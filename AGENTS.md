@@ -53,26 +53,22 @@ chore: 工具链 | style: 格式 | test: 测试
 <!-- CODEGRAPH_START -->
 ## CodeGraph
 
-配置了 CodeGraph MCP 服务器，提供基于 AST 解析的代码知识图谱查询。
+配置了 CodeGraph MCP 服务器（CLI v1.4.1），提供基于 AST 解析的代码知识图谱查询。
 
-### 工具选择
+### MCP 工具
 
-| 场景 | 工具 |
+v1.4.1 的 MCP server **仅暴露 1 个工具** `codegraph_explore`，把 search / callers / callees / impact / node / files / status 的能力收拢到一个调用里。
+
+| 工具 | 说明 |
 |------|------|
-| 定义查询 | `codegraph_search` |
-| 调用者/被调用者 | `codegraph_callers` / `codegraph_callees` |
-| 调用链路 | `codegraph_trace`（支持动态分发） |
-| 变更影响分析 | `codegraph_impact` |
-| 符号详情 | `codegraph_node` |
-| 任务上下文 | `codegraph_context` |
-| 批量源码查看 | `codegraph_explore` |
-| 文件列表 | `codegraph_files` |
-| 索引状态 | `codegraph_status` |
+| `codegraph_explore` | 主入口。接受自然语言问题或符号名列表，返回相关符号源码（按文件分组）+ 调用路径 + blast radius 摘要。Read 等价 —— **不要把返回的源码再 Read 一遍**。 |
 
 ### 使用原则
 
-- **直接回答，不委托子任务** — 结构性问题 1-2 次 codegraph 调用即可，无需走 grep + read 轮询
+- **优先用 MCP `codegraph_explore`** — 单调用覆盖绝大多数代码理解场景，无需 grep + read 轮询
 - **信任 AST 结果** — 来自完整 AST 解析，无需 grep 二次验证
 - **索引滞后** — 结果横幅列出待索引文件，对此用 Read 核实；其余内容以 codegraph 为准
 - **未初始化** — `.codegraph/` 不存在时运行 `codegraph init -i`
+
+> ⚠️ `codegraph_context` / `codegraph_trace` 在当前 v1.4.1 中**均不可用**，请勿引用。
 <!-- CODEGRAPH_END -->
