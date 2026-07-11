@@ -174,10 +174,27 @@ export function createAnthropicModelCaller(): ModelCaller {
       { signal },
     )
 
-    for await (const event of stream) {
-      // SDK 已经把事件映射成 snake_case; 直接 yield.
-      // 重要: 这里必须同步 yield, 不要 batch/buffer, 才能保证上游逐字流出.
-      yield event as unknown as StreamEvent
+    try {
+      for await (const event of stream) {
+        // SDK 已经把事件映射成 snake_case; 直接 yield.
+        // 重要: 这里必须同步 yield, 不要 batch/buffer, 才能保证上游逐字流出.
+        yield event as unknown as StreamEvent
+      }
+    } catch (err) {
+      // 观测点: 之前 stream 中断的真实原因(SDK 抛错)完全没落 server 日志,
+      // 中断时只能看到前端 runtime.error event, 控制台一片寂静.
+      // 加上后可区分 max_tokens / network / abort / 5xx 四类异常.
+      if (process.env.ZAI_DEBUG === '1') {
+        const e = err as any
+        console.error('[zai.modelCaller] stream aborted', {
+          model: resolvedModel,
+          code: e?.code ?? e?.error?.type,
+          status: e?.status,
+          message: (err as Error).message,
+          stack: (err as Error).stack?.split('\n').slice(0, 5).join('\n'),
+        })
+      }
+      throw err
     }
   })
 }

@@ -122,6 +122,13 @@ export async function* queryEngine(
   while (turn < maxTurns) {
     turn++
     if (abortController.signal.aborted) {
+      if (process.env.ZAI_DEBUG === '1') {
+        console.error('[zai.queryEngine] aborted at turn start', {
+          sessionId,
+          turn,
+          reason: abortController.signal.reason,
+        })
+      }
       yield toAbortedEvent({ sessionId, turnIndex: turn }, abortController.signal.reason as string | undefined)
       return
     }

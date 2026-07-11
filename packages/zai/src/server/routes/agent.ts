@@ -35,9 +35,23 @@ router.post('/agent/stream', async (req: Request, res: Response) => {
 
   const stream = createSseStream(res)
   const abortController = new AbortController()
-  const timer = setTimeout(() => abortController.abort('timeout'), HARD_TIMEOUT_MS)
+  const timer = setTimeout(() => {
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.agent.stream] HARD_TIMEOUT fired', {
+        sessionId: existingSessionId,
+        ms: HARD_TIMEOUT_MS,
+      })
+    }
+    abortController.abort('timeout')
+  }, HARD_TIMEOUT_MS)
 
   req.on('close', () => {
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.agent.stream] req.close', {
+        sessionId: existingSessionId,
+        alreadyAborted: abortController.signal.aborted,
+      })
+    }
     if (!abortController.signal.aborted) {
       abortController.abort('client_disconnect')
     }
@@ -71,6 +85,13 @@ router.post('/agent/stream', async (req: Request, res: Response) => {
       if (event.type === 'runtime.done' || event.type === 'runtime.aborted') break
     }
   } catch (err) {
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.agent.stream] for-await threw', {
+        sessionId: existingSessionId,
+        message: (err as Error).message,
+        stack: (err as Error).stack?.split('\n').slice(0, 5).join('\n'),
+      })
+    }
     stream.send({
       type: 'runtime.error',
       eventId: 'err',
