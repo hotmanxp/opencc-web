@@ -1,0 +1,46 @@
+{
+  "name": "@zn-ai/zai-agent-core",
+  "version": "0.1.0",
+  "description": "知鸟AI agent runtime core — 从 OpenCC 抽离的对话/工具/Skills/MCP/transcript 核心",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./runtime": "./dist/runtime/index.js",
+    "./transcript": "./dist/transcript/store.js"
+  },
+  "files": [
+    "dist/",
+    "src/opencc-internals/"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "test:e2e": "vitest run --config vitest.e2e.config.ts",
+    "sync-from-opencc": "tsx scripts/sync-from-opencc.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.52.0",
+    "@modelcontextprotocol/sdk": "^1.6.1",
+    "js-yaml": "^4.3.0",
+    "proper-lockfile": "^4.1.2",
+    "zod": "^3.23.8",
+    "zod-to-json-schema": "^3.25.2"
+  },
+  "devDependencies": {
+    "@types/js-yaml": "^4.0.9",
+    "@types/node": "^20.12.0",
+    "@types/proper-lockfile": "^4.1.4",
+    "tsx": "^4.19.0",
+    "typescript": "^5.6.0",
+    "vitest": "^2.1.0"
+  },
+  "publishConfig": {
+    "access": "public",
+    "registry": "https://nexus.paic.com.cn/repository/npm-internal/"
+  }
+}

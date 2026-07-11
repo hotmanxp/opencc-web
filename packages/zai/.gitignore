@@ -1,0 +1,12 @@
+node_modules/
+dist/
+*.log
+.env
+.env.*
+!.env.example
+.vite/
+.DS_Store
+# TypeScript composite build cache — `tsc -b` 增量构建时写在仓库根，
+# 任何 src 改动都会让它变化；同时也是构建产物（可由 `npm run build` 重生）。
+# 不应跟踪。
+tsconfig.tsbuildinfo

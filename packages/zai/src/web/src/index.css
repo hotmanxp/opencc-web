@@ -1,0 +1,166 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+:root {
+  --bg-body: #0a0a0f;
+  --bg-card: #12121a;
+  --bg-card-hover: #1a1a2e;
+  --bg-sidebar: #0d0d14;
+  --bg-input: #1a1a2e;
+  --border-subtle: rgba(255, 102, 0, 0.15);
+  --border-active: rgba(255, 102, 0, 0.4);
+  --text-primary: #f1f5f9;
+  --text-secondary: #94a3b8;
+  --text-tertiary: #64748b;
+  --accent-start: #ff6600;
+  --accent-end: #ff8533;
+  --glow: rgba(255, 102, 0, 0.15);
+  --success: #22c55e;
+  --error: #ef4444;
+  --warning: #f59e0b;
+}
+
+* { margin: 0; padding: 0; box-sizing: border-box; }
+
+body {
+  background: var(--bg-body);
+  color: var(--text-primary);
+  font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+  -webkit-font-smoothing: antialiased;
+}
+
+::-webkit-scrollbar { width: 6px; height: 6px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb { background: var(--text-tertiary); border-radius: 3px; }
+::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+.ant-layout { background: var(--bg-body) !important; }
+.ant-layout-sider { background: var(--bg-sidebar) !important; border-right: 1px solid var(--border-subtle) !important; }
+.ant-layout-header { background: rgba(18, 18, 26, 0.8) !important; backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-subtle) !important; }
+.ant-layout-content { background: var(--bg-body) !important; }
+
+.ant-menu-dark { background: transparent !important; }
+.ant-menu-dark .ant-menu-item { border-radius: 8px !important; margin: 4px 8px !important; transition: all 0.2s ease !important; }
+.ant-menu-dark .ant-menu-item:hover { background: rgba(255, 102, 0, 0.1) !important; }
+.ant-menu-dark .ant-menu-item-selected { background: linear-gradient(135deg, rgba(255,102,0,0.2), rgba(255,133,51,0.1)) !important; }
+.ant-menu-dark .ant-menu-item-selected::after { display: none !important; }
+
+.ant-card { background: var(--bg-card) !important; border: 1px solid var(--border-subtle) !important; border-radius: 12px !important; transition: all 0.2s ease; }
+.ant-card:hover { border-color: var(--border-active) !important; box-shadow: 0 0 20px var(--glow); }
+.ant-card-head { border-bottom: 1px solid var(--border-subtle) !important; }
+.ant-card-head-title { color: var(--text-primary) !important; }
+.ant-card-body { color: var(--text-primary) !important; }
+
+.ant-table { background: transparent !important; }
+.ant-table-thead > tr > th { background: var(--bg-card) !important; color: var(--text-secondary) !important; border-bottom: 1px solid var(--border-subtle) !important; }
+.ant-table-tbody > tr > td { border-bottom: 1px solid rgba(255,255,255,0.05) !important; color: var(--text-primary) !important; }
+.ant-table-tbody > tr:hover > td { background: var(--bg-card-hover) !important; }
+
+.ant-statistic-title { color: var(--text-secondary) !important; }
+.ant-statistic-content { color: var(--text-primary) !important; }
+
+.ant-tabs-tab { color: var(--text-secondary) !important; }
+.ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--accent-start) !important; }
+.ant-tabs-ink-bar { background: linear-gradient(90deg, var(--accent-start), var(--accent-end)) !important; }
+
+.ant-input { background: var(--bg-input) !important; border: 1px solid var(--border-subtle) !important; color: var(--text-primary) !important; border-radius: 8px !important; }
+.ant-input:focus { border-color: var(--accent-start) !important; box-shadow: 0 0 0 2px rgba(255,102,0,0.2) !important; }
+
+.ant-btn-primary { background: linear-gradient(135deg, var(--accent-start), var(--accent-end)) !important; border: none !important; border-radius: 8px !important; }
+.ant-btn-primary:hover { opacity: 0.9; box-shadow: 0 4px 20px var(--glow); }
+
+.ant-alert { border-radius: 10px !important; border: 1px solid var(--border-subtle) !important; }
+.ant-alert-info { background: rgba(255,102,0,0.1) !important; }
+.ant-alert-message { color: var(--text-primary) !important; }
+.ant-alert-description { color: var(--text-secondary) !important; }
+
+.ant-tree { background: transparent !important; color: var(--text-primary) !important; }
+.ant-tree .ant-tree-node-content-wrapper:hover { background: var(--bg-card-hover) !important; }
+
+.ant-list-item { border-bottom: 1px solid rgba(255,255,255,0.05) !important; }
+.ant-list-item-meta-title { color: var(--text-primary) !important; }
+
+.ant-spin-dot-item { background-color: var(--accent-start) !important; }
+.ant-empty-description { color: var(--text-tertiary) !important; }
+
+/* 流式输出光标: 在 assistant.text 流式气泡末尾的蓝色竖条 */
+@keyframes zai-blink {
+  0%, 50% { opacity: 1; }
+  50.01%, 100% { opacity: 0; }
+}
+
+/* QuestionCard 视觉隔离: 卡片用浅橙底 (#fff0e2), 全局 antd darkAlgorithm 下
+   文字默认浅色不可见. 在 .question-card-scope 内强制深色, 控件用主题橙 #ff6600
+   保持跟 App.tsx 的 accent 一致.
+   通配符 + !important 是必要的: 全局 antd darkAlgorithm 通过 !important
+   把所有 antd 组件文字设为浅色, 不加 !important 会被压制. */
+.question-card-scope,
+.question-card-scope *:not(.ant-tag):not(.ant-tag *) {
+  color: #1f1f1f !important;
+}
+/* antd Tag 在 darkAlgorithm 下用紫色背景 + 白色文字, 通配符不能把它强制成深色
+   (否则深色字 on 紫色背景完全看不清). 这里显式覆盖回白色, 让 pill 内部文字
+   仍然能看清. */
+.question-card-scope .ant-tag,
+.question-card-scope .ant-tag * {
+  color: #fff !important;
+}
+.question-card-scope .ant-tabs-tab-active .ant-tabs-tab-btn,
+.question-card-scope .ant-radio-checked .ant-radio-wrapper,
+.question-card-scope .ant-checkbox-checked .ant-checkbox-wrapper {
+  color: #ff6600 !important;
+}
+.question-card-scope .ant-tabs-ink-bar { background: #ff6600 !important; }
+/* radio / checkbox 圆点 + 文字都用深色, 选中态用主题橙 */
+.question-card-scope .ant-radio-wrapper,
+.question-card-scope .ant-checkbox-wrapper,
+.question-card-scope .ant-radio-wrapper > span,
+.question-card-scope .ant-checkbox-wrapper > span,
+.question-card-scope .ant-radio-wrapper > span:last-child,
+.question-card-scope .ant-checkbox-wrapper > span:last-child { color: #1f1f1f !important; }
+.question-card-scope .ant-radio-wrapper:hover,
+.question-card-scope .ant-checkbox-wrapper:hover { color: #ff6600 !important; }
+.question-card-scope .ant-radio-inner,
+.question-card-scope .ant-checkbox-inner { background-color: #fff !important; border-color: #ffb480 !important; }
+.question-card-scope .ant-radio-checked .ant-radio-inner { border-color: #ff6600 !important; }
+.question-card-scope .ant-radio-checked .ant-radio-inner::after { background-color: #ff6600 !important; }
+.question-card-scope .ant-checkbox-checked .ant-checkbox-inner { background-color: #ff6600 !important; border-color: #ff6600 !important; }
+/* 附加说明 TextArea: 浅橙底, 与卡片同色系 */
+.question-card-scope .ant-input,
+.question-card-scope .ant-input:focus,
+.question-card-scope textarea.ant-input { background: #fff7ec !important; color: #1f1f1f !important; border-color: #ffd1a3 !important; }
+.question-card-scope .ant-input::placeholder,
+.question-card-scope textarea.ant-input::placeholder { color: #8c8c8c !important; }
+.question-card-scope .ant-input:hover,
+.question-card-scope textarea.ant-input:hover { border-color: #ff6600 !important; }
+.question-card-scope .ant-input:focus,
+.question-card-scope textarea.ant-input:focus { border-color: #ff6600 !important; box-shadow: 0 0 0 2px rgba(255, 102, 0, 0.2) !important; }
+/* 取消按钮: 白底 + 橙边 + 深字 */
+.question-card-scope .ant-btn:not(.ant-btn-primary) {
+  background: #fff !important;
+  color: #1f1f1f !important;
+  border: 1px solid #ffd1a3 !important;
+}
+.question-card-scope .ant-btn:not(.ant-btn-primary):hover {
+  background: #fff0e2 !important;
+  color: #ff6600 !important;
+  border-color: #ff6600 !important;
+}
+/* Submit answers 主按钮: 主题橙渐变, 跟全局一致 */
+.question-card-scope .ant-btn-primary {
+  background: linear-gradient(135deg, #ff6600, #ff8533) !important;
+  border: none !important;
+  color: #fff !important;
+}
+.question-card-scope .ant-btn-primary[disabled],
+.question-card-scope .ant-btn-primary.ant-btn[disabled] {
+  background: #d9d9d9 !important;
+  color: #fff !important;
+}
+/* Popconfirm 浮层: 主题橙高亮 */
+.question-card-scope ~ .ant-popover .ant-popover-buttons .ant-btn-primary,
+.ant-popover .ant-popover-buttons .ant-btn-primary {
+  background: #ff6600 !important;
+  border-color: #ff6600 !important;
+}

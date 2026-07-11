@@ -1,0 +1,20 @@
+{
+  "autoFix": {
+    "enabled": true,
+    "lint": "pnpm exec tsc --noEmit",
+    "test": "pnpm run test:run",
+    "maxRetries": 3,
+    "timeout": 30000
+  },
+  "permissions": {
+    "allow": [
+      "mcp__codegraph__codegraph_search",
+      "mcp__codegraph__codegraph_context",
+      "mcp__codegraph__codegraph_callers",
+      "mcp__codegraph__codegraph_callees",
+      "mcp__codegraph__codegraph_impact",
+      "mcp__codegraph__codegraph_node",
+      "mcp__codegraph__codegraph_status"
+    ]
+  }
+}

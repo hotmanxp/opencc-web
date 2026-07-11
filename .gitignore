@@ -1,0 +1,48 @@
+# IDE
+.idea
+*.swp
+*.swo
+
+# Python
+__pycache__
+*.py[cod]
+*.pyo
+*.pyd
+.Python
+.env
+venv/
+env/
+.venv/
+
+# Node.js / Frontend
+node_modules/
+dist/
+build/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.pnpm-debug.log*
+
+# TypeScript
+**/tsconfig.tsbuildinfo
+
+# Package locks
+package-lock.json
+yarn.lock
+
+
+# OS
+.DS_Store
+Thumbs.db
+*.bak
+*~
+
+#Nova Working
+.nova_working_dir
+
+# Agent working directory (auto-generated)
+.agent_working_dir/
+
+# Worktrees (git worktree isolation)
+.worktrees/

@@ -1,0 +1,1179 @@
+#!/bin/bash
+# =============================================================================
+# zn-env - 知鸟 AI CLI 环境管理工具
+# =============================================================================
+
+set -e
+
+# 颜色定义
+RED='\033[0;31m'
+GREEN='\033[0;32m'
+YELLOW='\033[1;33m'
+BLUE='\033[0;34m'
+CYAN='\033[0;36m'
+MAGENTA='\033[0;35m'
+BOLD='\033[1m'
+DIM='\033[2m'
+NC='\033[0m' # No Color
+
+# Emoji
+EMOJI_CHECK="✅"
+EMOJI_CROSS="❌"
+EMOJI_INFO="ℹ️"
+EMOJI_QUESTION="❓"
+EMOJI_ROCKET="🚀"
+EMOJI_TOOL="🔧"
+EMOJI_PACKAGE="📦"
+EMOJI_KEY="🔑"
+EMOJI_SETTINGS="⚙️"
+EMOJI_QUIT="👋"
+
+# 全局变量
+NPM_REGISTRY="${NPM_REGISTRY:-http://maven.paic.com.cn/repository/npm/}"
+
+# =============================================================================
+# 包管理器检测
+# =============================================================================
+
+# 检测工具是通过哪个包管理器安装的
+detect_package_manager() {
+    local cmd=$1
+    if command -v "$cmd" &> /dev/null; then
+        # 检查 pnpm
+        if command -v pnpm &> /dev/null && pnpm list -g --depth=0 2>/dev/null | grep -q "$cmd"; then
+            echo "pnpm"
+        # 检查 npm
+        elif command -v npm &> /dev/null && npm list -g --depth=0 2>/dev/null | grep -q "$cmd"; then
+            echo "npm"
+        # 检查 yarn
+        elif command -v yarn &> /dev/null && yarn global list 2>/dev/null | grep -q "$cmd"; then
+            echo "yarn"
+        else
+            echo "npm"  # 默认使用 npm
+        fi
+    else
+        echo "npm"  # 未安装则默认使用 npm
+    fi
+}
+
+# 获取已安装命令的包管理器
+get_installed_pkg_manager() {
+    local cmd=$1
+    
+    # 检查 npm
+    if command -v npm &> /dev/null; then
+        if npm list -g --depth=0 2>/dev/null | grep -E "@zn-ai/${cmd}|opencode-ai" | grep -q "$cmd"; then
+            echo "npm"
+            return
+        fi
+    fi
+    
+    # 检查 pnpm
+    if command -v pnpm &> /dev/null; then
+        if pnpm list -g --depth=0 2>/dev/null | grep -E "@zn-ai/${cmd}|opencode-ai" | grep -q "$cmd"; then
+            echo "pnpm"
+            return
+        fi
+    fi
+    
+    # 检查 yarn
+    if command -v yarn &> /dev/null; then
+        if yarn global list 2>/dev/null | grep -E "@zn-ai/${cmd}|opencode-ai" | grep -q "$cmd"; then
+            echo "yarn"
+            return
+        fi
+    fi
+    
+    echo "npm"  # 默认
+}
+
+# 安装全局包
+install_global_pkg() {
+    local pkg=$1
+    local pkg_manager="${2:-npm}"
+    
+    case $pkg_manager in
+        pnpm)
+            pnpm add -g "$pkg" --registry="$NPM_REGISTRY"
+            ;;
+        yarn)
+            yarn global add "$pkg" --registry="$NPM_REGISTRY"
+            ;;
+        *)
+            npm install -g "$pkg" --registry="$NPM_REGISTRY"
+            ;;
+    esac
+}
+
+# =============================================================================
+# 辅助函数
+# =============================================================================
+
+print_header() {
+    echo ""
+    echo -e "${BOLD}${BLUE}╔════════════════════════════════════════════════════════════════╗${NC}"
+    echo -e "${BOLD}${BLUE}║${NC}  ${BOLD}${CYAN}知鸟 AI CLI 环境管理工具${NC} ${BOLD}${BLUE}                                     ║${NC}"
+    echo -e "${BOLD}${BLUE}╚════════════════════════════════════════════════════════════════╝${NC}"
+    echo ""
+}
+
+print_section() {
+    echo ""
+    echo -e "${BOLD}${CYAN}━━━ $1 ━━━${NC}"
+    echo ""
+}
+
+# 读取单个按键，支持 ESC 检测
+# 返回: ESC (按了 ESC 键), 或普通字符
+read_key() {
+    local key
+    IFS= read -rs -n 1 key
+    printf '%s' "$key"
+}
+
+print_info() {
+    echo -e "${BLUE}${EMOJI_INFO} ${DIM}$1${NC}"
+}
+
+print_success() {
+    echo -e "${GREEN}${EMOJI_CHECK} $1${NC}"
+}
+
+print_error() {
+    echo -e "${RED}${EMOJI_CROSS} $1${NC}"
+}
+
+print_warning() {
+    echo -e "${YELLOW}⚠️  $1${NC}"
+}
+
+print_step() {
+    echo -e "${CYAN}➤ $1${NC}"
+}
+
+wait_key() {
+    echo ""
+    read -p "按 Enter 键继续..."
+}
+
+confirm() {
+    local prompt="${1:-确认执行？}"
+    echo ""
+    read -p "$prompt (y/N): " -n 1 -r
+    echo ""
+    [[ $REPLY =~ ^[Yy]$ ]]
+}
+
+# =============================================================================
+# 系统信息
+# =============================================================================
+
+show_system_info() {
+    print_section "系统信息"
+    
+    # Node.js 版本
+    print_step "Node.js 版本"
+    if command -v node &> /dev/null; then
+        local node_version=$(node --version)
+        local node_major=$(echo $node_version | sed 's/v//' | cut -d. -f1)
+        echo "  版本: $node_version"
+        if [ "$node_major" -ge 20 ]; then
+            print_success "满足要求 (>= 20)"
+        else
+            print_error "需要 Node.js 20+"
+        fi
+    else
+        print_error "未安装 Node.js"
+    fi
+    
+    # npm 版本
+    print_step "npm 版本"
+    if command -v npm &> /dev/null; then
+        echo "  版本: $(npm --version)"
+    else
+        print_error "未安装 npm"
+    fi
+    
+    # npm prefix
+    print_step "npm 全局路径"
+    local prefix=$(npm config get prefix 2>/dev/null || echo "未配置")
+    echo "  prefix: $prefix"
+    
+    # npm registry
+    print_step "npm 镜像源"
+    echo "  registry: $(npm config get registry)"
+    
+    # PATH 检查
+    print_step "npm bin 路径"
+    local npm_bin=$(npm config get prefix 2>/dev/null)/bin
+    if [[ ":$PATH:" == *":$npm_bin:"* ]]; then
+        print_success "$npm_bin 已在 PATH 中"
+    else
+        print_warning "$npm_bin 未在 PATH 中"
+    fi
+    
+    echo ""
+}
+
+show_cli_status() {
+    print_section "CLI 工具安装状态"
+    
+    # Nova CLI
+    print_step "Nova CLI (@zn-ai/nova)"
+    if command -v nova &> /dev/null; then
+        echo "  命令: nova ($(which nova))"
+        print_success "已安装"
+    else
+        print_error "未安装"
+    fi
+    
+    # OpenCode
+    print_step "OpenCode CLI (opencode-ai)"
+    if command -v opencode &> /dev/null; then
+        echo "  命令: opencode ($(which opencode))"
+        print_success "已安装"
+    else
+        print_error "未安装"
+    fi
+    
+    # OpenCC
+    print_step "OpenCC (@zn-ai/opencc)"
+    if command -v opencc &> /dev/null; then
+        echo "  命令: opencc ($(which opencc))"
+        print_success "已安装"
+    else
+        print_error "未安装"
+    fi
+    
+    # agent-login
+    print_step "agent-login (@zn-ai/agent-login)"
+    echo "  使用方式: npx @zn-ai/agent-login@latest"
+    print_info "通过 npx 方式使用，无需全局安装"
+    
+    echo ""
+}
+
+show_directory_status() {
+    print_section "CLI 工具资源状态"
+
+    # Nova CLI
+    echo -e "  ${BOLD}${CYAN}Nova CLI${NC}"
+    local nova_dir="$HOME/.nova"
+    echo "  路径: $nova_dir"
+    
+    # Nova Agents
+    local nova_agents="$nova_dir/agents"
+    if [ -d "$nova_agents" ]; then
+        local count=$(ls -1 "$nova_agents" 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "    Agents: ${GREEN}$count 个${NC}"
+        if [ "$count" -gt 0 ]; then
+            echo -n "      "
+            ls -1 "$nova_agents" 2>/dev/null | tr '\n' ' '
+            echo ""
+        fi
+    else
+        echo "    Agents: 0 个"
+    fi
+    
+    # Nova Commands
+    local nova_cmds="$nova_dir/commands"
+    if [ -d "$nova_cmds" ]; then
+        local count=$(ls -1 "$nova_cmds" 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "    Commands: ${GREEN}$count 个${NC}"
+        if [ "$count" -gt 0 ]; then
+            echo -n "      "
+            ls -1 "$nova_cmds" 2>/dev/null | tr '\n' ' '
+            echo ""
+        fi
+    else
+        echo "    Commands: 0 个"
+    fi
+    
+    # Nova Plugins (Extensions)
+    local nova_plugins="$nova_dir/extensions"
+    if [ -d "$nova_plugins" ]; then
+        local count=$(ls -1d "$nova_plugins"/*/ 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "    Plugins: ${GREEN}$count 个${NC}"
+        if [ "$count" -gt 0 ]; then
+            echo -n "      "
+            ls -1d "$nova_plugins"/*/ 2>/dev/null | xargs -I {} basename {} | tr '\n' ' '
+            echo ""
+        fi
+    else
+        echo "    Plugins: 0 个"
+    fi
+    echo ""
+
+    # OpenCode
+    echo -e "  ${BOLD}${CYAN}OpenCode${NC}"
+    local opencode_dir="$HOME/.config/opencode"
+    echo "  路径: $opencode_dir"
+    
+    # OpenCode Agents
+    local opencode_agents="$opencode_dir/agents"
+    if [ -d "$opencode_agents" ]; then
+        local count=$(ls -1 "$opencode_agents" 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "    Agents: ${GREEN}$count 个${NC}"
+        if [ "$count" -gt 0 ]; then
+            echo -n "      "
+            ls -1 "$opencode_agents" 2>/dev/null | tr '\n' ' '
+            echo ""
+        fi
+    else
+        echo "    Agents: 0 个"
+    fi
+    
+    # OpenCode Commands
+    local opencode_cmds="$opencode_dir/commands"
+    if [ -d "$opencode_cmds" ]; then
+        local count=$(ls -1 "$opencode_cmds" 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "    Commands: ${GREEN}$count 个${NC}"
+        if [ "$count" -gt 0 ]; then
+            echo -n "      "
+            ls -1 "$opencode_cmds" 2>/dev/null | tr '\n' ' '
+            echo ""
+        fi
+    else
+        echo "    Commands: 0 个"
+    fi
+    echo ""
+
+    # OpenCC (使用 ~/.claude)
+    echo -e "  ${BOLD}${CYAN}OpenCC${NC}"
+    local opencc_dir="$HOME/.claude"
+    echo "  路径: $opencc_dir"
+    
+    # OpenCC Agents
+    local opencc_agents="$opencc_dir/agents"
+    if [ -d "$opencc_agents" ]; then
+        local count=$(ls -1 "$opencc_agents" 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "    Agents: ${GREEN}$count 个${NC}"
+        if [ "$count" -gt 0 ]; then
+            echo -n "      "
+            ls -1 "$opencc_agents" 2>/dev/null | tr '\n' ' '
+            echo ""
+        fi
+    else
+        echo "    Agents: 0 个"
+    fi
+    
+    # OpenCC Commands
+    local opencc_cmds="$opencc_dir/commands"
+    if [ -d "$opencc_cmds" ]; then
+        local count=$(ls -1 "$opencc_cmds" 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "    Commands: ${GREEN}$count 个${NC}"
+        if [ "$count" -gt 0 ]; then
+            echo -n "      "
+            ls -1 "$opencc_cmds" 2>/dev/null | tr '\n' ' '
+            echo ""
+        fi
+    else
+        echo "    Commands: 0 个"
+    fi
+    echo ""
+
+    # 全局 Skills (共享)
+    echo -e "  ${BOLD}${CYAN}全局 Skills${NC} (共享)"
+    local skills_dir="$HOME/.agents/skills"
+    echo "  路径: $skills_dir"
+    if [ -d "$skills_dir" ]; then
+        local count=$(ls -1d "$skills_dir"/*/ 2>/dev/null | wc -l | tr -d ' ')
+        echo -e "    Skills: ${GREEN}$count 个${NC}"
+        if [ "$count" -gt 0 ]; then
+            echo -n "      "
+            ls -1d "$skills_dir"/*/ 2>/dev/null | xargs -I {} basename {} | tr '\n' ' '
+            echo ""
+        fi
+    else
+        echo "    Skills: 0 个"
+    fi
+
+    echo ""
+}
+
+show_npm_packages() {
+    print_section "已安装的 npm 包"
+    
+    if command -v npm &> /dev/null; then
+        print_step "全局安装的包"
+        echo ""
+        npm list -g --depth=0 2>/dev/null | grep -E "@zn-ai|opencode" | head -20 || echo "  无相关包"
+    fi
+    
+    print_info "agent-login: npx @zn-ai/agent-login@latest"
+    
+    echo ""
+}
+
+show_all_system_info() {
+    clear
+    print_header
+    show_system_info
+    show_cli_status
+    show_directory_status
+    wait_key
+}
+
+# =============================================================================
+# 工具安装
+# =============================================================================
+
+install_nova_cli() {
+    print_section "安装/更新 Nova CLI"
+
+    local pkg_manager=$(get_installed_pkg_manager "nova")
+    print_step "检测到使用: $pkg_manager"
+    print_step "安装 Nova CLI..."
+
+    install_global_pkg "@zn-ai/nova@latest" "$pkg_manager"
+
+    if command -v nova &> /dev/null; then
+        print_success "Nova CLI 安装/更新成功!"
+    else
+        print_error "安装失败，请检查配置"
+    fi
+
+    wait_key
+}
+install_opencode_cli() {
+    print_section "安装/更新 OpenCode CLI"
+
+    local pkg_manager=$(get_installed_pkg_manager "opencode")
+    print_step "检测到使用: $pkg_manager"
+    print_step "安装 OpenCode CLI..."
+
+    install_global_pkg "opencode-ai@1.3.13" "$pkg_manager"
+
+    if command -v opencode &> /dev/null; then
+        print_success "OpenCode CLI 安装/更新成功!"
+    else
+        print_error "安装失败，请检查配置"
+    fi
+
+    wait_key
+}
+
+install_opencc() {
+    print_section "安装/更新 OpenCC"
+
+    local pkg_manager=$(get_installed_pkg_manager "opencc")
+    print_step "检测到使用: $pkg_manager"
+    print_step "安装 OpenCC..."
+
+    install_global_pkg "@zn-ai/opencc@latest" "$pkg_manager"
+
+    if command -v opencc &> /dev/null; then
+        print_success "OpenCC 安装/更新成功!"
+    else
+        print_error "安装失败，请检查配置"
+    fi
+
+    wait_key
+}
+
+install_agent_login() {
+    print_section "安装 agent-login"
+    print_info "agent-login 通过 npx 方式使用，无需全局安装"
+    print_info "所有登录命令会自动使用最新版本"
+    
+    # 验证 npx 可用
+    if command -v npx &> /dev/null; then
+        print_step "验证 @zn-ai/agent-login@latest 可访问..."
+        if npx @zn-ai/agent-login@latest --version &>/dev/null; then
+            print_success "agent-login 可用"
+        else
+            print_warning "请确保网络连接正常"
+        fi
+    else
+        print_error "需要 npx 命令"
+    fi
+    
+    wait_key
+}
+
+install_all_tools() {
+    print_section "安装所有 CLI 工具"
+    
+    if confirm "将安装 Nova CLI、OpenCode CLI 和 OpenCC？"; then
+        install_nova_cli
+        install_opencode_cli
+        install_opencc
+        print_success "所有工具安装完成!"
+        print_info "agent-login 使用 npx @zn-ai/agent-login@latest 方式"
+        wait_key
+    fi
+}
+
+# =============================================================================
+# 资源安装
+# =============================================================================
+
+# 列出可用资源
+list_available_resources() {
+    local type=$1
+
+    case $type in
+        skills)
+            print_section "可用 Skills"
+            echo ""
+            npx @zn-ai/plugin@latest list skills 2>/dev/null || print_error "获取 Skills 列表失败"
+            ;;
+        commands)
+            print_section "可用 Commands"
+            echo ""
+            npx @zn-ai/plugin@latest list commands 2>/dev/null || print_error "获取 Commands 列表失败"
+            ;;
+        plugins)
+            print_section "可用 Plugins (Extensions)"
+            echo ""
+            npx @zn-ai/plugin@latest list extensions 2>/dev/null || print_error "获取 Plugins 列表失败"
+            ;;
+        agents)
+            print_section "可用 Agents"
+            echo ""
+            npx @zn-ai/plugin@latest list agents 2>/dev/null || print_error "获取 Agents 列表失败"
+            ;;
+    esac
+}
+
+# 获取资源列表
+get_resource_list() {
+    local type=$1
+    local assets_dir="$HOME/code/zn-agent-assets/assets"
+    local items=()
+
+    case $type in
+        skills)
+            local skills_dir="$assets_dir/skills"
+            if [ -d "$skills_dir" ]; then
+                for skill in "$skills_dir"/*/; do
+                    if [ -d "$skill" ]; then
+                        items+=("$(basename "$skill")")
+                    fi
+                done
+            fi
+            ;;
+        commands)
+            local commands_dir="$assets_dir/commands"
+            if [ -d "$commands_dir" ]; then
+                for cmd in "$commands_dir"/*.toml "$commands_dir"/*.md; do
+                    if [ -f "$cmd" ]; then
+                        items+=("$(basename "$cmd")")
+                    fi
+                done
+            fi
+            ;;
+        plugins)
+            local extensions_dir="$assets_dir/extensions"
+            if [ -d "$extensions_dir" ]; then
+                for ext in "$extensions_dir"/*/; do
+                    if [ -d "$ext" ]; then
+                        items+=("$(basename "$ext")")
+                    fi
+                done
+            fi
+            ;;
+        agents)
+            local agents_dir="$assets_dir/agents"
+            if [ -d "$agents_dir" ]; then
+                for agent in "$agents_dir"/*/*.md; do
+                    if [ -f "$agent" ]; then
+                        items+=("$(basename "$agent")")
+                    fi
+                done
+            fi
+            ;;
+    esac
+
+    printf '%s\n' "${items[@]}"
+}
+
+# 浏览并选择资源进行安装
+browse_and_install_resource() {
+    local type=$1
+
+    # 先显示列表
+    show_resource_list() {
+        clear
+        print_header
+
+        case $type in
+            skills) echo -e "  ${BOLD}浏览 Skills${NC}" ;;
+            commands) echo -e "  ${BOLD}浏览 Commands${NC}" ;;
+            plugins) echo -e "  ${BOLD}浏览 Plugins${NC}" ;;
+            agents) echo -e "  ${BOLD}浏览 Agents${NC}" ;;
+        esac
+        echo ""
+
+        list_available_resources "$type"
+    }
+
+    show_resource_list
+
+    echo ""
+    echo -e "  ${DIM}输入资源名称安装，输入 0 返回${NC}"
+    echo ""
+    
+    # 读取输入
+    local resource_name=""
+    read -p "请输入: " resource_name
+    
+    # 检测输入为 0
+    if [ "$resource_name" = "0" ]; then
+        return
+    fi
+    
+    if [ -z "$resource_name" ]; then
+        return
+    fi
+    
+    print_step "安装 $resource_name..."
+
+    case $type in
+        skills)
+            npx @zn-ai/plugin@latest install skills "$resource_name" 2>&1 || print_error "安装失败"
+            ;;
+        commands)
+            npx @zn-ai/plugin@latest install commands "$resource_name" 2>&1 || print_error "安装失败"
+            ;;
+        plugins)
+            npx @zn-ai/plugin@latest install extensions "$resource_name" 2>&1 || print_error "安装失败"
+            ;;
+        agents)
+            npx @zn-ai/plugin@latest install agents "$resource_name" 2>&1 || print_error "安装失败"
+            ;;
+    esac
+    wait_key
+}
+
+# 兼容旧函数
+install_all_skills() {
+    print_section "安装所有 Skills"
+    local skill_dir="$HOME/.agents/skills"
+    local assets_skills="$HOME/code/zn-agent-assets/assets/skills"
+
+    mkdir -p "$skill_dir"
+
+    if [ -d "$assets_skills" ]; then
+        print_step "复制 skills 到 $skill_dir..."
+        for skill in "$assets_skills"/*/; do
+            if [ -d "$skill" ]; then
+                local skill_name=$(basename "$skill")
+                print_info "  安装: $skill_name"
+                rm -rf "$skill_dir/$skill_name"
+                cp -r "$skill" "$skill_dir/"
+            fi
+        done
+        print_success "Skills 安装完成!"
+    else
+        print_error "assets/skills 目录不存在"
+    fi
+
+    wait_key
+}
+
+install_all_commands() {
+    print_section "安装所有 Commands"
+    print_info "请使用 browse 方式选择安装"
+    wait_key
+}
+
+# =============================================================================
+# 登录命令
+# =============================================================================
+
+login_pa() {
+    print_section "PA 神兵登录"
+    print_step "执行 npx @zn-ai/agent-login@latest pa..."
+    npx @zn-ai/agent-login@latest pa
+    wait_key
+}
+
+login_openplatform() {
+    print_section "开放平台登录"
+    print_step "执行 npx @zn-ai/agent-login@latest op..."
+    npx @zn-ai/agent-login@latest op
+    wait_key
+}
+
+login_openplatform_stg() {
+    print_section "开放平台登录 (测试环境)"
+    print_step "执行 npx @zn-ai/agent-login@latest op --stg..."
+    npx @zn-ai/agent-login@latest op --stg
+    wait_key
+}
+
+
+
+# =============================================================================
+# 工具配置
+# =============================================================================
+
+# 检测可用的编辑器
+detect_editor() {
+    if command -v code &> /dev/null; then
+        echo "code"
+    elif command -v vim &> /dev/null; then
+        echo "vim"
+    elif command -v nano &> /dev/null; then
+        echo "nano"
+    elif command -v open &> /dev/null; then
+        # macOS open 命令，可打开文件进行编辑
+        echo "open"
+    fi
+}
+
+# 通用的配置文件打开函数
+# 参数: $1=配置文件路径 $2=工具名称 $3=默认配置内容
+open_or_init_config() {
+    local config_file=$1
+    local tool_name=$2
+    local default_content=$3
+
+    if [ -f "$config_file" ]; then
+        print_info "配置文件: $config_file"
+        local editor=$(detect_editor)
+        if [ -n "$editor" ]; then
+            print_step "使用 $editor 打开..."
+            $editor "$config_file"
+        else
+            print_warning "未检测到可用编辑器"
+            print_info "请手动打开: $config_file"
+        fi
+    else
+        print_warning "配置文件不存在"
+        if confirm "是否创建默认配置？"; then
+            mkdir -p "$(dirname "$config_file")"
+            echo "$default_content" > "$config_file"
+            print_success "默认配置已创建: $config_file"
+            local editor=$(detect_editor)
+            if [ -n "$editor" ]; then
+                print_step "使用 $editor 打开..."
+                $editor "$config_file"
+            else
+                print_warning "未检测到可用编辑器"
+                print_info "请手动打开: $config_file"
+            fi
+        fi
+    fi
+}
+
+config_nova_settings() {
+    print_section "配置 Nova"
+
+    local config_file="$HOME/.nova/settings.json"
+
+    # Nova 默认配置
+    local default_config='{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "",
+    "ANTHROPIC_BASE_URL": "https://zn-nova.paic.com.cn/novai",
+    "ANTHROPIC_MODEL": "qwen3.6-plus",
+    "ANTHROPIC_SMALL_FAST_MODEL": "MiniMax-M2.7-highspeed",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.1",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "MiniMax-M2.7-highspeed"
+  }
+}'
+
+    open_or_init_config "$config_file" "Nova" "$default_config"
+    wait_key
+}
+
+config_opencode_settings() {
+    print_section "配置 OpenCode"
+
+    # OpenCode 配置文件可能是 .json 或 .jsonc
+    local opencode_dir="$HOME/.config/opencode"
+    local config_file=""
+
+    if [ -f "$opencode_dir/opencode.jsonc" ]; then
+        config_file="$opencode_dir/opencode.jsonc"
+    elif [ -f "$opencode_dir/opencode.json" ]; then
+        config_file="$opencode_dir/opencode.json"
+    fi
+
+    if [ -n "$config_file" ]; then
+        print_info "配置文件: $config_file"
+        local editor=$(detect_editor)
+        if [ -n "$editor" ]; then
+            print_step "使用 $editor 打开..."
+            $editor "$config_file"
+        else
+            print_warning "未检测到可用编辑器"
+            print_info "请手动打开: $config_file"
+        fi
+    else
+        print_warning "配置文件不存在"
+        print_info "OpenCode 会在首次运行时自动创建配置"
+        local editor=$(detect_editor)
+        if [ -n "$editor" ]; then
+            print_step "使用 $editor 打开配置目录..."
+            $editor "$opencode_dir"
+        else
+            print_warning "未检测到可用编辑器"
+            print_info "请手动打开: $opencode_dir"
+        fi
+    fi
+
+    wait_key
+}
+
+config_opencc_settings() {
+    print_section "配置 OpenCC"
+
+    local config_file="$HOME/.claude/settings.json"
+
+    # OpenCC 默认配置
+    local default_config='{
+  "env": {
+    "ANTHROPIC_AUTH_TOKEN": "",
+    "API_TIMEOUT_MS": "3000000",
+    "CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC": "1",
+    "ANTHROPIC_BASE_URL": "https://zn-nova.paic.com.cn/novai",
+    "ANTHROPIC_MODEL": "qwen3.6-plus",
+    "ANTHROPIC_SMALL_FAST_MODEL": "MiniMax-M2.7-highspeed",
+    "ANTHROPIC_DEFAULT_SONNET_MODEL": "glm-5",
+    "ANTHROPIC_DEFAULT_OPUS_MODEL": "glm-5.1",
+    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "MiniMax-M2.7-highspeed"
+  }
+}'
+
+    open_or_init_config "$config_file" "OpenCC" "$default_config"
+    wait_key
+}
+
+show_env_guide() {
+    print_section "环境配置指南"
+    
+    cat << 'EOF'
+
+┌─────────────────────────────────────────────────────────────┐
+│                      环境配置步骤                           │
+└─────────────────────────────────────────────────────────────┘
+
+1. 配置 npm 镜像源 (本工具已提供)
+   npm config set registry http://maven.paic.com.cn/repository/npm/
+
+2. 安装 CLI 工具 (本工具已提供)
+   npm install -g @zn-ai/nova
+   npm install -g opencode-ai
+   npm install -g @zn-ai/opencc
+   npm install -g @zn-ai/agent-login@latest
+
+3. 登录 (本工具已提供)
+   npx @zn-ai/agent-login@latest pa      # PA 神兵登录
+   npx @zn-ai/agent-login@latest op      # 开放平台登录
+
+4. OpenCode 配置插件 (本工具已提供)
+   cd ~/.config/opencode
+   npm init -y
+   npm install @zn-ai/agent-login@latest
+   # 添加插件到 opencode.json
+
+5. OpenCC 配置 (本工具已提供)
+   # 创建 ~/.claude/settings.json
+   # 配置 ANTHROPIC_BASE_URL 和模型
+
+详细文档: docs/AI_CLI_SETUP.md
+
+EOF
+    
+    wait_key
+}
+
+# =============================================================================
+# 快速启动
+# =============================================================================
+
+quick_start() {
+    print_section "快速启动"
+    
+    echo "正在检查环境..."
+    echo ""
+    
+    local missing=()
+    
+    # 检查 Node.js
+    if ! command -v node &> /dev/null; then
+        missing+=("Node.js")
+    fi
+    
+    # 检查 npm
+    if ! command -v npm &> /dev/null; then
+        missing+=("npm")
+    fi
+    
+    if [ ${#missing[@]} -gt 0 ]; then
+        print_error "缺少必要环境: ${missing[*]}"
+        print_info "请先安装 Node.js: https://nodejs.org/"
+        wait_key
+        return
+    fi
+    
+    # 检查并安装工具
+    print_step "检查 CLI 工具..."
+    
+    local tools=("nova:@zn-ai/nova" "opencode:opencode-ai" "opencc:@zn-ai/opencc" "agent-login:@zn-ai/agent-login")
+    local to_install=()
+    
+    for tool in "${tools[@]}"; do
+        IFS=':' read -r cmd pkg <<< "$tool"
+        if ! command -v $cmd &> /dev/null; then
+            to_install+=("$pkg")
+        fi
+    done
+    
+    if [ ${#to_install[@]} -gt 0 ]; then
+        print_warning "发现未安装的工具: ${to_install[*]}"
+        if confirm "是否自动安装？"; then
+            for pkg in "${to_install[@]}"; do
+                print_step "安装 $pkg..."
+                npm install -g "$pkg" --registry="$NPM_REGISTRY" 2>/dev/null
+            done
+        fi
+    else
+        print_success "所有 CLI 工具已安装"
+    fi
+    
+    # 配置
+    print_step "配置 npm 镜像源..."
+    npm config set registry "$NPM_REGISTRY" 2>/dev/null || true
+    print_success "完成"
+    
+    echo ""
+    print_success "快速启动完成!"
+    print_info "下一步: 运行 'login' 命令进行登录"
+    
+    wait_key
+}
+
+# =============================================================================
+# 主菜单
+# =============================================================================
+
+show_menu() {
+    clear
+    print_header
+
+    # 显示基础信息
+    echo -e "  ${DIM}基础信息${NC}"
+
+    # Node 版本
+    if command -v node &> /dev/null; then
+        echo -e "    Node.js: ${GREEN}$(node --version)${NC}"
+    else
+        echo -e "    Node.js: ${RED}未安装${NC}"
+    fi
+
+    # CLI 安装状态
+    local cli_list=""
+    command -v nova &> /dev/null && cli_list+="${MAGENTA}Nova${NC} "
+    command -v opencode &> /dev/null && cli_list+="${GREEN}OpenCode${NC} "
+    command -v opencc &> /dev/null && cli_list+="${YELLOW}OpenCC${NC} "
+    if [ -n "$cli_list" ]; then
+        echo -e "    CLI: ${cli_list}"
+    else
+        echo -e "    CLI: ${RED}未安装${NC}"
+    fi
+
+    echo ""
+    echo -e "  ${BOLD}请选择操作:${NC}"
+    echo ""
+
+    local options=(
+        "🔑 PA 神兵登录"
+        "🌐 开放平台登录"
+        "📦 资源安装"
+        "🔧 工具安装"
+        "📊 系统信息"
+        "⚙️ 工具配置"
+        "🚀 快速启动"
+        "👋 退出"
+    )
+
+    local i=1
+    for opt in "${options[@]}"; do
+        printf "    ${CYAN}%d${NC}. %s\n" "$i" "$opt"
+        ((i++))
+    done
+
+    echo ""
+}
+# =============================================================================
+# 子菜单
+# =============================================================================
+
+show_install_menu() {
+     while true; do
+         clear
+         print_header
+         echo -e "  ${BOLD}工具安装/更新${NC}"
+         echo ""
+
+         local options=(
+             "安装/更新 Nova CLI"
+             "安装/更新 OpenCode CLI"
+             "安装/更新 OpenCC"
+             "安装/更新所有工具"
+             "返回主菜单"
+         )
+
+         local i=1
+         for opt in "${options[@]}"; do
+             printf "    ${CYAN}%d${NC}. %s\n" "$i" "$opt"
+             ((i++))
+         done
+
+         echo ""
+         echo -n "请选择 (1-5, ESC 返回): "
+         choice=$(read_key)
+         echo "$choice"
+
+         # 检测 ESC 键
+         if [[ "$choice" == $'\e' ]]; then
+             break
+         fi
+
+         case $choice in
+             1) install_nova_cli ;;
+             2) install_opencode_cli ;;
+             3) install_opencc ;;
+             4) install_all_tools ;;
+             5) break ;;
+             *) print_error "无效选择" ;;
+         esac
+     done
+}
+show_resource_menu() {
+    while true; do
+        clear
+        print_header
+        echo -e "  ${BOLD}资源安装${NC}"
+        echo ""
+
+        local options=(
+            "浏览 Skills"
+            "浏览 Commands"
+            "浏览 Plugins"
+            "浏览 Agents"
+            "返回主菜单"
+        )
+
+        local i=1
+        for opt in "${options[@]}"; do
+            printf "    ${CYAN}%d${NC}. %s\n" "$i" "$opt"
+            ((i++))
+        done
+
+        echo ""
+        echo -n "请选择 (1-5, ESC 返回): "
+        choice=$(read_key)
+        echo "$choice"
+
+        # 检测 ESC 键
+        if [[ "$choice" == $'\e' ]]; then
+            break
+        fi
+
+        case $choice in
+            1) browse_and_install_resource "skills" ;;
+            2) browse_and_install_resource "commands" ;;
+            3) browse_and_install_resource "plugins" ;;
+            4) browse_and_install_resource "agents" ;;
+            5) break ;;
+            *) print_error "无效选择" ;;
+        esac
+    done
+}
+
+show_config_menu() {
+    while true; do
+        clear
+        print_header
+        echo -e "  ${BOLD}工具配置${NC}"
+        echo ""
+
+        local options=(
+            "配置 Nova"
+            "配置 OpenCode"
+            "配置 OpenCC"
+            "返回主菜单"
+        )
+
+        local i=1
+        for opt in "${options[@]}"; do
+            printf "    ${CYAN}%d${NC}. %s\n" "$i" "$opt"
+            ((i++))
+        done
+
+        echo ""
+        echo -n "请选择 (1-4, ESC 返回): "
+        choice=$(read_key)
+        echo "$choice"
+
+        # 检测 ESC 键
+        if [[ "$choice" == $'\e' ]]; then
+            break
+        fi
+
+        case $choice in
+            1) config_nova_settings ;;
+            2) config_opencode_settings ;;
+            3) config_opencc_settings ;;
+            4) break ;;
+            *) print_error "无效选择" ;;
+        esac
+    done
+}
+
+# =============================================================================
+# 主程序
+# =============================================================================
+
+main() {
+    # 确保使用 bash
+    if [ -z "$BASH_VERSION" ]; then
+        echo "请使用 bash 运行此脚本: bash $0"
+        exit 1
+    fi
+
+    while true; do
+        show_menu
+        echo -n "请选择 (1-8, ESC 返回): "
+        choice=$(read_key)
+        echo "$choice"
+
+        # 检测 ESC 键 (ASCII 27)
+        if [[ "$choice" == $'\e' ]]; then
+            echo ""
+            echo -e "${BOLD}${GREEN}感谢使用!${NC}"
+            echo ""
+            exit 0
+        fi
+
+        case $choice in
+            1) login_pa ;;
+            2) login_openplatform ;;
+            3) show_resource_menu ;;
+            4) show_install_menu ;;
+            5) show_all_system_info ;;
+            6) show_config_menu ;;
+            7) quick_start ;;
+            8)
+                echo ""
+                echo -e "${BOLD}${GREEN}感谢使用!${NC}"
+                echo ""
+                exit 0
+                ;;
+            *)
+                if [[ -n "$choice" ]]; then
+                    print_error "无效选择，请输入 1-8"
+                    sleep 1
+                fi
+                ;;
+        esac
+    done
+}
+# 运行
+main "$@"
