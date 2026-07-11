@@ -30,6 +30,7 @@ import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { useAgentStore, type AgentMessage } from '../store/useAgentStore'
 import QuestionCard from '../components/QuestionCard.jsx'
+import DiffBlock from '../components/DiffBlock.js'
 import { linkifyText } from '../lib/linkify.js'
 
 const { TextArea } = Input
@@ -629,6 +630,11 @@ function MessageBubble({ msg, streaming }: { msg: AgentMessage; streaming: boole
     msg.type === 'tool_use:invalid' ||
     msg.type === 'tool_use:denied'
   ) {
+    // Edit / Write 走专门的 diff 展示 (行号 + 增删底色), 其余工具用通用折叠块.
+    const toolName = (msg.name as string) || ''
+    if (toolName === 'Edit' || toolName === 'Write') {
+      return <DiffBlock msg={msg} />
+    }
     return <ToolCallBlock msg={msg} />
   }
 
