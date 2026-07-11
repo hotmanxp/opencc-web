@@ -31,6 +31,13 @@ interface AgentState {
   textSegmentRev: number
   // 已经触发过 textSegmentRev++ 的 toolUseId 集合, 每个工具只 bump 一次.
   segmentedToolUseIds: Record<string, true>
+  // 每次 sendMessage 递增的发送序号. 拼进 stream block key 作为"本轮命名空间",
+  // 保证跨轮次的文本块 key 永不碰撞. 后端 turnIndex 恒为 0 (wrapWithZaiMeta 被
+  // 逐事件调用导致其内部计数器每次归零), textSegmentRev 只在工具调用时 bump,
+  // blockIndex 每轮新回复都从 0 起 — 三者在"上一轮纯文本回答"的场景下会让
+  // 相邻两轮首个文本块拼出同一个 key `0:0:0:text`, 新一轮文本被 append 进上一轮
+  // 气泡. sendSeq 提供跨轮唯一性, 根治该归并 bug.
+  sendSeq: number
 
   setCwd: (cwd: string) => void
   addMessage: (msg: AgentMessage) => void
@@ -65,6 +72,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   pendingAsk: null,
   textSegmentRev: 0,
   segmentedToolUseIds: {},
+  sendSeq: 0,
 
   setCwd: (cwd: string) => set({ cwd }),
   addMessage: (msg: AgentMessage) =>
@@ -197,7 +205,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const turnIndex = (base as { turnIndex?: number }).turnIndex ?? 0
       // 工具边界工具启动时已经 bumped, 这里的 s.textSegmentRev 反映
       // "现在属于第几个文字段"; 同段内的 delta 共享同一 key.
-      const key = `${turnIndex}:${s.textSegmentRev}:${blockIndex}:${kind}`
+      // sendSeq 作为最外层命名空间: 每次 sendMessage 递增一次, 保证
+      // 相邻两轮 (尤其上一轮无工具调用时 textSegmentRev/blockIndex 都停在 0)
+      // 的文本块 key 不再碰撞, 新一轮文本不会被 append 进上一轮气泡.
+      const key = `${s.sendSeq}:${turnIndex}:${s.textSegmentRev}:${blockIndex}:${kind}`
       const idx = s.messages.findIndex((m) => m.eventId === key)
       if (idx === -1) {
         const created: AgentMessage = {
@@ -226,6 +237,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // 否则新会话的 text 段会被旧会话遗留的 textSegmentRev 错位归并.
       textSegmentRev: 0,
       segmentedToolUseIds: {},
+      sendSeq: 0,
     }),
 
   loadSessions: async () => {
@@ -247,7 +259,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   setCurrentSession: (sessionId: string) => {
-    set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {} })
+    set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0 })
   },
 
   createNewSession: () => {
@@ -257,6 +269,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       status: 'idle',
       textSegmentRev: 0,
       segmentedToolUseIds: {},
+      sendSeq: 0,
     })
   },
 
@@ -340,6 +353,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // 重置防止后续 turn 用过期的 textSegmentRev 错位归并.
         textSegmentRev: 0,
         segmentedToolUseIds: {},
+        sendSeq: 0,
       })
     } catch {
       // ignore
@@ -361,6 +375,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       status: 'streaming',
       abortController,
       messages: [...s.messages, userMsg],
+      // 新一轮发送: 递增命名空间, 让本轮 stream block key 与历史轮次隔离.
+      sendSeq: s.sendSeq + 1,
     }))
 
     await runAgentStream({
@@ -370,17 +386,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       signal: abortController.signal,
       onEvent: (event: RuntimeEvent) => {
         const state = get()
-        // === TEMP DIAGNOSTIC: 跟踪事件流, 排查 message 归并 bug ===
-        // eslint-disable-next-line no-console
-        console.log('[zai-diag] event', {
-          type: event.type,
-          turnIndex: event.turnIndex,
-          toolUseId: event.toolUseId,
-          blockIndex: (event as any).index,
-          content_block: event.content_block,
-          textSegmentRev_before: state.textSegmentRev,
-          msgCount: state.messages.length,
-        })
         // 首次收到事件时记录 sessionId,并刷新侧栏 title
         if (!state.sessionId && event.sessionId) {
           set({ sessionId: event.sessionId })
@@ -389,9 +394,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
         // content_block_delta 走 upsert 合并: 同一 stream block 复用同一 eventId
         // 持续追加, 避免每条 delta 都新开气泡 / 折叠块.
-        // key 由 store 内部按 `${turnIndex}:${textSegmentRev}:${blockIndex}:${kind}`
-        // 拼出 — textSegmentRev 由 upsertToolCall 在工具起点 bump, 保证
-        // 工具前后的文字段落到不同 entry.
+        // key 由 store 内部按 `${sendSeq}:${turnIndex}:${textSegmentRev}:${blockIndex}:${kind}`
+        // 拼出 — sendSeq 每轮发送递增保证跨轮唯一, textSegmentRev 由 upsertToolCall
+        // 在工具起点 bump, 保证工具前后的文字段落到不同 entry.
         // 用 flushSync 强制同步提交, 否则 React 18 会把同一 microtask 内的
         // 多次 set() 合并成一次渲染, 用户看到的就是"原子出现"而非逐字流出.
         if (event.type === 'content_block_delta') {
@@ -408,12 +413,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             } else {
               state.upsertStreamBlock('text', base, delta?.text || '')
             }
-          })
-          // eslint-disable-next-line no-console
-          console.log('[zai-diag] after text_delta', {
-            msgCount: get().messages.length,
-            textSegmentRev: get().textSegmentRev,
-            lastTextSnippet: String(get().messages.findLast?.((m) => m.type === 'assistant.text')?.text ?? '').slice(-40),
           })
           return
         }
@@ -437,12 +436,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           (t === 'content_block_start' && block?.type === 'tool_use')
         if (isToolFlow) {
           state.upsertToolCall(event)
-          // eslint-disable-next-line no-console
-          console.log('[zai-diag] after tool_event', {
-            type: t,
-            textSegmentRev: get().textSegmentRev,
-            msgCount: get().messages.length,
-          })
           return
         }
 

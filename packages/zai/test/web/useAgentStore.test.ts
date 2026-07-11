@@ -11,6 +11,7 @@ describe('useAgentStore — text / tool / text 交错事件', () => {
       messages: [],
       textSegmentRev: 0,
       segmentedToolUseIds: {},
+      sendSeq: 0,
     })
   })
 
@@ -286,5 +287,56 @@ describe('useAgentStore — text / tool / text 交错事件', () => {
     useAgentStore.getState().clearMessages()
     expect(useAgentStore.getState().textSegmentRev).toBe(0)
     expect(useAgentStore.getState().segmentedToolUseIds).toEqual({})
+  })
+
+  // 回归: 跨轮次消息归并 bug.
+  // 上一轮回答是纯文本 (无工具调用) → textSegmentRev 停在 0; 新一轮首个
+  // 文本 delta 的 blockIndex 也从 0 起, 后端 turnIndex 恒为 0. 若 key 里
+  // 不含 sendSeq, 相邻两轮首个文本块会拼出同一个 `0:0:0:text`, 新一轮文本
+  // 被 append 进上一轮气泡 (显示在用户消息上方, 归到上一条 LLM 消息).
+  // sendMessage 每轮递增 sendSeq, 保证两轮 key 隔离.
+  it('两轮纯文本回答 (无工具) 不会归并到同一气泡', () => {
+    const sessionId = 'sess-7'
+
+    // --- 第 1 轮: sendMessage 会把 sendSeq 推到 1 ---
+    useAgentStore.setState({ sendSeq: 1 })
+    useAgentStore.getState().upsertStreamBlock(
+      'text',
+      { eventId: '', sessionId, ts: 1, turnIndex: 0, type: 'assistant.text', index: 0 } as any,
+      '第一轮回答'
+    )
+
+    // --- 用户发第 2 条消息: sendMessage 递增 sendSeq 到 2 + append userMsg ---
+    useAgentStore.setState((s) => ({
+      sendSeq: s.sendSeq + 1,
+      messages: [
+        ...s.messages,
+        { eventId: 'user-2', sessionId, ts: 2, turnIndex: 0, type: 'user.text', text: '第二个问题' } as any,
+      ],
+    }))
+
+    // --- 第 2 轮: 同样 blockIndex=0 / turnIndex=0 / textSegmentRev=0 的首个文本 ---
+    useAgentStore.getState().upsertStreamBlock(
+      'text',
+      { eventId: '', sessionId, ts: 3, turnIndex: 0, type: 'assistant.text', index: 0 } as any,
+      '第二轮回答'
+    )
+
+    const messages = useAgentStore.getState().messages
+    const texts = messages.filter((m) => m.type === 'assistant.text')
+
+    // 两轮回答应是两条独立 assistant.text, 内容不串
+    expect(texts).toHaveLength(2)
+    expect(texts[0]!.text).toBe('第一轮回答')
+    expect(texts[1]!.text).toBe('第二轮回答')
+    expect(texts[0]!.eventId).not.toBe(texts[1]!.eventId)
+
+    // 顺序: 第一轮回答 → 用户消息 → 第二轮回答
+    // (第二轮文本落在 userMsg 之后, 而非被塞回上一轮气泡)
+    expect(messages.map((m) => m.type)).toEqual([
+      'assistant.text',
+      'user.text',
+      'assistant.text',
+    ])
   })
 })
