@@ -1,12 +1,12 @@
 import { readFile } from 'fs/promises'
 import { isAbsolute, resolve } from 'path'
-import type { Tool, ToolContext } from '../Tool.js'
+import type { LegacyTool, LegacyToolContext as ToolContext } from '../Tool.js'
 import { FileReadInputSchema, type FileReadInput } from './schema.js'
 import { renderPrompt } from './prompt.js'
 
 const MAX_LINES_DEFAULT = 2000
 
-export const FileReadTool: Tool<typeof FileReadInputSchema, string> = {
+export const FileReadTool: LegacyTool<typeof FileReadInputSchema, string> = {
   name: 'Read',
   description: renderPrompt(),
   inputSchema: FileReadInputSchema,

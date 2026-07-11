@@ -1,7 +1,6 @@
 import { randomUUID } from 'node:crypto'
 import type { QueryOptions, RuntimeConfig, SandboxConfig } from './types.js'
-import type { Tool } from '../tools/Tool.js'
-import type { ToolContext, ToolResult } from '../tools/Tool.js'
+import type { Tool, LegacyToolContext as ToolContext } from '../tools/Tool.js'
 import type { RuntimeEvent } from './events.js'
 import { TranscriptStore } from '../transcript/store.js'
 import { wrapWithZaiMeta, toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
@@ -12,8 +11,10 @@ import { defaultCanUseToolFactory } from './canUseTool.js'
 import { loadSkillsFromDirs, buildSkillsSystemPrompt } from './skills/index.js'
 import { SkillTool } from '../tools/SkillTool/SkillTool.js'
 import type { LoadedSkill, PendingSkillInjection } from './skills/index.js'
-import { adaptMcpTools, type MCPTool } from '../mcp/MCPToolAdapter.js'
+import { adaptMcpTools } from '../mcp/MCPToolAdapter.js'
 import { loadMcpSkills } from '../mcp/SkillResourceAdapter.js'
+import { getMcpInstructionsSection } from '../mcp/mcpInstructions.js'
+import { wrapAsOpenccTool } from '../tools/legacyAdapter.js'
 
 const DEFAULT_MAX_TURNS = 50
 
@@ -51,6 +52,11 @@ export async function* queryEngine(
         skills.push(...(await loadMcpSkills(config.mcpClientPool, spec.name)))
       }
     }
+    // Snapshot post-boot MCP connections onto config.mcpClients so the
+    // system prompt assembler (buildSystemPrompt) can read each server's
+    // `instructions` field. This is the channel that injects MCP server
+    // instructions as system-prompt TEXT (not just tool metadata).
+    config.mcpClients = snapshotMcpClients(config.mcpClientPool)
   }
 
   // Dynamic import breaks queryEngine ↔ getZaiRuntimeTools cycle (Task 11)
@@ -59,7 +65,7 @@ export async function* queryEngine(
 
   // 0.3. Append MCP tools after resolveToolPool (they are not part of skill mechanism)
   if (config.mcpClientPool && config.mcpServers && config.mcpServers.length > 0) {
-    const mcpTools: MCPTool[] = []
+    const mcpTools: Tool[] = []
     for (const spec of config.mcpServers) {
       if (!config.mcpClientPool.hasClient(spec.name)) continue
       mcpTools.push(...(await adaptMcpTools(config.mcpClientPool, spec.name)))
@@ -76,7 +82,7 @@ export async function* queryEngine(
     }, sessionId)
   }
 
-  const systemPrompt = await buildSystemPrompt(options, skills)
+  const systemPrompt = await buildSystemPrompt(options, skills, config)
 
   const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = []
   if (options.resumeFromTranscriptId) {
@@ -185,14 +191,14 @@ export async function* queryEngine(
     // toolExecution 自己 yield 完整 RuntimeEvent (带 sessionId/ts/eventId/turnIndex).
     // 这里仅需要提供一个生成 eventId 的闭包 + 当前 turnIndex.
     let toolEvtCounter = 0
-    for await (const ev of executeToolsStreaming(toolUseBlocks, toolCtx, tools, {
+    for await (const ev of executeToolsStreaming(toolUseBlocks, toolCtx as any, tools, {
       sessionId,
       turnIndex: turn,
       nextEventId: () => `evt-tool-${++toolEvtCounter}`,
     }, config.askRegistry)) {
       yield ev as RuntimeEvent
     }
-    const lastResults: ToolResult[] = (toolCtx.state.__lastToolResults as ToolResult[]) ?? []
+    const lastResults: any[] = (toolCtx.state as any).__lastToolResults ?? []
 
     messages.push({ role: 'user', content: toolUseBlocks.map((t, i) => ({
       type: 'tool_result',
@@ -208,14 +214,14 @@ export async function* queryEngine(
     // 跳过渲染 (UI 上一次 SkillTool 已经以 <skill_invocation> 形式展示给用户;
     // 再把整段 skill markdown 渲染成 user 卡片 = "skill 文字被显示成用户消息" 的 bug).
     // queryEngine 自己 resume 时仍按 user message 加载, 不影响 LLM 上下文.
-    const pending = toolCtx.state.__pendingSkillInjection as PendingSkillInjection | undefined
+    const pending = (toolCtx.state as any).__pendingSkillInjection as PendingSkillInjection | undefined
     if (pending) {
       messages.push({ role: 'user', content: pending.content })
       await appendUserMessage(store, sessionId, pending.content, turn, {
         kind: 'skill_injection',
         skillName: pending.skillName,
       })
-      toolCtx.state.__pendingSkillInjection = undefined
+      ;(toolCtx.state as any).__pendingSkillInjection = undefined
     }
 
     if (turn >= maxTurns) {
@@ -235,7 +241,9 @@ function resolveToolPool(
 ): Tool[] {
   const preset = options.toolsOverride ?? 'base+subagent'
   const skillToolEnabled = skills.length > 0 && (_config.enableSkillTool ?? true)
-  const skillTool = skillToolEnabled ? [SkillTool] : []
+  // SkillTool is a legacy minimal Tool — wrap it in the opencc shape so it
+  // satisfies the same Tool[] contract as the rest of the registry.
+  const skillTool = skillToolEnabled ? [wrapAsOpenccTool(SkillTool)] : []
   if (preset === 'none') {
     return [...(options.additionalTools ?? []), ...skillTool]
   }
@@ -272,12 +280,13 @@ function makeToolContext(
     __defaultModel: options.model ?? config.defaultModel ?? 'default',
     __maxTurns: options.maxTurns ?? config.defaultMaxTurns ?? DEFAULT_MAX_TURNS,
     parentSessionId: options.parentSessionId,
-  }
+  } as any
 }
 
 async function buildSystemPrompt(
   options: QueryOptions,
   skills: LoadedSkill[],
+  config?: RuntimeConfig,
 ): Promise<string> {
   const parts: string[] = []
   if (options.systemPrompt) {
@@ -293,7 +302,24 @@ async function buildSystemPrompt(
   }
   const skillsPrompt = buildSkillsSystemPrompt(skills)
   if (skillsPrompt) parts.push(skillsPrompt)
+  // NEW: inject MCP server `instructions` into the system prompt text.
+  // This is the opencc-internals `getMcpInstructionsSection` path. Tool
+  // metadata (name/description/inputSchema) is still injected via the
+  // `tools` array; this adds server-level behavioral instructions.
+  const mcpSection = getMcpInstructionsSection(config?.mcpClients)
+  if (mcpSection) parts.push(mcpSection)
   return parts.filter(Boolean).join('\n\n')
+}
+
+function snapshotMcpClients(pool: any) {
+  if (!pool || typeof pool.getInstructions !== 'function') return []
+  // Prefer the new explicit accessor. Fall back to a generic snapshot if the
+  // pool doesn't expose one (e.g. legacy pool in tests).
+  try {
+    return pool.getInstructions()
+  } catch {
+    return []
+  }
 }
 
 function mergeInputDelta(block: { input: unknown }, partialJson: string): void {

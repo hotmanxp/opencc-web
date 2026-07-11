@@ -111,6 +111,17 @@ router.get('/agent/sessions/:id', async (req: Request, res: Response) => {
   }
 })
 
+// DELETE /api/agent/sessions/:id — 删除指定 session
+router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
+  try {
+    const store = getTranscriptStore()
+    await store.remove(req.params.id)
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
 router.post('/agent/abort', async (_req: Request, res: Response) => {
   const sessionId = getCurrentSessionId()
   await abortAgentSession('user_abort')

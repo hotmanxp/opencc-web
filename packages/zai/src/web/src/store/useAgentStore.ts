@@ -46,6 +46,7 @@ interface AgentState {
   loadTranscript: (sessionId: string) => Promise<void>
   setCurrentSession: (sessionId: string) => void
   createNewSession: () => void
+  deleteSession: (sessionId: string) => Promise<void>
   sendMessage: (prompt: string, cwd?: string) => Promise<void>
   stop: () => Promise<void>
   setAskAnswer: (questionText: string, label: string) => void
@@ -257,6 +258,31 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       textSegmentRev: 0,
       segmentedToolUseIds: {},
     })
+  },
+
+  deleteSession: async (sessionId: string) => {
+    const token = localStorage.getItem('zai-token') || ''
+    try {
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sessionId)}`, {
+        method: 'DELETE',
+        headers: { 'X-Zai-Token': token },
+      })
+      if (!res.ok) return
+    } catch {
+      return
+    }
+    const s = get()
+    const remaining = s.sessions.filter((x) => x.transcriptId !== sessionId)
+    set({ sessions: remaining })
+    // 删掉的是当前会话时, 切到剩余里最新的一条; 没有则回到空白新会话.
+    if (s.sessionId === sessionId) {
+      if (remaining.length > 0) {
+        set({ sessionId: remaining[0].transcriptId })
+        await get().loadTranscript(remaining[0].transcriptId)
+      } else {
+        get().createNewSession()
+      }
+    }
   },
 
   loadTranscript: async (sessionId: string) => {

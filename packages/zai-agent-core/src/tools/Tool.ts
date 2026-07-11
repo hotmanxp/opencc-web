@@ -1,58 +1,89 @@
+// @ts-nocheck -- opencc-internals Tool.ts is itself @ts-nocheck; we re-export.
+
 import type { z } from 'zod'
-import type { RuntimeConfig } from '../runtime/types.js'
 
-export type ToolResult = {
-  toolUseId: string
-  content: unknown
-  isError: boolean
-}
+export type {
+  Tool,
+  Tools,
+  ToolResult,
+  ToolResultBlockParam,
+  ToolUseBlockParam,
+  ValidationResult,
+  ToolPermissionContext,
+  ToolUseContext,
+} from '../opencc-internals/Tool.js'
 
-export type CanUseToolResult =
-  | { behavior: 'allow' }
-  | { behavior: 'deny'; reason: string }
-  | { behavior: 'ask'; reason?: string }
+export {
+  buildTool,
+  TOOL_DEFAULTS,
+} from '../opencc-internals/Tool.js'
 
-// AskUserQuestionTool 用: 调用方在 ask 模式下挂起等待用户回答.
-export type AskUserAnswers = {
-  answers: Record<string, string>
-  annotations?: Record<string, { preview?: string; notes?: string }>
-}
+/**
+ * Back-compat alias for existing zai tool bodies. The opencc-internals
+ * canonical name is `ToolUseContext`; the runtime bridge populates all
+ * fields so this alias is type-only.
+ */
+export type ToolContext = import('../opencc-internals/Tool.js').ToolUseContext
 
-// ToolContext → tool.call 内部调 ctx.awaitAskUserQuestion(input) 触发 ask_pending.
-export type AskUserRequest = {
-  questions: unknown  // zod-validated Question[]; core 不关心内部结构
-  metadata?: { source?: string }
-}
-
-export type ToolContext = {
+/**
+ * Legacy minimal Tool shape used by zai's hand-rolled tools (Bash, Agent,
+ * File*, Glob, Grep, AskUserQuestion, ListMcpResources, ReadMcpResource).
+ * `legacyAdapter.ts` upgrades each instance to the opencc Tool shape at
+ * the registry boundary.
+ *
+ * Existing tool bodies don't need to be rewritten — they continue to
+ * implement this minimal contract and return `{output, isError}`.
+ */
+export type LegacyToolContext = {
   cwd: string
   env: Record<string, string>
   abortSignal: AbortSignal
   dataDir: string
-  canUseTool: (toolName: string, input: unknown) => Promise<CanUseToolResult>
+  canUseTool: (toolName: string, input: unknown) => Promise<{
+    behavior: 'allow'
+    behavior?: 'allow' | 'deny' | 'ask'
+    reason?: string
+  }>
   emitEvent: (event: { type: string; [key: string]: unknown }) => void
   state: { [key: string]: unknown }
-  awaitAskUserQuestion: (req: AskUserRequest) => Promise<AskUserAnswers>
-
-  /** 注入, 供 sub-agent tool 调子 queryEngine 用 (escape hatch) */
-  __runtimeConfig?: RuntimeConfig
+  awaitAskUserQuestion: (req: unknown) => Promise<{
+    answers: Record<string, string>
+    annotations?: Record<string, { notes?: string; preview?: string }>
+  }>
+  __runtimeConfig?: any
   __defaultModel?: string
   __maxTurns?: number
   parentSessionId?: string
 }
 
-// Use `any` as the default Input so concrete schemas like z.ZodObject<...>
-// satisfy the bare Tool without TS variance errors. Callers who need the
-// specific Input type use the generic (e.g. Tool<typeof BashInputSchema>);
-// the default only applies when Tool is referenced bare (e.g. Tool[] in a
-// tool registry).
-export type Tool<Input extends z.ZodTypeAny = any, Output = unknown> = {
+export type LegacyTool<
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  Input extends z.ZodTypeAny = any,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  Output = any,
+> = {
   name: string
   description: string
-  inputSchema: Input
-  call(input: z.infer<Input>, ctx: ToolContext): Promise<{ output: Output; isError?: boolean }>
-  isConcurrencySafe?: (input: z.infer<Input>) => boolean
-  isReadOnly?: (input: z.infer<Input>) => boolean
-  isDestructive?: (input: z.infer<Input>) => boolean
+  inputSchema: any
+  call(input: any, ctx: LegacyToolContext): Promise<{ output: Output; isError?: boolean }>
+  isConcurrencySafe?: (input: any) => boolean
+  isReadOnly?: (input: any) => boolean
+  isDestructive?: (input: any) => boolean
 }
 
+// Re-export runtime-side types that previously lived in this file. These
+// are still consumed by canUseTool.ts, runtime/index.ts, and tests.
+export type CanUseToolResult =
+  | { behavior: 'allow' }
+  | { behavior: 'deny'; reason: string }
+  | { behavior: 'ask'; reason?: string }
+
+export type AskUserAnswers = {
+  answers: Record<string, string>
+  annotations?: Record<string, { preview?: string; notes?: string }>
+}
+
+export type AskUserRequest = {
+  questions: unknown
+  metadata?: { source?: string }
+}

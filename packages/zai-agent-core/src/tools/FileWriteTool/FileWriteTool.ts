@@ -1,10 +1,10 @@
 import { mkdir, writeFile } from 'fs/promises'
 import { dirname, isAbsolute, resolve } from 'path'
-import type { Tool, ToolContext } from '../Tool.js'
+import type { LegacyTool, LegacyToolContext as ToolContext } from '../Tool.js'
 import { FileWriteInputSchema, type FileWriteInput } from './schema.js'
 import { renderPrompt } from './prompt.js'
 
-export const FileWriteTool: Tool<typeof FileWriteInputSchema, string> = {
+export const FileWriteTool: LegacyTool<typeof FileWriteInputSchema, string> = {
   name: 'Write',
   description: renderPrompt(),
   inputSchema: FileWriteInputSchema,

@@ -1,13 +1,13 @@
 import { spawn } from 'node:child_process'
 import { readdir, readFile, stat } from 'fs/promises'
 import { isAbsolute, resolve, join } from 'path'
-import type { Tool, ToolContext } from '../Tool.js'
+import type { LegacyTool, LegacyToolContext as ToolContext } from '../Tool.js'
 import { GrepInputSchema, type GrepInput } from './schema.js'
 import { renderPrompt } from './prompt.js'
 
 const MAX_RESULTS = 200
 
-export const GrepTool: Tool<typeof GrepInputSchema, string> = {
+export const GrepTool: LegacyTool<typeof GrepInputSchema, string> = {
   name: 'Grep',
   description: renderPrompt(),
   inputSchema: GrepInputSchema,

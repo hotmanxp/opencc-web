@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { Tool } from '../Tool.js'
+import type { LegacyTool } from '../Tool.js'
 
 const inputSchema = z.object({
   serverName: z.string(),
@@ -8,7 +8,7 @@ const inputSchema = z.object({
 
 type ResourceContent = { text?: string; blob?: string; mimeType?: string }
 
-export const ReadMcpResourceTool: Tool<typeof inputSchema, string> = {
+export const ReadMcpResourceTool: LegacyTool<typeof inputSchema, string> = {
   name: 'ReadMcpResource',
   description:
     'Read a single resource from a connected MCP server by serverName + uri.',

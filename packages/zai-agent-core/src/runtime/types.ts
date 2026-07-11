@@ -63,6 +63,19 @@ export type RuntimeConfig = {
 
   /** AskUserQuestion 的等待表抽象, server 端实现. core 不依赖具体类. */
   askRegistry?: AskRegistryLike
+
+  /**
+   * Post-boot snapshot of connected MCP servers, used to inject
+   * `instructions` into the system prompt (see `mcp/mcpInstructions.ts`).
+   * The queryEngine populates this from `mcpClientPool` after `connectAll`.
+   * Optional because the runtime may be created before MCP boot completes.
+   */
+  mcpClients?: Array<{
+    name: string
+    type: string
+    status?: string
+    instructions?: string
+  }>
 }
 
 export type QueryOptions = {

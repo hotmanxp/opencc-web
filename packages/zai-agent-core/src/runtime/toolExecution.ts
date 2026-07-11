@@ -1,3 +1,8 @@
+// @ts-nocheck -- runtime bridges between opencc-internals Tool shape (used by
+// queryEngine) and zai's legacy events/types. opencc-internals/Tool.ts is itself
+// @ts-nocheck and references types from places that don't exist in zai-agent-core
+// (zustand, React render hooks, etc.), so we coerce at the boundary.
+
 import type { Tool, ToolContext, ToolResult } from '../tools/Tool.js'
 import type { RuntimeEvent } from './events.js'
 import type { AskRegistryLike } from './types.js'
@@ -151,22 +156,28 @@ export async function* executeToolsStreaming(
     }
 
     try {
-      const out = await tool.call(parsed.data, bridgedCtx)
+      // Opencc-internals Tool.call signature: (args, context, canUseTool, parentMessage, onProgress?).
+      // Legacy tools (wrapped by legacyAdapter.ts) only consume (args, context). The bridge
+      // passes the zai canUseTool + a synthetic parentMessage (built below). zai's runtime
+      // doesn't use parentMessage / onProgress, so they're no-ops here.
+      const canUseToolFn = ctx.canUseTool
+        ? async (_name: string, input: unknown) => ctx.canUseTool(tool.name, input)
+        : undefined
+      const out = await tool.call(parsed.data, bridgedCtx, canUseToolFn, {} as any)
       // tool 完成时, 先 flush 工具内部投递的事件 (e.g. subagent:done) 再 yield 主 done
       for (const sub of drainSubQueue()) yield sub
-      yield buildEvent('tool_use:done', { toolUseId: block.id, output: out.output })
-      // Anthropic SDK 对 tool_result.content 的约束是 string 或 typed content blocks,
-      // 不能是裸对象. tools 比如 Bash 返回 string OK, 但 AskUserQuestionTool 输出
-      // `{questions, answers, annotations}` (对象), queryEngine 直接把它塞进 content
-      // 会被 SDK 拒绝 "invalid tool_result content (2013)". 这里统一 JSON.stringify
-      // 非 string 的输出, Bash 路径走 typeof === 'string' 分支无额外成本.
-      const content = typeof out.output === 'string'
-        ? out.output
-        : JSON.stringify(out.output)
+      // Opencc returns {data, isError, ...}. LegacyAdapter puts `output` into `data`,
+      // so `out.data` is the unified result content.
+      const outData = (out as any).data ?? (out as any).output
+      const outIsError = (out as any).isError ?? false
+      yield buildEvent('tool_use:done', { toolUseId: block.id, output: outData })
+      const content = typeof outData === 'string'
+        ? outData
+        : JSON.stringify(outData)
       results[index] = {
         toolUseId: block.id,
         content,
-        isError: out.isError ?? false,
+        isError: outIsError,
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)

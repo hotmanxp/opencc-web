@@ -1,6 +1,6 @@
 import { createRequire } from 'node:module'
 import { isAbsolute, resolve } from 'path'
-import type { Tool, ToolContext } from '../Tool.js'
+import type { LegacyTool, LegacyToolContext as ToolContext } from '../Tool.js'
 import { GlobInputSchema, type GlobInput } from './schema.js'
 import { renderPrompt } from './prompt.js'
 
@@ -11,7 +11,7 @@ const glob = fsPromises.glob
 
 const MAX_RESULTS = 100
 
-export const GlobTool: Tool<typeof GlobInputSchema, string> = {
+export const GlobTool: LegacyTool<typeof GlobInputSchema, string> = {
   name: 'Glob',
   description: renderPrompt(),
   inputSchema: GlobInputSchema,

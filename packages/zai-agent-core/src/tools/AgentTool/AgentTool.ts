@@ -1,13 +1,13 @@
 import { z } from 'zod'
 import { randomUUID } from 'node:crypto'
-import type { Tool, ToolContext } from '../Tool.js'
+import type { LegacyTool } from '../Tool.js'
 import { renderPrompt } from './prompt.js'
 import { AgentInputSchema } from './schema.js'
 import { loadAgentDefinitions } from './loadAgentsDir.js'
 
 type AgentInput = z.infer<typeof AgentInputSchema>
 
-export const AgentTool: Tool<typeof AgentInputSchema, string> = {
+export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
   name: 'Agent',
   description: renderPrompt(),
   inputSchema: AgentInputSchema,

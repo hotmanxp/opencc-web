@@ -1,7 +1,7 @@
 import { z } from 'zod'
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
-import type { Tool, ToolContext } from '../Tool.js'
+import type { LegacyTool, LegacyToolContext as ToolContext } from '../Tool.js'
 import type { SandboxConfig } from '../../runtime/types.js'
 import { renderPrompt } from './prompt.js'
 import { BashInputSchema } from './schema.js'
@@ -9,7 +9,7 @@ import { pickEnv, isReadOnlyCommand, isDestructiveCommand, type BackgroundTask }
 
 const MAX_BUFFER = 10 * 1024 * 1024
 
-export const BashTool: Tool<typeof BashInputSchema, string> = {
+export const BashTool: LegacyTool<typeof BashInputSchema, string> = {
   name: 'Bash',
   description: renderPrompt(),
   inputSchema: BashInputSchema,

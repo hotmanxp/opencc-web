@@ -7,6 +7,8 @@ import {
   Tag,
   Typography,
   Space,
+  Popconfirm,
+  theme,
 } from 'antd'
 import {
   RobotOutlined,
@@ -20,6 +22,7 @@ import {
   MenuUnfoldOutlined,
   CaretDownOutlined,
   CaretRightOutlined,
+  DeleteOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -760,10 +763,15 @@ function MessageBubble({ msg, streaming }: { msg: AgentMessage; streaming: boole
 }
 
 export default function Agent() {
-  const { messages, status, cwd, sessions, sessionId, sendMessage, stop, clearMessages, loadSessions, setCurrentSession, loadTranscript, createNewSession, pendingAsk, setAskAnswer, setAskNotes, submitAsk, rejectAsk } =
+  const { messages, status, cwd, sessions, sessionId, sendMessage, stop, clearMessages, loadSessions, setCurrentSession, loadTranscript, createNewSession, deleteSession, pendingAsk, setAskAnswer, setAskNotes, submitAsk, rejectAsk } =
     useAgentStore()
   const [input, setInput] = useState('')
+  const { token } = theme.useToken()
   const [showAllSessions, setShowAllSessions] = useState(false)
+  // 会话列表默认展示条数: 按侧栏可视高度估算, 每项约 50px (padding + 两行文字 + gap).
+  const sessionListRef = useRef<HTMLDivElement>(null)
+  const [sessionPageSize, setSessionPageSize] = useState(10)
+  const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null)
   // 会话历史侧栏是否收起. 收起时宽度缩到 40px 只显示图标, 腾出空间给对话区.
   const [sessionsCollapsed, setSessionsCollapsed] = useState(false)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -773,6 +781,21 @@ export default function Agent() {
   // 流式动画: 仿 OpenCC 状态栏的 ✶✷✸✹✺✻✼✽ 字符循环, 每 100ms 切一帧
   const [spinnerIdx, setSpinnerIdx] = useState(0)
   const SPINNER = ['✶', '✷', '✸', '✹', '✺', '✻', '✼', '✽']
+
+  // 根据侧栏实际高度估算默认展示条数, 窗口/容器尺寸变化时自动重算.
+  useEffect(() => {
+    const el = sessionListRef.current
+    if (!el) return
+    const ITEM_HEIGHT = 50
+    const recompute = () => {
+      const count = Math.max(1, Math.floor(el.clientHeight / ITEM_HEIGHT))
+      setSessionPageSize(count)
+    }
+    recompute()
+    const ro = new ResizeObserver(recompute)
+    ro.observe(el)
+    return () => ro.disconnect()
+  }, [sessionsCollapsed])
 
   useEffect(() => {
     if (status === 'streaming') {
@@ -837,8 +860,8 @@ export default function Agent() {
     }
   }
 
-  const visibleSessions = showAllSessions ? sessions : sessions.slice(0, 10)
-  const hasMoreSessions = sessions.length > 10
+  const visibleSessions = showAllSessions ? sessions : sessions.slice(0, sessionPageSize)
+  const hasMoreSessions = sessions.length > sessionPageSize
 
   // messages 直接按 store 顺序渲染. store 已经通过 textSegmentRev 在工具调用
   // 起点 bump, 把"工具前后的文字段"切到不同 entry, 因此工具与文字在
@@ -909,7 +932,7 @@ export default function Agent() {
           )}
         </div>
         {!sessionsCollapsed && (
-          <div style={{ flex: 1, overflowY: 'auto' }}>
+          <div ref={sessionListRef} style={{ flex: 1, overflowY: 'auto' }}>
             {sessions.length === 0 ? (
               <div style={{ fontSize: 12, color: '#999', padding: '8px 4px' }}>
                 暂无历史会话
@@ -919,15 +942,21 @@ export default function Agent() {
                 <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
                   {visibleSessions.map((s) => {
                     const active = s.transcriptId === sessionId
+                    const hovered = s.transcriptId === hoveredSessionId
                     return (
                       <div
                         key={s.transcriptId}
                         style={{
+                          position: 'relative',
                           cursor: 'pointer',
                           padding: '6px 8px',
                           borderRadius: 6,
-                          background: active ? '#e6f4ff' : 'transparent',
+                          background: active ? token.colorPrimaryBg : 'transparent',
                         }}
+                        onMouseEnter={() => setHoveredSessionId(s.transcriptId)}
+                        onMouseLeave={() =>
+                          setHoveredSessionId((cur) => (cur === s.transcriptId ? null : cur))
+                        }
                         onClick={() => {
                           setCurrentSession(s.transcriptId)
                           loadTranscript(s.transcriptId)
@@ -939,7 +968,9 @@ export default function Agent() {
                             whiteSpace: 'nowrap',
                             overflow: 'hidden',
                             textOverflow: 'ellipsis',
-                            color: active ? '#1677ff' : undefined,
+                            // 悬停时给删除按钮留出空间, 避免标题被图标压住.
+                            paddingRight: hovered ? 20 : 0,
+                            color: active ? token.colorPrimary : undefined,
                           }}
                         >
                           {s.title || '新会话'}
@@ -947,6 +978,39 @@ export default function Agent() {
                         <div style={{ fontSize: 11, color: '#999' }}>
                           {new Date(s.updatedAt).toLocaleString()}
                         </div>
+                        <Popconfirm
+                          title="删除该会话?"
+                          okText="删除"
+                          cancelText="取消"
+                          okButtonProps={{ danger: true }}
+                          onConfirm={() => void deleteSession(s.transcriptId)}
+                        >
+                          <Button
+                            type="text"
+                            size="small"
+                            danger
+                            icon={<DeleteOutlined />}
+                            onClick={(e) => e.stopPropagation()}
+                            title="删除会话"
+                            style={{
+                              position: 'absolute',
+                              top: 4,
+                              right: 4,
+                              width: 24,
+                              height: 24,
+                              padding: 0,
+                              display: 'inline-flex',
+                              alignItems: 'center',
+                              justifyContent: 'center',
+                              // 始终挂载, 仅用透明度控制显隐. 若用 hovered 条件卸载,
+                              // 鼠标移向 Popconfirm 弹层会离开会话项触发 unmount,
+                              // 弹层随之消失.
+                              opacity: hovered ? 1 : 0,
+                              pointerEvents: hovered ? 'auto' : 'none',
+                              transition: 'opacity 0.15s',
+                            }}
+                          />
+                        </Popconfirm>
                       </div>
                     )
                   })}
@@ -955,10 +1019,10 @@ export default function Agent() {
                   <Button
                     type="link"
                     size="small"
-                    style={{ padding: 0, marginTop: 4 }}
+                    style={{ padding: 0, marginTop: 4, color: token.colorPrimary }}
                     onClick={() => setShowAllSessions((v) => !v)}
                   >
-                    {showAllSessions ? '收起' : `更多 (${sessions.length - 10})`}
+                    {showAllSessions ? '收起' : `更多 (${sessions.length - sessionPageSize})`}
                   </Button>
                 )}
               </>

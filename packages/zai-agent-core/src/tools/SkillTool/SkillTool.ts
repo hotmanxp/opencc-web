@@ -1,10 +1,10 @@
-import type { Tool } from '../Tool.js'
+import type { LegacyTool, LegacyToolContext } from '../Tool.js'
 import type { LoadedSkill, PendingSkillInjection } from '../../runtime/skills/index.js'
 import { substituteArguments } from '../../runtime/skills/substitute.js'
 import { renderPrompt } from './prompt.js'
 import { SkillInputSchema, type SkillInput } from './schema.js'
 
-export const SkillTool: Tool<typeof SkillInputSchema, string> = {
+export const SkillTool: LegacyTool<typeof SkillInputSchema, string> = {
   name: 'Skill',
   description: renderPrompt(),
   inputSchema: SkillInputSchema,
@@ -12,7 +12,7 @@ export const SkillTool: Tool<typeof SkillInputSchema, string> = {
   isReadOnly: () => false,
   isDestructive: () => false,
 
-  async call(rawInput, ctx) {
+  async call(rawInput, ctx: LegacyToolContext) {
     const input = rawInput as SkillInput
     const skills: LoadedSkill[] = (ctx.state.__zaiSkills as LoadedSkill[] | undefined) ?? []
     const skill = skills.find(s => s.name === input.name)

@@ -1,10 +1,10 @@
 import { readFile, writeFile } from 'fs/promises'
 import { isAbsolute, resolve } from 'path'
-import type { Tool, ToolContext } from '../Tool.js'
+import type { LegacyTool, LegacyToolContext as ToolContext } from '../Tool.js'
 import { FileEditInputSchema, type FileEditInput } from './schema.js'
 import { renderPrompt } from './prompt.js'
 
-export const FileEditTool: Tool<typeof FileEditInputSchema, string> = {
+export const FileEditTool: LegacyTool<typeof FileEditInputSchema, string> = {
   name: 'Edit',
   description: renderPrompt(),
   inputSchema: FileEditInputSchema,

@@ -1,8 +1,8 @@
 import { describe, expect, test, vi } from 'vitest'
-import type { ToolContext } from '../Tool.js'
+import type { LegacyToolContext } from '../Tool.js'
 import { AskUserQuestionTool } from './AskUserQuestionTool.js'
 
-function makeCtx(overrides: Partial<ToolContext> = {}): ToolContext {
+function makeCtx(overrides: Partial<LegacyToolContext> = {}): LegacyToolContext {
   return {
     cwd: '/tmp', env: {}, abortSignal: new AbortController().signal,
     dataDir: '/d', state: {},
@@ -27,6 +27,10 @@ const baseInput = {
   ],
 }
 
+function parseOut(output: string): any {
+  return JSON.parse(output)
+}
+
 describe('AskUserQuestionTool', () => {
   test('input already has answers → return without awaiting', async () => {
     const ctx = makeCtx({
@@ -35,21 +39,23 @@ describe('AskUserQuestionTool', () => {
       }),
     })
     const out = await AskUserQuestionTool.call(
-      { ...baseInput, answers: { 'Which library?': 'React' } },
-      ctx,
+      { ...baseInput, answers: { 'Which library?': 'React' } } as any,
+      ctx as any,
     )
     expect(out.isError).toBeFalsy()
-    expect((out.output as any).answers).toEqual({ 'Which library?': 'React' })
+    const parsed = parseOut(out.output as string)
+    expect(parsed.answers).toEqual({ 'Which library?': 'React' })
   })
 
   test('no answers → await ctx.awaitAskUserQuestion → return its result', async () => {
     const ctx = makeCtx({
-      awaitAskUserQuestion: async (req) => ({
+      awaitAskUserQuestion: async (req: any) => ({
         answers: { [(req.questions as any[])[0].question]: 'Vue' },
       }),
     })
-    const out = await AskUserQuestionTool.call(baseInput as any, ctx)
-    expect((out.output as any).answers).toEqual({ 'Which library?': 'Vue' })
+    const out = await AskUserQuestionTool.call(baseInput as any, ctx as any)
+    const parsed = parseOut(out.output as string)
+    expect(parsed.answers).toEqual({ 'Which library?': 'Vue' })
   })
 
   test('returns annotations when present', async () => {
@@ -59,16 +65,18 @@ describe('AskUserQuestionTool', () => {
         annotations: { 'Which library?': { notes: 'with SSR' } },
       }),
     })
-    const out = await AskUserQuestionTool.call(baseInput as any, ctx)
-    expect((out.output as any).annotations).toEqual({ 'Which library?': { notes: 'with SSR' } })
+    const out = await AskUserQuestionTool.call(baseInput as any, ctx as any)
+    const parsed = parseOut(out.output as string)
+    expect(parsed.annotations).toEqual({ 'Which library?': { notes: 'with SSR' } })
   })
 
   test('omits annotations when not provided', async () => {
     const ctx = makeCtx({
       awaitAskUserQuestion: async () => ({ answers: { 'Which library?': 'React' } }),
     })
-    const out = await AskUserQuestionTool.call(baseInput as any, ctx)
-    expect((out.output as any).annotations).toBeUndefined()
+    const out = await AskUserQuestionTool.call(baseInput as any, ctx as any)
+    const parsed = parseOut(out.output as string)
+    expect(parsed.annotations).toBeUndefined()
   })
 
   test('passes metadata through to awaitAskUserQuestion', async () => {
@@ -76,7 +84,7 @@ describe('AskUserQuestionTool', () => {
     const ctx = makeCtx({ awaitAskUserQuestion: spy })
     await AskUserQuestionTool.call(
       { ...baseInput, metadata: { source: 'remember' } } as any,
-      ctx,
+      ctx as any,
     )
     expect(spy).toHaveBeenCalledWith(expect.objectContaining({ metadata: { source: 'remember' } }))
   })
@@ -85,6 +93,6 @@ describe('AskUserQuestionTool', () => {
     const ctx = makeCtx({
       awaitAskUserQuestion: async () => { throw new Error('aborted') },
     })
-    await expect(AskUserQuestionTool.call(baseInput as any, ctx)).rejects.toThrow('aborted')
+    await expect(AskUserQuestionTool.call(baseInput as any, ctx as any)).rejects.toThrow('aborted')
   })
 })

@@ -1,5 +1,5 @@
 import { z } from 'zod'
-import type { Tool } from '../Tool.js'
+import type { LegacyTool } from '../Tool.js'
 
 const inputSchema = z.object({
   serverName: z.string().optional(),
@@ -12,7 +12,7 @@ type Result = {
   error?: string
 }
 
-export const ListMcpResourcesTool: Tool<typeof inputSchema, string> = {
+export const ListMcpResourcesTool: LegacyTool<typeof inputSchema, string> = {
   name: 'ListMcpResources',
   description:
     'List resources exposed by connected MCP servers. Optionally filter by serverName.',
