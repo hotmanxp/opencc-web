@@ -5,15 +5,38 @@ import { loadAgentsMd, buildAgentsMdSystemPrompt } from '@zn-ai/zai-agent-core'
 import { eventBus } from '../services/eventBus.js'
 import type { ServerEventInput } from '../services/eventBus.js'
 
+// Mirror zai-agent-core's runtime/types.ts UserMessage shape because the package
+// does not re-export these types — keep them in sync if the upstream shape changes.
+type UserMessageContent = Array<{ type: string; [key: string]: unknown }>
+type UserMessage = { role: 'user'; content: string | UserMessageContent }
+
 const router: IRouter = Router()
 
 const HARD_TIMEOUT_MS = 5 * 60 * 1000
 
 const PromptRequest = z.object({
-  prompt: z.string().min(1).max(32_000),
+  prompt: z.string().max(32_000).optional(),
+  contentBlocks: z
+    .array(
+      z.object({
+        type: z.string(),
+        source: z
+          .object({
+            type: z.enum(['base64', 'url']),
+            media_type: z.string(),
+            data: z.string(),
+          })
+          .passthrough(),
+      }).passthrough(),
+    )
+    .max(10)
+    .optional(),
   cwd: z.string().optional(),
   sessionId: z.string().optional(),
-})
+}).refine(
+  (v) => Boolean(v.prompt?.trim()) || Boolean(v.contentBlocks?.length),
+  { message: 'prompt or contentBlocks required' },
+)
 
 function newSessionId(): string {
   return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
@@ -152,7 +175,7 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
     return res.status(400).json({ error: 'invalid body: need {prompt, cwd?}' })
   }
 
-  const { prompt, cwd = process.cwd(), sessionId: existingSessionId } = parsed.data
+  const { prompt, contentBlocks, cwd = process.cwd(), sessionId: existingSessionId } = parsed.data
   const sessionId = existingSessionId ?? newSessionId()
   const abortController = new AbortController()
   const timer = setTimeout(() => {
@@ -190,8 +213,26 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
         // AGENTS.md 加载失败不阻断
       }
 
+      const text = prompt?.trim() ?? ''
+      const blocks = contentBlocks
+
+      // ★ image-paste v2: contentBlocks 拼成 user message array; 走 queryEngine array 路径
+      // (zai-agent-core queryEngine.ts:114-118 把每个元素 append 到 messages[]).
+      // 当 contentBlocks 为空时, promptArg 退化为 string, 走 queryEngine 的 string 路径.
+      const userContent =
+        blocks && blocks.length
+          ? [
+              ...blocks,
+              ...(text ? [{ type: 'text' as const, text }] : []),
+            ]
+          : text
+      const promptArg: string | UserMessage[] =
+        typeof userContent === 'string'
+          ? userContent
+          : [{ role: 'user', content: userContent as UserMessageContent }]
+
       const events = getRuntime().run({
-        prompt,
+        prompt: promptArg,
         cwd,
         ...(existingSessionId ? { resumeFromTranscriptId: existingSessionId } : {}),
         systemPrompt,
@@ -221,7 +262,7 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
           if (!titlePatched) {
             titlePatched = true
             try {
-              const title = deriveTitleFromPrompt(prompt)
+              const title = deriveTitleFromPrompt(text)
               await getTranscriptStore().patch(event.sessionId, { title })
             } catch {
               /* title 失败不阻断 */
