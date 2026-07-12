@@ -494,7 +494,7 @@ export function createUserMessage({
   }
   uuid?: UUID | string
   timestamp?: string
-  imagePasteIds?: number[]
+  imagePasteIds?: string[]
   // For tool_result messages: the UUID of the assistant message containing the matching tool_use
   sourceToolAssistantUUID?: UUID
   // Permission mode when message was sent (for rewind restoration)
