@@ -1,8 +1,29 @@
 import { create } from 'zustand'
 import { flushSync } from 'react-dom'
-import type { RuntimeEvent } from '../lib/sseAgent'
-import { runAgentStream, abortAgent } from '../lib/sseAgent'
 import type { ServerEvent } from '../../../../shared/events.js'
+
+// RuntimeEvent: shape of events produced by the SSE pipeline.
+// Kept locally since sseAgent.ts is deleted; matches what loadTranscript
+// constructs for user.text / assistant.text / tool_use:* history events.
+export type RuntimeEvent = {
+  eventId: string
+  sessionId: string
+  ts: number
+  turnIndex: number
+  type: string
+  text?: string
+  thinking?: string
+  toolUseId?: string
+  name?: string
+  input?: Record<string, unknown>
+  output?: unknown
+  error?: unknown
+  reason?: string
+  delta?: unknown
+  content_block?: Record<string, unknown>
+  index?: number
+  [key: string]: unknown
+}
 
 export type AgentStatus = 'idle' | 'streaming' | 'aborted' | 'error'
 
@@ -377,105 +398,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendMessage: async (prompt: string, cwd?: string) => {
-    const abortController = new AbortController()
-    // 先把用户消息放进 store,前端立即看到自己发出去的内容
-    const userMsg: AgentMessage = {
-      eventId: `user-${Date.now()}`,
-      sessionId: '',
-      ts: Date.now(),
-      turnIndex: 0,
-      type: 'user.text',
-      text: prompt,
-    }
-    set((s) => ({
-      status: 'streaming',
-      abortController,
-      messages: [...s.messages, userMsg],
-      // 新一轮发送: 递增命名空间, 让本轮 stream block key 与历史轮次隔离.
-      sendSeq: s.sendSeq + 1,
-    }))
-
-    await runAgentStream({
-      prompt,
-      cwd: cwd || get().cwd || undefined,
-      sessionId: get().sessionId ?? undefined,
-      signal: abortController.signal,
-      onEvent: (event: RuntimeEvent) => {
-        const state = get()
-        // 首次收到事件时记录 sessionId,并刷新侧栏 title
-        if (!state.sessionId && event.sessionId) {
-          set({ sessionId: event.sessionId })
-          void state.loadSessions()
-        }
-
-        // content_block_delta 走 upsert 合并: 同一 stream block 复用同一 eventId
-        // 持续追加, 避免每条 delta 都新开气泡 / 折叠块.
-        // key 由 store 内部按 `${sendSeq}:${turnIndex}:${textSegmentRev}:${blockIndex}:${kind}`
-        // 拼出 — sendSeq 每轮发送递增保证跨轮唯一, textSegmentRev 由 upsertToolCall
-        // 在工具起点 bump, 保证工具前后的文字段落到不同 entry.
-        // 用 flushSync 强制同步提交, 否则 React 18 会把同一 microtask 内的
-        // 多次 set() 合并成一次渲染, 用户看到的就是"原子出现"而非逐字流出.
-        if (event.type === 'content_block_delta') {
-          const delta = event.delta as
-            | { type?: string; text?: string; thinking?: string }
-            | undefined
-          const base: AgentMessage = {
-            ...event,
-            eventId: '', // upsertStreamBlock 会覆盖
-          }
-          flushSync(() => {
-            if (delta?.type === 'thinking_delta') {
-              state.upsertStreamBlock('thinking', base, delta.thinking || '')
-            } else {
-              state.upsertStreamBlock('text', base, delta?.text || '')
-            }
-          })
-          return
-        }
-
-        // tool_use:* 与 modelCaller 提前宣告的 content_block_start(tool_use)
-        // 走 upsertToolCall: 按 toolUseId 复用同一条消息, 保留 start 阶段的
-        // name/input, done/error 阶段只覆盖 output/error/reason + type.
-        // 这样渲染时同一工具只有一个 ToolCallBlock, 不会因为 done 不带 name
-        // 而冒出 "unknown 已完成" 的破损条目.
-        const t = event.type as string
-        const block = event.content_block as
-          | { type?: string; id?: string }
-          | undefined
-        const isToolFlow =
-          t === 'tool_use:start' ||
-          t === 'tool_use:done' ||
-          t === 'tool_use:error' ||
-          t === 'tool_use:invalid' ||
-          t === 'tool_use:denied' ||
-          t === 'tool_use:ask_pending' ||
-          (t === 'content_block_start' && block?.type === 'tool_use')
-        if (isToolFlow) {
-          state.upsertToolCall(event)
-          return
-        }
-
-        state.addMessage(event)
-
-        if (event.type === 'runtime.error') {
-          set({ status: 'error' })
-        }
-      },
-      onEnd: () => {
-        const state = get()
-        if (state.status === 'streaming') {
-          set({ status: 'idle', abortController: null })
-        }
-      },
-    })
+  sendMessage: async (_prompt: string, _cwd?: string) => {
+    // Deleted: sendMessage now lives in Agent.tsx calling /agent/prompt.
+    // The SSE stream is consumed by useEventStream -> applyRuntimeEvent.
+    throw new Error('sendMessage has been removed; use api.post("/agent/prompt") in Agent.tsx')
   },
 
   stop: async () => {
     const { abortController } = get()
     abortController?.abort('user_stop')
     set({ status: 'aborted', abortController: null })
-    await abortAgent()
+    await fetch('/api/agent/abort', { method: 'POST' })
   },
 
   setAskAnswer: (questionText, label) => set((s) => {

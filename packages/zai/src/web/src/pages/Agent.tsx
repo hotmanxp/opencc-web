@@ -29,6 +29,7 @@ import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { useAgentStore, type AgentMessage } from '../store/useAgentStore'
+import { api } from '../lib/api'
 import QuestionCard from '../components/QuestionCard.jsx'
 import DiffBlock from '../components/DiffBlock.js'
 import { linkifyText } from '../lib/linkify.js'
@@ -769,7 +770,7 @@ function MessageBubble({ msg, streaming }: { msg: AgentMessage; streaming: boole
 }
 
 export default function Agent() {
-  const { messages, status, cwd, sessions, sessionId, sendMessage, stop, clearMessages, loadSessions, setCurrentSession, loadTranscript, createNewSession, deleteSession, pendingAsk, setAskAnswer, setAskNotes, submitAsk, rejectAsk } =
+  const { messages, status, cwd, sessions, sessionId, stop, clearMessages, loadSessions, setCurrentSession, loadTranscript, createNewSession, deleteSession, pendingAsk, setAskAnswer, setAskNotes, submitAsk, rejectAsk } =
     useAgentStore()
   const [input, setInput] = useState('')
   const { token } = theme.useToken()
@@ -854,7 +855,25 @@ export default function Agent() {
     const trimmed = input.trim()
     if (!trimmed || status === 'streaming') return
     setInput('')
-    await sendMessage(trimmed, cwd || undefined)
+    // Optimistically add user message and set streaming state immediately
+    const userMsg: AgentMessage = {
+      eventId: `user-${Date.now()}`,
+      sessionId: '',
+      ts: Date.now(),
+      turnIndex: 0,
+      type: 'user.text',
+      text: trimmed,
+    }
+    useAgentStore.setState((s) => ({
+      status: 'streaming',
+      messages: [...s.messages, userMsg],
+      sendSeq: s.sendSeq + 1,
+    }))
+    const { sessionId } = await api.post<{ sessionId: string }>('/agent/prompt', {
+      prompt: trimmed,
+      cwd: cwd || undefined,
+    })
+    useAgentStore.setState({ activeSessionId: sessionId })
   }
 
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()

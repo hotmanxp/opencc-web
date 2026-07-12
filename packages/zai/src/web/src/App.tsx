@@ -2,8 +2,10 @@ import { BrowserRouter } from 'react-router-dom';
 import { ConfigProvider, theme } from 'antd';
 import zhCN from 'antd/locale/zh_CN';
 import AppRouter from './router';
+import { useEventStream } from './store/useEventStream';
 
 export default function App() {
+  useEventStream();
   return (
     <ConfigProvider
       locale={zhCN}
