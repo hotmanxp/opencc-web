@@ -1,6 +1,6 @@
 # @zn-ai/zai-agent-core
 
-知鸟AI agent runtime core — 进程内 agent runtime。
+知鸟AI agent runtime core — 从 OpenCC 抽离的进程内 agent runtime。
 
 ## 安装
 
@@ -25,7 +25,7 @@ async function main() {
 
 ## 架构
 
-- `src/opencc-internals/` — 上游同步过来的模块镜像（TUI 剔除）
+- `src/opencc-internals/` — CV 自 OpenCC 的镜像（TUI 剔除）
 - `src/runtime/` — runtime facade（`query()`, `DefaultAgentRuntime`, `streamAdapter`）
 - `src/transcript/` — JSON 文件 transcript 存储
 - `src/data/` — dataDir 路径解析
@@ -70,7 +70,7 @@ AskUserQuestionTool.inputSchema.parse({
 })
 ```
 
-## 同步上游
+## 同步 OpenCC
 
 ```bash
 pnpm sync-from-opencc --dry-run   # 预览变更

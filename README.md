@@ -5,7 +5,7 @@
 本仓库聚焦两件事:
 
 - **`@zn-ai/zai`** — 本地运行的 Web 管理平台(仪表盘 / 工具管理 / 资源浏览 / 登录管理 / 配置编辑 / Agent 对话)
-- **`@zn-ai/zai-agent-core`** — 进程内 Agent Runtime(对话 / 工具 / Skills / MCP / transcript)
+- **`@zn-ai/zai-agent-core`** — 从 OpenCC 抽离的进程内 Agent Runtime(对话 / 工具 / Skills / MCP / transcript)
 
 > 历史背景:本仓库早期承担 `zn-agent-assets` 资源库的载体,后转型为 zai + zai-agent-core 的 monorepo,资源仓库已拆分独立维护。
 
@@ -24,7 +24,7 @@ opencc-web/
 │   │   └── test/                  # Vitest 测试
 │   │
 │   └── zai-agent-core/            # @zn-ai/zai-agent-core — Agent Runtime
-│       ├── src/opencc-internals/  # 上游同步过来的运行时源码
+│       ├── src/opencc-internals/  # 从 OpenCC 同步过来的运行时源码
 │       ├── src/runtime/           # query / DefaultAgentRuntime / streamAdapter
 │       ├── src/mcp/               # MCPClientPool + MCPToolAdapter
 │       ├── src/tools/             # 工具实现(Bash / Read / Write / ...)
@@ -158,13 +158,13 @@ for await (const event of stream) {
 ```
 
 **架构**:
-- `src/opencc-internals/` — 上游同步过来的内部模块(TUI 已剔除)
+- `src/opencc-internals/` — 从 OpenCC 同步过来的内部模块(TUI 已剔除)
 - `src/runtime/` — runtime facade(`query()`,`DefaultAgentRuntime`,`streamAdapter`)
 - `src/transcript/` — JSON 文件 transcript 持久化
 - `src/data/` — dataDir 路径解析
 - `src/mcp/` — MCP 接入层(`MCPClientPool` / `MCPToolAdapter` / `mcpInstructions` / `permission-matcher`)
 
-**与上游同步**:
+**与上游 OpenCC 同步**:
 ```bash
 pnpm --filter @zn-ai/zai-agent-core sync-from-opencc --dry-run   # 预览
 pnpm --filter @zn-ai/zai-agent-core sync-from-opencc --apply     # 落地
@@ -230,7 +230,7 @@ pnpm test:watch
 
 仓库带两份 MCP 配置,二者用途不同:
 
-**`.mcp.json`** — 给 Claude Code 系 IDE 读:
+**`.mcp.json`** — 给 OpenCC / Claude Code 读:
 
 ```jsonc
 {

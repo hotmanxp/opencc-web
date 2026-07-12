@@ -1,15 +1,15 @@
-# opencc-internals — Internals Mirror
+# opencc-internals — OpenCC Source Mirror
 
 This directory is a **reference mirror** of selected modules from
-[`@zn-ai/opencc`](https://github.com/opencc/opencc). It is
+[`@zn-ai/opencc`](https://github.com/opencc/opencc) (Open Claude Code). It is
 populated by [`scripts/sync-from-opencc.ts`](../../scripts/sync-from-opencc.ts)
 and is **NOT** part of the zai-agent-core runtime.
 
 ## What it is
 
-- A reading-only snapshot of upstream modules that zai may decide to lift into
-  its own runtime in the future. Treat it as documentation that happens to be
-  importable, not as a library.
+- A reading-only snapshot of upstream OpenCC source for the modules zai may
+  decide to lift into its own runtime in the future. Treat it as documentation
+  that happens to be importable, not as a library.
 - Excluded from `tsc -b` via the package's `tsconfig.json`. Any code that
   references paths under `src/opencc-internals/` will fail typecheck.
 - Mirrors carry **Bun-only** runtime dependencies (`bun:bundle`,
