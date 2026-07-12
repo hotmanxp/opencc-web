@@ -81,6 +81,17 @@ export type RuntimeConfig = {
 export type QueryOptions = {
   prompt: string | UserMessage | UserMessage[]
   cwd: string
+  /**
+   * 指定 transcript ID (新建或续传都用这个 ID).
+   * - 若文件存在: 视为续传, 加载历史消息
+   * - 若文件不存在: 视为新建, runtime 启动后写 transcript 到这个 ID
+   * 不传则 runtime 生成 'sess-${randomUUID()}'.
+   *
+   * 与 resumeFromTranscriptId 的区别: 后者隐含"文件必须存在",
+   * store.read 会抛 ENOENT.
+   */
+  transcriptId?: string
+  /** @deprecated 用 transcriptId 代替. 文件不存在时会抛 ENOENT. */
   resumeFromTranscriptId?: string
   model?: string
   systemPrompt?: SystemPrompt | string

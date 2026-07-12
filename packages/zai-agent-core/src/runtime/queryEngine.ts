@@ -22,7 +22,13 @@ export async function* queryEngine(
   options: QueryOptions,
   config: RuntimeConfig,
 ): AsyncGenerator<RuntimeEvent> {
-  const sessionId = options.resumeFromTranscriptId ?? `sess-${randomUUID()}`
+  // transcriptId 优先: 显式指定 ID (新建/续传都用同一 ID).
+  // 回退到 resumeFromTranscriptId (续传, 文件必须已存在 — 否则 ENOENT).
+  // 最后才是 random UUID (新建).
+  const sessionId =
+    options.transcriptId ??
+    options.resumeFromTranscriptId ??
+    `sess-${randomUUID()}`
   const store = new TranscriptStore(config.dataDir)
   const abortController = new AbortController()
   const maxTurns = options.maxTurns ?? config.defaultMaxTurns ?? DEFAULT_MAX_TURNS
@@ -85,26 +91,35 @@ export async function* queryEngine(
   const systemPrompt = await buildSystemPrompt(options, skills, config)
 
   const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = []
-  if (options.resumeFromTranscriptId) {
-    const t = await store.read(options.resumeFromTranscriptId)
-    // 把 transcript 的 raw 字段转成 SDK 期望的 content 格式:
-    // - user raw = { content: string } → content: string
-    // - assistant raw = { text: string, tool_uses: [...] } → content: [{ type: 'text', text }]
-    for (const tm of t.messages as Array<{ type: string; raw?: unknown; role?: string }>) {
-      const role = tm.type === 'user' ? 'user' : tm.type === 'assistant' ? 'assistant' : (tm.role as 'user' | 'assistant' | undefined)
-      if (role !== 'user' && role !== 'assistant') continue
-      const raw = (tm.raw ?? {}) as Record<string, unknown>
-      let content: unknown
-      if (role === 'user') {
-        if (typeof raw.content === 'string') content = raw.content
-        else if (Array.isArray(raw.content)) content = raw.content
-        else content = ''
-      } else {
-        const text = typeof raw.text === 'string' ? raw.text : ''
-        const blocks: Array<{ type: 'text'; text: string }> = text ? [{ type: 'text', text }] : []
-        content = blocks
+  const resumeId = options.resumeFromTranscriptId ?? options.transcriptId
+  if (resumeId) {
+    let t: Awaited<ReturnType<typeof store.read>> | null = null
+    try {
+      t = await store.read(resumeId)
+    } catch {
+      // 文件不存在: 当成新建. transcriptId 路径必须有这个容错, 否则
+      // 第一次发消息时 transcript 还没创建 → ENOENT 抛错.
+    }
+    if (t) {
+      // 把 transcript 的 raw 字段转成 SDK 期望的 content 格式:
+      // - user raw = { content: string } → content: string
+      // - assistant raw = { text: string, tool_uses: [...] } → content: [{ type: 'text', text }]
+      for (const tm of t.messages as Array<{ type: string; raw?: unknown; role?: string }>) {
+        const role = tm.type === 'user' ? 'user' : tm.type === 'assistant' ? 'assistant' : (tm.role as 'user' | 'assistant' | undefined)
+        if (role !== 'user' && role !== 'assistant') continue
+        const raw = (tm.raw ?? {}) as Record<string, unknown>
+        let content: unknown
+        if (role === 'user') {
+          if (typeof raw.content === 'string') content = raw.content
+          else if (Array.isArray(raw.content)) content = raw.content
+          else content = ''
+        } else {
+          const text = typeof raw.text === 'string' ? raw.text : ''
+          const blocks: Array<{ type: 'text'; text: string }> = text ? [{ type: 'text', text }] : []
+          content = blocks
+        }
+        messages.push({ role, content })
       }
-      messages.push({ role, content })
     }
   }
   if (subCtx?.initialUserMessage) {
