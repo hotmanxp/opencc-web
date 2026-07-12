@@ -79,7 +79,10 @@ export async function* queryEngine(
     if (mcpTools.length > 0) tools = [...tools, ...mcpTools]
   }
 
-  if (!options.resumeFromTranscriptId) {
+  // 关键: 用 transcriptId ?? resumeFromTranscriptId 判断. 之前只检查
+  // resumeFromTranscriptId, 但新 API transcriptId 也表示"指定 ID", 漏掉
+  // 它会触发 store.create 把已存在的 transcript 文件覆盖掉.
+  if (!options.transcriptId && !options.resumeFromTranscriptId) {
     await store.create({
       cwd: options.cwd,
       model: options.model ?? config.defaultModel ?? 'default',
