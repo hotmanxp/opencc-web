@@ -126,10 +126,9 @@ export function createAnthropicModelCaller(): ModelCaller {
     const resolvedModel =
       model && model !== 'default'
         ? model
-        : (env.ANTHROPIC_SMALL_FAST_MODEL
-          ?? env.ANTHROPIC_DEFAULT_SONNET_MODEL
-          ?? env.ANTHROPIC_DEFAULT_OPUS_MODEL
-          ?? 'claude-sonnet-4-20250514')
+        : (env.ANTHROPIC_DEFAULT_SONNET_MODEL
+          ?? env.ANTHROPIC_SMALL_FAST_MODEL
+          ?? 'MiniMax-M3')
 
     const sysPromptStr =
       typeof systemPrompt === 'string'
