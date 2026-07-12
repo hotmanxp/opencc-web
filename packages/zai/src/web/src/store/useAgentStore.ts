@@ -2,6 +2,19 @@ import { create } from 'zustand'
 import { flushSync } from 'react-dom'
 import type { ServerEvent } from '../../../../shared/events.js'
 
+// 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob, 用于把历史图片
+// 消息里的 base64 还原成浏览器可显示的 objectURL. 解析失败时返回
+// null, 调用方回退到 raw dataURL 并把 status 标为 error.
+function dataURLtoBlob(dataUrl: string): Blob | null {
+  const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+  if (!m) return null
+  const mime = m[1]!
+  const bin = atob(m[2]!)
+  const arr = new Uint8Array(bin.length)
+  for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+  return new Blob([arr], { type: mime })
+}
+
 // Runtime 工具调用 id 计数器: 每个 runtime.tool_call 递增一次, 给
 // 没有自带 toolUseId 的 upstream runtime 事件合成一个稳定 id, 让
 // 后续 runtime.tool_result 能通过 toolUseId 与之对齐. 模块级别常量
@@ -367,7 +380,42 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           // 它属于工具侧产物, 不应当被渲染成 user.text 卡片 — 否则刷新页面后
           // 用户看到 "skill 文字输出变成了我发出的消息".
           if (rawObj.kind === 'skill_injection') continue
-          messages.push({ ...baseFields, eventId: msg.uuid, type: 'user.text', text })
+          if (Array.isArray(rawObj.content)) {
+            // ContentBlock[] (可能含 image) — 还原 text 拼接 + 重建 attachments
+            const blocks = rawObj.content as Array<{
+              type: string
+              source?: { type?: string; media_type?: string; data?: string }
+              text?: string
+            }>
+            const textFromBlocks = blocks
+              .filter((b) => b.type === 'text' && typeof b.text === 'string')
+              .map((b) => b.text!)
+              .join('\n')
+            const restoredAttachments = blocks
+              .filter((b) => b.type === 'image' && b.source?.type === 'base64')
+              .map((b, i) => {
+                const dataUrl = `data:${b.source!.media_type};base64,${b.source!.data}`
+                const blob = dataURLtoBlob(dataUrl)
+                const thumbnailUrl = blob ? URL.createObjectURL(blob) : dataUrl
+                return {
+                  localId: `${msg.uuid}-img-${i}`,
+                  mime: b.source!.media_type ?? 'image/png',
+                  filename: '[历史图片]',
+                  thumbnailUrl,
+                  status: blob ? ('ready' as const) : ('error' as const),
+                  error: blob ? undefined : '图片已损坏',
+                }
+              })
+            messages.push({
+              ...baseFields,
+              eventId: msg.uuid,
+              type: 'user.text',
+              text: textFromBlocks,
+              ...(restoredAttachments.length ? { attachments: restoredAttachments } : {}),
+            })
+          } else {
+            messages.push({ ...baseFields, eventId: msg.uuid, type: 'user.text', text })
+          }
         } else if (msg.type === 'assistant') {
           // 先 emit thinking 块（若有），再 emit 文本块，让折叠面板显示在 response 上方
           const thinking = typeof rawObj.thinking === 'string' ? rawObj.thinking : ''
