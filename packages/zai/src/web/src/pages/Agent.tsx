@@ -9,6 +9,7 @@ import {
   Space,
   Popconfirm,
   theme,
+  message,
 } from 'antd'
 import {
   RobotOutlined,
@@ -23,6 +24,7 @@ import {
   CaretDownOutlined,
   CaretRightOutlined,
   DeleteOutlined,
+  PictureOutlined,
 } from '@ant-design/icons'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -33,6 +35,8 @@ import { api } from '../lib/api'
 import QuestionCard from '../components/QuestionCard.jsx'
 import DiffBlock from '../components/DiffBlock.js'
 import { linkifyText } from '../lib/linkify.js'
+import { AttachmentStrip } from '../components/AttachmentStrip'
+import { readImageAsBase64, ImageReadError } from '../lib/imageReader'
 
 const { TextArea } = Input
 const { Text, Paragraph } = Typography
@@ -42,6 +46,23 @@ const { Text, Paragraph } = Typography
 const CODE_BG = '#282c34'
 const CODE_FONT_FAMILY =
   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+
+// 图片附件本地态: 用户在 handleSend 前挂在 Agent.tsx 内部的 pending list.
+// thumbnailUrl 是 objectURL (用于立即在 AttachmentStrip 渲染);
+// base64DataUrl 在 readImageAsBase64 完成后填入, 用于 handleSend 时拼
+// ContentBlock 与 userMsg.attachments 的 thumbnailUrl 快照.
+type PendingAttachment = {
+  localId: string
+  mime: string
+  size: number
+  filename: string
+  thumbnailUrl: string
+  base64DataUrl: string
+  status: 'reading' | 'ready' | 'error'
+  error?: string
+}
+
+const MAX_ATTACHMENTS_PER_TURN = 10
 
 const markdownComponents = {
   p: ({ children }: any) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
@@ -544,6 +565,7 @@ function MessageBubble({ msg, streaming }: { msg: AgentMessage; streaming: boole
   }
 
   if (msg.type === 'user.text' || msg.type === 'user.message') {
+    const msgAttachments = (msg.attachments as PendingAttachment[] | undefined) ?? []
     return (
       <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 16 }}>
         <Card
@@ -554,6 +576,9 @@ function MessageBubble({ msg, streaming }: { msg: AgentMessage; streaming: boole
             borderRadius: 12,
           }}
         >
+          {msgAttachments.length > 0 && (
+            <AttachmentStrip attachments={msgAttachments} />
+          )}
           <Space>
             <UserOutlined />
             <Text>{linkifyText((msg.text as string) || (msg.prompt as string) || '')}</Text>
@@ -773,6 +798,21 @@ export default function Agent() {
   const { messages, status, cwd, sessions, sessionId, stop, clearMessages, loadSessions, setCurrentSession, loadTranscript, createNewSession, deleteSession, pendingAsk, setAskAnswer, setAskNotes, submitAsk, rejectAsk } =
     useAgentStore()
   const [input, setInput] = useState('')
+  // 图片附件 local state. 仅在当前 Agent 实例存活期间有效 — 一旦 handleSend
+  // 把它快照到 userMsg.attachments 后, 就清理本地 (避免双重持有 + revoke objectURL).
+  const [attachments, setAttachments] = useState<PendingAttachment[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
+
+  // 组件 unmount 时清理 objectURL, 防止内存泄漏. 注意只在卸载时跑一次,
+  // 不订阅 attachments 变更 — 否则用户每次加/删附件都会 revoke 老的 url,
+  // 导致正在渲染中的 <img> 立刻失效.
+  useEffect(() => {
+    return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
   const { token } = theme.useToken()
   const [showAllSessions, setShowAllSessions] = useState(false)
   // 会话列表默认展示条数: 按侧栏可视高度估算, 每项约 50px (padding + 两行文字 + gap).
@@ -851,26 +891,136 @@ export default function Agent() {
     loadSessions()
   }, [])
 
+  // 批量添加附件: 立即以 objectURL 形式挂到 placeholder (显示缩略图),
+  // 然后并发调 readImageAsBase64 把 base64 写回, 失败则置 status='error'.
+  // 用 MAX_ATTACHMENTS_PER_TURN 截断超量粘贴/拖拽, 避免一次塞爆.
+  const addAttachments = async (files: File[]) => {
+    const accepted = files.slice(0, MAX_ATTACHMENTS_PER_TURN)
+    const placeholders: PendingAttachment[] = accepted.map((file) => ({
+      localId: crypto.randomUUID(),
+      mime: file.type,
+      size: file.size,
+      filename: file.name || 'image',
+      thumbnailUrl: URL.createObjectURL(file),
+      base64DataUrl: '',
+      status: 'reading',
+    }))
+    setAttachments((prev) => [...prev, ...placeholders])
+    await Promise.all(
+      placeholders.map(async (p, i) => {
+        try {
+          const r = await readImageAsBase64(accepted[i]!)
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.localId === p.localId
+                ? { ...a, base64DataUrl: r.dataUrl, status: 'ready' }
+                : a,
+            ),
+          )
+        } catch (e) {
+          const msg = e instanceof ImageReadError ? e.message : (e as Error).message
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.localId === p.localId
+                ? { ...a, status: 'error', error: msg }
+                : a,
+            ),
+          )
+        }
+      }),
+    )
+  }
+
+  const removeAttachment = (localId: string) => {
+    setAttachments((prev) => {
+      const att = prev.find((a) => a.localId === localId)
+      if (att) URL.revokeObjectURL(att.thumbnailUrl)
+      return prev.filter((a) => a.localId !== localId)
+    })
+  }
+
+  const handlePaste = (e: React.ClipboardEvent) => {
+    const files: File[] = []
+    for (const item of e.clipboardData.items) {
+      if (item.kind === 'file') {
+        const f = item.getAsFile()
+        if (f) files.push(f)
+      }
+    }
+    if (files.length === 0) return
+    e.preventDefault()
+    void addAttachments(files)
+  }
+
+  const handleDrop = (e: React.DragEvent) => {
+    if (status === 'streaming') {
+      e.preventDefault()
+      message.warning('请等待当前回复结束')
+      return
+    }
+    const files = Array.from(e.dataTransfer.files).filter((f) =>
+      f.type.startsWith('image/'),
+    )
+    if (files.length === 0) return
+    e.preventDefault()
+    void addAttachments(files)
+  }
+
+  const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
+    void addAttachments(files)
+    e.target.value = ''
+  }
+
   const handleSend = async () => {
-    const trimmed = input.trim()
-    if (!trimmed || status === 'streaming') return
+    const text = input.trim()
+    const readyAttachments = attachments.filter((a) => a.status === 'ready')
+    const blocks = readyAttachments.map((a) => ({
+      type: 'image' as const,
+      source: {
+        type: 'base64' as const,
+        media_type: a.mime,
+        // ★ 关键: data 是 base64DataUrl 去掉 'data:image/...;base64,' 前缀
+        // 因为 server zod / openaiShim 已经会拼前缀, 重复会双重前缀.
+        data: a.base64DataUrl.replace(/^data:[^;]+;base64,/, ''),
+      },
+    }))
+    if (!text && blocks.length === 0) return
+    if (status === 'streaming') return
     setInput('')
-    // Optimistically add user message and set streaming state immediately
+
+    // ★ 快照: 把 attachments 的精简版挂到 userMsg.attachments, 用 dataURL
+    // (base64DataUrl) 当 thumbnailUrl. handleSend 后的 setAttachments([]) +
+    // 组件 unmount 不会影响已发的气泡.
     const userMsg: AgentMessage = {
       eventId: `user-${Date.now()}`,
       sessionId: '',
       ts: Date.now(),
       turnIndex: 0,
       type: 'user.text',
-      text: trimmed,
+      text,
+      attachments: readyAttachments.map((a) => ({
+        localId: a.localId,
+        mime: a.mime,
+        filename: a.filename,
+        thumbnailUrl: a.base64DataUrl, // dataURL 而非 objectURL
+        status: a.status,
+      })),
     }
     useAgentStore.setState((s) => ({
       status: 'streaming',
       messages: [...s.messages, userMsg],
       sendSeq: s.sendSeq + 1,
     }))
+
+    // 清理本地附件 (snapshot 已存到 userMsg, 不再需要)
+    attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl))
+    setAttachments([])
+
     const { sessionId } = await api.post<{ sessionId: string }>('/agent/prompt', {
-      prompt: trimmed,
+      prompt: text || undefined,
+      contentBlocks: blocks.length > 0 ? blocks : undefined,
       cwd: cwd || undefined,
     })
     useAgentStore.setState({ activeSessionId: sessionId })
@@ -1165,16 +1315,37 @@ export default function Agent() {
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'stretch' }}>
-          <TextArea
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            placeholder="输入消息，按 Enter 发送，Shift+Enter 换行"
-            rows={3}
-            disabled={status === 'streaming' || pendingAsk?.status === 'pending'}
-            style={{ resize: 'none', flex: 1 }}
-          />
+        <div
+          onDrop={handleDrop}
+          onDragOver={(e) => e.preventDefault()}
+        >
+          <AttachmentStrip attachments={attachments} onRemove={removeAttachment} />
+          <div style={{ display: 'flex', alignItems: 'stretch' }}>
+            <Button
+              icon={<PictureOutlined />}
+              onClick={() => fileInputRef.current?.click()}
+              title="上传图片"
+              disabled={status === 'streaming' || pendingAsk?.status === 'pending'}
+            />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleFilePick}
+            />
+            <TextArea
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder="输入消息, 按 Enter 发送, Shift+Enter 换行. 可直接粘贴或拖拽图片."
+              rows={3}
+              disabled={status === 'streaming' || pendingAsk?.status === 'pending'}
+              style={{ resize: 'none', flex: 1 }}
+            />
+          </div>
         </div>
 
         {/* 输入框下方的模式栏: 仿 OpenCC 底栏 "▶▶ bypass on (shift+tab ↹) · master · zai · ..." */}
