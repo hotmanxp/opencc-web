@@ -2,6 +2,13 @@ import { create } from 'zustand'
 import { flushSync } from 'react-dom'
 import type { ServerEvent } from '../../../../shared/events.js'
 
+// Runtime 工具调用 id 计数器: 每个 runtime.tool_call 递增一次, 给
+// 没有自带 toolUseId 的 upstream runtime 事件合成一个稳定 id, 让
+// 后续 runtime.tool_result 能通过 toolUseId 与之对齐. 模块级别常量
+// 而非 store 字段, 因为它不需要被 UI 渲染或读取, 仅作为 reducer
+// 内部状态.
+let runtimeToolCounter = 0
+
 // RuntimeEvent: shape of events produced by the SSE pipeline.
 // Kept locally since sseAgent.ts is deleted; matches what loadTranscript
 // constructs for user.text / assistant.text / tool_use:* history events.
@@ -39,9 +46,6 @@ export type AskState = {
   annotations: Record<string, { notes?: string }>
 }
 
-type RuntimeDeltaMessage = { role: 'assistant'; content: string; ts: number }
-type ToolCall = { toolName: string; input: unknown; output?: unknown }
-
 interface AgentState {
   sessionId: string | null
   sessions: Array<{ transcriptId: string; title?: string; updatedAt: number }>
@@ -66,8 +70,6 @@ interface AgentState {
 
   // SSE reducers (Task 6)
   activeSessionId: string | null
-  turnStatus: Record<string, 'idle' | 'running' | 'aborted' | 'error'>
-  toolCalls: Record<string, Record<string, ToolCall>>
   applyRuntimeEvent: (event: ServerEvent) => void
   applySessionEvent: (event: ServerEvent) => void
   applyPromptAsk: (event: ServerEvent) => void
@@ -109,8 +111,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   // SSE reducer state (Task 6)
   activeSessionId: null,
-  turnStatus: {},
-  toolCalls: {},
 
   setCwd: (cwd: string) => set({ cwd }),
   addMessage: (msg: AgentMessage) =>
@@ -477,58 +477,82 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   // SSE reducers (Task 6)
-  applyRuntimeEvent: (event) => set((state) => {
-    if (!('sessionId' in event) || typeof event.sessionId !== 'string') return state
+  applyRuntimeEvent: (event) => {
+    if (!('sessionId' in event) || typeof event.sessionId !== 'string') return
     const sid = event.sessionId
+    // runtime.* 事件全部带 sessionId, 上面的 narrow 已保证它存在.
+    // runtime.* 不在 ServerEvent union 之外的 type 才会进入这里.
     switch (event.type) {
       case 'runtime.started':
-        return { ...state, turnStatus: { ...state.turnStatus, [sid]: 'running' } }
+        // 标记当前活跃 session + 进入 streaming 态. status 已经是
+        // 'idle' 时也会被覆盖成 'streaming'; UI 看到 streaming 后立即
+        // 显示流式动画与 elapsed 计时.
+        useAgentStore.setState({ activeSessionId: sid, status: 'streaming' })
+        return
       case 'runtime.delta': {
-        const existing = (state.messages as Record<string, RuntimeDeltaMessage[]>)[sid] ?? []
-        const last = existing[existing.length - 1]
-        if (last && last.role === 'assistant') {
-          const merged = [...existing.slice(0, -1), { ...last, content: last.content + event.delta }]
-          return { ...state, messages: { ...state.messages, [sid]: merged } }
+        // 沿用 store 内已有的 upsertStreamBlock. blockIndex 即 sendSeq:
+        // 每次 sendMessage 都会递增 sendSeq, 跨轮次文本块 key 永不碰撞;
+        // 拼上 turnIndex 即使同一 sendSeq 内出现多轮也保持稳定.
+        const sendSeq = useAgentStore.getState().sendSeq
+        const base: AgentMessage = {
+          eventId: '',
+          sessionId: sid,
+          ts: event.ts,
+          turnIndex: event.turnIndex,
+          type: 'assistant.text',
+          index: sendSeq,
         }
-        return {
-          ...state,
-          messages: { ...state.messages, [sid]: [...existing, { role: 'assistant', content: event.delta, ts: event.ts }] },
-        }
+        useAgentStore.getState().upsertStreamBlock('text', base, event.delta)
+        return
       }
       case 'runtime.tool_call': {
-        const calls = state.toolCalls[sid] ?? {}
-        // runtime.tool_call 不带 toolUseId；按 toolName 顺序入栈
-        const toolUseId = `tu_${Object.keys(calls).length}_${event.ts}`
-        return {
-          ...state,
-          toolCalls: {
-            ...state.toolCalls,
-            [sid]: { ...calls, [toolUseId]: { toolName: event.toolName, input: event.input } },
-          },
+        // runtime.tool_call schema 不带 toolUseId, 但 upsertToolCall
+        // 按 toolUseId upsert 合并 start→done/error, 必须生成稳定 id.
+        // 用 session 内顺序计数器 + ts 拼一个足够唯一的 id. 同步记录到
+        // pendingToolResults[sid], 让后续无 toolUseId 的 result 能找到
+        // 对应 start. 注意 result 实际是带 toolUseId 的, 这里匹配只是
+        // 兜底.
+        const tuId = `tu_runtime_${sid}_${++runtimeToolCounter}`
+        const startMsg: AgentMessage = {
+          eventId: `tool-${tuId}`,
+          sessionId: sid,
+          ts: event.ts,
+          turnIndex: event.turnIndex,
+          type: 'tool_use:start',
+          toolUseId: tuId,
+          name: event.toolName,
+          input: event.input as Record<string, unknown>,
         }
+        useAgentStore.getState().upsertToolCall(startMsg)
+        return
       }
       case 'runtime.tool_result': {
-        const calls = state.toolCalls[sid] ?? {}
-        const call = calls[event.toolUseId]
-        if (!call) return state
-        return {
-          ...state,
-          toolCalls: {
-            ...state.toolCalls,
-            [sid]: { ...calls, [event.toolUseId]: { ...call, output: event.output } },
-          },
+        // runtime.tool_result schema 携带 toolUseId, 直接复用.
+        const resultMsg: AgentMessage = {
+          eventId: `tool-${event.toolUseId}`,
+          sessionId: sid,
+          ts: event.ts,
+          turnIndex: event.turnIndex,
+          type: 'tool_use:done',
+          toolUseId: event.toolUseId,
+          output: event.output,
         }
+        useAgentStore.getState().upsertToolCall(resultMsg)
+        return
       }
       case 'runtime.done':
-        return { ...state, turnStatus: { ...state.turnStatus, [sid]: 'idle' } }
+        useAgentStore.getState().setStatus('idle')
+        return
       case 'runtime.aborted':
-        return { ...state, turnStatus: { ...state.turnStatus, [sid]: 'aborted' } }
+        useAgentStore.getState().setStatus('aborted')
+        return
       case 'runtime.error':
-        return { ...state, turnStatus: { ...state.turnStatus, [sid]: 'error' } }
+        useAgentStore.getState().setStatus('error')
+        return
       default:
-        return state
+        return
     }
-  }),
+  },
   applySessionEvent: (event) => set((state) => {
     if (!('sessionId' in event) || typeof event.sessionId !== 'string') return state
     const sid = event.sessionId

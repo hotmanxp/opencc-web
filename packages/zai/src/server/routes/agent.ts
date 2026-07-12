@@ -3,6 +3,7 @@ import { z } from 'zod'
 import { abortAgentSession, getCurrentSessionId, getAskRegistry, getRuntime, getTranscriptStore, setCurrentSessionId } from '../services/agentRuntime.js'
 import { loadAgentsMd, buildAgentsMdSystemPrompt } from '@zn-ai/zai-agent-core'
 import { eventBus } from '../services/eventBus.js'
+import type { ServerEventInput } from '../services/eventBus.js'
 
 const router: IRouter = Router()
 
@@ -16,6 +17,133 @@ const PromptRequest = z.object({
 
 function newSessionId(): string {
   return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+}
+
+// Translate Anthropic-style runtime events emitted by DefaultAgentRuntime
+// into the spec-shaped ServerEvent variants the frontend expects. The runtime
+// emits: message_start / content_block_* / message_stop / tool_use:start /
+// tool_use:done / tool_use:error|invalid|denied. The ServerEvent schema only
+// knows runtime.{started,delta,tool_call,tool_result,done,aborted,error}, so
+// every other event from the upstream stream would be silently dropped by
+// ServerEvent.parse → frontend never renders anything.
+async function* translateRuntimeEvents(
+  events: AsyncIterable<Record<string, unknown>>,
+  sessionId: string,
+): AsyncGenerator<ServerEventInput> {
+  let turnIndex = 0
+  let toolInputBuffer = ''
+  let pendingToolUseId: string | null = null
+  let pendingToolName: string | null = null
+
+  for await (const ev of events) {
+    const t = ev.type as string | undefined
+    switch (t) {
+      case 'message_start':
+        yield { type: 'runtime.started', sessionId, turnIndex }
+        break
+      case 'content_block_start': {
+        const block = ev.content_block as { type?: string; id?: string; name?: string } | undefined
+        // Reset tool input accumulator at the start of every tool_use block
+        if (block?.type === 'tool_use') {
+          toolInputBuffer = ''
+          pendingToolUseId = block.id ?? null
+          pendingToolName = block.name ?? null
+        }
+        break
+      }
+      case 'content_block_delta': {
+        const delta = ev.delta as { type?: string; text?: string; thinking?: string; partial_json?: string } | undefined
+        if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+          yield { type: 'runtime.delta', sessionId, turnIndex, delta: delta.text }
+        } else if (delta?.type === 'input_json_delta' && typeof delta.partial_json === 'string') {
+          // Stream the JSON fragments; the assembled input is emitted at content_block_stop
+          toolInputBuffer += delta.partial_json
+        } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
+          // Model thinking isn't a separate spec event — fold into the next text delta.
+          // We can't yield a separate event here; just skip and let UI render it
+          // via transcript if it persists. Streaming thinking drops silently for now.
+        }
+        break
+      }
+      case 'content_block_stop':
+        if (pendingToolUseId && pendingToolName) {
+          let parsedInput: unknown = toolInputBuffer
+          if (toolInputBuffer.trim()) {
+            try {
+              parsedInput = JSON.parse(toolInputBuffer)
+            } catch {
+              parsedInput = toolInputBuffer
+            }
+          }
+          yield {
+            type: 'runtime.tool_call',
+            sessionId,
+            turnIndex,
+            toolName: pendingToolName,
+            input: parsedInput,
+          }
+          toolInputBuffer = ''
+          pendingToolUseId = null
+          pendingToolName = null
+        }
+        break
+      case 'tool_use:start': {
+        // Direct tool start (non-streamed); emit tool_call immediately.
+        const id = (ev.id as string) ?? (ev.toolUseId as string) ?? ''
+        const name = (ev.name as string) ?? 'unknown'
+        yield {
+          type: 'runtime.tool_call',
+          sessionId,
+          turnIndex,
+          toolName: name,
+          input: (ev.input as unknown) ?? {},
+        }
+        // Remember id so the subsequent done/error uses the same identifier
+        pendingToolUseId = id
+        pendingToolName = name
+        break
+      }
+      case 'tool_use:done': {
+        const id = ((ev.id as string) ?? (ev.toolUseId as string) ?? pendingToolUseId) as string
+        yield {
+          type: 'runtime.tool_result',
+          sessionId,
+          turnIndex,
+          toolUseId: id,
+          output: (ev.output as unknown) ?? '',
+        }
+        break
+      }
+      case 'tool_use:error':
+      case 'tool_use:invalid':
+      case 'tool_use:denied': {
+        const message = String(
+          (ev.message as string) ??
+          (ev.reason as string) ??
+          (ev.error as string) ??
+          t,
+        )
+        yield {
+          type: 'runtime.error',
+          sessionId,
+          turnIndex,
+          error: { category: 'tool', message, recoverable: false },
+        }
+        break
+      }
+      case 'message_stop':
+        yield { type: 'runtime.done', sessionId, turnIndex }
+        turnIndex++
+        // Reset tool accumulator between turns
+        toolInputBuffer = ''
+        pendingToolUseId = null
+        pendingToolName = null
+        break
+      // Ignore content_block_start by itself (we handle it above for tool_use)
+      default:
+        break
+    }
+  }
 }
 
 router.post('/agent/prompt', async (req: Request, res: Response) => {
@@ -70,10 +198,25 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
         abortSignal: abortController.signal,
       })
 
+      // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,
+      // 否则 ServerEvent.parse 会把上游所有事件当作非法 variant 直接丢弃.
+      const translated = translateRuntimeEvents(
+        events as AsyncIterable<Record<string, unknown>>,
+        sessionId,
+      )
+
       let titlePatched = Boolean(existingSessionId)
-      for await (const event of events) {
-        // 首次出现 sessionId → 写入 session.created 事件
-        if (typeof event.sessionId === 'string' && event.sessionId !== sessionId) {
+      for await (const event of translated) {
+        // runtime.* 事件均带 sessionId, 在这里直接 narrow 到字符串即可.
+        // 用 event.type 同时锁定语义方向, 避免分布式联合中其它变体
+        // (job.* / prompt.ask / server.*) 没有 sessionId 字段导致 TS2339.
+        if (
+          (event.type === 'runtime.started' || event.type === 'runtime.delta' ||
+           event.type === 'runtime.tool_call' || event.type === 'runtime.tool_result' ||
+           event.type === 'runtime.done' || event.type === 'runtime.aborted' ||
+           event.type === 'runtime.error') &&
+          typeof event.sessionId === 'string' && event.sessionId !== sessionId
+        ) {
           setCurrentSessionId(event.sessionId)
           if (!titlePatched) {
             titlePatched = true
@@ -86,7 +229,7 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
           }
         }
         // ★ 替代原 stream.send：通过总线推送
-        eventBus.emit(event as any)
+        eventBus.emit(event)
         if (event.type === 'runtime.done' || event.type === 'runtime.aborted') break
       }
     } catch (err) {
