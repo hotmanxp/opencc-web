@@ -101,22 +101,16 @@ describe('useAgentStore.applyRuntimeEvent', () => {
 })
 
 describe('useAgentStore.applySessionEvent', () => {
-  test('session.created registers session metadata via session records', () => {
+  test('session.created registers session via transcriptId into array', () => {
     useAgentStore.getState().applySessionEvent({
       type: 'session.created',
       eventId: 'e1', ts: 1, sessionId: 's1', title: 'Hello', cwd: '/tmp',
     })
-    // applySessionEvent 内部仍然按 Record 形态写入以便兼容旧 record 形态.
-    const sessions = useAgentStore.getState().sessions as unknown as Record<
-      string,
-      { sessionId: string; title: string; cwd: string }
-    >
-    expect(sessions.s1).toEqual({
-      sessionId: 's1', title: 'Hello', cwd: '/tmp',
-    })
+    const sessions = useAgentStore.getState().sessions
+    expect(sessions.some((x) => x.transcriptId === 's1' && x.title === 'Hello')).toBe(true)
   })
 
-  test('session.deleted removes session', () => {
+  test('session.deleted removes session by transcriptId', () => {
     useAgentStore.getState().applySessionEvent({
       type: 'session.created',
       eventId: 'e1', ts: 1, sessionId: 's1', title: 'X', cwd: '/tmp',
@@ -125,11 +119,24 @@ describe('useAgentStore.applySessionEvent', () => {
       type: 'session.deleted',
       eventId: 'e2', ts: 2, sessionId: 's1',
     })
-    const sessions = useAgentStore.getState().sessions as unknown as Record<
-      string,
-      { sessionId: string; title: string; cwd: string }
-    >
-    expect(sessions.s1).toBeUndefined()
+    const sessions = useAgentStore.getState().sessions
+    expect(sessions.some((x) => x.transcriptId === 's1')).toBe(false)
+  })
+
+  test('session.renamed updates existing session title by transcriptId', () => {
+    // 这是修复的核心 regression: 老代码按 Record 索引 sessions[sid] 永远
+    // undefined, case 静默早退. 现在改成按 transcriptId findIndex.
+    useAgentStore.getState().applySessionEvent({
+      type: 'session.created',
+      eventId: 'e1', ts: 1, sessionId: 's1', title: 'old', cwd: '/tmp',
+    })
+    useAgentStore.getState().applySessionEvent({
+      type: 'session.renamed',
+      eventId: 'e2', ts: 2, sessionId: 's1', title: 'new',
+    })
+    const sessions = useAgentStore.getState().sessions
+    const found = sessions.find((x) => x.transcriptId === 's1')
+    expect(found?.title).toBe('new')
   })
 })
 

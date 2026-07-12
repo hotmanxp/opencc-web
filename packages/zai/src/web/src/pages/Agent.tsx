@@ -164,6 +164,17 @@ const THINKING_ACCENT = '#722ed1'
 const THINKING_BG = 'rgba(114, 45, 209, 0.14)'
 const THINKING_PREVIEW_MAX = 80
 
+// 会话标题派生: 与 server packages/zai/src/server/routes/agent.ts:363
+// 的 deriveTitleFromPrompt 保持一致 — 取 prompt 第一行 (去首尾空白),
+// 长度截到 50 字符 + 省略号. 空文本返回空串, 调用方决定是否要 patch.
+const TITLE_MAX_LEN = 50
+function deriveLocalTitle(prompt: string): string {
+  const firstLine = prompt.trim().split(/\r?\n/, 1)[0].trim()
+  if (!firstLine) return ''
+  if (firstLine.length <= TITLE_MAX_LEN) return firstLine
+  return firstLine.slice(0, TITLE_MAX_LEN - 1) + '…'
+}
+
 function ThinkingBlock({ text }: { text: string }) {
   if (!text) return null
 
@@ -1031,6 +1042,20 @@ export default function Agent() {
       sessionId: returnedSessionId,
       activeSessionId: returnedSessionId,
     })
+
+    // ★ 乐观更新: 不等 server 走完 runtime → eventBus → SSE → 前端 applySessionEvent
+    // 这条慢路径, handleSend 拿到 sessionId 立刻本地 derive title 写进 sessions.
+    // 后端 SSE 回来后 applySessionEvent 会用同一个 title 再写一次, 结果一致.
+    // 服务端 deriveTitleFromPrompt 在 packages/zai/src/server/routes/agent.ts:363,
+    // 这里复刻相同规则保持 sidebar 显示与 transcript 落盘一致.
+    const localTitle = deriveLocalTitle(text)
+    if (localTitle) {
+      useAgentStore.getState().applySessionEvent({
+        type: 'session.renamed',
+        sessionId: returnedSessionId,
+        title: localTitle,
+      })
+    }
   }
 
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()

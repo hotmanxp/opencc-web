@@ -626,19 +626,31 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const sid = event.sessionId
     switch (event.type) {
       case 'session.created': {
-        const sessions = { ...state.sessions as Record<string, { sessionId: string; title: string; cwd: string }> }
-        sessions[sid] = { sessionId: sid, title: event.title, cwd: event.cwd }
-        return { ...state, sessions }
+        // state.sessions 实际是 Array<{ transcriptId, title?, updatedAt }>
+        // (loadSessions 从 /api/agent/sessions 拿到的就是数组, sidebar 用
+        // s.transcriptId 渲染). 老代码当 Record 处理, sessions[sid] 完全
+        // 不工作, 静默吞掉 server 来的 session.created. 改成 unshift 进数组.
+        const list = state.sessions as Array<{ transcriptId: string; title?: string; updatedAt: number }>
+        if (list.some((x) => x.transcriptId === sid)) return state
+        return {
+          ...state,
+          sessions: [{ transcriptId: sid, title: event.title, updatedAt: Date.now() }, ...list],
+        }
       }
       case 'session.deleted': {
-        const sessions = { ...state.sessions as Record<string, { sessionId: string; title: string; cwd: string }> }
-        delete sessions[sid]
-        return { ...state, sessions }
+        const list = state.sessions as Array<{ transcriptId: string; title?: string; updatedAt: number }>
+        return { ...state, sessions: list.filter((x) => x.transcriptId !== sid) }
       }
       case 'session.renamed': {
-        const existing = (state.sessions as Record<string, { sessionId: string; title: string; cwd: string }>)[sid]
-        if (!existing) return state
-        return { ...state, sessions: { ...state.sessions as Record<string, { sessionId: string; title: string; cwd: string }>, [sid]: { ...existing, title: event.title } } }
+        // 跟 session.created 同样的根因: 老代码 sessions[sid] 在 Array 上
+        // 永远 undefined, case 静默早退, server SSE 来的 session.renamed
+        // 被丢掉 — 这就是"刷新页面才生效"的根因. 改成按 transcriptId 查找.
+        const list = state.sessions as Array<{ transcriptId: string; title?: string; updatedAt: number }>
+        const idx = list.findIndex((x) => x.transcriptId === sid)
+        if (idx === -1) return state
+        const next = list.slice()
+        next[idx] = { ...list[idx], title: event.title }
+        return { ...state, sessions: next }
       }
       default:
         return state
