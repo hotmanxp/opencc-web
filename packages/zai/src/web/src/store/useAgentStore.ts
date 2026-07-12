@@ -1,6 +1,6 @@
 import { create } from 'zustand'
 import { flushSync } from 'react-dom'
-import type { ServerEvent } from '../../../../shared/events.js'
+import type { ServerEvent } from '../../../shared/events.js'
 
 // 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob, 用于把历史图片
 // 消息里的 base64 还原成浏览器可显示的 objectURL. 解析失败时返回
@@ -14,13 +14,6 @@ function dataURLtoBlob(dataUrl: string): Blob | null {
   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
   return new Blob([arr], { type: mime })
 }
-
-// Runtime 工具调用 id 计数器: 每个 runtime.tool_call 递增一次, 给
-// 没有自带 toolUseId 的 upstream runtime 事件合成一个稳定 id, 让
-// 后续 runtime.tool_result 能通过 toolUseId 与之对齐. 模块级别常量
-// 而非 store 字段, 因为它不需要被 UI 渲染或读取, 仅作为 reducer
-// 内部状态.
-let runtimeToolCounter = 0
 
 // RuntimeEvent: shape of events produced by the SSE pipeline.
 // Kept locally since sseAgent.ts is deleted; matches what loadTranscript
@@ -573,14 +566,28 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         useAgentStore.getState().upsertStreamBlock('text', base, event.delta)
         return
       }
+      case 'runtime.thinking': {
+        // 思考块流式: 复用 upsertStreamBlock('thinking', ...) — 与 text 走
+        // 独立 key, 不混淆. base type 留 'assistant.thinking' 标识.
+        const sendSeq = useAgentStore.getState().sendSeq
+        const base: AgentMessage = {
+          eventId: '',
+          sessionId: sid,
+          ts: event.ts,
+          turnIndex: event.turnIndex,
+          type: 'assistant.thinking',
+          index: sendSeq,
+        }
+        useAgentStore.getState().upsertStreamBlock('thinking', base, event.thinking)
+        return
+      }
       case 'runtime.tool_call': {
-        // runtime.tool_call schema 不带 toolUseId, 但 upsertToolCall
-        // 按 toolUseId upsert 合并 start→done/error, 必须生成稳定 id.
-        // 用 session 内顺序计数器 + ts 拼一个足够唯一的 id. 同步记录到
-        // pendingToolResults[sid], 让后续无 toolUseId 的 result 能找到
-        // 对应 start. 注意 result 实际是带 toolUseId 的, 这里匹配只是
-        // 兜底.
-        const tuId = `tu_runtime_${sid}_${++runtimeToolCounter}`
+        // server (translateRuntimeEvents) 把 upstream block.id 填进
+        // runtime.tool_call.toolUseId, 这里直接拿来当工具边界 key, 不再合成.
+        // 旧的 `tu_runtime_${sid}_${++counter}` 合成路径与 server 发出的
+        // runtime.tool_result (用 upstream block.id) 不匹配, upsert 永远
+        // 命中不到 start 条目, ToolCallBlock 停在 "调用中" 永远不变.
+        const tuId = event.toolUseId
         const startMsg: AgentMessage = {
           eventId: `tool-${tuId}`,
           sessionId: sid,
@@ -658,12 +665,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   }),
   applyPromptAsk: (event) => set((state) => {
     if (event.type !== 'prompt.ask') return state
+    // 必须初始化 status / answers / annotations: QuestionCard 拿到 pendingAsk
+    // 后, `questions.every((q) => answers[q.question])` 立刻读 answers, 缺
+    // 字段直接抛 TypeError → 组件崩溃 → 用户看到 "卡片不渲染". 旧实现
+    // 只填了 sessionId/toolUseId/questions, 隐式 undefined 把组件搞挂.
     return {
       ...state,
       pendingAsk: {
         sessionId: event.sessionId,
         toolUseId: event.toolUseId,
         questions: event.questions,
+        status: 'pending',
+        answers: {},
+        annotations: {},
       },
     }
   }),

@@ -14,6 +14,7 @@ const NAMED_EVENT_TYPES = [
   // runtime.*
   'runtime.started',
   'runtime.delta',
+  'runtime.thinking',
   'runtime.tool_call',
   'runtime.tool_result',
   'runtime.done',

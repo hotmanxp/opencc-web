@@ -90,9 +90,11 @@ async function* translateRuntimeEvents(
           // Stream the JSON fragments; the assembled input is emitted at content_block_stop
           toolInputBuffer += delta.partial_json
         } else if (delta?.type === 'thinking_delta' && typeof delta.thinking === 'string') {
-          // Model thinking isn't a separate spec event — fold into the next text delta.
-          // We can't yield a separate event here; just skip and let UI render it
-          // via transcript if it persists. Streaming thinking drops silently for now.
+          // 推独立 runtime.thinking event, 前端 applyRuntimeEvent 用
+          // upsertStreamBlock('thinking', ...) 折叠为 assistant.thinking 块.
+          // 旧实现 silently 丢弃 — 流式时看不到 thinking, 只能刷新后从
+          // transcript 看到, 用户体验割裂.
+          yield { type: 'runtime.thinking', sessionId, turnIndex, thinking: delta.thinking }
         }
         break
       }
@@ -110,6 +112,9 @@ async function* translateRuntimeEvents(
             type: 'runtime.tool_call',
             sessionId,
             turnIndex,
+            // toolUseId 必填 (见 shared/events.ts schema 注释): 客户端按它
+            // upsert, runtime.tool_result 同 id 才能命中 start 条目.
+            toolUseId: pendingToolUseId,
             toolName: pendingToolName,
             input: parsedInput,
           }
@@ -126,6 +131,7 @@ async function* translateRuntimeEvents(
           type: 'runtime.tool_call',
           sessionId,
           turnIndex,
+          toolUseId: id,
           toolName: name,
           input: (ev.input as unknown) ?? {},
         }
@@ -143,6 +149,23 @@ async function* translateRuntimeEvents(
           toolUseId: id,
           output: (ev.output as unknown) ?? '',
         }
+        break
+      }
+      case 'tool_use:ask_pending': {
+        // AskUserQuestion: zai-agent-core yield 的 ask_pending 路径, 需要转成
+        // 前端 spec 里的 prompt.ask 事件, QuestionCard 才有机会渲染. 不转就
+        // 走 default 静默丢弃 → pendingAsk 永远 null → 用户没机会答 → registry
+        // 永不 resolve → 5min HARD_TIMEOUT 兜底发 tool_use:error.
+        const askId = ((ev.id as string) ?? (ev.toolUseId as string) ?? '') as string
+        const qs = (ev.questions as unknown[]) ?? []
+        const metadata = ev.metadata as { source?: string } | undefined
+        yield {
+          type: 'prompt.ask',
+          sessionId,
+          toolUseId: askId,
+          questions: qs as any,
+          ...(metadata ? { metadata } : {}),
+        } as any
         break
       }
       case 'tool_use:error':

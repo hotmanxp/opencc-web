@@ -41,34 +41,32 @@ describe('useAgentStore.applyRuntimeEvent', () => {
     useAgentStore.getState().applyRuntimeEvent({
       type: 'runtime.tool_call',
       eventId: 'e1', ts: 1, sessionId: 's1', turnIndex: 0,
-      toolName: 'bash', input: { cmd: 'ls' },
+      toolUseId: 'toolu_abc', toolName: 'bash', input: { cmd: 'ls' },
     })
     const msgs = useAgentStore.getState().messages
     const toolMsgs = msgs.filter((m) => m.type === 'tool_use:start')
     expect(toolMsgs.length).toBe(1)
     expect(toolMsgs[0].name).toBe('bash')
     expect(toolMsgs[0].input).toEqual({ cmd: 'ls' })
-    expect(typeof toolMsgs[0].toolUseId).toBe('string')
+    // toolUseId 直接用 server 给的 id, 不再合成. 这是修复的核心契约:
+    // runtime.tool_call 与 runtime.tool_result 共用同一 id, upsert 才能命中.
+    expect(toolMsgs[0].toolUseId).toBe('toolu_abc')
   })
 
   test('runtime.tool_result upserts the matching tool_use with output', () => {
     useAgentStore.getState().applyRuntimeEvent({
       type: 'runtime.tool_call',
       eventId: 'e1', ts: 1, sessionId: 's1', turnIndex: 0,
-      toolName: 'bash', input: { cmd: 'ls' },
+      toolUseId: 'toolu_abc', toolName: 'bash', input: { cmd: 'ls' },
     })
-    const startTool = useAgentStore.getState().messages.find(
-      (m) => m.type === 'tool_use:start' && (m.toolUseId as string).startsWith('tu_runtime_s1_'),
-    )
-    expect(startTool).toBeDefined()
     useAgentStore.getState().applyRuntimeEvent({
       type: 'runtime.tool_result',
       eventId: 'e2', ts: 2, sessionId: 's1', turnIndex: 0,
-      toolUseId: startTool!.toolUseId as string,
+      toolUseId: 'toolu_abc',
       output: 'file.txt',
     })
     const finalTool = useAgentStore.getState().messages.find(
-      (m) => m.toolUseId === startTool!.toolUseId,
+      (m) => m.toolUseId === 'toolu_abc',
     )
     expect(finalTool?.type).toBe('tool_use:done')
     expect(finalTool?.output).toBe('file.txt')
@@ -148,5 +146,22 @@ describe('useAgentStore.applyPromptAsk', () => {
       questions: [{ question: 'q', header: 'h', options: [{ label: 'A' }] }],
     })
     expect(useAgentStore.getState().pendingAsk?.toolUseId).toBe('tu1')
+  })
+
+  test('initializes status/answers/annotations so QuestionCard can read them', () => {
+    // 这是修复 QuestionCard 不渲染 的回归测试. 老实现只填
+    // sessionId/toolUseId/questions, answers 是 undefined →
+    // `questions.every((q) => answers[q.question])` 抛 TypeError →
+    // 组件崩溃. 现在 applyPromptAsk 必须把 status/answers/annotations
+    // 都填上, QuestionCard 才能安全渲染.
+    useAgentStore.getState().applyPromptAsk({
+      type: 'prompt.ask',
+      eventId: 'e1', ts: 1, sessionId: 's1', toolUseId: 'tu1',
+      questions: [{ question: 'q', header: 'h', options: [{ label: 'A' }] }],
+    })
+    const ask = useAgentStore.getState().pendingAsk!
+    expect(ask.status).toBe('pending')
+    expect(ask.answers).toEqual({})
+    expect(ask.annotations).toEqual({})
   })
 })

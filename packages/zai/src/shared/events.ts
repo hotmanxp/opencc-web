@@ -11,8 +11,18 @@ const RuntimeEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('runtime.delta'),
              sessionId: z.string(), turnIndex: z.number(),
              delta: z.string() }),
+  // 思考块的流式分片. 与 runtime.delta 平行通道 — UI 把 thinking 与
+  // 文本独立折叠显示. 早期版本 thinking_delta 被 silently 丢弃, 只能从
+  // transcript 刷新后看到, 流式过程看不到 — 这里加一条独立 spec event.
+  z.object({ ...Base.shape, type: z.literal('runtime.thinking'),
+             sessionId: z.string(), turnIndex: z.number(),
+             thinking: z.string() }),
+  // runtime.tool_call 必须带 toolUseId: server 在 content_block_stop / tool_use:start
+  // 两个分支都填上游 block.id, 客户端不再合成. 这样 runtime.tool_result 用同一 id
+  // upsert 能命中 start 条目, ToolCallBlock 才能从 "调用中" 切到 "已完成".
   z.object({ ...Base.shape, type: z.literal('runtime.tool_call'),
              sessionId: z.string(), turnIndex: z.number(),
+             toolUseId: z.string(),
              toolName: z.string(), input: z.unknown() }),
   z.object({ ...Base.shape, type: z.literal('runtime.tool_result'),
              sessionId: z.string(), turnIndex: z.number(),

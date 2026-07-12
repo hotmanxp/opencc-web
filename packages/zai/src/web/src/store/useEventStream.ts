@@ -17,6 +17,7 @@ function dispatch(event: ServerEvent) {
   switch (event.type) {
     case 'runtime.started':
     case 'runtime.delta':
+    case 'runtime.thinking':
     case 'runtime.tool_call':
     case 'runtime.tool_result':
     case 'runtime.done':
