@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { flushSync } from 'react-dom'
 import type { RuntimeEvent } from '../lib/sseAgent'
 import { runAgentStream, abortAgent } from '../lib/sseAgent'
+import type { ServerEvent } from '../../../../shared/events.js'
 
 export type AgentStatus = 'idle' | 'streaming' | 'aborted' | 'error'
 
@@ -16,6 +17,9 @@ export type AskState = {
   answers: Record<string, string>
   annotations: Record<string, { notes?: string }>
 }
+
+type RuntimeDeltaMessage = { role: 'assistant'; content: string; ts: number }
+type ToolCall = { toolName: string; input: unknown; output?: unknown }
 
 interface AgentState {
   sessionId: string | null
@@ -38,6 +42,14 @@ interface AgentState {
   // 相邻两轮首个文本块拼出同一个 key `0:0:0:text`, 新一轮文本被 append 进上一轮
   // 气泡. sendSeq 提供跨轮唯一性, 根治该归并 bug.
   sendSeq: number
+
+  // SSE reducers (Task 6)
+  activeSessionId: string | null
+  turnStatus: Record<string, 'idle' | 'running' | 'aborted' | 'error'>
+  toolCalls: Record<string, Record<string, ToolCall>>
+  applyRuntimeEvent: (event: ServerEvent) => void
+  applySessionEvent: (event: ServerEvent) => void
+  applyPromptAsk: (event: ServerEvent) => void
 
   setCwd: (cwd: string) => void
   addMessage: (msg: AgentMessage) => void
@@ -73,6 +85,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   textSegmentRev: 0,
   segmentedToolUseIds: {},
   sendSeq: 0,
+
+  // SSE reducer state (Task 6)
+  activeSessionId: null,
+  turnStatus: {},
+  toolCalls: {},
 
   setCwd: (cwd: string) => set({ cwd }),
   addMessage: (msg: AgentMessage) =>
@@ -525,4 +542,92 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       set({ pendingAsk: null })
     }
   },
+
+  // SSE reducers (Task 6)
+  applyRuntimeEvent: (event) => set((state) => {
+    if (!('sessionId' in event) || typeof event.sessionId !== 'string') return state
+    const sid = event.sessionId
+    switch (event.type) {
+      case 'runtime.started':
+        return { ...state, turnStatus: { ...state.turnStatus, [sid]: 'running' } }
+      case 'runtime.delta': {
+        const existing = (state.messages as Record<string, RuntimeDeltaMessage[]>)[sid] ?? []
+        const last = existing[existing.length - 1]
+        if (last && last.role === 'assistant') {
+          const merged = [...existing.slice(0, -1), { ...last, content: last.content + event.delta }]
+          return { ...state, messages: { ...state.messages, [sid]: merged } }
+        }
+        return {
+          ...state,
+          messages: { ...state.messages, [sid]: [...existing, { role: 'assistant', content: event.delta, ts: event.ts }] },
+        }
+      }
+      case 'runtime.tool_call': {
+        const calls = state.toolCalls[sid] ?? {}
+        // runtime.tool_call 不带 toolUseId；按 toolName 顺序入栈
+        const toolUseId = `tu_${Object.keys(calls).length}_${event.ts}`
+        return {
+          ...state,
+          toolCalls: {
+            ...state.toolCalls,
+            [sid]: { ...calls, [toolUseId]: { toolName: event.toolName, input: event.input } },
+          },
+        }
+      }
+      case 'runtime.tool_result': {
+        const calls = state.toolCalls[sid] ?? {}
+        const call = calls[event.toolUseId]
+        if (!call) return state
+        return {
+          ...state,
+          toolCalls: {
+            ...state.toolCalls,
+            [sid]: { ...calls, [event.toolUseId]: { ...call, output: event.output } },
+          },
+        }
+      }
+      case 'runtime.done':
+        return { ...state, turnStatus: { ...state.turnStatus, [sid]: 'idle' } }
+      case 'runtime.aborted':
+        return { ...state, turnStatus: { ...state.turnStatus, [sid]: 'aborted' } }
+      case 'runtime.error':
+        return { ...state, turnStatus: { ...state.turnStatus, [sid]: 'error' } }
+      default:
+        return state
+    }
+  }),
+  applySessionEvent: (event) => set((state) => {
+    if (!('sessionId' in event) || typeof event.sessionId !== 'string') return state
+    const sid = event.sessionId
+    switch (event.type) {
+      case 'session.created': {
+        const sessions = { ...state.sessions as Record<string, { sessionId: string; title: string; cwd: string }> }
+        sessions[sid] = { sessionId: sid, title: event.title, cwd: event.cwd }
+        return { ...state, sessions }
+      }
+      case 'session.deleted': {
+        const sessions = { ...state.sessions as Record<string, { sessionId: string; title: string; cwd: string }> }
+        delete sessions[sid]
+        return { ...state, sessions }
+      }
+      case 'session.renamed': {
+        const existing = (state.sessions as Record<string, { sessionId: string; title: string; cwd: string }>)[sid]
+        if (!existing) return state
+        return { ...state, sessions: { ...state.sessions as Record<string, { sessionId: string; title: string; cwd: string }>, [sid]: { ...existing, title: event.title } } }
+      }
+      default:
+        return state
+    }
+  }),
+  applyPromptAsk: (event) => set((state) => {
+    if (event.type !== 'prompt.ask') return state
+    return {
+      ...state,
+      pendingAsk: {
+        sessionId: event.sessionId,
+        toolUseId: event.toolUseId,
+        questions: event.questions,
+      },
+    }
+  }),
 }))
