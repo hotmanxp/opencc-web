@@ -30,7 +30,7 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
-import { useAgentStore, type AgentMessage } from '../store/useAgentStore'
+import { useAgentStore, type AgentMessage, type AgentStatus } from '../store/useAgentStore'
 import { api } from '../lib/api'
 import QuestionCard from '../components/QuestionCard.jsx'
 import DiffBlock from '../components/DiffBlock.js'
@@ -813,6 +813,12 @@ export default function Agent() {
   // 把它快照到 userMsg.attachments 后, 就清理本地 (避免双重持有 + revoke objectURL).
   const [attachments, setAttachments] = useState<PendingAttachment[]>([])
   const fileInputRef = useRef<HTMLInputElement>(null)
+  // 输入框 ref — handleSend 会把 TextArea 切到 disabled (status==='streaming'),
+  // disabled 状态浏览器会自动 blur. 流式结束后即使重新 enabled, 焦点不会自动
+  // 回到输入框, 用户得手动再点一次. 在 status 从 streaming 切回非 streaming
+  // 且没有 pendingAsk 时主动 refocus, 修这个体验问题.
+  const textareaRef = useRef<HTMLTextAreaElement>(null)
+  const prevStatusRef = useRef<AgentStatus>('idle')
 
   // 组件 unmount 时清理 objectURL, 防止内存泄漏. 注意只在卸载时跑一次,
   // 不订阅 attachments 变更 — 否则用户每次加/删附件都会 revoke 老的 url,
@@ -879,6 +885,18 @@ export default function Agent() {
     setSpinnerIdx(0)
     return undefined
   }, [status])
+
+  // 流式期间 TextArea 被 disabled → 浏览器自动 blur. 即使 status 切回非
+  // streaming, 焦点不会自动回来, 用户得手动再点输入框. 在 status 从 streaming
+  // 切回 idle/aborted/error, 且没有 pendingAsk 抢占焦点时主动 refocus.
+  // pendingAsk 期间用户应该在答 QuestionCard, 不应把焦点抢回输入框.
+  useEffect(() => {
+    const prev = prevStatusRef.current
+    prevStatusRef.current = status
+    if (prev === 'streaming' && status !== 'streaming' && !pendingAsk) {
+      textareaRef.current?.focus()
+    }
+  }, [status, pendingAsk])
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -1370,6 +1388,7 @@ export default function Agent() {
           <AttachmentStrip attachments={attachments} onRemove={removeAttachment} />
           <div style={{ display: 'flex', alignItems: 'stretch' }}>
             <TextArea
+              ref={textareaRef}
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
