@@ -1018,12 +1018,17 @@ export default function Agent() {
     attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl))
     setAttachments([])
 
-    const { sessionId } = await api.post<{ sessionId: string }>('/agent/prompt', {
+    const { sessionId: returnedSessionId } = await api.post<{ sessionId: string }>('/agent/prompt', {
       prompt: text || undefined,
       contentBlocks: blocks.length > 0 ? blocks : undefined,
       cwd: cwd || undefined,
+      // ★ 关键: 把当前 activeSessionId 传给 server, 让 server 走
+      // resumeFromTranscriptId 续上同一 session, 而不是新建一个.
+      // 不传的话 server 每次都 newSessionId(), 刷新后用户看到的
+      // 是最新的 image-only session, 之前的会话在 sidebar 但不自动选中.
+      sessionId: sessionId || undefined,
     })
-    useAgentStore.setState({ activeSessionId: sessionId })
+    useAgentStore.setState({ activeSessionId: returnedSessionId })
   }
 
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()
