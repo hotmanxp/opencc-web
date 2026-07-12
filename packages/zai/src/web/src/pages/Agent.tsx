@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect } from 'react'
+import { useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import {
   Input,
   Button,
@@ -773,6 +773,13 @@ export default function Agent() {
     useAgentStore()
   const [input, setInput] = useState('')
   const { token } = theme.useToken()
+  // Skills autocomplete: 输入 / 时弹出
+  const [skills, setSkills] = useState<Array<{ name: string; description: string }>>([])
+  const [showSkillMenu, setShowSkillMenu] = useState(false)
+  const [skillMenuIdx, setSkillMenuIdx] = useState(0)
+  const [skillFilter, setSkillFilter] = useState('')
+  const skillMenuRef = useRef<HTMLDivElement>(null)
+  const textAreaRef = useRef<any>(null)
   const [showAllSessions, setShowAllSessions] = useState(false)
   // 会话列表默认展示条数: 按侧栏可视高度估算, 每项约 50px (padding + 两行文字 + gap).
   const sessionListRef = useRef<HTMLDivElement>(null)
@@ -850,6 +857,86 @@ export default function Agent() {
     loadSessions()
   }, [])
 
+  // 加载 skills 列表（页面初始化时请求一次）
+  useEffect(() => {
+    fetch('/api/agent/skills')
+      .then((res) => res.json())
+      .then((data) => {
+        if (data.skills) setSkills(data.skills)
+      })
+      .catch(() => {})
+  }, [])
+
+  // 模糊匹配: 检查 query 的字符是否按顺序出现在 target 中（可不连续）
+  const fuzzyMatch = (query: string, target: string): number => {
+    let qi = 0
+    let score = 0
+    let lastMatchIdx = -1
+    const t = target.toLowerCase()
+    for (let ti = 0; ti < t.length && qi < query.length; ti++) {
+      if (t[ti] === query[qi]) {
+        // 连续匹配得分更高，且越靠前权重越大
+        const gap = lastMatchIdx >= 0 ? ti - lastMatchIdx - 1 : ti
+        score += gap === 0 ? 10 : Math.max(1, 10 - gap)
+        lastMatchIdx = ti
+        qi++
+      }
+    }
+    // 全部字符匹配成功才返回分数，否则返回 0
+    return qi === query.length ? score : 0
+  }
+
+  // 当输入以 / 开头时，计算过滤后的 skills（支持模糊匹配）
+  const filteredSkills = useMemo(() => {
+    if (!input.startsWith('/')) return []
+    const q = input.slice(1).toLowerCase()
+    if (!q) return skills
+    const scored = skills
+      .map((s) => {
+        const nameScore = fuzzyMatch(q, s.name)
+        const descScore = fuzzyMatch(q, s.description)
+        // name 匹配优先：只有 name 命中才算有效结果
+        if (nameScore === 0) return { skill: s, score: 0 }
+        // description 匹配只影响排序权重（name 匹配但 desc 也匹配的排前面）
+        const bonus = descScore > 0 ? descScore * 0.3 : 0
+        return { skill: s, score: nameScore + bonus }
+      })
+      .filter((item) => item.score > 0)
+      .sort((a, b) => b.score - a.score)
+    return scored.map((item) => item.skill)
+  }, [input, skills])
+
+  // 当过滤结果变化时，重置选中项
+  useEffect(() => {
+    setSkillMenuIdx(0)
+    setShowSkillMenu(filteredSkills.length > 0)
+  }, [filteredSkills.length])
+
+  // 点击外部关闭 skill 菜单
+  useEffect(() => {
+    if (!showSkillMenu) return
+    const handler = (e: MouseEvent) => {
+      if (skillMenuRef.current && !skillMenuRef.current.contains(e.target as Node)) {
+        setShowSkillMenu(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [showSkillMenu])
+
+  const selectSkill = useCallback(
+    (skillName: string) => {
+      setInput('/' + skillName + ' ')
+      setShowSkillMenu(false)
+      // 聚焦回输入框
+      setTimeout(() => {
+        const el = document.querySelector('.zai-agent-textarea') as HTMLTextAreaElement | null
+        el?.focus()
+      }, 0)
+    },
+    [],
+  )
+
   const handleSend = async () => {
     const trimmed = input.trim()
     if (!trimmed || status === 'streaming') return
@@ -860,6 +947,29 @@ export default function Agent() {
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // Skills 菜单键盘导航
+    if (showSkillMenu && filteredSkills.length > 0) {
+      if (e.key === 'ArrowDown') {
+        e.preventDefault()
+        setSkillMenuIdx((i) => (i + 1) % filteredSkills.length)
+        return
+      }
+      if (e.key === 'ArrowUp') {
+        e.preventDefault()
+        setSkillMenuIdx((i) => (i - 1 + filteredSkills.length) % filteredSkills.length)
+        return
+      }
+      if (e.key === 'Tab' || (e.key === 'Enter' && !e.shiftKey)) {
+        e.preventDefault()
+        selectSkill(filteredSkills[skillMenuIdx]!.name)
+        return
+      }
+      if (e.key === 'Escape') {
+        e.preventDefault()
+        setShowSkillMenu(false)
+        return
+      }
+    }
     if (e.key === 'Enter' && !e.shiftKey) {
       e.preventDefault()
       handleSend()
@@ -1146,16 +1256,90 @@ export default function Agent() {
           )}
         </div>
 
-        <div style={{ display: 'flex', alignItems: 'stretch' }}>
+        <div style={{ display: 'flex', alignItems: 'stretch', position: 'relative' }}>
           <TextArea
+            ref={textAreaRef}
+            className="zai-agent-textarea"
             value={input}
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
-            placeholder="输入消息，按 Enter 发送，Shift+Enter 换行"
+            placeholder="输入消息，按 Enter 发送，Shift+Enter 换行，输入 / 选择技能"
             rows={3}
             disabled={status === 'streaming' || pendingAsk?.status === 'pending'}
             style={{ resize: 'none', flex: 1 }}
           />
+          {/* Skills 自动补全下拉菜单 */}
+          {showSkillMenu && filteredSkills.length > 0 && (
+            <div
+              ref={skillMenuRef}
+              style={{
+                position: 'absolute',
+                bottom: '100%',
+                left: 0,
+                right: 0,
+                marginBottom: 4,
+                background: '#1a1a2e',
+                border: '1px solid rgba(255,255,255,0.15)',
+                borderRadius: 8,
+                maxHeight: 240,
+                overflowY: 'auto',
+                zIndex: 1000,
+                boxShadow: '0 4px 24px rgba(0,0,0,0.5)',
+              }}
+            >
+              {filteredSkills.map((skill, idx) => (
+                <div
+                  key={skill.name}
+                  onMouseDown={(e) => {
+                    e.preventDefault()
+                    selectSkill(skill.name)
+                  }}
+                  style={{
+                    padding: '8px 12px',
+                    cursor: 'pointer',
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 10,
+                    background:
+                      idx === skillMenuIdx
+                        ? 'rgba(255,102,0,0.15)'
+                        : 'transparent',
+                    borderLeft:
+                      idx === skillMenuIdx
+                        ? '3px solid #ff6600'
+                        : '3px solid transparent',
+                    transition: 'background 0.1s',
+                  }}
+                  onMouseEnter={() => setSkillMenuIdx(idx)}
+                >
+                  <span
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: '#a78bfa',
+                      fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                      whiteSpace: 'nowrap',
+                    }}
+                  >
+                    /{skill.name}
+                  </span>
+                  {skill.description && (
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: 'rgba(255,255,255,0.45)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {skill.description}
+                    </span>
+                  )}
+                </div>
+              ))}
+            </div>
+          )}
         </div>
 
         {/* 输入框下方的模式栏: 仿 OpenCC 底栏 "▶▶ bypass on (shift+tab ↹) · master · zai · ..." */}

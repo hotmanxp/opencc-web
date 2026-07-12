@@ -1,7 +1,7 @@
 import { Router, type IRouter, type Request, type Response } from 'express'
 import { z } from 'zod'
 import { createSseStream } from './stream.js'
-import { abortAgentSession, getCurrentSessionId, getAskRegistry, getRuntime, getTranscriptStore, setCurrentSessionId } from '../services/agentRuntime.js'
+import { abortAgentSession, getCurrentSessionId, getAskRegistry, getRuntime, getTranscriptStore, setCurrentSessionId, listSkills } from '../services/agentRuntime.js'
 import { loadAgentsMd, buildAgentsMdSystemPrompt } from '@zn-ai/zai-agent-core'
 
 const router: IRouter = Router()
@@ -126,6 +126,16 @@ router.post('/agent/abort', async (_req: Request, res: Response) => {
   const sessionId = getCurrentSessionId()
   await abortAgentSession('user_abort')
   res.json({ ok: true, sessionId })
+})
+
+// GET /api/agent/skills — 返回可用 skills 列表，供前端 / 触发 autocomplete
+router.get('/agent/skills', async (_req: Request, res: Response) => {
+  try {
+    const skills = await listSkills()
+    res.json({ skills })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
 })
 
 const TITLE_MAX_LEN = 50
