@@ -795,7 +795,7 @@ function MessageBubble({ msg, streaming }: { msg: AgentMessage; streaming: boole
 }
 
 export default function Agent() {
-  const { messages, status, cwd, sessions, sessionId, stop, clearMessages, loadSessions, setCurrentSession, loadTranscript, createNewSession, deleteSession, pendingAsk, setAskAnswer, setAskNotes, submitAsk, rejectAsk } =
+  const { messages, status, cwd, sessions, sessionId, activeSessionId, stop, clearMessages, loadSessions, setCurrentSession, loadTranscript, createNewSession, deleteSession, pendingAsk, setAskAnswer, setAskNotes, submitAsk, rejectAsk } =
     useAgentStore()
   const [input, setInput] = useState('')
   // 图片附件 local state. 仅在当前 Agent 实例存活期间有效 — 一旦 handleSend
@@ -1018,17 +1018,19 @@ export default function Agent() {
     attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl))
     setAttachments([])
 
+    // store 同时持有 sessionId (显示用, 由 loadSessions/setCurrentSession 设置)
+    // 和 activeSessionId (SSE reducer 在 runtime.started 时设置).
+    // 两者都需要更新, 否则下一次 handleSend 传给 server 的 sessionId 仍为 null.
     const { sessionId: returnedSessionId } = await api.post<{ sessionId: string }>('/agent/prompt', {
       prompt: text || undefined,
       contentBlocks: blocks.length > 0 ? blocks : undefined,
       cwd: cwd || undefined,
-      // ★ 关键: 把当前 activeSessionId 传给 server, 让 server 走
-      // resumeFromTranscriptId 续上同一 session, 而不是新建一个.
-      // 不传的话 server 每次都 newSessionId(), 刷新后用户看到的
-      // 是最新的 image-only session, 之前的会话在 sidebar 但不自动选中.
-      sessionId: sessionId || undefined,
+      sessionId: sessionId || activeSessionId || undefined,
     })
-    useAgentStore.setState({ activeSessionId: returnedSessionId })
+    useAgentStore.setState({
+      sessionId: returnedSessionId,
+      activeSessionId: returnedSessionId,
+    })
   }
 
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()
