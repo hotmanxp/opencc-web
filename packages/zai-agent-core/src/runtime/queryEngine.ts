@@ -96,7 +96,9 @@ export async function* queryEngine(
       const raw = (tm.raw ?? {}) as Record<string, unknown>
       let content: unknown
       if (role === 'user') {
-        content = typeof raw.content === 'string' ? raw.content : ''
+        if (typeof raw.content === 'string') content = raw.content
+        else if (Array.isArray(raw.content)) content = raw.content
+        else content = ''
       } else {
         const text = typeof raw.text === 'string' ? raw.text : ''
         const blocks: Array<{ type: 'text'; text: string }> = text ? [{ type: 'text', text }] : []
