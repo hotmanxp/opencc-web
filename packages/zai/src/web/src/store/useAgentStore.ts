@@ -313,15 +313,35 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0 })
   },
 
-  createNewSession: () => {
+  createNewSession: async () => {
+    // 立即清空当前 UI 态, 让用户感觉"切到了新会话"
     set({
       sessionId: null,
+      activeSessionId: null,
       messages: [],
       status: 'idle',
       textSegmentRev: 0,
       segmentedToolUseIds: {},
       sendSeq: 0,
     })
+    // 同步在 server 端建一条空 transcript, 让 sidebar 立即多一条
+    // '新会话' 占位条目 (而不是等第一条消息发出去才出现).
+    try {
+      const token = localStorage.getItem('zai-token') || ''
+      const cwd = get().cwd || ''
+      const res = await fetch('/api/agent/sessions', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
+        body: JSON.stringify({ cwd }),
+      })
+      if (!res.ok) return
+      const data = (await res.json()) as { sessionId: string }
+      // 把新 sessionId 设上 + 刷新 sidebar 列表
+      set({ sessionId: data.sessionId })
+      await get().loadSessions()
+    } catch {
+      // 静默失败: 用户还能继续在本地空态发消息, server 端会按旧路径新建
+    }
   },
 
   deleteSession: async (sessionId: string) => {

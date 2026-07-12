@@ -316,6 +316,20 @@ router.get('/agent/sessions', async (req: Request, res: Response) => {
   }
 })
 
+// POST /api/agent/sessions — 立即建一条空 transcript, 返回 sessionId.
+// 用于"新建会话"按钮: 用户点一下 sidebar 的 +, 立即在 sidebar 看到一条
+// '新会话' 占位条目, 而不是等到第一条消息发出去才出现.
+router.post('/agent/sessions', async (req: Request, res: Response) => {
+  try {
+    const cwd = (req.body && typeof req.body.cwd === 'string') ? req.body.cwd : process.cwd()
+    const store = getTranscriptStore()
+    const sessionId = await store.create({ cwd, model: 'unknown' })
+    res.json({ sessionId })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
 // GET /api/agent/sessions/:id — 读取指定 session 的消息
 router.get('/agent/sessions/:id', async (req: Request, res: Response) => {
   try {
