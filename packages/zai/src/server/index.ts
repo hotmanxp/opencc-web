@@ -36,7 +36,12 @@ export function createApp(_opts: AppOptions): express.Express {
   // and the UI shows a "click refresh" hint.
 
   const app = express();
-  app.use(express.json());
+  // 显式把 body 限额抬到 20mb: 默认 100kb 在粘贴/拖拽图片时立刻
+  // PayloadTooLargeError — 一张 200KB 的 PNG → ~270KB base64, 加上 JSON
+  // envelope 与 10 张图 (MAX_ATTACHMENTS_PER_TURN) 直接爆掉. 20mb 留足
+  // 10 × ~1.8MB 单图的余量, 也覆盖未来更大附件. 仅 /api/* 在公网仍受
+  // Anthropic / 上游 base64 限额约束, 这里只是放行到 server.
+  app.use(express.json({ limit: '20mb' }));
 
   app.use('/api', eventRouter);
   app.use('/api', healthRouter);
