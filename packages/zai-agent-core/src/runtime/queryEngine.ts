@@ -169,8 +169,25 @@ export async function* queryEngine(
     let assistantText = ''
     let thinkingText = ''
     const toolUseBlocks: Array<{ id: string; name: string; input: unknown }> = []
+    if (process.env.ZAI_DEBUG === '1') console.error('[zai.qe] enter stream loop', { sessionId, turn })
+    let sawMessageStop = false
     for await (const ev of modelStream) {
       if (abortController.signal.aborted) break
+      // ★ message_stop 是协议终止标志 (Anthropic SDK spec). minimax proxy
+      // 走完 message_stop 后 keep-alive 不关 socket, SDK for-await 永远等 EOF.
+      // 必须主动跳出, 否则 queryEngine 永远卡在 for-await modelStream,
+      // appendAssistantMessage 永远走不到 — transcript 永远只剩 user message.
+      // 注意: 不再 yield* 这个 event (因为下游 translateRuntimeEvents 会基于
+      // message_stop 推 runtime.done, 前端 status:idle 已经亮了). 直接 break.
+      if ((ev as any).type === 'message_stop') {
+        sawMessageStop = true
+        if (process.env.ZAI_DEBUG === '1') {
+          console.error('[zai.qe] break on message_stop', {
+            sessionId, turn, assistantTextLen: assistantText.length,
+          })
+        }
+        break
+      }
       yield* wrapWithZaiMeta((async function* () { yield ev } as () => AsyncGenerator<any>)(), { sessionId, sessionStartTs })
       if ((ev as any).type === 'content_block_delta' && (ev as any).delta?.type === 'text_delta') {
         assistantText += (ev as any).delta.text
@@ -196,6 +213,10 @@ export async function* queryEngine(
         try { b.input = JSON.parse(raw) } catch { b.input = {} }
       }
     }
+    if (process.env.ZAI_DEBUG === '1') console.error('[zai.qe] stream done', {
+      sessionId, turn, assistantTextLen: assistantText.length, tools: toolUseBlocks.length,
+      viaMessageStop: sawMessageStop,
+    })
 
     if (toolUseBlocks.length > 0) {
       messages.push({ role: 'assistant', content: [
@@ -395,6 +416,14 @@ async function appendAssistantMessage(
   payload: { text: string; thinking?: string; toolUses: Array<{ id: string; name: string; input: unknown }> },
   turnIndex: number,
 ): Promise<void> {
+  if (process.env.ZAI_DEBUG === '1') {
+    console.error('[zai.appendAssistant] enter', {
+      sessionId,
+      turnIndex,
+      textLen: payload.text.length,
+      tools: payload.toolUses.length,
+    })
+  }
   try {
     await store.append(sessionId, {
       uuid: randomUUID(),
@@ -408,5 +437,17 @@ async function appendAssistantMessage(
       },
       runtime: { turnIndex },
     })
-  } catch { /* transcript 写入失败不阻断对话 */ }
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.appendAssistant] wrote ok', { sessionId, turnIndex })
+    }
+  } catch (err) {
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.appendAssistant] FAILED', {
+        sessionId,
+        turnIndex,
+        err: (err as Error).message,
+      })
+    }
+    /* transcript 写入失败不阻断对话 */
+  }
 }

@@ -60,6 +60,11 @@ async function* translateRuntimeEvents(
   let toolInputBuffer = ''
   let pendingToolUseId: string | null = null
   let pendingToolName: string | null = null
+  // 跟踪是否见过 message_stop. queryEngine 在 message_stop 时会 break
+  // for-await modelStream 提前 return (避免 anthropic SDK 永远等 EOF), 这种
+  // 情况下 message_stop event 可能不被 forward 给这里, 此时最后一次 yield
+  // runtime.done 兜底 — 否则前端 status:'idle' 永远不亮.
+  let sawMessageStop = false
 
   for await (const ev of events) {
     const t = ev.type as string | undefined
@@ -158,6 +163,7 @@ async function* translateRuntimeEvents(
         break
       }
       case 'message_stop':
+        sawMessageStop = true
         yield { type: 'runtime.done', sessionId, turnIndex }
         turnIndex++
         // Reset tool accumulator between turns
@@ -169,6 +175,13 @@ async function* translateRuntimeEvents(
       default:
         break
     }
+  }
+  // queryEngine 在 message_stop 时主动 break for-await modelStream, 模型 stream
+  // 永远不 close (minimax proxy keep-alive). 这种情况下 message_stop event
+  // 不会被 forward 给我们 — for-await 上面没见到 message_stop, 兜底 yield
+  // runtime.done 让前端 status:'idle' 能点亮.
+  if (!sawMessageStop) {
+    yield { type: 'runtime.done', sessionId, turnIndex }
   }
 }
 
