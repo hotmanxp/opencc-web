@@ -190,14 +190,18 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
 
   req.on('close', () => {
     if (process.env.ZAI_DEBUG === '1') {
-      console.error('[zai.agent.prompt] req.close', {
+      console.error('[zai.agent.prompt] req.close (no abort — fire-and-forget)', {
         sessionId,
         alreadyAborted: abortController.signal.aborted,
       })
     }
-    if (!abortController.signal.aborted) {
-      abortController.abort('client_disconnect')
-    }
+    // ★ 不要 abortController.abort: fire-and-forget 设计下, /agent/prompt
+    // 第 205 行 res.json({ sessionId }) 立即写完响应, HTTP/1.1 默认会 close
+    // res, client 关 body 是正常 lifecycle. abort 会让 queryEngine 144 行
+    // 立即 yield runtime.aborted 提前 return, 永远走不到
+    // appendAssistantMessage — LLM 回复写不进 transcript, 刷新页面看不到.
+    // 真正兜底是上面的 HARD_TIMEOUT (5min).
+    // 但 askRegistry 仍要 abort — client 关掉页面时正在 ask 的 tool 必须释放.
     getAskRegistry().abortAll('client_disconnect')
   })
 
@@ -252,17 +256,33 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
         sessionId,
       )
 
-      let titlePatched = Boolean(existingSessionId)
+      // 用 transcript.meta.title 判断"是否需要写入标题":
+      // - 文件不存在 / meta.title 为空 → 首次消息, 应当写入
+      // - meta.title 已有值 → 续传, 不覆盖
+      // 不能用 existingSessionId 判断: commit 0f080e7 把"新建会话"挪到
+      // POST /api/agent/sessions, frontend 每次都带 sessionId, 这里
+      // existingSessionId 永远 truthy, 老逻辑会把所有"首次消息"误判成"续传".
+      let titlePatched = false
+      try {
+        const existing = await getTranscriptStore().read(sessionId)
+        if (existing.meta.title) titlePatched = true
+      } catch {
+        // 文件不存在 (新会话尚无 transcript) — title 未设, 首次消息触发 patch
+      }
+
       for await (const event of translated) {
         // runtime.* 事件均带 sessionId, 在这里直接 narrow 到字符串即可.
         // 用 event.type 同时锁定语义方向, 避免分布式联合中其它变体
         // (job.* / prompt.ask / server.*) 没有 sessionId 字段导致 TS2339.
+        // translateRuntimeEvents 已经把所有事件绑定到入参 sessionId,
+        // event.sessionId === sessionId 恒成立, 老逻辑里的 `!== sessionId`
+        // 判断在新设计下永远 false, 是 dead code — 直接拿掉.
         if (
           (event.type === 'runtime.started' || event.type === 'runtime.delta' ||
            event.type === 'runtime.tool_call' || event.type === 'runtime.tool_result' ||
            event.type === 'runtime.done' || event.type === 'runtime.aborted' ||
            event.type === 'runtime.error') &&
-          typeof event.sessionId === 'string' && event.sessionId !== sessionId
+          typeof event.sessionId === 'string'
         ) {
           setCurrentSessionId(event.sessionId)
           if (!titlePatched) {
@@ -270,6 +290,15 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
             try {
               const title = deriveTitleFromPrompt(text)
               await getTranscriptStore().patch(event.sessionId, { title })
+              // ★ 通知前端: sidebar 的 sessions 列表要立刻把这一条的 title
+              // 从"新会话"换成新标题. 前端 subscribeServerEvents 注册了
+              // session.renamed listener, 收到后通过 applySessionEvent
+              // 更新 sessions map.
+              eventBus.emit({
+                type: 'session.renamed',
+                sessionId: event.sessionId,
+                title,
+              } as any)
             } catch {
               /* title 失败不阻断 */
             }
@@ -306,7 +335,7 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
 })
 
 // GET /api/agent/sessions — 列出所有 session，最新的在前
-router.get('/agent/sessions', async (req: Request, res: Response) => {
+router.get('/agent/sessions', async (_req: Request, res: Response) => {
   try {
     const store = getTranscriptStore()
     const sessions = await store.list()
