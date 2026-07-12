@@ -1,5 +1,6 @@
 import express from 'express';
 import type { AppOptions } from './types.js';
+import eventRouter from './routes/event.js';
 import healthRouter from './routes/health.js';
 import systemRouter from './routes/system.js';
 import cliRouter from './routes/cli.js';
@@ -37,6 +38,7 @@ export function createApp(_opts: AppOptions): express.Express {
   const app = express();
   app.use(express.json());
 
+  app.use('/api', eventRouter);
   app.use('/api', healthRouter);
   app.use('/api', systemRouter);
   app.use('/api', cliRouter);
