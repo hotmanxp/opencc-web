@@ -6,12 +6,19 @@ const CAPACITY = 256
 let counter = 0
 const nextId = () => `evt_${Date.now().toString(36)}_${(++counter).toString(36)}`
 
+// Indexed-mapping input type: distributes ServerEvent variants by `type` discriminator
+// so inline object literals narrow correctly without excess property checks rejecting
+// variant-specific fields. eventId/ts remain optional (filled in by emit).
+export type ServerEventInput = {
+  [K in ServerEvent as K['type']]: Omit<K, 'eventId' | 'ts'> & { eventId?: string; ts?: number }
+}[ServerEvent['type']]
+
 export class ServerEventBus {
   private subs = new Set<Subscriber>()
   private history: ServerEvent[] = []
 
-  emit(event: Omit<ServerEvent, 'eventId' | 'ts'> & { eventId?: string; ts?: number }) {
-    const full = {
+  emit(event: ServerEventInput) {
+    const full: ServerEvent = {
       ...event,
       eventId: event.eventId ?? nextId(),
       ts: event.ts ?? Date.now(),

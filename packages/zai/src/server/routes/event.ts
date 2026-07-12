@@ -14,14 +14,14 @@ router.get('/event', (req: Request, res: Response) => {
   res.setHeader('X-Accel-Buffering', 'no')
   res.flushHeaders()
 
-  // 1. 立即发 server.connected
+  // 1. 注册 subscriber（必须在 emit 前注册，否则 emit 时没人接收）
+  const unsubscribe = eventBus.subscribe((event) => writeSse(res, event))
+
+  // 2. 立即发 server.connected
   eventBus.emit({ type: 'server.connected', sessionId: null })
 
-  // 2. 重连补发
+  // 3. 重连补发
   for (const ev of eventBus.getHistoryAfter(lastEventId)) writeSse(res, ev)
-
-  // 3. 注册为新 subscriber
-  const unsubscribe = eventBus.subscribe((event) => writeSse(res, event))
 
   // 4. 心跳
   const heartbeat = setInterval(() => {
