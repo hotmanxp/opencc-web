@@ -36,6 +36,7 @@ import QuestionCard from '../components/QuestionCard.jsx'
 import DiffBlock from '../components/DiffBlock.js'
 import { linkifyText } from '../lib/linkify.js'
 import { AttachmentStrip } from '../components/AttachmentStrip'
+import ConversationInfoButton from '../components/ConversationInfoButton'
 import { readImageAsBase64, ImageReadError } from '../lib/imageReader'
 
 const { TextArea } = Input
@@ -1371,6 +1372,7 @@ export default function Agent() {
             disabled={status === 'streaming' || pendingAsk?.status === 'pending'}
             style={{ color: 'rgba(255,255,255,0.45)' }}
           />
+          <ConversationInfoButton />
           <input
             ref={fileInputRef}
             type="file"
