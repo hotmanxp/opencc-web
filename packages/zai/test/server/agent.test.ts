@@ -10,15 +10,17 @@ let lastRunOpts: any = null
 // - patchCalls 记录所有 patch 调用, 断言 title 是否被写入
 let mockTranscriptHasTitle = false
 let patchCalls: Array<{ id: string; patch: { title?: string; tags?: string[] } }> = []
+// runtimeToolEvents: 让 tool_use:error/invalid/denied 翻译测试可注入事件序列.
+let runtimeToolEvents: Array<Record<string, unknown>> = [
+  { type: 'message_start' },
+  { type: 'message_stop' },
+]
 vi.mock('../../src/server/services/agentRuntime.js', () => ({
   getRuntime: () => ({
     run: (opts: any) => {
       lastRunOpts = opts
-      // 输出 message_start / message_stop, 让 translateRuntimeEvents 生成
-      // runtime.started / runtime.done, 触发 route 的 title patch 触发条件.
       return (async function* () {
-        yield { type: 'message_start' }
-        yield { type: 'message_stop' }
+        for (const ev of runtimeToolEvents) yield ev
       })()
     },
     abort: async () => {},
@@ -199,6 +201,106 @@ describe('POST /api/agent/prompt title patch', () => {
         // 续传场景不应发 session.renamed, 否则会覆盖用户已起的标题.
         const renamed = busEvents.filter((e) => e.type === 'session.renamed')
         expect(renamed.length).toBe(0)
+      } finally {
+        close()
+      }
+    } finally {
+      off()
+    }
+  })
+})
+
+// 回归: server 把 tool_use:error/invalid/denied 翻译成 runtime.error 时
+// 丢失 toolUseId → 前端无法 upsert 对应工具, ToolCallBlock 卡在"调用中".
+// 修复后 runtime.error 必须携带 toolUseId.
+describe('translateRuntimeEvents — tool_use:error 携带 toolUseId', () => {
+  it('tool_use:error 翻译成 runtime.error 时携带 toolUseId', async () => {
+    runtimeToolEvents = [
+      { type: 'message_start' },
+      // Anthropic 风格的 tool_use 块 (content_block_start → stop 完成)
+      {
+        type: 'content_block_start',
+        content_block: { type: 'tool_use', id: 'tu_err_1', name: 'Bash' },
+      },
+      {
+        type: 'content_block_stop',
+      },
+      // runtime 工具执行抛错
+      {
+        type: 'tool_use:error',
+        toolUseId: 'tu_err_1',
+        error: 'spawn ENOENT',
+      },
+      { type: 'message_stop' },
+    ]
+    const { eventBus } = await import('../../src/server/services/eventBus.js')
+    const busEvents: any[] = []
+    const off = eventBus.subscribe((e) => busEvents.push(e))
+    try {
+      const { url, close } = await startApp()
+      try {
+        const res = await fetch(`${url}/api/agent/prompt`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: 'run shell',
+            sessionId: 'sess-err-translate-1',
+          }),
+        })
+        expect(res.status).toBe(200)
+        const reader = res.body!.getReader()
+        while (true) {
+          const { done } = await reader.read()
+          if (done) break
+        }
+        await new Promise((r) => setTimeout(r, 50))
+        const errEvent = busEvents.find(
+          (e) => e.type === 'runtime.error' && e.toolUseId === 'tu_err_1',
+        )
+        expect(errEvent).toBeDefined()
+        expect(errEvent.error.category).toBe('tool')
+        expect(errEvent.error.message).toBe('spawn ENOENT')
+      } finally {
+        close()
+      }
+    } finally {
+      off()
+    }
+  })
+
+  it('tool_use:invalid / denied 同样携带 toolUseId', async () => {
+    runtimeToolEvents = [
+      { type: 'message_start' },
+      // invalid 路径
+      { type: 'tool_use:invalid', toolUseId: 'tu_inv_1', error: 'invalid input: bad cmd' },
+      { type: 'message_stop' },
+    ]
+    const { eventBus } = await import('../../src/server/services/eventBus.js')
+    const busEvents: any[] = []
+    const off = eventBus.subscribe((e) => busEvents.push(e))
+    try {
+      const { url, close } = await startApp()
+      try {
+        const res = await fetch(`${url}/api/agent/prompt`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: 'inv',
+            sessionId: 'sess-err-translate-2',
+          }),
+        })
+        expect(res.status).toBe(200)
+        const reader = res.body!.getReader()
+        while (true) {
+          const { done } = await reader.read()
+          if (done) break
+        }
+        await new Promise((r) => setTimeout(r, 50))
+        const invalid = busEvents.find(
+          (e) => e.type === 'runtime.error' && e.toolUseId === 'tu_inv_1',
+        )
+        expect(invalid).toBeDefined()
+        expect(invalid.error.message).toContain('invalid input')
       } finally {
         close()
       }

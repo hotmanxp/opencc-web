@@ -177,12 +177,22 @@ async function* translateRuntimeEvents(
           (ev.error as string) ??
           t,
         )
-        yield {
+        // 携带 toolUseId: tool_use:error/invalid/denied 都对应一个具体的
+        // tool_use block (block.id). 前端收到 runtime.error + toolUseId 时
+        // 应把对应 tool_use:start upsert 成 tool_use:error, ToolCallBlock
+        // 才会从"调用中"切到"错误". 老代码丢失 toolUseId, 工具卡在
+        // "调用中" 永远不变, AI 已经切换策略后 UI 还显示"正在调用".
+        const toolUseId = ((ev.id as string) ?? (ev.toolUseId as string) ?? '') as string
+        const errEvent: ServerEventInput = {
           type: 'runtime.error',
           sessionId,
           turnIndex,
           error: { category: 'tool', message, recoverable: false },
         }
+        if (toolUseId) {
+          ;(errEvent as { toolUseId?: string }).toolUseId = toolUseId
+        }
+        yield errEvent
         break
       }
       case 'message_stop':

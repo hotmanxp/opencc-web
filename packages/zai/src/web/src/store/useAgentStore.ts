@@ -168,13 +168,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const incomingInput =
         (msg.input as Record<string, unknown>) ||
         (block?.type === 'tool_use' ? block.input : undefined)
+      // 找任意 tool_use:* 记录 (start/done/error/invalid/denied), 不只匹配
+      // 'start'. 否则后端重复发 runtime.tool_call 到达 tool_use:done 之后
+      // (例如 SSE 重连后重发, 或 server 在 content_block_stop 之后又来
+      // 一次 tool_use:start), idx 会返回 -1 落入新建分支, 残留第二条
+      // 'tool_use:start' 与已完成的 done 条目并存 — React 用同一个 key
+      // (tool-${toolUseId}) 渲染两条, UI 同时显示"已完成"+"调用中"卡死.
       const idx = s.messages.findIndex(
         (m) =>
-          (m.type as string) === 'tool_use:start' &&
+          (m.type as string).startsWith('tool_use:') &&
           (m.toolUseId as string) === toolUseId
       )
       // 当前事件是否代表 "新工具边界": tool_use:start 第一次出现,
-      // 或者是 Anthropic 提前宣告的 content_block_start(tool_use).
+      // 或者是 Anthropic 提前宣告的 content_block_start(tool_use)。
       // 任何一条命中都触发一次 textSegmentRev++ + 标记 toolUseId 已计入,
       // 下一个 text_delta 落到不同的 key, 渲染层就开新气泡.
       const isToolBoundary =
@@ -183,11 +189,35 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const shouldBumpSegment =
         isToolBoundary && !s.segmentedToolUseIds[toolUseId]
 
+      // 防御: 新事件是 tool_use:start, 但已有 done/error/invalid/denied 记录,
+      // 说明这是一个迟到的重复 call — 直接吞掉, 不要把已完成状态打回"调用中".
+      // 仍触发 segmentedToolUseIds 标记 + textSegmentRev bump, 避免文本段粘连,
+      // 因为新事件至少意味着"模型重新声明了这个工具边界", 上下文上是真边界.
+      if (idx !== -1 && t === 'tool_use:start') {
+        const prev = s.messages[idx] as Record<string, unknown>
+        const prevType = prev.type as string
+        if (prevType !== 'tool_use:start') {
+          const updates: Partial<AgentState> = {}
+          if (shouldClearPending) updates.pendingAsk = null
+          if (shouldBumpSegment) {
+            updates.textSegmentRev = s.textSegmentRev + 1
+            updates.segmentedToolUseIds = {
+              ...s.segmentedToolUseIds,
+              [toolUseId]: true,
+            }
+          }
+          return updates
+        }
+      }
+
       if (idx === -1) {
         const created: AgentMessage = {
           ...msg,
           eventId: `tool-${toolUseId}`,
-          type: 'tool_use:start',
+          // 初始 type 用 msg.type 而不是硬编码 'tool_use:start': 万一 done/error
+          // 先到 (顺序异常), 也要正确建出对应状态的记录, 而不是建一条永远卡
+          // 在"调用中"的 start.
+          type: (msg.type as string).startsWith('tool_use:') ? msg.type : 'tool_use:start',
           toolUseId,
           name: incomingName || (msg.name as string) || 'unknown',
           input: incomingInput || (msg.input as Record<string, unknown>),
@@ -206,7 +236,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
         return updates
       }
-      // 已存在 start 条目: 保留 name/input, 更新 type / output / error
+      // 已存在任意 tool_use:* 条目: 保留 name/input, 更新 type / output / error
       const prev = s.messages[idx] as Record<string, unknown>
       const next = s.messages.slice()
       next[idx] = {
@@ -621,9 +651,27 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       case 'runtime.aborted':
         useAgentStore.getState().setStatus('aborted')
         return
-      case 'runtime.error':
+      case 'runtime.error': {
+        // 携带 toolUseId 的 runtime.error 来自 server 把 runtime 的
+        // tool_use:error/invalid/denied 翻译过来的事件 — 指向一个具体的
+        // 工具, 需要把对应 tool_use:start upsert 成 tool_use:error 让
+        // ToolCallBlock 从"调用中"切到"错误". 不携带 toolUseId 的 error
+        // 是 turn-level / 引擎级错误, 只 setStatus.
+        const toolUseId = (event as { toolUseId?: unknown }).toolUseId
+        if (typeof toolUseId === 'string' && toolUseId) {
+          useAgentStore.getState().upsertToolCall({
+            eventId: `err-${toolUseId}`,
+            sessionId: sid,
+            ts: event.ts,
+            turnIndex: event.turnIndex,
+            type: 'tool_use:error',
+            toolUseId,
+            error: event.error.message,
+          })
+        }
         useAgentStore.getState().setStatus('error')
         return
+      }
       default:
         return
     }

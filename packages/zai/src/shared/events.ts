@@ -33,10 +33,15 @@ const RuntimeEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('runtime.aborted'),
              sessionId: z.string(), turnIndex: z.number(),
              reason: z.string() }),
+  // runtime.error 携带 toolUseId 时表示"这是某个具体工具的失败" (例如
+  // tool_use:error/invalid/denied 翻译过来的), 前端应把对应 tool_use:start
+  // upsert 成 tool_use:error 让 ToolCallBlock 从"调用中"切到"错误".
+  // 没有 toolUseId 时是 turn-level / 引擎级别错误, 只 setStatus.
   z.object({ ...Base.shape, type: z.literal('runtime.error'),
              sessionId: z.string(), turnIndex: z.number(),
              error: z.object({ category: z.string(), message: z.string(),
-                               recoverable: z.boolean() }) }),
+                               recoverable: z.boolean() }),
+             toolUseId: z.string().optional() }),
 ])
 
 const SessionEvent = z.discriminatedUnion('type', [
