@@ -38,8 +38,11 @@ const PromptRequest = z.object({
   { message: 'prompt or contentBlocks required' },
 )
 
+// 关键: 格式必须与 zai-agent-core queryEngine.ts:25 一致 (sess-<uuid>),
+// 否则 server 返回的 sessionId 与 runtime 写出的 transcript 文件名不匹配,
+// 下一次 resume 时 store.read(sessionId) → ENOENT, runtime 又建一个.
 function newSessionId(): string {
-  return `s_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`
+  return `sess-${crypto.randomUUID()}`
 }
 
 // Translate Anthropic-style runtime events emitted by DefaultAgentRuntime
@@ -234,7 +237,10 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
       const events = getRuntime().run({
         prompt: promptArg,
         cwd,
-        ...(existingSessionId ? { resumeFromTranscriptId: existingSessionId } : {}),
+        // transcriptId: 显式指定 ID. 不管新建还是续传, runtime 都用这个 ID
+        // 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
+        // (旧 API resumeFromTranscriptId 在文件不存在时会抛 ENOENT, 不适用.)
+        transcriptId: sessionId,
         systemPrompt,
         abortSignal: abortController.signal,
       })
