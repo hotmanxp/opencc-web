@@ -11,6 +11,7 @@ import resourcesRouter from './routes/resources.js';
 import quickstartRouter from './routes/quickstart.js';
 import execRouter from './routes/exec.js';
 import agentRouter from './routes/agent.js';
+import agentSettingsRouter from './routes/agentSettings.js';
 import answerRouter from './routes/answer.js';
 import { ensureManifestDir } from './services/manifest.js';
 import { initAgentRuntime, getAskRegistry } from './services/agentRuntime.js';
@@ -54,6 +55,7 @@ export function createApp(_opts: AppOptions): express.Express {
   app.use('/api', quickstartRouter);
   app.use('/api', execRouter);
   app.use('/api', agentRouter);
+  app.use('/api', agentSettingsRouter);
   // 注入 AskRegistry 给 answer router, 并挂载.
   // 注意: 这里的 prefix 必须是 '/api' (不是 '/api/agent'); answerRouter 内部
   // 已经用 '/agent/answer' + '/agent/answer/reject' 做 path, 拼起来才是
