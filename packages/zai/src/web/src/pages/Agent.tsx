@@ -1313,6 +1313,22 @@ export default function Agent() {
               · esc 中断
             </span>
           )}
+          <span style={{ flex: 1 }} />
+          <Button
+            icon={<PictureOutlined />}
+            onClick={() => fileInputRef.current?.click()}
+            title="上传图片"
+            disabled={status === 'streaming' || pendingAsk?.status === 'pending'}
+            style={{ color: 'rgba(255,255,255,0.45)' }}
+          />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleFilePick}
+          />
         </div>
 
         <div
@@ -1321,20 +1337,6 @@ export default function Agent() {
         >
           <AttachmentStrip attachments={attachments} onRemove={removeAttachment} />
           <div style={{ display: 'flex', alignItems: 'stretch' }}>
-            <Button
-              icon={<PictureOutlined />}
-              onClick={() => fileInputRef.current?.click()}
-              title="上传图片"
-              disabled={status === 'streaming' || pendingAsk?.status === 'pending'}
-            />
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              style={{ display: 'none' }}
-              onChange={handleFilePick}
-            />
             <TextArea
               value={input}
               onChange={(e) => setInput(e.target.value)}
