@@ -70,7 +70,7 @@ export default function ConversationInfoCard({ info }: Props) {
       column={1}
       bordered
       style={{ width: 360 }}
-      labelStyle={{ width: 110, color: 'rgba(0,0,0,0.65)' }}
+      labelStyle={{ width: 110, color: 'rgba(255,255,255,0.65)' }}
     >
       <Descriptions.Item label="Session ID">
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
