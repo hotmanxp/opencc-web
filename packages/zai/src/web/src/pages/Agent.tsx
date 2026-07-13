@@ -37,6 +37,7 @@ import DiffBlock from '../components/DiffBlock.js'
 import { linkifyText } from '../lib/linkify.js'
 import { AttachmentStrip } from '../components/AttachmentStrip'
 import ConversationInfoButton from '../components/ConversationInfoButton'
+import ModelStatusBadge from '../components/ModelStatusBadge'
 import { readImageAsBase64, ImageReadError } from '../lib/imageReader'
 
 const { TextArea } = Input
@@ -1364,6 +1365,7 @@ export default function Agent() {
               · esc 中断
             </span>
           )}
+          <ModelStatusBadge />
           <span style={{ flex: 1 }} />
           <Button
             icon={<PictureOutlined />}

@@ -92,8 +92,6 @@ export default function ConversationInfoCard({ info }: Props) {
       <Descriptions.Item label="对话轮次">{info.turnCount}</Descriptions.Item>
       <Descriptions.Item label="消息数">{info.messageCount}</Descriptions.Item>
       <Descriptions.Item label="状态">{statusLabel(info.status)}</Descriptions.Item>
-      <Descriptions.Item label="工作目录">{info.cwd ?? '—'}</Descriptions.Item>
-      <Descriptions.Item label="当前模型">{info.model ?? '未知'}</Descriptions.Item>
     </Descriptions>
   )
 }
