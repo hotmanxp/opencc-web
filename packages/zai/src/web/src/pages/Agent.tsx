@@ -1371,14 +1371,15 @@ export default function Agent() {
           )}
           <span style={{ flex: 1 }} />
           {/* 附件缩略图内嵌到状态栏内, 与按钮同一行, 缩到 40px, 靠左.
-              缩略图在 spacer 之前, 直接跟随在状态文字后面; flexWrap: wrap
-              让多张缩略图超长时换行 (撑高状态栏). */}
+              compact 去除外层 padding 避免与状态文字产生多余间距,
+              缩略图紧跟状态文字后面; flexWrap: wrap 让多张时换行. */}
           {attachments.length > 0 && (
             <AttachmentStrip
               attachments={attachments}
               onRemove={removeAttachment}
               align="start"
               size={40}
+              compact
             />
           )}
           <span style={{ flex: 1 }} />

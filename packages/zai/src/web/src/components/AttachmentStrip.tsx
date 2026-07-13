@@ -15,12 +15,16 @@ export function AttachmentStrip({
   onRemove,
   align = 'start',
   size = 80,
+  compact = false,
 }: {
   attachments: StripAttachment[]
   onRemove?: (localId: string) => void
   align?: 'start' | 'end'
   /** 缩略图边长 (px). 状态栏内嵌版用 40~48, 默认 80 适配原有大方块场景. */
   size?: number
+  /** 紧凑模式: 去掉上下 padding, 用于内嵌到状态栏这类本身已有 padding 的容器里.
+      MessageBubble 等独立场景保持默认 false, 仍带 8px 上下间距. */
+  compact?: boolean
 }) {
   if (attachments.length === 0) return null
   // 移除按钮尺寸随 size 缩放: 24 (size=80) → 16 (size=40); 大缩略图才显,
@@ -33,7 +37,7 @@ export function AttachmentStrip({
         justifyContent: align === 'end' ? 'flex-end' : 'flex-start',
         gap: 8,
         flexWrap: 'wrap',
-        padding: '8px 0',
+        padding: compact ? 0 : '8px 0',
       }}
     >
       {attachments.map((a) => (
