@@ -14,12 +14,13 @@ import { useConversationInfo } from '../hooks/useConversationInfo.js'
  */
 export default function ModelStatusBadge() {
   const { model } = useConversationInfo()
-  if (!model) return null
+  const text = model ?? '未知'
 
   return (
     <span
       style={{
-        color: 'rgba(255,255,255,0.55)',
+        // 已知模型用稍亮的白色, 未知状态用更暗的灰 (与状态栏整体灰色基调对齐).
+        color: model ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.30)',
         // 用 monospace 跟状态栏其他文本一致; maxWidth 防长模型名撑爆布局.
         fontFamily:
           'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
@@ -28,9 +29,9 @@ export default function ModelStatusBadge() {
         textOverflow: 'ellipsis',
         whiteSpace: 'nowrap',
       }}
-      title={`当前模型: ${model}`}
+      title={model ? `当前模型: ${model}` : '当前模型: 未知 (session.model="unknown" 且 ~/.zai/settings.json 未配置默认模型)'}
     >
-      {model}
+      {text}
     </span>
   )
 }
