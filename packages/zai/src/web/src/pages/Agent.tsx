@@ -1321,8 +1321,8 @@ export default function Agent() {
 
       <div>
         {/* 状态栏: 仿 OpenCC 的 "✽ Pollinating… (Ns · ↓ tokens)" 行.
-            现在是纵向 column 布局 — 第一行是 status / 操作按钮, 第二行 (有附件时)
-            内嵌一行小尺寸缩略图, 整体高度按需撑高. */}
+            现在内嵌附件缩略图: 单行横向 flex, spacer 把缩略图与按钮推到右侧;
+            缩略图本身 align="end" 多张时仍右对齐, 多张会自动换行撑高状态栏. */}
         <div
           style={{
             borderTop: '1px solid rgba(255,255,255,0.10)',
@@ -1334,66 +1334,45 @@ export default function Agent() {
             // 文字统一灰色; 图标单独染色 (idle 绿点 / streaming 主题橙)
             color: 'rgba(255,255,255,0.45)',
             display: 'flex',
-            flexDirection: 'column',
-            gap: 4,
+            alignItems: 'center',
+            gap: 8,
+            // 多张缩略图需要换行时允许纵向扩展; 单行高度不变.
+            flexWrap: 'wrap',
           }}
         >
-          <div
+          <span
             style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
+              color:
+                status === 'idle'
+                  ? '#22c55e'
+                  : status === 'streaming'
+                    ? '#ff6600'
+                    : 'inherit',
             }}
           >
-            <span
-              style={{
-                color:
-                  status === 'idle'
-                    ? '#22c55e'
-                    : status === 'streaming'
-                      ? '#ff6600'
-                      : 'inherit',
-              }}
-            >
-              {status === 'streaming'
-                ? SPINNER[spinnerIdx]
-                : status === 'error'
-                  ? '✗'
-                  : status === 'aborted'
-                    ? '◼'
-                    : '●'}
+            {status === 'streaming'
+              ? SPINNER[spinnerIdx]
+              : status === 'error'
+                ? '✗'
+                : status === 'aborted'
+                  ? '◼'
+                  : '●'}
+          </span>
+          <span>
+            {status === 'idle' && '就绪'}
+            {status === 'streaming' && `对话中… (${elapsed}s)`}
+            {status === 'aborted' && '已中止'}
+            {status === 'error' && '错误'}
+          </span>
+          {status === 'streaming' && (
+            <span style={{ color: 'rgba(255,255,255,0.45)' }}>
+              · esc 中断
             </span>
-            <span>
-              {status === 'idle' && '就绪'}
-              {status === 'streaming' && `对话中… (${elapsed}s)`}
-              {status === 'aborted' && '已中止'}
-              {status === 'error' && '错误'}
-            </span>
-            {status === 'streaming' && (
-              <span style={{ color: 'rgba(255,255,255,0.45)' }}>
-                · esc 中断
-              </span>
-            )}
-            <span style={{ flex: 1 }} />
-            <Button
-              icon={<PictureOutlined />}
-              onClick={() => fileInputRef.current?.click()}
-              title="上传图片"
-              disabled={status === 'streaming' || pendingAsk?.status === 'pending'}
-              style={{ color: 'rgba(255,255,255,0.45)' }}
-            />
-            <ConversationInfoButton />
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              multiple
-              style={{ display: 'none' }}
-              onChange={handleFilePick}
-            />
-          </div>
-          {/* 附件缩略图内嵌到状态栏内, 右对齐, 尺寸缩小到 40px,
-              让状态栏在有附件时自然撑高, 不占输入框上方独立一行. */}
+          )}
+          <span style={{ flex: 1 }} />
+          {/* 附件缩略图内嵌到状态栏内, 与按钮同一行, 缩到 40px.
+              spacer 把这一段整体推到右侧; 缩略图内部 align="end" 让多张时
+              靠右排列, flexWrap: wrap 让超长时换行 (撑高状态栏). */}
           {attachments.length > 0 && (
             <AttachmentStrip
               attachments={attachments}
@@ -1402,6 +1381,22 @@ export default function Agent() {
               size={40}
             />
           )}
+          <Button
+            icon={<PictureOutlined />}
+            onClick={() => fileInputRef.current?.click()}
+            title="上传图片"
+            disabled={status === 'streaming' || pendingAsk?.status === 'pending'}
+            style={{ color: 'rgba(255,255,255,0.45)' }}
+          />
+          <ConversationInfoButton />
+          <input
+            ref={fileInputRef}
+            type="file"
+            accept="image/*"
+            multiple
+            style={{ display: 'none' }}
+            onChange={handleFilePick}
+          />
         </div>
 
         <div
