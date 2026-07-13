@@ -67,7 +67,14 @@ const originalFetch = globalThis.fetch
 beforeEach(() => {
   globalThis.fetch = vi.fn().mockResolvedValue({
     ok: true,
-    json: async () => ({ defaultModel: 'MiniMax-M3', baseURL: 'https://api.x' }),
+    json: async () => ({
+      defaultModel: 'MiniMax-M3',
+      baseURL: 'https://api.x',
+      models: [
+        { alias: 'M3', model: 'MiniMax-M3', label: 'M3 · 默认最强' },
+        { alias: 'haiku', model: 'MiniMax-M2.7-highspeed' },
+      ],
+    }),
   } as Response)
   useAgentStore.setState({
     sessionId: null,
@@ -148,5 +155,68 @@ describe('useConversationInfo (integration)', () => {
     const { result } = renderHook(() => useConversationInfo())
     await act(async () => { await Promise.resolve() })
     expect(result.current.model).toBe('MiniMax-M3')
+  })
+
+  it('returns displayLabel = alias.label when model hits an alias with label', async () => {
+    const sessionId = 'sess-display-label'
+    useAgentStore.setState({
+      sessionId,
+      sessions: [{
+        transcriptId: sessionId,
+        cwd: '/x',
+        model: 'MiniMax-M3',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    })
+    const { result } = renderHook(() => useConversationInfo())
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.displayLabel).toBe('M3 · 默认最强')
+  })
+
+  it('falls back to alias.alias when no label is configured', async () => {
+    const sessionId = 'sess-display-alias'
+    useAgentStore.setState({
+      sessionId,
+      sessions: [{
+        transcriptId: sessionId,
+        cwd: '/x',
+        model: 'MiniMax-M2.7-highspeed',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    })
+    const { result } = renderHook(() => useConversationInfo())
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.displayLabel).toBe('haiku')
+  })
+
+  it('returns displayLabel = raw model when no alias matches', async () => {
+    const sessionId = 'sess-display-raw'
+    useAgentStore.setState({
+      sessionId,
+      sessions: [{
+        transcriptId: sessionId,
+        cwd: '/x',
+        model: 'unknown-from-upstream',
+        createdAt: 1,
+        updatedAt: 1,
+      }],
+    })
+    const { result } = renderHook(() => useConversationInfo())
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.displayLabel).toBe('unknown-from-upstream')
+  })
+
+  it('returns displayLabel = null when there is no effective model', async () => {
+    // Override the default mock to return no defaultModel so the effective
+    // model resolves to null.
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({ defaultModel: null, baseURL: null, models: [] }),
+    } as Response)
+    const { result } = renderHook(() => useConversationInfo())
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.displayLabel).toBeNull()
   })
 })

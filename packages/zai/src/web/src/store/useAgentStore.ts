@@ -63,6 +63,7 @@ interface AgentState {
     model?: string
     cwd?: string
     createdAt?: number
+    messageCount?: number
   }>
   cwd: string
   messages: AgentMessage[]

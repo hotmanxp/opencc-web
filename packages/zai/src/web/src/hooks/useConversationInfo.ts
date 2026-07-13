@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAgentStore } from '../store/useAgentStore.js'
 import type { AgentMessage, AgentStatus } from '../store/useAgentStore.js'
+import type { ModelEntry } from '../../../shared/settings.js'
 
 /**
  * Snapshot of conversation metadata shown in the info Popover.
@@ -29,11 +30,14 @@ export interface ConversationInfo {
   model: string | null
   /** True once the /api/agent/settings fetch has settled (success or failure). */
   settingsLoaded: boolean
+  /** Alias-aware display label. Falls back: alias.label → alias.alias → model → null. */
+  displayLabel: string | null
 }
 
 interface RuntimeSettings {
   defaultModel: string | null
   baseURL: string | null
+  models: ModelEntry[]
 }
 
 /**
@@ -64,6 +68,11 @@ export function countCompletedTurns(messages: AgentMessage[]): number {
   return turns
 }
 
+function findAliasForModel(model: string | null, models: ModelEntry[]): ModelEntry | null {
+  if (!model) return null
+  return models.find((m) => m.model === model) ?? null
+}
+
 /**
  * Derive a ConversationInfo snapshot from the agent store and the
  * runtime settings endpoint. Re-runs when any store field changes —
@@ -76,6 +85,7 @@ export function useConversationInfo(): ConversationInfo {
   const [runtime, setRuntime] = useState<RuntimeSettings>({
     defaultModel: null,
     baseURL: null,
+    models: [],
   })
   const [settingsLoaded, setSettingsLoaded] = useState(false)
 
@@ -90,6 +100,7 @@ export function useConversationInfo(): ConversationInfo {
         setRuntime({
           defaultModel: data.defaultModel ?? null,
           baseURL: data.baseURL ?? null,
+          models: Array.isArray(data.models) ? data.models : [],
         })
       })
       .catch(() => {
@@ -114,6 +125,8 @@ export function useConversationInfo(): ConversationInfo {
       sess?.model && sess.model !== 'unknown'
         ? sess.model
         : runtime.defaultModel
+    const alias = findAliasForModel(model, runtime.models)
+    const displayLabel = alias?.label ?? alias?.alias ?? model ?? null
 
     return {
       sessionId: effectiveSessionId,
@@ -126,6 +139,7 @@ export function useConversationInfo(): ConversationInfo {
       cwd: cwd || sess?.cwd || null,
       model,
       settingsLoaded,
+      displayLabel,
     }
   }, [sessionId, activeSessionId, sessions, messages, status, cwd, runtime, settingsLoaded])
 }
