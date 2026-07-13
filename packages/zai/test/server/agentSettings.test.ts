@@ -40,10 +40,10 @@ describe('GET /api/agent/settings', () => {
     )
     const res = await request(app).get('/api/agent/settings')
     expect(res.status).toBe(200)
-    expect(res.body).toEqual({
+    expect(res.body).toEqual(expect.objectContaining({
       defaultModel: 'MiniMax-M3',
       baseURL: 'https://api.example.com',
-    })
+    }))
   })
 
   it('falls back to env.ANTHROPIC_SMALL_FAST_MODEL when SONNET is missing', async () => {
@@ -67,11 +67,13 @@ describe('GET /api/agent/settings', () => {
     expect(res.body.baseURL).toBeNull()
   })
 
-  it('returns null fields when settings.json is empty', async () => {
+  it('returns builtin fallback defaultModel when settings.json is empty', async () => {
     vi.mocked(readFileSync).mockReturnValue('{}')
     const res = await request(app).get('/api/agent/settings')
     expect(res.status).toBe(200)
-    expect(res.body).toEqual({ defaultModel: null, baseURL: null })
+    expect(res.body).toEqual(expect.objectContaining({ baseURL: null, models: [] }))
+    // resolveModel's BUILTIN_FALLBACK_MODEL when no env / settings.model override.
+    expect(res.body.defaultModel).toBe('MiniMax-M3')
   })
 
   it('returns 500 when readFileSync throws', async () => {
@@ -81,5 +83,31 @@ describe('GET /api/agent/settings', () => {
     const res = await request(app).get('/api/agent/settings')
     expect(res.status).toBe(500)
     expect(res.body.error).toContain('ENOENT')
+  })
+
+  it('returns models[] from settings.json when present', async () => {
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify({
+        env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3' },
+        models: [
+          { alias: 'M3', model: 'MiniMax-M3', label: 'M3 · 默认最强' },
+          { alias: 'haiku', model: 'MiniMax-M2.7-highspeed', label: 'M2.7 · 快速轻量' },
+        ],
+      }),
+    )
+    const res = await request(app).get('/api/agent/settings')
+    expect(res.status).toBe(200)
+    expect(res.body.models).toEqual([
+      { alias: 'M3', model: 'MiniMax-M3', label: 'M3 · 默认最强' },
+      { alias: 'haiku', model: 'MiniMax-M2.7-highspeed', label: 'M2.7 · 快速轻量' },
+    ])
+  })
+
+  it('returns models: [] when settings.json omits models', async () => {
+    vi.mocked(readFileSync).mockReturnValue(
+      JSON.stringify({ env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'X' } }),
+    )
+    const res = await request(app).get('/api/agent/settings')
+    expect(res.body.models).toEqual([])
   })
 })
