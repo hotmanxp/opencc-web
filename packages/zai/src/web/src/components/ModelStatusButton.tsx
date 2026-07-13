@@ -1,68 +1,248 @@
-import { Button, Popover } from 'antd'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { Button, Input, Popover } from 'antd'
 import { CheckOutlined } from '@ant-design/icons'
 import { useConversationInfo } from '../hooks/useConversationInfo.js'
 import { useAgentStore } from '../store/useAgentStore.js'
+import type { ModelEntry } from '../../../shared/settings.js'
 
 /**
- * Clickable model badge — replaces the read-only ModelStatusBadge.
+ * OpenCC TUI-style model picker.
  *
- * Click opens a Popover listing the available models from
- * /api/agent/settings → models[]. Selecting one triggers
- * store.patchSessionModel which PATCHes transcript.meta.model.
+ * Replaces the flat-list ModelStatusButton. Layout (top to bottom):
+ *   1. "Select model" header with esc hint
+ *   2. Search <Input> (autoFocus)
+ *   3. Recent section (only when no search query AND recentModels > 0)
+ *   4. Provider groups sorted by title
  *
- * Empty models[] shows a "未配置 models[]" placeholder.
+ * Each row shows ● marker when entry.model === currentModel, plus
+ * violet-tint background when keyboard-selectedIndex matches.
+ *
+ * Keyboard: ArrowUp/Down move selectedIndex in flatList (Recent first,
+ * then each group's entries in order); Enter calls patchSessionModel;
+ * Esc bubbles to antd Popover default close.
  */
 export default function ModelStatusButton() {
-  const { displayLabel, model, sessionId } = useConversationInfo()
-  const models = useAgentStore((s) => s.availableModels)
+  const { displayLabel, model: currentModel, sessionId } = useConversationInfo()
+  const availableModels = useAgentStore((s) => s.availableModels)
+  const sessions = useAgentStore((s) => s.sessions)
   const patchSessionModel = useAgentStore((s) => s.patchSessionModel)
 
+  const [searchQuery, setSearchQuery] = useState('')
+  const [selectedIndex, setSelectedIndex] = useState(0)
+  const selectedRowRef = useRef<HTMLDivElement | null>(null)
+  const searchInputRef = useRef<any>(null)
+
+  // Derived: recent models from sessions, recency-weighted, deduped, max 5.
+  const recentModels = useMemo<ModelEntry[]>(() => {
+    const seen = new Set<string>()
+    const out: ModelEntry[] = []
+    const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
+    for (const s of sorted) {
+      if (!s.model || s.model === 'unknown') continue
+      if (seen.has(s.model)) continue
+      const entry = availableModels.find((m) => m.model === s.model)
+      if (!entry) continue
+      seen.add(s.model)
+      out.push(entry)
+      if (out.length >= 5) break
+    }
+    return out
+  }, [sessions, availableModels])
+
+  // Derived: search-filtered models.
+  const filteredModels = useMemo<ModelEntry[]>(() => {
+    const q = searchQuery.trim().toLowerCase()
+    if (!q) return availableModels
+    return availableModels.filter((m) =>
+      m.model.toLowerCase().includes(q) ||
+      m.alias.toLowerCase().includes(q) ||
+      (m.label ?? '').toLowerCase().includes(q) ||
+      extractHost((m as ModelEntry & { baseUrl?: string }).baseUrl).toLowerCase().includes(q),
+    )
+  }, [availableModels, searchQuery])
+
+  // Derived: provider-grouped entries.
+  const groups = useMemo<Array<[string, ModelEntry[]]>>(() => {
+    const m = new Map<string, ModelEntry[]>()
+    for (const e of filteredModels) {
+      const title = formatProviderTitle(e)
+      const list = m.get(title) ?? []
+      list.push(e)
+      m.set(title, list)
+    }
+    return [...m.entries()].sort(([a], [b]) => a.localeCompare(b))
+  }, [filteredModels])
+
+  const showRecent = !searchQuery.trim() && recentModels.length > 0
+
+  // Flat list: Recent first (if visible), then each group in order.
+  // Deduplicate entries that already appear in Recent so that ArrowDown
+  // navigation has no gaps and indexOf returns stable positions.
+  const flatList = useMemo<ModelEntry[]>(() => {
+    const seen = new Set<string>()
+    const out: ModelEntry[] = []
+    const push = (entry: ModelEntry) => {
+      if (seen.has(entry.model)) return
+      seen.add(entry.model)
+      out.push(entry)
+    }
+    if (showRecent) for (const e of recentModels) push(e)
+    for (const [, items] of groups) for (const e of items) push(e)
+    return out
+  }, [recentModels, groups, showRecent])
+
+  // Clamp selectedIndex when flatList shape changes (search/Recent toggle).
+  useEffect(() => {
+    if (flatList.length === 0) {
+      setSelectedIndex(0)
+    } else if (selectedIndex >= flatList.length) {
+      setSelectedIndex(flatList.length - 1)
+    }
+  }, [flatList, selectedIndex])
+
+  // Auto-scroll selected row into view.
+  useEffect(() => {
+    selectedRowRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [selectedIndex])
+
+  // Reset search + selectedIndex on popover mount (covers re-open case
+  // since destroyTooltipOnHide resets component state on remount).
+  // No explicit reset needed — initial state already ('', 0).
+
+  const onKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'ArrowDown') {
+      e.preventDefault()
+      setSelectedIndex((i) => Math.min(i + 1, Math.max(0, flatList.length - 1)))
+    } else if (e.key === 'ArrowUp') {
+      e.preventDefault()
+      setSelectedIndex((i) => Math.max(i - 1, 0))
+    } else if (e.key === 'Enter') {
+      e.preventDefault()
+      const entry = flatList[selectedIndex]
+      if (entry && entry.model !== currentModel && sessionId) {
+        void patchSessionModel(sessionId, entry.model)
+      }
+    }
+    // Esc: let antd Popover default handle (close)
+  }
+
+  const pickEntry = (entry: ModelEntry) => {
+    if (entry.model === currentModel) return
+    if (!sessionId) return
+    void patchSessionModel(sessionId, entry.model)
+  }
+
   const content = (
-    <div style={{ width: 280 }}>
-      <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', marginBottom: 8 }}>
-        切换当前会话的模型
+    <div
+      data-testid="model-picker-content"
+      tabIndex={-1}
+      onKeyDown={onKeyDown}
+      style={{
+        width: 360,
+        background: '#1f1f1f',
+        color: '#fff',
+        borderRadius: 6,
+        padding: 8,
+        maxHeight: 480,
+        overflowY: 'auto',
+      }}
+    >
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 6,
+        }}
+      >
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.55)' }}>
+          Select model
+        </span>
+        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.30)' }}>esc</span>
       </div>
-      {models.length === 0 && (
-        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)' }}>
+
+      {availableModels.length === 0 ? (
+        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', padding: '12px 4px' }}>
           ~/.zai/settings.json 未配置 models[]
         </div>
-      )}
-      {models.map((m) => {
-        const isCurrent = m.model === model
-        return (
+      ) : (
+        <>
+          <Input
+            ref={searchInputRef}
+            value={searchQuery}
+            onChange={(e) => setSearchQuery(e.target.value)}
+            placeholder="Search"
+            autoFocus
+            allowClear
+            size="small"
+            style={{ marginBottom: 8 }}
+          />
+
+          {filteredModels.length === 0 && (
+            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center', padding: '12px 0' }}>
+              无匹配模型
+            </div>
+          )}
+
+          {showRecent && (
+            <div style={{ marginBottom: 8 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px' }}>
+                Recent
+              </div>
+              {recentModels.map((m) => {
+                const flatIdx = flatList.indexOf(m)
+                return (
+                  <Row
+                    key={`recent-${m.alias}`}
+                    entry={m}
+                    isCurrent={m.model === currentModel}
+                    isSelected={flatIdx === selectedIndex}
+                    onClick={() => pickEntry(m)}
+                    rowRef={flatIdx === selectedIndex ? selectedRowRef : undefined}
+                  />
+                )
+              })}
+            </div>
+          )}
+
+          {groups.map(([title, items]) => (
+            <div key={title} style={{ marginBottom: 6 }}>
+              <div style={{ fontSize: 10, fontWeight: 600, color: '#a78bfa', textTransform: 'uppercase', letterSpacing: 0.5, padding: '4px 4px' }}>
+                {title}
+              </div>
+              {items.map((m) => {
+                const flatIdx = flatList.indexOf(m)
+                return (
+                  <Row
+                    key={`group-${title}-${m.alias}`}
+                    entry={m}
+                    isCurrent={m.model === currentModel}
+                    isSelected={flatIdx === selectedIndex}
+                    onClick={() => pickEntry(m)}
+                    rowRef={flatIdx === selectedIndex ? selectedRowRef : undefined}
+                  />
+                )
+              })}
+            </div>
+          ))}
+
           <div
-            key={m.alias}
-            onClick={() => {
-              if (isCurrent || !sessionId) return
-              void patchSessionModel(sessionId, m.model)
-            }}
             style={{
-              padding: '6px 8px',
-              borderRadius: 4,
-              cursor: isCurrent ? 'default' : 'pointer',
-              background: isCurrent ? 'rgba(22,119,255,0.15)' : 'transparent',
+              fontSize: 11,
+              color: 'rgba(255,255,255,0.30)',
+              borderTop: '1px solid rgba(255,255,255,0.08)',
+              paddingTop: 6,
+              marginTop: 4,
               display: 'flex',
-              flexDirection: 'column',
-              gap: 2,
+              gap: 12,
             }}
           >
-            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-              <span style={{ fontSize: 13, color: '#fff', fontWeight: isCurrent ? 600 : 400 }}>
-                {m.label ?? m.alias}
-              </span>
-              {isCurrent && <CheckOutlined style={{ color: '#1677ff', fontSize: 12 }} />}
-            </div>
-            {m.description && (
-              <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)' }}>
-                {m.description}
-              </span>
-            )}
+            <span>↑↓ Navigate</span>
+            <span>⏎ Select</span>
+            <span>esc Close</span>
           </div>
-        )
-      })}
-      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.30)', marginTop: 8, borderTop: '1px solid rgba(255,255,255,0.08)', paddingTop: 6 }}>
-        仅作用于当前会话. 新建会话仍按 ~/.zai/settings.json 解析.
-      </div>
+        </>
+      )}
     </div>
   )
 
@@ -78,7 +258,7 @@ export default function ModelStatusButton() {
         size="small"
         title={`当前模型: ${displayLabel ?? '未知'}\n点击切换`}
         style={{
-          color: model ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.30)',
+          color: currentModel ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.30)',
           fontFamily:
             'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
         }}
@@ -87,4 +267,78 @@ export default function ModelStatusButton() {
       </Button>
     </Popover>
   )
+}
+
+interface RowProps {
+  entry: ModelEntry
+  isCurrent: boolean
+  isSelected: boolean
+  onClick: () => void
+  rowRef?: React.MutableRefObject<HTMLDivElement | null>
+}
+
+function Row({ entry, isCurrent, isSelected, onClick, rowRef }: RowProps) {
+  return (
+    <div
+      ref={rowRef ?? undefined}
+      onClick={onClick}
+      data-testid={`model-row-${entry.alias}`}
+      data-selected={isSelected ? 'true' : 'false'}
+      data-current={isCurrent ? 'true' : 'false'}
+      style={{
+        padding: '5px 8px',
+        borderRadius: 4,
+        cursor: isCurrent ? 'default' : 'pointer',
+        background: isSelected ? 'rgba(168, 139, 250, 0.15)' : 'transparent',
+        display: 'flex',
+        flexDirection: 'column',
+        gap: 1,
+      }}
+    >
+      <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', gap: 6 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, minWidth: 0, flex: 1 }}>
+          {isCurrent ? (
+            <span style={{ color: '#a78bfa', fontSize: 12, lineHeight: 1 }}>●</span>
+          ) : (
+            <span style={{ width: 7 }} />
+          )}
+          <span
+            style={{
+              fontSize: 13,
+              color: '#fff',
+              fontWeight: isCurrent ? 600 : 400,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {entry.label ?? entry.alias}
+          </span>
+        </div>
+        {isCurrent && <CheckOutlined style={{ color: '#a78bfa', fontSize: 11 }} />}
+      </div>
+      {entry.description && (
+        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.40)', paddingLeft: 13 }}>
+          {entry.description}
+        </span>
+      )}
+    </div>
+  )
+}
+
+function formatProviderTitle(entry: ModelEntry): string {
+  // alias 形如 "<profile>-<suffix>" (由 sync 脚本生成)
+  // e.g. "anthropic-mix-m3" → profile "anthropic-mix"
+  const lastDash = entry.alias.lastIndexOf('-')
+  const profile = lastDash > 0 ? entry.alias.slice(0, lastDash) : entry.alias
+  return `${profile} (${extractHost((entry as ModelEntry & { baseUrl?: string }).baseUrl)})`
+}
+
+function extractHost(baseUrl: string | undefined): string {
+  if (!baseUrl) return 'default'
+  try {
+    return new URL(baseUrl).host
+  } catch {
+    return 'default'
+  }
 }

@@ -55,9 +55,9 @@ describe('ModelStatusButton', () => {
     fireEvent.click(badge)
     // The Popover content has a list with both models.
     expect(screen.getAllByText('M2.7 · 快速')).toHaveLength(1)
-    // "M3 · 默认最强" appears both in the badge label and in the popover
-    // list item (current model is also listed) — expect 2 occurrences.
-    expect(screen.getAllByText('M3 · 默认最强')).toHaveLength(2)
+    // "M3 · 默认最强" appears in: badge label, Recent section row, and
+    // provider group row — expect 3 occurrences in the TUI picker.
+    expect(screen.getAllByText('M3 · 默认最强')).toHaveLength(3)
   })
 
   it('calls patchSessionModel when a non-current model is clicked', async () => {
@@ -82,5 +82,109 @@ describe('ModelStatusButton', () => {
     const matches = screen.getAllByText('M3 · 默认最强')
     fireEvent.click(matches[matches.length - 1]!)
     expect(patchSpy).not.toHaveBeenCalled()
+  })
+})
+
+describe('ModelStatusButton TUI picker (extended)', () => {
+  // Reuse the existing beforeEach that sets up sessions / availableModels / fetch.
+  // Existing beforeEach sets:
+  //   - sessions: [{ transcriptId: 'sess-1', model: 'MiniMax-M3', cwd: '/x', updatedAt: 1 }]
+  //   - availableModels: 2 models with aliases 'M3' and 'haiku'
+  //     (model strings: 'MiniMax-M3', 'MiniMax-M2.7-highspeed')
+  //   - globalThis.fetch mocked to return settings with defaultModel: 'MiniMax-M3'
+  //
+  // data-testid values are `model-row-${entry.alias}`:
+  //   - model-row-M3
+  //   - model-row-haiku
+  // Provider titles derive from alias prefix + baseUrl host; test data has
+  // no baseUrl so host falls back to 'default' → titles are 'M3 (default)'
+  // and 'haiku (default)'.
+
+  it('filters entries by search query', async () => {
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText('M3 · 默认最强')) // open popover
+    const search = screen.getByPlaceholderText(/Search/i) as HTMLInputElement
+    fireEvent.change(search, { target: { value: 'M2' } })
+    // M2.7 entry still shown, M3 hidden
+    expect(screen.queryByTestId('model-row-M3')).toBeNull()
+    expect(screen.getByTestId('model-row-haiku')).toBeDefined()
+  })
+
+  it('shows no-match message when search returns empty', async () => {
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText('M3 · 默认最强'))
+    const search = screen.getByPlaceholderText(/Search/i) as HTMLInputElement
+    fireEvent.change(search, { target: { value: 'xyz' } })
+    expect(screen.getByText('无匹配模型')).toBeDefined()
+  })
+
+  it('renders Recent section with session-derived models', async () => {
+    // Existing beforeEach already has sessions[0].model = 'MiniMax-M3', so Recent
+    // should render model-row-M3.
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText('M3 · 默认最强'))
+    expect(screen.getByText('Recent')).toBeDefined()
+    // Recent entry is the same M3 alias as current (M3 row also appears in
+    // provider group, so use getAllByTestId to handle the duplicate testid).
+    expect(screen.getAllByTestId('model-row-M3').length).toBeGreaterThanOrEqual(1)
+  })
+
+  it('dedupes Recent — same model in multiple sessions appears once', async () => {
+    // Override sessions to have 3 entries: two with M3, one with M2.7-highspeed.
+    useAgentStore.setState({
+      sessions: [
+        { transcriptId: 's-1', title: 'a', updatedAt: 3, model: 'MiniMax-M3' },
+        { transcriptId: 's-2', title: 'b', updatedAt: 2, model: 'MiniMax-M3' },
+        { transcriptId: 's-3', title: 'c', updatedAt: 1, model: 'MiniMax-M2.7-highspeed' },
+      ],
+    })
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText('M3 · 默认最强'))
+    // M3 should appear once in Recent (the 2 sessions with M3 collapse to 1 entry).
+    // Total M3 occurrences: 1 in Recent + 1 in provider group = 2.
+    const m3Rows = screen.getAllByTestId('model-row-M3')
+    expect(m3Rows.length).toBe(2) // 1 in Recent + 1 in provider group
+  })
+
+  it('formats provider title as "<profile> (<host>)"', async () => {
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText('M3 · 默认最强'))
+    // Test data has no baseUrl, so host is 'default'. Profile is the alias
+    // (no '-' so whole alias), title becomes 'M3 (default)'.
+    expect(screen.getByText(/M3 \(default\)/i)).toBeDefined()
+  })
+
+  it('handles Enter key to select highlighted entry', async () => {
+    const patchSpy = vi.spyOn(useAgentStore.getState(), 'patchSessionModel')
+      .mockResolvedValue(undefined)
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText('M3 · 默认最强')) // open popover
+    // Initial selectedIndex = 0, which is the current model (M3) — no-op on Enter.
+    // ArrowDown to move to next entry (haiku).
+    const content = screen.getByTestId('model-picker-content')
+    fireEvent.keyDown(content, { key: 'ArrowDown' })
+    // Now selectedIndex = 1, the haiku entry.
+    fireEvent.keyDown(content, { key: 'Enter' })
+    expect(patchSpy).toHaveBeenCalledWith('sess-1', 'MiniMax-M2.7-highspeed')
+  })
+
+  it('handles ArrowDown to move selection', async () => {
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText('M3 · 默认最强'))
+    const content = screen.getByTestId('model-picker-content')
+    // Initially selectedIndex = 0 (M3 row is current — selected because it's first in flatList).
+    const initialSelected = content.querySelector('[data-selected="true"]')
+    expect(initialSelected?.getAttribute('data-testid')).toBe('model-row-M3')
+    // ArrowDown → selectedIndex = 1 (haiku).
+    fireEvent.keyDown(content, { key: 'ArrowDown' })
+    const afterDown = content.querySelector('[data-selected="true"]')
+    expect(afterDown?.getAttribute('data-testid')).toBe('model-row-haiku')
   })
 })
