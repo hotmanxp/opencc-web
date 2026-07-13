@@ -1369,10 +1369,8 @@ export default function Agent() {
               · esc 中断
             </span>
           )}
-          <span style={{ flex: 1 }} />
-          {/* 附件缩略图内嵌到状态栏内, 与按钮同一行, 缩到 40px, 靠左.
-              compact 去除外层 padding 避免与状态文字产生多余间距,
-              缩略图紧跟状态文字后面; flexWrap: wrap 让多张时换行. */}
+          {/* 附件缩略图内嵌到状态栏内, 与按钮同一行, 缩到 40px, 紧贴状态文字.
+              compact 去除外层 padding; flexWrap: wrap 让多张时换行. */}
           {attachments.length > 0 && (
             <AttachmentStrip
               attachments={attachments}
@@ -1382,6 +1380,7 @@ export default function Agent() {
               compact
             />
           )}
+          {/* 缩略图后留一个 spacer 把按钮推到最右 */}
           <span style={{ flex: 1 }} />
           <Button
             icon={<PictureOutlined />}
