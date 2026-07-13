@@ -105,3 +105,21 @@ export async function abortAgentSession(reason?: string): Promise<void> {
     await getRuntime().abort(currentSessionId, reason)
   }
 }
+
+/**
+ * Load skills from configured skills dirs and return a lightweight list
+ * suitable for the frontend autocomplete UI.
+ */
+export async function listSkills(): Promise<Array<{ name: string; description: string }>> {
+  const dirs = resolveSkillsDirs()
+  if (dirs.length === 0) return []
+
+  // Dynamic import to avoid top-level dependency on the loader module
+  // when the runtime hasn't been initialized yet.
+  const { loadSkillsFromDirs } = await import('@zn-ai/zai-agent-core')
+  const skills = await loadSkillsFromDirs(dirs, { cwd: process.cwd() })
+  return skills.map((s) => ({
+    name: s.name,
+    description: s.frontmatter?.description || s.description || '',
+  }))
+}
