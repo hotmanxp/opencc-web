@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useAgentStore } from '../../src/web/src/store/useAgentStore.js'
+import type { ModelEntry } from '../../src/shared/settings.js'
 
 // 模拟一条典型 turn 内的 SSE 事件序列:
 //   text-block-0 (delta x N) → tool-X start/done → text-block-2 (delta x N)
@@ -507,5 +508,141 @@ describe('useAgentStore — runtime.tool_call 迟到 (tool_use:done 之后)', ()
     )
     expect(tools).toHaveLength(1)
     expect(tools[0]!.type).toBe('tool_use:done')
+  })
+})
+
+describe('useAgentStore.patchSessionModel', () => {
+  let originalFetch: typeof globalThis.fetch
+  let originalLocalStorage: Storage
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    originalLocalStorage = globalThis.localStorage
+    const store: Record<string, string> = {}
+    globalThis.localStorage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v },
+      removeItem: (k: string) => { delete store[k] },
+      clear: () => { for (const k of Object.keys(store)) delete store[k] },
+      key: (i: number) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length },
+    } as Storage
+    useAgentStore.setState({ sessions: [], availableModels: [] })
+  })
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    globalThis.localStorage = originalLocalStorage
+  })
+
+  it('optimistically updates local session.model and POSTs to PATCH endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    })
+    globalThis.fetch = fetchMock as any
+
+    useAgentStore.setState({
+      sessions: [{
+        transcriptId: 'sess-1',
+        title: 'old',
+        updatedAt: 1,
+        cwd: '/x',
+      }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', 'MiniMax-M3')
+
+    const updated = useAgentStore.getState().sessions[0]
+    expect(updated!.model).toBe('MiniMax-M3')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/agent/sessions/sess-1')
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body as string)).toEqual({ model: 'MiniMax-M3' })
+  })
+
+  it('reverts optimistic update when PATCH returns non-OK', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: 'boom' }),
+    })
+    globalThis.fetch = fetchMock as any
+
+    useAgentStore.setState({
+      sessions: [{
+        transcriptId: 'sess-1',
+        title: 'old',
+        updatedAt: 1,
+        // No model field set yet.
+      }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', 'MiniMax-M3')
+
+    const after = useAgentStore.getState().sessions[0]
+    expect(after!.model).toBeUndefined() // revert worked
+  })
+})
+
+describe('useAgentStore.loadSessions', () => {
+  let originalFetch: typeof globalThis.fetch
+  let originalLocalStorage: Storage
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    originalLocalStorage = globalThis.localStorage
+    const store: Record<string, string> = {}
+    globalThis.localStorage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v },
+      removeItem: (k: string) => { delete store[k] },
+      clear: () => { for (const k of Object.keys(store)) delete store[k] },
+      key: (i: number) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length },
+    } as Storage
+    useAgentStore.setState({ sessions: [], availableModels: [] })
+  })
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    globalThis.localStorage = originalLocalStorage
+  })
+
+  it('populates availableModels from /api/agent/settings response', async () => {
+    const models: ModelEntry[] = [
+      { alias: 'M3', model: 'MiniMax-M3' },
+      { alias: 'haiku', model: 'MiniMax-M2.7-highspeed' },
+    ]
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/agent/settings')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ defaultModel: 'MiniMax-M3', baseURL: null, models }),
+        } as Response)
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ sessions: [] }),
+      } as Response)
+    }) as any
+
+    await useAgentStore.getState().loadSessions()
+
+    expect(useAgentStore.getState().availableModels).toEqual(models)
+  })
+
+  it('keeps availableModels empty when settings fetch fails', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/agent/settings')) {
+        return Promise.reject(new Error('boom'))
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ sessions: [] }),
+      } as Response)
+    }) as any
+
+    await useAgentStore.getState().loadSessions()
+
+    expect(useAgentStore.getState().availableModels).toEqual([])
   })
 })

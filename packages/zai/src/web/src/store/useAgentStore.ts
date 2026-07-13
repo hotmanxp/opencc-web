@@ -1,6 +1,7 @@
 import { create } from 'zustand'
 import { flushSync } from 'react-dom'
 import type { ServerEvent } from '../../../shared/events.js'
+import type { ModelEntry } from '../../../shared/settings.js'
 
 // 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob, 用于把历史图片
 // 消息里的 base64 还原成浏览器可显示的 objectURL. 解析失败时返回
@@ -54,7 +55,15 @@ export type AskState = {
 
 interface AgentState {
   sessionId: string | null
-  sessions: Array<{ transcriptId: string; title?: string; updatedAt: number }>
+  sessions: Array<{
+    transcriptId: string
+    title?: string
+    updatedAt: number
+    /** Resolved model name (from transcript.meta.model). 'unknown' or absent = not set. */
+    model?: string
+    cwd?: string
+    createdAt?: number
+  }>
   cwd: string
   messages: AgentMessage[]
   status: AgentStatus
@@ -95,6 +104,10 @@ interface AgentState {
   setCurrentSession: (sessionId: string) => void
   createNewSession: () => void
   deleteSession: (sessionId: string) => Promise<void>
+  /** Models list synced from /api/agent/settings → models[]. */
+  availableModels: ModelEntry[]
+  /** Optimistic PATCH /api/agent/sessions/:id + local session model update. */
+  patchSessionModel: (sid: string, model: string) => Promise<void>
   sendMessage: (prompt: string, cwd?: string) => Promise<void>
   stop: () => Promise<void>
   setAskAnswer: (questionText: string, label: string) => void
@@ -106,6 +119,7 @@ interface AgentState {
 export const useAgentStore = create<AgentState>((set, get) => ({
   sessionId: null,
   sessions: [],
+  availableModels: [],
   cwd: '',
   messages: [],
   status: 'idle',
@@ -317,18 +331,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   loadSessions: async () => {
     try {
       const token = localStorage.getItem('zai-token') || ''
-      const res = await fetch('/api/agent/sessions', {
-        headers: { 'X-Zai-Token': token },
-      })
-      const data = await res.json()
+      const [sessionsRes, settingsRes] = await Promise.all([
+        fetch('/api/agent/sessions', { headers: { 'X-Zai-Token': token } }),
+        fetch('/api/agent/settings').catch(() => null),
+      ])
+      const data = await sessionsRes.json()
       const sessions = data.sessions ?? []
-      set({ sessions })
+      let availableModels: ModelEntry[] = []
+      if (settingsRes && settingsRes.ok) {
+        const settingsData = await settingsRes.json()
+        availableModels = Array.isArray(settingsData.models) ? settingsData.models : []
+      }
+      set({ sessions, availableModels })
       if (sessions.length > 0) {
         set({ sessionId: sessions[0].transcriptId })
         await get().loadTranscript(sessions[0].transcriptId)
       }
     } catch {
-      // ignore
+      // ignore — list load is best-effort
     }
   },
 
@@ -389,6 +409,29 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       } else {
         get().createNewSession()
       }
+    }
+  },
+
+  patchSessionModel: async (sid, model) => {
+    // Snapshot for revert on failure.
+    const prev = get().sessions
+    // Optimistic local update so the badge switches immediately.
+    set({
+      sessions: prev.map((x) =>
+        x.transcriptId === sid ? { ...x, model } : x,
+      ),
+    })
+    try {
+      const token = localStorage.getItem('zai-token') || ''
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sid)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
+        body: JSON.stringify({ model }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch {
+      // Revert the optimistic update.
+      set({ sessions: prev })
     }
   },
 
