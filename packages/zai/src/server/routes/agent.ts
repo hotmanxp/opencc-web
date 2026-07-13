@@ -4,6 +4,7 @@ import { abortAgentSession, getCurrentSessionId, getAskRegistry, getRuntime, get
 import { loadAgentsMd, buildAgentsMdSystemPrompt } from '@zn-ai/zai-agent-core'
 import { eventBus } from '../services/eventBus.js'
 import type { ServerEventInput } from '../services/eventBus.js'
+import { resolveModel } from '../lib/resolveModel.js'
 
 // Mirror zai-agent-core's runtime/types.ts UserMessage shape because the package
 // does not re-export these types — keep them in sync if the upstream shape changes.
@@ -284,6 +285,40 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
           ? userContent
           : [{ role: 'user', content: userContent as UserMessageContent }]
 
+      // 拉 transcript meta.model 给 resolveModel 用. 文件不存在 (新会话)
+      // 是正常路径, 静默忽略 — sessionModel 保持 null, resolveModel 走
+      // fallback 链到 env / settings / builtin.
+      let sessionModel: string | null = null
+      try {
+        const existing = await getTranscriptStore().read(sessionId)
+        if (existing.meta.model && existing.meta.model !== 'unknown') {
+          sessionModel = existing.meta.model
+        }
+      } catch {
+        // 新会话 / 无 transcript — sessionModel 保持 null
+      }
+
+      // resolveModel 内部 readZaiSettings 读不到 ~/.zai/settings.json 时
+      // 会 re-throw 非 SyntaxError 的 IO 错误 (per resolveModel.ts 合约).
+      // /agent/prompt 是 fire-and-forget, 这种路径不能让整条回复丢掉,
+      // 兜底到 BUILTIN_FALLBACK_MODEL 让 LLM 仍然能跑起来.
+      let resolvedModel: string
+      let modelSource: string
+      try {
+        const r = resolveModel({ sessionModel, cwd })
+        resolvedModel = r.model
+        modelSource = r.source
+      } catch {
+        resolvedModel = 'MiniMax-M3'
+        modelSource = 'builtin_fallback'
+      }
+
+      if (process.env.ZAI_DEBUG === '1') {
+        console.error('[zai.agent.prompt] resolved model', {
+          sessionId, modelSource, resolvedModel,
+        })
+      }
+
       const events = getRuntime().run({
         prompt: promptArg,
         cwd,
@@ -293,6 +328,7 @@ router.post('/agent/prompt', async (req: Request, res: Response) => {
         transcriptId: sessionId,
         systemPrompt,
         abortSignal: abortController.signal,
+        model: resolvedModel,
       })
 
       // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,
@@ -421,6 +457,32 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
   try {
     const store = getTranscriptStore()
     await store.remove(req.params.id)
+    res.json({ ok: true })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+// PATCH /agent/sessions/:id — partial-update a session's transcript meta.
+// v1 only supports updating `model`. The body must include a non-empty
+// string that's not the placeholder 'unknown' — silently dropping the
+// patch when 'unknown' is sent prevents accidentally resetting the
+// user's selection back to the env/settings fallback.
+const PatchSessionRequest = z.object({
+  model: z.string().min(1).max(256).optional(),
+})
+
+router.patch('/agent/sessions/:id', async (req: Request, res: Response) => {
+  const parsed = PatchSessionRequest.safeParse(req.body)
+  if (!parsed.success) {
+    return res.status(400).json({ error: 'invalid body' })
+  }
+  const sid = req.params.id
+  try {
+    const store = getTranscriptStore()
+    if (parsed.data.model && parsed.data.model !== 'unknown') {
+      await store.patch(sid, { model: parsed.data.model })
+    }
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })

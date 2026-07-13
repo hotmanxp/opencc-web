@@ -1,7 +1,18 @@
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import express from 'express'
 import http from 'node:http'
+import { readFileSync } from 'node:fs'
 import agentRouter from '../../src/server/routes/agent.js'
+
+// Mock node:fs so resolveModel's readZaiSettings() can be controlled.
+// Mirrors the pattern in test/server/agentSettings.test.ts:7-13.
+vi.mock('node:fs', async () => {
+  const actual = await vi.importActual<typeof import('node:fs')>('node:fs')
+  return {
+    ...actual,
+    readFileSync: vi.fn(),
+  }
+})
 
 // Mock agentRuntime — 不需要真实 LLM 跑, 我们只验证请求体透传
 let lastRunOpts: any = null
@@ -9,7 +20,8 @@ let lastRunOpts: any = null
 // - mockTranscriptHasTitle 控制 read().meta.title 是否有值
 // - patchCalls 记录所有 patch 调用, 断言 title 是否被写入
 let mockTranscriptHasTitle = false
-let patchCalls: Array<{ id: string; patch: { title?: string; tags?: string[] } }> = []
+let mockTranscriptMetaModel: string = 'unknown'
+let patchCalls: Array<{ id: string; patch: { title?: string; tags?: string[]; model?: string } }> = []
 // runtimeToolEvents: 让 tool_use:error/invalid/denied 翻译测试可注入事件序列.
 let runtimeToolEvents: Array<Record<string, unknown>> = [
   { type: 'message_start' },
@@ -39,14 +51,17 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
       transcriptId: 'sess-1',
       meta: {
         cwd: '/tmp',
-        model: 'unknown',
+        // mockTranscriptMetaModel controls the meta.model value the
+        // route reads when resolving per-session model. Default 'unknown'
+        // (matches existing tests).
+        model: mockTranscriptMetaModel,
         createdAt: 0,
         updatedAt: 0,
         ...(mockTranscriptHasTitle ? { title: 'existing-title' } : {}),
       },
       messages: [],
     }),
-    patch: async (id: string, patch: { title?: string; tags?: string[] }) => {
+    patch: async (id: string, patch: { title?: string; tags?: string[]; model?: string }) => {
       patchCalls.push({ id, patch })
     },
     remove: async () => {},
@@ -60,6 +75,14 @@ vi.mock('@zn-ai/zai-agent-core', () => ({
   loadAgentsMd: async () => null,
   buildAgentsMdSystemPrompt: () => null,
 }))
+
+// Reset readFileSync between tests — 防止 'falls back' 测试把 mock
+// 状态抛错泄漏到后续标题/翻译测试. resolveModel 走 default 时
+// readFileSync 返回 undefined → JSON.parse 抛 SyntaxError → readZaiSettings
+// 返回 {}, 整链路最终命中 BUILTIN_FALLBACK_MODEL.
+beforeEach(() => {
+  vi.mocked(readFileSync).mockReset()
+})
 
 function startApp(): Promise<{ url: string; close: () => void }> {
   return new Promise((resolve) => {
@@ -118,6 +141,62 @@ describe('POST /api/agent/prompt with contentBlocks', () => {
         body: JSON.stringify({ cwd: '/tmp' }),
       })
       expect(res.status).toBe(400)
+    } finally {
+      close()
+    }
+  })
+})
+
+// 关键: /agent/prompt 必须从 transcript.meta.model 读到 session 选过的
+// 模型, 通过 resolveModel 透传给 runtime.run({ model }). 三种情形:
+// 1) sessionModel = 'unknown' → 走 fallback (settings/env -> BUILTIN_FALLBACK_MODEL)
+// 2) sessionModel = '<resolvedName>' → 直接用它
+// 3) meta.model 缺失 (read 抛错) → 走 fallback
+describe('POST /api/agent/prompt model resolution', () => {
+  it('forwards transcript.meta.model to runtime.run when set', async () => {
+    lastRunOpts = null
+    mockTranscriptMetaModel = 'MiniMax-M2.7-highspeed'
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'hi', sessionId: 'sess-model-1' }),
+      })
+      expect(res.status).toBe(200)
+      const reader = res.body!.getReader()
+      while (true) {
+        const { done } = await reader.read()
+        if (done) break
+      }
+      expect(lastRunOpts).not.toBeNull()
+      expect(lastRunOpts.model).toBe('MiniMax-M2.7-highspeed')
+    } finally {
+      close()
+    }
+  })
+
+  it('falls back to BUILTIN_FALLBACK_MODEL when transcript.meta.model is "unknown"', async () => {
+    lastRunOpts = null
+    mockTranscriptMetaModel = 'unknown'
+    // 清空 readFileSync 让 resolveModel 走 builtin fallback.
+    vi.mocked(readFileSync).mockImplementation(() => {
+      throw new Error('ENOENT')
+    })
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'hi', sessionId: 'sess-model-2' }),
+      })
+      expect(res.status).toBe(200)
+      const reader = res.body!.getReader()
+      while (true) {
+        const { done } = await reader.read()
+        if (done) break
+      }
+      expect(lastRunOpts.model).toBe('MiniMax-M3')
     } finally {
       close()
     }
