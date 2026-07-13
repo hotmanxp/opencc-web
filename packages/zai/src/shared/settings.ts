@@ -12,6 +12,8 @@ export interface ModelEntry {
   model: string
   label?: string
   description?: string
+  /** Upstream OpenAI-compatible base URL; falls back to OpenAI default when omitted. */
+  baseUrl?: string
 }
 
 /** Shape of ~/.zai/settings.json. */

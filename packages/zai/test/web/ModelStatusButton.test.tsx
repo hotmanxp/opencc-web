@@ -6,8 +6,19 @@ import { useAgentStore } from '../../src/web/src/store/useAgentStore.js'
 import type { ModelEntry } from '../../src/shared/settings.js'
 
 const models: ModelEntry[] = [
-  { alias: 'M3', model: 'MiniMax-M3', label: 'M3 · 默认最强', description: '最强' },
-  { alias: 'haiku', model: 'MiniMax-M2.7-highspeed', label: 'M2.7 · 快速' },
+  {
+    alias: 'M3',
+    model: 'MiniMax-M3',
+    label: 'M3 · 默认最强',
+    description: '最强',
+    baseUrl: 'https://api.minimaxi.com/v1',
+  },
+  {
+    alias: 'haiku',
+    model: 'MiniMax-M2.7-highspeed',
+    label: 'M2.7 · 快速',
+    baseUrl: 'https://api.minimaxi.com/v1',
+  },
 ]
 
 beforeEach(() => {
@@ -96,9 +107,10 @@ describe('ModelStatusButton TUI picker (extended)', () => {
   // data-testid values are `model-row-${entry.alias}`:
   //   - model-row-M3
   //   - model-row-haiku
-  // Provider titles derive from alias prefix + baseUrl host; test data has
-  // no baseUrl so host falls back to 'default' → titles are 'M3 (default)'
-  // and 'haiku (default)'.
+  // Provider titles derive from alias prefix + baseUrl host. Test data
+  // sets baseUrl 'https://api.minimaxi.com/v1' on both entries, so titles
+  // are 'M3 (minimaxi.com)' and 'haiku (minimaxi.com)' and both render
+  // under the same group.
 
   it('filters entries by search query', async () => {
     render(<ModelStatusButton />)
@@ -154,9 +166,28 @@ describe('ModelStatusButton TUI picker (extended)', () => {
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
     fireEvent.click(screen.getByText('M3 · 默认最强'))
-    // Test data has no baseUrl, so host is 'default'. Profile is the alias
-    // (no '-' so whole alias), title becomes 'M3 (default)'.
-    expect(screen.getByText(/M3 \(default\)/i)).toBeDefined()
+    // Test data has baseUrl 'https://api.minimaxi.com/v1'. URL.host returns
+    // 'api.minimaxi.com' (full hostname). Profile is the alias (no '-' so
+    // whole alias), title becomes 'M3 (api.minimaxi.com)'. The haiku entry
+    // has a different profile ('haiku'), so it lands in its own group.
+    expect(screen.getByText(/M3 \(api\.minimaxi\.com\)/i)).toBeDefined()
+    expect(screen.getByText(/haiku \(api\.minimaxi\.com\)/i)).toBeDefined()
+  })
+
+  it('falls back to "default" host when baseUrl is absent', async () => {
+    // Override availableModels with one entry lacking baseUrl. The badge
+    // still shows the runtime-resolved M3 label, so click that to open.
+    useAgentStore.setState({
+      availableModels: [
+        { alias: 'plain', model: 'plain-model', label: 'plain' },
+      ],
+    })
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText('M3 · 默认最强'))
+    // The picker uses availableModels (not runtime.models), so the row
+    // for the "plain" entry renders with no baseUrl → host = 'default'.
+    expect(screen.getByText(/plain \(default\)/i)).toBeDefined()
   })
 
   it('handles Enter key to select highlighted entry', async () => {

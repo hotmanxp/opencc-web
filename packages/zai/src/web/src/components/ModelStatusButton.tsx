@@ -57,7 +57,7 @@ export default function ModelStatusButton() {
       m.model.toLowerCase().includes(q) ||
       m.alias.toLowerCase().includes(q) ||
       (m.label ?? '').toLowerCase().includes(q) ||
-      extractHost((m as ModelEntry & { baseUrl?: string }).baseUrl).toLowerCase().includes(q),
+      extractHost(m.baseUrl).toLowerCase().includes(q),
     )
   }, [availableModels, searchQuery])
 
@@ -74,6 +74,16 @@ export default function ModelStatusButton() {
   }, [filteredModels])
 
   const showRecent = !searchQuery.trim() && recentModels.length > 0
+
+  // Set of model IDs that already appear in the Recent section. Used to
+  // gate the keyboard-selected highlight / ref on provider-group rows so
+  // that the same model rendered in both sections does NOT get the
+  // selected-row visual marker twice. The Recent row owns the canonical
+  // selected-row identity for keyboard navigation.
+  const recentModelSet = useMemo<Set<string>>(
+    () => new Set(recentModels.map((m) => m.model)),
+    [recentModels],
+  )
 
   // Flat list: Recent first (if visible), then each group in order.
   // Deduplicate entries that already appear in Recent so that ArrowDown
@@ -212,14 +222,19 @@ export default function ModelStatusButton() {
               </div>
               {items.map((m) => {
                 const flatIdx = flatList.indexOf(m)
+                // If the same model already rendered in Recent, that row
+                // owns the keyboard-selected identity; suppress duplicate
+                // highlight + ref on this provider-group duplicate.
+                const ownsSelected =
+                  flatIdx === selectedIndex && !recentModelSet.has(m.model)
                 return (
                   <Row
                     key={`group-${title}-${m.alias}`}
                     entry={m}
                     isCurrent={m.model === currentModel}
-                    isSelected={flatIdx === selectedIndex}
+                    isSelected={ownsSelected}
                     onClick={() => pickEntry(m)}
-                    rowRef={flatIdx === selectedIndex ? selectedRowRef : undefined}
+                    rowRef={ownsSelected ? selectedRowRef : undefined}
                   />
                 )
               })}
@@ -331,7 +346,7 @@ function formatProviderTitle(entry: ModelEntry): string {
   // e.g. "anthropic-mix-m3" → profile "anthropic-mix"
   const lastDash = entry.alias.lastIndexOf('-')
   const profile = lastDash > 0 ? entry.alias.slice(0, lastDash) : entry.alias
-  return `${profile} (${extractHost((entry as ModelEntry & { baseUrl?: string }).baseUrl)})`
+  return `${profile} (${extractHost(entry.baseUrl)})`
 }
 
 function extractHost(baseUrl: string | undefined): string {
