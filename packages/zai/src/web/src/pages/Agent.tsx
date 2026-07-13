@@ -1365,7 +1365,6 @@ export default function Agent() {
               · esc 中断
             </span>
           )}
-          <ModelStatusBadge />
           <span style={{ flex: 1 }} />
           <Button
             icon={<PictureOutlined />}
@@ -1425,6 +1424,8 @@ export default function Agent() {
           <span>{cwd || '~'}</span>
           <span style={{ color: 'rgba(255,255,255,0.25)' }}>·</span>
           <span>master</span>
+          <span style={{ color: 'rgba(255,255,255,0.25)' }}>·</span>
+          <ModelStatusBadge />
         </div>
       </div>
       </div>
