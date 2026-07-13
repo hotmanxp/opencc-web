@@ -1370,17 +1370,18 @@ export default function Agent() {
             </span>
           )}
           <span style={{ flex: 1 }} />
-          {/* 附件缩略图内嵌到状态栏内, 与按钮同一行, 缩到 40px.
-              spacer 把这一段整体推到右侧; 缩略图内部 align="end" 让多张时
-              靠右排列, flexWrap: wrap 让超长时换行 (撑高状态栏). */}
+          {/* 附件缩略图内嵌到状态栏内, 与按钮同一行, 缩到 40px, 靠左.
+              缩略图在 spacer 之前, 直接跟随在状态文字后面; flexWrap: wrap
+              让多张缩略图超长时换行 (撑高状态栏). */}
           {attachments.length > 0 && (
             <AttachmentStrip
               attachments={attachments}
               onRemove={removeAttachment}
-              align="end"
+              align="start"
               size={40}
             />
           )}
+          <span style={{ flex: 1 }} />
           <Button
             icon={<PictureOutlined />}
             onClick={() => fileInputRef.current?.click()}
