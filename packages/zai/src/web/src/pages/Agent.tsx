@@ -1320,7 +1320,9 @@ export default function Agent() {
       </div>
 
       <div>
-        {/* 输入框上方的状态栏: 仿 OpenCC 的 "✽ Pollinating… (Ns · ↓ tokens)" 行 */}
+        {/* 状态栏: 仿 OpenCC 的 "✽ Pollinating… (Ns · ↓ tokens)" 行.
+            现在是纵向 column 布局 — 第一行是 status / 操作按钮, 第二行 (有附件时)
+            内嵌一行小尺寸缩略图, 整体高度按需撑高. */}
         <div
           style={{
             borderTop: '1px solid rgba(255,255,255,0.10)',
@@ -1332,63 +1334,80 @@ export default function Agent() {
             // 文字统一灰色; 图标单独染色 (idle 绿点 / streaming 主题橙)
             color: 'rgba(255,255,255,0.45)',
             display: 'flex',
-            alignItems: 'center',
-            gap: 8,
+            flexDirection: 'column',
+            gap: 4,
           }}
         >
-          <span
+          <div
             style={{
-              color:
-                status === 'idle'
-                  ? '#22c55e'
-                  : status === 'streaming'
-                    ? '#ff6600'
-                    : 'inherit',
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
             }}
           >
-            {status === 'streaming'
-              ? SPINNER[spinnerIdx]
-              : status === 'error'
-                ? '✗'
-                : status === 'aborted'
-                  ? '◼'
-                  : '●'}
-          </span>
-          <span>
-            {status === 'idle' && '就绪'}
-            {status === 'streaming' && `对话中… (${elapsed}s)`}
-            {status === 'aborted' && '已中止'}
-            {status === 'error' && '错误'}
-          </span>
-          {status === 'streaming' && (
-            <span style={{ color: 'rgba(255,255,255,0.45)' }}>
-              · esc 中断
+            <span
+              style={{
+                color:
+                  status === 'idle'
+                    ? '#22c55e'
+                    : status === 'streaming'
+                      ? '#ff6600'
+                      : 'inherit',
+              }}
+            >
+              {status === 'streaming'
+                ? SPINNER[spinnerIdx]
+                : status === 'error'
+                  ? '✗'
+                  : status === 'aborted'
+                    ? '◼'
+                    : '●'}
             </span>
+            <span>
+              {status === 'idle' && '就绪'}
+              {status === 'streaming' && `对话中… (${elapsed}s)`}
+              {status === 'aborted' && '已中止'}
+              {status === 'error' && '错误'}
+            </span>
+            {status === 'streaming' && (
+              <span style={{ color: 'rgba(255,255,255,0.45)' }}>
+                · esc 中断
+              </span>
+            )}
+            <span style={{ flex: 1 }} />
+            <Button
+              icon={<PictureOutlined />}
+              onClick={() => fileInputRef.current?.click()}
+              title="上传图片"
+              disabled={status === 'streaming' || pendingAsk?.status === 'pending'}
+              style={{ color: 'rgba(255,255,255,0.45)' }}
+            />
+            <ConversationInfoButton />
+            <input
+              ref={fileInputRef}
+              type="file"
+              accept="image/*"
+              multiple
+              style={{ display: 'none' }}
+              onChange={handleFilePick}
+            />
+          </div>
+          {/* 附件缩略图内嵌到状态栏内, 右对齐, 尺寸缩小到 40px,
+              让状态栏在有附件时自然撑高, 不占输入框上方独立一行. */}
+          {attachments.length > 0 && (
+            <AttachmentStrip
+              attachments={attachments}
+              onRemove={removeAttachment}
+              align="end"
+              size={40}
+            />
           )}
-          <span style={{ flex: 1 }} />
-          <Button
-            icon={<PictureOutlined />}
-            onClick={() => fileInputRef.current?.click()}
-            title="上传图片"
-            disabled={status === 'streaming' || pendingAsk?.status === 'pending'}
-            style={{ color: 'rgba(255,255,255,0.45)' }}
-          />
-          <ConversationInfoButton />
-          <input
-            ref={fileInputRef}
-            type="file"
-            accept="image/*"
-            multiple
-            style={{ display: 'none' }}
-            onChange={handleFilePick}
-          />
         </div>
 
         <div
           onDrop={handleDrop}
           onDragOver={(e) => e.preventDefault()}
         >
-          <AttachmentStrip attachments={attachments} onRemove={removeAttachment} />
           <div style={{ display: 'flex', alignItems: 'stretch' }}>
             <TextArea
               ref={textareaRef}

@@ -13,15 +13,24 @@ export type StripAttachment = {
 export function AttachmentStrip({
   attachments,
   onRemove,
+  align = 'start',
+  size = 80,
 }: {
   attachments: StripAttachment[]
   onRemove?: (localId: string) => void
+  align?: 'start' | 'end'
+  /** 缩略图边长 (px). 状态栏内嵌版用 40~48, 默认 80 适配原有大方块场景. */
+  size?: number
 }) {
   if (attachments.length === 0) return null
+  // 移除按钮尺寸随 size 缩放: 24 (size=80) → 16 (size=40); 大缩略图才显,
+  // 小缩略图里 20x20 的 X 会把图片盖掉一大块, 缩到 14~16 更合理.
+  const removeBtnSize = Math.max(14, Math.round(size * 0.25))
   return (
     <div
       style={{
         display: 'flex',
+        justifyContent: align === 'end' ? 'flex-end' : 'flex-start',
         gap: 8,
         flexWrap: 'wrap',
         padding: '8px 0',
@@ -32,8 +41,8 @@ export function AttachmentStrip({
           key={a.localId}
           style={{
             position: 'relative',
-            width: 80,
-            height: 80,
+            width: size,
+            height: size,
             borderRadius: 6,
             overflow: 'hidden',
             background: 'rgba(0,0,0,0.04)',
@@ -81,9 +90,9 @@ export function AttachmentStrip({
                 position: 'absolute',
                 top: 2,
                 right: 2,
-                width: 20,
-                height: 20,
-                minWidth: 20,
+                width: removeBtnSize,
+                height: removeBtnSize,
+                minWidth: removeBtnSize,
                 padding: 0,
                 background: 'rgba(0,0,0,0.55)',
                 color: '#fff',
