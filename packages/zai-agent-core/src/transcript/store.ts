@@ -63,7 +63,7 @@ export class TranscriptStore {
     }
   }
 
-  async patch(transcriptId: string, patch: { title?: string; tags?: string[] }): Promise<void> {
+  async patch(transcriptId: string, patch: { title?: string; tags?: string[]; model?: string }): Promise<void> {
     const filePath = transcriptPath(this.dataDir, transcriptId)
     const release = await lock(filePath, { retries: 3 })
     try {
@@ -71,6 +71,7 @@ export class TranscriptStore {
       const file = deserializeFile(raw)
       if (patch.title !== undefined) file.meta.title = patch.title
       if (patch.tags !== undefined) file.meta.tags = patch.tags
+      if (patch.model !== undefined) file.meta.model = patch.model
       file.meta.updatedAt = Date.now()
       await writeFile(filePath, serializeFile(file), 'utf-8')
     } finally {
