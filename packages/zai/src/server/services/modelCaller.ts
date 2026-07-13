@@ -126,10 +126,9 @@ export function createAnthropicModelCaller(): ModelCaller {
     const resolvedModel =
       model && model !== 'default'
         ? model
-        : (env.ANTHROPIC_SMALL_FAST_MODEL
-          ?? env.ANTHROPIC_DEFAULT_SONNET_MODEL
-          ?? env.ANTHROPIC_DEFAULT_OPUS_MODEL
-          ?? 'claude-sonnet-4-20250514')
+        : (env.ANTHROPIC_DEFAULT_SONNET_MODEL
+          ?? env.ANTHROPIC_SMALL_FAST_MODEL
+          ?? 'MiniMax-M3')
 
     const sysPromptStr =
       typeof systemPrompt === 'string'
@@ -174,10 +173,44 @@ export function createAnthropicModelCaller(): ModelCaller {
       { signal },
     )
 
-    for await (const event of stream) {
-      // SDK 已经把事件映射成 snake_case; 直接 yield.
-      // 重要: 这里必须同步 yield, 不要 batch/buffer, 才能保证上游逐字流出.
-      yield event as unknown as StreamEvent
+    try {
+      let eventCount = 0
+      for await (const event of stream) {
+        eventCount++
+        if (process.env.ZAI_DEBUG === '1' && (eventCount <= 3 || event.type === 'message_stop')) {
+          console.error('[zai.modelCaller] yield', { n: eventCount, type: event.type, model: resolvedModel })
+        }
+        // SDK 已经把事件映射成 snake_case; 直接 yield.
+        // 重要: 这里必须同步 yield, 不要 batch/buffer, 才能保证上游逐字流出.
+        yield event as unknown as StreamEvent
+        // ★ Anthropic 协议上 message_stop 是流终止; SDK 默认会等到 socket close
+        // 才把 reader done. minimax proxy 走 message_stop 后 keep-alive 不关,
+        // SDK for-await 永远等 EOF. 主动 break 让上层 queryEngine 进 append path.
+        if ((event as any).type === 'message_stop') {
+          if (process.env.ZAI_DEBUG === '1') {
+            console.error('[zai.modelCaller] break on message_stop', { eventCount, model: resolvedModel })
+          }
+          break
+        }
+      }
+      if (process.env.ZAI_DEBUG === '1') {
+        console.error('[zai.modelCaller] stream done normally', { eventCount, model: resolvedModel })
+      }
+    } catch (err) {
+      // 观测点: 之前 stream 中断的真实原因(SDK 抛错)完全没落 server 日志,
+      // 中断时只能看到前端 runtime.error event, 控制台一片寂静.
+      // 加上后可区分 max_tokens / network / abort / 5xx 四类异常.
+      if (process.env.ZAI_DEBUG === '1') {
+        const e = err as any
+        console.error('[zai.modelCaller] stream aborted', {
+          model: resolvedModel,
+          code: e?.code ?? e?.error?.type,
+          status: e?.status,
+          message: (err as Error).message,
+          stack: (err as Error).stack?.split('\n').slice(0, 5).join('\n'),
+        })
+      }
+      throw err
     }
   })
 }

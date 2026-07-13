@@ -22,7 +22,13 @@ export async function* queryEngine(
   options: QueryOptions,
   config: RuntimeConfig,
 ): AsyncGenerator<RuntimeEvent> {
-  const sessionId = options.resumeFromTranscriptId ?? `sess-${randomUUID()}`
+  // transcriptId 优先: 显式指定 ID (新建/续传都用同一 ID).
+  // 回退到 resumeFromTranscriptId (续传, 文件必须已存在 — 否则 ENOENT).
+  // 最后才是 random UUID (新建).
+  const sessionId =
+    options.transcriptId ??
+    options.resumeFromTranscriptId ??
+    `sess-${randomUUID()}`
   const store = new TranscriptStore(config.dataDir)
   const abortController = new AbortController()
   const maxTurns = options.maxTurns ?? config.defaultMaxTurns ?? DEFAULT_MAX_TURNS
@@ -73,7 +79,10 @@ export async function* queryEngine(
     if (mcpTools.length > 0) tools = [...tools, ...mcpTools]
   }
 
-  if (!options.resumeFromTranscriptId) {
+  // 关键: 用 transcriptId ?? resumeFromTranscriptId 判断. 之前只检查
+  // resumeFromTranscriptId, 但新 API transcriptId 也表示"指定 ID", 漏掉
+  // 它会触发 store.create 把已存在的 transcript 文件覆盖掉.
+  if (!options.transcriptId && !options.resumeFromTranscriptId) {
     await store.create({
       cwd: options.cwd,
       model: options.model ?? config.defaultModel ?? 'default',
@@ -85,24 +94,35 @@ export async function* queryEngine(
   const systemPrompt = await buildSystemPrompt(options, skills, config)
 
   const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = []
-  if (options.resumeFromTranscriptId) {
-    const t = await store.read(options.resumeFromTranscriptId)
-    // 把 transcript 的 raw 字段转成 SDK 期望的 content 格式:
-    // - user raw = { content: string } → content: string
-    // - assistant raw = { text: string, tool_uses: [...] } → content: [{ type: 'text', text }]
-    for (const tm of t.messages as Array<{ type: string; raw?: unknown; role?: string }>) {
-      const role = tm.type === 'user' ? 'user' : tm.type === 'assistant' ? 'assistant' : (tm.role as 'user' | 'assistant' | undefined)
-      if (role !== 'user' && role !== 'assistant') continue
-      const raw = (tm.raw ?? {}) as Record<string, unknown>
-      let content: unknown
-      if (role === 'user') {
-        content = typeof raw.content === 'string' ? raw.content : ''
-      } else {
-        const text = typeof raw.text === 'string' ? raw.text : ''
-        const blocks: Array<{ type: 'text'; text: string }> = text ? [{ type: 'text', text }] : []
-        content = blocks
+  const resumeId = options.resumeFromTranscriptId ?? options.transcriptId
+  if (resumeId) {
+    let t: Awaited<ReturnType<typeof store.read>> | null = null
+    try {
+      t = await store.read(resumeId)
+    } catch {
+      // 文件不存在: 当成新建. transcriptId 路径必须有这个容错, 否则
+      // 第一次发消息时 transcript 还没创建 → ENOENT 抛错.
+    }
+    if (t) {
+      // 把 transcript 的 raw 字段转成 SDK 期望的 content 格式:
+      // - user raw = { content: string } → content: string
+      // - assistant raw = { text: string, tool_uses: [...] } → content: [{ type: 'text', text }]
+      for (const tm of t.messages as Array<{ type: string; raw?: unknown; role?: string }>) {
+        const role = tm.type === 'user' ? 'user' : tm.type === 'assistant' ? 'assistant' : (tm.role as 'user' | 'assistant' | undefined)
+        if (role !== 'user' && role !== 'assistant') continue
+        const raw = (tm.raw ?? {}) as Record<string, unknown>
+        let content: unknown
+        if (role === 'user') {
+          if (typeof raw.content === 'string') content = raw.content
+          else if (Array.isArray(raw.content)) content = raw.content
+          else content = ''
+        } else {
+          const text = typeof raw.text === 'string' ? raw.text : ''
+          const blocks: Array<{ type: 'text'; text: string }> = text ? [{ type: 'text', text }] : []
+          content = blocks
+        }
+        messages.push({ role, content })
       }
-      messages.push({ role, content })
     }
   }
   if (subCtx?.initialUserMessage) {
@@ -122,6 +142,13 @@ export async function* queryEngine(
   while (turn < maxTurns) {
     turn++
     if (abortController.signal.aborted) {
+      if (process.env.ZAI_DEBUG === '1') {
+        console.error('[zai.queryEngine] aborted at turn start', {
+          sessionId,
+          turn,
+          reason: abortController.signal.reason,
+        })
+      }
       yield toAbortedEvent({ sessionId, turnIndex: turn }, abortController.signal.reason as string | undefined)
       return
     }
@@ -142,8 +169,25 @@ export async function* queryEngine(
     let assistantText = ''
     let thinkingText = ''
     const toolUseBlocks: Array<{ id: string; name: string; input: unknown }> = []
+    if (process.env.ZAI_DEBUG === '1') console.error('[zai.qe] enter stream loop', { sessionId, turn })
+    let sawMessageStop = false
     for await (const ev of modelStream) {
       if (abortController.signal.aborted) break
+      // ★ message_stop 是协议终止标志 (Anthropic SDK spec). minimax proxy
+      // 走完 message_stop 后 keep-alive 不关 socket, SDK for-await 永远等 EOF.
+      // 必须主动跳出, 否则 queryEngine 永远卡在 for-await modelStream,
+      // appendAssistantMessage 永远走不到 — transcript 永远只剩 user message.
+      // 注意: 不再 yield* 这个 event (因为下游 translateRuntimeEvents 会基于
+      // message_stop 推 runtime.done, 前端 status:idle 已经亮了). 直接 break.
+      if ((ev as any).type === 'message_stop') {
+        sawMessageStop = true
+        if (process.env.ZAI_DEBUG === '1') {
+          console.error('[zai.qe] break on message_stop', {
+            sessionId, turn, assistantTextLen: assistantText.length,
+          })
+        }
+        break
+      }
       yield* wrapWithZaiMeta((async function* () { yield ev } as () => AsyncGenerator<any>)(), { sessionId, sessionStartTs })
       if ((ev as any).type === 'content_block_delta' && (ev as any).delta?.type === 'text_delta') {
         assistantText += (ev as any).delta.text
@@ -169,6 +213,10 @@ export async function* queryEngine(
         try { b.input = JSON.parse(raw) } catch { b.input = {} }
       }
     }
+    if (process.env.ZAI_DEBUG === '1') console.error('[zai.qe] stream done', {
+      sessionId, turn, assistantTextLen: assistantText.length, tools: toolUseBlocks.length,
+      viaMessageStop: sawMessageStop,
+    })
 
     if (toolUseBlocks.length > 0) {
       messages.push({ role: 'assistant', content: [
@@ -368,6 +416,14 @@ async function appendAssistantMessage(
   payload: { text: string; thinking?: string; toolUses: Array<{ id: string; name: string; input: unknown }> },
   turnIndex: number,
 ): Promise<void> {
+  if (process.env.ZAI_DEBUG === '1') {
+    console.error('[zai.appendAssistant] enter', {
+      sessionId,
+      turnIndex,
+      textLen: payload.text.length,
+      tools: payload.toolUses.length,
+    })
+  }
   try {
     await store.append(sessionId, {
       uuid: randomUUID(),
@@ -381,5 +437,17 @@ async function appendAssistantMessage(
       },
       runtime: { turnIndex },
     })
-  } catch { /* transcript 写入失败不阻断对话 */ }
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.appendAssistant] wrote ok', { sessionId, turnIndex })
+    }
+  } catch (err) {
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.appendAssistant] FAILED', {
+        sessionId,
+        turnIndex,
+        err: (err as Error).message,
+      })
+    }
+    /* transcript 写入失败不阻断对话 */
+  }
 }

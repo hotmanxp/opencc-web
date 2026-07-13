@@ -1,5 +1,6 @@
 import express from 'express';
 import type { AppOptions } from './types.js';
+import eventRouter from './routes/event.js';
 import healthRouter from './routes/health.js';
 import systemRouter from './routes/system.js';
 import cliRouter from './routes/cli.js';
@@ -10,6 +11,7 @@ import resourcesRouter from './routes/resources.js';
 import quickstartRouter from './routes/quickstart.js';
 import execRouter from './routes/exec.js';
 import agentRouter from './routes/agent.js';
+import agentSettingsRouter from './routes/agentSettings.js';
 import answerRouter from './routes/answer.js';
 import { ensureManifestDir } from './services/manifest.js';
 import { initAgentRuntime, getAskRegistry } from './services/agentRuntime.js';
@@ -35,8 +37,14 @@ export function createApp(_opts: AppOptions): express.Express {
   // and the UI shows a "click refresh" hint.
 
   const app = express();
-  app.use(express.json());
+  // 显式把 body 限额抬到 20mb: 默认 100kb 在粘贴/拖拽图片时立刻
+  // PayloadTooLargeError — 一张 200KB 的 PNG → ~270KB base64, 加上 JSON
+  // envelope 与 10 张图 (MAX_ATTACHMENTS_PER_TURN) 直接爆掉. 20mb 留足
+  // 10 × ~1.8MB 单图的余量, 也覆盖未来更大附件. 仅 /api/* 在公网仍受
+  // Anthropic / 上游 base64 限额约束, 这里只是放行到 server.
+  app.use(express.json({ limit: '20mb' }));
 
+  app.use('/api', eventRouter);
   app.use('/api', healthRouter);
   app.use('/api', systemRouter);
   app.use('/api', cliRouter);
@@ -47,6 +55,7 @@ export function createApp(_opts: AppOptions): express.Express {
   app.use('/api', quickstartRouter);
   app.use('/api', execRouter);
   app.use('/api', agentRouter);
+  app.use('/api', agentSettingsRouter);
   // 注入 AskRegistry 给 answer router, 并挂载.
   // 注意: 这里的 prefix 必须是 '/api' (不是 '/api/agent'); answerRouter 内部
   // 已经用 '/agent/answer' + '/agent/answer/reject' 做 path, 拼起来才是

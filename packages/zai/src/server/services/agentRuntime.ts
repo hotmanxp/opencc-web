@@ -60,8 +60,7 @@ export function initAgentRuntime(): void {
     dataDir,
     modelCaller: createAnthropicModelCaller(),
     defaultModel:
-      process.env.ANTHROPIC_DEFAULT_OPUS_MODEL
-      ?? process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
+      process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
       ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
     askRegistry,
     skillsDirs: resolveSkillsDirs(),

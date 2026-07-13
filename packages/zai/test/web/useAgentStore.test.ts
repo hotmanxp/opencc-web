@@ -1,5 +1,6 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { useAgentStore } from '../../src/web/src/store/useAgentStore.js'
+import type { ModelEntry } from '../../src/shared/settings.js'
 
 // 模拟一条典型 turn 内的 SSE 事件序列:
 //   text-block-0 (delta x N) → tool-X start/done → text-block-2 (delta x N)
@@ -338,5 +339,310 @@ describe('useAgentStore — text / tool / text 交错事件', () => {
       'user.text',
       'assistant.text',
     ])
+  })
+})
+
+// 回归: tool_use:error 翻译成 runtime.error 时丢失 toolUseId, 前端只
+// setStatus('error') 不动具体工具 → ToolCallBlock 卡在 "调用中" 永远不变.
+// server 修复后, runtime.error 携带 toolUseId, 前端把它 upsert 成
+// tool_use:error, ToolCallBlock 切到 "错误".
+describe('useAgentStore — runtime.error 携带 toolUseId', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      messages: [],
+      status: 'idle',
+      textSegmentRev: 0,
+      segmentedToolUseIds: {},
+      sendSeq: 0,
+    })
+  })
+
+  it('runtime.error + toolUseId 把对应 tool_use:start upsert 成 tool_use:error', () => {
+    const state = useAgentStore.getState()
+    const sessionId = 'sess-err-1'
+
+    // 1) 工具先 start (来自 runtime.tool_call)
+    state.applyRuntimeEvent({
+      eventId: 'tc-1',
+      sessionId,
+      ts: 1,
+      turnIndex: 0,
+      type: 'runtime.tool_call',
+      toolUseId: 'tu_1',
+      toolName: 'Bash',
+      input: { command: 'ls' },
+    })
+    // 2) 工具抛错 (server 把 tool_use:error 翻译成 runtime.error + toolUseId)
+    state.applyRuntimeEvent({
+      eventId: 'err-1',
+      sessionId,
+      ts: 2,
+      turnIndex: 0,
+      type: 'runtime.error',
+      error: { category: 'tool', message: 'spawn ENOENT', recoverable: false },
+      toolUseId: 'tu_1',
+    } as any)
+
+    const msgs = useAgentStore.getState().messages
+    // 应当只有一条工具消息, type=tool_use:error (start → error upsert 合并)
+    const tools = msgs.filter((m) => m.type?.startsWith('tool_use:'))
+    expect(tools).toHaveLength(1)
+    expect(tools[0]!.type).toBe('tool_use:error')
+    expect((tools[0] as any).toolUseId).toBe('tu_1')
+    expect((tools[0] as any).error).toBe('spawn ENOENT')
+    // status 也应切到 error
+    expect(useAgentStore.getState().status).toBe('error')
+  })
+
+  it('runtime.error 不携带 toolUseId 时只 setStatus, 不创建工具消息', () => {
+    const state = useAgentStore.getState()
+    const sessionId = 'sess-err-2'
+
+    state.applyRuntimeEvent({
+      eventId: 'err-2',
+      sessionId,
+      ts: 1,
+      turnIndex: 0,
+      type: 'runtime.error',
+      error: { category: 'internal', message: 'LLM provider 5xx', recoverable: false },
+    })
+
+    const msgs = useAgentStore.getState().messages
+    expect(msgs).toHaveLength(0)
+    expect(useAgentStore.getState().status).toBe('error')
+  })
+})
+
+// 回归: 后端重复发 runtime.tool_call 到达 tool_use:done 之后 (例如 SSE 重
+// 连后重发, 或 server 在 content_block_stop + tool_use:start 之间漏接导致
+// 后端再补一次), 老 findIndex 只匹配 'tool_use:start' 落入新建分支, 残留
+// 第二条 'tool_use:start' 与已完成的 done 条目并存 — React 用同一个 key
+// (tool-${toolUseId}) 渲染两条 ToolCallBlock, UI 同时显示 "已完成"+"调用中"
+// 永远卡死. 修复: findIndex 匹配任意 tool_use:*, 迟到的 tool_use:start 不
+// 再覆盖已 done/error 的条目.
+describe('useAgentStore — runtime.tool_call 迟到 (tool_use:done 之后)', () => {
+  beforeEach(() => {
+    useAgentStore.setState({
+      messages: [],
+      status: 'idle',
+      textSegmentRev: 0,
+      segmentedToolUseIds: {},
+      sendSeq: 0,
+    })
+  })
+
+  it('runtime.tool_call 在 tool_use:done 之后到达, 不再残留第二条 tool_use:start', () => {
+    const state = useAgentStore.getState()
+    const sid = 'sess-late-1'
+
+    state.applyRuntimeEvent({
+      eventId: 'a', ts: 1, sessionId: sid, turnIndex: 0,
+      type: 'runtime.tool_call',
+      toolUseId: 't1', toolName: 'Bash', input: { command: 'ls' },
+    })
+    state.applyRuntimeEvent({
+      eventId: 'b', ts: 2, sessionId: sid, turnIndex: 0,
+      type: 'runtime.tool_result',
+      toolUseId: 't1', output: 'ok',
+    })
+    // 后端 bug / SSE 重发: 在 done 之后又来一次 tool_call, 不应再覆盖
+    state.applyRuntimeEvent({
+      eventId: 'c', ts: 3, sessionId: sid, turnIndex: 0,
+      type: 'runtime.tool_call',
+      toolUseId: 't1', toolName: 'Bash', input: { command: 'ls' },
+    })
+
+    const tools = useAgentStore.getState().messages.filter(
+      (m) => (m.type as string).startsWith('tool_use:'),
+    )
+    expect(tools).toHaveLength(1)
+    expect(tools[0]!.type).toBe('tool_use:done')
+    expect((tools[0] as any).output).toBe('ok')
+  })
+
+  it('runtime.tool_call 在 tool_use:error 之后到达, 不再残留第二条 tool_use:start', () => {
+    const state = useAgentStore.getState()
+    const sid = 'sess-late-2'
+
+    state.applyRuntimeEvent({
+      eventId: 'a', ts: 1, sessionId: sid, turnIndex: 0,
+      type: 'runtime.tool_call',
+      toolUseId: 't2', toolName: 'Bash', input: { command: 'rm -rf /' },
+    })
+    state.applyRuntimeEvent({
+      eventId: 'err', ts: 2, sessionId: sid, turnIndex: 0,
+      type: 'runtime.error',
+      error: { category: 'tool', message: 'permission denied', recoverable: false },
+      toolUseId: 't2',
+    } as any)
+    state.applyRuntimeEvent({
+      eventId: 'c', ts: 3, sessionId: sid, turnIndex: 0,
+      type: 'runtime.tool_call',
+      toolUseId: 't2', toolName: 'Bash', input: { command: 'rm -rf /' },
+    })
+
+    const tools = useAgentStore.getState().messages.filter(
+      (m) => (m.type as string).startsWith('tool_use:'),
+    )
+    expect(tools).toHaveLength(1)
+    expect(tools[0]!.type).toBe('tool_use:error')
+  })
+
+  it('正常顺序 (tool_use:done 在 tool_call 之后) 仍正确合并到一条 done', () => {
+    const state = useAgentStore.getState()
+    const sid = 'sess-normal'
+
+    state.applyRuntimeEvent({
+      eventId: 'a', ts: 1, sessionId: sid, turnIndex: 0,
+      type: 'runtime.tool_call',
+      toolUseId: 't3', toolName: 'Read', input: { path: '/tmp/x' },
+    })
+    state.applyRuntimeEvent({
+      eventId: 'b', ts: 2, sessionId: sid, turnIndex: 0,
+      type: 'runtime.tool_result',
+      toolUseId: 't3', output: 'contents',
+    })
+
+    const tools = useAgentStore.getState().messages.filter(
+      (m) => (m.type as string).startsWith('tool_use:'),
+    )
+    expect(tools).toHaveLength(1)
+    expect(tools[0]!.type).toBe('tool_use:done')
+  })
+})
+
+describe('useAgentStore.patchSessionModel', () => {
+  let originalFetch: typeof globalThis.fetch
+  let originalLocalStorage: Storage
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    originalLocalStorage = globalThis.localStorage
+    const store: Record<string, string> = {}
+    globalThis.localStorage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v },
+      removeItem: (k: string) => { delete store[k] },
+      clear: () => { for (const k of Object.keys(store)) delete store[k] },
+      key: (i: number) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length },
+    } as Storage
+    useAgentStore.setState({ sessions: [], availableModels: [] })
+  })
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    globalThis.localStorage = originalLocalStorage
+  })
+
+  it('optimistically updates local session.model and POSTs to PATCH endpoint', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    })
+    globalThis.fetch = fetchMock as any
+
+    useAgentStore.setState({
+      sessions: [{
+        transcriptId: 'sess-1',
+        title: 'old',
+        updatedAt: 1,
+        cwd: '/x',
+      }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', 'MiniMax-M3')
+
+    const updated = useAgentStore.getState().sessions[0]
+    expect(updated!.model).toBe('MiniMax-M3')
+    expect(fetchMock).toHaveBeenCalledTimes(1)
+    const [url, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(url).toBe('/api/agent/sessions/sess-1')
+    expect(init.method).toBe('PATCH')
+    expect(JSON.parse(init.body as string)).toEqual({ model: 'MiniMax-M3' })
+  })
+
+  it('reverts optimistic update when PATCH returns non-OK', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: 'boom' }),
+    })
+    globalThis.fetch = fetchMock as any
+
+    useAgentStore.setState({
+      sessions: [{
+        transcriptId: 'sess-1',
+        title: 'old',
+        updatedAt: 1,
+        // No model field set yet.
+      }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', 'MiniMax-M3')
+
+    const after = useAgentStore.getState().sessions[0]
+    expect(after!.model).toBeUndefined() // revert worked
+  })
+})
+
+describe('useAgentStore.loadSessions', () => {
+  let originalFetch: typeof globalThis.fetch
+  let originalLocalStorage: Storage
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    originalLocalStorage = globalThis.localStorage
+    const store: Record<string, string> = {}
+    globalThis.localStorage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v },
+      removeItem: (k: string) => { delete store[k] },
+      clear: () => { for (const k of Object.keys(store)) delete store[k] },
+      key: (i: number) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length },
+    } as Storage
+    useAgentStore.setState({ sessions: [], availableModels: [] })
+  })
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    globalThis.localStorage = originalLocalStorage
+  })
+
+  it('populates availableModels from /api/agent/settings response', async () => {
+    const models: ModelEntry[] = [
+      { alias: 'M3', model: 'MiniMax-M3' },
+      { alias: 'haiku', model: 'MiniMax-M2.7-highspeed' },
+    ]
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/agent/settings')) {
+        return Promise.resolve({
+          ok: true,
+          json: async () => ({ defaultModel: 'MiniMax-M3', baseURL: null, models }),
+        } as Response)
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ sessions: [] }),
+      } as Response)
+    }) as any
+
+    await useAgentStore.getState().loadSessions()
+
+    expect(useAgentStore.getState().availableModels).toEqual(models)
+  })
+
+  it('keeps availableModels empty when settings fetch fails', async () => {
+    globalThis.fetch = vi.fn().mockImplementation((url: string) => {
+      if (url.includes('/api/agent/settings')) {
+        return Promise.reject(new Error('boom'))
+      }
+      return Promise.resolve({
+        ok: true,
+        json: async () => ({ sessions: [] }),
+      } as Response)
+    }) as any
+
+    await useAgentStore.getState().loadSessions()
+
+    expect(useAgentStore.getState().availableModels).toEqual([])
   })
 })
