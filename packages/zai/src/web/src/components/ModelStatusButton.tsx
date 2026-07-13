@@ -22,7 +22,7 @@ import type { ModelEntry } from '../../../shared/settings.js'
  * Esc bubbles to antd Popover default close.
  */
 export default function ModelStatusButton() {
-  const { displayLabel, model: currentModel, sessionId } = useConversationInfo()
+  const { model: currentModel, sessionId } = useConversationInfo()
   const availableModels = useAgentStore((s) => s.availableModels)
   const sessions = useAgentStore((s) => s.sessions)
   const patchSessionModel = useAgentStore((s) => s.patchSessionModel)
@@ -31,6 +31,20 @@ export default function ModelStatusButton() {
   const [selectedIndex, setSelectedIndex] = useState(0)
   const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const searchInputRef = useRef<any>(null)
+
+  // Derived: provider label for the badge = "model-name(provider-name)".
+  // Looks up the current model in availableModels to find its alias
+  // (which encodes the provider name as the prefix before the last "-"),
+  // then formats the alias as "model-name(provider-name)" — e.g.
+  // "MiniMax-M3 (Anthropic-Mix)" for alias "anthropic-mix-m3".
+  const badgeText = useMemo<string | null>(() => {
+    if (!currentModel) return null
+    const entry = availableModels.find((m) => m.model === currentModel)
+    if (!entry) return currentModel // no alias match — show raw model name only
+    const lastDash = entry.alias.lastIndexOf('-')
+    const providerName = lastDash > 0 ? entry.alias.slice(0, lastDash) : entry.alias
+    return `${currentModel} (${providerName})`
+  }, [currentModel, availableModels])
 
   // Derived: recent models from sessions, recency-weighted, deduped, max 5.
   const recentModels = useMemo<ModelEntry[]>(() => {
@@ -168,7 +182,7 @@ export default function ModelStatusButton() {
         <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.55)' }}>
           Select model
         </span>
-        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.30)' }}>esc</span>
+        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)' }}>esc</span>
       </div>
 
       {availableModels.length === 0 ? (
@@ -185,7 +199,13 @@ export default function ModelStatusButton() {
             autoFocus
             allowClear
             size="small"
-            style={{ marginBottom: 8 }}
+            variant="borderless"
+            style={{
+              marginBottom: 8,
+              border: '1px solid rgba(255,255,255,0.18)',
+              borderRadius: 0,
+              background: 'transparent',
+            }}
           />
 
           {filteredModels.length === 0 && (
@@ -254,7 +274,7 @@ export default function ModelStatusButton() {
           >
             <span>↑↓ Navigate</span>
             <span>⏎ Select</span>
-            <span>esc Close</span>
+            <span style={{ color: 'rgba(255,255,255,0.65)' }}>esc Close</span>
           </div>
         </>
       )}
@@ -271,14 +291,15 @@ export default function ModelStatusButton() {
       <Button
         type="text"
         size="small"
-        title={`当前模型: ${displayLabel ?? '未知'}\n点击切换`}
+        title={`当前模型: ${badgeText ?? '未知'}\n点击切换`}
         style={{
           color: currentModel ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.30)',
+          fontSize: 12,
           fontFamily:
             'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
         }}
       >
-        {displayLabel ?? '未知'}
+        {badgeText ?? '未知'}
       </Button>
     </Popover>
   )
