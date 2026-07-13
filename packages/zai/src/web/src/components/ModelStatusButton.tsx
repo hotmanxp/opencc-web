@@ -226,7 +226,7 @@ export default function ModelStatusButton() {
                 // owns the keyboard-selected identity; suppress duplicate
                 // highlight + ref on this provider-group duplicate.
                 const ownsSelected =
-                  flatIdx === selectedIndex && !recentModelSet.has(m.model)
+                  flatIdx === selectedIndex && !(showRecent && recentModelSet.has(m.model))
                 return (
                   <Row
                     key={`group-${title}-${m.alias}`}

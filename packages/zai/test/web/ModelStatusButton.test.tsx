@@ -218,4 +218,21 @@ describe('ModelStatusButton TUI picker (extended)', () => {
     const afterDown = content.querySelector('[data-selected="true"]')
     expect(afterDown?.getAttribute('data-testid')).toBe('model-row-haiku')
   })
+
+  it('keeps the keyboard highlight visible when search hides Recent', async () => {
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText('M3 · 默认最强')) // open popover
+    // ArrowDown to move highlight into Recent → flatList index 1 (haiku).
+    const content = screen.getByTestId('model-picker-content')
+    fireEvent.keyDown(content, { key: 'ArrowDown' })
+    // Type a search query that hides the Recent section (any non-empty
+    // query flips `showRecent` false). After that, the provider-group
+    // haiku row must still render data-selected="true".
+    const search = screen.getByPlaceholderText(/Search/i) as HTMLInputElement
+    fireEvent.change(search, { target: { value: 'haiku' } })
+    const selected = content.querySelectorAll('[data-selected="true"]')
+    expect(selected.length).toBeGreaterThanOrEqual(1)
+    expect(selected[0]?.getAttribute('data-testid')).toBe('model-row-haiku')
+  })
 })
