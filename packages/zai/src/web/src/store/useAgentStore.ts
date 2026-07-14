@@ -190,7 +190,12 @@ export function loadTranscriptMessages(
           } else if (b.type === 'tool_use') {
             out.push({
               ...baseFields,
-              eventId: `tool-${b.id}`,
+              // M2: prefer msg.uuid for eventId so the assistant-message
+              // tool_use block path emits the same eventId as the direct
+              // tool_use message path (which also uses msg.uuid). Falls
+              // back to `tool-${b.id}` only when msg.uuid is missing
+              // (defensive — every persisted v2 message has uuid).
+              eventId: msg.uuid ?? `tool-${b.id}`,
               type: 'tool_use:start',
               toolUseId: b.id as string,
               name: b.name as string,
