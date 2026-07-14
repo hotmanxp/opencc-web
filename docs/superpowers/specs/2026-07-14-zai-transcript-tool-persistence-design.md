@@ -239,3 +239,12 @@ for (const msg of transcript.messages) {
 - **风险**：zai 的 `wrapWithZaiMeta` 在外层做了事件级包装，与 opencc-internals QueryEngine 内部的 messages 维护路径并存，parentUuid 链需要小心避免重复维护。
 - **缓解**：append 调用全部集中在 zai runtime 层（zai 的 query.ts/queryEngine.ts），不动 opencc-internals 的 QueryEngine；新加 `serializeForAnthropic` 隔离 v2 ↔ Anthropic 转换。
 - **回滚**：v1 store.append 路径不动（`appendUserMessage` / `appendAssistantMessage` 旧版保留作为 `appendLegacyAssistantMessage`），通过 env `ZAI_TRANSCRIPT_VERSION=1` 临时回退（不在首次实现里做，预留口子）。
+
+## 11. Implementation status
+
+Implemented via `docs/superpowers/plans/2026-07-14-zai-transcript-tool-persistence.md`.
+Tasks 1–7 landed; v1 files degrade silently via LegacyTranscriptError; v2 resume round-trips.
+Carry-forward items (out of scope for this plan):
+- compressToolHistory passthrough (transitive deps missing in zai-agent-core fork) — Task 3 follow-up
+- Layout.tsx + index.css sidebar UI tweak bundled accidentally, reverted in 262ef46
+- Tool execution error path not yet integrated with the new persistence layer (Task 6 covers the happy path; error path is best-effort passthrough)
