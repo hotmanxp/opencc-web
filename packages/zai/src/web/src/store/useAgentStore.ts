@@ -117,6 +117,153 @@ interface AgentState {
   rejectAsk: (reason?: string) => Promise<void>
 }
 
+// 把 transcript.messages 还原成 AgentMessage[] (供 React 渲染).
+// 设计: 必须与 SSE 流水线 (applyRuntimeEvent) 产出的 AgentMessage 形态等价,
+// 使 UI 渲染层 (ToolCallBlock / MessageList 等) 不需要区分"实时流"还是"历史回放".
+// v2 (ContentBlock[]) 走精细分支: tool_use / tool_result / assistant text+thinking;
+// 旧 v1 (raw.{text,content,thinking,tool_uses}) 走兜底分支.
+export function loadTranscriptMessages(
+  sessionId: string,
+  rawMessages: any[],
+): AgentMessage[] {
+  const out: AgentMessage[] = []
+  for (const msg of rawMessages) {
+    const rawObj = (msg.raw ?? {}) as Record<string, unknown>
+    const baseFields = {
+      sessionId,
+      ts: msg.timestamp,
+      turnIndex: msg.runtime?.turnIndex ?? 0,
+    }
+
+    // v2 path: message.content: ContentBlock[]
+    if (
+      (msg as { version?: string }).version === '2' &&
+      msg.message &&
+      Array.isArray(msg.message.content)
+    ) {
+      const blocks = msg.message.content as Array<Record<string, unknown>>
+      if (msg.type === 'tool_use') {
+        const b = blocks[0] as { id: string; name: string; input?: Record<string, unknown> }
+        out.push({
+          ...baseFields,
+          eventId: msg.uuid,
+          type: 'tool_use:start',
+          toolUseId: b.id,
+          name: b.name,
+          input: b.input,
+        })
+        continue
+      }
+      if (msg.type === 'user') {
+        const tr = blocks.find((b) => b.type === 'tool_result') as
+          | { tool_use_id: string; content: unknown; is_error: boolean }
+          | undefined
+        if (tr) {
+          const idx = out.findIndex((m) => m.toolUseId === tr.tool_use_id)
+          if (idx >= 0) {
+            out[idx] = {
+              ...out[idx],
+              type: tr.is_error ? 'tool_use:error' : 'tool_use:done',
+              output: tr.content,
+              error: tr.is_error ? tr.content : undefined,
+            }
+          }
+          continue
+        }
+      }
+      if (msg.type === 'assistant') {
+        for (const b of blocks) {
+          if (b.type === 'thinking') {
+            out.push({
+              ...baseFields,
+              eventId: `${msg.uuid}-thinking`,
+              type: 'assistant.thinking',
+              thinking: b.thinking as string,
+            })
+          } else if (b.type === 'text') {
+            out.push({
+              ...baseFields,
+              eventId: msg.uuid,
+              type: 'assistant.text',
+              text: b.text as string,
+            })
+          } else if (b.type === 'tool_use') {
+            out.push({
+              ...baseFields,
+              eventId: `tool-${b.id}`,
+              type: 'tool_use:start',
+              toolUseId: b.id as string,
+              name: b.name as string,
+              input: b.input as Record<string, unknown>,
+            })
+          }
+        }
+        continue
+      }
+    }
+
+    // v1 fallback (raw.* 旧路径)
+    const text =
+      typeof rawObj.text === 'string'
+        ? rawObj.text
+        : typeof rawObj.content === 'string'
+          ? rawObj.content
+          : ''
+    if (msg.type === 'user') {
+      if (rawObj.kind === 'skill_injection') continue
+      if (Array.isArray(rawObj.content)) {
+        const blocks = rawObj.content as Array<{
+          type: string
+          source?: { type?: string; media_type?: string; data?: string }
+          text?: string
+        }>
+        const textFromBlocks = blocks
+          .filter((b) => b.type === 'text' && typeof b.text === 'string')
+          .map((b) => b.text!)
+          .join('\n')
+        const restoredAttachments = blocks
+          .filter((b) => b.type === 'image' && b.source?.type === 'base64')
+          .map((b, i) => {
+            const dataUrl = `data:${b.source!.media_type};base64,${b.source!.data}`
+            const blob = dataURLtoBlob(dataUrl)
+            const thumbnailUrl = blob ? URL.createObjectURL(blob) : dataUrl
+            return {
+              localId: `${msg.uuid}-img-${i}`,
+              mime: b.source!.media_type ?? 'image/png',
+              filename: '[历史图片]',
+              thumbnailUrl,
+              status: blob ? ('ready' as const) : ('error' as const),
+              error: blob ? undefined : '图片已损坏',
+            }
+          })
+        out.push({
+          ...baseFields,
+          eventId: msg.uuid,
+          type: 'user.text',
+          text: textFromBlocks,
+          ...(restoredAttachments.length ? { attachments: restoredAttachments } : {}),
+        })
+      } else {
+        out.push({ ...baseFields, eventId: msg.uuid, type: 'user.text', text })
+      }
+    } else if (msg.type === 'assistant') {
+      const thinking = typeof rawObj.thinking === 'string' ? rawObj.thinking : ''
+      if (thinking) {
+        out.push({
+          ...baseFields,
+          eventId: `${msg.uuid}-thinking`,
+          type: 'assistant.thinking',
+          thinking,
+        })
+      }
+      out.push({ ...baseFields, eventId: msg.uuid, type: 'assistant.text', text })
+    } else {
+      out.push({ ...baseFields, eventId: msg.uuid, type: `runtime.${msg.type}`, text })
+    }
+  }
+  return out
+}
+
 export const useAgentStore = create<AgentState>((set, get) => ({
   sessionId: null,
   sessions: [],
@@ -445,80 +592,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const data = await res.json()
       const transcript = data.transcript
       if (!transcript) return
-      // 把 transcript messages 转换成 AgentMessage 格式
-      const messages: AgentMessage[] = []
-      for (const msg of (transcript.messages ?? []) as any[]) {
-        // user 类型 raw = { content: string }
-        // assistant 类型 raw = { text: string, thinking?: string, tool_uses: [...] }
-        const rawObj = (msg.raw ?? {}) as Record<string, unknown>
-        const text = typeof rawObj.text === 'string'
-          ? rawObj.text
-          : typeof rawObj.content === 'string'
-            ? rawObj.content
-            : ''
-        const baseFields = {
-          sessionId,
-          ts: msg.timestamp,
-          turnIndex: msg.runtime?.turnIndex ?? 0,
-        }
-        if (msg.type === 'user') {
-          // SkillTool 注入的 skill body 在 transcript 里以 user message 形态保存
-          // (kind:'skill_injection'), 供后续 turn 的 LLM 上下文使用. 但 UI 上
-          // 它属于工具侧产物, 不应当被渲染成 user.text 卡片 — 否则刷新页面后
-          // 用户看到 "skill 文字输出变成了我发出的消息".
-          if (rawObj.kind === 'skill_injection') continue
-          if (Array.isArray(rawObj.content)) {
-            // ContentBlock[] (可能含 image) — 还原 text 拼接 + 重建 attachments
-            const blocks = rawObj.content as Array<{
-              type: string
-              source?: { type?: string; media_type?: string; data?: string }
-              text?: string
-            }>
-            const textFromBlocks = blocks
-              .filter((b) => b.type === 'text' && typeof b.text === 'string')
-              .map((b) => b.text!)
-              .join('\n')
-            const restoredAttachments = blocks
-              .filter((b) => b.type === 'image' && b.source?.type === 'base64')
-              .map((b, i) => {
-                const dataUrl = `data:${b.source!.media_type};base64,${b.source!.data}`
-                const blob = dataURLtoBlob(dataUrl)
-                const thumbnailUrl = blob ? URL.createObjectURL(blob) : dataUrl
-                return {
-                  localId: `${msg.uuid}-img-${i}`,
-                  mime: b.source!.media_type ?? 'image/png',
-                  filename: '[历史图片]',
-                  thumbnailUrl,
-                  status: blob ? ('ready' as const) : ('error' as const),
-                  error: blob ? undefined : '图片已损坏',
-                }
-              })
-            messages.push({
-              ...baseFields,
-              eventId: msg.uuid,
-              type: 'user.text',
-              text: textFromBlocks,
-              ...(restoredAttachments.length ? { attachments: restoredAttachments } : {}),
-            })
-          } else {
-            messages.push({ ...baseFields, eventId: msg.uuid, type: 'user.text', text })
-          }
-        } else if (msg.type === 'assistant') {
-          // 先 emit thinking 块（若有），再 emit 文本块，让折叠面板显示在 response 上方
-          const thinking = typeof rawObj.thinking === 'string' ? rawObj.thinking : ''
-          if (thinking) {
-            messages.push({
-              ...baseFields,
-              eventId: `${msg.uuid}-thinking`,
-              type: 'assistant.thinking',
-              thinking,
-            })
-          }
-          messages.push({ ...baseFields, eventId: msg.uuid, type: 'assistant.text', text })
-        } else {
-          messages.push({ ...baseFields, eventId: msg.uuid, type: `runtime.${msg.type}`, text })
-        }
-      }
+      // 把 transcript messages 转换成 AgentMessage 格式 (v2 ContentBlock[] + v1 旧 fallback)
+      const messages = loadTranscriptMessages(sessionId, (transcript.messages ?? []) as any[])
       set({
         messages,
         sessionId,
