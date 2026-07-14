@@ -48,7 +48,8 @@ describe('queryEngine resume via serializeForAnthropic', () => {
       null,
       '/x',
     )
-    const tuUuid = (await store.read(sessionId)).messages.at(-1)!.uuid
+    const tuRead = await store.read(sessionId)
+    const tuUuid = tuRead.messages[tuRead.messages.length - 1]!.uuid
     await appendToolResult(
       store,
       sessionId,
@@ -98,7 +99,8 @@ describe('queryEngine resume via serializeForAnthropic', () => {
       null,
       '/x',
     )
-    const tuAUuid = (await store.read(sessionId)).messages.at(-1)!.uuid
+    const tuARead = await store.read(sessionId)
+    const tuAUuid = tuARead.messages[tuARead.messages.length - 1]!.uuid
     await appendToolUse(
       store,
       sessionId,
@@ -107,7 +109,8 @@ describe('queryEngine resume via serializeForAnthropic', () => {
       tuAUuid,
       '/x',
     )
-    const tuBUuid = (await store.read(sessionId)).messages.at(-1)!.uuid
+    const tuBRead = await store.read(sessionId)
+    const tuBUuid = tuBRead.messages[tuBRead.messages.length - 1]!.uuid
     await appendToolResult(
       store,
       sessionId,

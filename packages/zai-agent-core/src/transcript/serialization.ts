@@ -14,14 +14,14 @@ export function serializeFile(file: TranscriptFile): string {
 }
 
 export function deserializeFile(raw: string): TranscriptFile {
-  const parsed = JSON.parse(raw) as TranscriptFile
+  const parsed = JSON.parse(raw) as { version: number; [k: string]: unknown }
   if (parsed.version === 1) {
     throw new LegacyTranscriptError('version=1 — tool_use/tool_result not preserved')
   }
   if (parsed.version !== 2) {
     throw new Error(`Unsupported transcript version: ${parsed.version}`)
   }
-  return parsed
+  return parsed as unknown as TranscriptFile
 }
 
 export function extractMeta(file: TranscriptFile): TranscriptMeta {
