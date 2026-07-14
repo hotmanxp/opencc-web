@@ -6,6 +6,11 @@
 import type { Tool, ToolContext, ToolResult } from '../tools/Tool.js'
 import type { RuntimeEvent } from './events.js'
 import type { AskRegistryLike } from './types.js'
+import type { TranscriptStore } from '../transcript/store.js'
+import {
+  appendToolResult,
+  appendToolUse,
+} from '../transcript/persistence.js'
 import { ASK_USER_QUESTION_TOOL_NAME } from '../tools/AskUserQuestionTool/prompt.js'
 
 type ToolUseBlock = { id: string; name: string; input: unknown }
@@ -14,6 +19,13 @@ type EventMeta = {
   sessionId: string
   turnIndex: number
   nextEventId: () => string
+  /**
+   * TranscriptStore passed in from queryEngine so each completed tool call
+   * can persist its v2 tool_use + tool_result messages (Task 6).
+   * Optional so existing test fixtures that don't care about persistence
+   * keep working without plumbing a store.
+   */
+  store?: TranscriptStore
 }
 
 /**
@@ -126,6 +138,25 @@ export async function* executeToolsStreaming(
     })
     for (const sub of drainSubQueue()) yield sub
 
+    // Task 6: persist the tool_use block immediately after input is fully resolved.
+    // The returned uuid is the parentUuid for the matching tool_result below,
+    // matching the convention used by queryEngine-resume.test.ts (tool_result's
+    // parentUuid === tool_use's uuid).
+    //
+    // Failure to persist must not abort tool execution — appendToolUse swallows
+    // IO errors internally (logs to ZAI_DEBUG=1). If store isn't plumbed (test
+    // fixtures, ad-hoc callers), skip persistence — events still flow through the
+    // SSE path so the UI keeps working.
+    const toolUseUuid = meta.store
+      ? await appendToolUse(
+          meta.store,
+          meta.sessionId,
+          { id: block.id, name: block.name, input: parsed.data },
+          meta.turnIndex,
+          null,
+        )
+      : undefined
+
     // AskUserQuestion: 在 tool.call 进入 await 之前直接 yield ask_pending.
     // 此前的实现把 ask_pending 塞进 ctx.emitEvent (queryEngine.makeToolContext
     // 里就是 no-op), 导致事件到不了 SSE → 前端 store.pendingAsk 永远 null →
@@ -179,14 +210,37 @@ export async function* executeToolsStreaming(
         content,
         isError: outIsError,
       }
+      // Task 6: persist tool_result with the matching tool_use uuid as parent.
+      // Same swallow-IO-error semantics as appendToolUse.
+      if (meta.store) {
+        await appendToolResult(
+          meta.store,
+          meta.sessionId,
+          { tool_use_id: block.id, content, is_error: outIsError },
+          meta.turnIndex,
+          toolUseUuid ?? null,
+        )
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       for (const sub of drainSubQueue()) yield sub
       yield buildEvent('tool_use:error', { toolUseId: block.id, error: msg })
+      const errorContent = `error: ${msg}`
       results[index] = {
         toolUseId: block.id,
-        content: `error: ${msg}`,
+        content: errorContent,
         isError: true,
+      }
+      // Task 6: persist error tool_result so the transcript matches what the
+      // model would see on resume (is_error=true + error message).
+      if (meta.store) {
+        await appendToolResult(
+          meta.store,
+          meta.sessionId,
+          { tool_use_id: block.id, content: errorContent, is_error: true },
+          meta.turnIndex,
+          toolUseUuid ?? null,
+        )
       }
     }
   }

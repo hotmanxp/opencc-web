@@ -226,11 +226,14 @@ export async function* queryEngine(
     const toolCtx = makeToolContext(options, config, sessionId, abortController, skills)
     // toolExecution 自己 yield 完整 RuntimeEvent (带 sessionId/ts/eventId/turnIndex).
     // 这里仅需要提供一个生成 eventId 的闭包 + 当前 turnIndex.
+    // Task 6: 也透传 store + sessionId, 让 toolExecution 给每个完成工具
+    // 落盘 tool_use + tool_result v2 消息 (Task 6 闭环).
     let toolEvtCounter = 0
     for await (const ev of executeToolsStreaming(toolUseBlocks, toolCtx as any, tools, {
       sessionId,
       turnIndex: turn,
       nextEventId: () => `evt-tool-${++toolEvtCounter}`,
+      store,
     }, config.askRegistry)) {
       yield ev as RuntimeEvent
     }

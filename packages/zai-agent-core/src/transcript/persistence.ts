@@ -122,7 +122,7 @@ export async function appendToolUse(
   block: { id: string; name: string; input: unknown },
   turnIndex: number,
   parentUuid: string | null,
-): Promise<void> {
+): Promise<string | undefined> {
   try {
     const toolUseBlock: ContentBlock = {
       type: 'tool_use',
@@ -130,15 +130,18 @@ export async function appendToolUse(
       name: block.name,
       input: block.input,
     }
+    const base = baseFields({ cwd: '', sessionId }, turnIndex, parentUuid)
     const msg: TranscriptMessage = {
-      ...baseFields({ cwd: '', sessionId }, turnIndex, parentUuid),
+      ...base,
       type: 'tool_use',
       message: { content: [toolUseBlock], role: 'assistant' },
     }
     await store.append(sessionId, msg)
+    return base.uuid
   } catch (err) {
     if (process.env.ZAI_DEBUG === '1')
       console.error('[transcript] appendToolUse failed', err)
+    return undefined
   }
 }
 
@@ -148,7 +151,7 @@ export async function appendToolResult(
   block: { tool_use_id: string; content: unknown; is_error: boolean },
   turnIndex: number,
   parentUuid: string | null,
-): Promise<void> {
+): Promise<string | undefined> {
   try {
     const compressed = compressToolResult(block.content)
     const trBlock: ContentBlock = {
@@ -157,15 +160,18 @@ export async function appendToolResult(
       content: compressed,
       is_error: block.is_error,
     }
+    const base = baseFields({ cwd: '', sessionId }, turnIndex, parentUuid)
     const msg: TranscriptMessage = {
-      ...baseFields({ cwd: '', sessionId }, turnIndex, parentUuid),
+      ...base,
       type: 'user',
       message: { content: [trBlock], role: 'user' },
     }
     await store.append(sessionId, msg)
+    return base.uuid
   } catch (err) {
     if (process.env.ZAI_DEBUG === '1')
       console.error('[transcript] appendToolResult failed', err)
+    return undefined
   }
 }
 
