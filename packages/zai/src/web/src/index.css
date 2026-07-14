@@ -40,8 +40,8 @@ body {
 .ant-layout-header { background: rgba(18, 18, 26, 0.8) !important; backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-subtle) !important; }
 .ant-layout-content { background: var(--bg-body) !important; }
 
-.ant-menu-dark { background: transparent !important; }
-.ant-menu-dark .ant-menu-item { border-radius: 8px !important; margin: 4px 8px !important; transition: all 0.2s ease !important; }
+.ant-menu-dark .ant-menu-item { border-radius: 0 !important; margin: 4px 0 !important; padding-left: 0 !important; padding-right: 0 !important; width: 100% !important; transition: all 0.2s ease !important; }
+.ant-menu-dark .ant-menu-item .anticon { margin-left: 16px; }
 .ant-menu-dark .ant-menu-item:hover { background: rgba(255, 102, 0, 0.1) !important; }
 .ant-menu-dark .ant-menu-item-selected { background: linear-gradient(135deg, rgba(255,102,0,0.2), rgba(255,133,51,0.1)) !important; }
 .ant-menu-dark .ant-menu-item-selected::after { display: none !important; }
