@@ -190,7 +190,7 @@ export async function appendAssistantMessageV2(
   }
 }
 
-/** v2 → Anthropic SDK messages. Groups tool_result blocks under one user role. */
+/** v2 → Anthropic SDK messages. Groups consecutive tool_result blocks under one user role. */
 export function serializeForAnthropic(
   messages: TranscriptMessage[],
 ): Array<{ role: 'user' | 'assistant'; content: unknown }> {
@@ -213,7 +213,17 @@ export function serializeForAnthropic(
         const others = m.message.content.filter(
           (b) => b.type !== 'tool_result',
         )
-        out.push({ role: 'user', content: [...trBlocks, ...others] })
+        const lastUser = out.length > 0 ? out[out.length - 1] : null
+        if (
+          lastUser?.role === 'user' &&
+          Array.isArray(lastUser.content) &&
+          lastUser.content.some((b: unknown) => (b as { type?: string }).type === 'tool_result')
+        ) {
+          // Merge with previous user message that also had tool_result blocks
+          ;(lastUser.content as unknown[]).push(...trBlocks, ...others)
+        } else {
+          out.push({ role: 'user', content: [...trBlocks, ...others] })
+        }
         continue
       }
     }
