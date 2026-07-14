@@ -1,6 +1,64 @@
 import { randomUUID } from 'node:crypto'
+import { createRequire } from 'node:module'
 import type { TranscriptStore } from './store.js'
 import type { ContentBlock, TranscriptMessage } from './types.js'
+
+// Wraps `compressToolHistory` (which operates on a full messages array and
+// derives tiers from the model's context window) so the freshly-arrived
+// tool_result content can be passed through without fabricating a session.
+//
+// Loaded via `createRequire` instead of a static ESM `import` so the module
+// fails gracefully when the opencc-internals shim tree is not yet wired
+// (e.g. before the autoCompact/microCompact stubs land). A static `import`
+// would throw at module-load time and break every consumer of
+// persistence.ts, including the persistence.test.ts suite. The require is
+// evaluated once at module init, so the runtime cost is identical to a
+// static import on the hot path.
+//
+// Mirrors the Anthropic-style top-level `{ role, content }` shape that
+// compressToolHistory.ts's `getInner` accepts. Degrades to passthrough when
+// the shim cannot be loaded or returns a malformed payload.
+type CompressToolHistoryFn = (
+  messages: Array<{ role?: string; content?: unknown }>,
+  model: string,
+) => Array<{ role?: string; content?: unknown; message?: { content?: unknown } }>
+
+let compressToolHistory: CompressToolHistoryFn | undefined
+try {
+  const req = createRequire(import.meta.url)
+  const mod = req('../opencc-internals/services/api/compressToolHistory.js') as
+    | { compressToolHistory?: CompressToolHistoryFn }
+    | undefined
+  compressToolHistory = mod?.compressToolHistory
+} catch (err) {
+  if (process.env.ZAI_DEBUG === '1')
+    console.error('[transcript] compressToolHistory load failed', err)
+}
+
+function compressToolResult(content: unknown, model = 'gpt-4o'): unknown {
+  if (!compressToolHistory) return content
+  try {
+    const wrapped = [
+      { role: 'user', content },
+    ] as unknown as Parameters<CompressToolHistoryFn>[0]
+    const out = compressToolHistory(wrapped, model)
+    if (Array.isArray(out) && out[0]) {
+      const inner =
+        (out[0] as { message?: { content?: unknown } }).message ?? out[0]
+      const c = (inner as { content?: unknown }).content
+      if (Array.isArray(c)) {
+        const trBlock = (
+          c as Array<{ type?: string; content?: unknown }>
+        ).find(b => b.type === 'tool_result')
+        if (trBlock) return trBlock.content
+      }
+    }
+  } catch (err) {
+    if (process.env.ZAI_DEBUG === '1')
+      console.error('[transcript] compressToolResult failed', err)
+  }
+  return content
+}
 
 type CommonCtx = {
   cwd: string
@@ -90,32 +148,9 @@ export async function appendToolResult(
   block: { tool_use_id: string; content: unknown; is_error: boolean },
   turnIndex: number,
   parentUuid: string | null,
-  compressTier?: { recent: number; mid: number },
 ): Promise<void> {
   try {
-    let compressed: unknown = block.content
-    if (compressTier) {
-      const mod = await import(
-        '../opencc-internals/services/api/compressToolHistory.js'
-      ).catch(() => null)
-      if (mod) {
-        const result = mod.compressToolHistory(
-          [{ role: 'user', content: compressed }],
-          'gpt-4o',
-        )
-        if (Array.isArray(result) && result[0]) {
-          const inner = (result[0] as { message?: { content?: unknown } })
-            .message ?? result[0]
-          const c = (inner as { content?: unknown }).content
-          if (Array.isArray(c)) {
-            const trBlock = (
-              c as Array<{ type?: string; content?: unknown }>
-            ).find((b) => b.type === 'tool_result')
-            if (trBlock) compressed = trBlock.content
-          }
-        }
-      }
-    }
+    const compressed = compressToolResult(block.content)
     const trBlock: ContentBlock = {
       type: 'tool_result',
       tool_use_id: block.tool_use_id,
@@ -193,43 +228,4 @@ export function serializeForAnthropic(
     // system / attachment 跳过（resume 不喂模型；UI 单独处理）
   }
   return out
-}
-
-/**
- * Thin wrapper around `compressToolHistory` that accepts a single tool_result
- * content payload plus the current turn index. Returns the (possibly
- * compressed) content back. The underlying `compressToolHistory` operates on
- * a full messages array with a tier derived from the effective context window
- * — we wrap it here so callers don't need to fabricate an array.
- *
- * Uses a sensible default tier ({ recent: 5, mid: 30 }) since this helper is
- * only invoked on the freshly-arrived tool_result; tiering across the whole
- * session history is handled by the underlying shim.
- *
- * NOTE: this helper degrades gracefully to passthrough when the shim module
- * can't be loaded (e.g. during testing before the opencc-internals layer is
- * fully wired).
- */
-export async function compressToolResultIfNeeded(
-  content: unknown,
-  _turnIndex: number,
-): Promise<unknown> {
-  const mod = await import(
-    '../opencc-internals/services/api/compressToolHistory.js'
-  ).catch(() => null)
-  if (!mod) return content
-  const result = mod.compressToolHistory(
-    [{ role: 'user', content }],
-    'gpt-4o',
-  )
-  if (!Array.isArray(result) || !result[0]) return content
-  const inner =
-    (result[0] as { message?: { content?: unknown } }).message ??
-    result[0]
-  const c = (inner as { content?: unknown }).content
-  if (!Array.isArray(c)) return content
-  const trBlock = (c as Array<{ type?: string; content?: unknown }>).find(
-    (b) => b.type === 'tool_result',
-  )
-  return trBlock?.content ?? content
 }
