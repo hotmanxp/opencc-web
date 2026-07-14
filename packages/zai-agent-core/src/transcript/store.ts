@@ -15,7 +15,7 @@ export class TranscriptStore {
     await mkdir(transcriptDir(this.dataDir), { recursive: true })
     const transcriptId = id ?? generateTranscriptId()
     const file: TranscriptFile = {
-      version: 1,
+      version: 2 as const,
       transcriptId,
       meta: { ...meta, createdAt: Date.now(), updatedAt: Date.now() },
       messages: [],

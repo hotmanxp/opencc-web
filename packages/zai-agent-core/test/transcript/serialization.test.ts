@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, it } from 'bun:test'
 import {
   serializeMessage,
   deserializeMessage,
@@ -6,47 +6,72 @@ import {
   deserializeFile,
   extractMeta,
 } from '../../src/transcript/serialization.js'
+import { LegacyTranscriptError } from '../../src/transcript/types.js'
 import type { TranscriptFile, TranscriptMessage } from '../../src/transcript/types.js'
 
+const sampleMsg: TranscriptMessage = {
+  uuid: 'abc-123',
+  parentUuid: null,
+  type: 'user',
+  timestamp: 1700000000000,
+  message: { content: 'hello', role: 'user' },
+  cwd: '/home/user/project',
+  userType: 'zai',
+  sessionId: 'sess-abc',
+  version: '2',
+  isSidechain: false,
+}
+
 describe('serialization', () => {
-  test('message round-trip', () => {
-    const msg: TranscriptMessage = {
-      uuid: 'abc-123',
-      parentUuid: null,
-      type: 'user',
-      timestamp: 1700000000000,
-      raw: { content: 'hello' },
-    }
-    const json = serializeMessage(msg)
+  it('message round-trip', () => {
+    const json = serializeMessage(sampleMsg)
     const restored = deserializeMessage(json)
-    expect(restored).toEqual(msg)
+    expect(restored).toEqual(sampleMsg)
+    expect(restored.message.content).toBe('hello')
   })
 
-  test('file round-trip', () => {
+  it('file round-trip', () => {
     const file: TranscriptFile = {
-      version: 1,
+      version: 2,
       transcriptId: 'sess-xyz',
       meta: { cwd: '/test', model: 'gpt-4', createdAt: 1, updatedAt: 2 },
-      messages: [],
+      messages: [sampleMsg],
     }
     const json = serializeFile(file)
     const restored = deserializeFile(json)
     expect(restored).toEqual(file)
+    expect(restored.version).toBe(2)
+    expect(restored.messages[0].message.content).toBe('hello')
   })
 
-  test('deserializeFile throws on unknown version', () => {
+  it('deserializeFile throws LegacyTranscriptError on v1', () => {
+    const v1Raw = JSON.stringify({
+      version: 1,
+      transcriptId: 'sess-xyz',
+      meta: { cwd: '/test', model: 'gpt-4', createdAt: 1, updatedAt: 2 },
+      messages: [{ uuid: 'a', parentUuid: null, type: 'user', timestamp: 1, raw: { content: 'hi' } }],
+    })
+    expect(() => deserializeFile(v1Raw)).toThrow(LegacyTranscriptError)
+  })
+
+  it('deserializeFile throws on unknown version', () => {
     expect(() => deserializeFile(JSON.stringify({ version: 99 }))).toThrow('Unsupported transcript version')
   })
 
-  test('extractMeta', () => {
+  it('extractMeta', () => {
     const file: TranscriptFile = {
-      version: 1,
+      version: 2,
       transcriptId: 'sess-xyz',
       meta: { cwd: '/test', model: 'gpt-4', createdAt: 1, updatedAt: 2, title: 'my session' },
-      messages: [{ uuid: 'a', parentUuid: null, type: 'user', timestamp: 1, raw: {} }],
+      messages: [
+        { ...sampleMsg, uuid: 'msg-a', message: { content: 'first', role: 'user' } },
+        { ...sampleMsg, uuid: 'msg-b', message: { content: 'second', role: 'assistant' } },
+      ],
     }
     const meta = extractMeta(file)
-    expect(meta.messageCount).toBe(1)
+    expect(meta.version).toBe(2)
+    expect(meta.messageCount).toBe(2)
     expect(meta.title).toBe('my session')
+    expect(meta.transcriptId).toBe('sess-xyz')
   })
 })
