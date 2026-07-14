@@ -232,6 +232,7 @@ function parseFile(path: string, mcpKey: 'mcpServers' = 'mcpServers'): McpServer
 }
 
 function parseOne(name: string, def: McpJsonServer): McpServerSpec | null {
+  if (!def || typeof def !== 'object') return null
   if (def.command) {
     return {
       name,
