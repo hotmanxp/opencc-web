@@ -52,7 +52,6 @@ export default function Layout() {
         collapsed={sidebarCollapsed}
         onCollapse={toggleSidebar}
         width={150}
-        collapsedWidth={50}
         // trigger={false} 关闭 antd 自带的触发条 (避免 .ant-layout-sider-trigger
         // 的深蓝底色覆盖自定义样式). 我们自己渲染, 用主题紫 + 半透明紫底,
         // hover 时加深, 与全站紫色基调一致.
