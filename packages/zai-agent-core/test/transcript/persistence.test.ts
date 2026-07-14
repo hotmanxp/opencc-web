@@ -28,6 +28,7 @@ describe('persistence helpers', () => {
       { id: 'tu_1', name: 'Bash', input: { cmd: 'ls' } },
       0,
       null,
+      '/x',
     )
     const t = await store.read(sessionId)
     expect(t.messages).toHaveLength(1)
@@ -36,6 +37,8 @@ describe('persistence helpers', () => {
       id: 'tu_1',
       name: 'Bash',
     })
+    // M1: persisted tool_use v2 message must carry real cwd (not '').
+    expect(t.messages[0].cwd).toBe('/x')
   })
 
   it('appendToolResult stores type=user with tool_result block, is_error preserved', async () => {
@@ -45,6 +48,7 @@ describe('persistence helpers', () => {
       { id: 'tu_1', name: 'Bash', input: {} },
       0,
       null,
+      '/x',
     )
     const tuUuid = (await store.read(sessionId)).messages[0].uuid
     await appendToolResult(
@@ -53,10 +57,13 @@ describe('persistence helpers', () => {
       { tool_use_id: 'tu_1', content: 'err', is_error: true },
       0,
       tuUuid,
+      '/x',
     )
     const t = await store.read(sessionId)
     const tr = t.messages.find((m) => m.type === 'user')!
     expect((tr.message.content as any)[0].is_error).toBe(true)
+    // M1: persisted tool_result v2 message must carry real cwd (not '').
+    expect(tr.cwd).toBe('/x')
   })
 
   it('appendAssistantMessageV2 stores multiple blocks in order', async () => {

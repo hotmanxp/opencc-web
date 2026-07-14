@@ -234,6 +234,7 @@ export async function* queryEngine(
       turnIndex: turn,
       nextEventId: () => `evt-tool-${++toolEvtCounter}`,
       store,
+      cwd: options.cwd,
     }, config.askRegistry)) {
       yield ev as RuntimeEvent
     }

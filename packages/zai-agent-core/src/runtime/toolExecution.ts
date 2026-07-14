@@ -26,6 +26,13 @@ type EventMeta = {
    * keep working without plumbing a store.
    */
   store?: TranscriptStore
+  /**
+   * cwd of the active session, threaded into v2 tool_use + tool_result
+   * messages so every persisted message carries the real cwd (not '').
+   * Optional so existing fixtures that don't care about persistence
+   * keep working without plumbing cwd.
+   */
+  cwd?: string
 }
 
 /**
@@ -154,6 +161,7 @@ export async function* executeToolsStreaming(
           { id: block.id, name: block.name, input: parsed.data },
           meta.turnIndex,
           null,
+          meta.cwd ?? '',
         )
       : undefined
 
@@ -219,6 +227,7 @@ export async function* executeToolsStreaming(
           { tool_use_id: block.id, content, is_error: outIsError },
           meta.turnIndex,
           toolUseUuid ?? null,
+          meta.cwd ?? '',
         )
       }
     } catch (err) {
@@ -240,6 +249,7 @@ export async function* executeToolsStreaming(
           { tool_use_id: block.id, content: errorContent, is_error: true },
           meta.turnIndex,
           toolUseUuid ?? null,
+          meta.cwd ?? '',
         )
       }
     }

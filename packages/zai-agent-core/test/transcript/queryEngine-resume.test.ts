@@ -46,6 +46,7 @@ describe('queryEngine resume via serializeForAnthropic', () => {
       { id: 'tu_1', name: 'Bash', input: {} },
       0,
       null,
+      '/x',
     )
     const tuUuid = (await store.read(sessionId)).messages.at(-1)!.uuid
     await appendToolResult(
@@ -54,6 +55,7 @@ describe('queryEngine resume via serializeForAnthropic', () => {
       { tool_use_id: 'tu_1', content: 'r', is_error: false },
       0,
       tuUuid,
+      '/x',
     )
 
     const t = await store.read(sessionId)
@@ -94,6 +96,7 @@ describe('queryEngine resume via serializeForAnthropic', () => {
       { id: 'tu_a', name: 'Bash', input: {} },
       0,
       null,
+      '/x',
     )
     const tuAUuid = (await store.read(sessionId)).messages.at(-1)!.uuid
     await appendToolUse(
@@ -102,6 +105,7 @@ describe('queryEngine resume via serializeForAnthropic', () => {
       { id: 'tu_b', name: 'Bash', input: {} },
       0,
       tuAUuid,
+      '/x',
     )
     const tuBUuid = (await store.read(sessionId)).messages.at(-1)!.uuid
     await appendToolResult(
@@ -110,6 +114,7 @@ describe('queryEngine resume via serializeForAnthropic', () => {
       { tool_use_id: 'tu_a', content: 'a', is_error: false },
       0,
       tuAUuid,
+      '/x',
     )
     await appendToolResult(
       store,
@@ -117,6 +122,7 @@ describe('queryEngine resume via serializeForAnthropic', () => {
       { tool_use_id: 'tu_b', content: 'b', is_error: false },
       0,
       tuBUuid,
+      '/x',
     )
 
     const t = await store.read(sessionId)
