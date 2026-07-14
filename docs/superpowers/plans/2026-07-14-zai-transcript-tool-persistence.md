@@ -342,6 +342,7 @@ git commit -m "feat(zai-transcript): v2 serialization, v1 → LegacyTranscriptEr
 **Interfaces:**
 - Consumes: `TranscriptStore` from store.ts; `ContentBlock`, `TranscriptMessage`, `TranscriptFile` from types.ts; `compressToolHistory` from `opencc-internals/services/api/compressToolHistory.ts`
 - Produces:
+  - `appendUserMessageV2(store, sessionId, content, turnIndex, parentUuid, ctx, meta?): Promise<void>`
   - `appendToolUse(store, sessionId, { id, name, input }, turnIndex, parentUuid): Promise<void>`
   - `appendToolResult(store, sessionId, { tool_use_id, content, is_error }, turnIndex, parentUuid): Promise<void>`
   - `appendAssistantMessageV2(store, sessionId, blocks: ContentBlock[], turnIndex, parentUuid, ctx): Promise<void>`
@@ -442,6 +443,36 @@ function baseFields(ctx: CommonCtx, turnIndex: number, parentUuid: string | null
     version: '2',
     isSidechain: false,
     ...(turnIndex !== undefined ? { runtime: { turnIndex } } : {}),
+  }
+}
+
+export async function appendUserMessageV2(
+  store: TranscriptStore,
+  sessionId: string,
+  content: unknown,
+  turnIndex: number,
+  parentUuid: string | null,
+  ctx: CommonCtx,
+  meta?: { kind?: 'user' | 'skill_injection'; skillName?: string },
+): Promise<void> {
+  try {
+    const isSkillInjection = meta?.kind === 'skill_injection'
+    const normalized = typeof content === 'string' || Array.isArray(content)
+      ? content
+      : String(content)
+    const msg: TranscriptMessage = {
+      ...baseFields(ctx, turnIndex, parentUuid),
+      type: 'user',
+      message: {
+        content: isSkillInjection
+          ? `[skill_injection:${meta?.skillName ?? ''}] ${normalized}`
+          : normalized,
+        role: 'user',
+      },
+    }
+    await store.append(sessionId, msg)
+  } catch (err) {
+    if (process.env.ZAI_DEBUG === '1') console.error('[transcript] appendUserMessageV2 failed', err)
   }
 }
 
@@ -731,6 +762,7 @@ Edit `packages/zai-agent-core/src/runtime/queryEngine.ts`:
 ```ts
 import {
   appendAssistantMessageV2 as persistAssistantMessage,
+  appendUserMessageV2 as persistUserMessage,
   appendToolUse as persistToolUse,
   appendToolResult as persistToolResult,
   serializeForAnthropic,
@@ -758,9 +790,11 @@ if (resumeId) {
 
 3. Replace `appendUserMessage` / `appendAssistantMessage` callers (lines 130, 410, 452):
 
-For `appendUserMessage` (line 130) — keep existing signature but route through new helper:
+For `appendUserMessage` (line 130) — replace the in-file implementation with a thin wrapper that delegates to `appendUserMessageV2` from persistence.ts (which owns the v2 schema):
 
 ```ts
+import { appendUserMessageV2 as persistUserMessage } from '../transcript/persistence.js'
+
 async function appendUserMessage(
   store: TranscriptStore,
   sessionId: string,
@@ -768,32 +802,15 @@ async function appendUserMessage(
   turnIndex: number,
   meta?: { kind?: 'user' | 'skill_injection'; skillName?: string },
 ): Promise<void> {
-  try {
-    const isSkillInjection = meta?.kind === 'skill_injection'
-    const msg: TranscriptMessage = {
-      uuid: randomUUID(),
-      parentUuid: null,
-      type: 'user',
-      timestamp: Date.now(),
-      cwd: options.cwd,
-      userType: 'zai',
-      sessionId,
-      version: '2',
-      isSidechain: false,
-      runtime: { turnIndex },
-      message: {
-        content: typeof content === 'string' || Array.isArray(content) ? content : String(content),
-        role: 'user',
-      },
-    }
-    await store.append(sessionId, msg)
-  } catch (err) {
-    if (process.env.ZAI_DEBUG === '1') console.error('[transcript] appendUserMessage failed', err)
-  }
+  await persistUserMessage(
+    store, sessionId, content, turnIndex, null,
+    { cwd: options.cwd, sessionId },
+    meta,
+  )
 }
 ```
 
-(Remove the old `parentUuid: null` + `raw: { content }` shape — replace with v2 `message.content` and required SerializedMessage fields.)
+(Removes the old `parentUuid: null` + `raw: { content }` shape — v2 path lives in persistence.ts.)
 
 4. Replace `appendAssistantMessage` (lines 413–453) to call `persistAssistantMessage` with blocks:
 
