@@ -15,7 +15,7 @@ export default defineConfig({
     port: 5173,
     proxy: {
       '/api': {
-        target: 'http://localhost:7715',
+        target: process.env.ZAI_API_ORIGIN ?? 'http://localhost:7715',
         changeOrigin: true,
       },
     },
