@@ -75,7 +75,7 @@ describe('renderPrompt', () => {
   })
 
   it('empty args → all replacements empty', () => {
-    expect(renderPrompt({ body: '$ARGUMENTS $1', args: '' })).toBe('  ')
+    expect(renderPrompt({ body: '$ARGUMENTS $1', args: '' })).toBe(' ')
   })
 
   it('handles $$ (escaped dollar) — not a spec requirement, but verify no crash', () => {
