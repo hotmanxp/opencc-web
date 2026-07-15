@@ -14,26 +14,26 @@ interface CommandRequestBody {
 commandRouter.post('/command', async (req, res) => {
   const { name, args = '', sessionId } = (req.body ?? {}) as CommandRequestBody
 
-  // 服务启动时若未 init,先兜底一次。
-  await initCommands({ cwd: process.cwd(), dataDir: process.env.ZAI_DATA_DIR ?? '', sessionId })
-
-  const reg = getCommandRegistry()
-  const cmd = name ? reg.get(name) : undefined
-  if (!cmd) {
-    return res.json({ type: 'unknown', payload: { input: `/${name}` } })
-  }
-
-  // 取当前 session;若 body 带 sessionId,优先用。
-  const sid = sessionId ?? getCurrentSessionId() ?? undefined
-  const runtime = getRuntime() as unknown as { config?: { defaultModel?: string } }
-  const context = {
-    cwd: process.cwd(),
-    dataDir: process.env.ZAI_DATA_DIR ?? '',
-    ...(sid ? { sessionId: sid } : {}),
-    ...(runtime.config?.defaultModel ? { model: runtime.config.defaultModel } : {}),
-  }
-
   try {
+    // 服务启动时若未 init,先兜底一次。
+    await initCommands({ cwd: process.cwd(), dataDir: process.env.ZAI_DATA_DIR ?? '', sessionId })
+
+    const reg = getCommandRegistry()
+    const cmd = name ? reg.get(name) : undefined
+    if (!cmd) {
+      return res.json({ type: 'unknown', payload: { input: `/${name}` } })
+    }
+
+    // 取当前 session;若 body 带 sessionId,优先用。
+    const sid = sessionId ?? getCurrentSessionId() ?? undefined
+    const runtime = getRuntime() as unknown as { config?: { defaultModel?: string } } | null
+    const context = {
+      cwd: process.cwd(),
+      dataDir: process.env.ZAI_DATA_DIR ?? '',
+      ...(sid ? { sessionId: sid } : {}),
+      ...(runtime?.config?.defaultModel ? { model: runtime.config.defaultModel } : {}),
+    }
+
     if (cmd.type === 'local') {
       const result = await cmd.call(args, context)
       switch (result.kind) {
