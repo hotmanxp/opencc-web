@@ -96,4 +96,30 @@ describe('CommandRegistry', () => {
     expect(r2).not.toBe(r1)
     expect(r2.get('a')).toBeUndefined()
   })
+
+  it('re-register same primary clears old aliases', () => {
+    const r = getCommandRegistry()
+    r.register(makeLocal('foo', ['old']))
+    r.register(makeLocal('foo', ['new']))
+    expect(r.get('foo')).toBeDefined()
+    expect(r.get('old')).toBeUndefined()
+    expect(r.get('new')).toBeDefined()
+  })
+
+  it('does not delete alias still used by another command', () => {
+    const r = getCommandRegistry()
+    r.register(makeLocal('a', ['shared']))
+    r.register(makeLocal('b', ['shared']))
+    r.unregister('a')
+    expect(r.get('shared')).toBeDefined()
+    expect(r.get('b')).toBeDefined()
+  })
+
+  it('unregister cleans up that command aliases', () => {
+    const r = getCommandRegistry()
+    r.register(makeLocal('foo', ['x', 'y']))
+    r.unregister('foo')
+    expect(r.get('x')).toBeUndefined()
+    expect(r.get('y')).toBeUndefined()
+  })
 })

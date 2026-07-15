@@ -22,6 +22,17 @@ class InMemoryRegistry implements CommandRegistry {
   }
 
   register(cmd: Command): void {
+    const oldCmd = this.byPrimary.get(this.key(cmd.name))
+    if (oldCmd && oldCmd !== cmd) {
+      // 清理旧命令的 alias(只清指向旧实例的项,避免误删共享)
+      if (oldCmd.aliases) {
+        for (const a of oldCmd.aliases) {
+          if (this.byAlias.get(this.key(a)) === oldCmd) {
+            this.byAlias.delete(this.key(a))
+          }
+        }
+      }
+    }
     this.byPrimary.set(this.key(cmd.name), cmd)
     if (cmd.aliases) {
       for (const a of cmd.aliases) this.byAlias.set(this.key(a), cmd)
@@ -32,7 +43,11 @@ class InMemoryRegistry implements CommandRegistry {
     const cmd = this.byPrimary.get(this.key(name))
     this.byPrimary.delete(this.key(name))
     if (cmd?.aliases) {
-      for (const a of cmd.aliases) this.byAlias.delete(this.key(a))
+      for (const a of cmd.aliases) {
+        if (this.byAlias.get(this.key(a)) === cmd) {
+          this.byAlias.delete(this.key(a))
+        }
+      }
     }
   }
 
