@@ -9,6 +9,11 @@ import {
   Space,
   Tag,
   Tree,
+  Modal,
+  Form,
+  Input,
+  Select,
+  Popconfirm,
 } from 'antd';
 import type { DataNode } from 'antd/es/tree';
 import {
@@ -17,8 +22,12 @@ import {
   CheckCircleOutlined,
   FolderOutlined,
   FileOutlined,
+  EditOutlined,
+  DeleteOutlined,
+  PlusOutlined,
+  CopyOutlined,
 } from '@ant-design/icons';
-import { useEffect, useState, useMemo } from 'react';
+import { useCallback, useEffect, useState, useMemo } from 'react';
 import type { ResourceItem, ResourceType, SseEvent } from '@shared/types';
 import { api } from '../lib/api';
 import { useSse } from '../lib/sse';
@@ -102,6 +111,93 @@ export default function Resources() {
   useEffect(() => {
     fetchResources(activeTab);
   }, [activeTab]);
+
+  const [commandList, setCommandList] = useState<Array<{ name: string; description?: string; argumentHint?: string; whenToUse?: string }>>([])
+  const [commandLoading, setCommandLoading] = useState(false)
+  const [editingCommand, setEditingCommand] = useState<null | { name: string; frontmatter: Record<string, unknown>; body: string }>(null)
+  const [editingIsNew, setEditingIsNew] = useState(false)
+  const [commandForm] = Form.useForm()
+
+  const fetchCommandList = useCallback(async () => {
+    setCommandLoading(true)
+    try {
+      const res = await fetch('/api/agent/commands')
+      const data = await res.json()
+      setCommandList(Array.isArray(data.items) ? data.items : [])
+    } catch {
+      setCommandList([])
+    } finally {
+      setCommandLoading(false)
+    }
+  }, [])
+
+  useEffect(() => { fetchCommandList() }, [fetchCommandList])
+
+  const openCreateCommand = () => {
+    setEditingIsNew(true)
+    setEditingCommand({ name: '', frontmatter: { description: '', argumentHint: '' }, body: '' })
+    commandForm.resetFields()
+  }
+
+  const openEditCommand = async (name: string) => {
+    try {
+      const res = await fetch(`/api/agent/commands/${encodeURIComponent(name)}`)
+      if (!res.ok) { message.error('读取失败'); return }
+      const data = await res.json()
+      setEditingIsNew(false)
+      setEditingCommand({ name: data.name, frontmatter: data.frontmatter ?? {}, body: data.body ?? '' })
+      commandForm.setFieldsValue({
+        name: data.name,
+        description: data.frontmatter?.description ?? '',
+        argumentHint: data.frontmatter?.argumentHint ?? '',
+        argNames: Array.isArray(data.frontmatter?.argNames) ? data.frontmatter.argNames.join(', ') : '',
+        allowedTools: Array.isArray(data.frontmatter?.allowedTools) ? data.frontmatter.allowedTools.join(', ') : '',
+        model: data.frontmatter?.model ?? '',
+        effort: data.frontmatter?.effort ?? '',
+        body: data.body ?? '',
+      })
+    } catch (err) {
+      message.error(`读取失败: ${(err as Error).message}`)
+    }
+  }
+
+  const submitCommand = async () => {
+    const v = await commandForm.validateFields()
+    const fm: Record<string, unknown> = {}
+    if (v.description) fm.description = v.description
+    if (v.argumentHint) fm.argumentHint = v.argumentHint
+    if (v.argNames) fm.argNames = v.argNames.split(',').map((s: string) => s.trim()).filter(Boolean)
+    if (v.allowedTools) fm.allowedTools = v.allowedTools.split(',').map((s: string) => s.trim()).filter(Boolean)
+    if (v.model) fm.model = v.model
+    if (v.effort) fm.effort = v.effort
+    const name = v.name
+    try {
+      const res = editingIsNew
+        ? await fetch('/api/agent/commands', { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ name, frontmatter: fm, body: v.body }) })
+        : await fetch(`/api/agent/commands/${encodeURIComponent(name)}`, { method: 'PUT', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ frontmatter: fm, body: v.body }) })
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        message.error(err.error ?? `HTTP ${res.status}`)
+        return
+      }
+      message.success(editingIsNew ? '已创建' : '已更新')
+      setEditingCommand(null)
+      fetchCommandList()
+    } catch (err) {
+      message.error(`保存失败: ${(err as Error).message}`)
+    }
+  }
+
+  const deleteCommand = async (name: string) => {
+    try {
+      const res = await fetch(`/api/agent/commands/${encodeURIComponent(name)}`, { method: 'DELETE' })
+      if (!res.ok) { message.error('删除失败'); return }
+      message.success('已删除')
+      fetchCommandList()
+    } catch (err) {
+      message.error(`删除失败: ${(err as Error).message}`)
+    }
+  }
 
   const handleInstall = (item: ResourceItem) => {
     if (installing || item.installedVersion) return;
@@ -244,6 +340,67 @@ export default function Resources() {
           />
         </Card>
       )}
+
+      <Card title="用户命令 (User Commands)" extra={
+        <Button icon={<PlusOutlined />} type="primary" onClick={openCreateCommand}>新建</Button>
+      }>
+        {commandLoading ? <Spin /> : commandList.length === 0 ? (
+          <Empty description="暂无用户命令" />
+        ) : (
+          <Space direction="vertical" style={{ width: '100%' }}>
+            {commandList.map((c) => (
+              <Card key={c.name} size="small" type="inner"
+                title={<Space><Typography.Text code>/{c.name}</Typography.Text>{c.description && <Typography.Text type="secondary">{c.description}</Typography.Text>}</Space>}
+                extra={
+                  <Space>
+                    <Button icon={<EditOutlined />} size="small" onClick={() => openEditCommand(c.name)}>编辑</Button>
+                    <Popconfirm title={`删除 /${c.name}?`} onConfirm={() => deleteCommand(c.name)}>
+                      <Button icon={<DeleteOutlined />} size="small" danger>删除</Button>
+                    </Popconfirm>
+                  </Space>
+                }
+              >
+                {c.argumentHint && <Tag>arg: {c.argumentHint}</Tag>}
+                {c.whenToUse && <Typography.Text type="secondary"> {c.whenToUse}</Typography.Text>}
+              </Card>
+            ))}
+          </Space>
+        )}
+      </Card>
+
+      <Modal
+        open={editingCommand !== null}
+        title={editingIsNew ? '新建用户命令' : `编辑 /${editingCommand?.name ?? ''}`}
+        onCancel={() => setEditingCommand(null)}
+        onOk={submitCommand}
+        okText="保存"
+        cancelText="取消"
+        width={720}
+        destroyOnClose
+      >
+        <Form form={commandForm} layout="vertical" preserve={false}>
+          <Form.Item label="name" name="name" rules={[
+            { required: true, message: '必填' },
+            { pattern: /^[a-z0-9][a-z0-9-_]*$/, message: '小写字母/数字/-/_ 开头' },
+          ]}>
+            <Input disabled={!editingIsNew} placeholder="例如 greet" />
+          </Form.Item>
+          <Form.Item label="description" name="description"><Input /></Form.Item>
+          <Form.Item label="argumentHint" name="argumentHint"><Input placeholder="例如 [name]" /></Form.Item>
+          <Form.Item label="argNames (逗号分隔)" name="argNames"><Input placeholder="例如 name, age" /></Form.Item>
+          <Form.Item label="allowedTools (逗号分隔)" name="allowedTools"><Input /></Form.Item>
+          <Form.Item label="model" name="model"><Input placeholder="例如 claude-3-5-sonnet" /></Form.Item>
+          <Form.Item label="effort" name="effort">
+            <Select allowClear options={[
+              { value: 'low', label: 'low' }, { value: 'medium', label: 'medium' },
+              { value: 'high', label: 'high' }, { value: 'max', label: 'max' },
+            ]} />
+          </Form.Item>
+          <Form.Item label="body (markdown;可用 $ARGUMENTS / $1 / ${name})" name="body" rules={[{ required: true, message: '必填' }]}>
+            <Input.TextArea rows={10} placeholder="Hello $ARGUMENTS" />
+          </Form.Item>
+        </Form>
+      </Modal>
     </div>
   );
 }
