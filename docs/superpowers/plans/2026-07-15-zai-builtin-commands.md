@@ -533,12 +533,12 @@ git commit -m "feat(zai-agent-core): CommandRegistry with case-insensitive resol
 **Interfaces:**
 - Consumes:
   - agent-core `LocalCommand`, `LocalCommandResult`, `StatusPayload`, `CommandContext`, `getCommandRegistry`
-  - `getTranscriptStore()` (from `services/agentRuntime.ts`)
+  - `getTranscriptStore()` (from `services/agentRuntime.ts` — **实施前请 Read 该文件确认导出存在**)
   - `getCurrentSessionId()` (from `services/agentRuntime.ts`)
-  - `abortAgentSession(reason)` (from `services/agentRuntime.ts`)
+  - `abortAgentSession(reason)` (from `services/agentRuntime.ts` — **同上,确认导出与签名**)
   - `getRuntime()` (from `services/agentRuntime.ts`)
 - Produces:
-  - `initCommands(): void` — 注册 builtin + user
+  - `registerBuiltinCommands(): void` (Task 3);最终 `initCommands(context)` 在 Task 4 包装此函数
   - `clearCommand: LocalCommand`
   - `compactCommand: LocalCommand`
   - `statusCommand: LocalCommand`
