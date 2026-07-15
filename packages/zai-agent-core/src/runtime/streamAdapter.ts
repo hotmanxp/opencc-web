@@ -74,14 +74,22 @@ export function toAbortedEvent(
 
 function classifyError(err: Error): ErrorCategory {
   const msg = err.message.toLowerCase()
+  // 529 / overloaded → 子分类, 触发 BackgroundRuntime 自动重试.
+  if (msg.includes('529') || msg.includes('overloaded_error')) {
+    return 'llm_provider_overloaded'
+  }
+  // 401/403 → auth 子分类（区别于其他 4xx，避免被 retry 当 5xx 重试）.
   if (msg.includes('401') || msg.includes('403') || msg.includes('unauthorized') || msg.includes('auth')) {
-    return 'llm_provider'
+    return 'llm_provider_auth'
   }
+  // 429 rate limit → 子分类；quota-exhausted 仍由 BackgroundRuntime.catch 路径
+  // 通过 classifyRetryableError 区分, 此处只做粗粒度 fallback.
   if (msg.includes('429') || msg.includes('rate limit')) {
-    return 'llm_provider'
+    return 'llm_provider_rate_limit'
   }
-  if (msg.includes('5') || msg.includes('timeout') || msg.includes('fetch failed') || msg.includes('econnrefused')) {
-    return 'llm_provider'
+  // 5xx / 网络错误 → server 子分类.
+  if (msg.includes('5') || msg.includes('timeout') || msg.includes('fetch failed') || msg.includes('econnrefused') || msg.includes('econnreset')) {
+    return 'llm_provider_server'
   }
   if (msg.includes('abort')) {
     return 'aborted'

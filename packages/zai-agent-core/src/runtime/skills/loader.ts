@@ -93,7 +93,22 @@ async function parseSkillFile(
   sourceIndex: number,
 ): Promise<LoadedSkill | null> {
   const content = await readFile(filePath, 'utf-8')
-  const { frontmatter, body } = parseSkillFrontmatter(content, filePath)
+  // Frontmatter parse failure (bad YAML, invalid key shape, etc.) must not
+  // bubble out of this function — a single malformed skill file should skip
+  // itself rather than abort the whole loadSkillsFromDirs walk. The caller
+  // still has a defensive try/catch, but keeping the boundary local makes the
+  // contract explicit (LoadedSkill | null, never throws on bad input).
+  let frontmatter: SkillFrontmatter
+  let body: string
+  try {
+    ;({ frontmatter, body } = parseSkillFrontmatter(content, filePath))
+  } catch (err) {
+    console.warn(
+      `[skills] ${filePath}: frontmatter parse failed, skipping —`,
+      err instanceof Error ? err.message : err,
+    )
+    return null
+  }
 
   // malformed frontmatter (starts with `---` but has no closing terminator)
   // produces empty frontmatter + body starting with `---`. Treat as parse failure.

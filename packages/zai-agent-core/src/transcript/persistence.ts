@@ -80,6 +80,7 @@ function baseFields(
     sessionId: ctx.sessionId,
     version: '2',
     isSidechain: false,
+    raw: null,
     ...(turnIndex !== undefined ? { runtime: { turnIndex } } : {}),
   }
 }
@@ -92,15 +93,16 @@ export async function appendUserMessageV2(
   parentUuid: string | null,
   ctx: CommonCtx,
   meta?: { kind?: 'user' | 'skill_injection'; skillName?: string },
-): Promise<void> {
+): Promise<string | undefined> {
   try {
     const isSkillInjection = meta?.kind === 'skill_injection'
     const normalized =
       typeof content === 'string' || Array.isArray(content)
         ? content
         : String(content)
+    const base = baseFields(ctx, turnIndex, parentUuid)
     const msg: TranscriptMessage = {
-      ...baseFields(ctx, turnIndex, parentUuid),
+      ...base,
       type: 'user',
       message: {
         content: isSkillInjection
@@ -110,9 +112,11 @@ export async function appendUserMessageV2(
       },
     }
     await store.append(sessionId, msg)
+    return base.uuid
   } catch (err) {
     if (process.env.ZAI_DEBUG === '1')
       console.error('[transcript] appendUserMessageV2 failed', err)
+    return undefined
   }
 }
 
@@ -184,17 +188,20 @@ export async function appendAssistantMessageV2(
   turnIndex: number,
   parentUuid: string | null,
   ctx: CommonCtx,
-): Promise<void> {
+): Promise<string | undefined> {
   try {
+    const base = baseFields(ctx, turnIndex, parentUuid)
     const msg: TranscriptMessage = {
-      ...baseFields(ctx, turnIndex, parentUuid),
+      ...base,
       type: 'assistant',
       message: { content: blocks, role: 'assistant' },
     }
     await store.append(sessionId, msg)
+    return base.uuid
   } catch (err) {
     if (process.env.ZAI_DEBUG === '1')
       console.error('[transcript] appendAssistantMessageV2 failed', err)
+    return undefined
   }
 }
 
@@ -204,6 +211,9 @@ export function serializeForAnthropic(
 ): Array<{ role: 'user' | 'assistant'; content: unknown }> {
   const out: Array<{ role: 'user' | 'assistant'; content: unknown }> = []
   for (const m of messages) {
+    // v1 messages (no `message` field) cannot be replayed into Anthropic
+    // SDK format — skip them. Callers that need v1 → SDK should pre-convert.
+    if (!m.message) continue
     if (m.type === 'tool_use') {
       // tool_use 消息: 一条 assistant role, content 是单个 tool_use block
       out.push({ role: 'assistant', content: m.message.content })

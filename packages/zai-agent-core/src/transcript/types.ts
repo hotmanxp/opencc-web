@@ -1,63 +1,31 @@
-import { z } from 'zod'
+import type { PermissionMode } from '../runtime/permissionMode.js'
 
-// ---- ContentBlock (对齐 OpenCC message.ts:45) ----
-export const ContentBlockSchema = z.discriminatedUnion('type', [
-  z.object({ type: z.literal('text'), text: z.string() }),
-  z.object({ type: z.literal('thinking'), thinking: z.string() }),
-  z.object({
-    type: z.literal('tool_use'),
-    id: z.string(),
-    name: z.string(),
-    input: z.unknown(),
-  }),
-  z.object({
-    type: z.literal('tool_result'),
-    tool_use_id: z.string(),
-    content: z.unknown(),
-    is_error: z.boolean(),
-  }),
-])
-export type ContentBlock = z.infer<typeof ContentBlockSchema>
+// v2 ContentBlock — Anthropic 风格的内容块数组元素.
+// 同时兼容 v1 raw.content 数组形态 (text / image), 因为 v1 user message 的
+// raw.content 也可以是 ContentBlock[].
+export type ContentBlock =
+  | { type: 'text'; text: string }
+  | { type: 'thinking'; thinking: string }
+  | { type: 'tool_use'; id: string; name: string; input: unknown }
+  | {
+      type: 'tool_result'
+      tool_use_id: string
+      content: unknown
+      is_error?: boolean
+    }
+  | {
+      type: 'image'
+      source: { type: 'base64'; media_type: string; data: string }
+    }
 
-// ---- SerializedMessage (对齐 OpenCC logs.ts:10) ----
-export const SerializedMessageSchema = z.object({
-  cwd: z.string(),
-  userType: z.string(),
-  sessionId: z.string(),
-  timestamp: z.union([z.number(), z.string()]),
-  version: z.string(),
-  entrypoint: z.string().optional(),
-  gitBranch: z.string().optional(),
-  slug: z.string().optional(),
-})
-export type SerializedMessage = z.infer<typeof SerializedMessageSchema>
+// v2 Anthropic SDK 消息 (供 serializeForAnthropic 喂给 LLM).
+export type AnthropicMessage = {
+  role: 'user' | 'assistant'
+  content: string | ContentBlock[]
+}
 
-// ---- TranscriptMessage v2 ----
-export const TranscriptMessageSchema = z.object({
-  uuid: z.string(),
-  parentUuid: z.string().nullable(),
-  type: z.enum(['user', 'assistant', 'tool_use', 'tool_result', 'system', 'attachment']),
-  timestamp: z.number(),
-  message: z.object({
-    content: z.union([z.string(), z.array(ContentBlockSchema)]),
-    role: z.enum(['user', 'assistant']).optional(),
-  }),
-  cwd: z.string(),
-  userType: z.string(),
-  sessionId: z.string(),
-  version: z.literal('2'),
-  gitBranch: z.string().optional(),
-  slug: z.string().optional(),
-  isSidechain: z.boolean(),
-  runtime: z
-    .object({ turnIndex: z.number(), costUsd: z.number().optional() })
-    .optional(),
-})
-export type TranscriptMessage = z.infer<typeof TranscriptMessageSchema>
-
-// ---- TranscriptFile v2 ----
 export type TranscriptFile = {
-  version: 2
+  version: 1 | 2
   transcriptId: string
   meta: {
     cwd: string
@@ -68,14 +36,35 @@ export type TranscriptFile = {
     tags?: string[]
     parentSessionId?: string
     subagentType?: string
+    permissionMode?: PermissionMode
   }
   messages: TranscriptMessage[]
 }
 
-// ---- TranscriptMeta (list 视图，版本透明) ----
+// 兼容 v1 (raw.* 形态) 与 v2 (message: AnthropicMessage + ContentBlock[] 形态).
+// v2 字段全部可选, 旧 message / store 调用方无需改动.
+export type TranscriptMessage = {
+  uuid: string
+  parentUuid: string | null
+  type: 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result' | 'attachment'
+  timestamp: number
+  raw: unknown
+  runtime?: {
+    turnIndex: number
+    eventIdRange?: [string, string]
+    costUsd?: number
+  }
+  // v2 字段 (persistence.ts / useAgentStore.loadTranscriptMessages 使用).
+  version?: '1' | '2'
+  message?: AnthropicMessage
+  cwd?: string
+  sessionId?: string
+  userType?: string
+  isSidechain?: boolean
+}
+
 export type TranscriptMeta = {
   transcriptId: string
-  version: 1 | 2
   cwd: string
   model: string
   createdAt: number
@@ -85,12 +74,5 @@ export type TranscriptMeta = {
   messageCount: number
   parentSessionId?: string
   subagentType?: string
-}
-
-// ---- Legacy marker ----
-export class LegacyTranscriptError extends Error {
-  override readonly name = 'LegacyTranscriptError'
-  constructor(reason: string) {
-    super(`Legacy transcript (v1) rejected: ${reason}`)
-  }
+  permissionMode?: PermissionMode
 }

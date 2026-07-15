@@ -1,5 +1,14 @@
 export type ErrorCategory =
+  /** DEPRECATED: 旧粗粒度分类，新代码请用下面 4 个子分类. */
   | 'llm_provider'
+  /** 529 / `overloaded_error` — RETRYABLE. */
+  | 'llm_provider_overloaded'
+  /** 429 rate limit（不含 quota-exhausted）— RETRYABLE. */
+  | 'llm_provider_rate_limit'
+  /** 5xx / timeout / fetch failed / ECONNRESET — RETRYABLE. */
+  | 'llm_provider_server'
+  /** 401 / 403 — NOT retryable（依赖 token 刷新，由上层处理）. */
+  | 'llm_provider_auth'
   | 'tool_execution'
   | 'permission_denied'
   | 'transcript_io'
@@ -32,6 +41,7 @@ export type RuntimeErrorEvent = RuntimeEvent & {
 
 export type RuntimeDoneEvent = RuntimeEvent & {
   type: 'runtime.done'
+  text?: string
 }
 
 export type RuntimeAbortedEvent = RuntimeEvent & {

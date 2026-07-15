@@ -1,5 +1,4 @@
 import type { TranscriptFile, TranscriptMessage, TranscriptMeta } from './types.js'
-import { LegacyTranscriptError } from './types.js'
 
 export function serializeMessage(msg: TranscriptMessage): string {
   return JSON.stringify(msg)
@@ -14,20 +13,16 @@ export function serializeFile(file: TranscriptFile): string {
 }
 
 export function deserializeFile(raw: string): TranscriptFile {
-  const parsed = JSON.parse(raw) as { version: number; [k: string]: unknown }
-  if (parsed.version === 1) {
-    throw new LegacyTranscriptError('version=1 — tool_use/tool_result not preserved')
-  }
-  if (parsed.version !== 2) {
+  const parsed = JSON.parse(raw) as TranscriptFile
+  if (parsed.version !== 1 && parsed.version !== 2) {
     throw new Error(`Unsupported transcript version: ${parsed.version}`)
   }
-  return parsed as unknown as TranscriptFile
+  return parsed
 }
 
 export function extractMeta(file: TranscriptFile): TranscriptMeta {
   return {
     transcriptId: file.transcriptId,
-    version: 2,
     cwd: file.meta.cwd,
     model: file.meta.model,
     createdAt: file.meta.createdAt,
@@ -37,5 +32,6 @@ export function extractMeta(file: TranscriptFile): TranscriptMeta {
     messageCount: file.messages.length,
     parentSessionId: file.meta.parentSessionId,
     subagentType: file.meta.subagentType,
+    permissionMode: file.meta.permissionMode,
   }
 }

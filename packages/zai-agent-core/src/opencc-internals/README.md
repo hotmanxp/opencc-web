@@ -1,7 +1,7 @@
 # opencc-internals — OpenCC Source Mirror
 
 This directory is a **reference mirror** of selected modules from
-[`@zn-ai/opencc`](https://github.com/opencc/opencc) (Open Claude Code). It is
+[`@zn-ai/opencc`](https://github.com/opencc/opencc) (Open CC). It is
 populated by [`scripts/sync-from-opencc.ts`](../../scripts/sync-from-opencc.ts)
 and is **NOT** part of the zai-agent-core runtime.
 

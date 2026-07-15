@@ -3,6 +3,8 @@ export { abortSession } from './abort.js'
 export { DefaultAgentRuntime } from './contract.js'
 export type { AgentRuntime } from './contract.js'
 export type { RuntimeConfig, QueryOptions, ModelCaller, AskRegistryLike, SandboxConfig } from './types.js'
+export { PERMISSION_MODES, EXTERNAL_PERMISSION_MODES } from './permissionMode.js'
+export type { PermissionMode, UserFacingPermissionMode } from './permissionMode.js'
 export type { RuntimeEvent, RuntimeErrorEvent, RuntimeDoneEvent, RuntimeAbortedEvent, ErrorCategory } from './events.js'
 export { wrapWithZaiMeta, toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
 export { TranscriptStore } from '../transcript/store.js'
@@ -18,3 +20,6 @@ export { AskUserQuestionTool, ASK_USER_QUESTION_TOOL_NAME, DESCRIPTION as ASK_US
 export type { Question, QuestionOption } from '../tools/AskUserQuestionTool/schema.js'
 export { MCPClientPool } from '../mcp/MCPClientPool.js'
 export type { McpServerSpec } from '../mcp/types.js'
+
+// 后台任务运行时 (Phase 1 + Phase 2)
+export * from './background/index.js'

@@ -13,6 +13,14 @@ import { GrepTool } from './GrepTool/GrepTool.js'
 import { AskUserQuestionTool } from './AskUserQuestionTool/AskUserQuestionTool.js'
 import { ListMcpResourcesTool } from './ListMcpResourcesTool/ListMcpResourcesTool.js'
 import { ReadMcpResourceTool } from './ReadMcpResourceTool/ReadMcpResourceTool.js'
+import { BackgroundAgentTool } from './BackgroundAgentTool/BackgroundAgentTool.js'
+import { BackgroundAgentResultTool } from './BackgroundAgentResultTool/BackgroundAgentResultTool.js'
+import { TaskCreateTool } from './TaskCreateTool/TaskCreateTool.js'
+import { TaskListTool } from './TaskListTool/TaskListTool.js'
+import { TaskGetTool } from './TaskGetTool/TaskGetTool.js'
+import { TaskUpdateTool } from './TaskUpdateTool/TaskUpdateTool.js'
+import { TaskOutputTool } from './TaskOutputTool/TaskOutputTool.js'
+import { TaskStopTool } from './TaskStopTool/TaskStopTool.js'
 import { wrapAsOpenccTool } from './legacyAdapter.js'
 import type { Tool } from './Tool.js'
 
@@ -30,5 +38,13 @@ export function getZaiRuntimeTools(): Tool[] {
     wrapAsOpenccTool(AskUserQuestionTool),
     wrapAsOpenccTool(ListMcpResourcesTool),
     wrapAsOpenccTool(ReadMcpResourceTool),
+    wrapAsOpenccTool(BackgroundAgentTool),
+    wrapAsOpenccTool(BackgroundAgentResultTool),
+    wrapAsOpenccTool(TaskCreateTool),
+    wrapAsOpenccTool(TaskListTool),
+    wrapAsOpenccTool(TaskGetTool),
+    wrapAsOpenccTool(TaskUpdateTool),
+    wrapAsOpenccTool(TaskOutputTool),
+    wrapAsOpenccTool(TaskStopTool),
   ]
 }

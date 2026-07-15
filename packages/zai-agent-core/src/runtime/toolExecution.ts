@@ -33,6 +33,15 @@ type EventMeta = {
    * keep working without plumbing cwd.
    */
   cwd?: string
+  /**
+   * parentUuid chain anchor: the uuid of the immediately-prior persisted
+   * message in the transcript (typically the assistant message that
+   * contained this turn's tool_use blocks). Threaded through to
+   * appendToolUse so tool_use's parentUuid === assistant's uuid, and
+   * tool_result's parentUuid === tool_use's uuid. Optional — defaults to
+   * null when not provided (test fixtures, ad-hoc callers).
+   */
+  parentUuid?: string | null
 }
 
 /**
@@ -160,7 +169,7 @@ export async function* executeToolsStreaming(
           meta.sessionId,
           { id: block.id, name: block.name, input: parsed.data },
           meta.turnIndex,
-          null,
+          meta.parentUuid ?? null,
           meta.cwd ?? '',
         )
       : undefined
@@ -221,7 +230,7 @@ export async function* executeToolsStreaming(
       // Task 6: persist tool_result with the matching tool_use uuid as parent.
       // Same swallow-IO-error semantics as appendToolUse.
       if (meta.store) {
-        await appendToolResult(
+        const trUuid = await appendToolResult(
           meta.store,
           meta.sessionId,
           { tool_use_id: block.id, content, is_error: outIsError },
@@ -229,6 +238,7 @@ export async function* executeToolsStreaming(
           toolUseUuid ?? null,
           meta.cwd ?? '',
         )
+        if (trUuid) (ctx.state as Record<string, unknown>).__lastPersistedUuid = trUuid
       }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
@@ -243,7 +253,7 @@ export async function* executeToolsStreaming(
       // Task 6: persist error tool_result so the transcript matches what the
       // model would see on resume (is_error=true + error message).
       if (meta.store) {
-        await appendToolResult(
+        const trUuid = await appendToolResult(
           meta.store,
           meta.sessionId,
           { tool_use_id: block.id, content: errorContent, is_error: true },
@@ -251,6 +261,7 @@ export async function* executeToolsStreaming(
           toolUseUuid ?? null,
           meta.cwd ?? '',
         )
+        if (trUuid) (ctx.state as Record<string, unknown>).__lastPersistedUuid = trUuid
       }
     }
   }

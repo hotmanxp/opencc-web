@@ -3,12 +3,6 @@ import type { QueryOptions, RuntimeConfig, SandboxConfig } from './types.js'
 import type { Tool, LegacyToolContext as ToolContext } from '../tools/Tool.js'
 import type { RuntimeEvent } from './events.js'
 import { TranscriptStore } from '../transcript/store.js'
-import type { ContentBlock } from '../transcript/types.js'
-import {
-  appendAssistantMessageV2 as persistAssistantMessage,
-  appendUserMessageV2 as persistUserMessage,
-  serializeForAnthropic,
-} from '../transcript/persistence.js'
 import { wrapWithZaiMeta, toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
 import { loadAgentsMd, buildAgentsMdSystemPrompt } from '../agents/agentsMdLoader.js'
 import { executeToolsStreaming } from './toolExecution.js'
@@ -21,6 +15,12 @@ import { adaptMcpTools } from '../mcp/MCPToolAdapter.js'
 import { loadMcpSkills } from '../mcp/SkillResourceAdapter.js'
 import { getMcpInstructionsSection } from '../mcp/mcpInstructions.js'
 import { wrapAsOpenccTool } from '../tools/legacyAdapter.js'
+import { loadAgentDefinitions } from '../tools/AgentTool/loadAgentsDir.js'
+import { renderAvailableAgentsSection } from '../tools/AgentTool/prompt.js'
+import {
+  appendAssistantMessageV2,
+  appendUserMessageV2,
+} from '../transcript/persistence.js'
 
 const DEFAULT_MAX_TURNS = 50
 
@@ -92,6 +92,7 @@ export async function* queryEngine(
     await store.create({
       cwd: options.cwd,
       model: options.model ?? config.defaultModel ?? 'default',
+      permissionMode: options.permissionMode ?? config.defaultPermissionMode ?? 'default',
       ...(options.parentSessionId ? { parentSessionId: options.parentSessionId } : {}),
       ...(options.subagentType ? { subagentType: options.subagentType } : {}),
     }, sessionId)
@@ -100,29 +101,67 @@ export async function* queryEngine(
   const systemPrompt = await buildSystemPrompt(options, skills, config)
 
   const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = []
+  // parentUuid 链: 每次 append 后, 用返回值更新 lastUuid 作为下一条的父.
+  // resume 时初始化为 transcript 末尾消息的 uuid.
+  let lastUuid: string | null = null
+  const ctx = { cwd: options.cwd, sessionId }
   const resumeId = options.resumeFromTranscriptId ?? options.transcriptId
   if (resumeId) {
+    let t: Awaited<ReturnType<typeof store.read>> | null = null
     try {
-      const t = await store.read(resumeId)
-      messages.push(...serializeForAnthropic(t.messages))
-    } catch (err) {
-      // 文件不存在 / v1 文件 (LegacyTranscriptError): 当成新建.
-      // v2 文件损坏会抛 SyntaxError → 透传, 启动失败优于静默丢数据.
-      if ((err as Error).name !== 'LegacyTranscriptError') {
-        if ((err as { code?: string }).code !== 'ENOENT') throw err
+      t = await store.read(resumeId)
+    } catch {
+      // 文件不存在: 当成新建. transcriptId 路径必须有这个容错, 否则
+      // 第一次发消息时 transcript 还没创建 → ENOENT 抛错.
+    }
+    if (t) {
+      // 把 transcript 的 raw 字段转成 SDK 期望的 content 格式:
+      // - user raw = { content: string } → content: string
+      // - assistant raw = { text: string, tool_uses: [...] } → content: [{ type: 'text', text }]
+      // - v2 message.content (ContentBlock[]) → 透传
+      for (const tm of t.messages as Array<{ uuid?: string; type: string; raw?: unknown; role?: string; version?: string; message?: { content: unknown } }>) {
+        const role = tm.type === 'user' ? 'user' : tm.type === 'assistant' ? 'assistant' : (tm.role as 'user' | 'assistant' | undefined)
+        if (role !== 'user' && role !== 'assistant') continue
+        const raw = (tm.raw ?? {}) as Record<string, unknown>
+        let content: unknown
+        if (tm.version === '2' && tm.message && Array.isArray(tm.message.content)) {
+          // v2: 直接拿 message.content (text / tool_use / tool_result blocks)
+          // 但 v1 兜底: tool_result 块在 v2 形态下不会出现在 messages[] 里喂给 LLM,
+          // 而是通过 tool_use_id 关联 (serializeForAnthropic 处理). 这里为了简单,
+          // 只把 text block 串成 content; tool_use/tool_result 块在 message 数组里
+          // 跳过, 由 serializer 在喂模型前重新拼装.
+          // 实际我们把 message.content 整块传过去, 喂给 LLM 的入口(serializeForAnthropic)
+          // 会做正确的合并/分组.
+          content = tm.message.content
+        } else if (role === 'user') {
+          if (typeof raw.content === 'string') content = raw.content
+          else if (Array.isArray(raw.content)) content = raw.content
+          else content = ''
+        } else {
+          const text = typeof raw.text === 'string' ? raw.text : ''
+          const blocks: Array<{ type: 'text'; text: string }> = text ? [{ type: 'text', text }] : []
+          content = blocks
+        }
+        messages.push({ role, content })
+        // 串 parentUuid 链: 任何 type 都算 (tool_use/tool_result 也要衔接, 否则新建消息
+        // 会以 null 起步, 链断)
+        if (tm.uuid) lastUuid = tm.uuid
       }
     }
   }
   if (subCtx?.initialUserMessage) {
     messages.push(subCtx.initialUserMessage)
-    await appendUserMessage(store, sessionId, options.cwd, subCtx.initialUserMessage.content, 0)
+    const u = await appendUserMessageV2(store, sessionId, subCtx.initialUserMessage.content, 0, lastUuid, ctx)
+    if (u) lastUuid = u
   } else if (typeof options.prompt === 'string') {
     messages.push({ role: 'user', content: options.prompt })
-    await appendUserMessage(store, sessionId, options.cwd, options.prompt, 0)
+    const u = await appendUserMessageV2(store, sessionId, options.prompt, 0, lastUuid, ctx)
+    if (u) lastUuid = u
   } else if (Array.isArray(options.prompt)) {
     messages.push(...(options.prompt as any))
     for (const m of options.prompt as any[]) {
-      await appendUserMessage(store, sessionId, options.cwd, m?.content, 0)
+      const u = await appendUserMessageV2(store, sessionId, m?.content, 0, lastUuid, ctx)
+      if (u) lastUuid = u
     }
   }
 
@@ -211,23 +250,33 @@ export async function* queryEngine(
         ...(assistantText ? [{ type: 'text', text: assistantText }] : []),
         ...toolUseBlocks.map(t => ({ type: 'tool_use', id: t.id, name: t.name, input: t.input })),
       ]})
-      await appendAssistantMessage(store, sessionId, options.cwd, {
-        text: assistantText,
-        thinking: thinkingText || undefined,
-        toolUses: toolUseBlocks.map(t => ({ id: t.id, name: t.name, input: t.input })),
-      }, turn)
+      // v2 持久化: assistant 消息只写 text + thinking 块; tool_use 块由 toolExecution
+      // 单独写 v2 tool_use 消息, 避免前端加载时产生重复的 tool_use:start 事件.
+      const assistantBlocks: Array<{ type: 'text'; text: string } | { type: 'thinking'; thinking: string }> = []
+      if (thinkingText) assistantBlocks.push({ type: 'thinking', thinking: thinkingText })
+      if (assistantText) assistantBlocks.push({ type: 'text', text: assistantText })
+      const assistantUuid = await appendAssistantMessageV2(
+        store, sessionId, assistantBlocks, turn, lastUuid, ctx,
+      )
+      if (assistantUuid) lastUuid = assistantUuid
     } else {
       messages.push({ role: 'assistant', content: [{ type: 'text', text: assistantText }] })
-      await appendAssistantMessage(store, sessionId, options.cwd, { text: assistantText, thinking: thinkingText || undefined, toolUses: [] }, turn)
-      yield { type: 'runtime.done', eventId: '', sessionId, ts: Date.now(), turnIndex: turn } as any
+      const assistantBlocks: Array<{ type: 'text'; text: string } | { type: 'thinking'; thinking: string }> = []
+      if (thinkingText) assistantBlocks.push({ type: 'thinking', thinking: thinkingText })
+      if (assistantText) assistantBlocks.push({ type: 'text', text: assistantText })
+      const assistantUuid = await appendAssistantMessageV2(
+        store, sessionId, assistantBlocks, turn, lastUuid, ctx,
+      )
+      if (assistantUuid) lastUuid = assistantUuid
+      yield { type: 'runtime.done', eventId: '', sessionId, ts: Date.now(), turnIndex: turn, text: assistantText } as any
       return
     }
 
     const toolCtx = makeToolContext(options, config, sessionId, abortController, skills)
     // toolExecution 自己 yield 完整 RuntimeEvent (带 sessionId/ts/eventId/turnIndex).
     // 这里仅需要提供一个生成 eventId 的闭包 + 当前 turnIndex.
-    // Task 6: 也透传 store + sessionId, 让 toolExecution 给每个完成工具
-    // 落盘 tool_use + tool_result v2 消息 (Task 6 闭环).
+    // 透传 parentUuid (=assistant uuid) 给 toolExecution, 写 v2 tool_use / tool_result
+    // 时维持 chain. 旧行为是 null, 会断链.
     let toolEvtCounter = 0
     for await (const ev of executeToolsStreaming(toolUseBlocks, toolCtx as any, tools, {
       sessionId,
@@ -235,9 +284,14 @@ export async function* queryEngine(
       nextEventId: () => `evt-tool-${++toolEvtCounter}`,
       store,
       cwd: options.cwd,
+      parentUuid: lastUuid,
     }, config.askRegistry)) {
       yield ev as RuntimeEvent
     }
+    // 工具执行完, 把 chain 推进到最后一个 tool_result 的 uuid (如果有), 这样
+    // 接下来的 skill_injection user message 也能挂在 tool_result 之后.
+    const lastTrUuid = (toolCtx.state as any).__lastPersistedUuid as string | undefined
+    if (lastTrUuid) lastUuid = lastTrUuid
     const lastResults: any[] = (toolCtx.state as any).__lastToolResults ?? []
 
     messages.push({ role: 'user', content: toolUseBlocks.map((t, i) => ({
@@ -257,10 +311,11 @@ export async function* queryEngine(
     const pending = (toolCtx.state as any).__pendingSkillInjection as PendingSkillInjection | undefined
     if (pending) {
       messages.push({ role: 'user', content: pending.content })
-      await appendUserMessage(store, sessionId, options.cwd, pending.content, turn, {
+      const u = await appendUserMessageV2(store, sessionId, pending.content, turn, lastUuid, ctx, {
         kind: 'skill_injection',
         skillName: pending.skillName,
       })
+      if (u) lastUuid = u
       ;(toolCtx.state as any).__pendingSkillInjection = undefined
     }
 
@@ -348,6 +403,21 @@ async function buildSystemPrompt(
   // `tools` array; this adds server-level behavioral instructions.
   const mcpSection = getMcpInstructionsSection(config?.mcpClients)
   if (mcpSection) parts.push(mcpSection)
+  // Available agent types for the Agent tool's subagent_type. We load from
+  // the same sources (dataDir + userAgentsDir) the AgentTool itself uses,
+  // so what the parent sees here matches what AgentTool will accept.
+  // Skip silently on failure (loadAgentDefinitions already swallows per-dir
+  // errors; only the surrounding try/catch covers full crashes).
+  if (config?.dataDir) {
+    try {
+      const { agents } = await loadAgentDefinitions(
+        config.dataDir,
+        config.userAgentsDir,
+      )
+      const agentsSection = renderAvailableAgentsSection(agents)
+      if (agentsSection) parts.push(agentsSection)
+    } catch { /* agent list unavailable — don't break the whole prompt */ }
+  }
   return parts.filter(Boolean).join('\n\n')
 }
 
@@ -365,59 +435,4 @@ function snapshotMcpClients(pool: any) {
 function mergeInputDelta(block: { input: unknown }, partialJson: string): void {
   const acc = ((block.input as any).__rawJson ?? '') as string
   ;(block.input as any).__rawJson = acc + partialJson
-}
-
-async function appendUserMessage(
-  store: TranscriptStore,
-  sessionId: string,
-  cwd: string,
-  content: unknown,
-  turnIndex: number,
-  // meta.kind 用来在 transcript 里区分真实用户输入 vs 工具侧注入的消息
-  // (例如 SkillTool 把 skill body 当 user message 喂给 model). tag 之后
-  // 前端 loadTranscript 可以选择不渲染这类消息, 而 queryEngine 自己的 resume
-  // 流程仍按 user message 加载, 不影响 LLM 上下文完整性.
-  meta?: { kind?: 'user' | 'skill_injection'; skillName?: string },
-): Promise<void> {
-  await persistUserMessage(
-    store,
-    sessionId,
-    content,
-    turnIndex,
-    null,
-    { cwd, sessionId },
-    meta,
-  )
-}
-
-async function appendAssistantMessage(
-  store: TranscriptStore,
-  sessionId: string,
-  cwd: string,
-  payload: { text: string; thinking?: string; toolUses: Array<{ id: string; name: string; input: unknown }> },
-  turnIndex: number,
-): Promise<void> {
-  if (process.env.ZAI_DEBUG === '1') {
-    console.error('[zai.appendAssistant] enter', {
-      sessionId,
-      turnIndex,
-      textLen: payload.text.length,
-      tools: payload.toolUses.length,
-    })
-  }
-  const blocks: ContentBlock[] = []
-  if (payload.thinking) blocks.push({ type: 'thinking', thinking: payload.thinking })
-  if (payload.text) blocks.push({ type: 'text', text: payload.text })
-  for (const tu of payload.toolUses) blocks.push({ type: 'tool_use', id: tu.id, name: tu.name, input: tu.input })
-  await persistAssistantMessage(
-    store,
-    sessionId,
-    blocks,
-    turnIndex,
-    null,
-    { cwd, sessionId },
-  )
-  if (process.env.ZAI_DEBUG === '1') {
-    console.error('[zai.appendAssistant] wrote ok', { sessionId, turnIndex })
-  }
 }

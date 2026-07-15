@@ -2,6 +2,7 @@
 import type { Tool, AskUserAnswers } from '../tools/Tool.js'
 import type { McpServerSpec } from '../mcp/types.js'
 import type { MCPClientPool } from '../mcp/MCPClientPool.js'
+import type { PermissionMode } from './permissionMode.js'
 
 // UserMessage is shape-only; kept inline to avoid pulling from the opencc-internals
 // mirror (which would re-couple this file to Bun-only OpenCC source).
@@ -40,6 +41,12 @@ export type AskRegistryLike = {
 
 export type RuntimeConfig = {
   dataDir: string
+  /**
+   * Override the user-global agents directory (default: `~/.zai/agents`).
+   * Pass an explicit path to redirect user-global agent loading, or `''`
+   * to disable it entirely (used by tests and sandboxed environments).
+   */
+  userAgentsDir?: string
   defaultModel?: string
   defaultPermissions?: Record<string, unknown>
   mcpServers?: McpServerSpec[]
@@ -60,6 +67,9 @@ export type RuntimeConfig = {
   modelCaller?: ModelCaller
   sandbox?: SandboxConfig
   defaultMaxTurns?: number
+
+  /** Default permission mode for new sessions. Falls back to 'default'. */
+  defaultPermissionMode?: PermissionMode
 
   /** AskUserQuestion 的等待表抽象, server 端实现. core 不依赖具体类. */
   askRegistry?: AskRegistryLike
@@ -105,4 +115,6 @@ export type QueryOptions = {
   subagentType?: string
   /** Per-request override of RuntimeConfig.skillsDirs. Higher priority than config. */
   skillsDirs?: string[]
+  /** Override the permission mode for this query. Higher priority than transcript meta. */
+  permissionMode?: PermissionMode
 }
