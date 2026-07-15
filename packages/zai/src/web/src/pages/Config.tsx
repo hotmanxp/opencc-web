@@ -1,8 +1,9 @@
-import { Card, Form, Input, Button, message, Spin, Row, Col, Typography, Menu, List, Popconfirm, Select, Space, Modal, Tooltip } from 'antd';
+import { Card, Form, Input, Button, message, Spin, Row, Col, Typography, Menu, List, Popconfirm, Select, Space, Modal, Tooltip, Tag } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import type { ConfigTool, ProviderProfile, SystemInfo } from '@shared/types';
+import type { ConfigTool, ProviderProfile, SystemInfo, ModelCapabilities } from '@shared/types';
+import { BUILTIN_PROVIDERS } from '@shared/builtinProviders';
 import { api } from '../lib/api';
 
 const { Text } = Typography;
@@ -21,23 +22,10 @@ const KNOWN_PROVIDERS = [
   { value: '自定义', label: '自定义 Provider' },
 ];
 
-const BUILTIN_PROFILES: ProviderProfile[] = [
-  {
-    id: 'provider_f55e52139db6',
-    name: 'Anthropic-MIX',
-    provider: 'anthropic',
-    baseUrl: 'https://zn-nova.paic.com.cn/novai',
-    model: 'MiniMax-M3,MiniMax-M2.7-highspeed,qwen3.7-plus,glm-5.2,qwen3.7-max,deepseek-v4-flash,deepseek-v4-pro',
-  },
-  {
-    id: 'provider_61d7d2e26e62',
-    name: 'OpenAI-Mix',
-    provider: 'openai',
-    baseUrl: 'https://wizard-ai.paic.com.cn/code_pilot/api/v1',
-    model: 'zhiniao-MiniMax-M2.7,zhiniao-MiniMax-M2.7-highspeed,zhiniao-qwen3.6-plus,zhiniao-glm-5.1',
-    apiFormat: 'chat_completions',
-  },
-];
+// System default catalog lives in src/shared/builtinProviders.ts. Re-export
+// under the legacy BUILTIN_PROFILES name so the existing modal preset logic
+// (which seeds the Add form) keeps working without churn.
+const BUILTIN_PROFILES: ProviderProfile[] = BUILTIN_PROVIDERS;
 
 const OPENCC_DEFAULT_CONTENT: Record<string, unknown> = {
   permissions: {
@@ -80,6 +68,11 @@ function ProviderForm() {
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  // Tracks the builtin seed chosen when the modal was opened so we can
+  // copy its capabilities map onto the new profile on save. The form
+  // itself does not expose per-model capability edits — those come from
+  // the builtin catalog (or hand-edited ~/.claude.json).
+  const [pendingCapabilities, setPendingCapabilities] = useState<ProviderProfile['capabilities']>(undefined);
   const [form] = Form.useForm();
 
   const fetchProfiles = async () => {
@@ -87,8 +80,8 @@ function ProviderForm() {
     try {
       const data = await api.get<{ profiles: ProviderProfile[] }>('/config/opencc/provider');
       setProfiles(data.profiles || []);
-    } catch {
-      message.error('加载 Provider 失败');
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -109,6 +102,9 @@ function ProviderForm() {
       model: seed.model,
       apiFormat: seed.apiFormat,
     });
+    // Carry the seed's capabilities map so newly-added builtin presets
+    // ship with per-model context window / vision metadata.
+    setPendingCapabilities(seed.capabilities);
     setModalOpen(true);
   };
 
@@ -127,6 +123,7 @@ function ProviderForm() {
       model: preset.model,
       apiFormat: preset.apiFormat,
     });
+    setPendingCapabilities(preset.capabilities);
   }, [watchedProvider, modalOpen, form]);
 
   const handleModalOk = async () => {
@@ -139,6 +136,7 @@ function ProviderForm() {
         baseUrl: values.baseUrl,
         model: values.model,
         apiFormat: values.apiFormat,
+        capabilities: pendingCapabilities,
       };
       const updated = [...profiles, newProfile];
       setSaving(true);
@@ -146,8 +144,9 @@ function ProviderForm() {
       setProfiles(updated);
       message.success('Provider 已添加');
       setModalOpen(false);
+      setPendingCapabilities(undefined);
     } catch (err) {
-      if (err instanceof Error) message.error(err.message);
+      console.error(err);
     } finally {
       setSaving(false);
     }
@@ -160,8 +159,8 @@ function ProviderForm() {
       await api.put('/config/opencc/provider', { profiles: updated });
       setProfiles(updated);
       message.success('已删除');
-    } catch {
-      message.error('删除失败');
+    } catch (err) {
+      console.error(err);
     } finally {
       setSaving(false);
     }
@@ -197,10 +196,13 @@ function ProviderForm() {
             <List.Item.Meta
               title={item.name || item.provider}
               description={
-                <Space direction="vertical" size={0}>
+                <Space direction="vertical" size={4} style={{ width: '100%' }}>
                   <Text type="secondary" style={{ fontSize: 12 }}>Provider: {item.provider}</Text>
                   {item.baseUrl && <Text type="secondary" style={{ fontSize: 12 }}>BaseURL: {item.baseUrl}</Text>}
                   {item.model && <Text type="secondary" style={{ fontSize: 12 }}>模型: {item.model}</Text>}
+                  {item.capabilities && Object.keys(item.capabilities).length > 0 && (
+                    <ProviderCapabilitySummary capabilities={item.capabilities} />
+                  )}
                 </Space>
               }
             />
@@ -248,6 +250,45 @@ function ProviderForm() {
   );
 }
 
+/**
+ * Compact capability summary rendered beneath each saved ProviderProfile in
+ * the Config list. Shows aggregate context/output coverage and a per-model
+ * breakdown with capability tags. Aggregates are computed from the
+ * `capabilities` map so they stay correct as the catalog evolves.
+ */
+function ProviderCapabilitySummary({
+  capabilities,
+}: {
+  capabilities: Record<string, ModelCapabilities>;
+}) {
+  const entries = Object.entries(capabilities);
+  if (entries.length === 0) return null;
+
+  const visionCount = entries.filter(([, c]) => c.supportsVision).length;
+  const funcCount = entries.filter(([, c]) => c.supportsFunctionCalling).length;
+  const maxCtx = entries.reduce<number>((m, [, c]) => Math.max(m, c.contextWindow ?? 0), 0);
+  const maxOut = entries.reduce<number>((m, [, c]) => Math.max(m, c.maxOutputTokens ?? 0), 0);
+
+  return (
+    <div style={{ marginTop: 4 }}>
+      <Space size={4} wrap>
+        <Tag color="blue">{entries.length} 模型</Tag>
+        {maxCtx > 0 && <Tag>{formatTokens(maxCtx)} 输入</Tag>}
+        {maxOut > 0 && <Tag>{formatTokens(maxOut)} 输出</Tag>}
+        {visionCount > 0 && <Tag color="purple">多模态 ×{visionCount}</Tag>}
+        {funcCount > 0 && <Tag color="cyan">工具调用 ×{funcCount}</Tag>}
+      </Space>
+    </div>
+  );
+}
+
+/** 1234567 → "1.2M", 45678 → "46K". Keeps the summary row compact. */
+function formatTokens(n: number): string {
+  if (n >= 1_000_000) return `${(n / 1_000_000).toFixed(n % 1_000_000 === 0 ? 0 : 1)}M`
+  if (n >= 1_000) return `${Math.round(n / 1_000)}K`
+  return String(n)
+}
+
 const BUILTIN_PLUGINS = [
   { value: 'oh-my-agents@latest', label: 'oh-my-agents@latest' },
 ];
@@ -264,8 +305,8 @@ function PluginForm() {
     try {
       const data = await api.get<{ content: { plugin?: string[] } }>('/config/opencode');
       setPlugin(data.content?.plugin || []);
-    } catch {
-      message.error('加载插件失败');
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -286,7 +327,7 @@ function PluginForm() {
       await api.put('/config/opencode', nextContent);
       setPlugin(next);
     } catch (err) {
-      message.error(`保存失败: ${err}`);
+      console.error(err);
     } finally {
       setSaving(false);
     }
@@ -390,8 +431,8 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
       setFilePath(data.path);
       setContent(data.content);
       setMissing(!!data.missing);
-    } catch {
-      message.error('加载配置失败');
+    } catch (err) {
+      console.error(err);
     } finally {
       setLoading(false);
     }
@@ -431,7 +472,7 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
       setModalOpen(false);
       await fetchContent();
     } catch (err) {
-      message.error(`保存失败: ${err}`);
+      console.error(err);
     } finally {
       setSaving(false);
     }

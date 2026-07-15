@@ -4,7 +4,7 @@ import type { ServerEvent } from '../../../shared/events.js';
 const getInitialSidebarCollapsed = () =>
   typeof localStorage !== 'undefined'
     ? localStorage.getItem('zai-sidebar-collapsed') === 'true'
-    : false
+    : true
 
 interface JobInfo {
   jobId: string;
@@ -28,7 +28,9 @@ interface AppState {
   connected: boolean;
   jobs: Record<string, JobInfo>;
   toasts: ToastInfo[];
+  instanceContext: { cwd: string; cwdName: string; branch: string | null } | null;
   setConnected: (v: boolean) => void;
+  setInstanceContext: (ctx: { cwd: string; cwdName: string; branch: string | null }) => void;
   applyJobEvent: (event: ServerEvent) => void;
   applySystemEvent: (event: ServerEvent) => void;
   dismissToast: (id: string) => void;
@@ -45,7 +47,9 @@ export const useAppStore = create<AppState>((set) => ({
   connected: false,
   jobs: {},
   toasts: [],
+  instanceContext: null,
   setConnected: (v) => set({ connected: v }),
+  setInstanceContext: (ctx) => set({ instanceContext: ctx }),
   applyJobEvent: (event) => set((state) => {
     if (!('jobId' in event) || typeof event.jobId !== 'string') return state;
     const jid = event.jobId;
@@ -105,6 +109,13 @@ export const useAppStore = create<AppState>((set) => ({
         toasts: [...state.toasts, {
           id: event.eventId, level: 'error', message: event.message, ts: event.ts,
         }],
+      };
+    }
+    if (event.type === 'branch.changed') {
+      if (!state.instanceContext) return state;
+      return {
+        ...state,
+        instanceContext: { ...state.instanceContext, branch: event.branch },
       };
     }
     return state;

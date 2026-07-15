@@ -96,6 +96,58 @@ describe('useAgentStore.applyRuntimeEvent', () => {
     })
     expect(useAgentStore.getState().status).toBe('error')
   })
+
+  test('runtime.error without toolUseId pushes a runtime.error message into messages', () => {
+    // 这是 bug 修复的回归测试: 之前 turn-level / 引擎级 runtime.error
+    // (server agent.ts:471 catch 块发的 eventId:'err' 那一类) 只 setStatus,
+    // 错误信息没进 messages → 中间对话区看不到错误, 只有底栏"✗ 错误"标签.
+    // 现在应当把错误消息 push 到 messages, 让 Agent.tsx:888 的 MessageBubble
+    // 渲染分支 (红色 Card + error.message + error.category) 能命中.
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.error',
+      eventId: 'err',
+      ts: 1700000000000,
+      sessionId: 's1',
+      turnIndex: 0,
+      error: { category: 'internal', message: 'LLM upstream returned 502', recoverable: false },
+    })
+    const msgs = useAgentStore.getState().messages
+    const errMsgs = msgs.filter((m) => m.type === 'runtime.error')
+    expect(errMsgs.length).toBe(1)
+    expect(errMsgs[0]?.error).toEqual({
+      category: 'internal',
+      message: 'LLM upstream returned 502',
+      recoverable: false,
+    })
+    // 不带 toolUseId 时不应影响 tool_use:* 记录
+    const toolMsgs = msgs.filter((m) => (m.type as string).startsWith('tool_use:'))
+    expect(toolMsgs.length).toBe(0)
+  })
+
+  test('runtime.error with toolUseId does NOT push a runtime.error message (still routes to tool_use:error)', () => {
+    // 工具级 error 仍然走 upsertToolCall, 不应再额外 push 一条 runtime.error
+    // 消息 (会与 ToolCallBlock 的错误显示重复).
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.tool_call',
+      eventId: 'e1', ts: 1, sessionId: 's1', turnIndex: 0,
+      toolUseId: 'toolu_abc', toolName: 'Bash', input: { command: 'rm -rf /' },
+    })
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.error',
+      eventId: 'err-toolu_abc',
+      ts: 2, sessionId: 's1', turnIndex: 0,
+      toolUseId: 'toolu_abc',
+      error: { category: 'tool', message: 'permission denied', recoverable: false },
+    })
+    const msgs = useAgentStore.getState().messages
+    const errMsgs = msgs.filter((m) => m.type === 'runtime.error')
+    expect(errMsgs.length).toBe(0)
+    // 工具记录应是 tool_use:error, error 字段目前是 message 字符串
+    // (ToolCallBlock 已兼容这种 fallback 渲染, 见 Agent.tsx:449 / :503-506)
+    const tool = msgs.find((m) => m.toolUseId === 'toolu_abc')
+    expect(tool?.type).toBe('tool_use:error')
+    expect(tool?.error).toBe('permission denied')
+  })
 })
 
 describe('useAgentStore.applySessionEvent', () => {

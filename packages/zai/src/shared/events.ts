@@ -55,7 +55,9 @@ const SessionEvent = z.discriminatedUnion('type', [
 
 const JobEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('job.started'),
-             jobId: z.string(), kind: z.enum(['resource_refresh','login','install','agent_task']),
+             jobId: z.string(),
+             kind: z.enum(['resource_refresh','login','install','agent_task']),
+             // agent_task 时携带后端 BackgroundTask.id,前端可直接 fetch /api/tasks/:taskId
              taskId: z.string().optional() }),
   z.object({ ...Base.shape, type: z.literal('job.progress'),
              jobId: z.string(), message: z.string(), percent: z.number().optional() }),
@@ -83,6 +85,8 @@ const SystemEvent = z.discriminatedUnion('type', [
              message: z.string() }),
   z.object({ ...Base.shape, type: z.literal('toast'),
              level: z.enum(['info','warn','error']), message: z.string() }),
+  z.object({ ...Base.shape, type: z.literal('branch.changed'),
+             branch: z.string() }),
 ])
 
 export const ServerEvent = z.discriminatedUnion('type', [

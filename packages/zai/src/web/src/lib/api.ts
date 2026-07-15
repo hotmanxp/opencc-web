@@ -1,6 +1,9 @@
+import { ApiError, notifyApiError } from './apiError.js';
+
 const API_BASE = '/api';
 
 async function request<T>(path: string, init?: RequestInit): Promise<T> {
+  const method = (init?.method ?? 'GET').toUpperCase();
   const res = await fetch(`${API_BASE}${path}`, {
     ...init,
     headers: {
@@ -9,8 +12,10 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
     },
   });
   if (!res.ok) {
-    const err = await res.text();
-    throw new Error(err || res.statusText);
+    const body = await res.text().catch(() => res.statusText);
+    const err = new ApiError(res.status, method, path, body);
+    notifyApiError(err);
+    throw err;
   }
   return res.json();
 }

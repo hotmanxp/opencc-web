@@ -32,11 +32,11 @@ function resolveSkillsDirs(): string[] {
  * all commands with PATH preserved and a 10-minute CPU cap. Users opt out
  * via `ZAI_SANDBOX=off` for "no shell access" deployments.
  */
-function resolveSandbox(): import('@zn-ai/zai-agent-core').SandboxConfig | undefined {
+function resolveSandbox(cwd: string): import('@zn-ai/zai-agent-core').SandboxConfig | undefined {
   if (process.env.ZAI_SANDBOX === 'off') return undefined
   return {
     executor: 'child_process',
-    workdir: process.cwd(),
+    workdir: cwd,
     ...(process.env.ZAI_SANDBOX_ENV_ALLOWLIST
       ? { envAllowlist: process.env.ZAI_SANDBOX_ENV_ALLOWLIST.split(',') }
       : {}),
@@ -45,7 +45,7 @@ function resolveSandbox(): import('@zn-ai/zai-agent-core').SandboxConfig | undef
   }
 }
 
-export function initAgentRuntime(): void {
+export function initAgentRuntime(cwd: string): void {
   if (runtime) return
   const { resolved: dataDir } = resolveDataDir()
   transcriptStore = new TranscriptStore(dataDir)
@@ -53,7 +53,7 @@ export function initAgentRuntime(): void {
   // MCP servers (Phase 5 wiring). Only construct the pool when at least one
   // .mcp.json entry exists; an empty config still calls connectAll([]) which
   // is a no-op.
-  const mcpServers = loadMcpServers(process.cwd())
+  const mcpServers = loadMcpServers(cwd)
   const mcpClientPool = mcpServers.length > 0 ? new MCPClientPool() : undefined
 
   runtime = new DefaultAgentRuntime({
@@ -65,7 +65,7 @@ export function initAgentRuntime(): void {
     askRegistry,
     skillsDirs: resolveSkillsDirs(),
     ...(mcpClientPool && mcpServers.length > 0 ? { mcpClientPool, mcpServers } : {}),
-    ...(resolveSandbox() ? { sandbox: resolveSandbox() } : {}),
+    ...(resolveSandbox(cwd) ? { sandbox: resolveSandbox(cwd) } : {}),
   })
 
   // Disconnect MCP clients on shutdown so child processes don't get orphaned
@@ -117,8 +117,9 @@ export async function listSkills(): Promise<Array<{ name: string; description: s
   // Dynamic import to avoid top-level dependency on the loader module
   // when the runtime hasn't been initialized yet.
   const { loadSkillsFromDirs } = await import('@zn-ai/zai-agent-core')
+  type LoadedSkill = { name: string; description?: string; frontmatter?: { description?: string } }
   const skills = await loadSkillsFromDirs(dirs, { cwd: process.cwd() })
-  return skills.map((s) => ({
+  return (skills as LoadedSkill[]).map((s) => ({
     name: s.name,
     description: s.frontmatter?.description || s.description || '',
   }))

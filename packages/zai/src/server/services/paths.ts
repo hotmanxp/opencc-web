@@ -22,8 +22,8 @@ import { join } from 'node:path';
  */
 export const ZAI_DIR = join(homedir(), '.zai');
 export const ZN_ASSETS_DIR = join(ZAI_DIR, 'zn-assets');
-/** ~/.zai/tasks — background-task persistence root (JsonTaskStore). */
-export const BACKGROUND_DIR = join(ZAI_DIR, 'tasks');
+/** 后台任务运行时持久化目录:tasks/<id>.json + events/<id>.log */
+export const BACKGROUND_DIR = join(ZAI_DIR, 'background');
 export const PLUGIN_PKG = '@zn-ai/plugin';
 
 /** ~/.zai/zn-assets/<version> */

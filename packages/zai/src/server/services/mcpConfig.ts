@@ -105,7 +105,7 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
   }
 
   // 3. user: $HOME/.zai.json (zai-specific) if present, else fall back to
-  //    $HOME/.claude.json (claude code / opencc compat). Mutually exclusive —
+  //    $HOME/.claude.json (opencc compat). Mutually exclusive —
   //    zai.json fully shadows claude.json so users on a shared box can't leak
   //    MCP servers across tools.
   const home = homedir()

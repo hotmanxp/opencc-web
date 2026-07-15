@@ -22,7 +22,7 @@ export default function Dashboard() {
         setSystemInfo(sys);
         setCliStatuses(cli);
       })
-      .catch((err) => message.error(`加载失败: ${err.message}`))
+      .catch((err) => console.error(err))
       .finally(() => setLoading(false));
   }, []);
 
@@ -53,7 +53,7 @@ export default function Dashboard() {
     try {
       const exitCode = await runNpmConfigSet(opt.url);
       if (exitCode !== 0) {
-        message.error(`切换失败，npm 退出码 ${exitCode}`);
+        console.error('cli exit', exitCode);
         return;
       }
       message.success(`已切换 Registry: ${opt.label}`);
@@ -61,7 +61,7 @@ export default function Dashboard() {
       const sys = await api.get<SystemInfo>('/system');
       setSystemInfo(sys);
     } catch (err) {
-      message.error(`切换失败: ${(err as Error).message}`);
+      console.error(err);
     } finally {
       setSwitchingRegistry(false);
     }

@@ -119,19 +119,28 @@ export async function* queryEngine(
       // - user raw = { content: string } → content: string
       // - assistant raw = { text: string, tool_uses: [...] } → content: [{ type: 'text', text }]
       // - v2 message.content (ContentBlock[]) → 透传
+      //
+      // v2 transcript 里 type='tool_use' 是一条独立的消息 (tool_use blocks
+      // 单独写). 必须把它的 content 合并到前一条 assistant 消息里, 否则下一条
+      // user 消息携带的 tool_result block 找不到对应 tool_use_id —
+      // Anthropic API 会报 "tool result's tool id(...) not found (2013)".
+      let pendingAssistantContent: unknown[] | null = null
       for (const tm of t.messages as Array<{ uuid?: string; type: string; raw?: unknown; role?: string; version?: string; message?: { content: unknown } }>) {
+        // ★ 单独类型的 tool_use 消息: tool_use blocks 合并进上一条 assistant.
+        if (tm.type === 'tool_use' && tm.version === '2' && tm.message && Array.isArray(tm.message.content)) {
+          if (pendingAssistantContent) {
+            for (const b of tm.message.content) {
+              if ((b as { type?: string })?.type === 'tool_use') pendingAssistantContent.push(b)
+            }
+          }
+          if (tm.uuid) lastUuid = tm.uuid
+          continue
+        }
         const role = tm.type === 'user' ? 'user' : tm.type === 'assistant' ? 'assistant' : (tm.role as 'user' | 'assistant' | undefined)
         if (role !== 'user' && role !== 'assistant') continue
         const raw = (tm.raw ?? {}) as Record<string, unknown>
         let content: unknown
         if (tm.version === '2' && tm.message && Array.isArray(tm.message.content)) {
-          // v2: 直接拿 message.content (text / tool_use / tool_result blocks)
-          // 但 v1 兜底: tool_result 块在 v2 形态下不会出现在 messages[] 里喂给 LLM,
-          // 而是通过 tool_use_id 关联 (serializeForAnthropic 处理). 这里为了简单,
-          // 只把 text block 串成 content; tool_use/tool_result 块在 message 数组里
-          // 跳过, 由 serializer 在喂模型前重新拼装.
-          // 实际我们把 message.content 整块传过去, 喂给 LLM 的入口(serializeForAnthropic)
-          // 会做正确的合并/分组.
           content = tm.message.content
         } else if (role === 'user') {
           if (typeof raw.content === 'string') content = raw.content
@@ -146,6 +155,9 @@ export async function* queryEngine(
         // 串 parentUuid 链: 任何 type 都算 (tool_use/tool_result 也要衔接, 否则新建消息
         // 会以 null 起步, 链断)
         if (tm.uuid) lastUuid = tm.uuid
+        // 记录最后一条 assistant 消息的 content 数组, 给下一条 type='tool_use'
+        // 消息合并用. 非 assistant 立即清空 (e.g. user 出现后, 不能再合并 tool_use).
+        pendingAssistantContent = (role === 'assistant' && Array.isArray(content)) ? (content as unknown[]) : null
       }
     }
   }

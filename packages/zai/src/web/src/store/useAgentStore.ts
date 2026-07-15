@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import { flushSync } from 'react-dom'
 import type { ServerEvent } from '../../../shared/events.js'
 import type { ModelEntry } from '../../../shared/settings.js'
+import type { PermissionMode } from '@zn-ai/zai-agent-core/runtime'
 
 // 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob, 用于把历史图片
 // 消息里的 base64 还原成浏览器可显示的 objectURL. 解析失败时返回
@@ -61,6 +62,8 @@ interface AgentState {
     updatedAt: number
     /** Resolved model name (from transcript.meta.model). 'unknown' or absent = not set. */
     model?: string
+    /** Per-session permission mode (default/acceptEdits/plan/bypassPermissions/dontAsk). */
+    permissionMode?: PermissionMode
     cwd?: string
     createdAt?: number
     messageCount?: number
@@ -90,7 +93,6 @@ interface AgentState {
   applySessionEvent: (event: ServerEvent) => void
   applyPromptAsk: (event: ServerEvent) => void
 
-  setCwd: (cwd: string) => void
   addMessage: (msg: AgentMessage) => void
   upsertToolCall: (msg: AgentMessage) => void
   upsertStreamBlock: (
@@ -109,7 +111,9 @@ interface AgentState {
   availableModels: ModelEntry[]
   /** Optimistic PATCH /api/agent/sessions/:id + local session model update. */
   patchSessionModel: (sid: string, model: string) => Promise<void>
-  sendMessage: (prompt: string, cwd?: string) => Promise<void>
+  /** Optimistic PATCH /api/agent/sessions/:id + local session mode update. */
+  patchSessionMode: (sid: string, mode: PermissionMode) => Promise<void>
+  sendMessage: (prompt: string) => Promise<void>
   stop: () => Promise<void>
   setAskAnswer: (questionText: string, label: string) => void
   setAskNotes: (questionText: string, notes: string) => void
@@ -285,7 +289,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // SSE reducer state (Task 6)
   activeSessionId: null,
 
-  setCwd: (cwd: string) => set({ cwd }),
   addMessage: (msg: AgentMessage) =>
     set((s) => ({ messages: [...s.messages, msg] })),
   // 把 tool_use:* 与 content_block_start(tool_use) 合并到同一条消息.
@@ -524,11 +527,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // '新会话' 占位条目 (而不是等第一条消息发出去才出现).
     try {
       const token = localStorage.getItem('zai-token') || ''
-      const cwd = get().cwd || ''
       const res = await fetch('/api/agent/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
-        body: JSON.stringify({ cwd }),
+        body: JSON.stringify({}),
       })
       if (!res.ok) return
       const data = (await res.json()) as { sessionId: string }
@@ -588,6 +590,29 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
+  patchSessionMode: async (sid, mode) => {
+    // Snapshot for revert on failure.
+    const prev = get().sessions
+    // Optimistic local update so the badge switches immediately.
+    set({
+      sessions: prev.map((x) =>
+        x.transcriptId === sid ? { ...x, permissionMode: mode } : x,
+      ),
+    })
+    try {
+      const token = localStorage.getItem('zai-token') || ''
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sid)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
+        body: JSON.stringify({ permissionMode: mode }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch {
+      // Revert the optimistic update.
+      set({ sessions: prev })
+    }
+  },
+
   loadTranscript: async (sessionId: string) => {
     try {
       const token = localStorage.getItem('zai-token') || ''
@@ -613,7 +638,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  sendMessage: async (_prompt: string, _cwd?: string) => {
+  sendMessage: async (_prompt: string) => {
     // Deleted: sendMessage now lives in Agent.tsx calling /agent/prompt.
     // The SSE stream is consumed by useEventStream -> applyRuntimeEvent.
     throw new Error('sendMessage has been removed; use api.post("/agent/prompt") in Agent.tsx')
@@ -780,7 +805,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // tool_use:error/invalid/denied 翻译过来的事件 — 指向一个具体的
         // 工具, 需要把对应 tool_use:start upsert 成 tool_use:error 让
         // ToolCallBlock 从"调用中"切到"错误". 不携带 toolUseId 的 error
-        // 是 turn-level / 引擎级错误, 只 setStatus.
+        // 是 turn-level / 引擎级错误 (server agent.ts:471 catch 块发的
+        // eventId:'err' 那一类), 仅 setStatus 会让底栏亮"✗ 错误"但中间
+        // 对话区看不到任何错误详情. 也要把完整 error 写入 messages,
+        // 让 Agent.tsx:888 的 MessageBubble 渲染分支 (红色 Card +
+        // error.message + error.category) 命中, 错误才能被用户看到.
         const toolUseId = (event as { toolUseId?: unknown }).toolUseId
         if (typeof toolUseId === 'string' && toolUseId) {
           useAgentStore.getState().upsertToolCall({
@@ -792,6 +821,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             toolUseId,
             error: event.error.message,
           })
+        } else {
+          useAgentStore.setState((s) => ({
+            messages: [
+              ...s.messages,
+              {
+                eventId: event.eventId,
+                sessionId: sid,
+                ts: event.ts,
+                turnIndex: event.turnIndex,
+                type: 'runtime.error',
+                error: event.error,
+              },
+            ],
+          }))
         }
         useAgentStore.getState().setStatus('error')
         return
@@ -809,7 +852,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // (loadSessions 从 /api/agent/sessions 拿到的就是数组, sidebar 用
         // s.transcriptId 渲染). 老代码当 Record 处理, sessions[sid] 完全
         // 不工作, 静默吞掉 server 来的 session.created. 改成 unshift 进数组.
-        const list = state.sessions as Array<{ transcriptId: string; title?: string; updatedAt: number }>
+        const list = state.sessions as Array<{ transcriptId: string; title?: string; updatedAt: number; permissionMode?: PermissionMode }>
         if (list.some((x) => x.transcriptId === sid)) return state
         return {
           ...state,
@@ -817,7 +860,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
       }
       case 'session.deleted': {
-        const list = state.sessions as Array<{ transcriptId: string; title?: string; updatedAt: number }>
+        const list = state.sessions as Array<{ transcriptId: string; title?: string; updatedAt: number; permissionMode?: PermissionMode }>
         return { ...state, sessions: list.filter((x) => x.transcriptId !== sid) }
       }
       case 'session.renamed': {

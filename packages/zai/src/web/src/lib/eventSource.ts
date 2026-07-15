@@ -1,4 +1,5 @@
 import { ServerEvent } from '../../../shared/events.js'
+import { notifySseError } from './apiError.js'
 
 const API_BASE = '/api'
 
@@ -35,6 +36,7 @@ const NAMED_EVENT_TYPES = [
   'server.connected',
   'server.error',
   'toast',
+  'branch.changed',
 ] as const
 
 export function subscribeServerEvents(
@@ -58,6 +60,7 @@ export function subscribeServerEvents(
   }
 
   es.onerror = (e) => {
+    notifySseError('/event', '事件流已断开')
     onError?.(e)
   }
 

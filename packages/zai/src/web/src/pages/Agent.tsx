@@ -35,6 +35,7 @@ import {
   type AgentMessage,
   type AgentStatus,
 } from "../store/useAgentStore";
+import { useAppStore } from "../store/useAppStore";
 import { api } from "../lib/api";
 import QuestionCard from "../components/QuestionCard.jsx";
 import DiffBlock from "../components/DiffBlock.js";
@@ -42,6 +43,9 @@ import { linkifyText } from "../lib/linkify.js";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import ConversationInfoButton from "../components/ConversationInfoButton";
 import ModelStatusButton from "../components/ModelStatusButton";
+import ModeStatusButton, { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
+import { TaskDock } from "../components/TaskDock";
+import { TaskDrawer } from "../components/TaskDrawer";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 
 const { TextArea } = Input;
@@ -433,9 +437,16 @@ function ToolUsePill({ name, status }: { name: string; status: ToolStatus }) {
 // 统一成单一可折叠面板. 由于 React key 按 toolUseId 锁定 (见调用处),
 // 同一次调用的 start/done/error 事件会复用同一个 DOM 节点, 折叠态不丢.
 function ToolCallBlock({ msg }: { msg: AgentMessage }) {
-  const name = (msg.name as string) || "unknown";
-  const input = (msg.input as Record<string, unknown>) || {};
-  const output = msg.output;
+  const name = (msg.name as string) || 'unknown'
+  const input = (msg.input as Record<string, unknown>) || {}
+  // Agent 工具的 pill 不显示泛化的 "Agent" — 展示实际派发的 subagent_type
+  // (Explore / Plan / general-purpose / 用户自定义), 让用户一眼看出当前是
+  // 哪种 subagent 在跑. 格式 `<type> (agent)` 与 opencc AssistantToolUseMessage
+  // 的 userFacingName 风格一致. 缺省回退到 'general-purpose'(AgentTool 的 schema 默认值).
+  const displayName = name === "Agent"
+    ? `${(typeof input.subagent_type === "string" && input.subagent_type.trim()) || "general-purpose"} (agent)`
+    : name
+  const output = msg.output
   const errorField = msg.error as string | { message?: string } | undefined;
   const reasonField = msg.reason as string | undefined;
   const toolUseId =
@@ -526,7 +537,7 @@ function ToolCallBlock({ msg }: { msg: AgentMessage }) {
                   overflow: "hidden",
                 }}
               >
-                <ToolUsePill name={name} status={status} />
+                <ToolUsePill name={displayName} status={status} />
                 <Tag color={TOOL_PILL_COLORS[status].tag} style={{ margin: 0 }}>
                   {TOOL_PILL_COLORS[status].label}
                 </Tag>
@@ -964,7 +975,11 @@ export default function Agent() {
     submitAsk,
     rejectAsk,
   } = useAgentStore();
-  const [input, setInput] = useState("");
+  const patchSessionMode = useAgentStore((s) => s.patchSessionMode);
+  const { instanceContext } = useAppStore()
+  const cwdName = instanceContext?.cwdName || '~'
+  const branch = instanceContext?.branch || 'master'
+  const [input, setInput] = useState('')
   // 图片附件 local state. 仅在当前 Agent 实例存活期间有效 — 一旦 handleSend
   // 把它快照到 userMsg.attachments 后, 就清理本地 (避免双重持有 + revoke objectURL).
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -994,6 +1009,7 @@ export default function Agent() {
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [skillMenuIdx, setSkillMenuIdx] = useState(0);
   const [skillFilter, setSkillFilter] = useState("");
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const skillMenuRef = useRef<HTMLDivElement>(null);
   const textAreaRef = useRef<any>(null);
   const [showAllSessions, setShowAllSessions] = useState(false);
@@ -1303,7 +1319,6 @@ export default function Agent() {
     }>("/agent/prompt", {
       prompt: text || undefined,
       contentBlocks: blocks.length > 0 ? blocks : undefined,
-      cwd: cwd || undefined,
       sessionId: sessionId || activeSessionId || undefined,
     });
     useAgentStore.setState({
@@ -1354,6 +1369,17 @@ export default function Agent() {
         return;
       }
     }
+    // shift+tab: cycle permission mode (only when idle, not while streaming)
+    if (e.key === "Tab" && e.shiftKey && status === "idle" && sessionId) {
+      e.preventDefault();
+      const currentMode =
+        sessions.find((s) => s.transcriptId === sessionId)?.permissionMode
+        ?? "default";
+      const idx = MODE_CYCLE_ORDER.indexOf(currentMode);
+      const next = MODE_CYCLE_ORDER[(idx + 1) % MODE_CYCLE_ORDER.length]!;
+      void patchSessionMode(sessionId, next);
+      return;
+    }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -1380,7 +1406,7 @@ export default function Agent() {
         display: "flex",
         flexDirection: "row",
         gap: 16,
-        marginLeft: -16,
+        marginLeft: -24,
       }}
     >
       <div
@@ -1847,17 +1873,20 @@ export default function Agent() {
               gap: 8,
             }}
           >
-            <span style={{ color: "#a78bfa" }}>▶▶</span>
-            <span>zai</span>
+            <ModeStatusButton />
+            <span style={{ color: "#eab308" }}>{cwdName}</span>
             <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
-            <span>{cwd || "~"}</span>
+            <span style={{ color: "#22c55e" }}>{branch}</span>
             <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
-            <span>master</span>
+            <span style={{ color: "#f97316" }}>
+              <ModelStatusButton />
+            </span>
             <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
-            <ModelStatusButton />
+            <TaskDock onSelect={setSelectedTaskId} />
           </div>
         </div>
       </div>
+      <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
     </div>
   );
 }

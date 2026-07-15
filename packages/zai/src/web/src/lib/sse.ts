@@ -1,5 +1,6 @@
 import { useEffect, useRef, useCallback } from 'react';
 import type { SseEvent } from '@shared/types';
+import { notifySseError } from './apiError.js';
 
 const API_BASE = '/api';
 
@@ -9,6 +10,7 @@ export function useSse(
   onEnd?: () => void,
 ): () => void {
   const sourceRef = useRef<EventSource | null>(null);
+  const doneRef = useRef<boolean>(false);
   const onEventRef = useRef(onEvent);
   const onEndRef = useRef(onEnd);
 
@@ -28,6 +30,7 @@ export function useSse(
     // is forgiving for the existing Login.tsx call site.
     const base = path.startsWith('/api/') ? path : `${API_BASE}${path}`;
 
+    doneRef.current = false;
     const source = new EventSource(base);
     sourceRef.current = source;
 
@@ -36,6 +39,7 @@ export function useSse(
         const ev = JSON.parse(msg.data) as SseEvent;
         onEventRef.current(ev);
         if (ev.type === 'exit' || ev.type === 'error') {
+          doneRef.current = true;
           source.close();
           onEndRef.current?.();
         }
@@ -45,6 +49,9 @@ export function useSse(
     };
 
     source.onerror = () => {
+      if (doneRef.current) return;
+      doneRef.current = true;
+      notifySseError(path, '连接已断开');
       source.close();
       onEndRef.current?.();
     };

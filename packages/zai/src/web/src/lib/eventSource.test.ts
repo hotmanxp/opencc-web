@@ -1,6 +1,9 @@
 import { describe, expect, test, vi } from 'vitest'
 import type { ServerEvent } from '../../../shared/events.js'
 
+const notifMock = vi.hoisted(() => ({ error: vi.fn() }))
+vi.mock('antd', () => ({ notification: notifMock }))
+
 // Mirror the real EventSource semantics: the server writes each SSE frame with
 // a named `event:` field (e.g. `event: runtime.delta`), and only `addEventListener`
 // for that exact name fires — `onmessage` is reserved for the unnamed default.
@@ -91,5 +94,18 @@ describe('subscribeServerEvents', () => {
     const es = MockEventSource.instances[0]
     handle.close()
     expect(es.close).toHaveBeenCalled()
+  })
+
+  test('onerror 触发 notifySseError(/event) 并调原 onError', () => {
+    notifMock.error.mockReset()
+    notifMock.error.mockImplementation(() => undefined)
+    MockEventSource.instances = []
+    const onError = vi.fn()
+    subscribeServerEvents(() => {}, onError)
+    const es = MockEventSource.instances[0]
+    es.onerror?.(new Event('error'))
+    expect(notifMock.error).toHaveBeenCalledTimes(1)
+    expect(notifMock.error.mock.calls[0][0].description).toContain('/event')
+    expect(onError).toHaveBeenCalledTimes(1)
   })
 })

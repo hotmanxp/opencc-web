@@ -93,19 +93,28 @@ export interface SseEvent {
 export type ConfigTool = 'nova' | 'opencode' | 'opencc';
 
 /**
- * Per-model capability flags surfaced by the provider picker.
+ * Per-model capability metadata, mirroring the shape used by OpenCC's
+ * integration descriptors (src/integrations/descriptors.ts →
+ * CapabilityFlags + ModelDescriptor.contextWindow/maxOutputTokens).
  *
- * Mirrors the OpenCC src/integrations/models/*.ts descriptors —
- * copy values verbatim when a gateway adds or refreshes a model.
+ * All fields are optional — older providers saved before this schema
+ * landed simply omit capabilities and the UI degrades gracefully.
  */
 export interface ModelCapabilities {
-  supportsStreaming: boolean;
-  supportsFunctionCalling: boolean;
-  supportsJsonMode: boolean;
-  supportsReasoning: boolean;
-  supportsVision?: boolean;
+  /** Max input tokens the model accepts in a single request. */
   contextWindow?: number;
+  /** Max output tokens the model can emit per response. */
   maxOutputTokens?: number;
+  /** Accepts image inputs (vision/multimodal). */
+  supportsVision?: boolean;
+  /** Supports tool/function calling. */
+  supportsFunctionCalling?: boolean;
+  /** Supports extended thinking / reasoning_effort control. */
+  supportsReasoning?: boolean;
+  /** Supports server-side JSON mode / structured outputs. */
+  supportsJsonMode?: boolean;
+  /** Supports token-by-token streaming responses. */
+  supportsStreaming?: boolean;
 }
 
 export interface ProviderProfile {
@@ -115,7 +124,11 @@ export interface ProviderProfile {
   baseUrl?: string;
   model?: string;
   apiFormat?: string;
-  /** Optional per-model capability map (model id → capabilities). */
+  /**
+   * Optional capability map keyed by model name. Lets the picker/UI
+   * surface context window, vision support, etc. without a network
+   * round-trip. Unrecognised keys are ignored.
+   */
   capabilities?: Record<string, ModelCapabilities>;
 }
 export type LoginType = 'pa' | 'pa-long' | 'op';

@@ -4,21 +4,38 @@ import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
 import { readConfig, writeConfig } from '../services/fileStore.js';
-import type { ConfigTool } from '../../shared/types.js';
+import type { ConfigTool, ProviderProfile } from '../../shared/types.js';
 
 const router: IRouter = Router();
 const ConfigToolSchema = z.enum(['nova', 'opencode', 'opencc']);
 
 const CLAUDE_JSON_PATH = () => join(homedir(), '.claude.json');
 
-export interface ProviderProfile {
-  id?: string;
-  name: string;
-  provider: string;
-  baseUrl?: string;
-  model?: string;
-  apiFormat?: string;
-}
+// Capability metadata for one model entry on a provider profile.
+// All fields optional so existing pre-capability profiles round-trip cleanly.
+const ModelCapabilitiesSchema = z.object({
+  contextWindow: z.number().int().positive().optional(),
+  maxOutputTokens: z.number().int().positive().optional(),
+  supportsVision: z.boolean().optional(),
+  supportsFunctionCalling: z.boolean().optional(),
+  supportsReasoning: z.boolean().optional(),
+  supportsJsonMode: z.boolean().optional(),
+  supportsStreaming: z.boolean().optional(),
+}).strict();
+
+const ProviderProfileSchema = z.object({
+  id: z.string().optional(),
+  name: z.string(),
+  provider: z.string(),
+  baseUrl: z.string().optional(),
+  model: z.string().optional(),
+  apiFormat: z.string().optional(),
+  // Map keyed by model name → per-model capabilities. Unknown model keys
+  // are passed through (the picker filters by what it knows about).
+  capabilities: z.record(z.string(), ModelCapabilitiesSchema).optional(),
+}).strict();
+
+export type ProviderProfileInput = z.infer<typeof ProviderProfileSchema>;
 
 async function readClaudeJson(): Promise<Record<string, unknown>> {
   try {
@@ -79,14 +96,7 @@ router.get('/config/opencc/provider', async (_req, res) => {
 
 router.put('/config/opencc/provider', async (req, res) => {
   const schema = z.object({
-    profiles: z.array(z.object({
-      id: z.string().optional(),
-      name: z.string(),
-      provider: z.string(),
-      baseUrl: z.string().optional(),
-      model: z.string().optional(),
-      apiFormat: z.string().optional(),
-    })),
+    profiles: z.array(ProviderProfileSchema),
   });
   const parsed = schema.safeParse(req.body);
   if (!parsed.success) {

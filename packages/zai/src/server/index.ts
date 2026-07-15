@@ -13,17 +13,32 @@ import execRouter from './routes/exec.js';
 import agentRouter from './routes/agent.js';
 import agentSettingsRouter from './routes/agentSettings.js';
 import answerRouter from './routes/answer.js';
+import tasksRouter from './routes/tasks.js';
 import { ensureManifestDir } from './services/manifest.js';
 import { initAgentRuntime, getAskRegistry } from './services/agentRuntime.js';
+import {
+  initBackgroundRuntime,
+  initSubagentNotifierLifecycle,
+} from './services/backgroundRuntime.js';
+import { startBranchChecker } from './routes/system.js';
 
 // zai is a local dev tool — the server only listens on localhost and every
 // route is wide-open to anyone who can reach the port. The original
 // tokenGuard middleware added friction (token changes on every server
 // restart → 401 → manual paste dance) without buying real security.
-export function createApp(_opts: AppOptions): express.Express {
+export function createApp(opts: AppOptions): express.Express {
+  // Inject read-only instance context so routes can access cwd without process.cwd()
+  const app = express();
+  app.locals.instanceContext = { cwd: opts.cwd, cwdName: opts.cwdName };
+
   // Initialize the agent runtime singleton at boot. Idempotent — safe to call
   // if createApp is invoked multiple times in tests.
-  initAgentRuntime()
+  initAgentRuntime(opts.cwd)
+  // SubagentNotifier 必须在 initBackgroundRuntime 之前注册,这样
+  // onTaskStateChange 第一次触发就能拿到句柄 (backgroundRuntime.ts
+  // 内部 tryGetNotifier 也兜底了反向顺序)。
+  initSubagentNotifierLifecycle()
+  initBackgroundRuntime()
 
   // Ensure ~/.zai/ exists for persistent cache (manifest.json) and future
   // config data. This is fire-and-forget — if it fails the app still works,
@@ -36,7 +51,6 @@ export function createApp(_opts: AppOptions): express.Express {
   // Until that button is clicked, /api/resources returns an empty list
   // and the UI shows a "click refresh" hint.
 
-  const app = express();
   // 显式把 body 限额抬到 20mb: 默认 100kb 在粘贴/拖拽图片时立刻
   // PayloadTooLargeError — 一张 200KB 的 PNG → ~270KB base64, 加上 JSON
   // envelope 与 10 张图 (MAX_ATTACHMENTS_PER_TURN) 直接爆掉. 20mb 留足
@@ -56,6 +70,7 @@ export function createApp(_opts: AppOptions): express.Express {
   app.use('/api', execRouter);
   app.use('/api', agentRouter);
   app.use('/api', agentSettingsRouter);
+  app.use('/api', tasksRouter);
   // 注入 AskRegistry 给 answer router, 并挂载.
   // 注意: 这里的 prefix 必须是 '/api' (不是 '/api/agent'); answerRouter 内部
   // 已经用 '/agent/answer' + '/agent/answer/reject' 做 path, 拼起来才是
@@ -65,6 +80,9 @@ export function createApp(_opts: AppOptions): express.Express {
     (req as any)._askRegistry = getAskRegistry()
     next()
   }, answerRouter)
+
+  // 启动分支检查器（每 10 秒检测一次 git 分支变化）
+  startBranchChecker(opts.cwd);
 
   return app;
 }

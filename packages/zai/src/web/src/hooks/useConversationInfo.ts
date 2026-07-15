@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAgentStore } from '../store/useAgentStore.js'
+import { useAppStore } from '../store/useAppStore.js'
 import type { AgentMessage, AgentStatus } from '../store/useAgentStore.js'
 import type { ModelEntry } from '../../../shared/settings.js'
 
@@ -79,8 +80,10 @@ function findAliasForModel(model: string | null, models: ModelEntry[]): ModelEnt
  * cheap because countCompletedTurns is O(n).
  */
 export function useConversationInfo(): ConversationInfo {
-  const { sessionId, activeSessionId, sessions, messages, status, cwd } =
+  const { sessionId, activeSessionId, sessions, messages, status } =
     useAgentStore()
+  const { instanceContext } = useAppStore()
+  const cwd = instanceContext?.cwd || null
 
   const [runtime, setRuntime] = useState<RuntimeSettings>({
     defaultModel: null,

@@ -32,15 +32,22 @@ const menuItems = [
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sidebarCollapsed, toggleSidebar } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, setInstanceContext } = useAppStore();
   const [version, setVersion] = useState<string>('…');
 
   useEffect(() => {
     api
-      .get<{ ok: boolean; version: string }>('/health')
-      .then((data) => setVersion(data.version))
-      .catch(() => setVersion('unknown'));
-  }, []);
+      .get<{ ok: boolean; version: string; cwd: string; cwdName: string; branch: string | null }>('/system')
+      .then((data) => {
+        setVersion(data.version);
+        setInstanceContext({ cwd: data.cwd, cwdName: data.cwdName, branch: data.branch ?? null });
+        document.title = `知鸟AI - ${data.cwdName}`;
+      })
+      .catch(() => {
+        setVersion('unknown');
+        document.title = '知鸟AI';
+      });
+  }, [setInstanceContext]);
 
   return (
     // 用 height: 100vh (而不是 minHeight) 把 AntLayout 锁死在视口高度,
@@ -145,7 +152,7 @@ export default function Layout() {
             调整 Header 高度或 padding 都不会再把对话输入框挤出底部.
             注意 Content 自身必须有 flex: 1 才能在 AntLayout (flex column) 里
             占满 Header 之外的剩余高度, 否则子页面会以 content 高度为准溢出. */}
-        <Content style={{ flex: 1, padding: '24px 24px 0 24px', maxWidth: 1400, margin: '0 auto', width: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Content style={{ flex: 1, padding: '24px 24px 0 24px', width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Outlet />
         </Content>
       </AntLayout>

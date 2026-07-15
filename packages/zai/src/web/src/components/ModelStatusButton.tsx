@@ -1,9 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Input, Popover } from 'antd'
-import { CheckOutlined } from '@ant-design/icons'
+import { Button, Input, Popover, Tag, Tooltip } from 'antd'
+import { CheckOutlined, EyeOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useConversationInfo } from '../hooks/useConversationInfo.js'
 import { useAgentStore } from '../store/useAgentStore.js'
-import type { ModelEntry } from '../../../shared/settings.js'
+import type { ModelEntry, ModelCapabilities } from '../../../shared/settings.js'
 
 /**
  * OpenCC TUI-style model picker.
@@ -33,17 +33,15 @@ export default function ModelStatusButton() {
   const searchInputRef = useRef<any>(null)
 
   // Derived: provider label for the badge = "model-name(provider-name)".
-  // Looks up the current model in availableModels to find its alias
-  // (which encodes the provider name as the prefix before the last "-"),
-  // then formats the alias as "model-name(provider-name)" — e.g.
-  // "MiniMax-M3 (Anthropic-Mix)" for alias "anthropic-mix-m3".
+  // Looks up the current model in availableModels to find its
+  // `description` (set to the profile name by agentSettings.buildAvailableModels
+  // for both user models and builtin entries) — e.g.
+  // "MiniMax-M3 (Open Platform (Nova))".
   const badgeText = useMemo<string | null>(() => {
     if (!currentModel) return null
     const entry = availableModels.find((m) => m.model === currentModel)
-    if (!entry) return currentModel // no alias match — show raw model name only
-    const lastDash = entry.alias.lastIndexOf('-')
-    const providerName = lastDash > 0 ? entry.alias.slice(0, lastDash) : entry.alias
-    return `${currentModel} (${providerName})`
+    if (!entry || !entry.description) return currentModel
+    return `${currentModel} (${entry.description})`
   }, [currentModel, availableModels])
 
   // Derived: recent models from sessions, recency-weighted, deduped, max 5.
@@ -71,6 +69,7 @@ export default function ModelStatusButton() {
       m.model.toLowerCase().includes(q) ||
       m.alias.toLowerCase().includes(q) ||
       (m.label ?? '').toLowerCase().includes(q) ||
+      (m.description ?? '').toLowerCase().includes(q) ||
       extractHost(m.baseUrl).toLowerCase().includes(q),
     )
   }, [availableModels, searchQuery])
@@ -293,7 +292,8 @@ export default function ModelStatusButton() {
         size="small"
         title={`当前模型: ${badgeText ?? '未知'}\n点击切换`}
         style={{
-          color: currentModel ? 'rgba(255,255,255,0.55)' : 'rgba(255,255,255,0.30)',
+          color: 'inherit',
+          opacity: currentModel ? 0.9 : 0.6,
           fontSize: 12,
           fontFamily:
             'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
@@ -358,16 +358,73 @@ function Row({ entry, isCurrent, isSelected, onClick, rowRef }: RowProps) {
           {entry.description}
         </span>
       )}
+      <CapabilityBadges capabilities={entry.capabilities} />
+    </div>
+  )
+}
+
+/**
+ * Tiny capability chip strip rendered beneath each picker row. Kept
+ * intentionally compact: only vision + function-calling icons get
+ * individual chips; context/output is summarised as text to avoid
+ * crowding the row.
+ */
+function CapabilityBadges({ capabilities }: { capabilities?: ModelCapabilities }) {
+  if (!capabilities) return null
+  const ctx = capabilities.contextWindow
+  const out = capabilities.maxOutputTokens
+  const hasAny =
+    capabilities.supportsVision ||
+    capabilities.supportsFunctionCalling ||
+    capabilities.supportsReasoning ||
+    ctx ||
+    out
+  if (!hasAny) return null
+  return (
+    <div
+      style={{
+        display: 'flex',
+        gap: 4,
+        paddingLeft: 13,
+        fontSize: 10,
+        color: 'rgba(255,255,255,0.45)',
+        flexWrap: 'wrap',
+      }}
+    >
+      {capabilities.supportsVision && (
+        <Tooltip title="支持图片多模态">
+          <Tag color="purple" style={{ margin: 0, fontSize: 10, lineHeight: '14px', padding: '0 4px' }}>
+            <EyeOutlined /> Vision
+          </Tag>
+        </Tooltip>
+      )}
+      {capabilities.supportsFunctionCalling && (
+        <Tooltip title="支持工具调用">
+          <Tag color="cyan" style={{ margin: 0, fontSize: 10, lineHeight: '14px', padding: '0 4px' }}>
+            <ThunderboltOutlined /> Tools
+          </Tag>
+        </Tooltip>
+      )}
+      {ctx ? (
+        <span style={{ paddingLeft: 2 }}>
+          上下文 {ctx >= 1_000_000 ? `${(ctx / 1_000_000).toFixed(ctx % 1_000_000 === 0 ? 0 : 1)}M` : `${Math.round(ctx / 1_000)}K`}
+        </span>
+      ) : null}
+      {out ? (
+        <span style={{ paddingLeft: 2 }}>
+          · 输出 {out >= 1_000_000 ? `${(out / 1_000_000).toFixed(out % 1_000_000 === 0 ? 0 : 1)}M` : `${Math.round(out / 1_000)}K`}
+        </span>
+      ) : null}
     </div>
   )
 }
 
 function formatProviderTitle(entry: ModelEntry): string {
-  // alias 形如 "<profile>-<suffix>" (由 sync 脚本生成)
-  // e.g. "anthropic-mix-m3" → profile "anthropic-mix"
-  const lastDash = entry.alias.lastIndexOf('-')
-  const profile = lastDash > 0 ? entry.alias.slice(0, lastDash) : entry.alias
-  return `${profile} (${extractHost(entry.baseUrl)})`
+  // Group by the profile name set on ModelEntry.description (set by
+  // agentSettings.buildAvailableModels when projecting providerProfiles
+  // and the builtin catalog). Falls back to "<host>" when the entry
+  // has no description (legacy settings.json models).
+  return entry.description ?? extractHost(entry.baseUrl)
 }
 
 function extractHost(baseUrl: string | undefined): string {

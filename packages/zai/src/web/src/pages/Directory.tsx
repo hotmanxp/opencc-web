@@ -94,7 +94,7 @@ export default function Directory() {
     api
       .get<DirectoryStatus>('/dirs')
       .then(setData)
-      .catch((err) => message.error(`加载失败: ${err}`))
+      .catch((err) => console.error(err))
       .finally(() => setLoading(false));
   }, []);
 
@@ -131,7 +131,7 @@ export default function Directory() {
       await navigator.clipboard.writeText(viewerFile.content);
       message.success('已复制到剪贴板');
     } catch {
-      message.error('复制失败，请手动选择');
+      console.error('clipboard copy failed');
     }
   }, [viewerFile]);
 

@@ -29,15 +29,15 @@ program
 program
   .command('dev')
   .description('Development mode (Vite HMR + Express)')
-  .option('--port <port>', 'Vite dev server port', '9888')
-  .option('--api-port <port>', 'Express API port', '7715')
+  .option('--port <port>', 'Vite dev server port (default: 9888, auto-scan if occupied)')
+  .option('--api-port <port>', 'Express API port (default: 7715, auto-scan if occupied)')
   .option('--no-open', 'Do not auto-open browser')
   .action(runDev);
 
 program
   .command('start')
   .description('Production mode (static SPA + API)')
-  .option('--port <port>', 'Express port', '9888')
+  .option('--port <port>', 'Express port (default: 9888, auto-scan if occupied)')
   .option('--no-open', 'Do not auto-open browser')
   .action(runStart);
 

@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
+import path from "node:path";
 import { createSseStream } from "./stream.js";
 import {
   abortAgentSession,
@@ -10,7 +11,8 @@ import {
   setCurrentSessionId,
   listSkills,
 } from "../services/agentRuntime.js";
-import { loadAgentsMd, buildAgentsMdSystemPrompt } from "@zn-ai/zai-agent-core";
+import { loadAgentsMd, buildAgentsMdSystemPrompt, EXTERNAL_PERMISSION_MODES, type UserFacingPermissionMode } from "@zn-ai/zai-agent-core";
+import { getDefaultMode } from "../services/permissionMode.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
 import { resolveModel } from "../lib/resolveModel.js";
@@ -269,14 +271,25 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
     return res.status(400).json({ error: "invalid body: need {prompt, cwd?}" });
   }
 
-  const {
-    prompt,
-    contentBlocks,
-    cwd = process.cwd(),
-    sessionId: existingSessionId,
-  } = parsed.data;
-  const sessionId = existingSessionId ?? newSessionId();
-  const abortController = new AbortController();
+  const { prompt, contentBlocks, sessionId: existingSessionId } = parsed.data
+  const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
+  const cwd = ctx.cwd
+  const sessionId = existingSessionId ?? newSessionId()
+
+  // Prompt 携带已有 sessionId 时，必须在响应成功和启动 runtime 之前完成 cwd 校验
+  if (existingSessionId) {
+    try {
+      const t = await getTranscriptStore().read(existingSessionId)
+      const resolved = t.meta.cwd ? path.resolve(t.meta.cwd) : null
+      if (resolved !== path.resolve(ctx.cwd)) {
+        return res.status(404).json({ error: 'Session not found' })
+      }
+    } catch {
+      return res.status(404).json({ error: 'Session not found' })
+    }
+  }
+
+  const abortController = new AbortController()
   const timer = setTimeout(() => {
     if (process.env.ZAI_DEBUG === "1") {
       console.error("[zai.agent.prompt] HARD_TIMEOUT fired", {
@@ -337,17 +350,21 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
           ? userContent
           : [{ role: "user", content: userContent as UserMessageContent }];
 
-      // 拉 transcript meta.model 给 resolveModel 用. 文件不存在 (新会话)
-      // 是正常路径, 静默忽略 — sessionModel 保持 null, resolveModel 走
-      // fallback 链到 env / settings / builtin.
+      // 拉 transcript meta 给 resolveModel / permissionMode 用. 文件不存在
+      // (新会话) 是正常路径, 静默忽略 — sessionModel 保持 null,
+      // permissionMode 走 getDefaultMode() 兜底.
       let sessionModel: string | null = null;
+      let transcript:
+        | Awaited<ReturnType<ReturnType<typeof getTranscriptStore>["read"]>>
+        | null = null;
       try {
         const existing = await getTranscriptStore().read(sessionId);
+        transcript = existing;
         if (existing.meta.model && existing.meta.model !== "unknown") {
           sessionModel = existing.meta.model;
         }
       } catch {
-        // 新会话 / 无 transcript — sessionModel 保持 null
+        // 新会话 / 无 transcript — sessionModel 保持 null, transcript 保持 null
       }
 
       // resolveModel 内部 readZaiSettings 读不到 ~/.zai/settings.json 时
@@ -383,6 +400,10 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
         systemPrompt,
         abortSignal: abortController.signal,
         model: resolvedModel,
+        // 透传用户为该会话选定的 permission mode. 切 mode 后下一次发消息
+        // 立即生效, 不需要重启 runtime. 新会话 / meta 未写 mode 时走默认.
+        permissionMode:
+          transcript?.meta?.permissionMode ?? getDefaultMode(),
       });
 
       // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,
@@ -474,12 +495,13 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   })();
 });
 
-// GET /api/agent/sessions — 列出所有 session，最新的在前
-router.get("/agent/sessions", async (_req: Request, res: Response) => {
+// GET /api/agent/sessions — 列出当前实例 cwd 对应的 session
+router.get('/agent/sessions', async (req: Request, res: Response) => {
   try {
-    const store = getTranscriptStore();
-    const sessions = await store.list();
-    res.json({ sessions });
+    const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
+    const store = getTranscriptStore()
+    const sessions = await store.list(ctx.cwd)
+    res.json({ sessions })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
@@ -490,47 +512,60 @@ router.get("/agent/sessions", async (_req: Request, res: Response) => {
 // '新会话' 占位条目, 而不是等到第一条消息发出去才出现.
 router.post("/agent/sessions", async (req: Request, res: Response) => {
   try {
-    const cwd =
-      req.body && typeof req.body.cwd === "string"
-        ? req.body.cwd
-        : process.cwd();
-    const store = getTranscriptStore();
-    const sessionId = await store.create({ cwd, model: "unknown" });
-    res.json({ sessionId });
+    const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
+    const store = getTranscriptStore()
+    const sessionId = await store.create({
+      cwd: ctx.cwd,
+      model: 'unknown',
+      permissionMode: getDefaultMode(),
+    })
+    res.json({ sessionId })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
 
-// GET /api/agent/sessions/:id — 读取指定 session 的消息
-router.get("/agent/sessions/:id", async (req: Request, res: Response) => {
+// GET /api/agent/sessions/:id — 读取指定 session 的消息（校验 cwd）
+router.get('/agent/sessions/:id', async (req: Request, res: Response) => {
   try {
-    const store = getTranscriptStore();
-    const transcript = await store.read(req.params.id);
-    res.json({ transcript });
+    const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
+    const store = getTranscriptStore()
+    const transcript = await store.read(req.params.id)
+    const resolved = transcript.meta.cwd ? path.resolve(transcript.meta.cwd) : null
+    if (resolved !== path.resolve(ctx.cwd)) {
+      return res.status(404).json({ error: 'Session not found' })
+    }
+    res.json({ transcript })
   } catch (err) {
     res.status(404).json({ error: (err as Error).message });
   }
 });
 
-// DELETE /api/agent/sessions/:id — 删除指定 session
-router.delete("/agent/sessions/:id", async (req: Request, res: Response) => {
+// DELETE /api/agent/sessions/:id — 删除指定 session（校验 cwd）
+router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
   try {
-    const store = getTranscriptStore();
-    await store.remove(req.params.id);
-    res.json({ ok: true });
+    const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
+    const store = getTranscriptStore()
+    const transcript = await store.read(req.params.id)
+    const resolved = transcript.meta.cwd ? path.resolve(transcript.meta.cwd) : null
+    if (resolved !== path.resolve(ctx.cwd)) {
+      return res.status(404).json({ error: 'Session not found' })
+    }
+    await store.remove(req.params.id)
+    res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
   }
 });
 
 // PATCH /agent/sessions/:id — partial-update a session's transcript meta.
-// v1 only supports updating `model`. The body must include a non-empty
-// string that's not the placeholder 'unknown' — silently dropping the
-// patch when 'unknown' is sent prevents accidentally resetting the
-// user's selection back to the env/settings fallback.
+// Supports `model` and `permissionMode`. The model field must include a
+// non-empty string that's not the placeholder 'unknown' — silently
+// dropping the patch when 'unknown' is sent prevents accidentally
+// resetting the user's selection back to the env/settings fallback.
 const PatchSessionRequest = z.object({
   model: z.string().min(1).max(256).optional(),
+  permissionMode: z.enum(EXTERNAL_PERMISSION_MODES as readonly [UserFacingPermissionMode, ...UserFacingPermissionMode[]]).optional(),
 });
 
 router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
@@ -543,6 +578,9 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
     const store = getTranscriptStore();
     if (parsed.data.model && parsed.data.model !== "unknown") {
       await store.patch(sid, { model: parsed.data.model });
+    }
+    if (parsed.data.permissionMode) {
+      await store.patch(sid, { permissionMode: parsed.data.permissionMode });
     }
     res.json({ ok: true });
   } catch (err) {

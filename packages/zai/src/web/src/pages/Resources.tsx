@@ -92,7 +92,7 @@ export default function Resources() {
         data.filter((i) => i.isCollection).map((i) => `${type}/${i.name}`),
       );
     } catch (err) {
-      message.error(`加载失败: ${err}`);
+      console.error(err);
       setResources([]);
     } finally {
       setLoading(false);
@@ -129,7 +129,7 @@ export default function Resources() {
       await fetchResources(activeTab);
     } catch (err) {
       hide();
-      message.error(`刷新失败: ${err}`);
+      console.error(err);
     } finally {
       setGlobalRefreshing(false);
     }

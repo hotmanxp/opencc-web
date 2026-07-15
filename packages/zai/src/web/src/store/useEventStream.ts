@@ -46,5 +46,8 @@ function dispatch(event: ServerEvent) {
     case 'toast':
       useAppStore.getState().applySystemEvent(event)
       break
+    case 'branch.changed':
+      useAppStore.getState().applySystemEvent(event)
+      break
   }
 }
