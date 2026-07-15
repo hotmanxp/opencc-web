@@ -8,7 +8,8 @@
   "exports": {
     ".": "./dist/index.js",
     "./runtime": "./dist/runtime/index.js",
-    "./transcript": "./dist/transcript/store.js"
+    "./transcript": "./dist/transcript/store.js",
+    "./commands": "./dist/commands/index.js"
   },
   "files": [
     "dist/",
