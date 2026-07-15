@@ -187,7 +187,7 @@ export function renderPrompt({body, args, argNames}: RenderArgs): string
 1. `getCommandRegistry()` 拿 agent-core 单例
 2. `registerBuiltin()`:依次注册 `/clear`、`/compact`、`/status`
 3. `loadUserCommands()`:扫 `~/.zai/commands/*.md`,把每个文件包装为 `PromptCommand`,`name` 取文件名(去掉 `.md`),`source: 'user'`,`getPromptForCommand` 闭包持有 `body`
-4. 若 builtin 与 user 同名 → user 命令**不**注册,但保留在 loader 日志里警告(`console.warn`);`/api/agent/slash` 仍返回 user 命令(用 `user:` 前缀展示以区分)
+4. **冲突策略(明确)**:若 builtin 与 user 同名 — builtin 保持 `name="<x>"` 注册;user 命令**也注册**,但 `name` 重写为 `user:<x>` 以避免覆盖。`/api/agent/slash` 列表里两条都出现,UI 用 `isBuiltIn` 标记区分;用户输入 `/<x>` 时 `resolve()` 只命中 builtin。loader 打 `console.warn` 提示冲突。
 
 `reloadUserCommands()`:清除所有 `source==='user'` 的 Command,重新 `loadUserCommands()`。CRUD 端点写完后调。
 
@@ -195,9 +195,9 @@ export function renderPrompt({body, args, argNames}: RenderArgs): string
 
 | 文件 | 类型 | call 行为 |
 |---|---|---|
-| `builtin/clear.ts` | `LocalCommand` | 调 `getTranscriptStore().clear(sessionId)`(或对应 store API),返回 `{kind:'cleared'}`;若 `status==='streaming'` 则先 `abortAgentSession()` |
-| `builtin/compact.ts` | `LocalCommand` | 调 `services/compact/` 已有的 compact 函数(若未实现 → 返回 `{kind:'error', message: 'not yet wired'}`),返回 `{kind:'compacted', removedMessages: n, summary?}` |
-| `builtin/status.ts` | `LocalCommand` | 拼 `instanceContext` + `getCurrentSessionId()` + `model`,返回 `{kind:'status', payload: StatusPayload}`;**不**写消息 |
+| `builtin/clear.ts` | `LocalCommand` | 调 `getTranscriptStore().remove(transcriptId)`(参考 `packages/zai-agent-core/src/transcript/store.ts` 已有的 `remove()` 方法);若后端判定有活跃 query(通过 `getCurrentSessionId()` + `runtime` 拿 session),先 `await abortAgentSession()`,再 remove;返回 `{kind:'cleared'}` |
+| `builtin/compact.ts` | `LocalCommand` | 调 `services/compact/` 已有 compact 路径(若该路径尚未上线 → 返回 `{kind:'error', message: '/compact 暂未实现'}` — MVP 接受 stub);返回 `{kind:'compacted', removedMessages: n, summary?}` |
+| `builtin/status.ts` | `LocalCommand` | 拼 `instanceContext`(cwd / cwdName / branch)+ `getCurrentSessionId()` + 当前 `model`,返回 `{kind:'status', payload: StatusPayload}`;**不**写消息 — 由前端决定怎么呈现 |
 
 ### 2.7 userLoader.ts
 
@@ -222,7 +222,7 @@ export async function loadUserCommands(): Promise<PromptCommand[]>
 
 响应(`type: 'cleared'`):
 ```json
-{ "type": "cleared", "payload": {} }
+{ "type": "cleared", "payload": null }
 ```
 
 响应(`type: 'compacted'`):
@@ -289,7 +289,7 @@ export async function loadUserCommands(): Promise<PromptCommand[]>
 
 ### 4.1 `Agent.tsx`
 
-`handleSend` 头部加分支:
+`handleSend` 头部加分支。提取 `postPromptToLLM(text, blocks)` 为同一函数内 helper(`handleSend` 原 LLM 路径会搬到那里),让 slash 路径也能复用:
 
 ```tsx
 const handleSend = async () => {
@@ -313,14 +313,19 @@ const handleSend = async () => {
         await useAgentStore.getState().loadSessions()
         break
       case "status":
-        showStatusCard(result.payload)  // 复用 ConversationInfoCard 逻辑
+        // 复用 ConversationInfoButton 触发逻辑(Agent.tsx: ConversationInfoButton 处)
+        // payload 直接喂给现有 ConversationInfoCard 的渲染
+        showConversationInfoCard(result.payload)
         break
       case "prompt":
-        // 复用 handleSend 后续的 prompt 路径,把 text 换成 result.payload.rendered
+        // 走与 handleSend 原 prompt 路径完全相同的代码:
+        // 1) setInput("") 已做 2) 构造 userMsg 3) useAgentStore.setState({status:"streaming",messages:[...s.messages, userMsg]})
+        // 4) api.post /agent/prompt {prompt: result.payload.rendered, sessionId, contentBlocks: blocks}
+        // 唯一区别:把 text 换成 result.payload.rendered
         await postPromptToLLM(result.payload.rendered, blocks)
         break
       case "unknown":
-        // fallthrough 到原 LLM 路径
+        // OpenCC 默认 fallthrough:把原文本当普通 prompt 发给 LLM
         await postPromptToLLM(text, blocks)
         break
       case "error":
@@ -330,7 +335,7 @@ const handleSend = async () => {
     return
   }
 
-  // 原 prompt 路径不变
+  // 原 prompt 路径(extract 为 postPromptToLLM helper)
   await postPromptToLLM(text, blocks)
 }
 ```
