@@ -1,5 +1,6 @@
 import { commandRouter } from './command.js'
 import { commandsRouter } from './commands.js'
+import { slashRouter } from './slash.js'
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import path from "node:path";
@@ -27,6 +28,7 @@ type UserMessage = { role: "user"; content: string | UserMessageContent };
 const router: IRouter = Router();
 router.use('/agent', commandRouter)
 router.use('/agent', commandsRouter)
+router.use('/agent', slashRouter)
 
 const HARD_TIMEOUT_MS = 5 * 60 * 1000;
 
