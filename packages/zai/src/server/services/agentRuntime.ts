@@ -75,6 +75,12 @@ export function initAgentRuntime(cwd: string): void {
     process.once('SIGTERM', cleanup)
     process.once('SIGINT', cleanup)
   }
+
+  // 启动时一次性加载 commands registry(built-in + first user scan)。
+  // 若启动时 dataDir 尚未就绪,context.cwd 兜底为 process.cwd()。
+  import('./commands/registry.js').then(({ initCommands }) =>
+    initCommands({ cwd, dataDir: process.env.ZAI_DATA_DIR ?? '', sessionId: undefined })
+  ).catch((err) => console.error('[initCommands] failed:', err))
 }
 
 export async function getOrCreateAgentSession(): Promise<string | null> {

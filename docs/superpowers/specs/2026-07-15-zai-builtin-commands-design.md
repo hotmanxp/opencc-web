@@ -461,3 +461,16 @@ packages/zai/src/web/src/store/useAgentStore.ts (compact 后 reloadSessions help
 - **R3**:user-defined 命令 reload 时机 → MVP 决定**CRUD 写完后手动 reload**,不引入 watcher(后续 spec 再加)
 - **R4**:未知命令行为 → 决定**fallthrough 到 LLM**(OpenCC 默认),前端不感知命令语义,简化心智
 - **R5**:`/status` 命令的输出形态 → 决定**结构化 payload + 前端弹出现有 ConversationInfoCard**,不写新消息
+
+## 12. 实现状态(2026-07-15)
+
+实现已完成,对应 plan: `docs/superpowers/plans/2026-07-15-zai-builtin-commands.md`。
+
+- agent-core Command 类型 / registry / renderPrompt:已实现,测试覆盖
+- 三个 built-in (/clear /compact /status):已实现,compact 走 MVP stub(spec §2.6 决策)
+- userLoader:已实现,frontmatter 解析复用 zai-agent-core 既有 YAML 工具,无新增依赖
+- 三组 API 端点:`POST /api/agent/command` / `CRUD /api/agent/commands` / `GET /api/agent/slash` 已实现
+- Web:Agent.tsx handleSend 加 `/` 分支 + slash 弹层合并 commands + skills;Resources.tsx Commands CRUD 区块已实现
+- 测试:bun:test 跑过全部新增 + 已有
+
+不在本次实现范围(spec §9 YAGNI):文件 watcher、CLI `zai command`、命令面板高级 UI。
