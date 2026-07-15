@@ -1003,9 +1003,18 @@ export default function Agent() {
   }, []);
   const { token } = theme.useToken();
   // Skills autocomplete: 输入 / 时弹出
-  const [skills, setSkills] = useState<
-    Array<{ name: string; description: string }>
-  >([]);
+  const [slashItems, setSlashItems] = useState<
+    Array<{ kind: 'command' | 'skill'; name: string; description: string; isBuiltIn?: boolean }>
+  >([])
+  const setSlashSkills = useCallback((items: typeof slashItems) => setSlashItems(items), [])
+  const skills = useMemo(
+    () => slashItems.filter((i) => i.kind === 'skill') as Array<{ name: string; description: string }>,
+    [slashItems],
+  )
+  const commands = useMemo(
+    () => slashItems.filter((i) => i.kind === 'command') as Array<{ name: string; description: string; isBuiltIn?: boolean }>,
+    [slashItems],
+  )
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [skillMenuIdx, setSkillMenuIdx] = useState(0);
   const [skillFilter, setSkillFilter] = useState("");
@@ -1101,15 +1110,14 @@ export default function Agent() {
     loadSessions();
   }, []);
 
-  // 加载 skills 列表（页面初始化时请求一次）
   useEffect(() => {
-    fetch("/api/agent/skills")
+    fetch("/api/agent/slash")
       .then((res) => res.json())
       .then((data) => {
-        if (data.skills) setSkills(data.skills);
+        if (Array.isArray(data.items)) setSlashItems(data.items)
       })
-      .catch(() => {});
-  }, []);
+      .catch(() => {})
+  }, [])
 
   // 模糊匹配: 检查 query 的字符是否按顺序出现在 target 中（可不连续）
   const fuzzyMatch = (query: string, target: string): number => {
@@ -1130,31 +1138,36 @@ export default function Agent() {
     return qi === query.length ? score : 0;
   };
 
-  // 当输入以 / 开头时，计算过滤后的 skills（支持模糊匹配）
-  const filteredSkills = useMemo(() => {
-    if (!input.startsWith("/")) return [];
-    const q = input.slice(1).toLowerCase();
-    if (!q) return skills;
-    const scored = skills
-      .map((s) => {
-        const nameScore = fuzzyMatch(q, s.name);
-        const descScore = fuzzyMatch(q, s.description);
-        // name 匹配优先：只有 name 命中才算有效结果
-        if (nameScore === 0) return { skill: s, score: 0 };
-        // description 匹配只影响排序权重（name 匹配但 desc 也匹配的排前面）
-        const bonus = descScore > 0 ? descScore * 0.3 : 0;
-        return { skill: s, score: nameScore + bonus };
+  const filteredSlashItems = useMemo(() => {
+    if (!input.startsWith("/")) return []
+    const q = input.slice(1).toLowerCase()
+    if (!q) return slashItems
+    const scored = slashItems
+      .map((item) => {
+        const nameScore = fuzzyMatch(q, item.name)
+        const descScore = fuzzyMatch(q, item.description)
+        if (nameScore === 0) return { item, score: 0 }
+        const bonus = descScore > 0 ? descScore * 0.3 : 0
+        return { item, score: nameScore + bonus }
       })
-      .filter((item) => item.score > 0)
-      .sort((a, b) => b.score - a.score);
-    return scored.map((item) => item.skill);
-  }, [input, skills]);
+      .filter((s) => s.score > 0)
+      .sort((a, b) => b.score - a.score)
+    return scored.map((s) => s.item)
+  }, [input, slashItems])
+
+  // 把过滤后,做"命令优先"的重新排序:commands 排在 skills 前面。
+  // 这样用户打 "/cl" 时,/clear 排在任何 skill 前面。
+  const orderedSlashItems = useMemo(() => {
+    const cmds = filteredSlashItems.filter((i) => i.kind === "command")
+    const sks = filteredSlashItems.filter((i) => i.kind === "skill")
+    return [...cmds, ...sks]
+  }, [filteredSlashItems])
 
   // 当过滤结果变化时，重置选中项
   useEffect(() => {
     setSkillMenuIdx(0);
-    setShowSkillMenu(filteredSkills.length > 0);
-  }, [filteredSkills.length]);
+    setShowSkillMenu(orderedSlashItems.length > 0);
+  }, [orderedSlashItems.length]);
 
   // 点击外部关闭 skill 菜单
   useEffect(() => {
@@ -1266,6 +1279,46 @@ export default function Agent() {
     e.target.value = "";
   };
 
+  const postPromptToLLM = useCallback(async (text: string, blocks: Array<{ type: "image"; source: { type: "base64"; media_type: string; data: string } }>) => {
+    // 注意:attachments 已经清空,这里 userMsg 不带 attachments;
+    // 调用方应确保"无附件" — 这是合理的:slash prompt 命令不需要附带图片。
+    const userMsg: AgentMessage = {
+      eventId: `user-${Date.now()}`,
+      sessionId: "",
+      ts: Date.now(),
+      turnIndex: 0,
+      type: "user.text",
+      text,
+      attachments: [],
+    }
+    useAgentStore.setState((s) => ({
+      status: "streaming",
+      messages: [...s.messages, userMsg],
+      sendSeq: s.sendSeq + 1,
+    }))
+
+    const { sessionId: returnedSessionId } = await api.post<{ sessionId: string }>(
+      "/agent/prompt",
+      {
+        prompt: text || undefined,
+        contentBlocks: blocks.length > 0 ? blocks : undefined,
+        sessionId: sessionId || activeSessionId || undefined,
+      },
+    )
+    useAgentStore.setState({
+      sessionId: returnedSessionId,
+      activeSessionId: returnedSessionId,
+    })
+    const localTitle = deriveLocalTitle(text)
+    if (localTitle) {
+      useAgentStore.getState().applySessionEvent({
+        type: "session.renamed",
+        sessionId: returnedSessionId,
+        title: localTitle,
+      })
+    }
+  }, [sessionId, activeSessionId])
+
   const handleSend = async () => {
     const text = input.trim();
     const readyAttachments = attachments.filter((a) => a.status === "ready");
@@ -1279,6 +1332,56 @@ export default function Agent() {
         data: a.base64DataUrl.replace(/^data:[^;]+;base64,/, ""),
       },
     }));
+    if (text.startsWith("/")) {
+      setInput("")
+      const sp = text.indexOf(" ")
+      const name = sp === -1 ? text.slice(1) : text.slice(1, sp)
+      const args = sp === -1 ? "" : text.slice(sp + 1)
+      // 取当前 sessionId 优先 store.sessionId;前端可能为 null,后端会兜底。
+      const sid = sessionId || activeSessionId || undefined
+      try {
+        const result = await api.post<{ type: string; payload: any }>(
+          "/agent/command",
+          { name, args, ...(sid ? { sessionId: sid } : {}) },
+        )
+        switch (result.type) {
+          case "cleared":
+            useAgentStore.getState().clearMessages()
+            message.success("对话已清空")
+            return
+          case "compacted":
+            message.success(`压缩完成,移除 ${result.payload.removedMessages} 条`)
+            await useAgentStore.getState().loadSessions()
+            return
+          case "status":
+            // 复用 useAppStore instanceContext 注入到 modal。
+            // 把 payload 推到 existing ConversationInfoCard 弹层。
+            // 简化版:弹一个 message.info 摘要。
+            message.info(
+              `cwd: ${result.payload.cwd}\nmodel: ${result.payload.model}\nsession: ${result.payload.sessionId ?? "-"}`,
+              5,
+            )
+            return
+          case "prompt":
+            // 把 rendered 当普通 prompt 走原 LLM 路径
+            await postPromptToLLM(result.payload.rendered, blocks)
+            return
+          case "message":
+            message.info(result.payload.text, 3)
+            return
+          case "unknown":
+            // OpenCC 默认 fallthrough:把原文本当普通 prompt 发给 LLM
+            await postPromptToLLM(text, blocks)
+            return
+          case "error":
+            message.error(result.payload.message)
+            return
+        }
+      } catch (err) {
+        message.error(`命令执行失败: ${(err as Error).message}`)
+        return
+      }
+    }
     if (!text && blocks.length === 0) return;
     if (status === "streaming") return;
     setInput("");
@@ -1311,56 +1414,29 @@ export default function Agent() {
     attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl));
     setAttachments([]);
 
-    // store 同时持有 sessionId (显示用, 由 loadSessions/setCurrentSession 设置)
-    // 和 activeSessionId (SSE reducer 在 runtime.started 时设置).
-    // 两者都需要更新, 否则下一次 handleSend 传给 server 的 sessionId 仍为 null.
-    const { sessionId: returnedSessionId } = await api.post<{
-      sessionId: string;
-    }>("/agent/prompt", {
-      prompt: text || undefined,
-      contentBlocks: blocks.length > 0 ? blocks : undefined,
-      sessionId: sessionId || activeSessionId || undefined,
-    });
-    useAgentStore.setState({
-      sessionId: returnedSessionId,
-      activeSessionId: returnedSessionId,
-    });
-
-    // ★ 乐观更新: 不等 server 走完 runtime → eventBus → SSE → 前端 applySessionEvent
-    // 这条慢路径, handleSend 拿到 sessionId 立刻本地 derive title 写进 sessions.
-    // 后端 SSE 回来后 applySessionEvent 会用同一个 title 再写一次, 结果一致.
-    // 服务端 deriveTitleFromPrompt 在 packages/zai/src/server/routes/agent.ts:363,
-    // 这里复刻相同规则保持 sidebar 显示与 transcript 落盘一致.
-    const localTitle = deriveLocalTitle(text);
-    if (localTitle) {
-      useAgentStore.getState().applySessionEvent({
-        type: "session.renamed",
-        sessionId: returnedSessionId,
-        title: localTitle,
-      });
-    }
+    await postPromptToLLM(text, blocks)
   };
 
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
     // Skills 菜单键盘导航
-    if (showSkillMenu && filteredSkills.length > 0) {
+    if (showSkillMenu && orderedSlashItems.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSkillMenuIdx((i) => (i + 1) % filteredSkills.length);
+        setSkillMenuIdx((i) => (i + 1) % orderedSlashItems.length);
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
         setSkillMenuIdx(
-          (i) => (i - 1 + filteredSkills.length) % filteredSkills.length,
+          (i) => (i - 1 + orderedSlashItems.length) % orderedSlashItems.length,
         );
         return;
       }
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
         e.preventDefault();
-        selectSkill(filteredSkills[skillMenuIdx]!.name);
+        selectSkill(orderedSlashItems[skillMenuIdx]!.name);
         return;
       }
       if (e.key === "Escape") {
@@ -1771,7 +1847,7 @@ export default function Agent() {
           <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
             <div style={{ display: "flex", alignItems: "stretch", position: "relative" }}>
               {/* Skills 自动补全下拉菜单 */}
-              {showSkillMenu && filteredSkills.length > 0 && (
+              {showSkillMenu && orderedSlashItems.length > 0 && (
                 <div
                   ref={skillMenuRef}
                   style={{
@@ -1789,7 +1865,7 @@ export default function Agent() {
                     boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
                   }}
                 >
-                  {filteredSkills.map((skill, idx) => (
+                  {orderedSlashItems.map((skill, idx) => (
                     <div
                       key={skill.name}
                       onMouseDown={(e) => {
