@@ -8,6 +8,7 @@ export interface SlashItem {
   argumentHint?: string
   whenToUse?: string
   isBuiltIn?: boolean
+  isConflict?: boolean
 }
 
 export async function slashList(opts: { skills?: Array<{ name: string; description: string }> } = {}): Promise<SlashItem[]> {
@@ -36,6 +37,7 @@ export async function slashList(opts: { skills?: Array<{ name: string; descripti
       ...(cmd.argumentHint ? { argumentHint: cmd.argumentHint } : {}),
       ...(cmd.type === 'prompt' && cmd.whenToUse ? { whenToUse: cmd.whenToUse } : {}),
       isBuiltIn: false,
+      ...(cmd.name.startsWith('user:') ? { isConflict: true } : {}),
     })
   }
 

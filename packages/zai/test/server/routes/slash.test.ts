@@ -25,4 +25,18 @@ describe('slashList', () => {
     expect(out[1]!.kind).toBe('command')
     expect(out[1]!.isBuiltIn).toBe(false)
   })
+
+  it('marks user: prefixed commands as isConflict when userLoader renamed a conflicting builtin', async () => {
+    const r = getCommandRegistry()
+    r.register({ type: 'local', name: 'clear', description: 'd', source: 'builtin', call: async () => ({ kind: 'cleared' }) })
+    r.register({ type: 'prompt', name: 'user:clear', description: 'd', source: 'user', progressMessage: 'p', contentLength: 0, getPromptForCommand: async () => [{ type: 'text', text: 'hi' }] })
+    const out = await slashList({ skills: [] })
+    expect(out.map((i) => i.name)).toEqual(['clear', 'user:clear'])
+    expect(out[0]!.kind).toBe('command')
+    expect(out[0]!.isBuiltIn).toBe(true)
+    expect(out[0]!.isConflict).toBeUndefined()
+    expect(out[1]!.kind).toBe('command')
+    expect(out[1]!.isBuiltIn).toBe(false)
+    expect(out[1]!.isConflict).toBe(true)
+  })
 })
