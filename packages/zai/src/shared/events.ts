@@ -55,7 +55,8 @@ const SessionEvent = z.discriminatedUnion('type', [
 
 const JobEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('job.started'),
-             jobId: z.string(), kind: z.enum(['resource_refresh','login','install']) }),
+             jobId: z.string(), kind: z.enum(['resource_refresh','login','install','agent_task']),
+             taskId: z.string().optional() }),
   z.object({ ...Base.shape, type: z.literal('job.progress'),
              jobId: z.string(), message: z.string(), percent: z.number().optional() }),
   z.object({ ...Base.shape, type: z.literal('job.done'),

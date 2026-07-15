@@ -8,7 +8,7 @@ const getInitialSidebarCollapsed = () =>
 
 interface JobInfo {
   jobId: string;
-  kind: 'resource_refresh' | 'login' | 'install';
+  kind: 'resource_refresh' | 'login' | 'install' | 'agent_task';
   progress?: number;
   message?: string;
   done?: boolean;

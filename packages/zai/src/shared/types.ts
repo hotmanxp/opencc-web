@@ -92,6 +92,22 @@ export interface SseEvent {
 
 export type ConfigTool = 'nova' | 'opencode' | 'opencc';
 
+/**
+ * Per-model capability flags surfaced by the provider picker.
+ *
+ * Mirrors the OpenCC src/integrations/models/*.ts descriptors —
+ * copy values verbatim when a gateway adds or refreshes a model.
+ */
+export interface ModelCapabilities {
+  supportsStreaming: boolean;
+  supportsFunctionCalling: boolean;
+  supportsJsonMode: boolean;
+  supportsReasoning: boolean;
+  supportsVision?: boolean;
+  contextWindow?: number;
+  maxOutputTokens?: number;
+}
+
 export interface ProviderProfile {
   id?: string;
   name: string;
@@ -99,6 +115,8 @@ export interface ProviderProfile {
   baseUrl?: string;
   model?: string;
   apiFormat?: string;
+  /** Optional per-model capability map (model id → capabilities). */
+  capabilities?: Record<string, ModelCapabilities>;
 }
 export type LoginType = 'pa' | 'pa-long' | 'op';
 
