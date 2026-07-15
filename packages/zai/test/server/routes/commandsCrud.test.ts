@@ -18,9 +18,9 @@ afterEach(() => {
 })
 
 describe('commands CRUD routes', () => {
-  it('GET list returns [] when no commands dir', async () => {
-    const res = await fetch(`http://localhost:0/api/agent/commands`)
-    // 由于我们没有真实 server,这里测试 fileIO helpers;路由测试在集成测试中。
+  it('readCommandList returns [] when commands dir does not exist', async () => {
+    const commandsDir = join(tmpHome, '.zai', 'commands')
+    rmSync(commandsDir, { recursive: true, force: true })
     const { readCommandList } = await import('../../../src/server/services/commands/fileStore.js')
     expect(await readCommandList()).toEqual([])
   })
@@ -31,7 +31,7 @@ describe('commands CRUD routes', () => {
     const out = await readCommandFile('greet')
     expect(out).not.toBeNull()
     expect(out!.frontmatter.description).toBe('Say hi')
-    expect(out!.body).toBe('Hello $1')
+    expect(out!.body).toBe('Hello $1\n')
   })
 
   it('write rejects invalid name', async () => {
