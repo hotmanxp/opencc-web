@@ -4,9 +4,9 @@ import type { ServerEvent } from '../../../shared/events.js'
 import type { ModelEntry } from '../../../shared/settings.js'
 import type { PermissionMode } from '@zn-ai/zai-agent-core/runtime'
 
-// 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob, 用于把历史图片
-// 消息里的 base64 还原成浏览器可显示的 objectURL. 解析失败时返回
-// null, 调用方回退到 raw dataURL 并把 status 标为 error.
+// 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob. 仅用于 v2 协议里把
+// 历史图片消息里的 base64 还原成浏览器可显示的 objectURL. 解析失败时
+// 返回 null, 调用方回退到 raw dataURL 并把 status 标为 error.
 function dataURLtoBlob(dataUrl: string): Blob | null {
   const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
   if (!m) return null
@@ -124,150 +124,126 @@ interface AgentState {
 // 把 transcript.messages 还原成 AgentMessage[] (供 React 渲染).
 // 设计: 必须与 SSE 流水线 (applyRuntimeEvent) 产出的 AgentMessage 形态等价,
 // 使 UI 渲染层 (ToolCallBlock / MessageList 等) 不需要区分"实时流"还是"历史回放".
-// v2 (ContentBlock[]) 走精细分支: tool_use / tool_result / assistant text+thinking;
-// 旧 v1 (raw.{text,content,thinking,tool_uses}) 走兜底分支.
+// 仅处理 v2 协议: msg.message.content 可能是 string (用户纯文本 prompt) 或
+// ContentBlock[] (多模态 / 工具结果); 不同 msg.type 走精细分支.
 export function loadTranscriptMessages(
   sessionId: string,
   rawMessages: any[],
 ): AgentMessage[] {
   const out: AgentMessage[] = []
   for (const msg of rawMessages) {
-    const rawObj = (msg.raw ?? {}) as Record<string, unknown>
     const baseFields = {
       sessionId,
       ts: msg.timestamp,
       turnIndex: msg.runtime?.turnIndex ?? 0,
     }
+    const content = msg.message?.content
 
-    // v2 path: message.content: ContentBlock[]
-    if (
-      (msg as { version?: string }).version === '2' &&
-      msg.message &&
-      Array.isArray(msg.message.content)
-    ) {
-      const blocks = msg.message.content as Array<Record<string, unknown>>
-      if (msg.type === 'tool_use') {
-        const b = blocks[0] as { id: string; name: string; input?: Record<string, unknown> }
-        out.push({
-          ...baseFields,
-          eventId: msg.uuid,
-          type: 'tool_use:start',
-          toolUseId: b.id,
-          name: b.name,
-          input: b.input,
-        })
-        continue
-      }
+    // 字符串 content: 用户在输入框发出的纯文本 prompt.
+    if (typeof content === 'string') {
+      const text = content
       if (msg.type === 'user') {
-        const tr = blocks.find((b) => b.type === 'tool_result') as
-          | { tool_use_id: string; content: unknown; is_error: boolean }
-          | undefined
-        if (tr) {
-          const idx = out.findIndex((m) => m.toolUseId === tr.tool_use_id)
-          if (idx >= 0) {
-            out[idx] = {
-              ...out[idx],
-              type: tr.is_error ? 'tool_use:error' : 'tool_use:done',
-              output: tr.content,
-              error: tr.is_error ? tr.content : undefined,
-            }
-          }
-          continue
-        }
+        out.push({ ...baseFields, eventId: msg.uuid, type: 'user.text', text })
+      } else if (msg.type === 'assistant') {
+        out.push({ ...baseFields, eventId: msg.uuid, type: 'assistant.text', text })
       }
-      if (msg.type === 'assistant') {
-        for (const b of blocks) {
-          if (b.type === 'thinking') {
-            out.push({
-              ...baseFields,
-              eventId: `${msg.uuid}-thinking`,
-              type: 'assistant.thinking',
-              thinking: b.thinking as string,
-            })
-          } else if (b.type === 'text') {
-            out.push({
-              ...baseFields,
-              eventId: msg.uuid,
-              type: 'assistant.text',
-              text: b.text as string,
-            })
-          } else if (b.type === 'tool_use') {
-            out.push({
-              ...baseFields,
-              // M2: prefer msg.uuid for eventId so the assistant-message
-              // tool_use block path emits the same eventId as the direct
-              // tool_use message path (which also uses msg.uuid). Falls
-              // back to `tool-${b.id}` only when msg.uuid is missing
-              // (defensive — every persisted v2 message has uuid).
-              eventId: msg.uuid ?? `tool-${b.id}`,
-              type: 'tool_use:start',
-              toolUseId: b.id as string,
-              name: b.name as string,
-              input: b.input as Record<string, unknown>,
-            })
-          }
-        }
-        continue
-      }
+      // tool_use / tool_result 等类型不会出现字符串 content, 跳过.
+      continue
     }
 
-    // v1 fallback (raw.* 旧路径)
-    const text =
-      typeof rawObj.text === 'string'
-        ? rawObj.text
-        : typeof rawObj.content === 'string'
-          ? rawObj.content
-          : ''
+    if (!Array.isArray(content)) continue
+    const blocks = content as Array<Record<string, unknown>>
+
+    if (msg.type === 'tool_use') {
+      const b = blocks[0] as { id: string; name: string; input?: Record<string, unknown> }
+      out.push({
+        ...baseFields,
+        eventId: msg.uuid,
+        type: 'tool_use:start',
+        toolUseId: b.id,
+        name: b.name,
+        input: b.input,
+      })
+      continue
+    }
     if (msg.type === 'user') {
-      if (rawObj.kind === 'skill_injection') continue
-      if (Array.isArray(rawObj.content)) {
-        const blocks = rawObj.content as Array<{
-          type: string
-          source?: { type?: string; media_type?: string; data?: string }
-          text?: string
-        }>
-        const textFromBlocks = blocks
-          .filter((b) => b.type === 'text' && typeof b.text === 'string')
-          .map((b) => b.text!)
-          .join('\n')
-        const restoredAttachments = blocks
-          .filter((b) => b.type === 'image' && b.source?.type === 'base64')
-          .map((b, i) => {
-            const dataUrl = `data:${b.source!.media_type};base64,${b.source!.data}`
-            const blob = dataURLtoBlob(dataUrl)
-            const thumbnailUrl = blob ? URL.createObjectURL(blob) : dataUrl
-            return {
-              localId: `${msg.uuid}-img-${i}`,
-              mime: b.source!.media_type ?? 'image/png',
-              filename: '[历史图片]',
-              thumbnailUrl,
-              status: blob ? ('ready' as const) : ('error' as const),
-              error: blob ? undefined : '图片已损坏',
-            }
+      // tool_result 块: 把对应 tool_use:start 合并为 done/error.
+      const tr = blocks.find((b) => b.type === 'tool_result') as
+        | { tool_use_id: string; content: unknown; is_error: boolean }
+        | undefined
+      if (tr) {
+        const idx = out.findIndex((m) => m.toolUseId === tr.tool_use_id)
+        if (idx >= 0) {
+          out[idx] = {
+            ...out[idx],
+            type: tr.is_error ? 'tool_use:error' : 'tool_use:done',
+            output: tr.content,
+            error: tr.is_error ? tr.content : undefined,
+          }
+        }
+        continue
+      }
+      // 多模态 user 消息 (image / text 块): 提取 text 拼成 user.text,
+      // 把 image 块还原成 PendingAttachment (dataURL → objectURL).
+      const text = blocks
+        .filter((b) => b.type === 'text' && typeof (b as { text?: unknown }).text === 'string')
+        .map((b) => (b as { text: string }).text)
+        .join('\n')
+      const attachments = blocks
+        .filter(
+          (b) =>
+            b.type === 'image' &&
+            (b as { source?: { type?: string; media_type?: string; data?: string } }).source?.type === 'base64',
+        )
+        .map((b, i) => {
+          const src = (b as { source: { media_type?: string; data?: string } }).source
+          const dataUrl = `data:${src.media_type ?? 'image/png'};base64,${src.data ?? ''}`
+          const blob = dataURLtoBlob(dataUrl)
+          return {
+            localId: `${msg.uuid}-img-${i}`,
+            mime: src.media_type ?? 'image/png',
+            filename: '[历史图片]',
+            thumbnailUrl: blob ? URL.createObjectURL(blob) : dataUrl,
+            status: blob ? ('ready' as const) : ('error' as const),
+            error: blob ? undefined : '图片已损坏',
+          }
+        })
+      out.push({
+        ...baseFields,
+        eventId: msg.uuid,
+        type: 'user.text',
+        text,
+        ...(attachments.length ? { attachments } : {}),
+      })
+      continue
+    }
+    if (msg.type === 'assistant') {
+      for (const b of blocks) {
+        if (b.type === 'thinking') {
+          out.push({
+            ...baseFields,
+            eventId: `${msg.uuid}-thinking`,
+            type: 'assistant.thinking',
+            thinking: b.thinking as string,
           })
-        out.push({
-          ...baseFields,
-          eventId: msg.uuid,
-          type: 'user.text',
-          text: textFromBlocks,
-          ...(restoredAttachments.length ? { attachments: restoredAttachments } : {}),
-        })
-      } else {
-        out.push({ ...baseFields, eventId: msg.uuid, type: 'user.text', text })
+        } else if (b.type === 'text') {
+          out.push({
+            ...baseFields,
+            eventId: msg.uuid,
+            type: 'assistant.text',
+            text: b.text as string,
+          })
+        } else if (b.type === 'tool_use') {
+          out.push({
+            ...baseFields,
+            eventId: msg.uuid ?? `tool-${b.id}`,
+            type: 'tool_use:start',
+            toolUseId: b.id as string,
+            name: b.name as string,
+            input: b.input as Record<string, unknown>,
+          })
+        }
       }
-    } else if (msg.type === 'assistant') {
-      const thinking = typeof rawObj.thinking === 'string' ? rawObj.thinking : ''
-      if (thinking) {
-        out.push({
-          ...baseFields,
-          eventId: `${msg.uuid}-thinking`,
-          type: 'assistant.thinking',
-          thinking,
-        })
-      }
-      out.push({ ...baseFields, eventId: msg.uuid, type: 'assistant.text', text })
-    } else {
-      out.push({ ...baseFields, eventId: msg.uuid, type: `runtime.${msg.type}`, text })
     }
   }
   return out

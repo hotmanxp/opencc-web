@@ -129,8 +129,32 @@ describe('GET /api/tasks', () => {
   })
 
   test('filters by status query', async () => {
-    await mockRuntime.dispatch({ prompt: 'a' })
-    const res = await request(makeApp()).get('/api/tasks?status=queued')
+    // 默认 noop agent 立即完成 → dispatch 后状态会在 microtask 间隙
+    // 推到 completed,导致 ?status=queued/running 查询为 0(flaky)。
+    // 用 hanging agent 让 task 保持 running,dispatch 后等待 status 稳定再查。
+    await mockRuntime.shutdown().catch(() => {})
+    const hangingAgent: AgentRuntime = {
+      async *run(): AsyncGenerator<RuntimeEvent> {
+        await new Promise<RuntimeEvent>(() => {}) // 永不 resolve,依赖 shutdown 强制 abort
+      },
+      async abort() {},
+      async listSessions() { return [] },
+      async readSession() { throw new Error('not used') },
+      async patchSession() {},
+      async removeSession() {},
+    } as unknown as AgentRuntime
+    mockRuntime = await createRuntime(hangingAgent)
+    __setBackgroundRuntime(mockRuntime)
+
+    const dispatched = await mockRuntime.dispatch({ prompt: 'a' })
+    // 等 scheduleNext (setImmediate macrotask) 把 task 推到 running
+    const deadline = Date.now() + 1000
+    while (Date.now() < deadline) {
+      const t = await mockRuntime.get(dispatched.id)
+      if (t?.status === 'running') break
+      await new Promise((r) => setTimeout(r, 5))
+    }
+    const res = await request(makeApp()).get('/api/tasks?status=running')
     expect(res.body.tasks).toHaveLength(1)
   })
 
