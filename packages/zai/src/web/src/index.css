@@ -41,7 +41,7 @@ body {
 .ant-layout-content { background: var(--bg-body) !important; }
 
 .ant-menu-dark { background: transparent !important; }
-.ant-menu-dark .ant-menu-item { border-radius: 8px !important; margin: 4px 8px !important; transition: all 0.2s ease !important; }
+.ant-menu-dark .ant-menu-item { transition: all 0.2s ease !important; }
 .ant-menu-dark .ant-menu-item:hover { background: rgba(255, 102, 0, 0.1) !important; }
 .ant-menu-dark .ant-menu-item-selected { background: linear-gradient(135deg, rgba(255,102,0,0.2), rgba(255,133,51,0.1)) !important; }
 .ant-menu-dark .ant-menu-item-selected::after { display: none !important; }
