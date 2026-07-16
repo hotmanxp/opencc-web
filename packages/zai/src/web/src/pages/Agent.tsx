@@ -34,6 +34,7 @@ import {
   useAgentStore,
   type AgentMessage,
   type AgentStatus,
+  type TodoItem,
 } from "../store/useAgentStore";
 import { useAppStore } from "../store/useAppStore";
 import { api } from "../lib/api";
@@ -47,6 +48,7 @@ import ModelStatusButton from "../components/ModelStatusButton";
 import ModeStatusButton, { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import { TaskDock } from "../components/TaskDock";
 import { TaskDrawer } from "../components/TaskDrawer";
+import TodoZone from "../components/TodoZone.jsx";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 
 const { TextArea } = Input;
@@ -977,6 +979,7 @@ export default function Agent() {
     cwd,
     sessions,
     sessionId,
+    todosBySession,
     activeSessionId,
     stop,
     clearMessages,
@@ -991,6 +994,8 @@ export default function Agent() {
     submitAsk,
     rejectAsk,
   } = useAgentStore();
+  const todosForCurrentSession: TodoItem[] =
+    sessionId != null ? (todosBySession[sessionId] ?? []) : [];
   const patchSessionMode = useAgentStore((s) => s.patchSessionMode);
   const { instanceContext } = useAppStore()
   const cwdName = instanceContext?.cwdName || '~'
@@ -1806,6 +1811,7 @@ export default function Agent() {
               </Paragraph>
             </div>
           )}
+          <TodoZone todos={todosForCurrentSession} />
           {messages.map((msg: AgentMessage, idx: number) => {
             // 工具相位按 toolUseId 锁定 key, 让 store 的 upsert 合并后 React 复用
             // 同一个 DOM 节点. 其它事件沿用 eventId / 数组下标.
