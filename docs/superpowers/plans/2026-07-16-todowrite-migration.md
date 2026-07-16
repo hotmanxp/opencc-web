@@ -356,7 +356,7 @@ describe('TodoWriteTool', () => {
     expect(JSON.parse(result.output as string).todoCount).toBe(0)
   })
 
-  test('call: 混合状态 → payload.todoCount === 非 completed 项数', async () => {
+  test('call: 混合状态 → payload.todoCount === 全部项数 (completed 项保留)', async () => {
     const result = await TodoWriteTool.call({
       todos: [
         { content: 'a', status: 'completed', activeForm: 'A' },
@@ -366,8 +366,10 @@ describe('TodoWriteTool', () => {
     } as never)
     expect(result.isError).toBe(false)
     const payload = JSON.parse(result.output as string)
-    expect(payload.todoCount).toBe(2)
-    expect(payload.firstItem).toBe('b')
+    // tool_result 仅做最小回执 — 保留全部 todos, completed 项不删.
+    // UI 端通过 TodoZone 计算"open 数".
+    expect(payload.todoCount).toBe(3)
+    expect(payload.firstItem).toBe('a')
   })
 
   test('call: 空数组 → payload.todoCount === 0 (reset 路径)', async () => {
