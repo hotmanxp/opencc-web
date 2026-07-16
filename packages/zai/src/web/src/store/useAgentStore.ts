@@ -295,6 +295,52 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   upsertToolCall: (msg: AgentMessage) =>
     set((s) => {
       const t = msg.type as string
+      // TodoWrite 的 tool_use/tool_result 全部不进 messages 流 (按 spec:
+      // TodoWrite 不显示 ToolCallBlock, 它的可见状态由 todosBySession 渲染).
+      if ((msg.name as string) === 'TodoWrite') {
+        // done / error 阶段: 解析 input.todos 写回 todosBySession. 失败静默忽略.
+        const t2 = t as string
+        if (t2 === 'tool_use:done' || t2 === 'tool_use:error') {
+          const input = (msg.input as { todos?: unknown }) ?? {}
+          const rawTodos = input.todos
+          if (Array.isArray(rawTodos)) {
+            const parsed: TodoItem[] = []
+            let ok = true
+            for (const raw of rawTodos) {
+              if (
+                !raw || typeof raw !== 'object' ||
+                typeof (raw as { content?: unknown }).content !== 'string' ||
+                typeof (raw as { activeForm?: unknown }).activeForm !== 'string'
+              ) {
+                ok = false
+                break
+              }
+              const s0 = (raw as { status?: unknown }).status
+              if (s0 !== 'pending' && s0 !== 'in_progress' && s0 !== 'completed') {
+                ok = false
+                break
+              }
+              parsed.push({
+                content: (raw as { content: string }).content,
+                status: s0,
+                activeForm: (raw as { activeForm: string }).activeForm,
+              })
+            }
+            if (ok) {
+              const sid = (msg.sessionId as string | undefined) ?? s.sessionId
+              if (sid) {
+                return {
+                  todosBySession: { ...s.todosBySession, [sid]: parsed },
+                }
+              }
+            }
+            // parse 失败: 静默忽略, 不 push messages, 不 bump segment.
+            return {}
+          }
+        }
+        // start 阶段 或 parse 后 sid 缺失: 直接吞掉, 不动 messages.
+        return {}
+      }
       // tool_use:ask_pending → 设置 pendingAsk 状态 (不进入 messages, 由 QuestionCard 独立渲染)
       if (t === 'tool_use:ask_pending') {
         const toolUseId = msg.toolUseId as string
