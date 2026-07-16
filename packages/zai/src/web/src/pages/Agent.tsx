@@ -1481,16 +1481,15 @@ export default function Agent() {
         minHeight: 0,
         display: "flex",
         flexDirection: "row",
-        gap: 16,
-        marginLeft: -24,
+        gap: 16
       }}
     >
       <div
         style={{
-          width: sessionsCollapsed ? 40 : 180,
+          width: sessionsCollapsed ? 40 : 140,
           flexShrink: 0,
           borderRight: "1px solid #f0f0f0",
-          paddingRight: sessionsCollapsed ? 0 : 12,
+          // paddingRight: sessionsCollapsed ? 0 : 12,
           display: "flex",
           flexDirection: "column",
           transition: "width 0.18s ease",

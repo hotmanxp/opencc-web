@@ -14,6 +14,7 @@ import {
 } from '@ant-design/icons';
 import { useAppStore } from '../store/useAppStore';
 import { api } from '../lib/api';
+import ZnLogo from './ZnLogo';
 
 const { Sider, Header, Content } = AntLayout;
 
@@ -70,7 +71,7 @@ export default function Layout() {
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
-            fontSize: 24,
+            fontSize: 18,
             fontWeight: 700,
             background: 'linear-gradient(135deg, #ff6600, #ff8533)',
             WebkitBackgroundClip: 'text',
@@ -78,7 +79,7 @@ export default function Layout() {
             gap: 8,
           }}
         >
-          <span>🐦</span>
+          <ZnLogo size={42} />
           {!sidebarCollapsed && <span>知鸟AI</span>}
         </div>
         <Menu
@@ -127,7 +128,7 @@ export default function Layout() {
         </div>
       </Sider>
       <AntLayout>
-        <Header
+        {/* <Header
           style={{
             padding: '0 24px',
             display: 'flex',
@@ -146,13 +147,13 @@ export default function Layout() {
           >
             v{version}
           </Tag>
-        </Header>
+        </Header> */}
         {/* Content 用 flex column, 让子页面 (例如 Agent) 可以 flex: 1 自适应
             填满 Content 的可用高度, 不再依赖 calc(100vh - X) 的硬编码, 这样
             调整 Header 高度或 padding 都不会再把对话输入框挤出底部.
             注意 Content 自身必须有 flex: 1 才能在 AntLayout (flex column) 里
             占满 Header 之外的剩余高度, 否则子页面会以 content 高度为准溢出. */}
-        <Content style={{ flex: 1, padding: '24px 24px 0 24px', width: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Content style={{ flex: 1, padding: '24px 0 0 0', width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Outlet />
         </Content>
       </AntLayout>
