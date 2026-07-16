@@ -284,7 +284,7 @@ export default function ModelStatusButton() {
     <Popover
       content={<div onClick={(e) => e.stopPropagation()}>{content}</div>}
       trigger="click"
-      placement="topRight"
+      placement="topLeft"
       destroyTooltipOnHide
     >
       <Button
