@@ -248,6 +248,8 @@ export function loadTranscriptMessages(
             text: b.text as string,
           })
         } else if (b.type === 'tool_use') {
+          // TodoWrite tool_use 不进 messages 流; 它对应的状态由 TodoZone 渲染.
+          if ((b.name as string) === 'TodoWrite') continue
           out.push({
             ...baseFields,
             eventId: msg.uuid ?? `tool-${b.id}`,
@@ -261,6 +263,49 @@ export function loadTranscriptMessages(
     }
   }
   return out
+}
+
+// 从 transcript 历史里提取最近一次 TodoWrite 的 todos. 返回 null 表示没找到
+// 或解析失败. zai-web 用这个函数在 loadTranscript 末尾回填 todosBySession.
+export function extractTodosFromTranscript(
+  rawMessages: any[],
+): TodoItem[] | null {
+  // 倒序找最后一条 assistant message 含 TodoWrite tool_use 块.
+  for (let i = rawMessages.length - 1; i >= 0; i--) {
+    const msg = rawMessages[i]
+    if (!msg || msg.type !== 'assistant') continue
+    const content = msg.message?.content
+    if (!Array.isArray(content)) continue
+    const blocks = content as Array<Record<string, unknown>>
+    for (const b of blocks) {
+      if (b.type !== 'tool_use') continue
+      if ((b.name as string) !== 'TodoWrite') continue
+      const input = b.input as { todos?: unknown } | undefined
+      const rawTodos = input?.todos
+      if (!Array.isArray(rawTodos)) return null
+      const parsed: TodoItem[] = []
+      for (const raw of rawTodos) {
+        if (
+          !raw || typeof raw !== 'object' ||
+          typeof (raw as { content?: unknown }).content !== 'string' ||
+          typeof (raw as { activeForm?: unknown }).activeForm !== 'string'
+        ) {
+          return null
+        }
+        const s0 = (raw as { status?: unknown }).status
+        if (s0 !== 'pending' && s0 !== 'in_progress' && s0 !== 'completed') {
+          return null
+        }
+        parsed.push({
+          content: (raw as { content: string }).content,
+          status: s0,
+          activeForm: (raw as { activeForm: string }).activeForm,
+        })
+      }
+      return parsed
+    }
+  }
+  return null
 }
 
 export const useAgentStore = create<AgentState>((set, get) => ({
@@ -691,6 +736,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         segmentedToolUseIds: {},
         sendSeq: 0,
       })
+      // 还原 transcript 中最后一次 TodoWrite 的 todos. 失败静默 — 不清空 store 已有 todo.
+      const todos = extractTodosFromTranscript((transcript.messages ?? []) as any[])
+      if (todos !== null) {
+        set((s) => ({
+          todosBySession: { ...s.todosBySession, [sessionId]: todos },
+        }))
+      }
     } catch {
       // ignore
     }
