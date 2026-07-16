@@ -287,8 +287,8 @@ export function extractTodosFromTranscript(
       for (const raw of rawTodos) {
         if (
           !raw || typeof raw !== 'object' ||
-          typeof (raw as { content?: unknown }).content !== 'string' ||
-          typeof (raw as { activeForm?: unknown }).activeForm !== 'string'
+          typeof (raw as { content?: unknown }).content !== 'string' || (raw as { content: string }).content === '' ||
+          typeof (raw as { activeForm?: unknown }).activeForm !== 'string' || (raw as { activeForm: string }).activeForm === ''
         ) {
           return null
         }
@@ -354,8 +354,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             for (const raw of rawTodos) {
               if (
                 !raw || typeof raw !== 'object' ||
-                typeof (raw as { content?: unknown }).content !== 'string' ||
-                typeof (raw as { activeForm?: unknown }).activeForm !== 'string'
+                typeof (raw as { content?: unknown }).content !== 'string' || (raw as { content: string }).content === '' ||
+                typeof (raw as { activeForm?: unknown }).activeForm !== 'string' || (raw as { activeForm: string }).activeForm === ''
               ) {
                 ok = false
                 break
