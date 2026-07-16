@@ -62,8 +62,9 @@ export const TodoWriteTool = buildTool({
     const appState = context.getAppState()
     const todoKey = context.agentId ?? getSessionId()
     const oldTodos = appState.todos?.[todoKey] ?? []
+    // 空数组单独走 reset；非空且全 completed 也走 reset（与上游语义一致）
     const allDone = todos.length > 0 && todos.every(t => t.status === 'completed')
-    const newTodos = allDone ? [] : todos
+    const newTodos = allDone || todos.length === 0 ? [] : todos
     context.setAppState(prev => ({
       ...prev,
       todos: { ...(prev.todos ?? {}), [todoKey]: newTodos },
@@ -172,11 +173,13 @@ Transcript 重载：
 |---|---|
 | `todos` 字段缺失 / 类型错（call 层） | zod strictObject 拦在 schema 校验前；tool_result 返回 error block |
 | `todos` 单条 content / activeForm 为空 | `TodoItemSchema.min(1)` 拦截；LLM 看到 schema 错误 |
-| `todos` 是空数组 | `allDone` 对空数组为 true（用 `length > 0 && every(...)` 修正上游这里的小坑：`todos.every(...)` 对 `[]` 返回 true，但语义上"空数组不算 done"）；空数组 → `newTodos = []`，等价 reset |
+| `todos` 是空数组 | 直接 `newTodos = []`（不上 allDone 分支；空数组语义上等同"全部完成"但单独走更清晰） |
 | transcript 还原时 TodoWrite input 损坏 | safeParse 失败 → 静默忽略，保留 `[]` |
 | 同一 session 多次 TodoWrite | 以最后一次为准；transcript 中保留全部历史 |
 | 实时 tool_use:done input 损坏 | 静默忽略，不抛错 |
 | TodoWrite 与其他工具并发 | 同一 session 内 model 串行调用工具，无并发；跨 session 各自 key 互不影响 |
+
+> **关于 `allDone` 的边界**：上游用 `todos.every(t => t.status === 'completed')`，对空数组返回 true，会导致"model 误传空数组"也走 reset 路径。这里改为 `todos.length > 0 && todos.every(...)`，空数组直接 `newTodos = []` 单独走，两者输出等价，但意图更清楚。
 
 ## 测试
 
