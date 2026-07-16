@@ -4,6 +4,15 @@ import type { ServerEvent } from '../../../shared/events.js'
 import type { ModelEntry } from '../../../shared/settings.js'
 import type { PermissionMode } from '@zn-ai/zai-agent-core/runtime'
 
+// 与 agent-core TodoWriteInputSchema 的 zod 形态一致 (web 不直接 import zod schema,
+// 避免循环依赖; 字段类型用本地 type 即可, 实时流拿到的 input.todos 由本文件内的
+// safeParse 兜底, 失败时静默忽略).
+export type TodoItem = {
+  content: string
+  status: 'pending' | 'in_progress' | 'completed'
+  activeForm: string
+}
+
 // 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob. 仅用于 v2 协议里把
 // 历史图片消息里的 base64 还原成浏览器可显示的 objectURL. 解析失败时
 // 返回 null, 调用方回退到 raw dataURL 并把 status 标为 error.
@@ -79,6 +88,11 @@ interface AgentState {
   textSegmentRev: number
   // 已经触发过 textSegmentRev++ 的 toolUseId 集合, 每个工具只 bump 一次.
   segmentedToolUseIds: Record<string, true>
+  // 会话级 todo 列表 (按 sessionId 索引). 不持久化, 切换会话时保留旧 sid 的
+  // todo, 刷新页面由 loadTranscript 走 extractTodosFromTranscript 还原.
+  todosBySession: Record<string, TodoItem[]>
+  setTodos: (sessionId: string, todos: TodoItem[]) => void
+
   // 每次 sendMessage 递增的发送序号. 拼进 stream block key 作为"本轮命名空间",
   // 保证跨轮次的文本块 key 永不碰撞. 后端 turnIndex 恒为 0 (wrapWithZaiMeta 被
   // 逐事件调用导致其内部计数器每次归零), textSegmentRev 只在工具调用时 bump,
@@ -261,6 +275,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   textSegmentRev: 0,
   segmentedToolUseIds: {},
   sendSeq: 0,
+  todosBySession: {},
 
   // SSE reducer state (Task 6)
   activeSessionId: null,
