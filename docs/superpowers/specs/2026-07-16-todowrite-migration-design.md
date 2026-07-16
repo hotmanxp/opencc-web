@@ -37,49 +37,71 @@ zai-agent-core 已经有 TaskCreate / TaskList / TaskGet / TaskUpdate 这一套*
 ```
 packages/zai-agent-core/src/tools/TodoWriteTool/
   constants.ts     TODO_WRITE_TOOL_NAME = 'TodoWrite'
-  types.ts         TodoItemSchema / TodoListSchema (zod lazySchema)
-  schema.ts        inputSchema = lazySchema(() => z.strictObject({ todos: TodoListSchema() }))
-  prompt.ts        DESCRIPTION / PROMPT（照搬上游文本）
-  TodoWriteTool.ts buildTool({...})
+  schema.ts        TodoWriteInputSchema (zod strictObject)
+  prompt.ts        renderTodoWritePrompt()
+  TodoWriteTool.ts LegacyTool<typeof Schema, string>
+  index.ts         re-export
 ```
+
+> **注**：zai-agent-core 现有工具（BashTool / TaskCreateTool / TaskListTool 等）都用 `LegacyTool<typeof Schema, OutputType>` 形态而非 opencc 上游的 `buildTool(...)`。TodoWriteTool 也按这个风格写，最后通过 `wrapAsOpenccTool` 适配到统一 `Tool` 类型。todo 状态**不**进 `appState.todos`：因为 agent-core 现有 appState 没有 todos 字段，且 zai-web 不消费 appState.todos——todo 状态完全由 zai-web 的 store `todosBySession` 持有，agent-core 仅做校验与转字符串。
 
 `TodoWriteTool.ts` 关键形态：
 
 ```ts
-export const TodoWriteTool = buildTool({
-  name: TODO_WRITE_TOOL_NAME,
-  strict: true,
-  userFacingName: () => '',
-  isEnabled: () => true,
-  renderToolUseMessage: () => null,    // 工具结果不进 TUI transcript 显示
-  async description() { return DESCRIPTION },
-  async prompt() { return PROMPT },
-  get inputSchema() { return inputSchema() },
-  get outputSchema() { return outputSchema() },
-  async checkPermissions(input) { return { behavior: 'allow', updatedInput: input } },
-  toAutoClassifierInput(input) { return `${input.todos.length} items` },
-  async call({ todos }, context) {
-    const appState = context.getAppState()
-    const todoKey = context.agentId ?? getSessionId()
-    const oldTodos = appState.todos?.[todoKey] ?? []
-    // 空数组单独走 reset；非空且全 completed 也走 reset（与上游语义一致）
-    const allDone = todos.length > 0 && todos.every(t => t.status === 'completed')
-    const newTodos = allDone || todos.length === 0 ? [] : todos
-    context.setAppState(prev => ({
-      ...prev,
-      todos: { ...(prev.todos ?? {}), [todoKey]: newTodos },
-    }))
-    return { data: { oldTodos, newTodos, verificationNudgeNeeded: false } }
+import type { LegacyTool } from '../Tool.js'
+import { TodoWriteInputSchema, type TodoWriteInput } from './schema.js'
+import { renderTodoWritePrompt } from './prompt.js'
+import { TODO_WRITE_TOOL_NAME } from './constants.js'
+
+export const TodoWriteTool: LegacyTool<typeof TodoWriteInputSchema, string> = {
+  name: TODO_WRITE_TOOL_NAME,                   // 'TodoWrite'
+  description: renderTodoWritePrompt(),
+  inputSchema: TodoWriteInputSchema,
+  isConcurrencySafe: () => true,
+  isReadOnly: () => false,
+  isDestructive: () => false,
+
+  async call(rawInput) {
+    const input = rawInput as TodoWriteInput
+    // 全部 completed → reset；空数组也 reset（与上游语义一致）
+    const allDone =
+      input.todos.length > 0 &&
+      input.todos.every((t) => t.status === 'completed')
+    const newTodos = allDone || input.todos.length === 0 ? [] : input.todos
+    const payload = {
+      todoCount: newTodos.length,
+      firstItem: newTodos[0]?.content ?? null,
+    }
+    return {
+      output: JSON.stringify(payload, null, 2),
+      isError: false,
+    }
+    // 注：agent-core 不持有 todo 状态；zai-web 在收到 SSE tool_use:done 时
+    // 从 input.todos 解析并写入 todosBySession。tool_result 仅做最小回执。
   },
-  mapToolResultToToolResultBlockParam({ verificationNudgeNeeded }, toolUseID) {
-    const base = 'Todos have been modified successfully. Ensure that you continue to use the todo list to track your progress. Please proceed with the current tasks if applicable'
-    // 不带 nudge 文案，verificationNudgeNeeded 永远为 false
-    return { tool_use_id: toolUseID, type: 'tool_result', content: base }
-  },
-} satisfies ToolDef<InputSchema, Output>)
+}
 ```
 
-注册：在 `packages/zai-agent-core/src/tools.ts`（或同等注册入口）append `TodoWriteTool`，与 TaskCreate / TaskList / TaskGet / TaskUpdate 并列。
+`schema.ts`：
+
+```ts
+import { z } from 'zod'
+
+export const TodoItemSchema = z.object({
+  content: z.string().min(1, 'content 不能为空'),
+  status: z.enum(['pending', 'in_progress', 'completed']),
+  activeForm: z.string().min(1, 'activeForm 不能为空'),
+})
+
+export const TodoWriteInputSchema = z.object({
+  todos: z.array(TodoItemSchema),
+})
+
+export type TodoWriteItem = z.infer<typeof TodoItemSchema>
+export type TodoWriteInput = z.infer<typeof TodoWriteInputSchema>
+```
+
+注册：在 `packages/zai-agent-core/src/tools/index.ts` 的 `getZaiRuntimeTools()` 数组中 append `wrapAsOpenccTool(TodoWriteTool)`，与 `TaskCreateTool` 等并列。
 
 ### 2. agent-core：output schema
 
@@ -106,8 +128,9 @@ interface AgentState {
 - `loadTranscript(sid)` 末尾调用 `extractTodosFromTranscript` 把 TodoWrite 还原进 `todosBySession[sid]`。
 
 **TodoWrite 工具结果不进 messages**：
-- `upsertToolCall` 检测到 `name === 'TodoWrite'` 时**跳过**push 进 `messages`，但**不**触发 `textSegmentRev++`（不算工具边界，避免文本分段错位）。`segmentedToolUseIds` 仍要登记，避免后续重复 start 触发误 bump。
-- 实时刷新：tool_use:done 到达时，解析 `input.todos` → `setTodos(sid, parsed)`。若解析失败，**静默忽略**。
+- `upsertToolCall` (`packages/zai/src/web/src/store/useAgentStore.ts:275`) 检测到 `name === 'TodoWrite'` 时**跳过**push 进 `messages`，且**不**触发 `textSegmentRev++`。在函数最顶部（拿到 `toolUseId` 之前）插入守卫：`if ((msg.name as string) === TODO_WRITE_TOOL_NAME) return {}`。
+- `loadTranscriptMessages` (`useAgentStore.ts:236`) 在 `msg.type === 'assistant'` 的 tool_use 分支同样过滤：仅当 `b.name !== 'TodoWrite'` 才 push `out[]`（transcript 还原路径也要不进 messages 流）。
+- 实时刷新：`applyRuntimeEvent` 的 `case 'runtime.tool_call'` (useAgentStore.ts:739) 已经走 upsertToolCall 拦截，无需单独改；`case 'runtime.tool_result'` (useAgentStore.ts:759) 同理。**不在** `applyRuntimeEvent` 里直接调 setTodos，**而是**在 `upsertToolCall` 守卫的同一位置（即检测到 TodoWrite + type === 'tool_use:done'）调 `setTodos(sid, parsedTodos)`，单一入口。
 
 **会话切换与内存策略**：zai-web 允许用户在多个 session 之间高频切换，todo 列表**必须按 sessionId 在内存中分别保留**，否则切走就丢。承诺：
 
@@ -150,25 +173,30 @@ export function TodoZone({ todos }: Props) {
 }
 ```
 
-挂载位置：`pages/Agent.tsx` 在 `<MessageList />` **上方**插入 `<TodoZone todos={todosForCurrentSession} />`，用 `todosBySession[sessionId] ?? []` 作为输入。
+挂载位置：`pages/Agent.tsx:1727` 的 `messages.map((msg) => <MessageBubble ...>)` 上方插入 `<TodoZone todos={todosBySession[sessionId] ?? []} />`，用 selector 取 `todosForCurrentSession`。位置紧贴空态提示（`messages.length === 0`）的 div 之后、`messages.map` 之前。
 
 ### 5. 实时 vs transcript 双路径
 
 ```
 实时（SSE）：
-  tool_use:start name='TodoWrite'
-    └─ upsertToolCall: 跳过 messages push, 不 bump segment
-  tool_use:done toolUseId=T
-    └─ 取 msg.input.todos, schema parse → setTodos(sid, list)
+  runtime.tool_call (name='TodoWrite')
+    └─ upsertToolCall 守卫拦截: return {} (不 push 不 bump)
+  runtime.tool_result (toolUseId=T, name='TodoWrite')
+    └─ upsertToolCall 守卫拦截: 解析 msg.input.todos → safeParse → setTodos(sid, parsed)
     └─ (parse 失败静默忽略)
 
 Transcript 重载：
   loadTranscript(sid)
-    └─ extractTodosFromTranscript(rawMessages, 'TodoWrite')
+    └─ 调 extractTodosFromTranscript(rawMessages)
          ├─ findLast assistant msg 含 tool_use name='TodoWrite'
          ├─ 取 input.todos, safeParse
-         └─ setTodos(sid, parsed)
+         └─ 返回 TodoItem[] | null
+    └─ setTodos(sid, parsed ?? [])
 ```
+
+实现位置：
+- `extractTodosFromTranscript` 作为 `useAgentStore.ts` 顶层辅助函数（与 `loadTranscriptMessages` 同级），与 `loadTranscriptMessages` 都接收 `rawMessages`，但 `loadTranscriptMessages` 负责构造 messages（**过滤掉** TodoWrite tool_use），`extractTodosFromTranscript` 只负责提取最近一次 TodoWrite 的 todos。两个函数**互不依赖**，避免循环。
+- `loadTranscript` 在拿到 `transcript.messages` 后，**先**调 `loadTranscriptMessages` 构造 messages，**再**调 `extractTodosFromTranscript` 提取 todo，最后把 todo 写入 `todosBySession[sid]`。
 
 ### 6. 持久化与作用域
 
@@ -230,13 +258,14 @@ Transcript 重载：
 
 ## 实施顺序
 
-1. agent-core 新增 `TodoWriteTool/`（5 文件）+ 注册到 `tools.ts` + 单测。
+1. agent-core 新增 `TodoWriteTool/`（4 文件：constants/schema/prompt/TodoWriteTool.ts + index.ts）+ 注册到 `tools/index.ts` + 单测。
 2. agent-core `bun typecheck && bun test` 跑通。
-3. zai-web store：`todosBySession` + `setTodos` + `extractTodosFromTranscript` + store 单测。
-4. zai-web `TodoZone.tsx` 组件 + 单测 + 挂到 `pages/Agent.tsx`。
-5. zai-web `upsertToolCall` 改造（TodoWrite 不进 messages）+ 配套单测。
-6. `bun typecheck && bun run build && bun test` 全过。
-7. 手工 dev server 跑通 6 项验证。
+3. zai-web store 新增类型 + 状态字段：`TodoItem` / `todosBySession` / `setTodos`，并在 `clearMessages` / `setCurrentSession` / `createNewSession` 三个 reducer 内做对应清理逻辑 + 配套单测。
+4. zai-web `extractTodosFromTranscript` 辅助函数 + `loadTranscript` 内调用 + 配套单测。
+5. zai-web `upsertToolCall` 守卫（TodoWrite 不进 messages + done 时 setTodos）+ `loadTranscriptMessages` 过滤 + 配套单测。
+6. zai-web `TodoZone.tsx` 组件 + 单测 + 挂到 `pages/Agent.tsx`。
+7. `bun typecheck && bun run build && bun test` 全过。
+8. 手工 dev server 跑通 6 项验证。
 
 ## 不做的事（明确删除项）
 
