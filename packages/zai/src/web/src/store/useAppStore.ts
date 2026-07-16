@@ -1,10 +1,13 @@
 import { create } from 'zustand';
 import type { ServerEvent } from '../../../shared/events.js';
 
-const getInitialSidebarCollapsed = () =>
-  typeof localStorage !== 'undefined'
-    ? localStorage.getItem('zai-sidebar-collapsed') === 'true'
-    : true
+// 主菜单侧栏默认收起, 让首屏主区域占满. localStorage 显式存 'false' 时
+// 才展开; 任何其他情况 (无记录 / 'true' / 空值) 都视为收起.
+const getInitialSidebarCollapsed = (): boolean => {
+  if (typeof localStorage === 'undefined') return true;
+  return localStorage.getItem('zai-sidebar-collapsed') !== 'false';
+};
+
 
 interface JobInfo {
   jobId: string;

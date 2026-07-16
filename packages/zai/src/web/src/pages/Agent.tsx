@@ -1027,7 +1027,8 @@ export default function Agent() {
   const [sessionPageSize, setSessionPageSize] = useState(10);
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   // 会话历史侧栏是否收起. 收起时宽度缩到 40px 只显示图标, 腾出空间给对话区.
-  const [sessionsCollapsed, setSessionsCollapsed] = useState(false);
+  // 默认收起, 让对话区首屏占满主视图, 用户按需点开.
+  const [sessionsCollapsed, setSessionsCollapsed] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // 流式计时: 仅在 streaming 期间累加秒数, 状态切回 idle/aborted/error 时归零
   const [elapsed, setElapsed] = useState(0);

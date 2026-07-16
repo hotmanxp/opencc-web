@@ -80,7 +80,7 @@ export default function Layout() {
           }}
         >
           <ZnLogo size={42} />
-          {!sidebarCollapsed && <span>知鸟AI</span>}
+          {!sidebarCollapsed && <span>Z.AI</span>}
         </div>
         <Menu
           theme="dark"
