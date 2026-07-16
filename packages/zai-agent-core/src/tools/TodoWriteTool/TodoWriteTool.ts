@@ -22,7 +22,7 @@ export const TodoWriteTool: LegacyTool<typeof TodoWriteInputSchema, string> = {
     const allDone =
       input.todos.length > 0 &&
       input.todos.every((t) => t.status === 'completed')
-    const newTodos = allDone || input.todos.length === 0 ? [] : input.todos
+    const newTodos = allDone || input.todos.length === 0 ? [] : input.todos.filter((t) => t.status !== 'completed')
     const payload = {
       todoCount: newTodos.length,
       firstItem: newTodos[0]?.content ?? null,
