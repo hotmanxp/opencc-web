@@ -277,6 +277,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   sendSeq: 0,
   todosBySession: {},
 
+  setTodos: (sessionId: string, todos: TodoItem[]) =>
+    set((s) => ({
+      todosBySession: { ...s.todosBySession, [sessionId]: todos },
+    })),
+
   // SSE reducer state (Task 6)
   activeSessionId: null,
 
@@ -465,14 +470,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   setStatus: (status: AgentStatus) => set({ status }),
 
   clearMessages: () =>
-    set({
-      messages: [],
-      status: 'idle',
-      // 重置 stream block 状态: 切会话/清屏 后, 工具边界计数器也得回到 0,
-      // 否则新会话的 text 段会被旧会话遗留的 textSegmentRev 错位归并.
-      textSegmentRev: 0,
-      segmentedToolUseIds: {},
-      sendSeq: 0,
+    set((s) => {
+      // 仅清空当前 sid 的 todo, 其他 sid 保留以便切回.
+      const sid = s.sessionId
+      const { [sid as string]: _drop, ...rest } = (s.todosBySession ?? {}) as Record<string, TodoItem[]>
+      void _drop
+      return {
+        messages: [],
+        status: 'idle',
+        // 重置 stream block 状态: 切会话/清屏 后, 工具边界计数器也得回到 0,
+        // 否则新会话的 text 段会被旧会话遗留的 textSegmentRev 错位归并.
+        textSegmentRev: 0,
+        segmentedToolUseIds: {},
+        sendSeq: 0,
+        todosBySession: sid ? rest : s.todosBySession,
+      }
     }),
 
   loadSessions: async () => {
@@ -505,14 +517,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   createNewSession: async () => {
     // 立即清空当前 UI 态, 让用户感觉"切到了新会话"
-    set({
-      sessionId: null,
-      activeSessionId: null,
-      messages: [],
-      status: 'idle',
-      textSegmentRev: 0,
-      segmentedToolUseIds: {},
-      sendSeq: 0,
+    set((state) => {
+      const sid = state.sessionId
+      const nextTodos = sid
+        ? Object.fromEntries(
+            Object.entries(state.todosBySession).filter(([k]) => k !== sid),
+          )
+        : state.todosBySession
+      return {
+        sessionId: null,
+        activeSessionId: null,
+        messages: [],
+        status: 'idle',
+        textSegmentRev: 0,
+        segmentedToolUseIds: {},
+        sendSeq: 0,
+        todosBySession: nextTodos,
+      }
     })
     // 同步在 server 端建一条空 transcript, 让 sidebar 立即多一条
     // '新会话' 占位条目 (而不是等第一条消息发出去才出现).
