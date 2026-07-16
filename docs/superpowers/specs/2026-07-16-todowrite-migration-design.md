@@ -109,6 +109,15 @@ interface AgentState {
 - `upsertToolCall` 检测到 `name === 'TodoWrite'` 时**跳过**push 进 `messages`，但**不**触发 `textSegmentRev++`（不算工具边界，避免文本分段错位）。`segmentedToolUseIds` 仍要登记，避免后续重复 start 触发误 bump。
 - 实时刷新：tool_use:done 到达时，解析 `input.todos` → `setTodos(sid, parsed)`。若解析失败，**静默忽略**。
 
+**会话切换与内存策略**：zai-web 允许用户在多个 session 之间高频切换，todo 列表**必须按 sessionId 在内存中分别保留**，否则切走就丢。承诺：
+
+- 当前 sid 渲染 todo：`todosBySession[currentSid] ?? []` 作为 TodoZone 入参。
+- 切到任意旧 sid → **立刻**看到该 sid 的 todo（来自内存，未做 transcript 扫描）。
+- 刷新页面 / 重启 → 内存丢，依赖 `loadTranscript` 时 `extractTodosFromTranscript` 还原；还原后写回 `todosBySession[sid]`，后续内存命中。
+- `clearMessages()` 仅清当前 sid 条目；其他 sid 保留。
+
+为什么不直接靠 transcript 而不存内存：zai transcript 已经在内存里，扫一次是 O(N) 但 N 一般小；不过切会话是高频操作，每次都重新扫一遍属于无谓的重复。内存按 sid 作 key + transcript 兜底还原是 zai store 现有 messagesBySession 同类方案。
+
 ### 4. zai-web：UI 组件
 
 新增 `packages/zai/src/web/src/components/TodoZone.tsx`：
