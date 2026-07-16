@@ -16,6 +16,7 @@ import { ReadMcpResourceTool } from './ReadMcpResourceTool/ReadMcpResourceTool.j
 import { BackgroundAgentTool } from './BackgroundAgentTool/BackgroundAgentTool.js'
 import { BackgroundAgentResultTool } from './BackgroundAgentResultTool/BackgroundAgentResultTool.js'
 import { TaskCreateTool } from './TaskCreateTool/TaskCreateTool.js'
+import { TodoWriteTool } from './TodoWriteTool/TodoWriteTool.js'
 import { TaskListTool } from './TaskListTool/TaskListTool.js'
 import { TaskGetTool } from './TaskGetTool/TaskGetTool.js'
 import { TaskUpdateTool } from './TaskUpdateTool/TaskUpdateTool.js'
@@ -41,6 +42,7 @@ export function getZaiRuntimeTools(): Tool[] {
     wrapAsOpenccTool(BackgroundAgentTool),
     wrapAsOpenccTool(BackgroundAgentResultTool),
     wrapAsOpenccTool(TaskCreateTool),
+    wrapAsOpenccTool(TodoWriteTool),
     wrapAsOpenccTool(TaskListTool),
     wrapAsOpenccTool(TaskGetTool),
     wrapAsOpenccTool(TaskUpdateTool),
