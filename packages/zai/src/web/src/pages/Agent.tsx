@@ -1367,23 +1367,8 @@ export default function Agent() {
   };
 
   const postPromptToLLM = useCallback(async (text: string, blocks: Array<{ type: "image"; source: { type: "base64"; media_type: string; data: string } }>) => {
-    // 注意:attachments 已经清空,这里 userMsg 不带 attachments;
+    // 注意: userMsg 已由 handleSend 插入 store, 这里不再重复插入.
     // 调用方应确保"无附件" — 这是合理的:slash prompt 命令不需要附带图片。
-    const userMsg: AgentMessage = {
-      eventId: `user-${Date.now()}`,
-      sessionId: "",
-      ts: Date.now(),
-      turnIndex: 0,
-      type: "user.text",
-      text,
-      attachments: [],
-    }
-    useAgentStore.setState((s) => ({
-      status: "streaming",
-      messages: [...s.messages, userMsg],
-      sendSeq: s.sendSeq + 1,
-    }))
-
     const { sessionId: returnedSessionId } = await api.post<{ sessionId: string }>(
       "/agent/prompt",
       {
@@ -1402,6 +1387,8 @@ export default function Agent() {
         type: "session.renamed",
         sessionId: returnedSessionId,
         title: localTitle,
+        eventId: `session-renamed-${returnedSessionId}`,
+        ts: Date.now(),
       })
     }
   }, [sessionId, activeSessionId])
