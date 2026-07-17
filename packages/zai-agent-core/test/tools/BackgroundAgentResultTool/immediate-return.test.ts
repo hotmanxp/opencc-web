@@ -33,10 +33,14 @@ function makeRuntime(task: BackgroundTask | null, opts: { eventsCalls: number[] 
     async cancel() {
       return { ok: false }
     },
-    events(_id: string, _fromSeq = 0, _signal?: AbortSignal): AsyncIterable<TaskEvent> {
+    events(_id: string, _fromSeq = 0, signal?: AbortSignal): AsyncIterable<TaskEvent> {
       opts.eventsCalls.push(Date.now())
       return (async function* () {
-        await new Promise<never>(() => {})
+        if (signal?.aborted) return
+        await new Promise<void>((resolve) => {
+          if (signal?.aborted) return resolve()
+          signal?.addEventListener('abort', () => resolve(), { once: true })
+        })
       })()
     },
     async shutdown() {},
@@ -154,7 +158,11 @@ describe('BackgroundAgentResultTool — immediate return (waitMs=0)', () => {
             seq: 1, id: 'abc', type: 'message_start',
             ts: Date.now(), data: {},
           } as unknown as TaskEvent
-          await new Promise<never>(() => {})
+          if (signal?.aborted) return
+          await new Promise<void>((resolve) => {
+            if (signal?.aborted) return resolve()
+            signal?.addEventListener('abort', () => resolve(), { once: true })
+          })
         })()
       },
     }
