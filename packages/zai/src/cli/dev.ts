@@ -102,7 +102,10 @@ export async function runDev(options: DevOptions) {
     },
   });
 
-  if (options.open) {
+  // Only auto-open browser on cold boot (base port available first try).
+  // Hot restart via tsx --watch reuses the same port, so we skip opening.
+  const isColdBoot = options.open && apiPort === baseApiPort;
+  if (isColdBoot) {
     setTimeout(() => {
       spawn('open', [`http://localhost:${vitePort}`], { stdio: 'ignore' });
     }, 2000);
