@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from 'vitest'
 import {
   BackgroundAgentResultTool,
 } from '../../../src/tools/BackgroundAgentResultTool/BackgroundAgentResultTool.js'
-import type { ToolContext } from '../../../src/tools/Tool.js'
+import type { LegacyToolContext } from '../../../src/tools/Tool.js'
 import {
   setBackgroundRuntime,
   hasBackgroundRuntime,
@@ -33,7 +33,7 @@ function makeRuntime(task: BackgroundTask | null, opts: { eventsCalls: number[] 
     async cancel() {
       return { ok: false }
     },
-    events(id: string, _fromSeq = 0, _signal?: AbortSignal): AsyncIterable<TaskEvent> {
+    events(_id: string, _fromSeq = 0, _signal?: AbortSignal): AsyncIterable<TaskEvent> {
       opts.eventsCalls.push(Date.now())
       return (async function* () {
         await new Promise<never>(() => {})
@@ -53,11 +53,12 @@ function makeTask(overrides: Partial<BackgroundTask> & { id: string; status: Bac
     finishedAt: undefined,
     resultText: overrides.resultText,
     error: overrides.error,
+    eventCount: 0,
   }
   return { ...base, ...overrides }
 }
 
-function makeCtx(): ToolContext {
+function makeCtx(): LegacyToolContext {
   return {
     cwd: '/tmp',
     env: {},
@@ -66,11 +67,12 @@ function makeCtx(): ToolContext {
     canUseTool: async () => ({ behavior: 'allow' }),
     emitEvent: () => {},
     state: {},
+    awaitAskUserQuestion: async () => ({ answers: {} }),
     __runtimeConfig: {} as any,
     __defaultModel: 'test',
     __maxTurns: 1,
     parentSessionId: 'sess-test',
-  } as ToolContext
+  } as LegacyToolContext
 }
 
 let runtime: BackgroundRuntime
@@ -115,7 +117,7 @@ describe('BackgroundAgentResultTool — immediate return (waitMs=0)', () => {
     const task = makeTask({
       id: 'abc',
       status: 'failed',
-      error: { category: 'llm_provider', message: 'boom', recoverable: false },
+      error: { category: 'llm_provider', message: 'boom' },
     })
     runtime = makeRuntime(task, { eventsCalls })
     setBackgroundRuntime(runtime)
@@ -145,7 +147,7 @@ describe('BackgroundAgentResultTool — immediate return (waitMs=0)', () => {
     const task = makeTask({ id: 'abc', status: 'running' })
     runtime = {
       ...makeRuntime(task, { eventsCalls }),
-      events(id, fromSeq, signal) {
+      events(_id, fromSeq, signal) {
         calls.push({ fromSeq, signal })
         return (async function* () {
           yield {
@@ -175,7 +177,7 @@ describe('BackgroundAgentResultTool — immediate return (waitMs=0)', () => {
     const task = makeTask({ id: 'abc', status: 'completed', resultText: 'done' })
     runtime = {
       ...makeRuntime(task, { eventsCalls }),
-      events(id, fromSeq, signal) {
+      events(_id, _fromSeq, _signal) {
         return (async function* () {
           yield {
             seq: 1, id: 'abc', type: 'content_block_delta',
