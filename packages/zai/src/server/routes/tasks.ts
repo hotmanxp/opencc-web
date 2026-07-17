@@ -86,14 +86,26 @@ router.get('/tasks/:id/events', async (req: Request, res: Response) => {
   try {
     let lastSeq = fromSeq
     for await (const ev of runtime().events(id, fromSeq, ac.signal)) {
-      writeSse(res, { eventId: ev.seq, type: ev.type, ...evToWire(ev) })
+      // ★ 关键修复 (HRMSV3-ZN-WEBSITE#668):把 ev.seq 显式作为 SSE `id:`
+      // line 的值（用于 Last-Event-ID 续读），payload JSON 内保留 SDK
+      // 字符串 eventId 作为业务字段。之前的写法依赖 ...spread 让
+      // eventId 同时填 SSE id line 和 JSON,结果 id line 拿到的是
+      // "evt-tool-1" 这种非数字,前端 parseFrame 用 Number() 强转
+      // → NaN → 整个 frame 被丢弃 → TaskDrawer 永远 events.length === 0,
+      // 工具调用卡片出不来（截图中 "事件: 0"、"等待事件..."）。
+      const seq = ev.seq
+      writeSse(res, {
+        seq,
+        type: ev.type,
+        ...evToWire({ ...ev, seq }),
+      })
       lastSeq = ev.seq
     }
-    // 任务结束:发 task.ended 哨兵
+    // 任务结束:发 task.ended 哨兵 (lastSeq+1 作为新 id)
     const final = await runtime().get(id)
     if (final) {
       writeSse(res, {
-        eventId: lastSeq + 1,
+        seq: lastSeq + 1,
         type: 'task.ended',
         taskId: id,
         status: final.status,

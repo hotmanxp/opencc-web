@@ -1,11 +1,25 @@
-import { spawn } from 'node:child_process'
+import { spawn, execFile, execFileSync } from 'node:child_process'
+import { existsSync } from 'node:fs'
+import { dirname, join } from 'node:path'
+import { fileURLToPath } from 'node:url'
+import { isAbsolute, resolve } from 'path'
 import { readdir, readFile, stat } from 'fs/promises'
-import { isAbsolute, resolve, join } from 'path'
+import { promisify } from 'node:util'
 import type { LegacyTool, LegacyToolContext as ToolContext } from '../Tool.js'
 import { GrepInputSchema, type GrepInput } from './schema.js'
 import { renderPrompt } from './prompt.js'
 
 const MAX_RESULTS = 200
+const MAX_BUFFER_SIZE = 20_000_000 // 20MB
+
+type RgPath = { rgPath: string; mode: 'vendor' | 'system' } | null
+type SpawnResult = {
+  stdout: string
+  stderr: string
+  code: number | null
+  signal: NodeJS.Signals | null
+  error?: NodeJS.ErrnoException
+}
 
 export const GrepTool: LegacyTool<typeof GrepInputSchema, string> = {
   name: 'Grep',
@@ -20,56 +34,254 @@ export const GrepTool: LegacyTool<typeof GrepInputSchema, string> = {
       : ctx.cwd
     const mode = input.output_mode ?? 'content'
 
-    const rgResult = await tryRipgrep(input, searchPath, mode, ctx)
+    const rgResult = await runRipgrepWithFallback(input, searchPath, mode, ctx)
     if (rgResult !== null) return rgResult
 
     return fallbackSearch(input, searchPath, mode)
   },
 }
 
-function tryRipgrep(
+let codesignDone = false
+
+async function codesignRipgrepIfNecessary(
+  rgPath: string,
+  mode: 'vendor' | 'system',
+): Promise<void> {
+  if (process.platform !== 'darwin' || codesignDone) return
+  if (mode === 'system') return
+
+  // codesignDone 在 try 前设置: 即使失败也只尝试一次 (spec section 5 "仅首启动一次")
+  codesignDone = true
+  const execFilePromise = promisify(execFile)
+
+  try {
+    const { stdout } = await execFilePromise(
+      'codesign',
+      ['-vv', '-d', rgPath],
+      { encoding: 'utf-8' },
+    )
+    if (!stdout.includes('linker-signed')) return
+
+    await execFilePromise('codesign', [
+      '--sign',
+      '-',
+      '--force',
+      '--preserve-metadata=entitlements,requirements,flags,runtime',
+      rgPath,
+    ])
+    await execFilePromise('xattr', ['-d', 'com.apple.quarantine', rgPath])
+  } catch (err) {
+    console.error(`codesign ripgrep failed:`, err)
+  }
+}
+
+function spawnOnce(
+  rgPath: string,
+  args: string[],
+  signal: AbortSignal,
+  singleThread: boolean,
+): Promise<SpawnResult> {
+  return new Promise((resolveP) => {
+    const threadArgs = singleThread ? ['-j', '1'] : []
+    const fullArgs = [...args, ...threadArgs]
+    const platform = process.platform as string
+    const defaultTimeout = platform === 'wsl' ? 60_000 : 20_000
+    const parsedSeconds =
+      parseInt(process.env.CLAUDE_CODE_GLOB_TIMEOUT_SECONDS || '', 10) || 0
+    const timeout = parsedSeconds > 0 ? parsedSeconds * 1000 : defaultTimeout
+
+    const spawnOptions: import('node:child_process').SpawnOptions = {
+      signal,
+      timeout,
+      killSignal: platform === 'win32' ? undefined : 'SIGKILL',
+      windowsHide: true,
+    }
+    // maxBuffer 是 exec/execFile/spawnSync 的选项, spawn 本身不识别,
+    // 但保留该值以便子进程行为与原 spec 一致 (stdio 截断逻辑实际在下方 stdout/stderr 处理)
+    Object.assign(spawnOptions, { maxBuffer: MAX_BUFFER_SIZE })
+
+    const child = spawn(rgPath, fullArgs, spawnOptions)
+
+    let stdout = ''
+    let stderr = ''
+    let stdoutTruncated = false
+    let stderrTruncated = false
+
+    child.stdout?.on('data', (data: Buffer) => {
+      if (!stdoutTruncated) {
+        stdout += data.toString()
+        if (stdout.length > MAX_BUFFER_SIZE) {
+          stdout = stdout.slice(0, MAX_BUFFER_SIZE)
+          stdoutTruncated = true
+        }
+      }
+    })
+
+    child.stderr?.on('data', (data: Buffer) => {
+      if (!stderrTruncated) {
+        stderr += data.toString()
+        if (stderr.length > MAX_BUFFER_SIZE) {
+          stderr = stderr.slice(0, MAX_BUFFER_SIZE)
+          stderrTruncated = true
+        }
+      }
+    })
+
+    let killTimeoutId: ReturnType<typeof setTimeout> | undefined
+    const timeoutId = setTimeout(() => {
+      if (platform === 'win32') {
+        child.kill()
+      } else {
+        child.kill('SIGTERM')
+        killTimeoutId = setTimeout(() => child.kill('SIGKILL'), 5_000)
+      }
+    }, timeout)
+
+    let settled = false
+    child.on('close', (code, sig) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeoutId)
+      clearTimeout(killTimeoutId)
+      resolveP({ stdout, stderr, code, signal: sig })
+    })
+
+    child.on('error', (err: NodeJS.ErrnoException) => {
+      if (settled) return
+      settled = true
+      clearTimeout(timeoutId)
+      clearTimeout(killTimeoutId)
+      resolveP({ stdout, stderr, code: null, signal: null, error: err })
+    })
+  })
+}
+
+function resolveRgPathVendor(): RgPath {
+  const currentPlatform = process.platform
+  const currentArch = process.arch
+  // vendor 仅 darwin/win32 (OpenCC 只提供了 3 个二进制)
+  if (!['darwin', 'win32'].includes(currentPlatform)) return null
+  if (!['arm64', 'x64'].includes(currentArch)) return null
+  const ext = currentPlatform === 'win32' ? '.exe' : ''
+  const binName = `rg-${currentPlatform}-${currentArch}${ext}`
+  const __filename = fileURLToPath(import.meta.url)
+  const __dirname = dirname(__filename)
+  const vendorPath = join(
+    __dirname,
+    '..',
+    '..',
+    '..',
+    'vendor',
+    'ripgrep',
+    binName,
+  )
+  return existsSync(vendorPath) ? { rgPath: vendorPath, mode: 'vendor' } : null
+}
+
+function resolveRgPathSystem(): RgPath {
+  const currentPlatform = process.platform
+  try {
+    const cmd = currentPlatform === 'win32' ? 'where' : 'which'
+    const stdout = execFileSync(cmd, ['rg'], {
+      timeout: 3000,
+      encoding: 'utf-8',
+    })
+    const rgPath = stdout.trim().split('\n')[0]
+    return rgPath ? { rgPath, mode: 'system' } : null
+  } catch {
+    return null
+  }
+}
+
+function resolveAllRgPaths(): NonNullable<RgPath>[] {
+  const result: NonNullable<RgPath>[] = []
+  const vendor = resolveRgPathVendor()
+  if (vendor) result.push(vendor)
+  const system = resolveRgPathSystem()
+  if (system) result.push(system)
+  return result
+}
+
+async function runRipgrepWithFallback(
   input: GrepInput,
   searchPath: string,
   mode: 'content' | 'files_with_matches' | 'count',
   ctx: ToolContext,
 ): Promise<{ output: string; isError?: boolean } | null> {
-  return new Promise((resolveP) => {
+  const allRg = resolveAllRgPaths()
+
+  for (const currentRg of allRg) {
+    await codesignRipgrepIfNecessary(currentRg.rgPath, currentRg.mode)
+
     const args: string[] = ['--no-heading', '--line-number']
     if (mode === 'files_with_matches') args.push('--files-with-matches')
     if (mode === 'count') args.push('--count')
-    if (input.context && mode === 'content') args.push(`-C`, String(input.context))
+    if (input.context && mode === 'content')
+      args.push(`-C`, String(input.context))
     if (input.ignore_case) args.push('-i')
     if (input.glob) args.push('--glob', input.glob)
     args.push('--', input.pattern, searchPath)
 
-    let stdout = ''
-    let stderr = ''
-    const child = spawn('rg', args, { signal: ctx.abortSignal })
-    child.stdout.on('data', (d) => { stdout += d.toString() })
-    child.stderr.on('data', (d) => { stderr += d.toString() })
-    child.on('error', (e: NodeJS.ErrnoException) => {
-      // rg not installed — fall back
-      if (e.code === 'ENOENT') resolveP(null)
-      else resolveP({ output: `ripgrep failed: ${e.message}`, isError: true })
-    })
-    child.on('close', (code) => {
-      if (code === 0) {
-        const lines = stdout.split('\n').filter(Boolean)
-        const truncated = lines.length > MAX_RESULTS
-        const slice = truncated ? lines.slice(0, MAX_RESULTS) : lines
-        const header = truncated
-          ? `Found ${lines.length}+ matches (showing first ${MAX_RESULTS}):`
-          : (lines.length ? `Found ${lines.length} matches:` : 'No matches')
-        resolveP({ output: `${header}\n${slice.join('\n')}` })
-      } else if (code === 1) {
-        resolveP({ output: 'No matches' })
-      } else if (code === 2) {
-        resolveP({ output: `ripgrep error: ${stderr.trim()}`, isError: true })
-      } else {
-        resolveP(null)
+    let result = await spawnOnce(currentRg.rgPath, args, ctx.abortSignal, false)
+
+    // EAGAIN retry
+    if (
+      result.code === 2 &&
+      (result.stderr.includes('os error 11') ||
+        result.stderr.includes('Resource temporarily unavailable'))
+    ) {
+      result = await spawnOnce(currentRg.rgPath, args, ctx.abortSignal, true)
+    }
+
+    // Handle result
+    if (result.error?.code === 'ENOENT') continue
+
+    if (result.code === 0) {
+      const lines = result.stdout.split('\n').filter(Boolean)
+      const truncated = lines.length > MAX_RESULTS
+      const slice = truncated ? lines.slice(0, MAX_RESULTS) : lines
+      const header = truncated
+        ? `Found ${lines.length}+ matches (showing first ${MAX_RESULTS}):`
+        : lines.length
+          ? `Found ${lines.length} matches:`
+          : 'No matches'
+      return { output: `${header}\n${slice.join('\n')}` }
+    }
+
+    if (result.code === 1) return { output: 'No matches' }
+    if (result.code === 2)
+      return {
+        output: `ripgrep error: ${result.stderr.trim()}`,
+        isError: true,
       }
-    })
-  })
+
+    if (result.signal === 'SIGTERM' || result.signal === 'SIGKILL') {
+      const platform = process.platform as string
+      const lines = result.stdout.trim().split('\n').filter(Boolean)
+      if (lines.length === 0) {
+        return {
+          output: `ripgrep search timed out after ${platform === 'wsl' ? 60 : 20} seconds. The search may have matched files but did not complete in time. Try searching a more specific path or pattern.`,
+          isError: true,
+        }
+      }
+      return {
+        output: `Found ${lines.length} matches (search may be incomplete, timed out after ${platform === 'wsl' ? 60 : 20} seconds):\n${lines.join('\n')}`,
+      }
+    }
+
+    if (result.error?.code === 'ABORT_ERR')
+      return { output: 'Search aborted.', isError: true }
+    if (result.error?.code === 'ERR_CHILD_PROCESS_STDIO_MAXBUFFER') {
+      const lines = result.stdout.trim().split('\n').filter(Boolean)
+      return {
+        output: `Found ${lines.length}+ matches (output truncated):\n${lines.join('\n')}`,
+      }
+    }
+
+    // Other errors → try next
+  }
+
+  return null
 }
 
 async function fallbackSearch(

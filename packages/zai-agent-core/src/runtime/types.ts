@@ -3,6 +3,7 @@ import type { Tool, AskUserAnswers } from '../tools/Tool.js'
 import type { McpServerSpec } from '../mcp/types.js'
 import type { MCPClientPool } from '../mcp/MCPClientPool.js'
 import type { PermissionMode } from './permissionMode.js'
+import type { PluginRuntime, PluginRuntimeConfig } from '../plugins/types.js'
 
 // UserMessage is shape-only; kept inline to avoid pulling from the opencc-internals
 // mirror (which would re-couple this file to Bun-only OpenCC source).
@@ -86,6 +87,11 @@ export type RuntimeConfig = {
     status?: string
     instructions?: string
   }>
+
+  /** Plugin runtime config (sources, enablement, hook executor). */
+  plugins?: PluginRuntimeConfig
+  /** Plugin runtime implementation. Bootstrapped by the host if set. */
+  pluginRuntime?: PluginRuntime
 }
 
 export type QueryOptions = {

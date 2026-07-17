@@ -1,6 +1,8 @@
 import type { BackgroundTask } from '@zn-ai/zai-agent-core'
 import { getRuntime, getCurrentSessionId, setCurrentSessionId } from './agentRuntime.js'
 import { resolveModel } from '../lib/resolveModel.js'
+import { eventBus } from './eventBus.js'
+import { translateRuntimeEvents } from '../routes/agent.js'
 
 /**
  * SubagentNotifier:把 BackgroundRuntime 子 agent 的完成事件回流到父 session。
@@ -92,19 +94,25 @@ export class SubagentNotifier {
         transcriptId: task.parentSessionId!,
         model: resolvedModel,
       })
-      // 用 try/catch 包住 stream 消费,避免单次迭代抛错打断通知流程
+      // ★ 关键修复 (HRMSV3-ZN-WEBSITE#668):把 queryEngine 的 runtime 事件
+      // 经 translateRuntimeEvents 翻译成 ServerEvent 形态并 emit 到 eventBus,
+      // 让前端 SSE 渠道拿到 assistant 续写的 token / thinking / tool_call /
+      // done 等事件,UI 会随之更新。之前的实现只消费 stream 不 emit
+      // eventBus,导致 transcript 写进去了但前端永远卡在"派发后等通知"
+      // 状态(看起来 LLM 没继续输出)。
+      const sessionId = task.parentSessionId!
+      const translated = translateRuntimeEvents(
+        events as AsyncIterable<Record<string, unknown>>,
+        sessionId,
+      )
       try {
-        for await (const ev of events) {
-          // 这里其实只消费 stream 不写回 SSE —— background 完成事件已经在
-          // backgroundRuntime.ts 的 onTaskStateChange 里通过 job.* 推到
-          // 前端 SSE 渠道. queryEngine.run 自身会 emit runtime.* 事件到
-          // eventBus (routes/agent.ts:467 走 eventBus.emit),前端自然能
-          // 看到新一轮的 assistant 回应。
-          void ev
-          // 持续消费直到 stream 结束(否则 promise 不 resolve)
-          if ((ev as { type?: string }).type === 'runtime.done') break
-          if ((ev as { type?: string }).type === 'runtime.aborted') break
-          if ((ev as { type?: string }).type === 'runtime.error') break
+        for await (const ev of translated) {
+          eventBus.emit(ev)
+          // translateRuntimeEvents 已经会在 model message_stop 时自然结束。
+          // 再多一层防御:遇到 runtime.{done,aborted,error} 也立即 break,
+          // 避免意外阻塞 promise resolve。
+          const t = (ev as { type?: string }).type
+          if (t === 'runtime.done' || t === 'runtime.aborted' || t === 'runtime.error') break
         }
       } catch (streamErr) {
         // stream 迭代异常不应阻止 background 状态变化被记录

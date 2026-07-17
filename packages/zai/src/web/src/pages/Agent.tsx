@@ -40,6 +40,7 @@ import { api } from "../lib/api";
 import QuestionCard from "../components/QuestionCard.jsx";
 import DiffBlock from "../components/DiffBlock.js";
 import { linkifyText } from "../lib/linkify.js";
+import { splitMarkdownOnIncomplete } from "../lib/splitMarkdown.js";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import ConversationInfoButton from "../components/ConversationInfoButton";
 import ModelStatusButton from "../components/ModelStatusButton";
@@ -251,6 +252,42 @@ function MarkdownText({ text }: { text: string }) {
 // 展开态: 主题紫半透明叠加在深色页面背景上 + 紫罗兰左边条 + 浅色斜体等宽字体,
 // 与正式对话 Card 风格脱钩. 用 rgba 透明度而非纯浅紫, 是因为页面背景是深色,
 // 原 #f9f0ff 在深背景上跳眼; 改成主题紫 14% 透明度既保留紫色调又柔和融入暗背景.
+function StreamingMarkdown({ text }: { text: string }) {
+  const { complete, tail } = useMemo(
+    () => splitMarkdownOnIncomplete(text),
+    [text],
+  );
+  return (
+    <>
+      {complete && <MarkdownText text={complete} />}
+      {tail && (
+        <div
+          style={{
+            fontSize: 14,
+            lineHeight: 1.6,
+            whiteSpace: "pre-wrap",
+            wordBreak: "break-word",
+            color: "inherit",
+          }}
+        >
+          {linkifyText(tail)}
+          <span
+            style={{
+              display: "inline-block",
+              width: 7,
+              height: 14,
+              verticalAlign: "-2px",
+              marginLeft: 2,
+              background: "#1677ff",
+              animation: "zai-blink 1s steps(1) infinite",
+            }}
+          />
+        </div>
+      )}
+    </>
+  );
+}
+
 const THINKING_ACCENT = "#722ed1";
 const THINKING_BG = "rgba(114, 45, 209, 0.14)";
 const THINKING_PREVIEW_MAX = 80;
@@ -756,28 +793,7 @@ function MessageBubble({
             <RobotFilled style={{ color: "#ff6600", fontSize: 18 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               {streaming ? (
-                <div
-                  style={{
-                    fontSize: 14,
-                    lineHeight: 1.6,
-                    whiteSpace: "pre-wrap",
-                    wordBreak: "break-word",
-                    color: "inherit",
-                  }}
-                >
-                  {linkifyText(text)}
-                  <span
-                    style={{
-                      display: "inline-block",
-                      width: 7,
-                      height: 14,
-                      verticalAlign: "-2px",
-                      marginLeft: 2,
-                      background: "#1677ff",
-                      animation: "zai-blink 1s steps(1) infinite",
-                    }}
-                  />
-                </div>
+                <StreamingMarkdown text={text} />
               ) : (
                 <MarkdownText text={text} />
               )}
@@ -1002,19 +1018,22 @@ export default function Agent() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
   const { token } = theme.useToken();
-  // Skills autocomplete: 输入 / 时弹出
-  const [slashItems, setSlashItems] = useState<
-    Array<{ kind: 'command' | 'skill'; name: string; description: string; isBuiltIn?: boolean }>
-  >([])
-  const setSlashSkills = useCallback((items: typeof slashItems) => setSlashItems(items), [])
-  const skills = useMemo(
-    () => slashItems.filter((i) => i.kind === 'skill') as Array<{ name: string; description: string }>,
-    [slashItems],
-  )
-  const commands = useMemo(
-    () => slashItems.filter((i) => i.kind === 'command') as Array<{ name: string; description: string; isBuiltIn?: boolean }>,
-    [slashItems],
-  )
+  // Slash autocomplete: 输入 / 时弹出, 同时包含 builtin commands + user commands + skills
+  type SlashItem = {
+    kind: 'command' | 'skill'
+    name: string
+    description: string
+    argumentHint?: string
+    whenToUse?: string
+    isBuiltIn?: boolean
+    isConflict?: boolean
+    type?: 'local' | 'prompt'
+    /** plugin skill 的展示名（去掉 `plugin:pluginName:` 前缀） */
+    displayName?: string
+    /** plugin skill 所属的 plugin 名，用于在描述前渲染 `(pluginName)` */
+    pluginName?: string
+  }
+  const [slashItems, setSlashItems] = useState<SlashItem[]>([]);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [skillMenuIdx, setSkillMenuIdx] = useState(0);
   const [skillFilter, setSkillFilter] = useState("");
@@ -1107,15 +1126,26 @@ export default function Agent() {
     return () => window.removeEventListener("keydown", onKey);
   }, [status, stop]);
 
+  // 新 pwd 下首次打开 Agent 页面时, server 端 /api/agent/sessions 会返回
+  // 空数组 — loadSessions 当前对空列表不做任何处理, UI 会停在空白态.
+  // 在这里补一刀: 等 loadSessions 完成后如果 sessions 仍是空, 就调用
+  // createNewSession() (复用了 PlusOutlined 按钮的 onClick 逻辑 — POST
+  // /api/agent/sessions 建一条空 transcript, 立即在 sidebar 占位).
   useEffect(() => {
-    loadSessions();
+    (async () => {
+      await loadSessions();
+      if (useAgentStore.getState().sessions.length === 0) {
+        await useAgentStore.getState().createNewSession();
+      }
+    })();
   }, []);
 
+  // 加载 slash 列表（页面初始化时请求一次）：builtin commands + user commands + skills
   useEffect(() => {
-    fetch("/api/agent/slash")
+    fetch("/api/slash")
       .then((res) => res.json())
       .then((data) => {
-        if (Array.isArray(data.items)) setSlashItems(data.items)
+        if (Array.isArray(data.items)) setSlashItems(data.items);
       })
       .catch(() => {})
   }, [])
@@ -1139,36 +1169,46 @@ export default function Agent() {
     return qi === query.length ? score : 0;
   };
 
-  const filteredSlashItems = useMemo(() => {
-    if (!input.startsWith("/")) return []
-    const q = input.slice(1).toLowerCase()
-    if (!q) return slashItems
-    const scored = slashItems
-      .map((item) => {
-        const nameScore = fuzzyMatch(q, item.name)
-        const descScore = fuzzyMatch(q, item.description)
-        if (nameScore === 0) return { item, score: 0 }
-        const bonus = descScore > 0 ? descScore * 0.3 : 0
-        return { item, score: nameScore + bonus }
-      })
-      .filter((s) => s.score > 0)
-      .sort((a, b) => b.score - a.score)
-    return scored.map((s) => s.item)
-  }, [input, slashItems])
-
-  // 把过滤后,做"命令优先"的重新排序:commands 排在 skills 前面。
-  // 这样用户打 "/cl" 时,/clear 排在任何 skill 前面。
-  const orderedSlashItems = useMemo(() => {
-    const cmds = filteredSlashItems.filter((i) => i.kind === "command")
-    const sks = filteredSlashItems.filter((i) => i.kind === "skill")
-    return [...cmds, ...sks]
-  }, [filteredSlashItems])
+  // 当输入以 / 开头时, 计算过滤后的 slash 列表 (commands 在前, skills 在后)
+  const filteredSlash = useMemo(() => {
+    if (!input.startsWith("/")) return [];
+    const q = input.slice(1).toLowerCase();
+    if (!q) {
+      // 空 query: builtin commands 优先, 后面接 skills, 各组按 name 升序
+      const cmds = slashItems
+        .filter((i) => i.kind === "command" && i.isBuiltIn)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const sks = slashItems
+        .filter((i) => i.kind === "skill")
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return [...cmds, ...sks].slice(0, 30);
+    }
+    const scoreItem = (it: SlashItem) => {
+      const nameScore = fuzzyMatch(q, it.name);
+      if (nameScore === 0) return 0;
+      const descScore = fuzzyMatch(q, it.description);
+      return nameScore + (descScore > 0 ? descScore * 0.3 : 0);
+    };
+    const cmds = slashItems
+      .filter((i) => i.kind === "command")
+      .map((it) => ({ it, s: scoreItem(it) }))
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.it);
+    const sks = slashItems
+      .filter((i) => i.kind === "skill")
+      .map((it) => ({ it, s: scoreItem(it) }))
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.it);
+    return [...cmds, ...sks].slice(0, 30);
+  }, [input, slashItems]);
 
   // 当过滤结果变化时，重置选中项
   useEffect(() => {
     setSkillMenuIdx(0);
-    setShowSkillMenu(orderedSlashItems.length > 0);
-  }, [orderedSlashItems.length]);
+    setShowSkillMenu(filteredSlash.length > 0);
+  }, [filteredSlash.length]);
 
   // 点击外部关闭 skill 菜单
   useEffect(() => {
@@ -1185,10 +1225,51 @@ export default function Agent() {
     return () => document.removeEventListener("mousedown", handler);
   }, [showSkillMenu]);
 
-  const selectSkill = useCallback((skillName: string) => {
-    setInput("/" + skillName + " ");
+  const selectSlashItem = useCallback(async (item: SlashItem) => {
     setShowSkillMenu(false);
-    // 聚焦回输入框
+    if (item.kind === "command" && item.type === "local") {
+      // local 命令: 立即 POST /api/command 执行
+      try {
+        const res = await fetch("/api/command", {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify({ name: item.name, args: "" }),
+        });
+        const data = (await res.json()) as { type: string; payload?: any };
+        switch (data.type) {
+          case "cleared":
+            useAgentStore.getState().clearMessages();
+            message.success(`已清空对话: /${item.name}`);
+            break;
+          case "compacted":
+            message.success(
+              `已压缩 ${data.payload?.removedMessages ?? 0} 条历史`,
+            );
+            break;
+          case "status":
+            message.info(`状态: ${JSON.stringify(data.payload)}`);
+            break;
+          case "message":
+            message.info(data.payload?.text ?? "");
+            break;
+          case "error":
+            message.error(data.payload?.message ?? "命令执行失败");
+            break;
+          case "unknown":
+            message.warning(`未知命令: ${data.payload?.input ?? item.name}`);
+            break;
+          default:
+            message.info(`/${item.name} 已执行`);
+        }
+      } catch (err) {
+        message.error(
+          `执行失败: ${err instanceof Error ? err.message : String(err)}`,
+        );
+      }
+      return;
+    }
+    // prompt command 或 skill: 填入文本框, 等用户手动 Enter
+    setInput("/" + item.name + " ");
     setTimeout(() => {
       const el = document.querySelector(
         ".zai-agent-textarea",
@@ -1421,23 +1502,24 @@ export default function Agent() {
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
-    // Skills 菜单键盘导航
-    if (showSkillMenu && orderedSlashItems.length > 0) {
+    // Slash 菜单键盘导航
+    if (showSkillMenu && filteredSlash.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
-        setSkillMenuIdx((i) => (i + 1) % orderedSlashItems.length);
+        setSkillMenuIdx((i) => (i + 1) % filteredSlash.length);
         return;
       }
       if (e.key === "ArrowUp") {
         e.preventDefault();
         setSkillMenuIdx(
-          (i) => (i - 1 + orderedSlashItems.length) % orderedSlashItems.length,
+          (i) => (i - 1 + filteredSlash.length) % filteredSlash.length,
         );
         return;
       }
       if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
         e.preventDefault();
-        selectSkill(orderedSlashItems[skillMenuIdx]!.name);
+        const it = filteredSlash[skillMenuIdx];
+        if (it) void selectSlashItem(it);
         return;
       }
       if (e.key === "Escape") {
@@ -1846,8 +1928,8 @@ export default function Agent() {
 
           <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
             <div style={{ display: "flex", alignItems: "stretch", position: "relative" }}>
-              {/* Skills 自动补全下拉菜单 */}
-              {showSkillMenu && orderedSlashItems.length > 0 && (
+              {/* Slash 自动补全下拉菜单: builtin commands + user commands + skills */}
+              {showSkillMenu && filteredSlash.length > 0 && (
                 <div
                   ref={skillMenuRef}
                   style={{
@@ -1865,19 +1947,19 @@ export default function Agent() {
                     boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
                   }}
                 >
-                  {orderedSlashItems.map((skill, idx) => (
+                  {filteredSlash.map((item, idx) => (
                     <div
-                      key={skill.name}
+                      key={item.kind + ":" + item.name}
                       onMouseDown={(e) => {
                         e.preventDefault();
-                        selectSkill(skill.name);
+                        void selectSlashItem(item);
                       }}
                       style={{
                         padding: "8px 12px",
                         cursor: "pointer",
                         display: "flex",
                         alignItems: "center",
-                        gap: 10,
+                        gap: 12,
                         background:
                           idx === skillMenuIdx
                             ? "rgba(255,102,0,0.15)"
@@ -1898,11 +1980,14 @@ export default function Agent() {
                           fontFamily:
                             "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
                           whiteSpace: "nowrap",
+                          // ★ OpenCC 风格两栏布局: 左列固定最小宽度, 与右列描述对齐
+                          minWidth: 180,
+                          flexShrink: 0,
                         }}
                       >
-                        /{skill.name}
+                        /{item.displayName ?? item.name}
                       </span>
-                      {skill.description && (
+                      {item.description && (
                         <span
                           style={{
                             fontSize: 12,
@@ -1910,11 +1995,42 @@ export default function Agent() {
                             overflow: "hidden",
                             textOverflow: "ellipsis",
                             whiteSpace: "nowrap",
+                            flex: 1,
+                            minWidth: 0,
                           }}
                         >
-                          {skill.description}
+                          {/* plugin skill: 描述前缀显示 plugin 归属, 与 OpenCC TUI 一致 */}
+                          {item.pluginName && (
+                            <span style={{ color: "rgba(167,139,250,0.75)" }}>
+                              ({item.pluginName}){" "}
+                            </span>
+                          )}
+                          {item.description}
+                          {item.argumentHint ? ` · ${item.argumentHint}` : ""}
                         </span>
                       )}
+                      {/* kind badge: command 紫色, skill 灰色 */}
+                      <span
+                        style={{
+                          fontSize: 10,
+                          fontWeight: 600,
+                          padding: "2px 6px",
+                          borderRadius: 4,
+                          textTransform: "uppercase",
+                          letterSpacing: 0.5,
+                          color:
+                            item.kind === "command"
+                              ? "#a78bfa"
+                              : "rgba(255,255,255,0.45)",
+                          background:
+                            item.kind === "command"
+                              ? "rgba(167,139,250,0.18)"
+                              : "rgba(255,255,255,0.08)",
+                          flexShrink: 0,
+                        }}
+                      >
+                        {item.kind}
+                      </span>
                     </div>
                   ))}
                 </div>

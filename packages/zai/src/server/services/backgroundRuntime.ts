@@ -62,23 +62,32 @@ export function initBackgroundRuntime(): BackgroundRuntime {
         void n.handle(task)
       }
       // 2) 同时 emit 全局 job.* 事件,前端 useEventStream 自动分发到 useAppStore
+      // sessionId = task.parentSessionId:AgentTool 派发时由 metadata.parentSessionId
+      // 写入 (见 tools/AgentTool/AgentTool.ts:48-52),前端 useBackgroundTasks 据
+      // 此把 dock 任务按 useAgentStore.sessionId 切分 —— 切到其它 session 后,
+      // 该 session 派发的 job 不再显示在状态栏,避免多 session 任务堆积.
+      // sessionId 为 null 时 (e.g. 子任务派发时未填 parentSessionId) 视为全局
+      // job,客户端不会按 session 过滤掉,资源刷新 / 登录这类非会话任务正常显示.
+      const jobSessionId = task.parentSessionId ?? null
       if (task.status === 'completed') {
         eventBus.emit({
           type: 'job.done',
           jobId: task.id,
+          sessionId: jobSessionId,
         })
       } else if (task.status === 'failed' || task.status === 'cancelled') {
         eventBus.emit({
           type: 'job.failed',
           jobId: task.id,
           error: task.error?.message ?? task.status,
+          sessionId: jobSessionId,
         })
       }
     },
   })
 
   // dispatch 不在 lifecycle hook 内(同步返回),所以单独 emit job.started
-  backgroundRuntime = wrapWithJobStarted(inner)
+  backgroundRuntime = wrapWithJobStarted(inner, () => null)
   // 注册到 zai-agent-core 的全局 registry,让 BackgroundAgentTool 等可访问
   setBackgroundRuntime(backgroundRuntime)
   return backgroundRuntime
@@ -87,8 +96,14 @@ export function initBackgroundRuntime(): BackgroundRuntime {
 /**
  * 在 dispatch() 后立即 emit job.started({kind:'agent_task', taskId})。
  * 其他方法透传给 inner。
+ * sessionIdHook:可注入一个函数用于从 BackgroundTask 解析 sessionId(默认读
+ * task.parentSessionId —— AgentTool 派发时由 metadata.parentSessionId 写入)。
+ * 用 hook 而不是直接读 task.parentSessionId,是为了在测试里可注入 mock。
  */
-function wrapWithJobStarted(inner: BackgroundRuntime): BackgroundRuntime {
+function wrapWithJobStarted(
+  inner: BackgroundRuntime,
+  sessionIdHook: (task: BackgroundTask) => string | null = (t) => t.parentSessionId ?? null,
+): BackgroundRuntime {
   return {
     dispatch: async (input) => {
       const task = await inner.dispatch(input)
@@ -97,6 +112,7 @@ function wrapWithJobStarted(inner: BackgroundRuntime): BackgroundRuntime {
         jobId: task.id,
         kind: 'agent_task',
         taskId: task.id,
+        sessionId: sessionIdHook(task),
       })
       return task
     },

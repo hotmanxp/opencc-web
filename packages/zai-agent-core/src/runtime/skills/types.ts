@@ -43,7 +43,15 @@ export type LoadedSkill = {
   /** Top-level body text (set for MCP-loaded skills; disk skills use markdown). */
   body?: string
   /** Skill source. Defaults to 'disk' for skills loaded from the filesystem. */
-  source?: 'disk' | 'mcp'
+  source?: 'disk' | 'mcp' | 'plugin'
+  /**
+   * Plugin discriminator — `'skill'` for SKILL.md files loaded from a plugin
+   * directory, `'command'` for slash-command manifests. Omit for non-plugin
+   * skills to keep the original disk/MCP semantics intact.
+   */
+  kind?: 'skill' | 'command'
+  /** Owning plugin id; present only when `source === 'plugin'`. */
+  pluginId?: string
   /** MCP metadata — present only for skills loaded from an MCP server. */
   mcpInfo?: { serverName: string; resourceUri: string }
 }

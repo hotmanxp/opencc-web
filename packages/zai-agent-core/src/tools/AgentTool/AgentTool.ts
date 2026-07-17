@@ -72,9 +72,12 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
       return { output: 'AgentTool disabled: no __runtimeConfig in ToolContext', isError: true }
     }
 
+    const pluginAgents = (ctx.state as any).__pluginAgents ?? []
     const def = await loadAgentDefinitions(
       ctx.dataDir,
       ctx.__runtimeConfig?.userAgentsDir,
+      undefined,
+      pluginAgents,
     )
     const agent = def.agents.find(a => a.name === input.subagent_type)
                  ?? def.agents.find(a => a.name === 'general-purpose')
@@ -92,6 +95,15 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
       subagentType: input.subagent_type,
       maxTurns: agent?.maxTurns ?? ctx.__maxTurns ?? 25,
       abortSignal: ctx.abortSignal,
+    }
+
+    const hookRunner = (ctx.state as any).__pluginHookRunner as import('../../plugins/HookRunner.js').HookRunner | undefined
+    if (hookRunner) {
+      await hookRunner.run('SubagentStart', {
+        subagentType: input.subagent_type,
+        prompt: input.prompt,
+        sessionId: parentSessionId,
+      }, ctx.abortSignal)
     }
 
     ctx.emitEvent({
@@ -137,6 +149,14 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
       finalOutput = `error: ${err instanceof Error ? err.message : String(err)}`
     }
 
+    if (hookRunner) {
+      await hookRunner.run('SubagentStop', {
+        subagentType: input.subagent_type,
+        output: finalOutput,
+        exitReason,
+        sessionId: parentSessionId,
+      }, ctx.abortSignal)
+    }
     ctx.emitEvent({ type: 'subagent:done', subSessionId, output: finalOutput, exitReason })
 
     return {

@@ -44,8 +44,9 @@ export class TranscriptStore {
     }
   }
 
-  async list(cwd?: string): Promise<TranscriptMeta[]> {
+  async list(cwd?: string, opts?: { excludeSubagent?: boolean }): Promise<TranscriptMeta[]> {
     const dir = transcriptDir(this.dataDir)
+    const excludeSubagent = opts?.excludeSubagent === true
     try {
       const entries = await readdir(dir)
       const files = entries.filter((e) => e.endsWith('.json'))
@@ -58,6 +59,15 @@ export class TranscriptStore {
           if (cwd !== undefined) {
             const resolved = typeof meta.cwd === 'string' && meta.cwd ? path.resolve(meta.cwd) : null
             if (resolved !== path.resolve(cwd)) continue
+          }
+          // 过滤子 agent transcript: 用户在 sidebar 只应该看到自己主动新建的主
+          // session。子 agent (subagentType / parentSessionId 存在) 是 AgentTool
+          // 自动派发的内部任务,有 parentSessionId 指回主 session。不在 sidebar 出现。
+          if (
+            excludeSubagent &&
+            (typeof meta.subagentType === 'string' || typeof meta.parentSessionId === 'string')
+          ) {
+            continue
           }
           metas.push(meta)
         } catch { /* skip corrupt files */ }

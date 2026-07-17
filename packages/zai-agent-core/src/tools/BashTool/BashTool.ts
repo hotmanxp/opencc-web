@@ -6,6 +6,7 @@ import type { SandboxConfig } from '../../runtime/types.js'
 import { renderPrompt } from './prompt.js'
 import { BashInputSchema } from './schema.js'
 import { pickEnv, isReadOnlyCommand, isDestructiveCommand, type BackgroundTask } from './sandbox.js'
+import { bashBackgroundTracker } from './bashTracker.js'
 
 const MAX_BUFFER = 10 * 1024 * 1024
 
@@ -74,12 +75,37 @@ function runInBackground(
     startedAt: Date.now(), stdout: '', stderr: '',
     status: 'running', child,
   }
-  child.stdout?.on('data', d => { task.stdout += d.toString() })
-  child.stderr?.on('data', d => { task.stderr += d.toString() })
+  // 同时注册到全局 tracker, 让前端 dock 能计数 + 点击查看.
+  // sessionId 来自 queryEngine 注入到 __runtimeConfig 的字段; 兜底空串
+  // 让 tracker 仍能记录 (只是没法按 session 过滤, 全部显示).
+  const sessionId = (ctx.__runtimeConfig as { sessionId?: string } | undefined)?.sessionId ?? ''
+  bashBackgroundTracker.register(taskId, {
+    sessionId,
+    command: input.command,
+    description: task.description,
+    startedAt: task.startedAt,
+    pid: child.pid,
+  })
+  bashBackgroundTracker.attachChild(taskId, child)
+  child.stdout?.on('data', d => {
+    const text = d.toString()
+    task.stdout += text
+    bashBackgroundTracker.appendOutput(taskId, { stdout: text })
+  })
+  child.stderr?.on('data', d => {
+    const text = d.toString()
+    task.stderr += text
+    bashBackgroundTracker.appendOutput(taskId, { stderr: text })
+  })
   child.on('close', (code, signal) => {
     task.status = code === 0 ? 'completed' : 'failed'
     task.exitCode = code ?? undefined
     task.signal = signal ?? undefined
+    bashBackgroundTracker.markFinished(
+      taskId,
+      code === 0 ? 'completed' : 'failed',
+      { exitCode: code ?? undefined, signal: signal ?? undefined },
+    )
   })
   tasks.set(taskId, task)
   return {

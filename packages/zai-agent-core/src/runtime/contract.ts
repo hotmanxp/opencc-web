@@ -4,6 +4,7 @@ import type { TranscriptFile, TranscriptMeta } from '../transcript/types.js'
 import { TranscriptStore } from '../transcript/store.js'
 import { query } from './query.js'
 import { abortSession } from './abort.js'
+import { DefaultPluginRuntime } from '../plugins/index.js'
 
 export interface AgentRuntime {
   run(opts: QueryOptions): AsyncIterable<RuntimeEvent>
@@ -19,6 +20,9 @@ export class DefaultAgentRuntime implements AgentRuntime {
 
   constructor(private config: RuntimeConfig) {
     this.store = new TranscriptStore(config.dataDir)
+    if (!config.pluginRuntime && config.plugins) {
+      config.pluginRuntime = new DefaultPluginRuntime(config.plugins)
+    }
   }
 
   run(opts: QueryOptions): AsyncIterable<RuntimeEvent> {

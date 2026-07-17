@@ -16,6 +16,14 @@ interface JobInfo {
   message?: string;
   done?: boolean;
   error?: string;
+  /**
+   * 该 job 归属的 sessionId (agent_task 时 = BackgroundTask.parentSessionId,
+   * 即派发 sub-agent 的主 session)。undefined 表示非 agent_task 的全局 job
+   * (resource_refresh / login / install),与 session 无关。
+   * useBackgroundTasks 据此按当前 useAgentStore.sessionId 过滤 — 切换
+   * session 后,该 session 派发的 job 不再出现在当前状态栏。
+   */
+  sessionId?: string;
 }
 
 interface ToastInfo {
@@ -56,10 +64,17 @@ export const useAppStore = create<AppState>((set) => ({
   applyJobEvent: (event) => set((state) => {
     if (!('jobId' in event) || typeof event.jobId !== 'string') return state;
     const jid = event.jobId;
+    // server 给 job.started/job.progress/job.done/job.failed 发的 sessionId
+    // (来自 BackgroundTask.parentSessionId) 透传到 JobInfo,客户端 useBackgroundTasks
+    // 据此把 dock 任务按当前 useAgentStore.sessionId 切分. sessionId 缺失
+    // (undefined) 表示全局 job,不受 session 过滤影响.
+    const evtSessionId = 'sessionId' in event
+      ? typeof event.sessionId === 'string' ? event.sessionId : undefined
+      : undefined
     switch (event.type) {
       case 'job.started': {
         const jobs = { ...state.jobs };
-        jobs[jid] = { jobId: jid, kind: event.kind };
+        jobs[jid] = { jobId: jid, kind: event.kind, sessionId: evtSessionId };
         return { ...state, jobs };
       }
       case 'job.progress': {
@@ -67,7 +82,12 @@ export const useAppStore = create<AppState>((set) => ({
         if (!existing) return state;
         return {
           ...state,
-          jobs: { ...state.jobs, [jid]: { ...existing, message: event.message, progress: event.percent } },
+          jobs: { ...state.jobs, [jid]: {
+            ...existing,
+            message: event.message,
+            progress: event.percent,
+            ...(evtSessionId !== undefined ? { sessionId: evtSessionId } : {}),
+          } },
         };
       }
       case 'job.done': {
@@ -82,7 +102,12 @@ export const useAppStore = create<AppState>((set) => ({
         }, 3000);
         return {
           ...state,
-          jobs: { ...state.jobs, [jid]: { ...existing, done: true, progress: 100 } },
+          jobs: { ...state.jobs, [jid]: {
+            ...existing,
+            done: true,
+            progress: 100,
+            ...(evtSessionId !== undefined ? { sessionId: evtSessionId } : {}),
+          } },
         };
       }
       case 'job.failed': {
@@ -90,7 +115,11 @@ export const useAppStore = create<AppState>((set) => ({
         if (!existing) return state;
         return {
           ...state,
-          jobs: { ...state.jobs, [jid]: { ...existing, error: event.error } },
+          jobs: { ...state.jobs, [jid]: {
+            ...existing,
+            error: event.error,
+            ...(evtSessionId !== undefined ? { sessionId: evtSessionId } : {}),
+          } },
         };
       }
       default:

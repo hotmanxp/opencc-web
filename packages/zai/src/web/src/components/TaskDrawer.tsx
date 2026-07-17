@@ -1,4 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
+import ReactMarkdown from 'react-markdown'
+import remarkGfm from 'remark-gfm'
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { Badge, Button, Drawer, Empty, Tag, Tooltip } from 'antd'
 import {
   CheckCircleFilled,
@@ -9,8 +13,11 @@ import {
 import {
   cancelTask,
   fetchTask,
+  fetchBashTask,
+  killBashTask,
   subscribeTaskEvents,
   type BackgroundTask,
+  type BashTaskInfo,
   type SseFrame,
 } from '../lib/taskApi.js'
 
@@ -18,8 +25,6 @@ interface ToolCallEntry {
   toolUseId: string
   name: string
   input?: unknown
-  output?: unknown
-  error?: unknown
   status: 'running' | 'done' | 'error' | 'invalid' | 'denied'
   ts: number
 }
@@ -49,123 +54,338 @@ function formatDuration(ms: number): string {
   return `${m}m${rs}s`
 }
 
-function formatJson(value: unknown): string {
-  try {
-    return JSON.stringify(value, null, 2)
-  } catch {
-    return String(value)
-  }
+const CODE_BG = '#282c34'
+const CODE_FONT_FAMILY =
+  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
+
+const markdownComponents = {
+  p: ({ children }: any) => <p style={{ margin: '0 0 8px 0' }}>{children}</p>,
+  h1: ({ children }: any) => <h1 style={{ fontSize: 20, fontWeight: 600, margin: '12px 0 8px 0' }}>{children}</h1>,
+  h2: ({ children }: any) => <h2 style={{ fontSize: 18, fontWeight: 600, margin: '12px 0 8px 0' }}>{children}</h2>,
+  h3: ({ children }: any) => <h3 style={{ fontSize: 16, fontWeight: 600, margin: '10px 0 6px 0' }}>{children}</h3>,
+  h4: ({ children }: any) => <h4 style={{ fontSize: 14, fontWeight: 600, margin: '8px 0 4px 0' }}>{children}</h4>,
+  ul: ({ children }: any) => <ul style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ul>,
+  ol: ({ children }: any) => <ol style={{ margin: '0 0 8px 0', paddingLeft: 20 }}>{children}</ol>,
+  li: ({ children }: any) => <li style={{ marginBottom: 4 }}>{children}</li>,
+  code: ({ className, children }: any) => {
+    const match = /language-(\w+)/.exec(className || '')
+    if (!match) return <code style={{ background: 'transparent', color: '#a78bfa', padding: '1px 6px', borderRadius: 3, fontSize: '0.9em', fontFamily: CODE_FONT_FAMILY, fontWeight: 500 }}>{children}</code>
+    return <SyntaxHighlighter language={match[1]} style={oneDark} customStyle={{ margin: '6px 0 10px 0', padding: '12px 14px', borderRadius: 6, fontSize: 12, lineHeight: 1.55, background: CODE_BG }} codeTagProps={{ style: { fontFamily: CODE_FONT_FAMILY } }} wrapLongLines={false} showLineNumbers={false}>{String(children).replace(/\n$/, '')}</SyntaxHighlighter>
+  },
+  pre: ({ children }: any) => <>{children}</>,
+  table: ({ children }: any) => <table style={{ borderCollapse: 'collapse', margin: '4px 0 8px 0', fontSize: 13, width: '100%' }}>{children}</table>,
+  thead: ({ children }: any) => <thead style={{ background: 'rgba(255,255,255,0.05)' }}>{children}</thead>,
+  tbody: ({ children }: any) => <tbody>{children}</tbody>,
+  tr: ({ children }: any) => <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>{children}</tr>,
+  th: ({ children }: any) => <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, border: '1px solid rgba(255,255,255,0.08)' }}>{children}</th>,
+  td: ({ children }: any) => <td style={{ padding: '6px 10px', border: '1px solid rgba(255,255,255,0.08)' }}>{children}</td>,
+  blockquote: ({ children }: any) => <blockquote style={{ borderLeft: '3px solid rgba(255,255,255,0.2)', paddingLeft: 12, margin: '4px 0 8px 0', color: 'rgba(255,255,255,0.7)' }}>{children}</blockquote>,
+  a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#1677ff', textDecoration: 'underline' }}>{children}</a>,
+  hr: () => <hr style={{ border: 'none', borderTop: '1px solid rgba(255,255,255,0.08)', margin: '12px 0' }} />,
 }
 
-function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
-  const borderColor =
-    entry.status === 'error' || entry.status === 'invalid' || entry.status === 'denied'
-      ? '#f5222d'
-      : entry.status === 'done'
-        ? '#52c41a'
-        : '#a78bfa'
-
+export function MarkdownText({ text }: { text: string }) {
   return (
     <div
       style={{
-        borderLeft: `3px solid ${borderColor}`,
+        fontSize: 14,
+        lineHeight: 1.6,
+        color: 'inherit',
+        wordBreak: 'break-word',
+      }}
+    >
+      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
+        {text}
+      </ReactMarkdown>
+    </div>
+  )
+}
+
+/**
+ * 后台 Agent 头部"提示词"区域:
+ * - 始终展示 `Prompt:` label + 文本
+ * - 默认 2 行 (line-clamp) 折叠; 超过阈值时附"展开/收起"按钮
+ * - 短文本 (<= 2 行 / 120 字符) 不显示按钮, 避免无意义交互
+ */
+const PROMPT_EXPAND_LINE_THRESHOLD = 2
+const PROMPT_EXPAND_CHAR_THRESHOLD = 120
+export function PromptBlock({ text }: { text: string }) {
+  const [expanded, setExpanded] = useState(false)
+  // 简单的"是否值得展开"启发式: 多行 (>= 3 个换行) 或 字符数超阈值
+  // 时加按钮。准确行数依赖容器宽度, 这里用字符/换行粗估, 实际显示
+  // 仍由 CSS -webkit-line-clamp 截到 2 行, 按钮可手动展开。
+  const needsExpand =
+    text.split('\n').length > PROMPT_EXPAND_LINE_THRESHOLD ||
+    text.length > PROMPT_EXPAND_CHAR_THRESHOLD
+  const clamped = !expanded && needsExpand
+
+  return (
+    <div style={{ marginBottom: 8 }}>
+      <div
+        style={{
+          fontSize: 11,
+          color: 'rgba(255,255,255,0.45)',
+          marginBottom: 4,
+          letterSpacing: 0.5,
+        }}
+      >
+        Prompt:
+      </div>
+      <div
+        style={{
+          fontSize: 13,
+          color: '#fff',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          ...(clamped
+            ? {
+                display: '-webkit-box',
+                WebkitLineClamp: PROMPT_EXPAND_LINE_THRESHOLD,
+                WebkitBoxOrient: 'vertical' as const,
+                overflow: 'hidden',
+              }
+            : {}),
+        }}
+      >
+        {text}
+      </div>
+      {needsExpand && (
+        <Button
+          type="link"
+          size="small"
+          onClick={() => setExpanded((e) => !e)}
+          style={{ padding: 0, marginTop: 2, fontSize: 11, height: 'auto' }}
+        >
+          {expanded ? '收起' : '展开'}
+        </Button>
+      )}
+    </div>
+  )
+}
+
+/** Bash 后台任务详情面板。仿 OpenCC Shell details 布局:
+ *  Status · Runtime · Command · Output (stdout/stderr 合并展示). */
+export function BashTaskView({
+  task,
+  onTaskChange,
+}: {
+  task: BashTaskInfo
+  /** 杀进程后回调,让外部重新拉详情. */
+  onTaskChange?: (next: BashTaskInfo) => void
+}) {
+  const [expanded, setExpanded] = useState(false)
+  const [killing, setKilling] = useState(false)
+  const handleKill = async () => {
+    if (killing || task.status !== 'running') return
+    setKilling(true)
+    try {
+      await killBashTask(task.taskId)
+      // 刷新详情
+      const updated = await fetchBashTask(task.taskId)
+      if (updated) onTaskChange?.(updated)
+    } catch (err) {
+      console.warn('[BashTaskView] kill failed:', err)
+    } finally {
+      setKilling(false)
+    }
+  }
+  const runtimeMs = (task.finishedAt ?? Date.now()) - task.startedAt
+  const runtimeStr = formatDuration(runtimeMs)
+  const statusColor =
+    task.status === 'completed' ? '#52c41a'
+      : task.status === 'running' ? '#a78bfa'
+        : '#f5222d'
+  const output = task.stdout + (task.stderr ? `\n${task.stderr}` : '')
+  const maxOutputLines = 20
+  const outputLines = output.split('\n')
+  const isLongOutput = outputLines.length > maxOutputLines
+  const visibleLines = expanded ? outputLines : outputLines.slice(0, maxOutputLines)
+  const statusMeta: Record<string, string> = {
+    running: '运行中', completed: '完成', failed: '失败', killed: '已终止',
+  }
+
+  return (
+    <div style={{ padding: '12px 20px' }}>
+      {/* 状态行 */}
+      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div>
+          <span style={{ color: statusColor, fontWeight: 500 }}>
+            {task.status === 'running' ? '⏳ ' : task.status === 'completed' ? '✅ ' : '❌ '}
+            {statusMeta[task.status] ?? task.status}
+          </span>
+          <span style={{ marginLeft: 12 }}>Runtime: {runtimeStr}</span>
+          {task.exitCode !== undefined && (
+            <span style={{ marginLeft: 12 }}>exit: {task.exitCode}</span>
+          )}
+        </div>
+        {task.status === 'running' && (
+          <Button
+            danger
+            size="small"
+            loading={killing}
+            onClick={handleKill}
+            style={{ fontSize: 11 }}
+          >
+            {killing ? '终止中…' : '终止'}
+          </Button>
+        )}
+      </div>
+      {/* Command */}
+      <div style={{ marginBottom: 8 }}>
+        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.40)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+          Command
+        </div>
+        <div
+          style={{
+            fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+            fontSize: 12,
+            color: '#fff',
+            background: 'rgba(255,255,255,0.05)',
+            padding: '6px 10px',
+            borderRadius: 4,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+          }}
+        >
+          {task.command}
+        </div>
+      </div>
+      {/* Output */}
+      <div>
+        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.40)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5, display: 'flex', justifyContent: 'space-between' }}>
+          <span>Output</span>
+          {isLongOutput && !expanded && (
+            <span style={{ color: 'rgba(255,255,255,0.35)', textTransform: 'none' }}>
+              Showing {maxOutputLines} / {outputLines.length} lines · {Math.round(output.length / 1024 * 10) / 10}KB
+            </span>
+          )}
+        </div>
+        <pre
+          style={{
+            fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
+            fontSize: 11,
+            lineHeight: 1.5,
+            color: 'rgba(255,255,255,0.85)',
+            background: '#1a1a1a',
+            padding: '8px 10px',
+            borderRadius: 4,
+            maxHeight: expanded ? 'none' : 360,
+            overflow: 'auto',
+            margin: 0,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-all',
+          }}
+        >
+          {visibleLines.join('\n') || '(空)'}
+        </pre>
+        {isLongOutput && (
+          <Button
+            type="link"
+            size="small"
+            onClick={() => setExpanded((e) => !e)}
+            style={{ padding: 0, marginTop: 2, fontSize: 11, height: 'auto', color: '#a78bfa' }}
+          >
+            {expanded ? '收起' : `展开完整输出 (${outputLines.length} 行)`}
+          </Button>
+        )}
+      </div>
+    </div>
+  )
+}
+
+const TOOL_STATUS_LABEL: Record<ToolCallEntry['status'], string> = {
+  running: 'Running',
+  done: 'Done',
+  error: 'Error',
+  invalid: 'Invalid',
+  denied: 'Denied',
+}
+
+function compactInput(value: unknown): string {
+  try {
+    const serialized = JSON.stringify(value) ?? String(value)
+    // JSON.stringify 会把字符串值内的真实空白(换行/制表/空格)转义为
+    // `\n`/`\t`/`\r` 这类 JSON 转义序列,字面上只是两个普通字符 '\' 'n',
+    // 因此 `\s+` 不会命中。仅靠 `\s+` 会让 `{value:"a\nb"}` 保持
+    // `{"value":"a\nb"}` 字面,与单行压缩目标 `{"value":"a b"}` 不符。
+    // 这里用 `/\\[ntr]|\s+/g`:对 JSON 转义的 `\n`/`\t`/`\r` 直接替换成空格,
+    // 同时折叠其余真实空白;其它字面字符(包括 command/path 里的 n/t/r)
+    // 不受影响。
+    return serialized.replace(/\\[ntr]|\s+/g, ' ')
+  } catch {
+    return String(value).replace(/\s+/g, ' ')
+  }
+}
+
+export function formatToolInput(name: string, input: unknown): string {
+  if (typeof input === 'string') return input.replace(/\s+/g, ' ').trim()
+  if (!input || typeof input !== 'object' || Array.isArray(input)) return compactInput(input)
+
+  const record = input as Record<string, unknown>
+  const filePath =
+    typeof record.file_path === 'string'
+      ? record.file_path
+      : typeof record.path === 'string'
+        ? record.path
+        : undefined
+  if (filePath) return name.toLowerCase() === 'read' ? `@${filePath}` : `path=@${filePath}`
+
+  if (typeof record.command === 'string') return `command=${record.command.replace(/\s+/g, ' ').trim()}`
+  if (typeof record.query === 'string') return `query=${record.query.replace(/\s+/g, ' ').trim()}`
+
+  return compactInput(record)
+}
+
+export function formatToolCallLine(
+  entry: Pick<ToolCallEntry, 'name' | 'input' | 'status'>,
+): string {
+  return `${entry.name}: ${formatToolInput(entry.name, entry.input)} (${TOOL_STATUS_LABEL[entry.status]})`
+}
+
+export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
+  // 单行布局:左侧工具名 + 输入摘要(可省略),右侧独立状态文字。
+  // 状态颜色按用户确认: done=绿, running=黄, error/invalid/denied=红。
+  // 左边框(状态指示条)与右侧状态文字共用同一 statusColor,保证语义一致。
+  const statusColor =
+    entry.status === 'done'
+      ? '#52c41a'
+      : entry.status === 'running'
+        ? '#fadb14'
+        : '#f5222d'
+  const inputLine = `${entry.name}: ${formatToolInput(entry.name, entry.input)}`
+  const fullLine = formatToolCallLine(entry)
+
+  return (
+    <div
+      title={fullLine}
+      style={{
+        borderLeft: `3px solid ${statusColor}`,
         background: 'rgba(255,255,255,0.04)',
         padding: '8px 12px',
         borderRadius: 4,
         margin: '6px 0',
         fontSize: 12,
+        fontFamily: 'ui-monospace, monospace',
+        color: '#fff',
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        minWidth: 0,
       }}
     >
-      <div
+      <span
         style={{
-          display: 'flex',
-          justifyContent: 'space-between',
-          alignItems: 'center',
-          marginBottom: 4,
+          minWidth: 0,
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap',
         }}
       >
-        <span style={{ fontFamily: 'ui-monospace, monospace', color: '#fff' }}>
-          🔧 {entry.name}
-        </span>
-        <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11 }}>
-          {entry.status}
-        </span>
-      </div>
-      {entry.input !== undefined && (
-        <details style={{ marginTop: 4 }}>
-          <summary
-            style={{
-              color: 'rgba(255,255,255,0.55)',
-              cursor: 'pointer',
-              fontSize: 11,
-              padding: '2px 0',
-            }}
-          >
-            input
-          </summary>
-          <pre
-            style={{
-              margin: '4px 0 0',
-              padding: 8,
-              background: 'rgba(0,0,0,0.30)',
-              borderRadius: 4,
-              fontSize: 11,
-              maxHeight: 160,
-              overflow: 'auto',
-              color: 'rgba(255,255,255,0.75)',
-              fontFamily: 'ui-monospace, monospace',
-            }}
-          >
-            {formatJson(entry.input)}
-          </pre>
-        </details>
-      )}
-      {entry.output !== undefined && (
-        <details style={{ marginTop: 4 }} open>
-          <summary
-            style={{
-              color: 'rgba(255,255,255,0.55)',
-              cursor: 'pointer',
-              fontSize: 11,
-              padding: '2px 0',
-            }}
-          >
-            output
-          </summary>
-          <pre
-            style={{
-              margin: '4px 0 0',
-              padding: 8,
-              background: 'rgba(0,0,0,0.30)',
-              borderRadius: 4,
-              fontSize: 11,
-              maxHeight: 240,
-              overflow: 'auto',
-              color: 'rgba(255,255,255,0.75)',
-              fontFamily: 'ui-monospace, monospace',
-              whiteSpace: 'pre-wrap',
-            }}
-          >
-            {formatJson(entry.output)}
-          </pre>
-        </details>
-      )}
-      {entry.error !== undefined && (
-        <pre
-          style={{
-            margin: '4px 0 0',
-            padding: 8,
-            background: 'rgba(245,34,45,0.10)',
-            borderRadius: 4,
-            fontSize: 11,
-            color: '#f5222d',
-            fontFamily: 'ui-monospace, monospace',
-            whiteSpace: 'pre-wrap',
-          }}
-        >
-          {formatJson(entry.error)}
-        </pre>
-      )}
+        {inputLine}
+      </span>
+      <span style={{ marginLeft: 'auto', flexShrink: 0, color: statusColor }}>
+        {TOOL_STATUS_LABEL[entry.status]}
+      </span>
     </div>
   )
 }
@@ -175,7 +395,7 @@ function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
  * - 累积文本(text deltas)
  * - 工具调用(tool_use:start / done / error / invalid / denied)
  */
-function buildTimeline(events: StreamedEvent[]): Array<
+export function buildTimeline(events: StreamedEvent[]): Array<
   | { kind: 'text'; key: string; text: string }
   | { kind: 'tool'; key: string; entry: ToolCallEntry }
   | { kind: 'system'; key: string; label: string; tone: 'ok' | 'err' | 'neutral' }
@@ -226,16 +446,12 @@ function buildTimeline(events: StreamedEvent[]): Array<
         } else if (existing) {
           if (ev.type === 'tool_use:done') {
             existing.status = 'done'
-            existing.output = (data as { output?: unknown }).output
           } else if (ev.type === 'tool_use:error') {
             existing.status = 'error'
-            existing.error = (data as { error?: unknown }).error
           } else if (ev.type === 'tool_use:invalid') {
             existing.status = 'invalid'
-            existing.error = data
           } else if (ev.type === 'tool_use:denied') {
             existing.status = 'denied'
-            existing.error = data
           }
           // 更新现有工具条目(通过 key 重渲染)
           const idx = out.findIndex((o) => o.kind === 'tool' && o.entry.toolUseId === toolUseId)
@@ -279,14 +495,19 @@ export function TaskDrawer({
   onClose: () => void
 }) {
   const [detail, setDetail] = useState<BackgroundTask | null>(null)
+  const [bashTask, setBashTask] = useState<BashTaskInfo | null>(null)
   const [events, setEvents] = useState<StreamedEvent[]>([])
   const [loading, setLoading] = useState(false)
   const aborterRef = useRef<AbortController | null>(null)
+
+  // 区分 agent task 与 bash task: taskId 以 "bash-" 开头为 bash.
+  const isBashTask = !!taskId && taskId.startsWith('bash-')
 
   // 打开 task 时拉详情 + 订阅
   useEffect(() => {
     if (!taskId) {
       setDetail(null)
+      setBashTask(null)
       setEvents([])
       return
     }
@@ -294,9 +515,15 @@ export function TaskDrawer({
     let cancelled = false
     void (async () => {
       try {
-        const t = await fetchTask(taskId)
-        if (cancelled) return
-        setDetail(t)
+        if (isBashTask) {
+          const t = await fetchBashTask(taskId)
+          if (cancelled) return
+          setBashTask(t)
+        } else {
+          const t = await fetchTask(taskId)
+          if (cancelled) return
+          setDetail(t)
+        }
       } catch (err) {
         console.warn('[TaskDrawer] fetch task failed:', err)
       } finally {
@@ -304,14 +531,17 @@ export function TaskDrawer({
       }
     })()
 
-    // 订阅事件流(从已读 eventCount 续读)
+    // 订阅事件流。注意:destroyOnClose 让每次打开 drawer 都是全新挂载、
+    // events 数组已 reset 为 [],所以这里**永远从 seq=0 开始**重放,避免
+    // 误把 eventCount 当作 Last-Event-ID 续读——那样会导致已完成任务的
+    // 全部历史事件(seq 1..eventCount)从未到达前端,而后端只发 seq>eventCount
+    // 的尾包,UI 看起来像"事件: 0 / 等待事件..."。服务端在读完历史后
+    // 对运行中任务会自动转 live tail,对已完成任务直接结束 SSE 流。
     const ac = new AbortController()
     aborterRef.current = ac
     void (async () => {
       try {
-        const startSeq = (await fetchTask(taskId))?.eventCount
-        if (cancelled || startSeq === undefined) return
-        for await (const frame of subscribeTaskEvents(taskId, startSeq, ac.signal)) {
+        for await (const frame of subscribeTaskEvents(taskId, 0, ac.signal)) {
           if (cancelled) break
           handleFrame(frame)
         }
@@ -322,28 +552,49 @@ export function TaskDrawer({
     })()
 
     function handleFrame(frame: SseFrame) {
-      const data = frame.data as StreamedEvent['data']
-      // task.ended 哨兵:更新 detail 状态
+      const wireData = frame.data as StreamedEvent['data'] & {
+        seq?: number
+        ts?: number
+        type?: string
+        eventId?: string
+        data?: StreamedEvent['data']
+      }
+      // ★ 关键修复 (HRMSV3-ZN-WEBSITE#668):解开 server 端的 SSE 双层包裹。
+      // routes/tasks.ts 的 evToWire 把 NDJSON 行的整个对象(含 type/data 等
+      // metadata)放进了 JSON payload,导致 wire 是 wrapper {seq,type,eventId,data: <payload>}。
+      // buildTimeline 之前在 wrapper 上找 toolUseId / delta.text 等 → 全部 undefined,
+      // tool_use:start 直接被 `if (!toolUseId) break` 静默跳过,前端就只剩 system 类的
+      // runtime.done 卡片,看起来"事件数有,但工具调用不显示"。
+      //
+      // task.ended 走的是另外的字段(status/resultText 直接在 wrapper 上),
+      // 不需要再下钻到 .data,保留原形态。
       if (frame.event === 'task.ended') {
         setDetail((prev) =>
           prev
             ? {
                 ...prev,
-                status: ((data as { status?: string }).status as BackgroundTask['status']) ?? prev.status,
-                resultText: (data as { resultText?: string }).resultText ?? prev.resultText,
+                status: (wireData as { status?: string }).status as BackgroundTask['status'] ?? prev.status,
+                resultText: (wireData as { resultText?: string }).resultText ?? prev.resultText,
                 finishedAt: Date.now(),
               }
             : prev,
         )
         return
       }
+      const innerPayload =
+        wireData && typeof wireData === 'object' && 'data' in wireData && wireData.data && typeof wireData.data === 'object'
+          ? (wireData.data as StreamedEvent['data'])
+          : wireData
+      const ts = innerPayload && typeof innerPayload === 'object' && 'ts' in innerPayload && typeof (innerPayload as { ts?: number }).ts === 'number'
+        ? (innerPayload as { ts: number }).ts
+        : (wireData as { ts?: number }).ts ?? Date.now()
       setEvents((prev) => [
         ...prev,
         {
           seq: frame.id,
           type: frame.event,
-          ts: (data as { ts?: number }).ts ?? Date.now(),
-          data,
+          ts,
+          data: innerPayload,
         },
       ])
     }
@@ -353,7 +604,7 @@ export function TaskDrawer({
       ac.abort()
       aborterRef.current = null
     }
-  }, [taskId])
+  }, [taskId, isBashTask])
 
   const timeline = useMemo(() => buildTimeline(events), [events])
   const meta = detail ? STATUS_META[detail.status] : null
@@ -366,14 +617,29 @@ export function TaskDrawer({
     <Drawer
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span>后台 Agent</span>
-          {detail && (
+          <span>{isBashTask ? 'Shell' : '后台 Agent'}</span>
+          {detail && !isBashTask && (
             <Tag color={meta?.color} style={{ margin: 0 }}>
               {meta?.icon} {meta?.label}
             </Tag>
           )}
-          {duration && (
+          {detail && !isBashTask && duration && (
             <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12 }}>{duration}</span>
+          )}
+          {bashTask && (
+            <Tag
+              color={
+                bashTask.status === 'completed' ? '#52c41a'
+                  : bashTask.status === 'running' ? '#a78bfa'
+                    : '#f5222d'
+              }
+              style={{ margin: 0 }}
+            >
+              {bashTask.status === 'completed' ? '✅ 完成' : bashTask.status === 'running' ? '⏳ 运行中' : '❌ 失败'}
+            </Tag>
+          )}
+          {bashTask && (
+            <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12 }}>{formatDuration((bashTask.finishedAt ?? Date.now()) - bashTask.startedAt)}</span>
           )}
         </div>
       }
@@ -402,12 +668,15 @@ export function TaskDrawer({
         ) : null
       }
     >
-      {loading && !detail && (
+      {loading && !detail && !bashTask && (
         <div style={{ padding: 24, textAlign: 'center', color: 'rgba(255,255,255,0.45)' }}>
           <LoadingOutlined /> 加载中...
         </div>
       )}
-      {detail && (
+      {bashTask && (
+        <BashTaskView task={bashTask} onTaskChange={setBashTask} />
+      )}
+      {detail && !isBashTask && (
         <>
           {/* 头部信息 */}
           <div
@@ -417,17 +686,7 @@ export function TaskDrawer({
               background: '#1a1a1a',
             }}
           >
-            <div
-              style={{
-                fontSize: 13,
-                color: '#fff',
-                marginBottom: 8,
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {detail.input.prompt}
-            </div>
+            <PromptBlock text={detail.input.prompt} />
             <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
               {detail.input.model && <span>模型: {detail.input.model}</span>}
               {detail.input.cwd && (
@@ -477,14 +736,11 @@ export function TaskDrawer({
                     <div
                       key={item.key}
                       style={{
-                        fontSize: 13,
                         color: '#fff',
                         padding: '6px 0',
-                        whiteSpace: 'pre-wrap',
-                        wordBreak: 'break-word',
                       }}
                     >
-                      {item.text}
+                      <MarkdownText text={item.text} />
                     </div>
                   )
                 }

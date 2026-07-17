@@ -82,6 +82,7 @@ export async function loadAgentDefinitions(
   dataDir: string,
   userAgentsDir?: string,
   homedirOverride?: string,
+  pluginAgents: AgentDefinition[] = [],
 ): Promise<{ agents: AgentDefinition[] }> {
   const projectDir = join(dataDir, 'agents')
   const fromProject = await loadFromDir(projectDir)
@@ -98,6 +99,6 @@ export async function loadAgentDefinitions(
   for (const a of BUILT_IN_AGENTS) byName.set(a.name, a)
   for (const a of fromProject) byName.set(a.name, a)
   for (const a of fromUser) byName.set(a.name, a)
-
+  for (const a of pluginAgents) byName.set(a.name, a)
   return { agents: Array.from(byName.values()) }
 }

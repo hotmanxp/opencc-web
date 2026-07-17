@@ -14,6 +14,7 @@ import agentRouter from './routes/agent.js';
 import agentSettingsRouter from './routes/agentSettings.js';
 import answerRouter from './routes/answer.js';
 import tasksRouter from './routes/tasks.js';
+import { slashRouter } from './routes/slash.js';
 import { ensureManifestDir } from './services/manifest.js';
 import { initAgentRuntime, getAskRegistry } from './services/agentRuntime.js';
 import {
@@ -21,6 +22,7 @@ import {
   initSubagentNotifierLifecycle,
 } from './services/backgroundRuntime.js';
 import { startBranchChecker } from './routes/system.js';
+import { noCacheForApi } from './middleware/noCache.js';
 
 // zai is a local dev tool — the server only listens on localhost and every
 // route is wide-open to anyone who can reach the port. The original
@@ -58,6 +60,11 @@ export function createApp(opts: AppOptions): express.Express {
   // Anthropic / 上游 base64 限额约束, 这里只是放行到 server.
   app.use(express.json({ limit: '20mb' }));
 
+  // /api/* 必须禁浏览器缓存 (304 会让前端拿到启动时的旧响应)。
+  // SSE 路由自带 Cache-Control, 中间件不覆盖。
+  app.set('etag', false);
+  app.use('/api', noCacheForApi);
+
   app.use('/api', eventRouter);
   app.use('/api', healthRouter);
   app.use('/api', systemRouter);
@@ -71,6 +78,10 @@ export function createApp(opts: AppOptions): express.Express {
   app.use('/api', agentRouter);
   app.use('/api', agentSettingsRouter);
   app.use('/api', tasksRouter);
+  // /api/slash 直接挂这里 — 前端 Agent.tsx 用 fetch('/api/slash') 拉命令列表,
+  // 不能再走 agentRouter 的 '/agent' 前缀, 否则实际路径会变成 /api/agent/slash,
+  // 前端拿到 SPA fallback HTML, slashItems 永远是 [], 输入 / 不出菜单.
+  app.use('/api', slashRouter);
   // 注入 AskRegistry 给 answer router, 并挂载.
   // 注意: 这里的 prefix 必须是 '/api' (不是 '/api/agent'); answerRouter 内部
   // 已经用 '/agent/answer' + '/agent/answer/reject' 做 path, 拼起来才是

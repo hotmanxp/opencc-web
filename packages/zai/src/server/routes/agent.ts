@@ -1,6 +1,5 @@
 import { commandRouter } from './command.js'
 import { commandsRouter } from './commands.js'
-import { slashRouter } from './slash.js'
 import { Router, type IRouter, type Request, type Response } from "express";
 import { z } from "zod";
 import path from "node:path";
@@ -28,7 +27,9 @@ type UserMessage = { role: "user"; content: string | UserMessageContent };
 const router: IRouter = Router();
 router.use('/agent', commandRouter)
 router.use('/agent', commandsRouter)
-router.use('/agent', slashRouter)
+// slashRouter 不在这里挂 — 它在 server/index.ts 直接 app.use('/api', slashRouter),
+// 路径就是 /api/slash. 这里再挂一次会被 prefix 到 /api/agent/slash, 前端 Agent.tsx
+// fetch('/api/slash') 拿不到.
 
 const HARD_TIMEOUT_MS = 5 * 60 * 1000;
 
@@ -74,7 +75,11 @@ function newSessionId(): string {
 // knows runtime.{started,delta,tool_call,tool_result,done,aborted,error}, so
 // every other event from the upstream stream would be silently dropped by
 // ServerEvent.parse → frontend never renders anything.
-async function* translateRuntimeEvents(
+//
+// 导出:subagentNotifier.ts 在 <task-notification> 触发的副 run 里也要把
+// runtime 事件翻译后 emit 到 eventBus,否则前端 SSE 渠道拿不到续写事件
+// (只写了 transcript,前端 status 永远卡在 idle)。
+export async function* translateRuntimeEvents(
   events: AsyncIterable<Record<string, unknown>>,
   sessionId: string,
 ): AsyncGenerator<ServerEventInput> {
@@ -403,6 +408,15 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
         // 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
         // (旧 API resumeFromTranscriptId 在文件不存在时会抛 ENOENT, 不适用.)
         transcriptId: sessionId,
+        // ★ 关键修复 (HRMSV3-ZN-WEBSITE#668):把 parentSessionId 显式
+        // 设为 sessionId 本身。当前 session 即它派发出去的 sub-agent 的
+        // 父 session,这是 sub-agent 完成回写 <task-notification> 的必要
+        // 路由前提。缺失此字段会导致 AgentTool 内部兜底成 'sess-unknown'
+        // 字面量,runOne 那条 opts 也没透传 parentSessionId,子代理 task
+        // JSON 的 parentSessionId 永远是占位符,subagentNotifier 的
+        // 'sess-unknown' 兜底再吞掉通知 —— 主 session 永远收不到回流,
+        // 表现为 "派 sub-agent 后主会话不继续"。
+        parentSessionId: sessionId,
         systemPrompt,
         abortSignal: abortController.signal,
         model: resolvedModel,

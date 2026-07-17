@@ -20,6 +20,31 @@ export { AskUserQuestionTool, ASK_USER_QUESTION_TOOL_NAME, DESCRIPTION as ASK_US
 export type { Question, QuestionOption } from '../tools/AskUserQuestionTool/schema.js'
 export { MCPClientPool } from '../mcp/MCPClientPool.js'
 export type { McpServerSpec } from '../mcp/types.js'
+export type {
+  PluginSourceName,
+  PluginComponent,
+  PluginManifest,
+  PluginCandidate,
+  LoadedPlugin,
+  PluginHook,
+  PluginLoadError,
+  PluginCandidateResult,
+  HookExecutor,
+  PluginRuntimeConfig,
+  PluginSnapshot,
+  PluginRuntime,
+} from '../plugins/types.js'
+export { emptyPluginSnapshot } from '../plugins/types.js'
+export {
+  resolveOpenccConfigDir,
+  resolveOpenccPluginsDir,
+  resolveZaiPluginsDir,
+} from '../plugins/paths.js'
+export type { ResolveOpenccConfigDirOptions, ResolveZaiPluginsDirOptions } from '../plugins/paths.js'
+export { HookRunner, DEFAULT_HOOK_TIMEOUT_MS } from '../plugins/HookRunner.js'
+export type { HookRunResult } from '../plugins/HookRunner.js'
+export { createDefaultHookExecutor } from '../plugins/defaultHookExecutor.js'
+export { DefaultPluginRuntime, PluginRegistry } from '../plugins/index.js'
 
 // 后台任务运行时 (Phase 1 + Phase 2)
 export * from './background/index.js'

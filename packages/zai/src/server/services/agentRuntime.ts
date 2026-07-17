@@ -1,7 +1,14 @@
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { join } from 'node:path'
-import { DefaultAgentRuntime, MCPClientPool, resolveDataDir, TranscriptStore } from '@zn-ai/zai-agent-core'
+import {
+  DefaultAgentRuntime,
+  DefaultPluginRuntime,
+  MCPClientPool,
+  resolveDataDir,
+  resolveOpenccConfigDir,
+  TranscriptStore,
+} from '@zn-ai/zai-agent-core'
 import { createAnthropicModelCaller } from './modelCaller.js'
 import { AskRegistry } from './askRegistry.js'
 import { loadMcpServers } from './mcpConfig.js'
@@ -64,6 +71,14 @@ export function initAgentRuntime(cwd: string): void {
       ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
     askRegistry,
     skillsDirs: resolveSkillsDirs(),
+    // 启用 OpenCC plugin loader (superpowers 等) —
+    // 不传这个字段则 plugin 永远不会被实例化,见
+    // zai-agent-core/src/runtime/contract.ts:23-25 + queryEngine.ts:54-70
+    plugins: {
+      opencc: {
+        configDir: resolveOpenccConfigDir() ?? join(homedir(), '.claude'),
+      },
+    },
     ...(mcpClientPool && mcpServers.length > 0 ? { mcpClientPool, mcpServers } : {}),
     ...(resolveSandbox(cwd) ? { sandbox: resolveSandbox(cwd) } : {}),
   })
@@ -113,20 +128,48 @@ export async function abortAgentSession(reason?: string): Promise<void> {
 }
 
 /**
- * Load skills from configured skills dirs and return a lightweight list
- * suitable for the frontend autocomplete UI.
+ * Module-level plugin-runtime singleton shared between the runtime's
+ * queryEngine path and the `listSkills()` UI path. Loading is cached
+ * inside `DefaultPluginRuntime` (`plugins/index.ts:14`), so repeated
+ * callers within a session only pay the disk-read cost once.
+ */
+let pluginRuntime: DefaultPluginRuntime | null = null
+function getPluginRuntime(): DefaultPluginRuntime {
+  if (!pluginRuntime) {
+    pluginRuntime = new DefaultPluginRuntime({
+      opencc: {
+        configDir: resolveOpenccConfigDir() ?? join(homedir(), '.claude'),
+      },
+    })
+  }
+  return pluginRuntime
+}
+
+/**
+ * Load skills from configured skills dirs AND from OpenCC plugins
+ * (superpowers 等), return a lightweight list suitable for the frontend
+ * autocomplete UI.
  */
 export async function listSkills(): Promise<Array<{ name: string; description: string }>> {
+  const cwd = process.cwd()
   const dirs = resolveSkillsDirs()
-  if (dirs.length === 0) return []
 
   // Dynamic import to avoid top-level dependency on the loader module
   // when the runtime hasn't been initialized yet.
   const { loadSkillsFromDirs } = await import('@zn-ai/zai-agent-core')
   type LoadedSkill = { name: string; description?: string; frontmatter?: { description?: string } }
-  const skills = await loadSkillsFromDirs(dirs, { cwd: process.cwd() })
-  return (skills as LoadedSkill[]).map((s) => ({
+
+  const diskSkills: LoadedSkill[] = dirs.length > 0
+    ? ((await loadSkillsFromDirs(dirs, { cwd })) as LoadedSkill[])
+    : []
+
+  const snapshot = await getPluginRuntime().load({ cwd })
+  const pluginSkills = snapshot.skills as LoadedSkill[]
+
+  const toEntry = (s: LoadedSkill) => ({
     name: s.name,
     description: s.frontmatter?.description || s.description || '',
-  }))
+  })
+
+  return [...diskSkills.map(toEntry), ...pluginSkills.map(toEntry)]
 }

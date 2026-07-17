@@ -17,6 +17,10 @@ import { getMcpInstructionsSection } from '../mcp/mcpInstructions.js'
 import { wrapAsOpenccTool } from '../tools/legacyAdapter.js'
 import { loadAgentDefinitions } from '../tools/AgentTool/loadAgentsDir.js'
 import { renderAvailableAgentsSection } from '../tools/AgentTool/prompt.js'
+import { DefaultPluginRuntime } from '../plugins/index.js'
+import { emptyPluginSnapshot } from '../plugins/types.js'
+import { HookRunner } from '../plugins/HookRunner.js'
+import { createDefaultHookExecutor } from '../plugins/defaultHookExecutor.js'
 import {
   appendAssistantMessageV2,
   appendUserMessageV2,
@@ -47,19 +51,31 @@ export async function* queryEngine(
     ? buildSubagentContext(options, config, sessionId)
     : null
 
+  const pluginRuntime = config.pluginRuntime ?? (config.plugins ? new DefaultPluginRuntime(config.plugins) : undefined)
+  const pluginSnapshot = config.plugins?.enabled === false || !pluginRuntime
+    ? emptyPluginSnapshot()
+    : await pluginRuntime.load({ cwd: options.cwd, signal: abortController.signal })
+  const hookRunner = new HookRunner(
+    pluginSnapshot.hooks,
+    config.plugins?.hookExecutor ?? createDefaultHookExecutor(),
+  )
+  const mcpServers = [...(config.mcpServers ?? []), ...pluginSnapshot.mcpServers]
+
+  try {
   // 0.1. Load skills (skillsDirs 缺失 → 空)
   const skillsDirs = options.skillsDirs ?? config.skillsDirs ?? []
   const skills: LoadedSkill[] = skillsDirs.length > 0
     ? await loadSkillsFromDirs(skillsDirs, { cwd: options.cwd })
     : []
+  skills.push(...pluginSnapshot.skills)
 
   // 0.2. MCP boot: connect servers + collect skill:// resources
   //   connectAll swallows per-server errors via health(); servers that fail
   //   are skipped in adaptMcpTools / loadMcpSkills below.
-  if (config.mcpClientPool && config.mcpServers && config.mcpServers.length > 0) {
-    await config.mcpClientPool.connectAll(config.mcpServers)
+  if (config.mcpClientPool && mcpServers.length > 0) {
+    await config.mcpClientPool.connectAll(mcpServers)
     if (config.mcpSkillLoading !== 'off') {
-      for (const spec of config.mcpServers) {
+      for (const spec of mcpServers) {
         if (!config.mcpClientPool.hasClient(spec.name)) continue
         skills.push(...(await loadMcpSkills(config.mcpClientPool, spec.name)))
       }
@@ -76,9 +92,9 @@ export async function* queryEngine(
   let tools: Tool[] = resolveToolPool(options, config, getZaiRuntimeTools(), skills)
 
   // 0.3. Append MCP tools after resolveToolPool (they are not part of skill mechanism)
-  if (config.mcpClientPool && config.mcpServers && config.mcpServers.length > 0) {
+  if (config.mcpClientPool && mcpServers.length > 0) {
     const mcpTools: Tool[] = []
-    for (const spec of config.mcpServers) {
+    for (const spec of mcpServers) {
       if (!config.mcpClientPool.hasClient(spec.name)) continue
       mcpTools.push(...(await adaptMcpTools(config.mcpClientPool, spec.name)))
     }
@@ -98,7 +114,10 @@ export async function* queryEngine(
     }, sessionId)
   }
 
-  const systemPrompt = await buildSystemPrompt(options, skills, config)
+  const systemPrompt = await buildSystemPrompt(options, skills, config, pluginSnapshot.agents)
+
+  await hookRunner.run('SessionStart', {}, abortController.signal)
+  await hookRunner.run('UserPromptSubmit', { prompt: options.prompt, cwd: options.cwd, sessionId }, abortController.signal)
 
   const messages: Array<{ role: 'user' | 'assistant'; content: unknown }> = []
   // parentUuid 链: 每次 append 后, 用返回值更新 lastUuid 作为下一条的父.
@@ -280,11 +299,16 @@ export async function* queryEngine(
         store, sessionId, assistantBlocks, turn, lastUuid, ctx,
       )
       if (assistantUuid) lastUuid = assistantUuid
+      const stop = await hookRunner.run('Stop', { text: assistantText, sessionId }, abortController.signal)
+      if (stop.blocked && stop.outputs.some(output => String(output ?? '').length > 0) && turn < maxTurns) {
+        messages.push({ role: 'user', content: stop.outputs.map(output => String(output ?? '')).filter(Boolean).join('\n') })
+        continue
+      }
       yield { type: 'runtime.done', eventId: '', sessionId, ts: Date.now(), turnIndex: turn, text: assistantText } as any
       return
     }
 
-    const toolCtx = makeToolContext(options, config, sessionId, abortController, skills)
+    const toolCtx = makeToolContext(options, config, sessionId, abortController, skills, pluginSnapshot.agents, hookRunner)
     // toolExecution 自己 yield 完整 RuntimeEvent (带 sessionId/ts/eventId/turnIndex).
     // 这里仅需要提供一个生成 eventId 的闭包 + 当前 turnIndex.
     // 透传 parentUuid (=assistant uuid) 给 toolExecution, 写 v2 tool_use / tool_result
@@ -332,10 +356,19 @@ export async function* queryEngine(
     }
 
     if (turn >= maxTurns) {
+      await hookRunner.run('StopFailure', { reason: 'maxTurns', sessionId }, abortController.signal)
       const err = new Error(`maxTurns=${maxTurns} reached`)
       ;(err as any).code = 'max_turns_reached'
       yield toRuntimeErrorEvent(err, { sessionId, turnIndex: turn })
       return
+    }
+  }
+  } finally {
+    await hookRunner.run('SessionEnd', { cwd: options.cwd, sessionId }, abortController.signal)
+    if (config.mcpClientPool) {
+      for (const name of pluginSnapshot.pluginMcpServerNames) {
+        await config.mcpClientPool.disconnect(name)
+      }
     }
   }
 }
@@ -363,6 +396,8 @@ function makeToolContext(
   _sessionId: string,
   abortController: AbortController,
   skills: LoadedSkill[] = [],
+  pluginAgents: import('../tools/AgentTool/loadAgentsDir.js').AgentDefinition[] = [],
+  hookRunner?: HookRunner,
 ): ToolContext {
   // 让 sandbox workdir 跟随请求 cwd, 而不是固定 runtime config 启动时的目录.
   const baseSandbox = config.sandbox ?? {
@@ -377,13 +412,13 @@ function makeToolContext(
     dataDir: config.dataDir,
     canUseTool: defaultCanUseToolFactory(sandbox),
     emitEvent: () => { /* 事件已通过 yield 出去 */ },
-    state: { __zaiSkills: skills },
+    state: { __zaiSkills: skills, __pluginAgents: pluginAgents, __pluginHookRunner: hookRunner },
     // awaitAskUserQuestion 在 executeToolsStreaming 内部 per-block 重写;
     // 此处给一个 throw 占位, 防止 类型 缺失. 真实调用会被 toolExecution 覆盖.
     awaitAskUserQuestion: async () => {
       throw new Error('awaitAskUserQuestion called outside tool execution context')
     },
-    __runtimeConfig: { ...config, sandbox },
+    __runtimeConfig: { ...config, sandbox, sessionId: options.transcriptId ?? '' },
     __defaultModel: options.model ?? config.defaultModel ?? 'default',
     __maxTurns: options.maxTurns ?? config.defaultMaxTurns ?? DEFAULT_MAX_TURNS,
     parentSessionId: options.parentSessionId,
@@ -394,6 +429,7 @@ async function buildSystemPrompt(
   options: QueryOptions,
   skills: LoadedSkill[],
   config?: RuntimeConfig,
+  pluginAgents: import('../tools/AgentTool/loadAgentsDir.js').AgentDefinition[] = [],
 ): Promise<string> {
   const parts: string[] = []
   if (options.systemPrompt) {
@@ -425,6 +461,8 @@ async function buildSystemPrompt(
       const { agents } = await loadAgentDefinitions(
         config.dataDir,
         config.userAgentsDir,
+        undefined,
+        pluginAgents,
       )
       const agentsSection = renderAvailableAgentsSection(agents)
       if (agentsSection) parts.push(agentsSection)

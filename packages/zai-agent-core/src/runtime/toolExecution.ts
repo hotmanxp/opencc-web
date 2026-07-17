@@ -147,6 +147,21 @@ export async function* executeToolsStreaming(
       continue
     }
 
+    const hookRunner = (ctx.state as any).__pluginHookRunner as import('../plugins/HookRunner.js').HookRunner | undefined
+    if (hookRunner) {
+      const pre = await hookRunner.run('PreToolUse', {
+        toolName: block.name,
+        input: parsed.data,
+        sessionId: meta.sessionId,
+      }, ctx.abortSignal)
+      if (pre.blocked) {
+        const reason = pre.outputs.map(output => String(output ?? '')).filter(Boolean).join('\n') || 'blocked by plugin hook'
+        results[index] = { toolUseId: block.id, content: reason, isError: true }
+        yield buildEvent('tool_use:denied', { toolUseId: block.id, reason })
+        continue
+      }
+    }
+
     yield buildEvent('tool_use:start', {
       toolUseId: block.id,
       name: block.name,
@@ -227,6 +242,14 @@ export async function* executeToolsStreaming(
         content,
         isError: outIsError,
       }
+      if (hookRunner) {
+        await hookRunner.run(outIsError ? 'PostToolUseFailure' : 'PostToolUse', {
+          toolName: block.name,
+          input: parsed.data,
+          output: outData,
+          sessionId: meta.sessionId,
+        }, ctx.abortSignal)
+      }
       // Task 6: persist tool_result with the matching tool_use uuid as parent.
       // Same swallow-IO-error semantics as appendToolUse.
       if (meta.store) {
@@ -249,6 +272,14 @@ export async function* executeToolsStreaming(
         toolUseId: block.id,
         content: errorContent,
         isError: true,
+      }
+      if (hookRunner) {
+        await hookRunner.run('PostToolUseFailure', {
+          toolName: block.name,
+          input: parsed.data,
+          error: msg,
+          sessionId: meta.sessionId,
+        }, ctx.abortSignal)
       }
       // Task 6: persist error tool_result so the transcript matches what the
       // model would see on resume (is_error=true + error message).

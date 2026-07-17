@@ -71,4 +71,38 @@ describe('useAppStore', () => {
     })
     expect(useAppStore.getState().toasts[0].level).toBe('error')
   })
+
+  test('applyJobEvent 把 sessionId 从 job.started 透传到 JobInfo', () => {
+    useAppStore.getState().applyJobEvent({
+      type: 'job.started',
+      eventId: 'e1', ts: 1,
+      jobId: 'j-agent-1', kind: 'agent_task',
+      sessionId: 'sess-A',
+    })
+    expect(useAppStore.getState().jobs['j-agent-1'].sessionId).toBe('sess-A')
+  })
+
+  test('applyJobEvent 不带 sessionId 时透传 undefined (全局任务)', () => {
+    useAppStore.getState().applyJobEvent({
+      type: 'job.started',
+      eventId: 'e1', ts: 1,
+      jobId: 'j-global', kind: 'resource_refresh',
+    })
+    expect(useAppStore.getState().jobs['j-global'].sessionId).toBeUndefined()
+  })
+
+  test('applyJobEvent job.done 保留原 sessionId (done 的事件不一定带 sessionId)', () => {
+    useAppStore.getState().applyJobEvent({
+      type: 'job.started',
+      eventId: 'e1', ts: 1,
+      jobId: 'j2', kind: 'agent_task',
+      sessionId: 'sess-A',
+    })
+    useAppStore.getState().applyJobEvent({
+      type: 'job.done',
+      eventId: 'e2', ts: 2, jobId: 'j2',
+    })
+    expect(useAppStore.getState().jobs.j2.sessionId).toBe('sess-A')
+    expect(useAppStore.getState().jobs.j2.done).toBe(true)
+  })
 })

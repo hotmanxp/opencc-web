@@ -17,6 +17,13 @@ export interface BackgroundTask {
   error?: { message: string; category: string }
   resultText?: string
   eventCount: number
+  /**
+   * 父 sessionId。仅 agent_task 派发时由 AgentTool.metadata.parentSessionId
+   * 写入 (见 zai-agent-core BackgroundRuntime.types)。客户端 useBackgroundTasks
+   * 据此把 dock 任务按 useAgentStore.sessionId 切分。undefined 表示非
+   * agent_task 派发 (例如 cli 任务) 或老数据,与 session 无关。
+   */
+  parentSessionId?: string
 }
 
 export interface TaskEvent {
@@ -77,7 +84,7 @@ export async function dispatchTask(input: {
 
 /** 解析后的单帧 SSE 消息。 */
 export interface SseFrame {
-  id: number
+  id: string | number
   event: string
   data: unknown
 }
@@ -129,7 +136,12 @@ export async function* subscribeTaskEvents(
 }
 
 function parseFrame(raw: string): SseFrame | null {
-  let id: number | null = null
+  // SSE `id:` line 在浏览器端用于 Last-Event-ID 续读,后端 /api/tasks/:id/events
+  // 把数值 seq 写在这里(见 packages/zai/src/server/routes/tasks.ts)。但更一般
+  // 情况下后端的 eventId 可能是字符串(SDK correlation id),这里不强转 Number,
+  // 把字符串也接受进来。原实现 Number() 后 NaN 拒收,导致 TaskDrawer 永远
+  // events.length === 0。
+  let id: string | number | null = null
   let event: string | null = null
   const dataLines: string[] = []
   for (const line of raw.split('\n')) {
@@ -138,11 +150,17 @@ function parseFrame(raw: string): SseFrame | null {
     const colon = line.indexOf(':')
     const field = colon === -1 ? line : line.slice(0, colon)
     const value = colon === -1 ? '' : line.slice(colon + 1).replace(/^ /, '')
-    if (field === 'id') id = Number(value)
-    else if (field === 'event') event = value
-    else if (field === 'data') dataLines.push(value)
+    if (field === 'id') {
+      // 优先数值(seq),后端如果漏发数字则保留字符串原值用于日志
+      const n = Number(value)
+      id = Number.isNaN(n) || value === '' ? value : n
+    } else if (field === 'event') {
+      event = value
+    } else if (field === 'data') {
+      dataLines.push(value)
+    }
   }
-  if (event === null || id === null || Number.isNaN(id)) return null
+  if (event === null || id === null) return null
   if (dataLines.length === 0) return null
   let data: unknown
   try {
@@ -151,4 +169,46 @@ function parseFrame(raw: string): SseFrame | null {
     return null
   }
   return { id, event, data }
+}
+
+// ── Bash 后台任务 ────────────────────────────────────────────────────
+
+export type BashTaskStatus = 'running' | 'completed' | 'failed' | 'killed'
+
+export interface BashTaskInfo {
+  taskId: string
+  sessionId: string
+  command: string
+  description: string
+  startedAt: number
+  finishedAt?: number
+  status: BashTaskStatus
+  stdout: string
+  stderr: string
+  exitCode?: number
+  signal?: string
+}
+
+/** 列出所有后台 Bash 任务. 可选按 sessionId 过滤. */
+export async function listBashTasks(sessionId?: string): Promise<BashTaskInfo[]> {
+  const qs = sessionId ? `?sessionId=${encodeURIComponent(sessionId)}` : ''
+  const res = await fetch(`${API_BASE}/bash-tasks${qs}`)
+  if (!res.ok) throw new Error(`listBashTasks failed: ${res.status}`)
+  const body = await res.json() as { tasks: BashTaskInfo[] }
+  return body.tasks ?? []
+}
+
+/** 获取单个 Bash 任务详情. */
+export async function fetchBashTask(taskId: string): Promise<BashTaskInfo | null> {
+  const res = await fetch(`${API_BASE}/bash-tasks/${encodeURIComponent(taskId)}`)
+  if (res.status === 404) return null
+  if (!res.ok) throw new Error(`fetchBashTask failed: ${res.status}`)
+  return res.json() as Promise<BashTaskInfo>
+}
+
+/** 结束一个运行中的 Bash 任务. */
+export async function killBashTask(taskId: string): Promise<{ ok: boolean; signal?: string }> {
+  const res = await fetch(`${API_BASE}/bash-tasks/${encodeURIComponent(taskId)}/kill`, { method: 'POST' })
+  if (!res.ok) throw new Error(`killBashTask failed: ${res.status}`)
+  return res.json() as Promise<{ ok: boolean; signal?: string }>
 }

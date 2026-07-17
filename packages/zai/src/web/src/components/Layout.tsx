@@ -42,11 +42,11 @@ export default function Layout() {
       .then((data) => {
         setVersion(data.version);
         setInstanceContext({ cwd: data.cwd, cwdName: data.cwdName, branch: data.branch ?? null });
-        document.title = `知鸟AI - ${data.cwdName}`;
+        document.title = `${data.cwdName}-Z.ai`;
       })
       .catch(() => {
         setVersion('unknown');
-        document.title = '知鸟AI';
+        document.title = 'opencc-web-Z.ai';
       });
   }, [setInstanceContext]);
 

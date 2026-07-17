@@ -1,8 +1,10 @@
 import { useMemo, useState } from 'react'
 import { Badge, Popover, Tooltip } from 'antd'
-import { CaretRightOutlined, CheckCircleFilled, CloseCircleFilled, LoadingOutlined } from '@ant-design/icons'
+import { CaretRightOutlined, CheckCircleFilled, CloseCircleFilled, CodeOutlined, LoadingOutlined } from '@ant-design/icons'
 import { useBackgroundTasks } from '../hooks/useBackgroundTasks.js'
 import type { BackgroundTaskSummary } from '../hooks/useBackgroundTasks.js'
+import { useBashBackgroundTasks } from '../hooks/useBashBackgroundTasks.js'
+import type { BashTaskInfo } from '../lib/taskApi.js'
 
 const STATUS_ICON: Record<string, JSX.Element> = {
   running: <LoadingOutlined style={{ color: '#a78bfa' }} spin />,
@@ -76,6 +78,47 @@ function Row({
   )
 }
 
+const BASH_STATUS_ICON: Record<string, JSX.Element> = {
+  running: <CodeOutlined style={{ color: '#a78bfa' }} spin />,
+  completed: <CheckCircleFilled style={{ color: '#52c41a' }} />,
+  failed: <CloseCircleFilled style={{ color: '#f5222d' }} />,
+  killed: <CloseCircleFilled style={{ color: 'rgba(255,255,255,0.40)' }} />,
+}
+
+function BashRow({
+  task,
+  onSelect,
+}: {
+  task: BashTaskInfo
+  onSelect: (id: string) => void
+}) {
+  return (
+    <div
+      onClick={() => onSelect(task.taskId)}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 8,
+        padding: '6px 10px',
+        cursor: 'pointer',
+        borderRadius: 4,
+        color: '#fff',
+        fontSize: 12,
+      }}
+      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(168, 139, 250, 0.12)')}
+      onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
+    >
+      <span style={{ fontSize: 11 }}>{BASH_STATUS_ICON[task.status]}</span>
+      <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+        {truncatePrompt(task.description || task.command)}
+      </span>
+      <span style={{ color: 'rgba(255,255,255,0.40)', fontSize: 11 }}>
+        {STATUS_LABEL[task.status] ?? task.status}
+      </span>
+    </div>
+  )
+}
+
 /**
  * 底部状态栏上的后台任务 dock。
  * - 当 running > 0 时显示徽章数字
@@ -84,9 +127,11 @@ function Row({
  */
 export function TaskDock({ onSelect }: { onSelect: (id: string) => void }) {
   const { runningTasks, recentTasks } = useBackgroundTasks()
+  const { tasks: bashTasks } = useBashBackgroundTasks()
   const [open, setOpen] = useState(false)
 
-  const total = runningTasks.length
+  const bashRunning = bashTasks.filter((t) => t.status === 'running').length
+  const total = runningTasks.length + bashRunning
   const content = useMemo(
     () => (
       <div
@@ -110,13 +155,13 @@ export function TaskDock({ onSelect }: { onSelect: (id: string) => void }) {
             justifyContent: 'space-between',
           }}
         >
-          <span>后台 Agent</span>
+          <span>后台任务</span>
           <span>
-            {total} 运行中 / {recentTasks.length} 最近
+            {runningTasks.length} Agent / {bashRunning} Bash 运行中 · {recentTasks.length} 最近
           </span>
         </div>
 
-        {runningTasks.length === 0 && recentTasks.length === 0 && (
+        {runningTasks.length === 0 && recentTasks.length === 0 && bashTasks.length === 0 && (
           <div
             style={{
               fontSize: 12,
@@ -180,9 +225,35 @@ export function TaskDock({ onSelect }: { onSelect: (id: string) => void }) {
             ))}
           </>
         )}
+
+        {bashTasks.length > 0 && (
+          <>
+            <div
+              style={{
+                fontSize: 10,
+                fontWeight: 600,
+                color: '#a78bfa',
+                textTransform: 'uppercase',
+                padding: '8px 4px 4px',
+              }}
+            >
+              Bash {bashRunning} 运行中 / {bashTasks.length - bashRunning} 结束
+            </div>
+            {bashTasks.slice(0, 8).map((t) => (
+              <BashRow
+                key={t.taskId}
+                task={t}
+                onSelect={(id) => {
+                  onSelect(id)
+                  setOpen(false)
+                }}
+              />
+            ))}
+          </>
+        )}
       </div>
     ),
-    [runningTasks, recentTasks, total, onSelect],
+    [runningTasks, recentTasks, bashTasks, bashRunning, total, onSelect],
   )
 
   return (
@@ -214,11 +285,11 @@ export function TaskDock({ onSelect }: { onSelect: (id: string) => void }) {
             gap: 4,
             cursor: 'pointer',
             fontSize: 12,
-            color: total > 0 ? '#a78bfa' : 'rgba(255,255,255,0.55)',
+            color: total > 0 ? '#a78bfa' : 'rgba(255,255,255,0.40)',
           }}
         >
           <Badge count={total} size="small" offset={[4, -2]} color="#a78bfa">
-            <span style={{ padding: '0 4px' }}>后台</span>
+            <span style={{ padding: '0 4px', fontSize: 12, lineHeight: 1 }}>后台任务</span>
           </Badge>
         </span>
       </Tooltip>

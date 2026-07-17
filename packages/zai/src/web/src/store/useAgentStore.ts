@@ -699,12 +699,32 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // runtime.* 事件全部带 sessionId, 上面的 narrow 已保证它存在.
     // runtime.* 不在 ServerEvent union 之外的 type 才会进入这里.
     switch (event.type) {
-      case 'runtime.started':
+      case 'runtime.started': {
         // 标记当前活跃 session + 进入 streaming 态. status 已经是
         // 'idle' 时也会被覆盖成 'streaming'; UI 看到 streaming 后立即
         // 显示流式动画与 elapsed 计时.
-        useAgentStore.setState({ activeSessionId: sid, status: 'streaming' })
+        const prevStatus = useAgentStore.getState().status
+        if (prevStatus === 'streaming') {
+          // SSE 重连: server 重新发 runtime.started, status 仍是 streaming,
+          // 属于同一 turn 的延续. 不能 bump textSegmentRev, 否则同一个
+          // turn 的 text 会被切到不同 bubble, 用户看到流式回答中段莫名
+          // 换气泡 / 重置 markdown.
+          useAgentStore.setState({ activeSessionId: sid, status: 'streaming' })
+        } else {
+          // 新 turn 起点. SubagentNotifier 触发的 sub-agent 续写也走这条:
+          // 上一轮已 runtime.done / aborted / error, status 不再 streaming,
+          // 续写 turn 的 text_delta 必须落到新 bubble, 不能 append 到上一轮
+          // 末尾的 text (否则"等待结果..."和"结果已收到"被拼成一段).
+          // 修法: 把 textSegmentRev +1, 让新一轮首个 stream block key 改变,
+          // upsertStreamBlock 自然开新 bubble.
+          useAgentStore.setState((s) => ({
+            activeSessionId: sid,
+            status: 'streaming',
+            textSegmentRev: s.textSegmentRev + 1,
+          }))
+        }
         return
+      }
       case 'runtime.delta': {
         // 沿用 store 内已有的 upsertStreamBlock. blockIndex 即 sendSeq:
         // 每次 sendMessage 都会递增 sendSeq, 跨轮次文本块 key 永不碰撞;

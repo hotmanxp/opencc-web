@@ -53,18 +53,28 @@ const SessionEvent = z.discriminatedUnion('type', [
              sessionId: z.string(), title: z.string() }),
 ])
 
+// job.* 事件携带 sessionId (派发该 job 的父 session, 在 agent_task 时等于
+// BackgroundTask.parentSessionId)。客户端 useBackgroundTasks 据此把 dock
+// 任务按当前 useAgentStore.sessionId 切分 — 切到其它 session 后,该 session
+// 派发的 job 不再显示,避免多个 session 的任务堆积在同一个状态栏里。
+// sessionId 缺失视为"全局 job" (resource_refresh / login / install),仍然
+// 显示,与 session 无关。
 const JobEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('job.started'),
              jobId: z.string(),
              kind: z.enum(['resource_refresh','login','install','agent_task']),
              // agent_task 时携带后端 BackgroundTask.id,前端可直接 fetch /api/tasks/:taskId
-             taskId: z.string().optional() }),
+             taskId: z.string().optional(),
+             sessionId: z.string().nullable().optional() }),
   z.object({ ...Base.shape, type: z.literal('job.progress'),
-             jobId: z.string(), message: z.string(), percent: z.number().optional() }),
+             jobId: z.string(), message: z.string(), percent: z.number().optional(),
+             sessionId: z.string().nullable().optional() }),
   z.object({ ...Base.shape, type: z.literal('job.done'),
-             jobId: z.string(), result: z.unknown().optional() }),
+             jobId: z.string(), result: z.unknown().optional(),
+             sessionId: z.string().nullable().optional() }),
   z.object({ ...Base.shape, type: z.literal('job.failed'),
-             jobId: z.string(), error: z.string() }),
+             jobId: z.string(), error: z.string(),
+             sessionId: z.string().nullable().optional() }),
 ])
 
 const PromptEvent = z.discriminatedUnion('type', [

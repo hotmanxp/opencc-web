@@ -258,6 +258,17 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
       cwd: rec.task.input.cwd ?? process.cwd(),
       model: rec.task.input.model,
       abortSignal: rec.controller.signal,
+      // ★ 关键修复 (HRMSV3-ZN-WEBSITE#668):把当前 task 的 parentSessionId
+      // (由 dispatch metadata 写入,即上层 session 的 transcriptId) 透传给
+      // 子 agent 的 queryEngine.run。缺这一步时,子 agent 自己的
+      // LegacyToolContext.parentSessionId 是 undefined,AgentTool 内部
+      // 会兜底成 'sess-unknown' 字面量 → 子 agent 派发的孙子 task 也继承
+      // 占位符 → subagentNotifier 静默丢通知 (主会话收不到
+      // <task-notification> 续传)。而 task.parentSessionId 在 dispatch
+      // 时由 metadata.parentSessionId 写入,所以这里直接读 rec.task 即可。
+      // 注意:不要用 ctx.sessionId 之外的字符串拼装,要保持与 routes/agent.ts
+      // POST /agent/prompt handler 给出的 parentSessionId 一致。
+      parentSessionId: rec.task.parentSessionId,
     }
 
     // 重试循环: 每次失败后, classifyRetryableError 决定 retry / failed.
