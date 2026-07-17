@@ -166,6 +166,7 @@ import {
 } from './planModeV2.js'
 import { escapeRegExp } from './stringUtils.js'
 import { isTodoV2Enabled } from './tasks.js'
+import { foldTopLevelToolUses } from './foldTopLevelToolUses.js'
 
 // Lazy import to avoid circular dependency (teammateMailbox -> teammate -> ... -> messages)
 function getTeammateMailbox(): typeof import('./teammateMailbox.js') {
@@ -2131,9 +2132,12 @@ export function normalizeMessagesForAPI(
     }
   }
 
-  const result: (UserMessage | AssistantMessage)[] = []
-  reorderedMessages
-    .filter(
+  // Fold top-level `type=tool_use` records back into their parent
+  // assistant message. See `foldTopLevelToolUses.ts` for the regression
+  // history (sess-013f9f87 returned 2013 because these were silently
+  // dropped by the switch dispatch below, leaving tool_result orphans).
+  const foldedMessages = foldTopLevelToolUses(
+    reorderedMessages.filter(
       (
         _,
       ): _ is
@@ -2150,8 +2154,11 @@ export function normalizeMessagesForAPI(
         }
         return true
       },
-    )
-    .forEach(message => {
+    ),
+  )
+
+  const result: (UserMessage | AssistantMessage)[] = []
+  foldedMessages.forEach(message => {
       switch (message.type) {
         case 'system': {
           // local_command system messages need to be included as user messages
