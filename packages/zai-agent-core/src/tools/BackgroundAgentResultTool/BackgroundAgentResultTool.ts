@@ -3,6 +3,7 @@ import type { TaskEvent } from '../../runtime/background/types.js'
 import {
   getBackgroundRuntime,
   hasBackgroundRuntime,
+  type BackgroundTask,
 } from '../../runtime/background/index.js'
 import {
   BackgroundAgentResultInputSchema,
@@ -70,6 +71,43 @@ function tailLines(text: string, n: number): string {
 }
 
 /**
+ * Status-only output for the waitMs=0 path. Omits the `--- output (tail) ---`
+ * block because the caller did not ask for events.
+ */
+function buildStatusOnlyHeader(task: BackgroundTask): string {
+  const lines: string[] = [
+    `id: ${task.id}`,
+    `status: ${task.status}`,
+    `prompt: ${task.input.prompt.slice(0, 100)}`,
+    `createdAt: ${new Date(task.createdAt).toISOString()}`,
+    task.startedAt ? `startedAt: ${new Date(task.startedAt).toISOString()}` : '',
+    task.finishedAt ? `finishedAt: ${new Date(task.finishedAt).toISOString()}` : '',
+    task.error ? `error: ${task.error.message} (${task.error.category})` : '',
+    task.resultText ? `resultText: ${task.resultText}` : '',
+  ]
+  return lines.filter(Boolean).join('\n')
+}
+
+/**
+ * Wait up to `ms` milliseconds. Resolves early on `signal.abort`.
+ * Never rejects — abort is a normal exit path.
+ */
+function waitOrAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve()
+  return new Promise<void>((resolve) => {
+    const t = setTimeout(resolve, ms)
+    signal?.addEventListener(
+      'abort',
+      () => {
+        clearTimeout(t)
+        resolve()
+      },
+      { once: true },
+    )
+  })
+}
+
+/**
  * 暴露给 LLM 的「后台任务查询」工具。
  * 读取 events/<id>.log 最近 N 行 + 当前 status。
  */
@@ -100,20 +138,21 @@ export const BackgroundAgentResultTool: LegacyTool<typeof BackgroundAgentResultI
         }
       }
 
-      // 可选等待(用于 polling 还在跑的任务)
-      if (input.waitMs > 0 && (task.status === 'running' || task.status === 'queued')) {
-        await new Promise<void>((resolve, reject) => {
-          const t = setTimeout(resolve, input.waitMs)
-          ctx.abortSignal?.addEventListener('abort', () => {
-            clearTimeout(t)
-            reject(new Error('aborted while waiting'))
-          }, { once: true })
-        })
+      // waitMs=0: 立即返回 status, 不进入 runtime.events()(其 live tail 会阻塞到任务结束)
+      if (input.waitMs === 0) {
+        return {
+          output: buildStatusOnlyHeader(task),
+          isError: task.status === 'failed',
+        }
       }
 
-      // 读所有事件(已完成任务),或读到当前 eventCount(运行中任务)
+      // waitMs>0: 等待指定时长(或 abort), 再读 events
+      if (task.status === 'running' || task.status === 'queued') {
+        await waitOrAbort(input.waitMs, ctx.abortSignal)
+      }
+
       const events: TaskEvent[] = []
-      for await (const ev of runtime.events(input.shortId)) {
+      for await (const ev of runtime.events(input.shortId, 0, ctx.abortSignal)) {
         events.push(ev)
       }
 
