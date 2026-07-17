@@ -174,9 +174,13 @@ export async function* queryEngine(
         // 串 parentUuid 链: 任何 type 都算 (tool_use/tool_result 也要衔接, 否则新建消息
         // 会以 null 起步, 链断)
         if (tm.uuid) lastUuid = tm.uuid
-        // 记录最后一条 assistant 消息的 content 数组, 给下一条 type='tool_use'
-        // 消息合并用. 非 assistant 立即清空 (e.g. user 出现后, 不能再合并 tool_use).
-        pendingAssistantContent = (role === 'assistant' && Array.isArray(content)) ? (content as unknown[]) : null
+        // 记录最后一条 assistant 消息的 content 数组, 给后续 top-level tool_use
+        // 合并用. 仅在遇到新的 assistant 消息时替换 — user/tool_result 不再
+        // reset, 否则会丢掉 user 消息之后的 sibling tool_use children
+        // (sess-4a55d83d regression: 丢 _2/_3 触发 2013).
+        if (role === 'assistant' && Array.isArray(content)) {
+          pendingAssistantContent = content as unknown[]
+        }
       }
     }
   }
