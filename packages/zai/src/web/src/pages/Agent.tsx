@@ -1037,6 +1037,30 @@ export default function Agent() {
   const cwdName = instanceContext?.cwdName || '~'
   const branch = instanceContext?.branch || 'master'
   const { token } = theme.useToken();
+
+  const messageList = useMemo(
+    () =>
+      messages.map((msg: AgentMessage, idx: number) => {
+        const t = msg.type as string;
+        const toolUseId = t.startsWith("tool_use:")
+          ? (msg.toolUseId as string)
+          : undefined;
+        const reactKey =
+          (toolUseId ? `tool-${toolUseId}` : (msg.eventId as string)) ||
+          String(idx);
+        return (
+          <MessageBubble
+            key={reactKey}
+            msg={msg}
+            streaming={
+              status === "streaming" && idx === messages.length - 1
+            }
+          />
+        );
+      }),
+    [messages, status],
+  );
+
   // Slash autocomplete: 输入 / 时弹出, 同时包含 builtin commands + user commands + skills
   type SlashItem = {
     kind: 'command' | 'skill'
@@ -1405,27 +1429,7 @@ export default function Agent() {
             </div>
           )}
           <TodoZone todos={todosForCurrentSession} />
-          {messages.map((msg: AgentMessage, idx: number) => {
-            // 工具相位按 toolUseId 锁定 key, 让 store 的 upsert 合并后 React 复用
-            // 同一个 DOM 节点. 其它事件沿用 eventId / 数组下标.
-            const t = msg.type as string;
-            const toolUseId = t.startsWith("tool_use:")
-              ? (msg.toolUseId as string)
-              : undefined;
-            const reactKey =
-              (toolUseId ? `tool-${toolUseId}` : (msg.eventId as string)) ||
-              String(idx);
-            return (
-              <MessageBubble
-                key={reactKey}
-                msg={msg}
-                // 流式态只对末尾那条消息生效: 否则历史 assistant.text 也会跟着闪光标
-                streaming={
-                  status === "streaming" && idx === messages.length - 1
-                }
-              />
-            );
-          })}
+          {messageList}
           <div ref={messagesEndRef} />
           {pendingAsk && (
             <QuestionCard
