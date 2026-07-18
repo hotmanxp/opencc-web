@@ -6,6 +6,7 @@ import { queryEngine } from '../../src/runtime/queryEngine.js'
 import { makeMockModelCaller } from '../fixtures/MockModelCaller.js'
 import { makeMockSandbox } from '../fixtures/MockSandbox.js'
 import { TranscriptStore } from '../../src/transcript/store.js'
+import { getLastCacheSafeParams, saveCacheSafeParams } from '../../src/opencc-internals/utils/forkedAgent.js'
 
 async function collect(g: AsyncGenerator<any>) {
   const out: any[] = []
@@ -80,6 +81,17 @@ describe('queryEngine', () => {
     expect(events.some(e => e.type === 'runtime.aborted' || e.type === 'runtime.error')).toBe(true)
   })
 
+  test('queryEngine saves CacheSafeParams after each turn', async () => {
+    saveCacheSafeParams(null)
+    const events = await collect(queryEngine(
+      { prompt: 'hi', cwd: '/tmp' },
+      { dataDir: tmpDir, modelCaller: makeMockModelCaller('text-only') },
+    ))
+    expect(events.at(-1)?.type).toBe('runtime.done')
+    const snapshot = getLastCacheSafeParams()
+    expect(snapshot).not.toBeNull()
+    expect(String(snapshot?.systemPrompt).length).toBeGreaterThan(0)
+  })
   test('AGENTS.md 不存在时不报错, 默认空 systemPrompt', async () => {
     const events = await collect(queryEngine(
       { prompt: 'x', cwd: '/tmp' },
