@@ -42,7 +42,6 @@ import DiffBlock from "../components/DiffBlock.js";
 import { linkifyText } from "../lib/linkify.js";
 import { splitMarkdownOnIncomplete } from "../lib/splitMarkdown.js";
 import { AttachmentStrip } from "../components/AttachmentStrip";
-import ConversationInfoButton from "../components/ConversationInfoButton";
 import ModelStatusButton from "../components/ModelStatusButton";
 import ModeStatusButton, { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import { TaskDock } from "../components/TaskDock";

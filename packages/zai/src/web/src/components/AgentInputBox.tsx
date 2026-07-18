@@ -5,6 +5,7 @@ import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 import { api } from "../lib/api";
 import { AttachmentStrip } from "../components/AttachmentStrip";
+import ConversationInfoButton from "../components/ConversationInfoButton";
 
 type PendingAttachment = {
   localId: string;
@@ -475,6 +476,7 @@ export default function AgentInputBox() {
           disabled={status === "streaming" || pendingAsk?.status === "pending"}
           style={{ color: "rgba(255,255,255,0.45)" }}
         />
+        <ConversationInfoButton />
       </div>
 
       {/* TextArea + slash dropdown 区 */}
