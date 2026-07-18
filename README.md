@@ -140,6 +140,93 @@ packages/zai/src/server/services/ # 业务逻辑: detect/spawner/fileStore/osasc
 packages/zai/src/web/src/pages/   # Dashboard / Tools / Resources / Login / Config / Directory / Agent
 ```
 
+### Agent 对话
+
+Web 管理平台内置的 Agent 交互界面,直接消费 `@zn-ai/zai-agent-core` 暴露的流式事件。
+
+**入口**:`packages/zai/src/web/src/pages/Agent.tsx`(侧栏会话列表 + 主对话区 + 输入框),`cwd` 来自服务端启动参数 `app.locals.instanceContext.cwd`。
+
+**核心能力**:
+
+- **多模态输入** — 粘贴 / 拖拽图片(JPEG/PNG/GIF/WEBP,单张 ≤ 10MB,每轮 ≤ 4 张),自动转 base64 contentBlock
+- **Slash 命令** — `/` 唤起 builtin + 用户自定义 commands + skills,模糊匹配 + ↑↓/Tab/Enter 选择
+- **会话管理** — 创建 / 列表 / 重命名(首条事件触发) / 切换 / 删除 / 模型与权限模式热改
+- **流式渲染** — `splitMarkdownOnIncomplete` 把流式文本切成"已完整 + tail",完整段走 Markdown 渲染,tail 用 `linkifyText` + 闪烁游标;流式期跳过 react-markdown 整段重渲
+- **工具调用展示** — 工具级 renderer 注册表(`Agent` / `Bash` / `Glob` / `Grep` / `Read` / `MCP` / `Edit`+`Write` 走 diff renderer / 其它 generic),折叠 pill 显示 preview,展开看完整 input / output / diff
+- **Thinking 折叠** — 紫色折叠块 + 流式动画,默认收起
+- **TodoWrite 集成** — 不入消息流,独立渲染 `TodoZone`;从历史 transcript 倒序恢复最近一份 todo 列表
+- **V2 TaskList** — `TaskCreate` / `TaskUpdate` 触发的独立任务系统,持久化到 `~/.zai/tasks/<sid>.json`
+- **后台任务面板** — `TaskDock` / `TaskDrawer` 浮层,显示 v2 + todos 进度徽章
+- **AskUserQuestion 交互** — 多 Tab / 单选多选 / description + preview / 附加说明 / 取消,走 `tool_use:ask_pending` → `prompt.ask` → `QuestionCard` → `POST /api/agent/answer`
+- **Abort** — `Esc` 中断当前流,`POST /agent/abort` → `runtime.abort`(写 `.abort` 文件),状态切 `aborted`
+- **自动清空已完成任务** — todos + v2 全 completed 后 5s 从 store 清除对应 sid
+
+**数据流概览**:
+
+```
+输入框 ──POST /agent/prompt──▶ Express 路由
+                                │
+                                ▼
+                  new AbortController(5min HARD_TIMEOUT)
+                  立即 res.json({ sessionId })
+                                │
+                                ▼  (async)
+                  DefaultAgentRuntime.run({ ... })
+                                │
+                                ▼
+                  queryEngine 主循环 (maxTurns=50)
+                  ┌──────────────────────────┐
+                  │ modelStream              │
+                  │ executeToolsStreaming    │
+                  │ HookRunner               │
+                  └──────────────────────────┘
+                                │
+                                ▼ translateRuntimeEvents
+                  eventBus.emit(ServerEvent)
+                                │
+                                ▼
+                  GET /api/event ◀── EventSource
+                                │
+                                ▼
+                  useAgentStore.applyRuntimeEvent
+                  (reducer → messages 渲染)
+```
+
+**SSE 事件协议**(zod discriminated union,见 `packages/zai/src/shared/events.ts`):
+
+| Channel | 关键事件 | Payload 关键字段 |
+|---------|----------|------------------|
+| Runtime | `runtime.started` / `.delta` / `.thinking` / `.tool_call` / `.tool_result` / `.done` / `.aborted` / `.error` | sessionId, turnIndex, delta / thinking / toolUseId, toolName, input / output / error{category,message,recoverable} |
+| Session | `session.created` / `.deleted` / `.renamed` | sessionId, title, cwd |
+| Prompt  | `prompt.ask`(AskUserQuestion) | sessionId, toolUseId, questions[{question, header, options[{label, description?}]}] |
+| System  | `server.connected` / `.error` / `toast` / `branch.changed` | sessionId, message, level, branch |
+
+写入格式:`id: <eventId>\nevent: <type>\ndata: <JSON>\n\n`,15s 心跳 `: heartbeat\n\n`。
+
+**AskUserQuestion 完整链路**:模型吐 `AskUserQuestion` tool_use → `toolExecution` yield `tool_use:ask_pending` → 翻译为 `prompt.ask` SSE → `useAgentStore.applyPromptAsk` 设 `pendingAsk` → `QuestionCard` 渲染 → 用户提交 → `POST /api/agent/answer` → `AskRegistry.answer` 释放 `awaitAskUserQuestion` → 工具返回 output → `runtime.tool_result` SSE → `QuestionCard` 卸载,模型继续。
+
+**关键文件**:
+
+| 路径 | 作用 |
+|------|------|
+| `packages/zai/src/server/routes/agent.ts` | `/api/agent/*` 路由 + `translateRuntimeEvents` |
+| `packages/zai/src/server/routes/event.ts` | `/api/event` SSE 出口 |
+| `packages/zai/src/shared/events.ts` | `ServerEvent` zod schema |
+| `packages/zai/src/web/src/store/useAgentStore.ts` | 全部对话状态与 reducer |
+| `packages/zai/src/web/src/pages/Agent.tsx` | 主对话页面 |
+| `packages/zai/src/web/src/components/AgentInputBox.tsx` | 输入框 + slash + 粘贴/拖拽 |
+| `packages/zai/src/web/src/components/QuestionCard.tsx` | AskUserQuestion 渲染 |
+| `packages/zai/src/web/src/components/toolRenderers/` | 工具级 renderer 注册表 |
+| `packages/zai-agent-core/src/runtime/queryEngine.ts` | runtime 主循环 |
+| `packages/zai-agent-core/src/runtime/toolExecution.ts` | 工具执行 + AskUserQuestion 桥接 |
+
+**已知限制**:
+
+- `/agent/prompt` 是 fire-and-forget,客户端断开 HTTP 不直接 abort runtime;通过 `req.on('close')` 仅释放挂起的 ask
+- HARD_TIMEOUT 5min 仅在 `ZAI_DEBUG=1` 打日志,无主动 abort 逻辑
+- `translateRuntimeEvents` 偶有 `toolName` 流式丢失,渲染兜底显示"未知工具 (id:…)"
+- 流式 SSE 重连(EventSource 自动)与 store reducer 的收敛策略缺少端到端测试
+
 详见 `packages/zai/README.md`。
 
 ### `@zn-ai/zai-agent-core`
