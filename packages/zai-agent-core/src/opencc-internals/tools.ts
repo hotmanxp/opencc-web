@@ -5,7 +5,6 @@
 // the zai-specific `getZaiBaseTools()` helper is what consumers should use.
 import { toolMatchesName, type Tool, type Tools } from './Tool.js'
 import { AgentTool } from './tools/AgentTool/AgentTool.js'
-import { BackgroundAgentTool } from './tools/BackgroundAgentTool/index.js'
 import { BackgroundAgentResultTool } from './tools/BackgroundAgentResultTool/index.js'
 import { SkillTool } from './tools/SkillTool/SkillTool.js'
 import { BashTool } from './tools/BashTool/BashTool.js'
@@ -187,7 +186,7 @@ export function getAllBaseTools(): Tools {
     isBgAgentRuntimeEnabled: () => boolean
   }
   const bgTools = isBgAgentRuntimeEnabled()
-    ? [BackgroundAgentTool, BackgroundAgentResultTool]
+    ? [BackgroundAgentResultTool]
     : []
   return [
     AgentTool,

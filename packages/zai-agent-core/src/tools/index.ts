@@ -13,7 +13,6 @@ import { GrepTool } from './GrepTool/GrepTool.js'
 import { AskUserQuestionTool } from './AskUserQuestionTool/AskUserQuestionTool.js'
 import { ListMcpResourcesTool } from './ListMcpResourcesTool/ListMcpResourcesTool.js'
 import { ReadMcpResourceTool } from './ReadMcpResourceTool/ReadMcpResourceTool.js'
-import { BackgroundAgentTool } from './BackgroundAgentTool/BackgroundAgentTool.js'
 import { BackgroundAgentResultTool } from './BackgroundAgentResultTool/BackgroundAgentResultTool.js'
 import { TaskCreateTool } from './TaskCreateTool/TaskCreateTool.js'
 import { TodoWriteTool } from './TodoWriteTool/TodoWriteTool.js'
@@ -39,7 +38,6 @@ export function getZaiRuntimeTools(): Tool[] {
     wrapAsOpenccTool(AskUserQuestionTool),
     wrapAsOpenccTool(ListMcpResourcesTool),
     wrapAsOpenccTool(ReadMcpResourceTool),
-    wrapAsOpenccTool(BackgroundAgentTool),
     wrapAsOpenccTool(BackgroundAgentResultTool),
     wrapAsOpenccTool(TaskCreateTool),
     wrapAsOpenccTool(TodoWriteTool),
