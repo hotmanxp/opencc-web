@@ -568,7 +568,7 @@ export default React.memo(function AgentInputBox() {
           <Popover
             content={<TodoDropdown todos={todos} v2Tasks={v2Tasks} />}
             trigger="click"
-            placement="topRight"
+            placement="topLeft"
             arrow={false}
             destroyTooltipOnHide
           >

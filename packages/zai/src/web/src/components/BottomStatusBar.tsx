@@ -76,7 +76,7 @@ export function BottomStatusBar({ todos, v2Tasks, label = "任务" }: Props) {
       data-testid="bottom-status-popover"
       content={<TodoDropdown todos={todos} v2Tasks={v2Tasks} />}
       trigger="click"
-      placement="topRight"
+      placement="topLeft"
       arrow={false}
       destroyTooltipOnHide
     >
