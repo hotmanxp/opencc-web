@@ -27,6 +27,7 @@ import {
   serializeForAnthropic,
 } from '../transcript/persistence.js'
 import { foldTopLevelToolUses } from '../opencc-internals/utils/foldTopLevelToolUses.js'
+import { saveCacheSafeParams } from '../opencc-internals/utils/forkedAgent.js'
 
 const DEFAULT_MAX_TURNS = 50
 
@@ -233,6 +234,32 @@ export async function* queryEngine(
       // message_stop 推 runtime.done, 前端 status:idle 已经亮了). 直接 break.
       if ((ev as any).type === 'message_stop') {
         sawMessageStop = true
+        try {
+          saveCacheSafeParams({
+            systemPrompt,
+            userContext: {},
+            systemContext: {},
+            toolUseContext: {
+              abortController,
+              getAppState: () => ({
+                toolPermissionContext: { shouldAvoidPermissionPrompts: true },
+              }),
+              setAppState: () => {},
+              setInProgressToolUseIDs: () => {},
+              setResponseLength: () => {},
+              pushApiMetricsEntry: () => {},
+              updateFileHistoryState: () => {},
+              options: options as any,
+              messages: messages as any,
+              agentId: sessionId as any,
+              readFileState: new Map(),
+              queryTracking: { chainId: sessionId, depth: 0 },
+            } as any,
+            forkContextMessages: messages as any,
+          })
+        } catch (err) {
+          console.warn('[queryEngine] saveCacheSafeParams threw:', err)
+        }
         if (process.env.ZAI_DEBUG === '1') {
           console.error('[zai.qe] break on message_stop', {
             sessionId, turn, assistantTextLen: assistantText.length,

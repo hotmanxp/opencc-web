@@ -267,6 +267,21 @@ const WHITELIST_PATTERNS: string[] = [
   'tools/BashTool/sedValidation.ts',
   'tools/BashTool/sedEditParser.ts',
   'tools/BashTool/commentLabel.ts',
+
+  // AgentTool port — fork prerequisites (runForkedAgent transitive deps).
+  // NOTE: utils/toolResultStorage.ts is INTENTIONALLY NOT in this whitelist.
+  // The full upstream file has transitive imports (bootstrap/state,
+  // services/analytics/{growthbook,metadata,index}, utils/slowOperations)
+  // that chase TUI/desktop deps which should NOT enter the opencc-internals
+  // mirror. Instead, that file is a hand-written zai-local patch exporting
+  // only TOOL_RESULT_CLEARED_MESSAGE + ContentReplacementState +
+  // cloneContentReplacementState (the symbols forkedAgent.runForkedAgent and
+  // services/api/compressToolHistory actually need). If future tasks need
+  // additional upstream exports from toolResultStorage.ts, extend the patch
+  // locally rather than re-whitelisting the full file.
+  'utils/sessionStorage.ts',
+  'utils/abortController.ts',
+  'utils/fileStateCache.ts',
 ]
 
 // Files we explicitly never want (defense in depth — these would not be in WHITELIST anyway).
