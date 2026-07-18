@@ -44,6 +44,28 @@ export class TranscriptStore {
     }
   }
 
+  /**
+   * 原子替换 transcript 的 messages 数组。
+   * /compact 命令的落盘路径: 读出原 messages → 追加 boundary + summary → 一次写回。
+   * 沿用 append() 的 proper-lockfile 范式, 防止与并发 append 冲突。
+   */
+  async replace(
+    transcriptId: string,
+    newMessages: TranscriptMessage[],
+  ): Promise<void> {
+    const filePath = transcriptPath(this.dataDir, transcriptId)
+    const release = await lock(filePath, { retries: 3 })
+    try {
+      const raw = await readFile(filePath, 'utf-8')
+      const file = deserializeFile(raw)
+      file.messages = newMessages
+      file.meta.updatedAt = Date.now()
+      await writeFile(filePath, serializeFile(file), 'utf-8')
+    } finally {
+      await release()
+    }
+  }
+
   async list(cwd?: string, opts?: { excludeSubagent?: boolean }): Promise<TranscriptMeta[]> {
     const dir = transcriptDir(this.dataDir)
     const excludeSubagent = opts?.excludeSubagent === true
