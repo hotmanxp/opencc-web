@@ -46,5 +46,9 @@ export type { HookRunResult } from '../plugins/HookRunner.js'
 export { createDefaultHookExecutor } from '../plugins/defaultHookExecutor.js'
 export { DefaultPluginRuntime, PluginRegistry } from '../plugins/index.js'
 
+// /compact 命令 service (zai 自实现, 干净路径, 不接 opencc-internals/)
+export { compactSession } from './compactService.js'
+export type { CompactSessionOptions, CompactSessionResult } from './compactService.js'
+
 // 后台任务运行时 (Phase 1 + Phase 2)
 export * from './background/index.js'
