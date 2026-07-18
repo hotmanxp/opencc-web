@@ -1082,6 +1082,9 @@ export default function Agent() {
   // 默认收起, 让对话区首屏占满主视图, 用户按需点开.
   const [sessionsCollapsed, setSessionsCollapsed] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
+  // question 卡片滚到视口用: pendingAsk 不在 messages[] 里, 单依赖 messages 的滚动 effect
+  // 不会触发, 这里单独加一个 ref 让卡片出现时也能滚到底.
+  const questionCardRef = useRef<HTMLDivElement>(null);
 
   // 根据侧栏实际高度估算默认展示条数, 窗口/容器尺寸变化时自动重算.
   useEffect(() => {
@@ -1099,8 +1102,11 @@ export default function Agent() {
   }, [sessionsCollapsed]);
 
   useEffect(() => {
-    messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
-  }, [messages]);
+    // 优先级: question 卡片出现时滚卡片, 否则滚 messages 流末尾.
+    // pendingAsk 是独立字段, 必须放进依赖里否则卡片首次出现不触发.
+    const target = questionCardRef.current ?? messagesEndRef.current;
+    target?.scrollIntoView({ behavior: "smooth", block: "end" });
+  }, [messages, pendingAsk]);
 
   // 全局 Esc 拦截: 流式期间按 Esc 终止生成 (仿 OpenCC 状态栏 "esc to interrupt").
   // textarea 在 streaming 时被禁用, 这里挂 window 监听确保 Esc 仍生效.
@@ -1397,20 +1403,22 @@ export default function Agent() {
           )}
           <TodoZone todos={todosForCurrentSession} />
           {messageList}
-          <div ref={messagesEndRef} />
           {pendingAsk && (
-            <QuestionCard
-              questions={pendingAsk.questions}
-              answers={pendingAsk.answers}
-              annotations={pendingAsk.annotations}
-              status={pendingAsk.status}
-              errorMessage={pendingAsk.errorMessage}
-              onAnswer={setAskAnswer}
-              onNotesChange={setAskNotes}
-              onSubmit={() => void submitAsk()}
-              onReject={() => void rejectAsk()}
-            />
+            <div ref={questionCardRef}>
+              <QuestionCard
+                questions={pendingAsk.questions}
+                answers={pendingAsk.answers}
+                annotations={pendingAsk.annotations}
+                status={pendingAsk.status}
+                errorMessage={pendingAsk.errorMessage}
+                onAnswer={setAskAnswer}
+                onNotesChange={setAskNotes}
+                onSubmit={() => void submitAsk()}
+                onReject={() => void rejectAsk()}
+              />
+            </div>
           )}
+          <div ref={messagesEndRef} />
         </div>
 
         {/*
