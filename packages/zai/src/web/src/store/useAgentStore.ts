@@ -13,6 +13,22 @@ export type TodoItem = {
   activeForm: string
 }
 
+// V2 TaskList 镜像 (mirror of zai-agent-core TaskListStore). 跟 TodoZone
+// 字段对齐: 客户端只读, 写操作走 TaskCreate/TaskUpdate tool call, server
+// 重新计算后通过本字段刷新. status 多一个 'deleted' (completed 之外
+// 软删除态), UI 用删除线表达.
+export type V2TaskItem = {
+  id: string
+  subject: string
+  description?: string
+  activeForm?: string
+  status: 'pending' | 'in_progress' | 'completed' | 'deleted'
+  blocks: string[]
+  blockedBy: string[]
+  owner?: string
+  updatedAt: number
+}
+
 // 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob. 仅用于 v2 协议里把
 // 历史图片消息里的 base64 还原成浏览器可显示的 objectURL. 解析失败时
 // 返回 null, 调用方回退到 raw dataURL 并把 status 标为 error.
@@ -92,6 +108,13 @@ interface AgentState {
   // todo, 刷新页面由 loadTranscript 走 extractTodosFromTranscript 还原.
   todosBySession: Record<string, TodoItem[]>
   setTodos: (sessionId: string, todos: TodoItem[]) => void
+
+  // V2 TaskList 镜像: 与老 TodoWrite 分开存, 因为语义不同 (跨 turn、
+  // 会话之间可被查询). key 用 sessionId (来自 tool_use:start.msg.sessionId).
+  v2TasksBySession: Record<string, V2TaskItem[]>
+  setV2Tasks: (sessionId: string, tasks: V2TaskItem[]) => void
+  updateV2Task: (sessionId: string, task: V2TaskItem) => void
+  deleteV2Task: (sessionId: string, taskId: string) => void
 
   // 每次 sendMessage 递增的发送序号. 拼进 stream block key 作为"本轮命名空间",
   // 保证跨轮次的文本块 key 永不碰撞. 后端 turnIndex 恒为 0 (wrapWithZaiMeta 被
@@ -321,11 +344,39 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   segmentedToolUseIds: {},
   sendSeq: 0,
   todosBySession: {},
+  v2TasksBySession: {},
 
   setTodos: (sessionId: string, todos: TodoItem[]) =>
     set((s) => ({
       todosBySession: { ...s.todosBySession, [sessionId]: todos },
     })),
+
+  setV2Tasks: (sessionId, tasks) =>
+    set((s) => ({
+      v2TasksBySession: { ...s.v2TasksBySession, [sessionId]: tasks },
+    })),
+
+  updateV2Task: (sessionId, task) =>
+    set((s) => {
+      const cur = s.v2TasksBySession[sessionId] ?? []
+      const next = cur.some((t) => t.id === task.id)
+        ? cur.map((t) => (t.id === task.id ? task : t))
+        : [...cur, task]
+      return {
+        v2TasksBySession: { ...s.v2TasksBySession, [sessionId]: next },
+      }
+    }),
+
+  deleteV2Task: (sessionId, taskId) =>
+    set((s) => {
+      const cur = s.v2TasksBySession[sessionId] ?? []
+      return {
+        v2TasksBySession: {
+          ...s.v2TasksBySession,
+          [sessionId]: cur.filter((t) => t.id !== taskId),
+        },
+      }
+    }),
 
   // SSE reducer state (Task 6)
   activeSessionId: null,
@@ -579,6 +630,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const sid = s.sessionId
       const { [sid as string]: _drop, ...rest } = (s.todosBySession ?? {}) as Record<string, TodoItem[]>
       void _drop
+      // v2TasksBySession 与 todosBySession 一致: 切会话/清屏 只清理当前 sid
+      const { [sid as string]: _dropV2, ...restV2 } = (s.v2TasksBySession ?? {}) as Record<string, V2TaskItem[]>
+      void _dropV2
       return {
         messages: [],
         status: 'idle',
@@ -588,6 +642,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         segmentedToolUseIds: {},
         sendSeq: 0,
         todosBySession: sid ? rest : s.todosBySession,
+        v2TasksBySession: sid ? restV2 : s.v2TasksBySession,
       }
     }),
 
