@@ -2,7 +2,7 @@ import type { RuntimeConfig, QueryOptions } from './types.js'
 import type { RuntimeEvent } from './events.js'
 import type { TranscriptFile, TranscriptMeta } from '../transcript/types.js'
 import { TranscriptStore } from '../transcript/store.js'
-import { query } from './query.js'
+import { queryLoop } from './queryLoop.js'
 import { abortSession } from './abort.js'
 import { DefaultPluginRuntime } from '../plugins/index.js'
 
@@ -26,7 +26,7 @@ export class DefaultAgentRuntime implements AgentRuntime {
   }
 
   run(opts: QueryOptions): AsyncIterable<RuntimeEvent> {
-    return query(opts, this.config)
+    return queryLoop(opts, this.config)
   }
 
   async abort(sessionId: string, reason?: string): Promise<void> {

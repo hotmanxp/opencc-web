@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'vitest'
-import { resolveToolPool } from '../../src/runtime/queryEngine.js'
+import { resolveToolPool } from '../../src/runtime/queryLoop.js'
 import type { QueryOptions } from '../../src/runtime/types.js'
 
 type AnyTool = { name: string; description?: string }

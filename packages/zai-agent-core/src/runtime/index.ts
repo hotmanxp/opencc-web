@@ -1,4 +1,4 @@
-export { query } from './query.js'
+export { queryLoop as query } from './queryLoop.js'
 export { abortSession } from './abort.js'
 export { DefaultAgentRuntime } from './contract.js'
 export type { AgentRuntime } from './contract.js'
