@@ -38,7 +38,6 @@ import {
 } from "../store/useAgentStore";
 import { useAppStore } from "../store/useAppStore";
 import QuestionCard from "../components/QuestionCard.jsx";
-import DiffBlock from "../components/DiffBlock.js";
 import { linkifyText } from "../lib/linkify.js";
 import { getRenderer } from "../components/toolRenderers/registry.js";
 import { splitMarkdownOnIncomplete } from "../lib/splitMarkdown.js";
@@ -526,6 +525,11 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
   // 的 userFacingName 风格一致. 缺省回退到 'general-purpose'(AgentTool 的 schema 默认值).
   const renderer = getRenderer(rawName)
   const displayName = renderer.displayName?.(input) ?? name
+  // 整块接管: Edit/Write 等需要整段渲染 (DiffBlock 自带 header + diff + error)
+  // 的工具, 跳过 ToolCallBlock 自己的折叠面板/参数/结果分块, 直接挂 mount.
+  if (renderer.renderFull) {
+    return <>{renderer.renderFull(msg)}</>
+  }
   const output = msg.output
   const errorField = msg.error as string | { message?: string } | undefined;
   const reasonField = msg.reason as string | undefined;
@@ -839,11 +843,8 @@ const MessageBubble = React.memo(function MessageBubble({
     msg.type === "tool_use:invalid" ||
     msg.type === "tool_use:denied"
   ) {
-    // Edit / Write 走专门的 diff 展示 (行号 + 增删底色), 其余工具用通用折叠块.
-    const toolName = (msg.name as string) || "";
-    if (toolName === "Edit" || toolName === "Write") {
-      return <DiffBlock msg={msg} />;
-    }
+    // Edit / Write 走 registry 派发到 DiffBlock (renderFull 路径, ToolCallBlock 内部识别);
+    // 其余工具走 ToolCallBlock 的标准折叠/pill 渲染.
     return <ToolCallBlock msg={msg} />;
   }
 
