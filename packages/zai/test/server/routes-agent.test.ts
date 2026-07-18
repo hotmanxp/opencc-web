@@ -8,6 +8,8 @@ let patchCalls: Array<{ id: string; patch: { model?: string; title?: string } }>
 vi.mock('../../src/server/services/agentRuntime.js', () => ({
   initAgentRuntime: vi.fn(),
   getOrCreateAgentSession: vi.fn().mockResolvedValue('test-session-id'),
+  getAskRegistry: vi.fn().mockReturnValue({ abortAll: vi.fn() }),
+  abortAgentSession: vi.fn().mockResolvedValue(undefined),
   getRuntime: vi.fn().mockReturnValue({
     run: vi.fn().mockImplementation(async function* () {
       yield {
@@ -50,34 +52,39 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
 vi.mock('@zn-ai/zai-agent-core', () => ({
   loadAgentsMd: vi.fn().mockResolvedValue({ files: [] }),
   buildAgentsMdSystemPrompt: vi.fn().mockReturnValue(null),
+  // permissionMode.ts:6 启动时用 EXTERNAL_PERMISSION_MODES 构造 VALID_MODES set,
+  // mock 必须提供. 真实值见 zai-agent-core 导出 (5 个 user-facing mode).
+  EXTERNAL_PERMISSION_MODES: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'],
 }))
 
 const app = express()
 app.use(express.json())
+// agent.ts:293 期待 req.app.locals.instanceContext. server/index.ts 启动时设, 测试手动设.
+app.locals.instanceContext = { cwd: '/tmp', cwdName: 'routes-agent-test' }
 app.use('/api', agentRouter)
 
-describe('POST /api/agent/stream', () => {
-  it('returns SSE stream with RuntimeEvent', async () => {
+describe('POST /api/agent/prompt', () => {
+  // /api/agent/prompt 是 fire-and-forget: 立即 res.json({ sessionId }), 真正的 SSE
+  // 流在后台异步推送. supertest 等不到 SSE 流结束, 但能拿到立即返回的 JSON envelope.
+
+  it('returns 200 + sessionId envelope for valid prompt', async () => {
     const res = await request(app)
-      .post('/api/agent/stream')
+      .post('/api/agent/prompt')
       .send({ prompt: 'hi' })
     expect(res.status).toBe(200)
-    expect(res.headers['content-type']).toContain('text/event-stream')
-    expect(res.text).toContain('assistant.text')
-    expect(res.text).toContain('Hello!')
-    expect(res.text).toContain('runtime.done')
+    expect(res.body).toHaveProperty('sessionId')
   })
 
   it('rejects empty prompt', async () => {
     const res = await request(app)
-      .post('/api/agent/stream')
+      .post('/api/agent/prompt')
       .send({ prompt: '' })
     expect(res.status).toBe(400)
   })
 
   it('rejects missing prompt', async () => {
     const res = await request(app)
-      .post('/api/agent/stream')
+      .post('/api/agent/prompt')
       .send({})
     expect(res.status).toBe(400)
   })

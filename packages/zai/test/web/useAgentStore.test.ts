@@ -394,7 +394,10 @@ describe('useAgentStore — runtime.error 携带 toolUseId', () => {
     expect(useAgentStore.getState().status).toBe('error')
   })
 
-  it('runtime.error 不携带 toolUseId 时只 setStatus, 不创建工具消息', () => {
+  it('runtime.error 不携带 toolUseId 时写入 messages + setStatus', () => {
+    // 产品行为 (useAgentStore.ts:1101-1134): 不带 toolUseId 的 turn-level 错误
+    // 也会 push 到 messages, 让 Agent.tsx:888 MessageBubble 渲染红色 Card 显示
+    // 错误详情 (错误可见). status 同步切到 'error'.
     const state = useAgentStore.getState()
     const sessionId = 'sess-err-2'
 
@@ -408,7 +411,9 @@ describe('useAgentStore — runtime.error 携带 toolUseId', () => {
     })
 
     const msgs = useAgentStore.getState().messages
-    expect(msgs).toHaveLength(0)
+    expect(msgs).toHaveLength(1)
+    expect(msgs[0]?.type).toBe('runtime.error')
+    expect((msgs[0] as any).error?.message).toBe('LLM provider 5xx')
     expect(useAgentStore.getState().status).toBe('error')
   })
 })

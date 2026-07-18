@@ -22,6 +22,9 @@ vi.mock('node:fs', async () => {
 import agentSettingsRouter from '../../src/server/routes/agentSettings.js'
 
 const app = express()
+app.use(express.json())
+// agent.ts:293 期待 req.app.locals.instanceContext, 同包其它 router 测试也设了.
+app.locals.instanceContext = { cwd: '/tmp', cwdName: 'agent-settings-test' }
 app.use('/api', agentSettingsRouter)
 
 describe('GET /api/agent/settings', () => {
@@ -71,7 +74,11 @@ describe('GET /api/agent/settings', () => {
     vi.mocked(readFileSync).mockReturnValue('{}')
     const res = await request(app).get('/api/agent/settings')
     expect(res.status).toBe(200)
-    expect(res.body).toEqual(expect.objectContaining({ baseURL: null, models: [] }))
+    // buildAvailableModels() 永远 merge user entries + saved profiles + BUILTIN_PROVIDERS.
+    // 所以 models 永远非空, 不会为 []. baseURL 在没 env 覆盖时是 null.
+    expect(res.body.baseURL).toBeNull()
+    expect(Array.isArray(res.body.models)).toBe(true)
+    expect(res.body.models.length).toBeGreaterThan(0)
     // resolveModel's BUILTIN_FALLBACK_MODEL when no env / settings.model override.
     expect(res.body.defaultModel).toBe('MiniMax-M3')
   })
@@ -85,7 +92,7 @@ describe('GET /api/agent/settings', () => {
     expect(res.body.error).toContain('ENOENT')
   })
 
-  it('returns models[] from settings.json when present', async () => {
+  it('returns user-configured models[] prefixed before builtin entries', async () => {
     vi.mocked(readFileSync).mockReturnValue(
       JSON.stringify({
         env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3' },
@@ -97,17 +104,26 @@ describe('GET /api/agent/settings', () => {
     )
     const res = await request(app).get('/api/agent/settings')
     expect(res.status).toBe(200)
-    expect(res.body.models).toEqual([
+    // 用户的两个 entry 排在最前, 后面追加 builtins (alias 不会冲突所以都进得来).
+    expect(res.body.models.slice(0, 2)).toEqual([
       { alias: 'M3', model: 'MiniMax-M3', label: 'M3 · 默认最强' },
       { alias: 'haiku', model: 'MiniMax-M2.7-highspeed', label: 'M2.7 · 快速轻量' },
     ])
+    expect(res.body.models.length).toBeGreaterThan(2)
   })
 
-  it('returns models: [] when settings.json omits models', async () => {
+  it('falls back to BUILTIN_PROVIDERS when settings.json omits models', async () => {
     vi.mocked(readFileSync).mockReturnValue(
       JSON.stringify({ env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'X' } }),
     )
     const res = await request(app).get('/api/agent/settings')
-    expect(res.body.models).toEqual([])
+    // builtins 永远会注入; 不会真的空数组.
+    expect(Array.isArray(res.body.models)).toBe(true)
+    expect(res.body.models.length).toBeGreaterThan(0)
+    // openplatform gateway 的 catalog 在 builtins 里.
+    const hasNova = res.body.models.some((m: { baseUrl?: string }) =>
+      m.baseUrl === 'https://zn-nova.paic.com.cn/novai',
+    )
+    expect(hasNova).toBe(true)
   })
 })

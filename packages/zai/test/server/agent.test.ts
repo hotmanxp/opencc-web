@@ -74,6 +74,9 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
 vi.mock('@zn-ai/zai-agent-core', () => ({
   loadAgentsMd: async () => null,
   buildAgentsMdSystemPrompt: () => null,
+  // permissionMode.ts:6 启动时用 EXTERNAL_PERMISSION_MODES 构造 VALID_MODES set,
+  // mock 必须提供. 真实值见 zai-agent-core 导出 (5 个 user-facing mode).
+  EXTERNAL_PERMISSION_MODES: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'],
 }))
 
 // Reset readFileSync between tests — 防止 'falls back' 测试把 mock
@@ -88,6 +91,9 @@ function startApp(): Promise<{ url: string; close: () => void }> {
   return new Promise((resolve) => {
     const app = express()
     app.use(express.json())
+    // agent.ts:293 期待 req.app.locals.instanceContext. server/index.ts 启动时设,
+    // 测试用 startApp 走真实 http, 必须手动设. cwd 选 /tmp 避免污染 home 目录.
+    app.locals.instanceContext = { cwd: '/tmp', cwdName: 'agent-test' }
     app.use('/api', agentRouter)
     const server = http.createServer(app).listen(0, () => {
       const addr = server.address() as any

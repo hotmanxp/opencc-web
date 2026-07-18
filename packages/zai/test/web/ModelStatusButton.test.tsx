@@ -22,6 +22,8 @@ const models: ModelEntry[] = [
 ]
 
 beforeEach(() => {
+  // 各 test 的 vi.spyOn 不能跨用例泄漏 (会污染 patchSessionModel 计数)
+  vi.restoreAllMocks()
   useAgentStore.setState({
     sessionId: 'sess-1',
     activeSessionId: 'sess-1',
@@ -55,20 +57,21 @@ describe('ModelStatusButton', () => {
     render(<ModelStatusButton />)
     // Wait for the settings fetch to settle so displayLabel resolves.
     await new Promise((r) => setTimeout(r, 0))
-    expect(screen.getByText('MiniMax-M3 (M3)')).toBeDefined()
+    // Badge 实际显示 `${currentModel} (${entry.description})` —— description='最强' 在 setup 里.
+    expect(screen.getByText('MiniMax-M3 (最强)')).toBeDefined()
   })
 
   it('opens Popover with the model list on click', async () => {
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
     // Click the badge to open the Popover.
-    const badge = screen.getByText('MiniMax-M3 (M3)')
+    const badge = screen.getByText('MiniMax-M3 (最强)')
     fireEvent.click(badge)
-    // The Popover content has a list with both models.
+    // The Popover content has a list with both models. M2.7 row 用 entry.label='M2.7 · 快速'.
     expect(screen.getAllByText('M2.7 · 快速')).toHaveLength(1)
-    // "MiniMax-M3 (M3)" appears in: badge label, Recent section row, and
-    // provider group row — expect 3 occurrences in the TUI picker.
-    expect(screen.getAllByText('MiniMax-M3 (M3)')).toHaveLength(3)
+    // Badge 用 description='最强' 渲染; Popover 内 M3 的 Row 用 entry.label='MiniMax-M3 (M3)'.
+    // M3 在 Recent + Provider group 各出现一次, 共 2 次. (Badge 是 (最强), 不命中 (M3).)
+    expect(screen.getAllByText('MiniMax-M3 (M3)')).toHaveLength(2)
   })
 
   it('calls patchSessionModel when a non-current model is clicked', async () => {
@@ -76,8 +79,9 @@ describe('ModelStatusButton', () => {
       .mockResolvedValue(undefined)
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
-    fireEvent.click(screen.getByText('MiniMax-M3 (M3)')) // open popover
-    fireEvent.click(screen.getByText('M2.7 · 快速'))   // pick the other model
+    fireEvent.click(screen.getByText('MiniMax-M3 (最强)')) // open popover
+    // M3 row 在 Recent + Provider group 都出现, haiku row 只在 group 出现一次. 直接选 haiku.
+    fireEvent.click(screen.getByText('M2.7 · 快速'))        // pick the other model
     expect(patchSpy).toHaveBeenCalledWith('sess-1', 'MiniMax-M2.7-highspeed')
   })
 
@@ -86,10 +90,9 @@ describe('ModelStatusButton', () => {
       .mockResolvedValue(undefined)
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
-    fireEvent.click(screen.getByText('MiniMax-M3 (M3)')) // open popover
-    // Clicking the currently-selected model again should be a no-op.
-    // Both the badge and the list item render "MiniMax-M3 (M3)" — pick the
-    // one inside the popover (the list item).
+    fireEvent.click(screen.getByText('MiniMax-M3 (最强)')) // open popover
+    // Clicking the currently-selected model (M3) again should be a no-op.
+    // 用 getAllByText 取 M3 出现列表 (Recent + group 共 2 个), 任意一个都是 M3 → no-op.
     const matches = screen.getAllByText('MiniMax-M3 (M3)')
     fireEvent.click(matches[matches.length - 1]!)
     expect(patchSpy).not.toHaveBeenCalled()
@@ -115,7 +118,7 @@ describe('ModelStatusButton TUI picker (extended)', () => {
   it('filters entries by search query', async () => {
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
-    fireEvent.click(screen.getByText('MiniMax-M3 (M3)')) // open popover
+    fireEvent.click(screen.getByText('MiniMax-M3 (最强)')) // open popover
     const search = screen.getByPlaceholderText(/Search/i) as HTMLInputElement
     fireEvent.change(search, { target: { value: 'M2' } })
     // M2.7 entry still shown, M3 hidden
@@ -126,7 +129,7 @@ describe('ModelStatusButton TUI picker (extended)', () => {
   it('shows no-match message when search returns empty', async () => {
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
-    fireEvent.click(screen.getByText('MiniMax-M3 (M3)'))
+    fireEvent.click(screen.getByText('MiniMax-M3 (最强)'))
     const search = screen.getByPlaceholderText(/Search/i) as HTMLInputElement
     fireEvent.change(search, { target: { value: 'xyz' } })
     expect(screen.getByText('无匹配模型')).toBeDefined()
@@ -137,7 +140,7 @@ describe('ModelStatusButton TUI picker (extended)', () => {
     // should render model-row-M3.
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
-    fireEvent.click(screen.getByText('MiniMax-M3 (M3)'))
+    fireEvent.click(screen.getByText('MiniMax-M3 (最强)'))
     expect(screen.getByText('Recent')).toBeDefined()
     // Recent entry is the same M3 alias as current (M3 row also appears in
     // provider group, so use getAllByTestId to handle the duplicate testid).
@@ -155,28 +158,27 @@ describe('ModelStatusButton TUI picker (extended)', () => {
     })
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
-    fireEvent.click(screen.getByText('MiniMax-M3 (M3)'))
+    fireEvent.click(screen.getByText('MiniMax-M3 (最强)'))
     // M3 should appear once in Recent (the 2 sessions with M3 collapse to 1 entry).
     // Total M3 occurrences: 1 in Recent + 1 in provider group = 2.
     const m3Rows = screen.getAllByTestId('model-row-M3')
     expect(m3Rows.length).toBe(2) // 1 in Recent + 1 in provider group
   })
 
-  it('formats provider title as "<profile> (<host>)"', async () => {
+  it('formats provider title from entry.description (falls back to host)', async () => {
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
-    fireEvent.click(screen.getByText('MiniMax-M3 (M3)'))
-    // Test data has baseUrl 'https://api.minimaxi.com/v1'. URL.host returns
-    // 'api.minimaxi.com' (full hostname). Profile is the alias (no '-' so
-    // whole alias), title becomes 'M3 (api.minimaxi.com)'. The haiku entry
-    // has a different profile ('haiku'), so it lands in its own group.
-    expect(screen.getByText(/M3 \(api\.minimaxi\.com\)/i)).toBeDefined()
-    expect(screen.getByText(/haiku \(api\.minimaxi\.com\)/i)).toBeDefined()
+    fireEvent.click(screen.getByText('MiniMax-M3 (最强)'))
+    // "最强" 在 Popover 内出现多次 (group 标题 + row description 副文本), 用 getAllByText.
+    // "api.minimaxi.com" 是 haiku group 标题 (该 entry 没 description, 走 fallback).
+    const content = screen.getByTestId('model-picker-content')
+    expect(content.textContent).toContain('最强')
+    expect(content.textContent).toContain('api.minimaxi.com')
   })
 
-  it('falls back to "default" host when baseUrl is absent', async () => {
-    // Override availableModels with one entry lacking baseUrl. The badge
-    // still shows the runtime-resolved M3 label, so click that to open.
+  it('falls back to "default" host when baseUrl is absent and no description', async () => {
+    // Override availableModels with one entry lacking both baseUrl and description.
+    // The badge still shows the runtime-resolved M3 model, so click that to open.
     useAgentStore.setState({
       availableModels: [
         { alias: 'plain', model: 'plain-model', label: 'plain' },
@@ -185,7 +187,9 @@ describe('ModelStatusButton TUI picker (extended)', () => {
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
     fireEvent.click(screen.getByText('MiniMax-M3'))
-    expect(screen.getByText(/plain \(default\)/i)).toBeDefined()
+    // Row 内部显示 'plain' (entry.label). group 标题 fallback 到 'default'.
+    expect(screen.getByText('plain')).toBeDefined()
+    expect(screen.getByText('default')).toBeDefined()
   })
 
   it('handles Enter key to select highlighted entry', async () => {
@@ -193,7 +197,7 @@ describe('ModelStatusButton TUI picker (extended)', () => {
       .mockResolvedValue(undefined)
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
-    fireEvent.click(screen.getByText('MiniMax-M3 (M3)')) // open popover
+    fireEvent.click(screen.getByText('MiniMax-M3 (最强)')) // open popover
     // Initial selectedIndex = 0, which is the current model (M3) — no-op on Enter.
     // ArrowDown to move to next entry (haiku).
     const content = screen.getByTestId('model-picker-content')
@@ -206,7 +210,7 @@ describe('ModelStatusButton TUI picker (extended)', () => {
   it('handles ArrowDown to move selection', async () => {
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
-    fireEvent.click(screen.getByText('MiniMax-M3 (M3)'))
+    fireEvent.click(screen.getByText('MiniMax-M3 (最强)'))
     const content = screen.getByTestId('model-picker-content')
     // Initially selectedIndex = 0 (M3 row is current — selected because it's first in flatList).
     const initialSelected = content.querySelector('[data-selected="true"]')
@@ -220,7 +224,7 @@ describe('ModelStatusButton TUI picker (extended)', () => {
   it('keeps the keyboard highlight visible when search hides Recent', async () => {
     render(<ModelStatusButton />)
     await new Promise((r) => setTimeout(r, 0))
-    fireEvent.click(screen.getByText('MiniMax-M3 (M3)')) // open popover
+    fireEvent.click(screen.getByText('MiniMax-M3 (最强)')) // open popover
     // ArrowDown to move highlight into Recent → flatList index 1 (haiku).
     const content = screen.getByTestId('model-picker-content')
     fireEvent.keyDown(content, { key: 'ArrowDown' })
