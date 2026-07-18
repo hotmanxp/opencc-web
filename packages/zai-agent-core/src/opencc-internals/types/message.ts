@@ -3,6 +3,12 @@
  * This file contains the core message types used throughout the application.
  */
 
+// UUID template literal type. Matches the canonical 8-4-4-4-12 hex format produced
+// by `crypto.randomUUID()` and accepted by upstream normalize helpers. Kept as a
+// template literal so derived UUIDs (e.g. `deriveUUID(parent, index)`) stay
+// structurally compatible with raw crypto UUIDs.
+export type UUID = `${string}-${string}-${string}-${string}-${string}`
+
 // Content block types
 export type TextBlock = {
   type: 'text'
@@ -182,6 +188,8 @@ export interface UserMessage {
   content: string
   message: {
     content: string | ContentBlock[]
+    role?: 'user' | string
+    context_management?: unknown
   }
   origin?: MessageOrigin
   uuid?: string
@@ -190,13 +198,21 @@ export interface UserMessage {
   isVisibleInTranscriptOnly?: boolean
   isVirtual?: boolean
   isCompactSummary?: boolean
+  // Marks messages that summarize a collapsed transcript segment. Used by
+  // normalize helpers to fold multi-block messages into single-block form.
+  isCollapseSummary?: boolean
   summarizeMetadata?: unknown
   toolUseResult?: unknown
   /** Internal marker for synthetic tool_result messages created by agent step limits. */
   isAgentStepLimitToolResult?: boolean
   mcpMeta?: unknown
-  imagePasteIds?: string[]
+  // Widen to (number | string)[] for normalize compatibility: imagePasteIds may
+  // be string-backed (existing UI) or number-backed (new normalize path), or a
+  // mixed list. Use the element-union form so per-block derivation can stamp a
+  // single value of either type without further casts.
+  imagePasteIds?: (number | string)[]
   sourceToolAssistantUUID?: string
+  sourceToolUseID?: string
   permissionMode?: string
 }
 
@@ -213,6 +229,8 @@ export interface AssistantMessage {
     stop_reason?: string
     stop_sequence?: string
   }
+  uuid?: string
+  timestamp?: string
   toolUses?: unknown[]
   apiError?: unknown
   error?: unknown
@@ -220,6 +238,8 @@ export interface AssistantMessage {
   requestId?: string
   isApiErrorMessage?: boolean
   advisorModel?: string
+  isVirtual?: boolean
+  isMeta?: boolean
 }
 
 // System local command message
@@ -267,7 +287,7 @@ export type NormalizedUserMessage = {
   message: NormalizedMessageContent
   origin?: MessageOrigin
   attachment?: RenderableAttachment
-  imagePasteIds?: string[]
+  imagePasteIds?: (number | string)[]
   mcpMeta?: unknown
   isVisibleInTranscriptOnly?: boolean
   sourceToolUseID?: string

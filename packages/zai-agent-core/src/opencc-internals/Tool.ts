@@ -102,6 +102,12 @@ export type QueryChainTracking = {
 export type QueryActivity = {
   registerActivity(reason: string): void
   acquireLease(input: QueryGuardLeaseInput): QueryGuardLease
+  /**
+   * Suspend query idle/hard-max accounting while blocked on a human decision.
+   * Lease deadlines continue to run. Returns a resume function to call exactly
+   * once when the interaction ends.
+   */
+  beginUserInteraction?(): () => void
 }
 
 export type ValidationResult =
@@ -215,8 +221,7 @@ export type ToolUseContext = {
     params: ElicitRequestURLParams,
     signal: AbortSignal,
   ) => Promise<ElicitResult>
-  // ZAI_REMOVED: setToolJSX (UI/REPL coupling — unused in zai web runtime)
-  setToolJSX?: SetToolJSXFn // eslint-disable-line @typescript-eslint/no-unused-vars
+  setToolJSX?: SetToolJSXFn
   addNotification?: (notif: Notification) => void
   /** Append a UI-only system message to the REPL message list. Stripped at the
    *  normalizeMessagesForAPI boundary — the Exclude<> makes that type-enforced. */

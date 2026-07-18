@@ -252,6 +252,21 @@ const WHITELIST_PATTERNS: string[] = [
   'utils/withResolvers.ts',
   'utils/signal.ts',
   'utils/streamlinedTransform.ts',
+
+  // BashTool port — P-tier pure-logic modules (no Bun, no TUI, no analytics).
+  'utils/semanticBoolean.ts',
+  'utils/semanticNumber.ts',
+  'utils/lazySchema.ts',
+  'utils/stringUtils.ts',
+  'utils/errors.ts',
+  'utils/timeouts.ts',
+  'utils/bash/ast.ts',
+  'utils/bash/commands.ts',
+  'tools/BashTool/commandSemantics.ts',
+  'tools/BashTool/destructiveCommandWarning.ts',
+  'tools/BashTool/sedValidation.ts',
+  'tools/BashTool/sedEditParser.ts',
+  'tools/BashTool/commentLabel.ts',
 ]
 
 // Files we explicitly never want (defense in depth — these would not be in WHITELIST anyway).

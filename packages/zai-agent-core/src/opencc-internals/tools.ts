@@ -1,10 +1,7 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-// ZAI: zai web runtime trims getAllBaseTools() to the 8 essential tools below.
-// See ./README.md (and scripts/sync-from-opencc.ts) for full sync context.
-// The upstream register-everything path is preserved below as reference;
-// the zai-specific `getZaiBaseTools()` helper is what consumers should use.
 import { toolMatchesName, type Tool, type Tools } from './Tool.js'
 import { AgentTool } from './tools/AgentTool/AgentTool.js'
+import { BackgroundAgentTool } from './tools/BackgroundAgentTool/index.js'
 import { BackgroundAgentResultTool } from './tools/BackgroundAgentResultTool/index.js'
 import { SkillTool } from './tools/SkillTool/SkillTool.js'
 import { BashTool } from './tools/BashTool/BashTool.js'
@@ -186,7 +183,7 @@ export function getAllBaseTools(): Tools {
     isBgAgentRuntimeEnabled: () => boolean
   }
   const bgTools = isBgAgentRuntimeEnabled()
-    ? [BackgroundAgentResultTool]
+    ? [BackgroundAgentTool, BackgroundAgentResultTool]
     : []
   return [
     AgentTool,
@@ -255,33 +252,6 @@ export function getAllBaseTools(): Tools {
     ...(isToolSearchEnabledOptimistic() ? [ToolSearchTool] : []),
     // Filter out any null/undefined tools that might have been added by getters
   ].filter(Boolean)
-}
-
-/**
- * ZAI: minimal tool surface for web runtime.
- *
- * Returns only the 8 essential tools zai exposes today:
- *  - FileRead, FileEdit, NotebookEdit (file ops, safe)
- *  - Bash (sandbox shell)
- *  - Grep, Glob (search)
- *  - WebFetch, WebSearch (network)
- *
- * This intentionally omits: AgentTool, Plan (EnterPlanMode/ExitPlanMode),
- * Sleep, Desktop, TodoWrite, LSP, CronTool, Background/PR/Monitor and other
- * desktop/agent-loop tools that have no role in a thin web client.
- * Add new tools by extending this function, not by re-enabling
- * getAllBaseTools() above (which keeps its full upstream shape for reference).
- */
-export function getZaiBaseTools(): Tools {
-  return [
-    BashTool,
-    ...(hasEmbeddedSearchTools() ? [] : [GlobTool, GrepTool]),
-    FileReadTool,
-    FileEditTool,
-    NotebookEditTool,
-    WebFetchTool,
-    WebSearchTool,
-  ]
 }
 
 /**

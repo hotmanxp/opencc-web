@@ -406,7 +406,6 @@ export class QueryEngine {
     } = await processUserInput({
       input: prompt,
       mode: 'prompt',
-      // ZAI_REMOVED: setToolJSX noop (UI/REPL coupling)
       setToolJSX: () => {},
       context: {
         ...processUserInputContext,
