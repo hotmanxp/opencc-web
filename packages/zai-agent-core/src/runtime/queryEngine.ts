@@ -377,7 +377,8 @@ export async function* queryEngine(
   }
 }
 
-function resolveToolPool(
+/** @internal — exposed for unit tests in test/runtime/resolveToolPool-disallowed.test.ts */
+export function resolveToolPool(
   options: QueryOptions,
   _config: RuntimeConfig,
   base: Tool[],
