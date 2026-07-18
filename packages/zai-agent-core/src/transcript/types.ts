@@ -133,7 +133,7 @@ export type TranscriptFile = {
 export type TranscriptMessage = {
   uuid: string
   parentUuid: string | null
-  type: 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result' | 'attachment'
+  type: 'user' | 'assistant' | 'system' | 'tool_use' | 'tool_result' | 'attachment' | 'compact_boundary'
   timestamp: number
   raw: unknown
   runtime?: {
@@ -193,6 +193,7 @@ export const TranscriptMessageSchema = z
       'tool_use',
       'tool_result',
       'attachment',
+      'compact_boundary',
     ]),
     timestamp: z.number(),
     raw: z.unknown().optional(),
