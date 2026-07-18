@@ -145,4 +145,54 @@ describe('AgentTool', () => {
     expect(r).toMatch(/^\s*-\s+Explore:/m)
     expect(r).toMatch(/^\s*-\s+Plan:/m)
   })
+
+  test('validateInput rejects empty prompt', async () => {
+    const r = await (AgentTool as any).validateInput(
+      { prompt: '', subagent_type: 'general-purpose' },
+      ctx,
+    )
+    expect(r.result).toBe(false)
+  })
+
+  test('validateInput allows non-empty prompt', async () => {
+    const r = await (AgentTool as any).validateInput(
+      { prompt: 'do x', subagent_type: 'general-purpose' },
+      ctx,
+    )
+    expect(r.result).toBe(true)
+  })
+
+  test('checkPermissions returns allow', async () => {
+    const r = await (AgentTool as any).checkPermissions(
+      { prompt: 'x', subagent_type: 'general-purpose' },
+      ctx,
+    )
+    expect(r.behavior).toBe('allow')
+  })
+
+  test('userFacingName formats Agent(<subagent_type>)', () => {
+    expect((AgentTool as any).userFacingName({ subagent_type: 'Explore' })).toBe('Agent(Explore)')
+  })
+
+  test('getActivityDescription returns short label', () => {
+    const label = (AgentTool as any).getActivityDescription({
+      prompt: 'long prompt '.repeat(50),
+      subagent_type: 'general-purpose',
+    })
+    expect(typeof label).toBe('string')
+    expect(label.length).toBeLessThanOrEqual(80)
+  })
+
+  test('getToolUseSummary returns description or prompt prefix', () => {
+    expect((AgentTool as any).getToolUseSummary({
+      prompt: 'x', subagent_type: 'general-purpose', description: 'desc',
+    })).toBe('desc')
+  })
+
+  test('toAutoClassifierInput returns compact shape', () => {
+    const ci = (AgentTool as any).toAutoClassifierInput({
+      prompt: 'do x', subagent_type: 'general-purpose', description: 'desc',
+    })
+    expect(ci).toEqual({ name: 'Agent', subagent_type: 'general-purpose', prompt: 'do x', description: 'desc' })
+  })
 })

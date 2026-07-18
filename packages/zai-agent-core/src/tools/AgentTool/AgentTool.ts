@@ -19,6 +19,46 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
   isReadOnly: () => true,
   isDestructive: () => false,
 
+  // ---------------------------------------------------------------------------
+  // Opencc Tool contract methods
+  // ---------------------------------------------------------------------------
+
+  async validateInput(input: AgentInput): Promise<
+    { result: true } | { result: false; message: string; errorCode: number }
+  > {
+    if (!input.prompt || input.prompt.length === 0) {
+      return { result: false, message: 'prompt must not be empty', errorCode: 1 }
+    }
+    return { result: true }
+  },
+
+  async checkPermissions(): Promise<{ behavior: 'allow' }> {
+    return { behavior: 'allow' }
+  },
+
+  userFacingName(input: AgentInput): string {
+    return `Agent(${input.subagent_type})`
+  },
+
+  getActivityDescription(input: AgentInput): string {
+    if (input.description) return input.description
+    return input.prompt.slice(0, 60)
+  },
+
+  getToolUseSummary(input: AgentInput): string | null {
+    if (input.description) return input.description
+    return null
+  },
+
+  toAutoClassifierInput(input: AgentInput) {
+    return {
+      name: 'Agent',
+      subagent_type: input.subagent_type,
+      prompt: input.prompt,
+      description: input.description,
+    }
+  },
+
   async call(rawInput, ctx) {
     const input = rawInput as AgentInput
 
