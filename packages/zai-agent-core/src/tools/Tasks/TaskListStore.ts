@@ -200,6 +200,13 @@ export class TaskListStore {
   /**
    * 更新任务。同 get:即使 taskId 在文件里存在,如果它属于别的 session,
    * 也返回 null (而不是抛 404 让调用方误以为 ID 写错)。
+   *
+   * Auto-cleanup: 若本次 patch 把任务状态推到终态(`completed` 或
+   * `deleted`),且此时 session 内所有任务都已终态,则删除整 session
+   * 的任务文件。原因: LLM 任务清单是临时工作元数据,全部完成后继续
+   * 占着磁盘文件没有意义 — 重启会看到历史已完成任务的"幽灵",污染
+   * UI 计数(`X/Y 任务` 看起来永远停在 100%)。`update` 返回的仍是
+   * 更新后的 task 快照,UI 当次拿到反馈一致。
    */
   async update(
     sessionId: string,
@@ -222,7 +229,30 @@ export class TaskListStore {
     }
     map.set(id, updated)
     await this.saveSession(sessionId, map)
+
+    // Cleanup: 仅当本次更新把任务推到终态时检查 — 避免给不相关的
+    // update (subject/owner/metadata 等) 增加无意义 I/O。
+    const transitionedToTerminal =
+      updated.status === 'completed' || updated.status === 'deleted'
+    if (transitionedToTerminal && this.areAllTerminal(map)) {
+      await this.deleteSession(sessionId)
+    }
+
     return updated
+  }
+
+  /**
+   * 判断 session 内 map 是否"全部完成"。只看 status 字段:
+   *   - `completed` / `deleted` 视为已完成
+   *   - 其他 (`pending` / `in_progress`) 视为未完成
+   * 空 map 视为"全部完成" — 文件不存在即无须清理,update 也不会
+   * 走到这一行(因为 existing 已经不存在)。
+   */
+  private areAllTerminal(map: Map<string, TaskItem>): boolean {
+    for (const t of map.values()) {
+      if (t.status !== 'completed' && t.status !== 'deleted') return false
+    }
+    return true
   }
 
   /**
