@@ -10,6 +10,17 @@
  */
 export type BashTaskStatus = 'running' | 'completed' | 'failed' | 'killed'
 
+/**
+ * Tracker 内存保护 (兜底, 避免 byId 无限增长):
+ * - 终态 task 30 分钟后 evict
+ * - byId 总数超过 200 时按 finishedAt 升序淘汰最老的终态 task
+ * 跑前 BashTool.runForeground.finish 不再 unregisterForeground (BashTool.ts:325
+ * 注释), 所以需要 tracker 内部做 LRU + 时间淘汰。Eviction 仅作用于 terminal
+ * 状态的 task, 不动 running。
+ */
+const FINISHED_TTL_MS = 30 * 60 * 1000
+const MAX_TRACKED_TASKS = 200
+
 export interface BashTaskInfo {
   taskId: string
   /** 派发该 task 的 sessionId (transcriptId). 用于 dock session 隔离. */
@@ -155,7 +166,38 @@ class BashBackgroundTracker {
     if (info.exitCode !== undefined) t.exitCode = info.exitCode
     if (info.signal) t.signal = info.signal
     this.children.delete(taskId)
+    // 终态变化后, 主动触发一次 LRU 淘汰 — 保证 tracker 内存可控。
+    this.evictFinished()
     return t
+  }
+
+  /**
+   * LRU + 时间淘汰: 仅删 terminal task (completed/failed/killed), 不动 running。
+   * 触发条件: byId 总数超 MAX_TRACKED_TASKS, 或任一终态 task 超过 FINISHED_TTL_MS。
+   */
+  private evictFinished(): void {
+    const now = Date.now()
+    const finished: BashTaskInfo[] = []
+    for (const t of this.byId.values()) {
+      if (t.status === 'running') continue
+      finished.push(t)
+    }
+    // 1) 时间淘汰: finishedAt + TTL < now 的直接删
+    for (const t of finished) {
+      if (t.finishedAt !== undefined && now - t.finishedAt > FINISHED_TTL_MS) {
+        this.byId.delete(t.taskId)
+      }
+    }
+    // 2) 容量淘汰: byId 总数还超 MAX_TRACKED_TASKS → 按 finishedAt 升序删
+    if (this.byId.size > MAX_TRACKED_TASKS) {
+      const sorted = finished
+        .filter((t) => this.byId.has(t.taskId))
+        .sort((a, b) => (a.finishedAt ?? 0) - (b.finishedAt ?? 0))
+      const excess = this.byId.size - MAX_TRACKED_TASKS
+      for (let i = 0; i < excess && i < sorted.length; i++) {
+        this.byId.delete(sorted[i].taskId)
+      }
+    }
   }
 
   /**
@@ -222,6 +264,15 @@ class BashBackgroundTracker {
   __resetForTests(): void {
     this.byId.clear()
     this.children.clear()
+  }
+
+  /**
+   * 测试钩子: 强制触发一次 LRU + 时间淘汰. 测试需要注入"老 finishedAt"
+   * 时直接调 markFinished 会把 finishedAt 覆盖成 Date.now(), 无法验证
+   * TTL 路径. 暴露此方法让测试手动注入时间后跑 evict.
+   */
+  __evictFinishedForTests(): void {
+    this.evictFinished()
   }
 }
 

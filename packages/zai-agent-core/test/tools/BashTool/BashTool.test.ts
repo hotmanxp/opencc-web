@@ -480,4 +480,104 @@ describe('BashTool', () => {
       expect(p).toMatch(/sleep N.*blocked|sub-2s/i)
     })
   })
+
+  // -------------------------------------------------------------------------
+  // 回归测试 — bashTracker TaskDock 可见性 + hang 修复
+  // -------------------------------------------------------------------------
+
+  describe('回归: bashTracker 与 child.on(\'exit\') 行为', () => {
+    test('foreground 完成: task 仍保留在 tracker (TaskDock 可见 completed)', async () => {
+      const r = await BashTool.call({ command: 'echo done' }, ctx)
+      expect(r.isError).toBeFalsy()
+      const tasks = bashBackgroundTracker.list()
+      const mine = tasks.find((t) => t.command === 'echo done')
+      expect(mine, 'foreground 完成 task 必须在 tracker 可见').toBeDefined()
+      expect(mine!.status).toBe('completed')
+      expect(mine!.finishedAt).toBeTypeOf('number')
+    })
+
+    test('foreground 失败: task 保留在 tracker (status=failed)', async () => {
+      const r = await BashTool.call({ command: 'exit 7' }, ctx)
+      expect(r.isError).toBe(true)
+      const tasks = bashBackgroundTracker.list()
+      const mine = tasks.find((t) => t.command === 'exit 7')
+      expect(mine).toBeDefined()
+      expect(mine!.status).toBe('failed')
+      expect(mine!.exitCode).toBe(7)
+    })
+
+    test('regression: 后台子进程持有 stdout fd 时 Promise 不 hang', async () => {
+      // 复现 2026-07 用户 bug: `nohup pnpm dev > log 2>&1 &` 派生出的
+      // 后代进程持有 sh -c 的 stdout fd. 旧实现 'close' 等 fd 都关 →
+      // 永远不触发 → Promise 不 resolve → 阻塞后续对话 586s.
+      //
+      // 用最小复现: `sh -c "sleep 0.5 &"` — sh 立即 exit, 但 sleep 子进程
+      // 持有 sh 的 stdout fd (Node 这边 pipe 未关). 旧 'close' 实现永远不
+      // 触发, 新 'exit' 实现看 sh 进程本身退出立即触发.
+      const start = Date.now()
+      const r = await BashTool.call(
+        { command: 'sh -c "sleep 0.5 &"' },
+        ctx,
+      )
+      const elapsed = Date.now() - start
+      // sh 进程本身 < 100ms 退出; 允许一些调度 jitter, 阈值放到 2s
+      expect(elapsed, `BashTool.call 应在 sh exit 后立即 resolve, 实测 ${elapsed}ms`).toBeLessThan(2000)
+      expect(r.isError).toBeFalsy()
+      const tasks = bashBackgroundTracker.list()
+      const mine = tasks.find((t) => t.command === 'sh -c "sleep 0.5 &"')
+      expect(mine, 'backgrounded grandchild task 必须在 tracker').toBeDefined()
+      // sh exit 0 (后台 sleep 不影响 sh exit code), task 标记 completed
+      expect(mine!.status).toBe('completed')
+    })
+
+    test('regression: foreground sessionId 注入后 tracker.list 可按 sessionId 过滤到', async () => {
+      const ctxWithSid = {
+        ...ctx,
+        __runtimeConfig: { ...ctx.__runtimeConfig, sessionId: 'sess-test-123' },
+      }
+      await BashTool.call({ command: 'echo hi' }, ctxWithSid)
+      const filtered = bashBackgroundTracker.list({ sessionId: 'sess-test-123' })
+      expect(filtered.some((t) => t.command === 'echo hi')).toBe(true)
+      const otherSession = bashBackgroundTracker.list({ sessionId: 'sess-other' })
+      expect(otherSession.some((t) => t.command === 'echo hi')).toBe(false)
+    })
+  })
+
+  describe('回归: bashTracker LRU 淘汰', () => {
+    test('终态 task 30 分钟后被 evict', async () => {
+      const t = bashBackgroundTracker.register('b-test-1', {
+        sessionId: 's1',
+        command: 'old',
+        description: 'old',
+        startedAt: Date.now() - 31 * 60 * 1000,
+      })
+      bashBackgroundTracker.markFinished('b-test-1', 'completed')
+      // markFinished 会把 finishedAt 覆盖成 Date.now(); 改回 31 分钟前
+      // 再调测试 seam 强制 evict, 验证 TTL 路径.
+      t.finishedAt = Date.now() - 31 * 60 * 1000
+      bashBackgroundTracker.__evictFinishedForTests()
+      expect(bashBackgroundTracker.get('b-test-1')).toBeUndefined()
+    })
+
+    test('running task 即使老也不被 evict (TTL 不影响 running)', async () => {
+      bashBackgroundTracker.register('b-runing', {
+        sessionId: 's1',
+        command: 'still-running',
+        description: 'still',
+        startedAt: Date.now() - 60 * 60 * 1000,  // 1 小时前
+      })
+      // 触发 markFinished 不会让 running 变 finished — 直接调 evictFinished 路径
+      // 用一次 markFinished 触发清理, running 的不会被删
+      bashBackgroundTracker.register('b-old', {
+        sessionId: 's1',
+        command: 'old-finished',
+        description: 'old',
+        startedAt: Date.now() - 60 * 60 * 1000,
+      })
+      const oldTask = bashBackgroundTracker.get('b-old')!
+      oldTask.finishedAt = Date.now() - 60 * 60 * 1000
+      bashBackgroundTracker.markFinished('b-old', 'completed')
+      expect(bashBackgroundTracker.get('b-runing'), 'running task 不被 evict').toBeDefined()
+    })
+  })
 })

@@ -326,7 +326,10 @@ async function runForeground(
       if (settled) return
       settled = true
       clearTimeout(assistantBgTimer)
-      bashBackgroundTracker.unregisterForeground(taskId)
+      // ⚠️ 不要在这里 unregisterForeground — 保留 task 在 tracker 里,
+      // 这样 TaskDock / useBashBackgroundTasks 能看到 completed / failed
+      // 状态 (opencc 同 LocalShellTask.tsx:215-225 设计)。bashTracker 加了
+      // LRU 时间淘汰 (30 分钟 / 200 条) 兜底内存泄漏。
       resolve(result)
     }
 
@@ -341,7 +344,12 @@ async function runForeground(
       bashBackgroundTracker.appendOutput(taskId, { stderr: text })
     })
 
-    child.on('close', async (code, signal) => {
+    // 用 'exit' 而不是 'close' — Node.js 'close' 等 stdio streams 也关闭才触发。
+    // 命令如 `nohup pnpm dev > log 2>&1 &` 派生出的后代进程 (pnpm dev 自身)
+    // 持有 sh -c 的 stdout/stderr fd, 即使 sh -c 父进程已 exit, 'close' 也
+    // 不会触发 → Promise 永不 resolve → tool_use:done 不发 → 阻塞后续对话。
+    // 'exit' 只看 child 进程本身 exit, 立即触发 markFinished + finish。
+    child.on('exit', async (code, signal) => {
       bashBackgroundTracker.markFinished(
         taskId,
         code === 0 ? 'completed' : 'failed',
@@ -478,7 +486,9 @@ function runInBackground(
     const text = d.toString()
     bashBackgroundTracker.appendOutput(taskId, { stderr: text })
   })
-  child.on('close', (code, signal) => {
+  // 用 'exit' 而不是 'close' — 同 runForeground: 后代进程持有 fd 时 'close' 不会触发,
+  // 'exit' 只看 child 进程本身退出, 立即 markFinished 让 TaskDock 看到终态。
+  child.on('exit', (code, signal) => {
     bashBackgroundTracker.markFinished(
       taskId,
       code === 0 ? 'completed' : 'failed',
