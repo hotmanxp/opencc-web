@@ -1,8 +1,9 @@
-import { readFile } from 'fs/promises'
+import { readFile, stat } from 'fs/promises'
 import { isAbsolute, resolve } from 'path'
-import type { LegacyTool, LegacyToolContext as ToolContext } from '../Tool.js'
+import type { LegacyTool } from '../Tool.js'
 import { FileReadInputSchema, type FileReadInput } from './schema.js'
 import { renderPrompt } from './prompt.js'
+import { markRead } from '../readState.js'
 
 const MAX_LINES_DEFAULT = 2000
 
@@ -25,6 +26,16 @@ export const FileReadTool: LegacyTool<typeof FileReadInputSchema, string> = {
       const err = e as NodeJS.ErrnoException
       if (err.code === 'ENOENT') return { output: `File not found: ${absPath}`, isError: true }
       return { output: `Failed to read ${absPath}: ${err.message}`, isError: true }
+    }
+
+    // Mirror upstream OpenCC's readFileState: persist the observed mtime so
+    // FileWriteTool can enforce "must Read before Write" + mtime staleness.
+    try {
+      const s = await stat(absPath)
+      markRead(ctx.cwd, absPath, s.mtimeMs)
+    } catch {
+      // stat can race with concurrent deletes; the read itself succeeded, so
+      // we still return content. Write tool will re-check on its own pass.
     }
 
     const allLines = content.split('\n')
