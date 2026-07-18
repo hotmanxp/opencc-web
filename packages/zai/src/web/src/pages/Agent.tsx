@@ -658,21 +658,25 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
             children: (
               <div style={{ paddingLeft: 4 }}>
                 {inputKeys.length > 0 && (
-                  <div style={{ marginBottom: 8 }}>
-                    <Text
-                      type="secondary"
-                      style={{
-                        fontSize: 11,
-                        textTransform: "uppercase",
-                        letterSpacing: 0.5,
-                      }}
-                    >
-                      参数
-                    </Text>
-                    {renderer.renderInput
-                      ? renderer.renderInput(input)
-                      : renderGenericInput()}
-                  </div>
+                  // 自定义 renderer 自带 FieldLabel (e.g. "命令"/"文件"), 不重复套 "参数" 标题;
+                  // 仅 generic fallback 显示 "参数" 给 JSON 兜底一份上下文.
+                  renderer.renderInput
+                    ? renderer.renderInput(input)
+                    : (
+                      <div style={{ marginBottom: 8 }}>
+                        <Text
+                          type="secondary"
+                          style={{
+                            fontSize: 11,
+                            textTransform: "uppercase",
+                            letterSpacing: 0.5,
+                          }}
+                        >
+                          参数
+                        </Text>
+                        {renderGenericInput()}
+                      </div>
+                    )
                 )}
                 {output !== undefined && output !== null && (
                   <div style={{ marginBottom: 8 }}>
