@@ -1,9 +1,15 @@
 import type { ToolRenderer } from "./types.js"
 import { bashRenderer } from "./bash.js"
 import { genericRenderer } from "./generic.js"
+import { globRenderer } from "./glob.js"
+import { grepRenderer } from "./grep.js"
+import { readRenderer } from "./read.js"
 
 const registry: Record<string, ToolRenderer> = {
   Bash: bashRenderer,
+  Glob: globRenderer,
+  Grep: grepRenderer,
+  Read: readRenderer,
 }
 
 export function setRenderer(name: string, renderer: ToolRenderer): void {
