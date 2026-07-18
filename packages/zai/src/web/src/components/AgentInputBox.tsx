@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Input, Button, message } from "antd";
 import { PictureOutlined } from "@ant-design/icons";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
@@ -43,7 +43,7 @@ type SlashItem = {
   pluginName?: string;
 };
 
-export default function AgentInputBox() {
+export default React.memo(function AgentInputBox() {
   const status = useAgentStore((s) => s.status);
   const sessionId = useAgentStore((s) => s.sessionId);
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
@@ -630,4 +630,4 @@ export default function AgentInputBox() {
       />
     </div>
   );
-}
+});

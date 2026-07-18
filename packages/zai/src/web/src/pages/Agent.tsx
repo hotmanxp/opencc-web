@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
   Input,
   Button,
@@ -228,7 +228,7 @@ const markdownComponents = {
   ),
 };
 
-function MarkdownText({ text }: { text: string }) {
+const MarkdownText = React.memo(function MarkdownText({ text }: { text: string }) {
   return (
     <div
       style={{
@@ -246,14 +246,14 @@ function MarkdownText({ text }: { text: string }) {
       </ReactMarkdown>
     </div>
   );
-}
+});
 
 // Thinking 折叠块用紫罗兰 (#722ed1) 作为主色, 与正式对话的浅蓝/浅绿气泡区分.
 // 折叠态: pill 形紫色 "思考" 标签 + 截断预览
 // 展开态: 主题紫半透明叠加在深色页面背景上 + 紫罗兰左边条 + 浅色斜体等宽字体,
 // 与正式对话 Card 风格脱钩. 用 rgba 透明度而非纯浅紫, 是因为页面背景是深色,
 // 原 #f9f0ff 在深背景上跳眼; 改成主题紫 14% 透明度既保留紫色调又柔和融入暗背景.
-function StreamingMarkdown({ text }: { text: string }) {
+const StreamingMarkdown = React.memo(function StreamingMarkdown({ text }: { text: string }) {
   const { complete, tail } = useMemo(
     () => splitMarkdownOnIncomplete(text),
     [text],
@@ -287,7 +287,7 @@ function StreamingMarkdown({ text }: { text: string }) {
       )}
     </>
   );
-}
+});
 
 const THINKING_ACCENT = "#722ed1";
 const THINKING_BG = "rgba(114, 45, 209, 0.14)";
@@ -298,7 +298,7 @@ const THINKING_PREVIEW_MAX = 80;
 // 这样历史回放的 ThinkingBlock (streaming=undefined) 不会跑动画。
 let thinkGlowRefcount = 0;
 
-function ThinkingBlock({
+const ThinkingBlock = React.memo(function ThinkingBlock({
   text,
   streaming,
 }: {
@@ -470,7 +470,7 @@ function ThinkingBlock({
       />
       </div>
   );
-}
+});
 
 // Tool pill 调色板: 仿 opencc AssistantToolUseMessage 的 userFacingNameBackgroundColor
 // 思路, 用 pill 背景色 + 反白文字 表达 "当前正在被调用的工具".
@@ -512,7 +512,7 @@ function ToolUsePill({ name, status }: { name: string; status: ToolStatus }) {
 // 工具调用块: 把 tool_use:start / done / error / invalid / denied
 // 统一成单一可折叠面板. 由于 React key 按 toolUseId 锁定 (见调用处),
 // 同一次调用的 start/done/error 事件会复用同一个 DOM 节点, 折叠态不丢.
-function ToolCallBlock({ msg }: { msg: AgentMessage }) {
+const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMessage }) {
   const name = (msg.name as string) || 'unknown'
   const input = (msg.input as Record<string, unknown>) || {}
   // Agent 工具的 pill 不显示泛化的 "Agent" — 展示实际派发的 subagent_type
@@ -749,9 +749,9 @@ function ToolCallBlock({ msg }: { msg: AgentMessage }) {
       />
     </div>
   );
-}
+});
 
-function MessageBubble({
+const MessageBubble = React.memo(function MessageBubble({
   msg,
   streaming,
 }: {
@@ -1008,7 +1008,7 @@ function MessageBubble({
 
   // 其它事件 (message_stop / runtime.done) 不渲染
   return null;
-}
+});
 
 export default function Agent() {
   const messages = useAgentStore((s) => s.messages);
