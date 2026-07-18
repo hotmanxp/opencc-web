@@ -74,7 +74,7 @@ type PendingAttachment = {
   error?: string;
 };
 
-const MAX_ATTACHMENTS_PER_TURN = 10;
+// (MAX_ATTACHMENTS_PER_TURN moved to AgentInputBox — T6 migration)
 
 const markdownComponents = {
   p: ({ children }: any) => <p style={{ margin: "0 0 8px 0" }}>{children}</p>,
@@ -1062,20 +1062,8 @@ export default function Agent() {
   );
 
   // Slash autocomplete: 输入 / 时弹出, 同时包含 builtin commands + user commands + skills
-  type SlashItem = {
-    kind: 'command' | 'skill'
-    name: string
-    description: string
-    argumentHint?: string
-    whenToUse?: string
-    isBuiltIn?: boolean
-    isConflict?: boolean
-    type?: 'local' | 'prompt'
-    /** plugin skill 的展示名（去掉 `plugin:pluginName:` 前缀） */
-    displayName?: string
-    /** plugin skill 所属的 plugin 名，用于在描述前渲染 `(pluginName)` */
-    pluginName?: string
-  }
+  // (type moved to AgentInputBox — T6 migration)
+
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
   const [showAllSessions, setShowAllSessions] = useState(false);
   // 会话列表默认展示条数: 按侧栏可视高度估算, 每项约 50px (padding + 两行文字 + gap).
