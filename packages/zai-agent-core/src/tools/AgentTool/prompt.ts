@@ -1,10 +1,13 @@
+import { BUILT_IN_AGENTS } from './builtInAgents.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 
 /**
  * Opencc-style tool description. The text body mirrors the upstream
- * AgentTool.tsx description; when the upstream source is not locally
- * accessible (OPENCC_SRC unreachable), the body is a clearly-marked
- * placeholder that downstream sync --apply runs replace.
+ * AgentTool.tsx description.
+ *
+ * upstream-prompt-source: pending — replace body via sync-from-opencc once
+ * OPENCC_SRC is reachable. Until then this is a hand-written approximation
+ * of the documented role of each agent.
  *
  * The <AVAILABLE_AGENTS> section is appended unconditionally so the LLM
  * always sees which subagent_type values are valid.
@@ -32,10 +35,13 @@ export function getAgentToolDescription(): string {
     '  - Sub-agent does NOT share: tool context state, message history',
   ].join('\n')
 
-  return `${body}\n\n${renderAvailableAgentsSection()}\n`
-    + '\nDerived sub-agents cannot recursively call Agent by default. '
-    + 'Allow recursion by listing the desired tools in forbiddenTools only '
-    + 'when the agent definition explicitly opts in.\n'
+  const section = renderAvailableAgentsSection()
+  return (
+    `${body}\n\n${section}\n`
+    + 'Sub-agents cannot recursively call Agent by default (the runtime enforces\n'
+    + "disallowedTools:['Agent'] on every fork). To extend the recursion guard,\n"
+    + "set additional disallowedTools via the parent query's options.\n"
+  )
 }
 
 /**
@@ -49,9 +55,9 @@ export function getAgentToolDescription(): string {
  * available so callers can simply `if (section) push`.
  */
 export function renderAvailableAgentsSection(
-  agents?: AgentDefinition[],
+  agents: AgentDefinition[] = BUILT_IN_AGENTS,
 ): string {
-  const list = agents ?? []
+  const list = agents
   if (list.length === 0) return ''
   const lines = list.map(a => {
     const desc = a.description?.trim() || '(no description)'

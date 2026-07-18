@@ -115,17 +115,34 @@ describe('AgentTool', () => {
     expect(typeof text).toBe('string')
     expect(text.length).toBeGreaterThan(80)
     expect(text).toContain('sub-agent')
-    // Either upstream has AVAILABLE_AGENTS block already, or we append.
-    expect(text.toLowerCase()).toMatch(/availab.?agents|specialized|general-purpose/)
+    // Force the section to be present with the open + close tags and a
+    // general-purpose bullet. The loose '/availab.?agents|specialized|
+    // general-purpose/' regex previously passed because "general-purpose"
+    // already appears in the description body — these explicit assertions
+    // guarantee the <available_agents> block is actually appended.
+    expect(text).toContain('<available_agents>')
+    expect(text).toContain('</available_agents>')
+    expect(text).toMatch(/^\s*-\s+general-purpose:/m)
   })
 
-  test('renderAvailableAgentsSection returns rendered bullet list', async () => {
+  test('renderAvailableAgentsSection renders bullet list for explicit agents', async () => {
     // Built-in always at least one (general-purpose from BUILT_IN_AGENTS).
     const { renderAvailableAgentsSection } = await import('../../src/tools/AgentTool/prompt.js')
     const r = renderAvailableAgentsSection([
       { name: 'Explore', description: 'Read-only codebase exploration.', systemPrompt: 'x' },
     ])
     expect(r).toContain('<available_agents>')
-    expect(r).toContain('Explore')
+    expect(r).toContain('</available_agents>')
+    expect(r).toMatch(/^\s*-\s+Explore:/m)
+  })
+
+  test('renderAvailableAgentsSection defaults to BUILT_IN_AGENTS', async () => {
+    const { renderAvailableAgentsSection } = await import('../../src/tools/AgentTool/prompt.js')
+    const r = renderAvailableAgentsSection()
+    expect(r).toContain('<available_agents>')
+    expect(r).toContain('</available_agents>')
+    expect(r).toMatch(/^\s*-\s+general-purpose:/m)
+    expect(r).toMatch(/^\s*-\s+Explore:/m)
+    expect(r).toMatch(/^\s*-\s+Plan:/m)
   })
 })
