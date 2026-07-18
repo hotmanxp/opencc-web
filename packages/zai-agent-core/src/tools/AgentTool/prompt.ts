@@ -1,7 +1,7 @@
 import type { AgentDefinition } from './loadAgentsDir.js'
 
 export function renderPrompt(): string {
-  return `Launches a new agent (sub-agent) to handle a complex multi-step task.
+  return [`Launches a new agent (sub-agent) to handle a complex multi-step task.
 
   Each sub-agent runs in its own session, has its own transcript, and
   inherits the full tool pool (including Agent itself — sub-agents can
@@ -23,7 +23,9 @@ export function renderPrompt(): string {
     - Sub-agent default maxTurns: 25
     - Sub-agent shares: dataDir, sandbox config, model caller, abort signal
     - Sub-agent does NOT share: transcript, tool context state, message history
-    - All sub-agent events are forwarded to parent as 'subagent:event'`
+    - All sub-agent events are forwarded to parent as 'subagent:event'`,
+    '派生的子 agent 不能再调用 Agent / BackgroundAgent(防递归)。需要更多 sub-agent 时由父 session 派发。',
+  ].join('\n')
 }
 
 /**

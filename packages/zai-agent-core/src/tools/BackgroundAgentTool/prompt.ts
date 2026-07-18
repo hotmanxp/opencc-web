@@ -28,5 +28,6 @@ export function renderBackgroundAgentPrompt(): string {
     '- cwd:工作目录(可选,默认当前 cwd)',
     '- agent:子 agent 类型(可选)',
     '- label:人类可读的短标签(可选,用于显示)',
+    '派生的后台子 agent 不能再调用 Agent / BackgroundAgent(防递归)。需要更多 sub-agent 时由父 session 派发。',
   ].join('\n')
 }
