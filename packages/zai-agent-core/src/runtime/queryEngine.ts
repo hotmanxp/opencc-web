@@ -389,10 +389,21 @@ export function resolveToolPool(
   // SkillTool is a legacy minimal Tool — wrap it in the opencc shape so it
   // satisfies the same Tool[] contract as the rest of the registry.
   const skillTool = skillToolEnabled ? [wrapAsOpenccTool(SkillTool)] : []
+  let pool: Tool[]
   if (preset === 'none') {
-    return [...(options.additionalTools ?? []), ...skillTool]
+    pool = [...(options.additionalTools ?? []), ...skillTool]
+  } else {
+    pool = [...base, ...skillTool, ...(options.additionalTools ?? [])]
   }
-  return [...base, ...skillTool, ...(options.additionalTools ?? [])]
+  // 最后一步:按 disallowedTools 黑名单剔除工具 (复刻 OpenCC disallowedTools 语义)。
+  // AgentTool / DefaultBackgroundRuntime 在派发 sub-agent 时传入
+  // ['Agent', 'BackgroundAgent'],阻断递归派发。
+  const disallowed = options.disallowedTools
+  if (disallowed && disallowed.length > 0) {
+    const set = new Set(disallowed)
+    pool = pool.filter(t => !set.has(t.name))
+  }
+  return pool
 }
 
 function makeToolContext(
