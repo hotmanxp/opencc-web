@@ -2,7 +2,7 @@ import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Input, Button, message } from "antd";
 import { PictureOutlined } from "@ant-design/icons";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
-import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
+import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import { api } from "../lib/api";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import ConversationInfoButton from "../components/ConversationInfoButton";
@@ -310,6 +310,18 @@ export default function AgentInputBox() {
         setShowSkillMenu(false);
         return;
       }
+    }
+    // shift+tab: cycle permission mode (only when idle, not while streaming)
+    if (e.key === "Tab" && e.shiftKey && status === "idle" && sessionId) {
+      e.preventDefault();
+      const currentMode =
+        useAgentStore.getState().sessions.find(
+          (s) => s.transcriptId === sessionId,
+        )?.permissionMode ?? "default";
+      const idx = MODE_CYCLE_ORDER.indexOf(currentMode);
+      const next = MODE_CYCLE_ORDER[(idx + 1) % MODE_CYCLE_ORDER.length]!;
+      void useAgentStore.getState().patchSessionMode(sessionId, next);
+      return;
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();

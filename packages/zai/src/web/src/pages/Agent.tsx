@@ -1011,27 +1011,25 @@ function MessageBubble({
 }
 
 export default function Agent() {
-  const {
-    messages,
-    status,
-    cwd,
-    sessions,
-    sessionId,
-    todosBySession,
-    activeSessionId,
-    stop,
-    clearMessages,
-    loadSessions,
-    setCurrentSession,
-    loadTranscript,
-    createNewSession,
-    deleteSession,
-    pendingAsk,
-    setAskAnswer,
-    setAskNotes,
-    submitAsk,
-    rejectAsk,
-  } = useAgentStore();
+  const messages = useAgentStore((s) => s.messages);
+  const status = useAgentStore((s) => s.status);
+  const cwd = useAgentStore((s) => s.cwd);
+  const sessions = useAgentStore((s) => s.sessions);
+  const sessionId = useAgentStore((s) => s.sessionId);
+  const todosBySession = useAgentStore((s) => s.todosBySession);
+  const activeSessionId = useAgentStore((s) => s.activeSessionId);
+  const stop = useAgentStore((s) => s.stop);
+  const clearMessages = useAgentStore((s) => s.clearMessages);
+  const loadSessions = useAgentStore((s) => s.loadSessions);
+  const setCurrentSession = useAgentStore((s) => s.setCurrentSession);
+  const loadTranscript = useAgentStore((s) => s.loadTranscript);
+  const createNewSession = useAgentStore((s) => s.createNewSession);
+  const deleteSession = useAgentStore((s) => s.deleteSession);
+  const pendingAsk = useAgentStore((s) => s.pendingAsk);
+  const setAskAnswer = useAgentStore((s) => s.setAskAnswer);
+  const setAskNotes = useAgentStore((s) => s.setAskNotes);
+  const submitAsk = useAgentStore((s) => s.submitAsk);
+  const rejectAsk = useAgentStore((s) => s.rejectAsk);
   const todosForCurrentSession: TodoItem[] =
     sessionId != null ? (todosBySession[sessionId] ?? []) : [];
   const patchSessionMode = useAgentStore((s) => s.patchSessionMode);
