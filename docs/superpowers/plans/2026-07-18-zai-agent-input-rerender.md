@@ -49,29 +49,10 @@ import AgentInputBox from "../components/AgentInputBox";
 
 ```tsx
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Input, Button, theme } from "antd";
-import {
-  PictureOutlined,
-} from "@ant-design/icons";
+import { Input } from "antd";
 import { useAgentStore } from "../store/useAgentStore";
-import { api } from "../lib/api";
-import { AttachmentStrip } from "../components/AttachmentStrip";
-import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
-import type { AgentMessage } from "../store/useAgentStore";
 
 const { TextArea } = Input;
-const MAX_ATTACHMENTS_PER_TURN = 4;
-
-type PendingAttachment = {
-  localId: string;
-  mime: string;
-  size: number;
-  filename: string;
-  thumbnailUrl: string;
-  base64DataUrl: string;
-  status: "reading" | "ready" | "error";
-  error?: string;
-};
 
 type SlashItem = {
   kind: "command" | "skill";
@@ -91,7 +72,7 @@ export default function AgentInputBox() {
 }
 ```
 
-注: `PendingAttachment` 与 `SlashItem` 类型先在这里本地定义, 后续步骤把它们从 `Agent.tsx` 完全迁出, 然后从 `Agent.tsx` 删除对应定义。
+注: 骨架只 import 用到的 (`Input` 因为 `TextArea` 解构), 其他 (useState/useRef/useEffect/useCallback/useMemo/AttachmentStrip/api 等) 在后续步骤按需 import。`PendingAttachment` 与 `SlashItem` 类型先在这里本地定义, 后续步骤把它们从 `Agent.tsx` 完全迁出, 然后从 `Agent.tsx` 删除对应定义。
 
 - [ ] **Step 3: 验证骨架编译**
 
@@ -168,7 +149,6 @@ export default function AgentInputBox() {
   const skillMenuRef = useRef<HTMLDivElement>(null);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [skillMenuIdx, setSkillMenuIdx] = useState(0);
-  const [skillFilter, setSkillFilter] = useState("");
 
   return <div data-agent-inputbox-placeholder />;
 }
@@ -713,11 +693,52 @@ git commit -m "refactor(zai-web): move send + prompt post into AgentInputBox"
 
 - [ ] **Step 1: 把整个 status bar + TextArea 区段搬到 AgentInputBox**
 
+**保留原 UI 布局**: TextArea 上方一行 status bar (cwd / 模型 / streaming 指示 / `esc 中断` + 附件缩略图内嵌 + spacer + 上传图片按钮 + permission mode button), status bar 下方 TextArea + slash dropdown。
+
 替换 `AgentInputBox` 的 return 为:
 
 ```tsx
   return (
     <div>
+      {/* status bar: 顶部一行 — cwd / 模型 / streaming 提示 / 附件缩略图内嵌 / 上传图片按钮 */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "6px 10px",
+          background: "rgba(0,0,0,0.25)",
+          borderRadius: 6,
+          marginBottom: 6,
+          fontSize: 12,
+        }}
+      >
+        {/* cwd 文本 / 模型名 / streaming 提示 — 简化版; 完整 status bar 内容由 Task 7 搬入 */}
+        {status === "streaming" && (
+          <span style={{ color: "rgba(255,255,255,0.45)" }}>· esc 中断</span>
+        )}
+        {/* 附件缩略图内嵌到 status bar 内, 与按钮同一行, 缩到 40px, 紧贴状态文字.
+            compact 去除外层 padding; flexWrap: wrap 让多张时换行. */}
+        {attachments.length > 0 && (
+          <AttachmentStrip
+            attachments={attachments}
+            onRemove={removeAttachment}
+            align="start"
+            size={40}
+            compact
+          />
+        )}
+        <span style={{ flex: 1 }} />
+        <Button
+          icon={<PictureOutlined />}
+          onClick={() => fileInputRef.current?.click()}
+          title="上传图片"
+          disabled={status === "streaming" || pendingAsk?.status === "pending"}
+          style={{ color: "rgba(255,255,255,0.45)" }}
+        />
+      </div>
+
+      {/* TextArea + slash dropdown 区 */}
       <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
         <div
           style={{
@@ -845,17 +866,6 @@ git commit -m "refactor(zai-web): move send + prompt post into AgentInputBox"
           />
         </div>
       </div>
-
-      {/* 附件缩略图条 — 紧贴 TextArea 上方 (原 status bar 内嵌位置) */}
-      {attachments.length > 0 && (
-        <AttachmentStrip
-          attachments={attachments}
-          onRemove={removeAttachment}
-          align="start"
-          size={40}
-          compact
-        />
-      )}
 
       <input
         ref={fileInputRef}
@@ -1289,7 +1299,7 @@ async () => {
     window.__zaiAllCommits.push(rendered);
   };
 
-  const ta = document.querySelector('textarea');
+  const ta = document.querySelector('textarea.zai-agent-textarea') || document.querySelector('textarea');
   ta.focus();
   await new Promise(r => setTimeout(r, 100));
   window.__zaiAllCommits.length = 0;
@@ -1314,7 +1324,7 @@ async () => {
 }
 ```
 
-- [ ] **Step 4: 通过验收**
+- [ ] **Step 4: 通过验收 — 性能 (perf)**
 
 预期结果 (修复后):
 
@@ -1331,6 +1341,22 @@ async () => {
 ```
 
 若 `top` 里仍包含 `MessageBubble` / `Markdown` / `ThinkingBlock` / `ToolCallBlock` / `SyntaxHighlighter` 任一项, **或** `ms > 60`, **或** `commitCount > 2`, 任务失败, 回溯检查 M1-M4 哪一项没生效。
+
+- [ ] **Step 4b: 功能回归 — 真实交互 (functional)**
+
+用 chrome-devtools 的人工交互脚本 (通过 `take_snapshot` 拿 uid → `click` / `fill` / `press_key`):
+
+1. **输入文字**: 在 TextArea 内填 "hello regression test" — 文本应出现在 TextArea 中, transcript 不变。
+2. **Enter 发送**: 按 Enter — TextArea 清空, transcript 末尾出现新 user.text 气泡。
+3. **Shift+Enter 换行**: 重新填入 "line1" 按 Shift+Enter 再填 "line2" — TextArea 内容应包含两行换行。
+4. **粘贴图片**: 触发粘贴事件 (用 `evaluate_script` 注入 base64 PNG + `dispatchEvent(new ClipboardEvent('paste', { clipboardData }))`) — AttachmentStrip 出现缩略图, 状态切到 "ready"。
+5. **拖拽图片**: 同样通过 `dispatchEvent(new DragEvent('drop', { dataTransfer }))` 模拟。
+6. **`/` 触发 slash 菜单**: 填 "/" — 下拉菜单出现, 列项与 `/api/slash` 返回一致。
+7. **Slash 选择**: 用 ArrowDown 移动选中, Enter 触发 — 行为与原 Agent 一致 (local command 直接执行, prompt/skill 填入输入框)。
+8. **会话切换**: 点侧栏某条历史会话 (用 `take_snapshot` 拿 uid → `click`) — `messages` 应加载对应 transcript。
+9. **permission mode cycle**: 在 TextArea 焦点下按 Shift+Tab — mode 按钮的 `MODE_CYCLE_ORDER` 顺序循环。
+
+任一步失败 → 回溯对应 Task 重新审视实现。
 
 - [ ] **Step 5: 关闭 dev server**
 
