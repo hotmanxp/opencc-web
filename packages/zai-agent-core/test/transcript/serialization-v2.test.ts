@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { serializeFile, deserializeFile } from '../../src/transcript/serialization.js'
 import { LegacyTranscriptError } from '../../src/transcript/types.js'
 

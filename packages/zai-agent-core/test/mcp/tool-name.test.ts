@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { makeMcpToolName, parseMcpToolName } from '../../src/mcp/tool-name.js'
 
 describe('makeMcpToolName', () => {

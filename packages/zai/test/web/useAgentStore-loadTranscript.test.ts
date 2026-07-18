@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { loadTranscriptMessages } from '../../src/web/src/store/useAgentStore.js'
 
 describe('loadTranscriptMessages (v2)', () => {

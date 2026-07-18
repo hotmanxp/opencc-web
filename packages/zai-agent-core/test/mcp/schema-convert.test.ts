@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { z } from 'zod'
 import { jsonSchemaToZod } from '../../src/mcp/jsonSchemaToZod.js'
 

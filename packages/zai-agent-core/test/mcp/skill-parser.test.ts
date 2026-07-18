@@ -1,4 +1,4 @@
-import { describe, expect, test } from 'bun:test'
+import { describe, expect, test } from 'vitest'
 import { parseSkillResource } from '../../src/mcp/SkillResourceAdapter.js'
 
 describe('parseSkillResource', () => {

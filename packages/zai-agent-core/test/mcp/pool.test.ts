@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach } from 'bun:test'
+import { describe, expect, test, beforeEach } from 'vitest'
 import { MCPClientPool } from '../../src/mcp/MCPClientPool.js'
 import { McpServerError } from '../../src/mcp/errors.js'
 
