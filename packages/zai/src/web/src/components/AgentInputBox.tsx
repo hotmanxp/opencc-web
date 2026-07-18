@@ -6,6 +6,7 @@ import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import { api } from "../lib/api";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import ConversationInfoButton from "../components/ConversationInfoButton";
+import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 
 type PendingAttachment = {
   localId: string;
@@ -262,7 +263,11 @@ export default React.memo(function AgentInputBox() {
           );
         } catch (e) {
           const msg =
-            e instanceof ImageReadError ? e.message : (e as Error).message;
+            e instanceof ImageReadError
+              ? e.message
+              : e instanceof Error
+                ? e.message
+                : String(e);
           setAttachments((prev) =>
             prev.map((a) =>
               a.localId === p.localId
