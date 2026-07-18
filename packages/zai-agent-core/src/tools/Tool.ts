@@ -69,6 +69,58 @@ export type LegacyTool<
   isConcurrencySafe?: (input: any) => boolean
   isReadOnly?: (input: any) => boolean
   isDestructive?: (input: any) => boolean
+
+  // ---------------------------------------------------------------------------
+  // Optional opencc-style methods (对标 opencc `Tool` interface).
+  //
+  // 只为新工具(BashTool)实现, 老工具 (FileEdit/FileRead/Agent/Glob 等) 都不需要。
+  // legacyAdapter 把这些字段透传给 opencc `Tool` 同名字段; 缺省时由 adapter 默认值填充。
+  // ---------------------------------------------------------------------------
+
+  /** Opencc `Tool.prompt` — 完整的工具说明。 */
+  prompt?: () => Promise<string> | string
+
+  /** Opencc `Tool.validateInput` — schema 校验通过后的语义校验。 */
+  validateInput?: (input: any, ctx: LegacyToolContext) => Promise<{ result: true } | { result: false; message: string; errorCode: number }>
+
+  /** Opencc `Tool.checkPermissions` — 在 validateInput 之后调用。 */
+  checkPermissions?: (input: any, ctx: LegacyToolContext) => Promise<
+    | { behavior: 'allow'; updatedInput?: any }
+    | { behavior: 'deny'; message: string; updatedInput?: any }
+    | { behavior: 'ask'; message?: string; updatedInput?: any }
+  >
+
+  /** Opencc `Tool.preparePermissionMatcher` — 为 hook `if` 条件编译闭包。 */
+  preparePermissionMatcher?: (input: any) => Promise<(pattern: string) => boolean>
+
+  /** Opencc `Tool.description` — 异步获取简短描述。 */
+  asyncDescription?: (input: any) => Promise<string>
+
+  /** Opencc `Tool.isSearchOrReadCommand` — 用于 UI collapse。 */
+  isSearchOrReadCommand?: (input: any) => { isSearch: boolean; isRead: boolean; isList?: boolean }
+
+  /** Opencc `Tool.mapToolResultToToolResultBlockParam` — 工具 result → API block。 */
+  mapToolResultToToolResultBlockParam?: (output: any, toolUseId: string) => {
+    tool_use_id: string
+    type: 'tool_result'
+    content: string | unknown[]
+    is_error?: boolean
+  }
+
+  /** Opencc `Tool.toAutoClassifierInput` — auto-mode 安全分类器的紧凑输入。 */
+  toAutoClassifierInput?: (input: any) => unknown
+
+  /** Opencc `Tool.userFacingName` — UI 显示名。 */
+  userFacingName?: (input: any) => string
+
+  /** Opencc `Tool.getToolUseSummary` — 紧凑视图摘要。 */
+  getToolUseSummary?: (input: any) => string | null
+
+  /** Opencc `Tool.getActivityDescription` — spinner 显示。 */
+  getActivityDescription?: (input: any) => string | null
+
+  /** Opencc `Tool.maxResultSizeChars` — 超过此大小落盘。 */
+  maxResultSizeChars?: number
 }
 
 // Re-export runtime-side types that previously lived in this file. These

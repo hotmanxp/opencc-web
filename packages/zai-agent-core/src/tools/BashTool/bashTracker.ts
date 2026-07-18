@@ -1,10 +1,8 @@
 /**
  * Bash 后台任务全局注册中心。
  *
- * 历史背景: BashTool.runInBackground 之前把 task 存在 ctx.state.background_tasks
- * (per-queryEngine), 只能模型通过 BashOutput 类工具查询, 前端完全看不到
- * 状态栏计数. 状态栏 dock 现在要展示运行中的 Bash 任务 + 点击查看执行
- * 输出, 因此需要一个跨 queryEngine / 跨 session 的内存单例.
+ * 对标 opencc `tasks/LocalShellTask/LocalShellTask.tsx`(process-level in-memory
+ * task store + foreground/background transition + kill + notification suppression)。
  *
  * 进程级单例 (Node 进程内), 跟 server 同生命周期. 不落盘: Bash 任务的
  * 命令 + 输出通常含敏感内容, 且任务存活时间 < sandbox timeout, 进程
@@ -21,39 +19,128 @@ export interface BashTaskInfo {
   startedAt: number
   finishedAt?: number
   status: BashTaskStatus
-  /** 累计 stdout 内容 (utf8). 用于详情面板展示, 不支持 live tail (走 queryEngine 模型流). */
+  /** 累计 stdout 内容 (utf8). */
   stdout: string
   /** 累计 stderr 内容. */
   stderr: string
   exitCode?: number
   signal?: NodeJS.Signals
-  /** 运行时的进程号, 用于 kill. 进程结束后保留 (pid 复用风险低, 仅前端展示用). */
+  /** 运行时的进程号, 用于 kill. */
   pid?: number
+  /**
+   * Foreground → Background 状态机 (对标 opencc LocalShellTaskState.isBackgrounded)。
+   */
+  isBackgrounded: boolean
+  /**
+   * 已发送 <task-notification> 哨兵的标志。
+   */
+  notified: boolean
+  /** 大输出持久化路径 (对标 diskOutput.ts: getTaskOutputPath)。 */
+  persistedOutputPath?: string
 }
 
 class BashBackgroundTracker {
   private readonly byId = new Map<string, BashTaskInfo>()
-  /** 运行时 child process 引用. 注册时写入, close 事件后清除. 不暴露给外部. */
   private readonly children = new Map<string, ReturnType<typeof import('node:child_process').spawn>>()
 
-  register(taskId: string, info: Omit<BashTaskInfo, 'taskId' | 'status' | 'stdout' | 'stderr'>): BashTaskInfo {
-    const full: BashTaskInfo = { taskId, status: 'running', stdout: '', stderr: '', ...info }
+  /**
+   * 注册一个 task (默认 foreground — caller 可以 backgroundExistingForegroundTask
+   * 翻转)。
+   */
+  register(taskId: string, info: Omit<BashTaskInfo, 'taskId' | 'status' | 'stdout' | 'stderr' | 'isBackgrounded' | 'notified'>): BashTaskInfo {
+    const full: BashTaskInfo = {
+      taskId,
+      status: 'running',
+      stdout: '',
+      stderr: '',
+      isBackgrounded: false,
+      notified: false,
+      ...info,
+    }
     this.byId.set(taskId, full)
     return full
   }
 
-  /** 绑定运行时 child process (供 BashTool 在 spawn 后调用). */
+  /**
+   * 注册一个 foreground task (runShellCommand 在 2s 阈值后调)。
+   * 对标 LocalShellTask.registerForeground。
+   */
+  registerForeground(
+    taskId: string,
+    info: Omit<BashTaskInfo, 'taskId' | 'status' | 'stdout' | 'stderr' | 'isBackgrounded' | 'notified'>,
+  ): BashTaskInfo {
+    return this.register(taskId, info)
+  }
+
+  /** 绑定运行时 child process。 */
   attachChild(taskId: string, child: ReturnType<typeof import('node:child_process').spawn>): void {
     this.children.set(taskId, child)
   }
 
-  /** 追加 stdout/stderr 并返回更新后的 task. 用于 BashTool 的 child events. */
+  /** 追加 stdout/stderr。 */
   appendOutput(taskId: string, chunk: { stdout?: string; stderr?: string }): BashTaskInfo | undefined {
     const t = this.byId.get(taskId)
     if (!t) return undefined
     if (chunk.stdout) t.stdout += chunk.stdout
     if (chunk.stderr) t.stderr += chunk.stderr
     return t
+  }
+
+  /**
+   * 把 foreground task 转为 background (Ctrl+B / 超时 / 15s assistant budget)。
+   * 对标 LocalShellTask.backgroundExistingForegroundTask。
+   */
+  backgroundExistingForegroundTask(taskId: string): boolean {
+    const t = this.byId.get(taskId)
+    if (!t) return false
+    if (t.isBackgrounded) return false
+    if (t.status !== 'running') return false
+    t.isBackgrounded = true
+    return true
+  }
+
+  /**
+   * Foreground task 自然结束时调用 — 从 byId 中移除。
+   * 对标 LocalShellTask.unregisterForeground。
+   */
+  unregisterForeground(taskId: string): void {
+    const t = this.byId.get(taskId)
+    if (!t || t.isBackgrounded) return
+    this.byId.delete(taskId)
+    this.children.delete(taskId)
+  }
+
+  /**
+   * 把 task 标记为 notified, 抑制后续 <task-notification> 哨兵。
+   * 对标 LocalShellTask.markTaskNotified。
+   */
+  markTaskNotified(taskId: string): void {
+    const t = this.byId.get(taskId)
+    if (!t) return
+    t.notified = true
+  }
+
+  /**
+   * 设置 task 的持久化输出路径 (对标 diskOutput.ts: getTaskOutputPath)。
+   */
+  setPersistedOutputPath(taskId: string, path: string): void {
+    const t = this.byId.get(taskId)
+    if (!t) return
+    t.persistedOutputPath = path
+  }
+
+  /**
+   * 清理 task 的持久化输出文件 (对标 evictTaskOutput)。
+   */
+  evictOutput(taskId: string): void {
+    const t = this.byId.get(taskId)
+    if (!t?.persistedOutputPath) return
+    try {
+      const fs = require('node:fs') as typeof import('node:fs')
+      fs.unlinkSync(t.persistedOutputPath)
+    } catch {
+      // 文件已被外部清理 / 不存在 — 静默
+    }
   }
 
   markFinished(
@@ -73,22 +160,18 @@ class BashBackgroundTracker {
 
   /**
    * 结束指定任务对应的子进程。
-   * 先 SIGTERM, 1s 后若仍存活则 SIGKILL. 返回操作结果摘要.
-   * 对已完成 / 不存在的任务返回 undefined.
+   * 先 SIGTERM, 1s 后若仍存活则 SIGKILL.
    */
   kill(taskId: string): { ok: boolean; signal?: string } | undefined {
     const t = this.byId.get(taskId)
     if (!t || t.status !== 'running') return undefined
     const child = this.children.get(taskId)
     if (!child) {
-      // 进程句柄丢失, 直接标记 killed 兜底
       this.markFinished(taskId, 'killed')
       return { ok: true, signal: 'SIGKILL(fallback)' }
     }
     try {
-      // 发 SIGTERM: 给 shell 脚本 1s 优雅退出.
       child.kill('SIGTERM')
-      // 1s 兜底 SIGKILL: 避免孤儿进程残留.
       setTimeout(() => {
         if (this.children.has(taskId)) {
           try { child.kill('SIGKILL') } catch { /* ignore ESRCH */ }
@@ -96,7 +179,6 @@ class BashBackgroundTracker {
       }, 1000).unref()
       return { ok: true, signal: 'SIGTERM' }
     } catch (err) {
-      // child.kill 抛 ESRCH 表示进程已死, 直接标记 killed
       const message = err instanceof Error ? err.message : String(err)
       if (message.includes('ESRCH') || message.includes('already been terminated')) {
         this.markFinished(taskId, 'killed')
@@ -106,13 +188,26 @@ class BashBackgroundTracker {
     }
   }
 
+  /**
+   * Ctrl+B 路径 — kill 所有仍在前台运行的 task (对标 LocalShellTask.backgroundAll)。
+   */
+  killAllForeground(): string[] {
+    const killed: string[] = []
+    for (const [taskId, t] of this.byId) {
+      if (t.status === 'running' && !t.isBackgrounded) {
+        const r = this.kill(taskId)
+        if (r?.ok) killed.push(taskId)
+      }
+    }
+    return killed
+  }
+
   get(taskId: string): BashTaskInfo | undefined {
     return this.byId.get(taskId)
   }
 
   /**
    * 列出 task. 可选按 sessionId 过滤. 默认按 startedAt 降序 (新的在前).
-   * 仅返回最近 200 条防止内存膨胀; 旧 task 早应自然完成.
    */
   list(filter?: { sessionId?: string; limit?: number }): BashTaskInfo[] {
     const all = Array.from(this.byId.values())
@@ -126,6 +221,7 @@ class BashBackgroundTracker {
   /** 测试钩子: 重置整个 map. */
   __resetForTests(): void {
     this.byId.clear()
+    this.children.clear()
   }
 }
 
