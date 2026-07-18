@@ -1445,59 +1445,9 @@ export default function Agent() {
           )}
         </div>
 
-        <div>
-          {/* 状态栏: 仿 OpenCC 的 "✽ Pollinating… (Ns · ↓ tokens)" 行.
-            现在内嵌附件缩略图: 单行横向 flex, spacer 把缩略图与按钮推到右侧;
-            缩略图本身 align="end" 多张时仍右对齐, 多张会自动换行撑高状态栏. */}
-          <div
-            style={{
-              borderTop: "1px solid rgba(255,255,255,0.10)",
-              borderBottom: "1px solid rgba(255,255,255,0.10)",
-              padding: "6px 10px",
-              fontSize: 12,
-              fontFamily:
-                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-              // 文字统一灰色; 图标单独染色 (idle 绿点 / streaming 主题橙)
-              color: "rgba(255,255,255,0.45)",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-              // 多张缩略图需要换行时允许纵向扩展; 单行高度不变.
-              flexWrap: "wrap",
-            }}
-          >
-            <span
-              style={{
-                color:
-                  status === "idle"
-                    ? "#22c55e"
-                    : status === "streaming"
-                      ? "#ff6600"
-                      : "inherit",
-              }}
-            >
-              {status === "streaming"
-                ? SPINNER[spinnerIdx]
-                : status === "error"
-                  ? "✗"
-                  : status === "aborted"
-                    ? "◼"
-                    : "●"}
-            </span>
-            <span>
-              {status === "idle" && "就绪"}
-              {status === "streaming" && `对话中… (${elapsed}s)`}
-              {status === "aborted" && "已中止"}
-              {status === "error" && "错误"}
-            </span>
-            {status === "streaming" && (
-              <span style={{ color: "rgba(255,255,255,0.45)" }}>
-                · esc 中断
-              </span>
-            )}
-            <AgentInputBox />
-
-          {/* 输入框下方的模式栏: 仿 OpenCC 底栏 "▶▶ bypass on (shift+tab ↹) · master · zai · ..." */}
+        <div className="bottom-stack">
+          <AgentInputBox />
+          {/* 输入框下方的模式栏: 仿 OpenCC 底栏 */}
           <div
             style={{
               borderTop: "1px solid rgba(255,255,255,0.10)",
