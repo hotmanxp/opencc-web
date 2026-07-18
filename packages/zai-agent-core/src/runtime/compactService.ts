@@ -121,9 +121,18 @@ export async function compactSession(
       }
     }
   } catch (err) {
+    if (abortController.signal.aborted) {
+      return { kind: 'error', message: '生成摘要超时 (60s), 请稍后重试' }
+    }
     return { kind: 'error', message: `生成摘要失败: ${(err as Error).message.slice(0, 200)}` }
   } finally {
     clearTimeout(timer)
+  }
+
+  // 兜底: 收到 message_stop 表明 SDK 协议正常终止; 没收到 + 没抛错 = 异常中断视为 error
+  // (spec §6.4 — 模型被 abort 但 SDK 没抛错的边缘 case, summary 可能不完整)
+  if (!sawMessageStop) {
+    return { kind: 'error', message: '生成摘要失败: 响应不完整 (未收到 message_stop)' }
   }
 
   summary = summary.trim()
@@ -146,10 +155,13 @@ export async function compactSession(
     version: '2',
     message: {
       content: [{ type: 'text', text: '对话从这之后被压缩为摘要。详细历史已归档。' }],
-      // role: 'system' 标示 compact 边界 — queryEngine.ts:157-158 不读此字段,
-      // 但 AnthropicMessage 类型 (transcript/types.ts:110) 严格约束 'user'|'assistant'.
-      // 落盘写 'system', 恢复至 AnthropicMessage 形状时 serializeForAnthropic 已经 continue
-      // 跳过 (Task 3), 所以这个字段对模型可见性为 0. cast 是 spec §3.2 决定的.
+      // role: 'system' 是 spec §3.2 的设计选择 — 标识 compact 边界用的语义标签.
+      // AnthropicMessage 类型 (transcript/types.ts:110) 严格约束 'user'|'assistant',
+      // 所以 cast 成 'user' | 'assistant'. 这个字段是 dead data:
+      // - queryEngine.ts:158 用 tm.type 派生 role, 不读 message.role
+      // - serializeForAnthropic 跳过 compact_boundary 类型 (Task 3)
+      // 故 cast 无运行时影响, 是 cosmetic. 如果后续要 spec fidelity,
+      // 单独去 widen AnthropicMessage.role, 不要在这个 module 修。
       role: 'system' as 'user' | 'assistant',
     },
     cwd,
