@@ -3,8 +3,8 @@ import { Button, Popover } from 'antd'
 import {
   CodeOutlined,
   FileTextOutlined,
-  HandOutlined,
   QuestionCircleOutlined,
+  SelectOutlined,
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useAgentStore } from '../store/useAgentStore.js'
@@ -72,7 +72,7 @@ export const MODE_CYCLE_ORDER = MODE_CYCLE
 
 function IconFor({ mode }: { mode: PermissionMode }) {
   switch (mode) {
-    case 'default': return <HandOutlined />
+    case 'default': return <SelectOutlined />
     case 'acceptEdits': return <CodeOutlined />
     case 'plan': return <FileTextOutlined />
     case 'bypassPermissions': return <ThunderboltOutlined />
