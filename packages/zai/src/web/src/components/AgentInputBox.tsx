@@ -1,8 +1,10 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Input, message } from "antd";
+import { Input, Button, message } from "antd";
+import { PictureOutlined } from "@ant-design/icons";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 import { api } from "../lib/api";
+import { AttachmentStrip } from "../components/AttachmentStrip";
 
 type PendingAttachment = {
   localId: string;
@@ -435,5 +437,183 @@ export default function AgentInputBox() {
     await postPromptToLLM(text, blocks);
   };
 
-  return <div data-agent-inputbox-placeholder />
+  return (
+    <div>
+      {/* status bar: 顶部一行 — cwd / 模型 / streaming 提示 / 附件缩略图内嵌 / 上传图片按钮 */}
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          gap: 8,
+          padding: "6px 10px",
+          background: "rgba(0,0,0,0.25)",
+          borderRadius: 6,
+          marginBottom: 6,
+          fontSize: 12,
+        }}
+      >
+        {/* cwd 文本 / 模型名 / streaming 提示 — 简化版; 完整 status bar 内容由 Task 7 搬入 */}
+        {status === "streaming" && (
+          <span style={{ color: "rgba(255,255,255,0.45)" }}>· esc 中断</span>
+        )}
+        {/* 附件缩略图内嵌到 status bar 内, 与按钮同一行, 缩到 40px, 紧贴状态文字.
+            compact 去除外层 padding; flexWrap: wrap 让多张时换行. */}
+        {attachments.length > 0 && (
+          <AttachmentStrip
+            attachments={attachments}
+            onRemove={removeAttachment}
+            align="start"
+            size={40}
+            compact
+          />
+        )}
+        <span style={{ flex: 1 }} />
+        <Button
+          icon={<PictureOutlined />}
+          onClick={() => fileInputRef.current?.click()}
+          title="上传图片"
+          disabled={status === "streaming" || pendingAsk?.status === "pending"}
+          style={{ color: "rgba(255,255,255,0.45)" }}
+        />
+      </div>
+
+      {/* TextArea + slash dropdown 区 */}
+      <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
+        <div
+          style={{
+            display: "flex",
+            alignItems: "stretch",
+            position: "relative",
+          }}
+        >
+          {/* Slash 自动补全下拉菜单 */}
+          {showSkillMenu && filteredSlash.length > 0 && (
+            <div
+              ref={skillMenuRef}
+              style={{
+                position: "absolute",
+                bottom: "100%",
+                left: 0,
+                right: 0,
+                marginBottom: 4,
+                background: "#1a1a1e",
+                border: "1px solid rgba(255,255,255,0.15)",
+                borderRadius: 8,
+                maxHeight: 240,
+                overflowY: "auto",
+                zIndex: 1000,
+                boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
+              }}
+            >
+              {filteredSlash.map((item, idx) => (
+                <div
+                  key={item.kind + ":" + item.name}
+                  onMouseDown={(e) => {
+                    e.preventDefault();
+                    void selectSlashItem(item);
+                  }}
+                  style={{
+                    padding: "8px 12px",
+                    cursor: "pointer",
+                    display: "flex",
+                    alignItems: "center",
+                    gap: 12,
+                    background:
+                      idx === skillMenuIdx
+                        ? "rgba(255,102,0,0.15)"
+                        : "transparent",
+                    borderLeft:
+                      idx === skillMenuIdx
+                        ? "3px solid #ff6600"
+                        : "3px solid transparent",
+                    transition: "background 0.1s",
+                  }}
+                  onMouseEnter={() => setSkillMenuIdx(idx)}
+                >
+                  <span
+                    style={{
+                      fontSize: 13,
+                      fontWeight: 600,
+                      color: "#a78bfa",
+                      fontFamily:
+                        "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                      whiteSpace: "nowrap",
+                      minWidth: 180,
+                      flexShrink: 0,
+                    }}
+                  >
+                    /{item.displayName ?? item.name}
+                  </span>
+                  {item.description && (
+                    <span
+                      style={{
+                        fontSize: 12,
+                        color: "rgba(255,255,255,0.45)",
+                        overflow: "hidden",
+                        textOverflow: "ellipsis",
+                        whiteSpace: "nowrap",
+                        flex: 1,
+                        minWidth: 0,
+                      }}
+                    >
+                      {item.pluginName && (
+                        <span style={{ color: "rgba(167,139,250,0.75)" }}>
+                          ({item.pluginName}){" "}
+                        </span>
+                      )}
+                      {item.description}
+                      {item.argumentHint ? ` · ${item.argumentHint}` : ""}
+                    </span>
+                  )}
+                  <span
+                    style={{
+                      fontSize: 10,
+                      fontWeight: 600,
+                      padding: "2px 6px",
+                      borderRadius: 4,
+                      textTransform: "uppercase",
+                      letterSpacing: 0.5,
+                      color:
+                        item.kind === "command"
+                          ? "#a78bfa"
+                          : "rgba(255,255,255,0.45)",
+                      background:
+                        item.kind === "command"
+                          ? "rgba(167,139,250,0.18)"
+                          : "rgba(255,255,255,0.08)",
+                      flexShrink: 0,
+                    }}
+                  >
+                    {item.kind}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
+          <TextArea
+            ref={textareaRef}
+            value={input}
+            onChange={(e) => setInput(e.target.value)}
+            onKeyDown={handleKeyDown}
+            onPaste={handlePaste}
+            placeholder="输入消息, 按 Enter 发送, Shift+Enter 换行. 可直接粘贴或拖拽图片."
+            rows={3}
+            disabled={
+              status === "streaming" || pendingAsk?.status === "pending"
+            }
+            style={{ resize: "none", flex: 1 }}
+          />
+        </div>
+      </div>
+
+      <input
+        ref={fileInputRef}
+        type="file"
+        accept="image/*"
+        multiple
+        style={{ display: "none" }}
+        onChange={handleFilePick}
+      />
+    </div>
+  );
 }
