@@ -269,16 +269,17 @@ const WHITELIST_PATTERNS: string[] = [
   'tools/BashTool/commentLabel.ts',
 
   // AgentTool port — fork prerequisites (runForkedAgent transitive deps).
-  // NOTE: upstream opencc exports ContentReplacementState from
-  // utils/toolResultStorage.ts (not a separate types/toolResultStorage.ts).
-  // utils/toolResultStorage.ts already exists in opencc-internals/ as a
-  // 1-export stub (commit 1029c97, only exports TOOL_RESULT_CLEARED_MESSAGE
-  // for microCompact + persistence.ts). The stub is missing
-  // cloneContentReplacementState + ContentReplacementState, which forkedAgent
-  // imports. We whitelist it here so the sync overwrites the stub with the
-  // full upstream content (which still exports TOOL_RESULT_CLEARED_MESSAGE).
+  // NOTE: utils/toolResultStorage.ts is INTENTIONALLY NOT in this whitelist.
+  // The full upstream file has transitive imports (bootstrap/state,
+  // services/analytics/{growthbook,metadata,index}, utils/slowOperations)
+  // that chase TUI/desktop deps which should NOT enter the opencc-internals
+  // mirror. Instead, that file is a hand-written zai-local patch exporting
+  // only TOOL_RESULT_CLEARED_MESSAGE + ContentReplacementState +
+  // cloneContentReplacementState (the symbols forkedAgent.runForkedAgent and
+  // services/api/compressToolHistory actually need). If future tasks need
+  // additional upstream exports from toolResultStorage.ts, extend the patch
+  // locally rather than re-whitelisting the full file.
   'utils/sessionStorage.ts',
-  'utils/toolResultStorage.ts',
   'utils/abortController.ts',
   'utils/fileStateCache.ts',
 ]
