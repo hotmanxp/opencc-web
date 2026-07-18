@@ -24,7 +24,9 @@ import { createDefaultHookExecutor } from '../plugins/defaultHookExecutor.js'
 import {
   appendAssistantMessageV2,
   appendUserMessageV2,
+  serializeForAnthropic,
 } from '../transcript/persistence.js'
+import { foldTopLevelToolUses } from '../opencc-internals/utils/foldTopLevelToolUses.js'
 
 const DEFAULT_MAX_TURNS = 50
 
@@ -134,52 +136,40 @@ export async function* queryEngine(
       // 第一次发消息时 transcript 还没创建 → ENOENT 抛错.
     }
     if (t) {
-      // 把 transcript 的 raw 字段转成 SDK 期望的 content 格式:
-      // - user raw = { content: string } → content: string
-      // - assistant raw = { text: string, tool_uses: [...] } → content: [{ type: 'text', text }]
-      // - v2 message.content (ContentBlock[]) → 透传
-      //
-      // v2 transcript 里 type='tool_use' 是一条独立的消息 (tool_use blocks
-      // 单独写). 必须把它的 content 合并到前一条 assistant 消息里, 否则下一条
-      // user 消息携带的 tool_result block 找不到对应 tool_use_id —
-      // Anthropic API 会报 "tool result's tool id(...) not found (2013)".
-      let pendingAssistantContent: unknown[] | null = null
-      for (const tm of t.messages as Array<{ uuid?: string; type: string; raw?: unknown; role?: string; version?: string; message?: { content: unknown } }>) {
-        // ★ 单独类型的 tool_use 消息: tool_use blocks 合并进上一条 assistant.
-        if (tm.type === 'tool_use' && tm.version === '2' && tm.message && Array.isArray(tm.message.content)) {
-          if (pendingAssistantContent) {
-            for (const b of tm.message.content) {
-              if ((b as { type?: string })?.type === 'tool_use') pendingAssistantContent.push(b)
-            }
-          }
-          if (tm.uuid) lastUuid = tm.uuid
-          continue
-        }
-        const role = tm.type === 'user' ? 'user' : tm.type === 'assistant' ? 'assistant' : (tm.role as 'user' | 'assistant' | undefined)
-        if (role !== 'user' && role !== 'assistant') continue
-        const raw = (tm.raw ?? {}) as Record<string, unknown>
-        let content: unknown
-        if (tm.version === '2' && tm.message && Array.isArray(tm.message.content)) {
-          content = tm.message.content
-        } else if (role === 'user') {
-          if (typeof raw.content === 'string') content = raw.content
-          else if (Array.isArray(raw.content)) content = raw.content
-          else content = ''
-        } else {
-          const text = typeof raw.text === 'string' ? raw.text : ''
-          const blocks: Array<{ type: 'text'; text: string }> = text ? [{ type: 'text', text }] : []
-          content = blocks
-        }
-        messages.push({ role, content })
-        // 串 parentUuid 链: 任何 type 都算 (tool_use/tool_result 也要衔接, 否则新建消息
-        // 会以 null 起步, 链断)
-        if (tm.uuid) lastUuid = tm.uuid
-        // 记录最后一条 assistant 消息的 content 数组, 给后续 top-level tool_use
-        // 合并用. 仅在遇到新的 assistant 消息时替换 — user/tool_result 不再
-        // reset, 否则会丢掉 user 消息之后的 sibling tool_use children
-        // (sess-4a55d83d regression: 丢 _2/_3 触发 2013).
-        if (role === 'assistant' && Array.isArray(content)) {
-          pendingAssistantContent = content as unknown[]
+      // 转 v2 → Anthropic SDK 形态. 两步:
+      // (1) foldTopLevelToolUses: 把每条 type='tool_use' 顶层消息按 parentUuid
+      //     折回 parent assistant(orphan 重新生成为 standalone assistant, 不静默丢).
+      //     这一步把 N 个平行 tool_use 合并到同一条 assistant,避免连续 assistant 消息
+      //     (Anthropic API 严格要求 user/assistant 交替).
+      // (2) serializeForAnthropic: 合并相邻 tool_result user 消息为一条 — Anthropic
+      //     协议要求一个 assistant turn 的所有 tool_result 必须在紧随其后的同一条
+      //     user 消息里. 之前的内联 loop 缺这一步, sess-4ffad948 等多条历史 transcript
+      //     续传时拿到 [assistant(tool_use_a, tool_use_b), user(tool_result_a),
+      //     user(tool_result_b)] 触发 Anthropic API 400 "tool call result does not
+      //     follow tool call (2013)". subagentNotifier.js:28 注入 <task-notification>
+      //     时把这条 transcript 喂给 modelCaller 即刻复现.
+      // foldTopLevelToolUses<T extends FoldableMessage>(msgs: T[]): T[] — 接受任何
+      // 满足 FoldableMessage 字段(uid/parentUuid/type/message.content)的数组。
+      // TranscriptMessage 是 FoldableMessage 的超集(多 timestamp/raw/cwd/version 等),
+      // 直接传;fold 返回的同引用数组里 tool_use 已合并进 parent assistant.type。
+      // 之后 serializeForAnthropic 期望 TranscriptMessage[],这正是 fold 的输入类型,
+      // cast 只是为了让 TS 看到 fold 的泛型回参仍按 TranscriptMessage 处理。
+      const folded = foldTopLevelToolUses(
+        t.messages as unknown as Parameters<typeof foldTopLevelToolUses>[0],
+      )
+      messages.push(
+        ...serializeForAnthropic(
+          folded as unknown as Parameters<typeof serializeForAnthropic>[0],
+        ),
+      )
+      // 串 parentUuid 链: 取 transcript 末尾消息的 uuid 作为下条 append 的父,
+      // 让后续 turn 的 user/assistant/tool_use/tool_result 都挂在前一条之后,
+      // 不破坏 v2 树形 parentUuid DAG.
+      for (let i = t.messages.length - 1; i >= 0; i--) {
+        const u = t.messages[i]?.uuid
+        if (u) {
+          lastUuid = u
+          break
         }
       }
     }
