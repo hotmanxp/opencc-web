@@ -99,4 +99,13 @@ describe('AgentTool', () => {
     expect(AgentTool.isReadOnly!({ prompt: 'x', subagent_type: 'general-purpose' })).toBe(true)
     expect(AgentTool.isDestructive!({ prompt: 'x', subagent_type: 'general-purpose' })).toBe(false)
   })
+
+  test('schema rejects unknown keys (strict)', () => {
+    const r = (AgentTool as any).inputSchema.safeParse({
+      prompt: 'x',
+      subagent_type: 'general-purpose',
+      unknown_field: 'should-be-rejected',
+    })
+    expect(r.success).toBe(false)
+  })
 })

@@ -1,12 +1,14 @@
 import { z } from 'zod'
 
 export const AgentInputSchema = z.object({
-  prompt: z.string().min(1),
-  subagent_type: z.string().min(1).default('general-purpose'),
-  description: z.string().optional(),
-  /**
-   * 默认 true:Agent 工具默认通过后台 runtime 异步派发,
-   * 立即返回 shortId。设为 false 才走原同步路径(阻塞等结果)。
-   */
-  run_in_background: z.boolean().optional().default(true),
-})
+  prompt: z.string().min(1)
+    .describe('The task for the sub-agent. Required.'),
+  subagent_type: z.string().min(1).default('general-purpose')
+    .describe('Which agent definition to use. Defaults to general-purpose.'),
+  description: z.string().optional()
+    .describe('Short label shown in transcript and emitted as subagent:start.description.'),
+  run_in_background: z.boolean().optional().default(true)
+    .describe('When true (default), AgentTool dispatches via BackgroundRuntime '
+            + 'and returns a <subagent_dispatched> handle. When false, the '
+            + 'tool blocks via runForkedAgent and returns <subagent_result>.'),
+}).strict()
