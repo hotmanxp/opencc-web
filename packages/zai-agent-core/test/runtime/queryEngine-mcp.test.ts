@@ -31,7 +31,8 @@ describe('queryEngine MCP wiring', () => {
           transport: { kind: 'stdio' as const, command: 'definitely-not-a-real-binary' },
         },
       ],
-      modelCaller: textOnlyModelCaller(),
+      // modelCaller 必须传函数（不是 generator 实例）—— queryEngine 用 config.modelCaller?.({...}) 调用
+      modelCaller: textOnlyModelCaller,
     } as unknown as RuntimeConfig
 
     const events: unknown[] = []
@@ -48,11 +49,12 @@ describe('queryEngine MCP wiring', () => {
       { prompt: 'hi', cwd: '/tmp' },
       {
         dataDir: '/tmp',
-        modelCaller: textOnlyModelCaller(),
+        // modelCaller 必须传函数（不是 generator 实例）—— queryEngine 用 config.modelCaller?.({...}) 调用
+        modelCaller: textOnlyModelCaller,
       } as unknown as RuntimeConfig,
     )
     for await (const ev of gen) events.push(ev)
     // No MCP-related runtime errors expected.
-    expect(events.some((e: any) => e.type === 'runtime_error')).toBe(false)
+    expect(events.some((e: any) => e.type === 'runtime.error')).toBe(false)
   })
 })

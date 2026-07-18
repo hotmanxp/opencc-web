@@ -38,18 +38,24 @@ You are a statusline generator.`
 })
 
 describe('loadAgentDefinitions', () => {
-  test('无 agents 目录 → 空数组', async () => {
-    const r = await loadAgentDefinitions(dataDir)
-    expect(r.agents).toEqual([])
+  test('无 agents 目录 → 内置 BUILT_IN_AGENTS 仍加载 (3 个)', async () => {
+    // 产品行为: built-in 永远在场, 即使项目目录和 user-global 都没有 agent. 测试必须
+    // 显式传 userAgentsDir='' 关闭 user-global 读取, 否则会去读 ~/.zai/agents 撞真实环境.
+    const r = await loadAgentDefinitions(dataDir, '')
+    const names = r.agents.map(a => a.name).sort()
+    expect(names).toEqual(['Explore', 'Plan', 'general-purpose'])
   })
 
   test('单文件形式 <name>.md 加载', async () => {
     await mkdir(join(dataDir, 'agents'))
     await writeFile(join(dataDir, 'agents/general-purpose.md'),
       `---\nname: general-purpose\ndescription: do general tasks\n---\nYou are a general agent.`)
-    const r = await loadAgentDefinitions(dataDir)
-    expect(r.agents).toHaveLength(1)
-    expect(r.agents[0]?.name).toBe('general-purpose')
+    // 同样关掉 user-global, 保证断言只看 dataDir + built-in 的合并.
+    const r = await loadAgentDefinitions(dataDir, '')
+    const gp = r.agents.find(a => a.name === 'general-purpose')
+    expect(gp).toBeTruthy()
+    // 项目目录里 general-purpose 应当覆盖 built-in 那条 (按名字去重 last-wins)
+    expect(r.agents).toHaveLength(3) // general-purpose + Explore + Plan
   })
 
   test('目录形式 <name>/AGENT.md 加载', async () => {

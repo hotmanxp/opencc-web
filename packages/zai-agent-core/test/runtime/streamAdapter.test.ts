@@ -16,11 +16,12 @@ describe('wrapWithZaiMeta', () => {
       yield { type: 'message_stop' }
     }
     const events = await collect(wrapWithZaiMeta(mockStream(), { sessionId: 'sess-1', sessionStartTs: 1 }))
-    expect(events).toHaveLength(3) // 2 events + 1 done
+    // wrap 本身只做元数据填充, 不 yield runtime.done —— 那是 queryEngine 在 turn
+    // 全部结束后统一 yield 的 (见 streamAdapter.ts 末尾注释). 这里只验证元数据.
+    expect(events).toHaveLength(2)
     expect(events[0].eventId).toBeTruthy()
     expect(events[0].sessionId).toBe('sess-1')
     expect(events[0].ts).toBeGreaterThan(0)
-    expect(events[2].type).toBe('runtime.done')
   })
 })
 

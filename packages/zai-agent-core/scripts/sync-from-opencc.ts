@@ -32,7 +32,9 @@ import { fileURLToPath } from 'url'
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
 
-const OPENCC_SRC = '/Users/liangxuechao572/code/opencc/src'
+// OPENCC_SRC 优先读环境变量, 缺省回落到同步者本机的绝对路径. 这样测试 / CI / 别的开发者
+// 都能用 OPENCC_SRC=... 覆盖, 不再硬绑定到某台机器.
+const OPENCC_SRC = process.env.OPENCC_SRC ?? '/Users/liangxuechao572/code/opencc/src'
 const ZAI_PKG = join(__dirname, '..')
 const ZAI_INTERNALS = join(ZAI_PKG, 'src', 'opencc-internals')
 
