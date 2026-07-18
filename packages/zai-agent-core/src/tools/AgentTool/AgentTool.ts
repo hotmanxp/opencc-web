@@ -164,13 +164,56 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
     let exitReason: 'completed' | 'aborted' | 'max_turns' | 'error' = 'completed'
     let finalOutput = ''
     try {
+      // 防递归(R6):sync path 必须阻断 sub-agent 继续派 sub-agent.
+      // async 路径靠 defaultBackgroundRuntime.ts:273 在 agentRuntime.run
+      // 时把 {disallowedTools:['Agent']} 传给 queryEngine →
+      // resolveToolPool(queryEngine.ts:390) 在 tools 数组里过滤掉
+      // Agent. runForkedAgent 没有 top-level 参数,只能通过
+      // cacheSafeParams.toolUseContext.options 注入.
+      //
+      // 两件事必须同时做:
+      // (a) options.disallowedTools: ['Agent'] — 复刻 spec / async 路径合同
+      // (b) options.tools 把 name==='Agent' 的条目剔除 — opencc query.ts
+      //     直接读 toolUseContext.options.tools 喂给 StreamingToolExecutor
+      //     (1040) / 模型 (1199),不会过 resolveToolPool,所以"声明
+      //     disallowedTools"这一行本身不能阻止递归. 必须显式剥掉 Agent.
+      // options.disallowedTools is a zai-local extension; upstream's
+      // strict ToolUseContext.options type doesn't know about it. Cast
+      // antiRecursionOptions as any so we can attach the zai field
+      // without a structural-type mismatch on commands[] or undefined.
+      const antiRecursionOptions: any = {
+        ...(sharedParams?.toolUseContext.options ?? {}),
+        disallowedTools: Array.from(
+          new Set([
+            ...(((sharedParams?.toolUseContext.options as any)?.disallowedTools ?? []) as string[]),
+            'Agent',
+          ]),
+        ),
+        ...((sharedParams?.toolUseContext.options as any)?.tools
+          ? {
+              tools: ((sharedParams?.toolUseContext.options as any).tools as any[]).filter(
+                (t: any) => t?.name !== 'Agent',
+              ),
+            }
+          : {}),
+      }
       const cacheSafeParams = sharedParams
-        ? { ...sharedParams, systemContext }
+        ? {
+            ...sharedParams,
+            systemContext,
+            toolUseContext: {
+              ...sharedParams.toolUseContext,
+              options: antiRecursionOptions,
+            },
+          }
         : {
             systemPrompt: '',
             userContext: {},
             systemContext,
-            toolUseContext: { abortController } as any, // minimal stub
+            toolUseContext: {
+              abortController,
+              options: antiRecursionOptions,
+            } as any, // minimal stub
             forkContextMessages: [],
           }
       const result = await runForkedAgent({

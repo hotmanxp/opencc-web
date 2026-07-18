@@ -217,6 +217,68 @@ describe('AgentTool', () => {
     expect(ci).toEqual({ name: 'Agent', subagent_type: 'general-purpose', prompt: 'do x', description: 'desc' })
   })
 
+  test('sync path enforces disallowedTools: [Agent] anti-recursion (R6)', async () => {
+    // BackgroundRuntime async path enforces disallowedTools:['Agent'] via
+    // defaultBackgroundRuntime.ts:273 (agentRuntime.run is called with
+    // disallowedTools:['Agent']). Sync path through runForkedAgent has no
+    // top-level parameter — it must flow through cacheSafeParams. We capture
+    // the params runForkedAgent receives and assert both:
+    //   (a) options.disallowedTools includes 'Agent' — the spec contract
+    //       that zai's tools filtering layer reads.
+    //   (b) options.tools has name==='Agent' stripped — the runtime reality:
+    //       opencc query.ts reads toolUseContext.options.tools directly
+    //       (1040 / 1199) without going through resolveToolPool, so the
+    //       disallowedTools declaration alone would NOT block recursion in
+    //       the current sync path. Filtering the tool entry is the only
+    //       way to actually stop a sub-agent from re-dispatching AgentTool.
+    let captured: any = null
+    const { runForkedAgent, getLastCacheSafeParams } = await import(
+      '../../src/opencc-internals/utils/forkedAgent.js'
+    )
+    ;(runForkedAgent as any).mockImplementation(async (params: any) => {
+      captured = params
+      return {
+        messages: [{ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } } as any],
+        totalUsage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } as any,
+      }
+    })
+
+    // Seed parent's toolUseContext.options.tools with a fake Agent entry so
+    // we can prove the filter actually strips it.
+    const fakeAgent = { name: 'Agent', description: 'self', inputSchema: {} }
+    const fakeOther = { name: 'Bash', description: 'x', inputSchema: {} }
+    ;(getLastCacheSafeParams as any).mockReturnValueOnce({
+      systemPrompt: '',
+      userContext: {},
+      systemContext: {},
+      toolUseContext: {
+        abortController: new AbortController(),
+        options: { tools: [fakeAgent, fakeOther] } as any,
+        getAppState: () => ({}),
+        setAppState: () => {},
+        updateFileHistoryState: () => {},
+        updateAttributionState: () => {},
+        setInProgressToolUseIDs: () => {},
+        setResponseLength: () => {},
+        messages: [],
+      } as any,
+      forkContextMessages: [],
+    })
+
+    await AgentTool.call({ prompt: 'x', subagent_type: 'general-purpose' }, ctx)
+
+    expect(captured).toBeTruthy()
+    const opts = captured.cacheSafeParams.toolUseContext.options as any
+    // (a) Spec contract: disallowedTools includes 'Agent'
+    expect(Array.isArray(opts.disallowedTools)).toBe(true)
+    expect(opts.disallowedTools).toContain('Agent')
+    // (b) Runtime reality: tool list passed to query() has the Agent entry stripped
+    const tools: any[] = opts.tools ?? []
+    expect(tools.find((t: any) => t.name === 'Agent')).toBeUndefined()
+    // And the unrelated tool survives
+    expect(tools.find((t: any) => t.name === 'Bash')).toBeDefined()
+  })
+
   test('mapToolResultToToolResultBlockParam yields tool_result block', () => {
     const block = (AgentTool as any).mapToolResultToToolResultBlockParam(
       '<subagent_result agent_type="x" exit_reason="completed">\nresult text\n</subagent_result>',
