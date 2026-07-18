@@ -269,6 +269,8 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
       // 注意:不要用 ctx.sessionId 之外的字符串拼装,要保持与 routes/agent.ts
       // POST /agent/prompt handler 给出的 parentSessionId 一致。
       parentSessionId: rec.task.parentSessionId,
+      // 防递归:后台 sub-agent 不能继续派 sub-agent
+      disallowedTools: ['Agent', 'BackgroundAgent'],
     }
 
     // 重试循环: 每次失败后, classifyRetryableError 决定 retry / failed.
