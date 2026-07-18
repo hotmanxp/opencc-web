@@ -50,6 +50,7 @@ import { TaskDock } from "../components/TaskDock";
 import { TaskDrawer } from "../components/TaskDrawer";
 import TodoZone from "../components/TodoZone.jsx";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
+import AgentInputBox from "../components/AgentInputBox";
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
