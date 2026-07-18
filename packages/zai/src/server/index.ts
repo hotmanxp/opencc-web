@@ -79,7 +79,8 @@ export function createApp(opts: AppOptions): express.Express {
   app.use('/api', agentRouter);
   app.use('/api', agentSettingsRouter);
   app.use('/api', tasksRouter);
-  // V2 TaskList 只读路由 — zai-web 进会话时 GET 一次把 ~/.zai/tasks.json
+  // V2 TaskList 只读路由 — zai-web 进会话时 GET 一次把 server 端
+  // TaskListStore (按 sessionId 隔离, 实际存储 ~/.zai/tasks/<sid>.json)
   // 拉到本地 v2TasksBySession 缓存 (SSE 增量之外的兜底).
   app.use('/api', v2TasksRouter);
   // /api/slash 直接挂这里 — 前端 Agent.tsx 用 fetch('/api/slash') 拉命令列表,

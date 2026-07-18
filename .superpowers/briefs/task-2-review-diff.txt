@@ -1,0 +1,245 @@
+diff --git a/packages/zai/src/web/src/lib/v2TaskApi.test.ts b/packages/zai/src/web/src/lib/v2TaskApi.test.ts
+new file mode 100644
+index 0000000..6346175
+--- /dev/null
++++ b/packages/zai/src/web/src/lib/v2TaskApi.test.ts
+@@ -0,0 +1,52 @@
++// @vitest-environment happy-dom
++import { describe, expect, test, vi, beforeEach } from 'vitest'
++import { fetchV2Tasks } from './v2TaskApi.js'
++
++// 包 vitest.config.ts 默认 environment: 'node', 没有 localStorage. 用
++// 内存 stub 提供 setItem/clear/getItem, 让 brief 给定的测试代码可以原样
++// 跑通. 不加 @vitest-environment happy-dom 是为了不和 taskApi.ts 同
++// 目录的其它单测共享 node 环境, 也避免改动 vitest.config 触发连锁影响.
++const memoryStorage = (() => {
++  const m = new Map<string, string>()
++  return {
++    getItem: (k: string) => (m.has(k) ? m.get(k)! : null),
++    setItem: (k: string, v: string) => { m.set(k, v) },
++    removeItem: (k: string) => { m.delete(k) },
++    clear: () => { m.clear() },
++    key: (i: number) => Array.from(m.keys())[i] ?? null,
++    get length() { return m.size },
++  }
++})()
++
++describe('fetchV2Tasks', () => {
++  beforeEach(() => {
++    vi.restoreAllMocks()
++    // 装一个内存版的 localStorage 让 brief 给的测试代码可直接跑通.
++    ;(globalThis as any).localStorage = memoryStorage
++    localStorage.clear()
++  })
++
++  test('GET 路径正确 + 返回 task 数组', async () => {
++    localStorage.setItem('zai-token', 'tok-123')
++    const mockFetch = vi.fn().mockResolvedValue({
++      ok: true,
++      status: 200,
++      json: async () => ({ tasks: [{ id: 't1', subject: 'demo', status: 'pending', blocks: [], blockedBy: [], updatedAt: 0 }] }),
++    })
++    // @ts-expect-error mock fetch
++    globalThis.fetch = mockFetch
++
++    const tasks = await fetchV2Tasks('sess-abc')
++    expect(tasks[0]?.subject).toBe('demo')
++    expect(mockFetch).toHaveBeenCalledWith(
++      expect.stringContaining('/api/agent/sessions/sess-abc/v2-tasks'),
++      expect.objectContaining({ headers: expect.objectContaining({ 'X-Zai-Token': 'tok-123' }) }),
++    )
++  })
++
++  test('HTTP 非 2xx 抛错', async () => {
++    // @ts-expect-error mock fetch
++    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 })
++    await expect(fetchV2Tasks('s1')).rejects.toThrow(/500/)
++  })
++})
+\ No newline at end of file
+diff --git a/packages/zai/src/web/src/lib/v2TaskApi.ts b/packages/zai/src/web/src/lib/v2TaskApi.ts
+new file mode 100644
+index 0000000..ca5fdb0
+--- /dev/null
++++ b/packages/zai/src/web/src/lib/v2TaskApi.ts
+@@ -0,0 +1,21 @@
++// V2 TaskList 客户端. 写操作(zai-agent-core 内部 tool call)不在这里,
++// 这里只暴露只读: 因为 store 已经通过 SSE 增量更新, 但首次进入会话时
++// 需要 GET 一次把磁盘上 ~/.zai/tasks.json 现有内容拉过来覆盖本地缓存.
++
++import type { V2TaskItem } from '../store/useAgentStore.js'
++
++const API = '/api/agent/sessions'
++
++function getHeaders(): HeadersInit {
++  const token = (typeof localStorage !== 'undefined' && localStorage.getItem('zai-token')) || ''
++  return token ? { 'X-Zai-Token': token } : {}
++}
++
++export async function fetchV2Tasks(sessionId: string): Promise<V2TaskItem[]> {
++  const res = await fetch(`${API}/${encodeURIComponent(sessionId)}/v2-tasks`, {
++    headers: getHeaders(),
++  })
++  if (!res.ok) throw new Error(`v2-tasks fetch failed: ${res.status}`)
++  const data = (await res.json()) as { tasks: V2TaskItem[] }
++  return data.tasks
++}
+\ No newline at end of file
+diff --git a/packages/zai/src/web/src/store/useAgentStore.ts b/packages/zai/src/web/src/store/useAgentStore.ts
+index 3063b36..cd750e7 100644
+--- a/packages/zai/src/web/src/store/useAgentStore.ts
++++ b/packages/zai/src/web/src/store/useAgentStore.ts
+@@ -6,20 +6,36 @@ import type { PermissionMode } from '@zn-ai/zai-agent-core/runtime'
+ 
+ // 与 agent-core TodoWriteInputSchema 的 zod 形态一致 (web 不直接 import zod schema,
+ // 避免循环依赖; 字段类型用本地 type 即可, 实时流拿到的 input.todos 由本文件内的
+ // safeParse 兜底, 失败时静默忽略).
+ export type TodoItem = {
+   content: string
+   status: 'pending' | 'in_progress' | 'completed'
+   activeForm: string
+ }
+ 
++// V2 TaskList 镜像 (mirror of zai-agent-core TaskListStore). 跟 TodoZone
++// 字段对齐: 客户端只读, 写操作走 TaskCreate/TaskUpdate tool call, server
++// 重新计算后通过本字段刷新. status 多一个 'deleted' (completed 之外
++// 软删除态), UI 用删除线表达.
++export type V2TaskItem = {
++  id: string
++  subject: string
++  description?: string
++  activeForm?: string
++  status: 'pending' | 'in_progress' | 'completed' | 'deleted'
++  blocks: string[]
++  blockedBy: string[]
++  owner?: string
++  updatedAt: number
++}
++
+ // 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob. 仅用于 v2 协议里把
+ // 历史图片消息里的 base64 还原成浏览器可显示的 objectURL. 解析失败时
+ // 返回 null, 调用方回退到 raw dataURL 并把 status 标为 error.
+ function dataURLtoBlob(dataUrl: string): Blob | null {
+   const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+   if (!m) return null
+   const mime = m[1]!
+   const bin = atob(m[2]!)
+   const arr = new Uint8Array(bin.length)
+   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+@@ -86,20 +102,27 @@ interface AgentState {
+   // 工具调用前后的文字段强制放进不同 stream block. 不依赖 Anthropic SDK
+   // 的 content_block_delta.index 是否正确递增.
+   textSegmentRev: number
+   // 已经触发过 textSegmentRev++ 的 toolUseId 集合, 每个工具只 bump 一次.
+   segmentedToolUseIds: Record<string, true>
+   // 会话级 todo 列表 (按 sessionId 索引). 不持久化, 切换会话时保留旧 sid 的
+   // todo, 刷新页面由 loadTranscript 走 extractTodosFromTranscript 还原.
+   todosBySession: Record<string, TodoItem[]>
+   setTodos: (sessionId: string, todos: TodoItem[]) => void
+ 
++  // V2 TaskList 镜像: 与老 TodoWrite 分开存, 因为语义不同 (跨 turn、
++  // 会话之间可被查询). key 用 sessionId (来自 tool_use:start.msg.sessionId).
++  v2TasksBySession: Record<string, V2TaskItem[]>
++  setV2Tasks: (sessionId: string, tasks: V2TaskItem[]) => void
++  updateV2Task: (sessionId: string, task: V2TaskItem) => void
++  deleteV2Task: (sessionId: string, taskId: string) => void
++
+   // 每次 sendMessage 递增的发送序号. 拼进 stream block key 作为"本轮命名空间",
+   // 保证跨轮次的文本块 key 永不碰撞. 后端 turnIndex 恒为 0 (wrapWithZaiMeta 被
+   // 逐事件调用导致其内部计数器每次归零), textSegmentRev 只在工具调用时 bump,
+   // blockIndex 每轮新回复都从 0 起 — 三者在"上一轮纯文本回答"的场景下会让
+   // 相邻两轮首个文本块拼出同一个 key `0:0:0:text`, 新一轮文本被 append 进上一轮
+   // 气泡. sendSeq 提供跨轮唯一性, 根治该归并 bug.
+   sendSeq: number
+ 
+   // SSE reducers (Task 6)
+   activeSessionId: string | null
+@@ -314,26 +337,54 @@ export const useAgentStore = create<AgentState>((set, get) => ({
+   availableModels: [],
+   cwd: '',
+   messages: [],
+   status: 'idle',
+   abortController: null,
+   pendingAsk: null,
+   textSegmentRev: 0,
+   segmentedToolUseIds: {},
+   sendSeq: 0,
+   todosBySession: {},
++  v2TasksBySession: {},
+ 
+   setTodos: (sessionId: string, todos: TodoItem[]) =>
+     set((s) => ({
+       todosBySession: { ...s.todosBySession, [sessionId]: todos },
+     })),
+ 
++  setV2Tasks: (sessionId, tasks) =>
++    set((s) => ({
++      v2TasksBySession: { ...s.v2TasksBySession, [sessionId]: tasks },
++    })),
++
++  updateV2Task: (sessionId, task) =>
++    set((s) => {
++      const cur = s.v2TasksBySession[sessionId] ?? []
++      const next = cur.some((t) => t.id === task.id)
++        ? cur.map((t) => (t.id === task.id ? task : t))
++        : [...cur, task]
++      return {
++        v2TasksBySession: { ...s.v2TasksBySession, [sessionId]: next },
++      }
++    }),
++
++  deleteV2Task: (sessionId, taskId) =>
++    set((s) => {
++      const cur = s.v2TasksBySession[sessionId] ?? []
++      return {
++        v2TasksBySession: {
++          ...s.v2TasksBySession,
++          [sessionId]: cur.filter((t) => t.id !== taskId),
++        },
++      }
++    }),
++
+   // SSE reducer state (Task 6)
+   activeSessionId: null,
+ 
+   addMessage: (msg: AgentMessage) =>
+     set((s) => ({ messages: [...s.messages, msg] })),
+   // 把 tool_use:* 与 content_block_start(tool_use) 合并到同一条消息.
+   // 后端 tool_use:done 只带 {toolUseId, output}, name/input 在 start 已经定型,
+   // 单纯 append 会得到 "unknown 已完成" 的破损条目. 按 toolUseId upsert 后,
+   // 同一个工具的 start → done/error 全程复用一条消息 + 一个 DOM 节点,
+   // ToolCallBlock 内部 Collapse 折叠态不丢, React 也不再报 duplicate key.
+@@ -572,29 +623,33 @@ export const useAgentStore = create<AgentState>((set, get) => ({
+       return { messages: next }
+     }),
+   setStatus: (status: AgentStatus) => set({ status }),
+ 
+   clearMessages: () =>
+     set((s) => {
+       // 仅清空当前 sid 的 todo, 其他 sid 保留以便切回.
+       const sid = s.sessionId
+       const { [sid as string]: _drop, ...rest } = (s.todosBySession ?? {}) as Record<string, TodoItem[]>
+       void _drop
++      // v2TasksBySession 与 todosBySession 一致: 切会话/清屏 只清理当前 sid
++      const { [sid as string]: _dropV2, ...restV2 } = (s.v2TasksBySession ?? {}) as Record<string, V2TaskItem[]>
++      void _dropV2
+       return {
+         messages: [],
+         status: 'idle',
+         // 重置 stream block 状态: 切会话/清屏 后, 工具边界计数器也得回到 0,
+         // 否则新会话的 text 段会被旧会话遗留的 textSegmentRev 错位归并.
+         textSegmentRev: 0,
+         segmentedToolUseIds: {},
+         sendSeq: 0,
+         todosBySession: sid ? rest : s.todosBySession,
++        v2TasksBySession: sid ? restV2 : s.v2TasksBySession,
+       }
+     }),
+ 
+   loadSessions: async () => {
+     try {
+       const token = localStorage.getItem('zai-token') || ''
+       const [sessionsRes, settingsRes] = await Promise.all([
+         fetch('/api/agent/sessions', { headers: { 'X-Zai-Token': token } }),
+         fetch('/api/agent/settings').catch(() => null),
+       ])

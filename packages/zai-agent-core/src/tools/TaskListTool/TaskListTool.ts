@@ -1,9 +1,17 @@
-import type { LegacyTool } from '../Tool.js'
+import type { LegacyTool, LegacyToolContext } from '../Tool.js'
 import { TaskListInputSchema } from './schema.js'
 import { renderTaskListPrompt } from './prompt.js'
 import { getTaskListStore } from '../Tasks/TaskListStore.js'
 
 export const TASK_LIST_TOOL_NAME = 'TaskList'
+
+function requireSessionId(ctx: LegacyToolContext): string {
+  const sid = (ctx.__runtimeConfig as { sessionId?: string } | undefined)?.sessionId
+  if (!sid) {
+    throw new Error('TaskList: missing ctx.__runtimeConfig.sessionId (transcriptId)')
+  }
+  return sid
+}
 
 export const TaskListTool: LegacyTool<typeof TaskListInputSchema, string> = {
   name: TASK_LIST_TOOL_NAME,
@@ -13,9 +21,10 @@ export const TaskListTool: LegacyTool<typeof TaskListInputSchema, string> = {
   isReadOnly: () => true,
   isDestructive: () => false,
 
-  async call() {
+  async call(_rawInput, ctx) {
     try {
-      const tasks = await getTaskListStore().list()
+      const sessionId = requireSessionId(ctx)
+      const tasks = await getTaskListStore().list(sessionId)
       const trimmed = tasks.map((t) => ({
         id: t.id,
         subject: t.subject,

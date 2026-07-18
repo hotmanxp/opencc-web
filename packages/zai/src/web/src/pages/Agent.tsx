@@ -35,7 +35,6 @@ import {
   type AgentMessage,
   type AgentStatus,
   type TodoItem,
-  type V2TaskItem,
 } from "../store/useAgentStore";
 import { useAppStore } from "../store/useAppStore";
 import QuestionCard from "../components/QuestionCard.jsx";
@@ -47,9 +46,7 @@ import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import ConfigStatusBar from "../components/ConfigStatusBar";
 import { TaskDrawer } from "../components/TaskDrawer";
 import TodoZone from "../components/TodoZone.jsx";
-import { BottomStatusBar } from "../components/BottomStatusBar";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
-import { fetchV2Tasks } from "../lib/v2TaskApi.js";
 import AgentInputBox from "../components/AgentInputBox";
 
 const { TextArea } = Input;
@@ -1040,8 +1037,9 @@ export default function Agent() {
   const rejectAsk = useAgentStore((s) => s.rejectAsk);
   const todosForCurrentSession: TodoItem[] =
     sessionId != null ? (todosBySession[sessionId] ?? []) : [];
-  const v2TasksForCurrentSession: V2TaskItem[] =
-    sessionId != null ? (v2TasksBySession[sessionId] ?? []) : [];
+  // v2TasksBySession 仍订阅在 store, 但渲染层 Agent.tsx 不再使用 —
+  // 任务摘要现在由 AgentInputBox 内部从 store 直接取 (避免 props 透传).
+  void v2TasksBySession;
   const patchSessionMode = useAgentStore((s) => s.patchSessionMode);
   const { instanceContext } = useAppStore()
   const cwdName = instanceContext?.cwdName || '~'
@@ -1132,28 +1130,9 @@ export default function Agent() {
     })();
   }, []);
 
-  // 切会话时把 ~/.zai/tasks.json 当前内容拉到本地 v2TasksBySession 缓存.
-  // SSE runtime.tool_call 拿到的增量更新走 useAgentStore.applyRuntimeEvent
-  // 内置的 v2 工具分支处理 (见该 store 内的 TaskCreate/Update 拦截),
-  // 这里是首次/刷新场景的兜底,保证刷新页面后 V2 任务列表不会空白.
-  // 失败静默 — 不阻断会话切换.
-  useEffect(() => {
-    const sid = sessionId
-    if (!sid) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const tasks = await fetchV2Tasks(sid)
-        if (cancelled) return
-        useAgentStore.getState().setV2Tasks(sid, tasks)
-      } catch (err) {
-        console.warn('[v2Tasks] initial fetch failed:', err)
-      }
-    })()
-    return () => { cancelled = true }
-  }, [sessionId])
-
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()
+  // 修复: v2 tasks 的初始拉取已迁移到 useAgentStore.loadTranscript 内部,
+  // 切 session → loadTranscript → 自动拉 v2 tasks. 这里不再重复拉.
 
   const visibleSessions = showAllSessions
     ? sessions
@@ -1434,8 +1413,11 @@ export default function Agent() {
           )}
         </div>
 
-        <BottomStatusBar todos={todosForCurrentSession} v2Tasks={v2TasksForCurrentSession} />
-
+        {/*
+          修复: BottomStatusBar 整行已移除. 任务摘要职责合并到
+          AgentInputBox 的"● 就绪"状态行 (见 AgentInputBox.tsx 内部实现),
+          让 UI 更紧凑, 不再有一条独立任务行 + 一条状态行.
+        */}
         <div className="bottom-stack">
           <AgentInputBox />
           <ConfigStatusBar

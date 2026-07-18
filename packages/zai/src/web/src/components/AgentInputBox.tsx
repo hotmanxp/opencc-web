@@ -1,11 +1,13 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
-import { Input, Button, message } from "antd";
+import { Input, Button, message, Popover, Tooltip } from "antd";
 import { PictureOutlined } from "@ant-design/icons";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
+import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import { api } from "../lib/api";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import ConversationInfoButton from "../components/ConversationInfoButton";
+import TodoDropdown from "./TodoDropdown.js";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 
 type PendingAttachment = {
@@ -49,6 +51,27 @@ export default React.memo(function AgentInputBox() {
   const sessionId = useAgentStore((s) => s.sessionId);
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
   const pendingAsk = useAgentStore((s) => s.pendingAsk);
+  // 任务摘要: 从 store 取当前 session 的 todos + v2 tasks, 合并统计 N/M 任务.
+  // 修复: 任务摘要从独立 BottomStatusBar 行合并到状态行, 让 UI 更紧凑.
+  // 取 store 字段而非 props — AgentInputBox 是叶子组件, 让 store selector
+  // 自动追踪 sid 变化, 避免父组件多传一组 props.
+  const todos: TodoItem[] = useAgentStore((s) =>
+    s.sessionId ? s.todosBySession[s.sessionId] ?? [] : []
+  );
+  const v2Tasks: V2TaskItem[] = useAgentStore((s) =>
+    s.sessionId ? s.v2TasksBySession[s.sessionId] ?? [] : []
+  );
+  const todoTotal = todos.length;
+  const todoDone = todos.filter((t) => t.status === "completed").length;
+  const todoInProgress = todos.filter((t) => t.status === "in_progress").length;
+  const v2Total = v2Tasks.length;
+  const v2Done = v2Tasks.filter((t) => t.status === "completed").length;
+  const v2InProgress = v2Tasks.filter((t) => t.status === "in_progress").length;
+  const totalTasks = todoTotal + v2Total;
+  const doneTasks = todoDone + v2Done;
+  const inProgressTasks = todoInProgress + v2InProgress;
+  const openTasks =
+    totalTasks - doneTasks - inProgressTasks;
 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -491,8 +514,11 @@ export default React.memo(function AgentInputBox() {
     <div>
       {/* 状态栏: 仿 OpenCC 的 "✽ Pollinating… (Ns · ↓ tokens)" 行.
           现在内嵌附件缩略图: 单行横向 flex, spacer 把缩略图与按钮推到右侧;
-          缩略图本身 align="end" 多张时仍右对齐, 多张会自动换行撑高状态栏. */}
+          缩略图本身 align="end" 多张时仍右对齐, 多张会自动换行撑高状态栏.
+          修复: 同时承担"任务摘要"职责 — 当会话有未完成任务时, 在状态文字后
+          追加 `· 1/3 任务 · 1 进行中`, 让任务行合并到此处, 减少一行高度. */}
       <div
+        data-testid="agent-input-status-row"
         style={{
           borderTop: "1px solid rgba(255,255,255,0.10)",
           borderBottom: "1px solid rgba(255,255,255,0.10)",
@@ -531,6 +557,55 @@ export default React.memo(function AgentInputBox() {
           {status === "aborted" && "已中止"}
           {status === "error" && "错误"}
         </span>
+        {/* 任务摘要: 始终展示, 避免对话进行中被"遮挡"造成用户找不到任务进度.
+            修复历史: 早期版本 streaming 时整段不渲染, 用户反馈"被遮"; 改为始终
+            渲染 + 流式期间降透明, 视觉上不与 spinner 抢眼, 又不丢信息.
+            flex 保护: flexShrink:0 + whiteSpace:nowrap + overflow:hidden/textOverflow:
+            ellipsis 防止右端按钮(PictureOutlined + InfoCircleOutlined)通过
+            flex spacer 把任务摘要挤到 0 宽 — 之前症状: 窄屏/长任务文本时
+            "X/Y 任务 · K 待开始" 整段被挤不可见. */}
+        {totalTasks > 0 && (
+          <Popover
+            content={<TodoDropdown todos={todos} v2Tasks={v2Tasks} />}
+            trigger="click"
+            placement="topRight"
+            arrow={false}
+            destroyTooltipOnHide
+          >
+            <Tooltip title="点击查看任务详情" placement="top">
+              <span
+                data-testid="agent-input-task-summary"
+                style={{
+                  color: "rgba(255,255,255,0.65)",
+                  cursor: "pointer",
+                  // 关键 flex 保护: 不让右端 spacer + 按钮把这段挤没.
+                  flexShrink: 0,
+                  whiteSpace: "nowrap",
+                  overflow: "hidden",
+                  textOverflow: "ellipsis",
+                  // 流式期间降透明, 让 spinner 成为视觉焦点, 任务信息仍可读.
+                  opacity: status === "streaming" ? 0.65 : 1,
+                  transition: "opacity 0.2s",
+                }}
+              >
+                <span style={{ color: "rgba(255,255,255,0.25)", marginRight: 4 }}>·</span>
+                <span style={{ color: doneTasks === totalTasks ? "#52c41a" : "rgba(255,255,255,0.85)" }}>
+                  {doneTasks}/{totalTasks} 任务
+                </span>
+                {inProgressTasks > 0 && (
+                  <span style={{ color: "#a78bfa", marginLeft: 8 }}>
+                    · {inProgressTasks} 进行中
+                  </span>
+                )}
+                {openTasks > 0 && (
+                  <span style={{ color: "rgba(255,255,255,0.55)", marginLeft: 8 }}>
+                    · {openTasks} 待开始
+                  </span>
+                )}
+              </span>
+            </Tooltip>
+          </Popover>
+        )}
         {status === "streaming" && (
           <span style={{ color: "rgba(255,255,255,0.45)" }}>· esc 中断</span>
         )}
@@ -543,13 +618,16 @@ export default React.memo(function AgentInputBox() {
             compact
           />
         )}
-        <span style={{ flex: 1 }} />
+        {/* spacer: flex:1 把右端按钮推到底部右边.
+            minWidth:0 关键 — 不加时 flex item 默认 min-width:auto (= content 尺寸),
+            在窄屏下 spacer 会反向挤压任务摘要到 0 宽, 表现为"被遮挡". */}
+        <span style={{ flex: 1, minWidth: 0 }} />
         <Button
           icon={<PictureOutlined />}
           onClick={() => fileInputRef.current?.click()}
           title="上传图片"
           disabled={status === "streaming" || pendingAsk?.status === "pending"}
-          style={{ color: "rgba(255,255,255,0.45)" }}
+          style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }}
         />
         <ConversationInfoButton />
       </div>

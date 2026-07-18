@@ -1,6 +1,7 @@
 // V2 TaskList 客户端. 写操作(zai-agent-core 内部 tool call)不在这里,
 // 这里只暴露只读: 因为 store 已经通过 SSE 增量更新, 但首次进入会话时
-// 需要 GET 一次把磁盘上 ~/.zai/tasks.json 现有内容拉过来覆盖本地缓存.
+// 需要 GET 一次把磁盘上该 session 的任务 (TaskListStore 按 sessionId
+// 隔离, 实际存储 ~/.zai/tasks/<sessionId>.json) 拉过来覆盖本地缓存.
 
 import type { V2TaskItem } from '../store/useAgentStore.js'
 

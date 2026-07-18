@@ -1,0 +1,4 @@
+ packages/zai/src/web/src/lib/v2TaskApi.test.ts  | 52 +++++++++++++++++++++++
+ packages/zai/src/web/src/lib/v2TaskApi.ts       | 21 ++++++++++
+ packages/zai/src/web/src/store/useAgentStore.ts | 55 +++++++++++++++++++++++++
+ 3 files changed, 128 insertions(+)

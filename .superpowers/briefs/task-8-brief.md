@@ -1,7 +1,20 @@
+# Task 8 Brief
+
+## Task 8: 写 `BottomStatusBar` 单元测试
+
+
+
+**Files:**
+- Create: `packages/zai/src/web/src/components/BottomStatusBar.test.tsx`
+
+- [ ] **Step 1: 写测试**
+
+`packages/zai/src/web/src/components/BottomStatusBar.test.tsx`:
+
+```tsx
 // @vitest-environment happy-dom
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { describe, expect, test } from "vitest";
-import "@testing-library/jest-dom";
 import { BottomStatusBar } from "./BottomStatusBar.js";
 import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
 
@@ -13,11 +26,9 @@ const v2 = (id: string, subject: string, status: V2TaskItem["status"]): V2TaskIt
 });
 
 describe("BottomStatusBar", () => {
-  test("空 todos + 空 v2 完全不渲染 (不占行)", () => {
-    const { container } = render(<BottomStatusBar todos={[]} v2Tasks={[]} />);
-    // 修复: 任务为空时不展示状态栏, 让 UI 更紧凑. 之前会渲染"暂无 任务".
-    expect(container.firstChild).toBeNull();
-    expect(screen.queryByTestId("bottom-status-trigger")).toBeNull();
+  test("空 todos + 空 v2 渲染空态", () => {
+    render(<BottomStatusBar todos={[]} v2Tasks={[]} />);
+    expect(screen.getByTestId("bottom-status-trigger")).toHaveTextContent("暂无 任务");
     expect(screen.queryByTestId("bottom-status-summary")).toBeNull();
   });
 
@@ -49,7 +60,7 @@ describe("BottomStatusBar", () => {
     const summary = screen.getByTestId("bottom-status-summary");
     expect(summary).toHaveTextContent("2/4 任务"); // 1 + 3
     expect(summary).toHaveTextContent("1 进行中");
-    expect(summary).toHaveTextContent("1 待开始"); // 0 老 pending + 1 v2 pending
+    expect(summary).toHaveTextContent("2 待开始"); // 1 老 + 1 v2 pending
   });
 
   test("全完成时进度数字染绿", () => {
@@ -61,7 +72,7 @@ describe("BottomStatusBar", () => {
     );
     const summary = screen.getByTestId("bottom-status-summary");
     const greenSpan = summary.querySelector("span")
-    expect(greenSpan?.style.color).toBe("#52c41a") // inline hex preserved by happy-dom
+    expect(greenSpan?.style.color).toBe("rgb(82, 196, 26)") // #52c41a
   });
 
   test("点击 trigger 展开 popover 并渲染合并的 dropdown", async () => {
@@ -77,3 +88,30 @@ describe("BottomStatusBar", () => {
     expect(screen.getByTestId("v2-task-dropdown-item-pending")).toHaveTextContent("v2 task")
   });
 })
+```
+
+- [ ] **Step 2: 跑测试**
+
+Run: `pnpm --filter @zn-ai/zai test -- BottomStatusBar`
+Expected: 5 passed
+
+常见失败：
+- `findByTestId` 超时 → 改 `await waitFor(() => screen.getByTestId(...))`
+- antd Popover 触发需 click 在 data-testid 节点上（已挂在 div 上 ✓）
+
+- [ ] **Step 3: 全量回归**
+
+Run: `pnpm --filter @zn-ai/zai test`
+Expected: 全部通过（含已有的 `TaskDrawer.test.tsx`、`useBackgroundTasks.test.ts`、`useAgentStore.test.ts`、`TodoDropdown.test.tsx`、`BottomStatusBar.test.tsx` 等）
+
+Run: `pnpm --filter @zn-ai/zai typecheck`
+Expected: 通过
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add packages/zai/src/web/src/components/BottomStatusBar.test.tsx
+git commit -m "test(zai-web): cover BottomStatusBar empty / merged / green-complete / popover"
+```
+
+---

@@ -26,6 +26,12 @@ export function BottomStatusBar({ todos, v2Tasks, label = "任务" }: Props) {
   const inProgress = todoInProgress + v2InProgress;
   const open = todoOpen + (v2Total - v2Done - v2InProgress);
 
+  // 修复: 任务全部为空时完全不渲染 (不展示"暂无任务"占位行).
+  // 留空让 UI 更紧凑, 状态行的职责下放给 AgentInputBox 的"● 就绪"行.
+  if (total === 0) {
+    return null;
+  }
+
   // 触发器: `N/M 任务 · K 进行中 · J 待开始` + 向上 caret
   const trigger = (
     <div
@@ -46,25 +52,21 @@ export function BottomStatusBar({ todos, v2Tasks, label = "任务" }: Props) {
         userSelect: "none",
       }}
     >
-      {total === 0 ? (
-        <span>暂无 {label}</span>
-      ) : (
-        <span data-testid="bottom-status-summary">
-          <span style={{ color: done === total ? "#52c41a" : "rgba(255,255,255,0.85)" }}>
-            {done}/{total} {label}
-          </span>
-          {inProgress > 0 && (
-            <span style={{ color: "#a78bfa", marginLeft: 8 }}>
-              · {inProgress} 进行中
-            </span>
-          )}
-          {open > 0 && (
-            <span style={{ color: "rgba(255,255,255,0.55)", marginLeft: 8 }}>
-              · {open} 待开始
-            </span>
-          )}
+      <span data-testid="bottom-status-summary">
+        <span style={{ color: done === total ? "#52c41a" : "rgba(255,255,255,0.85)" }}>
+          {done}/{total} {label}
         </span>
-      )}
+        {inProgress > 0 && (
+          <span style={{ color: "#a78bfa", marginLeft: 8 }}>
+            · {inProgress} 进行中
+          </span>
+        )}
+        {open > 0 && (
+          <span style={{ color: "rgba(255,255,255,0.55)", marginLeft: 8 }}>
+            · {open} 待开始
+          </span>
+        )}
+      </span>
       <CaretUpOutlined style={{ fontSize: 10, opacity: 0.7 }} />
     </div>
   );
@@ -79,7 +81,7 @@ export function BottomStatusBar({ todos, v2Tasks, label = "任务" }: Props) {
       destroyTooltipOnHide
     >
       <Tooltip
-        title={total === 0 ? `暂无${label},点击查看历史` : `点击查看${label}详情`}
+        title={`点击查看${label}详情`}
         placement="top"
       >
         {trigger}

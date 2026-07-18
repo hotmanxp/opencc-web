@@ -345,18 +345,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   sendSeq: 0,
   todosBySession: {},
   v2TasksBySession: {},
+  // 待清空定时器: 每 sessionId 一份, "全部任务完成" 后 5s 自动从 store 移除
+  // (避免"全部完成还一直挂着"的 UI 噪音). 重新写入含未完成任务时取消.
+  _taskClearTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
 
-  setTodos: (sessionId: string, todos: TodoItem[]) =>
+  setTodos: (sessionId: string, todos: TodoItem[]) => {
     set((s) => ({
       todosBySession: { ...s.todosBySession, [sessionId]: todos },
-    })),
+    }))
+    scheduleTaskListClearIfAllDone(sessionId)
+  },
 
-  setV2Tasks: (sessionId, tasks) =>
+  setV2Tasks: (sessionId, tasks) => {
     set((s) => ({
       v2TasksBySession: { ...s.v2TasksBySession, [sessionId]: tasks },
-    })),
+    }))
+    scheduleTaskListClearIfAllDone(sessionId)
+  },
 
-  updateV2Task: (sessionId, task) =>
+  updateV2Task: (sessionId, task) => {
     set((s) => {
       const cur = s.v2TasksBySession[sessionId] ?? []
       const next = cur.some((t) => t.id === task.id)
@@ -365,9 +372,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return {
         v2TasksBySession: { ...s.v2TasksBySession, [sessionId]: next },
       }
-    }),
+    })
+    scheduleTaskListClearIfAllDone(sessionId)
+  },
 
-  deleteV2Task: (sessionId, taskId) =>
+  deleteV2Task: (sessionId, taskId) => {
     set((s) => {
       const cur = s.v2TasksBySession[sessionId] ?? []
       return {
@@ -376,7 +385,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           [sessionId]: cur.filter((t) => t.id !== taskId),
         },
       }
-    }),
+    })
+    scheduleTaskListClearIfAllDone(sessionId)
+  },
 
   // SSE reducer state (Task 6)
   activeSessionId: null,
@@ -683,6 +694,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             Object.entries(state.todosBySession).filter(([k]) => k !== sid),
           )
         : state.todosBySession
+      const nextV2 = sid
+        ? Object.fromEntries(
+            Object.entries(state.v2TasksBySession).filter(([k]) => k !== sid),
+          )
+        : state.v2TasksBySession
+      // 清掉自动清空 timer (旧 sid 不会再有 completed 任务了)
+      const nextTimers = sid
+        ? Object.fromEntries(
+            Object.entries(state._taskClearTimers).filter(([k]) => k !== sid),
+          )
+        : state._taskClearTimers
       return {
         sessionId: null,
         activeSessionId: null,
@@ -692,6 +714,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         segmentedToolUseIds: {},
         sendSeq: 0,
         todosBySession: nextTodos,
+        v2TasksBySession: nextV2,
+        _taskClearTimers: nextTimers,
       }
     })
     // 同步在 server 端建一条空 transcript, 让 sidebar 立即多一条
@@ -814,6 +838,30 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     } catch {
       // ignore
     }
+    // 异步回填 v2 tasks: transcript 不持久化 v2 task (它们在
+    // ~/.zai/tasks/<sessionId>.json, 按 sessionId 隔离), 必须从服务端
+    // GET 一次拿磁盘上当前 session 的最新任务列表. 不 await,
+    // fire-and-forget — UI 会随 setV2Tasks 自然刷新. 失败静默,
+    // 下次切会话/刷新会再拉一次.
+    // 内联 fetch 而非 import v2TaskApi 是为了避开 store → v2TaskApi → store
+    // (type-only) 的 ESM 循环引用.
+    void (async () => {
+      try {
+        const token = localStorage.getItem('zai-token') || ''
+        const v2Res = await fetch(
+          `/api/agent/sessions/${encodeURIComponent(sessionId)}/v2-tasks`,
+          { headers: { 'X-Zai-Token': token } },
+        )
+        if (!v2Res.ok) return
+        const v2Data = (await v2Res.json()) as { tasks: V2TaskItem[] }
+        useAgentStore.setState((s) => ({
+          v2TasksBySession: { ...s.v2TasksBySession, [sessionId]: v2Data.tasks },
+        }))
+        scheduleTaskListClearIfAllDone(sessionId)
+      } catch {
+        // 静默: 同上
+      }
+    })()
   },
 
   sendMessage: async (_prompt: string) => {
@@ -977,8 +1025,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         }
         useAgentStore.getState().upsertToolCall(startMsg)
         // V2 TaskList 增量刷新: 收到 TaskCreate / TaskUpdate tool_call 时,
-        // 异步重新拉一次 ~/.zai/tasks.json (server 已通过 tool call 写盘)
-        // 覆盖本地 v2TasksBySession 缓存. fire-and-forget, 失败静默 —
+        // 异步重新拉一次 server (server 已按当前 sessionId 过滤后, 写盘到
+        // ~/.zai/tasks/<sessionId>.json) 覆盖本地 v2TasksBySession 缓存.
+        // fire-and-forget, 失败静默 —
         // 下次切会话/刷新会再拉一次兜底. 内联 fetch 而非 import v2TaskApi
         // 是为了避开 store → v2TaskApi → store (type-only) 的 ESM 循环引用.
         if (event.toolName === 'TaskCreate' || event.toolName === 'TaskUpdate') {
@@ -1114,3 +1163,65 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   }),
 }))
+
+/**
+ * 自动清理 helper: 当某个 sessionId 的 todos + v2 tasks 全部 completed /
+ * deleted, 5 秒后从 store 里把对应的 todosBySession[sid] + v2TasksBySession[sid]
+ * 一起清掉. 中途重新写入含未完成任务则取消定时器.
+ *
+ * 设计: 不依赖 React 组件挂载, 直接用模块级 setTimeout + 写入 store.
+ * - 使用 getState() 拿到最新值, 不需要通过 set 闭包传递
+ * - 重复调用时若 sid 的清除定时器已存在, 先 clear 再调度 (debounce)
+ * - hasUnfinished 决定是否调度: 全部完成 → 调度; 任意未完成 → 取消
+ */
+const TASK_CLEAR_DELAY_MS = 5_000
+function scheduleTaskListClearIfAllDone(sessionId: string): void {
+  const s = useAgentStore.getState()
+  const todos = s.todosBySession[sessionId] ?? []
+  const v2 = s.v2TasksBySession[sessionId] ?? []
+  // 没任务 → 取消已有定时器
+  if (todos.length === 0 && v2.length === 0) {
+    if (s._taskClearTimers[sessionId]) {
+      clearTimeout(s._taskClearTimers[sessionId])
+      useAgentStore.setState((cur) => {
+        const { [sessionId]: _, ...rest } = cur._taskClearTimers
+        void _
+        return { _taskClearTimers: rest }
+      })
+    }
+    return
+  }
+  // todo 的 completed 是终态; v2 的 completed + deleted 都是终态
+  const hasUnfinished =
+    todos.some((t) => t.status !== 'completed') ||
+    v2.some((t) => t.status !== 'completed' && t.status !== 'deleted')
+  if (hasUnfinished) {
+    if (s._taskClearTimers[sessionId]) {
+      clearTimeout(s._taskClearTimers[sessionId])
+      useAgentStore.setState((cur) => {
+        const { [sessionId]: _, ...rest } = cur._taskClearTimers
+        void _
+        return { _taskClearTimers: rest }
+      })
+    }
+    return
+  }
+  // 全部终态 → 调度 (或刷新) 5s 后清空
+  if (s._taskClearTimers[sessionId]) clearTimeout(s._taskClearTimers[sessionId])
+  const timer = setTimeout(() => {
+    useAgentStore.setState((cur) => {
+      const { [sessionId]: _, ...restTodos } = cur.todosBySession
+      const { [sessionId]: __, ...restV2 } = cur.v2TasksBySession
+      const { [sessionId]: ___, ...restTimers } = cur._taskClearTimers
+      void _; void __; void ___
+      return {
+        todosBySession: restTodos,
+        v2TasksBySession: restV2,
+        _taskClearTimers: restTimers,
+      }
+    })
+  }, TASK_CLEAR_DELAY_MS)
+  useAgentStore.setState((cur) => ({
+    _taskClearTimers: { ...cur._taskClearTimers, [sessionId]: timer },
+  }))
+}

@@ -1,0 +1,1193 @@
+# Whole-branch review package: e2c8029..5259562
+
+Plan: docs/superpowers/plans/2026-07-18-agent-bottom-status-bar.md
+
+## Commits (8)
+5259562 test(zai-web): cover BottomStatusBar empty / merged / green-complete / popover
+06e2e99 feat(zai-web): add BottomStatusBar above input box for merged TODO + V2 task summary
+9aa9082 test(zai-web): cover TodoDropdown empty / progress / V2 / blocked-by / deleted
+af827fb feat(zai-web): TodoDropdown panel covers legacy TodoWrite + V2 TaskList
+3656591 refactor(zai-web): extract inline bottom config bar into ConfigStatusBar component
+cd10f97 feat(zai): expose V2 TaskList via GET route + auto-refresh on session change
+c5dca77 feat(zai-web): add v2TasksBySession store slice + fetchV2Tasks client API
+c06b313 fix(zai-web): degrade unknown tool name to readable label + diagnose warn
+
+## Diff stat
+ packages/zai/src/server/index.ts                   |   4 +
+ packages/zai/src/server/routes/v2Tasks.ts          |  90 +++++++++++
+ .../web/src/components/BottomStatusBar.test.tsx    |  77 +++++++++
+ .../zai/src/web/src/components/BottomStatusBar.tsx |  89 +++++++++++
+ .../zai/src/web/src/components/ConfigStatusBar.tsx |  38 +++++
+ .../src/web/src/components/TodoDropdown.test.tsx   |  67 ++++++++
+ .../zai/src/web/src/components/TodoDropdown.tsx    | 176 +++++++++++++++++++++
+ packages/zai/src/web/src/lib/v2TaskApi.test.ts     |  52 ++++++
+ packages/zai/src/web/src/lib/v2TaskApi.ts          |  21 +++
+ packages/zai/src/web/src/pages/Agent.tsx           |  71 +++++----
+ packages/zai/src/web/src/store/useAgentStore.ts    |  87 ++++++++++
+ 11 files changed, 743 insertions(+), 29 deletions(-)
+
+## Files touched
+ packages/zai/src/server/index.ts                   |   4 +
+ packages/zai/src/server/routes/v2Tasks.ts          |  90 +++++++++++
+ .../web/src/components/BottomStatusBar.test.tsx    |  77 +++++++++
+ .../zai/src/web/src/components/BottomStatusBar.tsx |  89 +++++++++++
+ .../zai/src/web/src/components/ConfigStatusBar.tsx |  38 +++++
+ .../src/web/src/components/TodoDropdown.test.tsx   |  67 ++++++++
+ .../zai/src/web/src/components/TodoDropdown.tsx    | 176 +++++++++++++++++++++
+ packages/zai/src/web/src/lib/v2TaskApi.test.ts     |  52 ++++++
+ packages/zai/src/web/src/lib/v2TaskApi.ts          |  21 +++
+ packages/zai/src/web/src/pages/Agent.tsx           |  71 +++++----
+ packages/zai/src/web/src/store/useAgentStore.ts    |  87 ++++++++++
+ 11 files changed, 743 insertions(+), 29 deletions(-)
+
+## Full diff (verbatim, line-numbered via -U10)
+diff --git a/packages/zai/src/server/index.ts b/packages/zai/src/server/index.ts
+index b738dd2..8734a41 100644
+--- a/packages/zai/src/server/index.ts
++++ b/packages/zai/src/server/index.ts
+@@ -7,20 +7,21 @@ import cliRouter from './routes/cli.js';
+ import dirsRouter from './routes/dirs.js';
+ import loginRouter from './routes/login.js';
+ import configRouter from './routes/config.js';
+ import resourcesRouter from './routes/resources.js';
+ import quickstartRouter from './routes/quickstart.js';
+ import execRouter from './routes/exec.js';
+ import agentRouter from './routes/agent.js';
+ import agentSettingsRouter from './routes/agentSettings.js';
+ import answerRouter from './routes/answer.js';
+ import tasksRouter from './routes/tasks.js';
++import v2TasksRouter from './routes/v2Tasks.js';
+ import { slashRouter } from './routes/slash.js';
+ import { ensureManifestDir } from './services/manifest.js';
+ import { initAgentRuntime, getAskRegistry } from './services/agentRuntime.js';
+ import {
+   initBackgroundRuntime,
+   initSubagentNotifierLifecycle,
+ } from './services/backgroundRuntime.js';
+ import { startBranchChecker } from './routes/system.js';
+ import { noCacheForApi } from './middleware/noCache.js';
+ 
+@@ -71,20 +72,23 @@ export function createApp(opts: AppOptions): express.Express {
+   app.use('/api', cliRouter);
+   app.use('/api', dirsRouter);
+   app.use('/api', loginRouter);
+   app.use('/api', configRouter);
+   app.use('/api', resourcesRouter);
+   app.use('/api', quickstartRouter);
+   app.use('/api', execRouter);
+   app.use('/api', agentRouter);
+   app.use('/api', agentSettingsRouter);
+   app.use('/api', tasksRouter);
++  // V2 TaskList 只读路由 — zai-web 进会话时 GET 一次把 ~/.zai/tasks.json
++  // 拉到本地 v2TasksBySession 缓存 (SSE 增量之外的兜底).
++  app.use('/api', v2TasksRouter);
+   // /api/slash 直接挂这里 — 前端 Agent.tsx 用 fetch('/api/slash') 拉命令列表,
+   // 不能再走 agentRouter 的 '/agent' 前缀, 否则实际路径会变成 /api/agent/slash,
+   // 前端拿到 SPA fallback HTML, slashItems 永远是 [], 输入 / 不出菜单.
+   app.use('/api', slashRouter);
+   // 注入 AskRegistry 给 answer router, 并挂载.
+   // 注意: 这里的 prefix 必须是 '/api' (不是 '/api/agent'); answerRouter 内部
+   // 已经用 '/agent/answer' + '/agent/answer/reject' 做 path, 拼起来才是
+   // '/api/agent/answer'. 之前写成 '/api/agent' 会变成 '/api/agent/agent/answer',
+   // 单元测试因为 makeApp 用 '/api' 没问题, 生产环境全坏, 前端拿到 404.
+   app.use('/api', (req, _res, next) => {
+diff --git a/packages/zai/src/server/routes/v2Tasks.ts b/packages/zai/src/server/routes/v2Tasks.ts
+new file mode 100644
+index 0000000..bcc6098
+--- /dev/null
++++ b/packages/zai/src/server/routes/v2Tasks.ts
+@@ -0,0 +1,90 @@
++// V2 TaskList 只读路由. zai-web 通过 SSE 的 runtime.tool_call 拿到增量
++// 写入本地 store, 但首次 / 刷新时需要从磁盘把 ~/.zai/tasks.json 现状拉
++// 过来覆盖本地空态. 写操作是 LLM 调 TaskCreate/Update tool, 走
++// zai-agent-core 内部通道, 不经过此路由.
++//
++// 字段映射: server 侧 TaskItem.subject -> client V2TaskItem.subject;
++// status 透传; blocks/blockedBy 透传; 不返回 metadata (含 _internal).
++//
++// 实现说明 (Plan B): 不用 `import { getTaskListStore } from
++// '@zn-ai/zai-agent-core/tools/Tasks/TaskListStore.js'`, 因为 zai-agent-core
++// 的 package.json `exports` 字段没有把 tools/Tasks 子路径暴露出去, Node 的
++// module resolver 会拒绝深路径. 直接读 ~/.zai/tasks.json 即可, 跟
++// TaskListStore.list() 内部行为一致 (load → parse → 过滤 deleted +
++// _internal), 路由层面补齐相同过滤.
++
++import { Router, type IRouter, type Request, type Response } from 'express'
++import { readFile } from 'node:fs/promises'
++import { homedir } from 'node:os'
++import { join } from 'node:path'
++
++// 与 zai-agent-core TaskListStore 内 TaskItem 字段对齐, 过滤后只返回 client
++// 需要的子集. 不引 zod schema, 这层只做形状裁剪, 解析失败 / 字段缺失
++// 都不阻断响应 — 缺失字段 fallback 到 undefined, 客户端 V2TaskItem 全
++// optional.
++type StoredTask = {
++  id: string
++  subject: string
++  description?: string
++  activeForm?: string
++  status: 'pending' | 'in_progress' | 'completed' | 'deleted'
++  blocks: string[]
++  blockedBy: string[]
++  owner?: string
++  metadata?: Record<string, unknown>
++  updatedAt: number
++}
++
++/**
++ * 读 ~/.zai/tasks.json, parse + 过滤 deleted / _internal, 返回客户端
++ * 字段子集. 文件不存在 / JSON 损坏返回空数组 — 这俩是正常路径 (用户
++ * 从未调过 TaskCreate tool, 或文件被外部破坏), 不应 5xx.
++ */
++async function readV2Tasks(): Promise<StoredTask[]> {
++  const path = join(homedir(), '.zai', 'tasks.json')
++  let raw: string
++  try {
++    raw = await readFile(path, 'utf-8')
++  } catch (err) {
++    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
++    throw err
++  }
++  let parsed: unknown
++  try {
++    parsed = JSON.parse(raw)
++  } catch {
++    // 损坏 JSON 当空处理: 客户端会显示"无任务"而不是一片红错误. 真要
++    // 报警可以走 console.warn; 不上 500 是因为这个端点是"兜底拉取",
++    // 失败静默比阻断 UI 体验更好.
++    console.warn('[v2Tasks] tasks.json 损坏, 按空列表返回')
++    return []
++  }
++  if (!Array.isArray(parsed)) return []
++  return parsed.filter((t): t is StoredTask => {
++    if (!t || typeof t !== 'object') return false
++    const task = t as StoredTask
++    if (task.status === 'deleted') return false
++    if (task.metadata?._internal === true) return false
++    return true
++  })
++}
++
++const router: IRouter = Router()
++
++/**
++ * GET /api/agent/sessions/:sid/v2-tasks — 返回当前磁盘上的 V2 TaskList.
++ *
++ * 路径里的 :sid 当前实现不参与 partition (TaskListStore 是全局单例,
++ * 写在 ~/.zai/tasks.json). 保留 :sid 是为了与未来按 session 切片兼容,
++ * 前端调用形态统一不必再改.
++ */
++router.get('/agent/sessions/:sid/v2-tasks', async (_req: Request, res: Response) => {
++  try {
++    const tasks = await readV2Tasks()
++    res.json({ tasks })
++  } catch (err) {
++    res.status(500).json({ error: (err as Error).message })
++  }
++})
++
++export default router
+\ No newline at end of file
+diff --git a/packages/zai/src/web/src/components/BottomStatusBar.test.tsx b/packages/zai/src/web/src/components/BottomStatusBar.test.tsx
+new file mode 100644
+index 0000000..c94db66
+--- /dev/null
++++ b/packages/zai/src/web/src/components/BottomStatusBar.test.tsx
+@@ -0,0 +1,77 @@
++// @vitest-environment happy-dom
++import { fireEvent, render, screen, waitFor } from "@testing-library/react";
++import { describe, expect, test } from "vitest";
++import "@testing-library/jest-dom";
++import { BottomStatusBar } from "./BottomStatusBar.js";
++import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
++
++const todo = (content: string, status: TodoItem["status"]): TodoItem => ({
++  content, status, activeForm: content,
++});
++const v2 = (id: string, subject: string, status: V2TaskItem["status"]): V2TaskItem => ({
++  id, subject, status, blocks: [], blockedBy: [], updatedAt: 0,
++});
++
++describe("BottomStatusBar", () => {
++  test("空 todos + 空 v2 渲染空态", () => {
++    render(<BottomStatusBar todos={[]} v2Tasks={[]} />);
++    expect(screen.getByTestId("bottom-status-trigger")).toHaveTextContent("暂无 任务");
++    expect(screen.queryByTestId("bottom-status-summary")).toBeNull();
++  });
++
++  test("仅 todos 时摘要只算 todo", () => {
++    const todos: TodoItem[] = [
++      todo("a", "completed"),
++      todo("b", "completed"),
++      todo("c", "in_progress"),
++      todo("d", "pending"),
++    ];
++    render(<BottomStatusBar todos={todos} v2Tasks={[]} />);
++    const summary = screen.getByTestId("bottom-status-summary");
++    expect(summary).toHaveTextContent("2/4 任务");
++    expect(summary).toHaveTextContent("1 进行中");
++    expect(summary).toHaveTextContent("1 待开始");
++  });
++
++  test("合并 todos + v2 进度", () => {
++    render(
++      <BottomStatusBar
++        todos={[todo("a", "completed")]}
++        v2Tasks={[
++          v2("v1", "v2 task", "in_progress"),
++          v2("v2", "v2 done", "completed"),
++          v2("v3", "v2 pending", "pending"),
++        ]}
++      />,
++    );
++    const summary = screen.getByTestId("bottom-status-summary");
++    expect(summary).toHaveTextContent("2/4 任务"); // 1 + 3
++    expect(summary).toHaveTextContent("1 进行中");
++    expect(summary).toHaveTextContent("1 待开始"); // 0 老 pending + 1 v2 pending
++  });
++
++  test("全完成时进度数字染绿", () => {
++    render(
++      <BottomStatusBar
++        todos={[todo("a", "completed"), todo("b", "completed")]}
++        v2Tasks={[]}
++      />,
++    );
++    const summary = screen.getByTestId("bottom-status-summary");
++    const greenSpan = summary.querySelector("span")
++    expect(greenSpan?.style.color).toBe("#52c41a") // inline hex preserved by happy-dom
++  });
++
++  test("点击 trigger 展开 popover 并渲染合并的 dropdown", async () => {
++    render(
++      <BottomStatusBar
++        todos={[todo("first", "in_progress")]}
++        v2Tasks={[v2("v1", "v2 task", "pending")]}
++      />,
++    );
++    fireEvent.click(screen.getByTestId("bottom-status-trigger"))
++    await waitFor(() => expect(screen.getByTestId("todo-dropdown")).toBeInTheDocument())
++    expect(screen.getByTestId("todo-dropdown-item-in_progress")).toHaveTextContent("first")
++    expect(screen.getByTestId("v2-task-dropdown-item-pending")).toHaveTextContent("v2 task")
++  });
++})
+\ No newline at end of file
+diff --git a/packages/zai/src/web/src/components/BottomStatusBar.tsx b/packages/zai/src/web/src/components/BottomStatusBar.tsx
+new file mode 100644
+index 0000000..18ae3b4
+--- /dev/null
++++ b/packages/zai/src/web/src/components/BottomStatusBar.tsx
+@@ -0,0 +1,89 @@
++import { Popover, Tooltip } from "antd";
++import { CaretUpOutlined } from "@ant-design/icons";
++import TodoDropdown from "./TodoDropdown.js";
++import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
++
++type Props = {
++  todos: TodoItem[];
++  v2Tasks: V2TaskItem[];
++  /** 触发按钮文字，默认 "任务"。 */
++  label?: string;
++};
++
++export function BottomStatusBar({ todos, v2Tasks, label = "任务" }: Props) {
++  // 老 TODO (会话内) 与 V2 (跨会话持久) 各自统计
++  const todoTotal = todos.length;
++  const todoDone = todos.filter((t) => t.status === "completed").length;
++  const todoInProgress = todos.filter((t) => t.status === "in_progress").length;
++  const todoOpen = todoTotal - todoDone - todoInProgress;
++
++  const v2Total = v2Tasks.length;
++  const v2Done = v2Tasks.filter((t) => t.status === "completed").length;
++  const v2InProgress = v2Tasks.filter((t) => t.status === "in_progress").length;
++
++  const total = todoTotal + v2Total;
++  const done = todoDone + v2Done;
++  const inProgress = todoInProgress + v2InProgress;
++  const open = todoOpen + (v2Total - v2Done - v2InProgress);
++
++  // 触发器: `N/M 任务 · K 进行中 · J 待开始` + 向上 caret
++  const trigger = (
++    <div
++      data-testid="bottom-status-trigger"
++      style={{
++        display: "flex",
++        alignItems: "center",
++        justifyContent: "center",
++        gap: 8,
++        padding: "8px 12px",
++        cursor: "pointer",
++        background: "rgba(255,255,255,0.04)",
++        borderTop: "1px solid rgba(255,255,255,0.10)",
++        borderBottom: "1px solid rgba(255,255,255,0.06)",
++        color: total > 0 ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.45)",
++        fontSize: 12,
++        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
++        userSelect: "none",
++      }}
++    >
++      {total === 0 ? (
++        <span>暂无 {label}</span>
++      ) : (
++        <span data-testid="bottom-status-summary">
++          <span style={{ color: done === total ? "#52c41a" : "rgba(255,255,255,0.85)" }}>
++            {done}/{total} {label}
++          </span>
++          {inProgress > 0 && (
++            <span style={{ color: "#a78bfa", marginLeft: 8 }}>
++              · {inProgress} 进行中
++            </span>
++          )}
++          {open > 0 && (
++            <span style={{ color: "rgba(255,255,255,0.55)", marginLeft: 8 }}>
++              · {open} 待开始
++            </span>
++          )}
++        </span>
++      )}
++      <CaretUpOutlined style={{ fontSize: 10, opacity: 0.7 }} />
++    </div>
++  );
++
++  return (
++    <Popover
++      data-testid="bottom-status-popover"
++      content={<TodoDropdown todos={todos} v2Tasks={v2Tasks} />}
++      trigger="click"
++      placement="topRight"
++      arrow={false}
++      destroyTooltipOnHide
++    >
++      <Tooltip
++        title={total === 0 ? `暂无${label},点击查看历史` : `点击查看${label}详情`}
++        placement="top"
++      >
++        {trigger}
++      </Tooltip>
++    </Popover>
++  );
++}
+\ No newline at end of file
+diff --git a/packages/zai/src/web/src/components/ConfigStatusBar.tsx b/packages/zai/src/web/src/components/ConfigStatusBar.tsx
+new file mode 100644
+index 0000000..8bf50b5
+--- /dev/null
++++ b/packages/zai/src/web/src/components/ConfigStatusBar.tsx
+@@ -0,0 +1,38 @@
++import ModelStatusButton from "./ModelStatusButton";
++import ModeStatusButton from "./ModeStatusButton";
++import { TaskDock } from "./TaskDock";
++
++type Props = {
++  cwdName: string;
++  branch: string;
++  onTaskSelect: (taskId: string) => void;
++};
++
++export default function ConfigStatusBar({ cwdName, branch, onTaskSelect }: Props) {
++  return (
++    <div
++      style={{
++        borderTop: "1px solid rgba(255,255,255,0.10)",
++        padding: "6px 10px",
++        fontSize: 12,
++        fontFamily:
++          "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
++        color: "rgba(255,255,255,0.45)",
++        display: "flex",
++        alignItems: "center",
++        gap: 8,
++      }}
++    >
++      <ModeStatusButton />
++      <span style={{ color: "#eab308" }}>{cwdName}</span>
++      <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
++      <span style={{ color: "#22c55e" }}>{branch}</span>
++      <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
++      <span style={{ color: "#f97316" }}>
++        <ModelStatusButton />
++      </span>
++      <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
++      <TaskDock onSelect={onTaskSelect} />
++    </div>
++  );
++}
+\ No newline at end of file
+diff --git a/packages/zai/src/web/src/components/TodoDropdown.test.tsx b/packages/zai/src/web/src/components/TodoDropdown.test.tsx
+new file mode 100644
+index 0000000..694f48a
+--- /dev/null
++++ b/packages/zai/src/web/src/components/TodoDropdown.test.tsx
+@@ -0,0 +1,67 @@
++// @vitest-environment happy-dom
++import { render, screen } from "@testing-library/react";
++import { describe, expect, test } from "vitest";
++import "@testing-library/jest-dom";
++import TodoDropdown from "./TodoDropdown.js";
++import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
++
++const todo = (content: string, status: TodoItem["status"]): TodoItem => ({
++  content, status, activeForm: content,
++});
++
++const v2 = (id: string, subject: string, status: V2TaskItem["status"], extra: Partial<V2TaskItem> = {}): V2TaskItem => ({
++  id, subject, status, blocks: [], blockedBy: [], updatedAt: 0, ...extra,
++});
++
++describe("TodoDropdown", () => {
++  test("空 todos + 空 v2 渲染 empty 提示", () => {
++    render(<TodoDropdown todos={[]} v2Tasks={[]} />);
++    expect(screen.getByTestId("todo-dropdown-empty")).toHaveTextContent("暂无任务或 TODO");
++    expect(screen.queryByTestId("todo-dropdown")).toBeNull();
++  });
++
++  test("仅 todos 时显示 N/M 完成进度 + 三个 data-testid", () => {
++    const todos: TodoItem[] = [
++      todo("分析需求", "completed"),
++      todo("写代码", "in_progress"),
++      todo("写测试", "pending"),
++    ];
++    render(<TodoDropdown todos={todos} v2Tasks={[]} />);
++    expect(screen.getByTestId("todo-dropdown")).toBeInTheDocument();
++    expect(screen.getByTestId("todo-dropdown")).toHaveTextContent("1/3 完成");
++    expect(screen.getByTestId("todo-dropdown")).toHaveTextContent("1 进行中");
++    expect(screen.getByTestId("todo-dropdown-item-completed")).toHaveTextContent("分析需求");
++    expect(screen.getByTestId("todo-dropdown-item-in_progress")).toHaveTextContent("写代码");
++    expect(screen.getByTestId("todo-dropdown-item-pending")).toHaveTextContent("写测试");
++  });
++
++  test("同时含 todos + v2 时渲染两段", () => {
++    render(
++      <TodoDropdown
++        todos={[todo("老 todo", "in_progress")]}
++        v2Tasks={[v2("v1", "V2 任务 A", "pending"), v2("v2", "V2 任务 B", "completed")]}
++      />,
++    );
++    expect(screen.getByTestId("todo-dropdown-item-in_progress")).toHaveTextContent("老 todo");
++    expect(screen.getByTestId("v2-task-dropdown-item-pending")).toHaveTextContent("V2 任务 A");
++    expect(screen.getByTestId("v2-task-dropdown-item-completed")).toHaveTextContent("V2 任务 B");
++    expect(screen.getByTestId("todo-dropdown")).toHaveTextContent("V2 任务清单");
++  });
++
++  test("v2 task 含 blockedBy 时显示依赖数量", () => {
++    render(
++      <TodoDropdown
++        todos={[]}
++        v2Tasks={[v2("v1", "blocked", "pending", { blockedBy: ["a", "b"] })]}
++      />,
++    );
++    expect(screen.getByTestId("v2-task-dropdown-item-pending")).toHaveTextContent("依赖 2");
++  });
++
++  test("v2 task deleted 状态显示 ✗ 删除线", () => {
++    render(
++      <TodoDropdown todos={[]} v2Tasks={[v2("v1", "deleted one", "deleted")]} />,
++    );
++    expect(screen.getByTestId("v2-task-dropdown-item-deleted")).toHaveTextContent("deleted one");
++  });
++});
+diff --git a/packages/zai/src/web/src/components/TodoDropdown.tsx b/packages/zai/src/web/src/components/TodoDropdown.tsx
+new file mode 100644
+index 0000000..dd9d16e
+--- /dev/null
++++ b/packages/zai/src/web/src/components/TodoDropdown.tsx
+@@ -0,0 +1,176 @@
++import type { TodoItem, V2TaskItem } from '../store/useAgentStore.js'
++
++type Props = { todos: TodoItem[]; v2Tasks: V2TaskItem[] }
++
++// 样式与 zai-web 现有暗色主题靠齐. 颜色 / 字号复用 TodoZone 的视觉密度,
++// 仅追加 Popover 包裹所需的宽度 / maxHeight / 滚动 / 分割线.
++const styles: Record<string, React.CSSProperties> = {
++  wrap: {
++    width: 360,
++    background: '#1f1f1f',
++    borderRadius: 6,
++    padding: 10,
++    maxHeight: 360,
++    overflowY: 'auto',
++    color: '#fff',
++    fontSize: 12,
++    fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
++  },
++  header: {
++    fontSize: 11,
++    fontWeight: 600,
++    color: 'rgba(255,255,255,0.55)',
++    marginBottom: 8,
++    display: 'flex',
++    justifyContent: 'space-between',
++  },
++  list: { listStyle: 'none', padding: 0, margin: 0 },
++  item: {
++    display: 'flex',
++    alignItems: 'center',
++    gap: 8,
++    padding: '5px 6px',
++    borderRadius: 4,
++  },
++  icon: { width: 16, textAlign: 'center', fontSize: 12 },
++  empty: {
++    fontSize: 12,
++    color: 'rgba(255,255,255,0.40)',
++    padding: '16px 8px',
++    textAlign: 'center',
++  },
++  divider: {
++    height: 1,
++    background: 'rgba(255,255,255,0.08)',
++    margin: '10px -10px',
++  },
++}
++
++function todoIcon(status: TodoItem['status']): string {
++  if (status === 'completed') return '✓'
++  if (status === 'in_progress') return '■'
++  return '☐'
++}
++
++function v2Icon(status: V2TaskItem['status']): string {
++  if (status === 'completed') return '✓'
++  if (status === 'in_progress') return '■'
++  if (status === 'deleted') return '✗'
++  return '☐'
++}
++
++function todoColor(status: TodoItem['status']): string {
++  if (status === 'completed') return '#52c41a'
++  if (status === 'in_progress') return '#a78bfa'
++  return 'rgba(255,255,255,0.40)'
++}
++
++function v2Color(status: V2TaskItem['status']): string {
++  if (status === 'completed') return '#52c41a'
++  if (status === 'in_progress') return '#a78bfa'
++  if (status === 'deleted') return '#f5222d'
++  return 'rgba(255,255,255,0.40)'
++}
++
++export default function TodoDropdown({ todos, v2Tasks }: Props) {
++  const todoDone = todos.filter((t) => t.status === 'completed').length
++  const todoInProgress = todos.filter((t) => t.status === 'in_progress').length
++  const v2Done = v2Tasks.filter((t) => t.status === 'completed').length
++  const v2InProgress = v2Tasks.filter((t) => t.status === 'in_progress').length
++  const isEmpty = todos.length === 0 && v2Tasks.length === 0
++
++  if (isEmpty) {
++    return (
++      <div style={styles.wrap} data-testid="todo-dropdown-empty">
++        <div style={styles.empty}>暂无任务或 TODO</div>
++      </div>
++    )
++  }
++
++  return (
++    <div style={styles.wrap} data-testid="todo-dropdown">
++      {todos.length > 0 && (
++        <>
++          <div style={styles.header}>
++            <span>当前会话 TODO</span>
++            <span>
++              {todoDone}/{todos.length} 完成 · {todoInProgress} 进行中
++            </span>
++          </div>
++          <ul style={styles.list}>
++            {todos.map((t, i) => (
++              <li
++                key={`todo-${i}`}
++                style={styles.item}
++                data-testid={`todo-dropdown-item-${t.status}`}
++              >
++                <span style={{ ...styles.icon, color: todoColor(t.status) }}>
++                  {todoIcon(t.status)}
++                </span>
++                <span
++                  style={{
++                    flex: 1,
++                    color:
++                      t.status === 'completed'
++                        ? 'rgba(255,255,255,0.45)'
++                        : 'rgba(255,255,255,0.85)',
++                    textDecoration:
++                      t.status === 'completed' ? 'line-through' : 'none',
++                  }}
++                >
++                  {t.content}
++                </span>
++              </li>
++            ))}
++          </ul>
++        </>
++      )}
++
++      {v2Tasks.length > 0 && (
++        <>
++          <div style={styles.divider} />
++          <div style={styles.header}>
++            <span>V2 任务清单</span>
++            <span>
++              {v2Done}/{v2Tasks.length} 完成 · {v2InProgress} 进行中
++            </span>
++          </div>
++          <ul style={styles.list}>
++            {v2Tasks.map((t) => (
++              <li
++                key={t.id}
++                style={styles.item}
++                data-testid={`v2-task-dropdown-item-${t.status}`}
++              >
++                <span style={{ ...styles.icon, color: v2Color(t.status) }}>
++                  {v2Icon(t.status)}
++                </span>
++                <span
++                  style={{
++                    flex: 1,
++                    color:
++                      t.status === 'completed' || t.status === 'deleted'
++                        ? 'rgba(255,255,255,0.45)'
++                        : 'rgba(255,255,255,0.85)',
++                    textDecoration:
++                      t.status === 'completed' || t.status === 'deleted'
++                        ? 'line-through'
++                        : 'none',
++                  }}
++                  title={t.description ?? t.subject}
++                >
++                  {t.subject}
++                </span>
++                {t.blockedBy.length > 0 && (
++                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)' }}>
++                    依赖 {t.blockedBy.length}
++                  </span>
++                )}
++              </li>
++            ))}
++          </ul>
++        </>
++      )}
++    </div>
++  )
++}
+\ No newline at end of file
+diff --git a/packages/zai/src/web/src/lib/v2TaskApi.test.ts b/packages/zai/src/web/src/lib/v2TaskApi.test.ts
+new file mode 100644
+index 0000000..6346175
+--- /dev/null
++++ b/packages/zai/src/web/src/lib/v2TaskApi.test.ts
+@@ -0,0 +1,52 @@
++// @vitest-environment happy-dom
++import { describe, expect, test, vi, beforeEach } from 'vitest'
++import { fetchV2Tasks } from './v2TaskApi.js'
++
++// 包 vitest.config.ts 默认 environment: 'node', 没有 localStorage. 用
++// 内存 stub 提供 setItem/clear/getItem, 让 brief 给定的测试代码可以原样
++// 跑通. 不加 @vitest-environment happy-dom 是为了不和 taskApi.ts 同
++// 目录的其它单测共享 node 环境, 也避免改动 vitest.config 触发连锁影响.
++const memoryStorage = (() => {
++  const m = new Map<string, string>()
++  return {
++    getItem: (k: string) => (m.has(k) ? m.get(k)! : null),
++    setItem: (k: string, v: string) => { m.set(k, v) },
++    removeItem: (k: string) => { m.delete(k) },
++    clear: () => { m.clear() },
++    key: (i: number) => Array.from(m.keys())[i] ?? null,
++    get length() { return m.size },
++  }
++})()
++
++describe('fetchV2Tasks', () => {
++  beforeEach(() => {
++    vi.restoreAllMocks()
++    // 装一个内存版的 localStorage 让 brief 给的测试代码可直接跑通.
++    ;(globalThis as any).localStorage = memoryStorage
++    localStorage.clear()
++  })
++
++  test('GET 路径正确 + 返回 task 数组', async () => {
++    localStorage.setItem('zai-token', 'tok-123')
++    const mockFetch = vi.fn().mockResolvedValue({
++      ok: true,
++      status: 200,
++      json: async () => ({ tasks: [{ id: 't1', subject: 'demo', status: 'pending', blocks: [], blockedBy: [], updatedAt: 0 }] }),
++    })
++    // @ts-expect-error mock fetch
++    globalThis.fetch = mockFetch
++
++    const tasks = await fetchV2Tasks('sess-abc')
++    expect(tasks[0]?.subject).toBe('demo')
++    expect(mockFetch).toHaveBeenCalledWith(
++      expect.stringContaining('/api/agent/sessions/sess-abc/v2-tasks'),
++      expect.objectContaining({ headers: expect.objectContaining({ 'X-Zai-Token': 'tok-123' }) }),
++    )
++  })
++
++  test('HTTP 非 2xx 抛错', async () => {
++    // @ts-expect-error mock fetch
++    globalThis.fetch = vi.fn().mockResolvedValue({ ok: false, status: 500 })
++    await expect(fetchV2Tasks('s1')).rejects.toThrow(/500/)
++  })
++})
+\ No newline at end of file
+diff --git a/packages/zai/src/web/src/lib/v2TaskApi.ts b/packages/zai/src/web/src/lib/v2TaskApi.ts
+new file mode 100644
+index 0000000..ca5fdb0
+--- /dev/null
++++ b/packages/zai/src/web/src/lib/v2TaskApi.ts
+@@ -0,0 +1,21 @@
++// V2 TaskList 客户端. 写操作(zai-agent-core 内部 tool call)不在这里,
++// 这里只暴露只读: 因为 store 已经通过 SSE 增量更新, 但首次进入会话时
++// 需要 GET 一次把磁盘上 ~/.zai/tasks.json 现有内容拉过来覆盖本地缓存.
++
++import type { V2TaskItem } from '../store/useAgentStore.js'
++
++const API = '/api/agent/sessions'
++
++function getHeaders(): HeadersInit {
++  const token = (typeof localStorage !== 'undefined' && localStorage.getItem('zai-token')) || ''
++  return token ? { 'X-Zai-Token': token } : {}
++}
++
++export async function fetchV2Tasks(sessionId: string): Promise<V2TaskItem[]> {
++  const res = await fetch(`${API}/${encodeURIComponent(sessionId)}/v2-tasks`, {
++    headers: getHeaders(),
++  })
++  if (!res.ok) throw new Error(`v2-tasks fetch failed: ${res.status}`)
++  const data = (await res.json()) as { tasks: V2TaskItem[] }
++  return data.tasks
++}
+\ No newline at end of file
+diff --git a/packages/zai/src/web/src/pages/Agent.tsx b/packages/zai/src/web/src/pages/Agent.tsx
+index 3f63b32..5e1ab4d 100644
+--- a/packages/zai/src/web/src/pages/Agent.tsx
++++ b/packages/zai/src/web/src/pages/Agent.tsx
+@@ -28,33 +28,35 @@ import {
+ } from "@ant-design/icons";
+ import ReactMarkdown from "react-markdown";
+ import remarkGfm from "remark-gfm";
+ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
+ import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+ import {
+   useAgentStore,
+   type AgentMessage,
+   type AgentStatus,
+   type TodoItem,
++  type V2TaskItem,
+ } from "../store/useAgentStore";
+ import { useAppStore } from "../store/useAppStore";
+ import QuestionCard from "../components/QuestionCard.jsx";
+ import DiffBlock from "../components/DiffBlock.js";
+ import { linkifyText } from "../lib/linkify.js";
+ import { splitMarkdownOnIncomplete } from "../lib/splitMarkdown.js";
+ import { AttachmentStrip } from "../components/AttachmentStrip";
+-import ModelStatusButton from "../components/ModelStatusButton";
+-import ModeStatusButton, { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
+-import { TaskDock } from "../components/TaskDock";
++import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
++import ConfigStatusBar from "../components/ConfigStatusBar";
+ import { TaskDrawer } from "../components/TaskDrawer";
+ import TodoZone from "../components/TodoZone.jsx";
++import { BottomStatusBar } from "../components/BottomStatusBar";
+ import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
++import { fetchV2Tasks } from "../lib/v2TaskApi.js";
+ import AgentInputBox from "../components/AgentInputBox";
+ 
+ const { TextArea } = Input;
+ const { Text, Paragraph } = Typography;
+ 
+ // 代码块使用 oneDark 主题作为底色, 深灰(#282c34) 与浅色气泡形成稳定对比,
+ // 避免原来 rgba(0,0,0,0.35) 在浅气泡上对比度过低的问题.
+ const CODE_BG = "#282c34";
+ const CODE_FONT_FAMILY =
+   "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
+@@ -506,21 +508,26 @@ function ToolUsePill({ name, status }: { name: string; status: ToolStatus }) {
+     >
+       {name}
+     </span>
+   );
+ }
+ 
+ // 工具调用块: 把 tool_use:start / done / error / invalid / denied
+ // 统一成单一可折叠面板. 由于 React key 按 toolUseId 锁定 (见调用处),
+ // 同一次调用的 start/done/error 事件会复用同一个 DOM 节点, 折叠态不丢.
+ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMessage }) {
+-  const name = (msg.name as string) || 'unknown'
++  const rawName = (msg.name as string | undefined)?.trim() || ''
++  const shortId = (msg.toolUseId as string | undefined)?.slice(-8) ?? '????????'
++  // 兜底: 模型 SSE 流里有个别时刻 toolName 没带过来(已知 race condition,
++  // tool_use:start 与 content_block_start 都在抢),显示 "未知工具 (id:xxxxxxxx)"
++  // 比 "unknown" 强,user 至少能根据 id 复制去后端日志 grep
++  const name = rawName || `未知工具 (id:${shortId})`
+   const input = (msg.input as Record<string, unknown>) || {}
+   // Agent 工具的 pill 不显示泛化的 "Agent" — 展示实际派发的 subagent_type
+   // (Explore / Plan / general-purpose / 用户自定义), 让用户一眼看出当前是
+   // 哪种 subagent 在跑. 格式 `<type> (agent)` 与 opencc AssistantToolUseMessage
+   // 的 userFacingName 风格一致. 缺省回退到 'general-purpose'(AgentTool 的 schema 默认值).
+   const displayName = name === "Agent"
+     ? `${(typeof input.subagent_type === "string" && input.subagent_type.trim()) || "general-purpose"} (agent)`
+     : name
+   const output = msg.output
+   const errorField = msg.error as string | { message?: string } | undefined;
+@@ -1010,35 +1017,38 @@ const MessageBubble = React.memo(function MessageBubble({
+   return null;
+ });
+ 
+ export default function Agent() {
+   const messages = useAgentStore((s) => s.messages);
+   const status = useAgentStore((s) => s.status);
+   const cwd = useAgentStore((s) => s.cwd);
+   const sessions = useAgentStore((s) => s.sessions);
+   const sessionId = useAgentStore((s) => s.sessionId);
+   const todosBySession = useAgentStore((s) => s.todosBySession);
++  const v2TasksBySession = useAgentStore((s) => s.v2TasksBySession);
+   const activeSessionId = useAgentStore((s) => s.activeSessionId);
+   const stop = useAgentStore((s) => s.stop);
+   const clearMessages = useAgentStore((s) => s.clearMessages);
+   const loadSessions = useAgentStore((s) => s.loadSessions);
+   const setCurrentSession = useAgentStore((s) => s.setCurrentSession);
+   const loadTranscript = useAgentStore((s) => s.loadTranscript);
+   const createNewSession = useAgentStore((s) => s.createNewSession);
+   const deleteSession = useAgentStore((s) => s.deleteSession);
+   const pendingAsk = useAgentStore((s) => s.pendingAsk);
+   const setAskAnswer = useAgentStore((s) => s.setAskAnswer);
+   const setAskNotes = useAgentStore((s) => s.setAskNotes);
+   const submitAsk = useAgentStore((s) => s.submitAsk);
+   const rejectAsk = useAgentStore((s) => s.rejectAsk);
+   const todosForCurrentSession: TodoItem[] =
+     sessionId != null ? (todosBySession[sessionId] ?? []) : [];
++  const v2TasksForCurrentSession: V2TaskItem[] =
++    sessionId != null ? (v2TasksBySession[sessionId] ?? []) : [];
+   const patchSessionMode = useAgentStore((s) => s.patchSessionMode);
+   const { instanceContext } = useAppStore()
+   const cwdName = instanceContext?.cwdName || '~'
+   const branch = instanceContext?.branch || 'master'
+   const { token } = theme.useToken();
+ 
+   const messageList = useMemo(
+     () =>
+       messages.map((msg: AgentMessage, idx: number) => {
+         const t = msg.type as string;
+@@ -1115,20 +1125,41 @@ export default function Agent() {
+   // /api/agent/sessions 建一条空 transcript, 立即在 sidebar 占位).
+   useEffect(() => {
+     (async () => {
+       await loadSessions();
+       if (useAgentStore.getState().sessions.length === 0) {
+         await useAgentStore.getState().createNewSession();
+       }
+     })();
+   }, []);
+ 
++  // 切会话时把 ~/.zai/tasks.json 当前内容拉到本地 v2TasksBySession 缓存.
++  // SSE runtime.tool_call 拿到的增量更新走 useAgentStore.applyRuntimeEvent
++  // 内置的 v2 工具分支处理 (见该 store 内的 TaskCreate/Update 拦截),
++  // 这里是首次/刷新场景的兜底,保证刷新页面后 V2 任务列表不会空白.
++  // 失败静默 — 不阻断会话切换.
++  useEffect(() => {
++    const sid = sessionId
++    if (!sid) return
++    let cancelled = false
++    void (async () => {
++      try {
++        const tasks = await fetchV2Tasks(sid)
++        if (cancelled) return
++        useAgentStore.getState().setV2Tasks(sid, tasks)
++      } catch (err) {
++        console.warn('[v2Tasks] initial fetch failed:', err)
++      }
++    })()
++    return () => { cancelled = true }
++  }, [sessionId])
++
+   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()
+ 
+   const visibleSessions = showAllSessions
+     ? sessions
+     : sessions.slice(0, sessionPageSize);
+   const hasMoreSessions = sessions.length > sessionPageSize;
+ 
+   // messages 直接按 store 顺序渲染. store 已经通过 textSegmentRev 在工具调用
+   // 起点 bump, 把"工具前后的文字段"切到不同 entry, 因此工具与文字在
+   // messages[] 中天然交错, 不需要前端再二次重排. 早期这里曾用 useMemo
+@@ -1396,43 +1427,25 @@ export default function Agent() {
+               status={pendingAsk.status}
+               errorMessage={pendingAsk.errorMessage}
+               onAnswer={setAskAnswer}
+               onNotesChange={setAskNotes}
+               onSubmit={() => void submitAsk()}
+               onReject={() => void rejectAsk()}
+             />
+           )}
+         </div>
+ 
++        <BottomStatusBar todos={todosForCurrentSession} v2Tasks={v2TasksForCurrentSession} />
++
+         <div className="bottom-stack">
+           <AgentInputBox />
+-          {/* 输入框下方的模式栏: 仿 OpenCC 底栏 */}
+-          <div
+-            style={{
+-              borderTop: "1px solid rgba(255,255,255,0.10)",
+-              padding: "6px 10px",
+-              fontSize: 12,
+-              fontFamily:
+-                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+-              color: "rgba(255,255,255,0.45)",
+-              display: "flex",
+-              alignItems: "center",
+-              gap: 8,
+-            }}
+-          >
+-            <ModeStatusButton />
+-            <span style={{ color: "#eab308" }}>{cwdName}</span>
+-            <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
+-            <span style={{ color: "#22c55e" }}>{branch}</span>
+-            <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
+-            <span style={{ color: "#f97316" }}>
+-              <ModelStatusButton />
+-            </span>
+-            <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
+-            <TaskDock onSelect={setSelectedTaskId} />
+-          </div>
++          <ConfigStatusBar
++            cwdName={cwdName}
++            branch={branch}
++            onTaskSelect={setSelectedTaskId}
++          />
+         </div>
+       </div>
+       <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
+     </div>
+   );
+ }
+diff --git a/packages/zai/src/web/src/store/useAgentStore.ts b/packages/zai/src/web/src/store/useAgentStore.ts
+index b59ae63..ed1687a 100644
+--- a/packages/zai/src/web/src/store/useAgentStore.ts
++++ b/packages/zai/src/web/src/store/useAgentStore.ts
+@@ -6,20 +6,36 @@ import type { PermissionMode } from '@zn-ai/zai-agent-core/runtime'
+ 
+ // 与 agent-core TodoWriteInputSchema 的 zod 形态一致 (web 不直接 import zod schema,
+ // 避免循环依赖; 字段类型用本地 type 即可, 实时流拿到的 input.todos 由本文件内的
+ // safeParse 兜底, 失败时静默忽略).
+ export type TodoItem = {
+   content: string
+   status: 'pending' | 'in_progress' | 'completed'
+   activeForm: string
+ }
+ 
++// V2 TaskList 镜像 (mirror of zai-agent-core TaskListStore). 跟 TodoZone
++// 字段对齐: 客户端只读, 写操作走 TaskCreate/TaskUpdate tool call, server
++// 重新计算后通过本字段刷新. status 多一个 'deleted' (completed 之外
++// 软删除态), UI 用删除线表达.
++export type V2TaskItem = {
++  id: string
++  subject: string
++  description?: string
++  activeForm?: string
++  status: 'pending' | 'in_progress' | 'completed' | 'deleted'
++  blocks: string[]
++  blockedBy: string[]
++  owner?: string
++  updatedAt: number
++}
++
+ // 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob. 仅用于 v2 协议里把
+ // 历史图片消息里的 base64 还原成浏览器可显示的 objectURL. 解析失败时
+ // 返回 null, 调用方回退到 raw dataURL 并把 status 标为 error.
+ function dataURLtoBlob(dataUrl: string): Blob | null {
+   const m = dataUrl.match(/^data:([^;]+);base64,(.+)$/)
+   if (!m) return null
+   const mime = m[1]!
+   const bin = atob(m[2]!)
+   const arr = new Uint8Array(bin.length)
+   for (let i = 0; i < bin.length; i++) arr[i] = bin.charCodeAt(i)
+@@ -86,20 +102,27 @@ interface AgentState {
+   // 工具调用前后的文字段强制放进不同 stream block. 不依赖 Anthropic SDK
+   // 的 content_block_delta.index 是否正确递增.
+   textSegmentRev: number
+   // 已经触发过 textSegmentRev++ 的 toolUseId 集合, 每个工具只 bump 一次.
+   segmentedToolUseIds: Record<string, true>
+   // 会话级 todo 列表 (按 sessionId 索引). 不持久化, 切换会话时保留旧 sid 的
+   // todo, 刷新页面由 loadTranscript 走 extractTodosFromTranscript 还原.
+   todosBySession: Record<string, TodoItem[]>
+   setTodos: (sessionId: string, todos: TodoItem[]) => void
+ 
++  // V2 TaskList 镜像: 与老 TodoWrite 分开存, 因为语义不同 (跨 turn、
++  // 会话之间可被查询). key 用 sessionId (来自 tool_use:start.msg.sessionId).
++  v2TasksBySession: Record<string, V2TaskItem[]>
++  setV2Tasks: (sessionId: string, tasks: V2TaskItem[]) => void
++  updateV2Task: (sessionId: string, task: V2TaskItem) => void
++  deleteV2Task: (sessionId: string, taskId: string) => void
++
+   // 每次 sendMessage 递增的发送序号. 拼进 stream block key 作为"本轮命名空间",
+   // 保证跨轮次的文本块 key 永不碰撞. 后端 turnIndex 恒为 0 (wrapWithZaiMeta 被
+   // 逐事件调用导致其内部计数器每次归零), textSegmentRev 只在工具调用时 bump,
+   // blockIndex 每轮新回复都从 0 起 — 三者在"上一轮纯文本回答"的场景下会让
+   // 相邻两轮首个文本块拼出同一个 key `0:0:0:text`, 新一轮文本被 append 进上一轮
+   // 气泡. sendSeq 提供跨轮唯一性, 根治该归并 bug.
+   sendSeq: number
+ 
+   // SSE reducers (Task 6)
+   activeSessionId: string | null
+@@ -314,26 +337,54 @@ export const useAgentStore = create<AgentState>((set, get) => ({
+   availableModels: [],
+   cwd: '',
+   messages: [],
+   status: 'idle',
+   abortController: null,
+   pendingAsk: null,
+   textSegmentRev: 0,
+   segmentedToolUseIds: {},
+   sendSeq: 0,
+   todosBySession: {},
++  v2TasksBySession: {},
+ 
+   setTodos: (sessionId: string, todos: TodoItem[]) =>
+     set((s) => ({
+       todosBySession: { ...s.todosBySession, [sessionId]: todos },
+     })),
+ 
++  setV2Tasks: (sessionId, tasks) =>
++    set((s) => ({
++      v2TasksBySession: { ...s.v2TasksBySession, [sessionId]: tasks },
++    })),
++
++  updateV2Task: (sessionId, task) =>
++    set((s) => {
++      const cur = s.v2TasksBySession[sessionId] ?? []
++      const next = cur.some((t) => t.id === task.id)
++        ? cur.map((t) => (t.id === task.id ? task : t))
++        : [...cur, task]
++      return {
++        v2TasksBySession: { ...s.v2TasksBySession, [sessionId]: next },
++      }
++    }),
++
++  deleteV2Task: (sessionId, taskId) =>
++    set((s) => {
++      const cur = s.v2TasksBySession[sessionId] ?? []
++      return {
++        v2TasksBySession: {
++          ...s.v2TasksBySession,
++          [sessionId]: cur.filter((t) => t.id !== taskId),
++        },
++      }
++    }),
++
+   // SSE reducer state (Task 6)
+   activeSessionId: null,
+ 
+   addMessage: (msg: AgentMessage) =>
+     set((s) => ({ messages: [...s.messages, msg] })),
+   // 把 tool_use:* 与 content_block_start(tool_use) 合并到同一条消息.
+   // 后端 tool_use:done 只带 {toolUseId, output}, name/input 在 start 已经定型,
+   // 单纯 append 会得到 "unknown 已完成" 的破损条目. 按 toolUseId upsert 后,
+   // 同一个工具的 start → done/error 全程复用一条消息 + 一个 DOM 节点,
+   // ToolCallBlock 内部 Collapse 折叠态不丢, React 也不再报 duplicate key.
+@@ -476,20 +527,33 @@ export const useAgentStore = create<AgentState>((set, get) => ({
+           // 在"调用中"的 start.
+           type: (msg.type as string).startsWith('tool_use:') ? msg.type : 'tool_use:start',
+           toolUseId,
+           name: incomingName || (msg.name as string) || 'unknown',
+           input: incomingInput || (msg.input as Record<string, unknown>),
+           // start 阶段先不带 output / error; done / error 阶段由后续事件填
+           output: msg.output,
+           error: msg.error,
+           reason: msg.reason,
+         }
++        if (!incomingName && !(msg.name as string | undefined)) {
++          // 数据收集: 流式阶段 server 漏传 toolName 的次数 + 上下文 toolUseId,
++          // 排查 Bug A (实时流式期间显示 "unknown") 的现场统计.
++          if (typeof console !== 'undefined') {
++            console.warn('[tool_unknown] runtime.tool_call 漏传 toolName', {
++              toolUseId,
++              sessionId: msg.sessionId,
++              turnIndex: msg.turnIndex,
++              ts: msg.ts,
++              input: msg.input,
++            })
++          }
++        }
+         const updates: Partial<AgentState> = { messages: [...s.messages, created] }
+         if (shouldBumpSegment) {
+           updates.textSegmentRev = s.textSegmentRev + 1
+           updates.segmentedToolUseIds = {
+             ...s.segmentedToolUseIds,
+             [toolUseId]: true,
+           }
+         }
+         return updates
+       }
+@@ -559,29 +623,33 @@ export const useAgentStore = create<AgentState>((set, get) => ({
+       return { messages: next }
+     }),
+   setStatus: (status: AgentStatus) => set({ status }),
+ 
+   clearMessages: () =>
+     set((s) => {
+       // 仅清空当前 sid 的 todo, 其他 sid 保留以便切回.
+       const sid = s.sessionId
+       const { [sid as string]: _drop, ...rest } = (s.todosBySession ?? {}) as Record<string, TodoItem[]>
+       void _drop
++      // v2TasksBySession 与 todosBySession 一致: 切会话/清屏 只清理当前 sid
++      const { [sid as string]: _dropV2, ...restV2 } = (s.v2TasksBySession ?? {}) as Record<string, V2TaskItem[]>
++      void _dropV2
+       return {
+         messages: [],
+         status: 'idle',
+         // 重置 stream block 状态: 切会话/清屏 后, 工具边界计数器也得回到 0,
+         // 否则新会话的 text 段会被旧会话遗留的 textSegmentRev 错位归并.
+         textSegmentRev: 0,
+         segmentedToolUseIds: {},
+         sendSeq: 0,
+         todosBySession: sid ? rest : s.todosBySession,
++        v2TasksBySession: sid ? restV2 : s.v2TasksBySession,
+       }
+     }),
+ 
+   loadSessions: async () => {
+     try {
+       const token = localStorage.getItem('zai-token') || ''
+       const [sessionsRes, settingsRes] = await Promise.all([
+         fetch('/api/agent/sessions', { headers: { 'X-Zai-Token': token } }),
+         fetch('/api/agent/settings').catch(() => null),
+       ])
+@@ -901,20 +969,39 @@ export const useAgentStore = create<AgentState>((set, get) => ({
+           eventId: `tool-${tuId}`,
+           sessionId: sid,
+           ts: event.ts,
+           turnIndex: event.turnIndex,
+           type: 'tool_use:start',
+           toolUseId: tuId,
+           name: event.toolName,
+           input: event.input as Record<string, unknown>,
+         }
+         useAgentStore.getState().upsertToolCall(startMsg)
++        // V2 TaskList 增量刷新: 收到 TaskCreate / TaskUpdate tool_call 时,
++        // 异步重新拉一次 ~/.zai/tasks.json (server 已通过 tool call 写盘)
++        // 覆盖本地 v2TasksBySession 缓存. fire-and-forget, 失败静默 —
++        // 下次切会话/刷新会再拉一次兜底. 内联 fetch 而非 import v2TaskApi
++        // 是为了避开 store → v2TaskApi → store (type-only) 的 ESM 循环引用.
++        if (event.toolName === 'TaskCreate' || event.toolName === 'TaskUpdate') {
++          void (async () => {
++            try {
++              const token = localStorage.getItem('zai-token') || ''
++              const res = await fetch(
++                `/api/agent/sessions/${encodeURIComponent(sid)}/v2-tasks`,
++                { headers: { 'X-Zai-Token': token } },
++              )
++              if (!res.ok) return
++              const data = (await res.json()) as { tasks: V2TaskItem[] }
++              useAgentStore.getState().setV2Tasks(sid, data.tasks)
++            } catch { /* 静默 */ }
++          })()
++        }
+         return
+       }
+       case 'runtime.tool_result': {
+         // runtime.tool_result schema 携带 toolUseId, 直接复用.
+         const resultMsg: AgentMessage = {
+           eventId: `tool-${event.toolUseId}`,
+           sessionId: sid,
+           ts: event.ts,
+           turnIndex: event.turnIndex,
+           type: 'tool_use:done',

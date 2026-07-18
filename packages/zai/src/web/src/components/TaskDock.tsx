@@ -132,6 +132,12 @@ export function TaskDock({ onSelect }: { onSelect: (id: string) => void }) {
 
   const bashRunning = bashTasks.filter((t) => t.status === 'running').length
   const total = runningTasks.length + bashRunning
+
+  // 修复: 完全没有任务 (running=0 + recent=0 + bash 全空) 时不渲染任何东西.
+  // 之前会一直挂着"暂无后台任务"占位, 占位行没信息密度, 让底栏冗余.
+  if (total === 0 && recentTasks.length === 0 && bashTasks.length === 0) {
+    return null
+  }
   const content = useMemo(
     () => (
       <div
@@ -260,7 +266,7 @@ export function TaskDock({ onSelect }: { onSelect: (id: string) => void }) {
     <Popover
       content={<div onClick={(e) => e.stopPropagation()}>{content}</div>}
       trigger="click"
-      placement="topRight"
+      placement="topLeft"
       open={open}
       onOpenChange={setOpen}
       destroyTooltipOnHide
