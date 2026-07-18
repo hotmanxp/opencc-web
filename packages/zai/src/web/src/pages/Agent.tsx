@@ -40,6 +40,7 @@ import { useAppStore } from "../store/useAppStore";
 import QuestionCard from "../components/QuestionCard.jsx";
 import DiffBlock from "../components/DiffBlock.js";
 import { linkifyText } from "../lib/linkify.js";
+import { getRenderer } from "../components/toolRenderers/registry.js";
 import { splitMarkdownOnIncomplete } from "../lib/splitMarkdown.js";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
@@ -516,16 +517,15 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
   const shortId = (msg.toolUseId as string | undefined)?.slice(-8) ?? '????????'
   // 兜底: 模型 SSE 流里有个别时刻 toolName 没带过来(已知 race condition,
   // tool_use:start 与 content_block_start 都在抢),显示 "未知工具 (id:xxxxxxxx)"
-  // 比 "unknown" 强,user 至少能根据 id 复制去后端日志 grep
+  // 比 "unknown" 强,user 至少能根据 id 复制去后端日志 grep.
   const name = rawName || `未知工具 (id:${shortId})`
   const input = (msg.input as Record<string, unknown>) || {}
   // Agent 工具的 pill 不显示泛化的 "Agent" — 展示实际派发的 subagent_type
   // (Explore / Plan / general-purpose / 用户自定义), 让用户一眼看出当前是
   // 哪种 subagent 在跑. 格式 `<type> (agent)` 与 opencc AssistantToolUseMessage
   // 的 userFacingName 风格一致. 缺省回退到 'general-purpose'(AgentTool 的 schema 默认值).
-  const displayName = name === "Agent"
-    ? `${(typeof input.subagent_type === "string" && input.subagent_type.trim()) || "general-purpose"} (agent)`
-    : name
+  const renderer = getRenderer(rawName)
+  const displayName = renderer.displayName?.(input) ?? name
   const output = msg.output
   const errorField = msg.error as string | { message?: string } | undefined;
   const reasonField = msg.reason as string | undefined;
@@ -545,41 +545,10 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
   // 折叠态预览: 直接展示第一个 input 字段的值, 不带 "key: " 前缀.
   // 工具名已通过 pill (Read/Edit/Glob…) 表达, 再写 file_path/pattern 等
   // 字段名属于冗余; 路径/pattern 本身就是用户最关心的辨识信息.
+  // 每个工具的预览策略由对应 renderer.preview(input) 决定; Bash 优先
+  // description, Agent 优先 description, 其余工具则回退到第一个字段的值.
   const inputKeys = Object.keys(input);
-  const truncate = (s: string) => (s.length > 80 ? s.slice(0, 80) + "…" : s);
-  // Bash 工具特殊: 模型通常会同时给出 description (意图说明) + command (实际命令).
-  // 折叠态优先展示 description — 用户一眼看出"这条 Bash 是在做什么", 真正命令
-  // 留到展开后的参数区查看. 没有 description 时回退到 command, 再退化到通用逻辑.
-  // Agent 工具 (sub-agent 调用) 同理: description 说明意图, prompt 是发给子代理的
-  // 具体指令. 优先 description, 缺失时回退到 prompt 的开头几行.
-  let preview = "";
-  if (name === "Bash") {
-    const desc = input.description;
-    const cmd = input.command;
-    if (typeof desc === "string" && desc.trim()) {
-      preview = truncate(desc);
-    } else if (typeof cmd === "string" && cmd.trim()) {
-      preview = truncate(cmd);
-    }
-  } else if (name === "Agent") {
-    const desc = input.description;
-    const prompt = input.prompt;
-    if (typeof desc === "string" && desc.trim()) {
-      preview = truncate(desc);
-    } else if (typeof prompt === "string" && prompt.trim()) {
-      preview = truncate(prompt);
-    }
-  } else {
-    const firstKey = inputKeys[0];
-    const firstVal = firstKey ? input[firstKey] : undefined;
-    const firstPreview =
-      firstVal == null
-        ? ""
-        : typeof firstVal === "string"
-          ? firstVal
-          : JSON.stringify(firstVal);
-    preview = firstPreview ? truncate(firstPreview) : "";
-  }
+  const preview = renderer.preview(input);
 
   const errorText =
     typeof errorField === "string"
@@ -588,6 +557,39 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
 
   // 同 ThinkingBlock: 受控 + 抹掉默认箭头 + 手动渲染, 让箭头紧贴 pill 之后.
   const [active, setActive] = useState(false);
+
+  // 泛型输入/输出渲染: 当 renderer 没有自定义 renderInput/renderOutput
+  // 时回退到这里. 风格刻意与 bash/error 等专用 renderer 保持一致
+  // (字体/字号/背景圆角), 让用户在 "generic" 与 "specific" 之间的视觉
+  // 跳跃最小.
+  const renderGenericInput = () => (
+    <pre
+      style={{
+        fontSize: 12, margin: "4px 0 0 0", padding: "8px 10px",
+        background: "rgba(0,0,0,0.03)", borderRadius: 4,
+        whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const,
+        fontFamily: CODE_FONT_FAMILY,
+      }}
+    >
+      {linkifyText(JSON.stringify(input, null, 2))}
+    </pre>
+  )
+
+  const renderGenericOutput = () =>
+    output === undefined || output === null ? null : (
+      <pre
+        style={{
+          fontSize: 12, margin: "4px 0 0 0", padding: "8px 10px",
+          background: "rgba(82,196,26,0.06)", borderLeft: "2px solid #52c41a",
+          borderRadius: 4, whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const,
+          fontFamily: CODE_FONT_FAMILY, maxHeight: 360, overflow: "auto" as const,
+        }}
+      >
+        {typeof output === "string"
+          ? linkifyText(output)
+          : linkifyText(JSON.stringify(output, null, 2))}
+      </pre>
+    )
 
   return (
     // 不缩进 (贴齐主对话流); 视觉上与 assistant.text 气泡同列.
@@ -667,20 +669,9 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                     >
                       参数
                     </Text>
-                    <pre
-                      style={{
-                        fontSize: 12,
-                        margin: "4px 0 0 0",
-                        padding: "8px 10px",
-                        background: "rgba(0,0,0,0.03)",
-                        borderRadius: 4,
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
-                        fontFamily: CODE_FONT_FAMILY,
-                      }}
-                    >
-                      {linkifyText(JSON.stringify(input, null, 2))}
-                    </pre>
+                    {renderer.renderInput
+                      ? renderer.renderInput(input)
+                      : renderGenericInput()}
                   </div>
                 )}
                 {output !== undefined && output !== null && (
@@ -695,25 +686,9 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                     >
                       结果
                     </Text>
-                    <pre
-                      style={{
-                        fontSize: 12,
-                        margin: "4px 0 0 0",
-                        padding: "8px 10px",
-                        background: "rgba(82,196,26,0.06)",
-                        borderLeft: "2px solid #52c41a",
-                        borderRadius: 4,
-                        whiteSpace: "pre-wrap",
-                        wordBreak: "break-word",
-                        fontFamily: CODE_FONT_FAMILY,
-                        maxHeight: 360,
-                        overflow: "auto",
-                      }}
-                    >
-                      {typeof output === "string"
-                        ? linkifyText(output)
-                        : linkifyText(JSON.stringify(output, null, 2))}
-                    </pre>
+                    {renderer.renderOutput
+                      ? renderer.renderOutput(output, errorField != null)
+                      : renderGenericOutput()}
                   </div>
                 )}
                 {errorText && (
