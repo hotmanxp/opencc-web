@@ -62,5 +62,74 @@ export default function AgentInputBox() {
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [skillMenuIdx, setSkillMenuIdx] = useState(0);
 
+  // 模糊匹配: 检查 query 的字符是否按顺序出现在 target 中（可不连续）
+  const fuzzyMatch = (query: string, target: string): number => {
+    let qi = 0;
+    let score = 0;
+    let lastMatchIdx = -1;
+    const t = target.toLowerCase();
+    for (let ti = 0; ti < t.length && qi < query.length; ti++) {
+      if (t[ti] === query[qi]) {
+        const gap = lastMatchIdx >= 0 ? ti - lastMatchIdx - 1 : ti;
+        score += gap === 0 ? 10 : Math.max(1, 10 - gap);
+        lastMatchIdx = ti;
+        qi++;
+      }
+    }
+    return qi === query.length ? score : 0;
+  };
+
+  const filteredSlash = useMemo(() => {
+    if (!input.startsWith("/")) return [];
+    const q = input.slice(1).toLowerCase();
+    if (!q) {
+      const cmds = slashItems
+        .filter((i) => i.kind === "command" && i.isBuiltIn)
+        .sort((a, b) => a.name.localeCompare(b.name));
+      const sks = slashItems
+        .filter((i) => i.kind === "skill")
+        .sort((a, b) => a.name.localeCompare(b.name));
+      return [...cmds, ...sks].slice(0, 30);
+    }
+    const scoreItem = (it: SlashItem) => {
+      const nameScore = fuzzyMatch(q, it.name);
+      if (nameScore === 0) return 0;
+      const descScore = fuzzyMatch(q, it.description);
+      return nameScore + (descScore > 0 ? descScore * 0.3 : 0);
+    };
+    const cmds = slashItems
+      .filter((i) => i.kind === "command")
+      .map((it) => ({ it, s: scoreItem(it) }))
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.it);
+    const sks = slashItems
+      .filter((i) => i.kind === "skill")
+      .map((it) => ({ it, s: scoreItem(it) }))
+      .filter((x) => x.s > 0)
+      .sort((a, b) => b.s - a.s)
+      .map((x) => x.it);
+    return [...cmds, ...sks].slice(0, 30);
+  }, [input, slashItems]);
+
+  useEffect(() => {
+    setSkillMenuIdx(0);
+    setShowSkillMenu(filteredSlash.length > 0);
+  }, [filteredSlash.length]);
+
+  useEffect(() => {
+    if (!showSkillMenu) return;
+    const handler = (e: MouseEvent) => {
+      if (
+        skillMenuRef.current &&
+        !skillMenuRef.current.contains(e.target as Node)
+      ) {
+        setShowSkillMenu(false);
+      }
+    };
+    document.addEventListener("mousedown", handler);
+    return () => document.removeEventListener("mousedown", handler);
+  }, [showSkillMenu]);
+
   return <div data-agent-inputbox-placeholder />;
 }
