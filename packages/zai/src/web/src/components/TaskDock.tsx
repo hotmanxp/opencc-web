@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react'
+import { useState } from 'react'
 import { Badge, Popover, Tooltip } from 'antd'
 import { CaretRightOutlined, CheckCircleFilled, CloseCircleFilled, CodeOutlined, LoadingOutlined } from '@ant-design/icons'
 import { useBackgroundTasks } from '../hooks/useBackgroundTasks.js'
@@ -133,13 +133,14 @@ export function TaskDock({ onSelect }: { onSelect: (id: string) => void }) {
   const bashRunning = bashTasks.filter((t) => t.status === 'running').length
   const total = runningTasks.length + bashRunning
 
-  // 修复: 完全没有任务 (running=0 + recent=0 + bash 全空) 时不渲染任何东西.
-  // 之前会一直挂着"暂无后台任务"占位, 占位行没信息密度, 让底栏冗余.
+  // 空态时直接 return null — 所有 hooks 已在上面调用, 顺序在每次渲染中固定,
+  // 不会触发 React #310 (Rules of Hooks 要求: hooks 必须在每次渲染中按相同
+  // 顺序调用相同数量, 不能在条件分支里跳过).
   if (total === 0 && recentTasks.length === 0 && bashTasks.length === 0) {
     return null
   }
-  const content = useMemo(
-    () => (
+
+  const content = (
       <div
         style={{
           width: 360,
@@ -258,9 +259,7 @@ export function TaskDock({ onSelect }: { onSelect: (id: string) => void }) {
           </>
         )}
       </div>
-    ),
-    [runningTasks, recentTasks, bashTasks, bashRunning, total, onSelect],
-  )
+  );
 
   return (
     <Popover
