@@ -61,11 +61,14 @@ return (
     {streaming && (
       <style>{`
         @keyframes zai-think-glow {
-          0%, 100% { color: #f7d774; }
-          50%      { color: #ffe999; }
+          0%, 100% { fill: #f7d774; }
+          50%      { fill: #ffe999; }
+        }
+        .zai-thinking-bulb svg path {
+          animation: zai-think-glow 1.4s ease-in-out infinite;
         }
         @media (prefers-reduced-motion: reduce) {
-          @keyframes zai-think-glow { 0%, 100% { color: inherit; } }
+          @keyframes zai-think-glow { 0%, 100% { fill: #cacaca; } }
         }
       `}</style>
     )}
@@ -75,14 +78,7 @@ return (
         label: (
           <div ...>
             <span style={{ /* 紫色 pill 样式保持不变 */ }}>
-              <BulbOutlined
-                style={{
-                  fontSize: 11,
-                  ...(streaming && {
-                    animation: "zai-think-glow 1.4s ease-in-out infinite",
-                  }),
-                }}
-              />
+              <BulbOutlined className="zai-thinking-bulb" style={{ fontSize: 11 }} />
               思考
             </span>
             ...
@@ -98,10 +94,12 @@ return (
 ### 关键决策
 
 1. **行内 `<style>` 局部注入**：与项目现有 `zai-blink`（`index.css:88`）的声明方式分离，避免污染全局。仅当 `streaming=true` 才挂载，DOM 上自动随 streaming 切换插入/移除。
-2. **`prefers-reduced-motion` 降级**：在同一个 `<style>` 内用嵌套 `@media` 让 keyframes 在 reduce 模式下 `color: inherit`，**动画与颜色同时关闭**，灯泡回到静态白色。
-3. **颜色范围**：仅 `<BulbOutlined>` 的 `color` 属性在 `#f7d774 ↔ #ffe999` 之间循环（暗黄 ↔ 亮黄）。pill 背景、`思考` 文字、左侧紫罗兰边条全部不动。
-4. **周期 1.4s `ease-in-out`**：比 `StreamingMarkdown` 末尾 `zai-blink` 的 1s `steps(1)` 慢半拍，避免与流式光标节奏重叠；`ease-in-out` 让脉冲更柔和，符合"思考"沉静语义。
-5. **不变更 index.css**：不引入全局 keyframe，遵循项目模块化约定。
+2. **改 `fill` 而非 `color`**：AntD `BulbOutlined` 的 SVG `<path>` 在源码里硬编码 `fill="#cacaca"`（base64 数据），CSS `color` 属性**不会**传导到 path 的 fill，必须用 `.zai-thinking-bulb svg path { animation: ... }` 把 keyframe 直接挂到 path 上，并在 keyframe 里改 `fill`。这是关键架构决策 — 用 `color` 动画是无效的（已通过截图对比验证）。
+3. **`prefers-reduced-motion` 降级**：在同一个 `<style>` 内用嵌套 `@media` 让 keyframes 在 reduce 模式下 `fill: #cacaca`（与默认静态色一致），**动画与颜色同时关闭**。
+4. **className 始终挂载**：`zai-thinking-bulb` className 无论 streaming 与否都存在，但 `<style>` 块仅 streaming 时挂载。`<style>` 不挂载时 CSS 选择器无匹配，灯泡回到默认 #cacaca 灰色，无残留样式。
+5. **颜色范围**：灯泡 path 的 fill 在 `#f7d774 ↔ #ffe999` 之间循环（暗黄 ↔ 亮黄）。pill 背景、`思考` 文字、左侧紫罗兰边条全部不动。
+6. **周期 1.4s `ease-in-out`**：比 `StreamingMarkdown` 末尾 `zai-blink` 的 1s `steps(1)` 慢半拍，避免与流式光标节奏重叠；`ease-in-out` 让脉冲更柔和，符合"思考"沉静语义。
+7. **不变更 index.css**：不引入全局 keyframe，遵循项目模块化约定。
 
 ## 边界情况与行为
 
@@ -132,7 +130,7 @@ return (
 | 文件 | 行 | 改动 |
 |------|-----|------|
 | `packages/zai/src/web/src/pages/Agent.tsx` | 308 | `ThinkingBlock` 签名加 `streaming?: boolean` |
-| `packages/zai/src/web/src/pages/Agent.tsx` | 308 内部 | 返回 JSX 用 Fragment 包裹，新增条件 `<style>` 与 `<BulbOutlined>` 动态 `animation` 样式 |
+| `packages/zai/src/web/src/pages/Agent.tsx` | 308 内部 | 返回 JSX 用 Fragment 包裹，新增条件 `<style>` 与 `<BulbOutlined>` 加 `className="zai-thinking-bulb"`（CSS 选择器把 animation 挂到 svg path 上）|
 | `packages/zai/src/web/src/pages/Agent.tsx` | 727 | `<ThinkingBlock>` 增加 `streaming={streaming}` |
 
 `index.css`、`MessageBubble` 外层结构、其他组件均不修改。

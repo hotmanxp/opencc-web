@@ -66,11 +66,14 @@ return (
     {streaming && (
       <style>{`
         @keyframes zai-think-glow {
-          0%, 100% { color: #f7d774; }
-          50%      { color: #ffe999; }
+          0%, 100% { fill: #f7d774; }
+          50%      { fill: #ffe999; }
+        }
+        .zai-thinking-bulb svg path {
+          animation: zai-think-glow 1.4s ease-in-out infinite;
         }
         @media (prefers-reduced-motion: reduce) {
-          @keyframes zai-think-glow { 0%, 100% { color: inherit; } }
+          @keyframes zai-think-glow { 0%, 100% { fill: #cacaca; } }
         }
       `}</style>
     )}
@@ -114,12 +117,8 @@ return (
                   }}
                 >
                   <BulbOutlined
-                    style={{
-                      fontSize: 11,
-                      ...(streaming && {
-                        animation: "zai-think-glow 1.4s ease-in-out infinite",
-                      }),
-                    }}
+                    className="zai-thinking-bulb"
+                    style={{ fontSize: 11 }}
                   />
                   思考
                 </span>
@@ -180,6 +179,8 @@ return (
 ```
 
 注：上面把整个组件 return 体完整列出，避免"参考 Task N"式的省略；`active`、`firstLine`、`preview` 等中间变量保持原代码不变。
+
+**关键架构说明**：AntD `BulbOutlined` 的 SVG `<path>` 在源码里硬编码 `fill="#cacaca"`，CSS `color` 属性**不会**传导到 path 的 fill。因此必须在 `<style>` 内通过 `.zai-thinking-bulb svg path { animation: ... }` 选择器把 animation 直接挂到 path 上，并在 keyframe 里改 `fill`。用 `color` 动画是无效的（已通过对比截图验证）。
 
 ### 改动 3：MessageBubble 内透传 streaming
 
@@ -261,7 +262,7 @@ git commit -m "feat(zai-web): animate ThinkingBlock bulb glow during streaming"
 - ✅ 接口扩展 `streaming?: boolean` → 改动 1
 - ✅ 透传路径 MessageBubble → ThinkingBlock → 改动 3
 - ✅ 行内 `<style>` + 局部 keyframes → 改动 2
-- ✅ 颜色 `#f7d774 ↔ #ffe999` → 改动 2
+- ✅ 颜色 `#f7d774 ↔ #ffe999`（改 fill 而非 color，因为 AntD BulbOutlined path 硬编码 fill）→ 改动 2
 - ✅ 周期 1.4s `ease-in-out` → 改动 2
 - ✅ `prefers-reduced-motion` 降级 → 改动 2
 - ✅ 不修改 index.css → 全局约束
@@ -270,4 +271,6 @@ git commit -m "feat(zai-web): animate ThinkingBlock bulb glow during streaming"
 
 **2. Placeholder scan:** 无 TBD/TODO/模糊指令；改动 2 给出完整 return 体（含 `active`、`firstLine`、`preview` 中间变量上下文）；验证步骤全部有具体命令与预期。
 
-**3. Type consistency:** 改动 1 定义 `streaming?: boolean`；改动 3 透传同一类型 `streaming`（来源为 `MessageBubble` 的 `streaming: boolean` 入参，已存在）；改动 2 行内 animation 字符串使用 `zai-think-glow`（与 `<style>` 内 keyframe 名一致）。
+**3. Type consistency:** 改动 1 定义 `streaming?: boolean`；改动 3 透传同一类型 `streaming`（来源为 `MessageBubble` 的 `streaming: boolean` 入参，已存在）；改动 2 的 className `zai-thinking-bulb` 与 `<style>` 内 CSS 选择器 `.zai-thinking-bulb svg path` 一致；keyframe 名 `zai-think-glow` 在 `<style>` 内自洽（不再需要 inline animation 字符串）。
+
+**4. 修复记录（v2）:** 第一版提交（commit `2f27d1a`）使用 `<BulbOutlined style={{ animation: ... }}>` + keyframe 改 `color`，但 AntD `BulbOutlined` 的 SVG `<path>` 在源码里硬编码 `fill="#cacaca"`，CSS `color` 属性不会传导到 path 的 fill，导致动画在视觉上完全无效。已在 v2 修复：把 inline `animation` 移除，加 `className="zai-thinking-bulb"`，`<style>` 块内用 `.zai-thinking-bulb svg path { animation: ... }` 选择器直接挂到 path 上，keyframe 改 `fill`。已通过 Chrome DevTools 截图对比验证修复有效。

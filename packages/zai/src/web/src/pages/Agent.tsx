@@ -339,11 +339,14 @@ function ThinkingBlock({
       {streaming && (
         <style>{`
           @keyframes zai-think-glow {
-            0%, 100% { color: #f7d774; }
-            50%      { color: #ffe999; }
+            0%, 100% { fill: #f7d774; }
+            50%      { fill: #ffe999; }
+          }
+          .zai-thinking-bulb svg path {
+            animation: zai-think-glow 1.4s ease-in-out infinite;
           }
           @media (prefers-reduced-motion: reduce) {
-            @keyframes zai-think-glow { 0%, 100% { color: inherit; } }
+            @keyframes zai-think-glow { 0%, 100% { fill: #cacaca; } }
           }
         `}</style>
       )}
@@ -390,14 +393,7 @@ function ThinkingBlock({
                     flexShrink: 0,
                   }}
                 >
-                  <BulbOutlined
-                    style={{
-                      fontSize: 11,
-                      ...(streaming && {
-                        animation: "zai-think-glow 1.4s ease-in-out infinite",
-                      }),
-                    }}
-                  />
+                  <BulbOutlined className="zai-thinking-bulb" style={{ fontSize: 11 }} />
                   思考
                 </span>
                 {/* 箭头: 折叠态 › (CaretRight), 展开态 ⌄ (CaretDown).
