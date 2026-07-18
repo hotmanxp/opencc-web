@@ -131,6 +131,6 @@ return (
 |------|-----|------|
 | `packages/zai/src/web/src/pages/Agent.tsx` | 308 | `ThinkingBlock` 签名加 `streaming?: boolean` |
 | `packages/zai/src/web/src/pages/Agent.tsx` | 308 内部 | 返回 JSX 用 Fragment 包裹，新增条件 `<style>` 与 `<BulbOutlined>` 加 `className="zai-thinking-bulb"`（CSS 选择器把 animation 挂到 svg path 上）|
-| `packages/zai/src/web/src/pages/Agent.tsx` | 727 | `<ThinkingBlock>` 增加 `streaming={streaming}` |
+| `packages/zai/src/web/src/pages/Agent.tsx` | 747, 958 | 两处 `<ThinkingBlock>` 调用都增加 `streaming={streaming}`：747 处是 `assistant.thinking` 消息回放，958 处是 `content_block_delta` 流式（真正的"正在思考"路径，第二轮修复补上的）|
 
 `index.css`、`MessageBubble` 外层结构、其他组件均不修改。

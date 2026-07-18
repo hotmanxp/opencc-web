@@ -955,7 +955,7 @@ function MessageBubble({
       | undefined;
     // thinking_delta: 模型内部推理, 折叠成灰色面板
     if (delta?.type === "thinking_delta") {
-      return <ThinkingBlock text={delta.thinking || ""} />;
+      return <ThinkingBlock text={delta.thinking || ""} streaming={streaming} />;
     }
     // text_delta: 可见回复正文
     const text = delta?.text || "";

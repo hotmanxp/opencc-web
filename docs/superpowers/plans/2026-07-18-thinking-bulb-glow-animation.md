@@ -26,7 +26,7 @@
 |------|-----|---------|
 | `packages/zai/src/web/src/pages/Agent.tsx` | 308 | `ThinkingBlock` 函数签名扩展，加 `streaming?: boolean` 入参 |
 | `packages/zai/src/web/src/pages/Agent.tsx` | 308 内部 | 返回 JSX 用 Fragment 包裹，新增条件 `<style>` 与 `<BulbOutlined>` 动态 `animation` 样式 |
-| `packages/zai/src/web/src/pages/Agent.tsx` | 727 | `<ThinkingBlock>` 调用处透传 `streaming={streaming}` |
+| `packages/zai/src/web/src/pages/Agent.tsx` | 747, 958 | 两处 `<ThinkingBlock>` 调用都透传 `streaming={streaming}`（v3 修复补 958：流式 thinking_delta 路径，**这是真正"正在思考"的渲染点**）|
 
 不创建任何新文件。
 
@@ -274,3 +274,5 @@ git commit -m "feat(zai-web): animate ThinkingBlock bulb glow during streaming"
 **3. Type consistency:** 改动 1 定义 `streaming?: boolean`；改动 3 透传同一类型 `streaming`（来源为 `MessageBubble` 的 `streaming: boolean` 入参，已存在）；改动 2 的 className `zai-thinking-bulb` 与 `<style>` 内 CSS 选择器 `.zai-thinking-bulb svg path` 一致；keyframe 名 `zai-think-glow` 在 `<style>` 内自洽（不再需要 inline animation 字符串）。
 
 **4. 修复记录（v2）:** 第一版提交（commit `2f27d1a`）使用 `<BulbOutlined style={{ animation: ... }}>` + keyframe 改 `color`，但 AntD `BulbOutlined` 的 SVG `<path>` 在源码里硬编码 `fill="#cacaca"`，CSS `color` 属性不会传导到 path 的 fill，导致动画在视觉上完全无效。已在 v2 修复：把 inline `animation` 移除，加 `className="zai-thinking-bulb"`，`<style>` 块内用 `.zai-thinking-bulb svg path { animation: ... }` 选择器直接挂到 path 上，keyframe 改 `fill`。已通过 Chrome DevTools 截图对比验证修复有效。
+
+**5. 修复记录（v3）:** 用户报告"还是没看到动画"。v1/v2 修复只覆盖了 `MessageBubble` 路径（`Agent.tsx:747`），但**真正的流式渲染路径在 `content_block_delta` 分支**（`Agent.tsx:958`）—— 该分支在模型每个 thinking chunk 到达时调用 `<ThinkingBlock text={delta.thinking || ""} />`，**没有传 streaming**，所以 thinking 流的整个生命周期内 `streaming` 永远是 `undefined`，`<style>` 块不挂载，动画不跑。v3 修复：在 958 处调用点也传 `streaming={streaming}`，与 747 处行为对齐。
