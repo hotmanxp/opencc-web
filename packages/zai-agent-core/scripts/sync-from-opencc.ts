@@ -270,10 +270,15 @@ const WHITELIST_PATTERNS: string[] = [
 
   // AgentTool port — fork prerequisites (runForkedAgent transitive deps).
   // NOTE: upstream opencc exports ContentReplacementState from
-  // utils/toolResultStorage.ts (not a separate types/toolResultStorage.ts),
-  // and utils/toolResultStorage.ts was already synced in commit 8f56820;
-  // we only need to pull the remaining 3 new files here.
+  // utils/toolResultStorage.ts (not a separate types/toolResultStorage.ts).
+  // utils/toolResultStorage.ts already exists in opencc-internals/ as a
+  // 1-export stub (commit 1029c97, only exports TOOL_RESULT_CLEARED_MESSAGE
+  // for microCompact + persistence.ts). The stub is missing
+  // cloneContentReplacementState + ContentReplacementState, which forkedAgent
+  // imports. We whitelist it here so the sync overwrites the stub with the
+  // full upstream content (which still exports TOOL_RESULT_CLEARED_MESSAGE).
   'utils/sessionStorage.ts',
+  'utils/toolResultStorage.ts',
   'utils/abortController.ts',
   'utils/fileStateCache.ts',
 ]
