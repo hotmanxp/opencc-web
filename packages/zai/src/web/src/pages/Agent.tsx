@@ -42,9 +42,8 @@ import DiffBlock from "../components/DiffBlock.js";
 import { linkifyText } from "../lib/linkify.js";
 import { splitMarkdownOnIncomplete } from "../lib/splitMarkdown.js";
 import { AttachmentStrip } from "../components/AttachmentStrip";
-import ModelStatusButton from "../components/ModelStatusButton";
-import ModeStatusButton, { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
-import { TaskDock } from "../components/TaskDock";
+import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
+import ConfigStatusBar from "../components/ConfigStatusBar";
 import { TaskDrawer } from "../components/TaskDrawer";
 import TodoZone from "../components/TodoZone.jsx";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
@@ -1432,31 +1431,11 @@ export default function Agent() {
 
         <div className="bottom-stack">
           <AgentInputBox />
-          {/* 输入框下方的模式栏: 仿 OpenCC 底栏 */}
-          <div
-            style={{
-              borderTop: "1px solid rgba(255,255,255,0.10)",
-              padding: "6px 10px",
-              fontSize: 12,
-              fontFamily:
-                "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-              color: "rgba(255,255,255,0.45)",
-              display: "flex",
-              alignItems: "center",
-              gap: 8,
-            }}
-          >
-            <ModeStatusButton />
-            <span style={{ color: "#eab308" }}>{cwdName}</span>
-            <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
-            <span style={{ color: "#22c55e" }}>{branch}</span>
-            <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
-            <span style={{ color: "#f97316" }}>
-              <ModelStatusButton />
-            </span>
-            <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
-            <TaskDock onSelect={setSelectedTaskId} />
-          </div>
+          <ConfigStatusBar
+            cwdName={cwdName}
+            branch={branch}
+            onTaskSelect={setSelectedTaskId}
+          />
         </div>
       </div>
       <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
