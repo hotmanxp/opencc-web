@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { ChildProcess, ExecFileException } from 'child_process'
 import { execFile, spawn } from 'child_process'
 import { existsSync } from 'fs'

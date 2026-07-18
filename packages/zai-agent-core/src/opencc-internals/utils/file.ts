@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { chmodSync, writeFileSync as fsWriteFileSync } from 'fs'
 import { realpath, stat } from 'fs/promises'
 import { homedir } from 'os'

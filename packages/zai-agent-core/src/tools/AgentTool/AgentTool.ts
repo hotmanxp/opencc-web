@@ -222,7 +222,7 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
         canUseTool: ctx.canUseTool,
         querySource: 'agent',
         forkLabel: input.subagent_type,
-        maxTurns: agent?.maxTurns ?? ctx.__maxTurns ?? 25,
+        maxTurns: agent?.maxTurns ?? ctx.__maxTurns,
         onStreamEvent: (ev) => ctx.emitEvent({ type: 'subagent:event', subSessionId, event: ev }),
         skipTranscript: true,
         skipCacheWrite: false,

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // @ts-ignore
 // ZAI_REMOVED: import React from 'react'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'

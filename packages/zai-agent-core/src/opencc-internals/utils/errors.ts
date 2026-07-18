@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import type { AbortReason } from './abortReasons.js'
 

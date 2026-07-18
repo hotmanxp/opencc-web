@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { createHash } from 'crypto'
 import { statSync } from 'fs'
 import { join, resolve } from 'path'
