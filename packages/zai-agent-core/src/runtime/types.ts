@@ -120,7 +120,7 @@ export type QueryOptions = {
   /**
    * 工具黑名单。resolveToolPool 在构造完工具池后,移除 name 出现在此列表里的工具。
    * 由 AgentTool / DefaultBackgroundRuntime 在派发 sub-agent 时填充
-   * `['Agent', 'BackgroundAgent']`,防止 sub-agent 递归派发 sub-agent
+   * `['Agent']`,防止 sub-agent 递归派发 sub-agent
    * (复刻 OpenCC sub-agents 文档中的 disallowedTools 语义)。
    */
   disallowedTools?: string[]

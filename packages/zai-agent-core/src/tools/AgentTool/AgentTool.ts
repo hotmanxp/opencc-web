@@ -95,7 +95,7 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
       subagentType: input.subagent_type,
       maxTurns: agent?.maxTurns ?? ctx.__maxTurns ?? 25,
       abortSignal: ctx.abortSignal,
-      disallowedTools: ['Agent', 'BackgroundAgent'],
+      disallowedTools: ['Agent'],
     }
 
     const hookRunner = (ctx.state as any).__pluginHookRunner as import('../../plugins/HookRunner.js').HookRunner | undefined

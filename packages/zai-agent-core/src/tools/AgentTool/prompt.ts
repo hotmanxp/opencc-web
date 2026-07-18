@@ -24,7 +24,7 @@ export function renderPrompt(): string {
     - Sub-agent shares: dataDir, sandbox config, model caller, abort signal
     - Sub-agent does NOT share: transcript, tool context state, message history
     - All sub-agent events are forwarded to parent as 'subagent:event'`,
-    '派生的子 agent 不能再调用 Agent / BackgroundAgent(防递归)。需要更多 sub-agent 时由父 session 派发。',
+    '派生的子 agent 不能递归调用 Agent(防递归)。需要更多 sub-agent 时由父 session 派发。',
   ].join('\n')
 }
 
