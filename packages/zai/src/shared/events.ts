@@ -20,13 +20,22 @@ const RuntimeEvent = z.discriminatedUnion('type', [
   // runtime.tool_call 必须带 toolUseId: server 在 content_block_stop / tool_use:start
   // 两个分支都填上游 block.id, 客户端不再合成. 这样 runtime.tool_result 用同一 id
   // upsert 能命中 start 条目, ToolCallBlock 才能从 "调用中" 切到 "已完成".
+  //
+  // runtime.tool_result 也必须带 toolName / input: 客户端 (useAgentStore
+  // upsertToolCall 守卫) 依靠这两个字段识别 TodoWrite — TodoWrite 的
+  // tool_use (start 阶段) 在守卫被吞掉, 不会写入 messages, 因此 done 路径
+  // 无法从 prev 同 toolUseId 的 entry 拿 name / input. server 在
+  // content_block_stop / tool_use:start 时把上游 block.name 缓存到
+  // pendingToolName, tool_use:done 时再回填进 runtime.tool_result.
   z.object({ ...Base.shape, type: z.literal('runtime.tool_call'),
              sessionId: z.string(), turnIndex: z.number(),
              toolUseId: z.string(),
              toolName: z.string(), input: z.unknown() }),
   z.object({ ...Base.shape, type: z.literal('runtime.tool_result'),
              sessionId: z.string(), turnIndex: z.number(),
-             toolUseId: z.string(), output: z.unknown() }),
+             toolUseId: z.string(),
+             toolName: z.string(), input: z.unknown(),
+             output: z.unknown() }),
   z.object({ ...Base.shape, type: z.literal('runtime.done'),
              sessionId: z.string(), turnIndex: z.number(),
              usage: z.object({ input: z.number(), output: z.number() }).optional() }),

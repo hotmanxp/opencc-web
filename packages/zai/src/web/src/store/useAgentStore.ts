@@ -399,17 +399,44 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 单纯 append 会得到 "unknown 已完成" 的破损条目. 按 toolUseId upsert 后,
   // 同一个工具的 start → done/error 全程复用一条消息 + 一个 DOM 节点,
   // ToolCallBlock 内部 Collapse 折叠态不丢, React 也不再报 duplicate key.
+  //
+  // 重要: TodoWrite 的 tool_use (start 阶段) 会主动 *吞掉* 这一帧不写 store,
+  // 但 tool_result (done 阶段) 来自 SSE, schema 上 *不* 带 toolName / input —
+  // shared/events.ts:27-29. 如果只在消息本身上看 name/input, 守卫在 done
+  // 路径永远漏判, TodoWrite 会被当成 unknown 工具渲染 JSON 卡片. 修法:
+  // 守卫同时检查 msg.name, 也从 prev (同 toolUseId 已存在的 start entry)
+  // 拿 name / input 兜底.
   upsertToolCall: (msg: AgentMessage) =>
     set((s) => {
       const t = msg.type as string
+      // 同 toolUseId 的 prev entry: SSE start 阶段已经在 store 里建好了,
+      // 由于 TodoWrite start 在守卫被吞掉, prev 在 done 路径上没有 prev,
+      // 但 *内容层面* 该条 toolUse 的 TodoWrite 身份仍能从 prev 没有 / 当前
+      // 输入中识别 — 守卫先看 msg.name, 拿不到再用 prev.name 做 fallback.
+      // (TodoWrite start 同样吞掉不留 prev, 所以此处实际只覆盖 '先有 prev
+      // entry' 的旁路场景, 主路径仍是看 msg.name 与 msg.input.)
+      const prevEntry = (() => {
+        if (!msg.toolUseId) return undefined
+        return s.messages.find(
+          (m) =>
+            (m.type as string).startsWith('tool_use:') &&
+            (m.toolUseId as string) === msg.toolUseId,
+        )
+      })()
+      const effectiveName =
+        (msg.name as string | undefined) ??
+        (prevEntry?.name as string | undefined)
       // TodoWrite 的 tool_use/tool_result 全部不进 messages 流 (按 spec:
       // TodoWrite 不显示 ToolCallBlock, 它的可见状态由 todosBySession 渲染).
-      if ((msg.name as string) === 'TodoWrite') {
-        // done / error 阶段: 解析 input.todos 写回 todosBySession. 失败静默忽略.
+      if (effectiveName === 'TodoWrite') {
+        // done / error 阶段: 解析 todos 写回 todosBySession. 失败静默忽略.
+        // input 既可能来自 msg (手工调用 upsertToolCall), 也可能需要从
+        // prev entry 的 input 拿 (SSE done 路径 schema 不携带 input).
         const t2 = t as string
         if (t2 === 'tool_use:done' || t2 === 'tool_use:error') {
-          const input = (msg.input as { todos?: unknown }) ?? {}
-          const rawTodos = input.todos
+          const msgInput = msg.input as { todos?: unknown } | undefined
+          const prevInput = prevEntry?.input as { todos?: unknown } | undefined
+          const rawTodos = msgInput?.todos ?? prevInput?.todos
           if (Array.isArray(rawTodos)) {
             const parsed: TodoItem[] = []
             let ok = true
@@ -1047,7 +1074,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         return
       }
       case 'runtime.tool_result': {
-        // runtime.tool_result schema 携带 toolUseId, 直接复用.
+        // runtime.tool_result schema 携带 toolUseId / toolName / input
+        // (2026-07-18 加 toolName/input: 前端 upsertToolCall 守卫要靠这
+        // 两个字段识别 TodoWrite — TodoWrite tool_use (start) 在守卫被
+        // 吞掉, prev 同 toolUseId 不存在, 必须用本事件自身字段).
         const resultMsg: AgentMessage = {
           eventId: `tool-${event.toolUseId}`,
           sessionId: sid,
@@ -1055,6 +1085,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           turnIndex: event.turnIndex,
           type: 'tool_use:done',
           toolUseId: event.toolUseId,
+          name: event.toolName,
+          input: event.input as Record<string, unknown>,
           output: event.output,
         }
         useAgentStore.getState().upsertToolCall(resultMsg)

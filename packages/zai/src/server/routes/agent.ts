@@ -196,11 +196,19 @@ export async function* translateRuntimeEvents(
         const id = ((ev.id as string) ??
           (ev.toolUseId as string) ??
           pendingToolUseId) as string;
+        // toolName / input 也一并 emit: 前端 upsertToolCall 守卫依靠这两个
+        // 字段识别 TodoWrite — TodoWrite 的 tool_use (start) 阶段被守卫
+        // 吞掉不写 store, done 路径上 prev 同 toolUseId 不存在, 必须用
+        // 当前事件自身携带的 toolName / input.
+        const toolName = ((ev.name as string) ?? pendingToolName) as string;
+        const input = (ev.input as unknown) ?? {};
         yield {
           type: "runtime.tool_result",
           sessionId,
           turnIndex,
           toolUseId: id,
+          toolName,
+          input,
           output: (ev.output as unknown) ?? "",
         };
         break;
