@@ -11,7 +11,6 @@ const baseTools: AnyTool[] = [
   fakeTool('Read'),
   fakeTool('Write'),
   fakeTool('Agent'),
-  fakeTool('BackgroundAgent'),
   fakeTool('Bash'),
 ]
 
@@ -26,17 +25,15 @@ describe('resolveToolPool — disallowedTools filter', () => {
     const names = result.map(t => t.name)
     expect(names).toContain('Read')
     expect(names).toContain('Bash')
-    expect(names).toContain('BackgroundAgent')
     expect(names).not.toContain('Agent')
   })
 
   test('removes multiple named tools', () => {
-    const opts: QueryOptions = { disallowedTools: ['Agent', 'BackgroundAgent'] }
+    const opts: QueryOptions = { disallowedTools: ['Agent', 'Read'] }
     const result = resolveToolPool(opts, emptyConfig, baseTools, noSkills)
     const names = result.map(t => t.name)
     expect(names).not.toContain('Agent')
-    expect(names).not.toContain('BackgroundAgent')
-    expect(names).toContain('Read')
+    expect(names).not.toContain('Read')
     expect(names).toContain('Write')
     expect(names).toContain('Bash')
   })
@@ -44,7 +41,7 @@ describe('resolveToolPool — disallowedTools filter', () => {
   test('undefined disallowedTools is a no-op', () => {
     const opts: QueryOptions = {}
     const result = resolveToolPool(opts, emptyConfig, baseTools, noSkills)
-    expect(result.map(t => t.name)).toEqual(['Read', 'Write', 'Agent', 'BackgroundAgent', 'Bash'])
+    expect(result.map(t => t.name)).toEqual(['Read', 'Write', 'Agent', 'Bash'])
   })
 
   test('empty disallowedTools array is a no-op', () => {
