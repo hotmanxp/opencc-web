@@ -37,7 +37,6 @@ import {
   type TodoItem,
 } from "../store/useAgentStore";
 import { useAppStore } from "../store/useAppStore";
-import { api } from "../lib/api";
 import QuestionCard from "../components/QuestionCard.jsx";
 import DiffBlock from "../components/DiffBlock.js";
 import { linkifyText } from "../lib/linkify.js";
@@ -294,17 +293,6 @@ function StreamingMarkdown({ text }: { text: string }) {
 const THINKING_ACCENT = "#722ed1";
 const THINKING_BG = "rgba(114, 45, 209, 0.14)";
 const THINKING_PREVIEW_MAX = 80;
-
-// 会话标题派生: 与 server packages/zai/src/server/routes/agent.ts:363
-// 的 deriveTitleFromPrompt 保持一致 — 取 prompt 第一行 (去首尾空白),
-// 长度截到 50 字符 + 省略号. 空文本返回空串, 调用方决定是否要 patch.
-const TITLE_MAX_LEN = 50;
-function deriveLocalTitle(prompt: string): string {
-  const firstLine = prompt.trim().split(/\r?\n/, 1)[0].trim();
-  if (!firstLine) return "";
-  if (firstLine.length <= TITLE_MAX_LEN) return firstLine;
-  return firstLine.slice(0, TITLE_MAX_LEN - 1) + "…";
-}
 
 // 模块级计数器: 当前有几个 ThinkingBlock 处于 streaming 状态。
 // 第一个进入 streaming=true 的实例挂 <style>, 最后一个退出的实例卸 <style>。
@@ -1155,131 +1143,6 @@ export default function Agent() {
       }
     })();
   }, []);
-
-  const postPromptToLLM = useCallback(async (text: string, blocks: Array<{ type: "image"; source: { type: "base64"; media_type: string; data: string } }>) => {
-    // 注意: userMsg 已由 handleSend 插入 store, 这里不再重复插入.
-    // 调用方应确保"无附件" — 这是合理的:slash prompt 命令不需要附带图片。
-    const { sessionId: returnedSessionId } = await api.post<{ sessionId: string }>(
-      "/agent/prompt",
-      {
-        prompt: text || undefined,
-        contentBlocks: blocks.length > 0 ? blocks : undefined,
-        sessionId: sessionId || activeSessionId || undefined,
-      },
-    )
-    useAgentStore.setState({
-      sessionId: returnedSessionId,
-      activeSessionId: returnedSessionId,
-    })
-    const localTitle = deriveLocalTitle(text)
-    if (localTitle) {
-      useAgentStore.getState().applySessionEvent({
-        type: "session.renamed",
-        sessionId: returnedSessionId,
-        title: localTitle,
-        eventId: `session-renamed-${returnedSessionId}`,
-        ts: Date.now(),
-      })
-    }
-  }, [sessionId, activeSessionId])
-
-  const handleSend = async () => {
-    const text = input.trim();
-    const readyAttachments = attachments.filter((a) => a.status === "ready");
-    const blocks = readyAttachments.map((a) => ({
-      type: "image" as const,
-      source: {
-        type: "base64" as const,
-        media_type: a.mime,
-        // ★ 关键: data 是 base64DataUrl 去掉 'data:image/...;base64,' 前缀
-        // 因为 server zod / openaiShim 已经会拼前缀, 重复会双重前缀.
-        data: a.base64DataUrl.replace(/^data:[^;]+;base64,/, ""),
-      },
-    }));
-    if (text.startsWith("/")) {
-      setInput("")
-      const sp = text.indexOf(" ")
-      const name = sp === -1 ? text.slice(1) : text.slice(1, sp)
-      const args = sp === -1 ? "" : text.slice(sp + 1)
-      // 取当前 sessionId 优先 store.sessionId;前端可能为 null,后端会兜底。
-      const sid = sessionId || activeSessionId || undefined
-      try {
-        const result = await api.post<{ type: string; payload: any }>(
-          "/agent/command",
-          { name, args, ...(sid ? { sessionId: sid } : {}) },
-        )
-        switch (result.type) {
-          case "cleared":
-            useAgentStore.getState().clearMessages()
-            message.success("对话已清空")
-            return
-          case "compacted":
-            message.success(`压缩完成,移除 ${result.payload.removedMessages} 条`)
-            await useAgentStore.getState().loadSessions()
-            return
-          case "status":
-            // 复用 useAppStore instanceContext 注入到 modal。
-            // 把 payload 推到 existing ConversationInfoCard 弹层。
-            // 简化版:弹一个 message.info 摘要。
-            message.info(
-              `cwd: ${result.payload.cwd}\nmodel: ${result.payload.model}\nsession: ${result.payload.sessionId ?? "-"}`,
-              5,
-            )
-            return
-          case "prompt":
-            // 把 rendered 当普通 prompt 走原 LLM 路径
-            await postPromptToLLM(result.payload.rendered, blocks)
-            return
-          case "message":
-            message.info(result.payload.text, 3)
-            return
-          case "unknown":
-            // OpenCC 默认 fallthrough:把原文本当普通 prompt 发给 LLM
-            await postPromptToLLM(text, blocks)
-            return
-          case "error":
-            message.error(result.payload.message)
-            return
-        }
-      } catch (err) {
-        message.error(`命令执行失败: ${(err as Error).message}`)
-        return
-      }
-    }
-    if (!text && blocks.length === 0) return;
-    if (status === "streaming") return;
-    setInput("");
-
-    // ★ 快照: 把 attachments 的精简版挂到 userMsg.attachments, 用 dataURL
-    // (base64DataUrl) 当 thumbnailUrl. handleSend 后的 setAttachments([]) +
-    // 组件 unmount 不会影响已发的气泡.
-    const userMsg: AgentMessage = {
-      eventId: `user-${Date.now()}`,
-      sessionId: "",
-      ts: Date.now(),
-      turnIndex: 0,
-      type: "user.text",
-      text,
-      attachments: readyAttachments.map((a) => ({
-        localId: a.localId,
-        mime: a.mime,
-        filename: a.filename,
-        thumbnailUrl: a.base64DataUrl, // dataURL 而非 objectURL
-        status: a.status,
-      })),
-    };
-    useAgentStore.setState((s) => ({
-      status: "streaming",
-      messages: [...s.messages, userMsg],
-      sendSeq: s.sendSeq + 1,
-    }));
-
-    // 清理本地附件 (snapshot 已存到 userMsg, 不再需要)
-    attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl));
-    setAttachments([]);
-
-    await postPromptToLLM(text, blocks)
-  };
 
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()
 

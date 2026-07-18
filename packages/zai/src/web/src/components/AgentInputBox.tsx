@@ -1,7 +1,8 @@
 import { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Input, message } from "antd";
-import { useAgentStore } from "../store/useAgentStore";
+import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
+import { api } from "../lib/api";
 
 type PendingAttachment = {
   localId: string;
@@ -17,6 +18,14 @@ type PendingAttachment = {
 const { TextArea } = Input;
 
 const MAX_ATTACHMENTS_PER_TURN = 4;
+
+const TITLE_MAX_LEN = 50;
+function deriveLocalTitle(prompt: string): string {
+  const firstLine = prompt.trim().split(/\r?\n/, 1)[0].trim();
+  if (!firstLine) return "";
+  if (firstLine.length <= TITLE_MAX_LEN) return firstLine;
+  return firstLine.slice(0, TITLE_MAX_LEN - 1) + "…";
+}
 
 type SlashItem = {
   kind: "command" | "skill";
@@ -301,9 +310,130 @@ export default function AgentInputBox() {
     }
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
-      // Step 5 will wire up handleSend
+      handleSend();
     }
   };
 
-  return <div data-agent-inputbox-placeholder />;
+  const postPromptToLLM = useCallback(
+    async (
+      text: string,
+      blocks: Array<{
+        type: "image";
+        source: { type: "base64"; media_type: string; data: string };
+      }>,
+    ) => {
+      const { sessionId: returnedSessionId } = await api.post<{
+        sessionId: string;
+      }>("/agent/prompt", {
+        prompt: text || undefined,
+        contentBlocks: blocks.length > 0 ? blocks : undefined,
+        sessionId: sessionId || activeSessionId || undefined,
+      });
+      useAgentStore.setState({
+        sessionId: returnedSessionId,
+        activeSessionId: returnedSessionId,
+      });
+      const localTitle = deriveLocalTitle(text);
+      if (localTitle) {
+        useAgentStore.getState().applySessionEvent({
+          type: "session.renamed",
+          sessionId: returnedSessionId,
+          title: localTitle,
+          eventId: `session-renamed-${returnedSessionId}`,
+          ts: Date.now(),
+        });
+      }
+    },
+    [sessionId, activeSessionId],
+  );
+
+  const handleSend = async () => {
+    const text = input.trim();
+    const readyAttachments = attachments.filter((a) => a.status === "ready");
+    const blocks = readyAttachments.map((a) => ({
+      type: "image" as const,
+      source: {
+        type: "base64" as const,
+        media_type: a.mime,
+        data: a.base64DataUrl.replace(/^data:[^;]+;base64,/, ""),
+      },
+    }));
+    if (text.startsWith("/")) {
+      setInput("");
+      const sp = text.indexOf(" ");
+      const name = sp === -1 ? text.slice(1) : text.slice(1, sp);
+      const args = sp === -1 ? "" : text.slice(sp + 1);
+      const sid = sessionId || activeSessionId || undefined;
+      try {
+        const result = await api.post<{ type: string; payload: any }>(
+          "/agent/command",
+          { name, args, ...(sid ? { sessionId: sid } : {}) },
+        );
+        switch (result.type) {
+          case "cleared":
+            useAgentStore.getState().clearMessages();
+            message.success("对话已清空");
+            return;
+          case "compacted":
+            message.success(
+              `压缩完成,移除 ${result.payload.removedMessages} 条`,
+            );
+            await useAgentStore.getState().loadSessions();
+            return;
+          case "status":
+            message.info(
+              `cwd: ${result.payload.cwd}\nmodel: ${result.payload.model}\nsession: ${result.payload.sessionId ?? "-"}`,
+              5,
+            );
+            return;
+          case "prompt":
+            await postPromptToLLM(result.payload.rendered, blocks);
+            return;
+          case "message":
+            message.info(result.payload.text, 3);
+            return;
+          case "unknown":
+            await postPromptToLLM(text, blocks);
+            return;
+          case "error":
+            message.error(result.payload.message);
+            return;
+        }
+      } catch (err) {
+        message.error(`命令执行失败: ${(err as Error).message}`);
+        return;
+      }
+    }
+    if (!text && blocks.length === 0) return;
+    if (status === "streaming") return;
+    setInput("");
+
+    const userMsg: AgentMessage = {
+      eventId: `user-${Date.now()}`,
+      sessionId: "",
+      ts: Date.now(),
+      turnIndex: 0,
+      type: "user.text",
+      text,
+      attachments: readyAttachments.map((a) => ({
+        localId: a.localId,
+        mime: a.mime,
+        filename: a.filename,
+        thumbnailUrl: a.base64DataUrl,
+        status: a.status,
+      })),
+    };
+    useAgentStore.setState((s) => ({
+      status: "streaming",
+      messages: [...s.messages, userMsg],
+      sendSeq: s.sendSeq + 1,
+    }));
+
+    attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl));
+    setAttachments([]);
+
+    await postPromptToLLM(text, blocks);
+  };
+
+  return <div data-agent-inputbox-placeholder />
 }
