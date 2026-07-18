@@ -14,6 +14,7 @@ import agentRouter from './routes/agent.js';
 import agentSettingsRouter from './routes/agentSettings.js';
 import answerRouter from './routes/answer.js';
 import tasksRouter from './routes/tasks.js';
+import v2TasksRouter from './routes/v2Tasks.js';
 import { slashRouter } from './routes/slash.js';
 import { ensureManifestDir } from './services/manifest.js';
 import { initAgentRuntime, getAskRegistry } from './services/agentRuntime.js';
@@ -78,6 +79,9 @@ export function createApp(opts: AppOptions): express.Express {
   app.use('/api', agentRouter);
   app.use('/api', agentSettingsRouter);
   app.use('/api', tasksRouter);
+  // V2 TaskList 只读路由 — zai-web 进会话时 GET 一次把 ~/.zai/tasks.json
+  // 拉到本地 v2TasksBySession 缓存 (SSE 增量之外的兜底).
+  app.use('/api', v2TasksRouter);
   // /api/slash 直接挂这里 — 前端 Agent.tsx 用 fetch('/api/slash') 拉命令列表,
   // 不能再走 agentRouter 的 '/agent' 前缀, 否则实际路径会变成 /api/agent/slash,
   // 前端拿到 SPA fallback HTML, slashItems 永远是 [], 输入 / 不出菜单.

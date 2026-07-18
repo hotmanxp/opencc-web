@@ -48,6 +48,7 @@ import { TaskDock } from "../components/TaskDock";
 import { TaskDrawer } from "../components/TaskDrawer";
 import TodoZone from "../components/TodoZone.jsx";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
+import { fetchV2Tasks } from "../lib/v2TaskApi.js";
 import AgentInputBox from "../components/AgentInputBox";
 
 const { TextArea } = Input;
@@ -1126,6 +1127,27 @@ export default function Agent() {
       }
     })();
   }, []);
+
+  // 切会话时把 ~/.zai/tasks.json 当前内容拉到本地 v2TasksBySession 缓存.
+  // SSE runtime.tool_call 拿到的增量更新走 useAgentStore.applyRuntimeEvent
+  // 内置的 v2 工具分支处理 (见该 store 内的 TaskCreate/Update 拦截),
+  // 这里是首次/刷新场景的兜底,保证刷新页面后 V2 任务列表不会空白.
+  // 失败静默 — 不阻断会话切换.
+  useEffect(() => {
+    const sid = sessionId
+    if (!sid) return
+    let cancelled = false
+    void (async () => {
+      try {
+        const tasks = await fetchV2Tasks(sid)
+        if (cancelled) return
+        useAgentStore.getState().setV2Tasks(sid, tasks)
+      } catch (err) {
+        console.warn('[v2Tasks] initial fetch failed:', err)
+      }
+    })()
+    return () => { cancelled = true }
+  }, [sessionId])
 
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()
 

@@ -976,6 +976,25 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           input: event.input as Record<string, unknown>,
         }
         useAgentStore.getState().upsertToolCall(startMsg)
+        // V2 TaskList 增量刷新: 收到 TaskCreate / TaskUpdate tool_call 时,
+        // 异步重新拉一次 ~/.zai/tasks.json (server 已通过 tool call 写盘)
+        // 覆盖本地 v2TasksBySession 缓存. fire-and-forget, 失败静默 —
+        // 下次切会话/刷新会再拉一次兜底. 内联 fetch 而非 import v2TaskApi
+        // 是为了避开 store → v2TaskApi → store (type-only) 的 ESM 循环引用.
+        if (event.toolName === 'TaskCreate' || event.toolName === 'TaskUpdate') {
+          void (async () => {
+            try {
+              const token = localStorage.getItem('zai-token') || ''
+              const res = await fetch(
+                `/api/agent/sessions/${encodeURIComponent(sid)}/v2-tasks`,
+                { headers: { 'X-Zai-Token': token } },
+              )
+              if (!res.ok) return
+              const data = (await res.json()) as { tasks: V2TaskItem[] }
+              useAgentStore.getState().setV2Tasks(sid, data.tasks)
+            } catch { /* 静默 */ }
+          })()
+        }
         return
       }
       case 'runtime.tool_result': {
