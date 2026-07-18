@@ -305,7 +305,13 @@ function deriveLocalTitle(prompt: string): string {
   return firstLine.slice(0, TITLE_MAX_LEN - 1) + "…";
 }
 
-function ThinkingBlock({ text }: { text: string }) {
+function ThinkingBlock({
+  text,
+  streaming,
+}: {
+  text: string;
+  streaming?: boolean;
+}) {
   if (!text) return null;
 
   // 折叠态预览: 取首个非空行, 超过阈值截断加省略号
@@ -329,8 +335,20 @@ function ThinkingBlock({ text }: { text: string }) {
     // 思考块属于 LLM 正常回复节奏的一部分:
     // - 不缩进 (贴齐主对话流, 与正式文字回答同级宽度)
     // - 箭头紧贴 pill 后 (手动渲染, 不靠 expandIconPosition)
-    <div style={{ marginBottom: 8, maxWidth: "100%" }}>
-      <Collapse
+    <>
+      {streaming && (
+        <style>{`
+          @keyframes zai-think-glow {
+            0%, 100% { color: #f7d774; }
+            50%      { color: #ffe999; }
+          }
+          @media (prefers-reduced-motion: reduce) {
+            @keyframes zai-think-glow { 0%, 100% { color: inherit; } }
+          }
+        `}</style>
+      )}
+      <div style={{ marginBottom: 8, maxWidth: "100%" }}>
+        <Collapse
         size="small"
         ghost
         bordered={false}
@@ -372,7 +390,14 @@ function ThinkingBlock({ text }: { text: string }) {
                     flexShrink: 0,
                   }}
                 >
-                  <BulbOutlined style={{ fontSize: 11 }} />
+                  <BulbOutlined
+                    style={{
+                      fontSize: 11,
+                      ...(streaming && {
+                        animation: "zai-think-glow 1.4s ease-in-out infinite",
+                      }),
+                    }}
+                  />
                   思考
                 </span>
                 {/* 箭头: 折叠态 › (CaretRight), 展开态 ⌄ (CaretDown).
@@ -431,7 +456,8 @@ function ThinkingBlock({ text }: { text: string }) {
           },
         ]}
       />
-    </div>
+      </div>
+    </>
   );
 }
 
@@ -726,6 +752,7 @@ function MessageBubble({
     return (
       <ThinkingBlock
         text={(msg.thinking as string) || (msg.text as string) || ""}
+        streaming={streaming}
       />
     );
   }
