@@ -1051,28 +1051,6 @@ export default function Agent() {
   const { instanceContext } = useAppStore()
   const cwdName = instanceContext?.cwdName || '~'
   const branch = instanceContext?.branch || 'master'
-  const [input, setInput] = useState('')
-  // 图片附件 local state. 仅在当前 Agent 实例存活期间有效 — 一旦 handleSend
-  // 把它快照到 userMsg.attachments 后, 就清理本地 (避免双重持有 + revoke objectURL).
-  const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  // 输入框 ref — handleSend 会把 TextArea 切到 disabled (status==='streaming'),
-  // disabled 状态浏览器会自动 blur. 流式结束后即使重新 enabled, 焦点不会自动
-  // 回到输入框, 用户得手动再点一次. 在 status 从 streaming 切回非 streaming
-  // 且没有 pendingAsk 时主动 refocus, 修这个体验问题.
-  const textareaRef = useRef<HTMLTextAreaElement>(null);
-  const prevStatusRef = useRef<AgentStatus>("idle");
-
-  // 组件 unmount 时清理 objectURL, 防止内存泄漏. 注意只在卸载时跑一次,
-  // 不订阅 attachments 变更 — 否则用户每次加/删附件都会 revoke 老的 url,
-  // 导致正在渲染中的 <img> 立刻失效.
-  useEffect(() => {
-    return () => {
-      // eslint-disable-next-line react-hooks/exhaustive-deps
-      attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl));
-    };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, []);
   const { token } = theme.useToken();
   // Slash autocomplete: 输入 / 时弹出, 同时包含 builtin commands + user commands + skills
   type SlashItem = {
@@ -1089,13 +1067,7 @@ export default function Agent() {
     /** plugin skill 所属的 plugin 名，用于在描述前渲染 `(pluginName)` */
     pluginName?: string
   }
-  const [slashItems, setSlashItems] = useState<SlashItem[]>([]);
-  const [showSkillMenu, setShowSkillMenu] = useState(false);
-  const [skillMenuIdx, setSkillMenuIdx] = useState(0);
-  const [skillFilter, setSkillFilter] = useState("");
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null);
-  const skillMenuRef = useRef<HTMLDivElement>(null);
-  const textAreaRef = useRef<any>(null);
   const [showAllSessions, setShowAllSessions] = useState(false);
   // 会话列表默认展示条数: 按侧栏可视高度估算, 每项约 50px (padding + 两行文字 + gap).
   const sessionListRef = useRef<HTMLDivElement>(null);
@@ -1152,18 +1124,6 @@ export default function Agent() {
     return undefined;
   }, [status]);
 
-  // 流式期间 TextArea 被 disabled → 浏览器自动 blur. 即使 status 切回非
-  // streaming, 焦点不会自动回来, 用户得手动再点输入框. 在 status 从 streaming
-  // 切回 idle/aborted/error, 且没有 pendingAsk 抢占焦点时主动 refocus.
-  // pendingAsk 期间用户应该在答 QuestionCard, 不应把焦点抢回输入框.
-  useEffect(() => {
-    const prev = prevStatusRef.current;
-    prevStatusRef.current = status;
-    if (prev === "streaming" && status !== "streaming" && !pendingAsk) {
-      textareaRef.current?.focus();
-    }
-  }, [status, pendingAsk]);
-
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
   }, [messages]);
@@ -1195,16 +1155,6 @@ export default function Agent() {
       }
     })();
   }, []);
-
-  // 加载 slash 列表（页面初始化时请求一次）：builtin commands + user commands + skills
-  useEffect(() => {
-    fetch("/api/slash")
-      .then((res) => res.json())
-      .then((data) => {
-        if (Array.isArray(data.items)) setSlashItems(data.items);
-      })
-      .catch(() => {})
-  }, [])
 
   // 模糊匹配: 检查 query 的字符是否按顺序出现在 target 中（可不连续）
   const fuzzyMatch = (query: string, target: string): number => {
