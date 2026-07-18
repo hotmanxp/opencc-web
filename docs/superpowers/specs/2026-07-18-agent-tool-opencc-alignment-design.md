@@ -7,7 +7,7 @@
 ## Background
 
 `packages/zai-agent-core/src/tools/AgentTool/AgentTool.ts` is currently a
-hand-rolled `LegacyTool` that fires its own `queryEngine(...)` event loop and
+hand-rolled `LegacyTool` that fires its own `queryLoop(...)` event loop and
 ships `run_in_background` as a zai-specific extension. The recent
 BashTool/EditTool/FileRead alignment commits
 (`e938ea9`, `8f56820`, `6da12fe`) establish the project's alignment idiom:
@@ -28,10 +28,10 @@ without breaking parent-session continuity.
    `getToolUseSummary`, `getActivityDescription`,
    `mapToolResultToToolResultBlockParam`, `toAutoClassifierInput`,
    `isConcurrencySafe`, `isReadOnly`, `isDestructive`.
-2. Replace the sync dispatch (currently a manual `for-await queryEngine` loop)
+2. Replace the sync dispatch (currently a manual `for-await queryLoop` loop)
    with `runForkedAgent` so the sub-agent shares the parent's prompt cache
    via `CacheSafeParams`.
-3. Wire `saveCacheSafeParams(...)` into zai's main `queryEngine` loop so the
+3. Wire `saveCacheSafeParams(...)` into zai's main `queryLoop` loop so the
    snapshot is available to `AgentTool` when called.
 4. Preserve the async `BackgroundRuntime` path unchanged (SubagentNotifier
    chain is load-bearing).
@@ -48,7 +48,7 @@ without breaking parent-session continuity.
 - No `tools/AgentTool/AgentTool.tsx` upstream sync of the body — zai re-authors
   its own equivalent under `src/tools/AgentTool/`.
 - No changes to `loadAgentsDir.ts`, `builtInAgents.ts`, `subAgentNotifier.ts`,
-  `BackgroundRuntime`, or `queryEngine` semantics beyond the
+  `BackgroundRuntime`, or `queryLoop` semantics beyond the
   `saveCacheSafeParams` hook.
 - No automatic e2e tests beyond extending `AgentTool.test.ts`.
 - No upstream sync of AgentTool.tsx prompt text itself (depends on local
@@ -85,7 +85,7 @@ call(rawInput, ctx):
        b. SubagentStart hook fire
        c. emit 'subagent:start' with subSessionId
        d. cacheSafeParams = getLastCacheSafeParams() ?? fallbackEmptyCacheSafeParams(ctx)
-          ⚠ If fallback fires (zai queryEngine didn't pre-warm), fall through
+          ⚠ If fallback fires (zai queryLoop didn't pre-warm), fall through
           to a manual query() call with the legacy QueryOptions shape so
           AgentTool never deadlocks.
        e. result = await runForkedAgent({
@@ -169,7 +169,7 @@ cache contract. The key name (`AGENT_PROMPT_KEY`) is a constant string
 defined in `AgentTool.ts`; the opencc upstream uses a similar convention
 for skill content injection.
 
-### queryEngine hook (`runtime/queryEngine.ts`)
+### queryLoop hook (`runtime/queryLoop.ts`)
 
 After each turn-end (where sawMessageStop is recorded), call:
 
@@ -185,7 +185,7 @@ saveCacheSafeParams({
 })
 ```
 
-The values are read from zai queryEngine's existing internal book-keeping.
+The values are read from zai queryLoop's existing internal book-keeping.
 The `toolUseContext` does not need full upstream shape — only the
 forkedAgent `createSubagentContext` reads are used:
 `abortController`, `getAppState`, `options`, `messages`,
@@ -236,10 +236,10 @@ modified  packages/zai-agent-core/test/tools/AgentTool.test.ts
 `legacyAdapter.ts` is **not** modified — its current shape already forwards
 all `Tool` method fields added in `e938ea9`.
 
-### Phase 3 — queryEngine hook commit
+### Phase 3 — queryLoop hook commit
 
 ```
-modified  packages/zai-agent-core/src/runtime/queryEngine.ts
+modified  packages/zai-agent-core/src/runtime/queryLoop.ts
 ```
 
 Adds `saveCacheSafeParams(...)` invocation in the message-stop branch, in a
@@ -285,7 +285,7 @@ verified until implementation. Implementation may iterate 1-2 times
 discovering `Tool` requires a non-LegacyToolBridge field.
 
 ### R3. Stale `saveCacheSafeParams` snapshot
-zai queryEngine early-returns on errors, leaving last-set params. Next
+zai queryLoop early-returns on errors, leaving last-set params. Next
 AgentTool fork may consume a stale `toolUseContext`. Mitigation:
 `try/finally` around `saveCacheSafeParams` and snapshot reset on
 major state changes. Test coverage added in Phase 3.
@@ -326,7 +326,7 @@ mocks instead.
 [x] pnpm -r typecheck passes after Phase 2
 [x] Phase 3 commit merged
 [x] pnpm -r typecheck passes after Phase 3
-[x] pnpm -r test passes (18/18 AgentTool GREEN; queryEngine test added but env-blocked)
+[x] pnpm -r test passes (18/18 AgentTool GREEN; queryLoop test added but env-blocked)
 [ ] pnpm smoke passes
 [ ] manual: sync AgentTool → <subagent_result> emits subagent:event
 [ ] manual: async AgentTool → parent receives <task-notification>
@@ -340,7 +340,7 @@ Final merge commit on main: `494b808 feat(agent-tool): align AgentTool to upstre
 
 - **OI1.** zai's full ToolUseContext migration is a separate, much larger
   spec.
-- **OI2.** zai's main `queryEngine` could itself be replaced by the
+- **OI2.** zai's main `queryLoop` could itself be replaced by the
   `QueryEngine` class upstream exposes — separate spec.
 - **OI3.** prompt verbatim text relies on periodic
   `pnpm sync-from-opencc --apply` runs post-merge; this spec does not

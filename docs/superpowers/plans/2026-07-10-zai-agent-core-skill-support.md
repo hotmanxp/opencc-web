@@ -4,7 +4,7 @@
 
 **Goal:** 在 `zai-agent-core` 落地 SKILL 加载（frontmatter 全字段解析 + 路径白名单 loader）+ `SkillTool`（同会话 prompt 注入），让 zai-server 通过 `RuntimeConfig.skillsDirs` 即可让 agent 看到并调用用户自定义 skill。
 
-**Architecture:** zai 自写最小 frontmatter parser（不引外部依赖）和目录扫描 loader（`node:fs/promises`），二者组合产出 `LoadedSkill[]`。`SkillTool` 走与 `AgentTool` 相同的 `Tool<>` 接口形态，但不 fork 子会话，而是把 skill body 写入 `ToolContext.state.__pendingSkillInjection`，由 `queryEngine` 在 tool results 之后追加为下一轮 user message。`SkillTool` 不进 `getZaiRuntimeTools()`，由 `resolveToolPool` 按 `skills.length > 0` 动态注入。
+**Architecture:** zai 自写最小 frontmatter parser（不引外部依赖）和目录扫描 loader（`node:fs/promises`），二者组合产出 `LoadedSkill[]`。`SkillTool` 走与 `AgentTool` 相同的 `Tool<>` 接口形态，但不 fork 子会话，而是把 skill body 写入 `ToolContext.state.__pendingSkillInjection`，由 `queryLoop` 在 tool results 之后追加为下一轮 user message。`SkillTool` 不进 `getZaiRuntimeTools()`，由 `resolveToolPool` 按 `skills.length > 0` 动态注入。
 
 **Tech Stack:** TypeScript 5.6 + Node 20 + zod 3.23 + vitest 2.1。零新依赖。
 
@@ -48,8 +48,8 @@
 
 **修改文件：**
 - `src/runtime/types.ts` — `RuntimeConfig.skillsDirs` / `enableSkillTool`，`QueryOptions.skillsDirs`；`enabledSkills` 标 deprecated
-- `src/runtime/queryEngine.ts` — 加载 skills、动态注入 SkillTool、system prompt 拼接、`__pendingSkillInjection` 消费
-- `test/runtime/queryEngine.test.ts` — 新增 5 个 skill 相关集成测试
+- `src/runtime/queryLoop.ts` — 加载 skills、动态注入 SkillTool、system prompt 拼接、`__pendingSkillInjection` 消费
+- `test/runtime/queryLoop.test.ts` — 新增 5 个 skill 相关集成测试
 - `package.json` — exports 增加 `./skills`
 
 ---
@@ -820,8 +820,8 @@ git commit -m "feat(zai-agent-core): add buildSkillsSystemPrompt + skills/index 
 - Create: `packages/zai-agent-core/test/tools/SkillTool.test.ts`
 
 **Interfaces:**
-- Consumes: `ctx.state.__zaiSkills: LoadedSkill[]` (set by queryEngine in Task 5)
-- Consumes: `ctx.state.__pendingSkillInjection: PendingSkillInjection` (writer; queryEngine consumes in Task 5)
+- Consumes: `ctx.state.__zaiSkills: LoadedSkill[]` (set by queryLoop in Task 5)
+- Consumes: `ctx.state.__pendingSkillInjection: PendingSkillInjection` (writer; queryLoop consumes in Task 5)
 - Consumes: `ctx.parentSessionId: string | undefined`
 - Produces: `SkillTool: Tool<typeof SkillInputSchema, string>` with `name: 'Skill'`
 
@@ -1139,24 +1139,24 @@ git commit -m "feat(zai-agent-core): extend RuntimeConfig/QueryOptions with skil
 
 ---
 
-## Task 6: queryEngine 接入
+## Task 6: queryLoop 接入
 
 **Files:**
-- Modify: `packages/zai-agent-core/src/runtime/queryEngine.ts`
-- Test: extend `packages/zai-agent-core/test/runtime/queryEngine.test.ts`
+- Modify: `packages/zai-agent-core/src/runtime/queryLoop.ts`
+- Test: extend `packages/zai-agent-core/test/runtime/queryLoop.test.ts`
 
 **Interfaces:**
 - Consumes: `loadSkillsFromDirs`, `buildSkillsSystemPrompt` (Task 2/3)
 - Consumes: `SkillTool` (Task 4)
 - Consumes: extended `RuntimeConfig.skillsDirs`, `QueryOptions.skillsDirs` (Task 5)
-- Produces: `queryEngine` 时按 `skills.length > 0` 动态注册 `SkillTool`；system prompt 含 `<skills>` 段；`__pendingSkillInjection` 在 tool results 之后追加为 user message 并落盘 transcript
+- Produces: `queryLoop` 时按 `skills.length > 0` 动态注册 `SkillTool`；system prompt 含 `<skills>` 段；`__pendingSkillInjection` 在 tool results 之后追加为 user message 并落盘 transcript
 
-- [ ] **Step 1: 在 queryEngine.test.ts 顶部加 mock skill 工具调用 helper**
+- [ ] **Step 1: 在 queryLoop.test.ts 顶部加 mock skill 工具调用 helper**
 
-扩展 `test/runtime/queryEngine.test.ts`，添加下列 fixture：
+扩展 `test/runtime/queryLoop.test.ts`，添加下列 fixture：
 
 ```ts
-// 追加到 test/runtime/queryEngine.test.ts 顶部
+// 追加到 test/runtime/queryLoop.test.ts 顶部
 import { mkdir, writeFile } from 'fs/promises'
 
 async function setupSkillsDir(tmp: string, relPath: string, fm: string, body = 'PDF body'): Promise<string> {
@@ -1175,7 +1175,7 @@ async function setupSkillsDir(tmp: string, relPath: string, fm: string, body = '
 
 - [ ] **Step 2: 写失败测试 — skillsDirs 非空 → SkillTool 出现，system prompt 含 `<skills>`**
 
-追加到 `test/runtime/queryEngine.test.ts`：
+追加到 `test/runtime/queryLoop.test.ts`：
 
 ```ts
 test('skillsDirs 非空 → SkillTool 出现在 tools, system prompt 含 <skills>', async () => {
@@ -1191,7 +1191,7 @@ test('skillsDirs 非空 → SkillTool 出现在 tools, system prompt 含 <skills
       yield { type: 'message_stop' }
     })()
   }
-  const events = await collect(queryEngine(
+  const events = await collect(queryLoop(
     { prompt: 'hi', cwd: '/tmp' },
     { dataDir: tmpDir, modelCaller: captureCaller as any, skillsDirs: [skillsDir] },
   ))
@@ -1219,7 +1219,7 @@ test('skillsDirs 缺失 → SkillTool 不出现, system prompt 无 <skills>', as
       yield { type: 'message_stop' }
     })()
   }
-  const events = await collect(queryEngine(
+  const events = await collect(queryLoop(
     { prompt: 'hi', cwd: '/tmp' },
     { dataDir: tmpDir, modelCaller: captureCaller as any },
   ))
@@ -1236,7 +1236,7 @@ test('skillsDirs 缺失 → SkillTool 不出现, system prompt 无 <skills>', as
 ```ts
 test('SkillTool 调不存在的 skill → tool_result isError=true', async () => {
   const skillsDir = await setupSkillsDir(tmpDir, 'pdf', 'description: x')
-  const events = await collect(queryEngine(
+  const events = await collect(queryLoop(
     { prompt: 'hi', cwd: '/tmp' },
     {
       dataDir: tmpDir,
@@ -1257,7 +1257,7 @@ test('SkillTool 调不存在的 skill → tool_result isError=true', async () =>
 ```ts
 test('SkillTool 调用成功 → tool_result 后追加 user message 含 skill body, transcript 落盘', async () => {
   const skillsDir = await setupSkillsDir(tmpDir, 'pdf', 'description: x', 'INJECT-BODY-XYZ')
-  const events = await collect(queryEngine(
+  const events = await collect(queryLoop(
     { prompt: 'hi', cwd: '/tmp' },
     {
       dataDir: tmpDir,
@@ -1299,7 +1299,7 @@ test('一个 SKILL.md frontmatter 损坏 → 其他 skill 仍加载', async () =
       yield { type: 'message_stop' }
     })()
   }
-  const events = await collect(queryEngine(
+  const events = await collect(queryLoop(
     { prompt: 'hi', cwd: '/tmp' },
     { dataDir: tmpDir, modelCaller: captureCaller as any, skillsDirs: [skillsDir] },
   ))
@@ -1311,10 +1311,10 @@ test('一个 SKILL.md frontmatter 损坏 → 其他 skill 仍加载', async () =
 
 - [ ] **Step 7: 跑测试确认全部 fail（未实现前）**
 
-Run: `cd packages/zai-agent-core && pnpm test test/runtime/queryEngine.test.ts`
+Run: `cd packages/zai-agent-core && pnpm test test/runtime/queryLoop.test.ts`
 Expected: FAIL — skills 相关测试全部失败（5 个）
 
-- [ ] **Step 8: 修改 `src/runtime/queryEngine.ts`**
+- [ ] **Step 8: 修改 `src/runtime/queryLoop.ts`**
 
 在文件顶部 import 区添加：
 
@@ -1324,7 +1324,7 @@ import { SkillTool } from '../tools/SkillTool/SkillTool.js'
 import type { LoadedSkill, PendingSkillInjection } from './skills/index.js'
 ```
 
-在 `queryEngine` 主函数顶部、动态 import `getZaiRuntimeTools` 之后，添加 skill 加载与 tool pool 解析：
+在 `queryLoop` 主函数顶部、动态 import `getZaiRuntimeTools` 之后，添加 skill 加载与 tool pool 解析：
 
 ```ts
   // 0.1. 加载 skills (skillsDirs 缺失 → 空)
@@ -1333,7 +1333,7 @@ import type { LoadedSkill, PendingSkillInjection } from './skills/index.js'
     ? await loadSkillsFromDirs(skillsDirs, { cwd: options.cwd })
     : []
 
-  // 0.2. Dynamic import breaks queryEngine ↔ getZaiRuntimeTools cycle (Task 11)
+  // 0.2. Dynamic import breaks queryLoop ↔ getZaiRuntimeTools cycle (Task 11)
   const { getZaiRuntimeTools } = await import('../tools/index.js')
   const tools = resolveToolPool(options, config, getZaiRuntimeTools(), skills)
 ```
@@ -1466,9 +1466,9 @@ export function makeSkillNotFoundModelCaller(): ModelCaller {
 }
 ```
 
-- [ ] **Step 10: 跑 queryEngine 测试确认全部 pass**
+- [ ] **Step 10: 跑 queryLoop 测试确认全部 pass**
 
-Run: `cd packages/zai-agent-core && pnpm test test/runtime/queryEngine.test.ts`
+Run: `cd packages/zai-agent-core && pnpm test test/runtime/queryLoop.test.ts`
 Expected: PASS — 原 7 个 + 新增 5 个 = 12 个全绿
 
 - [ ] **Step 11: 跑全套测试 + typecheck 确认无回归**
@@ -1479,10 +1479,10 @@ Expected: PASS
 - [ ] **Step 12: Commit**
 
 ```bash
-git add packages/zai-agent-core/src/runtime/queryEngine.ts \
-        packages/zai-agent-core/test/runtime/queryEngine.test.ts \
+git add packages/zai-agent-core/src/runtime/queryLoop.ts \
+        packages/zai-agent-core/test/runtime/queryLoop.test.ts \
         packages/zai-agent-core/test/fixtures/MockModelCaller.ts
-git commit -m "feat(zai-agent-core): wire skills + SkillTool into queryEngine loop"
+git commit -m "feat(zai-agent-core): wire skills + SkillTool into queryLoop loop"
 ```
 
 ---
@@ -1577,7 +1577,7 @@ git commit -m "docs(zai-agent-core): expose skills export + README skill usage"
 | §3.4 frontmatter 自写最小 YAML 解析 | Task 1 |
 | §3.5 promptBuilder 输出格式 | Task 3 |
 | §4 SkillTool schema / prompt / body 注入 | Task 4 |
-| §5.1 queryEngine tool pool 动态注入 SkillTool | Task 6 |
+| §5.1 queryLoop tool pool 动态注入 SkillTool | Task 6 |
 | §5.2 skill 加载 + 注入 ToolContext | Task 6 |
 | §5.3 system prompt 拼接 | Task 6 |
 | §5.4 skill 注入到 messages + transcript 落盘 | Task 6 |
@@ -1595,7 +1595,7 @@ git commit -m "docs(zai-agent-core): expose skills export + README skill usage"
 
 ### 风险与依赖
 
-- Task 4 假设 `ctx.state.__zaiSkills` 由 Task 6 注入 — Task 6 之前 Task 4 的单元测试自给 state（不依赖 queryEngine）
+- Task 4 假设 `ctx.state.__zaiSkills` 由 Task 6 注入 — Task 6 之前 Task 4 的单元测试自给 state（不依赖 queryLoop）
 - Task 5 改 `types.ts` 后，Task 6 才引用新字段 — 顺序正确
 - Task 6 Step 9 扩展 `MockModelCaller`，需先于 Step 4 / Step 5 测试运行
 

@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { queryEngine } from '../../src/runtime/queryEngine.js'
+import { queryLoop } from '../../src/runtime/queryLoop.js'
 import { TranscriptStore } from '../../src/transcript/store.js'
 import {
   appendAssistantMessageV2,
@@ -14,9 +14,9 @@ import type { ModelCaller } from '../../src/runtime/types.js'
 
 /**
  * Regression: Anthropic 400 error 2013 ("tool call result does not follow
- * tool call") is raised when queryEngine resumes a transcript whose assistant
+ * tool call") is raised when queryLoop resumes a transcript whose assistant
  * turn emitted N parallel tool_use blocks. The previous in-memory loop in
- * queryEngine.ts folded tool_use children into the parent assistant message
+ * queryLoop.ts folded tool_use children into the parent assistant message
  * but did NOT merge the per-tool tool_result user messages — they were left
  * as separate user messages. Anthropic protocol requires all tool_results
  * answering an assistant(tool_use_1, tool_use_2) turn to live in ONE user
@@ -43,7 +43,7 @@ afterEach(async () => {
   await rm(tmpDir, { recursive: true, force: true })
 })
 
-describe('queryEngine resume — parallel tool_use Anthropic-2013 regression', () => {
+describe('queryLoop resume — parallel tool_use Anthropic-2013 regression', () => {
   it('merges sibling tool_result user messages into ONE user message (parallel tool_use)', async () => {
     const store = new TranscriptStore(tmpDir)
     const sessionId = await store.create({ cwd: '/x', model: 'm' })
@@ -88,7 +88,7 @@ describe('queryEngine resume — parallel tool_use Anthropic-2013 regression', (
       0, tuBUuid!, '/x',
     )
 
-    // 5) 接下来由 queryEngine 续传:一个 mock modelCaller 截获 req.messages
+    // 5) 接下来由 queryLoop 续传:一个 mock modelCaller 截获 req.messages
     const seen: Array<{ role: string; content: unknown }> = []
     const captureCaller: ModelCaller = (async function* (req: any) {
       seen.push(...req.messages)
@@ -108,7 +108,7 @@ describe('queryEngine resume — parallel tool_use Anthropic-2013 regression', (
     }) as ModelCaller
 
     await collect(
-      queryEngine(
+      queryLoop(
         { prompt: '<task-notification>new</task-notification>', cwd: '/x', transcriptId: sessionId },
         { dataDir: tmpDir, modelCaller: captureCaller },
       ),
@@ -202,7 +202,7 @@ describe('queryEngine resume — parallel tool_use Anthropic-2013 regression', (
     }) as ModelCaller
 
     await collect(
-      queryEngine(
+      queryLoop(
         { prompt: 'new', cwd: '/x', transcriptId: sessionId },
         { dataDir: tmpDir, modelCaller: captureCaller },
       ),

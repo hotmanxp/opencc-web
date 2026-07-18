@@ -4,7 +4,7 @@
 
 **Goal:** Remove the legacy `BackgroundAgentTool` so the LLM-facing tool list shows exactly one Agent tool (the unified `Agent` with `run_in_background` toggle), then simplify `disallowedTools: ['Agent', 'BackgroundAgent']` to `['Agent']` everywhere.
 
-**Architecture:** Pure deletion + reference cleanup. Delete `BackgroundAgentTool/` directory, remove its registration from `tools/index.ts` and `opencc-internals/tools.ts`, replace any server-side or test usage with `AgentTool`, simplify the `disallowedTools` literal in three places (AgentTool sync path, DefaultBackgroundRuntime.runOne, queryEngine JSDoc, types JSDoc), update tests' fixture names. `BackgroundAgentResultTool` (query tool) stays unchanged.
+**Architecture:** Pure deletion + reference cleanup. Delete `BackgroundAgentTool/` directory, remove its registration from `tools/index.ts` and `opencc-internals/tools.ts`, replace any server-side or test usage with `AgentTool`, simplify the `disallowedTools` literal in three places (AgentTool sync path, DefaultBackgroundRuntime.runOne, queryLoop JSDoc, types JSDoc), update tests' fixture names. `BackgroundAgentResultTool` (query tool) stays unchanged.
 
 **Tech Stack:** TypeScript, vitest, bun test runner.
 
@@ -31,7 +31,7 @@
 | `packages/zai-agent-core/src/tools/AgentTool/prompt.ts` | Drop `BackgroundAgent` mention |
 | `packages/zai-agent-core/src/runtime/background/DefaultBackgroundRuntime.ts` | `disallowedTools` simplification |
 | `packages/zai-agent-core/src/runtime/types.ts` | JSDoc update on `QueryOptions.disallowedTools` |
-| `packages/zai-agent-core/src/runtime/queryEngine.ts` | JSDoc update |
+| `packages/zai-agent-core/src/runtime/queryLoop.ts` | JSDoc update |
 | `packages/zai-agent-core/src/runtime/background/registry.ts` | Audit (likely no change) |
 | `packages/zai-agent-core/src/tools/TaskStopTool/prompt.ts` | Audit doc reference |
 | `packages/zai-agent-core/src/tools/TaskOutputTool/{schema.ts,TaskOutputTool.ts}` | Audit |
@@ -179,7 +179,7 @@ is unaffected and remains registered."
 - Modify: `packages/zai-agent-core/src/tools/AgentTool/AgentTool.ts:98`
 - Modify: `packages/zai-agent-core/src/runtime/background/DefaultBackgroundRuntime.ts`
 - Modify: `packages/zai-agent-core/src/runtime/types.ts`
-- Modify: `packages/zai-agent-core/src/runtime/queryEngine.ts`
+- Modify: `packages/zai-agent-core/src/runtime/queryLoop.ts`
 - Modify: `packages/zai-agent-core/src/tools/AgentTool/prompt.ts`
 
 **Interfaces:** none.
@@ -222,9 +222,9 @@ In `packages/zai-agent-core/src/runtime/types.ts`, find the JSDoc block above `d
   disallowedTools?: string[]
 ```
 
-- [ ] **Step 4: Update JSDoc on filter step in `queryEngine.ts`**
+- [ ] **Step 4: Update JSDoc on filter step in `queryLoop.ts`**
 
-In `packages/zai-agent-core/src/runtime/queryEngine.ts`, find the comment block just above the `pool.filter` call in `resolveToolPool`:
+In `packages/zai-agent-core/src/runtime/queryLoop.ts`, find the comment block just above the `pool.filter` call in `resolveToolPool`:
 
 ```ts
   // 最后一步:按 disallowedTools 黑名单剔除工具 (复刻 OpenCC disallowedTools 语义)。
@@ -271,7 +271,7 @@ git add packages/zai-agent-core/src/tools/AgentTool/AgentTool.ts \
         packages/zai-agent-core/src/tools/AgentTool/prompt.ts \
         packages/zai-agent-core/src/runtime/background/DefaultBackgroundRuntime.ts \
         packages/zai-agent-core/src/runtime/types.ts \
-        packages/zai-agent-core/src/runtime/queryEngine.ts
+        packages/zai-agent-core/src/runtime/queryLoop.ts
 git commit -m "refactor(zai-agent-core): simplify disallowedTools to ['Agent']
 
 BackgroundAgent is gone, so the recursion-prevention deny list only

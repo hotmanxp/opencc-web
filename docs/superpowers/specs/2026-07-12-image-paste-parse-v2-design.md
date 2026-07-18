@@ -12,7 +12,7 @@ v1 的 8 个 zai-web commit（Task 4-8）依赖被废弃的 `sseAgent` / `useAge
 
 - `feat(zai-web): 新增 readImageAsBase64 helper` (`645f242`)
 - `fix(zai-agent-core): createUserMessage.imagePasteIds 类型 number[] → string[]` (`37dc4b6`)
-- `fix(zai-agent-core): queryEngine resume path preserves ContentBlock[] array` (`5d272d4`)
+- `fix(zai-agent-core): queryLoop resume path preserves ContentBlock[] array` (`5d272d4`)
 
 v2 重做 v1 的 zai-web 部分，适配新架构。
 
@@ -24,7 +24,7 @@ v2 重做 v1 的 zai-web 部分，适配新架构。
 
 用户按 Enter：`handleSend` 把 `input.trim()` + `attachments`（过滤 `status === 'ready'`）拼成 `ContentBlock[] = [{ type: 'image', source: { type: 'base64', media_type, data } }, ...]`，连同 `text` 一起 POST 到 `/agent/prompt`。允许 image-only（无文字）。
 
-`/agent/prompt` server 端 zod 接收 `contentBlocks?: ContentBlock[]`（max 10），relax `prompt` 为可选（prompt 与 contentBlocks 至少有一个非空）。拼出 `promptArg: string | UserMessage[]`：`string` 时直接传；`UserMessage[]` 时走 `zai-agent-core` 的 `queryEngine` array 路径（已支持，见 `5d272d4`）。`runtime.run` 启动后，事件经 `eventBus` → `/api/event` SSE → `subscribeServerEvents` → `useEventStream` → `useAgentStore.applyRuntimeEvent` → 进 `messages[]`。
+`/agent/prompt` server 端 zod 接收 `contentBlocks?: ContentBlock[]`（max 10），relax `prompt` 为可选（prompt 与 contentBlocks 至少有一个非空）。拼出 `promptArg: string | UserMessage[]`：`string` 时直接传；`UserMessage[]` 时走 `zai-agent-core` 的 `queryLoop` array 路径（已支持，见 `5d272d4`）。`runtime.run` 启动后，事件经 `eventBus` → `/api/event` SSE → `subscribeServerEvents` → `useEventStream` → `useAgentStore.applyRuntimeEvent` → 进 `messages[]`。
 
 **持久化**：base64 写进 `transcript.raw.content`（`TranscriptMessage.raw: unknown` 自动 JSON 序列化）。`loadTranscript` 新增 `Array.isArray(raw.content)` 分支：text 块 `join('\n')` 进 `text` 字段，image 块转 dataURL → Blob → `URL.createObjectURL` 生成缩略图 URL，挂到 `msg.attachments`。与 v1 一致。
 

@@ -46,7 +46,7 @@ No new code. Pure deletion + reference cleanup:
 | `packages/zai-agent-core/src/tools/AgentTool/prompt.ts` | Drop "BackgroundAgent" mention in recursion-prevention line |
 | `packages/zai-agent-core/src/runtime/background/DefaultBackgroundRuntime.ts` | Same `disallowedTools` simplification |
 | `packages/zai-agent-core/src/runtime/types.ts` | Check JSDoc on `QueryOptions.disallowedTools` — remove "BackgroundAgent" mention |
-| `packages/zai-agent-core/src/runtime/queryEngine.ts` | Check JSDoc comment on filter step |
+| `packages/zai-agent-core/src/runtime/queryLoop.ts` | Check JSDoc comment on filter step |
 | `packages/zai-agent-core/src/runtime/background/registry.ts` | Audit: likely only type/constant references — drop |
 | `packages/zai-agent-core/src/tools/BackgroundAgentResultTool/{prompt.ts,BackgroundAgentResultTool.ts}` | Audit — `BackgroundAgentResultTool` stays; no change to source (mentions of "BackgroundAgent" in prompt text are about the result-query tool's parent context, not the to-be-deleted dispatch tool) |
 | `packages/zai-agent-core/src/tools/BackgroundAgentResultTool/{schema.ts,index.ts}` | No change |
@@ -116,7 +116,7 @@ Expected: only references to `BackgroundAgentResultTool` / `BackgroundAgentResul
 | `packages/zai-agent-core/src/tools/AgentTool/prompt.ts` | Drop `BackgroundAgent` mention |
 | `packages/zai-agent-core/src/runtime/background/DefaultBackgroundRuntime.ts` | `disallowedTools` simplification |
 | `packages/zai-agent-core/src/runtime/types.ts` | JSDoc text update on `QueryOptions.disallowedTools` |
-| `packages/zai-agent-core/src/runtime/queryEngine.ts` | JSDoc comment text update |
+| `packages/zai-agent-core/src/runtime/queryLoop.ts` | JSDoc comment text update |
 | `packages/zai-agent-core/src/runtime/background/registry.ts` | Audit; remove if applicable |
 | `packages/zai-agent-core/src/opencc-internals/tools.ts` | Audit; remove re-exports |
 | `packages/zai-agent-core/src/tools/TaskStopTool/prompt.ts` | Audit; update doc references |

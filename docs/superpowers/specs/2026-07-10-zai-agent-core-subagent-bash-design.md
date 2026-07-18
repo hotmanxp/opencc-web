@@ -26,7 +26,7 @@
 │   │  src/runtime/  (facade + 最小 query loop)            │    │
 │   │  query() / abortSession() / DefaultAgentRuntime     │    │
 │   │  wrapWithZaiMeta() / RuntimeEvent 流                  │    │
-│   │  queryEngine.ts (zai 自写最小 loop)                    │    │
+│   │  queryLoop.ts (zai 自写最小 loop)                    │    │
 │   │  toolExecution.ts (streaming tool 调度)              │    │
 │   │  subagent.ts (sub-agent 上下文 / fork)                │    │
 │   └────────────────────┬─────────────────────────────────┘    │
@@ -74,8 +74,8 @@ packages/zai-agent-core/src/
 ├── runtime/
 │   ├── contract.ts            (改) 增加 modelCaller / sandbox 配置
 │   ├── types.ts               (改) RuntimeConfig / QueryOptions 增字段
-│   ├── query.ts               (改) 替换 mock 占位 → 委托 queryEngine
-│   ├── queryEngine.ts         (新) zai 自写最小 query loop
+│   ├── query.ts               (改) 替换 mock 占位 → 委托 queryLoop
+│   ├── queryLoop.ts         (新) zai 自写最小 query loop
 │   ├── toolExecution.ts       (新) streaming tool 调度 + canUseTool
 │   ├── subagent.ts            (新) sub-agent context / fork / sessionId
 │   ├── events.ts              (不改)
@@ -91,7 +91,7 @@ packages/zai-agent-core/src/
 │   │   ├── prompt.ts          (新) tool description
 │   │   └── schema.ts          (新) zod schema
 │   └── AgentTool/
-│       ├── AgentTool.ts       (新) 主体, 调 queryEngine 递归
+│       ├── AgentTool.ts       (新) 主体, 调 queryLoop 递归
 │       ├── loadAgentsDir.ts   (新) 从 ~/.zai/agents/ 加载 agent 定义
 │       ├── prompt.ts          (新) tool description
 │       └── schema.ts          (新) zod schema
@@ -183,7 +183,7 @@ export type ToolContext = {
   }>
   emitEvent: (event: { type: string; [k: string]: unknown }) => void
   state: { [key: string]: unknown }
-  /** 注入, 供 sub-agent tool 调子 queryEngine 用 */
+  /** 注入, 供 sub-agent tool 调子 queryLoop 用 */
   __runtimeConfig?: RuntimeConfig
   __defaultModel?: string
   __maxTurns?: number
@@ -210,7 +210,7 @@ export type Tool<Input extends z.ZodType = z.ZodType, Output = unknown> = {
 
 ## 3. 最小 query loop
 
-### 3.1 入口 `src/runtime/queryEngine.ts`
+### 3.1 入口 `src/runtime/queryLoop.ts`
 
 ```ts
 import { randomUUID } from 'node:crypto'
@@ -225,7 +225,7 @@ import { getZaiRuntimeTools } from '../tools/index.js'
 
 const DEFAULT_MAX_TURNS = 50
 
-export async function* queryEngine(
+export async function* queryLoop(
   options: QueryOptions,
   config: RuntimeConfig,
 ): AsyncGenerator<RuntimeEvent> {
@@ -358,7 +358,7 @@ export async function* queryEngine(
 - **不实现** tool result 截断（BashTool 自己在 sandbox 限制 maxCpuMs）
 - **不实现** fork / resume（`resumeFromTranscriptId` 拉历史后单次跑完）
 
-### 3.3 helpers（与 queryEngine 同文件）
+### 3.3 helpers（与 queryLoop 同文件）
 
 ```ts
 import type { ToolContext } from '../tools/Tool.js'
@@ -714,7 +714,7 @@ import type { Tool, ToolContext } from '../Tool.js'
 import { renderPrompt } from './prompt.js'
 import { AgentInputSchema } from './schema.js'
 import { loadAgentDefinitions } from './loadAgentsDir.js'
-import { queryEngine } from '../../runtime/queryEngine.js'
+import { queryLoop } from '../../runtime/queryLoop.js'
 
 export const AgentTool: Tool<typeof AgentInputSchema, string> = {
   name: 'Agent',
@@ -760,7 +760,7 @@ export const AgentTool: Tool<typeof AgentInputSchema, string> = {
     })
 
     // 5. 跑子 query, 事件全量转发
-    const subStream = queryEngine(subOpts, subConfig)
+    const subStream = queryLoop(subOpts, subConfig)
     let finalOutput = ''
     let exitReason: 'completed' | 'aborted' | 'max_turns' | 'error' = 'completed'
     try {
@@ -1016,7 +1016,7 @@ export type TranscriptMeta = {
 | 层级 | 工具 | 覆盖 | 位置 |
 |------|------|------|------|
 | **Unit** | vitest | BashTool.sandbox: pickEnv / isReadOnlyCommand / isDestructiveCommand; AgentTool.loadAgentsDir.parseAgentMd; defaultCanUseTool; subagent.buildSubagentContext | `test/unit/` |
-| **Integration** | vitest + MockModelCaller | queryEngine happy path; tool call; 2-turn loop; sub-agent 调用 + 事件转发; sandbox 拒绝; canUseTool 拒绝; maxTurns 触发; abort 透传 | `test/integration/` |
+| **Integration** | vitest + MockModelCaller | queryLoop happy path; tool call; 2-turn loop; sub-agent 调用 + 事件转发; sandbox 拒绝; canUseTool 拒绝; maxTurns 触发; abort 透传 | `test/integration/` |
 | **E2E (manual)** | tsx + 真实 LLM | AgentTool 派生子 agent 完成真实任务; BashTool 真跑 `ls` / `cat`; run_in_background 启动 + 状态查; maxTurns 触发 | `test/e2e/manual/` |
 
 ### 8.2 MockModelCaller fixture
@@ -1049,7 +1049,7 @@ export function makeMockModelCaller(scenario: 'text-only' | 'one-tool' | 'multi-
 ### 8.3 关键集成测试用例
 
 ```ts
-// test/integration/queryEngine.test.ts
+// test/integration/queryLoop.test.ts
 test('happy path: text-only response emits done event', async () => {
   const config = makeConfig({ modelCaller: makeMockModelCaller('text-only') })
   const events = await collect(runQuery({ prompt: 'hi', cwd: '/tmp' }, config))

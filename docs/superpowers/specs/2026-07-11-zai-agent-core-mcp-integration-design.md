@@ -7,7 +7,7 @@
 
 ## 1. 背景与动机
 
-`zai-agent-core` 当前未真正接入 MCP 工具能力。从 OpenCC 上游同步过来的 MCP 代码位于 `src/opencc-internals/services/mcp/client.ts` 等位置，靠 `@ts-nocheck` 跳过类型检查。`@modelcontextprotocol/sdk` 不在 `package.json` 的 dependencies，`RuntimeConfig.mcpServers` 字段在 `src/runtime/types.ts` 定义但 `queryEngine.ts` 全文无引用，`MCPTool` 未注册到 `getZaiRuntimeTools()` 工具池。
+`zai-agent-core` 当前未真正接入 MCP 工具能力。从 OpenCC 上游同步过来的 MCP 代码位于 `src/opencc-internals/services/mcp/client.ts` 等位置，靠 `@ts-nocheck` 跳过类型检查。`@modelcontextprotocol/sdk` 不在 `package.json` 的 dependencies，`RuntimeConfig.mcpServers` 字段在 `src/runtime/types.ts` 定义但 `queryLoop.ts` 全文无引用，`MCPTool` 未注册到 `getZaiRuntimeTools()` 工具池。
 
 本次接入打通从配置到工具调用、Skill 加载、错误事件的端到端链路。
 
@@ -33,7 +33,7 @@ zai-server
     - RuntimeConfig.mcpClientPool = pool
     - RuntimeConfig.mcpServers = merged config
   ↓
-zai-agent-core queryEngine
+zai-agent-core queryLoop
   while turn:
     pool.connectAll(config.mcpServers)          // 幂等，懒启动
     mcpArtifacts = pool.getArtifacts()
@@ -62,7 +62,7 @@ zai-agent-core queryEngine
 | `src/mcp/SkillResourceAdapter.ts` (新增) | MCP `resources/read` skill:// 适配为 LoadedSkill |
 | `src/mcp/transport.ts` (新增) | createMcpTransport 工厂 + auth 注入 |
 | `src/mcp/types.ts` (新增) | McpServerSpec / MCPClientPool interface |
-| `src/runtime/queryEngine.ts` (修改) | connectAll / disconnectAll 调用，工具池装配 |
+| `src/runtime/queryLoop.ts` (修改) | connectAll / disconnectAll 调用，工具池装配 |
 | `src/runtime/types.ts` (修改) | RuntimeConfig.mcpClientPool / mcpServers / mcpSkillLoading |
 | `src/tools/index.ts` (修改) | ListMcpResourcesTool / ReadMcpResourceTool 动态注入 |
 | `src/opencc-internals/services/mcp/client.ts` (修改) | 去掉 `@ts-nocheck`，正式接入依赖 |
@@ -73,7 +73,7 @@ zai-agent-core queryEngine
 - `MCPClientPool` 连接池 + 缓存，不感知 agent-core Tool 接口
 - `MCPToolAdapter` 协议转换层，把 MCP 协议翻译成 zai-agent-core 的 Tool
 - `SkillResourceAdapter` 同样做 MCP resources → LoadedSkill 翻译
-- `queryEngine` 不直接调 MCP SDK，只通过 pool + adapter 两层间接使用
+- `queryLoop` 不直接调 MCP SDK，只通过 pool + adapter 两层间接使用
 
 ## 4. 数据契约
 
@@ -168,10 +168,10 @@ export type RuntimeConfig = {
 - 关闭 SSE/HTTP 连接（abort fetch + clearTimeout）
 - 幂等
 
-### 5.5 与 queryEngine 协作
+### 5.5 与 queryLoop 协作
 
-- queryEngine 不在 finally 里 disconnectAll（pool 跨 query 复用）
-- queryEngine abort（用户中断 query）也**不**调 disconnectAll，仅终止当前 in-flight tool call
+- queryLoop 不在 finally 里 disconnectAll（pool 跨 query 复用）
+- queryLoop abort（用户中断 query）也**不**调 disconnectAll，仅终止当前 in-flight tool call
 - disconnectAll **仅**由 zai-server shutdown 触发，避免连接频繁断建
 
 ## 6. Transport 适配
@@ -343,9 +343,9 @@ MCP 永远不应该让 query 整体失败：
 
 ### 9.5 AbortSignal 集成
 
-- queryEngine AbortSignal 传入 connectAll / tool.call
-- queryEngine abort（用户中断 query）时：正在建立的连接 abort，正在执行的 tool call 终止；pool **保持连接**，仅当前 query 中断
-- pool.disconnectAll 由 zai-server shutdown 信号（SIGTERM / SIGINT）触发，独立于 queryEngine abort
+- queryLoop AbortSignal 传入 connectAll / tool.call
+- queryLoop abort（用户中断 query）时：正在建立的连接 abort，正在执行的 tool call 终止；pool **保持连接**，仅当前 query 中断
+- pool.disconnectAll 由 zai-server shutdown 信号（SIGTERM / SIGINT）触发，独立于 queryLoop abort
 
 ## 10. 测试策略
 
@@ -392,7 +392,7 @@ test/mcp/pool.test.ts
 ### 10.5 回归保护
 
 - `toolExecution.test.ts` 加 2 用例：MCP 工具正常 / MCP 工具失败
-- queryEngine test 加 1 用例：connectAll 永不抛错
+- queryLoop test 加 1 用例：connectAll 永不抛错
 - 前端 smoke：`mcp_server:status` 事件能渲染
 
 ## 11. 实施分解（阶段，非计划）
@@ -402,7 +402,7 @@ test/mcp/pool.test.ts
 | P1 构建层 | 加 `@modelcontextprotocol/sdk` 到 deps，去掉 client.ts 的 `@ts-nocheck`，确保编译通过 | — |
 | P2 原语 | MCPClientPool + createMcpTransport + 三种 transport 工厂 + auth 注入 | P1 |
 | P3 适配层 | MCPToolAdapter + SkillResourceAdapter + Schema 转换 | P2 |
-| P4 工具池 | queryEngine 装配 MCP artifacts，ListMcpResourcesTool / ReadMcpResourceTool 注入 | P3 |
+| P4 工具池 | queryLoop 装配 MCP artifacts，ListMcpResourcesTool / ReadMcpResourceTool 注入 | P3 |
 | P5 错误层 | mcp_server:status / tools_updated 事件，streamAdapter mcp_server 分类校准 | P4 |
 | P6 测试 | 单元 + 集成 + E2E 全部就绪 | P5 |
 | P7 zai-server | DefaultAgentRuntime 注入 pool，shutdown 调 disconnectAll，读 ~/.zai/settings.json + cwd/.mcp.json | P6 |
@@ -448,7 +448,7 @@ test/mcp/pool.test.ts
 - `packages/zai-agent-core/package.json`（加 `@modelcontextprotocol/sdk`）
 - `packages/zai-agent-core/src/opencc-internals/services/mcp/client.ts`（去 `@ts-nocheck`）
 - `packages/zai-agent-core/src/runtime/types.ts`
-- `packages/zai-agent-core/src/runtime/queryEngine.ts`
+- `packages/zai-agent-core/src/runtime/queryLoop.ts`
 - `packages/zai-agent-core/src/runtime/streamAdapter.ts`（mcp_server 分类校准）
 - `packages/zai-agent-core/src/tools/index.ts`（动态注入资源工具）
 - `packages/zai-agent-core/test/runtime/toolExecution.test.ts`（MCP 工具用例）
@@ -461,5 +461,5 @@ test/mcp/pool.test.ts
 设计差异点（与上游 OpenCC）：
 
 - OpenCC 用 zod-to-json-schema 序列化 tool schema；zai-agent-core 已经统一走 zod → json schema（`modelCaller.ts:41-44`），MCP 工具走同样路径
-- OpenCC 的 mcp 路径耦合在 queryEngine 内部；zai-agent-core 走 MCPClientPool 抽象，更易测试
+- OpenCC 的 mcp 路径耦合在 queryLoop 内部；zai-agent-core 走 MCPClientPool 抽象，更易测试
 - OpenCC 用 mcp 字段 `mcp__<server>__<tool>` 但权限模型在外层；zai-agent-core 在 RuntimeConfig 层暴露 wildcard 权限规则

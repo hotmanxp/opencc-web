@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'vitest'
 import { MCPClientPool } from '../../src/mcp/MCPClientPool.js'
-import { queryEngine } from '../../src/runtime/queryEngine.js'
+import { queryLoop } from '../../src/runtime/queryLoop.js'
 import type { RuntimeConfig } from '../../src/runtime/types.js'
 
 /** modelCaller returns a single text-only message and no tool calls. */
@@ -19,7 +19,7 @@ async function* textOnlyModelCaller(): AsyncGenerator<unknown> {
   yield { type: 'message_stop' }
 }
 
-describe('queryEngine MCP wiring', () => {
+describe('queryLoop MCP wiring', () => {
   test('connectAll never throws even when all servers fail', async () => {
     const pool = new MCPClientPool()
     const config = {
@@ -31,12 +31,12 @@ describe('queryEngine MCP wiring', () => {
           transport: { kind: 'stdio' as const, command: 'definitely-not-a-real-binary' },
         },
       ],
-      // modelCaller 必须传函数（不是 generator 实例）—— queryEngine 用 config.modelCaller?.({...}) 调用
+      // modelCaller 必须传函数（不是 generator 实例）—— queryLoop 用 config.modelCaller?.({...}) 调用
       modelCaller: textOnlyModelCaller,
     } as unknown as RuntimeConfig
 
     const events: unknown[] = []
-    const gen = queryEngine({ prompt: 'hi', cwd: '/tmp' }, config)
+    const gen = queryLoop({ prompt: 'hi', cwd: '/tmp' }, config)
     for await (const ev of gen) events.push(ev)
 
     // connectAll swallows per-server errors; pool.health() reflects failure.
@@ -45,11 +45,11 @@ describe('queryEngine MCP wiring', () => {
 
   test('skips MCP boot when mcpClientPool is not configured', async () => {
     const events: unknown[] = []
-    const gen = queryEngine(
+    const gen = queryLoop(
       { prompt: 'hi', cwd: '/tmp' },
       {
         dataDir: '/tmp',
-        // modelCaller 必须传函数（不是 generator 实例）—— queryEngine 用 config.modelCaller?.({...}) 调用
+        // modelCaller 必须传函数（不是 generator 实例）—— queryLoop 用 config.modelCaller?.({...}) 调用
         modelCaller: textOnlyModelCaller,
       } as unknown as RuntimeConfig,
     )

@@ -4,7 +4,7 @@
 
 **Goal:** Port `packages/zai-agent-core/src/tools/AgentTool/` to upstream opencc's `Tool` contract, wire the sync path through `runForkedAgent` for prompt-cache sharing, preserve the async `BackgroundRuntime` path.
 
-**Architecture:** Three commits. (1) chore: sync 5 fork-prerequisite modules into `opencc-internals` and whitelist them. (2) refactor AgentTool onto `Tool` contract with sync path fork + async BackgroundRuntime preservation. (3) hook `queryEngine` to call `saveCacheSafeParams` per turn so fork snapshots are fresh.
+**Architecture:** Three commits. (1) chore: sync 5 fork-prerequisite modules into `opencc-internals` and whitelist them. (2) refactor AgentTool onto `Tool` contract with sync path fork + async BackgroundRuntime preservation. (3) hook `queryLoop` to call `saveCacheSafeParams` per turn so fork snapshots are fresh.
 
 **Tech Stack:** TypeScript, Zod, vitest, pnpm, `forkedAgent.runForkedAgent` from `opencc-internals/utils/forkedAgent.ts`.
 
@@ -42,7 +42,7 @@ This plan touches the following files:
 | `packages/zai-agent-core/src/tools/AgentTool/prompt.ts` | 2 | Export `getAgentToolDescription()` function |
 | `packages/zai-agent-core/src/tools/AgentTool/AgentTool.ts` | 2 | Opencc `Tool` contract; sync path uses `runForkedAgent` |
 | `packages/zai-agent-core/test/tools/AgentTool.test.ts` | 2 | 6 new tests + carry-over |
-| `packages/zai-agent-core/src/runtime/queryEngine.ts` | 3 | Hook `saveCacheSafeParams` per turn |
+| `packages/zai-agent-core/src/runtime/queryLoop.ts` | 3 | Hook `saveCacheSafeParams` per turn |
 
 `packages/zai-agent-core/src/tools/legacyAdapter.ts` and `packages/zai-agent-core/src/tools/Tool.ts` are NOT modified.
 
@@ -835,13 +835,13 @@ git add packages/zai-agent-core/src/tools/AgentTool/AgentTool.ts packages/zai-ag
 git commit -m "$(cat <<'EOF'
 refactor(zai-agent-core): AgentTool sync path via runForkedAgent
 
-Replace the manual for-await queryEngine(...) event loop in the sync
+Replace the manual for-await queryLoop(...) event loop in the sync
 path with an upstream runForkedAgent({...}) call. Async BackgroundRuntime
 path is preserved unchanged so the SubagentNotifier → <task-notification>
 parent resume chain is intact (zai-local surface, R7).
 
 Cache-share contract:
-- Parent's systemPrompt (saved by queryEngine.saveCacheSafeParams hook —
+- Parent's systemPrompt (saved by queryLoop.saveCacheSafeParams hook —
   see next commit) is passed through verbatim.
 - agent.systemPrompt is injected into systemContext['__AGENT_PROMPT__']
   so the wire-level systemPrompt block matches the parent and prompt
@@ -861,38 +861,38 @@ EOF
 
 ---
 
-### Task 6: `queryEngine` saves `CacheSafeParams` per turn
+### Task 6: `queryLoop` saves `CacheSafeParams` per turn
 
 **Files:**
-- Modify: `packages/zai-agent-core/src/runtime/queryEngine.ts`
-- Test: extend an existing test in `test/runtime/` (likely `contract.test.ts` or any that exercises queryEngine turn-end)
+- Modify: `packages/zai-agent-core/src/runtime/queryLoop.ts`
+- Test: extend an existing test in `test/runtime/` (likely `contract.test.ts` or any that exercises queryLoop turn-end)
 
 **Interfaces:**
 - Consumes:
   - `saveCacheSafeParams` from `opencc-internals/utils/forkedAgent.js`
-  - Whatever queryEngine holds for systemPrompt + options + state at turn-end
+  - Whatever queryLoop holds for systemPrompt + options + state at turn-end
 - Produces: every `message_stop` path calls `saveCacheSafeParams(...)` in `try/finally` so `getLastCacheSafeParams()` is fresh.
 
-- [ ] **Step 1: Read `queryEngine.ts` to find the turn-end hook point**
+- [ ] **Step 1: Read `queryLoop.ts` to find the turn-end hook point**
 
 ```bash
-grep -n "sawMessageStop\|message_stop\|appendAssistantMessage\|saveCacheSafeParams" packages/zai-agent-core/src/runtime/queryEngine.ts | head -30
+grep -n "sawMessageStop\|message_stop\|appendAssistantMessage\|saveCacheSafeParams" packages/zai-agent-core/src/runtime/queryLoop.ts | head -30
 ```
 
 Verify the exact line where `sawMessageStop` is set true (around line 250 per AGENTS.md description). Note `systemPrompt` / `options` / messages local var names from the surrounding code.
 
 - [ ] **Step 2: Write failing test**
 
-Locate `packages/zai-agent-core/test/runtime/contract.test.ts` (or whichever test exercises queryEngine end-to-end). Add a new test that:
+Locate `packages/zai-agent-core/test/runtime/contract.test.ts` (or whichever test exercises queryLoop end-to-end). Add a new test that:
 
-- Drives queryEngine through a mock model caller emitting assistant text + message_stop.
+- Drives queryLoop through a mock model caller emitting assistant text + message_stop.
 - After completion, calls `getLastCacheSafeParams()` and asserts non-null + systemPrompt.length > 0.
 
 ```ts
 import { getLastCacheSafeParams } from '../../src/opencc-internals/utils/forkedAgent.js'
 
-test('queryEngine saves CacheSafeParams after each turn', async () => {
-  const stream = queryEngine({
+test('queryLoop saves CacheSafeParams after each turn', async () => {
+  const stream = queryLoop({
     prompt: 'p',
     cwd: dataDir,
     modelCaller: makeMockModelCaller('text-only'),
@@ -915,7 +915,7 @@ cd packages/zai-agent-core && pnpm test -- saveCacheSafeParams
 
 Expected: FAIL — currently `getLastCacheSafeParams()` returns `null` (no caller writes to it).
 
-- [ ] **Step 4: Add the hook in `queryEngine.ts`**
+- [ ] **Step 4: Add the hook in `queryLoop.ts`**
 
 Find the `sawMessageStop = true` assignment (single quote-string `sawMessageStop` per AGENTS.md). After the entire `for-await` loop ends, **before** the `appendAssistantMessage` call (or equivalent turn-completion block), insert:
 
@@ -934,11 +934,11 @@ try {
   })
 } catch (err) {
   // Snapshot failure must not poison the main loop (R3).
-  console.warn('[queryEngine] saveCacheSafeParams threw:', err)
+  console.warn('[queryLoop] saveCacheSafeParams threw:', err)
 }
 ```
 
-**Important**: Use the ACTUAL variable names from `queryEngine.ts` (identified in Step 1). The example above is the shape; the real implementation reads zai's local book-keeping. If zai's local systemPrompt is not a string but a structured object, pass it as-is — `CacheSafeParams.systemPrompt` is typed as `SystemPrompt` which accepts string or structured.
+**Important**: Use the ACTUAL variable names from `queryLoop.ts` (identified in Step 1). The example above is the shape; the real implementation reads zai's local book-keeping. If zai's local systemPrompt is not a string but a structured object, pass it as-is — `CacheSafeParams.systemPrompt` is typed as `SystemPrompt` which accepts string or structured.
 
 For `toolUseContext`, only the **fields forkedAgent.createSubagentContext actually reads** need to be populated:
 - `abortController`
@@ -964,7 +964,7 @@ Expected: PASS.
 - [ ] **Step 6: Run full AgentTool + runtime test files**
 
 ```bash
-cd packages/zai-agent-core && pnpm test -- "AgentTool|queryEngine|saveCacheSafeParams"
+cd packages/zai-agent-core && pnpm test -- "AgentTool|queryLoop|saveCacheSafeParams"
 ```
 
 Expected: PASS.
@@ -980,13 +980,13 @@ Expected: PASS.
 - [ ] **Step 8: Commit**
 
 ```bash
-git add packages/zai-agent-core/src/runtime/queryEngine.ts packages/zai-agent-core/test/
+git add packages/zai-agent-core/src/runtime/queryLoop.ts packages/zai-agent-core/test/
 
 git commit -m "$(cat <<'EOF'
-refactor(zai-agent-core): queryEngine saves CacheSafeParams per turn
+refactor(zai-agent-core): queryLoop saves CacheSafeParams per turn
 
 Add saveCacheSafeParams(...) at the message_stop branch of zai's main
-queryEngine loop so forkedAgent.getLastCacheSafeParams() returns a
+queryLoop loop so forkedAgent.getLastCacheSafeParams() returns a
 fresh snapshot when AgentTool.sync runs.
 
 Snapshot is built from zai's existing book-keeping: systemPrompt, options,
@@ -1075,7 +1075,7 @@ EOF
 
 ## Self-review checklist (filled by planner)
 
-- [x] Spec §"Architecture": Tool contract methods → Task 4; sync via runForkedAgent → Task 5; queryEngine hook → Task 6.
+- [x] Spec §"Architecture": Tool contract methods → Task 4; sync via runForkedAgent → Task 5; queryLoop hook → Task 6.
 - [x] Spec §"Schema": Task 2.
 - [x] Spec §"Prompt": Task 3.
 - [x] Spec §"Pre-flight sync": Task 1.

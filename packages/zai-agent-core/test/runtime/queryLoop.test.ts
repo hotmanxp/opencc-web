@@ -2,11 +2,10 @@ import { describe, expect, test, beforeEach, afterEach } from 'vitest'
 import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { queryEngine } from '../../src/runtime/queryEngine.js'
+import { queryLoop } from '../../src/runtime/queryLoop.js'
 import { makeMockModelCaller } from '../fixtures/MockModelCaller.js'
 import { makeMockSandbox } from '../fixtures/MockSandbox.js'
 import { TranscriptStore } from '../../src/transcript/store.js'
-import { getLastCacheSafeParams, saveCacheSafeParams } from '../../src/opencc-internals/utils/forkedAgent.js'
 
 async function collect(g: AsyncGenerator<any>) {
   const out: any[] = []
@@ -18,9 +17,9 @@ let tmpDir: string
 beforeEach(async () => { tmpDir = await mkdtemp(join(tmpdir(), 'zai-qe-')) })
 afterEach(async () => { await rm(tmpDir, { recursive: true, force: true }) })
 
-describe('queryEngine', () => {
+describe('queryLoop', () => {
   test('无 modelCaller → runtime.error(no modelCaller configured)', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'hi', cwd: '/tmp' },
       { dataDir: tmpDir },
     ))
@@ -29,7 +28,7 @@ describe('queryEngine', () => {
   })
 
   test('text-only happy path → ends with runtime.done', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'hi', cwd: '/tmp' },
       { dataDir: tmpDir, modelCaller: makeMockModelCaller('text-only') },
     ))
@@ -39,7 +38,7 @@ describe('queryEngine', () => {
   })
 
   test('tool call: Bash 跑 echo, 输出回流 → 第二轮 done', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'list', cwd: '/tmp' },
       {
         dataDir: tmpDir,
@@ -53,7 +52,7 @@ describe('queryEngine', () => {
   })
 
   test('maxTurns=5 + infinite-loop → runtime.error(code: max_turns_reached)', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'loop', cwd: '/tmp', maxTurns: 5 },
       {
         dataDir: tmpDir,
@@ -69,7 +68,7 @@ describe('queryEngine', () => {
   test('abort signal → runtime.aborted 事件', async () => {
     const controller = new AbortController()
     const events: any[] = []
-    const iter = queryEngine(
+    const iter = queryLoop(
       { prompt: 'x', cwd: '/tmp', abortSignal: controller.signal },
       { dataDir: tmpDir, modelCaller: makeMockModelCaller('infinite-loop'), sandbox: makeMockSandbox('/tmp') },
     )
@@ -81,19 +80,52 @@ describe('queryEngine', () => {
     expect(events.some(e => e.type === 'runtime.aborted' || e.type === 'runtime.error')).toBe(true)
   })
 
-  test('queryEngine saves CacheSafeParams after each turn', async () => {
-    saveCacheSafeParams(null)
-    const events = await collect(queryEngine(
-      { prompt: 'hi', cwd: '/tmp' },
-      { dataDir: tmpDir, modelCaller: makeMockModelCaller('text-only') },
-    ))
-    expect(events.at(-1)?.type).toBe('runtime.done')
-    const snapshot = getLastCacheSafeParams()
-    expect(snapshot).not.toBeNull()
-    expect(String(snapshot?.systemPrompt).length).toBeGreaterThan(0)
+  // ---- OpenCC alignment: no hard maxTurns ----------------------------------
+  // 见 docs: queryLoop 不再有 DEFAULT_MAX_TURNS=50 的硬截。turn 上限现在由
+  // options.maxTurns (per-call) 或 abort signal 决定。这跟 opencc queryLoop
+  // 的 turnCount < (maxTurns ?? Infinity) 语义一致。
+  test('queryLoop 模块不再 export DEFAULT_MAX_TURNS 常量 (默认 Infinity 兜底)', () => {
+    // RED TEST for OpenCC 对齐 (断言源码层):
+    // 移除 queryLoop.ts 里硬编码 50 常量, 主 agent 不再有隐式 50 轮上限.
+    // 仍保留 `while (turn < maxTurns)` 循环结构 (with Infinity 兜底时等价
+    // `while (true)`, 跟 opencc 行为一致).
+    const { readFileSync } = require('fs')
+    const { resolve } = require('path')
+    const src = readFileSync(
+      resolve(__dirname, '../../src/runtime/queryLoop.ts'),
+      'utf-8',
+    )
+    expect(src).not.toMatch(/export\s+const\s+DEFAULT_MAX_TURNS\s*=/)
+    expect(src).toMatch(/maxTurns\s*=\s*options\.maxTurns\s*\?\?\s*config\.defaultMaxTurns\s*\?\?\s*Infinity/)
   })
+
+  test('AgentTool 派发 sub-agent 时不再硬编码 maxTurns ?? 25 default', () => {
+    // RED TEST (源码层): 当前 AgentTool.ts:119 有
+    //   maxTurns: agent?.maxTurns ?? ctx.__maxTurns ?? 25
+    // 改为对标 opencc 后 sub-agent 也无隐式上限 (除非 agent.maxTurns 或
+    // ctx.__maxTurns 显式传).
+    const { readFileSync } = require('fs')
+    const { resolve } = require('path')
+    const src = readFileSync(
+      resolve(__dirname, '../../src/tools/AgentTool/AgentTool.ts'),
+      'utf-8',
+    )
+    expect(src).not.toMatch(/__maxTurns\s*\?\?\s*25/)
+    expect(src).not.toMatch(/maxTurns\s*:\s*agent\?\.maxTurns\s*\?\?\s*ctx\.__maxTurns\s*\?\?\s*25/)
+  })
+
+  test('显式传 maxTurns=3 时, 第 3 轮后 yield runtime.error(code: max_turns_reached)', async () => {
+    // 保留语义: options.maxTurns 仍然是 per-call 上限 (跟 opencc 一致)
+    const events = await collect(queryLoop(
+      { prompt: 'loop', cwd: '/tmp', maxTurns: 3 },
+      { dataDir: tmpDir, modelCaller: makeMockModelCaller('infinite-loop'), sandbox: makeMockSandbox('/tmp') },
+    ))
+    const err = events.find(e => e.type === 'runtime.error') as any
+    expect(err?.error?.code).toBe('max_turns_reached')
+  })
+
   test('AGENTS.md 不存在时不报错, 默认空 systemPrompt', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'x', cwd: '/tmp' },
       { dataDir: tmpDir, modelCaller: makeMockModelCaller('text-only') },
     ))
@@ -101,7 +133,7 @@ describe('queryEngine', () => {
   })
 
   test('sessionId 在 events 上有', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'x', cwd: '/tmp' },
       { dataDir: tmpDir, modelCaller: makeMockModelCaller('text-only') },
     ))
@@ -130,7 +162,7 @@ describe('queryEngine', () => {
         yield { type: 'message_stop' }
       })()
     }) as any
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'hi', cwd: '/tmp' },
       { dataDir: tmpDir, modelCaller: captureCaller, skillsDirs: [skillsDir] },
     ))
@@ -155,7 +187,7 @@ describe('queryEngine', () => {
         yield { type: 'message_stop' }
       })()
     }) as any
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'hi', cwd: '/tmp' },
       { dataDir: tmpDir, modelCaller: captureCaller },
     ))
@@ -166,7 +198,7 @@ describe('queryEngine', () => {
 
   test('SkillTool 调不存在的 skill → tool_result isError=true', async () => {
     const skillsDir = await setupSkillsDir('pdf', 'description: x')
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'hi', cwd: '/tmp', maxTurns: 4 },
       {
         dataDir: tmpDir,
@@ -186,7 +218,7 @@ describe('queryEngine', () => {
 
   test('SkillTool 调用成功 → 追加 user message 含 skill body, transcript 落盘', async () => {
     const skillsDir = await setupSkillsDir('pdf', 'description: x', 'INJECT-BODY-XYZ')
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'hi', cwd: '/tmp' },
       {
         dataDir: tmpDir,
@@ -222,7 +254,7 @@ describe('queryEngine', () => {
         yield { type: 'message_stop' }
       })()
     }) as any
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'hi', cwd: '/tmp' },
       { dataDir: tmpDir, modelCaller: captureCaller, skillsDirs: [skillsDir] },
     ))

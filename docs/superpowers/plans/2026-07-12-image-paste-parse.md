@@ -15,7 +15,7 @@
 - `createUserMessage.imagePasteIds` 形参类型 `number[]` → `string[]` (与 `UserMessage.imagePasteIds?: string[]` 顶层对齐)
 - 服务端路由路径: **`POST /api/agent/stream`** (不是 `/api/agent/run`), 校验器在 `packages/zai/src/server/routes/agent.ts:11`
 - MessageBubble 是 Agent.tsx 内联组件 (`packages/zai/src/web/src/pages/Agent.tsx:539`), 不是独立文件
-- `QueryOptions.prompt` 已支持 `string | UserMessage | UserMessage[]` (zai-agent-core runtime/types.ts:82), array 路径在 `queryEngine.ts:114-118` 已实现
+- `QueryOptions.prompt` 已支持 `string | UserMessage | UserMessage[]` (zai-agent-core runtime/types.ts:82), array 路径在 `queryLoop.ts:114-118` 已实现
 - 不引入 Files API 调用, 不调 zai-agent-core `uploadFile()`, 不增 server `/api/files/upload` route
 - 提交规范: `feat(scope): xxx` / `fix(scope): xxx` / `chore / docs / refactor / test / style`, 详见 `AGENTS.md`
 - 测试框架: vitest (`packages/zai/test/web/*.test.ts` 与 `packages/zai-agent-core/test/**/*.test.ts`), 全局命令 `pnpm -F zai test` / `pnpm -F zai-agent-core test`
@@ -41,7 +41,7 @@
 | `packages/zai/src/web/src/pages/Agent.tsx` | TextArea onPaste/onDrop + 🖼 按钮 + 缩略图条 + `handleSend` 拼 contentBlocks + `MessageBubble` user.text 分支加 attachments 渲染 |
 | `packages/zai/src/server/routes/agent.ts` | `StreamRequest` zod schema 加 `contentBlocks` 字段, 改用 array 路径 (`prompt: [{ role: 'user', content: ContentBlock[] }]`) |
 | `packages/zai-agent-core/src/opencc-internals/utils/messages.ts:497` | `createUserMessage` 形参 `imagePasteIds?: number[]` → `string[]` |
-| `packages/zai-agent-core/src/runtime/queryEngine.ts:99` | resumeFromTranscriptId 路径: 当 `raw.content` 是 array 时, 直接作为 content blocks 传给 modelCaller, 不再塌成 `''` |
+| `packages/zai-agent-core/src/runtime/queryLoop.ts:99` | resumeFromTranscriptId 路径: 当 `raw.content` 是 array 时, 直接作为 content blocks 传给 modelCaller, 不再塌成 `''` |
 | `packages/zai/test/web/imageReader.test.ts` | (新建) readImageAsBase64 单测 |
 | `packages/zai/test/web/useAgentStore.test.ts` | 扩 attachments 相关用例 (loadTranscript 重建 + removeAttachment revoke) |
 | `packages/zai/test/server/agent.test.ts` | (新建) `/api/agent/stream` 接 contentBlocks 集成测试 |
@@ -295,18 +295,18 @@ git commit -m "fix(zai-agent-core): createUserMessage.imagePasteIds 类型 numbe
 
 ---
 
-## Task 3: queryEngine resume 路径支持 array content
+## Task 3: queryLoop resume 路径支持 array content
 
 > 关键修复: 当 transcript 里 user message 的 `raw.content` 是 `ContentBlock[]` (图片) 而非 string 时, resume 该 session 不能再塌成空字符串喂模型. 这一步不依赖 Task 1/2 但与它们正交, 提前做以便 server 端代码可以依赖该行为.
 
 **Files:**
-- Modify: `packages/zai-agent-core/src/runtime/queryEngine.ts:99`
+- Modify: `packages/zai-agent-core/src/runtime/queryLoop.ts:99`
 
 ### Step 1: 读现状
 
-读 `packages/zai-agent-core/src/runtime/queryEngine.ts:90-120`, 确认改动位置.
+读 `packages/zai-agent-core/src/runtime/queryLoop.ts:90-120`, 确认改动位置.
 
-### Step 2: 改 queryEngine.ts
+### Step 2: 改 queryLoop.ts
 
 ```diff
        if (role === 'user') {
@@ -338,8 +338,8 @@ Expected: 全部通过
 ### Step 5: Commit
 
 ```bash
-git add packages/zai-agent-core/src/runtime/queryEngine.ts
-git commit -m "fix(zai-agent-core): queryEngine resume 路径支持 array content (图片消息)"
+git add packages/zai-agent-core/src/runtime/queryLoop.ts
+git commit -m "fix(zai-agent-core): queryLoop resume 路径支持 array content (图片消息)"
 ```
 
 ---
@@ -527,7 +527,7 @@ Expected: FAIL (contentBlocks 还没被 server 识别)
 
    try {
 +    // 拼 user message: ContentBlock[] 在前, text 块在后.
-+    // zai-agent-core queryEngine array 路径 (queryEngine.ts:114) 会把每个元素
++    // zai-agent-core queryLoop array 路径 (queryLoop.ts:114) 会把每个元素
 +    // 作为 user message append 到 messages[], 内部 appendUserMessage 直接
 +    // JSON.stringify 进 raw.content, 无需手动序列化.
 +    const userContent = contentBlocks?.length
@@ -1437,7 +1437,7 @@ Expected: 端口监听, 无 panic
 - §2.4 Agent.tsx UI + MessageBubble → Task 8 ✓
 - §2.5 server route contentBlocks → Task 4 ✓
 - §2.6 imagePasteIds type fix → Task 2 ✓
-- §2.7 transcript raw.content 序列化 → 由 `TranscriptMessage.raw: unknown` 透明处理 (无 store 改动), 但 Task 3 修了 queryEngine resume 路径读 array 的支持 ✓
+- §2.7 transcript raw.content 序列化 → 由 `TranscriptMessage.raw: unknown` 透明处理 (无 store 改动), 但 Task 3 修了 queryLoop resume 路径读 array 的支持 ✓
 - §2.8 MessageBubble attachments → Task 8 Step 6 ✓
 
 ### 2. Placeholder scan

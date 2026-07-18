@@ -132,7 +132,7 @@ export type ToolContext = {
   state: { [key: string]: unknown }
   awaitAskUserQuestion: (req: AskUserRequest) => Promise<AskUserAnswers>
 
-  /** 注入, 供 sub-agent tool 调子 queryEngine 用 (escape hatch) */
+  /** 注入, 供 sub-agent tool 调子 queryLoop 用 (escape hatch) */
   __runtimeConfig?: RuntimeConfig
   __defaultModel?: string
   __maxTurns?: number
@@ -647,7 +647,7 @@ export async function* executeToolsStreaming(
 
 ```ts
     // 注入 ask hook: 用原始 ctx.emitEvent 让 ask_pending 走主事件流,
-    // 紧跟 tool_use:start 之后立即被 queryEngine yield.
+    // 紧跟 tool_use:start 之后立即被 queryLoop yield.
     ;(bridgedCtx as any).awaitAskUserQuestion = async (req: { questions: unknown; metadata?: { source?: string } }) => {
       if (!askRegistry) {
         throw new Error('askRegistry not configured: cannot await AskUserQuestion answers')

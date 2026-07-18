@@ -27,14 +27,14 @@
 | `packages/zai-agent-core/src/transcript/serialization.ts` | v2 `serializeFile` / `deserializeFile`; throw `LegacyTranscriptError` on v1; add `serializeMessage` for v2 | Modify |
 | `packages/zai-agent-core/src/transcript/store.ts` | No API change; existing append/read/patch/list cover v2 as opaque JSON | None |
 | `packages/zai-agent-core/src/transcript/persistence.ts` (new) | `appendToolUse`, `appendToolResult`, `appendAssistantMessageV2`, `serializeForAnthropic`, `compressToolResultIfNeeded` | Create |
-| `packages/zai-agent-core/src/runtime/queryEngine.ts` | Replace raw-based appenders with v2 ones; resume path uses `serializeForAnthropic`; event-level append for tool_use / tool_result | Modify |
+| `packages/zai-agent-core/src/runtime/queryLoop.ts` | Replace raw-based appenders with v2 ones; resume path uses `serializeForAnthropic`; event-level append for tool_use / tool_result | Modify |
 | `packages/zai-agent-core/src/runtime/streamAdapter.ts` | (No direct change; verify caller update.) | Verify |
 | `packages/zai-agent-core/src/runtime/toolExecution.ts` | After each tool finishes, emit + persist v2 tool_result via persistence helpers | Modify |
 | `packages/zai/src/web/src/store/useAgentStore.ts` | Extend `loadTranscript` with three new branches (tool_use / tool_result / assistant ContentBlock[]), keep v1 fallback | Modify |
 | `packages/zai-agent-core/test/transcript/serialization-v2.test.ts` | Round-trip + v1 → LegacyTranscriptError | Create |
 | `packages/zai-agent-core/test/transcript/persistence.test.ts` | `appendToolUse`, `appendToolResult`, `appendAssistantMessageV2` round-trip; lockfile concurrency | Create |
 | `packages/zai-agent-core/test/transcript/serializeForAnthropic.test.ts` | v2 → Anthropic messages shape; tool_result grouped under user | Create |
-| `packages/zai-agent-core/test/runtime/queryEngine-resume.test.ts` | mock store, resume loads tool_use + tool_result into initial messages | Create |
+| `packages/zai-agent-core/test/runtime/queryLoop-resume.test.ts` | mock store, resume loads tool_use + tool_result into initial messages | Create |
 
 ---
 
@@ -662,10 +662,10 @@ git commit -m "test(zai-transcript): serializeForAnthropic grouping + passthroug
 
 ---
 
-## Task 5: Wire v2 appenders into queryEngine.ts
+## Task 5: Wire v2 appenders into queryLoop.ts
 
 **Files:**
-- Modify: `packages/zai-agent-core/src/runtime/queryEngine.ts:96-130, 378-453`
+- Modify: `packages/zai-agent-core/src/runtime/queryLoop.ts:96-130, 378-453`
 
 **Interfaces:**
 - Consumes: `appendToolUse`, `appendToolResult`, `appendAssistantMessageV2`, `serializeForAnthropic` (Task 3)
@@ -675,7 +675,7 @@ git commit -m "test(zai-transcript): serializeForAnthropic grouping + passthroug
 - [ ] **Step 1: Write the failing test**
 
 ```ts
-// test/runtime/queryEngine-resume.test.ts
+// test/runtime/queryLoop-resume.test.ts
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
@@ -700,7 +700,7 @@ mock.module('@anthropic-ai/sdk', () => ({
   },
 }))
 
-describe('queryEngine resume', () => {
+describe('queryLoop resume', () => {
   it('seeds initial messages from v2 transcript (user + tool_use + tool_result)', async () => {
     const { appendToolUse, appendToolResult, appendAssistantMessageV2, appendUserMessageV2 } = await import('../../src/transcript/persistence.js')
     await appendUserMessageV2(store, sessionId, 'hello', 0, null, { cwd: '/x', sessionId })
@@ -709,9 +709,9 @@ describe('queryEngine resume', () => {
     const tuUuid = (await store.read(sessionId)).messages.at(-1)!.uuid
     await appendToolResult(store, sessionId, { tool_use_id: 'tu_1', content: 'r', is_error: false }, 1, tuUuid)
 
-    const { queryEngine } = await import('../../src/runtime/queryEngine.js')
+    const { queryLoop } = await import('../../src/runtime/queryLoop.js')
     const events: any[] = []
-    for await (const ev of queryEngine({
+    for await (const ev of queryLoop({
       prompt: 'next',
       cwd: '/x',
       model: 'm',
@@ -750,12 +750,12 @@ it('v2 transcript round-trips into Anthropic message shape', async () => {
 
 - [ ] **Step 2: Run test to verify it fails**
 
-Run: `bun test packages/zai-agent-core/test/runtime/queryEngine-resume.test.ts`
+Run: `bun test packages/zai-agent-core/test/runtime/queryLoop-resume.test.ts`
 Expected: FAIL — current code reads `tm.raw` not `tm.message`.
 
-- [ ] **Step 3: Modify queryEngine.ts**
+- [ ] **Step 3: Modify queryLoop.ts**
 
-Edit `packages/zai-agent-core/src/runtime/queryEngine.ts`:
+Edit `packages/zai-agent-core/src/runtime/queryLoop.ts`:
 
 1. Add import at top:
 
@@ -829,7 +829,7 @@ async function appendAssistantMessage(
 }
 ```
 
-5. Add a new import in queryEngine.ts at the top for `ContentBlock`:
+5. Add a new import in queryLoop.ts at the top for `ContentBlock`:
 
 ```ts
 import type { ContentBlock, TranscriptMessage } from '../transcript/types.js'
@@ -837,14 +837,14 @@ import type { ContentBlock, TranscriptMessage } from '../transcript/types.js'
 
 - [ ] **Step 4: Run all transcript + runtime tests**
 
-Run: `bun test packages/zai-agent-core/test/transcript/ packages/zai-agent-core/test/runtime/queryEngine-resume.test.ts`
+Run: `bun test packages/zai-agent-core/test/transcript/ packages/zai-agent-core/test/runtime/queryLoop-resume.test.ts`
 Expected: PASS (previous + new).
 
 - [ ] **Step 5: Commit**
 
 ```bash
-git add packages/zai-agent-core/src/runtime/queryEngine.ts packages/zai-agent-core/test/runtime/queryEngine-resume.test.ts
-git commit -m "feat(zai): queryEngine persists v2 transcript; resume reads via serializeForAnthropic"
+git add packages/zai-agent-core/src/runtime/queryLoop.ts packages/zai-agent-core/test/runtime/queryLoop-resume.test.ts
+git commit -m "feat(zai): queryLoop persists v2 transcript; resume reads via serializeForAnthropic"
 ```
 
 ---
@@ -1131,7 +1131,7 @@ git commit -m "docs(zai-transcript): mark spec implemented"
 **Type consistency:**
 - `TranscriptMessage` referenced with `message.content`, `version`, `cwd`, `userType`, `sessionId` everywhere ✓
 - `appendToolUse` / `appendToolResult` / `appendAssistantMessageV2` / `serializeForAnthropic` / `compressToolResultIfNeeded` consistent across Tasks 3–6 ✓
-- `LegacyTranscriptError` only thrown by serialization.ts (Task 2), caught in queryEngine.ts (Task 5) ✓
+- `LegacyTranscriptError` only thrown by serialization.ts (Task 2), caught in queryLoop.ts (Task 5) ✓
 - `loadTranscriptMessages(sessionId, rawMessages)` signature consistent in Task 7 + test ✓
 
 **No gaps found; ready to execute.**

@@ -4,7 +4,7 @@
 
 **Goal:** Make the model badge in the zai-web chat status bar clickable so users can pick a different model for the active session, with the choice persisted to `transcript.meta.model` and new sessions retaining the env/settings/default fallback chain.
 
-**Architecture:** OpenCC-inspired layered model resolution + per-session override. Server reads `transcript.meta.model` and threads it through `runtime.run({ model })` (already supported by `zai-agent-core`'s `queryEngine`). Settings file gets a `models[]` alias table powering the picker UI; the picked alias is resolved to a full model ID and written back to `transcript.meta.model`.
+**Architecture:** OpenCC-inspired layered model resolution + per-session override. Server reads `transcript.meta.model` and threads it through `runtime.run({ model })` (already supported by `zai-agent-core`'s `queryLoop`). Settings file gets a `models[]` alias table powering the picker UI; the picked alias is resolved to a full model ID and written back to `transcript.meta.model`.
 
 **Tech Stack:** Express + zod (server), React + antd Popover + zustand (client), vitest + supertest + @testing-library/react + happy-dom.
 

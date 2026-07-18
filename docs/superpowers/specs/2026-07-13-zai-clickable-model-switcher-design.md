@@ -4,7 +4,7 @@
 
 **Goal:** Make the model badge in the zai-web chat status bar clickable so users can pick a different model for the active session, with the choice persisted in the session's transcript and new sessions retaining the default model resolution chain.
 
-**Architecture:** OpenCC-inspired layered model resolution + per-session override. Server reads `transcript.meta.model` and threads it through `runtime.run({ model })` (already supported by zai-agent-core's `queryEngine`). Settings file gets a `models[]` alias table that powers the picker UI; the picked alias is resolved to a full model ID and written back to `transcript.meta.model`. Existing sessions with `meta.model === 'unknown'` (or missing) keep falling through to the env/settings/default chain — no migration needed.
+**Architecture:** OpenCC-inspired layered model resolution + per-session override. Server reads `transcript.meta.model` and threads it through `runtime.run({ model })` (already supported by zai-agent-core's `queryLoop`). Settings file gets a `models[]` alias table that powers the picker UI; the picked alias is resolved to a full model ID and written back to `transcript.meta.model`. Existing sessions with `meta.model === 'unknown'` (or missing) keep falling through to the env/settings/default chain — no migration needed.
 
 **Tech Stack:** Express + zod (server), React + antd Popover + zustand (client), vitest + supertest + @testing-library/react.
 
@@ -223,7 +223,7 @@ No change. Existing `defaultModel` env fallback at line 62-64 is kept as the cat
 
 ### Integration verification
 
-`zai-agent-core/dist/runtime/queryEngine.js:73` confirms `model: options.model ?? config.defaultModel ?? 'default'`. Threading `model` through `runtime.run({ model })` already flows to the modelCaller. **No zai-agent-core change required.**
+`zai-agent-core/dist/runtime/queryLoop.js:73` confirms `model: options.model ?? config.defaultModel ?? 'default'`. Threading `model` through `runtime.run({ model })` already flows to the modelCaller. **No zai-agent-core change required.**
 
 ---
 

@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 `zai-agent-core` 中端到端接入 MCP (Model Context Protocol) 工具能力，让 `RuntimeConfig.mcpServers` 里的 MCP server 通过 stdio / SSE / StreamableHTTP 三种 transport 接入，并把它们的 tools 和 skills 注入到 queryEngine 工具池。
+**Goal:** 在 `zai-agent-core` 中端到端接入 MCP (Model Context Protocol) 工具能力，让 `RuntimeConfig.mcpServers` 里的 MCP server 通过 stdio / SSE / StreamableHTTP 三种 transport 接入，并把它们的 tools 和 skills 注入到 queryLoop 工具池。
 
-**Architecture:** 方案 A — 在 RuntimeConfig 顶层新增 `mcpClientPool?: MCPClientPool` 和 `mcpServers?: McpServerSpec[]`。`MCPClientPool` 负责连接生命周期、artifacts 缓存、错误聚合。`MCPToolAdapter` 把 MCP `tool/list` 翻译成 zai-agent-core `Tool<>`（命名 `mcp__<server>__<tool>`）。`SkillResourceAdapter` 把 MCP `resources/read` 的 `skill://` URI 翻译成 `LoadedSkill`。queryEngine 在每个 turn 调 `pool.connectAll` 幂等建连，从 `getArtifacts()` 取 tools 和 skills 合并到工具池。zai-server shutdown 时调 `pool.disconnectAll()`。
+**Architecture:** 方案 A — 在 RuntimeConfig 顶层新增 `mcpClientPool?: MCPClientPool` 和 `mcpServers?: McpServerSpec[]`。`MCPClientPool` 负责连接生命周期、artifacts 缓存、错误聚合。`MCPToolAdapter` 把 MCP `tool/list` 翻译成 zai-agent-core `Tool<>`（命名 `mcp__<server>__<tool>`）。`SkillResourceAdapter` 把 MCP `resources/read` 的 `skill://` URI 翻译成 `LoadedSkill`。queryLoop 在每个 turn 调 `pool.connectAll` 幂等建连，从 `getArtifacts()` 取 tools 和 skills 合并到工具池。zai-server shutdown 时调 `pool.disconnectAll()`。
 
 **Tech Stack:** TypeScript (strict), `@modelcontextprotocol/sdk ^1.6.1`（与 `packages/mcp-proxy-server` 对齐），Bun runtime + bun test，Zod schema。
 
@@ -15,7 +15,7 @@
 - **依赖**：`@modelcontextprotocol/sdk ^1.6.1`，版本与 `packages/mcp-proxy-server` 对齐
 - **命名**：MCP 工具名 `mcp__<serverName>__<originalToolName>`（OpenCC 风格）
 - **配置源**：仅 RuntimeConfig.mcpServers；zai-server 负责读 `~/.zai/settings.json` + `cwd/.mcp.json` 后合并传入
-- **生命周期**：zai-agent-core 自管 pool；zai-server shutdown 调 disconnectAll；queryEngine 不在 finally/finally 调 disconnectAll
+- **生命周期**：zai-agent-core 自管 pool；zai-server shutdown 调 disconnectAll；queryLoop 不在 finally/finally 调 disconnectAll
 - **OAuth**：仅 env 注入 bearer/header，不做交互式 OAuth
 - **失败策略**：MCP 永不打断 query（pool.connectAll 永不抛错，tool.call 失败返回 isError，disconnectAll 失败仅 log warn）
 - **E2E 测试**：默认 CI 不跑，靠 `RUN_MCP_E2E=1` 触发
@@ -59,7 +59,7 @@
 | `packages/zai-agent-core/package.json` | 加 `@modelcontextprotocol/sdk ^1.6.1` 到 dependencies |
 | `packages/zai-agent-core/src/opencc-internals/services/mcp/client.ts` | 去掉 `@ts-nocheck`，导出适配后的 `createMCPClient` |
 | `packages/zai-agent-core/src/runtime/types.ts` | `RuntimeConfig.mcpServers` / `mcpClientPool` / `mcpSkillLoading` 字段 |
-| `packages/zai-agent-core/src/runtime/queryEngine.ts` | `pool.connectAll` / `getArtifacts` 装配 MCP artifacts 到工具池 |
+| `packages/zai-agent-core/src/runtime/queryLoop.ts` | `pool.connectAll` / `getArtifacts` 装配 MCP artifacts 到工具池 |
 | `packages/zai-agent-core/src/runtime/streamAdapter.ts` | 校验 `mcp_server` 错误分类 recoverable |
 | `packages/zai-agent-core/src/tools/index.ts` | 暴露 MCP 工具 + 资源工具 |
 | `packages/zai-agent-core/test/runtime/toolExecution.test.ts` | 加 MCP 工具用例 |
@@ -1071,7 +1071,7 @@ git commit -m "feat(zai-agent-core): MCP tool and skill adapters with schema + p
 
 **Files:**
 - Modify: `packages/zai-agent-core/src/runtime/types.ts`（`mcpClientPool` / `mcpSkillLoading` 字段）
-- Modify: `packages/zai-agent-core/src/runtime/queryEngine.ts`（`pool.connectAll` / `getArtifacts` 装配）
+- Modify: `packages/zai-agent-core/src/runtime/queryLoop.ts`（`pool.connectAll` / `getArtifacts` 装配）
 - Create: `packages/zai-agent-core/src/tools/ListMcpResourcesTool/ListMcpResourcesTool.ts`
 - Create: `packages/zai-agent-core/src/tools/ReadMcpResourceTool/ReadMcpResourceTool.ts`
 - Modify: `packages/zai-agent-core/src/tools/index.ts`（暴露两个资源工具）
@@ -1079,7 +1079,7 @@ git commit -m "feat(zai-agent-core): MCP tool and skill adapters with schema + p
 
 **Interfaces:**
 - Consumes: `MCPClientPool`（Task 2）+ `MCPTool` / `loadMcpSkills`（Task 3）
-- Produces: queryEngine 在每 turn 装配 MCP artifacts，资源工具在 `getZaiRuntimeTools()` 可用
+- Produces: queryLoop 在每 turn 装配 MCP artifacts，资源工具在 `getZaiRuntimeTools()` 可用
 
 - [ ] **Step 1: 扩展 RuntimeConfig 字段**
 
@@ -1221,16 +1221,16 @@ export { ReadMcpResourceTool } from './ReadMcpResourceTool/ReadMcpResourceTool.j
 
 并在 `getZaiRuntimeTools()` 返回的数组中追加这两个工具（无条件）。
 
-- [ ] **Step 5: 写 queryEngine MCP 装配失败测试**
+- [ ] **Step 5: 写 queryLoop MCP 装配失败测试**
 
-`packages/zai-agent-core/test/runtime/queryEngine-mcp.test.ts`：
+`packages/zai-agent-core/test/runtime/queryLoop-mcp.test.ts`：
 
 ```ts
 import { describe, expect, test, mock } from 'bun:test'
 import { MCPClientPool } from '../../src/mcp/MCPClientPool.js'
-import { queryEngine } from '../../src/runtime/queryEngine.js'
+import { queryLoop } from '../../src/runtime/queryLoop.js'
 
-describe('queryEngine MCP wiring', () => {
+describe('queryLoop MCP wiring', () => {
   test('connectAll never throws even when all servers fail', async () => {
     const pool = new MCPClientPool()
     const config = {
@@ -1241,10 +1241,10 @@ describe('queryEngine MCP wiring', () => {
       ],
       modelCaller: async () => ({ content: 'mock', tool_use: [] }),
     }
-    // 用一个最小 prompt 跑 queryEngine，期待 connectAll 不抛、query 继续
+    // 用一个最小 prompt 跑 queryLoop，期待 connectAll 不抛、query 继续
     const events: unknown[] = []
     try {
-      const gen = queryEngine({ prompt: 'hi', cwd: '/tmp' }, config as never)
+      const gen = queryLoop({ prompt: 'hi', cwd: '/tmp' }, config as never)
       for await (const ev of gen) events.push(ev)
     } catch {
       // 允许 modelCaller mock 报错；关键是 connectAll 不抛
@@ -1254,12 +1254,12 @@ describe('queryEngine MCP wiring', () => {
 })
 ```
 
-Run: `cd packages/zai-agent-core && bun test test/runtime/queryEngine-mcp.test.ts`
-Expected: FAIL（queryEngine 当前不调用 pool）
+Run: `cd packages/zai-agent-core && bun test test/runtime/queryLoop-mcp.test.ts`
+Expected: FAIL（queryLoop 当前不调用 pool）
 
-- [ ] **Step 6: 修改 queryEngine.ts 装配 MCP artifacts**
+- [ ] **Step 6: 修改 queryLoop.ts 装配 MCP artifacts**
 
-修改 `packages/zai-agent-core/src/runtime/queryEngine.ts`，在 `resolveToolPool` 调用前增加：
+修改 `packages/zai-agent-core/src/runtime/queryLoop.ts`，在 `resolveToolPool` 调用前增加：
 
 ```ts
 import { adaptMcpTools } from '../mcp/MCPToolAdapter.js'
@@ -1283,11 +1283,11 @@ if (config.mcpClientPool && config.mcpServers) {
 }
 ```
 
-实际变量名按 queryEngine.ts 现有结构适配（`baseTools` / `loadedSkills` 可能叫别的名字）。
+实际变量名按 queryLoop.ts 现有结构适配（`baseTools` / `loadedSkills` 可能叫别的名字）。
 
-- [ ] **Step 7: 跑 queryEngine-mcp 测试**
+- [ ] **Step 7: 跑 queryLoop-mcp 测试**
 
-Run: `cd packages/zai-agent-core && bun test test/runtime/queryEngine-mcp.test.ts`
+Run: `cd packages/zai-agent-core && bun test test/runtime/queryLoop-mcp.test.ts`
 Expected: PASS
 
 - [ ] **Step 8: 加 toolExecution MCP 用例**
@@ -1333,11 +1333,11 @@ Expected: 全部通过
 
 ```bash
 cd packages/zai-agent-core
-git add src/runtime/types.ts src/runtime/queryEngine.ts src/tools/index.ts \
+git add src/runtime/types.ts src/runtime/queryLoop.ts src/tools/index.ts \
   src/tools/ListMcpResourcesTool/ src/tools/ReadMcpResourceTool/ \
-  test/runtime/queryEngine-mcp.test.ts test/runtime/toolExecution.test.ts \
+  test/runtime/queryLoop-mcp.test.ts test/runtime/toolExecution.test.ts \
   test/tools/ListMcpResourcesTool.test.ts test/tools/ReadMcpResourceTool.test.ts
-git commit -m "feat(zai-agent-core): wire MCP artifacts into queryEngine tool pool + resource tools"
+git commit -m "feat(zai-agent-core): wire MCP artifacts into queryLoop tool pool + resource tools"
 ```
 
 ---
@@ -1348,7 +1348,7 @@ git commit -m "feat(zai-agent-core): wire MCP artifacts into queryEngine tool po
 - Modify: `packages/zai-agent-core/src/runtime/streamAdapter.ts`
 - Modify: `packages/zai-agent-core/src/runtime/types.ts`（RuntimeEvent 新增 `mcp_server:status` / `mcp_server:tools_updated`）
 - Modify: `packages/zai-agent-core/src/runtime/MCPClientPool.ts`（暴露 server 状态变更的回调）
-- Modify: `packages/zai-agent-core/src/runtime/queryEngine.ts`（订阅 pool 状态变更 → 投递事件）
+- Modify: `packages/zai-agent-core/src/runtime/queryLoop.ts`（订阅 pool 状态变更 → 投递事件）
 
 **Interfaces:**
 - Consumes: `MCPClientPool.health()`（Task 2）
@@ -1423,9 +1423,9 @@ class MCPClientPool {
 
 并在 `connectOne` 状态变更处（connected / failed）和 `disconnect` 处调 `this.emitStatus(...)`。
 
-- [ ] **Step 5: queryEngine 订阅并投递事件**
+- [ ] **Step 5: queryLoop 订阅并投递事件**
 
-修改 `packages/zai-agent-core/src/runtime/queryEngine.ts`，在 `connectAll` 后：
+修改 `packages/zai-agent-core/src/runtime/queryLoop.ts`，在 `connectAll` 后：
 
 ```ts
 if (config.mcpClientPool) {
@@ -1436,12 +1436,12 @@ if (config.mcpClientPool) {
       // toolNames 留空，client 端需要时调 ListMcpResourcesTool/重新查
     }
   })
-  // 注意：当前 queryEngine 是 AsyncGenerator，emit 通过 yield 返回
+  // 注意：当前 queryLoop 是 AsyncGenerator，emit 通过 yield 返回
   // unsubscribe 在 query 结束时调用（用 try/finally）
 }
 ```
 
-具体 emit 实现按 queryEngine.ts 现有的 yield RuntimeEvent 模式写。
+具体 emit 实现按 queryLoop.ts 现有的 yield RuntimeEvent 模式写。
 
 - [ ] **Step 6: 校准 streamAdapter 的 mcp_server 分类**
 
@@ -1467,7 +1467,7 @@ Expected: 全部通过
 
 ```bash
 cd packages/zai-agent-core
-git add src/runtime/types.ts src/runtime/streamAdapter.ts src/runtime/queryEngine.ts src/mcp/MCPClientPool.ts \
+git add src/runtime/types.ts src/runtime/streamAdapter.ts src/runtime/queryLoop.ts src/mcp/MCPClientPool.ts \
   test/runtime/runtime-events.test.ts
 git commit -m "feat(zai-agent-core): mcp_server RuntimeEvents + streamAdapter calibration"
 ```
@@ -1703,7 +1703,7 @@ export async function adaptMcpTools(
 }
 ```
 
-queryEngine 调用方同步传入 spec。
+queryLoop 调用方同步传入 spec。
 
 - [ ] **Step 3: 写过滤单元测试**
 

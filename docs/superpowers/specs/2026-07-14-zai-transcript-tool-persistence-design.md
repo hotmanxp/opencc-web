@@ -7,7 +7,7 @@
 
 ## 1. 背景与动机
 
-zai 当前把 tool_use 折叠进 assistant 消息的 `raw.tool_uses: [{id, name, input}]` 字段，且完全不写 tool_result（`packages/zai-agent-core/src/runtime/queryEngine.ts:413` `appendAssistantMessage`）。后果：
+zai 当前把 tool_use 折叠进 assistant 消息的 `raw.tool_uses: [{id, name, input}]` 字段，且完全不写 tool_result（`packages/zai-agent-core/src/runtime/queryLoop.ts:413` `appendAssistantMessage`）。后果：
 
 - 历史会话刷新后 `useAgentStore.loadTranscript` 看不到工具卡片；
 - 不能跨进程 resume：模型拿不到历史 tool_result，强制 reset 上下文；
@@ -23,7 +23,7 @@ OpenCC 上游每个事件独立落 `SerializedMessage`，user 消息携带 `tool
 |------|------|
 | 核心目标 | 完整可重放 |
 | Schema 演进 | 换 OpenCC 风格（`SerializedMessage` + `ContentBlock[]`），TranscriptFile.version 1 → 2 |
-| Resume | 本次一并实现（queryEngine 启动时 store.read → 拼 Anthropic messages） |
+| Resume | 本次一并实现（queryLoop 启动时 store.read → 拼 Anthropic messages） |
 | 数据迁移 | 不迁移；v1 read 失败时降级为空 messages，旧会话仅显示文本 |
 | 工具结果压缩 | 复用 `opencc-internals/services/api/compressToolHistory.ts` 三级压缩 |
 | 文件格式 | 保持 `.json` 单文件（不改 JSONL），便于 `list()` 性能 |
@@ -32,7 +32,7 @@ OpenCC 上游每个事件独立落 `SerializedMessage`，user 消息携带 `tool
 ## 3. 架构总览
 
 ```
-zai queryEngine (runtime/queryEngine.ts)
+zai queryLoop (runtime/queryLoop.ts)
   store = new TranscriptStore(dataDir)
   if options.resumeFromTranscriptId:
     try: t = await store.read(id)            // v2
@@ -67,7 +67,7 @@ zai useAgentStore.loadTranscript
 | `packages/zai-agent-core/src/transcript/types.ts` | v2 schema 定义（ContentBlock / SerializedMessage 风格 TranscriptMessage） |
 | `packages/zai-agent-core/src/transcript/serialization.ts` | v2 serialize / deserialize；`LegacyTranscriptError` 抛出 v1 |
 | `packages/zai-agent-core/src/transcript/store.ts` | 不变；append/read 继续走 proper-lockfile |
-| `packages/zai-agent-core/src/runtime/queryEngine.ts` | 新增 `appendToolUse` / `appendToolResult` / `serializeForAnthropic`；调用 `compressToolHistory` |
+| `packages/zai-agent-core/src/runtime/queryLoop.ts` | 新增 `appendToolUse` / `appendToolResult` / `serializeForAnthropic`；调用 `compressToolHistory` |
 | `packages/zai-agent-core/src/opencc-internals/services/api/compressToolHistory.ts` | 复用，不改 |
 | `packages/zai/src/web/src/store/useAgentStore.ts` | `loadTranscript` 增加 tool_use / tool_result / ContentBlock[] 三个分支；保留 v1 fallback |
 
@@ -147,7 +147,7 @@ async function appendAssistantMessage(
 
 ## 5. Resume 实现细节
 
-### queryEngine 启动（`runtime/queryEngine.ts`）
+### queryLoop 启动（`runtime/queryLoop.ts`）
 
 ```ts
 let initialMessages: Array<{ role: 'user' | 'assistant'; content: unknown }> = []
@@ -210,8 +210,8 @@ for (const msg of transcript.messages) {
 | 场景 | 行为 |
 |------|------|
 | `appendToolUse` / `appendToolResult` 写盘失败 | `catch` 吞掉，不阻断对话；`ZAI_DEBUG=1` 时 console.error |
-| `store.read` v1 文件 | 抛 `LegacyTranscriptError` → queryEngine initialMessages=[]，UI 显示 "历史工具不可读" |
-| `store.read` v2 文件损坏 | JSON.parse 失败 → 抛 SyntaxError，queryEngine 上层捕获返回错误 |
+| `store.read` v1 文件 | 抛 `LegacyTranscriptError` → queryLoop initialMessages=[]，UI 显示 "历史工具不可读" |
+| `store.read` v2 文件损坏 | JSON.parse 失败 → 抛 SyntaxError，queryLoop 上层捕获返回错误 |
 | `compressToolHistory` 异常 | 单条 tool_result 退化为不压缩，原样写入 |
 
 ## 8. 测试策略
@@ -221,7 +221,7 @@ for (const msg of transcript.messages) {
 - `store-v2.test.ts`：写入 user/assistant/tool_use/tool_result 四种类型各一条，read 后字段一致；proper-lockfile 并发写入不丢消息
 - `serialize-v2.test.ts`：ContentBlock[] ↔ Anthropic SDK 双向转换；v1 fixture 抛 LegacyTranscriptError
 - `compress-tool-result.test.ts`：复用 compressToolHistory 已有测试覆盖；新加 zai wrapper 在 0/中/远 turn 行为
-- `queryEngine-resume.test.ts`：mock TranscriptStore.read，验证 resume 把 tool_use + tool_result 拼进 Anthropic messages
+- `queryLoop-resume.test.ts`：mock TranscriptStore.read，验证 resume 把 tool_use + tool_result 拼进 Anthropic messages
 
 `packages/zai/src/web/src/store/useAgentStore.test.ts`（如有）：
 - v2 transcript fixture 还原 tool_use:start → tool_use:done 顺序；tool_error 标红
@@ -237,7 +237,7 @@ for (const msg of transcript.messages) {
 ## 10. 风险与回滚
 
 - **风险**：zai 的 `wrapWithZaiMeta` 在外层做了事件级包装，与 opencc-internals QueryEngine 内部的 messages 维护路径并存，parentUuid 链需要小心避免重复维护。
-- **缓解**：append 调用全部集中在 zai runtime 层（zai 的 query.ts/queryEngine.ts），不动 opencc-internals 的 QueryEngine；新加 `serializeForAnthropic` 隔离 v2 ↔ Anthropic 转换。
+- **缓解**：append 调用全部集中在 zai runtime 层（zai 的 query.ts/queryLoop.ts），不动 opencc-internals 的 QueryEngine；新加 `serializeForAnthropic` 隔离 v2 ↔ Anthropic 转换。
 - **回滚**：v1 store.append 路径不动（`appendUserMessage` / `appendAssistantMessage` 旧版保留作为 `appendLegacyAssistantMessage`），通过 env `ZAI_TRANSCRIPT_VERSION=1` 临时回退（不在首次实现里做，预留口子）。
 
 ## 11. Implementation status

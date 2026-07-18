@@ -4,7 +4,7 @@
 
 **Goal:** Prevent sub-agents (sync `Agent` and async `BackgroundAgent`) from recursively dispatching further sub-agents by adding a `disallowedTools` mechanism to `QueryOptions` and forcing it on every sub-agent construction site.
 
-**Architecture:** `resolveToolPool` in `runtime/queryEngine.ts` gets a final filter step that drops any tool whose `name` appears in `options.disallowedTools`. `AgentTool.call` (sync path) injects `['Agent', 'BackgroundAgent']` into its `subOpts`; `DefaultBackgroundRuntime.runOne` (async path) injects the same list when constructing `QueryOptions` for the background sub-agent. Top-level `queryEngine(opts)` is unaffected because no caller supplies `disallowedTools` for the parent session.
+**Architecture:** `resolveToolPool` in `runtime/queryLoop.ts` gets a final filter step that drops any tool whose `name` appears in `options.disallowedTools`. `AgentTool.call` (sync path) injects `['Agent', 'BackgroundAgent']` into its `subOpts`; `DefaultBackgroundRuntime.runOne` (async path) injects the same list when constructing `QueryOptions` for the background sub-agent. Top-level `queryLoop(opts)` is unaffected because no caller supplies `disallowedTools` for the parent session.
 
 **Tech Stack:** TypeScript, vitest, bun test runner.
 
@@ -22,7 +22,7 @@
 | File | Action | Purpose |
 |------|--------|---------|
 | `packages/zai-agent-core/src/runtime/types.ts` | Modify | Add `disallowedTools?: string[]` to `QueryOptions` |
-| `packages/zai-agent-core/src/runtime/queryEngine.ts` | Modify | Filter step at the end of `resolveToolPool` |
+| `packages/zai-agent-core/src/runtime/queryLoop.ts` | Modify | Filter step at the end of `resolveToolPool` |
 | `packages/zai-agent-core/src/tools/AgentTool/AgentTool.ts` | Modify | Inject `disallowedTools: ['Agent', 'BackgroundAgent']` in sync `subOpts` |
 | `packages/zai-agent-core/src/tools/AgentTool/prompt.ts` | Modify | Add one-line recursion-prevention note |
 | `packages/zai-agent-core/src/tools/BackgroundAgentTool/prompt.ts` | Modify | Add one-line recursion-prevention note |
@@ -43,7 +43,7 @@
 
 - [ ] **Step 1: Export `resolveToolPool` as `@internal`**
 
-In `packages/zai-agent-core/src/runtime/queryEngine.ts`, change the function declaration:
+In `packages/zai-agent-core/src/runtime/queryLoop.ts`, change the function declaration:
 
 ```ts
 function resolveToolPool(
@@ -64,7 +64,7 @@ Create `packages/zai-agent-core/test/runtime/resolveToolPool-disallowed.test.ts`
 
 ```ts
 import { describe, expect, test } from 'vitest'
-import { resolveToolPool } from '../../../src/runtime/queryEngine.js'
+import { resolveToolPool } from '../../../src/runtime/queryLoop.js'
 import type { QueryOptions } from '../../../src/runtime/types.js'
 
 type AnyTool = { name: string; description?: string }
@@ -154,7 +154,7 @@ Expected: 6 tests fail (the filter doesn't exist yet). The first test will fail 
 
 ```bash
 cd /Users/ethan/code/opencc-web
-git add packages/zai-agent-core/src/runtime/queryEngine.ts \
+git add packages/zai-agent-core/src/runtime/queryLoop.ts \
         packages/zai-agent-core/test/runtime/resolveToolPool-disallowed.test.ts
 git commit -m "test(zai-agent-core): failing cases for resolveToolPool disallowedTools filter"
 ```
@@ -165,7 +165,7 @@ git commit -m "test(zai-agent-core): failing cases for resolveToolPool disallowe
 
 **Files:**
 - Modify: `packages/zai-agent-core/src/runtime/types.ts`
-- Modify: `packages/zai-agent-core/src/runtime/queryEngine.ts`
+- Modify: `packages/zai-agent-core/src/runtime/queryLoop.ts`
 
 **Interfaces:**
 - Consumes: existing `QueryOptions`, `resolveToolPool`.
@@ -187,7 +187,7 @@ In `packages/zai-agent-core/src/runtime/types.ts`, find the `toolsOverride` fiel
 
 - [ ] **Step 2: Add filter step to `resolveToolPool`**
 
-In `packages/zai-agent-core/src/runtime/queryEngine.ts`, replace the existing `resolveToolPool` body (lines 380-395) with:
+In `packages/zai-agent-core/src/runtime/queryLoop.ts`, replace the existing `resolveToolPool` body (lines 380-395) with:
 
 ```ts
 function resolveToolPool(
@@ -242,7 +242,7 @@ cd /Users/ethan/code/opencc-web/packages/zai-agent-core && bun test test/transcr
 ```bash
 cd /Users/ethan/code/opencc-web
 git add packages/zai-agent-core/src/runtime/types.ts \
-        packages/zai-agent-core/src/runtime/queryEngine.ts
+        packages/zai-agent-core/src/runtime/queryLoop.ts
 git commit -m "feat(zai-agent-core): add QueryOptions.disallowedTools + resolveToolPool filter
 
 Mirrors OpenCC sub-agents docs: a per-query deny list applied as the

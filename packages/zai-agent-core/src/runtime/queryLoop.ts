@@ -27,11 +27,22 @@ import {
   serializeForAnthropic,
 } from '../transcript/persistence.js'
 import { foldTopLevelToolUses } from '../opencc-internals/utils/foldTopLevelToolUses.js'
-import { saveCacheSafeParams } from '../opencc-internals/utils/forkedAgent.js'
 
-const DEFAULT_MAX_TURNS = 50
-
-export async function* queryEngine(
+/**
+ * queryLoop — zai port of OpenCC's async-generator query loop.
+ *
+ * Alignment with upstream (opencc src/query.ts:461):
+ *  - Named `queryLoop` (was: `queryLoop`) to match opencc naming.
+ *  - No hard `DEFAULT_MAX_TURNS` cap. Turn limit is purely per-call via
+ *    `options.maxTurns` / `config.defaultMaxTurns` (or absent → run to natural
+ *    done / abort / explicit maxTurns). Matches opencc semantics
+ *    `turnCount < (maxTurns ?? Infinity)`.
+ *  - Abort comes solely from `options.abortSignal`. server layer
+ *    (routes/agent.ts) wires a per-session AbortController into this, so
+ *    /agent/abort can actually stop the loop (replaces the broken
+ *    `runtime/abort.ts` marker-file pattern).
+ */
+export async function* queryLoop(
   options: QueryOptions,
   config: RuntimeConfig,
 ): AsyncGenerator<RuntimeEvent> {
@@ -44,7 +55,10 @@ export async function* queryEngine(
     `sess-${randomUUID()}`
   const store = new TranscriptStore(config.dataDir)
   const abortController = new AbortController()
-  const maxTurns = options.maxTurns ?? config.defaultMaxTurns ?? DEFAULT_MAX_TURNS
+  // No hard default — if neither options.maxTurns nor config.defaultMaxTurns
+  // is set, the loop runs until natural done (model emits no tool_use),
+  // an abort, or an explicit maxTurns (opencc semantics).
+  const maxTurns = options.maxTurns ?? config.defaultMaxTurns ?? Infinity
   const sessionStartTs = Date.now()
 
   options.abortSignal?.addEventListener('abort',
@@ -90,7 +104,7 @@ export async function* queryEngine(
     config.mcpClients = snapshotMcpClients(config.mcpClientPool)
   }
 
-  // Dynamic import breaks queryEngine ↔ getZaiRuntimeTools cycle (Task 11)
+  // Dynamic import breaks queryLoop ↔ getZaiRuntimeTools cycle (Task 11)
   const { getZaiRuntimeTools } = await import('../tools/index.js')
   let tools: Tool[] = resolveToolPool(options, config, getZaiRuntimeTools(), skills)
 
@@ -196,7 +210,7 @@ export async function* queryEngine(
     turn++
     if (abortController.signal.aborted) {
       if (process.env.ZAI_DEBUG === '1') {
-        console.error('[zai.queryEngine] aborted at turn start', {
+        console.error('[zai.queryLoop] aborted at turn start', {
           sessionId,
           turn,
           reason: abortController.signal.reason,
@@ -228,38 +242,12 @@ export async function* queryEngine(
       if (abortController.signal.aborted) break
       // ★ message_stop 是协议终止标志 (Anthropic SDK spec). minimax proxy
       // 走完 message_stop 后 keep-alive 不关 socket, SDK for-await 永远等 EOF.
-      // 必须主动跳出, 否则 queryEngine 永远卡在 for-await modelStream,
+      // 必须主动跳出, 否则 queryLoop 永远卡在 for-await modelStream,
       // appendAssistantMessage 永远走不到 — transcript 永远只剩 user message.
       // 注意: 不再 yield* 这个 event (因为下游 translateRuntimeEvents 会基于
       // message_stop 推 runtime.done, 前端 status:idle 已经亮了). 直接 break.
       if ((ev as any).type === 'message_stop') {
         sawMessageStop = true
-        try {
-          saveCacheSafeParams({
-            systemPrompt,
-            userContext: {},
-            systemContext: {},
-            toolUseContext: {
-              abortController,
-              getAppState: () => ({
-                toolPermissionContext: { shouldAvoidPermissionPrompts: true },
-              }),
-              setAppState: () => {},
-              setInProgressToolUseIDs: () => {},
-              setResponseLength: () => {},
-              pushApiMetricsEntry: () => {},
-              updateFileHistoryState: () => {},
-              options: options as any,
-              messages: messages as any,
-              agentId: sessionId as any,
-              readFileState: new Map(),
-              queryTracking: { chainId: sessionId, depth: 0 },
-            } as any,
-            forkContextMessages: messages as any,
-          })
-        } catch (err) {
-          console.warn('[queryEngine] saveCacheSafeParams threw:', err)
-        }
         if (process.env.ZAI_DEBUG === '1') {
           console.error('[zai.qe] break on message_stop', {
             sessionId, turn, assistantTextLen: assistantText.length,
@@ -359,12 +347,12 @@ export async function* queryEngine(
     })) })
 
     // Skill body injection: SkillTool 在执行时设置 ctx.state.__pendingSkillInjection,
-    // queryEngine 读出后追加为独立 user message (model 下轮可见 skill body), 并落盘 transcript.
+    // queryLoop 读出后追加为独立 user message (model 下轮可见 skill body), 并落盘 transcript.
     //
     // 持久化这里打上 kind:'skill_injection' 标记, 让前端在 loadTranscript 时
     // 跳过渲染 (UI 上一次 SkillTool 已经以 <skill_invocation> 形式展示给用户;
     // 再把整段 skill markdown 渲染成 user 卡片 = "skill 文字被显示成用户消息" 的 bug).
-    // queryEngine 自己 resume 时仍按 user message 加载, 不影响 LLM 上下文.
+    // queryLoop 自己 resume 时仍按 user message 加载, 不影响 LLM 上下文.
     const pending = (toolCtx.state as any).__pendingSkillInjection as PendingSkillInjection | undefined
     if (pending) {
       messages.push({ role: 'user', content: pending.content })
@@ -452,7 +440,9 @@ function makeToolContext(
     },
     __runtimeConfig: { ...config, sandbox, sessionId: options.transcriptId ?? '' },
     __defaultModel: options.model ?? config.defaultModel ?? 'default',
-    __maxTurns: options.maxTurns ?? config.defaultMaxTurns ?? DEFAULT_MAX_TURNS,
+    // No hard default — sub-agent / tools 显式传 maxTurns 才生效。
+    // 没有则 Infinity, 配合 opencc 语义 (tools / AgentTool 不再硬编码 25)。
+    __maxTurns: options.maxTurns ?? config.defaultMaxTurns ?? Infinity,
     parentSessionId: options.parentSessionId,
   } as any
 }

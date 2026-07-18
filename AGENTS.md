@@ -9,12 +9,12 @@
 | 目录 | 说明 |
 |------|------|
 | `packages/zai/` | `src/server/` 路由 + service,`src/web/` UI + store,`src/shared/` zod schema |
-| `packages/zai-agent-core/` | `runtime/`(`queryEngine` 主循环 + `query` shim + `streamAdapter` / `toolExecution` / `canUseTool` / `subagent` / `background/`)+ `tools/`(Bash/Read/Edit/Write/AskUserQuestion/TodoWrite/Task*/Agent/BackgroundAgent/...)+ `transcript/`(v2 落盘)+ `mcp/` + `plugins/`(OpenCC 插件)+ `skills/` |
+| `packages/zai-agent-core/` | `runtime/`(`queryLoop` 主循环 + `query` shim + `streamAdapter` / `toolExecution` / `canUseTool` / `subagent` / `background/`)+ `tools/`(Bash/Read/Edit/Write/AskUserQuestion/TodoWrite/Task*/Agent/BackgroundAgent/...)+ `transcript/`(v2 落盘)+ `mcp/` + `plugins/`(OpenCC 插件)+ `skills/` |
 | `docs/  examples/  scripts/` | 设计文档 / 示例 / 仓库脚本 |
 
 ## 核心入口
 
-- **`packages/zai-agent-core/src/runtime/queryEngine.ts`** — 主循环 `export async function* queryEngine(options, config)`:`while (turn < maxTurns=50)` → 加载 skills → 连 MCP → assemble tools → resume transcript → build system prompt → 跑 hooks → `for-await modelCaller`(遇 `message_stop` 主动 break)→ 累积 text/thinking/tool_use → 落盘 v2 → `executeToolsStreaming` → 处理 `__pendingSkillInjection` → loop。`query.ts` 是 re-export shim,`contract.ts:DefaultAgentRuntime.run` 代理到 `query()`
+- **`packages/zai-agent-core/src/runtime/queryLoop.ts`** — 主循环 `export async function* queryLoop(options, config)`:`while (turn < maxTurns=50)` → 加载 skills → 连 MCP → assemble tools → resume transcript → build system prompt → 跑 hooks → `for-await modelCaller`(遇 `message_stop` 主动 break)→ 累积 text/thinking/tool_use → 落盘 v2 → `executeToolsStreaming` → 处理 `__pendingSkillInjection` → loop。`query.ts` 是 re-export shim,`contract.ts:DefaultAgentRuntime.run` 代理到 `query()`
 - **`packages/zai/src/server/index.ts`** — `createApp({cwd, cwdName, token, port?})` 按顺序 `initAgentRuntime → initSubagentNotifierLifecycle → initBackgroundRuntime`;挂 14 个 router 到 `/api/*`;`express.json({limit:'20mb'})`(图片粘贴);`/api` 整段禁缓存
 
 ## 数据流
@@ -55,8 +55,8 @@ web (useBackgroundTasks) ─POST /api/tasks→ DefaultBackgroundRuntime.dispatch
 | `packages/zai/src/server/services/askRegistry.ts` | `register/answer/reject/abortAll`,等 AskUserQuestion 答复 |
 | `packages/zai/src/server/services/agentRuntime.ts` | `DefaultAgentRuntime` 单例 + `resolveSkillsDirs`(`~/.agents/skills`)+ `resolveSandbox`(`executor:'child_process'` / `maxCpuMs:600_000`)+ 启动时 `initCommands` |
 | `packages/zai/src/server/services/backgroundRuntime.ts` | `initBackgroundRuntime` 包 `DefaultBackgroundRuntime` 注入 `onTaskStateChange` → emit `job.*` + 串 `SubagentNotifier.handle(task)`;`initSubagentNotifierLifecycle` 必须先注册 |
-| `packages/zai/src/server/services/subagentNotifier.ts` | 后台 task terminal 时 fire-and-forget 注入 `<task-notification>` 触发父 queryEngine 续传 |
-| `packages/zai-agent-core/src/runtime/{queryEngine,streamAdapter,toolExecution,canUseTool}.ts` | 主循环 / `wrapWithZaiMeta` 加 meta / `executeToolsStreaming` 串行 tool_use:* / `defaultCanUseToolFactory`(Bash 走 sandbox,Agent 直接 allow)|
+| `packages/zai/src/server/services/subagentNotifier.ts` | 后台 task terminal 时 fire-and-forget 注入 `<task-notification>` 触发父 queryLoop 续传 |
+| `packages/zai-agent-core/src/runtime/{queryLoop,streamAdapter,toolExecution,canUseTool}.ts` | 主循环 / `wrapWithZaiMeta` 加 meta / `executeToolsStreaming` 串行 tool_use:* / `defaultCanUseToolFactory`(Bash 走 sandbox,Agent 直接 allow)|
 | `packages/zai-agent-core/src/runtime/background/{BackgroundRuntime,DefaultBackgroundRuntime,store/JsonTaskStore,types}.ts` | `dispatch/get/list/cancel/events/shutdown` interface + JsonTaskStore 持久化 + retry(529 连续上限 vs 5xx 总上限 maxRetries=10)|
 | `packages/zai-agent-core/src/{agents/agentsMdLoader,skills/index,mcp/MCPClientPool,plugins/{index,HookRunner}}.ts` | `loadAgentsMd` 注入 system prompt 顶部 / `loadSkillsFromDirs` + PendingSkillInjection / MCP 池 + SIGTERM 钩子 / `DefaultPluginRuntime` + 8 个 hook event |
 | `packages/zai-agent-core/src/tools/{BackgroundAgentResultTool,TaskOutputTool}/` | 阻塞读 / 非阻塞拉 task output |
@@ -86,7 +86,7 @@ web (useBackgroundTasks) ─POST /api/tasks→ DefaultBackgroundRuntime.dispatch
 | `tool_use:start` / `:done` | `runtime.tool_call` / `runtime.tool_result` |
 | `tool_use:ask_pending` | `prompt.ask` |
 | `tool_use:error` / `:invalid` / `:denied` | `runtime.error`(带 toolUseId)|
-| `message_stop` | `runtime.done`(`queryEngine` 主动 yield,不再 wrapWithZaiMeta)|
+| `message_stop` | `runtime.done`(`queryLoop` 主动 yield,不再 wrapWithZaiMeta)|
 
 ## 前端 store 关键设计
 
@@ -121,14 +121,14 @@ tool_use(AskUserQuestion) → toolExecution yield tool_use:ask_pending
 - **retry**:`runOne` 区分 529 连续上限(`max529Retries`)vs 5xx 总上限(`maxRetries=10` = 11 次总尝试);`getRetryDelay(consecutive529 || attempt)` 退避
 - **防递归**:派 sub-agent 时强制 `disallowedTools:['Agent']`,后台 sub-agent 不能继续派 sub-agent
 - **parentSessionId 透传**:`dispatch metadata.parentSessionId` → `task.parentSessionId` → `agentRuntime.run({parentSessionId})`。缺这一步时,AgentTool 兜底成 `'sess-unknown'` → 孙子 task 继承占位符 → subagentNotifier 静默丢通知
-- **sub-agent 续传**:`SubagentNotifier.handle(task)` 把 `<task-notification>` user 消息注入父 session 触发 queryEngine 重启一轮(走 Notifier 而不是直接 emit,因为父 session 不在跑时也要能排队)
+- **sub-agent 续传**:`SubagentNotifier.handle(task)` 把 `<task-notification>` user 消息注入父 session 触发 queryLoop 重启一轮(走 Notifier 而不是直接 emit,因为父 session 不在跑时也要能排队)
 - **session 切分**:`job.*` 事件 `sessionId` 来自 `task.parentSessionId`,前端 `useBackgroundTasks` 按 `useAgentStore.sessionId` 过滤 → 切到其它 session 后旧 job 不再显示
 - **对应工具**:`BackgroundAgentResultTool`(阻塞轮询 terminal)/ `TaskOutputTool`(非阻塞拉 output) — AgentTool 派发 `run_in_background:true` 时由 LLM 在描述里看到
 
 ## 关键 race condition
 
-- `message_stop` race:minimax proxy 走完 `message_stop` 后 keep-alive 不关 socket → queryEngine 必须主动 break,否则 `appendAssistantMessage` 永远走不到 — `queryEngine.ts:243-251`(`sawMessageStop` 标志)
-- v2 transcript resume:`store.read` 必须把 `type:'tool_use'` 顶层消息的 content 合并到上一条 assistant,否则下一轮 `tool_result` block 找不到对应 `tool_use_id` 报 Anthropic 2013 — `queryEngine.ts:140-185`
+- `message_stop` race:minimax proxy 走完 `message_stop` 后 keep-alive 不关 socket → queryLoop 必须主动 break,否则 `appendAssistantMessage` 永远走不到 — `queryLoop.ts:243-251`(`sawMessageStop` 标志)
+- v2 transcript resume:`store.read` 必须把 `type:'tool_use'` 顶层消息的 content 合并到上一条 assistant,否则下一轮 `tool_result` block 找不到对应 `tool_use_id` 报 Anthropic 2013 — `queryLoop.ts:140-185`
 - BackgroundRuntime 重启:`store.load(id)` 拿不到 in-memory `TaskRecord` → `events()` 退化成"只回放历史"模式(`events/<id>.log`),客户端用 Last-Event-ID 续读
 
 ## 已知薄弱点
@@ -136,7 +136,7 @@ tool_use(AskUserQuestion) → toolExecution yield tool_use:ask_pending
 - `/agent/prompt` HARD_TIMEOUT 5min 没有自动化测试(常量 `agent.ts:34`)
 - `BackgroundRuntime` retry 策略(529 vs 5xx)缺单元测试;`SubagentNotifier` 父 session 续传链路缺测试(关键路径任何一环断就静默丢通知)
 - `translateRuntimeEvents` 没有针对错位/损坏 input 的回归测试
-- v2 transcript resume `tool_use` 顶层消息合并(`queryEngine.ts:140-185`)缺回归测试,易在改 schema 时回归 2013
+- v2 transcript resume `tool_use` 顶层消息合并(`queryLoop.ts:140-185`)缺回归测试,易在改 schema 时回归 2013
 - abort / SSE 重连 / 模式切换乐观更新 revert / `AgentInputBox` 图片粘贴 + Esc 中断 路径无单元测试
 
 ## 启动所需环境

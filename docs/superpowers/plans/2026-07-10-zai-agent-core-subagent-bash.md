@@ -4,7 +4,7 @@
 
 **Goal:** 在 `zai-agent-core` 落地 zai 自写的最小 query loop + BashTool + AgentTool（含 sub-agent 同进程递归），让 zai-server 可以把 LLM 真正接进运行时。
 
-**Architecture:** zai-agent-core 不内置 LLM / 沙箱。所有 provider / 沙箱行为由 `RuntimeConfig.modelCaller` / `RuntimeConfig.sandbox` 注入。zai 写一个 600-1000 行的最小 query loop（messages 状态机 + canUseTool + streaming tool execution + abort 透传）。Sub-agent 走同进程递归 `queryEngine()`，独立 sessionId，事件全量转发给父。
+**Architecture:** zai-agent-core 不内置 LLM / 沙箱。所有 provider / 沙箱行为由 `RuntimeConfig.modelCaller` / `RuntimeConfig.sandbox` 注入。zai 写一个 600-1000 行的最小 query loop（messages 状态机 + canUseTool + streaming tool execution + abort 透传）。Sub-agent 走同进程递归 `queryLoop()`，独立 sessionId，事件全量转发给父。
 
 **Tech Stack:** TypeScript 5.6 + Node 20 + tsx 4.19 + vitest 2.1 + zod 3.23 + proper-lockfile 4.1. 零新依赖。
 
@@ -46,7 +46,7 @@
 - `src/tools/AgentTool/prompt.ts` — tool description
 - `src/tools/AgentTool/schema.ts` — AgentInputSchema
 - `src/runtime/canUseTool.ts` — defaultCanUseToolFactory
-- `src/runtime/queryEngine.ts` — zai 最小 query loop + helpers
+- `src/runtime/queryLoop.ts` — zai 最小 query loop + helpers
 - `src/runtime/toolExecution.ts` — executeToolsStreaming
 - `src/runtime/subagent.ts` — buildSubagentContext
 - `test/fixtures/MockModelCaller.ts` — 测试用 mock modelCaller
@@ -56,13 +56,13 @@
 - `test/tools/loadAgentsDir.test.ts`
 - `test/runtime/canUseTool.test.ts`
 - `test/runtime/toolExecution.test.ts`
-- `test/runtime/queryEngine.test.ts`
+- `test/runtime/queryLoop.test.ts`
 - `test/integration/subagent.test.ts`
 
 **修改文件：**
 - `src/runtime/types.ts` — 加 `SandboxConfig` / `ModelCaller` / `RuntimeConfig` 新字段 / `QueryOptions` 新字段
 - `src/runtime/streamAdapter.ts` — 加 subagent.* 事件分类辅助
-- `src/runtime/query.ts` — 把 mock 占位换成委托给 `queryEngine()`
+- `src/runtime/query.ts` — 把 mock 占位换成委托给 `queryLoop()`
 - `src/transcript/types.ts` — `TranscriptMeta` 加 `parentSessionId` / `subagentType`
 - `src/transcript/store.ts` — `create()` 接受可选 `parentSessionId` / `subagentType`
 - `src/opencc-internals/README.md` — 加注 "sub-agent + Bash 不在镜像范围"
@@ -335,7 +335,7 @@ export type ToolContext = {
   emitEvent: (event: { type: string; [key: string]: unknown }) => void
   state: { [key: string]: unknown }
 
-  /** 注入, 供 sub-agent tool 调子 queryEngine 用 (escape hatch) */
+  /** 注入, 供 sub-agent tool 调子 queryLoop 用 (escape hatch) */
   __runtimeConfig?: RuntimeConfig
   __defaultModel?: string
   __maxTurns?: number
@@ -1134,7 +1134,7 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(zai-agent-core): subagent.buildSubagen
 ## Task 8: AgentTool 主体（call sub-agent）
 
 **Files:**
-- Create: `packages/zai-agent-core/src/runtime/queryEngine.ts` (STUB, Task 10 rewrites it)
+- Create: `packages/zai-agent-core/src/runtime/queryLoop.ts` (STUB, Task 10 rewrites it)
 - Create: `packages/zai-agent-core/src/tools/AgentTool/prompt.ts`
 - Create: `packages/zai-agent-core/src/tools/AgentTool/AgentTool.ts`
 - Create: `packages/zai-agent-core/test/tools/AgentTool.test.ts`
@@ -1142,36 +1142,36 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(zai-agent-core): subagent.buildSubagen
 - Create: `packages/zai-agent-core/test/fixtures/MockSandbox.ts`
 
 **Interfaces:**
-- Consumes: `AgentInputSchema` (Task 6), `loadAgentDefinitions` (Task 6), `queryEngine` (Task 10 — **forward reference**)
+- Consumes: `AgentInputSchema` (Task 6), `loadAgentDefinitions` (Task 6), `queryLoop` (Task 10 — **forward reference**)
 
 > **循环依赖处理 (revised after pre-flight implementer feedback):**
 >
-> At Task 8 time, `queryEngine.ts` does not exist yet (it's Task 10's deliverable). But `AgentTool.call` needs to invoke a query for the sub-agent. Solution:
+> At Task 8 time, `queryLoop.ts` does not exist yet (it's Task 10's deliverable). But `AgentTool.call` needs to invoke a query for the sub-agent. Solution:
 >
-> 1. **Task 8 creates a STUB `queryEngine.ts`** that re-exports the existing `query` from `query.ts`:
+> 1. **Task 8 creates a STUB `queryLoop.ts`** that re-exports the existing `query` from `query.ts`:
 >    ```ts
->    export { query as queryEngine } from './query.js'
+>    export { query as queryLoop } from './query.js'
 >    ```
 >    The existing `query.ts` (the mock from earlier work) already accepts `modelCaller` via `RuntimeConfig` and yields `runtime.done` after a `text-only` model call — sufficient for Task 8's tests to pass.
 >
 > 2. **`AgentTool.call` uses dynamic import** to break the cycle:
 >    ```ts
->    const { queryEngine } = await import('../../runtime/queryEngine.js')
+>    const { queryLoop } = await import('../../runtime/queryLoop.js')
 >    ```
 >
-> 3. **Task 10 will replace the body of `queryEngine.ts`** with the real engine (still re-exporting it as the same named export `queryEngine`). The cycle remains broken at module load time because Task 10's queryEngine also uses dynamic import to load `getZaiRuntimeTools`.
+> 3. **Task 10 will replace the body of `queryLoop.ts`** with the real engine (still re-exporting it as the same named export `queryLoop`). The cycle remains broken at module load time because Task 10's queryLoop also uses dynamic import to load `getZaiRuntimeTools`.
 >
 > DO NOT modify `query.ts` in Task 8. The existing mock is sufficient.
 
-- [ ] **Step 0: 创建 `src/runtime/queryEngine.ts` (STUB)**
+- [ ] **Step 0: 创建 `src/runtime/queryLoop.ts` (STUB)**
 
 ```ts
 /**
- * queryEngine — temporary stub re-exporting the existing mock query().
+ * queryLoop — temporary stub re-exporting the existing mock query().
  * Task 10 will replace the body with the real minimal query loop.
- * The named export `queryEngine` is what AgentTool.call dynamic-imports.
+ * The named export `queryLoop` is what AgentTool.call dynamic-imports.
  */
-export { query as queryEngine } from './query.js'
+export { query as queryLoop } from './query.js'
 ```
 
 - [ ] **Step 1: 创建 `test/fixtures/MockModelCaller.ts`**
@@ -1424,9 +1424,9 @@ export const AgentTool: Tool<typeof AgentInputSchema, string> = {
       description: input.description ?? input.prompt.slice(0, 60),
     })
 
-    // Dynamic import breaks the queryEngine ↔ AgentTool cycle
-    const { queryEngine } = await import('../../runtime/queryEngine.js')
-    const subStream = queryEngine(subOpts, ctx.__runtimeConfig)
+    // Dynamic import breaks the queryLoop ↔ AgentTool cycle
+    const { queryLoop } = await import('../../runtime/queryLoop.js')
+    const subStream = queryLoop(subOpts, ctx.__runtimeConfig)
     let finalOutput = ''
     let exitReason: 'completed' | 'aborted' | 'max_turns' | 'error' = 'completed'
     try {
@@ -1463,7 +1463,7 @@ Expected: 5 tests PASS
 
 ```bash
 git add src/tools/AgentTool/AgentTool.ts src/tools/AgentTool/prompt.ts test/tools/AgentTool.test.ts test/fixtures/
-git commit -m "HRMSV3-ZN-WEBSITE#668 feat(zai-agent-core): AgentTool — recurse queryEngine + forward subagent events"
+git commit -m "HRMSV3-ZN-WEBSITE#668 feat(zai-agent-core): AgentTool — recurse queryLoop + forward subagent events"
 ```
 
 ---
@@ -1681,27 +1681,27 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(zai-agent-core): executeToolsStreaming
 
 ---
 
-## Task 10: queryEngine + helpers（替换 mock）
+## Task 10: queryLoop + helpers（替换 mock）
 
 **Files:**
-- Modify: `packages/zai-agent-core/src/runtime/queryEngine.ts`（Task 8 创建了 stub, Task 10 替换为真实实现. 保留 named export `queryEngine`）
-- Modify: `packages/zai-agent-core/src/runtime/query.ts`（委托给 queryEngine, 移除旧的 mock generateMockEvents）
-- Create: `packages/zai-agent-core/test/runtime/queryEngine.test.ts`
+- Modify: `packages/zai-agent-core/src/runtime/queryLoop.ts`（Task 8 创建了 stub, Task 10 替换为真实实现. 保留 named export `queryLoop`）
+- Modify: `packages/zai-agent-core/src/runtime/query.ts`（委托给 queryLoop, 移除旧的 mock generateMockEvents）
+- Create: `packages/zai-agent-core/test/runtime/queryLoop.test.ts`
 - Modify: `packages/zai-agent-core/test/runtime/query.test.ts`（用 MockModelCaller）
 - Modify: `packages/zai-agent-core/test/runtime/contract.test.ts`（用 MockModelCaller）
 
 **Interfaces:**
 - Consumes: `executeToolsStreaming` (Task 9), `buildSubagentContext` (Task 7), `defaultCanUseToolFactory` (Task 3), `getZaiRuntimeTools` (Task 11 — **forward reference**), `loadAgentsMd` (existing), `TranscriptStore` (Task 1)
-- Produces: `queryEngine(options, config): AsyncGenerator<RuntimeEvent>`
+- Produces: `queryLoop(options, config): AsyncGenerator<RuntimeEvent>`
 
-- [ ] **Step 1: 创建 `test/runtime/queryEngine.test.ts`**
+- [ ] **Step 1: 创建 `test/runtime/queryLoop.test.ts`**
 
 ```ts
 import { describe, expect, test, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { queryEngine } from '../../src/runtime/queryEngine.js'
+import { queryLoop } from '../../src/runtime/queryLoop.js'
 import { makeMockModelCaller } from '../fixtures/MockModelCaller.js'
 import { makeMockSandbox } from '../fixtures/MockSandbox.js'
 
@@ -1715,9 +1715,9 @@ let tmpDir: string
 beforeEach(async () => { tmpDir = await mkdtemp(join(tmpdir(), 'zai-qe-')) })
 afterEach(async () => { await rm(tmpDir, { recursive: true, force: true }) })
 
-describe('queryEngine', () => {
+describe('queryLoop', () => {
   test('无 modelCaller → runtime.error(no modelCaller configured)', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'hi', cwd: '/tmp' },
       { dataDir: tmpDir },
     ))
@@ -1726,7 +1726,7 @@ describe('queryEngine', () => {
   })
 
   test('text-only happy path → ends with runtime.done', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'hi', cwd: '/tmp' },
       { dataDir: tmpDir, modelCaller: makeMockModelCaller('text-only') },
     ))
@@ -1736,7 +1736,7 @@ describe('queryEngine', () => {
   })
 
   test('tool call: Bash 跑 echo, 输出回流 → 第二轮 done', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'list', cwd: '/tmp' },
       {
         dataDir: tmpDir,
@@ -1750,7 +1750,7 @@ describe('queryEngine', () => {
   })
 
   test('maxTurns=5 + infinite-loop → runtime.error(code: max_turns_reached)', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'loop', cwd: '/tmp', maxTurns: 5 },
       {
         dataDir: tmpDir,
@@ -1766,7 +1766,7 @@ describe('queryEngine', () => {
   test('abort signal → runtime.aborted 事件', async () => {
     const controller = new AbortController()
     const events: any[] = []
-    const iter = queryEngine(
+    const iter = queryLoop(
       { prompt: 'x', cwd: '/tmp', abortSignal: controller.signal },
       { dataDir: tmpDir, modelCaller: makeMockModelCaller('infinite-loop'), sandbox: makeMockSandbox('/tmp') },
     )
@@ -1779,7 +1779,7 @@ describe('queryEngine', () => {
   })
 
   test('AGENTS.md 不存在时不报错, 默认空 systemPrompt', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'x', cwd: '/tmp' },
       { dataDir: tmpDir, modelCaller: makeMockModelCaller('text-only') },
     ))
@@ -1787,7 +1787,7 @@ describe('queryEngine', () => {
   })
 
   test('sessionId 在 events 上有', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'x', cwd: '/tmp' },
       { dataDir: tmpDir, modelCaller: makeMockModelCaller('text-only') },
     ))
@@ -1798,10 +1798,10 @@ describe('queryEngine', () => {
 
 - [ ] **Step 2: 跑测试确认 fail**
 
-Run: `cd packages/zai-agent-core && pnpm test test/runtime/queryEngine.test.ts`
+Run: `cd packages/zai-agent-core && pnpm test test/runtime/queryLoop.test.ts`
 Expected: FAIL
 
-- [ ] **Step 3: 创建 `src/runtime/queryEngine.ts`**
+- [ ] **Step 3: 创建 `src/runtime/queryLoop.ts`**
 
 ```ts
 import { randomUUID } from 'node:crypto'
@@ -1817,7 +1817,7 @@ import { defaultCanUseToolFactory } from './canUseTool.js'
 
 const DEFAULT_MAX_TURNS = 50
 
-export async function* queryEngine(
+export async function* queryLoop(
   options: QueryOptions,
   config: RuntimeConfig,
 ): AsyncGenerator<RuntimeEvent> {
@@ -1834,7 +1834,7 @@ export async function* queryEngine(
     ? buildSubagentContext(options, config, sessionId)
     : null
 
-  // Dynamic import breaks queryEngine ↔ getZaiRuntimeTools cycle (Task 11)
+  // Dynamic import breaks queryLoop ↔ getZaiRuntimeTools cycle (Task 11)
   const { getZaiRuntimeTools } = await import('../tools/index.js')
   const tools = resolveToolPool(options, config, getZaiRuntimeTools())
 
@@ -1995,19 +1995,19 @@ function mergeInputDelta(block: { input: unknown }, partialJson: string): void {
 }
 ```
 
-- [ ] **Step 4: 修改 `src/runtime/query.ts`（委托给 queryEngine）**
+- [ ] **Step 4: 修改 `src/runtime/query.ts`（委托给 queryLoop）**
 
 完整替换：
 
 ```ts
-import { queryEngine } from './queryEngine.js'
+import { queryLoop } from './queryLoop.js'
 
-export { queryEngine as query }
+export { queryLoop as query }
 ```
 
-- [ ] **Step 5: 跑 queryEngine 测试确认 pass**
+- [ ] **Step 5: 跑 queryLoop 测试确认 pass**
 
-Run: `cd packages/zai-agent-core && pnpm test test/runtime/queryEngine.test.ts`
+Run: `cd packages/zai-agent-core && pnpm test test/runtime/queryLoop.test.ts`
 Expected: 7 tests PASS
 
 - [ ] **Step 6: 修改 `test/runtime/query.test.ts`（用 MockModelCaller）**
@@ -2141,8 +2141,8 @@ Expected: 全部 PASS（包括之前的 query/contract/serialization/store/agent
 - [ ] **Step 9: Commit**
 
 ```bash
-git add src/runtime/queryEngine.ts src/runtime/query.ts test/runtime/
-git commit -m "HRMSV3-ZN-WEBSITE#668 feat(zai-agent-core): queryEngine — 替换 mock 占位为最小 query loop"
+git add src/runtime/queryLoop.ts src/runtime/query.ts test/runtime/
+git commit -m "HRMSV3-ZN-WEBSITE#668 feat(zai-agent-core): queryLoop — 替换 mock 占位为最小 query loop"
 ```
 
 ---
@@ -2260,7 +2260,7 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(zai-agent-core): getZaiRuntimeTools() 
 
 **Files:**
 - Modify: `packages/zai-agent-core/src/opencc-internals/README.md`（加注 "sub-agent + Bash 不在镜像范围"）
-- Modify: `packages/zai-agent-core/src/runtime/streamAdapter.ts`（加 subagent 事件分类辅助 — 为后续 queryEngine 用到, 见 spec §7.6）
+- Modify: `packages/zai-agent-core/src/runtime/streamAdapter.ts`（加 subagent 事件分类辅助 — 为后续 queryLoop 用到, 见 spec §7.6）
 - Create: `packages/zai-agent-core/test/runtime/streamAdapter.test.ts`（若已有则更新）
 
 - [ ] **Step 1: 追加段到 `src/opencc-internals/README.md`**
@@ -2333,7 +2333,7 @@ import { describe, expect, test, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { queryEngine } from '../../src/runtime/queryEngine.js'
+import { queryLoop } from '../../src/runtime/queryLoop.js'
 import { makeMockModelCaller } from '../fixtures/MockModelCaller.js'
 import { makeMockSandbox } from '../fixtures/MockSandbox.js'
 
@@ -2349,7 +2349,7 @@ async function collect(g: AsyncGenerator<any>) {
 
 describe('integration: sub-agent', () => {
   test('AgentTool 派生子 agent, 父 SSE 看到 subagent:start/event/done', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: '派个 sub-agent', cwd: '/tmp' },
       { dataDir, modelCaller: makeMockModelCaller('subagent'), sandbox: makeMockSandbox('/tmp') },
     ))
@@ -2359,7 +2359,7 @@ describe('integration: sub-agent', () => {
   })
 
   test('sub-agent sessionId 形如 <parent>-sub-<8hex>', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: '派个 sub-agent', cwd: '/tmp' },
       { dataDir, modelCaller: makeMockModelCaller('subagent'), sandbox: makeMockSandbox('/tmp') },
     ))
@@ -2392,7 +2392,7 @@ describe('integration: sub-agent', () => {
       yield { type: 'content_block_stop', index: 0 }
       yield { type: 'message_stop' }
     }
-    await collect(queryEngine(
+    await collect(queryLoop(
       { prompt: '派个', cwd: '/tmp' },
       { dataDir, modelCaller: doubleCaller, sandbox: makeMockSandbox('/tmp') },
     ))
@@ -2400,7 +2400,7 @@ describe('integration: sub-agent', () => {
   })
 
   test('Bash command 在 sandbox denylist → permission_denied, 不 spawn 进程', async () => {
-    const events = await collect(queryEngine(
+    const events = await collect(queryLoop(
       { prompt: 'rm 一下', cwd: '/tmp' },
       {
         dataDir,
@@ -2416,7 +2416,7 @@ describe('integration: sub-agent', () => {
     const controller = new AbortController()
     const events: any[] = []
     setTimeout(() => controller.abort(), 20)
-    for await (const e of queryEngine(
+    for await (const e of queryLoop(
       { prompt: 'x', cwd: '/tmp', abortSignal: controller.signal },
       { dataDir, modelCaller: makeMockModelCaller('infinite-loop'), sandbox: makeMockSandbox('/tmp') },
     )) {

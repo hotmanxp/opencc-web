@@ -6,7 +6,7 @@
 
 `@zn-ai/zai-agent-core` 当前 `RuntimeConfig.enabledSkills?: string[]` 字段已声明但**完全没读**；`src/opencc-internals/skills/` 下的 CV 自 OpenCC 的 skill 源码（`loadSkillsDir.ts` / `bundledSkills.ts` / `mcpSkillBuilders.ts` / `mcpSkills.ts`）未被 runtime 调用；`runtime/index.ts` 没有导出任何 skill 相关 API；`src/tools/` 下没有 `SkillTool`。
 
-`queryEngine.buildSystemPrompt()` 只拼接 `systemPrompt + AGENTS.md`，没有 skill 段；`resolveToolPool()` 没把 skill 派生出的工具纳入工具池。
+`queryLoop.buildSystemPrompt()` 只拼接 `systemPrompt + AGENTS.md`，没有 skill 段；`resolveToolPool()` 没把 skill 派生出的工具纳入工具池。
 
 要让 zai 的 main agent 能像 OpenCC 一样看到「可用 skill 列表」并通过 `Skill` 工具触发 skill prompt 注入，必须在 `runtime/skills/` 下新增独立 loader，并在 `tools/SkillTool/` 下新增 Skill 工具。本 spec 决定如何接入。
 
@@ -19,7 +19,7 @@
 │   ┌────────────────────────────────────────────────────┐    │
 │   │  src/runtime/  (facade + 最小 query loop)            │    │
 │   │  query() / abortSession() / DefaultAgentRuntime     │    │
-│   │  queryEngine.ts (zai 自写 loop, 本 spec 改动)         │    │
+│   │  queryLoop.ts (zai 自写 loop, 本 spec 改动)         │    │
 │   │  toolExecution.ts / subagent.ts / canUseTool.ts     │    │
 │   │                                                    │    │
 │   │  + src/runtime/skills/    (本 spec 新建)             │    │
@@ -232,7 +232,7 @@ When a skill matches the user's intent, invoke it via the Skill tool with the sk
 
 - 空数组 → 返回 `null`（与 `buildAgentsMdSystemPrompt` 一致）
 - 只暴露 frontmatter `name` / `description` / `when_to_use` 三个字段，**不暴露 markdown body**（节省 token）
-- 在 `queryEngine.buildSystemPrompt()` 中拼到 AGENTS.md 段之后
+- 在 `queryLoop.buildSystemPrompt()` 中拼到 AGENTS.md 段之后
 
 ## 4. SkillTool 设计
 
@@ -306,7 +306,7 @@ export const SkillTool: Tool<typeof SkillInputSchema, string> = {
       body = substituteArguments(body, args, true, argNames)
     }
 
-    // 2. 标记注入: queryEngine 在 tool 结果写入 messages 之后追加一次 user 消息
+    // 2. 标记注入: queryLoop 在 tool 结果写入 messages 之后追加一次 user 消息
     ctx.state.__pendingSkillInjection = {
       skillName: skill.name,
       content: body,
@@ -349,12 +349,12 @@ The skill's full markdown body becomes available to you after invocation. Invoke
 - **`isReadOnly` 返回 false**：保守策略；实际副作用取决于 skill body，zai 当前没有静态分析能力
 - **tool pool 注册条件**：`skills.length > 0 && config.enableSkillTool !== false`
 
-## 5. queryEngine 接入
+## 5. queryLoop 接入
 
 ### 5.1 改动点 1: tool pool
 
 ```ts
-// queryEngine.ts (resolveToolPool)
+// queryLoop.ts (resolveToolPool)
 const { getZaiRuntimeTools } = await import('../tools/index.js')
 const { SkillTool } = await import('../tools/SkillTool/SkillTool.js')
 
@@ -377,7 +377,7 @@ function resolveToolPool(
 ### 5.2 改动点 2: skill 加载 + 注入到 ToolContext
 
 ```ts
-// queryEngine.ts (主循环前)
+// queryLoop.ts (主循环前)
 const skillsDirs = options.skillsDirs ?? config.skillsDirs ?? []
 const skills = skillsDirs.length > 0 ? await loadSkillsFromDirs(skillsDirs, { cwd: options.cwd }) : []
 const tools = resolveToolPool(options, config, getZaiRuntimeTools(), skills)
@@ -438,7 +438,7 @@ async function buildSystemPrompt(options: QueryOptions, skills: LoadedSkill[]): 
 ### 5.4 改动点 4: skill 注入到 messages
 
 ```ts
-// queryEngine.ts (tool result 写入 messages 之后, 下一轮 model 调用之前)
+// queryLoop.ts (tool result 写入 messages 之后, 下一轮 model 调用之前)
 messages.push({ role: 'user', content: toolUseBlocks.map((t, i) => ({
   type: 'tool_result',
   tool_use_id: t.id,
@@ -490,12 +490,12 @@ export type RuntimeConfig = {
 | `test/skills/loader.test.ts` | 空目录、不存在目录、单层 SKILL.md、嵌套 SKILL.md、命名冲突、realpath 去重、单文件解析失败跳过 |
 | `test/skills/promptBuilder.test.ts` | 空数组 → null；单/多 skill 格式；不暴露 markdown body |
 
-### 6.2 集成测试（`test/runtime/queryEngine.test.ts` 新增）
+### 6.2 集成测试（`test/runtime/queryLoop.test.ts` 新增）
 
 ```ts
 test('skillsDirs 非空 → SkillTool 出现在 tool pool', async () => {
   // 准备 tmpDir/skills/pdf/SKILL.md
-  // queryEngine 调用, mock modelCaller 返回 Skill(name='pdf') tool_use
+  // queryLoop 调用, mock modelCaller 返回 Skill(name='pdf') tool_use
   // 验证 messages 含 skill body
 })
 
@@ -539,7 +539,7 @@ test('frontmatter 解析失败的 SKILL.md → loader 跳过该文件, 不阻断
 | 风险 | 缓解 |
 |------|------|
 | **frontmatter 解析器与 OpenCC 行为不一致** | 测试覆盖与 opencc-internals/skills/loadSkillsDir.ts 中 `parseSkillFrontmatterFields` 行为对齐；不实现的功能明确标注（注释/嵌套/多行字符串） |
-| **skill body 注入消耗 token** | transcript 与 messages 都含 body，模型上下文 = transcript messages（与现有 queryEngine 一致）；不在 system prompt 暴露 body（节省 token） |
+| **skill body 注入消耗 token** | transcript 与 messages 都含 body，模型上下文 = transcript messages（与现有 queryLoop 一致）；不在 system prompt 暴露 body（节省 token） |
 | **skill 无限递归**（skill body 调用 SkillTool）| 与 OpenCC 一致，无显式深度限制；zai-server 端可加 `maxSubagentDepth` 软限制（不在本 spec） |
 | **`enabledSkills` 旧字段误用** | type 层保留为 deprecated，README 注明；zai-server 启动时检测并 warn |
 | **YAML 解析器对 hooks/shell 字段语义不完整** | 这两个字段本版只存 metadata 不执行，解析失败仅 warn；README 注明不支持 `\|` / `>` / 嵌套 map |
@@ -551,7 +551,7 @@ test('frontmatter 解析失败的 SKILL.md → loader 跳过该文件, 不阻断
 - [ ] `pnpm typecheck` 通过
 - [ ] `pnpm build` 通过，dist 产物含 `runtime/skills/*` 和 `tools/SkillTool/*`
 - [ ] `RuntimeConfig.skillsDirs` 配置生效，SkillTool 出现在 tool pool
-- [ ] 不配 `skillsDirs` 时，SkillTool 不注册，system prompt 无 `<skills>` 段（与现有 queryEngine 行为兼容）
+- [ ] 不配 `skillsDirs` 时，SkillTool 不注册，system prompt 无 `<skills>` 段（与现有 queryLoop 行为兼容）
 - [ ] SkillTool 调用后，transcript 落盘含完整 skill body
 - [ ] frontmatter 解析失败的 SKILL.md 不阻断其他 skill 加载
 - [ ] `src/opencc-internals/` 镜像文件 0 修改（git diff 干净）

@@ -174,7 +174,7 @@ Web 管理平台内置的 Agent 交互界面,直接消费 `@zn-ai/zai-agent-core
                   DefaultAgentRuntime.run({ ... })
                                 │
                                 ▼
-                  queryEngine 主循环 (maxTurns=50)
+                  queryLoop 主循环 (maxTurns=50)
                   ┌──────────────────────────┐
                   │ modelStream              │
                   │ executeToolsStreaming    │
@@ -217,7 +217,7 @@ Web 管理平台内置的 Agent 交互界面,直接消费 `@zn-ai/zai-agent-core
 | `packages/zai/src/web/src/components/AgentInputBox.tsx` | 输入框 + slash + 粘贴/拖拽 |
 | `packages/zai/src/web/src/components/QuestionCard.tsx` | AskUserQuestion 渲染 |
 | `packages/zai/src/web/src/components/toolRenderers/` | 工具级 renderer 注册表 |
-| `packages/zai-agent-core/src/runtime/queryEngine.ts` | runtime 主循环 |
+| `packages/zai-agent-core/src/runtime/queryLoop.ts` | runtime 主循环 |
 | `packages/zai-agent-core/src/runtime/toolExecution.ts` | 工具执行 + AskUserQuestion 桥接 |
 
 **已知限制**:

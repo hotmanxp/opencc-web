@@ -4,7 +4,7 @@
 
 **Goal:** 在 zai Web 的 Agent 页面支持粘贴/拖拽/点击上传图片，base64 ContentBlock 透传到 MiniMax，transcript 持久化还原，刷新页面可恢复。
 
-**Architecture:** Agent.tsx 局部 `useState` 持有 `attachments`，`readImageAsBase64` 转 dataURL，`handleSend` 拼 `ContentBlock[]` POST 到 `/agent/prompt`。Server 拼 `promptArg: string | UserMessage[]` 走 zai-agent-core `queryEngine` array 路径。Transcript `raw.content` 序列化数组，`loadTranscript` 还原缩略图条。
+**Architecture:** Agent.tsx 局部 `useState` 持有 `attachments`，`readImageAsBase64` 转 dataURL，`handleSend` 拼 `ContentBlock[]` POST 到 `/agent/prompt`。Server 拼 `promptArg: string | UserMessage[]` 走 zai-agent-core `queryLoop` array 路径。Transcript `raw.content` 序列化数组，`loadTranscript` 还原缩略图条。
 
 **Tech Stack:** Bun + pnpm + vitest, React 18, zustand, AntD 5, Express 5, zod, EventSource-based SSE.
 
@@ -28,7 +28,7 @@
 - `packages/zai/src/web/src/lib/imageReader.ts` (cherry-pick `645f242`)
 - `packages/zai/src/web/src/lib/imageReader.test.ts`
 - `packages/zai-agent-core/src/opencc-internals/utils/messages.ts:497` `imagePasteIds: string[]` (cherry-pick `37dc4b6`)
-- `packages/zai-agent-core/src/runtime/queryEngine.ts:99` array content 通过 (cherry-pick `5d272d4`)
+- `packages/zai-agent-core/src/runtime/queryLoop.ts:99` array content 通过 (cherry-pick `5d272d4`)
 
 ### 新建
 - `packages/zai/src/web/src/components/AttachmentStrip.tsx` (从 `feat/image-paste` worktree commit `891312d` 取文件内容)
@@ -198,9 +198,9 @@ Expected: 新 2 个用例 FAIL (server 尚未接 contentBlocks)
 在 fire-and-forget `void (async () => {` 块内, 把 `runtime.run({ prompt, ... })` 改成接 `promptArg`. 在该块开头 `const text = parsed.data.prompt?.trim() ?? ''` 之后, `const blocks = parsed.data.contentBlocks` 之后:
 
 ```ts
-    // ★ image-paste v2: contentBlocks 拼成 user message array; 走 queryEngine array 路径
-    // (zai-agent-core queryEngine.ts:114-118 把每个元素 append 到 messages[]).
-    // 当 contentBlocks 为空时, promptArg 退化为 string, 走 queryEngine 的 string 路径.
+    // ★ image-paste v2: contentBlocks 拼成 user message array; 走 queryLoop array 路径
+    // (zai-agent-core queryLoop.ts:114-118 把每个元素 append 到 messages[]).
+    // 当 contentBlocks 为空时, promptArg 退化为 string, 走 queryLoop 的 string 路径.
     const userContent =
       blocks && blocks.length
         ? [

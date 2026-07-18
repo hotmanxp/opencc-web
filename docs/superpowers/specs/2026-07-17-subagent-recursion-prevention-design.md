@@ -2,7 +2,7 @@
 
 **Status:** Draft
 **Date:** 2026-07-17
-**Scope:** `packages/zai-agent-core/src/runtime/{types.ts,queryEngine.ts}`, `packages/zai-agent-core/src/tools/AgentTool/AgentTool.ts`, `packages/zai-agent-core/src/runtime/background/DefaultBackgroundRuntime.ts`
+**Scope:** `packages/zai-agent-core/src/runtime/{types.ts,queryLoop.ts}`, `packages/zai-agent-core/src/tools/AgentTool/AgentTool.ts`, `packages/zai-agent-core/src/runtime/background/DefaultBackgroundRuntime.ts`
 
 ## Problem
 
@@ -22,7 +22,7 @@ A sub-agent **cannot** dispatch further sub-agents — neither synchronously via
 |--------|-------------------------------|
 | `AgentTool.call(...)` (sync) | parent tools minus `['Agent', 'BackgroundAgent']` |
 | `BackgroundAgentTool.call(...)` (via `runtime.dispatch` → `DefaultBackgroundRuntime.runOne`) | same — `disallowedTools: ['Agent', 'BackgroundAgent']` injected in `runOne`'s `QueryOptions` |
-| Top-level `queryEngine(opts)` | unchanged (no `disallowedTools` set) — the parent session retains full tool list |
+| Top-level `queryLoop(opts)` | unchanged (no `disallowedTools` set) — the parent session retains full tool list |
 
 The `disallowedTools` filter applies **after** `toolsOverride` / `additionalTools` are merged, so a user-supplied `additionalTools: [AgentTool]` is still filtered out (defense-in-depth).
 
@@ -61,7 +61,7 @@ Add to `QueryOptions`:
 disallowedTools?: string[]
 ```
 
-### `runtime/queryEngine.ts`
+### `runtime/queryLoop.ts`
 
 Update `resolveToolPool` to apply the filter as the final step:
 ```ts
@@ -126,7 +126,7 @@ Document the new behavior on both tools' prompt strings:
 
 ### New file: `test/runtime/resolveToolPool-disallowed.test.ts`
 
-Pure unit tests on `resolveToolPool` (already reachable via `queryEngine`, but the function is module-private — test through a thin public seam: export `resolveToolPool` from queryEngine.ts with `@internal`, or test by calling `queryEngine` with mocked runtime).
+Pure unit tests on `resolveToolPool` (already reachable via `queryLoop`, but the function is module-private — test through a thin public seam: export `resolveToolPool` from queryLoop.ts with `@internal`, or test by calling `queryLoop` with mocked runtime).
 
 Cases:
 1. `disallowedTools: ['Foo']` removes the tool whose `name === 'Foo'`, leaves others alone.
@@ -137,7 +137,7 @@ Cases:
 
 ### New file: `test/tools/AgentTool/no-recursion.test.ts`
 
-Mock `queryEngine` (or its module seam) to capture the `QueryOptions` passed in. Verify `AgentTool.call({...}, ctx)` constructs a `subOpts` with `disallowedTools: ['Agent', 'BackgroundAgent']`.
+Mock `queryLoop` (or its module seam) to capture the `QueryOptions` passed in. Verify `AgentTool.call({...}, ctx)` constructs a `subOpts` with `disallowedTools: ['Agent', 'BackgroundAgent']`.
 
 Cases:
 1. Sync path (BackgroundRuntime not initialized): captured opts has `disallowedTools: ['Agent', 'BackgroundAgent']`.
@@ -162,7 +162,7 @@ Add one case: `AgentTool.call` from a top-level session does NOT filter its own 
 ## Files touched
 
 - `packages/zai-agent-core/src/runtime/types.ts` — add `disallowedTools?: string[]` to `QueryOptions`
-- `packages/zai-agent-core/src/runtime/queryEngine.ts` — filter step in `resolveToolPool`
+- `packages/zai-agent-core/src/runtime/queryLoop.ts` — filter step in `resolveToolPool`
 - `packages/zai-agent-core/src/tools/AgentTool/AgentTool.ts` — `subOpts.disallowedTools`
 - `packages/zai-agent-core/src/tools/AgentTool/prompt.ts` — recursion note
 - `packages/zai-agent-core/src/tools/BackgroundAgentTool/prompt.ts` — recursion note

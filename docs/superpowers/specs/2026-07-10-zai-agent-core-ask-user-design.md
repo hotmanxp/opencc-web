@@ -161,7 +161,7 @@ export const AskUserQuestionTool: Tool<typeof inputSchema, Output> = {
 }
 ```
 
-> **注意**: `awaitAskUserQuestion` 由 `queryEngine`/`toolExecution` 在构造 `ToolContext` 时注入, 实现是一个 Promise, 内部从 `AskRegistry` 拿到 resolver 后挂起。`AskUserAnswers` 类型定义在 `src/tools/Tool.ts`（见 §3.2），本文件 re-use 不重复定义。
+> **注意**: `awaitAskUserQuestion` 由 `queryLoop`/`toolExecution` 在构造 `ToolContext` 时注入, 实现是一个 Promise, 内部从 `AskRegistry` 拿到 resolver 后挂起。`AskUserAnswers` 类型定义在 `src/tools/Tool.ts`（见 §3.2），本文件 re-use 不重复定义。
 
 ### 3.2 `src/tools/Tool.ts` 扩展 `ToolContext`
 
@@ -197,7 +197,7 @@ export function getZaiRuntimeTools() {
 
 ### 3.4 `src/runtime/toolExecution.ts` 注入 `awaitAskUserQuestion`
 
-**做法**: 不改 `toolExecution` 的核心 yield 顺序。在 `executeToolsStreaming` 构造 `bridgedCtx` 时, 把 `awaitAskUserQuestion` 用闭包绑定到**当前 block** 的 `toolUseId`。tool.call 内 `await ctx.awaitAskUserQuestion(req)` 时, 闭包先通过**原始 ctx** 的 `emitEvent` 投递 `tool_use:ask_pending` 事件(queryEngine 把它作为主事件流 yield), 然后从 `askRegistry` 拿 resolver 挂起。server 收到事件后注入答案, resolver 触发, tool.call 继续返回。
+**做法**: 不改 `toolExecution` 的核心 yield 顺序。在 `executeToolsStreaming` 构造 `bridgedCtx` 时, 把 `awaitAskUserQuestion` 用闭包绑定到**当前 block** 的 `toolUseId`。tool.call 内 `await ctx.awaitAskUserQuestion(req)` 时, 闭包先通过**原始 ctx** 的 `emitEvent` 投递 `tool_use:ask_pending` 事件(queryLoop 把它作为主事件流 yield), 然后从 `askRegistry` 拿 resolver 挂起。server 收到事件后注入答案, resolver 触发, tool.call 继续返回。
 
 ```ts
 // toolExecution.ts 内, 构造 bridgedCtx 处:
@@ -225,7 +225,7 @@ const bridgedCtx: ToolContext = {
 
 `toolExecution.ts` 的核心 yield 顺序不变 — 仍是 `tool_use:start` → `[ask_pending]` → `tool_use:done`。`ask_pending` 紧贴 `tool_use:start` 是关键: web 端 store 在收到 `tool_use:start` 后, 期待下一个事件要么是 `ask_pending`(交互型 tool) 要么是 `tool_use:done`(普通 tool)。
 
-> **注意**: 由于 ask_pending 在主事件流上, 必须在 `tool_use:start` yield 之后**立即**触发。`ctx.emitEvent` 是同步 push(由 queryEngine 接管, 在外层循环里 yield), 我们的 await 不会卡死 — ask_pending 走 queryEngine 那边的事件流, toolExecution 这边只 await askRegistry.register 返回的 Promise。
+> **注意**: 由于 ask_pending 在主事件流上, 必须在 `tool_use:start` yield 之后**立即**触发。`ctx.emitEvent` 是同步 push(由 queryLoop 接管, 在外层循环里 yield), 我们的 await 不会卡死 — ask_pending 走 queryLoop 那边的事件流, toolExecution 这边只 await askRegistry.register 返回的 Promise。
 
 ### 3.5 `src/runtime/types.ts` 扩展 `RuntimeConfig`
 
@@ -532,7 +532,7 @@ case 'tool_use:denied':
    - AskUserQuestion + mock 慢答: yield `tool_use:start` → `tool_use:ask_pending`(子事件) → 等 → `tool_use:done`
    - AskUserQuestion + abort: yield `tool_use:error`, tool_result isError=true
 
-3. **queryEngine**(更新既有)
+3. **queryLoop**(更新既有)
    - 注入 `askRegistry` mock, 验证同一 toolUseId 的 resolver 与 answer() 串联
    - 未注入 askRegistry 时, AskUserQuestion 抛 "askRegistry not configured"
 
@@ -572,7 +572,7 @@ case 'tool_use:denied':
 
 ## 8. 实施顺序
 
-1. **core**: schema → tool → ToolContext 扩展 → RuntimeConfig 扩展 → queryEngine 注入 → 单元测
+1. **core**: schema → tool → ToolContext 扩展 → RuntimeConfig 扩展 → queryLoop 注入 → 单元测
 2. **server**: AskRegistry → /agent/answer → routes/agent.ts 清理 → 集成测
 3. **web**: store 扩展 → QuestionCard → Agent.tsx 集成 → 手动联调
 4. **docs**: README 增补 + sync 脚本注释
@@ -589,7 +589,7 @@ case 'tool_use:denied':
 | `packages/zai-agent-core/src/tools/index.ts` | 改 | 注册新工具 |
 | `packages/zai-agent-core/src/tools/Tool.ts` | 改 | ToolContext 加 awaitAskUserQuestion |
 | `packages/zai-agent-core/src/runtime/types.ts` | 改 | RuntimeConfig 加 askRegistry |
-| `packages/zai-agent-core/src/runtime/queryEngine.ts` | 改 | 构造 ctx 时注入 awaitAskUserQuestion |
+| `packages/zai-agent-core/src/runtime/queryLoop.ts` | 改 | 构造 ctx 时注入 awaitAskUserQuestion |
 | `packages/zai-agent-core/README.md` | 改 | 增补 AskUserQuestionTool 章节 |
 | `packages/zai/src/server/services/askRegistry.ts` | 新建 | AskRegistry 类 |
 | `packages/zai/src/server/services/askRegistry.test.ts` | 新建 | 单元测 |

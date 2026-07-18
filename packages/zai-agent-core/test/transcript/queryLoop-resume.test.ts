@@ -22,7 +22,7 @@ beforeEach(async () => {
 })
 afterEach(() => rmSync(dataDir, { recursive: true, force: true }))
 
-describe('queryEngine resume via serializeForAnthropic', () => {
+describe('queryLoop resume via serializeForAnthropic', () => {
   it('v2 transcript round-trips into Anthropic message shape (user + assistant + tool_use + tool_result)', async () => {
     await appendUserMessageV2(
       store,
