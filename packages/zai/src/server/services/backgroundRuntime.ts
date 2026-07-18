@@ -88,7 +88,7 @@ export function initBackgroundRuntime(): BackgroundRuntime {
 
   // dispatch 不在 lifecycle hook 内(同步返回),所以单独 emit job.started
   backgroundRuntime = wrapWithJobStarted(inner, () => null)
-  // 注册到 zai-agent-core 的全局 registry,让 BackgroundAgentTool 等可访问
+  // 注册到 zai-agent-core 的全局 registry,让 AgentTool(run_in_background: true)等可访问
   setBackgroundRuntime(backgroundRuntime)
   return backgroundRuntime
 }

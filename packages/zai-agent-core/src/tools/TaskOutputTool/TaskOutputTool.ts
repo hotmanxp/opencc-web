@@ -20,7 +20,7 @@ export const TaskOutputTool: LegacyTool<typeof TaskOutputInputSchema, string> = 
   name: TASK_OUTPUT_TOOL_NAME,
   description: [
     '读取后台 agent 任务的当前输出。',
-    'task_id 是 BackgroundAgent / 后台派发 Agent 派发时返回的 shortId。',
+    'task_id 是后台派发 Agent 返回的 shortId。',
     '',
     '注意:子 agent 完成后,父 session 会自动通过 <task-notification> 收到结果;',
     '只有当需要查看部分进度,或者主动取消/失败后还想捞数据时,才需要调本工具。',

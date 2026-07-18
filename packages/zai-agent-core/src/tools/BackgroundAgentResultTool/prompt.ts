@@ -6,7 +6,7 @@ export function renderBackgroundAgentResultPrompt(): string {
     '查询后台任务的状态与输出。',
     '',
     '用法:',
-    '- 传 shortId(BackgroundAgent 派发时返回的 ID)',
+    '- 传 shortId(Agent 后台派发时返回的 ID)',
     '- 可选 tailLines:返回输出末尾多少行(默认 200)。仅 waitMs > 0 时生效。',
     '- 可选 waitMs:',
     '    - 0(默认):立即返回 status + resultText, 不读 events, 不阻塞。任务在跑也立即返回。',

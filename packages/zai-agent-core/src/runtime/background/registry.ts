@@ -5,7 +5,7 @@ let _runtime: BackgroundRuntime | null = null
 /**
  * 全局 BackgroundRuntime 注册中心。
  * - zai 包在 initBackgroundRuntime() 中调用 setBackgroundRuntime(runtime)
- * - BackgroundAgentTool / BackgroundAgentResultTool 通过 getBackgroundRuntime() 拿
+ * - AgentTool(run_in_background: true) / BackgroundAgentResultTool 通过 getBackgroundRuntime() 拿
  *
  * 这种间接方式避免了 zai-agent-core 反向依赖 zai,
  * 同时让外部 SDK 也能注入自己的 runtime 实例。

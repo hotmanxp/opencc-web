@@ -1,7 +1,7 @@
 import { z } from 'zod'
 
 /**
- * task_id = BackgroundAgent 派发时返回的 shortId。
+ * task_id = Agent 后台派发时返回的 shortId。
  * block:是否阻塞等待(默认 true);timeout:最长等多久(默认 600000ms = 10 分钟,最大 600000ms)。
  *
  * 默认 10 分钟:对齐 opencc 上游的 bg-agent 任务常见时长,也避免 LLM 在父 turn
