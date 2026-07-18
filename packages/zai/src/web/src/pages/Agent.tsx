@@ -35,6 +35,7 @@ import {
   type AgentMessage,
   type AgentStatus,
   type TodoItem,
+  type V2TaskItem,
 } from "../store/useAgentStore";
 import { useAppStore } from "../store/useAppStore";
 import QuestionCard from "../components/QuestionCard.jsx";
@@ -46,6 +47,7 @@ import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import ConfigStatusBar from "../components/ConfigStatusBar";
 import { TaskDrawer } from "../components/TaskDrawer";
 import TodoZone from "../components/TodoZone.jsx";
+import { BottomStatusBar } from "../components/BottomStatusBar";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 import { fetchV2Tasks } from "../lib/v2TaskApi.js";
 import AgentInputBox from "../components/AgentInputBox";
@@ -1022,6 +1024,7 @@ export default function Agent() {
   const sessions = useAgentStore((s) => s.sessions);
   const sessionId = useAgentStore((s) => s.sessionId);
   const todosBySession = useAgentStore((s) => s.todosBySession);
+  const v2TasksBySession = useAgentStore((s) => s.v2TasksBySession);
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
   const stop = useAgentStore((s) => s.stop);
   const clearMessages = useAgentStore((s) => s.clearMessages);
@@ -1037,6 +1040,8 @@ export default function Agent() {
   const rejectAsk = useAgentStore((s) => s.rejectAsk);
   const todosForCurrentSession: TodoItem[] =
     sessionId != null ? (todosBySession[sessionId] ?? []) : [];
+  const v2TasksForCurrentSession: V2TaskItem[] =
+    sessionId != null ? (v2TasksBySession[sessionId] ?? []) : [];
   const patchSessionMode = useAgentStore((s) => s.patchSessionMode);
   const { instanceContext } = useAppStore()
   const cwdName = instanceContext?.cwdName || '~'
@@ -1428,6 +1433,8 @@ export default function Agent() {
             />
           )}
         </div>
+
+        <BottomStatusBar todos={todosForCurrentSession} v2Tasks={v2TasksForCurrentSession} />
 
         <div className="bottom-stack">
           <AgentInputBox />
