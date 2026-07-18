@@ -483,6 +483,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           error: msg.error,
           reason: msg.reason,
         }
+        if (!incomingName && !(msg.name as string | undefined)) {
+          // 数据收集: 流式阶段 server 漏传 toolName 的次数 + 上下文 toolUseId,
+          // 排查 Bug A (实时流式期间显示 "unknown") 的现场统计.
+          if (typeof console !== 'undefined') {
+            console.warn('[tool_unknown] runtime.tool_call 漏传 toolName', {
+              toolUseId,
+              sessionId: msg.sessionId,
+              turnIndex: msg.turnIndex,
+              ts: msg.ts,
+              input: msg.input,
+            })
+          }
+        }
         const updates: Partial<AgentState> = { messages: [...s.messages, created] }
         if (shouldBumpSegment) {
           updates.textSegmentRev = s.textSegmentRev + 1

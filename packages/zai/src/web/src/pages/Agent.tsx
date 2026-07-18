@@ -513,7 +513,12 @@ function ToolUsePill({ name, status }: { name: string; status: ToolStatus }) {
 // 统一成单一可折叠面板. 由于 React key 按 toolUseId 锁定 (见调用处),
 // 同一次调用的 start/done/error 事件会复用同一个 DOM 节点, 折叠态不丢.
 const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMessage }) {
-  const name = (msg.name as string) || 'unknown'
+  const rawName = (msg.name as string | undefined)?.trim() || ''
+  const shortId = (msg.toolUseId as string | undefined)?.slice(-8) ?? '????????'
+  // 兜底: 模型 SSE 流里有个别时刻 toolName 没带过来(已知 race condition,
+  // tool_use:start 与 content_block_start 都在抢),显示 "未知工具 (id:xxxxxxxx)"
+  // 比 "unknown" 强,user 至少能根据 id 复制去后端日志 grep
+  const name = rawName || `未知工具 (id:${shortId})`
   const input = (msg.input as Record<string, unknown>) || {}
   // Agent 工具的 pill 不显示泛化的 "Agent" — 展示实际派发的 subagent_type
   // (Explore / Plan / general-purpose / 用户自定义), 让用户一眼看出当前是
