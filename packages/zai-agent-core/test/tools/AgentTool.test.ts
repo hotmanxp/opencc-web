@@ -3,6 +3,7 @@ import { mkdtemp, rm, mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { AgentTool } from '../../src/tools/AgentTool/AgentTool.js'
+import { getAgentToolDescription } from '../../src/tools/AgentTool/prompt.js'
 import type { ToolContext } from '../../src/tools/Tool.js'
 import { makeMockModelCaller } from '../fixtures/MockModelCaller.js'
 import { makeMockSandbox } from '../fixtures/MockSandbox.js'
@@ -107,5 +108,24 @@ describe('AgentTool', () => {
       unknown_field: 'should-be-rejected',
     })
     expect(r.success).toBe(false)
+  })
+
+  test('getAgentToolDescription returns opencc-style prompt with AVAILABLE_AGENTS section', () => {
+    const text = getAgentToolDescription()
+    expect(typeof text).toBe('string')
+    expect(text.length).toBeGreaterThan(80)
+    expect(text).toContain('sub-agent')
+    // Either upstream has AVAILABLE_AGENTS block already, or we append.
+    expect(text.toLowerCase()).toMatch(/availab.?agents|specialized|general-purpose/)
+  })
+
+  test('renderAvailableAgentsSection returns rendered bullet list', async () => {
+    // Built-in always at least one (general-purpose from BUILT_IN_AGENTS).
+    const { renderAvailableAgentsSection } = await import('../../src/tools/AgentTool/prompt.js')
+    const r = renderAvailableAgentsSection([
+      { name: 'Explore', description: 'Read-only codebase exploration.', systemPrompt: 'x' },
+    ])
+    expect(r).toContain('<available_agents>')
+    expect(r).toContain('Explore')
   })
 })
