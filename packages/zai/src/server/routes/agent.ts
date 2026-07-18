@@ -103,11 +103,19 @@ export async function* translateRuntimeEvents(
         const block = ev.content_block as
           | { type?: string; id?: string; name?: string }
           | undefined;
-        // Reset tool input accumulator at the start of every tool_use block
+        // 每个 content_block 都重置 pending 状态: tool_use 块设值, 其他块清空.
+        // 关键: 不重置的话, model 在 tool_use 块后再输出 text 块,
+        // text 块的 content_block_stop 仍持有上一个 tool_use 的 pendingToolUseId,
+        // 会再 emit 一条 input=空字符串 的 runtime.tool_call, 把客户端 store 里
+        // 已经存好的 input (useAgentStore upsertToolCall 的 `||` 链) 覆盖成 {}.
         if (block?.type === "tool_use") {
           toolInputBuffer = "";
           pendingToolUseId = block.id ?? null;
           pendingToolName = block.name ?? null;
+        } else {
+          toolInputBuffer = "";
+          pendingToolUseId = null;
+          pendingToolName = null;
         }
         break;
       }
@@ -179,13 +187,17 @@ export async function* translateRuntimeEvents(
         // Direct tool start (non-streamed); emit tool_call immediately.
         const id = (ev.id as string) ?? (ev.toolUseId as string) ?? "";
         const name = (ev.name as string) ?? "unknown";
+        // input 缺省时不要兜底 `{}`: 客户端 upsertToolCall 的 `incomingInput
+        // ?? prev.input` 会因 `{}` truthy 覆盖已有 input. 让 input 保持
+        // undefined, 客户端走 prev 回退或维持空 (全新 toolUseId 不会有 prev).
+        const startInput = (ev.input !== undefined && ev.input !== null) ? (ev.input as unknown) : undefined;
         yield {
           type: "runtime.tool_call",
           sessionId,
           turnIndex,
           toolUseId: id,
           toolName: name,
-          input: (ev.input as unknown) ?? {},
+          input: startInput,
         };
         // Remember id so the subsequent done/error uses the same identifier
         pendingToolUseId = id;
@@ -201,7 +213,13 @@ export async function* translateRuntimeEvents(
         // 吞掉不写 store, done 路径上 prev 同 toolUseId 不存在, 必须用
         // 当前事件自身携带的 toolName / input.
         const toolName = ((ev.name as string) ?? pendingToolName) as string;
-        const input = (ev.input as unknown) ?? {};
+        // 关键: input 不要默认 `{}`. zai-agent-core 的 tool_use:done 事件
+        // 不带 input (input 已经在 start 阶段从 content_block_stop 缓存到
+        // pendingToolName 兄弟字段, 或者 prev entry 已存). 若强行给 `{}`
+        // 推到客户端, useAgentStore upsertToolCall 的 `incomingInput ?? prev.input`
+        // 会因为 `{}` 是 truthy 而把已有 input 覆盖成空对象, ToolCallBlock
+        // 折叠态预览丢失. 让 input 保持 undefined, 客户端走 prev.input 回退.
+        const input = (ev.input !== undefined && ev.input !== null) ? (ev.input as unknown) : undefined;
         yield {
           type: "runtime.tool_result",
           sessionId,

@@ -511,8 +511,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const incomingName =
         (msg.name as string) ||
         (block?.type === 'tool_use' ? block.name : undefined)
+      // 用 typeof === 'object' + 非 null 替代 `||`:
+      // 关键: server 在 content_block_stop stale 状态时, 会用空字符串当 input
+      // 二次 emit runtime.tool_call. `"" || {}` = `{}` (空字符串 falsy,
+      // 空对象 truthy), 旧写法会把 prev.input 覆盖成 `{}` 导致 ToolCallBlock
+      // 折叠态预览丢失. 显式判对象 + 非空, 拒绝空字符串/null/undefined.
+      const msgInputObj = (msg.input !== null && typeof msg.input === 'object' && !Array.isArray(msg.input))
+        ? (msg.input as Record<string, unknown>)
+        : undefined
       const incomingInput =
-        (msg.input as Record<string, unknown>) ||
+        msgInputObj ??
         (block?.type === 'tool_use' ? block.input : undefined)
       // 找任意 tool_use:* 记录 (start/done/error/invalid/denied), 不只匹配
       // 'start'. 否则后端重复发 runtime.tool_call 到达 tool_use:done 之后
@@ -566,7 +574,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           type: (msg.type as string).startsWith('tool_use:') ? msg.type : 'tool_use:start',
           toolUseId,
           name: incomingName || (msg.name as string) || 'unknown',
-          input: incomingInput || (msg.input as Record<string, unknown>),
+          // input 同 incomingInput: 优先 incomingInput (已过滤空字符串/数组),
+          // 否则用 msg.input (同样过滤), 避免 `||` 把空字符串当 falsy 落到
+          // 下一个候选, 最后写到 store 的 input 是 `{}` / 损坏对象.
+          input: incomingInput ?? (msgInputObj ?? (msg.input as Record<string, unknown> | undefined) ?? undefined),
           // start 阶段先不带 output / error; done / error 阶段由后续事件填
           output: msg.output,
           error: msg.error,
@@ -607,7 +618,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         error: msg.error !== undefined ? msg.error : prev.error,
         reason: msg.reason !== undefined ? msg.reason : prev.reason,
         name: incomingName || prev.name,
-        input: incomingInput || prev.input,
+        // 用 `??` 而非 `||`: incomingInput 是 null/undefined 时才回退 prev,
+        // 避免空字符串/空对象覆盖已有 input (与 idx===-1 分支同一漏洞).
+        input: incomingInput ?? prev.input,
       } as unknown as AgentMessage
       const updates: Partial<AgentState> = { messages: next }
       if (shouldClearPending) updates.pendingAsk = null
