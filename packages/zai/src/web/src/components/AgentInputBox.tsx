@@ -216,13 +216,14 @@ export default React.memo(function AgentInputBox() {
   const selectSlashItem = useCallback(async (item: SlashItem) => {
     setShowSkillMenu(false);
     if (item.kind === "command" && item.type === "local") {
+      const sid = sessionId || activeSessionId || undefined;
       try {
-        const res = await fetch("/api/command", {
-          method: "POST",
-          headers: { "Content-Type": "application/json" },
-          body: JSON.stringify({ name: item.name, args: "" }),
-        });
-        const data = (await res.json()) as { type: string; payload?: any };
+        // 走与 handleSend 一致的 /agent/command (旧 /api/command 不存在,
+        // 会触发 404 HTML 错误页 → Unexpected token '<').
+        const data = await api.post<{ type: string; payload?: any }>(
+          "/agent/command",
+          { name: item.name, args: "", ...(sid ? { sessionId: sid } : {}) },
+        );
         switch (data.type) {
           case "cleared":
             useAgentStore.getState().clearMessages();
@@ -259,7 +260,7 @@ export default React.memo(function AgentInputBox() {
     setTimeout(() => {
       textareaRef.current?.focus();
     }, 0);
-  }, []);
+  }, [sessionId, activeSessionId]);
 
   const addAttachments = async (files: File[]) => {
     const accepted = files.slice(0, MAX_ATTACHMENTS_PER_TURN);
@@ -359,7 +360,18 @@ export default React.memo(function AgentInputBox() {
         );
         return;
       }
-      if (e.key === "Tab" || (e.key === "Enter" && !e.shiftKey)) {
+      // Tab: 补全到输入框 (像 shell/IDE 的补全体感)
+      // Enter: 选中并执行 (与 Tab 分工, 避免误触发执行)
+      if (e.key === "Tab") {
+        e.preventDefault();
+        const it = filteredSlash[skillMenuIdx];
+        if (it) {
+          setInput("/" + it.name + " ");
+          setShowSkillMenu(false);
+        }
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
         e.preventDefault();
         const it = filteredSlash[skillMenuIdx];
         if (it) void selectSlashItem(it);
