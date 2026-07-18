@@ -7,6 +7,7 @@ import {
   MCPClientPool,
   resolveDataDir,
   resolveOpenccConfigDir,
+  setDefaultSandboxManager,
   TranscriptStore,
 } from '@zn-ai/zai-agent-core'
 import { createAnthropicModelCaller } from './modelCaller.js'
@@ -82,6 +83,12 @@ export function initAgentRuntime(cwd: string): void {
     ...(mcpClientPool && mcpServers.length > 0 ? { mcpClientPool, mcpServers } : {}),
     ...(resolveSandbox(cwd) ? { sandbox: resolveSandbox(cwd) } : {}),
   })
+
+  // 把 sandbox config 注入 ZaiSandboxManager 单例, 让 BashTool 的 prompt
+  // (getSimpleSandboxSection) 能展示 filesystem / network 限制。
+  // 没有这个调用, prompt 永远不包含 sandbox 段, 模型不知道 sandbox 边界。
+  const sandbox = resolveSandbox(cwd)
+  if (sandbox) setDefaultSandboxManager(sandbox)
 
   // Disconnect MCP clients on shutdown so child processes don't get orphaned
   // when the zai server is killed by SIGTERM/SIGINT.

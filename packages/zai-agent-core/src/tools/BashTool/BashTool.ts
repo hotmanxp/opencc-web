@@ -163,20 +163,30 @@ export const BashTool: LegacyTool<typeof BashInputSchema, string> = {
   // opencc `Tool.maxResultSizeChars` — 30K 字符后落盘 (opencc 同值)
   maxResultSizeChars: 30_000,
 
-  // opencc `Tool.mapToolResultToToolResultBlockParam` — BashTool 返回 Out 对象,
-  // 这里把它格式化进 tool_result block (处理 persistedOutputPath /
-  // backgroundTaskId / interrupted / sed 模拟)。
+  // opencc `Tool.mapToolResultToToolResultBlockParam` — BashTool 返回的
+  // call() output 是 JSON.stringify(makeBashOutput(...))。这里先尝试 parse 回
+  // BashOutput 对象, 再格式化进 tool_result block (处理 persistedOutputPath /
+  // backgroundTaskId / interrupted)。如果 parse 失败, 当成纯文本透传。
   mapToolResultToToolResultBlockParam: (content: unknown, toolUseId: string): ToolResultBlockParam => {
-    if (typeof content === 'string') {
+    let parsed: any = content
+    if (typeof content === 'string' && content.startsWith('{')) {
+      try {
+        parsed = JSON.parse(content)
+      } catch {
+        parsed = content
+      }
+    }
+
+    if (typeof parsed === 'string') {
       return {
         type: 'tool_result',
         tool_use_id: toolUseId,
-        content: content,
+        content: parsed,
         is_error: false,
       }
     }
 
-    const out = content as {
+    const out = parsed as {
       stdout?: string
       stderr?: string
       interrupted?: boolean
