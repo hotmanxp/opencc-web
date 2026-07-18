@@ -267,6 +267,15 @@ const WHITELIST_PATTERNS: string[] = [
   'tools/BashTool/sedValidation.ts',
   'tools/BashTool/sedEditParser.ts',
   'tools/BashTool/commentLabel.ts',
+
+  // AgentTool port — fork prerequisites (runForkedAgent transitive deps).
+  // NOTE: upstream opencc exports ContentReplacementState from
+  // utils/toolResultStorage.ts (not a separate types/toolResultStorage.ts),
+  // and utils/toolResultStorage.ts was already synced in commit 8f56820;
+  // we only need to pull the remaining 3 new files here.
+  'utils/sessionStorage.ts',
+  'utils/abortController.ts',
+  'utils/fileStateCache.ts',
 ]
 
 // Files we explicitly never want (defense in depth — these would not be in WHITELIST anyway).
