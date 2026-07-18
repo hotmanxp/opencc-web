@@ -305,6 +305,11 @@ function deriveLocalTitle(prompt: string): string {
   return firstLine.slice(0, TITLE_MAX_LEN - 1) + "…";
 }
 
+// 模块级计数器: 当前有几个 ThinkingBlock 处于 streaming 状态。
+// 第一个进入 streaming=true 的实例挂 <style>, 最后一个退出的实例卸 <style>。
+// 这样历史回放的 ThinkingBlock (streaming=undefined) 不会跑动画。
+let thinkGlowRefcount = 0;
+
 function ThinkingBlock({
   text,
   streaming,
@@ -331,26 +336,46 @@ function ThinkingBlock({
   //   [pill 灯泡 + 思考] [⌄/›] [预览文字]
   const [active, setActive] = useState(false);
 
-  return (
-    // 思考块属于 LLM 正常回复节奏的一部分:
-    // - 不缩进 (贴齐主对话流, 与正式文字回答同级宽度)
-    // - 箭头紧贴 pill 后 (手动渲染, 不靠 expandIconPosition)
-    <>
-      {streaming && (
-        <style>{`
+  // 流式期间把 keyframe 注入 <head>: 不能用 inline <style>, 因为
+  // Fragment 子项被父容器 (这里是 Collapse) 当 items 数组处理,
+  // <style> 元素会被吃掉、不到 DOM. 通过 useEffect 注入更稳.
+  // 用模块级 refcount: 第一个 streaming=true 挂载, 最后一个 streaming 消失
+  // (含组件卸载) 才卸载 — 避免历史回放中也跟着跑动画.
+  useEffect(() => {
+    const id = "zai-think-glow-style";
+    if (streaming) {
+      thinkGlowRefcount += 1;
+      if (thinkGlowRefcount === 1) {
+        const style = document.createElement("style");
+        style.id = id;
+        style.textContent = `
           @keyframes zai-think-glow {
             0%, 100% { fill: #f7d774; }
             50%      { fill: #ffe999; }
           }
-          .zai-thinking-bulb svg path {
+          .zai-thinking-bulb-active svg path {
             animation: zai-think-glow 1.4s ease-in-out infinite;
           }
           @media (prefers-reduced-motion: reduce) {
             @keyframes zai-think-glow { 0%, 100% { fill: #cacaca; } }
           }
-        `}</style>
-      )}
-      <div style={{ marginBottom: 8, maxWidth: "100%" }}>
+        `;
+        document.head.appendChild(style);
+      }
+      return () => {
+        thinkGlowRefcount -= 1;
+        if (thinkGlowRefcount === 0) {
+          document.getElementById(id)?.remove();
+        }
+      };
+    }
+  }, [streaming]);
+
+  return (
+    // 思考块属于 LLM 正常回复节奏的一部分:
+    // - 不缩进 (贴齐主对话流, 与正式文字回答同级宽度)
+    // - 箭头紧贴 pill 后 (手动渲染, 不靠 expandIconPosition)
+    <div style={{ marginBottom: 8, maxWidth: "100%" }}>
         <Collapse
         size="small"
         ghost
@@ -393,7 +418,10 @@ function ThinkingBlock({
                     flexShrink: 0,
                   }}
                 >
-                  <BulbOutlined className="zai-thinking-bulb" style={{ fontSize: 11 }} />
+                  <BulbOutlined
+                    className={streaming ? "zai-thinking-bulb zai-thinking-bulb-active" : "zai-thinking-bulb"}
+                    style={{ fontSize: 11 }}
+                  />
                   思考
                 </span>
                 {/* 箭头: 折叠态 › (CaretRight), 展开态 ⌄ (CaretDown).
@@ -453,7 +481,6 @@ function ThinkingBlock({
         ]}
       />
       </div>
-    </>
   );
 }
 
