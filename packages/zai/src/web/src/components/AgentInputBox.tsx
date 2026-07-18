@@ -55,6 +55,38 @@ export default React.memo(function AgentInputBox() {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevStatusRef = useRef<typeof status>("idle");
 
+  // 流式计时: 仅在 streaming 期间累加秒数, 状态切回 idle/aborted/error 时归零
+  const [elapsed, setElapsed] = useState(0);
+  const streamStartRef = useRef<number | null>(null);
+  // 流式动画: 仿 OpenCC 状态栏的 ✶✷✸✹✺✻✼✽ 字符循环, 每 100ms 切一帧
+  const [spinnerIdx, setSpinnerIdx] = useState(0);
+  const SPINNER = ["✶", "✷", "✸", "✹", "✺", "✻", "✼", "✽"];
+
+  useEffect(() => {
+    if (status === "streaming") {
+      if (streamStartRef.current == null) {
+        streamStartRef.current = Date.now();
+        setElapsed(0);
+      }
+      const timer = setInterval(() => {
+        if (streamStartRef.current != null) {
+          setElapsed(Math.floor((Date.now() - streamStartRef.current) / 1000));
+        }
+      }, 250);
+      const spinTimer = setInterval(() => {
+        setSpinnerIdx((i) => (i + 1) % SPINNER.length);
+      }, 100);
+      return () => {
+        clearInterval(timer);
+        clearInterval(spinTimer);
+      };
+    }
+    streamStartRef.current = null;
+    setElapsed(0);
+    setSpinnerIdx(0);
+    return undefined;
+  }, [status]);
+
   // unmount 时清理 objectURL
   useEffect(() => {
     return () => {
@@ -452,25 +484,51 @@ export default React.memo(function AgentInputBox() {
 
   return (
     <div>
-      {/* status bar: 顶部一行 — cwd / 模型 / streaming 提示 / 附件缩略图内嵌 / 上传图片按钮 */}
+      {/* 状态栏: 仿 OpenCC 的 "✽ Pollinating… (Ns · ↓ tokens)" 行.
+          现在内嵌附件缩略图: 单行横向 flex, spacer 把缩略图与按钮推到右侧;
+          缩略图本身 align="end" 多张时仍右对齐, 多张会自动换行撑高状态栏. */}
       <div
         style={{
+          borderTop: "1px solid rgba(255,255,255,0.10)",
+          borderBottom: "1px solid rgba(255,255,255,0.10)",
+          padding: "6px 10px",
+          fontSize: 12,
+          fontFamily:
+            "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+          color: "rgba(255,255,255,0.45)",
           display: "flex",
           alignItems: "center",
           gap: 8,
-          padding: "6px 10px",
-          background: "rgba(0,0,0,0.25)",
-          borderRadius: 6,
-          marginBottom: 6,
-          fontSize: 12,
+          flexWrap: "wrap",
         }}
       >
-        {/* cwd 文本 / 模型名 / streaming 提示 — 简化版; 完整 status bar 内容由 Task 7 搬入 */}
+        <span
+          style={{
+            color:
+              status === "idle"
+                ? "#22c55e"
+                : status === "streaming"
+                  ? "#ff6600"
+                  : "inherit",
+          }}
+        >
+          {status === "streaming"
+            ? SPINNER[spinnerIdx]
+            : status === "error"
+              ? "✗"
+              : status === "aborted"
+                ? "◼"
+                : "●"}
+        </span>
+        <span>
+          {status === "idle" && "就绪"}
+          {status === "streaming" && `对话中… (${elapsed}s)`}
+          {status === "aborted" && "已中止"}
+          {status === "error" && "错误"}
+        </span>
         {status === "streaming" && (
           <span style={{ color: "rgba(255,255,255,0.45)" }}>· esc 中断</span>
         )}
-        {/* 附件缩略图内嵌到 status bar 内, 与按钮同一行, 缩到 40px, 紧贴状态文字.
-            compact 去除外层 padding; flexWrap: wrap 让多张时换行. */}
         {attachments.length > 0 && (
           <AttachmentStrip
             attachments={attachments}

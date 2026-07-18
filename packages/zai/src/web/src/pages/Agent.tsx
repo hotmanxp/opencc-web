@@ -1074,12 +1074,6 @@ export default function Agent() {
   // 默认收起, 让对话区首屏占满主视图, 用户按需点开.
   const [sessionsCollapsed, setSessionsCollapsed] = useState(true);
   const messagesEndRef = useRef<HTMLDivElement>(null);
-  // 流式计时: 仅在 streaming 期间累加秒数, 状态切回 idle/aborted/error 时归零
-  const [elapsed, setElapsed] = useState(0);
-  const streamStartRef = useRef<number | null>(null);
-  // 流式动画: 仿 OpenCC 状态栏的 ✶✷✸✹✺✻✼✽ 字符循环, 每 100ms 切一帧
-  const [spinnerIdx, setSpinnerIdx] = useState(0);
-  const SPINNER = ["✶", "✷", "✸", "✹", "✺", "✻", "✼", "✽"];
 
   // 根据侧栏实际高度估算默认展示条数, 窗口/容器尺寸变化时自动重算.
   useEffect(() => {
@@ -1095,31 +1089,6 @@ export default function Agent() {
     ro.observe(el);
     return () => ro.disconnect();
   }, [sessionsCollapsed]);
-
-  useEffect(() => {
-    if (status === "streaming") {
-      if (streamStartRef.current == null) {
-        streamStartRef.current = Date.now();
-        setElapsed(0);
-      }
-      const timer = setInterval(() => {
-        if (streamStartRef.current != null) {
-          setElapsed(Math.floor((Date.now() - streamStartRef.current) / 1000));
-        }
-      }, 250);
-      const spinTimer = setInterval(() => {
-        setSpinnerIdx((i) => (i + 1) % SPINNER.length);
-      }, 100);
-      return () => {
-        clearInterval(timer);
-        clearInterval(spinTimer);
-      };
-    }
-    streamStartRef.current = null;
-    setElapsed(0);
-    setSpinnerIdx(0);
-    return undefined;
-  }, [status]);
 
   useEffect(() => {
     messagesEndRef.current?.scrollIntoView({ behavior: "smooth" });
