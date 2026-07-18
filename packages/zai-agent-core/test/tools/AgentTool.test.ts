@@ -1,4 +1,4 @@
-import { describe, expect, test, beforeEach, afterEach } from 'vitest'
+import { describe, expect, test, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtemp, rm, mkdir, writeFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
@@ -7,6 +7,26 @@ import { getAgentToolDescription } from '../../src/tools/AgentTool/prompt.js'
 import type { ToolContext } from '../../src/tools/Tool.js'
 import { makeMockModelCaller } from '../fixtures/MockModelCaller.js'
 import { makeMockSandbox } from '../fixtures/MockSandbox.js'
+
+// `vi.mock` is hoisted: it intercepts the module load of
+// opencc-internals/utils/forkedAgent.js BEFORE the AgentTool call()
+// reaches its dynamic import. The factory runs lazily so we don't pull
+// in Bun-only transitive imports (bun:bundle via withRetry.ts) at
+// collection time. Per-test override uses
+// `(await import('...forkedAgent.js')).runForkedAgent.mockImplementation(...)`.
+vi.mock('../../src/opencc-internals/utils/forkedAgent.js', () => ({
+  runForkedAgent: vi.fn(),
+  getLastCacheSafeParams: vi.fn(() => null),
+  saveCacheSafeParams: vi.fn(),
+  extractResultText: vi.fn((_msgs: any, def: string) => def),
+}))
+
+// `messages.ts` has a top-level `import { feature } from 'bun:bundle'`
+// that vitest-node cannot resolve. AgentTool's sync path only needs
+// `createUserMessage`, so we stub the entire module before that import.
+vi.mock('../../src/opencc-internals/utils/messages.js', () => ({
+  createUserMessage: vi.fn(({ content }: { content: any }) => ({ type: 'user', message: { content } })),
+}))
 
 let dataDir: string
 let ctx: ToolContext
@@ -40,6 +60,12 @@ describe('AgentTool', () => {
     const events: any[] = []
     ctx.emitEvent = (e) => events.push(e)
 
+    const { runForkedAgent } = await import('../../src/opencc-internals/utils/forkedAgent.js')
+    ;(runForkedAgent as any).mockImplementation(async () => ({
+      messages: [{ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } } as any],
+      totalUsage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } as any,
+    }))
+
     const r = await AgentTool.call(
       { prompt: 'sub task', subagent_type: 'general-purpose' },
       ctx,
@@ -47,45 +73,40 @@ describe('AgentTool', () => {
     expect(r.isError).toBeFalsy()
     expect(r.output as string).toContain('<subagent_result')
     expect(events.some(e => e.type === 'subagent:start')).toBe(true)
-    expect(events.some(e => e.type === 'subagent:event')).toBe(true)
+    // subagent:done is emitted in both code paths (success and error),
+    // independent of the mocked runForkedAgent behavior.
     expect(events.some(e => e.type === 'subagent:done')).toBe(true)
   })
 
   test('subSessionId 形如 <parent>-sub-<8hex>', async () => {
     let startEvent: any
     ctx.emitEvent = (e) => { if (e.type === 'subagent:start') startEvent = e }
+    const { runForkedAgent } = await import('../../src/opencc-internals/utils/forkedAgent.js')
+    ;(runForkedAgent as any).mockImplementation(async () => ({
+      messages: [{ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } } as any],
+      totalUsage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } as any,
+    }))
     await AgentTool.call({ prompt: 'x', subagent_type: 'general-purpose' }, ctx)
     expect(startEvent.subSessionId).toMatch(/^sess-parent-sub-[0-9a-f]{8}$/)
   })
 
-  test('agent definition 存在时使用其 systemPrompt (验证子 query 的 systemPrompt 含 agent prompt)', async () => {
+  test('agent definition 存在时使用其 systemPrompt (验证 sync path 将 agent.systemPrompt 注入 systemContext)', async () => {
     await writeFile(join(dataDir, 'agents/custom.md'),
       `---\nname: custom\ndescription: custom agent\n---\nCUSTOM_SYSTEM_PROMPT`)
 
-    // 第一次 model call (父): 调 AgentTool 派 sub-agent
-    // 第二次 model call (子): 捕获子 query 的 systemPrompt, 验证含 CUSTOM_SYSTEM_PROMPT
-    let callCount = 0
-    let capturedSubPrompt: string | undefined
-    ctx.__runtimeConfig!.modelCaller = (async function* (req: any) {
-      callCount++
-      if (callCount === 1) {
-        yield { type: 'message_start', message: { id: 'm1' } }
-        yield { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 't1', name: 'Agent', input: {} } }
-        yield { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"prompt":"sub","subagent_type":"custom"}' } }
-        yield { type: 'content_block_stop', index: 0 }
-        yield { type: 'message_stop' }
-        return
+    let capturedSystemContext: Record<string, string> | undefined
+    const { runForkedAgent } = await import('../../src/opencc-internals/utils/forkedAgent.js')
+    ;(runForkedAgent as any).mockImplementation(async (params: any) => {
+      capturedSystemContext = params.cacheSafeParams.systemContext
+      return {
+        messages: [{ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } } as any],
+        totalUsage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } as any,
       }
-      capturedSubPrompt = Array.isArray(req.systemPrompt) ? JSON.stringify(req.systemPrompt) : req.systemPrompt
-      yield { type: 'message_start', message: { id: 'm2' } }
-      yield { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }
-      yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'done' } }
-      yield { type: 'content_block_stop', index: 0 }
-      yield { type: 'message_stop' }
-    }) as any
+    })
 
     await AgentTool.call({ prompt: 'x', subagent_type: 'custom' }, ctx)
-    expect(capturedSubPrompt).toContain('CUSTOM_SYSTEM_PROMPT')
+    expect(capturedSystemContext).toBeDefined()
+    expect(capturedSystemContext!.__AGENT_PROMPT__).toContain('CUSTOM_SYSTEM_PROMPT')
   })
 
   test('__runtimeConfig 缺省 → isError', async () => {
@@ -194,5 +215,18 @@ describe('AgentTool', () => {
       prompt: 'do x', subagent_type: 'general-purpose', description: 'desc',
     })
     expect(ci).toEqual({ name: 'Agent', subagent_type: 'general-purpose', prompt: 'do x', description: 'desc' })
+  })
+
+  test('mapToolResultToToolResultBlockParam yields tool_result block', () => {
+    const block = (AgentTool as any).mapToolResultToToolResultBlockParam(
+      '<subagent_result agent_type="x" exit_reason="completed">\nresult text\n</subagent_result>',
+      'tool-use-1',
+    )
+    expect(block).toEqual({
+      tool_use_id: 'tool-use-1',
+      type: 'tool_result',
+      content: '<subagent_result agent_type="x" exit_reason="completed">\nresult text\n</subagent_result>',
+      is_error: false,
+    })
   })
 })

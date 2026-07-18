@@ -59,6 +59,15 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
     }
   },
 
+  mapToolResultToToolResultBlockParam(output: any, toolUseId: string) {
+    return {
+      tool_use_id: toolUseId,
+      type: 'tool_result',
+      content: typeof output === 'string' ? output : JSON.stringify(output),
+      is_error: false,
+    }
+  },
+
   async call(rawInput, ctx) {
     const input = rawInput as AgentInput
 
@@ -76,11 +85,10 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
           subagentType: input.subagent_type,
           description: desc,
         })
-        // ★ 关键:把 parentSessionId / agentType / description 写到
-        // dispatch metadata。zai server 端 SubagentNotifier 在任务
-        // 进入 terminal 时,会读 task.parentSessionId 把
-        // <task-notification> user 消息回流到父 session,触发下一轮
-        // turn。LLM 收到通知后继续,不需要主动调 TaskOutput.
+        // 把 parentSessionId / agentType / description 写到 dispatch metadata,
+        // zai server 端 SubagentNotifier 在任务进入 terminal 时,会读
+        // task.parentSessionId 把 <task-notification> user 消息回流到父
+        // session,触发下一轮 turn。
         const task = await runtime.dispatch({
           prompt: input.prompt,
           cwd: ctx.cwd,
@@ -102,15 +110,20 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
           isError: false,
         }
       } catch (err) {
-        // 后台派发失败时回落到同步路径
         console.warn('[AgentTool] background dispatch failed, falling back to sync:', err)
+        // fall through to sync
       }
     }
 
-    // 同步路径:run_in_background=false 或 BackgroundRuntime 未初始化
+    // 同步路径:runForkedAgent(走 prompt 缓存共享)
     if (!ctx.__runtimeConfig) {
       return { output: 'AgentTool disabled: no __runtimeConfig in ToolContext', isError: true }
     }
+
+    const { runForkedAgent, getLastCacheSafeParams, extractResultText } = await import(
+      '../../opencc-internals/utils/forkedAgent.js'
+    )
+    const { createUserMessage } = await import('../../opencc-internals/utils/messages.js')
 
     const pluginAgents = (ctx.state as any).__pluginAgents ?? []
     const def = await loadAgentDefinitions(
@@ -121,22 +134,13 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
     )
     const agent = def.agents.find(a => a.name === input.subagent_type)
                  ?? def.agents.find(a => a.name === 'general-purpose')
+                 ?? def.agents[0]
 
     const parentSessionId = ctx.parentSessionId ?? 'sess-unknown'
     const subSessionId = `${parentSessionId}-sub-${randomUUID().slice(0, 8)}`
-
-    const subOpts = {
-      prompt: input.prompt,
-      cwd: ctx.cwd,
-      model: agent?.model ?? ctx.__defaultModel,
-      systemPrompt: agent?.systemPrompt,
-      additionalTools: agent?.additionalTools,
-      parentSessionId,
-      subagentType: input.subagent_type,
-      maxTurns: agent?.maxTurns ?? ctx.__maxTurns ?? 25,
-      abortSignal: ctx.abortSignal,
-      disallowedTools: ['Agent'],
-    }
+    const desc = input.description ?? input.prompt.slice(0, 60)
+    const abortController = new AbortController()
+    ctx.abortSignal.addEventListener('abort', () => abortController.abort(ctx.abortSignal.reason), { once: true })
 
     const hookRunner = (ctx.state as any).__pluginHookRunner as import('../../plugins/HookRunner.js').HookRunner | undefined
     if (hookRunner) {
@@ -146,47 +150,44 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
         sessionId: parentSessionId,
       }, ctx.abortSignal)
     }
+    ctx.emitEvent({ type: 'subagent:start', subSessionId, subagentType: input.subagent_type, description: desc })
 
-    ctx.emitEvent({
-      type: 'subagent:start',
-      subSessionId,
-      subagentType: input.subagent_type,
-      description: input.description ?? input.prompt.slice(0, 60),
-    })
+    const sharedParams = getLastCacheSafeParams()
+    const systemContext: Record<string, string> = {
+      ...(sharedParams?.systemContext ?? {}),
+    }
+    if (agent?.systemPrompt) {
+      // Inject agent.systemPrompt into systemContext so cache hit is preserved.
+      systemContext['__AGENT_PROMPT__'] = agent.systemPrompt
+    }
 
-    // Dynamic import breaks the queryEngine ↔ AgentTool cycle
-    const { queryEngine } = await import('../../runtime/queryEngine.js')
-    const subStream = queryEngine(subOpts, ctx.__runtimeConfig)
-    let finalOutput = ''
     let exitReason: 'completed' | 'aborted' | 'max_turns' | 'error' = 'completed'
+    let finalOutput = ''
     try {
-      for await (const ev of subStream) {
-        ctx.emitEvent({ type: 'subagent:event', subSessionId, event: ev })
-        const t = (ev as { type: string }).type
-        // 兜底: 累积 text_delta. 正常路径下 queryEngine 已在 runtime.done.text
-        // 携带最终文本, 这里只作为 stream 改写 / 旧版兼容时的防御.
-        if (t === 'content_block_delta' && (ev as any).delta?.type === 'text_delta') {
-          finalOutput += (ev as any).delta.text
-          continue
-        }
-        if (t === 'runtime.done') {
-          exitReason = 'completed'
-          if (typeof (ev as any).text === 'string' && (ev as any).text.length > 0) {
-            finalOutput = (ev as any).text
+      const cacheSafeParams = sharedParams
+        ? { ...sharedParams, systemContext }
+        : {
+            systemPrompt: '',
+            userContext: {},
+            systemContext,
+            toolUseContext: { abortController } as any, // minimal stub
+            forkContextMessages: [],
           }
-          break
-        }
-        if (t === 'runtime.aborted') { exitReason = 'aborted'; break }
-        if (t === 'runtime.error') {
-          exitReason = ((ev as any).error?.code === 'max_turns_reached') ? 'max_turns' : 'error'
-          if ((ev as any).error?.message) {
-            finalOutput = `error: ${(ev as any).error.message}`
-          }
-          break
-        }
-      }
+      const result = await runForkedAgent({
+        promptMessages: [createUserMessage({ content: input.prompt }) as any],
+        cacheSafeParams,
+        canUseTool: ctx.canUseTool,
+        querySource: 'agent',
+        forkLabel: input.subagent_type,
+        maxTurns: agent?.maxTurns ?? ctx.__maxTurns ?? 25,
+        onStreamEvent: (ev) => ctx.emitEvent({ type: 'subagent:event', subSessionId, event: ev }),
+        skipTranscript: true,
+        skipCacheWrite: false,
+      })
+      finalOutput = extractResultText(result.messages, 'Execution completed')
     } catch (err) {
-      exitReason = 'error'
+      if (ctx.abortSignal.aborted) exitReason = 'aborted'
+      else exitReason = 'error'
       finalOutput = `error: ${err instanceof Error ? err.message : String(err)}`
     }
 
@@ -201,7 +202,9 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
     ctx.emitEvent({ type: 'subagent:done', subSessionId, output: finalOutput, exitReason })
 
     return {
-      output: `<subagent_result agent_type="${input.subagent_type}" exit_reason="${exitReason}">\n${finalOutput}\n</subagent_result>`,
+      output:
+        `<subagent_result agent_type="${input.subagent_type}" exit_reason="${exitReason}">\n` +
+        `${finalOutput}\n</subagent_result>`,
       isError: exitReason === 'error',
     }
   },
