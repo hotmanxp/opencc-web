@@ -214,6 +214,8 @@ export function serializeForAnthropic(
     // v1 messages (no `message` field) cannot be replayed into Anthropic
     // SDK format — skip them. Callers that need v1 → SDK should pre-convert.
     if (!m.message) continue
+    // 跳过 compact_boundary 消息 — 它是 transcript 内部标记, 不应喂给 LLM
+    if (m.type === 'compact_boundary') continue
     if (m.type === 'tool_use') {
       // tool_use 消息: 一条 assistant role, content 是单个 tool_use block
       out.push({ role: 'assistant', content: m.message.content })
