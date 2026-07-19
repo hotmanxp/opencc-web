@@ -1,4 +1,5 @@
 import { getTranscriptStore, getCurrentSessionId, abortAgentSession } from '../../agentRuntime.js'
+import { clearMemoryCache } from '@zn-ai/zai-agent-core'
 import type { LocalCommand, LocalCommandResult } from '@zn-ai/zai-agent-core'
 
 export const clearCommand: LocalCommand = {
@@ -13,6 +14,7 @@ export const clearCommand: LocalCommand = {
       await abortAgentSession('user_clear')
       await getTranscriptStore().remove(sessionId)
     }
+    clearMemoryCache()
     return { kind: 'cleared' }
   },
 }
