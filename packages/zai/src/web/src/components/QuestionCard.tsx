@@ -211,7 +211,7 @@ export default function QuestionCard(props: QuestionCardProps) {
 
         <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <Popconfirm title="确认取消?" onConfirm={onReject} okText="是" cancelText="否">
-            <Button size="small">取消</Button>
+            <Button type="text" style={{ color: '#595959' }}>取消</Button>
           </Popconfirm>
           <Button type="primary" disabled={!allAnswered || status === 'submitting'} onClick={onSubmit} loading={status === 'submitting'}>
             Submit answers
