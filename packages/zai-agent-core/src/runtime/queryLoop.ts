@@ -4,23 +4,37 @@ import type { Tool, LegacyToolContext as ToolContext } from '../tools/Tool.js'
 import type { RuntimeEvent } from './events.js'
 import { TranscriptStore } from '../transcript/store.js'
 import { wrapWithZaiMeta, toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
-import { loadMemoryForPrompt } from '../agents/memoryLoader.js'
 import { executeToolsStreaming } from './toolExecution.js'
 import { buildSubagentContext } from './subagent.js'
 import { defaultCanUseToolFactory } from './canUseTool.js'
-import { loadSkillsFromDirs, buildSkillsSystemPrompt } from './skills/index.js'
+import { loadSkillsFromDirs } from './skills/index.js'
 import { SkillTool } from '../tools/SkillTool/SkillTool.js'
 import type { LoadedSkill, PendingSkillInjection } from './skills/index.js'
 import { adaptMcpTools } from '../mcp/MCPToolAdapter.js'
 import { loadMcpSkills } from '../mcp/SkillResourceAdapter.js'
-import { getMcpInstructionsSection } from '../mcp/mcpInstructions.js'
 import { wrapAsOpenccTool } from '../tools/legacyAdapter.js'
-import { loadAgentDefinitions } from '../tools/AgentTool/loadAgentsDir.js'
-import { renderAvailableAgentsSection } from '../tools/AgentTool/prompt.js'
 import { DefaultPluginRuntime } from '../plugins/index.js'
 import { emptyPluginSnapshot } from '../plugins/types.js'
 import { HookRunner } from '../plugins/HookRunner.js'
 import { createDefaultHookExecutor } from '../plugins/defaultHookExecutor.js'
+import {
+  type SystemPrompt,
+  buildEffectiveSystemPrompt,
+  getEnvInfoSection,
+  getLanguageSection,
+  getScratchpadSection,
+  getTokenBudgetSection,
+  getNumericAnchorsSection,
+  getFRCSection,
+  getSummarizeToolResultsSection,
+  getMemorySection,
+  getSkillsSection,
+  getMcpInstructionsDynamicSection,
+  getAvailableAgentsSection,
+  resolveScratchpadDir,
+  isScratchpadEnabled,
+  clearSystemPromptSections,
+} from '../systemPrompt/index.js'
 import {
   appendAssistantMessageV2,
   appendUserMessageV2,
@@ -132,7 +146,7 @@ export async function* queryLoop(
     }, sessionId)
   }
 
-  const systemPrompt = await buildSystemPrompt(options, skills, config, pluginSnapshot.agents)
+  const systemPrompt = await assembleSystemPrompt(options, skills, config, pluginSnapshot.agents)
 
   await hookRunner.run('SessionStart', {}, abortController.signal)
   await hookRunner.run('UserPromptSubmit', { prompt: options.prompt, cwd: options.cwd, sessionId }, abortController.signal)
@@ -231,7 +245,11 @@ export async function* queryLoop(
 
     const modelStream = config.modelCaller?.({
       model: options.model ?? config.defaultModel ?? 'default',
-      systemPrompt,
+      // ModelCaller.systemPrompt is `string | string[] | { type }[]` —
+      // not readonly. Spread the branded readonly array into a fresh
+      // mutable array. The boundary marker lives at index idx; the
+      // modelCaller filters it out / splits for cache_control.
+      systemPrompt: [...systemPrompt],
       messages,
       tools,
       signal: abortController.signal,
@@ -456,77 +474,68 @@ function makeToolContext(
   } as any
 }
 
-async function buildSystemPrompt(
+/**
+ * Compose the full system prompt array for one query.
+ *
+ * Steps:
+ *   1. Resolve the model id (per-call override > config default).
+ *   2. Build the 12-section dynamic list (env, language, scratchpad,
+ *      memory, skills, MCP, agents, FRC, summarize, token budget,
+ *      numeric anchors).
+ *   3. Call buildEffectiveSystemPrompt to splice in `options.systemPrompt`
+ *      (custom override) and `options.appendSystemPrompt` (trailing
+ *      note) per the opencc priority rules.
+ *
+ * Sections resolve through the memoized registry in `systemPrompt/section.ts`
+ * so most strings are cached across turns. New turns only pay for the
+ * DANGEROUS_uncached sections (MCP) and any section whose cache key
+ * changed (cwd, model, skill set, agents dir).
+ */
+async function assembleSystemPrompt(
   options: QueryOptions,
   skills: LoadedSkill[],
   config?: RuntimeConfig,
   pluginAgents: import('../tools/AgentTool/loadAgentsDir.js').AgentDefinition[] = [],
-): Promise<string[]> {
-  // Static sections (cacheable across turns)
-  const staticIntro: string = options.systemPrompt
-    ? (typeof options.systemPrompt === 'string'
-        ? options.systemPrompt
-        : options.systemPrompt.join('\n'))
-    : ''
+): Promise<SystemPrompt> {
+  const model = options.model ?? config?.defaultModel ?? 'default'
 
-  // Dynamic sections — registered through vendored section system for
-  // per-section cache invalidation. Dynamic import: vendored code has
-  // pre-existing typecheck errors; we wrap calls in safeAsync.
-  const sections: string[] = []
-  if (options.enableAgentsMd !== false) {
-    sections.push(
-      await safeAsync(async () => {
-        const files = await loadMemoryForPrompt(options.cwd)
-        if (files.length === 0) return null
-        const formatted = (files as any[])
-          .map((f) => `<!-- ${f.path} -->\n${f.content ?? ''}`)
-          .join('\n\n')
-        return `以下是根据项目 AGENTS.md / .claude/rules 加载的指令:\n\n${formatted}`
-      }),
-    )
-  }
-  const skillsPrompt = buildSkillsSystemPrompt(skills)
-  if (skillsPrompt) sections.push(skillsPrompt)
-  const mcpSection = getMcpInstructionsSection(config?.mcpClients)
-  if (mcpSection) sections.push(mcpSection)
-  if (config?.dataDir) {
-    const agentsSection = await safeAsync(async () => {
-      try {
-        const { agents } = await loadAgentDefinitions(
-          config.dataDir,
-          config.userAgentsDir,
-          undefined,
-          pluginAgents,
-        )
-        return renderAvailableAgentsSection(agents)
-      } catch {
-        return null
-      }
-    })
-    if (agentsSection) sections.push(agentsSection)
-  }
+  const scratchpadDir = isScratchpadEnabled()
+    ? resolveScratchpadDir(config?.dataDir ?? '/tmp', options.transcriptId ?? 'default')
+    : null
 
-  // Marker between static and dynamic sections. Anthropic prompt cache uses
-  // this to invalidate only the dynamic half. Mirrors vendored
-  // SYSTEM_PROMPT_DYNAMIC_BOUNDARY in
-  // opencc-internals/constants/prompts.ts:129.
-  const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'
-  const boundary = SYSTEM_PROMPT_DYNAMIC_BOUNDARY
+  const sections = [
+    getEnvInfoSection({ model, enableAgentsMd: options.enableAgentsMd !== false, cwd: options.cwd }),
+    getLanguageSection,
+    getScratchpadSection({ enabled: isScratchpadEnabled(), dir: scratchpadDir }),
+    getMemorySection({ cwd: options.cwd, enabled: options.enableAgentsMd !== false }),
+    getSkillsSection(skills),
+    getMcpInstructionsDynamicSection(config?.mcpClients),
+    getAvailableAgentsSection({
+      dataDir: config?.dataDir,
+      userAgentsDir: config?.userAgentsDir,
+      pluginAgents,
+    }),
+    getFRCSection(model),
+    getSummarizeToolResultsSection,
+    getTokenBudgetSection,
+    getNumericAnchorsSection,
+  ]
 
-  return [staticIntro, boundary, ...sections].filter(Boolean)
+  return buildEffectiveSystemPrompt({
+    sections,
+    customSystemPrompt: options.systemPrompt,
+    appendSystemPrompt: undefined,
+  })
 }
 
-async function safeAsync(fn: () => Promise<string | null>): Promise<string> {
-  try {
-    return (await fn()) ?? ''
-  } catch (err) {
-    // console.debug (not .warn) matches memoryLoader's "section failed"
-    // convention: a missing / partial memory section is recoverable and
-    // shouldn't alarm the user at warn level.
-    console.debug('[buildSystemPrompt] section failed:', err)
-    return ''
-  }
-}
+/**
+ * Reset every cached system-prompt section. Called by `/clear` and
+ * `/compact` so the next turn rebuilds from scratch instead of
+ * reusing stale strings (e.g. after cwd change, env refresh, model
+ * switch). The host (zai server) wires this into the corresponding
+ * slash-command handlers.
+ */
+export const resetSystemPromptCache = clearSystemPromptSections
 
 function snapshotMcpClients(pool: any) {
   if (!pool || typeof pool.getInstructions !== 'function') return []

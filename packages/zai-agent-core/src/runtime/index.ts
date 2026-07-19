@@ -58,3 +58,24 @@ export * from './background/index.js'
 // Per-session cwd tracking (zai LLM-self-cwd-switch feature)
 export { CwdStore, type SessionCwd } from './cwdStore.js'
 export { runWithSessionId, getCurrentSessionId } from '../opencc-internals/utils/cwd.js'
+
+// System-prompt subsystem (zai-native port of opencc's getSystemPrompt)
+// Hosts compose the system prompt for each query by calling
+// `buildEffectiveSystemPrompt` with a list of sections. Most sections
+// are memoized across turns; the section registry resets on /clear
+// and /compact. See `systemPrompt/section.ts` for cache semantics.
+export {
+  type SystemPrompt,
+  asSystemPrompt,
+  type BuildSystemPromptInput,
+  buildSystemPrompt,
+  type BuildEffectiveSystemPromptInput,
+  buildEffectiveSystemPrompt,
+  DEFAULT_STATIC_INTRO,
+  SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
+  systemPromptSection,
+  DANGEROUS_uncachedSystemPromptSection,
+  clearSystemPromptSections,
+  resolveScratchpadDir,
+  isScratchpadEnabled,
+} from '../systemPrompt/index.js'
