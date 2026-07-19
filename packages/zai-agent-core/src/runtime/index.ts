@@ -58,3 +58,7 @@ export * from './background/index.js'
 // Per-session cwd tracking (zai LLM-self-cwd-switch feature)
 export { CwdStore, type SessionCwd } from './cwdStore.js'
 export { runWithSessionId, getCurrentSessionId } from '../opencc-internals/utils/cwd.js'
+
+// State change bus (in-process event for zai server SSE bridge)
+export { stateChangeBus, resetStateChangeBusForTests } from './stateChangeBus.js'
+export type { StateChangeEventMap } from './stateChangeBus.js'
