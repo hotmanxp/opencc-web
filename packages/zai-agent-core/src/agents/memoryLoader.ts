@@ -73,13 +73,14 @@ export async function loadMemoryForPrompt(cwd: string): Promise<MemoryFile[]> {
     }
 
     // 3. .claude/rules/**/*.md (recursive)
-    const rules = await collectRulesDir(cwd, cwd)
+    const ig = ignore()
+    const rules = await collectRulesDir(cwd, cwd, ig)
     files.push(...rules)
 
     cache.set(cwd, files)
     return files
   } catch (err) {
-    console.warn('[memory] loadMemoryForPrompt failed:', err)
+    console.debug('[memory] loadMemoryForPrompt failed:', err)
     return []
   }
 }
@@ -102,7 +103,7 @@ export async function hasExternalIncludes(cwd: string): Promise<boolean> {
       if (f.parent) {
         // Has a parent → was @include'd. Check if parent is outside cwd.
         const relParent = relative(cwd, f.parent)
-        if (relParent.startsWith('..')) return true
+        if (relParent === '..' || relParent.startsWith('..' + sep)) return true
       }
     }
     return false
@@ -182,6 +183,7 @@ async function processIncludes(
 async function collectRulesDir(
   cwd: string,
   dir: string,
+  ig: ReturnType<typeof ignore>,
 ): Promise<MemoryFile[]> {
   const result: MemoryFile[] = []
   let entries: string[]
@@ -190,11 +192,6 @@ async function collectRulesDir(
   } catch {
     return result  // .claude/rules doesn't exist
   }
-
-  // Use .gitignore semantics to skip ignored files (best-effort).
-  const ig = ignore()
-  // (No default ignores — caller's .gitignore is the source of truth, but
-  // loading it from `cwd` is out of scope for slim loader.)
 
   for (const entry of entries) {
     const full = join(dir, entry)
@@ -206,7 +203,7 @@ async function collectRulesDir(
     }
     if (st.isDirectory()) {
       // Recurse into subdirectories of .claude/rules
-      const sub = await collectRulesDir(cwd, full)
+      const sub = await collectRulesDir(cwd, full, ig)
       result.push(...sub)
     } else if (st.isFile() && entry.endsWith('.md')) {
       if (ig.ignores(relative(cwd, full))) continue
@@ -215,15 +212,6 @@ async function collectRulesDir(
       // Filter by frontmatter `paths:` glob if present.
       const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n/)
       if (fmMatch) {
-        const fm = fmMatch[1]
-        const pathsMatch = fm.match(/^paths:\s*\[(.*?)\]/m)
-        if (pathsMatch) {
-          // Slim loader: skip files with paths: frontmatter (deferred to a
-          // later PR with picomatch integration). Always include.
-          // See scope decision in spec: "暂不实现 ... glob 过滤"
-          // For now, just include all .md files in rules dir.
-        }
-        // Strip frontmatter from content
         const stripped = content.replace(/^---\n[\s\S]*?\n---\n/, '')
         result.push({ path: full, content: stripped, type: 'Rule' })
       } else {
