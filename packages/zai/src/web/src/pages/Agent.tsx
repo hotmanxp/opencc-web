@@ -10,6 +10,7 @@ import {
   Popconfirm,
   theme,
   message,
+  Modal,
 } from "antd";
 import {
   RobotOutlined,
@@ -745,6 +746,20 @@ const MessageBubble = React.memo(function MessageBubble({
   msg: AgentMessage;
   streaming: boolean;
 }) {
+  // 用户消息附件点击放大: 在气泡外层维护 previewingAttachment state.
+  // 原因: MessageBubble 被 React.memo 包, 用内部 state 不会让兄弟气泡重渲;
+  // 另外图片 src 在 bubble 内随手就能取到, 不必把 state 上提到 Agent 主组件.
+  // 修复历史: 之前卡片只显示 80x80 cover 缩略图, 长截图 (聊天记录等) 大量细节
+  // 被裁掉看不到 — 用户截图抱怨"识别对话内容"卡片显示不出来. 现在保留 cover
+  // 缩略图 (与状态栏一致), 但加点击放大, 让原图完整可见.
+  const [previewingAttachment, setPreviewingAttachment] = useState<
+    | {
+        url: string;
+        filename: string;
+      }
+    | null
+  >(null);
+
   // 来自 transcript 历史回放: 思考块作为独立条目, 与 assistant.text 配对出现
   if (msg.type === "assistant.thinking") {
     return (
@@ -775,7 +790,15 @@ const MessageBubble = React.memo(function MessageBubble({
           }}
         >
           {msgAttachments.length > 0 && (
-            <AttachmentStrip attachments={msgAttachments} />
+            <AttachmentStrip
+              attachments={msgAttachments}
+              onPreview={(a) =>
+                setPreviewingAttachment({
+                  url: a.thumbnailUrl,
+                  filename: a.filename,
+                })
+              }
+            />
           )}
           <Space>
             <UserOutlined />
@@ -786,6 +809,41 @@ const MessageBubble = React.memo(function MessageBubble({
             </Text>
           </Space>
         </Card>
+        {/* 附件大图预览: 跟气泡同级, 不影响 maxWidth:70% 气泡本身宽度.
+            footer 为 null 干净版, mask 半透明黑让用户聚焦图片, body 用 0 padding
+            让图片填满. zoom-out cursor 暗示可关闭. */}
+        <Modal
+          open={previewingAttachment !== null}
+          onCancel={() => setPreviewingAttachment(null)}
+          footer={null}
+          width="auto"
+          centered
+          destroyOnClose
+          title={previewingAttachment?.filename}
+          styles={{
+            body: {
+              padding: 0,
+              background: "transparent",
+            },
+          }}
+        >
+          {previewingAttachment && (
+            <img
+              src={previewingAttachment.url}
+              alt={previewingAttachment.filename}
+              style={{
+                display: "block",
+                maxWidth: "90vw",
+                maxHeight: "85vh",
+                width: "auto",
+                height: "auto",
+                cursor: "zoom-out",
+                borderRadius: 4,
+              }}
+              onClick={() => setPreviewingAttachment(null)}
+            />
+          )}
+        </Modal>
       </div>
     );
   }
