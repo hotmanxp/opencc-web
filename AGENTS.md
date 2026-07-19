@@ -132,6 +132,68 @@ tool_use(AskUserQuestion) → toolExecution yield tool_use:ask_pending
 - v2 transcript resume:`store.read` 必须把 `type:'tool_use'` 顶层消息的 content 合并到上一条 assistant,否则下一轮 `tool_result` block 找不到对应 `tool_use_id` 报 Anthropic 2013 — `queryLoop.ts:140-185`
 - BackgroundRuntime 重启:`store.load(id)` 拿不到 in-memory `TaskRecord` → `events()` 退化成"只回放历史"模式(`events/<id>.log`),客户端用 Last-Event-ID 续读
 
+## 会话压缩(阶段 1 已交付)
+
+zai 主对话路径已支持自动压缩,3 道防线(`snip` → `forceReason` → `autocompact`) + circuit breaker 失败熔断。
+
+- **运行时**:`packages/zai-agent-core/src/runtime/compact/`(9 个小文件,每文件 ≤ 200 行)
+- **集成测试**:`packages/zai-agent-core/test/integration/agent/auto-compact-turn-loop.test.ts`(8 个 case)
+- **Spec**:`docs/superpowers/specs/2026-07-19-zai-session-compaction-design.md`
+- **Plan**:`docs/superpowers/plans/2026-07-19-zai-auto-compact-core.md`(19 tasks,阶段 1 已交付)
+
+### 数据流
+
+```
+queryLoop 每轮 turn 进入
+  ↓
+snipCompactIfNeeded (削 ≥95% 阈值的早期 user 消息)
+  ↓
+resolveForceReason (memory-pressure > message-count > token 阈值)
+  ↓ forceReason 写入 tracking.forceReason
+autoCompactIfNeeded (per spec)
+  ├─ shouldAutoCompact → querySource 递归守卫 / ZAI_DISABLE_* env / token 阈值 / forceReason
+  ├─ resolveAutoCompactCircuitBreakerState → closed / half-open / skip(open + cooldown)
+  ├─ compactConversation → streaming modelCaller → boundary + summary message
+  ├─ store.replace() 落盘(沿用 proper-lockfile)
+  └─ logEvent → ~/.zai/logs/compact.jsonl(JSONL,无锁)
+  ↓
+yield 内部 compaction.completed 事件
+  ↓
+routes/agent.ts translateRuntimeEvents 翻译为 SSE runtime.compacted
+  ↓
+useAgentStore.applyCompactionEvent → 5s 自动消失的 toast
+```
+
+### Env 矩阵(`runtime/compact/index.ts` 顶部消费)
+
+| Env | 默认 | 说明 |
+|---|---|---|
+| `ZAI_DISABLE_AUTO_COMPACT` | `0` | 设为 `1` 禁自动压缩,manual `/compact` 仍可用 |
+| `ZAI_DISABLE_COMPACT` | `0` | 设为 `1` 禁所有压缩 |
+| `ZAI_AUTOCOMPACT_PCT_OVERRIDE` | unset | 0-100,覆盖 token 阈值百分比 |
+| `ZAI_AUTOCOMPACT_FAILURE_COOLDOWN_MS` | `300000`(5min) | ≥ 10000,失败后冷却时长 |
+| `ZAI_MAX_ACTIVE_MESSAGES` | `200` | message-count forceReason 触发上限 |
+| `ZAI_AUTOCOMPACT_FORCE_FLOOR_PCT` | `75` | 大上下文安全百分比(floor) |
+
+### 已交付
+
+- ✅ 主动压缩核心(`autoCompactIfNeeded`) + snip + forceReason 3 道防线
+- ✅ Circuit breaker 状态机(`resolveAutoCompactCircuitBreakerState`,half-open 模式)
+- ✅ Streaming 摘要生成(`compactConversation` 阶段 1 简化版)
+- ✅ 本地 JSONL 日志(`~/.zai/logs/compact.jsonl`) + `logEvent` 模拟接口
+- ✅ `runtime.compacted` SSE 事件 + 前端 toast 提示
+- ✅ `compactService.ts` shim 化,保持 `/compact` 命令向后兼容
+- ✅ Transcript schema:`CompactMetadata` + `compact_boundary` type
+- ✅ `TranscriptStore.replaceWithBoundary`(链式压缩写盘,阶段 3 接 resume 路径)
+- ✅ Coverage: 关键模块 line ≥ 92%,branch ≥ 80%(spec §11.6 目标)
+
+### 阶段 2-4 待办(单独 plan)
+
+- 阶段 2:`/compact` v2(PTL 自愈 + prompt cache 复用 + pre/post hook)
+- 阶段 3:Transcript 回放支持 `compact_boundary`(链式压缩 + resume 跳过)
+- 阶段 4:Reactive compact(API 413 / media_size / max_tokens 自愈) + API microcompact(`context_management.edits`)
+- 阶段 1 限制:`manual /compact` 在大对话下仍可能 `kind: 'error'`(阶段 1 不做 PTL 自愈);`autocompact` / `conversation` branch coverage < 85%,阶段 2 补
+
 ## 已知薄弱点
 
 - `/agent/prompt` HARD_TIMEOUT 2h 没有自动化测试(常量 `agent.ts:34`)。AskUserQuestion 的等待不该被这条 timeout 掐死;若要让 ask 单独计时,应在 `askRegistry.register` 里接独立 setTimeout,而不是复用这里的 abortController。
