@@ -68,6 +68,11 @@ export function wrapAsOpenccTool(legacy: LegacyTool): Tool {
       return legacy.preparePermissionMatcher(input)
     },
 
+    inputsEquivalent(input1: any, input2: any) {
+      if (!legacy.inputsEquivalent) return false
+      return legacy.inputsEquivalent(input1, input2)
+    },
+
     toAutoClassifierInput(input: any) {
       if (legacy.toAutoClassifierInput) return legacy.toAutoClassifierInput(input)
       if (typeof input === 'string') return input

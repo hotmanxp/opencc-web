@@ -93,6 +93,14 @@ export type LegacyTool<
   /** Opencc `Tool.preparePermissionMatcher` — 为 hook `if` 条件编译闭包。 */
   preparePermissionMatcher?: (input: any) => Promise<(pattern: string) => boolean>
 
+  /**
+   * Opencc `Tool.inputsEquivalent` — decide whether two invocations of this
+   * tool would produce equivalent side effects. Used by the runtime to
+   * coalesce redundant tool_use calls inside the same turn. Optional;
+   * adapters default to `false` (never equivalent) when absent.
+   */
+  inputsEquivalent?: (input1: any, input2: any) => boolean
+
   /** Opencc `Tool.description` — 异步获取简短描述。 */
   asyncDescription?: (input: any) => Promise<string>
 
@@ -118,6 +126,14 @@ export type LegacyTool<
 
   /** Opencc `Tool.getActivityDescription` — spinner 显示。 */
   getActivityDescription?: (input: any) => string | null
+
+  /**
+   * zai extension: resolve isolation strategy for this call. Default
+   * implementation may return 'none'. AgentTool uses this to gate the
+   * ZAI_ENABLE_AGENT_WORKTREE_ISOLATION env flag and emit a warning when
+   * isolation is requested without backing infrastructure.
+   */
+  resolveIsolation?: (input: any) => 'worktree' | 'none' | string
 
   /** Opencc `Tool.maxResultSizeChars` — 超过此大小落盘。 */
   maxResultSizeChars?: number
