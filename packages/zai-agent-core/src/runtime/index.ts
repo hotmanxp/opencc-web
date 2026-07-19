@@ -54,3 +54,7 @@ export type { CompactSessionOptions, CompactSessionResult } from './compactServi
 
 // 后台任务运行时 (Phase 1 + Phase 2)
 export * from './background/index.js'
+
+// Per-session cwd tracking (zai LLM-self-cwd-switch feature)
+export { CwdStore, type SessionCwd } from './cwdStore.js'
+export { runWithSessionId, getCurrentSessionId } from '../opencc-internals/utils/cwd.js'

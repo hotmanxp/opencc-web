@@ -27,6 +27,7 @@
  */
 import { spawn } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
+import { readFileSync, unlinkSync } from 'node:fs'
 import type { LegacyTool, LegacyToolContext } from '../Tool.js'
 import type { SandboxConfig } from '../../runtime/types.js'
 import { BashInputSchema, type BashInput } from './schema.js'
@@ -51,6 +52,7 @@ import {
 } from './utils.js'
 import { BASH_TOOL_NAME } from './toolName.js'
 import { checkDestructiveCommand } from './destructiveCommandWarning.js'
+import { CwdStore } from '../../runtime/cwdStore.js'
 
 // tool_result block 的形状 (Anthropic SDK 复用类型) — 本地声明避免拉 @anthropic-ai/sdk
 type ToolResultBlockParam = {
@@ -259,7 +261,11 @@ export const BashTool: LegacyTool<typeof BashInputSchema, string> = {
 
     const analysis = analyzeBashCommand(input.command)
     const useSandbox = shouldUseSandbox(input, analysis)
-    const effectiveWorkdir = useSandbox ? cfg.workdir : (ctx.cwd || process.cwd())
+    const sessionId = (ctx.__runtimeConfig as { sessionId?: string } | undefined)?.sessionId ?? ''
+    const cwdFromStore = sessionId ? CwdStore.get(sessionId) : undefined
+    const effectiveWorkdir = useSandbox
+      ? cfg.workdir
+      : (cwdFromStore ?? ctx.cwd) || process.cwd()
     const effectiveEnv = useSandbox ? pickEnv(process.env, cfg.envAllowlist) : process.env
 
     if (input.run_in_background) return runInBackground(input, effectiveWorkdir, effectiveEnv, ctx)
@@ -291,15 +297,17 @@ async function runForeground(
     let settled = false
     let assistantAutoBackgrounded = false
 
-    const child = spawn('sh', ['-c', input.command], {
+    const taskId = `bash-${randomUUID().slice(0, 8)}`
+    const sessionId = (ctx.__runtimeConfig as { sessionId?: string } | undefined)?.sessionId ?? ''
+    const tmpCwdFile = `/tmp/zai-bash-${taskId}-cwd`
+    const wrappedCommand = `${input.command}\npwd -P >| ${tmpCwdFile}`
+
+    const child = spawn('sh', ['-c', wrappedCommand], {
       cwd: workdir,
       env,
       timeout: timeoutMs,
       signal: ctx.abortSignal,
     })
-
-    const taskId = `bash-${randomUUID().slice(0, 8)}`
-    const sessionId = (ctx.__runtimeConfig as { sessionId?: string } | undefined)?.sessionId ?? ''
 
     bashBackgroundTracker.registerForeground(taskId, {
       sessionId,
@@ -355,6 +363,26 @@ async function runForeground(
         code === 0 ? 'completed' : 'failed',
         { exitCode: code ?? undefined, signal: signal ?? undefined },
       )
+
+      // cwd trailer: read tmpfile written by `pwd -P >| tmpCwdFile` appended to user command
+      if (sessionId) {
+        try {
+          const raw = readFileSync(tmpCwdFile, 'utf8').trim()
+          // sh's pwd -P already resolves symlinks; NFC-normalize for Unicode paths
+          const newCwd = raw.normalize('NFC')
+          const oldCwd = CwdStore.get(sessionId)
+          if (newCwd && newCwd !== oldCwd) {
+            CwdStore.set(sessionId, newCwd)
+          }
+        } catch {
+          // tmpfile missing (cmd aborted before trailer ran) or permission error — keep old cwd
+        }
+        try {
+          unlinkSync(tmpCwdFile)
+        } catch {
+          // best-effort cleanup
+        }
+      }
 
       if (resetCwdIfOutsideProject()) {
         stderr = stdErrAppendShellResetMessage(stderr)

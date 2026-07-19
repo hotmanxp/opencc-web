@@ -12,7 +12,16 @@ vi.mock("../store/useAppStore.js", () => ({
     instanceContext: { cwdName: '~', branch: 'master' },
     toasts: [],
     jobs: {},
+    setInstanceContext: vi.fn(),
   }),
+}))
+vi.mock("../hooks/useSessionCwd.js", () => ({
+  useSessionCwd: () => undefined,  // SessionCwdBridge 内部 hook:no-op for tests
+}))
+// 把整个 SessionCwdBridge mock 掉,因为它的 useEffect 链在 Agent 测试
+// 关心不到,提前让它什么都不渲染
+vi.mock("../components/SessionCwdBridge.js", () => ({
+  SessionCwdBridge: () => null,
 }))
 vi.mock("../components/TaskDrawer.js", () => ({
   TaskDrawer: () => null,

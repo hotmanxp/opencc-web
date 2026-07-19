@@ -4,11 +4,19 @@ import { TaskDock } from "./TaskDock";
 
 type Props = {
   cwdName: string;
+  /** Per-session cwd (overrides cwdName when provided; e.g., "/Users/me/proj/sub" → renders "sub"). */
+  sessionCwd?: string;
   branch: string;
   onTaskSelect: (taskId: string) => void;
 };
 
-export default function ConfigStatusBar({ cwdName, branch, onTaskSelect }: Props) {
+export default function ConfigStatusBar({ cwdName, sessionCwd, branch, onTaskSelect }: Props) {
+  // When sessionCwd is provided, show its basename; otherwise fall back to the static cwdName.
+  // Browser side has no node:path, so use string split. Empty parts (from leading "/") are filtered.
+  const displayName = sessionCwd
+    ? sessionCwd.split('/').filter(Boolean).pop() || sessionCwd
+    : cwdName
+
   return (
     <div
       style={{
@@ -24,7 +32,7 @@ export default function ConfigStatusBar({ cwdName, branch, onTaskSelect }: Props
       }}
     >
       <ModeStatusButton />
-      <span style={{ color: "#eab308" }}>{cwdName}</span>
+      <span style={{ color: "#eab308" }}>{displayName}</span>
       <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
       <span style={{ color: "#22c55e" }}>{branch}</span>
       <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>

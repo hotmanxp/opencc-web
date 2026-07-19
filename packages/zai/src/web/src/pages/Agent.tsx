@@ -45,6 +45,7 @@ import { splitMarkdownOnIncomplete } from "../lib/splitMarkdown.js";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import ConfigStatusBar from "../components/ConfigStatusBar";
+import { SessionCwdBridge } from "../components/SessionCwdBridge";
 import { TaskDrawer } from "../components/TaskDrawer";
 import TodoZone from "../components/TodoZone.jsx";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
@@ -1479,6 +1480,7 @@ export default function Agent() {
         </div>
       </div>
       <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
+      <SessionCwdBridge />
     </div>
   );
 }

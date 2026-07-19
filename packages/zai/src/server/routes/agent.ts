@@ -14,6 +14,7 @@ import {
   listSkills,
 } from "../services/agentRuntime.js";
 import { EXTERNAL_PERMISSION_MODES, type UserFacingPermissionMode } from "@zn-ai/zai-agent-core";
+import { CwdStore, runWithSessionId } from "@zn-ai/zai-agent-core/runtime";
 import { getDefaultMode } from "../services/permissionMode.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
@@ -367,8 +368,9 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   // 立即响应，事件通过 eventBus → /api/event SSE
   res.json({ sessionId });
 
-  // 异步 fire-and-forget 运行 runtime
-  void (async () => {
+  // 异步 fire-and-forget 运行 runtime; 整段包进 runWithSessionId 让 queryLoop
+  // 里的 getCwd() 通过 ALS 解析到本 session 的逻辑 cwd。
+  void runWithSessionId(sessionId, async () => {
     try {
       // AGENTS.md / .claude/rules 加载由 queryLoop.buildSystemPrompt 内部
       // 通过 loadMemoryForPrompt 完成（见 zai-agent-core/src/runtime/queryLoop.ts）。
@@ -541,7 +543,7 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
     } finally {
       clearTimeout(timer);
     }
-  })();
+  });
 });
 
 // GET /api/agent/sessions — 列出当前实例 cwd 对应的 session
@@ -574,6 +576,19 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
   }
 });
 
+// GET /api/agent/sessions/:id/pwd — 返回 session 当前逻辑 cwd(LLM 自切后)
+router.get('/agent/sessions/:id/pwd', (req: Request, res: Response) => {
+  const sid = req.params.id
+  if (!CwdStore.has(sid)) {
+    return res.status(404).json({ error: 'session not found' })
+  }
+  const cwd = CwdStore.get(sid)
+  if (!cwd) {
+    return res.status(404).json({ error: 'session not found' })
+  }
+  return res.json({ cwd })
+})
+
 // GET /api/agent/sessions/:id — 读取指定 session 的消息（校验 cwd）
 router.get('/agent/sessions/:id', async (req: Request, res: Response) => {
   try {
@@ -601,6 +616,8 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
       return res.status(404).json({ error: 'Session not found' })
     }
     await store.remove(req.params.id)
+    // 同时清掉 per-session cwd map(防内存泄漏 + 防止 stale data)
+    CwdStore.delete(req.params.id)
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
