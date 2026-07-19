@@ -169,25 +169,6 @@ export function createAnthropicModelCaller(): ModelCaller {
           : (m.content as Array<{ type: string; text?: string; tool_use_id?: string; content?: string }>),
     })) as Anthropic.Messages.MessageParam[]
 
-    // Always-on request metadata log. minimax 代理在新 session 也复现 413 时,
-    // 这是定位 minimax 拒绝原因的唯一现场 — 哪个字段(shape/size)触发 413。
-    // body 完整 dump 太重, 只记 metadata; 配合 ZAI_DEBUG=1 走 error 段补 dump headers。
-    console.error('[zai.modelCaller] → request', JSON.stringify({
-      model: resolvedModel,
-      max_tokens: 8192,
-      thinking: { type: 'enabled', budget_tokens: 4096 },
-      systemPromptKind:
-        typeof systemPrompt === 'string'
-          ? `string(${systemPrompt.length}B)`
-          : Array.isArray(systemPrompt) && systemPrompt.every((s) => typeof s === 'string')
-            ? `string[${systemPrompt.length}](${(systemPrompt as string[]).join('').length}B)`
-            : `blocks[${(systemPrompt as unknown[]).length}]`,
-      messageCount: sdkMessages.length,
-      toolCount: tools.length,
-      toolNames: tools.map((t) => t.name),
-      anthropicBeta: 'anthropic-tot-control,interleaved-thinking-2025-05-14',
-    }))
-
     // Use the streaming API and yield each event as it arrives from upstream.
     // The SDK returns RawMessageStreamEvent objects (snake_case) which already
     // match the ModelCaller contract, so we just pass them through.
