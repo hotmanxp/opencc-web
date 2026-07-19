@@ -27,10 +27,11 @@ let onChangeCallback: ((path: string) => void) | null = null
 function watcherCallback(path: string): (curr: { mtime?: Date }) => void {
   return (curr) => {
     if (!curr.mtime) return
+    const currMs = curr.mtime.getTime()
     const entry = watchedFiles.find((w) => w.path === path)
     if (!entry) return
-    if (entry.prevMtimeMs === curr.mtimeMs) return
-    entry.prevMtimeMs = curr.mtimeMs
+    if (entry.prevMtimeMs === currMs) return
+    entry.prevMtimeMs = currMs
     clearMemoryCache()
     if (onChangeCallback) onChangeCallback(path)
   }

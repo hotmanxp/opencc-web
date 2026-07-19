@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm, writeFile, utimes } from 'fs/promises'
+import { mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { startMemoryWatcher, stopMemoryWatcher } from '../../src/agents/memoryWatcher.js'
