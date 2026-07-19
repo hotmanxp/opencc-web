@@ -1,41 +1,19 @@
-import { useEffect } from 'react'
-import { listBashTasks, type BashTaskInfo } from '../lib/taskApi.js'
 import { useAgentStore } from '../store/useAgentStore.js'
+import type { BashTaskInfo } from '../lib/taskApi.js'
 
 /**
  * 当前 session 的 Bash 后台任务。
  *
- * SSE 推送 (bash_task.changed) 经 useAgentStore.bashTasksBySession 维护。
- * 仅当 store 无值时 fallback 一次性 fetch `/api/bash-tasks?sessionId=...`,
- * 之后完全靠 SSE。
+ * 100% SSE 推送 (bash_task.changed) — store 由 useEventStream dispatch
+ * 通过 applyBashTaskChanged reducer 维护。无冷启动 fallback fetch。
+ *
+ * 副作用: 切到全新 session 时,cold start 期间返回空数组(直到 BashTool
+ * 跑后台命令)。这是有意的 trade-off — 不再用一次性 REST 拉取。
  */
-export function useBashBackgroundTasks() {
+export function useBashBackgroundTasks(): { tasks: BashTaskInfo[]; loading: boolean } {
   const sessionId = useAgentStore((s) => s.sessionId)
   const tasks = useAgentStore((s) =>
     sessionId ? s.bashTasksBySession[sessionId] ?? [] : []
   )
-  const has = useAgentStore((s) =>
-    sessionId ? sessionId in s.bashTasksBySession : false
-  )
-
-  useEffect(() => {
-    if (!sessionId || has) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const list = await listBashTasks(sessionId)
-        if (cancelled) return
-        for (const task of list) {
-          useAgentStore.getState().applyBashTaskChanged({ sessionId, task })
-        }
-      } catch (err) {
-        if (!cancelled) console.warn('[useBashBackgroundTasks] initial fetch failed:', err)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [sessionId, has])
-
   return { tasks, loading: false }
 }

@@ -12,14 +12,13 @@ import {
 } from '@ant-design/icons'
 import {
   cancelTask,
-  fetchTask,
-  fetchBashTask,
   killBashTask,
   subscribeTaskEvents,
   type BackgroundTask,
   type BashTaskInfo,
   type SseFrame,
 } from '../lib/taskApi.js'
+import { useAgentStore } from '../store/useAgentStore.js'
 
 interface ToolCallEntry {
   toolUseId: string
@@ -167,11 +166,8 @@ export function PromptBlock({ text }: { text: string }) {
  *  Status · Runtime · Command · Output (stdout/stderr 合并展示). */
 export function BashTaskView({
   task,
-  onTaskChange,
 }: {
   task: BashTaskInfo
-  /** 杀进程后回调,让外部重新拉详情. */
-  onTaskChange?: (next: BashTaskInfo) => void
 }) {
   const [expanded, setExpanded] = useState(false)
   const [killing, setKilling] = useState(false)
@@ -494,8 +490,26 @@ export function TaskDrawer({
   taskId: string | null
   onClose: () => void
 }) {
-  const [detail, setDetail] = useState<BackgroundTask | null>(null)
-  const [bashTask, setBashTask] = useState<BashTaskInfo | null>(null)
+  // detail / bashTask 100% 从 useAgentStore 读 — SSE agent_task.changed /
+  // bash_task.changed 推送的 BackgroundTaskSummary.detail 已含完整 task。
+  // 切 session 期间 store 里没当前 taskId 的 entry 时显示 "not found"。
+  const allSessionIds = useAgentStore((s) => Object.keys(s.agentTasksBySession))
+  const detail = useAgentStore((s) => {
+    if (!taskId || taskId.startsWith('bash-')) return null
+    for (const sid of Object.keys(s.agentTasksBySession)) {
+      const summary = s.agentTasksBySession[sid]?.find((t) => t.taskId === taskId)
+      if (summary?.detail) return summary.detail
+    }
+    return null
+  })
+  const bashTask = useAgentStore((s) => {
+    if (!taskId || !taskId.startsWith('bash-')) return null
+    for (const sid of Object.keys(s.bashTasksBySession)) {
+      const t = s.bashTasksBySession[sid]?.find((task) => task.taskId === taskId)
+      if (t) return t
+    }
+    return null
+  })
   const [events, setEvents] = useState<StreamedEvent[]>([])
   const [loading, setLoading] = useState(false)
   const aborterRef = useRef<AbortController | null>(null)
@@ -503,42 +517,32 @@ export function TaskDrawer({
   // 区分 agent task 与 bash task: taskId 以 "bash-" 开头为 bash.
   const isBashTask = !!taskId && taskId.startsWith('bash-')
 
-  // 打开 task 时拉详情 + 订阅
+  // taskId 变化时清 events;detail/bashTask 由上面 selector 实时算。
   useEffect(() => {
     if (!taskId) {
-      setDetail(null)
-      setBashTask(null)
       setEvents([])
       return
     }
     setLoading(true)
-    let cancelled = false
-    void (async () => {
-      try {
-        if (isBashTask) {
-          const t = await fetchBashTask(taskId)
-          if (cancelled) return
-          setBashTask(t)
-        } else {
-          const t = await fetchTask(taskId)
-          if (cancelled) return
-          setDetail(t)
-        }
-      } catch (err) {
-        console.warn('[TaskDrawer] fetch task failed:', err)
-      } finally {
-        if (!cancelled) setLoading(false)
-      }
-    })()
+    // SSE agent_task.changed / bash_task.changed 已保证 store 里有最新 task;
+    // 200ms 后若 store 仍没 entry(detail/bashTask 都 null),显示 "not found"。
+    // 这是 SSE 还没推到的窗口(冷启动),非真错误 — 见 useBackgroundTasks 设计。
+    const t = setTimeout(() => setLoading(false), 200)
+    return () => clearTimeout(t)
+  }, [taskId])
 
-    // 订阅事件流。注意:destroyOnClose 让每次打开 drawer 都是全新挂载、
-    // events 数组已 reset 为 [],所以这里**永远从 seq=0 开始**重放,避免
-    // 误把 eventCount 当作 Last-Event-ID 续读——那样会导致已完成任务的
-    // 全部历史事件(seq 1..eventCount)从未到达前端,而后端只发 seq>eventCount
-    // 的尾包,UI 看起来像"事件: 0 / 等待事件..."。服务端在读完历史后
-    // 对运行中任务会自动转 live tail,对已完成任务直接结束 SSE 流。
+  // 订阅 agent task event stream (bash task 没有自己的 event stream,
+  // 完全靠 bash_task.changed SSE 推 detail 到 store;drawer 直接读 store 渲染)。
+  // destroyOnClose 让每次打开 drawer 都是全新挂载、events 数组已 reset 为 [],
+  // 所以这里**永远从 seq=0 开始**重放,避免误把 eventCount 当作 Last-Event-ID
+  // 续读 — 那样会导致已完成任务的全部历史事件(seq 1..eventCount)从未到达前端,
+  // 而后端只发 seq>eventCount 的尾包,UI 看起来像"事件: 0 / 等待事件..."。
+  // 服务端在读完历史后对运行中任务会自动转 live tail,对已完成任务直接结束 SSE 流。
+  useEffect(() => {
+    if (!taskId || isBashTask) return
     const ac = new AbortController()
     aborterRef.current = ac
+    let cancelled = false
     void (async () => {
       try {
         for await (const frame of subscribeTaskEvents(taskId, 0, ac.signal)) {
@@ -550,61 +554,60 @@ export function TaskDrawer({
         console.warn('[TaskDrawer] subscribe events failed:', err)
       }
     })()
-
-    function handleFrame(frame: SseFrame) {
-      const wireData = frame.data as StreamedEvent['data'] & {
-        seq?: number
-        ts?: number
-        type?: string
-        eventId?: string
-        data?: StreamedEvent['data']
-      }
-      // ★ 关键修复 (HRMSV3-ZN-WEBSITE#668):解开 server 端的 SSE 双层包裹。
-      // routes/tasks.ts 的 evToWire 把 NDJSON 行的整个对象(含 type/data 等
-      // metadata)放进了 JSON payload,导致 wire 是 wrapper {seq,type,eventId,data: <payload>}。
-      // buildTimeline 之前在 wrapper 上找 toolUseId / delta.text 等 → 全部 undefined,
-      // tool_use:start 直接被 `if (!toolUseId) break` 静默跳过,前端就只剩 system 类的
-      // runtime.done 卡片,看起来"事件数有,但工具调用不显示"。
-      //
-      // task.ended 走的是另外的字段(status/resultText 直接在 wrapper 上),
-      // 不需要再下钻到 .data,保留原形态。
-      if (frame.event === 'task.ended') {
-        setDetail((prev) =>
-          prev
-            ? {
-                ...prev,
-                status: (wireData as { status?: string }).status as BackgroundTask['status'] ?? prev.status,
-                resultText: (wireData as { resultText?: string }).resultText ?? prev.resultText,
-                finishedAt: Date.now(),
-              }
-            : prev,
-        )
-        return
-      }
-      const innerPayload =
-        wireData && typeof wireData === 'object' && 'data' in wireData && wireData.data && typeof wireData.data === 'object'
-          ? (wireData.data as StreamedEvent['data'])
-          : wireData
-      const ts = innerPayload && typeof innerPayload === 'object' && 'ts' in innerPayload && typeof (innerPayload as { ts?: number }).ts === 'number'
-        ? (innerPayload as { ts: number }).ts
-        : (wireData as { ts?: number }).ts ?? Date.now()
-      setEvents((prev) => [
-        ...prev,
-        {
-          seq: frame.id,
-          type: frame.event,
-          ts,
-          data: innerPayload,
-        },
-      ])
-    }
-
     return () => {
       cancelled = true
       ac.abort()
       aborterRef.current = null
     }
   }, [taskId, isBashTask])
+
+  function handleFrame(frame: SseFrame) {
+    const wireData = frame.data as StreamedEvent['data'] & {
+      seq?: number
+      ts?: number
+      type?: string
+      eventId?: string
+      data?: StreamedEvent['data']
+    }
+    // ★ 关键修复 (HRMSV3-ZN-WEBSITE#668):解开 server 端的 SSE 双层包裹。
+    // routes/tasks.ts 的 evToWire 把 NDJSON 行的整个对象(含 type/data 等
+    // metadata)放进了 JSON payload,导致 wire 是 wrapper {seq,type,eventId,data: <payload>}。
+    // buildTimeline 之前在 wrapper 上找 toolUseId / delta.text 等 → 全部 undefined,
+    // tool_use:start 直接被 `if (!toolUseId) break` 静默跳过,前端就只剩 system 类的
+    // runtime.done 卡片,看起来"事件数有,但工具调用不显示"。
+    //
+    // task.ended 走的是另外的字段(status/resultText 直接在 wrapper 上),
+    // 不需要再下钻到 .data,保留原形态。
+    if (frame.event === 'task.ended') {
+      setDetail((prev) =>
+        prev
+          ? {
+              ...prev,
+              status: (wireData as { status?: string }).status as BackgroundTask['status'] ?? prev.status,
+              resultText: (wireData as { resultText?: string }).resultText ?? prev.resultText,
+              finishedAt: Date.now(),
+            }
+          : prev,
+      )
+      return
+    }
+    const innerPayload =
+      wireData && typeof wireData === 'object' && 'data' in wireData && wireData.data && typeof wireData.data === 'object'
+        ? (wireData.data as StreamedEvent['data'])
+        : wireData
+    const ts = innerPayload && typeof innerPayload === 'object' && 'ts' in innerPayload && typeof (innerPayload as { ts?: number }).ts === 'number'
+      ? (innerPayload as { ts: number }).ts
+      : (wireData as { ts?: number }).ts ?? Date.now()
+    setEvents((prev) => [
+      ...prev,
+      {
+        seq: frame.id,
+        type: frame.event,
+        ts,
+        data: innerPayload,
+      },
+    ])
+  }
 
   const timeline = useMemo(() => buildTimeline(events), [events])
   const meta = detail ? STATUS_META[detail.status] : null

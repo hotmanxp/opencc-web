@@ -1049,30 +1049,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     } catch {
       // ignore
     }
-    // 异步回填 v2 tasks: transcript 不持久化 v2 task (它们在
-    // ~/.zai/tasks/<sessionId>.json, 按 sessionId 隔离), 必须从服务端
-    // GET 一次拿磁盘上当前 session 的最新任务列表. 不 await,
-    // fire-and-forget — UI 会随 setV2Tasks 自然刷新. 失败静默,
-    // 下次切会话/刷新会再拉一次.
-    // 内联 fetch 而非 import v2TaskApi 是为了避开 store → v2TaskApi → store
-    // (type-only) 的 ESM 循环引用.
-    void (async () => {
-      try {
-        const token = localStorage.getItem('zai-token') || ''
-        const v2Res = await fetch(
-          `/api/agent/sessions/${encodeURIComponent(sessionId)}/v2-tasks`,
-          { headers: { 'X-Zai-Token': token } },
-        )
-        if (!v2Res.ok) return
-        const v2Data = (await v2Res.json()) as { tasks: V2TaskItem[] }
-        useAgentStore.setState((s) => ({
-          v2TasksBySession: { ...s.v2TasksBySession, [sessionId]: v2Data.tasks },
-        }))
-        scheduleTaskListClearIfAllDone(sessionId)
-      } catch {
-        // 静默: 同上
-      }
-    })()
+    // 100% SSE 设计: 不再 fetch /v2-tasks. v2 tasks 由 SSE v2_task.changed
+    // 推送,通过 applyV2TaskChanged reducer 维护 v2TasksBySession。冷启动
+    // 期间 v2TasksBySession 为空,直到第一个 TaskCreate/TaskUpdate tool_call
+    // 触发 SSE 推送。这是有意的 trade-off — 不再用一次性 REST 拉取。
   },
 
   sendMessage: async (_prompt: string) => {
@@ -1283,26 +1263,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           input: event.input as Record<string, unknown>,
         }
         useAgentStore.getState().upsertToolCall(startMsg)
-        // V2 TaskList 增量刷新: 收到 TaskCreate / TaskUpdate tool_call 时,
-        // 异步重新拉一次 server (server 已按当前 sessionId 过滤后, 写盘到
-        // ~/.zai/tasks/<sessionId>.json) 覆盖本地 v2TasksBySession 缓存.
-        // fire-and-forget, 失败静默 —
-        // 下次切会话/刷新会再拉一次兜底. 内联 fetch 而非 import v2TaskApi
-        // 是为了避开 store → v2TaskApi → store (type-only) 的 ESM 循环引用.
-        if (event.toolName === 'TaskCreate' || event.toolName === 'TaskUpdate') {
-          void (async () => {
-            try {
-              const token = localStorage.getItem('zai-token') || ''
-              const res = await fetch(
-                `/api/agent/sessions/${encodeURIComponent(sid)}/v2-tasks`,
-                { headers: { 'X-Zai-Token': token } },
-              )
-              if (!res.ok) return
-              const data = (await res.json()) as { tasks: V2TaskItem[] }
-              useAgentStore.getState().setV2Tasks(sid, data.tasks)
-            } catch { /* 静默 */ }
-          })()
-        }
+        // V2 TaskList 增量刷新: 100% SSE 设计,不再 fetch /v2-tasks。
+        // TaskCreate/TaskUpdate tool_call 触发 server 端 TaskListStore.write,
+        // 后者 emit v2_task.changed (Task 4 + Task 8 + Task 11 wiring),前端
+        // useEventStream dispatch 调用 applyV2TaskChanged 自动更新 v2TasksBySession。
         return
       }
       case 'runtime.tool_result': {
