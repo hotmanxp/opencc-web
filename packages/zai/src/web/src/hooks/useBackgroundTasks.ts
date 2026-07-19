@@ -145,7 +145,7 @@ export function useBackgroundTasks() {
         for (const t of initial) {
           detailCache.current.set(t.id, t)
           useAgentStore.getState().applyAgentTaskChanged({
-            sessionId: t.parentSessionId ?? null,
+            sessionId: t.parentSessionId ?? currentSessionId ?? '',
             task: t,
           })
         }
