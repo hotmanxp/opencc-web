@@ -497,15 +497,12 @@ async function buildSystemPrompt(
     if (agentsSection) sections.push(agentsSection)
   }
 
-  // Boundary marker from vendored buildSystemPromptBlocks. Dynamic import
-  // for the same reason as above.
-  let boundary = ''
-  try {
-    const claude = await import('../opencc-internals/services/api/claude.js')
-    boundary = (claude as any).SYSTEM_PROMPT_DYNAMIC_BOUNDARY ?? ''
-  } catch {
-    // No-op if vendored constant not exported; we still return a valid array.
-  }
+  // Marker between static and dynamic sections. Anthropic prompt cache uses
+  // this to invalidate only the dynamic half. Mirrors vendored
+  // SYSTEM_PROMPT_DYNAMIC_BOUNDARY in
+  // opencc-internals/constants/prompts.ts:129.
+  const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'
+  const boundary = SYSTEM_PROMPT_DYNAMIC_BOUNDARY
 
   return [staticIntro, boundary, ...sections].filter(Boolean)
 }
