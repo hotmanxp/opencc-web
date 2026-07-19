@@ -17,34 +17,40 @@ export function AttachmentStrip({
   align = 'start',
   size = 80,
   compact = false,
-  previewSize,
+  previewHeight,
+  previewMaxWidth,
 }: {
   attachments: StripAttachment[]
   onRemove?: (localId: string) => void
   /** 点击缩略图回调. 传入时缩略图变为可点击 (cursor: zoom-in),
-   *  用于 MessageBubble 等"展示已发送图片"场景 — 让用户能放大查看
-   *  previewSize 模式显示得不够大的原图细节. 状态栏不传, 保持只读 + 移除. */
+   *  用于 MessageBubble 等"展示已发送图片"场景 — 让用户能放大看
+   *  previewHeight 模式显示得不够大的原图细节. 状态栏不传, 保持只读 + 移除. */
   onPreview?: (attachment: StripAttachment) => void
   align?: 'start' | 'end'
   /** 缩略图边长 (px). 状态栏内嵌版用 40~48, 默认 80 适配原有大方块场景.
-   *  previewSize 模式下被忽略. */
+   *  previewHeight 模式下被忽略. */
   size?: number
   /** 紧凑模式: 去掉上下 padding, 用于内嵌到状态栏这类本身已有 padding 的容器里.
       MessageBubble 等独立场景保持默认 false, 仍带 8px 上下间距. */
   compact?: boolean
-  /** "完整可见"模式: 容器变成 maxWidth/maxHeight = previewSize (例如 240),
-   *  图片用 objectFit: contain + max-width/height:100% 按比例缩放,
-   *  长截图 (聊天记录 / 长图) 整张都能看到, 不会被 cover 裁掉.
+  /** "高固定宽自适应" 预览模式: 容器高度 = previewHeight (例如 80),
+   *  宽度由图片原始宽高比自动撑开 + maxWidth 上限 (默认 480).
+   *  跟 cover 方块不同 — 长截图 (聊天记录 / 长图) 整张可见不被裁掉,
+   *  但因为按比例缩放不会过份挤占卡片空间.
    *  仍可与 onPreview 联用做"点击再放大看更多细节".
    *  不传则保持原方块 cover 行为 (状态栏等不需要看全部内容的场景). */
-  previewSize?: number
+  previewHeight?: number
+  /** "高固定宽自适应" 模式的最大宽度. 防止极宽截图 (例如 1920x1080 横屏截图)
+   *  占满整个卡片. 默认 480. 0 / 不传 = 不限. */
+  previewMaxWidth?: number
 }) {
   if (attachments.length === 0) return null
-  const isPreviewMode = typeof previewSize === 'number' && previewSize > 0
+  const isPreviewMode =
+    typeof previewHeight === 'number' && previewHeight > 0
   // 移除按钮尺寸: 方块 cover 模式按 size 缩放 (24px@80, 16px@40).
-  // previewSize 模式按容器尺寸缩放, 略大 (24px@240) 方便点击.
+  // previewHeight 模式按高度缩放, 略小 (20px@80) 避免过大显得突兀.
   const removeBtnSize = isPreviewMode
-    ? Math.max(20, Math.round((previewSize ?? 0) * 0.1))
+    ? Math.max(16, Math.round((previewHeight ?? 0) * 0.25))
     : Math.max(14, Math.round(size * 0.25))
   return (
     <div
@@ -53,6 +59,10 @@ export function AttachmentStrip({
         justifyContent: align === 'end' ? 'flex-end' : 'flex-start',
         gap: 8,
         flexWrap: 'wrap',
+        // previewHeight 模式宽度由图撑开, maxWidth 上限防止外溢卡片,
+        // 单张时宽度 = 图片按比例缩放到指定高度的宽度;
+        // 多张时 flexWrap 让长截图也能在一行 / 多行展开.
+        maxWidth: isPreviewMode ? previewMaxWidth ?? 480 : undefined,
         padding: compact ? 0 : '8px 0',
       }}
     >
@@ -66,16 +76,18 @@ export function AttachmentStrip({
           e.stopPropagation()
           onPreview(a)
         }
-        // previewSize 模式: 容器是 maxWidth/maxHeight 上限 (非固定 size*size),
-        // 图片按原始宽高比缩放到容器内 (objectFit: contain). 这样长截图整张可见,
-        // cover 模式下被切掉的边缘内容 (对话头部/底部的人名、时间戳等) 都能看到.
+        // previewHeight 模式: 容器高度固定, 宽度 auto, 内部 <img height:100% width:auto>
+        // 自动按原始宽高比撑开宽度. 长截图整张可见不被裁剪 (cover 方块的问题).
+        // outer <div> 用 inline-flex 让容器贴合图片尺寸.
         const containerStyle: React.CSSProperties = isPreviewMode
           ? {
               position: 'relative',
-              maxWidth: previewSize,
-              maxHeight: previewSize,
-              minWidth: 80,
-              minHeight: 40,
+              height: previewHeight,
+              width: 'auto',
+              maxWidth: '100%',
+              display: 'inline-flex',
+              alignItems: 'center',
+              justifyContent: 'center',
               borderRadius: 6,
               overflow: 'hidden',
               background: 'rgba(0,0,0,0.04)',
@@ -85,11 +97,6 @@ export function AttachmentStrip({
                   : '1px solid transparent',
               cursor: clickable ? 'zoom-in' : undefined,
               padding: 0,
-              // button 默认 inline-block 行为会让 <img max-width:100%> 失效 —
-              // flex+center 保证图片被居中且自适应到容器内.
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
             }
           : {
               position: 'relative',
@@ -107,11 +114,11 @@ export function AttachmentStrip({
             }
         const imgStyle: React.CSSProperties = isPreviewMode
           ? {
-              // contain: 图片完整显示不裁剪, 自适应到容器内.
-              maxWidth: '100%',
-              maxHeight: typeof previewSize === 'number' ? previewSize : '100%',
+              // 按比例缩放: 高度固定 100%, 宽度 auto. 浏览器根据图片 natural
+              // 比例自动计算宽度, 长截图整张按比例显示. objectFit: contain 兜底
+              // 防止图片本身分辨率大于容器被拉伸 (应不会发生, 浏览器会尊重 natural size).
+              height: '100%',
               width: 'auto',
-              height: 'auto',
               display: 'block',
               objectFit: 'contain',
             }
