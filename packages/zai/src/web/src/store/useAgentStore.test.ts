@@ -1,4 +1,5 @@
-import { beforeEach, describe, expect, test } from 'vitest'
+// @vitest-environment happy-dom
+import { beforeEach, describe, expect, test, vi } from 'vitest'
 import { useAgentStore } from './useAgentStore.js'
 
 beforeEach(() => {
@@ -363,5 +364,146 @@ describe('useAgentStore.applyPromptAsk', () => {
     expect(ask.status).toBe('pending')
     expect(ask.answers).toEqual({})
     expect(ask.annotations).toEqual({})
+  })
+})
+
+// ========== URL <-> sessionId 同步 ==========
+// 这些测试用 happy-dom 提供 window. 我们不真的依赖 window.history/state
+// 行为,只用 URLSearchParams(window.location.search) 这条 round-trip:
+// store 通过 history.replaceState 把 sid 写进 URL.search, 我们再读出来断言.
+//
+// 每个 case 独立 stub fetch (loadSessions 调), 同时在初始 URL 上预设
+// ?sid=xxx (模拟用户刷新或贴分享链接进来), 然后检查 store sessionId 与 URL 的最终形态.
+
+function mockFetchSessions(sessions: Array<{ transcriptId: string; title?: string; updatedAt: number }>) {
+  vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+    if (url.includes('/api/agent/sessions') && url.endsWith('/sessions')) {
+      return new Response(JSON.stringify({ sessions }), { status: 200 })
+    }
+    if (url.endsWith('/api/agent/settings')) {
+      return new Response(JSON.stringify({ models: [] }), { status: 200 })
+    }
+    return new Response('{}', { status: 200 })
+  }) as unknown as typeof fetch)
+}
+
+function setLocationHref(href: string): void {
+  // happy-dom 的 window.location 是只读 URL 对象的 lookup; 改完整 URL 用
+  // assign/replace 比较 hack. 我们直接覆盖 .search 即可 (URLSearchParams
+  // 读的就是这一段). 走 URL 重建安全些, 避免遗留旧 query.
+  const url = new URL(href)
+  history.replaceState(null, '', url.toString())
+}
+
+describe('URL <-> sessionId sync (Agent ?sid=...)', () => {
+  beforeEach(() => {
+    // 重置 history 到裸 /agent, 防止上一 case 残留 ?sid=...
+    // happy-dom 默认 origin 是 http://localhost:3000, URL 必须匹配 origin
+    // 否则 history.replaceState 会抛 SecurityError.
+    history.replaceState(null, '', 'http://localhost:3000/agent')
+    vi.restoreAllMocks()
+    // 同样清 store 里残留 session
+    useAgentStore.setState({
+      sessions: [],
+      sessionId: null,
+      activeSessionId: null,
+      messages: [],
+      status: 'idle',
+      sendSeq: 0,
+    })
+  })
+
+  test('loadSessions: URL ?sid=xxx 命中列表 → store 用 URL 的会话, 不取首条', async () => {
+    setLocationHref('http://localhost:3000/agent?sid=second')
+    mockFetchSessions([
+      { transcriptId: 'first', updatedAt: 1000 },
+      { transcriptId: 'second', updatedAt: 2000 },
+      { transcriptId: 'third', updatedAt: 3000 },
+    ])
+    await useAgentStore.getState().loadSessions()
+    expect(useAgentStore.getState().sessionId).toBe('second')
+  })
+
+  test('loadSessions: URL ?sid=xxx 不在列表 (已删/换机) → 回退首条 + 清掉 URL 的 sid', async () => {
+    setLocationHref('http://localhost:3000/agent?sid=ghost')
+    mockFetchSessions([
+      { transcriptId: 'first', updatedAt: 1000 },
+      { transcriptId: 'second', updatedAt: 2000 },
+    ])
+    await useAgentStore.getState().loadSessions()
+    // 回退
+    expect(useAgentStore.getState().sessionId).toBe('first')
+    // URL sid 必须清掉, 下次刷新才不会又卡在 ghost
+    expect(new URLSearchParams(window.location.search).get('sid')).toBeNull()
+  })
+
+  test('loadSessions: 无 URL ?sid → 保持旧行为 (取 sessions[0])', async () => {
+    setLocationHref('http://localhost:3000/agent')
+    mockFetchSessions([
+      { transcriptId: 'first', updatedAt: 1000 },
+      { transcriptId: 'second', updatedAt: 2000 },
+    ])
+    await useAgentStore.getState().loadSessions()
+    expect(useAgentStore.getState().sessionId).toBe('first')
+    // 也不该写任何 sid 到 URL
+    expect(new URLSearchParams(window.location.search).get('sid')).toBeNull()
+  })
+
+  test('setCurrentSession: 切换会话 → URL ?sid 同步更新', () => {
+    setLocationHref('http://localhost:3000/agent')
+    useAgentStore.getState().setCurrentSession('targetSid')
+    expect(useAgentStore.getState().sessionId).toBe('targetSid')
+    expect(new URLSearchParams(window.location.search).get('sid')).toBe('targetSid')
+  })
+
+  test('createNewSession: server 回包后 URL ?sid 同步到新会话 id', async () => {
+    setLocationHref('http://localhost:3000/agent')
+    // mock POST /api/agent/sessions 返回一个新 id
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/sessions') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ sessionId: 'brand-new' }), { status: 200 })
+      }
+      if (url.endsWith('/sessions')) {
+        return new Response(JSON.stringify({ sessions: [{ transcriptId: 'brand-new', updatedAt: Date.now() }] }), { status: 200 })
+      }
+      if (url.endsWith('/api/agent/settings')) {
+        return new Response(JSON.stringify({ models: [] }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    }) as unknown as typeof fetch)
+    await useAgentStore.getState().createNewSession()
+    expect(useAgentStore.getState().sessionId).toBe('brand-new')
+    expect(new URLSearchParams(window.location.search).get('sid')).toBe('brand-new')
+  })
+
+  test('deleteSession: 删的是当前会话 → URL ?sid 切到下一条 (不是已死的旧 sid)', async () => {
+    setLocationHref('http://localhost:3000/agent')
+    // 先有两条, 当前激活 first
+    useAgentStore.setState({
+      sessions: [
+        { transcriptId: 'first', updatedAt: 1000 },
+        { transcriptId: 'second', updatedAt: 2000 },
+      ],
+      sessionId: 'first',
+    })
+    // 同步一下 URL
+    useAgentStore.getState().setCurrentSession('first')
+    expect(new URLSearchParams(window.location.search).get('sid')).toBe('first')
+
+    // stub DELETE 让它成功
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (url.includes('/api/agent/sessions/first') && !url.includes('first/v2-tasks')) {
+        return new Response('{}', { status: 200 })
+      }
+      if (url.includes('/api/agent/sessions/second/v2-tasks') ||
+          url.includes('/api/agent/sessions/first/v2-tasks')) {
+        return new Response(JSON.stringify({ tasks: [] }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    }) as unknown as typeof fetch)
+
+    await useAgentStore.getState().deleteSession('first')
+    expect(useAgentStore.getState().sessionId).toBe('second')
+    expect(new URLSearchParams(window.location.search).get('sid')).toBe('second')
   })
 })

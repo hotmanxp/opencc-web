@@ -4,6 +4,38 @@ import type { ServerEvent } from '../../../shared/events.js'
 import type { ModelEntry } from '../../../shared/settings.js'
 import type { PermissionMode } from '@zn-ai/zai-agent-core/runtime'
 
+// ========== URL <-> sessionId 双向同步 ==========
+// Agent 页面: ?sid=xxx 锁住当前活跃会话, 让用户能刷新/分享链接.
+// 读: 任何一次"需要确定 sessionId" 的时候(包括首次 loadSessions).
+// 写: 当前 sessionId 改变(setCurrentSession / createNewSession 后 server
+//     回的 id / deleteSession 后切到下一条),把 URL 同步成最新的 sid.
+// 清: loadSessions 时如果 URL 里的 sid 不在 sessions 列表(被删/换机),
+//     自动 replaceState 去掉 sid, 避免刷新又卡死.
+// 实现选 history 直接读写,不走 react-router 的 useSearchParams: 想让
+// 同步逻辑"无痛"地挂在 store 里(没有组件也能 sync),并且 react-router
+// 自身的 setSearchParams 同样调 history.pushState/replaceState,效果一致.
+// 只在浏览器侧调用, SSR/Node 测试环境下 window 不存在,函数降级为 no-op.
+function readUrlSid(): string | null {
+  if (typeof window === 'undefined') return null
+  const sp = new URLSearchParams(window.location.search)
+  return sp.get('sid')
+}
+
+function writeUrlSid(sid: string | null): void {
+  if (typeof window === 'undefined') return
+  const url = new URL(window.location.href)
+  const sp = url.searchParams
+  if (sid) sp.set('sid', sid)
+  else sp.delete('sid')
+  // 用 replaceState 避免污染 history (用户按返回键不应回到一个
+  // 临时刷新的中间态). pushState 会让用户得按多次返回才能离开 Agent 页.
+  window.history.replaceState(window.history.state, '', url.toString())
+}
+
+function clearUrlSid(): void {
+  writeUrlSid(null)
+}
+
 // 与 agent-core TodoWriteInputSchema 的 zod 形态一致 (web 不直接 import zod schema,
 // 避免循环依赖; 字段类型用本地 type 即可, 实时流拿到的 input.todos 由本文件内的
 // safeParse 兜底, 失败时静默忽略).
@@ -713,8 +745,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }
       set({ sessions, availableModels })
       if (sessions.length > 0) {
-        set({ sessionId: sessions[0].transcriptId })
-        await get().loadTranscript(sessions[0].transcriptId)
+        // 优先使用 URL ?sid=... 指定的会话, 让刷新/分享链接能落到对应会话上.
+        // URL 不带 / 带但 sid 不存在(已删除/换机) → 回退到首条, 并清掉 URL
+        // 里的 sid, 避免下次刷新又卡在已死的 sid 上.
+        const requested = readUrlSid()
+        const target = requested && sessions.some((s: { transcriptId: string }) => s.transcriptId === requested)
+          ? sessions.find((s: { transcriptId: string }) => s.transcriptId === requested)
+          : undefined
+        if (requested && !target) clearUrlSid()
+        const picked = target ?? sessions[0]
+        set({ sessionId: picked.transcriptId })
+        await get().loadTranscript(picked.transcriptId)
       }
     } catch {
       // ignore — list load is best-effort
@@ -723,6 +764,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   setCurrentSession: (sessionId: string) => {
     set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0 })
+    // 同步 URL ?sid=..., 让刷新/分享链接落到同一会话.
+    writeUrlSid(sessionId)
   },
 
   createNewSession: async () => {
@@ -771,6 +814,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const data = (await res.json()) as { sessionId: string }
       // 把新 sessionId 设上 + 刷新 sidebar 列表
       set({ sessionId: data.sessionId })
+      // 同步 URL ?sid=..., 新建的会话也能刷新/分享出去.
+      writeUrlSid(data.sessionId)
       await get().loadSessions()
     } catch {
       // 静默失败: 用户还能继续在本地空态发消息, server 端会按旧路径新建
@@ -794,8 +839,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 删掉的是当前会话时, 切到剩余里最新的一条; 没有则回到空白新会话.
     if (s.sessionId === sessionId) {
       if (remaining.length > 0) {
-        set({ sessionId: remaining[0].transcriptId })
-        await get().loadTranscript(remaining[0].transcriptId)
+        const nextSid = remaining[0].transcriptId
+        set({ sessionId: nextSid })
+        // 同步 URL: 避免 URL 还指着已删除的 sid, 下次刷新卡死.
+        writeUrlSid(nextSid)
+        await get().loadTranscript(nextSid)
       } else {
         get().createNewSession()
       }
