@@ -18,8 +18,11 @@ export type BashTaskStatus = 'running' | 'completed' | 'failed' | 'killed'
  * 注释), 所以需要 tracker 内部做 LRU + 时间淘汰。Eviction 仅作用于 terminal
  * 状态的 task, 不动 running。
  */
+import { stateChangeBus } from '../../runtime/stateChangeBus.js'
+
 const FINISHED_TTL_MS = 30 * 60 * 1000
 const MAX_TRACKED_TASKS = 200
+const DEBOUNCE_MS = 50
 
 export interface BashTaskInfo {
   taskId: string
@@ -53,6 +56,8 @@ export interface BashTaskInfo {
 class BashBackgroundTracker {
   private readonly byId = new Map<string, BashTaskInfo>()
   private readonly children = new Map<string, ReturnType<typeof import('node:child_process').spawn>>()
+  private readonly pendingEmits = new Map<string, NodeJS.Timeout>()
+  private readonly pendingSnapshots = new Map<string, BashTaskInfo>()
 
   /**
    * 注册一个 task (默认 foreground — caller 可以 backgroundExistingForegroundTask
@@ -69,6 +74,7 @@ class BashBackgroundTracker {
       ...info,
     }
     this.byId.set(taskId, full)
+    this.scheduleEmit(taskId)
     return full
   }
 
@@ -94,6 +100,7 @@ class BashBackgroundTracker {
     if (!t) return undefined
     if (chunk.stdout) t.stdout += chunk.stdout
     if (chunk.stderr) t.stderr += chunk.stderr
+    this.scheduleEmit(taskId)
     return t
   }
 
@@ -107,6 +114,7 @@ class BashBackgroundTracker {
     if (t.isBackgrounded) return false
     if (t.status !== 'running') return false
     t.isBackgrounded = true
+    this.scheduleEmit(taskId)
     return true
   }
 
@@ -129,6 +137,7 @@ class BashBackgroundTracker {
     const t = this.byId.get(taskId)
     if (!t) return
     t.notified = true
+    this.scheduleEmit(taskId)
   }
 
   /**
@@ -166,9 +175,59 @@ class BashBackgroundTracker {
     if (info.exitCode !== undefined) t.exitCode = info.exitCode
     if (info.signal) t.signal = info.signal
     this.children.delete(taskId)
+    // 终态变化是 critical info — 同步 emit, 不走 debounce。同时取消
+    // pending debounce timer 防止重复 emit。
+    this.cancelPendingEmit(taskId)
+    stateChangeBus.emit('bash_task.changed', { sessionId: t.sessionId, task: { ...t } })
     // 终态变化后, 主动触发一次 LRU 淘汰 — 保证 tracker 内存可控。
     this.evictFinished()
     return t
+  }
+
+  /**
+   * 调度一次 bash_task.changed 推送 (50ms debounce)。
+   * 高频 mutator (appendOutput) 在此 debounce, 低频 / 关键 mutator
+   * (markFinished) 直接同步 emit 不走这里。taskId 不在 byId 时静默
+   * 返回 (evicted / 未知 id — 兜底)。
+   */
+  private scheduleEmit(taskId: string): void {
+    const t = this.byId.get(taskId)
+    if (!t) return
+    this.pendingSnapshots.set(taskId, { ...t })
+    if (this.pendingEmits.has(taskId)) return
+    const timer = setTimeout(() => {
+      this.pendingEmits.delete(taskId)
+      const snap = this.pendingSnapshots.get(taskId)
+      this.pendingSnapshots.delete(taskId)
+      if (!snap) return
+      stateChangeBus.emit('bash_task.changed', { sessionId: snap.sessionId, task: snap })
+    }, DEBOUNCE_MS)
+    this.pendingEmits.set(taskId, timer)
+    timer.unref()
+  }
+
+  /**
+   * 取消指定 taskId 的 pending debounce emit, 用于 markFinished 路径
+   * (终态会同步 emit, 不需要再 debounce 一次)。
+   */
+  private cancelPendingEmit(taskId: string): void {
+    const timer = this.pendingEmits.get(taskId)
+    if (timer) {
+      clearTimeout(timer)
+      this.pendingEmits.delete(taskId)
+    }
+    this.pendingSnapshots.delete(taskId)
+  }
+
+  /** 测试 seam: 立即 flush 所有 pending emit, 绕过 50ms debounce。 */
+  __flushPendingForTests(): void {
+    for (const [taskId, timer] of this.pendingEmits) {
+      clearTimeout(timer)
+      const snap = this.pendingSnapshots.get(taskId)
+      if (snap) stateChangeBus.emit('bash_task.changed', { sessionId: snap.sessionId, task: snap })
+    }
+    this.pendingEmits.clear()
+    this.pendingSnapshots.clear()
   }
 
   /**
@@ -262,6 +321,9 @@ class BashBackgroundTracker {
 
   /** 测试钩子: 重置整个 map. */
   __resetForTests(): void {
+    for (const timer of this.pendingEmits.values()) clearTimeout(timer)
+    this.pendingEmits.clear()
+    this.pendingSnapshots.clear()
     this.byId.clear()
     this.children.clear()
   }
