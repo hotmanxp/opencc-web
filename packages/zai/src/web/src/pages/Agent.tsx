@@ -792,6 +792,11 @@ const MessageBubble = React.memo(function MessageBubble({
           {msgAttachments.length > 0 && (
             <AttachmentStrip
               attachments={msgAttachments}
+              // previewSize 模式: 图片按比例缩放 (cover → contain),
+              // 长截图 (聊天记录 / 长图) 整张可见, 不再被 80x80 cover 裁掉.
+              // 240px 是经验值: 卡片 maxWidth: 70% 内够大, 又不会让单图占满屏幕.
+              // 仍可点击触发 onPreview 看更清晰的原图.
+              previewSize={240}
               onPreview={(a) =>
                 setPreviewingAttachment({
                   url: a.thumbnailUrl,
