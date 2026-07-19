@@ -1,5 +1,4 @@
 import { describe, it, expect, vi } from 'vitest'
-import { readFileSync } from 'node:fs'
 import type { Anthropic } from '@anthropic-ai/sdk'
 
 // Mock node:fs so the zai settings reader doesn't read the user's real
