@@ -38,7 +38,13 @@ import { sep } from 'path'
 import type { LegacyTool } from '../Tool.js'
 import { lastRead } from '../readState.js'
 import { loadSkillsFromDirs } from '../../runtime/skills/index.js'
-import { logForDebugging } from '../../opencc-internals/utils/debug.js'
+
+// Local debug-log stub — opencc-internals/utils/debug.js has bare `src/...`
+// imports that fail under Bun bundling. zai doesn't have the debug-log
+// subsystem, so just route through console.error with a [zai-debug] prefix.
+const logForDebugging = (msg: string): void => {
+  if (process.env['ZAI_DEBUG']) console.error(`[zai-debug] ${msg}`)
+}
 
 // zai's local constant — AGENTS_FILENAME isn't exported from
 // memoryLoader (see agents/memoryLoader.ts:36). The literal is the
