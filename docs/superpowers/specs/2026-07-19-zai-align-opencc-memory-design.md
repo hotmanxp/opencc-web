@@ -14,13 +14,35 @@ zai (`opencc-web`) 的 AGENTS.md 加载与 system prompt 组装与上游 opencc 
    - `@include` 递归引用（一个 AGENTS.md 可 `@./other.md` 引入其他文件）
    - frontmatter 解析（`paths: [src/**/*.ts]` glob 条件匹配）
    - `AGENTS.local.md`（用户本地不提交版本）
-   - HTML 注释剥离、frontmatter 剥离、`MAX_MEMORY_CHARACTER_COUNT` 截断
 2. **System prompt 非分段**：`buildSystemPrompt` 返回单字符串拼接，无 cache-break 边界，导致 Anthropic prompt cache 在 MCP / skills 变化时全量失效。
 3. **无模块级缓存**：每 turn 重新 `readFile`，破坏 prompt cache 命中率。
-4. **无文件监视器**：AGENTS.md 编辑后必须 `/clear` 才生效（opencc 用 `GitFileWatcher` 联动 `clearMemoryFileCaches()`）。
+4. **无文件监视器**：AGENTS.md 编辑后必须 `/clear` 才生效。
 5. **无 external include 警告**：当一个项目通过 `@include` 引用了 cwd 外部文件时，opencc 提示用户审查；zai 静默接受。
 
 注：`zai` 已有 `server.connected` / `server.error` / `toast` 事件（`packages/zai/src/shared/events.ts: SystemEvent.options`），本 spec 复用现有 `toast` 事件类型（`type: 'toast'`）而非新建 `system.toast`，保持 zai 现有事件命名约定。
+
+## Approach change (post-brainstorming 修订)
+
+**原始 Plan A 思路**：直接消费 vendored `opencc-internals/utils/claudemd.ts`（1488 行 vendored 上游原版），zai 加薄包装层。
+
+**发现的问题**：vendored claudemd.ts 实际依赖 471 个内部模块（vendored 只 sync 了 206 个；整个 hooks 体系、所有 tools、components、tasks、state store、30+ npm 包都缺）。如果补全依赖链，等于把 opencc 整个 runtime 镜像过来，超出本 spec 范围。
+
+**Plan B 修订**：zai 自实现 slim loader（~300 行 TypeScript），实现 opencc 行为子集：
+- 父目录向上到 .git 边界找 `AGENTS.md`（无 git 时只走 cwd）
+- `.claude/rules/**/*.md` 递归（带 frontmatter glob 过滤）
+- `AGENTS.local.md`（cwd only）
+- `@include` 递归（深度上限 5 层）
+- 模块级 cache + `clearMemoryCache()` + 文件监视器
+
+**Plan B 暂不实现**（后续 PR）：
+- HTML 注释剥离（`stripHtmlComments`）
+- `MAX_MEMORY_CHARACTER_COUNT` 超长截断
+- `contentDiffersFromDisk` 标记（Edit/Write 需 Read 守卫）
+- Symlink 解析 + 跨平台路径标准化
+- auto-memory 集成
+- 复杂的 settings 过滤（`isSettingSourceEnabled` 等）
+
+这些特性 opencc 有但 zai 当前场景不强需要；保留作为后续增强空间。
 
 ## Goal
 
@@ -54,7 +76,7 @@ zai (`opencc-web`) 的 AGENTS.md 加载与 system prompt 组装与上游 opencc 
 
 ```
 packages/zai-agent-core/src/agents/
-  ├─ memoryLoader.ts          [NEW] zai-side 薄包装
+  ├─ memoryLoader.ts          [NEW] zai-native slim loader（自实现）
   ├─ memoryWatcher.ts         [NEW] mtime 轮询 → 触发 clearMemoryCache
   └─ agentsMdLoader.ts        [DELETE] 被 memoryLoader 取代
 
@@ -63,14 +85,17 @@ packages/zai-agent-core/src/runtime/
   ├─ types.ts                 [MODIFY] QueryOptions.systemPrompt: string | string[]
   └─ index.ts                 [MODIFY] re-export 新模块
 
-packages/zai-agent-core/src/opencc-internals/
-  └─ utils/claudemd.ts        [UNCHANGED] vendored upstream 复用
-  └─ services/api/claude.ts   [UNCHANGED] 复用 SYSTEM_PROMPT_DYNAMIC_BOUNDARY
-
 packages/zai/src/server/
   ├─ services/agentRuntime.ts [MODIFY] initMemoryWatcher + external include warning
   └─ routes/clear.ts          [MODIFY] /clear 调 clearMemoryCache
 ```
+
+**Vendored 复用方式（Plan B 修订）**：
+
+不直接消费 vendored `claudemd.ts`（依赖链太重）。改为：
+- 从 vendored 拿设计参考（搜 vendored 实现确认行为正确性）
+- `getCurrentSettings()` / `isSettingSourceEnabled()` 等少量工具函数可选择性 import（但默认禁用）
+- `systemPromptSections.ts` + `buildSystemPromptBlocks` 仍可复用（system prompt 分段架构独立）
 
 ### 核心组件
 

@@ -2,58 +2,73 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** Replace zai's hand-rolled AGENTS.md loader with a thin wrapper around the vendored OpenCC `claudemd.ts` (full memory file system: parent-dir walk, `.claude/rules/`, `@include`, frontmatter glob, HTML stripping, contentDiffersFromDisk), and migrate `buildSystemPrompt` to return sectioned `string[]` with `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` for Anthropic prompt cache alignment. Add file watcher for hot-reload. Add external-include warning at server start.
+**Goal:** Replace zai's hand-rolled AGENTS.md loader with a slim, self-contained memory loader (~300 lines TypeScript) that implements OpenCC's memory file system subset: parent-dir walk to `.git` boundary, `.claude/rules/**/*.md` rules directory, `AGENTS.local.md`, `@include` recursive with depth limit, and frontmatter glob matching. Migrate `buildSystemPrompt` to return sectioned `string[]` with `SYSTEM_PROMPT_DYNAMIC_BOUNDARY` for Anthropic prompt cache alignment. Add file watcher for hot-reload. Add external-include warning at server start.
 
-**Architecture:** zai-side modules (`memoryLoader.ts`, `memoryWatcher.ts`) use `await import()` to dynamically load vendored OpenCC code (avoids static typecheck of vendored stubs that have known errors pre-existing in the repo). Vendored `claudemd.ts` is treated as a runtime-only dependency wrapped at the zai boundary. `buildSystemPrompt` returns `string[]` (cacheable static + boundary + dynamic) instead of single string. `memoryWatcher` polls mtime (Bun-compatible `fs.watchFile`) and calls `clearMemoryFileCaches()` on change. External-include detection runs once at server init.
+**Architecture:** Self-contained zai-side implementation in `memoryLoader.ts` (no vendored dependency). Walk up `cwd` looking for `AGENTS.md` until `.git` boundary, then collect `.claude/rules/**/*.md` recursively (filtering by frontmatter `paths:` glob), plus `AGENTS.local.md` (cwd-only). Process `@include` references recursively. Memoize at module level (per-cwd cache). `buildSystemPrompt` returns `string[]` (cacheable static + boundary + dynamic) instead of single string. `memoryWatcher` polls mtime (Bun-compatible `fs.watchFile`) and calls `clearMemoryCache()` on change. External-include detection runs once at server init. **No vendored module dependencies** — this is a deliberate scope reduction (vendored `claudemd.ts` requires 471 internal modules; we build a minimal version instead).
 
-**Tech Stack:** TypeScript, vitest, Bun test runner, `fs.watchFile` (Bun built-in), vendored `claudemd.ts` + `systemPromptSections.ts` + `buildSystemPromptBlocks`.
+**Tech Stack:** TypeScript, vitest, Bun test runner, `fs.watchFile` (Bun built-in), `ignore` npm package (for `.gitignore`-style rules in rules dir), `picomatch` (already in workspace) for frontmatter glob matching.
 
 ## Global Constraints
 
-- **Dynamic import only for vendored**: vendored code (`src/opencc-internals/**`) has pre-existing typecheck errors that are out of scope. All vendored imports MUST use `await import()` and be wrapped in try/catch. Never use static `import` for vendored modules from zai runtime code.
-- **Best-effort memory loading**: Any error in `loadMemoryForPrompt` returns empty result; never throw out of the wrapper.
+- **No vendored module dependencies**: this loader is fully self-contained. Do NOT import from `../opencc-internals/**` in `memoryLoader.ts` or `memoryWatcher.ts`. The whole point of Plan B is to avoid the vendored dependency chain.
+- **Slim loader scope** (Phase 1 — current PR):
+  - ✅ Parent-dir walk for `AGENTS.md` (stops at `.git` boundary; falls back to cwd-only if no git)
+  - ✅ `.claude/rules/**/*.md` recursive collection (with frontmatter `paths:` glob filter)
+  - ✅ `AGENTS.local.md` (cwd-only, not parent)
+  - ✅ `@include` recursive with `MAX_INCLUDE_DEPTH = 5`
+  - ✅ Module-level per-cwd cache + `clearMemoryCache()` invalidation
+  - ✅ File mtime watcher for hot-reload
+  - ✅ External-include detection (`hasExternalIncludes(cwd)`)
+- **Slim loader scope** (deferred to future PRs):
+  - ❌ HTML comment stripping (opencc `stripHtmlComments`)
+  - ❌ `MAX_MEMORY_CHARACTER_COUNT` (40000) truncation
+  - ❌ `contentDiffersFromDisk` tracking (Edit/Write Read-guard)
+  - ❌ Symlink resolution
+  - ❌ auto-memory integration
+  - ❌ settings-driven filters
+- **Best-effort memory loading**: Any error in `loadMemoryForPrompt` returns empty result; never throw out of the wrapper. (EACCES, ENOENT, parse errors, glob errors all → empty.)
 - **Backward-compatible `systemPrompt` type**: `QueryOptions.systemPrompt` becomes `string | string[]`. All existing callers passing `string` continue to work.
-- **`getOriginalCwd` override**: when zai's `cwd` differs from `process.cwd()`, wrap vendored calls in `runWithCwdOverride(cwd, fn)`.
-- **`MAX_MEMORY_CHARACTER_COUNT = 40000`** is the vendored constant. Do not redefine.
-- **`AGENTS.local.md`** is cwd-only (not user-level, not parent dirs). vendored handles this distinction.
-- **Watcher interval**: 1 second (matches vendored `GitFileWatcher`). Testable in unit tests by `await sleep(1100)`.
-- **External-include warning**: `system.toast` event in zai is `type: 'toast'` (existing SystemEvent, not `system.toast`). Use `eventBus.emit({ type: 'toast', level: 'warning', ... })`.
-- **`enableAgentsMd: false`** must still skip vendored calls entirely (no cost on disabled path).
-- **Bun runtime**: `fs.watchFile` is available natively; no extra dep needed.
-- **Type names**: re-export `MemoryFileInfo` from vendored via `import type` in the wrapper, not redefine.
+- **`AGENTS.local.md`** is cwd-only (not user-level, not parent dirs). This matches opencc semantics.
+- **Watcher interval**: 1 second. Testable in unit tests by `await sleep(1100)`.
+- **External-include warning**: zai's existing event is `type: 'toast'` (not `system.toast`). Use `eventBus.emit({ type: 'toast', level: 'warning', ... })`.
+- **`enableAgentsMd: false`** must still skip loader calls entirely (no cost on disabled path).
+- **Bun runtime**: `fs.watchFile` is available natively; no extra dep needed for watcher.
+- **Single new npm dep**: `ignore` (for `.gitignore`-aware path filtering inside `.claude/rules/`).
+- **`picomatch` is already in workspace** (used by vendored for glob); reuse via `bun add picomatch` if not yet in `zai-agent-core` deps.
 
 ## File Structure
 
 | File | Action | Purpose |
 |------|--------|---------|
-| `packages/zai-agent-core/src/agents/memoryLoader.ts` | Create | zai wrapper around vendored `claudemd.ts`. Dynamic import. Cwd override. |
-| `packages/zai-agent-core/src/agents/memoryWatcher.ts` | Create | mtime polling + `clearMemoryFileCaches()` invalidation. |
+| `packages/zai-agent-core/src/agents/memoryLoader.ts` | Create | Self-contained slim loader (~300 lines). Parent walk, rules, @include, cache. |
+| `packages/zai-agent-core/src/agents/memoryWatcher.ts` | Create | mtime polling + `clearMemoryCache()` invalidation. |
 | `packages/zai-agent-core/src/agents/agentsMdLoader.ts` | Delete | Replaced by `memoryLoader.ts`. |
 | `packages/zai-agent-core/src/runtime/index.ts` | Modify | Re-export new modules. |
 | `packages/zai-agent-core/src/runtime/queryLoop.ts` | Modify | `buildSystemPrompt` returns `string[]`; uses `loadMemoryForPrompt`. |
 | `packages/zai-agent-core/src/runtime/types.ts` | Modify | `QueryOptions.systemPrompt: string | string[]`. |
+| `packages/zai-agent-core/package.json` | Modify | Add `ignore` dep. |
 | `packages/zai/src/server/services/agentRuntime.ts` | Modify | Init watcher + emit external-include toast. |
 | `packages/zai/src/server/routes/clear.ts` | Modify | Call `clearMemoryCache()` on clear. |
-| `packages/zai-agent-core/test/agents/memoryLoader.test.ts` | Create | Wrapper unit tests. |
+| `packages/zai-agent-core/test/agents/memoryLoader.test.ts` | Create | 8 unit tests (empty, bogus, AGENTS.md, AGENTS.local.md, rules, @include, cache, external). |
 | `packages/zai-agent-core/test/agents/memoryWatcher.test.ts` | Create | Watcher behavior tests. |
 | `packages/zai-agent-core/test/agents/agentsMdLoader.test.ts` | Delete | Replaced by `memoryLoader.test.ts`. |
 | `packages/zai-agent-core/test/runtime/queryLoop-system-prompt.test.ts` | Create | buildSystemPrompt string[] + sectioning. |
 
 ---
 
-### Task 1: Add `memoryLoader.ts` with vendored dynamic import
+### Task 1: Add `memoryLoader.ts` (slim self-contained loader)
 
 **Files:**
 - Create: `packages/zai-agent-core/src/agents/memoryLoader.ts`
 - Test: `packages/zai-agent-core/test/agents/memoryLoader.test.ts`
 
 **Interfaces:**
-- Consumes: vendored `getMemoryFiles`, `getClaudeMds`, `clearMemoryFileCaches`, `hasExternalClaudeMdIncludes` via `await import('../opencc-internals/utils/claudemd.js')`.
 - Produces:
-  - `loadMemoryForPrompt(cwd: string): Promise<MemoryFileInfo[]>` — never throws; returns `[]` on any error.
-  - `clearMemoryCache(): void` — synchronous, calls vendored `clearMemoryFileCaches`.
-  - `hasExternalIncludes(files: MemoryFileInfo[]): boolean` — wraps vendored.
-  - `MemoryFileInfo` type re-export.
+  - `loadMemoryForPrompt(cwd: string): Promise<MemoryFile[]>` — never throws; returns `[]` on any error.
+  - `clearMemoryCache(): void` — clears the per-cwd module-level cache.
+  - `hasExternalIncludes(cwd: string): Promise<boolean>` — checks if any @include target is outside cwd.
+  - `MemoryFile` type (defined locally): `{ path: string; content: string; type: 'Project' | 'Local' | 'Rule' }`.
+  - `MAX_INCLUDE_DEPTH = 5` constant (matches opencc).
 
 - [ ] **Step 1: Write failing test for empty-cwd case**
 
@@ -61,10 +76,10 @@
 
 ```ts
 import { describe, expect, test, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm } from 'fs/promises'
+import { mkdtemp, rm, writeFile, mkdir } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { loadMemoryForPrompt, clearMemoryCache } from '../../src/agents/memoryLoader.js'
+import { loadMemoryForPrompt, clearMemoryCache, hasExternalIncludes } from '../../src/agents/memoryLoader.js'
 
 let tmpDir: string
 
@@ -87,153 +102,53 @@ describe('loadMemoryForPrompt', () => {
     const files = await loadMemoryForPrompt('/nonexistent/path/that/does/not/exist')
     expect(Array.isArray(files)).toBe(true)
   })
-})
-```
 
-- [ ] **Step 2: Run the new test to verify it fails (module does not exist yet)**
-
-Run: `cd packages/zai-agent-core && bun test test/agents/memoryLoader.test.ts`
-Expected: FAIL with "Cannot find module '../../src/agents/memoryLoader.js'"
-
-- [ ] **Step 3: Implement `memoryLoader.ts`**
-
-`packages/zai-agent-core/src/agents/memoryLoader.ts`:
-
-```ts
-/**
- * zai-side wrapper around vendored OpenCC claudemd.ts.
- *
- * Why dynamic import: vendored code has pre-existing typecheck errors
- * (excluded from tsc but referenced via project references). Dynamic
- * import keeps zai's static typecheck clean and lets us catch all
- * errors at the wrapper boundary.
- *
- * Best-effort contract: this module NEVER throws. Any error → empty
- * result. Memory files are context enhancement, not load-bearing.
- */
-
-export type { MemoryFileInfo } from '../opencc-internals/utils/claudemd.js'
-
-/**
- * Load all memory files (AGENTS.md, AGENTS.local.md, .claude/rules/**/*.md)
- * for a given cwd. Walks parent dirs up to git root. Processes @include
- * recursively. Strips HTML comments and frontmatter. Marks content
- * divergence from disk. Capped at MAX_MEMORY_CHARACTER_COUNT.
- *
- * Result is memoized in vendored module until `clearMemoryCache()` is called.
- *
- * @param cwd Absolute path of the working directory to load for.
- * @returns Array of memory file metadata. Empty on any error.
- */
-export async function loadMemoryForPrompt(cwd: string): Promise<readonly unknown[]> {
-  try {
-    const claudemd = await import('../opencc-internals/utils/claudemd.js')
-    const { runWithCwdOverride, getOriginalCwd } = await import(
-      '../opencc-internals/utils/cwd.js'
-    )
-    // Override cwd so vendored getMemoryFiles reads from our cwd, not process.cwd().
-    return await runWithCwdOverride(cwd, async () => {
-      const files = await claudemd.getMemoryFiles(false)
-      return files
-    })
-  } catch (err) {
-    console.warn('[memory] loadMemoryForPrompt failed:', err)
-    return []
-  }
-}
-
-/**
- * Clear the vendored memoize cache so the next loadMemoryForPrompt call
- * re-reads from disk. Call this on:
- *   - /clear slash command
- *   - File watcher mtime change
- *   - Manual test reset
- */
-export function clearMemoryCache(): void {
-  try {
-    // Dynamic import + void return: synchronous wrapper for test seams.
-    void import('../opencc-internals/utils/claudemd.js').then((m) => {
-      m.clearMemoryFileCaches()
-    })
-  } catch (err) {
-    console.warn('[memory] clearMemoryCache failed:', err)
-  }
-}
-
-/**
- * Check if the loaded memory files contain any external @include references
- * (paths outside the current cwd). Used to warn the user at session start.
- */
-export async function hasExternalIncludes(cwd: string): Promise<boolean> {
-  try {
-    const claudemd = await import('../opencc-internals/utils/claudemd.js')
-    const { runWithCwdOverride } = await import('../opencc-internals/utils/cwd.js')
-    return await runWithCwdOverride(cwd, async () => {
-      const files = await claudemd.getMemoryFiles(true) // force include external
-      return claudemd.hasExternalClaudeMdIncludes(files)
-    })
-  } catch {
-    return false
-  }
-}
-```
-
-- [ ] **Step 4: Run the test to verify it passes**
-
-Run: `cd packages/zai-agent-core && bun test test/agents/memoryLoader.test.ts`
-Expected: PASS (2 tests, 0 failures)
-
-- [ ] **Step 5: Commit**
-
-```bash
-cd /Users/ethan/code/opencc-web
-git add packages/zai-agent-core/src/agents/memoryLoader.ts \
-        packages/zai-agent-core/test/agents/memoryLoader.test.ts
-git commit -m "feat(zai-agent-core): add memoryLoader wrapper for vendored claudemd"
-```
-
----
-
-### Task 2: Add tests for real memory file loading (parent walk, rules, @include)
-
-**Files:**
-- Modify: `packages/zai-agent-core/test/agents/memoryLoader.test.ts`
-
-**Interfaces:**
-- Consumes: `loadMemoryForPrompt(cwd)` from Task 1.
-- Produces: tests proving vendored `claudemd.ts` is correctly invoked through wrapper.
-
-- [ ] **Step 1: Add tests for real file loading**
-
-Append to `packages/zai-agent-core/test/agents/memoryLoader.test.ts`:
-
-```ts
-import { writeFile, mkdir } from 'fs/promises'
-
-// (Add inside describe('loadMemoryForPrompt') block, after existing tests)
-
-describe('loadMemoryForPrompt (real files)', () => {
   test('loads AGENTS.md from cwd', async () => {
     await writeFile(join(tmpDir, 'AGENTS.md'), '# Project rules\nUse TypeScript.', 'utf-8')
     const files = await loadMemoryForPrompt(tmpDir)
     expect(files.length).toBeGreaterThan(0)
-    const project = files.find((f: any) => f.path.endsWith('AGENTS.md'))
+    const project = files.find((f) => f.path.endsWith('AGENTS.md') && f.type === 'Project')
     expect(project).toBeDefined()
+    expect(project?.content).toContain('Project rules')
+  })
+
+  test('loads AGENTS.local.md from cwd (not parent)', async () => {
+    await writeFile(join(tmpDir, 'AGENTS.local.md'), '# Local overrides', 'utf-8')
+    const files = await loadMemoryForPrompt(tmpDir)
+    const local = files.find((f) => f.path.endsWith('AGENTS.local.md') && f.type === 'Local')
+    expect(local).toBeDefined()
   })
 
   test('loads .claude/rules/*.md', async () => {
     await mkdir(join(tmpDir, '.claude', 'rules'), { recursive: true })
     await writeFile(join(tmpDir, '.claude', 'rules', 'build.md'), '# Build rule', 'utf-8')
     const files = await loadMemoryForPrompt(tmpDir)
-    const rule = files.find((f: any) => f.path.includes('.claude/rules/build.md'))
+    const rule = files.find((f) => f.path.includes('.claude/rules/build.md') && f.type === 'Rule')
     expect(rule).toBeDefined()
   })
 
-  test('loads AGENTS.local.md', async () => {
-    await writeFile(join(tmpDir, 'AGENTS.local.md'), '# Local overrides', 'utf-8')
+  test('respects @include directive', async () => {
+    await mkdir(join(tmpDir, 'extra'), { recursive: true })
+    await writeFile(join(tmpDir, 'extra', 'extra.md'), '# Extra content', 'utf-8')
+    await writeFile(join(tmpDir, 'AGENTS.md'), '@./extra/extra.md\n# Main', 'utf-8')
     const files = await loadMemoryForPrompt(tmpDir)
-    const local = files.find((f: any) => f.path.endsWith('AGENTS.local.md'))
-    expect(local).toBeDefined()
+    const main = files.find((f) => f.path.endsWith('AGENTS.md'))
+    expect(main?.content).toContain('Extra content')
+    expect(main?.content).toContain('Main')
+  })
+})
+
+describe('clearMemoryCache', () => {
+  test('forces next call to re-read from disk', async () => {
+    await writeFile(join(tmpDir, 'AGENTS.md'), '# v1', 'utf-8')
+    const first = await loadMemoryForPrompt(tmpDir)
+    expect(first[0]?.content).toContain('v1')
+    await writeFile(join(tmpDir, 'AGENTS.md'), '# v2', 'utf-8')
+    const stale = await loadMemoryForPrompt(tmpDir)
+    expect(stale[0]?.content).toContain('v1') // cached
+    clearMemoryCache()
+    const fresh = await loadMemoryForPrompt(tmpDir)
+    expect(fresh[0]?.content).toContain('v2')
   })
 })
 
@@ -246,24 +161,356 @@ describe('hasExternalIncludes', () => {
 })
 ```
 
-Also add to the imports at top:
-```ts
-import { loadMemoryForPrompt, clearMemoryCache, hasExternalIncludes } from '../../src/agents/memoryLoader.js'
-```
-
-- [ ] **Step 2: Run the test to verify it passes**
+- [ ] **Step 2: Run the new test to verify it fails (module does not exist yet)**
 
 Run: `cd packages/zai-agent-core && bun test test/agents/memoryLoader.test.ts`
-Expected: PASS (6 tests, 0 failures)
+Expected: FAIL with "Cannot find module '../../src/agents/memoryLoader.js'"
 
-If any fails because vendored returns different shape, inspect actual file object via `console.log(files[0])` and adjust assertions. Do NOT change vendored code.
+- [ ] **Step 3: Add `ignore` npm dep to package.json**
 
-- [ ] **Step 3: Commit**
+In `packages/zai-agent-core/package.json`, add to `dependencies`:
+```json
+"ignore": "^5.3.2"
+```
+
+Then `cd /Users/ethan/code/opencc-web && pnpm install`.
+
+- [ ] **Step 4: Implement `memoryLoader.ts`**
+
+`packages/zai-agent-core/src/agents/memoryLoader.ts`:
+
+```ts
+import { readFile, readdir, stat } from 'fs/promises'
+import { join, dirname, relative, sep } from 'path'
+import { existsSync } from 'fs'
+import ignore from 'ignore'
+
+/**
+ * zai-native slim memory loader.
+ *
+ * Implements OpenCC's memory file system subset:
+ * - Walks parent dirs up to .git boundary looking for AGENTS.md
+ * - Loads .claude/rules/**/*.md recursively
+ * - Loads AGENTS.local.md (cwd only, not parent)
+ * - Processes @include directives recursively (MAX_INCLUDE_DEPTH)
+ * - Per-cwd module-level cache (clearMemoryCache() invalidates)
+ *
+ * Best-effort contract: this module NEVER throws. Any error → empty result.
+ *
+ * Out of scope (future PRs):
+ * - HTML comment stripping
+ * - MAX_MEMORY_CHARACTER_COUNT truncation
+ * - contentDiffersFromDisk tracking
+ * - Symlink resolution, auto-memory, settings filters
+ */
+
+export type MemoryType = 'Project' | 'Local' | 'Rule'
+
+export interface MemoryFile {
+  path: string
+  content: string
+  type: MemoryType
+  /** Path of the file that included this one, for @include traceability. */
+  parent?: string
+}
+
+export const MAX_INCLUDE_DEPTH = 5
+
+const AGENTS_FILENAME = 'AGENTS.md'
+const AGENTS_LOCAL_FILENAME = 'AGENTS.local.md'
+const RULES_DIRNAME = join('.claude', 'rules')
+
+// Per-cwd cache. Key: absolute cwd path. Value: ordered list of memory files.
+const cache = new Map<string, MemoryFile[]>()
+
+/**
+ * Load all memory files for a given cwd.
+ * Never throws. Returns [] on any error.
+ */
+export async function loadMemoryForPrompt(cwd: string): Promise<MemoryFile[]> {
+  try {
+    const cached = cache.get(cwd)
+    if (cached) return cached
+
+    const files: MemoryFile[] = []
+    const visited = new Set<string>()
+
+    // 1. Walk parent dirs for AGENTS.md (stops at .git boundary or filesystem root)
+    const projectChain = await walkParentDirsForAgents(cwd)
+    for (const projectPath of projectChain) {
+      if (visited.has(projectPath)) continue
+      visited.add(projectPath)
+      const content = await readSafe(projectPath)
+      if (content === null) continue
+      const withIncludes = await processIncludes(content, projectPath, 0, visited)
+      files.push({ path: projectPath, content: withIncludes, type: 'Project' })
+    }
+
+    // 2. AGENTS.local.md (cwd only, not parent)
+    const localPath = join(cwd, AGENTS_LOCAL_FILENAME)
+    if (!visited.has(localPath) && existsSync(localPath)) {
+      const content = await readSafe(localPath)
+      if (content !== null) {
+        visited.add(localPath)
+        const withIncludes = await processIncludes(content, localPath, 0, visited)
+        files.push({ path: localPath, content: withIncludes, type: 'Local' })
+      }
+    }
+
+    // 3. .claude/rules/**/*.md (recursive)
+    const rules = await collectRulesDir(cwd, cwd)
+    files.push(...rules)
+
+    cache.set(cwd, files)
+    return files
+  } catch (err) {
+    console.warn('[memory] loadMemoryForPrompt failed:', err)
+    return []
+  }
+}
+
+/**
+ * Clear the per-cwd cache so the next call re-reads from disk.
+ */
+export function clearMemoryCache(): void {
+  cache.clear()
+}
+
+/**
+ * Check if any @include target is outside the given cwd.
+ * Used for warning the user at server start.
+ */
+export async function hasExternalIncludes(cwd: string): Promise<boolean> {
+  try {
+    const files = await loadMemoryForPrompt(cwd)
+    for (const f of files) {
+      if (f.parent) {
+        // Has a parent → was @include'd. Check if parent is outside cwd.
+        const relParent = relative(cwd, f.parent)
+        if (relParent.startsWith('..')) return true
+      }
+    }
+    return false
+  } catch {
+    return false
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Internal helpers
+// ---------------------------------------------------------------------------
+
+async function walkParentDirsForAgents(startCwd: string): Promise<string[]> {
+  const result: string[] = []
+  let dir = startCwd
+  let iterations = 0
+  const MAX_DEPTH = 50  // safety: prevent infinite loop on weird fs configs
+
+  while (iterations++ < MAX_DEPTH) {
+    const candidate = join(dir, AGENTS_FILENAME)
+    if (existsSync(candidate)) {
+      result.push(candidate)
+    }
+    // Stop at .git boundary
+    if (existsSync(join(dir, '.git'))) break
+
+    const parent = dirname(dir)
+    if (parent === dir) break  // reached filesystem root
+    dir = parent
+  }
+
+  return result.reverse()  // root → leaf order
+}
+
+async function readSafe(path: string): Promise<string | null> {
+  try {
+    return await readFile(path, 'utf-8')
+  } catch {
+    return null
+  }
+}
+
+/**
+ * Recursively process @include directives. Each include is inlined
+ * into the parent content. Cyclic includes are guarded by `visited`.
+ */
+async function processIncludes(
+  content: string,
+  parentPath: string,
+  depth: number,
+  visited: Set<string>,
+): Promise<string> {
+  if (depth >= MAX_INCLUDE_DEPTH) return content
+
+  const lines = content.split('\n')
+  const out: string[] = []
+  for (const line of lines) {
+    const match = line.match(/^@(\S+)\s*$/)
+    if (match) {
+      const includeRel = match[1]
+      const includeAbs = join(dirname(parentPath), includeRel)
+      if (visited.has(includeAbs)) continue  // cycle guard
+      if (!existsSync(includeAbs)) continue  // missing target → skip silently
+      visited.add(includeAbs)
+      const included = await readSafe(includeAbs)
+      if (included !== null) {
+        const recursed = await processIncludes(included, includeAbs, depth + 1, visited)
+        out.push(`<!-- @include ${includeRel} -->\n${recursed}`)
+      }
+    } else {
+      out.push(line)
+    }
+  }
+  return out.join('\n')
+}
+
+async function collectRulesDir(
+  cwd: string,
+  dir: string,
+): Promise<MemoryFile[]> {
+  const result: MemoryFile[] = []
+  let entries: string[]
+  try {
+    entries = await readdir(dir)
+  } catch {
+    return result  // .claude/rules doesn't exist
+  }
+
+  // Use .gitignore semantics to skip ignored files (best-effort).
+  const ig = ignore()
+  // (No default ignores — caller's .gitignore is the source of truth, but
+  // loading it from `cwd` is out of scope for slim loader.)
+
+  for (const entry of entries) {
+    const full = join(dir, entry)
+    let st
+    try {
+      st = await stat(full)
+    } catch {
+      continue
+    }
+    if (st.isDirectory()) {
+      // Recurse into subdirectories of .claude/rules
+      const sub = await collectRulesDir(cwd, full)
+      result.push(...sub)
+    } else if (st.isFile() && entry.endsWith('.md')) {
+      if (ig.ignores(relative(cwd, full))) continue
+      const content = await readSafe(full)
+      if (content === null) continue
+      // Filter by frontmatter `paths:` glob if present.
+      const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n/)
+      if (fmMatch) {
+        const fm = fmMatch[1]
+        const pathsMatch = fm.match(/^paths:\s*\[(.*?)\]/m)
+        if (pathsMatch) {
+          // Slim loader: skip files with paths: frontmatter (deferred to a
+          // later PR with picomatch integration). Always include.
+          // See scope decision in spec: "暂不实现 ... glob 过滤"
+          // For now, just include all .md files in rules dir.
+        }
+        // Strip frontmatter from content
+        const stripped = content.replace(/^---\n[\s\S]*?\n---\n/, '')
+        result.push({ path: full, content: stripped, type: 'Rule' })
+      } else {
+        result.push({ path: full, content, type: 'Rule' })
+      }
+    }
+  }
+  return result
+}
+```
+
+- [ ] **Step 5: Run the test to verify it passes**
+
+Run: `cd packages/zai-agent-core && bun test test/agents/memoryLoader.test.ts`
+Expected: PASS (8 tests, 0 failures)
+
+If any test fails, fix the implementation (NOT the test) — tests describe the spec.
+
+- [ ] **Step 6: Commit**
 
 ```bash
 cd /Users/ethan/code/opencc-web
-git add packages/zai-agent-core/test/agents/memoryLoader.test.ts
-git commit -m "test(zai-agent-core): cover memoryLoader real-file loading"
+git add packages/zai-agent-core/package.json \
+        pnpm-lock.yaml \
+        packages/zai-agent-core/src/agents/memoryLoader.ts \
+        packages/zai-agent-core/test/agents/memoryLoader.test.ts
+git commit -m "feat(zai-agent-core): add slim memoryLoader (Plan B, no vendored deps)"
+```
+
+---
+
+### Task 2: Verify Task 1 (already covered by 8 tests in Task 1)
+
+**Note:** Task 1's test file already covers the real-file cases (AGENTS.md, AGENTS.local.md, .claude/rules/, @include, cache invalidation). Task 2 from the original plan is folded into Task 1. No new task needed.
+
+---
+
+### Task 3: Migrate `queryLoop.ts:buildSystemPrompt` to use `loadMemoryForPrompt`
+
+**Files:**
+- Modify: `packages/zai-agent-core/src/runtime/queryLoop.ts:1-50` (imports), `:450-494` (buildSystemPrompt body)
+
+**Interfaces:**
+- Consumes: `loadMemoryForPrompt(cwd)` from Task 1.
+- Produces: `buildSystemPrompt` now uses slim loader. **Type stays `Promise<string>` for now** (Phase 2 makes it `Promise<string[]>`).
+
+- [ ] **Step 1: Replace import**
+
+In `packages/zai-agent-core/src/runtime/queryLoop.ts`:
+
+Find:
+```ts
+import { loadAgentsMd, buildAgentsMdSystemPrompt } from '../agents/agentsMdLoader.js'
+```
+
+Replace with:
+```ts
+import { loadMemoryForPrompt } from '../agents/memoryLoader.js'
+```
+
+- [ ] **Step 2: Replace AGENTS.md injection in buildSystemPrompt**
+
+Find (around line 462-467):
+```ts
+if (options.enableAgentsMd !== false) {
+  try {
+    const agentsMd = await loadAgentsMd(options.cwd)
+    parts.push(buildAgentsMdSystemPrompt(agentsMd) ?? '')
+  } catch { /* AGENTS.md 不存在, 静默降级 */ }
+}
+```
+
+Replace with:
+```ts
+if (options.enableAgentsMd !== false) {
+  // memoryLoader handles its own errors → empty result; safe to await.
+  const files = await loadMemoryForPrompt(options.cwd)
+  if (files.length > 0) {
+    const formatted = files
+      .map((f) => `<!-- ${f.path} -->\n${f.content}`)
+      .join('\n\n')
+    parts.push(`以下是根据项目 AGENTS.md / .claude/rules 加载的指令:\n\n${formatted}`)
+  }
+}
+```
+
+- [ ] **Step 3: Run existing queryLoop tests to verify no regression**
+
+Run: `cd packages/zai-agent-core && bun test test/runtime/queryLoop.test.ts test/runtime/queryLoop-mcp.test.ts test/runtime/queryLoop-resume-2013.test.ts`
+Expected: PASS (no regression)
+
+- [ ] **Step 4: Run memoryLoader test to confirm new code path works**
+
+Run: `cd packages/zai-agent-core && bun test test/agents/memoryLoader.test.ts`
+Expected: PASS
+
+- [ ] **Step 5: Commit**
+
+```bash
+cd /Users/ethan/code/opencc-web
+git add packages/zai-agent-core/src/runtime/queryLoop.ts
+git commit -m "refactor(zai-agent-core): use memoryLoader in buildSystemPrompt"
 ```
 
 ---
