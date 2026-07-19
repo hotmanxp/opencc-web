@@ -12,9 +12,18 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "forceConsistentCasingInFileNames": true,
-    "isolatedModules": true
+    "isolatedModules": true,
+    "noEmitOnError": false,
+    "ignoreDeprecations": "5.0",
+    "baseUrl": ".",
+    "paths": {
+      "../opencc-internals/*": ["./src/types/opencc-internals-stubs/*"]
+    }
   },
-  "include": ["src/**/*.ts"],
+  "include": [
+    "src/**/*.ts",
+    "src/types/opencc-internals-stubs/**/*.d.ts"
+  ],
   "exclude": [
     "node_modules",
     "dist",
