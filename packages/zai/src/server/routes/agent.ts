@@ -393,9 +393,14 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   // 里的 getCwd() 通过 ALS 解析到本 session 的逻辑 cwd。
   void runWithSessionId(sessionId, async () => {
     try {
-      // AGENTS.md / .claude/rules 加载由 queryLoop.buildSystemPrompt 内部
-      // 通过 loadMemoryForPrompt 完成（见 zai-agent-core/src/runtime/queryLoop.ts）。
-      // 这里不再预加载,避免重复 IO + 缓存绕过。
+      // System-prompt 拼装由 queryLoop.assembleSystemPrompt 内部完成:
+      //   1. 7 段 DEFAULT_STATIC_INTRO (static intro)
+      //   2. SYSTEM_PROMPT_DYNAMIC_BOUNDARY marker
+      //   3. 11 个动态 section (env / language / scratchpad / memory / skills /
+      //      MCP / agents / FRC / summarize / token budget / numeric anchors)
+      // options.systemPrompt 走 buildEffectiveSystemPrompt 仲裁: 若此处非
+      // undefined 会替换 DEFAULT_STATIC_INTRO (customSystemPrompt 路径)。
+      // 这里不预拼,避免重复 IO + 缓存绕过。modelCaller 发送前过滤 boundary。
       const systemPrompt: string | undefined = undefined;
 
       const text = prompt?.trim() ?? "";

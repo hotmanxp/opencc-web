@@ -132,34 +132,44 @@ export function createAnthropicModelCaller(): ModelCaller {
 
     // New normalization. Handles three shapes:
     // 1. string             → use as-is
-    // 2. string[]           → join sections with double newline; drop the dynamic-boundary marker
-    //                          (it's an internal placeholder for Anthropic prompt-cache hints;
-    //                          we are not emitting `cache_control` here, so the marker has no
-    //                          meaning in the outbound payload).
+    // 2. string[]           → split on boundary marker; join each half
+    //                          with double newline; emit as two text blocks
+    //                          so Anthropic prompt cache can scope the static
+    //                          prefix (cache_control: { type: 'ephemeral' }).
     // 3. Array<{type, ...}> → JSON.stringify each block (legacy structured-system path).
     //
     // Bug history: previously the string[] case fell through to `JSON.stringify(map(...))`,
     // which wrapped every section in literal quotes and escaped `\n` into `\\n`. The
     // `__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__` marker ended up quoted in the actual prompt
     // sent to the model.
-    //
-    // Mirrored literal from packages/zai-agent-core/src/runtime/queryLoop.ts:504 to keep
-    // the package export surface narrow (see notes on duplicated constant in this file).
     const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'
-    const sysPromptStr = (() => {
-      if (typeof systemPrompt === 'string') return systemPrompt
-      if (
-        Array.isArray(systemPrompt)
-        && systemPrompt.every((s) => typeof s === 'string')
-      ) {
-        return (systemPrompt as string[])
-          .filter((s) => s !== SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
-          .join('\n\n')
-      }
-      return (systemPrompt as Array<{ type: string; [key: string]: unknown }>)
-        .map((b) => JSON.stringify(b))
-        .join('\n')
-    })()
+    const systemBlocks: Array<{ type: 'text'; text: string; cache_control?: { type: 'ephemeral' } }>
+      = (() => {
+        if (typeof systemPrompt === 'string') {
+          return [{ type: 'text', text: systemPrompt }]
+        }
+        if (
+          Array.isArray(systemPrompt)
+          && systemPrompt.every((s) => typeof s === 'string')
+        ) {
+          const sections = systemPrompt as string[]
+          const idx = sections.indexOf(SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+          if (idx === -1) {
+            return [{ type: 'text', text: sections.join('\n\n') }]
+          }
+          // Split into [static..., dynamic...] so we can mark only the
+          // static half as cacheable. Anthropic prompt-cache scopes the
+          // block that carries cache_control; the dynamic half stays fresh.
+          const staticHalf = sections.slice(0, idx).join('\n\n')
+          const dynamicHalf = sections.slice(idx + 1).join('\n\n')
+          return [
+            { type: 'text', text: staticHalf, cache_control: { type: 'ephemeral' } },
+            { type: 'text', text: dynamicHalf },
+          ]
+        }
+        return (systemPrompt as Array<{ type: string; [key: string]: unknown }>)
+          .map((b) => ({ type: 'text' as const, text: JSON.stringify(b) }))
+      })()
 
     const sdkMessages = messages.map((m) => ({
       role: m.role,
@@ -187,7 +197,7 @@ export function createAnthropicModelCaller(): ModelCaller {
           model: resolvedModel,
           max_tokens: 8192,
           thinking: { type: 'enabled', budget_tokens: 4096 },
-          system: [{ type: 'text', text: sysPromptStr }],
+          system: systemBlocks,
           messages: sdkMessages,
           tools: tools.length > 0
             ? (tools.map((t) => ({

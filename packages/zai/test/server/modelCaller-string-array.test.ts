@@ -93,7 +93,7 @@ describe('createAnthropicModelCaller — systemPrompt normalization', () => {
     expect(args.system).toEqual([{ type: 'text', text: 'just a string' }])
   })
 
-  it('joins string[] sections with double newlines and drops the boundary marker', async () => {
+  it('splits on the boundary marker into two text blocks (cache_control on static half)', async () => {
     capturedCreateArgs.length = 0
     const mc = createAnthropicModelCaller()
     await callOnce(mc, [
@@ -102,28 +102,32 @@ describe('createAnthropicModelCaller — systemPrompt normalization', () => {
       'section B',
     ])
     const args = capturedCreateArgs[0] as AnthropicCreateArgs
-    const text = args.system[0].text
 
-    // Critical: boundary marker must NOT appear (it is an internal placeholder).
-    expect(text).not.toContain('__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__')
-    // Critical: must NOT be quoted. Old code wrapped each section in literal
-    // double-quotes via JSON.stringify.
-    expect(text).not.toMatch(/"section A"/)
-    expect(text).not.toMatch(/"section B"/)
-    // Critical: must NOT contain escaped \n (\n literal in the string),
-    // which was the second artifact of JSON.stringify.
-    expect(text).not.toContain('\\n')
-    // Sections preserved, in order, joined with double newline.
-    expect(text).toBe('section A\n\nsection B')
+    // Two text blocks emitted, so Anthropic can scope prompt cache to the
+    // static half via cache_control. See zai-agent-core/systemPrompt for the
+    // boundary contract.
+    expect(args.system).toHaveLength(2)
+    // Static half: cacheable.
+    expect(args.system[0]).toEqual({
+      type: 'text',
+      text: 'section A',
+      cache_control: { type: 'ephemeral' },
+    })
+    // Dynamic half: stays fresh every turn.
+    expect(args.system[1]).toEqual({ type: 'text', text: 'section B' })
+    // Critical: boundary marker must NOT appear in either block.
+    expect(args.system[0].text).not.toContain('__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__')
+    expect(args.system[1].text).not.toContain('__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__')
   })
 
   it('preserves embedded newlines inside a string[] section (does not collapse them)', async () => {
     capturedCreateArgs.length = 0
     const mc = createAnthropicModelCaller()
+    // No boundary marker → single text block, sections joined with \n\n.
     await callOnce(mc, ['line1\nline2', 'next'])
     const args = capturedCreateArgs[0] as AnthropicCreateArgs
-    const text = args.system[0].text
-    expect(text).toBe('line1\nline2\n\nnext')
+    expect(args.system).toHaveLength(1)
+    expect(args.system[0].text).toBe('line1\nline2\n\nnext')
   })
 
   it('handles an empty string[] without crashing', async () => {
@@ -134,33 +138,35 @@ describe('createAnthropicModelCaller — systemPrompt normalization', () => {
     expect(args.system[0].text).toBe('')
   })
 
-  it('still JSON.stringifies each block in the legacy structured-block path', async () => {
+  it('passes legacy structured-block entries through as JSON.stringify(text) blocks', async () => {
     capturedCreateArgs.length = 0
     const mc = createAnthropicModelCaller()
-    // Non-string entries force the third branch — preserve old behaviour.
+    // Non-string entries force the third branch — preserve old shape (one
+    // block per entry, JSON.stringify'd inside a { type: 'text', text }).
     const structured = [
       { type: 'text', text: 'hello' },
       { type: 'text', text: 'world' },
     ]
     await callOnce(mc, structured)
     const args = capturedCreateArgs[0] as AnthropicCreateArgs
-    // Each block individually JSON.stringify'd, joined with single \n.
-    expect(args.system[0].text).toBe(
-      `${JSON.stringify({ type: 'text', text: 'hello' })}\n${JSON.stringify({ type: 'text', text: 'world' })}`,
-    )
+    expect(args.system).toEqual([
+      { type: 'text', text: JSON.stringify({ type: 'text', text: 'hello' }) },
+      { type: 'text', text: JSON.stringify({ type: 'text', text: 'world' }) },
+    ])
   })
 
   it('coerces a mixed (string + object) array back through the legacy structured path', async () => {
     capturedCreateArgs.length = 0
     const mc = createAnthropicModelCaller()
     // Mixed types → `every(s => typeof s === 'string')` is false → falls
-    // through to the legacy JSON.stringify branch.
+    // through to the legacy JSON.stringify branch. Each entry becomes its
+    // own text block.
     const mixed = ['section A', { type: 'text', text: 'B' }]
     await callOnce(mc, mixed)
     const args = capturedCreateArgs[0] as AnthropicCreateArgs
-    // Both entries should be JSON-quoted by the legacy branch.
-    expect(args.system[0].text).toBe(
-      `${JSON.stringify('section A')}\n${JSON.stringify({ type: 'text', text: 'B' })}`,
-    )
+    expect(args.system).toEqual([
+      { type: 'text', text: JSON.stringify('section A') },
+      { type: 'text', text: JSON.stringify({ type: 'text', text: 'B' }) },
+    ])
   })
 })
