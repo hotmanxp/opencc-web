@@ -1,46 +1,36 @@
-import { useEffect, useState } from 'react'
-
-const POLL_INTERVAL_MS = 5_000
+import { useEffect } from 'react'
+import { useAgentStore } from '../store/useAgentStore.js'
 
 /**
- * Fetch the current cwd for a session, polling every 5s.
+ * 读取当前 session 的 cwd。
  *
- * - Returns `undefined` until the first successful fetch (or forever if sessionId is null)
- * - Keeps last known value on fetch error / 404 (silent)
- * - Restarts polling when sessionId changes
- * - Clears interval on unmount
+ * SSE 推送 (cwd.changed) 经 useAgentStore.cwdBySession 维护。
+ * 仅当 store 无值时(冷启动 / 服务重启后第一次进 session)才 fallback
+ * 一次性 fetch `/api/agent/sessions/:id/pwd` 拉一次,之后完全靠 SSE。
  */
 export function useSessionCwd(sessionId: string | null): string | undefined {
-  const [cwd, setCwd] = useState<string | undefined>(undefined)
+  const cwd = useAgentStore((s) => (sessionId ? s.cwdBySession[sessionId] : undefined))
+  const has = useAgentStore((s) => (sessionId ? sessionId in s.cwdBySession : false))
 
   useEffect(() => {
-    if (!sessionId) {
-      setCwd(undefined)
-      return
-    }
-
+    if (!sessionId || has) return
     let cancelled = false
-
-    const fetchOnce = async () => {
+    void (async () => {
       try {
         const res = await fetch(`/api/agent/sessions/${sessionId}/pwd`)
-        if (!res.ok) return  // 404 / 5xx — keep old value
+        if (!res.ok) return
         const data = (await res.json()) as { cwd?: string }
         if (!cancelled && typeof data.cwd === 'string') {
-          setCwd(data.cwd)
+          useAgentStore.getState().applyCwdChanged({ sessionId, cwd: data.cwd })
         }
       } catch {
-        // network error — keep old value
+        // silent
       }
-    }
-
-    void fetchOnce()  // immediate
-    const id = setInterval(() => { void fetchOnce() }, POLL_INTERVAL_MS)
+    })()
     return () => {
       cancelled = true
-      clearInterval(id)
     }
-  }, [sessionId])
+  }, [sessionId, has])
 
   return cwd
 }
