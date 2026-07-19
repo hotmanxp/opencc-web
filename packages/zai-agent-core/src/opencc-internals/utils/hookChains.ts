@@ -2,7 +2,7 @@
 import { createHash } from 'crypto'
 import { statSync } from 'fs'
 import { join, resolve } from 'path'
-import { HOOK_EVENTS } from 'src/entrypoints/agentSdkTypes.js'
+import { HOOK_EVENTS } from '../entrypoints/agentSdkTypes.js'
 import { getOriginalCwd } from '../bootstrap/state.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

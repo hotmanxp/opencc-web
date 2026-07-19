@@ -22,8 +22,6 @@ import {
   existsSync,
   mkdirSync,
   readFileSync,
-  readdirSync,
-  statSync,
   writeFileSync,
 } from 'fs'
 import { dirname, join, relative } from 'path'
@@ -210,6 +208,8 @@ const WHITELIST_PATTERNS: string[] = [
   'utils/debug.ts',
   'utils/managedEnv.ts',
   'utils/managedEnvConstants.ts',
+  'utils/memoryPressure.ts',
+  'utils/imageValidation.ts',
   'utils/auth.ts',
   'utils/crypto.ts',
   'utils/stream.ts',
@@ -304,6 +304,10 @@ const HARD_EXCLUDE_FILES = new Set<string>([
   // handles via its own RuntimeConfig. Keep these locally maintained.
   'utils/permissions/denialTracking.ts',
   'utils/permissions/permissionSetup.ts',
+  // cwd.ts is zai-local patched (adds runWithSessionId/getCurrentSessionId
+  // ALS + replaces bootstrap/state.js with process.cwd() fallback). Keep
+  // HAND-WRITTEN; sync must NEVER overwrite the local stub.
+  'utils/cwd.ts',
 ])
 
 // Files that get a ZAI_STUB marker prepended (deferred modules).
@@ -430,6 +434,28 @@ function main(): void {
       content = content.replace(re, (m) => `// ZAI_REMOVED: ${m.trimEnd()}`)
     }
     if (content !== original) cleaned++
+
+    // Rewrite bare `src/...` imports to relative paths under opencc-internals.
+    // The opencc source uses a tsconfig path alias (`src/* → src/*`) that
+    // doesn't exist in zai; rewrite to a computed relative path so runtime
+    // module resolution works.
+    const destDir = dirname(dest)
+    const bareRewritten = content.replace(
+      /from\s+['"]src\/([^'"]+)['"]/g,
+      (_m, rest: string) => {
+        // Resolve opencc's `src/<rest>` to the corresponding file in the
+        // opencc-internals mirror, then express that as a relative path
+        // from destDir.
+        const target = join(ZAI_INTERNALS, rest)
+        let rel = relative(destDir, target)
+        if (!rel.startsWith('.')) rel = './' + rel
+        return `from '${rel.replace(/\\/g, '/')}'`
+      },
+    )
+    if (bareRewritten !== content) {
+      content = bareRewritten
+      cleaned++
+    }
 
     // Add ZAI_STUB marker for deferred modules.
     if (STUB_FILES.has(rel) && !content.startsWith('// ZAI_STUB')) {

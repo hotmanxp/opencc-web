@@ -7,20 +7,20 @@ import {
   getApiKeyFromApiKeyHelper,
   getClaudeAIOAuthTokens,
   isClaudeAISubscriber,
-} from 'src/utils/auth.js'
+} from '../../utils/auth.js'
 import {
   convertEffortValueToLevel,
   type EffortValue,
   standardEffortToOpenAI,
   type OpenAIEffortLevel,
-} from 'src/utils/effort.js'
-import { getUserAgent } from 'src/utils/http.js'
+} from '../../utils/effort.js'
+import { getUserAgent } from '../../utils/http.js'
 import { shouldUseFirstPartyAnthropicAuth } from './authRouting.js'
 import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
 } from '../../utils/model/providers.js'
-import { getProxyFetchOptions } from 'src/utils/proxy.js'
+import { getProxyFetchOptions } from '../../utils/proxy.js'
 import {
   getIsNonInteractiveSession,
   getSessionId,

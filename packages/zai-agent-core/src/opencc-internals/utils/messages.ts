@@ -20,9 +20,9 @@ import last from 'lodash-es/last.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from 'src/services/analytics/index.js'
-import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js'
-import type { AgentId } from 'src/types/ids.js'
+} from '../services/analytics/index.js'
+import { sanitizeToolNameForAnalytics } from '../services/analytics/metadata.js'
+import type { AgentId } from '../types/ids.js'
 import { companionIntroText } from '../buddy/prompt.js'
 import { NO_CONTENT_MESSAGE } from '../constants/messages.js'
 import { OUTPUT_STYLE_CONFIG } from '../constants/outputStyles.js'
@@ -102,15 +102,15 @@ import type {
 import type {
   HookEvent,
   SDKAssistantMessageError,
-} from 'src/entrypoints/agentSdkTypes.js'
-import { AGENT_TOOL_NAME } from 'src/tools/AgentTool/constants.js'
-import { BashTool } from 'src/tools/BashTool/BashTool.js'
-import { ExitPlanModeV2Tool } from 'src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js'
+} from '../entrypoints/agentSdkTypes.js'
+import { AGENT_TOOL_NAME } from '../tools/AgentTool/constants.js'
+import { BashTool } from '../tools/BashTool/BashTool.js'
+import { ExitPlanModeV2Tool } from '../tools/ExitPlanModeTool/ExitPlanModeV2Tool.js'
 import {
   FILE_READ_TOOL_NAME,
   MAX_LINES_TO_READ,
-} from 'src/tools/FileReadTool/prompt.js'
-import type { DeepImmutable } from 'src/types/utils.js'
+} from '../tools/FileReadTool/prompt.js'
+import type { DeepImmutable } from '../types/utils.js'
 import { getStrictToolResultPairing } from '../bootstrap/state.js'
 import {
   COMMAND_ARGS_TAG,

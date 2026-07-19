@@ -3,7 +3,7 @@ import {
   type APIProvider,
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
-} from 'src/utils/model/providers.js'
+} from '../../utils/model/providers.js'
 
 export type ProviderOverride = { model: string; baseURL: string; apiKey: string }
 

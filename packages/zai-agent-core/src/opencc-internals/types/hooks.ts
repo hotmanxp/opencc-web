@@ -7,12 +7,12 @@ import {
   HOOK_EVENTS,
   type PermissionUpdate,
   type HookJSONOutput as SDKHookJSONOutput,
-} from 'src/entrypoints/agentSdkTypes.js'
+} from '../entrypoints/agentSdkTypes.js'
 
 // Re-export SDK types
-export type { HookJSONOutput as SDKHookJSONOutput } from 'src/entrypoints/agentSdkTypes.js'
-export { HOOK_EVENTS } from 'src/entrypoints/agentSdkTypes.js'
-export type { HookEvent, PermissionUpdate } from 'src/entrypoints/agentSdkTypes.js'
+export type { HookJSONOutput as SDKHookJSONOutput } from '../entrypoints/agentSdkTypes.js'
+export { HOOK_EVENTS } from '../entrypoints/agentSdkTypes.js'
+export type { HookEvent, PermissionUpdate } from '../entrypoints/agentSdkTypes.js'
 // HookInput is the generic SDK type - used for callback signatures
 export type HookInput = {
   [key: string]: unknown
@@ -59,10 +59,10 @@ export type CombinedHookJSONOutput = SyncHookJSONOutput | AsyncHookJSONOutput
 
 // HookJSONOutput type - use our proper type instead of SDK's generic { [key: string]: unknown }
 export type HookJSONOutput = CombinedHookJSONOutput
-import type { Message } from 'src/types/message.js'
-import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js'
-import { permissionBehaviorSchema } from 'src/utils/permissions/PermissionRule.js'
-import { permissionUpdateSchema } from 'src/utils/permissions/PermissionUpdateSchema.js'
+import type { Message } from './message.js'
+import type { PermissionResult } from '../utils/permissions/PermissionResult.js'
+import { permissionBehaviorSchema } from '../utils/permissions/PermissionRule.js'
+import { permissionUpdateSchema } from '../utils/permissions/PermissionUpdateSchema.js'
 import type { AppState } from '../state/AppState.js'
 import type { AttributionState } from '../utils/commitAttribution.js'
 

@@ -1,7 +1,7 @@
 // @ts-nocheck
 import type { UUID } from 'crypto'
-import type { FileHistorySnapshot } from 'src/utils/fileHistory.js'
-import type { ContentReplacementRecord } from 'src/utils/toolResultStorage.js'
+import type { FileHistorySnapshot } from '../utils/fileHistory.js'
+import type { ContentReplacementRecord } from '../utils/toolResultStorage.js'
 import type { AgentId } from './ids.js'
 import type { Message } from './message.js'
 // @ts-ignore

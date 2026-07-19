@@ -56,7 +56,7 @@ import {
 import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-} from 'src/services/analytics/index.js'
+} from '../services/analytics/index.js'
 import { logOTelEvent } from './telemetry/events.js'
 import { ALLOWED_OFFICIAL_MARKETPLACE_NAMES } from './plugins/schemas.js'
 import {
@@ -112,7 +112,7 @@ import type {
 import type { StatusLineCommandInput } from '../types/statusLine.js'
 import type { ElicitResult } from '@modelcontextprotocol/sdk/types.js'
 import type { FileSuggestionCommandInput } from '../types/fileSuggestion.js'
-import type { HookResultMessage } from 'src/types/message.js'
+import type { HookResultMessage } from '../types/message.js'
 import chalk from 'chalk'
 import type {
   HookMatcher,

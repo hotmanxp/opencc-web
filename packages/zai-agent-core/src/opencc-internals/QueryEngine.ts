@@ -6,7 +6,7 @@ import last from 'lodash-es/last.js'
 import {
   getSessionId,
   isSessionPersistenceDisabled,
-} from 'src/bootstrap/state.js'
+} from './bootstrap/state.js'
 import type {
   PermissionMode,
   SDKCompactBoundaryMessage,
@@ -14,11 +14,11 @@ import type {
   SDKPermissionDenial,
   SDKStatus,
   SDKUserMessageReplay,
-} from 'src/entrypoints/agentSdkTypes.js'
-import { EXTERNAL_PERMISSION_MODES } from 'src/types/permissions.js'
-import { accumulateUsage, updateUsage } from 'src/services/api/claude.js'
-import type { NonNullableUsage } from 'src/services/api/logging.js'
-import { EMPTY_USAGE } from 'src/services/api/logging.js'
+} from './entrypoints/agentSdkTypes.js'
+import { EXTERNAL_PERMISSION_MODES } from './types/permissions.js'
+import { accumulateUsage, updateUsage } from './services/api/claude.js'
+import type { NonNullableUsage } from './services/api/logging.js'
+import { EMPTY_USAGE } from './services/api/logging.js'
 import { stripVTControlCharacters as stripAnsi } from 'node:util'
 import type { Command } from './commands.js'
 import { getSlashCommandToolSkills } from './commands.js'

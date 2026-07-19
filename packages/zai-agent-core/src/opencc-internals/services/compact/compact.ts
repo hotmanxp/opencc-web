@@ -10,7 +10,7 @@ const sessionTranscriptModule: (typeof import('../sessionTranscript/sessionTrans
   : null
 
 import { APIUserAbortError } from '@anthropic-ai/sdk'
-import { markPostCompaction } from 'src/bootstrap/state.js'
+import { markPostCompaction } from '../../bootstrap/state.js'
 import {
   getInvokedSkillsForAgent,
   getOriginalCwd,
