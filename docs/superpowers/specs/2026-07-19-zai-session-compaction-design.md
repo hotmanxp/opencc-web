@@ -547,24 +547,40 @@ export async function executePostCompactHooks(
 
 ### 7.6 `compactService.ts` 兼容性
 
-现有 `runtime/compactService.ts`(7 KB, 196 行)改为 shim:
+现有 `runtime/compactService.ts`(7 KB, 196 行)改为 shim,**保持 `compactSession(opts: CompactSessionOptions)` 的对外签名不变**,只把内部 `serializeForCompact` + 调 `modelCaller` 的逻辑替换为调 `compactConversation`:
 
 ```ts
-// runtime/compactService.ts(新)
-export { compactConversation as _internal } from './compact/conversation.js'
+// runtime/compactService.ts(新 shim 版本)
+import { compactConversation, buildPostCompactMessages } from './compact/conversation.js'
+import type { CompactSessionOptions, CompactSessionResult } from './compact/types.js'
 
 export async function compactSession(opts: CompactSessionOptions): Promise<CompactSessionResult> {
-  // 适配老接口:读 + summarize + 写盘,但内部走 compactConversation
-  const file = await opts.store.read(opts.sessionId)
-  if (file.messages.length < 2) return { kind: 'error', message: '...' }
-  const result = await _internal(file.messages, ...)
+  const { store, sessionId, modelCaller, cwd, model } = opts
+  const file = await store.read(sessionId)
+  if (file.messages.length < 2) {
+    return { kind: 'error', message: `对话太短,无需压缩 (当前 ${file.messages.length} 条,至少需要 2 条)` }
+  }
+  // 构建最小 ToolUseContext + CacheSafeParams(让 compactConversation 能跑)
+  const cacheSafeParams = buildCacheSafeParamsFromCompactSession(opts)
+  const result = await compactConversation(
+    file.messages,
+    cacheSafeParams.toolUseContext,
+    cacheSafeParams,
+    true,                    // suppressFollowUpQuestions
+    undefined,               // customInstructions
+    false,                   // isAutoCompact (manual)
+  )
   const newMessages = buildPostCompactMessages(result)
-  await opts.store.replace(opts.sessionId, newMessages)
-  return { kind: 'compacted', summary: extractSummary(result), newMessages }
+  await store.replace(sessionId, newMessages)
+  const summary = extractSummaryFromResult(result)
+  return { kind: 'compacted', summary, newMessages }
 }
 ```
 
-保证旧 `compactService.test.ts` 继续通过。
+**关键约束**:`CompactSessionOptions` 的字段(`store` / `sessionId` / `modelCaller` / `cwd` / `model`)保持不变,保证:
+1. 旧 `packages/zai/src/server/services/commands/builtin/compact.ts` 调用方零改动
+2. 旧 `packages/zai-agent-core/test/runtime/compactService.test.ts` 测试零改动
+3. `runtime/index.ts` 的 export 形状不变
 
 ## 8. 子项目 F:Transcript 回放支持 `compact_boundary`
 
