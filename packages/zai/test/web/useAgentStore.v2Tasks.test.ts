@@ -79,9 +79,9 @@ describe('useAgentStore — v2TasksBySession session 隔离', () => {
     expect(s.v2TasksBySession['sess-B']).toHaveLength(1)
   })
 
-  it('loadTranscript 后自动 fetch /api/agent/sessions/:id/v2-tasks 回填 v2TasksBySession', async () => {
-    // mock transcript 端点返回一条 transcript (不挂 TodoWrite, 只触发
-    // loadTranscript 主流程)
+  it('loadTranscript 不再自动 fetch v2-tasks (100% SSE)', async () => {
+    // 100% SSE 设计: loadTranscript 完成后不再 fire-and-forget /v2-tasks.
+    // v2 tasks 完全由 SSE v2_task.changed 推送 (Task 4 + Task 8 + Task 11 wiring).
     const transcriptPayload = {
       transcript: {
         messages: [
@@ -100,21 +100,10 @@ describe('useAgentStore — v2TasksBySession session 隔离', () => {
         ],
       },
     }
-    const v2Payload = {
-      tasks: sampleV2,
-    }
     const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
       const url = typeof input === 'string' ? input : (input as URL).toString()
-      // 注意顺序: v2-tasks 必须先匹配 (它的路径含 sess-A)
-      if (url.includes('/v2-tasks')) {
-        return {
-          ok: true,
-          status: 200,
-          json: async () => v2Payload,
-        } as any
-      }
-      if (url.includes('/api/agent/sessions/sess-A')) {
-        // transcript GET
+      // transcript GET 返回; v2-tasks 不应再被调
+      if (url.includes('/api/agent/sessions/sess-A') && !url.includes('/v2-tasks')) {
         return {
           ok: true,
           status: 200,
@@ -126,53 +115,16 @@ describe('useAgentStore — v2TasksBySession session 隔离', () => {
     vi.stubGlobal('fetch', fetchMock as any)
 
     await useAgentStore.getState().loadTranscript('sess-A')
-
-    // 等待 microtask (fetchV2Tasks 是 async)
+    // 等待 microtask
     await new Promise((r) => setTimeout(r, 10))
 
-    const s = useAgentStore.getState()
-    expect(s.v2TasksBySession['sess-A']).toEqual(sampleV2)
-    expect(fetchMock).toHaveBeenCalledWith(
-      expect.stringContaining('/api/agent/sessions/sess-A/v2-tasks'),
-      expect.objectContaining({ headers: expect.any(Object) }),
-    )
-  })
-
-  it('loadTranscript v2 fetch 失败时静默, 不抛错', async () => {
-    const transcriptPayload = {
-      transcript: {
-        messages: [
-          {
-            uuid: 'u1',
-            parentUuid: null,
-            type: 'user',
-            timestamp: 1,
-            message: { content: 'hello' },
-            cwd: '/x',
-            userType: 'zai',
-            sessionId: 'sess-A',
-            version: '2',
-            isSidechain: false,
-          },
-        ],
-      },
-    }
-    const fetchMock = vi.fn(async (input: RequestInfo | URL) => {
-      const url = typeof input === 'string' ? input : (input as URL).toString()
-      if (url.includes('/v2-tasks')) {
-        return { ok: false, status: 500, json: async () => ({}) } as any
-      }
-      return {
-        ok: true,
-        status: 200,
-        json: async () => transcriptPayload,
-      } as any
+    // 验证没有调 v2-tasks
+    const v2Calls = fetchMock.mock.calls.filter((call) => {
+      const url = typeof call[0] === 'string' ? call[0] : (call[0] as URL).toString()
+      return url.includes('/v2-tasks')
     })
-    vi.stubGlobal('fetch', fetchMock as any)
-
-    // 不应抛错
-    await expect(useAgentStore.getState().loadTranscript('sess-A')).resolves.toBeUndefined()
-    await new Promise((r) => setTimeout(r, 10))
+    expect(v2Calls).toHaveLength(0)
+    // transcript 加载了, 但 v2TasksBySession 仍是空
     expect(useAgentStore.getState().v2TasksBySession['sess-A']).toBeUndefined()
   })
 })
