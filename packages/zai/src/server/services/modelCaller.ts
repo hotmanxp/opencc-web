@@ -130,10 +130,36 @@ export function createAnthropicModelCaller(): ModelCaller {
           ?? env.ANTHROPIC_SMALL_FAST_MODEL
           ?? 'MiniMax-M3')
 
-    const sysPromptStr =
-      typeof systemPrompt === 'string'
-        ? systemPrompt
-        : systemPrompt.map((b) => JSON.stringify(b)).join('\n')
+    // New normalization. Handles three shapes:
+    // 1. string             → use as-is
+    // 2. string[]           → join sections with double newline; drop the dynamic-boundary marker
+    //                          (it's an internal placeholder for Anthropic prompt-cache hints;
+    //                          we are not emitting `cache_control` here, so the marker has no
+    //                          meaning in the outbound payload).
+    // 3. Array<{type, ...}> → JSON.stringify each block (legacy structured-system path).
+    //
+    // Bug history: previously the string[] case fell through to `JSON.stringify(map(...))`,
+    // which wrapped every section in literal quotes and escaped `\n` into `\\n`. The
+    // `__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__` marker ended up quoted in the actual prompt
+    // sent to the model.
+    //
+    // Mirrored literal from packages/zai-agent-core/src/runtime/queryLoop.ts:504 to keep
+    // the package export surface narrow (see notes on duplicated constant in this file).
+    const SYSTEM_PROMPT_DYNAMIC_BOUNDARY = '__SYSTEM_PROMPT_DYNAMIC_BOUNDARY__'
+    const sysPromptStr = (() => {
+      if (typeof systemPrompt === 'string') return systemPrompt
+      if (
+        Array.isArray(systemPrompt)
+        && systemPrompt.every((s) => typeof s === 'string')
+      ) {
+        return (systemPrompt as string[])
+          .filter((s) => s !== SYSTEM_PROMPT_DYNAMIC_BOUNDARY)
+          .join('\n\n')
+      }
+      return (systemPrompt as Array<{ type: string; [key: string]: unknown }>)
+        .map((b) => JSON.stringify(b))
+        .join('\n')
+    })()
 
     const sdkMessages = messages.map((m) => ({
       role: m.role,
