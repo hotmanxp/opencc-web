@@ -9,7 +9,7 @@ import {
   suggestPathUnderCwd,
   getFileModificationTimeAsync,
   FILE_NOT_FOUND_CWD_NOTE,
-} from '../../opencc-internals/utils/file.js'
+} from './fileUtils.js'
 import { FILE_UNCHANGED_STUB } from './constants.js'
 
 const MAX_LINES_DEFAULT = 2000
@@ -182,7 +182,6 @@ export const FileReadTool: LegacyTool<typeof FileReadInputSchema, string> = {
 
     let content: string | null = null
     let usedPath = absPath
-    let enoent: NodeJS.ErrnoException | null = null
     for (const p of tryPaths) {
       try {
         content = await readTextSlice(p, offset, limit)
@@ -191,7 +190,6 @@ export const FileReadTool: LegacyTool<typeof FileReadInputSchema, string> = {
       } catch (e) {
         const err = e as NodeJS.ErrnoException
         if (err.code === 'ENOENT') {
-          enoent = err
           continue
         }
         return {
@@ -203,8 +201,8 @@ export const FileReadTool: LegacyTool<typeof FileReadInputSchema, string> = {
 
     if (content === null) {
       // ---- ENOENT: try to suggest a similar file / cwd-relative path ----
-      const similarFilename = findSimilarFile(absPath)
-      const cwdSuggestion = await suggestPathUnderCwd(absPath)
+      const similarFilename = await findSimilarFile(absPath)
+      const cwdSuggestion = await suggestPathUnderCwd(absPath, ctx.cwd)
       let message = `File not found: ${absPath}. ${FILE_NOT_FOUND_CWD_NOTE} ${ctx.cwd}.`
       if (cwdSuggestion) {
         message += ` Did you mean ${cwdSuggestion}?`
