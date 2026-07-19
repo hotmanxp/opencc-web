@@ -52,10 +52,14 @@ const RuntimeEvent = z.discriminatedUnion('type', [
                                recoverable: z.boolean() }),
              toolUseId: z.string().optional() }),
   // 阶段 1 只有 trigger='auto'; manual 走原 kind:'compacted'(不变).
-  // 注意: 此 schema 与 union 其他成员字段不对称 — 没有 spread Base
-  // (不带 eventId / ts), 而是显式用 timestamp 字段 (brief Step 2 原文).
-  // zod discriminatedUnion 不要求成员字段一致, 只靠 'type' 字段区分.
-  z.object({ type: z.literal('runtime.compacted'),
+  // 同时 spread Base (拿到 eventId / ts) 与显式 timestamp: 前者是
+  // ServerEvent union 共有, eventBus.history 续读 (Last-Event-ID 比对)
+  // 与 SSE id: line 推送都依赖; 后者是压缩事件的"语义时间" (brief
+  // Step 2 原文), 前端 applyCompactionEvent 用 timestamp + 5000ms 计算
+  // toast expiresAt. Base.ts 与 timestamp 同时存在 → emit 时两条都填,
+  // 客户端可任选. zod discriminatedUnion 允许成员字段冗余, 字段全集
+  // (spread 后的 Base + 显式 timestamp) 完全合法.
+  z.object({ ...Base.shape, type: z.literal('runtime.compacted'),
              sessionId: z.string(),
              trigger: z.enum(['auto', 'manual']),
              preTokens: z.number(),
