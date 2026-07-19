@@ -1,4 +1,4 @@
-import { watchFile, unwatchFile, statSync } from 'fs'
+import { watchFile, unwatchFile, statSync, existsSync } from 'fs'
 import { join } from 'path'
 import { clearMemoryCache } from './memoryLoader.js'
 
@@ -38,12 +38,18 @@ function watcherCallback(path: string): (curr: { mtime?: Date }) => void {
 }
 
 function watchOne(path: string): void {
+  // Skip registering a poller for paths that don't exist. The 1s poll cost
+  // only matters if we later scale to recursive .claude/rules/**/*.md
+  // enumeration; for the 3 hardcoded Phase 3 paths it's negligible, but
+  // the guard keeps behaviour predictable: nonexistent → no watcher.
+  if (!existsSync(path)) return
   watchFile(path, { interval: WATCH_INTERVAL_MS }, watcherCallback(path) as any)
   let mtimeMs = 0
   try {
     mtimeMs = statSync(path).mtimeMs
   } catch {
-    // file doesn't exist yet — that's fine, we'll pick up mtime on first write
+    // file was deleted between existsSync and statSync — fine, the
+    // registered watcher will fire on the next create event.
   }
   watchedFiles.push({ path, prevMtimeMs: mtimeMs })
 }
