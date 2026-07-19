@@ -1,4 +1,3 @@
-// @ts-nocheck
 import Anthropic, { type ClientOptions } from '@anthropic-ai/sdk'
 import { randomUUID } from 'crypto'
 import {

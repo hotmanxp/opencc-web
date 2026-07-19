@@ -1,4 +1,3 @@
-// @ts-nocheck
 import { isEnvTruthy } from 'src/utils/envUtils.js'
 
 // Default to prod config, override with test/staging if enabled

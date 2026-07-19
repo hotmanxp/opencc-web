@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { AnthropicUsage, AnthropicStreamEvent, ShimCreateParams } from '../codexShim.js'
 
 // Re-export shared types from codexShim

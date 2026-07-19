@@ -1,4 +1,3 @@
-// @ts-nocheck
 /**
  * OpenAI-compatible API shim for OpenCC.
  *

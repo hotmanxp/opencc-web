@@ -1,4 +1,3 @@
-// @ts-nocheck
 import type { APIError } from '@anthropic-ai/sdk'
 
 // SSL/TLS error codes from OpenSSL (used by both Node.js and Bun)

@@ -1,4 +1,3 @@
-// @ts-nocheck
 import axios, { type AxiosError } from 'axios'
 import type { UUID } from 'crypto'
 import { getOauthConfig } from '../../constants/oauth.js'
