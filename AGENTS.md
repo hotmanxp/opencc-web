@@ -140,22 +140,6 @@ tool_use(AskUserQuestion) → toolExecution yield tool_use:ask_pending
 - v2 transcript resume `tool_use` 顶层消息合并(`queryLoop.ts:140-185`)缺回归测试,易在改 schema 时回归 2013
 - abort / SSE 重连 / 模式切换乐观更新 revert / `AgentInputBox` 图片粘贴 + Esc 中断 路径无单元测试
 
-### LLM 自切 cwd(`feat/cwd-tracking`)
-
-zai 端实现的能力,把 opencc 上游 `bashProvider.ts` 的"shell trailer 跟踪 cwd" 移植过来:
-
-- **持久化**:每个 session 维护自己的逻辑 cwd(`Map<sessionId, {cwd, updatedAt}>`),zai 多 session 共享一个 server 实例,所以**全局 cwd 存取要按 sessionId 作 key**
-- **跟踪机制**:BashTool 在每条 `sh -c` 末尾追加 `\npwd -P >| /tmp/zai-bash-<taskId>-cwd` trailer;子进程退出后 `readFileSync` 读出,与上次比较,**不同就更新 `CwdStore`**
-- **API 路径**:`GET /api/agent/sessions/:id/pwd` → `{ cwd } | 404`
-- **前端轮询**:`useSessionCwd(sessionId)` 5s 轮询 → `SessionCwdBridge` 把 cwd basename 写到 `useAppStore.instanceContext.cwdName` → `ConfigStatusBar` 展示
-- **已知薄弱点**:
-  - `useSessionCwd` 5s 轮询在大量 session(>50)时打爆 server:暂无 throttle。后续可换 SSE 广播 `cwd.changed` 事件。
-  - CwdStore 仅内存:server 进程重启后所有 session cwd 归零(transcript 重跑可恢复,符合预期)。
-  - 前端 cwd 轮询失败时静默保留旧值:用户看到陈旧 cwd 但无错误提示。
-  - `pwd -P` 在某些 shell 上不支持 `>|` noclobber(罕见,POSIX 必支持)
-  - 不做目录权限限制:`resetCwdIfOutsideProject` 仍是 stub 返回 false(用户明确延后)
-  - 不做 sub-agent cwd 隔离:`preventCwdChanges = !isMainThread` 未实现,sub-agent bash 也会污染 session cwd(主 agent 与 sub-agent 不隔离)
-
 ## 启动所需环境
 
 - `cwd`:从 `createApp({cwd, cwdName, token, port?})` 注入 `app.locals.instanceContext`;`tokenGuard` 已移除
