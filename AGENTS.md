@@ -212,7 +212,7 @@ zai 端实现的能力,把 opencc 上游 `bashProvider.ts` 的"shell trailer 跟
 - **持久化**:每个 session 维护自己的逻辑 cwd(`Map<sessionId, {cwd, updatedAt}>`),zai 多 session 共享一个 server 实例,所以**全局 cwd 存取要按 sessionId 作 key**
 - **跟踪机制**:BashTool 在每条 `sh -c` 末尾追加 `\npwd -P >| /tmp/zai-bash-<taskId>-cwd` trailer;子进程退出后 `readFileSync` 读出,与上次比较,**不同就更新 `CwdStore`**
 - **API 路径**:`GET /api/agent/sessions/:id/pwd` → `{ cwd } | 404`
-- **前端轮询**:`useSessionCwd(sessionId)` 5s 轮询 → `SessionCwdBridge` 把 cwd basename 写到 `useAppStore.instanceContext.cwdName` → `ConfigStatusBar` 展示
+- **前端轮询**:`useSessionCwd(sessionId)` SSE 推送 (cwd.changed) → `SessionCwdBridge` 把 cwd basename 写到 `useAppStore.instanceContext.cwdName` → `ConfigStatusBar` 展示
 - **已知薄弱点**:
   - CwdStore 仅内存:server 进程重启后所有 session cwd 归零(transcript 重跑可恢复,符合预期)。
   - 前端 cwd 轮询失败时静默保留旧值:用户看到陈旧 cwd 但无错误提示。
