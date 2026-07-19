@@ -38,6 +38,9 @@ import { analyzeBashCommand } from './commandAnalysis.js'
 import { bashToolHasPermission } from './permissions.js'
 import { detectBlockedSleepPattern } from './detectBlockedSleep.js'
 import { isSearchOrReadBashCommand } from './isSearchOrRead.js'
+import { isAutobackgroundingAllowed } from './autobackground.js'
+import { checkReadOnlyConstraints } from './readOnlyValidation.js'
+import { containsVulnerableUncPath } from './pathValidation.js'
 import { shouldUseSandbox } from './shouldUseSandbox.js'
 import { splitCommand, baseCommand } from './commandSplitter.js'
 import { applySedEdit, SedEditFileNotFoundError } from './applySedEdit.js'
@@ -109,6 +112,20 @@ export const BashTool: LegacyTool<typeof BashInputSchema, string> = {
         errorCode: 10,
       }
     }
+    // read-only mode (ZAI_READ_ONLY=1) — 拒绝任何写操作
+    const readOnly = checkReadOnlyConstraints(input)
+    if (!readOnly.allowed) {
+      return { result: false, message: readOnly.reason, errorCode: 11 }
+    }
+    // UNC path — WebDAV / SMB 攻击面, 显式拒绝
+    if (containsVulnerableUncPath(input.command)) {
+      return {
+        result: false,
+        message:
+          'Blocked: command contains a UNC path (\\\\server\\share or //server/share) that could trigger WebDAV/SMB credential leaks.',
+        errorCode: 12,
+      }
+    }
     return { result: true }
   },
 
@@ -135,7 +152,7 @@ export const BashTool: LegacyTool<typeof BashInputSchema, string> = {
   // opencc `Tool.isSearchOrReadCommand` — 用于 UI collapse
   isSearchOrReadCommand: (input: BashInput) => {
     const parsed = BashInputSchema.safeParse(input)
-    if (!parsed.success) return { isSearch: false, isRead: false }
+    if (!parsed.success) return { isSearch: false, isRead: false, isList: false }
     return isSearchOrReadBashCommand(parsed.data.command)
   },
 
@@ -321,9 +338,10 @@ async function runForeground(
     // zai 不需要 setToolJSX (无 JSX UI); 2s 后标记 task 已在 tracker 中。
     // 后续若 user UI 加入 streaming 进度展示, 在这里调用 setToolJSX。
 
-    // 15s 后自动后台化 (assistant 模式)
+    // 15s 后自动后台化 (assistant 模式)。`sleep` 等命令豁免, 保持前台跑
+    // 让用户看到进度 — 显式 run_in_background:true 仍允许后台。
     const assistantBgTimer = setTimeout(() => {
-      if (!settled && child.exitCode === null) {
+      if (!settled && child.exitCode === null && isAutobackgroundingAllowed(input.command)) {
         if (bashBackgroundTracker.backgroundExistingForegroundTask(taskId)) {
           assistantAutoBackgrounded = true
         }
