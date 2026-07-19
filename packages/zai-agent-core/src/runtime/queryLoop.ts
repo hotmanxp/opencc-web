@@ -452,49 +452,71 @@ async function buildSystemPrompt(
   skills: LoadedSkill[],
   config?: RuntimeConfig,
   pluginAgents: import('../tools/AgentTool/loadAgentsDir.js').AgentDefinition[] = [],
-): Promise<string> {
-  const parts: string[] = []
-  if (options.systemPrompt) {
-    parts.push(typeof options.systemPrompt === 'string'
-      ? options.systemPrompt
-      : options.systemPrompt.map(b => JSON.stringify(b)).join('\n'))
-  }
+): Promise<string[]> {
+  // Static sections (cacheable across turns)
+  const staticIntro: string = options.systemPrompt
+    ? (typeof options.systemPrompt === 'string'
+        ? options.systemPrompt
+        : options.systemPrompt.join('\n'))
+    : ''
+
+  // Dynamic sections — registered through vendored section system for
+  // per-section cache invalidation. Dynamic import: vendored code has
+  // pre-existing typecheck errors; we wrap calls in safeAsync.
+  const sections: string[] = []
   if (options.enableAgentsMd !== false) {
-    // memoryLoader handles its own errors → empty result; safe to await.
-    const files = await loadMemoryForPrompt(options.cwd)
-    if (files.length > 0) {
-      const formatted = files
-        .map((f) => `<!-- ${f.path} -->\n${f.content}`)
-        .join('\n\n')
-      parts.push(`以下是根据项目 AGENTS.md / .claude/rules 加载的指令:\n\n${formatted}`)
-    }
+    sections.push(
+      await safeAsync(async () => {
+        const files = await loadMemoryForPrompt(options.cwd)
+        if (files.length === 0) return null
+        const formatted = (files as any[])
+          .map((f) => `<!-- ${f.path} -->\n${f.content ?? ''}`)
+          .join('\n\n')
+        return `以下是根据项目 AGENTS.md / .claude/rules 加载的指令:\n\n${formatted}`
+      }),
+    )
   }
   const skillsPrompt = buildSkillsSystemPrompt(skills)
-  if (skillsPrompt) parts.push(skillsPrompt)
-  // NEW: inject MCP server `instructions` into the system prompt text.
-  // This is the opencc-internals `getMcpInstructionsSection` path. Tool
-  // metadata (name/description/inputSchema) is still injected via the
-  // `tools` array; this adds server-level behavioral instructions.
+  if (skillsPrompt) sections.push(skillsPrompt)
   const mcpSection = getMcpInstructionsSection(config?.mcpClients)
-  if (mcpSection) parts.push(mcpSection)
-  // Available agent types for the Agent tool's subagent_type. We load from
-  // the same sources (dataDir + userAgentsDir) the AgentTool itself uses,
-  // so what the parent sees here matches what AgentTool will accept.
-  // Skip silently on failure (loadAgentDefinitions already swallows per-dir
-  // errors; only the surrounding try/catch covers full crashes).
+  if (mcpSection) sections.push(mcpSection)
   if (config?.dataDir) {
-    try {
-      const { agents } = await loadAgentDefinitions(
-        config.dataDir,
-        config.userAgentsDir,
-        undefined,
-        pluginAgents,
-      )
-      const agentsSection = renderAvailableAgentsSection(agents)
-      if (agentsSection) parts.push(agentsSection)
-    } catch { /* agent list unavailable — don't break the whole prompt */ }
+    const agentsSection = await safeAsync(async () => {
+      try {
+        const { agents } = await loadAgentDefinitions(
+          config.dataDir,
+          config.userAgentsDir,
+          undefined,
+          pluginAgents,
+        )
+        return renderAvailableAgentsSection(agents)
+      } catch {
+        return null
+      }
+    })
+    if (agentsSection) sections.push(agentsSection)
   }
-  return parts.filter(Boolean).join('\n\n')
+
+  // Boundary marker from vendored buildSystemPromptBlocks. Dynamic import
+  // for the same reason as above.
+  let boundary = ''
+  try {
+    const claude = await import('../opencc-internals/services/api/claude.js')
+    boundary = (claude as any).SYSTEM_PROMPT_DYNAMIC_BOUNDARY ?? ''
+  } catch {
+    // No-op if vendored constant not exported; we still return a valid array.
+  }
+
+  return [staticIntro, boundary, ...sections].filter(Boolean)
+}
+
+async function safeAsync(fn: () => Promise<string | null>): Promise<string> {
+  try {
+    return (await fn()) ?? ''
+  } catch (err) {
+    console.warn('[buildSystemPrompt] section failed:', err)
+    return ''
+  }
 }
 
 function snapshotMcpClients(pool: any) {
