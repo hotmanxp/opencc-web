@@ -4,7 +4,7 @@ import type { Tool, LegacyToolContext as ToolContext } from '../tools/Tool.js'
 import type { RuntimeEvent } from './events.js'
 import { TranscriptStore } from '../transcript/store.js'
 import { wrapWithZaiMeta, toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
-import { loadAgentsMd, buildAgentsMdSystemPrompt } from '../agents/agentsMdLoader.js'
+import { loadMemoryForPrompt } from '../agents/memoryLoader.js'
 import { executeToolsStreaming } from './toolExecution.js'
 import { buildSubagentContext } from './subagent.js'
 import { defaultCanUseToolFactory } from './canUseTool.js'
@@ -460,10 +460,14 @@ async function buildSystemPrompt(
       : options.systemPrompt.map(b => JSON.stringify(b)).join('\n'))
   }
   if (options.enableAgentsMd !== false) {
-    try {
-      const agentsMd = await loadAgentsMd(options.cwd)
-      parts.push(buildAgentsMdSystemPrompt(agentsMd) ?? '')
-    } catch { /* AGENTS.md 不存在, 静默降级 */ }
+    // memoryLoader handles its own errors → empty result; safe to await.
+    const files = await loadMemoryForPrompt(options.cwd)
+    if (files.length > 0) {
+      const formatted = files
+        .map((f) => `<!-- ${f.path} -->\n${f.content}`)
+        .join('\n\n')
+      parts.push(`以下是根据项目 AGENTS.md / .claude/rules 加载的指令:\n\n${formatted}`)
+    }
   }
   const skillsPrompt = buildSkillsSystemPrompt(skills)
   if (skillsPrompt) parts.push(skillsPrompt)
