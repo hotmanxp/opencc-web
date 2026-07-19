@@ -184,11 +184,8 @@ export default function QuestionCard(props: QuestionCardProps) {
           borderRadius: 6,
         }}
       >
-        <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
+        <div style={{ marginBottom: 10 }}>
           <Text strong style={{ color: '#1f1f1f' }}>请回答以下问题</Text>
-          <Popconfirm title="确认取消?" onConfirm={onReject} okText="是" cancelText="否">
-            <Button size="small">取消</Button>
-          </Popconfirm>
         </div>
 
         {status === 'error' && errorMessage && (
@@ -212,7 +209,10 @@ export default function QuestionCard(props: QuestionCardProps) {
           onNotesChange={onNotesChange}
         />
 
-        <div style={{ marginTop: 16, display: 'flex', gap: 8 }}>
+        <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
+          <Popconfirm title="确认取消?" onConfirm={onReject} okText="是" cancelText="否">
+            <Button size="small">取消</Button>
+          </Popconfirm>
           <Button type="primary" disabled={!allAnswered || status === 'submitting'} onClick={onSubmit} loading={status === 'submitting'}>
             Submit answers
           </Button>
