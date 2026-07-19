@@ -123,11 +123,44 @@ const SystemEvent = z.discriminatedUnion('type', [
              branch: z.string() }),
 ])
 
+// state.* — 服务端 in-process StateChangeBus 经 zai server bridge 翻译后 emit。
+// 4 个 type 都是 session-scoped (走 per-sid filter),除 agent_task.changed 兼容 null。
+// payload 是全量快照(不是 diff)。
+const StateEvent = z.discriminatedUnion('type', [
+  z.object({
+    ...Base.shape,
+    type: z.literal('cwd.changed'),
+    sessionId: z.string(),
+    cwd: z.string(),
+    updatedAt: z.number(),
+  }),
+  z.object({
+    ...Base.shape,
+    type: z.literal('bash_task.changed'),
+    sessionId: z.string(),
+    task: z.unknown(), // BashTaskInfo shape 由 zai-agent-core 保证
+  }),
+  z.object({
+    ...Base.shape,
+    type: z.literal('v2_task.changed'),
+    sessionId: z.string(),
+    task: z.unknown(),
+    action: z.enum(['upsert', 'delete']),
+  }),
+  z.object({
+    ...Base.shape,
+    type: z.literal('agent_task.changed'),
+    sessionId: z.string().nullable(),
+    task: z.unknown(),
+  }),
+])
+
 export const ServerEvent = z.discriminatedUnion('type', [
   ...RuntimeEvent.options,
   ...SessionEvent.options,
   ...JobEvent.options,
   ...PromptEvent.options,
   ...SystemEvent.options,
+  ...StateEvent.options,
 ])
 export type ServerEvent = z.infer<typeof ServerEvent>
