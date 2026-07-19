@@ -11,7 +11,9 @@
     "./transcript": "./dist/transcript/store.js",
     "./commands": "./dist/commands/index.js",
     "./bashTracker": "./dist/tools/BashTool/bashTracker.js",
-    "./taskListStore": "./dist/tools/Tasks/TaskListStore.js"
+    "./taskListStore": "./dist/tools/Tasks/TaskListStore.js",
+    "./agents/memoryWatcher": "./dist/agents/memoryWatcher.js",
+    "./agents/memoryLoader": "./dist/agents/memoryLoader.js"
   },
   "files": [
     "dist/",
