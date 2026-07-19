@@ -2,6 +2,7 @@ import { readFile, readdir, stat } from 'fs/promises'
 import { join, dirname, relative, sep } from 'path'
 import { existsSync } from 'fs'
 import ignore from 'ignore'
+import picomatch from 'picomatch'
 
 /**
  * zai-native slim memory loader.
@@ -47,26 +48,40 @@ export async function loadMemoryForPrompt(cwd: string): Promise<MemoryFile[]> {
     if (cached) return cached
 
     const files: MemoryFile[] = []
-    const visited = new Set<string>()
+    // Two tracking sets:
+    // - `topLevel`: absolute paths of files already pushed as a top-level
+    //   MemoryFile entry. Used to dedup top-level entrypoints (AGENTS.md
+    //   at the same path is the same file).
+    // - `includedAnywhere`: absolute paths that have appeared in any @include
+    //   chain. Used purely for cycle detection (A includes B, B includes A
+    //   → B's recursion sees A is in the chain, aborts). Crucially this is
+    //   NOT used to dedup "second include of the same path from a different
+    //   top-level" — each top-level file passes its OWN chain down so two
+    //   unrelated top-level files can include the same path without one
+    //   silently dropping it. The OpenCC vendored behaviour is "include
+    //   once per source tree", not "include once globally".
+    const topLevel = new Set<string>()
 
     // 1. Walk parent dirs for AGENTS.md (stops at .git boundary or filesystem root)
     const projectChain = await walkParentDirsForAgents(cwd)
     for (const projectPath of projectChain) {
-      if (visited.has(projectPath)) continue
-      visited.add(projectPath)
+      if (topLevel.has(projectPath)) continue
+      topLevel.add(projectPath)
       const content = await readSafe(projectPath)
       if (content === null) continue
-      const withIncludes = await processIncludes(content, projectPath, 0, visited)
+      const chain = new Set<string>(topLevel)
+      const withIncludes = await processIncludes(content, projectPath, 0, chain)
       files.push({ path: projectPath, content: withIncludes, type: 'Project' })
     }
 
     // 2. AGENTS.local.md (cwd only, not parent)
     const localPath = join(cwd, AGENTS_LOCAL_FILENAME)
-    if (!visited.has(localPath) && existsSync(localPath)) {
+    if (!topLevel.has(localPath) && existsSync(localPath)) {
       const content = await readSafe(localPath)
       if (content !== null) {
-        visited.add(localPath)
-        const withIncludes = await processIncludes(content, localPath, 0, visited)
+        topLevel.add(localPath)
+        const chain = new Set<string>(topLevel)
+        const withIncludes = await processIncludes(content, localPath, 0, chain)
         files.push({ path: localPath, content: withIncludes, type: 'Local' })
       }
     }
@@ -146,14 +161,69 @@ async function readSafe(path: string): Promise<string | null> {
 }
 
 /**
+ * Parse a YAML frontmatter block (the content between the two `---` fences)
+ * into a list of glob patterns from the `paths:` key. Supports both YAML
+ * list syntax (`paths: [a, b]`) and comma-separated scalar (`paths: a, b`),
+ * matching OpenCC's vendored behaviour. Returns [] when `paths:` is missing
+ * or contains only `**` (match-all = include unconditionally).
+ */
+function parseFrontmatterPaths(fmBlock: string): string[] {
+  const m = fmBlock.match(/^paths:\s*(.+?)\s*$/m)
+  if (!m) return []
+  const raw = m[1]
+  // Strip inline YAML list brackets if present
+  const inner = raw.replace(/^\[/, '').replace(/\]$/, '').trim()
+  if (!inner) return []
+  const parts = inner
+    .split(',')
+    .map((p) => p.trim().replace(/^["']|["']$/g, ''))
+    .filter((p) => p.length > 0)
+  // Drop `/**` suffix — picomatch `src` matches both the dir and contents.
+  const cleaned = parts.map((p) => (p.endsWith('/**') ? p.slice(0, -3) : p))
+  // All `**` (match-all) → treat as no gate
+  if (cleaned.length === 0 || cleaned.every((p) => p === '**')) return []
+  return cleaned
+}
+
+/**
+ * Decide whether a `paths:` frontmatter gate is satisfied for unconditional
+ * prompt load. The vendored OpenCC semantics (per
+ * opencc-internals/utils/claudemd.ts:255-411 + the consumer at runtime):
+ * a rule with `paths: ["src/**"]` applies when the active context file is
+ * under `src/`. For session-start load there's no active file, so we
+ * approximate by checking whether cwd contains at least one top-level
+ * entry whose name matches any pattern (after stripping a trailing `/**`).
+ * An empty pattern list is treated as "no gate" (return true).
+ */
+async function matchesCwdTree(cwd: string, patterns: string[]): Promise<boolean> {
+  if (patterns.length === 0) return true
+  let entries: string[]
+  try {
+    entries = await readdir(cwd)
+  } catch {
+    return true  // can't enumerate → don't filter (fail-open)
+  }
+  for (const pat of patterns) {
+    for (const entry of entries) {
+      // picomatch handles both literal patterns (`src`) and globs (`*.ts`).
+      // `dot: true` lets `.foo` match if the pattern explicitly targets it.
+      if (picomatch.isMatch(entry, pat, { dot: true })) return true
+    }
+  }
+  return false
+}
+
+/**
  * Recursively process @include directives. Each include is inlined
- * into the parent content. Cyclic includes are guarded by `visited`.
+ * into the parent content. Cyclic includes are guarded by `chain` — a
+ * file appears at most once per top-level expansion tree. Two top-level
+ * files can independently include the same path without dropping one.
  */
 async function processIncludes(
   content: string,
   parentPath: string,
   depth: number,
-  visited: Set<string>,
+  chain: Set<string>,
 ): Promise<string> {
   if (depth >= MAX_INCLUDE_DEPTH) return content
 
@@ -164,12 +234,12 @@ async function processIncludes(
     if (match) {
       const includeRel = match[1]
       const includeAbs = join(dirname(parentPath), includeRel)
-      if (visited.has(includeAbs)) continue  // cycle guard
+      if (chain.has(includeAbs)) continue  // cycle guard (current chain)
       if (!existsSync(includeAbs)) continue  // missing target → skip silently
-      visited.add(includeAbs)
+      chain.add(includeAbs)
       const included = await readSafe(includeAbs)
       if (included !== null) {
-        const recursed = await processIncludes(included, includeAbs, depth + 1, visited)
+        const recursed = await processIncludes(included, includeAbs, depth + 1, chain)
         out.push(`<!-- @include ${includeRel} -->\n${recursed}`)
       }
     } else {
@@ -205,17 +275,33 @@ async function collectRulesDir(
       const sub = await collectRulesDir(cwd, full, ig)
       result.push(...sub)
     } else if (st.isFile() && entry.endsWith('.md')) {
-      if (ig.ignores(relative(cwd, full))) continue
+      const relPath = relative(cwd, full)
+      if (ig.ignores(relPath)) continue
       const content = await readSafe(full)
       if (content === null) continue
-      // Filter by frontmatter `paths:` glob if present.
+      // Parse frontmatter. Vendored OpenCC semantics (opencc-internals/
+      // utils/claudemd.ts:255-280 + 351-411):
+      //   - `paths:` is a YAML list (or comma-separated string) of globs.
+      //   - A rule with `paths:` applies only when the relevant context
+      //     (the active file path, or in unconditional-load mode the cwd
+      //     tree) matches one of the patterns.
+      //   - A rule with NO `paths:` (or with a `**` / match-all pattern)
+      //     applies unconditionally.
+      // We implement the unconditional-load gate: when no specific file
+      // is active, the rule is INCLUDED iff cwd's relative tree contains
+      // at least one path matching the frontmatter `paths:` patterns.
+      // Concretely: pattern `src/**` includes the rule when cwd contains
+      // a `src/` directory; pattern `**` (match-all) means include; empty
+      // / missing `paths:` means include.
       const fmMatch = content.match(/^---\n([\s\S]*?)\n---\n/)
+      let stripped = content
       if (fmMatch) {
-        const stripped = content.replace(/^---\n[\s\S]*?\n---\n/, '')
-        result.push({ path: full, content: stripped, type: 'Rule' })
-      } else {
-        result.push({ path: full, content, type: 'Rule' })
+        const fmBlock = fmMatch[1]
+        const patterns = parseFrontmatterPaths(fmBlock)
+        if (!(await matchesCwdTree(cwd, patterns))) continue  // paths: gate skipped
+        stripped = content.replace(/^---\n[\s\S]*?\n---\n/, '')
       }
+      result.push({ path: full, content: stripped, type: 'Rule' })
     }
   }
   return result
