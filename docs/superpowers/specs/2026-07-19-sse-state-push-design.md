@@ -43,60 +43,56 @@
 ## 2. 架构
 
 ```
-┌──────────────────────────── Server (zai-agent-core / zai) ────────────────────────────┐
-│                                                                                        │
-│  ┌───────────────┐    ┌─────────────────┐    ┌──────────────────┐                     │
-│  │  BashTool +   │    │  BashTracker    │    │  TaskListStore   │  CwdStore setter    │
-│  │  CwdStore     │───▶│  50ms debounce  │    │  on append/      │  + BackgroundRuntime│
-│  │  (mutation    │    │  batch emit     │    │  delete          │  onTaskStateChange  │
-│  │   points)     │    │  bash_task.*    │    │  v2_task.*       │  agent_task.*       │
-│  └───────┬───────┘    └────────┬────────┘    └────────┬─────────┘  + CwdStore emit   │
-│          │                     │                      │            cwd.changed        │
-│          │ emit(topic=…)       │                      │                              │
-│          ▼                     ▼                      ▼                              │
-│  ┌──────────────────────────────────────────────────────────────────┐                 │
-│  │             ServerEventBus  (ext: subscribeTopics)                │                 │
-│  │  • topic whitelist  • per-sid history  • Last-Event-ID replay     │                 │
-│  └─────────────────────────────────────┬────────────────────────────┘                 │
-│                                        │                                              │
-│                                        ▼                                              │
-│  ┌──────────────────────────────────────────────────────────────────┐                 │
-│  │  GET /api/event?sid=xxx&topics=cwd,bash,v2,agent_task,…           │                 │
-│  │  topic filter at subscribe time, replay at connect                │                 │
-│  └──────────────────────────────────────────────────────────────────┘                 │
-└────────────────────────────────────────────────────────────────────────────────────────┘
-                                          │
-                                          ▼
-                              SSE: cwd.changed / bash_task.changed
-                                   / v2_task.changed / agent_task.changed
-                                          │
-                                          ▼
-┌──────────────────────────── Client (zai web) ──────────────────────────────────────────┐
-│                                                                                        │
-│  ┌──────────────────────────┐                                                         │
-│  │  useEventStream  (扩展)  │                                                         │
-│  │  topics 随 hook 注册     │                                                         │
-│  └────────────┬─────────────┘                                                         │
-│               │ dispatch(event)                                                       │
-│               ▼                                                                       │
-│  ┌────────────────────────────────────────────────────┐                                │
-│  │  useAppStore  /  useAgentStore                     │                                │
-│  │  bashTasksBySession    cwdBySession                │                                │
-│  │  v2TasksBySession      agentTasksBySession         │                                │
-│  │  (现有 todosBySession / messages 保持不变)         │                                │
-│  └────────────────────────────────────────────────────┘                                │
-│                                                                                        │
-│  useSessionCwd       ─▶ 不再 setInterval,改订阅 cwd.changed                            │
-│  useBashBackgroundTasks ─▶ 不再 setInterval,改订阅 bash_task.changed                   │
-│  useBackgroundTasks  ─▶ 不再 listTasks 兜底(初次连接 replay 一次)                       │
-│  useConversationInfo ─▶ 不变(一次性)                                                   │
-└────────────────────────────────────────────────────────────────────────────────────────┘
+┌──────────── zai-agent-core (runtime 库, 不依赖 zai server) ──────────────┐
+│                                                                            │
+│  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐  ┌─────────────┐       │
+│  │ CwdStore    │  │ BashTracker │  │ TaskList    │  │ BgRuntime   │       │
+│  │ setter      │  │ 50ms debch  │  │ Store       │  │ onStateChg  │       │
+│  │ BashTool    │  │ batch       │  │ append/del  │  │             │       │
+│  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘  └──────┬──────┘       │
+│         │                │                │                │              │
+│         └────────────────┴────────────────┴────────────────┘              │
+│                                  │                                        │
+│                                  ▼                                        │
+│                  StateChangeBus (Node EventEmitter)                       │
+└──────────────────────────────────┬─────────────────────────────────────────┘
+                                   │ (进程内事件)
+                                   ▼
+┌──────────────────────── zai server (delivery 层) ──────────────────────────┐
+│                                                                            │
+│  stateBridge.ts: subscribe StateChangeBus → eventBus.emit                  │
+│                                  │                                        │
+│                                  ▼                                        │
+│  ┌──────────────────────────────────────────────────────────────────┐     │
+│  │             ServerEventBus  (ext: subscribeTopics)                │     │
+│  │  • topic whitelist  • per-sid history  • Last-Event-ID replay     │     │
+│  └─────────────────────────────────────┬────────────────────────────┘     │
+│                                        │                                  │
+│                                        ▼                                  │
+│  ┌──────────────────────────────────────────────────────────────────┐     │
+│  │  GET /api/event?sid=xxx&topics=cwd,bash,v2,agent_task,…           │     │
+│  │  topic filter at subscribe time, replay at connect                │     │
+│  └──────────────────────────────────────────────────────────────────┘     │
+└────────────────────────────────────────────────────────────────────────────┘
+                                   │ SSE
+                                   ▼
+┌──────────────────────────── Client (zai web) ──────────────────────────────┐
+│                                                                            │
+│  useEventStream  →  useAgentStore (cwdBySession / bashTasksBySession /    │
+│                                  v2TasksBySession / agentTasksBySession)   │
+│                                                                            │
+│  useSessionCwd       ─▶ 不再 setInterval,改订阅 cwd.changed                │
+│  useBashBackgroundTasks ─▶ 不再 setInterval,改订阅 bash_task.changed       │
+│  useBackgroundTasks  ─▶ 不再 listTasks 兜底(初次连接 replay 已经覆盖)      │
+│  useConversationInfo ─▶ 不变(一次性)                                       │
+└────────────────────────────────────────────────────────────────────────────┘
 ```
 
 **关键边界**:
-- **emit 在 zai-agent-core 内部**(tracker/store mutation 路径),不穿透到 zai server。zai server 路由层只关心 subscribe + replay。
-- **topic 是 server 端 first-class 概念**,前端通过 URL 参数声明自己需要哪些 topic,server 用 whitelist filter。
-- **跨 tab 隔离仍走 sid**:subscribed topics 全局共享,但 emit 时按 `event.sessionId` 走 sid filter,跟现有 `isGlobalEvent` 模式一致(全局 topic = `session.*` / `system.*`)。
+- **zai-agent-core 只暴露 StateChangeBus**(Node EventEmitter),**不 import zai 的 eventBus**。依赖方向单向:core → 无依赖 → server。
+- **zai server 通过 `stateBridge.ts` 桥接**:把 `stateChangeBus` 事件翻译成 `eventBus.emit({type: 'cwd.changed', ...})`,复用现有 SSE 通道。
+- **topic 是 server 端 first-class 概念**,前端通过 URL 参数声明,server 用 whitelist filter。
+- **跨 tab 隔离仍走 sid**:subscribed topics 全局共享,但 emit 时按 `event.sessionId` 走 sid filter。
 
 ---
 
@@ -243,7 +239,7 @@ bashTasksBySession: Record<string, BashTaskInfo[]>       // sid → 列表 (newe
 agentTasksBySession: Record<string, BackgroundTaskSummary[]>  // sid → 列表
 ```
 
-**关键决定:`useBackgroundTasks` 的 local map 上提到 zustand store**。理由:这个 hook 当前只服务于一个组件(TaskDock),但 SSE 推送是全局的(可能多个组件都需要),放 store 才能共享。
+**关键决定:`useBackgroundTasks` 的 local map 上提到 zustand store**。理由:这个 hook 当前只服务于 TaskDock 一处,但 SSE 推送是全局可消费的;后续若 TaskDrawer 之外(例如新面板)需要展示同一 session 的 task 列表,store 共享避免双源 state drift。
 
 `v2TasksBySession` 已经存在,不动。
 
@@ -351,73 +347,96 @@ applyAgentTaskChanged({ sessionId, task }):
 | `useBackgroundTasks` | `useEffect → listTasks()` on mount + session 切换 | 删除 `listTasks` 兜底(初次连接 SSE replay 已经覆盖),保留 `detail` 懒加载(SSE 推送的 detail 优先,fetch 兜底) |
 | `useConversationInfo` | 1-shot `/api/agent/settings` | 不变 |
 
-**过渡期兼容**:hook 删除前先保留 setInterval(新增 SSE 订阅 + setInterval 共存 1 个 release),验证没问题再删 setInterval — 通过 feature flag `ZAI_SSE_STATE_PUSH=on` 控制。
+> 落地时序与回退策略见 §8.2(`ZAI_SSE_STATE_PUSH` feature flag 控制新 / 老路径并存 1 个 release)。
 
 ---
 
 ## 6. Server 端 emit 触发点
 
-### 6.1 cwd.changed
+### 6.0 依赖边界 — 关键设计约束
 
-`BashTool.runShellCommand` 末尾,`CwdStore.set(sessionId, newCwd)` 之后:
+`zai-agent-core` 是 runtime 库,**不依赖 zai 的 services**(具体说:不 import `eventBus`)。所有 SSE event 都在 zai server 层 emit。
 
-```ts
-import { eventBus } from '@zai/zai/server/services/eventBus'
+为了不破坏依赖方向,设计模式:**zai-agent-core 暴露 `StateChangeBus`(in-process Node `EventEmitter`),zai server 层在启动时 subscribe `StateChangeBus` 并桥接到 `eventBus.emit`**。
 
-CwdStore.set(sessionId, newCwd)
-eventBus.emit({
-  type: 'cwd.changed',
-  sessionId,
-  cwd: newCwd,
-  updatedAt: Date.now(),
-})
+```
+zai-agent-core (runtime)                zai server (delivery)
+─────────────────────────               ────────────────────
+CwdStore.set ─┐                         initStateBridge()
+BashTracker ──┼─▶ StateChangeBus ─────▶ subscribe ─▶ eventBus.emit
+TaskListStore ┤                         (按 type 翻译成 SSE event)
+BgRuntime    ─┘
 ```
 
-测试钩子:`BashTool` 在 test mode 下 emit 走 mock eventBus,不污染真实 SSE。
+`StateChangeBus` 接口:
+
+```ts
+// zai-agent-core: 新文件 src/runtime/stateChangeBus.ts
+import { EventEmitter } from 'node:events'
+
+export interface StateChangeEventMap {
+  'cwd.changed': { sessionId: string; cwd: string; updatedAt: number }
+  'bash_task.changed': { sessionId: string; task: BashTaskInfo }
+  'v2_task.changed': { sessionId: string; task: V2TaskItem; action: 'upsert' | 'delete' }
+  'agent_task.changed': { sessionId: string | null; task: BackgroundTask }
+}
+
+export const stateChangeBus = new EventEmitter() as TypedEmitter<StateChangeEventMap>
+
+// 进程退出时清理(避免 listener leak)
+export function resetStateChangeBusForTests(): void {
+  stateChangeBus.removeAllListeners()
+}
+```
+
+> **为什么是 Node EventEmitter 而不是 zod schema discriminated union?** 因为 `StateChangeBus` 是 in-process event,不走 SSE wire,不需要 zod 校验。schema 校验在 zai server emit 到 eventBus 时做(那里 schema 已经在 §3 定义)。
+
+### 6.1 cwd.changed
+
+`zai-agent-core/src/tools/BashTool/BashTool.ts` 末尾,`CwdStore.set(sessionId, newCwd)` 之后:
+
+```ts
+import { stateChangeBus } from '../../runtime/stateChangeBus.js'
+
+CwdStore.set(sessionId, newCwd)
+stateChangeBus.emit('cwd.changed', { sessionId, cwd: newCwd, updatedAt: Date.now() })
+```
+
+注意:`BashTool` 当前用 `runWithSessionId` AsyncLocalStorage 拿到 sessionId,emit 不需要额外参数(从 ALS 拿)。
 
 ### 6.2 bash_task.changed
 
-在 `bashTracker.ts` 内部,所有 mutator 方法(`appendOutput` / `markFinished` / `backgroundExistingForegroundTask` / `register` / `unregisterForeground` / `markNotified`)末尾调 `scheduleEmit(taskId)`:
+在 `zai-agent-core/src/tools/BashTool/bashTracker.ts` 内部,所有 mutator 方法末尾调 `scheduleEmit(taskId)`,`stateChangeBus.emit` 在 50ms debounce 后 batch 触发:
 
 ```ts
+import { stateChangeBus } from '../../runtime/stateChangeBus.js'
+
 class BashBackgroundTracker {
-  // debounce timer 持有 pending taskId -> 最新 snapshot
   private pendingEmits = new Map<string, NodeJS.Timeout>()
   private pendingSnapshots = new Map<string, BashTaskInfo>()
 
-  scheduleEmit(taskId: string): void {
+  private scheduleEmit(taskId: string): void {
     const t = this.byId.get(taskId)
-    if (!t) return  // 已被 LRU evict, 不 emit
+    if (!t) return
     this.pendingSnapshots.set(taskId, { ...t })
-    if (this.pendingEmits.has(taskId)) return  // 已有 timer
+    if (this.pendingEmits.has(taskId)) return
 
     const timer = setTimeout(() => {
-      const snap = this.pendingSnapshots.get(taskId)
       this.pendingEmits.delete(taskId)
+      const snap = this.pendingSnapshots.get(taskId)
       this.pendingSnapshots.delete(taskId)
       if (!snap) return
-      eventBus.emit({
-        type: 'bash_task.changed',
-        sessionId: snap.sessionId,
-        task: snap,
-      })
+      stateChangeBus.emit('bash_task.changed', { sessionId: snap.sessionId, task: snap })
     }, 50)
     this.pendingEmits.set(taskId, timer)
-    timer.unref()  // 不阻止进程退出
+    timer.unref()
   }
 
-  // 测试钩子
   __flushPendingForTests(): void {
     for (const [taskId, timer] of this.pendingEmits) {
       clearTimeout(timer)
       const snap = this.pendingSnapshots.get(taskId)
-      if (snap) {
-        eventBus.emit({
-          type: 'bash_task.changed',
-          sessionId: snap.sessionId,
-          task: snap,
-        })
-      }
+      if (snap) stateChangeBus.emit('bash_task.changed', { sessionId: snap.sessionId, task: snap })
     }
     this.pendingEmits.clear()
     this.pendingSnapshots.clear()
@@ -425,58 +444,91 @@ class BashBackgroundTracker {
 }
 ```
 
-`markFinished` 后:**同步立即 flush**,不再 debounce(终态是重要事件):
+`markFinished` 同步立即 flush(终态不能 debounce):
 
 ```ts
 markFinished(taskId, status, info): BashTaskInfo | undefined {
   // ... existing logic
-  this.cancelPendingEmit(taskId)  // 取消 debounce timer
-  eventBus.emit({ type: 'bash_task.changed', sessionId: t.sessionId, task: { ...t } })
+  this.cancelPendingEmit(taskId)
+  stateChangeBus.emit('bash_task.changed', { sessionId: t.sessionId, task: { ...t } })
   return t
 }
 ```
 
 ### 6.3 v2_task.changed
 
-`packages/zai-agent-core/src/transcript/taskListStore.ts`(或对应文件)append/update/delete 路径:
+`zai-agent-core/src/transcript/taskListStore.ts`(或对应文件)append/update/delete 路径:
 
 ```ts
+import { stateChangeBus } from '../runtime/stateChangeBus.js'
+
 async append(sid: string, item: TaskItem): Promise<void> {
   // ... existing logic
-  eventBus.emit({
-    type: 'v2_task.changed',
-    sessionId: sid,
-    task: trimToClientShape(item),
-    action: 'upsert',
-  })
+  stateChangeBus.emit('v2_task.changed', { sessionId: sid, task: trimToClientShape(item), action: 'upsert' })
 }
 
 async remove(sid: string, taskId: string): Promise<void> {
-  // ... existing logic (snapshot before delete)
-  eventBus.emit({
-    type: 'v2_task.changed',
-    sessionId: sid,
-    task: snapshot,
-    action: 'delete',
-  })
+  const snapshot = this.peek(sid, taskId) // 已有或新增 helper
+  // ... existing logic
+  stateChangeBus.emit('v2_task.changed', { sessionId: sid, task: snapshot, action: 'delete' })
 }
 ```
 
 ### 6.4 agent_task.changed
 
-`packages/zai-agent-core/src/runtime/background/DefaultBackgroundRuntime.ts` 的 `onTaskStateChange` 回调,server 侧 `initBackgroundRuntime` 处:
+`zai-agent-core/src/runtime/background/DefaultBackgroundRuntime.ts` 内部 `runOne` 的 task 状态变更点(创建 / 完成 / 失败 / 取消),在现有 `onTaskStateChange` 回调之前/同步调 `stateChangeBus.emit`。这样 `onTaskStateChange` 仍然是 server 注入的回调(用于 emit `job.*`),`stateChangeBus.emit` 是 agent-core 自己的活:
 
 ```ts
-onTaskStateChange: (task) => {
-  // existing: emit job.* events
-  // new: also emit full snapshot
-  eventBus.emit({
-    type: 'agent_task.changed',
-    sessionId: task.parentSessionId ?? null,
-    task,
-  })
+// 在 runOne task lifecycle 关键点:
+stateChangeBus.emit('agent_task.changed', { sessionId: task.parentSessionId ?? null, task })
+this.onTaskStateChange?.(task)  // 现有 callback, server 注入 emit job.*
+```
+
+> **避免重复 emit 路径**:`agent_task.changed` 与 `job.*` 各自独立,但 consumer 不同(job.\* → useAppStore 进度条;agent_task.changed → useAgentStore 详情)。server 侧 `initBackgroundRuntime` 不需要改。
+
+### 6.5 zai server 桥接层
+
+`packages/zai/src/server/services/stateBridge.ts`(新文件),在 `createApp` 启动时调一次:
+
+```ts
+import { stateChangeBus } from '@zn-ai/zai-agent-core/runtime'
+import { eventBus } from './eventBus.js'
+
+export function initStateBridge(): () => void {
+  const onCwdChanged = (e: { sessionId: string; cwd: string; updatedAt: number }) => {
+    eventBus.emit({ type: 'cwd.changed', ...e })
+  }
+  const onBashTaskChanged = (e: { sessionId: string; task: BashTaskInfo }) => {
+    eventBus.emit({ type: 'bash_task.changed', ...e })
+  }
+  const onV2TaskChanged = (e: { sessionId: string; task: V2TaskItem; action: 'upsert' | 'delete' }) => {
+    eventBus.emit({ type: 'v2_task.changed', ...e })
+  }
+  const onAgentTaskChanged = (e: { sessionId: string | null; task: BackgroundTask }) => {
+    eventBus.emit({ type: 'agent_task.changed', ...e })
+  }
+
+  stateChangeBus.on('cwd.changed', onCwdChanged)
+  stateChangeBus.on('bash_task.changed', onBashTaskChanged)
+  stateChangeBus.on('v2_task.changed', onV2TaskChanged)
+  stateChangeBus.on('agent_task.changed', onAgentTaskChanged)
+
+  return () => {
+    stateChangeBus.off('cwd.changed', onCwdChanged)
+    stateChangeBus.off('bash_task.changed', onBashTaskChanged)
+    stateChangeBus.off('v2_task.changed', onV2TaskChanged)
+    stateChangeBus.off('agent_task.changed', onAgentTaskChanged)
+  }
 }
 ```
+
+`createApp`(`packages/zai/src/server/index.ts`)启动顺序:在 `initBackgroundRuntime` 之后调 `initStateBridge()`,返回的 `dispose` 在 server `close` 时调。
+
+### 6.6 与 zod schema 校验的关系
+
+`zai-agent-core` 内部 emit 时不校验(`StateChangeBus` 是 in-process EventEmitter)。schema 校验发生在两处:
+- `zai server` emit 到 `eventBus` 时(`shared/events.ts` 的 zod discriminatedUnion 已经在现有 `routes/agent.ts` 路径上隐式依赖,新增 type 自动校验)。
+- `zai web` 收到 SSE 帧时(`eventSource.ts` 已 `ServerEvent.parse(JSON.parse(e.data))`)。
 
 ---
 
@@ -491,7 +543,7 @@ onTaskStateChange: (task) => {
    - `markFinished` 同步立即 emit,不等 debounce。
 
 2. **CwdStore emit 测试**
-   - mock eventBus → `BashTool.runShellCommand` 末尾 `cd /tmp` → expect `cwd.changed` 1 次,cwd = `/tmp`。
+   - spy `stateChangeBus` listener → `BashTool.runShellCommand` 末尾 `cd /tmp` → expect `stateChangeBus.emit('cwd.changed', …)` 1 次,cwd = `/tmp`。
    - 没变化时(同 cwd)不 emit。
 
 3. **Topic filter 单元测试**
@@ -539,10 +591,11 @@ onTaskStateChange: (task) => {
 
 ### 8.1 迁移顺序
 
-1. Phase A:Server 端 schema + emit 触发点 + topic filter(`shared/events.ts`, `eventBus.ts`, `event.ts`, 4 个 emit 点)— 不动前端。
-2. Phase B:Client store 字段 + reducer(`useAgentStore.ts`, `useEventStream.ts`)— 不删 setInterval,先让新路径跑通。
-3. Phase C:Hook 改造(`useSessionCwd`, `useBashBackgroundTasks`, `useBackgroundTasks`)— 删除 setInterval。
-4. Phase D:测试 + benchmark + 文档同步。
+1. **Phase A — core 桥接层**:zai-agent-core 新增 `stateChangeBus`(Node EventEmitter)+ 4 个 emit 触发点(`CwdStore` setter / `bashTracker` mutator / `taskListStore` append/remove / `DefaultBackgroundRuntime.runOne`)。**不引入 schema 校验**(in-process 不需要)。
+2. **Phase B — server schema + topic filter + bridge**:`shared/events.ts` 加 4 个新 discriminatedUnion 成员;`ServerEventBus.subscribeTopics` 新方法 + topic whitelist filter;`stateBridge.ts` 桥接层;`createApp` 启动时调 `initStateBridge()`。此时 SSE 已能推到客户端。
+3. **Phase C — client store + reducer**:`useAgentStore` 新增 4 个 map + 4 个 reducer;`useEventStream` dispatch 扩 4 个 case;`eventSource.ts` `NAMED_EVENT_TYPES` 加 4 项。**不删 setInterval,新路径 + 老路径并存**。
+4. **Phase D — hook 改造**:删 `useSessionCwd` / `useBashBackgroundTasks` 的 `setInterval`,改读 store;`useBackgroundTasks` 删 `listTasks` 兜底;测试同步重写。
+5. **Phase E — benchmark + 文档**:50 session / 5 bash 并发跑测,AGENTS.md 同步。
 
 ### 8.2 Feature flag
 
@@ -558,7 +611,7 @@ onTaskStateChange: (task) => {
 | Last-Event-ID replay 时 state event 被 topic filter 错过滤 | 低 | replay 时**显式应用 topic filter**,单元测试覆盖 |
 | EventSource 自动重连不带 sid(URL 被改) | 低 | 现有 useEventStream 已固定 sid + topic 在 URL,重连保留 |
 | 50 session 同时连打爆 server 内存 | 中 | ring 256 + per-sid 切片 256 双 cap,与现有一致 |
-| BashTool emit 在 test 环境造成泄漏 | 中 | mock eventBus(测试 setup 替换) |
+| BashTool emit 在 test 环境造成泄漏 | 中 | test setup `resetStateChangeBusForTests()` 清空 listener |
 | `agent_task.changed` 与 `job.*` 重复事件 | 低 | 接受重复:`job.*` 给 dock 进度条,`agent_task.changed` 给 TaskDock 详情。两者消费者不同,各自独立 |
 
 ### 8.4 文档同步
