@@ -476,6 +476,35 @@ describe('URL <-> sessionId sync (Agent ?sid=...)', () => {
     expect(new URLSearchParams(window.location.search).get('sid')).toBe('brand-new')
   })
 
+  test('loadSessions: URL ?sid=newID → 拦截并 createNewSession, URL 改成真实 sid', async () => {
+    // ConfigStatusBar 上 N 按钮的新 tab 入口: URL 携带 newID 字面量,
+    // 表示"全新会话"特殊标记, 不应回退到列表首条, 而是直接调
+    // createNewSession 并把 URL 同步成 server 回的 transcriptId.
+    setLocationHref('http://localhost:3000/agent?sid=newID')
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/sessions') && init?.method === 'POST') {
+        return new Response(JSON.stringify({ sessionId: 'created-from-newid' }), { status: 200 })
+      }
+      if (url.endsWith('/sessions')) {
+        return new Response(JSON.stringify({
+          sessions: [
+            { transcriptId: 'first', updatedAt: 1000 },
+            { transcriptId: 'created-from-newid', updatedAt: Date.now() },
+          ],
+        }), { status: 200 })
+      }
+      if (url.endsWith('/api/agent/settings')) {
+        return new Response(JSON.stringify({ models: [] }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    }) as unknown as typeof fetch)
+    await useAgentStore.getState().loadSessions()
+    // 新建的 sid 应成为当前活跃会话
+    expect(useAgentStore.getState().sessionId).toBe('created-from-newid')
+    // URL 已被 writeUrlSid 改成真实 sid, 不再保留 newID 标记
+    expect(new URLSearchParams(window.location.search).get('sid')).toBe('created-from-newid')
+  })
+
   test('deleteSession: 删的是当前会话 → URL ?sid 切到下一条 (不是已死的旧 sid)', async () => {
     setLocationHref('http://localhost:3000/agent')
     // 先有两条, 当前激活 first

@@ -875,11 +875,20 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         availableModels = Array.isArray(settingsData.models) ? settingsData.models : []
       }
       set({ sessions, availableModels })
+      // 特殊标记: URL 带 ?sid=newID 表示 "新 tab 想开全新会话".
+      // ConfigStatusBar 上的 N 按钮会在新 tab 里打开 /agent?sid=newID,
+      // 我们在这里拦截 → 立即调 createNewSession() 建一条空 transcript,
+      // 然后让 createNewSession 内部通过 writeUrlSid 把 URL 改成真实 sid,
+      // 避免列表回退把 URL 又改成 first.
+      const requested = readUrlSid()
+      if (requested === 'newID') {
+        await get().createNewSession()
+        return
+      }
       if (sessions.length > 0) {
         // 优先使用 URL ?sid=... 指定的会话, 让刷新/分享链接能落到对应会话上.
         // URL 不带 / 带但 sid 不存在(已删除/换机) → 回退到首条, 并清掉 URL
         // 里的 sid, 避免下次刷新又卡在已死的 sid 上.
-        const requested = readUrlSid()
         const target = requested && sessions.some((s: { transcriptId: string }) => s.transcriptId === requested)
           ? sessions.find((s: { transcriptId: string }) => s.transcriptId === requested)
           : undefined

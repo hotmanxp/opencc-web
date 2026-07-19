@@ -1180,6 +1180,17 @@ export default function Agent() {
     })();
   }, []);
 
+  // N 按钮处理函数: 在新 tab 打开 /agent?sid=newID, store.loadSessions 会
+  // 识别 newID 字面量 → 直接调 createNewSession 建一条新 transcript, 并把
+  // URL 同步成 server 回的真实 sid. 当前 tab 的会话状态完全不动.
+  const openNewSessionInNewTab = () => {
+    window.open(
+      `${window.location.origin}/agent?sid=newID`,
+      "_blank",
+      "noopener"
+    );
+  };
+
   // 中断逻辑: 已无 UI 按钮, 流式期间按 Esc (window 全局监听) 触发 stop()
   // 修复: v2 tasks 的初始拉取已迁移到 useAgentStore.loadTranscript 内部,
   // 切 session → loadTranscript → 自动拉 v2 tasks. 这里不再重复拉.
@@ -1229,9 +1240,10 @@ export default function Agent() {
         >
           {sessionsCollapsed ? (
             // 收起时也要暴露创建入口, 否则收起后用户没法开新会话.
-            // 用 absolute + transform 让两个图标按钮绝对居中于 40px 列宽,
+            // 用 absolute + transform 让三个图标按钮绝对居中于 40px 列宽,
             // 绕开 AntD Button 内部 icon 偏左导致的视觉不齐.
-            <div style={{ position: "relative", width: "100%", height: 60 }}>
+            // 第 2 个 N 按钮 = 新 tab 打开 /agent?sid=newID (不影响当前 tab).
+            <div style={{ position: "relative", width: "100%", height: 92 }}>
               <Button
                 type="text"
                 size="small"
@@ -1251,6 +1263,35 @@ export default function Agent() {
                   justifyContent: "center",
                 }}
               />
+              {/* N 按钮: 在新 tab 打开全新会话, 保留当前 tab 会话状态不变. */}
+              <Button
+                type="text"
+                size="small"
+                onClick={openNewSessionInNewTab}
+                title="在新标签页打开新会话"
+                data-testid="new-session-in-new-tab"
+                style={{
+                  position: "absolute",
+                  top: 32,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  width: 28,
+                  height: 28,
+                  padding: 0,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  // 用等宽字体 + 粗体 + 紫色, 与 antd 图标按钮区分开,
+                  // 让用户一眼能识别这是"新 tab"语义 (与 Plus 不一样).
+                  color: "#722ed1",
+                  fontFamily:
+                    "ui-monospace, SFMono-Regular, Menlo, monospace",
+                  fontWeight: 700,
+                  fontSize: 14,
+                }}
+              >
+                N
+              </Button>
               <Button
                 type="text"
                 size="small"
@@ -1259,7 +1300,7 @@ export default function Agent() {
                 title="展开会话历史"
                 style={{
                   position: "absolute",
-                  top: 32,
+                  top: 64,
                   left: "50%",
                   transform: "translateX(-50%)",
                   width: 28,
@@ -1273,9 +1314,9 @@ export default function Agent() {
             </div>
           ) : (
             <>
-              <Space>
+              <Space style={{ fontSize: 12 }}>
                 <MessageOutlined />
-                会话历史
+                历史
               </Space>
               <Space size={4}>
                 <Button
@@ -1285,6 +1326,23 @@ export default function Agent() {
                   onClick={createNewSession}
                   title="创建新会话"
                 />
+                {/* N 按钮: 在新 tab 打开全新会话, 不影响当前 tab. */}
+                <Button
+                  type="text"
+                  size="small"
+                  onClick={openNewSessionInNewTab}
+                  title="在新标签页打开新会话"
+                  data-testid="new-session-in-new-tab"
+                  style={{
+                    color: "#722ed1",
+                    fontFamily:
+                      "ui-monospace, SFMono-Regular, Menlo, monospace",
+                    fontWeight: 700,
+                    fontSize: 14,
+                  }}
+                >
+                  N
+                </Button>
                 <Button
                   type="text"
                   size="small"
