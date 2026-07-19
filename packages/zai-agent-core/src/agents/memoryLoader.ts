@@ -33,7 +33,6 @@ export const MAX_INCLUDE_DEPTH = 5
 
 const AGENTS_FILENAME = 'AGENTS.md'
 const AGENTS_LOCAL_FILENAME = 'AGENTS.local.md'
-const RULES_DIRNAME = join('.claude', 'rules')
 
 // Per-cwd cache. Key: absolute cwd path. Value: ordered list of memory files.
 const cache = new Map<string, MemoryFile[]>()
@@ -195,7 +194,7 @@ async function collectRulesDir(
 
   for (const entry of entries) {
     const full = join(dir, entry)
-    let st
+    let st: Awaited<ReturnType<typeof stat>>
     try {
       st = await stat(full)
     } catch {
