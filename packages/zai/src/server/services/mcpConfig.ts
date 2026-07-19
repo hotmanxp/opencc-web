@@ -138,7 +138,9 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
   apply(localLoads)
   apply(userLoads)
 
-  return Array.from(byName.values()).map(v => v.spec)
+  return Array.from(byName.values()).map((v) =>
+    v.spec.roots ? v.spec : { ...v.spec, roots: [cwd] }
+  )
 }
 
 /**

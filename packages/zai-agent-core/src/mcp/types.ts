@@ -10,4 +10,9 @@ export type McpServerSpec = {
   }
   reconnect?: { maxRetries?: number; backoffMs?: number }
   callTimeoutMs?: number
+  /**
+   * Root directories advertised to this MCP server via the `roots/list` capability.
+   * Each entry must be an absolute path. If omitted, defaults to `[<pool cwd>]`.
+   */
+  roots?: string[]
 }

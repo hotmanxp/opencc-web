@@ -1,4 +1,7 @@
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
+import { ListRootsRequestSchema } from '@modelcontextprotocol/sdk/types.js'
+import { pathToFileURL } from 'node:url'
+import path from 'node:path'
 import type { McpServerSpec } from './types.js'
 import { createMcpTransport } from './transport.js'
 import { McpServerError } from './errors.js'
@@ -55,10 +58,27 @@ export class MCPClientPool {
     this.servers.delete(name)
   }
 
-  private async connectOne(spec: McpServerSpec): Promise<void> {
+  private async connectOne(
+    spec: McpServerSpec,
+    transportOverride?: import('@modelcontextprotocol/sdk/shared/transport.js').Transport,
+  ): Promise<void> {
+    const client = new Client(
+      { name: `zai-agent-core/${spec.name}`, version: '0.0.0' },
+      { capabilities: { roots: { listChanged: true } } },
+    )
+
+    // Advertise the project cwd (or spec-supplied roots) so servers like
+    // chrome-devtools-mcp stop printing the "did not negotiate the MCP roots
+    // capability" warning and lift their file-writing restrictions.
+    const roots = (spec.roots ?? [process.cwd()]).map((p) => {
+      const abs = path.isAbsolute(p) ? p : path.resolve(p)
+      return { uri: pathToFileURL(abs).href, name: path.basename(abs) }
+    })
+    client.setRequestHandler(ListRootsRequestSchema, async () => ({ roots }))
+
     const entry: ServerEntry = {
       spec,
-      client: new Client({ name: `zai-agent-core/${spec.name}`, version: '0.0.0' }, { capabilities: {} }),
+      client,
       status: 'connecting',
       retries: 0,
       lastCheckAt: Date.now(),
@@ -66,7 +86,7 @@ export class MCPClientPool {
     this.servers.set(spec.name, entry)
 
     try {
-      const transport = createMcpTransport(spec, new AbortController().signal)
+      const transport = transportOverride ?? createMcpTransport(spec, new AbortController().signal)
       await entry.client.connect(transport)
       entry.status = 'connected'
       entry.lastCheckAt = Date.now()
@@ -76,6 +96,19 @@ export class MCPClientPool {
       entry.lastCheckAt = Date.now()
       // do not throw — surface via health()
     }
+  }
+
+  /**
+   * Test-only entry: connect a server using a caller-provided transport
+   * (e.g. `InMemoryTransport`). Used by pool tests to exercise the
+   * `roots/list` handler end-to-end without spawning stdio subprocesses.
+   * @internal
+   */
+  async __connectWithTransport(
+    spec: McpServerSpec,
+    transport: import('@modelcontextprotocol/sdk/shared/transport.js').Transport,
+  ): Promise<void> {
+    await this.connectOne(spec, transport)
   }
 
   /** Read-only view of underlying MCP clients for adapters. Throws on failed servers. */
