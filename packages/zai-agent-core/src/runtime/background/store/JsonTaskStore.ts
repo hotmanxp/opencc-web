@@ -12,10 +12,19 @@ import { atomicWriteFile } from './atomicWrite.js'
  *   <root>/
  *     ├── tasks/<id>.json     # 元数据,原子写
  *     └── events/<id>.log     # NDJSON,append-only
+ *
+ * 加固(2026-Q3,JsonTaskStore 损坏复盘):
+ * - save(): atomicWrite 后立即 read-back JSON.parse 校验;失败则抛错并 unlink 损坏文件,
+ *   让上层感知(避免"前端缓存显示任务在,实际磁盘读不回来")。
+ * - load(): JSON.parse 失败时累加进程级损坏计数,方便运维定位。
+ * - list(): 用 corruptedCount delta 在调用结束一次性 warn,避免每文件一条 warn。
  */
 export class JsonTaskStore implements TaskStore {
   private readonly tasksDir: string
   private readonly eventsDir: string
+
+  /** 进程内累计的损坏 task 文件计数(load 失败时 +1);用于 list() 聚合 warn。 */
+  private corruptedCount = 0
 
   constructor(private readonly rootDir: string) {
     this.tasksDir = join(rootDir, 'tasks')
@@ -37,10 +46,50 @@ export class JsonTaskStore implements TaskStore {
   }
 
   async save(task: BackgroundTask): Promise<void> {
-    await atomicWriteFile(
-      this.taskPath(task.id),
-      JSON.stringify(task, null, 2),
-    )
+    const serialized = JSON.stringify(task, null, 2)
+    const path = this.taskPath(task.id)
+    await atomicWriteFile(path, serialized)
+    await this.verifyWrite(path, serialized, task.id)
+  }
+
+  /**
+   * 写后 read-back 校验 + 失败回滚。
+   * 抽出为独立方法以便单测,无需 mock atomicWriteFile。
+   * 三道校验:① readFile 能成功 ② 字节内容完全等于 serialized ③ JSON.parse 通过。
+   * 任一失败 → unlink(path) + 抛错,让上层感知。
+   */
+  async verifyWrite(path: string, expected: string, taskId: string): Promise<void> {
+    const { readFile, unlink } = await import('node:fs/promises')
+    let verifiedRaw: string
+    try {
+      verifiedRaw = await readFile(path, 'utf-8')
+    } catch (err) {
+      throw new Error(
+        `[JsonTaskStore] post-write readback failed for ${taskId}: ${(err as Error).message}`,
+      )
+    }
+    if (verifiedRaw !== expected) {
+      try {
+        await unlink(path)
+      } catch {
+        // best-effort:已脏,尽力清;失败也吞(下一步抛错更重要)
+      }
+      throw new Error(
+        `[JsonTaskStore] post-write readback mismatch for ${taskId} (len written=${expected.length}, read=${verifiedRaw.length}); corrupted file removed`,
+      )
+    }
+    try {
+      JSON.parse(verifiedRaw) as BackgroundTask
+    } catch (err) {
+      try {
+        await unlink(path)
+      } catch {
+        // best-effort
+      }
+      throw new Error(
+        `[JsonTaskStore] post-write JSON.parse failed for ${taskId}: ${(err as Error).message}; corrupted file removed`,
+      )
+    }
   }
 
   async load(id: string): Promise<BackgroundTask | null> {
@@ -50,6 +99,7 @@ export class JsonTaskStore implements TaskStore {
       return JSON.parse(raw) as BackgroundTask
     } catch (err) {
       if ((err as NodeJS.ErrnoException).code === 'ENOENT') return null
+      this.corruptedCount += 1
       console.warn(`[JsonTaskStore] failed to parse task ${id}:`, err)
       return null
     }
@@ -65,11 +115,19 @@ export class JsonTaskStore implements TaskStore {
     }
 
     const tasks: BackgroundTask[] = []
+    const corruptedAtStart = this.corruptedCount
     for (const entry of entries) {
       if (!entry.endsWith('.json')) continue
       const id = entry.slice(0, -'.json'.length)
       const task = await this.load(id)
       if (task) tasks.push(task)
+    }
+    const newCorruptions = this.corruptedCount - corruptedAtStart
+    if (newCorruptions > 0) {
+      console.warn(
+        `[JsonTaskStore] list() skipped ${newCorruptions} corrupted task file(s) at ${this.tasksDir} ` +
+          `(process total: ${this.corruptedCount}). Inspect + remove manually.`,
+      )
     }
 
     let filtered = filter?.status
