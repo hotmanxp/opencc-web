@@ -51,6 +51,17 @@ const RuntimeEvent = z.discriminatedUnion('type', [
              error: z.object({ category: z.string(), message: z.string(),
                                recoverable: z.boolean() }),
              toolUseId: z.string().optional() }),
+  // 阶段 1 只有 trigger='auto'; manual 走原 kind:'compacted'(不变).
+  // 注意: 此 schema 与 union 其他成员字段不对称 — 没有 spread Base
+  // (不带 eventId / ts), 而是显式用 timestamp 字段 (brief Step 2 原文).
+  // zod discriminatedUnion 不要求成员字段一致, 只靠 'type' 字段区分.
+  z.object({ type: z.literal('runtime.compacted'),
+             sessionId: z.string(),
+             trigger: z.enum(['auto', 'manual']),
+             preTokens: z.number(),
+             postTokens: z.number(),
+             savedTokens: z.number(),
+             timestamp: z.number() }),
 ])
 
 const SessionEvent = z.discriminatedUnion('type', [
