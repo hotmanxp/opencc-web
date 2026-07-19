@@ -65,5 +65,16 @@ function dispatch(event: ServerEvent) {
     case 'branch.changed':
       useAppStore.getState().applySystemEvent(event)
       break
+    // state.* — 4 个独立 case 分别路由到 useAgentStore 上对应的 reducer
+    // (Task 10). 不能合并 case 因为 reducer 入参 shape 各不相同
+    // (applyCwdChanged 不需要 task, applyV2TaskChanged 需要 action 字段).
+    case 'cwd.changed':
+      useAgentStore.getState().applyCwdChanged(event); break
+    case 'bash_task.changed':
+      useAgentStore.getState().applyBashTaskChanged(event); break
+    case 'v2_task.changed':
+      useAgentStore.getState().applyV2TaskChanged(event); break
+    case 'agent_task.changed':
+      useAgentStore.getState().applyAgentTaskChanged(event); break
   }
 }

@@ -37,6 +37,11 @@ const NAMED_EVENT_TYPES = [
   'server.error',
   'toast',
   'branch.changed',
+  // state.* — SSE state push
+  'cwd.changed',
+  'bash_task.changed',
+  'v2_task.changed',
+  'agent_task.changed',
 ] as const
 
 // 打开一条 SSE 连接到 /api/event. 后端按 sid 过滤:
