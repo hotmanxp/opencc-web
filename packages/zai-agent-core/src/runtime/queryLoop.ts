@@ -26,6 +26,7 @@ import {
   appendUserMessageV2,
   serializeForAnthropic,
 } from '../transcript/persistence.js'
+import { repairAndPersistTranscript } from '../transcript/repair.js'
 import { foldTopLevelToolUses } from '../opencc-internals/utils/foldTopLevelToolUses.js'
 
 /**
@@ -151,6 +152,14 @@ export async function* queryLoop(
       // 第一次发消息时 transcript 还没创建 → ENOENT 抛错.
     }
     if (t) {
+      const repaired = await repairAndPersistTranscript(store, resumeId)
+      if (process.env.ZAI_DEBUG === '1' && repaired.report.repaired) {
+        console.error('[zai.queryLoop] repaired transcript tool pairs', {
+          sessionId,
+          ...repaired.report,
+        })
+      }
+
       // 转 v2 → Anthropic SDK 形态. 两步:
       // (1) foldTopLevelToolUses: 把每条 type='tool_use' 顶层消息按 parentUuid
       //     折回 parent assistant(orphan 重新生成为 standalone assistant, 不静默丢).
@@ -170,7 +179,7 @@ export async function* queryLoop(
       // 之后 serializeForAnthropic 期望 TranscriptMessage[],这正是 fold 的输入类型,
       // cast 只是为了让 TS 看到 fold 的泛型回参仍按 TranscriptMessage 处理。
       const folded = foldTopLevelToolUses(
-        t.messages as unknown as Parameters<typeof foldTopLevelToolUses>[0],
+        repaired.messages as unknown as Parameters<typeof foldTopLevelToolUses>[0],
       )
       messages.push(
         ...serializeForAnthropic(
@@ -180,8 +189,8 @@ export async function* queryLoop(
       // 串 parentUuid 链: 取 transcript 末尾消息的 uuid 作为下条 append 的父,
       // 让后续 turn 的 user/assistant/tool_use/tool_result 都挂在前一条之后,
       // 不破坏 v2 树形 parentUuid DAG.
-      for (let i = t.messages.length - 1; i >= 0; i--) {
-        const u = t.messages[i]?.uuid
+      for (let i = repaired.messages.length - 1; i >= 0; i--) {
+        const u = repaired.messages[i]?.uuid
         if (u) {
           lastUuid = u
           break

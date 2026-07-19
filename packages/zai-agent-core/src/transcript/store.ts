@@ -66,6 +66,39 @@ export class TranscriptStore {
     }
   }
 
+  /**
+   * 在同一 proper-lockfile 锁内 read → mutate → optional write。
+   * `mutate` 必须返回新 messages、是否变更、以及一个随调用方返回的 value。
+   * 当 `result.changed === false` 时跳过落盘、不刷新 `meta.updatedAt`，
+   * 让幂等调用（比如 transcript repair 第二次跑）不产生磁盘写。
+   * 该入口是 transcript 修复 / 归档等需要在同一事务内观察并改写
+   * messages 的所有命令的落盘路径。
+   */
+  async mutateMessages<T>(
+    transcriptId: string,
+    mutate: (messages: TranscriptMessage[]) => {
+      messages: TranscriptMessage[]
+      changed: boolean
+      value: T
+    },
+  ): Promise<T> {
+    const filePath = transcriptPath(this.dataDir, transcriptId)
+    const release = await lock(filePath, { retries: 3 })
+    try {
+      const raw = await readFile(filePath, 'utf-8')
+      const file = deserializeFile(raw)
+      const result = mutate(file.messages)
+      if (result.changed) {
+        file.messages = result.messages
+        file.meta.updatedAt = Date.now()
+        await writeFile(filePath, serializeFile(file), 'utf-8')
+      }
+      return result.value
+    } finally {
+      await release()
+    }
+  }
+
   async list(cwd?: string, opts?: { excludeSubagent?: boolean }): Promise<TranscriptMeta[]> {
     const dir = transcriptDir(this.dataDir)
     const excludeSubagent = opts?.excludeSubagent === true

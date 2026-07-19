@@ -208,7 +208,7 @@ describe('queryLoop resume — parallel tool_use Anthropic-2013 regression', () 
       ),
     )
 
-    // tool_use 必须出现在某条 assistant.content 里(孤儿被吸收成 assistant)
+    // tool_use 必须出现在某条 assistant.content 里(下游 fold 将孤儿吸收成 assistant)
     const allAssistantIds = new Set<string>()
     for (const m of seen) {
       if (m.role !== 'assistant') continue
