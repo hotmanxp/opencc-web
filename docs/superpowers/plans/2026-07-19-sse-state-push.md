@@ -1113,9 +1113,9 @@ git commit -m "feat(events): add StateEvent union (cwd/bash/v2/agent_task change
 **Interfaces:**
 - Consumes: 无
 - Produces:
-  - `topicMatches(type: string, topics: string[]): boolean` 顶层 helper
-  - `subscribeTopics(sid: string | null, topics: string[], cb: Subscriber): () => void`
-  - `getHistoryAfterForSidWithTopics(lastEventId: string | undefined, sid: string, topics: string[]): ServerEvent[]`
+  - `ServerEventBus.topicMatches(type: string, topics: string[]): boolean` **static 方法**(类内 / 测试都一致访问)
+  - `subscribeTopics(sid: string | null, topics: string[], cb: Subscriber): () => void` 实例方法
+  - `getHistoryAfterForSidWithTopics(lastEventId: string | undefined, sid: string, topics: string[]): ServerEvent[]` 实例方法
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1133,24 +1133,24 @@ describe('ServerEventBus topic filter', () => {
   })
 
   it('topicMatches: state group covers 4 state.* types', () => {
-    expect(bus.topicMatches('cwd.changed', ['state'])).toBe(true)
-    expect(bus.topicMatches('bash_task.changed', ['state'])).toBe(true)
-    expect(bus.topicMatches('v2_task.changed', ['state'])).toBe(true)
-    expect(bus.topicMatches('agent_task.changed', ['state'])).toBe(true)
-    expect(bus.topicMatches('runtime.delta', ['state'])).toBe(false)
+    expect(ServerEventBus.topicMatches('cwd.changed', ['state'])).toBe(true)
+    expect(ServerEventBus.topicMatches('bash_task.changed', ['state'])).toBe(true)
+    expect(ServerEventBus.topicMatches('v2_task.changed', ['state'])).toBe(true)
+    expect(ServerEventBus.topicMatches('agent_task.changed', ['state'])).toBe(true)
+    expect(ServerEventBus.topicMatches('runtime.delta', ['state'])).toBe(false)
   })
 
   it('topicMatches: specific topic only matches one type', () => {
-    expect(bus.topicMatches('bash_task.changed', ['bash'])).toBe(true)
-    expect(bus.topicMatches('cwd.changed', ['bash'])).toBe(false)
+    expect(ServerEventBus.topicMatches('bash_task.changed', ['bash'])).toBe(true)
+    expect(ServerEventBus.topicMatches('cwd.changed', ['bash'])).toBe(false)
   })
 
   it('topicMatches: legacy group names', () => {
-    expect(bus.topicMatches('runtime.delta', ['runtime'])).toBe(true)
-    expect(bus.topicMatches('session.created', ['session'])).toBe(true)
-    expect(bus.topicMatches('job.started', ['job'])).toBe(true)
-    expect(bus.topicMatches('prompt.ask', ['prompt'])).toBe(true)
-    expect(bus.topicMatches('server.connected', ['system'])).toBe(true)
+    expect(ServerEventBus.topicMatches('runtime.delta', ['runtime'])).toBe(true)
+    expect(ServerEventBus.topicMatches('session.created', ['session'])).toBe(true)
+    expect(ServerEventBus.topicMatches('job.started', ['job'])).toBe(true)
+    expect(ServerEventBus.topicMatches('prompt.ask', ['prompt'])).toBe(true)
+    expect(ServerEventBus.topicMatches('server.connected', ['system'])).toBe(true)
   })
 
   it('subscribeTopics filters events by topic', () => {
@@ -1193,7 +1193,7 @@ Expected: FAIL(topicMatches is not a function)
 
 - [ ] **Step 3: 改 eventBus.ts**
 
-`packages/zai/src/server/services/eventBus.ts`,在 `isGlobalEvent` 函数后(第 35 行 `}` 后)追加:
+`packages/zai/src/server/services/eventBus.ts`,在 `isGlobalEvent` 函数后(第 35 行 `}` 后)、`ServerEventBus` 类前追加模块级 const:
 
 ```ts
 // 内部状态事件 type 集合,作为 'state' group 简写的展开目标。
@@ -1203,44 +1203,42 @@ const STATE_EVENT_TYPES = new Set<string>([
   'v2_task.changed',
   'agent_task.changed',
 ])
-
-/**
- * 判断 event.type 是否匹配 subscribedTopics 列表。
- *
- * 简写语义:
- * - 'state' → 4 个 state.* type 全匹配
- * - 'cwd' / 'bash' / 'v2' / 'agent_task' → 单 type 匹配
- * - 'runtime' / 'session' / 'job' / 'prompt' / 'system' → 各自已有 type group 匹配
- *
- * 未知 group/type 一律 false,白名单 semantics。
- */
-export function topicMatches(type: string, topics: string[]): boolean {
-  for (const t of topics) {
-    if (t === 'state' && STATE_EVENT_TYPES.has(type)) return true
-    if (t === 'cwd' && type === 'cwd.changed') return true
-    if (t === 'bash' && type === 'bash_task.changed') return true
-    if (t === 'v2' && type === 'v2_task.changed') return true
-    if (t === 'agent_task' && type === 'agent_task.changed') return true
-    if (t === 'runtime' && type.startsWith('runtime.')) return true
-    if (t === 'session' && type.startsWith('session.')) return true
-    if (t === 'job' && type.startsWith('job.')) return true
-    if (t === 'prompt' && type === 'prompt.ask') return true
-    if (t === 'system' && (
-      type === 'server.connected' ||
-      type === 'server.error' ||
-      type === 'toast' ||
-      type === 'branch.changed'
-    )) return true
-  }
-  return false
-}
 ```
 
-**注意:** 把 `topicMatches` 声明成顶层 `export function`,而 `subscribeTopics` / `getHistoryAfterForSidWithTopics` 是 `ServerEventBus` 类方法(测试用 `bus.topicMatches(...)` 也能访问,需要在 class 上挂)。两种都可,选其一保持一致。
-
-在 `ServerEventBus` 类内部,`getHistoryAfterForSid` 方法后(第 99 行 `}` 后),追加:
+在 `ServerEventBus` 类内,`getHistoryAfterForSid` 方法后(第 99 行 `}` 后),追加 3 个方法(其中 `topicMatches` 是 `static`,类内 `subscribeTopics` / `getHistoryAfterForSidWithTopics` 内部用 `ServerEventBus.topicMatches(...)` 调):
 
 ```ts
+  /**
+   * 判断 event.type 是否匹配 subscribedTopics 列表。
+   *
+   * 简写语义:
+   * - 'state' → 4 个 state.* type 全匹配
+   * - 'cwd' / 'bash' / 'v2' / 'agent_task' → 单 type 匹配
+   * - 'runtime' / 'session' / 'job' / 'prompt' / 'system' → 各自已有 type group 匹配
+   *
+   * 未知 group/type 一律 false,白名单 semantics。
+   */
+  static topicMatches(type: string, topics: string[]): boolean {
+    for (const t of topics) {
+      if (t === 'state' && STATE_EVENT_TYPES.has(type)) return true
+      if (t === 'cwd' && type === 'cwd.changed') return true
+      if (t === 'bash' && type === 'bash_task.changed') return true
+      if (t === 'v2' && type === 'v2_task.changed') return true
+      if (t === 'agent_task' && type === 'agent_task.changed') return true
+      if (t === 'runtime' && type.startsWith('runtime.')) return true
+      if (t === 'session' && type.startsWith('session.')) return true
+      if (t === 'job' && type.startsWith('job.')) return true
+      if (t === 'prompt' && type === 'prompt.ask') return true
+      if (t === 'system' && (
+        type === 'server.connected' ||
+        type === 'server.error' ||
+        type === 'toast' ||
+        type === 'branch.changed'
+      )) return true
+    }
+    return false
+  }
+
   getHistoryAfterForSidWithTopics(
     lastEventId: string | undefined,
     sid: string,
@@ -1248,7 +1246,7 @@ export function topicMatches(type: string, topics: string[]): boolean {
   ): ServerEvent[] {
     const all = this.getHistoryAfterForSid(lastEventId, sid)
     if (topics.length === 0) return all
-    return all.filter((e) => topicMatches(e.type, topics))
+    return all.filter((e) => ServerEventBus.topicMatches(e.type, topics))
   }
 
   /**
@@ -1267,7 +1265,7 @@ export function topicMatches(type: string, topics: string[]): boolean {
         const sid = eventSessionId(event)
         if (sid !== wantedSid) return
       }
-      if (!topicMatches(event.type, topics)) return
+      if (!ServerEventBus.topicMatches(event.type, topics)) return
       sub(event)
     }
     this.subs.add(wrapped)
@@ -1533,10 +1531,16 @@ git commit -m "feat(server): stateBridge — agent-core StateChangeBus → event
 
 `packages/zai/src/server/routes/event.ts`:
 
-1. 顶部 import 区(第 3 行后)追加:
+1. 修改第 3 行 import,从:
 ```ts
-import { topicMatches } from '../services/eventBus.js'
+import { eventBus } from '../services/eventBus.js'
 ```
+改为:
+```ts
+import { eventBus, ServerEventBus } from '../services/eventBus.js'
+```
+
+**注意:** `topicMatches` 已经在 `ServerEventBus` 上作为 `static` 方法,通过 `ServerEventBus.topicMatches(...)` 调用,无需额外 import 函数。
 
 2. 修改 `readWantedSid` 函数(第 11-17 行)后追加 `readWantedTopics`:
 ```ts
@@ -1633,7 +1637,7 @@ router.get('/event', (req: Request, res: Response) => {
   } else if (wantedTopics.length > 0) {
     const hist = eventBus.getHistoryAfter(lastEventId)
     for (const ev of hist) {
-      if (topicMatches(ev.type, wantedTopics)) {
+      if (ServerEventBus.topicMatches(ev.type, wantedTopics)) {
         writeSse(res, ev as unknown as Parameters<typeof writeSse>[1])
       }
     }
