@@ -81,4 +81,30 @@ describe('autocompact', () => {
     )
     expect(result.wasCompacted).toBe(false)
   })
+
+  test('autoCompactIfNeeded: 缺 modelCaller → catch 路径 + logEvent + 递增 consecutiveFailures', async () => {
+    const msgs = [makeMsg('hi'), makeMsg('ok', 'assistant')]
+    // tracking.consecutiveFailures = 2 + forceReason → 失败后应到 3,触发 cooldown
+    const tracking = {
+      compacted: false,
+      turnCounter: 0,
+      turnId: 't-trip',
+      consecutiveFailures: 2,
+      forceReason: 'message-count' as const,
+    }
+    const result = await autoCompactIfNeeded(
+      msgs,
+      { options: { mainLoopModel: 'MiniMax-M3' }, abortController: new AbortController() } as any,
+      {} as any,
+      'repl_main_thread',
+      tracking,
+      0,
+      Date.now(),
+    )
+    expect(result.wasCompacted).toBe(false)
+    expect(result.consecutiveFailures).toBe(3)
+    expect(result.circuitBreakerTripped).toBe(true)
+    expect(result.circuitBreakerActive).toBe(true)
+    expect(result.nextRetryAtMs).toBeDefined()
+  })
 })
