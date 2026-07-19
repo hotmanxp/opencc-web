@@ -287,6 +287,27 @@ export async function* translateRuntimeEvents(
         yield errEvent;
         break;
       }
+      case "compaction.completed": {
+        // 阶段 1 翻译层: queryLoop (Task 16) 会在 autocompact 触发时 yield
+        // 这个内部事件, 翻译层把它翻成 SSE `runtime.compacted` 给前端 reducer.
+        // trigger='manual' 的 /compact 命令仍走原 kind:'compacted' 路径, 不
+        // 经过这里 — 这里只对应 auto 路径.
+        // 字段严格匹配 shared/events.ts schema: 没有 spread Base (无 eventId/ts),
+        // 显式 timestamp 字段 (zod discriminatedUnion 不要求成员字段一致).
+        const trigger = (ev.trigger as "auto" | "manual") ?? "auto";
+        const preTokens = typeof ev.preTokens === "number" ? ev.preTokens : 0;
+        const postTokens = typeof ev.postTokens === "number" ? ev.postTokens : 0;
+        yield {
+          type: "runtime.compacted",
+          sessionId,
+          trigger,
+          preTokens,
+          postTokens,
+          savedTokens: preTokens - postTokens,
+          timestamp: Date.now(),
+        };
+        break;
+      }
       case "message_stop":
         sawMessageStop = true;
         yield { type: "runtime.done", sessionId, turnIndex };
