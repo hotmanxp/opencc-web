@@ -17,6 +17,7 @@ import tasksRouter from './routes/tasks.js';
 import v2TasksRouter from './routes/v2Tasks.js';
 import { slashRouter } from './routes/slash.js';
 import bashTasksRouter from './routes/bashTasks.js';
+import transcriptRouter from './routes/transcript.js';
 import { ensureManifestDir } from './services/manifest.js';
 import { initAgentRuntime, getAskRegistry } from './services/agentRuntime.js';
 import {
@@ -90,6 +91,9 @@ export function createApp(opts: AppOptions): express.Express {
   // TaskListStore (按 sessionId 隔离, 实际存储 ~/.zai/tasks/<sid>.json)
   // 拉到本地 v2TasksBySession 缓存 (SSE 增量之外的兜底).
   app.use('/api', v2TasksRouter);
+  // /api/transcript/* 手动修复端点 — 给当前会话的 transcript 跑一次
+  // repairAndPersistTranscript,补齐历史上漏写的 tool_result
+  app.use('/api/transcript', transcriptRouter);
   // /api/slash 直接挂这里 — 前端 Agent.tsx 用 fetch('/api/slash') 拉命令列表,
   // 不能再走 agentRouter 的 '/agent' 前缀, 否则实际路径会变成 /api/agent/slash,
   // 前端拿到 SPA fallback HTML, slashItems 永远是 [], 输入 / 不出菜单.

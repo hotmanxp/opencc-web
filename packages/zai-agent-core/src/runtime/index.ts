@@ -8,6 +8,8 @@ export type { PermissionMode, UserFacingPermissionMode } from './permissionMode.
 export type { RuntimeEvent, RuntimeErrorEvent, RuntimeDoneEvent, RuntimeAbortedEvent, ErrorCategory } from './events.js'
 export { wrapWithZaiMeta, toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
 export { TranscriptStore } from '../transcript/store.js'
+export { repairAndPersistTranscript } from '../transcript/repair.js'
+export type { TranscriptRepairReport, TranscriptRepairResult } from '../transcript/repair.js'
 export { resolveDataDir } from '../data/dataDir.js'
 export type { DataDirConfig } from '../data/dataDir.js'
 export type { TranscriptFile, TranscriptMessage, TranscriptMeta } from '../transcript/types.js'

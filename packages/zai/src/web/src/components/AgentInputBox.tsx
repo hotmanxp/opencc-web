@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Input, Button, message, Popover, Tooltip } from "antd";
-import { PictureOutlined } from "@ant-design/icons";
+import { PictureOutlined, ToolOutlined } from "@ant-design/icons";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
 import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
@@ -143,6 +143,10 @@ export default React.memo(function AgentInputBox() {
   const skillMenuRef = useRef<HTMLDivElement>(null);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [skillMenuIdx, setSkillMenuIdx] = useState(0);
+  // transcript 修复按钮 loading 态: 与 status === "streaming" 互斥(避免
+  // 在对话进行中触发对当前文件的写操作;否则 concurrent append 会跟 repair 的
+  // fileLock 撞车, 报 EAGAIN)。
+  const [repairing, setRepairing] = useState(false);
 
   // 模糊匹配: 检查 query 的字符是否按顺序出现在 target 中（可不连续）
   const fuzzyMatch = (query: string, target: string): number => {
@@ -639,6 +643,60 @@ export default React.memo(function AgentInputBox() {
             minWidth:0 关键 — 不加时 flex item 默认 min-width:auto (= content 尺寸),
             在窄屏下 spacer 会反向挤压任务摘要到 0 宽, 表现为"被遮挡". */}
         <span style={{ flex: 1, minWidth: 0 }} />
+        {/* 修复 transcript 按钮:
+            对当前 session 触发 POST /api/transcript/:sessionId/repair,把历史上
+            漏写的 tool_result 补成"tool execution did not complete" 占位,
+            解决 transcript 里 tool_use 没配对的 warning。按钮放在 spacer 后、
+            上传图片前 — 不抢主操作, 但用户能直接找到。点击后即时 toast 结果,
+            失败不打断会话。 */}
+        <Tooltip
+          title={
+            sessionId
+              ? "修复 transcript:补齐漏写的 tool_result,然后才能正常恢复会话"
+              : "当前没有会话"
+          }
+          placement="top"
+        >
+          <Button
+            icon={<ToolOutlined />}
+            data-testid="transcript-repair-button"
+            disabled={!sessionId || status === "streaming"}
+            loading={repairing}
+            onClick={async () => {
+              if (!sessionId || repairing) return
+              setRepairing(true)
+              try {
+                const res = await fetch(
+                  `/api/transcript/${encodeURIComponent(sessionId)}/repair`,
+                  { method: "POST" },
+                )
+                if (!res.ok) {
+                  const text = await res.text().catch(() => "")
+                  throw new Error(text || `HTTP ${res.status}`)
+                }
+                const data = (await res.json()) as {
+                  repaired: boolean
+                  repairedToolUseIds: string[]
+                  synthesizedToolUseIds: string[]
+                }
+                if (data.repaired) {
+                  message.success(
+                    `已修复 ${data.synthesizedToolUseIds.length} 个孤立 tool_use`,
+                  )
+                } else {
+                  message.info("transcript 健康,无需修复")
+                }
+              } catch (err) {
+                message.error(
+                  `修复失败: ${err instanceof Error ? err.message : String(err)}`,
+                )
+              } finally {
+                setRepairing(false)
+              }
+            }}
+            style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }}
+          />
+        </Tooltip>
         <Button
           icon={<PictureOutlined />}
           onClick={() => fileInputRef.current?.click()}

@@ -242,16 +242,12 @@ export async function* executeToolsStreaming(
         content,
         isError: outIsError,
       }
-      if (hookRunner) {
-        await hookRunner.run(outIsError ? 'PostToolUseFailure' : 'PostToolUse', {
-          toolName: block.name,
-          input: parsed.data,
-          output: outData,
-          sessionId: meta.sessionId,
-        }, ctx.abortSignal)
-      }
-      // Task 6: persist tool_result with the matching tool_use uuid as parent.
-      // Same swallow-IO-error semantics as appendToolUse.
+      // Persist tool_result BEFORE PostToolUse hook runs so that a throwing
+      // hook can never leave the transcript with an orphan tool_use. Previously
+      // appendToolResult was the last call in each branch, so any exception
+      // from `hookRunner.run(...)` skipped persistence and produced dangling
+      // parentUuid chains (Anthropic 2013 on resume). appendToolResult itself
+      // swallows IO errors internally, so moving it earlier is safe.
       if (meta.store) {
         const trUuid = await appendToolResult(
           meta.store,
@@ -263,6 +259,21 @@ export async function* executeToolsStreaming(
         )
         if (trUuid) (ctx.state as Record<string, unknown>).__lastPersistedUuid = trUuid
       }
+      // PostToolUse hook is best-effort: a failing hook must not abort the
+      // tool result or the surrounding turn.
+      if (hookRunner) {
+        try {
+          await hookRunner.run(outIsError ? 'PostToolUseFailure' : 'PostToolUse', {
+            toolName: block.name,
+            input: parsed.data,
+            output: outData,
+            sessionId: meta.sessionId,
+          }, ctx.abortSignal)
+        } catch (hookErr) {
+          if (process.env.ZAI_DEBUG === '1')
+            console.error('[toolExecution] PostToolUse hook threw', hookErr)
+        }
+      }
     } catch (err) {
       const msg = err instanceof Error ? err.message : String(err)
       for (const sub of drainSubQueue()) yield sub
@@ -273,16 +284,9 @@ export async function* executeToolsStreaming(
         content: errorContent,
         isError: true,
       }
-      if (hookRunner) {
-        await hookRunner.run('PostToolUseFailure', {
-          toolName: block.name,
-          input: parsed.data,
-          error: msg,
-          sessionId: meta.sessionId,
-        }, ctx.abortSignal)
-      }
-      // Task 6: persist error tool_result so the transcript matches what the
-      // model would see on resume (is_error=true + error message).
+      // Persist error tool_result BEFORE PostToolUseFailure hook — same
+      // rationale as the success branch. The model sees a balanced
+      // tool_use/tool_result pair on resume regardless of hook behavior.
       if (meta.store) {
         const trUuid = await appendToolResult(
           meta.store,
@@ -293,6 +297,19 @@ export async function* executeToolsStreaming(
           meta.cwd ?? '',
         )
         if (trUuid) (ctx.state as Record<string, unknown>).__lastPersistedUuid = trUuid
+      }
+      if (hookRunner) {
+        try {
+          await hookRunner.run('PostToolUseFailure', {
+            toolName: block.name,
+            input: parsed.data,
+            error: msg,
+            sessionId: meta.sessionId,
+          }, ctx.abortSignal)
+        } catch (hookErr) {
+          if (process.env.ZAI_DEBUG === '1')
+            console.error('[toolExecution] PostToolUseFailure hook threw', hookErr)
+        }
       }
     }
   }

@@ -105,6 +105,60 @@ describe('executeToolsStreaming', () => {
     expect(events.some((e: any) => e.type === 'tool_use:error')).toBe(true)
   })
 
+  // Regression: hookRunner.run('PostToolUse') throwing must NOT skip the
+  // appendToolResult call — previously a hook throw left tool_use persisted
+  // but tool_result dropped, producing orphan parentUuid chains on resume.
+  // After the fix tool_result is persisted BEFORE the hook runs so any hook
+  // exception propagates without breaking the transcript shape.
+  test('PostToolUse hook throwing still persists tool_result', async () => {
+    const { TranscriptStore } = await import('../../src/transcript/store.js')
+    const { mkdtempSync } = await import('node:fs')
+    const { tmpdir } = await import('node:os')
+    const { join } = await import('node:path')
+    const dataDir = mkdtempSync(join(tmpdir(), 'zai-hook-throw-'))
+    const store = new TranscriptStore(dataDir)
+    const sessionId = await store.create({ cwd: '/x', model: 'm', permissionMode: 'default' })
+    // Only PostToolUse throws. PreToolUse returns success so the tool_use
+    // block is persisted and the success branch executes — that's the
+    // specific code path that previously dropped tool_result.
+    const ctx = makeCtx({
+      state: {
+        __pluginHookRunner: {
+          run: async (event: string) => {
+            if (event === 'PostToolUse') throw new Error('hook blew up')
+            return { blocked: false, outputs: [] }
+          },
+        },
+      },
+    })
+    const blocks = [{ id: 't-hook', name: 'Echo', input: { msg: 'hi' } }]
+    const tools: Tool[] = [{
+      name: 'Echo', description: '', inputSchema: z.object({ msg: z.string() }),
+      call: async ({ msg }) => ({ output: `echo:${msg}` }),
+    }]
+    const meta = {
+      sessionId,
+      turnIndex: 0,
+      nextEventId: (() => { let n = 0; return () => `evt-${++n}` })(),
+      store,
+      cwd: '/x',
+    }
+    const events = await collect(executeToolsStreaming(blocks, ctx, tools, meta))
+    // tool_use:done still yields (hook runs AFTER persistence now)
+    expect(events.some((e: any) => e.type === 'tool_use:done')).toBe(true)
+    const onDisk = await store.read(sessionId)
+    const toolUse = onDisk.messages.find(m =>
+      m.type === 'tool_use' && m.message && Array.isArray(m.message.content)
+      && (m.message.content as any[])[0]?.id === 't-hook'
+    )
+    const toolResult = onDisk.messages.find(m =>
+      m.type === 'user' && m.message && Array.isArray(m.message.content)
+      && (m.message.content as any[])[0]?.tool_use_id === 't-hook'
+    )
+    expect(toolUse).toBeDefined()
+    expect(toolResult).toBeDefined()
+  })
+
   test('tool 通过 ctx.emitEvent 投递子事件 → 与 tool_use:* 按发生顺序 yield', async () => {
     const ctx = makeCtx()
     const tools: Tool[] = [{
