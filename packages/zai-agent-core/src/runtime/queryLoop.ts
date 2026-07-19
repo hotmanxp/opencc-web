@@ -212,18 +212,21 @@ export async function* queryLoop(
       }
     }
   }
+  // 对齐 OpenCC isMeta: SubagentNotifier 注入的 <task-notification> 通过
+  // isMetaPrompt: true 走 meta.isMeta=true 落盘,前端 UI 层不渲染.
+  const promptIsMeta = options.isMetaPrompt === true
   if (subCtx?.initialUserMessage) {
     messages.push(subCtx.initialUserMessage)
-    const u = await appendUserMessageV2(store, sessionId, subCtx.initialUserMessage.content, 0, lastUuid, ctx)
+    const u = await appendUserMessageV2(store, sessionId, subCtx.initialUserMessage.content, 0, lastUuid, ctx, promptIsMeta ? { isMeta: true } : undefined)
     if (u) lastUuid = u
   } else if (typeof options.prompt === 'string') {
     messages.push({ role: 'user', content: options.prompt })
-    const u = await appendUserMessageV2(store, sessionId, options.prompt, 0, lastUuid, ctx)
+    const u = await appendUserMessageV2(store, sessionId, options.prompt, 0, lastUuid, ctx, promptIsMeta ? { isMeta: true } : undefined)
     if (u) lastUuid = u
   } else if (Array.isArray(options.prompt)) {
     messages.push(...(options.prompt as any))
     for (const m of options.prompt as any[]) {
-      const u = await appendUserMessageV2(store, sessionId, m?.content, 0, lastUuid, ctx)
+      const u = await appendUserMessageV2(store, sessionId, m?.content, 0, lastUuid, ctx, promptIsMeta ? { isMeta: true } : undefined)
       if (u) lastUuid = u
     }
   }

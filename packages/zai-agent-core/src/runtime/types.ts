@@ -130,4 +130,14 @@ export type QueryOptions = {
   skillsDirs?: string[]
   /** Override the permission mode for this query. Higher priority than transcript meta. */
   permissionMode?: PermissionMode
+  /**
+   * 把 `prompt` 标成 isMeta (对齐 OpenCC 语义). true 时该 user 消息仍会:
+   *   1) 进入模型上下文 (LLM 可见)
+   *   2) 落盘到 transcript.json (持久化)
+   * 但前端 UI 层不渲染 (loadTranscriptMessages / SSE 渲染层都过滤).
+   *
+   * 用于 SubagentNotifier 注入的 `<task-notification>` 这类"系统提示但不让
+   * 用户看见原始 XML"场景。缺省 false (普通用户输入,正常显示).
+   */
+  isMetaPrompt?: boolean
 }

@@ -92,10 +92,12 @@ export async function appendUserMessageV2(
   turnIndex: number,
   parentUuid: string | null,
   ctx: CommonCtx,
-  meta?: { kind?: 'user' | 'skill_injection'; skillName?: string },
+  meta?: { kind?: 'user' | 'skill_injection'; skillName?: string; isMeta?: boolean },
 ): Promise<string | undefined> {
   try {
     const isSkillInjection = meta?.kind === 'skill_injection'
+    // skill body 注入对齐 OpenCC isMeta: 前端按 isMeta=true 跳过渲染 (useAgentStore.loadTranscriptMessages)
+    const isMeta = meta?.isMeta === true || isSkillInjection
     const normalized =
       typeof content === 'string' || Array.isArray(content)
         ? content
@@ -110,6 +112,10 @@ export async function appendUserMessageV2(
           : normalized,
         role: 'user',
       },
+      // 对齐 OpenCC isMeta: true 时消息仍发给 model,但前端 UI 隐藏。
+      // 用于 SubagentNotifier 注入的 <task-notification> 等系统 user 消息。
+      // 缺省字段不写入磁盘,前端按 false 处理 (隐藏行为默认关闭).
+      ...(isMeta ? { isMeta: true } : {}),
     }
     await store.append(sessionId, msg)
     return base.uuid

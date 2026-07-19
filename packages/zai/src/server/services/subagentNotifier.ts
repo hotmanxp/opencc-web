@@ -88,11 +88,15 @@ export class SubagentNotifier {
     try {
       // transcriptId = parentSessionId 走 zai-agent-core 续传路径,
       // 把 <task-notification> 追加到父 transcript 末尾,触发新一轮 turn.
+      // isMetaPrompt: true 标记这条 user prompt 为系统注入 — 对齐 OpenCC isMeta
+      // 语义: LLM 仍能看到 <task-notification> 内容,transcript 也落盘,
+      // 但前端 UI 层不渲染这个 user 气泡 (用户看到的还是后续 assistant 续写).
       const events = runtime.run({
         prompt,
         cwd: process.cwd(),
         transcriptId: task.parentSessionId!,
         model: resolvedModel,
+        isMetaPrompt: true,
       })
       // ★ 关键修复 (HRMSV3-ZN-WEBSITE#668):把 queryEngine 的 runtime 事件
       // 经 translateRuntimeEvents 翻译成 ServerEvent 形态并 emit 到 eventBus,

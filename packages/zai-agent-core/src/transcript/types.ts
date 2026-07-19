@@ -148,6 +148,14 @@ export type TranscriptMessage = {
   sessionId?: string
   userType?: string
   isSidechain?: boolean
+  /**
+   * UI 隐藏标记。true 时消息仍发给 model (LLM 上下文可见),但前端
+   * loadTranscriptMessages / SSE 渲染层不显示。对齐 upstream OpenCC
+   * `isMeta` 语义,用于把系统注入的 user 消息(如 SubagentNotifier
+   * 注入的 `<task-notification>`)藏起来。可选字段,v1 老 transcript
+   * 缺省时按 false 处理。
+   */
+  isMeta?: boolean
 }
 
 export type TranscriptMeta = {
@@ -210,5 +218,8 @@ export const TranscriptMessageSchema = z
     sessionId: z.string(),
     userType: z.string(),
     isSidechain: z.boolean(),
+    // UI 隐藏标记 (对齐 OpenCC isMeta). v1 → v2 升级路径不存在,这条字段
+    // 缺省时前端按 false 处理,不会破坏老 transcript 的解析.
+    isMeta: z.boolean().optional(),
   })
   .passthrough()

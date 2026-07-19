@@ -7,6 +7,7 @@ import {
   appendAssistantMessageV2,
   appendToolResult,
   appendToolUse,
+  appendUserMessageV2,
 } from '../../src/transcript/persistence.js'
 
 let dataDir: string
@@ -83,5 +84,62 @@ describe('persistence helpers', () => {
     expect(content).toHaveLength(2)
     expect(content[0].type).toBe('text')
     expect(content[1].type).toBe('thinking')
+  })
+
+  // isMeta 对齐 OpenCC: SubagentNotifier 注入的 <task-notification> 等
+  // 系统 user 消息带 isMeta:true. LLM 仍可见, 但前端 UI 层不渲染.
+  it('appendUserMessageV2 with isMeta:true persists isMeta flag', async () => {
+    await appendUserMessageV2(
+      store,
+      sessionId,
+      '<task-notification>...</task-notification>',
+      0,
+      null,
+      { cwd: '/x', sessionId, userType: 'zai' },
+      { isMeta: true },
+    )
+    const t = await store.read(sessionId)
+    expect(t.messages).toHaveLength(1)
+    expect(t.messages[0].type).toBe('user')
+    expect(t.messages[0].isMeta).toBe(true)
+    expect(t.messages[0].message.content).toBe(
+      '<task-notification>...</task-notification>',
+    )
+  })
+
+  it('appendUserMessageV2 without isMeta omits the field (back-compat)', async () => {
+    await appendUserMessageV2(
+      store,
+      sessionId,
+      'hello user',
+      0,
+      null,
+      { cwd: '/x', sessionId, userType: 'zai' },
+    )
+    const t = await store.read(sessionId)
+    expect(t.messages).toHaveLength(1)
+    // 字段缺省时不写入磁盘, 前端按 false 处理 — 老 transcript 兼容.
+    expect(t.messages[0].isMeta).toBeUndefined()
+  })
+
+  it('appendUserMessageV2 with skill_injection is treated as isMeta', async () => {
+    // 对齐 OpenCC isMeta: skill body 落盘成 user 消息, LLM 仍可见 (resume 时进 prompt),
+    // 但前端 UI 通过 isMeta=true 跳过渲染 (loadTranscriptMessages).
+    await appendUserMessageV2(
+      store,
+      sessionId,
+      'skill body markdown',
+      0,
+      null,
+      { cwd: '/x', sessionId, userType: 'zai' },
+      { kind: 'skill_injection', skillName: 'foo' },
+    )
+    const t = await store.read(sessionId)
+    expect(t.messages[0].isMeta).toBe(true)
+    expect(
+      (t.messages[0].message.content as string).startsWith(
+        '[skill_injection:foo]',
+      ),
+    ).toBe(true)
   })
 })

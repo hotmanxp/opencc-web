@@ -285,6 +285,9 @@ export function loadTranscriptMessages(
     if (typeof content === 'string') {
       const text = content
       if (msg.type === 'user') {
+        // 对齐 OpenCC isMeta: SubagentNotifier 注入的 <task-notification>
+        // 等系统 user 消息带 isMeta:true, LLM 可见但前端不渲染.
+        if (msg.isMeta === true) continue
         out.push({ ...baseFields, eventId: msg.uuid, type: 'user.text', text })
       } else if (msg.type === 'assistant') {
         out.push({ ...baseFields, eventId: msg.uuid, type: 'assistant.text', text })
@@ -309,6 +312,11 @@ export function loadTranscriptMessages(
       continue
     }
     if (msg.type === 'user') {
+      // 对齐 OpenCC isMeta: 系统注入 user 消息 (含 tool_result 块或多模态
+      // text/image 块) 带 isMeta:true 时, LLM 可见但前端不渲染 — 直接跳过.
+      // tool_result 分支与多模态分支共享这条守卫, 避免 SubagentNotifier 注入
+      // 的 <task-notification> user 消息以任何形态在 UI 上泄漏.
+      if (msg.isMeta === true) continue
       // tool_result 块: 把对应 tool_use:start 合并为 done/error.
       const tr = blocks.find((b) => b.type === 'tool_result') as
         | { tool_use_id: string; content: unknown; is_error: boolean }
