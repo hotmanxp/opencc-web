@@ -27,6 +27,9 @@ yarn-error.log*
 # TypeScript
 **/tsconfig.tsbuildinfo
 
+# Coverage (vitest --coverage output)
+coverage/
+
 # Package locks
 package-lock.json
 yarn.lock
