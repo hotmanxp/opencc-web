@@ -299,6 +299,11 @@ const HARD_EXCLUDE_FILES = new Set<string>([
   'constants.ts',
   'tasks.ts',
   'state', // directory
+  // Local zai stubs for forkedAgent transitive imports. Upstream pulls in the
+  // full permission FSM (settings file load, mode validation) which zai
+  // handles via its own RuntimeConfig. Keep these locally maintained.
+  'utils/permissions/denialTracking.ts',
+  'utils/permissions/permissionSetup.ts',
 ])
 
 // Files that get a ZAI_STUB marker prepended (deferred modules).

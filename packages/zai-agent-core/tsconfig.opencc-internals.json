@@ -1,0 +1,27 @@
+{
+  "_comment": "Secondary build config for the opencc-internals mirror. The main tsconfig excludes this dir (its surface is consumed via source-on-the-fly at runtime), but some pre-existing TS errors in upstream files need a relaxed build. We emit just enough .js files to satisfy runtime require()s — primarily the newly-added denialTracking / permissionSetup stubs, plus the cwd / file / debug helpers other tools depend on.",
+  "compilerOptions": {
+    "target": "ES2022",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "outDir": "dist",
+    "rootDir": "src",
+    "declaration": false,
+    "declarationMap": false,
+    "sourceMap": true,
+    "strict": false,
+    "noImplicitAny": false,
+    "strictNullChecks": false,
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "forceConsistentCasingInFileNames": true,
+    "isolatedModules": false,
+    "allowJs": true,
+    "noEmitOnError": false,
+    "types": ["node"]
+  },
+  "include": [
+    "src/opencc-internals/**/*.ts",
+    "src/types/global-stubs.d.ts"
+  ]
+}
