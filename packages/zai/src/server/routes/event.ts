@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from 'express'
 import type { ServerEvent } from '../../shared/events.js'
-import { eventBus } from '../services/eventBus.js'
+import { eventBus, ServerEventBus } from '../services/eventBus.js'
 import { writeSse, SSE_HEADERS } from '../services/sse.js'
 
 const router: IRouter = Router()
@@ -17,29 +17,59 @@ function readWantedSid(req: Request): string | null {
   return null
 }
 
+// 从 query 读 topics (csv). 缺省 / 空 = 订阅全量.
+function readWantedTopics(req: Request): string[] {
+  const q = req.query.topics
+  if (typeof q !== 'string' || q.length === 0) return []
+  return q.split(',').map((s) => s.trim()).filter(Boolean)
+}
+
 router.get('/event', (req: Request, res: Response) => {
   const lastEventId = req.headers['last-event-id'] as string | undefined
   const wantedSid = readWantedSid(req)
+  const wantedTopics = readWantedTopics(req)
 
   for (const [k, v] of Object.entries(SSE_HEADERS)) res.setHeader(k, v)
   res.flushHeaders()
 
-  // 1. 注册 subscriber (必须在 emit 前注册, 否则 emit 时没人接收)
-  //    wantedSid 非空 → subscribeScoped, 自动按 sid filter;
-  //    wantedSid 为空 → 走老路径, 全量转发 (兼容非 Agent 页面).
-  const unsubscribe = wantedSid
-    ? eventBus.subscribeScoped(wantedSid, (event) =>
-        writeSse(res, event as unknown as Parameters<typeof writeSse>[1]),
-      )
-    : eventBus.subscribe((event) =>
-        writeSse(res, event as unknown as Parameters<typeof writeSse>[1]),
-      )
+  // 1. 注册 subscriber (必须在 emit 前注册, 否则 emit 时没人接收).
+  //    4 分支:
+  //    - 有 topics + 有 sid → subscribeTopics(sid, topics, ...)
+  //    - 有 topics + 无 sid → subscribeTopics(null, topics, ...)
+  //    - 无 topics + 有 sid → subscribeScoped (旧行为)
+  //    - 无 topics + 无 sid → subscribe (旧行为, 兼容非 Agent 页面)
+  const writeEvent = (event: ServerEvent) =>
+    writeSse(res, event as unknown as Parameters<typeof writeSse>[1])
 
-  // 2. 重连补发 (必须在 emit 前执行, 避免 server.connected 被 replay 切片包含)
-  //    有 sid → 走 per-sid 切片; 无 sid → 走全局历史 (旧行为).
-  if (wantedSid) {
+  let unsubscribe: () => void
+  if (wantedTopics.length > 0) {
+    unsubscribe = eventBus.subscribeTopics(wantedSid, wantedTopics, writeEvent)
+  } else if (wantedSid) {
+    unsubscribe = eventBus.subscribeScoped(wantedSid, writeEvent)
+  } else {
+    unsubscribe = eventBus.subscribe(writeEvent)
+  }
+
+  // 2. 重连补发 (必须在 emit 前执行, 避免 server.connected 被 replay 切片包含).
+  //    topics 同样 apply 到 replay:
+  //    - 有 topics + 有 sid → getHistoryAfterForSidWithTopics
+  //    - 有 topics + 无 sid → getHistoryAfter + topicMatches 过滤
+  //    - 无 topics + 有 sid → getHistoryAfterForSid (旧行为)
+  //    - 无 topics + 无 sid → getHistoryAfter (旧行为)
+  if (wantedSid && wantedTopics.length > 0) {
+    for (const ev of eventBus.getHistoryAfterForSidWithTopics(lastEventId, wantedSid, wantedTopics)) {
+      writeSse(res, ev as unknown as Parameters<typeof writeSse>[1])
+    }
+  } else if (wantedSid) {
     for (const ev of eventBus.getHistoryAfterForSid(lastEventId, wantedSid)) {
       writeSse(res, ev as unknown as Parameters<typeof writeSse>[1])
+    }
+  } else if (wantedTopics.length > 0) {
+    const hist = eventBus.getHistoryAfter(lastEventId)
+    for (const ev of hist) {
+      if (ServerEventBus.topicMatches(ev.type, wantedTopics)) {
+        writeSse(res, ev as unknown as Parameters<typeof writeSse>[1])
+      }
     }
   } else {
     for (const ev of eventBus.getHistoryAfter(lastEventId)) {
