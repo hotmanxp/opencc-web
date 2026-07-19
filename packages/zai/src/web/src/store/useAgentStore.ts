@@ -111,6 +111,18 @@ export type AskState = {
   annotations: Record<string, { notes?: string }>
 }
 
+// 收到 server runtime.compacted 事件时 reducer 推入的 toast. expiresAt
+// (timestamp + 5000ms) 让 UI 用 setTimeout 自动回收, 不用 reducer 再起
+// 定时器. 注意: 不要复用 useAppStore 的 ToastInfo (message/ts 字段名),
+// 这里用 text/level 走专属 display contract — 与 task 14 brief 对齐.
+export type CompactionToast = {
+  id: string
+  text: string
+  level: 'info'
+  sessionId: string
+  expiresAt: number
+}
+
 interface AgentState {
   sessionId: string | null
   sessions: Array<{
@@ -161,6 +173,15 @@ interface AgentState {
   applyRuntimeEvent: (event: ServerEvent) => void
   applySessionEvent: (event: ServerEvent) => void
   applyPromptAsk: (event: ServerEvent) => void
+
+  // Compaction toast: 收到 server 推的 runtime.compacted 时, 往 toasts
+  // 顶一条 5s 自动消失的信息 (UI 层订阅本字段做顶部提示). 与 useAppStore
+  // 的系统级 toast (server.error / 'toast' 事件) 完全独立 — 这里只追踪
+  // conversation-level 的 compact 事件, 与 sessionId 绑定, 避免全局 toast
+  // 池被会话级噪音污染.
+  toasts: CompactionToast[]
+  applyCompactionEvent: (event: Extract<ServerEvent, { type: 'runtime.compacted' }>) => void
+  dismissCompactionToast: (id: string) => void
 
   addMessage: (msg: AgentMessage) => void
   upsertToolCall: (msg: AgentMessage) => void
@@ -377,6 +398,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   sendSeq: 0,
   todosBySession: {},
   v2TasksBySession: {},
+  // Compaction toast 队列 (Task 14): 收到 server runtime.compacted 时由
+  // applyCompactionEvent 推入. UI 端 (未来的 dedupe component) 用 expiresAt
+  // (event.timestamp + 5000ms) 自动回收, 而不用 reducer 内部起 setTimeout.
+  // 与 useAppStore 的 ToastInfo (server.system toast / server.error) 完全独立,
+  // 不混用同一个池.
+  toasts: [],
   // 待清空定时器: 每 sessionId 一份, "全部任务完成" 后 5s 自动从 store 移除
   // (避免"全部完成还一直挂着"的 UI 噪音). 重新写入含未完成任务时取消.
   _taskClearTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
@@ -423,6 +450,42 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   // SSE reducer state (Task 6)
   activeSessionId: null,
+
+  // Compaction toast reducer (Task 14):
+  // 服务端 runtime.compacted 来时往 toasts 顶一条 5s 自动消失的信息. UI
+  // 端 (未来的 TopToast / ToastDock 组件) 用 expiresAt = timestamp + 5000
+  // 自动回收; reducer 不在这里起 setTimeout, 避免 React 渲染路径之外的
+  // 异步写状态导致意外 race.
+  //
+  // sessionId 防御: brief Step 2 设的契约是 "sessionId 透传". 与
+  // applyRuntimeEvent 的 currentSid 防御不一致 — 那里会直接吞错 sid
+  // 以保护 messages 流, 但 toast 是会话级而非流级展示, 切到 B 后
+  // A 的压缩仍应能弹一条 (用户切回 A 也能看到底栏历史); 这里不做
+  // sid 过滤.
+  applyCompactionEvent: (event) => {
+    set((state) => {
+      const saved = Math.max(0, Math.floor(event.savedTokens))
+      const newToast: CompactionToast = {
+        id: `compacted-${event.timestamp}`,
+        text: `对话已压缩 · 节省 ${saved.toLocaleString()} tokens`,
+        level: 'info',
+        sessionId: event.sessionId,
+        expiresAt: event.timestamp + 5000,
+      }
+      return {
+        ...state,
+        toasts: [...(state.toasts ?? []), newToast],
+      }
+    })
+  },
+  // UI 端可主动 dismiss (例如用户点 ×); reducer 不强制依赖 expiresAt 清理
+  // 路径, 两条路并存, 兼容未来需要的"立即清除"交互.
+  dismissCompactionToast: (id) => {
+    set((state) => ({
+      ...state,
+      toasts: (state.toasts ?? []).filter((t) => t.id !== id),
+    }))
+  },
 
   addMessage: (msg: AgentMessage) =>
     set((s) => ({ messages: [...s.messages, msg] })),
@@ -1056,6 +1119,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   applyRuntimeEvent: (event) => {
     if (!('sessionId' in event) || typeof event.sessionId !== 'string') return
     const sid = event.sessionId
+    // Task 14 — runtime.compacted: 不经过 currentSid 过滤, 直接推顶部 toast.
+    // 原因: 压缩 toast 是会话级"提示", 而非流式事件 — 切到 B 后即使迟到
+    // 收到 A 的 compact 事件 (极少, 但 SSE 重连 / 后台压缩排队时可能发生),
+    // 用户期望被告知 "刚刚后台压缩了 N tokens". 把它放在 switch 之前保证
+    // 不被下面的 defense-in-depth 误吞.
+    //
+    // 注意: 它仍然要走 applyRuntimeEvent (而不是 useAppStore.applySystemEvent),
+    // 因为 toast 形态与 system.toast 不同 (CompactionToast 带 expiresAt +
+    // sessionId), 不能借用系统 toast 池.
+    if (event.type === 'runtime.compacted') {
+      useAgentStore.getState().applyCompactionEvent(event)
+      return
+    }
     // Defense-in-depth: 后端已经按 sid 过滤 (subscribeScoped), 但切换会话
     // 时旧 sid 的迟到事件可能穿透 (e.g. EventSource 重建有几十 ms 真空期,
     // 旧连接还没 close 时最后一批事件已落地). 这种事件不应该写入当前
