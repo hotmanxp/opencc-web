@@ -58,7 +58,8 @@ web (useBackgroundTasks) ─POST /api/tasks→ DefaultBackgroundRuntime.dispatch
 | `packages/zai/src/server/services/subagentNotifier.ts` | 后台 task terminal 时 fire-and-forget 注入 `<task-notification>` 触发父 queryLoop 续传 |
 | `packages/zai-agent-core/src/runtime/{queryLoop,streamAdapter,toolExecution,canUseTool}.ts` | 主循环 / `wrapWithZaiMeta` 加 meta / `executeToolsStreaming` 串行 tool_use:* / `defaultCanUseToolFactory`(Bash 走 sandbox,Agent 直接 allow)|
 | `packages/zai-agent-core/src/runtime/background/{BackgroundRuntime,DefaultBackgroundRuntime,store/JsonTaskStore,types}.ts` | `dispatch/get/list/cancel/events/shutdown` interface + JsonTaskStore 持久化 + retry(529 连续上限 vs 5xx 总上限 maxRetries=10)|
-| `packages/zai-agent-core/src/{agents/agentsMdLoader,skills/index,mcp/MCPClientPool,plugins/{index,HookRunner}}.ts` | `loadAgentsMd` 注入 system prompt 顶部 / `loadSkillsFromDirs` + PendingSkillInjection / MCP 池 + SIGTERM 钩子 / `DefaultPluginRuntime` + 8 个 hook event |
+| `packages/zai-agent-core/src/agents/{memoryLoader,memoryWatcher}.ts` | `loadMemoryForPrompt` 注入 system prompt 顶部(AGENTS.md 链 + .claude/rules + AGENTS.local.md + @include) / `startMemoryWatcher` 1s mtime 监听 + `clearMemoryCache` |
+| `packages/zai-agent-core/src/{skills/index,mcp/MCPClientPool,plugins/{index,HookRunner}}.ts` | `loadSkillsFromDirs` + PendingSkillInjection / MCP 池 + SIGTERM 钩子 / `DefaultPluginRuntime` + 8 个 hook event |
 | `packages/zai-agent-core/src/tools/{BackgroundAgentResultTool,TaskOutputTool}/` | 阻塞读 / 非阻塞拉 task output |
 | `packages/zai/src/shared/events.ts` | zod discriminatedUnion:`runtime.*` / `session.*` / `job.*` / `prompt.ask` / `system.*` 五通道 |
 | `packages/zai/src/web/src/store/useAgentStore.ts` | Zustand store:`applyRuntimeEvent` / `applySessionEvent` / `applyPromptAsk` / `applyJobEvent` / `applySystemEvent` + `upsertToolCall` / `scheduleTaskListClearIfAllDone` 5s 自动清空 |

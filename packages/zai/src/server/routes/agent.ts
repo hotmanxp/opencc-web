@@ -13,7 +13,7 @@ import {
   setCurrentSessionId,
   listSkills,
 } from "../services/agentRuntime.js";
-import { loadAgentsMd, buildAgentsMdSystemPrompt, EXTERNAL_PERMISSION_MODES, type UserFacingPermissionMode } from "@zn-ai/zai-agent-core";
+import { EXTERNAL_PERMISSION_MODES, type UserFacingPermissionMode } from "@zn-ai/zai-agent-core";
 import { getDefaultMode } from "../services/permissionMode.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
@@ -370,14 +370,10 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   // 异步 fire-and-forget 运行 runtime
   void (async () => {
     try {
-      let systemPrompt: string | undefined;
-      try {
-        const agentsMd = await loadAgentsMd(cwd);
-        const built = buildAgentsMdSystemPrompt(agentsMd);
-        systemPrompt = built ?? undefined;
-      } catch {
-        // AGENTS.md 加载失败不阻断
-      }
+      // AGENTS.md / .claude/rules 加载由 queryLoop.buildSystemPrompt 内部
+      // 通过 loadMemoryForPrompt 完成（见 zai-agent-core/src/runtime/queryLoop.ts）。
+      // 这里不再预加载,避免重复 IO + 缓存绕过。
+      const systemPrompt: string | undefined = undefined;
 
       const text = prompt?.trim() ?? "";
       const blocks = contentBlocks;

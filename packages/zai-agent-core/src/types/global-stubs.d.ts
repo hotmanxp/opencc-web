@@ -2,6 +2,32 @@
 // This file provides minimal type declarations for modules that are
 // imported by opencc-internals but don't exist in this package.
 
+// Stub for picomatch (no @types/picomatch installed). The package exports
+// both a default callable and named helpers; the memoryLoader uses both.
+declare module 'picomatch' {
+  interface PicomatchOptions {
+    dot?: boolean
+    [key: string]: unknown
+  }
+  type Matcher = (input: string) => boolean
+  interface PicomatchApi {
+    (pattern: string | string[], options?: PicomatchOptions): Matcher
+    (
+      pattern: string | string[],
+      options: PicomatchOptions | undefined,
+      callback: (matched: boolean) => void,
+    ): void
+    isMatch(
+      input: string,
+      pattern: string | string[],
+      options?: PicomatchOptions,
+    ): boolean
+  }
+  const picomatch: PicomatchApi
+  export default picomatch
+  export { picomatch, isMatch }
+}
+
 // Stub for bun:bundle
 declare module 'bun:bundle' {
   export const VERSION: string;

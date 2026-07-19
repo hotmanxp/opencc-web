@@ -27,7 +27,7 @@ export type SandboxConfig = {
 
 export type ModelCaller = (req: {
   model: string
-  systemPrompt: string | Array<{ type: string; [key: string]: unknown }>
+  systemPrompt: string | string[] | Array<{ type: string; [key: string]: unknown }>
   messages: Array<{ role: 'user' | 'assistant'; content: unknown }>
   tools: Tool[]
   signal: AbortSignal
@@ -110,7 +110,7 @@ export type QueryOptions = {
   /** @deprecated 用 transcriptId 代替. 文件不存在时会抛 ENOENT. */
   resumeFromTranscriptId?: string
   model?: string
-  systemPrompt?: SystemPrompt | string
+  systemPrompt?: string | string[]
   additionalTools?: Tool[]
   abortSignal?: AbortSignal
   maxTurns?: number

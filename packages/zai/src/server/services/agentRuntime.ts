@@ -10,6 +10,12 @@ import {
   setDefaultSandboxManager,
   TranscriptStore,
 } from '@zn-ai/zai-agent-core'
+import { eventBus } from './eventBus.js'
+import {
+  startMemoryWatcher,
+  stopMemoryWatcher,
+} from '@zn-ai/zai-agent-core/agents/memoryWatcher'
+import { hasExternalIncludes } from '@zn-ai/zai-agent-core/agents/memoryLoader'
 import { createAnthropicModelCaller } from './modelCaller.js'
 import { AskRegistry } from './askRegistry.js'
 import { loadMcpServers } from './mcpConfig.js'
@@ -98,11 +104,29 @@ export function initAgentRuntime(cwd: string): void {
     process.once('SIGINT', cleanup)
   }
 
+  process.once('SIGTERM', () => stopMemoryWatcher())
+  process.once('SIGINT', () => stopMemoryWatcher())
+
   // 启动时一次性加载 commands registry(built-in + first user scan)。
   // 若启动时 dataDir 尚未就绪,context.cwd 兜底为 process.cwd()。
   import('./commands/registry.js').then(({ initCommands }) =>
     initCommands({ cwd, dataDir: process.env.ZAI_DATA_DIR ?? '', sessionId: undefined })
   ).catch((err) => console.error('[initCommands] failed:', err))
+
+  // AGENTS.md / .claude/rules hot-reload watcher
+  startMemoryWatcher({ cwd })
+
+  // External include warning (best-effort, never blocks init)
+  void hasExternalIncludes(cwd).then((has: boolean) => {
+    if (has) {
+      console.warn('[memory] external CLAUDE.md includes detected for cwd:', cwd)
+      eventBus.emit({
+        type: 'toast',
+        level: 'warn',
+        message: '检测到外部 CLAUDE.md include，请审查是否信任',
+      })
+    }
+  })
 }
 
 export async function getOrCreateAgentSession(): Promise<string | null> {
