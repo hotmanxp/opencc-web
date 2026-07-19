@@ -36,10 +36,18 @@ vi.stubGlobal('EventSource', MockEventSource)
 const { subscribeServerEvents } = await import('./eventSource.js')
 
 describe('subscribeServerEvents', () => {
-  test('connects to /api/event', () => {
+  test('connects to /api/event (无 sid)', () => {
     MockEventSource.instances = []
-    subscribeServerEvents(() => {})
+    subscribeServerEvents(null, () => {})
     expect(MockEventSource.instances[0].url).toBe('/api/event')
+  })
+
+  test('带 sid 时 URL 含 ?sid=xxx (encodeURIComponent)', () => {
+    MockEventSource.instances = []
+    subscribeServerEvents('sess-A/with space', () => {})
+    expect(MockEventSource.instances[0].url).toBe(
+      '/api/event?sid=sess-A%2Fwith%20space',
+    )
   })
 
   test('dispatches named SSE events (runtime.delta) to onEvent', () => {
@@ -47,7 +55,7 @@ describe('subscribeServerEvents', () => {
     // ('runtime.delta', ...) fires. onmessage must NOT receive these.
     MockEventSource.instances = []
     const onEvent = vi.fn()
-    subscribeServerEvents(onEvent)
+    subscribeServerEvents('s1', onEvent)
     const es = MockEventSource.instances[0]
     es.dispatchNamed('runtime.delta', {
       type: 'runtime.delta',
@@ -61,7 +69,7 @@ describe('subscribeServerEvents', () => {
   test('dispatches runtime.started and runtime.done named events', () => {
     MockEventSource.instances = []
     const onEvent = vi.fn()
-    subscribeServerEvents(onEvent)
+    subscribeServerEvents('s1', onEvent)
     const es = MockEventSource.instances[0]
     es.dispatchNamed('runtime.started', {
       type: 'runtime.started',
@@ -80,7 +88,7 @@ describe('subscribeServerEvents', () => {
     MockEventSource.instances = []
     const onEvent = vi.fn()
     const consoleError = vi.spyOn(console, 'error').mockImplementation(() => {})
-    subscribeServerEvents(onEvent)
+    subscribeServerEvents('s1', onEvent)
     const es = MockEventSource.instances[0]
     es.dispatchNamed('runtime.delta', 'not json' as unknown as ServerEvent)
     expect(onEvent).not.toHaveBeenCalled()
@@ -90,7 +98,7 @@ describe('subscribeServerEvents', () => {
 
   test('handle.close calls es.close', () => {
     MockEventSource.instances = []
-    const handle = subscribeServerEvents(() => {})
+    const handle = subscribeServerEvents(null, () => {})
     const es = MockEventSource.instances[0]
     handle.close()
     expect(es.close).toHaveBeenCalled()
@@ -101,7 +109,7 @@ describe('subscribeServerEvents', () => {
     notifMock.error.mockImplementation(() => undefined)
     MockEventSource.instances = []
     const onError = vi.fn()
-    subscribeServerEvents(() => {}, onError)
+    subscribeServerEvents('s1', () => {}, onError)
     const es = MockEventSource.instances[0]
     es.onerror?.(new Event('error'))
     expect(notifMock.error).toHaveBeenCalledTimes(1)

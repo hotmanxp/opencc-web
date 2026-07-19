@@ -13,9 +13,48 @@ export type ServerEventInput = {
   [K in ServerEvent as K['type']]: Omit<K, 'eventId' | 'ts'> & { eventId?: string; ts?: number }
 }[ServerEvent['type']]
 
+// 哪些事件不受 sid 限制 (与具体 session 解耦, 所有 tab 都应收)
+// - session.*: 自身的生命周期通知 (sidebar 需要知道)
+// - system.* (server.connected / server.error / toast / branch.changed): 全局
+//
+// 显式穷举: 未来新增事件类型时, 默认会被认为"跟 session 绑定", 不会自动
+// 跨 sid 转发. 想跨 sid 的新类型必须在这里显式登记 — 这是 by-design, 防止
+// 误把 sid-scoped 的事件 (比如未来的 `file.changed` 带 sid) 默认全局广播.
+function isGlobalEvent(event: ServerEvent): boolean {
+  switch (event.type) {
+    case 'server.connected':
+    case 'server.error':
+    case 'toast':
+    case 'branch.changed':
+    case 'session.created':
+    case 'session.deleted':
+    case 'session.renamed':
+      return true
+    default:
+      return false
+  }
+}
+
+// 从事件里安全读 sessionId. runtime.* / prompt.ask 必有, session.* 有, job.* 有,
+// system.* 中 server.connected 有 (nullable), 其它 system.* 没有.
+// 返回 string 表示属于该 sid, null 表示全局/无关, undefined 表示无法判断 (按 null 兜底)
+function eventSessionId(event: ServerEvent): string | null | undefined {
+  if (
+    'sessionId' in event &&
+    typeof (event as { sessionId?: unknown }).sessionId === 'string'
+  ) {
+    return (event as { sessionId: string }).sessionId
+  }
+  return null
+}
+
 export class ServerEventBus {
   private subs = new Set<Subscriber>()
   private history: ServerEvent[] = []
+  // per-sid 历史切片, 给 SSE 路由按 sid replay 用. 仅缓存有 sessionId 的事件;
+  // 全局事件 (session.* / system.*) 留在全局 history, 它们不归某个 sid.
+  // 容量同样按 CAPACITY 裁, 避免单 sid 长期占满内存.
+  private historyBySid = new Map<string, ServerEvent[]>()
 
   emit(event: ServerEventInput) {
     const full: ServerEvent = {
@@ -25,6 +64,14 @@ export class ServerEventBus {
     } as ServerEvent
     this.history.push(full)
     if (this.history.length > CAPACITY) this.history.shift()
+    // 写 per-sid 切片 (仅当 event 带明确的 string sessionId)
+    const sid = eventSessionId(full)
+    if (typeof sid === 'string') {
+      const arr = this.historyBySid.get(sid) ?? []
+      arr.push(full)
+      if (arr.length > CAPACITY) arr.shift()
+      this.historyBySid.set(sid, arr)
+    }
     for (const sub of this.subs) {
       try {
         sub(full)
@@ -41,10 +88,41 @@ export class ServerEventBus {
     return this.history.slice(idx + 1)
   }
 
+  // 仅返回属于该 sid 的事件历史 (Last-Event-ID 续读用). 不包含 session.* /
+  // system.* 等全局事件 — 那些由 EventSource 在 client 端从 store 同步,
+  // SSE 渠道不需要重发 (server.connected 单独在 connect 时即时推送).
+  getHistoryAfterForSid(lastEventId: string | undefined, sid: string): ServerEvent[] {
+    const arr = this.historyBySid.get(sid) ?? []
+    if (lastEventId === undefined) return []
+    const idx = arr.findIndex((e) => e.eventId === lastEventId)
+    if (idx < 0) return [...arr]
+    return arr.slice(idx + 1)
+  }
+
   subscribe(sub: Subscriber): () => void {
     this.subs.add(sub)
     return () => {
       this.subs.delete(sub)
+    }
+  }
+
+  // 带 sid 的订阅: 自动 filter, 只把 wantedSid 匹配或全局事件交给 callback.
+  // wantedSid == null → 不过滤 (维持旧行为, 兼容旧的"全量订阅"场景).
+  //
+  // 设计要点: 复用同一个全局 emit 循环 (不改 emit 行为), 在订阅侧装一层
+  // wrapper. 这样老代码 `eventBus.subscribe(cb)` 仍然收所有事件, 不会破坏
+  // 现有调用方 (backgroundRuntime / subagentNotifier 等依赖全量).
+  subscribeScoped(wantedSid: string | null, sub: Subscriber): () => void {
+    const wrapped = (event: ServerEvent) => {
+      if (wantedSid == null) return sub(event)
+      if (isGlobalEvent(event)) return sub(event)
+      const sid = eventSessionId(event)
+      if (sid === wantedSid) return sub(event)
+      // 不匹配: 静默丢弃. 不要 throw — 一个订阅者抛错不能影响其它订阅者.
+    }
+    this.subs.add(wrapped)
+    return () => {
+      this.subs.delete(wrapped)
     }
   }
 }

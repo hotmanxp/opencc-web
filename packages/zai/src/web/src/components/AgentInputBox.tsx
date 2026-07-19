@@ -415,6 +415,11 @@ export default React.memo(function AgentInputBox() {
         prompt: text || undefined,
         contentBlocks: blocks.length > 0 ? blocks : undefined,
         sessionId: sessionId || activeSessionId || undefined,
+      }, {
+        // X-Session-Id 与 body.sessionId 同步: server 现在用 body.sessionId
+        // 决定是续传还是新会话, header 是冗余校验 + 日志/审计用, 让 server
+        // 能在多 tab 串号场景里发现并拒绝.
+        headers: (sessionId || activeSessionId) ? { 'X-Session-Id': sessionId || activeSessionId || '' } : undefined,
       });
       useAgentStore.setState({
         sessionId: returnedSessionId,

@@ -50,4 +50,31 @@ describe('AskRegistry', () => {
     expect(reg.answer('t1', { answers: { q1: 'b' } })).toBe(false)
     await expect(p).resolves.toEqual({ answers: { q1: 'a' } })
   })
+
+  // ========== peek (给 handler 做 sid 串号校验用) ==========
+
+  test('peek 返回 pending 的 sessionId, 不 consume', () => {
+    const reg = new AskRegistry()
+    const ctrl = new AbortController()
+    reg.register('t1', 'sess-A', ctrl.signal)
+    const peeked = reg.peek('t1')
+    expect(peeked?.sessionId).toBe('sess-A')
+    expect(peeked?.toolUseId).toBe('t1')
+    // peek 不该清除 pending
+    expect(reg.peek('t1')?.sessionId).toBe('sess-A')
+  })
+
+  test('peek 找不到 → undefined', () => {
+    const reg = new AskRegistry()
+    expect(reg.peek('nonexistent')).toBeUndefined()
+  })
+
+  test('peek 后 answer 仍能 resolve', async () => {
+    const reg = new AskRegistry()
+    const ctrl = new AbortController()
+    const p = reg.register('t1', 'sess-A', ctrl.signal)
+    reg.peek('t1') // peek 不应改变状态
+    expect(reg.answer('t1', { answers: { q1: 'a' } })).toBe(true)
+    await expect(p).resolves.toEqual({ answers: { q1: 'a' } })
+  })
 })

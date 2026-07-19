@@ -39,11 +39,22 @@ const NAMED_EVENT_TYPES = [
   'branch.changed',
 ] as const
 
+// 打开一条 SSE 连接到 /api/event. 后端按 sid 过滤:
+// - sid 非空: server 只推 sid 匹配 + 全局事件 (session.* / system.*),
+//   防止多个 tab / 同一 tab 切会话时消息互串.
+// - sid 为 null: 维持旧行为 (全量), 给未绑定会话的页面用.
+//
+// 调用方在 sessionId 变化时 close 旧 handle 重新 subscribe, 让 EventSource
+// 用新 URL 重建连接 (新连接走 per-sid 切片 + Last-Event-ID 续读).
 export function subscribeServerEvents(
+  sid: string | null,
   onEvent: (event: ServerEvent) => void,
   onError?: (err: Event) => void,
 ): StreamHandle {
-  const es = new EventSource(`${API_BASE}/event`)
+  const url = sid
+    ? `${API_BASE}/event?sid=${encodeURIComponent(sid)}`
+    : `${API_BASE}/event`
+  const es = new EventSource(url)
 
   // The browser's EventSource only fires `onmessage` for the unnamed default
   // event. The server writes each frame as `event: <type>` so we must register

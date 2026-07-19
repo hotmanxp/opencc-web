@@ -962,7 +962,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const { abortController } = get()
     abortController?.abort('user_stop')
     set({ status: 'aborted', abortController: null })
-    await fetch('/api/agent/abort', { method: 'POST' })
+    // 透传 sid 给 server: server 端 /agent/abort 现在用 getCurrentSessionId()
+    // (来自 queryLoop 的 in-memory state), header 是冗余校验 + 日志/审计的
+    // 双重保险. 切了会话后再点 stop 时, in-memory state 可能还没跟上
+    // (createNewSession → setCurrentSessionId 之间), header 里 sid 能让 server
+    // 校验这就是本会话的 stop 请求, 避免误杀其它正在跑的 turn.
+    const sid = get().sessionId
+    await fetch('/api/agent/abort', {
+      method: 'POST',
+      headers: sid ? { 'X-Session-Id': sid } : {},
+    })
   },
 
   setAskAnswer: (questionText, label) => set((s) => {
@@ -993,9 +1002,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     if (!s.pendingAsk) return
     set({ pendingAsk: { ...s.pendingAsk, status: 'submitting' } })
     try {
+      // X-Session-Id 让 server 能校验 pendingAsk 是不是本会话的, 防御
+      // "切到 B 后 A 的 ask 还在 pending, 用户在 B 的 QuestionCard 上点
+      // submit, A 的 prompt 收到 B 的答案" 这种串号.
+      // pendingAsk.sessionId 由 applyPromptAsk 写入, 兜底用 store.sessionId
+      // (老 schema 没写, 给旧 transcript 残留的 pendingAsk 留 fallback).
+      const askSid = s.pendingAsk.sessionId ?? s.sessionId
       const res = await fetch('/api/agent/answer', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(askSid ? { 'X-Session-Id': askSid } : {}),
+        },
         body: JSON.stringify({
           toolUseId: s.pendingAsk.toolUseId,
           answers: s.pendingAsk.answers,
@@ -1020,9 +1038,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const s = get()
     if (!s.pendingAsk) return
     try {
+      const askSid = s.pendingAsk.sessionId ?? s.sessionId
       await fetch('/api/agent/answer/reject', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+          'Content-Type': 'application/json',
+          ...(askSid ? { 'X-Session-Id': askSid } : {}),
+        },
         body: JSON.stringify({ toolUseId: s.pendingAsk.toolUseId, reason }),
       })
     } finally {
@@ -1034,6 +1056,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   applyRuntimeEvent: (event) => {
     if (!('sessionId' in event) || typeof event.sessionId !== 'string') return
     const sid = event.sessionId
+    // Defense-in-depth: 后端已经按 sid 过滤 (subscribeScoped), 但切换会话
+    // 时旧 sid 的迟到事件可能穿透 (e.g. EventSource 重建有几十 ms 真空期,
+    // 旧连接还没 close 时最后一批事件已落地). 这种事件不应该写入当前
+    // store 的 messages — 否则切到 B 后还会看到 A 的最后几帧.
+    //
+    // 兜底动作: 直接丢弃 — transcript 重连后会用 tool_use_id 把 runtime 流
+    // 合并回 A 的 messages, 用户切回 A 不会丢. 不写 store.messages 是因为
+    // store 是单一数组, 写进去就污染当前视图.
+    //
+    // 例外: activeSessionId (流式期间标记当前活跃 sid) 不同步更新, 因为
+    // 切到 B 后 B 的 runtime.started 会自然覆盖.
+    const currentSid = useAgentStore.getState().sessionId
+    if (currentSid && sid !== currentSid) return
     // runtime.* 事件全部带 sessionId, 上面的 narrow 已保证它存在.
     // runtime.* 不在 ServerEvent union 之外的 type 才会进入这里.
     switch (event.type) {

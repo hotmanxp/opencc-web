@@ -72,6 +72,54 @@ describe('POST /api/agent/answer', () => {
       annotations: { q1: { notes: 'extra' } },
     })
   })
+
+  // ========== X-Session-Id sid 串号校验 ==========
+
+  test('X-Session-Id 与 pending sid 匹配 → 正常 resolve', async () => {
+    const ctrl = new AbortController()
+    const p = registry.register('t1', 'sess-A', ctrl.signal)
+    const res = await request(app)
+      .post('/api/agent/answer')
+      .set('X-Session-Id', 'sess-A')
+      .send({ toolUseId: 't1', answers: { q1: 'a' } })
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+    await expect(p).resolves.toEqual({ answers: { q1: 'a' } })
+  })
+
+  test('X-Session-Id 与 pending sid 不匹配 → 409, 不 consume pending', async () => {
+    const ctrl = new AbortController()
+    const p = registry.register('t1', 'sess-A', ctrl.signal)
+    // pending 用 race + timeout 守护: 期望它永远不 resolve, 因为 server 应当
+    // 拒绝并保留 pending. 100ms 后断言 p 仍未 settle.
+    let settled = false
+    void p.then(() => { settled = true }).catch(() => { settled = true })
+    const res = await request(app)
+      .post('/api/agent/answer')
+      .set('X-Session-Id', 'sess-B')
+      .send({ toolUseId: 't1', answers: { q1: 'a' } })
+    expect(res.status).toBe(409)
+    expect(res.body.error).toBe('session_mismatch')
+    // 给 microtask 一点时间, 确认 pending 没被 consume
+    await new Promise((r) => setTimeout(r, 20))
+    expect(settled).toBe(false)
+    // cleanup: 用正确的 sid 真的 answer 掉, 避免 test 间污染
+    const res2 = await request(app)
+      .post('/api/agent/answer')
+      .set('X-Session-Id', 'sess-A')
+      .send({ toolUseId: 't1', answers: { q1: 'a' } })
+    expect(res2.status).toBe(200)
+  })
+
+  test('不带 X-Session-Id (legacy) → 维持旧行为, 仅靠 toolUseId 唯一性', async () => {
+    const ctrl = new AbortController()
+    const p = registry.register('t1', 'sess-A', ctrl.signal)
+    const res = await request(app)
+      .post('/api/agent/answer')
+      .send({ toolUseId: 't1', answers: { q1: 'a' } })
+    expect(res.status).toBe(200)
+    await expect(p).resolves.toEqual({ answers: { q1: 'a' } })
+  })
 })
 
 describe('POST /api/agent/answer/reject', () => {

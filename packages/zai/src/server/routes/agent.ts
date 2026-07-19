@@ -641,7 +641,11 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
   }
 });
 
-router.post("/agent/abort", async (_req: Request, res: Response) => {
+router.post("/agent/abort", async (req: Request, res: Response) => {
+  // X-Session-Id header 当前仅作为日志/审计冗余字段 — 真正的 abort 走
+  // getCurrentSessionId() 指向的 in-flight run (runtime 没有 session-aware
+  // abort 接口). 等 runtime 加 session-aware abort 后, 这个 header 会成为
+  // "abort 哪一条 sid" 的关键参数.
   const sessionId = getCurrentSessionId();
   await abortAgentSession("user_abort");
   res.json({ ok: true, sessionId });

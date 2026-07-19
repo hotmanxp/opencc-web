@@ -33,6 +33,12 @@ export class AskRegistry {
     })
   }
 
+  // 只读 peek, 不 consume. 给 answer/reject handler 在执行实际 resolve/reject
+  // 之前校验 pendingAsk 的 sessionId, 防御跨 sid 串号. 没找到 → undefined.
+  peek(toolUseId: string): Pending | undefined {
+    return this.pending.get(toolUseId)
+  }
+
   answer(toolUseId: string, payload: AskUserAnswers): boolean {
     const p = this.pending.get(toolUseId)
     if (!p) return false

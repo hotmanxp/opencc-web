@@ -22,10 +22,14 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
 
 export const api = {
   get: <T>(path: string) => request<T>(path),
-  post: <T>(path: string, body?: unknown) =>
+  // 加 init 参数让调用方能传 headers (e.g. X-Session-Id). 兼容老调用
+  // (init 可选). body 优先用 body, headers 走 init.headers, Content-Type
+  // 由 request() 内部合并 — 调用方传进来的 headers 不会覆盖 Content-Type.
+  post: <T>(path: string, body?: unknown, init?: RequestInit) =>
     request<T>(path, {
       method: 'POST',
       body: body ? JSON.stringify(body) : undefined,
+      ...(init ?? {}),
     }),
   put: <T>(path: string, body: unknown) =>
     request<T>(path, {
