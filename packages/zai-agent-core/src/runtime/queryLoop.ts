@@ -511,7 +511,10 @@ async function safeAsync(fn: () => Promise<string | null>): Promise<string> {
   try {
     return (await fn()) ?? ''
   } catch (err) {
-    console.warn('[buildSystemPrompt] section failed:', err)
+    // console.debug (not .warn) matches memoryLoader's "section failed"
+    // convention: a missing / partial memory section is recoverable and
+    // shouldn't alarm the user at warn level.
+    console.debug('[buildSystemPrompt] section failed:', err)
     return ''
   }
 }
