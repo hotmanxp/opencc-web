@@ -23,6 +23,7 @@ import {
   initBackgroundRuntime,
   initSubagentNotifierLifecycle,
 } from './services/backgroundRuntime.js';
+import { initStateBridge } from './services/stateBridge.js';
 import { startBranchChecker } from './routes/system.js';
 import { noCacheForApi } from './middleware/noCache.js';
 
@@ -43,6 +44,10 @@ export function createApp(opts: AppOptions): express.Express {
   // 内部 tryGetNotifier 也兜底了反向顺序)。
   initSubagentNotifierLifecycle()
   initBackgroundRuntime()
+  // 桥接 agent-core StateChangeBus → eventBus. 必须在 initBackgroundRuntime
+  // 之后调: agent-core 才会发 agent_task.changed, 先订阅才不会丢第一批;
+  // 同时 stateBridge 必须存在, emit 才有下游订阅 (eventBus) 接收.
+  initStateBridge()
 
   // Ensure ~/.zai/ exists for persistent cache (manifest.json) and future
   // config data. This is fire-and-forget — if it fails the app still works,

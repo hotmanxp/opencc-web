@@ -1,46 +1,41 @@
-import { useEffect, useState } from 'react'
+import { useEffect } from 'react'
 import { listBashTasks, type BashTaskInfo } from '../lib/taskApi.js'
 import { useAgentStore } from '../store/useAgentStore.js'
 
 /**
  * 当前 session 的 Bash 后台任务。
  *
- * 每 15s 轮询,因为 Bash 任务没有 SSE 事件流推送 (stdout/stderr 在内存 tracker
- * 里,前端要轮询才能拿到最新输出)。
+ * SSE 推送 (bash_task.changed) 经 useAgentStore.bashTasksBySession 维护。
+ * 仅当 store 无值时 fallback 一次性 fetch `/api/bash-tasks?sessionId=...`,
+ * 之后完全靠 SSE。
  */
 export function useBashBackgroundTasks() {
   const sessionId = useAgentStore((s) => s.sessionId)
-  const [tasks, setTasks] = useState<BashTaskInfo[]>([])
-  const [loading, setLoading] = useState(false)
+  const tasks = useAgentStore((s) =>
+    sessionId ? s.bashTasksBySession[sessionId] ?? [] : []
+  )
+  const has = useAgentStore((s) =>
+    sessionId ? sessionId in s.bashTasksBySession : false
+  )
 
   useEffect(() => {
-    if (!sessionId) {
-      setTasks([])
-      return
-    }
+    if (!sessionId || has) return
     let cancelled = false
-    let tick = 0
-    const refresh = async () => {
-      tick++
-      const myTick = tick
+    void (async () => {
       try {
         const list = await listBashTasks(sessionId)
-        if (cancelled || myTick !== tick) return
-        setTasks(list)
+        if (cancelled) return
+        for (const task of list) {
+          useAgentStore.getState().applyBashTaskChanged({ sessionId, task })
+        }
       } catch (err) {
-        if (!cancelled) console.warn('[useBashBackgroundTasks] refresh failed:', err)
-      } finally {
-        if (myTick === tick) setLoading(false)
+        if (!cancelled) console.warn('[useBashBackgroundTasks] initial fetch failed:', err)
       }
-    }
-    setLoading(true)
-    void refresh()
-    const iv = setInterval(() => void refresh(), 15_000)
+    })()
     return () => {
       cancelled = true
-      clearInterval(iv)
     }
-  }, [sessionId])
+  }, [sessionId, has])
 
-  return { tasks, loading }
+  return { tasks, loading: false }
 }

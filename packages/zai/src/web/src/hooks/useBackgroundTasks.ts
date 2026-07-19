@@ -50,9 +50,46 @@ export function useBackgroundTasks() {
   // 当前正在查看的 session; useAgentStore.sessionId 是 sidebar 选中项,
   // 没有选中 (新建会话占位) 时为 null —— 此时不显示 agent_task 任务。
   const currentSessionId = useAgentStore((s) => s.sessionId)
+  // SSE 推送的 agent_task.changed 落到 useAgentStore.agentTasksBySession[sid],
+  // 作为本 hook 的 source of truth (按 session 隔离, store 写入与读取按 sid 走)。
+  const storeTasks = useAgentStore((s) =>
+    currentSessionId ? s.agentTasksBySession[currentSessionId] : undefined,
+  )
+  // store 是否已有当前 sid 的 entries; 用于决定是否需要 listTasks fallback
+  // (避免冷启动之外每次切 session 都重发请求)。
+  const hasInitial = useAgentStore((s) =>
+    currentSessionId ? currentSessionId in s.agentTasksBySession : false,
+  )
   const [tasks, setTasks] = useState<Map<string, BackgroundTaskSummary>>(new Map())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const detailCache = useRef<Map<string, BackgroundTask>>(new Map())
+
+  // 把 store 里 (SSE 推送 / listTasks fallback 注入) 的 agentTasksBySession
+  // 合并进本地 tasks Map。store 是全量快照, 每次 storeTasks 引用变化就覆盖
+  // 合并 — 与 jobs effect 互补 (jobs 是 useAppStore 那条独立通道)。
+  useEffect(() => {
+    if (!storeTasks) return
+    setTasks((prev) => {
+      const next = new Map(prev)
+      for (const summary of storeTasks) {
+        const existing = next.get(summary.taskId)
+        // 已存在 → 保留 jobs effect 写入的 live status / detail (jobs 是
+        // 最即时源), 只补 store 字段 (prompt / detail / lastKnownSessionId);
+        // 不存在 → 直接落入。
+        if (existing) {
+          next.set(summary.taskId, {
+            ...existing,
+            prompt: summary.prompt || existing.prompt,
+            detail: summary.detail ?? existing.detail,
+            lastKnownSessionId: summary.lastKnownSessionId ?? existing.lastKnownSessionId,
+          })
+        } else {
+          next.set(summary.taskId, summary)
+        }
+      }
+      return next
+    })
+  }, [storeTasks])
 
   // 监听 jobs 中 agent_task 变化,同步到 tasks map。
   // 注意:这里只收集所有 session 的 task,job.sessionId === task.detail
@@ -94,12 +131,12 @@ export function useBackgroundTasks() {
     })
   }, [jobs])
 
-  // 初次加载 + 拉详情。
-  // 把所有 session 的任务都进 map,session 过滤在 render 时统一应用。
-  // 切 session 触发 effect 重跑 — 但 listTasks() 不重发请求,而是补 fetch
-  // 缺失的 detail.parentSessionId (重新 query 时,某些 task 的 detail 可能
-  // 已经丢失,例如服务重启导致 in-memory tasks map 蒸发)。
+  // 初次加载 fallback: 仅当 store 没当前 sid 的 entries 时 (冷启动 / 切到
+  // 一个全新 session / 服务重启) 才发一次 listTasks 请求, 把结果通过
+  // applyAgentTaskChanged 注入到 store; 后续完全靠 SSE 推送 + jobs 通道。
+  // 切到已有 entries 的 session → skip, 避免重复请求。
   useEffect(() => {
+    if (!currentSessionId || hasInitial) return
     let cancelled = false
     void (async () => {
       try {
@@ -107,30 +144,9 @@ export function useBackgroundTasks() {
         if (cancelled) return
         for (const t of initial) {
           detailCache.current.set(t.id, t)
-          setTasks((prev) => {
-            const next = new Map(prev)
-            const existing = next.get(t.id)
-            const detailSessionId = typeof t.parentSessionId === 'string' ? t.parentSessionId : undefined
-            if (!existing || (existing.status !== t.status && t.status !== 'running')) {
-              next.set(t.id, {
-                taskId: t.id,
-                status: t.status,
-                prompt: t.input.prompt,
-                createdAt: t.createdAt,
-                finishedAt: t.finishedAt,
-                error: t.error?.message,
-                detail: t,
-                lastKnownSessionId: detailSessionId ?? existing?.lastKnownSessionId,
-              })
-            } else if (existing) {
-              next.set(t.id, {
-                ...existing,
-                prompt: t.input.prompt,
-                detail: t,
-                lastKnownSessionId: detailSessionId ?? existing.lastKnownSessionId,
-              })
-            }
-            return next
+          useAgentStore.getState().applyAgentTaskChanged({
+            sessionId: t.parentSessionId ?? currentSessionId ?? '',
+            task: t,
           })
         }
       } catch (err) {
@@ -140,7 +156,7 @@ export function useBackgroundTasks() {
     return () => {
       cancelled = true
     }
-  }, [currentSessionId])
+  }, [currentSessionId, hasInitial])
 
   // 当 summary 没 detail 时拉详情
   const missingDetail = useMemo(() => {

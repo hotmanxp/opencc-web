@@ -25,6 +25,7 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
+    "test:unit": "vitest run test/unit",
     "test:e2e": "vitest run --config vitest.e2e.config.ts",
     "sync-from-opencc": "tsx scripts/sync-from-opencc.ts"
   },

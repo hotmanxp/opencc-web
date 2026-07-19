@@ -25,6 +25,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, writeFile, rename, rm } from 'node:fs/promises'
 import { dirname, join } from 'node:path'
+import { stateChangeBus } from '../../runtime/stateChangeBus.js'
 
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted'
 
@@ -163,6 +164,7 @@ export class TaskListStore {
     const map = await this.loadSession(sessionId)
     map.set(task.id, task)
     await this.saveSession(sessionId, map)
+    stateChangeBus.emit('v2_task.changed', { sessionId, task, action: 'upsert' })
     return task
   }
 
@@ -229,9 +231,12 @@ export class TaskListStore {
     }
     map.set(id, updated)
     await this.saveSession(sessionId, map)
+    stateChangeBus.emit('v2_task.changed', { sessionId, task: updated, action: 'upsert' })
 
     // Cleanup: 仅当本次更新把任务推到终态时检查 — 避免给不相关的
     // update (subject/owner/metadata 等) 增加无意义 I/O。
+    // deleteSession 内部循环 emit 'delete' for each task,所以本路径下
+    // 只发一次 upsert + deleteSession 发一次 delete,共 2 个事件。
     const transitionedToTerminal =
       updated.status === 'completed' || updated.status === 'deleted'
     if (transitionedToTerminal && this.areAllTerminal(map)) {
@@ -260,6 +265,10 @@ export class TaskListStore {
    * 工具层 (TaskCreate 等) 不主动调。
    */
   async deleteSession(sessionId: string): Promise<void> {
+    const map = await this.loadSession(sessionId)
+    for (const task of map.values()) {
+      stateChangeBus.emit('v2_task.changed', { sessionId, task, action: 'delete' })
+    }
     await rm(this.filePath(sessionId), { force: true })
   }
 

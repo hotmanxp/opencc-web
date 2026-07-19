@@ -60,6 +60,14 @@ function eventSessionId(event: ServerEvent): string | null | undefined {
   return null
 }
 
+// 内部状态事件 type 集合,作为 'state' group 简写的展开目标。
+const STATE_EVENT_TYPES = new Set<string>([
+  'cwd.changed',
+  'bash_task.changed',
+  'v2_task.changed',
+  'agent_task.changed',
+])
+
 export class ServerEventBus {
   private subs = new Set<Subscriber>()
   private history: ServerEvent[] = []
@@ -109,6 +117,72 @@ export class ServerEventBus {
     const idx = arr.findIndex((e) => e.eventId === lastEventId)
     if (idx < 0) return [...arr]
     return arr.slice(idx + 1)
+  }
+
+  /**
+   * 判断 event.type 是否匹配 subscribedTopics 列表。
+   *
+   * 简写语义:
+   * - 'state' → 4 个 state.* type 全匹配
+   * - 'cwd' / 'bash' / 'v2' / 'agent_task' → 单 type 匹配
+   * - 'runtime' / 'session' / 'job' / 'prompt' / 'system' → 各自已有 type group 匹配
+   *
+   * 未知 group/type 一律 false,白名单 semantics。
+   */
+  static topicMatches(type: string, topics: string[]): boolean {
+    for (const t of topics) {
+      if (t === 'state' && STATE_EVENT_TYPES.has(type)) return true
+      if (t === 'cwd' && type === 'cwd.changed') return true
+      if (t === 'bash' && type === 'bash_task.changed') return true
+      if (t === 'v2' && type === 'v2_task.changed') return true
+      if (t === 'agent_task' && type === 'agent_task.changed') return true
+      if (t === 'runtime' && type.startsWith('runtime.')) return true
+      if (t === 'session' && type.startsWith('session.')) return true
+      if (t === 'job' && type.startsWith('job.')) return true
+      if (t === 'prompt' && type === 'prompt.ask') return true
+      if (t === 'system' && (
+        type === 'server.connected' ||
+        type === 'server.error' ||
+        type === 'toast' ||
+        type === 'branch.changed'
+      )) return true
+    }
+    return false
+  }
+
+  getHistoryAfterForSidWithTopics(
+    lastEventId: string | undefined,
+    sid: string,
+    topics: string[],
+  ): ServerEvent[] {
+    const all = this.getHistoryAfterForSid(lastEventId, sid)
+    if (topics.length === 0) return all
+    return all.filter((e) => ServerEventBus.topicMatches(e.type, topics))
+  }
+
+  /**
+   * 带 topic 白名单 + sid 的订阅。
+   * 复用 isGlobalEvent 现有逻辑:wantedSid=null 时不过滤 sid(全量),
+   * 否则 sid 不匹配静默丢弃(global 事件仍透传)。
+   * topic 过滤叠加:event.type 必须命中 subscribedTopics 至少一条。
+   */
+  subscribeTopics(
+    wantedSid: string | null,
+    topics: string[],
+    sub: Subscriber,
+  ): () => void {
+    const wrapped = (event: ServerEvent) => {
+      if (wantedSid != null && !isGlobalEvent(event)) {
+        const sid = eventSessionId(event)
+        if (sid !== wantedSid) return
+      }
+      if (!ServerEventBus.topicMatches(event.type, topics)) return
+      sub(event)
+    }
+    this.subs.add(wrapped)
+    return () => {
+      this.subs.delete(wrapped)
+    }
   }
 
   subscribe(sub: Subscriber): () => void {

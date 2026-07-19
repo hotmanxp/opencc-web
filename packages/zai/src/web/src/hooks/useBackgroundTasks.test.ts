@@ -20,7 +20,12 @@ vi.mock('../lib/taskApi.js', async (importOriginal) => {
 
 beforeEach(() => {
   useAppStore.setState({ jobs: {}, toasts: [] })
-  useAgentStore.setState({ sessionId: null })
+  useAgentStore.setState({
+    sessionId: null,
+    // 重置 store 的 agentTasksBySession, 避免上一个 test 注入的 entry
+    // 影响当前 test 的 hasInitial / listTasks fallback 判定.
+    agentTasksBySession: {},
+  })
 })
 
 afterEach(() => {
@@ -188,8 +193,11 @@ describe('useBackgroundTasks session 隔离', () => {
   })
 
   test('listTasks 返回 detail 后,session 隔离正常生效', async () => {
-    // 上一 case 的反面: listTasks 把 parentSessionId 加载回来后, 即使
-    // liveJob 没了, 过滤仍然正确.
+    // 上一 case 的反面: 切到 B 后 store 没有 sess-B entries → 触发 listTasks
+    // fallback. 加载到的 task-A1 属于 sess-A → 注入到 agentTasksBySession['sess-A']
+    // 而非 ['sess-B']. 当前查看 sess-B 时 storeTasks=undefined, store 合并
+    // effect 不写入本地 map; jobs effect 留下的 lastKnownSessionId='sess-A'
+    // 兜底继续生效 → recentTasks 不含 task-A1.
     const { listTasks } = await import('../lib/taskApi.js')
     vi.mocked(listTasks).mockResolvedValueOnce([
       {
@@ -222,16 +230,105 @@ describe('useBackgroundTasks session 隔离', () => {
         return { jobs }
       })
     })
-    // 切到 B, 触发 useEffect → listTasks 加载 detail
+    // 切到 B, store 没有 sess-B entries → 触发 listTasks fallback
     act(() => {
       useAgentStore.setState({ sessionId: 'sess-B' })
     })
     const { result, rerender } = renderHook(() => useBackgroundTasks())
-    // 等 listTasks promise resolve + setTasks 跑完
+    // 等 listTasks promise resolve + applyAgentTaskChanged 跑完
     await act(async () => {
       await new Promise((r) => setTimeout(r, 10))
     })
     rerender()
     expect(result.current.recentTasks.map((t) => t.taskId)).not.toContain('task-A1')
+  })
+
+  test('store 已有当前 sid entries 时,listTasks 不重发', async () => {
+    // Task 14 新契约: SSE 已推过 / 之前已加载过的 session 不再发 listTasks.
+    // 验证方法: 预置 agentTasksBySession[sess-A], 切到 sess-A → listTasks
+    // 调用次数保持为 0.
+    const { listTasks } = await import('../lib/taskApi.js')
+    vi.mocked(listTasks).mockClear()
+
+    // 预置 store entries — 模拟 SSE 已推过 / 之前 fallback 已加载
+    act(() => {
+      useAgentStore.getState().applyAgentTaskChanged({
+        sessionId: 'sess-A',
+        task: {
+          id: 'task-A1',
+          status: 'running',
+          input: { prompt: 'do X', cwd: '/a', model: 'm' },
+          createdAt: 1000,
+          eventCount: 1,
+          parentSessionId: 'sess-A',
+        } as any,
+      })
+    })
+    // 切到 sess-A, store 已有 entries → listTasks 不应被调用
+    act(() => {
+      useAgentStore.setState({ sessionId: 'sess-A' })
+    })
+    const { result } = renderHook(() => useBackgroundTasks())
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+    expect(listTasks).not.toHaveBeenCalled()
+    // 预置的 entry 应出现在 runningTasks
+    expect(result.current.runningTasks.map((t) => t.taskId)).toContain('task-A1')
+  })
+
+  test('store 为空时 listTasks fallback 触发,结果通过 applyAgentTaskChanged 注入', async () => {
+    // Task 14 新契约: 冷启动 (store 没当前 sid entries) 时发一次 listTasks,
+    // 每条 task 走 applyAgentTaskChanged 注入到 store — SSE 推送路径与 fallback
+    // 路径汇合到同一个 reducer, 后续渲染逻辑统一.
+    const { listTasks } = await import('../lib/taskApi.js')
+    vi.mocked(listTasks).mockClear()
+    vi.mocked(listTasks).mockResolvedValueOnce([
+      {
+        id: 'task-A1',
+        status: 'completed',
+        input: { prompt: 'do X', cwd: '/a', model: 'm' },
+        createdAt: 1000,
+        finishedAt: 2000,
+        eventCount: 5,
+        parentSessionId: 'sess-A',
+      } as any,
+      {
+        id: 'task-B1',
+        status: 'running',
+        input: { prompt: 'do Y', cwd: '/b', model: 'm' },
+        createdAt: 1500,
+        eventCount: 2,
+        parentSessionId: 'sess-B',
+      } as any,
+    ])
+
+    // spy on applyAgentTaskChanged to verify injection
+    const applySpy = vi.spyOn(useAgentStore.getState(), 'applyAgentTaskChanged')
+
+    // 切到 sess-A, store 空 → listTasks 触发 + apply
+    act(() => {
+      useAgentStore.setState({ sessionId: 'sess-A' })
+    })
+    const { result } = renderHook(() => useBackgroundTasks())
+    await act(async () => {
+      await new Promise((r) => setTimeout(r, 10))
+    })
+
+    expect(listTasks).toHaveBeenCalledTimes(1)
+    // 两条结果都注入; 各自的 sessionId 来自 task.parentSessionId
+    expect(applySpy).toHaveBeenCalledTimes(2)
+    const calls = applySpy.mock.calls.map((c) => c[0])
+    expect(calls).toContainEqual(
+      expect.objectContaining({ sessionId: 'sess-A', task: expect.objectContaining({ id: 'task-A1' }) }),
+    )
+    expect(calls).toContainEqual(
+      expect.objectContaining({ sessionId: 'sess-B', task: expect.objectContaining({ id: 'task-B1' }) }),
+    )
+
+    // 当前 sessionId=sess-A → storeTasks(sess-A) 有 task-A1; 渲染时应可见
+    expect(result.current.recentTasks.map((t) => t.taskId)).toContain('task-A1')
+    // task-B1 注入到 sess-B, 在 sess-A 视图里不出现
+    expect(result.current.runningTasks.map((t) => t.taskId)).not.toContain('task-B1')
   })
 })

@@ -79,3 +79,7 @@ export {
   resolveScratchpadDir,
   isScratchpadEnabled,
 } from '../systemPrompt/index.js'
+
+// State change bus (in-process event for zai server SSE bridge)
+export { stateChangeBus, resetStateChangeBusForTests } from './stateChangeBus.js'
+export type { StateChangeEventMap } from './stateChangeBus.js'

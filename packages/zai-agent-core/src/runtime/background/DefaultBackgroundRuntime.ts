@@ -16,6 +16,7 @@ import {
   getRetryDelay,
   retrySleep,
 } from './retryPolicy.js'
+import { stateChangeBus } from '../stateChangeBus.js'
 
 interface TaskRecord {
   task: BackgroundTask
@@ -72,6 +73,10 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
     } catch (err) {
       console.warn('[BackgroundRuntime] onTaskStateChange threw:', err)
     }
+    stateChangeBus.emit('agent_task.changed', {
+      sessionId: task.parentSessionId ?? null,
+      task,
+    })
   }
 
   async dispatch(input: DispatchInput): Promise<BackgroundTask> {

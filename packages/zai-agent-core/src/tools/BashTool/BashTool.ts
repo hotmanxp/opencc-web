@@ -56,6 +56,7 @@ import {
 import { BASH_TOOL_NAME } from './toolName.js'
 import { checkDestructiveCommand } from './destructiveCommandWarning.js'
 import { CwdStore } from '../../runtime/cwdStore.js'
+import { stateChangeBus } from '../../runtime/stateChangeBus.js'
 
 // tool_result block 的形状 (Anthropic SDK 复用类型) — 本地声明避免拉 @anthropic-ai/sdk
 type ToolResultBlockParam = {
@@ -391,6 +392,11 @@ async function runForeground(
           const oldCwd = CwdStore.get(sessionId)
           if (newCwd && newCwd !== oldCwd) {
             CwdStore.set(sessionId, newCwd)
+            stateChangeBus.emit('cwd.changed', {
+              sessionId,
+              cwd: newCwd,
+              updatedAt: Date.now(),
+            })
           }
         } catch {
           // tmpfile missing (cmd aborted before trailer ran) or permission error — keep old cwd

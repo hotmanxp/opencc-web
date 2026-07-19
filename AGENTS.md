@@ -72,6 +72,7 @@ web (useBackgroundTasks) ─POST /api/tasks→ DefaultBackgroundRuntime.dispatch
 - **job.\***:started(progress / done / failed,可带 `sessionId` 让前端按 session 过滤;`kind:'agent_task'` 带 `taskId`)
 - **prompt.ask**:`sessionId + toolUseId + questions[{question, header, options}]`
 - **system.\***:server.connected / server.error / toast / branch.changed
+- **state.\***:cwd.changed / bash_task.changed / v2_task.changed / agent_task.changed(2026-07-19 新增,SSE 统一状态推送)
 
 ## RuntimeEvent 翻译表(`routes/agent.ts` 内 `translateRuntimeEvents`)
 
@@ -98,6 +99,7 @@ web (useBackgroundTasks) ─POST /api/tasks→ DefaultBackgroundRuntime.dispatch
 - **V2 TaskList**:`v2TasksBySession` 与 TodoWrite 独立,server 持久化到 `~/.zai/tasks/<sid>.json`,前端通过 `/api/agent/sessions/:id/v2-tasks` 拉全量兜底
 - **runtime.error 路由**:带 toolUseId → `upsertToolCall` 写成 `tool_use:error`;不带 → push 一条进 messages 红色 Card
 - **任务自动清空**:`scheduleTaskListClearIfAllDone`,todos + v2 tasks 全部终态(completed / deleted)后 5s 自动从 store 移除
+- **StateEvent map**:`cwdBySession` / `bashTasksBySession` / `agentTasksBySession` / `v2TasksBySession`(已有)与 `todosBySession` 平行,4 个 map + 4 个 reducer 维护
 
 ## AskUserQuestion 端到端流
 
@@ -201,6 +203,7 @@ useAgentStore.applyCompactionEvent → 5s 自动消失的 toast
 - `translateRuntimeEvents` 没有针对错位/损坏 input 的回归测试
 - v2 transcript resume `tool_use` 顶层消息合并(`queryLoop.ts:140-185`)缺回归测试,易在改 schema 时回归 2013
 - abort / SSE 重连 / 模式切换乐观更新 revert / `AgentInputBox` 图片粘贴 + Esc 中断 路径无单元测试
+- SSE state push 走 StateChangeBus 桥接层,见 docs/superpowers/specs/2026-07-19-sse-state-push-design.md
 
 ### LLM 自切 cwd(`feat/cwd-tracking`)
 
@@ -209,9 +212,8 @@ zai 端实现的能力,把 opencc 上游 `bashProvider.ts` 的"shell trailer 跟
 - **持久化**:每个 session 维护自己的逻辑 cwd(`Map<sessionId, {cwd, updatedAt}>`),zai 多 session 共享一个 server 实例,所以**全局 cwd 存取要按 sessionId 作 key**
 - **跟踪机制**:BashTool 在每条 `sh -c` 末尾追加 `\npwd -P >| /tmp/zai-bash-<taskId>-cwd` trailer;子进程退出后 `readFileSync` 读出,与上次比较,**不同就更新 `CwdStore`**
 - **API 路径**:`GET /api/agent/sessions/:id/pwd` → `{ cwd } | 404`
-- **前端轮询**:`useSessionCwd(sessionId)` 5s 轮询 → `SessionCwdBridge` 把 cwd basename 写到 `useAppStore.instanceContext.cwdName` → `ConfigStatusBar` 展示
+- **前端轮询**:`useSessionCwd(sessionId)` SSE 推送 (cwd.changed) → `SessionCwdBridge` 把 cwd basename 写到 `useAppStore.instanceContext.cwdName` → `ConfigStatusBar` 展示
 - **已知薄弱点**:
-  - `useSessionCwd` 5s 轮询在大量 session(>50)时打爆 server:暂无 throttle。后续可换 SSE 广播 `cwd.changed` 事件。
   - CwdStore 仅内存:server 进程重启后所有 session cwd 归零(transcript 重跑可恢复,符合预期)。
   - 前端 cwd 轮询失败时静默保留旧值:用户看到陈旧 cwd 但无错误提示。
   - `pwd -P` 在某些 shell 上不支持 `>|` noclobber(罕见,POSIX 必支持)
