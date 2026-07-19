@@ -1,20 +1,15 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store/useAppStore.js'
 import { useAgentStore } from '../store/useAgentStore.js'
-import {
-  fetchTask,
-  listTasks,
-  type BackgroundTask,
-  type TaskStatus,
-} from '../lib/taskApi.js'
+import type { BackgroundTask, TaskStatus } from '../lib/taskApi.js'
 
 /**
  * 后台任务视图。
- * 监听 useAppStore.jobs 中 kind==='agent_task' 的 lifecycle 事件,
- * 维护本地任务缓存(包含完整 task 详情),并暴露 selectedId 给 dock/drawer 使用。
  *
- * 注意:useAppStore 的 job 3 秒后被删除,所以本地缓存延长保留窗口到 60 秒,
- * 让用户可以查看刚刚结束的任务。
+ * 100% SSE 推送 + jobs lifecycle event 驱动:
+ * - useAppStore.jobs (kind='agent_task') 提供 lifecycle (queued / progress / done / failed)
+ * - useAgentStore.agentTasksBySession (来自 SSE agent_task.changed) 提供完整 task 快照
+ * 两者合并维护本地任务缓存,暴露 selectedId 给 dock/drawer。
  *
  * Session 隔离:每个任务归属到派发它的主 session (= BackgroundTask.parentSessionId)。
  * 只有 useAgentStore.sessionId 与任务归属 sessionId 一致的任务出现在该
@@ -22,6 +17,9 @@ import {
  * 避免多个 session 的任务堆积在同一个状态栏里造成噪音。sessionId 缺失的
  * 任务 (resource_refresh / login / install 这类全局任务) 不受 session
  * 过滤影响,继续显示。
+ *
+ * 切到全新 session 时,cold start 期间返回空数组(SSE agent_task.changed
+ * 还没推过来)。这是有意的 trade-off — 不再用 listTasks / fetchTask REST。
  */
 export interface BackgroundTaskSummary {
   taskId: string
@@ -30,15 +28,13 @@ export interface BackgroundTaskSummary {
   createdAt: number
   finishedAt?: number
   error?: string
-  /** 后端完整 task 详情,延迟加载 */
   detail?: BackgroundTask
   /**
    * 该任务最近一次观察到的 sessionId (来自 useAppStore.job.sessionId 或
-   * listTasks / fetchTask 详情.parentSessionId). 持久化在任务条目上,
+   * SSE agent_task.changed.event.sessionId). 持久化在任务条目上,
    * 避免 useAppStore 在 job.done 3s 后清理 job + detail 还在路上的窗口
    * 内, session 过滤因 sessionOfTask 查不到而把当前 session 的任务也
-   * 隐藏 (回归: "切 session 后看到 A 的任务" 修复后, 同一个 session
-   * 完成的 task 在 3s 后会消失, 直到用户切 session 触发 listTasks).
+   * 隐藏。
    */
   lastKnownSessionId?: string
 }
@@ -55,26 +51,21 @@ export function useBackgroundTasks() {
   const storeTasks = useAgentStore((s) =>
     currentSessionId ? s.agentTasksBySession[currentSessionId] : undefined,
   )
-  // store 是否已有当前 sid 的 entries; 用于决定是否需要 listTasks fallback
-  // (避免冷启动之外每次切 session 都重发请求)。
-  const hasInitial = useAgentStore((s) =>
-    currentSessionId ? currentSessionId in s.agentTasksBySession : false,
-  )
   const [tasks, setTasks] = useState<Map<string, BackgroundTaskSummary>>(new Map())
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const detailCache = useRef<Map<string, BackgroundTask>>(new Map())
 
-  // 把 store 里 (SSE 推送 / listTasks fallback 注入) 的 agentTasksBySession
-  // 合并进本地 tasks Map。store 是全量快照, 每次 storeTasks 引用变化就覆盖
-  // 合并 — 与 jobs effect 互补 (jobs 是 useAppStore 那条独立通道)。
+  // 把 store 里 SSE agent_task.changed 推送的全量快照合并进本地 tasks Map。
+  // store 是 source of truth, 每次 storeTasks 引用变化就覆盖合并 — 与 jobs
+  // effect 互补 (jobs 是 useAppStore 那条独立 lifecycle 通道)。
   useEffect(() => {
     if (!storeTasks) return
     setTasks((prev) => {
       const next = new Map(prev)
       for (const summary of storeTasks) {
         const existing = next.get(summary.taskId)
-        // 已存在 → 保留 jobs effect 写入的 live status / detail (jobs 是
-        // 最即时源), 只补 store 字段 (prompt / detail / lastKnownSessionId);
+        // 已存在 → 保留 jobs effect 写入的 live status (jobs 是最即时源),
+        // 只补 store 字段 (prompt / detail / lastKnownSessionId);
         // 不存在 → 直接落入。
         if (existing) {
           next.set(summary.taskId, {
@@ -92,12 +83,10 @@ export function useBackgroundTasks() {
   }, [storeTasks])
 
   // 监听 jobs 中 agent_task 变化,同步到 tasks map。
-  // 注意:这里只收集所有 session 的 task,job.sessionId === task.detail
-  // 通过 job 输入时直接落下,从 listTasks / fetchTask 加载时通过
-  // detail.parentSessionId 落下。session 过滤在 render 时(runningTasks /
-  // recentTasks useMemo)按 currentSessionId 统一应用 — 这样切换 session
-  // 时旧 session 的任务在 memo 中自动剔除,不会出现 "切到 B 后 A 的任务
-  // 残留一段时间" 的时序漏洞。
+  // 注意:这里只收集所有 session 的 task,job.sessionId 通过 job 输入时
+  // 直接落下。session 过滤在 render 时(runningTasks / recentTasks useMemo)
+  // 按 currentSessionId 统一应用 — 这样切换 session 时旧 session 的任务
+  // 在 memo 中自动剔除,不会出现 "切到 B 后 A 的任务 残留一段时间" 的时序漏洞。
   useEffect(() => {
     setTasks((prev) => {
       const next = new Map(prev)
@@ -131,88 +120,15 @@ export function useBackgroundTasks() {
     })
   }, [jobs])
 
-  // 初次加载 fallback: 仅当 store 没当前 sid 的 entries 时 (冷启动 / 切到
-  // 一个全新 session / 服务重启) 才发一次 listTasks 请求, 把结果通过
-  // applyAgentTaskChanged 注入到 store; 后续完全靠 SSE 推送 + jobs 通道。
-  // 切到已有 entries 的 session → skip, 避免重复请求。
-  useEffect(() => {
-    if (!currentSessionId || hasInitial) return
-    let cancelled = false
-    void (async () => {
-      try {
-        const initial = await listTasks({ limit: 50 })
-        if (cancelled) return
-        for (const t of initial) {
-          detailCache.current.set(t.id, t)
-          useAgentStore.getState().applyAgentTaskChanged({
-            sessionId: t.parentSessionId ?? currentSessionId ?? '',
-            task: t,
-          })
-        }
-      } catch (err) {
-        console.warn('[useBackgroundTasks] initial load failed:', err)
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [currentSessionId, hasInitial])
-
-  // 当 summary 没 detail 时拉详情
-  const missingDetail = useMemo(() => {
-    const out: string[] = []
-    for (const [id, t] of tasks.entries()) {
-      if (!t.detail && !detailCache.current.has(id)) out.push(id)
-    }
-    return out
-  }, [tasks])
-
-  useEffect(() => {
-    if (missingDetail.length === 0) return
-    let cancelled = false
-    void (async () => {
-      for (const id of missingDetail) {
-        try {
-          const t = await fetchTask(id)
-          if (cancelled || !t) continue
-          detailCache.current.set(id, t)
-          setTasks((prev) => {
-            const next = new Map(prev)
-            const existing = next.get(id)
-            if (existing) {
-              const detailSessionId = typeof t.parentSessionId === 'string' ? t.parentSessionId : undefined
-              next.set(id, {
-                ...existing,
-                prompt: t.input.prompt,
-                status: t.status,
-                finishedAt: t.finishedAt,
-                error: t.error?.message,
-                detail: t,
-                lastKnownSessionId: detailSessionId ?? existing.lastKnownSessionId,
-              })
-            }
-            return next
-          })
-        } catch (err) {
-          console.warn('[useBackgroundTasks] fetch detail failed:', id, err)
-        }
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [missingDetail])
-
   /**
    * 判断一条任务是否归属当前 session。
-   * 三个数据来源的归属字段:
+   * 数据来源:
    * - useAppStore.job.* 事件流:job.sessionId (server 用 task.parentSessionId 填)
-   * - listTasks / fetchTask 详情:task.parentSessionId (顶层字段)
+   * - SSE agent_task.changed:event.sessionId
    * - 上一次观察到的归属:task.lastKnownSessionId (持久化在 entry 上, 兜底)
    *
-   * 优先级: live job > detail.parentSessionId > lastKnownSessionId. 前两
-   * 者是最新值, lastKnownSessionId 是兜底, 用于 job 已被 3s 清理 + detail
-   * 还在路上的窗口, 让"当前 session 完成的 task 不会突然消失".
+   * 优先级: live job > SSE > lastKnownSessionId. 前两者是最新值,
+   * lastKnownSessionId 是兜底, 用于 job 已被 3s 清理 + SSE 还在路上的窗口。
    *
    * 三者都查不到 (sessionId 是 null 或 undefined) → 视为全局任务,
    * 任何 session 都应可见. 这覆盖两种场景:
