@@ -121,6 +121,15 @@ export type LegacyTool<
 
   /** Opencc `Tool.maxResultSizeChars` — 超过此大小落盘。 */
   maxResultSizeChars?: number
+
+  /**
+   * Opencc `Tool.aliases` — 工具的别名列表(向后兼容重命名)。
+   * 对标 opencc 上游 `TaskOutputTool.aliases = ['AgentOutputTool', 'BashOutputTool']`
+   * 与 `TaskStopTool.aliases = ['KillShell']` 的别名机制。
+   * `legacyAdapter.wrapAsOpenccTool` 透传到 opencc Tool,`findToolByName`
+   * 按 primary name + aliases 命中。
+   */
+  aliases?: string[]
 }
 
 // Re-export runtime-side types that previously lived in this file. These

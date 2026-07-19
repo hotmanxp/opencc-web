@@ -21,6 +21,10 @@ export function wrapAsOpenccTool(legacy: LegacyTool): Tool {
   return {
     // Identity
     name: legacy.name,
+    // Forward legacy-tool aliases to the opencc Tool contract so
+    // `findToolByName` and `toolMatchesName` can resolve the renamed
+    // tool under its prior names (e.g. BashOutput → TaskOutput).
+    aliases: legacy.aliases,
     isMcp: false,
 
     inputSchema: legacy.inputSchema,

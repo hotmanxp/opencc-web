@@ -11,6 +11,12 @@ export const KILL_SHELL_TOOL_NAME = 'KillShell'
 
 export const TaskStopTool: LegacyTool<typeof TaskStopInputSchema, string> = {
   name: TASK_STOP_TOOL_NAME,
+  // 对标 opencc 上游 TaskStopTool.aliases:
+  //   aliases: ['KillShell']
+  // 允许 LLM(以及老 transcript)用 `KillShell` 名字调本工具,
+  // 通过 wrapAsOpenccTool → opencc Tool.aliases 走 findToolByName 命中。
+  // Legacy 参数 `shell_id` 在 schema.ts 的 zod transform 里归一到 `task_id`。
+  aliases: [KILL_SHELL_TOOL_NAME],
   description: renderTaskStopPrompt(),
   inputSchema: TaskStopInputSchema,
   isConcurrencySafe: () => false,

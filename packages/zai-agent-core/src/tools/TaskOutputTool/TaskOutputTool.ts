@@ -18,6 +18,12 @@ export const BASH_OUTPUT_TOOL_NAME = 'BashOutput'
  */
 export const TaskOutputTool: LegacyTool<typeof TaskOutputInputSchema, string> = {
   name: TASK_OUTPUT_TOOL_NAME,
+  // 对标 opencc 上游 TaskOutputTool.aliases:
+  //   aliases: ['AgentOutputTool', 'BashOutputTool']
+  // 允许 LLM(以及老 transcript)用 `BashOutput` / `AgentOutput` 名字调本工具,
+  // 通过 wrapAsOpenccTool → opencc Tool.aliases 走 findToolByName 命中。
+  // 旧参数 bash_id / agentId / wait_up_to 在 schema.ts 的 zod transform 里归一到 task_id / timeout。
+  aliases: [AGENT_OUTPUT_TOOL_NAME, BASH_OUTPUT_TOOL_NAME],
   description: [
     '读取后台 agent 任务的当前输出。',
     'task_id 是后台派发 Agent 返回的 shortId。',
