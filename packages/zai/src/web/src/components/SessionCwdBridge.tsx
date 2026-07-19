@@ -11,20 +11,33 @@ import { useSessionCwd } from '../hooks/useSessionCwd.js'
  * polling lifecycle (start/stop on sessionId change) is best owned by the
  * top-level page tree. This component renders nothing (returns null) and only
  * side-effects useAppStore.
+ *
+ * Why useAppStore.setState (not setInstanceContext):
+ * `setInstanceContext` is `(ctx) => set({ instanceContext: ctx })` — a
+ * full-replacement setter, NOT a Zustand-style updater. Passing a function
+ * (like `prev => ({ ...prev, cwdName })`) would assign the function itself as
+ * `instanceContext`, breaking every consumer that reads
+ * `instanceContext.cwdName` (Agent.tsx falls back to '~'). Use setState with a
+ * proper (state) => partial updater instead.
  */
 export function SessionCwdBridge() {
   const sessionId = useAgentStore(s => s.sessionId)
   const sessionCwd = useSessionCwd(sessionId)
-  const setInstanceContext = useAppStore(s => s.setInstanceContext)
   const fallbackCwdName = useAppStore(s => s.instanceContext?.cwdName ?? '')
 
   useEffect(() => {
-    if (!setInstanceContext) return  // guarded for tests / non-store consumers
     const name = sessionCwd
       ? sessionCwd.split('/').filter(Boolean).pop() || sessionCwd
       : fallbackCwdName
-    setInstanceContext(prev => prev ? { ...prev, cwdName: name } : prev)
-  }, [sessionCwd, fallbackCwdName, setInstanceContext])
+    // 兜底: instanceContext 未初始化(Layout 还没 fetch /api/system)时不要写
+    // 空 cwdName 把 store 里的 null 替换成半成品 — 等 Layout 落地后再覆盖。
+    useAppStore.setState((state) => {
+      if (!state.instanceContext) return state
+      // 已经一致就不触发 render / subscriber
+      if (state.instanceContext.cwdName === name) return state
+      return { instanceContext: { ...state.instanceContext, cwdName: name } }
+    })
+  }, [sessionCwd, fallbackCwdName])
 
   return null
 }
