@@ -198,9 +198,15 @@ export function useBackgroundTasks() {
    * 者是最新值, lastKnownSessionId 是兜底, 用于 job 已被 3s 清理 + detail
    * 还在路上的窗口, 让"当前 session 完成的 task 不会突然消失".
    *
-   * 三者都查不到 (极少见, e.g. AgentTool 没传 parentSessionId 且 detail
-   * 还没回来且 job 也被清了) → 不显示, 避免泄露到其他 session.
-   * 全局任务 (resource_refresh / login / install) 走 useAppStore.jobs
+   * 三者都查不到 (sessionId 是 null 或 undefined) → 视为全局任务,
+   * 任何 session 都应可见. 这覆盖两种场景:
+   *  (1) agent_task 派发时 metadata.parentSessionId 缺失 (老数据 / cli
+   *      dispatch / 调度器自己派) → server emit job.* sessionId=null
+   *  (2) 调度器自己派的全局子任务, 跟具体 session 解耦
+   * 修复 HRMSV3-ZN-WEBSITE#668 同根问题: 之前 return false 会把这类任务
+   * 藏起来, dock 看不见.
+   *
+   * 注: 全局任务 (resource_refresh / login / install) 走 useAppStore.jobs
    * 直接渲染, 不进这个 hook 的 agent_task 过滤, 不受影响.
    */
   const belongsToCurrentSession = (t: BackgroundTaskSummary): boolean => {
@@ -212,10 +218,12 @@ export function useBackgroundTasks() {
     const sessionFromDetail =
       typeof detailSession === 'string' ? detailSession : undefined
     const sessionOfTask = sessionFromJob ?? sessionFromDetail ?? t.lastKnownSessionId
-    if (sessionOfTask !== undefined) {
-      return currentSessionId !== null && sessionOfTask === currentSessionId
+    if (sessionOfTask === undefined) {
+      // 三个来源都没拿到 sessionId → 全局任务, 任何 session 都可见
+      return true
     }
-    return false
+    // 有明确归属 → 必须与当前 session 匹配
+    return currentSessionId !== null && sessionOfTask === currentSessionId
   }
 
   const runningTasks = useMemo(

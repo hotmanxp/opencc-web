@@ -156,6 +156,37 @@ describe('useBackgroundTasks session 隔离', () => {
     expect(result.current.recentTasks.map((t) => t.taskId)).not.toContain('task-A1')
   })
 
+  test('agent_task 全局 (无 parentSessionId, sessionId=null) 在任何 session 都应可见', () => {
+    // 现实场景: 后台派发一个 agent_task 但 metadata.parentSessionId 缺失
+    // (例如 cli dispatch / 老数据 / 调度器自己派), server emit 的
+    // job.started.sessionId === null. 此前 bug: belongsToCurrentSession 把
+    // sessionId 查不到的任务视为"不属于任何 session → 隐藏", 导致 dock
+    // 看不到这类全局 agent_task.
+    act(() => {
+      useAppStore.getState().applyJobEvent({
+        type: 'job.started',
+        eventId: 'e1', ts: 1,
+        jobId: 'task-global-1', kind: 'agent_task', taskId: 'task-global-1',
+        sessionId: null,
+      })
+    })
+    act(() => {
+      useAgentStore.setState({ sessionId: 'sess-A' })
+    })
+    const { result, rerender } = renderHook(() => useBackgroundTasks())
+    rerender()
+    // ★ 这里当前 fail — belongsToCurrentSession 误把 sessionId=null
+    // 的任务当"不属于任何 session" 隐藏了
+    expect(result.current.runningTasks.map((t) => t.taskId)).toContain('task-global-1')
+
+    // 切到另一个 session, 全局任务仍应可见
+    act(() => {
+      useAgentStore.setState({ sessionId: 'sess-B' })
+    })
+    rerender()
+    expect(result.current.runningTasks.map((t) => t.taskId)).toContain('task-global-1')
+  })
+
   test('listTasks 返回 detail 后,session 隔离正常生效', async () => {
     // 上一 case 的反面: listTasks 把 parentSessionId 加载回来后, 即使
     // liveJob 没了, 过滤仍然正确.

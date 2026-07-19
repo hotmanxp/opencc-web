@@ -87,7 +87,11 @@ export function initBackgroundRuntime(): BackgroundRuntime {
   })
 
   // dispatch 不在 lifecycle hook 内(同步返回),所以单独 emit job.started
-  backgroundRuntime = wrapWithJobStarted(inner, () => null)
+  // ★ 不传第二参, 使用默认 hook (t) => t.parentSessionId ?? null —— 把任务
+  // 实际归属的 sessionId 透传, 前端 useBackgroundTasks 据此按 session 切分.
+  // 修复 HRMSV3-ZN-WEBSITE#668 同根问题: 之前误传 () => null 导致所有
+  // job.started.sessionId === null, dock 看不见任务.
+  backgroundRuntime = wrapWithJobStarted(inner)
   // 注册到 zai-agent-core 的全局 registry,让 AgentTool(run_in_background: true)等可访问
   setBackgroundRuntime(backgroundRuntime)
   return backgroundRuntime
@@ -99,8 +103,12 @@ export function initBackgroundRuntime(): BackgroundRuntime {
  * sessionIdHook:可注入一个函数用于从 BackgroundTask 解析 sessionId(默认读
  * task.parentSessionId —— AgentTool 派发时由 metadata.parentSessionId 写入)。
  * 用 hook 而不是直接读 task.parentSessionId,是为了在测试里可注入 mock。
+ *
+ * ★ 测试可访问性: 必须 export, 否则 backgroundRuntime.test.ts 没法直接测
+ *   job.started.sessionId 的派生逻辑。Init 路径 (backgroundRuntime.ts:90)
+ *   仍然传默认 hook, 行为不变。
  */
-function wrapWithJobStarted(
+export function wrapWithJobStarted(
   inner: BackgroundRuntime,
   sessionIdHook: (task: BackgroundTask) => string | null = (t) => t.parentSessionId ?? null,
 ): BackgroundRuntime {

@@ -16,6 +16,14 @@ export type ServerEventInput = {
 // 哪些事件不受 sid 限制 (与具体 session 解耦, 所有 tab 都应收)
 // - session.*: 自身的生命周期通知 (sidebar 需要知道)
 // - system.* (server.connected / server.error / toast / branch.changed): 全局
+// - job.*: job 派发是 server-side 行为, 客户端 dock 要看得见。
+//   注意: job.* 仍然带 sessionId 字段, 客户端 useBackgroundTasks 收到后
+//   会按 session 切分 (详见 useBackgroundTasks.belongsToCurrentSession)。
+//   这里"全局"指的是不被 subscribeScoped 按 wantedSid 过滤掉 ——
+//   否则 sid=null 的 job.* (无 parentSessionId 的全局任务) 会被静默丢,
+//   dock 永远看不见资源刷新 / login / install 这类系统级 job。
+//   修复 HRMSV3-ZN-WEBSITE#668 同根问题 (job.* 之前被认为 sid-scoped,
+//   sessionId=null 的事件被静默丢弃).
 //
 // 显式穷举: 未来新增事件类型时, 默认会被认为"跟 session 绑定", 不会自动
 // 跨 sid 转发. 想跨 sid 的新类型必须在这里显式登记 — 这是 by-design, 防止
@@ -29,6 +37,10 @@ function isGlobalEvent(event: ServerEvent): boolean {
     case 'session.created':
     case 'session.deleted':
     case 'session.renamed':
+    case 'job.started':
+    case 'job.progress':
+    case 'job.done':
+    case 'job.failed':
       return true
     default:
       return false

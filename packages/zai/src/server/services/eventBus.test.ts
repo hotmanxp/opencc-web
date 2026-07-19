@@ -100,18 +100,21 @@ describe('ServerEventBus', () => {
     expect(got).toEqual(['runtime.delta', 'runtime.delta'])
   })
 
-  test('subscribeScoped 不收其它 sid 的事件', () => {
+  test('subscribeScoped 不收其它 sid 的 sid-scoped 事件 (runtime.* / prompt.ask)', () => {
     const bus = new ServerEventBus()
     const got: string[] = []
     bus.subscribeScoped('A', (e) => got.push(e.type))
+    // runtime.* / prompt.ask 仍按 sid 过滤 (不在 isGlobalEvent 白名单)
     bus.emit({ type: 'runtime.delta', sessionId: 'B', turnIndex: 0, delta: 'x' } as any)
     bus.emit({ type: 'runtime.tool_call', sessionId: 'B', turnIndex: 0, toolUseId: 't', toolName: 'n', input: {} } as any)
     bus.emit({ type: 'prompt.ask', sessionId: 'B', toolUseId: 't', questions: [] } as any)
+    // job.* 是全局事件 (job.started 加入 isGlobalEvent), 不受 sid 过滤,
+    // 所以即使是 sid=B 的 job, sid=A 的订阅者也会收到。
     bus.emit({ type: 'job.started', jobId: 'j', kind: 'agent_task', sessionId: 'B' } as any)
-    expect(got).toEqual([])
+    expect(got).toEqual(['job.started'])
   })
 
-  test('subscribeScoped 照收全局事件 (session.* / system.*)', () => {
+  test('subscribeScoped 照收全局事件 (session.* / system.* / job.*)', () => {
     const bus = new ServerEventBus()
     const got: string[] = []
     bus.subscribeScoped('A', (e) => got.push(e.type))
@@ -122,9 +125,18 @@ describe('ServerEventBus', () => {
     bus.emit({ type: 'toast', level: 'info', message: 'hi' } as any)
     bus.emit({ type: 'branch.changed', branch: 'main' } as any)
     bus.emit({ type: 'server.connected', sessionId: null } as any)
+    // 全局任务 (job.*) 在派发时 sessionId === null (无 parentSessionId 的
+    // resource_refresh / login / install / cli dispatch) 不应被订阅者过滤.
+    // 此前 bug: subscribeScoped 把 sessionId===null 的 job.* 当 sid 不匹配
+    // 静默丢弃, 导致 server.connected 之后那些 job.* 永远到不了前端.
+    bus.emit({ type: 'job.started', jobId: 'j-global', kind: 'install', sessionId: null } as any)
+    bus.emit({ type: 'job.progress', jobId: 'j-global', message: 'x', sessionId: null } as any)
+    bus.emit({ type: 'job.done', jobId: 'j-global', sessionId: null } as any)
+    bus.emit({ type: 'job.failed', jobId: 'j-global', error: 'x', sessionId: null } as any)
     expect(got).toEqual([
       'session.created', 'session.deleted', 'session.renamed',
       'server.error', 'toast', 'branch.changed', 'server.connected',
+      'job.started', 'job.progress', 'job.done', 'job.failed',
     ])
   })
 
