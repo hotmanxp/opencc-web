@@ -3,6 +3,7 @@ import { flushSync } from 'react-dom'
 import type { ServerEvent } from '../../../shared/events.js'
 import type { ModelEntry } from '../../../shared/settings.js'
 import type { PermissionMode } from '@zn-ai/zai-agent-core/runtime'
+import type { BashTaskInfo, BackgroundTask, TaskStatus } from '../lib/taskApi.js'
 
 // ========== URL <-> sessionId 双向同步 ==========
 // Agent 页面: ?sid=xxx 锁住当前活跃会话, 让用户能刷新/分享链接.
@@ -111,6 +112,31 @@ export type AskState = {
   annotations: Record<string, { notes?: string }>
 }
 
+// 后台 agent_task 任务的"summary 视图" (Task 10 — SSE state push).
+//
+// 形态与 hooks/useBackgroundTasks.ts 里的同名 export interface 完全一致 —
+// 那里是 useBackgroundTasks hook 内部用的 view-model. 暂时不能在
+// useAgentStore 直接 import (useBackgroundTasks 已经 import 了
+// useAgentStore, 会形成循环), 故在 store 这一侧 inline 一份同样的
+// 字段. Task 14 重构 useBackgroundTasks hook 时会把两边合一.
+interface BackgroundTaskSummary {
+  taskId: string
+  status: TaskStatus
+  prompt: string
+  createdAt: number
+  finishedAt?: number
+  error?: string
+  /** 后端完整 task 详情,延迟加载 */
+  detail?: BackgroundTask
+  /**
+   * 该任务最近一次观察到的 sessionId (来自 SSE agent_task.changed.event.sessionId
+   * 或 listTasks / fetchTask 详情.parentSessionId). 持久化在任务条目上,
+   * 避免 dock 在 job.done 3s 清理窗口内, session 过滤因 sessionOfTask 查不到
+   * 而把当前 session 的任务也隐藏.
+   */
+  lastKnownSessionId?: string
+}
+
 // 收到 server runtime.compacted 事件时 reducer 推入的 toast. expiresAt
 // (timestamp + 5000ms) 让 UI 用 setTimeout 自动回收, 不用 reducer 再起
 // 定时器. 注意: 不要复用 useAppStore 的 ToastInfo (message/ts 字段名),
@@ -160,6 +186,14 @@ interface AgentState {
   updateV2Task: (sessionId: string, task: V2TaskItem) => void
   deleteV2Task: (sessionId: string, taskId: string) => void
 
+  // SSE state.* events (Task 10) — 服务端 in-process StateChangeBus
+  // 经 stateBridge → eventBus → SSE 推到客户端的 4 类 state.* 事件的
+  // per-session 落地. 客户端不再轮询 (Task 12-14 会把 useSessionCwd /
+  // useBashBackgroundTasks / useBackgroundTasks 改成读这里).
+  cwdBySession: Record<string, string>
+  bashTasksBySession: Record<string, BashTaskInfo[]>
+  agentTasksBySession: Record<string, BackgroundTaskSummary[]>
+
   // 每次 sendMessage 递增的发送序号. 拼进 stream block key 作为"本轮命名空间",
   // 保证跨轮次的文本块 key 永不碰撞. 后端 turnIndex 恒为 0 (wrapWithZaiMeta 被
   // 逐事件调用导致其内部计数器每次归零), textSegmentRev 只在工具调用时 bump,
@@ -173,6 +207,24 @@ interface AgentState {
   applyRuntimeEvent: (event: ServerEvent) => void
   applySessionEvent: (event: ServerEvent) => void
   applyPromptAsk: (event: ServerEvent) => void
+
+  // SSE state.* event reducers (Task 10) — 由 useEventStream (Task 11) 在
+  // 收到 cwd.changed / bash_task.changed / v2_task.changed /
+  // agent_task.changed 时按 type dispatch. 入参虽然是 ServerEvent union 的
+  // 具体子类型, 但 reducer 内部对 payload 字段名做 lenient access (兼容
+  // server 端 zod schema 的可选/必填差异), 与 eventSource.ts 已有的
+  // applyRuntimeEvent pattern 一致.
+  applyCwdChanged: (event: { sessionId: string; cwd: string }) => void
+  applyBashTaskChanged: (event: { sessionId: string; task: BashTaskInfo }) => void
+  applyV2TaskChanged: (event: {
+    sessionId: string
+    task: V2TaskItem
+    action: 'upsert' | 'delete'
+  }) => void
+  applyAgentTaskChanged: (event: {
+    sessionId: string | null
+    task: BackgroundTask
+  }) => void
 
   // Compaction toast: 收到 server 推的 runtime.compacted 时, 往 toasts
   // 顶一条 5s 自动消失的信息 (UI 层订阅本字段做顶部提示). 与 useAppStore
@@ -398,6 +450,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   sendSeq: 0,
   todosBySession: {},
   v2TasksBySession: {},
+  // SSE state.* event 缓存 (Task 10): 每个 sessionId 一份, 默认空,
+  // 由 applyCwdChanged / applyBashTaskChanged / applyV2TaskChanged /
+  // applyAgentTaskChanged 4 个 reducer 写入. 切会话/清屏 时保留旧 sid
+  // 的条目, 与 todosBySession / v2TasksBySession 一致 — 用户切回 A 仍
+  // 能看到 A 的 bash 任务 / agent 任务历史.
+  cwdBySession: {},
+  bashTasksBySession: {},
+  agentTasksBySession: {},
   // Compaction toast 队列 (Task 14): 收到 server runtime.compacted 时由
   // applyCompactionEvent 推入. UI 端 (未来的 dedupe component) 用 expiresAt
   // (event.timestamp + 5000ms) 自动回收, 而不用 reducer 内部起 setTimeout.
@@ -1366,6 +1426,102 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       },
     }
   }),
+
+  // ── SSE state.* event reducers (Task 10) ───────────────────────────
+  // 由 useEventStream (Task 11) 在收到 state.* ServerEvent 时按 type
+  // dispatch. 入参虽然是 ServerEvent union 的具体子类型, 但 reducer
+  // 内部对 payload 字段名做 lenient access (兼容 server 端 zod schema
+  // 的可选/必填差异), 与 eventSource.ts 已有的 applyRuntimeEvent
+  // pattern 一致.
+
+  applyCwdChanged: (event) => {
+    set((s) => ({
+      cwdBySession: { ...s.cwdBySession, [event.sessionId]: event.cwd },
+    }))
+  },
+
+  applyBashTaskChanged: (event) => {
+    set((s) => {
+      const list = s.bashTasksBySession[event.sessionId] ?? []
+      let next: BashTaskInfo[]
+      // 终态 (completed / failed / killed) → 删掉旧的 running entry
+      // (同 taskId), 把终态条目 prepend 到列表顶部. 这样 UI 端
+      // TaskDock 立即显示"已完成"而不是"运行中 30 分钟".
+      // 注: BashTaskStatus 实际取值是 'running' / 'completed' /
+      // 'failed' / 'killed' (lib/taskApi.ts), 终态 ≠ 'running'.
+      if (event.task.status !== 'running') {
+        next = [
+          event.task,
+          ...list.filter((t) => t.taskId !== event.task.taskId),
+        ]
+      } else {
+        // running → 同一 taskId 的旧 entry 直接替换 (status delta);
+        // 新的 taskId prepend 到列表顶部.
+        const idx = list.findIndex((t) => t.taskId === event.task.taskId)
+        next =
+          idx >= 0
+            ? list.map((t) => (t.taskId === event.task.taskId ? event.task : t))
+            : [event.task, ...list]
+      }
+      return {
+        bashTasksBySession: { ...s.bashTasksBySession, [event.sessionId]: next },
+      }
+    })
+  },
+
+  applyV2TaskChanged: (event) => {
+    set((s) => {
+      const list = s.v2TasksBySession[event.sessionId] ?? []
+      // action='delete' → 按 task.id 过滤掉; action='upsert' →
+      // 已存在则替换, 不存在则 append. V2 task 与 BashTask 不同,
+      // 没有"终态替换运行中"的概念 — TaskList 是 CRUD 模型, status
+      // 在 v2_task.changed 里通过 upsert 携带新 status 来更新.
+      const next =
+        event.action === 'delete'
+          ? list.filter((t) => t.id !== event.task.id)
+          : (() => {
+              const idx = list.findIndex((t) => t.id === event.task.id)
+              if (idx >= 0) return list.map((t) => (t.id === event.task.id ? event.task : t))
+              return [...list, event.task]
+            })()
+      return {
+        v2TasksBySession: { ...s.v2TasksBySession, [event.sessionId]: next },
+      }
+    })
+  },
+
+  applyAgentTaskChanged: (event) => {
+    // agent_task.changed.sessionId 可能为 null: cli 派发 (非 agent_task)
+    // 或老数据没有 parentSessionId. 这种任务不归属任何 session, dock
+    // 不展示, 这里直接 no-op 落掉.
+    if (event.sessionId === null) return
+    const sid = event.sessionId
+    set((s) => {
+      const list = s.agentTasksBySession[sid] ?? []
+      // 把后端 BackgroundTask 转换成 dock 用的 BackgroundTaskSummary.
+      // prompt 走 event.task.input.prompt (cli 派发时由 LLM 在 input
+      // 里塞入, 与 BackgroundTask.input schema 一致).
+      const summary: BackgroundTaskSummary = {
+        taskId: event.task.id,
+        status: event.task.status,
+        prompt: event.task.input.prompt,
+        createdAt: event.task.createdAt,
+        finishedAt: event.task.finishedAt,
+        error: event.task.error?.message,
+        detail: event.task,
+        lastKnownSessionId: sid,
+      }
+      // 已存在 → 替换; 不存在 → prepend (新派发的 task 排在顶部).
+      const idx = list.findIndex((t) => t.taskId === event.task.id)
+      const next =
+        idx >= 0
+          ? list.map((t) => (t.taskId === event.task.id ? summary : t))
+          : [summary, ...list]
+      return {
+        agentTasksBySession: { ...s.agentTasksBySession, [sid]: next },
+      }
+    })
+  },
 }))
 
 /**
