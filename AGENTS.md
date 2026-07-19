@@ -43,7 +43,7 @@ web (useBackgroundTasks) ─POST /api/tasks→ DefaultBackgroundRuntime.dispatch
    → GET /api/tasks/:id/events (SSE, ev.seq 作 id:)
 ```
 
-`/agent/prompt` 不 abort(fire-and-forget),真正兜底是 **5 分钟 HARD_TIMEOUT**(`agent.ts:34`)。
+`/agent/prompt` 不 abort(fire-and-forget),真正兜底是 **2 小时 HARD_TIMEOUT**(`agent.ts:34`)。
 
 ## 关键文件
 
@@ -133,7 +133,7 @@ tool_use(AskUserQuestion) → toolExecution yield tool_use:ask_pending
 
 ## 已知薄弱点
 
-- `/agent/prompt` HARD_TIMEOUT 5min 没有自动化测试(常量 `agent.ts:34`)
+- `/agent/prompt` HARD_TIMEOUT 2h 没有自动化测试(常量 `agent.ts:34`)。AskUserQuestion 的等待不该被这条 timeout 掐死;若要让 ask 单独计时,应在 `askRegistry.register` 里接独立 setTimeout,而不是复用这里的 abortController。
 - `BackgroundRuntime` retry 策略(529 vs 5xx)缺单元测试;`SubagentNotifier` 父 session 续传链路缺测试(关键路径任何一环断就静默丢通知)
 - `translateRuntimeEvents` 没有针对错位/损坏 input 的回归测试
 - v2 transcript resume `tool_use` 顶层消息合并(`queryLoop.ts:140-185`)缺回归测试,易在改 schema 时回归 2013

@@ -31,7 +31,14 @@ router.use('/agent', commandsRouter)
 // 路径就是 /api/slash. 这里再挂一次会被 prefix 到 /api/agent/slash, 前端 Agent.tsx
 // fetch('/api/slash') 拿不到.
 
-const HARD_TIMEOUT_MS = 5 * 60 * 1000;
+// 兜底超时: 2 小时。原本 5min 在 AskUserQuestion 多次连续等待 + LLM 思考
+// 时间累积下太短,导致用户没答完就被 abortAgentSession 兜底 (transcript 写
+// `error: aborted`)。这条 timeout 是为了让 fire-and-forget 的 queryLoop
+// 不会永远挂着 — 但 AskUserQuestion 的等待不该被它掐死,真实可终止信号应该
+// 来自 user_abort / client_disconnect。如果将来要让 ask timeout 单独计时,
+// 应该在 askRegistry.register 里接一个独立的 setTimeout,而不是复用这里的
+// abortController。
+const HARD_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
 const PromptRequest = z
   .object({
@@ -235,7 +242,7 @@ export async function* translateRuntimeEvents(
         // AskUserQuestion: zai-agent-core yield 的 ask_pending 路径, 需要转成
         // 前端 spec 里的 prompt.ask 事件, QuestionCard 才有机会渲染. 不转就
         // 走 default 静默丢弃 → pendingAsk 永远 null → 用户没机会答 → registry
-        // 永不 resolve → 5min HARD_TIMEOUT 兜底发 tool_use:error.
+        // 永不 resolve → HARD_TIMEOUT (现 2h, 见上方常量) 兜底发 tool_use:error.
         const askId = ((ev.id as string) ??
           (ev.toolUseId as string) ??
           "") as string;
@@ -352,7 +359,7 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
     // res, client 关 body 是正常 lifecycle. abort 会让 queryEngine 144 行
     // 立即 yield runtime.aborted 提前 return, 永远走不到
     // appendAssistantMessage — LLM 回复写不进 transcript, 刷新页面看不到.
-    // 真正兜底是上面的 HARD_TIMEOUT (5min).
+    // 真正兜底是上面的 HARD_TIMEOUT (现 2h, 见顶部常量).
     // 但 askRegistry 仍要 abort — client 关掉页面时正在 ask 的 tool 必须释放.
     getAskRegistry().abortAll("client_disconnect");
   });
