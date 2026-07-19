@@ -4,15 +4,15 @@ export type SkillFrontmatter = {
   when_to_use?: string
   version?: string
   model?: string
-  'disable-model-invocation'?: boolean
-  'user-invocable'?: boolean
+  'disable-model-invocation'?: boolean | string
+  'user-invocable'?: boolean | string
   'allowed-tools'?: string[]
   'argument-hint'?: string
   arguments?: string | string[]
   context?: 'fork'
   agent?: string
   effort?: string | number
-  shell?: string
+  shell?: string | Record<string, unknown>
   hooks?: Record<string, unknown>
   paths?: string | string[]
   [k: string]: unknown
@@ -43,7 +43,7 @@ export type LoadedSkill = {
   /** Top-level body text (set for MCP-loaded skills; disk skills use markdown). */
   body?: string
   /** Skill source. Defaults to 'disk' for skills loaded from the filesystem. */
-  source?: 'disk' | 'mcp' | 'plugin'
+  source?: 'disk' | 'mcp' | 'plugin' | 'bundled'
   /**
    * Plugin discriminator — `'skill'` for SKILL.md files loaded from a plugin
    * directory, `'command'` for slash-command manifests. Omit for non-plugin

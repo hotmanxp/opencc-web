@@ -23,7 +23,9 @@ describe('buildSkillsSystemPrompt', () => {
       skill('pdf', { description: 'Read PDFs', when_to_use: 'On PDF input' }),
     ])
     expect(out).toContain('<name>pdf</name>')
-    expect(out).toContain('<description>Read PDFs</description>')
+    // when_to_use is concatenated into <description> (opencc-style "X - Y")
+    // so the listing reader sees one budget-fit string per skill.
+    expect(out).toContain('<description>Read PDFs - On PDF input</description>')
     expect(out).toContain('<when_to_use>On PDF input</when_to_use>')
   })
 

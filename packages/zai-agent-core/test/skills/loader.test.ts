@@ -2,11 +2,15 @@ import { describe, expect, test, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, writeFile, mkdir, symlink } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { loadSkillsFromDirs } from '../../src/runtime/skills/loader.js'
+import {
+  activateConditionalSkillsForPaths,
+  loadSkillsFromDirs,
+  loadSkillsFromDirsDetailed,
+} from '../../src/runtime/skills/loader.js'
 
 let tmp: string
 beforeEach(async () => { tmp = await mkdtemp(join(tmpdir(), 'zai-skill-')) })
-afterEach(async () => { await rm(tmp, { recursive: true, force: true }) })
+afterEach(async () => { tmp && await rm(tmp, { recursive: true, force: true }) })
 
 async function makeSkill(dir: string, relPath: string, fm: string, body = 'body') {
   const full = join(dir, relPath)
@@ -96,5 +100,215 @@ describe('loadSkillsFromDirs', () => {
     const skills = await loadSkillsFromDirs([tmp])
     expect(skills).toHaveLength(1)
     expect(skills[0]!.name).toBe('pdf')
+  })
+
+  // -------------------------------------------------------------------------
+  // New (opencc-faithful) capabilities
+  // -------------------------------------------------------------------------
+
+  test('user-invocable: false → 跳过该 skill', async () => {
+    await makeSkill(tmp, 'a', 'description: a', 'body')
+    await makeSkill(
+      tmp,
+      'b',
+      'description: b\nuser-invocable: false',
+      'body',
+    )
+    await makeSkill(
+      tmp,
+      'c',
+      'description: c\nuser-invocable: "false"',
+      'body',
+    )
+    const skills = await loadSkillsFromDirs([tmp])
+    expect(skills.map(s => s.name)).toEqual(['a'])
+  })
+
+  test('user-invocable: true (默认) → 加载', async () => {
+    await makeSkill(tmp, 'a', 'description: a\nuser-invocable: true', 'body')
+    const skills = await loadSkillsFromDirs([tmp])
+    expect(skills.map(s => s.name)).toEqual(['a'])
+  })
+
+  test('description 是 bool/number → coerce 成字符串', async () => {
+    // js-yaml with CORE_SCHEMA parses unquoted `description: true` as the
+    // boolean true. coerceDescriptionToString turns it back into a string so
+    // downstream code can rely on .description being a string.
+    await mkdir(join(tmp, 'foo'), { recursive: true })
+    await writeFile(
+      join(tmp, 'foo/SKILL.md'),
+      '---\ndescription: true\n---\nbody',
+    )
+    const skills = await loadSkillsFromDirs([tmp])
+    expect(skills).toHaveLength(1)
+    expect(skills[0]!.description).toBe('true')
+  })
+
+  test('shell frontmatter 解析成功', async () => {
+    await makeSkill(
+      tmp,
+      'shell-skill',
+      'description: uses bash\nshell: bash',
+    )
+    const skills = await loadSkillsFromDirs([tmp])
+    expect(skills).toHaveLength(1)
+    expect(skills[0]!.frontmatter?.shell).toBe('bash')
+  })
+
+  test('shell frontmatter 非法 → 跳过该字段', async () => {
+    await makeSkill(
+      tmp,
+      'bad-shell',
+      'description: bad shell\nshell: "rm -rf /"',
+    )
+    const skills = await loadSkillsFromDirs([tmp])
+    expect(skills).toHaveLength(1)
+    expect(skills[0]!.frontmatter?.shell).toBeUndefined()
+  })
+
+  test('isDirGitignored: true → 跳过该目录', async () => {
+    await makeSkill(tmp, 'visible', 'description: visible')
+    await makeSkill(tmp, 'hidden', 'description: hidden')
+    const skills = await loadSkillsFromDirs([tmp], {
+      isDirGitignored: async (dir) => dir.endsWith('/hidden'),
+    })
+    expect(skills.map(s => s.name)).toEqual(['visible'])
+  })
+
+  test('isDirGitignored: undefined → 不 gate (默认 allow)', async () => {
+    await makeSkill(tmp, 'a', 'description: a')
+    const skills = await loadSkillsFromDirs([tmp], {})
+    expect(skills).toHaveLength(1)
+  })
+})
+
+describe('loadSkillsFromDirsDetailed (conditional skills)', () => {
+  test('无 paths frontmatter → 进 unconditional', async () => {
+    await makeSkill(tmp, 'plain', 'description: plain')
+    const { unconditional, conditional } = await loadSkillsFromDirsDetailed([tmp])
+    expect(unconditional.map(s => s.name)).toEqual(['plain'])
+    expect(conditional).toEqual([])
+  })
+
+  test('有 paths frontmatter → 进 conditional', async () => {
+    await makeSkill(
+      tmp,
+      'ts-only',
+      'description: ts only\npaths:\n  - "**/*.ts"',
+    )
+    const { unconditional, conditional } = await loadSkillsFromDirsDetailed([tmp])
+    expect(unconditional).toEqual([])
+    expect(conditional).toHaveLength(1)
+    expect(conditional[0]!.name).toBe('ts-only')
+    expect(conditional[0]!.paths).toEqual(['**/*.ts'])
+  })
+
+  test('paths 仅含 ** → 不算 conditional', async () => {
+    await makeSkill(
+      tmp,
+      'catchall',
+      'description: catchall\npaths: "**"',
+    )
+    const { unconditional, conditional } = await loadSkillsFromDirsDetailed([tmp])
+    expect(unconditional).toHaveLength(1)
+    expect(conditional).toEqual([])
+  })
+
+  test('paths /<dir>/** 后缀被剥掉', async () => {
+    await makeSkill(
+      tmp,
+      'subdir',
+      'description: subdir\npaths:\n  - "src/**"',
+    )
+    const { conditional } = await loadSkillsFromDirsDetailed([tmp])
+    expect(conditional[0]!.paths).toEqual(['src'])
+  })
+
+  test('paths 是数组 → 每项独立规范化', async () => {
+    await makeSkill(
+      tmp,
+      'multi',
+      'description: multi\npaths:\n  - "src/**"\n  - "tests/**"',
+    )
+    const { conditional } = await loadSkillsFromDirsDetailed([tmp])
+    expect(conditional[0]!.paths).toEqual(['src', 'tests'])
+  })
+})
+
+describe('activateConditionalSkillsForPaths', () => {
+  async function loadAll() {
+    return loadSkillsFromDirsDetailed([tmp])
+  }
+
+  test('匹配 .ts 文件 → 激活 paths 含 **/*.ts 的 skill', async () => {
+    await makeSkill(
+      tmp,
+      'ts',
+      'description: ts\npaths:\n  - "**/*.ts"',
+    )
+    await makeSkill(
+      tmp,
+      'py',
+      'description: py\npaths:\n  - "**/*.py"',
+    )
+    const { conditional } = await loadAll()
+    const activated = activateConditionalSkillsForPaths(
+      conditional,
+      [join(tmp, 'foo/bar.ts')],
+      tmp,
+    )
+    expect(activated.map(s => s.name)).toEqual(['ts'])
+  })
+
+  test('路径在 cwd 之外 → 不激活（无法解析为 cwd 相对路径）', async () => {
+    await makeSkill(
+      tmp,
+      'ts',
+      'description: ts\npaths:\n  - "**/*.ts"',
+    )
+    const { conditional } = await loadAll()
+    const activated = activateConditionalSkillsForPaths(
+      conditional,
+      ['/elsewhere/foo.ts'],
+      tmp,
+    )
+    expect(activated).toEqual([])
+  })
+
+  test('空 paths 列表 → 空结果', async () => {
+    await makeSkill(
+      tmp,
+      'ts',
+      'description: ts\npaths:\n  - "**/*.ts"',
+    )
+    const { conditional } = await loadAll()
+    expect(
+      activateConditionalSkillsForPaths(conditional, [], tmp),
+    ).toEqual([])
+  })
+
+  test('空 conditional 列表 → 空结果', async () => {
+    expect(
+      activateConditionalSkillsForPaths(
+        [],
+        [join(tmp, 'foo.ts')],
+        tmp,
+      ),
+    ).toEqual([])
+  })
+
+  test('多 patterns OR-语义：任一匹配即激活', async () => {
+    await makeSkill(
+      tmp,
+      'multi',
+      'description: multi\npaths:\n  - "**/*.ts"\n  - "**/*.tsx"',
+    )
+    const { conditional } = await loadAll()
+    const activated = activateConditionalSkillsForPaths(
+      conditional,
+      [join(tmp, 'components/Foo.tsx')],
+      tmp,
+    )
+    expect(activated.map(s => s.name)).toEqual(['multi'])
   })
 })

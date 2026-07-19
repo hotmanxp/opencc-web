@@ -1,5 +1,12 @@
 import { describe, expect, test } from 'vitest'
-import { parseSkillFrontmatter } from '../../src/runtime/skills/frontmatter.js'
+import {
+  coerceDescriptionToString,
+  parseBooleanFrontmatter,
+  parseEffortValue,
+  parseShellFrontmatter,
+  parseSkillFrontmatter,
+  splitPathInFrontmatter,
+} from '../../src/runtime/skills/frontmatter.js'
 
 describe('parseSkillFrontmatter', () => {
   test('空文件 → 空 frontmatter + 全文 body', () => {
