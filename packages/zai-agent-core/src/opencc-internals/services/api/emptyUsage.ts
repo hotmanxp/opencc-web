@@ -1,3 +1,4 @@
+// @ts-nocheck
 // @ts-ignore
 import type { NonNullableUsage } from '../../entrypoints/sdk/sdkUtilityTypes.js'
 

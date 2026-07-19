@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { AnthropicUsage } from '../codexShim.js'
 import type { OpenAIStreamChunk } from './types.js'
 

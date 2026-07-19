@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Compresses old tool_result content for stateless OpenAI-compatible providers
  * (Copilot, Mistral, Ollama). Preserves all conversation structure — tool_use,

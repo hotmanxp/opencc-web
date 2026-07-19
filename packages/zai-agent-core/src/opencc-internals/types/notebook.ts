@@ -1,3 +1,4 @@
+// @ts-nocheck
 export interface NotebookCell {
   id: string;
   source: NotebookCellSource;

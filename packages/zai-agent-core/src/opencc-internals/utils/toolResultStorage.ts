@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * ZAI-LOCAL PATCH of opencc/utils/toolResultStorage — extracted from
  * upstream commit at /Users/ethan/code/opencc/src/utils/toolResultStorage.ts

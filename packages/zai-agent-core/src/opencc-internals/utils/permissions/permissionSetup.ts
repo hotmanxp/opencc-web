@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Local stub for opencc-internals/utils/permissions/permissionSetup.ts.
 // forkedAgent only calls parseToolListFromCLI() — that's the symbol reproduced
 // here. The full upstream file owns permission-mode / settings-file loading

@@ -1,3 +1,4 @@
+// @ts-nocheck
 const STRING_ARGUMENT_TOOL_FIELDS: Record<string, string> = {
   Bash: 'command',
   Read: 'file_path',

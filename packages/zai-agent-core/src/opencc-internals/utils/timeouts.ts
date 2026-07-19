@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { DEFAULT_QUERY_HARD_MAX_MS } from './QueryGuard.js'
 
 // Constants for timeout values

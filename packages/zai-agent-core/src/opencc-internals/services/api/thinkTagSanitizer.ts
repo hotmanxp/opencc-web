@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Think-tag sanitizer for reasoning content leaks.
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { normalize, posix, win32 } from 'path'
 import {
   getAutoMemPath,

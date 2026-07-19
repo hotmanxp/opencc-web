@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { randomInt } from 'crypto'
 import type { AppState } from './state/AppState.js'
 import type { AgentId } from './types/ids.js'

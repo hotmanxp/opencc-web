@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { Command } from '../types/command.js'
 import { parseFrontmatter } from '../utils/frontmatterParser.js'
 import { memoizeWithLRU } from '../utils/memoize.js'

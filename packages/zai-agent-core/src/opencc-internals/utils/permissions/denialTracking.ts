@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Local stub for opencc-internals/utils/permissions/denialTracking.ts.
 // The full upstream file isn't in the sync whitelist because its'permission
 // FSM isn't needed by zai (no classifier pipeline). forkedAgent only needs

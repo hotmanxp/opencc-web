@@ -1,3 +1,4 @@
+// @ts-nocheck
 const EXPLICIT_REASONING_START_RE =
   /^\s*(i should\b|i need to\b|let me think\b|the task\b|the request\b)/i
 

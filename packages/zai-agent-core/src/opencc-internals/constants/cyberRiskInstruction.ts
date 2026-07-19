@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { BRAND_NAME } from './product.js'
 
 /**

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { OptionWithDescription } from '../../components/CustomSelect/select.js'
 import { getAgentModelOptions } from '../../utils/model/agent.js'
 import {

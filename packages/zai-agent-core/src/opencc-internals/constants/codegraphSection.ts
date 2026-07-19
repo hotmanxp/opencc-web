@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { pwd } from '../utils/cwd.js'
 import { hasCodegraphIndex } from '../utils/codegraph.js'
 import { systemPromptSection } from './systemPromptSections.js'

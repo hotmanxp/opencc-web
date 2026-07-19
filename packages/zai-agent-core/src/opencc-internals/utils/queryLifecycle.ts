@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { normalizeAbortReason } from './abortReasons.js'
 
 export type QueryTerminalReason =

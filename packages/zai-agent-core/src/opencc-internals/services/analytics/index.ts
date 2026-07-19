@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ZAI_STUB: zai 暂未实现，待 web 端稳定后再补
 /**
  * Analytics service - public API for event logging

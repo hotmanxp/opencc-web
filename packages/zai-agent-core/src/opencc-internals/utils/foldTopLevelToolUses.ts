@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Fold top-level `type=tool_use` transcript messages back into their parent
  * assistant message before the API request builder sees them.

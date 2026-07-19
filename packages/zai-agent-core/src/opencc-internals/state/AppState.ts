@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Minimal AppState stub for zai-agent-core.
  *

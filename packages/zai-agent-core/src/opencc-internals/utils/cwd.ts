@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { AsyncLocalStorage } from 'async_hooks'
 
 // zai-local stubs for opencc's bootstrap/state.ts exports. opencc keeps

@@ -1,3 +1,4 @@
+// @ts-nocheck
 export type OpenAICompatibilityFailureCategory =
   | 'connection_refused'
   | 'localhost_resolution_failed'

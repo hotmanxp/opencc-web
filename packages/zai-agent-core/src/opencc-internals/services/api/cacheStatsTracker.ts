@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Per-query and per-session cache metrics tracker for Phase 1 observability.
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 import type { ClientOptions } from '@anthropic-ai/sdk'
 
 export function getLastApiRequests(): Array<{

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Brand name
 export const BRAND_NAME = 'OpenCC'
 

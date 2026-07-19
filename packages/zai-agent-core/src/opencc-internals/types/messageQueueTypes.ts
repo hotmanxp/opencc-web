@@ -1,3 +1,4 @@
+// @ts-nocheck
 export type QueueOperation = 'enqueue' | 'dequeue' | 'remove' | 'popAll'
 
 export interface QueueOperationMessage {

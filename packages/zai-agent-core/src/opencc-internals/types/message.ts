@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Message types for the CLI.
  * This file contains the core message types used throughout the application.

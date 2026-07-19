@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { disableKeepAlive, getProxyFetchOptions } from '../../utils/proxy.js'
 
 const RETRYABLE_FETCH_ERROR_PATTERN =

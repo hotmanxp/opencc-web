@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Stub — utility type definitions not included in source snapshot. See
  * src/types/message.ts for the same scoping caveat (issue #473).

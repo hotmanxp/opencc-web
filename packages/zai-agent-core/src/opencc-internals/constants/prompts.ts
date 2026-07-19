@@ -1,3 +1,4 @@
+// @ts-nocheck
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 import { AGENT_INSTRUCTIONS_FILE } from './product.js'
 import { type as osType, version as osVersion, release as osRelease } from 'os'

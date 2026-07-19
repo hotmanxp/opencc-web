@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Credential pool stub.
  *

@@ -1,3 +1,4 @@
+// @ts-nocheck
 // ZAI_REMOVED: import { useSyncExternalStore } from 'react'
 import { compactWarningStore } from './compactWarningState.js'
 

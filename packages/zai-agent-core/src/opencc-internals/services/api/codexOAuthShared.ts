@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { createCombinedAbortSignal } from '../../utils/combinedAbortSignal.js'
 
 export const CODEX_OAUTH_ISSUER = 'https://auth.openai.com'

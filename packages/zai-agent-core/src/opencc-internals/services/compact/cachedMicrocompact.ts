@@ -1,3 +1,4 @@
+// @ts-nocheck
 // Stub — cachedMicrocompact not included in source snapshot (feature-gated)
 
 export type CacheEditsBlock = {

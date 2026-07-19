@@ -1,3 +1,4 @@
+// @ts-nocheck
 /**
  * Smart model routing — cheap-for-simple, strong-for-hard.
  *

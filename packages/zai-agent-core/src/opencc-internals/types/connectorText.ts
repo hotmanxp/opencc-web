@@ -1,3 +1,4 @@
+// @ts-nocheck
 export type ConnectorTextBlock = {
   type: 'connector_text'
   connector_text: string

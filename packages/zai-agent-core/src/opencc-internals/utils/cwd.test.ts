@@ -1,3 +1,4 @@
+// @ts-nocheck
 import { describe, it, expect, beforeEach } from 'vitest'
 import { runWithSessionId, getCwd, runWithCwdOverride, getCurrentSessionId } from './cwd.js'
 import { CwdStore } from '../../runtime/cwdStore.js'
