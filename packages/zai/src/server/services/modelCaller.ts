@@ -169,6 +169,25 @@ export function createAnthropicModelCaller(): ModelCaller {
           : (m.content as Array<{ type: string; text?: string; tool_use_id?: string; content?: string }>),
     })) as Anthropic.Messages.MessageParam[]
 
+    // Always-on request metadata log. minimax 代理在新 session 也复现 413 时,
+    // 这是定位 minimax 拒绝原因的唯一现场 — 哪个字段(shape/size)触发 413。
+    // body 完整 dump 太重, 只记 metadata; 配合 ZAI_DEBUG=1 走 error 段补 dump headers。
+    console.error('[zai.modelCaller] → request', JSON.stringify({
+      model: resolvedModel,
+      max_tokens: 8192,
+      thinking: { type: 'enabled', budget_tokens: 4096 },
+      systemPromptKind:
+        typeof systemPrompt === 'string'
+          ? `string(${systemPrompt.length}B)`
+          : Array.isArray(systemPrompt) && systemPrompt.every((s) => typeof s === 'string')
+            ? `string[${systemPrompt.length}](${(systemPrompt as string[]).join('').length}B)`
+            : `blocks[${(systemPrompt as unknown[]).length}]`,
+      messageCount: sdkMessages.length,
+      toolCount: tools.length,
+      toolNames: tools.map((t) => t.name),
+      anthropicBeta: 'anthropic-tot-control,interleaved-thinking-2025-05-14',
+    }))
+
     // Use the streaming API and yield each event as it arrives from upstream.
     // The SDK returns RawMessageStreamEvent objects (snake_case) which already
     // match the ModelCaller contract, so we just pass them through.
@@ -180,27 +199,26 @@ export function createAnthropicModelCaller(): ModelCaller {
     // The interleaved-thinking beta header is set globally on the client
     // via defaultHeaders above so thinking survives tool_use → tool_result
     // rounds instead of being dropped on the first tool call.
-    const stream = await client.messages.create(
-      {
-        model: resolvedModel,
-        max_tokens: 8192,
-        thinking: { type: 'enabled', budget_tokens: 4096 },
-        system: [{ type: 'text', text: sysPromptStr }],
-        messages: sdkMessages,
-        tools: tools.length > 0
-          ? (tools.map((t) => ({
-              name: t.name,
-              description: t.description ?? '',
-              input_schema: buildAnthropicInputSchema(t.inputSchema),
-            })) as Anthropic.Messages.ToolUnion[])
-          : undefined,
-        stream: true,
-      },
-      { signal },
-    )
-
+    let eventCount = 0
     try {
-      let eventCount = 0
+      const stream = await client.messages.create(
+        {
+          model: resolvedModel,
+          max_tokens: 8192,
+          thinking: { type: 'enabled', budget_tokens: 4096 },
+          system: [{ type: 'text', text: sysPromptStr }],
+          messages: sdkMessages,
+          tools: tools.length > 0
+            ? (tools.map((t) => ({
+                name: t.name,
+                description: t.description ?? '',
+                input_schema: buildAnthropicInputSchema(t.inputSchema),
+              })) as Anthropic.Messages.ToolUnion[])
+            : undefined,
+          stream: true,
+        },
+        { signal },
+      )
       for await (const event of stream) {
         eventCount++
         if (process.env.ZAI_DEBUG === '1' && (eventCount <= 3 || event.type === 'message_stop')) {
@@ -223,19 +241,33 @@ export function createAnthropicModelCaller(): ModelCaller {
         console.error('[zai.modelCaller] stream done normally', { eventCount, model: resolvedModel })
       }
     } catch (err) {
-      // 观测点: 之前 stream 中断的真实原因(SDK 抛错)完全没落 server 日志,
-      // 中断时只能看到前端 runtime.error event, 控制台一片寂静.
-      // 加上后可区分 max_tokens / network / abort / 5xx 四类异常.
-      if (process.env.ZAI_DEBUG === '1') {
-        const e = err as any
-        console.error('[zai.modelCaller] stream aborted', {
-          model: resolvedModel,
-          code: e?.code ?? e?.error?.type,
-          status: e?.status,
-          message: (err as Error).message,
-          stack: (err as Error).stack?.split('\n').slice(0, 5).join('\n'),
-        })
+      // Always-on error log. 区分 create 阶段 (eventCount === 0) vs 流阶段。
+      // minimax 413 / 529 / network 全在这里出；之前 ZAI_DEBUG 没开时静默丢。
+      // eventCount === 0 → SDK 在 create 阶段就抛 (典型: 413/401/529 在 HTTP 响应)。
+      // eventCount > 0  → 流中途断 (典型: keep-alive socket / partial 5xx)。
+      const e = err as {
+        status?: number
+        requestID?: string | null
+        code?: string
+        name?: string
+        headers?: Headers
       }
+      console.error('[zai.modelCaller] ← error', JSON.stringify({
+        model: resolvedModel,
+        stage: eventCount === 0 ? 'create' : 'stream',
+        eventCount,
+        status: e?.status,
+        requestID: e?.requestID,
+        name: e?.name,
+        message: (err as Error).message,
+        ...(process.env.ZAI_DEBUG === '1' && {
+          headers:
+            e?.headers && typeof (e.headers as Headers).entries === 'function'
+              ? Object.fromEntries((e.headers as Headers).entries())
+              : undefined,
+          stack: (err as Error).stack?.split('\n').slice(0, 5).join('\n'),
+        }),
+      }))
       throw err
     }
   })

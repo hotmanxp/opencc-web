@@ -42,14 +42,6 @@ describe('loadMemoryForPrompt', () => {
     expect(local).toBeDefined()
   })
 
-  test('loads .claude/rules/*.md', async () => {
-    await mkdir(join(tmpDir, '.claude', 'rules'), { recursive: true })
-    await writeFile(join(tmpDir, '.claude', 'rules', 'build.md'), '# Build rule', 'utf-8')
-    const files = await loadMemoryForPrompt(tmpDir)
-    const rule = files.find((f) => f.path.includes('.claude/rules/build.md') && f.type === 'Rule')
-    expect(rule).toBeDefined()
-  })
-
   test('respects @include directive', async () => {
     await mkdir(join(tmpDir, 'extra'), { recursive: true })
     await writeFile(join(tmpDir, 'extra', 'extra.md'), '# Extra content', 'utf-8')
@@ -93,52 +85,6 @@ describe('loadMemoryForPrompt', () => {
     const aMatches = root?.content.match(/# A/g) ?? []
     expect(aMatches.length).toBe(1)
     // No infinite loop: the function returns within finite time.
-  })
-
-  test('frontmatter strip: rule with YAML frontmatter exposes only body', async () => {
-    await mkdir(join(tmpDir, '.claude', 'rules'), { recursive: true })
-    // The rule has `paths: src/**` so we also need a matching src/ dir
-    // to keep the rule loaded (test is about strip, not gate enforcement).
-    await mkdir(join(tmpDir, 'src'), { recursive: true })
-    await writeFile(
-      join(tmpDir, '.claude', 'rules', 'fm.md'),
-      '---\npaths: src/**\n---\n# Body',
-      'utf-8',
-    )
-    const files = await loadMemoryForPrompt(tmpDir)
-    const fm = files.find((f) => f.path.endsWith('fm.md') && f.type === 'Rule')
-    expect(fm).toBeDefined()
-    expect(fm?.content).toContain('Body')
-    // Frontmatter must be stripped — no `paths:` line leaks into the prompt
-    expect(fm?.content).not.toContain('paths:')
-    expect(fm?.content).not.toMatch(/^---/)
-  })
-
-  test('paths: frontmatter includes rule when matching dir exists under cwd', async () => {
-    await mkdir(join(tmpDir, '.claude', 'rules'), { recursive: true })
-    await mkdir(join(tmpDir, 'src'), { recursive: true })
-    await writeFile(
-      join(tmpDir, '.claude', 'rules', 'narrow.md'),
-      '---\npaths: src/**\n---\n# narrow',
-      'utf-8',
-    )
-    const files = await loadMemoryForPrompt(tmpDir)
-    const narrow = files.find((f) => f.path.endsWith('narrow.md'))
-    expect(narrow).toBeDefined()
-    expect(narrow?.content).toContain('narrow')
-  })
-
-  test('paths: frontmatter excludes rule when no matching dir under cwd', async () => {
-    await mkdir(join(tmpDir, '.claude', 'rules'), { recursive: true })
-    // No `src/` directory exists; `paths: src/**` should filter this rule out.
-    await writeFile(
-      join(tmpDir, '.claude', 'rules', 'narrow.md'),
-      '---\npaths: src/**\n---\n# narrow',
-      'utf-8',
-    )
-    const files = await loadMemoryForPrompt(tmpDir)
-    const narrow = files.find((f) => f.path.endsWith('narrow.md'))
-    expect(narrow).toBeUndefined()
   })
 
   test('top-level files can each include the same path without dropping it', async () => {
