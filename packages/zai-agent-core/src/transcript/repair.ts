@@ -5,6 +5,7 @@ export type TranscriptRepairReport = {
   repaired: boolean
   repairedToolUseIds: string[]
   synthesizedToolUseIds: string[]
+  synthesizedOrphanToolUseIds: string[]
   droppedMessageUuids: string[]
 }
 
@@ -142,7 +143,7 @@ export function repairTranscriptToolPairs(
   if (hasOrphanToolUse) {
     return {
       messages: original,
-      report: { repaired: false, repairedToolUseIds: [], synthesizedToolUseIds: [], droppedMessageUuids: [] },
+      report: { repaired: false, repairedToolUseIds: [], synthesizedToolUseIds: [], synthesizedOrphanToolUseIds: [], droppedMessageUuids: [] },
     }
   }
 
@@ -236,7 +237,7 @@ export function repairTranscriptToolPairs(
   if (!validProtocol(canonical)) {
     return {
       messages: original,
-      report: { repaired: false, repairedToolUseIds: [], synthesizedToolUseIds: [], droppedMessageUuids: [] },
+      report: { repaired: false, repairedToolUseIds: [], synthesizedToolUseIds: [], synthesizedOrphanToolUseIds: [], droppedMessageUuids: [] },
     }
   }
 
