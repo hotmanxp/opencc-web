@@ -14,7 +14,6 @@ import {
   cancelTask,
   killBashTask,
   subscribeTaskEvents,
-  type BackgroundTask,
   type BashTaskInfo,
   type SseFrame,
 } from '../lib/taskApi.js'
@@ -29,7 +28,7 @@ interface ToolCallEntry {
 }
 
 interface StreamedEvent {
-  seq: number
+  seq: string | number
   type: string
   ts: number
   text?: string
@@ -176,9 +175,6 @@ export function BashTaskView({
     setKilling(true)
     try {
       await killBashTask(task.taskId)
-      // 刷新详情
-      const updated = await fetchBashTask(task.taskId)
-      if (updated) onTaskChange?.(updated)
     } catch (err) {
       console.warn('[BashTaskView] kill failed:', err)
     } finally {
@@ -569,28 +565,7 @@ export function TaskDrawer({
       eventId?: string
       data?: StreamedEvent['data']
     }
-    // ★ 关键修复 (HRMSV3-ZN-WEBSITE#668):解开 server 端的 SSE 双层包裹。
-    // routes/tasks.ts 的 evToWire 把 NDJSON 行的整个对象(含 type/data 等
-    // metadata)放进了 JSON payload,导致 wire 是 wrapper {seq,type,eventId,data: <payload>}。
-    // buildTimeline 之前在 wrapper 上找 toolUseId / delta.text 等 → 全部 undefined,
-    // tool_use:start 直接被 `if (!toolUseId) break` 静默跳过,前端就只剩 system 类的
-    // runtime.done 卡片,看起来"事件数有,但工具调用不显示"。
-    //
-    // task.ended 走的是另外的字段(status/resultText 直接在 wrapper 上),
-    // 不需要再下钻到 .data,保留原形态。
-    if (frame.event === 'task.ended') {
-      setDetail((prev) =>
-        prev
-          ? {
-              ...prev,
-              status: (wireData as { status?: string }).status as BackgroundTask['status'] ?? prev.status,
-              resultText: (wireData as { resultText?: string }).resultText ?? prev.resultText,
-              finishedAt: Date.now(),
-            }
-          : prev,
-      )
-      return
-    }
+    // 普通 TaskEvent 的业务字段位于 data；task.ended 哨兵字段位于顶层。
     const innerPayload =
       wireData && typeof wireData === 'object' && 'data' in wireData && wireData.data && typeof wireData.data === 'object'
         ? (wireData.data as StreamedEvent['data'])
@@ -677,7 +652,7 @@ export function TaskDrawer({
         </div>
       )}
       {bashTask && (
-        <BashTaskView task={bashTask} onTaskChange={setBashTask} />
+        <BashTaskView task={bashTask} />
       )}
       {detail && !isBashTask && (
         <>

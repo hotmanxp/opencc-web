@@ -205,7 +205,7 @@ const markdownComponents = {
   ),
 };
 
-const MarkdownText = React.memo(function MarkdownText({ text }: { text: string }) {
+export const MarkdownText = React.memo(function MarkdownText({ text }: { text: string }) {
   return (
     <div
       style={{
@@ -230,7 +230,7 @@ const MarkdownText = React.memo(function MarkdownText({ text }: { text: string }
 // 展开态: 主题紫半透明叠加在深色页面背景上 + 紫罗兰左边条 + 浅色斜体等宽字体,
 // 与正式对话 Card 风格脱钩. 用 rgba 透明度而非纯浅紫, 是因为页面背景是深色,
 // 原 #f9f0ff 在深背景上跳眼; 改成主题紫 14% 透明度既保留紫色调又柔和融入暗背景.
-const StreamingMarkdown = React.memo(function StreamingMarkdown({ text }: { text: string }) {
+export const StreamingMarkdown = React.memo(function StreamingMarkdown({ text }: { text: string }) {
   const { complete, tail } = useMemo(
     () => splitMarkdownOnIncomplete(text),
     [text],
@@ -275,7 +275,7 @@ const THINKING_PREVIEW_MAX = 80;
 // 这样历史回放的 ThinkingBlock (streaming=undefined) 不会跑动画。
 let thinkGlowRefcount = 0;
 
-const ThinkingBlock = React.memo(function ThinkingBlock({
+export const ThinkingBlock = React.memo(function ThinkingBlock({
   text,
   streaming,
 }: {

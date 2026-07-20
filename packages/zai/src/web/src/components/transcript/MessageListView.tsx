@@ -65,11 +65,15 @@ export function MessageListView({ messages, streaming }: Props) {
           )
         }
         if (node.kind === 'thinking') {
-          // Thinking in collapsed view: full render via CollapsedMessageBubble (no clamp).
+          // Thinking in collapsed view: 与 expanded 走同一个 MessageBubble 渲染分支,
+          // 让 ThinkingBlock (含 pill + 折叠 + 预览) 在两种视图下完全一致.
+          // 原因: 早期 CollapsedMessageBubble 自渲染 thinking 文本, 用户反馈"思考模块不见了";
+          // 根因是旧分支只匹配 type==='assistant', 而真正的思考消息 type 是 'assistant.thinking'.
           return (
-            <CollapsedMessageBubble
+            <MessageBubble
               key={`think-${node.index}-${i}`}
-              message={node.message}
+              msg={node.message}
+              streaming={streaming && node.index === messages.length - 1}
             />
           )
         }
@@ -88,7 +92,13 @@ export function MessageListView({ messages, streaming }: Props) {
           <div key={`txt-${node.startIndex}-${node.endIndex}-${i}`}>
             {node.messages.map((m, mi) => {
               const evtId = ((m as any).eventId as string) ?? `txt-${node.startIndex}-${mi}`
-              return <CollapsedMessageBubble key={evtId} message={m} />
+              return (
+                <CollapsedMessageBubble
+                  key={evtId}
+                  message={m}
+                  streaming={streaming && node.endIndex === messages.length - 1}
+                />
+              )
             })}
           </div>
         )

@@ -1,7 +1,15 @@
 // @vitest-environment happy-dom
-import { fireEvent, render } from '@testing-library/react'
-import { describe, expect, test } from 'vitest'
-import { buildTimeline, formatToolCallLine, formatToolInput, MarkdownText, PromptBlock } from './TaskDrawer.js'
+import { fireEvent, render, waitFor } from '@testing-library/react'
+import { afterEach, describe, expect, test, vi } from 'vitest'
+import { BashTaskView, buildTimeline, formatToolCallLine, formatToolInput, MarkdownText, PromptBlock, TaskDrawer } from './TaskDrawer.js'
+import { useAgentStore } from '../store/useAgentStore.js'
+
+afterEach(() => {
+  useAgentStore.setState({
+    agentTasksBySession: {},
+    bashTasksBySession: {},
+  })
+})
 
 describe('formatToolInput', () => {
   test('Read 使用 @ 前缀显示文件路径', () => {
@@ -171,5 +179,108 @@ describe('PromptBlock', () => {
     fireEvent.click(toggle) // 收起
     expect(container.textContent).toContain('展开')
     expect(container.textContent).not.toContain('收起')
+  })
+})
+
+describe('BashTaskView', () => {
+  test('终止请求结束后恢复按钮且不重复拉取详情', async () => {
+    const fetchMock = vi.fn(async () => ({
+      ok: true,
+      json: async () => ({ ok: true }),
+    }))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal('fetch', fetchMock)
+
+    try {
+      const { getByRole } = render(
+        <BashTaskView
+          task={{
+            taskId: 'bash-1',
+            sessionId: 'session-1',
+            command: 'sleep 10',
+            description: 'Sleep',
+            startedAt: Date.now(),
+            status: 'running',
+            stdout: '',
+            stderr: '',
+          }}
+        />,
+      )
+
+      const killButton = getByRole('button', { name: /终\s*止/ })
+      fireEvent.click(killButton)
+      expect(killButton.classList.contains('ant-btn-loading')).toBe(true)
+      await waitFor(() => expect(killButton.classList.contains('ant-btn-loading')).toBe(false))
+
+      expect(fetchMock).toHaveBeenCalledTimes(1)
+      expect(fetchMock).toHaveBeenCalledWith('/api/bash-tasks/bash-1/kill', { method: 'POST' })
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+      warnSpy.mockRestore()
+    }
+  })
+})
+
+describe('TaskDrawer', () => {
+  test('从 SSE store 渲染 Bash 任务详情时不依赖已删除的本地 setter', () => {
+    useAgentStore.setState({
+      agentTasksBySession: {},
+      bashTasksBySession: {
+        'session-1': [
+          {
+            taskId: 'bash-1',
+            sessionId: 'session-1',
+            command: 'pwd',
+            description: 'Print working directory',
+            startedAt: Date.now(),
+            status: 'running',
+            stdout: '',
+            stderr: '',
+          },
+        ],
+      },
+    })
+
+    const { getByText } = render(<TaskDrawer taskId="bash-1" onClose={() => {}} />)
+    expect(getByText('pwd')).toBeTruthy()
+  })
+
+  test('收到 task.ended 时追加时间线且不调用已删除的本地 setter', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      'id: 1\nevent: task.ended\ndata: {"status":"completed","resultText":"done"}\n\n',
+      { status: 200, headers: { 'Content-Type': 'text/event-stream' } },
+    ))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal('fetch', fetchMock)
+    useAgentStore.setState({
+      bashTasksBySession: {},
+      agentTasksBySession: {
+        'session-1': [
+          {
+            taskId: 'task-1',
+            status: 'running',
+            prompt: 'Test task',
+            detail: {
+              id: 'task-1',
+              status: 'running',
+              input: { prompt: 'Test task' },
+              createdAt: Date.now(),
+              startedAt: Date.now(),
+              eventCount: 0,
+            },
+          },
+        ],
+      },
+    })
+
+    try {
+      const { findByText } = render(<TaskDrawer taskId="task-1" onClose={() => {}} />)
+      expect(await findByText('task.ended status=completed')).toBeTruthy()
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+      warnSpy.mockRestore()
+    }
   })
 })

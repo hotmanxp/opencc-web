@@ -1,6 +1,6 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Input, Button, message, Popover, Tooltip } from "antd";
-import { PictureOutlined, ToolOutlined } from "@ant-design/icons";
+import { PictureOutlined, ToolOutlined, CompressOutlined, ExpandOutlined } from "@ant-design/icons";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
 import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
@@ -62,6 +62,10 @@ export default React.memo(function AgentInputBox() {
     s.sessionId ? s.v2TasksBySession[s.sessionId] ?? [] : []
   );
   const todoTotal = todos.length;
+  const transcriptCollapsed = useAgentStore((s) => s.transcriptCollapsed);
+  const toggleTranscriptCollapsed = useAgentStore(
+    (s) => s.toggleTranscriptCollapsed,
+  );
   const todoDone = todos.filter((t) => t.status === "completed").length;
   const todoInProgress = todos.filter((t) => t.status === "in_progress").length;
   const v2Total = v2Tasks.length;
@@ -643,6 +647,21 @@ export default React.memo(function AgentInputBox() {
             minWidth:0 关键 — 不加时 flex item 默认 min-width:auto (= content 尺寸),
             在窄屏下 spacer 会反向挤压任务摘要到 0 宽, 表现为"被遮挡". */}
         <span style={{ flex: 1, minWidth: 0 }} />
+        {/* 折叠/展开 transcript 按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
+            图标在 collapsed=false 时显示 ExpandOutlined (可折叠), true 时显示
+            CompressOutlined (可展开), hover Tooltip 给完整文案, 与同行其他图标按钮
+            视觉风格保持一致 (icon-only + flexShrink:0). */}
+        <Tooltip
+          title={transcriptCollapsed ? "展开 transcript" : "折叠 transcript"}
+          placement="top"
+        >
+          <Button
+            icon={transcriptCollapsed ? <CompressOutlined /> : <ExpandOutlined />}
+            data-testid="transcript-collapse-button"
+            onClick={() => toggleTranscriptCollapsed()}
+            style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }}
+          />
+        </Tooltip>
         {/* 修复 transcript 按钮:
             对当前 session 触发 POST /api/transcript/:sessionId/repair,把历史上
             漏写的 tool_result 补成"tool execution did not complete" 占位,

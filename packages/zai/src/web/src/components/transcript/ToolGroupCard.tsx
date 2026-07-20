@@ -4,9 +4,12 @@ import type { ToolGroupEntry } from './deriveTranscriptNodes.js'
 import { MessageBubble } from './MessageBubble.js'
 
 function summarizeNames(entries: ToolGroupEntry[]): string {
+  // 工具名取 msg.name (与 MessageBubble.ToolCallBlock 一致), 不要取 toolName
+  // (那是 transcript 历史回放字段, 当前 zai store 里没填). 空名条目静默跳过,
+  // 让"工具调用中..."过渡态显示时不带杂项 fallback "Tool".
   const names = entries
-    .map((e) => ((e.message as any).toolName as string) ?? 'Tool')
-    .filter(Boolean)
+    .map((e) => ((e.message as any).name as string | undefined)?.trim())
+    .filter((n): n is string => Boolean(n))
   // Dedup consecutive duplicates: "Bash, Bash, Read" → "Bash, Read +1"
   const seen: string[] = []
   for (const n of names) if (seen[seen.length - 1] !== n) seen.push(n)
@@ -23,13 +26,13 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
   const errs = errorCount(entries)
   const summary = summarizeNames(entries)
   const titleText = entries.length === 1
-    ? `1 个工具调用 · ${summary}`
+    ? (summary ? `1 个工具调用 · ${summary}` : '1 个工具调用')
     : `${entries.length} 个工具调用`
 
   return (
     <Card
       size="small"
-      style={{ marginBottom: 8 }}
+      style={{ marginBottom: 8, maxWidth: '85%' }}
       title={
         <span>
           {titleText}
