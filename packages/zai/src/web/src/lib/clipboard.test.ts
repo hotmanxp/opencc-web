@@ -2,6 +2,13 @@
 import { describe, expect, test, vi } from 'vitest'
 import { copyToClipboard } from './clipboard.js'
 
+// happy-dom 20.10.6 does not define document.execCommand, but vi.spyOn requires
+// the property to exist before it can replace it. Install a no-op stub so the
+// existing spyOn calls work without touching vitest.config.ts.
+if (!('execCommand' in document)) {
+  ;(document as unknown as { execCommand: (cmd: string) => boolean }).execCommand = () => false
+}
+
 describe('copyToClipboard', () => {
   test('navigator.clipboard.writeText 可用时, 调用之并返回 true', async () => {
     const writeText = vi.fn().mockResolvedValue(undefined)
