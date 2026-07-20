@@ -115,3 +115,123 @@ describe("MessageCopyButton", () => {
     expect(parentClick).not.toHaveBeenCalled()
   })
 })
+
+describe("MessageBubble — copy button integration", () => {
+  const writeText = vi.fn().mockResolvedValue(undefined)
+
+  beforeEach(() => {
+    msgMock.success.mockReset()
+    msgMock.warning.mockReset()
+    vi.stubGlobal("navigator", { clipboard: { writeText } })
+    writeText.mockClear()
+  })
+
+  test("assistant.text 气泡渲染 Copy 按钮", () => {
+    render(
+      <MessageBubble
+        msg={{
+          eventId: "a-1",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "assistant.text",
+          text: "AI reply",
+        }}
+      />,
+    )
+    expect(screen.getByLabelText("复制助手回答")).toBeInTheDocument()
+  })
+
+  test("user.text 气泡渲染 Copy 按钮", () => {
+    render(
+      <MessageBubble
+        msg={{
+          eventId: "u-1",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "user.text",
+          text: "user msg",
+        }}
+      />,
+    )
+    expect(screen.getByLabelText("复制用户消息")).toBeInTheDocument()
+  })
+
+  test("assistant.thinking 路径不渲染 Copy 按钮", () => {
+    const { container } = render(
+      <MessageBubble
+        msg={{
+          eventId: "t-1",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "assistant.thinking",
+          text: "thinking content",
+        }}
+      />,
+    )
+    expect(container.querySelector('[aria-label="复制助手回答"]')).toBeNull()
+    expect(container.querySelector('[aria-label="复制用户消息"]')).toBeNull()
+  })
+
+  test("tool_use:start 路径不渲染 Copy 按钮", () => {
+    const { container } = render(
+      <MessageBubble
+        msg={{
+          eventId: "tool-1",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "tool_use:start",
+          toolUseId: "tu-1",
+          name: "Bash",
+          input: { command: "ls" },
+        }}
+      />,
+    )
+    expect(container.querySelector('[aria-label="复制助手回答"]')).toBeNull()
+    expect(container.querySelector('[aria-label="复制用户消息"]')).toBeNull()
+  })
+
+  test("点击 assistant Copy 按钮复制 msg.text", async () => {
+    render(
+      <MessageBubble
+        msg={{
+          eventId: "a-2",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "assistant.text",
+          text: "```ts\nconst x = 1\n```",
+        }}
+      />,
+    )
+    fireEvent.click(screen.getByLabelText("复制助手回答"))
+    await vi.waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("```ts\nconst x = 1\n```")
+    })
+  })
+
+  test("点击 user Copy 按钮复制 visibleText, 不含 isRenderedPrompt 第二行", async () => {
+    render(
+      <MessageBubble
+        msg={{
+          eventId: "u-2",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "user.text",
+          text: "原始问题",
+          isRenderedPrompt: true,
+        }}
+      />,
+    )
+    fireEvent.click(screen.getByLabelText("复制用户消息"))
+    await vi.waitFor(() => {
+      expect(writeText).toHaveBeenCalledWith("原始问题")
+    })
+    const calledWith = writeText.mock.calls[0]?.[0] ?? ""
+    expect(calledWith).not.toContain("渲染后")
+  })
+})

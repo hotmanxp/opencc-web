@@ -830,8 +830,10 @@ export const MessageBubble = React.memo(function MessageBubble({
             maxWidth: "70%",
             background: "#e6f4ff",
             borderRadius: 12,
+            position: "relative",
           }}
         >
+          <MessageCopyButton text={visibleText} variant="user" />
           {msgAttachments.length > 0 && (
             <AttachmentStrip
               attachments={msgAttachments}
@@ -941,8 +943,10 @@ export const MessageBubble = React.memo(function MessageBubble({
             marginRight: 20,
             background: "#f6ffed",
             borderRadius: 12,
+            position: "relative",
           }}
         >
+          <MessageCopyButton text={text} variant="ai" />
           <Space align="start" size={8} style={{ width: "100%" }}>
             <RobotFilled style={{ color: "#ff6600", fontSize: 18 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
