@@ -60,7 +60,7 @@ zai / zai-agent-core 目前**没有任何内置 slash 命令支持**:用户在 w
 ### 1.1 沿用的核心约束
 
 - 不读 OpenCC `settings.json`,zai 独立 `~/.zai/settings.json`
-- 不读 OpenCC 默认命令路径(`~/.claude/commands`),zai 用 `~/.zai/commands/`(单一来源,显式配置)
+- ~~不读 OpenCC 默认命令路径(`~/.claude/commands`),zai 用 `~/.zai/commands/`(单一来源,显式配置)~~ **2026-07-20 修订**:命令加载改为优先 `~/.zai/commands/`;该目录不存在时,回退读取 `~/.claude/commands/`(单向 fallback,详见 `2026-07-20-zai-slash-command-ui-display-design.md`)。
 - 所有错误走 toast(`message.warning` / `message.error`)或结构化 `{kind:'error'}` 路径
 - zai-agent-core 零 LLM SDK、零 npm 依赖增量
 
