@@ -27,18 +27,6 @@ function statusOf(msg: AgentMessage): ToolGroupStatus {
   }
 }
 
-/**
- * Flush a buffered text run.
- *
- * `endIndex` is the index of the next non-text message that terminated the
- * run; the text run itself covers `startIndex .. endIndex - 1`.
- *
- * Call sites:
- *   - Inside the loop: pass the current index `i` of the terminating
- *     non-text message → run ends at `i - 1`.
- *   - At tail: pass `messages.length` so the formula yields
- *     `messages.length - 1`, the actual last index of the run.
- */
 function pushText(buf: AgentMessage[], out: TranscriptNode[], startIndex: number, idx: number) {
   if (buf.length === 0) return
   out.push({ kind: 'text', messages: buf.slice(), startIndex, endIndex: idx - 1 })
@@ -98,10 +86,7 @@ export function deriveTranscriptNodes(messages: AgentMessage[]): TranscriptNode[
 
   // tail flush
   flushGroup(messages.length - 1)
-  // Pass `messages.length` (not `messages.length - 1`): pushText uses the
-  // formula `endIndex: idx - 1`, so the terminating index must be one past
-  // the last message in the run — `messages.length`.
-  if (textBuf.length) pushText(textBuf, out, textStart, messages.length)
+  if (textBuf.length) pushText(textBuf, out, textStart, messages.length - 1)
 
   return out
 }
