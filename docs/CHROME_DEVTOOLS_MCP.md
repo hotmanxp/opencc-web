@@ -9,6 +9,7 @@ Chrome DevTools MCP 是一个强大的工具，允许 AI 助手通过 Model Cont
   - [Windows 配置](#windows-配置)
 - [Nova CLI 配置](#nova-cli-配置)
 - [OpenCode 配置](#opencode-配置)
+- [zai 配置](#zai-配置)
 - [使用示例](#使用示例)
 - [常用场景](#常用场景)
   - [Web 开发调试](#web-开发调试)
@@ -216,6 +217,38 @@ npx chrome-devtools-mcp
    ```
    使用 chrome-devtools-mcp 工具打开 https://www.zhi-niao.com
    ```
+
+---
+
+## zai 配置
+
+zai 通过项目级 `.mcp.json` 或用户级 `~/.zai.json` / `~/.claude.json` 自动发现 chrome-devtools-mcp。zai **尊重 Claude Code 的 MCP 过滤字段**(`packages/zai/src/server/services/mcpConfig.ts:88-108`):
+
+```jsonc
+// .mcp.json — 最小可用配置
+{
+  "mcpServers": {
+   "chrome-devtools-mcp": {
+     "command": "chrome-devtools-mcp",
+     "args": ["--auto-connect", "--browserUrl=http://127.0.0.1:9223"]
+   }
+  }
+}
+```
+
+**过滤行为:**
+
+| 字段 | 位置 | 效果 |
+|---|---|---|
+| `enabledMcpjsonServers` | `.mcp.json` | allowlist — 只加载列表中的 server(空数组 ⇒ 全部禁用) |
+| `disabledMcpjsonServers` | `.mcp.json` | blocklist — 移除列表中的 server(与 enabled 互斥) |
+| `disabledMcpServers` | `~/.zai.json` / `~/.claude.json` | 全局黑名单 — post-merge 过滤,user 压过 project allowlist |
+
+**注意:** enterprise scope(`ZAI_MANAGED_MCP_CONFIG` / `/etc/zai/managed-mcp.json`)一旦命中即 exclusive,**不被 `disabledMcpServers` 影响**。
+
+zai 启动时会自动为 chrome-devtools-mcp 注入 `roots: [cwd]`,避免 "did not negotiate the MCP roots capability" 警告。
+
+Plan: `docs/superpowers/plans/2026-07-20-zai-mcp-disabled-servers.md`
 
 ---
 
@@ -725,4 +758,4 @@ start "" "C:\Program Files\Google\Chrome\Application\chrome.exe" --remote-debugg
 ---
 
 **维护者:** ZN-AI Team  
-**最后更新:** 2026 年 3 月 31 日
+**最后更新:** 2026 年 7 月 20 日

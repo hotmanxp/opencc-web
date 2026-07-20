@@ -1,6 +1,8 @@
 # zai MCP `disabledMcpServers` / `enabled/disabledMcpjsonServers` 支持 Plan
 
-> **Status:** 缺口已复现(reproducing tests in `packages/zai/test/server/mcpConfig.test.ts` 3/3 失败),实现尚未开始。本 plan 用于指导后续 task-by-task 实施。
+> **Status:** ✅ Delivered (commit `84760a8`, 2026-07-20)
+>
+> 全部 task 已实施:`packages/zai/src/server/services/mcpConfig.ts` + 9 个 vitest 用例 (`packages/zai/test/server/mcpConfig.test.ts`)。回归测试覆盖 cross-scope 优先级、空匹配 no-op、非数组字段宽容、malformed JSON 不崩。102/102 zai server 测试全过,typecheck 干净。
 
 **Goal:** 让 `loadMcpServers` 尊重 Claude Code 的 MCP 禁用/启用字段,与 opencc 行为对齐,避免用户在 `~/.claude.json` 里禁用的 server 仍然在 zai 中生效。
 
@@ -93,6 +95,30 @@ cd /Users/ethan/code/opencc-web/packages/zai && npx vitest run test/server/mcpCo
 - **日志**:`/mcp` debug UI 已经用 `describeMcpSources`,必要时把 disabled/enabled 集合也展示出来(后续 PR,不阻塞本 plan)
 - **测试运行命令**:`cd packages/zai && npx vitest run test/server/mcpConfig.test.ts`
 - **commit 风格**:Conventional Commits,每 task 一个 commit
+
+---
+
+## 实施记录(2026-07-20)
+
+**实际决策**(与本 plan 假设一致):
+
+1. ✅ Per-file 过滤只对 project scope (`.mcp.json`) 生效 — 符合 Claude Code 行为
+2. ✅ Enterprise scope 不被 `disabledMcpServers` 影响 — 管理员配置始终生效
+3. ⚠️ `enabledMcpjsonServers` 在 user scope 也存在,但**实现选择忽略**(只对 project scope 生效),理由:plan 表格里标注 user scope 不适用,保持 scope 边界清晰;若后续 opencc 证明 user scope 也应生效,把 `ingest` 里的 `scope === 'project'` 判断改成 `parsed.enabledMcpjsonServers !== null` 即可
+
+**测试矩阵**(vitest 9/9 全过):
+
+| Test | 验证 |
+|---|---|
+| `injects roots: [cwd] when spec is loaded from .mcp.json` | 旧:roots 默认注入仍工作 |
+| `returns empty list (no fallback) when nothing configured` | 旧:空配置仍返回空 |
+| `disabledMcpServers in user scope filters the server out` | 主功能:user 黑名单 |
+| `disabledMcpjsonServers in project .mcp.json suppresses that file` | 主功能:project 黑名单 |
+| `enabledMcpjsonServers is an allowlist (other servers disabled)` | 主功能:project allowlist |
+| `user disabledMcpServers wins over project enabledMcpjsonServers allowlist` | 边界:user 压过 project |
+| `disabledMcpServers with no matching server is a no-op (no error)` | 边界:空匹配不报错 |
+| `non-array disabledMcpServers is tolerated (treated as unset)` | 边界:非数组宽容 |
+| `parseFile tolerates malformed JSON without throwing` | 边界:坏 JSON 不崩启动 |
 
 ---
 

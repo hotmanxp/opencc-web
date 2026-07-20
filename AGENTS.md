@@ -228,7 +228,7 @@ zai 端实现的能力,把 opencc 上游 `bashProvider.ts` 的"shell trailer 跟
 - 默认 model:`ANTHROPIC_DEFAULT_SONNET_MODEL ?? ANTHROPIC_SMALL_FAST_MODEL`,回退 `MiniMax-M3`
 - Skills:默认 `[~/.agents/skills]`(与 Nova CLI / OpenCode / OpenCC 共享);`ZAI_SKILLS_DIRS=''` 显式禁用
 - Sandbox:默认开(`executor:'child_process'`,`maxCpuMs:600_000`,`networkEgress:'allow'`);`ZAI_SANDBOX=off` 关闭;`ZAI_SANDBOX_ENV_ALLOWLIST=foo,bar` 控制 env 白名单
-- MCP:从 `cwd/.mcp.json` 加载 → `MCPClientPool`;`mcpSkillLoading='off'` 关闭 `skill://`;zai 注册 SIGTERM/SIGINT 钩子
+- MCP:从 `cwd/.mcp.json` 加载 → `MCPClientPool`;`mcpSkillLoading='off'` 关闭 `skill://`;zai 注册 SIGTERM/SIGINT 钩子;**尊重 Claude Code 的过滤字段** —— `enabledMcpjsonServers` / `disabledMcpjsonServers`(per-`.mcp.json` allowlist/blocklist,只在 project scope 生效)+ `disabledMcpServers`(user-scope 全局黑名单,post-merge 过滤;user 黑名单压过 project allowlist;enterprise exclusive 不被影响)。实现见 `packages/zai/src/server/services/mcpConfig.ts:88-108`,plan 在 `docs/superpowers/plans/2026-07-20-zai-mcp-disabled-servers.md`
 - 插件:`resolveOpenccConfigDir()` → `~/.claude` 加载 OpenCC plugin(skills / agents / hooks)
 - AGENTS.md 自动注入:每个 turn 调 `loadAgentsMd(options.cwd)` 拼到 system prompt 顶部;`enableAgentsMd:false` 关闭
 - 前端鉴权:**默认不带** `X-Zai-Token` —— `lib/api.ts:1-35` 不读 localStorage,只有 `v2TaskApi / slash` 等少数手写 fetch 显式加;server 也不强制校验
