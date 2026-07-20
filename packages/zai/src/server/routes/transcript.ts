@@ -40,6 +40,7 @@ router.post('/:sessionId/repair', async (req: Request, res: Response) => {
       repaired: result.report.repaired,
       repairedToolUseIds: result.report.repairedToolUseIds,
       synthesizedToolUseIds: result.report.synthesizedToolUseIds,
+      synthesizedOrphanToolUseIds: result.report.synthesizedOrphanToolUseIds,
     })
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err)
