@@ -21,6 +21,24 @@ type McpJsonServer = {
 
 type McpJsonFile = {
   mcpServers?: Record<string, McpJsonServer>
+  // Claude Code compat: per-file allowlist/blocklist for .mcp.json.
+  // Only honored in project scope.
+  enabledMcpjsonServers?: unknown
+  disabledMcpjsonServers?: unknown
+  // Claude Code compat: global disable list, typically in user-scope
+  // (~/.claude.json / ~/.zai.json). Applied as final filter across all
+  // scopes' merged spec list.
+  disabledMcpServers?: unknown
+}
+
+type ParsedMcpFile = {
+  servers: McpServerSpec[]
+  // `null` = key absent or non-array (treated as "not set" — no filter
+  // applied). `[]` = present but empty (allowlist with 0 entries → nothing
+  // loads from this file).
+  enabledMcpjsonServers: string[] | null
+  disabledMcpjsonServers: string[] | null
+  disabledMcpServers: string[] | null
 }
 
 type Scope = 'enterprise' | 'user' | 'project' | 'local'
@@ -59,15 +77,35 @@ type ScopeLoadResult = {
  */
 export function loadMcpServers(cwd: string): McpServerSpec[] {
   const byName = new Map<string, { spec: McpServerSpec; scope: Scope }>()
+  // Union of `disabledMcpServers` declared anywhere (typically user scope).
+  // Applied as a final filter after all scopes merge.
+  const globalDisabled = new Set<string>()
 
-  // Helper: merge a scope's results into the running map. Higher-scope
-  // sources write last so they win on name collision.
-  const apply = (entries: ScopeLoadResult[]) => {
-    for (const e of entries) {
-      for (const spec of e.servers) {
-        byName.set(spec.name, { spec, scope: e.scope })
+  // Helper: ingest a parsed file. For project scope, apply the per-file
+  // enabled/disabledMcpjsonServers filter before adding to byName. For all
+  // scopes, collect disabledMcpServers into the global disable set.
+  // Returns a ScopeLoadResult for callers that want the per-file view
+  // (used by `describeMcpSources`).
+  const ingest = (parsed: ParsedMcpFile, scope: Scope, source: string): ScopeLoadResult => {
+    if (parsed.disabledMcpServers) {
+      for (const name of parsed.disabledMcpServers) globalDisabled.add(name)
+    }
+    let filtered = parsed.servers
+    if (scope === 'project') {
+      if (parsed.enabledMcpjsonServers !== null) {
+        // Allowlist (even empty → load nothing from this file).
+        const allowed = new Set(parsed.enabledMcpjsonServers)
+        filtered = filtered.filter((s) => allowed.has(s.name))
+      } else if (parsed.disabledMcpjsonServers !== null) {
+        // Blocklist (only set if enabled is absent).
+        const blocked = new Set(parsed.disabledMcpjsonServers)
+        filtered = filtered.filter((s) => !blocked.has(s.name))
       }
     }
+    for (const spec of filtered) {
+      byName.set(spec.name, { spec, scope })
+    }
+    return { scope, source, servers: filtered }
   }
 
   // 1. project: walk up from cwd to root, collect .mcp.json files.
@@ -85,7 +123,7 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
     const path = join(dir, '.mcp.json')
     const parsed = parseFile(path)
     if (parsed) {
-      projectLoads.push({ scope: 'project', source: path, servers: parsed })
+      projectLoads.push(ingest(parsed, 'project', path))
     }
   }
 
@@ -98,9 +136,9 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
   ]
   const localLoads: ScopeLoadResult[] = []
   for (const p of localPaths) {
-    const parsed = parseFile(p, 'mcpServers')
+    const parsed = parseFile(p)
     if (parsed) {
-      localLoads.push({ scope: 'local', source: p, servers: parsed })
+      localLoads.push(ingest(parsed, 'local', p))
     }
   }
 
@@ -119,24 +157,26 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
     userPath = claudeJsonPath
   }
   if (userPath) {
-    const parsed = parseFile(userPath, 'mcpServers')
+    const parsed = parseFile(userPath)
     if (parsed) {
-      userLoads.push({ scope: 'user', source: userPath, servers: parsed })
+      userLoads.push(ingest(parsed, 'user', userPath))
     }
   }
 
   // 4. enterprise: explicit env var, then XDG, then /etc.
   //    If present, it takes exclusive control: drop everything else.
+  //    `disabledMcpServers` does NOT filter enterprise — admins want their
+  //    managed config honored regardless of user-side toggle state.
   const enterprisePath = resolveEnterpriseMcpPath()
-  const enterpriseParsed = enterprisePath ? parseFile(enterprisePath, 'mcpServers') : null
-  if (enterpriseParsed && enterpriseParsed.length > 0) {
-    return enterpriseParsed
+  const enterpriseParsed = enterprisePath ? parseFile(enterprisePath) : null
+  if (enterpriseParsed && enterpriseParsed.servers.length > 0) {
+    return enterpriseParsed.servers.map((s) =>
+      s.roots ? s : { ...s, roots: [cwd] }
+    )
   }
 
-  // Merge in precedence order (lowest first, highest last).
-  apply(projectLoads)
-  apply(localLoads)
-  apply(userLoads)
+  // Apply global disabledMcpServers filter (post-merge).
+  for (const name of globalDisabled) byName.delete(name)
 
   return Array.from(byName.values()).map((v) =>
     v.spec.roots ? v.spec : { ...v.spec, roots: [cwd] }
@@ -161,13 +201,12 @@ export function describeMcpSources(cwd: string): ScopeLoadResult[] {
   }
   for (const dir of dirs.reverse()) {
     const path = join(dir, '.mcp.json')
-    const servers = parseFile(path) ?? []
-    out.push({ scope: 'project', source: path, servers })
+    out.push({ scope: 'project', source: path, servers: parseFile(path)?.servers ?? [] })
   }
   // local
   for (const p of [join(cwd, '.claude', 'settings.local.json'),
                    join(homedir(), '.claude', 'settings.local.json')]) {
-    out.push({ scope: 'local', source: p, servers: parseFile(p, 'mcpServers') ?? [] })
+    out.push({ scope: 'local', source: p, servers: parseFile(p)?.servers ?? [] })
   }
   // user
   const zj = join(homedir(), '.zai.json')
@@ -176,12 +215,12 @@ export function describeMcpSources(cwd: string): ScopeLoadResult[] {
   out.push({
     scope: 'user',
     source: userSource,
-    servers: parseFile(userSource, 'mcpServers') ?? [],
+    servers: parseFile(userSource)?.servers ?? [],
   })
   // enterprise
   const ent = resolveEnterpriseMcpPath()
   if (ent) {
-    out.push({ scope: 'enterprise', source: ent, servers: parseFile(ent, 'mcpServers') ?? [] })
+    out.push({ scope: 'enterprise', source: ent, servers: parseFile(ent)?.servers ?? [] })
   }
   return out
 }
@@ -201,7 +240,7 @@ function resolveEnterpriseMcpPath(): string | null {
   return null
 }
 
-function parseFile(path: string, mcpKey: 'mcpServers' = 'mcpServers'): McpServerSpec[] | null {
+function parseFile(path: string): ParsedMcpFile | null {
   if (!existsSync(path)) return null
   let stat
   try {
@@ -222,15 +261,37 @@ function parseFile(path: string, mcpKey: 'mcpServers' = 'mcpServers'): McpServer
   } catch {
     return null
   }
+  if (!parsed || typeof parsed !== 'object') return null
+
   // Tolerate a top-level object with `mcpServers` OR a bare `mcpServers` object.
-  const servers = parsed?.[mcpKey] ?? (parsed && typeof parsed === 'object' && !parsed[mcpKey] ? parsed : null)
-  if (!servers || typeof servers !== 'object') return null
-  const out: McpServerSpec[] = []
-  for (const [name, def] of Object.entries(servers)) {
-    const spec = parseOne(name, def as McpJsonServer)
-    if (spec) out.push(spec)
+  const serversObj =
+    parsed.mcpServers ??
+    (!parsed.mcpServers && typeof parsed === 'object' ? parsed : null)
+  const servers: McpServerSpec[] = []
+  if (serversObj && typeof serversObj === 'object') {
+    for (const [name, def] of Object.entries(serversObj)) {
+      const spec = parseOne(name, def as McpJsonServer)
+      if (spec) servers.push(spec)
+    }
   }
-  return out
+
+  return {
+    servers,
+    enabledMcpjsonServers: toStringArrayOrNull(parsed.enabledMcpjsonServers),
+    disabledMcpjsonServers: toStringArrayOrNull(parsed.disabledMcpjsonServers),
+    disabledMcpServers: toStringArrayOrNull(parsed.disabledMcpServers),
+  }
+}
+
+/**
+ * Coerce a JSON-decoded value to a string array, or null if the field
+ * is absent / not an array. `null` is the sentinel callers use to
+ * distinguish "not configured" (skip filter) from "configured but empty"
+ * (allowlist with 0 entries → nothing loads).
+ */
+function toStringArrayOrNull(v: unknown): string[] | null {
+  if (!Array.isArray(v)) return null
+  return v.filter((x): x is string => typeof x === 'string')
 }
 
 function parseOne(name: string, def: McpJsonServer): McpServerSpec | null {
