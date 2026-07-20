@@ -635,3 +635,37 @@ git commit -m "fix(zai-web): polish settings drawer UI per manual verification"
 - `settingsTheme` + `setSettingsTheme`:`Task 1` 定义 → `Task 4` 在 Theme tab 消费
 - `defaultMode` from `useAgentStore`:`Task 4` Permission tab 消费 — 已确认 useAgentStore 持有 (参考 spec §3)
 - `api.get('/agent/settings')` 返回 shape:`Task 4` 内联 `AgentSettings` 类型与 `routes/agentSettings.ts` 返回一致(参见 `MODEL_PROVIDERS_*` 字段)
+
+---
+
+## 修订:2026-07-20 TUI 重写
+
+**首期实现按 spec 走 AntD Drawer + Tabs + Form 风格,但用户验收后认为不符合 opencc 上游 `Config.tsx` 的预期形态**。本次提交保留 Drawer 作为右侧容器,但内部改为 opencc `/config` TUI 风格(文字行 + `>` cursor + ↑↓ 导航 + Space toggle + Enter 弹层 + `/` 搜索 + Esc 关闭)。
+
+### 实际实施 vs 原 plan 差异
+
+| 维度 | 原 plan (Tabs + Form) | 实际实施 (TUI 文本行) |
+|---|---|---|
+| `SettingsDrawer.tsx` 主结构 | `Drawer` + `Tabs` + `Form` + `Radio.Group` + `Select` + `Tag` + `List` | `Drawer` + `SettingsList` (自定义紧凑文本行 + 键盘交互) |
+| 视觉 | AntD Material 风格表单 | mono 字体 13px 文字行,`>` cursor |
+| 交互 | 鼠标点 Radio/Select | 全键盘(`↑↓ Space Enter / Esc`) |
+| Tab 划分 | Model / Permission / Theme / Env Vars | 删除 tabs,改为按 section(Permission / Theme / Language)分组 |
+| Model tab 数据 (`GET /api/agent/settings`) | 阶段 1 拉一次 | 推迟到阶段 2 |
+| Env Vars mock | 4 行只读 | 删除 |
+| 主题行 | Radio.Group (4 项) | enum 行,Enter 弹下拉选 |
+| 行类型 | Form 控件 | `SettingsRow = boolean \| enum` |
+| 测试 | 1 个最小用例 + 人工验收 | `test/web/SettingsDrawer.test.tsx` 20 个用例(渲染/导航/Space/Enter 弹层/搜索/Esc/store 联动) |
+
+### 仍保留的契约
+
+- ✅ `SettingsButton.tsx` 不变(沿用 `useAppStore.openSettingsDrawer`)
+- ✅ `useAppStore` 不变(沿用 `settingsDrawerOpen` / `settingsTheme` / `setSettingsTheme`)
+- ✅ `Agent.tsx` mount 点不变(顶层 `<SettingsDrawer />`)
+- ✅ `SettingsList` 是受控组件,通过 `onChange(key, value)` 把变更传回父组件
+- ✅ 主题行通过 `setSettingsTheme` 写回 store(其它行仅本地 state,阶段 2 接真实写盘)
+
+### 阶段 2 调整
+
+原 plan 的阶段 2「PUT 写盘 + Theme 持久化」不变,新增:
+- 在 Permission section 之前插入「Model」section,一行 enum (当前 model,从 `/api/agent/settings` 拼入 schema)
+- Env Vars 推迟到阶段 4(spec 已注明)

@@ -209,3 +209,30 @@ AgentInputBox.tsx:685
 | 阶段 3 | Permissions allow/deny rules 结构化 UI(替换 Config.tsx 里的 raw JSON) |
 | 阶段 4 | Env Vars 结构化编辑器(对接 `modelCaller.ts:46` 的 `ZaiSettings.env`) |
 | 阶段 5 | Notification / Attribution 等小项 |
+
+---
+
+## 修订:2026-07-20 TUI 重写
+
+**首期提交(prototype)按 spec 实现了 AntD Drawer + Tabs + Form 风格**,但实际效果与 opencc 上游 `Config.tsx` 的「文字列表 TUI」风格差距明显。用户反馈:`> cursor` + 单行文本 + 右对齐值 + 键盘交互(Space / Enter / `/` / Esc)的紧凑交互才是预期形态,而不是 AntD Radio/Select/Tag。
+
+**本修订保留 Drawer 作为右侧容器,但内部替换为 opencc /config 风格的文本行列表**:
+
+- ❌ 删除 AntD `Tabs` / `Form` / `Radio.Group` / `Select` / `Tag` / `List`(原 spec 详设 §3 + §验收)
+- ❌ 删除 4 tab 划分(Model / Permission / Theme / Env Vars)
+- ✅ 改为单一文本行列表,按 section(Permission / Theme / Language)分组;每行 `左 label` + `右 value`,`>` 标记当前光标行
+- ✅ 键盘交互(对齐 opencc /config):
+  - `↑↓` 移动光标(跳过 section header)
+  - `Space` 切换 boolean 行
+  - `Enter` 在 enum 行上弹居中下拉; `↑↓` 选;`Enter` 确认;`Esc` 取消
+  - `/` 进入搜索;输入过滤;`Esc` 退出搜索(回到完整列表)
+  - `Esc`(非搜索、非浮层)关闭 Drawer
+- ✅ 行类型只保留 boolean / enum;原 Model tab(GET `/api/agent/settings`)+ Env Vars mock 在阶段 2 重新接入
+- ✅ 字体:`ui-monospace, ...` + 13px,行高 1.5,与截图的 TUI 风格一致
+
+**实施影响**:
+
+- 行为变更:`SettingsDrawer.tsx` 整文件重写,但 store (`settingsDrawerOpen` / `settingsTheme` / 三个 action)、`SettingsButton.tsx`、`Agent.tsx` 顶层 mount 点保持不变
+- 数据流:`SettingsList` 内部 schema 仍由父组件通过 `onChange(key, value)` 回调写回(本阶段不持久化;主题行额外 `setSettingsTheme` 同步到 store)
+- 测试:新增 `test/web/SettingsDrawer.test.tsx` 覆盖 20 个用例(渲染 / 导航 / Space / Enter 弹层 / `/` 搜索 / Esc / store 联动);`SettingsButton.test.tsx` 不变
+- 阶段 2 重写计划:删除「Model tab GET /api/agent settings」+「Env Vars mock」两条;改为「在 Permission section 之前插入『Model』section + 一行 enum (当前 model),数据从 `/api/agent/settings` 拼;Env Vars 推迟到阶段 4」
