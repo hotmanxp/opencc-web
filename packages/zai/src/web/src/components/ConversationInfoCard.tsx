@@ -1,4 +1,5 @@
 import { Button, Descriptions, message, Typography } from 'antd'
+import { copyToClipboard } from '../lib/clipboard.js'
 import { CopyOutlined } from '@ant-design/icons'
 import type { ConversationInfo } from '../hooks/useConversationInfo.js'
 
@@ -18,27 +19,6 @@ function statusLabel(status: ConversationInfo['status']): string {
   }
 }
 
-async function copyToClipboard(text: string): Promise<void> {
-  // navigator.clipboard requires a secure context (https / localhost).
-  // Fall back to a temporary textarea for http / older browsers.
-  if (navigator.clipboard?.writeText) {
-    try {
-      await navigator.clipboard.writeText(text)
-      return
-    } catch {
-      // fall through to legacy path
-    }
-  }
-  const ta = document.createElement('textarea')
-  ta.value = text
-  ta.style.position = 'fixed'
-  ta.style.opacity = '0'
-  document.body.appendChild(ta)
-  ta.select()
-  document.execCommand('copy')
-  document.body.removeChild(ta)
-}
-
 interface Props {
   info: ConversationInfo
 }
@@ -56,12 +36,9 @@ export default function ConversationInfoCard({ info }: Props) {
     // 不让 click 冒泡到 Popover 触发关闭, 也不让 button 触发 form submit 之类.
     e.stopPropagation()
     e.preventDefault()
-    try {
-      await copyToClipboard(info.sessionId!)
-      message.success('已复制 sessionId')
-    } catch {
-      message.warning('复制失败, 请手动选中')
-    }
+    const ok = await copyToClipboard(info.sessionId!)
+    if (ok) message.success('已复制 sessionId')
+    else message.warning('复制失败, 请手动选中')
   }
 
   return (
