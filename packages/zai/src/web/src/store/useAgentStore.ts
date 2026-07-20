@@ -836,7 +836,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       } as AgentMessage
       return { messages: next }
     }),
+  // Transcript collapse toggle (UI layer). 不写 localStorage, 不持久化.
+  // 刷新归零, 切 session 不重置 (因为是全局布尔, 不属于 messagesBySession).
+  // 仅本次会话 (刷新后归零).
+  transcriptCollapsed: false,
   setStatus: (status: AgentStatus) => set({ status }),
+  toggleTranscriptCollapsed: () =>
+    set((s) => ({ transcriptCollapsed: !s.transcriptCollapsed })),
 
   clearMessages: () =>
     set((s) => {
