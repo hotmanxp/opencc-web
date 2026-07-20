@@ -53,6 +53,7 @@ import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 import AgentInputBox from "../components/AgentInputBox";
 import { MessageBubble } from "../components/transcript/MessageBubble.js";
 import { MessageListView } from "../components/transcript/MessageListView.js";
+import { useScrollFollow } from "../hooks/useScrollFollow";
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
@@ -125,9 +126,15 @@ export default function Agent() {
   useEffect(() => {
     // 优先级: question 卡片出现时滚卡片, 否则滚 messages 流末尾.
     // pendingAsk 是独立字段, 必须放进依赖里否则卡片首次出现不触发.
+    //
+    // scrollFollowLocked 由 useScrollFollow 维护: 用户最近 5s 内触发过
+    // 滚动手势时返回 true, 此时跳过自动滚动 — 用户主动翻看历史时,
+    // AI 一边生成一边把视图拉到底会让人读不到内容。5s 内无新手势后
+    // locked 回到 false, 下一次 messages 更新会恢复"跟到底"行为。
+    if (scrollFollowLocked) return;
     const target = questionCardRef.current ?? messagesEndRef.current;
     target?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, pendingAsk]);
+  }, [messages, pendingAsk, scrollFollowLocked]);
 
   // 全局 Esc 拦截: 流式期间按 Esc 终止生成 (仿 OpenCC 状态栏 "esc to interrupt").
   // textarea 在 streaming 时被禁用, 这里挂 window 监听确保 Esc 仍生效.
@@ -452,6 +459,7 @@ export default function Agent() {
         }}
       >
         <div
+          ref={scrollContainerRef}
           style={{
             flex: 1,
             minHeight: 0,
