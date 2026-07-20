@@ -52,7 +52,8 @@ import { TaskDrawer } from "../components/TaskDrawer";
 import TodoZone from "../components/TodoZone.jsx";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 import AgentInputBox from "../components/AgentInputBox";
-import { MessageBubble } from "../components/transcript/MessageBubble";
+import { MessageBubble } from "../components/transcript/MessageBubble.js";
+import MessageListView from "../components/transcript/MessageListView.js";
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
@@ -93,29 +94,6 @@ export default function Agent() {
   const cwdName = instanceContext?.cwdName || '~'
   const branch = instanceContext?.branch || 'master'
   const { token } = theme.useToken();
-
-  const messageList = useMemo(
-    () =>
-      messages.map((msg: AgentMessage, idx: number) => {
-        const t = msg.type as string;
-        const toolUseId = t.startsWith("tool_use:")
-          ? (msg.toolUseId as string)
-          : undefined;
-        const reactKey =
-          (toolUseId ? `tool-${toolUseId}` : (msg.eventId as string)) ||
-          String(idx);
-        return (
-          <MessageBubble
-            key={reactKey}
-            msg={msg}
-            streaming={
-              status === "streaming" && idx === messages.length - 1
-            }
-          />
-        );
-      }),
-    [messages, status],
-  );
 
   // Slash autocomplete: 输入 / 时弹出, 同时包含 builtin commands + user commands + skills
   // (type moved to AgentInputBox — T6 migration)
@@ -517,7 +495,7 @@ export default function Agent() {
               {transcriptCollapsed ? '展开 transcript' : '折叠 transcript'}
             </Button>
           </div>
-          {messageList}
+          <MessageListView messages={messages} streaming={status === "streaming"} />
           {pendingAsk && (
             <div ref={questionCardRef}>
               <QuestionCard
