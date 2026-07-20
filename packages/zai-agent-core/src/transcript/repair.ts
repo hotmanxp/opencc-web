@@ -135,16 +135,43 @@ export function repairTranscriptToolPairs(
   }
   chain.reverse()
 
-  const hasOrphanToolUse = messages.some(message => {
-    if (message.type !== 'tool_use') return false
-    if (!message.parentUuid || !chainUuids.has(message.parentUuid)) return true
-    return byUuid.get(message.parentUuid)?.type !== 'assistant'
-  })
-  if (hasOrphanToolUse) {
-    return {
-      messages: original,
-      report: { repaired: false, repairedToolUseIds: [], synthesizedToolUseIds: [], synthesizedOrphanToolUseIds: [], droppedMessageUuids: [] },
+  // ---- orphan revival (spec §6a) ---------------------------------------
+  // Orphan tool_use records have either:
+  //   - parentUuid not on the active chain, or
+  //   - parentUuid on the chain but parent's type !== 'assistant'.
+  // We re-attach each orphan to the most recent active-chain assistant that
+  // appears in source-array order before the orphan. The orphan's tool_use
+  // id is added to `synthesizedOrphanToolUseIds`; downstream §4-6 logic
+  // synthesizes the recovery result.
+  const revivedAnchors = new Map<string, TranscriptMessage[]>()
+  for (let index = 0; index < messages.length; index += 1) {
+    const message = messages[index]
+    if (message.type !== 'tool_use') continue
+    const parent = message.parentUuid ? byUuid.get(message.parentUuid) : undefined
+    const parentOnChain = message.parentUuid ? chainUuids.has(message.parentUuid) : false
+    const parentIsAssistant = parent?.type === 'assistant'
+    if (parentOnChain && parentIsAssistant) continue
+
+    // No anchor available when there's no assistant earlier than this
+    // orphan on the active chain.
+    const anchor = [...chain]
+      .reverse()
+      .find(candidate => candidate.type === 'assistant' && (originalIndex.get(candidate.uuid) ?? 0) < index)
+    if (!anchor) {
+      return {
+        messages: original,
+        report: {
+          repaired: false,
+          repairedToolUseIds: [],
+          synthesizedToolUseIds: [],
+          synthesizedOrphanToolUseIds: [],
+          droppedMessageUuids: [],
+        },
+      }
     }
+    const list = revivedAnchors.get(anchor.uuid) ?? []
+    list.push(message)
+    revivedAnchors.set(anchor.uuid, list)
   }
 
   const resultUuids = new Set(messages
@@ -156,6 +183,7 @@ export function repairTranscriptToolPairs(
   const emitted = new Set<string>()
   const repairedToolUseIds: string[] = []
   const synthesizedToolUseIds: string[] = []
+  const synthesizedOrphanToolUseIds: string[] = []
 
   for (const message of chain) {
     if (
@@ -168,7 +196,10 @@ export function repairTranscriptToolPairs(
     emitted.add(message.uuid)
     if (message.type !== 'assistant') continue
 
-    const children = (childrenByParent.get(message.uuid) ?? [])
+    const children = [
+      ...(childrenByParent.get(message.uuid) ?? []),
+      ...(revivedAnchors.get(message.uuid) ?? []),
+    ]
       .filter(child => child.type === 'tool_use')
       .sort((left, right) => (originalIndex.get(left.uuid) ?? 0) - (originalIndex.get(right.uuid) ?? 0))
     const groupedResults: ToolResultBlock[] = []
@@ -177,9 +208,10 @@ export function repairTranscriptToolPairs(
       output.push(clone(child))
       emitted.add(child.uuid)
       lastTool = child
+      const revivedFromHere = (revivedAnchors.get(message.uuid) ?? []).some(candidate => candidate.uuid === child.uuid)
       for (const block of toolUses(child)) {
         const results = resultsByToolUseId.get(block.id)
-        if (results?.length) {
+        if (results?.length && !revivedFromHere) {
           groupedResults.push(...results.map(result => structuredClone(result)))
           repairedToolUseIds.push(block.id)
           continue
@@ -190,7 +222,8 @@ export function repairTranscriptToolPairs(
           content: RECOVERY_TEXT,
           is_error: true,
         })
-        synthesizedToolUseIds.push(block.id)
+        if (revivedFromHere) synthesizedOrphanToolUseIds.push(block.id)
+        else synthesizedToolUseIds.push(block.id)
       }
     }
     if (groupedResults.length > 0 && lastTool) {
@@ -248,6 +281,7 @@ export function repairTranscriptToolPairs(
       repaired,
       repairedToolUseIds: repaired ? repairedToolUseIds : [],
       synthesizedToolUseIds: repaired ? synthesizedToolUseIds : [],
+      synthesizedOrphanToolUseIds: repaired ? synthesizedOrphanToolUseIds : [],
       droppedMessageUuids: repaired ? droppedMessageUuids : [],
     },
   }

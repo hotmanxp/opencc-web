@@ -4,6 +4,13 @@ import { repairTranscriptToolPairs } from '../../src/transcript/repair.js'
 
 type MessageContent = AnthropicMessage['content']
 
+const toolResults = (message: TranscriptMessage): Array<{ tool_use_id: string; is_error?: boolean; type: string }> => {
+  const content = message.message?.content
+  if (!Array.isArray(content)) return []
+  return content.filter((block): block is { tool_use_id: string; is_error?: boolean; type: string } =>
+    typeof block === 'object' && block !== null && 'type' in block && block.type === 'tool_result')
+}
+
 const record = (
   uuid: string,
   type: TranscriptMessage['type'],
@@ -128,13 +135,14 @@ describe('repairTranscriptToolPairs', () => {
     expect(result.report.droppedMessageUuids).toEqual(['a800'])
   })
 
-  it('skips all repair when a tool_use parent is not an assistant in the active chain', () => {
-    const user = record('u1', 'user', 'run it')
+  it('revives an orphan whose active-chain parent is not an assistant', () => {
+    const a1 = record('a1', 'assistant', [])
+    const userMid = record('u900', 'user', 'continue', 'a1')
     const orphan = record(
       't1',
       'tool_use',
       [{ type: 'tool_use', id: 'call-orphan', name: 'Bash', input: {} }],
-      'u1',
+      'u900',
     )
     const delayedResult = record(
       'r1',
@@ -142,18 +150,16 @@ describe('repairTranscriptToolPairs', () => {
       [{ type: 'tool_result', tool_use_id: 'call-orphan', content: 'done', is_error: false }],
       't1',
     )
-    const input = [user, orphan, delayedResult]
+    const input = [a1, userMid, orphan, delayedResult]
 
     const result = repairTranscriptToolPairs(input)
 
-    expect(result.messages).toEqual(input)
-    expect(result.messages).not.toBe(input)
-    expect(result.report).toEqual({
-      repaired: false,
-      repairedToolUseIds: [],
-      synthesizedToolUseIds: [],
-      droppedMessageUuids: [],
-    })
+    expect(result.report.repaired).toBe(true)
+    expect(result.report.synthesizedOrphanToolUseIds).toEqual(['call-orphan'])
+    const userResults = result.messages.filter(message => toolResults(message).length > 0)
+    expect(userResults).toHaveLength(1)
+    expect((userResults[0].message?.content as Array<{ tool_use_id: string; is_error?: boolean }>)[0])
+      .toMatchObject({ tool_use_id: 'call-orphan', is_error: true })
   })
 
   it('does not mutate input and is idempotent', () => {

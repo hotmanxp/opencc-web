@@ -79,8 +79,6 @@ export default function Agent() {
   const setAskNotes = useAgentStore((s) => s.setAskNotes);
   const submitAsk = useAgentStore((s) => s.submitAsk);
   const rejectAsk = useAgentStore((s) => s.rejectAsk);
-  const transcriptCollapsed = useAgentStore((s) => s.transcriptCollapsed);
-  const toggleTranscriptCollapsed = useAgentStore((s) => s.toggleTranscriptCollapsed);
   const todosForCurrentSession: TodoItem[] =
     sessionId != null ? (todosBySession[sessionId] ?? []) : [];
   // v2TasksBySession 仍订阅在 store, 但渲染层 Agent.tsx 不再使用 —
