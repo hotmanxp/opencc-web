@@ -48,6 +48,8 @@ describe('repairTranscriptToolPairs orphan revival (spec §6a)', () => {
 
     expect(result.report.repaired).toBe(true)
     expect(result.report.synthesizedOrphanToolUseIds).toEqual(['call-orphan-1'])
+    const revivedTool = result.messages.find(message => message.type === 'tool_use')
+    expect(revivedTool?.parentUuid).toBe('a1')
     // orphan revived under a1 — its synthesized result message immediately follows.
     const types = result.messages.map(m => m.type)
     expect(types.indexOf('tool_use')).toBeGreaterThan(-1)

@@ -131,7 +131,15 @@ export function repairTranscriptToolPairs(
     seen.add(cursor.uuid)
     chain.push(cursor)
     chainUuids.add(cursor.uuid)
-    cursor = cursor.parentUuid ? byUuid.get(cursor.parentUuid) : undefined
+    const parent = cursor.parentUuid ? byUuid.get(cursor.parentUuid) : undefined
+    if (parent) {
+      cursor = parent
+      continue
+    }
+    const index = originalIndex.get(cursor.uuid)
+    cursor = cursor.parentUuid && index !== undefined && index > 0
+      ? messages[index - 1]
+      : undefined
   }
   chain.reverse()
 
@@ -205,10 +213,12 @@ export function repairTranscriptToolPairs(
     const groupedResults: ToolResultBlock[] = []
     let lastTool: TranscriptMessage | undefined
     for (const child of children) {
-      output.push(clone(child))
-      emitted.add(child.uuid)
-      lastTool = child
       const revivedFromHere = (revivedAnchors.get(message.uuid) ?? []).some(candidate => candidate.uuid === child.uuid)
+      const canonicalChild = clone(child)
+      if (revivedFromHere) canonicalChild.parentUuid = message.uuid
+      output.push(canonicalChild)
+      emitted.add(child.uuid)
+      lastTool = canonicalChild
       for (const block of toolUses(child)) {
         const results = resultsByToolUseId.get(block.id)
         if (results?.length && !revivedFromHere) {
@@ -251,17 +261,7 @@ export function repairTranscriptToolPairs(
     }
   }
 
-  const canonical: TranscriptMessage[] = []
-  for (const message of output) {
-    const isResultRecord = toolResults(message).length > 0
-    if (!isResultRecord) {
-      canonical.push(message)
-      continue
-    }
-    const existingIndex = canonical.findIndex(candidate => toolResults(candidate).length > 0)
-    if (existingIndex >= 0) canonical.splice(existingIndex, 1)
-    canonical.push(message)
-  }
+  const canonical = output
   const retained = new Set(canonical.map(message => message.uuid))
   const droppedMessageUuids = messages
     .filter(message => !retained.has(message.uuid) && !resultUuids.has(message.uuid) && message.type !== 'tool_use')

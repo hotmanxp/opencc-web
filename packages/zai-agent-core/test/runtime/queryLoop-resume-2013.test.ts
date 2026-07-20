@@ -219,4 +219,69 @@ describe('queryLoop resume — parallel tool_use Anthropic-2013 regression', () 
     }
     expect(allAssistantIds.has('call_orphan')).toBe(true)
   })
+
+  it('folds a revived orphan into its anchor assistant before grouped results', async () => {
+    const store = new TranscriptStore(tmpDir)
+    const sessionId = await store.create({ cwd: '/x', model: 'm' })
+    const userUuid = await appendUserMessageV2(
+      store, sessionId, 'do two things', 0, null, { cwd: '/x', sessionId },
+    )
+    const assistantUuid = await appendAssistantMessageV2(
+      store,
+      sessionId,
+      [],
+      0,
+      userUuid,
+      { cwd: '/x', sessionId },
+    )
+    const attachedToolUuid = await appendToolUse(
+      store, sessionId,
+      { id: 'call_attached', name: 'Bash', input: {} },
+      0, assistantUuid!, '/x',
+    )
+    const orphanToolUuid = await appendToolUse(
+      store, sessionId,
+      { id: 'call_revived', name: 'Read', input: {} },
+      0, 'missing-assistant', '/x',
+    )
+    await appendToolResult(
+      store, sessionId,
+      { tool_use_id: 'call_attached', content: 'a', is_error: false },
+      0, attachedToolUuid!, '/x',
+    )
+    await appendToolResult(
+      store, sessionId,
+      { tool_use_id: 'call_revived', content: 'b', is_error: false },
+      0, orphanToolUuid!, '/x',
+    )
+
+    const seen: Array<{ role: string; content: unknown }> = []
+    const captureCaller: ModelCaller = (async function* (req: any) {
+      seen.push(...req.messages)
+      yield { type: 'message_start', message: { id: 'm1' } }
+      yield { type: 'message_stop' }
+    }) as ModelCaller
+
+    await collect(
+      queryLoop(
+        { prompt: 'new', cwd: '/x', transcriptId: sessionId },
+        { dataDir: tmpDir, modelCaller: captureCaller },
+      ),
+    )
+
+    const assistantToolMessages = seen.filter(message =>
+      message.role === 'assistant'
+      && Array.isArray(message.content)
+      && message.content.some(block => (block as { type?: string }).type === 'tool_use'))
+    expect(assistantToolMessages).toHaveLength(1)
+    const toolIds = (assistantToolMessages[0]!.content as Array<{ type?: string; id?: string }>)
+      .filter(block => block.type === 'tool_use')
+      .map(block => block.id)
+    expect(toolIds).toEqual(['call_attached', 'call_revived'])
+
+    const assistantIndex = seen.indexOf(assistantToolMessages[0]!)
+    const resultBlocks = seen[assistantIndex + 1]!.content as Array<{ type?: string; tool_use_id?: string }>
+    expect(seen[assistantIndex + 1]!.role).toBe('user')
+    expect(resultBlocks.map(block => block.tool_use_id)).toEqual(['call_attached', 'call_revived'])
+  })
 })

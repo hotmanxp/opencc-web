@@ -162,6 +162,44 @@ describe('repairTranscriptToolPairs', () => {
       .toMatchObject({ tool_use_id: 'call-orphan', is_error: true })
   })
 
+  it('preserves every result across multiple valid tool turns', () => {
+    const input = [
+      record('u1', 'user', 'start'),
+      record('a2', 'assistant', [], 'u1'),
+      record('t3', 'tool_use', [{ type: 'tool_use', id: 'call-a', name: 'Bash', input: {} }], 'a2'),
+      record('r4', 'user', [{ type: 'tool_result', tool_use_id: 'call-a', content: 'a' }], 't3'),
+      record('a5', 'assistant', [], 'r4'),
+      record('t6', 'tool_use', [{ type: 'tool_use', id: 'call-b', name: 'Read', input: {} }], 'a5'),
+      record('r7', 'user', [{ type: 'tool_result', tool_use_id: 'call-b', content: 'b' }], 't6'),
+      record('u8', 'user', 'continue', 'r7'),
+    ]
+
+    const result = repairTranscriptToolPairs(input)
+
+    expect(result.report.repaired).toBe(false)
+    expect(result.messages).toEqual(input)
+  })
+
+  it('recovers an earlier tool turn when a later assistant references a missing result record', () => {
+    const input = [
+      record('u1', 'user', 'start'),
+      record('a2', 'assistant', [], 'u1'),
+      record('t3', 'tool_use', [{ type: 'tool_use', id: 'call-a', name: 'Bash', input: {} }], 'a2'),
+      record('a5', 'assistant', [], 'missing-r4'),
+      record('t6', 'tool_use', [{ type: 'tool_use', id: 'call-b', name: 'Read', input: {} }], 'a5'),
+      record('r7', 'user', [{ type: 'tool_result', tool_use_id: 'call-b', content: 'b' }], 't6'),
+      record('u8', 'user', 'continue', 'r7'),
+    ]
+
+    const first = repairTranscriptToolPairs(input)
+    const resultIds = first.messages.flatMap(message => toolResults(message).map(block => block.tool_use_id))
+    const second = repairTranscriptToolPairs(first.messages)
+
+    expect(first.report.repaired).toBe(true)
+    expect(resultIds).toEqual(['call-a', 'call-b'])
+    expect(second.report.repaired).toBe(false)
+  })
+
   it('does not mutate input and is idempotent', () => {
     const input = [
       record('a1', 'assistant', []),
