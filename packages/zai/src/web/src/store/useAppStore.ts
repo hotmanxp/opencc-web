@@ -45,6 +45,15 @@ interface AppState {
   applyJobEvent: (event: ServerEvent) => void;
   applySystemEvent: (event: ServerEvent) => void;
   dismissToast: (id: string) => void;
+  // Settings Drawer 入口状态:右端工具栏的 [⚙] 按钮触发,Agent.tsx 顶层监听渲染.
+  // 首期仅 frontend toggle;后续阶段 2 再接 PUT 写盘.
+  settingsDrawerOpen: boolean;
+  // Theme 仅前端暂存(SPEC 阶段 1),刷新/重开 Drawer 后还原为 'auto'.
+  // 与 opencc 上游 ThemeSetting 字段名对齐 (opencc/src/utils/theme.ts:111).
+  settingsTheme: 'auto' | 'dark' | 'light' | 'high-contrast';
+  openSettingsDrawer: () => void;
+  closeSettingsDrawer: () => void;
+  setSettingsTheme: (t: 'auto' | 'dark' | 'light' | 'high-contrast') => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -59,6 +68,8 @@ export const useAppStore = create<AppState>((set) => ({
   jobs: {},
   toasts: [],
   instanceContext: null,
+  settingsDrawerOpen: false,
+  settingsTheme: 'auto',
   setConnected: (v) => set({ connected: v }),
   setInstanceContext: (ctx) => set({ instanceContext: ctx }),
   applyJobEvent: (event) => set((state) => {
@@ -156,4 +167,7 @@ export const useAppStore = create<AppState>((set) => ({
     ...state,
     toasts: state.toasts.filter((t) => t.id !== id),
   })),
+  openSettingsDrawer: () => set({ settingsDrawerOpen: true }),
+  closeSettingsDrawer: () => set({ settingsDrawerOpen: false }),
+  setSettingsTheme: (t) => set({ settingsTheme: t }),
 }));
