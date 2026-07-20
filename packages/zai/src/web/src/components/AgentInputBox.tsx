@@ -678,11 +678,18 @@ export default React.memo(function AgentInputBox() {
                   repaired: boolean
                   repairedToolUseIds: string[]
                   synthesizedToolUseIds: string[]
+                  synthesizedOrphanToolUseIds: string[]
                 }
                 if (data.repaired) {
-                  message.success(
-                    `已修复 ${data.synthesizedToolUseIds.length} 个孤立 tool_use`,
-                  )
+                  const orphanCount = data.synthesizedOrphanToolUseIds.length
+                  const activeCount = data.synthesizedToolUseIds.length
+                  const summary = [
+                    activeCount > 0 ? `孤立 tool_use ${activeCount}` : null,
+                    orphanCount > 0 ? `孤儿分支复活 ${orphanCount}` : null,
+                  ]
+                    .filter(Boolean)
+                    .join("、")
+                  message.success(`已修复: ${summary}`)
                 } else {
                   message.info("transcript 健康,无需修复")
                 }
