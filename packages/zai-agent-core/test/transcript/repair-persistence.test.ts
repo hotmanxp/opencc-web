@@ -152,4 +152,41 @@ describe('repairAndPersistTranscript', () => {
     expect(after.messages).toEqual(before.messages)
     expect(after.meta.updatedAt).toBe(before.meta.updatedAt)
   })
+
+  it('persists orphan revival under file lock and stays idempotent on a second call', async () => {
+    await appendAssistantMessageV2(
+      store,
+      sessionId,
+      [{ type: 'text', text: 'plan' }],
+      0,
+      null,
+      { cwd: '/x', sessionId },
+    )
+    const a1 = (await store.read(sessionId)).messages[0].uuid
+    const u900 = (await appendUserMessageV2(
+      store,
+      sessionId,
+      'continue',
+      1,
+      a1,
+      { cwd: '/x', sessionId },
+    ))!
+    await appendToolUse(
+      store,
+      sessionId,
+      { id: 'orphan-rid', name: 'Bash', input: {} },
+      0,
+      u900,
+      '/x',
+    )
+
+    const first = await repairAndPersistTranscript(store, sessionId)
+    const second = await repairAndPersistTranscript(store, sessionId)
+    const onDisk = await store.read(sessionId)
+
+    expect(first.report.repaired).toBe(true)
+    expect(first.report.synthesizedOrphanToolUseIds).toEqual(['orphan-rid'])
+    expect(second.report.repaired).toBe(false)
+    expect(onDisk.messages).toEqual(first.messages)
+  })
 })
