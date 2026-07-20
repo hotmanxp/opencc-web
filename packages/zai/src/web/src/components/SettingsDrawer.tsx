@@ -98,97 +98,105 @@ export default function SettingsDrawer() {
             key: 'model',
             label: 'Model',
             children: (
-              <Form layout="vertical" style={{ marginTop: 16 }}>
-                <Form.Item label="默认模型">
-                  <Tag color="blue">{settings?.defaultModel ?? '加载中…'}</Tag>
-                </Form.Item>
-                <Form.Item label="API Base URL">
-                  <Tag>{settings?.baseURL ?? '默认'}</Tag>
-                </Form.Item>
-                <Form.Item label="可选模型">
-                  <Select
-                    style={{ width: '100%' }}
-                    disabled
-                    value={settings?.defaultModel}
-                    options={(settings?.models ?? []).map((m) => ({
-                      label: m.label,
-                      value: m.alias,
-                    }))}
-                    placeholder="(首期不可切换 — 阶段 2 启用)"
-                  />
-                </Form.Item>
-              </Form>
+              <div data-testid="settings-tab-model">
+                <Form layout="vertical" style={{ marginTop: 16 }}>
+                  <Form.Item label="默认模型">
+                    <Tag color="blue">{settings?.defaultModel ?? '加载中…'}</Tag>
+                  </Form.Item>
+                  <Form.Item label="API Base URL">
+                    <Tag>{settings?.baseURL ?? '默认'}</Tag>
+                  </Form.Item>
+                  <Form.Item label="可选模型">
+                    <Select
+                      style={{ width: '100%' }}
+                      disabled
+                      value={settings?.defaultModel}
+                      options={(settings?.models ?? []).map((m) => ({
+                        label: m.label,
+                        value: m.alias,
+                      }))}
+                      placeholder="(首期不可切换 — 阶段 2 启用)"
+                    />
+                  </Form.Item>
+                </Form>
+              </div>
             ),
           },
           {
             key: 'permission',
             label: 'Permission',
             children: (
-              <Form layout="vertical" style={{ marginTop: 16 }}>
-                <Form.Item label="当前模式">
-                  <Tag color="blue">{defaultMode}</Tag>
-                </Form.Item>
-                <Form.Item label="支持列表(只读,首期)">
-                  <Radio.Group disabled value={defaultMode}>
-                    <Space direction="vertical">
-                      {PERMISSION_MODES.map((m) => (
-                        <Radio key={m} value={m}>
-                          {m}
-                        </Radio>
-                      ))}
-                    </Space>
-                  </Radio.Group>
-                </Form.Item>
-              </Form>
+              <div data-testid="settings-tab-permission">
+                <Form layout="vertical" style={{ marginTop: 16 }}>
+                  <Form.Item label="当前模式">
+                    <Tag color="blue">{defaultMode}</Tag>
+                  </Form.Item>
+                  <Form.Item label="支持列表(只读,首期)">
+                    <Radio.Group disabled value={defaultMode}>
+                      <Space direction="vertical">
+                        {PERMISSION_MODES.map((m) => (
+                          <Radio key={m} value={m}>
+                            {m}
+                          </Radio>
+                        ))}
+                      </Space>
+                    </Radio.Group>
+                  </Form.Item>
+                </Form>
+              </div>
             ),
           },
           {
             key: 'theme',
             label: 'Theme',
             children: (
-              <Form layout="vertical" style={{ marginTop: 16 }}>
-                <Form.Item label="界面主题">
-                  <Radio.Group
-                    value={theme}
-                    onChange={(e) => setTheme(e.target.value as Theme)}
-                  >
-                    <Space direction="vertical">
-                      <Radio value="auto">auto(跟随系统)</Radio>
-                      <Radio value="dark">dark</Radio>
-                      <Radio value="light">light</Radio>
-                      <Radio value="high-contrast">high-contrast</Radio>
-                    </Space>
-                  </Radio.Group>
-                </Form.Item>
-                <p style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
-                  阶段 1:仅前端 state,刷新 / 重开 Drawer 后还原为 auto。
-                </p>
-              </Form>
+              <div data-testid="settings-tab-theme">
+                <Form layout="vertical" style={{ marginTop: 16 }}>
+                  <Form.Item label="界面主题">
+                    <Radio.Group
+                      value={theme}
+                      onChange={(e) => setTheme(e.target.value as Theme)}
+                    >
+                      <Space direction="vertical">
+                        <Radio value="auto">auto(跟随系统)</Radio>
+                        <Radio value="dark">dark</Radio>
+                        <Radio value="light">light</Radio>
+                        <Radio value="high-contrast">high-contrast</Radio>
+                      </Space>
+                    </Radio.Group>
+                  </Form.Item>
+                  <p style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12 }}>
+                    阶段 1:仅前端 state,刷新 / 重开 Drawer 后还原为 auto。
+                  </p>
+                </Form>
+              </div>
             ),
           },
           {
             key: 'env',
             label: 'Env Vars',
             children: (
-              <Form layout="vertical" style={{ marginTop: 16 }}>
-                <p style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12, marginBottom: 8 }}>
-                  阶段 1:只读 mock 数据,阶段 4 对接 modelCaller 真实 ZaiSettings.env。
-                </p>
-                <List
-                  dataSource={MOCK_ENV}
-                  renderItem={(item) => (
-                    <List.Item key={item.name}>
-                      <Form.Item label={item.name} style={{ marginBottom: 0, width: '100%' }}>
-                        {item.secret ? (
-                          <Input.Password value={item.value} disabled />
-                        ) : (
-                          <Input value={item.value} disabled />
-                        )}
-                      </Form.Item>
-                    </List.Item>
-                  )}
-                />
-              </Form>
+              <div data-testid="settings-tab-env">
+                <Form layout="vertical" style={{ marginTop: 16 }}>
+                  <p style={{ color: 'rgba(0,0,0,0.45)', fontSize: 12, marginBottom: 8 }}>
+                    阶段 1:只读 mock 数据,阶段 4 对接 modelCaller 真实 ZaiSettings.env。
+                  </p>
+                  <List
+                    dataSource={MOCK_ENV}
+                    renderItem={(item) => (
+                      <List.Item key={item.name}>
+                        <Form.Item label={item.name} style={{ marginBottom: 0, width: '100%' }}>
+                          {item.secret ? (
+                            <Input.Password value={item.value} disabled />
+                          ) : (
+                            <Input value={item.value} disabled />
+                          )}
+                        </Form.Item>
+                      </List.Item>
+                    )}
+                  />
+                </Form>
+              </div>
             ),
           },
         ]}

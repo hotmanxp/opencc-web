@@ -47,6 +47,7 @@ import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import ConfigStatusBar from "../components/ConfigStatusBar";
 import { SessionCwdBridge } from "../components/SessionCwdBridge";
 import { TaskDrawer } from "../components/TaskDrawer";
+import SettingsDrawer from "../components/SettingsDrawer";
 import TodoZone from "../components/TodoZone.jsx";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 import AgentInputBox from "../components/AgentInputBox";
@@ -514,6 +515,7 @@ export default function Agent() {
         </div>
       </div>
       <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
+      <SettingsDrawer />
       <SessionCwdBridge />
     </div>
   );
