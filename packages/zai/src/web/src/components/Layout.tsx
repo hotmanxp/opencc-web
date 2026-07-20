@@ -13,7 +13,9 @@ import {
   MenuUnfoldOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../store/useAppStore';
+import { useAgentStore } from '../store/useAgentStore';
 import { api } from '../lib/api';
+import type { OutputStyle } from '../../shared/settings.js';
 import ZnLogo from './ZnLogo';
 
 const { Sider, Header, Content } = AntLayout;
@@ -33,7 +35,7 @@ const menuItems = [
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sidebarCollapsed, toggleSidebar, setInstanceContext } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setOutputStyle } = useAppStore();
   const [version, setVersion] = useState<string>('…');
 
   useEffect(() => {
@@ -49,6 +51,36 @@ export default function Layout() {
         document.title = 'opencc-web-Z.AI';
       });
   }, [setInstanceContext]);
+
+  // 冷启动 hydrate outputStyle:一次性 GET /api/agent/settings 把磁盘上的
+  // settings.json 投影进 store.失败就保持 'default',与现有 settings 缺失
+  // 兜底行为一致 — SettingsDrawer 重新打开时仍能写回磁盘.
+  // 同步把 useAgentStore.transcriptCollapsed 设为 (compact === true),这样
+  // MessageListView 在 compact 默认下立即进入折叠视图,无需"先看到再翻"
+  // 的闪烁.
+  const setTranscriptCollapsed = useAgentStore((s) => s.setTranscriptCollapsed)
+  useEffect(() => {
+    let cancelled = false
+    api
+      .get<{ outputStyle?: OutputStyle }>('/agent/settings')
+      .then((data) => {
+        if (cancelled) return
+        if (
+          data.outputStyle === 'default' ||
+          data.outputStyle === 'compact' ||
+          data.outputStyle === 'verbose'
+        ) {
+          setOutputStyle(data.outputStyle)
+          setTranscriptCollapsed(data.outputStyle === 'compact')
+        }
+      })
+      .catch(() => {
+        // swallow — keep default
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [setOutputStyle, setTranscriptCollapsed]);
 
   return (
     // 用 height: 100vh (而不是 minHeight) 把 AntLayout 锁死在视口高度,

@@ -243,6 +243,14 @@ interface AgentState {
     delta: string
   ) => void
   setStatus: (status: AgentStatus) => void
+  /**
+   * Transcript fold override. 初始值为 false(展开); Layout hydrate 时
+   * 根据 settings.outputStyle 把初始值改成 (outputStyle === 'compact').
+   * 用户点工具栏按钮 → setTranscriptCollapsed(!visualCollapsed) 直接翻转.
+   * 刷新回到 settings.outputStyle 决定的值.
+   */
+  transcriptCollapsed: boolean
+  setTranscriptCollapsed: (collapsed: boolean) => void
   clearMessages: () => void
   loadSessions: () => Promise<void>
   loadTranscript: (sessionId: string) => Promise<void>
@@ -836,13 +844,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       } as AgentMessage
       return { messages: next }
     }),
-  // Transcript collapse toggle (UI layer). 不写 localStorage, 不持久化.
-  // 刷新归零, 切 session 不重置 (因为是全局布尔, 不属于 messagesBySession).
-  // 仅本次会话 (刷新后归零).
+  // Transcript collapse override (UI layer). 不写 localStorage, 不持久化.
+  // 初始值由 settings.outputStyle 决定 (Layout hydrate 时把它从 'default'
+  // 调成 outputStyle === 'compact' 即 true). 用户点工具栏按钮 → 翻转当前
+  // 视觉态,直接设值;刷新回到 settings.outputStyle 决定的值.
   transcriptCollapsed: false,
   setStatus: (status: AgentStatus) => set({ status }),
-  toggleTranscriptCollapsed: () =>
-    set((s) => ({ transcriptCollapsed: !s.transcriptCollapsed })),
+  setTranscriptCollapsed: (collapsed: boolean) =>
+    set({ transcriptCollapsed: collapsed }),
 
   clearMessages: () =>
     set((s) => {

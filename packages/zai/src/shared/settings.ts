@@ -37,6 +37,17 @@ export interface ModelEntry {
   capabilities?: ModelCapabilities
 }
 
+/**
+ * Output style for the web UI transcript.
+ *
+ *  - 'default'  → expanded transcript (legacy behavior, no collapse).
+ *  - 'compact'  → messages render as collapsed bubbles by default; the
+ *                 toolbar's manual collapse/expand button toggles a
+ *                 transient override that resets when the user reloads.
+ *  - 'verbose'  → reserved for future use (today: same as 'default').
+ */
+export type OutputStyle = 'default' | 'compact' | 'verbose'
+
 /** Shape of ~/.zai/settings.json. */
 export interface ZaiSettings {
   env?: Record<string, string>
@@ -44,4 +55,8 @@ export interface ZaiSettings {
   model?: string
   /** Alias table powering the picker UI. */
   models?: ModelEntry[]
+  /** Default permission mode surfaced in the Settings drawer. */
+  defaultMode?: string
+  /** Web transcript output style — see OutputStyle. */
+  outputStyle?: OutputStyle
 }

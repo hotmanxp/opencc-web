@@ -3,34 +3,16 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { resolveModel } from '../lib/resolveModel.js'
-import type { ModelEntry } from '../../shared/settings.js'
+import type { ModelEntry, OutputStyle, ZaiSettings } from '../../shared/settings.js'
 import type { ProviderProfile } from '../../shared/types.js'
 import { getDefaultMode } from '../services/permissionMode.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
-
-/**
- * Read ~/.zai/settings.json. Returns parsed object or empty object on
- * any failure (missing file, invalid JSON, permission error).
- *
- * Mirrors the same defensive pattern used in resolveModel.ts — the
- * settings file is optional and the server must keep working when it
- * is absent.
- */
-function readZaiSettings(): {
-  env?: Record<string, string>
-  model?: string
-  models?: ModelEntry[]
-} {
-  try {
-    const path = join(homedir(), '.zai', 'settings.json')
-    return JSON.parse(readFileSync(path, 'utf-8'))
-  } catch (err) {
-    // Empty file / invalid JSON is fine — fall back to defaults.
-    // Real IO errors are surfaced so the route can return 500.
-    if (err instanceof SyntaxError) return {}
-    throw err
-  }
-}
+import {
+  isValidOutputStyle,
+  readZaiSettings,
+  resolveOutputStyle,
+  writeZaiSettings,
+} from '../services/zaiSettingsStore.js'
 
 /**
  * Read ~/.claude.json → providerProfiles. Returns empty array when the
@@ -99,8 +81,7 @@ function slugifyModelName(model: string): string {
  *
  * Earlier layers win on alias collision so the user's picks stay sticky.
  */
-function buildAvailableModels(): ModelEntry[] {
-  const settings = readZaiSettings()
+function buildAvailableModels(settings: ZaiSettings): ModelEntry[] {
   const userEntries = settings.models ?? []
   const seen = new Set(userEntries.map((e) => e.alias))
 
@@ -127,15 +108,54 @@ const router: IRouter = Router()
  * `models` merges (in order): user settings.models[] → saved
  * providerProfiles → builtin catalog. The picker is never empty even
  * on a fresh install, but user edits are preserved on alias collision.
+ *
+ * `outputStyle` exposes the persisted transcript rendering preference
+ * so the SettingsDrawer can render the right selected row on cold
+ * start (no flash of "default" before the GET resolves).
  */
 router.get('/agent/settings', async (_req: Request, res: Response) => {
   try {
-    const settings = readZaiSettings()
+    const settings = await readZaiSettings()
     const env = settings.env ?? {}
     const { model: defaultModel } = resolveModel({ sessionModel: null, cwd: '' })
     const baseURL = env.ANTHROPIC_BASE_URL ?? null
-    const models = buildAvailableModels()
-    res.json({ defaultModel, baseURL, models, defaultMode: getDefaultMode() })
+    const models = buildAvailableModels(settings)
+    const outputStyle = resolveOutputStyle(settings)
+    res.json({
+      defaultModel,
+      baseURL,
+      models,
+      defaultMode: getDefaultMode(),
+      outputStyle,
+    })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+/**
+ * PUT /api/agent/settings/output-style — persist the web UI's
+ * transcript output style. Body is
+ * `{ outputStyle: 'default' | 'compact' | 'verbose' }`. The server
+ * validates the value and round-trips the existing settings.json
+ * (other fields preserved).
+ *
+ * Used by SettingsDrawer when the user changes the "输出样式" row.
+ * Returns the persisted value so the client can echo the canonical
+ * form back (in case it sent a typo).
+ */
+router.put('/agent/settings/output-style', async (req: Request, res: Response) => {
+  const candidate = (req.body as { outputStyle?: unknown } | undefined)?.outputStyle
+  if (!isValidOutputStyle(candidate)) {
+    return res
+      .status(400)
+      .json({ error: `invalid outputStyle: ${String(candidate)}` })
+  }
+  try {
+    const settings = await readZaiSettings()
+    const next: ZaiSettings = { ...settings, outputStyle: candidate as OutputStyle }
+    await writeZaiSettings(next)
+    res.json({ outputStyle: next.outputStyle })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }

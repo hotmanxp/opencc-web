@@ -1,5 +1,6 @@
 import { create } from 'zustand';
 import type { ServerEvent } from '../../../shared/events.js';
+import type { OutputStyle } from '../../../shared/settings.js';
 
 // 主菜单侧栏默认收起, 让首屏主区域占满. localStorage 显式存 'false' 时
 // 才展开; 任何其他情况 (无记录 / 'true' / 空值) 都视为收起.
@@ -54,6 +55,21 @@ interface AppState {
   openSettingsDrawer: () => void;
   closeSettingsDrawer: () => void;
   setSettingsTheme: (t: 'auto' | 'dark' | 'light' | 'high-contrast') => void;
+  /**
+   * Web transcript output style — see OutputStyle in shared/settings.ts.
+   *
+   * Source of truth is `~/.zai/settings.json` on disk; the field is
+   * hydrated from GET /api/agent/settings on first read and synced
+   * back via PUT /api/agent/settings/output-style when the user picks
+   * a new value in the Settings drawer.
+   *
+   * MessageListView treats `outputStyle === 'compact'` as the default
+   * transcript-collapsed state; the per-session transcriptCollapsed
+   * toggle on AgentInputBox becomes a transient override that resets
+   * to the persisted value on reload.
+   */
+  outputStyle: OutputStyle;
+  setOutputStyle: (style: OutputStyle) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -70,6 +86,10 @@ export const useAppStore = create<AppState>((set) => ({
   instanceContext: null,
   settingsDrawerOpen: false,
   settingsTheme: 'auto',
+  // Default before the GET /api/agent/settings fetch resolves; the
+  // Layout mount effect re-hydrates this from disk on first paint so
+  // cold-load reflects the user's persisted choice without a flash.
+  outputStyle: 'default',
   setConnected: (v) => set({ connected: v }),
   setInstanceContext: (ctx) => set({ instanceContext: ctx }),
   applyJobEvent: (event) => set((state) => {
@@ -170,6 +190,7 @@ export const useAppStore = create<AppState>((set) => ({
   openSettingsDrawer: () => set({ settingsDrawerOpen: true }),
   closeSettingsDrawer: () => set({ settingsDrawerOpen: false }),
   setSettingsTheme: (t) => set({ settingsTheme: t }),
+  setOutputStyle: (style) => set({ outputStyle: style }),
   // NOTE: openSettingsDrawer / closeSettingsDrawer / setSettingsTheme
   // 三个 action 必须保留(SPEC 阶段 1 4-store field requirement)。
   // 若有并行 rebase 误删,SettingsButton.test.tsx 会以

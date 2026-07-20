@@ -29,6 +29,8 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Drawer } from 'antd'
 import { useAppStore } from '../store/useAppStore'
+import { useAgentStore } from '../store/useAgentStore'
+import type { OutputStyle } from '../../../shared/settings.js'
 
 export type SettingsValue = string | number | boolean
 
@@ -421,7 +423,7 @@ type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 //   1) 静态 schema(本组件内置)— boolean / enum 行
 //   2) GET /api/agent/settings 拉来的 dynamic rows(可选模型列表)— 拼到 Permission section 之前
 // 阶段 1 只渲染静态部分;动态模型行在阶段 2 接真实数据后补上。
-function buildStaticSchema(theme: Theme): SettingsSchema {
+function buildStaticSchema(theme: Theme, outputStyle: OutputStyle): SettingsSchema {
   return [
     {
       section: 'Permission',
@@ -493,7 +495,9 @@ function buildStaticSchema(theme: Theme): SettingsSchema {
           key: 'outputStyle',
           label: '输出样式',
           kind: 'enum',
-          value: 'default',
+          // 输出样式走 store + settings.json 持久化;'compact' 时
+          // MessageListView 默认折叠,工具栏折叠按钮变成"临时展开"覆盖.
+          value: outputStyle,
           options: [
             { value: 'default', label: 'default' },
             { value: 'compact', label: 'compact' },
@@ -538,9 +542,17 @@ export default function SettingsDrawer() {
   const close = useAppStore((s) => s.closeSettingsDrawer)
   const theme = useAppStore((s) => s.settingsTheme)
   const setTheme = useAppStore((s) => s.setSettingsTheme)
+  const outputStyle = useAppStore((s) => s.outputStyle)
+  const setOutputStyle = useAppStore((s) => s.setOutputStyle)
+  // 切换 outputStyle 时同步把 transcriptCollapsed 重置为新默认 — 'compact' 切换到
+  // 'default' 时立即展开,'default' 切到 'compact' 时立即折叠;避免用户得再点
+  // 一次工具栏按钮才生效.
+  const setTranscriptCollapsed = useAgentStore((s) => s.setTranscriptCollapsed)
 
   // 把当前 store 主题映射进 schema(theme 行)
-  const [schema, setSchema] = useState<SettingsSchema>(() => buildStaticSchema(theme))
+  const [schema, setSchema] = useState<SettingsSchema>(() =>
+    buildStaticSchema(theme, outputStyle),
+  )
   // 同步 store theme → schema.theme 行(其它行的 value 内部维护)。
   useEffect(() => {
     setSchema((prev) =>
@@ -557,12 +569,44 @@ export default function SettingsDrawer() {
       })),
     )
   }, [theme])
+  // 同步 store outputStyle → schema.outputStyle 行;store 是 settings.json
+  // 持久化的真源,这里仅单向把"已持久化的值"投影到 schema 渲染态.
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'outputStyle' && r.kind === 'enum') {
+            return { ...r, value: outputStyle }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [outputStyle])
 
   const handleChange = useCallback(
     (key: string, value: SettingsValue) => {
       // 主题行直接写回 store(阶段 1 不持久化,只 frontend state)
       if (key === 'theme' && typeof value === 'string') {
         setTheme(value as Theme)
+      }
+      // 输出样式走完整持久化路径:写 store 让 MessageListView 立即生效,
+      // 同时 PUT settings.json 跨刷新保存.失败不打断 UI(下次启动仍可重写).
+      // 同步把 transcriptCollapsed 重置为新默认:
+      //   - 'compact' → true (折叠)
+      //   - 'default' / 'verbose' → false (展开)
+      if (key === 'outputStyle' && typeof value === 'string') {
+        const next = value as OutputStyle
+        setOutputStyle(next)
+        setTranscriptCollapsed(next === 'compact')
+        void fetch('/api/agent/settings/output-style', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ outputStyle: next }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
       }
       // 其它行目前只更新内部 schema state(阶段 2 接真实写盘)
       setSchema((prev) =>
@@ -581,7 +625,7 @@ export default function SettingsDrawer() {
         })),
       )
     },
-    [setTheme],
+    [setTheme, setOutputStyle, setTranscriptCollapsed],
   )
 
   if (!open) return null

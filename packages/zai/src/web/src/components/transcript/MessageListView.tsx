@@ -11,6 +11,11 @@ interface Props {
 }
 
 export function MessageListView({ messages, streaming }: Props) {
+  // 单一布尔字段,初值由 Layout hydrate 时根据 settings.outputStyle 设置:
+  //   - outputStyle === 'compact' → transcriptCollapsed = true (默认收起)
+  //   - 其余                     → transcriptCollapsed = false (默认展开)
+  // 用户点工具栏按钮 → setTranscriptCollapsed(!transcriptCollapsed) 直接翻转;
+  // 刷新回到 settings.outputStyle 决定的值.
   const collapsed = useAgentStore((s) => s.transcriptCollapsed)
 
   if (!collapsed) {

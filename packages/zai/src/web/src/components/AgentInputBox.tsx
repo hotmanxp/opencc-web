@@ -4,6 +4,7 @@ import { PictureOutlined, ToolOutlined, CompressOutlined, ExpandOutlined } from 
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
 import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
+import { useAppStore } from "../store/useAppStore";
 import { api } from "../lib/api";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import ConversationInfoButton from "../components/ConversationInfoButton";
@@ -63,10 +64,15 @@ export default React.memo(function AgentInputBox() {
     s.sessionId ? s.v2TasksBySession[s.sessionId] ?? [] : []
   );
   const todoTotal = todos.length;
+  // 单一布尔 transcriptCollapsed:Layout hydrate 时根据 settings.outputStyle
+  // 把初始值定为 (compact === true),用户点工具栏按钮 → 直接翻转.
+  // 这里 *不* 重新计算 visuallyCollapsed — transcriptCollapsed 本身就是
+  // 当前视觉折叠态,刷新时回到 Layout hydrate 后的值(由 settings 决定).
   const transcriptCollapsed = useAgentStore((s) => s.transcriptCollapsed);
-  const toggleTranscriptCollapsed = useAgentStore(
-    (s) => s.toggleTranscriptCollapsed,
-  );
+  const setTranscriptCollapsed = useAgentStore((s) => s.setTranscriptCollapsed);
+  // outputStyle 仅用于 tooltip 文案:让用户知道 settings 是 compact,
+  // 刷新后会回到当前这个工具栏按钮点击后的反向设置.
+  const outputStyle = useAppStore((s) => s.outputStyle);
   const todoDone = todos.filter((t) => t.status === "completed").length;
   const todoInProgress = todos.filter((t) => t.status === "in_progress").length;
   const v2Total = v2Tasks.length;
@@ -693,15 +699,28 @@ export default React.memo(function AgentInputBox() {
         {/* 折叠/展开 transcript 按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
             图标在 collapsed=false 时显示 ExpandOutlined (可折叠), true 时显示
             CompressOutlined (可展开), hover Tooltip 给完整文案, 与同行其他图标按钮
-            视觉风格保持一致 (icon-only + flexShrink:0). */}
+            视觉风格保持一致 (icon-only + flexShrink:0).
+
+            视觉态 = transcriptCollapsed, 初值由 Layout 根据 settings.outputStyle
+            设好(compact → true,其余 → false). 按钮只翻这一个布尔, 不依赖 settings,
+            因此在 compact 模式下点击也能正常切换. tooltip 在 outputStyle=compact 时
+            提示"刷新后回到 compact"以区分与 settings 持久化的关系. */}
         <Tooltip
-          title={transcriptCollapsed ? "展开 transcript" : "折叠 transcript"}
+          title={
+            outputStyle === "compact"
+              ? transcriptCollapsed
+                ? "临时展开 transcript(刷新后回到 compact)"
+                : "临时收起 transcript(刷新后回到 compact)"
+              : transcriptCollapsed
+                ? "展开 transcript"
+                : "折叠 transcript"
+          }
           placement="top"
         >
           <Button
             icon={transcriptCollapsed ? <CompressOutlined /> : <ExpandOutlined />}
             data-testid="transcript-collapse-button"
-            onClick={() => toggleTranscriptCollapsed()}
+            onClick={() => setTranscriptCollapsed(!transcriptCollapsed)}
             style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }}
           />
         </Tooltip>

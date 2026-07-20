@@ -536,3 +536,30 @@ describe('URL <-> sessionId sync (Agent ?sid=...)', () => {
     expect(new URLSearchParams(window.location.search).get('sid')).toBe('second')
   })
 })
+
+describe('useAgentStore.transcriptCollapsed', () => {
+  // 单一布尔字段,初值由 Layout 的 hydrate effect 根据 settings.outputStyle
+  // 设为 (compact === true),用户点工具栏按钮 → setTranscriptCollapsed 直接
+  // 翻转. 不再用三态 override,因为简单 boolean + hydrate 初值就够用.
+  test('defaults to false', () => {
+    expect(useAgentStore.getState().transcriptCollapsed).toBe(false)
+  })
+
+  test('setTranscriptCollapsed toggles the flag directly', () => {
+    useAgentStore.getState().setTranscriptCollapsed(true)
+    expect(useAgentStore.getState().transcriptCollapsed).toBe(true)
+
+    useAgentStore.getState().setTranscriptCollapsed(false)
+    expect(useAgentStore.getState().transcriptCollapsed).toBe(false)
+  })
+
+  test('agent store does not consult outputStyle itself — it just stores the boolean', () => {
+    // Layout / SettingsDrawer 负责把 settings.outputStyle 投影到此布尔,store 自己
+    // 不读 useAppStore.outputStyle. 这条契约让 store 完全不知道 settings 持久层,
+    // 刷新行为由 store 默认值 + hydrate 流程共同决定,而不是散在多处.
+    useAgentStore.setState({ transcriptCollapsed: false })
+    expect(useAgentStore.getState().transcriptCollapsed).toBe(false)
+    useAgentStore.setState({ transcriptCollapsed: true })
+    expect(useAgentStore.getState().transcriptCollapsed).toBe(true)
+  })
+})
