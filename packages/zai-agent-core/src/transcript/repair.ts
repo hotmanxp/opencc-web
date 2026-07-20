@@ -51,7 +51,36 @@ const clone = (message: TranscriptMessage): TranscriptMessage => structuredClone
 
 const stable = (value: unknown): string => JSON.stringify(value)
 
+// fold into the anthropic-protocol role shape (user / assistant / tool_use / tool_result)
+// so the alternation check below does not see separate "tool_use" records as their
+// own role. Used by `validProtocol` and the new `mergeConsecutiveUsers` pass.
+type ProtocolRole = 'user' | 'assistant'
+type ProtocolMessage = { role: ProtocolRole; messages: TranscriptMessage[] }
+
+const roleOf = (message: TranscriptMessage): ProtocolRole | null => {
+  if (message.type === 'user') return 'user'
+  if (message.type === 'assistant') return 'assistant'
+  if (message.type === 'tool_use') return 'assistant'
+  return null
+}
+
+const foldToProtocol = (messages: TranscriptMessage[]): ProtocolMessage[] => {
+  const out: ProtocolMessage[] = []
+  for (const message of messages) {
+    const role = roleOf(message)
+    if (role === null) continue
+    const last = out[out.length - 1]
+    if (last && last.role === role) {
+      last.messages.push(message)
+      continue
+    }
+    out.push({ role, messages: [message] })
+  }
+  return out
+}
+
 const validProtocol = (messages: TranscriptMessage[]): boolean => {
+  // (1) tool_use_id ↔ tool_result id pairing
   for (let index = 0; index < messages.length; index += 1) {
     const results = toolResults(messages[index])
     if (results.length === 0) continue
@@ -69,7 +98,87 @@ const validProtocol = (messages: TranscriptMessage[]): boolean => {
     if (ids.size === 0) return false
     if (results.some(block => !ids.has(block.tool_use_id))) return false
   }
+
+  // (2) Anthropic role alternation: serialized user/assistant must strictly
+  // alternate. We fold top-level `tool_use` into their parent assistant (per
+  // `foldTopLevelToolUses` semantics used by queryLoop resume), then assert
+  // no two consecutive entries share the same role. Without this check
+  // adjacent text-only user messages (e.g. rapid "retry" submissions or
+  // paste-then-send) survive repair and trigger 400 / 2013 on the next
+  // modelCaller — sess-d40042c8 reproducible regression.
+  const protocol = foldToProtocol(messages)
+  for (let index = 1; index < protocol.length; index += 1) {
+    if (protocol[index].role === protocol[index - 1].role) return false
+  }
   return true
+}
+
+// Merge consecutive user messages in source order into the first occurrence.
+//
+// Rationale — Anthropic 400 / 2013 on resume:
+//   `serializeForAnthropic` already merges adjacent user messages when at
+//   least one carries `tool_result` blocks. It deliberately skips the
+//   pure-text case so UI-rendered transcripts can keep each send as its own
+//   bubble. That skip is the bug: when a user re-submits the same prompt
+//   twice (retry / accidental double-Enter) the rejected user messages
+//   append to the transcript and resume reload surfaces them as
+//   `user,user,...` — failing the strict alternation guarantee.
+//
+// Behaviour:
+//   - Only consecutive user messages are merged (text-only or mixed content).
+//   - The merged record re-parents all absorbed messages to the first one.
+//   - `mergeConsecutiveUsers` is invoked from `repairTranscriptToolPairs`
+//     before `validProtocol` so the alternation check passes.
+//   - Pure text merges concatenate raw strings (preserving order). Mixed
+//     content (text + blocks) emits a single text block per absorbed message.
+const mergeConsecutiveUsers = (messages: TranscriptMessage[]): TranscriptMessage[] => {
+  const out: TranscriptMessage[] = []
+  for (const message of messages) {
+    if (message.type !== 'user') {
+      out.push(message)
+      continue
+    }
+    const last = out[out.length - 1]
+    if (!last || last.type !== 'user') {
+      out.push(message)
+      continue
+    }
+    // Tool_result blocks are structural: each one is a per-tool-use response
+    // and merging them with an adjacent user message corrupts tool_use_id
+    // pairing. Skip the merge when either side carries tool_result blocks
+    // — `serializeForAnthropic`'s existing merge already handles that case
+    // (and the assembler does the right thing at serialize time).
+    if (toolResults(last).length > 0 || toolResults(message).length > 0) {
+      out.push(message)
+      continue
+    }
+    // Merge `message` into `last`. Keep `last.uuid`, drop `message` from `out`.
+    // Pure text merges concatenate raw strings (preserving order); non-text
+    // blocks are converted to empty text placeholders so we don't lose the
+    // slot but also don't double-render attachment metadata. Image / file
+    // paste blocks are rare in duplicate-send scenarios; if they appear we
+    // accept the lossy merge rather than preserving the alternation bug.
+    const mergedContent: Array<{ type: 'text'; text: string }> = []
+    const pushContent = (entry: TranscriptMessage) => {
+      const c = entry.message?.content
+      if (typeof c === 'string') {
+        if (c.length > 0) mergedContent.push({ type: 'text', text: c })
+        return
+      }
+      if (Array.isArray(c)) {
+        for (const block of c) {
+          if (block && block.type === 'text' && typeof block.text === 'string') {
+            mergedContent.push({ type: 'text', text: block.text })
+          }
+          // Non-text blocks fall through (dropped) — see rationale above.
+        }
+      }
+    }
+    pushContent(last)
+    pushContent(message)
+    last.message = { ...(last.message ?? {}), role: 'user', content: mergedContent }
+  }
+  return out
 }
 
 const recoveryRecord = (
@@ -263,20 +372,40 @@ export function repairTranscriptToolPairs(
 
   const canonical = output
   const retained = new Set(canonical.map(message => message.uuid))
-  const droppedMessageUuids = messages
+  const droppedMessageUuids: string[] = messages
     .filter(message => !retained.has(message.uuid) && !resultUuids.has(message.uuid) && message.type !== 'tool_use')
     .map(message => message.uuid)
 
-  if (!validProtocol(canonical)) {
+  // ---- role alternation repair (sess-d40042c8 regression) ----------------
+  // Adjacent text-only user messages survive the tool_use pass because the
+  // chain walker treats them as legitimate branches. Without merging we
+  // would return the unchanged array, `validProtocol` would still flag it,
+  // and Anthropic would reject the modelCaller payload with 400 / 2013 on
+  // resume — exactly the symptom the user reported.
+  // `mergeConsecutiveUsers` folds adjacent same-role messages into the
+  // first occurrence so the strict user/assistant alternation in
+  // `validProtocol` accepts the result. Any uuid dropped by the merge is
+  // surfaced via `droppedMessageUuids`.
+  const canonicalStable = stable(canonical)
+  const merged = mergeConsecutiveUsers(canonical)
+  const mergedRetained = new Set(merged.map(message => message.uuid))
+  for (const entry of canonical) {
+    if (!mergedRetained.has(entry.uuid)) droppedMessageUuids.push(entry.uuid)
+  }
+  const mergedStable = stable(merged)
+  const mergeChanged = canonicalStable !== mergedStable
+  const finalCanonical = mergeChanged ? merged : canonical
+
+  if (!validProtocol(finalCanonical)) {
     return {
       messages: original,
       report: { repaired: false, repairedToolUseIds: [], synthesizedToolUseIds: [], synthesizedOrphanToolUseIds: [], droppedMessageUuids: [] },
     }
   }
 
-  const repaired = stable(original) !== stable(canonical)
+  const repaired = stable(original) !== mergedStable
   return {
-    messages: repaired ? canonical : original,
+    messages: repaired ? finalCanonical : original,
     report: {
       repaired,
       repairedToolUseIds: repaired ? repairedToolUseIds : [],

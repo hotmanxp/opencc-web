@@ -107,6 +107,13 @@ export default function Agent() {
   // question 卡片滚到视口用: pendingAsk 不在 messages[] 里, 单依赖 messages 的滚动 effect
   // 不会触发, 这里单独加一个 ref 让卡片出现时也能滚到底.
   const questionCardRef = useRef<HTMLDivElement>(null);
+  // 真实承载 messages 流的可滚动 div. useScrollFollow 在这个容器上挂
+  // wheel / touchstart / 滚动键监听器去判断"用户是否在翻历史",挂到
+  // messagesEndRef (底部哨兵 ref) 上会因它通常不可见而漏事件。
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // 用户最近 5s 内主动滚过 → true 时跳过自动滚到底,避免 AI 生成期间
+  // 把用户视线硬拉回底部。详细语义见 hooks/useScrollFollow.ts 顶部注释。
+  const scrollFollowLocked = useScrollFollow(scrollContainerRef);
 
   // 根据侧栏实际高度估算默认展示条数, 窗口/容器尺寸变化时自动重算.
   useEffect(() => {

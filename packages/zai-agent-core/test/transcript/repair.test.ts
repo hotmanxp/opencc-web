@@ -215,4 +215,75 @@ describe('repairTranscriptToolPairs', () => {
     expect(second.report.repaired).toBe(false)
     expect(second.messages).toEqual(first.messages)
   })
+
+  // Regression: sess-d40042c8-86c6-432f-998d-f3d125ebf8ec
+  //   Three consecutive text-only user messages (rapid retries / pasted
+  //   follow-ups) survived the tool_use repair pass. They serialize as
+  //   `user,user,user` instead of strict user/assistant alternation and
+  //   Anthropic rejects the next modelCaller payload with 400 / 2013.
+  //   `validProtocol` previously only checked tool_use_id pairing and
+  //   reported "no fix needed"; the new role-alternation check + adjacent
+  //   user-merge fold these into a single user record.
+  //
+  // Note on parentUuid: in real transcripts the duplicate sends chain
+  // off each previous user (parentUuid points back), so the active-chain
+  // walk retains them. Test mirrors that shape.
+  it('merges consecutive text-only user messages to enforce role alternation', () => {
+    const input = [
+      record('u1', 'user', 'start'),
+      record('a2', 'assistant', [], 'u1'),
+      record('t3', 'tool_use', [{ type: 'tool_use', id: 'call-a', name: 'Bash', input: {} }], 'a2'),
+      record('r4', 'user', [{ type: 'tool_result', tool_use_id: 'call-a', content: 'a' }], 't3'),
+      record('a5', 'assistant', [], 'r4'),
+      // Three duplicate user sends in a row, properly chained — the
+      // regression shape from sess-d40042c8 last 3 entries.
+      record('u6a', 'user', 'retry once', 'a5'),
+      record('u6b', 'user', 'retry once', 'u6a'),
+      record('u6c', 'user', 'v', 'u6b'),
+    ]
+
+    const result = repairTranscriptToolPairs(input)
+
+    expect(result.report.repaired).toBe(true)
+    expect(result.report.droppedMessageUuids).toEqual(expect.arrayContaining(['u6b', 'u6c']))
+    // No two adjacent user records.
+    for (let i = 1; i < result.messages.length; i += 1) {
+      expect(
+        result.messages[i].type !== 'user' || result.messages[i - 1].type !== 'user',
+      ).toBe(true)
+    }
+    // Merged user record should concatenate text from all three originals.
+    const lastUser = result.messages.findLast(m => m.type === 'user' && Array.isArray(m.message?.content))
+    const content = lastUser?.message?.content as Array<{ text?: string }> | undefined
+    const text = Array.isArray(content) ? content.map(b => String(b.text ?? '')).join('\n') : ''
+    expect(text).toBe('retry once\nretry once\nv')
+    // Re-running the repair is a no-op.
+    const second = repairTranscriptToolPairs(result.messages)
+    expect(second.report.repaired).toBe(false)
+  })
+
+  // Tool_result blocks are structural: each is paired with a specific
+  // tool_use_id. Two adjacent user records — one with tool_result, one
+  // with text — must NOT be merged, otherwise the tool_result block
+  // gets renumbered out of position and 2013 returns at a different id.
+  it('does not merge when either side carries tool_result blocks', () => {
+    const input = [
+      record('u1', 'user', 'continue'),
+      record('a2', 'assistant', [], 'u1'),
+      record('t3', 'tool_use', [{ type: 'tool_use', id: 'call-x', name: 'Bash', input: {} }], 'a2'),
+      record('r4', 'user', [{ type: 'tool_result', tool_use_id: 'call-x', content: 'a' }], 't3'),
+      record('u5', 'user', 'follow-up', 'r4'),
+    ]
+
+    const result = repairTranscriptToolPairs(input)
+
+    // Invariant: the tool_result block survives — its tool_use_id pairing
+    // is what `mergeConsecutiveUsers` must NOT touch.
+    const allBlocks = result.messages.flatMap(m => toolResults(m))
+    expect(allBlocks.map(b => b.tool_use_id)).toContain('call-x')
+    // And the follow-up text record is still there as a separate user
+    // record (no merge swallowed it).
+    const textUsers = result.messages.filter(m => m.type === 'user' && m.message?.content === 'follow-up')
+    expect(textUsers).toHaveLength(1)
+  })
 })
