@@ -26,6 +26,8 @@ import {
   CaretRightOutlined,
   DeleteOutlined,
   PictureOutlined,
+  CompressOutlined,
+  ExpandOutlined,
 } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -77,12 +79,18 @@ export default function Agent() {
   const setAskNotes = useAgentStore((s) => s.setAskNotes);
   const submitAsk = useAgentStore((s) => s.submitAsk);
   const rejectAsk = useAgentStore((s) => s.rejectAsk);
+  const transcriptCollapsed = useAgentStore((s) => s.transcriptCollapsed);
+  const toggleTranscriptCollapsed = useAgentStore((s) => s.toggleTranscriptCollapsed);
   const todosForCurrentSession: TodoItem[] =
     sessionId != null ? (todosBySession[sessionId] ?? []) : [];
   // v2TasksBySession 仍订阅在 store, 但渲染层 Agent.tsx 不再使用 —
   // 任务摘要现在由 AgentInputBox 内部从 store 直接取 (避免 props 透传).
   void v2TasksBySession;
   const patchSessionMode = useAgentStore((s) => s.patchSessionMode);
+  const transcriptCollapsed = useAgentStore((s) => s.transcriptCollapsed);
+  const toggleTranscriptCollapsed = useAgentStore(
+    (s) => s.toggleTranscriptCollapsed,
+  );
   const { instanceContext } = useAppStore()
   const cwdName = instanceContext?.cwdName || '~'
   const branch = instanceContext?.branch || 'master'
@@ -502,6 +510,15 @@ export default function Agent() {
             </div>
           )}
           <TodoZone todos={todosForCurrentSession} />
+          <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 4 }}>
+            <Button
+              size="small"
+              icon={transcriptCollapsed ? <CompressOutlined /> : <ExpandOutlined />}
+              onClick={() => toggleTranscriptCollapsed()}
+            >
+              {transcriptCollapsed ? '展开 transcript' : '折叠 transcript'}
+            </Button>
+          </div>
           {messageList}
           {pendingAsk && (
             <div ref={questionCardRef}>
