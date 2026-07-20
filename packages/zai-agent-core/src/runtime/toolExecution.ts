@@ -5,13 +5,21 @@
 
 import type { Tool, ToolContext, ToolResult } from '../tools/Tool.js'
 import type { RuntimeEvent } from './events.js'
-import type { AskRegistryLike } from './types.js'
+import type { AskRegistryLike, RuntimeConfig } from './types.js'
 import type { TranscriptStore } from '../transcript/store.js'
 import {
   appendToolResult,
   appendToolUse,
 } from '../transcript/persistence.js'
 import { ASK_USER_QUESTION_TOOL_NAME } from '../tools/AskUserQuestionTool/prompt.js'
+import {
+  createStreamingToolExecutor,
+  DEFAULT_MAX_PARALLEL,
+} from './streaming/index.js'
+import type {
+  ParallelToolEvent,
+  StreamingToolExecutorHandle,
+} from './streaming/types.js'
 
 type ToolUseBlock = { id: string; name: string; input: unknown }
 
@@ -42,6 +50,18 @@ type EventMeta = {
    * null when not provided (test fixtures, ad-hoc callers).
    */
   parentUuid?: string | null
+  /**
+   * Optional RuntimeConfig — when present AND
+   * `config.runtime.streamingToolExecution === 'on'`, the top of
+   * `executeToolsStreaming` dispatches through
+   * `createStreamingToolExecutor` (parallel pool) instead of the legacy
+   * serial loop. Spec: docs/superpowers/specs/2026-07-19-zai-loop-resilience-b-streaming-tools-design.md §2.5.
+   *
+   * Existing call sites that don't pass `config` keep the historical
+   * serial behavior — Phase 2 wire-in PR populates this from queryLoop /
+   * queryEngine.
+   */
+  config?: RuntimeConfig
 }
 
 /**
@@ -68,6 +88,26 @@ export async function* executeToolsStreaming(
   meta: EventMeta,
   askRegistry?: AskRegistryLike,
 ): AsyncGenerator<RuntimeEvent, void, void> {
+  // ---- 0. Streaming fast path (B spec §2.5) ------------------------------
+  // When `config.runtime.streamingToolExecution === 'on'`, dispatch through
+  // the bounded-concurrency parallel pool (`createStreamingToolExecutor`)
+  // instead of the legacy serial loop below. The pool yields
+  // `runtime.tool_call` / `runtime.tool_result` events with `parallel:true`
+  // — the existing `routes/agent.ts` translator maps these to the SSE wire
+  // shape unchanged. When the flag is off (default today), we fall through
+  // to the historical serial path so all existing tests / call sites keep
+  // their behavior.
+  //
+  // Caveat: the streaming executor does NOT yet cover hook runner,
+  // AskUserQuestion, or transcript persistence. Phase 2 wire-in is
+  // responsible for layering those concerns on top — see umbrella plan
+  // Phase 2 Task 3.
+  const streamingOpt = (meta.config as any)?.runtime?.streamingToolExecution
+  if (streamingOpt === 'on') {
+    yield* runStreamingFastPath(blocks, ctx, tools, meta, askRegistry)
+    return
+  }
+
   const results: ToolResult[] = new Array(blocks.length)
   ctx.state.__lastToolResults = results
 
@@ -316,4 +356,115 @@ export async function* executeToolsStreaming(
 
   // ---- 3. 收尾 flush (防御性: 还有没排出去的 sub 事件) ----
   for (const sub of drainSubQueue()) yield sub
+}
+
+/**
+ * Streaming fast path — B spec §2.5.
+ *
+ * Wraps `createStreamingToolExecutor` and translates its
+ * `runtime.tool_call` / `runtime.tool_result` events into the same
+ * `RuntimeEvent` shape the legacy serial loop yields. Hooks, AskUserQuestion,
+ * and transcript persistence are deliberately NOT covered here — Phase 2
+ * wire-in layers them on top. The fast path keeps the existing
+ * `ctx.state.__lastToolResults` invariant so queryLoop / queryEngine still
+ * read tool results from there.
+ */
+async function* runStreamingFastPath(
+  blocks: ToolUseBlock[],
+  ctx: ToolContext,
+  tools: Tool[],
+  meta: EventMeta,
+  _askRegistry?: AskRegistryLike,
+): AsyncGenerator<RuntimeEvent, void, void> {
+  const results: ToolResult[] = new Array(blocks.length)
+  ctx.state.__lastToolResults = results
+
+  // Build streaming-tool registry: each tool's `execute` invokes the same
+  // path the legacy serial loop uses (`tool.call` with a bridged context),
+  // so behavior matches when hooks / AskUserQuestion aren't involved.
+  const streamingTools = tools.map((t) => ({
+    name: t.name,
+    execute: async (input: unknown) => {
+      const canUseToolFn = ctx.canUseTool
+        ? async (_name: string, inp: unknown) => ctx.canUseTool(t.name, inp)
+        : undefined
+      // Reuse the bridgedCtx semantics (sub-event queue) by going through
+      // tool.call directly; we drop sub-event bridging for the fast path
+      // since Phase 2 wire-in is responsible for layering it on.
+      const out = await t.call(input as any, ctx, canUseToolFn, {} as any)
+      const data = (out as any).data ?? (out as any).output ?? ''
+      return {
+        toolUseId: 'unused',
+        content: typeof data === 'string' ? data : JSON.stringify(data),
+        isError: Boolean((out as any).isError),
+      }
+    },
+  }))
+
+  const maxParallel =
+    (meta.config as any)?.runtime?.streamingToolExecution?.maxParallel ??
+    DEFAULT_MAX_PARALLEL
+
+  const exec: StreamingToolExecutorHandle = createStreamingToolExecutor({
+    tools: streamingTools,
+    maxParallel,
+    signal: ctx.abortSignal,
+    sessionId: meta.sessionId,
+  })
+
+  for (const block of blocks) {
+    exec.submit({ id: block.id, name: block.name, input: block.input })
+  }
+
+  // Pull events and translate to the legacy RuntimeEvent shape so the
+  // surrounding pipeline (translator in routes/agent.ts, store upserts)
+  // continues to work unchanged. The streaming executor's
+  // `runtime.tool_call` carries `parallel:true`; `routes/agent.ts` already
+  // passes that through.
+  for await (const ev of exec.events()) {
+    if (ev.type === 'runtime.tool_call') {
+      yield makeRuntimeEvent(meta, 'tool_use:start', {
+        toolUseId: ev.toolUseId,
+        name: ev.toolName,
+        input: ev.input,
+        parallel: true,
+      })
+    } else {
+      // runtime.tool_result → tool_use:done OR tool_use:error.
+      const eventType = ev.ok ? 'tool_use:done' : 'tool_use:error'
+      yield makeRuntimeEvent(meta, eventType, {
+        toolUseId: ev.toolUseId,
+        name: ev.toolName,
+        output: ev.output,
+        ...(ev.ok ? {} : { error: ev.output }),
+      })
+      const idx = blocks.findIndex((b) => b.id === ev.toolUseId)
+      if (idx >= 0) {
+        results[idx] = {
+          toolUseId: ev.toolUseId,
+          content: ev.output,
+          isError: !ev.ok,
+        }
+      }
+    }
+  }
+
+  // drain() blocks until the executor finishes, but events() above already
+  // drained the channel, so this returns immediately.
+  await exec.drain()
+}
+
+function makeRuntimeEvent(
+  meta: EventMeta,
+  type: string,
+  payload: Record<string, unknown>,
+): RuntimeEvent {
+  return {
+    eventId: meta.nextEventId(),
+    sessionId: meta.sessionId,
+    ts: Date.now(),
+    turnIndex: meta.turnIndex,
+    type,
+    ...payload,
+  } as RuntimeEvent
 }

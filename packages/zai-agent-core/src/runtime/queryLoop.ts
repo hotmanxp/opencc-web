@@ -43,6 +43,24 @@ import {
 import { repairAndPersistTranscript } from '../transcript/repair.js'
 import { foldTopLevelToolUses } from '../opencc-internals/utils/foldTopLevelToolUses.js'
 
+
+// wirein-imports: loop-resilience
+import {
+  recordToolFailure,
+  recordToolSuccess,
+  type LoopGuardState,
+} from './errors/index.js'
+import { getAttachmentMessages, startRelevantMemoryPrefetch } from './attachment/index.js'
+import {
+  analyzeContinuationIntent,
+  injectContinuationNudge,
+  isHookBlockedError,
+  buildHookBlockedErrorPayload,
+  type LastBlockKind,
+  type NudgeCounters,
+} from './nudge/index.js'
+import { getAgentStepLimit, generateToolUseSummary } from './summary/index.js'
+
 /**
  * queryLoop — zai port of OpenCC's async-generator query loop.
  *
@@ -92,6 +110,9 @@ export async function* queryLoop(
     config.plugins?.hookExecutor ?? createDefaultHookExecutor(),
   )
   const mcpServers = [...(config.mcpServers ?? []), ...pluginSnapshot.mcpServers]
+
+  // wirein-prefetch: 提前声明 null 让 finally 安全 dispose
+  let memPrefetch: { dispose(): void; prefetched: Promise<string | null> } | null = null
 
   try {
   // 0.1. Load skills (skillsDirs 缺失 → 空)
@@ -215,6 +236,30 @@ export async function* queryLoop(
   // 对齐 OpenCC isMeta: SubagentNotifier 注入的 <task-notification> 通过
   // isMetaPrompt: true 走 meta.isMeta=true 落盘,前端 UI 层不渲染.
   const promptIsMeta = options.isMetaPrompt === true
+
+  // ---- loop-resilience wire-in (Phase 2) -----------------------------------
+  // D. mid-turn attachment + memory prefetch (turn 入口一次性拉取)
+  const attachments = await getAttachmentMessages({
+    sessionId,
+    signal: abortController.signal,
+    pluginSnapshot,
+  })
+  for (const att of attachments) messages.push(att.payload as any)
+  memPrefetch = startRelevantMemoryPrefetch({
+    sessionId,
+    signal: abortController.signal,
+  })
+  // E. agent step limit (Phase 2 读一次; 在 while entry 用)
+  const stepLimit = getAgentStepLimit({
+    config,
+    userOptIn: options.agentStepLimit as number | undefined,
+  })
+  // A. loop-guard 状态(同 turn 内连续失败防护)
+  const loopGuardState: LoopGuardState = { consecutiveFailureByToolId: new Map() }
+  // C. continuation nudge 计数器(loop-local)
+  const nudgeCounters: NudgeCounters = { consecutive: 0, total: 0 }
+  // ------------------------------------------------------------------------
+
   if (subCtx?.initialUserMessage) {
     messages.push(subCtx.initialUserMessage)
     const u = await appendUserMessageV2(store, sessionId, subCtx.initialUserMessage.content, 0, lastUuid, ctx, promptIsMeta ? { isMeta: true } : undefined)
@@ -243,6 +288,11 @@ export async function* queryLoop(
         })
       }
       yield toAbortedEvent({ sessionId, turnIndex: turn }, abortController.signal.reason as string | undefined)
+      return
+    }
+    // E. stepLimit 守卫 (Phase 2 wire-in)
+    if (stepLimit !== null && turn > stepLimit) {
+      yield { type: 'runtime.done', eventId: '', sessionId, ts: Date.now(), turnIndex: turn, text: '', reason: 'step-limit-reached' } as any
       return
     }
 
@@ -338,11 +388,44 @@ export async function* queryLoop(
         store, sessionId, assistantBlocks, turn, lastUuid, ctx,
       )
       if (assistantUuid) lastUuid = assistantUuid
-      const stop = await hookRunner.run('Stop', { text: assistantText, sessionId }, abortController.signal)
-      if (stop.blocked && stop.outputs.some(output => String(output ?? '').length > 0) && turn < maxTurns) {
+      // C. Stop hook blocking (Phase 2 wire-in)
+      let stop: Awaited<ReturnType<typeof hookRunner.run>> | undefined
+      try {
+        stop = await hookRunner.run(
+          'Stop',
+          { text: assistantText, sessionId, blocking: true } as any,
+          abortController.signal,
+        )
+      } catch (err) {
+        if (isHookBlockedError(err)) {
+          yield { type: 'runtime.error', payload: buildHookBlockedErrorPayload(err) } as any
+          return
+        }
+        throw err
+      }
+      if (stop?.blocked && stop.outputs.some(output => String(output ?? '').length > 0) && turn < maxTurns) {
         messages.push({ role: 'user', content: stop.outputs.map(output => String(output ?? '')).filter(Boolean).join('\n') })
         continue
       }
+      // C. Continuation intent analysis (spec C §2.5)
+      const lastBlockKind: LastBlockKind = toolUseBlocks.length > 0 ? 'tool_use' : 'text'
+      const intent = analyzeContinuationIntent(assistantText, lastBlockKind)
+      const nudgeResult = injectContinuationNudge(intent, {
+        counters: nudgeCounters,
+        max: config.runtime?.continuationNudgeMax as number | undefined,
+        enabled: config.runtime?.continuationNudgeEnabled as boolean | undefined,
+      })
+      if (nudgeResult.inject && nudgeResult.nudgeMessage) {
+        yield nudgeResult.nudgeMessage as RuntimeEvent
+        continue
+      }
+      // E. fire-and-forget summary(spec E §2.5)
+      void generateToolUseSummary({
+        toolResult: { content: assistantText, isError: false, data: undefined },
+        sessionId,
+        transcriptId: sessionId,
+        signal: abortController.signal,
+      })
       yield { type: 'runtime.done', eventId: '', sessionId, ts: Date.now(), turnIndex: turn, text: assistantText } as any
       return
     }
@@ -353,6 +436,7 @@ export async function* queryLoop(
     // 透传 parentUuid (=assistant uuid) 给 toolExecution, 写 v2 tool_use / tool_result
     // 时维持 chain. 旧行为是 null, 会断链.
     let toolEvtCounter = 0
+    // Phase 2 wire-in: config 透传让 B streaming fast path 开关生效
     for await (const ev of executeToolsStreaming(toolUseBlocks, toolCtx as any, tools, {
       sessionId,
       turnIndex: turn,
@@ -360,6 +444,7 @@ export async function* queryLoop(
       store,
       cwd: options.cwd,
       parentUuid: lastUuid,
+      config,
     }, config.askRegistry)) {
       yield ev as RuntimeEvent
     }
@@ -368,6 +453,40 @@ export async function* queryLoop(
     const lastTrUuid = (toolCtx.state as any).__lastPersistedUuid as string | undefined
     if (lastTrUuid) lastUuid = lastTrUuid
     const lastResults: any[] = (toolCtx.state as any).__lastToolResults ?? []
+
+    // A. loop-guard (Phase 2 wire-in, spec A §2.5)
+    const isLastTurn = turn + 1 >= maxTurns
+    let loopGuardTriggered = false
+    for (let i = 0; i < toolUseBlocks.length; i++) {
+      const tub = toolUseBlocks[i]!
+      const failed = Boolean(lastResults[i]?.isError) || lastResults[i]?.content?.startsWith?.('[tool not found]')
+      if (failed) {
+        const decision = recordToolFailure(loopGuardState, tub.id)
+        if (decision === 'break-and-error' && !isLastTurn) {
+          yield {
+            type: 'runtime.error',
+            payload: {
+              message: `tool ${tub.name} failed ${loopGuardState.consecutiveFailureByToolId.get(tub.id)} times consecutively`,
+              fatal: true,
+              kind: 'tool_failure_loop',
+              toolUseId: tub.id,
+            },
+          } as any
+          loopGuardTriggered = true
+          break
+        }
+      } else {
+        recordToolSuccess(loopGuardState, tub.id)
+      }
+      // E. fire-and-forget summary(spec E §2.5,§3.5)
+      void generateToolUseSummary({
+        toolResult: lastResults[i] ?? { content: '', isError: false, data: undefined },
+        sessionId,
+        transcriptId: sessionId,
+        signal: abortController.signal,
+      })
+    }
+    if (loopGuardTriggered) return
 
     messages.push({ role: 'user', content: toolUseBlocks.map((t, i) => ({
       type: 'tool_result',
@@ -403,6 +522,7 @@ export async function* queryLoop(
     }
   }
   } finally {
+    memPrefetch?.dispose()
     await hookRunner.run('SessionEnd', { cwd: options.cwd, sessionId }, abortController.signal)
     if (config.mcpClientPool) {
       for (const name of pluginSnapshot.pluginMcpServerNames) {

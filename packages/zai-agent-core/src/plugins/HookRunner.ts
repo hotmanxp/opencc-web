@@ -19,6 +19,24 @@ export const DEFAULT_HOOK_TIMEOUT_MS = 30_000
 const BLOCKING_EVENTS = new Set<string>(['PreToolUse', 'Stop'])
 
 /**
+ * Local typing for the `input` object passed to `Stop` hooks when the
+ * wire-in (Phase 2 in queryLoop.ts) wants to enable active blocking.
+ *
+ * Spec C §2.1: pure additive payload extension. The `blocking: true`
+ * field signals to a Stop hook that it MAY throw a `HookBlockedError`
+ * (defined in `runtime/nudge/hooks.ts`) to actively break the loop.
+ * The actual catch + `runtime.error` translation lives in the wire-in
+ * layer; this file only documents the payload shape.
+ *
+ * Not exported — keeps the public surface area of `plugins/HookRunner`
+ * unchanged. Wire-in callers cast to this shape at the call site.
+ */
+interface StopHookPayload {
+  /** Set to true by the wire-in when active blocking is allowed. */
+  blocking: boolean
+}
+
+/**
  * Stable contract returned by `HookRunner.run`. The runtime (Task 6)
  * inspects `blocked` and forwards `outputs` / `errors` to telemetry.
  */

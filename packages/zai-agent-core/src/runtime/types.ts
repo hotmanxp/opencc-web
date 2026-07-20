@@ -92,6 +92,22 @@ export type RuntimeConfig = {
   plugins?: PluginRuntimeConfig
   /** Plugin runtime implementation. Bootstrapped by the host if set. */
   pluginRuntime?: PluginRuntime
+
+  /**
+   * Loop-resilience runtime tunables (spec E + spec C). Narrow + structural
+   * so unit tests can pass partial shapes — matches the shape used by
+   * `runtime/summary/stepCounter.ts` (`RuntimeConfigSlice`).
+   */
+  runtime?: {
+    /** Per-session agent step limit. Read by `getAgentStepLimit({ config })`. */
+    agentStepLimit?: number
+    /** Max continuation nudges before bailing. Read by `injectContinuationNudge`. */
+    continuationNudgeMax?: number
+    /** Feature toggle for continuation nudges. Read by `injectContinuationNudge`. */
+    continuationNudgeEnabled?: boolean
+    /** Allow other loop-resilience keys without forcing them into the type. */
+    [key: string]: unknown
+  }
 }
 
 export type QueryOptions = {
@@ -140,4 +156,10 @@ export type QueryOptions = {
    * 用户看见原始 XML"场景。缺省 false (普通用户输入,正常显示).
    */
   isMetaPrompt?: boolean
+  /**
+   * Per-query override of the agent step limit (spec E §2.1). Has highest
+   * priority over `config.runtime.agentStepLimit` and `ZAI_AGENT_STEP_LIMIT`.
+   * Wired into `getAgentStepLimit({ userOptIn })` by queryLoop.
+   */
+  agentStepLimit?: number
 }

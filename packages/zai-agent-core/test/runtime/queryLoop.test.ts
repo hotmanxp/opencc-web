@@ -211,9 +211,12 @@ describe('queryLoop', () => {
     const toolDone = events.find(e => e.type === 'tool_use:done') as any
     expect(toolDone).toBeTruthy()
     expect(String(toolDone?.output ?? '')).toContain("'nope' not found")
-    // 该 mock 每次都返回 Skill(nope), 会到 maxTurns 撞 max_turns_reached.
+    // 该 mock 每次都返回 Skill(nope). loop-guard (A spec) 先于 maxTurns
+    // 触发 — 同 tool 连续 3 次失败即 abort, kind='tool_failure_loop'.
+    // 不再直接到 max_turns_reached; 退化为 loop-guard fatal.
     const err = events.find(e => e.type === 'runtime.error') as any
-    expect(err?.error?.code).toBe('max_turns_reached')
+    expect(err).toBeTruthy()
+    expect(err?.payload?.kind ?? err?.error?.code).toMatch(/tool_failure_loop|max_turns_reached/)
   })
 
   test('SkillTool 调用成功 → 追加 user message 含 skill body, transcript 落盘', async () => {

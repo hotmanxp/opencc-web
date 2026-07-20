@@ -107,7 +107,7 @@ import {
   extractQuotaStatusFromHeaders,
 } from '../claudeAiLimits.js'
 import { getAPIContextManagement } from '../compact/apiMicrocompact.js'
-import { getStreamIdleTimeoutMs } from './openaiShim.js'
+import { getStreamIdleTimeoutMs } from './openaiShim/streaming.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const autoModeStateModule = true

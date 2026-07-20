@@ -58,9 +58,123 @@ function readZaiSettings(): ZaiSettings {
   }
 }
 
+interface ClaudeProviderProfile {
+  id: string
+  name: string
+  provider: 'anthropic' | 'openai' | string
+  baseUrl: string
+  model: string
+  apiKey?: string
+  apiFormat?: string
+}
+
+/** Read ~/.claude.json and return providerProfiles (or empty). */
+function readClaudeProviderProfiles(): ClaudeProviderProfile[] {
+  try {
+    const path = join(homedir(), '.claude.json')
+    const raw = JSON.parse(readFileSync(path, 'utf-8'))
+    return Array.isArray(raw?.providerProfiles) ? raw.providerProfiles : []
+  } catch {
+    return []
+  }
+}
+
+/** Parse a comma/semicolon-separated model list. */
+function parseModelList(modelField: string): string[] {
+  return modelField.split(/[,;]/).map(m => m.trim()).filter(Boolean)
+}
+
+/**
+ * Find the provider profile that contains the given model name.
+ * Returns null when not found or no providerProfiles are configured.
+ */
+function findProfileForModel(modelName: string): ClaudeProviderProfile | null {
+  const profiles = readClaudeProviderProfiles()
+  const trimmedModel = modelName.trim()
+
+  for (const profile of profiles) {
+    if (!profile.model) continue
+    const models = parseModelList(profile.model)
+    if (models.includes(trimmedModel)) {
+      return profile
+    }
+  }
+  return null
+}
+
 let _client: Anthropic | null = null
+let _clientKey: string | null = null
+
+/**
+ * Pick the right provider profile (if any) for the requested model.
+ * Returns { baseURL, apiKey } from ~/.claude.json's providerProfiles when the
+ * model is hosted by a non-Anthropic profile (e.g. zhiniao-* on the Wizard AI
+ * OpenAI-compatible gateway). Falls back to the global Anthropic env config.
+ */
+function resolveProviderForModel(model: string | undefined): {
+  baseURL: string
+  apiKey: string
+  profile?: ClaudeProviderProfile
+} {
+  const zaiEnv = readZaiSettings().env ?? {}
+
+  if (model) {
+    const profile = findProfileForModel(model)
+    if (profile) {
+      console.error(`[DEBUG modelCaller] Model "${model}" found in providerProfile ${profile.id} (${profile.provider})`)
+      // Use the profile's apiKey when set, otherwise fall back to the global env
+      // (OPENAI_API_KEY for OpenAI providers, ANTHROPIC_AUTH_TOKEN for Anthropic)
+      const fallbackKey =
+        profile.provider === 'openai'
+          ? (zaiEnv.OPENAI_API_KEY ?? '')
+          : (zaiEnv.ANTHROPIC_AUTH_TOKEN ?? '')
+      return {
+        baseURL: profile.baseUrl,
+        apiKey: profile.apiKey ?? fallbackKey,
+        profile,
+      }
+    }
+    console.error(`[DEBUG modelCaller] Model "${model}" not found in providerProfiles, using global Anthropic env`)
+  }
+
+  return {
+    baseURL: zaiEnv.ANTHROPIC_BASE_URL ?? '',
+    apiKey: zaiEnv.ANTHROPIC_AUTH_TOKEN ?? '',
+  }
+}
+
+function getAnthropicClientForModel(model?: string): Anthropic {
+  // Reuse cached client when the model resolves to the same provider.
+  const cacheKey = model ?? '__default__'
+  if (_client && _clientKey === cacheKey) return _client
+
+  const { baseURL, apiKey } = resolveProviderForModel(model)
+  console.error(`[DEBUG modelCaller.getAnthropicClient] model=${model}, baseURL=${baseURL}, apiKey=${apiKey ? '***' : '(empty)'}`)
+
+  if (!apiKey) throw new Error('API key not found for selected model')
+  if (!baseURL) throw new Error('Base URL not found for selected model')
+
+  _client = new Anthropic({
+    authToken: apiKey,
+    baseURL,
+    maxRetries: 2,
+    // anthropic-beta header: comma-separated list of beta features.
+    // - anthropic-tot-control: tool orchestration extras (legacy from upstream proxy)
+    // - interleaved-thinking-2025-05-14: keeps extended thinking active across
+    //   tool_use → tool_result rounds instead of being dropped on the first tool call.
+    // String is duplicated from zai-agent-core constants/betas.ts to avoid
+    // widening the package export surface; keep in sync.
+    defaultHeaders: {
+      'anthropic-beta': 'anthropic-tot-control,interleaved-thinking-2025-05-14',
+    },
+  })
+  _clientKey = cacheKey
+  return _client
+}
 
 function getAnthropicClient(): Anthropic {
+  // Default path (no model) keeps the previous behavior so existing callers
+  // continue to work.
   if (_client) return _client
 
   const settings = readZaiSettings()
@@ -68,6 +182,8 @@ function getAnthropicClient(): Anthropic {
 
   const authToken = env.ANTHROPIC_AUTH_TOKEN
   const baseURL = env.ANTHROPIC_BASE_URL
+
+  console.error(`[DEBUG modelCaller.getAnthropicClient] baseURL=${baseURL}`)
 
   if (!authToken) throw new Error('ANTHROPIC_AUTH_TOKEN not found in ~/.zai/settings.json → env')
   if (!baseURL) throw new Error('ANTHROPIC_BASE_URL not found in ~/.zai/settings.json → env')
@@ -119,7 +235,6 @@ export function createAnthropicModelCaller(): ModelCaller {
       tools: Array<{ name: string; description?: string; inputSchema: Parameters<typeof zodToJsonSchema>[0] }>
       signal: AbortSignal
     } = req
-    const client = getAnthropicClient()
     const zaiSettings = readZaiSettings()
     const env = zaiSettings.env ?? {}
 
@@ -129,6 +244,16 @@ export function createAnthropicModelCaller(): ModelCaller {
         : (env.ANTHROPIC_DEFAULT_SONNET_MODEL
           ?? env.ANTHROPIC_SMALL_FAST_MODEL
           ?? 'MiniMax-M3')
+
+console.error(`[DEBUG modelCaller] input model: "${model}"`)
+    console.error(`[DEBUG modelCaller] resolvedModel: "${resolvedModel}"`)
+    console.error(`[DEBUG modelCaller] env.OPENAI_BASE_URL: ${env.OPENAI_BASE_URL || '(unset)'}`)
+    console.error(`[DEBUG modelCaller] env.OPENAI_MODEL: ${env.OPENAI_MODEL || '(unset)'}`)
+    console.error(`[DEBUG modelCaller] env.OPENAI_API_KEY present: ${!!env.OPENAI_API_KEY}`)
+
+    // Per-model client: pick the right provider from providerProfiles when the
+    // model belongs to a non-Anthropic profile (e.g. zhiniao-* on Wizard AI).
+    const client = getAnthropicClientForModel(resolvedModel)
 
     // New normalization. Handles three shapes:
     // 1. string             → use as-is
@@ -171,6 +296,8 @@ export function createAnthropicModelCaller(): ModelCaller {
           .map((b) => ({ type: 'text' as const, text: JSON.stringify(b) }))
       })()
 
+    let eventCount = 0
+
     const sdkMessages = messages.map((m) => ({
       role: m.role,
       content:
@@ -190,9 +317,13 @@ export function createAnthropicModelCaller(): ModelCaller {
     // The interleaved-thinking beta header is set globally on the client
     // via defaultHeaders above so thinking survives tool_use → tool_result
     // rounds instead of being dropped on the first tool call.
-    let eventCount = 0
+    console.error(`[DEBUG modelCaller] About to call client.messages.create`)
+    console.error(`[DEBUG modelCaller] client.baseURL=${(client as any)._baseURL || (client as any).baseURL || 'unknown'}`)
+    console.error(`[DEBUG modelCaller] resolvedModel=${resolvedModel}`)
+
+    let stream
     try {
-      const stream = await client.messages.create(
+      stream = await client.messages.create(
         {
           model: resolvedModel,
           max_tokens: 8192,
@@ -210,6 +341,14 @@ export function createAnthropicModelCaller(): ModelCaller {
         },
         { signal },
       )
+      console.error(`[DEBUG modelCaller] Stream created successfully`)
+    } catch (err) {
+      console.error(`[DEBUG modelCaller] messages.create FAILED:`, (err as Error).message)
+      console.error(`[DEBUG modelCaller] Error stack:`, (err as Error).stack?.split('\n').slice(0, 5).join('\n'))
+      throw err
+    }
+
+    try {
       for await (const event of stream) {
         eventCount++
         if (process.env.ZAI_DEBUG === '1' && (eventCount <= 3 || event.type === 'message_stop')) {

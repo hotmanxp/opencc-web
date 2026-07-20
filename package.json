@@ -10,8 +10,8 @@
     "build": "pnpm -r run build",
     "clean": "pnpm -r run clean",
     "dev": "pnpm -r run dev",
-    "test": "vitest run",
-    "test:watch": "vitest"
+    "test": "pnpm -r run test",
+    "test:watch": "pnpm -r --parallel run test"
   },
   "keywords": [
     "nova",

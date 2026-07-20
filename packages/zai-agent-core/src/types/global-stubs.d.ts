@@ -88,10 +88,6 @@ declare module 'src/utils/auth.js' {
   export {};
 }
 
-declare module 'src/utils/effort.js' {
-  export {};
-}
-
 declare module 'src/utils/http.js' {
   export {};
 }
@@ -261,10 +257,6 @@ declare module '../claudeAiLimits.js' {
 
 declare module '../rateLimitMocking.js' {
   export const mocking: Record<string, unknown>;
-}
-
-declare module './openaiShim/index.js' {
-  export const shim: Record<string, unknown>;
 }
 
 declare module '../oauth/auth-code-listener.js' {

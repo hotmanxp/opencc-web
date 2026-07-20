@@ -3,6 +3,8 @@ import type { SettingsJson } from '../../utils/settings/types.js'
 import type { PermissionMode } from '../../utils/permissions/PermissionMode.js'
 import { getAgentModel } from '../../utils/model/agent.js'
 import { isModelAlias } from '../../utils/model/aliases.js'
+import { getGlobalConfig } from '../../utils/config.js'
+import type { ProviderProfile } from '../../utils/config.js'
 
 /**
  * Provider override resolved from agent routing config.
@@ -140,17 +142,78 @@ export function resolveAgentProvider(
 }
 
 /**
+ * Parse a comma/semicolon-separated model list into an array.
+ */
+function parseModelList(modelField: string): string[] {
+  return modelField
+    .split(/[,;]/)
+    .map(m => m.trim())
+    .filter(Boolean)
+}
+
+/**
+ * Find the provider profile that contains the given model name.
+ */
+function findProfileForModel(modelName: string): ProviderProfile | null {
+  const config = getGlobalConfig()
+  const profiles = config.providerProfiles ?? []
+  const trimmedModel = modelName.trim()
+  console.error(`[DEBUG findProfileForModel] Searching for model: "${trimmedModel}" in ${profiles.length} profiles`)
+  console.error(`[DEBUG findProfileForModel] Profile IDs: ${profiles.map(p => p.id).join(', ')}`)
+  console.error(`[DEBUG findProfileForModel] Profile models: ${profiles.map(p => p.model).join(' | ')}`)
+
+  for (const profile of profiles) {
+    if (!profile.model) {
+      console.error(`[DEBUG findProfileForModel] Profile ${profile.id} has no model field`)
+      continue
+    }
+    const models = parseModelList(profile.model)
+    console.error(`[DEBUG findProfileForModel] Profile ${profile.id} models: ${models.join(', ')}`)
+    if (models.includes(trimmedModel)) {
+      console.error(`[DEBUG findProfileForModel] MATCH! Model "${trimmedModel}" found in profile ${profile.id}`)
+      return profile
+    }
+  }
+  console.error(`[DEBUG findProfileForModel] No profile found for model "${trimmedModel}"`)
+  return null
+}
+
+/**
  * Resolve an agent route directly from a requested model name (cross-provider or model-only).
- * Checks for an exact match in agentModels. Does not fuzzy match or normalize case.
+ * Checks for an exact match in agentModels first, then falls back to providerProfiles.
  */
 export function resolveAgentModelProvider(
   modelName: string | undefined,
   settings: SettingsJson | null,
 ): AgentRoute | null {
-  if (!settings || !settings.agentModels || !modelName) return null
+  if (!modelName) {
+    console.error('[DEBUG resolveAgentModelProvider] No modelName provided')
+    return null
+  }
 
   const trimmedModelName = modelName.trim()
-  return toAgentRoute(trimmedModelName, settings.agentModels[trimmedModelName])
+  console.error(`[DEBUG resolveAgentModelProvider] Resolving model: "${trimmedModelName}"`)
+
+  // First check agentModels (highest priority)
+  if (settings?.agentModels?.[trimmedModelName]) {
+    console.error(`[DEBUG resolveAgentModelProvider] Found in agentModels`)
+    return toAgentRoute(trimmedModelName, settings.agentModels[trimmedModelName])
+  }
+  console.error(`[DEBUG resolveAgentModelProvider] Not found in agentModels, checking providerProfiles`)
+
+  // Fall back to providerProfiles from ~/.claude.json
+  const profile = findProfileForModel(trimmedModelName)
+  if (profile) {
+    console.error(`[DEBUG resolveAgentModelProvider] Found in providerProfiles: profile.id=${profile.id}, provider=${profile.provider}, baseUrl=${profile.baseUrl}, apiKey=${profile.apiKey ? '***' : '(empty)'}`)
+    return {
+      model: trimmedModelName,
+      baseURL: profile.baseUrl,  // ProviderProfile uses baseUrl, ProviderOverride uses baseURL
+      apiKey: profile.apiKey ?? '',
+    }
+  }
+
+  console.error(`[DEBUG resolveAgentModelProvider] Model "${trimmedModelName}" not found in providerProfiles either`)
+  return null
 }
 
 /**

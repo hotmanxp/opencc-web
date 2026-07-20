@@ -142,6 +142,7 @@ export async function getAnthropicClient({
   // Strip auth-related headers to prevent leaking Anthropic credentials
   // to third-party endpoints (SSRF / credential forwarding mitigation).
   if (providerOverride) {
+    console.error(`[DEBUG client.ts] providerOverride present: baseURL=${providerOverride.baseURL}, model=${providerOverride.model}, apiKey=${providerOverride.apiKey ? '***' : '(empty)'}`)
     const { createOpenAIShimClient } = await import('./openaiShim/index.js')
     const safeHeaders: Record<string, string> = {}
     for (const [k, v] of Object.entries(defaultHeaders)) {
@@ -158,6 +159,7 @@ export async function getAnthropicClient({
     }) as unknown as Anthropic
   }
   if (isEnvTruthy(process.env.CLAUDE_CODE_USE_OPENAI)) {
+    console.error(`[DEBUG client.ts] CLAUDE_CODE_USE_OPENAI is set, using OpenAI shim`)
     const { createOpenAIShimClient } = await import('./openaiShim/index.js')
     return createOpenAIShimClient({
       defaultHeaders,
@@ -166,6 +168,8 @@ export async function getAnthropicClient({
       reasoningEffort: shimReasoningEffort,
     }) as unknown as Anthropic
   }
+  console.error(`[DEBUG client.ts] No providerOverride, no CLAUDE_CODE_USE_OPENAI - using native Anthropic SDK`)
+  console.error(`[DEBUG client.ts] ANTHROPIC_BASE_URL: ${process.env.ANTHROPIC_BASE_URL || '(unset)'}`)
 
   // Determine authentication method based on available tokens
   const resolvedApiKey = isClaudeAISubscriber() ? null : apiKey || getAnthropicApiKey()

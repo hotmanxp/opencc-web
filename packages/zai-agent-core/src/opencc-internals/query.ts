@@ -133,6 +133,12 @@ import {
   normalizeMaxMessagesCompactionThreshold,
 } from './utils/config.js'
 import { productionDeps, type QueryDeps } from './query/deps.js'
+import { getInitialSettings } from './utils/settings/settings.js'
+import {
+  resolveAgentModelProvider,
+  isProviderOverride,
+  type ProviderOverride,
+} from './services/api/agentRouting.js'
 import type { Terminal, Continue } from './query/transitions.js'
 import { feature } from 'bun:bundle'
 import {
@@ -1057,6 +1063,22 @@ async function* queryLoop(
         doesMostRecentAssistantMessageExceed200k(messagesForQuery),
     })
 
+    // Resolve provider override for cross-provider routing when model is configured
+    // in agentModels with base_url and api_key (e.g., zhiniao-MiniMax-M2.7-highspeed)
+    let providerOverride: ProviderOverride | undefined
+    const settings = getInitialSettings()
+    console.error(`[DEBUG query.ts] currentModel before routing: "${currentModel}"`)
+    console.error(`[DEBUG query.ts] settings.agentModels exists? ${!!settings?.agentModels}, keys: ${settings?.agentModels ? Object.keys(settings.agentModels).join(',') : 'N/A'}`)
+    const modelRoute = resolveAgentModelProvider(currentModel, settings)
+    console.error(`[DEBUG query.ts] modelRoute result: ${modelRoute ? JSON.stringify(modelRoute) : 'null'}`)
+    if (modelRoute && isProviderOverride(modelRoute)) {
+      providerOverride = modelRoute
+      currentModel = modelRoute.model
+      console.error(`[DEBUG query.ts] Set providerOverride: baseURL=${providerOverride.baseURL}, apiKey=${providerOverride.apiKey ? '***' : '(empty)'}`)
+    } else {
+      console.error(`[DEBUG query.ts] No provider override set, will use default provider`)
+    }
+
     queryCheckpoint('query_setup_end')
 
     // Create fetch wrapper once per query session to avoid memory retention.
@@ -1268,7 +1290,7 @@ async function* queryLoop(
               skipCacheWrite,
               agentId: toolUseContext.agentId,
               addNotification: toolUseContext.addNotification,
-              providerOverride: toolUseContext.options.providerOverride,
+              providerOverride: providerOverride ?? toolUseContext.options.providerOverride,
               ...(toolsForModel !== toolUseContext.options.tools && {
                 messageNormalizationTools: toolUseContext.options.tools,
               }),
