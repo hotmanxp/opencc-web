@@ -101,3 +101,48 @@ describe('reloadUserCommands', () => {
     expect(reg.get('user:clear')?.source).toBe('user')
   })
 })
+
+describe('loadUserCommands — fallback to ~/.claude/commands', () => {
+  let homeDir: string
+
+  beforeEach(() => {
+    homeDir = mkdtempSync(join(tmpdir(), 'zai-cmd-fallback-'))
+    mkdirSync(join(homeDir, '.zai'), { recursive: true })
+    mkdirSync(join(homeDir, '.claude'), { recursive: true })
+    setCommandRegistry(null)
+  })
+
+  afterEach(() => {
+    rmSync(homeDir, { recursive: true, force: true })
+  })
+
+  const writeCommandAt = (dir: string, name: string, body: string, extra: Record<string, unknown> = {}) => {
+    const yaml = Object.entries({ description: name, ...extra })
+      .map(([k, v]) => `${k}: ${JSON.stringify(v)}`).join('\n')
+    writeFileSync(join(dir, `${name}.md`), `---\n${yaml}\n---\n${body}`, 'utf-8')
+  }
+
+  it('loads from ~/.claude/commands when ~/.zai/commands is absent', async () => {
+    const claudeDir = join(homeDir, '.claude', 'commands')
+    writeCommandAt(claudeDir, 'greet', 'Hello $ARGUMENTS')
+    const cmds = await loadUserCommands({ cwd: '/x', dataDir: tmpHome, homeDir } as any)
+    expect(cmds.map((c) => c.name)).toEqual(['greet'])
+  })
+
+  it('prefers ~/.zai/commands over ~/.claude/commands when both exist', async () => {
+    const zaiDir = join(tmpHome, '.zai', 'commands')
+    const claudeDir = join(homeDir, '.claude', 'commands')
+    writeCommandAt(zaiDir, 'greet', 'Hello $ARGUMENTS')
+    writeCommandAt(claudeDir, 'greet', 'Bye $ARGUMENTS')
+    const [cmd] = await loadUserCommands({ cwd: '/x', dataDir: tmpHome, homeDir } as any)
+    const rendered = await cmd!.getPromptForCommand('alice', { cwd: '/x', dataDir: tmpHome })
+    expect((rendered[0] as any).text).toBe('Hello alice')
+  })
+
+  it('returns [] when neither directory exists', async () => {
+    const empty = mkdtempSync(join(tmpdir(), 'zai-cmd-empty-'))
+    const cmds = await loadUserCommands({ cwd: '/x', dataDir: empty, homeDir: empty } as any)
+    expect(cmds).toEqual([])
+    rmSync(empty, { recursive: true, force: true })
+  })
+})

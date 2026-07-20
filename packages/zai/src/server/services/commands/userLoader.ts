@@ -12,9 +12,24 @@ const yaml = requireFromAgentCore('js-yaml') as { load(s: string): unknown }
 
 const NAME_RE = /^[a-z0-9][a-z0-9-_]*$/
 
-function defaultCommandsDir(dataDir?: string): string {
-  if (dataDir) return join(dataDir, '.zai', 'commands')
-  return join(homedir(), '.zai', 'commands')
+interface CommandsDirsOpts {
+  dataDir?: string
+  homeDir?: string
+}
+
+/**
+ * Resolve which command directory should be loaded. Policy:
+ * 1. `~/.zai/commands` always wins if it exists (single-source for zai users).
+ * 2. Otherwise fall back to `~/.claude/commands` for OpenCC workflows.
+ * 3. Never merge — only one directory is scanned per server boot.
+ */
+export function defaultCommandsDirs(opts: CommandsDirsOpts = {}): string[] {
+  const home = opts.homeDir ?? homedir()
+  const zaiDir = opts.dataDir
+    ? join(opts.dataDir, '.zai', 'commands')
+    : join(home, '.zai', 'commands')
+  const claudeDir = join(home, '.claude', 'commands')
+  return existsSync(zaiDir) ? [zaiDir] : [claudeDir].filter((d) => existsSync(d))
 }
 
 interface CommandFrontmatter {
@@ -81,9 +96,8 @@ function buildPromptCommand(
   }
 }
 
-export async function loadUserCommands(context: CommandContext): Promise<PromptCommand[]> {
-  const dir = defaultCommandsDir(context.dataDir)
-  if (!existsSync(dir)) return []
+/** Scan one directory for `*.md` files; first dir with content wins. */
+async function scanDir(dir: string): Promise<PromptCommand[]> {
   let entries: string[]
   try {
     entries = readdirSync(dir)
@@ -119,6 +133,18 @@ export async function loadUserCommands(context: CommandContext): Promise<PromptC
     out.push(buildPromptCommand(name, fm, body))
   }
   return out
+}
+
+export async function loadUserCommands(
+  context: CommandContext & { homeDir?: string },
+): Promise<PromptCommand[]> {
+  for (const dir of defaultCommandsDirs({ dataDir: context.dataDir, homeDir: context.homeDir })) {
+    const cmds = await scanDir(dir)
+    if (cmds.length > 0 || existsSync(dir)) {
+      return cmds
+    }
+  }
+  return []
 }
 
 /**
