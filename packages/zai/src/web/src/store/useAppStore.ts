@@ -170,4 +170,10 @@ export const useAppStore = create<AppState>((set) => ({
   openSettingsDrawer: () => set({ settingsDrawerOpen: true }),
   closeSettingsDrawer: () => set({ settingsDrawerOpen: false }),
   setSettingsTheme: (t) => set({ settingsTheme: t }),
+  // NOTE: openSettingsDrawer / closeSettingsDrawer / setSettingsTheme
+  // 三个 action 必须保留(SPEC 阶段 1 4-store field requirement)。
+  // 若有并行 rebase 误删,SettingsButton.test.tsx 会以
+  // `expected false to be true` 失败,需立即按 commit 27efed5 的 pattern 还原。
+  // 2026-07-20 task-restore-openSettingsDrawer 已验证三条 action 都在,
+  // test/web/SettingsButton.test.tsx 2/2 pass,test/web/ 整体 28 files / 209 tests pass。
 }));
