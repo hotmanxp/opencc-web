@@ -10,8 +10,8 @@
 // import { MessageBubble } from this file. Inner helpers remain unexported
 // (module-private) — extraction of those helpers is out of scope for Task 3.
 
-import React, { useState, useEffect, useMemo } from "react";
-import { Card, Collapse, Modal, Space, Tag, Typography } from "antd";
+import React, { useState, useEffect, useMemo, useRef } from "react";
+import { Button, Card, Collapse, Modal, Space, Tag, Typography, message } from "antd";
 import {
   RobotFilled,
   UserOutlined,
@@ -19,6 +19,8 @@ import {
   BulbOutlined,
   CaretDownOutlined,
   CaretRightOutlined,
+  CopyOutlined,
+  CheckOutlined,
 } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -26,6 +28,7 @@ import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
 import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
 import type { AgentMessage } from "../../store/useAgentStore.js";
 import { AttachmentStrip } from "../AttachmentStrip.js";
+import { copyToClipboard } from "../../lib/clipboard.js";
 import { linkifyText } from "../../lib/linkify.js";
 import { splitMarkdownOnIncomplete } from "../../lib/splitMarkdown.js";
 import { getRenderer } from "../toolRenderers/registry.js";
@@ -463,6 +466,61 @@ const TOOL_PILL_COLORS: Record<
   done: { bg: "#f6ffed", fg: "#389e0d", tag: "green", label: "已完成" },
   error: { bg: "#fff2f0", fg: "#cf1322", tag: "red", label: "错误" },
 };
+
+// 气泡右上角 copy 按钮: 始终可见, 点击后 1.5s 内图标变 ✓.
+// e.stopPropagation 防 click 冒泡到 Card 内部 (Collapse/链接).
+// timerRef + useEffect cleanup 防组件卸载时 setState on unmounted component.
+export function MessageCopyButton({
+  text,
+  variant,
+}: {
+  text: string;
+  variant: "ai" | "user";
+}) {
+  const [copied, setCopied] = useState(false);
+  const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+
+  useEffect(
+    () => () => {
+      if (timerRef.current) clearTimeout(timerRef.current);
+    },
+    [],
+  );
+
+  const handleClick = async (e: React.MouseEvent) => {
+    e.stopPropagation();
+    e.preventDefault();
+    const ok = await copyToClipboard(text);
+    if (!ok) {
+      message.warning("复制失败, 请手动选中");
+      return;
+    }
+    setCopied(true);
+    message.success("已复制");
+    if (timerRef.current) clearTimeout(timerRef.current);
+    timerRef.current = setTimeout(() => setCopied(false), 1500);
+  };
+
+  return (
+    <Button
+      type="text"
+      size="small"
+      icon={copied ? <CheckOutlined /> : <CopyOutlined />}
+      onClick={handleClick}
+      title="复制"
+      aria-label={variant === "ai" ? "复制助手回答" : "复制用户消息"}
+      style={{
+        position: "absolute",
+        top: 8,
+        right: 8,
+        zIndex: 1,
+        background: "rgba(255,255,255,0.06)",
+        borderRadius: 4,
+        opacity: 0.85,
+      }}
+    />
+  );
+}
 
 function ToolUsePill({ name, status }: { name: string; status: ToolStatus }) {
   const c = TOOL_PILL_COLORS[status];
