@@ -50,7 +50,7 @@ import { TaskDrawer } from "../components/TaskDrawer";
 import TodoZone from "../components/TodoZone.jsx";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 import AgentInputBox from "../components/AgentInputBox";
-import { MessageBubble } from "../components/transcript/MessageBubble.js";
+import { MessageBubble } from "../components/transcript/MessageBubble";
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
