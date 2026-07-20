@@ -7,6 +7,7 @@ import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import { api } from "../lib/api";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import ConversationInfoButton from "../components/ConversationInfoButton";
+import SettingsButton from './SettingsButton'
 import TodoDropdown from "./TodoDropdown.js";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 
@@ -684,6 +685,11 @@ export default React.memo(function AgentInputBox() {
             minWidth:0 关键 — 不加时 flex item 默认 min-width:auto (= content 尺寸),
             在窄屏下 spacer 会反向挤压任务摘要到 0 宽, 表现为"被遮挡". */}
         <span style={{ flex: 1, minWidth: 0 }} />
+        {/* settings 按钮(首期 UI 原型入口,点击弹出 SettingsDrawer).
+            位置:右端工具栏第一项,在 CompressOutlined 之前 — 与原 4 个图标
+            共用同一行 flex 容器,颜色一致 (rgba(255,255,255,0.45)).
+            替代原 opencc 上游 [⚙] 内嵌快捷键;阶段 2 再加 dropdown 双层结构. */}
+        <SettingsButton />
         {/* 折叠/展开 transcript 按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
             图标在 collapsed=false 时显示 ExpandOutlined (可折叠), true 时显示
             CompressOutlined (可展开), hover Tooltip 给完整文案, 与同行其他图标按钮
