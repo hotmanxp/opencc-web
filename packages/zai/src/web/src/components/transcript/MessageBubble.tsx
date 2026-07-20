@@ -750,7 +750,14 @@ export const MessageBubble = React.memo(function MessageBubble({
 
   if (msg.type === "user.text" || msg.type === "user.message") {
     const msgAttachments =
-      (msg.attachments as PendingAttachment[] | undefined) ?? [];
+      (msg.attachments as PendingAttachment[] | undefined) ?? []
+    // 渲染后 prompt 行: 仅由 AgentInputBox.pushUserMsg(text, true) 写出的
+    // user.text 携带 isRenderedPrompt:true, 这里在同一气泡内追加一行 muted 提示.
+    // 既有未带 flag 的 user.text 行为不变.
+    const isRendered = Boolean(
+      (msg as { isRenderedPrompt?: unknown }).isRenderedPrompt,
+    )
+    const visibleText = ((msg.text as string) || (msg.prompt as string) || "")
     return (
       <div
         style={{
@@ -783,14 +790,35 @@ export const MessageBubble = React.memo(function MessageBubble({
               }
             />
           )}
-          <Space>
-            <UserOutlined />
-            <Text>
-              {linkifyText(
-                (msg.text as string) || (msg.prompt as string) || "",
-              )}
-            </Text>
-          </Space>
+          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
+            <Space>
+              <UserOutlined />
+              <Text>{linkifyText(visibleText)}</Text>
+            </Space>
+            {isRendered && (
+              <Text
+                data-testid="user-text-rendered-prompt"
+                style={{
+                  fontSize: 12,
+                  fontStyle: "italic",
+                  color: "rgba(0,0,0,0.55)",
+                  borderLeft: "2px solid rgba(0,0,0,0.18)",
+                  paddingLeft: 8,
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                }}
+              >
+                <span style={{ color: "rgba(0,0,0,0.45)", marginRight: 4 }}>
+                  ⤷
+                </span>
+                <span style={{ fontWeight: 500 }}>渲染后</span>
+                <span style={{ margin: "0 6px", color: "rgba(0,0,0,0.35)" }}>
+                  ·
+                </span>
+                {linkifyText(visibleText)}
+              </Text>
+            )}
+          </div>
         </Card>
         {/* 附件大图预览: 跟气泡同级, 不影响 maxWidth:70% 气泡本身宽度.
             footer 为 null 干净版, mask 半透明黑让用户聚焦图片, body 用 0 padding
