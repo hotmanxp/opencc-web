@@ -121,7 +121,6 @@ function resolveProviderForModel(model: string | undefined): {
   if (model) {
     const profile = findProfileForModel(model)
     if (profile) {
-      console.error(`[DEBUG modelCaller] Model "${model}" found in providerProfile ${profile.id} (${profile.provider})`)
       // Use the profile's apiKey when set, otherwise fall back to the global env
       // (OPENAI_API_KEY for OpenAI providers, ANTHROPIC_AUTH_TOKEN for Anthropic)
       const fallbackKey =
@@ -134,7 +133,6 @@ function resolveProviderForModel(model: string | undefined): {
         profile,
       }
     }
-    console.error(`[DEBUG modelCaller] Model "${model}" not found in providerProfiles, using global Anthropic env`)
   }
 
   return {
@@ -149,7 +147,6 @@ function getAnthropicClientForModel(model?: string): Anthropic {
   if (_client && _clientKey === cacheKey) return _client
 
   const { baseURL, apiKey } = resolveProviderForModel(model)
-  console.error(`[DEBUG modelCaller.getAnthropicClient] model=${model}, baseURL=${baseURL}, apiKey=${apiKey ? '***' : '(empty)'}`)
 
   if (!apiKey) throw new Error('API key not found for selected model')
   if (!baseURL) throw new Error('Base URL not found for selected model')
@@ -182,8 +179,6 @@ function getAnthropicClient(): Anthropic {
 
   const authToken = env.ANTHROPIC_AUTH_TOKEN
   const baseURL = env.ANTHROPIC_BASE_URL
-
-  console.error(`[DEBUG modelCaller.getAnthropicClient] baseURL=${baseURL}`)
 
   if (!authToken) throw new Error('ANTHROPIC_AUTH_TOKEN not found in ~/.zai/settings.json → env')
   if (!baseURL) throw new Error('ANTHROPIC_BASE_URL not found in ~/.zai/settings.json → env')
@@ -244,12 +239,6 @@ export function createAnthropicModelCaller(): ModelCaller {
         : (env.ANTHROPIC_DEFAULT_SONNET_MODEL
           ?? env.ANTHROPIC_SMALL_FAST_MODEL
           ?? 'MiniMax-M3')
-
-console.error(`[DEBUG modelCaller] input model: "${model}"`)
-    console.error(`[DEBUG modelCaller] resolvedModel: "${resolvedModel}"`)
-    console.error(`[DEBUG modelCaller] env.OPENAI_BASE_URL: ${env.OPENAI_BASE_URL || '(unset)'}`)
-    console.error(`[DEBUG modelCaller] env.OPENAI_MODEL: ${env.OPENAI_MODEL || '(unset)'}`)
-    console.error(`[DEBUG modelCaller] env.OPENAI_API_KEY present: ${!!env.OPENAI_API_KEY}`)
 
     // Per-model client: pick the right provider from providerProfiles when the
     // model belongs to a non-Anthropic profile (e.g. zhiniao-* on Wizard AI).
@@ -317,36 +306,24 @@ console.error(`[DEBUG modelCaller] input model: "${model}"`)
     // The interleaved-thinking beta header is set globally on the client
     // via defaultHeaders above so thinking survives tool_use → tool_result
     // rounds instead of being dropped on the first tool call.
-    console.error(`[DEBUG modelCaller] About to call client.messages.create`)
-    console.error(`[DEBUG modelCaller] client.baseURL=${(client as any)._baseURL || (client as any).baseURL || 'unknown'}`)
-    console.error(`[DEBUG modelCaller] resolvedModel=${resolvedModel}`)
-
-    let stream
-    try {
-      stream = await client.messages.create(
-        {
-          model: resolvedModel,
-          max_tokens: 8192,
-          thinking: { type: 'enabled', budget_tokens: 4096 },
-          system: systemBlocks,
-          messages: sdkMessages,
-          tools: tools.length > 0
-            ? (tools.map((t) => ({
-                name: t.name,
-                description: t.description ?? '',
-                input_schema: buildAnthropicInputSchema(t.inputSchema),
-              })) as Anthropic.Messages.ToolUnion[])
-            : undefined,
-          stream: true,
-        },
-        { signal },
-      )
-      console.error(`[DEBUG modelCaller] Stream created successfully`)
-    } catch (err) {
-      console.error(`[DEBUG modelCaller] messages.create FAILED:`, (err as Error).message)
-      console.error(`[DEBUG modelCaller] Error stack:`, (err as Error).stack?.split('\n').slice(0, 5).join('\n'))
-      throw err
-    }
+    const stream = await client.messages.create(
+      {
+        model: resolvedModel,
+        max_tokens: 8192,
+        thinking: { type: 'enabled', budget_tokens: 4096 },
+        system: systemBlocks,
+        messages: sdkMessages,
+        tools: tools.length > 0
+          ? (tools.map((t) => ({
+              name: t.name,
+              description: t.description ?? '',
+              input_schema: buildAnthropicInputSchema(t.inputSchema),
+            })) as Anthropic.Messages.ToolUnion[])
+          : undefined,
+        stream: true,
+      },
+      { signal },
+    )
 
     try {
       for await (const event of stream) {
