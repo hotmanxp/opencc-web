@@ -2,7 +2,7 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, Card, Space, Typography } from 'antd'
 import { RobotFilled, UserOutlined } from '@ant-design/icons'
 import type { AgentMessage } from '../../store/useAgentStore.js'
-import { MarkdownText, StreamingMarkdown, ThinkingBlock } from './MessageBubble.js'
+import { MarkdownText, MessageCopyButton, StreamingMarkdown, ThinkingBlock } from './MessageBubble.js'
 import { linkifyText } from '../../lib/linkify.js'
 
 const { Paragraph, Text } = Typography
@@ -66,8 +66,9 @@ export function CollapsedMessageBubble({
       >
         <Card
           size="small"
-          style={{ width: '100%', maxWidth: '100%', borderRadius: 12 }}
+          style={{ width: '100%', maxWidth: '100%', borderRadius: 12, position: 'relative' }}
         >
+          <MessageCopyButton text={(m.text as string) || ''} variant="ai" />
           <Space align="start" size={8} style={{ width: '100%' }}>
             <RobotFilled style={{ color: '#ff6600', fontSize: 18 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
@@ -93,7 +94,8 @@ export function CollapsedMessageBubble({
           marginBottom: 16,
         }}
       >
-        <Card size="small" style={{ maxWidth: '70%', borderRadius: 12 }}>
+        <Card size="small" style={{ maxWidth: '70%', borderRadius: 12, position: 'relative' }}>
+          <MessageCopyButton text={text} variant="user" />
           <Space>
             <UserOutlined />
             <Paragraph
