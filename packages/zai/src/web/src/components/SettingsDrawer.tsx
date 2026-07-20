@@ -13,7 +13,6 @@ import {
   message,
 } from 'antd'
 import { useAppStore } from '../store/useAppStore'
-import { api } from '../lib/api'
 
 type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 type Mode = 'default' | 'acceptEdits' | 'plan' | 'bypassPermissions' | 'dontAsk'
@@ -50,10 +49,13 @@ export default function SettingsDrawer() {
   useEffect(() => {
     if (!open || settings) return
     let cancel = false
-    api
-      .get<AgentSettings>('/agent/settings')
+    fetch('/api/agent/settings')
+      .then((r) => {
+        if (!r.ok) return Promise.reject(new Error(`HTTP ${r.status}`))
+        return r.json()
+      })
       .then((d) => {
-        if (!cancel) setSettings(d)
+        if (!cancel) setSettings(d as AgentSettings)
       })
       .catch(() => {
         if (!cancel) setSettings({ defaultModel: 'unknown', baseURL: null, models: [] })
