@@ -447,6 +447,38 @@ export default React.memo(function AgentInputBox() {
     [sessionId, activeSessionId],
   );
 
+  const pushUserMsg = useCallback(
+    (text: string, isRenderedPrompt = false) => {
+      const ready = attachments.filter((a) => a.status === "ready")
+      useAgentStore.setState((s) => ({
+        status: "streaming",
+        messages: [
+          ...s.messages,
+          {
+            eventId: `user-${Date.now()}-${isRenderedPrompt ? "r" : "o"}`,
+            sessionId: "",
+            ts: Date.now(),
+            turnIndex: 0,
+            type: "user.text",
+            text,
+            isRenderedPrompt,
+            attachments: ready.map((a) => ({
+              localId: a.localId,
+              mime: a.mime,
+              filename: a.filename,
+              thumbnailUrl: a.base64DataUrl,
+              status: a.status,
+            })),
+          },
+        ],
+        sendSeq: s.sendSeq + 1,
+      }))
+      ready.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl))
+      setAttachments((prev) => prev.filter((a) => a.status !== "ready"))
+    },
+    [attachments],
+  )
+
   const handleSend = async () => {
     const text = input.trim();
     const readyAttachments = attachments.filter((a) => a.status === "ready");
@@ -487,12 +519,17 @@ export default React.memo(function AgentInputBox() {
             );
             return;
           case "prompt":
-            await postPromptToLLM(result.payload.rendered, blocks);
+            pushUserMsg(text, false);
+            if (result.payload?.rendered) {
+              pushUserMsg(result.payload.rendered, true);
+            }
+            await postPromptToLLM(result.payload?.rendered ?? "", blocks);
             return;
           case "message":
             message.info(result.payload.text, 3);
             return;
           case "unknown":
+            pushUserMsg(text, false);
             await postPromptToLLM(text, blocks);
             return;
           case "error":

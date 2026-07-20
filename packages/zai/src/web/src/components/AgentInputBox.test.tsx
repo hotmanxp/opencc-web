@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-import { describe, expect, test, beforeEach } from "vitest";
+import { describe, expect, test, beforeEach, vi } from "vitest";
 import "@testing-library/jest-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useAgentStore, type TodoItem, type V2TaskItem } from "../store/useAgentStore.js";
+import { api } from "../lib/api.js";
 
 const todo = (content: string, status: TodoItem["status"]): TodoItem => ({
   content, status, activeForm: content,
@@ -33,6 +34,60 @@ beforeEach(() => {
     sendSeq: 0,
     todosBySession: {},
     v2TasksBySession: {},
+  })
+})
+
+describe('AgentInputBox — slash command UI visibility', () => {
+  // mockReset to clear any default-return setup other suites may have left.
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset()
+  })
+
+  async function typeAndSubmit(text: string) {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: text } })
+    fireEvent.keyDown(ta, { key: "Enter", code: "Enter", shiftKey: false })
+    await waitFor(() => expect(vi.mocked(api.post)).toHaveBeenCalled())
+  }
+
+  test("'prompt' branch pushes the raw /cmd args and a rendered user.text", async () => {
+    vi.mocked(api.post).mockResolvedValueOnce({
+      type: "prompt",
+      payload: { rendered: "Hello alice" },
+    } as any)
+    await typeAndSubmit("/greet alice")
+    await waitFor(() => {
+      const msgs = useAgentStore.getState().messages
+      expect(msgs.length).toBeGreaterThanOrEqual(2)
+      const tail = msgs.slice(-2)
+      expect(tail[0]).toMatchObject({ type: "user.text", text: "/greet alice" })
+      expect(tail[1]).toMatchObject({
+        type: "user.text",
+        text: "Hello alice",
+        isRenderedPrompt: true,
+      })
+    })
+  })
+
+  test("'unknown' branch pushes exactly one user.text without isRenderedPrompt", async () => {
+    vi.mocked(api.post).mockResolvedValueOnce({
+      type: "unknown",
+      payload: { input: "/greet" },
+    } as any)
+    useAgentStore.setState({
+      sessionId: "sess-1",
+      messages: [],
+      status: "idle",
+      sendSeq: 0,
+    })
+    await typeAndSubmit("/greet alice")
+    await waitFor(() => {
+      const msgs = useAgentStore.getState().messages
+      const tail = msgs[msgs.length - 1]
+      expect(tail).toMatchObject({ type: "user.text", text: "/greet alice" })
+      expect((tail as { isRenderedPrompt?: boolean }).isRenderedPrompt).toBeUndefined()
+    })
   })
 })
 
