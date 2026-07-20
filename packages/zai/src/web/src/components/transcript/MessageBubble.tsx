@@ -467,15 +467,20 @@ const TOOL_PILL_COLORS: Record<
   error: { bg: "#fff2f0", fg: "#cf1322", tag: "red", label: "错误" },
 };
 
-// 气泡右上角 copy 按钮: 始终可见, 点击后 1.5s 内图标变 ✓.
-// e.stopPropagation 防 click 冒泡到 Card 内部 (Collapse/链接).
-// timerRef + useEffect cleanup 防组件卸载时 setState on unmounted component.
+// 气泡 copy 按钮. 默认 `absolute` 模式: 始终浮在气泡右上角 (top:8 right:8),
+// 适合 AI 气泡 (卡片占满 maxWidth:100%, 按钮贴在右上不挤压长 markdown).
+// `inline` 模式: 普通 inline-flex, 嵌入父级 flex 容器, 与其它元素平级.
+// 用于 user 气泡: user.text 卡片 maxWidth:70%, 短消息 + 右上绝对按钮会盖住文字,
+// 改成横向 flex [copy inline] [text flex:1] [UserOutlined] 后, copy 与 user icon
+// 夹住文字, 任何长度都不会重叠.
 export function MessageCopyButton({
   text,
   variant,
+  placement = "absolute",
 }: {
   text: string;
   variant: "ai" | "user";
+  placement?: "absolute" | "inline";
 }) {
   const [copied, setCopied] = useState(false);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -501,6 +506,24 @@ export function MessageCopyButton({
     timerRef.current = setTimeout(() => setCopied(false), 1500);
   };
 
+  const style: React.CSSProperties =
+    placement === "absolute"
+      ? {
+          position: "absolute",
+          top: 8,
+          right: 8,
+          zIndex: 1,
+          background: "rgba(255,255,255,0.06)",
+          borderRadius: 4,
+          opacity: 0.85,
+        }
+      : {
+          background: "rgba(255,255,255,0.06)",
+          borderRadius: 4,
+          opacity: 0.85,
+          flexShrink: 0,
+        };
+
   return (
     <Button
       type="text"
@@ -509,15 +532,7 @@ export function MessageCopyButton({
       onClick={handleClick}
       title="复制"
       aria-label={variant === "ai" ? "复制助手回答" : "复制用户消息"}
-      style={{
-        position: "absolute",
-        top: 8,
-        right: 8,
-        zIndex: 1,
-        background: "rgba(255,255,255,0.06)",
-        borderRadius: 4,
-        opacity: 0.85,
-      }}
+      style={style}
     />
   );
 }
@@ -833,51 +848,71 @@ export const MessageBubble = React.memo(function MessageBubble({
             position: "relative",
           }}
         >
-          <MessageCopyButton text={visibleText} variant="user" />
-          {msgAttachments.length > 0 && (
-            <AttachmentStrip
-              attachments={msgAttachments}
-              // previewHeight 模式: 高度固定 80px, 宽度按图片原始宽高比自适应.
-              // 长截图 (聊天记录 / 长图) 整张可见不被裁切, 又不会像 240 方块
-              // 那样挤占卡片高度. 默认 maxWidth 480 防止横屏截图撑爆卡片.
-              // 仍可点击触发 onPreview 看更清晰原图.
-              previewHeight={80}
-              onPreview={(a) =>
-                setPreviewingAttachment({
-                  url: a.thumbnailUrl,
-                  filename: a.filename,
-                })
-              }
+          {/* 横向 flex: [copy] [text flex:1] [user icon]
+              copy 用 inline 模式嵌在最左, user icon 嵌在最右, 文字占中间 flex:1.
+              任何长度的消息都不会与 copy 按钮重叠 (旧 absolute top:8 right:8 会盖住短消息文字). */}
+          <div
+            style={{
+              display: "flex",
+              alignItems: "flex-start",
+              gap: 8,
+              minWidth: 0,
+            }}
+          >
+            <MessageCopyButton
+              text={visibleText}
+              variant="user"
+              placement="inline"
             />
-          )}
-          <div style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-            <Space>
-              <UserOutlined />
-              <Text>{linkifyText(visibleText)}</Text>
-            </Space>
-            {isRendered && (
-              <Text
-                data-testid="user-text-rendered-prompt"
-                style={{
-                  fontSize: 12,
-                  fontStyle: "italic",
-                  color: "rgba(0,0,0,0.55)",
-                  borderLeft: "2px solid rgba(0,0,0,0.18)",
-                  paddingLeft: 8,
-                  whiteSpace: "pre-wrap",
-                  wordBreak: "break-word",
-                }}
-              >
-                <span style={{ color: "rgba(0,0,0,0.45)", marginRight: 4 }}>
-                  ⤷
-                </span>
-                <span style={{ fontWeight: 500 }}>渲染后</span>
-                <span style={{ margin: "0 6px", color: "rgba(0,0,0,0.35)" }}>
-                  ·
-                </span>
+            <div
+              style={{
+                flex: 1,
+                minWidth: 0,
+                display: "flex",
+                flexDirection: "column",
+                gap: 4,
+              }}
+            >
+              {msgAttachments.length > 0 && (
+                <AttachmentStrip
+                  attachments={msgAttachments}
+                  previewHeight={80}
+                  onPreview={(a) =>
+                    setPreviewingAttachment({
+                      url: a.thumbnailUrl,
+                      filename: a.filename,
+                    })
+                  }
+                />
+              )}
+              <Text style={{ wordBreak: "break-word", whiteSpace: "pre-wrap" }}>
                 {linkifyText(visibleText)}
               </Text>
-            )}
+              {isRendered && (
+                <Text
+                  data-testid="user-text-rendered-prompt"
+                  style={{
+                    fontSize: 12,
+                    fontStyle: "italic",
+                    color: "rgba(0,0,0,0.55)",
+                    borderLeft: "2px solid rgba(0,0,0,0.18)",
+                    paddingLeft: 8,
+                    whiteSpace: "pre-wrap",
+                    wordBreak: "break-word",
+                  }}
+                >
+                  <span style={{ color: "rgba(0,0,0,0.45)", marginRight: 4 }}>
+                    ⤷
+                  </span>
+                  <span style={{ fontWeight: 500 }}>渲染后</span>
+                  <span style={{ margin: "0 6px", color: "rgba(0,0,0,0.35)" }}>
+                    ·
+                  </span>
+                  {linkifyText(visibleText)}
+                </Text>
+              )}
+            </div>
+            <UserOutlined style={{ flexShrink: 0, marginTop: 2 }} />
           </div>
         </Card>
         {/* 附件大图预览: 跟气泡同级, 不影响 maxWidth:70% 气泡本身宽度.

@@ -95,20 +95,31 @@ export function CollapsedMessageBubble({
         }}
       >
         <Card size="small" style={{ maxWidth: '70%', borderRadius: 12, position: 'relative' }}>
-          <MessageCopyButton text={text} variant="user" />
-          <Space>
-            <UserOutlined />
-            <Paragraph
-              ellipsis={{
-                rows: CLAMP_LINES,
-                expandable: true,
-                symbol: '显示更多',
-              }}
-              style={{ marginBottom: 0 }}
-            >
-              {linkifyText(text)}
-            </Paragraph>
-          </Space>
+          {/* 横向 flex: [copy inline] [text flex:1] [UserOutlined]
+              copy 与 expanded 视图一致用 inline 嵌最左, 避免短消息 + 右上绝对按钮盖住文字. */}
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: 8,
+              minWidth: 0,
+            }}
+          >
+            <MessageCopyButton text={text} variant="user" placement="inline" />
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <Paragraph
+                ellipsis={{
+                  rows: CLAMP_LINES,
+                  expandable: true,
+                  symbol: '显示更多',
+                }}
+                style={{ marginBottom: 0 }}
+              >
+                {linkifyText(text)}
+              </Paragraph>
+            </div>
+            <UserOutlined style={{ flexShrink: 0, marginTop: 2 }} />
+          </div>
         </Card>
       </div>
     )

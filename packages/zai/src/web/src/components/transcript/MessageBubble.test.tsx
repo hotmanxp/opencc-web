@@ -33,7 +33,7 @@ describe("MessageBubble — isRenderedPrompt rendering", () => {
       />,
     )
     expect(screen.getByText(/^渲染后$/)).toBeInTheDocument()
-    expect(screen.getByText("Hello alice")).toBeInTheDocument()
+    expect(screen.getAllByText("Hello alice")).toHaveLength(2)
     expect(screen.getByTestId("user-text-rendered-prompt")).toBeInTheDocument()
   })
 
