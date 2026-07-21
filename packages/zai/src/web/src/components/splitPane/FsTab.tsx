@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Button, Empty, Spin, Tree } from 'antd';
-import { ReloadOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
+import { ReloadOutlined } from '@ant-design/icons';
+import { FileIcon, DirIcon } from './fileIcon.js';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
 import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { DataNode } from 'antd/es/tree';
@@ -144,7 +145,12 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       return {
         key: e.path,
         title: <span style={{ fontFamily: MONO, fontSize: 12 }}>{e.name}</span>,
-        icon: e.type === 'dir' ? <FolderOutlined /> : <FileOutlined />,
+        icon:
+          e.type === 'dir' ? (
+            <DirIcon name={e.name} open={expandedKeys.includes(e.path)} />
+          ) : (
+            <FileIcon name={e.name} />
+          ),
         isLeaf: e.type === 'file',
         children:
           e.type === 'dir'

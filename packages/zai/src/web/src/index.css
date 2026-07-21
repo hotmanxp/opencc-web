@@ -134,10 +134,10 @@ body {
   margin-inline-end: 3px !important;
 }
 [data-testid="fs-tree"] .ant-tree-icon__customize {
-  width: 12px !important;
-  height: 12px !important;
+  width: 14px !important;
+  height: 14px !important;
   font-size: 12px !important;
-  margin-inline-end: 3px !important;
+  margin-inline-end: 4px !important;
   vertical-align: middle !important;
 }
 
@@ -147,6 +147,27 @@ body {
 
 [data-testid="fs-tree"] .ant-tree-node-selected {
   background: rgba(255, 102, 0, 0.18) !important;
+}
+
+/* 文件树图标 — 不再靠 antd 的 FileOutlined + 颜色. 现在每个语言/类型
+   在 languageIcons.tsx 里有一个独立的内联 SVG(色块 + 字母/形状),
+   这里只控制图标的尺寸 + 目录的色块兜底, 不再覆盖 [data-file-ext="..."]
+   主色(SVG 自带 fill). */
+[data-testid="fs-tree"] .ant-tree-icon__customize {
+  width: 14px !important;
+  height: 14px !important;
+  margin-inline-end: 4px !important;
+  vertical-align: middle !important;
+}
+[data-testid="fs-tree"] .ant-tree-icon__customize > svg {
+  width: 14px;
+  height: 14px;
+  display: block;
+}
+/* 目录统一黄色,SVG 内 fill 也写了这个值,这里作为兜底.
+   [data-file-ext] 现在保留属性(测试在选)但不再覆盖主色. */
+[data-testid="fs-tree"] [data-dir="true"] {
+  color: #facc15;
 }
 
 [data-testid="fs-tree"] .ant-tree-node-content-wrapper:hover {

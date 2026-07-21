@@ -363,4 +363,37 @@ describe('FsTab', () => {
     expect(tree.style.overflow).toBe('auto');
     expect(tree.style.minHeight).toMatch(/^0(px)?$/);
   });
+
+  it('tags file tree icons with data-file-ext (so CSS can color them)', () => {
+    // fileIcon.tsx 给 <FileOutlined> 挂 data-file-ext 属性;
+    // index.css 用 [data-file-ext="..."] 给每种类型上色.
+    // 这里只断言属性出现在 DOM 里 — 不去校验具体颜色,
+    // 颜色跟 VSCode Material Icon Theme 对齐是视觉契约,
+    // happy-dom 也跑不动真实样式表,断言一下属性挂对了就行.
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          { name: 'src', path: 'src', type: 'dir', size: null },
+          { name: 'index.ts', path: 'index.ts', type: 'file', size: 42 },
+          { name: 'README.md', path: 'README.md', type: 'file', size: 12 },
+          { name: 'package.json', path: 'package.json', type: 'file', size: 32 },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({ data: null, loading: false, error: null });
+    render(<FsTab cwd="/repo" />);
+    const tree = screen.getByTestId('fs-tree');
+    const fileExtNodes = tree.querySelectorAll('[data-file-ext]');
+    const dirNodes = tree.querySelectorAll('[data-dir="true"]');
+    // 至少给每个 file/dir 节点挂上了对应属性 — 文件总数 == 文件节点数
+    expect(fileExtNodes.length).toBe(3);
+    expect(dirNodes.length).toBe(1);
+    // 抽样确认映射:index.ts → ts, README.md → md, package.json → json
+    const exts = Array.from(fileExtNodes).map((n) => n.getAttribute('data-file-ext')).sort();
+    expect(exts).toEqual(['json', 'md', 'ts']);
+  });
 });
