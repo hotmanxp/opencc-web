@@ -305,12 +305,21 @@ describe('FsTab', () => {
     expect(screen.queryByTestId('fs-preview-md')).toBeNull();
   });
 
-  it('mounts fs-tree as a fixed-height column so the inner Tree owns scrolling', () => {
+  it('mounts fs-tree as a fixed-height column with overflow:auto so scroll always works', () => {
     // antd Tree uses rc-virtual-list internally; rc-virtual-list only
     // sets its own maxHeight + overflowY when given a numeric height prop.
     // The column needs minHeight:0 (so flexbox doesn't expand it past
-    // the panel) and overflow:hidden (so the column itself doesn't try
-    // to scroll — Tree's height prop drives the inner scroll).
+    // the panel).
+    //
+    // overflow:auto (not hidden) is the safe default: when the inner
+    // <Tree height={treeHeight}> successfully enables rc-virtual-list,
+    // the inner holder owns the scrollbar and the outer auto just stays
+    // inert. But if `treeHeight` is 0 — e.g. the rAF re-measure in
+    // useElementHeight hasn't fired yet, or the parent flex column
+    // genuinely has 0 height — the Tree falls back to natural height
+    // and the outer overflow:auto keeps the content scrollable instead
+    // of silently clipping it off-panel. The previous `hidden` was a
+    // hard cut that left users with no way to reach the rest of the tree.
     mockList.mockReturnValue({
       data: { ok: true, entries: [] },
       loading: false,
@@ -320,7 +329,7 @@ describe('FsTab', () => {
     mockFile.mockReturnValue({ data: null, loading: false, error: null });
     render(<FsTab cwd="/repo" />);
     const tree = screen.getByTestId('fs-tree') as HTMLElement;
-    expect(tree.style.overflow).toBe('hidden');
+    expect(tree.style.overflow).toBe('auto');
     expect(tree.style.minHeight).toMatch(/^0(px)?$/);
   });
 });

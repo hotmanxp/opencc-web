@@ -199,16 +199,12 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           data-testid="fs-tree"
           style={{
             flex: '0 0 40%',
-            // minHeight:0 is mandatory in flexbox — without it, a row
-            // flex child defaults to min-height:auto and lets its
-            // content (the expanded antd Tree) stretch the row past
-            // the panel. overflow:hidden (not auto) because the inner
-            // <Tree height={treeHeight}> renders its own scroll via
-            // rc-virtual-list — outer overflow:auto would only kick in
-            // if the tree itself failed to clip, which is exactly the
-            // bug we're fixing.
+            // 显式高度 (calc(100vh - 140px)) 让 fs-tree 在 flex 行里
+            // 有确定的高度, antd Tree 拿到真实 maxHeight 启用滚动;
+            // minHeight:0 防止 Tree 自然高度撑爆 calc.
+            height: 'calc(100vh - 140px)',
             minHeight: 0,
-            overflow: 'hidden',
+            overflow: 'auto',
             borderRight: '1px solid rgba(255,255,255,0.08)',
             padding: '4px 8px',
           }}
@@ -243,15 +239,10 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         <div
           data-testid="fs-preview"
           style={{
-            // Column flex with minHeight:0 lets the inner <pre> /
-            // SyntaxHighlighter be the scroll container instead of
-            // stretching the row and clipping the Tree column on the left.
-            // Without minHeight:0, flexbox defaults to min-height:auto
-            // and a tall file pushes the whole row past the panel — the
-            // previous version used a viewport-absolute maxHeight which
-            // worked on desktop but broke on resize and showed no scroll
-            // when the file content alone was taller than the viewport.
+            // 与 fs-tree 对齐的 calc 高度; minHeight:0 防止内层
+            // SyntaxHighlighter / <pre> 自然高度撑爆 flex 行.
             flex: '0 0 60%',
+            height: 'calc(100vh - 140px)',
             minHeight: 0,
             display: 'flex',
             flexDirection: 'column',
