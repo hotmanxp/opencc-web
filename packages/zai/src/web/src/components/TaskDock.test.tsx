@@ -77,3 +77,30 @@ describe("TaskDock — hooks 顺序稳定 (回归 React #310)", () => {
     expect(container.firstChild).toBeNull();
   });
 });
+
+describe("TaskDock — compact 模式 (右侧分屏展开时)", () => {
+  test("compact=true 时不渲染 '后台任务' 文本,只渲染图标", () => {
+    state.runningTasks = [{ taskId: "t1", status: "running", prompt: "echo" }];
+    state.recentTasks = [];
+    state.bashTasks = [];
+
+    const { container } = render(<TaskDock onSelect={() => {}} compact />);
+
+    // 文本被替换为图标
+    expect(screen.queryByText("后台任务")).toBeNull();
+    // 图标按钮带 aria-label="后台任务", 仍可被无障碍 / 测试访问
+    expect(screen.getByLabelText("后台任务")).toBeInTheDocument();
+    // 容器仍然渲染 (有任务时不为 null)
+    expect(container.firstChild).not.toBeNull();
+  });
+
+  test("compact=false (默认) 仍渲染 '后台任务' 文本", () => {
+    state.runningTasks = [{ taskId: "t1", status: "running", prompt: "echo" }];
+    state.recentTasks = [];
+    state.bashTasks = [];
+
+    render(<TaskDock onSelect={() => {}} />);
+    expect(screen.queryByText("后台任务")).not.toBeNull();
+    expect(screen.queryByLabelText("后台任务")).toBeNull();
+  });
+});

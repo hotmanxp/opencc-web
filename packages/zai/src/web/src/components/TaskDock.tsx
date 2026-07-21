@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Badge, Popover, Tooltip } from 'antd'
-import { CaretRightOutlined, CheckCircleFilled, CloseCircleFilled, CodeOutlined, LoadingOutlined } from '@ant-design/icons'
+import { AppstoreOutlined, CaretRightOutlined, CheckCircleFilled, CloseCircleFilled, CodeOutlined, LoadingOutlined } from '@ant-design/icons'
 import { useBackgroundTasks } from '../hooks/useBackgroundTasks.js'
 import type { BackgroundTaskSummary } from '../hooks/useBackgroundTasks.js'
 import { useBashBackgroundTasks } from '../hooks/useBashBackgroundTasks.js'
@@ -124,8 +124,16 @@ function BashRow({
  * - 当 running > 0 时显示徽章数字
  * - 点击展开 Popover,列出活跃 + 最近结束的任务
  * - 点击某行 → 通过 onSelect 通知外部打开 Drawer
+ * - compact=true(右侧分屏展开)时只显示图标+badge,省掉"后台任务"文本,
+ *   跟 ModeStatusButton 在 compact 下的精简策略一致.
  */
-export function TaskDock({ onSelect }: { onSelect: (id: string) => void }) {
+export function TaskDock({
+  onSelect,
+  compact = false,
+}: {
+  onSelect: (id: string) => void
+  compact?: boolean
+}) {
   const { runningTasks, recentTasks } = useBackgroundTasks()
   const { tasks: bashTasks } = useBashBackgroundTasks()
   const [open, setOpen] = useState(false)
@@ -293,8 +301,17 @@ export function TaskDock({ onSelect }: { onSelect: (id: string) => void }) {
             color: total > 0 ? '#a78bfa' : 'rgba(255,255,255,0.40)',
           }}
         >
-          <Badge count={total} size="small" offset={[4, -2]} color="#a78bfa">
-            <span style={{ padding: '0 4px', fontSize: 12, lineHeight: 1 }}>后台任务</span>
+          <Badge count={total} size="small" offset={compact ? [2, -2] : [4, -2]} color="#a78bfa">
+            {compact ? (
+              // compact(右侧分屏展开)模式: 只显示图标,省掉"后台任务"文本.
+              // 视觉与 ModeStatusButton 在 compact 下的精简策略一致.
+              <AppstoreOutlined
+                style={{ padding: '0 4px', fontSize: 14, lineHeight: 1 }}
+                aria-label="后台任务"
+              />
+            ) : (
+              <span style={{ padding: '0 4px', fontSize: 12, lineHeight: 1 }}>后台任务</span>
+            )}
           </Badge>
         </span>
       </Tooltip>

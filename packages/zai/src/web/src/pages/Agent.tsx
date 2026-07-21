@@ -550,6 +550,7 @@ export default function Agent() {
             cwdName={cwdName}
             branch={branch}
             onTaskSelect={setSelectedTaskId}
+            splitPaneOpen={splitPaneOpen}
           />
         </div>
       </div>

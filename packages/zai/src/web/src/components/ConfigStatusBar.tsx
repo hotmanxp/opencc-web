@@ -8,9 +8,20 @@ type Props = {
   sessionCwd?: string;
   branch: string;
   onTaskSelect: (taskId: string) => void;
+  /**
+   * 右侧分屏是否展开. 展开时按钮文本做精简(权限模式去掉 (shift+tab) 提示,
+   * 后台任务只显示图标),给窄屏幕 / 分屏态腾出横向空间. 默认 false(收起).
+   */
+  splitPaneOpen?: boolean;
 };
 
-export default function ConfigStatusBar({ cwdName, sessionCwd, branch, onTaskSelect }: Props) {
+export default function ConfigStatusBar({
+  cwdName,
+  sessionCwd,
+  branch,
+  onTaskSelect,
+  splitPaneOpen = false,
+}: Props) {
   // When sessionCwd is provided, show its basename; otherwise fall back to the static cwdName.
   // Browser side has no node:path, so use string split. Empty parts (from leading "/") are filtered.
   const displayName = sessionCwd
@@ -31,7 +42,7 @@ export default function ConfigStatusBar({ cwdName, sessionCwd, branch, onTaskSel
         gap: 8,
       }}
     >
-      <ModeStatusButton />
+      <ModeStatusButton compact={splitPaneOpen} />
       <span style={{ color: "#eab308" }}>{displayName}</span>
       <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
       <span style={{ color: "#22c55e" }}>{branch}</span>
@@ -40,7 +51,7 @@ export default function ConfigStatusBar({ cwdName, sessionCwd, branch, onTaskSel
         <ModelStatusButton />
       </span>
       <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
-      <TaskDock onSelect={onTaskSelect} />
+      <TaskDock onSelect={onTaskSelect} compact={splitPaneOpen} />
     </div>
   );
 }

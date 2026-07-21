@@ -191,7 +191,7 @@ function Row({ mode, isCurrent, isSelected, onClick, onMouseEnter }: RowProps) {
   )
 }
 
-export default function ModeStatusButton() {
+export default function ModeStatusButton({ compact = false }: { compact?: boolean } = {}) {
   const sessions = useAgentStore((s) => s.sessions)
   const activeSessionId = useAgentStore((s) => s.activeSessionId)
   const sessionId = useAgentStore((s) => s.sessionId)
@@ -311,7 +311,11 @@ export default function ModeStatusButton() {
         }}
       >
         <span style={{ color: meta.color }}>{meta.icon} {meta.badgeLabel}</span>
-        <span style={{ color: 'rgba(255,255,255,0.35)' }}> (shift+tab ↹)</span>
+        {/* compact(右侧分屏展开)模式下省掉 shift+tab 提示,腾出横向空间.
+            title 仍保留完整文案,鼠标 hover 仍能拿到快捷键说明. */}
+        {!compact && (
+          <span style={{ color: 'rgba(255,255,255,0.35)' }}> (shift+tab ↹)</span>
+        )}
       </Button>
     </Popover>
   )
