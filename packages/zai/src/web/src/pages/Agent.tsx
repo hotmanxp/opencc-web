@@ -68,9 +68,20 @@ const { Text, Paragraph } = Typography;
 export default function Agent() {
   const messages = useAgentStore((s) => s.messages);
   const status = useAgentStore((s) => s.status);
-  const cwd = useAgentStore((s) => s.cwd);
   const sessions = useAgentStore((s) => s.sessions);
   const sessionId = useAgentStore((s) => s.sessionId);
+  // 右侧分屏需要当前 cwd. store.cwd 字段从未被 reducer 写, 一直是 ''.
+  // 正确来源: (1) instanceContext.cwd 是 server 注入的进程 cwd, 冷启动立即可用;
+  //          (2) cwdBySession[sessionId] 由 SSE cwd.changed 维护, 只在用户跑过 bash 后才有.
+  // 优先取 (1), sessionId 切换时由 ConfigStatusBar 桥接 cwdName 即可.
+  const { instanceContext } = useAppStore();
+  const cwdBySessionForSid = useAgentStore((s) =>
+    s.sessionId ? s.cwdBySession[s.sessionId] : undefined,
+  );
+  const cwd: string | null = useMemo(() => {
+    if (instanceContext?.cwd) return instanceContext.cwd;
+    return cwdBySessionForSid ?? null;
+  }, [instanceContext?.cwd, cwdBySessionForSid]);
   const todosBySession = useAgentStore((s) => s.todosBySession);
   const v2TasksBySession = useAgentStore((s) => s.v2TasksBySession);
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
@@ -92,7 +103,6 @@ export default function Agent() {
   // 任务摘要现在由 AgentInputBox 内部从 store 直接取 (避免 props 透传).
   void v2TasksBySession;
   const patchSessionMode = useAgentStore((s) => s.patchSessionMode);
-  const { instanceContext } = useAppStore()
   const cwdName = instanceContext?.cwdName || '~'
   const branch = instanceContext?.branch || 'master'
   const { token } = theme.useToken();
