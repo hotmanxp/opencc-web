@@ -100,7 +100,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         }}
       >
         <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>
-          Files <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.35)' }}>(深度 ≤ {MAX_DEPTH})</span>
+          Files <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.35)' }}>(深度 ≤ {FS_MAX_DEPTH})</span>
         </span>
         {refreshBtn}
       </div>
