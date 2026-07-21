@@ -71,6 +71,10 @@ export async function runDev(options: DevOptions) {
         });
         viteServer!.listen(vitePort, '127.0.0.1', () => resolve());
       });
+      // Free the port: dev.ts was only using it to detect availability.
+      // The actual vite child will re-listen on the same port (and we
+      // pass --strictPort so it fails fast if it can't).
+      await new Promise<void>((resolve) => viteServer!.close(() => resolve()));
       break;
     } catch (err: any) {
       if (err.code === 'EADDRINUSE') {
