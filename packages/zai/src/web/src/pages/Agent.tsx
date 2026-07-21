@@ -20,6 +20,7 @@ import {
   MessageOutlined,
   PlusOutlined,
   BulbOutlined,
+  BorderOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   CaretDownOutlined,
@@ -54,6 +55,11 @@ import AgentInputBox from "../components/AgentInputBox";
 import { MessageBubble } from "../components/transcript/MessageBubble.js";
 import { MessageListView } from "../components/transcript/MessageListView.js";
 import { useScrollFollow } from "../hooks/useScrollFollow";
+import { SplitPane, SplitPaneToggle } from "../components/splitPane/SplitPane.js";
+import {
+  STORAGE_KEYS,
+  useLocalStorageState,
+} from "../components/splitPane/shared.js";
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
@@ -103,6 +109,13 @@ export default function Agent() {
   // 会话历史侧栏是否收起. 收起时宽度缩到 40px 只显示图标, 腾出空间给对话区.
   // 默认收起, 让对话区首屏占满主视图, 用户按需点开.
   const [sessionsCollapsed, setSessionsCollapsed] = useState(true);
+  // 右侧分屏开关: 与 SplitPane 共享同一份 localStorage key, 这样左侧
+  // 侧栏的 toggle 与 SplitPane 内部的 toggle 始终同步 (storage 事件桥接).
+  // 宽度由 SplitPane 自己持有 (含 drag handle), Agent 不重复实现.
+  const [splitPaneOpenStored, setSplitPaneOpenStored] =
+    useLocalStorageState<boolean>(STORAGE_KEYS.open, false);
+  const splitPaneOpen = splitPaneOpenStored;
+  const toggleSplitPane = () => setSplitPaneOpenStored(!splitPaneOpenStored);
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // question 卡片滚到视口用: pendingAsk 不在 messages[] 里, 单依赖 messages 的滚动 effect
   // 不会触发, 这里单独加一个 ref 让卡片出现时也能滚到底.
@@ -234,7 +247,9 @@ export default function Agent() {
             // 用 absolute + transform 让三个图标按钮绝对居中于 40px 列宽,
             // 绕开 AntD Button 内部 icon 偏左导致的视觉不齐.
             // 第 2 个 N 按钮 = 新 tab 打开 /agent?sid=newID (不影响当前 tab).
-            <div style={{ position: "relative", width: "100%", height: 92 }}>
+            // 第 4 个按钮 (新增) = 切换右侧分屏, 与展开侧栏里的 toggle 共享 localStorage.
+            // height 提到 124 让四个 28px 按钮 + 4 间距全放下 (top 0/32/64/96).
+            <div style={{ position: "relative", width: "100%", height: 124 }}>
               <Button
                 type="text"
                 size="small"
@@ -302,6 +317,31 @@ export default function Agent() {
                   justifyContent: "center",
                 }}
               />
+              {/* 收起态下的右侧分屏 toggle. 与展开侧栏里的 SplitPaneToggle
+                  共享同一份 localStorage, 点这里也能开/关右侧面板. */}
+              <Button
+                type="text"
+                size="small"
+                icon={<BorderOutlined />}
+                onClick={toggleSplitPane}
+                title="切换右侧分屏"
+                data-testid="split-pane-toggle-collapsed"
+                style={{
+                  position: "absolute",
+                  top: 96,
+                  left: "50%",
+                  transform: "translateX(-50%)",
+                  width: 28,
+                  height: 28,
+                  padding: 0,
+                  display: "inline-flex",
+                  alignItems: "center",
+                  justifyContent: "center",
+                  // 与展开态 SplitPaneToggle 的图标约定对齐: 开启时
+                  // 用品牌色 #ff6600 高亮, 关闭时使用 antd 默认色.
+                  color: splitPaneOpen ? "#ff6600" : undefined,
+                }}
+              />
             </div>
           ) : (
             <>
@@ -340,6 +380,11 @@ export default function Agent() {
                   icon={<MenuFoldOutlined />}
                   onClick={() => setSessionsCollapsed(true)}
                   title="收起会话历史"
+                />
+                {/* 右侧分屏 toggle — 与 SplitPane 共享 localStorage. */}
+                <SplitPaneToggle
+                  open={splitPaneOpen}
+                  onToggle={toggleSplitPane}
                 />
               </Space>
             </>
@@ -529,6 +574,9 @@ export default function Agent() {
           />
         </div>
       </div>
+      {/* 右侧分屏面板. 自管理可见性 (localStorage) + 宽度 (含 drag handle),
+          Agent 只透传 cwd. 与左下角 toggle 通过同一份 localStorage key 同步. */}
+      <SplitPane cwd={cwd} />
       <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
       <SettingsDrawer />
       <SessionCwdBridge />
