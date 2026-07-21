@@ -4,7 +4,7 @@ import { ReloadOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
-import { FS_MAX_DEPTH } from './shared.js';
+import { MAX_DEPTH } from './shared.js';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
@@ -100,7 +100,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         }}
       >
         <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>
-          Files <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.35)' }}>(深度 ≤ {FS_MAX_DEPTH})</span>
+          Files <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.35)' }}>(深度 ≤ {MAX_DEPTH})</span>
         </span>
         {refreshBtn}
       </div>
