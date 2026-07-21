@@ -1,5 +1,4 @@
 import { useEffect, useState } from 'react';
-import { basename, dirname } from 'node:path';
 import { Button, Empty, Spin, Tag } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useGitStatus } from './useGitStatus.js';
@@ -9,6 +8,11 @@ import { STATUS_COLORS, STATUS_LABELS } from './shared.js';
 import type { GitStatusChar } from '../../../../shared/git.js';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+
+function getFileName(filePath: string): string {
+  const separatorIndex = Math.max(filePath.lastIndexOf('/'), filePath.lastIndexOf('\\'));
+  return filePath.slice(separatorIndex + 1);
+}
 
 export function GitTab({ cwd }: { cwd: string | null }) {
   const status = useGitStatus(cwd);
@@ -94,6 +98,8 @@ export function GitTab({ cwd }: { cwd: string | null }) {
           ) : (
             files.map((f) => {
               const isSel = selected === f.path;
+              const fileName = getFileName(f.path);
+              const dir = f.path.slice(0, f.path.length - fileName.length - 1);
               return (
                 <div
                   key={f.path}
@@ -140,24 +146,21 @@ export function GitTab({ cwd }: { cwd: string | null }) {
                         whiteSpace: 'nowrap',
                       }}
                     >
-                      {basename(f.path)}
+                      {fileName}
                     </span>
-                    {(() => {
-                      const dir = dirname(f.path);
-                      return dir && dir !== '.' ? (
-                        <span
-                          style={{
-                            color: 'rgba(255,255,255,0.45)',
-                            fontSize: 10,
-                            overflow: 'hidden',
-                            textOverflow: 'ellipsis',
-                            whiteSpace: 'nowrap',
-                          }}
-                        >
-                          {dir}
-                        </span>
-                      ) : null;
-                    })()}
+                    {dir && dir !== '.' ? (
+                      <span
+                        style={{
+                          color: 'rgba(255,255,255,0.45)',
+                          fontSize: 10,
+                          overflow: 'hidden',
+                          textOverflow: 'ellipsis',
+                          whiteSpace: 'nowrap',
+                        }}
+                      >
+                        {dir}
+                      </span>
+                    ) : null}
                   </span>
                   {f.staged && (
                     <span
