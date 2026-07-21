@@ -305,21 +305,11 @@ describe('FsTab', () => {
     expect(screen.queryByTestId('fs-preview-md')).toBeNull();
   });
 
-  it('mounts fs-tree as a fixed-height column with overflow:auto so scroll always works', () => {
-    // antd Tree uses rc-virtual-list internally; rc-virtual-list only
-    // sets its own maxHeight + overflowY when given a numeric height prop.
-    // The column needs minHeight:0 (so flexbox doesn't expand it past
-    // the panel).
-    //
-    // overflow:auto (not hidden) is the safe default: when the inner
-    // <Tree height={treeHeight}> successfully enables rc-virtual-list,
-    // the inner holder owns the scrollbar and the outer auto just stays
-    // inert. But if `treeHeight` is 0 — e.g. the rAF re-measure in
-    // useElementHeight hasn't fired yet, or the parent flex column
-    // genuinely has 0 height — the Tree falls back to natural height
-    // and the outer overflow:auto keeps the content scrollable instead
-    // of silently clipping it off-panel. The previous `hidden` was a
-    // hard cut that left users with no way to reach the rest of the tree.
+  it('mounts fs-tree with a calc(100vh - 140px) height + overflow:auto so scroll always works', () => {
+    // 关键修复: fs-tree / fs-preview 都写死 height: calc(100vh - 140px),
+    // 不依赖 flex 父级 stretch race. fs-tree overflow:auto 兜底滚动
+    // (antd Tree 自然渲染的内容超出时被父容器截断并显示原生滚动条).
+    // minHeight:0 防止 Tree 自然高度反向撑爆 calc.
     mockList.mockReturnValue({
       data: { ok: true, entries: [] },
       loading: false,
@@ -329,6 +319,7 @@ describe('FsTab', () => {
     mockFile.mockReturnValue({ data: null, loading: false, error: null });
     render(<FsTab cwd="/repo" />);
     const tree = screen.getByTestId('fs-tree') as HTMLElement;
+    expect(tree.style.height).toBe('calc(100vh - 140px)');
     expect(tree.style.overflow).toBe('auto');
     expect(tree.style.minHeight).toMatch(/^0(px)?$/);
   });

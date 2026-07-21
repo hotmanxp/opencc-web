@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Button, Empty, Spin, Tree } from 'antd';
 import { ReloadOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -7,7 +7,6 @@ import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
 import { extToLanguage } from './extToLang.js';
-import { useElementHeight } from './useElementHeight.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
@@ -91,13 +90,6 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [loaded, setLoaded] = useState<LoadedMap>({});
   const file = useFsFile(cwd, selected);
-  // antd Tree uses rc-virtual-list internally, which only sets its own
-  // `maxHeight` + `overflowY:auto` when given a numeric `height` prop —
-  // otherwise the tree renders at natural height and the surrounding
-  // column's `overflow:auto` never fires. Track the column's measured
-  // height via ResizeObserver and feed it to <Tree height={...} />.
-  const treeContainerRef = useRef<HTMLDivElement | null>(null);
-  const treeHeight = useElementHeight(treeContainerRef);
 
   // Reset on cwd change.
   useEffect(() => {
@@ -195,13 +187,13 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       </div>
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div
-          ref={treeContainerRef}
           data-testid="fs-tree"
           style={{
             flex: '0 0 40%',
             // 显式高度 (calc(100vh - 140px)) 让 fs-tree 在 flex 行里
-            // 有确定的高度, antd Tree 拿到真实 maxHeight 启用滚动;
-            // minHeight:0 防止 Tree 自然高度撑爆 calc.
+            // 有确定的高度, antd Tree 自然渲染的内容超出时被父容器
+            // overflow:auto 截断并显示原生滚动条; minHeight:0 防止
+            // Tree 自然高度反向撑爆 calc.
             height: 'calc(100vh - 140px)',
             minHeight: 0,
             overflow: 'auto',
@@ -223,7 +215,6 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             <Tree
               treeData={treeData}
               showIcon
-              height={treeHeight || undefined}
               loadData={handleLoadData}
               expandedKeys={expandedKeys}
               onExpand={(keys) => setExpandedKeys(keys)}
