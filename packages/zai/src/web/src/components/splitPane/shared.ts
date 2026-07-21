@@ -13,6 +13,9 @@ export const DEFAULT_WIDTH = 480;
 export const RESPONSIVE_BREAKPOINT = 1024;
 export const COLLAPSED_WIDTH = 0;
 
+/** Maximum directory depth the split-pane FsTab allows expanding into. */
+export const MAX_DEPTH = 3;
+
 export function clampWidth(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_WIDTH;
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(value)));
