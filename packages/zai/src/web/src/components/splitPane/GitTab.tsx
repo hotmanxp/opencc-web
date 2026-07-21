@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react';
+import { basename, dirname } from 'node:path';
 import { Button, Empty, Spin, Tag } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { useGitStatus } from './useGitStatus.js';
@@ -124,14 +125,39 @@ export function GitTab({ cwd }: { cwd: string | null }) {
                     style={{
                       flex: 1,
                       minWidth: 0,
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                      color: 'rgba(255,255,255,0.85)',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      gap: 1,
                     }}
                     title={f.path}
                   >
-                    {f.path}
+                    <span
+                      style={{
+                        color: 'rgba(255,255,255,0.92)',
+                        fontWeight: 500,
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {basename(f.path)}
+                    </span>
+                    {(() => {
+                      const dir = dirname(f.path);
+                      return dir && dir !== '.' ? (
+                        <span
+                          style={{
+                            color: 'rgba(255,255,255,0.45)',
+                            fontSize: 10,
+                            overflow: 'hidden',
+                            textOverflow: 'ellipsis',
+                            whiteSpace: 'nowrap',
+                          }}
+                        >
+                          {dir}
+                        </span>
+                      ) : null;
+                    })()}
                   </span>
                   {f.staged && (
                     <span
