@@ -14,10 +14,10 @@ const TEXT_EXTS = new Set([
   '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
   '.css', '.scss', '.less', '.html', '.htm', '.xml', '.svg',
-  '.sh', '.bash', '.zsh', '.fish', '.ps1',
+  '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
   '.py', '.rb', '.go', '.rs', '.java', '.kt', '.swift', '.c', '.cc', '.cpp', '.h', '.hpp',
   '.sql', '.graphql', '.gql',
-  '.env', '.gitignore', '.gitattributes',
+  '.env', '.gitignore', '.gitattributes', '.lock',
 ]);
 
 interface InstanceContextShape { cwd: string; cwdName: string }

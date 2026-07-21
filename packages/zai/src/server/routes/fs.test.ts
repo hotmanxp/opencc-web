@@ -29,6 +29,11 @@ describe('routes/fs', () => {
     // unsupported extension
     writeFileSync(join(root, 'image.bin'), Buffer.from([0, 1, 2, 3]));
     writeFileSync(join(root, '.npmrc'), 'save-exact=true\n');
+    // Windows batch scripts
+    writeFileSync(join(root, 'zn-ai.bat'), '@echo off\r\necho hello\r\n');
+    writeFileSync(join(root, 'zn-ai.cmd'), '@echo off\r\necho hello\r\n');
+    // Lock files
+    writeFileSync(join(root, 'bun.lock'), '# bun lockfile v0\n');
   });
 
   afterAll(() => {
@@ -77,5 +82,21 @@ describe('routes/fs', () => {
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.content).toMatch(/save-exact=true/);
+  });
+
+  test('GET /fs/file serves Windows batch scripts (.bat / .cmd) as text', async () => {
+    for (const name of ['zn-ai.bat', 'zn-ai.cmd']) {
+      const res = await request(makeApp(root)).get('/api/fs/file').query({ path: name });
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      expect(res.body.content).toMatch(/@echo off/);
+    }
+  });
+
+  test('GET /fs/file serves .lock files as text', async () => {
+    const res = await request(makeApp(root)).get('/api/fs/file').query({ path: 'bun.lock' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.content).toMatch(/bun lockfile/);
   });
 });
