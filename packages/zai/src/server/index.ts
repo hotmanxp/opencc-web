@@ -5,6 +5,8 @@ import healthRouter from './routes/health.js';
 import systemRouter from './routes/system.js';
 import cliRouter from './routes/cli.js';
 import dirsRouter from './routes/dirs.js';
+import gitRouter from './routes/git.js';
+import fsRouter from './routes/fs.js';
 import loginRouter from './routes/login.js';
 import configRouter from './routes/config.js';
 import resourcesRouter from './routes/resources.js';
@@ -78,6 +80,8 @@ export function createApp(opts: AppOptions): express.Express {
   app.use('/api', systemRouter);
   app.use('/api', cliRouter);
   app.use('/api', dirsRouter);
+  app.use('/api', gitRouter);
+  app.use('/api', fsRouter);
   app.use('/api', loginRouter);
   app.use('/api', configRouter);
   app.use('/api', resourcesRouter);
