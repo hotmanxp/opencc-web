@@ -236,4 +236,25 @@ describe('FsTab', () => {
     // The raw markdown source should appear verbatim.
     expect(screen.getByText('# Hello')).toBeTruthy();
   });
+
+  it('mounts fs-tree with overflow:auto + minHeight:0 so expanded Tree scrolls inside the column', () => {
+    // Regression: a previous version of fs-tree had overflow:auto but
+    // not minHeight:0, so the row-flex child defaulted to min-height:auto
+    // and let the expanded Tree stretch the whole FsTab past the panel —
+    // no scrollbar appeared because the row itself had no defined height
+    // to overflow against. The fs-preview column is handled separately
+    // (its inner fs-preview-code / fs-preview-text div is the actual
+    // scroll viewport).
+    mockList.mockReturnValue({
+      data: { ok: true, entries: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({ data: null, loading: false, error: null });
+    render(<FsTab cwd="/repo" />);
+    const tree = screen.getByTestId('fs-tree') as HTMLElement;
+    expect(tree.style.overflow).toBe('auto');
+    expect(tree.style.minHeight).toMatch(/^0(px)?$/);
+  });
 });

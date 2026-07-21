@@ -177,6 +177,15 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           data-testid="fs-tree"
           style={{
             flex: '0 0 40%',
+            // minHeight:0 is mandatory in flexbox — without it, a row
+            // flex child defaults to min-height:auto and lets its
+            // content (the expanded antd Tree) stretch the row past
+            // the panel. The previous version only set overflow:auto,
+            // which never triggered because the row had no defined
+            // height to overflow against — Tree expansion grew the
+            // whole FsTab, hiding the scrollbar that should be inside
+            // the tree column itself.
+            minHeight: 0,
             overflow: 'auto',
             borderRight: '1px solid rgba(255,255,255,0.08)',
             padding: '4px 8px',
