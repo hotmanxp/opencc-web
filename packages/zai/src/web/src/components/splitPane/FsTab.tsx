@@ -59,6 +59,15 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const renderTree = (entries: Array<{ name: string; path: string; type: 'dir' | 'file'; size: number | null }>): DataNode[] =>
     entries.map((e) => {
       const children = loaded[e.path];
+      // For directory nodes:
+      //   - children loaded → render real children (may be [] = empty dir)
+      //   - children not yet loaded → leave `children` undefined so antd Tree
+      //     fires `loadData` on expand (the previous version injected a
+      //     `[ { __ph } ]` placeholder which made Tree think the node was
+      //     already loaded and skip the fetch — that's why drill-down was
+      //     stuck at every level).
+      // Files are always leaves.
+      const isLoaded = Object.prototype.hasOwnProperty.call(loaded, e.path);
       return {
         key: e.path,
         title: <span style={{ fontFamily: MONO, fontSize: 12 }}>{e.name}</span>,
@@ -66,9 +75,9 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         isLeaf: e.type === 'file',
         children:
           e.type === 'dir'
-            ? children
-              ? renderTree(children)
-              : [{ key: `${e.path}__ph`, title: '…', isLeaf: true }]
+            ? isLoaded
+              ? renderTree(children ?? [])
+              : undefined
             : undefined,
       } as DataNode;
     });

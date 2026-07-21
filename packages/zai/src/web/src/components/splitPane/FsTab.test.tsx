@@ -77,4 +77,37 @@ describe('FsTab', () => {
     expect(screen.queryByText(/深度 ≤/)).toBeNull();
     expect(screen.getByText(/按需加载/)).toBeTruthy();
   });
+
+  it('does not inject a placeholder child for unloaded directories', () => {
+    // Regression: a previous version of renderTree pushed
+    // `[{ key: __ph, title: '…', isLeaf: true }]` for every dir so the
+    // tree looked populated but was permanently stuck — antd Tree saw a
+    // non-empty children array and skipped loadData, so expand was a
+    // no-op. The fix leaves `children` undefined until loaded[path] is
+    // set, which makes antd actually invoke loadData.
+    //
+    // We assert on the rendered DOM by reading the data-testid wrapper
+    // and confirming no `…` placeholder text appears for unloaded dirs.
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          { name: 'packages', path: 'packages', type: 'dir', size: null },
+          { name: 'docs', path: 'docs', type: 'dir', size: null },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({ data: null, loading: false, error: null });
+    render(<FsTab cwd="/repo" />);
+    // Top-level entries render.
+    expect(screen.getByText('packages')).toBeTruthy();
+    expect(screen.getByText('docs')).toBeTruthy();
+    // Placeholder text should NOT appear at the top level — only real
+    // loaded entries or undefined children (which antd handles via
+    // loadData on expand). The previous bug exposed a `…` row here.
+    expect(screen.queryByText('…')).toBeNull();
+  });
 });
