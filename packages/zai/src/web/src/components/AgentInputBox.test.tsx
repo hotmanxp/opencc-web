@@ -24,6 +24,21 @@ vi.mock("../lib/api.js", () => ({
   },
 }))
 
+// AgentInputBox 挂载时调裸 fetch("/api/slash") 拉 slash items. 之前没 mock
+// → happy-dom 触发真请求 → ECONNREFUSED,导致整个 describe 挂掉. 我们只关心
+// transcript-collapse 按钮的渲染,不关心 slash 数据,直接 resolve 一个空 items.
+beforeAll(() => {
+  vi.stubGlobal(
+    "fetch",
+    vi.fn(async () =>
+      new Response(JSON.stringify({ items: [] }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    ),
+  )
+})
+
 beforeEach(() => {
   useAgentStore.setState({
     sessionId: 'sess-1',
