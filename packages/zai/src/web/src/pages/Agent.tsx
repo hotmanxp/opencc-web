@@ -20,7 +20,6 @@ import {
   MessageOutlined,
   PlusOutlined,
   BulbOutlined,
-  BorderOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   CaretDownOutlined,
@@ -55,7 +54,7 @@ import AgentInputBox from "../components/AgentInputBox";
 import { MessageBubble } from "../components/transcript/MessageBubble.js";
 import { MessageListView } from "../components/transcript/MessageListView.js";
 import { useScrollFollow } from "../hooks/useScrollFollow";
-import { SplitPane, SplitPaneToggle } from "../components/splitPane/SplitPane.js";
+import { SplitPane } from "../components/splitPane/SplitPane.js";
 import {
   STORAGE_KEYS,
   useLocalStorageState,
@@ -257,9 +256,9 @@ export default function Agent() {
             // 用 absolute + transform 让三个图标按钮绝对居中于 40px 列宽,
             // 绕开 AntD Button 内部 icon 偏左导致的视觉不齐.
             // 第 2 个 N 按钮 = 新 tab 打开 /agent?sid=newID (不影响当前 tab).
-            // 第 4 个按钮 (新增) = 切换右侧分屏, 与展开侧栏里的 toggle 共享 localStorage.
-            // height 提到 124 让四个 28px 按钮 + 4 间距全放下 (top 0/32/64/96).
-            <div style={{ position: "relative", width: "100%", height: 124 }}>
+            // 第 3 个按钮 = "展开会话历史" 切换 (MenuUnfoldOutlined).
+            // height = 96 让三个 28px 按钮 + 2 段 32px 间距全放下 (top 0/32/64).
+            <div style={{ position: "relative", width: "100%", height: 96 }}>
               <Button
                 type="text"
                 size="small"
@@ -327,31 +326,6 @@ export default function Agent() {
                   justifyContent: "center",
                 }}
               />
-              {/* 收起态下的右侧分屏 toggle. 与展开侧栏里的 SplitPaneToggle
-                  共享同一份 localStorage, 点这里也能开/关右侧面板. */}
-              <Button
-                type="text"
-                size="small"
-                icon={<BorderOutlined />}
-                onClick={toggleSplitPane}
-                title="切换右侧分屏"
-                data-testid="split-pane-toggle-collapsed"
-                style={{
-                  position: "absolute",
-                  top: 96,
-                  left: "50%",
-                  transform: "translateX(-50%)",
-                  width: 28,
-                  height: 28,
-                  padding: 0,
-                  display: "inline-flex",
-                  alignItems: "center",
-                  justifyContent: "center",
-                  // 与展开态 SplitPaneToggle 的图标约定对齐: 开启时
-                  // 用品牌色 #ff6600 高亮, 关闭时使用 antd 默认色.
-                  color: splitPaneOpen ? "#ff6600" : undefined,
-                }}
-              />
             </div>
           ) : (
             <>
@@ -390,11 +364,6 @@ export default function Agent() {
                   icon={<MenuFoldOutlined />}
                   onClick={() => setSessionsCollapsed(true)}
                   title="收起会话历史"
-                />
-                {/* 右侧分屏 toggle — 与 SplitPane 共享 localStorage. */}
-                <SplitPaneToggle
-                  open={splitPaneOpen}
-                  onToggle={toggleSplitPane}
                 />
               </Space>
             </>

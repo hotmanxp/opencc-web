@@ -1,10 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { Button, Tabs } from 'antd';
-import {
-  BorderOutlined,
-  ReloadOutlined,
-  PicCenterOutlined,
-} from '@ant-design/icons';
+import { Tabs } from 'antd';
 import { GitTab } from './GitTab.js';
 import { FsTab } from './FsTab.js';
 import { PlaceholderTab } from './PlaceholderTab.js';
@@ -109,10 +104,6 @@ export function SplitPane({ cwd }: SplitPaneProps) {
         transition: 'width 0.2s ease, min-width 0.2s ease',
       }}
     >
-      <SplitPaneToggle
-        open={open}
-        onToggle={() => setOpenStored(!openStored)}
-      />
       {open && (
         <>
           <Tabs
@@ -158,30 +149,3 @@ export function SplitPane({ cwd }: SplitPaneProps) {
     </div>
   );
 }
-
-/**
- * Companion toggle button — rendered by Agent.tsx in the left sidebar.
- */
-export function SplitPaneToggle({
-  open,
-  onToggle,
-}: {
-  open: boolean;
-  onToggle: () => void;
-}) {
-  return (
-    <Button
-      type="text"
-      size="small"
-      icon={open ? <PicCenterOutlined /> : <BorderOutlined />}
-      onClick={onToggle}
-      title="切换右侧分屏"
-      data-testid="split-pane-toggle"
-      style={{
-        // Match the existing icon-button cluster in the left sidebar.
-      }}
-    />
-  );
-}
-
-void ReloadOutlined; // re-exported for potential future "refresh" use

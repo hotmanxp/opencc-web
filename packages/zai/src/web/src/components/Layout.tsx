@@ -121,43 +121,6 @@ export default function Layout() {
           items={menuItems}
           onClick={({ key }) => navigate(key)}
         />
-        {/* 自定义触发条: trigger={null} 关闭了 antd 自带的 .ant-layout-sider-trigger
-            (深蓝底色), 这里手动渲染一个, 用主题橙 (#ff6600) + 浅橙底, hover 加深,
-            点击切 sidebarCollapsed. 图标用 MenuFold / MenuUnfold (双向箭头),
-            比 antd 默认的单边 < > 更有方向感. */}
-        <div
-          onClick={toggleSidebar}
-          style={{
-            position: 'absolute',
-            bottom: 0,
-            left: 0,
-            right: 0,
-            height: 40,
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            cursor: 'pointer',
-            background: 'rgba(255, 102, 0, 0.12)',
-            color: '#ff6600',
-            borderTop: '1px solid rgba(255, 102, 0, 0.25)',
-            transition: 'background 0.15s ease',
-          }}
-          onMouseEnter={(e) => {
-            ;(e.currentTarget as HTMLDivElement).style.background =
-              'rgba(255, 102, 0, 0.22)'
-          }}
-          onMouseLeave={(e) => {
-            ;(e.currentTarget as HTMLDivElement).style.background =
-              'rgba(255, 102, 0, 0.12)'
-          }}
-          title={sidebarCollapsed ? '展开侧栏' : '收起侧栏'}
-        >
-          {sidebarCollapsed ? (
-            <MenuUnfoldOutlined style={{ fontSize: 16 }} />
-          ) : (
-            <MenuFoldOutlined style={{ fontSize: 16 }} />
-          )}
-        </div>
       </Sider>
       <AntLayout>
         {/* <Header
