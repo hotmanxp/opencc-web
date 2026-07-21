@@ -1,4 +1,4 @@
-import { Router, type IRouter } from 'express';
+import { Router, type IRouter, type Request } from 'express';
 import { readdir, stat, readFile } from 'node:fs/promises';
 import { extname, basename, sep } from 'node:path';
 import { resolveSafePath } from '../utils/safePath.js';
@@ -22,7 +22,7 @@ const TEXT_EXTS = new Set([
 ]);
 
 interface InstanceContextShape { cwd: string; cwdName: string }
-function ctx(req: express.Request): InstanceContextShape {
+function ctx(req: Request): InstanceContextShape {
   return req.app.locals.instanceContext as InstanceContextShape;
 }
 
