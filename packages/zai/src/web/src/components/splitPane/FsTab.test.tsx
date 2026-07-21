@@ -237,14 +237,12 @@ describe('FsTab', () => {
     expect(screen.getByText('# Hello')).toBeTruthy();
   });
 
-  it('mounts fs-tree with overflow:auto + minHeight:0 so expanded Tree scrolls inside the column', () => {
-    // Regression: a previous version of fs-tree had overflow:auto but
-    // not minHeight:0, so the row-flex child defaulted to min-height:auto
-    // and let the expanded Tree stretch the whole FsTab past the panel —
-    // no scrollbar appeared because the row itself had no defined height
-    // to overflow against. The fs-preview column is handled separately
-    // (its inner fs-preview-code / fs-preview-text div is the actual
-    // scroll viewport).
+  it('mounts fs-tree as a fixed-height column so the inner Tree owns scrolling', () => {
+    // antd Tree uses rc-virtual-list internally; rc-virtual-list only
+    // sets its own maxHeight + overflowY when given a numeric height prop.
+    // The column needs minHeight:0 (so flexbox doesn't expand it past
+    // the panel) and overflow:hidden (so the column itself doesn't try
+    // to scroll — Tree's height prop drives the inner scroll).
     mockList.mockReturnValue({
       data: { ok: true, entries: [] },
       loading: false,
@@ -254,7 +252,7 @@ describe('FsTab', () => {
     mockFile.mockReturnValue({ data: null, loading: false, error: null });
     render(<FsTab cwd="/repo" />);
     const tree = screen.getByTestId('fs-tree') as HTMLElement;
-    expect(tree.style.overflow).toBe('auto');
+    expect(tree.style.overflow).toBe('hidden');
     expect(tree.style.minHeight).toMatch(/^0(px)?$/);
   });
 });

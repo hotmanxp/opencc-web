@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Empty, Spin, Tree } from 'antd';
 import { ReloadOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -7,6 +7,7 @@ import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
 import { extToLanguage } from './extToLang.js';
+import { useElementHeight } from './useElementHeight.js';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
@@ -77,6 +78,13 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [loaded, setLoaded] = useState<LoadedMap>({});
   const file = useFsFile(cwd, selected);
+  // antd Tree uses rc-virtual-list internally, which only sets its own
+  // `maxHeight` + `overflowY:auto` when given a numeric `height` prop —
+  // otherwise the tree renders at natural height and the surrounding
+  // column's `overflow:auto` never fires. Track the column's measured
+  // height via ResizeObserver and feed it to <Tree height={...} />.
+  const treeContainerRef = useRef<HTMLDivElement | null>(null);
+  const treeHeight = useElementHeight(treeContainerRef);
 
   // Reset on cwd change.
   useEffect(() => {
@@ -174,19 +182,20 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       </div>
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div
+          ref={treeContainerRef}
           data-testid="fs-tree"
           style={{
             flex: '0 0 40%',
             // minHeight:0 is mandatory in flexbox — without it, a row
             // flex child defaults to min-height:auto and lets its
             // content (the expanded antd Tree) stretch the row past
-            // the panel. The previous version only set overflow:auto,
-            // which never triggered because the row had no defined
-            // height to overflow against — Tree expansion grew the
-            // whole FsTab, hiding the scrollbar that should be inside
-            // the tree column itself.
+            // the panel. overflow:hidden (not auto) because the inner
+            // <Tree height={treeHeight}> renders its own scroll via
+            // rc-virtual-list — outer overflow:auto would only kick in
+            // if the tree itself failed to clip, which is exactly the
+            // bug we're fixing.
             minHeight: 0,
-            overflow: 'auto',
+            overflow: 'hidden',
             borderRight: '1px solid rgba(255,255,255,0.08)',
             padding: '4px 8px',
           }}
@@ -205,6 +214,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             <Tree
               treeData={treeData}
               showIcon
+              height={treeHeight || undefined}
               loadData={handleLoadData}
               expandedKeys={expandedKeys}
               onExpand={(keys) => setExpandedKeys(keys)}
