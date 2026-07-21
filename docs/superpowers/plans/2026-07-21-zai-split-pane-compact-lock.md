@@ -229,7 +229,7 @@ git commit -m "feat(zai-web): add useSplitPaneCompactLock hook (test-driven)"
 
 **Interfaces:**
 - Consumes: `useLocalStorageState<boolean>` from `../components/splitPane/shared.js`.
-- Produces: `export function useSplitPaneSessionAutoCollapse(opts: { splitPaneOpen: boolean; timeoutMs?: number }): { collapsed: boolean; expand: () => void; schedule: () => void }` where `timeoutMs` defaults to `10000`.
+- Produces: `export function useSplitPaneSessionAutoCollapse(opts: { splitPaneOpen: boolean; timeoutMs?: number }): { collapsed: boolean; expand: () => void; collapse: () => void; schedule: () => void }` where `timeoutMs` defaults to `10000`. (`collapse()` is needed by Agent.tsx's existing "收起会话历史" button — it collapses immediately and clears the auto-collapse timer.)
 
 - [ ] **Step 1: Write the failing tests**
 
@@ -406,6 +406,8 @@ export interface UseSplitPaneSessionAutoCollapseResult {
   collapsed: boolean
   /** 点 "展开会话历史" 时调用: 翻 false + 启动倒计时. */
   expand: () => void
+  /** 点 "收起会话历史" 时调用: 翻 true + 清掉计时器. */
+  collapse: () => void
   /** hover / mousemove / onClick 时调用, 重置倒计时. */
   schedule: () => void
 }
@@ -446,6 +448,11 @@ export function useSplitPaneSessionAutoCollapse(
     armTimer(timeoutMs)
   }, [splitPaneOpen, armTimer, timeoutMs])
 
+  const collapse = useCallback(() => {
+    setCollapsed(true)
+    clearTimer()
+  }, [clearTimer])
+
   // Enter 分屏: 强制收起 + 清掉旧 timer
   useEffect(() => {
     if (!splitPaneOpen) {
@@ -460,7 +467,7 @@ export function useSplitPaneSessionAutoCollapse(
   // Unmount cleanup
   useEffect(() => clearTimer, [clearTimer])
 
-  return { collapsed, expand, schedule }
+  return { collapsed, expand, collapse, schedule }
 }
 ```
 
@@ -610,9 +617,9 @@ git commit -m "feat(zai-web): hide transcript-collapse button when split-pane is
 - Consumes: `useSplitPaneSessionAutoCollapse` from `../hooks/useSplitPaneSessionAutoCollapse.js`; existing `splitPaneOpen` boolean on line 125.
 - Produces: replaces `const [sessionsCollapsed, setSessionsCollapsed] = useState(true);` (line 119) with the hook. JSX uses `collapsed`, `expand()`, `schedule()` instead of the local setters.
 
-- [ ] **Step 1: Add failing test for the page-level behavior**
+- [ ] **Step 1: Establish smoke checklist + skip page-level test**
 
-Append a new `describe` block at the bottom of `packages/zai/src/web/src/components/splitPane/SplitPane.test.tsx` is **not** the right file — Agent.tsx has no test file. Skip page-level render tests; rely on hook-level tests (Task 2) plus a manual smoke checklist below. The component change is verified via TypeScript compile + manual UI walkthrough.
+Agent.tsx has no render test file in this repo, so the only automated checks for Task 4 are the existing hook tests (Task 2) plus TypeScript compile. Implementer must run the following smoke walkthrough manually on a running dev server and report results in their final report:
 
 Manual smoke checklist (to be performed by implementer after Step 3):
 - Cold load with `zai.splitPane.open=false`: sessions sidebar starts collapsed (icon-only column), expand/collapse works as before.
@@ -626,13 +633,25 @@ Manual smoke checklist (to be performed by implementer after Step 3):
 
 Open `packages/zai/src/web/src/pages/Agent.tsx`:
 
-1. Add import. After `import { useSplitPaneSessionAutoCollapse } from "...";` is the only new import. Add it after the existing `import { SplitPane } from "../components/splitPane/SplitPane.js";` (line 56):
+1. Add import. Insert after the existing `import { SplitPane } from "../components/splitPane/SplitPane.js";` (line 56):
 
 ```ts
 import { useSplitPaneSessionAutoCollapse } from "../hooks/useSplitPaneSessionAutoCollapse.js";
 ```
 
-2. Delete the existing local state on line 119:
+2. Remove `useState` from React's destructured import — `sessionsCollapsed` is moving into the hook. Replace the existing:
+
+```ts
+import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+```
+
+with:
+
+```ts
+import React, { useRef, useEffect, useCallback, useMemo } from "react";
+```
+
+3. Delete the existing local state on line 119:
 
 ```ts
   const [sessionsCollapsed, setSessionsCollapsed] = useState(true);
@@ -645,36 +664,13 @@ Replace with (immediately after `const splitPaneOpen = splitPaneOpenStored;` on 
   const sessionsCollapsed = sessionPanel.collapsed;
 ```
 
-3. Update the existing JSX usages:
+4. Update the existing JSX usages:
 
 - Around line 313 (collapsed view, expand button):
   - `onClick={() => setSessionsCollapsed(false)}` → `onClick={sessionPanel.expand}`
 
 - Around line 364 (expanded view, collapse button):
-  - `onClick={() => setSessionsCollapsed(true)}` → `onClick={() => sessionPanel.schedule() /* no-op: exit also keeps state; expand triggers timer */}`
-
-  Note: when expanded, clicking the collapse icon should `schedule()` a 10s timer in addition to collapsing immediately. Actually per spec the user can collapse manually; we still `schedule()` to keep behavior parallel (set collapsed=true immediately, no timer). Replace with:
-
-  ```ts
-  onClick={() => {
-    /* manual collapse — set state directly through expand's inverse via a custom action */
-    useAgentStore.setState({ sessionsCollapsed: false }) // unreachable — see below
-  }}
-  ```
-
-  Wait — the hook only exposes `expand()`. To let user manually collapse, expose `collapse()` too. **Stop here** and instead update the hook in Task 2 to also expose `collapse()` so the JSX is symmetric. Implementer instruction: edit `useSplitPaneSessionAutoCollapse.ts` to add `collapse: () => void` to the return value, then proceed.
-
-  Replace Step 2 line above. **New implementation:** in Task 2's `useSplitPaneSessionAutoCollapse.ts` add to the return object:
-  ```ts
-  const collapse = useCallback(() => {
-    setCollapsed(true)
-    clearTimer()
-  }, [clearTimer])
-  ```
-  And add `collapse` to `UseSplitPaneSessionAutoCollapseResult` and the returned object.
-
-  Now in Agent.tsx:
-  - `onClick={() => setSessionsCollapsed(true)}` (line 364) → `onClick={sessionPanel.collapse}`
+  - `onClick={() => setSessionsCollapsed(true)}` → `onClick={sessionPanel.collapse}`
 
 - Around line 403 (session item click): add `sessionPanel.schedule()` call alongside `setCurrentSession`/`loadTranscript`:
 
@@ -771,7 +767,12 @@ git commit -m "feat(zai-web): auto-collapse session list in split-pane mode (10s
    - §1 #4 (close split-pane preserves state): Task 1 (cleanup only, no revert); Task 2 (cleanup only, no force-collapse on exit).
    - §2 non-goals: store untouched, `outputStyle` not modified, `split-pane open` persistence unchanged — confirmed.
 2. **Placeholder scan:** All step code blocks contain actual code. No "TBD" / "TODO" / "similar to Task N". Step 2 of Task 4 originally had an unreachable instruction — fixed inline by extending the hook with `collapse()`.
-3. **Type consistency:** `useSplitPaneSessionAutoCollapse` signature in §7 of spec matches this plan's Task 2 + the late addition of `collapse()`. Hook is called once in Agent.tsx (`sessionPanel`), destructured via the returned object.
+3. **Type consistency:** `useSplitPaneSessionAutoCollapse` signature in spec §7 is `expand/schedule` only; this plan's Task 2 hook + result interface both expose three actions (`expand`, `collapse`, `schedule`). Spec was drafted before the Agent.tsx wiring revealed the need for manual collapse — plan extends hook surface intentionally. Hook is called once in Agent.tsx via `sessionPanel.collapsed` / `sessionPanel.expand` / `sessionPanel.collapse` / `sessionPanel.schedule`.
+
+## Pre-Flight Fix Log
+
+- **(2026-07-21, pre-execution):** Step 2 of original Task 4 contained an inner monologue ("Wait — the hook only exposes expand()… **Stop here** and instead update the hook in Task 2…"). Rewrote to direct, unambiguous steps and threaded `collapse()` into Task 2's hook from the start.
+- **(2026-07-21, pre-execution):** Added step to drop `useState` from `pages/Agent.tsx`'s React import — original draft referenced a removed local setter.
 
 ## Execution Handoff
 
