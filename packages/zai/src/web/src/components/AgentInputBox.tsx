@@ -6,6 +6,7 @@ import {
   CompressOutlined,
   ExpandOutlined,
   BorderOutlined,
+  MenuUnfoldOutlined,
 } from "@ant-design/icons";
 import {
   STORAGE_KEYS,
@@ -812,16 +813,14 @@ export default React.memo(function AgentInputBox() {
         />
         <ConversationInfoButton />
         {/* 右侧分屏 toggle — 行尾最右侧.
-            图标用 BorderOutlined (矩形外框 + 内含两条竖线的扫描器样式, 与
-            左侧栏 / SplitPane 内部 toggle 的视觉约定一致 — open 时若改成
-            PicCenterOutlined 等可选, 这里先保持单图标 + 颜色切换, 与现有
-            Agent.tsx:351 行为对齐).
+            图标用 MenuUnfoldOutlined (三线+右箭头, 侧边栏展开风格),
+            比 BorderOutlined 更直观表达"右侧面板滑出"的操作.
             数据源 STORAGE_KEYS.open 与 SplitPane + 左侧栏 toggle 共享, 任意
             一处写 → 全局同步 (useLocalStorageState 自带 same-tab storage event).
             open 时用品牌色 #ff6600 高亮, 关闭时与同行其他按钮颜色一致. */}
         <Tooltip title="切换右侧分屏" placement="top">
           <Button
-            icon={<BorderOutlined />}
+            icon={<MenuUnfoldOutlined />}
             data-testid="split-pane-toggle-inputbox"
             aria-pressed={splitPaneOpen}
             onClick={() => setSplitPaneOpen(!splitPaneOpen)}
