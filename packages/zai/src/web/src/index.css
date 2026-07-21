@@ -88,11 +88,16 @@ body {
 }
 
 [data-testid="fs-tree"] .ant-tree-treenode .ant-tree-node-content-wrapper {
+  margin-left: -7px;
   min-height: 22px !important;
   height: 22px !important;
   line-height: 22px !important;
   padding: 0 4px !important;
   border-radius: 3px !important;
+}
+
+.ant-tree-node-content-wrapper .anticon {
+  vertical-align: 0.5em;
 }
 
 [data-testid="fs-tree"] .ant-tree-treenode .ant-tree-switcher {
