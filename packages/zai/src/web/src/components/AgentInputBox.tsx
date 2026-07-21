@@ -12,6 +12,7 @@ import {
   STORAGE_KEYS,
   useLocalStorageState,
 } from "../components/splitPane/shared.js";
+import { useSplitPaneCompactLock } from "../hooks/useSplitPaneCompactLock.js";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
 import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
@@ -81,6 +82,10 @@ export default React.memo(function AgentInputBox() {
   // 当前视觉折叠态,刷新时回到 Layout hydrate 后的值(由 settings 决定).
   const transcriptCollapsed = useAgentStore((s) => s.transcriptCollapsed);
   const setTranscriptCollapsed = useAgentStore((s) => s.setTranscriptCollapsed);
+  // 分屏开启时锁住 transcript-collapsed 折叠按钮 — hook 内 effect 会立刻把
+  // transcriptCollapsed 设为 true, 然后整个按钮 + Tooltip 不挂载, 让 "分屏
+  // 模式下不可切换"的契约在 DOM 层一次性落实.
+  const { isLocked: transcriptLockActive } = useSplitPaneCompactLock();
   // outputStyle 仅用于 tooltip 文案:让用户知道 settings 是 compact,
   // 刷新后会回到当前这个工具栏按钮点击后的反向设置.
   const outputStyle = useAppStore((s) => s.outputStyle);
@@ -724,25 +729,27 @@ export default React.memo(function AgentInputBox() {
             设好(compact → true,其余 → false). 按钮只翻这一个布尔, 不依赖 settings,
             因此在 compact 模式下点击也能正常切换. tooltip 在 outputStyle=compact 时
             提示"刷新后回到 compact"以区分与 settings 持久化的关系. */}
-        <Tooltip
-          title={
-            outputStyle === "compact"
-              ? transcriptCollapsed
-                ? "临时展开 transcript(刷新后回到 compact)"
-                : "临时收起 transcript(刷新后回到 compact)"
-              : transcriptCollapsed
-                ? "展开 transcript"
-                : "折叠 transcript"
-          }
-          placement="top"
-        >
-          <Button
-            icon={transcriptCollapsed ? <CompressOutlined /> : <ExpandOutlined />}
-            data-testid="transcript-collapse-button"
-            onClick={() => setTranscriptCollapsed(!transcriptCollapsed)}
-            style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }}
-          />
-        </Tooltip>
+        {!transcriptLockActive && (
+          <Tooltip
+            title={
+              outputStyle === "compact"
+                ? transcriptCollapsed
+                  ? "临时展开 transcript(刷新后回到 compact)"
+                  : "临时收起 transcript(刷新后回到 compact)"
+                : transcriptCollapsed
+                  ? "展开 transcript"
+                  : "折叠 transcript"
+            }
+            placement="top"
+          >
+            <Button
+              icon={transcriptCollapsed ? <CompressOutlined /> : <ExpandOutlined />}
+              data-testid="transcript-collapse-button"
+              onClick={() => setTranscriptCollapsed(!transcriptCollapsed)}
+              style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }}
+            />
+          </Tooltip>
+        )}
         {/* 修复 transcript 按钮:
             对当前 session 触发 POST /api/transcript/:sessionId/repair,把历史上
             漏写的 tool_result 补成"tool execution did not complete" 占位,

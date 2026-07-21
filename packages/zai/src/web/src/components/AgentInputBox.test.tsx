@@ -1,5 +1,5 @@
 // @vitest-environment happy-dom
-import { describe, expect, test, beforeEach, vi } from "vitest";
+import { describe, expect, test, beforeEach, beforeAll, vi } from "vitest";
 import "@testing-library/jest-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useAgentStore, type TodoItem, type V2TaskItem } from "../store/useAgentStore.js";
@@ -225,5 +225,38 @@ describe('AgentInputBox — 右侧分屏 toggle (split-pane)', () => {
     render(<AgentInputBox />)
     const btn = screen.getByTestId('split-pane-toggle-inputbox')
     expect(btn).toHaveAttribute('aria-pressed', 'true')
+  })
+})
+
+describe('AgentInputBox — transcript lock (分屏开启时不渲染折叠按钮)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  test('splitPaneOpen=false → transcript-collapse 按钮可被查到', () => {
+    render(<AgentInputBox />)
+    expect(screen.getByTestId('transcript-collapse-button')).toBeInTheDocument()
+  })
+
+  test('splitPaneOpen=true → transcript-collapse 按钮完全不渲染', () => {
+    localStorage.setItem('zai.splitPane.open', 'true')
+    render(<AgentInputBox />)
+    expect(screen.queryByTestId('transcript-collapse-button')).toBeNull()
+  })
+
+  test('点击 transcript-collapse 按钮在 unlocked 态可翻转 transcriptCollapsed', () => {
+    render(<AgentInputBox />)
+    const before = useAgentStore.getState().transcriptCollapsed
+    fireEvent.click(screen.getByTestId('transcript-collapse-button'))
+    const after = useAgentStore.getState().transcriptCollapsed
+    expect(after).toBe(!before)
+  })
+
+  test('splitPaneOpen=true 时 transcriptCollapsed 已被 hook 锁为 true', () => {
+    useAgentStore.setState({ transcriptCollapsed: false })
+    localStorage.setItem('zai.splitPane.open', 'true')
+    render(<AgentInputBox />)
+    expect(useAgentStore.getState().transcriptCollapsed).toBe(true)
+    expect(screen.queryByTestId('transcript-collapse-button')).toBeNull()
   })
 })
