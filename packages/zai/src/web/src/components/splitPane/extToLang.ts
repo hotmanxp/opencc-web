@@ -1,11 +1,12 @@
 /**
  * Map a file basename → Prism language id, for `react-syntax-highlighter`.
  *
- * Only returns a language for code files (.ts / .tsx / .js / .py / .go / …).
- * Plain text, JSON, YAML, Markdown and similar are intentionally NOT mapped —
- * the preview falls back to a plain `<pre>` so we don't get half-coloured
- * markdown or JSON that looks inconsistent next to the same syntax in tool
- * output.
+ * Returns a language for code files (.ts / .tsx / .js / .py / .go / …) and
+ * for structured data files that Prism handles cleanly (.json / .jsonc /
+ * .json5). Plain text, YAML and Markdown are intentionally NOT mapped —
+ * the preview falls back to a plain `<pre>` (or MarkdownText for .md) so
+ * we don't get half-coloured output that looks inconsistent next to the
+ * same syntax in tool output.
  *
  * The server already enforces an extension allow-list (TEXT_EXTS in
  * `routes/fs.ts`); this map is the language *display* side. Files that
@@ -20,6 +21,10 @@ const EXT_TO_LANG: Record<string, string> = {
   jsx: 'jsx',
   mjs: 'javascript',
   cjs: 'javascript',
+  // Data / config
+  json: 'json',
+  jsonc: 'json',
+  json5: 'json',
   // Web
   css: 'css',
   scss: 'scss',

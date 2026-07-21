@@ -114,7 +114,8 @@ describe('FsTab', () => {
   it('renders code files via Prism syntax highlighter (oneDark)', () => {
     // Selecting a `.ts` file should mount a SyntaxHighlighter with
     // language="typescript" and the `fs-preview-code` test-id wrapper.
-    // Plain `.md` / `.json` files fall through to the unstyled `<pre>`.
+    // Plain `.md` files go through MarkdownText; `.json` files get
+    // Prism JSON highlighting (extToLanguage maps json → 'json').
     mockList.mockReturnValue({
       data: { ok: true, entries: [] },
       loading: false,
@@ -303,6 +304,45 @@ describe('FsTab', () => {
     fireEvent.click(screen.getByText('notes.txt'));
     expect(screen.getByTestId('fs-preview-text')).toBeTruthy();
     expect(screen.queryByTestId('fs-preview-md')).toBeNull();
+  });
+
+  it('uses fs-preview-code test-id for .json files (Prism JSON highlighting)', () => {
+    // .json / .jsonc / .json5 all map to the Prism 'json' language
+    // in extToLanguage, so the preview should mount the same
+    // SyntaxHighlighter wrapper as code files — not the plain <pre>.
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          { name: 'package.json', path: 'package.json', type: 'file', size: 32 },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true,
+        path: '/repo/package.json',
+        name: 'package.json',
+        size: 32,
+        mtime: '2026-07-21T00:00:00Z',
+        content: '{\n  "name": "x",\n  "v": 1\n}',
+      },
+      loading: false,
+      error: null,
+    });
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByText('package.json'));
+    expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
+    expect(screen.queryByTestId('fs-preview-text')).toBeNull();
+    expect(screen.queryByTestId('fs-preview-md')).toBeNull();
+    // Prism tokenization should produce token spans inside <code>.
+    const codeBlock = screen.getByTestId('fs-preview-code');
+    const codeEl = codeBlock.querySelector('code');
+    expect(codeEl).toBeTruthy();
+    expect(codeEl && codeEl.querySelectorAll('span').length).toBeGreaterThan(0);
   });
 
   it('mounts fs-tree with a calc(100vh - 140px) height + overflow:auto so scroll always works', () => {
