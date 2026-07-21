@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { render, screen } from '@testing-library/react';
 
 vi.mock('./useFsList.js', () => ({ useFsList: vi.fn() }));
 vi.mock('./useFsFile.js', () => ({ useFsFile: vi.fn() }));
@@ -46,13 +46,35 @@ describe('FsTab', () => {
 
   it('shows error from useFsList', () => {
     mockList.mockReturnValue({
-      data: { ok: false, error: '目录深度超过 3 层' },
+      data: { ok: false, error: '目录读取失败' },
       loading: false,
-      error: '目录深度超过 3 层',
+      error: '目录读取失败',
       refetch: vi.fn(),
     });
     mockFile.mockReturnValue({ data: null, loading: false, error: null });
     render(<FsTab cwd="/repo" />);
-    expect(screen.getByText(/目录深度超过 3 层/)).toBeTruthy();
+    expect(screen.getByText(/目录读取失败/)).toBeTruthy();
+  });
+
+  it('does not advertise a depth cap in the header (any depth allowed)', () => {
+    // The depth cap was removed — the server returns children for any
+    // depth, and the client lazy-loads them. The header should advertise
+    // lazy loading rather than a max depth.
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          { name: 'packages', path: 'packages', type: 'dir', size: null },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({ data: null, loading: false, error: null });
+    render(<FsTab cwd="/repo" />);
+    expect(screen.getByText('packages')).toBeTruthy();
+    expect(screen.queryByText(/深度 ≤/)).toBeNull();
+    expect(screen.getByText(/按需加载/)).toBeTruthy();
   });
 });

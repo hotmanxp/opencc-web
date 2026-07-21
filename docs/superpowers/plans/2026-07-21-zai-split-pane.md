@@ -12,7 +12,7 @@
 
 - **Path safety:** every filesystem / git endpoint that takes a relative path must call `resolveSafePath(cwd, rel)`. Outside-cwd → 403 (or `{ ok:false, error }` for git-style responses).
 - **Size cap:** `MAX_FILE_BYTES = 2 * 1024 * 1024` (mirrored in `git.ts` for diffs).
-- **Depth cap:** directory listing refuses depth > 3 (counted as path segments after cwd).
+- **Depth cap:** none — directory listing accepts any depth under cwd; the client lazy-loads children on expand.
 - **Ignore list for fs list:** `node_modules`, `.git`, `.next`, `dist`, `build`, `.cache`, `.DS_Store`. Hidden dirs beyond depth 1 are also filtered (so `.claude`, `.config` remain visible at top level).
 - **Git porcelain:** `git status --porcelain=v1 -u normal`. `??` = untracked. Two-char prefix → single-char `status` (`M`/`A`/`D`/`??`); unstaged column wins when both are present.
 - **Git diff:** tracked → `git diff --no-color HEAD -- <rel>`; untracked → `git diff --no-color --no-index /dev/null <abs>`.
@@ -624,10 +624,14 @@ describe('routes/fs', () => {
     expect(names).not.toContainEqual(['node_modules', 'dir']);
   });
 
-  test('GET /fs/list refuses depth > 3', async () => {
+  test('GET /fs/list returns children at any depth (no depth cap)', async () => {
+    // depth-4 fixture root/a/b/c/d/leaf.txt. Old behavior rejected this;
+    // current behavior returns the leaf file as the sole entry.
     const res = await request(makeApp(root)).get('/api/fs/list').query({ dir: 'a/b/c/d' });
-    expect(res.body.ok).toBe(false);
-    expect(res.body.error).toMatch(/深度|depth/);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    const names = (res.body.entries as Array<{ name: string; type: string }>).map((e) => [e.name, e.type]);
+    expect(names).toContainEqual(['leaf.txt', 'file']);
   });
 
   test('GET /fs/file returns content for text', async () => {
@@ -666,7 +670,6 @@ import { resolveSafePath } from '../utils/safePath.js';
 import type { FsEntry, FsFile, FsList } from '../../shared/fs.js';
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
-const MAX_DEPTH = 3;
 const IGNORED = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', '.cache', '.DS_Store',
 ]);
@@ -701,11 +704,6 @@ fsRouter.get('/fs/list', async (req, res) => {
   if (!safe.ok) {
     const body: FsList = { ok: false, error: safe.error };
     res.status(403).json(body);
-    return;
-  }
-  if (depthOf(dir) > MAX_DEPTH) {
-    const body: FsList = { ok: false, error: `目录深度超过 ${MAX_DEPTH} 层，拒绝展开` };
-    res.json(body);
     return;
   }
   let names: string[];
@@ -1876,14 +1874,35 @@ describe('FsTab', () => {
 
   it('shows error from useFsList', () => {
     mockList.mockReturnValue({
-      data: { ok: false, error: '目录深度超过 3 层' },
+      data: { ok: false, error: '目录读取失败' },
       loading: false,
-      error: '目录深度超过 3 层',
+      error: '目录读取失败',
       refetch: vi.fn(),
     });
     mockFile.mockReturnValue({ data: null, loading: false, error: null });
     render(<FsTab cwd="/repo" />);
-    expect(screen.getByText(/目录深度超过 3 层/)).toBeTruthy();
+    expect(screen.getByText(/目录读取失败/)).toBeTruthy();
+
+  it('does not advertise a depth cap in the header (any depth allowed)', () => {
+    // The depth cap was removed — the server returns children for any
+    // depth, and the client lazy-loads them. The header should advertise
+    // lazy loading rather than a max depth.
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          { name: 'packages', path: 'packages', type: 'dir', size: null },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({ data: null, loading: false, error: null });
+    render(<FsTab cwd="/repo" />);
+    expect(screen.getByText('packages')).toBeTruthy();
+    expect(screen.queryByText(/深度 ≤/)).toBeNull();
+    expect(screen.getByText(/按需加载/)).toBeTruthy();
   });
 });
 ```
@@ -1904,7 +1923,7 @@ import { ReloadOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons'
 import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
-import { MAX_DEPTH } from './shared.js';
+// MAX_DEPTH removed: directory listing has no depth cap (see spec §2026-07-21).
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
@@ -2025,7 +2044,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         }}
       >
         <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>
-          Files <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.35)' }}>(深度 ≤ {MAX_DEPTH})</span>
+          Files <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.35)' }}>(按需加载)</span>
         </span>
         {refreshBtn}
       </div>

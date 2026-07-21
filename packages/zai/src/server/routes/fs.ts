@@ -5,7 +5,6 @@ import { resolveSafePath } from '../utils/safePath.js';
 import type { FsEntry, FsFile, FsList } from '../../shared/fs.js';
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
-const MAX_DEPTH = 3;
 const IGNORED = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', '.cache', '.DS_Store',
 ]);
@@ -40,11 +39,6 @@ fsRouter.get('/fs/list', async (req, res) => {
   if (!safe.ok) {
     const body: FsList = { ok: false, error: safe.error };
     res.status(403).json(body);
-    return;
-  }
-  if (depthOf(dir) > MAX_DEPTH) {
-    const body: FsList = { ok: false, error: `目录深度超过 ${MAX_DEPTH} 层，拒绝展开` };
-    res.json(body);
     return;
   }
   let names: string[];

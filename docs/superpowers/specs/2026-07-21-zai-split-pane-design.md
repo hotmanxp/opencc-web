@@ -12,8 +12,10 @@ default and toggled by a single button. The panel hosts three AntD `Tabs`:
 1. **Git** — left column lists git-changed files relative to working tree
    (status --porcelain, including untracked); right column shows
    `git diff` for the selected file.
-2. **Files** — left column recursively scans the cwd directory tree (depth ≤
-   3, ignoring `node_modules` / `.git`); right column shows file contents.
+2. **Files** — left column lists the cwd directory tree on demand (click a
+   directory to fetch its children; no depth cap — any directory reachable
+   under cwd can be drilled into). Filtering still ignores `node_modules`
+   / `.git` / build artifacts; right column shows file contents.
 3. **Placeholder** — third tab reserved for future use. Renders an AntD
    `Empty` "即将到来" / "Coming soon".
 
@@ -59,7 +61,7 @@ refresh piggybacks on the existing `useSessionCwd` SSE/cwd watcher.
 | `packages/zai/src/web/src/components/splitPane/useGitDiff.ts` | `useGitDiff(cwd, path, isUntracked)` hook. |
 | `packages/zai/src/web/src/components/splitPane/useFsList.ts` | `useFsList(cwd, dir)` hook. |
 | `packages/zai/src/web/src/components/splitPane/useFsFile.ts` | `useFsFile(cwd, path)` hook. |
-| `packages/zai/src/web/src/components/splitPane/shared.ts` | Shared types & constants (max depth = 3, supported text extensions reused from server, status colors). |
+| `packages/zai/src/web/src/components/splitPane/shared.ts` | Shared types & constants (width clamps, status colors, localStorage sync). Directory depth is unbounded — children are loaded lazily on expand. |
 | `packages/zai/src/web/src/components/splitPane/SplitPane.test.tsx` | localStorage persistence + toggle behavior. |
 | `packages/zai/src/web/src/components/splitPane/GitTab.test.tsx` | Renders list, triggers diff fetch on click. |
 | `packages/zai/src/web/src/components/splitPane/FsTab.test.tsx` | Tree rendering + leaf click fetches preview. |
@@ -267,8 +269,9 @@ applicable here, but we still guard for future SSR).
 
 - **Query**: `dir` is a path relative to cwd, default `''` (cwd root).
 - **Validation**: `path.resolve(cwd, dir)` must `startsWith(cwd)` and the
-  resulting directory must exist. Max recursion depth = 3 (the endpoint
-  refuses `dir=foo/bar/baz/qux` because its resolved depth > 3).
+  resulting directory must exist. **No depth cap** — any directory
+  reachable under cwd can be listed. Children are fetched lazily by the
+  client on expand, so the server does not need to limit recursion.
 - **Filter**: skip `node_modules`, `.git`, `.next`, `dist`, `build`,
   `.cache`, `.DS_Store`, plus any directory starting with `.` beyond depth 1
   (so `.claude`, `.config` are still visible).
@@ -326,8 +329,9 @@ export function resolveSafePath(root: string, rel: string): { ok: true; abs: str
   `system.ts`.
 - **Path traversal**: `resolveSafePath` is the single entry point; both
   endpoints refuse any path that escapes cwd.
-- **Resource exhaustion**: 2 MB cap on diff / file reads, 3-level depth
-  limit on directory listing.
+- **Resource exhaustion**: 2 MB cap on diff / file reads; directory
+  listing has no depth cap because the client fetches one level per
+  expand (bounded by user clicks, not by traversal).
 - **Process isolation**: read-only endpoints — they cannot modify git
   state (`diff`, `status`, `rev-parse`, `ls-files` only) or filesystem
   state (`readdir`, `stat`, `readFile` only).
@@ -361,10 +365,12 @@ export function resolveSafePath(root: string, rel: string): { ok: true; abs: str
   - Hit `/api/git/diff?path=untracked.md` → assert `isUntracked: true`
     and that the diff has a `+` for every line.
   - Hit `/api/git/diff?path=../outside` → 400 or `{ok:false}`.
-- **`routes/fs.test.ts`** — fixtures nested 4 deep, files of supported
+- **`routes/fs.test.ts`** — fixtures nested ≥ 4 deep, files of supported
   and unsupported extensions, binary, oversized. Assert:
   - `/fs/list?dir=` returns top-level + ignores `node_modules`.
-  - `/fs/list?dir=a/b/c/d` is rejected (depth > 3).
+  - `/fs/list?dir=a/b/c/d` returns the children at depth 4 (no depth cap
+    — lazy loading is the client's responsibility, server returns the
+    requested level).
   - `/fs/file?path=a/b.ts` returns content.
   - `/fs/file?path=../../../etc/passwd` returns 403.
   - Oversized file returns 413.

@@ -44,10 +44,14 @@ describe('routes/fs', () => {
     expect(names).not.toContainEqual(['node_modules', 'dir']);
   });
 
-  test('GET /fs/list refuses depth > 3', async () => {
+  test('GET /fs/list returns children at any depth (no depth cap)', async () => {
+    // depth-4 fixture root/a/b/c/d/leaf.txt. Old behavior rejected this;
+    // current behavior returns the leaf file as the sole entry.
     const res = await request(makeApp(root)).get('/api/fs/list').query({ dir: 'a/b/c/d' });
-    expect(res.body.ok).toBe(false);
-    expect(res.body.error).toMatch(/深度|depth/);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    const names = (res.body.entries as Array<{ name: string; type: string }>).map((e) => [e.name, e.type]);
+    expect(names).toContainEqual(['leaf.txt', 'file']);
   });
 
   test('GET /fs/file returns content for text', async () => {
