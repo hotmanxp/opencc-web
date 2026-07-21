@@ -43,26 +43,61 @@ export function useLocalStorageState<T>(
   });
 
   // Sync from a different component instance (e.g. tab change from a
-  // sibling). Storage event is sufficient for our case — we don't need
-  // BroadcastChannel because all state mutations happen through this hook.
+  // sibling). Two sources:
+  //   1. `storage` event — fires in *other* tabs when localStorage is mutated.
+  //   2. `zai-localstorage-sync` custom event — fires in the *same* tab when
+  //      a different component instance writes through this same hook. The
+  //      browser's storage event does not fire for the writer, so without this
+  //      sibling components (e.g. Agent.tsx toggle ↔ SplitPane) would not
+  //      re-render in sync.
   useEffect(() => {
     const onStorage = (e: StorageEvent) => {
-      if (e.key !== key || e.newValue === null) return;
+      if (e.key !== key) return;
+      if (e.newValue === null) {
+        setValue(defaultValue);
+        return;
+      }
       try {
         setValue(JSON.parse(e.newValue) as T);
       } catch {
         // ignore corrupt updates
       }
     };
+    const onSync = (e: Event) => {
+      const detail = (e as CustomEvent<{ key: string; value: string | null }>)
+        .detail;
+      if (!detail || detail.key !== key) return;
+      if (detail.value === null) {
+        setValue(defaultValue);
+        return;
+      }
+      try {
+        setValue(JSON.parse(detail.value) as T);
+      } catch {
+        // ignore corrupt updates
+      }
+    };
     window.addEventListener('storage', onStorage);
-    return () => window.removeEventListener('storage', onStorage);
-  }, [key]);
+    window.addEventListener('zai-localstorage-sync', onSync);
+    return () => {
+      window.removeEventListener('storage', onStorage);
+      window.removeEventListener('zai-localstorage-sync', onSync);
+    };
+  }, [key, defaultValue]);
 
   const set = useCallback(
     (next: T) => {
       setValue(next);
       try {
-        localStorage.setItem(key, JSON.stringify(next));
+        const serialized = JSON.stringify(next);
+        localStorage.setItem(key, serialized);
+        // Notify same-tab siblings — the browser's `storage` event won't fire
+        // for the writer itself.
+        window.dispatchEvent(
+          new CustomEvent('zai-localstorage-sync', {
+            detail: { key, value: serialized },
+          }),
+        );
       } catch {
         // quota / privacy mode — silently ignore, in-memory state still works.
       }
