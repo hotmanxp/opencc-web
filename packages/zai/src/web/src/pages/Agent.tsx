@@ -59,6 +59,7 @@ import {
   STORAGE_KEYS,
   useLocalStorageState,
 } from "../components/splitPane/shared.js";
+import { useSplitPaneSessionAutoCollapse } from "../hooks/useSplitPaneSessionAutoCollapse.js";
 
 const { TextArea } = Input;
 const { Text, Paragraph } = Typography;
@@ -117,14 +118,15 @@ export default function Agent() {
   const [hoveredSessionId, setHoveredSessionId] = useState<string | null>(null);
   // 会话历史侧栏是否收起. 收起时宽度缩到 40px 只显示图标, 腾出空间给对话区.
   // 默认收起, 让对话区首屏占满主视图, 用户按需点开.
-  const [sessionsCollapsed, setSessionsCollapsed] = useState(true);
-  // 右侧分屏开关: 与 SplitPane 共享同一份 localStorage key, 这样左侧
-  // 侧栏的 toggle 与 SplitPane 内部的 toggle 始终同步 (storage 事件桥接).
-  // 宽度由 SplitPane 自己持有 (含 drag handle), Agent 不重复实现.
+  // 后续会被 useSplitPaneSessionAutoCollapse 接管 — 进入分屏时强制收起,
+  // 用户点开可在 10s 内 (切会话 / hover / mousemove 重置) 自动收回.
   const [splitPaneOpenStored, setSplitPaneOpenStored] =
     useLocalStorageState<boolean>(STORAGE_KEYS.open, false);
   const splitPaneOpen = splitPaneOpenStored;
   const toggleSplitPane = () => setSplitPaneOpenStored(!splitPaneOpenStored);
+  // Hook 必须在 splitPaneOpen 派生之后调用, hook 依赖该 boolean.
+  const sessionPanel = useSplitPaneSessionAutoCollapse({ splitPaneOpen });
+  const sessionsCollapsed = sessionPanel.collapsed;
   const messagesEndRef = useRef<HTMLDivElement>(null);
   // question 卡片滚到视口用: pendingAsk 不在 messages[] 里, 单依赖 messages 的滚动 effect
   // 不会触发, 这里单独加一个 ref 让卡片出现时也能滚到底.
@@ -311,7 +313,7 @@ export default function Agent() {
                 type="text"
                 size="small"
                 icon={<MenuUnfoldOutlined />}
-                onClick={() => setSessionsCollapsed(false)}
+                onClick={sessionPanel.expand}
                 title="展开会话历史"
                 style={{
                   position: "absolute",
@@ -362,7 +364,7 @@ export default function Agent() {
                   type="text"
                   size="small"
                   icon={<MenuFoldOutlined />}
-                  onClick={() => setSessionsCollapsed(true)}
+                  onClick={sessionPanel.collapse}
                   title="收起会话历史"
                 />
               </Space>
@@ -370,7 +372,12 @@ export default function Agent() {
           )}
         </div>
         {!sessionsCollapsed && (
-          <div ref={sessionListRef} style={{ flex: 1, overflowY: "auto" }}>
+          <div
+            ref={sessionListRef}
+            // mousemove 重置 10s 倒计时 — 用户在列表里滚动/浏览的时候不收回去
+            onMouseMove={() => sessionPanel.schedule()}
+            style={{ flex: 1, overflowY: "auto" }}
+          >
             {sessions.length === 0 ? (
               <div style={{ fontSize: 12, color: "#999", padding: "8px 4px" }}>
                 暂无历史会话
@@ -395,7 +402,12 @@ export default function Agent() {
                             ? token.colorPrimaryBg
                             : "transparent",
                         }}
-                        onMouseEnter={() => setHoveredSessionId(s.transcriptId)}
+                        onMouseEnter={() => {
+                          setHoveredSessionId(s.transcriptId);
+                          // hover 任何会话项都重置 10s 倒计时,避免
+                          // 用户正在浏览列表时被自动收回.
+                          sessionPanel.schedule();
+                        }}
                         onMouseLeave={() =>
                           setHoveredSessionId((cur) =>
                             cur === s.transcriptId ? null : cur,
@@ -404,6 +416,8 @@ export default function Agent() {
                         onClick={() => {
                           setCurrentSession(s.transcriptId);
                           loadTranscript(s.transcriptId);
+                          // 切会话也重置 10s 倒计时.
+                          sessionPanel.schedule();
                         }}
                       >
                         <div
