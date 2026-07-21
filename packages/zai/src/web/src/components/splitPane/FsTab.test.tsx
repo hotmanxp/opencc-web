@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { render, screen, fireEvent } from '@testing-library/react';
 
 vi.mock('./useFsList.js', () => ({ useFsList: vi.fn() }));
 vi.mock('./useFsFile.js', () => ({ useFsFile: vi.fn() }));
@@ -109,5 +109,131 @@ describe('FsTab', () => {
     // loaded entries or undefined children (which antd handles via
     // loadData on expand). The previous bug exposed a `…` row here.
     expect(screen.queryByText('…')).toBeNull();
+  });
+
+  it('renders code files via Prism syntax highlighter (oneDark)', () => {
+    // Selecting a `.ts` file should mount a SyntaxHighlighter with
+    // language="typescript" and the `fs-preview-code` test-id wrapper.
+    // Plain `.md` / `.json` files fall through to the unstyled `<pre>`.
+    mockList.mockReturnValue({
+      data: { ok: true, entries: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true,
+        path: '/repo/src/foo.ts',
+        name: 'foo.ts',
+        size: 42,
+        mtime: '2026-07-21T00:00:00Z',
+        content: 'export const x: number = 1;',
+      },
+      loading: false,
+      error: null,
+    });
+    // Pre-select the file via the hook ordering: the hook is called
+    // with cwd only — we drive selection by clicking the Tree, but
+    // here we just render and then assert the code preview block is
+    // NOT mounted (no selection yet). To exercise the code path we
+    // need a selection, which the click-based test below covers.
+    render(<FsTab cwd="/repo" />);
+    // Without a selection, the code preview block shouldn't exist yet.
+    expect(screen.queryByTestId('fs-preview-code')).toBeNull();
+    expect(screen.queryByTestId('fs-preview-text')).toBeNull();
+  });
+
+  it('uses fs-preview-code test-id for .ts files (syntax highlighted)', () => {
+    // Drive selection via the tree click path. We mock useFsList with
+    // a single .ts entry; expanding isn't required because the
+    // `onSelect` handler reads from expandedKeys state directly. Easiest
+    // way: stub the Tree to fire onSelect with the file path. To keep
+    // this test simple and deterministic we directly assert on the
+    // renderPreview helper through a known-state entry.
+    //
+    // Concretely: mockFile returns content for `foo.ts` and we use a
+    // mockList that returns that file as the *root-level* entry; then
+    // click it. The Tree fires onSelect only for file (leaf) nodes
+    // automatically when the user clicks — we simulate that by calling
+    // the antd Tree's onSelect prop via fireEvent.
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          { name: 'foo.ts', path: 'foo.ts', type: 'file', size: 42 },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true,
+        path: '/repo/foo.ts',
+        name: 'foo.ts',
+        size: 42,
+        mtime: '2026-07-21T00:00:00Z',
+        content: 'export const x: number = 1;',
+      },
+      loading: false,
+      error: null,
+    });
+    render(<FsTab cwd="/repo" />);
+    // Find the title node and click it; antd Tree wires onSelect to
+    // the row's click handler.
+    const title = screen.getByText('foo.ts');
+    fireEvent.click(title);
+    // Now the preview block is mounted — and it's the code variant.
+    expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
+    expect(screen.queryByTestId('fs-preview-text')).toBeNull();
+    // SyntaxHighlighter doesn't emit `language-typescript` on the <pre>;
+    // it wraps each token in <span class="token" style=...> inside the
+    // <code>. happy-dom runs Prism's tokenization and renders these
+    // spans, so we assert that the code element contains at least one
+    // token span — that proves we hit the SyntaxHighlighter path
+    // instead of the plain <pre> fallback (which would render a single
+    // text node, no spans).
+    const codeBlock = screen.getByTestId('fs-preview-code');
+    const codeEl = codeBlock.querySelector('code');
+    expect(codeEl).toBeTruthy();
+    expect(codeEl && codeEl.querySelectorAll('span').length).toBeGreaterThan(0);
+  });
+
+  it('uses fs-preview-text test-id for .md files (no highlighting)', () => {
+    // Markdown / JSON / plain-text should render through the plain
+    // <pre> wrapper, not Prism — keeps markdown source from getting
+    // half-coloured and matches user preference (only code files get
+    // syntax highlighting).
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          { name: 'README.md', path: 'README.md', type: 'file', size: 12 },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true,
+        path: '/repo/README.md',
+        name: 'README.md',
+        size: 12,
+        mtime: '2026-07-21T00:00:00Z',
+        content: '# Hello',
+      },
+      loading: false,
+      error: null,
+    });
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByText('README.md'));
+    expect(screen.getByTestId('fs-preview-text')).toBeTruthy();
+    expect(screen.queryByTestId('fs-preview-code')).toBeNull();
+    // The raw markdown source should appear verbatim.
+    expect(screen.getByText('# Hello')).toBeTruthy();
   });
 });

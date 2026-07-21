@@ -1,15 +1,75 @@
 import { useEffect, useState } from 'react';
 import { Button, Empty, Spin, Tree } from 'antd';
 import { ReloadOutlined, FolderOutlined, FileOutlined } from '@ant-design/icons';
+import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
+import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
+import { extToLanguage } from './extToLang.js';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
 // We track loaded children in a map keyed by parent path.
 type Entry = { name: string; path: string; type: 'dir' | 'file'; size: number | null };
 type LoadedMap = Record<string, Entry[]>;
+
+/**
+ * Render the file content with Prism syntax highlighting when the
+ * extension maps to a known code language; fall back to a plain
+ * <pre> for prose-like files (.md / .json / .txt / unknown).
+ *
+ * The outer container (`fs-preview`) is the column-flex scroller; the
+ * inner <pre> / SyntaxHighlighter only needs `flex: 1, min-height: 0`
+ * to inherit that scroll behavior and grow with the panel height.
+ */
+function renderPreview(content: string, name?: string): JSX.Element {
+  const lang = name ? extToLanguage(name) : null;
+  const containerStyle: React.CSSProperties = {
+    flex: 1,
+    minHeight: 0,
+    overflow: 'auto',
+    borderRadius: 6,
+  };
+  if (lang) {
+    return (
+      <div data-testid="fs-preview-code" style={containerStyle}>
+        <SyntaxHighlighter
+          language={lang}
+          style={oneDark}
+          customStyle={{
+            margin: 0,
+            padding: 12,
+            background: 'transparent',
+            fontSize: 12,
+            lineHeight: 1.55,
+          }}
+          codeTagProps={{ style: { fontFamily: MONO } }}
+          wrapLongLines={false}
+          showLineNumbers={false}
+        >
+          {content}
+        </SyntaxHighlighter>
+      </div>
+    );
+  }
+  return (
+    <div data-testid="fs-preview-text" style={containerStyle}>
+      <pre
+        style={{
+          margin: 0,
+          padding: 12,
+          background: 'rgba(255,255,255,0.04)',
+          color: 'rgba(255,255,255,0.85)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {content}
+      </pre>
+    </div>
+  );
+}
 
 export function FsTab({ cwd }: { cwd: string | null }) {
   const root = useFsList(cwd, '');
@@ -149,9 +209,20 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         <div
           data-testid="fs-preview"
           style={{
+            // Column flex with minHeight:0 lets the inner <pre> /
+            // SyntaxHighlighter be the scroll container instead of
+            // stretching the row and clipping the Tree column on the left.
+            // Without minHeight:0, flexbox defaults to min-height:auto
+            // and a tall file pushes the whole row past the panel — the
+            // previous version used a viewport-absolute maxHeight which
+            // worked on desktop but broke on resize and showed no scroll
+            // when the file content alone was taller than the viewport.
             flex: '0 0 60%',
+            minHeight: 0,
+            display: 'flex',
+            flexDirection: 'column',
             padding: 12,
-            overflow: 'auto',
+            overflow: 'hidden',
             fontFamily: MONO,
             fontSize: 12,
           }}
@@ -165,20 +236,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           ) : file.error ? (
             <Empty description={file.error} />
           ) : file.data?.content !== undefined ? (
-            <pre
-              style={{
-                margin: 0,
-                padding: 12,
-                background: 'rgba(255,255,255,0.04)',
-                borderRadius: 6,
-                maxHeight: 'calc(100vh - 360px)',
-                overflow: 'auto',
-                whiteSpace: 'pre-wrap',
-                wordBreak: 'break-word',
-              }}
-            >
-              {file.data.content}
-            </pre>
+            renderPreview(file.data.content, file.data.name)
           ) : (
             <Empty description="没有内容" />
           )}

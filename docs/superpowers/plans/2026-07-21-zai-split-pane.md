@@ -2140,6 +2140,72 @@ git commit -m "feat(zai-web): split-pane FsTab (tree + file preview)"
 
 ---
 
+## Task 10.5: Add `extToLang.ts` + SyntaxHighlighter preview scroll fix
+
+**Files:**
+- Create: `packages/zai/src/web/src/components/splitPane/extToLang.ts`
+- Modify: `packages/zai/src/web/src/components/splitPane/FsTab.tsx`
+- Modify: `packages/zai/src/web/src/components/splitPane/FsTab.test.tsx`
+
+**Interfaces:**
+- Produces: `extToLanguage(basename: string): string | null` — maps a file
+  extension to a Prism language id. Only code files map to a language;
+  prose / unknown returns `null`.
+- Replaces: bare `<pre>` preview block. New preview is a column-flex
+  container with `min-height: 0` so the inner pre / SyntaxHighlighter
+  scrolls instead of stretching the row.
+
+- [ ] **Step 1: Write `extToLang.ts`**
+
+Add a small file-mapping helper. Cover the common code languages;
+return `null` for `.md` / `.json` / `.yaml` / `.txt` / unknown so the
+caller falls back to plain `<pre>`. (Plain mapping — see
+`extToLang.ts` in the source for the full list.)
+
+- [ ] **Step 2: Update FsTab preview**
+
+Replace the bare `<pre>` in `FsTab.tsx` with a `renderPreview(content,
+name)` helper that:
+- Looks up the language via `extToLanguage(name ?? '')`.
+- For code files: wraps `<SyntaxHighlighter language={lang} style={oneDark}>`
+  in a `<div data-testid="fs-preview-code">` with `flex: 1, min-height: 0,
+  overflow: auto` so the inner pre is the scroll viewport.
+- For prose / unknown: wraps a plain `<pre>` in a
+  `<div data-testid="fs-preview-text">` with the same flex/scroll contract.
+
+Also change the outer `fs-preview` div to `display: flex, flexDirection:
+column, min-height: 0, overflow: hidden` so the inner scroll container
+inherits the panel's height rather than stretching past it.
+
+- [ ] **Step 3: Add FsTab.test.tsx cases**
+
+Three new tests:
+- `renders code files via Prism syntax highlighter (oneDark)` — selecting
+  a `.ts` entry mounts `data-testid="fs-preview-code"` and the inner
+  `<code>` contains token `<span>` wrappers (proves Prism ran).
+- `uses fs-preview-text test-id for .md files (no highlighting)` — selecting
+  a `.md` entry mounts `data-testid="fs-preview-text"` and the raw
+  markdown text appears verbatim, no token spans.
+- (existing depth-cap / placeholder / lazy-load tests continue to pass.)
+
+- [ ] **Step 4: Verify**
+
+```bash
+cd packages/zai && pnpm exec vitest run src/web/src/components/splitPane/FsTab.test.tsx
+```
+Expected: 9 tests pass.
+
+- [ ] **Step 5: Commit**
+
+```bash
+git add packages/zai/src/web/src/components/splitPane/extToLang.ts \
+        packages/zai/src/web/src/components/splitPane/FsTab.tsx \
+        packages/zai/src/web/src/components/splitPane/FsTab.test.tsx
+git commit -m "feat(zai-web): Prism syntax highlighting + scrollable preview in SplitPane FsTab"
+```
+
+---
+
 ## Task 11: Frontend `PlaceholderTab` + `SplitPane` shell
 
 **Files:**

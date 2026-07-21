@@ -61,6 +61,7 @@ refresh piggybacks on the existing `useSessionCwd` SSE/cwd watcher.
 | `packages/zai/src/web/src/components/splitPane/useGitDiff.ts` | `useGitDiff(cwd, path, isUntracked)` hook. |
 | `packages/zai/src/web/src/components/splitPane/useFsList.ts` | `useFsList(cwd, dir)` hook. |
 | `packages/zai/src/web/src/components/splitPane/useFsFile.ts` | `useFsFile(cwd, path)` hook. |
+| `packages/zai/src/web/src/components/splitPane/extToLang.ts` | `extToLanguage(basename)` — extension → Prism language id. Returns `null` for prose / unknown; FsTab falls back to plain `<pre>`. |
 | `packages/zai/src/web/src/components/splitPane/shared.ts` | Shared types & constants (width clamps, status colors, localStorage sync). Directory depth is unbounded — children are loaded lazily on expand. |
 | `packages/zai/src/web/src/components/splitPane/SplitPane.test.tsx` | localStorage persistence + toggle behavior. |
 | `packages/zai/src/web/src/components/splitPane/GitTab.test.tsx` | Renders list, triggers diff fetch on click. |
@@ -197,10 +198,19 @@ applicable here, but we still guard for future SSR).
     consistent.
   - File headers (`diff --git a/... b/...`) are folded into a smaller
     label above each hunk.
-- **File preview render** — `<pre>` with monospace font (same
-  `CODE_FONT_FAMILY` as TaskDrawer), `<SyntaxHighlighter>` from
-  `react-syntax-highlighter` reused if extension is in the supported set.
-  Otherwise plain `<pre>`.
+- **File preview render** — Column-flex preview column with
+  `min-height: 0` so the inner container is the scroll viewport (the
+  previous version used a viewport-absolute `maxHeight: calc(100vh -
+  360px)` which broke on resize and never showed a scrollbar when the
+  file was taller than the viewport). Code files (`.ts`/`.tsx`/`.js`/
+  `.py`/`.go`/`.rs`/`.java`/`.css`/`.html`/`.sh`/`.sql`/…) render via
+  `react-syntax-highlighter`'s `Prism` + `oneDark`; prose-like files
+  (`.md`/`.json`/`.yaml`/`.txt`/unknown) fall through to a plain
+  `<pre>` so markdown source doesn't get half-coloured. Extension →
+  language mapping lives in
+  `packages/zai/src/web/src/components/splitPane/extToLang.ts` —
+  mirror the server's `TEXT_EXTS` allow-list but only return a
+  language for code extensions; null falls back to plain `<pre>`.
 
 ## API Specification
 
