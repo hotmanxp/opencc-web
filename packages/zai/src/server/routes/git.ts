@@ -1,4 +1,4 @@
-import { Router, type IRouter } from 'express';
+import { Router, type IRouter, type Request } from 'express';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolveSafePath } from '../utils/safePath.js';
@@ -13,7 +13,7 @@ interface InstanceContextShape {
   cwdName: string;
 }
 
-function ctx(req: express.Request): InstanceContextShape {
+function ctx(req: Request): InstanceContextShape {
   return req.app.locals.instanceContext as InstanceContextShape;
 }
 
