@@ -13,12 +13,28 @@ const TEXT_EXTS = new Set([
   '.md', '.markdown', '.txt', '.json', '.jsonc', '.json5',
   '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-  '.css', '.scss', '.less', '.html', '.htm', '.xml', '.svg',
+  '.css', '.scss', '.less', '.html', '.htm', '.xml',
   '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
   '.py', '.rb', '.go', '.rs', '.java', '.kt', '.swift', '.c', '.cc', '.cpp', '.h', '.hpp',
   '.sql', '.graphql', '.gql',
   '.env', '.gitignore', '.gitattributes', '.lock',
 ]);
+
+// Image extensions we know how to MIME-type without sniffing. SVG lives
+// here too — it's XML but also a real image, and the renderer should
+// show it as a picture, not dump the markup. `.html`/`.xml`/`.htm` stay
+// in TEXT_EXTS so they keep their syntax-highlight treatment.
+const IMAGE_EXTS: Record<string, string> = {
+  '.png': 'image/png',
+  '.jpg': 'image/jpeg',
+  '.jpeg': 'image/jpeg',
+  '.gif': 'image/gif',
+  '.webp': 'image/webp',
+  '.bmp': 'image/bmp',
+  '.ico': 'image/x-icon',
+  '.avif': 'image/avif',
+  '.svg': 'image/svg+xml',
+};
 
 interface InstanceContextShape { cwd: string; cwdName: string }
 function ctx(req: Request): InstanceContextShape {
@@ -100,7 +116,8 @@ fsRouter.get('/fs/file', async (req, res) => {
   const ext = extname(safe.abs).toLowerCase();
   const base = basename(safe.abs);
   const isDotfile = base.startsWith('.') && base !== '.' && base !== '..';
-  if (!TEXT_EXTS.has(ext) && !isDotfile) {
+  const isImage = Object.prototype.hasOwnProperty.call(IMAGE_EXTS, ext);
+  if (!TEXT_EXTS.has(ext) && !isImage && !isDotfile) {
     res.status(415).json({ ok: false, error: `不支持的文件类型：${ext || '(无扩展名)'}` } satisfies FsFile);
     return;
   }
@@ -126,9 +143,28 @@ fsRouter.get('/fs/file', async (req, res) => {
     return;
   }
   try {
+    if (isImage) {
+      // Binary path: read as Buffer, base64-encode into a data URL so
+      // the browser can render it without a separate /fs/raw route.
+      const buf = await readFile(safe.abs);
+      const dataUrl = `data:${IMAGE_EXTS[ext]};base64,${buf.toString('base64')}`;
+      const body: FsFile = {
+        ok: true,
+        kind: 'image',
+        path: safe.abs,
+        name: basename(safe.abs),
+        size: info.size,
+        mtime: info.mtime.toISOString(),
+        mime: IMAGE_EXTS[ext],
+        dataUrl,
+      };
+      res.json(body);
+      return;
+    }
     const content = await readFile(safe.abs, 'utf8');
     const body: FsFile = {
       ok: true,
+      kind: 'text',
       path: safe.abs,
       name: basename(safe.abs),
       size: info.size,

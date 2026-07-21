@@ -345,6 +345,124 @@ describe('FsTab', () => {
     expect(codeEl && codeEl.querySelectorAll('span').length).toBeGreaterThan(0);
   });
 
+  it('renders .png files via <img> with the dataUrl (fs-preview-image branch)', () => {
+    // Regression for the favicon-128.png 415 in FsTab: when the server
+    // returns kind:'image' + dataUrl, FsTab should mount the
+    // fs-preview-image test-id wrapper and drop the dataUrl straight into
+    // <img src>. It must NOT take the code/md/text branches.
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          { name: 'favicon-128.png', path: 'favicon-128.png', type: 'file', size: 24 },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true,
+        path: '/repo/favicon-128.png',
+        name: 'favicon-128.png',
+        size: 24,
+        mtime: '2026-07-21T00:00:00Z',
+        kind: 'image',
+        mime: 'image/png',
+        dataUrl: 'data:image/png;base64,iVBORw0KGgo=',
+      },
+      loading: false,
+      error: null,
+    });
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByText('favicon-128.png'));
+    const wrapper = screen.getByTestId('fs-preview-image');
+    expect(wrapper).toBeTruthy();
+    const img = wrapper.querySelector('img');
+    expect(img).toBeTruthy();
+    expect(img?.getAttribute('src')).toBe('data:image/png;base64,iVBORw0KGgo=');
+    expect(screen.queryByTestId('fs-preview-code')).toBeNull();
+    expect(screen.queryByTestId('fs-preview-text')).toBeNull();
+    expect(screen.queryByTestId('fs-preview-md')).toBeNull();
+  });
+
+  it('renders .jpg / .gif / .webp via the same image branch', () => {
+    // Same wrapper, different mime in the dataUrl. One assertion per
+    // format keeps the IMAGE_EXTS contract honest on the client side too.
+    const cases: Array<[string, string]> = [
+      ['photo.jpg', 'data:image/jpeg;base64,/9j/4AAQ'],
+      ['photo.gif', 'data:image/gif;base64,R0lGODlh'],
+      ['photo.webp', 'data:image/webp;base64,UklGRg=='],
+    ];
+    for (const [name, dataUrl] of cases) {
+      mockList.mockReturnValue({
+        data: { ok: true, entries: [{ name, path: name, type: 'file', size: 8 }] },
+        loading: false,
+        error: null,
+        refetch: vi.fn(),
+      });
+      mockFile.mockReturnValue({
+        data: {
+          ok: true,
+          path: `/repo/${name}`,
+          name,
+          size: 8,
+          mtime: '2026-07-21T00:00:00Z',
+          kind: 'image',
+          mime: dataUrl.slice(5, dataUrl.indexOf(';')),
+          dataUrl,
+        },
+        loading: false,
+        error: null,
+      });
+      const { unmount } = render(<FsTab cwd="/repo" />);
+      fireEvent.click(screen.getByText(name));
+      const wrapper = screen.getByTestId('fs-preview-image');
+      const img = wrapper.querySelector('img');
+      expect(img?.getAttribute('src')).toBe(dataUrl);
+      unmount();
+    }
+  });
+
+  it('renders .svg via the image branch (no xml syntax dump)', () => {
+    // Regression: .svg used to be served as TEXT → extToLanguage mapped
+    // `svg` → `xml` and Prism dumped the markup. Now the server emits
+    // kind:'image' + an image/svg+xml dataUrl, so the same image branch
+    // handles it — and it must NOT take the code/md/text branches.
+    mockList.mockReturnValue({
+      data: { ok: true, entries: [{ name: 'logo.svg', path: 'logo.svg', type: 'file', size: 64 }] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true,
+        path: '/repo/logo.svg',
+        name: 'logo.svg',
+        size: 64,
+        mtime: '2026-07-21T00:00:00Z',
+        kind: 'image',
+        mime: 'image/svg+xml',
+        dataUrl: 'data:image/svg+xml;base64,PHN2ZyB4bWxucz0iaHR0cDovL3d3dy53My5vcmcvMjAwMC9zdmciLz4=',
+      },
+      loading: false,
+      error: null,
+    });
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByText('logo.svg'));
+    const wrapper = screen.getByTestId('fs-preview-image');
+    expect(wrapper).toBeTruthy();
+    const img = wrapper.querySelector('img');
+    expect(img).toBeTruthy();
+    expect(img?.getAttribute('src')?.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    // Critically: the markup must NOT leak into the code/md/text branches.
+    expect(screen.queryByTestId('fs-preview-code')).toBeNull();
+    expect(screen.queryByTestId('fs-preview-md')).toBeNull();
+    expect(screen.queryByTestId('fs-preview-text')).toBeNull();
+  });
+
   it('mounts fs-tree with a calc(100vh - 140px) height + overflow:auto so scroll always works', () => {
     // 关键修复: fs-tree / fs-preview 都写死 height: calc(100vh - 140px),
     // 不依赖 flex 父级 stretch race. fs-tree overflow:auto 兜底滚动

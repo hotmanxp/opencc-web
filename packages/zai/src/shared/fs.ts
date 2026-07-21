@@ -21,9 +21,17 @@ export interface FsList {
 export interface FsFile {
   ok: boolean;
   error?: string;
+  /** Preview kind. 'text' (default for known text extensions) returns
+   *  utf8 `content`. 'image' returns base64 `dataUrl` + `mime` for
+   *  binary image formats; `content` is omitted in that case. */
+  kind?: 'text' | 'image';
   path?: string;
   name?: string;
   size?: number;
   mtime?: string;
   content?: string;
+  /** Image MIME type (only set when kind === 'image'). */
+  mime?: string;
+  /** Base64 data URL for the image (only set when kind === 'image'). */
+  dataUrl?: string;
 }

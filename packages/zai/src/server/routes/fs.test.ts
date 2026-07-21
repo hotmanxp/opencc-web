@@ -77,6 +77,70 @@ describe('routes/fs', () => {
     expect(res.status).toBe(415);
   });
 
+  test('GET /fs/file serves .png as kind=image with base64 dataUrl', async () => {
+    // Regression for the 415 that hit favicon-*.png in FsTab: the server
+    // must recognise known image extensions, mime-type them, and return
+    // a data URL the browser can drop straight into <img src>.
+    const pngBytes = Buffer.from([
+      0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a, // PNG signature
+      0, 0, 0, 0x0d, 0x49, 0x48, 0x44, 0x52, // IHDR length + tag
+      0, 0, 0, 1, 0, 0, 0, 1, 0x08, 0x06, 0, 0, 0, // 1x1 RGBA
+      0x1f, 0x15, 0xc4, 0x89, // CRC-ish payload tail
+    ]);
+    writeFileSync(join(root, 'favicon-128.png'), pngBytes);
+
+    const res = await request(makeApp(root)).get('/api/fs/file').query({ path: 'favicon-128.png' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.kind).toBe('image');
+    expect(res.body.mime).toBe('image/png');
+    expect(typeof res.body.dataUrl).toBe('string');
+    expect(res.body.dataUrl.startsWith('data:image/png;base64,')).toBe(true);
+    // content is omitted for image kind — caller renders via <img src={dataUrl}>.
+    expect(res.body.content).toBeUndefined();
+  });
+
+  test('GET /fs/file serves .jpg / .gif / .webp with the right mime', async () => {
+    // Exercise the rest of the IMAGE_EXTS table in one go so the table
+    // stays correct if anyone adds a new pair.
+    writeFileSync(join(root, 'photo.jpg'), Buffer.from([0xff, 0xd8, 0xff]));
+    writeFileSync(join(root, 'photo.gif'), Buffer.from([0x47, 0x49, 0x46]));
+    writeFileSync(join(root, 'photo.webp'), Buffer.from([0x52, 0x49, 0x46, 0x46]));
+
+    const cases: Array<[string, string]> = [
+      ['photo.jpg', 'image/jpeg'],
+      ['photo.gif', 'image/gif'],
+      ['photo.webp', 'image/webp'],
+    ];
+    for (const [path, mime] of cases) {
+      const res = await request(makeApp(root)).get('/api/fs/file').query({ path });
+      expect(res.status).toBe(200);
+      expect(res.body.kind).toBe('image');
+      expect(res.body.mime).toBe(mime);
+      expect(res.body.dataUrl.startsWith(`data:${mime};base64,`)).toBe(true);
+    }
+  });
+
+  test('GET /fs/file serves .svg as kind=image (svg:image/svg+xml dataUrl)', async () => {
+    // Regression: .svg used to fall through to TEXT_EXTS → xml syntax
+    // highlighting, which dumped the markup instead of rendering it.
+    // The fix treats SVG as an image (same path as raster formats) and
+    // emits a base64 data URL the browser can drop into <img src>.
+    const svgBody =
+      '<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 16 16"><rect width="16" height="16" fill="red"/></svg>';
+    writeFileSync(join(root, 'logo.svg'), svgBody);
+
+    const res = await request(makeApp(root)).get('/api/fs/file').query({ path: 'logo.svg' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.kind).toBe('image');
+    expect(res.body.mime).toBe('image/svg+xml');
+    expect(typeof res.body.dataUrl).toBe('string');
+    expect(res.body.dataUrl.startsWith('data:image/svg+xml;base64,')).toBe(true);
+    // content is omitted for image kind — caller renders via <img src={dataUrl}>.
+    expect(res.body.content).toBeUndefined();
+  });
+
   test('GET /fs/file serves dotfiles like .npmrc as text', async () => {
     const res = await request(makeApp(root)).get('/api/fs/file').query({ path: '.npmrc' });
     expect(res.status).toBe(200);

@@ -25,7 +25,44 @@ type LoadedMap = Record<string, Entry[]>;
  * inner <pre> / SyntaxHighlighter only needs `flex: 1, min-height: 0`
  * to inherit that scroll behavior and grow with the panel height.
  */
-function renderPreview(content: string, name?: string): JSX.Element {
+function renderPreview(file: import('../../../../shared/fs.js').FsFile): JSX.Element {
+  const { name } = file;
+  const content = file.content ?? '';
+
+  // Image kind: the server returned a base64 dataUrl for binary image
+  // formats (png/jpg/gif/webp/bmp/ico/avif). Render with a plain <img>
+  // — auto-fit, transparent background, checker pattern helps spot
+  // transparency vs. solid images.
+  if (file.kind === 'image' && file.dataUrl) {
+    const containerStyle: React.CSSProperties = {
+      flex: 1,
+      minHeight: 0,
+      overflow: 'auto',
+      borderRadius: 6,
+      display: 'flex',
+      alignItems: 'flex-start',
+      justifyContent: 'center',
+      padding: 12,
+      backgroundImage:
+        'linear-gradient(45deg, rgba(255,255,255,0.05) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,0.05) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.05) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.05) 75%)',
+      backgroundSize: '16px 16px',
+      backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
+    };
+    return (
+      <div data-testid="fs-preview-image" style={containerStyle}>
+        <img
+          src={file.dataUrl}
+          alt={name ?? ''}
+          style={{
+            maxWidth: '100%',
+            height: 'auto',
+            display: 'block',
+          }}
+        />
+      </div>
+    );
+  }
+
   const containerStyle: React.CSSProperties = {
     flex: 1,
     minHeight: 0,
@@ -257,8 +294,8 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             </div>
           ) : file.error ? (
             <Empty description={file.error} />
-          ) : file.data?.content !== undefined ? (
-            renderPreview(file.data.content, file.data.name)
+          ) : file.data && (file.data.content !== undefined || file.data.kind === 'image') ? (
+            renderPreview(file.data)
           ) : (
             <Empty description="没有内容" />
           )}
