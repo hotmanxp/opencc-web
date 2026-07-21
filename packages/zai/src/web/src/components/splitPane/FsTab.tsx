@@ -8,6 +8,7 @@ import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
 import { extToLanguage } from './extToLang.js';
 import { useElementHeight } from './useElementHeight.js';
+import { MarkdownText } from '../markdown/MarkdownText.js';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
@@ -25,13 +26,25 @@ type LoadedMap = Record<string, Entry[]>;
  * to inherit that scroll behavior and grow with the panel height.
  */
 function renderPreview(content: string, name?: string): JSX.Element {
-  const lang = name ? extToLanguage(name) : null;
   const containerStyle: React.CSSProperties = {
     flex: 1,
     minHeight: 0,
     overflow: 'auto',
     borderRadius: 6,
   };
+
+  // MD 分支: 在 lang 检查之前,先识别 .md / .markdown,走 MarkdownText。
+  // 用 regex 而非 extToLanguage, 因为 extToLanguage 不把 MD 视为 code,
+  // 返回 null, 会让 MD 落到 plain text 分支(就是现状的 bug)。
+  if (name && /\.(md|markdown)$/i.test(name)) {
+    return (
+      <div data-testid="fs-preview-md" style={containerStyle}>
+        <MarkdownText text={content} />
+      </div>
+    );
+  }
+
+  const lang = name ? extToLanguage(name) : null;
   if (lang) {
     return (
       <div data-testid="fs-preview-code" style={containerStyle}>
@@ -218,9 +231,11 @@ export function FsTab({ cwd }: { cwd: string | null }) {
               loadData={handleLoadData}
               expandedKeys={expandedKeys}
               onExpand={(keys) => setExpandedKeys(keys)}
-              onSelect={(keys) => {
-                const k = keys[0];
-                if (typeof k === 'string' && !k.endsWith('__ph')) setSelected(k);
+              onSelect={(_keys, info) => {
+                // Only files have content to preview. Clicking a directory
+                // should only expand (handled by loadData/onExpand) — picking
+                // it here would fire GET /api/fs/file?path=<dir> and 415.
+                if (info.node.isLeaf) setSelected(String(info.node.key));
               }}
             />
           )}

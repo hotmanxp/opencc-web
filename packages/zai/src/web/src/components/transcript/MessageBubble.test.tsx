@@ -235,3 +235,51 @@ describe("MessageBubble — copy button integration", () => {
     expect(calledWith).not.toContain("渲染后")
   })
 })
+
+describe("MessageBubble — Skill tool pill", () => {
+  test("Skill tool_use:start pill surfaces the full skill name (not truncated generic preview)", () => {
+    // Regression: SkillTool falls through genericRenderer because registry has
+    // no "Skill" key. The generic preview truncates Object.values(input)[0]
+    // to 80 chars, so users with long skill names like
+    // "plugin:superpowers:writing-plans" need to read the name in the pill.
+    render(
+      <MessageBubble
+        msg={{
+          eventId: "tool-skill-1",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "tool_use:start",
+          toolUseId: "call-skill-1",
+          name: "Skill",
+          input: { name: "plugin:superpowers:writing-plans" },
+        }}
+      />,
+    )
+    expect(
+      screen.getByText("plugin:superpowers:writing-plans"),
+    ).toBeInTheDocument()
+  })
+
+  test("Skill tool_use:done pill surfaces the skill name + done status tag", () => {
+    render(
+      <MessageBubble
+        msg={{
+          eventId: "tool-skill-2",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "tool_use:done",
+          toolUseId: "call-skill-2",
+          name: "Skill",
+          input: { name: "plugin:superpowers:systematic-debugging" },
+          output: "<skill_invocation>...</skill_invocation>",
+        }}
+      />,
+    )
+    expect(
+      screen.getByText("plugin:superpowers:systematic-debugging"),
+    ).toBeInTheDocument()
+    expect(screen.getByText("已完成")).toBeInTheDocument()
+  })
+})

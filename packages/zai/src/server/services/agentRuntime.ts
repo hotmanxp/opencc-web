@@ -25,6 +25,38 @@ let currentSessionId: string | null = null
 let transcriptStore: TranscriptStore | null = null
 const askRegistry = new AskRegistry()
 
+// Per-session AbortController registry. The HTTP layer (POST /api/agent/abort)
+// looks up the in-flight controller for a sessionId and calls .abort() to
+// signal the running queryLoop. The queryLoop is responsible for
+// registerSessionController on entry and releaseSessionController on exit
+// (normal or error). Test seam at the bottom lets unit tests reset module state.
+const sessionControllers = new Map<string, AbortController>()
+
+export function registerSessionController(
+  sessionId: string,
+  controller: AbortController,
+): void {
+  sessionControllers.set(sessionId, controller)
+}
+
+export function releaseSessionController(sessionId: string): void {
+  sessionControllers.delete(sessionId)
+}
+
+export function abortSessionController(
+  sessionId: string,
+  reason?: string,
+): boolean {
+  const c = sessionControllers.get(sessionId)
+  if (!c || c.signal.aborted) return false
+  c.abort(reason ?? 'user_abort')
+  return true
+}
+
+export function __resetSessionControllersForTests(): void {
+  sessionControllers.clear()
+}
+
 export function getAskRegistry(): AskRegistry {
   return askRegistry
 }
@@ -154,7 +186,7 @@ export function getTranscriptStore(): TranscriptStore {
 export async function abortAgentSession(reason?: string): Promise<void> {
   askRegistry.abortAll(reason ?? 'session_aborted')
   if (currentSessionId) {
-    await getRuntime().abort(currentSessionId, reason)
+    abortSessionController(currentSessionId, reason)
   }
 }
 

@@ -28,6 +28,7 @@ describe('routes/fs', () => {
     writeFileSync(join(root, 'a', 'b', 'c', 'd', 'leaf.txt'), 'deep\n');
     // unsupported extension
     writeFileSync(join(root, 'image.bin'), Buffer.from([0, 1, 2, 3]));
+    writeFileSync(join(root, '.npmrc'), 'save-exact=true\n');
   });
 
   afterAll(() => {
@@ -69,5 +70,12 @@ describe('routes/fs', () => {
   test('GET /fs/file rejects unsupported extension', async () => {
     const res = await request(makeApp(root)).get('/api/fs/file').query({ path: 'image.bin' });
     expect(res.status).toBe(415);
+  });
+
+  test('GET /fs/file serves dotfiles like .npmrc as text', async () => {
+    const res = await request(makeApp(root)).get('/api/fs/file').query({ path: '.npmrc' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.content).toMatch(/save-exact=true/);
   });
 });

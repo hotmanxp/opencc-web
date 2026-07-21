@@ -6,10 +6,13 @@ import path from "node:path";
 import { createSseStream } from "./stream.js";
 import {
   abortAgentSession,
+  abortSessionController,
   getCurrentSessionId,
   getAskRegistry,
   getRuntime,
   getTranscriptStore,
+  registerSessionController,
+  releaseSessionController,
   setCurrentSessionId,
   listSkills,
 } from "../services/agentRuntime.js";
@@ -356,6 +359,11 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   }
 
   const abortController = new AbortController()
+  // 把这个请求的 abortController 注册到 sessionControllers — /agent/abort
+  // 通过 abortSessionController(sid) 找到这条 controller 并 .abort()。
+  // 没这一步 abort route 永远 abort 不到正在跑的 queryLoop, 用户按 Esc
+  // 看到前端 status 卡在 'in_progress' 直到 HARD_TIMEOUT (2h) 兜底。
+  registerSessionController(sessionId, abortController)
   const timer = setTimeout(() => {
     if (process.env.ZAI_DEBUG === "1") {
       console.error("[zai.agent.prompt] HARD_TIMEOUT fired", {
@@ -568,6 +576,12 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
       } as any);
     } finally {
       clearTimeout(timer);
+      // 无论正常结束 / abort / 异常抛出 — 都必须从 sessionControllers map
+      // 释放掉, 否则这个 sid 会一直留在 map 里, 下一次同 sid 的 prompt
+      // registerSessionController 会覆盖. 留着不算 bug, 但内存会慢慢涨.
+      // release 只删 map 项, 不主动 .abort(). abort 已经发生过的 controller
+      // 自然 abort, 还没发生的就让它跑完.
+      releaseSessionController(sessionId)
     }
   });
 });
@@ -681,13 +695,19 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
 });
 
 router.post("/agent/abort", async (req: Request, res: Response) => {
-  // X-Session-Id header 当前仅作为日志/审计冗余字段 — 真正的 abort 走
-  // getCurrentSessionId() 指向的 in-flight run (runtime 没有 session-aware
-  // abort 接口). 等 runtime 加 session-aware abort 后, 这个 header 会成为
-  // "abort 哪一条 sid" 的关键参数.
-  const sessionId = getCurrentSessionId();
-  await abortAgentSession("user_abort");
-  res.json({ ok: true, sessionId });
+  // X-Session-Id header 是 abort 哪一条 sid 的真相 — 切会话时 in-memory
+  // currentSessionId 可能还没跟上, header 优先. fallback 到 currentSessionId
+  // 兼容旧客户端.
+  const headerSid = (req.headers["x-session-id"] as string | undefined) ?? undefined
+  const sid = headerSid ?? getCurrentSessionId()
+  const aborted = sid ? abortSessionController(sid, "user_abort") : false
+  // 仍然调 askRegistry.abortAll 以解锁任何 pending AskUserQuestion.
+  // 注意: abortAgentSession 内部还会触发一次 currentSessionId 对应的
+  // abortSessionController, 但此时 sid 已 abort 完毕 (idempotent 返回
+  // false), 重复调用不会引入副作用. 保留是为了让"没带 header 的旧前端"
+  // 走 currentSessionId 兜底时仍然能 abort.
+  await abortAgentSession("user_abort")
+  res.json({ ok: true, sessionId: sid, aborted })
 });
 
 // GET /api/agent/skills — 返回可用 skills 列表，供前端 / 触发 autocomplete

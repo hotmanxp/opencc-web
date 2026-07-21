@@ -354,6 +354,27 @@ export async function* queryLoop(
       }
     }
 
+    // Mid-stream abort: streaming loop ended because signal.aborted flipped
+    // (either for-await broke on signal check at top, or producer kept going
+    // through message_stop while abort was already set). Surface a single
+    // runtime.aborted event instead of letting the code fall through to
+    // appendAssistantMessageV2 + yield runtime.done — that path makes the UI
+    // think the turn succeeded. Persist whatever was already streamed as a
+    // partial assistant message before yielding aborted.
+    if (abortController.signal.aborted) {
+      if (assistantText || thinkingText) {
+        const partialBlocks: Array<{ type: 'text'; text: string } | { type: 'thinking'; thinking: string }> = []
+        if (thinkingText) partialBlocks.push({ type: 'thinking', thinking: thinkingText })
+        if (assistantText) partialBlocks.push({ type: 'text', text: assistantText })
+        const partialUuid = await appendAssistantMessageV2(
+          store, sessionId, partialBlocks, turn, lastUuid, ctx,
+        )
+        if (partialUuid) lastUuid = partialUuid
+      }
+      yield toAbortedEvent({ sessionId, turnIndex: turn }, abortController.signal.reason as string | undefined)
+      return
+    }
+
     for (const b of toolUseBlocks) {
       const raw = (b.input as any).__rawJson
       if (typeof raw === 'string') {

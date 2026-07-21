@@ -201,11 +201,12 @@ describe('FsTab', () => {
     expect(codeEl && codeEl.querySelectorAll('span').length).toBeGreaterThan(0);
   });
 
-  it('uses fs-preview-text test-id for .md files (no highlighting)', () => {
-    // Markdown / JSON / plain-text should render through the plain
-    // <pre> wrapper, not Prism — keeps markdown source from getting
-    // half-coloured and matches user preference (only code files get
-    // syntax highlighting).
+  it('renders .md files via MarkdownText (fs-preview-md test-id)', () => {
+    // Selecting a .md file should mount the MarkdownText wrapper
+    // (data-testid="fs-preview-md") so the markdown source is rendered
+    // as proper markdown — heading elements, lists, tables — NOT a
+    // raw <pre>. This is the new behavior introduced by the FsTab
+    // MD rendering refactor.
     mockList.mockReturnValue({
       data: {
         ok: true,
@@ -224,17 +225,84 @@ describe('FsTab', () => {
         name: 'README.md',
         size: 12,
         mtime: '2026-07-21T00:00:00Z',
-        content: '# Hello',
+        content: '# Hello\n\nbody',
       },
       loading: false,
       error: null,
     });
     render(<FsTab cwd="/repo" />);
     fireEvent.click(screen.getByText('README.md'));
-    expect(screen.getByTestId('fs-preview-text')).toBeTruthy();
+    // The new MD branch wrapper:
+    expect(screen.getByTestId('fs-preview-md')).toBeTruthy();
+    expect(screen.queryByTestId('fs-preview-text')).toBeNull();
     expect(screen.queryByTestId('fs-preview-code')).toBeNull();
-    // The raw markdown source should appear verbatim.
-    expect(screen.getByText('# Hello')).toBeTruthy();
+    // Markdown was actually rendered (heading element appeared).
+    expect(screen.getByRole('heading', { level: 1, name: 'Hello' })).toBeTruthy();
+    // The raw "# Hello" text should NOT appear as raw text (it became a heading).
+    expect(screen.queryByText('# Hello', { selector: 'pre, code' })).toBeNull();
+  });
+
+  it('renders .markdown files (alternate suffix) via MarkdownText', () => {
+    // The regex is /\.md|\.markdown$/i — confirm .markdown variant hits
+    // the same branch.
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          { name: 'NOTES.markdown', path: 'NOTES.markdown', type: 'file', size: 5 },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true,
+        path: '/repo/NOTES.markdown',
+        name: 'NOTES.markdown',
+        size: 5,
+        mtime: '2026-07-21T00:00:00Z',
+        content: '## Section',
+      },
+      loading: false,
+      error: null,
+    });
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByText('NOTES.markdown'));
+    expect(screen.getByTestId('fs-preview-md')).toBeTruthy();
+    expect(screen.getByRole('heading', { level: 2, name: 'Section' })).toBeTruthy();
+  });
+
+  it('still renders .txt files via plain <pre> (regression guard)', () => {
+    // .txt files should NOT hit the new MD branch.
+    mockList.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          { name: 'notes.txt', path: 'notes.txt', type: 'file', size: 4 },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true,
+        path: '/repo/notes.txt',
+        name: 'notes.txt',
+        size: 4,
+        mtime: '2026-07-21T00:00:00Z',
+        content: 'plain text',
+      },
+      loading: false,
+      error: null,
+    });
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByText('notes.txt'));
+    expect(screen.getByTestId('fs-preview-text')).toBeTruthy();
+    expect(screen.queryByTestId('fs-preview-md')).toBeNull();
   });
 
   it('mounts fs-tree as a fixed-height column so the inner Tree owns scrolling', () => {

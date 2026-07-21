@@ -1,6 +1,16 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import { Input, Button, message, Popover, Tooltip } from "antd";
-import { PictureOutlined, ToolOutlined, CompressOutlined, ExpandOutlined } from "@ant-design/icons";
+import {
+  PictureOutlined,
+  ToolOutlined,
+  CompressOutlined,
+  ExpandOutlined,
+  BorderOutlined,
+} from "@ant-design/icons";
+import {
+  STORAGE_KEYS,
+  useLocalStorageState,
+} from "../components/splitPane/shared.js";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
 import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
@@ -158,6 +168,14 @@ export default React.memo(function AgentInputBox() {
   // 在对话进行中触发对当前文件的写操作;否则 concurrent append 会跟 repair 的
   // fileLock 撞车, 报 EAGAIN)。
   const [repairing, setRepairing] = useState(false);
+  // 右侧分屏开关: 复用 STORAGE_KEYS.open 与 SplitPane + 左侧栏 toggle 共享.
+  // useLocalStorageState 自带 same-tab 的 'zai-localstorage-sync' 事件, 写一次
+  // → 所有持有同 key 的组件(本按钮 / 左侧栏 SplitPaneToggle / SplitPane 内部
+  // 顶角 toggle)同步翻转, 无需在 Agent.tsx 多传一组 props.
+  const [splitPaneOpen, setSplitPaneOpen] = useLocalStorageState<boolean>(
+    STORAGE_KEYS.open,
+    false,
+  );
 
   // 模糊匹配: 检查 query 的字符是否按顺序出现在 target 中（可不连续）
   const fuzzyMatch = (query: string, target: string): number => {
@@ -793,6 +811,26 @@ export default React.memo(function AgentInputBox() {
           style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }}
         />
         <ConversationInfoButton />
+        {/* 右侧分屏 toggle — 行尾最右侧.
+            图标用 BorderOutlined (矩形外框 + 内含两条竖线的扫描器样式, 与
+            左侧栏 / SplitPane 内部 toggle 的视觉约定一致 — open 时若改成
+            PicCenterOutlined 等可选, 这里先保持单图标 + 颜色切换, 与现有
+            Agent.tsx:351 行为对齐).
+            数据源 STORAGE_KEYS.open 与 SplitPane + 左侧栏 toggle 共享, 任意
+            一处写 → 全局同步 (useLocalStorageState 自带 same-tab storage event).
+            open 时用品牌色 #ff6600 高亮, 关闭时与同行其他按钮颜色一致. */}
+        <Tooltip title="切换右侧分屏" placement="top">
+          <Button
+            icon={<BorderOutlined />}
+            data-testid="split-pane-toggle-inputbox"
+            aria-pressed={splitPaneOpen}
+            onClick={() => setSplitPaneOpen(!splitPaneOpen)}
+            style={{
+              color: splitPaneOpen ? "#ff6600" : "rgba(255,255,255,0.45)",
+              flexShrink: 0,
+            }}
+          />
+        </Tooltip>
       </div>
 
       {/* TextArea + slash dropdown 区 */}

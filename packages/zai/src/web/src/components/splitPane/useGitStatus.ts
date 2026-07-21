@@ -9,6 +9,8 @@ export interface UseGitStatusResult {
   refetch: () => void;
 }
 
+const POLL_INTERVAL_MS = 5000;
+
 export function useGitStatus(cwd: string | null | undefined): UseGitStatusResult {
   const [data, setData] = useState<GitStatus | null>(null);
   const [loading, setLoading] = useState(false);
@@ -43,7 +45,10 @@ export function useGitStatus(cwd: string | null | undefined): UseGitStatusResult
 
   useEffect(() => {
     load();
-  }, [load]);
+    if (!cwd) return;
+    const id = setInterval(load, POLL_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [load, cwd]);
 
   return { data, loading, error, refetch: load };
 }

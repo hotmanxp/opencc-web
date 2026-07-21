@@ -22,10 +22,7 @@ import {
   CopyOutlined,
   CheckOutlined,
 } from "@ant-design/icons";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
-import { Prism as SyntaxHighlighter } from "react-syntax-highlighter";
-import { oneDark } from "react-syntax-highlighter/dist/esm/styles/prism";
+import { MarkdownText } from "../markdown/MarkdownText.js";
 import type { AgentMessage } from "../../store/useAgentStore.js";
 import { AttachmentStrip } from "../AttachmentStrip.js";
 import { copyToClipboard } from "../../lib/clipboard.js";
@@ -36,8 +33,9 @@ import { getRenderer } from "../toolRenderers/registry.js";
 const { Text } = Typography;
 
 // 代码块使用 oneDark 主题作为底色, 深灰(#282c34) 与浅色气泡形成稳定对比,
-// 避免原来 rgba(0,0,0,0.35) 在浅气泡上对比度过低的问题.
-const CODE_BG = "#282c34";
+// 避免原来 rgba(0,0,0,0.35) 在浅气泡上对比度过低的问题. CODE_BG 现在只在
+// components/markdown/MarkdownText.tsx 里使用, 此处只保留 CODE_FONT_FAMILY
+// 给 ToolUsePill / ToolCallBlock 的等宽 stack trace fallback 用.
 const CODE_FONT_FAMILY =
   "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace";
 
@@ -55,178 +53,6 @@ type PendingAttachment = {
   status: "reading" | "ready" | "error";
   error?: string;
 };
-
-const markdownComponents = {
-  p: ({ children }: any) => <p style={{ margin: "0 0 8px 0" }}>{children}</p>,
-  h1: ({ children }: any) => (
-    <h1 style={{ fontSize: 20, fontWeight: 600, margin: "12px 0 8px 0" }}>
-      {children}
-    </h1>
-  ),
-  h2: ({ children }: any) => (
-    <h2 style={{ fontSize: 18, fontWeight: 600, margin: "12px 0 8px 0" }}>
-      {children}
-    </h2>
-  ),
-  h3: ({ children }: any) => (
-    <h3 style={{ fontSize: 16, fontWeight: 600, margin: "10px 0 6px 0" }}>
-      {children}
-    </h3>
-  ),
-  h4: ({ children }: any) => (
-    <h4 style={{ fontSize: 14, fontWeight: 600, margin: "8px 0 4px 0" }}>
-      {children}
-    </h4>
-  ),
-  ul: ({ children }: any) => (
-    <ul style={{ margin: "0 0 8px 0", paddingLeft: 20 }}>{children}</ul>
-  ),
-  ol: ({ children }: any) => (
-    <ol style={{ margin: "0 0 8px 0", paddingLeft: 20 }}>{children}</ol>
-  ),
-  li: ({ children }: any) => <li style={{ marginBottom: 4 }}>{children}</li>,
-  code: ({ className, children }: any) => {
-    // 围栏代码块 ```lang\n...\n``` 由 markdown 渲染时会给 code 加上 language-xxx className,
-    // 行内 `code` 没有 className. 我们据此分发到 SyntaxHighlighter 或简单内联样式.
-    const match = /language-(\w+)/.exec(className || "");
-    if (!match) {
-      // 行内 code: 柔和紫色文字 (#a78bfa violet-400 调性), 背景透明,
-      // 仅靠文字色区分, 不增加视觉块面.
-      return (
-        <code
-          style={{
-            background: "transparent",
-            color: "#a78bfa",
-            padding: "1px 6px",
-            borderRadius: 3,
-            fontSize: "0.9em",
-            fontFamily: CODE_FONT_FAMILY,
-            fontWeight: 500,
-          }}
-        >
-          {children}
-        </code>
-      );
-    }
-    return (
-      <SyntaxHighlighter
-        language={match[1]}
-        style={oneDark}
-        customStyle={{
-          margin: "6px 0 10px 0",
-          padding: "12px 14px",
-          borderRadius: 6,
-          fontSize: 12,
-          lineHeight: 1.55,
-          background: CODE_BG,
-        }}
-        codeTagProps={{
-          style: { fontFamily: CODE_FONT_FAMILY },
-        }}
-        wrapLongLines={false}
-        showLineNumbers={false}
-      >
-        {String(children).replace(/\n$/, "")}
-      </SyntaxHighlighter>
-    );
-  },
-  // SyntaxHighlighter 自带 <pre>, 这里直接透传避免外层再包一个 pre
-  pre: ({ children }: any) => <>{children}</>,
-  table: ({ children }: any) => (
-    <table
-      style={{
-        borderCollapse: "collapse",
-        margin: "4px 0 8px 0",
-        fontSize: 13,
-        width: "100%",
-      }}
-    >
-      {children}
-    </table>
-  ),
-  thead: ({ children }: any) => (
-    <thead style={{ background: "rgba(255,255,255,0.05)" }}>{children}</thead>
-  ),
-  tbody: ({ children }: any) => <tbody>{children}</tbody>,
-  tr: ({ children }: any) => (
-    <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
-      {children}
-    </tr>
-  ),
-  th: ({ children }: any) => (
-    <th
-      style={{
-        padding: "6px 10px",
-        textAlign: "left",
-        fontWeight: 600,
-        border: "1px solid rgba(255,255,255,0.08)",
-      }}
-    >
-      {children}
-    </th>
-  ),
-  td: ({ children }: any) => (
-    <td
-      style={{
-        padding: "6px 10px",
-        border: "1px solid rgba(255,255,255,0.08)",
-      }}
-    >
-      {children}
-    </td>
-  ),
-  blockquote: ({ children }: any) => (
-    <blockquote
-      style={{
-        borderLeft: "3px solid rgba(255,255,255,0.2)",
-        paddingLeft: 12,
-        margin: "4px 0 8px 0",
-        color: "rgba(255,255,255,0.7)",
-      }}
-    >
-      {children}
-    </blockquote>
-  ),
-  a: ({ href, children }: any) => (
-    <a
-      href={href}
-      target="_blank"
-      rel="noopener noreferrer"
-      style={{ color: "#1677ff", textDecoration: "underline" }}
-    >
-      {children}
-    </a>
-  ),
-  hr: () => (
-    <hr
-      style={{
-        border: "none",
-        borderTop: "1px solid rgba(255,255,255,0.08)",
-        margin: "12px 0",
-      }}
-    />
-  ),
-};
-
-export const MarkdownText = React.memo(function MarkdownText({ text }: { text: string }) {
-  return (
-    <div
-      style={{
-        fontSize: 14,
-        lineHeight: 1.6,
-        color: "inherit",
-        wordBreak: "break-word",
-      }}
-    >
-      <ReactMarkdown
-        remarkPlugins={[remarkGfm]}
-        components={markdownComponents}
-      >
-        {text}
-      </ReactMarkdown>
-    </div>
-  );
-});
 
 // Thinking 折叠块用紫罗兰 (#722ed1) 作为主色, 与正式对话的浅蓝/浅绿气泡区分.
 // 折叠态: pill 形紫色 "思考" 标签 + 截断预览
@@ -576,7 +402,23 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
   // 哪种 subagent 在跑. 格式 `<type> (agent)` 与 opencc AssistantToolUseMessage
   // 的 userFacingName 风格一致. 缺省回退到 'general-purpose'(AgentTool 的 schema 默认值).
   const renderer = getRenderer(rawName)
-  const displayName = renderer.displayName?.(input) ?? name
+  // Skill 工具走 genericRenderer (registry 里没注册 Skill), 但 genericRenderer
+  // 只把 Object.values(input)[0] 截到 80 字符——等于把 "plugin:superpowers:..." 这种
+  // 长 skill 名截断,pill 标签只是泛化的 "Skill",用户看不出调的是哪个 skill。
+  // 特判: rawName === "Skill" 时直接展示 input.name 完整路径作为 displayName +
+  // preview,折叠态就一眼能看见 skill 名。展开后的 params/output 仍走 generic 路径。
+  const isSkillTool = rawName === "Skill"
+  const skillNameFromInput =
+    typeof input.name === "string" && input.name.trim()
+      ? input.name.trim()
+      : undefined
+  const displayName = isSkillTool && skillNameFromInput
+    ? skillNameFromInput
+    : renderer.displayName?.(input) ?? name
+  // preview override: skill 走 skillNameFromInput 完整,其他工具照旧走 renderer.preview
+  const preview = isSkillTool && skillNameFromInput
+    ? skillNameFromInput
+    : renderer.preview(input)
   // 整块接管: Edit/Write 等需要整段渲染 (DiffBlock 自带 header + diff + error)
   // 的工具, 跳过 ToolCallBlock 自己的折叠面板/参数/结果分块, 直接挂 mount.
   if (renderer.renderFull) {
@@ -604,7 +446,7 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
   // 每个工具的预览策略由对应 renderer.preview(input) 决定; Bash 优先
   // description, Agent 优先 description, 其余工具则回退到第一个字段的值.
   const inputKeys = Object.keys(input);
-  const preview = renderer.preview(input);
+  // 注意: preview 在上面 (Skill 特判) 已经被 const 声明过了, 不要再 shadow.
 
   const errorText =
     typeof errorField === "string"

@@ -46,8 +46,8 @@ export function DiffView({ diff }: { diff: string }) {
         border: '1px solid rgba(255,255,255,0.08)',
         borderRadius: 6,
         padding: '6px 0',
-        maxHeight: 'calc(100vh - 360px)',
-        minHeight: 200,
+        height: '100%',
+        boxSizing: 'border-box',
         overflow: 'auto',
         background: 'rgba(255,255,255,0.02)',
       }}

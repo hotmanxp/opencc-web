@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen } from '@testing-library/react';
+import { fireEvent, render, screen } from '@testing-library/react';
 
 // Mock the hooks this component uses.
 vi.mock('./useGitStatus.js', () => ({
@@ -60,5 +60,42 @@ describe('GitTab', () => {
     mockDiff.mockReturnValue({ data: null, loading: false, error: null });
     render(<GitTab cwd="/repo" />);
     expect(screen.getByText(/选择左侧文件/i)).toBeTruthy();
+  });
+
+  it('clears the selection when the selected file disappears from the next refresh', () => {
+    mockStatus.mockReturnValue({
+      data: {
+        ok: true,
+        branch: 'main',
+        files: [
+          { path: 'a.ts', status: 'M', staged: false },
+          { path: 'b.ts', status: 'M', staged: false },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockDiff.mockReturnValue({ data: { ok: true, diff: 'diff --git a b' }, loading: false, error: null });
+
+    const { rerender } = render(<GitTab cwd="/repo" />);
+
+    // Pick b.ts
+    fireEvent.click(screen.getByText('b.ts'));
+
+    // Next refresh: b.ts is gone (e.g. reverted). selection must reset and
+    // the diff panel must show the empty hint again.
+    mockStatus.mockReturnValue({
+      data: { ok: true, branch: 'main', files: [{ path: 'a.ts', status: 'M', staged: false }] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockDiff.mockReturnValue({ data: { ok: true, diff: 'new diff' }, loading: false, error: null });
+    rerender(<GitTab cwd="/repo" />);
+
+    expect(screen.getByText(/选择左侧文件/i)).toBeTruthy();
+    expect(screen.queryByText('diff --git a b')).toBeNull();
+    expect(screen.queryByText('new diff')).toBeNull();
   });
 });

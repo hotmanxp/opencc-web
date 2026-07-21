@@ -24,6 +24,17 @@ export function GitTab({ cwd }: { cwd: string | null }) {
     setSelected(null);
   }, [cwd]);
 
+  // When the status refreshes and the previously-selected file is no longer in
+  // the list (e.g. the change was reverted or committed), clear the selection so
+  // the diff panel resets back to the empty hint.
+  const filePaths = status.data?.ok ? status.data.files.map((f) => f.path) : null;
+  useEffect(() => {
+    if (!selected) return;
+    if (filePaths && !filePaths.includes(selected)) {
+      setSelected(null);
+    }
+  }, [filePaths, selected]);
+
   if (!cwd) {
     return (
       <div style={{ padding: 16 }}>
@@ -184,7 +195,15 @@ export function GitTab({ cwd }: { cwd: string | null }) {
         {/* Right detail */}
         <div
           data-testid="git-detail"
-          style={{ flex: '0 0 60%', padding: 12, overflow: 'auto' }}
+          style={{
+            flex: '1 1 60%',
+            minWidth: 0,
+            minHeight: 0,
+            maxHeight: "calc(100vh - 140px)",
+            padding: 12,
+            display: 'flex',
+            flexDirection: 'column',
+          }}
         >
           {!selected ? (
             <Empty description="选择左侧文件查看 diff" />

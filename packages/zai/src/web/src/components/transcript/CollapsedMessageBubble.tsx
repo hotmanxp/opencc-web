@@ -2,7 +2,8 @@ import { useEffect, useRef, useState } from 'react'
 import { Button, Card, Space, Typography } from 'antd'
 import { RobotFilled, UserOutlined } from '@ant-design/icons'
 import type { AgentMessage } from '../../store/useAgentStore.js'
-import { MarkdownText, MessageCopyButton, StreamingMarkdown, ThinkingBlock } from './MessageBubble.js'
+import { MarkdownText } from '../markdown/MarkdownText.js'
+import { MessageCopyButton, StreamingMarkdown, ThinkingBlock } from './MessageBubble.js'
 import { linkifyText } from '../../lib/linkify.js'
 
 const { Paragraph, Text } = Typography

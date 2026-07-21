@@ -117,7 +117,9 @@ router.get('/dirs/file', async (req, res) => {
   }
 
   const ext = extname(abs).toLowerCase();
-  if (!TEXT_EXTS.has(ext)) {
+  const base = basename(abs);
+  const isDotfile = base.startsWith('.') && base !== '.' && base !== '..';
+  if (!TEXT_EXTS.has(ext) && !isDotfile) {
     res.status(415).json({ error: `不支持的文件类型：${ext || '(无扩展名)'}` });
     return;
   }

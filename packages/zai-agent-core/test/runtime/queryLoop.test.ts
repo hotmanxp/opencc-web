@@ -266,3 +266,43 @@ describe('queryLoop', () => {
     expect(calls[0]!.systemPrompt).not.toContain('<name>bad</name>')
   })
 })
+
+describe('queryLoop mid-stream abort', () => {
+  // 当 abort 在 streaming loop 中途触发时, queryLoop 必须 yield runtime.aborted
+  // 而非 runtime.done, 否则前端 status:idle 误显示"成功". 之前 for-await 因
+  // signal.aborted break 后直接 fall-through 到 appendAssistantMessageV2 +
+  // yield runtime.done, transcript 也会落盘一条完整 assistant 消息 — 都不正确.
+  test('abort lands DURING streaming yields runtime.aborted, not runtime.done', async () => {
+    // Custom producer that:
+    //   1. yields message_start synchronously (so for-await starts consuming)
+    //   2. yields content_block_start synchronously
+    //   3. enters an infinite loop that yields deltas one at a time, each
+    //      preceded by a 5ms await
+    // Boot code in queryLoop can take 20-100ms (loadSkills, MCP, plugins),
+    // so abort needs to fire AFTER boot completes but BEFORE streaming finishes.
+    // Use a 200ms delay to ensure we land mid-stream.
+    async function* slowText() {
+      yield { type: 'message_start', message: { id: 'm1' } }
+      yield { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }
+      for (let i = 0; i < 100; i++) {
+        await new Promise<void>((resolve) => setTimeout(resolve, 5))
+        yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'x' } }
+      }
+      yield { type: 'content_block_stop', index: 0 }
+      yield { type: 'message_stop' }
+    }
+
+    const controller = new AbortController()
+    const events: any[] = []
+    const iter = queryLoop(
+      { prompt: 'hi', cwd: '/tmp', abortSignal: controller.signal },
+      { dataDir: tmpDir, modelCaller: slowText as any, sandbox: makeMockSandbox('/tmp') },
+    )
+    setTimeout(() => controller.abort(new Error('user-stop')), 200)
+    for await (const e of iter) {
+      events.push(e)
+    }
+    expect(events.at(-1)?.type).toBe('runtime.aborted')
+    expect(events.at(-1)?.reason).toBeDefined()
+  })
+})

@@ -196,3 +196,34 @@ describe('AgentInputBox — 状态行合并任务摘要', () => {
     expect(screen.getByTestId('v2-task-dropdown-item-pending')).toHaveTextContent('A')
   });
 })
+
+describe('AgentInputBox — 右侧分屏 toggle (split-pane)', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  test('默认渲染在状态行最右侧, 默认关闭', () => {
+    render(<AgentInputBox />)
+    const btn = screen.getByTestId('split-pane-toggle-inputbox')
+    expect(btn).toBeInTheDocument()
+    expect(btn).toHaveAttribute('aria-pressed', 'false')
+  })
+
+  test('点击翻转并写入 STORAGE_KEYS.open, 再次点击翻回', () => {
+    render(<AgentInputBox />)
+    const btn = screen.getByTestId('split-pane-toggle-inputbox')
+    fireEvent.click(btn)
+    expect(btn).toHaveAttribute('aria-pressed', 'true')
+    expect(localStorage.getItem('zai.splitPane.open')).toBe('true')
+    fireEvent.click(btn)
+    expect(btn).toHaveAttribute('aria-pressed', 'false')
+    expect(localStorage.getItem('zai.splitPane.open')).toBe('false')
+  })
+
+  test('已打开状态下刷新 (新挂载) 直接读取 localStorage 进入开启态', () => {
+    localStorage.setItem('zai.splitPane.open', 'true')
+    render(<AgentInputBox />)
+    const btn = screen.getByTestId('split-pane-toggle-inputbox')
+    expect(btn).toHaveAttribute('aria-pressed', 'true')
+  })
+})

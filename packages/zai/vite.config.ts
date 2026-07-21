@@ -13,15 +13,10 @@ export default defineConfig({
     },
   },
   server: {
-    host: '127.0.0.1',
     port: Number.parseInt(process.env.VITE_PORT || '5173', 10),
     proxy: {
       '/api': {
-        // Resolve `localhost` to an explicit IPv4 host so the proxy always
-        // dials the same address family as the API server (which listens on
-        // 127.0.0.1 only). Without this, vite may resolve `localhost` to
-        // `::1` and the proxy silently hangs (Vite 8 default IPv6 dual-stack).
-        target: apiOrigin.replace(/^localhost/, '127.0.0.1'),
+        target: apiOrigin,
         changeOrigin: true,
       },
     },

@@ -44,4 +44,32 @@ describe('useGitStatus', () => {
     const { result } = renderHook(() => useGitStatus('/tmp/x'));
     await waitFor(() => expect(result.current.error).toBe('network down'));
   });
+
+  it('polls /git/status every 5 seconds', async () => {
+    vi.useFakeTimers();
+    try {
+      mockGet.mockResolvedValue({ ok: true, branch: 'main', files: [] });
+      renderHook(() => useGitStatus('/tmp/repo'));
+      // initial fetch
+      await vi.waitFor(() => expect(mockGet).toHaveBeenCalledTimes(1));
+      // advance the 5s interval and the trailing microtasks
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mockGet).toHaveBeenCalledTimes(2);
+      await vi.advanceTimersByTimeAsync(5000);
+      expect(mockGet).toHaveBeenCalledTimes(3);
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  it('does not poll when cwd is null', async () => {
+    vi.useFakeTimers();
+    try {
+      renderHook(() => useGitStatus(null));
+      await vi.advanceTimersByTimeAsync(15000);
+      expect(mockGet).not.toHaveBeenCalled();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

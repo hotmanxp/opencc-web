@@ -78,6 +78,76 @@ body {
 .ant-tree { background: transparent !important; color: var(--text-primary) !important; }
 .ant-tree .ant-tree-node-content-wrapper:hover { background: var(--bg-card-hover) !important; }
 
+/* FsTab 目录树紧凑化(对齐 VSCode Explorer)
+   antd@5 通过 prefixCls='ant-tree' 把 rc-tree class 也变成 .ant-tree-*,
+   所以直接覆盖 .ant-tree-* 系列. 用 !important 压过 antd cssinjs 注入的
+   token-derived width/margin (titleHeight 默认 24px). */
+[data-testid="fs-tree"] .ant-tree-treenode {
+  line-height: 22px !important;
+  margin-bottom: 0 !important;
+}
+
+[data-testid="fs-tree"] .ant-tree-treenode .ant-tree-node-content-wrapper {
+  min-height: 22px !important;
+  height: 22px !important;
+  line-height: 22px !important;
+  padding: 0 4px !important;
+  border-radius: 3px !important;
+}
+
+[data-testid="fs-tree"] .ant-tree-treenode .ant-tree-switcher {
+  width: 14px !important;
+  height: 22px !important;
+  margin: 0 !important;
+  margin-inline-end: 3px !important;
+}
+
+/* chevron: antd 在 switcher 内插入 svg/anticon,缩到 10px */
+[data-testid="fs-tree"] .ant-tree-treenode .ant-tree-switcher > .anticon,
+[data-testid="fs-tree"] .ant-tree-treenode .ant-tree-switcher svg {
+  width: 10px !important;
+  height: 10px !important;
+  font-size: 10px !important;
+  vertical-align: middle !important;
+}
+/* hover 时的圆形背景伪元素 */
+[data-testid="fs-tree"] .ant-tree-treenode .ant-tree-switcher::before {
+  width: 14px !important;
+  height: 22px !important;
+  border-radius: 2px !important;
+}
+
+/* indent-unit: 缩进 8px/级,替代默认 16px */
+[data-testid="fs-tree"] .ant-tree-indent-unit {
+  width: 8px !important;
+}
+
+/* icon: 文件/文件夹 icon 12px */
+[data-testid="fs-tree"] .ant-tree-iconEle {
+  width: 12px !important;
+  height: 22px !important;
+  margin-inline-end: 3px !important;
+}
+[data-testid="fs-tree"] .ant-tree-icon__customize {
+  width: 12px !important;
+  height: 12px !important;
+  font-size: 12px !important;
+  margin-inline-end: 3px !important;
+  vertical-align: middle !important;
+}
+
+[data-testid="fs-tree"] .ant-tree-title {
+  font-size: 12px !important;
+}
+
+[data-testid="fs-tree"] .ant-tree-node-selected {
+  background: rgba(255, 102, 0, 0.18) !important;
+}
+
+[data-testid="fs-tree"] .ant-tree-node-content-wrapper:hover {
+  background: var(--bg-card-hover) !important;
+}
+
 .ant-list-item { border-bottom: 1px solid rgba(255,255,255,0.05) !important; }
 .ant-list-item-meta-title { color: var(--text-primary) !important; }
 

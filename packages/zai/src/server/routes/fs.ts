@@ -98,7 +98,9 @@ fsRouter.get('/fs/file', async (req, res) => {
     return;
   }
   const ext = extname(safe.abs).toLowerCase();
-  if (!TEXT_EXTS.has(ext)) {
+  const base = basename(safe.abs);
+  const isDotfile = base.startsWith('.') && base !== '.' && base !== '..';
+  if (!TEXT_EXTS.has(ext) && !isDotfile) {
     res.status(415).json({ ok: false, error: `不支持的文件类型：${ext || '(无扩展名)'}` } satisfies FsFile);
     return;
   }

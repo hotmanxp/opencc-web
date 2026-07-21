@@ -8,8 +8,15 @@ export const STORAGE_KEYS = {
 } as const;
 
 export const MIN_WIDTH = 320;
-export const MAX_WIDTH = 720;
+// MAX_WIDTH 上限放宽到 1200px: 默认宽度是屏幕的 60%, 1920px 屏对应 1152,
+// 给用户拖拽留一点上探空间 (≈ 62.5% @ 1920). 大于 1200 的屏 (2K/4K) 仍
+// 拖到 1200, 不会把分屏做得过宽挡住中间对话区.
+export const MAX_WIDTH = 1200;
+// 旧默认 480 保留为 fallback (storage 损坏 / clampWidth 入参非有限值时),
+// 新默认走 DEFAULT_WIDTH_PCT × window.innerWidth, 见 SplitPane.tsx.
 export const DEFAULT_WIDTH = 480;
+// 首次打开分屏 (localStorage 没有 width key) 时使用屏幕宽度的 60%.
+export const DEFAULT_WIDTH_PCT = 0.6;
 export const RESPONSIVE_BREAKPOINT = 1024;
 export const COLLAPSED_WIDTH = 0;
 

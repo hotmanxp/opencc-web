@@ -13,10 +13,24 @@ import {
   MIN_WIDTH,
   MAX_WIDTH,
   DEFAULT_WIDTH,
+  DEFAULT_WIDTH_PCT,
   RESPONSIVE_BREAKPOINT,
   clampWidth,
   useLocalStorageState,
 } from './shared.js';
+
+/**
+ * 首次打开分屏时的默认宽度: 屏幕宽度的 60% (DEFAULT_WIDTH_PCT), 然后过
+ * clampWidth 让窄屏也能用. 若 storage 已有值 (旧默认 480 或用户拖拽过),
+ * 沿用 storage, 不动用户的偏好 — 仅"首次"用 60%.
+ *
+ * SSR 安全: typeof window 守卫避免在非浏览器环境 (测试 / SSR) 抛错.
+ */
+function resolveInitialWidth(): number {
+  if (typeof window === 'undefined') return DEFAULT_WIDTH;
+  const pct = Math.round(window.innerWidth * DEFAULT_WIDTH_PCT);
+  return clampWidth(pct);
+}
 
 type TabKey = 'git' | 'fs' | 'tbd';
 
@@ -36,7 +50,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
   const [tab, setTab] = useLocalStorageState<TabKey>(STORAGE_KEYS.tab, 'git');
   const [widthStored, setWidthStored] = useLocalStorageState<number>(
     STORAGE_KEYS.width,
-    DEFAULT_WIDTH,
+    resolveInitialWidth(),
   );
   const width = clampWidth(widthStored);
 
