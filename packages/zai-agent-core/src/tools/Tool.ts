@@ -1,6 +1,7 @@
 // @ts-nocheck -- opencc-internals Tool.ts is itself @ts-nocheck; we re-export.
 
 import type { z } from 'zod'
+import type { AwaitApproveInput, AwaitApproveResult } from './RequestApproveTool/RequestApproveTool.js'
 
 export type {
   Tool,
@@ -50,6 +51,21 @@ export type LegacyToolContext = {
     answers: Record<string, string>
     annotations?: Record<string, { notes?: string; preview?: string }>
   }>
+  /**
+   * Parallel of awaitAskUserQuestion, used by RequestApproveTool. The
+   * runtime populates this with a closure capturing the approveRegistry
+   * and the current toolUseId each time a `RequestApprove` tool_use is
+   * dispatched, then clears it after tool.call returns.
+   */
+  awaitApprove?: (req: AwaitApproveInput) => Promise<AwaitApproveResult>
+  /**
+   * The runtime attaches the resolved body (file path → file content) onto
+   * the context before invoking RequestApproveTool.call so the tool does
+   * not need to re-resolve the file.
+   */
+  __resolvedApproveBody?: import('./RequestApproveTool/schema.js').ResolvedBody
+  /** The current tool_use block id (set by toolExecution for RequestApprove). */
+  __toolUseId?: string
   __runtimeConfig?: any
   __defaultModel?: string
   __maxTurns?: number
