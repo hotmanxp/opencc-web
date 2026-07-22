@@ -94,6 +94,7 @@ export function GitTab({ cwd }: { cwd: string | null }) {
           style={{
             flex: '0 0 40%',
             overflowY: 'auto',
+            height: "calc(100vh - 140px)",
             borderRight: '1px solid rgba(255,255,255,0.08)',
             padding: '4px 0',
           }}
@@ -199,7 +200,7 @@ export function GitTab({ cwd }: { cwd: string | null }) {
             flex: '1 1 60%',
             minWidth: 0,
             minHeight: 0,
-            maxHeight: "calc(100vh - 140px)",
+            height: "calc(100vh - 140px)",
             padding: 12,
             display: 'flex',
             flexDirection: 'column',
