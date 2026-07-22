@@ -9,12 +9,35 @@ import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
 import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
+import { FsContextMenu } from './FsContextMenu.js';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
 // We track loaded children in a map keyed by parent path.
 type Entry = { name: string; path: string; type: 'dir' | 'file'; size: number | null };
 type LoadedMap = Record<string, Entry[]>;
+
+/**
+ * Build an absolute path from a session cwd and a tree-relative path,
+ * preserving whatever separator convention the cwd uses. Server-side
+ * `path.resolve` returns POSIX `/` on macOS/Linux but `\\` on Windows;
+ * joining with a hard-coded `/` produces mixed separators that break
+ * cmd-line / Git Bash pasting for the "Copy Absolute Path" action.
+ *
+ * Detection: pick `\\` when cwd contains a backslash, otherwise `/`.
+ * Strip the trailing separator (either kind) before joining. Returns
+ * relPath unchanged when cwd is null so downstream clipboard code still
+ * has something to copy.
+ *
+ * Exported for testability — the right-click handler in this module is
+ * the only caller in production.
+ */
+export function buildAbsPath(cwd: string | null, relPath: string): string {
+  if (!cwd) return relPath;
+  const sep = cwd.includes('\\') ? '\\' : '/';
+  const trimmed = cwd.replace(/[\\/]$/, '');
+  return relPath ? `${trimmed}${sep}${relPath}` : trimmed;
+}
 
 /**
  * Render the file content with Prism syntax highlighting when the
@@ -128,12 +151,14 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [loaded, setLoaded] = useState<LoadedMap>({});
   const file = useFsFile(cwd, selected);
+  const [contextMenu, setContextMenu] = useState<{ path: string; absPath: string; x: number; y: number } | null>(null);
 
   // Reset on cwd change.
   useEffect(() => {
     setSelected(null);
     setExpandedKeys([]);
     setLoaded({});
+    setContextMenu(null);
   }, [cwd]);
 
   if (!cwd) {
@@ -275,6 +300,12 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                   );
                 }
               }}
+              onRightClick={({ node, event }) => {
+                const relPath = String(node.key);
+                const abs = buildAbsPath(cwd, relPath);
+                setContextMenu({ path: relPath, absPath: abs, x: event.clientX, y: event.clientY });
+                event.preventDefault();
+              }}
             />
           )}
         </div>
@@ -309,6 +340,15 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           )}
         </div>
       </div>
+      {contextMenu && cwd && (
+        <FsContextMenu
+          path={contextMenu.path}
+          absPath={contextMenu.absPath}
+          cwd={cwd}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }

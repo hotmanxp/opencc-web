@@ -22,6 +22,13 @@ export function resolveSafePath(
   if (typeof rel !== 'string') {
     return { ok: false, error: 'path 必须为字符串' };
   }
+  // NUL bytes are rejected at every layer of the OS (C strings terminate
+  // on them) and would otherwise smuggle a path component past the
+  // prefix check below. Reject up front so all callers — present and
+  // future — inherit the guard.
+  if (rel.includes('\x00')) {
+    return { ok: false, error: 'path 含 NUL 字符' };
+  }
   // Empty rel means "the root itself" — useful for /fs/list?dir=
   const abs = resolve(root, rel);
   // Resolve removes trailing slash on root; compare exactly + the

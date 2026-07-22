@@ -4,10 +4,17 @@ import { render, screen, fireEvent } from '@testing-library/react';
 
 vi.mock('./useFsList.js', () => ({ useFsList: vi.fn() }));
 vi.mock('./useFsFile.js', () => ({ useFsFile: vi.fn() }));
+vi.mock('./FsContextMenu.js', () => ({
+  FsContextMenu: vi.fn(({ path, onClose }) => (
+    <div data-testid="ctx-menu-stub" data-path={path}>
+      <button onClick={onClose}>close</button>
+    </div>
+  )),
+}));
 
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
-import { FsTab } from './FsTab.js';
+import { FsTab, buildAbsPath } from './FsTab.js';
 
 const mockList = useFsList as unknown as ReturnType<typeof vi.fn>;
 const mockFile = useFsFile as unknown as ReturnType<typeof vi.fn>;
@@ -513,5 +520,47 @@ describe('FsTab', () => {
     // 抽样确认映射:index.ts → ts, README.md → md, package.json → json
     const exts = Array.from(fileExtNodes).map((n) => n.getAttribute('data-file-ext')).sort();
     expect(exts).toEqual(['json', 'md', 'ts']);
+  });
+
+  it('opens FsContextMenu when a node is right-clicked and closes on onClose', () => {
+    mockList.mockReturnValue({
+      data: { ok: true, entries: [{ name: 'src', path: 'src', type: 'dir', size: null }] },
+      loading: false, error: null, refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({ data: null, loading: false, error: null });
+    render(<FsTab cwd="/repo" />);
+    expect(screen.queryByTestId('ctx-menu-stub')).toBeNull();
+    const node = screen.getByText('src');
+    fireEvent.contextMenu(node, { clientX: 50, clientY: 60 });
+    const stub = screen.getByTestId('ctx-menu-stub');
+    expect(stub.getAttribute('data-path')).toBe('src');
+    fireEvent.click(screen.getByText('close'));
+    expect(screen.queryByTestId('ctx-menu-stub')).toBeNull();
+  });
+
+  it('builds POSIX absPath when cwd uses POSIX separators', () => {
+    // Extract the exported pure helper and exercise it directly — keeps
+    // the test honest without going through the Tree right-click plumbing.
+    expect(buildAbsPath('/repo', 'src/index.ts')).toBe('/repo/src/index.ts');
+    expect(buildAbsPath('/repo/', 'src/index.ts')).toBe('/repo/src/index.ts');
+    expect(buildAbsPath('/repo', '')).toBe('/repo');
+  });
+
+  it('builds Windows absPath when cwd uses backslash separators', () => {
+    // Server's `path.resolve` on Windows returns `C:\\repo\\...`. Joining
+    // with POSIX `/` would produce mixed separators that break cmd-line /
+    // Git Bash pasting for the "Copy Absolute Path" action. The helper
+    // must detect `\` and use it consistently.
+    expect(buildAbsPath('C:\\repo', 'src\\index.ts')).toBe('C:\\repo\\src\\index.ts');
+    expect(buildAbsPath('C:\\repo\\', 'src\\index.ts')).toBe('C:\\repo\\src\\index.ts');
+    // Mixed-case drive letter preserved.
+    expect(buildAbsPath('D:\\proj', 'README.md')).toBe('D:\\proj\\README.md');
+  });
+
+  it('buildAbsPath returns relPath unchanged when cwd is null', () => {
+    // Without a cwd the user can't build an absolute path — fall back to
+    // the relPath so downstream code (FsContextMenu "Copy Path") still
+    // has something sensible to put on the clipboard.
+    expect(buildAbsPath(null, 'src/index.ts')).toBe('src/index.ts');
   });
 });
