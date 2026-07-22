@@ -247,7 +247,12 @@ fsRouter.post('/fs/reveal', async (req, res) => {
   }
   const safe = resolveSafePath(cwd, rel);
   if (!safe.ok) {
-    res.status(403).json({ ok: false, error: safe.error } satisfies FsAck);
+    // NUL bytes are a malformed-input (400) failure, not a privilege (403)
+    // one — the caller hasn't crossed a boundary, they've handed us a
+    // string the OS will truncate. resolveSafePath also rejects them so
+    // every other endpoint inherits the same defence.
+    const status = safe.error.includes('NUL') ? 400 : 403;
+    res.status(status).json({ ok: false, error: safe.error } satisfies FsAck);
     return;
   }
   const { cmd, buildArgs } = platformCommands().reveal;
@@ -268,7 +273,12 @@ fsRouter.post('/fs/open-terminal', async (req, res) => {
   }
   const safe = resolveSafePath(cwd, rel);
   if (!safe.ok) {
-    res.status(403).json({ ok: false, error: safe.error } satisfies FsAck);
+    // NUL bytes are a malformed-input (400) failure, not a privilege (403)
+    // one — the caller hasn't crossed a boundary, they've handed us a
+    // string the OS will truncate. resolveSafePath also rejects them so
+    // every other endpoint inherits the same defence.
+    const status = safe.error.includes('NUL') ? 400 : 403;
+    res.status(status).json({ ok: false, error: safe.error } satisfies FsAck);
     return;
   }
   // For files, open terminal at the parent directory (Linux/Win fallback

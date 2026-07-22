@@ -202,6 +202,23 @@ describe('routes/fs', () => {
       expect(res.status).toBe(403);
       expect(execFileMock).not.toHaveBeenCalled();
     });
+
+    test('rejects empty path with 400', async () => {
+      const res = await request(makeApp(root))
+        .post('/api/fs/reveal')
+        .send({});
+      expect(res.status).toBe(400);
+      expect(execFileMock).not.toHaveBeenCalled();
+    });
+
+    test('rejects NUL-byte path with 400', async () => {
+      const res = await request(makeApp(root))
+        .post('/api/fs/reveal')
+        .send({ path: 'src/foo\x00../etc/passwd' });
+      expect(res.status).toBe(400);
+      expect(execFileMock).not.toHaveBeenCalled();
+      expect(res.body.error).toMatch(/NUL/);
+    });
   });
 
   describe('POST /fs/open-terminal', () => {
@@ -243,6 +260,23 @@ describe('routes/fs', () => {
         .send({ path: '../../etc/passwd' });
       expect(res.status).toBe(403);
       expect(execFileMock).not.toHaveBeenCalled();
+    });
+
+    test('rejects empty path with 400', async () => {
+      const res = await request(makeApp(root))
+        .post('/api/fs/open-terminal')
+        .send({});
+      expect(res.status).toBe(400);
+      expect(execFileMock).not.toHaveBeenCalled();
+    });
+
+    test('rejects NUL-byte path with 400', async () => {
+      const res = await request(makeApp(root))
+        .post('/api/fs/open-terminal')
+        .send({ path: 'src/foo\x00../etc/passwd' });
+      expect(res.status).toBe(400);
+      expect(execFileMock).not.toHaveBeenCalled();
+      expect(res.body.error).toMatch(/NUL/);
     });
   });
 });

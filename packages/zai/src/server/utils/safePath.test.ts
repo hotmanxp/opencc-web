@@ -21,4 +21,18 @@ describe('resolveSafePath', () => {
     const r = resolveSafePath('/tmp/repo', '');
     expect(r).toEqual({ ok: true, abs: expect.stringMatching(/repo$/) });
   });
+
+  test('rejects NUL-byte in relative path', () => {
+    // Node's path.resolve silently passes \x00 through to the OS, which
+    // truncates at it (C strings terminate on NUL). That means a string
+    // like `src/foo\x00../etc/passwd` could resolve to one thing in JS
+    // and a different thing once it crosses into a syscall. Reject up
+    // front so the boundary check below is the only path-resolution
+    // logic we have to trust.
+    const r = resolveSafePath('/tmp/repo', 'src/foo\x00../etc/passwd');
+    expect(r.ok).toBe(false);
+    if (!r.ok) {
+      expect(r.error).toMatch(/NUL/);
+    }
+  });
 });
