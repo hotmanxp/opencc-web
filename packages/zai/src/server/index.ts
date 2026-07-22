@@ -15,6 +15,7 @@ import execRouter from './routes/exec.js';
 import agentRouter from './routes/agent.js';
 import agentSettingsRouter from './routes/agentSettings.js';
 import answerRouter from './routes/answer.js';
+import approveRouter from './routes/approve.js';
 import tasksRouter from './routes/tasks.js';
 import v2TasksRouter from './routes/v2Tasks.js';
 import { slashRouter } from './routes/slash.js';

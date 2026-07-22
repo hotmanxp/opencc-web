@@ -18,12 +18,14 @@ import {
 import { hasExternalIncludes } from '@zn-ai/zai-agent-core/agents/memoryLoader'
 import { createAnthropicModelCaller } from './modelCaller.js'
 import { AskRegistry } from './askRegistry.js'
+import { ApproveRegistry } from './approveRegistry.js'
 import { loadMcpServers } from './mcpConfig.js'
 
 let runtime: DefaultAgentRuntime | null = null
 let currentSessionId: string | null = null
 let transcriptStore: TranscriptStore | null = null
 const askRegistry = new AskRegistry()
+const approveRegistry = new ApproveRegistry()
 
 // Per-session AbortController registry. The HTTP layer (POST /api/agent/abort)
 // looks up the in-flight controller for a sessionId and calls .abort() to
@@ -109,6 +111,7 @@ export function initAgentRuntime(cwd: string): void {
       process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
       ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
     askRegistry,
+    approveRegistry,
     skillsDirs: resolveSkillsDirs(),
     // 启用 OpenCC plugin loader (superpowers 等) —
     // 不传这个字段则 plugin 永远不会被实例化,见
