@@ -259,4 +259,31 @@ fsRouter.post('/fs/reveal', async (req, res) => {
   res.json({ ok: true } satisfies FsAck);
 });
 
+fsRouter.post('/fs/open-terminal', async (req, res) => {
+  const { cwd } = ctx(req);
+  const rel = typeof req.body?.path === 'string' ? req.body.path : '';
+  if (!rel) {
+    res.status(400).json({ ok: false, error: '缺少 path 参数' } satisfies FsAck);
+    return;
+  }
+  const safe = resolveSafePath(cwd, rel);
+  if (!safe.ok) {
+    res.status(403).json({ ok: false, error: safe.error } satisfies FsAck);
+    return;
+  }
+  // For files, open terminal at the parent directory (Linux/Win fallback
+  // wouldn't understand a file arg). On macOS, `open -a Terminal <dir>`
+  // also wants a directory, so we always compute the dir.
+  const absDir = rel && !rel.endsWith('/')
+    ? safe.abs.substring(0, safe.abs.lastIndexOf(sep))
+    : safe.abs;
+  const { cmd, buildArgs } = platformCommands().openTerminal;
+  const result = await launchPlatformTool(cmd, buildArgs(absDir));
+  if (!result.ok) {
+    res.status(500).json(result satisfies FsAck);
+    return;
+  }
+  res.json({ ok: true } satisfies FsAck);
+});
+
 export default fsRouter;

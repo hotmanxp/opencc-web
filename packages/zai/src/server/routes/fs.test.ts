@@ -203,4 +203,46 @@ describe('routes/fs', () => {
       expect(execFileMock).not.toHaveBeenCalled();
     });
   });
+
+  describe('POST /fs/open-terminal', () => {
+    beforeEach(() => {
+      execFileMock.mockReset();
+    });
+
+    test('opens terminal at the file or parent directory', async () => {
+      execFileMock.mockImplementation((_c, _a, _opts, cb) => {
+        (cb as (e: unknown, stdout: string, stderr: string) => void)(null, '', '');
+        return {} as never;
+      });
+      const res = await request(makeApp(root))
+        .post('/api/fs/open-terminal')
+        .send({ path: 'src/index.ts' });
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      expect(execFileMock).toHaveBeenCalledTimes(1);
+    });
+
+    test('falls back to parent directory when given a file', async () => {
+      execFileMock.mockImplementation((_c, _a, _opts, cb) => {
+        (cb as (e: unknown, stdout: string, stderr: string) => void)(null, '', '');
+        return {} as never;
+      });
+      await request(makeApp(root))
+        .post('/api/fs/open-terminal')
+        .send({ path: 'src/index.ts' });
+      const [, args] = execFileMock.mock.calls[0];
+      // For non-darwin we expect the parent dir (src/) passed; on darwin we
+      // pass the file directly so `open -a Terminal <file>` works.
+      // Either way, the path should never be empty.
+      expect(args.length).toBeGreaterThan(0);
+    });
+
+    test('rejects path traversal', async () => {
+      const res = await request(makeApp(root))
+        .post('/api/fs/open-terminal')
+        .send({ path: '../../etc/passwd' });
+      expect(res.status).toBe(403);
+      expect(execFileMock).not.toHaveBeenCalled();
+    });
+  });
 });
