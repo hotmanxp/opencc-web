@@ -99,18 +99,20 @@ describe('POST /api/agent/approve', () => {
   test('X-Session-Id 不匹配 → 409, pending 不消费', async () => {
     const ctrl = new AbortController()
     const p = registry.register('t1', 'sess-A', ctrl.signal)
-    let settled = false
-    void p.then(() => { settled = true }).catch(() => { settled = true })
     const res = await request(app)
       .post('/api/agent/approve')
+      .set('Content-Type', 'application/json')
       .set('X-Session-Id', 'sess-B')
-      .send({ toolUseId: 't1', decision: 'approved' })
+      .send(JSON.stringify({ toolUseId: 't1', decision: 'approved' }))
     expect(res.status).toBe(409)
     expect(res.body.error).toBe('session_mismatch')
-    await new Promise((r) => setTimeout(r, 20))
-    expect(settled).toBe(false)
-    // cleanup
+    // Confirm pending NOT consumed by the bad-sid call. The route must
+    // still be answerable; cleanup answers it. We do NOT use the
+    // setTimeout-based race check (vitest flags unhandled rejection
+    // warnings on the lingering p if the test exits before cleanup).
+    expect(registry.peek('t1')).toBeDefined()
     registry.answer('t1', { decision: 'approved' })
+    await p
   })
 
   test('不带 X-Session-Id → 维持旧行为', async () => {
