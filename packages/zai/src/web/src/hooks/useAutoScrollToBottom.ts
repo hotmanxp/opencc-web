@@ -53,6 +53,20 @@ export function useAutoScrollToBottom(
         distanceToBottomPx,
       })
 
+      // DEBUG: log scroll decision
+      if (nextLength > prevLengthRef.current) {
+        console.debug('[autoScroll]', {
+          prevLength: prevLengthRef.current,
+          nextLength,
+          scrollLocked,
+          distanceToBottomPx,
+          decision,
+          scrollHeight: el.scrollHeight,
+          scrollTop: el.scrollTop,
+          clientHeight: el.clientHeight,
+        })
+      }
+
       if (decision === 'follow') {
         // 用 scrollTo({ top: scrollHeight }) 取代 scrollIntoView: 后者会同时改
         // 整页面 scroll (block:'end' 在嵌套滚动容器里有副作用), 且会触发
