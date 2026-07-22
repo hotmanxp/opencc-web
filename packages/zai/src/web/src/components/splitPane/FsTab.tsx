@@ -18,6 +18,28 @@ type Entry = { name: string; path: string; type: 'dir' | 'file'; size: number | 
 type LoadedMap = Record<string, Entry[]>;
 
 /**
+ * Build an absolute path from a session cwd and a tree-relative path,
+ * preserving whatever separator convention the cwd uses. Server-side
+ * `path.resolve` returns POSIX `/` on macOS/Linux but `\\` on Windows;
+ * joining with a hard-coded `/` produces mixed separators that break
+ * cmd-line / Git Bash pasting for the "Copy Absolute Path" action.
+ *
+ * Detection: pick `\\` when cwd contains a backslash, otherwise `/`.
+ * Strip the trailing separator (either kind) before joining. Returns
+ * relPath unchanged when cwd is null so downstream clipboard code still
+ * has something to copy.
+ *
+ * Exported for testability — the right-click handler in this module is
+ * the only caller in production.
+ */
+export function buildAbsPath(cwd: string | null, relPath: string): string {
+  if (!cwd) return relPath;
+  const sep = cwd.includes('\\') ? '\\' : '/';
+  const trimmed = cwd.replace(/[\\/]$/, '');
+  return relPath ? `${trimmed}${sep}${relPath}` : trimmed;
+}
+
+/**
  * Render the file content with Prism syntax highlighting when the
  * extension maps to a known code language; fall back to a plain
  * <pre> for prose-like files (.md / .json / .txt / unknown).
@@ -280,7 +302,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
               }}
               onRightClick={({ node, event }) => {
                 const relPath = String(node.key);
-                const abs = cwd ? `${cwd.replace(/\/$/, '')}/${relPath}` : relPath;
+                const abs = buildAbsPath(cwd, relPath);
                 setContextMenu({ path: relPath, absPath: abs, x: event.clientX, y: event.clientY });
                 event.preventDefault();
               }}

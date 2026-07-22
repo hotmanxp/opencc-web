@@ -201,9 +201,20 @@ function platformCommands(): {
   // linux / others
   return {
     reveal: { cmd: 'xdg-open', buildArgs: (abs) => [abs] },
+    // x-terminal-emulator is the Debian/Ubuntu convention. The
+    // `cd "${abs}" && $SHELL` string is re-parsed by /bin/sh on the
+    // launched emulator side, so paths with literal `"` or `$` are
+    // technically injection risks. Best-effort for now — hardening
+    // (detect gnome-terminal/konsole/xterm and pass argv directly)
+    // is a separate, low-priority project.
     openTerminal: { cmd: 'x-terminal-emulator', buildArgs: (abs) => ['-e', `cd "${abs}" && $SHELL`] },
   };
 }
+
+// platformCommands() only reads process.platform, so it's stable for the
+// lifetime of the process. Hoist it out of the request handlers to avoid
+// recomputing the lookup on every /fs/reveal or /fs/open-terminal call.
+const PLATFORM_COMMANDS = platformCommands();
 
 function launchPlatformTool(
   cmd: string,
@@ -260,7 +271,7 @@ fsRouter.post('/fs/reveal', async (req, res) => {
     res.status(status).json({ ok: false, error: safe.error } satisfies FsAck);
     return;
   }
-  const { cmd, buildArgs } = platformCommands().reveal;
+  const { cmd, buildArgs } = PLATFORM_COMMANDS.reveal;
   const result = await launchPlatformTool(cmd, buildArgs(safe.abs));
   if (!result.ok) {
     res.status(500).json(result satisfies FsAck);
@@ -292,7 +303,7 @@ fsRouter.post('/fs/open-terminal', async (req, res) => {
   const absDir = rel && !rel.endsWith('/')
     ? safe.abs.substring(0, safe.abs.lastIndexOf(sep))
     : safe.abs;
-  const { cmd, buildArgs } = platformCommands().openTerminal;
+  const { cmd, buildArgs } = PLATFORM_COMMANDS.openTerminal;
   const result = await launchPlatformTool(cmd, buildArgs(absDir));
   if (!result.ok) {
     res.status(500).json(result satisfies FsAck);
