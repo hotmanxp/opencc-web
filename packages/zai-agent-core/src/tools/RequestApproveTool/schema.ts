@@ -61,3 +61,8 @@ export type RequestApproveDecision = 'approved' | 'rejected'
 export type ResolvedBody =
   | { kind: 'inline'; displayPath: null;  content: string }
   | { kind: 'file';   displayPath: string; content: string }
+
+// Canonical aliases matching AskUserQuestionTool's schema convention. The
+// runtime imports the tool's inputSchema/outputSchema by these names.
+export const inputSchema = RequestApproveInput
+export const outputSchema = RequestApproveOutput
