@@ -40,6 +40,23 @@ export type AskRegistryLike = {
   register: (toolUseId: string, sessionId: string, abortSignal: AbortSignal) => Promise<AskUserAnswers>
 }
 
+/**
+ * The shape RequestApprove's runtime needs from a server-side approve
+ * registry. Mirrors AskRegistryLike but for the approve/reject decision
+ * payload. The host server is responsible for resolving promises when the
+ * user submits a decision via the HTTP API.
+ */
+export type ApproveRegistryLike = {
+  register: (
+    toolUseId: string,
+    sessionId: string,
+    abortSignal: AbortSignal,
+  ) => Promise<{
+    decision: 'approved' | 'rejected'
+    comment?: string
+  }>
+}
+
 export type RuntimeConfig = {
   dataDir: string
   /**
@@ -74,6 +91,9 @@ export type RuntimeConfig = {
 
   /** AskUserQuestion 的等待表抽象, server 端实现. core 不依赖具体类. */
   askRegistry?: AskRegistryLike
+
+  /** RequestApprove 的 pending-decision 表抽象, server 端实现. */
+  approveRegistry?: ApproveRegistryLike
 
   /**
    * Post-boot snapshot of connected MCP servers, used to inject
