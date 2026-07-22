@@ -321,7 +321,7 @@ export async function* queryEngine(
       store,
       cwd: options.cwd,
       parentUuid: lastUuid,
-    }, config.askRegistry)) {
+    }, config.askRegistry, config.approveRegistry)) {
       yield ev as RuntimeEvent
     }
     // 工具执行完, 把 chain 推进到最后一个 tool_result 的 uuid (如果有), 这样
