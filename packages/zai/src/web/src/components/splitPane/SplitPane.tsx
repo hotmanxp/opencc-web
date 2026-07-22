@@ -117,8 +117,8 @@ export function SplitPane({ cwd }: SplitPaneProps) {
               borderBottom: '1px solid rgba(255,255,255,0.08)',
             }}
             items={[
-              { key: 'git', label: 'Git', children: <GitTab cwd={cwd} /> },
               { key: 'fs', label: 'Files', children: <FsTab cwd={cwd} /> },
+              { key: 'git', label: 'Git', children: <GitTab cwd={cwd} /> },
               { key: 'tbd', label: '待定', children: <PlaceholderTab /> },
             ]}
           />

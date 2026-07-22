@@ -262,10 +262,18 @@ export function FsTab({ cwd }: { cwd: string | null }) {
               expandedKeys={expandedKeys}
               onExpand={(keys) => setExpandedKeys(keys)}
               onSelect={(_keys, info) => {
-                // Only files have content to preview. Clicking a directory
-                // should only expand (handled by loadData/onExpand) — picking
-                // it here would fire GET /api/fs/file?path=<dir> and 415.
-                if (info.node.isLeaf) setSelected(String(info.node.key));
+                // Files: preview their content.
+                // Directories: toggle expand on click. Loading is lazy —
+                // adding an unloaded dir to expandedKeys triggers loadData
+                // since renderTree leaves `children` undefined until loaded.
+                const key = String(info.node.key);
+                if (info.node.isLeaf) {
+                  setSelected(key);
+                } else {
+                  setExpandedKeys((cur) =>
+                    cur.includes(key) ? cur.filter((k) => k !== key) : [...cur, key],
+                  );
+                }
               }}
             />
           )}
