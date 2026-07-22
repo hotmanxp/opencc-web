@@ -72,6 +72,41 @@ describe('QuestionCard — 单问题直出', () => {
     fireEvent.click(submit)
     expect(onSubmit).toHaveBeenCalledTimes(1)
   })
+
+  test('选项列表末尾自动追加一个 "Other" 选项 (UI 自动添加, AI prompt 约定)', () => {
+    const { container } = render(
+      <QuestionCard
+        {...baseProps}
+        questions={[q()]}
+      />,
+    )
+    // AI 只给了 A/B, UI 必须额外渲染 Other
+    expect(screen.getByText('Other')).toBeInTheDocument()
+  })
+
+  test('单选选 Other 时弹出 Input,输入文本前 Submit 仍 disabled (占位符未答完)', () => {
+    const { rerender } = render(
+      <QuestionCard
+        {...baseProps}
+        questions={[q()]}
+        answers={{ 'pick one?': '__other__' }}
+      />,
+    )
+    // 占位符状态下 Submit 必须 disabled — 虽然 '__other__' truthy, 但
+    // 用户其实还没输入真正的回答
+    const submit = screen.getByText('Submit answers').closest('button')!
+    expect(submit).toBeDisabled()
+
+    // 模拟 store 收到用户文本 (Input.onChange 把答案覆盖成实际文本)
+    rerender(
+      <QuestionCard
+        {...baseProps}
+        questions={[q()]}
+        answers={{ 'pick one?': 'My custom answer' }}
+      />,
+    )
+    expect(submit).not.toBeDisabled()
+  })
 })
 
 describe('QuestionCard — 多问题保留 Tabs + Review 流程', () => {
