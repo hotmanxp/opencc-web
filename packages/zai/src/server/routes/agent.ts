@@ -261,6 +261,23 @@ export async function* translateRuntimeEvents(
         } as any;
         break;
       }
+      case "tool_use:approve_pending": {
+        // RequestApprove: toolExecution 已把 file 解析为 content. drawer 一律收
+        // 到 canonical ResolvedBody shape (kind ∈ {inline, file}). 不再二次读盘.
+        const approveTuId = ((ev.id as string) ??
+          (ev.toolUseId as string) ??
+          "") as string;
+        const body = (ev.body as any) ?? { kind: 'inline', displayPath: null, content: '' };
+        yield {
+          type: "prompt.approve",
+          sessionId,
+          toolUseId: approveTuId,
+          title: String(ev.title ?? ''),
+          ...(ev.summary ? { summary: String(ev.summary) } : {}),
+          body,
+        } as any;
+        break;
+      }
       case "tool_use:error":
       case "tool_use:invalid":
       case "tool_use:denied": {
