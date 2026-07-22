@@ -17,7 +17,7 @@
 
 import { Drawer, Button, Input, Popconfirm, Typography } from 'antd'
 import { useEffect, useState } from 'react'
-import MarkdownText from './markdown/MarkdownText.jsx'
+import { MarkdownText } from './markdown/MarkdownText.jsx'
 import { useAgentStore } from '../store/useAgentStore.js'
 
 const { TextArea } = Input
@@ -150,7 +150,7 @@ export default function ApproveDrawer(): JSX.Element {
         )}
         <div style={{ flex: 1, overflow: 'auto', padding: '12px 0' }}>
           {content ? (
-            <MarkdownText content={content} />
+            <MarkdownText text={content} />
           ) : (
             <Text type="secondary">No content.</Text>
           )}
