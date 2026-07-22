@@ -314,6 +314,15 @@ const HARD_EXCLUDE_FILES = new Set<string>([
   // it. See packages/zai-agent-core/src/opencc-internals/bootstrap/state.ts
   // for the full reasoning.
   'bootstrap/state.ts',
+  // zai-local stubs for opencc's utils/ runtime helpers used by debug.ts →
+  // openaiClient.ts → shim load chain. Upstream files excluded from the
+  // cherry-pick mirror. Listed in HARD_EXCLUDE_FILES so sync must NEVER
+  // overwrite them. See packages/zai-agent-core/src/opencc-internals/utils/
+  // for the full reasoning.
+  'utils/bufferedWriter.ts',
+  'utils/debugFilter.ts',
+  'utils/fsOperations.ts',
+  'utils/slowOperations.ts',
 ])
 
 // Files that get a ZAI_STUB marker prepended (deferred modules).
