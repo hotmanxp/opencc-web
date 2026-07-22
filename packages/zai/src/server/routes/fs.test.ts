@@ -1,14 +1,23 @@
-import { afterAll, beforeAll, describe, expect, test } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { join, sep } from 'node:path';
+import { execFile } from 'node:child_process';
 import fsRouter from './fs.js';
+
+vi.mock('node:child_process', async () => {
+  const actual = await vi.importActual<typeof import('node:child_process')>('node:child_process');
+  return { ...actual, execFile: vi.fn() };
+});
+
+const execFileMock = execFile as unknown as ReturnType<typeof vi.fn>;
 
 function makeApp(cwd: string) {
   const app = express();
   app.locals.instanceContext = { cwd, cwdName: 'test' };
+  app.use(express.json());
   app.use('/api', fsRouter);
   return app;
 }
@@ -162,5 +171,36 @@ describe('routes/fs', () => {
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.content).toMatch(/bun lockfile/);
+  });
+
+  describe('POST /fs/reveal', () => {
+    beforeEach(() => {
+      execFileMock.mockReset();
+    });
+
+    test('posts to macOS reveal with resolved absolute path', async () => {
+      execFileMock.mockImplementation((_cmd, _args, _opts, cb) => {
+        (cb as (e: unknown, stdout: string, stderr: string) => void)(null, '', '');
+        return {} as never;
+      });
+      const res = await request(makeApp(root))
+        .post('/api/fs/reveal')
+        .send({ path: 'src/index.ts' });
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      expect(execFileMock).toHaveBeenCalledTimes(1);
+      const [cmd, args] = execFileMock.mock.calls[0];
+      expect(cmd).toBe('open');
+      expect(args[0]).toBe('-R');
+      expect(args[1].endsWith(`${sep}src${sep}index.ts`)).toBe(true);
+    });
+
+    test('rejects path traversal with 403', async () => {
+      const res = await request(makeApp(root))
+        .post('/api/fs/reveal')
+        .send({ path: '../../etc/passwd' });
+      expect(res.status).toBe(403);
+      expect(execFileMock).not.toHaveBeenCalled();
+    });
   });
 });

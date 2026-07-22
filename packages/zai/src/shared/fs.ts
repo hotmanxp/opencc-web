@@ -18,6 +18,11 @@ export interface FsList {
   entries?: FsEntry[];
 }
 
+export interface FsAck {
+  ok: boolean;
+  error?: string;
+}
+
 export interface FsFile {
   ok: boolean;
   error?: string;

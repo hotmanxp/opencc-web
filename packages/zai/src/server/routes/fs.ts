@@ -1,8 +1,9 @@
 import { Router, type IRouter, type Request } from 'express';
 import { readdir, stat, readFile } from 'node:fs/promises';
 import { extname, basename, sep } from 'node:path';
+import { execFile } from 'node:child_process';
 import { resolveSafePath } from '../utils/safePath.js';
-import type { FsEntry, FsFile, FsList } from '../../shared/fs.js';
+import type { FsAck, FsEntry, FsFile, FsList } from '../../shared/fs.js';
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const IGNORED = new Set([
@@ -175,6 +176,87 @@ fsRouter.get('/fs/file', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: `读取失败：${err instanceof Error ? err.message : String(err)}` } satisfies FsFile);
   }
+});
+
+const REVEAL_TIMEOUT_MS = 3_000;
+
+function platformCommands(): {
+  reveal: { cmd: string; buildArgs: (abs: string) => string[] };
+  openTerminal: { cmd: string; buildArgs: (abs: string) => string[] };
+} {
+  const p = process.platform;
+  if (p === 'darwin') {
+    return {
+      reveal: { cmd: 'open', buildArgs: (abs) => ['-R', abs] },
+      openTerminal: { cmd: 'open', buildArgs: (abs) => ['-a', 'Terminal', abs] },
+    };
+  }
+  if (p === 'win32') {
+    return {
+      reveal: { cmd: 'explorer.exe', buildArgs: (abs) => [`/select,${abs}`] },
+      // `start "" "<dir>"` requires cmd.exe shell, so we use cmd /c.
+      openTerminal: { cmd: 'cmd', buildArgs: (abs) => ['/c', 'start', '""', abs] },
+    };
+  }
+  // linux / others
+  return {
+    reveal: { cmd: 'xdg-open', buildArgs: (abs) => [abs] },
+    openTerminal: { cmd: 'x-terminal-emulator', buildArgs: (abs) => ['-e', `cd "${abs}" && $SHELL`] },
+  };
+}
+
+function launchPlatformTool(
+  cmd: string,
+  args: string[],
+): Promise<{ ok: boolean; error?: string }> {
+  return new Promise((resolve) => {
+    const child = execFile(
+      cmd,
+      args,
+      { timeout: REVEAL_TIMEOUT_MS, windowsHide: true, stdio: 'ignore' },
+      (err) => {
+        if (err) {
+          if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+            resolve({ ok: false, error: `${cmd} 未找到` });
+            return;
+          }
+          if ((err as { killed?: boolean }).killed) {
+            resolve({ ok: false, error: 'timeout' });
+            return;
+          }
+          // ENOENT vs signal-killed aside, `execFile` with `stdio:'ignore'`
+          // returns null on success even when the launched GUI exits non-zero,
+          // so any non-null `err` here is a real failure.
+          resolve({ ok: false, error: (err as Error).message });
+          return;
+        }
+        resolve({ ok: true });
+      },
+    );
+    // Ensure we don't leak handles; spawn detached for GUI tools.
+    if (process.platform !== 'win32') child.unref?.();
+  });
+}
+
+fsRouter.post('/fs/reveal', async (req, res) => {
+  const { cwd } = ctx(req);
+  const rel = typeof req.body?.path === 'string' ? req.body.path : '';
+  if (!rel) {
+    res.status(400).json({ ok: false, error: '缺少 path 参数' } satisfies FsAck);
+    return;
+  }
+  const safe = resolveSafePath(cwd, rel);
+  if (!safe.ok) {
+    res.status(403).json({ ok: false, error: safe.error } satisfies FsAck);
+    return;
+  }
+  const { cmd, buildArgs } = platformCommands().reveal;
+  const result = await launchPlatformTool(cmd, buildArgs(safe.abs));
+  if (!result.ok) {
+    res.status(500).json(result satisfies FsAck);
+    return;
+  }
+  res.json({ ok: true } satisfies FsAck);
 });
 
 export default fsRouter;
