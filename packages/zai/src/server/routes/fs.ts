@@ -219,9 +219,9 @@ function launchPlatformTool(
       args,
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       { timeout: REVEAL_TIMEOUT_MS, windowsHide: true, stdio: 'ignore' } as any,
-      (err) => {
+      (err: import('node:child_process').ExecFileException | null) => {
         if (err) {
-          if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+          if (err.code === 'ENOENT') {
             resolve({ ok: false, error: `${cmd} 未找到` });
             return;
           }
