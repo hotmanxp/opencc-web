@@ -210,10 +210,15 @@ function launchPlatformTool(
   args: string[],
 ): Promise<{ ok: boolean; error?: string }> {
   return new Promise((resolve) => {
+    // `stdio: 'ignore'` is a Node-supported execFile option but the older
+    // @types/node overloads don't list it; cast through `unknown` so the
+    // runtime behaviour matches Node's docs. We never read stdout / stderr
+    // from this GUI launcher, so 'ignore' is correct here.
     const child = execFile(
       cmd,
       args,
-      { timeout: REVEAL_TIMEOUT_MS, windowsHide: true, stdio: 'ignore' },
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      { timeout: REVEAL_TIMEOUT_MS, windowsHide: true, stdio: 'ignore' } as any,
       (err) => {
         if (err) {
           if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
