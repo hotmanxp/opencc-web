@@ -9,6 +9,7 @@ import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
 import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
+import { FsContextMenu } from './FsContextMenu.js';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
@@ -128,12 +129,14 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [loaded, setLoaded] = useState<LoadedMap>({});
   const file = useFsFile(cwd, selected);
+  const [contextMenu, setContextMenu] = useState<{ path: string; absPath: string; x: number; y: number } | null>(null);
 
   // Reset on cwd change.
   useEffect(() => {
     setSelected(null);
     setExpandedKeys([]);
     setLoaded({});
+    setContextMenu(null);
   }, [cwd]);
 
   if (!cwd) {
@@ -275,6 +278,12 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                   );
                 }
               }}
+              onRightClick={({ node, event }) => {
+                const relPath = String(node.key);
+                const abs = cwd ? `${cwd.replace(/\/$/, '')}/${relPath}` : relPath;
+                setContextMenu({ path: relPath, absPath: abs, x: event.clientX, y: event.clientY });
+                event.preventDefault();
+              }}
             />
           )}
         </div>
@@ -309,6 +318,15 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           )}
         </div>
       </div>
+      {contextMenu && cwd && (
+        <FsContextMenu
+          path={contextMenu.path}
+          absPath={contextMenu.absPath}
+          cwd={cwd}
+          position={{ x: contextMenu.x, y: contextMenu.y }}
+          onClose={() => setContextMenu(null)}
+        />
+      )}
     </div>
   );
 }

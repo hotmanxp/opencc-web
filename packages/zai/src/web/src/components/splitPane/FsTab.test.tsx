@@ -4,6 +4,13 @@ import { render, screen, fireEvent } from '@testing-library/react';
 
 vi.mock('./useFsList.js', () => ({ useFsList: vi.fn() }));
 vi.mock('./useFsFile.js', () => ({ useFsFile: vi.fn() }));
+vi.mock('./FsContextMenu.js', () => ({
+  FsContextMenu: vi.fn(({ path, onClose }) => (
+    <div data-testid="ctx-menu-stub" data-path={path}>
+      <button onClick={onClose}>close</button>
+    </div>
+  )),
+}));
 
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
@@ -513,5 +520,21 @@ describe('FsTab', () => {
     // 抽样确认映射:index.ts → ts, README.md → md, package.json → json
     const exts = Array.from(fileExtNodes).map((n) => n.getAttribute('data-file-ext')).sort();
     expect(exts).toEqual(['json', 'md', 'ts']);
+  });
+
+  it('opens FsContextMenu when a node is right-clicked and closes on onClose', () => {
+    mockList.mockReturnValue({
+      data: { ok: true, entries: [{ name: 'src', path: 'src', type: 'dir', size: null }] },
+      loading: false, error: null, refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({ data: null, loading: false, error: null });
+    render(<FsTab cwd="/repo" />);
+    expect(screen.queryByTestId('ctx-menu-stub')).toBeNull();
+    const node = screen.getByText('src');
+    fireEvent.contextMenu(node, { clientX: 50, clientY: 60 });
+    const stub = screen.getByTestId('ctx-menu-stub');
+    expect(stub.getAttribute('data-path')).toBe('src');
+    fireEvent.click(screen.getByText('close'));
+    expect(screen.queryByTestId('ctx-menu-stub')).toBeNull();
   });
 });
