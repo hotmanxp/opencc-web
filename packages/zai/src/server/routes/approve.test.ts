@@ -135,7 +135,8 @@ describe('POST /api/agent/approve', () => {
     const p = registry.register('t1', 'sess-A', ctrl.signal)
     const res = await request(app)
       .post('/api/agent/approve')
-      .send({ toolUseId: 't1', decision: 'approved' })
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ toolUseId: 't1', decision: 'approved' }))
     expect(res.status).toBe(200)
     await expect(p).resolves.toEqual({ decision: 'approved' })
   })
@@ -144,7 +145,10 @@ describe('POST /api/agent/approve', () => {
 describe('POST /api/agent/approve/reject', () => {
   test('缺 toolUseId → 400', async () => {
     const { app } = makeApp()
-    const res = await request(app).post('/api/agent/approve/reject').send({})
+    const res = await request(app)
+      .post('/api/agent/approve/reject')
+      .set('Content-Type', 'application/json')
+      .send('{}')
     expect(res.status).toBe(400)
   })
 
@@ -152,9 +156,15 @@ describe('POST /api/agent/approve/reject', () => {
     const { app, registry } = makeApp()
     const ctrl = new AbortController()
     const p = registry.register('t1', 's1', ctrl.signal)
+    // Attach a no-op catch handler BEFORE the route handler rejects p.
+    // Without this, Node flags an unhandledRejection synchronously
+    // emitted inside the route handler, which on some worker-thread
+    // timings poisons subsequent supertest requests in this file.
+    void p.catch(() => {})
     const res = await request(app)
       .post('/api/agent/approve/reject')
-      .send({ toolUseId: 't1', comment: 'no', reason: 'not_ready' })
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ toolUseId: 't1', comment: 'no', reason: 'not_ready' }))
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(true)
     await expect(p).rejects.toThrow('not_ready')
@@ -164,7 +174,8 @@ describe('POST /api/agent/approve/reject', () => {
     const { app } = makeApp()
     const res = await request(app)
       .post('/api/agent/approve/reject')
-      .send({ toolUseId: 'nope', comment: 'no' })
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ toolUseId: 'nope', comment: 'no' }))
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(false)
   })
