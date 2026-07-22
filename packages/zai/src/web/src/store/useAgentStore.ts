@@ -112,6 +112,21 @@ export type AskState = {
   annotations: Record<string, { notes?: string }>
 }
 
+// Per-tool-Use pending state for the new RequestApprove flow. Mirrors
+// AskState so future Task drawer UIs can share infrastructure.
+export type ApproveState = {
+  toolUseId: string
+  sessionId: string
+  title: string
+  summary?: string
+  content: string
+  displayPath: string | null
+  decision: 'approved' | 'rejected' | null
+  comment: string
+  status: 'pending' | 'submitting' | 'error'
+  errorMessage?: string
+}
+
 // 后台 agent_task 任务的"summary 视图" (Task 10 — SSE state push).
 //
 // 形态与 hooks/useBackgroundTasks.ts 里的同名 export interface 完全一致 —
@@ -168,6 +183,11 @@ interface AgentState {
   status: AgentStatus
   abortController: AbortController | null
   pendingAsk: AskState | null
+  pendingApprove: ApproveState | null
+  setApproveComment: (comment: string) => void
+  submitApprove: (decision: 'approved' | 'rejected') => Promise<void>
+  applyPromptApprove: (event: any) => void
+  clearPendingApprove: (toolUseId: string) => void
   // 工具边界计数: 每出现一个新的 tool_use 起点, 计数 +1, 用于把
   // 工具调用前后的文字段强制放进不同 stream block. 不依赖 Anthropic SDK
   // 的 content_block_delta.index 是否正确递增.
@@ -461,6 +481,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   status: 'idle',
   abortController: null,
   pendingAsk: null,
+  pendingApprove: null,
   textSegmentRev: 0,
   segmentedToolUseIds: {},
   sendSeq: 0,
@@ -676,6 +697,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         (t === 'tool_use:done' || t === 'tool_use:error' ||
          t === 'tool_use:invalid' || t === 'tool_use:denied') &&
         s.pendingAsk.toolUseId === toolUseId
+      const shouldClearApprove =
+        s.pendingApprove &&
+        (t === 'tool_use:done' || t === 'tool_use:error' ||
+         t === 'tool_use:invalid' || t === 'tool_use:denied') &&
+        s.pendingApprove.toolUseId === toolUseId
       // 归一化成 'tool_use:start' 形态, ToolCallBlock 据此识别 status / 显示字段.
       // name 优先取 incoming (start 第一次写), 之后 done/error 不会带 name,
       // 落到 prev 上保留 start 的 name; 同理 input.
@@ -724,6 +750,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         if (prevType !== 'tool_use:start') {
           const updates: Partial<AgentState> = {}
           if (shouldClearPending) updates.pendingAsk = null
+          if (shouldClearApprove) updates.pendingApprove = null
           if (shouldBumpSegment) {
             updates.textSegmentRev = s.textSegmentRev + 1
             updates.segmentedToolUseIds = {
@@ -795,6 +822,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       } as unknown as AgentMessage
       const updates: Partial<AgentState> = { messages: next }
       if (shouldClearPending) updates.pendingAsk = null
+      if (shouldClearApprove) updates.pendingApprove = null
       // 安全网: 如果 start 条目早已存在但因为某种原因 segmented 标记缺失
       // (例如服务重启后部分状态恢复), 同样补一次 bump, 避免文段粘连.
       if (shouldBumpSegment) {
@@ -1421,6 +1449,75 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         annotations: {},
       },
     }
+  }),
+
+  // prompt.approve → pendingApprove (mirrors applyPromptAsk).
+  applyPromptApprove: (event) => set((state) => {
+    if (!event || event.type !== 'prompt.approve') return state
+    const body = (event as any).body ?? { kind: 'inline', displayPath: null, content: '' }
+    return {
+      ...state,
+      pendingApprove: {
+        sessionId: event.sessionId,
+        toolUseId: event.toolUseId,
+        title: event.title,
+        ...(event.summary ? { summary: event.summary } : {}),
+        content: String(body.content ?? ''),
+        displayPath: body.kind === 'file' ? String(body.displayPath ?? '') : null,
+        decision: null,
+        comment: '',
+        status: 'pending',
+      },
+    }
+  }),
+
+  setApproveComment: (comment) => set((s) => {
+    if (!s.pendingApprove) return s
+    return { ...s, pendingApprove: { ...s.pendingApprove, comment } }
+  }),
+
+  submitApprove: async (decision) => {
+    const s = get()
+    if (!s.pendingApprove) return
+    if (decision === 'rejected' && s.pendingApprove.comment.trim().length === 0) {
+      set({ pendingApprove: { ...s.pendingApprove, status: 'error', errorMessage: 'Rejection comment is required.' } })
+      return
+    }
+    set({ pendingApprove: { ...s.pendingApprove, status: 'submitting', decision } })
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      const claimSid = s.pendingApprove.sessionId ?? s.sessionId
+      if (claimSid) headers['X-Session-Id'] = claimSid
+      const res = await fetch('/api/agent/approve', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          toolUseId: s.pendingApprove.toolUseId,
+          decision,
+          comment: s.pendingApprove.comment || undefined,
+        }),
+      })
+      if (res.status === 404) {
+        set({ pendingApprove: { ...s.pendingApprove, status: 'error', errorMessage: 'Review expired (no pending)' } })
+        return
+      }
+      if (res.status === 409) {
+        set({ pendingApprove: { ...s.pendingApprove, status: 'error', errorMessage: 'Session mismatch — refresh?' } })
+        return
+      }
+      if (!res.ok) {
+        set({ pendingApprove: { ...s.pendingApprove, status: 'error', errorMessage: `HTTP ${res.status}` } })
+        return
+      }
+      set({ pendingApprove: null })
+    } catch (err) {
+      set({ pendingApprove: { ...s.pendingApprove, status: 'error', errorMessage: (err as Error).message } })
+    }
+  },
+
+  clearPendingApprove: (toolUseId) => set((s) => {
+    if (!s.pendingApprove || s.pendingApprove.toolUseId !== toolUseId) return s
+    return { ...s, pendingApprove: null }
   }),
 
   // ── SSE state.* event reducers (Task 10) ───────────────────────────
