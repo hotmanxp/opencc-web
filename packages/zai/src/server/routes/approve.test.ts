@@ -24,12 +24,12 @@ describe('POST /api/agent/approve', () => {
   })
 
   test('缺字段 → 400', async () => {
-    const res = await request(app).post('/api/agent/approve').set('Content-Type', 'application/json').send({})
+    const res = await request(app).post('/api/agent/approve').send({})
     expect(res.status).toBe(400)
   })
 
   test('缺 decision → 400', async () => {
-    const res = await request(app).post('/api/agent/approve').set('Content-Type', 'application/json').send({ toolUseId: 't1' })
+    const res = await request(app).post('/api/agent/approve').send({ toolUseId: 't1' })
     expect(res.status).toBe(400)
   })
 
@@ -127,7 +127,7 @@ describe('POST /api/agent/approve', () => {
 describe('POST /api/agent/approve/reject', () => {
   test('缺 toolUseId → 400', async () => {
     const { app } = makeApp()
-    const res = await request(app).post('/api/agent/approve/reject').set('Content-Type', 'application/json').send({})
+    const res = await request(app).post('/api/agent/approve/reject').send({})
     expect(res.status).toBe(400)
   })
 
