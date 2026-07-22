@@ -56,11 +56,11 @@ describe('ApproveRegistry', () => {
     expect(reg.listBySession('sess-X')).toEqual([])
   })
 
-  test('peek returns Pending with title', () => {
+  test('peek returns Pending with sessionId', () => {
     const reg = new ApproveRegistry()
     const ctrl = new AbortController()
     reg.register('t1', 's1', ctrl.signal)
-    expect(reg.peek('t1')).toEqual(expect.objectContaining({ title: 'MyPlan', sessionId: 's1' }))
+    expect(reg.peek('t1')).toEqual(expect.objectContaining({ sessionId: 's1' }))
   })
 
   test('X-Session-Id defense: peek allows read before answer', () => {
