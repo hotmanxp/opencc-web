@@ -54,18 +54,17 @@ export function useAutoScrollToBottom(
       })
 
       // DEBUG: log scroll decision
-      if (nextLength > prevLengthRef.current) {
-        console.debug('[autoScroll]', {
-          prevLength: prevLengthRef.current,
-          nextLength,
-          scrollLocked,
-          distanceToBottomPx,
-          decision,
-          scrollHeight: el.scrollHeight,
-          scrollTop: el.scrollTop,
-          clientHeight: el.clientHeight,
-        })
-      }
+      console.debug('[autoScroll]', {
+        prevLength: prevLengthRef.current,
+        nextLength,
+        scrollLocked,
+        distanceToBottomPx,
+        decision,
+        scrollHeight: el.scrollHeight,
+        scrollTop: el.scrollTop,
+        clientHeight: el.clientHeight,
+        now: Date.now(),
+      })
 
       if (decision === 'follow') {
         // 用 scrollTo({ top: scrollHeight }) 取代 scrollIntoView: 后者会同时改
