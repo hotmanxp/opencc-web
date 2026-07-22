@@ -308,6 +308,12 @@ const HARD_EXCLUDE_FILES = new Set<string>([
   // ALS + replaces bootstrap/state.js with process.cwd() fallback). Keep
   // HAND-WRITTEN; sync must NEVER overwrite the local stub.
   'utils/cwd.ts',
+  // zai-local stub for opencc's bootstrap/state.ts. Upstream is 1865 lines
+  // and pulls TUI/desktop deps (crypto, settings, AgentColorManager,
+  // ReplayIndexBuilder). Keep the stub locally; sync must NEVER overwrite
+  // it. See packages/zai-agent-core/src/opencc-internals/bootstrap/state.ts
+  // for the full reasoning.
+  'bootstrap/state.ts',
 ])
 
 // Files that get a ZAI_STUB marker prepended (deferred modules).
