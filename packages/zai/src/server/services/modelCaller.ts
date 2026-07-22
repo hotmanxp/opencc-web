@@ -141,15 +141,38 @@ function resolveProviderForModel(model: string | undefined): {
   }
 }
 
-function getAnthropicClientForModel(model?: string): Anthropic {
+async function getAnthropicClientForModel(model?: string): Promise<Anthropic> {
   // Reuse cached client when the model resolves to the same provider.
   const cacheKey = model ?? '__default__'
   if (_client && _clientKey === cacheKey) return _client
 
-  const { baseURL, apiKey } = resolveProviderForModel(model)
+  const { baseURL, apiKey, profile } = resolveProviderForModel(model)
 
   if (!apiKey) throw new Error('API key not found for selected model')
   if (!baseURL) throw new Error('Base URL not found for selected model')
+
+  // Branch on provider: 'openai' profiles get the hand-rolled
+  // openaiClient; everything else (anthropic, or no profile) stays on the
+  // Anthropic SDK. Cast to `Anthropic` is safe because the OpenAI client
+  // duck-types the surface area modelCaller's for-await loop touches
+  // (messages.create(...) → async iterable of RawMessageStreamEvent shape).
+  if (profile?.provider === 'openai') {
+    // Lazy dynamic import keeps openaiClient out of the Anthropic-only
+    // default load path. vitest's vi.mock('.../openaiClient.js') intercepts
+    // dynamic imports too, so this is mockable in tests.
+    console.error('[zai.modelCaller] client.new (openai-compat)', {
+      model,
+      baseURL,
+      profileId: profile.id,
+      profileName: profile.name,
+      apiFormat: profile.apiFormat,
+      transport: 'fetch → POST {baseURL}/chat/completions (NOT Anthropic SDK)',
+    })
+    const mod = await import('./openaiClient.js')
+    _client = new mod.OpenAIClient({ baseURL, apiKey, model: model ?? '' }) as unknown as Anthropic
+    _clientKey = cacheKey
+    return _client
+  }
 
   _client = new Anthropic({
     authToken: apiKey,
@@ -242,7 +265,8 @@ export function createAnthropicModelCaller(): ModelCaller {
 
     // Per-model client: pick the right provider from providerProfiles when the
     // model belongs to a non-Anthropic profile (e.g. zhiniao-* on Wizard AI).
-    const client = getAnthropicClientForModel(resolvedModel)
+    // Async because OpenAI profiles lazy-load the openaiClient module.
+    const client = await getAnthropicClientForModel(resolvedModel)
 
     // New normalization. Handles three shapes:
     // 1. string             → use as-is
