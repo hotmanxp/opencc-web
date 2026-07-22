@@ -180,7 +180,7 @@ function QuestionPanel({
                 </Radio>
               ))}
               <Radio key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE}>
-                <div style={{ fontWeight: 500 }>{OTHER_OPTION_LABEL}</div>
+                <div style={{ fontWeight: 500 }}>{OTHER_OPTION_LABEL}</div>
               </Radio>
             </Radio.Group>
             {isOtherSelected && (
@@ -398,6 +398,7 @@ export default function QuestionCard(props: QuestionCardProps) {
                 annotations={annotations}
                 onAnswer={onAnswer}
                 onNotesChange={onNotesChange}
+                onOtherChange={onOtherChange}
               />
             ),
           })),

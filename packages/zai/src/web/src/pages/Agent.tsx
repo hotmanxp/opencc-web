@@ -551,6 +551,7 @@ export default function Agent() {
                 errorMessage={pendingAsk.errorMessage}
                 onAnswer={setAskAnswer}
                 onNotesChange={setAskNotes}
+                onOtherChange={setAskOtherText}
                 onSubmit={() => void submitAsk()}
                 onReject={() => void rejectAsk()}
               />

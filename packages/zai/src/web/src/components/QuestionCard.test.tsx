@@ -6,10 +6,11 @@ import QuestionCard from './QuestionCard.jsx'
 
 const baseProps = {
   answers: {} as Record<string, string>,
-  annotations: {} as Record<string, { notes?: string }>,
+  annotations: {} as Record<string, { notes?: string; otherText?: string }>,
   status: 'pending' as const,
   onAnswer: vi.fn(),
   onNotesChange: vi.fn(),
+  onOtherChange: vi.fn(),
   onSubmit: vi.fn(),
   onReject: vi.fn(),
 }
@@ -85,6 +86,9 @@ describe('QuestionCard — 单问题直出', () => {
   })
 
   test('单选选 Other 时弹出 Input,输入文本前 Submit 仍 disabled (占位符未答完)', () => {
+    // 2026-07-20 fix: Other 文本独立存 annotations.otherText,
+    // answers 始终保持 '__other__' 占位符 (避免 Radio 模式下 Input 块
+    // 在打字瞬间被卸载导致焦点丢失的 bug).
     const { rerender } = render(
       <QuestionCard
         {...baseProps}
@@ -92,20 +96,59 @@ describe('QuestionCard — 单问题直出', () => {
         answers={{ 'pick one?': '__other__' }}
       />,
     )
-    // 占位符状态下 Submit 必须 disabled — 虽然 '__other__' truthy, 但
+    // 占位符状态下 Submit 必须 disabled — annotations.otherText 还没填,
     // 用户其实还没输入真正的回答
     const submit = screen.getByText('Submit answers').closest('button')!
     expect(submit).toBeDisabled()
 
-    // 模拟 store 收到用户文本 (Input.onChange 把答案覆盖成实际文本)
+    // 模拟 store 收到用户文本 (经 onOtherChange 写 annotations.otherText)
     rerender(
       <QuestionCard
         {...baseProps}
         questions={[q()]}
-        answers={{ 'pick one?': 'My custom answer' }}
+        answers={{ 'pick one?': '__other__' }}
+        annotations={{ 'pick one?': { otherText: 'My custom answer' } }}
       />,
     )
     expect(submit).not.toBeDisabled()
+  })
+
+  test('修复: 选中 Other 并打字时, Input 块始终挂载 (焦点不丢失)', () => {
+    // 回归测试 — Bug 历史: 之前 onChange 把用户文本写进 answers, 导致
+    // currentAnswer 立刻变成 'h' (等), isOtherSelected 变 false, Input
+    // 块被卸载, 焦点丢失到附加说明 TextArea. 修复后 answers 保持
+    // '__other__' 不变, Input 块始终挂载.
+    const onAnswer = vi.fn()
+    const onOtherChange = vi.fn()
+    const { rerender, container } = render(
+      <QuestionCard
+        {...baseProps}
+        questions={[q()]}
+        answers={{ 'pick one?': '__other__' }}
+        onAnswer={onAnswer}
+        onOtherChange={onOtherChange}
+      />,
+    )
+    // 模拟用户点选 Other → store 写 '__other__'
+    expect(container.querySelector('input[placeholder="请输入..."]')).not.toBeNull()
+
+    // 模拟 store 收到第一次按键 (旧实现会写 'h' 进 answers; 新实现只
+    // 走 onOtherChange). 重渲染时 answers 仍保持 '__other__'.
+    rerender(
+      <QuestionCard
+        {...baseProps}
+        questions={[q()]}
+        answers={{ 'pick one?': '__other__' }}
+        annotations={{ 'pick one?': { otherText: 'h' } }}
+        onAnswer={onAnswer}
+        onOtherChange={onOtherChange}
+      />,
+    )
+    // Input 块必须仍在 DOM 里 (旧 bug 这里会被卸载)
+    expect(container.querySelector('input[placeholder="请输入..."]')).not.toBeNull()
+    // 验证 onAnswer 没有被错误调用 (新实现不污染 answers)
+    expect(onAnswer).not.toHaveBeenCalled()
+    expect(onOtherChange).toHaveBeenCalledWith('pick one?', 'h')
   })
 })
 

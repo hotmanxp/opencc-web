@@ -102,6 +102,13 @@ export type AgentStatus = 'idle' | 'streaming' | 'aborted' | 'error'
 
 export type AgentMessage = RuntimeEvent
 
+// 与 QuestionCard.tsx 的 OTHER_OPTION_VALUE 共用 — answers 里的 sentinel
+// 标识"用户选了 Other 选项但实际文本在 annotations.otherText 里".
+// 这里硬编码一份, 不从 QuestionCard.tsx import (避免循环依赖 + 跨 web
+// 子模块边界: store 是 zustand 全局单例, 不能耦合到 components/).
+// QuestionCard 是这个常量的唯一真源, 若日后修改需同步本文件.
+const OTHER_OPTION_VALUE = '__other__'
+
 export type AskState = {
   toolUseId: string
   questions: any[]
