@@ -230,7 +230,7 @@ describe('OpenAIClient — request body construction', () => {
     }
   })
 
-  it('appends every properties key to required[] (OpenAI strict-mode schema fix)', async () => {
+  it('preserves optional fields in required[] (does NOT promote all properties)', async () => {
     const cap = captureRequest()
     try {
       const client = new OpenAIClient({
@@ -251,8 +251,9 @@ describe('OpenAIClient — request body construction', () => {
               type: 'object',
               properties: {
                 command: { type: 'string' },
-                timeout: { type: 'number' }, // not in required
+                timeout: { type: 'number' }, // optional, NOT in required
               },
+              required: ['command'],
             },
           },
         ],
@@ -262,9 +263,418 @@ describe('OpenAIClient — request body construction', () => {
       const bashTool = body.tools.find(
         (t: { function: { name: string } }) => t.function.name === 'Bash',
       )
-      expect(bashTool.function.parameters.required).toContain('command')
-      expect(bashTool.function.parameters.required).toContain('timeout')
+      // Only fields explicitly marked required stay; the optional 'timeout'
+      // must NOT be promoted, otherwise strict providers (Groq, Azure) 400.
+      expect(bashTool.function.parameters.required).toEqual(['command'])
       expect(bashTool.function.parameters.additionalProperties).toBe(false)
+    } finally {
+      cap.restore()
+    }
+  })
+
+  it('drops required keys that are missing from properties (defensive)', async () => {
+    const cap = captureRequest()
+    try {
+      const client = new OpenAIClient({
+        baseURL: 'https://api.example.com/v1',
+        apiKey: 'k',
+        model: 'm',
+      })
+      for await (const _ev of client.messages.create({
+        model: 'm',
+        system: '',
+        messages: [{ role: 'user', content: 'x' }],
+        stream: true,
+        tools: [
+          {
+            name: 'Bash',
+            description: 'Run a shell command.',
+            input_schema: {
+              type: 'object',
+              properties: { command: { type: 'string' } },
+              required: ['command', 'nonexistent'],
+            },
+          },
+        ],
+      })) { /* drain */ }
+      const req = cap.get()!
+      const body = JSON.parse(req.init.body as string)
+      const bashTool = body.tools.find(
+        (t: { function: { name: string } }) => t.function.name === 'Bash',
+      )
+      // Stale required keys absent from properties get filtered out so we
+      // never ship a schema that strict providers would reject out-of-hand.
+      expect(bashTool.function.parameters.required).toEqual(['command'])
+    } finally {
+      cap.restore()
+    }
+  })
+})
+
+// ---------------------------------------------------------------------------
+// Stream event shape — regression tests for the P0 conversion bugs.
+// Each test mocks fetch with a hand-rolled SSE body that simulates the
+// upstream behavior we're trying to defend against.
+// ---------------------------------------------------------------------------
+
+function streamCapture() {
+  let captured: { url: string; init: RequestInit } | null = null
+  const original = globalThis.fetch
+  function setSseBody(body: string) {
+    globalThis.fetch = (async (url: any, init: any) => {
+      captured = { url: String(url), init }
+      return new Response(body, {
+        status: 200,
+        headers: { 'Content-Type': 'text/event-stream' },
+      })
+    }) as typeof fetch
+  }
+  return {
+    setSseBody,
+    get: () => captured,
+    restore: () => { globalThis.fetch = original },
+  }
+}
+
+function sseChunk(payload: object): string {
+  return `data: ${JSON.stringify(payload)}\n\n`
+}
+
+describe('OpenAIClient — stream event shape (P0 fixes)', () => {
+  it('emits exactly ONE content_block_start per tool_use block (no duplicate)', async () => {
+    // Real OpenAI stream: the first chunk carries id+name+initial-args;
+    // subsequent chunks only carry arguments deltas. The previous shim
+    // emitted a second content_block_start whenever id/name appeared on
+    // any chunk, causing queryLoop to push duplicate toolUseBlocks.
+    const cap = streamCapture()
+    cap.setSseBody(
+      sseChunk({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'Bash', arguments: '{"comm' },
+            }],
+          },
+        }],
+      }) +
+      sseChunk({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              function: { arguments: 'and":"ls"}' },
+            }],
+          },
+        }],
+      }) +
+      sseChunk({
+        choices: [{ delta: {}, finish_reason: 'tool_calls' }],
+      }) +
+      'data: [DONE]\n\n',
+    )
+    try {
+      const client = new OpenAIClient({
+        baseURL: 'https://api.example.com/v1', apiKey: 'k', model: 'm',
+      })
+      const events: Array<{ type: string; index?: number; id?: string }> = []
+      for await (const ev of client.messages.create({
+        model: 'm',
+        system: '',
+        messages: [{ role: 'user', content: 'x' }],
+        stream: true,
+      })) {
+        events.push({
+          type: ev.type,
+          index: (ev as { index?: number }).index,
+          id: (ev as { content_block?: { id?: string } }).content_block?.id,
+        })
+      }
+      const toolStarts = events.filter(e =>
+        e.type === 'content_block_start' && e.index === 0,
+      )
+      expect(toolStarts).toHaveLength(1)
+      expect(toolStarts[0]?.id).toBe('call_1')
+    } finally {
+      cap.restore()
+    }
+  })
+
+  it('emits monotonic block indexes when tool_call arrives before text', async () => {
+    // Previously the tool block took index 0 (per the formula), then text
+    // arrived and also went to index 0 — corrupting the SSE consumer's
+    // block tracking. Now: tool=0, then text gets a fresh index 1.
+    const cap = streamCapture()
+    cap.setSseBody(
+      sseChunk({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'Bash', arguments: '{}' },
+            }],
+          },
+        }],
+      }) +
+      sseChunk({
+        choices: [{ delta: {}, finish_reason: 'tool_calls' }],
+      }) +
+      sseChunk({
+        choices: [{ delta: { content: 'after-tool' }, finish_reason: 'stop' }],
+      }) +
+      'data: [DONE]\n\n',
+    )
+    try {
+      const client = new OpenAIClient({
+        baseURL: 'https://api.example.com/v1', apiKey: 'k', model: 'm',
+      })
+      const events: Array<{ type: string; index?: number; kind?: string }> = []
+      for await (const ev of client.messages.create({
+        model: 'm',
+        system: '',
+        messages: [{ role: 'user', content: 'x' }],
+        stream: true,
+      })) {
+        events.push({
+          type: ev.type,
+          index: (ev as { index?: number }).index,
+          kind: (ev as { content_block?: { type?: string } }).content_block?.type,
+        })
+      }
+      const toolStart = events.find(e =>
+        e.type === 'content_block_start' && e.kind === 'tool_use',
+      )
+      const textStart = events.find(e =>
+        e.type === 'content_block_start' && e.kind === 'text',
+      )
+      expect(toolStart?.index).toBe(0)
+      expect(textStart?.index).toBe(1)
+      // Distinct stop events too — no index reuse.
+      const stops = events.filter(e => e.type === 'content_block_stop').map(e => e.index)
+      expect(stops).toContain(0)
+      expect(stops).toContain(1)
+    } finally {
+      cap.restore()
+    }
+  })
+
+  it('closes text block when transitioning to tool_call', async () => {
+    // text → tool: text block must be closed before the tool block opens so
+    // the consumer sees a clean sequence (start text → ... → stop text →
+    // start tool → ... → stop tool).
+    const cap = streamCapture()
+    cap.setSseBody(
+      sseChunk({
+        choices: [{ delta: { content: 'before ' } }],
+      }) +
+      sseChunk({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'Bash', arguments: '{}' },
+            }],
+          },
+        }],
+      }) +
+      sseChunk({
+        choices: [{ delta: {}, finish_reason: 'tool_calls' }],
+      }) +
+      'data: [DONE]\n\n',
+    )
+    try {
+      const client = new OpenAIClient({
+        baseURL: 'https://api.example.com/v1', apiKey: 'k', model: 'm',
+      })
+      const events: Array<{ type: string; index?: number; kind?: string }> = []
+      for await (const ev of client.messages.create({
+        model: 'm',
+        system: '',
+        messages: [{ role: 'user', content: 'x' }],
+        stream: true,
+      })) {
+        events.push({
+          type: ev.type,
+          index: (ev as { index?: number }).index,
+          kind: (ev as { content_block?: { type?: string } }).content_block?.type,
+        })
+      }
+      const textStart = events.find(e =>
+        e.type === 'content_block_start' && e.kind === 'text',
+      )
+      const textStop = events.find(e =>
+        e.type === 'content_block_stop' && e.index === textStart?.index,
+      )
+      const toolStart = events.find(e =>
+        e.type === 'content_block_start' && e.kind === 'tool_use',
+      )
+      const textStartIdx = events.indexOf(textStart!)
+      const textStopIdx = events.indexOf(textStop!)
+      const toolStartIdx = events.indexOf(toolStart!)
+      // Text stop MUST be emitted before the tool start.
+      expect(textStopIdx).toBeGreaterThan(textStartIdx)
+      expect(textStopIdx).toBeLessThan(toolStartIdx)
+    } finally {
+      cap.restore()
+    }
+  })
+
+  it('repairs truncated tool JSON on finish_reason=length (P0-4)', async () => {
+    // Some providers truncate streamed tool arguments when they hit the
+    // token limit. The previous shim emitted the partial literal as-is and
+    // the consumer fell back to {}. Now we append a closing suffix that
+    // makes the buffer valid JSON.
+    const cap = streamCapture()
+    cap.setSseBody(
+      sseChunk({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'Bash', arguments: '{"command":"ls' },
+            }],
+          },
+          finish_reason: 'length',
+        }],
+      }) +
+      'data: [DONE]\n\n',
+    )
+    try {
+      const client = new OpenAIClient({
+        baseURL: 'https://api.example.com/v1', apiKey: 'k', model: 'm',
+      })
+      const events: Array<{ type: string; index?: number; partial_json?: string }> = []
+      for await (const ev of client.messages.create({
+        model: 'm',
+        system: '',
+        messages: [{ role: 'user', content: 'x' }],
+        stream: true,
+      })) {
+        events.push({
+          type: ev.type,
+          index: (ev as { index?: number }).index,
+          partial_json: (ev as { delta?: { partial_json?: string } }).delta?.partial_json,
+        })
+      }
+      const repairDelta = [...events].reverse().find(e =>
+        e.type === 'content_block_delta' && typeof e.partial_json === 'string' && e.partial_json.length > 0,
+      )
+      // The repair MUST close the partial object literal. The exact suffix
+      // depends on where truncation fell (a bare `}` for `{"a":1`, but `"}`
+      // for `{"command":"ls` since the inner string is still open). We
+      // assert: (a) some repair suffix was appended, (b) the joined buffer
+      // parses as a valid JSON object.
+      expect(repairDelta?.partial_json).toMatch(/^["}\]]+$/)
+      const allArgs = events
+        .filter(e => e.type === 'content_block_delta' && typeof e.partial_json === 'string')
+        .map(e => e.partial_json!)
+        .join('')
+      expect(() => JSON.parse(allArgs)).not.toThrow()
+      const parsed = JSON.parse(allArgs) as { command: string }
+      expect(parsed.command).toBe('ls')
+    } finally {
+      cap.restore()
+    }
+  })
+
+  it('does NOT repair when finish_reason is tool_calls (no truncation)', async () => {
+    // Only `length` triggers repair; `tool_calls` means the stream ended
+    // normally and the JSON should already be valid.
+    const cap = streamCapture()
+    cap.setSseBody(
+      sseChunk({
+        choices: [{
+          delta: {
+            tool_calls: [{
+              index: 0,
+              id: 'call_1',
+              type: 'function',
+              function: { name: 'Bash', arguments: '{"command":"ls"}' },
+            }],
+          },
+          finish_reason: 'tool_calls',
+        }],
+      }) +
+      'data: [DONE]\n\n',
+    )
+    try {
+      const client = new OpenAIClient({
+        baseURL: 'https://api.example.com/v1', apiKey: 'k', model: 'm',
+      })
+      const repairDeltas: string[] = []
+      for await (const ev of client.messages.create({
+        model: 'm',
+        system: '',
+        messages: [{ role: 'user', content: 'x' }],
+        stream: true,
+      })) {
+        const pj = (ev as { delta?: { partial_json?: string } }).delta?.partial_json
+        if (
+          ev.type === 'content_block_delta'
+          && typeof pj === 'string'
+          && pj.length > 0
+        ) {
+          repairDeltas.push(pj)
+        }
+      }
+      // Original args echoed verbatim; no extra repair suffix appended.
+      expect(repairDeltas).toEqual(['{"command":"ls"}'])
+    } finally {
+      cap.restore()
+    }
+  })
+
+  it('allocates distinct indexes for parallel tool_calls in a single chunk', async () => {
+    // Two parallel tool_calls in the same delta must each get their own
+    // content_block_start with distinct indexes, not the same index twice.
+    const cap = streamCapture()
+    cap.setSseBody(
+      sseChunk({
+        choices: [{
+          delta: {
+            tool_calls: [
+              { index: 0, id: 'call_a', type: 'function', function: { name: 'Bash', arguments: '{}' } },
+              { index: 1, id: 'call_b', type: 'function', function: { name: 'Read', arguments: '{}' } },
+            ],
+          },
+          finish_reason: 'tool_calls',
+        }],
+      }) +
+      'data: [DONE]\n\n',
+    )
+    try {
+      const client = new OpenAIClient({
+        baseURL: 'https://api.example.com/v1', apiKey: 'k', model: 'm',
+      })
+      const events: Array<{ type: string; index?: number; id?: string }> = []
+      for await (const ev of client.messages.create({
+        model: 'm',
+        system: '',
+        messages: [{ role: 'user', content: 'x' }],
+        stream: true,
+      })) {
+        events.push({
+          type: ev.type,
+          index: (ev as { index?: number }).index,
+          id: (ev as { content_block?: { id?: string } }).content_block?.id,
+        })
+      }
+      const toolStarts = events.filter(
+        e => e.type === 'content_block_start' && e.id && e.id.startsWith('call_'),
+      )
+      expect(toolStarts).toHaveLength(2)
+      const indexes = toolStarts.map(e => e.index)
+      expect(new Set(indexes).size).toBe(2)
+      expect(indexes).toContain(0)
+      expect(indexes).toContain(1)
     } finally {
       cap.restore()
     }

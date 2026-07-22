@@ -100,14 +100,16 @@ function asStringContent(content: unknown): string {
 }
 
 function normalizeSchema(schema: Record<string, unknown>): Record<string, unknown> {
-  // OpenAI requires every key in `properties` to also appear in `required`.
-  // Anthropic schemas often mark fields optional; we coerce here.
+  // OpenAI strict-mode providers (Groq, Azure, OpenAI strict) reject tool
+  // calls when `required[]` lists a field the model correctly omits. We must
+  // NOT promote every properties key to required; preserve Anthropic's
+  // optional markers (drop any required key not present in properties).
+  // additionalProperties:false is still required for strict mode.
   if (schema.type !== 'object' || !schema.properties) return schema
-  const props = schema.properties as Record<string, Record<string, unknown>>
-  const required = Array.isArray(schema.required) ? [...(schema.required as string[])] : []
-  for (const key of Object.keys(props)) {
-    if (!required.includes(key)) required.push(key)
-  }
+  const props = schema.properties as Record<string, unknown>
+  const required = Array.isArray(schema.required)
+    ? (schema.required as string[]).filter((k) => k in props)
+    : []
   return { ...schema, required, additionalProperties: false }
 }
 
@@ -285,20 +287,90 @@ async function* readSseLines(
   }
 }
 
+// ---------------------------------------------------------------------------
+// Truncated JSON repair (porting the minimal subset of OpenCC's streaming.ts).
+// Some OpenAI-compatible providers truncate streaming output when
+// finish_reason='length' (max_tokens hit). The accumulated `partial_json` for
+// a tool_use block then looks like `{"command":` — invalid JSON. We try to
+// close the partial literal at finish time so queryLoop's JSON.parse sees a
+// valid object instead of falling back to {}.
+// ---------------------------------------------------------------------------
+const JSON_REPAIR_SUFFIXES = [
+  '}', '"}', ']}', '"]}', '}}', '"}}', ']}}', '"]}}', '"]}]}', '}]}',
+] as const
+
+function repairPossiblyTruncatedObjectJson(raw: string): string | null {
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
+      ? raw
+      : null
+  } catch {
+    for (const combo of JSON_REPAIR_SUFFIXES) {
+      try {
+        const repaired = raw + combo
+        const parsed = JSON.parse(repaired)
+        if (parsed && typeof parsed === 'object' && !Array.isArray(parsed)) {
+          return repaired
+        }
+      } catch {
+        // try next suffix
+      }
+    }
+    return null
+  }
+}
+
+interface ToolBlockState {
+  blockIndex: number
+  id: string
+  name: string
+  jsonBuffer: string
+}
+
 interface BlockState {
-  textIndex: number | null
-  thinkingIndex: number | null
-  toolIndexToBlockIndex: Map<number, number>
+  // Monotonic counter for every content_block_* event. Each new block
+  // (text / thinking / tool_use) gets a fresh index from this counter so the
+  // SSE consumer (queryLoop) never sees two blocks share an index — which
+  // previously broke `tool → text` and `thinking → tool → text` orderings.
+  nextBlockIndex: number
+  // The currently-open text/thinking block, or null when none is open.
+  // Closed when a tool block starts, when the opposite kind starts, or at
+  // finish_reason.
+  textBlockIndex: number | null
+  thinkingBlockIndex: number | null
+  toolBlocks: Map<number, ToolBlockState>
 }
 
 function newBlockState(): BlockState {
-  return { textIndex: null, thinkingIndex: null, toolIndexToBlockIndex: new Map() }
+  return {
+    nextBlockIndex: 0,
+    textBlockIndex: null,
+    thinkingBlockIndex: null,
+    toolBlocks: new Map(),
+  }
 }
 
 async function* chunksToAnthropicEvents(
   lines: AsyncGenerator<string>,
   blockState: BlockState,
 ): AsyncGenerator<OpenAIStreamEvent> {
+  const closeBlock = async function* (index: number | null): AsyncGenerator<OpenAIStreamEvent> {
+    if (index === null || index === undefined) return
+    yield { type: 'content_block_stop' as const, index }
+  }
+
+  const closeOpenTextAndThinking = async function* (): AsyncGenerator<OpenAIStreamEvent> {
+    if (blockState.textBlockIndex !== null) {
+      yield* closeBlock(blockState.textBlockIndex)
+      blockState.textBlockIndex = null
+    }
+    if (blockState.thinkingBlockIndex !== null) {
+      yield* closeBlock(blockState.thinkingBlockIndex)
+      blockState.thinkingBlockIndex = null
+    }
+  }
+
   for await (const line of lines) {
     if (!line.startsWith('data:')) continue
     const payload = line.slice(5).trim()
@@ -318,34 +390,34 @@ async function* chunksToAnthropicEvents(
 
     // text delta
     if (typeof delta.content === 'string' && delta.content.length > 0) {
-      if (blockState.textIndex === null) {
-        blockState.textIndex = 0
+      if (blockState.textBlockIndex === null) {
+        blockState.textBlockIndex = blockState.nextBlockIndex++
         yield {
           type: 'content_block_start',
-          index: blockState.textIndex,
+          index: blockState.textBlockIndex,
           content_block: { type: 'text', text: '' },
         }
       }
       yield {
         type: 'content_block_delta',
-        index: blockState.textIndex,
+        index: blockState.textBlockIndex,
         delta: { type: 'text_delta', text: delta.content },
       }
     }
 
     // reasoning_content → thinking block
     if (typeof delta.reasoning_content === 'string' && delta.reasoning_content.length > 0) {
-      if (blockState.thinkingIndex === null) {
-        blockState.thinkingIndex = 1
+      if (blockState.thinkingBlockIndex === null) {
+        blockState.thinkingBlockIndex = blockState.nextBlockIndex++
         yield {
           type: 'content_block_start',
-          index: blockState.thinkingIndex,
+          index: blockState.thinkingBlockIndex,
           content_block: { type: 'thinking', thinking: '' },
         }
       }
       yield {
         type: 'content_block_delta',
-        index: blockState.thinkingIndex,
+        index: blockState.thinkingBlockIndex,
         delta: { type: 'thinking_delta', thinking: delta.reasoning_content },
       }
     }
@@ -353,42 +425,39 @@ async function* chunksToAnthropicEvents(
     // tool_calls delta
     if (Array.isArray(delta.tool_calls)) {
       for (const tc of delta.tool_calls) {
-        let blockIndex = blockState.toolIndexToBlockIndex.get(tc.index)
-        if (blockIndex === undefined) {
-          // Allocate new content block. Place tool blocks AFTER text+thinking
-          // so block indexes match the order they were emitted.
-          const next = (blockState.textIndex !== null ? 1 : 0) +
-                       (blockState.thinkingIndex !== null ? 1 : 0) +
-                       blockState.toolIndexToBlockIndex.size
-          blockIndex = next
-          blockState.toolIndexToBlockIndex.set(tc.index, blockIndex)
-          yield {
-            type: 'content_block_start',
-            index: blockIndex,
-            content_block: {
-              type: 'tool_use',
-              id: tc.id ?? `toolu_${tc.index}_${Date.now()}`,
-              name: tc.function?.name ?? '',
-              input: {},
-            },
+        let toolState = blockState.toolBlocks.get(tc.index)
+        if (toolState === undefined) {
+          // Close any open text/thinking before allocating the tool block,
+          // so the block indexes appear in the order they were emitted.
+          yield* closeOpenTextAndThinking()
+          const blockIndex = blockState.nextBlockIndex++
+          // Stable fallback id: prefer tc.id, fall back to a deterministic
+          // per-tool-call string. Using Date.now() here would risk collisions
+          // when the same delta contains both id+name and arguments (the
+          // previous code emitted two starts with two different timestamps).
+          toolState = {
+            blockIndex,
+            id: tc.id ?? `toolu_${tc.index}`,
+            name: tc.function?.name ?? '',
+            jsonBuffer: '',
           }
-        }
-        if (tc.id || tc.function?.name) {
+          blockState.toolBlocks.set(tc.index, toolState)
           yield {
             type: 'content_block_start',
             index: blockIndex,
             content_block: {
               type: 'tool_use',
-              id: tc.id ?? `toolu_${tc.index}_${Date.now()}`,
-              name: tc.function?.name ?? '',
+              id: toolState.id,
+              name: toolState.name,
               input: {},
             },
           }
         }
         if (typeof tc.function?.arguments === 'string' && tc.function.arguments.length > 0) {
+          toolState.jsonBuffer += tc.function.arguments
           yield {
             type: 'content_block_delta',
-            index: blockIndex,
+            index: toolState.blockIndex,
             delta: {
               type: 'input_json_delta',
               partial_json: tc.function.arguments,
@@ -399,16 +468,34 @@ async function* chunksToAnthropicEvents(
     }
 
     if (choice.finish_reason) {
-      // Close any open blocks before message_delta.
-      for (const idx of [
-        blockState.textIndex,
-        blockState.thinkingIndex,
-        ...blockState.toolIndexToBlockIndex.values(),
-      ]) {
-        if (idx !== null && idx !== undefined) {
-          yield { type: 'content_block_stop', index: idx }
+      // Close any open text/thinking blocks before closing tool blocks so
+      // the consumer sees stop events in the same order as start events.
+      yield* closeOpenTextAndThinking()
+
+      // Close all tool blocks, repairing truncated JSON when finish_reason
+      // indicates max_tokens truncation so the consumer's JSON.parse doesn't
+      // silently fall back to {}.
+      const truncated = choice.finish_reason === 'length'
+      for (const [, toolState] of blockState.toolBlocks) {
+        if (truncated && toolState.jsonBuffer.length > 0) {
+          // Try to close a partial object literal — only emit a delta if we
+          // find a suffix that parses. Otherwise leave the buffer as-is and
+          // let queryLoop's catch handle it (preserves prior behavior).
+          const repaired = repairPossiblyTruncatedObjectJson(toolState.jsonBuffer)
+          if (repaired !== null && repaired !== toolState.jsonBuffer) {
+            const suffix = repaired.slice(toolState.jsonBuffer.length)
+            if (suffix.length > 0) {
+              yield {
+                type: 'content_block_delta',
+                index: toolState.blockIndex,
+                delta: { type: 'input_json_delta', partial_json: suffix },
+              }
+            }
+          }
         }
+        yield { type: 'content_block_stop', index: toolState.blockIndex }
       }
+
       const stopReason = choice.finish_reason === 'tool_calls'
         ? 'tool_use'
         : choice.finish_reason === 'length'
