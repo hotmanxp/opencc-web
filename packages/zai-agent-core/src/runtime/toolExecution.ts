@@ -5,13 +5,15 @@
 
 import type { Tool, ToolContext, ToolResult } from '../tools/Tool.js'
 import type { RuntimeEvent } from './events.js'
-import type { AskRegistryLike, RuntimeConfig } from './types.js'
+import type { AskRegistryLike, ApproveRegistryLike, RuntimeConfig } from './types.js'
 import type { TranscriptStore } from '../transcript/store.js'
 import {
   appendToolResult,
   appendToolUse,
 } from '../transcript/persistence.js'
 import { ASK_USER_QUESTION_TOOL_NAME } from '../tools/AskUserQuestionTool/prompt.js'
+import { REQUEST_APPROVE_TOOL_NAME } from '../tools/RequestApproveTool/prompt.js'
+import type { RequestApproveInput as RequestApproveInputType, ResolvedBody } from '../tools/RequestApproveTool/schema.js'
 import {
   createStreamingToolExecutor,
   DEFAULT_MAX_PARALLEL,
@@ -87,6 +89,7 @@ export async function* executeToolsStreaming(
   tools: Tool[],
   meta: EventMeta,
   askRegistry?: AskRegistryLike,
+  approveRegistry?: ApproveRegistryLike,
 ): AsyncGenerator<RuntimeEvent, void, void> {
   // ---- 0. Streaming fast path (B spec §2.5) ------------------------------
   // When `config.runtime.streamingToolExecution === 'on'`, dispatch through
@@ -104,7 +107,7 @@ export async function* executeToolsStreaming(
   // Phase 2 Task 3.
   const streamingOpt = (meta.config as any)?.runtime?.streamingToolExecution
   if (streamingOpt === 'on') {
-    yield* runStreamingFastPath(blocks, ctx, tools, meta, askRegistry)
+    yield* runStreamingFastPath(blocks, ctx, tools, meta, askRegistry, approveRegistry)
     return
   }
 
@@ -147,7 +150,43 @@ export async function* executeToolsStreaming(
     } as RuntimeEvent
   }
 
-  // ---- 1. 权限判定 ----
+
+/**
+ * Resolve a file path to its UTF-8 content for the approve drawer.
+ * Mirrors the path-resolution semantics of the existing Read tool:
+ * - Relative paths resolve against opts.cwd (session cwd).
+ * - Absolute paths are forbidden by the tool schema (enforced upstream).
+ * - Files larger than maxBytes or non-utf8 throw an Error that the
+ *   runtime surfaces via `tool_use:invalid`.
+ */
+async function resolveFileBody(
+  path: string,
+  opts: { cwd: string; maxBytes: number },
+): Promise<ResolvedBody> {
+  const fs = await import('node:fs/promises')
+  const nodePath = await import('node:path')
+  const abs = nodePath.isAbsolute(path) ? path : nodePath.resolve(opts.cwd, path)
+  const stat = await fs.stat(abs)
+  if (stat.size > opts.maxBytes) {
+    throw new Error(`file too large: ${stat.size} > ${opts.maxBytes}`)
+  }
+  const buf = await fs.readFile(abs)
+  // Empty file: allow but keep display honest.
+  if (buf.length === 0) {
+    return { kind: 'file', displayPath: path, content: '' }
+  }
+  // Strict utf-8: binary files trigger an exception via TextDecoder(fatal:true).
+  const td = new TextDecoder('utf-8', { fatal: true })
+  let content: string
+  try {
+    content = td.decode(buf)
+  } catch {
+    throw new Error('file is not valid utf-8 (binary?)')
+  }
+  return { kind: 'file', displayPath: path, content }
+}
+
+    // ---- 1. 权限判定 ----
   const permissionResults = await Promise.all(blocks.map(async b => {
     const tool = tools.find(t => t.name === b.name)
     if (!tool) return { behavior: 'deny' as const, reason: `unknown tool: ${b.name}` }
@@ -250,6 +289,43 @@ export async function* executeToolsStreaming(
         questions: askInput.questions,
         ...(askInput.metadata ? { metadata: askInput.metadata } : {}),
       })
+    }
+    // RequestApprove: 与 AskUserQuestion 同模式 — 在 await 之前直接 yield
+    // approve_pending, plumb the registry handle to bridgedCtx, and let
+    // the tool body resolve on user submit. File variant 由 runtime 读取后
+    // 替换 body.content (绝对路径会被 zod 输入侧拒绝, 相对路径在这里解析).
+    else if (tool.name === REQUEST_APPROVE_TOOL_NAME) {
+      if (!approveRegistry) {
+        const msg = 'approveRegistry not configured: cannot await RequestApprove decisions'
+        yield buildEvent('tool_use:error', { toolUseId: block.id, error: msg })
+        results[index] = { toolUseId: block.id, content: `error: ${msg}`, isError: true }
+        for (const sub of drainSubQueue()) yield sub
+        continue
+      }
+      const approveInput = parsed.data as RequestApproveInputType
+      let resolved: ResolvedBody
+      try {
+        resolved = approveInput.body.kind === 'file'
+          ? await resolveFileBody(approveInput.body.path, { cwd: meta.cwd ?? ctx.cwd, maxBytes: 200_000 })
+          : { kind: 'inline', displayPath: null, content: approveInput.body.content }
+      } catch (e) {
+        const msg = e instanceof Error ? e.message : String(e)
+        yield buildEvent('tool_use:invalid', { toolUseId: block.id, error: `file unreadable: ${msg}` })
+        results[index] = { toolUseId: block.id, content: `error: ${msg}`, isError: true }
+        for (const sub of drainSubQueue()) yield sub
+        continue
+      }
+      yield buildEvent('tool_use:approve_pending', {
+        toolUseId: block.id,
+        title: approveInput.title,
+        ...(approveInput.summary ? { summary: approveInput.summary } : {}),
+        body: resolved,
+      })
+      bridgedCtx.awaitApprove = async (_req) => {
+        return approveRegistry!.register(block.id, meta.sessionId, ctx.abortSignal)
+      }
+      ;(bridgedCtx as any).__resolvedApproveBody = resolved
+      ;(bridgedCtx as any).__toolUseId = block.id
     }
 
     // 注入 ask hook (每次循环重置, 闭包捕获 block.id).
@@ -375,6 +451,7 @@ async function* runStreamingFastPath(
   tools: Tool[],
   meta: EventMeta,
   _askRegistry?: AskRegistryLike,
+  _approveRegistry?: ApproveRegistryLike,
 ): AsyncGenerator<RuntimeEvent, void, void> {
   const results: ToolResult[] = new Array(blocks.length)
   ctx.state.__lastToolResults = results
