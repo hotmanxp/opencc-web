@@ -53,7 +53,7 @@ import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 import AgentInputBox from "../components/AgentInputBox";
 import { MessageBubble } from "../components/transcript/MessageBubble.js";
 import { MessageListView } from "../components/transcript/MessageListView.js";
-import { useScrollFollow } from "../hooks/useScrollFollow";
+import { useAutoScrollToBottom } from "../hooks/useAutoScrollToBottom";
 import { SplitPane } from "../components/splitPane/SplitPane.js";
 import {
   STORAGE_KEYS,
@@ -127,17 +127,16 @@ export default function Agent() {
   // Hook 必须在 splitPaneOpen 派生之后调用, hook 依赖该 boolean.
   const sessionPanel = useSplitPaneSessionAutoCollapse({ splitPaneOpen });
   const sessionsCollapsed = sessionPanel.collapsed;
-  const messagesEndRef = useRef<HTMLDivElement>(null);
   // question 卡片滚到视口用: pendingAsk 不在 messages[] 里, 单依赖 messages 的滚动 effect
   // 不会触发, 这里单独加一个 ref 让卡片出现时也能滚到底.
   const questionCardRef = useRef<HTMLDivElement>(null);
-  // 真实承载 messages 流的可滚动 div. useScrollFollow 在这个容器上挂
-  // wheel / touchstart / 滚动键监听器去判断"用户是否在翻历史",挂到
-  // messagesEndRef (底部哨兵 ref) 上会因它通常不可见而漏事件。
+  // 真实承载 messages 流的可滚动 div. useAutoScrollToBottom 在这个容器上挂
+  // wheel / touchstart / 滚动键监听器判断"用户是否在翻历史",并根据
+  // messages length 变化 / distance-to-bottom 决定是否真的 scrollTo 底部。
+  // 旧实现 messagesEndRef (底部哨兵) 已删除 — hook 改用 scrollTo({top: scrollHeight})
+  // 直达末尾, 不再依赖哨兵。详细语义见 hooks/useAutoScrollToBottom.ts。
   const scrollContainerRef = useRef<HTMLDivElement>(null);
-  // 用户最近 5s 内主动滚过 → true 时跳过自动滚到底,避免 AI 生成期间
-  // 把用户视线硬拉回底部。详细语义见 hooks/useScrollFollow.ts 顶部注释。
-  const scrollFollowLocked = useScrollFollow(scrollContainerRef);
+  const autoScroll = useAutoScrollToBottom(scrollContainerRef);
 
   // 根据侧栏实际高度估算默认展示条数, 窗口/容器尺寸变化时自动重算.
   useEffect(() => {
@@ -155,17 +154,22 @@ export default function Agent() {
   }, [sessionsCollapsed]);
 
   useEffect(() => {
-    // 优先级: question 卡片出现时滚卡片, 否则滚 messages 流末尾.
-    // pendingAsk 是独立字段, 必须放进依赖里否则卡片首次出现不触发.
+    // 优先级: pendingAsk 出现时滚到 QuestionCard, 否则由 hook 自带的
+    // 三层防御 (length 增长 / 用户锁 / 距离底部) 决定是否滚 messages 末尾。
     //
-    // scrollFollowLocked 由 useScrollFollow 维护: 用户最近 5s 内触发过
-    // 滚动手势时返回 true, 此时跳过自动滚动 — 用户主动翻看历史时,
-    // AI 一边生成一边把视图拉到底会让人读不到内容。5s 内无新手势后
-    // locked 回到 false, 下一次 messages 更新会恢复"跟到底"行为。
-    if (scrollFollowLocked) return;
-    const target = questionCardRef.current ?? messagesEndRef.current;
-    target?.scrollIntoView({ behavior: "smooth", block: "end" });
-  }, [messages, pendingAsk, scrollFollowLocked]);
+    // 修复历史: 旧版本无脑调 scrollIntoView — streaming delta 期间 messages
+    // 数组每条都换新引用, 但 length 不变, effect 仍 fire, 把用户在读历史
+    // 的视线拉回底部。新版本 useAutoScrollToBottom 内置 decideAutoScroll,
+    // 长度未增长 / 用户上滚 / 用户主动锁 三种情况一律 stay。
+    //
+    // pendingAsk 路径不受 hook 控制, 因为 QuestionCard 不在 messages[] 里,
+    // 单依赖 messages 的 effect 无法感知它首次出现。
+    if (pendingAsk) {
+      questionCardRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
+      return;
+    }
+    autoScroll.scrollToBottom(messages.length);
+  }, [messages, pendingAsk, autoScroll]);
 
   // 全局 Esc 拦截: 流式期间按 Esc 终止生成 (仿 OpenCC 状态栏 "esc to interrupt").
   // textarea 在 streaming 时被禁用, 这里挂 window 监听确保 Esc 仍生效.
@@ -550,7 +554,8 @@ export default function Agent() {
               />
             </div>
           )}
-          <div ref={messagesEndRef} />
+          {/* 滚动哨兵 div 已删除 — useAutoScrollToBottom 改用 scrollTo({top: scrollHeight})
+              直达末尾, 不再依赖 DOM 哨兵位置。视觉上无变化, JSX 更干净。 */}
         </div>
 
         {/*
