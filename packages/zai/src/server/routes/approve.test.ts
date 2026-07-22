@@ -56,7 +56,7 @@ describe('POST /api/agent/approve', () => {
 
   test('approved with comment → 200, promise resolves', async () => {
     const ctrl = new AbortController()
-    const p = registry.register('t1', 's1', ctrl.signal)
+    const p = registry.register('t1', 's1', 'Plan', ctrl.signal)
     const res = await request(app)
       .post('/api/agent/approve')
       .send({ toolUseId: 't1', decision: 'approved', comment: 'lgtm' })
@@ -67,7 +67,7 @@ describe('POST /api/agent/approve', () => {
 
   test('approved without comment → 200', async () => {
     const ctrl = new AbortController()
-    const p = registry.register('t1', 's1', ctrl.signal)
+    const p = registry.register('t1', 's1', 'Plan', ctrl.signal)
     const res = await request(app)
       .post('/api/agent/approve')
       .send({ toolUseId: 't1', decision: 'approved' })
@@ -77,7 +77,7 @@ describe('POST /api/agent/approve', () => {
 
   test('rejected with comment → 200, promise resolves', async () => {
     const ctrl = new AbortController()
-    const p = registry.register('t1', 's1', ctrl.signal)
+    const p = registry.register('t1', 's1', 'Plan', ctrl.signal)
     const res = await request(app)
       .post('/api/agent/approve')
       .send({ toolUseId: 't1', decision: 'rejected', comment: 'fix X' })
@@ -87,7 +87,7 @@ describe('POST /api/agent/approve', () => {
 
   test('X-Session-Id 匹配 → 200', async () => {
     const ctrl = new AbortController()
-    const p = registry.register('t1', 'sess-A', ctrl.signal)
+    const p = registry.register('t1', 'sess-A', 'Plan', ctrl.signal)
     const res = await request(app)
       .post('/api/agent/approve')
       .set('X-Session-Id', 'sess-A')
@@ -98,7 +98,7 @@ describe('POST /api/agent/approve', () => {
 
   test('X-Session-Id 不匹配 → 409, pending 不消费', async () => {
     const ctrl = new AbortController()
-    const p = registry.register('t1', 'sess-A', ctrl.signal)
+    const p = registry.register('t1', 'sess-A', 'Plan', ctrl.signal)
     let settled = false
     void p.then(() => { settled = true }).catch(() => { settled = true })
     const res = await request(app)
@@ -115,7 +115,7 @@ describe('POST /api/agent/approve', () => {
 
   test('不带 X-Session-Id → 维持旧行为', async () => {
     const ctrl = new AbortController()
-    const p = registry.register('t1', 'sess-A', ctrl.signal)
+    const p = registry.register('t1', 'sess-A', 'Plan', ctrl.signal)
     const res = await request(app)
       .post('/api/agent/approve')
       .send({ toolUseId: 't1', decision: 'approved' })
@@ -134,7 +134,7 @@ describe('POST /api/agent/approve/reject', () => {
   test('命中 → 200 ok:true, promise reject', async () => {
     const { app, registry } = makeApp()
     const ctrl = new AbortController()
-    const p = registry.register('t1', 's1', ctrl.signal)
+    const p = registry.register('t1', 's1', 'Plan', ctrl.signal)
     const res = await request(app)
       .post('/api/agent/approve/reject')
       .send({ toolUseId: 't1', comment: 'no', reason: 'not_ready' })
