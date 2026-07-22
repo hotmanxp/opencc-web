@@ -2494,6 +2494,58 @@ git commit -m "test(core): RequestApprove end-to-end turn-loop integration"
 
 ---
 
+## Task 22: Register RequestApproveTool in zai runtime tool pool
+
+**Discovered gap (post-merge review):** Tasks 1–3 created the tool object
+but never wired it into `getZaiRuntimeTools()`. As a result the LLM cannot
+emit a `RequestApprove` tool_use — the tool is exported from
+`zai-agent-core/src/index.ts:6` but never assembled into the runtime pool
+consumed by `queryLoop.ts:144-145`. This task closes the loop so the
+feature is reachable end-to-end.
+
+**Files:**
+- Modify: `packages/zai-agent-core/src/tools/index.ts`
+
+- [ ] **Step 1: Add import**
+
+Insert immediately after the `AskUserQuestionTool` import (line 12):
+
+```ts
+import { AskUserQuestionTool } from './AskUserQuestionTool/AskUserQuestionTool.js'
+import { RequestApproveTool } from './RequestApproveTool/RequestApproveTool.js'   // NEW
+```
+
+- [ ] **Step 2: Register the tool**
+
+Insert immediately after the `AskUserQuestionTool` registration
+(line 36), to keep semantic neighbours adjacent:
+
+```ts
+    wrapAsOpenccTool(AskUserQuestionTool),
+    wrapAsOpenccTool(RequestApproveTool),                                            // NEW
+```
+
+- [ ] **Step 3: Verify resolveToolPool picks it up**
+
+Run a quick smoke check that the tool is reachable from the pool:
+
+```bash
+cd packages/zai-agent-core && npx vitest run test/integration/agent/request-approve-turn-loop.test.ts
+```
+
+The turn-loop integration test mocks the model caller to emit a single
+`RequestApprove` tool_use block; if the tool isn't in the pool, the test
+fails with "tool not found". Expected: all 3 tests still pass.
+
+- [ ] **Step 4: Commit**
+
+```bash
+git add packages/zai-agent-core/src/tools/index.ts
+git commit -m "feat(core): register RequestApproveTool in runtime tool pool"
+```
+
+---
+
 ## Task 21: Final verification — typecheck + full test suite
 
 **Files:** None — verification only.
@@ -2571,7 +2623,7 @@ RequestApprove tool — DONE
 If you wrote this plan top-to-bottom, run these checks now:
 
 1. **Spec coverage:**
-   - §2 Tool Contract → Tasks 1, 2, 3
+   - §2 Tool Contract → Tasks 1, 2, 3, **22** (registration)
    - §3 Runtime Wiring → Tasks 4, 7, 8
    - §4 Server Routes → Tasks 9, 11, 14
    - §5 SSE Event → Tasks 13, 14

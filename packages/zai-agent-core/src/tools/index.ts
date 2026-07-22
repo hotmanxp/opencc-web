@@ -11,6 +11,7 @@ import { FileEditTool } from './FileEditTool/FileEditTool.js'
 import { GlobTool } from './GlobTool/GlobTool.js'
 import { GrepTool } from './GrepTool/GrepTool.js'
 import { AskUserQuestionTool } from './AskUserQuestionTool/AskUserQuestionTool.js'
+import { RequestApproveTool } from './RequestApproveTool/RequestApproveTool.js'
 import { ListMcpResourcesTool } from './ListMcpResourcesTool/ListMcpResourcesTool.js'
 import { ReadMcpResourceTool } from './ReadMcpResourceTool/ReadMcpResourceTool.js'
 import { BackgroundAgentResultTool } from './BackgroundAgentResultTool/BackgroundAgentResultTool.js'
@@ -35,6 +36,7 @@ export function getZaiRuntimeTools(): Tool[] {
     wrapAsOpenccTool(GlobTool),
     wrapAsOpenccTool(GrepTool),
     wrapAsOpenccTool(AskUserQuestionTool),
+    wrapAsOpenccTool(RequestApproveTool),
     wrapAsOpenccTool(ListMcpResourcesTool),
     wrapAsOpenccTool(ReadMcpResourceTool),
     wrapAsOpenccTool(BackgroundAgentResultTool),
