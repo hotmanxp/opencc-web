@@ -9,6 +9,7 @@ import {
   abortSessionController,
   getCurrentSessionId,
   getAskRegistry,
+  getApproveRegistry,
   getRuntime,
   getTranscriptStore,
   registerSessionController,
@@ -409,6 +410,9 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
     // 真正兜底是上面的 HARD_TIMEOUT (现 2h, 见顶部常量).
     // 但 askRegistry 仍要 abort — client 关掉页面时正在 ask 的 tool 必须释放.
     getAskRegistry().abortAll("client_disconnect");
+    // ApproveRegistry 同样要在 client 断开时释放: 阻止 /api/agent/approve
+    // 路由对一个已经死掉的 client 永久挂起. spec §4.4.
+    getApproveRegistry().abortAll("client_disconnect");
   });
 
   // 立即响应，事件通过 eventBus → /api/event SSE
