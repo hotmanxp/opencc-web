@@ -578,6 +578,7 @@ export default function Agent() {
           Agent 只透传 cwd. 与左下角 toggle 通过同一份 localStorage key 同步. */}
       <SplitPane cwd={cwd} />
       <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
+      <ApproveDrawer />
       <SettingsDrawer />
       <SessionCwdBridge />
     </div>
