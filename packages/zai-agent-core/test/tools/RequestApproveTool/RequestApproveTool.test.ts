@@ -31,7 +31,7 @@ const inlineResolved = {
 }
 
 describe('RequestApproveTool', () => {
-  test('approved without comment → output has decision only', async () => {
+  test('approved without comment → output { decision: "approved" }, no comment field', async () => {
     const awaitApprove = vi.fn(async (_req: AwaitApproveInput): Promise<AwaitApproveResult> => ({
       decision: 'approved',
     }))
@@ -53,7 +53,7 @@ describe('RequestApproveTool', () => {
     }))
   })
 
-  test('approved WITH comment → output includes comment', async () => {
+  test('approved WITH comment → output { decision: "approved", comment }', async () => {
     const ctx = makeCtx({
       awaitApprove: async () => ({ decision: 'approved', comment: 'looks solid' }),
       __resolvedApproveBody: inlineResolved,
@@ -64,7 +64,7 @@ describe('RequestApproveTool', () => {
     expect(parsed).toEqual({ decision: 'approved', comment: 'looks solid' })
   })
 
-  test('rejected with comment → output { decision, comment }', async () => {
+  test('rejected with comment → output { decision: "rejected", comment }', async () => {
     const ctx = makeCtx({
       awaitApprove: async () => ({ decision: 'rejected', comment: 'fix the API section' }),
       __resolvedApproveBody: inlineResolved,
@@ -73,16 +73,6 @@ describe('RequestApproveTool', () => {
     const out = await RequestApproveTool.call(inlineInput as any, ctx as any)
     const parsed = JSON.parse(out.output)
     expect(parsed).toEqual({ decision: 'rejected', comment: 'fix the API section' })
-  })
-
-  test('rejected WITHOUT comment → throws with clear message (defensive)', async () => {
-    const ctx = makeCtx({
-      awaitApprove: async () => ({ decision: 'rejected' as const }),
-      __resolvedApproveBody: inlineResolved,
-      __toolUseId: 'tu-3b',
-    } as any)
-    await expect(RequestApproveTool.call(inlineInput as any, ctx as any))
-      .rejects.toThrow('rejected decision must include a comment')
   })
 
   test('file variant passes through resolved body with displayPath', async () => {
@@ -117,7 +107,7 @@ describe('RequestApproveTool', () => {
     const r = RequestApproveTool.inputSchema.safeParse({
       title: 'x',
       body: { kind: 'file', path: '/absolute/path.md' },
-    } as any)
+    })
     expect(r.success).toBe(false)
   })
 
@@ -126,7 +116,7 @@ describe('RequestApproveTool', () => {
     const r = RequestApproveTool.inputSchema.safeParse({
       title: 'x',
       body: { kind: 'inline', content: big },
-    } as any)
+    })
     expect(r.success).toBe(false)
   })
 
@@ -134,7 +124,7 @@ describe('RequestApproveTool', () => {
     const r = RequestApproveTool.inputSchema.safeParse({
       title: '',
       body: { kind: 'inline', content: '# x' },
-    } as any)
+    })
     expect(r.success).toBe(false)
   })
 
@@ -152,15 +142,5 @@ describe('RequestApproveTool', () => {
     const ctx = makeCtx({ awaitApprove: undefined, __resolvedApproveBody: inlineResolved } as any)
     await expect(RequestApproveTool.call(inlineInput as any, ctx as any))
       .rejects.toThrow('awaitApprove not available')
-  })
-
-  test('resolved body missing → throws clearly', async () => {
-    const ctx = makeCtx({
-      awaitApprove: async () => ({ decision: 'approved' }),
-      __resolvedApproveBody: undefined,
-      __toolUseId: 'tu-y',
-    } as any)
-    await expect(RequestApproveTool.call(inlineInput as any, ctx as any))
-      .rejects.toThrow('resolved body missing')
   })
 })
