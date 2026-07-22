@@ -110,6 +110,29 @@ const PromptEvent = z.discriminatedUnion('type', [
                  label: z.string(), description: z.string().optional(),
                })),
              })) }),
+  // prompt.approve — server resolved the file body server-side, so the
+  // drawer always receives content populated. Matches ResolvedBody from
+  // zai-agent-core's RequestApproveTool schema.
+  z.object({
+    ...Base.shape,
+    type: z.literal('prompt.approve'),
+    sessionId: z.string(),
+    toolUseId: z.string(),
+    title: z.string(),
+    summary: z.string().optional(),
+    body: z.discriminatedUnion('kind', [
+      z.object({
+        kind: z.literal('inline'),
+        displayPath: z.null(),
+        content: z.string(),
+      }),
+      z.object({
+        kind: z.literal('file'),
+        displayPath: z.string(),
+        content: z.string(),
+      }),
+    ]),
+  }),
 ])
 
 const SystemEvent = z.discriminatedUnion('type', [
