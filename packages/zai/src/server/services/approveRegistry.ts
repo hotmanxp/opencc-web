@@ -14,7 +14,6 @@ type Pending = {
   reject: (e: Error) => void
   toolUseId: string
   sessionId: string
-  title: string
 }
 
 export class ApproveRegistry {
@@ -23,7 +22,6 @@ export class ApproveRegistry {
   register(
     toolUseId: string,
     sessionId: string,
-    title: string,
     abortSignal: AbortSignal,
   ): Promise<{ decision: PendingDecision; comment?: string }> {
     return new Promise((resolve, reject) => {
@@ -44,7 +42,6 @@ export class ApproveRegistry {
         },
         toolUseId,
         sessionId,
-        title,
       })
     })
   }

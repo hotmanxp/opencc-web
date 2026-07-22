@@ -5,7 +5,7 @@ describe('ApproveRegistry', () => {
   test('register + answer resolves with payload', async () => {
     const reg = new ApproveRegistry()
     const ctrl = new AbortController()
-    const p = reg.register('t1', 's1', 'Plan for X', ctrl.signal)
+    const p = reg.register('t1', 's1', ctrl.signal)
     const ok = reg.answer('t1', { decision: 'approved', comment: 'looks good' })
     expect(ok).toBe(true)
     await expect(p).resolves.toEqual({ decision: 'approved', comment: 'looks good' })
@@ -14,7 +14,7 @@ describe('ApproveRegistry', () => {
   test('register + reject rejects with default reason', async () => {
     const reg = new ApproveRegistry()
     const ctrl = new AbortController()
-    const p = reg.register('t1', 's1', 'Plan', ctrl.signal)
+    const p = reg.register('t1', 's1', ctrl.signal)
     reg.reject('t1')
     await expect(p).rejects.toThrow('user_rejected')
   })
@@ -28,7 +28,7 @@ describe('ApproveRegistry', () => {
   test('abort signal rejects pending Promise and removes it', async () => {
     const reg = new ApproveRegistry()
     const ctrl = new AbortController()
-    const p = reg.register('t1', 's1', 'P', ctrl.signal)
+    const p = reg.register('t1', 's1', ctrl.signal)
     expect(reg.peek('t1')).toBeDefined()
     ctrl.abort()
     await expect(p).rejects.toThrow('aborted')
@@ -38,8 +38,8 @@ describe('ApproveRegistry', () => {
   test('abortAll rejects every pending entry', async () => {
     const reg = new ApproveRegistry()
     const ctrl = new AbortController()
-    const p1 = reg.register('t1', 's1', 'A', ctrl.signal)
-    const p2 = reg.register('t2', 's1', 'B', ctrl.signal)
+    const p1 = reg.register('t1', 's1', ctrl.signal)
+    const p2 = reg.register('t2', 's1', ctrl.signal)
     reg.abortAll('session_aborted')
     await expect(p1).rejects.toThrow('session_aborted')
     await expect(p2).rejects.toThrow('session_aborted')
@@ -48,9 +48,9 @@ describe('ApproveRegistry', () => {
   test('listBySession filters correctly', () => {
     const reg = new ApproveRegistry()
     const ctrl = new AbortController()
-    reg.register('t1', 'sess-A', 'A', ctrl.signal)
-    reg.register('t2', 'sess-A', 'B', ctrl.signal)
-    reg.register('t3', 'sess-B', 'C', ctrl.signal)
+    reg.register('t1', 'sess-A', ctrl.signal)
+    reg.register('t2', 'sess-A', ctrl.signal)
+    reg.register('t3', 'sess-B', ctrl.signal)
     expect(reg.listBySession('sess-A').map((p) => p.toolUseId).sort()).toEqual(['t1', 't2'])
     expect(reg.listBySession('sess-B').map((p) => p.toolUseId)).toEqual(['t3'])
     expect(reg.listBySession('sess-X')).toEqual([])
@@ -59,14 +59,14 @@ describe('ApproveRegistry', () => {
   test('peek returns Pending with title', () => {
     const reg = new ApproveRegistry()
     const ctrl = new AbortController()
-    reg.register('t1', 's1', 'MyPlan', ctrl.signal)
+    reg.register('t1', 's1', ctrl.signal)
     expect(reg.peek('t1')).toEqual(expect.objectContaining({ title: 'MyPlan', sessionId: 's1' }))
   })
 
   test('X-Session-Id defense: peek allows read before answer', () => {
     const reg = new ApproveRegistry()
     const ctrl = new AbortController()
-    reg.register('t1', 'sess-A', 'X', ctrl.signal)
+    reg.register('t1', 'sess-A', ctrl.signal)
     expect(reg.peek('t1')?.sessionId).toBe('sess-A')
     expect(reg.peek('unknown')).toBeUndefined()
   })
@@ -74,7 +74,7 @@ describe('ApproveRegistry', () => {
   test('approved without comment is allowed', async () => {
     const reg = new ApproveRegistry()
     const ctrl = new AbortController()
-    const p = reg.register('t1', 's1', 'P', ctrl.signal)
+    const p = reg.register('t1', 's1', ctrl.signal)
     reg.answer('t1', { decision: 'approved' })
     await expect(p).resolves.toEqual({ decision: 'approved' })
   })

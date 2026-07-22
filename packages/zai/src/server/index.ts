@@ -22,7 +22,7 @@ import { slashRouter } from './routes/slash.js';
 import bashTasksRouter from './routes/bashTasks.js';
 import transcriptRouter from './routes/transcript.js';
 import { ensureManifestDir } from './services/manifest.js';
-import { initAgentRuntime, getAskRegistry } from './services/agentRuntime.js';
+import { initAgentRuntime, getAskRegistry, getApproveRegistry } from './services/agentRuntime.js';
 import {
   initBackgroundRuntime,
   initSubagentNotifierLifecycle,
@@ -110,6 +110,7 @@ export function createApp(opts: AppOptions): express.Express {
   // 单元测试因为 makeApp 用 '/api' 没问题, 生产环境全坏, 前端拿到 404.
   app.use('/api', (req, _res, next) => {
     (req as any)._askRegistry = getAskRegistry()
+    ;(req as any)._approveRegistry = getApproveRegistry()
     next()
   }, answerRouter)
 

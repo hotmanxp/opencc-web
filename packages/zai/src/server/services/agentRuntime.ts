@@ -63,6 +63,10 @@ export function getAskRegistry(): AskRegistry {
   return askRegistry
 }
 
+export function getApproveRegistry(): ApproveRegistry {
+  return approveRegistry
+}
+
 // 默认走 ~/.agents/skills (与 Nova CLI / OpenCode / OpenCC 共享, 见根 AGENTS.md).
 // 没这个默认 SkillTool 永远不会注册, 用户得自己写代码喂 skillsDirs, 违反 "out of the box".
 // ZAI_SKILLS_DIRS='' → 显式禁用; 不设 → 用默认; 设值 → 用 env (path.delimiter 分割).
@@ -188,6 +192,7 @@ export function getTranscriptStore(): TranscriptStore {
 
 export async function abortAgentSession(reason?: string): Promise<void> {
   askRegistry.abortAll(reason ?? 'session_aborted')
+  approveRegistry.abortAll(reason ?? 'session_aborted')
   if (currentSessionId) {
     abortSessionController(currentSessionId, reason)
   }
