@@ -466,7 +466,7 @@ export async function* queryLoop(
       cwd: options.cwd,
       parentUuid: lastUuid,
       config,
-    }, config.askRegistry)) {
+    }, config.askRegistry, config.approveRegistry)) {
       yield ev as RuntimeEvent
     }
     // 工具执行完, 把 chain 推进到最后一个 tool_result 的 uuid (如果有), 这样

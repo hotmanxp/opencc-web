@@ -9,6 +9,7 @@ export type MockScenario =
   | 'error'
   | 'skill-call-then-text'
   | 'skill-not-found'
+  | 'request-approve-tool'
 
 export function makeMockModelCaller(scenario: MockScenario = 'text-only'): ModelCaller {
   // Shared call counter so multi-turn scenarios (skill-call-then-text) can branch by call index.
@@ -110,6 +111,27 @@ export function makeMockModelCaller(scenario: MockScenario = 'text-only'): Model
       yield { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 't1', name: 'Skill', input: {} } }
       yield { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"name":"nope"}' } }
       yield { type: 'content_block_stop', index: 0 }
+      yield { type: 'message_stop' }
+      return
+    }
+    if (scenario === 'request-approve-tool') {
+      // First turn: yield a RequestApprove tool_use. Test must pre-register
+      // a decision on the approveRegistry, then the runtime should resolve,
+      // produce tool_use:done, and on the second turn yield text-only done.
+      if (myTurn === 0) {
+        yield { type: 'message_start', message: { id: 'm1' } }
+        yield { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 't1', name: 'RequestApprove', input: {} } }
+        yield { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"title":"plan","body":{"kind":"inline","content":"hi"}}' } }
+        yield { type: 'content_block_stop', index: 0 }
+        yield { type: 'message_delta', delta: { stop_reason: 'tool_use' } }
+        yield { type: 'message_stop' }
+        return
+      }
+      yield { type: 'message_start', message: { id: 'm2' } }
+      yield { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }
+      yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'done' } }
+      yield { type: 'content_block_stop', index: 0 }
+      yield { type: 'message_delta', delta: { stop_reason: 'end_turn' } }
       yield { type: 'message_stop' }
       return
     }
