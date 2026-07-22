@@ -113,6 +113,10 @@ export function createApp(opts: AppOptions): express.Express {
     ;(req as any)._approveRegistry = getApproveRegistry()
     next()
   }, answerRouter)
+  // ApproveRouter: 与 answerRouter 同一模式 — 共享 /api 前缀 + 上面的
+  // middleware 已经把 _approveRegistry 绑到 req. 内部 path 是 /agent/approve
+  // + /agent/approve/reject, 拼成 /api/agent/approve 与前端 ApproveDrawer 期望一致.
+  app.use('/api', approveRouter)
 
   // 启动分支检查器（每 10 秒检测一次 git 分支变化）
   startBranchChecker(opts.cwd);
