@@ -55,6 +55,9 @@ function dispatch(event: ServerEvent) {
     case 'prompt.ask':
       useAgentStore.getState().applyPromptAsk(event)
       break
+    case 'prompt.approve':
+      useAgentStore.getState().applyPromptApprove(event as any)
+      break
     case 'server.connected':
       useAppStore.getState().setConnected(true)
       break
