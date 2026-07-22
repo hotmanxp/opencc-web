@@ -24,33 +24,44 @@ describe('POST /api/agent/approve', () => {
   })
 
   test('缺字段 → 400', async () => {
-    const res = await request(app).post('/api/agent/approve').send({})
+    const res = await request(app)
+      .post('/api/agent/approve')
+      .set('Content-Type', 'application/json')
+      .send('{}')
     expect(res.status).toBe(400)
   })
 
   test('缺 decision → 400', async () => {
-    const res = await request(app).post('/api/agent/approve').send({ toolUseId: 't1' })
+    const res = await request(app)
+      .post('/api/agent/approve')
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ toolUseId: 't1' }))
     expect(res.status).toBe(400)
   })
 
   test('rejected 但缺 comment → 400', async () => {
     const res = await request(app)
       .post('/api/agent/approve')
-      .send({ toolUseId: 't1', decision: 'rejected' })
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ toolUseId: 't1', decision: 'rejected' }))
     expect(res.status).toBe(400)
   })
 
   test('comment > 2000 chars → 400', async () => {
     const res = await request(app)
       .post('/api/agent/approve')
-      .send({ toolUseId: 't1', decision: 'approved', comment: 'x'.repeat(2001) })
+      .set('Content-Type', 'application/json')
+      .send(
+        JSON.stringify({ toolUseId: 't1', decision: 'approved', comment: 'x'.repeat(2001) }),
+      )
     expect(res.status).toBe(400)
   })
 
   test('toolUseId 不存在 → 404', async () => {
     const res = await request(app)
       .post('/api/agent/approve')
-      .send({ toolUseId: 'unknown', decision: 'approved' })
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ toolUseId: 'unknown', decision: 'approved' }))
     expect(res.status).toBe(404)
   })
 
@@ -59,7 +70,8 @@ describe('POST /api/agent/approve', () => {
     const p = registry.register('t1', 's1', ctrl.signal)
     const res = await request(app)
       .post('/api/agent/approve')
-      .send({ toolUseId: 't1', decision: 'approved', comment: 'lgtm' })
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ toolUseId: 't1', decision: 'approved', comment: 'lgtm' }))
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(true)
     await expect(p).resolves.toEqual({ decision: 'approved', comment: 'lgtm' })
@@ -70,7 +82,8 @@ describe('POST /api/agent/approve', () => {
     const p = registry.register('t1', 's1', ctrl.signal)
     const res = await request(app)
       .post('/api/agent/approve')
-      .send({ toolUseId: 't1', decision: 'approved' })
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ toolUseId: 't1', decision: 'approved' }))
     expect(res.status).toBe(200)
     await expect(p).resolves.toEqual({ decision: 'approved' })
   })
@@ -80,7 +93,8 @@ describe('POST /api/agent/approve', () => {
     const p = registry.register('t1', 's1', ctrl.signal)
     const res = await request(app)
       .post('/api/agent/approve')
-      .send({ toolUseId: 't1', decision: 'rejected', comment: 'fix X' })
+      .set('Content-Type', 'application/json')
+      .send(JSON.stringify({ toolUseId: 't1', decision: 'rejected', comment: 'fix X' }))
     expect(res.status).toBe(200)
     await expect(p).resolves.toEqual({ decision: 'rejected', comment: 'fix X' })
   })
@@ -90,8 +104,9 @@ describe('POST /api/agent/approve', () => {
     const p = registry.register('t1', 'sess-A', ctrl.signal)
     const res = await request(app)
       .post('/api/agent/approve')
+      .set('Content-Type', 'application/json')
       .set('X-Session-Id', 'sess-A')
-      .send({ toolUseId: 't1', decision: 'approved' })
+      .send(JSON.stringify({ toolUseId: 't1', decision: 'approved' }))
     expect(res.status).toBe(200)
     await expect(p).resolves.toEqual({ decision: 'approved' })
   })
