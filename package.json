@@ -7,7 +7,7 @@
     "packages/*"
   ],
   "scripts": {
-    "build": "pnpm -r run build",
+    "build": "pnpm --filter @zn-ai/zai-agent-core run build && pnpm --filter @zn-ai/zai run build",
     "clean": "pnpm -r run clean",
     "dev": "pnpm -r run dev",
     "test": "pnpm -r run test",

@@ -6,11 +6,14 @@ import { REQUEST_APPROVE_TOOL_NAME, DESCRIPTION, REQUEST_APPROVE_TOOL_PROMPT } f
 // Re-export for system-prompt injection symmetry with AskUserQuestion.
 export { REQUEST_APPROVE_TOOL_NAME, DESCRIPTION, REQUEST_APPROVE_TOOL_PROMPT }
 
+// The shape the runtime passes to ctx.awaitApprove. The front end receives
+// the same canonical shape through the `prompt.approve` SSE event so the
+// drawer can render MarkdownText once it has fetched the body.
 export interface AwaitApproveInput {
   toolUseId: string
   title: string
   summary?: string
-  body: import('./schema.js').ResolvedBody
+  filePath: string
 }
 
 export interface AwaitApproveResult {
@@ -23,9 +26,9 @@ export const RequestApproveTool: LegacyTool<any, string> = {
   description: DESCRIPTION,
   inputSchema,
 
-  // No filesystem side effects from the tool itself — file reading is done
-  // by toolExecution.ts before this body is called. The tool simply awaits
-  // the user.
+  // No filesystem side effects — the front end fetches the body via the
+  // /api/agent/approve/file endpoint while the agent loop is parked on
+  // ctx.awaitApprove.
   isReadOnly: () => true,
 
   // Parallel calls are safe: each is keyed by its own toolUseId via
@@ -34,10 +37,6 @@ export const RequestApproveTool: LegacyTool<any, string> = {
   isConcurrencySafe: () => true,
 
   async call(rawInput: any, ctx: LegacyToolContext): Promise<{ output: string; isError?: boolean }> {
-    // The runtime supplies the resolved body (file path → file content) and
-    // attaches it to ctx elsewhere; this entry point expects to be invoked
-    // AFTER toolExecution.ts has already done the resolve. The input here
-    // is the original AI input for transcript fidelity.
     const input = rawInput as z.infer<typeof inputSchema>
 
     const awaitApprove = (ctx as any).awaitApprove as
@@ -47,18 +46,11 @@ export const RequestApproveTool: LegacyTool<any, string> = {
       throw new Error('awaitApprove not available on tool context — runtime misconfigured')
     }
 
-    // The runtime attaches the resolved body (file path → file content) onto
-    // ctx before calling this tool (Task 7 wires `bridgedCtx.__resolvedApproveBody`).
-    const resolved = (ctx as any).__resolvedApproveBody as AwaitApproveInput['body']
-    if (!resolved) {
-      throw new Error('resolved body missing on tool context — runtime must attach it before calling this tool')
-    }
-
     const result = await awaitApprove({
       toolUseId: (ctx as any).__toolUseId ?? 'unknown',
       title: input.title,
       ...(input.summary ? { summary: input.summary } : {}),
-      body: resolved,
+      filePath: input.filePath,
     })
 
     // Serialize to JSON string for transcript.

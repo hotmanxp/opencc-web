@@ -263,19 +263,19 @@ export async function* translateRuntimeEvents(
         break;
       }
       case "tool_use:approve_pending": {
-        // RequestApprove: toolExecution 已把 file 解析为 content. drawer 一律收
-        // 到 canonical ResolvedBody shape (kind ∈ {inline, file}). 不再二次读盘.
+        // RequestApprove: toolExecution 把 filePath 透传到前端, drawer 用它
+        // 调用 /api/agent/approve/file 拉文档. 运行时不再预读文件 — 节省 SSE
+        // 流量且用户总能看到 AI 提交的最新版本.
         const approveTuId = ((ev.id as string) ??
           (ev.toolUseId as string) ??
           "") as string;
-        const body = (ev.body as any) ?? { kind: 'inline', displayPath: null, content: '' };
         yield {
           type: "prompt.approve",
           sessionId,
           toolUseId: approveTuId,
           title: String(ev.title ?? ''),
           ...(ev.summary ? { summary: String(ev.summary) } : {}),
-          body,
+          filePath: String(ev.filePath ?? ''),
         } as any;
         break;
       }

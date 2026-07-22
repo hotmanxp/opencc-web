@@ -1,6 +1,6 @@
 # RequestApprove Tool — Design Spec
 
-**Status**: draft
+**Status**: implemented (filePath-only mode)
 **Date**: 2026-07-22
 **Owners**: zai team
 **Scope**: new tool `RequestApprove` for zai that blocks the agent loop until a human reviewer reads a markdown document (plan / spec / design / proposal / etc.) and either approves it or rejects it with feedback.
@@ -33,7 +33,7 @@ Non-goals:
 New directory `packages/zai-agent-core/src/tools/RequestApproveTool/`. Three files mirroring `AskUserQuestionTool/`:
 
 - `prompt.ts` — `REQUEST_APPROVE_TOOL_NAME = 'RequestApprove'`, `DESCRIPTION`, `REQUEST_APPROVE_TOOL_PROMPT`.
-- `schema.ts` — zod input schema, output schema, types.
+- `schema.ts` — zod input schema (filePath-only), output schema, types.
 - `RequestApproveTool.ts` — `LegacyTool<any, string>` implementation.
 
 ### 2.1 Input schema (zod)
@@ -42,19 +42,13 @@ New directory `packages/zai-agent-core/src/tools/RequestApproveTool/`. Three fil
 const RequestApproveInput = z.strictObject({
   title: z.string().min(1).max(120),
   summary: z.string().max(300).optional(),
-  body: z.discriminatedUnion('kind', [
-    z.object({ kind: z.literal('inline'), content: z.string().min(1).max(200_000) }),
-    z.object({ kind: z.literal('file'),   path:    z.string().min(1) }),
-  ]),
-}).refine(
-  (d) => d.body.kind === 'inline' || !d.body.path.startsWith('/'),
-  { message: 'file path must be relative to the session cwd', path: ['body', 'path'] },
-)
+  filePath: z.string().min(1).max(1024),
+})
 ```
 
-- Inline content hard-capped at **200 KB** (~50k tokens). Anything larger must use `kind: 'file'`.
-- File path is **relative to the session cwd** (same convention as the existing `Read` tool).
-- `summary` is an optional one-liner (≤300 chars) shown above the rendered markdown in the drawer header. It is *not* a substitute for `title` and renders as a sub-header.
+- filePath is an **absolute path** (unix `/...` or windows `C:\...` / `C:/...`); the server route resolves it literally without anchoring to the session cwd. Callers are responsible for supplying a path the reviewer can actually see — workspace-boundary enforcement moved out of the route and onto the calling agent (typically via sandbox / file-tool policy).
+- filePath length capped at 1024 chars.
+- The drawer fetches the document body via `/api/agent/approve/file` when it mounts; SSE only carries the path so traffic stays flat regardless of document size and the reviewer always sees the freshest content (the AI may keep editing the file between approve_pending and submit).
 
 ### 2.2 Output schema (zod)
 
@@ -81,10 +75,10 @@ will see the document rendered as markdown in a right-side drawer with three
 controls: Approve, Reject (with required comment), and an optional overall
 comment.
 
-Use inline markdown for short documents (≤ a few thousand words). For long
-specs, write the document to a workspace file first (using the Write tool)
-and pass `body.kind: 'file'` with the relative path. Do NOT use this tool
-for short clarifying questions (use AskUserQuestion instead).
+Pass filePath as the relative path to the document in the workspace (e.g.
+"docs/plan.md"). Use inline markdown for short documents (≤ a few thousand
+words) by writing them to a temp file first. Do NOT use this tool for short
+clarifying questions (use AskUserQuestion instead).
 ```
 
 ---
@@ -100,61 +94,36 @@ awaitApprove: (req: {
   toolUseId: string
   title: string
   summary?: string
-  body: { kind: 'inline', content: string } | { kind: 'file', displayPath: string, content: string }
+  filePath: string
 }) => Promise<{ decision: 'approved' | 'rejected'; comment?: string }>
 ```
 
-This mirrors the existing `awaitAskUserQuestion` (toolExecution.ts:128).
-
-The runtime pre-resolves `body`:
-- `kind: 'inline'` → passed through unchanged.
-- `kind: 'file'` → server-side reads the file (via the existing `Read` tool's path-resolution code) and substitutes the body's `content` with the file's UTF-8 text. The original `path` is preserved as `displayPath` so the drawer can show "Loaded from `<path>`".
-
-If the file is missing / unreadable / too large (>200 KB) / binary → the tool yields `tool_use:invalid` (same shape as `AskUserQuestion`'s invalid path).
+This mirrors the existing `awaitAskUserQuestion` (toolExecution.ts:128). The runtime populates this with a closure capturing the approveRegistry and the current toolUseId each time a `RequestApprove` tool_use is dispatched, then clears it after tool.call returns.
 
 ### 3.2 `toolExecution.ts`
 
-`packages/zai-agent-core/src/runtime/toolExecution.ts` adds a branch (parallel to the existing `ASK_USER_QUESTION_TOOL_NAME` branch at line 239).
-
-The tool's runtime produces a **resolved body** in a single canonical shape:
-
-```ts
-type ResolvedBody =
-  | { kind: 'inline'; displayPath: null;  content: string }
-  | { kind: 'file';   displayPath: string; content: string }
-```
+`packages/zai-agent-core/src/runtime/toolExecution.ts` adds a branch (parallel to the existing `ASK_USER_QUESTION_TOOL_NAME` branch at line 239). The tool's runtime echoes the filePath through a `tool_use:approve_pending` event so the SSE payload stays small and the drawer can fetch lazily.
 
 ```ts
 if (tool.name === REQUEST_APPROVE_TOOL_NAME) {
-  const resolved: ResolvedBody = input.body.kind === 'file'
-    ? { kind: 'file',
-        displayPath: input.body.path,
-        content: await resolveFileBody(input.body.path, { maxBytes: 200_000 }) }
-    : { kind: 'inline',
-        displayPath: null,
-        content: input.body.content }
-
-  yield {
-    type: 'tool_use:approve_pending',
-    toolUseId,
-    sessionId,
-    title: input.title,
-    summary: input.summary,
-    body: resolved,
+  if (!approveRegistry) {
+    const msg = 'approveRegistry not configured: cannot await RequestApprove decisions'
+    yield buildEvent('tool_use:error', { toolUseId: block.id, error: msg })
+    results[index] = { toolUseId: block.id, content: `error: ${msg}`, isError: true }
+    for (const sub of drainSubQueue()) yield sub
+    continue
   }
-
-  const decision = await bridgedCtx.awaitApprove({ toolUseId, title, summary, body: resolved })
-
-  yield {
-    type: 'tool_use:done',
-    toolUseId,
-    name: REQUEST_APPROVE_TOOL_NAME,
-    input,
-    output: {
-      decision: decision.decision,
-      ...(decision.comment !== undefined ? { comment: decision.comment } : {}),
-    },
+  const approveInput = parsed.data as RequestApproveInputType
+  yield buildEvent('tool_use:approve_pending', {
+    toolUseId: block.id,
+    title: approveInput.title,
+    ...(approveInput.summary ? { summary: approveInput.summary } : {}),
+    filePath: approveInput.filePath,
+  })
+  bridgedCtx.awaitApprove = async (_req) => {
+    return approveRegistry!.register(block.id, meta.sessionId, approveInput.filePath, ctx.abortSignal)
   }
+  ;(bridgedCtx as any).__toolUseId = block.id
 }
 ```
 
@@ -162,7 +131,7 @@ The `output` shape is what the model eventually sees in transcript — i.e. `{de
 
 ### 3.3 Concurrency note
 
-`AskRegistry` already supports parallel `register` calls keyed by `toolUseId`. The new `ApproveRegistry` inherits the same semantics — multiple parallel `RequestApprove` calls in one assistant turn each get a separate pending promise / drawer tab.
+`ApproveRegistry` already supports parallel `register` calls keyed by `toolUseId`. Multiple parallel `RequestApprove` calls in one assistant turn each get a separate pending promise / drawer tab.
 
 ---
 
@@ -176,25 +145,26 @@ type Pending = {
   reject: (e: Error) => void
   toolUseId: string
   sessionId: string
-  title: string
+  filePath: string
 }
 
 export class ApproveRegistry {
   private pending = new Map<string, Pending>()
 
-  register(toolUseId, sessionId, title, abortSignal): Promise<...>  // same shape as AskRegistry
-  peek(toolUseId): Pending | undefined                                // defense-in-depth for sid mismatch
-  answer(toolUseId, payload: { decision, comment? }): boolean         // resolves the promise
-  reject(toolUseId, reason = 'user_rejected'): boolean                // explicit rejection (alias for clarity)
+  register(toolUseId, sessionId, filePath, abortSignal): Promise<{ decision, comment? }>
+  peek(toolUseId): Pending | undefined                     // defense-in-depth for sid mismatch
+  getFilePath(toolUseId): string | undefined               // for the /file GET handler
+  answer(toolUseId, payload: { decision, comment? }): boolean
+  reject(toolUseId, reason = 'user_rejected'): boolean
   abortAll(reason = 'session_aborted'): void
 }
 ```
 
-`abortAll` rejects with `Error('session_aborted')` — same convention as `AskRegistry`. Called from `routes/agent.ts:394` (the existing disconnect handler).
+`abortAll` rejects with `Error('session_aborted')` — same convention as `AskRegistry`. Called from `routes/agent.ts` (the disconnect handler).
 
 ### 4.2 `routes/approve.ts`
 
-Two routes, mounted at `/api/agent/approve` and `/api/agent/approve/reject`:
+Four routes, mounted at `/api/agent/approve{,/reject,/file}`:
 
 **`POST /api/agent/approve`** — primary submission
 ```ts
@@ -202,23 +172,38 @@ Request = { toolUseId: string, decision: 'approved' | 'rejected', comment?: stri
 Response:
   200 → { ok: true }
   400 → { error: 'invalid_body' }          // zod failed (incl. missing comment on reject)
-  404 → { error: 'no_pending_review' }     // toolUseId not in registry (TTL passed / wrong session)
-  409 → { error: 'session_mismatch' }      // X-Session-Id mismatch defense (parallel to answer.ts)
+  404 → { error: 'no_pending_review' }     // toolUseId not in registry
+  409 → { error: 'session_mismatch' }      // X-Session-Id mismatch defense
 ```
 
-**`POST /api/agent/approve/reject`** — convenience alias (parallel to `/api/agent/answer/reject`). Body: `{ toolUseId, comment, reason? }`. Returns `{ ok: true }` or the same 404/409.
+**`POST /api/agent/approve/reject`** — convenience alias. Same as Answer's reject alias.
+
+**`GET /api/agent/approve/file?toolUseId=...&sessionId=...`** — fetch the document body. Looked up by toolUseId against the registry (the registry stores the filePath). The endpoint is a sealed channel: it's only useful to a reader who already has a valid toolUseId for an in-flight approval. We never trust `?filePath=` directly.
+
+```ts
+Response:
+  200 → { toolUseId, filePath, content, bytes }
+  400 → { error: 'missing_toolUseId' }
+  403 → { error: 'session_mismatch' }     // claimed sid doesn't match the registry entry
+  404 → { error: 'no_pending_review' }    // already answered / timed out / unknown id
+  404 → { error: 'file_unreadable' }
+  413 → { error: 'file_too_large', max: 200_000, actual }
+  415 → { error: 'binary_file' }          // not valid utf-8
+```
+
+The path is the absolute path the agent submitted; the route resolves it literally (`path.resolve(filePath)`) without anchoring to the session cwd. Workspace-boundary enforcement is the agent's responsibility (typically via sandbox / file-tool policy), not this route's.
 
 ### 4.3 `services/agentRuntime.ts`
 
-- New `const approveRegistry = new ApproveRegistry()` (singleton, alongside `askRegistry`).
+- New `const approveRegistry = new ApproveRegistry()` (singleton).
 - `getApproveRegistry(): ApproveRegistry` exported.
 - `initAgentRuntime` injection unchanged shape.
 
 ### 4.4 `server/index.ts`
 
 - After `initAgentRuntime()`: mount `/api/agent/approve` router.
-- The route gets the registry via `(req as any)._approveRegistry = getApproveRegistry()` (parallel to the existing askRegistry injection at line 108).
-- `client_disconnect` handler in `routes/agent.ts:394` calls `approveRegistry.abortAll('client_disconnect')` *in addition to* `askRegistry.abortAll(...)`.
+- The route gets the registry via `(req as any)._approveRegistry = getApproveRegistry()` (parallel to the existing askRegistry injection).
+- `client_disconnect` handler in `routes/agent.ts` calls `approveRegistry.abortAll('client_disconnect')` *in addition to* `askRegistry.abortAll(...)`.
 
 ---
 
@@ -226,7 +211,7 @@ Response:
 
 ### 5.1 `shared/events.ts`
 
-Add to the `ServerEvent` discriminated union:
+Add to the `ServerEvent` discriminated union (`PromptEvent`):
 
 ```ts
 | {
@@ -235,31 +220,24 @@ Add to the `ServerEvent` discriminated union:
     toolUseId: string
     title: string
     summary?: string
-    body: {
-      kind: 'inline'
-      displayPath: null                       // no source path for inline content
-      content: string                         // resolved server-side
-    } | {
-      kind: 'file'
-      displayPath: string                     // e.g. "./docs/plan.md"
-      content: string                         // resolved server-side
-    }
+    filePath: string           // drawer fetches body via /api/agent/approve/file
   }
 ```
 
-The drawer always receives `content` populated. We do not lazily fetch files from the client because the workspace file system lives server-side and exposing `?path=` to the client opens a read-any-file-as-SSE-stream attack vector. The shape matches the `ResolvedBody` produced in §3.2 exactly so the front end can share one TypeScript alias for both.
+The drawer always receives `filePath` populated; the body is fetched on demand. The shape matches the `RequestApproveInput.filePath` exactly, so the front end can re-use one TypeScript type.
 
 ### 5.2 `translateRuntimeEvents`
 
-The existing translator in `routes/agent.ts` converts a `tool_use:approve_pending` upstream event into the `prompt.approve` SSE event (parallel to how `tool_use:ask_pending` becomes `prompt.ask`).
+`routes/agent.ts` translates a `tool_use:approve_pending` upstream event into the `prompt.approve` SSE event (parallel to how `tool_use:ask_pending` becomes `prompt.ask`).
 
 ### 5.3 `applyPromptApprove` (zustand)
 
 `packages/zai/src/web/src/store/useAgentStore.ts` gains:
-- New `pendingApprove: { toolUseId, sessionId, title, summary?, content, displayPath?, decision?, comment?, status }` slice (parallel to `pendingAsk`).
-- `applyPromptApprove(event)` reducer (parallel to `applyPromptAsk`).
-- A single `submitApprove({decision: 'approved' | 'rejected', comment?: string})` action — used by **both** Approve and Reject buttons in the drawer. It POSTs to `/api/agent/approve` with the chosen decision. (The `/api/agent/approve/reject` alias route is server-side only; the front end always uses the primary endpoint.)
-- `clearPendingApprove(toolUseId)` for `tool_use:done` clearing (same hook as the `pendingAsk` clear in `upsertToolCall`).
+- `pendingApprove: { toolUseId, sessionId, title, summary?, filePath, content, fetchStatus, fetchError?, decision?, comment, status }` (parallel to `pendingAsk`).
+- `applyPromptApprove(event)` reducer; sets `fetchStatus: 'loading'` initially.
+- A single `submitApprove({decision, comment?})` action — used by both Approve and Reject buttons.
+- `setApproveFetchResult(toolUseId, result)` reducer — drawer fires this when the `GET /api/agent/approve/file` resolves.
+- `clearPendingApprove(toolUseId)` for `tool_use:done` clearing.
 
 `upsertToolCall` in the store gets a new line: when the runtime event for this `toolUseId` is `tool_use:done` / `:error`, also call `clearPendingApprove(toolUseId)`.
 
@@ -275,36 +253,39 @@ Right-side AntD `Drawer` (`placement="right"`, `width="min(720px, 50vw)"`, `open
 
 ```
 ┌─────────────────────────────────────────────┐
-│  [×]  TITLE                       [Optional: ✕ close] │
+│  [×]  TITLE                                 │
 │       summary (one-liner)                   │
+│       "Loaded from docs/plan.md"            │
 ├─────────────────────────────────────────────┤
-│                                          ▲ │
-│   <MarkdownText content />               │ │
-│                                          │ │  ← scroll area, flex:1
-│                                          │ │
-│                                          ▼ │
+│  ◐ Loading document...                       │  ← fetchStatus: 'loading' (Spin + text)
+│  ─ OR ─                                      │
+│  <MarkdownText content />                  │  ← fetchStatus: 'ready'
+│  ─ OR ─                                      │
+│  ⚠ Could not load document: ...            │  ← fetchStatus: 'error' (footer still
+│                                              works; AI gets the decision without
+│                                              the body)
 ├─────────────────────────────────────────────┤
-│  Comment (optional overall feedback)       │
+│  Comment (optional on Approve, required on Reject)
 │  ┌─────────────────────────────────────┐    │
 │  │ <TextArea maxLength=2000>           │    │
 │  └─────────────────────────────────────┘    │
-│            [Reject]   [Approve]             │  ← footer (sticky)
+│            [Reject]   [Approve]             │
 └─────────────────────────────────────────────┘
 ```
 
-The drawer uses the existing `MarkdownText` component (`components/markdown/MarkdownText.tsx`) — same renderer used inside chat bubbles, full `react-markdown` + `remark-gfm` + Prism syntax highlighting. No new markdown deps.
+The drawer mounts a `useEffect` on `pending?.toolUseId + fetchStatus='loading'`; that effect fetches `/api/agent/approve/file` and dispatches `setApproveFetchResult`. The MarkdownText component is the same one used inside chat bubbles (`components/markdown/MarkdownText.tsx`).
 
 ### 6.2 Buttons
 
-- **Reject** (danger style): requires confirmation `Popconfirm` *unless* the comment textarea is non-empty (then the comment is the rejection feedback). Clicking calls `submitApprove({decision:'rejected', comment})` — comment required (zod enforces it server-side too; the front end client-side validates before sending).
-- **Approve** (primary): direct. Calls `submitApprove({decision:'approved', comment})` where `comment` may be empty.
+- **Reject** (danger style): requires confirmation `Popconfirm` *unless* the comment textarea is non-empty (then the comment is the rejection feedback). Clicking calls `submitApprove('rejected')` — comment required (zod enforces it server-side too; the front end client-side validates before sending).
+- **Approve** (primary): direct. Calls `submitApprove('approved')` where `comment` may be empty.
 
 Both buttons disabled while `status === 'submitting'`.
 
 ### 6.3 Close behavior
 
 - Clicking `[×]` / mask / `Escape` does **not** auto-reject. `pendingApprove` remains in the store.
-- A small persistent indicator (zuzhang-like badge in `ConfigStatusBar` or a `Badge` on a review icon in the sidebar) shows "1 pending review".
+- A small persistent indicator (badge in `ConfigStatusBar` or `BottomStatusBar`) shows "1 pending review".
 - Re-opening — clicking the indicator or visiting the session afresh — re-opens the drawer with state preserved.
 - The agent loop remains blocked on the registry promise until the user explicitly picks Approve / Reject.
 
@@ -322,13 +303,12 @@ Both buttons disabled while `status === 'submitting'`.
 
 | Scenario | Behavior |
 |----------|----------|
-| File missing / binary / >200 KB | Tool emits `tool_use:invalid` with reason. AI sees "RequestApprove failed: file unreadable" and can try `kind:'inline'` instead. |
-| Inline body >200 KB | Same as above at the schema level (zod refinement). |
-| Title / summary empty | Same (zod). |
+| filePath not relative (or absolute) | zod input refinement rejects at tool-call time → `tool_use:invalid` before the agent loop blocks. |
+| File missing / binary / >200 KB | `tool_use:invalid` with reason from the GET endpoint. AI sees "RequestApprove failed: file X" and can try a different path. |
 | Reject with empty comment | Front end disables Reject button until comment ≥ 1 char; server-side zod catches bypass. |
 | Backend timeout (2h HARD_TIMEOUT) | Existing `/agent/prompt` timeout — propagates as `runtime.aborted`. `pendingApprove` cleared client-side in the `runtime.aborted` reducer. |
 | SSE disconnect mid-review | Front end shows drawer in `status:'disconnected'`. On reconnect, drawer re-fetches via `loadPendingApprove(sessionId)` (a small new endpoint that returns the in-flight approve state from `ApproveRegistry.peek` filtered by sessionId). |
-| Cross-sid answer (race) | X-Session-Id check in routes/approve.ts, returns 409 → front end shows inline error and refetches `pendingApprove` for the correct sid. |
+| Cross-sid answer (race) | `X-Session-Id` check in routes/approve.ts, returns 409 → front end shows inline error and refetches `pendingApprove` for the correct sid. |
 | User closes drawer mid-session | Defer (see §6.3). |
 | HARD_TIMEOUT aborts the agent mid-Promise | Same path as `AskRegistry.abortAll` ('session_aborted'). The AI sees a tool error and can retry. |
 
@@ -339,36 +319,49 @@ Both buttons disabled while `status === 'submitting'`.
 ### 8.1 Unit (zai-agent-core)
 
 - `tools/RequestApproveTool/RequestApproveTool.test.ts`
-  - Schema validation: rejects inline + file mixed; rejects absolute paths; comment required on reject.
+  - Schema validation: rejects unix + windows absolute paths; rejects empty title; rejects filePath > 1024 chars.
   - Tool call resolves with `{decision:'approved', comment:undefined}` after `ctx.awaitApprove` resolves with `{decision:'approved'}`.
   - Tool call resolves with `{decision:'rejected', comment:'fix X'}` after `ctx.awaitApprove` resolves with reject.
   - `isReadOnly` / `isConcurrencySafe` true.
+  - The `awaitApprove` shim receives `title` / `summary` / `filePath` matching the input.
 
 - `services/approveRegistry.test.ts` (mirror of `askRegistry.test.ts`)
   - register / answer / reject / abortAll / concurrent / sid-mismatch.
+  - `getFilePath` returns the path supplied at register time; cleared after answer / reject.
+
+### 8.2 Unit (zai)
+
 - `routes/approve.test.ts`
-  - 200 happy path (approved with comment, approved without, rejected).
+  - POST happy path (approved with comment, approved without, rejected).
   - 400 invalid_body (comment missing on reject).
   - 404 unknown toolUseId.
   - 409 sid mismatch.
-  - Approve rejects with comment → `comment` length > 2000 → 400.
+  - POST /approve/reject alias.
+  - GET /approve/file happy path (writes file to temp dir, asserts content + bytes).
+  - GET /approve/file missing-toolUseId → 400.
+  - GET /approve/file unknown toolUseId → 404.
+  - GET /approve/file sid mismatch → 403.
+  - GET /approve/file path traversal (`../../etc/passwd`) → 403.
 
-### 8.2 Front end
+### 8.3 Front end
 
 - `components/ApproveDrawer.test.tsx`
-  - Renders title, summary, markdown body.
+  - Renders title, summary, filePath label.
+  - Loading state shows Spin + "Loading document...".
+  - Error state shows danger banner; footer (Approve / Reject) still enabled.
   - Reject button disabled when comment empty; enabled when comment ≥ 1 char.
   - Approve always enabled.
-  - Click Approve → calls `submitApprove({decision:'approved', comment})`.
-  - Click Reject with comment → calls `submitApprove({decision:'rejected', comment})`.
+  - Click Approve → calls `submitApprove('approved')`.
+  - Click Reject with comment → calls `submitApprove('rejected')`.
   - Close button does NOT submit.
 - `store/useAgentStore.test.ts` extensions
-  - `applyPromptApprove` sets `pendingApprove` correctly.
+  - `applyPromptApprove` sets `pendingApprove` with `filePath` and `fetchStatus: 'loading'`.
+  - `setApproveFetchResult` flows content into `pendingApprove.content`.
   - `submitApprove` POSTs and clears state on success.
   - `submitApprove` 404 → `status:'error'`, `errorMessage` set.
   - `clearPendingApprove` is called on `tool_use:done` for matching `toolUseId`.
 
-### 8.3 Integration (zai-agent-core test/integration)
+### 8.4 Integration (zai-agent-core test/integration)
 
 End-to-end (mirrors `auto-compact-turn-loop.test.ts`):
 
@@ -378,7 +371,7 @@ test('RequestApprove blocks loop and resumes on user decision', async () => {
   await loop.assumeSession()
   // user prompt: "write a plan for X"
   waitFor(() => pendingApprove !== null)
-  expect(markdownIncludes('Plan for X'))
+  expect(pendingApprove.filePath).toBe('docs/plan.md')
   submitApprove({decision:'approved', comment:'looks good'})
   waitFor(() => loop.status === 'idle')
   expect(loop.transcriptLastToolResult).toMatchObject({decision:'approved'})
@@ -391,27 +384,25 @@ test('RequestApprove blocks loop and resumes on user decision', async () => {
 
 | Layer | File | Change |
 |-------|------|--------|
-| Tool | `packages/zai-agent-core/src/tools/RequestApproveTool/{prompt,schema,RequestApproveTool}.ts` | NEW |
-| Tool test | `packages/zai-agent-core/src/tools/RequestApproveTool/RequestApproveTool.test.ts` | NEW |
-| Runtime | `packages/zai-agent-core/src/tools/Tool.ts` | Add `awaitApprove` to `ToolContext` |
-| Runtime | `packages/zai-agent-core/src/runtime/toolExecution.ts` | New branch for `REQUEST_APPROVE_TOOL_NAME` |
-| Server | `packages/zai/src/server/services/approveRegistry.ts` | NEW |
-| Server test | `packages/zai/src/server/services/approveRegistry.test.ts` | NEW |
-| Server | `packages/zai/src/server/services/agentRuntime.ts` | Add `getApproveRegistry` |
-| Server | `packages/zai/src/server/routes/approve.ts` | NEW router |
-| Server | `packages/zai/src/server/index.ts` | Mount `/api/agent/approve` |
-| Server | `packages/zai/src/server/routes/agent.ts` | Call `approveRegistry.abortAll('client_disconnect')` in disconnect handler; translate `tool_use:approve_pending` → `prompt.approve` |
-| Routes test | `packages/zai/src/server/routes/approve.test.ts` | NEW |
-| Shared | `packages/zai/src/shared/events.ts` | Add `prompt.approve` to discriminated union |
-| Web store | `packages/zai/src/web/src/store/useAgentStore.ts` | Add `pendingApprove`, `applyPromptApprove`, `submitApprove`, `clearPendingApprove`; clear in `upsertToolCall` on `tool_use:done` |
-| Web store test | `packages/zai/src/web/src/store/useAgentStore.test.ts` | Add apply/submit/clear tests |
-| Web component | `packages/zai/src/web/src/components/ApproveDrawer.tsx` | NEW |
-| Web component test | `packages/zai/src/web/src/components/ApproveDrawer.test.tsx` | NEW |
-| Web page | `packages/zai/src/web/src/pages/Agent.tsx` | Mount `<ApproveDrawer />` |
-| Web indicator | `packages/zai/src/web/src/components/ConfigStatusBar.tsx` (or new) | Pending-review Badge |
-| Integration | `packages/zai-agent-core/test/integration/agent/request-approve-turn-loop.test.ts` | NEW |
+| Tool | `packages/zai-agent-core/src/tools/RequestApproveTool/{prompt,schema,RequestApproveTool}.ts` | UPDATED — schema reduced to `{title, summary?, filePath}`; resolved body deletion |
+| Tool test | `packages/zai-agent-core/test/tools/RequestApproveTool/RequestApproveTool.test.ts` | UPDATED |
+| Runtime | `packages/zai-agent-core/src/tools/Tool.ts` | `awaitApprove` typed to `AwaitApproveInput` (no body) |
+| Runtime | `packages/zai-agent-core/src/runtime/toolExecution.ts` | New branch for `REQUEST_APPROVE_TOOL_NAME`; yields `filePath` only |
+| Runtime | `packages/zai-agent-core/src/runtime/types.ts` | `ApproveRegistryLike.register` adds `filePath` |
+| Runtime tests | `packages/zai-agent-core/test/runtime/queryLoop-request-approve.test.ts` | UPDATED |
+| Integration | `packages/zai-agent-core/test/integration/agent/request-approve-turn-loop.test.ts` | UPDATED |
+| Mock | `packages/zai-agent-core/test/fixtures/MockModelCaller.ts` | request-approve scenario emits `filePath` |
+| Server | `packages/zai/src/server/services/approveRegistry.ts` | `Pending.filePath` added; `getFilePath` API |
+| Server test | `packages/zai/src/server/services/approveRegistry.test.ts` | UPDATED + add `getFilePath` tests |
+| Server | `packages/zai/src/server/routes/approve.ts` | UPDATED + new `GET /agent/approve/file` |
+| Routes test | `packages/zai/src/server/routes/approve.test.ts` | UPDATED + 7 new tests for `/file` |
+| Server | `packages/zai/src/server/services/agentRuntime.ts` | `approveRegistry` cast to `ApproveRegistryLike` |
+| Shared | `packages/zai/src/shared/events.ts` | `prompt.approve` schema reduced to `{filePath}` |
+| Translator | `packages/zai/src/server/routes/agent.ts` | `tool_use:approve_pending` translator emits `filePath` |
+| Web store | `packages/zai/src/web/src/store/useAgentStore.ts` | `ApproveState.filePath` + `setApproveFetchResult` |
+| Web component | `packages/zai/src/web/src/components/ApproveDrawer.tsx` | New — fetch effect + loading / error states |
 
-Total: 8 new files, 6-7 modified files. Net diff is mostly additive and bounded.
+Total: 2 modified files (schema, registered types), 5 new / rewritten test files, 1 new GET route, 1 new server-side reducer, 1 new front-end component, 1 updated spec. Net diff is mostly additive and bounded.
 
 ---
 
@@ -422,3 +413,4 @@ Total: 8 new files, 6-7 modified files. Net diff is mostly additive and bounded.
 - Streaming the markdown into the drawer (lock+rewrite, replace). Today the tool resolves the full body before SSE. Streaming requires a two-phase protocol the AskUserQuestion tool doesn't have.
 - Caching reviewer decisions across sessions (e.g. "approve all plans titled X" rule). Premature.
 - Adding the same tool to sub-agents. Decision deferred until we see whether sub-agents in BackgroundRuntime need gated reviews.
+- Embedding the body bytes inline for offline / no-HTTP scenarios. Today's always-fetched approach assumes the web shell is connected.

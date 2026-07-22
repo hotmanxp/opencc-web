@@ -565,14 +565,14 @@ describe('useAgentStore.transcriptCollapsed', () => {
 })
 
 describe('useAgentStore.applyPromptApprove', () => {
-  test('event with inline body → pendingApprove populated correctly', () => {
+  test('event with filePath → pendingApprove populated with fetchStatus loading', () => {
     useAgentStore.getState().applyPromptApprove({
       type: 'prompt.approve',
       sessionId: 's1',
       toolUseId: 'tu-1',
       title: 'Plan',
       summary: 'brief',
-      body: { kind: 'inline', displayPath: null, content: '# Plan\n\ncontent' },
+      filePath: 'docs/plan.md',
       eventId: 'e1',
       ts: 0,
     } as any)
@@ -581,24 +581,45 @@ describe('useAgentStore.applyPromptApprove', () => {
     expect(p!.toolUseId).toBe('tu-1')
     expect(p!.title).toBe('Plan')
     expect(p!.summary).toBe('brief')
-    expect(p!.content).toContain('content')
-    expect(p!.displayPath).toBeNull()
+    expect(p!.filePath).toBe('docs/plan.md')
+    // Body is NOT populated at SSE; the drawer fetches it on mount.
+    expect(p!.content).toBe('')
+    expect(p!.fetchStatus).toBe('loading')
     expect(p!.status).toBe('pending')
     expect(p!.decision).toBeNull()
     expect(p!.comment).toBe('')
   })
 
-  test('event with file body → displayPath populated', () => {
+  test('setApproveFetchResult flows content into pendingApprove', () => {
     useAgentStore.getState().applyPromptApprove({
       type: 'prompt.approve',
-      sessionId: 's1',
-      toolUseId: 'tu-2',
-      title: 'Design',
-      body: { kind: 'file', displayPath: 'docs/design.md', content: 'resolved file content' },
-      eventId: 'e2',
-      ts: 0,
+      sessionId: 's1', toolUseId: 'tu-r', title: 'T',
+      filePath: 'docs/x.md',
+      eventId: 'e-r', ts: 0,
     } as any)
-    expect(useAgentStore.getState().pendingApprove!.displayPath).toBe('docs/design.md')
+    useAgentStore.getState().setApproveFetchResult('tu-r', {
+      ok: true,
+      content: 'resolved file content',
+    })
+    const p = useAgentStore.getState().pendingApprove!
+    expect(p.content).toBe('resolved file content')
+    expect(p.fetchStatus).toBe('ready')
+  })
+
+  test('setApproveFetchResult error keeps pendingApprove', () => {
+    useAgentStore.getState().applyPromptApprove({
+      type: 'prompt.approve',
+      sessionId: 's1', toolUseId: 'tu-e', title: 'T',
+      filePath: 'docs/x.md',
+      eventId: 'e-e', ts: 0,
+    } as any)
+    useAgentStore.getState().setApproveFetchResult('tu-e', {
+      ok: false,
+      error: 'file_unreadable',
+    })
+    const p = useAgentStore.getState().pendingApprove!
+    expect(p.fetchStatus).toBe('error')
+    expect(p.fetchError).toBe('file_unreadable')
   })
 
   test('event without summary → undefined', () => {
@@ -607,7 +628,7 @@ describe('useAgentStore.applyPromptApprove', () => {
       sessionId: 's1',
       toolUseId: 'tu-3',
       title: 'NoSummary',
-      body: { kind: 'inline', displayPath: null, content: 'x' },
+      filePath: 'docs/x.md',
       eventId: 'e3',
       ts: 0,
     } as any)
@@ -620,7 +641,7 @@ describe('useAgentStore.applyPromptApprove', () => {
       sessionId: 's1',
       toolUseId: 'tu-c',
       title: 'T',
-      body: { kind: 'inline', displayPath: null, content: 'x' },
+      filePath: 'docs/x.md',
       eventId: 'e-c',
       ts: 0,
     } as any)
@@ -632,7 +653,7 @@ describe('useAgentStore.applyPromptApprove', () => {
     useAgentStore.getState().applyPromptApprove({
       type: 'prompt.approve',
       sessionId: 's1', toolUseId: 'tu-x', title: 'T',
-      body: { kind: 'inline', displayPath: null, content: 'x' },
+      filePath: 'docs/x.md',
       eventId: 'e-x', ts: 0,
     } as any)
     useAgentStore.getState().clearPendingApprove('tu-x')
@@ -643,7 +664,7 @@ describe('useAgentStore.applyPromptApprove', () => {
     useAgentStore.getState().applyPromptApprove({
       type: 'prompt.approve',
       sessionId: 's1', toolUseId: 'tu-y', title: 'T',
-      body: { kind: 'inline', displayPath: null, content: 'x' },
+      filePath: 'docs/x.md',
       eventId: 'e-y', ts: 0,
     } as any)
     useAgentStore.getState().clearPendingApprove('tu-other')

@@ -6,6 +6,10 @@
 // /api/agent/approve resolves it; the runtime's bridged
 // `ctx.awaitApprove` registers it; abortAll is called on session
 // disconnect.
+//
+// filePath lives alongside the registry entry so /api/agent/approve/file
+// can resolve the same target the front end saw in the SSE event (the
+// SSE payload is just the path — no body bytes hit the wire).
 
 type PendingDecision = 'approved' | 'rejected'
 
@@ -14,6 +18,7 @@ type Pending = {
   reject: (e: Error) => void
   toolUseId: string
   sessionId: string
+  filePath: string
 }
 
 export class ApproveRegistry {
@@ -22,6 +27,7 @@ export class ApproveRegistry {
   register(
     toolUseId: string,
     sessionId: string,
+    filePath: string,
     abortSignal: AbortSignal,
   ): Promise<{ decision: PendingDecision; comment?: string }> {
     return new Promise((resolve, reject) => {
@@ -42,6 +48,7 @@ export class ApproveRegistry {
         },
         toolUseId,
         sessionId,
+        filePath,
       })
     })
   }
@@ -50,6 +57,12 @@ export class ApproveRegistry {
   // (before calling answer / reject).
   peek(toolUseId: string): Pending | undefined {
     return this.pending.get(toolUseId)
+  }
+
+  // Read the resolved filePath so /api/agent/approve/file can serve it.
+  // Mirrors peek() for sid-mismatch defense: undefined if no pending entry.
+  getFilePath(toolUseId: string): string | undefined {
+    return this.pending.get(toolUseId)?.filePath
   }
 
   answer(

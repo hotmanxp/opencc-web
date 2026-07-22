@@ -50,6 +50,7 @@ export type ApproveRegistryLike = {
   register: (
     toolUseId: string,
     sessionId: string,
+    filePath: string,
     abortSignal: AbortSignal,
   ) => Promise<{
     decision: 'approved' | 'rejected'

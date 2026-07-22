@@ -3,15 +3,14 @@ import { executeToolsStreaming } from '../../../src/runtime/toolExecution.js'
 import { REQUEST_APPROVE_TOOL_NAME } from '../../../src/tools/RequestApproveTool/prompt.js'
 import { RequestApproveTool } from '../../../src/tools/RequestApproveTool/RequestApproveTool.js'
 import type { ApproveRegistryLike } from '../../../src/runtime/types.js'
-import { mkdirSync, writeFileSync } from 'node:fs'
 
 // Same minimal in-memory registry shape as zai's services/approveRegistry.ts
 // — reimplemented here to avoid a cross-package import in tests.
 class TestApproveRegistry implements ApproveRegistryLike {
-  pending = new Map<string, { resolve: (d: any) => void; reject: (e: Error) => void; sessionId: string }>()
-  register(toolUseId: string, sessionId: string, _sig: AbortSignal): Promise<any> {
+  pending = new Map<string, { resolve: (d: any) => void; reject: (e: Error) => void; sessionId: string; filePath: string }>()
+  register(toolUseId: string, sessionId: string, filePath: string, _sig: AbortSignal): Promise<any> {
     return new Promise<any>((resolve, reject) => {
-      this.pending.set(toolUseId, { resolve, reject, sessionId })
+      this.pending.set(toolUseId, { resolve, reject, sessionId, filePath })
     })
   }
   answer(toolUseId: string, payload: any) {
@@ -32,7 +31,7 @@ describe('RequestApprove end-to-end turn loop', () => {
         name: REQUEST_APPROVE_TOOL_NAME,
         input: {
           title: 'My plan',
-          body: { kind: 'inline', content: '# Plan\n\nA plan.' },
+          filePath: '/tmp/plan.md',
         },
       },
     ]
@@ -61,24 +60,23 @@ describe('RequestApprove end-to-end turn loop', () => {
     expect(approvePending).toBeTruthy()
     expect(approvePending.toolUseId).toBe('tu-1')
     expect(approvePending.title).toBe('My plan')
-    expect(approvePending.body).toEqual({ kind: 'inline', displayPath: null, content: '# Plan\n\nA plan.' })
+    // Runtime no longer reads file content — only echoes the filePath.
+    // The drawer fetches the body via /api/agent/approve/file when it
+    // mounts.
+    expect(approvePending.filePath).toBe('/tmp/plan.md')
     const done = collected.find((e) => e.type === 'tool_use:done')
     expect(done).toBeTruthy()
   })
 
   test('file path with displayPath preserved in approve_pending event', async () => {
     const reg = new TestApproveRegistry()
-    // runtime's resolveFileBody reads cwd + relative path off disk;
-    // pre-create the file under /tmp so the read succeeds.
-    mkdirSync('/tmp/docs', { recursive: true })
-    writeFileSync('/tmp/docs/design.md', '# design content', 'utf8')
     const blocks = [
       {
         id: 'tu-2',
         name: REQUEST_APPROVE_TOOL_NAME,
         input: {
           title: 'design',
-          body: { kind: 'file', path: 'docs/design.md' },
+          filePath: '/tmp/design.md',
         },
       },
     ]
@@ -101,9 +99,11 @@ describe('RequestApprove end-to-end turn loop', () => {
       }
     })()
 
+    // The runtime no longer pre-reads the file — that responsibility moved
+    // to the front-end drawer via the GET /api/agent/approve/file route.
+    // We just confirm the path is preserved on the SSE event.
     const approvePending = collected.find((e) => e.type === 'tool_use:approve_pending')
-    expect(approvePending.body.kind).toBe('file')
-    expect(approvePending.body.displayPath).toBe('docs/design.md')
+    expect(approvePending.filePath).toBe('/tmp/design.md')
   })
 
   test('approveRegistry not configured → tool_use:error yielded, promise not awaited', async () => {
@@ -111,7 +111,7 @@ describe('RequestApprove end-to-end turn loop', () => {
       {
         id: 'tu-3',
         name: REQUEST_APPROVE_TOOL_NAME,
-        input: { title: 'T', body: { kind: 'inline', content: 'x' } },
+        input: { title: 'T', filePath: '/tmp/x.md' },
       },
     ]
 

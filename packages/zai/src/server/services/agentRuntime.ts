@@ -1,3 +1,4 @@
+import type { ApproveRegistryLike } from '@zn-ai/zai-agent-core'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { join } from 'node:path'
@@ -115,7 +116,7 @@ export function initAgentRuntime(cwd: string): void {
       process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
       ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
     askRegistry,
-    approveRegistry,
+    approveRegistry: approveRegistry as unknown as ApproveRegistryLike,
     skillsDirs: resolveSkillsDirs(),
     // 启用 OpenCC plugin loader (superpowers 等) —
     // 不传这个字段则 plugin 永远不会被实例化,见

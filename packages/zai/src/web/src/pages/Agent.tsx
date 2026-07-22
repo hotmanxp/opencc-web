@@ -96,6 +96,7 @@ export default function Agent() {
   const pendingAsk = useAgentStore((s) => s.pendingAsk);
   const setAskAnswer = useAgentStore((s) => s.setAskAnswer);
   const setAskNotes = useAgentStore((s) => s.setAskNotes);
+  const setAskOtherText = useAgentStore((s) => s.setAskOtherText);
   const submitAsk = useAgentStore((s) => s.submitAsk);
   const rejectAsk = useAgentStore((s) => s.rejectAsk);
   const todosForCurrentSession: TodoItem[] =

@@ -110,9 +110,9 @@ const PromptEvent = z.discriminatedUnion('type', [
                  label: z.string(), description: z.string().optional(),
                })),
              })) }),
-  // prompt.approve — server resolved the file body server-side, so the
-  // drawer always receives content populated. Matches ResolvedBody from
-  // zai-agent-core's RequestApproveTool schema.
+  // prompt.approve — drawer 只收 filePath, 文档内容由前端按需 fetch
+  // /api/agent/approve/file 取得. 这样 SSE 流量与文档大小解耦, 且用户
+  // 总能看到 AI 提交后的最新版本(AI 可在 await 期间继续编辑文件).
   z.object({
     ...Base.shape,
     type: z.literal('prompt.approve'),
@@ -120,18 +120,7 @@ const PromptEvent = z.discriminatedUnion('type', [
     toolUseId: z.string(),
     title: z.string(),
     summary: z.string().optional(),
-    body: z.discriminatedUnion('kind', [
-      z.object({
-        kind: z.literal('inline'),
-        displayPath: z.null(),
-        content: z.string(),
-      }),
-      z.object({
-        kind: z.literal('file'),
-        displayPath: z.string(),
-        content: z.string(),
-      }),
-    ]),
+    filePath: z.string(),
   }),
 ])
 

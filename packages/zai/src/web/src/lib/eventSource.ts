@@ -21,6 +21,7 @@ const NAMED_EVENT_TYPES = [
   'runtime.done',
   'runtime.aborted',
   'runtime.error',
+  'runtime.compacted',
   // session.*
   'session.created',
   'session.deleted',
@@ -32,6 +33,7 @@ const NAMED_EVENT_TYPES = [
   'job.failed',
   // prompt.*
   'prompt.ask',
+  'prompt.approve',
   // system.*
   'server.connected',
   'server.error',

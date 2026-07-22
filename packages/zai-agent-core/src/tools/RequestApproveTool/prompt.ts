@@ -9,4 +9,4 @@ export const DESCRIPTION = `Use this tool to gate the agent loop on a human revi
 
 export const REQUEST_APPROVE_TOOL_PROMPT = `Use this tool to gate the agent loop on a human review of a document you've produced (plan, spec, design doc, proposal, RFC, contract, etc.). The user will see the document rendered as markdown in a right-side drawer with three controls: Approve, Reject (with required comment), and an optional overall comment.
 
-Use inline markdown for short documents (≤ a few thousand words). For long specs, write the document to a workspace file first (using the Write tool) and pass body.kind: 'file' with the relative path. Do NOT use this tool for short clarifying questions (use AskUserQuestion instead).`
+Use inline markdown for short documents (≤ a few thousand words). For long specs, write the document to a workspace file first (using the Write tool) and pass an absolute filePath (e.g. /Users/you/project/docs/spec.md). Do NOT use this tool for short clarifying questions (use AskUserQuestion instead).`

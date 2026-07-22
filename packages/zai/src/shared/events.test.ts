@@ -40,29 +40,20 @@ describe('ServerEvent schema', () => {
     expect(() => ServerEvent.parse(event)).not.toThrow()
   })
 
-  test('accepts prompt.approve (inline + file body variants)', () => {
-    const inlineEvent = {
+  test('accepts prompt.approve (filePath variant)', () => {
+    // The filePath simplification: prompt.approve only carries the path;
+    // the body is fetched by the drawer via /api/agent/approve/file.
+    const evt = {
       type: 'prompt.approve',
-      eventId: 'evt_3a',
+      eventId: 'evt_3',
       ts: 1000,
       sessionId: 's_3',
       toolUseId: 'tu_a',
-      title: 'Review inline body',
-      body: { kind: 'inline', displayPath: null, content: '# Hi' },
-    }
-    expect(() => ServerEvent.parse(inlineEvent)).not.toThrow()
-
-    const fileEvent = {
-      type: 'prompt.approve',
-      eventId: 'evt_3b',
-      ts: 1000,
-      sessionId: 's_3',
-      toolUseId: 'tu_b',
-      title: 'Review file body',
+      title: 'Review spec',
       summary: 'Loaded from disk',
-      body: { kind: 'file', displayPath: 'docs/plan.md', content: '# Plan' },
+      filePath: 'docs/plan.md',
     }
-    expect(() => ServerEvent.parse(fileEvent)).not.toThrow()
+    expect(() => ServerEvent.parse(evt)).not.toThrow()
   })
 
   test('accepts server.connected', () => {

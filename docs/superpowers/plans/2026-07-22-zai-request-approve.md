@@ -17,7 +17,7 @@
 These apply to every task. Pulled verbatim from the spec — do not relax.
 
 - Inline body hard-cap: **200 KB** (`max(200_000)` in zod).
-- File path requirement: relative to session cwd, **must not** start with `/`.
+- File path requirement: **absolute path** (unix `/...` or windows `C:\...` / `C:/...`); the route resolves it literally, no cwd anchoring. Workspace-boundary enforcement is the agent's responsibility.
 - Title length: `1..120`. Summary length: `≤ 300`. Comment length: `1..2000` on reject; `0..2000` (optional) on approve.
 - Approve comment is optional; **reject comment is required** (zod discriminated union enforces it).
 - Server resolves file bodies server-side before SSE; the drawer must receive `content` always populated.

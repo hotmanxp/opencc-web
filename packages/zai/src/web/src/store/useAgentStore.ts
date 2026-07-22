@@ -109,7 +109,12 @@ export type AskState = {
   status: 'pending' | 'submitting' | 'error'
   errorMessage?: string
   answers: Record<string, string>
-  annotations: Record<string, { notes?: string }>
+  // otherText: 用户在 "Other" 选项下输入的真实文本。独立于 answers 存储
+  // 是因为 Other 一旦被选中, answers 必须保持 '__other__' 占位符以便
+  // QuestionCard 判断 Input 块是否挂载; 若直接把文本写进 answers, Radio
+  // 模式下 isOtherSelected 会在打字瞬间变 false → Input 块卸载 → 焦点
+  // 丢失并跳到附加说明 TextArea (QuestionCard 失焦 bug)。
+  annotations: Record<string, { notes?: string; otherText?: string }>
 }
 
 // Per-tool-Use pending state for the new RequestApprove flow. Mirrors
@@ -119,8 +124,14 @@ export type ApproveState = {
   sessionId: string
   title: string
   summary?: string
+  // filePath is the relative path the AI submitted; the drawer fetches
+  // /api/agent/approve/file on mount to populate `content`. Initial
+  // state is 'loading' so the UI can show a spinner.
+  filePath: string
   content: string
-  displayPath: string | null
+  /** null while the drawer is fetching or if the fetch failed. */
+  fetchStatus: 'idle' | 'loading' | 'ready' | 'error'
+  fetchError?: string
   decision: 'approved' | 'rejected' | null
   comment: string
   status: 'pending' | 'submitting' | 'error'
@@ -187,6 +198,12 @@ interface AgentState {
   setApproveComment: (comment: string) => void
   submitApprove: (decision: 'approved' | 'rejected') => Promise<void>
   applyPromptApprove: (event: any) => void
+  setApproveFetchResult: (
+    toolUseId: string,
+    result:
+      | { ok: true; content: string }
+      | { ok: false; error: string },
+  ) => void
   clearPendingApprove: (toolUseId: string) => void
   // 工具边界计数: 每出现一个新的 tool_use 起点, 计数 +1, 用于把
   // 工具调用前后的文字段强制放进不同 stream block. 不依赖 Anthropic SDK
@@ -287,6 +304,11 @@ interface AgentState {
   stop: () => Promise<void>
   setAskAnswer: (questionText: string, label: string) => void
   setAskNotes: (questionText: string, notes: string) => void
+  // 'Other' 选项下的真实文本: 写到 annotations.otherText 而非 answers,
+  // 让 answers 始终保持 '__other__' 占位 (QuestionCard 用它判断 Input
+  // 块挂载/卸载 — Radio 模式下若 answers 跟着输入变, isOtherSelected 会
+  // 变 false → Input 卸载 → 焦点跳到附加说明 TextArea).
+  setAskOtherText: (questionText: string, text: string) => void
   submitAsk: () => Promise<void>
   rejectAsk: (reason?: string) => Promise<void>
 }
@@ -1160,6 +1182,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   }),
 
+  // 'Other' 文本独立写 annotations.otherText — 不动 answers. 原因见
+  // setAskNotes 上面 + AskState 类型注释: answers 必须保持 '__other__'
+  // 占位符, 否则 QuestionCard 的 Radio 模式下 isOtherSelected 会变 false
+  // → Input 块卸载 → 焦点丢失。
+  setAskOtherText: (questionText, text) => set((s) => {
+    if (!s.pendingAsk) return s
+    return {
+      pendingAsk: {
+        ...s.pendingAsk,
+        annotations: {
+          ...s.pendingAsk.annotations,
+          [questionText]: { ...(s.pendingAsk.annotations[questionText] ?? {}), otherText: text },
+        },
+      },
+    }
+  }),
+
   submitAsk: async () => {
     const s = get()
     if (!s.pendingAsk) return
@@ -1171,6 +1210,29 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // pendingAsk.sessionId 由 applyPromptAsk 写入, 兜底用 store.sessionId
       // (老 schema 没写, 给旧 transcript 残留的 pendingAsk 留 fallback).
       const askSid = s.pendingAsk.sessionId ?? s.sessionId
+      // POST 前把 answers 里的 '__other__' 占位符替换成对应
+      // annotations.otherText 里的真实文本 — server (AskUserQuestionTool)
+      // 只透传 answers 给下游, 不识别 '__other__' 这个 sentinel.
+      // 替换策略: 对每条 answer, 若 === '__other__' → 取 otherText;
+      // 若包含 '__other__' (Checkbox 多选) → 把 '__other__' 这一段
+      // 替换成 otherText 然后重 join. Radio/Checkbox 两条路径都覆盖.
+      const resolvedAnswers: Record<string, string> = {}
+      for (const [qText, ans] of Object.entries(s.pendingAsk.answers)) {
+        const other = s.pendingAsk.annotations[qText]?.otherText ?? ''
+        if (ans === OTHER_OPTION_VALUE) {
+          resolvedAnswers[qText] = other
+        } else if (ans.includes(OTHER_OPTION_VALUE)) {
+          // Checkbox 多选: "label1, __other__, label2" → 把 '__other__'
+          // 槽替换为 otherText, 保持原有顺序, 重新 ', ' join.
+          const parts = ans.split(', ')
+          resolvedAnswers[qText] = parts
+            .map((p) => (p === OTHER_OPTION_VALUE ? other : p))
+            .filter((p) => p.length > 0)
+            .join(', ')
+        } else {
+          resolvedAnswers[qText] = ans
+        }
+      }
       const res = await fetch('/api/agent/answer', {
         method: 'POST',
         headers: {
@@ -1179,7 +1241,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         },
         body: JSON.stringify({
           toolUseId: s.pendingAsk.toolUseId,
-          answers: s.pendingAsk.answers,
+          answers: resolvedAnswers,
           annotations: s.pendingAsk.annotations,
         }),
       })
@@ -1451,10 +1513,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   }),
 
-  // prompt.approve → pendingApprove (mirrors applyPromptAsk).
+  // prompt.approve → pendingApprove. After this lands the drawer mounts
+  // and fires fetchApproveFile() to populate content via
+  // /api/agent/approve/file. Until that fetch resolves the drawer
+  // shows a loading state (fetchStatus: 'loading').
   applyPromptApprove: (event) => set((state) => {
     if (!event || event.type !== 'prompt.approve') return state
-    const body = (event as any).body ?? { kind: 'inline', displayPath: null, content: '' }
+    const filePath = String((event as any).filePath ?? '')
     return {
       ...state,
       pendingApprove: {
@@ -1462,11 +1527,37 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         toolUseId: event.toolUseId,
         title: event.title,
         ...(event.summary ? { summary: event.summary } : {}),
-        content: String(body.content ?? ''),
-        displayPath: body.kind === 'file' ? String(body.displayPath ?? '') : null,
+        filePath,
+        content: '',
+        fetchStatus: filePath ? 'loading' : 'error',
+        ...(filePath ? {} : { fetchError: 'AI did not supply a file path' }),
         decision: null,
         comment: '',
         status: 'pending',
+      },
+    }
+  }),
+
+  // setApproveFetchResult 后端 fetch 完成时 drawer 调. ok 路径写 content,
+  // 失败路径写 fetchError 让 drawer 显示 fallback 提示.
+  setApproveFetchResult: (toolUseId, result) => set((s) => {
+    if (!s.pendingApprove || s.pendingApprove.toolUseId !== toolUseId) return s
+    if (result.ok) {
+      return {
+        ...s,
+        pendingApprove: {
+          ...s.pendingApprove,
+          content: result.content,
+          fetchStatus: 'ready',
+        },
+      }
+    }
+    return {
+      ...s,
+      pendingApprove: {
+        ...s.pendingApprove,
+        fetchStatus: 'error',
+        fetchError: result.error,
       },
     }
   }),

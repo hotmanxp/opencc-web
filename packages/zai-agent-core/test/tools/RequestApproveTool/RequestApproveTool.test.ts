@@ -13,21 +13,17 @@ function makeCtx(overrides: Partial<LegacyToolContext> = {}): LegacyToolContext 
   } as any
 }
 
-const inlineInput = {
+// Both inline + file-input variants now share the same flat shape — just
+// a `filePath` pointing at a workspace file. The AI no longer decides
+// between inline or file; the drawer always fetches via /api/agent/approve/file.
+//
+// filePath is now an absolute path (unix or windows). The server route
+// resolves it literally; callers are responsible for supplying a path
+// the reviewer can actually see.
+const baseInput = {
   title: 'Plan for the foo feature',
   summary: 'Brief one-liner',
-  body: { kind: 'inline' as const, content: '# Plan\n\nThis is the plan.' },
-}
-
-const fileInput = {
-  title: 'Design doc',
-  body: { kind: 'file' as const, path: 'docs/design.md' },
-}
-
-const inlineResolved = {
-  kind: 'inline' as const,
-  displayPath: null,
-  content: '# Plan\n\nThis is the plan.',
+  filePath: '/tmp/plan.md',
 }
 
 describe('RequestApproveTool', () => {
@@ -37,10 +33,9 @@ describe('RequestApproveTool', () => {
     }))
     const ctx = makeCtx({
       awaitApprove,
-      __resolvedApproveBody: inlineResolved,
       __toolUseId: 'tu-1',
     } as any)
-    const out = await RequestApproveTool.call(inlineInput as any, ctx as any)
+    const out = await RequestApproveTool.call(baseInput as any, ctx as any)
     expect(out.isError).toBeFalsy()
     const parsed = JSON.parse(out.output)
     expect(parsed.decision).toBe('approved')
@@ -49,17 +44,16 @@ describe('RequestApproveTool', () => {
       toolUseId: 'tu-1',
       title: 'Plan for the foo feature',
       summary: 'Brief one-liner',
-      body: inlineResolved,
+      filePath: '/tmp/plan.md',
     }))
   })
 
   test('approved WITH comment → output { decision: "approved", comment }', async () => {
     const ctx = makeCtx({
       awaitApprove: async () => ({ decision: 'approved', comment: 'looks solid' }),
-      __resolvedApproveBody: inlineResolved,
       __toolUseId: 'tu-2',
     } as any)
-    const out = await RequestApproveTool.call(inlineInput as any, ctx as any)
+    const out = await RequestApproveTool.call(baseInput as any, ctx as any)
     const parsed = JSON.parse(out.output)
     expect(parsed).toEqual({ decision: 'approved', comment: 'looks solid' })
   })
@@ -67,32 +61,25 @@ describe('RequestApproveTool', () => {
   test('rejected with comment → output { decision: "rejected", comment }', async () => {
     const ctx = makeCtx({
       awaitApprove: async () => ({ decision: 'rejected', comment: 'fix the API section' }),
-      __resolvedApproveBody: inlineResolved,
       __toolUseId: 'tu-3',
     } as any)
-    const out = await RequestApproveTool.call(inlineInput as any, ctx as any)
+    const out = await RequestApproveTool.call(baseInput as any, ctx as any)
     const parsed = JSON.parse(out.output)
     expect(parsed).toEqual({ decision: 'rejected', comment: 'fix the API section' })
   })
 
-  test('file variant passes through resolved body with displayPath', async () => {
-    const fileResolved = {
-      kind: 'file' as const,
-      displayPath: 'docs/design.md',
-      content: '# Design\n\n...resolved file content...',
-    }
+  test('filePath passes through to awaitApprove (drawer fetches file)', async () => {
     const captured: AwaitApproveInput[] = []
     const ctx = makeCtx({
       awaitApprove: async (req) => {
         captured.push(req)
         return { decision: 'approved' }
       },
-      __resolvedApproveBody: fileResolved,
       __toolUseId: 'tu-4',
     } as any)
-    await RequestApproveTool.call(fileInput as any, ctx as any)
-    expect(captured[0]!.body).toEqual(fileResolved)
-    expect(captured[0]!.summary).toBeUndefined()
+    await RequestApproveTool.call({ ...baseInput, filePath: '/tmp/design.md' } as any, ctx as any)
+    expect(captured[0]!.filePath).toBe('/tmp/design.md')
+    expect(captured[0]!.summary).toBe('Brief one-liner')
   })
 
   test('isReadOnly true', () => {
@@ -103,27 +90,48 @@ describe('RequestApproveTool', () => {
     expect(RequestApproveTool.isConcurrencySafe!({} as any)).toBe(true)
   })
 
-  test('schema rejects absolute file path', () => {
+  test('schema accepts absolute unix file path', () => {
     const r = RequestApproveTool.inputSchema.safeParse({
       title: 'x',
-      body: { kind: 'file', path: '/absolute/path.md' },
+      filePath: '/absolute/path.md',
     })
-    expect(r.success).toBe(false)
+    expect(r.success).toBe(true)
+    if (r.success) {
+      expect(r.data.filePath).toBe('/absolute/path.md')
+    }
   })
 
-  test('schema rejects inline over 200_000 chars', () => {
-    const big = 'x'.repeat(200_001)
+  test('schema accepts absolute windows file path', () => {
     const r = RequestApproveTool.inputSchema.safeParse({
       title: 'x',
-      body: { kind: 'inline', content: big },
+      filePath: 'C:/some/path.md',
     })
-    expect(r.success).toBe(false)
+    expect(r.success).toBe(true)
+    if (r.success) {
+      expect(r.data.filePath).toBe('C:/some/path.md')
+    }
+  })
+
+  test('schema still accepts relative file paths', () => {
+    const r = RequestApproveTool.inputSchema.safeParse({
+      title: 'x',
+      filePath: 'docs/x.md',
+    })
+    expect(r.success).toBe(true)
   })
 
   test('schema rejects empty title', () => {
     const r = RequestApproveTool.inputSchema.safeParse({
       title: '',
-      body: { kind: 'inline', content: '# x' },
+      filePath: '/tmp/x.md',
+    })
+    expect(r.success).toBe(false)
+  })
+
+  test('schema rejects filePath > 1024 chars', () => {
+    const r = RequestApproveTool.inputSchema.safeParse({
+      title: 'x',
+      filePath: '/' + 'a'.repeat(1024),
     })
     expect(r.success).toBe(false)
   })
@@ -131,16 +139,15 @@ describe('RequestApproveTool', () => {
   test('propagates abort error from awaitApprove', async () => {
     const ctx = makeCtx({
       awaitApprove: async () => { throw new Error('aborted') },
-      __resolvedApproveBody: inlineResolved,
       __toolUseId: 'tu-x',
     } as any)
-    await expect(RequestApproveTool.call(inlineInput as any, ctx as any))
+    await expect(RequestApproveTool.call(baseInput as any, ctx as any))
       .rejects.toThrow('aborted')
   })
 
   test('awaitApprove not available → throws clearly', async () => {
-    const ctx = makeCtx({ awaitApprove: undefined, __resolvedApproveBody: inlineResolved } as any)
-    await expect(RequestApproveTool.call(inlineInput as any, ctx as any))
+    const ctx = makeCtx({ awaitApprove: undefined } as any)
+    await expect(RequestApproveTool.call(baseInput as any, ctx as any))
       .rejects.toThrow('awaitApprove not available')
   })
 })

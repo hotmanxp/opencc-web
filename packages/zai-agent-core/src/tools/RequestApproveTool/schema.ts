@@ -1,40 +1,26 @@
 import { z } from 'zod'
 
-// 200KB hard cap on inline content. ~50k tokens is the practical maximum
-// we want to allow through the SSE pipeline; anything larger should use the
-// `file` variant and write the document to disk first.
-const INLINE_BODY_MAX = 200_000
+// 上限:title / summary / comment 与旧 spec 对齐。filePath 长度单独限制
+// 防止用户传超长字符串绕过 prefix 检查。路径 1KB 已远超实践上限。
 const TITLE_MAX = 120
 const SUMMARY_MAX = 300
 const COMMENT_MAX = 2000
+const FILE_PATH_MAX = 1024
 
-// The body the AI submits. Discriminated by `kind`. Exactly one variant must
-// be present per the runtime's parseAndExecute flow.
-export const RequestApproveBody = z.discriminatedUnion('kind', [
-  z.object({
-    kind: z.literal('inline'),
-    content: z.string().min(1).max(INLINE_BODY_MAX),
-  }),
-  z.object({
-    kind: z.literal('file'),
-    // Path is relative to the session cwd. The runtime validates that this
-    // doesn't start with '/' (an absolute path would escape the workspace).
-    path: z.string().min(1),
-  }),
-])
-export type RequestApproveBody = z.infer<typeof RequestApproveBody>
-
+// Simplified input: just a title + an optional summary + a filePath that the
+// front-end can fetch on demand. We deliberately DO NOT inline the body here:
+//   - SSE traffic stays constant regardless of document size
+//   - The reviewer always sees the freshest content (the AI may keep editing
+//     the file before submit); the old `inline` variant captured a snapshot
+//   - No 200KB cap is needed because the bytes never traverse the wire
+//
+// filePath 接受绝对路径(unix `/...` 或 windows `C:\...` / `C:/...`)。服务端
+// 路由直接按字面值解析,不再相对 session cwd 锚定 — 调用方负责给出合法路径。
 export const RequestApproveInput = z.strictObject({
   title: z.string().min(1).max(TITLE_MAX),
   summary: z.string().max(SUMMARY_MAX).optional(),
-  body: RequestApproveBody,
-}).refine(
-  // File paths must be relative to the session cwd. Absolute paths are
-  // rejected because they escape the workspace boundary that the runtime
-  // already maintains for Read/Write.
-  (d) => d.body.kind === 'inline' || !d.body.path.startsWith('/'),
-  { message: 'file path must be relative to the session cwd', path: ['body', 'path'] },
-)
+  filePath: z.string().min(1).max(FILE_PATH_MAX),
+})
 export type RequestApproveInput = z.infer<typeof RequestApproveInput>
 
 // Output is what the model sees in transcript after the user decides.
@@ -55,12 +41,6 @@ export const RequestApproveOutput = z.discriminatedUnion('decision', [
 export type RequestApproveOutput = z.infer<typeof RequestApproveOutput>
 
 export type RequestApproveDecision = 'approved' | 'rejected'
-
-// The shape the runtime resolves into before passing to the registry. The
-// SSE event uses the same canonical shape — see shared/events.ts.
-export type ResolvedBody =
-  | { kind: 'inline'; displayPath: null;  content: string }
-  | { kind: 'file';   displayPath: string; content: string }
 
 // Canonical aliases matching AskUserQuestionTool's schema convention. The
 // runtime imports the tool's inputSchema/outputSchema by these names.

@@ -21,10 +21,10 @@ import type { ApproveRegistryLike } from '../../src/runtime/types.js'
 // In-memory registry mirroring zai/services/approveRegistry.ts, kept inline
 // to avoid a cross-package import in tests.
 class TestApproveRegistry implements ApproveRegistryLike {
-  pending = new Map<string, { resolve: (d: any) => void; reject: (e: Error) => void; sessionId: string }>()
-  register(toolUseId: string, sessionId: string, _sig: AbortSignal): Promise<any> {
+  pending = new Map<string, { resolve: (d: any) => void; reject: (e: Error) => void; sessionId: string; filePath: string }>()
+  register(toolUseId: string, sessionId: string, filePath: string, _sig: AbortSignal): Promise<any> {
     return new Promise<any>((resolve, reject) => {
-      this.pending.set(toolUseId, { resolve, reject, sessionId })
+      this.pending.set(toolUseId, { resolve, reject, sessionId, filePath })
       // Auto-approve on the next microtask. We can't predict the runtime's
       // internal toolUseId string reliably from outside the modelCaller
       // fixture, so resolving whatever id the runtime passes through is
@@ -73,7 +73,8 @@ describe('queryLoop RequestApprove registry pass-through', () => {
     expect(pending, 'expected tool_use:approve_pending to be yielded when approveRegistry is configured').toBeTruthy()
     expect(pending.toolUseId).toBeTruthy()
     expect(pending.title).toBe('plan')
-    expect(pending.body).toEqual({ kind: 'inline', displayPath: null, content: 'hi' })
+    // Runtime only echoes the filePath; the body fetch moved to /api/agent/approve/file.
+    expect(pending.filePath).toBe('/tmp/plan.md')
 
     expect(error, 'expected NO tool_use:error("approveRegistry ...") when registry is wired').toBeUndefined()
 

@@ -8,11 +8,16 @@ const { Text } = Typography
 export type QuestionCardProps = {
   questions: any[]
   answers: Record<string, string>
-  annotations: Record<string, { notes?: string }>
+  annotations: Record<string, { notes?: string; otherText?: string }>
   status: 'pending' | 'submitting' | 'error'
   errorMessage?: string
   onAnswer: (questionText: string, label: string) => void
   onNotesChange: (questionText: string, notes: string) => void
+  // 'Other' 文本变更: 写到 annotations.otherText 而非 answers.
+  // 设计动机见 useAgentStore.ts 里的 setAskOtherText 注释. 简要: answers
+  // 必须始终保持 '__other__' 占位, 否则 Radio 模式下 isOtherSelected
+  // 在打字瞬间变 false → Input 块卸载 → 焦点丢失并跳到附加说明 TextArea.
+  onOtherChange: (questionText: string, text: string) => void
   onSubmit: () => void
   onReject: () => void
 }
@@ -68,41 +73,49 @@ function QuestionPanel({
   annotations,
   onAnswer,
   onNotesChange,
+  onOtherChange,
 }: {
   q: any
   answers: Record<string, string>
-  annotations: Record<string, { notes?: string }>
+  annotations: Record<string, { notes?: string; otherText?: string }>
   onAnswer: (questionText: string, label: string) => void
   onNotesChange: (questionText: string, notes: string) => void
+  onOtherChange: (questionText: string, text: string) => void
 }) {
   const currentAnswer = answers[q.question]
-  // Radio 选中 Other 但用户尚未输入文本时, 父组件的 answers 是占位符
-  // OTHER_OPTION_VALUE。此时本地 otherText 必须独立承载正在输入的文本,
-  // 不要被 answers 覆盖回去。
+  // 'Other' 选项的固定逻辑: answers 中始终保持 '__other__' 占位, 文本
+  // 走 annotations.otherText。这样设计的原因是 — Radio 模式下, 如果把
+  // 用户输入直接写进 answers, store 每次按键都更新, 父级 useAgentStore
+  // 重新渲染 QuestionPanel, currentAnswer 立刻变成用户文本 (例如 'h'),
+  // isOtherSelected (= currentAnswer === '__other__') 变 false, {isOtherSelected && ...}
+  // 这块 Input 从 DOM 卸载, 焦点丢失并跳到下面 TextArea。
+  // 修复后, 即使用户输入字符, answers 仍保持 '__other__', Input 块始终
+  // 挂载, 焦点保留在 Other 文本框里。
   const isOtherSelected = currentAnswer === OTHER_OPTION_VALUE
-  const initialOtherText = isOtherSelected ? '' : (currentAnswer ?? '')
-  const [otherText, setOtherText] = useState<string>(initialOtherText)
+  // Other 文本完全由父组件 store 维护 (单一数据源), 不再用 useState —
+  // 之前 useState 的设计是让父组件不参与中间 Input 状态, 但这恰好是
+  // 触发 bug 的根因 (父级重渲染 + isOtherSelected 变 false)。改成由
+  // annotations.otherText 完全控制, React 重新挂载/卸载 Input 时永远
+  // 拿到最新值, 不会再"丢失焦点"或在父级重渲染时丢失输入字符。
+  const otherText = annotations[q.question]?.otherText ?? ''
 
   const handleRadioChange = (e: any) => {
     if (e.target.value === OTHER_OPTION_VALUE) {
-      // 切到 Other: 同步清空本地文本, 通知父组件占位。
-      setOtherText('')
+      // 切到 Other: answers 设占位符 (永久保持); 清空 otherText (用户
+      // 重新输入), 通知父组件 (经 onOtherChange 写 annotations.otherText)。
+      onOtherChange(q.question, '')
       onAnswer(q.question, OTHER_OPTION_VALUE)
     } else {
-      setOtherText('')
+      // 切走 Other: 清理 otherText (防止切回去时残留), 设真实答案。
+      onOtherChange(q.question, '')
       onAnswer(q.question, e.target.value)
     }
   }
 
-  // Checkbox 模式: answers 是 "label1, label2, __other__" 形式。
-  // 选中 Other 时右侧出 Input; 文本真实值就是 answers 去掉 __other__
-  // 槽位后剩下的第一项("__other__" 替换成用户文本)。__other__ 必须
-  // 始终位于第一位, 这样 answers 解析清晰。
+  // Checkbox 模式: answers 是 "label1, label2, __other__" 形式 (Other 永远在首项)。
+  // 选中 Other 时右侧出 Input; 文本真实值就是 annotations.otherText。
   const selectedList = (currentAnswer ?? '').split(', ').filter(Boolean)
   const checkboxOtherActive = selectedList.includes(OTHER_OPTION_VALUE)
-  const checkboxOtherText = checkboxOtherActive
-    ? (selectedList[0] === OTHER_OPTION_VALUE ? (selectedList[1] ?? '') : (selectedList[selectedList.indexOf(OTHER_OPTION_VALUE)] ?? ''))
-    : ''
 
   return (
     <div>
@@ -140,15 +153,8 @@ function QuestionPanel({
                 <Input
                   autoFocus
                   placeholder="请输入..."
-                  value={checkboxOtherText}
-                  onChange={(e) => {
-                    // 把 __other__ 这个槽替换成用户当前输入的文本, 其余
-                    // 真实选项保留; __other__ 永远排在第一位便于 UI 识别。
-                    const rest = selectedList.filter((v) => v !== OTHER_OPTION_VALUE)
-                    const text = e.target.value
-                    const merged = [OTHER_OPTION_VALUE, text, ...rest].filter(Boolean).join(', ')
-                    onAnswer(q.question, merged)
-                  }}
+                  value={otherText}
+                  onChange={(e) => onOtherChange(q.question, e.target.value)}
                 />
               </div>
             )}
@@ -174,7 +180,7 @@ function QuestionPanel({
                 </Radio>
               ))}
               <Radio key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE}>
-                <div style={{ fontWeight: 500 }}>{OTHER_OPTION_LABEL}</div>
+                <div style={{ fontWeight: 500 }>{OTHER_OPTION_LABEL}</div>
               </Radio>
             </Radio.Group>
             {isOtherSelected && (
@@ -183,11 +189,7 @@ function QuestionPanel({
                   autoFocus
                   placeholder="请输入..."
                   value={otherText}
-                  onChange={(e) => {
-                    const text = e.target.value
-                    setOtherText(text)
-                    onAnswer(q.question, text || OTHER_OPTION_VALUE)
-                  }}
+                  onChange={(e) => onOtherChange(q.question, e.target.value)}
                 />
               </div>
             )}
@@ -211,16 +213,26 @@ function QuestionPanel({
 
 /**
  * Answer 是否算"已答完"。Radio 模式下选了 Other 但还没在文本框里写字
- * 的话,答案值仍是 OTHER_OPTION_VALUE 占位符 — 这种情况视作未答完。
- * 单选 `__other__` 占位 = 未答; 复选 `__other__, <empty>` = 未答。
+ * 的话,答案值仍是 OTHER_OPTION_VALUE 占位符 — 这种情况视作未答完, 必须
+ * 看 annotations[q.question].otherText 才知道是否输入了真实文本 (since
+ * 2026-07-20: answers 不再携带 Other 文本, 改存 annotations.otherText).
+ * 单选 `__other__` 占位 + otherText 空 = 未答; 复选 `__other__, ...` =
+ * 看 otherText 是否为空。
  */
-function isAnswered(answer: string | undefined): boolean {
+function isAnswered(
+  answer: string | undefined,
+  annotations: Record<string, { notes?: string; otherText?: string }>,
+  questionText: string,
+): boolean {
   if (!answer) return false
-  if (answer === OTHER_OPTION_VALUE) return false
-  // 复选: "__other__, userText" 中 userText 空 → 算未答完
-  if (answer.startsWith(`${OTHER_OPTION_VALUE}, `)) {
-    const rest = answer.slice(OTHER_OPTION_VALUE.length + 2)
-    return rest.trim().length > 0
+  if (answer === OTHER_OPTION_VALUE) {
+    // Radio 选 Other + 已输入文本 → 已答。
+    return (annotations[questionText]?.otherText ?? '').trim().length > 0
+  }
+  // 复选: "__other__, userText" — 同样以 otherText 是否填了为标准
+  // (answers 里不再嵌入文本)。其他真实选项 (A, B, ...) 直接算已答。
+  if (answer.includes(OTHER_OPTION_VALUE)) {
+    return (annotations[questionText]?.otherText ?? '').trim().length > 0
   }
   return true
 }
@@ -238,7 +250,7 @@ function ReviewPanel({
 }: {
   questions: any[]
   answers: Record<string, string>
-  annotations: Record<string, { notes?: string }>
+  annotations: Record<string, { notes?: string; otherText?: string }>
   allAnswered: boolean
   status: 'pending' | 'submitting' | 'error'
   onSubmit: () => void
@@ -247,13 +259,13 @@ function ReviewPanel({
     <div>
       {questions.map((q) => {
         const ans = answers[q.question]
+        const otherText = annotations[q.question]?.otherText ?? ''
         let display: string
         if (!ans) {
           display = ''
-        } else if (ans === OTHER_OPTION_VALUE || ans.startsWith(`${OTHER_OPTION_VALUE}, `)) {
+        } else if (ans === OTHER_OPTION_VALUE || ans.includes(OTHER_OPTION_VALUE)) {
           // 显示 Other 文本(若有),用 "Other: xxx" 形式标记是自填项
-          const text = ans === OTHER_OPTION_VALUE ? '' : ans.slice(OTHER_OPTION_VALUE.length + 2)
-          display = text ? `Other: ${text}` : 'Other(待填写)'
+          display = otherText ? `Other: ${otherText}` : 'Other(待填写)'
         } else {
           display = ans
         }
@@ -281,10 +293,10 @@ function ReviewPanel({
 }
 
 export default function QuestionCard(props: QuestionCardProps) {
-  const { questions, answers, annotations, status, errorMessage, onAnswer, onNotesChange, onSubmit, onReject } = props
+  const { questions, answers, annotations, status, errorMessage, onAnswer, onNotesChange, onOtherChange, onSubmit, onReject } = props
   const firstQuestion = questions[0]
   const [tabKey, setTabKey] = useState<string>(firstQuestion?.question ?? 'review')
-  const allAnswered = questions.every((q) => isAnswered(answers[q.question]))
+  const allAnswered = questions.every((q) => isAnswered(answers[q.question], annotations, q.question))
 
   if (!firstQuestion) return null
 
@@ -325,6 +337,7 @@ export default function QuestionCard(props: QuestionCardProps) {
           annotations={annotations}
           onAnswer={onAnswer}
           onNotesChange={onNotesChange}
+          onOtherChange={onOtherChange}
         />
 
         <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
