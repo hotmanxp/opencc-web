@@ -563,3 +563,90 @@ describe('useAgentStore.transcriptCollapsed', () => {
     expect(useAgentStore.getState().transcriptCollapsed).toBe(true)
   })
 })
+
+describe('useAgentStore.applyPromptApprove', () => {
+  test('event with inline body → pendingApprove populated correctly', () => {
+    useAgentStore.getState().applyPromptApprove({
+      type: 'prompt.approve',
+      sessionId: 's1',
+      toolUseId: 'tu-1',
+      title: 'Plan',
+      summary: 'brief',
+      body: { kind: 'inline', displayPath: null, content: '# Plan\n\ncontent' },
+      eventId: 'e1',
+      ts: 0,
+    } as any)
+    const p = useAgentStore.getState().pendingApprove
+    expect(p).toBeTruthy()
+    expect(p!.toolUseId).toBe('tu-1')
+    expect(p!.title).toBe('Plan')
+    expect(p!.summary).toBe('brief')
+    expect(p!.content).toContain('content')
+    expect(p!.displayPath).toBeNull()
+    expect(p!.status).toBe('pending')
+    expect(p!.decision).toBeNull()
+    expect(p!.comment).toBe('')
+  })
+
+  test('event with file body → displayPath populated', () => {
+    useAgentStore.getState().applyPromptApprove({
+      type: 'prompt.approve',
+      sessionId: 's1',
+      toolUseId: 'tu-2',
+      title: 'Design',
+      body: { kind: 'file', displayPath: 'docs/design.md', content: 'resolved file content' },
+      eventId: 'e2',
+      ts: 0,
+    } as any)
+    expect(useAgentStore.getState().pendingApprove!.displayPath).toBe('docs/design.md')
+  })
+
+  test('event without summary → undefined', () => {
+    useAgentStore.getState().applyPromptApprove({
+      type: 'prompt.approve',
+      sessionId: 's1',
+      toolUseId: 'tu-3',
+      title: 'NoSummary',
+      body: { kind: 'inline', displayPath: null, content: 'x' },
+      eventId: 'e3',
+      ts: 0,
+    } as any)
+    expect(useAgentStore.getState().pendingApprove!.summary).toBeUndefined()
+  })
+
+  test('setApproveComment writes comment', () => {
+    useAgentStore.getState().applyPromptApprove({
+      type: 'prompt.approve',
+      sessionId: 's1',
+      toolUseId: 'tu-c',
+      title: 'T',
+      body: { kind: 'inline', displayPath: null, content: 'x' },
+      eventId: 'e-c',
+      ts: 0,
+    } as any)
+    useAgentStore.getState().setApproveComment('hello')
+    expect(useAgentStore.getState().pendingApprove!.comment).toBe('hello')
+  })
+
+  test('clearPendingApprove(toolUseId) clears matching pending', () => {
+    useAgentStore.getState().applyPromptApprove({
+      type: 'prompt.approve',
+      sessionId: 's1', toolUseId: 'tu-x', title: 'T',
+      body: { kind: 'inline', displayPath: null, content: 'x' },
+      eventId: 'e-x', ts: 0,
+    } as any)
+    useAgentStore.getState().clearPendingApprove('tu-x')
+    expect(useAgentStore.getState().pendingApprove).toBeNull()
+  })
+
+  test('clearPendingApprove with non-matching toolUseId is a no-op', () => {
+    useAgentStore.getState().applyPromptApprove({
+      type: 'prompt.approve',
+      sessionId: 's1', toolUseId: 'tu-y', title: 'T',
+      body: { kind: 'inline', displayPath: null, content: 'x' },
+      eventId: 'e-y', ts: 0,
+    } as any)
+    useAgentStore.getState().clearPendingApprove('tu-other')
+    expect(useAgentStore.getState().pendingApprove).not.toBeNull()
+  })
+})
