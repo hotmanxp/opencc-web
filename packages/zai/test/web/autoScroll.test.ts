@@ -4,14 +4,19 @@
 // 这是 Agent.tsx 那个 effect 的核心决策, 抽出来好测:
 //
 //   - 用户主动滚过 (scrollFollowLocked) → 绝对不滚 (5s 锁)
-//   - messages 没新增 (in-place delta append 也算没新增) → 不滚
+//   - 容器内容长高 (contentGrew) + 用户在底部 → 滚动 (streaming 期间的关键信号)
+//   - messages 没新增 + 容器没长高 → 不滚
 //   - 已经离底部很远 (distanceToBottomPx > NEAR_BOTTOM_PX) → 不滚
 //   - 其他 → 滚
 //
-// ROOT CAUSE 修复: 旧逻辑只看 [messages, pendingAsk, scrollFollowLocked],
-// messages 数组在 streaming delta 时每条都换新引用, 但 length 不变, 仍然
-// fire scrollIntoView, 把阅读历史的用户视线拉回。本规则让"无 length 增长"
-// 不再触发滚动。
+// ROOT CAUSE 修复历史:
+//   1) 旧逻辑只看 [messages, pendingAsk, scrollFollowLocked], messages 数组在
+//      streaming delta 时每条都换新引用, 但 length 不变, 仍然 fire scrollIntoView,
+//      把阅读历史的用户视线拉回。
+//   2) 第一次 fix 加上"length 不增长 → 不滚", 但漏掉了 streaming 期间 length
+//      不变、容器内容却长高 (同一 bubble 持续 append) 的场景, 用户根本看不到
+//      新内容。
+//   3) 当前 fix 引入 contentGrew (scrollHeight 是否真长高) 作为互补信号。
 import { describe, it, expect } from 'vitest'
 import { decideAutoScroll } from '../../src/web/src/hooks/autoScroll.js'
 
@@ -21,20 +26,62 @@ describe('decideAutoScroll', () => {
       decideAutoScroll({
         prevLength: 5,
         nextLength: 6,
+        contentGrew: true,
         scrollFollowLocked: false,
         distanceToBottomPx: 0,
       }),
     ).toBe('follow')
   })
 
-  it('messages 数量不变 (streaming delta in-place append) → 不滚', () => {
-    // 这是核心修复: upsertStreamBlock 每条 delta 都返回新 messages 数组,
-    // 但 length 仍 5, 旧逻辑会 fire effect 把用户拉回, 现在不该滚。
+  it('messages 数量不变 + 内容没变 (纯 effect 重跑) → 不滚', () => {
+    // upsertStreamBlock 每条 delta 都返回新 messages 数组, 但 length 仍 5,
+    // scrollHeight 也没变 → 不该滚。
     expect(
       decideAutoScroll({
         prevLength: 5,
         nextLength: 5,
+        contentGrew: false,
         scrollFollowLocked: false,
+        distanceToBottomPx: 0,
+      }),
+    ).toBe('stay')
+  })
+
+  it('messages 数量不变 + 容器长高 + 用户在底部 → 滚动 (streaming delta 修复核心)', () => {
+    // 关键修复: streaming 期间同一 assistant.text bubble 持续 append, length
+    // 不变但 scrollHeight 一直在涨。这种场景必须 follow, 否则用户看不到新内容。
+    expect(
+      decideAutoScroll({
+        prevLength: 5,
+        nextLength: 5,
+        contentGrew: true,
+        scrollFollowLocked: false,
+        distanceToBottomPx: 0,
+      }),
+    ).toBe('follow')
+  })
+
+  it('messages 数量不变 + 容器长高 + 用户已上滚 (> 80px) → 不滚 (放手模式)', () => {
+    // 用户主动上滚翻历史, 此时新内容涌入也不要拉回, 让 "新消息 N" 提示处理。
+    expect(
+      decideAutoScroll({
+        prevLength: 5,
+        nextLength: 5,
+        contentGrew: true,
+        scrollFollowLocked: false,
+        distanceToBottomPx: 400,
+      }),
+    ).toBe('stay')
+  })
+
+  it('messages 数量不变 + 容器长高 + 用户主动滚 (lock) → 不滚', () => {
+    // 即便用户在底部 (contentGrew + 距离 ≤ 80), 只要 lock 住就不打扰。
+    expect(
+      decideAutoScroll({
+        prevLength: 5,
+        nextLength: 5,
+        contentGrew: true,
+        scrollFollowLocked: true,
         distanceToBottomPx: 0,
       }),
     ).toBe('stay')
@@ -47,17 +94,19 @@ describe('decideAutoScroll', () => {
       decideAutoScroll({
         prevLength: 10,
         nextLength: 0,
+        contentGrew: false,
         scrollFollowLocked: false,
         distanceToBottomPx: 0,
       }),
     ).toBe('stay')
   })
 
-  it('用户主动滚过 (scrollFollowLocked) → 绝对不滚, 即便 length 增长', () => {
+  it('用户主动滚过 (scrollFollowLocked) → 绝对不滚, 即便 length 增长 + 内容长高', () => {
     expect(
       decideAutoScroll({
         prevLength: 3,
         nextLength: 4,
+        contentGrew: true,
         scrollFollowLocked: true,
         distanceToBottomPx: 0,
       }),
@@ -69,6 +118,7 @@ describe('decideAutoScroll', () => {
       decideAutoScroll({
         prevLength: 5,
         nextLength: 5,
+        contentGrew: false,
         scrollFollowLocked: false,
         distanceToBottomPx: 400,
       }),
@@ -82,6 +132,7 @@ describe('decideAutoScroll', () => {
       decideAutoScroll({
         prevLength: 5,
         nextLength: 6,
+        contentGrew: true,
         scrollFollowLocked: false,
         distanceToBottomPx: 200,
       }),
@@ -93,6 +144,7 @@ describe('decideAutoScroll', () => {
       decideAutoScroll({
         prevLength: 5,
         nextLength: 6,
+        contentGrew: true,
         scrollFollowLocked: false,
         distanceToBottomPx: 40,
       }),
@@ -104,6 +156,7 @@ describe('decideAutoScroll', () => {
       decideAutoScroll({
         prevLength: 5,
         nextLength: 6,
+        contentGrew: true,
         scrollFollowLocked: false,
         distanceToBottomPx: 80,
       }),
@@ -115,6 +168,7 @@ describe('decideAutoScroll', () => {
       decideAutoScroll({
         prevLength: -1,
         nextLength: 0,
+        contentGrew: false,
         scrollFollowLocked: false,
         distanceToBottomPx: 9999,
       }),

@@ -57,7 +57,7 @@ describe('useAutoScrollToBottom', () => {
     expect(el.scrollTop).toBe(1000)
   })
 
-  it('messages length 不变 (delta) → 不滚', () => {
+  it('messages length + scrollHeight 都没变 → 不滚 (维持用户当前位置)', () => {
     const containerRef = createRef<HTMLDivElement>()
     const el = makeScrollableContainer()
     containerRef.current = el
@@ -69,7 +69,8 @@ describe('useAutoScrollToBottom', () => {
     expect(el.scrollTop).toBe(1000)
     el.scrollTop = 100 // 用户主动上滚
 
-    // 模拟 nextLength === prevLength (streaming delta 没新增条目)
+    // 模拟完全无变化的 effect 重跑 (nextLength===prev 且 scrollHeight 未变):
+    // 既不滚回底部, 也不动 — 尊重用户位置。
     act(() => result.current.scrollToBottom(1))
     expect(el.scrollTop).toBe(100) // 没动
   })
@@ -110,5 +111,65 @@ describe('useAutoScrollToBottom', () => {
     expect(() => {
       act(() => result.current.scrollToBottom(5))
     }).not.toThrow()
+  })
+
+  // 回归测试: streaming delta 时 messages.length 不变, 但容器内容长高
+  // (e.g. 同一 assistant.text bubble 持续 append). 此前 decideAutoScroll
+  // 在 nextLength <= prevLength 路径早退 → 用户停在老位置, 看不到新内容。
+  // 新逻辑: 检测 scrollHeight 增长 + 用户在底部, 继续跟随。
+  //
+  // 关键: prevLengthRef 在 init 后已被设为 1 (上一轮 messages 已经存在), 现在
+  // streaming 不断推 delta 但 length 始终 1。必须连续跑两次 delta 才能暴露
+  // "prevLength===nextLength 路径" 的 bug — 第一次 delta 走 prev=-1 路径
+  // 是 'follow', 看起来正确, 但后续每条 delta 都走 stay 路径。
+  it('streaming delta (length 不变, scrollHeight 增长, 用户在底部) → 跟随', () => {
+    const containerRef = createRef<HTMLDivElement>()
+    const el = makeScrollableContainer()
+    containerRef.current = el
+
+    const { result } = renderHook(() => useAutoScrollToBottom(containerRef))
+
+    // 把 prevLengthRef 推到 1, 模拟"已经在对话中, 上一轮已经有 1 条消息"
+    act(() => result.current.scrollToBottom(1))
+    expect(el.scrollTop).toBe(1000)
+
+    // 第 1 个 delta: scrollHeight 1000 → 1100, length 仍是 1, prevLength=1
+    Object.defineProperty(el, 'scrollHeight', { value: 1100, configurable: true })
+    el.scrollTop = 900 // 用户跟到底部 (距离 0)
+    act(() => result.current.scrollToBottom(1))
+    expect(el.scrollTop).toBe(1100)
+
+    // 第 2 个 delta: scrollHeight 1100 → 1200, length 仍是 1 — 这就是旧 bug
+    Object.defineProperty(el, 'scrollHeight', { value: 1200, configurable: true })
+    el.scrollTop = 1000
+    act(() => result.current.scrollToBottom(1))
+    expect(el.scrollTop).toBe(1200)
+  })
+
+  // 回归测试: streaming delta 期间用户主动上滚 (wheel/键盘) → 锁住, 不拉回。
+  // 锁 + length 不增长 + 用户已远离底部 三种信号叠加, 一律 stay。
+  it('streaming delta (length 不变, scrollHeight 增长, 但用户已上滚) → 不滚', () => {
+    const containerRef = createRef<HTMLDivElement>()
+    const el = makeScrollableContainer()
+    containerRef.current = el
+
+    const { result } = renderHook(() => useAutoScrollToBottom(containerRef))
+
+    // 初始化
+    act(() => result.current.scrollToBottom(0))
+    expect(el.scrollTop).toBe(1000)
+
+    // 模拟 streaming delta: scrollHeight 增长
+    Object.defineProperty(el, 'scrollHeight', { value: 1300, configurable: true })
+    // 用户主动上滚 1000px (看到的是更早的内容)
+    el.scrollTop = 100
+
+    // 触发 user-gesture lock: 派 wheel 事件 → useScrollFollow 锁住 5s
+    act(() => {
+      el.dispatchEvent(new Event('wheel'))
+    })
+
+    act(() => result.current.scrollToBottom(1))
+    expect(el.scrollTop).toBe(100) // 没动, 尊重用户翻历史
   })
 })

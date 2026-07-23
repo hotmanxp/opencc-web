@@ -2,12 +2,14 @@
 //
 // 把"messages / pendingAsk 更新时是否滚动到底部"封装到 hook 里, 不让 Agent.tsx
 // 的 effect 直接调 scrollIntoView。 这样 effect 只关心"messages 变了", 真正的
-// 决策 (length 是否增长 / 用户是否上滚 / 是否用户主动锁) 由 hook 内部决定。
+// 决策 (length 是否增长 / scrollHeight 是否长高 / 用户是否上滚 / 是否用户主动锁)
+// 由 hook 内部决定。
 //
-// 三层防御:
+// 四层防御:
 //   1. decideAutoScroll 决策 (autoScroll.ts) — 纯函数, 9 个单测覆盖
 //   2. useScrollFollow 锁 — 用户主动滚过 5s 内不打扰 (hooks/useScrollFollow.ts)
 //   3. distanceToBottomPx > 80px 视为用户在看历史, 即便 length 增长也不拉回
+//   4. contentGrew 信号 — streaming delta 时 length 不变但容器长高, 也要 follow
 //
 // 决策结果 'follow' 才执行 scrollTo, 默认 'stay' — 这一点跟旧实现相反, 是修复核心。
 import { useCallback, useRef, type RefObject } from 'react'
@@ -30,6 +32,10 @@ export function useAutoScrollToBottom(
   containerRef: RefObject<HTMLElement | null>,
 ): UseAutoScrollToBottomResult {
   const prevLengthRef = useRef<number>(-1)
+  // 追踪上一次 effect 时的 scrollHeight, 用 "容器内容是否真长高" 作为
+  // streaming 期间 "用户需要看新内容" 的关键信号 — 比 nextLength 更准:
+  // streaming delta 时 length 不变但 scrollHeight 一直在涨。
+  const prevScrollHeightRef = useRef<number>(0)
   const scrollLocked = useScrollFollow(containerRef)
 
   const scrollToBottom = useCallback(
@@ -46,9 +52,16 @@ export function useAutoScrollToBottom(
         el.scrollHeight - el.scrollTop - el.clientHeight,
       )
 
+      // contentGrew = 容器长高. 与 prevLength === nextLength 互补:
+      //   - length 增长 (新增 bubble) → contentGrew 通常也是 true
+      //   - length 不变但 streaming append 同一 bubble → contentGrew=true, length 信号漏掉
+      // 用 delta 而非绝对值, 避免 resize 字体/窗口时的 false positive。
+      const contentGrew = el.scrollHeight > prevScrollHeightRef.current
+
       const decision = decideAutoScroll({
         prevLength: prevLengthRef.current,
         nextLength,
+        contentGrew,
         scrollFollowLocked: scrollLocked,
         distanceToBottomPx,
       })
@@ -57,6 +70,7 @@ export function useAutoScrollToBottom(
       console.debug('[autoScroll]', {
         prevLength: prevLengthRef.current,
         nextLength,
+        contentGrew,
         scrollLocked,
         distanceToBottomPx,
         decision,
@@ -76,8 +90,11 @@ export function useAutoScrollToBottom(
       }
 
       // 不管 'follow' 还是 'stay' 都更新 prev, 让 delta 这条同样走 length===prev
-      // 路径直接早退 (避免 init 之后 prev 永远 -1)。
+      // 路径直接早退 (避免 init 之后 prev 永远 -1)。scrollHeight 也同步,
+      // 否则下次 effect 会把"我们刚刚 scrollTo 完留下的新高度"误算成 contentGrew,
+      // 触发无谓重滚。
       prevLengthRef.current = nextLength
+      prevScrollHeightRef.current = el.scrollHeight
     },
     [containerRef, scrollLocked],
   )
