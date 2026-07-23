@@ -94,11 +94,11 @@ describe('GET /api/agent/sessions/:id/state', () => {
   it('falls back to v2Tasks=[] when TaskListStore throws, others unaffected', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
     const { getTaskListStore } = await import('@zn-ai/zai-agent-core/taskListStore')
-    vi.mocked(getTaskListStore).mockReturnValue({
+    vi.mocked(getTaskListStore).mockReturnValue(({
       list: async () => {
         throw new Error('boom')
       },
-    } as ReturnType<typeof getTaskListStore>)
+    } as unknown) as ReturnType<typeof getTaskListStore>)
     const res = await request(app).get('/api/agent/sessions/sess-1/state')
     expect(res.body.v2Tasks).toEqual([])
     expect(res.body.bashTasks).toEqual([])
@@ -123,11 +123,11 @@ describe('GET /api/agent/sessions/:id/state', () => {
 
   it('falls back to agentTasks=[] when BackgroundRuntime throws, others unaffected', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
-    vi.mocked(getBackgroundRuntime).mockReturnValue({
+    vi.mocked(getBackgroundRuntime).mockReturnValue(({
       list: async () => {
         throw new Error('boom')
       },
-    } as ReturnType<typeof getBackgroundRuntime>)
+    } as unknown) as ReturnType<typeof getBackgroundRuntime>)
     const res = await request(app).get('/api/agent/sessions/sess-1/state')
     expect(res.body.agentTasks).toEqual([])
     expect(res.body.cwd).toBeNull()

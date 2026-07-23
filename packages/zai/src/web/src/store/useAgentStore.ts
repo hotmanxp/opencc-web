@@ -1005,11 +1005,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
    * 详见 docs/superpowers/specs/2026-07-23-session-cold-state-design.md §3.2。
    */
   hydrateSessionState: async (sid: string) => {
-    const headers: HeadersInit = (() => {
-      const token =
-        (typeof localStorage !== 'undefined' && localStorage.getItem('zai-token')) || ''
-      return token ? { 'X-Zai-Token': token } : {}
-    })()
+    // 不带 X-Zai-Token: 与 /api/agent/sessions/:id/pwd 和 /api/agent/sessions
+    // 同级 — zai 仅监听 localhost, 不依赖外部鉴权 (AGENTS.md §启动所需环境)。
     let snap: {
       cwd?: { cwd: string; updatedAt: number } | null
       v2Tasks?: unknown
@@ -1019,7 +1016,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     try {
       const res = await fetch(
         `/api/agent/sessions/${encodeURIComponent(sid)}/state`,
-        { headers },
       )
       if (!res.ok) return
       snap = await res.json()
