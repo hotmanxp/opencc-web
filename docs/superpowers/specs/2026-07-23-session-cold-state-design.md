@@ -158,19 +158,10 @@ router.get('/agent/sessions/:id/state', async (req, res) => {
 })
 ```
 
-### 4.2 需要的 supporting 改动(2 处)
+### 4.2 需要的 supporting 改动(0 处)
 
-1. **`BashBackgroundTracker.listBySession(sid)`** — 新增 method,`packages/zai-agent-core/src/tools/BashTool/bashTracker.ts`:
-   ```ts
-   listBySession(sessionId: string): BashTaskInfo[] {
-     return Array.from(this.byId.values())
-       .filter((t) => t.sessionId === sessionId)
-   }
-   ```
-   - 不动现有 `BashTaskInfo` 字段
-   - 不做排序 — 前端 `useBackgroundTasks` 的 `runningTasks`/`recentTasks` 已经按 `createdAt` 排序(本地 store map 的 Map 插入序保留兜底)
-
-2. **不存在** — `BackgroundRuntime.list()` 已经支持 TaskListFilter(虽然只支持 status/limit),server 端拿全量 post-filter 即可,数据量小
+- **`BashBackgroundTracker.list({sessionId})` 已存在**(`packages/zai-agent-core/src/tools/BashTool/bashTracker.ts:312`),签名完全匹配,直接调用即可
+- **`BackgroundRuntime.list()` 已经支持 TaskListFilter**(虽然只支持 status/limit),server 端拿全量 post-filter 即可,数据量小
 
 ---
 
@@ -274,15 +265,13 @@ spec `2026-07-19-sse-state-push-design.md` §1.3 提到 `/api/event?topics=...` 
 
 新增:
 - `packages/zai/src/server/routes/sessionState.ts` (~60 行)
-- `packages/zai/src/server/test/unit/routes/sessionState.test.ts` (~150 行)
+- `packages/zai/src/server/routes/sessionState.test.ts` (~150 行,与 `agent.cwd.test.ts` 同级)
 - `packages/zai/src/web/src/store/useAgentStore.hydrateSessionState.test.ts` (~80 行)
 
 修改:
 - `packages/zai/src/server/index.ts` (注册新 router,~2 行)
-- `packages/zai-agent-core/src/tools/BashTool/bashTracker.ts` (新增 `listBySession`,~5 行 + 1 行 test)
-- `packages/zai/src/web/src/store/useAgentStore.ts` (新增 `hydrateSessionState` action,~30 行)
-- `packages/zai/src/web/src/store/useEventStream.ts` (server.connected case 加一行,~3 行)
-- `packages/zai/src/web/src/store/useAgentStore.ts` (`setCurrentSession` 末尾加一行,~1 行)
+- `packages/zai/src/web/src/store/useAgentStore.ts` (新增 `hydrateSessionState` action + `setCurrentSession` 末尾加一行)
+- `packages/zai/src/web/src/store/useEventStream.ts` (server.connected case 加一行)
 
 不修改:
 - 4 个 `apply*Changed` reducer
