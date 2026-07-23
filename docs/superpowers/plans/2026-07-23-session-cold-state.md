@@ -21,7 +21,7 @@
 - All client unit tests live in `packages/zai/src/web/src/<target>.test.ts` (sibling of source, e.g. `useAgentStore.test.ts` if it exists). Verify with `Glob` before creating new file.
 - Server test command (from `packages/zai/`): `npx vitest run src/server/routes/<file>.test.ts`
 - Web test command (from `packages/zai/`): `npx vitest run src/web/<path>/<file>.test.ts`
-- Always commit in feature branch `feat/session-cold-state` (create from main if absent). Two commits only.
+- Always commit in feature branch `feat/session-cold-state` (create from main if absent). Two commits total: server (Tasks 1+2) and web (Tasks 3+4+5).
 
 ---
 
@@ -192,7 +192,7 @@ Expected: no errors related to `sessionState.ts` (other pre-existing errors OK t
 
 ```bash
 git add packages/zai/src/server/routes/sessionState.ts packages/zai/src/server/index.ts
-git commit -m "feat(zai-server): add GET /api/agent/sessions/:id/state for cold-start snapshot"
+git commit -m "feat(zai-server): add GET /api/agent/sessions/:id/state endpoint and tests for cold-start hydration"
 ```
 
 ---
@@ -376,7 +376,7 @@ Common fix patterns:
 
 ```bash
 git add packages/zai/src/server/routes/sessionState.test.ts
-git commit -m "feat(zai-server): unit tests for /api/agent/sessions/:id/state"
+git commit --amend --no-edit
 ```
 
 ---
@@ -491,7 +491,7 @@ Expected: no errors.
 
 ```bash
 git add packages/zai/src/web/src/store/useAgentStore.ts
-git commit -m "feat(zai-web): useAgentStore.hydrateSessionState + cold-start on switch"
+git commit -m "feat(zai-web): useAgentStore.hydrateSessionState with SSE and session-switch cold-start wiring and tests"
 ```
 
 ---
@@ -546,7 +546,7 @@ Expected: no errors.
 
 ```bash
 git add packages/zai/src/web/src/store/useEventStream.ts
-git commit -m "feat(zai-web): hydrate session state on SSE server.connected"
+git commit --amend --no-edit
 ```
 
 ---
@@ -690,7 +690,7 @@ Common fix patterns:
 
 ```bash
 git add packages/zai/src/web/src/store/useAgentStore.hydrateSessionState.test.ts
-git commit -m "feat(zai-web): unit tests for hydrateSessionState"
+git commit --amend --no-edit
 ```
 
 ---
@@ -724,8 +724,8 @@ Expected: no errors.
 - [ ] **Step 4: Confirm git history**
 
 Run: `cd /Users/ethan/code/opencc-web && git log --oneline main..HEAD`
-Expected: 5 commits on `feat/session-cold-state`, one per task (Task 1 server route, Task 2 server tests, Task 3 client action, Task 4 SSE wire, Task 5 client tests).
+Expected: 2 commits on `feat/session-cold-state`: (1) feat(zai-server): add GET /api/agent/sessions/:id/state endpoint and tests for cold-start hydration, (2) feat(zai-web): useAgentStore.hydrateSessionState with SSE and session-switch cold-start wiring and tests
 
 - [ ] **Step 5: Report completion**
 
-Show the user: branch name, 3 commit subjects, test results.
+Show the user: branch name, 2 commit subjects, test results.
