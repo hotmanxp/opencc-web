@@ -40,10 +40,10 @@ describe('GET /api/agent/sessions/:id/state', () => {
 
   beforeEach(() => {
     // Reset every mock's implementation to "no-op returning undefined"
-    // before each test, so previous-test mockImplementation throws (test
-    // 4, test 6, test 7) don't leak into later tests. Without this,
-    // mocked store helpers from earlier tests poison later ones and the
-    // endpoint request hangs until the 5s vitest timeout.
+    // before each test runs, so previous-test mockImplementation throws
+    // (test 4, test 6, test 7) don't poison subsequent tests. Without
+    // this, mocked store helpers from earlier tests leak into later ones
+    // and endpoint requests hang (5000ms timeout).
     vi.resetAllMocks()
     app = express()
     app.use('/api', sessionStateRouter)

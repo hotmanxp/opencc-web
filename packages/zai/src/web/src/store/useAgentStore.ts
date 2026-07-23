@@ -299,6 +299,13 @@ interface AgentState {
   loadSessions: () => Promise<void>
   loadTranscript: (sessionId: string) => Promise<void>
   setCurrentSession: (sessionId: string) => void
+  /**
+   * Cold-start 快照补全 (Task 3). fire-and-forget 拉一次
+   * /api/agent/sessions/:id/state, 把 cwd / v2Tasks / bashTasks /
+   * agentTasks 4 字段写入 per-session maps. 详见
+   * docs/superpowers/specs/2026-07-23-session-cold-state-design.md §3.2。
+   */
+  hydrateSessionState: (sid: string) => Promise<void>
   createNewSession: () => void
   deleteSession: (sessionId: string) => Promise<void>
   /** Models list synced from /api/agent/settings → models[]. */
@@ -978,6 +985,75 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0 })
     // 同步 URL ?sid=..., 让刷新/分享链接落到同一会话.
     writeUrlSid(sessionId)
+    // ★ Cold-start 快照补全: 切会话时 fire-and-forget 拉一次 4 字段快照,
+    // 与新 SSE 连接建立并行, 降低首屏可见状态延迟。
+    // 详见 docs/superpowers/specs/2026-07-23-session-cold-state-design.md §5.2。
+    void get().hydrateSessionState(sessionId)
+  },
+
+  /**
+   * Cold-start 快照补全 — 拉一次 /api/agent/sessions/:id/state, 把 4 字段
+   * 快照写入 per-session maps (cwdBySession / v2TasksBySession /
+   * bashTasksBySession / agentTasksBySession)。
+   *
+   * 设计:
+   * - 整端点失败 → 静默 (fetch 4xx/5xx 或 JSON parse 异常都吞)。
+   * - 字段独立覆盖: cwd 只在 store 缺失时写入 (避免被 stale 覆盖);
+   *   数组字段类型不对就跳过该字段。
+   * - SSE 仍是 source of truth — 后续 state.* 事件通过 reducer 自然覆盖。
+   *
+   * 详见 docs/superpowers/specs/2026-07-23-session-cold-state-design.md §3.2。
+   */
+  hydrateSessionState: async (sid: string) => {
+    const headers: HeadersInit = (() => {
+      const token =
+        (typeof localStorage !== 'undefined' && localStorage.getItem('zai-token')) || ''
+      return token ? { 'X-Zai-Token': token } : {}
+    })()
+    let snap: {
+      cwd?: { cwd: string; updatedAt: number } | null
+      v2Tasks?: unknown
+      bashTasks?: unknown
+      agentTasks?: unknown
+    }
+    try {
+      const res = await fetch(
+        `/api/agent/sessions/${encodeURIComponent(sid)}/state`,
+        { headers },
+      )
+      if (!res.ok) return
+      snap = await res.json()
+    } catch {
+      // 整端点失败 → 静默
+      return
+    }
+
+    set((s) => {
+      const next = { ...s }
+      // cwd: 只在 store 还没有该 sid 条目时覆盖 (避免 stale 覆盖更新值)
+      if (snap.cwd && !s.cwdBySession[sid]) {
+        next.cwdBySession = { ...s.cwdBySession, [sid]: snap.cwd.cwd }
+      }
+      if (Array.isArray(snap.v2Tasks)) {
+        next.v2TasksBySession = {
+          ...s.v2TasksBySession,
+          [sid]: snap.v2Tasks as never,
+        }
+      }
+      if (Array.isArray(snap.bashTasks)) {
+        next.bashTasksBySession = {
+          ...s.bashTasksBySession,
+          [sid]: snap.bashTasks as never,
+        }
+      }
+      if (Array.isArray(snap.agentTasks)) {
+        next.agentTasksBySession = {
+          ...s.agentTasksBySession,
+          [sid]: snap.agentTasks as never,
+        }
+      }
+      return next
+    })
   },
 
   createNewSession: async () => {
