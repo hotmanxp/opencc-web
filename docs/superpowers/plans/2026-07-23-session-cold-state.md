@@ -724,7 +724,7 @@ Expected: no errors.
 - [ ] **Step 4: Confirm git history**
 
 Run: `cd /Users/ethan/code/opencc-web && git log --oneline main..HEAD`
-Expected: 3 commits on `feat/session-cold-state`, one per task group (or per logical change).
+Expected: 5 commits on `feat/session-cold-state`, one per task (Task 1 server route, Task 2 server tests, Task 3 client action, Task 4 SSE wire, Task 5 client tests).
 
 - [ ] **Step 5: Report completion**
 
