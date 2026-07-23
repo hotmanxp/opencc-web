@@ -143,7 +143,7 @@ router.get('/agent/sessions/:id/state', async (req, res) => {
     getTaskListStore().list(sid)
       .then((tasks) => tasks.map(trimV2Task))
       .catch((err) => { console.warn('[sessionState] v2 failed', err); return [] }),
-    Promise.resolve().then(() => bashBackgroundTracker.listBySession(sid))
+    Promise.resolve().then(() => bashBackgroundTracker.list({ sessionId: sid }))
       .catch((err) => { console.warn('[sessionState] bash failed', err); return [] }),
     getBackgroundRuntime().list()
       .then((all) => all.filter((t) => t.parentSessionId === sid))
