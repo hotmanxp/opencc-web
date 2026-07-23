@@ -190,10 +190,8 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
       return { output: 'AgentTool disabled: no __runtimeConfig in ToolContext', isError: true }
     }
 
-    const { runForkedAgent, getLastCacheSafeParams, extractResultText } = await import(
-      '../../opencc-internals/utils/forkedAgent.js'
-    )
-    const { createUserMessage } = await import('../../opencc-internals/utils/messages.js')
+    const { runForkedAgent, getLastCacheSafeParams, extractResultText } = await import('./forkedAgent.js')
+    const { createUserMessage } = await import('./forkedAgent.js')
 
     const pluginAgents = (ctx.state as any).__pluginAgents ?? []
     const def = await loadAgentDefinitions(
@@ -320,6 +318,10 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
         onStreamEvent: (ev) => ctx.emitEvent({ type: 'subagent:event', subSessionId, event: ev }),
         skipTranscript: true,
         skipCacheWrite: false,
+        // zai-local forkedAgent: needs RuntimeConfig (= ctx.__runtimeConfig)
+        // to spin up DefaultAgentRuntime. The opencc shim pulls it from a
+        // module-level singleton instead.
+        runtime: ctx.__runtimeConfig,
       })
       if (autoBgTimer) clearTimeout(autoBgTimer)
       finalOutput = extractResultText(result.messages, 'Execution completed')
