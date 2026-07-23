@@ -9,23 +9,31 @@ import { makeMockModelCaller } from '../fixtures/MockModelCaller.js'
 import { makeMockSandbox } from '../fixtures/MockSandbox.js'
 
 // `vi.mock` is hoisted: it intercepts the module load of
-// opencc-internals/utils/forkedAgent.js BEFORE the AgentTool call()
-// reaches its dynamic import. The factory runs lazily so we don't pull
-// in Bun-only transitive imports (bun:bundle via withRetry.ts) at
-// collection time. Per-test override uses
+// tools/AgentTool/forkedAgent.js BEFORE the AgentTool call() reaches
+// its dynamic import. The factory runs lazily so we don't pull in
+// DefaultAgentRuntime's transitive imports at collection time. Per-test
+// override uses
 // `(await import('...forkedAgent.js')).runForkedAgent.mockImplementation(...)`.
-vi.mock('../../src/opencc-internals/utils/forkedAgent.js', () => ({
+//
+// After commit b59ed7a rerouted AgentTool.sync through the local
+// forkedAgent, the vendored opencc-internals/utils/forkedAgent.js no longer
+// exists, so the previous mock target was a dead path. runForkedAgent stayed
+// un-mocked, leaving systemContext / cacheSafeParams captures empty (the two
+// failing assertions on tests at lines ~107 and ~270).
+//
+// We must export `createUserMessage` here too because AgentTool does a
+// single dynamic import that destructures both — leaving it undefined would
+// crash `createUserMessage({ content: input.prompt })` on
+// `undefined is not a function`.
+vi.mock('../../src/tools/AgentTool/forkedAgent.js', () => ({
   runForkedAgent: vi.fn(),
   getLastCacheSafeParams: vi.fn(() => null),
   saveCacheSafeParams: vi.fn(),
   extractResultText: vi.fn((_msgs: any, def: string) => def),
-}))
-
-// `messages.ts` has a top-level `import { feature } from 'bun:bundle'`
-// that vitest-node cannot resolve. AgentTool's sync path only needs
-// `createUserMessage`, so we stub the entire module before that import.
-vi.mock('../../src/opencc-internals/utils/messages.js', () => ({
-  createUserMessage: vi.fn(({ content }: { content: any }) => ({ type: 'user', message: { content } })),
+  createUserMessage: vi.fn(({ content }: { content: any }) => ({
+    type: 'user',
+    message: { content },
+  })),
 }))
 
 let dataDir: string
@@ -60,7 +68,7 @@ describe('AgentTool', () => {
     const events: any[] = []
     ctx.emitEvent = (e) => events.push(e)
 
-    const { runForkedAgent } = await import('../../src/opencc-internals/utils/forkedAgent.js')
+    const { runForkedAgent } = await import('../../src/tools/AgentTool/forkedAgent.js')
     ;(runForkedAgent as any).mockImplementation(async () => ({
       messages: [{ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } } as any],
       totalUsage: { input_tokens: 1, output_tokens: 2, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } as any,
@@ -81,7 +89,7 @@ describe('AgentTool', () => {
   test('subSessionId 形如 <parent>-sub-<8hex>', async () => {
     let startEvent: any
     ctx.emitEvent = (e) => { if (e.type === 'subagent:start') startEvent = e }
-    const { runForkedAgent } = await import('../../src/opencc-internals/utils/forkedAgent.js')
+    const { runForkedAgent } = await import('../../src/tools/AgentTool/forkedAgent.js')
     ;(runForkedAgent as any).mockImplementation(async () => ({
       messages: [{ type: 'assistant', message: { content: [{ type: 'text', text: 'done' }] } } as any],
       totalUsage: { input_tokens: 0, output_tokens: 0, cache_read_input_tokens: 0, cache_creation_input_tokens: 0 } as any,
@@ -95,7 +103,7 @@ describe('AgentTool', () => {
       `---\nname: custom\ndescription: custom agent\n---\nCUSTOM_SYSTEM_PROMPT`)
 
     let capturedSystemContext: Record<string, string> | undefined
-    const { runForkedAgent } = await import('../../src/opencc-internals/utils/forkedAgent.js')
+    const { runForkedAgent } = await import('../../src/tools/AgentTool/forkedAgent.js')
     ;(runForkedAgent as any).mockImplementation(async (params: any) => {
       capturedSystemContext = params.cacheSafeParams.systemContext
       return {
@@ -233,7 +241,7 @@ describe('AgentTool', () => {
     //       way to actually stop a sub-agent from re-dispatching AgentTool.
     let captured: any = null
     const { runForkedAgent, getLastCacheSafeParams } = await import(
-      '../../src/opencc-internals/utils/forkedAgent.js'
+      '../../src/tools/AgentTool/forkedAgent.js'
     )
     ;(runForkedAgent as any).mockImplementation(async (params: any) => {
       captured = params
