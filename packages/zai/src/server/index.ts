@@ -18,7 +18,6 @@ import answerRouter from './routes/answer.js';
 import approveRouter from './routes/approve.js';
 import tasksRouter from './routes/tasks.js';
 import v2TasksRouter from './routes/v2Tasks.js';
-import sessionStateRouter from './routes/sessionState.js';
 import { slashRouter } from './routes/slash.js';
 import bashTasksRouter from './routes/bashTasks.js';
 import transcriptRouter from './routes/transcript.js';
@@ -97,10 +96,6 @@ export function createApp(opts: AppOptions): express.Express {
   // TaskListStore (按 sessionId 隔离, 实际存储 ~/.zai/tasks/<sid>.json)
   // 拉到本地 v2TasksBySession 缓存 (SSE 增量之外的兜底).
   app.use('/api', v2TasksRouter);
-  // Session cold-state hydration — 切换 session 时拉一次 cwd/v2/bash/agent
-  // 快照,填补 SSE 首条 *.changed 到达前的 UI 空窗。详见
-  // docs/superpowers/specs/2026-07-23-session-cold-state-design.md。
-  app.use('/api', sessionStateRouter);
   // /api/transcript/* 手动修复端点 — 给当前会话的 transcript 跑一次
   // repairAndPersistTranscript,补齐历史上漏写的 tool_result
   app.use('/api/transcript', transcriptRouter);
