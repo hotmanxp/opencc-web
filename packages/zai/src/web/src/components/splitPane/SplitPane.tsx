@@ -2,7 +2,8 @@ import { useCallback, useEffect, useRef, useState } from 'react';
 import { Tabs } from 'antd';
 import { GitTab } from './GitTab.js';
 import { FsTab } from './FsTab.js';
-import { PlaceholderTab } from './PlaceholderTab.js';
+import { BashTab } from './BashTab.js';
+import { useAgentStore } from '../../store/useAgentStore.js';
 import {
   STORAGE_KEYS,
   MIN_WIDTH,
@@ -23,7 +24,7 @@ function resolveInitialWidth(): number {
   return DEFAULT_WIDTH_VW;
 }
 
-type TabKey = 'git' | 'fs' | 'tbd';
+type TabKey = 'git' | 'fs' | 'bash';
 
 export interface SplitPaneProps {
   cwd: string | null;
@@ -44,6 +45,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
     resolveInitialWidth(),
   );
   const width = clampWidth(widthStored);
+  const activeSessionId = useAgentStore((s) => s.activeSessionId ?? null)
 
   // Responsive: collapse when window is narrow regardless of stored state.
   const [responsiveClosed, setResponsiveClosed] = useState(
@@ -122,7 +124,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
             items={[
               { key: 'fs', label: 'Files', children: <FsTab cwd={cwd} /> },
               { key: 'git', label: 'Git', children: <GitTab cwd={cwd} /> },
-              { key: 'tbd', label: '待定', children: <PlaceholderTab /> },
+              { key: 'bash', label: 'Bash', children: <BashTab sessionId={activeSessionId} cwd={cwd} /> },
             ]}
           />
           {/* Splitter handle — drag to resize. */}
