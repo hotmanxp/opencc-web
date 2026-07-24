@@ -76,13 +76,18 @@ class ReplSession {
 class ReplBusyError extends Error {
   readonly currentExecId: string
 }
+
+class ReplSpawnError extends Error {
+  readonly cause: unknown  // 原生 spawn error（如 ENOENT）
+}
 ```
 
 **关键行为**：
 - `exec` 时 `spawn('sh', ['-c', command], { cwd, env: filteredEnv })`，env 过滤白名单：`PATH`, `HOME`, `USER`, `LANG`, `LC_*`, `TZ`
+- `spawn` 同步失败（如 ENOENT）→ `exec` 抛 `ReplSpawnError`，不分配 execId、不 emit
 - stdout/stderr 各自 `on('data', chunk => emit({kind, execId, chunk, ts}))`
 - child `'exit'` → emit `{kind:'exit', execId, code, signal, ts}` → `busy=false`, `child=null`
-- child `'error'`（如 ENOENT）→ emit `{kind:'error', execId, message, ts}` → `busy=false`, `child=null`
+- child 启动后 `'error'`（运行中进程崩溃）→ emit `{kind:'error', execId, message, ts}` → `busy=false`, `child=null`
 
 ### 3.2 `ReplRegistry`（server）
 
@@ -241,7 +246,7 @@ function useBashRepl(sessionId: string | null, defaultCwd: string | null): {
 
 | 场景 | 处理 |
 |---|---|
-| spawn 失败（ENOENT） | ReplSession emit `{kind:'error', message:'spawn ENOENT'}`，exec endpoint 仍返回 200 + execId（child 已死但 execId 已记录）；busy=false |
+| spawn 失败（ENOENT 等） | `ReplSession.exec` 抛 `ReplSpawnError`，exec endpoint 返回 500 `{error:'spawn failed: ENOENT'}`；不分配 execId |
 | 上一命令在跑 | POST exec 返回 409 `{ok:false, busy:true, currentExecId}` |
 | child 被信号杀 | `{kind:'exit', code:null, signal:'SIGTERM'}`，前端 signal 灰显示 |
 | SSE 断连 | EventSource 自动重连，UI 显示"重连中"灰条（connected=false）；不补发历史 |
@@ -256,7 +261,8 @@ function useBashRepl(sessionId: string | null, defaultCwd: string | null): {
 - `abort` 调 SIGTERM（mock child.kill）；超时升级 SIGKILL
 - child 自然 exit（code 0 / 非 0）→ emit `{kind:'exit', code}`
 - child 被信号杀 → emit `{kind:'exit', code:null, signal}`
-- spawn ENOENT（不存在的 command）→ emit `{kind:'error', message}`、busy=false
+- spawn ENOENT（不存在的 command）→ `exec` 抛 `ReplSpawnError`、不分配 execId
+- child 启动后 `'error'` 事件（运行中进程崩溃）→ emit `{kind:'error', message}`、busy=false
 - dispose() 后再 exec 报错或重新初始化（明确 dispose 后状态）
 
 **`ReplRegistry.test.ts`**：
