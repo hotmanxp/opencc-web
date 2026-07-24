@@ -11,6 +11,20 @@
 | `packages/zai/` | `src/server/` 路由 + service,`src/web/` UI + store,`src/shared/` zod schema |
 | `packages/zai-agent-core/` | `runtime/`(`queryLoop` 主循环 + `query` shim + `streamAdapter` / `toolExecution` / `canUseTool` / `subagent` / `background/`)+ `tools/`(Bash/Read/Edit/Write/AskUserQuestion/TodoWrite/Task*/Agent/BackgroundAgent/...)+ `transcript/`(v2 落盘)+ `mcp/` + `plugins/`(OpenCC 插件)+ `skills/` |
 | `docs/  examples/  scripts/` | 设计文档 / 示例 / 仓库脚本 |
+| `docs/superpowers/specs/` | 各特性设计文档(specs);`docs/superpowers/plans/` 是对应的实施计划(plans) |
+
+## 文档索引
+
+> 一级入口文档,适合初次了解项目时阅读。
+
+| 文档 | 位置 | 用途 |
+|---|---|---|
+| **架构总览** | `docs/superpowers/specs/2026-07-25-opencc-web-architecture-overview.md` | 子代理产出的架构研究报告,684 行,涵盖两个 workspace 模块清单、19 个 router 表格、6 个服务单例、RuntimeEvent 翻译表、3 条核心数据流、风险清单 |
+| **SSE 状态推送设计** | `docs/superpowers/specs/2026-07-19-sse-state-push-design.md` | StateChangeBus → eventBus 桥接层设计 |
+| **会话压缩设计** | `docs/superpowers/specs/2026-07-19-zai-session-compaction-design.md` | 阶段 1 已交付(spec §11.6 目标:line ≥ 92%, branch ≥ 80%),阶段 2-4 见对应 plan |
+| **MCP disabled servers** | `docs/superpowers/plans/2026-07-20-zai-mcp-disabled-servers.md` | 尊重 Claude Code 过滤字段(`enabledMcpjsonServers` / `disabledMcpjsonServers` / `disabledMcpServers`) |
+
+> 历史 spec / plan 完整列表(按日期)见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名格式 `YYYY-MM-DD-<topic>.md`。
 
 ## 核心入口
 
