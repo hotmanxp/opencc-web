@@ -706,12 +706,13 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
   }
   const sid = req.params.id;
   try {
+    const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
     const store = getTranscriptStore();
     if (parsed.data.model && parsed.data.model !== "unknown") {
-      await store.patch(sid, { model: parsed.data.model });
+      await store.patch(sid, { model: parsed.data.model }, { cwd: ctx.cwd });
     }
     if (parsed.data.permissionMode) {
-      await store.patch(sid, { permissionMode: parsed.data.permissionMode });
+      await store.patch(sid, { permissionMode: parsed.data.permissionMode }, { cwd: ctx.cwd });
     }
     res.json({ ok: true });
   } catch (err) {

@@ -65,7 +65,7 @@ export const compactCommand: LocalCommand = {
 
       // 5. 落盘
       try {
-        await store.replace(sessionId, result.newMessages)
+        await store.replace(sessionId, result.newMessages, { cwd: context.cwd })
       } catch (err) {
         return { kind: 'error', message: `落盘失败: ${(err as Error).message}` }
       }

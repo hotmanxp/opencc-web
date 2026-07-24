@@ -57,9 +57,9 @@ function readClaimedSid(req: Request): string | null {
 // (which may differ from the instance cwd if the LLM ran `cd` mid-loop).
 async function resolveSessionCwd(sessionId: string, instanceCwd: string): Promise<string> {
   try {
-    const { getTranscriptStore } = await import('../services/agentRuntime.js')
+    const { getTranscriptStore, getServerCwd } = await import('../services/agentRuntime.js')
     const store = getTranscriptStore()
-    const t = await store.read(sessionId)
+    const t = await store.read(sessionId, { cwd: getServerCwd() })
     const metaCwd = (t.meta as { cwd?: string }).cwd
     return metaCwd ? path.resolve(metaCwd) : path.resolve(instanceCwd)
   } catch {
