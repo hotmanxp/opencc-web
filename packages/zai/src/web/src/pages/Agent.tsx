@@ -26,6 +26,7 @@ import {
   CaretRightOutlined,
   DeleteOutlined,
   PictureOutlined,
+  UpOutlined,
 } from "@ant-design/icons";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
@@ -68,6 +69,34 @@ const { Text, Paragraph } = Typography;
 
 export default function Agent() {
   const messages = useAgentStore((s) => s.messages);
+  // 消息裁剪: messages.length > maxVisibleMessages 时只渲染尾部 N 条,
+  // 顶部浮按钮 [显示全部 (X 条隐藏)] 让用户点开看完整历史。点开后新消息
+  // 持续到达再次超出 limit, useEffect 会自动把 showAllMessages 重置为 false。
+  // 设计见 docs/superpowers/specs/2026-07-24-zai-message-cap-design.md §5。
+  const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages);
+  const [showAllMessages, setShowAllMessages] = useState(false);
+  // hiddenCount 不受 showAllMessages 影响,纯粹由 messages.length 与 limit 派生;
+  // visibleMessages 切片时考虑 showAllMessages,展开时切片偏移 = 0。
+  const { hiddenCount, visibleMessages } = useMemo(() => {
+    const hc = Math.max(0, messages.length - maxVisibleMessages);
+    const eff = showAllMessages ? 0 : hc;
+    return { hiddenCount: hc, visibleMessages: messages.slice(eff) };
+  }, [messages, maxVisibleMessages, showAllMessages]);
+  // 用户点开 pill 后,新消息持续进来,直到 messages.length 再次超出 limit,
+  // 自动把 showAllMessages 重置为 false, pill 重新出现。
+  // 用 ref 记下"打开 pill 那一刻的 hc",effect 只在 hc **涨过** 那时阈值才 reset —
+  // 单纯点 pill 不会立刻 reset,避免 spec §7 描述的"用户点开看历史"瞬间被收回。
+  const hiddenCountAtExpandRef = useRef(hiddenCount);
+  useEffect(() => {
+    if (!showAllMessages) {
+      hiddenCountAtExpandRef.current = hiddenCount;
+      return;
+    }
+    if (hiddenCount > hiddenCountAtExpandRef.current) {
+      setShowAllMessages(false);
+    }
+  }, [showAllMessages, hiddenCount]);
+  const showPill = hiddenCount > 0 && !showAllMessages;
   const status = useAgentStore((s) => s.status);
   const sessions = useAgentStore((s) => s.sessions);
   const sessionId = useAgentStore((s) => s.sessionId);
@@ -540,7 +569,30 @@ export default function Agent() {
             </div>
           )}
           <TodoZone todos={todosForCurrentSession} />
-          <MessageListView messages={messages} streaming={status === "streaming"} />
+          {showPill && (
+            <div
+              style={{
+                position: "sticky",
+                top: 0,
+                zIndex: 10,
+                display: "flex",
+                justifyContent: "center",
+                paddingTop: 8,
+                paddingBottom: 4,
+              }}
+            >
+              <Button
+                shape="round"
+                size="small"
+                icon={<UpOutlined />}
+                onClick={() => setShowAllMessages(true)}
+                data-testid="show-all-messages-pill"
+              >
+                显示全部 ({hiddenCount} 条隐藏)
+              </Button>
+            </div>
+          )}
+          <MessageListView messages={visibleMessages} streaming={status === "streaming"} />
           {pendingAsk && (
             <div ref={questionCardRef}>
               <QuestionCard
