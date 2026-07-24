@@ -59,4 +59,23 @@ export interface ZaiSettings {
   defaultMode?: string
   /** Web transcript output style — see OutputStyle. */
   outputStyle?: OutputStyle
+  /**
+   * 主对话区最大渲染消息条数. 超过时 UI 折叠早期消息,顶部浮按钮一键还原.
+   * 默认 20. clamp [1, 1000].
+   */
+  maxVisibleMessages?: number
+}
+
+/**
+ * Tier-3 fallback settings seeded into ~/.zai/settings.json on first boot
+ * when neither ~/.zai nor ~/.claude settings exist. Minimal but valid —
+ * mirrors the "empty but present" shape callers already defend against,
+ * so resolveOutputStyle / env lookups behave identically to the legacy
+ * "file missing → {}" path.
+ */
+export const BUILTIN_DEFAULT_SETTINGS: ZaiSettings = {
+  env: {},
+  defaultMode: 'default',
+  outputStyle: 'default',
+  maxVisibleMessages: 20,
 }

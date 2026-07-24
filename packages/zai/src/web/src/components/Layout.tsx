@@ -35,7 +35,7 @@ const menuItems = [
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setOutputStyle } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setOutputStyle, setMaxVisibleMessages } = useAppStore();
   const [version, setVersion] = useState<string>('…');
 
   useEffect(() => {
@@ -62,7 +62,7 @@ export default function Layout() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<{ outputStyle?: OutputStyle }>('/agent/settings')
+      .get<{ outputStyle?: OutputStyle; maxVisibleMessages?: number }>('/agent/settings')
       .then((data) => {
         if (cancelled) return
         if (
@@ -73,6 +73,13 @@ export default function Layout() {
           setOutputStyle(data.outputStyle)
           setTranscriptCollapsed(data.outputStyle === 'compact')
         }
+        if (typeof data.maxVisibleMessages === 'number') {
+          // Mirror server-side clamp from settings/max-visible-messages PUT handler
+          // so a tampered settings.json can't break the UI with a 0/negative/NaN.
+          setMaxVisibleMessages(
+            Math.max(1, Math.min(1000, Math.floor(data.maxVisibleMessages))),
+          )
+        }
       })
       .catch(() => {
         // swallow — keep default
@@ -80,7 +87,7 @@ export default function Layout() {
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setTranscriptCollapsed]);
+  }, [setOutputStyle, setMaxVisibleMessages, setTranscriptCollapsed]);
 
   return (
     // 用 height: 100vh (而不是 minHeight) 把 AntLayout 锁死在视口高度,

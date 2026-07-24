@@ -282,6 +282,12 @@ describe('queryLoop resume — parallel tool_use Anthropic-2013 regression', () 
     const assistantIndex = seen.indexOf(assistantToolMessages[0]!)
     const resultBlocks = seen[assistantIndex + 1]!.content as Array<{ type?: string; tool_use_id?: string }>
     expect(seen[assistantIndex + 1]!.role).toBe('user')
-    expect(resultBlocks.map(block => block.tool_use_id)).toEqual(['call_attached', 'call_revived'])
+    // 紧跟 tool_use assistant 的 user(tool_result) 块按源码顺序出现;尾部若有
+    // 额外 text 块(SubagentNotifier 注入合并到 tool_result user)也合法 —
+    // 见 test/runtime/subagentNotifier-2013.test.ts 的 tool_result+text 合并测试。
+    const toolResultIds = resultBlocks
+      .filter(block => block.type === 'tool_result')
+      .map(block => block.tool_use_id)
+    expect(toolResultIds).toEqual(['call_attached', 'call_revived'])
   })
 })

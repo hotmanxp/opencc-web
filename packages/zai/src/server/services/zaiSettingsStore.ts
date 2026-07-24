@@ -1,7 +1,16 @@
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises'
+import { writeFile, rename, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { OutputStyle, ZaiSettings } from '../../shared/settings.js'
+import { getCachedZaiSettings, refreshCache } from './zaiSettingsCache.js'
+
+// Re-export the cache API so existing `zaiSettingsStore` importers can reach
+// it without a second import path.
+export {
+  getCachedZaiSettings,
+  getCachedZaiSettingsSync,
+  initZaiSettingsCache,
+} from './zaiSettingsCache.js'
 
 /** Path to ~/.zai/settings.json — the on-disk persistence layer. */
 export function zaiSettingsPath(): string {
@@ -9,31 +18,21 @@ export function zaiSettingsPath(): string {
 }
 
 /**
- * Read ~/.zai/settings.json as an untyped object. Returns {} when the file
- * is missing or unparseable so callers can keep working.
- *
- * Mirrors the defensive pattern used in modelCaller / permissionMode /
- * agentSettings — the file is optional and the server must stay up when
- * it is absent.
+ * Read the cached ~/.zai/settings.json value. Backed by the boot-time
+ * settings cache (see zaiSettingsCache.ts): returns the resolved settings
+ * once `initZaiSettingsCache()` has run, awaiting initialization if a caller
+ * arrives before it settles. The three-tier fallback (zai → claude → builtin
+ * defaults) guarantees a valid object, so this never throws on a missing file.
  */
 export async function readZaiSettings(): Promise<ZaiSettings> {
-  try {
-    const raw = await readFile(zaiSettingsPath(), 'utf-8')
-    return JSON.parse(raw) as ZaiSettings
-  } catch (err) {
-    if (err instanceof SyntaxError) return {}
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return {}
-    throw err
-  }
+  return getCachedZaiSettings()
 }
 
 /**
  * Atomically write the given object to ~/.zai/settings.json. Uses
- * tmp+rename so a crash mid-write never corrupts the user's settings.
- *
- * `ensureDir` mirrors the writeConfig helper in fileStore.ts: directory
- * creation is best-effort and the rename step requires the parent to
- * exist already on most filesystems.
+ * tmp+rename so a crash mid-write never corrupts the user's settings,
+ * then synchronously refreshes the in-memory cache so subsequent reads
+ * (this process) see the new value immediately — no watcher, no restart.
  */
 export async function writeZaiSettings(settings: ZaiSettings): Promise<void> {
   const path = zaiSettingsPath()
@@ -41,6 +40,7 @@ export async function writeZaiSettings(settings: ZaiSettings): Promise<void> {
   const tmpPath = `${path}.tmp`
   await writeFile(tmpPath, JSON.stringify(settings, null, 2), 'utf-8')
   await rename(tmpPath, path)
+  refreshCache(settings)
 }
 
 const VALID_OUTPUT_STYLES: ReadonlySet<OutputStyle> = new Set<OutputStyle>([

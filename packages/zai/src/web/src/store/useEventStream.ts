@@ -39,6 +39,7 @@ function dispatch(event: ServerEvent) {
     case 'runtime.done':
     case 'runtime.aborted':
     case 'runtime.error':
+    case 'runtime.compacted':
       useAgentStore.getState().applyRuntimeEvent(event)
       break
     case 'session.created':
@@ -58,9 +59,14 @@ function dispatch(event: ServerEvent) {
     case 'prompt.approve':
       useAgentStore.getState().applyPromptApprove(event as any)
       break
-    case 'server.connected':
+    case 'server.connected': {
       useAppStore.getState().setConnected(true)
+      // Cold-start 快照补全 — SSE per-sid slice 已注册, 此时拉 REST 不会漏事件。
+      // 详见 docs/superpowers/specs/2026-07-23-session-cold-state-design.md §5.1。
+      const _connectedSid = useAgentStore.getState().sessionId
+      if (_connectedSid) void useAgentStore.getState().hydrateSessionState(_connectedSid)
       break
+    }
     case 'server.error':
     case 'toast':
       useAppStore.getState().applySystemEvent(event)

@@ -17,6 +17,7 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import type { ModelCaller } from '@zn-ai/zai-agent-core/runtime'
+import { getCachedZaiSettingsSync } from './zaiSettingsStore.js'
 
 // 流式事件类型 — Anthropic SDK 返回的 RawMessageStreamEvent 本身就是 snake_case,
 // 这里只用作 yield 的最小契约, 实际结构由 queryEngine 的 streamAdapter 识别.
@@ -41,21 +42,6 @@ type StreamEvent = {
 function buildAnthropicInputSchema(zodSchema: Parameters<typeof zodToJsonSchema>[0]): Anthropic.Messages.Tool.InputSchema {
   // `$refStrategy: 'none'` 把 zod 内部的 ref 全展开, 避免 SDK 不认 $ref 报错.
   return zodToJsonSchema(zodSchema, { target: 'jsonSchema7', $refStrategy: 'none' }) as unknown as Anthropic.Messages.Tool.InputSchema
-}
-
-interface ZaiSettings {
-  env?: Record<string, string>
-  model?: string
-}
-
-/** Read ~/.zai/settings.json and return the parsed object (or empty). */
-function readZaiSettings(): ZaiSettings {
-  try {
-    const path = join(homedir(), '.zai', 'settings.json')
-    return JSON.parse(readFileSync(path, 'utf-8')) as ZaiSettings
-  } catch {
-    return {}
-  }
 }
 
 interface ClaudeProviderProfile {
@@ -116,7 +102,7 @@ function resolveProviderForModel(model: string | undefined): {
   apiKey: string
   profile?: ClaudeProviderProfile
 } {
-  const zaiEnv = readZaiSettings().env ?? {}
+  const zaiEnv = getCachedZaiSettingsSync().env ?? {}
 
   if (model) {
     const profile = findProfileForModel(model)
@@ -197,7 +183,7 @@ function getAnthropicClient(): Anthropic {
   // continue to work.
   if (_client) return _client
 
-  const settings = readZaiSettings()
+  const settings = getCachedZaiSettingsSync()
   const env = settings.env ?? {}
 
   const authToken = env.ANTHROPIC_AUTH_TOKEN
@@ -253,7 +239,7 @@ export function createAnthropicModelCaller(): ModelCaller {
       tools: Array<{ name: string; description?: string; inputSchema: Parameters<typeof zodToJsonSchema>[0] }>
       signal: AbortSignal
     } = req
-    const zaiSettings = readZaiSettings()
+    const zaiSettings = getCachedZaiSettingsSync()
     const env = zaiSettings.env ?? {}
 
     const resolvedModel =

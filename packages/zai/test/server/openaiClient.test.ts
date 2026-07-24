@@ -54,6 +54,30 @@ describe('OpenAIClient — request body construction', () => {
     }
   })
 
+  it('adds Gemini client headers for paic.com.cn endpoints', async () => {
+    const cap = captureRequest()
+    try {
+      const client = new OpenAIClient({
+        baseURL: 'https://wizard-ai.paic.com.cn/v1',
+        apiKey: 'sk-test-token',
+        model: 'model',
+      })
+      for await (const _ev of client.messages.create({
+        model: 'model',
+        system: '',
+        messages: [{ role: 'user', content: 'hi' }],
+        stream: true,
+      })) { /* drain */ }
+
+      const headers = cap.get()!.init.headers as Record<string, string>
+      expect(headers.Authorization).toBe('Bearer sk-test-token')
+      expect(headers['client-code']).toBe('Gemini')
+      expect(headers['plugin-version']).toBe('Gemini')
+    } finally {
+      cap.restore()
+    }
+  })
+
   it('emits Anthropic-shape message_start + message_stop events', async () => {
     const cap = captureRequest()
     try {
@@ -225,6 +249,80 @@ describe('OpenAIClient — request body construction', () => {
         role: 'system',
         content: 'static prefix\n\ndynamic suffix',
       })
+    } finally {
+      cap.restore()
+    }
+  })
+
+  it('converts base64 images to OpenAI image_url parts and preserves order', async () => {
+    const cap = captureRequest()
+    try {
+      const client = new OpenAIClient({
+        baseURL: 'https://api.example.com/v1',
+        apiKey: 'k',
+        model: 'm',
+      })
+      for await (const _ev of client.messages.create({
+        model: 'm',
+        system: '',
+        messages: [{
+          role: 'user',
+          content: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: 'aGVsbG8=' },
+            },
+            { type: 'text', text: 'describe this image' },
+          ],
+        }],
+        stream: true,
+      })) { /* drain */ }
+
+      const body = JSON.parse(cap.get()!.init.body as string)
+      expect(body.messages).toEqual([{
+        role: 'user',
+        content: [
+          {
+            type: 'image_url',
+            image_url: { url: 'data:image/png;base64,aGVsbG8=' },
+          },
+          { type: 'text', text: 'describe this image' },
+        ],
+      }])
+    } finally {
+      cap.restore()
+    }
+  })
+
+  it('keeps image-only user messages', async () => {
+    const cap = captureRequest()
+    try {
+      const client = new OpenAIClient({
+        baseURL: 'https://api.example.com/v1',
+        apiKey: 'k',
+        model: 'm',
+      })
+      for await (const _ev of client.messages.create({
+        model: 'm',
+        system: '',
+        messages: [{
+          role: 'user',
+          content: [{
+            type: 'image',
+            source: { type: 'base64', media_type: 'image/jpeg', data: '/9j/' },
+          }],
+        }],
+        stream: true,
+      })) { /* drain */ }
+
+      const body = JSON.parse(cap.get()!.init.body as string)
+      expect(body.messages).toEqual([{
+        role: 'user',
+        content: [{
+          type: 'image_url',
+          image_url: { url: 'data:image/jpeg;base64,/9j/' },
+        }],
+      }])
     } finally {
       cap.restore()
     }

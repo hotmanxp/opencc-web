@@ -16,8 +16,8 @@
  * Supported:
  * - POST ${baseURL}/chat/completions with stream:true
  * - Bearer auth from OPENAI_API_KEY / profile.apiKey
- * - Anthropic messages → OpenAI messages (string content + tool_use +
- *   tool_result blocks)
+ * - Anthropic messages → OpenAI messages (string content + base64 image +
+ *   tool_use + tool_result blocks)
  * - Tool schema normalization (required[] ⊇ properties keys, strict mode)
  * - OpenAI SSE → Anthropic events:
  *     message_start, content_block_start (text/thinking), content_block_delta,
@@ -26,8 +26,7 @@
  * - AbortSignal passes through to fetch.
  *
  * NOT supported (by design — out of scope for the v1 fix):
- * - Vision / image_url content blocks (will be silently dropped; messages
- *   without text content will throw at send time).
+ * - Remote URL image sources (base64 images are supported).
  * - Server-side tool_choice coercion modes beyond 'auto' / 'required' / 'none'.
  * - Prompt caching (Anthropic cache_control is stripped).
  * - Extended thinking (Anthropic `thinking` param is dropped).
@@ -42,11 +41,15 @@ type ContentBlock =
   | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
   | { type: 'unknown'; [k: string]: unknown }
 
+type OpenAIContentPart =
+  | { type: 'text'; text: string }
+  | { type: 'image_url'; image_url: { url: string } }
+
 type Role = 'system' | 'user' | 'assistant' | 'tool'
 
 export interface OpenAIMessage {
   role: Role
-  content: string | ContentBlock[] | null
+  content: string | OpenAIContentPart[] | null
   tool_calls?: Array<{ id: string; type: 'function'; function: { name: string; arguments: string } }>
   tool_call_id?: string
 }
@@ -97,6 +100,35 @@ function asStringContent(content: unknown): string {
       .join('')
   }
   return ''
+}
+
+function convertUserContent(content: unknown): string | OpenAIContentPart[] {
+  if (typeof content === 'string') return content
+  if (!Array.isArray(content)) return ''
+
+  const parts: OpenAIContentPart[] = []
+  for (const block of content as ContentBlock[]) {
+    if (block.type === 'text') {
+      parts.push({ type: 'text', text: block.text })
+    } else if (
+      block.type === 'image'
+      && block.source.type === 'base64'
+      && block.source.media_type
+      && block.source.data
+    ) {
+      parts.push({
+        type: 'image_url',
+        image_url: {
+          url: `data:${block.source.media_type};base64,${block.source.data}`,
+        },
+      })
+    }
+  }
+
+  if (parts.every((part) => part.type === 'text')) {
+    return parts.map((part) => part.type === 'text' ? part.text : '').join('')
+  }
+  return parts
 }
 
 function normalizeSchema(schema: Record<string, unknown>): Record<string, unknown> {
@@ -187,10 +219,10 @@ function convertMessages(
           })
         }
         if (other.length > 0) {
-          out.push({ role: 'user', content: asStringContent(other) })
+          out.push({ role: 'user', content: convertUserContent(other) })
         }
       } else {
-        out.push({ role: 'user', content: asStringContent(m.content) })
+        out.push({ role: 'user', content: convertUserContent(m.content) })
       }
     } else if (m.role === 'assistant') {
       const content = m.content
@@ -372,8 +404,18 @@ async function* chunksToAnthropicEvents(
   }
 
   for await (const line of lines) {
-    if (!line.startsWith('data:')) continue
-    const payload = line.slice(5).trim()
+    const trimmed = line.trim()
+    if (!trimmed) continue
+    // Accept both "data: " (with space, OpenAI spec) and "data:" (no space,
+    // emitted by paic.com.cn gateways like wizard-ai). The stream chunks
+    // themselves follow the standard; only the prefix separator varies.
+    if (!trimmed.startsWith('data:')) {
+      continue
+    }
+    // Skip the "data:" prefix (5 chars) plus optional single space.
+    const payload = trimmed.startsWith('data: ')
+      ? trimmed.slice(6)
+      : trimmed.slice(5)
     if (payload === '[DONE]') {
       yield { type: 'message_stop' }
       return
@@ -571,14 +613,20 @@ export class OpenAIClient {
       },
     }
 
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${this.apiKey}`,
+    }
+    if (this.baseURL.includes('paic.com.cn')) {
+      headers['client-code'] = 'Gemini'
+      headers['plugin-version'] = 'Gemini'
+    }
+
     let response: Response
     try {
       response = await fetch(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${this.apiKey}`,
-        },
+        headers,
         body: JSON.stringify(body),
         signal,
       })

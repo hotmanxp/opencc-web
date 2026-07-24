@@ -47,6 +47,19 @@ export interface DecideAutoScrollInput {
    * `Infinity` 用于初始化时强制跟随 (容器尚未挂载, 量不到距离)。
    */
   distanceToBottomPx: number
+  /**
+   * 折叠视图态 (transcriptCollapsed === true)。折叠态下 AssistantTextBody
+   * 的 maxHeight:140 + overflow:hidden clamp 让 outer scrollHeight 在文字
+   * 越过 ~6 行后停涨, `contentGrew` 信号失真. 折叠态下用 messages 数组
+   * 引用变化作为 fallback 信号, 而非依赖 scrollHeight delta.
+   */
+  folded?: boolean
+  /**
+   * messages 数组引用是否变化 (`messages !== prevMessages`). 折叠态下
+   * streaming delta 与 tool_result 都是 in-place 更新, 引用换但 length 不
+   * 变, 这正是折叠视图不滚的根因 — 但 store 真的写过新数据, UI 必须跟.
+   */
+  messagesRefChanged?: boolean
 }
 
 export type AutoScrollDecision = 'follow' | 'stay'
@@ -54,7 +67,15 @@ export type AutoScrollDecision = 'follow' | 'stay'
 export function decideAutoScroll(
   input: DecideAutoScrollInput,
 ): AutoScrollDecision {
-  const { prevLength, nextLength, contentGrew, scrollFollowLocked, distanceToBottomPx } = input
+  const {
+    prevLength,
+    nextLength,
+    contentGrew,
+    scrollFollowLocked,
+    distanceToBottomPx,
+    folded = false,
+    messagesRefChanged = false,
+  } = input
 
   // 1) 用户主动滚 → 5s 锁内一律不滚 (用户主动翻历史期间, 不打扰)。
   //    注意: 即便 contentGrew, 用户手势期间也不要拉回 — 让 "N 条新消息" 提示
@@ -70,6 +91,24 @@ export function decideAutoScroll(
   //    没变但容器长高, 用户在底部 → 跟到底, 让新字符出现在视口里。
   //    用户不在底部 (> 80px) 时不打扰, 留给 5) 的距离判断。
   if (contentGrew && distanceToBottomPx <= NEAR_BOTTOM_PX) return 'follow'
+
+  // 3.5) 折叠视图 fallback: CollapsedMessageBubble 的 maxHeight:140 +
+  //    overflow:hidden clamp 让 outer scrollHeight 在文字越过 ~6 行后
+  //    停涨, contentGrew 失真. 但 store 里 messages 真的写过 (引用换了),
+  //    UI 必须跟 — 不然用户看不到 tool_result 已完成 / 后续 streaming
+  //    delta. 仅在用户已在底部时触发, 用户上滚 (>80px) 仍 stay.
+  //    nextLength > prevLength 已由外层 caller 兜底覆盖 "新增消息"
+  //    路径, 此处专门救 length 不变 + contentGrew=false 的折叠态
+  //    streaming delta / tool_result.
+  if (
+    folded &&
+    messagesRefChanged &&
+    !contentGrew &&
+    nextLength === prevLength &&
+    distanceToBottomPx <= NEAR_BOTTOM_PX
+  ) {
+    return 'follow'
+  }
 
   // 4) 长度和内容都没变 → effect 重跑但无新增 (例如 React strict-mode 二次挂载、
   //    store 引用刷新但数据未变)。保持当前位置。

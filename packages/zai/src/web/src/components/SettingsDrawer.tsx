@@ -27,7 +27,7 @@
  * onChange 由父组件 SettingsDrawer 接到 store / 写盘动作(后续阶段)。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Drawer } from 'antd'
+import { Button, Drawer } from 'antd'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
 import type { OutputStyle } from '../../../shared/settings.js'
@@ -42,6 +42,15 @@ export interface EnumOption {
 export type SettingsRow =
   | { key: string; label: string; kind: 'boolean'; value: boolean }
   | { key: string; label: string; kind: 'enum'; value: string; options: EnumOption[] }
+  | {
+      key: string
+      label: string
+      kind: 'number'
+      value: number
+      min?: number
+      max?: number
+      step?: number
+    }
 
 export interface SettingsSection {
   section: string
@@ -144,12 +153,75 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
     [],
   )
 
+  // number row 编辑模式 — `numberEdit` 是正在编辑的 row.key,null 表示未编辑。
+  // `numberEditBuffer` 是输入框临时字符串(用户输入未提交)。
+  const [numberEdit, setNumberEdit] = useState<string | null>(null)
+  const [numberEditBuffer, setNumberEditBuffer] = useState('')
+
+  // 在选中的 number row 上开启编辑模式 — 用 row 当前 value 初始化 buffer。
+  const openNumberEdit = useCallback(
+    (row: Extract<SettingsRow, { kind: 'number' }>) => {
+      setNumberEdit(row.key)
+      setNumberEditBuffer(String(row.value))
+    },
+    [],
+  )
+
+  // 提交当前 buffer:解析成 number,clamp 到 [min, max],触发 onChange,退出编辑。
+  const commitNumberEdit = useCallback(() => {
+    if (!numberEdit) return
+    const row = flatRows.find((r) => r.key === numberEdit)
+    if (!row || row.kind !== 'number') {
+      setNumberEdit(null)
+      return
+    }
+    const parsed = parseInt(numberEditBuffer, 10)
+    if (Number.isFinite(parsed)) {
+      let next = parsed
+      if (typeof row.min === 'number') next = Math.max(next, row.min)
+      if (typeof row.max === 'number') next = Math.min(next, row.max)
+      onChange?.(row.key, next)
+    }
+    setNumberEdit(null)
+    setNumberEditBuffer('')
+  }, [numberEdit, numberEditBuffer, flatRows, onChange])
+
+  // ± 按钮:对当前 row.value 加/减 step,clamp 到 [min, max]。始终触发 onChange
+  // (即便值不变 — 与 opencc /config 一致)。
+  const bumpNumber = useCallback(
+    (row: Extract<SettingsRow, { kind: 'number' }>, dir: 1 | -1) => {
+      const step = row.step ?? 1
+      let next = row.value + step * dir
+      if (typeof row.min === 'number') next = Math.max(next, row.min)
+      if (typeof row.max === 'number') next = Math.min(next, row.max)
+      onChange?.(row.key, next)
+    },
+    [onChange],
+  )
+
   // === 键盘事件 ===
   // 用 window listener 而不是 onKeyDown prop,因为 SettingsList 不一定接收 focus
   // (测试也用 window.dispatchEvent 触发,保证一致性)。
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       const key = e.key
+      // 0) number row 编辑模式激活 — Escape / Enter 由我们拦截;
+      // Backspace / 数字键透传给 input 自身。其它键不冒泡。
+      if (numberEdit) {
+        if (key === 'Escape') {
+          e.preventDefault()
+          setNumberEdit(null)
+          setNumberEditBuffer('')
+          return
+        }
+        if (key === 'Enter') {
+          e.preventDefault()
+          commitNumberEdit()
+          return
+        }
+        if (key === 'Backspace' || /^[0-9]$/.test(key)) return
+        return
+      }
       // 1) 枚举浮层激活时优先处理浮层交互
       if (enumOverlay) {
         if (key === 'Escape') {
@@ -217,6 +289,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
       if (key === 'Enter') {
         e.preventDefault()
         if (selectedRow?.kind === 'enum') openEnumOverlay(selectedRow)
+        else if (selectedRow?.kind === 'number') openNumberEdit(selectedRow)
         return
       }
       if (key === '/') {
@@ -233,12 +306,15 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [
+    numberEdit,
     enumOverlay,
     searchMode,
     filteredFlatRows.length,
     selectedRow,
     toggleBoolean,
     openEnumOverlay,
+    openNumberEdit,
+    commitNumberEdit,
     onClose,
   ])
 
@@ -328,18 +404,83 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                     {isSelected ? '›' : ''}
                   </span>
                   <span style={{ flex: 1 }}>{row.label}</span>
-                  <span
-                    style={{
-                      color: 'rgba(255,255,255,0.65)',
-                      textAlign: 'right',
-                      maxWidth: '55%',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap',
-                    }}
-                  >
-                    {displayValue}
-                  </span>
+                  {row.kind === 'number' ? (
+                    <span
+                      style={{
+                        display: 'inline-flex',
+                        alignItems: 'center',
+                        gap: 4,
+                      }}
+                    >
+                      <Button
+                        size="small"
+                        data-testid={`number-row-minus-${row.key}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          bumpNumber(row, -1)
+                        }}
+                        aria-label="decrement"
+                      >
+                        −
+                      </Button>
+                      {numberEdit === row.key ? (
+                        <input
+                          autoFocus
+                          data-testid={`number-row-input-${row.key}`}
+                          type="text"
+                          inputMode="numeric"
+                          value={numberEditBuffer}
+                          onChange={(e) => setNumberEditBuffer(e.target.value)}
+                          onClick={(e) => e.stopPropagation()}
+                          style={{
+                            width: 56,
+                            textAlign: 'center',
+                            background: 'transparent',
+                            border: '1px solid rgba(255,255,255,0.3)',
+                            color: 'rgba(255,255,255,0.85)',
+                            outline: 'none',
+                            font: 'inherit',
+                            padding: '0 4px',
+                          }}
+                        />
+                      ) : (
+                        <span
+                          data-testid={`number-row-value-${row.key}`}
+                          style={{
+                            minWidth: 28,
+                            textAlign: 'center',
+                            color: 'rgba(255,255,255,0.85)',
+                          }}
+                        >
+                          {displayValue}
+                        </span>
+                      )}
+                      <Button
+                        size="small"
+                        data-testid={`number-row-plus-${row.key}`}
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          bumpNumber(row, 1)
+                        }}
+                        aria-label="increment"
+                      >
+                        +
+                      </Button>
+                    </span>
+                  ) : (
+                    <span
+                      style={{
+                        color: 'rgba(255,255,255,0.65)',
+                        textAlign: 'right',
+                        maxWidth: '55%',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {displayValue}
+                    </span>
+                  )}
                 </div>
               )
             })}
@@ -407,6 +548,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
 
 function formatValue(row: SettingsRow): string {
   if (row.kind === 'boolean') return row.value ? 'true' : 'false'
+  if (row.kind === 'number') return String(row.value)
   // enum: 显示当前 option.label
   const opt = row.options.find((o) => o.value === row.value)
   return opt?.label ?? row.value
@@ -423,7 +565,11 @@ type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 //   1) 静态 schema(本组件内置)— boolean / enum 行
 //   2) GET /api/agent/settings 拉来的 dynamic rows(可选模型列表)— 拼到 Permission section 之前
 // 阶段 1 只渲染静态部分;动态模型行在阶段 2 接真实数据后补上。
-function buildStaticSchema(theme: Theme, outputStyle: OutputStyle): SettingsSchema {
+function buildStaticSchema(
+  theme: Theme,
+  outputStyle: OutputStyle,
+  maxVisibleMessages: number,
+): SettingsSchema {
   return [
     {
       section: 'Permission',
@@ -463,6 +609,20 @@ function buildStaticSchema(theme: Theme, outputStyle: OutputStyle): SettingsSche
         { key: 'gitignore', label: '在文件选择器中尊重 .gitignore', kind: 'boolean', value: true },
         { key: 'copyFull', label: '始终复制完整回复(跳过 /copy 选择器)', kind: 'boolean', value: false },
         { key: 'noFlicker', label: '无闪烁模式', kind: 'boolean', value: false },
+      ],
+    },
+    {
+      section: 'Display',
+      rows: [
+        {
+          key: 'maxVisibleMessages',
+          label: '消息最大显示条数',
+          kind: 'number',
+          value: maxVisibleMessages,
+          min: 1,
+          max: 1000,
+          step: 1,
+        },
       ],
     },
     {
@@ -544,6 +704,8 @@ export default function SettingsDrawer() {
   const setTheme = useAppStore((s) => s.setSettingsTheme)
   const outputStyle = useAppStore((s) => s.outputStyle)
   const setOutputStyle = useAppStore((s) => s.setOutputStyle)
+  const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages)
+  const setMaxVisibleMessages = useAppStore((s) => s.setMaxVisibleMessages)
   // 切换 outputStyle 时同步把 transcriptCollapsed 重置为新默认 — 'compact' 切换到
   // 'default' 时立即展开,'default' 切到 'compact' 时立即折叠;避免用户得再点
   // 一次工具栏按钮才生效.
@@ -551,7 +713,7 @@ export default function SettingsDrawer() {
 
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle),
+    buildStaticSchema(theme, outputStyle, maxVisibleMessages),
   )
   // 同步 store theme → schema.theme 行(其它行的 value 内部维护)。
   useEffect(() => {
@@ -584,6 +746,20 @@ export default function SettingsDrawer() {
       })),
     )
   }, [outputStyle])
+  // 同步 store maxVisibleMessages → schema.maxVisibleMessages 行。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'maxVisibleMessages' && r.kind === 'number') {
+            return { ...r, value: maxVisibleMessages }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [maxVisibleMessages])
 
   const handleChange = useCallback(
     (key: string, value: SettingsValue) => {
@@ -608,6 +784,19 @@ export default function SettingsDrawer() {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })
       }
+      // 消息最大显示条数走 store + PUT settings.json 持久化路径(同 outputStyle):
+      // clamp 到 [1, 1000] 再写 store,server 端会再做一次 floor + clamp 兜底.
+      if (key === 'maxVisibleMessages' && typeof value === 'number') {
+        const clamped = Math.max(1, Math.min(1000, Math.floor(value)))
+        setMaxVisibleMessages(clamped)
+        void fetch('/api/agent/settings/max-visible-messages', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value: clamped }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
       // 其它行目前只更新内部 schema state(阶段 2 接真实写盘)
       setSchema((prev) =>
         prev.map((s) => ({
@@ -620,12 +809,15 @@ export default function SettingsDrawer() {
             if (r.kind === 'enum' && typeof value === 'string') {
               return { ...r, value }
             }
+            if (r.kind === 'number' && typeof value === 'number') {
+              return { ...r, value }
+            }
             return r
           }),
         })),
       )
     },
-    [setTheme, setOutputStyle, setTranscriptCollapsed],
+    [setTheme, setOutputStyle, setTranscriptCollapsed, setMaxVisibleMessages],
   )
 
   if (!open) return null

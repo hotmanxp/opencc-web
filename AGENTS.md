@@ -56,6 +56,7 @@ web (useBackgroundTasks) ─POST /api/tasks→ DefaultBackgroundRuntime.dispatch
 | `packages/zai/src/server/services/agentRuntime.ts` | `DefaultAgentRuntime` 单例 + `resolveSkillsDirs`(`~/.agents/skills`)+ `resolveSandbox`(`executor:'child_process'` / `maxCpuMs:600_000`)+ 启动时 `initCommands` |
 | `packages/zai/src/server/services/backgroundRuntime.ts` | `initBackgroundRuntime` 包 `DefaultBackgroundRuntime` 注入 `onTaskStateChange` → emit `job.*` + 串 `SubagentNotifier.handle(task)`;`initSubagentNotifierLifecycle` 必须先注册 |
 | `packages/zai/src/server/services/subagentNotifier.ts` | 后台 task terminal 时 fire-and-forget 注入 `<task-notification>` 触发父 queryLoop 续传 |
+| `packages/zai/src/server/services/openaiClient.ts` | 手写 OpenAI-compatible HTTP 客户端(~648 行),`messages.create()` 返回 `AsyncGenerator<OpenAIStreamEvent>`,duck-type 为 Anthropic SDK 让 `modelCaller` 在 `provider:'openai'` 时无缝替换:Anthropic messages → OpenAI messages(支持 string / base64 image / tool_use / tool_result,orphan tool_result 自动丢)+ tool schema 归一化(`required[] ⊆ properties`,strict mode 加 `additionalProperties:false`)+ OpenAI SSE → Anthropic events(`message_start`/`content_block_*`/`message_delta`/`message_stop`/`error`,含 `reasoning_content → thinking` 桥接 + `finish_reason=length` 截断 JSON 自愈 + `paic.com.cn` 自动加 `client-code/plugin-version: Gemini` 头)。**NOT supported**:远程 URL 图片、`tool_choice` 非 auto/required/none、prompt cache、`thinking` 参数、code interpreter。`modelCaller.ts:159-175` 懒加载 dynamic import(vitest `vi.mock` 可拦截) |
 | `packages/zai-agent-core/src/runtime/{queryLoop,streamAdapter,toolExecution,canUseTool}.ts` | 主循环 / `wrapWithZaiMeta` 加 meta / `executeToolsStreaming` 串行 tool_use:* / `defaultCanUseToolFactory`(Bash 走 sandbox,Agent 直接 allow)|
 | `packages/zai-agent-core/src/runtime/background/{BackgroundRuntime,DefaultBackgroundRuntime,store/JsonTaskStore,types}.ts` | `dispatch/get/list/cancel/events/shutdown` interface + JsonTaskStore 持久化 + retry(529 连续上限 vs 5xx 总上限 maxRetries=10)|
 | `packages/zai-agent-core/src/agents/{memoryLoader,memoryWatcher}.ts` | `loadMemoryForPrompt` 注入 system prompt 顶部(AGENTS.md 链 + .claude/rules + AGENTS.local.md + @include) / `startMemoryWatcher` 1s mtime 监听 + `clearMemoryCache` |
@@ -63,6 +64,7 @@ web (useBackgroundTasks) ─POST /api/tasks→ DefaultBackgroundRuntime.dispatch
 | `packages/zai-agent-core/src/tools/{BackgroundAgentResultTool,TaskOutputTool}/` | 阻塞读 / 非阻塞拉 task output |
 | `packages/zai/src/shared/events.ts` | zod discriminatedUnion:`runtime.*` / `session.*` / `job.*` / `prompt.ask` / `system.*` 五通道 |
 | `packages/zai/src/web/src/store/useAgentStore.ts` | Zustand store:`applyRuntimeEvent` / `applySessionEvent` / `applyPromptAsk` / `applyJobEvent` / `applySystemEvent` + `upsertToolCall` / `scheduleTaskListClearIfAllDone` 5s 自动清空 |
+| `packages/zai/src/web/src/store/useAppStore.ts` | 全局 UI state:`sidebarCollapsed` / `settingsDrawerOpen` / `settingsTheme` / `outputStyle` / `maxVisibleMessages`(消息最大显示条数,默认 20,超过时 Agent.tsx 折叠早期消息 + 顶部浮按钮一键还原) |
 | `packages/zai/src/web/src/lib/{api,v2TaskApi}.ts` + `hooks/useBackgroundTasks.ts` | 通用 fetch(`api.ts` 默认不带 `X-Zai-Token`)+ v2 task 拉取 + job dock 按 sessionId 切分 |
 
 ## SSE 事件通道(`shared/events.ts`)
@@ -201,7 +203,7 @@ useAgentStore.applyCompactionEvent → 5s 自动消失的 toast
 - `/agent/prompt` HARD_TIMEOUT 2h 没有自动化测试(常量 `agent.ts:34`)。AskUserQuestion 的等待不该被这条 timeout 掐死;若要让 ask 单独计时,应在 `askRegistry.register` 里接独立 setTimeout,而不是复用这里的 abortController。
 - `BackgroundRuntime` retry 策略(529 vs 5xx)缺单元测试;`SubagentNotifier` 父 session 续传链路缺测试(关键路径任何一环断就静默丢通知)
 - `translateRuntimeEvents` 没有针对错位/损坏 input 的回归测试
-- v2 transcript resume `tool_use` 顶层消息合并(`queryLoop.ts:140-185`)缺回归测试,易在改 schema 时回归 2013
+- v2 transcript resume `tool_use` 顶层消息合并 + SubagentNotifier 注入后 user/tool_result 配对已有回归测试(`test/runtime/queryLoop-resume-2013.test.ts`、`test/runtime/subagentNotifier-2013.test.ts`),覆盖 tool_result+text 合并到同一条 user 的 Anthropic 协议约束
 - abort / SSE 重连 / 模式切换乐观更新 revert / `AgentInputBox` 图片粘贴 + Esc 中断 路径无单元测试
 - SSE state push 走 StateChangeBus 桥接层,见 docs/superpowers/specs/2026-07-19-sse-state-push-design.md
 

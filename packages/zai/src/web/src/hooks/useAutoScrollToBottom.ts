@@ -22,8 +22,16 @@ export interface UseAutoScrollToBottomResult {
    *
    * @param nextLength 当前 messages.length。第一次调用传 0 (内部用 prevLengthRef
    *                    触发 -1 的初始化路径, 让首屏落到底)。
+   * @param opts.folded 折叠视图态 (transcriptCollapsed === true). 折叠态
+   *                    下 outer scrollHeight 受 clamp 干扰, 用 messages
+   *                    数组引用变化作为 fallback 信号.
+   * @param opts.messagesRef 本次 messages 数组引用. 与 ref 缓存的 prev
+   *                    对比, 引用换过即 store 真的写过新数据.
    */
-  scrollToBottom: (nextLength?: number) => void
+  scrollToBottom: (
+    nextLength?: number,
+    opts?: { folded?: boolean; messagesRef?: unknown },
+  ) => void
   /** 容器滚动锁 (用户 5s 内主动滚过), 透传给外部 UI 显示 "N 条新消息" 提示。 */
   scrollLocked: boolean
 }
@@ -36,10 +44,17 @@ export function useAutoScrollToBottom(
   // streaming 期间 "用户需要看新内容" 的关键信号 — 比 nextLength 更准:
   // streaming delta 时 length 不变但 scrollHeight 一直在涨。
   const prevScrollHeightRef = useRef<number>(0)
+  // 追踪上一次 effect 时的 messages 引用, 折叠视图 fallback 路径用:
+  // streaming delta / tool_result 都是 in-place 更新 (引用换但 length 不变),
+  // 引用变化是 "store 真的写过" 的可靠信号.
+  const prevMessagesRef = useRef<unknown>(undefined)
   const scrollLocked = useScrollFollow(containerRef)
 
   const scrollToBottom = useCallback(
-    (nextLength: number = 0) => {
+    (
+      nextLength: number = 0,
+      opts?: { folded?: boolean; messagesRef?: unknown },
+    ) => {
       const el = containerRef.current
       if (!el) return
 
@@ -58,12 +73,26 @@ export function useAutoScrollToBottom(
       // 用 delta 而非绝对值, 避免 resize 字体/窗口时的 false positive。
       const contentGrew = el.scrollHeight > prevScrollHeightRef.current
 
+      // 折叠视图 fallback 信号: messages 数组引用换了 (即 store 真的写过),
+      // 无论 length 是否增长、scrollHeight 是否增长, 都视为"有新数据要跟".
+      // 折叠视图 (maxHeight:140 + overflow:hidden) clamp 让 contentGrew 在文字
+      // 越过 ~6 行后停涨, 这条信号是 contentGrew 失真时的救命稻草.
+      // 注意: 第一次调用 prevMessagesRef.current === undefined, 不能用
+      // !== prevMessagesRef.current 判断. 用 caller 传入的 prev ref 或
+      // 用 prevLengthRef === -1 (即初始化路径) 排除.
+      const messagesRefChanged =
+        prevMessagesRef.current !== undefined &&
+        opts?.messagesRef !== undefined &&
+        opts.messagesRef !== prevMessagesRef.current
+
       const decision = decideAutoScroll({
         prevLength: prevLengthRef.current,
         nextLength,
         contentGrew,
         scrollFollowLocked: scrollLocked,
         distanceToBottomPx,
+        folded: opts?.folded,
+        messagesRefChanged,
       })
 
       // DEBUG: log scroll decision
@@ -73,6 +102,8 @@ export function useAutoScrollToBottom(
         contentGrew,
         scrollLocked,
         distanceToBottomPx,
+        folded: opts?.folded,
+        messagesRefChanged,
         decision,
         scrollHeight: el.scrollHeight,
         scrollTop: el.scrollTop,
@@ -92,9 +123,12 @@ export function useAutoScrollToBottom(
       // 不管 'follow' 还是 'stay' 都更新 prev, 让 delta 这条同样走 length===prev
       // 路径直接早退 (避免 init 之后 prev 永远 -1)。scrollHeight 也同步,
       // 否则下次 effect 会把"我们刚刚 scrollTo 完留下的新高度"误算成 contentGrew,
-      // 触发无谓重滚。
+      // 触发无谓重滚。messagesRef 同步让下次 effect 正确判断引用变化.
       prevLengthRef.current = nextLength
       prevScrollHeightRef.current = el.scrollHeight
+      if (opts?.messagesRef !== undefined) {
+        prevMessagesRef.current = opts.messagesRef
+      }
     },
     [containerRef, scrollLocked],
   )

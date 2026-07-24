@@ -106,3 +106,16 @@ describe('useAppStore', () => {
     expect(useAppStore.getState().jobs.j2.done).toBe(true)
   })
 })
+
+describe('maxVisibleMessages', () => {
+  test('default value is 20', () => {
+    useAppStore.setState({ maxVisibleMessages: 20 })
+    expect(useAppStore.getState().maxVisibleMessages).toBe(20)
+  })
+
+  test('setMaxVisibleMessages(50) updates state', () => {
+    useAppStore.setState({ maxVisibleMessages: 20 })
+    useAppStore.getState().setMaxVisibleMessages(50)
+    expect(useAppStore.getState().maxVisibleMessages).toBe(50)
+  })
+})

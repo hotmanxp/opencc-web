@@ -2,6 +2,7 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
+import { BUILTIN_DEFAULT_SETTINGS } from '../../shared/settings.js'
 
 /**
  * Tests for the zaiSettingsStore helper. We redirect `homedir()` into a
@@ -31,9 +32,12 @@ vi.mock('node:os', async () => {
   }
 })
 
-beforeEach(() => {
+beforeEach(async () => {
   // fresh temp dir per test so writeZaiSettings never collides
   currentHome = makeTempHome()
+  // clear the module-level settings cache so each test re-runs the tier chain
+  const { __resetCacheForTests } = await import('./zaiSettingsCache.js')
+  __resetCacheForTests()
 })
 
 afterEach(() => {
@@ -44,12 +48,12 @@ afterEach(() => {
 })
 
 describe('zaiSettingsStore', () => {
-  it('returns {} when settings.json is absent', async () => {
+  it('seeds and returns builtin defaults when settings.json is absent', async () => {
     const { readZaiSettings } = await import('./zaiSettingsStore.js')
-    expect(await readZaiSettings()).toEqual({})
+    expect(await readZaiSettings()).toEqual(BUILTIN_DEFAULT_SETTINGS)
   })
 
-  it('returns {} when settings.json contains invalid JSON', async () => {
+  it('falls back to builtin defaults when settings.json contains invalid JSON', async () => {
     const fs = await import('node:fs/promises')
     await fs.mkdir(join(currentHome, '.zai'), { recursive: true })
     await fs.writeFile(
@@ -58,7 +62,7 @@ describe('zaiSettingsStore', () => {
       'utf-8',
     )
     const { readZaiSettings } = await import('./zaiSettingsStore.js')
-    expect(await readZaiSettings()).toEqual({})
+    expect(await readZaiSettings()).toEqual(BUILTIN_DEFAULT_SETTINGS)
   })
 
   it('round-trips outputStyle through writeZaiSettings', async () => {

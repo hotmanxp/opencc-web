@@ -2,18 +2,24 @@
 // @ts-nocheck
 import { describe, expect, test, vi, beforeEach } from "vitest";
 import "@testing-library/jest-dom";
-import { render } from "@testing-library/react";
+import { fireEvent, render } from "@testing-library/react";
 
-// 把 Agent.tsx 内部会触发的副作用全部 mock 掉, 只关注"页面是否还渲染
-// BottomStatusBar" — 修复后, 任务 dock 已合并到 AgentInputBox 状态行,
-// 顶层不再需要 BottomStatusBar 这条独立行.
+// useAppStore mock: 同时支持 selector 形式 useAppStore((s) => s.x) 和
+// 无参形式 useAppStore() (Agent.tsx 顶层解构 instanceContext 用).
+// 闭包持有 appState 引用, 测试可通过 setAppState({ ... }) 注入字段;
+// 渲染前必须先 setAppState, 因为 mock 第一次调用会读 appState.
+const appState: any = {
+  instanceContext: { cwdName: '~', branch: 'master' },
+  toasts: [],
+  jobs: {},
+  setInstanceContext: vi.fn(),
+  maxVisibleMessages: 20,
+}
+function setAppState(patch: Record<string, any>) {
+  Object.assign(appState, patch)
+}
 vi.mock("../store/useAppStore.js", () => ({
-  useAppStore: () => ({
-    instanceContext: { cwdName: '~', branch: 'master' },
-    toasts: [],
-    jobs: {},
-    setInstanceContext: vi.fn(),
-  }),
+  useAppStore: (selector?: any) => (selector ? selector(appState) : appState),
 }))
 vi.mock("../hooks/useSessionCwd.js", () => ({
   useSessionCwd: () => undefined,  // SessionCwdBridge 内部 hook:no-op for tests
@@ -74,6 +80,8 @@ beforeEach(async () => {
     todosBySession: {},
     v2TasksBySession: {},
   })
+  // 重置 mock appState 的可变字段 (maxVisibleMessages 等)
+  setAppState({ maxVisibleMessages: 20 })
 })
 
 describe("Agent.tsx — 不再渲染 BottomStatusBar (任务已合并到 AgentInputBox)", () => {
@@ -85,5 +93,50 @@ describe("Agent.tsx — 不再渲染 BottomStatusBar (任务已合并到 AgentIn
     expect(queryByTestId("bottom-status-trigger")).toBeNull();
     // 既然任务行不在了, todosBySession / v2TasksBySession 这两个变量在 Agent.tsx
     // 也变成了 dead code — 这个测试只关心渲染层面.
+  })
+})
+
+// Task 8 — visible tail + sticky "显示全部 (N 条隐藏)" pill.
+// 当 messages.length > maxVisibleMessages 时, Agent 渲染一个 sticky pill,
+// 文案 "显示全部 ({hiddenCount} 条隐藏)". 点击 pill 后 setShowAllMessages(true),
+// pill 消失直到 messages 再次超过上限触发 useEffect reset.
+describe("Agent.tsx — visibleMessages slice + sticky show-all pill", () => {
+  // 构造 100 条 runtime.delta 消息: 模拟一个长对话, 触发 hiddenCount > 0.
+  function buildMessages(n: number) {
+    const out: any[] = []
+    for (let i = 0; i < n; i++) {
+      out.push({
+        type: 'runtime.delta',
+        eventId: `evt-${i}`,
+        ts: 1000 + i,
+        sessionId: 'sess-1',
+        turnIndex: 0,
+        delta: `delta-${i}`,
+      })
+    }
+    return out
+  }
+
+  test("shows the show-all pill when messages exceed maxVisibleMessages", async () => {
+    const mod = await import("../store/useAgentStore.js")
+    mod.useAgentStore.setState({ messages: buildMessages(100) } as any)
+    setAppState({ maxVisibleMessages: 20 })
+    const { default: Agent } = await import("./Agent.jsx")
+    const { getByTestId } = render(<Agent />)
+    const pill = getByTestId("show-all-messages-pill")
+    // 100 - 20 = 80 hidden; pill 文本含 "80 条隐藏".
+    expect(pill.textContent).toMatch(/80\s*条隐藏/)
+  })
+
+  test("clicking pill shows all messages (pill disappears)", async () => {
+    const mod = await import("../store/useAgentStore.js")
+    mod.useAgentStore.setState({ messages: buildMessages(100) } as any)
+    setAppState({ maxVisibleMessages: 20 })
+    const { default: Agent } = await import("./Agent.jsx")
+    const { getByTestId, queryByTestId } = render(<Agent />)
+    const pill = getByTestId("show-all-messages-pill")
+    fireEvent.click(pill)
+    // showAllMessages=true → pill 不再渲染.
+    expect(queryByTestId("show-all-messages-pill")).toBeNull()
   })
 })

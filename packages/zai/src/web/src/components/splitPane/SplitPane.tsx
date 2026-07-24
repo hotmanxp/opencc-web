@@ -7,24 +7,20 @@ import {
   STORAGE_KEYS,
   MIN_WIDTH,
   MAX_WIDTH,
-  DEFAULT_WIDTH,
-  DEFAULT_WIDTH_PCT,
+  DEFAULT_WIDTH_VW,
   RESPONSIVE_BREAKPOINT,
   clampWidth,
   useLocalStorageState,
 } from './shared.js';
 
 /**
- * 首次打开分屏时的默认宽度: 屏幕宽度的 60% (DEFAULT_WIDTH_PCT), 然后过
- * clampWidth 让窄屏也能用. 若 storage 已有值 (旧默认 480 或用户拖拽过),
- * 沿用 storage, 不动用户的偏好 — 仅"首次"用 60%.
+ * 首次打开分屏时的默认宽度: 60vw (DEFAULT_WIDTH_VW). storage 已有值
+ * (用户拖拽过) 沿用 storage — 仅"首次"用 60vw.
  *
  * SSR 安全: typeof window 守卫避免在非浏览器环境 (测试 / SSR) 抛错.
  */
 function resolveInitialWidth(): number {
-  if (typeof window === 'undefined') return DEFAULT_WIDTH;
-  const pct = Math.round(window.innerWidth * DEFAULT_WIDTH_PCT);
-  return clampWidth(pct);
+  return DEFAULT_WIDTH_VW;
 }
 
 type TabKey = 'git' | 'fs' | 'tbd';
@@ -63,7 +59,10 @@ export function SplitPane({ cwd }: SplitPaneProps) {
 
   const open = openStored && !responsiveClosed;
 
-  // Splitter drag state.
+  // Splitter drag state. width 存的是 vw (整数百分比), 但 mouse 移动给出 px,
+  // 所以拖拽过程中实时把 px delta 折算成 vw delta:
+  //   delta_vw = delta_px / window.innerWidth * 100
+  // 然后加到 startW (vw) 上, clamp 进 [MIN_WIDTH, MAX_WIDTH].
   const dragRef = useRef<{ startX: number; startW: number } | null>(null);
   const onHandleMouseDown = useCallback(
     (e: React.MouseEvent) => {
@@ -71,7 +70,10 @@ export function SplitPane({ cwd }: SplitPaneProps) {
       const onMove = (ev: MouseEvent) => {
         if (!dragRef.current) return;
         // Drag left → reduce panel width; right → grow.
-        const next = dragRef.current.startW + (ev.clientX - dragRef.current.startX) * -1;
+        const viewport = window.innerWidth || 1;
+        const deltaPx = (ev.clientX - dragRef.current.startX) * -1;
+        const deltaVw = (deltaPx / viewport) * 100;
+        const next = dragRef.current.startW + deltaVw;
         setWidthStored(clampWidth(next));
       };
       const onUp = () => {
@@ -85,7 +87,8 @@ export function SplitPane({ cwd }: SplitPaneProps) {
     [width, setWidthStored],
   );
 
-  const panelWidth = open ? width : 0;
+  // panelWidth 是 vw 字符串 ('60vw' / '0'), 跟随窗口宽度变化.
+  const panelWidth = open ? `${width}vw` : 0;
 
   return (
     <div
@@ -142,7 +145,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
             onMouseLeave={(e) => {
               (e.currentTarget as HTMLDivElement).style.background = 'transparent';
             }}
-            title={`拖动以调整宽度 (${MIN_WIDTH}-${MAX_WIDTH}px)`}
+            title={`拖动以调整宽度 (${MIN_WIDTH}-${MAX_WIDTH}vw)`}
           />
         </>
       )}

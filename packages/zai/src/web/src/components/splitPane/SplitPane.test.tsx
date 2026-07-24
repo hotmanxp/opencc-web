@@ -79,46 +79,40 @@ describe('SplitPane', () => {
     expect(screen.queryByText(/Git/)).toBeNull();
   });
 
-  it('首次打开宽度 = 屏幕宽度 × 60%', () => {
-    // beforeEach 已把 innerWidth 设为 1440, 60% = 864, 在 MIN/MAX 内 (320/1200).
+  it('首次打开宽度 = 60vw (跟窗口无关, 跟旧 "60% 屏幕宽度" 视觉一致)', () => {
+    // 默认宽度走 DEFAULT_WIDTH_VW (60), 不再依赖 innerWidth. 新语义是
+    // vw 百分比, 任何 innerWidth 都是 60vw.
     localStorage.setItem('zai.splitPane.open', 'true');
     render(<SplitPane cwd="/repo" />);
     const panel = screen.getByTestId('split-pane');
-    // 行内样式里的 width 是 panelWidth (= 60% of 1440 = 864).
-    const w = parseInt((panel as HTMLElement).style.width, 10);
-    expect(w).toBe(Math.round(1440 * 0.6));
+    expect((panel as HTMLElement).style.width).toBe('60vw');
   });
 
-  it('storage 已有 width 时沿用 storage, 不动用户偏好', () => {
-    // 用户曾经拖到 700px, storage 落盘, 即使屏幕是 1440 也应保持 700.
+  it('storage 已有 widthVw 时沿用 storage, 不动用户偏好', () => {
+    // 用户曾经拖到 45vw, storage 落盘, 即使屏幕是 1440 也应保持 45vw.
     localStorage.setItem('zai.splitPane.open', 'true');
-    localStorage.setItem('zai.splitPane.width', '700');
+    localStorage.setItem('zai.splitPane.widthVw', '45');
     render(<SplitPane cwd="/repo" />);
     const panel = screen.getByTestId('split-pane');
-    const w = parseInt((panel as HTMLElement).style.width, 10);
-    expect(w).toBe(700);
+    expect((panel as HTMLElement).style.width).toBe('45vw');
   });
 
-  it('窄屏 (< 60% 小于 MIN_WIDTH) 会被 clamp 到 MIN_WIDTH', () => {
-    // 注意: innerWidth < RESPONSIVE_BREAKPOINT (1024) 会触发 auto-close, 这里
-    // 不重复 (见 "auto-closes when window is narrow"). clamp 下限靠 storage
-    // 灌一个低于 MIN_WIDTH 的值来验证: storage > hook > clampWidth 应拦到 MIN.
+  it('storage 灌低于 MIN_WIDTH 的 vw 会被 clamp 到 MIN_WIDTH', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
     localStorage.setItem('zai.splitPane.open', 'true');
-    localStorage.setItem('zai.splitPane.width', '100'); // < MIN_WIDTH (320)
+    localStorage.setItem('zai.splitPane.widthVw', '10'); // < MIN_WIDTH (20)
     render(<SplitPane cwd="/repo" />);
     const panel = screen.getByTestId('split-pane');
-    const w = parseInt((panel as HTMLElement).style.width, 10);
-    expect(w).toBe(MIN_WIDTH);
+    expect((panel as HTMLElement).style.width).toBe(`${MIN_WIDTH}vw`);
   });
 
-  it('超大屏 (60% 大于 MAX_WIDTH) 会被 clamp 到 MAX_WIDTH', () => {
-    Object.defineProperty(window, 'innerWidth', { configurable: true, value: 2400 });
-    // 60% of 2400 = 1440, clamp 到 MAX_WIDTH (1200).
+  it('storage 灌高于 MAX_WIDTH 的 vw 会被 clamp 到 MAX_WIDTH', () => {
+    // 旧 "60% × 2400 = 1440px → clamp 到 MAX" 这条用例, 新语义下没有
+    // "屏幕宽度依赖", 但 clamp 上限仍要验证: 灌一个 90 进去, 应拦到 MAX.
     localStorage.setItem('zai.splitPane.open', 'true');
+    localStorage.setItem('zai.splitPane.widthVw', '90');
     render(<SplitPane cwd="/repo" />);
     const panel = screen.getByTestId('split-pane');
-    const w = parseInt((panel as HTMLElement).style.width, 10);
-    expect(w).toBe(MAX_WIDTH);
+    expect((panel as HTMLElement).style.width).toBe(`${MAX_WIDTH}vw`);
   });
 });

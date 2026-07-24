@@ -174,4 +174,104 @@ describe('decideAutoScroll', () => {
       }),
     ).toBe('follow')
   })
+
+  // 折叠视图 fallback (rule #3.5): CollapsedMessageBubble 的
+  // maxHeight:140 + overflow:hidden clamp 让 outer scrollHeight 失真,
+  // contentGrew 在 streaming / tool_result 阶段恒为 false. 此时用 messages
+  // 引用变化作为 fallback 信号 — store 真的写过新数据即视为"有新内容要跟".
+  // 仅在用户已在底部 (≤80px) 时触发, 用户上滚仍 stay 保护阅读位置.
+
+  it('折叠视图 + length 不变 + contentGrew=false + 引用换了 + 在底部 → 滚动', () => {
+    // 根因场景: 折叠态下 tool_use:done 是 in-place 更新, messages.length 不变,
+    // outer scrollHeight 因 ToolGroupCard 仍 compact 而停涨, 旧逻辑 stay.
+    expect(
+      decideAutoScroll({
+        prevLength: 5,
+        nextLength: 5,
+        contentGrew: false,
+        scrollFollowLocked: false,
+        distanceToBottomPx: 0,
+        folded: true,
+        messagesRefChanged: true,
+      }),
+    ).toBe('follow')
+  })
+
+  it('折叠视图 + length 不变 + contentGrew=false + 引用换了 + 在历史中段 → 不滚', () => {
+    // 保护用户阅读历史的位置, 即便 store 写过新数据也不拉回.
+    expect(
+      decideAutoScroll({
+        prevLength: 5,
+        nextLength: 5,
+        contentGrew: false,
+        scrollFollowLocked: false,
+        distanceToBottomPx: 400,
+        folded: true,
+        messagesRefChanged: true,
+      }),
+    ).toBe('stay')
+  })
+
+  it('折叠视图 + 用户主动滚 (lock) → 绝对不滚, 即便引用换了', () => {
+    // scrollFollowLocked 在 rule #1 优先拦截, 折叠 fallback 在后面也救不回来.
+    expect(
+      decideAutoScroll({
+        prevLength: 5,
+        nextLength: 5,
+        contentGrew: false,
+        scrollFollowLocked: true,
+        distanceToBottomPx: 0,
+        folded: true,
+        messagesRefChanged: true,
+      }),
+    ).toBe('stay')
+  })
+
+  it('折叠视图 + 引用没换 (effect 误重跑) → 不滚', () => {
+    // messagesRefChanged 是关键信号, 没换就当 effect 误重跑, 仍 stay.
+    expect(
+      decideAutoScroll({
+        prevLength: 5,
+        nextLength: 5,
+        contentGrew: false,
+        scrollFollowLocked: false,
+        distanceToBottomPx: 0,
+        folded: true,
+        messagesRefChanged: false,
+      }),
+    ).toBe('stay')
+  })
+
+  it('折叠视图 + length 增长 (新消息) + 在底部 → 滚动 (原有 path 不变)', () => {
+    // length grew 的路径仍走 rule #6 fallback, 折叠 fallback 在 rule #3.5
+    // 不触发 (nextLength === prevLength 这一前置条件不满足). 验证两条路径
+    // 互不干扰.
+    expect(
+      decideAutoScroll({
+        prevLength: 5,
+        nextLength: 6,
+        contentGrew: true,
+        scrollFollowLocked: false,
+        distanceToBottomPx: 0,
+        folded: true,
+        messagesRefChanged: true,
+      }),
+    ).toBe('follow')
+  })
+
+  it('非折叠视图 + length 不变 + contentGrew=false + 引用换了 → 仍 stay', () => {
+    // 折叠 fallback 在 folded=false 时不生效, 展开态走原有 rule #4 stay.
+    // 重要: 这条保证展开态行为完全不变, 折叠态是纯增量.
+    expect(
+      decideAutoScroll({
+        prevLength: 5,
+        nextLength: 5,
+        contentGrew: false,
+        scrollFollowLocked: false,
+        distanceToBottomPx: 0,
+        folded: false,
+        messagesRefChanged: true,
+      }),
+    ).toBe('stay')
+  })
 })

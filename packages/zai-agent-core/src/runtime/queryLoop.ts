@@ -276,6 +276,21 @@ export async function* queryLoop(
     }
   }
 
+  // ★ 关键修复 (SubagentNotifier 2013 regression)
+  // Anthropic 协议要求 user/assistant 严格交替。当 SubagentNotifier 注入
+  // <task-notification> 续传父 session 时,父 transcript 末尾往往停在
+  // user(tool_result) 上(AgentTool 派发后的 subagent_dispatched 响应);
+  // 直接 push 新 user 会得到 user(tool_result), user(task-notification)
+  // ——两条连续 user,modelCaller 把它们喂给 Anthropic 即刻被 400 / 2013
+  // ("tool call id is invalid") 拒绝。
+  //
+  // `serializeForAnthropic` 只在两边都带 tool_result 时合并相邻 user,
+  // 对 "tool_result user + 纯文本 user" 这种新出现的形状无能为力,因为它
+  // 是在 transcript 加载后、新 prompt push 前执行的。这里在 push 完新 prompt
+  // 之后补一道合并:把新 user 的 content 追加到上一条 user 后面,
+  // tool_result 块在前、新文本块在后,保持结构合规。
+  mergeTrailingUserMessage(messages)
+
   let turn = 0
   while (turn < maxTurns) {
     turn++
@@ -695,4 +710,51 @@ function snapshotMcpClients(pool: any) {
 function mergeInputDelta(block: { input: unknown }, partialJson: string): void {
   const acc = ((block.input as any).__rawJson ?? '') as string
   ;(block.input as any).__rawJson = acc + partialJson
+}
+
+/**
+ * 合并 messages 末尾的两条连续 user 消息。SubagentNotifier 注入
+ * <task-notification> 续传时,父 transcript 末尾停在 user(tool_result) 上
+ * (AgentTool 派发后的 subagent_dispatched 响应),新 prompt 又 push 一条
+ * user 进去,产生 user(tool_result), user(text) —— 两条连续 user 违反
+ * Anthropic 协议 user/assistant 交替约束,modelCaller 把它们喂给 API 即刻
+ * 被 400 / 2013 拒绝("tool call id is invalid")。
+ *
+ * 与 serializeForAnthropic 不同:serializeForAnthropic 仅在两边都带
+ * tool_result 时合并;这里必须合并 "tool_result user + 纯文本 user" 这种
+ * 形状(因为后者也会落在 tool_use 之后)。Anthropic 接受 user 消息同时含
+ * tool_result 和 text 块,所以这里把 curr 的 content 归一化为数组后追加
+ * 到上一条 user 的 content 数组尾部,tool_result 块在前、新文本块在后,
+ * 保持结构合规。
+ *
+ * No-op when:
+ *   - messages 长度 < 2
+ *   - 最后两条都不是 user
+ *   - 上一条 user 的 content 不是数组(纯文本)
+ *   - 上一条 user 不带 tool_result 块(新形状本身已合规,留给 serializeForAnthropic 既有逻辑处理)
+ */
+function mergeTrailingUserMessage(
+  messages: Array<{ role: 'user' | 'assistant'; content: unknown }>,
+): void {
+  if (messages.length < 2) return
+  const prev = messages[messages.length - 2]!
+  const curr = messages[messages.length - 1]!
+  if (prev.role !== 'user' || curr.role !== 'user') return
+  if (!Array.isArray(prev.content)) return
+  const prevHasToolResult = (prev.content as Array<{ type?: string }>).some(
+    b => b.type === 'tool_result',
+  )
+  if (!prevHasToolResult) return
+  // 把 curr 的 blocks 归一化后追加到 prev 后面。新 prompt 在 queryLoop 里
+  // 走的是 string path(content = options.prompt),这里把 string 包装成
+  // text 块;array path(content = [{ type: 'text', ... }])直接展开。tool_result
+  // 块保持在前(它们来自上一条 user)、新文本块在后,Anthropic 不在意 user
+  // 块内顺序,但视觉上更易调试。
+  const currBlocks = Array.isArray(curr.content)
+    ? (curr.content as unknown[])
+    : typeof curr.content === 'string' && curr.content.length > 0
+      ? [{ type: 'text', text: curr.content }]
+      : []
+  ;(prev.content as unknown[]).push(...currBlocks)
+  messages.pop()
 }

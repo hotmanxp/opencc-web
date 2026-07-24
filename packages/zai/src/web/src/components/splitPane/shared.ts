@@ -4,24 +4,26 @@ import type { GitStatusChar } from '../../../../shared/git.js';
 export const STORAGE_KEYS = {
   open: 'zai.splitPane.open',
   tab: 'zai.splitPane.tab',
-  width: 'zai.splitPane.width',
+  // 2026-07-21+: 旧 key `zai.splitPane.width` 存的是像素, 与新 vw 语义不
+  // 兼容. 切换 key 一次性把老用户的拖拽偏好归档, 避免 480px 这种值被 clamp
+  // 当成 480vw 强行塞回面板.
+  width: 'zai.splitPane.widthVw',
 } as const;
 
-export const MIN_WIDTH = 320;
-// MAX_WIDTH 上限放宽到 1200px: 默认宽度是屏幕的 60%, 1920px 屏对应 1152,
-// 给用户拖拽留一点上探空间 (≈ 62.5% @ 1920). 大于 1200 的屏 (2K/4K) 仍
-// 拖到 1200, 不会把分屏做得过宽挡住中间对话区.
-export const MAX_WIDTH = 1200;
-// 旧默认 480 保留为 fallback (storage 损坏 / clampWidth 入参非有限值时),
-// 新默认走 DEFAULT_WIDTH_PCT × window.innerWidth, 见 SplitPane.tsx.
-export const DEFAULT_WIDTH = 480;
-// 首次打开分屏 (localStorage 没有 width key) 时使用屏幕宽度的 60%.
-export const DEFAULT_WIDTH_PCT = 0.6;
+// 宽度单位从 px 改成 vw (viewport width 百分比), 跟随窗口宽度变化, 窄屏
+// 自动收窄, 宽屏自动扩宽, 不再需要用户手动拖.
+//   20vw @ 1024 ≈ 205px  — 窄屏 (RESPONSIVE_BREAKPOINT) 已自动收起, 此为下限
+//   70vw @ 1920 ≈ 1344px — 比原 MAX_WIDTH (1200) 略宽, 给 2K 屏留余量
+export const MIN_WIDTH = 20;
+export const MAX_WIDTH = 70;
+// 首次打开分屏 (localStorage 没有 widthVw key) 时使用 60vw, 跟旧 "60% 屏
+// 幕宽度" 视觉一致, 但现在不论窗口大小都是 60vw. SSR / clamp fallback.
+export const DEFAULT_WIDTH_VW = 60;
 export const RESPONSIVE_BREAKPOINT = 1024;
 export const COLLAPSED_WIDTH = 0;
 
 export function clampWidth(value: number): number {
-  if (!Number.isFinite(value)) return DEFAULT_WIDTH;
+  if (!Number.isFinite(value)) return DEFAULT_WIDTH_VW;
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(value)));
 }
 

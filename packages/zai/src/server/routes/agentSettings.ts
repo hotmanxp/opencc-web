@@ -121,12 +121,17 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
     const baseURL = env.ANTHROPIC_BASE_URL ?? null
     const models = buildAvailableModels(settings)
     const outputStyle = resolveOutputStyle(settings)
+    const maxVisibleMessages =
+      typeof settings.maxVisibleMessages === 'number'
+        ? Math.max(1, Math.min(1000, Math.floor(settings.maxVisibleMessages)))
+        : 20
     res.json({
       defaultModel,
       baseURL,
       models,
       defaultMode: getDefaultMode(),
       outputStyle,
+      maxVisibleMessages,
     })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
@@ -160,5 +165,33 @@ router.put('/agent/settings/output-style', async (req: Request, res: Response) =
     res.status(500).json({ error: (err as Error).message })
   }
 })
+
+/**
+ * PUT /api/agent/settings/max-visible-messages — persist the web UI's
+ * "消息最大显示条数" setting. Body is `{ value: number }`.
+ * Server clamps to [1, 1000] and floors fractional inputs.
+ *
+ * Used by SettingsDrawer when the user changes the "消息最大显示条数" row.
+ * Returns the persisted value so the client echoes back the canonical form.
+ */
+router.put(
+  '/agent/settings/max-visible-messages',
+  async (req: Request, res: Response) => {
+    const raw = (req.body as { value?: unknown } | undefined)?.value
+    const n = typeof raw === 'number' ? raw : Number(raw)
+    if (!Number.isFinite(n)) {
+      return res.status(400).json({ error: `invalid value: ${String(raw)}` })
+    }
+    const clamped = Math.max(1, Math.min(1000, Math.floor(n)))
+    try {
+      const settings = await readZaiSettings()
+      const next: ZaiSettings = { ...settings, maxVisibleMessages: clamped }
+      await writeZaiSettings(next)
+      res.json({ value: next.maxVisibleMessages })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  },
+)
 
 export default router

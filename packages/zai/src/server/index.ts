@@ -18,6 +18,7 @@ import answerRouter from './routes/answer.js';
 import approveRouter from './routes/approve.js';
 import tasksRouter from './routes/tasks.js';
 import v2TasksRouter from './routes/v2Tasks.js';
+import sessionStateRouter from './routes/sessionState.js';
 import { slashRouter } from './routes/slash.js';
 import bashTasksRouter from './routes/bashTasks.js';
 import transcriptRouter from './routes/transcript.js';
@@ -28,6 +29,7 @@ import {
   initSubagentNotifierLifecycle,
 } from './services/backgroundRuntime.js';
 import { initStateBridge } from './services/stateBridge.js';
+import { initZaiSettingsCache } from './services/zaiSettingsStore.js';
 import { startBranchChecker } from './routes/system.js';
 import { noCacheForApi } from './middleware/noCache.js';
 
@@ -52,6 +54,15 @@ export function createApp(opts: AppOptions): express.Express {
   // 之后调: agent-core 才会发 agent_task.changed, 先订阅才不会丢第一批;
   // 同时 stateBridge 必须存在, emit 才有下游订阅 (eventBus) 接收.
   initStateBridge()
+
+  // Boot-time settings cache: resolve ~/.zai/settings.json by tier
+  // (zai → claude → builtin defaults), seeding the file when missing so a
+  // fresh user gets working settings on first launch. Fire-and-forget —
+  // createApp is sync, and sync readers (modelCaller / resolveModel) return
+  // {} until this settles, identical to the legacy "file missing" behavior.
+  initZaiSettingsCache().catch((err) =>
+    console.warn('[zai-settings-cache] boot init failed:', err),
+  )
 
   // Ensure ~/.zai/ exists for persistent cache (manifest.json) and future
   // config data. This is fire-and-forget — if it fails the app still works,
@@ -96,6 +107,7 @@ export function createApp(opts: AppOptions): express.Express {
   // TaskListStore (按 sessionId 隔离, 实际存储 ~/.zai/tasks/<sid>.json)
   // 拉到本地 v2TasksBySession 缓存 (SSE 增量之外的兜底).
   app.use('/api', v2TasksRouter);
+  app.use('/api', sessionStateRouter);
   // /api/transcript/* 手动修复端点 — 给当前会话的 transcript 跑一次
   // repairAndPersistTranscript,补齐历史上漏写的 tool_result
   app.use('/api/transcript', transcriptRouter);

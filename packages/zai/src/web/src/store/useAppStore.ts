@@ -70,6 +70,12 @@ interface AppState {
    */
   outputStyle: OutputStyle;
   setOutputStyle: (style: OutputStyle) => void;
+  /**
+   * 主对话区最大渲染消息条数. 超过时 UI 折叠早期消息,顶部浮按钮一键还原.
+   * 默认 20. Layout mount effect 用 GET /api/agent/settings 覆写.
+   */
+  maxVisibleMessages: number;
+  setMaxVisibleMessages: (n: number) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -90,6 +96,7 @@ export const useAppStore = create<AppState>((set) => ({
   // Layout mount effect re-hydrates this from disk on first paint so
   // cold-load reflects the user's persisted choice without a flash.
   outputStyle: 'default',
+  maxVisibleMessages: 20,
   setConnected: (v) => set({ connected: v }),
   setInstanceContext: (ctx) => set({ instanceContext: ctx }),
   applyJobEvent: (event) => set((state) => {
@@ -191,6 +198,7 @@ export const useAppStore = create<AppState>((set) => ({
   closeSettingsDrawer: () => set({ settingsDrawerOpen: false }),
   setSettingsTheme: (t) => set({ settingsTheme: t }),
   setOutputStyle: (style) => set({ outputStyle: style }),
+  setMaxVisibleMessages: (n) => set({ maxVisibleMessages: n }),
   // NOTE: openSettingsDrawer / closeSettingsDrawer / setSettingsTheme
   // 三个 action 必须保留(SPEC 阶段 1 4-store field requirement)。
   // 若有并行 rebase 误删,SettingsButton.test.tsx 会以
