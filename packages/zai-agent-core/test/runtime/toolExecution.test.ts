@@ -117,7 +117,7 @@ describe('executeToolsStreaming', () => {
     const { join } = await import('node:path')
     const dataDir = mkdtempSync(join(tmpdir(), 'zai-hook-throw-'))
     const store = new TranscriptStore(dataDir)
-    const sessionId = await store.create({ cwd: '/x', model: 'm', permissionMode: 'default' })
+    const sessionId = await store.create({ cwd: '/x', model: 'm', permissionMode: 'default' }, { cwd: '/x' })
     // Only PostToolUse throws. PreToolUse returns success so the tool_use
     // block is persisted and the success branch executes — that's the
     // specific code path that previously dropped tool_result.
@@ -146,7 +146,7 @@ describe('executeToolsStreaming', () => {
     const events = await collect(executeToolsStreaming(blocks, ctx, tools, meta))
     // tool_use:done still yields (hook runs AFTER persistence now)
     expect(events.some((e: any) => e.type === 'tool_use:done')).toBe(true)
-    const onDisk = await store.read(sessionId)
+    const onDisk = await store.read(sessionId, { cwd: '/x' })
     const toolUse = onDisk.messages.find(m =>
       m.type === 'tool_use' && m.message && Array.isArray(m.message.content)
       && (m.message.content as any[])[0]?.id === 't-hook'

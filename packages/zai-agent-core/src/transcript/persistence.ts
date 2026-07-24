@@ -93,6 +93,7 @@ export async function appendUserMessageV2(
   parentUuid: string | null,
   ctx: CommonCtx,
   meta?: { kind?: 'user' | 'skill_injection'; skillName?: string; isMeta?: boolean },
+  pathOpts?: { cwd?: string; subagent?: boolean },
 ): Promise<string | undefined> {
   try {
     const isSkillInjection = meta?.kind === 'skill_injection'
@@ -117,7 +118,10 @@ export async function appendUserMessageV2(
       // 缺省字段不写入磁盘,前端按 false 处理 (隐藏行为默认关闭).
       ...(isMeta ? { isMeta: true } : {}),
     }
-    await store.append(sessionId, msg)
+    await store.append(sessionId, msg, {
+      cwd: pathOpts?.cwd ?? ctx.cwd,
+      subagent: pathOpts?.subagent,
+    })
     return base.uuid
   } catch (err) {
     if (process.env.ZAI_DEBUG === '1')
@@ -133,6 +137,7 @@ export async function appendToolUse(
   turnIndex: number,
   parentUuid: string | null,
   cwd: string,
+  pathOpts?: { subagent?: boolean },
 ): Promise<string | undefined> {
   try {
     const toolUseBlock: ContentBlock = {
@@ -147,7 +152,7 @@ export async function appendToolUse(
       type: 'tool_use',
       message: { content: [toolUseBlock], role: 'assistant' },
     }
-    await store.append(sessionId, msg)
+    await store.append(sessionId, msg, { cwd, subagent: pathOpts?.subagent })
     return base.uuid
   } catch (err) {
     if (process.env.ZAI_DEBUG === '1')
@@ -163,6 +168,7 @@ export async function appendToolResult(
   turnIndex: number,
   parentUuid: string | null,
   cwd: string,
+  pathOpts?: { subagent?: boolean },
 ): Promise<string | undefined> {
   try {
     const compressed = compressToolResult(block.content)
@@ -178,7 +184,7 @@ export async function appendToolResult(
       type: 'user',
       message: { content: [trBlock], role: 'user' },
     }
-    await store.append(sessionId, msg)
+    await store.append(sessionId, msg, { cwd, subagent: pathOpts?.subagent })
     return base.uuid
   } catch (err) {
     if (process.env.ZAI_DEBUG === '1')
@@ -194,6 +200,7 @@ export async function appendAssistantMessageV2(
   turnIndex: number,
   parentUuid: string | null,
   ctx: CommonCtx,
+  pathOpts?: { subagent?: boolean },
 ): Promise<string | undefined> {
   try {
     const base = baseFields(ctx, turnIndex, parentUuid)
@@ -202,7 +209,10 @@ export async function appendAssistantMessageV2(
       type: 'assistant',
       message: { content: blocks, role: 'assistant' },
     }
-    await store.append(sessionId, msg)
+    await store.append(sessionId, msg, {
+      cwd: ctx.cwd,
+      subagent: pathOpts?.subagent,
+    })
     return base.uuid
   } catch (err) {
     if (process.env.ZAI_DEBUG === '1')

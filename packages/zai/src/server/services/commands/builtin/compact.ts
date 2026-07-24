@@ -33,7 +33,7 @@ export const compactCommand: LocalCommand = {
       const store = getTranscriptStore()
       let existing: Awaited<ReturnType<typeof store.read>> | null = null
       try {
-        existing = await store.read(sessionId)
+        existing = await store.read(sessionId, { cwd: context.cwd })
       } catch {
         return { kind: 'error', message: '会话不存在' }
       }

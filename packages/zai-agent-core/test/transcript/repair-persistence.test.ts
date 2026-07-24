@@ -18,7 +18,7 @@ let sessionId: string
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'zai-repair-persist-'))
   store = new TranscriptStore(dataDir)
-  sessionId = await store.create({ cwd: '/x', model: 'm' })
+  sessionId = await store.create({ cwd: '/x', model: 'm' }, { cwd: '/x' })
 })
 
 afterEach(() => {
@@ -39,7 +39,7 @@ describe('repairAndPersistTranscript', () => {
       null,
       { cwd: '/x', sessionId },
     )
-    const assistantUuid = (await store.read(sessionId)).messages[0].uuid
+    const assistantUuid = (await store.read(sessionId, { cwd: '/x' })).messages[0].uuid
 
     const toolUuid = (await appendToolUse(
       store,
@@ -68,9 +68,9 @@ describe('repairAndPersistTranscript', () => {
       '/x',
     )
 
-    const first = await repairAndPersistTranscript(store, sessionId)
-    const second = await repairAndPersistTranscript(store, sessionId)
-    const onDisk = await store.read(sessionId)
+    const first = await repairAndPersistTranscript(store, sessionId, { cwd: '/x' })
+    const second = await repairAndPersistTranscript(store, sessionId, { cwd: '/x' })
+    const onDisk = await store.read(sessionId, { cwd: '/x' })
 
     expect(first.report.repaired).toBe(true)
     expect(second.report.repaired).toBe(false)
@@ -86,7 +86,7 @@ describe('repairAndPersistTranscript', () => {
       null,
       { cwd: '/x', sessionId },
     )
-    const assistantUuid = (await store.read(sessionId)).messages[0].uuid
+    const assistantUuid = (await store.read(sessionId, { cwd: '/x' })).messages[0].uuid
     const toolUuid = (await appendToolUse(
       store,
       sessionId,
@@ -112,9 +112,9 @@ describe('repairAndPersistTranscript', () => {
       '/x',
     )
 
-    const before = await store.read(sessionId)
-    const result = await repairAndPersistTranscript(store, sessionId)
-    const after = await store.read(sessionId)
+    const before = await store.read(sessionId, { cwd: '/x' })
+    const result = await repairAndPersistTranscript(store, sessionId, { cwd: '/x' })
+    const after = await store.read(sessionId, { cwd: '/x' })
 
     expect(before.meta.updatedAt).toBeLessThanOrEqual(after.meta.updatedAt)
     expect(result.report.repaired).toBe(true)
@@ -139,16 +139,16 @@ describe('repairAndPersistTranscript', () => {
       null,
       { cwd: '/x', sessionId },
     )
-    const before = await store.read(sessionId)
+    const before = await store.read(sessionId, { cwd: '/x' })
 
     const returned = await store.mutateMessages(sessionId, messages => ({
       messages,
       changed: false,
       value: { tags: ['kept'], count: messages.length },
-    }))
+    }), { cwd: '/x' })
 
     expect(returned).toEqual({ tags: ['kept'], count: 1 })
-    const after = await store.read(sessionId)
+    const after = await store.read(sessionId, { cwd: '/x' })
     expect(after.messages).toEqual(before.messages)
     expect(after.meta.updatedAt).toBe(before.meta.updatedAt)
   })
@@ -162,7 +162,7 @@ describe('repairAndPersistTranscript', () => {
       null,
       { cwd: '/x', sessionId },
     )
-    const a1 = (await store.read(sessionId)).messages[0].uuid
+    const a1 = (await store.read(sessionId, { cwd: '/x' })).messages[0].uuid
     const u900 = (await appendUserMessageV2(
       store,
       sessionId,
@@ -180,9 +180,9 @@ describe('repairAndPersistTranscript', () => {
       '/x',
     )
 
-    const first = await repairAndPersistTranscript(store, sessionId)
-    const second = await repairAndPersistTranscript(store, sessionId)
-    const onDisk = await store.read(sessionId)
+    const first = await repairAndPersistTranscript(store, sessionId, { cwd: '/x' })
+    const second = await repairAndPersistTranscript(store, sessionId, { cwd: '/x' })
+    const onDisk = await store.read(sessionId, { cwd: '/x' })
 
     expect(first.report.repaired).toBe(true)
     expect(first.report.synthesizedOrphanToolUseIds).toEqual(['orphan-rid'])

@@ -46,7 +46,7 @@ afterEach(async () => {
 describe('queryLoop resume — parallel tool_use Anthropic-2013 regression', () => {
   it('merges sibling tool_result user messages into ONE user message (parallel tool_use)', async () => {
     const store = new TranscriptStore(tmpDir)
-    const sessionId = await store.create({ cwd: '/x', model: 'm' })
+    const sessionId = await store.create({ cwd: '/x', model: 'm' }, { cwd: '/x' })
 
     // 1) 起始 user prompt(appendUserMessageV2 是写入 user 消息的唯一方式,
     //    store.create 只创建空 transcript)
@@ -166,7 +166,7 @@ describe('queryLoop resume — parallel tool_use Anthropic-2013 regression', () 
     // → 2013。正确语义:把孤儿 tool_use 折叠成独立 assistant 消息,tool_result
     // 紧跟其后匹配。
     const store = new TranscriptStore(tmpDir)
-    const sessionId = await store.create({ cwd: '/x', model: 'm' })
+    const sessionId = await store.create({ cwd: '/x', model: 'm' }, { cwd: '/x' })
     const userUuid = await appendUserMessageV2(
       store, sessionId, 'do something', 0, null, { cwd: '/x', sessionId },
     )
@@ -222,7 +222,7 @@ describe('queryLoop resume — parallel tool_use Anthropic-2013 regression', () 
 
   it('folds a revived orphan into its anchor assistant before grouped results', async () => {
     const store = new TranscriptStore(tmpDir)
-    const sessionId = await store.create({ cwd: '/x', model: 'm' })
+    const sessionId = await store.create({ cwd: '/x', model: 'm' }, { cwd: '/x' })
     const userUuid = await appendUserMessageV2(
       store, sessionId, 'do two things', 0, null, { cwd: '/x', sessionId },
     )

@@ -45,7 +45,7 @@ describe('clearCommand', () => {
     expect(result).toEqual({ kind: 'cleared' })
     expect(runtimeMock.abort).toHaveBeenCalled()
     // 关键: 必须是 replace(保留文件),不允许 remove
-    expect(runtimeMock.replace).toHaveBeenCalledWith('sess-1', [])
+    expect(runtimeMock.replace).toHaveBeenCalledWith('sess-1', [], { cwd: '/x' })
   })
 
   it('falls back to getCurrentSessionId() when context.sessionId missing', async () => {
@@ -53,6 +53,6 @@ describe('clearCommand', () => {
     const { clearCommand: fresh } = await import('../../../src/server/services/commands/builtin/clear.js')
     const result = await fresh.call('', { cwd: '/x', dataDir: '/d' })
     expect(result).toEqual({ kind: 'cleared' })
-    expect(runtimeMock.replace).toHaveBeenCalledWith('sess-fallback', [])
+    expect(runtimeMock.replace).toHaveBeenCalledWith('sess-fallback', [], { cwd: '/x' })
   })
 })

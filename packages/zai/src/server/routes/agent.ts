@@ -366,7 +366,7 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   // Prompt 携带已有 sessionId 时，必须在响应成功和启动 runtime 之前完成 cwd 校验
   if (existingSessionId) {
     try {
-      const t = await getTranscriptStore().read(existingSessionId)
+      const t = await getTranscriptStore().read(existingSessionId, { cwd: ctx.cwd })
       const resolved = t.meta.cwd ? path.resolve(t.meta.cwd) : null
       if (resolved !== path.resolve(ctx.cwd)) {
         return res.status(404).json({ error: 'Session not found' })
@@ -455,7 +455,7 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
         | Awaited<ReturnType<ReturnType<typeof getTranscriptStore>["read"]>>
         | null = null;
       try {
-        const existing = await getTranscriptStore().read(sessionId);
+        const existing = await getTranscriptStore().read(sessionId, { cwd });
         transcript = existing;
         if (existing.meta.model && existing.meta.model !== "unknown") {
           sessionModel = existing.meta.model;
@@ -494,15 +494,19 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
         // 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
         // (旧 API resumeFromTranscriptId 在文件不存在时会抛 ENOENT, 不适用.)
         transcriptId: sessionId,
-        // ★ 关键修复 (HRMSV3-ZN-WEBSITE#668):把 parentSessionId 显式
-        // 设为 sessionId 本身。当前 session 即它派发出去的 sub-agent 的
-        // 父 session,这是 sub-agent 完成回写 <task-notification> 的必要
-        // 路由前提。缺失此字段会导致 AgentTool 内部兜底成 'sess-unknown'
-        // 字面量,runOne 那条 opts 也没透传 parentSessionId,子代理 task
-        // JSON 的 parentSessionId 永远是占位符,subagentNotifier 的
-        // 'sess-unknown' 兜底再吞掉通知 —— 主 session 永远收不到回流,
-        // 表现为 "派 sub-agent 后主会话不继续"。
-        parentSessionId: sessionId,
+        // parentSessionId: 仅在 prompt body 显式标注 "我是 sub-agent 调度"
+        // 时才设; 默认 top-level 用户 prompt 不带这个字段 —— 主 session
+        // 派发出去的 sub-agent 走 AgentTool 路径 (subCtx.parentSessionId),
+        // 不复用本顶层 prompt 路由。
+        // 历史: HRMSV3-ZN-WEBSITE#668 之前在这里硬塞 `parentSessionId: sessionId`
+        // 让 AgentTool 的兜底逻辑拿到真实 sid, 但副作用是所有主 session 也被
+        // 标成 subagent —— 在 transcript 落盘新布局 (projectDir/subagents/)
+        // 下, 这会把主 session 写到 subagents/ 目录里跟 AgentTool 派发的真正
+        // sub-agent 混在一起。修法是 AgentTool 自己负责透传 parentSessionId,
+        // 顶层 prompt 不带。
+        ...(typeof (parsed.data as { parentSessionId?: unknown }).parentSessionId === 'string'
+          ? { parentSessionId: (parsed.data as { parentSessionId: string }).parentSessionId }
+          : {}),
         systemPrompt,
         abortSignal: abortController.signal,
         model: resolvedModel,
@@ -527,7 +531,7 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
       // existingSessionId 永远 truthy, 老逻辑会把所有"首次消息"误判成"续传".
       let titlePatched = false;
       try {
-        const existing = await getTranscriptStore().read(sessionId);
+        const existing = await getTranscriptStore().read(sessionId, { cwd });
         if (existing.meta.title) titlePatched = true;
       } catch {
         // 文件不存在 (新会话尚无 transcript) — title 未设, 首次消息触发 patch
@@ -555,7 +559,7 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
             titlePatched = true;
             try {
               const title = deriveTitleFromPrompt(text);
-              await getTranscriptStore().patch(event.sessionId, { title });
+              await getTranscriptStore().patch(event.sessionId, { title }, { cwd });
               // ★ 通知前端: sidebar 的 sessions 列表要立刻把这一条的 title
               // 从"新会话"换成新标题. 前端 subscribeServerEvents 注册了
               // session.renamed listener, 收到后通过 applySessionEvent
@@ -612,7 +616,7 @@ router.get('/agent/sessions', async (req: Request, res: Response) => {
   try {
     const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
     const store = getTranscriptStore()
-    const sessions = await store.list(ctx.cwd)
+    const sessions = await store.list({ cwd: ctx.cwd, excludeSubagent: true })
     res.json({ sessions })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -630,7 +634,7 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
       cwd: ctx.cwd,
       model: 'unknown',
       permissionMode: getDefaultMode(),
-    })
+    }, { cwd: ctx.cwd })
     res.json({ sessionId })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -655,7 +659,7 @@ router.get('/agent/sessions/:id', async (req: Request, res: Response) => {
   try {
     const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
     const store = getTranscriptStore()
-    const transcript = await store.read(req.params.id)
+    const transcript = await store.read(req.params.id, { cwd: ctx.cwd })
     const resolved = transcript.meta.cwd ? path.resolve(transcript.meta.cwd) : null
     if (resolved !== path.resolve(ctx.cwd)) {
       return res.status(404).json({ error: 'Session not found' })
@@ -671,12 +675,12 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
   try {
     const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
     const store = getTranscriptStore()
-    const transcript = await store.read(req.params.id)
+    const transcript = await store.read(req.params.id, { cwd: ctx.cwd })
     const resolved = transcript.meta.cwd ? path.resolve(transcript.meta.cwd) : null
     if (resolved !== path.resolve(ctx.cwd)) {
       return res.status(404).json({ error: 'Session not found' })
     }
-    await store.remove(req.params.id)
+    await store.remove(req.params.id, { cwd: ctx.cwd })
     // 同时清掉 per-session cwd map(防内存泄漏 + 防止 stale data)
     CwdStore.delete(req.params.id)
     res.json({ ok: true })

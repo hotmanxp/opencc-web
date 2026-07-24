@@ -17,7 +17,7 @@ let sessionId: string
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'zai-transcript-'))
   store = new TranscriptStore(dataDir)
-  sessionId = await store.create({ cwd: '/x', model: 'm' })
+  sessionId = await store.create({ cwd: '/x', model: 'm' }, { cwd: '/x' })
 })
 afterEach(() => rmSync(dataDir, { recursive: true, force: true }))
 
@@ -31,7 +31,7 @@ describe('persistence helpers', () => {
       null,
       '/x',
     )
-    const t = await store.read(sessionId)
+    const t = await store.read(sessionId, { cwd: '/x' })
     expect(t.messages).toHaveLength(1)
     expect(t.messages[0].type).toBe('tool_use')
     expect((t.messages[0].message.content as any)[0]).toMatchObject({
@@ -51,7 +51,7 @@ describe('persistence helpers', () => {
       null,
       '/x',
     )
-    const tuUuid = (await store.read(sessionId)).messages[0].uuid
+    const tuUuid = (await store.read(sessionId, { cwd: '/x' })).messages[0].uuid
     await appendToolResult(
       store,
       sessionId,
@@ -60,7 +60,7 @@ describe('persistence helpers', () => {
       tuUuid,
       '/x',
     )
-    const t = await store.read(sessionId)
+    const t = await store.read(sessionId, { cwd: '/x' })
     const tr = t.messages.find((m) => m.type === 'user')!
     expect((tr.message.content as any)[0].is_error).toBe(true)
     // M1: persisted tool_result v2 message must carry real cwd (not '').
@@ -79,7 +79,7 @@ describe('persistence helpers', () => {
       null,
       { cwd: '/x', sessionId, userType: 'zai' },
     )
-    const t = await store.read(sessionId)
+    const t = await store.read(sessionId, { cwd: '/x' })
     const content = t.messages[0].message.content as any
     expect(content).toHaveLength(2)
     expect(content[0].type).toBe('text')
@@ -98,7 +98,7 @@ describe('persistence helpers', () => {
       { cwd: '/x', sessionId, userType: 'zai' },
       { isMeta: true },
     )
-    const t = await store.read(sessionId)
+    const t = await store.read(sessionId, { cwd: '/x' })
     expect(t.messages).toHaveLength(1)
     expect(t.messages[0].type).toBe('user')
     expect(t.messages[0].isMeta).toBe(true)
@@ -116,7 +116,7 @@ describe('persistence helpers', () => {
       null,
       { cwd: '/x', sessionId, userType: 'zai' },
     )
-    const t = await store.read(sessionId)
+    const t = await store.read(sessionId, { cwd: '/x' })
     expect(t.messages).toHaveLength(1)
     // 字段缺省时不写入磁盘, 前端按 false 处理 — 老 transcript 兼容.
     expect(t.messages[0].isMeta).toBeUndefined()
@@ -134,7 +134,7 @@ describe('persistence helpers', () => {
       { cwd: '/x', sessionId, userType: 'zai' },
       { kind: 'skill_injection', skillName: 'foo' },
     )
-    const t = await store.read(sessionId)
+    const t = await store.read(sessionId, { cwd: '/x' })
     expect(t.messages[0].isMeta).toBe(true)
     expect(
       (t.messages[0].message.content as string).startsWith(

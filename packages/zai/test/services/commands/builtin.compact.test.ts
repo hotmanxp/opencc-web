@@ -24,7 +24,7 @@ beforeEach(async () => {
   runtimeMock.abort.mockClear()
   tmpDir = await mkdtemp(join(tmpdir(), 'zai-cmd-compact-'))
   runtimeMock.store = new TranscriptStore(tmpDir)
-  await runtimeMock.store.create({ cwd: '/test', model: 'mock-model' })
+  await runtimeMock.store.create({ cwd: '/test', model: 'mock-model' }, { cwd: '/test' })
   // 默认的 modelCaller: yield 固定 text_delta + message_stop
   runtimeMock.modelCaller = async function* () {
     yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 'mocked summary' } }
@@ -61,9 +61,9 @@ describe('compactCommand', () => {
   it('returns kind:error when session exists but messages.length < 2', async () => {
     const sid = 'sess-' + Math.random()
     // 直接构造 cmd 验证 < 2 路径: 用一个空 store 没有 messages
-    await runtimeMock.store!.create({ cwd: '/test', model: 'mock-model' })
+    await runtimeMock.store!.create({ cwd: '/test', model: 'mock-model' }, { cwd: '/test' })
     const emptyStore = new TranscriptStore(tmpDir + '-empty')
-    await emptyStore.create({ cwd: '/test', model: 'mock-model' })
+    await emptyStore.create({ cwd: '/test', model: 'mock-model' }, { cwd: '/test' })
     // 用一个空 session 来跑 (no messages appended)
     const { compactCommand } = await import(
       '../../../src/server/services/commands/builtin/compact.js'
@@ -77,12 +77,12 @@ describe('compactCommand', () => {
   })
 
   it('happy path: returns kind:compacted after summary + replace', async () => {
-    const sid = await runtimeMock.store!.create({ cwd: '/test', model: 'mock-model' })
+    const sid = await runtimeMock.store!.create({ cwd: '/test', model: 'mock-model' }, { cwd: '/test' })
     const ctx = { cwd: '/test', sessionId: sid }
-    await appendUserMessageV2(runtimeMock.store!, sid, 'hi', 0, null, ctx)
+    await appendUserMessageV2(runtimeMock.store!, sid, 'hi', 0, null, ctx, undefined, { cwd: '/test' })
     await appendAssistantMessageV2(
       runtimeMock.store!, sid,
-      [{ type: 'text', text: 'hello' }], 0, null, ctx,
+      [{ type: 'text', text: 'hello' }], 0, null, ctx, { cwd: '/test' },
     )
     runtimeMock.sessionId = sid
 
@@ -92,24 +92,27 @@ describe('compactCommand', () => {
     const result = await compactCommand.call('', {
       cwd: '/test', dataDir: '/x', sessionId: sid,
     })
+    if (result.kind === 'error') {
+      console.error('[test] compactCommand returned error:', (result as { message?: string }).message)
+    }
     expect(result.kind).toBe('compacted')
     if (result.kind !== 'compacted') return
     expect(result.summary).toBe('mocked summary')
     expect(result.removedMessages).toBe(0)  // 2 original → 保 boundary + summary 共 2
     // store 已经被 replace: 原始 2 条 + 1 boundary + 1 summary = 4
-    const after = await runtimeMock.store!.read(sid)
+    const after = await runtimeMock.store!.read(sid, { cwd: '/test' })
     expect(after.messages).toHaveLength(4)
     expect(after.messages[after.messages.length - 2]!.type).toBe('compact_boundary')
     expect(after.messages[after.messages.length - 1]!.type).toBe('assistant')
   })
 
   it('propagates kind:error from compactSession without writing', async () => {
-    const sid = await runtimeMock.store!.create({ cwd: '/test', model: 'mock-model' })
+    const sid = await runtimeMock.store!.create({ cwd: '/test', model: 'mock-model' }, { cwd: '/test' })
     const ctx = { cwd: '/test', sessionId: sid }
-    await appendUserMessageV2(runtimeMock.store!, sid, 'p', 0, null, ctx)
+    await appendUserMessageV2(runtimeMock.store!, sid, 'p', 0, null, ctx, undefined, { cwd: '/test' })
     await appendAssistantMessageV2(
       runtimeMock.store!, sid,
-      [{ type: 'text', text: 'r' }], 0, null, ctx,
+      [{ type: 'text', text: 'r' }], 0, null, ctx, { cwd: '/test' },
     )
     runtimeMock.sessionId = sid
     // mock 出空 summary (只 yield message_stop, 不 yield text_delta)

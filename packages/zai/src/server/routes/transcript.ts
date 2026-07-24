@@ -1,5 +1,6 @@
 import { Router, type Request, type Response } from 'express'
 import {
+  getServerCwd,
   getTranscriptStore,
 } from '../services/agentRuntime.js'
 import { repairAndPersistTranscript } from '@zn-ai/zai-agent-core/runtime'
@@ -22,8 +23,9 @@ router.post('/:sessionId/repair', async (req: Request, res: Response) => {
   }
   try {
     const store = getTranscriptStore()
+    const cwd = getServerCwd()
     try {
-      await store.read(sessionId)
+      await store.read(sessionId, { cwd })
     } catch (readErr) {
       // ENOENT 或 transcript 损坏
       const code = (readErr as NodeJS.ErrnoException)?.code
@@ -33,7 +35,7 @@ router.post('/:sessionId/repair', async (req: Request, res: Response) => {
       }
       throw readErr
     }
-    const result = await repairAndPersistTranscript(store, sessionId)
+    const result = await repairAndPersistTranscript(store, sessionId, { cwd })
     res.json({
       ok: true,
       sessionId,

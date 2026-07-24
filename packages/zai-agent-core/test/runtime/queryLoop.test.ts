@@ -233,9 +233,9 @@ describe('queryLoop', () => {
     expect(events.at(-1)?.type).toBe('runtime.done')
     // transcript 中应能找到含 INJECT-BODY-XYZ 的 user message (skill body 已落盘).
     const store = new TranscriptStore(tmpDir)
-    const sessions = await store.list()
+    const sessions = await store.list({ cwd: '/tmp' })
     expect(sessions.length).toBeGreaterThan(0)
-    const t = await store.read(sessions[0]!.transcriptId)
+    const t = await store.read(sessions[0]!.transcriptId, { cwd: '/tmp' })
     const allText = JSON.stringify(t.messages)
     expect(allText).toContain('INJECT-BODY-XYZ')
   })

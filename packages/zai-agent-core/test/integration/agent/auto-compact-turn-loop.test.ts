@@ -154,19 +154,19 @@ describe('integration: auto-compact turn loop (阶段 1)', () => {
 
   test('transcript store: replace 链路正常, messages 数从 3 减到 2', async () => {
     const sessionId = 'sess-test-1'
-    await store.create({ cwd: '/tmp', model: 'MiniMax-M3' }, sessionId)
-    await store.append(sessionId, makeMsg('m1'))
-    await store.append(sessionId, makeMsg('m2', 'assistant'))
-    await store.append(sessionId, makeMsg('m3'))
+    await store.create({ cwd: '/tmp', model: 'MiniMax-M3' }, { cwd: '/tmp' }, sessionId)
+    await store.append(sessionId, makeMsg('m1'), { cwd: '/tmp' })
+    await store.append(sessionId, makeMsg('m2', 'assistant'), { cwd: '/tmp' })
+    await store.append(sessionId, makeMsg('m3'), { cwd: '/tmp' })
 
-    const file = await store.read(sessionId)
+    const file = await store.read(sessionId, { cwd: '/tmp' })
     expect(file.messages.length).toBe(3)
 
     // 模拟削掉第一条
     const compressed = file.messages.slice(1)
-    await store.replace(sessionId, compressed)
+    await store.replace(sessionId, compressed, { cwd: '/tmp' })
 
-    const afterFile = await store.read(sessionId)
+    const afterFile = await store.read(sessionId, { cwd: '/tmp' })
     expect(afterFile.messages.length).toBe(2)
     expect(afterFile.messages[0]?.uuid).toBe(file.messages[1]?.uuid)
   })
@@ -175,13 +175,13 @@ describe('integration: auto-compact turn loop (阶段 1)', () => {
 
   test('end-to-end: 大对话 + forceReason → compact → store.replace 链路', async () => {
     const sessionId = 'sess-test-2'
-    await store.create({ cwd: '/tmp', model: 'MiniMax-M3' }, sessionId)
+    await store.create({ cwd: '/tmp', model: 'MiniMax-M3' }, { cwd: '/tmp' }, sessionId)
     // 3 条对话
-    await store.append(sessionId, makeMsg('hi', 'user', sessionId))
-    await store.append(sessionId, makeMsg('hello', 'assistant', sessionId))
-    await store.append(sessionId, makeMsg('how are you', 'user', sessionId))
+    await store.append(sessionId, makeMsg('hi', 'user', sessionId), { cwd: '/tmp' })
+    await store.append(sessionId, makeMsg('hello', 'assistant', sessionId), { cwd: '/tmp' })
+    await store.append(sessionId, makeMsg('how are you', 'user', sessionId), { cwd: '/tmp' })
 
-    const file = await store.read(sessionId)
+    const file = await store.read(sessionId, { cwd: '/tmp' })
     const msgs = file.messages
     expect(msgs.length).toBe(3)
 

@@ -157,6 +157,8 @@ export async function* queryLoop(
   // 关键: 用 transcriptId ?? resumeFromTranscriptId 判断. 之前只检查
   // resumeFromTranscriptId, 但新 API transcriptId 也表示"指定 ID", 漏掉
   // 它会触发 store.create 把已存在的 transcript 文件覆盖掉.
+  const isSubagent = Boolean(options.parentSessionId)
+  const pathOpts = { cwd: options.cwd, subagent: isSubagent }
   if (!options.transcriptId && !options.resumeFromTranscriptId) {
     await store.create({
       cwd: options.cwd,
@@ -164,7 +166,7 @@ export async function* queryLoop(
       permissionMode: options.permissionMode ?? config.defaultPermissionMode ?? 'default',
       ...(options.parentSessionId ? { parentSessionId: options.parentSessionId } : {}),
       ...(options.subagentType ? { subagentType: options.subagentType } : {}),
-    }, sessionId)
+    }, pathOpts, sessionId)
   }
 
   const systemPrompt = await assembleSystemPrompt(options, skills, config, pluginSnapshot.agents)
@@ -181,13 +183,13 @@ export async function* queryLoop(
   if (resumeId) {
     let t: Awaited<ReturnType<typeof store.read>> | null = null
     try {
-      t = await store.read(resumeId)
+      t = await store.read(resumeId, pathOpts)
     } catch {
       // 文件不存在: 当成新建. transcriptId 路径必须有这个容错, 否则
       // 第一次发消息时 transcript 还没创建 → ENOENT 抛错.
     }
     if (t) {
-      const repaired = await repairAndPersistTranscript(store, resumeId)
+      const repaired = await repairAndPersistTranscript(store, resumeId, pathOpts)
       if (process.env.ZAI_DEBUG === '1' && repaired.report.repaired) {
         console.error('[zai.queryLoop] repaired transcript tool pairs', {
           sessionId,
@@ -262,16 +264,16 @@ export async function* queryLoop(
 
   if (subCtx?.initialUserMessage) {
     messages.push(subCtx.initialUserMessage)
-    const u = await appendUserMessageV2(store, sessionId, subCtx.initialUserMessage.content, 0, lastUuid, ctx, promptIsMeta ? { isMeta: true } : undefined)
+    const u = await appendUserMessageV2(store, sessionId, subCtx.initialUserMessage.content, 0, lastUuid, ctx, promptIsMeta ? { isMeta: true } : undefined, pathOpts)
     if (u) lastUuid = u
   } else if (typeof options.prompt === 'string') {
     messages.push({ role: 'user', content: options.prompt })
-    const u = await appendUserMessageV2(store, sessionId, options.prompt, 0, lastUuid, ctx, promptIsMeta ? { isMeta: true } : undefined)
+    const u = await appendUserMessageV2(store, sessionId, options.prompt, 0, lastUuid, ctx, promptIsMeta ? { isMeta: true } : undefined, pathOpts)
     if (u) lastUuid = u
   } else if (Array.isArray(options.prompt)) {
     messages.push(...(options.prompt as any))
     for (const m of options.prompt as any[]) {
-      const u = await appendUserMessageV2(store, sessionId, m?.content, 0, lastUuid, ctx, promptIsMeta ? { isMeta: true } : undefined)
+      const u = await appendUserMessageV2(store, sessionId, m?.content, 0, lastUuid, ctx, promptIsMeta ? { isMeta: true } : undefined, pathOpts)
       if (u) lastUuid = u
     }
   }
@@ -481,6 +483,7 @@ export async function* queryLoop(
       cwd: options.cwd,
       parentUuid: lastUuid,
       config,
+      subagent: isSubagent,
     }, config.askRegistry, config.approveRegistry)) {
       yield ev as RuntimeEvent
     }
@@ -629,7 +632,9 @@ function makeToolContext(
     // No hard default — sub-agent / tools 显式传 maxTurns 才生效。
     // 没有则 Infinity, 配合 opencc 语义 (tools / AgentTool 不再硬编码 25)。
     __maxTurns: options.maxTurns ?? config.defaultMaxTurns ?? Infinity,
-    parentSessionId: options.parentSessionId,
+    // 工具视角的 parentSessionId: 永远 fallback 到 sessionId, 让 AgentTool 派发
+    // BackgroundRuntime 时拿到真实 sid 而不是 'sess-unknown' 占位符.
+    parentSessionId: options.parentSessionId ?? _sessionId,
   } as any
 }
 

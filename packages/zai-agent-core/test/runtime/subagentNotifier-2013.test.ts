@@ -50,7 +50,7 @@ afterEach(async () => {
 describe('queryLoop resume — SubagentNotifier inject after AgentTool dispatch', () => {
   it('preserves Agent tool_use ↔ <subagent_dispatched> pairing when resuming for task-notification', async () => {
     const store = new TranscriptStore(tmpDir)
-    const sessionId = await store.create({ cwd: '/x', model: 'm' })
+    const sessionId = await store.create({ cwd: '/x', model: 'm' }, { cwd: '/x' })
 
     // 1) 父 session 起始 user prompt
     const userUuid = await appendUserMessageV2(
@@ -184,7 +184,7 @@ describe('queryLoop resume — SubagentNotifier inject after AgentTool dispatch'
     // prompt 不应触发合并 — mergeTrailingUserMessage 是 no-op,留给后续 turn
     // 让 model 自己处理 user → assistant 交替。
     const store = new TranscriptStore(tmpDir)
-    const sessionId = await store.create({ cwd: '/x', model: 'm' })
+    const sessionId = await store.create({ cwd: '/x', model: 'm' }, { cwd: '/x' })
 
     const userUuid = await appendUserMessageV2(
       store, sessionId, 'first prompt', 0, null, { cwd: '/x', sessionId },

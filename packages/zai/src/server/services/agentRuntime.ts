@@ -25,6 +25,7 @@ import { loadMcpServers } from './mcpConfig.js'
 let runtime: DefaultAgentRuntime | null = null
 let currentSessionId: string | null = null
 let transcriptStore: TranscriptStore | null = null
+let serverCwd: string | null = null
 const askRegistry = new AskRegistry()
 const approveRegistry = new ApproveRegistry()
 
@@ -101,6 +102,7 @@ function resolveSandbox(cwd: string): import('@zn-ai/zai-agent-core').SandboxCon
 export function initAgentRuntime(cwd: string): void {
   if (runtime) return
   const { resolved: dataDir } = resolveDataDir()
+  serverCwd = cwd
   transcriptStore = new TranscriptStore(dataDir)
 
   // MCP servers (Phase 5 wiring). Only construct the pool when at least one
@@ -189,6 +191,12 @@ export function getRuntime(): DefaultAgentRuntime {
 export function getTranscriptStore(): TranscriptStore {
   if (!transcriptStore) throw new Error('Transcript store not initialized')
   return transcriptStore
+}
+
+/** 启动时注入的 cwd —— 供 TranscriptStore 落盘路径路由使用。 */
+export function getServerCwd(): string {
+  if (!serverCwd) throw new Error('Server cwd not initialized')
+  return serverCwd
 }
 
 export async function abortAgentSession(reason?: string): Promise<void> {

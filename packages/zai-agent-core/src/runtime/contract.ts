@@ -9,10 +9,10 @@ import { DefaultPluginRuntime } from '../plugins/index.js'
 export interface AgentRuntime {
   run(opts: QueryOptions): AsyncIterable<RuntimeEvent>
   abort(sessionId: string, reason?: string): Promise<void>
-  listSessions(): Promise<TranscriptMeta[]>
-  readSession(transcriptId: string): Promise<TranscriptFile>
-  patchSession(transcriptId: string, patch: { title?: string; tags?: string[] }): Promise<void>
-  removeSession(transcriptId: string): Promise<void>
+  listSessions(opts?: { cwd?: string; excludeSubagent?: boolean; includeSubagent?: boolean }): Promise<TranscriptMeta[]>
+  readSession(transcriptId: string, opts: { cwd: string; subagent?: boolean }): Promise<TranscriptFile>
+  patchSession(transcriptId: string, patch: { title?: string; tags?: string[] }, opts: { cwd: string; subagent?: boolean }): Promise<void>
+  removeSession(transcriptId: string, opts: { cwd: string; subagent?: boolean }): Promise<void>
 }
 
 export class DefaultAgentRuntime implements AgentRuntime {
@@ -33,19 +33,19 @@ export class DefaultAgentRuntime implements AgentRuntime {
     await abortSession(this.config, sessionId, reason)
   }
 
-  listSessions(): Promise<TranscriptMeta[]> {
-    return this.store.list()
+  listSessions(opts?: { cwd?: string; excludeSubagent?: boolean; includeSubagent?: boolean }): Promise<TranscriptMeta[]> {
+    return this.store.list(opts)
   }
 
-  readSession(transcriptId: string): Promise<TranscriptFile> {
-    return this.store.read(transcriptId)
+  readSession(transcriptId: string, opts: { cwd: string; subagent?: boolean }): Promise<TranscriptFile> {
+    return this.store.read(transcriptId, opts)
   }
 
-  patchSession(transcriptId: string, patch: { title?: string; tags?: string[] }): Promise<void> {
-    return this.store.patch(transcriptId, patch)
+  patchSession(transcriptId: string, patch: { title?: string; tags?: string[] }, opts: { cwd: string; subagent?: boolean }): Promise<void> {
+    return this.store.patch(transcriptId, patch, opts)
   }
 
-  removeSession(transcriptId: string): Promise<void> {
-    return this.store.remove(transcriptId)
+  removeSession(transcriptId: string, opts: { cwd: string; subagent?: boolean }): Promise<void> {
+    return this.store.remove(transcriptId, opts)
   }
 }

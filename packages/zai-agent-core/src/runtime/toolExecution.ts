@@ -64,6 +64,12 @@ type EventMeta = {
    * queryEngine.
    */
   config?: RuntimeConfig
+  /**
+   * 标记当前 session 是 subagent — tool_use/tool_result 落盘时走
+   * `<projectDir>/subagents/<id>.json`。queryEngine 从 options.parentSessionId
+   * 推导并透传。
+   */
+  subagent?: boolean
 }
 
 /**
@@ -229,6 +235,7 @@ export async function* executeToolsStreaming(
           meta.turnIndex,
           meta.parentUuid ?? null,
           meta.cwd ?? '',
+          { subagent: meta.subagent },
         )
       : undefined
 
@@ -324,6 +331,7 @@ export async function* executeToolsStreaming(
           meta.turnIndex,
           toolUseUuid ?? null,
           meta.cwd ?? '',
+          { subagent: meta.subagent },
         )
         if (trUuid) (ctx.state as Record<string, unknown>).__lastPersistedUuid = trUuid
       }
@@ -363,6 +371,7 @@ export async function* executeToolsStreaming(
           meta.turnIndex,
           toolUseUuid ?? null,
           meta.cwd ?? '',
+          { subagent: meta.subagent },
         )
         if (trUuid) (ctx.state as Record<string, unknown>).__lastPersistedUuid = trUuid
       }

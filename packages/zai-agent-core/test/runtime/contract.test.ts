@@ -31,7 +31,7 @@ describe('DefaultAgentRuntime', () => {
 
   test('listSessions after run', async () => {
     for await (const _ of runtime.run({ prompt: 'hi', cwd: '/test' })) { /* drain */ }
-    const sessions = await runtime.listSessions()
+    const sessions = await runtime.listSessions({ cwd: '/test' })
     expect(sessions.length).toBeGreaterThanOrEqual(1)
   })
 
@@ -40,7 +40,7 @@ describe('DefaultAgentRuntime', () => {
     for await (const e of runtime.run({ prompt: 'hi', cwd: '/test' })) {
       if (!sessionId) sessionId = e.sessionId
     }
-    const file = await runtime.readSession(sessionId)
+    const file = await runtime.readSession(sessionId, { cwd: '/test' })
     expect(file.transcriptId).toBe(sessionId)
   })
 })

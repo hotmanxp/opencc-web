@@ -104,6 +104,8 @@ export async function* queryEngine(
   // 关键: 用 transcriptId ?? resumeFromTranscriptId 判断. 之前只检查
   // resumeFromTranscriptId, 但新 API transcriptId 也表示"指定 ID", 漏掉
   // 它会触发 store.create 把已存在的 transcript 文件覆盖掉.
+  const isSubagent = Boolean(options.parentSessionId)
+  const pathOpts = { cwd: options.cwd, subagent: isSubagent }
   if (!options.transcriptId && !options.resumeFromTranscriptId) {
     await store.create({
       cwd: options.cwd,
@@ -111,7 +113,7 @@ export async function* queryEngine(
       permissionMode: options.permissionMode ?? config.defaultPermissionMode ?? 'default',
       ...(options.parentSessionId ? { parentSessionId: options.parentSessionId } : {}),
       ...(options.subagentType ? { subagentType: options.subagentType } : {}),
-    }, sessionId)
+    }, pathOpts, sessionId)
   }
 
   const systemPrompt = await buildSystemPrompt(options, skills, config, pluginSnapshot.agents)
@@ -128,7 +130,7 @@ export async function* queryEngine(
   if (resumeId) {
     let t: Awaited<ReturnType<typeof store.read>> | null = null
     try {
-      t = await store.read(resumeId)
+      t = await store.read(resumeId, pathOpts)
     } catch {
       // 文件不存在: 当成新建. transcriptId 路径必须有这个容错, 否则
       // 第一次发消息时 transcript 还没创建 → ENOENT 抛错.
@@ -182,16 +184,16 @@ export async function* queryEngine(
   }
   if (subCtx?.initialUserMessage) {
     messages.push(subCtx.initialUserMessage)
-    const u = await appendUserMessageV2(store, sessionId, subCtx.initialUserMessage.content, 0, lastUuid, ctx)
+    const u = await appendUserMessageV2(store, sessionId, subCtx.initialUserMessage.content, 0, lastUuid, ctx, undefined, pathOpts)
     if (u) lastUuid = u
   } else if (typeof options.prompt === 'string') {
     messages.push({ role: 'user', content: options.prompt })
-    const u = await appendUserMessageV2(store, sessionId, options.prompt, 0, lastUuid, ctx)
+    const u = await appendUserMessageV2(store, sessionId, options.prompt, 0, lastUuid, ctx, undefined, pathOpts)
     if (u) lastUuid = u
   } else if (Array.isArray(options.prompt)) {
     messages.push(...(options.prompt as any))
     for (const m of options.prompt as any[]) {
-      const u = await appendUserMessageV2(store, sessionId, m?.content, 0, lastUuid, ctx)
+      const u = await appendUserMessageV2(store, sessionId, m?.content, 0, lastUuid, ctx, undefined, pathOpts)
       if (u) lastUuid = u
     }
   }
@@ -287,7 +289,7 @@ export async function* queryEngine(
       if (thinkingText) assistantBlocks.push({ type: 'thinking', thinking: thinkingText })
       if (assistantText) assistantBlocks.push({ type: 'text', text: assistantText })
       const assistantUuid = await appendAssistantMessageV2(
-        store, sessionId, assistantBlocks, turn, lastUuid, ctx,
+        store, sessionId, assistantBlocks, turn, lastUuid, ctx, pathOpts,
       )
       if (assistantUuid) lastUuid = assistantUuid
     } else {
@@ -296,7 +298,7 @@ export async function* queryEngine(
       if (thinkingText) assistantBlocks.push({ type: 'thinking', thinking: thinkingText })
       if (assistantText) assistantBlocks.push({ type: 'text', text: assistantText })
       const assistantUuid = await appendAssistantMessageV2(
-        store, sessionId, assistantBlocks, turn, lastUuid, ctx,
+        store, sessionId, assistantBlocks, turn, lastUuid, ctx, pathOpts,
       )
       if (assistantUuid) lastUuid = assistantUuid
       const stop = await hookRunner.run('Stop', { text: assistantText, sessionId }, abortController.signal)
@@ -321,6 +323,7 @@ export async function* queryEngine(
       store,
       cwd: options.cwd,
       parentUuid: lastUuid,
+      subagent: isSubagent,
     }, config.askRegistry, config.approveRegistry)) {
       yield ev as RuntimeEvent
     }
@@ -350,7 +353,7 @@ export async function* queryEngine(
       const u = await appendUserMessageV2(store, sessionId, pending.content, turn, lastUuid, ctx, {
         kind: 'skill_injection',
         skillName: pending.skillName,
-      })
+      }, pathOpts)
       if (u) lastUuid = u
       ;(toolCtx.state as any).__pendingSkillInjection = undefined
     }
@@ -421,7 +424,13 @@ function makeToolContext(
     __runtimeConfig: { ...config, sandbox, sessionId: options.transcriptId ?? '' },
     __defaultModel: options.model ?? config.defaultModel ?? 'default',
     __maxTurns: options.maxTurns ?? config.defaultMaxTurns ?? DEFAULT_MAX_TURNS,
-    parentSessionId: options.parentSessionId,
+    // 工具视角的 parentSessionId: 永远 fallback 到 sessionId, 让 AgentTool 派发
+    // BackgroundRuntime 时拿到真实 sid 而不是 'sess-unknown' 占位符.
+    // 注意: 这与 queryLoop 的 isSubagent 标志 (用于 transcript 落盘路径)
+    // 是两套独立的语义. 主 session 派 sub-agent 时, 主 session 本身
+    // 不是 sub-agent (isSubagent = false), 但 AgentTool 需要的 "我属于哪个 session"
+    // 仍然 = 当前 sessionId.
+    parentSessionId: options.parentSessionId ?? _sessionId,
   } as any
 }
 

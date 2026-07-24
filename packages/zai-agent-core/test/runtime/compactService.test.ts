@@ -13,7 +13,7 @@ let sessionId: string
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), 'zai-compact-'))
   store = new TranscriptStore(tmpDir)
-  sessionId = await store.create({ cwd: '/test', model: 'mock-model' })
+  sessionId = await store.create({ cwd: '/test', model: 'mock-model' }, { cwd: '/test' })
 })
 
 afterEach(async () => {
@@ -104,7 +104,7 @@ describe('compactSession', () => {
     expect(result.kind).toBe('error')
     expect((result as { message: string }).message).toContain('生成摘要失败')
     // service 不写盘 — 原始 transcript 应仍是 2 条
-    const afterRead = await store.read(sessionId)
+    const afterRead = await store.read(sessionId, { cwd: '/test' })
     expect(afterRead.messages).toHaveLength(2)
   })
 
@@ -112,7 +112,7 @@ describe('compactSession', () => {
     const ctx = { cwd: '/test', sessionId }
     await appendUserMessageV2(store, sessionId, 'p1', 0, null, ctx)
     await appendAssistantMessageV2(store, sessionId, [{ type: 'text', text: 'r1' }], 0, null, ctx)
-    const before = await store.read(sessionId)
+    const before = await store.read(sessionId, { cwd: '/test' })
     const lastOriginalUuid = before.messages[before.messages.length - 1]!.uuid
 
     const mockModelCaller = async function* () {
@@ -162,7 +162,7 @@ describe('compactSession', () => {
     await appendUserMessageV2(store, sessionId, 'big output', 0, null, ctx)
     const huge = 'x'.repeat(800)
     const { appendToolResult } = await import('../../src/transcript/persistence.js')
-    const lastRead = await store.read(sessionId)
+    const lastRead = await store.read(sessionId, { cwd: '/test' })
     const parent = lastRead.messages[lastRead.messages.length - 1]!.uuid
     await appendToolResult(
       store, sessionId,

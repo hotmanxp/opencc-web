@@ -27,7 +27,7 @@ export const clearCommand: LocalCommand = {
         // 改成 store.replace(sessionId, []) 后,文件保留,messages 清零,sid
         // 持续可续传,与 /compact 路径(同样保留文件只改 messages)语义一致,
         // 与前端 '清屏但保留 session' 的用户心智模型一致。
-        await store.replace(sessionId, [])
+        await store.replace(sessionId, [], { cwd: context.cwd })
       } catch {
         // 文件不存在/损坏 — 静默兜底。clear 的本意是"清屏",文件没了也无所谓,
         // 用户下一条消息能正常发出去(进入"无 transcript"新建分支)。

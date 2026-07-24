@@ -86,7 +86,7 @@ export async function compactSession(
   const { store, sessionId, modelCaller, cwd, model } = opts
 
   // 1. 读 + serialize
-  const file = await store.read(sessionId)
+  const file = await store.read(sessionId, { cwd })
   const originalMessages = file.messages
   if (originalMessages.length < 2) {
     return { kind: 'error', message: `对话太短, 无需压缩 (当前 ${originalMessages.length} 条, 至少需要 2 条)` }

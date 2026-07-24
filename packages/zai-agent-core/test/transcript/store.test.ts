@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from 'vitest'
-import { mkdtemp, rm } from 'fs/promises'
+import { mkdtemp, rm, readdir } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
 import { TranscriptStore } from '../../src/transcript/store.js'
@@ -33,30 +33,39 @@ afterEach(async () => {
 
 describe('TranscriptStore', () => {
   it('create returns a valid transcriptId', async () => {
-    const id = await store.create({ cwd: '/test', model: 'gpt-4' })
+    const id = await store.create({ cwd: '/test', model: 'gpt-4' }, { cwd: '/test' })
     expect(id).toMatch(/^sess-[0-9a-f-]{36}$/i)
   })
 
   it('read returns created file', async () => {
-    const id = await store.create({ cwd: '/test', model: 'gpt-4' })
-    const file = await store.read(id)
+    const id = await store.create({ cwd: '/test', model: 'gpt-4' }, { cwd: '/test' })
+    const file = await store.read(id, { cwd: '/test' })
     expect(file.transcriptId).toBe(id)
     expect(file.meta.cwd).toBe('/test')
     expect(file.messages).toEqual([])
   })
 
   it('append + read includes messages', async () => {
-    const id = await store.create({ cwd: '/test', model: 'gpt-4' })
-    await store.append(id, v2Msg({ uuid: 'msg-1', message: { content: 'hello', role: 'user' } }))
-    const file = await store.read(id)
+    const id = await store.create({ cwd: '/test', model: 'gpt-4' }, { cwd: '/test' })
+    await store.append(id, v2Msg({ uuid: 'msg-1', message: { content: 'hello', role: 'user' } }), { cwd: '/test' })
+    const file = await store.read(id, { cwd: '/test' })
     expect(file.messages).toHaveLength(1)
     expect(file.messages[0].message.content).toBe('hello')
   })
 
-  it('list returns all sessions sorted by updatedAt desc', async () => {
-    const id1 = await store.create({ cwd: '/a', model: 'm1' })
+  it('list(cwd) returns only sessions in that cwd project', async () => {
+    const idA = await store.create({ cwd: '/a', model: 'm1' }, { cwd: '/a' })
+    const idB = await store.create({ cwd: '/b', model: 'm2' }, { cwd: '/b' })
+    const listA = await store.list({ cwd: '/a' })
+    expect(listA.map((m) => m.transcriptId)).toEqual([idA])
+    const listB = await store.list({ cwd: '/b' })
+    expect(listB.map((m) => m.transcriptId)).toEqual([idB])
+  })
+
+  it('list() with no args returns all sessions across all projects', async () => {
+    const id1 = await store.create({ cwd: '/a', model: 'm1' }, { cwd: '/a' })
     await new Promise((r) => setTimeout(r, 10))
-    const id2 = await store.create({ cwd: '/b', model: 'm2' })
+    const id2 = await store.create({ cwd: '/b', model: 'm2' }, { cwd: '/b' })
     const list = await store.list()
     expect(list).toHaveLength(2)
     expect(list[0].transcriptId).toBe(id2)
@@ -64,16 +73,93 @@ describe('TranscriptStore', () => {
   })
 
   it('patch updates title and tags', async () => {
-    const id = await store.create({ cwd: '/test', model: 'm1' })
-    await store.patch(id, { title: 'my session', tags: ['bug'] })
-    const file = await store.read(id)
+    const id = await store.create({ cwd: '/test', model: 'm1' }, { cwd: '/test' })
+    await store.patch(id, { title: 'my session', tags: ['bug'] }, { cwd: '/test' })
+    const file = await store.read(id, { cwd: '/test' })
     expect(file.meta.title).toBe('my session')
     expect(file.meta.tags).toEqual(['bug'])
   })
 
   it('remove deletes the file', async () => {
-    const id = await store.create({ cwd: '/test', model: 'm1' })
-    await store.remove(id)
-    await expect(store.read(id)).rejects.toThrow()
+    const id = await store.create({ cwd: '/test', model: 'm1' }, { cwd: '/test' })
+    await store.remove(id, { cwd: '/test' })
+    await expect(store.read(id, { cwd: '/test' })).rejects.toThrow()
+  })
+})
+
+describe('TranscriptStore path layout', () => {
+  it('writes main session under <dataDir>/transcripts/projects/<sanitized>/<id>.json', async () => {
+    const id = await store.create(
+      { cwd: '/Users/ethan/code/opencc', model: 'm' },
+      { cwd: '/Users/ethan/code/opencc' },
+    )
+    const projectDir = join(tmpDir, 'transcripts', 'projects', '-Users-ethan-code-opencc')
+    const entries = await readdir(projectDir)
+    expect(entries).toContain(`${id}.json`)
+  })
+
+  it('writes subagent session under <projectDir>/subagents/<id>.json', async () => {
+    const id = await store.create(
+      {
+        cwd: '/Users/ethan/code/opencc',
+        model: 'm',
+        parentSessionId: 'sess-parent',
+        subagentType: 'general-purpose',
+      },
+      { cwd: '/Users/ethan/code/opencc', subagent: true },
+    )
+    const subDir = join(
+      tmpDir,
+      'transcripts',
+      'projects',
+      '-Users-ethan-code-opencc',
+      'subagents',
+    )
+    const entries = await readdir(subDir)
+    expect(entries).toContain(`${id}.json`)
+  })
+
+  it('does not write into the legacy flat transcripts/ root', async () => {
+    await store.create({ cwd: '/proj', model: 'm' }, { cwd: '/proj' })
+    // 老布局 `<dataDir>/transcripts/*.json` 应不再有 .json 顶层文件
+    const root = join(tmpDir, 'transcripts')
+    const entries = await readdir(root).catch(() => [] as string[])
+    expect(entries.filter((e) => e.endsWith('.json'))).toEqual([])
+  })
+
+  it('different cwds live in different projectDirs', async () => {
+    await store.create({ cwd: '/x', model: 'm' }, { cwd: '/x' })
+    await store.create({ cwd: '/y', model: 'm' }, { cwd: '/y' })
+    const projectsDir = join(tmpDir, 'transcripts', 'projects')
+    const entries = await readdir(projectsDir)
+    expect(entries.sort()).toEqual(['-x', '-y'])
+  })
+})
+
+describe('TranscriptStore list excludes subagents by path', () => {
+  it('list(cwd, {excludeSubagent}) skips subagents/ directory entirely', async () => {
+    const mainId = await store.create(
+      { cwd: '/proj', model: 'm' },
+      { cwd: '/proj' },
+    )
+    await store.create(
+      { cwd: '/proj', model: 'm', parentSessionId: mainId, subagentType: 'explore' },
+      { cwd: '/proj', subagent: true },
+    )
+    const list = await store.list({ cwd: '/proj', excludeSubagent: true })
+    expect(list.map((m) => m.transcriptId)).toEqual([mainId])
+  })
+
+  it('list(cwd, {includeSubagent}) returns subagents too', async () => {
+    const mainId = await store.create(
+      { cwd: '/proj', model: 'm' },
+      { cwd: '/proj' },
+    )
+    const subId = await store.create(
+      { cwd: '/proj', model: 'm', parentSessionId: mainId, subagentType: 'explore' },
+      { cwd: '/proj', subagent: true },
+    )
+    const list = await store.list({ cwd: '/proj', includeSubagent: true })
+    expect(new Set(list.map((m) => m.transcriptId))).toEqual(new Set([mainId, subId]))
   })
 })

@@ -18,7 +18,7 @@ let sessionId: string
 beforeEach(async () => {
   dataDir = mkdtempSync(join(tmpdir(), 'zai-resume-'))
   store = new TranscriptStore(dataDir)
-  sessionId = await store.create({ cwd: '/x', model: 'm' })
+  sessionId = await store.create({ cwd: '/x', model: 'm' }, { cwd: '/x' })
 })
 afterEach(() => rmSync(dataDir, { recursive: true, force: true }))
 
@@ -48,7 +48,7 @@ describe('queryLoop resume via serializeForAnthropic', () => {
       null,
       '/x',
     )
-    const tuRead = await store.read(sessionId)
+    const tuRead = await store.read(sessionId, { cwd: '/x' })
     const tuUuid = tuRead.messages[tuRead.messages.length - 1]!.uuid
     await appendToolResult(
       store,
@@ -59,7 +59,7 @@ describe('queryLoop resume via serializeForAnthropic', () => {
       '/x',
     )
 
-    const t = await store.read(sessionId)
+    const t = await store.read(sessionId, { cwd: '/x' })
     const anthropic = serializeForAnthropic(t.messages)
     // user, assistant, assistant(tool_use), user(tool_result)
     expect(anthropic).toHaveLength(4)
@@ -99,7 +99,7 @@ describe('queryLoop resume via serializeForAnthropic', () => {
       null,
       '/x',
     )
-    const tuARead = await store.read(sessionId)
+    const tuARead = await store.read(sessionId, { cwd: '/x' })
     const tuAUuid = tuARead.messages[tuARead.messages.length - 1]!.uuid
     await appendToolUse(
       store,
@@ -109,7 +109,7 @@ describe('queryLoop resume via serializeForAnthropic', () => {
       tuAUuid,
       '/x',
     )
-    const tuBRead = await store.read(sessionId)
+    const tuBRead = await store.read(sessionId, { cwd: '/x' })
     const tuBUuid = tuBRead.messages[tuBRead.messages.length - 1]!.uuid
     await appendToolResult(
       store,
@@ -128,7 +128,7 @@ describe('queryLoop resume via serializeForAnthropic', () => {
       '/x',
     )
 
-    const t = await store.read(sessionId)
+    const t = await store.read(sessionId, { cwd: '/x' })
     const anthropic = serializeForAnthropic(t.messages)
     // assistant, assistant(tool_use), assistant(tool_use), user(2 tool_results grouped)
     expect(anthropic).toHaveLength(4)
@@ -151,7 +151,7 @@ describe('queryLoop resume via serializeForAnthropic', () => {
       null,
       { cwd: '/x', sessionId },
     )
-    const t = await store.read(sessionId)
+    const t = await store.read(sessionId, { cwd: '/x' })
     const anthropic = serializeForAnthropic(t.messages)
     expect(anthropic).toHaveLength(1)
     expect(anthropic[0].role).toBe('assistant')

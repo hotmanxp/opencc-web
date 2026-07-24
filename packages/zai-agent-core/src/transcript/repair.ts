@@ -426,6 +426,7 @@ export function repairTranscriptToolPairs(
 export async function repairAndPersistTranscript(
   store: TranscriptStore,
   sessionId: string,
+  pathOpts: { cwd: string; subagent?: boolean },
 ): Promise<TranscriptRepairResult> {
   return store.mutateMessages(sessionId, messages => {
     const result = repairTranscriptToolPairs(messages)
@@ -434,5 +435,5 @@ export async function repairAndPersistTranscript(
       changed: result.report.repaired,
       value: result,
     }
-  })
+  }, pathOpts)
 }
