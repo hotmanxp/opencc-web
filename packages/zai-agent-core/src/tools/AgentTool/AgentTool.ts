@@ -249,11 +249,23 @@ export const AgentTool: LegacyTool<typeof AgentInputSchema, string> = {
       // strict ToolUseContext.options type doesn't know about it. Cast
       // antiRecursionOptions as any so we can attach the zai field
       // without a structural-type mismatch on commands[] or undefined.
+      // ★ 修复 sync path 透传: 把 ctx.parentSessionId 写进 options,
+      // forkedAgent.ts:184 从 toolUseContext.options.parentSessionId 读取并
+      // 喂给 queryLoop. 缺这一步时 queryLoop 的 isSubagent 判定只看
+      // subagentType 也兜底归类 (queryLoop.ts + queryEngine.ts 双保险),
+      // 但为了让 meta.parentSessionId 也写对、SubagentNotifier 续传链路通畅,
+      // 这里显式透传. ctx.parentSessionId 来自 queryLoop 给每个 tool ctx
+      // 注入的 fallback (queryLoop.ts: `parentSessionId: options.parentSessionId ?? _sessionId`),
+      // 即真父 sid.
+      const upstreamOpts = (sharedParams?.toolUseContext.options ?? {}) as any
       const antiRecursionOptions: any = {
-        ...(sharedParams?.toolUseContext.options ?? {}),
+        ...upstreamOpts,
+        ...(ctx.parentSessionId && ctx.parentSessionId !== 'sess-unknown'
+          ? { parentSessionId: ctx.parentSessionId }
+          : {}),
         disallowedTools: Array.from(
           new Set([
-            ...(((sharedParams?.toolUseContext.options as any)?.disallowedTools ?? []) as string[]),
+            ...((upstreamOpts.disallowedTools ?? []) as string[]),
             'Agent',
           ]),
         ),

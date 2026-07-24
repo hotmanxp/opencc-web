@@ -119,6 +119,31 @@ describe('TranscriptStore path layout', () => {
     expect(entries).toContain(`${id}.json`)
   })
 
+  // 回归 (sync fork 双保险归类):
+  //   AgentTool 的 sync fork 路径 (runForkedAgent → queryLoop) 只透传
+  //   subagentType, 没透传 ctx.parentSessionId 到 toolUseContext.options.
+  //   queryLoop / queryEngine 的 isSubagent 判定必须也看 subagentType,
+  //   否则 sync fork 的 transcript 误落 projectDir 顶层而不是 subagents/.
+  it('auto-classifies as subagent when only subagentType is set in meta (no parentSessionId)', async () => {
+    const id = await store.create(
+      {
+        cwd: '/Users/ethan/code/opencc',
+        model: 'm',
+        subagentType: 'general-purpose',
+      },
+      { cwd: '/Users/ethan/code/opencc' },
+    )
+    const subDir = join(
+      tmpDir,
+      'transcripts',
+      'projects',
+      '-Users-ethan-code-opencc',
+      'subagents',
+    )
+    const entries = await readdir(subDir)
+    expect(entries).toContain(`${id}.json`)
+  })
+
   it('does not write into the legacy flat transcripts/ root', async () => {
     await store.create({ cwd: '/proj', model: 'm' }, { cwd: '/proj' })
     // 老布局 `<dataDir>/transcripts/*.json` 应不再有 .json 顶层文件

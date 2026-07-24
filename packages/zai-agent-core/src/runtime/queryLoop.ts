@@ -157,7 +157,12 @@ export async function* queryLoop(
   // 关键: 用 transcriptId ?? resumeFromTranscriptId 判断. 之前只检查
   // resumeFromTranscriptId, 但新 API transcriptId 也表示"指定 ID", 漏掉
   // 它会触发 store.create 把已存在的 transcript 文件覆盖掉.
-  const isSubagent = Boolean(options.parentSessionId)
+  // ★ 双保险: 不仅看 parentSessionId, 也看 subagentType.
+  // AgentTool 的 sync fork (forkedAgent.ts) 只把 subagentType 喂给 queryLoop,
+  // 没把 ctx.parentSessionId 透传到 toolUseContext.options.parentSessionId.
+  // 单看 parentSessionId 会漏判, 导致 sync fork 的 transcript 误落顶层
+  // projectDir 而不是 subagents/. AgentTool.ts 已修透传, 这里也加一道兜底.
+  const isSubagent = Boolean(options.parentSessionId) || Boolean(options.subagentType)
   const pathOpts = { cwd: options.cwd, subagent: isSubagent }
   if (!options.transcriptId && !options.resumeFromTranscriptId) {
     await store.create({

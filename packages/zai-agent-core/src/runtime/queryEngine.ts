@@ -104,7 +104,8 @@ export async function* queryEngine(
   // 关键: 用 transcriptId ?? resumeFromTranscriptId 判断. 之前只检查
   // resumeFromTranscriptId, 但新 API transcriptId 也表示"指定 ID", 漏掉
   // 它会触发 store.create 把已存在的 transcript 文件覆盖掉.
-  const isSubagent = Boolean(options.parentSessionId)
+  // ★ 双保险: 不仅看 parentSessionId, 也看 subagentType. 见 queryLoop.ts 同位置注释.
+  const isSubagent = Boolean(options.parentSessionId) || Boolean(options.subagentType)
   const pathOpts = { cwd: options.cwd, subagent: isSubagent }
   if (!options.transcriptId && !options.resumeFromTranscriptId) {
     await store.create({
