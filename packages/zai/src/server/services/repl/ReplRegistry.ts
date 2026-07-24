@@ -34,7 +34,9 @@ export function getReplRegistry(): ReplRegistry {
 /** 测试 seam：清空单例 + 释放所有 session。 */
 export function __resetReplRegistryForTest(): void {
   if (_singleton) {
-    for (const s of _singleton.map.values()) s.dispose()
+    // 通过 cast 访问私有字段（strict TS 不允许 `private` 外部直接访问）。
+    const sessions = Array.from((_singleton as unknown as { map: Map<string, unknown> }).map.values()) as Array<{ dispose: () => void }>
+    for (const s of sessions) s.dispose()
   }
   _singleton = null
 }
