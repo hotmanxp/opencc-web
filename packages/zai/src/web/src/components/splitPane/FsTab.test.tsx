@@ -5,6 +5,9 @@ import { render, screen, fireEvent } from '@testing-library/react';
 vi.mock('./useFsList.js', () => ({ useFsList: vi.fn() }));
 vi.mock('./useFsFile.js', () => ({ useFsFile: vi.fn() }));
 vi.mock('./useFsSearch.js', () => ({ useFsSearch: vi.fn() }));
+vi.mock('./useFsWrite.js', () => ({
+  useFsWrite: vi.fn(() => ({ save: vi.fn(), saving: false })),
+}));
 vi.mock('./FsContextMenu.js', () => ({
   FsContextMenu: vi.fn(({ path, onClose }) => (
     <div data-testid="ctx-menu-stub" data-path={path}>
@@ -16,15 +19,19 @@ vi.mock('./FsContextMenu.js', () => ({
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
 import { useFsSearch } from './useFsSearch.js';
+import { useFsWrite } from './useFsWrite.js';
 import { FsTab, buildAbsPath } from './FsTab.js';
 
 const mockList = useFsList as unknown as ReturnType<typeof vi.fn>;
 const mockFile = useFsFile as unknown as ReturnType<typeof vi.fn>;
 const mockSearch = useFsSearch as unknown as ReturnType<typeof vi.fn>;
+const mockWrite = useFsWrite as unknown as ReturnType<typeof vi.fn>;
 
 describe('FsTab', () => {
   beforeEach(() => {
     mockSearch.mockReturnValue({ data: null, loading: false, error: null, durationMs: null });
+    mockWrite.mockReturnValue({ save: vi.fn().mockResolvedValue({ ok: true }), saving: false });
+    mockFile.mockReturnValue({ data: null, loading: false, error: null });
   });
 
   it('renders empty state when cwd is null', () => {
@@ -859,4 +866,104 @@ it('does NOT show HTML preview/source toggle for non-HTML files', () => {
   fireEvent.click(screen.getByText('foo.ts'));
   expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
   expect(screen.queryByTestId('fs-html-mode')).toBeNull();
+});
+
+// --- Task 6: Edit/Save/Cancel integration ---
+
+it('shows 编辑 button only for text-kind files', () => {
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [
+      { name: 'foo.ts', path: 'foo.ts', type: 'file', size: 10 },
+    ]},
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'text', path: '/repo/foo.ts', name: 'foo.ts', size: 10, mtime: '', content: 'x' },
+    loading: false, error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByText('foo.ts'));
+  expect(screen.getByTestId('fs-edit-btn')).toBeTruthy();
+});
+
+it('hides 编辑 button for image and html files', () => {
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [
+      { name: 'pic.png', path: 'pic.png', type: 'file', size: 10 },
+    ]},
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'image', path: '/repo/pic.png', name: 'pic.png', size: 10, mime: 'image/png', dataUrl: 'data:image/png;base64,xxx' },
+    loading: false, error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByText('pic.png'));
+  expect(screen.queryByTestId('fs-edit-btn')).toBeNull();
+});
+
+it('enters edit mode on 编辑 click', () => {
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [
+      { name: 'foo.ts', path: 'foo.ts', type: 'file', size: 10 },
+    ]},
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'text', path: '/repo/foo.ts', name: 'foo.ts', size: 10, mtime: '', content: 'x' },
+    loading: false, error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByText('foo.ts'));
+  fireEvent.click(screen.getByTestId('fs-edit-btn'));
+  expect(screen.getByTestId('fs-editor')).toBeTruthy();
+  expect(screen.getByTestId('fs-save-btn')).toBeTruthy();
+  expect(screen.getByTestId('fs-cancel-btn')).toBeTruthy();
+});
+
+it('saves on Save click and marks file dirty', async () => {
+  const save = vi.fn().mockResolvedValue({ ok: true });
+  mockWrite.mockReturnValue({ save, saving: false });
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [
+      { name: 'foo.ts', path: 'foo.ts', type: 'file', size: 10 },
+    ]},
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'text', path: '/repo/foo.ts', name: 'foo.ts', size: 10, mtime: '', content: 'x' },
+    loading: false, error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByText('foo.ts'));
+  fireEvent.click(screen.getByTestId('fs-edit-btn'));
+  // Editor mounts; we can't easily dispatch Mod-S through CodeMirror in
+  // happy-dom, so we exercise the Save button directly.
+  fireEvent.click(screen.getByTestId('fs-save-btn'));
+  expect(save).toHaveBeenCalledTimes(1);
+  expect(save).toHaveBeenCalledWith('foo.ts', expect.any(String));
+  // dirty dot rendered in tree — wait for async handleSave to resolve
+  // and trigger the setDirtyPaths state update.
+  expect(await screen.findByTestId('fs-tree-dirty-foo.ts')).toBeTruthy();
+});
+
+it('does not call save on Cancel click', () => {
+  const save = vi.fn();
+  mockWrite.mockReturnValue({ save, saving: false });
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [
+      { name: 'foo.ts', path: 'foo.ts', type: 'file', size: 10 },
+    ]},
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: { ok: true, kind: 'text', path: '/repo/foo.ts', name: 'foo.ts', size: 10, mtime: '', content: 'x' },
+    loading: false, error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByText('foo.ts'));
+  fireEvent.click(screen.getByTestId('fs-edit-btn'));
+  fireEvent.click(screen.getByTestId('fs-cancel-btn'));
+  expect(save).not.toHaveBeenCalled();
+  expect(screen.queryByTestId('fs-editor')).toBeNull();
 });

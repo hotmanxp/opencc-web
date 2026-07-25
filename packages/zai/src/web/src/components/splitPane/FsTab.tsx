@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Input, Segmented, Spin, Tree } from 'antd';
+import { Button, Empty, Input, Segmented, Spin, Tree, message } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { FileIcon, DirIcon } from './fileIcon.js';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -12,6 +12,8 @@ import { FsSearchList } from './FsSearchList.js';
 import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
 import { FsContextMenu } from './FsContextMenu.js';
+import { TextEditor } from './TextEditor.js';
+import { useFsWrite } from './useFsWrite.js';
 
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 
@@ -278,6 +280,30 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const showHtmlToggle =
     !!file.data && file.data.kind === 'html' && !!file.data.dataUrl;
 
+  // Edit-mode state.
+  const { save: saveFile, saving } = useFsWrite();
+  const [editingPath, setEditingPath] = useState<string | null>(null);
+  const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(new Set());
+
+  // Save handler — marks dirty by tree path key so renderTree lookup matches.
+  const handleSave = async (path: string, content: string) => {
+    const r = await saveFile(path, content);
+    if (r.ok) {
+      setDirtyPaths((prev) => {
+        const next = new Set(prev);
+        next.add(path);
+        return next;
+      });
+      setEditingPath(null);
+      void message.success('已保存');
+    } else {
+      void message.error(r.error ?? '保存失败');
+    }
+  };
+  const handleCancel = () => {
+    setEditingPath(null);
+  };
+
   // Reset on cwd change.
   useEffect(() => {
     setSelected(null);
@@ -285,6 +311,8 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     setLoaded({});
     setContextMenu(null);
     setQuery('');
+    setEditingPath(null);
+    setDirtyPaths(new Set());
   }, [cwd]);
 
   if (!cwd) {
@@ -330,9 +358,28 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       //     stuck at every level).
       // Files are always leaves.
       const isLoaded = Object.prototype.hasOwnProperty.call(loaded, e.path);
+      const isDirty = e.type === 'file' && dirtyPaths.has(e.path);
       return {
         key: e.path,
-        title: <span style={{ fontFamily: MONO, fontSize: 12 }}>{e.name}</span>,
+        title: (
+          <span style={{ fontFamily: MONO, fontSize: 12 }}>
+            {isDirty && (
+              <span
+                data-testid={`fs-tree-dirty-${e.name}`}
+                style={{
+                  display: 'inline-block',
+                  width: 6,
+                  height: 6,
+                  borderRadius: '50%',
+                  background: 'rgba(255,102,0,0.7)',
+                  marginRight: 6,
+                  verticalAlign: 'middle',
+                }}
+              />
+            )}
+            {e.name}
+          </span>
+        ),
         icon:
           e.type === 'dir' ? (
             <DirIcon name={e.name} open={expandedKeys.includes(e.path)} />
@@ -398,6 +445,41 @@ export function FsTab({ cwd }: { cwd: string | null }) {
               { label: '源码', value: 'source' },
             ]}
           />
+        )}
+        {file.data && file.data.kind === 'text' && file.data.path && editingPath !== file.data.path && (
+          <Button
+            size="small"
+            data-testid="fs-edit-btn"
+            onClick={() => setEditingPath(file.data!.path!)}
+          >
+            编辑
+          </Button>
+        )}
+        {editingPath && file.data && file.data.path === editingPath && file.data.kind === 'text' && (
+          <>
+            <Button
+              size="small"
+              data-testid="fs-save-btn"
+              loading={saving}
+              onClick={() => {
+                const ev = new CustomEvent('fs-editor-get-doc');
+                const editor = document.querySelector('[data-testid="fs-editor"]');
+                let newContent: string | null = null;
+                const handler = (e: Event) => {
+                  newContent = (e as CustomEvent<string>).detail;
+                };
+                window.addEventListener('fs-editor-doc', handler);
+                editor?.dispatchEvent(ev);
+                window.removeEventListener('fs-editor-doc', handler);
+                void handleSave(selected!, newContent ?? file.data!.content ?? '');
+              }}
+            >
+              保存
+            </Button>
+            <Button size="small" data-testid="fs-cancel-btn" onClick={handleCancel}>
+              取消
+            </Button>
+          </>
         )}
         {refreshBtn}
       </div>
@@ -490,6 +572,14 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             </div>
           ) : file.error ? (
             <Empty description={file.error} />
+          ) : file.data && editingPath && file.data.path === editingPath && file.data.kind === 'text' && file.data.content !== undefined ? (
+            <TextEditor
+              initialContent={file.data.content}
+              language={file.data.name ? extToLanguage(file.data.name) : null}
+              saving={saving}
+              onSave={(newContent) => void handleSave(editingPath, newContent)}
+              onCancel={handleCancel}
+            />
           ) : file.data && (file.data.content !== undefined || file.data.kind === 'image' || file.data.kind === 'html') ? (
             renderPreview(file.data, htmlMode)
           ) : (
