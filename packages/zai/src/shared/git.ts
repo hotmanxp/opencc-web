@@ -25,3 +25,9 @@ export interface GitDiff {
   diff?: string;
   isUntracked?: boolean;
 }
+
+export interface GitRevertResult {
+  ok: boolean;
+  error?: string;
+  isUntracked?: boolean;
+}

@@ -1,9 +1,10 @@
 import { useEffect, useState } from 'react';
-import { Button, Empty, Spin, Tag } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { Button, Empty, Modal, Spin, Tag, message } from 'antd';
+import { ReloadOutlined, UndoOutlined } from '@ant-design/icons';
 import { useGitStatus } from './useGitStatus.js';
 import { useGitDiff } from './useGitDiff.js';
 import { DiffView } from './DiffView.js';
+import { gitApi } from '../../lib/gitApi.js';
 import { STATUS_COLORS, STATUS_LABELS } from './shared.js';
 import type { GitStatusChar } from '../../../../shared/git.js';
 
@@ -17,7 +18,26 @@ function getFileName(filePath: string): string {
 export function GitTab({ cwd }: { cwd: string | null }) {
   const status = useGitStatus(cwd);
   const [selected, setSelected] = useState<string | null>(null);
+  const [reverting, setReverting] = useState<string | null>(null);
   const diff = useGitDiff(cwd, selected);
+
+  const handleRevert = async (path: string) => {
+    setReverting(path);
+    try {
+      const res = await gitApi.revertFile(path);
+      if (res.ok) {
+        message.success('已撤销更改');
+        status.refetch();
+        if (selected === path) setSelected(null);
+      } else {
+        message.error(res.error ?? '撤销失败');
+      }
+    } catch {
+      message.error('撤销失败');
+    } finally {
+      setReverting(null);
+    }
+  };
 
   // When cwd changes, drop the selection — old paths no longer apply.
   useEffect(() => {
@@ -188,6 +208,28 @@ export function GitTab({ cwd }: { cwd: string | null }) {
                       staged
                     </span>
                   )}
+                  <Button
+                    type="text"
+                    size="small"
+                    icon={<UndoOutlined />}
+                    loading={reverting === f.path}
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      const isNew = f.status === '??';
+                      Modal.confirm({
+                        title: isNew ? '确认删除' : '确认撤销',
+                        content: isNew
+                          ? `确定要删除新文件 ${f.path} 吗？此操作不可恢复。`
+                          : `确定要撤销对 ${f.path} 的更改吗？此操作不可恢复。`,
+                        okText: isNew ? '确认删除' : '确认撤销',
+                        cancelText: '取消',
+                        okButtonProps: { danger: true },
+                        onOk: () => handleRevert(f.path),
+                      });
+                    }}
+                    title={f.status === '??' ? '删除此新文件' : '撤销此文件的更改'}
+                    style={{ color: 'rgba(255,255,255,0.45)', padding: '0 4px' }}
+                  />
                 </div>
               );
             })

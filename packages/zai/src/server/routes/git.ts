@@ -2,7 +2,7 @@ import { Router, type IRouter, type Request } from 'express';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolveSafePath } from '../utils/safePath.js';
-import type { GitDiff, GitStatus, GitStatusChar, GitStatusFile } from '../../shared/git.js';
+import type { GitDiff, GitRevertResult, GitStatus, GitStatusChar, GitStatusFile } from '../../shared/git.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -143,6 +143,49 @@ gitRouter.get('/git/diff', async (req, res) => {
 
   const body: GitDiff = { ok: true, diff, isUntracked };
   res.json(body);
+});
+
+gitRouter.post('/git/revert', async (req, res) => {
+  const { cwd } = ctx(req);
+  const rel = typeof req.body?.path === 'string' ? req.body.path : '';
+  if (!rel) {
+    const body: GitRevertResult = { ok: false, error: '缺少 path 参数' };
+    res.status(400).json(body);
+    return;
+  }
+  const safe = resolveSafePath(cwd, rel);
+  if (!safe.ok) {
+    const body: GitRevertResult = { ok: false, error: safe.error };
+    res.json(body);
+    return;
+  }
+  // Check if the file is untracked (not committed yet)
+  let isUntracked = false;
+  try {
+    const { stdout } = await execFileAsync(
+      'git',
+      ['status', '--porcelain=v1', '-unormal', '--', rel],
+      { cwd, timeout: 3000 },
+    );
+    isUntracked = stdout.trimStart().startsWith('??');
+  } catch {
+    isUntracked = false;
+  }
+  try {
+    if (isUntracked) {
+      // Untracked file: remove it
+      const fs = await import('node:fs');
+      fs.unlinkSync(safe.abs);
+    } else {
+      // Tracked file: restore to HEAD
+      await execFileAsync('git', ['checkout', '--', safe.abs], { cwd, timeout: 5000 });
+    }
+    const body: GitRevertResult = { ok: true, isUntracked };
+    res.json(body);
+  } catch (err) {
+    const body: GitRevertResult = { ok: false, error: `撤销失败: ${err instanceof Error ? err.message : String(err)}` };
+    res.json(body);
+  }
 });
 
 export default gitRouter;
