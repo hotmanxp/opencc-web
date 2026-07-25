@@ -48,7 +48,7 @@ export default function ConfigStatusBar({
       <span style={{ color: "#22c55e" }}>{branch}</span>
       <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
       <span style={{ color: "#f97316" }}>
-        <ModelStatusButton />
+        <ModelStatusButton compact={splitPaneOpen} />
       </span>
       <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
       <TaskDock onSelect={onTaskSelect} compact={splitPaneOpen} />

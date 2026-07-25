@@ -21,7 +21,15 @@ import type { ModelEntry, ModelCapabilities } from '../../../shared/settings.js'
  * then each group's entries in order); Enter calls patchSessionModel;
  * Esc bubbles to antd Popover default close.
  */
-export default function ModelStatusButton() {
+type Props = {
+  /**
+   * 右侧分屏是否展开. 展开时按钮只显示模型名 (隐藏括号里的 provider 描述) ,
+   * 给窄屏幕 / 分屏态腾出横向空间. 默认 false (保持向后兼容, 即完整渲染).
+   */
+  compact?: boolean
+}
+
+export default function ModelStatusButton({ compact = false }: Props = {}) {
   const { model: currentModel, sessionId } = useConversationInfo()
   const availableModels = useAgentStore((s) => s.availableModels)
   const sessions = useAgentStore((s) => s.sessions)
@@ -37,12 +45,16 @@ export default function ModelStatusButton() {
   // `description` (set to the profile name by agentSettings.buildAvailableModels
   // for both user models and builtin entries) — e.g.
   // "MiniMax-M3 (Open Platform (Nova))".
+  //
+  // compact=true (分屏态) 时只返回模型名, 不带括号 provider, 把宽度留给其他状态栏元素.
+  // hover title 仍保留完整文案, 鼠标 hover 仍能拿到 provider 信息.
   const badgeText = useMemo<string | null>(() => {
     if (!currentModel) return null
+    if (compact) return currentModel
     const entry = availableModels.find((m) => m.model === currentModel)
     if (!entry || !entry.description) return currentModel
     return `${currentModel} (${entry.description})`
-  }, [currentModel, availableModels])
+  }, [currentModel, availableModels, compact])
 
   // Derived: recent models from sessions, recency-weighted, deduped, max 5.
   const recentModels = useMemo<ModelEntry[]>(() => {
