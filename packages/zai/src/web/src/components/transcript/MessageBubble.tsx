@@ -336,8 +336,8 @@ export function MessageCopyButton({
     placement === "absolute"
       ? {
           position: "absolute",
-          top: 8,
-          right: 8,
+          top: 4,
+          right: 2,
           zIndex: 1,
           background: "rgba(255,255,255,0.06)",
           borderRadius: 4,
