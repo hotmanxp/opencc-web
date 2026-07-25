@@ -73,6 +73,7 @@ const markdownComponents = {
           fontSize: 12,
           lineHeight: 1.55,
           background: CODE_BG,
+          overflowX: "auto",
         }}
         codeTagProps={{
           style: { fontFamily: CODE_FONT_FAMILY },
