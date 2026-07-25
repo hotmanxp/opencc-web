@@ -140,3 +140,83 @@ describe("Agent.tsx — visibleMessages slice + sticky show-all pill", () => {
     expect(queryByTestId("show-all-messages-pill")).toBeNull()
   })
 })
+
+// Task: compact 模式 — 最后一条 LLM 文本消息 (type === 'assistant.text')
+// 即使落在折叠区, 也必须展示出来. Regression: 旧实现判 messages[i].role
+// 但 RuntimeEvent 没有 role 字段, 导致整个 compact 分支永远不命中.
+describe("Agent.tsx — compact 输出模式:最后一条 LLM 文本保持可见", () => {
+  // 构造 total 条消息, 在 assistantIdx 处放一条 assistant.text,
+  // 其余 user.text / tool_use:start. 这种 raw 消息会被 upsertStreamBlock
+  // 等 reducer 进一步 merge; 我们直接观察 visibleMessages.slice 的结果,
+  // 即 pill 中 hiddenCount 文案.
+  function buildCompactMessages(total: number, assistantIdx: number): any[] {
+    const out: any[] = []
+    for (let i = 0; i < total; i++) {
+      if (i === assistantIdx) {
+        out.push({
+          type: 'assistant.text',
+          eventId: `assistant-${i}`,
+          ts: 1000 + i,
+          sessionId: 'sess-1',
+          turnIndex: 0,
+          text: 'assistant reply',
+        })
+      } else {
+        out.push({
+          type: i % 2 === 0 ? 'user.text' : 'tool_use:start',
+          eventId: `evt-${i}`,
+          ts: 1000 + i,
+          sessionId: 'sess-1',
+          turnIndex: 0,
+          text: i % 2 === 0 ? `user-${i}` : undefined,
+          toolUseId: i % 2 === 1 ? `tu-${i}` : undefined,
+          name: i % 2 === 1 ? 'Bash' : undefined,
+          input: i % 2 === 1 ? {} : undefined,
+        })
+      }
+    }
+    return out
+  }
+
+  test("compact 模式:hiddenCount 收紧到最后一条 assistant.text 的索引", async () => {
+    // 30 条消息, assistant 在 idx=5 (会被默认 hc=20 折叠).
+    // compact 分支: 5 < hc=20, 收紧 hiddenCount = 5.
+    setAppState({ maxVisibleMessages: 10, outputStyle: 'compact' })
+    const mod = await import("../store/useAgentStore.js")
+    mod.useAgentStore.setState({
+      messages: buildCompactMessages(30, 5),
+    } as any)
+    const { default: Agent } = await import("./Agent.jsx")
+    const { getByTestId } = render(<Agent />)
+    const pill = getByTestId("show-all-messages-pill")
+    expect(pill.textContent).toMatch(/5\s*条隐藏/)
+  })
+
+  test("compact 模式:assistant 已在 visible 区时不收紧 (走默认 hc)", async () => {
+    // 20 条消息, assistant 在 idx=19 (末尾). hc=10, idx=19 >= hc,
+    // 不触发 compact 分支, 默认 slice(10) — hiddenCount = 10.
+    setAppState({ maxVisibleMessages: 10, outputStyle: 'compact' })
+    const mod = await import("../store/useAgentStore.js")
+    mod.useAgentStore.setState({
+      messages: buildCompactMessages(20, 19),
+    } as any)
+    const { default: Agent } = await import("./Agent.jsx")
+    const { getByTestId } = render(<Agent />)
+    const pill = getByTestId("show-all-messages-pill")
+    expect(pill.textContent).toMatch(/10\s*条隐藏/)
+  })
+
+  test("非 compact 模式:行为保持不变 (default hc = length - limit)", async () => {
+    // 30 条消息, assistant 在 idx=5. outputStyle=default, 走旧路径,
+    // hiddenCount = 30 - 10 = 20 (与是否含 assistant.text 无关).
+    setAppState({ maxVisibleMessages: 10, outputStyle: 'default' })
+    const mod = await import("../store/useAgentStore.js")
+    mod.useAgentStore.setState({
+      messages: buildCompactMessages(30, 5),
+    } as any)
+    const { default: Agent } = await import("./Agent.jsx")
+    const { getByTestId } = render(<Agent />)
+    const pill = getByTestId("show-all-messages-pill")
+    expect(pill.textContent).toMatch(/20\s*条隐藏/)
+  })
+})

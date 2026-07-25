@@ -28,12 +28,19 @@ const AI_TEXT_MAX_HEIGHT_PX = 140
 // var(--bg-card) (#12121a) + 浅色字, 这是 zai 暗色主题的基础. 自定义浅色背景
 // (例如 #e6f4ff / #f6ffed) 在 expanded 视图也是被覆盖的 (用户无感知因为颜色没生效);
 // 我们这里显式不设 bg, 让全局 CSS 一致接管, 避免气泡出现"亮底+浅字"的不可读组合.
+//
+// forceExpanded — 当 caller 判定这是 "最后一条" LLM 文本 (例如分屏模式下
+// transcriptCollapsed=true) 时传 true, 让 AssistantTextBody 绕开 maxHeight
+// clamp, 完整展开 (与 expanded 视图视觉一致). 历史 assistant.text 仍走
+// 默认 6 行 clamp + "显示更多" 按钮, 不破坏 transcript 折叠结构.
 export function CollapsedMessageBubble({
   message,
   streaming,
+  forceExpanded = false,
 }: {
   message: AgentMessage
   streaming?: boolean
+  forceExpanded?: boolean
 }) {
   const m = message as any
   const t = m.type as string
@@ -76,6 +83,7 @@ export function CollapsedMessageBubble({
               <AssistantTextBody
                 text={(m.text as string) || ''}
                 streaming={streaming}
+                forceExpanded={forceExpanded}
               />
             </div>
           </Space>
@@ -168,34 +176,47 @@ export function CollapsedMessageBubble({
 // maxHeight clamp 是 spec §3.4 "助手文本同样 6 行 clamp" 的实践版: markdown 输出
 // 不支持 CSS line-clamp (ReactMarkdown 输出的元素没法直接打 ellipsis),
 // 用 maxHeight + 测 scrollHeight 模拟. 内容未溢出时不显示 "显示更多" 按钮.
+//
+// forceExpanded=true 时强制 maxHeight:'none' / overflow:'visible' / 不渲染
+// "显示更多" 按钮 — caller 已经在父层判定该条 assistant.text 是 "最后一条",
+// 不再走默认 clamp 路径 (典型场景: 分屏模式 transcriptCollapsed=true).
 function AssistantTextBody({
   text,
   streaming,
+  forceExpanded = false,
 }: {
   text: string
   streaming?: boolean
+  forceExpanded?: boolean
 }) {
   const [expanded, setExpanded] = useState(false)
   const [overflow, setOverflow] = useState(false)
   const ref = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
-    if (expanded || !ref.current) {
+    // forceExpanded: 直接展开, 不需要测 overflow, 不渲染按钮.
+    if (forceExpanded || !ref.current) {
+      setOverflow(false)
+      return
+    }
+    if (expanded) {
       setOverflow(false)
       return
     }
     // clientHeight 是 maxHeight 截断后的渲染高度; scrollHeight 是真实高度.
     // 二者差超过 1px 说明内容被截了, 显示展开按钮.
     setOverflow(ref.current.scrollHeight > ref.current.clientHeight + 1)
-  }, [text, expanded])
+  }, [text, expanded, forceExpanded])
 
+  // forceExpanded 时 clamp box 整体取消, 用户手动 expanded state 不再生效.
+  const effectiveExpanded = forceExpanded || expanded
   return (
     <>
       <div
         ref={ref}
         style={{
-          overflow: expanded ? 'visible' : 'hidden',
-          maxHeight: expanded ? 'none' : AI_TEXT_MAX_HEIGHT_PX,
+          overflow: effectiveExpanded ? 'visible' : 'hidden',
+          maxHeight: effectiveExpanded ? 'none' : AI_TEXT_MAX_HEIGHT_PX,
         }}
       >
         {streaming ? <StreamingMarkdown text={text} /> : <MarkdownText text={text} />}

@@ -1,4 +1,3 @@
-import { useMemo } from 'react'
 import { useAgentStore, type AgentMessage } from '../../store/useAgentStore.js'
 import { MessageBubble } from './MessageBubble.js'
 import { CollapsedMessageBubble } from './CollapsedMessageBubble.js'
@@ -57,6 +56,18 @@ export function MessageListView({ messages, streaming }: Props) {
     )
   }
 
+  // 在 collapsed 视图下, 找到 messages 里最后一条 assistant.text 的索引;
+  // 渲染时给对应气泡传 forceExpanded, 完整展开 (绕开 6 行 clamp). 分屏模式
+  // (transcriptCollapsed=true) 用户期望看到 AI 的最近一条完整回答, 历史
+  // 仍然 clamp — 这条规则与 splitPaneOpen 无关 (transcriptCollapsed 已经是
+  // 单一真源, useSplitPaneCompactLock 把它锁到 true).
+  const lastAssistantIdx = (() => {
+    for (let i = messages.length - 1; i >= 0; i--) {
+      if ((messages[i] as { type?: string }).type === 'assistant.text') return i
+    }
+    return -1
+  })()
+
   return (
     <>
       {nodes.map((node, i) => {
@@ -97,11 +108,16 @@ export function MessageListView({ messages, streaming }: Props) {
           <div key={`txt-${node.startIndex}-${node.endIndex}-${i}`}>
             {node.messages.map((m, mi) => {
               const evtId = ((m as any).eventId as string) ?? `txt-${node.startIndex}-${mi}`
+              const msgIdx = node.startIndex + mi
+              // "最后一条 assistant.text" 完整展开 (绕开 clamp);
+              // 历史 assistant.text 仍走默认 6 行 clamp + "显示更多" 按钮.
+              const isLastAssistant = msgIdx === lastAssistantIdx
               return (
                 <CollapsedMessageBubble
                   key={evtId}
                   message={m}
                   streaming={streaming && node.endIndex === messages.length - 1}
+                  forceExpanded={isLastAssistant}
                 />
               )
             })}

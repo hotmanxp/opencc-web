@@ -101,3 +101,84 @@ describe('CollapsedMessageBubble — copy button', () => {
     })
   })
 })
+
+// forceExpanded 标志: 由 MessageListView 给 "最后一条 assistant.text" 传 true
+// (分屏模式 / transcriptCollapsed=true 时用户期望看到完整 AI 回答).
+// 行为: AssistantTextBody 内部 div 用 maxHeight:'none' + overflow:'visible',
+// 不渲染 "显示更多" 按钮. 历史 assistant.text 默认 clamp 6 行.
+describe('CollapsedMessageBubble — forceExpanded prop', () => {
+  const writeText = vi.fn().mockResolvedValue(undefined)
+
+  beforeEach(() => {
+    msgMock.success.mockReset()
+    msgMock.warning.mockReset()
+    vi.stubGlobal('navigator', { clipboard: { writeText } })
+    writeText.mockClear()
+  })
+
+  test('默认 (forceExpanded=false) 时 assistant.text 渲染 clamp box (maxHeight 140px)', () => {
+    const { container } = render(
+      <CollapsedMessageBubble
+        message={
+          {
+            eventId: 'a-default',
+            sessionId: 'sess-1',
+            ts: 1,
+            turnIndex: 0,
+            type: 'assistant.text',
+            text: 'some AI text',
+          } as any
+        }
+      />,
+    )
+    const clampBox = container.querySelector('div[style*="max-height: 140px"]')
+    expect(clampBox).not.toBeNull()
+    // 默认不渲染 "显示更多" 按钮 (除非内容溢出 + 测了 scrollHeight, 在 happy-dom
+    // 里 clientHeight/scrollHeight 永远相等, 所以按钮不出现 — 正是我们想要的)
+    expect(screen.queryByText('显示更多')).toBeNull()
+  })
+
+  test('forceExpanded=true 时 assistant.text 渲染展开 box (maxHeight:none)', () => {
+    const { container } = render(
+      <CollapsedMessageBubble
+        forceExpanded
+        message={
+          {
+            eventId: 'a-last',
+            sessionId: 'sess-1',
+            ts: 1,
+            turnIndex: 0,
+            type: 'assistant.text',
+            text: 'last AI reply, must be fully visible',
+          } as any
+        }
+      />,
+    )
+    // 展开态: maxHeight: 'none', overflow: 'visible'
+    const expandedBox = container.querySelector('div[style*="max-height: none"]')
+    expect(expandedBox).not.toBeNull()
+    // "显示更多" 按钮被 forceExpanded 抑制
+    expect(screen.queryByText('显示更多')).toBeNull()
+  })
+
+  test('forceExpanded 对 thinking 消息无影响 (走 ThinkingBlock)', () => {
+    const { container } = render(
+      <CollapsedMessageBubble
+        forceExpanded
+        message={
+          {
+            eventId: 't-1',
+            sessionId: 'sess-1',
+            ts: 1,
+            turnIndex: 0,
+            type: 'assistant.thinking',
+            thinking: 'reasoning trace',
+          } as any
+        }
+      />,
+    )
+    // ThinkingBlock 不渲染 maxHeight clamp box (用 ThinkingBlock 自家结构).
+    // 只要不出现 max-height: 140px 的 clamp 元素就算通过.
+    expect(container.querySelector('div[style*="max-height: 140px"]')).toBeNull()
+  })
+})

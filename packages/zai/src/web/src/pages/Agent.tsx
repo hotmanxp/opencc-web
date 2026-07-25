@@ -73,15 +73,47 @@ export default function Agent() {
   // 顶部浮按钮 [显示全部 (X 条隐藏)] 让用户点开看完整历史。点开后新消息
   // 持续到达再次超出 limit, useEffect 会自动把 showAllMessages 重置为 false。
   // 设计见 docs/superpowers/specs/2026-07-24-zai-message-cap-design.md §5。
+  // 特殊: compact 模式下最后一条 assistant 消息始终可见,不折叠。
   const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages);
+  const outputStyle = useAppStore((s) => s.outputStyle);
   const [showAllMessages, setShowAllMessages] = useState(false);
   // hiddenCount 不受 showAllMessages 影响,纯粹由 messages.length 与 limit 派生;
   // visibleMessages 切片时考虑 showAllMessages,展开时切片偏移 = 0。
   const { hiddenCount, visibleMessages } = useMemo(() => {
     const hc = Math.max(0, messages.length - maxVisibleMessages);
-    const eff = showAllMessages ? 0 : hc;
-    return { hiddenCount: hc, visibleMessages: messages.slice(eff) };
-  }, [messages, maxVisibleMessages, showAllMessages]);
+    if (showAllMessages) {
+      return { hiddenCount: 0, visibleMessages: messages };
+    }
+    if (hc === 0) {
+      return { hiddenCount: 0, visibleMessages: messages };
+    }
+    // compact 模式:找到最后一条 LLM 文本消息,确保它不被折叠
+    // 注意: store 里 AgentMessage = RuntimeEvent, 没有 role 字段,
+    // LLM 文本的 type 是 'assistant.text' (见 useAgentStore runtime.delta
+    // reducer); tool_use / thinking / user.text 都不算.
+    const isCompact = outputStyle === 'compact';
+    if (isCompact) {
+      let lastAssistantIdx = -1;
+      for (let i = messages.length - 1; i >= 0; i--) {
+        if ((messages[i] as { type?: string }).type === 'assistant.text') {
+          lastAssistantIdx = i;
+          break;
+        }
+      }
+      // 如果最后一条 assistant.text 在被折叠的部分内 (即 lastAssistantIdx < hc,
+      // 表示 slice(hc) 起点落在它之后, 它会被隐藏), 把隐藏数收紧到
+      // lastAssistantIdx, 让 slice(adjustedHc) 正好从该条开始,
+      // visibleMessages 末尾就是它, top pill 计数随之缩短.
+      if (lastAssistantIdx >= 0 && lastAssistantIdx < hc) {
+        const adjustedHc = lastAssistantIdx;
+        return {
+          hiddenCount: adjustedHc,
+          visibleMessages: messages.slice(adjustedHc),
+        };
+      }
+    }
+    return { hiddenCount: hc, visibleMessages: messages.slice(hc) };
+  }, [messages, maxVisibleMessages, showAllMessages, outputStyle]);
   // 用户点开 pill 后,新消息持续进来,直到 messages.length 再次超出 limit,
   // 自动把 showAllMessages 重置为 false, pill 重新出现。
   // 用 ref 记下"打开 pill 那一刻的 hc",effect 只在 hc **涨过** 那时阈值才 reset —
