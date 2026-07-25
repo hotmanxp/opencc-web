@@ -309,7 +309,7 @@ describe('queryEngine', () => {
   test('tool call → transcript 落盘 v2, parentUuid 链完整', async () => {
     const sessionId = `sess-${'1'.repeat(8)}-aaaa-bbbb-cccc-${'2'.repeat(12)}`
     // queryEngine 不会自己 create() — 在 agent route 入口会先建文件. 测试模拟这一步.
-    await new TranscriptStore(tmpDir).create({ cwd: '/tmp', model: 'm' }, sessionId)
+    await new TranscriptStore(tmpDir).create({ cwd: '/tmp', model: 'm' }, { cwd: '/tmp' }, sessionId)
     await collect(queryEngine(
       { prompt: 'list', cwd: '/tmp', transcriptId: sessionId },
       {
