@@ -30,14 +30,35 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
     : `${entries.length} 个工具调用`
 
   return (
+    // 工具折叠卡片宽度与 LLM 文字气泡一致 (maxWidth:100%), 用深色半透明
+    // 面板 + 紫色左边条与浅绿 (#f6ffed) 文字气泡视觉区分: 文字气泡表达
+    // "模型回复", 工具面板表达 "工具调用汇总", 颜色互不抢占.
     <Card
       size="small"
-      style={{ marginBottom: 8, maxWidth: '85%' }}
+      style={{
+        marginBottom: 8,
+        // 减去与 LLM 气泡相同的 marginRight(20), 让卡片实际渲染宽度
+        // 与 #f6ffed 文字气泡一致, 而不是被 100% + 20px marginRight
+        // 撑得比文字气泡长一截.
+        width: 'calc(100% - 20px)',
+        maxWidth: 'calc(100% - 20px)',
+        marginRight: 20,
+        // 与 LLM 文字气泡 (#f6ffed 浅绿) 形成稳定对比:
+        // 工具面板用紫色半透明底 + 紫色左边条, 表达"工具调用汇总".
+        // 透明度从 0.04 提到 0.10, 让面板在深色页面背景上清晰可见.
+        background: 'rgba(114,45,209,0.10)',
+        borderColor: 'rgba(114,45,209,0.45)',
+        borderLeft: '3px solid #722ed1',
+        borderRadius: 12,
+      }}
+      styles={{ body: { padding: 12 } }}
       title={
-        <span>
+        <span style={{ fontSize: 13 }}>
           {titleText}
           {summary && entries.length > 1 && (
-            <span style={{ marginLeft: 8, color: '#8c8c8c' }}>· {summary}</span>
+            <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.55)' }}>
+              · {summary}
+            </span>
           )}
           {errs > 0 && (
             <Tag color="red" style={{ marginLeft: 8 }}>{errs} 个失败</Tag>
@@ -62,7 +83,7 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
           )
         })}
       {!expanded && (
-        <div style={{ color: '#8c8c8c', fontSize: 12 }}>
+        <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>
           {entries.some((e) => e.status === 'pending') ? '工具调用中…' : '折叠显示'}
         </div>
       )}
