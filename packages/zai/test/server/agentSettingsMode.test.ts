@@ -2,7 +2,7 @@ import { describe, it, expect, beforeAll, afterAll, vi } from 'vitest'
 import express from 'express'
 import request from 'supertest'
 import path from 'node:path'
-import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
+import { mkdtempSync, rmSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { TranscriptStore } from '@zn-ai/zai-agent-core'
 
@@ -53,7 +53,7 @@ describe('PATCH /api/agent/sessions/:id permissionMode', () => {
     const router = await loadAgentRouter()
     const app = buildApp(router)
     const store = new TranscriptStore(dataDir)
-    const id = await store.create({ cwd: tmpDir, model: 'unknown' })
+    const id = await store.create({ cwd: tmpDir, model: 'unknown' }, { cwd: tmpDir })
 
     const res = await request(app)
       .patch(`/api/agent/sessions/${id}`)
@@ -61,7 +61,7 @@ describe('PATCH /api/agent/sessions/:id permissionMode', () => {
 
     expect(res.status).toBe(200)
     expect(res.body.ok).toBe(true)
-    const reloaded = await store.read(id)
+    const reloaded = await store.read(id, { cwd: tmpDir })
     expect(reloaded.meta.permissionMode).toBe('plan')
   })
 
@@ -69,14 +69,14 @@ describe('PATCH /api/agent/sessions/:id permissionMode', () => {
     const router = await loadAgentRouter()
     const app = buildApp(router)
     const store = new TranscriptStore(dataDir)
-    const id = await store.create({ cwd: tmpDir, model: 'unknown' })
+    const id = await store.create({ cwd: tmpDir, model: 'unknown' }, { cwd: tmpDir })
 
     const res = await request(app)
       .patch(`/api/agent/sessions/${id}`)
       .send({ permissionMode: 'garbage' })
 
     expect(res.status).toBe(400)
-    const reloaded = await store.read(id)
+    const reloaded = await store.read(id, { cwd: tmpDir })
     expect(reloaded.meta.permissionMode).toBeUndefined()
   })
 
@@ -95,7 +95,7 @@ describe('GET /api/agent/sessions includes permissionMode', () => {
     const router = await loadAgentRouter()
     const app = buildApp(router)
     const store = new TranscriptStore(dataDir)
-    await store.create({ cwd: tmpDir, model: 'unknown', permissionMode: 'plan' })
+    await store.create({ cwd: tmpDir, model: 'unknown', permissionMode: 'plan' }, { cwd: tmpDir })
 
     const res = await request(app).get('/api/agent/sessions')
     expect(res.status).toBe(200)
@@ -112,7 +112,7 @@ describe('POST /api/agent/sessions uses defaultMode', () => {
     expect(res.status).toBe(200)
     expect(res.body.sessionId).toBeTruthy()
     const store = new TranscriptStore(dataDir)
-    const transcript = await store.read(res.body.sessionId)
+    const transcript = await store.read(res.body.sessionId, { cwd: tmpDir })
     expect(transcript.meta.permissionMode).toBe('acceptEdits')
   })
 })

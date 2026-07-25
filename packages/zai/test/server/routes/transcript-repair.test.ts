@@ -15,6 +15,7 @@ const mocks = vi.hoisted(() => ({
 
 vi.mock('../../../src/server/services/agentRuntime.js', () => ({
   getTranscriptStore: () => mocks.store,
+  getServerCwd: () => '/x',
 }))
 
 vi.mock('@zn-ai/zai-agent-core/runtime', async () => {
@@ -37,7 +38,7 @@ describe('POST /api/transcript/:sessionId/repair', () => {
       cwd: '/x',
       model: 'm',
       permissionMode: 'default',
-    })
+    }, { cwd: '/x' })
     mocks.repair = vi.fn(async () => ({
       messages: [],
       report: {

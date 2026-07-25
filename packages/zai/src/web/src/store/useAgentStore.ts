@@ -1487,6 +1487,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         useAgentStore.getState().upsertToolCall(resultMsg)
         return
       }
+      case 'runtime.retrying':
+        useAgentStore.getState().setStatus('retrying')
+        return
       case 'runtime.done':
         useAgentStore.getState().setStatus('idle')
         return

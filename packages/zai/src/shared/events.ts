@@ -66,6 +66,14 @@ const RuntimeEvent = z.discriminatedUnion('type', [
              postTokens: z.number(),
              savedTokens: z.number(),
              timestamp: z.number() }),
+  // runtime.retrying: emitted when the model caller retries after a recoverable
+  // error (e.g. 529 overload). Frontend uses this to show a retrying toast.
+  z.object({ ...Base.shape, type: z.literal('runtime.retrying'),
+             sessionId: z.string(), turnIndex: z.number(),
+             attempt: z.number(),
+             delayMs: z.number(),
+             nextAttemptAtMs: z.number(),
+             category: z.enum(['llm_provider_overloaded', 'llm_provider_server', 'llm_provider_rate_limit']) }),
 ])
 
 const SessionEvent = z.discriminatedUnion('type', [

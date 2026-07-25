@@ -10,6 +10,7 @@ export {
   getCachedZaiSettings,
   getCachedZaiSettingsSync,
   initZaiSettingsCache,
+  __resetCacheForTests,
 } from './zaiSettingsCache.js'
 
 /** Path to ~/.zai/settings.json — the on-disk persistence layer. */
