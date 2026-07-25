@@ -130,7 +130,7 @@ export default function TodoDropdown({ todos, v2Tasks }: Props) {
         <>
           <div style={styles.divider} />
           <div style={styles.header}>
-            <span>V2 任务清单</span>
+            <span>任务清单</span>
             <span>
               {v2Done}/{v2Tasks.length} 完成 · {v2InProgress} 进行中
             </span>
