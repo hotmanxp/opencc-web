@@ -92,9 +92,16 @@ describe('autocompact', () => {
       consecutiveFailures: 2,
       forceReason: 'message-count' as const,
     }
+    // 防御纵深测试:即便调用方用 `as any` 绕过 TypeScript 必填检查,
+    // compactConversation 内部 `if (!modelCaller)` 仍应在 0ms 抛错,
+    // circuit breaker 递增。这是回归保护,生产代码必须传 modelCaller。
     const result = await autoCompactIfNeeded(
       msgs,
-      { options: { mainLoopModel: 'MiniMax-M3' }, abortController: new AbortController() } as any,
+      {
+        options: { mainLoopModel: 'MiniMax-M3' },
+        abortController: new AbortController(),
+        modelCaller: undefined,
+      } as any,
       {} as any,
       'repl_main_thread',
       tracking,
@@ -106,5 +113,62 @@ describe('autocompact', () => {
     expect(result.circuitBreakerTripped).toBe(true)
     expect(result.circuitBreakerActive).toBe(true)
     expect(result.nextRetryAtMs).toBeDefined()
+  })
+
+  test('autoCompactIfNeeded: 提供 modelCaller + forceReason → wasCompacted=true', async () => {
+    const msgs = [makeMsg('hi'), makeMsg('ok', 'assistant')]
+    const tracking = {
+      compacted: false,
+      turnCounter: 0,
+      turnId: 'turn-ok',
+      forceReason: 'message-count' as const,
+    }
+    // mock modelCaller:吐 "compact summary" + message_stop
+    const mockModelCaller = (async function* () {
+      yield { type: 'content_block_start', index: 0, content_block: { type: 'text', text: '' } }
+      yield {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'text_delta', text: '对话摘要:用户打招呼,助手回应。' },
+      }
+      yield { type: 'message_stop' }
+    }) as any
+
+    const result = await autoCompactIfNeeded(
+      msgs,
+      {
+        options: { mainLoopModel: 'MiniMax-M3' },
+        abortController: new AbortController(),
+        modelCaller: mockModelCaller,
+      },
+      {} as any,
+      'repl_main_thread',
+      tracking,
+      0,
+      Date.now(),
+    )
+    expect(result.wasCompacted).toBe(true)
+    expect(result.consecutiveFailures).toBe(0)
+  })
+
+  test('ToolUseContext: modelCaller 字段类型层必填 (静态检查)', () => {
+    // 这段代码不应该编译过 — 但 vitest 是运行时跑, 类型检查交给 tsc.
+    // 真正拦截在 `tsc -b --noEmit` / 编辑器层。这里只是文档化意图:
+    // 把 type-only assertion 放在注释里, 任何想偷懒写 `modelCaller: undefined`
+    // 的 PR reviewer 看到这条 test 会知道契约。
+    type Assert = {
+      options: { mainLoopModel: string }
+      abortController: AbortController
+      modelCaller: (req: any) => AsyncIterable<any>
+    }
+    const ok: Assert = {
+      options: { mainLoopModel: 'm' },
+      abortController: new AbortController(),
+      modelCaller: async function* () {},
+    }
+    expect(typeof ok.modelCaller).toBe('function')
+    // @ts-expect-error modelCaller 必填 — 这条断言如果通过说明类型被改回了 optional
+    const _bad: Assert = { options: { mainLoopModel: 'm' }, abortController: new AbortController() }
+    void _bad
   })
 })

@@ -15,7 +15,12 @@ import type { CompactionResult } from './types.js'
 // ---- 本地最小类型:避免依赖 opencc-internals / runtime/types.js ----
 type Message = TranscriptMessage
 
-type ModelCaller = (req: {
+/**
+ * 摘要流式生成用的模型调用器签名。本地定义保持最小契约,避免
+ * 与 `runtime/types.ts` 的 `ModelCaller`(对 tools/messages 有更严约束)
+ * 双向耦合。`autocompact.ts` 现在强制要求调用方传入符合本签名的函数。
+ */
+export type CompactModelCaller = (req: {
   model: string
   systemPrompt: string
   messages: Array<{ role: 'user' | 'assistant'; content: string }>
@@ -31,7 +36,7 @@ type ModelCaller = (req: {
 type ToolUseContext = {
   options: { mainLoopModel: string }
   abortController: AbortController
-  modelCaller?: ModelCaller
+  modelCaller?: CompactModelCaller
 }
 
 type CacheSafeParams = {

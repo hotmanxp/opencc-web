@@ -9,6 +9,7 @@
  */
 
 import type { TranscriptMessage } from '../../transcript/types.js'
+import type { CompactModelCaller } from './conversation.js'
 import type { AutoCompactTrackingState, ForceReason } from './types.js'
 import { getAutoCompactThreshold } from './context-window.js'
 import {
@@ -44,6 +45,16 @@ function tokenCountWithEstimation(messages: TranscriptMessage[]): number {
 type ToolUseContext = {
   options: { mainLoopModel: string }
   abortController: AbortController
+  /**
+   * 流式生成摘要用的模型调用器。`compactConversation` 会通过 `modelCaller`
+   * 调 LLM,缺失会让每次 compact attempt 在 0ms 抛错 → circuit breaker
+   * 永远 open → session 永远不压缩 → 长跑后 messages 累积拖慢后续 turn。
+   *
+   * 强制必填:之前的 `modelCaller?: ModelCaller` + 调用处 `as any` 让生产路径
+   * 漏传,compact.jsonl 写满 30 行 `compact: context.modelCaller is required`。
+   * 改必填后,调用方编译期就必须注入,防御纵深留给 compactConversation 里的运行时检查。
+   */
+  modelCaller: CompactModelCaller
 }
 type CacheSafeParams = {
   systemPrompt: unknown
@@ -124,7 +135,7 @@ export async function autoCompactIfNeeded(
   try {
     const result = await compactConversation(
       messages,
-      toolUseContext as any,
+      toolUseContext,
       cacheSafeParams,
       true,
       undefined,
