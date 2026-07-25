@@ -279,6 +279,63 @@ describe('routes/fs', () => {
       expect(res.body.error).toMatch(/NUL/);
     });
   });
+
+  describe('POST /fs/delete', () => {
+    test('deletes a file under cwd', async () => {
+      const target = join(root, 'delete-me.txt');
+      writeFileSync(target, 'bye\n');
+      const res = await request(makeApp(root))
+        .post('/api/fs/delete')
+        .send({ path: 'delete-me.txt' });
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      // fs.unlink should have removed it
+      expect((await import('node:fs')).existsSync(target)).toBe(false);
+    });
+
+    test('deletes an empty directory under cwd', async () => {
+      const target = join(root, 'empty-dir');
+      mkdirSync(target);
+      const res = await request(makeApp(root))
+        .post('/api/fs/delete')
+        .send({ path: 'empty-dir' });
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      expect((await import('node:fs')).existsSync(target)).toBe(false);
+    });
+
+    test('rejects path traversal with 403', async () => {
+      const res = await request(makeApp(root))
+        .post('/api/fs/delete')
+        .send({ path: '../../etc/passwd' });
+      expect(res.status).toBe(403);
+      expect(res.body.ok).toBe(false);
+    });
+
+    test('rejects empty path with 400', async () => {
+      const res = await request(makeApp(root))
+        .post('/api/fs/delete')
+        .send({});
+      expect(res.status).toBe(400);
+      expect(res.body.ok).toBe(false);
+    });
+
+    test('rejects NUL-byte path with 400', async () => {
+      const res = await request(makeApp(root))
+        .post('/api/fs/delete')
+        .send({ path: 'src/foo\x00../etc/passwd' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/NUL/);
+    });
+
+    test('returns 404 when path does not exist', async () => {
+      const res = await request(makeApp(root))
+        .post('/api/fs/delete')
+        .send({ path: 'does-not-exist.txt' });
+      expect(res.status).toBe(404);
+      expect(res.body.ok).toBe(false);
+    });
+  });
 });
 describe('GET /api/fs/search', () => {
   let root: string;

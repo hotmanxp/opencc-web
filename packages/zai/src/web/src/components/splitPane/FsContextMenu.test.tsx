@@ -3,9 +3,21 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, fireEvent, waitFor, act } from '@testing-library/react';
 import { message } from 'antd';
 
+// Hand-rolled handle for Modal.confirm so tests can drive onOk only when
+// they choose — happy-dom's AntD Modal rendering has been flaky in this
+// repo. Each call to Modal.confirm stores its options under `lastConfirm`;
+// tests await `lastConfirm.onOk()` to simulate the user clicking OK.
+let lastConfirm: { onOk?: () => void | Promise<void> } | null = null;
 vi.mock('antd', async () => {
   const actual = await vi.importActual<typeof import('antd')>('antd');
-  return { ...actual, message: { success: vi.fn(), error: vi.fn(), warning: vi.fn() } };
+  const modalConfirm = vi.fn((opts: { onOk?: () => void | Promise<void> }) => {
+    lastConfirm = opts;
+  });
+  return {
+    ...actual,
+    message: { success: vi.fn(), error: vi.fn(), warning: vi.fn() },
+    Modal: { ...actual.Modal, confirm: modalConfirm },
+  };
 });
 
 import { FsContextMenu } from './FsContextMenu.js';
@@ -17,6 +29,7 @@ const absPath = '/repo/src/index.ts';
 describe('FsContextMenu', () => {
   beforeEach(() => {
     vi.restoreAllMocks();
+    lastConfirm = null;
     // happy-dom defines navigator.clipboard with a getter; redefine via defineProperty
     Object.defineProperty(navigator, 'clipboard', {
       configurable: true,
@@ -69,5 +82,35 @@ describe('FsContextMenu', () => {
     const item = await waitFor(() => document.querySelector('[data-testid="fs-cm-copy-rel"]') as HTMLElement);
     await act(async () => { fireEvent.click(item); });
     expect(onClose).toHaveBeenCalled();
+  });
+
+  it('shows confirmation dialog before deleting and posts /fs/delete on confirm', async () => {
+    const { Modal } = await import('antd');
+    const onDeleted = vi.fn();
+    render(
+      <FsContextMenu
+        path={path}
+        absPath={absPath}
+        cwd={cwd}
+        position={{ x: 0, y: 0 }}
+        onClose={vi.fn()}
+        onDeleted={onDeleted}
+      />,
+    );
+    const item = await waitFor(() => document.querySelector('[data-testid="fs-cm-delete"]') as HTMLElement);
+    await act(async () => { fireEvent.click(item); });
+    // Modal.confirm must be invoked; before the user confirms we must
+    // NOT have hit the network.
+    expect(Modal.confirm).toHaveBeenCalled();
+    expect(lastConfirm).not.toBeNull();
+    expect((globalThis.fetch as any)).not.toHaveBeenCalled();
+    // Simulate the user clicking OK in the confirm dialog.
+    await act(async () => {
+      await lastConfirm!.onOk?.();
+    });
+    await waitFor(() =>
+      expect(globalThis.fetch).toHaveBeenCalledWith('/api/fs/delete', expect.objectContaining({ method: 'POST' })),
+    );
+    await waitFor(() => expect(onDeleted).toHaveBeenCalled());
   });
 });

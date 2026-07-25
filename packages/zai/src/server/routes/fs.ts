@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request } from 'express';
-import { readdir, stat, readFile } from 'node:fs/promises';
+import { readdir, stat, readFile, rm, rmdir } from 'node:fs/promises';
 import { extname, basename, join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { resolveSafePath } from '../utils/safePath.js';
@@ -544,6 +544,43 @@ fsRouter.post('/fs/open-terminal', async (req, res) => {
     return;
   }
   res.json({ ok: true } satisfies FsAck);
+});
+
+fsRouter.post('/fs/delete', async (req, res) => {
+  const { cwd } = ctx(req);
+  const rel = typeof req.body?.path === 'string' ? req.body.path : '';
+  if (!rel) {
+    res.status(400).json({ ok: false, error: '缺少 path 参数' } satisfies FsAck);
+    return;
+  }
+  const safe = resolveSafePath(cwd, rel);
+  if (!safe.ok) {
+    const status = safe.error.includes('NUL') ? 400 : 403;
+    res.status(status).json({ ok: false, error: safe.error } satisfies FsAck);
+    return;
+  }
+  let info;
+  try {
+    info = await stat(safe.abs);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      res.status(404).json({ ok: false, error: '文件不存在' } satisfies FsAck);
+      return;
+    }
+    res.status(500).json({ ok: false, error: `stat 失败：${err instanceof Error ? err.message : String(err)}` } satisfies FsAck);
+    return;
+  }
+  try {
+    if (info.isDirectory()) {
+      await rmdir(safe.abs);
+    } else {
+      await rm(safe.abs);
+    }
+    res.json({ ok: true } satisfies FsAck);
+  } catch (err) {
+    res.status(500).json({ ok: false, error: `删除失败：${err instanceof Error ? err.message : String(err)}` } satisfies FsAck);
+  }
 });
 
 export default fsRouter;

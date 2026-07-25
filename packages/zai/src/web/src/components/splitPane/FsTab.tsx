@@ -504,6 +504,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           cwd={cwd}
           position={{ x: contextMenu.x, y: contextMenu.y }}
           onClose={() => setContextMenu(null)}
+          onDeleted={() => { setContextMenu(null); void root.refetch(); }}
         />
       )}
     </div>

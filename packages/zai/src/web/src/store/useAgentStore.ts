@@ -1488,7 +1488,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         return
       }
       case 'runtime.retrying':
-        useAgentStore.getState().setStatus('retrying')
+        useAgentStore.setState((s) => ({
+          status: 'retrying',
+          messages: [
+            ...s.messages,
+            {
+              eventId: event.eventId,
+              sessionId: sid,
+              ts: event.ts,
+              turnIndex: event.turnIndex,
+              type: 'runtime.retrying',
+              attempt: event.attempt,
+              delayMs: event.delayMs,
+              nextAttemptAtMs: event.nextAttemptAtMs,
+              category: event.category,
+            },
+          ],
+        }))
         return
       case 'runtime.done':
         useAgentStore.getState().setStatus('idle')
