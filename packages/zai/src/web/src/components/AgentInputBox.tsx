@@ -41,6 +41,21 @@ const { TextArea } = Input;
 
 const MAX_ATTACHMENTS_PER_TURN = 4;
 
+// crypto.randomUUID() 在 insecure context 下抛异常 (HTTP 非 localhost).
+// LAN 模式下访问 zai 的场景 (192.168.x.x) 走 HTTP, 触发 addAttachments 后整段
+// 会中断 → 缩略图不显示. 这里兜底到时间戳+随机数, 仅用于本地 React key 用,
+// 不参与任何 cryptographic 用途.
+function genLocalId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+  } catch {
+    /* ignore — 某些浏览器在非 secure context 下访问 crypto.randomUUID 会抛 TypeError */
+  }
+  return `att-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
+
 const TITLE_MAX_LEN = 50;
 function deriveLocalTitle(prompt: string): string {
   const firstLine = prompt.trim().split(/\r?\n/, 1)[0].trim();
@@ -307,7 +322,7 @@ export default React.memo(function AgentInputBox() {
   const addAttachments = async (files: File[]) => {
     const accepted = files.slice(0, MAX_ATTACHMENTS_PER_TURN);
     const placeholders: PendingAttachment[] = accepted.map((file) => ({
-      localId: crypto.randomUUID(),
+      localId: genLocalId(),
       mime: file.type,
       size: file.size,
       filename: file.name || "image",

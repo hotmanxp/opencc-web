@@ -6,6 +6,7 @@ import { queryEngine } from '../../src/runtime/queryEngine.js'
 import { makeMockModelCaller } from '../fixtures/MockModelCaller.js'
 import { makeMockSandbox } from '../fixtures/MockSandbox.js'
 import { TranscriptStore } from '../../src/transcript/store.js'
+import { __resetProjectDirCacheForTest } from '../../src/transcript/paths.js'
 import type { PluginRuntime, PluginSnapshot } from '../../src/plugins/types.js'
 import type { HookExecutor } from '../../src/plugins/types.js'
 
@@ -41,8 +42,14 @@ async function collect(g: AsyncGenerator<any>) {
 }
 
 let tmpDir: string
-beforeEach(async () => { tmpDir = await mkdtemp(join(tmpdir(), 'zai-qe-')) })
-afterEach(async () => { await rm(tmpDir, { recursive: true, force: true }) })
+beforeEach(async () => {
+  __resetProjectDirCacheForTest()
+  tmpDir = await mkdtemp(join(tmpdir(), 'zai-qe-'))
+})
+afterEach(async () => {
+  __resetProjectDirCacheForTest()
+  await rm(tmpDir, { recursive: true, force: true })
+})
 
 describe('queryEngine', () => {
   test('无 modelCaller → runtime.error(no modelCaller configured)', async () => {
@@ -264,9 +271,9 @@ describe('queryEngine', () => {
     expect(events.at(-1)?.type).toBe('runtime.done')
     // transcript 中应能找到含 INJECT-BODY-XYZ 的 user message (skill body 已落盘).
     const store = new TranscriptStore(tmpDir)
-    const sessions = await store.list({ cwd: '/test' })
+    const sessions = await store.list({ cwd: '/tmp' })
     expect(sessions.length).toBeGreaterThan(0)
-    const t = await store.read(sessions[0]!.transcriptId, { cwd: '/test' })
+    const t = await store.read(sessions[0]!.transcriptId, { cwd: '/tmp' })
     const allText = JSON.stringify(t.messages)
     expect(allText).toContain('INJECT-BODY-XYZ')
   })
@@ -311,7 +318,7 @@ describe('queryEngine', () => {
         sandbox: makeMockSandbox('/tmp'),
       },
     ))
-    const file = await new TranscriptStore(tmpDir).read(sessionId)
+    const file = await new TranscriptStore(tmpDir).read(sessionId, { cwd: '/tmp' })
     expect(file.version).toBe(2)
 
     // 期望顺序: user → assistant → tool_use → tool_result → assistant(text-only)
@@ -359,12 +366,12 @@ describe('queryEngine', () => {
     ))
     expect(firstEvents.at(-1)?.type).toBe('runtime.done')
 
-    const sessions = await new TranscriptStore(tmpDir).list()
+    const sessions = await new TranscriptStore(tmpDir).list({ cwd: '/tmp' })
     expect(sessions.length).toBe(1)
     const transcriptId = sessions[0]!.transcriptId
 
     // 确认前提: transcript 里 type='tool_use' 是单独一条消息 (这是触发 bug 的形态)
-    const initial = await new TranscriptStore(tmpDir).read(transcriptId)
+    const initial = await new TranscriptStore(tmpDir).read(transcriptId, { cwd: '/tmp' })
     expect(initial.messages.some(m => m.type === 'tool_use')).toBe(true)
 
     // 2. 第二轮 resume, 捕获喂给 modelCaller 的 messages 数组
