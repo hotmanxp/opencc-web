@@ -14,7 +14,7 @@
   ],
   "scripts": {
     "dev": "tsx src/cli/index.ts dev",
-    "build": "tsc -b && npm run build:web",
+    "build": "tsc -b --force && npm run build:web",
     "build:web": "vite build --outDir dist/web",
     "start": "node dist/cli/index.js start",
     "test": "vitest run",
