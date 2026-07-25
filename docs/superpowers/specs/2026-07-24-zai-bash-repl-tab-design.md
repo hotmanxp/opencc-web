@@ -318,3 +318,7 @@ function useBashRepl(sessionId: string | null, defaultCwd: string | null): {
 - 与 `useAppStore.instanceContext.cwdName` 联动更新 status bar
 
 这些列入未来 spec，本轮只交付最小可用 REPL。
+
+> 增量：本 spec 范围外另有 plan `docs/superpowers/plans/2026-07-25-zai-bash-repl-top10.md`，
+> 在 BashTab 上新增"全局聚合命令历史"能力(topN 下拉建议 + 前缀过滤补全)。
+> 不改变本 spec 的契约，仅在 BashTab UI 层增量。

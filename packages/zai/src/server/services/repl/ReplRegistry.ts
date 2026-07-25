@@ -1,4 +1,8 @@
-import { ReplSession } from './ReplSession.js'
+import { ReplSession, type ReplHistoryService } from './ReplSession.js'
+
+export interface ReplSessionOptions {
+  historyService?: ReplHistoryService
+}
 
 export class ReplRegistry {
   private readonly map = new Map<string, ReplSession>()
@@ -6,11 +10,16 @@ export class ReplRegistry {
   /**
    * 懒加载：sessionId 已有则返回旧实例；否则用 defaultCwd 新建。
    * 重复 get 不影响已有 instance 的 cwd — 已存在的 child 仍跑在原 cwd。
+   * opts.historyService 仅在新建时生效,旧实例保留原 historyService。
    */
-  get(sessionId: string, defaultCwd: string): ReplSession {
+  get(
+    sessionId: string,
+    defaultCwd: string,
+    opts: ReplSessionOptions = {},
+  ): ReplSession {
     const existing = this.map.get(sessionId)
     if (existing) return existing
-    const created = new ReplSession(defaultCwd)
+    const created = new ReplSession(defaultCwd, { historyService: opts.historyService })
     this.map.set(sessionId, created)
     return created
   }

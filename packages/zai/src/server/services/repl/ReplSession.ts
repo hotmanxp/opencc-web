@@ -2,6 +2,12 @@ import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
 import type { ReplEvent } from '../../../shared/repl.js'
+import {
+  getReplHistoryService,
+  type ReplHistoryService,
+} from './ReplHistoryService.js'
+
+export type { ReplHistoryService } from './ReplHistoryService.js'
 
 export class ReplBusyError extends Error {
   readonly currentExecId: string
@@ -44,10 +50,16 @@ export class ReplSession extends EventEmitter {
   private currentExecId: string | null = null
   private killTimer: NodeJS.Timeout | null = null
   readonly cwd: string
+  /** 用于写入全局命令历史;测试可注入。默认拿单例。 */
+  private readonly historyService: ReplHistoryService
 
-  constructor(cwd: string) {
+  constructor(
+    cwd: string,
+    opts: { historyService?: ReplHistoryService } = {},
+  ) {
     super()
     this.cwd = cwd
+    this.historyService = opts.historyService ?? getReplHistoryService()
   }
 
   get busy(): boolean {
@@ -57,8 +69,17 @@ export class ReplSession extends EventEmitter {
   /**
    * 启动一次执行。已有 child 在跑时抛 ReplBusyError。
    * 同步 spawn 失败（ENOENT 等）抛 ReplSpawnError。
+   *
+   * spawn 成功后立即 fire-and-forget 写入全局命令历史（详见 plan §3.1 / §3.5）:
+   * - ReplSpawnError 不写历史(命令没跑起来)
+   * - 写入由 sessionId 标识;跨 session 共享同一 JSONL
+   * - appendCommand 失败不抛(只是日志),不能影响 exec 返回
    */
-  async exec(command: string, opts: { cwd?: string } = {}): Promise<{ execId: string; startedAt: number }> {
+  async exec(
+    command: string,
+    sessionId: string,
+    opts: { cwd?: string } = {},
+  ): Promise<{ execId: string; startedAt: number }> {
     if (this.child) {
       throw new ReplBusyError(this.currentExecId ?? 'unknown')
     }
@@ -75,6 +96,16 @@ export class ReplSession extends EventEmitter {
 
     this.child = child
     this.currentExecId = execId
+
+    // fire-and-forget:appendCommand 内部已用 Promise-chain 串行化,失败不抛。
+    // 用 .catch 兜底防 TS 抱怨未处理 promise;真正错误吞掉(不写进用户面)。
+    // append 完成后 invalidateCache — server 端 5min TTL cache 不刷新的话,
+    // 新写入的命令在 cache TTL 期内不会出现在 topN(plan §3.2 风险)。
+    this.historyService.appendCommand(command, sessionId)
+      .then(() => this.historyService.invalidateCache())
+      .catch(() => {
+        /* swallow — appendCommand 失败不影响 exec 返回 */
+      })
 
     child.stdout?.on('data', (chunk: Buffer) => {
       this.emit('event', { kind: 'stdout', execId, chunk: chunk.toString(), ts: Date.now() } satisfies ReplEvent)

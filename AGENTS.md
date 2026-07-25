@@ -77,6 +77,12 @@ web (useBackgroundTasks) ─POST /api/tasks→ DefaultBackgroundRuntime.dispatch
 | `packages/zai-agent-core/src/{skills/index,mcp/MCPClientPool,plugins/{index,HookRunner}}.ts` | `loadSkillsFromDirs` + PendingSkillInjection / MCP 池 + SIGTERM 钩子 / `DefaultPluginRuntime` + 8 个 hook event |
 | `packages/zai-agent-core/src/tools/{BackgroundAgentResultTool,TaskOutputTool}/` | 阻塞读 / 非阻塞拉 task output |
 | `packages/zai/src/shared/events.ts` | zod discriminatedUnion:`runtime.*` / `session.*` / `job.*` / `prompt.ask` / `system.*` 五通道 |
+| `packages/zai/src/shared/repl.ts` | `TopCommandEntry` / `TopCommandsResponse`(全局 topN 历史接口契约) |
+| `packages/zai/src/server/services/repl/{ReplSession,ReplRegistry,ReplHistoryService}.ts` | Bash REPL 单 session 状态机 / 单例 registry / 全局 JSONL 命令历史(append 串行 + 5min TTL cache + 10MB rotate + blocklist) |
+| `packages/zai/src/server/routes/{bashRepl,replHistory}.ts` | `/api/bash/repl/:sid/{exec,events,abort}` + `/api/bash/history/top10?q=&n=` |
+| `packages/zai/src/web/src/lib/{bashReplApi,replHistoryApi}.ts` | exec/abort/SSE client fetch + topN 历史 fetch 包装 |
+| `packages/zai/src/web/src/hooks/useBashRepl.ts` | SSE 连接管理 + `topCommands` state + `refreshTopCommands()`(exec 后自动刷新) |
+| `packages/zai/src/web/src/components/splitPane/BashTab.tsx` | Bash REPL Tab + AntD `AutoComplete` 下拉 top10 建议(本地 prefix 过滤) |
 | `packages/zai/src/web/src/store/useAgentStore.ts` | Zustand store:`applyRuntimeEvent` / `applySessionEvent` / `applyPromptAsk` / `applyJobEvent` / `applySystemEvent` + `upsertToolCall` / `scheduleTaskListClearIfAllDone` 5s 自动清空 |
 | `packages/zai/src/web/src/store/useAppStore.ts` | 全局 UI state:`sidebarCollapsed` / `settingsDrawerOpen` / `settingsTheme` / `outputStyle` / `maxVisibleMessages`(消息最大显示条数,默认 20,超过时 Agent.tsx 折叠早期消息 + 顶部浮按钮一键还原) |
 | `packages/zai/src/web/src/lib/{api,v2TaskApi}.ts` + `hooks/useBackgroundTasks.ts` | 通用 fetch(`api.ts` 默认不带 `X-Zai-Token`)+ v2 task 拉取 + job dock 按 sessionId 切分 |
