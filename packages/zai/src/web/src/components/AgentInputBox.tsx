@@ -5,7 +5,6 @@ import {
   ToolOutlined,
   CompressOutlined,
   ExpandOutlined,
-  BorderOutlined,
   MenuUnfoldOutlined,
   ShareAltOutlined,
 } from "@ant-design/icons";
@@ -23,6 +22,7 @@ import { AttachmentStrip } from "../components/AttachmentStrip";
 import ConversationInfoButton from "../components/ConversationInfoButton";
 import SettingsButton from './SettingsButton'
 import SharePopover from "./SharePopover.js";
+import { toolbarIconButtonStyle, TOOLBAR_ACTIVE_COLOR } from "./toolbarStyles.js";
 import TodoDropdown from "./TodoDropdown.js";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 
@@ -762,8 +762,11 @@ export default React.memo(function AgentInputBox() {
               disabled={!sessionId}
               aria-pressed={shareOpen}
               style={{
-                color: shareOpen ? "#ff6600" : "rgba(255,255,255,0.45)",
-                flexShrink: 0,
+                ...toolbarIconButtonStyle,
+                ...(shareOpen && {
+                  color: TOOLBAR_ACTIVE_COLOR,
+                  borderColor: TOOLBAR_ACTIVE_COLOR,
+                }),
               }}
             />
           </Popover>
@@ -795,7 +798,7 @@ export default React.memo(function AgentInputBox() {
               icon={transcriptCollapsed ? <CompressOutlined /> : <ExpandOutlined />}
               data-testid="transcript-collapse-button"
               onClick={() => setTranscriptCollapsed(!transcriptCollapsed)}
-              style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }}
+              style={toolbarIconButtonStyle}
             />
           </Tooltip>
         )}
@@ -857,7 +860,7 @@ export default React.memo(function AgentInputBox() {
                 setRepairing(false)
               }
             }}
-            style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }}
+            style={toolbarIconButtonStyle}
           />
         </Tooltip>
         <Button
@@ -865,7 +868,7 @@ export default React.memo(function AgentInputBox() {
           onClick={() => fileInputRef.current?.click()}
           title="上传图片"
           disabled={status === "streaming" || pendingAsk?.status === "pending"}
-          style={{ color: "rgba(255,255,255,0.45)", flexShrink: 0 }}
+          style={toolbarIconButtonStyle}
         />
         <ConversationInfoButton />
         {/* 右侧分屏 toggle — 行尾最右侧.
@@ -881,8 +884,11 @@ export default React.memo(function AgentInputBox() {
             aria-pressed={splitPaneOpen}
             onClick={() => setSplitPaneOpen(!splitPaneOpen)}
             style={{
-              color: splitPaneOpen ? "#ff6600" : "rgba(255,255,255,0.45)",
-              flexShrink: 0,
+              ...toolbarIconButtonStyle,
+              ...(splitPaneOpen && {
+                color: TOOLBAR_ACTIVE_COLOR,
+                borderColor: TOOLBAR_ACTIVE_COLOR,
+              }),
             }}
           />
         </Tooltip>
