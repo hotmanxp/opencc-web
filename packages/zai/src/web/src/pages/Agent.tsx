@@ -293,6 +293,7 @@ export default function Agent() {
     <div
       style={{
         flex: 1,
+        maxWidth: "100%",
         minHeight: 0,
         display: "flex",
         flexDirection: "row",
@@ -568,6 +569,8 @@ export default function Agent() {
           display: "flex",
           flexDirection: "column",
           minWidth: 0,
+          maxWidth: "100%",
+          overflowX: "hidden"
         }}
       >
         <div
@@ -579,6 +582,8 @@ export default function Agent() {
             padding: "0 8px",
             marginBottom: 16,
             background: "#000000",
+            maxWidth: "100%",
+            overflowX: "hidden"
           }}
         >
           {messages.length === 0 && (
