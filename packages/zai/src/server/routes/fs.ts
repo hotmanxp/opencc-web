@@ -3,9 +3,8 @@ import { readdir, stat, readFile, rm, rmdir } from 'node:fs/promises';
 import { extname, basename, join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { resolveSafePath } from '../utils/safePath.js';
+import { MAX_FILE_BYTES, writeTextFile } from '../utils/fsWrite.js';
 import type { FsAck, FsEntry, FsFile, FsList, FsSearchEntry, FsSearchResult } from '../../shared/fs.js';
-
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
 const MAX_QUERY_LEN = 64;
 const WALK_TIMEOUT_MS = 200;
 const IGNORED = new Set([
@@ -359,6 +358,75 @@ fsRouter.get('/fs/file', async (req, res) => {
   } catch (err) {
     res.status(500).json({ ok: false, error: `读取失败：${err instanceof Error ? err.message : String(err)}` } satisfies FsFile);
   }
+});
+
+fsRouter.put('/fs/file', async (req, res) => {
+  const { cwd } = ctx(req);
+  const body = req.body ?? {};
+  const rel = typeof body.path === 'string' ? body.path : '';
+  const content = typeof body.content === 'string' ? body.content : null;
+  if (!rel) {
+    res.status(400).json({ ok: false, error: '缺少 path 参数' } satisfies FsFile);
+    return;
+  }
+  if (content === null) {
+    res.status(400).json({ ok: false, error: '缺少 content 字段' } satisfies FsFile);
+    return;
+  }
+  const safe = resolveSafePath(cwd, rel);
+  if (!safe.ok) {
+    const status = safe.error.includes('NUL') ? 400 : 403;
+    res.status(status).json({ ok: false, error: safe.error } satisfies FsFile);
+    return;
+  }
+  // 扩展名白名单:复用 GET /fs/file 的逻辑(只允许 TEXT_EXTS 内的扩展 + dotfile)
+  const ext = extname(safe.abs).toLowerCase();
+  const base = basename(safe.abs);
+  const isDotfile = base.startsWith('.') && base !== '.' && base !== '..';
+  if (!TEXT_EXTS.has(ext) && !isDotfile) {
+    res.status(400).json({ ok: false, error: `不允许写入:扩展名 ${ext || '(无)'} 不在白名单` } satisfies FsFile);
+    return;
+  }
+  const bytes = Buffer.byteLength(content, 'utf8');
+  if (bytes > MAX_FILE_BYTES) {
+    const mb = (bytes / 1024 / 1024).toFixed(2);
+    res.status(413).json({ ok: false, error: `内容过大 (${mb} MB > 2 MB)` } satisfies FsFile);
+    return;
+  }
+  // PUT requires an existing file (like "save", not "save as")
+  let info;
+  try {
+    info = await stat(safe.abs);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      res.status(404).json({ ok: false, error: '文件不存在' } satisfies FsFile);
+      return;
+    }
+    res.status(500).json({ ok: false, error: `stat 失败：${err instanceof Error ? err.message : String(err)}` } satisfies FsFile);
+    return;
+  }
+  if (!info.isFile()) {
+    res.status(400).json({ ok: false, error: '不是文件' } satisfies FsFile);
+    return;
+  }
+  const result = await writeTextFile(safe.abs, content);
+  if (!result.ok) {
+    if (result.code === 'ENOENT') {
+      res.status(404).json({ ok: false, error: result.error } satisfies FsFile);
+      return;
+    }
+    res.status(500).json({ ok: false, error: result.error } satisfies FsFile);
+    return;
+  }
+  res.json({
+    ok: true,
+    kind: 'text',
+    path: safe.abs,
+    name: base,
+    size: result.size,
+    mtime: result.mtime,
+  } satisfies FsFile);
 });
 
 fsRouter.get('/fs/search', async (req, res) => {

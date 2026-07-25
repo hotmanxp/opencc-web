@@ -1,7 +1,7 @@
 import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
-import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
+import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -17,7 +17,7 @@ const execFileMock = execFile as unknown as ReturnType<typeof vi.fn>;
 function makeApp(cwd: string) {
   const app = express();
   app.locals.instanceContext = { cwd, cwdName: 'test' };
-  app.use(express.json());
+  app.use(express.json({ limit: '20mb' }));
   app.use('/api', fsRouter);
   return app;
 }
@@ -171,6 +171,91 @@ describe('routes/fs', () => {
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.content).toMatch(/bun lockfile/);
+  });
+
+  describe('PUT /fs/file', () => {
+    beforeEach(() => {
+      writeFileSync(join(root, 'put-target.ts'), 'old\n');
+    });
+
+    test('writes a text file under cwd', async () => {
+      const res = await request(makeApp(root))
+        .put('/api/fs/file')
+        .send({ path: 'put-target.ts', content: 'new content' });
+      expect(res.status).toBe(200);
+      expect(res.body.ok).toBe(true);
+      expect(res.body.path).toMatch(/put-target\.ts$/);
+      expect(typeof res.body.mtime).toBe('string');
+      expect(res.body.size).toBe(Buffer.byteLength('new content', 'utf8'));
+      expect(readFileSync(join(root, 'put-target.ts'), 'utf8')).toBe('new content');
+    });
+
+    test('returns 400 when path is missing', async () => {
+      const res = await request(makeApp(root))
+        .put('/api/fs/file')
+        .send({ content: 'x' });
+      expect(res.status).toBe(400);
+      expect(res.body.ok).toBe(false);
+    });
+
+    test('returns 400 when extension is not text', async () => {
+      const res = await request(makeApp(root))
+        .put('/api/fs/file')
+        .send({ path: 'image.bin', content: 'x' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/不支持|不允许/);
+      // file must not have been created
+      expect((await import('node:fs')).existsSync(join(root, 'image.bin'))).toBe(true); // pre-existing fixture
+      // content unchanged
+      const buf = readFileSync(join(root, 'image.bin'));
+      expect(buf.equals(Buffer.from([0, 1, 2, 3]))).toBe(true);
+    });
+
+    test('returns 403 when path escapes cwd', async () => {
+      const res = await request(makeApp(root))
+        .put('/api/fs/file')
+        .send({ path: '../../etc/passwd', content: 'x' });
+      expect(res.status).toBe(403);
+      expect(res.body.ok).toBe(false);
+      expect(res.body.error).toMatch(/禁止访问|越界/);
+    });
+
+    test('returns 400 when path contains NUL byte', async () => {
+      const res = await request(makeApp(root))
+        .put('/api/fs/file')
+        .send({ path: 'src/foo\x00../etc/passwd', content: 'x' });
+      expect(res.status).toBe(400);
+      expect(res.body.error).toMatch(/NUL/);
+    });
+
+    test('returns 404 when target file missing', async () => {
+      rmSync(join(root, 'put-target.ts'));
+      const res = await request(makeApp(root))
+        .put('/api/fs/file')
+        .send({ path: 'put-target.ts', content: 'x' });
+      expect(res.status).toBe(404);
+      expect(res.body.ok).toBe(false);
+    });
+
+    test('returns 413 when content exceeds 2MB', async () => {
+      const big = 'x'.repeat(2 * 1024 * 1024 + 1);
+      const res = await request(makeApp(root))
+        .put('/api/fs/file')
+        .send({ path: 'put-target.ts', content: big });
+      expect(res.status).toBe(413);
+      expect(res.body.ok).toBe(false);
+      // file untouched
+      expect(readFileSync(join(root, 'put-target.ts'), 'utf8')).toBe('old\n');
+    });
+
+    test('preserves utf8 multi-byte sequences', async () => {
+      const res = await request(makeApp(root))
+        .put('/api/fs/file')
+        .send({ path: 'put-target.ts', content: '你好\n世界\n' });
+      expect(res.status).toBe(200);
+      expect(readFileSync(join(root, 'put-target.ts'), 'utf8')).toBe('你好\n世界\n');
+      expect(res.body.size).toBe(Buffer.byteLength('你好\n世界\n', 'utf8'));
+    });
   });
 
   describe('POST /fs/reveal', () => {
