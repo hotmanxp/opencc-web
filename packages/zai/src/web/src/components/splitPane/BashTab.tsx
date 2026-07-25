@@ -1,5 +1,5 @@
-import { useEffect, useRef, useState } from 'react'
-import { Input } from 'antd'
+import { useEffect, useMemo, useRef, useState } from 'react'
+import { AutoComplete, Input } from 'antd'
 import { useBashRepl } from '../../hooks/useBashRepl.js'
 import type { ReplEvent } from '../../../shared/repl.js'
 import { AnsiText } from '../toolRenderers/ansi.js'
@@ -49,7 +49,7 @@ function coalesceEvents(events: ReplEvent[]): Row[] {
 }
 
 export function BashTab({ sessionId, cwd }: BashTabProps) {
-  const { events, busy, exec, abort } = useBashRepl(sessionId, cwd)
+  const { events, busy, exec, abort, topCommands } = useBashRepl(sessionId, cwd)
   const [input, setInput] = useState('')
   const outputRef = useRef<HTMLDivElement>(null)
 
@@ -59,12 +59,32 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
     }
   }, [events])
 
-  async function handleSubmit() {
-    const cmd = input.trim()
+  async function handleSubmit(command?: string) {
+    const cmd = (command ?? input).trim()
     if (!cmd || !sessionId) return
     setInput('')
     await exec(cmd)
   }
+
+  // AutoComplete options:把 topCommands 渲染成 { value, label }。
+  // 用本地 state(input)做 prefix 前端过滤 — 避免每次按键都打 server。
+  // plan §3.4 / 风险 5。
+  const autoOptions = useMemo(() => {
+    const prefix = input.trim()
+    const filtered = prefix
+      ? topCommands.filter((e) => e.command.startsWith(prefix))
+      : topCommands
+    return filtered.map((e) => ({
+      value: e.command,
+      // label 显示命令 + 频次,让用户一眼看出高频命令
+      label: (
+        <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
+          <span style={{ fontFamily: 'ui-monospace, monospace' }}>{e.command}</span>
+          <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11 }}>×{e.count}</span>
+        </div>
+      ),
+    }))
+  }, [topCommands, input])
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -150,18 +170,35 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
           borderTop: '1px solid rgba(255,255,255,0.08)',
         }}
       >
-        <Input
-          placeholder="输入 bash 命令，按 Enter 执行（Shift+Enter 换行）"
+        <AutoComplete
+          style={{ flex: 1 }}
+          options={autoOptions}
           value={input}
           disabled={busy}
-          onChange={(e) => setInput(e.target.value)}
-          onPressEnter={(e) => {
-            if (e.shiftKey) return
-            e.preventDefault()
-            void handleSubmit()
+          // 仅聚焦时展开(plan §3.4 / 风险 3)
+          openOnFocus
+          // 输入时实时过滤(本地,不打 server)
+          onSearch={(text) => setInput(text)}
+          // 点选下拉项 → 直接 exec(value),清空 input。
+          // AntD AutoComplete 会同时把 value 写到 input;handleSubmit 这里显式传 value 即可。
+          onSelect={(value) => {
+            void handleSubmit(value)
           }}
-          data-testid="bash-input"
-        />
+          onChange={(value) => setInput(value)}
+          // 自定义 popup 渲染 — 不传 defaultActiveFirstOption,避免 Enter 误选第一条
+          popupMatchSelectWidth={360}
+          data-testid="bash-autocomplete"
+        >
+          <Input
+            placeholder="输入 bash 命令，按 Enter 执行（Shift+Enter 换行）"
+            onPressEnter={(e) => {
+              if (e.shiftKey) return
+              e.preventDefault()
+              void handleSubmit()
+            }}
+            data-testid="bash-input"
+          />
+        </AutoComplete>
         {busy && (
           <button
             type="button"

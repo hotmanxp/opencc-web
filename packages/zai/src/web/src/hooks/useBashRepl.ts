@@ -1,12 +1,22 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
-import type { ReplEvent, ExecRequest, ExecResult } from '../../../shared/repl.js'
+import type {
+  ReplEvent,
+  ExecRequest,
+  ExecResult,
+  TopCommandEntry,
+} from '../../../shared/repl.js'
 import { execRepl, abortRepl, replEventsUrl } from '../lib/bashReplApi.js'
+import { fetchTopCommands } from '../lib/replHistoryApi.js'
 
 export interface UseBashReplResult {
   events: ReplEvent[]
   busy: boolean
   currentExecId: string | null
   connected: boolean
+  /** 全局命令历史 top10(plan §4 Task 4)。 */
+  topCommands: TopCommandEntry[]
+  /** 手动刷新 topCommands(供 BashTab 选中/执行后调用)。 */
+  refreshTopCommands: () => Promise<void>
   exec: (command: string) => Promise<ExecResult>
   abort: () => Promise<void>
   clear: () => void
@@ -20,8 +30,10 @@ export function useBashRepl(
   const [busy, setBusy] = useState(false)
   const [currentExecId, setCurrentExecId] = useState<string | null>(null)
   const [connected, setConnected] = useState(false)
+  const [topCommands, setTopCommands] = useState<TopCommandEntry[]>([])
   const eventsRef = useRef<ReplEvent[]>([])
   const execIdRef = useRef<string | null>(null)
+  const topCommandsRef = useRef<TopCommandEntry[]>([])
 
   // SSE 连接管理 — sessionId 变化关闭旧连接、建新的；events 清空。
   useEffect(() => {
@@ -56,6 +68,39 @@ export function useBashRepl(
     }
   }, [sessionId])
 
+  // 拉全局 top10 — sessionId 建立后跑一次（plan §4 Task 4）。
+  // fire-and-forget:失败静默保留空数组,BashTab 仍然可用。
+  useEffect(() => {
+    if (!sessionId) {
+      setTopCommands([])
+      topCommandsRef.current = []
+      return
+    }
+    let cancelled = false
+    fetchTopCommands()
+      .then((resp) => {
+        if (cancelled) return
+        topCommandsRef.current = resp.entries
+        setTopCommands(resp.entries)
+      })
+      .catch(() => {
+        /* swallow — 拉取失败不影响 hook 正常使用 */
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [sessionId])
+
+  const refreshTopCommands = useCallback(async () => {
+    try {
+      const resp = await fetchTopCommands()
+      topCommandsRef.current = resp.entries
+      setTopCommands(resp.entries)
+    } catch {
+      /* swallow */
+    }
+  }, [])
+
   const exec = useCallback(
     async (command: string): Promise<ExecResult> => {
       if (!sessionId) return { ok: false, busy: true, currentExecId: 'no-session' }
@@ -65,10 +110,13 @@ export function useBashRepl(
         setBusy(true)
         setCurrentExecId(result.execId)
         execIdRef.current = result.execId
+        // 后台异步刷新 topCommands:命令已写入历史(JSONL append 已落盘),
+        // 但 server 5min cache 还没失效,手动触发一次刷新让 UI 立刻反映。
+        void refreshTopCommands()
       }
       return result
     },
-    [sessionId, defaultCwd],
+    [sessionId, defaultCwd, refreshTopCommands],
   )
 
   const abort = useCallback(async () => {
@@ -81,5 +129,15 @@ export function useBashRepl(
     eventsRef.current = []
   }, [])
 
-  return { events, busy, currentExecId, connected, exec, abort, clear }
+  return {
+    events,
+    busy,
+    currentExecId,
+    connected,
+    topCommands,
+    refreshTopCommands,
+    exec,
+    abort,
+    clear,
+  }
 }

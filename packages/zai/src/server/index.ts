@@ -22,6 +22,7 @@ import sessionStateRouter from './routes/sessionState.js';
 import { slashRouter } from './routes/slash.js';
 import bashTasksRouter from './routes/bashTasks.js';
 import bashReplRouter from './routes/bashRepl.js';
+import replHistoryRouter from './routes/replHistory.js';
 import transcriptRouter from './routes/transcript.js';
 import { ensureManifestDir } from './services/manifest.js';
 import { initAgentRuntime, getAskRegistry, getApproveRegistry } from './services/agentRuntime.js';
@@ -109,6 +110,7 @@ export function createApp(opts: AppOptions): express.Express {
   app.use('/api', tasksRouter);
   app.use('/api', bashTasksRouter);
   app.use('/api', bashReplRouter);
+  app.use('/api', replHistoryRouter);
   // V2 TaskList 只读路由 — zai-web 进会话时 GET 一次把 server 端
   // TaskListStore (按 sessionId 隔离, 实际存储 ~/.zai/tasks/<sid>.json)
   // 拉到本地 v2TasksBySession 缓存 (SSE 增量之外的兜底).

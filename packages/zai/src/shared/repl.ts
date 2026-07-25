@@ -22,3 +22,16 @@ export type ExecResponse =
 export type ExecResult =
   | { ok: true; execId: string }
   | { ok: false; busy: true; currentExecId: string }
+
+/**
+ * Top-N 命令历史条目:跨 session 全局聚合,按出现频次倒序。
+ * Spec/Plan: docs/superpowers/plans/2026-07-25-zai-bash-repl-top10.md
+ */
+export interface TopCommandEntry {
+  command: string
+  count: number
+}
+
+export interface TopCommandsResponse {
+  entries: TopCommandEntry[]
+}

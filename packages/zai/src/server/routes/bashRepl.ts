@@ -1,6 +1,7 @@
 import { Router, type IRouter } from 'express'
 import { z } from 'zod'
 import { getReplRegistry } from '../services/repl/ReplRegistry.js'
+import { getReplHistoryService } from '../services/repl/ReplHistoryService.js'
 import { createSseStream } from './stream.js'
 import type { ExecRequest } from '../../shared/repl.js'
 
@@ -17,6 +18,14 @@ function defaultCwd(req: any): string {
   return ctx?.cwd ?? process.cwd()
 }
 
+/**
+ * 解析 historyService:测试可注入 app.locals.replHistoryService;生产用单例。
+ * 与 replHistory.ts 的 resolveService 保持一致。
+ */
+function resolveHistoryService(req: any) {
+  return req.app?.locals?.replHistoryService ?? getReplHistoryService()
+}
+
 router.post('/bash/repl/:sessionId/exec', async (req, res) => {
   const parsed = ExecSchema.safeParse(req.body)
   if (!parsed.success) {
@@ -25,10 +34,12 @@ router.post('/bash/repl/:sessionId/exec', async (req, res) => {
   const { command, cwd } = parsed.data
   const sessionId = req.params.sessionId
   const reg = getReplRegistry()
-  const session = reg.get(sessionId, cwd ?? defaultCwd(req))
+  const session = reg.get(sessionId, cwd ?? defaultCwd(req), {
+    historyService: resolveHistoryService(req),
+  })
 
   try {
-    const { execId, startedAt } = await session.exec(command, cwd ? { cwd } : {})
+    const { execId, startedAt } = await session.exec(command, sessionId, cwd ? { cwd } : {})
     return res.json({ ok: true, execId, startedAt })
   } catch (err: any) {
     if (err?.name === 'ReplBusyError') {
