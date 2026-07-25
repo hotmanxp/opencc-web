@@ -80,7 +80,11 @@ router.get('/tasks/:id/events', async (req: Request, res: Response) => {
   req.on('close', () => ac.abort())
 
   const heartbeat = setInterval(() => {
-    res.write(': heartbeat\n\n')
+    try {
+      res.write(': heartbeat\n\n')
+    } catch {
+      clearInterval(heartbeat)
+    }
   }, HEARTBEAT_MS)
 
   try {

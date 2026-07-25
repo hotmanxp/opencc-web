@@ -82,7 +82,11 @@ router.get('/event', (req: Request, res: Response) => {
 
   // 4. 心跳
   const heartbeat = setInterval(() => {
-    res.write(': heartbeat\n\n')
+    try {
+      res.write(': heartbeat\n\n')
+    } catch {
+      clearInterval(heartbeat)
+    }
   }, HEARTBEAT_MS)
 
   req.on('close', () => {
