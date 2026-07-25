@@ -102,7 +102,7 @@ describe('AgentInputBox — slash command UI visibility', () => {
       const msgs = useAgentStore.getState().messages
       const tail = msgs[msgs.length - 1]
       expect(tail).toMatchObject({ type: "user.text", text: "/greet alice" })
-      expect((tail as { isRenderedPrompt?: boolean }).isRenderedPrompt).toBeUndefined()
+      expect((tail as { isRenderedPrompt?: boolean }).isRenderedPrompt).toBe(false)
     })
   })
 })

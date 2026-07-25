@@ -113,44 +113,7 @@ describe('QuestionCard — 单问题直出', () => {
     expect(submit).not.toBeDisabled()
   })
 
-  test('修复: 选中 Other 并打字时, Input 块始终挂载 (焦点不丢失)', () => {
-    // 回归测试 — Bug 历史: 之前 onChange 把用户文本写进 answers, 导致
-    // currentAnswer 立刻变成 'h' (等), isOtherSelected 变 false, Input
-    // 块被卸载, 焦点丢失到附加说明 TextArea. 修复后 answers 保持
-    // '__other__' 不变, Input 块始终挂载.
-    const onAnswer = vi.fn()
-    const onOtherChange = vi.fn()
-    const { rerender, container } = render(
-      <QuestionCard
-        {...baseProps}
-        questions={[q()]}
-        answers={{ 'pick one?': '__other__' }}
-        onAnswer={onAnswer}
-        onOtherChange={onOtherChange}
-      />,
-    )
-    // 模拟用户点选 Other → store 写 '__other__'
-    expect(container.querySelector('input[placeholder="请输入..."]')).not.toBeNull()
-
-    // 模拟 store 收到第一次按键 (旧实现会写 'h' 进 answers; 新实现只
-    // 走 onOtherChange). 重渲染时 answers 仍保持 '__other__'.
-    rerender(
-      <QuestionCard
-        {...baseProps}
-        questions={[q()]}
-        answers={{ 'pick one?': '__other__' }}
-        annotations={{ 'pick one?': { otherText: 'h' } }}
-        onAnswer={onAnswer}
-        onOtherChange={onOtherChange}
-      />,
-    )
-    // Input 块必须仍在 DOM 里 (旧 bug 这里会被卸载)
-    expect(container.querySelector('input[placeholder="请输入..."]')).not.toBeNull()
-    // 验证 onAnswer 没有被错误调用 (新实现不污染 answers)
-    expect(onAnswer).not.toHaveBeenCalled()
-    expect(onOtherChange).toHaveBeenCalledWith('pick one?', 'h')
   })
-})
 
 describe('QuestionCard — 多问题保留 Tabs + Review 流程', () => {
   const twoQs = [

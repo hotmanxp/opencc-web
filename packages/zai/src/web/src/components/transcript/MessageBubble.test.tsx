@@ -256,9 +256,9 @@ describe("MessageBubble — Skill tool pill", () => {
         }}
       />,
     )
-    expect(
-      screen.getByText("plugin:superpowers:writing-plans"),
-    ).toBeInTheDocument()
+    // 技能名同时出现在 ToolUsePill 与 preview, 用 getAllByText 替代 getByText.
+    const matches = screen.getAllByText("plugin:superpowers:writing-plans")
+    expect(matches.length).toBeGreaterThan(0)
   })
 
   test("Skill tool_use:done pill surfaces the skill name + done status tag", () => {
@@ -277,9 +277,8 @@ describe("MessageBubble — Skill tool pill", () => {
         }}
       />,
     )
-    expect(
-      screen.getByText("plugin:superpowers:systematic-debugging"),
-    ).toBeInTheDocument()
+    const matches = screen.getAllByText("plugin:superpowers:systematic-debugging")
+    expect(matches.length).toBeGreaterThan(0)
     expect(screen.getByText("已完成")).toBeInTheDocument()
   })
 })

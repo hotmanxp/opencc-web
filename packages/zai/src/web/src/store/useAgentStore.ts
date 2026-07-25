@@ -1488,23 +1488,37 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         return
       }
       case 'runtime.retrying':
-        useAgentStore.setState((s) => ({
-          status: 'retrying',
-          messages: [
-            ...s.messages,
-            {
-              eventId: event.eventId,
-              sessionId: sid,
-              ts: event.ts,
-              turnIndex: event.turnIndex,
-              type: 'runtime.retrying',
-              attempt: event.attempt,
-              delayMs: event.delayMs,
-              nextAttemptAtMs: event.nextAttemptAtMs,
-              category: event.category,
-            },
-          ],
-        }))
+        useAgentStore.setState((s) => {
+          // Toast 去重: 同 session 已存在 runtime.retrying 消息时, 用新事件
+          // 替换旧 toast, 而不是再追加一条. 避免每次 retry attempt 都往
+          // messages 里 push 一行导致 transcript 被 toast 刷屏.
+          const lastIdx = [...s.messages].reverse().findIndex(
+            (m) => m.type === 'runtime.retrying' && (m as { sessionId?: string }).sessionId === sid,
+          )
+          const tail: typeof s.messages = lastIdx === -1
+            ? s.messages
+            : [
+                ...s.messages.slice(0, s.messages.length - 1 - lastIdx),
+                ...s.messages.slice(s.messages.length - lastIdx),
+              ]
+          return {
+            status: 'retrying',
+            messages: [
+              ...tail,
+              {
+                eventId: event.eventId,
+                sessionId: sid,
+                ts: event.ts,
+                turnIndex: event.turnIndex,
+                type: 'runtime.retrying',
+                attempt: event.attempt,
+                delayMs: event.delayMs,
+                nextAttemptAtMs: event.nextAttemptAtMs,
+                category: event.category,
+              },
+            ],
+          }
+        })
         return
       case 'runtime.done':
         useAgentStore.getState().setStatus('idle')
