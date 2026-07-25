@@ -16,7 +16,7 @@ const TEXT_EXTS = new Set([
   '.md', '.markdown', '.txt', '.json', '.jsonc', '.json5',
   '.yaml', '.yml', '.toml', '.ini', '.cfg', '.conf',
   '.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs',
-  '.css', '.scss', '.less', '.html', '.htm', '.xml',
+  '.css', '.scss', '.less', '.xml',
   '.sh', '.bash', '.zsh', '.fish', '.ps1', '.bat', '.cmd',
   '.py', '.rb', '.go', '.rs', '.java', '.kt', '.swift', '.c', '.cc', '.cpp', '.h', '.hpp',
   '.sql', '.graphql', '.gql',
@@ -25,8 +25,8 @@ const TEXT_EXTS = new Set([
 
 // Image extensions we know how to MIME-type without sniffing. SVG lives
 // here too — it's XML but also a real image, and the renderer should
-// show it as a picture, not dump the markup. `.html`/`.xml`/`.htm` stay
-// in TEXT_EXTS so they keep their syntax-highlight treatment.
+// show it as a picture, not dump the markup. `.xml` stays in TEXT_EXTS so
+// it keeps its syntax-highlight treatment.
 const IMAGE_EXTS: Record<string, string> = {
   '.png': 'image/png',
   '.jpg': 'image/jpeg',
@@ -38,6 +38,12 @@ const IMAGE_EXTS: Record<string, string> = {
   '.avif': 'image/avif',
   '.svg': 'image/svg+xml',
 };
+
+// HTML extensions: rendered as a base64 data URL with `text/html` mime so
+// the client can drop it straight into a sandboxed <iframe>. Lives
+// outside TEXT_EXTS / IMAGE_EXTS because it needs the `kind: 'html'`
+// discriminator (different render branch, same payload shape as 'image').
+const HTML_EXTS = new Set(['.html', '.htm']);
 
 /**
  * Score a fuzzy filename match (subsequence algorithm).
@@ -274,7 +280,8 @@ fsRouter.get('/fs/file', async (req, res) => {
   const base = basename(safe.abs);
   const isDotfile = base.startsWith('.') && base !== '.' && base !== '..';
   const isImage = Object.prototype.hasOwnProperty.call(IMAGE_EXTS, ext);
-  if (!TEXT_EXTS.has(ext) && !isImage && !isDotfile) {
+  const isHtml = HTML_EXTS.has(ext);
+  if (!TEXT_EXTS.has(ext) && !isImage && !isHtml && !isDotfile) {
     res.status(415).json({ ok: false, error: `不支持的文件类型：${ext || '(无扩展名)'}` } satisfies FsFile);
     return;
   }
@@ -313,6 +320,26 @@ fsRouter.get('/fs/file', async (req, res) => {
         size: info.size,
         mtime: info.mtime.toISOString(),
         mime: IMAGE_EXTS[ext],
+        dataUrl,
+      };
+      res.json(body);
+      return;
+    }
+    if (isHtml) {
+      // HTML preview: serve as a base64 data URL with text/html so the
+      // client can drop it straight into a sandboxed <iframe>. We keep
+      // it as utf8 (not Buffer) so <meta charset> in the document works
+      // correctly without re-decoding latin1 → utf8 on the client.
+      const content = await readFile(safe.abs, 'utf8');
+      const dataUrl = `data:text/html;charset=utf-8;base64,${Buffer.from(content, 'utf8').toString('base64')}`;
+      const body: FsFile = {
+        ok: true,
+        kind: 'html',
+        path: safe.abs,
+        name: basename(safe.abs),
+        size: info.size,
+        mtime: info.mtime.toISOString(),
+        mime: 'text/html',
         dataUrl,
       };
       res.json(body);

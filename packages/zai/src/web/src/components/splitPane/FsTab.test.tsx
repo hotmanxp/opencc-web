@@ -662,3 +662,201 @@ it('clicking a search row invokes setSelected + reuse right-side preview', () =>
   fireEvent.click(screen.getByTestId('fs-search-row'));
   expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
 });
+
+// --- HTML preview (sandboxed iframe) ---
+
+it('renders .html files via a sandboxed iframe (fs-preview-html branch)', () => {
+  // Regression for the .html -> syntax-highlight dump: the server now
+  // returns kind:'html' + a text/html dataUrl, and FsTab mounts a
+  // sandboxed <iframe data-testid="fs-preview-html">. We assert three
+  // security properties:
+  //   1. iframe src is the dataUrl the server handed us
+  //   2. sandbox attribute is exactly "allow-scripts" — no
+  //      allow-same-origin, no allow-forms/-popups/-top-navigation
+  //   3. the preview/source/md/image branches do NOT mount
+  mockList.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [
+        { name: 'index.html', path: 'index.html', type: 'file', size: 64 },
+      ],
+    },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: {
+      ok: true,
+      path: '/repo/index.html',
+      name: 'index.html',
+      size: 64,
+      mtime: '2026-07-21T00:00:00Z',
+      kind: 'html',
+      mime: 'text/html',
+      dataUrl: 'data:text/html;charset=utf-8;base64,PGgxPkhlbGxvPC9oMT4=',
+    },
+    loading: false,
+    error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByText('index.html'));
+  const iframe = screen.getByTestId('fs-preview-html') as HTMLIFrameElement;
+  expect(iframe.tagName).toBe('IFRAME');
+  expect(iframe.getAttribute('src')).toBe(
+    'data:text/html;charset=utf-8;base64,PGgxPkhlbGxvPC9oMT4=',
+  );
+  expect(iframe.getAttribute('sandbox')).toBe('allow-scripts');
+  // Negative branches must not mount.
+  expect(screen.queryByTestId('fs-preview-code')).toBeNull();
+  expect(screen.queryByTestId('fs-preview-text')).toBeNull();
+  expect(screen.queryByTestId('fs-preview-md')).toBeNull();
+  expect(screen.queryByTestId('fs-preview-image')).toBeNull();
+});
+
+it('renders .htm files (alternate suffix) via the same iframe branch', () => {
+  // Same data shape as .html; only the basename differs.
+  mockList.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [
+        { name: 'page.htm', path: 'page.htm', type: 'file', size: 64 },
+      ],
+    },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: {
+      ok: true,
+      path: '/repo/page.htm',
+      name: 'page.htm',
+      size: 64,
+      mtime: '2026-07-21T00:00:00Z',
+      kind: 'html',
+      mime: 'text/html',
+      dataUrl: 'data:text/html;charset=utf-8;base64,PGgxPkhlbGxvPC9oMT4=',
+    },
+    loading: false,
+    error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByText('page.htm'));
+  expect(screen.getByTestId('fs-preview-html')).toBeTruthy();
+});
+
+it('HTML preview shows a preview/source Segmented toggle in the header', () => {
+  // The toggle is gated by `showHtmlToggle` (kind === 'html' + dataUrl),
+  // so it should appear ONLY for HTML files. For other kinds (code, md,
+  // image) the Segmented control must not mount.
+  mockList.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [
+        { name: 'index.html', path: 'index.html', type: 'file', size: 64 },
+      ],
+    },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: {
+      ok: true,
+      path: '/repo/index.html',
+      name: 'index.html',
+      size: 64,
+      mtime: '2026-07-21T00:00:00Z',
+      kind: 'html',
+      mime: 'text/html',
+      dataUrl: 'data:text/html;charset=utf-8;base64,PGgxPkhlbGxvPC9oMT4=',
+    },
+    loading: false,
+    error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByText('index.html'));
+  const seg = screen.getByTestId('fs-html-mode');
+  expect(seg).toBeTruthy();
+  // Two option labels: 预览 / 源码
+  expect(screen.getByText('预览')).toBeTruthy();
+  expect(screen.getByText('源码')).toBeTruthy();
+});
+
+it('HTML preview source toggle decodes base64 back to raw markup', () => {
+  // Default mode is 'preview' (iframe). Clicking the '源码' option
+  // should switch to the source <pre> and the markup must be a faithful
+  // round-trip of the bytes encoded on the server. The test payload
+  // `PGgxPkhlbGxvPC9oMT4=` is base64 for `<h1>Hello</h1>`.
+  mockList.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [
+        { name: 'index.html', path: 'index.html', type: 'file', size: 64 },
+      ],
+    },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: {
+      ok: true,
+      path: '/repo/index.html',
+      name: 'index.html',
+      size: 64,
+      mtime: '2026-07-21T00:00:00Z',
+      kind: 'html',
+      mime: 'text/html',
+      dataUrl: 'data:text/html;charset=utf-8;base64,PGgxPkhlbGxvPC9oMT4=',
+    },
+    loading: false,
+    error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByText('index.html'));
+  // Iframe is mounted in preview mode.
+  expect(screen.getByTestId('fs-preview-html')).toBeTruthy();
+  // Switch to source.
+  fireEvent.click(screen.getByText('源码'));
+  const source = screen.getByTestId('fs-preview-html-source');
+  expect(source).toBeTruthy();
+  expect(source.textContent).toBe('<h1>Hello</h1>');
+  // And the iframe should unmount.
+  expect(screen.queryByTestId('fs-preview-html')).toBeNull();
+});
+
+it('does NOT show HTML preview/source toggle for non-HTML files', () => {
+  // Regression: the Segmented control is gated on `showHtmlToggle`.
+  // For .ts / .md / .png files it must not mount — otherwise the
+  // header would gain a phantom toggle that does nothing for the
+  // active preview.
+  mockList.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [
+        { name: 'foo.ts', path: 'foo.ts', type: 'file', size: 32 },
+      ],
+    },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: {
+      ok: true,
+      path: '/repo/foo.ts',
+      name: 'foo.ts',
+      size: 32,
+      mtime: '',
+      content: 'export const x = 1;',
+    },
+    loading: false,
+    error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByText('foo.ts'));
+  expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
+  expect(screen.queryByTestId('fs-html-mode')).toBeNull();
+});

@@ -28,16 +28,18 @@ export interface FsFile {
   error?: string;
   /** Preview kind. 'text' (default for known text extensions) returns
    *  utf8 `content`. 'image' returns base64 `dataUrl` + `mime` for
-   *  binary image formats; `content` is omitted in that case. */
-  kind?: 'text' | 'image';
+   *  binary image formats. 'html' is like 'image' but mime is text/html
+   *  and the client renders via a sandboxed <iframe> instead of <img>;
+   *  `content` is omitted in the 'image' / 'html' cases. */
+  kind?: 'text' | 'image' | 'html';
   path?: string;
   name?: string;
   size?: number;
   mtime?: string;
   content?: string;
-  /** Image MIME type (only set when kind === 'image'). */
+  /** MIME type (set when kind === 'image' or 'html'). */
   mime?: string;
-  /** Base64 data URL for the image (only set when kind === 'image'). */
+  /** Base64 data URL (set when kind === 'image' or 'html'). */
   dataUrl?: string;
 }
 

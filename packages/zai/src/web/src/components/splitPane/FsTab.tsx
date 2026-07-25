@@ -1,5 +1,5 @@
-import { useEffect, useState } from 'react';
-import { Button, Empty, Input, Spin, Tree } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
+import { Button, Empty, Input, Segmented, Spin, Tree } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { FileIcon, DirIcon } from './fileIcon.js';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -18,6 +18,105 @@ const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
 // We track loaded children in a map keyed by parent path.
 type Entry = { name: string; path: string; type: 'dir' | 'file'; size: number | null };
 type LoadedMap = Record<string, Entry[]>;
+
+// HTML preview view mode. Defaults to 'preview' (the rendered iframe);
+// users can flip to 'source' to read the markup directly. The state is
+// kept in FsTab so it survives selection changes within the same cwd.
+type HtmlMode = 'preview' | 'source';
+
+/**
+ * Render HTML preview inside a sandboxed <iframe>. The server hands us
+ * a base64 data URL with mime `text/html`; we mount it as iframe.src so
+ * scripts / images / links resolve inside the iframe document. The
+ * sandbox attribute is the security boundary — we deliberately do NOT
+ * include `allow-same-origin`, so the iframe is treated as a unique
+ * opaque origin and cannot read cookies / localStorage / parent DOM.
+ *
+ * Source-toggle: when `mode === 'source'` we decode the base64 back to
+ * raw markup and render it in a <pre>, so users can compare markup vs
+ * render. The decoded string is memoized per dataUrl so toggling back
+ * and forth doesn't repeat the work.
+ *
+ * Returns the column-flex wrapper expected by `fs-preview`. The
+ * <iframe> gets `flex: 1` + explicit `min-height: 0` to inherit the
+ * outer container's vertical scroll behavior and stretch to fill.
+ */
+function HtmlPreview({
+  dataUrl,
+  name,
+  mode,
+}: {
+  dataUrl: string;
+  name: string | undefined;
+  mode: HtmlMode;
+}): JSX.Element {
+  // Decode base64 data URL back to raw markup for the source view.
+  // Server writes `data:text/html;charset=utf-8;base64,<payload>`; the
+  // payload is utf8-bytes-encoded via Buffer (latin1 round-trips bytes,
+  // including multi-byte utf8 sequences, correctly back to the original
+  // string when atob() decodes each byte). atob is available in modern
+  // browsers and happy-dom. Failures fall back to the iframe view so
+  // the user always sees *something*.
+  const source = useMemo(() => {
+    if (mode !== 'source') return null;
+    const idx = dataUrl.indexOf('base64,');
+    if (idx < 0) return null;
+    try {
+      return atob(dataUrl.slice(idx + 'base64,'.length));
+    } catch {
+      return null;
+    }
+  }, [dataUrl, mode]);
+
+  if (mode === 'source' && source !== null) {
+    return (
+      <pre
+        data-testid="fs-preview-html-source"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          margin: 0,
+          padding: 12,
+          overflow: 'auto',
+          background: 'rgba(255,255,255,0.04)',
+          color: 'rgba(255,255,255,0.85)',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+          borderRadius: 6,
+          fontFamily: MONO,
+          fontSize: 12,
+          lineHeight: 1.55,
+        }}
+      >
+        {source}
+      </pre>
+    );
+  }
+
+  return (
+    <iframe
+      data-testid="fs-preview-html"
+      src={dataUrl}
+      title={name ?? 'HTML preview'}
+      // SECURITY: see file header. allow-scripts lets the HTML run its
+      // own JS (we want that); allow-same-origin is INTENTIONALLY OMITTED
+      // so the iframe is opaque-origin and can't reach into the parent.
+      // No allow-forms / -popups / -top-navigation — these enable phishing
+      // and tab hijacking without enabling anything users want from a
+      // local HTML preview.
+      sandbox="allow-scripts"
+      referrerPolicy="no-referrer"
+      style={{
+        flex: 1,
+        minHeight: 0,
+        width: '100%',
+        border: 'none',
+        borderRadius: 6,
+        background: '#fff',
+      }}
+    />
+  );
+}
 
 /**
  * Build an absolute path from a session cwd and a tree-relative path,
@@ -50,7 +149,10 @@ export function buildAbsPath(cwd: string | null, relPath: string): string {
  * inner <pre> / SyntaxHighlighter only needs `flex: 1, min-height: 0`
  * to inherit that scroll behavior and grow with the panel height.
  */
-function renderPreview(file: import('../../../../shared/fs.js').FsFile): JSX.Element {
+function renderPreview(
+  file: import('../../../../shared/fs.js').FsFile,
+  htmlMode: HtmlMode,
+): JSX.Element {
   const { name } = file;
   const content = file.content ?? '';
 
@@ -86,6 +188,13 @@ function renderPreview(file: import('../../../../shared/fs.js').FsFile): JSX.Ele
         />
       </div>
     );
+  }
+
+  // HTML kind: server returned kind:'html' + a text/html dataUrl. Hand
+  // off to <HtmlPreview>; that component owns the iframe vs source
+  // toggle (driven by the Segmented control in the header).
+  if (file.kind === 'html' && file.dataUrl) {
+    return <HtmlPreview dataUrl={file.dataUrl} name={name} mode={htmlMode} />;
   }
 
   const containerStyle: React.CSSProperties = {
@@ -159,6 +268,15 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   // (selected/file) is unchanged — search results reuse setSelected().
   const [query, setQuery] = useState<string>('');
   const search = useFsSearch(cwd, query);
+  // HTML preview view mode: 'preview' shows the rendered iframe,
+  // 'source' shows the markup. Driven by a Segmented control rendered
+  // only when the active file is HTML (see below).
+  const [htmlMode, setHtmlMode] = useState<HtmlMode>('preview');
+  // True only when the currently-selected file is an HTML preview.
+  // Used to gate the Segmented control in the header so it doesn't
+  // appear for unrelated file types.
+  const showHtmlToggle =
+    !!file.data && file.data.kind === 'html' && !!file.data.dataUrl;
 
   // Reset on cwd change.
   useEffect(() => {
@@ -269,6 +387,18 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           onChange={(e) => setQuery(e.target.value)}
           style={{ flex: 1 }}
         />
+        {showHtmlToggle && (
+          <Segmented
+            data-testid="fs-html-mode"
+            size="small"
+            value={htmlMode}
+            onChange={(v) => setHtmlMode(v as HtmlMode)}
+            options={[
+              { label: '预览', value: 'preview' },
+              { label: '源码', value: 'source' },
+            ]}
+          />
+        )}
         {refreshBtn}
       </div>
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -360,8 +490,8 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             </div>
           ) : file.error ? (
             <Empty description={file.error} />
-          ) : file.data && (file.data.content !== undefined || file.data.kind === 'image') ? (
-            renderPreview(file.data)
+          ) : file.data && (file.data.content !== undefined || file.data.kind === 'image' || file.data.kind === 'html') ? (
+            renderPreview(file.data, htmlMode)
           ) : (
             <Empty description="没有内容" />
           )}
