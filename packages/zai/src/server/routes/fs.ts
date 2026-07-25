@@ -1,11 +1,13 @@
 import { Router, type IRouter, type Request } from 'express';
 import { readdir, stat, readFile } from 'node:fs/promises';
-import { extname, basename, sep } from 'node:path';
+import { extname, basename, join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { resolveSafePath } from '../utils/safePath.js';
-import type { FsAck, FsEntry, FsFile, FsList } from '../../shared/fs.js';
+import type { FsAck, FsEntry, FsFile, FsList, FsSearchEntry, FsSearchResult } from '../../shared/fs.js';
 
 const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_QUERY_LEN = 64;
+const WALK_TIMEOUT_MS = 200;
 const IGNORED = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', '.cache', '.DS_Store',
 ]);
@@ -36,6 +38,160 @@ const IMAGE_EXTS: Record<string, string> = {
   '.avif': 'image/avif',
   '.svg': 'image/svg+xml',
 };
+
+/**
+ * Score a fuzzy filename match (subsequence algorithm).
+ *
+ * Match: each query character must appear in `path` in order, respecting
+ * `caseSensitive`. Score bonuses reward:
+ *   - contiguous runs (typing the literal substring),
+ *   - boundary alignment (matching at start-of-word after /, -, _, .),
+ *   - case-exact alignment (typed casing matches the casing in path),
+ *   - basename-end alignment (path ends with the literal query).
+ *
+ * Penalties push shallow paths above deep ones and short above long, so
+ * common targets float to the top. Final score may be negative for very
+ * long paths matched weakly; callers should run it through `clampScore`.
+ *
+ * Returns 0 when query is empty or cannot be matched.
+ */
+export function fuzzyMatchScore(
+  query: string,
+  path: string,
+  caseSensitive: boolean,
+): number {
+  if (!query) return 0;
+  const q = caseSensitive ? query : query.toLowerCase();
+  const p = caseSensitive ? path : path.toLowerCase();
+
+  let qi = 0;
+  let runScore = 0;
+  let boundaryScore = 0;
+  let caseScore = 0;
+  for (let pi = 0; pi < p.length && qi < q.length; pi++) {
+    if (p[pi] !== q[qi]) continue;
+    runScore += 5;
+    const prev = pi > 0 ? path[pi - 1] : '';
+    if (pi === 0 || prev === '/' || prev === '-' || prev === '_' || prev === '.') {
+      boundaryScore += 10;
+    }
+    if (path[pi] === query[qi]) {
+      caseScore += 8;
+    }
+    qi++;
+  }
+  if (qi < q.length) return 0;
+
+  const basenameEndScore = path.endsWith(query) ? 6 : 0;
+  const bonuses = runScore + boundaryScore + caseScore + basenameEndScore;
+  const depthPenalty = path.split('/').length * 2;
+  const lengthPenalty = path.length;
+  return bonuses - depthPenalty - lengthPenalty;
+}
+
+/** Clamp a possibly-negative raw score from `fuzzyMatchScore` to non-negative. */
+export function clampScore(s: number): number {
+  return s > 0 ? s : 0;
+}
+
+const MAX_RESULTS = 200;
+
+interface WalkOptions {
+  caseSensitive: boolean;
+  signal: AbortSignal;
+}
+
+interface WalkResult {
+  entries: FsSearchEntry[];
+  truncated: boolean;
+  durationMs: number;
+}
+
+/**
+ * BFS workspace walk that collects fuzzy filename matches.
+ *
+ * Skips the same directories as `/fs/list` (the IGNORED set + hidden dirs
+ * at depth >= 1). Returns up to MAX_RESULTS top-scoring files, sorted by
+ * score desc then path asc. Honors an AbortSignal — when aborted, the
+ * recursion is abandoned and the partial result is returned with
+ * truncated:true.
+ */
+export async function walkForSearch(
+  absRoot: string,
+  query: string,
+  options: WalkOptions,
+): Promise<WalkResult> {
+  const start = Date.now();
+  const collected: Array<{ path: string; name: string; score: number }> = [];
+  let truncated = false;
+
+  const stack: Array<{ relDir: string; depth: number }> = [{ relDir: '', depth: 0 }];
+
+  outer: while (stack.length > 0) {
+    if (options.signal.aborted) {
+      truncated = true;
+      break;
+    }
+    const { relDir, depth } = stack.pop()!;
+    const absDir = relDir ? join(absRoot, relDir) : absRoot;
+
+    let names: string[];
+    try {
+      names = await readdir(absDir);
+    } catch {
+      continue;
+    }
+
+    names.sort();
+
+    for (const name of names) {
+      if (IGNORED.has(name)) continue;
+      if (depth >= 1 && name.startsWith('.')) continue;
+      const childAbs = join(absDir, name);
+      const childRel = relDir ? `${relDir}${sep}${name}` : name;
+
+      let info;
+      try {
+        info = await stat(childAbs);
+      } catch {
+        continue;
+      }
+
+      if (info.isDirectory()) {
+        stack.push({ relDir: childRel, depth: depth + 1 });
+        continue;
+      }
+      if (!info.isFile()) continue;
+
+      const relPath = childRel.split(sep).join('/');
+      const rawScore = fuzzyMatchScore(query, relPath, options.caseSensitive);
+      const score = clampScore(rawScore);
+      if (score <= 0) continue;
+
+      collected.push({ path: relPath, name, score });
+    }
+  }
+
+  collected.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+  });
+
+  let top = collected;
+  if (collected.length > MAX_RESULTS) {
+    top = collected.slice(0, MAX_RESULTS);
+    truncated = true;
+  }
+
+  const entries: FsSearchEntry[] = top.map((c) => ({
+    path: c.path,
+    name: c.name,
+    type: 'file',
+    score: c.score,
+  }));
+
+  return { entries, truncated, durationMs: Date.now() - start };
+}
 
 interface InstanceContextShape { cwd: string; cwdName: string }
 function ctx(req: Request): InstanceContextShape {
@@ -175,6 +331,57 @@ fsRouter.get('/fs/file', async (req, res) => {
     res.json(body);
   } catch (err) {
     res.status(500).json({ ok: false, error: `读取失败：${err instanceof Error ? err.message : String(err)}` } satisfies FsFile);
+  }
+});
+
+fsRouter.get('/fs/search', async (req, res) => {
+  const ctxVal = ctx(req);
+  if (!ctxVal || typeof ctxVal.cwd !== 'string') {
+    res.status(500).json({ ok: false, error: 'instance cwd not configured' } satisfies FsSearchResult);
+    return;
+  }
+  const { cwd } = ctxVal;
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  const caseSensitive = req.query.case === '1';
+
+  if (!q) {
+    res.status(400).json({ ok: false, error: '缺少 q 参数' } satisfies FsSearchResult);
+    return;
+  }
+  if (q.length > MAX_QUERY_LEN) {
+    res.status(400).json({ ok: false, error: `q 太长 (>${MAX_QUERY_LEN})` } satisfies FsSearchResult);
+    return;
+  }
+
+  const safe = resolveSafePath(cwd, '');
+  if (!safe.ok) {
+    res.status(403).json({ ok: false, error: safe.error } satisfies FsSearchResult);
+    return;
+  }
+
+  // Intentional: ignore any dir / start / cwd query params — search
+  // always anchors at the configured cwd.
+
+  const ac = new AbortController();
+  const timer = setTimeout(() => ac.abort(), WALK_TIMEOUT_MS);
+
+  try {
+    const { entries, truncated, durationMs } = await walkForSearch(safe.abs, q, {
+      caseSensitive,
+      signal: ac.signal,
+    });
+    const body: FsSearchResult = {
+      ok: true,
+      entries,
+      truncated: truncated || ac.signal.aborted,
+      durationMs,
+    };
+    res.json(body);
+  } catch (err) {
+    const message = err instanceof Error ? err.message : String(err);
+    res.status(500).json({ ok: false, error: `search 失败: ${message}` } satisfies FsSearchResult);
+  } finally {
+    clearTimeout(timer);
   }
 });
 

@@ -40,9 +40,25 @@ interface AppState {
   connected: boolean;
   jobs: Record<string, JobInfo>;
   toasts: ToastInfo[];
-  instanceContext: { cwd: string; cwdName: string; branch: string | null } | null;
+  // host/port/ips 由后续 LAN-share 阶段注入;字段可选以保证 Layout / 测试
+  // 等已有调用方 (只传 cwd/cwdName/branch) 仍能 typecheck.
+  instanceContext: {
+    cwd: string;
+    cwdName: string;
+    branch: string | null;
+    host?: string;
+    port?: number;
+    ips?: string[];
+  } | null;
   setConnected: (v: boolean) => void;
-  setInstanceContext: (ctx: { cwd: string; cwdName: string; branch: string | null }) => void;
+  setInstanceContext: (ctx: {
+    cwd: string;
+    cwdName: string;
+    branch: string | null;
+    host?: string;
+    port?: number;
+    ips?: string[];
+  }) => void;
   applyJobEvent: (event: ServerEvent) => void;
   applySystemEvent: (event: ServerEvent) => void;
   dismissToast: (id: string) => void;

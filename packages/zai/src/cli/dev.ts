@@ -38,7 +38,10 @@ export async function runDev(options: DevOptions) {
           if (err.code === 'EADDRINUSE') reject(err);
           else reject(err);
         });
-        apiServer!.listen(apiPort, '127.0.0.1', () => resolve());
+        apiServer!.listen(apiPort, '127.0.0.1', () => {
+          process.env.ZAI_PORT = String(apiPort);
+          resolve();
+        });
       });
       break;
     } catch (err: any) {

@@ -40,10 +40,26 @@ export default function Layout() {
 
   useEffect(() => {
     api
-      .get<{ ok: boolean; version: string; cwd: string; cwdName: string; branch: string | null }>('/system')
+      .get<{
+        ok: boolean;
+        version: string;
+        cwd: string;
+        cwdName: string;
+        branch: string | null;
+        host: string;
+        port: number;
+        ips: string[];
+      }>('/system')
       .then((data) => {
         setVersion(data.version);
-        setInstanceContext({ cwd: data.cwd, cwdName: data.cwdName, branch: data.branch ?? null });
+        setInstanceContext({
+          cwd: data.cwd,
+          cwdName: data.cwdName,
+          branch: data.branch ?? null,
+          host: data.host,
+          port: data.port,
+          ips: data.ips ?? [],
+        });
         document.title = `${data.cwdName}-Z.AI`;
       })
       .catch(() => {

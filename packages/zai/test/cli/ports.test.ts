@@ -33,6 +33,14 @@ describe('listen', () => {
     await expect(listen(port)).rejects.toThrow();
     server.close();
   });
+
+  it('binds to specified host (0.0.0.0 for --lan)', async () => {
+    const server = await listen(0, '0.0.0.0');
+    const addr = server.address() as { address: string; port: number };
+    expect(addr.address).toBe('0.0.0.0');
+    expect(addr.port).toBeGreaterThan(0);
+    server.close();
+  });
 });
 
 describe('findAvailablePort', () => {

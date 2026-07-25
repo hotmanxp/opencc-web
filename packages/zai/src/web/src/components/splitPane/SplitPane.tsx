@@ -45,7 +45,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
     resolveInitialWidth(),
   );
   const width = clampWidth(widthStored);
-  const activeSessionId = useAgentStore((s) => s.activeSessionId ?? null)
+  const activeSessionId = useAgentStore((s) => s.sessionId ?? null)
 
   // Responsive: collapse when window is narrow regardless of stored state.
   const [responsiveClosed, setResponsiveClosed] = useState(

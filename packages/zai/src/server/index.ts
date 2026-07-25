@@ -41,7 +41,11 @@ import { noCacheForApi } from './middleware/noCache.js';
 export function createApp(opts: AppOptions): express.Express {
   // Inject read-only instance context so routes can access cwd without process.cwd()
   const app = express();
-  app.locals.instanceContext = { cwd: opts.cwd, cwdName: opts.cwdName };
+  app.locals.instanceContext = {
+    cwd: opts.cwd,
+    cwdName: opts.cwdName,
+    host: opts.host ?? '127.0.0.1',
+  };
 
   // Initialize the agent runtime singleton at boot. Idempotent — safe to call
   // if createApp is invoked multiple times in tests.

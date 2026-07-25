@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Button, Empty, Spin, Tree } from 'antd';
+import { Button, Empty, Input, Spin, Tree } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { FileIcon, DirIcon } from './fileIcon.js';
 import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
@@ -7,6 +7,8 @@ import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
+import { useFsSearch } from './useFsSearch.js';
+import { FsSearchList } from './FsSearchList.js';
 import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
 import { FsContextMenu } from './FsContextMenu.js';
@@ -152,6 +154,11 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const [loaded, setLoaded] = useState<LoadedMap>({});
   const file = useFsFile(cwd, selected);
   const [contextMenu, setContextMenu] = useState<{ path: string; absPath: string; x: number; y: number } | null>(null);
+  // Search-mode toggle. When non-empty after trim, the left pane renders
+  // <FsSearchList> instead of the directory tree. Right-side preview
+  // (selected/file) is unchanged — search results reuse setSelected().
+  const [query, setQuery] = useState<string>('');
+  const search = useFsSearch(cwd, query);
 
   // Reset on cwd change.
   useEffect(() => {
@@ -159,6 +166,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     setExpandedKeys([]);
     setLoaded({});
     setContextMenu(null);
+    setQuery('');
   }, [cwd]);
 
   if (!cwd) {
@@ -240,17 +248,27 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
       <div
+        data-testid="fs-tab-header"
         style={{
           display: 'flex',
-          justifyContent: 'space-between',
           alignItems: 'center',
+          gap: 8,
           padding: '6px 12px',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
         }}
       >
-        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>
-          Files <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.35)' }}>(按需加载)</span>
+        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)', whiteSpace: 'nowrap' }}>
+          Files
         </span>
+        <Input
+          data-testid="fs-search-input"
+          size="small"
+          placeholder="搜索文件…"
+          allowClear
+          value={query}
+          onChange={(e) => setQuery(e.target.value)}
+          style={{ flex: 1 }}
+        />
         {refreshBtn}
       </div>
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
@@ -269,7 +287,16 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             padding: '4px 8px',
           }}
         >
-          {root.error && !root.data?.ok ? (
+          {query.trim().length > 0 ? (
+            <FsSearchList
+              entries={search.data?.entries ?? []}
+              loading={search.loading}
+              error={search.error}
+              truncated={search.data?.truncated ?? false}
+              query={query}
+              onSelect={(p) => setSelected(p)}
+            />
+          ) : root.error && !root.data?.ok ? (
             <Empty description={root.error} />
           ) : root.loading && treeData.length === 0 ? (
             <div style={{ padding: 16, textAlign: 'center' }}>

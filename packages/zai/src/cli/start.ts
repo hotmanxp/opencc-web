@@ -12,6 +12,7 @@ import express from 'express';
 interface StartOptions {
   port?: string;
   open: boolean;
+  lan?: boolean;
 }
 
 export async function runStart(options: StartOptions) {
@@ -22,7 +23,8 @@ export async function runStart(options: StartOptions) {
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const webDir = join(__dirname, '..', 'web');
 
-  const app = createApp({ token, cwd, cwdName });
+  const host = options.lan ? '0.0.0.0' : '127.0.0.1';
+  const app = createApp({ token, cwd, cwdName, host });
   app.use(express.static(webDir));
 
   app.get('*', (_req, res) => {
@@ -56,7 +58,10 @@ export async function runStart(options: StartOptions) {
             reject(err);
           }
         });
-        server!.listen(port, '127.0.0.1', () => resolve());
+        server!.listen(port, host, () => {
+          process.env.ZAI_PORT = String(port);
+          resolve();
+        });
       });
       // Successfully bound
       break;
@@ -73,7 +78,17 @@ export async function runStart(options: StartOptions) {
     }
   }
 
-  console.log(`[zai] Production server on http://localhost:${port}`);
+  if (options.lan) {
+    const { detectLanIps } = await import('../server/utils/lanIps.js');
+    const ips = detectLanIps();
+    console.log(`[zai] Production server on http://localhost:${port}`);
+    console.log(`[zai] LAN mode — listening on 0.0.0.0:${port}`);
+    for (const ip of ips) {
+      console.log(`[zai]   → http://${ip}:${port}`);
+    }
+  } else {
+    console.log(`[zai] Production server on http://localhost:${port}`);
+  }
   if (options.open) {
     spawn('open', [`http://localhost:${port}`], { stdio: 'ignore' });
   }

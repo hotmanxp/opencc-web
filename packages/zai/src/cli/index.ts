@@ -39,6 +39,7 @@ program
   .description('Production mode (static SPA + API)')
   .option('--port <port>', 'Express port (default: 9888, auto-scan if occupied)')
   .option('--no-open', 'Do not auto-open browser')
+  .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
   .action(runStart);
 
 // 全局安装 `zai` 后的默认行为：当作 `zai start` 启动服务，

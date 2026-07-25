@@ -1,6 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect } from 'vitest'
 import { bashRenderer } from '../../../src/web/src/components/toolRenderers/bash.js'
+import { renderToString } from 'react-dom/server'
 import React from 'react'
 
 describe('bashRenderer', () => {
@@ -44,5 +45,17 @@ describe('bashRenderer', () => {
       false,
     )
     expect(React.isValidElement(node)).toBe(true)
+  })
+  it('renderOutput strips ANSI escapes from rendered output', () => {
+    const node = bashRenderer.renderOutput?.(
+      '<stdout>\x1b[31mred\x1b[0m text</stdout>',
+      false,
+    )
+    const html = renderToString(node as any)
+    expect(html).not.toContain('\x1b')
+    expect(html).toContain('red')
+    expect(html).toContain(' text')
+    // Color span should be present (AnsiText applied the SGR code)
+    expect(html).toMatch(/<span[^>]*color:/)
   })
 })

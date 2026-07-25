@@ -64,8 +64,8 @@ body {
 .ant-tabs-tab-active .ant-tabs-tab-btn { color: var(--accent-start) !important; }
 .ant-tabs-ink-bar { background: linear-gradient(90deg, var(--accent-start), var(--accent-end)) !important; }
 
-.ant-input { background: var(--bg-input) !important; border: 1px solid var(--border-subtle) !important; color: var(--text-primary) !important; border-radius: 8px !important; }
-.ant-input:focus { border-color: var(--accent-start) !important; box-shadow: 0 0 0 2px rgba(255,102,0,0.2) !important; }
+/* .ant-input { background: var(--bg-input) !important; border: 1px solid var(--border-subtle) !important; color: var(--text-primary) !important; border-radius: 8px !important; } */
+/* .ant-input:focus { border-color: var(--accent-start) !important; box-shadow: 0 0 0 2px rgba(255,102,0,0.2) !important; } */
 
 .ant-btn-primary { background: linear-gradient(135deg, var(--accent-start), var(--accent-end)) !important; border: none !important; border-radius: 8px !important; }
 .ant-btn-primary:hover { opacity: 0.9; box-shadow: 0 4px 20px var(--glow); }

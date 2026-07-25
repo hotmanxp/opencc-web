@@ -285,12 +285,16 @@ export const BashTool: LegacyTool<typeof BashInputSchema, string> = {
       ? cfg.workdir
       : (cwdFromStore ?? ctx.cwd) || process.cwd()
     const effectiveEnv = useSandbox ? pickEnv(process.env, cfg.envAllowlist) : process.env
+    // 子进程经 pipe 运行、没有 TTY, chalk / supports-color 默认判定"无色"而抑制 ANSI。
+    // 强制 16 色, 让 UI 的 ANSI 解析器有内容可渲染 —— 与真实终端一致。用 level 1 (16 色)
+    // 而非 2/3, 避免产生 256/真彩色码 (解析器只精确支持 16 色)。新建对象, 不污染 process.env。
+    const spawnEnv: NodeJS.ProcessEnv = { ...effectiveEnv, FORCE_COLOR: '1' }
 
-    if (input.run_in_background) return runInBackground(input, effectiveWorkdir, effectiveEnv, ctx)
+    if (input.run_in_background) return runInBackground(input, effectiveWorkdir, spawnEnv, ctx)
 
     const timeoutMs = input.timeout ?? cfg.maxCpuMs ?? 600_000
 
-    return runForeground(input, effectiveWorkdir, effectiveEnv, timeoutMs, ctx)
+    return runForeground(input, effectiveWorkdir, spawnEnv, timeoutMs, ctx)
   },
 }
 

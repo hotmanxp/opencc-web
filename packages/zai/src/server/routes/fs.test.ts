@@ -1,4 +1,4 @@
-import { afterAll, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
+import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi } from 'vitest';
 import express from 'express';
 import request from 'supertest';
 import { mkdtempSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
@@ -279,4 +279,68 @@ describe('routes/fs', () => {
       expect(res.body.error).toMatch(/NUL/);
     });
   });
+});
+describe('GET /api/fs/search', () => {
+  let root: string;
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'zai-fs-search-http-'));
+    mkdirSync(join(root, 'src'));
+    writeFileSync(join(root, 'README.md'), 'r\n');
+    writeFileSync(join(root, 'src', 'foo.ts'), 'foo\n');
+    mkdirSync(join(root, 'node_modules'));
+    writeFileSync(join(root, 'node_modules', 'foo.js'), 'x\n');
+  });
+  beforeEach(() => {
+    if (typeof execFileMock.mockClear === 'function') execFileMock.mockClear();
+  });
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('returns 200 with matches for valid query', async () => {
+    const res = await request(makeApp(root)).get('/api/fs/search').query({ q: 'foo' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(Array.isArray(res.body.entries)).toBe(true);
+    expect(res.body.entries.find((e: { path: string }) => e.path === 'src/foo.ts')).toBeTruthy();
+    expect(res.body.entries.find((e: { path: string }) => e.path.includes('node_modules'))).toBeFalsy();
+    expect(typeof res.body.durationMs).toBe('number');
+  });
+
+  test('returns 400 when q is missing', async () => {
+    const res = await request(makeApp(root)).get('/api/fs/search');
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+    expect(res.body.error).toMatch(/q/);
+  });
+
+  test('returns 400 when q is empty', async () => {
+    const res = await request(makeApp(root)).get('/api/fs/search').query({ q: '' });
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+  });
+
+  test('returns 400 when q exceeds MAX_QUERY_LEN', async () => {
+    const long = 'a'.repeat(65);
+    const res = await request(makeApp(root)).get('/api/fs/search').query({ q: long });
+    expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+  });
+
+  test('case=1 toggles case sensitivity', async () => {
+    writeFileSync(join(root, 'src', 'FOO.ts'), 'x\n');
+    const insensitive = await request(makeApp(root)).get('/api/fs/search').query({ q: 'foo' });
+    const sensitive = await request(makeApp(root)).get('/api/fs/search').query({ q: 'foo', case: '1' });
+    // insensitive: src/foo.ts (case-match) + src/FOO.ts (subseq insensitive)
+    expect(insensitive.body.entries.length).toBeGreaterThanOrEqual(1);
+    // sensitive case=1: only 'foo' literal — only src/foo.ts matches
+    expect(sensitive.body.entries.length).toBe(1);
+  });
+
+  test('returns 500 when cwd missing (instance context missing)', async () => {
+    const app = express();
+    app.use('/api', fsRouter);
+    const res = await request(app).get('/api/fs/search').query({ q: 'foo' });
+    expect(res.status).toBe(500);
+  }, 10000);
 });

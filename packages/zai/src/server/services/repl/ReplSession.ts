@@ -33,6 +33,9 @@ function filterEnv(): NodeJS.ProcessEnv {
   for (const [k, v] of Object.entries(process.env)) {
     if (ENV_ALLOWLIST.has(k)) env[k] = v
   }
+  // 子进程经 pipe 运行、没有 TTY, chalk / supports-color 默认会判定"无色"而抑制
+  // ANSI 转义码。强制开启 16 色, 让前端 ANSI 解析器有内容可渲染 —— 与真实终端一致。
+  env.FORCE_COLOR = '1'
   return env
 }
 

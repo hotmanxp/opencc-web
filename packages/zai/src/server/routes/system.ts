@@ -61,9 +61,23 @@ export function stopBranchChecker() {
 router.get('/system', async (req, res) => {
   try {
     const info = await getSystemInfo();
-    const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string };
+    const ctx = req.app.locals.instanceContext as {
+      cwd: string;
+      cwdName: string;
+      host: string;
+    };
     const branch = await getGitBranch(ctx.cwd);
-    res.json({ ...info, cwd: ctx.cwd, cwdName: ctx.cwdName, branch });
+    const { detectLanIps } = await import('../utils/lanIps.js');
+    const ips = detectLanIps();
+    res.json({
+      ...info,
+      cwd: ctx.cwd,
+      cwdName: ctx.cwdName,
+      branch,
+      host: ctx.host,
+      port: Number(process.env.ZAI_PORT ?? '') || 0,
+      ips,
+    });
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }

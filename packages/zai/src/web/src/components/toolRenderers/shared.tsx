@@ -1,6 +1,7 @@
 import React from "react"
 import { Typography } from "antd"
 import { STYLE } from "./styles.js"
+import { AnsiText } from "./ansi.js"
 
 const { Text } = Typography
 
@@ -37,9 +38,11 @@ export function FieldLabel({ children }: { children: React.ReactNode }) {
 export function PreBlock({
   children,
   variant = "muted",
+  ansi = false,
 }: {
   children: React.ReactNode
   variant?: "muted" | "success" | "error" | "warn"
+  ansi?: boolean
 }) {
   const variantStyle =
     variant === "success"
@@ -49,7 +52,13 @@ export function PreBlock({
         : variant === "warn"
           ? STYLE.preWarn
           : STYLE.preMuted
-  return <pre style={{ ...STYLE.preBase, ...variantStyle }}>{children}</pre>
+  const content =
+    ansi && typeof children === "string" ? (
+      <AnsiText text={children} />
+    ) : (
+      children
+    )
+  return <pre style={{ ...STYLE.preBase, ...variantStyle }}>{content}</pre>
 }
 
 export function DetailsSection({

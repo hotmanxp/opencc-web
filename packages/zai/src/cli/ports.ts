@@ -9,11 +9,11 @@ export function parsePort(value: string, field: string): number {
   return n;
 }
 
-export function listen(port: number): Promise<Server> {
+export function listen(port: number, host = '127.0.0.1'): Promise<Server> {
   return new Promise((resolve, reject) => {
     const server = createServer();
     server.once('error', reject);
-    server.listen(port, '127.0.0.1', () => {
+    server.listen(port, host, () => {
       server.removeListener('error', reject);
       resolve(server);
     });

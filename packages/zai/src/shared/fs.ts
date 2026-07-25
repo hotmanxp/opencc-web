@@ -40,3 +40,28 @@ export interface FsFile {
   /** Base64 data URL for the image (only set when kind === 'image'). */
   dataUrl?: string;
 }
+
+/**
+ * Result of a filename-only fuzzy search.
+ * Returned by /api/fs/search and consumed by useFsSearch → FsSearchList.
+ */
+export interface FsSearchEntry {
+  /** Path relative to cwd, joined with forward slashes (POSIX style). */
+  path: string;
+  /** Basename of the file — used for UI rendering and <mark> highlight alignment. */
+  name: string;
+  /** Search only ever returns files (not directories). */
+  type: 'file';
+  /** Fuzzy match score (>= 0). Higher = better. Useful for debugging + tests. */
+  score: number;
+}
+
+export interface FsSearchResult {
+  ok: boolean;
+  error?: string;
+  entries?: FsSearchEntry[];
+  /** True when hit count exceeded MAX_RESULTS or scan timed out. */
+  truncated?: boolean;
+  /** Elapsed ms since walk started (server-side). For client telemetry. */
+  durationMs?: number;
+}

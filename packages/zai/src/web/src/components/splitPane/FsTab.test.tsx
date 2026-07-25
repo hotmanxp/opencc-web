@@ -4,6 +4,7 @@ import { render, screen, fireEvent } from '@testing-library/react';
 
 vi.mock('./useFsList.js', () => ({ useFsList: vi.fn() }));
 vi.mock('./useFsFile.js', () => ({ useFsFile: vi.fn() }));
+vi.mock('./useFsSearch.js', () => ({ useFsSearch: vi.fn() }));
 vi.mock('./FsContextMenu.js', () => ({
   FsContextMenu: vi.fn(({ path, onClose }) => (
     <div data-testid="ctx-menu-stub" data-path={path}>
@@ -14,12 +15,18 @@ vi.mock('./FsContextMenu.js', () => ({
 
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
+import { useFsSearch } from './useFsSearch.js';
 import { FsTab, buildAbsPath } from './FsTab.js';
 
 const mockList = useFsList as unknown as ReturnType<typeof vi.fn>;
 const mockFile = useFsFile as unknown as ReturnType<typeof vi.fn>;
+const mockSearch = useFsSearch as unknown as ReturnType<typeof vi.fn>;
 
 describe('FsTab', () => {
+  beforeEach(() => {
+    mockSearch.mockReturnValue({ data: null, loading: false, error: null, durationMs: null });
+  });
+
   it('renders empty state when cwd is null', () => {
     mockList.mockReturnValue({ data: null, loading: false, error: null, refetch: vi.fn() });
     mockFile.mockReturnValue({ data: null, loading: false, error: null });
@@ -82,7 +89,9 @@ describe('FsTab', () => {
     render(<FsTab cwd="/repo" />);
     expect(screen.getByText('packages')).toBeTruthy();
     expect(screen.queryByText(/深度 ≤/)).toBeNull();
-    expect(screen.getByText(/按需加载/)).toBeTruthy();
+    // Header now uses an interactive search <Input> instead of the old
+    // "(按需加载)" tagline; verify it landed.
+    expect(screen.getByTestId('fs-search-input')).toBeTruthy();
   });
 
   it('does not inject a placeholder child for unloaded directories', () => {
@@ -563,4 +572,93 @@ describe('FsTab', () => {
     // has something sensible to put on the clipboard.
     expect(buildAbsPath(null, 'src/index.ts')).toBe('src/index.ts');
   });
+});
+// --- Task 7: search integration ---
+
+it('renders the search input when cwd is set', () => {
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [] },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  render(<FsTab cwd="/repo" />);
+  expect(screen.getByTestId('fs-search-input')).toBeTruthy();
+});
+
+it('renders the directory tree when query is empty (search list not shown)', () => {
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [{ name: 'src', path: 'src', type: 'dir', size: null }] },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  render(<FsTab cwd="/repo" />);
+  expect(screen.getByText('src')).toBeTruthy();
+  expect(screen.queryByTestId('fs-search-list')).toBeNull();
+});
+
+it('renders the search list when query is non-empty (mocked useFsSearch result)', () => {
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [] },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  mockSearch.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [{ path: 'src/foo.ts', name: 'foo.ts', type: 'file', score: 50 }],
+      truncated: false,
+      durationMs: 12,
+    },
+    loading: false,
+    error: null,
+    durationMs: 12,
+  });
+  render(<FsTab cwd="/repo" />);
+  const input = screen.getByTestId('fs-search-input') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: 'foo' } });
+  expect(screen.getByTestId('fs-search-list')).toBeTruthy();
+  expect(screen.getByTestId('fs-search-row')).toBeTruthy();
+});
+
+it('clicking a search row invokes setSelected + reuse right-side preview', () => {
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [] },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: {
+      ok: true,
+      path: '/repo/src/foo.ts',
+      name: 'foo.ts',
+      size: 42,
+      mtime: '',
+      content: 'export const x = 1;',
+    },
+    loading: false,
+    error: null,
+  });
+  mockSearch.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [{ path: 'src/foo.ts', name: 'foo.ts', type: 'file', score: 50 }],
+      truncated: false,
+      durationMs: 12,
+    },
+    loading: false,
+    error: null,
+    durationMs: 12,
+  });
+  render(<FsTab cwd="/repo" />);
+  const input = screen.getByTestId('fs-search-input') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: 'foo' } });
+  fireEvent.click(screen.getByTestId('fs-search-row'));
+  expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
 });

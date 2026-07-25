@@ -35,10 +35,10 @@ export const bashRenderer: ToolRenderer = {
     return (
       <>
         {stdout && (
-          <PreBlock variant="success">{linkifyText(stdout)}</PreBlock>
+          <PreBlock variant="success" ansi>{stdout}</PreBlock>
         )}
-        {stderr && <PreBlock variant="warn">{linkifyText(stderr)}</PreBlock>}
-        {plain && <PreBlock>{linkifyText(plain)}</PreBlock>}
+        {stderr && <PreBlock variant="warn" ansi>{stderr}</PreBlock>}
+        {plain && <PreBlock ansi>{plain}</PreBlock>}
       </>
     )
   },

@@ -2,21 +2,50 @@ import { useEffect, useRef, useState } from 'react'
 import { Input } from 'antd'
 import { useBashRepl } from '../../hooks/useBashRepl.js'
 import type { ReplEvent } from '../../../shared/repl.js'
+import { AnsiText } from '../toolRenderers/ansi.js'
 
 interface BashTabProps {
   sessionId: string | null
   cwd: string | null
 }
 
-function fmtExitColor(ev: Extract<ReplEvent, { kind: 'exit' }>): string {
+type ExitLike = { code: number | null; signal: string | null }
+
+function fmtExitColor(ev: ExitLike): string {
   if (ev.signal) return 'rgba(255,255,255,0.45)'
   if (ev.code === 0) return '#52c41a'
   return '#f59e0b'
 }
 
-function fmtExitLabel(ev: Extract<ReplEvent, { kind: 'exit' }>): string {
+function fmtExitLabel(ev: ExitLike): string {
   if (ev.signal) return `── ${ev.signal} ──`
   return `── exit ${ev.code} ──`
+}
+
+// 渲染行：把同一 execId 同 kind(stdout/stderr) 的相邻 SSE chunk 合并成一行,
+// 避免 ANSI 转义序列被切到两个 chunk 中间导致解析错乱 / 跨 chunk 颜色丢失。
+type Row =
+  | { kind: 'stream'; streamKind: 'stdout' | 'stderr'; execId: string; text: string }
+  | { kind: 'error'; execId: string; message: string }
+  | { kind: 'exit'; execId: string; code: number | null; signal: string | null }
+
+function coalesceEvents(events: ReplEvent[]): Row[] {
+  const rows: Row[] = []
+  for (const ev of events) {
+    if (ev.kind === 'stdout' || ev.kind === 'stderr') {
+      const last = rows[rows.length - 1]
+      if (last && last.kind === 'stream' && last.execId === ev.execId && last.streamKind === ev.kind) {
+        last.text += ev.chunk
+      } else {
+        rows.push({ kind: 'stream', streamKind: ev.kind, execId: ev.execId, text: ev.chunk })
+      }
+    } else if (ev.kind === 'error') {
+      rows.push({ kind: 'error', execId: ev.execId, message: ev.message })
+    } else if (ev.kind === 'exit') {
+      rows.push({ kind: 'exit', execId: ev.execId, code: ev.code, signal: ev.signal })
+    }
+  }
+  return rows
 }
 
 export function BashTab({ sessionId, cwd }: BashTabProps) {
@@ -65,6 +94,8 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
           flex: 1,
           minHeight: 0,
           overflow: 'auto',
+          overflowY: 'auto',
+          maxHeight: 'calc(100vh - 150px)',
           padding: 12,
           fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
           fontSize: 12,
@@ -78,32 +109,32 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
             在下方输入 bash 命令，按 Enter 执行
           </div>
         )}
-        {events.map((ev, i) => {
-          if (ev.kind === 'stdout') {
+        {coalesceEvents(events).map((row, i) => {
+          if (row.kind === 'stream') {
+            // stderr 行：未着色的纯文本继承红色；AnsiText 渲染的带色 span 用内联样式覆盖。
             return (
-              <div key={`${ev.execId}-${i}`} style={{ whiteSpace: 'pre-wrap' }}>
-                {ev.chunk}
+              <div
+                key={`${row.execId}-${row.streamKind}-${i}`}
+                style={{
+                  whiteSpace: 'pre-wrap',
+                  ...(row.streamKind === 'stderr' ? { color: '#ef4444' } : null),
+                }}
+              >
+                <AnsiText text={row.text} />
               </div>
             )
           }
-          if (ev.kind === 'stderr') {
+          if (row.kind === 'error') {
             return (
-              <div key={`${ev.execId}-${i}`} style={{ whiteSpace: 'pre-wrap', color: '#ef4444' }}>
-                {ev.chunk}
+              <div key={`${row.execId}-err-${i}`} style={{ color: '#ef4444', fontWeight: 600 }}>
+                ✗ {row.message}
               </div>
             )
           }
-          if (ev.kind === 'error') {
+          if (row.kind === 'exit') {
             return (
-              <div key={`${ev.execId}-${i}`} style={{ color: '#ef4444', fontWeight: 600 }}>
-                ✗ {ev.message}
-              </div>
-            )
-          }
-          if (ev.kind === 'exit') {
-            return (
-              <div key={`${ev.execId}-${i}`} style={{ color: fmtExitColor(ev) }}>
-                {fmtExitLabel(ev)}
+              <div key={`${row.execId}-exit-${i}`} style={{ color: fmtExitColor(row) }}>
+                {fmtExitLabel(row)}
               </div>
             )
           }

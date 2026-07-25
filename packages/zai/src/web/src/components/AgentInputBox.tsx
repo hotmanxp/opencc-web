@@ -7,6 +7,7 @@ import {
   ExpandOutlined,
   BorderOutlined,
   MenuUnfoldOutlined,
+  ShareAltOutlined,
 } from "@ant-design/icons";
 import {
   STORAGE_KEYS,
@@ -21,6 +22,7 @@ import { api } from "../lib/api";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import ConversationInfoButton from "../components/ConversationInfoButton";
 import SettingsButton from './SettingsButton'
+import SharePopover from "./SharePopover.js";
 import TodoDropdown from "./TodoDropdown.js";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 
@@ -102,6 +104,7 @@ export default React.memo(function AgentInputBox() {
 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
+  const [shareOpen, setShareOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const prevStatusRef = useRef<typeof status>("idle");
@@ -715,10 +718,41 @@ export default React.memo(function AgentInputBox() {
             minWidth:0 关键 — 不加时 flex item 默认 min-width:auto (= content 尺寸),
             在窄屏下 spacer 会反向挤压任务摘要到 0 宽, 表现为"被遮挡". */}
         <span style={{ flex: 1, minWidth: 0 }} />
-        {/* settings 按钮(首期 UI 原型入口,点击弹出 SettingsDrawer).
-            位置:右端工具栏第一项,在 CompressOutlined 之前 — 与原 4 个图标
-            共用同一行 flex 容器,颜色一致 (rgba(255,255,255,0.45)).
-            替代原 opencc 上游 [⚙] 内嵌快捷键;阶段 2 再加 dropdown 双层结构. */}
+        {/* Share 按钮: 分享当前 session 到 LAN.
+            - 位置: spacer 后最右, 作为工具栏右端第一入口 (演示场景核心操作).
+            - disabled: 无 sessionId 时 disabled (分享空 session 无意义).
+            - Popover: 受控 open={shareOpen}, 内部渲染 SharePopover.
+            - 图标色与同行其他按钮一致 (rgba(255,255,255,0.45)).
+            详见 docs/superpowers/specs/2026-07-25-zai-agent-share-design.md §4.6 */}
+        <Tooltip
+          title={
+            sessionId
+              ? "分享到 LAN — 点开后选择 IP 复制链接发给同事"
+              : "先开一个会话再分享"
+          }
+          placement="top"
+        >
+          <Popover
+            open={shareOpen}
+            onOpenChange={(v) => setShareOpen(v)}
+            trigger="click"
+            placement="topRight"
+            arrow={false}
+            destroyTooltipOnHide
+            content={<SharePopover />}
+          >
+            <Button
+              icon={<ShareAltOutlined />}
+              data-testid="share-button"
+              disabled={!sessionId}
+              aria-pressed={shareOpen}
+              style={{
+                color: shareOpen ? "#ff6600" : "rgba(255,255,255,0.45)",
+                flexShrink: 0,
+              }}
+            />
+          </Popover>
+        </Tooltip>
         <SettingsButton />
         {/* 折叠/展开 transcript 按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
             图标在 collapsed=false 时显示 ExpandOutlined (可折叠), true 时显示

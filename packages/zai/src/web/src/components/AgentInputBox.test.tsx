@@ -3,6 +3,7 @@ import { describe, expect, test, beforeEach, beforeAll, vi } from "vitest";
 import "@testing-library/jest-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useAgentStore, type TodoItem, type V2TaskItem } from "../store/useAgentStore.js";
+import { useAppStore } from "../store/useAppStore.js";
 import { api } from "../lib/api.js";
 
 const todo = (content: string, status: TodoItem["status"]): TodoItem => ({
@@ -274,4 +275,38 @@ describe('AgentInputBox — transcript lock (分屏开启时不渲染折叠按�
     expect(useAgentStore.getState().transcriptCollapsed).toBe(true)
     expect(screen.queryByTestId('transcript-collapse-button')).toBeNull()
   })
+})
+
+describe('AgentInputBox — share button', () => {
+  beforeEach(() => {
+    useAppStore.setState({
+      instanceContext: {
+        cwd: '/tmp',
+        cwdName: 'tmp',
+        branch: null,
+        host: '0.0.0.0',
+        port: 9888,
+        ips: ['192.168.1.5'],
+      },
+    });
+  });
+
+  test('share button renders', () => {
+    render(<AgentInputBox />);
+    expect(screen.getByTestId('share-button')).toBeInTheDocument();
+  });
+
+  test('share button disabled when no sessionId', () => {
+    useAgentStore.setState({ sessionId: null });
+    render(<AgentInputBox />);
+    expect(screen.getByTestId('share-button')).toBeDisabled();
+  });
+
+  test('clicking share button opens popover with IP list', async () => {
+    render(<AgentInputBox />);
+    fireEvent.click(screen.getByTestId('share-button'));
+    await waitFor(() => {
+      expect(screen.getByText(/192.168.1.5/)).toBeInTheDocument();
+    });
+  });
 })
