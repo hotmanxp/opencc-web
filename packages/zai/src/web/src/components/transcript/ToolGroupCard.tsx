@@ -51,7 +51,15 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
         borderLeft: '3px solid #722ed1',
         borderRadius: 12,
       }}
-      styles={{ body: { padding: 12 } }}
+      styles={{
+        // 头部背景用你取的紫色 (#602272 + 透明). 之前我用了纯 #602272
+        // 没带 alpha,在深色卡片体上显得太亮; 改成 #60227233 (alpha=0x33≈20%)
+        // 让深色透过来, 与"半透明紫底"卡片体形成同一色系深浅层次.
+        // ⚠ AntD Card styles 槽位叫 header 不是 head (semantic-dom 命名),
+        // 用 head 会被静默忽略.
+        header: { background: '#60227233' },
+        body: { padding: 12 },
+      }}
       title={
         <span style={{ fontSize: 13 }}>
           {titleText}
