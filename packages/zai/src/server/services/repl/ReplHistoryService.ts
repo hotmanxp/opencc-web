@@ -1,4 +1,5 @@
 import { appendFile, mkdir, readFile, rename, stat } from 'node:fs/promises'
+import { homedir } from 'node:os'
 import { dirname } from 'node:path'
 import type { TopCommandEntry } from '../../../shared/repl.js'
 
@@ -159,8 +160,6 @@ function isSensitive(command: string): boolean {
 }
 
 function defaultHistoryPath(): string {
-  // 延迟解析 homedir,避免 import 时机问题
-  const { homedir } = require('node:os') as typeof import('node:os')
   return `${homedir()}/.zai/repl-history.jsonl`
 }
 
