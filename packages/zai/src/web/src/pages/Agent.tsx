@@ -433,9 +433,11 @@ export default function Agent() {
           修复: BottomStatusBar 整行已移除. 任务摘要职责合并到
           AgentInputBox 的"● 就绪"状态行 (见 AgentInputBox.tsx 内部实现),
           让 UI 更紧凑, 不再有一条独立任务行 + 一条状态行.
+
+          2026-07-26: AgentInputBox 已迁移到 AgentConversation 内部渲染,
+          此处不再重复渲染, 只保留 ConfigStatusBar。
         */}
         <div className="bottom-stack">
-          <AgentInputBox />
           <ConfigStatusBar
             cwdName={cwdName}
             branch={branch}
