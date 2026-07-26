@@ -1,5 +1,5 @@
 import { useState } from 'react'
-import { Badge, Popover, Tooltip } from 'antd'
+import { Badge, Modal, Popover, Tooltip } from 'antd'
 import { AppstoreOutlined, CaretRightOutlined, CheckCircleFilled, CloseCircleFilled, CodeOutlined, LoadingOutlined } from '@ant-design/icons'
 import { useBackgroundTasks } from '../hooks/useBackgroundTasks.js'
 import type { BackgroundTaskSummary } from '../hooks/useBackgroundTasks.js'
@@ -156,12 +156,16 @@ export function TaskDock({
   const content = (
       <div
         style={{
-          width: 360,
+          // 自适应容器宽度: 桌面 Popover 内 popover 自带 360px 容器足够,
+          // 移动 Modal 内 modal 是 90vw, 这里用 100% 跟随. 避免固定 360px
+          // 在窄屏 (<400px) 把 modal 撑破.
+          width: '100%',
           background: '#1f1f1f',
           borderRadius: 6,
           padding: 8,
           maxHeight: 480,
           overflowY: 'auto',
+          boxSizing: 'border-box',
         }}
       >
         <div
@@ -275,14 +279,7 @@ export function TaskDock({
   );
 
   return (
-    <Popover
-      content={<div onClick={(e) => e.stopPropagation()}>{content}</div>}
-      trigger="click"
-      placement="topLeft"
-      open={open}
-      onOpenChange={setOpen}
-      destroyTooltipOnHide
-    >
+    <>
       <Tooltip
         title={
           total === 0
@@ -291,11 +288,9 @@ export function TaskDock({
         }
       >
         <span
-          onClick={(e) => {
-            if (total === 0 && recentTasks.length === 0) {
-              e.preventDefault()
-              e.stopPropagation()
-            }
+          onClick={() => {
+            // 桌面端走 Popover(触发器控制), 移动端走 Modal(下方单独渲染).
+            if (isMobile) setOpen(true)
           }}
           style={{
             display: 'inline-flex',
@@ -320,6 +315,39 @@ export function TaskDock({
           </Badge>
         </span>
       </Tooltip>
-    </Popover>
+
+      {/* 桌面端 Popover (从触发器左上角展开, 不会越过屏幕右缘) */}
+      {!isMobile && (
+        <Popover
+          content={<div onClick={(e) => e.stopPropagation()}>{content}</div>}
+          trigger="click"
+          placement="topLeft"
+          open={open}
+          onOpenChange={setOpen}
+          destroyTooltipOnHide
+        >
+          <span style={{ display: 'none' }} aria-hidden />
+        </Popover>
+      )}
+
+      {/* 移动端 Modal: 触发按钮在右下, Popover 向左扩展空间不足被截断,
+          改用居中 Modal 占 90vw 居中弹窗, 不依赖触发位置. */}
+      {isMobile && (
+        <Modal
+          open={open}
+          onCancel={() => setOpen(false)}
+          footer={null}
+          width="90vw"
+          centered
+          destroyOnClose
+          title="后台任务"
+          styles={{
+            body: { padding: 0, background: '#1f1f1f', borderRadius: 6 },
+          }}
+        >
+          {content}
+        </Modal>
+      )}
+    </>
   )
 }

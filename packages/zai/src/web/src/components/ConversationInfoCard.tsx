@@ -46,7 +46,9 @@ export default function ConversationInfoCard({ info }: Props) {
       size="small"
       column={1}
       bordered
-      style={{ width: 360 }}
+      // 跟随外层容器宽度 (桌面 Popover 自带 360px / 移动 Modal 90vw),
+      // 避免固定 360 在窄屏 modal 内被 Descriptions label + 内容撑破.
+      style={{ width: '100%' }}
       labelStyle={{ width: 110, color: 'rgba(255,255,255,0.65)' }}
     >
       <Descriptions.Item label="Session ID">
