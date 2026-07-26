@@ -23,7 +23,7 @@ export function redirectMobileUA(req: Request, res: Response, next: NextFunction
   // req.originalUrl 拿。
   const fullPath = req.baseUrl + req.path
   // req.path 在 app.use('/agent', ...) 下为 '/', 所以 '/agent/' 也算 '/agent'。
-  if (!/^\/agent(?:\/|\\?|$)/.test(fullPath)) {
+  if (!/^\/agent(?:\?|$)/.test(fullPath)) {
     next()
     return
   }

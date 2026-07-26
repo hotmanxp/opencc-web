@@ -3,7 +3,7 @@ import type { Request } from 'express'
 import { redirectMobileUA, matchesMobileUA } from '../../../middleware/redirectMobileUA.js'
 
 function mkReq(path: string, ua: string | undefined): Request {
-  return { path, url: path, baseUrl: '', headers: ua ? { 'user-agent': ua } : {} } as unknown as Request
+  return { path, url: path, originalUrl: path, baseUrl: '', headers: ua ? { 'user-agent': ua } : {} } as unknown as Request
 }
 function mkRes(): any {
   const headers: Record<string, string> = {}
@@ -90,18 +90,18 @@ describe('redirectMobileUA', () => {
     expect(next).toHaveBeenCalledOnce()
   })
 
-  test('redirects /agent under mounted baseUrl (real Express scenario)', () => {
+  test('does NOT redirect /agent/ with trailing slash (baseUrl mount scenario)', () => {
     // Simulates Express app.use('/agent', redirectMobileUA): baseUrl='/agent',
-    // req.path='/'(stripped), req.url='/' (stripped), req.originalUrl is full path.
+    // req.path='/' (stripped), req.url='/' (stripped), req.originalUrl is '/agent/...'.
+    // /agent/ should NOT redirect — only exact /agent or /agent?sid=... should.
     const req = mkReq('/', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1')
     ;(req as any).baseUrl = '/agent'
     req.originalUrl = '/agent?sid=abc&foo=bar'
     const res = mkRes()
     const next = vi.fn()
     redirectMobileUA(req, res, next)
-    expect(res.statusCode).toBe(302)
-    expect(res.headers.location).toBe('/m?sid=abc&foo=bar')
-    expect(next).not.toHaveBeenCalled()
+    expect(next).toHaveBeenCalledOnce()
+    expect(res.headers.location).toBeUndefined()
   })
 
   test('does NOT redirect when baseUrl is mounted under non-/agent prefix', () => {
