@@ -117,7 +117,7 @@ export default function AgentConversation() {
           minHeight: 0,
           overflowY: 'auto',
           padding: '0 8px',
-          marginBottom: 16,
+          marginBottom: 4,
           background: '#000000',
           maxWidth: '100%',
           overflowX: 'hidden',
