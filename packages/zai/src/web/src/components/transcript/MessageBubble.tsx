@@ -225,7 +225,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                 <span
                   style={{
                     fontSize: 13,
-                    color: "rgba(255,255,255,0.55)",
+                    color: "var(--text-secondary)",
                     display: "inline-flex",
                     alignItems: "center",
                     flexShrink: 0,
@@ -237,7 +237,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                 <span
                   style={{
                     fontSize: 12,
-                    color: "rgba(0,0,0,0.45)",
+                    color: "var(--text-tertiary)",
                     fontStyle: "italic",
                     overflow: "hidden",
                     textOverflow: "ellipsis",
@@ -260,7 +260,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                   borderLeft: `3px solid ${THINKING_ACCENT}`,
                   borderRadius: 4,
                   // THINKING_BG 是主题紫半透明叠加深色页面, 浅色文字才有足够对比度
-                  color: "rgba(255,255,255,0.78)",
+                  color: "var(--text-secondary)",
                   fontStyle: "italic",
                   fontFamily:
                     "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
@@ -288,9 +288,9 @@ const TOOL_PILL_COLORS: Record<
   ToolStatus,
   { bg: string; fg: string; tag: string; label: string }
 > = {
-  start: { bg: "#f9f0ff", fg: "#722ed1", tag: "purple", label: "调用中" },
-  done: { bg: "#f6ffed", fg: "#389e0d", tag: "green", label: "已完成" },
-  error: { bg: "#fff2f0", fg: "#cf1322", tag: "red", label: "错误" },
+  start: { bg: "var(--accent-start-bg)", fg: "var(--accent-start)", tag: "purple", label: "调用中" },
+  done: { bg: "var(--accent-end-bg)", fg: "var(--accent-start)", tag: "green", label: "已完成" },
+  error: { bg: "var(--accent-end-bg)", fg: "var(--accent-end)", tag: "red", label: "错误" },
 };
 
 // 气泡 copy 按钮. 默认 `absolute` 模式: 始终浮在气泡右上角 (top:8 right:8),
@@ -339,12 +339,12 @@ export function MessageCopyButton({
           top: 4,
           right: 2,
           zIndex: 1,
-          background: "rgba(255,255,255,0.06)",
+          background: "var(--bg-card-hover)",
           borderRadius: 4,
           opacity: 0.85,
         }
       : {
-          background: "rgba(255,255,255,0.06)",
+          background: "var(--bg-card-hover)",
           borderRadius: 4,
           opacity: 0.85,
           flexShrink: 0,
@@ -464,7 +464,7 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
     <pre
       style={{
         fontSize: 12, margin: "4px 0 0 0", padding: "8px 10px",
-        background: "rgba(0,0,0,0.03)", borderRadius: 4,
+        background: "var(--bg-card)", borderRadius: 4,
         whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const,
         fontFamily: CODE_FONT_FAMILY,
       }}
@@ -526,7 +526,7 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                 <span
                   style={{
                     fontSize: 13,
-                    color: "rgba(255,255,255,0.55)",
+                    color: "var(--text-secondary)",
                     display: "inline-flex",
                     alignItems: "center",
                     flexShrink: 0,
@@ -736,18 +736,18 @@ export const MessageBubble = React.memo(function MessageBubble({
                   style={{
                     fontSize: 12,
                     fontStyle: "italic",
-                    color: "rgba(0,0,0,0.55)",
-                    borderLeft: "2px solid rgba(0,0,0,0.18)",
+                    color: "var(--text-tertiary)",
+                    borderLeft: "2px solid var(--text-tertiary)",
                     paddingLeft: 8,
                     whiteSpace: "pre-wrap",
                     wordBreak: "break-word",
                   }}
                 >
-                  <span style={{ color: "rgba(0,0,0,0.45)", marginRight: 4 }}>
+                  <span style={{ color: "var(--text-tertiary)", marginRight: 4 }}>
                     ⤷
                   </span>
                   <span style={{ fontWeight: 500 }}>渲染后</span>
-                  <span style={{ margin: "0 6px", color: "rgba(0,0,0,0.35)" }}>
+                  <span style={{ margin: "0 6px", color: "var(--text-tertiary)" }}>
                     ·
                   </span>
                   {linkifyText(visibleText)}
