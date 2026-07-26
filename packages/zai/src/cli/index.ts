@@ -3,8 +3,14 @@ import { Command } from 'commander';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { registerProcessOutputErrorHandlers } from '@zn-ai/zai-agent-core/runtime';
 import { runDev } from './dev.js';
 import { runStart } from './start.js';
+
+// 防御 stdout/stderr EPIPE — 上游管道 (nohup + 重定向、容器关闭、
+// detached TTY) 被关闭后, console.log 会触发 EPIPE. 不处理会让 zai
+// 因为 unhandled 'error' event 直接 crash.
+registerProcessOutputErrorHandlers();
 
 const program = new Command();
 

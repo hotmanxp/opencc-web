@@ -85,3 +85,11 @@ export {
 // State change bus (in-process event for zai server SSE bridge)
 export { stateChangeBus, resetStateChangeBusForTests } from './stateChangeBus.js'
 export type { StateChangeEventMap } from './stateChangeBus.js'
+
+// EPIPE 防护 — 当 stdout/stderr 上游管道关闭时不抛 unhandled 'error'。
+// zai CLI 入口 (packages/zai/src/cli/index.ts) 在最早时机调用, 保证
+// 任一 console.log 失败都不会杀掉进程.
+export {
+  registerProcessOutputErrorHandlers,
+  __resetProcessOutputErrorHandlersForTests,
+} from '../opencc-internals/utils/process.js'
