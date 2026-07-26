@@ -1,25 +1,22 @@
 /**
  * Compact conversation — streaming 摘要生成。
  *
- * 阶段 1 简化版:不实现 PTL 自愈 / prompt cache sharing / pre/post hooks
- * (这些留到阶段 2)。
- *
- * 调用 modelCaller 流式生成 summary,构造 boundary + summary message,
- * 返回 CompactionResult。
+ * 阶段 2 升级:
+ * - 注入 serializeForCompact(thinking/tool_use/tool_result/image 完整版)
+ * - 注入 estimateMessagesTokenCount(替代 messages.length * 100 占位)
+ * - 调用 pre/post hooks(no-op 默认)
+ * - PTL 错误透传(code: 'prompt_too_long'),重试由 compactSession shim 处理
  */
 
 import { randomUUID } from 'node:crypto'
 import type { TranscriptMessage } from '../../transcript/types.js'
 import type { CompactionResult } from './types.js'
+import { serializeForCompact } from './serialize-for-compact.js'
+import { estimateMessagesTokenCount } from './token-estimate.js'
+import { executePreCompactHooks, executePostCompactHooks } from './hooks.js'
 
-// ---- 本地最小类型:避免依赖 opencc-internals / runtime/types.js ----
 type Message = TranscriptMessage
 
-/**
- * 摘要流式生成用的模型调用器签名。本地定义保持最小契约,避免
- * 与 `runtime/types.ts` 的 `ModelCaller`(对 tools/messages 有更严约束)
- * 双向耦合。`autocompact.ts` 现在强制要求调用方传入符合本签名的函数。
- */
 export type CompactModelCaller = (req: {
   model: string
   systemPrompt: string
@@ -63,9 +60,10 @@ export async function compactConversation(
   messages: Message[],
   context: ToolUseContext,
   _cacheSafeParams: CacheSafeParams,
-  _suppressFollowUpQuestions: boolean,
+  suppressFollowUpQuestions: boolean,
   customInstructions?: string,
   isAutoCompact: boolean = false,
+  _providerKind?: string,
 ): Promise<CompactionResult> {
   if (messages.length === 0) {
     throw new Error('Not enough messages to compact.')
@@ -80,8 +78,16 @@ export async function compactConversation(
   const abortController = new AbortController()
   const timer = setTimeout(() => abortController.abort(), COMPACT_TIMEOUT_MS)
 
+  const trigger = isAutoCompact ? 'auto' : 'manual'
+
+  const preHookResult = await executePreCompactHooks(
+    { trigger, customInstructions: customInstructions ?? null },
+    abortController.signal,
+  )
+  const effectiveInstructions = preHookResult.newCustomInstructions ?? customInstructions
+
   const systemPrompt =
-    customInstructions ??
+    effectiveInstructions ??
     '你是一个对话摘要助手。把以下对话历史压缩成精炼的中文摘要,不超过 800 字。'
 
   const summaryRequest = {
@@ -126,6 +132,11 @@ export async function compactConversation(
     throw new Error('compact: 模型返回空 summary')
   }
 
+  const hookResults = await executePostCompactHooks(
+    { trigger, summary, messagesToKeep: [] },
+    abortController.signal,
+  )
+
   const lastTurn = (lastMsg.runtime?.turnIndex ?? 0) + 1
 
   const boundaryMarker: TranscriptMessage = {
@@ -140,10 +151,6 @@ export async function compactConversation(
       content: [
         { type: 'text', text: '对话从这之后被压缩为摘要。详细历史已归档。' },
       ],
-      // 与 compactService.ts 同样的取舍: 'system' 在 AnthropicMessage.role
-      // (transcript/types.ts:110) 不允许, cast 成 'user'|'assistant'。
-      // 该字段是 dead data — queryEngine 按 tm.type 派生 role, 不读
-      // message.role; serializeForAnthropic 也跳过 compact_boundary 类型。
       role: 'system' as 'user' | 'assistant',
     },
     cwd: lastMsg.cwd ?? '/',
@@ -170,26 +177,14 @@ export async function compactConversation(
     isSidechain: false,
   }
 
-  // isAutoCompact 留到阶段 2 在 hook 里消费
-  void isAutoCompact
+  void suppressFollowUpQuestions
 
   return {
     boundaryMarker,
     summaryMessages: [summaryMessage],
     attachments: [],
-    hookResults: [],
-    preCompactTokenCount: messages.length * 100,
-    postCompactTokenCount: summary.length * 2,
+    hookResults,
+    preCompactTokenCount: estimateMessagesTokenCount(messages),
+    postCompactTokenCount: estimateMessagesTokenCount([boundaryMarker, summaryMessage]),
   }
-}
-
-function serializeForCompact(messages: Message[]): string {
-  return messages
-    .map((m) => {
-      const content = m.message?.content
-      if (typeof content === 'string') return `[${m.type}] ${content}`
-      const blocks = Array.isArray(content) ? content : []
-      return `[${m.type}] ${blocks.map((b: any) => b.text ?? '').join('')}`
-    })
-    .join('\n\n')
 }

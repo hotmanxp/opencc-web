@@ -90,3 +90,65 @@ describe('conversation (阶段 1 简化版)', () => {
     ).rejects.toThrow(/未收到 message_stop/)
   })
 })
+
+import { describe as d2, expect as e2, it as i2 } from 'vitest'
+import { compactConversation as cc2 } from '../../../src/runtime/compact/conversation.js'
+
+d2('conversation v2 注入', () => {
+  i2('preCompactTokenCount 使用 estimateMessagesTokenCount 而非 messages.length * 100', async () => {
+    const mock = (async function* () {
+      yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 's' } }
+      yield { type: 'message_stop' }
+    }) as any
+    const msgs = [
+      { type: 'user', uuid: 'u1', parentUuid: null, timestamp: 1, raw: null, runtime: { turnIndex: 0 }, version: '2', message: { role: 'user', content: [{ type: 'text', text: '一二三四五六七八九' }] }, cwd: '/', sessionId: 's', userType: 'zai', isSidechain: false },
+      { type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: 2, raw: null, runtime: { turnIndex: 0 }, version: '2', message: { role: 'assistant', content: [{ type: 'text', text: 'hi' }] }, cwd: '/', sessionId: 's', userType: 'zai', isSidechain: false },
+    ]
+    const result = await cc2(
+      msgs as any,
+      { options: { mainLoopModel: 'MiniMax-M3' }, abortController: new AbortController(), modelCaller: mock } as any,
+      { systemPrompt: '', userContext: {}, systemContext: {}, toolUseContext: {} as any, forkContextMessages: [] } as any,
+      true,
+      undefined,
+      false,
+      'anthropic',
+    )
+    // 9 个汉字 → 6 tokens;text 'hi' → 1 token;总 7
+    expect(result.preCompactTokenCount).toBe(7)
+  })
+
+  i2('PTL 错误透传(throw 含 code: prompt_too_long)', async () => {
+    const throwingCaller = (async function* () {
+      throw Object.assign(new Error('prompt_too_long'), { code: 'prompt_too_long', ptlResponse: { usage: { output_tokens: 200_000 } } })
+    }) as any
+    await expect(
+      cc2(
+        [{ type: 'user', uuid: 'u1', parentUuid: null, timestamp: 1, raw: null, runtime: { turnIndex: 0 }, version: '2', message: { role: 'user', content: [{ type: 'text', text: 'hi' }] }, cwd: '/', sessionId: 's', userType: 'zai', isSidechain: false }] as any,
+        { options: { mainLoopModel: 'MiniMax-M3' }, abortController: new AbortController(), modelCaller: throwingCaller } as any,
+        {} as any,
+        true,
+      ),
+    ).rejects.toThrow(/prompt_too_long/)
+  })
+
+  i2('使用 serializeForCompact(thinking 丢弃)而不是旧简化版', async () => {
+    let captured = ''
+    const capture = (async function* (req: any) {
+      captured = String(req.messages[0].content)
+      yield { type: 'content_block_delta', index: 0, delta: { type: 'text_delta', text: 's' } }
+      yield { type: 'message_stop' }
+    }) as any
+    const msgs = [
+      { type: 'user', uuid: 'u1', parentUuid: null, timestamp: 1, raw: null, runtime: { turnIndex: 0 }, version: '2', message: { role: 'user', content: [{ type: 'text', text: 'q' }] }, cwd: '/', sessionId: 's', userType: 'zai', isSidechain: false },
+      { type: 'assistant', uuid: 'a1', parentUuid: 'u1', timestamp: 2, raw: null, runtime: { turnIndex: 0 }, version: '2', message: { role: 'assistant', content: [{ type: 'thinking', thinking: 'SECRET' }, { type: 'text', text: 'a' }] }, cwd: '/', sessionId: 's', userType: 'zai', isSidechain: false },
+    ]
+    await cc2(
+      msgs as any,
+      { options: { mainLoopModel: 'MiniMax-M3' }, abortController: new AbortController(), modelCaller: capture } as any,
+      {} as any,
+      true,
+    )
+    expect(captured).not.toContain('SECRET')
+    expect(captured).toContain('[assistant] a')
+  })
+})
