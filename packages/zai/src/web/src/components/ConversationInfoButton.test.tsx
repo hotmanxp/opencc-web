@@ -70,11 +70,15 @@ describe('ConversationInfoButton — mobile vs desktop branching', () => {
   it('mobile: clicking the trigger toggles the Modal open state', () => {
     useAppStore.setState({ isMobile: true })
     render(<ConversationInfoButton />)
+    // 模拟真实点击事件序列: mouseDown + click (RTL 的 fireEvent.click 只派 click, 不派 mouseDown)
+    const trigger = screen.getByTestId('conversation-info-trigger')
     // 初始打开 → 关闭
-    fireEvent.click(screen.getByTestId('conversation-info-trigger'))
+    fireEvent.mouseDown(trigger)
+    fireEvent.click(trigger)
     expect(screen.queryByTestId('conversation-info-card')).not.toBeInTheDocument()
     // 再点 → 打开
-    fireEvent.click(screen.getByTestId('conversation-info-trigger'))
+    fireEvent.mouseDown(trigger)
+    fireEvent.click(trigger)
     expect(screen.getByTestId('conversation-info-card')).toBeInTheDocument()
   })
 })
