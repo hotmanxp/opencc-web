@@ -24,6 +24,9 @@ vi.mock("antd", async (importOriginal) => {
       success: (...args: unknown[]) => mocks.successOrError.success(...args),
       error: (...args: unknown[]) => mocks.successOrError.error(...args),
     },
+    QRCode: ({ value, "data-testid": testId, ...rest }: { value: string; "data-testid"?: string }) => (
+      <div data-testid={testId} data-value={value} {...rest} />
+    ),
   };
 });
 
@@ -102,5 +105,47 @@ describe("SharePopover", () => {
     await waitFor(() => {
       expect(errorFn).toHaveBeenCalled();
     });
+  });
+
+  test("renders primary QRCode with /m URL and '其它可用 IP' list when multiple IPs", () => {
+    render(<SharePopover />);
+    // QR stub 存在
+    expect(screen.getByTestId("share-primary-qrcode")).toBeInTheDocument();
+    // 副标题文本
+    expect(screen.getByText(/扫码在手机上打开/)).toBeInTheDocument();
+    expect(screen.getByText(/\/m\?sid=sess-test-123/)).toBeInTheDocument();
+    // "其它可用 IP" 分组标题
+    expect(screen.getByText(/其它可用 IP/)).toBeInTheDocument();
+    // 2 个 IP → 2 个复制按钮(每个 IP 一行)
+    expect(screen.getAllByRole("button", { name: /复制/ })).toHaveLength(2);
+  });
+
+  test("primary QRCode value points to /m?sid=<sid> with first IP", () => {
+    render(<SharePopover />);
+    const qr = screen.getByTestId("share-primary-qrcode");
+    // stub 把 value 放在 data-value 上
+    expect(qr.getAttribute("data-value")).toBe(
+      "http://192.168.1.5:9888/m?sid=sess-test-123",
+    );
+  });
+
+  test("hides '其它可用 IP' group when only one IP", () => {
+    useAppStore.setState({
+      instanceContext: {
+        cwd: "/tmp",
+        cwdName: "tmp",
+        branch: null,
+        host: "0.0.0.0",
+        port: 9888,
+        ips: ["192.168.1.5"],
+      },
+    });
+    render(<SharePopover />);
+    // QR 仍渲染
+    expect(screen.getByTestId("share-primary-qrcode")).toBeInTheDocument();
+    // "其它可用 IP" 标题不出现
+    expect(screen.queryByText(/其它可用 IP/)).not.toBeInTheDocument();
+    // 仅 1 个复制按钮
+    expect(screen.getAllByRole("button", { name: /复制/ })).toHaveLength(1);
   });
 });
