@@ -300,7 +300,7 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
     <Popover
       content={<div onClick={(e) => e.stopPropagation()}>{content}</div>}
       trigger="click"
-      placement="topLeft"
+      placement={isMobile ? 'bottom' : 'topLeft'}
       destroyTooltipOnHide
     >
       <Button
