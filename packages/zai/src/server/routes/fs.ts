@@ -4,7 +4,12 @@ import { extname, basename, join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { resolveSafePath } from '../utils/safePath.js';
 import { MAX_FILE_BYTES, writeTextFile } from '../utils/fsWrite.js';
-import type { FsAck, FsEntry, FsFile, FsList, FsSearchEntry, FsSearchResult } from '../../shared/fs.js';
+import { resolveRgPath, runRipgrep } from '../services/ripgrep.js';
+import type {
+  FsAck, FsEntry, FsFile, FsList, FsSearchEntry, FsSearchResult,
+  FsContentSearchEntry, FsContentSearchResult,
+} from '../../shared/fs.js';
+import { dirname as pathDirname, relative as pathRelative } from 'node:path';
 const MAX_QUERY_LEN = 64;
 const WALK_TIMEOUT_MS = 200;
 const IGNORED = new Set([
@@ -478,6 +483,214 @@ fsRouter.get('/fs/search', async (req, res) => {
   } finally {
     clearTimeout(timer);
   }
+});
+
+// --- Content search (ripgrep-backed) -------------------------------------
+
+const RG_TIMEOUT_MS = 10_000;
+const DEFAULT_HEAD_LIMIT = 200;
+const MAX_HEAD_LIMIT = 500;
+const RG_GLOBS = [
+  // Binary / archive
+  '--glob', '!*.{png,jpg,jpeg,gif,webp,ico,pdf,zip,tar,gz,wasm,mp3,mp4,avi,mov,ogg,flac,ttf,otf,eot,bin,exe,so,dll,class,o,obj}',
+  // VCS
+  '--glob', '!{.git,.svn,.hg,.bzr,.jj,.sl}',
+  // Deps / build
+  '--glob', '!{node_modules,dist,build,coverage,.next,.turbo,.cache}',
+];
+
+interface ParsedRgMatch {
+  path: string;
+  line: number;
+  text: string;
+  submatch: { text: string; start: number; end: number };
+}
+
+function parseRgJsonLine(line: string): ParsedRgMatch | null {
+  if (!line) return null;
+  let obj: unknown;
+  try {
+    obj = JSON.parse(line);
+  } catch {
+    return null;
+  }
+  if (
+    typeof obj !== 'object' || obj === null ||
+    (obj as { type?: string }).type !== 'match'
+  ) {
+    return null;
+  }
+  const o = obj as {
+    data?: {
+      path?: { text?: string };
+      line_number?: number;
+      lines?: { text?: string };
+      submatches?: Array<{ match?: { text?: string }; start: number; end: number }>;
+    };
+  };
+  const d = o.data;
+  if (!d?.path?.text || typeof d.line_number !== 'number' || !d.lines?.text) return null;
+  const sub = d.submatches?.[0];
+  if (!sub?.match?.text) return null;
+  return {
+    path: d.path.text,
+    line: d.line_number,
+    text: d.lines.text.replace(/\r?\n$/, ''),
+    submatch: { text: sub.match.text, start: sub.start, end: sub.end },
+  };
+}
+
+/**
+ * Aggregate ripgrep --json output into FsContentSearchEntry[].
+ * - Relativises paths against searchRoot, joins POSIX forward-slashes.
+ * - Aggregates matches per path.
+ * - Sorts entries by matches.length desc, then path asc.
+ * - Truncates to headLimit; sets truncated=true if either the headLimit
+ *   cut was reached OR a parse error forced early termination.
+ */
+function aggregateRgOutput(
+  stdout: string,
+  searchRoot: string,
+  headLimit: number,
+): { entries: FsContentSearchEntry[]; truncated: boolean } {
+  const byPath = new Map<string, ParsedRgMatch[]>();
+  let parseErrors = 0;
+  for (const raw of stdout.split('\n')) {
+    if (!raw) continue;
+    const m = parseRgJsonLine(raw);
+    if (!m) {
+      parseErrors++;
+      continue;
+    }
+    // Relativise + POSIX join.
+    const rel = pathRelative(searchRoot, m.path);
+    const relPosix = rel.split(sep).join('/');
+    const arr = byPath.get(relPosix);
+    if (arr) arr.push(m);
+    else byPath.set(relPosix, [m]);
+  }
+
+  const allEntries: FsContentSearchEntry[] = [];
+  for (const [relPath, matches] of byPath) {
+    matches.sort((a, b) => a.line - b.line);
+    const name = relPath.includes('/')
+      ? relPath.slice(relPath.lastIndexOf('/') + 1)
+      : relPath;
+    allEntries.push({
+      path: relPath,
+      name,
+      matches: matches.map((m) => ({
+        line: m.line,
+        text: m.text,
+        submatch: m.submatch,
+      })),
+    });
+  }
+  allEntries.sort((a, b) => {
+    const byCount = b.matches.length - a.matches.length;
+    return byCount !== 0 ? byCount : a.path.localeCompare(b.path);
+  });
+
+  const truncated = parseErrors > 0 || allEntries.length > headLimit;
+  const entries = allEntries.slice(0, headLimit);
+  return { entries, truncated };
+}
+
+fsRouter.get('/fs/content-search', async (req, res) => {
+  const ctxVal = ctx(req);
+  if (!ctxVal || typeof ctxVal.cwd !== 'string') {
+    res.status(500).json({ ok: false, error: 'instance cwd not configured' } satisfies FsContentSearchResult);
+    return;
+  }
+  const { cwd } = ctxVal;
+
+  const q = typeof req.query.q === 'string' ? req.query.q : '';
+  if (!q) {
+    res.status(400).json({ ok: false, error: '缺少 q 参数' } satisfies FsContentSearchResult);
+    return;
+  }
+  if (q.length > MAX_QUERY_LEN) {
+    res.status(400).json({ ok: false, error: `q 太长 (>${MAX_QUERY_LEN})` } satisfies FsContentSearchResult);
+    return;
+  }
+
+  const safe = resolveSafePath(cwd, '');
+  if (!safe.ok) {
+    res.status(403).json({ ok: false, error: safe.error } satisfies FsContentSearchResult);
+    return;
+  }
+
+  const headLimitRaw = parseInt(String(req.query.headLimit ?? ''), 10);
+  const headLimit = Number.isFinite(headLimitRaw) && headLimitRaw > 0
+    ? Math.min(headLimitRaw, MAX_HEAD_LIMIT)
+    : DEFAULT_HEAD_LIMIT;
+
+  const rg = resolveRgPath();
+  if (!rg) {
+    res.status(200).json({
+      ok: false,
+      error: 'ripgrep 未安装,内容搜索不可用',
+    } satisfies FsContentSearchResult);
+    return;
+  }
+
+  const startMs = Date.now();
+  const ac = new AbortController();
+  // Outer timer aborts on top of spawn's own timeout; whichever fires
+  // first wins. We expose partial results with truncated:true.
+  const outerTimer = setTimeout(() => ac.abort(), RG_TIMEOUT_MS);
+
+  const args = [
+    '--json',
+    '-n',
+    '-i',
+    '--max-filesize', '2M',
+    ...RG_GLOBS,
+    '-e', q,
+    safe.abs,
+  ];
+
+  let result;
+  try {
+    result = await runRipgrep(args, { cwd: safe.abs, signal: ac.signal, timeoutMs: RG_TIMEOUT_MS });
+  } finally {
+    clearTimeout(outerTimer);
+  }
+
+  // EAGAIN retry (errno 11) — single-thread rerun, then give up.
+  if (
+    result.code === 2 &&
+    (result.stderr.includes('os error 11') || result.stderr.includes('Resource temporarily unavailable'))
+  ) {
+    ac.abort();
+    const ac2 = new AbortController();
+    const outerTimer2 = setTimeout(() => ac2.abort(), RG_TIMEOUT_MS);
+    try {
+      result = await runRipgrep(['-j', '1', ...args], {
+        cwd: safe.abs,
+        signal: ac2.signal,
+        timeoutMs: RG_TIMEOUT_MS,
+      });
+    } finally {
+      clearTimeout(outerTimer2);
+    }
+  }
+
+  if (result.error?.code === 'ENOENT' || (result.code !== 0 && result.code !== 1)) {
+    res.status(200).json({
+      ok: false,
+      error: `search 失败: ${result.stderr || result.error?.message || `exit ${result.code}`}`,
+    } satisfies FsContentSearchResult);
+    return;
+  }
+
+  const { entries, truncated } = aggregateRgOutput(result.stdout, safe.abs, headLimit);
+  res.json({
+    ok: true,
+    entries,
+    truncated,
+    durationMs: Date.now() - startMs,
+  } satisfies FsContentSearchResult);
 });
 
 const REVEAL_TIMEOUT_MS = 3_000;
