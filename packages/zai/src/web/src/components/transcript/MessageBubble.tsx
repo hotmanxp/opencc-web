@@ -85,7 +85,7 @@ export const StreamingMarkdown = React.memo(function StreamingMarkdown({ text }:
               height: 14,
               verticalAlign: "-2px",
               marginLeft: 2,
-              background: "#1677ff", // TODO: theme-constant (AntD brand blue cursor)
+              background: "#1677ff", // TODO: theme-constant (AntD brand blue cursor — no CSS var mapping yet)
               animation: "zai-blink 1s steps(1) infinite",
             }}
           />
