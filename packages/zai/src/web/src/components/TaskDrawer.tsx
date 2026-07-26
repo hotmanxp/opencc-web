@@ -48,12 +48,11 @@ interface StreamedEvent {
   data: Record<string, unknown>
 }
 
-// TODO: theme-constant — STATUS_META color values to be migrated to CSS vars
 const STATUS_META: Record<string, { color: string; label: string; icon: JSX.Element }> = {
-  running: { color: '#a78bfa', label: '运行中', icon: <LoadingOutlined spin /> },
-  queued: { color: 'rgba(255,255,255,0.55)', label: '排队中', icon: <LoadingOutlined /> },
-  completed: { color: '#52c41a', label: '完成', icon: <CheckCircleFilled /> },
-  failed: { color: '#f5222d', label: '失败', icon: <CloseCircleFilled /> },
+  running: { color: 'var(--accent-start)', label: '运行中', icon: <LoadingOutlined spin /> },
+  queued: { color: 'var(--text-secondary)', label: '排队中', icon: <LoadingOutlined /> },
+  completed: { color: 'var(--success)', label: '完成', icon: <CheckCircleFilled /> },
+  failed: { color: 'var(--error)', label: '失败', icon: <CloseCircleFilled /> },
   cancelled: { color: 'var(--text-tertiary)', label: '已取消', icon: <CloseCircleFilled /> },
 }
 
@@ -66,7 +65,7 @@ function formatDuration(ms: number): string {
   return `${m}m${rs}s`
 }
 
-const CODE_BG = '#282c34'
+const CODE_BG = 'var(--bg-card)'
 const CODE_FONT_FAMILY =
   'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace'
 
@@ -81,7 +80,7 @@ const markdownComponents = {
   li: ({ children }: any) => <li style={{ marginBottom: 4 }}>{children}</li>,
   code: ({ className, children }: any) => {
     const match = /language-(\w+)/.exec(className || '')
-    if (!match) return <code style={{ background: 'transparent', color: '#a78bfa', padding: '1px 6px', borderRadius: 3, fontSize: '0.9em', fontFamily: CODE_FONT_FAMILY, fontWeight: 500 }}>{children}</code>
+    if (!match) return <code style={{ background: 'transparent', color: 'var(--accent-start)', padding: '1px 6px', borderRadius: 3, fontSize: '0.9em', fontFamily: CODE_FONT_FAMILY, fontWeight: 500 }}>{children}</code>
     // Lazy: SyntaxHighlighter pulls in prism once per session. Until then
     // show the raw text inside the same padding/background so the user
     // doesn't see a layout jump.
@@ -89,14 +88,14 @@ const markdownComponents = {
   },
   pre: ({ children }: any) => <>{children}</>,
   table: ({ children }: any) => <table style={{ borderCollapse: 'collapse', margin: '4px 0 8px 0', fontSize: 13, width: '100%' }}>{children}</table>,
-  thead: ({ children }: any) => <thead style={{ background: 'rgba(255,255,255,0.05)' }}>{children}</thead>,
+  thead: ({ children }: any) => <thead style={{ background: 'var(--bg-card-hover)' }}>{children}</thead>,
   tbody: ({ children }: any) => <tbody>{children}</tbody>,
-  tr: ({ children }: any) => <tr style={{ borderBottom: '1px solid rgba(255,255,255,0.08)' }}>{children}</tr>,
-  th: ({ children }: any) => <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, border: '1px solid rgba(255,255,255,0.08)' }}>{children}</th>,
-  td: ({ children }: any) => <td style={{ padding: '6px 10px', border: '1px solid rgba(255,255,255,0.08)' }}>{children}</td>,
-  blockquote: ({ children }: any) => <blockquote style={{ borderLeft: '3px solid rgba(255,255,255,0.2)', paddingLeft: 12, margin: '4px 0 8px 0', color: 'rgba(255,255,255,0.7)' }}>{children}</blockquote>,
+  tr: ({ children }: any) => <tr style={{ borderBottom: '1px solid var(--border-subtle)' }}>{children}</tr>,
+  th: ({ children }: any) => <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, border: '1px solid var(--border-subtle)' }}>{children}</th>,
+  td: ({ children }: any) => <td style={{ padding: '6px 10px', border: '1px solid var(--border-subtle)' }}>{children}</td>,
+  blockquote: ({ children }: any) => <blockquote style={{ borderLeft: '3px solid var(--border-subtle)', paddingLeft: 12, margin: '4px 0 8px 0', color: 'var(--text-secondary)' }}>{children}</blockquote>,
   a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#1677ff', textDecoration: 'underline' }}>{children}</a>,
-  hr: () => <hr style={{ border: 'none', borderTop: '1px solid rgba(255,255,255,0.08)', margin: '12px 0' }} />,
+  hr: () => <hr style={{ border: 'none', borderTop: '1px solid var(--border-subtle)', margin: '12px 0' }} />,
 }
 
 /**
@@ -126,7 +125,7 @@ function LazyCode({ lang, code }: { lang: string; code: string }) {
           fontSize: 12,
           lineHeight: 1.55,
           background: CODE_BG,
-          color: 'rgba(255,255,255,0.85)',
+          color: 'var(--text-primary)',
           fontFamily: CODE_FONT_FAMILY,
           overflow: 'auto',
           whiteSpace: 'pre-wrap',
@@ -147,7 +146,7 @@ function LazyCode({ lang, code }: { lang: string; code: string }) {
           fontSize: 12,
           lineHeight: 1.55,
           background: CODE_BG,
-          color: 'rgba(255,255,255,0.85)',
+          color: 'var(--text-primary)',
           fontFamily: CODE_FONT_FAMILY,
           overflow: 'auto',
           whiteSpace: 'pre-wrap',
@@ -273,9 +272,9 @@ export function BashTaskView({
   const runtimeMs = (task.finishedAt ?? Date.now()) - task.startedAt
   const runtimeStr = formatDuration(runtimeMs)
   const statusColor =
-    task.status === 'completed' ? '#52c41a'
-      : task.status === 'running' ? '#a78bfa'
-        : '#f5222d'
+    task.status === 'completed' ? 'var(--success)'
+      : task.status === 'running' ? 'var(--accent-start)'
+        :	'var(--error)'
   const output = task.stdout + (task.stderr ? `\n${task.stderr}` : '')
   const maxOutputLines = 20
   const outputLines = output.split('\n')
@@ -288,7 +287,7 @@ export function BashTaskView({
   return (
     <div style={{ padding: '12px 20px' }}>
       {/* 状态行 */}
-      <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.55)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+      <div style={{ fontSize: 11, color: 'var(--text-secondary)', marginBottom: 8, display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div>
           <span style={{ color: statusColor, fontWeight: 500 }}>
             {task.status === 'running' ? '⏳ ' : task.status === 'completed' ? '✅ ' : '❌ '}
@@ -321,7 +320,7 @@ export function BashTaskView({
             fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
             fontSize: 12,
             color: 'var(--text-primary)',
-            background: 'rgba(255,255,255,0.05)',
+            background: 'var(--bg-card-hover)',
             padding: '6px 10px',
             borderRadius: 4,
             whiteSpace: 'pre-wrap',
@@ -346,7 +345,7 @@ export function BashTaskView({
             fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
             fontSize: 11,
             lineHeight: 1.5,
-            color: 'rgba(255,255,255,0.85)',
+            color: 'var(--text-primary)',
             background: 'var(--bg-card-hover)',
             padding: '8px 10px',
             borderRadius: 4,
@@ -364,7 +363,7 @@ export function BashTaskView({
             type="link"
             size="small"
             onClick={() => setExpanded((e) => !e)}
-            style={{ padding: 0, marginTop: 2, fontSize: 11, height: 'auto', color: '#a78bfa' }}
+            style={{ padding: 0, marginTop: 2, fontSize: 11, height: 'auto', color: 'var(--accent-start)' }}
           >
             {expanded ? '收起' : `展开完整输出 (${outputLines.length} 行)`}
           </Button>
@@ -429,10 +428,10 @@ export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
   // 左边框(状态指示条)与右侧状态文字共用同一 statusColor,保证语义一致。
   const statusColor =
     entry.status === 'done'
-      ? '#52c41a'
+      ? 'var(--success)'
       : entry.status === 'running'
-        ? '#fadb14'
-        : '#f5222d'
+        ? 'var(--warning)'
+        : 'var(--error)'
   const inputLine = `${entry.name}: ${formatToolInput(entry.name, entry.input)}`
   const fullLine = formatToolCallLine(entry)
 
@@ -441,7 +440,7 @@ export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
       title={fullLine}
       style={{
         borderLeft: `3px solid ${statusColor}`,
-        background: 'rgba(255,255,255,0.04)',
+        background: 'var(--bg-card-hover)',
         padding: '8px 12px',
         borderRadius: 4,
         margin: '6px 0',
@@ -696,9 +695,9 @@ export function TaskDrawer({
           {bashTask && (
             <Tag
               color={
-                bashTask.status === 'completed' ? '#52c41a'
-                  : bashTask.status === 'running' ? '#a78bfa'
-                    : '#f5222d'
+                bashTask.status === 'completed' ? 'var(--success)'
+                  : bashTask.status === 'running' ? 'var(--accent-start)'
+                    :	'var(--error)'
               }
               style={{ margin: 0 }}
             >
@@ -749,7 +748,7 @@ export function TaskDrawer({
           <div
             style={{
               padding: '12px 20px',
-              borderBottom: '1px solid rgba(255,255,255,0.08)',
+              borderBottom: '1px solid var(--border-subtle)',
               background: 'var(--bg-card-hover)',
             }}
           >
@@ -778,8 +777,8 @@ export function TaskDrawer({
                     alignItems: 'center',
                     gap: 4,
                     padding: '2px 8px',
-                    background: 'rgba(168, 139, 250, 0.12)',
-                    border: '1px solid rgba(168, 139, 250, 0.30)',
+                    background: 'var(--bg-card-hover)',
+                    border: '1px solid var(--accent-start)',
                     borderRadius: 4,
                   }}
                 >
@@ -822,9 +821,9 @@ export function TaskDrawer({
                       padding: '6px 0',
                       color:
                         item.tone === 'err'
-                          ? '#f5222d'
+                          ? 'var(--error)'
                           : item.tone === 'ok'
-                            ? '#52c41a'
+                            ? 'var(--success)'
                             : 'var(--text-secondary)',
                       fontFamily: 'ui-monospace, monospace',
                     }}
