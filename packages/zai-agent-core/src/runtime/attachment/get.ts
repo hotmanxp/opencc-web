@@ -2,6 +2,12 @@
  * getAttachmentMessages — turn 入点拉取 mid-turn 期间的 attachment。
  *
  * Spec: docs/superpowers/specs/2026-07-19-zai-loop-resilience-d-attachment-design.md
+ *       (base contract: 4 sources, never-throws, consumedAt sort)
+ *     + docs/superpowers/specs/2026-07-26-zai-attachment-system-reminder-design.md
+ *       (v1.1: collectors emit `<system-reminder>` plain text instead of
+ *       assistant `AnthropicMessage` payloads; queryLoop splices onto
+ *       systemPrompt instead of pushing to messages — fixes the fresh-
+ *       session "consecutive assistant" Anthropic 2013 crash)
  *
  * 契约:
  *   - 永不抛 (spec §2.4), 异常 → 返 [].

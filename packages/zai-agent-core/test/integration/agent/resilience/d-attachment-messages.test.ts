@@ -302,4 +302,77 @@ describe('integration: getAttachmentMessages (mid-turn attachment)', () => {
     expect(result[0].source).toBe('memory-prefetch')
     expect(result[0].content).toBe('<system-reminder>\nmemory payload for the agent\n</system-reminder>')
   })
+
+  // spec §5.4 coverage — branch coverage for the try/catch around the
+  // background-agent source (get.ts L150-159): when backgroundTaskStore.list
+  // throws, getAttachmentMessages should swallow and return [].
+  test('returns empty array when backgroundTaskStore.list throws', async () => {
+    const brokenStore = {
+      list: async () => {
+        throw new Error('store exploded')
+      },
+    }
+    const result = await getAttachmentMessages({
+      sessionId: 'sess-1',
+      signal: signal(),
+      backgroundTaskStore: brokenStore,
+    })
+    expect(result).toEqual([])
+  })
+
+  // spec §5.4 coverage — branch coverage for the try/catch around the
+  // skill-prefetch source (get.ts L161-165). collectSkills reads
+  // pluginSnapshot.skills and currently cannot throw, but the guard still
+  // covers malformed snapshot shapes (skills = undefined etc).
+  test('returns empty array when pluginSnapshot.skills is malformed', async () => {
+    const brokenSnapshot = { skills: undefined as unknown as LoadedSkill[] }
+    const result = await getAttachmentMessages({
+      sessionId: 'sess-1',
+      signal: signal(),
+      pluginSnapshot: brokenSnapshot,
+    })
+    expect(result).toEqual([])
+  })
+
+  // spec §5.4 coverage — branch coverage for the try/catch around the
+  // memory-prefetch source (get.ts L167-172): when memoryCache.get throws,
+  // getAttachmentMessages should swallow and return [].
+  test('returns empty array when memoryCache.get throws', async () => {
+    const brokenCache = {
+      get: (_sessionId: string): string | null => {
+        throw new Error('cache exploded')
+      },
+    }
+    const result = await getAttachmentMessages({
+      sessionId: 'sess-1',
+      signal: signal(),
+      memoryCache: brokenCache,
+    })
+    expect(result).toEqual([])
+  })
+
+  // spec §5.4 coverage — branch coverage for collectMemory (get.ts L248):
+  // empty-string and null memoryCache.get() return values must NOT produce
+  // an attachment. Covers the typeof/length guard branch.
+  test('skips memory-prefetch attachment when memoryCache returns empty or null', async () => {
+    const cache = {
+      get: (sessionId: string): string | null => {
+        if (sessionId === 'sess-empty') return ''
+        if (sessionId === 'sess-null') return null
+        return 'unused'
+      },
+    }
+    const empty = await getAttachmentMessages({
+      sessionId: 'sess-empty',
+      signal: signal(),
+      memoryCache: cache,
+    })
+    expect(empty).toEqual([])
+    const nullRes = await getAttachmentMessages({
+      sessionId: 'sess-null',
+      signal: signal(),
+      memoryCache: cache,
+    })
+    expect(nullRes).toEqual([])
+  })
 })
