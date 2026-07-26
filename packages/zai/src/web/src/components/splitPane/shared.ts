@@ -4,10 +4,10 @@ import type { GitStatusChar } from '../../../../shared/git.js';
 export const STORAGE_KEYS = {
   open: 'zai.splitPane.open',
   tab: 'zai.splitPane.tab',
-  // 2026-07-21+: 旧 key `zai.splitPane.width` 存的是像素, 与新 vw 语义不
-  // 兼容. 切换 key 一次性把老用户的拖拽偏好归档, 避免 480px 这种值被 clamp
-  // 当成 480vw 强行塞回面板.
   width: 'zai.splitPane.widthVw',
+  // 2026-07-26+: 移动端常用指令 Drawer 的本地 prompt 片段持久化。
+  // 独立命名空间避开既有 zai.splitPane.* / zai.app.* 前缀。
+  quickPrompts: 'zai.quickPrompts.v1',
 } as const;
 
 // 宽度单位从 px 改成 vw (viewport width 百分比), 跟随窗口宽度变化, 窄屏
