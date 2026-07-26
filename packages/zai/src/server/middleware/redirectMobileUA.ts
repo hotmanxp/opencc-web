@@ -4,7 +4,7 @@ import type { Request, Response, NextFunction } from 'express'
  * UA 白名单 — 覆盖 iPhone / iPad / iPod / Android（含纯 Android UA）/ Mobile Safari。
  * 不包含 'Macintosh' — iPadOS 13+ 桌面伪装 UA 走桌面端,在前端 MobileAgent 横幅处兜底(见 spec §3.3)。
  */
-const MOBILE_UA_RE = /Mobile|Android|iPhone|iPad|iPod|Safari/
+const MOBILE_UA_RE = /(?:iPhone|iPad|iPod|Android|Mobile|Safari.*Mobile)/
 
 export function matchesMobileUA(ua: string | undefined): boolean {
   if (!ua) return false
@@ -23,7 +23,7 @@ export function redirectMobileUA(req: Request, res: Response, next: NextFunction
   // req.originalUrl 拿。
   const fullPath = req.baseUrl + req.path
   // req.path 在 app.use('/agent', ...) 下为 '/', 所以 '/agent/' 也算 '/agent'。
-  if (!/^\/agent(?:\?|$)/.test(fullPath)) {
+  if (!/^\/agent(?:\?|\/|$)/.test(fullPath)) {
     next()
     return
   }

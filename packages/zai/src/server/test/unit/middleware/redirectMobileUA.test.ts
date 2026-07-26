@@ -90,18 +90,20 @@ describe('redirectMobileUA', () => {
     expect(next).toHaveBeenCalledOnce()
   })
 
-  test('does NOT redirect /agent/ with trailing slash (baseUrl mount scenario)', () => {
+  test('redirects /agent/ with trailing slash (baseUrl mount scenario) for mobile UA', () => {
     // Simulates Express app.use('/agent', redirectMobileUA): baseUrl='/agent',
     // req.path='/' (stripped), req.url='/' (stripped), req.originalUrl is '/agent/...'.
-    // /agent/ should NOT redirect — only exact /agent or /agent?sid=... should.
+    // /agent/ with mobile UA SHOULD redirect to /m/ — this was the original bug,
+    // fixed by updating the path regex to /^\/agent(?:\?|\/|$)/.
     const req = mkReq('/', 'Mozilla/5.0 (iPhone; CPU iPhone OS 17_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Mobile/15E148 Safari/604.1')
     ;(req as any).baseUrl = '/agent'
     req.originalUrl = '/agent?sid=abc&foo=bar'
     const res = mkRes()
     const next = vi.fn()
     redirectMobileUA(req, res, next)
-    expect(next).toHaveBeenCalledOnce()
-    expect(res.headers.location).toBeUndefined()
+    expect(next).not.toHaveBeenCalled()
+    expect(res.statusCode).toBe(302)
+    expect(res.headers.location).toBe('/m?sid=abc&foo=bar')
   })
 
   test('does NOT redirect when baseUrl is mounted under non-/agent prefix', () => {
