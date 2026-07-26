@@ -538,7 +538,6 @@ export default React.memo(function AgentInputBox() {
     if (status === "streaming") return;
     setInput("");
 
-    pushUserMsg(text);
     attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl));
     setAttachments([]);
 
@@ -546,6 +545,9 @@ export default React.memo(function AgentInputBox() {
       // 含图片附件: 仍走原始内联实现 (submitPrompt hook 不接 contentBlocks,
       // 保持图片附件路径不抽到 hook — 与 handleSend 历史契约对齐, 避免破坏
       // 已有 ["AgentInputBox"] 附件提交路径).
+      // 注意: 该分支不调 pushUserMsg — UI 走 transcript 刷新路径,
+      // server 把 user 消息落盘后由 loadTranscript 渲染一条 user.text.
+      // 纯文本分支由 submitPrompt 默认行为 push 一条 user.text, 不重复.
       const sid = sessionId || activeSessionId || undefined;
       const { sessionId: returnedSessionId } = await api.post<{
         sessionId: string;
