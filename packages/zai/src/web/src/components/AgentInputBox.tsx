@@ -596,17 +596,6 @@ export default React.memo(function AgentInputBox() {
           flexWrap: "wrap",
         }}
       >
-        {isMobile && (
-          <Tooltip title="常用指令" placement="top">
-            <Button
-              icon={<AppstoreAddOutlined />}
-              onClick={() => useAppStore.getState().setQuickDrawerOpen(true)}
-              data-testid="mobile-quick-drawer-toggle"
-              aria-label="打开常用指令"
-              style={toolbarIconButtonStyle}
-            />
-          </Tooltip>
-        )}
         <span
           style={{
             color:
@@ -842,6 +831,22 @@ export default React.memo(function AgentInputBox() {
           style={toolbarIconButtonStyle}
         />
         <ConversationInfoButton />
+        {/* 移动端「常用指令」按钮: 仅 isMobile 时挂载.
+            位置: 工具栏最右端 (紧贴 ConversationInfoButton), 与桌面端
+            split-pane toggle 平级. 移动端 split-pane toggle 不挂载, 这里
+            是行尾最右一个按钮.
+            行为: 调 useAppStore.setQuickDrawerOpen(true) 打开右侧 Drawer. */}
+        {isMobile && (
+          <Tooltip title="常用指令" placement="top">
+            <Button
+              icon={<AppstoreAddOutlined />}
+              onClick={() => useAppStore.getState().setQuickDrawerOpen(true)}
+              data-testid="mobile-quick-drawer-toggle"
+              aria-label="打开常用指令"
+              style={toolbarIconButtonStyle}
+            />
+          </Tooltip>
+        )}
         {/* 右侧分屏 toggle — 行尾最右侧.
             图标用 MenuUnfoldOutlined (三线+右箭头, 侧边栏展开风格),
             比 BorderOutlined 更直观表达"右侧面板滑出"的操作.
