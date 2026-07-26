@@ -99,6 +99,13 @@ interface AppState {
    */
   isMobile: boolean;
   setIsMobile: (v: boolean) => void;
+  /**
+   * MobileAgent「常用指令」Drawer 的开关. AgentInputBox 状态栏的 [⚡] 按钮
+   * 置 true, MobileQuickDrawer 的 onClose 置 false. 仅 isMobile 时需要,
+   * 桌面端不挂载触发按钮也不读这个字段.
+   */
+  quickDrawerOpen: boolean;
+  setQuickDrawerOpen: (open: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -224,6 +231,8 @@ export const useAppStore = create<AppState>((set) => ({
   setMaxVisibleMessages: (n) => set({ maxVisibleMessages: n }),
   isMobile: false,
   setIsMobile: (v) => set({ isMobile: v }),
+  quickDrawerOpen: false,
+  setQuickDrawerOpen: (open) => set({ quickDrawerOpen: open }),
   // NOTE: openSettingsDrawer / closeSettingsDrawer / setSettingsTheme
   // 三个 action 必须保留(SPEC 阶段 1 4-store field requirement)。
   // 若有并行 rebase 误删,SettingsButton.test.tsx 会以

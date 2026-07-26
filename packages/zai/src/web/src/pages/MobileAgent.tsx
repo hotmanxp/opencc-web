@@ -9,6 +9,7 @@ import { TaskDrawer } from '../components/TaskDrawer'
 import ApproveDrawer from '../components/ApproveDrawer.jsx'
 import SettingsDrawer from '../components/SettingsDrawer'
 import ConfigStatusBar from '../components/ConfigStatusBar'
+import MobileQuickDrawer from '../components/MobileQuickDrawer.jsx'
 
 /**
  * 移动端 /agent 页面:
@@ -26,6 +27,8 @@ export default function MobileAgent() {
   const [drawerOpen, setDrawerOpen] = useState(false)
   const loadSessions = useAgentStore((s) => s.loadSessions)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  const quickDrawerOpen = useAppStore((s) => s.quickDrawerOpen)
+  const setQuickDrawerOpen = useAppStore((s) => s.setQuickDrawerOpen)
   const { instanceContext } = useAppStore()
   const cwdBySessionForSid = useAgentStore((s) =>
     s.sessionId ? s.cwdBySession[s.sessionId] : undefined,
@@ -58,6 +61,10 @@ export default function MobileAgent() {
       <ApproveDrawer />
       <SettingsDrawer />
       <SessionCwdBridge />
+      <MobileQuickDrawer
+        open={quickDrawerOpen}
+        onClose={() => setQuickDrawerOpen(false)}
+      />
     </>
   )
 }
