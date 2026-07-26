@@ -260,8 +260,9 @@ export async function* queryLoop(
   })
   // getAttachmentMessages 内部已按 consumedAt asc 排序 + DEFAULT_LIMIT=100 cap.
   const reminderText = attachments.map((a) => a.content).join('\n')
-  // SystemPrompt 是 branded readonly string[] — 不能 push, 用 spread 重赋值.
-  // reminderText 为空时跳过,避免 systemPrompt 数组尾巴多一条空字符串.
+  // SystemPrompt 是 branded readonly string[] & { __brand: 'SystemPrompt' }
+  // (packages/zai-agent-core/src/systemPrompt/type.ts:13) — 不能 push, 用 spread
+  // 重赋值. reminderText 为空时跳过,避免 systemPrompt 数组尾巴多一条空字符串.
   const finalSystemPrompt = reminderText.length > 0
     ? ([...systemPrompt, reminderText] as unknown as typeof systemPrompt)
     : systemPrompt
@@ -335,10 +336,11 @@ export async function* queryLoop(
       model: options.model ?? config.defaultModel ?? 'default',
       // Pass `finalSystemPrompt` (systemPrompt + joined <system-reminder>
       // attachments) instead of the base `systemPrompt`. ModelCaller's
-      // `systemPrompt` parameter is `string | string[] | { type }[]` —
-      // `string[]` is mutable, but `finalSystemPrompt` is the branded
-      // `readonly string[]` (SystemPrompt). Spread it once here into a
-      // fresh mutable `string[]` to satisfy the parameter type.
+      // `systemPrompt` parameter is `string | string[] | Array<{type,…}>`
+      // (types.ts:29) — the `string[]` branch is mutable, but
+      // `finalSystemPrompt` is the branded `readonly string[]` (SystemPrompt,
+      // type.ts:13). Spread it here into a fresh mutable `string[]` to
+      // satisfy the parameter type.
       systemPrompt: [...finalSystemPrompt],
       messages,
       tools,
