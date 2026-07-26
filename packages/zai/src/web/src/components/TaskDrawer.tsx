@@ -1,9 +1,22 @@
-import { useEffect, useMemo, useRef, useState } from 'react'
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter'
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism'
 import { Badge, Button, Drawer, Empty, Tag, Tooltip } from 'antd'
+
+// React-syntax-highlighter lazy: SyntaxHighlighter + the prism style sheet
+// live in /components/markdown/syntaxHighlighter.ts (shared chunk with
+// MarkdownText and FsTab). TaskDrawer only needs highlighting if a shell
+// tool output embeds ```lang code blocks, so we trigger the dynamic
+// import inside CodeBlock instead of paying 610 KB on first paint.
+const SyntaxHighlighterLazy = lazy(() =>
+  import('./markdown/syntaxHighlighter.js').then((m) => ({
+    default: m.SyntaxHighlighter,
+  })),
+)
+async function loadOneDark(): Promise<Record<string, React.CSSProperties>> {
+  const m = await import('./markdown/syntaxHighlighter.js')
+  return m.oneDark
+}
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -68,7 +81,10 @@ const markdownComponents = {
   code: ({ className, children }: any) => {
     const match = /language-(\w+)/.exec(className || '')
     if (!match) return <code style={{ background: 'transparent', color: '#a78bfa', padding: '1px 6px', borderRadius: 3, fontSize: '0.9em', fontFamily: CODE_FONT_FAMILY, fontWeight: 500 }}>{children}</code>
-    return <SyntaxHighlighter language={match[1]} style={oneDark} customStyle={{ margin: '6px 0 10px 0', padding: '12px 14px', borderRadius: 6, fontSize: 12, lineHeight: 1.55, background: CODE_BG }} codeTagProps={{ style: { fontFamily: CODE_FONT_FAMILY } }} wrapLongLines={false} showLineNumbers={false}>{String(children).replace(/\n$/, '')}</SyntaxHighlighter>
+    // Lazy: SyntaxHighlighter pulls in prism once per session. Until then
+    // show the raw text inside the same padding/background so the user
+    // doesn't see a layout jump.
+    return <LazyCode lang={match[1]} code={String(children).replace(/\n$/, '')} />
   },
   pre: ({ children }: any) => <>{children}</>,
   table: ({ children }: any) => <table style={{ borderCollapse: 'collapse', margin: '4px 0 8px 0', fontSize: 13, width: '100%' }}>{children}</table>,
@@ -80,6 +96,78 @@ const markdownComponents = {
   blockquote: ({ children }: any) => <blockquote style={{ borderLeft: '3px solid rgba(255,255,255,0.2)', paddingLeft: 12, margin: '4px 0 8px 0', color: 'rgba(255,255,255,0.7)' }}>{children}</blockquote>,
   a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#1677ff', textDecoration: 'underline' }}>{children}</a>,
   hr: () => <hr style={{ border: 'none', borderTop: '1px solid rgba(255,255,255,0.08)', margin: '12px 0' }} />,
+}
+
+/**
+ * `<LazyCode>` wraps the lazy SyntaxHighlighter so a single shared
+ * oneDark instance is loaded exactly once per session. While the chunk
+ * is in flight the user sees an unhighlighted <pre> with the same
+ * padding/background so layout doesn't jump on arrival.
+ */
+function LazyCode({ lang, code }: { lang: string; code: string }) {
+  const [oneDark, setOneDark] = useState<Record<string, React.CSSProperties> | null>(null)
+  useEffect(() => {
+    let cancelled = false
+    loadOneDark().then((d) => {
+      if (!cancelled) setOneDark(d)
+    })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  if (!oneDark) {
+    return (
+      <pre
+        style={{
+          margin: '6px 0 10px 0',
+          padding: '12px 14px',
+          borderRadius: 6,
+          fontSize: 12,
+          lineHeight: 1.55,
+          background: CODE_BG,
+          color: 'rgba(255,255,255,0.85)',
+          fontFamily: CODE_FONT_FAMILY,
+          overflow: 'auto',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        <code>{code}</code>
+      </pre>
+    )
+  }
+  return (
+    <Suspense fallback={
+      <pre
+        style={{
+          margin: '6px 0 10px 0',
+          padding: '12px 14px',
+          borderRadius: 6,
+          fontSize: 12,
+          lineHeight: 1.55,
+          background: CODE_BG,
+          color: 'rgba(255,255,255,0.85)',
+          fontFamily: CODE_FONT_FAMILY,
+          overflow: 'auto',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        <code>{code}</code>
+      </pre>
+    }>
+      <SyntaxHighlighterLazy
+        language={lang}
+        style={oneDark}
+        customStyle={{ margin: '6px 0 10px 0', padding: '12px 14px', borderRadius: 6, fontSize: 12, lineHeight: 1.55, background: CODE_BG }}
+        codeTagProps={{ style: { fontFamily: CODE_FONT_FAMILY } }}
+        wrapLongLines={false}
+        showLineNumbers={false}
+      >
+        {code}
+      </SyntaxHighlighterLazy>
+    </Suspense>
+  )
 }
 
 export function MarkdownText({ text }: { text: string }) {

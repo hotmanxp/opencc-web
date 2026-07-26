@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 
 vi.mock('./useFsList.js', () => ({ useFsList: vi.fn() }));
 vi.mock('./useFsFile.js', () => ({ useFsFile: vi.fn() }));
@@ -15,6 +15,40 @@ vi.mock('./FsContextMenu.js', () => ({
     </div>
   )),
 }));
+// TextEditor and the markdown SyntaxHighlighter chunks are dynamic
+// imports that happy-dom never resolves (vitest's module loader uses
+// a separate Promise machinery from Node's). We stub them so that
+// the dynamic-import promise resolves on the next microtask with
+// our test stub, which FsTab's lazy load() then mounts.
+vi.mock('./TextEditor.js', () => ({
+  TextEditor: (props: any) => (
+    <div data-testid="fs-editor">
+      <pre>{props.initialContent}</pre>
+      <button
+        data-testid="fs-editor-mod-s"
+        onClick={() => props.onSave?.(props.initialContent)}
+      >
+        save
+      </button>
+      <button data-testid="fs-editor-escape" onClick={() => props.onCancel?.()}>
+        cancel
+      </button>
+    </div>
+  ),
+}));
+vi.mock('../markdown/syntaxHighlighter.js', () => ({
+  SyntaxHighlighter: ({ children }: { children?: unknown }) => (
+    <pre className="language-ts">
+      <code>{children}</code>
+    </pre>
+  ),
+  oneDark: {},
+}));
+// Make dynamic imports resolve during tests. vi.mock intercepts the
+// happy-dom doesn't progress microtasks synchronously during fireEvent,
+// so tests that wait for the lazy chunk resolve use waitFor() to
+// advance the timer. No globalThis.import shim is required — vi.mock
+// already controls the resolved module.
 
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
@@ -168,19 +202,7 @@ describe('FsTab', () => {
     expect(screen.queryByTestId('fs-preview-text')).toBeNull();
   });
 
-  it('uses fs-preview-code test-id for .ts files (syntax highlighted)', () => {
-    // Drive selection via the tree click path. We mock useFsList with
-    // a single .ts entry; expanding isn't required because the
-    // `onSelect` handler reads from expandedKeys state directly. Easiest
-    // way: stub the Tree to fire onSelect with the file path. To keep
-    // this test simple and deterministic we directly assert on the
-    // renderPreview helper through a known-state entry.
-    //
-    // Concretely: mockFile returns content for `foo.ts` and we use a
-    // mockList that returns that file as the *root-level* entry; then
-    // click it. The Tree fires onSelect only for file (leaf) nodes
-    // automatically when the user clicks — we simulate that by calling
-    // the antd Tree's onSelect prop via fireEvent.
+  it('uses fs-preview-code test-id for .ts files (syntax highlighted)', async () => {
     mockList.mockReturnValue({
       data: {
         ok: true,
@@ -205,24 +227,19 @@ describe('FsTab', () => {
       error: null,
     });
     render(<FsTab cwd="/repo" />);
-    // Find the title node and click it; antd Tree wires onSelect to
-    // the row's click handler.
-    const title = screen.getByText('foo.ts');
-    fireEvent.click(title);
-    // Now the preview block is mounted — and it's the code variant.
+    fireEvent.click(screen.getByText('foo.ts'));
     expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
     expect(screen.queryByTestId('fs-preview-text')).toBeNull();
-    // SyntaxHighlighter doesn't emit `language-typescript` on the <pre>;
-    // it wraps each token in <span class="token" style=...> inside the
-    // <code>. happy-dom runs Prism's tokenization and renders these
-    // spans, so we assert that the code element contains at least one
-    // token span — that proves we hit the SyntaxHighlighter path
-    // instead of the plain <pre> fallback (which would render a single
-    // text node, no spans).
-    const codeBlock = screen.getByTestId('fs-preview-code');
-    const codeEl = codeBlock.querySelector('code');
-    expect(codeEl).toBeTruthy();
-    expect(codeEl && codeEl.querySelectorAll('span').length).toBeGreaterThan(0);
+    // Component-level dynamic import of syntaxHighlighter resolves
+    // asynchronously; once it lands, our stub renders a <pre><code>
+    // pair which replaces the synchronous fallback `<pre>` markup.
+    await waitFor(() => {
+      const codeBlock = screen.getByTestId('fs-preview-code');
+      expect(codeBlock.querySelector('code')).toBeTruthy();
+      // The fallback <pre data-testid="fs-preview-code-fallback">
+      // unmounts when the highlighted branch takes over.
+      expect(codeBlock.querySelector('[data-testid="fs-preview-code-fallback"]')).toBeNull();
+    });
   });
 
   it('renders .md files via MarkdownText (fs-preview-md test-id)', () => {
@@ -329,7 +346,7 @@ describe('FsTab', () => {
     expect(screen.queryByTestId('fs-preview-md')).toBeNull();
   });
 
-  it('uses fs-preview-code test-id for .json files (Prism JSON highlighting)', () => {
+  it('uses fs-preview-code test-id for .json files (Prism JSON highlighting)', async () => {
     // .json / .jsonc / .json5 all map to the Prism 'json' language
     // in extToLanguage, so the preview should mount the same
     // SyntaxHighlighter wrapper as code files — not the plain <pre>.
@@ -361,11 +378,11 @@ describe('FsTab', () => {
     expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
     expect(screen.queryByTestId('fs-preview-text')).toBeNull();
     expect(screen.queryByTestId('fs-preview-md')).toBeNull();
-    // Prism tokenization should produce token spans inside <code>.
-    const codeBlock = screen.getByTestId('fs-preview-code');
-    const codeEl = codeBlock.querySelector('code');
-    expect(codeEl).toBeTruthy();
-    expect(codeEl && codeEl.querySelectorAll('span').length).toBeGreaterThan(0);
+    await waitFor(() => {
+      const codeBlock = screen.getByTestId('fs-preview-code');
+      expect(codeBlock.querySelector('code')).toBeTruthy();
+      expect(codeBlock.querySelector('[data-testid="fs-preview-code-fallback"]')).toBeNull();
+    });
   });
 
   it('renders .png files via <img> with the dataUrl (fs-preview-image branch)', () => {
@@ -902,7 +919,7 @@ it('hides 编辑 button for image and html files', () => {
   expect(screen.queryByTestId('fs-edit-btn')).toBeNull();
 });
 
-it('enters edit mode on 编辑 click', () => {
+it('enters edit mode on 编辑 click', async () => {
   mockList.mockReturnValue({
     data: { ok: true, entries: [
       { name: 'foo.ts', path: 'foo.ts', type: 'file', size: 10 },
@@ -916,7 +933,12 @@ it('enters edit mode on 编辑 click', () => {
   render(<FsTab cwd="/repo" />);
   fireEvent.click(screen.getByText('foo.ts'));
   fireEvent.click(screen.getByTestId('fs-edit-btn'));
-  expect(screen.getByTestId('fs-editor')).toBeTruthy();
+  // Lazy chunk needs one microtask to resolve; happy-dom doesn't
+  // progress microtasks during fireEvent synchronously, so the
+  // mock vi.fn() component only mounts on the next waitFor tick.
+  await waitFor(() => {
+    expect(screen.getByTestId('fs-editor')).toBeTruthy();
+  });
   expect(screen.getByTestId('fs-save-btn')).toBeTruthy();
   expect(screen.getByTestId('fs-cancel-btn')).toBeTruthy();
 });
@@ -937,8 +959,8 @@ it('saves on Save click and marks file dirty', async () => {
   render(<FsTab cwd="/repo" />);
   fireEvent.click(screen.getByText('foo.ts'));
   fireEvent.click(screen.getByTestId('fs-edit-btn'));
-  // Editor mounts; we can't easily dispatch Mod-S through CodeMirror in
-  // happy-dom, so we exercise the Save button directly.
+  // Wait for the lazy chunk to resolve and the editor stub to mount.
+  await waitFor(() => screen.getByTestId('fs-editor'));
   fireEvent.click(screen.getByTestId('fs-save-btn'));
   expect(save).toHaveBeenCalledTimes(1);
   expect(save).toHaveBeenCalledWith('foo.ts', expect.any(String));
@@ -947,7 +969,7 @@ it('saves on Save click and marks file dirty', async () => {
   expect(await screen.findByTestId('fs-tree-dirty-foo.ts')).toBeTruthy();
 });
 
-it('does not call save on Cancel click', () => {
+it('does not call save on Cancel click', async () => {
   const save = vi.fn();
   mockWrite.mockReturnValue({ save, saving: false });
   mockList.mockReturnValue({
@@ -963,6 +985,7 @@ it('does not call save on Cancel click', () => {
   render(<FsTab cwd="/repo" />);
   fireEvent.click(screen.getByText('foo.ts'));
   fireEvent.click(screen.getByTestId('fs-edit-btn'));
+  await waitFor(() => screen.getByTestId('fs-editor'));
   fireEvent.click(screen.getByTestId('fs-cancel-btn'));
   expect(save).not.toHaveBeenCalled();
   expect(screen.queryByTestId('fs-editor')).toBeNull();

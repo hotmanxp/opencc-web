@@ -2,8 +2,6 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button, Empty, Input, Segmented, Spin, Tree, message } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { FileIcon, DirIcon } from './fileIcon.js';
-import { Prism as SyntaxHighlighter } from 'react-syntax-highlighter';
-import { oneDark } from 'react-syntax-highlighter/dist/esm/styles/prism';
 import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
@@ -12,10 +10,82 @@ import { FsSearchList } from './FsSearchList.js';
 import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
 import { FsContextMenu } from './FsContextMenu.js';
-import { TextEditor } from './TextEditor.js';
 import { useFsWrite } from './useFsWrite.js';
 
+// TextEditor: dynamic-imported CodeMirror; we keep a module-scoped
+// cache rather than React.lazy + Suspense so FsTab tests don't need
+// to wait on a chunk that happy-dom never resolves. After the first
+// import resolves, subsequent mounts reuse the cached reference.
+type TextEditorComponent = React.ComponentType<{
+  initialContent: string;
+  language: string | null;
+  saving?: boolean;
+  onSave: (newContent: string) => void | Promise<void>;
+  onCancel: () => void;
+}>;
+let cachedTextEditor: TextEditorComponent | null = null;
+function loadTextEditor(): Promise<TextEditorComponent> {
+  if (cachedTextEditor) return Promise.resolve(cachedTextEditor);
+  return import('./TextEditor.js').then((m) => {
+    cachedTextEditor = m.TextEditor;
+    return cachedTextEditor;
+  });
+}
+
 const MONO = 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace';
+
+// Wrapper that resolves TextEditor via module-scoped cache (loadTextEditor)
+// before mounting it. Avoids the Suspense-and-React.lazy pattern, which
+// (a) happy-dom never resolves and (b) would couple FsTab to a Suspense
+// boundary for a chunk that rarely matters. Edit mode is the only entry
+// point — most users never trigger this lazy path.
+function LazyTextEditor(props: {
+  initialContent: string;
+  language: string | null;
+  saving?: boolean;
+  onSave: (newContent: string) => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  const [Editor, setEditor] = useState<TextEditorComponent | null>(cachedTextEditor);
+  useEffect(() => {
+    if (Editor) return;
+    let cancelled = false;
+    loadTextEditor().then((m) => {
+      if (!cancelled) setEditor(() => m);
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [Editor]);
+  if (!Editor) {
+    // Loading state — the editor needs ~540 KB chunk; show the same
+    // padding/typography the editor will use so layout doesn't jump.
+    return (
+      <div
+        data-testid="fs-editor-loading"
+        style={{
+          flex: 1,
+          minHeight: 0,
+          padding: 12,
+          color: 'rgba(255,255,255,0.45)',
+          fontSize: 12,
+        }}
+      >
+        正在加载编辑器…
+      </div>
+    );
+  }
+  const TextEditor = Editor;
+  return (
+    <TextEditor
+      initialContent={props.initialContent}
+      language={props.language}
+      saving={props.saving}
+      onSave={props.onSave}
+      onCancel={props.onCancel}
+    />
+  );
+}
 
 // We track loaded children in a map keyed by parent path.
 type Entry = { name: string; path: string; type: 'dir' | 'file'; size: number | null };
@@ -151,12 +221,37 @@ export function buildAbsPath(cwd: string | null, relPath: string): string {
  * inner <pre> / SyntaxHighlighter only needs `flex: 1, min-height: 0`
  * to inherit that scroll behavior and grow with the panel height.
  */
-function renderPreview(
-  file: import('../../../../shared/fs.js').FsFile,
-  htmlMode: HtmlMode,
-): JSX.Element {
+function FilePreview({
+  file,
+  htmlMode,
+}: {
+  file: import('../../../../shared/fs.js').FsFile;
+  htmlMode: HtmlMode;
+}): JSX.Element {
   const { name } = file;
   const content = file.content ?? '';
+  // We use a state-driven async pattern instead of React.lazy +
+  // <Suspense> because (a) Suspense + lazy in happy-dom test env
+  // doesn't resolve, leaving the fallback forever and tripping our
+  // FsTab tests, and (b) it lets us cache the SyntaxHighlighter
+  // component once across renders, avoiding reimport on every file
+  // click. HLC carries both the component and the oneDark style
+  // sheet as separate fields, populated from the same module.
+  const [hl, setHl] = useState<{
+    SyntaxHighlighter: React.ComponentType<any>;
+    oneDark: Record<string, React.CSSProperties>;
+  } | null>(null);
+  const lang = name ? extToLanguage(name) : null;
+  useEffect(() => {
+    if (!lang || hl) return;
+    let cancelled = false;
+    import('../markdown/syntaxHighlighter.js').then((m) => {
+      if (!cancelled) setHl({ SyntaxHighlighter: m.SyntaxHighlighter, oneDark: m.oneDark });
+    });
+    return () => {
+      cancelled = true;
+    };
+  }, [lang, hl]);
 
   // Image kind: the server returned a base64 dataUrl for binary image
   // formats (png/jpg/gif/webp/bmp/ico/avif). Render with a plain <img>
@@ -217,8 +312,38 @@ function renderPreview(
     );
   }
 
-  const lang = name ? extToLanguage(name) : null;
   if (lang) {
+    // We use a state-driven async pattern instead of React.lazy +
+    // <Suspense> because (a) Suspense + lazy in happy-dom test env
+    // doesn't resolve, leaving the fallback forever and tripping our
+    // FsTab tests, and (b) it lets us cache the SyntaxHighlighter
+    // component once across renders, avoiding reimport on every file
+    // click. The `useState` initialiser runs synchronously so the
+    // very first mount can already render highlighted code if the
+    // chunk is already cached from a previous click in the session.
+    if (!hl) {
+      return (
+        <div data-testid="fs-preview-code" style={containerStyle}>
+          <pre
+            data-testid="fs-preview-code-fallback"
+            style={{
+              margin: 0,
+              padding: 12,
+              background: 'rgba(255,255,255,0.04)',
+              color: 'rgba(255,255,255,0.85)',
+              fontFamily: MONO,
+              fontSize: 12,
+              lineHeight: 1.55,
+              whiteSpace: 'pre-wrap',
+              wordBreak: 'break-word',
+            }}
+          >
+            {content}
+          </pre>
+        </div>
+      );
+    }
+    const { SyntaxHighlighter, oneDark } = hl;
     return (
       <div data-testid="fs-preview-code" style={containerStyle}>
         <SyntaxHighlighter
@@ -573,7 +698,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           ) : file.error ? (
             <Empty description={file.error} />
           ) : file.data && editingPath && file.data.path === editingPath && file.data.kind === 'text' && file.data.content !== undefined ? (
-            <TextEditor
+            <LazyTextEditor
               initialContent={file.data.content}
               language={file.data.name ? extToLanguage(file.data.name) : null}
               saving={saving}
@@ -581,7 +706,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
               onCancel={handleCancel}
             />
           ) : file.data && (file.data.content !== undefined || file.data.kind === 'image' || file.data.kind === 'html') ? (
-            renderPreview(file.data, htmlMode)
+            <FilePreview file={file.data} htmlMode={htmlMode} />
           ) : (
             <Empty description="没有内容" />
           )}

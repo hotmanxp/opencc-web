@@ -1,7 +1,7 @@
 {
   "name": "zn-agent-assets",
   "version": "1.0.0",
-  "description": "AI Agent \u914d\u7f6e\u8d44\u6e90\u5e93 - Nova CLI \u7684 agent \u914d\u7f6e\u3001\u547d\u4ee4\u5b9a\u4e49\u3001\u6280\u80fd\u6a21\u5757\u53ca\u53d1\u5e03\u5de5\u5177",
+  "description": "AI Agent 配置资源库 - Nova CLI 的 agent 配置、命令定义、技能模块及发布工具",
   "private": true,
   "workspaces": [
     "packages/*"
@@ -23,6 +23,7 @@
   "license": "MIT",
   "devDependencies": {
     "@types/node": "^25.5.0",
+    "rollup-plugin-visualizer": "^7.0.1",
     "vitest": "^4.1.0"
   },
   "pnpm": {
