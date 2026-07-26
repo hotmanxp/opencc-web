@@ -172,7 +172,7 @@ describe('integration: queryLoop splices attachments into systemPrompt (v1.1)', 
     const opens = last.match(/<system-reminder>/g) ?? []
     const closes = last.match(/<\/system-reminder>/g) ?? []
     expect(opens.length).toBe(closes.length)
-    expect(opens.length).toBeGreaterThanOrEqual(2) // 2 skills → ≥2 reminders
+    expect(opens.length).toBe(2) // 2 skills → exactly 2 <system-reminder> blocks
 
     // Joining happens with a single newline; verify both skills appear in last.
     expect(last).toContain('The following skill is available: alpha')

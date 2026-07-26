@@ -19,6 +19,7 @@ import { HookRunner } from '../plugins/HookRunner.js'
 import { createDefaultHookExecutor } from '../plugins/defaultHookExecutor.js'
 import {
   type SystemPrompt,
+  asSystemPrompt,
   buildEffectiveSystemPrompt,
   getEnvInfoSection,
   getLanguageSection,

@@ -1,19 +1,19 @@
 /**
  * getAttachmentMessages — turn 入点拉取 mid-turn 期间的 attachment。
  *
- * Spec: docs/superpowers/specs/2026-07-19-zai-loop-resilience-d-attachment-design.md
- *       (base contract: 4 sources, never-throws, consumedAt sort)
- *     + docs/superpowers/specs/2026-07-26-zai-attachment-system-reminder-design.md
- *       (v1.1: collectors emit `<system-reminder>` plain text instead of
- *       assistant `AnthropicMessage` payloads; queryLoop splices onto
- *       systemPrompt instead of pushing to messages — fixes the fresh-
- *       session "consecutive assistant" Anthropic 2013 crash)
+ * Spec: docs/superpowers/specs/2026-07-26-zai-attachment-system-reminder-design.md
+ *       (v1.1: `<system-reminder>` plain-text output, systemPrompt splice)
+ *     + docs/superpowers/specs/2026-07-19-zai-loop-resilience-d-attachment-design.md
+ *       (parent spec: 4 sources, never-throws, consumedAt sort)
  *
- * 契约:
+ * 契约 (v1.1):
  *   - 永不抛 (spec §2.4), 异常 → 返 [].
  *   - 按 consumedAt asc 排序 (spec §3 行为 5).
  *   - fromTimestamp 过滤 (spec §3 行为 4).
  *   - 4 类 source: background-bash | background-agent | skill-prefetch | memory-prefetch.
+ *   - 输出 `Attachment.content` 为 `<system-reminder>...</system-reminder>` 包裹的纯文本
+ *     (v1.1); queryLoop 不再 push 到 messages,改为 spread 拼到 systemPrompt 尾巴 —
+ *     修复 fresh session "连续 assistant message" 触发的 Anthropic 2013 crash.
  *   - 不重写 BackgroundRuntime / BashTracker, 只读它们的 store API (spec §0/§3 行为 9-11).
  *
  * 实现策略: duck-typed context. 调用方通过 AttachmentContext 注入 sources,
