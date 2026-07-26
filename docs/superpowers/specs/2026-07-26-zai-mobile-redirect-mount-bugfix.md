@@ -77,7 +77,7 @@ export function redirectMobileUA(req: Request, res: Response, next: NextFunction
 2. 第 28 行 `req.url.replace(...)` → `req.originalUrl.replace(...)`
 3. 加注释解释 mount 语义
 
-`matchesMobileUA` 单独导出的纯函数不动,继续复用。
+`matchesMobileUA` 单独导出的纯函数继续复用,但内部 UA regex 已同步修正:原正则 `/Mobile|Android|iPhone|iPad|iPod|Safari/` 会误匹配所有 Safari UA(含桌面 Chrome 的 Safari 兼容 UA),已更正为 `/(?:iPhone|iPad|iPod|Android|Mobile|Safari.*Mobile)/` — 只匹配移动设备 UA。
 
 ### 3.2 测试改动(`packages/zai/src/server/test/unit/middleware/redirectMobileUA.test.ts`)
 

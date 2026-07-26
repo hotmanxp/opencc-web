@@ -26,6 +26,21 @@ describe('matchesMobileUA', () => {
     ['Mozilla/5.0 (Windows NT 10.0; Win64; x64)', false],
     ['', false],
     [undefined, false],
+    // Android + Mobile in UA string
+    [
+      'Mozilla/5.0 (Linux; Android 10; SM-G960U) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/78.0.3904.96 Mobile Safari/537.36',
+      true,
+    ],
+    // iPhone + Mobile Safari
+    [
+      'Mozilla/5.0 (iPhone; CPU iPhone OS 13_0 like Mac OS X) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/13.0 Mobile/17A577 Safari/604.1',
+      true,
+    ],
+    // Desktop Safari (no Mobile) — must NOT match to avoid false-positives
+    [
+      'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.0 Safari/605.1.15',
+      false,
+    ],
   ])('UA=%s -> %s', (ua, expected) => {
     expect(matchesMobileUA(ua)).toBe(expected)
   })

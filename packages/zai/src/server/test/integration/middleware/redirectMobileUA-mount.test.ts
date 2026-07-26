@@ -53,4 +53,12 @@ describe('redirectMobileUA under real Express mount (/agent)', () => {
       .set('User-Agent', IPHONE_UA)
     expect(res.status).toBe(200)
   })
+
+  test('iPhone UA GET /agent/ (trailing slash) -> 302 Location /m/', async () => {
+    const res = await request(buildApp())
+      .get('/agent/')
+      .set('User-Agent', IPHONE_UA)
+    expect(res.status).toBe(302)
+    expect(res.headers.location).toBe('/m/')
+  })
 })
