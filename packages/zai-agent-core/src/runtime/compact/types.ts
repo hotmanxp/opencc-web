@@ -44,6 +44,7 @@ export interface CompactSessionOptions {
   modelCaller: ModelCaller
   cwd: string
   model?: string
+  providerKind?: string
 }
 
 export type CompactSessionResult =
