@@ -8,6 +8,7 @@ import {
   ThunderboltOutlined,
 } from '@ant-design/icons'
 import { useAgentStore } from '../store/useAgentStore.js'
+import { useAppStore } from '../store/useAppStore.js'
 import type { PermissionMode } from '@zn-ai/zai-agent-core/runtime'
 
 // Canonical cycle order (matches OpenCC TUI shift+tab order).
@@ -191,11 +192,17 @@ function Row({ mode, isCurrent, isSelected, onClick, onMouseEnter }: RowProps) {
   )
 }
 
+/**
+ * ModeStatusButton 直接从 useAppStore.isMobile 读取移动端判断, 不再接受
+ * `isMobile` props. 桌面端的 `compact` prop (split-pane 展开时省掉 shift+tab
+ * 提示) 仍然保留 — 那是分屏组件传的局部状态, 与全局视口无关.
+ */
 export default function ModeStatusButton({ compact = false }: { compact?: boolean } = {}) {
   const sessions = useAgentStore((s) => s.sessions)
   const activeSessionId = useAgentStore((s) => s.activeSessionId)
   const sessionId = useAgentStore((s) => s.sessionId)
   const patchSessionMode = useAgentStore((s) => s.patchSessionMode)
+  const isMobile = useAppStore((s) => s.isMobile)
 
   const currentSessionId = sessionId ?? activeSessionId ?? null
   const currentSession = useMemo(
@@ -300,7 +307,7 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
         type="text"
         size="small"
         data-testid="mode-status-button"
-        title={`当前 mode: ${meta.label}\n点击切换`}
+        title={isMobile ? undefined : `当前 mode: ${meta.label}\n点击切换`}
         style={{
           color: meta.color,
           opacity: 0.9,
@@ -310,11 +317,17 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
           padding: '0 6px',
         }}
       >
-        <span style={{ color: meta.color }}>{meta.icon} {meta.badgeLabel}</span>
-        {/* compact(右侧分屏展开)模式下省掉 shift+tab 提示,腾出横向空间.
-            title 仍保留完整文案,鼠标 hover 仍能拿到快捷键说明. */}
-        {!compact && (
-          <span style={{ color: 'rgba(255,255,255,0.35)' }}> (shift+tab ↹)</span>
+        <span style={{ color: meta.color }}>{meta.icon}</span>
+        {/* 移动端只显示图标,不显示文字和提示 */}
+        {!isMobile && (
+          <>
+            <span style={{ color: meta.color }}> {meta.badgeLabel}</span>
+            {/* compact(右侧分屏展开)模式下省掉 shift+tab 提示,腾出横向空间.
+                title 仍保留完整文案,鼠标 hover 仍能拿到快捷键说明. */}
+            {!compact && (
+              <span style={{ color: 'rgba(255,255,255,0.35)' }}> (shift+tab ↹)</span>
+            )}
+          </>
         )}
       </Button>
     </Popover>

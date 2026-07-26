@@ -77,15 +77,15 @@ type SlashItem = {
   pluginName?: string;
 };
 
-export interface AgentInputBoxProps {
-  /** 移动端下隐藏 split-pane toggle / transcript-collapse / transcript-repair 按钮 */
-  isMobile?: boolean
-}
-
-export default React.memo(function AgentInputBox({ isMobile = false }: AgentInputBoxProps = {}) {
+/**
+ * AgentInputBox 直接从 useAppStore.isMobile 读取移动端判断, 不再接受 props.
+ * 由 useIsMobile() (挂在 Layout 顶部) 通过 matchMedia 同步到 store.
+ */
+export default React.memo(function AgentInputBox() {
   const status = useAgentStore((s) => s.status);
   const sessionId = useAgentStore((s) => s.sessionId);
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
+  const isMobile = useAppStore((s) => s.isMobile);
   const pendingAsk = useAgentStore((s) => s.pendingAsk);
   // 任务摘要: 从 store 取当前 session 的 todos + v2 tasks, 合并统计 N/M 任务.
   // 修复: 任务摘要从独立 BottomStatusBar 行合并到状态行, 让 UI 更紧凑.
@@ -667,12 +667,14 @@ export default React.memo(function AgentInputBox({ isMobile = false }: AgentInpu
                 ? "◼"
                 : "●"}
         </span>
-        <span>
-          {status === "idle" && "就绪"}
-          {status === "streaming" && `对话中… (${elapsed}s)`}
-          {status === "aborted" && "已中止"}
-          {status === "error" && "错误"}
-        </span>
+        {!isMobile && (
+          <span>
+            {status === "idle" && "就绪"}
+            {status === "streaming" && `对话中… (${elapsed}s)`}
+            {status === "aborted" && "已中止"}
+            {status === "error" && "错误"}
+          </span>
+        )}
         {/* 任务摘要: 始终展示, 避免对话进行中被"遮挡"造成用户找不到任务进度.
             修复历史: 早期版本 streaming 时整段不渲染, 用户反馈"被遮"; 改为始终
             渲染 + 流式期间降透明, 视觉上不与 spinner 抢眼, 又不丢信息.
@@ -776,7 +778,7 @@ export default React.memo(function AgentInputBox({ isMobile = false }: AgentInpu
             />
           </Popover>
         </Tooltip>
-        <SettingsButton />
+        {!isMobile && <SettingsButton />}
         {/* 折叠/展开 transcript 按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
             图标在 collapsed=false 时显示 ExpandOutlined (可折叠), true 时显示
             CompressOutlined (可展开), hover Tooltip 给完整文案, 与同行其他图标按钮

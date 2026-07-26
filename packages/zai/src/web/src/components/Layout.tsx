@@ -17,6 +17,7 @@ import { useAgentStore } from '../store/useAgentStore';
 import { api } from '../lib/api';
 import type { OutputStyle } from '../../shared/settings.js';
 import ZnLogo from './ZnLogo';
+import { useIsMobile } from '../hooks/useIsMobile';
 
 const { Sider, Header, Content } = AntLayout;
 
@@ -37,6 +38,9 @@ export default function Layout() {
   const location = useLocation();
   const { sidebarCollapsed, toggleSidebar, setInstanceContext, setOutputStyle, setMaxVisibleMessages } = useAppStore();
   const [version, setVersion] = useState<string>('…');
+  // 视口宽度监听 → 写 useAppStore.isMobile. 全局一次挂载即可, 子组件用
+  // useAppStore((s) => s.isMobile) 直接读, 避免 props 透传.
+  useIsMobile();
 
   useEffect(() => {
     api

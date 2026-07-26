@@ -1,6 +1,7 @@
 import { useEffect } from 'react'
 import { Outlet } from 'react-router-dom'
 import { useVisualViewportHeight } from '../hooks/useVisualViewportHeight'
+import { useIsMobile } from '../hooks/useIsMobile'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
 import { api } from '../lib/api'
@@ -16,6 +17,9 @@ import { api } from '../lib/api'
  */
 export default function MobileLayout() {
   const vvHeight = useVisualViewportHeight()
+  // 同步全局 isMobile. Layout 也会调, 这里再调一次是为了 MobileLayout 直接挂载
+  // (没有 Layout 父级) 时也立即生效, 比如用户从桌面拉窄到 <768px 跳路由后.
+  useIsMobile()
   const setInstanceContext = useAppStore((s) => s.setInstanceContext)
   const setOutputStyle = useAppStore((s) => s.setOutputStyle)
   const setMaxVisibleMessages = useAppStore((s) => s.setMaxVisibleMessages)

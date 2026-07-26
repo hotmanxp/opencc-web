@@ -92,6 +92,13 @@ interface AppState {
    */
   maxVisibleMessages: number;
   setMaxVisibleMessages: (n: number) => void;
+  /**
+   * 是否移动端视口. 由 `useIsMobile()` hook 通过 matchMedia 维护, 任何组件
+   * 直接读 store 即可, 无需 props 透传. 路由层 Layout/MobileLayout 也用
+   * 这个值决定走哪一套布局 (Sider + SettingsDrawer vs. MobileHeader).
+   */
+  isMobile: boolean;
+  setIsMobile: (v: boolean) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -215,6 +222,8 @@ export const useAppStore = create<AppState>((set) => ({
   setSettingsTheme: (t) => set({ settingsTheme: t }),
   setOutputStyle: (style) => set({ outputStyle: style }),
   setMaxVisibleMessages: (n) => set({ maxVisibleMessages: n }),
+  isMobile: false,
+  setIsMobile: (v) => set({ isMobile: v }),
   // NOTE: openSettingsDrawer / closeSettingsDrawer / setSettingsTheme
   // 三个 action 必须保留(SPEC 阶段 1 4-store field requirement)。
   // 若有并行 rebase 误删,SettingsButton.test.tsx 会以

@@ -55,9 +55,9 @@ vi.mock("../components/AgentInputBox.js", () => ({
   default: () => null,
 }))
 vi.mock("./AgentConversation", () => ({
-  default: ({ isMobile }: { isMobile?: boolean }) => (
-    <div data-testid="agent-conv" data-mobile={String(!!isMobile)} />
-  ),
+  // AgentConversation 内部从 useAppStore.isMobile 读移动端判断, 不再接 props.
+  // mock 只暴露一个 data-testid 节点, 让测试断言 "AgentConversation 是否被渲染".
+  default: () => <div data-testid="agent-conv" />,
 }))
 
 // BottomStatusBar mock: 如果 Agent 还在用它, 会渲染 test-id; 不再被调用就拿不到.

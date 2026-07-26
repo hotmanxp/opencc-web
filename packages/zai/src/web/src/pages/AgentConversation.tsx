@@ -14,18 +14,16 @@ import { useAutoScrollToBottom } from '../hooks/useAutoScrollToBottom'
 
 const { Paragraph } = Typography
 
-export interface AgentConversationProps {
-  /** 移动端下 AgentInputBox 隐藏 split-pane toggle / transcript-collapse / transcript-repair 按钮 */
-  isMobile?: boolean
-}
-
 /**
  * Agent.tsx 的对话核心 — 抽出来供 MobileAgent 复用。
  * 只负责:消息裁剪 + 渲染 + QuestionCard + AgentInputBox + 自动滚动 + Esc 中断。
  * 不负责:左侧 sessions 栏、右侧 SplitPane、ConfigStatusBar、Drawer 容器。
  * 这些由调用方(Agent.tsx / MobileAgent.tsx)各自决定怎么挂。
+ *
+ * 移动端判断走 useAppStore.isMobile (由 useIsMobile() hook 在 Layout 顶部
+ * 同步), 不再走 props, 让组件树更扁.
  */
-export default function AgentConversation({ isMobile = false }: AgentConversationProps) {
+export default function AgentConversation() {
   const messages = useAgentStore((s) => s.messages)
   const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages)
   const outputStyle = useAppStore((s) => s.outputStyle)
@@ -177,7 +175,7 @@ export default function AgentConversation({ isMobile = false }: AgentConversatio
         )}
       </div>
       <div className="bottom-stack">
-        <AgentInputBox isMobile={isMobile} />
+        <AgentInputBox />
       </div>
     </div>
   )

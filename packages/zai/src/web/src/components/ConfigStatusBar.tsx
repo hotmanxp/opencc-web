@@ -42,6 +42,8 @@ export default function ConfigStatusBar({
         gap: 8,
       }}
     >
+      {/* ModeStatusButton 内部从 useAppStore.isMobile 自动判断移动端.
+          splitPaneOpen 是分屏局部状态, 仍以 prop 形式传入. */}
       <ModeStatusButton compact={splitPaneOpen} />
       <span style={{ color: "#eab308" }}>{displayName}</span>
       <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
