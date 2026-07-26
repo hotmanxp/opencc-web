@@ -104,6 +104,19 @@ describe('integration: getAttachmentMessages (mid-turn attachment)', () => {
     expect(result).toEqual([])
   })
 
+  // spec §5.4 coverage — branch coverage for the early abort shortcut
+  // (get.ts L146): when signal.aborted is already true at entry, no IO
+  // must run and the result must be [].
+  test('returns empty array immediately when signal is already aborted', async () => {
+    const c = controller()
+    c.abort()
+    const result = await getAttachmentMessages({
+      sessionId: 'sess-1',
+      signal: c.signal,
+    })
+    expect(result).toEqual([])
+  })
+
   // §3 行为 2 + §4 case 2: bash attachments from BashTracker
   test('returns background-bash attachment from BashTracker', async () => {
     const tracker = makeBashTracker([makeBashTask('sess-1', 1000)])
