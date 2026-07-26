@@ -48,12 +48,13 @@ interface StreamedEvent {
   data: Record<string, unknown>
 }
 
+// TODO: theme-constant — STATUS_META color values to be migrated to CSS vars
 const STATUS_META: Record<string, { color: string; label: string; icon: JSX.Element }> = {
   running: { color: '#a78bfa', label: '运行中', icon: <LoadingOutlined spin /> },
   queued: { color: 'rgba(255,255,255,0.55)', label: '排队中', icon: <LoadingOutlined /> },
   completed: { color: '#52c41a', label: '完成', icon: <CheckCircleFilled /> },
   failed: { color: '#f5222d', label: '失败', icon: <CloseCircleFilled /> },
-  cancelled: { color: 'rgba(255,255,255,0.40)', label: '已取消', icon: <CloseCircleFilled /> },
+  cancelled: { color: 'var(--text-tertiary)', label: '已取消', icon: <CloseCircleFilled /> },
 }
 
 function formatDuration(ms: number): string {
@@ -210,7 +211,7 @@ export function PromptBlock({ text }: { text: string }) {
       <div
         style={{
           fontSize: 11,
-          color: 'rgba(255,255,255,0.45)',
+          color: 'var(--text-secondary)',
           marginBottom: 4,
           letterSpacing: 0.5,
         }}
@@ -220,7 +221,7 @@ export function PromptBlock({ text }: { text: string }) {
       <div
         style={{
           fontSize: 13,
-          color: '#fff',
+          color: 'var(--text-primary)',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           ...(clamped
@@ -312,14 +313,14 @@ export function BashTaskView({
       </div>
       {/* Command */}
       <div style={{ marginBottom: 8 }}>
-        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.40)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>
+        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5 }}>
           Command
         </div>
         <div
           style={{
             fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
             fontSize: 12,
-            color: '#fff',
+            color: 'var(--text-primary)',
             background: 'rgba(255,255,255,0.05)',
             padding: '6px 10px',
             borderRadius: 4,
@@ -332,10 +333,10 @@ export function BashTaskView({
       </div>
       {/* Output */}
       <div>
-        <div style={{ fontSize: 10, color: 'rgba(255,255,255,0.40)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5, display: 'flex', justifyContent: 'space-between' }}>
+        <div style={{ fontSize: 10, color: 'var(--text-tertiary)', marginBottom: 2, textTransform: 'uppercase', letterSpacing: 0.5, display: 'flex', justifyContent: 'space-between' }}>
           <span>Output</span>
           {isLongOutput && !expanded && (
-            <span style={{ color: 'rgba(255,255,255,0.35)', textTransform: 'none' }}>
+            <span style={{ color: 'var(--text-tertiary)', textTransform: 'none' }}>
               Showing {maxOutputLines} / {outputLines.length} lines · {Math.round(output.length / 1024 * 10) / 10}KB
             </span>
           )}
@@ -346,7 +347,7 @@ export function BashTaskView({
             fontSize: 11,
             lineHeight: 1.5,
             color: 'rgba(255,255,255,0.85)',
-            background: '#1a1a1a',
+            background: 'var(--bg-card-hover)',
             padding: '8px 10px',
             borderRadius: 4,
             maxHeight: expanded ? 'none' : 360,
@@ -446,7 +447,7 @@ export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
         margin: '6px 0',
         fontSize: 12,
         fontFamily: 'ui-monospace, monospace',
-        color: '#fff',
+        color: 'var(--text-primary)',
         display: 'flex',
         alignItems: 'center',
         gap: 8,
@@ -690,7 +691,7 @@ export function TaskDrawer({
             </Tag>
           )}
           {detail && !isBashTask && duration && (
-            <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12 }}>{duration}</span>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{duration}</span>
           )}
           {bashTask && (
             <Tag
@@ -705,7 +706,7 @@ export function TaskDrawer({
             </Tag>
           )}
           {bashTask && (
-            <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 12 }}>{formatDuration((bashTask.finishedAt ?? Date.now()) - bashTask.startedAt)}</span>
+            <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{formatDuration((bashTask.finishedAt ?? Date.now()) - bashTask.startedAt)}</span>
           )}
         </div>
       }
@@ -714,7 +715,7 @@ export function TaskDrawer({
       open={!!taskId}
       onClose={onClose}
       destroyOnClose
-      styles={{ body: { padding: 0, background: '#141414', color: '#fff' } }}
+      styles={{ body: { padding: 0, background: 'var(--bg-body)', color: 'var(--text-primary)' } }}
       extra={
         detail && detail.status === 'running' ? (
           <Button
@@ -735,7 +736,7 @@ export function TaskDrawer({
       }
     >
       {loading && !detail && !bashTask && (
-        <div style={{ padding: 24, textAlign: 'center', color: 'rgba(255,255,255,0.45)' }}>
+        <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
           <LoadingOutlined /> 加载中...
         </div>
       )}
@@ -749,11 +750,11 @@ export function TaskDrawer({
             style={{
               padding: '12px 20px',
               borderBottom: '1px solid rgba(255,255,255,0.08)',
-              background: '#1a1a1a',
+              background: 'var(--bg-card-hover)',
             }}
           >
             <PromptBlock text={detail.input.prompt} />
-            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
+            <div style={{ display: 'flex', gap: 12, fontSize: 11, color: 'var(--text-secondary)' }}>
               {detail.input.model && <span>模型: {detail.input.model}</span>}
               {detail.input.cwd && (
                 <Tooltip title={detail.input.cwd}>
@@ -772,7 +773,7 @@ export function TaskDrawer({
                   style={{
                     marginTop: 8,
                     fontSize: 11,
-                    color: 'rgba(255,255,255,0.65)',
+                    color: 'var(--text-secondary)',
                     display: 'inline-flex',
                     alignItems: 'center',
                     gap: 4,
@@ -793,7 +794,7 @@ export function TaskDrawer({
               <Empty
                 image={Empty.PRESENTED_IMAGE_SIMPLE}
                 description="等待事件..."
-                style={{ color: 'rgba(255,255,255,0.40)' }}
+                style={{ color: 'var(--text-tertiary)' }}
               />
             ) : (
               timeline.map((item) => {
@@ -802,7 +803,7 @@ export function TaskDrawer({
                     <div
                       key={item.key}
                       style={{
-                        color: '#fff',
+                        color: 'var(--text-primary)',
                         padding: '6px 0',
                       }}
                     >
@@ -824,7 +825,7 @@ export function TaskDrawer({
                           ? '#f5222d'
                           : item.tone === 'ok'
                             ? '#52c41a'
-                            : 'rgba(255,255,255,0.45)',
+                            : 'var(--text-secondary)',
                       fontFamily: 'ui-monospace, monospace',
                     }}
                   >
