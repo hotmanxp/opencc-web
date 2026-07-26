@@ -288,9 +288,9 @@ const TOOL_PILL_COLORS: Record<
   ToolStatus,
   { bg: string; fg: string; tag: string; label: string }
 > = {
-  start: { bg: "var(--accent-start-bg)", fg: "var(--accent-start)", tag: "purple", label: "调用中" },
-  done: { bg: "var(--accent-end-bg)", fg: "var(--accent-start)", tag: "green", label: "已完成" },
-  error: { bg: "var(--accent-end-bg)", fg: "var(--accent-end)", tag: "red", label: "错误" },
+  start: { bg: "var(--bg-card-hover, #1a1a2e)", fg: "var(--accent-start)", tag: "purple", label: "调用中" },
+  done: { bg: "var(--bg-card-hover, #1a1a2e)", fg: "var(--accent-start)", tag: "green", label: "已完成" },
+  error: { bg: "var(--bg-card-hover, #1a1a2e)", fg: "var(--accent-end)", tag: "red", label: "错误" },
 };
 
 // 气泡 copy 按钮. 默认 `absolute` 模式: 始终浮在气泡右上角 (top:8 right:8),
