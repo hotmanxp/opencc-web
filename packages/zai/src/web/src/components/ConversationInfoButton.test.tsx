@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, it, expect, vi, afterEach } from 'vitest'
 import '@testing-library/jest-dom'
-import { cleanup, fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useAppStore } from '../store/useAppStore.js'
 
 // Replace the actual hook with a deterministic fixture. We only need the
@@ -35,6 +35,26 @@ vi.mock('./ConversationInfoCard.js', () => ({
   ),
 }))
 
+// Stub Modal to a minimal synchronous wrapper so the open/close toggle is
+// testable in happy-dom without dealing with rc-motion's async leave cycle.
+// The real production Modal (with destroyOnHidden) is exercised in browser
+// E2E tests; here we just need to verify the trigger toggles mobileOpen and
+// that the card body mounts/unmounts accordingly.
+vi.mock('antd', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('antd')>()
+  return {
+    ...actual,
+    Modal: ({ open, children, ...rest }: { open: boolean; children: React.ReactNode; [k: string]: unknown }) => (
+      <div
+        data-testid={rest['data-testid'] as string}
+        style={{ display: open ? 'block' : 'none' }}
+      >
+        {open ? children : null}
+      </div>
+    ),
+  }
+})
+
 import ConversationInfoButton from './ConversationInfoButton.js'
 
 describe('ConversationInfoButton — mobile vs desktop branching', () => {
@@ -67,20 +87,15 @@ describe('ConversationInfoButton — mobile vs desktop branching', () => {
     expect(screen.queryByTestId('desktop-popover-anchor')).not.toBeInTheDocument()
   })
 
-  // happy-dom 不 dispatch CSS transitionend, antd rc-motion 的 leave 动画
-  // 永远停在中间状态, destroyOnHidden 不会触发卸载. 真实浏览器里 antd 标准
-  // 过渡完成后正常卸载, 这里 skip 把这条断言留给手动 e2e / jsdom 环境验证.
-  it.skip('mobile: clicking the trigger toggles the Modal open state', async () => {
+  it('mobile: clicking the trigger toggles the Modal open state', () => {
     useAppStore.setState({ isMobile: true })
     render(<ConversationInfoButton />)
     const trigger = screen.getByTestId('conversation-info-trigger')
+    // 初始打开 → 关闭
     fireEvent.click(trigger)
-    await waitFor(() =>
-      expect(screen.queryByTestId('conversation-info-card')).not.toBeInTheDocument()
-    )
+    expect(screen.queryByTestId('conversation-info-card')).not.toBeInTheDocument()
+    // 再点 → 打开
     fireEvent.click(trigger)
-    await waitFor(() =>
-      expect(screen.getByTestId('conversation-info-card')).toBeInTheDocument()
-    )
+    expect(screen.getByTestId('conversation-info-card')).toBeInTheDocument()
   })
 })
