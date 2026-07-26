@@ -339,14 +339,12 @@ export function MessageCopyButton({
           top: 4,
           right: 2,
           zIndex: 1,
-          background: "var(--bg-card-hover)",
+          background: "transparent",
           borderRadius: 4,
-          opacity: 0.85,
         }
       : {
-          background: "var(--bg-card-hover)",
+          background: "transparent",
           borderRadius: 4,
-          opacity: 0.85,
           flexShrink: 0,
         };
 
