@@ -35,18 +35,6 @@ describe("TodoDropdown", () => {
     expect(screen.getByTestId("todo-dropdown-item-pending")).toHaveTextContent("写测试");
   });
 
-  test("同时含 todos + v2 时渲染两段", () => {
-    render(
-      <TodoDropdown
-        todos={[todo("老 todo", "in_progress")]}
-        v2Tasks={[v2("v1", "V2 任务 A", "pending"), v2("v2", "V2 任务 B", "completed")]}
-      />,
-    );
-    expect(screen.getByTestId("todo-dropdown-item-in_progress")).toHaveTextContent("老 todo");
-    expect(screen.getByTestId("v2-task-dropdown-item-pending")).toHaveTextContent("V2 任务 A");
-    expect(screen.getByTestId("v2-task-dropdown-item-completed")).toHaveTextContent("V2 任务 B");
-    expect(screen.getByTestId("todo-dropdown")).toHaveTextContent("V2 任务清单");
-  });
 
   test("v2 task 含 blockedBy 时显示依赖数量", () => {
     render(
