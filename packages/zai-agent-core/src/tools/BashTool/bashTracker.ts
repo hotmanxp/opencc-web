@@ -344,4 +344,40 @@ class BashBackgroundTracker {
   }
 }
 
+/**
+ * 测试 seam: 清理 /tmp 下残留 zai-bash-* 文件 (兜底, 处理历史测试残留)。
+ * 仅当 NODE_ENV === 'test' 或 VITEST 存在时执行真实清理, 其他环境 throw 以防误删用户数据。
+ */
+export function __cleanupTempFilesForTests(): { cleaned: string[] } {
+  if (process.env.NODE_ENV !== 'test' && !process.env.VITEST) {
+    throw new Error('__cleanupTempFilesForTests 必须在测试环境调用')
+  }
+  const fs = require('node:fs') as typeof import('node:fs')
+  const dirs = new Set<string>()
+  const tmpdir = process.env.TMPDIR ?? '/tmp'
+  dirs.add('/tmp')
+  if (tmpdir !== '/tmp') dirs.add(tmpdir)
+  const cleaned: string[] = []
+  const re = /^zai-bash-/
+  for (const dir of dirs) {
+    let names: string[]
+    try {
+      names = fs.readdirSync(dir)
+    } catch {
+      continue
+    }
+    for (const n of names) {
+      if (!re.test(n)) continue
+      const full = `${dir}/${n}`
+      try {
+        fs.unlinkSync(full)
+        cleaned.push(full)
+      } catch {
+        // best-effort
+      }
+    }
+  }
+  return { cleaned }
+}
+
 export const bashBackgroundTracker = new BashBackgroundTracker()

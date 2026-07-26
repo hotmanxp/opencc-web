@@ -4,7 +4,7 @@ import { join } from 'path'
 import { tmpdir } from 'os'
 import { existsSync } from 'node:fs'
 import { BashTool } from '../../../src/tools/BashTool/BashTool.js'
-import { bashBackgroundTracker } from '../../../src/tools/BashTool/bashTracker.js'
+import { bashBackgroundTracker, __cleanupTempFilesForTests } from '../../../src/tools/BashTool/bashTracker.js'
 import { BashInputSchema } from '../../../src/tools/BashTool/schema.js'
 import { isSearchOrReadBashCommand } from '../../../src/tools/BashTool/isSearchOrRead.js'
 import { analyzeBashCommand } from '../../../src/tools/BashTool/commandAnalysis.js'
@@ -39,6 +39,7 @@ beforeEach(async () => {
 afterEach(async () => {
   await rm(workdir, { recursive: true, force: true })
   bashBackgroundTracker.__resetForTests()
+  __cleanupTempFilesForTests()  // 兜底:清掉本测试 run 期间任何残留 /tmp/zai-bash-*
 })
 
 // ---------------------------------------------------------------------------
