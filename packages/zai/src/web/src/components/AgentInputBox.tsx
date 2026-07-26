@@ -7,6 +7,7 @@ import {
   ExpandOutlined,
   MenuUnfoldOutlined,
   ShareAltOutlined,
+  StopOutlined,
 } from "@ant-design/icons";
 import {
   STORAGE_KEYS,
@@ -724,7 +725,10 @@ export default React.memo(function AgentInputBox() {
             </Tooltip>
           </Popover>
         )}
-        {status === "streaming" && (
+        {/* Esc 中断提示仅在桌面端展示, 移动端用输入框旁的"停止"按钮替代 —
+            物理/虚拟键盘没有 Esc 键, 文字提示对移动用户没意义.
+            桌面端保留是为了让键盘用户能记住快捷键. */}
+        {status === "streaming" && !isMobile && (
           <span style={{ color: "rgba(255,255,255,0.45)" }}>· esc 中断</span>
         )}
         {attachments.length > 0 && (
@@ -1033,6 +1037,43 @@ export default React.memo(function AgentInputBox() {
             }
             style={{ resize: "none", flex: 1 }}
           />
+          {/* 移动端"停止"按钮: 替代桌面端的 Esc 键 —
+            物理键盘/软键盘都没有 Esc, 必须给移动用户提供一个等价入口.
+            - 仅 isMobile 时挂载 (桌面端继续靠 Esc keydown, 避免按钮占位);
+            - 仅 streaming 时显示, 非流式态 stop 无意义;
+            - 调用 useAgentStore.getState().stop() 与 AgentConversation 的
+              全局 Esc 处理路径完全一致 (AgentConversation.tsx:91-99),
+              走同一套后端 abort + status 流, 不会绕过任何清理逻辑. */}
+          {isMobile && status === "streaming" && (
+            <Button
+              data-testid="mobile-stop-button"
+              aria-label="停止生成"
+              onClick={() => {
+                void useAgentStore.getState().stop()
+              }}
+              style={{
+                flexShrink: 0,
+                marginLeft: 8,
+                height: "auto",
+                alignSelf: "stretch",
+                display: "flex",
+                alignItems: "center",
+                justifyContent: "center",
+                gap: 4,
+                padding: "0 12px",
+                background: "rgba(255, 102, 0, 0.15)",
+                border: "1px solid #ff6600",
+                borderRadius: 6,
+                color: "#ff6600",
+                fontWeight: 600,
+                fontSize: 13,
+                cursor: "pointer",
+              }}
+            >
+              <StopOutlined />
+              <span>停止</span>
+            </Button>
+          )}
         </div>
       </div>
 
