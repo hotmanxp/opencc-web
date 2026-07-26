@@ -122,9 +122,10 @@ describe('MobileQuickDrawer — Bash tab', () => {
 
 describe('MobileQuickDrawer — Prompt tab', () => {
   function switchToPromptTab() {
-    // Segmented rendered via Portal, use document.body.
+    // Segmented rendered via Portal, use document.body. The Diff tab is
+    // index 2 in MobileQuickDrawer, so prompt sits at index 1.
     const items = document.body.querySelectorAll('.ant-segmented-item')
-    expect(items.length).toBe(2)
+    expect(items.length).toBe(3)
     fireEvent.click(items[1]!)
   }
 
