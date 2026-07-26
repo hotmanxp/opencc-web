@@ -10,8 +10,8 @@ import { useAppStore } from '../store/useAppStore.js'
 const STATUS_ICON: Record<string, JSX.Element> = {
   running: <LoadingOutlined style={{ color: 'var(--accent-start)' }} spin />,
   queued: <CaretRightOutlined style={{ color: 'var(--bg-card-hover)' }} />,
-  completed: <CheckCircleFilled style={{ color: '#52c41a' }} />,
-  failed: <CloseCircleFilled style={{ color: '#f5222d' }} />,
+  completed: <CheckCircleFilled style={{ color: 'var(--success)' }} />,
+  failed: <CloseCircleFilled style={{ color: 'var(--error)' }} />,
   cancelled: <CloseCircleFilled style={{ color: 'var(--bg-card-hover)' }} />,
 }
 
@@ -82,8 +82,8 @@ function Row({
 
 const BASH_STATUS_ICON: Record<string, JSX.Element> = {
   running: <CodeOutlined style={{ color: 'var(--accent-start)' }} spin />,
-  completed: <CheckCircleFilled style={{ color: '#52c41a' }} />,
-  failed: <CloseCircleFilled style={{ color: '#f5222d' }} />,
+  completed: <CheckCircleFilled style={{ color: 'var(--success)' }} />,
+  failed: <CloseCircleFilled style={{ color: 'var(--error)' }} />,
   killed: <CloseCircleFilled style={{ color: 'var(--bg-card-hover)' }} />,
 }
 
@@ -299,7 +299,7 @@ export function TaskDock({
             gap: 4,
             cursor: 'pointer',
             fontSize: 12,
-            color: total > 0 ? '#a78bfa' : 'rgba(255,255,255,0.40)',
+            color: total > 0 ? '#a78bfa' : 'var(--bg-card-hover)', // kept: #a78bfa (purple accent — no CSS var mapping)
           }}
         >
           <Badge count={total} size="small" offset={isLite ? [2, -2] : [4, -2]} color="#a78bfa">
