@@ -487,6 +487,13 @@ async function runForeground(
     if (ctx.abortSignal) {
       ctx.abortSignal.addEventListener('abort', () => {
         // 子进程已由 spawn({signal}) 自动 kill, 等待 close 事件归一化
+        // belt-and-suspenders: 即使未来 'exit' 事件不触发 (eg child 已被 kill
+        // 抢占), 也保证 cwd trailer 文件不留垃圾
+        try {
+          unlinkSync(tmpCwdFile)
+        } catch {
+          // 文件还没写出来 / 已删 / 权限不足 — 静默
+        }
       }, { once: true })
     }
   })

@@ -606,4 +606,31 @@ describe('BashTool', () => {
       await rm(tmpDir, { recursive: true, force: true })
     })
   })
+
+  describe('回归: abort 路径清理 cwd trailer', () => {
+    test('abort 触发时 tmpCwdFile 被清理', async () => {
+      // 先确保现场干净
+      const fs = await import('node:fs')
+      const before = fs.readdirSync('/tmp').filter((f) =>
+        f.startsWith('zai-bash-bash-') && f.endsWith('-cwd')
+      )
+      const beforeCount = before.length
+
+      const ac = new AbortController()
+      const ctxWithAbort = { ...ctx, abortSignal: ac.signal }
+      // 跑一个 sleep 命令让 abort 来得及触发
+      const p = BashTool.call({ command: 'sleep 0.5' }, ctxWithAbort)
+      setTimeout(() => ac.abort(), 50)
+      await p
+
+      const after = fs.readdirSync('/tmp').filter((f) =>
+        f.startsWith('zai-bash-bash-') && f.endsWith('-cwd')
+      )
+      // abort 路径不应新增 cwd trailer 残留
+      expect(
+        after.length,
+        `expected no new zai-bash-bash-*-cwd files; before=${beforeCount} after=${after.length}; new=${JSON.stringify(after.slice(beforeCount))}`
+      ).toBe(beforeCount)
+    })
+  })
 })
