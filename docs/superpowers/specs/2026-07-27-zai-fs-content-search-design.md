@@ -177,7 +177,7 @@ export async function runRipgrep(
 
 - `resolveRgPath()`:先 vendor,再 system,合并为列表;调用方循环尝试(与 `GrepTool.runRipgrepWithFallback` 同语义,本次不抽出循环,留给调用方)。
 - `runRipgrep()`:`spawn(rg, args, { cwd, signal, timeout, killSignal:'SIGKILL' })`,监听 stdout/stderr,超发 SIGTERM → 5s 后 SIGKILL;settled guard 防重复 resolve。
-- EAGAIN errno 11 重试由调用方负责(`/fs/content-search` handler 内单线程 `-j 1` 重试)。
+- **errno 11 重试语义**:`/fs/content-search` handler 内做,**最多一次**单线程重试(`-j 1`);两次都失败才返回 ok:false。`runRipgrep` 本身不重试,只暴露 `result.code` + `result.stderr` 给调用方判断。
 
 ### 4.3 route handler 错误矩阵
 
@@ -264,9 +264,10 @@ export function useFsContentSearch(
 ```
 
 行为:
-- `enabled=false` 或 `cwd=null` 或 `query.trim()=''` → 立即返回 `{ data:null, loading:false, error:null, durationMs:null }`,不发请求。
+- `enabled=false` 或 `cwd=null` 或 `query.trim()=''` → 立即返回 `{ data:null, loading:false, error:null, durationMs:null }`,**不发请求且 abort 任何 inflight**(与 `useFsSearch` 模板的关键差异:`useFsSearch` 没有 enabled gate,`useFsContentSearch` 必须 abort inflight)。
 - 200ms debounce + seqRef + AbortController(模板与 `useFsSearch.ts` 一致)。
 - `headLimit` 通过 query string `&headLimit=<n>` 透传给 server。
+- 卸载 / cwd 变 / query 变 / enabled 变 → cleanup 中 `clearTimeout` + `ac.abort()`,避免 inflight 串到下一个 query。
 
 ### 4.6 FsContentSearchList
 
@@ -371,14 +372,9 @@ useEffect(() => {
 
 ### 4.8 CSS
 
-`packages/zai/src/web/src/components/splitPane/FsTab.css`(或内联 style,沿用 FsTab 现有 inline 风格):
+**决策**:走内联 style 而非新建 `.css` 文件 — FsTab 现有 header / 列表 / preview 全部内联 style(`rgba(255,255,255,*)` 直接写),与现有风格一致,不引入额外的样式文件加载路径。
 
-```css
-.fs-line-highlight {
-  background: rgba(255, 200, 0, 0.3);
-  transition: background 0.3s;
-}
-```
+FilePreview 渲染时给 `<span data-line={n}>` 加内联 `style={{ background: 'rgba(255,200,0,0.3)', transition: 'background 0.3s' }}`,2s 后 setState 移除该 prop。
 
 ## 5. 关键场景
 
