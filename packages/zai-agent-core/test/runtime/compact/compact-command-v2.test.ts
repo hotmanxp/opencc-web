@@ -38,7 +38,6 @@ describe('compactSession v2 集成', () => {
       if (calls === 1) {
         throw Object.assign(new Error('prompt_too_long'), {
           code: 'prompt_too_long',
-          // 100_000: gap=72000 > 50k headroom threshold, truncateHeadForPTLRetry 返回非 null → 重试
           ptlResponse: { usage: { output_tokens: 100_000 } },
         })
       }

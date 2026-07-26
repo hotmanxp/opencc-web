@@ -147,7 +147,7 @@ export async function compactSession(
       if (e.code !== 'prompt_too_long' || attempt >= PTL_RETRY_MAX) {
         return { kind: 'error', message: `生成摘要失败: ${e.message.slice(0, 200)}` }
       }
-      const ctx = getEffectiveContextWindowSize(model ?? 'MiniMax-M3') + 20_000
+      const ctx = getEffectiveContextWindowSize(model ?? 'MiniMax-M3')
       const truncated = truncateHeadForPTLRetry(messages, e.ptlResponse ?? {}, ctx)
       if (!truncated) {
         return { kind: 'error', message: '对话历史过长, 无法压缩(已尝试 3 次)' }
