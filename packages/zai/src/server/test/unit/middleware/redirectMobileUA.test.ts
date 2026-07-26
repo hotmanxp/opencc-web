@@ -3,7 +3,7 @@ import type { Request } from 'express'
 import { redirectMobileUA, matchesMobileUA } from '../../../middleware/redirectMobileUA.js'
 
 function mkReq(path: string, ua: string | undefined): Request {
-  return { path, url: path, headers: ua ? { 'user-agent': ua } : {} } as unknown as Request
+  return { path, url: path, baseUrl: '', headers: ua ? { 'user-agent': ua } : {} } as unknown as Request
 }
 function mkRes(): any {
   const headers: Record<string, string> = {}
@@ -35,6 +35,7 @@ describe('redirectMobileUA', () => {
   test('redirects /agent?sid=abc to /m?sid=abc (querystring preserved)', () => {
     const req = mkReq('/agent', 'Mozilla/5.0 (iPhone)')
     req.url = '/agent?sid=abc&foo=bar'
+    req.originalUrl = '/agent?sid=abc&foo=bar'
     const res = mkRes()
     const next = vi.fn()
     redirectMobileUA(req, res, next)

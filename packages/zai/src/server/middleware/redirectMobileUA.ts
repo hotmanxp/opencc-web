@@ -17,7 +17,13 @@ export function matchesMobileUA(ua: string | undefined): boolean {
  * 不对 /m 重定向 — 避免 /m → /m 死循环。
  */
 export function redirectMobileUA(req: Request, res: Response, next: NextFunction): void {
-  if (req.path !== '/agent') {
+  // Express 的 app.use('/agent', mw) 会自动 strip 挂载前缀,中间件内
+  // req.path 是相对路径('/...'),req.url 也是相对路径。完整路径要用
+  // req.baseUrl + req.path(Express 官方 mount 语义);querystring 也要从
+  // req.originalUrl 拿。
+  const fullPath = req.baseUrl + req.path
+  // req.path 在 app.use('/agent', ...) 下为 '/', 所以 '/agent/' 也算 '/agent'。
+  if (!/^\/agent(?:\/|\\?|$)/.test(fullPath)) {
     next()
     return
   }
@@ -26,7 +32,6 @@ export function redirectMobileUA(req: Request, res: Response, next: NextFunction
     next()
     return
   }
-  // req.url 形如 '/agent?sid=xxx&foo=bar',strip 前缀 → '?sid=xxx&foo=bar'
-  const suffix = req.url.replace(/^\/agent/, '')
+  const suffix = req.originalUrl.replace(/^\/agent/, '')
   res.redirect(302, '/m' + suffix)
 }
