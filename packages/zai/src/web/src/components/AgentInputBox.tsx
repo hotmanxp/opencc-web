@@ -8,12 +8,14 @@ import {
   MenuUnfoldOutlined,
   ShareAltOutlined,
   StopOutlined,
+  AppstoreAddOutlined,
 } from "@ant-design/icons";
 import {
   STORAGE_KEYS,
   useLocalStorageState,
 } from "../components/splitPane/shared.js";
 import { useSplitPaneCompactLock } from "../hooks/useSplitPaneCompactLock.js";
+import { useSubmitPrompt } from "../hooks/useSubmitPrompt.js";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
 import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
@@ -464,75 +466,7 @@ export default React.memo(function AgentInputBox() {
     }
   };
 
-  const postPromptToLLM = useCallback(
-    async (
-      text: string,
-      blocks: Array<{
-        type: "image";
-        source: { type: "base64"; media_type: string; data: string };
-      }>,
-    ) => {
-      const { sessionId: returnedSessionId } = await api.post<{
-        sessionId: string;
-      }>("/agent/prompt", {
-        prompt: text || undefined,
-        contentBlocks: blocks.length > 0 ? blocks : undefined,
-        sessionId: sessionId || activeSessionId || undefined,
-      }, {
-        // X-Session-Id 与 body.sessionId 同步: server 现在用 body.sessionId
-        // 决定是续传还是新会话, header 是冗余校验 + 日志/审计用, 让 server
-        // 能在多 tab 串号场景里发现并拒绝.
-        headers: (sessionId || activeSessionId) ? { 'X-Session-Id': sessionId || activeSessionId || '' } : undefined,
-      });
-      useAgentStore.setState({
-        sessionId: returnedSessionId,
-        activeSessionId: returnedSessionId,
-      });
-      const localTitle = deriveLocalTitle(text);
-      if (localTitle) {
-        useAgentStore.getState().applySessionEvent({
-          type: "session.renamed",
-          sessionId: returnedSessionId,
-          title: localTitle,
-          eventId: `session-renamed-${returnedSessionId}`,
-          ts: Date.now(),
-        });
-      }
-    },
-    [sessionId, activeSessionId],
-  );
-
-  const pushUserMsg = useCallback(
-    (text: string, isRenderedPrompt = false) => {
-      const ready = attachments.filter((a) => a.status === "ready")
-      useAgentStore.setState((s) => ({
-        status: "streaming",
-        messages: [
-          ...s.messages,
-          {
-            eventId: `user-${Date.now()}-${isRenderedPrompt ? "r" : "o"}`,
-            sessionId: "",
-            ts: Date.now(),
-            turnIndex: 0,
-            type: "user.text",
-            text,
-            isRenderedPrompt,
-            attachments: ready.map((a) => ({
-              localId: a.localId,
-              mime: a.mime,
-              filename: a.filename,
-              thumbnailUrl: a.base64DataUrl,
-              status: a.status,
-            })),
-          },
-        ],
-        sendSeq: s.sendSeq + 1,
-      }))
-      ready.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl))
-      setAttachments((prev) => prev.filter((a) => a.status !== "ready"))
-    },
-    [attachments],
-  )
+  const { submitPrompt, pushUserMsg } = useSubmitPrompt();
 
   const handleSend = async () => {
     const text = input.trim();
@@ -578,14 +512,18 @@ export default React.memo(function AgentInputBox() {
             if (result.payload?.rendered) {
               pushUserMsg(result.payload.rendered, true);
             }
-            await postPromptToLLM(result.payload?.rendered ?? "", blocks);
+            // 上方已手工 pushUserMsg 原文本 + 渲染版,这里 skip 让
+            // submitPrompt 不重复 push,避免 msgs 出现 duplicate user.text.
+            await submitPrompt(result.payload?.rendered ?? text, {
+              skipPushUserMsg: true,
+            });
             return;
           case "message":
             message.info(result.payload.text, 3);
             return;
           case "unknown":
             pushUserMsg(text, false);
-            await postPromptToLLM(text, blocks);
+            await submitPrompt(text, { skipPushUserMsg: true });
             return;
           case "error":
             message.error(result.payload.message);
@@ -600,31 +538,39 @@ export default React.memo(function AgentInputBox() {
     if (status === "streaming") return;
     setInput("");
 
-    const userMsg: AgentMessage = {
-      eventId: `user-${Date.now()}`,
-      sessionId: "",
-      ts: Date.now(),
-      turnIndex: 0,
-      type: "user.text",
-      text,
-      attachments: readyAttachments.map((a) => ({
-        localId: a.localId,
-        mime: a.mime,
-        filename: a.filename,
-        thumbnailUrl: a.base64DataUrl,
-        status: a.status,
-      })),
-    };
-    useAgentStore.setState((s) => ({
-      status: "streaming",
-      messages: [...s.messages, userMsg],
-      sendSeq: s.sendSeq + 1,
-    }));
-
+    pushUserMsg(text);
     attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl));
     setAttachments([]);
 
-    await postPromptToLLM(text, blocks);
+    if (blocks.length > 0) {
+      // 含图片附件: 仍走原始内联实现 (submitPrompt hook 不接 contentBlocks,
+      // 保持图片附件路径不抽到 hook — 与 handleSend 历史契约对齐, 避免破坏
+      // 已有 ["AgentInputBox"] 附件提交路径).
+      const sid = sessionId || activeSessionId || undefined;
+      const { sessionId: returnedSessionId } = await api.post<{
+        sessionId: string;
+      }>(
+        "/agent/prompt",
+        { prompt: text || undefined, contentBlocks: blocks, sessionId: sid },
+        { headers: sid ? { "X-Session-Id": sid } : undefined },
+      );
+      useAgentStore.setState({
+        sessionId: returnedSessionId,
+        activeSessionId: returnedSessionId,
+      });
+      const localTitle = deriveLocalTitle(text);
+      if (localTitle) {
+        useAgentStore.getState().applySessionEvent({
+          type: "session.renamed",
+          sessionId: returnedSessionId,
+          title: localTitle,
+          eventId: `session-renamed-${returnedSessionId}`,
+          ts: Date.now(),
+        });
+      }
+    } else {
+      await submitPrompt(text);
+    }
   };
 
   return (
@@ -650,6 +596,17 @@ export default React.memo(function AgentInputBox() {
           flexWrap: "wrap",
         }}
       >
+        {isMobile && (
+          <Tooltip title="常用指令" placement="top">
+            <Button
+              icon={<AppstoreAddOutlined />}
+              onClick={() => useAppStore.getState().setQuickDrawerOpen(true)}
+              data-testid="mobile-quick-drawer-toggle"
+              aria-label="打开常用指令"
+              style={toolbarIconButtonStyle}
+            />
+          </Tooltip>
+        )}
         <span
           style={{
             color:

@@ -310,3 +310,20 @@ describe('AgentInputBox — share button', () => {
     });
   });
 })
+
+describe('AgentInputBox — 移动端 [⚡] 按钮', () => {
+  it('isMobile=true 时渲染 mobile-quick-drawer-toggle,点击触发 setQuickDrawerOpen(true)', () => {
+    useAppStore.setState({ isMobile: true, quickDrawerOpen: false })
+    render(<AgentInputBox />)
+    const btn = screen.getByTestId('mobile-quick-drawer-toggle')
+    expect(btn).toBeInTheDocument()
+    fireEvent.click(btn)
+    expect(useAppStore.getState().quickDrawerOpen).toBe(true)
+  })
+
+  it('isMobile=false 时不渲染该按钮', () => {
+    useAppStore.setState({ isMobile: false })
+    render(<AgentInputBox />)
+    expect(screen.queryByTestId('mobile-quick-drawer-toggle')).toBeNull()
+  })
+})
