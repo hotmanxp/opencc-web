@@ -1,18 +1,22 @@
 import { useState } from 'react'
-import { Drawer, Segmented, Button, Input, App as AntApp } from 'antd'
+import { Drawer, Segmented, Button, Input, App as AntApp, Tag, Modal, Empty } from 'antd'
 import {
   ReloadOutlined,
   PlusOutlined,
   DeleteOutlined,
   ClearOutlined,
+  UndoOutlined,
 } from '@ant-design/icons'
 import { useAgentStore } from '../store/useAgentStore.js'
 import { useQuickPrompts, MAX_TEXT } from '../hooks/useQuickPrompts.js'
 import { useSubmitPrompt } from '../hooks/useSubmitPrompt.js'
 import { useBashRepl } from '../hooks/useBashRepl.js'
+import { useGitStatus } from './splitPane/useGitStatus.js'
+import { gitApi } from '../lib/gitApi.js'
+import { STATUS_COLORS, STATUS_LABELS } from './splitPane/shared.js'
 import { message } from 'antd'
 
-type TabKey = 'bash' | 'prompt'
+type TabKey = 'bash' | 'prompt' | 'diff'
 
 export interface MobileQuickDrawerProps {
   open: boolean
@@ -106,13 +110,14 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
       }
     >
       <div style={{ marginBottom: 12 }}>
-        <Segmented<'bash' | 'prompt'>
+        <Segmented<'bash' | 'prompt' | 'diff'>
           block
           value={tab}
           onChange={(v) => setTab(v as TabKey)}
           options={[
             { label: '快捷 Bash', value: 'bash' },
             { label: '常用指令', value: 'prompt' },
+            { label: 'Diff', value: 'diff' },
           ]}
         />
       </div>
@@ -282,6 +287,12 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
               </Button>
             </div>
           )}
+        </div>
+      )}
+
+      {tab === 'diff' && (
+        <div data-testid="mobile-quick-drawer-diff">
+          Diff
         </div>
       )}
     </Drawer>
