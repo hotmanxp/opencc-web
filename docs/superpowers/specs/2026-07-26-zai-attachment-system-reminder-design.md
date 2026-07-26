@@ -15,7 +15,7 @@
 |---|---|
 | 4 类 attachment(`background-bash` / `background-agent` / `skill-prefetch` / `memory-prefetch`)改走 `<system-reminder>` 纯文本 | 改 `BackgroundRuntime` / `BashTracker`(冻结) |
 | `Attachment.payload: AnthropicMessage` → `content: string` | prompt cache `cache_control` 边界 marker 重新设计(留 follow-up) |
-| `queryLoop:248-254` 把 attachment 拼到 `systemPrompt` 数组尾巴 | `mergeTrailingUserMessage` 逻辑调整(已不再需要) |
+| `queryLoop:248-254` 把 attachment 拼到 `systemPrompt` 数组尾巴 | `mergeTrailingUserMessage` 逻辑调整(attachment 不入 messages,无需改) |
 | `collectSkills` 不再用 `<skill-prefetch>` 标签,改用人类语言描述 | front-end UI 调整(attachment 不入 UI,transcript loader 不变) |
 | 4 个 builder 输出形态重写 | `prefetchMemory.ts` 行为变更 |
 | 单测 + 集成测补充 | transcript v2 schema 调整 |
@@ -77,19 +77,17 @@ export interface Attachment {
 ```ts
 // runtime/queryLoop.ts turn 入点 (替换原 248-254)
 const attachments = await getAttachmentMessages({ sessionId, signal, pluginSnapshot })
-// 全部按 consumedAt asc 排序(已由 getAttachmentMessages 保证),join 到 systemPrompt 尾巴
+// 全部按 consumedAt asc 排序(已由 getAttachmentMessages 保证),join 拼成单字符串
 const reminderText = attachments.map(a => a.content).join('\n')
-if (reminderText.length > 0) systemPrompt.push(reminderText)
+// systemPrompt 是 branded readonly string[] (packages/zai-agent-core/src/systemPrompt/type.ts:13),
+// 不能 push — 用 spread 重赋值:
+const newSystemPrompt: SystemPrompt = reminderText.length > 0
+  ? ([...systemPrompt, reminderText] as SystemPrompt)
+  : systemPrompt
 // messages 数组完全不再被 attachment 污染
 ```
 
-`systemPrompt` 类型原为 `readonly string[]`(见 `queryLoop:326 [...systemPrompt]`),`push` 调用前需要 spread / mutation 形式:
-
-```ts
-systemPrompt = [...systemPrompt, reminderText]
-```
-
-或者改 modelCaller 输入形参签名为可变数组。本次计划取前一种,**不动 modelCaller 签名**。
+`systemPrompt` 的 branded 类型(`readonly string[] & { __brand: 'SystemPrompt' }`)对 spread 重赋值是兼容的(类型仍是 `readonly string[]`),无需修改 `assembleSystemPrompt` / `modelCaller` 签名。
 
 ### 2.4 错误契约(沿用 spec D §2.4)
 
@@ -173,7 +171,7 @@ getAttachmentMessages({ sessionId, signal, pluginSnapshot })
    ↓
 attachments[].content.map(...).join('\n') → reminderText
    ↓
-systemPrompt = [...systemPrompt, reminderText]
+systemPrompt 拼到尾巴 ([...systemPrompt, reminderText] as SystemPrompt)
    ↓
 modelCaller({ systemPrompt, messages, ... })   ← messages 不变(只 + 1 user prompt)
    ↓
@@ -221,8 +219,8 @@ Anthropic API 接受(skills via <system-reminder> in systemPrompt,user prompt us
 | `system-reminder` 在 `systemPrompt` 数组 vs Anthropic messages 内识别差异 | `system-reminder` 是 Anthropic SDK 原生 token,放在 systemPrompt 与 user message 都能被模型理解;不区分 |
 | 大量 attachment 把 systemPrompt 撑爆 | 沿用 spec D §6.2 `DEFAULT_LIMIT=100`,`getAttachmentMessages` 已 cap |
 | prompt cache 命中降级(systemPrompt 比 messages 靠后 / 边界 marker 缺失) | 由 modelCaller 内部决定,不在本次范围;若命中率真出问题,留 follow-up(独立 plan) |
-| `systemPrompt` 是 `readonly string[]` 类型 | queryLoop 用 spread 重赋值:`systemPrompt = [...systemPrompt, reminderText]`(局部变量非 `readonly`,见 queryLoop:177) |
-| `modelCaller` 输入签名为 `systemPrompt: readonly string[]`,不接受新长度数组 | 不影响 — `[...systemPrompt, reminderText]` 产生新数组,长度可变,类型仍是 `string[]`,赋给 readonly 形参 OK |
+| `SystemPrompt` 是 branded readonly 数组(`readonly string[] & { __brand: 'SystemPrompt' }`) | spread 重赋值:`[...systemPrompt, reminderText] as SystemPrompt`,不修改 `assembleSystemPrompt` 签名 |
+| `modelCaller` 输入签名为 `readonly string[]` 形式 | 不影响 — spread 产生新数组长度可变,类型仍是 `string[]`,赋给 readonly 形参 OK |
 | `<bash-task>` / `<background-agent>` 内层标签 vs OpenCC 是否一致 | OpenCC 内层用的是 XML-like 结构;zai 保留自造内层标签(非 OpenCC 来源);保留是因为有 user-facing 调试价值,改动属于"兼容保留" |
 
 ## 7. 不锁定
