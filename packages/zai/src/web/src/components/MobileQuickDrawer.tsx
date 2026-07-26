@@ -23,6 +23,121 @@ export interface MobileQuickDrawerProps {
   onClose: () => void
 }
 
+interface DiffTabProps {
+  cwd: string | null
+}
+
+function DiffTab({ cwd }: DiffTabProps) {
+  const { data, error, refetch } = useGitStatus(cwd)
+  const [loadingPath, setLoadingPath] = useState<string | null>(null)
+
+  const files = data?.ok && data.files ? data.files : []
+  const showEmpty =
+    !cwd ||
+    error != null ||
+    (data?.ok === false) ||
+    (data?.ok === true && files.length === 0)
+
+  function emptyDescription(): string {
+    if (!cwd) return '请先开启会话'
+    if (error) return error
+    if (data?.ok === false) return data.error ?? '当前目录不是 git 仓库'
+    if (data?.ok === true && files.length === 0) return '无变更'
+    return ''
+  }
+
+  function handleRevert(path: string, isUntracked: boolean) {
+    const content = isUntracked
+      ? '该文件未跟踪,撤销将永久删除该文件'
+      : '将丢弃该文件的本地改动'
+    Modal.confirm({
+      title: `撤销 ${path}?`,
+      content,
+      okText: '撤销',
+      okType: 'danger',
+      cancelText: '取消',
+      onOk: async () => {
+        setLoadingPath(path)
+        try {
+          const result = await gitApi.revertFile(path)
+          if (result.ok) {
+            message.success('已撤销')
+            refetch()
+          } else {
+            message.error(result.error ?? '撤销失败')
+          }
+        } catch (err) {
+          message.error(`撤销失败: ${err instanceof Error ? err.message : String(err)}`)
+        } finally {
+          setLoadingPath(null)
+        }
+      },
+    })
+  }
+
+  return (
+    <div data-testid="mobile-quick-drawer-diff">
+      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          onClick={() => refetch()}
+          data-testid="mobile-quick-drawer-diff-refresh"
+        >
+          刷新
+        </Button>
+      </div>
+      {showEmpty ? (
+        <div data-testid="mobile-quick-drawer-diff-empty" style={{ padding: 16 }}>
+          <Empty description={emptyDescription()} />
+        </div>
+      ) : (
+        files.map((file) => (
+          <div
+            key={file.path}
+            data-testid={`mobile-quick-drawer-diff-row-${file.path}`}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 8,
+              padding: '10px 12px',
+              borderBottom: '1px solid rgba(255,255,255,0.06)',
+            }}
+          >
+            <Tag color={STATUS_COLORS[file.status]} style={{ flexShrink: 0 }}>
+              {STATUS_LABELS[file.status]}
+            </Tag>
+            <span
+              title={file.path}
+              style={{
+                flex: 1,
+                minWidth: 0,
+                overflow: 'hidden',
+                textOverflow: 'ellipsis',
+                whiteSpace: 'nowrap',
+                fontFamily: 'ui-monospace, Menlo, monospace',
+                fontSize: 13,
+              }}
+            >
+              {file.path}
+            </span>
+            <Button
+              type="text"
+              size="small"
+              danger
+              icon={<UndoOutlined />}
+              loading={loadingPath === file.path}
+              onClick={() => handleRevert(file.path, file.status === '??')}
+              data-testid={`mobile-quick-drawer-diff-revert-${file.path}`}
+              aria-label={`撤销 ${file.path}`}
+            />
+          </div>
+        ))
+      )}
+    </div>
+  )
+}
+
 export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerProps) {
   const sessionId = useAgentStore((s) => s.sessionId)
   const activeSessionId = useAgentStore((s) => s.activeSessionId)
@@ -291,9 +406,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
       )}
 
       {tab === 'diff' && (
-        <div data-testid="mobile-quick-drawer-diff">
-          Diff
-        </div>
+        <DiffTab cwd={cwd} />
       )}
     </Drawer>
   )
