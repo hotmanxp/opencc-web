@@ -51,10 +51,10 @@ beforeEach(() => {
 describe("SharePopover", () => {
   test("renders IP list with sid in URL", () => {
     render(<SharePopover />);
-    // 验证每行有 data-testid 复制按钮(后续 test 也用它索引)。
+    // 验证 "其它可用 IP" 分组里的 row 有 data-testid 复制按钮(primary IP 已进 QR 区,不在此处)。
     // clipboard URL 含完整 sid 由 test 4 验证,展示文本因多 text node 切片
     // 不直接用 getByText 整串匹配(react 把相邻表达式当独立 child)。
-    expect(screen.getByTestId("share-copy-192.168.1.5")).toBeInTheDocument();
+    expect(screen.queryByTestId("share-copy-192.168.1.5")).not.toBeInTheDocument();
     expect(screen.getByTestId("share-copy-10.0.0.2")).toBeInTheDocument();
   });
 
@@ -85,11 +85,13 @@ describe("SharePopover", () => {
     const writeText = vi.fn().mockResolvedValue(undefined);
     vi.stubGlobal("navigator", { clipboard: { writeText } });
     render(<SharePopover />);
+    // primary IP 已进 QR 区, "其它可用 IP" 分组只剩 10.0.0.2
     const copyBtns = screen.getAllByRole("button", { name: /复制/ });
+    expect(copyBtns).toHaveLength(1);
     fireEvent.click(copyBtns[0]!);
     await waitFor(() => {
       expect(writeText).toHaveBeenCalledWith(
-        "http://192.168.1.5:9888/agent?sid=sess-test-123",
+        "http://10.0.0.2:9888/agent?sid=sess-test-123",
       );
     });
   });
@@ -116,8 +118,8 @@ describe("SharePopover", () => {
     expect(screen.getByText(/\/m\?sid=sess-test-123/)).toBeInTheDocument();
     // "其它可用 IP" 分组标题
     expect(screen.getByText(/其它可用 IP/)).toBeInTheDocument();
-    // 2 个 IP → 2 个复制按钮(每个 IP 一行)
-    expect(screen.getAllByRole("button", { name: /复制/ })).toHaveLength(2);
+    // 2 个 IP: primary 已在 QR 区(无复制按钮), "其它可用 IP" 分组只剩 1 个 row → 1 个复制按钮
+    expect(screen.getAllByRole("button", { name: /复制/ })).toHaveLength(1);
   });
 
   test("primary QRCode value points to /m?sid=<sid> with first IP", () => {
@@ -145,8 +147,8 @@ describe("SharePopover", () => {
     expect(screen.getByTestId("share-primary-qrcode")).toBeInTheDocument();
     // "其它可用 IP" 标题不出现
     expect(screen.queryByText(/其它可用 IP/)).not.toBeInTheDocument();
-    // 仅 1 个复制按钮
-    expect(screen.getAllByRole("button", { name: /复制/ })).toHaveLength(1);
+    // 仅 1 个 IP: 无 "其它可用 IP" 分组 + primary IP 不在 copy 列表 → 0 复制按钮
+    expect(screen.queryAllByRole("button", { name: /复制/ })).toHaveLength(0);
   });
 });
 

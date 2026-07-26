@@ -82,15 +82,6 @@ export default function SharePopover() {
         <div style={{ fontSize: 12, color: "#666" }}>
           首选: <code>{primaryIp}:{ctx.port}</code>
         </div>
-        <Button
-          size="small"
-          icon={<CopyOutlined />}
-          data-testid={`share-copy-${primaryIp}`}
-          onClick={() => void handleCopy(primaryIp)}
-          aria-label={`复制 ${primaryIp}`}
-        >
-          复制
-        </Button>
       </div>
 
       {/* 其它可用 IP 分组: 仅在 ≥2 个 IP 时显示 */}
