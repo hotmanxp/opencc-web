@@ -67,3 +67,44 @@ export interface FsSearchResult {
   /** Elapsed ms since walk started (server-side). For client telemetry. */
   durationMs?: number;
 }
+
+/**
+ * Result of a content (full-text) search.
+ * Returned by /api/fs/content-search and consumed by useFsContentSearch → FsContentSearchList.
+ */
+export interface FsContentSearchSubmatch {
+  /** 命中的子串原文(大小写与原文一致)。 */
+  text: string;
+  /** 0-based column offset (UTF-8 字节,与 ripgrep --json 一致)。 */
+  start: number;
+  /** 排除性 end column。 */
+  end: number;
+}
+
+export interface FsContentSearchMatch {
+  /** 1-based line number。 */
+  line: number;
+  /** 完整行文本(去尾换行,前导空白保留)。 */
+  text: string;
+  /** 第一个 submatch(本次固定返回单 submatch)。 */
+  submatch: FsContentSearchSubmatch;
+}
+
+export interface FsContentSearchEntry {
+  /** 相对 cwd 的 POSIX 路径(forward-slash)。 */
+  path: string;
+  /** basename。 */
+  name: string;
+  /** 该文件的所有命中行(本次只展示首个,排序由 server 完成)。 */
+  matches: FsContentSearchMatch[];
+}
+
+export interface FsContentSearchResult {
+  ok: boolean;
+  error?: string;
+  entries?: FsContentSearchEntry[];
+  /** 命中数超过 headLimit 或超时截断。 */
+  truncated?: boolean;
+  /** server 端耗时 ms。 */
+  durationMs?: number;
+}
