@@ -2,6 +2,7 @@ import { describe, test, expect, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, rmSync, existsSync, readFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
+import { __setDataDirForTests } from '../../../src/runtime/compact/log-event.js'
 
 describe('log-event', () => {
   let dataDir: string
@@ -11,11 +12,13 @@ describe('log-event', () => {
     dataDir = mkdtempSync(join(tmpdir(), 'zai-log-test-'))
     originalEnv = process.env.ZAI_DATA_DIR
     process.env.ZAI_DATA_DIR = dataDir
+    __setDataDirForTests(dataDir)  // 锁定,防止 env race 写真实 homedir
   })
 
   afterEach(() => {
     if (originalEnv === undefined) delete process.env.ZAI_DATA_DIR
     else process.env.ZAI_DATA_DIR = originalEnv
+    __setDataDirForTests(null)
     if (existsSync(dataDir)) rmSync(dataDir, { recursive: true, force: true })
   })
 

@@ -29,11 +29,18 @@ export interface CompactLogEntry {
 }
 
 function dataDir(): string {
-  return process.env.ZAI_DATA_DIR ?? join(homedir(), '.zai')
+  return dataDirOverride ?? process.env.ZAI_DATA_DIR ?? join(homedir(), '.zai')
 }
 
 function logPath(): string {
   return join(dataDir(), 'logs', 'compact.jsonl')
+}
+
+let dataDirOverride: string | null = null
+
+/** 测试 seam: 锁定 dataDir, 防止 env race 或漏设 beforeEach 写真实 homedir。 */
+export function __setDataDirForTests(dir: string | null): void {
+  dataDirOverride = dir
 }
 
 export function logEvent(eventName: string, metadata: CompactLogEntry): void {

@@ -1,8 +1,12 @@
-import { describe, test, expect } from 'vitest'
+import { describe, test, expect, beforeEach, afterEach } from 'vitest'
+import { mkdtempSync, rmSync, existsSync } from 'node:fs'
+import { tmpdir } from 'node:os'
+import { join } from 'node:path'
 import {
   autoCompactIfNeeded,
   shouldAutoCompact,
 } from '../../../src/runtime/compact/autocompact.js'
+import { __setDataDirForTests } from '../../../src/runtime/compact/log-event.js'
 import type { TranscriptMessage } from '../../../src/transcript/types.js'
 
 function makeMsg(content: string, type: 'user' | 'assistant' = 'user'): TranscriptMessage {
@@ -23,6 +27,22 @@ function makeMsg(content: string, type: 'user' | 'assistant' = 'user'): Transcri
 }
 
 describe('autocompact', () => {
+  let dataDir: string
+  let originalDataDirEnv: string | undefined
+
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'zai-autocompact-'))
+    originalDataDirEnv = process.env.ZAI_DATA_DIR
+    process.env.ZAI_DATA_DIR = dataDir
+    __setDataDirForTests(dataDir)  // 锁定,防止 logEvent 写真实 homedir
+  })
+
+  afterEach(() => {
+    if (originalDataDirEnv === undefined) delete process.env.ZAI_DATA_DIR
+    else process.env.ZAI_DATA_DIR = originalDataDirEnv
+    __setDataDirForTests(null)
+    if (existsSync(dataDir)) rmSync(dataDir, { recursive: true, force: true })
+  })
   test('shouldAutoCompact: querySource=compact 永远 false', async () => {
     const msgs = [makeMsg('hi'), makeMsg('ok', 'assistant')]
     const r = await shouldAutoCompact(msgs, 'MiniMax-M3', 'compact', 0, undefined)
