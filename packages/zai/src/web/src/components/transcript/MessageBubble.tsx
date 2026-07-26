@@ -85,7 +85,7 @@ export const StreamingMarkdown = React.memo(function StreamingMarkdown({ text }:
               height: 14,
               verticalAlign: "-2px",
               marginLeft: 2,
-              background: "#1677ff",
+              background: "#1677ff", // TODO: theme-constant (AntD brand blue cursor)
               animation: "zai-blink 1s steps(1) infinite",
             }}
           />
@@ -205,7 +205,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                     padding: "1px 6px",
                     borderRadius: 10,
                     background: THINKING_ACCENT,
-                    color: "#fff",
+                    color: "var(--text-primary)",
                     fontSize: 11,
                     fontWeight: 600,
                     lineHeight: 1.6,
@@ -478,7 +478,7 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
       <pre
         style={{
           fontSize: 12, margin: "4px 0 0 0", padding: "8px 10px",
-          background: "rgba(82,196,26,0.06)", borderLeft: "2px solid #52c41a",
+          background: "rgba(82,196,26,0.06)", borderLeft: "2px solid", borderLeftColor: "var(--accent-start)",
           borderRadius: 4, whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const,
           fontFamily: CODE_FONT_FAMILY, maxHeight: 360, overflow: "auto" as const,
         }}
@@ -611,9 +611,9 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                         margin: "4px 0 0 0",
                         padding: "8px 10px",
                         background: "rgba(255,77,79,0.06)",
-                        borderLeft: "2px solid #ff4d4f",
+                        borderLeft: "2px solid", borderLeftColor: "var(--accent-end)",
                         borderRadius: 4,
-                        color: "#cf1322",
+                        color: "var(--accent-end)",
                         whiteSpace: "pre-wrap",
                         wordBreak: "break-word",
                         fontFamily: CODE_FONT_FAMILY,
@@ -685,7 +685,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           size="small"
           style={{
             maxWidth: "70%",
-            background: "#e6f4ff",
+            background: "var(--bg-card)",
             borderRadius: 12,
             position: "relative",
           }}
@@ -818,14 +818,14 @@ export const MessageBubble = React.memo(function MessageBubble({
             width: "100%",
             maxWidth: "100%",
             marginRight: 20,
-            background: "#f6ffed",
+            background: "var(--bg-card)",
             borderRadius: 12,
             position: "relative",
           }}
         >
           <MessageCopyButton text={text} variant="ai" />
           <Space align="start" size={8} style={{ width: "100%" }}>
-            <RobotFilled style={{ color: "#ff6600", fontSize: 18 }} />
+            <RobotFilled style={{ color: "var(--accent-start)", fontSize: 18 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               {streaming ? (
                 <StreamingMarkdown text={text} />
@@ -919,7 +919,7 @@ export const MessageBubble = React.memo(function MessageBubble({
                     fontSize: 12,
                     margin: 0,
                     whiteSpace: "pre-wrap",
-                    color: isError ? "#ff4d4f" : undefined,
+                    color: isError ? "var(--accent-end)" : undefined,
                   }}
                 >
                   {typeof result === "string"
@@ -942,7 +942,7 @@ export const MessageBubble = React.memo(function MessageBubble({
       <div style={{ marginBottom: 8 }}>
         <Card
           size="small"
-          style={{ background: "#fff2f0", borderColor: "#ff4d4f" }}
+          style={{ background: "var(--bg-card)", borderColor: "var(--accent-end)" }}
         >
           <Text type="danger">
             {error?.message || "发生未知错误"}
@@ -981,12 +981,12 @@ export const MessageBubble = React.memo(function MessageBubble({
             width: "100%",
             maxWidth: "100%",
             marginRight: 20,
-            background: "#f6ffed",
+            background: "var(--bg-card)",
             borderRadius: 12,
           }}
         >
           <Space align="start" size={8}>
-            <RobotFilled style={{ color: "#ff6600", fontSize: 18 }} />
+            <RobotFilled style={{ color: "var(--accent-start)", fontSize: 18 }} />
             <MarkdownText text={text} />
           </Space>
         </Card>
