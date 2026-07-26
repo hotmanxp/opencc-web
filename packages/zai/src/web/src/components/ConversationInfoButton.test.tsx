@@ -38,6 +38,18 @@ vi.mock('./ConversationInfoCard.js', () => ({
 
 import ConversationInfoButton from './ConversationInfoButton.js'
 
+// Test-only ConfigProvider: disable antd Modal enter/leave transitions so
+// `destroyOnHidden` unmounts synchronously under happy-dom. happy-dom does
+// not auto-dispatch transitionend events, which would otherwise keep the
+// Modal subtree in the DOM after close. Production keeps the standard
+// transitions — this is purely a test environment affordance.
+const renderWithDisabledTransitions = (ui: React.ReactElement) =>
+  render(
+    <ConfigProvider modal={{ transitionName: '', maskTransitionName: '' }}>
+      {ui}
+    </ConfigProvider>,
+  )
+
 describe('ConversationInfoButton — mobile vs desktop branching', () => {
   afterEach(() => {
     cleanup()
@@ -70,18 +82,9 @@ describe('ConversationInfoButton — mobile vs desktop branching', () => {
 
   it('mobile: clicking the trigger toggles the Modal open state', () => {
     useAppStore.setState({ isMobile: true })
-    // happy-dom 下 antd Modal 的 leave 动画不会触发 DOM 卸载,
-    // 用 ConfigProvider 关掉过渡让 destroyOnHidden 同步生效, 避免
-    // 引入 waitFor/异步等待。生产路径仍保留 antd 标准过渡动画。
-    render(
-      <ConfigProvider
-        modal={{ transitionName: '', maskTransitionName: '' }}
-      >
-        <ConversationInfoButton />
-      </ConfigProvider>
-    )
+    renderWithDisabledTransitions(<ConversationInfoButton />)
     const trigger = screen.getByTestId('conversation-info-trigger')
-    // 初始打开 → 关闭
+    // 初始打开 → 关闭: destroyOnHidden 同步卸载,DOM 立即清掉
     fireEvent.click(trigger)
     expect(screen.queryByTestId('conversation-info-card')).not.toBeInTheDocument()
     // 再点 → 打开

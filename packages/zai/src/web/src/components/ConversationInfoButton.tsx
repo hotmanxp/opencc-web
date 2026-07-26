@@ -46,13 +46,7 @@ export default function ConversationInfoButton() {
           data-testid="conversation-info-trigger"
           onClick={handleTriggerClick}
         />
-        {/*
-          key={String(mobileOpen)} 强制 Modal 在 open 翻转时 remount.
-          happy-dom 下 antd Modal 的 leave 动画不卸载 DOM, 不重挂载的话
-          conversation-info-card 会留在 document 里被 queryByTestId 误命中.
-        */}
         <Modal
-          key={String(mobileOpen)}
           open={mobileOpen}
           onCancel={() => setMobileOpen(false)}
           centered
