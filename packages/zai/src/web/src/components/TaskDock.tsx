@@ -8,11 +8,11 @@ import type { BashTaskInfo } from '../lib/taskApi.js'
 import { useAppStore } from '../store/useAppStore.js'
 
 const STATUS_ICON: Record<string, JSX.Element> = {
-  running: <LoadingOutlined style={{ color: '#a78bfa' }} spin />,
-  queued: <CaretRightOutlined style={{ color: 'rgba(255,255,255,0.55)' }} />,
+  running: <LoadingOutlined style={{ color: 'var(--accent-start)' }} spin />,
+  queued: <CaretRightOutlined style={{ color: 'var(--bg-card-hover)' }} />,
   completed: <CheckCircleFilled style={{ color: '#52c41a' }} />,
   failed: <CloseCircleFilled style={{ color: '#f5222d' }} />,
-  cancelled: <CloseCircleFilled style={{ color: 'rgba(255,255,255,0.40)' }} />,
+  cancelled: <CloseCircleFilled style={{ color: 'var(--bg-card-hover)' }} />,
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -45,10 +45,10 @@ function Row({
         padding: '6px 10px',
         cursor: 'pointer',
         borderRadius: 4,
-        color: '#fff',
+        color: 'var(--text-primary)',
         fontSize: 12,
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(168, 139, 250, 0.12)')}
+      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent-start)')}
       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
     >
       <span style={{ fontSize: 11 }}>{STATUS_ICON[task.status]}</span>
@@ -63,10 +63,11 @@ function Row({
             style={{
               fontSize: 10,
               padding: '0 4px',
-              background: 'rgba(168, 139, 250, 0.18)',
-              border: '1px solid rgba(168, 139, 250, 0.40)',
+              background: 'var(--accent-start)',
+              border: '1px solid',
+              borderColor: 'var(--accent-start)', // TODO: use borderSubtle CSS var when available
               borderRadius: 3,
-              color: '#a78bfa',
+              color: 'var(--accent-start)',
               fontWeight: 500,
             }}
           >
@@ -74,16 +75,16 @@ function Row({
           </span>
         </Tooltip>
       )}
-      <span style={{ color: 'rgba(255,255,255,0.40)', fontSize: 11 }}>{STATUS_LABEL[task.status]}</span>
+      <span style={{ color: 'var(--bg-card-hover)', fontSize: 11 }}>{STATUS_LABEL[task.status]}</span>
     </div>
   )
 }
 
 const BASH_STATUS_ICON: Record<string, JSX.Element> = {
-  running: <CodeOutlined style={{ color: '#a78bfa' }} spin />,
+  running: <CodeOutlined style={{ color: 'var(--accent-start)' }} spin />,
   completed: <CheckCircleFilled style={{ color: '#52c41a' }} />,
   failed: <CloseCircleFilled style={{ color: '#f5222d' }} />,
-  killed: <CloseCircleFilled style={{ color: 'rgba(255,255,255,0.40)' }} />,
+  killed: <CloseCircleFilled style={{ color: 'var(--bg-card-hover)' }} />,
 }
 
 function BashRow({
@@ -103,17 +104,17 @@ function BashRow({
         padding: '6px 10px',
         cursor: 'pointer',
         borderRadius: 4,
-        color: '#fff',
+        color: 'var(--text-primary)',
         fontSize: 12,
       }}
-      onMouseEnter={(e) => (e.currentTarget.style.background = 'rgba(168, 139, 250, 0.12)')}
+      onMouseEnter={(e) => (e.currentTarget.style.background = 'var(--accent-start)')}
       onMouseLeave={(e) => (e.currentTarget.style.background = 'transparent')}
     >
       <span style={{ fontSize: 11 }}>{BASH_STATUS_ICON[task.status]}</span>
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {truncatePrompt(task.description || task.command)}
       </span>
-      <span style={{ color: 'rgba(255,255,255,0.40)', fontSize: 11 }}>
+      <span style={{ color: 'var(--bg-card-hover)', fontSize: 11 }}>
         {STATUS_LABEL[task.status] ?? task.status}
       </span>
     </div>
@@ -160,7 +161,7 @@ export function TaskDock({
           // 移动 Modal 内 modal 是 90vw, 这里用 100% 跟随. 避免固定 360px
           // 在窄屏 (<400px) 把 modal 撑破.
           width: '100%',
-          background: '#1f1f1f',
+          background: 'var(--bg-card)',
           borderRadius: 6,
           padding: 8,
           maxHeight: 480,
@@ -172,7 +173,7 @@ export function TaskDock({
           style={{
             fontSize: 11,
             fontWeight: 600,
-            color: 'rgba(255,255,255,0.55)',
+            color: 'var(--bg-card-hover)',
             marginBottom: 6,
             padding: '0 4px',
             display: 'flex',
@@ -189,7 +190,7 @@ export function TaskDock({
           <div
             style={{
               fontSize: 12,
-              color: 'rgba(255,255,255,0.40)',
+              color: 'var(--bg-card-hover)',
               padding: '16px 8px',
               textAlign: 'center',
             }}
@@ -204,7 +205,7 @@ export function TaskDock({
               style={{
                 fontSize: 10,
                 fontWeight: 600,
-                color: '#a78bfa',
+                color: 'var(--accent-start)',
                 textTransform: 'uppercase',
                 padding: '4px 4px',
               }}
@@ -230,7 +231,7 @@ export function TaskDock({
               style={{
                 fontSize: 10,
                 fontWeight: 600,
-                color: 'rgba(255,255,255,0.45)',
+                color: 'var(--bg-card-hover)',
                 textTransform: 'uppercase',
                 padding: '8px 4px 4px',
               }}
@@ -256,7 +257,7 @@ export function TaskDock({
               style={{
                 fontSize: 10,
                 fontWeight: 600,
-                color: '#a78bfa',
+                color: 'var(--accent-start)',
                 textTransform: 'uppercase',
                 padding: '8px 4px 4px',
               }}
@@ -342,7 +343,7 @@ export function TaskDock({
           destroyOnClose
           title="后台任务"
           styles={{
-            body: { padding: 0, background: '#1f1f1f', borderRadius: 6 },
+            body: { padding: 0, background: 'var(--bg-card)', borderRadius: 6 },
           }}
         >
           {content}
