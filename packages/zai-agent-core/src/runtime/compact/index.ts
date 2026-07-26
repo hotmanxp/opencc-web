@@ -157,9 +157,15 @@ export async function compactSession(
     }
   }
 
-  const newMessages = buildPostCompactMessages(result)
   // shim 不写盘(对齐旧 compactService.ts + builtin/compact.ts:67 调用方语义)
+  // 对齐旧 compactSession contract:
+  //   - newMessages = [...original, boundary, summary] (buildPostCompactMessages 只返回 boundary+summary+hooks)
+  //   - boundaryMarker.type 强制覆盖为 'compact_boundary' (旧 contract; conversation.ts 写 'system')
   void isCompactionCacheSharingCompatible // dual path 决策点保留,详细 cache params 走阶段 3
   const summaryText = (result.summaryMessages[0]?.message as any)?.content?.[0]?.text ?? ''
+  const tail = buildPostCompactMessages(result).map((m, i) =>
+    i === 0 ? { ...m, type: 'compact_boundary' as const } : m,
+  )
+  const newMessages = [...file.messages, ...tail]
   return { kind: 'compacted', summary: summaryText, newMessages }
 }

@@ -16,7 +16,7 @@ import { mkdtempSync, rmSync, existsSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { TranscriptStore } from '../src/transcript/store.js'
-import { compactSession } from '../src/runtime/compactService.js'
+import { compactSession } from '../src/runtime/compact/index.js'
 import {
   appendUserMessageV2,
   appendAssistantMessageV2,
@@ -34,10 +34,10 @@ async function main() {
   try {
     section('1. TranscriptStore.create + 灌 4 条消息')
     const store = new TranscriptStore(dataDir)
-    const sessionId = await store.create({
-      cwd: process.cwd(),
-      model: 'MiniMax-M3',
-    })
+    const sessionId = await store.create(
+      { cwd: process.cwd(), model: 'MiniMax-M3' },
+      { cwd: process.cwd() },
+    )
     console.log(`[smoke] session: ${sessionId}`)
 
     const ctx = { cwd: process.cwd(), sessionId }
@@ -60,7 +60,7 @@ async function main() {
       ctx,
     )
 
-    let file = await store.read(sessionId)
+    let file = await store.read(sessionId, { cwd: process.cwd() })
     console.log(`[smoke] pre-compact messages: ${file.messages.length}`)
     if (file.messages.length !== 4) {
       throw new Error(`expected 4 messages, got ${file.messages.length}`)
@@ -97,11 +97,11 @@ async function main() {
     console.log(`[smoke] modelCaller called: tools=[] (length=${calls[0]?.toolsLen})`)
 
     // compactSession 不写盘 — 调用方负责(对齐 /compact 命令 builtin/compact.ts:67 的语义)
-    await store.replace(sessionId, result.newMessages)
+    await store.replace(sessionId, result.newMessages, { cwd: process.cwd() })
     console.log(`[smoke] store.replace() 由调用方完成 (对齐 /compact 命令 builtin/compact.ts:67)`)
 
     section('3. 验证 store 落盘结果')
-    file = await store.read(sessionId)
+    file = await store.read(sessionId, { cwd: process.cwd() })
     console.log(`[smoke] post-compact messages: ${file.messages.length}`)
     console.log(`[smoke] types: ${file.messages.map((m) => m.type).join(', ')}`)
     console.log(`[smoke] meta.updatedAt bumped: ${file.meta.updatedAt > 0}`)

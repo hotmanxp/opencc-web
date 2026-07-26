@@ -53,12 +53,16 @@ export const compactCommand: LocalCommand = {
       }
 
       // 4. 调 service
+      const providerKind = (runtime as unknown as { config?: { providerKind?: string } }).config?.providerKind
+        ?? (process.env.ANTHROPIC_BASE_URL ? 'anthropic' : 'openai')
+
       const result = await compactSession({
         store,
         sessionId,
         modelCaller,
         cwd: context.cwd,
         model: context.model ?? (runtime as unknown as { config?: { defaultModel?: string } }).config?.defaultModel,
+        providerKind,
       })
 
       if (result.kind === 'error') return result

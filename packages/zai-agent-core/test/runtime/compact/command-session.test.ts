@@ -2,9 +2,9 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
-import { TranscriptStore } from '../../src/transcript/store.js'
-import { compactSession } from '../../src/runtime/compactService.js'
-import { appendUserMessageV2, appendAssistantMessageV2 } from '../../src/transcript/persistence.js'
+import { TranscriptStore } from '../../../src/transcript/store.js'
+import { compactSession } from '../../../src/runtime/compact/index.js'
+import { appendUserMessageV2, appendAssistantMessageV2 } from '../../../src/transcript/persistence.js'
 
 let tmpDir: string
 let store: TranscriptStore
@@ -161,7 +161,7 @@ describe('compactSession', () => {
     const ctx = { cwd: '/test', sessionId }
     await appendUserMessageV2(store, sessionId, 'big output', 0, null, ctx)
     const huge = 'x'.repeat(800)
-    const { appendToolResult } = await import('../../src/transcript/persistence.js')
+    const { appendToolResult } = await import('../../../src/transcript/persistence.js')
     const lastRead = await store.read(sessionId, { cwd: '/test' })
     const parent = lastRead.messages[lastRead.messages.length - 1]!.uuid
     await appendToolResult(
