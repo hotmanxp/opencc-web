@@ -17,7 +17,6 @@ import type {
 } from '../../../../src/tools/BashTool/bashTracker.js'
 import type { BackgroundTask } from '../../../../src/runtime/background/types.js'
 import type { LoadedSkill } from '../../../../src/runtime/skills/types.js'
-import type { AnthropicMessage } from '../../../../src/transcript/types.js'
 
 // ---- test fixtures ---------------------------------------------------------
 
@@ -116,12 +115,9 @@ describe('integration: getAttachmentMessages (mid-turn attachment)', () => {
     expect(result).toHaveLength(1)
     expect(result[0].source).toBe('background-bash')
     expect(result[0].consumedAt).toBe(1000)
-    expect(result[0].payload.role).toBe('assistant')
-    // assistant message content is a string with bash command + output summary
-    const text = Array.isArray(result[0].payload.content)
-      ? (result[0].payload.content[0] as { text: string }).text
-      : result[0].payload.content
-    expect(text).toContain('sleep 1')
+    expect(result[0].content).toMatch(/^<system-reminder>\n<bash-task/)
+    expect(result[0].content).toContain('sleep 1')
+    expect(result[0].content).toMatch(/<\/system-reminder>$/)
   })
 
   // §3 行为 2 + §4 case 3: agent attachments from BackgroundRuntime task store
@@ -135,7 +131,9 @@ describe('integration: getAttachmentMessages (mid-turn attachment)', () => {
     expect(result).toHaveLength(1)
     expect(result[0].source).toBe('background-agent')
     expect(result[0].consumedAt).toBe(2000)
-    expect(result[0].payload.role).toBe('assistant')
+    expect(result[0].content).toMatch(/^<system-reminder>\n<background-agent/)
+    expect(result[0].content).toContain('agent result')
+    expect(result[0].content).toMatch(/<\/system-reminder>$/)
   })
 
   // §3 行为 5 + §4 case 4: sort by consumedAt asc across sources
@@ -184,28 +182,24 @@ describe('integration: getAttachmentMessages (mid-turn attachment)', () => {
     expect(result).toEqual([])
   })
 
-  // §4 case 7: AnthropicMessage shape for assistant form
-  test('properly populates AnthropicMessage shape for assistant message form', async () => {
+  // §4 case 7: bash attachment wraps content in <system-reminder>
+  test('bash attachment wraps content in <system-reminder>', async () => {
     const tracker = makeBashTracker([
       makeBashTask('sess-1', 5000, 'failed', {
         exitCode: 2,
         stderr: 'boom',
       }),
     ])
-    const [att] = await getAttachmentMessages({
+    const result = await getAttachmentMessages({
       sessionId: 'sess-1',
       signal: signal(),
       bashTracker: tracker,
     })
-    const payload: AnthropicMessage = att.payload
-    expect(payload.role).toBe('assistant')
-    // content is string or [{type:'text', text:string}]
-    if (typeof payload.content === 'string') {
-      expect(payload.content.length).toBeGreaterThan(0)
-    } else {
-      expect(payload.content[0].type).toBe('text')
-      expect((payload.content[0] as { text: string }).text.length).toBeGreaterThan(0)
-    }
+    expect(result).toHaveLength(1)
+    expect(result[0].content).toMatch(/^<system-reminder>/)
+    expect(result[0].content).toContain('<bash-task taskId="bash-5000" status="failed" exitCode="2">')
+    expect(result[0].content).toContain('[stderr]\nboom')
+    expect(result[0].content).toMatch(/<\/system-reminder>$/)
   })
 
   // bonus: filters out non-terminal bash tasks (running) — terminal-only spec
@@ -268,6 +262,13 @@ describe('integration: getAttachmentMessages (mid-turn attachment)', () => {
       pluginSnapshot: snapshot,
     })
     expect(result.some((a) => a.source === 'skill-prefetch')).toBe(true)
+    const skillAtt = result.find((a) => a.source === 'skill-prefetch')!
+    expect(skillAtt.content).toMatch(/^<system-reminder>/)
+    expect(skillAtt.content).toMatch(/The following skill is available: my-skill/)
+    expect(skillAtt.content).toMatch(/\(source: disk\)/)
+    expect(skillAtt.content).toContain('desc')
+    expect(skillAtt.content).toMatch(/<\/system-reminder>$/)
+    expect(skillAtt.content).not.toContain('<skill-prefetch')
   })
 
   // bonus: only completed/failed agent tasks (terminal) qualify
@@ -299,9 +300,6 @@ describe('integration: getAttachmentMessages (mid-turn attachment)', () => {
     })
     expect(result).toHaveLength(1)
     expect(result[0].source).toBe('memory-prefetch')
-    const text = Array.isArray(result[0].payload.content)
-      ? (result[0].payload.content[0] as { text: string }).text
-      : result[0].payload.content
-    expect(text).toContain('memory payload for the agent')
+    expect(result[0].content).toBe('<system-reminder>\nmemory payload for the agent\n</system-reminder>')
   })
 })
