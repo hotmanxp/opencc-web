@@ -633,4 +633,30 @@ describe('BashTool', () => {
       ).toBe(beforeCount)
     })
   })
+
+  describe('回归: 大输出后台任务登记 persistedOutputPath', () => {
+    test('run_in_background 输出 8MB (低于阈值) 时 tracker 不登记 persistedOutputPath', async () => {
+      const r = await BashTool.call(
+        { command: 'head -c 8000000 /dev/zero | tr "\\0" a', run_in_background: true },
+        ctx,
+      )
+      expect(r.isError).toBeFalsy()
+      const out = String(r.output)
+      const match = out.match(/<task_id>(bash-[0-9a-f]{8})<\/task_id>/)
+      expect(match).not.toBeNull()
+      const taskId = match![1]
+      // 等后台 task 终态
+      const deadline = Date.now() + 30_000
+      while (Date.now() < deadline) {
+        const t = bashBackgroundTracker.get(taskId)
+        if (t && t.status !== 'running') break
+        await new Promise((res) => setTimeout(res, 200))
+      }
+      const finalTask = bashBackgroundTracker.get(taskId)
+      expect(finalTask).toBeDefined()
+      expect(finalTask!.status).not.toBe('running')
+      // 8MB 低于 64MB 阈值 → 不应登记 persistedOutputPath
+      expect(finalTask!.persistedOutputPath).toBeUndefined()
+    }, 60_000)
+  })
 })
