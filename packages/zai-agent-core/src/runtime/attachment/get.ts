@@ -14,7 +14,9 @@
  * 这样本模块不依赖 BackgroundRuntime / BashTracker 的运行时实例, 也便于
  * 单测用 mock source.
  */
-import type { AnthropicMessage, ContentBlock } from '../../transcript/types.js'
+// v1.1 — Attachment no longer carries AnthropicMessage payloads; collectors
+// emit plain <system-reminder>-wrapped strings (see spec
+// docs/superpowers/specs/2026-07-26-zai-attachment-system-reminder-design.md §2.2).
 import type { LoadedSkill } from '../skills/types.js'
 
 /** 来源类型 — 冻结 spec §2.1 / §2.3. */
@@ -25,12 +27,20 @@ export type AttachmentSource =
   | 'memory-prefetch'
 
 /**
- * 单条 attachment. payload 形态 = assistant message, 由调用方在 wire-in 阶段
- * 注入到 messages (沿用 runtime.delta 通道, 详见 spec §2.2).
+ * v1.1 — attachment is plain text wrapped in `<system-reminder>...</system-reminder>`.
+ * queryLoop joins all attachments' content and appends to `systemPrompt`
+ * (does NOT push to `messages`, which would break Anthropic's user/assistant
+ * alternation contract).
+ *
+ * Source contract frozen (spec §2.2 / §2.3):
+ *   - 'background-bash'    → BashTracker terminal tasks
+ *   - 'background-agent'   → BackgroundRuntime terminal tasks
+ *   - 'skill-prefetch'     → pluginSnapshot.skills (one per skill)
+ *   - 'memory-prefetch'    → memoryCache.get(sessionId)
  */
 export interface Attachment {
   source: AttachmentSource
-  payload: AnthropicMessage
+  content: string
   consumedAt: number
 }
 
