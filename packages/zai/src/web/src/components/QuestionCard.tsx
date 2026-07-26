@@ -119,7 +119,7 @@ function QuestionPanel({
 
   return (
     <div>
-      <Text strong style={{ color: '#1f1f1f' }}>{q.question}</Text>
+      <Text strong style={{ color: 'var(--text-primary)' }}>{q.question}</Text>
       <div style={{ marginTop: 8 }}>
         {q.multiSelect ? (
           <>
@@ -197,7 +197,7 @@ function QuestionPanel({
         )}
       </div>
       <div style={{ marginTop: 12 }}>
-        <Text type="secondary" style={{ fontSize: 12, color: '#595959' }}>附加说明 (可选)</Text>
+        <Text type="secondary" style={{ fontSize: 12, color: 'var(--text-secondary)' }}>附加说明 (可选)</Text>
         <TextArea
           rows={2}
           maxLength={NOTES_MAX}
@@ -271,12 +271,12 @@ function ReviewPanel({
         }
         return (
           <div key={q.question} style={{ marginBottom: 8 }}>
-            <Text strong style={{ color: '#1f1f1f' }}>{q.question}</Text>
+            <Text strong style={{ color: 'var(--text-primary)' }}>{q.question}</Text>
             <div style={{ marginTop: 2 }}>
-              <Text style={{ color: '#1f1f1f' }}>{display || <Text type="secondary" style={{ color: '#8c8c8c' }}>未回答</Text>}</Text>
+              <Text style={{ color: 'var(--text-primary)' }}>{display || <Text type="secondary" style={{ color: 'var(--text-tertiary)' }}>未回答</Text>}</Text>
             </div>
             {annotations[q.question]?.notes && (
-              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2, color: '#595959' }}>
+              <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 2, color: 'var(--text-secondary)' }}>
                 备注: {annotations[q.question].notes}
               </Text>
             )}
@@ -309,24 +309,24 @@ export default function QuestionCard(props: QuestionCardProps) {
         style={{
           margin: '12px 24px',
           padding: '12px 14px',
-          background: '#fff0e2',
-          borderLeft: '3px solid #ff6600',
+          background: 'var(--bg-card-hover)',
+          borderLeft: '3px solid var(--accent-start)',
           borderRadius: 6,
         }}
       >
         <div style={{ marginBottom: 10 }}>
-          <Text strong style={{ color: '#1f1f1f' }}>请回答以下问题</Text>
+          <Text strong style={{ color: 'var(--text-primary)' }}>请回答以下问题</Text>
         </div>
 
         {status === 'error' && errorMessage && (
-          <div style={{ marginBottom: 10, padding: '6px 10px', background: '#fff2f0', border: '1px solid #ff4d4f', borderRadius: 4 }}>
+          <div style={{ marginBottom: 10, padding: '6px 10px', background: 'var(--bg-body)', border: '1px solid var(--error)', borderRadius: 4 }}>
             <Text type="danger" style={{ fontSize: 12 }}>{errorMessage}</Text>
           </div>
         )}
 
         <div style={{ marginBottom: 6 }}>
           <Tag color="purple" style={{ marginRight: 4 }}>{q.header}</Tag>
-          <span style={{ color: '#595959', marginLeft: 4 }}>
+          <span style={{ color: 'var(--text-secondary)', marginLeft: 4 }}>
             {q.multiSelect ? '多选' : '单选'}
           </span>
         </div>
@@ -342,7 +342,7 @@ export default function QuestionCard(props: QuestionCardProps) {
 
         <div style={{ marginTop: 16, display: 'flex', gap: 8, justifyContent: 'flex-end' }}>
           <Popconfirm title="确认取消?" onConfirm={onReject} okText="是" cancelText="否">
-            <Button type="text" style={{ color: '#595959' }}>取消</Button>
+            <Button type="text" style={{ color: 'var(--text-secondary)' }}>取消</Button>
           </Popconfirm>
           <Button type="primary" disabled={!allAnswered || status === 'submitting'} onClick={onSubmit} loading={status === 'submitting'}>
             Submit answers
@@ -359,20 +359,20 @@ export default function QuestionCard(props: QuestionCardProps) {
       style={{
         margin: '12px 24px',
         padding: '12px 14px',
-        background: '#fff0e2',
-        borderLeft: '3px solid #ff6600',
+        background: 'var(--bg-card-hover)',
+        borderLeft: '3px solid var(--accent-start)',
         borderRadius: 6,
       }}
     >
       <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: 10 }}>
-        <Text strong style={{ color: '#1f1f1f' }}>请回答以下问题</Text>
+        <Text strong style={{ color: 'var(--text-primary)' }}>请回答以下问题</Text>
         <Popconfirm title="确认取消?" onConfirm={onReject} okText="是" cancelText="否">
           <Button size="small">取消</Button>
         </Popconfirm>
       </div>
 
       {status === 'error' && errorMessage && (
-        <div style={{ marginBottom: 10, padding: '6px 10px', background: '#fff2f0', border: '1px solid #ff4d4f', borderRadius: 4 }}>
+        <div style={{ marginBottom: 10, padding: '6px 10px', background: 'var(--bg-body)', border: '1px solid var(--error)', borderRadius: 4 }}>
           <Text type="danger" style={{ fontSize: 12 }}>{errorMessage}</Text>
         </div>
       )}
@@ -386,7 +386,7 @@ export default function QuestionCard(props: QuestionCardProps) {
             label: (
               <span>
                 <Tag color="purple" style={{ marginRight: 4 }}>{q.header}</Tag>
-                <span style={{ color: '#595959', marginLeft: 4 }}>
+                <span style={{ color: 'var(--text-secondary)', marginLeft: 4 }}>
                   {q.multiSelect ? '多选' : '单选'}
                 </span>
               </span>
