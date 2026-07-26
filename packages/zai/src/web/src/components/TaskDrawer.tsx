@@ -94,7 +94,7 @@ const markdownComponents = {
   th: ({ children }: any) => <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, border: '1px solid var(--border-subtle)' }}>{children}</th>,
   td: ({ children }: any) => <td style={{ padding: '6px 10px', border: '1px solid var(--border-subtle)' }}>{children}</td>,
   blockquote: ({ children }: any) => <blockquote style={{ borderLeft: '3px solid var(--border-subtle)', paddingLeft: 12, margin: '4px 0 8px 0', color: 'var(--text-secondary)' }}>{children}</blockquote>,
-  a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: '#1677ff', textDecoration: 'underline' }}>{children}</a>,
+  a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-start)', textDecoration: 'underline' }}>{children}</a>,
   hr: () => <hr style={{ border: 'none', borderTop: '1px solid var(--border-subtle)', margin: '12px 0' }} />,
 }
 
