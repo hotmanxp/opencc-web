@@ -245,13 +245,26 @@ export async function* queryLoop(
   const promptIsMeta = options.isMetaPrompt === true
 
   // ---- loop-resilience wire-in (Phase 2) -----------------------------------
-  // D. mid-turn attachment + memory prefetch (turn 入口一次性拉取)
+  // D. mid-turn attachment (v1.1: system-reminder, NOT messages).
+  //   4 类 attachment (background-bash / background-agent / skill-prefetch /
+  //   memory-prefetch) 都返回 <system-reminder>...</system-reminder> 包裹的
+  //   字符串. queryLoop 不再 push 到 messages 数组(否则 fresh session 配合
+  //   skill-prefetch 会出现连续 assistant message,触发 Anthropic 2013),
+  //   改为 join 到 systemPrompt 尾巴 — 由 modelCaller 在 systemPrompt 数组上
+  //   自然拆分 prompt-cache 边界 marker. 详见 spec
+  //   docs/superpowers/specs/2026-07-26-zai-attachment-system-reminder-design.md
   const attachments = await getAttachmentMessages({
     sessionId,
     signal: abortController.signal,
     pluginSnapshot,
   })
-  for (const att of attachments) messages.push(att.payload as any)
+  // getAttachmentMessages 内部已按 consumedAt asc 排序 + DEFAULT_LIMIT=100 cap.
+  const reminderText = attachments.map((a) => a.content).join('\n')
+  // SystemPrompt 是 branded readonly string[] — 不能 push, 用 spread 重赋值.
+  // reminderText 为空时跳过,避免 systemPrompt 数组尾巴多一条空字符串.
+  const finalSystemPrompt = reminderText.length > 0
+    ? ([...systemPrompt, reminderText] as unknown as typeof systemPrompt)
+    : systemPrompt
   memPrefetch = startRelevantMemoryPrefetch({
     sessionId,
     signal: abortController.signal,
@@ -320,11 +333,13 @@ export async function* queryLoop(
 
     const modelStream = config.modelCaller?.({
       model: options.model ?? config.defaultModel ?? 'default',
-      // ModelCaller.systemPrompt is `string | string[] | { type }[]` —
-      // not readonly. Spread the branded readonly array into a fresh
-      // mutable array. The boundary marker lives at index idx; the
-      // modelCaller filters it out / splits for cache_control.
-      systemPrompt: [...systemPrompt],
+      // Pass `finalSystemPrompt` (systemPrompt + joined <system-reminder>
+      // attachments) instead of the base `systemPrompt`. ModelCaller's
+      // `systemPrompt` parameter is `string | string[] | { type }[]` —
+      // `string[]` is mutable, but `finalSystemPrompt` is the branded
+      // `readonly string[]` (SystemPrompt). Spread it once here into a
+      // fresh mutable `string[]` to satisfy the parameter type.
+      systemPrompt: [...finalSystemPrompt],
       messages,
       tools,
       signal: abortController.signal,
