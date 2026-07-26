@@ -53,6 +53,14 @@
 :root[data-theme='light'] .ant-layout-header {
   background: rgba(255, 255, 255, 0.8) !important;
 }
+
+/* light 主题: 状态栏加一点背景色 */
+:root[data-theme='light'] [data-testid='config-status-bar'] {
+  background: #e2e8f0;
+}
+:root[data-theme='light'] [data-testid='bottom-status-trigger'] {
+  background: #e2e8f0 !important;
+}
 :root[data-theme='light'] .ant-table-tbody > tr > td {
   border-bottom-color: rgba(15, 23, 42, 0.05) !important;
 }
@@ -61,6 +69,16 @@
 }
 :root[data-theme='light'] [data-testid="fs-tree"] .ant-tree-node-selected {
   background: rgba(249, 115, 22, 0.14) !important;
+}
+
+/* light 主题: 折叠消息的"显示更多"/"收起"链接文字用主题橙 */
+:root[data-theme='light'] .ant-card-body .ant-typography-expand,
+:root[data-theme='light'] .ant-typography-expand {
+  color: var(--accent-start) !important;
+}
+/* AssistantTextBody 里的 Button type="link" 也要覆盖 */
+:root[data-theme='light'] .ant-btn-link {
+  color: var(--accent-start) !important;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }

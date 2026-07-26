@@ -30,8 +30,10 @@ export default function ConfigStatusBar({
 
   return (
     <div
+      data-testid="config-status-bar"
       style={{
-        borderTop: "1px solid rgba(255,255,255,0.10)",
+        background: "var(--bg-card-hover)",
+        borderTop: "1px solid var(--border-subtle)",
         padding: "6px 10px",
         fontSize: 12,
         fontFamily:
