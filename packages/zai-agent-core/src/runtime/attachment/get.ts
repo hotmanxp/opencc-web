@@ -193,7 +193,7 @@ function collectBash(
     const finishedAt = typeof t.finishedAt === 'number' ? t.finishedAt : Date.now()
     out.push({
       source: 'background-bash',
-      payload: bashTaskToAssistantMessage(t),
+      content: bashTaskToReminder(t),
       consumedAt: finishedAt,
     })
   }
@@ -218,7 +218,7 @@ async function collectBackgroundTasks(
     const finishedAt = typeof t.finishedAt === 'number' ? t.finishedAt : Date.now()
     out.push({
       source: 'background-agent',
-      payload: backgroundTaskToAssistantMessage(t),
+      content: backgroundTaskToReminder(t),
       consumedAt: finishedAt,
     })
   }
@@ -235,7 +235,7 @@ function collectSkills(
   // 一个 skill 一条 attachment; wire-in 阶段由 caller 决定是否合并.
   return snapshot.skills.map((s) => ({
     source: 'skill-prefetch' as const,
-    payload: skillToAssistantMessage(s),
+    content: skillToReminder(s),
     consumedAt: now,
   }))
 }
@@ -249,18 +249,18 @@ function collectMemory(
   if (typeof content !== 'string' || content.length === 0) return null
   return {
     source: 'memory-prefetch',
-    payload: textToAssistantMessage(content),
+    content: textToReminder(content),
     consumedAt: Date.now(),
   }
 }
 
 // ---- payload builders ------------------------------------------------------
 
-function textToAssistantMessage(text: string): AnthropicMessage {
-  return { role: 'assistant', content: text }
+function textToReminder(text: string): string {
+  return `<system-reminder>\n${text}\n</system-reminder>`
 }
 
-function bashTaskToAssistantMessage(t: BashTaskLike): AnthropicMessage {
+function bashTaskToReminder(t: BashTaskLike): string {
   // OpenCC 风格保持纯 text (spec §6.5).
   const header = `<bash-task taskId="${t.taskId ?? ''}" status="${t.status ?? ''}" exitCode="${t.exitCode ?? ''}">`
   const body = [
@@ -270,24 +270,21 @@ function bashTaskToAssistantMessage(t: BashTaskLike): AnthropicMessage {
   ]
     .filter(Boolean)
     .join('\n')
-  const text = `${header}\n${body}\n</bash-task>`
-  const block: ContentBlock = { type: 'text', text }
-  return { role: 'assistant', content: [block] }
+  return `<system-reminder>\n${header}\n${body}\n</bash-task>\n</system-reminder>`
 }
 
-function backgroundTaskToAssistantMessage(t: BackgroundTaskLike): AnthropicMessage {
+function backgroundTaskToReminder(t: BackgroundTaskLike): string {
   const header = `<background-agent taskId="${t.id ?? ''}" status="${t.status ?? ''}">`
-  const body = t.resultText
-    ?? t.error?.message
-    ?? '(no result)'
-  const text = `${header}\n${body}\n</background-agent>`
-  const block: ContentBlock = { type: 'text', text }
-  return { role: 'assistant', content: [block] }
+  const body = t.resultText ?? t.error?.message ?? '(no result)'
+  return `<system-reminder>\n${header}\n${body}\n</background-agent>\n</system-reminder>`
 }
 
-function skillToAssistantMessage(s: LoadedSkill): AnthropicMessage {
+function skillToReminder(s: LoadedSkill): string {
+  // OpenCC skill_listing 用 "The following skills are available for use with
+  // the Skill tool:" 作为人类语言描述, 不依赖外部标签. zai 每个 skill 一条
+  // reminder, 由 queryLoop 直接 join — 模型看到连续多个 <system-reminder>
+  // 块会自动理解, 不需要 list 头.
   const desc = s.frontmatter?.description ?? s.description ?? ''
-  const text = `<skill-prefetch name="${s.name}" source="${s.source ?? 'disk'}">\n${desc}\n</skill-prefetch>`
-  const block: ContentBlock = { type: 'text', text }
-  return { role: 'assistant', content: [block] }
+  const source = s.source ?? 'disk'
+  return `<system-reminder>\nThe following skill is available: ${s.name} (source: ${source})\n${desc}\n</system-reminder>`
 }
