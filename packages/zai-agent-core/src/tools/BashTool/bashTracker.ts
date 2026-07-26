@@ -241,10 +241,11 @@ class BashBackgroundTracker {
       if (t.status === 'running') continue
       finished.push(t)
     }
-    // 1) 时间淘汰: finishedAt + TTL < now 的直接删
+    // 1) 时间淘汰: finishedAt + TTL < now 的直接删 (同步 unlink persisted 文件)
+    const toDelete = new Set<string>()
     for (const t of finished) {
       if (t.finishedAt !== undefined && now - t.finishedAt > FINISHED_TTL_MS) {
-        this.byId.delete(t.taskId)
+        toDelete.add(t.taskId)
       }
     }
     // 2) 容量淘汰: byId 总数还超 MAX_TRACKED_TASKS → 按 finishedAt 升序删
@@ -254,8 +255,13 @@ class BashBackgroundTracker {
         .sort((a, b) => (a.finishedAt ?? 0) - (b.finishedAt ?? 0))
       const excess = this.byId.size - MAX_TRACKED_TASKS
       for (let i = 0; i < excess && i < sorted.length; i++) {
-        this.byId.delete(sorted[i].taskId)
+        toDelete.add(sorted[i].taskId)
       }
+    }
+    // 同步 unlink 每个被驱逐 task 的 persisted 文件, 再删 byId 项
+    for (const taskId of toDelete) {
+      this.evictOutput(taskId)
+      this.byId.delete(taskId)
     }
   }
 

@@ -2,6 +2,7 @@ import { describe, expect, test, beforeEach, afterEach } from 'vitest'
 import { mkdtemp, rm, writeFile, readFile } from 'fs/promises'
 import { join } from 'path'
 import { tmpdir } from 'os'
+import { existsSync } from 'node:fs'
 import { BashTool } from '../../../src/tools/BashTool/BashTool.js'
 import { bashBackgroundTracker } from '../../../src/tools/BashTool/bashTracker.js'
 import { BashInputSchema } from '../../../src/tools/BashTool/schema.js'
@@ -578,6 +579,31 @@ describe('BashTool', () => {
       oldTask.finishedAt = Date.now() - 60 * 60 * 1000
       bashBackgroundTracker.markFinished('b-old', 'completed')
       expect(bashBackgroundTracker.get('b-runing'), 'running task 不被 evict').toBeDefined()
+    })
+  })
+
+  describe('回归: evictFinished 清理 persisted 输出文件', () => {
+    test('时间驱逐时自动 unlink persisted 文件', async () => {
+      const tmpDir = await mkdtemp(join(tmpdir(), 'zai-evict-persist-'))
+      const fakePersistedPath = join(tmpDir, 'zai-bash-fake-persist.txt')
+      await writeFile(fakePersistedPath, 'big output')
+
+      bashBackgroundTracker.register('b-persist-test', {
+        sessionId: 's1',
+        command: 'cmd-with-persist',
+        description: 'persist',
+        startedAt: Date.now() - 31 * 60 * 1000,
+      })
+      bashBackgroundTracker.markFinished('b-persist-test', 'completed')
+      // markFinished 把 finishedAt 设成 Date.now(); 改回 31 分钟前以触发 TTL 路径
+      const t = bashBackgroundTracker.get('b-persist-test')!
+      t.finishedAt = Date.now() - 31 * 60 * 1000
+      t.persistedOutputPath = fakePersistedPath
+      bashBackgroundTracker.__evictFinishedForTests()
+
+      expect(bashBackgroundTracker.get('b-persist-test')).toBeUndefined()
+      expect(existsSync(fakePersistedPath)).toBe(false)  // 应已被删
+      await rm(tmpDir, { recursive: true, force: true })
     })
   })
 })
