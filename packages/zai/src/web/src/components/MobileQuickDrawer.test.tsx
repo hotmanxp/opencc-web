@@ -4,6 +4,7 @@ import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 
 const execReplMock = vi.fn(async () => ({ ok: true as const, execId: 'e1' }))
+const refreshTopCommandsMock = vi.fn()
 vi.mock('../hooks/useBashRepl.js', () => ({
   useBashRepl: () => ({
     events: [],
@@ -14,7 +15,7 @@ vi.mock('../hooks/useBashRepl.js', () => ({
       { command: 'ls -la', count: 5 },
       { command: 'pwd', count: 2 },
     ],
-    refreshTopCommands: vi.fn(),
+    refreshTopCommands: refreshTopCommandsMock,
     exec: execReplMock,
     abort: vi.fn(),
     clear: vi.fn(),
@@ -29,6 +30,33 @@ vi.mock('../hooks/useSubmitPrompt.js', () => ({
     pushUserMsg: pushUserMsgMock,
   }),
 }))
+
+const removeMock = vi.fn()
+const clearMock = vi.fn()
+vi.mock('../hooks/useQuickPrompts.js', () => ({
+  useQuickPrompts: () => ({
+    prompts: [
+      { id: 'p1', text: '优化这段代码的可读性与性能' },
+      { id: 'p2', text: '为这段函数补上单元测试' },
+      { id: 'p3', text: '解释这个错误的根因,并给出修复建议' },
+    ],
+    add: vi.fn(),
+    remove: removeMock,
+    clear: clearMock,
+  }),
+}))
+
+const messageWarningMock = vi.fn()
+vi.mock('antd', async (importOriginal) => {
+  const antd = await importOriginal<typeof import('antd')>()
+  return {
+    ...antd,
+    message: {
+      ...(antd.message ?? {}),
+      warning: (...args: unknown[]) => messageWarningMock(...args),
+    },
+  }
+})
 
 import MobileQuickDrawer from './MobileQuickDrawer.jsx'
 import { useAgentStore } from '../store/useAgentStore.js'
@@ -84,6 +112,12 @@ describe('MobileQuickDrawer — Bash tab', () => {
     expect(screen.getByText(/请先开启会话/)).toBeInTheDocument()
     expect(screen.queryByText('ls -la')).toBeNull()
   })
+
+  it('点击 [刷新] 按钮调 refreshTopCommands', () => {
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    fireEvent.click(screen.getByTestId('mobile-quick-drawer-bash-refresh'))
+    expect(refreshTopCommandsMock).toHaveBeenCalled()
+  })
 })
 
 describe('MobileQuickDrawer — Prompt tab', () => {
@@ -109,5 +143,33 @@ describe('MobileQuickDrawer — Prompt tab', () => {
     fireEvent.click(screen.getByText('为这段函数补上单元测试'))
     await waitFor(() => expect(submitPromptMock).toHaveBeenCalledWith('为这段函数补上单元测试'))
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('status=streaming 时点击 prompt row 调 message.warning 且不调 onClose', () => {
+    const onClose = vi.fn()
+    useAgentStore.setState({ status: 'streaming' })
+    render(<MobileQuickDrawer open onClose={onClose} />)
+    switchToPromptTab()
+    fireEvent.click(screen.getByText('为这段函数补上单元测试'))
+    expect(messageWarningMock).toHaveBeenCalledWith('请等待当前回复结束')
+    expect(submitPromptMock).not.toHaveBeenCalled()
+    expect(onClose).not.toHaveBeenCalled()
+  })
+
+  it('点击删除按钮调 remove(id)', () => {
+    const onClose = vi.fn()
+    render(<MobileQuickDrawer open onClose={onClose} />)
+    switchToPromptTab()
+    const deleteBtn = screen.getAllByLabelText('删除')[0]!
+    fireEvent.click(deleteBtn)
+    expect(removeMock).toHaveBeenCalledWith('p1')
+  })
+
+  it('点击 [清空全部] 按钮调 clear', () => {
+    const onClose = vi.fn()
+    render(<MobileQuickDrawer open onClose={onClose} />)
+    switchToPromptTab()
+    fireEvent.click(screen.getByTestId('mobile-quick-drawer-prompt-clear'))
+    expect(clearMock).toHaveBeenCalled()
   })
 })
