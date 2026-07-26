@@ -226,6 +226,7 @@ useAgentStore.applyCompactionEvent → 5s 自动消失的 toast
 - v2 transcript resume `tool_use` 顶层消息合并 + SubagentNotifier 注入后 user/tool_result 配对已有回归测试(`test/runtime/queryLoop-resume-2013.test.ts`、`test/runtime/subagentNotifier-2013.test.ts`),覆盖 tool_result+text 合并到同一条 user 的 Anthropic 协议约束
 - abort / SSE 重连 / 模式切换乐观更新 revert / `AgentInputBox` 图片粘贴 + Esc 中断 路径无单元测试
 - SSE state push 走 StateChangeBus 桥接层,见 docs/superpowers/specs/2026-07-19-sse-state-push-design.md
+- BashTool `/tmp/zai-bash-*-cwd` (cwd trailer) 与 `/tmp/zai-bash-<taskId>.txt` (大输出持久化) 已修复: abort/timeout 路径主动清 cwd trailer，bashBackgroundTracker.evictFinished 同步 unlink 持久化文件。测试 seam `__cleanupTempFilesForTests()` 在 afterEach 兜底。log-event 加 `__setDataDirForTests` seam 防止单元测试污染真实 `~/.zai/`。详见 plan `2026-07-26-zai-bash-test-cleanup.md`.
 
 ### LLM 自切 cwd(`feat/cwd-tracking`)
 
