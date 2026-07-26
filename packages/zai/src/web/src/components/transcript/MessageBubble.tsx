@@ -95,8 +95,8 @@ export const StreamingMarkdown = React.memo(function StreamingMarkdown({ text }:
   );
 });
 
-const THINKING_ACCENT = "#722ed1";
-const THINKING_BG = "rgba(114, 45, 209, 0.14)";
+const THINKING_ACCENT = "#722ed1"; // TODO: theme-constant (purple — no CSS var mapping yet)
+const THINKING_BG = "rgba(114, 45, 209, 0.14)"; // TODO: theme-constant (purple bg — no CSS var mapping yet)
 const THINKING_PREVIEW_MAX = 80;
 
 // 模块级计数器: 当前有几个 ThinkingBlock 处于 streaming 状态。
@@ -478,7 +478,7 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
       <pre
         style={{
           fontSize: 12, margin: "4px 0 0 0", padding: "8px 10px",
-          background: "rgba(82,196,26,0.06)", borderLeft: "2px solid", borderLeftColor: "var(--accent-start)",
+          background: "var(--success-bg, rgba(82,196,26,0.06))", borderLeft: "2px solid", borderLeftColor: "var(--accent-start)",
           borderRadius: 4, whiteSpace: "pre-wrap" as const, wordBreak: "break-word" as const,
           fontFamily: CODE_FONT_FAMILY, maxHeight: 360, overflow: "auto" as const,
         }}
@@ -610,7 +610,7 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                         fontSize: 12,
                         margin: "4px 0 0 0",
                         padding: "8px 10px",
-                        background: "rgba(255,77,79,0.06)",
+                        background: "var(--error-bg, rgba(255,77,79,0.06))",
                         borderLeft: "2px solid", borderLeftColor: "var(--accent-end)",
                         borderRadius: 4,
                         color: "var(--accent-end)",
