@@ -36,7 +36,7 @@ export default function ConfigStatusBar({
         fontSize: 12,
         fontFamily:
           "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-        color: "rgba(255,255,255,0.45)",
+        color: "var(--text-tertiary)",
         display: "flex",
         alignItems: "center",
         gap: 8,
@@ -46,13 +46,13 @@ export default function ConfigStatusBar({
           splitPaneOpen 是分屏局部状态, 仍以 prop 形式传入. */}
       <ModeStatusButton compact={splitPaneOpen} />
       <span style={{ color: "#eab308" }}>{displayName}</span>
-      <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
-      <span style={{ color: "#22c55e" }}>{branch}</span>
-      <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
-      <span style={{ color: "#f97316" }}>
+      <span style={{ color: "var(--text-tertiary)" }}>·</span>
+      <span style={{ color: "var(--success)" }}>{branch}</span>
+      <span style={{ color: "var(--text-tertiary)" }}>·</span>
+      <span style={{ color: "var(--accent-start)" }}>
         <ModelStatusButton compact={splitPaneOpen} />
       </span>
-      <span style={{ color: "rgba(255,255,255,0.25)" }}>·</span>
+      <span style={{ color: "var(--text-tertiary)" }}>·</span>
       <TaskDock onSelect={onTaskSelect} compact={splitPaneOpen} />
     </div>
   );

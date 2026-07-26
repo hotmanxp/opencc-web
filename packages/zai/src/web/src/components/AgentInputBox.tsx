@@ -591,7 +591,7 @@ export default React.memo(function AgentInputBox() {
           fontSize: 12,
           fontFamily:
             "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
-          color: "rgba(255,255,255,0.45)",
+          color: "var(--text-tertiary)",
           display: "flex",
           alignItems: "center",
           gap: 8,
@@ -602,9 +602,9 @@ export default React.memo(function AgentInputBox() {
           style={{
             color:
               status === "idle"
-                ? "#22c55e"
+                ? "var(--success)"
                 : status === "streaming"
-                  ? "#ff6600"
+                  ? "var(--accent-start)"
                   : "inherit",
           }}
         >
@@ -643,7 +643,7 @@ export default React.memo(function AgentInputBox() {
               <span
                 data-testid="agent-input-task-summary"
                 style={{
-                  color: "rgba(255,255,255,0.65)",
+                  color: "var(--text-secondary)",
                   cursor: "pointer",
                   // 关键 flex 保护: 不让右端 spacer + 按钮把这段挤没.
                   flexShrink: 0,
@@ -651,12 +651,12 @@ export default React.memo(function AgentInputBox() {
                   overflow: "hidden",
                   textOverflow: "ellipsis",
                   // 流式期间降透明, 让 spinner 成为视觉焦点, 任务信息仍可读.
-                  opacity: status === "streaming" ? 0.65 : 1,
+                  opacity: status === "streaming" ? 0.7 : 1,
                   transition: "opacity 0.2s",
                 }}
               >
-                <span style={{ color: "rgba(255,255,255,0.25)", marginRight: 4 }}>·</span>
-                <span style={{ color: doneTasks === totalTasks ? "#52c41a" : "rgba(255,255,255,0.85)" }}>
+                <span style={{ color: "var(--text-tertiary)", marginRight: 4 }}>·</span>
+                <span style={{ color: doneTasks === totalTasks ? "var(--success)" : "var(--text-primary)" }}>
                   {doneTasks}/{totalTasks} 任务
                 </span>
                 {inProgressTasks > 0 && (
@@ -665,7 +665,7 @@ export default React.memo(function AgentInputBox() {
                   </span>
                 )}
                 {openTasks > 0 && (
-                  <span style={{ color: "rgba(255,255,255,0.55)", marginLeft: 8 }}>
+                  <span style={{ color: "var(--text-tertiary)", marginLeft: 8 }}>
                     · {openTasks} 待开始
                   </span>
                 )}
@@ -677,7 +677,7 @@ export default React.memo(function AgentInputBox() {
             物理/虚拟键盘没有 Esc 键, 文字提示对移动用户没意义.
             桌面端保留是为了让键盘用户能记住快捷键. */}
         {status === "streaming" && !isMobile && (
-          <span style={{ color: "rgba(255,255,255,0.45)" }}>· esc 中断</span>
+          <span style={{ color: "var(--text-tertiary)" }}>· esc 中断</span>
         )}
         {attachments.length > 0 && (
           <AttachmentStrip
@@ -730,7 +730,7 @@ export default React.memo(function AgentInputBox() {
             />
           </Popover>
         </Tooltip>
-        {!isMobile && <SettingsButton />}
+        <SettingsButton />
         {/* 折叠/展开 transcript 按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
             图标在 collapsed=false 时显示 ExpandOutlined (可折叠), true 时显示
             CompressOutlined (可展开), hover Tooltip 给完整文案, 与同行其他图标按钮
@@ -894,8 +894,8 @@ export default React.memo(function AgentInputBox() {
                 left: 0,
                 right: 0,
                 marginBottom: 4,
-                background: "#1a1a1e",
-                border: "1px solid rgba(255,255,255,0.15)",
+                background: "var(--bg-card)",
+                border: "1px solid var(--border-subtle)",
                 borderRadius: 8,
                 maxHeight: 240,
                 overflowY: "auto",

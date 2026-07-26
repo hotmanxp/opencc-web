@@ -27,8 +27,8 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
         display: 'flex',
         alignItems: 'center',
         padding: '0 8px',
-        borderBottom: '1px solid rgba(255,255,255,0.10)',
-        background: '#12121a',
+        borderBottom: '1px solid var(--border-subtle)',
+        background: 'var(--bg-card)',
         flexShrink: 0,
       }}
     >
@@ -46,7 +46,7 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
           textAlign: 'center',
           fontSize: 14,
           fontWeight: 500,
-          color: '#f1f5f9',
+          color: 'var(--text-primary)',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           whiteSpace: 'nowrap',

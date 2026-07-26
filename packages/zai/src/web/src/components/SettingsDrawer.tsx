@@ -378,18 +378,29 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
               const globalIdx = filteredFlatRows.findIndex((r) => r.key === row.key)
               const isSelected = globalIdx === selectedIdx
               const displayValue = formatValue(row)
+              // 行点击:boolean → toggle,enum → 打开选项浮层,number → 进入编辑
+              // (inputMode="numeric" 会在移动端弹出数字键盘). 键盘操作保留不变,
+              // 这样桌面 / 移动两套交互并行不冲突. +/- 按钮已在内部 stopPropagation,
+              // 不会被外层 onClick 重复触发.
+              const handleRowClick = () => {
+                setSelectedIdx(globalIdx)
+                if (row.kind === 'boolean') toggleBoolean(row)
+                else if (row.kind === 'enum') openEnumOverlay(row)
+                else if (row.kind === 'number') openNumberEdit(row)
+              }
               return (
                 <div
                   key={row.key}
                   data-row-key={row.key}
                   data-selected={isSelected ? 'true' : 'false'}
+                  onClick={handleRowClick}
                   style={{
                     display: 'flex',
                     padding: '3px 12px',
                     background: isSelected
                       ? 'rgba(255,255,255,0.08)'
                       : 'transparent',
-                    cursor: 'default',
+                    cursor: 'pointer',
                   }}
                 >
                   <span

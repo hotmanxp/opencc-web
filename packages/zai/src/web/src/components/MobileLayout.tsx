@@ -77,8 +77,8 @@ export default function MobileLayout() {
         paddingBottom: 'env(safe-area-inset-bottom)',
         display: 'flex',
         flexDirection: 'column',
-        background: '#0a0a0f',
-        color: '#f1f5f9',
+        background: 'var(--bg-body)',
+        color: 'var(--text-primary)',
         overflow: 'hidden',
       }}
     >

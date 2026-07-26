@@ -78,7 +78,7 @@ export function CollapsedMessageBubble({
         >
           <MessageCopyButton text={(m.text as string) || ''} variant="ai" />
           <Space align="start" size={8} style={{ width: '100%' }}>
-            <RobotFilled style={{ color: '#ff6600', fontSize: 18 }} />
+            <RobotFilled style={{ color: 'var(--accent-start)', fontSize: 18 }} />
             <div style={{ flex: 1, minWidth: 0 }}>
               <AssistantTextBody
                 text={(m.text as string) || ''}

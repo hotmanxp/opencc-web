@@ -190,8 +190,8 @@ describe('AgentInputBox — 状态行合并任务摘要', () => {
     expect(summary).toHaveTextContent('1/3 任务');
     expect(summary).toHaveTextContent('1 进行中');
     expect(summary).toHaveTextContent('1 待开始');
-    // 流式期间 opacity 降到 0.65, 让 spinner 抢眼
-    expect((summary as HTMLElement).style.opacity).toBe('0.65');
+    // 流式期间 opacity 降到 0.7, 让 spinner 抢眼同时任务文字仍可读
+    expect((summary as HTMLElement).style.opacity).toBe('0.7');
   });
 
   // 修复: 状态行任务摘要可点击 → 弹出 TodoDropdown 列出 todo + v2 详情.

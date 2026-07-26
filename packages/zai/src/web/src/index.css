@@ -2,22 +2,24 @@
 @tailwind components;
 @tailwind utilities;
 
+/* 默认 (dark 主题) : 深色背景 + 暖橙 accent.
+   Light 主题在 :root[data-theme='light'] 里覆盖: 白底 + 卡片浅灰, accent 仍是橙色. */
 :root {
   --bg-body: #0a0a0f;
   --bg-card: #12121a;
   --bg-card-hover: #1a1a2e;
   --bg-sidebar: #0d0d14;
   --bg-input: #1a1a2e;
-  --border-subtle: rgba(255, 102, 0, 0.15);
-  --border-active: rgba(255, 102, 0, 0.4);
-  --text-primary: #f1f5f9;
-  --text-secondary: #94a3b8;
-  --text-tertiary: #64748b;
-  --accent-start: #ff6600;
-  --accent-end: #ff8533;
-  --accent-start-bg: #f9f0ff;
-  --accent-end-bg: #f6ffed;
-  --glow: rgba(255, 102, 0, 0.15);
+  --border-subtle: rgba(249, 115, 22, 0.18);
+  --border-active: rgba(249, 115, 22, 0.45);
+  --text-primary: #f8fafc;
+  --text-secondary: #cbd5e1;
+  --text-tertiary: #94a3b8;
+  --accent-start: #f97316;
+  --accent-end: #fb923c;
+  --accent-start-bg: #fff7ed;
+  --accent-end-bg: #fff2f0;
+  --glow: rgba(249, 115, 22, 0.18);
   --success: #22c55e;
   --error: #ef4444;
   --warning: #f59e0b;
@@ -26,21 +28,22 @@
 :root { color-scheme: light dark; }
 
 :root[data-theme='light'] {
-  --bg-body: #f8fafc;
-  --bg-card: #ffffff;
-  --bg-card-hover: #f1f5f9;
-  --bg-sidebar: #f1f5f9;
+  /* 用户要求: 白底 + 卡片浅灰, 主题色仍保留橙色 identity. */
+  --bg-body: #ffffff;
+  --bg-card: #f1f5f5;
+  --bg-card-hover: #e2e8f0;
+  --bg-sidebar: #f8fafc;
   --bg-input: #ffffff;
-  --border-subtle: rgba(15, 23, 42, 0.10);
-  --border-active: rgba(255, 102, 0, 0.50);
+  --border-subtle: rgba(249, 115, 22, 0.20);
+  --border-active: rgba(249, 115, 22, 0.55);
   --text-primary: #0f172a;
   --text-secondary: #475569;
-  --text-tertiary: #94a3b8;
-  --accent-start: #ff6600;
-  --accent-end: #ff8533;
-  --accent-start-bg: #f9f0ff;
+  --text-tertiary: #64748b;
+  --accent-start: #f97316;
+  --accent-end: #fb923c;
+  --accent-start-bg: #fff7ed;
   --accent-end-bg: #fff2f0;
-  --glow: rgba(255, 102, 0, 0.12);
+  --glow: rgba(249, 115, 22, 0.14);
   --success: #16a34a;
   --error: #dc2626;
   --warning: #d97706;
@@ -57,7 +60,7 @@
   border-bottom-color: rgba(15, 23, 42, 0.05) !important;
 }
 :root[data-theme='light'] [data-testid="fs-tree"] .ant-tree-node-selected {
-  background: rgba(255, 102, 0, 0.12) !important;
+  background: rgba(249, 115, 22, 0.14) !important;
 }
 
 * { margin: 0; padding: 0; box-sizing: border-box; }
@@ -81,8 +84,8 @@ body {
 
 .ant-menu-dark { background: transparent !important; }
 .ant-menu-dark .ant-menu-item { transition: all 0.2s ease !important; }
-.ant-menu-dark .ant-menu-item:hover { background: rgba(255, 102, 0, 0.1) !important; }
-.ant-menu-dark .ant-menu-item-selected { background: linear-gradient(135deg, rgba(255,102,0,0.2), rgba(255,133,51,0.1)) !important; }
+.ant-menu-dark .ant-menu-item:hover { background: rgba(249, 115, 22, 0.12) !important; }
+.ant-menu-dark .ant-menu-item-selected { background: linear-gradient(135deg, rgba(249,115,22,0.22), rgba(251,146,60,0.12)) !important; }
 .ant-menu-dark .ant-menu-item-selected::after { display: none !important; }
 
 .ant-card { background: var(--bg-card) !important; border: 1px solid var(--border-subtle) !important; border-radius: 12px !important; transition: all 0.2s ease; }
@@ -104,13 +107,18 @@ body {
 .ant-tabs-ink-bar { background: linear-gradient(90deg, var(--accent-start), var(--accent-end)) !important; }
 
 /* .ant-input { background: var(--bg-input) !important; border: 1px solid var(--border-subtle) !important; color: var(--text-primary) !important; border-radius: 8px !important; } */
-/* .ant-input:focus { border-color: var(--accent-start) !important; box-shadow: 0 0 0 2px rgba(255,102,0,0.2) !important; } */
+/* .ant-input:focus { border-color: var(--accent-start) !important; box-shadow: 0 0 0 2px rgba(249,115,22,0.20) !important; } */
 
-.ant-btn-primary { background: linear-gradient(135deg, var(--accent-start), var(--accent-end)) !important; border: none !important; border-radius: 8px !important; }
+.ant-btn-primary {
+  background: linear-gradient(135deg, var(--accent-start), var(--accent-end)) !important;
+  border: none !important;
+  border-radius: 8px !important;
+  color: #fff !important;
+}
 .ant-btn-primary:hover { opacity: 0.9; box-shadow: 0 4px 20px var(--glow); }
 
 .ant-alert { border-radius: 10px !important; border: 1px solid var(--border-subtle) !important; }
-.ant-alert-info { background: rgba(255,102,0,0.1) !important; }
+.ant-alert-info { background: rgba(249, 115, 22, 0.10) !important; }
 .ant-alert-message { color: var(--text-primary) !important; }
 .ant-alert-description { color: var(--text-secondary) !important; }
 
@@ -185,7 +193,7 @@ body {
 }
 
 [data-testid="fs-tree"] .ant-tree-node-selected {
-  background: rgba(255, 102, 0, 0.18) !important;
+  background: rgba(249, 115, 22, 0.20) !important;
 }
 
 /* 文件树图标 — 不再靠 antd 的 FileOutlined + 颜色. 现在每个语言/类型

@@ -237,7 +237,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                 <span
                   style={{
                     fontSize: 12,
-                    color: "var(--text-tertiary)",
+                    color: "var(--text-secondary)",
                     fontStyle: "italic",
                     overflow: "hidden",
                     textOverflow: "ellipsis",

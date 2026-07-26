@@ -118,14 +118,14 @@ export default function AgentConversation() {
           overflowY: 'auto',
           padding: '0 8px',
           marginBottom: 4,
-          background: '#000000',
+          background: 'var(--bg-body)',
           maxWidth: '100%',
           overflowX: 'hidden',
         }}
       >
         {messages.length === 0 && (
-          <div style={{ textAlign: 'center', marginTop: 80, color: '#999' }}>
-            <RobotFilled style={{ fontSize: 48, marginBottom: 16, color: '#ff6600' }} />
+          <div style={{ textAlign: 'center', marginTop: 80, color: 'var(--text-tertiary)' }}>
+            <RobotFilled style={{ fontSize: 48, marginBottom: 16, color: 'var(--accent-start)' }} />
             <Paragraph type="secondary">发送消息开始与 AI Agent 对话</Paragraph>
             <Paragraph type="secondary" style={{ fontSize: 12 }}>
               支持文件搜索、读写文件和 Bash 执行
