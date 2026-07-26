@@ -1,8 +1,7 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach, beforeAll, afterAll } from 'vitest'
 import '@testing-library/jest-dom'
-import { cleanup, fireEvent, render, screen } from '@testing-library/react'
-import { ConfigProvider } from 'antd'
+import { act, cleanup, fireEvent, render, screen } from '@testing-library/react'
 import { useAppStore } from '../store/useAppStore.js'
 
 // Replace the actual hook with a deterministic fixture. We only need the
@@ -38,17 +37,34 @@ vi.mock('./ConversationInfoCard.js', () => ({
 
 import ConversationInfoButton from './ConversationInfoButton.js'
 
-// Test-only ConfigProvider: disable antd Modal enter/leave transitions so
-// `destroyOnHidden` unmounts synchronously under happy-dom. happy-dom does
-// not auto-dispatch transitionend events, which would otherwise keep the
-// Modal subtree in the DOM after close. Production keeps the standard
-// transitions — this is purely a test environment affordance.
-const renderWithDisabledTransitions = (ui: React.ReactElement) =>
-  render(
-    <ConfigProvider modal={{ transitionName: '', maskTransitionName: '' }}>
-      {ui}
-    </ConfigProvider>,
+// happy-dom does not auto-dispatch CSS `transitionend`. antd Modal's
+// rc-motion state machine (PREPARE → START → ACTIVE → ACTIVATED) is driven
+// by chained rAF callbacks, and only at STEP_ACTIVE does it register its
+// `transitionend` listener. We force every rAF callback to fire synchronously
+// so the listener is attached in the same task as the click; then we dispatch
+// `transitionend` on the motion-wrapped elements (`.ant-modal-mask` and
+// `.ant-modal`, NOT `.ant-modal-content` — rc-motion rejects events whose
+// target isn't the wrapped element). Production keeps the standard
+// transitions; this is purely a test-environment affordance.
+beforeAll(() => {
+  vi.spyOn(window, 'requestAnimationFrame').mockImplementation(
+    ((cb: FrameRequestCallback) => {
+      cb(performance.now())
+      return 0
+    }) as typeof window.requestAnimationFrame,
   )
+})
+afterAll(() => {
+  vi.mocked(window.requestAnimationFrame).mockRestore()
+})
+
+const flushModalTransition = (modalTestId: string) => {
+  const root = screen.queryByTestId(modalTestId)
+  if (!root) return
+  for (const el of root.querySelectorAll<HTMLElement>('.ant-modal-mask, .ant-modal')) {
+    fireEvent.transitionEnd(el, { propertyName: 'opacity' })
+  }
+}
 
 describe('ConversationInfoButton — mobile vs desktop branching', () => {
   afterEach(() => {
@@ -82,10 +98,12 @@ describe('ConversationInfoButton — mobile vs desktop branching', () => {
 
   it('mobile: clicking the trigger toggles the Modal open state', () => {
     useAppStore.setState({ isMobile: true })
-    renderWithDisabledTransitions(<ConversationInfoButton />)
+    render(<ConversationInfoButton />)
     const trigger = screen.getByTestId('conversation-info-trigger')
-    // 初始打开 → 关闭: destroyOnHidden 同步卸载,DOM 立即清掉
+    // 初始打开 → 关闭: 同步 rAF 让 rc-motion 走到 STEP_ACTIVE 注册 listener,
+    // 然后派发 transitionend 让 destroyOnHidden 卸载子树。
     fireEvent.click(trigger)
+    flushModalTransition('mobile-conversation-info-modal')
     expect(screen.queryByTestId('conversation-info-card')).not.toBeInTheDocument()
     // 再点 → 打开
     fireEvent.click(trigger)
