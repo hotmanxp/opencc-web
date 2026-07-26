@@ -65,7 +65,9 @@ interface AppState {
   // Settings Drawer 入口状态:右端工具栏的 [⚙] 按钮触发,Agent.tsx 顶层监听渲染.
   // 首期仅 frontend toggle;后续阶段 2 再接 PUT 写盘.
   settingsDrawerOpen: boolean;
-  // Theme 仅前端暂存(SPEC 阶段 1),刷新/重开 Drawer 后还原为 'auto'.
+  // Theme 仅前端暂存(SPEC 阶段 1:不持久化),刷新/重开 Drawer 后还原为 'auto'.
+  // 'auto' / 'high-contrast' 由 useEffectiveTheme() 解析为跟随系统 prefers-color-scheme.
+  // 持久化与高对比度真实主题实现见后续 phase.
   // 与 opencc 上游 ThemeSetting 字段名对齐 (opencc/src/utils/theme.ts:111).
   settingsTheme: 'auto' | 'dark' | 'light' | 'high-contrast';
   openSettingsDrawer: () => void;
