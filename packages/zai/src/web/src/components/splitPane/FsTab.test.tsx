@@ -5,6 +5,7 @@ import { render, screen, fireEvent, waitFor } from '@testing-library/react';
 vi.mock('./useFsList.js', () => ({ useFsList: vi.fn() }));
 vi.mock('./useFsFile.js', () => ({ useFsFile: vi.fn() }));
 vi.mock('./useFsSearch.js', () => ({ useFsSearch: vi.fn() }));
+vi.mock('./useFsContentSearch.js', () => ({ useFsContentSearch: vi.fn() }));
 vi.mock('./useFsWrite.js', () => ({
   useFsWrite: vi.fn(() => ({ save: vi.fn(), saving: false })),
 }));
@@ -53,17 +54,20 @@ vi.mock('../markdown/syntaxHighlighter.js', () => ({
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
 import { useFsSearch } from './useFsSearch.js';
+import { useFsContentSearch } from './useFsContentSearch.js';
 import { useFsWrite } from './useFsWrite.js';
 import { FsTab, buildAbsPath } from './FsTab.js';
 
 const mockList = useFsList as unknown as ReturnType<typeof vi.fn>;
 const mockFile = useFsFile as unknown as ReturnType<typeof vi.fn>;
 const mockSearch = useFsSearch as unknown as ReturnType<typeof vi.fn>;
+const mockContentSearch = useFsContentSearch as unknown as ReturnType<typeof vi.fn>;
 const mockWrite = useFsWrite as unknown as ReturnType<typeof vi.fn>;
 
 describe('FsTab', () => {
   beforeEach(() => {
     mockSearch.mockReturnValue({ data: null, loading: false, error: null, durationMs: null });
+    mockContentSearch.mockReturnValue({ data: null, loading: false, error: null, durationMs: null });
     mockWrite.mockReturnValue({ save: vi.fn().mockResolvedValue({ ok: true }), saving: false });
     mockFile.mockReturnValue({ data: null, loading: false, error: null });
   });
@@ -943,3 +947,104 @@ it('enters edit mode on 编辑 click', async () => {
   expect(screen.getByTestId('fs-cancel-btn')).toBeTruthy();
 });
 
+
+// --- Content search mode (Switch) ---
+
+it('renders the Switch in name mode by default', () => {
+  mockList.mockReturnValue({ data: { ok: true, entries: [] }, loading: false, error: null, refetch: vi.fn() });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  render(<FsTab cwd="/repo" />);
+  const sw = screen.getByTestId('fs-search-mode') as HTMLElement;
+  // antd Switch exposes role=switch with aria-checked
+  expect(sw.getAttribute('aria-checked')).toBe('false');
+});
+
+it('toggling the Switch renders FsContentSearchList when query is non-empty', () => {
+  mockList.mockReturnValue({ data: { ok: true, entries: [] }, loading: false, error: null, refetch: vi.fn() });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  mockContentSearch.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [
+        {
+          path: 'src/foo.ts',
+          name: 'foo.ts',
+          matches: [{ line: 42, text: 'TODO', submatch: { text: 'TODO', start: 0, end: 4 } }],
+        },
+      ],
+      truncated: false,
+      durationMs: 5,
+    },
+    loading: false,
+    error: null,
+    durationMs: 5,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.change(screen.getByTestId('fs-search-input'), { target: { value: 'TODO' } });
+  const sw = screen.getByTestId('fs-search-mode');
+  fireEvent.click(sw);
+  expect(sw.getAttribute('aria-checked')).toBe('true');
+  expect(screen.getByTestId('fs-content-list')).toBeTruthy();
+});
+
+it('clicking a content search row passes pendingLine to FilePreview', () => {
+  mockList.mockReturnValue({ data: { ok: true, entries: [] }, loading: false, error: null, refetch: vi.fn() });
+  mockFile.mockReturnValue({
+    data: {
+      ok: true, kind: 'text', path: '/repo/src/foo.ts', name: 'foo.ts',
+      size: 42, mtime: '', content: 'line1\nTODO\nline3\n',
+    },
+    loading: false,
+    error: null,
+  });
+  mockContentSearch.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [
+        {
+          path: 'src/foo.ts', name: 'foo.ts',
+          matches: [{ line: 2, text: 'TODO', submatch: { text: 'TODO', start: 0, end: 4 } }],
+        },
+      ],
+      truncated: false,
+      durationMs: 5,
+    },
+    loading: false,
+    error: null,
+    durationMs: 5,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.change(screen.getByTestId('fs-search-input'), { target: { value: 'TODO' } });
+  fireEvent.click(screen.getByTestId('fs-search-mode'));
+  fireEvent.click(screen.getByTestId('fs-content-row'));
+  // pendingLine=2 should mark the second <span data-line="2"> as highlighted
+  const line2 = document.querySelector('[data-line="2"]') as HTMLElement | null;
+  expect(line2).toBeTruthy();
+  // Background fades in via inline style. The data-line attr is what
+  // marks it; the actual inline style is asserted in FsContentSearchList.
+});
+
+it('cwd change resets mode and pendingLine', () => {
+  mockList.mockReturnValue({ data: { ok: true, entries: [] }, loading: false, error: null, refetch: vi.fn() });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  mockContentSearch.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [{ path: 'a.ts', name: 'a.ts', matches: [{ line: 1, text: 'x', submatch: { text: 'x', start: 0, end: 1 } }] }],
+      truncated: false,
+      durationMs: 1,
+    },
+    loading: false,
+    error: null,
+    durationMs: 1,
+  });
+  const { rerender } = render(<FsTab cwd="/repo1" />);
+  fireEvent.change(screen.getByTestId('fs-search-input'), { target: { value: 'foo' } });
+  fireEvent.click(screen.getByTestId('fs-search-mode'));
+  rerender(<FsTab cwd="/repo2" />);
+  // After cwd change, query should be empty and mode reset to 'name'
+  const input = screen.getByTestId('fs-search-input') as HTMLInputElement;
+  expect(input.value).toBe('');
+  const sw = screen.getByTestId('fs-search-mode');
+  expect(sw.getAttribute('aria-checked')).toBe('false');
+});

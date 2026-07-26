@@ -1,12 +1,15 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Button, Empty, Input, Segmented, Spin, Tree, message } from 'antd';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { Button, Empty, Input, Segmented, Spin, Switch, Tree, message } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { FileIcon, DirIcon } from './fileIcon.js';
 import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
 import { useFsFile } from './useFsFile.js';
 import { useFsSearch } from './useFsSearch.js';
+import { useFsContentSearch } from './useFsContentSearch.js';
 import { FsSearchList } from './FsSearchList.js';
+import { FsContentSearchList } from './FsContentSearchList.js';
+import type { FsFile } from '../../../shared/fs.js';
 import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
 import { FsContextMenu } from './FsContextMenu.js';
@@ -224,9 +227,11 @@ export function buildAbsPath(cwd: string | null, relPath: string): string {
 function FilePreview({
   file,
   htmlMode,
+  pendingLine,
 }: {
-  file: import('../../../../shared/fs.js').FsFile;
+  file: FsFile;
   htmlMode: HtmlMode;
+  pendingLine: number | null;
 }): JSX.Element {
   const { name } = file;
   const content = file.content ?? '';
@@ -252,6 +257,28 @@ function FilePreview({
       cancelled = true;
     };
   }, [lang, hl]);
+
+  // pendingLine: scroll to that 1-based line and pulse a yellow highlight
+  // for 2 seconds. Hooks MUST sit at the top of the component function,
+  // before any early returns — otherwise React's rules-of-hooks ESLint
+  // rule fails and the effect would run in the wrong order across renders.
+  const pendingRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    if (pendingLine == null) return;
+    const content = file.content ?? '';
+    if (!content) return;
+    const el = pendingRef.current?.querySelector<HTMLElement>(
+      `[data-line="${pendingLine}"]`,
+    );
+    if (!el) return;
+    el.scrollIntoView({ block: 'center', behavior: 'smooth' });
+    el.style.transition = 'background 0.3s';
+    el.style.background = 'rgba(255, 200, 0, 0.4)';
+    const id = setTimeout(() => {
+      el.style.background = '';
+    }, 2000);
+    return () => clearTimeout(id);
+  }, [pendingLine, file.content]);
 
   // Image kind: the server returned a base64 dataUrl for binary image
   // formats (png/jpg/gif/webp/bmp/ico/avif). Render with a plain <img>
@@ -366,7 +393,7 @@ function FilePreview({
     );
   }
   return (
-    <div data-testid="fs-preview-text" style={containerStyle}>
+    <div ref={pendingRef} data-testid="fs-preview-text" style={containerStyle}>
       <pre
         style={{
           margin: 0,
@@ -377,7 +404,11 @@ function FilePreview({
           wordBreak: 'break-word',
         }}
       >
-        {content}
+        {content.split('\n').map((line, idx) => (
+          <span key={idx} data-line={idx + 1} style={{ display: 'block' }}>
+            {line}
+          </span>
+        ))}
       </pre>
     </div>
   );
@@ -395,6 +426,20 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   // (selected/file) is unchanged — search results reuse setSelected().
   const [query, setQuery] = useState<string>('');
   const search = useFsSearch(cwd, query);
+  // Content-search mode: 'name' (fuzzy filename) vs 'content' (ripgrep).
+  // The Switch in the header toggles between them. When mode === 'content',
+  // useFsContentSearch fires with `enabled: true`; otherwise it stays inert
+  // so the user only pays the ripgrep cost when they explicitly opt in.
+  const [mode, setMode] = useState<'name' | 'content'>('name');
+  // pendingLine: 1-based line number passed to FilePreview when the user
+  // clicks a content-search row. FilePreview scrolls the matching
+  // <span data-line={n}> into view and pulses a yellow highlight for 2s.
+  const [pendingLine, setPendingLine] = useState<number | null>(null);
+  const contentSearch = useFsContentSearch(
+    cwd,
+    query,
+    { enabled: mode === 'content' },
+  );
   // HTML preview view mode: 'preview' shows the rendered iframe,
   // 'source' shows the markup. Driven by a Segmented control rendered
   // only when the active file is HTML (see below).
@@ -436,6 +481,8 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     setLoaded({});
     setContextMenu(null);
     setQuery('');
+    setMode('name');
+    setPendingLine(null);
     setEditingPath(null);
     setDirtyPaths(new Set());
   }, [cwd]);
@@ -559,6 +606,14 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           onChange={(e) => setQuery(e.target.value)}
           style={{ flex: 1 }}
         />
+        <Switch
+          size="small"
+          data-testid="fs-search-mode"
+          checked={mode === 'content'}
+          onChange={(v) => setMode(v ? 'content' : 'name')}
+          checkedChildren="内容"
+          unCheckedChildren="文件名"
+        />
         {showHtmlToggle && (
           <Segmented
             data-testid="fs-html-mode"
@@ -625,14 +680,25 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           }}
         >
           {query.trim().length > 0 ? (
-            <FsSearchList
-              entries={search.data?.entries ?? []}
-              loading={search.loading}
-              error={search.error}
-              truncated={search.data?.truncated ?? false}
-              query={query}
-              onSelect={(p) => setSelected(p)}
-            />
+            mode === 'content' ? (
+              <FsContentSearchList
+                entries={contentSearch.data?.entries ?? []}
+                loading={contentSearch.loading}
+                error={contentSearch.error}
+                truncated={contentSearch.data?.truncated ?? false}
+                query={query}
+                onSelect={(p, l) => { setSelected(p); setPendingLine(l); }}
+              />
+            ) : (
+              <FsSearchList
+                entries={search.data?.entries ?? []}
+                loading={search.loading}
+                error={search.error}
+                truncated={search.data?.truncated ?? false}
+                query={query}
+                onSelect={(p) => setSelected(p)}
+              />
+            )
           ) : root.error && !root.data?.ok ? (
             <Empty description={root.error} />
           ) : root.loading && treeData.length === 0 ? (
@@ -706,7 +772,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
               onCancel={handleCancel}
             />
           ) : file.data && (file.data.content !== undefined || file.data.kind === 'image' || file.data.kind === 'html') ? (
-            <FilePreview file={file.data} htmlMode={htmlMode} />
+            <FilePreview file={file.data} htmlMode={htmlMode} pendingLine={pendingLine} />
           ) : (
             <Empty description="没有内容" />
           )}
