@@ -54,6 +54,12 @@ vi.mock("../components/TodoZone.jsx", () => ({
 vi.mock("../components/AgentInputBox.js", () => ({
   default: () => null,
 }))
+vi.mock("./AgentConversation", () => ({
+  default: ({ isMobile }: { isMobile?: boolean }) => (
+    <div data-testid="agent-conv" data-mobile={String(!!isMobile)} />
+  ),
+}))
+
 // BottomStatusBar mock: 如果 Agent 还在用它, 会渲染 test-id; 不再被调用就拿不到.
 vi.mock("../components/BottomStatusBar.js", () => ({
   BottomStatusBar: () => <div data-testid="bottom-status-trigger">SHOULD NOT BE USED</div>,

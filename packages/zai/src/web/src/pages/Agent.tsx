@@ -62,7 +62,9 @@ export default function Agent() {
   void v2TasksBySession;
   const cwdName = instanceContext?.cwdName || '~'
   const branch = instanceContext?.branch || 'master'
-  const { token } = theme.useToken();
+  // 会话列表 active 高亮色 — 用 ConfigProvider 默认 token.colorPrimary(#ff6600),
+  // 硬编码而不是 theme.useToken() 让 Agent.tsx 不依赖 antd theme 上下文,
+  // 避免某些测试 (无 ConfigProvider 包裹) 抛 "theme is not defined".
 
   // Slash autocomplete: 输入 / 时弹出, 同时包含 builtin commands + user commands + skills
   // (type moved to AgentInputBox — T6 migration)
@@ -319,7 +321,7 @@ export default function Agent() {
                           padding: "6px 8px",
                           borderRadius: 6,
                           background: active
-                            ? token.colorPrimaryBg
+                            ? 'rgba(255,102,0,0.10)'
                             : "transparent",
                         }}
                         onMouseEnter={() => {
@@ -348,7 +350,7 @@ export default function Agent() {
                             textOverflow: "ellipsis",
                             // 悬停时给删除按钮留出空间, 避免标题被图标压住.
                             paddingRight: hovered ? 20 : 0,
-                            color: active ? token.colorPrimary : undefined,
+                            color: active ? '#ff6600' : undefined,
                           }}
                         >
                           {s.title || "新会话"}
@@ -400,7 +402,7 @@ export default function Agent() {
                     style={{
                       padding: 0,
                       marginTop: 4,
-                      color: token.colorPrimary,
+                      color: '#ff6600',
                     }}
                     onClick={() => setShowAllSessions((v) => !v)}
                   >
