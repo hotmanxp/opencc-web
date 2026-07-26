@@ -20,27 +20,7 @@ import {
 import { compactConversation } from './conversation.js'
 import { runPostCompactCleanup } from './cleanup.js'
 import { logEvent } from './log-event.js'
-
-// 本地最小 token 估算 — 阶段 1 简化:每条 message 的 content 长度 / 4 估 token
-// 阶段 2 再用更精确的实现替换
-function tokenCountWithEstimation(messages: TranscriptMessage[]): number {
-  let total = 0
-  for (const m of messages) {
-    const content = m.message?.content
-    if (typeof content === 'string') {
-      total += Math.ceil(content.length / 4)
-    } else if (Array.isArray(content)) {
-      for (const block of content) {
-        if (typeof block === 'object' && block !== null) {
-          const b = block as { text?: string; thinking?: string; content?: unknown }
-          if (typeof b.text === 'string') total += Math.ceil(b.text.length / 4)
-          if (typeof b.thinking === 'string') total += Math.ceil(b.thinking.length / 4)
-        }
-      }
-    }
-  }
-  return total
-}
+import { estimateMessagesTokenCount } from './token-estimate.js'
 
 type ToolUseContext = {
   options: { mainLoopModel: string }
@@ -89,7 +69,7 @@ export async function shouldAutoCompact(
 
   if (forceReason) return true
 
-  const tokenCount = tokenCountWithEstimation(messages) - snipTokensFreed
+  const tokenCount = estimateMessagesTokenCount(messages) - snipTokensFreed
   const threshold = getAutoCompactThreshold(model)
   return tokenCount >= threshold
 }
