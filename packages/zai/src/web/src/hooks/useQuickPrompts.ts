@@ -38,12 +38,12 @@ function genId(): string {
 function loadFromStorage(): QuickPrompt[] | null {
   try {
     const raw = localStorage.getItem(STORAGE_KEYS.quickPrompts)
-    if (raw === null) return null
+    if (raw === null) return null  // key missing → null → seed later
     const parsed = JSON.parse(raw)
-    if (!Array.isArray(parsed)) return null
+    if (!Array.isArray(parsed)) return []  // corrupt (not array) → []
     return parsed as QuickPrompt[]
   } catch {
-    return null
+    return []  // JSON.parse threw → [], don't seed (corrupt ≠ first-use)
   }
 }
 
