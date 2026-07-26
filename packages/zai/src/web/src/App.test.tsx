@@ -20,6 +20,7 @@ function mockMatchMedia(matches: boolean) {
 
 describe('App theme wiring', () => {
   beforeEach(() => {
+    vi.spyOn(globalThis, 'fetch').mockImplementation(() => new Promise(() => {}))
     useAppStore.setState({ settingsTheme: 'auto' })
     document.documentElement.dataset.theme = ''
   })
