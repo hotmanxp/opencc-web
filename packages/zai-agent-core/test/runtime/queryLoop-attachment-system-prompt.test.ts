@@ -105,12 +105,6 @@ async function runQueryLoopWithCapture(options: {
   return captured
 }
 
-function flattenSystemPrompt(sp: unknown): string {
-  if (typeof sp === 'string') return sp
-  if (Array.isArray(sp)) return (sp as unknown[]).map((s) => String(s)).join('\n')
-  return ''
-}
-
 describe('integration: queryLoop splices attachments into systemPrompt (v1.1)', () => {
   test('Case 1: fresh session + skill-prefetch → messages has only user prompt, systemPrompt gains <system-reminder>', async () => {
     const captured = await runQueryLoopWithCapture({
