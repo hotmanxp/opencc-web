@@ -55,6 +55,8 @@ isMobile === undefined (初次渲染) → 回退 Popover, 避免桌面初始态�
 | `destroyOnClose` | `true` | 关闭后销毁,下次打开重新挂载(避免 Description 内部状态遗留) |
 | `title` | `'会话信息'` | 显式标题,移动端可读性 |
 
+> **实现备注**: 实施时 antd 5.22+ 把 `destroyOnClose` 标为 `@deprecated`,实际代码用其非弃用别名 `destroyOnHidden`(语义完全一致,在 `node_modules/antd/es/modal/interface.d.ts:47` 仍可见)。提交时若用 `destroyOnHidden` 视为等价实现。
+
 ### 4. 共用内容
 
 Modal 与 Popover 都把 `<ConversationInfoCard info={info} />` 作为 body,外层 `<div onClick={(e) => e.stopPropagation()}>` 保留现有防冒泡语义。`useConversationInfo()` 仍只调用一次。
