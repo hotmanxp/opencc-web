@@ -3,6 +3,7 @@ import { Button, Input, Popover, Tag, Tooltip } from 'antd'
 import { CheckOutlined, EyeOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useConversationInfo } from '../hooks/useConversationInfo.js'
 import { useAgentStore } from '../store/useAgentStore.js'
+import { useAppStore } from '../store/useAppStore.js'
 import type { ModelEntry, ModelCapabilities } from '../../../shared/settings.js'
 
 /**
@@ -34,6 +35,8 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
   const availableModels = useAgentStore((s) => s.availableModels)
   const sessions = useAgentStore((s) => s.sessions)
   const patchSessionModel = useAgentStore((s) => s.patchSessionModel)
+  // 移动端直接从 useAppStore.isMobile 读, 与 ModeStatusButton 同模式.
+  const isMobile = useAppStore((s) => s.isMobile)
 
   const [searchQuery, setSearchQuery] = useState('')
   const [selectedIndex, setSelectedIndex] = useState(0)
@@ -46,15 +49,16 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
   // for both user models and builtin entries) — e.g.
   // "MiniMax-M3 (Open Platform (Nova))".
   //
-  // compact=true (分屏态) 时只返回模型名, 不带括号 provider, 把宽度留给其他状态栏元素.
-  // hover title 仍保留完整文案, 鼠标 hover 仍能拿到 provider 信息.
+  // compact=true (分屏态) 或移动端时只返回模型名, 不带括号 provider,
+  // 把宽度留给其他状态栏元素. hover title 仍保留完整文案, 鼠标 hover
+  // (桌面端) 或展开 picker 仍能拿到 provider 信息.
   const badgeText = useMemo<string | null>(() => {
     if (!currentModel) return null
-    if (compact) return currentModel
+    if (compact || isMobile) return currentModel
     const entry = availableModels.find((m) => m.model === currentModel)
     if (!entry || !entry.description) return currentModel
     return `${currentModel} (${entry.description})`
-  }, [currentModel, availableModels, compact])
+  }, [currentModel, availableModels, compact, isMobile])
 
   // Derived: recent models from sessions, recency-weighted, deduped, max 5.
   const recentModels = useMemo<ModelEntry[]>(() => {
