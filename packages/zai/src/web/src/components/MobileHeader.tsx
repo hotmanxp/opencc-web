@@ -8,7 +8,7 @@ export interface MobileHeaderProps {
 }
 
 /**
- * 移动端 56px 顶栏:
+ * 移动端 44px 顶栏:
  *   左: [≡] 抽屉触发按钮 + 当前会话标题(取 sessions.find(s => s.transcriptId === sessionId).title)
  *   右: [+] 新建会话按钮
  * 不渲染设置/分享按钮 — 这两个由 AgentInputBox 内部工具栏提供。
@@ -23,7 +23,7 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
   return (
     <div
       style={{
-        height: 56,
+        height: 44,
         display: 'flex',
         alignItems: 'center',
         padding: '0 8px',
@@ -38,7 +38,7 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
         onClick={onOpenSessionDrawer}
         data-testid="mobile-header-drawer-toggle"
         aria-label="打开会话列表"
-        style={{ width: 40, height: 40, padding: 0 }}
+        style={{ width: 36, height: 36, padding: 0 }}
       />
       <div
         style={{
@@ -62,7 +62,7 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
         onClick={() => void createNewSession()}
         data-testid="mobile-header-new-session"
         aria-label="新建会话"
-        style={{ width: 40, height: 40, padding: 0 }}
+        style={{ width: 36, height: 36, padding: 0 }}
       />
     </div>
   )
