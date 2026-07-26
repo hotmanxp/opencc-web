@@ -1,7 +1,8 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi, afterEach } from 'vitest'
 import '@testing-library/jest-dom'
 import { cleanup, fireEvent, render, screen } from '@testing-library/react'
+import { ConfigProvider } from 'antd'
 import { useAppStore } from '../store/useAppStore.js'
 
 // Replace the actual hook with a deterministic fixture. We only need the
@@ -69,15 +70,21 @@ describe('ConversationInfoButton — mobile vs desktop branching', () => {
 
   it('mobile: clicking the trigger toggles the Modal open state', () => {
     useAppStore.setState({ isMobile: true })
-    render(<ConversationInfoButton />)
-    // 模拟真实点击事件序列: mouseDown + click (RTL 的 fireEvent.click 只派 click, 不派 mouseDown)
+    // happy-dom 下 antd Modal 的 leave 动画不会触发 DOM 卸载,
+    // 用 ConfigProvider 关掉过渡让 destroyOnHidden 同步生效, 避免
+    // 引入 waitFor/异步等待。生产路径仍保留 antd 标准过渡动画。
+    render(
+      <ConfigProvider
+        modal={{ transitionName: '', maskTransitionName: '' }}
+      >
+        <ConversationInfoButton />
+      </ConfigProvider>
+    )
     const trigger = screen.getByTestId('conversation-info-trigger')
     // 初始打开 → 关闭
-    fireEvent.mouseDown(trigger)
     fireEvent.click(trigger)
     expect(screen.queryByTestId('conversation-info-card')).not.toBeInTheDocument()
     // 再点 → 打开
-    fireEvent.mouseDown(trigger)
     fireEvent.click(trigger)
     expect(screen.getByTestId('conversation-info-card')).toBeInTheDocument()
   })
