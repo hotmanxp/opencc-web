@@ -734,7 +734,6 @@ export default React.memo(function AgentInputBox({ isMobile = false }: AgentInpu
             compact
           />
         )}
-        )}
         {/* spacer: flex:1 把右端按钮推到底部右边.
             minWidth:0 关键 — 不加时 flex item 默认 min-width:auto (= content 尺寸),
             在窄屏下 spacer 会反向挤压任务摘要到 0 宽, 表现为"被遮挡". */}
@@ -870,6 +869,8 @@ export default React.memo(function AgentInputBox({ isMobile = false }: AgentInpu
             style={toolbarIconButtonStyle}
           />
         </Tooltip>
+        )}
+
         <Button
           icon={<PictureOutlined />}
           onClick={() => fileInputRef.current?.click()}
@@ -900,6 +901,8 @@ export default React.memo(function AgentInputBox({ isMobile = false }: AgentInpu
             }}
           />
         </Tooltip>
+        )}
+
       </div>
 
       {/* TextArea + slash dropdown 区 */}

@@ -5,8 +5,8 @@ import MobileHeader from '../components/MobileHeader'
 import MobileSessionDrawer from '../components/MobileSessionDrawer'
 import { SessionCwdBridge } from '../components/SessionCwdBridge'
 import { TaskDrawer } from '../components/TaskDrawer'
-import { ApproveDrawer } from '../components/ApproveDrawer'
-import { SettingsDrawer } from '../components/SettingsDrawer'
+import ApproveDrawer from '../components/ApproveDrawer.jsx'
+import SettingsDrawer from '../components/SettingsDrawer'
 
 /**
  * 移动端 /agent 页面:

@@ -7,7 +7,7 @@ import {
 } from '../store/useAgentStore'
 import { useAppStore } from '../store/useAppStore'
 import QuestionCard from '../components/QuestionCard.jsx'
-import { TodoZone } from '../components/TodoZone.jsx'
+import TodoZone from '../components/TodoZone.jsx'
 import AgentInputBox from '../components/AgentInputBox'
 import { MessageListView } from '../components/transcript/MessageListView.js'
 import { useAutoScrollToBottom } from '../hooks/useAutoScrollToBottom'
