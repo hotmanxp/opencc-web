@@ -100,6 +100,7 @@ export function TextEditor(props: TextEditorProps): JSX.Element {
           },
           '.cm-content': {
             fontFamily: 'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+            caretColor: 'rgb(167, 139, 250)',
           },
           '.cm-gutters': {
             backgroundColor: '#0d0d0d',
@@ -112,6 +113,15 @@ export function TextEditor(props: TextEditorProps): JSX.Element {
           '.cm-activeLineGutter': {
             backgroundColor: 'transparent',
             color: 'rgba(255,255,255,0.65)',
+          },
+          // `.cm-cursor` 的边框色来自基础 light 主题(`solid black`),
+          // 在 #0d0d0d 暗背景上几乎不可见 — 这正是"鼠标点击没显示光标"的根因。
+          // CM 在 focused 时会隐藏原生 caret(`.cm-content { caretColor:
+          // transparent !important }`),光标完全靠 `.cm-cursor` 这条 1.2px
+          // 边框竖线呈现,必须显式覆盖 borderLeftColor 才看得到。
+          // 顺带把 dropCursor 也覆盖,保持一致。
+          '.cm-cursor, .cm-dropCursor': {
+            borderLeftColor: 'rgb(167, 139, 250)',
           },
         }),
       ],

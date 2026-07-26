@@ -34,6 +34,7 @@ import { initStateBridge } from './services/stateBridge.js';
 import { initZaiSettingsCache } from './services/zaiSettingsStore.js';
 import { startBranchChecker } from './routes/system.js';
 import { noCacheForApi } from './middleware/noCache.js';
+import { redirectMobileUA } from './middleware/redirectMobileUA.js';
 
 // zai is a local dev tool — the server only listens on localhost and every
 // route is wide-open to anyone who can reach the port. The original
@@ -137,6 +138,11 @@ export function createApp(opts: AppOptions): express.Express {
   // middleware 已经把 _approveRegistry 绑到 req. 内部 path 是 /agent/approve
   // + /agent/approve/reject, 拼成 /api/agent/approve 与前端 ApproveDrawer 期望一致.
   app.use('/api', approveRouter)
+
+  // 移动端 UA 检测: 命中手机/平板 UA 时把 /agent 302 到 /m,
+  // 让分享到 LAN 的链接在移动设备上自动进入移动版对话页面。
+  // 路径仅匹配 /agent — /api/* /login /dashboard 等路径不被干预。
+  app.use('/agent', redirectMobileUA);
 
   // 启动分支检查器（每 10 秒检测一次 git 分支变化）
   startBranchChecker(opts.cwd);

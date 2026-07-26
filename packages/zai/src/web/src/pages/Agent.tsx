@@ -1,133 +1,42 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
 import {
-  Input,
   Button,
-  Card,
-  Collapse,
-  Tag,
   Typography,
   Space,
   Popconfirm,
-  theme,
   message,
-  Modal,
 } from "antd";
 import {
-  RobotOutlined,
-  RobotFilled,
-  UserOutlined,
-  ToolOutlined,
   MessageOutlined,
   PlusOutlined,
-  BulbOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
-  CaretDownOutlined,
-  CaretRightOutlined,
   DeleteOutlined,
   PictureOutlined,
-  UpOutlined,
 } from "@ant-design/icons";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   useAgentStore,
-  type AgentMessage,
-  type AgentStatus,
   type TodoItem,
 } from "../store/useAgentStore";
 import { useAppStore } from "../store/useAppStore";
-import QuestionCard from "../components/QuestionCard.jsx";
-import { linkifyText } from "../lib/linkify.js";
-import { getRenderer } from "../components/toolRenderers/registry.js";
-import { splitMarkdownOnIncomplete } from "../lib/splitMarkdown.js";
-import { AttachmentStrip } from "../components/AttachmentStrip";
-import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import ConfigStatusBar from "../components/ConfigStatusBar";
 import { SessionCwdBridge } from "../components/SessionCwdBridge";
 import { TaskDrawer } from "../components/TaskDrawer";
 import ApproveDrawer from "../components/ApproveDrawer.jsx";
 import SettingsDrawer from "../components/SettingsDrawer";
 import TodoZone from "../components/TodoZone.jsx";
-import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 import AgentInputBox from "../components/AgentInputBox";
-import { MessageBubble } from "../components/transcript/MessageBubble.js";
-import { MessageListView } from "../components/transcript/MessageListView.js";
-import { useAutoScrollToBottom } from "../hooks/useAutoScrollToBottom";
 import { SplitPane } from "../components/splitPane/SplitPane.js";
 import {
   STORAGE_KEYS,
   useLocalStorageState,
 } from "../components/splitPane/shared.js";
 import { useSplitPaneSessionAutoCollapse } from "../hooks/useSplitPaneSessionAutoCollapse.js";
+import AgentConversation from "./AgentConversation";
 
-const { TextArea } = Input;
-const { Text, Paragraph } = Typography;
 
 
 export default function Agent() {
-  const messages = useAgentStore((s) => s.messages);
-  // 消息裁剪: messages.length > maxVisibleMessages 时只渲染尾部 N 条,
-  // 顶部浮按钮 [显示全部 (X 条隐藏)] 让用户点开看完整历史。点开后新消息
-  // 持续到达再次超出 limit, useEffect 会自动把 showAllMessages 重置为 false。
-  // 设计见 docs/superpowers/specs/2026-07-24-zai-message-cap-design.md §5。
-  // 特殊: compact 模式下最后一条 assistant 消息始终可见,不折叠。
-  const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages);
-  const outputStyle = useAppStore((s) => s.outputStyle);
-  const [showAllMessages, setShowAllMessages] = useState(false);
-  // hiddenCount 不受 showAllMessages 影响,纯粹由 messages.length 与 limit 派生;
-  // visibleMessages 切片时考虑 showAllMessages,展开时切片偏移 = 0。
-  const { hiddenCount, visibleMessages } = useMemo(() => {
-    const hc = Math.max(0, messages.length - maxVisibleMessages);
-    if (showAllMessages) {
-      return { hiddenCount: 0, visibleMessages: messages };
-    }
-    if (hc === 0) {
-      return { hiddenCount: 0, visibleMessages: messages };
-    }
-    // compact 模式:找到最后一条 LLM 文本消息,确保它不被折叠
-    // 注意: store 里 AgentMessage = RuntimeEvent, 没有 role 字段,
-    // LLM 文本的 type 是 'assistant.text' (见 useAgentStore runtime.delta
-    // reducer); tool_use / thinking / user.text 都不算.
-    const isCompact = outputStyle === 'compact';
-    if (isCompact) {
-      let lastAssistantIdx = -1;
-      for (let i = messages.length - 1; i >= 0; i--) {
-        if ((messages[i] as { type?: string }).type === 'assistant.text') {
-          lastAssistantIdx = i;
-          break;
-        }
-      }
-      // 如果最后一条 assistant.text 在被折叠的部分内 (即 lastAssistantIdx < hc,
-      // 表示 slice(hc) 起点落在它之后, 它会被隐藏), 把隐藏数收紧到
-      // lastAssistantIdx, 让 slice(adjustedHc) 正好从该条开始,
-      // visibleMessages 末尾就是它, top pill 计数随之缩短.
-      if (lastAssistantIdx >= 0 && lastAssistantIdx < hc) {
-        const adjustedHc = lastAssistantIdx;
-        return {
-          hiddenCount: adjustedHc,
-          visibleMessages: messages.slice(adjustedHc),
-        };
-      }
-    }
-    return { hiddenCount: hc, visibleMessages: messages.slice(hc) };
-  }, [messages, maxVisibleMessages, showAllMessages, outputStyle]);
-  // 用户点开 pill 后,新消息持续进来,直到 messages.length 再次超出 limit,
-  // 自动把 showAllMessages 重置为 false, pill 重新出现。
-  // 用 ref 记下"打开 pill 那一刻的 hc",effect 只在 hc **涨过** 那时阈值才 reset —
-  // 单纯点 pill 不会立刻 reset,避免 spec §7 描述的"用户点开看历史"瞬间被收回。
-  const hiddenCountAtExpandRef = useRef(hiddenCount);
-  useEffect(() => {
-    if (!showAllMessages) {
-      hiddenCountAtExpandRef.current = hiddenCount;
-      return;
-    }
-    if (hiddenCount > hiddenCountAtExpandRef.current) {
-      setShowAllMessages(false);
-    }
-  }, [showAllMessages, hiddenCount]);
-  const showPill = hiddenCount > 0 && !showAllMessages;
-  const status = useAgentStore((s) => s.status);
   const sessions = useAgentStore((s) => s.sessions);
   const sessionId = useAgentStore((s) => s.sessionId);
   // 右侧分屏需要当前 cwd. store.cwd 字段从未被 reducer 写, 一直是 ''.
@@ -142,31 +51,20 @@ export default function Agent() {
     if (instanceContext?.cwd) return instanceContext.cwd;
     return cwdBySessionForSid ?? null;
   }, [instanceContext?.cwd, cwdBySessionForSid]);
-  const todosBySession = useAgentStore((s) => s.todosBySession);
   const v2TasksBySession = useAgentStore((s) => s.v2TasksBySession);
-  const activeSessionId = useAgentStore((s) => s.activeSessionId);
-  const stop = useAgentStore((s) => s.stop);
-  const clearMessages = useAgentStore((s) => s.clearMessages);
   const loadSessions = useAgentStore((s) => s.loadSessions);
   const setCurrentSession = useAgentStore((s) => s.setCurrentSession);
   const loadTranscript = useAgentStore((s) => s.loadTranscript);
   const createNewSession = useAgentStore((s) => s.createNewSession);
   const deleteSession = useAgentStore((s) => s.deleteSession);
-  const pendingAsk = useAgentStore((s) => s.pendingAsk);
-  const setAskAnswer = useAgentStore((s) => s.setAskAnswer);
-  const setAskNotes = useAgentStore((s) => s.setAskNotes);
-  const setAskOtherText = useAgentStore((s) => s.setAskOtherText);
-  const submitAsk = useAgentStore((s) => s.submitAsk);
-  const rejectAsk = useAgentStore((s) => s.rejectAsk);
-  const todosForCurrentSession: TodoItem[] =
-    sessionId != null ? (todosBySession[sessionId] ?? []) : [];
   // v2TasksBySession 仍订阅在 store, 但渲染层 Agent.tsx 不再使用 —
   // 任务摘要现在由 AgentInputBox 内部从 store 直接取 (避免 props 透传).
   void v2TasksBySession;
-  const patchSessionMode = useAgentStore((s) => s.patchSessionMode);
   const cwdName = instanceContext?.cwdName || '~'
   const branch = instanceContext?.branch || 'master'
-  const { token } = theme.useToken();
+  // 会话列表 active 高亮色 — 用 ConfigProvider 默认 token.colorPrimary(#ff6600),
+  // 硬编码而不是 theme.useToken() 让 Agent.tsx 不依赖 antd theme 上下文,
+  // 避免某些测试 (无 ConfigProvider 包裹) 抛 "theme is not defined".
 
   // Slash autocomplete: 输入 / 时弹出, 同时包含 builtin commands + user commands + skills
   // (type moved to AgentInputBox — T6 migration)
@@ -188,16 +86,6 @@ export default function Agent() {
   // Hook 必须在 splitPaneOpen 派生之后调用, hook 依赖该 boolean.
   const sessionPanel = useSplitPaneSessionAutoCollapse({ splitPaneOpen });
   const sessionsCollapsed = sessionPanel.collapsed;
-  // question 卡片滚到视口用: pendingAsk 不在 messages[] 里, 单依赖 messages 的滚动 effect
-  // 不会触发, 这里单独加一个 ref 让卡片出现时也能滚到底.
-  const questionCardRef = useRef<HTMLDivElement>(null);
-  // 真实承载 messages 流的可滚动 div. useAutoScrollToBottom 在这个容器上挂
-  // wheel / touchstart / 滚动键监听器判断"用户是否在翻历史",并根据
-  // messages length 变化 / distance-to-bottom 决定是否真的 scrollTo 底部。
-  // 旧实现 messagesEndRef (底部哨兵) 已删除 — hook 改用 scrollTo({top: scrollHeight})
-  // 直达末尾, 不再依赖哨兵。详细语义见 hooks/useAutoScrollToBottom.ts。
-  const scrollContainerRef = useRef<HTMLDivElement>(null);
-  const autoScroll = useAutoScrollToBottom(scrollContainerRef);
 
   // 根据侧栏实际高度估算默认展示条数, 窗口/容器尺寸变化时自动重算.
   useEffect(() => {
@@ -213,38 +101,6 @@ export default function Agent() {
     ro.observe(el);
     return () => ro.disconnect();
   }, [sessionsCollapsed]);
-
-  useEffect(() => {
-    // 优先级: pendingAsk 出现时滚到 QuestionCard, 否则由 hook 自带的
-    // 三层防御 (length 增长 / 用户锁 / 距离底部) 决定是否滚 messages 末尾。
-    //
-    // 修复历史: 旧版本无脑调 scrollIntoView — streaming delta 期间 messages
-    // 数组每条都换新引用, 但 length 不变, effect 仍 fire, 把用户在读历史
-    // 的视线拉回底部。新版本 useAutoScrollToBottom 内置 decideAutoScroll,
-    // 长度未增长 / 用户上滚 / 用户主动锁 三种情况一律 stay。
-    //
-    // pendingAsk 路径不受 hook 控制, 因为 QuestionCard 不在 messages[] 里,
-    // 单依赖 messages 的 effect 无法感知它首次出现。
-    if (pendingAsk) {
-      questionCardRef.current?.scrollIntoView({ behavior: "smooth", block: "end" });
-      return;
-    }
-    autoScroll.scrollToBottom(messages.length);
-  }, [messages, pendingAsk, autoScroll]);
-
-  // 全局 Esc 拦截: 流式期间按 Esc 终止生成 (仿 OpenCC 状态栏 "esc to interrupt").
-  // textarea 在 streaming 时被禁用, 这里挂 window 监听确保 Esc 仍生效.
-  useEffect(() => {
-    if (status !== "streaming") return;
-    const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") {
-        e.preventDefault();
-        void stop();
-      }
-    };
-    window.addEventListener("keydown", onKey);
-    return () => window.removeEventListener("keydown", onKey);
-  }, [status, stop]);
 
   // 新 pwd 下首次打开 Agent 页面时, server 端 /api/agent/sessions 会返回
   // 空数组 — loadSessions 当前对空列表不做任何处理, UI 会停在空白态.
@@ -465,7 +321,7 @@ export default function Agent() {
                           padding: "6px 8px",
                           borderRadius: 6,
                           background: active
-                            ? token.colorPrimaryBg
+                            ? 'rgba(255,102,0,0.10)'
                             : "transparent",
                         }}
                         onMouseEnter={() => {
@@ -494,7 +350,7 @@ export default function Agent() {
                             textOverflow: "ellipsis",
                             // 悬停时给删除按钮留出空间, 避免标题被图标压住.
                             paddingRight: hovered ? 20 : 0,
-                            color: active ? token.colorPrimary : undefined,
+                            color: active ? '#ff6600' : undefined,
                           }}
                         >
                           {s.title || "新会话"}
@@ -546,7 +402,7 @@ export default function Agent() {
                     style={{
                       padding: 0,
                       marginTop: 4,
-                      color: token.colorPrimary,
+                      color: '#ff6600',
                     }}
                     onClick={() => setShowAllSessions((v) => !v)}
                   >
@@ -571,90 +427,17 @@ export default function Agent() {
           overflowX: "hidden"
         }}
       >
-        <div
-          ref={scrollContainerRef}
-          style={{
-            flex: 1,
-            minHeight: 0,
-            overflowY: "auto",
-            padding: "0 8px",
-            marginBottom: 16,
-            background: "#000000",
-            maxWidth: "100%",
-            overflowX: "hidden"
-          }}
-        >
-          {messages.length === 0 && (
-            <div
-              style={{
-                textAlign: "center",
-                marginTop: 80,
-                color: "#999",
-              }}
-            >
-              <RobotFilled
-                style={{ fontSize: 48, marginBottom: 16, color: "#ff6600" }}
-              />
-              <Paragraph type="secondary">
-                发送消息开始与 AI Agent 对话
-              </Paragraph>
-              <Paragraph type="secondary" style={{ fontSize: 12 }}>
-                支持文件搜索、读写文件和 Bash 执行
-              </Paragraph>
-            </div>
-          )}
-          <TodoZone todos={todosForCurrentSession} />
-          {showPill && (
-            <div
-              style={{
-                position: "sticky",
-                top: 0,
-                zIndex: 10,
-                display: "flex",
-                justifyContent: "center",
-                paddingTop: 8,
-                paddingBottom: 4,
-              }}
-            >
-              <Button
-                shape="round"
-                size="small"
-                icon={<UpOutlined />}
-                onClick={() => setShowAllMessages(true)}
-                data-testid="show-all-messages-pill"
-              >
-                显示全部 ({hiddenCount} 条隐藏)
-              </Button>
-            </div>
-          )}
-          <MessageListView messages={visibleMessages} streaming={status === "streaming"} />
-          {pendingAsk && (
-            <div ref={questionCardRef}>
-              <QuestionCard
-                questions={pendingAsk.questions}
-                answers={pendingAsk.answers}
-                annotations={pendingAsk.annotations}
-                status={pendingAsk.status}
-                errorMessage={pendingAsk.errorMessage}
-                onAnswer={setAskAnswer}
-                onNotesChange={setAskNotes}
-                onOtherChange={setAskOtherText}
-                onSubmit={() => void submitAsk()}
-                onReject={() => void rejectAsk()}
-              />
-            </div>
-          )}
-          {/* 滚动哨兵 div 已删除 — useAutoScrollToBottom 改用 scrollTo({top: scrollHeight})
-              直达末尾, 不再依赖 DOM 哨兵位置。视觉上无变化, JSX 更干净。 */}
-        </div>
+        <AgentConversation />
 
         {/*
           修复: BottomStatusBar 整行已移除. 任务摘要职责合并到
           AgentInputBox 的"● 就绪"状态行 (见 AgentInputBox.tsx 内部实现),
           让 UI 更紧凑, 不再有一条独立任务行 + 一条状态行.
+
+          2026-07-26: AgentInputBox 已迁移到 AgentConversation 内部渲染,
+          此处不再重复渲染, 只保留 ConfigStatusBar。
         */}
         <div className="bottom-stack">
-          <AgentInputBox />
           <ConfigStatusBar
             cwdName={cwdName}
             branch={branch}

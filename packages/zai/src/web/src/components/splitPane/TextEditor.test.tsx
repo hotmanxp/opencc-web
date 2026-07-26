@@ -51,4 +51,17 @@ describe('TextEditor', () => {
     const { unmount } = render(<TextEditor initialContent="x" language={null} onSave={() => {}} onCancel={() => {}} />);
     expect(() => unmount()).not.toThrow();
   });
+
+  test('themes .cm-cursor border in a light color on dark background', () => {
+    // Regression: CM 6 默认走 light base theme → `.cm-cursor` 的 borderLeftColor
+    // 是 black,在 #0d0d0d 暗背景上几乎不可见。点击编辑器后看不见光标就是这个
+    // 原因。修复要求 theme 注入 `.cm-cursor, .cm-dropCursor` 的边框色覆盖。
+    // CM 通过 <style> 标签注入主题,document.querySelector 拿到首条 style 后
+    // 检查文本是否同时出现 `.cm-cursor` 和浅色边框。
+    render(<TextEditor initialContent="hello" language={null} onSave={() => {}} onCancel={() => {}} />);
+    const styles = Array.from(document.querySelectorAll('style'))
+      .map((s) => s.textContent ?? '')
+      .join('\n');
+    expect(styles).toMatch(/\.cm-cursor[^{}]*\{[^}]*border-left-color\s*:\s*rgb\(\s*167\s*,\s*139\s*,\s*250\s*\)/);
+  });
 });

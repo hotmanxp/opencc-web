@@ -193,6 +193,7 @@ const markdownComponents = {
     <ol style={{ margin: "0 0 8px 0", paddingLeft: 20 }}>{children}</ol>
   ),
   li: ({ children }: any) => <li style={{ marginBottom: 4 }}>{children}</li>,
+<<<<<<< HEAD
   code: CodeBlock,
   pre: ({ children }: any) => <>{children}</>,
   table: ({ children }: any) => (

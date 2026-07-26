@@ -18,6 +18,7 @@ import { join } from 'node:path'
 import { zodToJsonSchema } from 'zod-to-json-schema'
 import type { ModelCaller } from '@zn-ai/zai-agent-core/runtime'
 import { getCachedZaiSettingsSync } from './zaiSettingsStore.js'
+import { applyModelMapping, resolveCurrentProvider } from '../lib/resolveModel.js'
 
 // 流式事件类型 — Anthropic SDK 返回的 RawMessageStreamEvent 本身就是 snake_case,
 // 这里只用作 yield 的最小契约, 实际结构由 queryEngine 的 streamAdapter 识别.
@@ -242,12 +243,20 @@ export function createAnthropicModelCaller(): ModelCaller {
     const zaiSettings = getCachedZaiSettingsSync()
     const env = zaiSettings.env ?? {}
 
-    const resolvedModel =
+    const rawModel =
       model && model !== 'default'
         ? model
         : (env.ANTHROPIC_DEFAULT_SONNET_MODEL
           ?? env.ANTHROPIC_SMALL_FAST_MODEL
           ?? 'MiniMax-M3')
+
+    // Apply alias mapping (haiku/sonnet/opus → concrete ID) before client selection
+    // and before sending to the API. This ensures:
+    // 1. findProfileForModel receives a concrete model ID it can match in profiles
+    // 2. The upstream API receives a valid model ID, not an alias
+    const { model: resolvedModel } = applyModelMapping(rawModel, {
+      provider: resolveCurrentProvider(),
+    })
 
     // Per-model client: pick the right provider from providerProfiles when the
     // model belongs to a non-Anthropic profile (e.g. zhiniao-* on Wizard AI).

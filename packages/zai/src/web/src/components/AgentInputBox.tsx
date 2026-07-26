@@ -77,7 +77,12 @@ type SlashItem = {
   pluginName?: string;
 };
 
-export default React.memo(function AgentInputBox() {
+export interface AgentInputBoxProps {
+  /** 移动端下隐藏 split-pane toggle / transcript-collapse / transcript-repair 按钮 */
+  isMobile?: boolean
+}
+
+export default React.memo(function AgentInputBox({ isMobile = false }: AgentInputBoxProps = {}) {
   const status = useAgentStore((s) => s.status);
   const sessionId = useAgentStore((s) => s.sessionId);
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
@@ -781,7 +786,7 @@ export default React.memo(function AgentInputBox() {
             设好(compact → true,其余 → false). 按钮只翻这一个布尔, 不依赖 settings,
             因此在 compact 模式下点击也能正常切换. tooltip 在 outputStyle=compact 时
             提示"刷新后回到 compact"以区分与 settings 持久化的关系. */}
-        {!transcriptLockActive && (
+        {!transcriptLockActive && !isMobile && (
           <Tooltip
             title={
               outputStyle === "compact"
@@ -808,6 +813,7 @@ export default React.memo(function AgentInputBox() {
             解决 transcript 里 tool_use 没配对的 warning。按钮放在 spacer 后、
             上传图片前 — 不抢主操作, 但用户能直接找到。点击后即时 toast 结果,
             失败不打断会话。 */}
+        {!isMobile && (
         <Tooltip
           title={
             sessionId
@@ -863,6 +869,8 @@ export default React.memo(function AgentInputBox() {
             style={toolbarIconButtonStyle}
           />
         </Tooltip>
+        )}
+
         <Button
           icon={<PictureOutlined />}
           onClick={() => fileInputRef.current?.click()}
@@ -877,6 +885,7 @@ export default React.memo(function AgentInputBox() {
             数据源 STORAGE_KEYS.open 与 SplitPane + 左侧栏 toggle 共享, 任意
             一处写 → 全局同步 (useLocalStorageState 自带 same-tab storage event).
             open 时用品牌色 #ff6600 高亮, 关闭时与同行其他按钮颜色一致. */}
+        {!isMobile && (
         <Tooltip title="切换右侧分屏" placement="top">
           <Button
             icon={<MenuUnfoldOutlined />}
@@ -892,6 +901,8 @@ export default React.memo(function AgentInputBox() {
             }}
           />
         </Tooltip>
+        )}
+
       </div>
 
       {/* TextArea + slash dropdown 区 */}
