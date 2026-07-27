@@ -12,7 +12,7 @@ interface BashTabProps {
 type ExitLike = { code: number | null; signal: string | null }
 
 function fmtExitColor(ev: ExitLike): string {
-  if (ev.signal) return 'rgba(255,255,255,0.45)'
+  if (ev.signal) return 'var(--text-dim-45)'
   if (ev.code === 0) return '#52c41a'
   return '#f59e0b'
 }
@@ -80,7 +80,7 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
       label: (
         <div style={{ display: 'flex', justifyContent: 'space-between', gap: 12 }}>
           <span style={{ fontFamily: 'ui-monospace, monospace' }}>{e.command}</span>
-          <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11 }}>×{e.count}</span>
+          <span style={{ color: 'var(--text-dim-45)', fontSize: 11 }}>×{e.count}</span>
         </div>
       ),
     }))
@@ -96,7 +96,7 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
           padding: '6px 12px',
           borderBottom: '1px solid rgba(255,255,255,0.08)',
           fontSize: 12,
-          color: 'rgba(255,255,255,0.55)',
+          color: 'var(--text-dim-55)',
         }}
       >
         <span>
@@ -120,7 +120,7 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
           fontFamily: 'ui-monospace, Menlo, Consolas, monospace',
           fontSize: 12,
           lineHeight: 1.55,
-          color: 'rgba(255,255,255,0.85)',
+          color: 'var(--text-dim-85)',
         }}
       >
         {events.length === 0 && (
