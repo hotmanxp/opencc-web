@@ -90,7 +90,7 @@ export function AttachmentStrip({
               justifyContent: 'center',
               borderRadius: 6,
               overflow: 'hidden',
-              background: 'rgba(0,0,0,0.04)',
+              background: 'var(--bg-faint-04)',
               border:
                 a.status === 'error'
                   ? '1px solid #ff4d4f'
@@ -104,7 +104,7 @@ export function AttachmentStrip({
               height: size,
               borderRadius: 6,
               overflow: 'hidden',
-              background: 'rgba(0,0,0,0.04)',
+              background: 'var(--bg-faint-04)',
               border:
                 a.status === 'error'
                   ? '1px solid #ff4d4f'
@@ -173,7 +173,7 @@ export function AttachmentStrip({
                   height: removeBtnSize,
                   minWidth: removeBtnSize,
                   padding: 0,
-                  background: 'rgba(0,0,0,0.55)',
+                  background: 'var(--text-dim-55)',
                   color: '#fff',
                   display: 'inline-flex',
                   alignItems: 'center',

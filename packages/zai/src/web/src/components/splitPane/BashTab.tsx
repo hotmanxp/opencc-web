@@ -94,7 +94,7 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '6px 12px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          borderBottom: '1px solid var(--border-light)',
           fontSize: 12,
           color: 'var(--text-dim-55)',
         }}
@@ -166,7 +166,7 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
           display: 'flex',
           gap: 8,
           padding: 8,
-          borderTop: '1px solid rgba(255,255,255,0.08)',
+          borderTop: '1px solid var(--border-light)',
         }}
       >
         <AutoComplete

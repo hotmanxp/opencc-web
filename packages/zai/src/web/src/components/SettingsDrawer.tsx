@@ -331,7 +331,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
     >
       {searchMode && (
         <div style={{ marginBottom: 12, display: 'flex', alignItems: 'center', gap: 6 }}>
-          <span style={{ color: 'rgba(255,255,255,0.45)' }}>搜索:</span>
+          <span style={{ color: 'var(--text-dim-45)' }}>搜索:</span>
           <input
             data-testid="settings-search-input"
             autoFocus
@@ -342,7 +342,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
               flex: 1,
               background: 'transparent',
               border: 'none',
-              borderBottom: '1px solid rgba(255,255,255,0.3)',
+              borderBottom: '1px solid var(--border-strong)',
               outline: 'none',
               font: 'inherit',
             }}
@@ -351,7 +351,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
       )}
 
       {filteredFlatRows.length === 0 ? (
-        <div style={{ color: 'rgba(255,255,255,0.45)', padding: '12px 8px' }}>
+        <div style={{ color: 'var(--text-dim-45)', padding: '12px 8px' }}>
           无匹配设置项
         </div>
       ) : (
@@ -360,7 +360,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
             <div
               data-section-header="true"
               style={{
-                color: 'rgba(255,255,255,0.55)',
+                color: 'var(--text-dim-55)',
                 fontWeight: 600,
                 textTransform: 'uppercase',
                 fontSize: 11,
@@ -396,7 +396,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                     display: 'flex',
                     padding: '3px 12px',
                     background: isSelected
-                      ? 'rgba(255,255,255,0.08)'
+                      ? 'var(--bg-faint-08)'
                       : 'transparent',
                     cursor: 'pointer',
                   }}
@@ -445,7 +445,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                             width: 56,
                             textAlign: 'center',
                             background: 'transparent',
-                            border: '1px solid rgba(255,255,255,0.3)',
+                            border: '1px solid var(--border-strong)',
                             outline: 'none',
                             font: 'inherit',
                             padding: '0 4px',
@@ -849,7 +849,7 @@ export default function SettingsDrawer() {
       data-testid="settings-drawer"
       styles={{ body: { padding: '12px 16px' } }}
       footer={
-        <div style={{ fontSize: 11, color: 'rgba(255,255,255,0.45)' }}>
+        <div style={{ fontSize: 11, color: 'var(--text-dim-45)' }}>
           Space 修改 · Enter 弹出选项 · / 搜索 · Esc 取消
         </div>
       }

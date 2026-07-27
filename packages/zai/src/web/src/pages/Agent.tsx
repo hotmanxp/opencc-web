@@ -170,7 +170,7 @@ export default function Agent() {
           style={{
             fontWeight: 500,
             marginBottom: 8,
-            color: "#666",
+            color: 'var(--text-dim-65)',
             display: "flex",
             justifyContent: "space-between",
             alignItems: "center",
@@ -302,7 +302,7 @@ export default function Agent() {
             style={{ flex: 1, overflowY: "auto" }}
           >
             {sessions.length === 0 ? (
-              <div style={{ fontSize: 12, color: "#999", padding: "8px 4px" }}>
+              <div style={{ fontSize: 12, color: 'var(--text-dim-45)', padding: "8px 4px" }}>
                 暂无历史会话
               </div>
             ) : (
@@ -356,7 +356,7 @@ export default function Agent() {
                         >
                           {s.title || "新会话"}
                         </div>
-                        <div style={{ fontSize: 11, color: "#999" }}>
+                        <div style={{ fontSize: 11, color: 'var(--text-dim-45)' }}>
                           {new Date(s.updatedAt).toLocaleString()}
                         </div>
                         <Popconfirm

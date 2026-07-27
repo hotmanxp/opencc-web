@@ -170,7 +170,7 @@ export default function Layout() {
             justifyContent: 'space-between',
           }}
         >
-          <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0, color: '#f1f5f9' }}>知鸟AI 平台</h1>
+          <h1 style={{ fontSize: 20, fontWeight: 600, margin: 0, color: 'var(--text-primary)' }}>知鸟AI 平台</h1>
           <Tag
             color="orange"
             style={{

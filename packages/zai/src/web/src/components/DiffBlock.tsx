@@ -9,8 +9,8 @@ const ADD_BG = 'rgba(46,160,67,0.18)'
 const ADD_FG = '#3fb950'
 const DEL_BG = 'rgba(248,81,73,0.18)'
 const DEL_FG = '#f85149'
-const CTX_FG = 'rgba(255,255,255,0.72)'
-const GUTTER_FG = 'rgba(255,255,255,0.30)'
+const CTX_FG = 'var(--text-dim-72)'
+const GUTTER_FG = 'var(--text-dim-30)'
 
 type ToolStatus = 'start' | 'done' | 'error'
 
@@ -112,8 +112,8 @@ export default function DiffBlock({ msg }: { msg: AgentMessage }) {
             flexShrink: 0,
           }}
         />
-        <span style={{ color: 'rgba(255,255,255,0.9)', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
-          {headerLabel}(<span style={{ color: 'rgba(255,255,255,0.6)', fontWeight: 400 }}>{filePath}</span>)
+        <span style={{ color: 'var(--text-dim-90)', fontWeight: 600, minWidth: 0, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+          {headerLabel}(<span style={{ color: 'var(--text-dim-65)', fontWeight: 400 }}>{filePath}</span>)
         </span>
         {summary && (
           <span style={{ color: GUTTER_FG, flexShrink: 0 }}>{summary}</span>
@@ -127,12 +127,12 @@ export default function DiffBlock({ msg }: { msg: AgentMessage }) {
             fontFamily: MONO,
             fontSize: 12,
             lineHeight: 1.55,
-            border: '1px solid rgba(255,255,255,0.08)',
+            border: '1px solid var(--border-light)',
             borderRadius: 6,
             padding: '6px 0',
             maxHeight: 360,
             overflow: 'auto',
-            background: 'rgba(255,255,255,0.02)',
+            background: 'var(--bg-faint-02)',
           }}
         >
           {rows.map((row, idx) => (

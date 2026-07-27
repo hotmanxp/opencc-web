@@ -11,7 +11,7 @@ export const STYLE = {
     wordBreak: "break-word" as const,
     fontFamily: CODE_FONT_FAMILY,
   },
-  preMuted: { background: "rgba(0,0,0,0.03)" },
+  preMuted: { background: "var(--bg-faint-02)" },
   preSuccess: {
     background: "rgba(82,196,26,0.06)",
     borderLeft: "2px solid #52c41a",

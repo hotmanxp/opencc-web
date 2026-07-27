@@ -26,7 +26,7 @@ interface Props {
 export default function ConversationInfoCard({ info }: Props) {
   if (!info.sessionId) {
     return (
-      <div style={{ padding: 8, color: 'rgba(0,0,0,0.45)', fontSize: 13 }}>
+      <div style={{ padding: 8, color: 'var(--text-dim-45)', fontSize: 13 }}>
         暂无活跃会话
       </div>
     )
@@ -49,7 +49,7 @@ export default function ConversationInfoCard({ info }: Props) {
       // 跟随外层容器宽度 (桌面 Popover 自带 360px / 移动 Modal 90vw),
       // 避免固定 360 在窄屏 modal 内被 Descriptions label + 内容撑破.
       style={{ width: '100%' }}
-      labelStyle={{ width: 110, color: 'rgba(255,255,255,0.65)' }}
+      labelStyle={{ width: 110, color: 'var(--text-dim-65)' }}
     >
       <Descriptions.Item label="Session ID">
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>

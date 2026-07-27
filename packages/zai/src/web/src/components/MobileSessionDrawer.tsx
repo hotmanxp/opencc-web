@@ -44,7 +44,7 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
       }
     >
       {sessions.length === 0 && (
-        <div style={{ padding: 16, color: '#999', fontSize: 13 }}>暂无历史会话</div>
+        <div style={{ padding: 16, color: 'var(--text-dim-45)', fontSize: 13 }}>暂无历史会话</div>
       )}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {sessions.map((s) => {
@@ -65,7 +65,7 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
               style={{
                 padding: '12px 16px',
                 cursor: 'pointer',
-                borderBottom: '1px solid rgba(255,255,255,0.06)',
+                borderBottom: '1px solid var(--border-faint)',
                 background: active ? 'rgba(255,102,0,0.10)' : 'transparent',
                 display: 'flex',
                 alignItems: 'center',
@@ -76,7 +76,7 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
                 <div
                   style={{
                     fontSize: 14,
-                    color: active ? '#ff8533' : '#f1f5f9',
+                    color: active ? '#ff8533' : 'var(--text-primary)',
                     overflow: 'hidden',
                     textOverflow: 'ellipsis',
                     whiteSpace: 'nowrap',
@@ -84,7 +84,7 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
                 >
                   {s.title || '新会话'}
                 </div>
-                <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                <div style={{ fontSize: 11, color: 'var(--text-dim-45)', marginTop: 2 }}>
                   {new Date(s.updatedAt).toLocaleString()}
                 </div>
               </div>

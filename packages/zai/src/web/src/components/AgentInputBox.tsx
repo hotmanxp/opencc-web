@@ -696,7 +696,7 @@ export default React.memo(function AgentInputBox() {
             - 位置: spacer 后最右, 作为工具栏右端第一入口 (演示场景核心操作).
             - disabled: 无 sessionId 时 disabled (分享空 session 无意义).
             - Popover: 受控 open={shareOpen}, 内部渲染 SharePopover.
-            - 图标色与同行其他按钮一致 (rgba(255,255,255,0.45)).
+            - 图标色与同行其他按钮一致 (var(--text-dim-45)).
             详见 docs/superpowers/specs/2026-07-25-zai-agent-share-design.md §4.6 */}
         <Tooltip
           title={
@@ -900,7 +900,7 @@ export default React.memo(function AgentInputBox() {
                 maxHeight: 240,
                 overflowY: "auto",
                 zIndex: 1000,
-                boxShadow: "0 4px 24px rgba(0,0,0,0.5)",
+                boxShadow: "0 4px 24px var(--text-dim-50)",
               }}
             >
               {filteredSlash.map((item, idx) => (
@@ -946,7 +946,7 @@ export default React.memo(function AgentInputBox() {
                     <span
                       style={{
                         fontSize: 12,
-                        color: "rgba(255,255,255,0.45)",
+                        color: "var(--text-dim-45)",
                         overflow: "hidden",
                         textOverflow: "ellipsis",
                         whiteSpace: "nowrap",
@@ -974,11 +974,11 @@ export default React.memo(function AgentInputBox() {
                       color:
                         item.kind === "command"
                           ? "#a78bfa"
-                          : "rgba(255,255,255,0.45)",
+                          : "var(--text-dim-45)",
                       background:
                         item.kind === "command"
                           ? "rgba(167,139,250,0.18)"
-                          : "rgba(255,255,255,0.08)",
+                          : "var(--bg-faint-08)",
                       flexShrink: 0,
                     }}
                   >

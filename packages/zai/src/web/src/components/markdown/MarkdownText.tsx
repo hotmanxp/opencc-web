@@ -131,7 +131,7 @@ function CodeBlock({
           fontSize: 12,
           lineHeight: 1.55,
           background: CODE_BG,
-          color: "rgba(255,255,255,0.85)",
+          color: "var(--text-dim-85)",
           fontFamily: CODE_FONT_FAMILY,
           overflow: "auto",
         }}
@@ -208,11 +208,11 @@ const markdownComponents = {
     </table>
   ),
   thead: ({ children }: any) => (
-    <thead style={{ background: "rgba(255,255,255,0.05)" }}>{children}</thead>
+    <thead style={{ background: "var(--bg-faint-05)" }}>{children}</thead>
   ),
   tbody: ({ children }: any) => <tbody>{children}</tbody>,
   tr: ({ children }: any) => (
-    <tr style={{ borderBottom: "1px solid rgba(255,255,255,0.08)" }}>
+    <tr style={{ borderBottom: "1px solid var(--border-light)" }}>
       {children}
     </tr>
   ),
@@ -222,7 +222,7 @@ const markdownComponents = {
         padding: "6px 10px",
         textAlign: "left",
         fontWeight: 600,
-        border: "1px solid rgba(255,255,255,0.08)",
+        border: "1px solid var(--border-light)",
       }}
     >
       {children}
@@ -232,7 +232,7 @@ const markdownComponents = {
     <td
       style={{
         padding: "6px 10px",
-        border: "1px solid rgba(255,255,255,0.08)",
+        border: "1px solid var(--border-light)",
       }}
     >
       {children}
@@ -241,10 +241,10 @@ const markdownComponents = {
   blockquote: ({ children }: any) => (
     <blockquote
       style={{
-        borderLeft: "3px solid rgba(255,255,255,0.2)",
+        borderLeft: "3px solid var(--border-mid)",
         paddingLeft: 12,
         margin: "4px 0 8px 0",
-        color: "rgba(255,255,255,0.7)",
+        color: "var(--text-dim-70)",
       }}
     >
       {children}
@@ -264,7 +264,7 @@ const markdownComponents = {
     <hr
       style={{
         border: "none",
-        borderTop: "1px solid rgba(255,255,255,0.08)",
+        borderTop: "1px solid var(--border-light)",
         margin: "12px 0",
       }}
     />

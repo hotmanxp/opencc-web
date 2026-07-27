@@ -124,7 +124,7 @@ export function GitTab({ cwd }: { cwd: string | null }) {
               <Spin />
             </div>
           ) : files.length === 0 ? (
-            <div style={{ padding: 16, color: 'rgba(255,255,255,0.45)', fontSize: 12 }}>
+            <div style={{ padding: 16, color: 'var(--text-dim-45)', fontSize: 12 }}>
               没有变更
             </div>
           ) : (
@@ -227,7 +227,7 @@ export function GitTab({ cwd }: { cwd: string | null }) {
                       });
                     }}
                     title={f.status === '??' ? '删除此新文件' : '撤销此文件的更改'}
-                    style={{ color: 'rgba(255,255,255,0.45)', padding: '0 4px' }}
+                    style={{ color: 'var(--text-dim-45)', padding: '0 4px' }}
                   />
                 </div>
               );

@@ -5,8 +5,8 @@ const ADD_BG = 'rgba(46,160,67,0.18)';
 const ADD_FG = '#3fb950';
 const DEL_BG = 'rgba(248,81,73,0.18)';
 const DEL_FG = '#f85149';
-const CTX_FG = 'rgba(255,255,255,0.72)';
-const GUTTER_FG = 'rgba(255,255,255,0.30)';
+const CTX_FG = 'var(--text-dim-72)';
+const GUTTER_FG = 'var(--text-dim-30)';
 const HUNK_FG = 'rgba(167,139,250,0.85)';
 
 type Row =
@@ -43,13 +43,13 @@ export function DiffView({ diff }: { diff: string }) {
         fontFamily: MONO,
         fontSize: 12,
         lineHeight: 1.55,
-        border: '1px solid rgba(255,255,255,0.08)',
+        border: '1px solid var(--border-light)',
         borderRadius: 6,
         padding: '6px 0',
         height: '100%',
         boxSizing: 'border-box',
         overflow: 'auto',
-        background: 'rgba(255,255,255,0.02)',
+        background: 'var(--bg-faint-02)',
       }}
     >
       {lines.map((line, idx) => {

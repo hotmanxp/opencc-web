@@ -27,12 +27,25 @@
   --success: #22c55e;
   --error: #ef4444;
   --warning: #f59e0b;
+  --text-dim-90: rgba(255,255,255,0.9);
   --text-dim-85: rgba(255,255,255,0.85);
+  --text-dim-72: rgba(255,255,255,0.72);
+  --text-dim-70: rgba(255,255,255,0.7);
   --text-dim-65: rgba(255,255,255,0.55);
   --text-dim-55: rgba(255,255,255,0.55);
   --text-dim-45: rgba(255,255,255,0.45);
+  --text-dim-40: rgba(255,255,255,0.4);
   --text-dim-35: rgba(255,255,255,0.35);
+  --text-dim-30: rgba(255,255,255,0.3);
+  --border-faint: rgba(255,255,255,0.06);
   --border-light: rgba(255,255,255,0.08);
+  --border-mid: rgba(255,255,255,0.18);
+  --border-strong: rgba(255,255,255,0.3);
+  --bg-faint-02: rgba(255,255,255,0.02);
+  --bg-faint-04: rgba(255,255,255,0.04);
+  --bg-faint-05: rgba(255,255,255,0.05);
+  --bg-faint-06: rgba(255,255,255,0.06);
+  --bg-faint-08: rgba(255,255,255,0.08);
   --bg-theme-6: rgba(0,0,0,0.6);
   --bg-popup: rgba(0,0,0,0.6);
 
@@ -64,14 +77,27 @@
   --success: #16a34a;
   --error: #dc2626;
   --warning: #d97706;
+  --text-dim-90: rgba(0,0,0,0.9);
   --text-dim-85: rgba(0,0,0,0.85);
+  --text-dim-72: rgba(0,0,0,0.72);
+  --text-dim-70: rgba(0,0,0,0.7);
   --text-dim-65: rgba(0,0,0,0.65);
   --text-dim-55: rgba(0,0,0,0.55);
   --text-dim-45: rgba(0,0,0,0.45);
+  --text-dim-40: rgba(0,0,0,0.4);
   --text-dim-35: rgba(0,0,0,0.35);
+  --text-dim-30: rgba(0,0,0,0.3);
+  --border-faint: rgba(0,0,0,0.06);
   --border-light: rgba(0,0,0,0.1);
+  --border-mid: rgba(0,0,0,0.18);
+  --border-strong: rgba(0,0,0,0.3);
+  --bg-faint-02: rgba(0,0,0,0.02);
+  --bg-faint-04: rgba(0,0,0,0.04);
+  --bg-faint-05: rgba(0,0,0,0.05);
+  --bg-faint-06: rgba(0,0,0,0.06);
+  --bg-faint-08: rgba(0,0,0,0.08);
   --bg-theme-6: rgba(255,255,255,0.6);
-    --bg-popup: rgba(255,255,255,255, 1);
+  --bg-popup: #ffffff;
 }
 
 /* light 主题下, 半透明 header 需要更亮一些 */

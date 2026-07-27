@@ -7,7 +7,7 @@ type Props = { todos: TodoItem[]; v2Tasks: V2TaskItem[] }
 const styles: Record<string, React.CSSProperties> = {
   wrap: {
     width: 360,
-    background: '#1f1f1f',
+    background: 'var(--bg-popup)',
     borderRadius: 6,
     padding: 10,
     maxHeight: 360,
@@ -19,7 +19,7 @@ const styles: Record<string, React.CSSProperties> = {
   header: {
     fontSize: 11,
     fontWeight: 600,
-    color: 'rgba(255,255,255,0.55)',
+    color: 'var(--text-dim-55)',
     marginBottom: 8,
     display: 'flex',
     justifyContent: 'space-between',
@@ -35,13 +35,13 @@ const styles: Record<string, React.CSSProperties> = {
   icon: { width: 16, textAlign: 'center', fontSize: 12 },
   empty: {
     fontSize: 12,
-    color: 'rgba(255,255,255,0.40)',
+    color: 'var(--text-dim-40)',
     padding: '16px 8px',
     textAlign: 'center',
   },
   divider: {
     height: 1,
-    background: 'rgba(255,255,255,0.08)',
+    background: 'var(--bg-faint-08)',
     margin: '10px -10px',
   },
 }
@@ -62,14 +62,14 @@ function v2Icon(status: V2TaskItem['status']): string {
 function todoColor(status: TodoItem['status']): string {
   if (status === 'completed') return '#52c41a'
   if (status === 'in_progress') return '#a78bfa'
-  return 'rgba(255,255,255,0.40)'
+  return 'var(--text-dim-40)'
 }
 
 function v2Color(status: V2TaskItem['status']): string {
   if (status === 'completed') return '#52c41a'
   if (status === 'in_progress') return '#a78bfa'
   if (status === 'deleted') return '#f5222d'
-  return 'rgba(255,255,255,0.40)'
+  return 'var(--text-dim-40)'
 }
 
 export default function TodoDropdown({ todos, v2Tasks }: Props) {
@@ -112,8 +112,8 @@ export default function TodoDropdown({ todos, v2Tasks }: Props) {
                     flex: 1,
                     color:
                       t.status === 'completed'
-                        ? 'rgba(255,255,255,0.45)'
-                        : 'rgba(255,255,255,0.85)',
+                        ? 'var(--text-dim-45)'
+                        : 'var(--text-dim-85)',
                     textDecoration:
                       t.status === 'completed' ? 'line-through' : 'none',
                   }}
@@ -150,8 +150,8 @@ export default function TodoDropdown({ todos, v2Tasks }: Props) {
                     flex: 1,
                     color:
                       t.status === 'completed' || t.status === 'deleted'
-                        ? 'rgba(255,255,255,0.45)'
-                        : 'rgba(255,255,255,0.85)',
+                        ? 'var(--text-dim-45)'
+                        : 'var(--text-dim-85)',
                     textDecoration:
                       t.status === 'completed' || t.status === 'deleted'
                         ? 'line-through'
@@ -162,7 +162,7 @@ export default function TodoDropdown({ todos, v2Tasks }: Props) {
                   {t.subject}
                 </span>
                 {t.blockedBy.length > 0 && (
-                  <span style={{ fontSize: 10, color: 'rgba(255,255,255,0.45)' }}>
+                  <span style={{ fontSize: 10, color: 'var(--text-dim-45)' }}>
                     依赖 {t.blockedBy.length}
                   </span>
                 )}

@@ -43,17 +43,17 @@ export function BottomStatusBar({ todos, v2Tasks, label = "任务" }: Props) {
         gap: 8,
         padding: "8px 12px",
         cursor: "pointer",
-        background: "rgba(255,255,255,0.04)",
+        background: "var(--bg-faint-04)",
         borderTop: "1px solid var(--border-subtle)",
         borderBottom: "1px solid var(--border-subtle)",
-        color: total > 0 ? "rgba(255,255,255,0.85)" : "rgba(255,255,255,0.45)",
+        color: total > 0 ? "var(--text-dim-85)" : "var(--text-dim-45)",
         fontSize: 12,
         fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
         userSelect: "none",
       }}
     >
       <span data-testid="bottom-status-summary">
-        <span style={{ color: done === total ? "#52c41a" : "rgba(255,255,255,0.85)" }}>
+        <span style={{ color: done === total ? "#52c41a" : "var(--text-dim-85)" }}>
           {done}/{total} {label}
         </span>
         {inProgress > 0 && (
@@ -62,7 +62,7 @@ export function BottomStatusBar({ todos, v2Tasks, label = "任务" }: Props) {
           </span>
         )}
         {open > 0 && (
-          <span style={{ color: "rgba(255,255,255,0.55)", marginLeft: 8 }}>
+          <span style={{ color: "var(--text-dim-55)", marginLeft: 8 }}>
             · {open} 待开始
           </span>
         )}

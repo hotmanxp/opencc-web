@@ -64,7 +64,7 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
         <span style={{ fontSize: 13 }}>
           {titleText}
           {summary && entries.length > 1 && (
-            <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.55)' }}>
+            <span style={{ marginLeft: 8, color: 'var(--text-dim-55)' }}>
               · {summary}
             </span>
           )}
@@ -91,7 +91,7 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
           )
         })}
       {!expanded && (
-        <div style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>
+        <div style={{ color: 'var(--text-dim-55)', fontSize: 12 }}>
           {entries.some((e) => e.status === 'pending') ? '工具调用中…' : '折叠显示'}
         </div>
       )}

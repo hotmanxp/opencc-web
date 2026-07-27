@@ -193,7 +193,7 @@ export default function ApproveDrawer(): JSX.Element {
             style={{
               marginBottom: 12,
               padding: 12,
-              background: 'rgba(0,0,0,0.04)',
+              background: 'var(--bg-faint-04)',
               borderRadius: 4,
             }}
           >
@@ -207,7 +207,7 @@ export default function ApproveDrawer(): JSX.Element {
             style={{
               marginBottom: 8,
               fontSize: 11,
-              color: '#8c8c8c',
+              color: 'var(--text-dim-55)',
               fontFamily: 'ui-monospace, monospace',
             }}
           >

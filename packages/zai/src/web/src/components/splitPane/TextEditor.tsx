@@ -94,7 +94,7 @@ export function TextEditor(props: TextEditorProps): JSX.Element {
         EditorView.theme({
           '&': {
             backgroundColor: '#0d0d0d',
-            color: 'rgba(255,255,255,0.85)',
+            color: 'var(--text-dim-85)',
             height: '100%',
             fontSize: '12px',
           },
@@ -104,15 +104,15 @@ export function TextEditor(props: TextEditorProps): JSX.Element {
           },
           '.cm-gutters': {
             backgroundColor: '#0d0d0d',
-            color: 'rgba(255,255,255,0.35)',
+            color: 'var(--text-dim-35)',
             border: 'none',
           },
           '.cm-activeLine': {
-            backgroundColor: 'rgba(255,255,255,0.04)',
+            backgroundColor: 'var(--bg-faint-04)',
           },
           '.cm-activeLineGutter': {
             backgroundColor: 'transparent',
-            color: 'rgba(255,255,255,0.65)',
+            color: 'var(--text-dim-65)',
           },
           // `.cm-cursor` 的边框色来自基础 light 主题(`solid black`),
           // 在 #0d0d0d 暗背景上几乎不可见 — 这正是"鼠标点击没显示光标"的根因。

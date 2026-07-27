@@ -70,7 +70,7 @@ function LazyTextEditor(props: {
           flex: 1,
           minHeight: 0,
           padding: 12,
-          color: 'rgba(255,255,255,0.45)',
+          color: 'var(--text-dim-45)',
           fontSize: 12,
         }}
       >
@@ -153,8 +153,8 @@ function HtmlPreview({
           margin: 0,
           padding: 12,
           overflow: 'auto',
-          background: 'rgba(255,255,255,0.04)',
-          color: 'rgba(255,255,255,0.85)',
+          background: 'var(--bg-faint-04)',
+          color: 'var(--text-dim-85)',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
           borderRadius: 6,
@@ -187,7 +187,7 @@ function HtmlPreview({
         width: '100%',
         border: 'none',
         borderRadius: 6,
-        background: '#fff',
+        background: 'var(--bg-card)',
       }}
     />
   );
@@ -312,7 +312,7 @@ function FilePreview({
       justifyContent: 'center',
       padding: 12,
       backgroundImage:
-        'linear-gradient(45deg, rgba(255,255,255,0.05) 25%, transparent 25%), linear-gradient(-45deg, rgba(255,255,255,0.05) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, rgba(255,255,255,0.05) 75%), linear-gradient(-45deg, transparent 75%, rgba(255,255,255,0.05) 75%)',
+        'linear-gradient(45deg, var(--bg-faint-05) 25%, transparent 25%), linear-gradient(-45deg, var(--bg-faint-05) 25%, transparent 25%), linear-gradient(45deg, transparent 75%, var(--bg-faint-05) 75%), linear-gradient(-45deg, transparent 75%, var(--bg-faint-05) 75%)',
       backgroundSize: '16px 16px',
       backgroundPosition: '0 0, 0 8px, 8px -8px, -8px 0px',
     };
@@ -373,8 +373,8 @@ function FilePreview({
             style={{
               margin: 0,
               padding: 12,
-              background: 'rgba(255,255,255,0.04)',
-              color: 'rgba(255,255,255,0.85)',
+              background: 'var(--bg-faint-04)',
+              color: 'var(--text-dim-85)',
               fontFamily: MONO,
               fontSize: 12,
               lineHeight: 1.55,
@@ -426,7 +426,7 @@ function FilePreview({
           // Subtle, non-clickable gutter: 11px font + ~35% opacity so
           // the line numbers don't compete with the code itself.
           lineNumberStyle={{
-            color: 'rgba(255,255,255,0.35)',
+            color: 'var(--text-dim-35)',
             fontSize: 11,
           }}
         >
@@ -441,8 +441,8 @@ function FilePreview({
         style={{
           margin: 0,
           padding: 12,
-          background: 'rgba(255,255,255,0.04)',
-          color: 'rgba(255,255,255,0.85)',
+          background: 'var(--bg-faint-04)',
+          color: 'var(--text-dim-85)',
           whiteSpace: 'pre-wrap',
           wordBreak: 'break-word',
         }}
@@ -673,7 +673,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           borderBottom: '1px solid var(--border-light)',
         }}
       >
-        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)', whiteSpace: 'nowrap' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-dim-55)', whiteSpace: 'nowrap' }}>
           Files
         </span>
         <Input
@@ -794,7 +794,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
               <Spin />
             </div>
           ) : treeData.length === 0 ? (
-            <div style={{ padding: 16, color: 'rgba(255,255,255,0.45)', fontSize: 12 }}>
+            <div style={{ padding: 16, color: 'var(--text-dim-45)', fontSize: 12 }}>
               目录为空
             </div>
           ) : (

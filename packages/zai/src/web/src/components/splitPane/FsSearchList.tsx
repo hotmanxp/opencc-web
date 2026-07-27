@@ -106,7 +106,7 @@ export function FsSearchList(props: FsSearchListProps): JSX.Element {
               color: 'var(--text-dim-85)',
             }}
             onMouseEnter={(ev) => {
-              (ev.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.06)';
+              (ev.currentTarget as HTMLDivElement).style.background = 'var(--bg-faint-06)';
             }}
             onMouseLeave={(ev) => {
               (ev.currentTarget as HTMLDivElement).style.background = 'transparent';

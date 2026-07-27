@@ -33,7 +33,7 @@ import { getRenderer } from "../toolRenderers/registry.js";
 const { Text } = Typography;
 
 // 代码块使用 oneDark 主题作为底色, 深灰(#282c34) 与浅色气泡形成稳定对比,
-// 避免原来 rgba(0,0,0,0.35) 在浅气泡上对比度过低的问题. CODE_BG 现在只在
+// 避免原来 var(--text-dim-35) 在浅气泡上对比度过低的问题. CODE_BG 现在只在
 // components/markdown/MarkdownText.tsx 里使用, 此处只保留 CODE_FONT_FAMILY
 // 给 ToolUsePill / ToolCallBlock 的等宽 stack trace fallback 用.
 const CODE_FONT_FAMILY =
@@ -221,7 +221,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                 {/* 箭头: 折叠态 › (CaretRight), 展开态 ⌄ (CaretDown).
                     紧贴 pill 之后, 视觉顺序: pill → 箭头 → 预览文字.
                     注意: 颜色必须用浅色 — ThinkingBlock 直接挂在 #000000
-                    消息容器下, 用 rgba(0,0,0,0.45) 会与背景同色不可见 */}
+                    消息容器下, 用 var(--text-dim-45) 会与背景同色不可见 */}
                 <span
                   style={{
                     fontSize: 13,

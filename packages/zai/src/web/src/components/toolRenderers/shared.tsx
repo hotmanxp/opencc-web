@@ -73,7 +73,7 @@ export function DetailsSection({
       <summary
         style={{
           fontSize: 11,
-          color: "rgba(0,0,0,0.55)",
+          color: "var(--text-dim-55)",
           cursor: "pointer",
           textTransform: "uppercase",
           letterSpacing: 0.5,

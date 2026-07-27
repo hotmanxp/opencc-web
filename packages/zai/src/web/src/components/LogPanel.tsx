@@ -18,7 +18,7 @@ export default function LogPanel({ events, title }: LogPanelProps) {
   return (
     <div
       style={{
-        background: '#0a0a0f',
+        background: 'var(--bg-body)',
         borderRadius: 8,
         overflow: 'hidden',
         border: '1px solid var(--border-subtle)',

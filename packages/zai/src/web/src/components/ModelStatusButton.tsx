@@ -178,7 +178,7 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
       onKeyDown={onKeyDown}
       style={{
         width: 360,
-        background: '#1f1f1f',
+        background: 'var(--bg-popup)',
         color: '#fff',
         borderRadius: 6,
         padding: 8,
@@ -194,14 +194,14 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
           marginBottom: 6,
         }}
       >
-        <span style={{ fontSize: 12, fontWeight: 600, color: 'rgba(255,255,255,0.55)' }}>
+        <span style={{ fontSize: 12, fontWeight: 600, color: 'var(--text-dim-55)' }}>
           Select model
         </span>
-        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.65)' }}>esc</span>
+        <span style={{ fontSize: 11, color: 'var(--text-dim-65)' }}>esc</span>
       </div>
 
       {availableModels.length === 0 ? (
-        <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', padding: '12px 4px' }}>
+        <div style={{ fontSize: 12, color: 'var(--text-dim-45)', padding: '12px 4px' }}>
           ~/.zai/settings.json 未配置 models[]
         </div>
       ) : (
@@ -217,14 +217,14 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
             variant="borderless"
             style={{
               marginBottom: 8,
-              border: '1px solid rgba(255,255,255,0.18)',
+              border: '1px solid var(--border-mid)',
               borderRadius: 0,
               background: 'transparent',
             }}
           />
 
           {filteredModels.length === 0 && (
-            <div style={{ fontSize: 12, color: 'rgba(255,255,255,0.45)', textAlign: 'center', padding: '12px 0' }}>
+            <div style={{ fontSize: 12, color: 'var(--text-dim-45)', textAlign: 'center', padding: '12px 0' }}>
               无匹配模型
             </div>
           )}
@@ -279,8 +279,8 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
           <div
             style={{
               fontSize: 11,
-              color: 'rgba(255,255,255,0.30)',
-              borderTop: '1px solid rgba(255,255,255,0.08)',
+              color: 'var(--text-dim-30)',
+              borderTop: '1px solid var(--border-light)',
               paddingTop: 6,
               marginTop: 4,
               display: 'flex',
@@ -289,7 +289,7 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
           >
             <span>↑↓ Navigate</span>
             <span>⏎ Select</span>
-            <span style={{ color: 'rgba(255,255,255,0.65)' }}>esc Close</span>
+            <span style={{ color: 'var(--text-dim-65)' }}>esc Close</span>
           </div>
         </>
       )}
@@ -370,7 +370,7 @@ function Row({ entry, isCurrent, isSelected, onClick, rowRef }: RowProps) {
         {isCurrent && <CheckOutlined style={{ color: '#a78bfa', fontSize: 11 }} />}
       </div>
       {entry.description && (
-        <span style={{ fontSize: 11, color: 'rgba(255,255,255,0.40)', paddingLeft: 13 }}>
+        <span style={{ fontSize: 11, color: 'var(--text-dim-40)', paddingLeft: 13 }}>
           {entry.description}
         </span>
       )}
@@ -403,7 +403,7 @@ function CapabilityBadges({ capabilities }: { capabilities?: ModelCapabilities }
         gap: 4,
         paddingLeft: 13,
         fontSize: 10,
-        color: 'rgba(255,255,255,0.45)',
+        color: 'var(--text-dim-45)',
         flexWrap: 'wrap',
       }}
     >

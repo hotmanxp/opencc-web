@@ -118,7 +118,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
               margin: 0,
               padding: '0 8px',
               background: 'var(--bg-tab)',
-              borderBottom: '1px solid rgba(255,255,255,0.08)',
+              borderBottom: '1px solid var(--border-light)',
             }}
             items={[
               { key: 'fs', label: 'Files', children: <FsTab cwd={cwd} /> },

@@ -53,7 +53,7 @@ export default function SharePopover() {
 
   return (
     <div style={{ maxWidth: 360, padding: "4px 0" }}>
-      <div style={{ fontSize: 12, color: "#999", marginBottom: 8 }}>
+      <div style={{ fontSize: 12, color: 'var(--text-dim-45)', marginBottom: 8 }}>
         分享到 LAN — 点 Copy 把链接发给同事
       </div>
 
@@ -76,10 +76,10 @@ export default function SharePopover() {
           bgColor="#fff"
           data-testid="share-primary-qrcode"
         />
-        <div style={{ fontSize: 12, color: "#999" }}>
+        <div style={{ fontSize: 12, color: 'var(--text-dim-45)' }}>
           扫码在手机上打开 <code>/m?sid={sessionId}</code>
         </div>
-        <div style={{ fontSize: 12, color: "#666" }}>
+        <div style={{ fontSize: 12, color: 'var(--text-dim-65)' }}>
           首选: <code>{primaryIp}:{ctx.port}</code>
         </div>
       </div>
@@ -90,8 +90,8 @@ export default function SharePopover() {
           <div
             style={{
               fontSize: 12,
-              color: "#999",
-              borderTop: "1px solid rgba(255,255,255,0.08)",
+              color: 'var(--text-dim-45)',
+              borderTop: "1px solid var(--border-light)",
               paddingTop: 8,
               marginTop: 4,
               marginBottom: 6,
@@ -111,7 +111,7 @@ export default function SharePopover() {
                     alignItems: "center",
                     gap: 8,
                     padding: "6px 8px",
-                    background: "rgba(255,255,255,0.04)",
+                    background: "var(--bg-faint-04)",
                     borderRadius: 4,
                   }}
                 >

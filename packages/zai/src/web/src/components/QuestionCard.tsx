@@ -36,14 +36,14 @@ function PreviewText({ text }: { text: string }) {
   if (!text) return null
   if (text.length <= PREVIEW_LIMIT) {
     return (
-      <pre style={{ fontSize: 11, margin: '4px 0 0 0', padding: '6px 8px', background: 'rgba(0,0,0,0.04)', borderRadius: 4, whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, monospace' }}>
+      <pre style={{ fontSize: 11, margin: '4px 0 0 0', padding: '6px 8px', background: 'var(--bg-faint-04)', borderRadius: 4, whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, monospace' }}>
         {text}
       </pre>
     )
   }
   return (
     <div>
-      <pre style={{ fontSize: 11, margin: '4px 0 0 0', padding: '6px 8px', background: 'rgba(0,0,0,0.04)', borderRadius: 4, whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, monospace' }}>
+      <pre style={{ fontSize: 11, margin: '4px 0 0 0', padding: '6px 8px', background: 'var(--bg-faint-04)', borderRadius: 4, whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, monospace' }}>
         {expanded ? text : text.slice(0, PREVIEW_LIMIT) + '…'}
       </pre>
       <Button type="link" size="small" style={{ padding: 0, fontSize: 11 }} onClick={() => setExpanded((v) => !v)}>

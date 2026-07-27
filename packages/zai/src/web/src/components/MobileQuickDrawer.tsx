@@ -101,7 +101,7 @@ function DiffTab({ cwd }: DiffTabProps) {
               alignItems: 'center',
               gap: 8,
               padding: '10px 12px',
-              borderBottom: '1px solid rgba(255,255,255,0.06)',
+              borderBottom: '1px solid var(--border-faint)',
             }}
           >
             <Tag color={STATUS_COLORS[file.status]} style={{ flexShrink: 0 }}>
@@ -250,12 +250,12 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
             </Button>
           </div>
           {!effectiveSid && (
-            <div style={{ color: 'rgba(255,255,255,0.45)', padding: 16 }}>
+            <div style={{ color: 'var(--text-dim-45)', padding: 16 }}>
               请先开启会话
             </div>
           )}
           {effectiveSid && topCommands.length === 0 && (
-            <div style={{ color: 'rgba(255,255,255,0.45)', padding: 16 }}>
+            <div style={{ color: 'var(--text-dim-45)', padding: 16 }}>
               暂无历史命令
             </div>
           )}
@@ -277,7 +277,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
                 justifyContent: 'space-between',
                 gap: 12,
                 padding: '10px 12px',
-                borderBottom: '1px solid rgba(255,255,255,0.06)',
+                borderBottom: '1px solid var(--border-faint)',
                 cursor: 'pointer',
                 fontFamily: 'ui-monospace, Menlo, monospace',
                 fontSize: 13,
@@ -286,7 +286,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
               <span style={{ overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
                 {entry.command}
               </span>
-              <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11, flexShrink: 0 }}>
+              <span style={{ color: 'var(--text-dim-45)', fontSize: 11, flexShrink: 0 }}>
                 ×{entry.count}
               </span>
             </div>
@@ -341,12 +341,12 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
             </div>
           )}
           {!effectiveSid && (
-            <div style={{ color: 'rgba(255,255,255,0.45)', padding: 16 }}>
+            <div style={{ color: 'var(--text-dim-45)', padding: 16 }}>
               无会话
             </div>
           )}
           {effectiveSid && prompts.length === 0 && (
-            <div style={{ color: 'rgba(255,255,255,0.45)', padding: 16 }}>
+            <div style={{ color: 'var(--text-dim-45)', padding: 16 }}>
               暂无常用指令,点「+ 新增」添加
             </div>
           )}
@@ -368,7 +368,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
                 alignItems: 'center',
                 gap: 8,
                 padding: '10px 12px',
-                borderBottom: '1px solid rgba(255,255,255,0.06)',
+                borderBottom: '1px solid var(--border-faint)',
                 cursor: 'pointer',
               }}
             >

@@ -32,7 +32,7 @@ const MODE_META: Record<PermissionMode, {
   icon: string
   color: string
 }> = {
-  default:           { label: 'default on',     badgeLabel: 'default on',     icon: '▶▶', color: 'rgba(255,255,255,0.65)' },
+  default:           { label: 'default on',     badgeLabel: 'default on',     icon: '▶▶', color: 'var(--text-dim-65)' },
   acceptEdits:       { label: 'accept edits on', badgeLabel: 'accept edits on', icon: '▶▶', color: '#a78bfa' },
   plan:              { label: 'plan mode on',    badgeLabel: 'plan mode on',    icon: '▮▮', color: '#5eead4' },
   bypassPermissions: { label: 'bypass on',       badgeLabel: 'bypass on',       icon: '▶▶', color: '#f43f5e' },
@@ -85,10 +85,10 @@ function IconFor({ mode }: { mode: PermissionMode }) {
 const KBD_BASE: React.CSSProperties = {
   padding: '2px 6px',
   fontSize: 11,
-  background: 'rgba(255,255,255,0.08)',
-  border: '1px solid rgba(255,255,255,0.18)',
+  background: 'var(--bg-faint-08)',
+  border: '1px solid var(--border-mid)',
   borderRadius: 4,
-  color: 'rgba(255,255,255,0.85)',
+  color: 'var(--text-dim-85)',
   fontFamily:
     'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
   lineHeight: 1.2,
@@ -147,8 +147,8 @@ function Row({ mode, isCurrent, isSelected, onClick, onMouseEnter }: RowProps) {
           width: 32,
           height: 32,
           borderRadius: 6,
-          background: 'rgba(255,255,255,0.05)',
-          border: '1px solid rgba(255,255,255,0.08)',
+          background: 'var(--bg-faint-05)',
+          border: '1px solid var(--border-light)',
           display: 'inline-flex',
           alignItems: 'center',
           justifyContent: 'center',
@@ -178,7 +178,7 @@ function Row({ mode, isCurrent, isSelected, onClick, onMouseEnter }: RowProps) {
         <span
           style={{
             fontSize: 11,
-            color: 'rgba(255,255,255,0.55)',
+            color: 'var(--text-dim-55)',
             lineHeight: 1.3,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
@@ -237,7 +237,7 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
       tabIndex={-1}
       style={{
         width: 380,
-        background: '#1f1f1f',
+        background: 'var(--bg-popup)',
         color: '#fff',
         borderRadius: 10,
         padding: 10,
@@ -257,14 +257,14 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
           style={{
             fontSize: 13,
             fontWeight: 600,
-            color: 'rgba(255,255,255,0.85)',
+            color: 'var(--text-dim-85)',
           }}
         >
           Modes
         </span>
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 4 }}>
           <span style={KBD_BASE}>⇧</span>
-          <span style={{ color: 'rgba(255,255,255,0.45)', fontSize: 11 }}>+</span>
+          <span style={{ color: 'var(--text-dim-45)', fontSize: 11 }}>+</span>
           <span style={KBD_BASE}>tab</span>
         </span>
       </div>
@@ -285,8 +285,8 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
       <div
         style={{
           fontSize: 11,
-          color: 'rgba(255,255,255,0.30)',
-          borderTop: '1px solid rgba(255,255,255,0.08)',
+          color: 'var(--text-dim-30)',
+          borderTop: '1px solid var(--border-light)',
           paddingTop: 6,
           marginTop: 4,
         }}
@@ -325,7 +325,7 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
             {/* compact(右侧分屏展开)模式下省掉 shift+tab 提示,腾出横向空间.
                 title 仍保留完整文案,鼠标 hover 仍能拿到快捷键说明. */}
             {!compact && (
-              <span style={{ color: 'rgba(255,255,255,0.35)' }}> (shift+tab ↹)</span>
+              <span style={{ color: 'var(--text-dim-35)' }}> (shift+tab ↹)</span>
             )}
           </>
         )}
