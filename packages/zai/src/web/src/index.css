@@ -122,13 +122,15 @@
   background: rgba(249, 115, 22, 0.14) !important;
 }
 
-/* light 主题: 折叠消息的"显示更多"/"收起"链接文字用主题橙 */
-:root[data-theme='light'] .ant-card-body .ant-typography-expand,
-:root[data-theme='light'] .ant-typography-expand {
+/* 折叠消息的"显示更多"/"收起"链接文字用主题橙 — 两个主题都要
+   之前只覆写 light 主题, 暗色下 antd darkAlgorithm 把文字设成浅灰,
+   视觉上完全没有主题橙 identity. 这里改成全局规则. */
+.ant-card-body .ant-typography-expand,
+.ant-typography-expand {
   color: var(--accent-start) !important;
 }
 /* AssistantTextBody 里的 Button type="link" 也要覆盖 */
-:root[data-theme='light'] .ant-btn-link {
+.ant-btn-link {
   color: var(--accent-start) !important;
 }
 
