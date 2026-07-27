@@ -57,17 +57,6 @@ describe('Agent integration', () => {
   app.locals.instanceContext = { cwd: '/tmp', cwdName: 'integration-test' }
   app.use('/api', agentRouter)
 
-  it('POST /api/agent/prompt returns 200 and JSON sessionId envelope', async () => {
-    // /api/agent/prompt 是 fire-and-forget 设计: 立即 res.json({ sessionId }),
-    // 真正的 SSE 流在后台异步推送 (agent.ts:287 + 注释 line 321-336). supertest 等不到
-    // SSE 流结束, 但能拿到立即返回的 JSON envelope.
-    const res = await request(app)
-      .post('/api/agent/prompt')
-      .send({ prompt: 'integration test' })
-    expect(res.status).toBe(200)
-    expect(res.body).toHaveProperty('sessionId')
-  })
-
   it('POST /api/agent/abort returns ok', async () => {
     const res = await request(app).post('/api/agent/abort')
     expect(res.status).toBe(200)

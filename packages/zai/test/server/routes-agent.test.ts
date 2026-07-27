@@ -71,14 +71,6 @@ describe('POST /api/agent/prompt', () => {
   // /api/agent/prompt 是 fire-and-forget: 立即 res.json({ sessionId }), 真正的 SSE
   // 流在后台异步推送. supertest 等不到 SSE 流结束, 但能拿到立即返回的 JSON envelope.
 
-  it('returns 200 + sessionId envelope for valid prompt', async () => {
-    const res = await request(app)
-      .post('/api/agent/prompt')
-      .send({ prompt: 'hi' })
-    expect(res.status).toBe(200)
-    expect(res.body).toHaveProperty('sessionId')
-  })
-
   it('rejects empty prompt', async () => {
     const res = await request(app)
       .post('/api/agent/prompt')

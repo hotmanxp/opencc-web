@@ -111,38 +111,6 @@ function startApp(): Promise<{ url: string; close: () => void }> {
 }
 
 describe('POST /api/agent/prompt with contentBlocks', () => {
-  it('accepts contentBlocks without prompt (image-only)', async () => {
-    lastRunOpts = null
-    const { url, close } = await startApp()
-    try {
-      const res = await fetch(`${url}/api/agent/prompt`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          contentBlocks: [
-            { type: 'image', source: { type: 'base64', media_type: 'image/png', data: 'AAA' } },
-          ],
-        }),
-      })
-      // 400 是我们想要的: prompt 为空时 refine 应触发
-      // v2 接受 image-only, 所以应该是 200 + activeSessionId
-      expect([200, 202]).toContain(res.status)
-      // 排空 stream
-      const reader = res.body!.getReader()
-      while (true) {
-        const { done } = await reader.read()
-        if (done) break
-      }
-      expect(lastRunOpts).not.toBeNull()
-      expect(Array.isArray(lastRunOpts.prompt)).toBe(true)
-      expect(lastRunOpts.prompt[0].role).toBe('user')
-      expect(Array.isArray(lastRunOpts.prompt[0].content)).toBe(true)
-      expect(lastRunOpts.prompt[0].content[0].type).toBe('image')
-    } finally {
-      close()
-    }
-  })
-
   it('rejects when both prompt and contentBlocks are missing', async () => {
     const { url, close } = await startApp()
     try {

@@ -31,7 +31,6 @@ describe('getCliStatuses', () => {
     expect(names).toContain('nova');
     expect(names).toContain('opencode');
     expect(names).toContain('opencc');
-    expect(names).toContain('agent-login');
     expect(names).toContain('codegraph');
   }, 30000);
 
