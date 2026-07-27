@@ -477,7 +477,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                   ) : (
                     <span
                       style={{
-                        color: 'rgba(255,255,255,0.65)',
+                        color: 'var(--text-dim-65)',
                         textAlign: 'right',
                         maxWidth: '55%',
                         overflow: 'hidden',
@@ -501,7 +501,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
           style={{
             position: 'fixed',
             inset: 0,
-            background: 'rgba(0,0,0,0.6)',
+            background: 'var(--bg-theme-6)',
             display: 'flex',
             alignItems: 'center',
             justifyContent: 'center',
@@ -512,8 +512,8 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
           <div
             onClick={(e) => e.stopPropagation()}
             style={{
-              background: '#1f1f1f',
-              border: '1px solid rgba(255,255,255,0.15)',
+              background: 'var(--bg-popup)',
+              border: '1px solid var(--border-light)',
               padding: '12px 0',
               minWidth: 280,
               maxWidth: 480,

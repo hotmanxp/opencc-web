@@ -79,7 +79,7 @@ export function GitTab({ cwd }: { cwd: string | null }) {
     return (
       <div style={{ padding: 12, display: 'flex', flexDirection: 'column', gap: 8, height: '100%' }}>
         <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-          <span style={{ color: 'rgba(255,255,255,0.55)', fontSize: 12 }}>Git</span>
+          <span style={{ color: 'var(--text-dim-55)', fontSize: 12 }}>Git</span>
           {refreshBtn}
         </div>
         <Empty description={status.error} />
@@ -98,12 +98,12 @@ export function GitTab({ cwd }: { cwd: string | null }) {
           justifyContent: 'space-between',
           alignItems: 'center',
           padding: '6px 12px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          borderBottom: '1px solid var(--border-light)',
         }}
       >
-        <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)' }}>
+        <span style={{ fontSize: 12, color: 'var(--text-dim-55)' }}>
           Git {branch ? <Tag color="orange" style={{ marginLeft: 6 }}>{branch}</Tag> : null}
-          <span style={{ marginLeft: 8, color: 'rgba(255,255,255,0.35)' }}>{files.length} 项变更</span>
+          <span style={{ marginLeft: 8, color: 'var(--text-dim-35)' }}>{files.length} 项变更</span>
         </span>
         {refreshBtn}
       </div>
@@ -115,7 +115,7 @@ export function GitTab({ cwd }: { cwd: string | null }) {
             flex: '0 0 40%',
             overflowY: 'auto',
             height: "calc(100vh - 140px)",
-            borderRight: '1px solid rgba(255,255,255,0.08)',
+            borderRight: '1px solid var(--border-light)',
             padding: '4px 0',
           }}
         >

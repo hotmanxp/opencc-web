@@ -103,7 +103,7 @@ export function FsSearchList(props: FsSearchListProps): JSX.Element {
               display: 'flex',
               alignItems: 'center',
               gap: 6,
-              color: 'rgba(255,255,255,0.85)',
+              color: 'var(--text-dim-85)',
             }}
             onMouseEnter={(ev) => {
               (ev.currentTarget as HTMLDivElement).style.background = 'rgba(255,255,255,0.06)';
@@ -121,7 +121,7 @@ export function FsSearchList(props: FsSearchListProps): JSX.Element {
           data-testid="fs-search-truncated"
           style={{
             padding: '6px 10px',
-            color: 'rgba(255,255,255,0.45)',
+            color: 'var(--text-dim-45)',
             fontSize: 11,
             fontStyle: 'italic',
           }}

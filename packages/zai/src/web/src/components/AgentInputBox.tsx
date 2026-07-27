@@ -585,8 +585,8 @@ export default React.memo(function AgentInputBox() {
       <div
         data-testid="agent-input-status-row"
         style={{
-          borderTop: "1px solid rgba(255,255,255,0.10)",
-          borderBottom: "1px solid rgba(255,255,255,0.10)",
+          borderTop: "1px solid var(--border-light)",
+          borderBottom: "1px solid var(--border-light)",
           padding: "6px 10px",
           fontSize: 12,
           fontFamily:

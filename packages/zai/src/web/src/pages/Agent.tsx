@@ -156,9 +156,10 @@ export default function Agent() {
     >
       <div
         style={{
+          paddingTop: 12,
           width: sessionsCollapsed ? 40 : 140,
           flexShrink: 0,
-          borderRight: "1px solid #f0f0f0",
+          borderRight: "1px solid var(--border-light)",
           // paddingRight: sessionsCollapsed ? 0 : 12,
           display: "flex",
           flexDirection: "column",

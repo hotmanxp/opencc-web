@@ -56,11 +56,11 @@ const rowStyle: React.CSSProperties = {
   display: 'flex',
   alignItems: 'baseline',
   gap: 8,
-  color: 'rgba(255,255,255,0.85)',
+  color: 'var(--text-dim-85)',
 };
 
 const pathStyle: React.CSSProperties = {
-  color: 'rgba(255,255,255,0.55)',
+  color: 'var(--text-dim-55)',
   fontSize: 11,
   whiteSpace: 'nowrap',
 };
@@ -156,7 +156,7 @@ export function FsContentSearchList(props: FsContentSearchListProps): JSX.Elemen
           data-testid="fs-content-truncated"
           style={{
             padding: '6px 10px',
-            color: 'rgba(255,255,255,0.45)',
+            color: 'var(--text-dim-45)',
             fontSize: 11,
             fontStyle: 'italic',
           }}

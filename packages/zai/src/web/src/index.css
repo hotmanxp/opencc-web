@@ -27,6 +27,15 @@
   --success: #22c55e;
   --error: #ef4444;
   --warning: #f59e0b;
+  --text-dim-85: rgba(255,255,255,0.85);
+  --text-dim-65: rgba(255,255,255,0.55);
+  --text-dim-55: rgba(255,255,255,0.55);
+  --text-dim-45: rgba(255,255,255,0.45);
+  --text-dim-35: rgba(255,255,255,0.35);
+  --border-light: rgba(255,255,255,0.08);
+  --bg-theme-6: rgba(0,0,0,0.6);
+  --bg-popup: rgba(0,0,0,0.6);
+
 }
 
 :root { color-scheme: light dark; }
@@ -55,6 +64,14 @@
   --success: #16a34a;
   --error: #dc2626;
   --warning: #d97706;
+  --text-dim-85: rgba(0,0,0,0.85);
+  --text-dim-65: rgba(0,0,0,0.65);
+  --text-dim-55: rgba(0,0,0,0.55);
+  --text-dim-45: rgba(0,0,0,0.45);
+  --text-dim-35: rgba(0,0,0,0.35);
+  --border-light: rgba(0,0,0,0.1);
+  --bg-theme-6: rgba(255,255,255,0.6);
+    --bg-popup: rgba(255,255,255,255, 1);
 }
 
 /* light 主题下, 半透明 header 需要更亮一些 */

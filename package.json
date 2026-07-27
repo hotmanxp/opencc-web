@@ -10,6 +10,7 @@
     "build": "pnpm --filter @zn-ai/zai-agent-core run build && pnpm --filter @zn-ai/zai run build",
     "clean": "pnpm -r run clean",
     "dev": "pnpm -r run dev",
+    "dev:web": "pnpm --filter @zn-ai/zai run dev",
     "test": "pnpm -r run test",
     "test:watch": "pnpm -r --parallel run test"
   },

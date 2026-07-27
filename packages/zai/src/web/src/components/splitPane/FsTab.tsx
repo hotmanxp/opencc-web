@@ -670,7 +670,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           alignItems: 'center',
           gap: 8,
           padding: '6px 12px',
-          borderBottom: '1px solid rgba(255,255,255,0.08)',
+          borderBottom: '1px solid var(--border-light)',
         }}
       >
         <span style={{ fontSize: 12, color: 'rgba(255,255,255,0.55)', whiteSpace: 'nowrap' }}>
@@ -763,7 +763,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             height: 'calc(100vh - 140px)',
             minHeight: 0,
             overflow: 'auto',
-            borderRight: '1px solid rgba(255,255,255,0.08)',
+            borderRight: '1px solid var(--border-light)',
             padding: '4px 8px',
           }}
         >

@@ -187,7 +187,7 @@ export default function Layout() {
             调整 Header 高度或 padding 都不会再把对话输入框挤出底部.
             注意 Content 自身必须有 flex: 1 才能在 AntLayout (flex column) 里
             占满 Header 之外的剩余高度, 否则子页面会以 content 高度为准溢出. */}
-        <Content style={{ flex: 1, padding: '24px 0 0 0', width: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Content style={{ flex: 1, padding: '0', width: '100%', display: 'flex', flexDirection: 'column' }}>
           <Outlet />
         </Content>
       </AntLayout>

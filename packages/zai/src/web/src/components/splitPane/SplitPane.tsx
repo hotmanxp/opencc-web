@@ -103,7 +103,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
         display: 'flex',
         position: 'relative',
         flexDirection: 'column',
-        borderLeft: open ? '1px solid rgba(255,255,255,0.08)' : 'none',
+        borderLeft: open ? '1px solid var(--border-light)' : 'none',
         overflow: 'hidden',
         transition: 'width 0.2s ease, min-width 0.2s ease',
       }}
