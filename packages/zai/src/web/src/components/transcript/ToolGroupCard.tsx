@@ -74,7 +74,11 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
         </span>
       }
       extra={
-        <Button size="small" onClick={() => setExpanded((x) => !x)}>
+        <Button
+          size="small"
+          type="text"
+          onClick={() => setExpanded((x) => !x)}
+        >
           {expanded ? '收起' : `展开 ${entries.length} 个工具`}
         </Button>
       }
