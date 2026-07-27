@@ -171,7 +171,6 @@ export function GitTab({ cwd }: { cwd: string | null }) {
                   >
                     <span
                       style={{
-                        color: 'rgba(255,255,255,0.92)',
                         fontWeight: 500,
                         overflow: 'hidden',
                         textOverflow: 'ellipsis',
@@ -183,7 +182,7 @@ export function GitTab({ cwd }: { cwd: string | null }) {
                     {dir && dir !== '.' ? (
                       <span
                         style={{
-                          color: 'rgba(255,255,255,0.45)',
+                          color: 'var(--ui-text-dim)',
                           fontSize: 10,
                           overflow: 'hidden',
                           textOverflow: 'ellipsis',

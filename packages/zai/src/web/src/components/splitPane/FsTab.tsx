@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Input, Segmented, Spin, Switch, Tree, message } from 'antd';
 import { ReloadOutlined } from '@ant-design/icons';
 import { FileIcon, DirIcon } from './fileIcon.js';
@@ -262,6 +262,23 @@ function FilePreview({
   // for 2 seconds. Hooks MUST sit at the top of the component function,
   // before any early returns — otherwise React's rules-of-hooks ESLint
   // rule fails and the effect would run in the wrong order across renders.
+  //
+  // All three preview branches (code, plain text, MD) now emit per-line
+  // `data-line` anchors, so the same `querySelector` path works everywhere
+  // — no more brittle `lineHeight * (N-1)` math for the SyntaxHighlighter
+  // branch (see FsTab.test "clicking a content search row … pendingLine"
+  // and the wrapper-anchored regression test).
+  //
+  // Why `hl` is in the dep list: for code files the SyntaxHighlighter
+  // chunk loads asynchronously. The first effect run after `pendingLine`
+  // changes happens BEFORE the gutter spans are mounted, so the
+  // querySelector returns null and we early-return. When `hl` resolves
+  // (microtask later), React re-runs the effect with the same `pendingLine`
+  // but with a populated `pendingRef`, and the querySelector hits the
+  // data-line anchor. Without `hl` in the dep list, the second run never
+  // happens and the jump effect silently no-ops. Plain-text / MD branches
+  // mount synchronously, so the first run already finds the anchor and
+  // they aren't affected by this dep.
   const pendingRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (pendingLine == null) return;
@@ -278,7 +295,7 @@ function FilePreview({
       el.style.background = '';
     }, 2000);
     return () => clearTimeout(id);
-  }, [pendingLine, file.content]);
+  }, [pendingLine, file.content, hl]);
 
   // Image kind: the server returned a base64 dataUrl for binary image
   // formats (png/jpg/gif/webp/bmp/ico/avif). Render with a plain <img>
@@ -333,7 +350,7 @@ function FilePreview({
   // 返回 null, 会让 MD 落到 plain text 分支(就是现状的 bug)。
   if (name && /\.(md|markdown)$/i.test(name)) {
     return (
-      <div data-testid="fs-preview-md" style={containerStyle}>
+      <div ref={pendingRef} data-testid="fs-preview-md" style={containerStyle}>
         <MarkdownText text={content} />
       </div>
     );
@@ -372,20 +389,46 @@ function FilePreview({
     }
     const { SyntaxHighlighter, oneDark } = hl;
     return (
-      <div data-testid="fs-preview-code" style={containerStyle}>
+      <div ref={pendingRef} data-testid="fs-preview-code" style={containerStyle}>
         <SyntaxHighlighter
           language={lang}
           style={oneDark}
           customStyle={{
             margin: 0,
-            padding: 12,
+            // Right padding bumped to 44px so the floating line-number
+            // gutter (added via showLineNumbers) doesn't sit on top of
+            // the first character. Library defaults: gutter <code> uses
+            // `float: left; paddingRight: 10px`, auto-minWidth based on
+            // the largest line number. 44px is enough for files up to
+            // 999 lines, which is well past the 200KB server cap.
+            padding: '12px 12px 12px 44px',
             background: 'transparent',
             fontSize: 12,
             lineHeight: 1.55,
           }}
           codeTagProps={{ style: { fontFamily: MONO } }}
           wrapLongLines={false}
-          showLineNumbers={false}
+          // Per-line `data-line={N}` anchors. The library only attaches
+          // `lineProps` when `wrapLines` is true (see highlight.js
+          // createLineElement), so we set both. `wrapLines` and
+          // `wrapLongLines` are independent flags — wrapLongLines stays
+          // false so long lines don't word-wrap; wrapLines just toggles
+          // per-line <span> wrapping. Without `showLineNumbers` we get
+          // data-line anchors but no visible gutter; without wrapLines
+          // we get the gutter but no anchors for the jump effect. Both
+          // are required for the content-search row click to land
+          // precisely on the matched line.
+          wrapLines
+          lineProps={(lineNumber: number) => ({
+            'data-line': String(lineNumber),
+          })}
+          showLineNumbers
+          // Subtle, non-clickable gutter: 11px font + ~35% opacity so
+          // the line numbers don't compete with the code itself.
+          lineNumberStyle={{
+            color: 'rgba(255,255,255,0.35)',
+            fontSize: 11,
+          }}
         >
           {content}
         </SyntaxHighlighter>
@@ -414,6 +457,37 @@ function FilePreview({
   );
 }
 
+// FilePreview is the largest pure subtree under FsTab: for a 2 MB text
+// file it stitches ~50k `<span data-line>` nodes into the DOM, and on
+// every FsTab re-render (search input change, header toggle, dirty dot
+// update, etc.) React would otherwise re-walk that whole tree. The
+// subtree is also pure — its only inputs are the file payload, the
+// htmlMode toggle, and the pendingLine jump target — so memo() with a
+// shallow-equality is a safe, cheap win. We deliberately compare the
+// fields that actually drive the rendered DOM (path / kind / content
+// slice / dataUrl / htmlMode / pendingLine) rather than `Object.is`,
+// because `useFsFile` returns a fresh wrapper object on every fetch
+// even when the underlying file payload is byte-identical.
+//
+// Caveat: this only suppresses the *re-render*. It does not reduce the
+// absolute DOM size — that needs line virtualization. If we still see
+// jank after this lands, the next step is to swap the inner
+// `content.split('\n').map(...)` / `<SyntaxHighlighter>` branches for a
+// windowed renderer. Don't do both at once; you want to be able to
+// bisect the perf delta.
+const FilePreviewMemo = memo(FilePreview, (prev, next) => {
+  const a = prev.file;
+  const b = next.file;
+  if (a.path !== b.path) return false;
+  if (a.kind !== b.kind) return false;
+  if (a.kind === 'text' && a.content !== b.content) return false;
+  if (a.kind === 'image' && a.dataUrl !== b.dataUrl) return false;
+  if (a.kind === 'html' && a.dataUrl !== b.dataUrl) return false;
+  if (prev.htmlMode !== next.htmlMode) return false;
+  if (prev.pendingLine !== next.pendingLine) return false;
+  return true;
+});
+
 export function FsTab({ cwd }: { cwd: string | null }) {
   const root = useFsList(cwd, '');
   const [selected, setSelected] = useState<string | null>(null);
@@ -424,8 +498,12 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   // Search-mode toggle. When non-empty after trim, the left pane renders
   // <FsSearchList> instead of the directory tree. Right-side preview
   // (selected/file) is unchanged — search results reuse setSelected().
-  const [query, setQuery] = useState<string>('');
-  const search = useFsSearch(cwd, query);
+  // `draft` mirrors the input value; `submittedQuery` is what the hook
+  // actually searches against. We commit on Enter (or clear-confirm) so
+  // the user is not paying the search cost on every keystroke.
+  const [draft, setDraft] = useState<string>('');
+  const [submittedQuery, setSubmittedQuery] = useState<string>('');
+  const search = useFsSearch(cwd, submittedQuery);
   // Content-search mode: 'name' (fuzzy filename) vs 'content' (ripgrep).
   // The Switch in the header toggles between them. When mode === 'content',
   // useFsContentSearch fires with `enabled: true`; otherwise it stays inert
@@ -437,7 +515,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const [pendingLine, setPendingLine] = useState<number | null>(null);
   const contentSearch = useFsContentSearch(
     cwd,
-    query,
+    submittedQuery,
     { enabled: mode === 'content' },
   );
   // HTML preview view mode: 'preview' shows the rendered iframe,
@@ -480,7 +558,8 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     setExpandedKeys([]);
     setLoaded({});
     setContextMenu(null);
-    setQuery('');
+    setDraft('');
+    setSubmittedQuery('');
     setMode('name');
     setPendingLine(null);
     setEditingPath(null);
@@ -600,10 +679,19 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         <Input
           data-testid="fs-search-input"
           size="small"
-          placeholder="搜索文件…"
+          placeholder="搜索文件…(回车搜索)"
           allowClear
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
+          value={draft}
+          onChange={(e) => {
+            const v = e.target.value;
+            setDraft(v);
+            // Allowing the user to clear the search by hitting the
+            // × icon (or selecting all + delete) should also collapse
+            // back to the directory tree — so empty drafts commit
+            // immediately, mirroring an "Enter" with no input.
+            if (v === '') setSubmittedQuery('');
+          }}
+          onPressEnter={() => setSubmittedQuery(draft.trim())}
           style={{ flex: 1 }}
         />
         <Switch
@@ -679,14 +767,14 @@ export function FsTab({ cwd }: { cwd: string | null }) {
             padding: '4px 8px',
           }}
         >
-          {query.trim().length > 0 ? (
+          {submittedQuery.length > 0 ? (
             mode === 'content' ? (
               <FsContentSearchList
                 entries={contentSearch.data?.entries ?? []}
                 loading={contentSearch.loading}
                 error={contentSearch.error}
                 truncated={contentSearch.data?.truncated ?? false}
-                query={query}
+                query={submittedQuery}
                 onSelect={(p, l) => { setSelected(p); setPendingLine(l); }}
               />
             ) : (
@@ -695,7 +783,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                 loading={search.loading}
                 error={search.error}
                 truncated={search.data?.truncated ?? false}
-                query={query}
+                query={submittedQuery}
                 onSelect={(p) => setSelected(p)}
               />
             )
@@ -772,7 +860,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
               onCancel={handleCancel}
             />
           ) : file.data && (file.data.content !== undefined || file.data.kind === 'image' || file.data.kind === 'html') ? (
-            <FilePreview file={file.data} htmlMode={htmlMode} pendingLine={pendingLine} />
+            <FilePreviewMemo file={file.data} htmlMode={htmlMode} pendingLine={pendingLine} />
           ) : (
             <Empty description="没有内容" />
           )}

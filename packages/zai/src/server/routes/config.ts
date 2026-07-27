@@ -7,7 +7,7 @@ import { readConfig, writeConfig } from '../services/fileStore.js';
 import type { ConfigTool, ProviderProfile } from '../../shared/types.js';
 
 const router: IRouter = Router();
-const ConfigToolSchema = z.enum(['nova', 'opencode', 'opencc']);
+const ConfigToolSchema = z.enum(['nova', 'opencode', 'opencc', 'zai']);
 
 const CLAUDE_JSON_PATH = () => join(homedir(), '.claude.json');
 

@@ -309,8 +309,8 @@ export default function QuestionCard(props: QuestionCardProps) {
         style={{
           margin: '12px 24px',
           padding: '12px 14px',
-          background: 'var(--bg-card-hover)',
-          borderLeft: '3px solid var(--accent-start)',
+          background: 'var(--bg-card-ansi)',
+          borderTop: '3px solid var(--accent-start)',
           borderRadius: 6,
         }}
       >
@@ -325,7 +325,7 @@ export default function QuestionCard(props: QuestionCardProps) {
         )}
 
         <div style={{ marginBottom: 6 }}>
-          <Tag color="purple" style={{ marginRight: 4 }}>{q.header}</Tag>
+          <Tag style={{ marginRight: 4, background: '#a78bfa', borderColor: '#a78bfa', color: '#fff' }}>{q.header}</Tag>
           <span style={{ color: 'var(--text-secondary)', marginLeft: 4 }}>
             {q.multiSelect ? '多选' : '单选'}
           </span>
@@ -359,8 +359,8 @@ export default function QuestionCard(props: QuestionCardProps) {
       style={{
         margin: '12px 24px',
         padding: '12px 14px',
-        background: 'var(--bg-card-hover)',
-        borderLeft: '3px solid var(--accent-start)',
+        background: 'var(--bg-card-ansi)',
+        borderTop: '3px solid var(--accent-start)',
         borderRadius: 6,
       }}
     >
@@ -385,7 +385,7 @@ export default function QuestionCard(props: QuestionCardProps) {
             key: q.question,
             label: (
               <span>
-                <Tag color="purple" style={{ marginRight: 4 }}>{q.header}</Tag>
+                <Tag style={{ marginRight: 4, background: '#a78bfa', borderColor: '#a78bfa', color: '#fff' }}>{q.header}</Tag>
                 <span style={{ color: 'var(--text-secondary)', marginLeft: 4 }}>
                   {q.multiSelect ? '多选' : '单选'}
                 </span>

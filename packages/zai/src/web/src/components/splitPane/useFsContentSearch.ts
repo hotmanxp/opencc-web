@@ -15,15 +15,16 @@ export interface UseFsContentSearchResult {
   durationMs: number | null;
 }
 
-const DEBOUNCE_MS = 200;
-
 /**
- * Debounced content (ripgrep) search hook with an `enabled` gate.
+ * Content (ripgrep) search hook with an `enabled` gate.
  *
  * Differences from useFsSearch:
  *   - adds an `enabled` flag; while false, the hook returns empty state
  *     AND aborts any inflight fetch.
- *   - 200ms debounce + seqRef + AbortController (same template).
+ *
+ * Fires a GET /fs/content-search immediately on every `query` / `cwd` /
+ * `enabled` change. The hook itself does no debouncing — callers decide
+ * when to update `query` (e.g. on Enter).
  *
  * Uses global `fetch` so AbortSignal can be passed; `api.get` does not
  * accept a signal.
@@ -56,34 +57,31 @@ export function useFsContentSearch(
 
     const seq = ++seqRef.current;
     const ac = new AbortController();
-    const timer = setTimeout(() => {
-      setLoading(true);
-      setError(null);
-      const qs = new URLSearchParams({ q: trimmed });
-      if (typeof headLimit === 'number') qs.set('headLimit', String(headLimit));
-      const url = `/api/fs/content-search?${qs.toString()}`;
-      fetch(url, { signal: ac.signal })
-        .then(async (r) => {
-          if (seqRef.current !== seq) return;
-          if (!r.ok) throw new Error(`/fs/content-search HTTP ${r.status}`);
-          const json = (await r.json()) as FsContentSearchResult;
-          if (seqRef.current !== seq) return;
-          setData(json);
-          setError(json.ok ? null : json.error ?? '未知错误');
-          setDurationMs(json.durationMs ?? null);
-        })
-        .catch((err: unknown) => {
-          if (seqRef.current !== seq) return;
-          if (err instanceof DOMException && err.name === 'AbortError') return;
-          setError(err instanceof Error ? err.message : String(err));
-        })
-        .finally(() => {
-          if (seqRef.current === seq) setLoading(false);
-        });
-    }, DEBOUNCE_MS);
+    setLoading(true);
+    setError(null);
+    const qs = new URLSearchParams({ q: trimmed });
+    if (typeof headLimit === 'number') qs.set('headLimit', String(headLimit));
+    const url = `/api/fs/content-search?${qs.toString()}`;
+    fetch(url, { signal: ac.signal })
+      .then(async (r) => {
+        if (seqRef.current !== seq) return;
+        if (!r.ok) throw new Error(`/fs/content-search HTTP ${r.status}`);
+        const json = (await r.json()) as FsContentSearchResult;
+        if (seqRef.current !== seq) return;
+        setData(json);
+        setError(json.ok ? null : json.error ?? '未知错误');
+        setDurationMs(json.durationMs ?? null);
+      })
+      .catch((err: unknown) => {
+        if (seqRef.current !== seq) return;
+        if (err instanceof DOMException && err.name === 'AbortError') return;
+        setError(err instanceof Error ? err.message : String(err));
+      })
+      .finally(() => {
+        if (seqRef.current === seq) setLoading(false);
+      });
 
     return () => {
-      clearTimeout(timer);
       ac.abort();
     };
   }, [cwd, query, enabled, headLimit]);

@@ -7,6 +7,7 @@ const CONFIG_PATHS: Record<ConfigTool, () => string> = {
   nova: () => join(homedir(), '.nova', 'settings.json'),
   opencode: () => join(homedir(), '.config', 'opencode', 'opencode.json'),
   opencc: () => join(homedir(), '.claude', 'settings.json'),
+  zai: () => join(homedir(), '.zai', 'settings.json'),
 };
 
 export async function readConfig(tool: ConfigTool): Promise<ConfigFile> {

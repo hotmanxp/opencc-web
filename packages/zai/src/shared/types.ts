@@ -90,7 +90,7 @@ export interface SseEvent {
   message?: string;
 }
 
-export type ConfigTool = 'nova' | 'opencode' | 'opencc';
+export type ConfigTool = 'nova' | 'opencode' | 'opencc' | 'zai';
 
 /**
  * Per-model capability metadata, mirroring the shape used by OpenCC's

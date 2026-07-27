@@ -65,10 +65,16 @@ interface AppState {
   // Settings Drawer 入口状态:右端工具栏的 [⚙] 按钮触发,Agent.tsx 顶层监听渲染.
   // 首期仅 frontend toggle;后续阶段 2 再接 PUT 写盘.
   settingsDrawerOpen: boolean;
-  // Theme 仅前端暂存(SPEC 阶段 1:不持久化),刷新/重开 Drawer 后还原为 'auto'.
-  // 'auto' / 'high-contrast' 由 useEffectiveTheme() 解析为跟随系统 prefers-color-scheme.
-  // 持久化与高对比度真实主题实现见后续 phase.
-  // 与 opencc 上游 ThemeSetting 字段名对齐 (opencc/src/utils/theme.ts:111).
+  /**
+   * Web UI 主题偏好 — 持久化到 ~/.zai/settings.json(settings.theme).
+   * Layout mount 时一次性 GET /api/agent/settings hydrate;SettingsDrawer 切主题
+   * 时同步 PUT settings.json,失败 swallow(下次启动仍可重写).
+   *
+   * 默认 'dark';'auto' / 'high-contrast' 由 useEffectiveTheme() 解析为跟随系统
+   * prefers-color-scheme,见 packages/zai/src/web/src/hooks/useEffectiveTheme.ts.
+   *
+   * 与 opencc 上游 ThemeSetting 字段名对齐 (opencc/src/utils/theme.ts:111).
+   */
   settingsTheme: 'auto' | 'dark' | 'light' | 'high-contrast';
   openSettingsDrawer: () => void;
   closeSettingsDrawer: () => void;
@@ -123,7 +129,7 @@ export const useAppStore = create<AppState>((set) => ({
   toasts: [],
   instanceContext: null,
   settingsDrawerOpen: false,
-  settingsTheme: 'auto',
+  settingsTheme: 'dark',
   // Default before the GET /api/agent/settings fetch resolves; the
   // Layout mount effect re-hydrates this from disk on first paint so
   // cold-load reflects the user's persisted choice without a flash.

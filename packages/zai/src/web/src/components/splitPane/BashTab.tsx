@@ -121,11 +121,10 @@ export function BashTab({ sessionId, cwd }: BashTabProps) {
           fontSize: 12,
           lineHeight: 1.55,
           color: 'rgba(255,255,255,0.85)',
-          background: '#0a0a0f',
         }}
       >
         {events.length === 0 && (
-          <div style={{ color: 'rgba(255,255,255,0.35)' }}>
+          <div style={{ color: 'var(--ui-text-dim)' }}>
             在下方输入 bash 命令，按 Enter 执行
           </div>
         )}

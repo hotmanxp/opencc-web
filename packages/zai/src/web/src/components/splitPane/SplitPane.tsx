@@ -103,7 +103,6 @@ export function SplitPane({ cwd }: SplitPaneProps) {
         display: 'flex',
         position: 'relative',
         flexDirection: 'column',
-        background: '#0d0d0d',
         borderLeft: open ? '1px solid rgba(255,255,255,0.08)' : 'none',
         overflow: 'hidden',
         transition: 'width 0.2s ease, min-width 0.2s ease',
@@ -118,7 +117,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
             tabBarStyle={{
               margin: 0,
               padding: '0 8px',
-              background: '#141414',
+              background: 'var(--bg-tab)',
               borderBottom: '1px solid rgba(255,255,255,0.08)',
             }}
             items={[

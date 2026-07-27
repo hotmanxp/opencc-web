@@ -12,6 +12,7 @@ const tools: { key: ConfigTool; label: string }[] = [
   { key: 'opencc', label: 'OpenCC' },
   { key: 'opencode', label: 'OpenCode' },
   { key: 'nova', label: 'Nova' },
+  { key: 'zai', label: 'Zai' },
 ];
 
 const KNOWN_PROVIDERS = [

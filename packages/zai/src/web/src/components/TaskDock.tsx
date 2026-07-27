@@ -9,10 +9,10 @@ import { useAppStore } from '../store/useAppStore.js'
 
 const STATUS_ICON: Record<string, JSX.Element> = {
   running: <LoadingOutlined style={{ color: 'var(--accent-start)' }} spin />,
-  queued: <CaretRightOutlined style={{ color: 'var(--bg-card-hover)' }} />,
+  queued: <CaretRightOutlined style={{ color: 'var(--ui-text-color)' }} />,
   completed: <CheckCircleFilled style={{ color: 'var(--success)' }} />,
   failed: <CloseCircleFilled style={{ color: 'var(--error)' }} />,
-  cancelled: <CloseCircleFilled style={{ color: 'var(--bg-card-hover)' }} />,
+  cancelled: <CloseCircleFilled style={{ color: 'var(--ui-text-color)' }} />,
 }
 
 const STATUS_LABEL: Record<string, string> = {
@@ -75,7 +75,7 @@ function Row({
           </span>
         </Tooltip>
       )}
-      <span style={{ color: 'var(--bg-card-hover)', fontSize: 11 }}>{STATUS_LABEL[task.status]}</span>
+      <span style={{ color: 'var(--ui-text-color)', fontSize: 11 }}>{STATUS_LABEL[task.status]}</span>
     </div>
   )
 }
@@ -84,7 +84,7 @@ const BASH_STATUS_ICON: Record<string, JSX.Element> = {
   running: <CodeOutlined style={{ color: 'var(--accent-start)' }} spin />,
   completed: <CheckCircleFilled style={{ color: 'var(--success)' }} />,
   failed: <CloseCircleFilled style={{ color: 'var(--error)' }} />,
-  killed: <CloseCircleFilled style={{ color: 'var(--bg-card-hover)' }} />,
+  killed: <CloseCircleFilled style={{ color: 'var(--ui-text-color)' }} />,
 }
 
 function BashRow({
@@ -114,7 +114,7 @@ function BashRow({
       <span style={{ flex: 1, overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
         {truncatePrompt(task.description || task.command)}
       </span>
-      <span style={{ color: 'var(--bg-card-hover)', fontSize: 11 }}>
+      <span style={{ color: 'var(--ui-text-color)', fontSize: 11 }}>
         {STATUS_LABEL[task.status] ?? task.status}
       </span>
     </div>
@@ -173,7 +173,7 @@ export function TaskDock({
           style={{
             fontSize: 11,
             fontWeight: 600,
-            color: 'var(--bg-card-hover)',
+            color: 'var(--ui-text-color)',
             marginBottom: 6,
             padding: '0 4px',
             display: 'flex',
@@ -190,7 +190,7 @@ export function TaskDock({
           <div
             style={{
               fontSize: 12,
-              color: 'var(--bg-card-hover)',
+              color: 'var(--ui-text-color)',
               padding: '16px 8px',
               textAlign: 'center',
             }}
@@ -231,7 +231,7 @@ export function TaskDock({
               style={{
                 fontSize: 10,
                 fontWeight: 600,
-                color: 'var(--bg-card-hover)',
+                color: 'var(--ui-text-color)',
                 textTransform: 'uppercase',
                 padding: '8px 4px 4px',
               }}
@@ -279,61 +279,47 @@ export function TaskDock({
       </div>
   );
 
-  return (
-    <>
-      <Tooltip
-        title={
-          total === 0
-            ? '暂无后台任务'
-            : `${total} 个后台 Agent 运行中,点击查看`
-        }
-      >
-        <span
-          onClick={() => {
-            // 桌面端走 Popover(触发器控制), 移动端走 Modal(下方单独渲染).
-            if (isMobile) setOpen(true)
-          }}
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 4,
-            cursor: 'pointer',
-            fontSize: 12,
-            color: total > 0 ? '#a78bfa' : 'var(--bg-card-hover)', // kept: #a78bfa (purple accent — no CSS var mapping)
-          }}
-        >
-          <Badge count={total} size="small" offset={isLite ? [2, -2] : [4, -2]} color="#a78bfa">
-            {isLite ? (
-              // isLite (分屏展开 / 移动端) 模式: 只显示图标,省掉"后台任务"文本.
-              // 视觉与 ModeStatusButton 在 compact 下的精简策略一致.
-              <AppstoreOutlined
-                style={{ padding: '0 4px', fontSize: 14, lineHeight: 1 }}
-                aria-label="后台任务"
-              />
-            ) : (
-              <span style={{ padding: '0 4px', fontSize: 12, lineHeight: 1 }}>后台任务</span>
-            )}
-          </Badge>
-        </span>
-      </Tooltip>
+  // 触发器样式 (桌面 / 移动共用). Tooltip 包一层用于 hover 提示.
+  const trigger = (
+    <span
+      style={{
+        display: 'inline-flex',
+        alignItems: 'center',
+        gap: 4,
+        cursor: 'pointer',
+        fontSize: 12,
+        color: total > 0 ? '#a78bfa' : 'var(--ui-text-color)', // kept: #a78bfa (purple accent — no CSS var mapping)
+      }}
+    >
+      <Badge count={total} size="small" offset={isLite ? [2, -2] : [4, -2]} color="#a78bfa">
+        {isLite ? (
+          // isLite (分屏展开 / 移动端) 模式: 只显示图标,省掉"后台任务"文本.
+          // 视觉与 ModeStatusButton 在 compact 下的精简策略一致.
+          <AppstoreOutlined
+            style={{ padding: '0 4px', fontSize: 14, lineHeight: 1 }}
+            aria-label="后台任务"
+          />
+        ) : (
+          <span style={{ padding: '0 4px', fontSize: 12, lineHeight: 1 }}>后台任务</span>
+        )}
+      </Badge>
+    </span>
+  )
 
-      {/* 桌面端 Popover (从触发器左上角展开, 不会越过屏幕右缘) */}
-      {!isMobile && (
-        <Popover
-          content={<div onClick={(e) => e.stopPropagation()}>{content}</div>}
-          trigger="click"
-          placement="topLeft"
-          open={open}
-          onOpenChange={setOpen}
-          destroyTooltipOnHide
+  if (isMobile) {
+    // 移动端: Modal 由 onClick 显式 setOpen 控制, 跟 Popover 的 trigger click
+    // 解耦 (Popover 在窄屏触发位置不够, 改居中弹窗).
+    return (
+      <>
+        <Tooltip
+          title={
+            total === 0
+              ? '暂无后台任务'
+              : `${total} 个后台 Agent 运行中,点击查看`
+          }
         >
-          <span style={{ display: 'none' }} aria-hidden />
-        </Popover>
-      )}
-
-      {/* 移动端 Modal: 触发按钮在右下, Popover 向左扩展空间不足被截断,
-          改用居中 Modal 占 90vw 居中弹窗, 不依赖触发位置. */}
-      {isMobile && (
+          <span onClick={() => setOpen((o) => !o)}>{trigger}</span>
+        </Tooltip>
         <Modal
           open={open}
           onCancel={() => setOpen(false)}
@@ -348,7 +334,29 @@ export function TaskDock({
         >
           {content}
         </Modal>
-      )}
-    </>
+      </>
+    )
+  }
+
+  // 桌面端: 把可见触发器嵌进 Popover, AntD Trigger 自己管 click 切换.
+  // 修复前可见触发器在 Popover 外面, AntD click-outside 把它当外部点击 →
+  // 立刻 setOpen(false), 出现"闪一下就消失". 让 Trigger 自己持有触发器
+  // ref, 它就不会误判.
+  return (
+    <Popover
+      content={<div onClick={(e) => e.stopPropagation()}>{content}</div>}
+      trigger="click"
+      placement="topLeft"
+    >
+      <Tooltip
+        title={
+          total === 0
+            ? '暂无后台任务'
+            : `${total} 个后台 Agent 运行中,点击查看`
+        }
+      >
+        {trigger}
+      </Tooltip>
+    </Popover>
   )
 }

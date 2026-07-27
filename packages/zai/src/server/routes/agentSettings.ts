@@ -3,14 +3,16 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { resolveModel } from '../lib/resolveModel.js'
-import type { ModelEntry, OutputStyle, ZaiSettings } from '../../shared/settings.js'
+import type { ModelEntry, OutputStyle, Theme, ZaiSettings } from '../../shared/settings.js'
 import type { ProviderProfile } from '../../shared/types.js'
 import { getDefaultMode } from '../services/permissionMode.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
 import {
   isValidOutputStyle,
+  isValidTheme,
   readZaiSettings,
   resolveOutputStyle,
+  resolveTheme,
   writeZaiSettings,
 } from '../services/zaiSettingsStore.js'
 
@@ -121,6 +123,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
     const baseURL = env.ANTHROPIC_BASE_URL ?? null
     const models = buildAvailableModels(settings)
     const outputStyle = resolveOutputStyle(settings)
+    const theme = resolveTheme(settings)
     const maxVisibleMessages =
       typeof settings.maxVisibleMessages === 'number'
         ? Math.max(1, Math.min(1000, Math.floor(settings.maxVisibleMessages)))
@@ -131,6 +134,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       models,
       defaultMode: getDefaultMode(),
       outputStyle,
+      theme,
       maxVisibleMessages,
     })
   } catch (err) {
@@ -161,6 +165,30 @@ router.put('/agent/settings/output-style', async (req: Request, res: Response) =
     const next: ZaiSettings = { ...settings, outputStyle: candidate as OutputStyle }
     await writeZaiSettings(next)
     res.json({ outputStyle: next.outputStyle })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+/**
+ * PUT /api/agent/settings/theme — persist the web UI's theme preference.
+ * Body is `{ theme: 'auto' | 'dark' | 'light' | 'high-contrast' }`. The
+ * server validates the value and round-trips the existing settings.json
+ * (other fields preserved).
+ *
+ * Used by SettingsDrawer when the user changes the "主题" row.
+ * Returns the persisted value so the client echoes back the canonical form.
+ */
+router.put('/agent/settings/theme', async (req: Request, res: Response) => {
+  const candidate = (req.body as { theme?: unknown } | undefined)?.theme
+  if (!isValidTheme(candidate)) {
+    return res.status(400).json({ error: `invalid theme: ${String(candidate)}` })
+  }
+  try {
+    const settings = await readZaiSettings()
+    const next: ZaiSettings = { ...settings, theme: candidate as Theme }
+    await writeZaiSettings(next)
+    res.json({ theme: next.theme })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }

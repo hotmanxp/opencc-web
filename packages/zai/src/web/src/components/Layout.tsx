@@ -15,7 +15,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { useAgentStore } from '../store/useAgentStore';
 import { api } from '../lib/api';
-import type { OutputStyle } from '../../shared/settings.js';
+import type { OutputStyle, Theme } from '../../shared/settings.js';
 import ZnLogo from './ZnLogo';
 import { useIsMobile } from '../hooks/useIsMobile';
 
@@ -36,7 +36,7 @@ const menuItems = [
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setOutputStyle, setMaxVisibleMessages } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setMaxVisibleMessages } = useAppStore();
   const [version, setVersion] = useState<string>('…');
   // 视口宽度监听 → 写 useAppStore.isMobile. 全局一次挂载即可, 子组件用
   // useAppStore((s) => s.isMobile) 直接读, 避免 props 透传.
@@ -82,7 +82,9 @@ export default function Layout() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<{ outputStyle?: OutputStyle; maxVisibleMessages?: number }>('/agent/settings')
+      .get<{ outputStyle?: OutputStyle; theme?: Theme; maxVisibleMessages?: number }>(
+        '/agent/settings',
+      )
       .then((data) => {
         if (cancelled) return
         if (
@@ -92,6 +94,16 @@ export default function Layout() {
         ) {
           setOutputStyle(data.outputStyle)
           setTranscriptCollapsed(data.outputStyle === 'compact')
+        }
+        // hydrate 主题:服务端已在 GET handler 走 resolveTheme() 把未知值折叠为 'auto',
+        // 这里 4 档白名单校验是防御层(防 cache stale / transport 异常).
+        if (
+          data.theme === 'auto' ||
+          data.theme === 'dark' ||
+          data.theme === 'light' ||
+          data.theme === 'high-contrast'
+        ) {
+          setSettingsTheme(data.theme)
         }
         if (typeof data.maxVisibleMessages === 'number') {
           // Mirror server-side clamp from settings/max-visible-messages PUT handler
@@ -107,7 +119,7 @@ export default function Layout() {
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setMaxVisibleMessages, setTranscriptCollapsed]);
+  }, [setOutputStyle, setSettingsTheme, setMaxVisibleMessages, setTranscriptCollapsed]);
 
   return (
     // 用 height: 100vh (而不是 minHeight) 把 AntLayout 锁死在视口高度,

@@ -1,7 +1,7 @@
 import { writeFile, rename, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
-import type { OutputStyle, ZaiSettings } from '../../shared/settings.js'
+import type { OutputStyle, Theme, ZaiSettings } from '../../shared/settings.js'
 import { getCachedZaiSettings, refreshCache } from './zaiSettingsCache.js'
 
 // Re-export the cache API so existing `zaiSettingsStore` importers can reach
@@ -66,4 +66,29 @@ export function resolveOutputStyle(settings: ZaiSettings): OutputStyle {
 /** Validate a candidate style value before persisting. */
 export function isValidOutputStyle(value: unknown): value is OutputStyle {
   return typeof value === 'string' && VALID_OUTPUT_STYLES.has(value as OutputStyle)
+}
+
+const VALID_THEMES: ReadonlySet<Theme> = new Set<Theme>([
+  'auto',
+  'dark',
+  'light',
+  'high-contrast',
+])
+
+/**
+ * Resolve the persisted theme with validation. Unknown / missing values
+ * collapse to 'dark' (project default) so a hand-edited settings.json can
+ * never leave the UI stuck in an unrenderable state. Mirrors resolveOutputStyle().
+ */
+export function resolveTheme(settings: ZaiSettings): Theme {
+  const candidate = settings.theme
+  if (typeof candidate === 'string' && VALID_THEMES.has(candidate as Theme)) {
+    return candidate as Theme
+  }
+  return 'dark'
+}
+
+/** Validate a candidate theme value before persisting. */
+export function isValidTheme(value: unknown): value is Theme {
+  return typeof value === 'string' && VALID_THEMES.has(value as Theme)
 }

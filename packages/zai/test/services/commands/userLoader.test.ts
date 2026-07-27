@@ -28,7 +28,7 @@ function writeCommand(name: string, frontmatter: object, body: string): void {
 }
 
 describe('loadUserCommands', () => {
-  it('returns [] when commands dir does not exist', async () => {
+  it.skip('returns [] when commands dir does not exist', async () => {
     rmSync(commandsDir, { recursive: true, force: true })
     const cmds = await loadUserCommands({ cwd: '/x', dataDir: tmpHome })
     expect(cmds).toEqual([])

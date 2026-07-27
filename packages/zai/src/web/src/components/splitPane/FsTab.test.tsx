@@ -38,11 +38,60 @@ vi.mock('./TextEditor.js', () => ({
   ),
 }));
 vi.mock('../markdown/syntaxHighlighter.js', () => ({
-  SyntaxHighlighter: ({ children }: { children?: unknown }) => (
-    <pre className="language-ts">
-      <code>{children}</code>
-    </pre>
-  ),
+  // The real SyntaxHighlighter (with showLineNumbers + wrapLines +
+  // lineProps enabled in FsTab) emits per-line <span data-line={N}>
+  // anchors. The pendingLine jump effect queries that selector to
+  // scroll the matched line into view. Our stub mirrors that contract
+  // so the existing "clicking a content search row passes pendingLine
+  // to FilePreview" test continues to assert the same DOM shape — and
+  // so the new regression test (line numbers + data-line present) is
+  // honest about what the real component renders, not what happy-dom
+  // would otherwise synthesize from a bare <pre><code>.
+  SyntaxHighlighter: ({
+    children,
+    showLineNumbers,
+    lineProps,
+  }: {
+    children?: unknown;
+    showLineNumbers?: boolean;
+    lineProps?: (n: number) => Record<string, string>;
+  }) => {
+    const text = typeof children === 'string' ? children : String(children ?? '');
+    const lines = text.split('\n');
+    // Drop the trailing empty line that .split('\n') adds for trailing
+    // newlines, matching how the real library counts (it uses
+    // codeString.replace(/\n$/, '').split('\n') for the gutter).
+    if (lines.length > 0 && lines[lines.length - 1] === '') lines.pop();
+    return (
+      <pre className="language-ts">
+        {showLineNumbers && (
+          <code
+            data-testid="fs-line-gutter"
+            style={{ float: 'left', paddingRight: 10 }}
+          >
+            {lines.map((_, i) => (
+              <span key={`g${i}`} className="react-syntax-highlighter-line-number">
+                {i + 1}
+                {'\n'}
+              </span>
+            ))}
+          </code>
+        )}
+        <code>
+          {lines.map((line, i) => {
+            const lineNumber = i + 1;
+            const extra = lineProps ? lineProps(lineNumber) : {};
+            return (
+              <span key={`l${lineNumber}`} data-line={String(lineNumber)} {...extra}>
+                {line}
+                {i < lines.length - 1 ? '\n' : ''}
+              </span>
+            );
+          })}
+        </code>
+      </pre>
+    );
+  },
   oneDark: {},
 }));
 // Make dynamic imports resolve during tests. vi.mock intercepts the
@@ -650,6 +699,7 @@ it('renders the search list when query is non-empty (mocked useFsSearch result)'
   render(<FsTab cwd="/repo" />);
   const input = screen.getByTestId('fs-search-input') as HTMLInputElement;
   fireEvent.change(input, { target: { value: 'foo' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
   expect(screen.getByTestId('fs-search-list')).toBeTruthy();
   expect(screen.getByTestId('fs-search-row')).toBeTruthy();
 });
@@ -687,6 +737,7 @@ it('clicking a search row invokes setSelected + reuse right-side preview', () =>
   render(<FsTab cwd="/repo" />);
   const input = screen.getByTestId('fs-search-input') as HTMLInputElement;
   fireEvent.change(input, { target: { value: 'foo' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
   fireEvent.click(screen.getByTestId('fs-search-row'));
   expect(screen.getByTestId('fs-preview-code')).toBeTruthy();
 });
@@ -980,7 +1031,9 @@ it('toggling the Switch renders FsContentSearchList when query is non-empty', ()
     durationMs: 5,
   });
   render(<FsTab cwd="/repo" />);
-  fireEvent.change(screen.getByTestId('fs-search-input'), { target: { value: 'TODO' } });
+  const input = screen.getByTestId('fs-search-input') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: 'TODO' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
   const sw = screen.getByTestId('fs-search-mode');
   fireEvent.click(sw);
   expect(sw.getAttribute('aria-checked')).toBe('true');
@@ -1014,7 +1067,9 @@ it('clicking a content search row passes pendingLine to FilePreview', () => {
     durationMs: 5,
   });
   render(<FsTab cwd="/repo" />);
-  fireEvent.change(screen.getByTestId('fs-search-input'), { target: { value: 'TODO' } });
+  const input = screen.getByTestId('fs-search-input') as HTMLInputElement;
+  fireEvent.change(input, { target: { value: 'TODO' } });
+  fireEvent.keyDown(input, { key: 'Enter' });
   fireEvent.click(screen.getByTestId('fs-search-mode'));
   fireEvent.click(screen.getByTestId('fs-content-row'));
   // pendingLine=2 should mark the second <span data-line="2"> as highlighted
@@ -1022,6 +1077,136 @@ it('clicking a content search row passes pendingLine to FilePreview', () => {
   expect(line2).toBeTruthy();
   // Background fades in via inline style. The data-line attr is what
   // marks it; the actual inline style is asserted in FsContentSearchList.
+});
+
+it('code preview renders a line-number gutter and per-line data-line anchors', async () => {
+  // Regression: previously FsTab passed showLineNumbers={false} to the
+  // SyntaxHighlighter, so the code preview had no line numbers and the
+  // content-search jump-to-line effect had to fall back to a brittle
+  // `lineHeight * (N-1)` scroll math. Now showLineNumbers + wrapLines +
+  // lineProps are all on, the gutter is visible, and per-line
+  // <span data-line={N}> anchors let the jump effect use querySelector.
+  // The stub mirrors that contract (see vi.mock above) so this test
+  // exercises the same DOM shape happy-dom would synthesize from a
+  // real SyntaxHighlighter with these props.
+  mockList.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [{ name: 'foo.ts', path: 'foo.ts', type: 'file', size: 42 }],
+    },
+    loading: false,
+    error: null,
+    refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({
+    data: {
+      ok: true,
+      path: '/repo/foo.ts',
+      name: 'foo.ts',
+      size: 42,
+      mtime: '2026-07-21T00:00:00Z',
+      content: 'line1\nTODO\nline3',
+    },
+    loading: false,
+    error: null,
+  });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByText('foo.ts'));
+  await waitFor(() => {
+    const codeBlock = screen.getByTestId('fs-preview-code');
+    // The stub adds a data-testid for the gutter <code>. The real
+    // library uses a similar <code style="float:left;..."> with no
+    // testid, but the visual line-number <span> per line is what
+    // we actually assert on below.
+    expect(codeBlock.querySelector('.react-syntax-highlighter-line-number')).toBeTruthy();
+  });
+  // Gutter must contain a line number for each non-empty source line.
+  // `content` has 3 newline-separated lines → 3 gutter spans.
+  const codeBlock = screen.getByTestId('fs-preview-code');
+  const gutter = codeBlock.querySelector('[data-testid="fs-line-gutter"]') as HTMLElement | null;
+  expect(gutter).toBeTruthy();
+  expect(gutter!.querySelectorAll('.react-syntax-highlighter-line-number').length).toBe(3);
+  // Per-line data-line anchors — one per non-empty source line.
+  // The jump effect (pendingLine=2) needs [data-line="2"] to exist
+  // before scrollIntoView is called; the click-content-search-row
+  // test below covers the actual scroll path.
+  const dataLines = codeBlock.querySelectorAll('[data-line]');
+  expect(dataLines.length).toBe(3);
+  expect(codeBlock.querySelector('[data-line="1"]')).toBeTruthy();
+  expect(codeBlock.querySelector('[data-line="2"]')).toBeTruthy();
+  expect(codeBlock.querySelector('[data-line="3"]')).toBeTruthy();
+});
+
+it('content-search row click on .ts file scrolls to the matched line via data-line anchor', async () => {
+  // End-to-end of the jump effect: switch to content mode, click the
+  // first match at line=2, and verify the data-line="2" span is the
+  // one the effect calls scrollIntoView on. The previous "brittle
+  // lineHeight * (N-1) math" path is gone — the effect should hit
+  // the [data-line="2"] anchor via querySelector. We spy on
+  // Element.prototype.scrollIntoView so we don't have to assert
+  // against happy-dom's specific style-string serialization (it
+  // varies across versions and we're not testing the renderer).
+  const scrollSpy = vi.spyOn(Element.prototype, 'scrollIntoView');
+  try {
+    mockList.mockReturnValue({
+      data: { ok: true, entries: [] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({
+      data: {
+        ok: true, kind: 'text', path: '/repo/src/foo.ts', name: 'foo.ts',
+        size: 42, mtime: '', content: 'line1\nTODO\nline3',
+      },
+      loading: false,
+      error: null,
+    });
+    mockContentSearch.mockReturnValue({
+      data: {
+        ok: true,
+        entries: [
+          {
+            path: 'src/foo.ts', name: 'foo.ts',
+            matches: [{ line: 2, text: 'TODO', submatch: { text: 'TODO', start: 0, end: 4 } }],
+          },
+        ],
+        truncated: false,
+        durationMs: 5,
+      },
+      loading: false,
+      error: null,
+      durationMs: 5,
+    });
+    render(<FsTab cwd="/repo" />);
+    const input = screen.getByTestId('fs-search-input') as HTMLInputElement;
+    fireEvent.change(input, { target: { value: 'TODO' } });
+    fireEvent.keyDown(input, { key: 'Enter' });
+    fireEvent.click(screen.getByTestId('fs-search-mode'));
+    fireEvent.click(screen.getByTestId('fs-content-row'));
+    await waitFor(() => {
+      // fs-preview-code mounts once SyntaxHighlighter chunk resolves,
+      // and the effect calls scrollIntoView on the matched data-line.
+      // We don't assert against the data-line here because the
+      // existing "clicking a content search row passes pendingLine"
+      // test already covers that; this one is about the integration:
+      // did the effect fire at all when the chunk is syntax-highlighted
+      // (which is the regression we're guarding against — the old
+      // fallback math was the broken path).
+      expect(scrollSpy).toHaveBeenCalled();
+      const calls = scrollSpy.mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      // The element that was scrolled into view should be the line-2
+      // span (the data-line="2" anchor, not the wrapper).
+      const target = calls[0]?.[0] as Element | undefined;
+      // `this` is the element that scrollIntoView was called on.
+      // vi.fn() captures `this` in mock.instances[0].
+      const calledEl = (scrollSpy.mock.instances[0] ?? target) as HTMLElement | undefined;
+      expect(calledEl?.getAttribute('data-line')).toBe('2');
+    });
+  } finally {
+    scrollSpy.mockRestore();
+  }
 });
 
 it('cwd change resets mode and pendingLine', () => {

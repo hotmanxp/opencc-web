@@ -325,7 +325,6 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
           'ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace',
         fontSize: 13,
         lineHeight: 1.5,
-        color: 'rgba(255,255,255,0.85)',
         padding: '8px 4px',
       }}
       data-testid="settings-list"
@@ -344,7 +343,6 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
               background: 'transparent',
               border: 'none',
               borderBottom: '1px solid rgba(255,255,255,0.3)',
-              color: 'rgba(255,255,255,0.85)',
               outline: 'none',
               font: 'inherit',
             }}
@@ -448,7 +446,6 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                             textAlign: 'center',
                             background: 'transparent',
                             border: '1px solid rgba(255,255,255,0.3)',
-                            color: 'rgba(255,255,255,0.85)',
                             outline: 'none',
                             font: 'inherit',
                             padding: '0 4px',
@@ -460,7 +457,6 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                           style={{
                             minWidth: 28,
                             textAlign: 'center',
-                            color: 'rgba(255,255,255,0.85)',
                           }}
                         >
                           {displayValue}
@@ -538,7 +534,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                       : 'transparent',
                     color: isHighlight
                       ? 'rgb(99, 226, 183)'
-                      : 'rgba(255,255,255,0.85)',
+                      : 'var(--ui-text-color)',
                     cursor: 'pointer',
                   }}
                   onClick={() => {
@@ -774,9 +770,18 @@ export default function SettingsDrawer() {
 
   const handleChange = useCallback(
     (key: string, value: SettingsValue) => {
-      // 主题行直接写回 store(阶段 1 不持久化,只 frontend state)
+      // 主题行走完整持久化路径:写 store 让 useEffectiveTheme() 立即生效,
+      // 同时 PUT settings.json 跨刷新保存.失败不打断 UI(下次启动仍可重写).
       if (key === 'theme' && typeof value === 'string') {
-        setTheme(value as Theme)
+        const next = value as Theme
+        setTheme(next)
+        void fetch('/api/agent/settings/theme', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ theme: next }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
       }
       // 输出样式走完整持久化路径:写 store 让 MessageListView 立即生效,
       // 同时 PUT settings.json 跨刷新保存.失败不打断 UI(下次启动仍可重写).

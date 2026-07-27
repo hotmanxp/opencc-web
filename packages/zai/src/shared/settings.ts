@@ -48,6 +48,15 @@ export interface ModelEntry {
  */
 export type OutputStyle = 'default' | 'compact' | 'verbose'
 
+/**
+ * 用户主题偏好. 'auto' / 'high-contrast' 由 useEffectiveTheme() 解析为跟随系统
+ * prefers-color-scheme,见 packages/zai/src/web/src/hooks/useEffectiveTheme.ts.
+ *
+ * 持久化到 ~/.zai/settings.json(settings.theme),见 docs/superpowers/specs/
+ * 2026-07-27-zai-theme-persistence-design.md.
+ */
+export type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
+
 /** Shape of ~/.zai/settings.json. */
 export interface ZaiSettings {
   env?: Record<string, string>
@@ -59,6 +68,11 @@ export interface ZaiSettings {
   defaultMode?: string
   /** Web transcript output style — see OutputStyle. */
   outputStyle?: OutputStyle
+  /**
+   * Web UI 主题偏好 — see Theme. 持久化到 ~/.zai/settings.json.
+   * 缺失 / 未知值由 resolveTheme() 折叠为 'auto'.
+   */
+  theme?: Theme
   /**
    * 主对话区最大渲染消息条数. 超过时 UI 折叠早期消息,顶部浮按钮一键还原.
    * 默认 20. clamp [1, 1000].

@@ -8,6 +8,10 @@
   --bg-body: #0a0a0f;
   --bg-card: #12121a;
   --bg-card-hover: #1a1a2e;
+  --bg-card-ansi: #f1f5f5;
+  --ui-text-color: #ffffff;
+  --ui-text-dim: rgba(255,255,255,0.35);
+  --bg-tab: '#141414';
   --bg-sidebar: #0d0d14;
   --bg-input: #1a1a2e;
   --border-subtle: rgba(249, 115, 22, 0.18);
@@ -32,6 +36,10 @@
   --bg-body: #ffffff;
   --bg-card: #f1f5f5;
   --bg-card-hover: #e2e8f0;
+  --bg-card-ansi: #64748b;
+  --ui-text-color: #1a1a2e;
+  --ui-text-dim: #c6c6c6;
+  --bg-tab: '#e4e4e4';
   --bg-sidebar: #f8fafc;
   --bg-input: #ffffff;
   --border-subtle: rgba(249, 115, 22, 0.20);
