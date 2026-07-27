@@ -1683,19 +1683,17 @@ function FilePreview({
 }): JSX.Element {
 ```
 
-**3c)** 在 `FilePreview` 函数体内部,紧接 `const lang = name ? extToLanguage(name) : null;` 行(line 243 附近)之后,插入以下 `useEffect`:
+**3c)** 在 `FilePreview` 函数体内,在 **所有 early return 之前**(line 223-253 之间,具体是在已有的 `const [hl, setHl] = useState(...)` 块下方、第一个 `if (file.kind === 'image'...)` 之前)插入以下两块:
 
 ```typescript
   // pendingLine: scroll to that 1-based line and pulse a yellow highlight
-  // for 2 seconds. The text kind renders below in a single <pre>; image /
-  // html / md branches ignore it (line-number navigation only makes sense
-  // for textual previews).
-  const content = file.content ?? '';
+  // for 2 seconds. Hooks MUST sit at the top of the component function,
+  // before any early returns — otherwise React's rules-of-hooks ESLint
+  // rule fails and the effect would run in the wrong order across renders.
   const pendingRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (pendingLine == null) return;
-    // Wait until content is available — the lazy SyntaxHighlighter might
-    // not have mounted on the very first render.
+    const content = file.content ?? '';
     if (!content) return;
     const el = pendingRef.current?.querySelector<HTMLElement>(
       `[data-line="${pendingLine}"]`,
@@ -1708,7 +1706,7 @@ function FilePreview({
       el.style.background = '';
     }, 2000);
     return () => clearTimeout(id);
-  }, [pendingLine, content]);
+  }, [pendingLine, file.content]);
 ```
 
 **3d)** 在 `FilePreview` 渲染文本 kind 的 `<pre>` 部分(plain text 分支,line 367-382)替换为:
