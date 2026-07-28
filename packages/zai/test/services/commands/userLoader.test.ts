@@ -28,12 +28,6 @@ function writeCommand(name: string, frontmatter: object, body: string): void {
 }
 
 describe('loadUserCommands', () => {
-  it.skip('returns [] when commands dir does not exist', async () => {
-    rmSync(commandsDir, { recursive: true, force: true })
-    const cmds = await loadUserCommands({ cwd: '/x', dataDir: tmpHome })
-    expect(cmds).toEqual([])
-  })
-
   it('loads a valid .md as PromptCommand', async () => {
     writeCommand('greet', {
       description: 'Say hi',

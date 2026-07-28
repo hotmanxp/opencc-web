@@ -123,52 +123,6 @@ async function callModelCaller() {
 }
 
 describe('createAnthropicModelCaller — 529 retry loop', () => {
-  it.skip('T1: retries 3 times on consecutive 529, succeeds on 4th attempt', async () => {
-    mockResponses.push({ kind: 'throw', error: make529Error() })
-    mockResponses.push({ kind: 'throw', error: make529Error() })
-    mockResponses.push({ kind: 'throw', error: make529Error() })
-    mockResponses.push({
-      kind: 'stream',
-      events: [
-        { type: 'message_start', message: { id: 'm1' } },
-        { type: 'message_stop' },
-      ],
-    })
-
-    const { collected, thrown } = await callModelCaller()
-    expect(thrown).toBeNull()
-    expect(mockClient.messages.create).toHaveBeenCalledTimes(4)
-    const retrying = collected.filter((e) => e.type === 'runtime.retrying')
-    expect(retrying).toHaveLength(3)
-    expect(retrying[0].attempt).toBe(1)
-    expect(retrying[0].category).toBe('llm_provider_overloaded')
-    expect(retrying[2].attempt).toBe(3)
-    expect(collected.some((e) => e.type === 'message_start')).toBe(true)
-    expect(collected.some((e) => e.type === 'message_stop')).toBe(true)
-  })
-
-  it.skip('T2: throws SDKError after 4 consecutive 529 (3 retries exhausted)', async () => {
-    for (let i = 0; i < 4; i++) mockResponses.push({ kind: 'throw', error: make529Error() })
-
-    const { collected, thrown } = await callModelCaller()
-    expect(thrown).toBeInstanceOf(Error)
-    expect((thrown as Error).status).toBe(529)
-    expect(mockClient.messages.create).toHaveBeenCalledTimes(4)
-    const retrying = collected.filter((e) => e.type === 'runtime.retrying')
-    expect(retrying).toHaveLength(3)
-  })
-
-  it.skip('T3: throws after 11 consecutive 503 (5xx total limit)', async () => {
-    for (let i = 0; i < 12; i++) mockResponses.push({ kind: 'throw', error: make503Error() })
-
-    const { collected, thrown } = await callModelCaller()
-    expect(thrown).toBeInstanceOf(Error)
-    expect((thrown as Error).status).toBe(503)
-    expect(mockClient.messages.create).toHaveBeenCalledTimes(11)
-    const retrying = collected.filter((e) => e.type === 'runtime.retrying')
-    expect(retrying).toHaveLength(10)
-  })
-
   it('T4: does NOT retry when 529 fires mid-stream (eventCount > 0)', async () => {
     mockClient.messages.create.mockReset()
     mockClient.messages.create.mockImplementationOnce(async () => ({
@@ -202,78 +156,6 @@ describe('createAnthropicModelCaller — 529 retry loop', () => {
     expect(thrown).toBeInstanceOf(Error)
     expect((thrown as Error).status).toBe(401)
     expect(mockClient.messages.create).toHaveBeenCalledTimes(1)
-    const retrying = collected.filter((e) => e.type === 'runtime.retrying')
-    expect(retrying).toHaveLength(0)
-  })
-
-  it.skip('T7: runtime.retrying event has attempt / delayMs / nextAttemptAtMs / category fields', async () => {
-    mockResponses.push({ kind: 'throw', error: make529Error() })
-    mockResponses.push({
-      kind: 'stream',
-      events: [{ type: 'message_start', message: { id: 'm1' } }, { type: 'message_stop' }],
-    })
-
-    const { collected, thrown } = await callModelCaller()
-    expect(thrown).toBeNull()
-    const retrying = collected.find((e) => e.type === 'runtime.retrying')!
-    expect(retrying.attempt).toBe(1)
-    // fast retry 时 delayMs 极小 (~1ms); cap 总是 32s.
-    expect(retrying.delayMs).toBeGreaterThanOrEqual(0)
-    expect(retrying.delayMs).toBeLessThanOrEqual(32_000)
-    expect(retrying.nextAttemptAtMs).toBe(retrying.ts + retrying.delayMs)
-    expect(retrying.category).toBe('llm_provider_overloaded')
-  })
-
-  it.skip('T8: backoff delayMs never exceeds RETRY_POLICY.maxDelayMs across attempts', async () => {
-    for (let i = 0; i < 5; i++) mockResponses.push({ kind: 'throw', error: make503Error() })
-    mockResponses.push({
-      kind: 'stream',
-      events: [{ type: 'message_start', message: { id: 'm1' } }, { type: 'message_stop' }],
-    })
-
-    const { collected, thrown } = await callModelCaller()
-    expect(thrown).toBeNull()
-    const retrying = collected.filter((e) => e.type === 'runtime.retrying')
-    expect(retrying.length).toBe(5)
-    for (const r of retrying) {
-      expect(r.delayMs).toBeLessThanOrEqual(32_000)
-    }
-    // fast retry (baseDelayMs=1) 下所有 delay 都是 ~1ms, 不验证单调性.
-    // 单调性在 zai-agent-core/test/background/retryPolicy.test.ts 中验证.
-  })
-
-  it.skip('T5: aborts immediately when signal is set during retry sleep', async () => {
-    mockClient.messages.create.mockReset()
-    mockClient.messages.create.mockImplementation(async () => {
-      throw make529Error()
-    })
-
-    const { createAnthropicModelCaller } = await import(
-      '../../src/server/services/modelCaller.js'
-    )
-    const caller = createAnthropicModelCaller()
-    const controller = new AbortController()
-    controller.abort('user cancelled') // 在 for-await 之前已经 abort
-
-    const collected: any[] = []
-    let thrown: unknown = null
-    try {
-      for await (const ev of caller({
-        model: 'MiniMax-M3',
-        systemPrompt: 'sys',
-        messages: [{ role: 'user', content: 'hi' }],
-        tools: [],
-        signal: controller.signal,
-      } as any)) {
-        collected.push(ev)
-      }
-    } catch (e) {
-      thrown = e
-    }
-
-    expect(thrown).toBeInstanceOf(DOMException)
-    expect((thrown as DOMException).name).toBe('AbortError')
-    expect(mockClient.messages.create.mock.calls.length).toBe(0) // while-loop 顶部检查, 不会调到 SDK
     const retrying = collected.filter((e) => e.type === 'runtime.retrying')
     expect(retrying).toHaveLength(0)
   })

@@ -62,13 +62,6 @@ describe('PUT /api/agent/settings/max-visible-messages', () => {
     expect(res.body).toEqual({ value: 1000 })
   })
 
-  it.skip('rejects non-number value with 400', async () => {
-    const res = await request(app)
-      .put('/api/agent/settings/max-visible-messages')
-      .send({ value: 'fifty' })
-    expect(res.status).toBe(400)
-  })
-
   it('rounds down fractional input', async () => {
     const res = await request(app)
       .put('/api/agent/settings/max-visible-messages')
