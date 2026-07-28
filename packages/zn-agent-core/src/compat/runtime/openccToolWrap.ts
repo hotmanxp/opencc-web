@@ -11,6 +11,18 @@
  * extend this base with tool-specific behavior like permission checks.
  */
 
+/**
+ * wrapWithOverrides — like wrapAsOpenccTool but allows tool-specific
+ * wrappers to override specific methods (e.g., BashTool overrides
+ * checkPermissions, AskUserQuestionTool overrides requiresUserInteraction).
+ */
+export function wrapWithOverrides(
+  tool: ZaiToolLike,
+  overrides: Partial<OpenccToolMinimal>,
+): OpenccToolMinimal {
+  return { ...wrapAsOpenccTool(tool), ...overrides }
+}
+
 import {
   noopReactNode,
   falseFn,

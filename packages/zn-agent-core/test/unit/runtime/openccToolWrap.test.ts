@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest'
-import { wrapAsOpenccTool } from '../../../src/compat/runtime/openccToolWrap.js'
+import { wrapAsOpenccTool, wrapWithOverrides } from '../../../src/compat/runtime/openccToolWrap.js'
 import type { Tool as ZaiTool } from '../../../src/compat/runtime/types.js'
 
 function makeZaiTool(): ZaiTool {
@@ -41,5 +41,18 @@ describe('wrapAsOpenccTool', () => {
     expect(wrapped.isEnabled()).toBe(true)
     expect(wrapped.renderToolUseMessage({} as any, {} as any)).toBeNull()
     expect(wrapped.renderToolResultMessage({} as any, [] as any, {} as any)).toBeNull()
+  })
+})
+
+describe('wrapWithOverrides', () => {
+  it('overrides specified methods on wrapped tool', async () => {
+    const wrapped = wrapWithOverrides(makeZaiTool(), {
+      isReadOnly: () => true,
+      description: async () => 'overridden description',
+    })
+    expect(wrapped.isReadOnly({} as any)).toBe(true)
+    expect(await wrapped.description({} as any, {} as any)).toBe('overridden description')
+    // Non-overridden methods still work
+    expect(wrapped.isEnabled()).toBe(true)
   })
 })
