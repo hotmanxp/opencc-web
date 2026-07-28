@@ -1,9 +1,66 @@
+// @zn-ai/zn-agent-core compat shim — port of zai-agent-core runtime/skills/types.ts.
+//
+// Verbatim port. No path adjustments needed (the file is purely types).
+
+export type SkillFrontmatter = {
+  name?: string
+  description?: string
+  when_to_use?: string
+  version?: string
+  model?: string
+  'disable-model-invocation'?: boolean | string
+  'user-invocable'?: boolean | string
+  'allowed-tools'?: string[]
+  'argument-hint'?: string
+  arguments?: string | string[]
+  context?: 'fork'
+  agent?: string
+  effort?: string | number
+  shell?: string | Record<string, unknown>
+  hooks?: Record<string, unknown>
+  paths?: string | string[]
+  [k: string]: unknown
+}
+
 /**
- * Compat placeholder for `LoadedSkill`. The real type lands in
- * `compat/runtime/skills/types.ts` (Batch 3). Until then, this stub
- * keeps `compat/plugins/types.ts` compiling by giving the same name
- * a structural placeholder.
+ * A skill loaded from a known source.
  *
- * @deprecated Use the real `LoadedSkill` once Batch 3 lands.
+ * Disk-loaded skills fill `baseDir`, `filePath`, `frontmatter`, `markdown`,
+ * and `sourceIndex`. Skills loaded from an MCP server (see `loadMcpSkills`)
+ * fill `description`, `body`, and `mcpInfo` instead. Both shapes share `name`
+ * and the optional `source` discriminator.
  */
-export type LoadedSkill = Record<string, unknown>
+export type LoadedSkill = {
+  name: string
+  /** Present for disk-loaded skills. */
+  baseDir?: string
+  /** Present for disk-loaded skills. */
+  filePath?: string
+  /** Present for disk-loaded skills. */
+  frontmatter?: SkillFrontmatter
+  /** Present for disk-loaded skills. */
+  markdown?: string
+  /** Present for disk-loaded skills. */
+  sourceIndex?: number
+  /** Top-level description (set for MCP-loaded skills; disk skills use frontmatter.description). */
+  description?: string
+  /** Top-level body text (set for MCP-loaded skills; disk skills use markdown). */
+  body?: string
+  /** Skill source. Defaults to 'disk' for skills loaded from the filesystem. */
+  source?: 'disk' | 'mcp' | 'plugin' | 'bundled'
+  /**
+   * Plugin discriminator — `'skill'` for SKILL.md files loaded from a plugin
+   * directory, `'command'` for slash-command manifests. Omit for non-plugin
+   * skills to keep the original disk/MCP semantics intact.
+   */
+  kind?: 'skill' | 'command'
+  /** Owning plugin id; present only when `source === 'plugin'`. */
+  pluginId?: string
+  /** MCP metadata — present only for skills loaded from an MCP server. */
+  mcpInfo?: { serverName: string; resourceUri: string }
+}
+
+export type PendingSkillInjection = {
+  skillName: string
+  content: string
+}
