@@ -19,14 +19,18 @@ import type { Tool } from './modelCaller.js'
 import type { PermissionMode } from '../permissionMode.js'
 import type { McpServerSpec } from '../mcp/types.js'
 import type { MCPClientPool } from '../mcp/MCPClientPool.js'
+import type { PluginRuntime, PluginRuntimeConfig } from '../plugins/types.js'
 
 // Re-export Tool so callers can `import type { Tool } from './types.js'`.
 export type { Tool }
 
 // Forward references — to be replaced with real imports when Batch 2/3 lands.
 export type AskUserAnswers = Record<string, unknown>
-export type PluginRuntime = Record<string, unknown>
-export type PluginRuntimeConfig = Record<string, unknown>
+
+// `PluginRuntime` / `PluginRuntimeConfig` come from the real compat
+// plugins shim (Batch 2c). Re-exported here so callers can still
+// import them from this module.
+export type { PluginRuntime, PluginRuntimeConfig }
 
 // UserMessage is shape-only; kept inline to avoid pulling from the opencc-internals
 // mirror (which would re-couple this file to Bun-only OpenCC source).
