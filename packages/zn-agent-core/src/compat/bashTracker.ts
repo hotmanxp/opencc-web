@@ -53,7 +53,7 @@ export interface BashTaskInfo {
   persistedOutputPath?: string
 }
 
-class BashBackgroundTracker {
+export class BashBackgroundTracker {
   private readonly byId = new Map<string, BashTaskInfo>()
   private readonly children = new Map<string, ReturnType<typeof import('node:child_process').spawn>>()
   private readonly pendingEmits = new Map<string, NodeJS.Timeout>()

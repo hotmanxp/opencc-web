@@ -47,3 +47,16 @@ declare module '*.md' {
   const content: string
   export default content
 }
+
+/**
+ * Bun's build-time feature flag macro. opencc wraps `feature(flag, default)` around
+ * values substituted at build time via Bun's `define` option. We don't currently
+ * run with Bun, so this declaration exists only to satisfy `tsc --noEmit` — at
+ * runtime, `import.meta.env[flag]` lookups resolve to `default` (or undefined).
+ *
+ * Note: `defaultValue` is optional because some opencc call sites use bare
+ * `feature(flag)` as a truthiness check (e.g. `if (feature('EXPERIMENTAL_X'))`).
+ */
+declare module 'bun:bundle' {
+  export function feature<T>(flag: string, defaultValue?: T): T | undefined
+}
