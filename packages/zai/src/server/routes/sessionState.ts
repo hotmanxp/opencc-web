@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from 'express'
-import { CwdStore } from '@zn-ai/zai-agent-core/runtime'
+import { CwdStore } from '@zn-ai/zn-agent-core/runtime'
 import { getTaskListStore } from '@zn-ai/zn-agent-core/taskListStore'
 import { bashBackgroundTracker } from '@zn-ai/zn-agent-core/bashTracker'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'

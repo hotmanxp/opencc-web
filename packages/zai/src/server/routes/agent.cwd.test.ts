@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
 import express from 'express'
 import request from 'supertest'
-import { CwdStore } from '@zn-ai/zai-agent-core/runtime'
+import { CwdStore } from '@zn-ai/zn-agent-core/runtime'
 import agentRouter from './agent.js'
 
 describe('GET /api/agent/sessions/:id/pwd', () => {
