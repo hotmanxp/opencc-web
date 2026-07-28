@@ -2,14 +2,14 @@
 
 ## 项目概述
 
-**opencc-web** 是 zai 的本地开发与运行工具集,在 `packages/zai`(Express + SSE server + React/Zustand/AntD 前端)与 `packages/zn-agent-core`(Agent 运行时核心库,vendor 自 opencc 0.21)两个 workspace 中实现 Agent 对话、流式 UI、命令/Skill/插件等能力。zai 仅监听 localhost,不依赖外部鉴权。
+**opencc-web** 是 zai 的本地开发与运行工具集,在 `packages/zai`(Express + SSE server + React/Zustand/AntD 前端)与 `packages/zn-agent-core`(Agent 运行时核心库)两个 workspace 中实现 Agent 对话、流式 UI、命令/Skill/插件等能力。zai 仅监听 localhost,不依赖外部鉴权。
 
 ## 目录说明
 
 | 目录 | 说明 |
 |------|------|
 | `packages/zai/` | `src/server/` 路由 + service,`src/web/` UI + store,`src/shared/` zod schema |
-| `packages/zn-agent-core/` | vendor 自 opencc 0.21 + zai 适配层。`opencc-src/`(~1448 文件)是 vendor 副本(剥 UI / commands / state 等);`compat/`(~70 文件)是 zai 自己写的 7 个 shim(permissions / cwdStore / runWithSessionId / bashTracker / taskListStore / memory / transcript);`runtime/openccStubs.ts` + `compat/runtime/{contract,openccAdapter,openccQueryBridge,sdkEventAdapter,types,streamAdapter,modelCaller}.ts` 适配 zai 的 `DefaultAgentRuntime`。详见 `docs/superpowers/plans/2026-07-28-zn-agent-core-rescue-opencc-runtime.md` |
+| `packages/zn-agent-core/` | `compat/`(zai-side 抽象的兼容垫片,verbatim 移植:permissions / cwdStore / commands / transcript / background + DefaultBackgroundRuntime / MCPClientPool / DefaultPluginRuntime / skills / compactService)+ `opencc-src/`(从 opencc 0.20.0 拷贝,UI 已剔除;Bun-native 运行时,需要适配层接入 Node)+ `scripts/copyFromOpencc.mjs`(一次性拷贝脚本)。子路径导出:`./runtime`、`./transcript`、`./commands`、`./bashTracker`、`./taskListStore`、`./agents/memory` |
 | `docs/  examples/  scripts/` | 设计文档 / 示例 / 仓库脚本 |
 | `docs/superpowers/specs/` | 各特性设计文档(specs);`docs/superpowers/plans/` 是对应的实施计划(plans) |
 
@@ -28,7 +28,8 @@
 
 ## 核心入口
 
-- **`packages/zai-agent-core/src/runtime/queryLoop.ts`** — 主循环 `export async function* queryLoop(options, config)`:`while (turn < maxTurns=50)` → 加载 skills → 连 MCP → assemble tools → resume transcript → build system prompt → 跑 hooks → `for-await modelCaller`(遇 `message_stop` 主动 break)→ 累积 text/thinking/tool_use → 落盘 v2 → `executeToolsStreaming` → 处理 `__pendingSkillInjection` → loop。`query.ts` 是 re-export shim,`contract.ts:DefaultAgentRuntime.run` 代理到 `query()`
+- **`packages/zn-agent-core/src/compat/runtime/contract.ts`** — `DefaultAgentRuntime` 兼容垫片,目前 `run(opts)` 返回空 `AsyncIterable`(opencc `query()` 签名与 `StreamEvent` 类型与原 `queryLoop(opts,config)` + `RuntimeEvent` 不兼容,需后续适配 plan 接线)。其他 compat shim(`cwdStore` / `commands` / `transcript` / `background/DefaultBackgroundRuntime` / `mcp/MCPClientPool` / `plugins/HookRunner` / `runtime/skills-*` / `runtime/compactService`)均按 zai 端原 API 形态提供。
+- **`packages/zn-agent-core/src/opencc-src/`** — opencc 0.20.0 源码副本(`query.ts` 主循环入口 + `queryLoop.ts` / `services/tools/` / `services/api/` / `services/mcp/` 等),UI 已剔除。Bun-native,`import 'bun:bundle'` 与 `Bun.sleep` 等 API 在 Node 下抛 `ERR_MODULE_NOT_FOUND`,`pnpm --filter zai test` 27 个失败即此约束(非迁移 bug)。
 - **`packages/zai/src/server/index.ts`** — `createApp({cwd, cwdName, token, port?})` 按顺序 `initAgentRuntime → initSubagentNotifierLifecycle → initBackgroundRuntime`;挂 14 个 router 到 `/api/*`;`express.json({limit:'20mb'})`(图片粘贴);`/api` 整段禁缓存
 
 ## 数据流
@@ -71,11 +72,13 @@ web (useBackgroundTasks) ─POST /api/tasks→ DefaultBackgroundRuntime.dispatch
 | `packages/zai/src/server/services/backgroundRuntime.ts` | `initBackgroundRuntime` 包 `DefaultBackgroundRuntime` 注入 `onTaskStateChange` → emit `job.*` + 串 `SubagentNotifier.handle(task)`;`initSubagentNotifierLifecycle` 必须先注册 |
 | `packages/zai/src/server/services/subagentNotifier.ts` | 后台 task terminal 时 fire-and-forget 注入 `<task-notification>` 触发父 queryLoop 续传 |
 | `packages/zai/src/server/services/openaiClient.ts` | 手写 OpenAI-compatible HTTP 客户端(~648 行),`messages.create()` 返回 `AsyncGenerator<OpenAIStreamEvent>`,duck-type 为 Anthropic SDK 让 `modelCaller` 在 `provider:'openai'` 时无缝替换:Anthropic messages → OpenAI messages(支持 string / base64 image / tool_use / tool_result,orphan tool_result 自动丢)+ tool schema 归一化(`required[] ⊆ properties`,strict mode 加 `additionalProperties:false`)+ OpenAI SSE → Anthropic events(`message_start`/`content_block_*`/`message_delta`/`message_stop`/`error`,含 `reasoning_content → thinking` 桥接 + `finish_reason=length` 截断 JSON 自愈 + `paic.com.cn` 自动加 `client-code/plugin-version: Gemini` 头)。**NOT supported**:远程 URL 图片、`tool_choice` 非 auto/required/none、prompt cache、`thinking` 参数、code interpreter。`modelCaller.ts:159-175` 懒加载 dynamic import(vitest `vi.mock` 可拦截) |
-| `packages/zai-agent-core/src/runtime/{queryLoop,streamAdapter,toolExecution,canUseTool}.ts` | 主循环 / `wrapWithZaiMeta` 加 meta / `executeToolsStreaming` 串行 tool_use:* / `defaultCanUseToolFactory`(Bash 走 sandbox,Agent 直接 allow)|
-| `packages/zai-agent-core/src/runtime/background/{BackgroundRuntime,DefaultBackgroundRuntime,store/JsonTaskStore,types}.ts` | `dispatch/get/list/cancel/events/shutdown` interface + JsonTaskStore 持久化 + retry(529 连续上限 vs 5xx 总上限 maxRetries=10)|
-| `packages/zai-agent-core/src/agents/{memoryLoader,memoryWatcher}.ts` | `loadMemoryForPrompt` 注入 system prompt 顶部(AGENTS.md 链 + .claude/rules + AGENTS.local.md + @include) / `startMemoryWatcher` 1s mtime 监听 + `clearMemoryCache` |
-| `packages/zai-agent-core/src/{skills/index,mcp/MCPClientPool,plugins/{index,HookRunner}}.ts` | `loadSkillsFromDirs` + PendingSkillInjection / MCP 池 + SIGTERM 钩子 / `DefaultPluginRuntime` + 8 个 hook event |
-| `packages/zai-agent-core/src/tools/{BackgroundAgentResultTool,TaskOutputTool}/` | 阻塞读 / 非阻塞拉 task output |
+| `packages/zn-agent-core/src/compat/runtime/contract.ts` | `DefaultAgentRuntime` 兼容垫片(目前 `run(opts)` 返回空流,需后续适配 plan 接线 opencc `query()`);主循环实际源在 `opencc-src/query.ts`(Bun-native,需适配层)|
+| `packages/zn-agent-core/src/compat/runtime/{skills-index,skills-loader,skills-promptBuilder,skills-frontmatter,skills-substitute}.ts` | `loadSkillsFromDirs` + `buildSkillsSystemPrompt` + PendingSkillInjection / 解析 YAML frontmatter / `$ARGUMENTS`/`$N`/`$NAME` 替换 |
+| `packages/zn-agent-core/src/compat/background/{BackgroundRuntime,DefaultBackgroundRuntime,store/JsonTaskStore,retryPolicy,types}.ts` | `dispatch/get/list/cancel/events/shutdown` interface + 调度器(并发上限 4)+ JsonTaskStore 持久化 + retry(529 连续上限 vs 5xx 总上限 maxRetries=10)|
+| `packages/zn-agent-core/src/compat/memory/{loader,watcher}.ts` | `loadMemoryForPrompt` 注入 system prompt 顶部(AGENTS.md 链 + .claude/rules + AGENTS.local.md + @include)/ `startMemoryWatcher` 1s mtime 监听 + `clearMemoryCache` |
+| `packages/zn-agent-core/src/compat/mcp/MCPClientPool.ts` + `MCPToolAdapter.ts` | MCP 池 + zai 工具协议适配 |
+| `packages/zn-agent-core/src/compat/plugins/{HookRunner,DefaultHookExecutor,registry,manifest,paths,errors}.ts` | OpenCC 插件钩子 + `DefaultPluginRuntime` + 8 个 hook event |
+| `packages/zn-agent-core/src/opencc-src/tools/{BackgroundAgentResultTool,TaskOutputTool}/` | 阻塞读 / 非阻塞拉 task output(opencc 原版,Bun-native)|
 | `packages/zai/src/shared/events.ts` | zod discriminatedUnion:`runtime.*` / `session.*` / `job.*` / `prompt.ask` / `system.*` 五通道 |
 | `packages/zai/src/shared/repl.ts` | `TopCommandEntry` / `TopCommandsResponse`(全局 topN 历史接口契约) |
 | `packages/zai/src/server/services/repl/{ReplSession,ReplRegistry,ReplHistoryService}.ts` | Bash REPL 单 session 状态机 / 单例 registry / 全局 JSONL 命令历史(append 串行 + 5min TTL cache + 10MB rotate + blocklist) |
@@ -160,8 +163,8 @@ tool_use(AskUserQuestion) → toolExecution yield tool_use:ask_pending
 
 zai 主对话路径已支持自动压缩,3 道防线(`snip` → `forceReason` → `autocompact`) + circuit breaker 失败熔断。
 
-- **运行时**:`packages/zai-agent-core/src/runtime/compact/`(9 个小文件,每文件 ≤ 200 行)
-- **集成测试**:`packages/zai-agent-core/test/integration/agent/auto-compact-turn-loop.test.ts`(8 个 case)
+- **运行时**:`packages/zn-agent-core/src/compat/runtime/compactService.ts`(单文件移植,`compactSession()` 接 modelCaller + transcript 边界 + summary message 写入)
+- **集成测试**:`packages/zn-agent-core/test/`(从 opencc 拷贝的运行时测试,Bun-native,Node 下 `bun:bundle` import 抛错导致 27 个 pre-existing 失败,非迁移 bug)
 - **Spec**:`docs/superpowers/specs/2026-07-19-zai-session-compaction-design.md`
 - **Plan**:`docs/superpowers/plans/2026-07-19-zai-auto-compact-core.md`(19 tasks,阶段 1 已交付)
 
