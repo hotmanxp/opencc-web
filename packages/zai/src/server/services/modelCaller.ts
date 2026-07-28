@@ -19,6 +19,10 @@ import { zodToJsonSchema } from 'zod-to-json-schema'
 import type { ModelCaller } from '@zn-ai/zai-agent-core/runtime'
 import { getCachedZaiSettingsSync } from './zaiSettingsStore.js'
 import { applyModelMapping, resolveCurrentProvider } from '../lib/resolveModel.js'
+import {
+  getModelMaxOutputTokens,
+  getThinkingBudgetTokens,
+} from './modelCapabilities.js'
 
 // 流式事件类型 — Anthropic SDK 返回的 RawMessageStreamEvent 本身就是 snake_case,
 // 这里只用作 yield 的最小契约, 实际结构由 queryEngine 的 streamAdapter 识别.
@@ -321,15 +325,35 @@ export function createAnthropicModelCaller(): ModelCaller {
     // thinking: enable extended thinking so the upstream emits
     //   content_block_start { type: 'thinking' } and `thinking_delta`
     //   events that queryEngine folds separately from the visible reply.
-    //   budget_tokens must stay < max_tokens (8192) — 4096 leaves headroom.
+    //   budget_tokens is sized as 25% of max_tokens (clamped to [1024, 8192])
+    //   so we never starve the visible output but still leave headroom for
+    //   reasoning on Sonnet / Opus-class models.
+    //
+    // max_tokens: previously hardcoded at 8192 — that was a 99% regression
+    // on models like MiniMax-M3 (512k native) and Claude Sonnet 4.5 (64k).
+    // Any Write tool call producing >4k tokens of content would hit
+    // stop_reason='max_tokens' and either be written truncated (OpenAI
+    // path's `"}` repair) or rejected as invalid (Anthropic path's
+    // JSON.parse fallback to {}). getModelMaxOutputTokens respects each
+    // model's actual ceiling; users can override via ZAI_MAX_OUTPUT_TOKENS.
+    //
     // The interleaved-thinking beta header is set globally on the client
     // via defaultHeaders above so thinking survives tool_use → tool_result
     // rounds instead of being dropped on the first tool call.
+    const resolvedMaxTokens = getModelMaxOutputTokens(resolvedModel)
+    const resolvedThinkingBudget = getThinkingBudgetTokens(resolvedMaxTokens)
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.modelCaller] resolved budget', {
+        model: resolvedModel,
+        max_tokens: resolvedMaxTokens,
+        thinking_budget: resolvedThinkingBudget,
+      })
+    }
     const stream = await client.messages.create(
       {
         model: resolvedModel,
-        max_tokens: 8192,
-        thinking: { type: 'enabled', budget_tokens: 4096 },
+        max_tokens: resolvedMaxTokens,
+        thinking: { type: 'enabled', budget_tokens: resolvedThinkingBudget },
         system: systemBlocks,
         messages: sdkMessages,
         tools: tools.length > 0

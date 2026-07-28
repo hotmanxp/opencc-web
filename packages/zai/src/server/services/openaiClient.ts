@@ -270,6 +270,11 @@ function convertMessages(
 // SSE → Anthropic stream events
 // ---------------------------------------------------------------------------
 
+import {
+  hasToolFieldMapping,
+  normalizeToolArguments,
+} from './toolArgumentNormalization.js'
+
 interface OpenAIChunk {
   id?: string
   model?: string
@@ -358,6 +363,13 @@ interface ToolBlockState {
   id: string
   name: string
   jsonBuffer: string
+  // True when the tool's input is dominated by a single string field
+  // (Write/Bash/Read/Edit/Glob/Grep). For these tools we buffer the raw
+  // partial_json deltas instead of eagerly emitting input_json_delta events,
+  // and on finish_reason='length' we route the buffer through
+  // normalizeToolArguments so a half-formed literal cannot become a valid
+  // {content:"..."} / {command:"..."} input that gets written to disk.
+  normalizeAtStop: boolean
 }
 
 interface BlockState {
@@ -473,6 +485,7 @@ async function* chunksToAnthropicEvents(
           // so the block indexes appear in the order they were emitted.
           yield* closeOpenTextAndThinking()
           const blockIndex = blockState.nextBlockIndex++
+          const toolName = tc.function?.name ?? ''
           // Stable fallback id: prefer tc.id, fall back to a deterministic
           // per-tool-call string. Using Date.now() here would risk collisions
           // when the same delta contains both id+name and arguments (the
@@ -480,8 +493,9 @@ async function* chunksToAnthropicEvents(
           toolState = {
             blockIndex,
             id: tc.id ?? `toolu_${tc.index}`,
-            name: tc.function?.name ?? '',
+            name: toolName,
             jsonBuffer: '',
+            normalizeAtStop: hasToolFieldMapping(toolName),
           }
           blockState.toolBlocks.set(tc.index, toolState)
           yield {
@@ -497,13 +511,20 @@ async function* chunksToAnthropicEvents(
         }
         if (typeof tc.function?.arguments === 'string' && tc.function.arguments.length > 0) {
           toolState.jsonBuffer += tc.function.arguments
-          yield {
-            type: 'content_block_delta',
-            index: toolState.blockIndex,
-            delta: {
-              type: 'input_json_delta',
-              partial_json: tc.function.arguments,
-            },
+          // String-arg tools (Write/Bash/Read/Edit/Glob/Grep) buffer until
+          // finish_reason so we never emit a half-formed literal that the
+          // JSON_REPAIR_SUFFIXES path could accidentally close into a
+          // syntactically valid object (see truncation.test.ts). The raw
+          // buffer is emitted as a single partial_json at finish time.
+          if (!toolState.normalizeAtStop) {
+            yield {
+              type: 'content_block_delta',
+              index: toolState.blockIndex,
+              delta: {
+                type: 'input_json_delta',
+                partial_json: tc.function.arguments,
+              },
+            }
           }
         }
       }
@@ -514,25 +535,41 @@ async function* chunksToAnthropicEvents(
       // the consumer sees stop events in the same order as start events.
       yield* closeOpenTextAndThinking()
 
-      // Close all tool blocks, repairing truncated JSON when finish_reason
-      // indicates max_tokens truncation so the consumer's JSON.parse doesn't
-      // silently fall back to {}.
+      // Close all tool blocks. For string-arg tools we emit the buffered
+      // JSON here (once, in full). For all tools, on finish_reason='length'
+      // we route the buffer through normalizeToolArguments so a half-formed
+      // literal cannot become a valid {content:"..."} / {command:"..."}
+      // input that gets written to disk.
       const truncated = choice.finish_reason === 'length'
       for (const [, toolState] of blockState.toolBlocks) {
-        if (truncated && toolState.jsonBuffer.length > 0) {
-          // Try to close a partial object literal — only emit a delta if we
-          // find a suffix that parses. Otherwise leave the buffer as-is and
-          // let queryLoop's catch handle it (preserves prior behavior).
+        let partialJson = ''
+
+        if (toolState.normalizeAtStop) {
+          // Buffer-then-flush: emit the entire accumulated buffer as one
+          // partial_json delta so the consumer never sees a half-formed
+          // literal. For non-truncated streams the buffer IS the valid
+          // JSON the provider was streaming; for length-truncated streams
+          // the buffer is the half-string we need to neutralize.
+          const safeBuffer = truncated
+            ? JSON.stringify(normalizeToolArguments(toolState.name, toolState.jsonBuffer))
+            : toolState.jsonBuffer
+          partialJson = safeBuffer
+        } else if (truncated && toolState.jsonBuffer.length > 0) {
+          // Non-string-arg tool truncated by max_tokens. The JSON_REPAIR
+          // path is still appropriate here — these tools have structured
+          // inputs where partial data is more useful than nothing. Append
+          // only a closing suffix (no eager emission in this branch).
           const repaired = repairPossiblyTruncatedObjectJson(toolState.jsonBuffer)
           if (repaired !== null && repaired !== toolState.jsonBuffer) {
-            const suffix = repaired.slice(toolState.jsonBuffer.length)
-            if (suffix.length > 0) {
-              yield {
-                type: 'content_block_delta',
-                index: toolState.blockIndex,
-                delta: { type: 'input_json_delta', partial_json: suffix },
-              }
-            }
+            partialJson = repaired.slice(toolState.jsonBuffer.length)
+          }
+        }
+
+        if (partialJson.length > 0) {
+          yield {
+            type: 'content_block_delta',
+            index: toolState.blockIndex,
+            delta: { type: 'input_json_delta', partial_json: partialJson },
           }
         }
         yield { type: 'content_block_stop', index: toolState.blockIndex }

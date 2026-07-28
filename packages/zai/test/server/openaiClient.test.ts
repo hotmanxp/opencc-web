@@ -626,8 +626,17 @@ describe('OpenAIClient — stream event shape (P0 fixes)', () => {
   it('repairs truncated tool JSON on finish_reason=length (P0-4)', async () => {
     // Some providers truncate streamed tool arguments when they hit the
     // token limit. The previous shim emitted the partial literal as-is and
-    // the consumer fell back to {}. Now we append a closing suffix that
-    // makes the buffer valid JSON.
+    // the consumer fell back to {}.
+    //
+    // For NON-string-arg tools (TodoWrite, Agent, etc.) the buffer is routed
+    // through repairPossiblyTruncatedObjectJson which appends a closing
+    // suffix when one parses. For string-arg tools (Write/Bash/Read/Edit/
+    // Glob/Grep) the buffer is instead normalized so a half-formed literal
+    // can never become a valid {content:"<half string>"} input — see
+    // openaiClient.truncation.test.ts for those scenarios.
+    //
+    // This test pins the non-string-arg repair path. We use a fictional
+    // tool name so the buffer hits the repair branch.
     const cap = streamCapture()
     cap.setSseBody(
       sseChunk({
@@ -637,7 +646,10 @@ describe('OpenAIClient — stream event shape (P0 fixes)', () => {
               index: 0,
               id: 'call_1',
               type: 'function',
-              function: { name: 'Bash', arguments: '{"command":"ls' },
+              function: {
+                name: 'TodoWrite',
+                arguments: '{"todos":[{"content":"x"},{"content":"y"',
+              },
             }],
           },
           finish_reason: 'length',
@@ -665,19 +677,14 @@ describe('OpenAIClient — stream event shape (P0 fixes)', () => {
       const repairDelta = [...events].reverse().find(e =>
         e.type === 'content_block_delta' && typeof e.partial_json === 'string' && e.partial_json.length > 0,
       )
-      // The repair MUST close the partial object literal. The exact suffix
-      // depends on where truncation fell (a bare `}` for `{"a":1`, but `"}`
-      // for `{"command":"ls` since the inner string is still open). We
-      // assert: (a) some repair suffix was appended, (b) the joined buffer
-      // parses as a valid JSON object.
+      // The last emitted input_json_delta is the repair suffix — must be
+      // closing-only (`"}]}` or similar).
       expect(repairDelta?.partial_json).toMatch(/^["}\]]+$/)
       const allArgs = events
         .filter(e => e.type === 'content_block_delta' && typeof e.partial_json === 'string')
         .map(e => e.partial_json!)
         .join('')
       expect(() => JSON.parse(allArgs)).not.toThrow()
-      const parsed = JSON.parse(allArgs) as { command: string }
-      expect(parsed.command).toBe('ls')
     } finally {
       cap.restore()
     }
@@ -686,6 +693,10 @@ describe('OpenAIClient — stream event shape (P0 fixes)', () => {
   it('does NOT repair when finish_reason is tool_calls (no truncation)', async () => {
     // Only `length` triggers repair; `tool_calls` means the stream ended
     // normally and the JSON should already be valid.
+    //
+    // Bash is a string-arg tool, so its buffer is flushed once at finish —
+    // not emitted mid-stream as a single delta. Use a non-string-arg tool
+    // to verify the no-op-mid-stream path is preserved.
     const cap = streamCapture()
     cap.setSseBody(
       sseChunk({
@@ -695,7 +706,7 @@ describe('OpenAIClient — stream event shape (P0 fixes)', () => {
               index: 0,
               id: 'call_1',
               type: 'function',
-              function: { name: 'Bash', arguments: '{"command":"ls"}' },
+              function: { name: 'TodoWrite', arguments: '{"todos":[]}' },
             }],
           },
           finish_reason: 'tool_calls',
@@ -724,7 +735,7 @@ describe('OpenAIClient — stream event shape (P0 fixes)', () => {
         }
       }
       // Original args echoed verbatim; no extra repair suffix appended.
-      expect(repairDeltas).toEqual(['{"command":"ls"}'])
+      expect(repairDeltas).toEqual(['{"todos":[]}'])
     } finally {
       cap.restore()
     }
