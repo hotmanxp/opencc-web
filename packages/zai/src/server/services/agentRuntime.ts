@@ -16,7 +16,7 @@ import {
   startMemoryWatcher,
   stopMemoryWatcher,
 } from '@zn-ai/zai-agent-core/agents/memoryWatcher'
-import { hasExternalIncludes } from '@zn-ai/zai-agent-core/agents/memoryLoader'
+import { hasExternalIncludes } from '@zn-ai/zn-agent-core/agents/memoryLoader'
 import { createAnthropicModelCaller } from './modelCaller.js'
 import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
