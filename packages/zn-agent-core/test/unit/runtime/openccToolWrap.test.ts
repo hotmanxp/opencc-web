@@ -14,6 +14,14 @@ function makeZaiTool(): ZaiTool {
 }
 
 describe('wrapAsOpenccTool', () => {
+  it('uses function description directly when provided', async () => {
+    const tool = makeZaiTool()
+    tool.description = () => 'sync description'
+    const wrapped = wrapAsOpenccTool(tool)
+    const result = await wrapped.description({}, undefined)
+    expect(result).toBe('sync description')
+  })
+
   it('returns object with required opencc Tool properties', () => {
     const wrapped = wrapAsOpenccTool(makeZaiTool())
     expect(wrapped.name).toBe('TestTool')

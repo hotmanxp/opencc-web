@@ -11,7 +11,6 @@
  * extend this base with tool-specific behavior like permission checks.
  */
 
-import type { Tool as ZaiTool } from './types.js'
 import {
   noopReactNode,
   falseFn,
@@ -19,6 +18,17 @@ import {
   defaultDescription,
   defaultUserFacingName,
 } from './openccToolDefaults.js'
+
+// Structural input type for wrapAsOpenccTool. Decouples from the narrow
+// `Tool` declaration in types.js — callers in later tasks can cast as needed.
+export type ZaiToolLike = {
+  name: string
+  description?: string | ((input: unknown) => string)
+  inputSchema?: unknown
+  call?: (args: unknown, ctx: unknown) => Promise<unknown>
+  maxResultSizeChars?: number
+  userFacingName?: ((input: unknown) => string) | string
+}
 
 // Minimal subset of opencc's Tool type that we satisfy. Avoids pulling
 // opencc's full Tool interface (which requires ReactNode) into every caller.
@@ -38,7 +48,7 @@ export interface OpenccToolMinimal {
   // ... other methods are optional and default to no-ops
 }
 
-export function wrapAsOpenccTool(tool: ZaiTool): OpenccToolMinimal {
+export function wrapAsOpenccTool(tool: ZaiToolLike): OpenccToolMinimal {
   const wrapped: OpenccToolMinimal = {
     name: tool.name,
     inputSchema: tool.inputSchema,
@@ -48,6 +58,7 @@ export function wrapAsOpenccTool(tool: ZaiTool): OpenccToolMinimal {
       // zai's Tool.call has signature: (args, ctx) => Promise<ToolResult>
       // opencc's Tool.call has signature: (args, ctx, canUseTool, parentMessage, onProgress?) => Promise<ToolResult>
       // We pass through args + ctx; ignore the extra opencc-only params.
+      if (!tool.call) throw new Error(`openccToolWrap: tool "${tool.name}" has no call method`)
       return tool.call(args, ctx as any)
     },
 
@@ -66,11 +77,13 @@ export function wrapAsOpenccTool(tool: ZaiTool): OpenccToolMinimal {
     renderToolResultMessage: noopReactNode as any,
   }
 
-  // Preserve userFacingName if present
+  // Preserve userFacingName if present; otherwise default to a closure that
+  // calls defaultUserFacingName(tool) so the name field is always available.
   if (tool.userFacingName) {
     ;(wrapped as any).userFacingName = tool.userFacingName
   } else {
-    ;(wrapped as any).userFacingName = defaultUserFacingName
+    ;(wrapped as any).userFacingName = (input?: unknown) =>
+      defaultUserFacingName(tool as { name: string })
   }
 
   return wrapped
