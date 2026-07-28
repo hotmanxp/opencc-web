@@ -2,7 +2,7 @@ import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { createRequire } from 'node:module'
-import type { PromptCommand, CommandContext, CommandSource } from '@zn-ai/zai-agent-core'
+import type { PromptCommand, CommandContext, CommandSource } from '@zn-ai/zn-agent-core'
 // yaml 解析走 agent-core 的 js-yaml(其 package.json 已声明为依赖),
 // 通过 createRequire 跨包引用 node_modules,避免新增依赖。
 const requireFromAgentCore = createRequire(
@@ -89,7 +89,7 @@ function buildPromptCommand(
     async getPromptForCommand(args: string, _context: CommandContext) {
       // 同步 prompt 模板替换 — renderPrompt 在 agent-core 里。
       // 用 dynamic import 避免循环依赖 + 与 skill loader 同模式。
-      const { renderPrompt } = await import('@zn-ai/zai-agent-core')
+      const { renderPrompt } = await import('@zn-ai/zn-agent-core')
       const text = renderPrompt({ body, args, argNames: fm?.argNames })
       return [{ type: 'text', text }]
     },
@@ -152,7 +152,7 @@ export async function loadUserCommands(
  * 同步函数(内部 await),不阻塞调用方太久:O(几十) 个文件,毫秒级。
  */
 export async function reloadUserCommands(context: CommandContext): Promise<PromptCommand[]> {
-  const { getCommandRegistry } = await import('@zn-ai/zai-agent-core')
+  const { getCommandRegistry } = await import('@zn-ai/zn-agent-core')
   const reg = getCommandRegistry()
   // 1. unregister 旧 user
   for (const cmd of reg.all().filter((c) => c.source === 'user')) {

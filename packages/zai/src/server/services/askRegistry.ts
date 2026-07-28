@@ -1,4 +1,4 @@
-import type { AskUserAnswers } from '@zn-ai/zai-agent-core'
+import type { AskUserAnswers } from '@zn-ai/zn-agent-core'
 
 type Pending = {
   resolve: (a: AskUserAnswers) => void

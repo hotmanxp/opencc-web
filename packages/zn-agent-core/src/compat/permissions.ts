@@ -3,6 +3,8 @@
  * add zai's UserFacingPermissionMode subset.
  */
 
+import { EXTERNAL_PERMISSION_MODES } from '../opencc-src/types/permissions.js'
+
 export {
   EXTERNAL_PERMISSION_MODES,
   PERMISSION_MODES,
@@ -14,4 +16,4 @@ export {
  * UserFacingPermissionMode — subset of ExternalPermissionMode exposed to
  * the zai UI. Identical to ExternalPermissionMode in zai's current code.
  */
-export type UserFacingPermissionMode = ExternalPermissionMode
+export type UserFacingPermissionMode = (typeof EXTERNAL_PERMISSION_MODES)[number]

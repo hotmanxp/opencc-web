@@ -17,7 +17,7 @@ import {
   setCurrentSessionId,
   listSkills,
 } from "../services/agentRuntime.js";
-import { EXTERNAL_PERMISSION_MODES, type UserFacingPermissionMode } from "@zn-ai/zai-agent-core";
+import { EXTERNAL_PERMISSION_MODES, type UserFacingPermissionMode } from "@zn-ai/zn-agent-core";
 import { CwdStore, runWithSessionId } from "@zn-ai/zn-agent-core/runtime";
 import { getDefaultMode } from "../services/permissionMode.js";
 import { eventBus } from "../services/eventBus.js";

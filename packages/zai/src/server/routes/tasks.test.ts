@@ -10,7 +10,7 @@ import {
   type AgentRuntime,
   type BackgroundRuntime,
   type RuntimeEvent,
-} from '@zn-ai/zai-agent-core'
+} from '@zn-ai/zn-agent-core'
 import tasksRouter from './tasks.js'
 import { __setBackgroundRuntime } from '../services/backgroundRuntime.js'
 

@@ -1,4 +1,4 @@
-import type { ApproveRegistryLike } from '@zn-ai/zai-agent-core'
+import type { ApproveRegistryLike } from '@zn-ai/zn-agent-core'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { join } from 'node:path'
@@ -10,7 +10,7 @@ import {
   resolveOpenccConfigDir,
   setDefaultSandboxManager,
   TranscriptStore,
-} from '@zn-ai/zai-agent-core'
+} from '@zn-ai/zn-agent-core'
 import { eventBus } from './eventBus.js'
 import {
   startMemoryWatcher,
@@ -86,7 +86,7 @@ function resolveSkillsDirs(): string[] {
  * all commands with PATH preserved and a 10-minute CPU cap. Users opt out
  * via `ZAI_SANDBOX=off` for "no shell access" deployments.
  */
-function resolveSandbox(cwd: string): import('@zn-ai/zai-agent-core').SandboxConfig | undefined {
+function resolveSandbox(cwd: string): import('@zn-ai/zn-agent-core').SandboxConfig | undefined {
   if (process.env.ZAI_SANDBOX === 'off') return undefined
   return {
     executor: 'child_process',
@@ -236,7 +236,7 @@ export async function listSkills(): Promise<Array<{ name: string; description: s
 
   // Dynamic import to avoid top-level dependency on the loader module
   // when the runtime hasn't been initialized yet.
-  const { loadSkillsFromDirs } = await import('@zn-ai/zai-agent-core')
+  const { loadSkillsFromDirs } = await import('@zn-ai/zn-agent-core')
   type LoadedSkill = { name: string; description?: string; frontmatter?: { description?: string } }
 
   const diskSkills: LoadedSkill[] = dirs.length > 0

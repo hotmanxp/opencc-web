@@ -9,7 +9,7 @@ export type {
 export { TaskNotFoundError } from './types.js'
 
 export type { BackgroundRuntime } from './BackgroundRuntime.js'
-export type { AgentRuntime } from './AgentRuntime.js'
+export type { AgentRuntime } from '../runtime/contract.js'
 export {
   DefaultBackgroundRuntime,
   type DefaultBackgroundRuntimeOptions,

@@ -35,6 +35,12 @@ export type CompactSessionOptions = {
   modelCaller: ModelCaller
   cwd: string
   model?: string
+  /**
+   * Provider discriminator (`'anthropic'` vs `'openai'`). Optional; today the
+   * compat shim doesn't branch on it, but zai's `compact.ts` passes it so the
+   * type matches.
+   */
+  providerKind?: string
 }
 
 export type CompactSessionResult =

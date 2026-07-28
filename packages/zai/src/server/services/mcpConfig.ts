@@ -6,7 +6,7 @@
 import { readFileSync, existsSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join, dirname, parse } from 'node:path'
-import type { McpServerSpec } from '@zn-ai/zai-agent-core'
+import type { McpServerSpec } from '@zn-ai/zn-agent-core'
 
 type McpJsonServer = {
   command?: string

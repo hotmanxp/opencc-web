@@ -4,7 +4,7 @@ import {
   setBackgroundRuntime,
   type BackgroundRuntime,
   type BackgroundTask,
-} from '@zn-ai/zai-agent-core'
+} from '@zn-ai/zn-agent-core'
 import { BACKGROUND_DIR } from './paths.js'
 import { getRuntime } from './agentRuntime.js'
 import { eventBus } from './eventBus.js'

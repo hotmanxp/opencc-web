@@ -1,7 +1,7 @@
 import {
   compactSession,
-} from '@zn-ai/zai-agent-core'
-import type { LocalCommand, LocalCommandResult } from '@zn-ai/zai-agent-core'
+} from '@zn-ai/zn-agent-core'
+import type { LocalCommand, LocalCommandResult } from '@zn-ai/zn-agent-core'
 import {
   getTranscriptStore,
   getCurrentSessionId,

@@ -1,6 +1,6 @@
 import { Router, type IRouter, type Request, type Response } from 'express'
 import { z } from 'zod'
-import type { BackgroundRuntime, TaskEvent } from '@zn-ai/zai-agent-core'
+import type { BackgroundRuntime, TaskEvent } from '@zn-ai/zn-agent-core'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
 import { writeSse, SSE_HEADERS } from '../services/sse.js'
 

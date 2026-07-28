@@ -25,7 +25,7 @@ import {
   type AgentRuntime,
   type BackgroundRuntime,
   type RuntimeEvent,
-} from '@zn-ai/zai-agent-core'
+} from '@zn-ai/zn-agent-core'
 import { eventBus } from './eventBus.js'
 import {
   wrapWithJobStarted,

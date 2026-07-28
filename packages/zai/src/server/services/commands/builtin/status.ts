@@ -1,5 +1,5 @@
 import { getCurrentSessionId } from '../../agentRuntime.js'
-import type { LocalCommand, LocalCommandResult, StatusPayload } from '@zn-ai/zai-agent-core'
+import type { LocalCommand, LocalCommandResult, StatusPayload } from '@zn-ai/zn-agent-core'
 
 export const statusCommand: LocalCommand = {
   type: 'local',
