@@ -58,3 +58,7 @@ export type { DataDirConfig } from './compat/data/dataDir.js'
 export * from './compat/runtime/skills-index.js'
 export { loadAgentDefinitions, parseAgentMd } from './compat/tools/loadAgentsDir.js'
 export type { AgentDefinition } from './compat/tools/loadAgentsDir.js'
+
+// Compact session (Batch 3b)
+export { compactSession } from './compat/runtime/compactService.js'
+export type { CompactSessionOptions, CompactSessionResult } from './compat/runtime/compactService.js'
