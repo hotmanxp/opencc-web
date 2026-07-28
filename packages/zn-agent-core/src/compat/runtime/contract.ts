@@ -16,6 +16,7 @@ import type { RuntimeEvent } from './events.js'
 import type { TranscriptFile, TranscriptMeta } from '../transcript/types.js'
 import { TranscriptStore } from '../transcript/store.js'
 import { abortSession } from './abort.js'
+import { runOpenccQuery } from './openccAdapter.js'
 import { DefaultPluginRuntime } from '../plugins/index.js'
 
 export interface AgentRuntime {
@@ -53,11 +54,11 @@ export class DefaultAgentRuntime implements AgentRuntime {
    * and the server stays bootable. Documented in
    * `.superpowers/sdd/task-21-report.md` under "Subpath 8 — open blocker".
    */
-  run(_opts: QueryOptions): AsyncIterable<RuntimeEvent> {
-    async function* empty(): AsyncGenerator<RuntimeEvent, void> {
-      // intentionally empty — see comment above
-    }
-    return empty()
+  run(opts: QueryOptions): AsyncIterable<RuntimeEvent> {
+    // openccConfig is the optional subset of this.config that the adapter consumes.
+    // Cast is safe because the adapter only reads known fields (mcpPool, hookRunner, etc.)
+    const openccConfig = (this.config as any).openccConfig ?? {}
+    return runOpenccQuery(opts, openccConfig)
   }
 
   async abort(sessionId: string, reason?: string): Promise<void> {
