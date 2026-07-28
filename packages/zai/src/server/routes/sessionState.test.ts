@@ -6,7 +6,7 @@ import request from 'supertest'
 // NOTE: factories return vi.fn() (not plain functions) so vi.mocked(...) has
 // spies to call .mockImplementation / .mockReturnValue on. This is the minimal
 // deviation from the brief required to make vi.mocked() work.
-vi.mock('@zn-ai/zai-agent-core/runtime', () => ({
+vi.mock('@zn-ai/zn-agent-core/runtime', () => ({
   CwdStore: {
     clear: vi.fn(),
     has: vi.fn(() => false),
@@ -31,7 +31,7 @@ vi.mock('../services/backgroundRuntime.js', () => ({
 }))
 
 import sessionStateRouter from './sessionState.js'
-import { CwdStore } from '@zn-ai/zai-agent-core/runtime'
+import { CwdStore } from '@zn-ai/zn-agent-core/runtime'
 import { bashBackgroundTracker } from '@zn-ai/zn-agent-core/bashTracker'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
 

@@ -10,7 +10,7 @@
  * 时调)。
  */
 
-import { stateChangeBus } from '@zn-ai/zai-agent-core/runtime'
+import { stateChangeBus } from '@zn-ai/zn-agent-core/runtime'
 import { eventBus } from './eventBus.js'
 
 let _stateBridgeDispose: (() => void) | null = null

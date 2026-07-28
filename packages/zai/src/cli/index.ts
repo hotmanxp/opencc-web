@@ -3,7 +3,7 @@ import { Command } from 'commander';
 import { readFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { registerProcessOutputErrorHandlers } from '@zn-ai/zai-agent-core/runtime';
+import { registerProcessOutputErrorHandlers } from '@zn-ai/zn-agent-core/runtime';
 import { runDev } from './dev.js';
 import { runStart } from './start.js';
 

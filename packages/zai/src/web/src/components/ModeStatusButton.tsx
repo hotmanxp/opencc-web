@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons'
 import { useAgentStore } from '../store/useAgentStore.js'
 import { useAppStore } from '../store/useAppStore.js'
-import type { PermissionMode } from '@zn-ai/zai-agent-core/runtime'
+import type { PermissionMode } from '@zn-ai/zn-agent-core/runtime'
 
 // Canonical cycle order (matches OpenCC TUI shift+tab order).
 const MODE_CYCLE: PermissionMode[] = [
