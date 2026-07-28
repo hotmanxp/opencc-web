@@ -1,5 +1,24 @@
 import type { AnthropicMessage, ContentBlock, TranscriptMessage } from './types.js'
-import type { TranscriptStore } from './store.js'
+
+/**
+ * Structural type that accepts any TranscriptStore impl — the new package's
+ * `compat/transcript/store.ts` and the old `@zn-ai/zai-agent-core` runtime's
+ * `TranscriptStore` both expose `mutateMessages` with compatible signatures,
+ * but TypeScript treats their private `dataDir` fields as distinct nominal
+ * types. Using a duck-type here lets zai callers pass either during the
+ * dual-track migration window.
+ */
+type RepairTargetStore = {
+  mutateMessages<T>(
+    sessionId: string,
+    mutator: (messages: TranscriptMessage[]) => {
+      messages: TranscriptMessage[]
+      changed: boolean
+      value: T
+    },
+    pathOpts: { cwd: string; subagent?: boolean },
+  ): Promise<{ value: T; updatedAt: number } | T>
+}
 
 export type TranscriptRepairReport = {
   repaired: boolean
@@ -424,11 +443,11 @@ export function repairTranscriptToolPairs(
  * 持久化路径，queryLoop 不直接调用此函数（见 Task 3）。
  */
 export async function repairAndPersistTranscript(
-  store: TranscriptStore,
+  store: RepairTargetStore,
   sessionId: string,
   pathOpts: { cwd: string; subagent?: boolean },
 ): Promise<TranscriptRepairResult> {
-  return store.mutateMessages(sessionId, messages => {
+  const out = await store.mutateMessages(sessionId, messages => {
     const result = repairTranscriptToolPairs(messages)
     return {
       messages: result.messages,
@@ -436,4 +455,6 @@ export async function repairAndPersistTranscript(
       value: result,
     }
   }, pathOpts)
+  // Old store shape returns T directly; new store wraps in { value, updatedAt }
+  return 'value' in out ? out.value : out
 }

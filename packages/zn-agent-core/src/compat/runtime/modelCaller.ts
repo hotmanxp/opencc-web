@@ -13,8 +13,16 @@
 
 export interface Tool {
   name: string
-  description: string
-  input_schema: unknown
+  /**
+   * Tool description. Either a static string (zai-native tools) or a
+   * function returning a Promise<string> (opencc SDK tools). The shape is
+   * intentionally permissive (`Function` rather than a typed callback) so
+   * callers from either source can flow through without a cast — opencc's
+   * SDK takes `(input, options)` while the zai-native form takes nothing.
+   */
+  description: string | Function
+  /** Optional: zai callers may pass `Tool` shapes from opencc's SDK that omit this. */
+  input_schema?: unknown
 }
 
 export type ModelCaller = (req: {
