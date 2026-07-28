@@ -27,3 +27,15 @@ export type {
   PluginRuntimeConfig,
 } from './compat/runtime/types.js'
 export type { AskUserAnswers } from './compat/runtime/types.js'
+
+// Runtime event contract (Batch 2a)
+export type {
+  ErrorCategory,
+  RuntimeEvent,
+  RuntimeErrorEvent,
+  RuntimeDoneEvent,
+  RuntimeAbortedEvent,
+} from './compat/runtime/events.js'
+
+// Background runtime (Batch 2a: persistence + scheduler compat shims)
+export * from './compat/background/index.js'
