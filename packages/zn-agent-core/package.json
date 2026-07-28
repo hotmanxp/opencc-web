@@ -1,0 +1,43 @@
+{
+  "name": "@zn-ai/zn-agent-core",
+  "version": "0.1.0",
+  "description": "zai agent runtime core — 拷贝自 opencc 0.20.0，剥除 UI，zai 端消费",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": "./dist/index.js",
+    "./runtime": "./dist/runtime/index.js",
+    "./transcript": "./dist/transcript/store.js",
+    "./commands": "./dist/commands/index.js",
+    "./bashTracker": "./dist/tools/BashTool/bashTracker.js",
+    "./taskListStore": "./dist/tools/Tasks/TaskListStore.js",
+    "./agents/memoryLoader": "./dist/agents/memoryLoader.js",
+    "./agents/memoryWatcher": "./dist/agents/memoryWatcher.js"
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc -b",
+    "dev": "tsc -b --watch",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "copy-from-opencc": "tsx scripts/copy-from-opencc.ts",
+    "verify": "tsx scripts/verify-imports.ts"
+  },
+  "dependencies": {
+    "@anthropic-ai/sdk": "^0.94.0",
+    "@modelcontextprotocol/sdk": "^1.29.0",
+    "ajv": "^8.17.1",
+    "eventsource-parser": "^1.1.2",
+    "ignore": "^5.3.2",
+    "zod": "^3.23.8"
+  },
+  "devDependencies": {
+    "@types/node": "22.10.0",
+    "typescript": "5.6.3",
+    "vitest": "^2.1.0"
+  }
+}
