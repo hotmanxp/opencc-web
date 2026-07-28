@@ -53,3 +53,8 @@ export { TranscriptStore } from './compat/transcript/store.js'
 // Data directory helpers
 export { resolveDataDir } from './compat/data/dataDir.js'
 export type { DataDirConfig } from './compat/data/dataDir.js'
+
+// Skills runtime (Batch 3a)
+export * from './compat/runtime/skills-index.js'
+export { loadAgentDefinitions, parseAgentMd } from './compat/tools/loadAgentsDir.js'
+export type { AgentDefinition } from './compat/tools/loadAgentsDir.js'
