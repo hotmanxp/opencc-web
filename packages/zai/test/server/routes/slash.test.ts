@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'vitest'
-import { setCommandRegistry, getCommandRegistry } from '@zn-ai/zai-agent-core'
+import { setCommandRegistry, getCommandRegistry } from '@zn-ai/zn-agent-core'
 import { slashList } from '../../../src/server/services/commands/slashList.js'
 
 beforeEach(() => setCommandRegistry(null))

@@ -4,7 +4,7 @@ import request from 'supertest'
 import path from 'node:path'
 import { mkdtempSync, rmSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
-import { TranscriptStore } from '@zn-ai/zai-agent-core'
+import { TranscriptStore } from '@zn-ai/zn-agent-core'
 
 // We need a fake cwd to feed the routes — agent.ts routes read req.app.locals.instanceContext.
 let tmpDir: string

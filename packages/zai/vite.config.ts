@@ -49,7 +49,7 @@ export default defineConfig({
             return 'antd';
           if (id.includes('react-router') || id.includes('history')) return 'router';
           if (id.includes('zustand')) return 'store';
-          if (id.includes('@zn-ai/zai-agent-core')) return 'agent-core';
+          if (id.includes('@zn-ai/zn-agent-core')) return 'agent-core';
           if (id.includes('react') || id.includes('scheduler')) return 'react';
           return 'vendor';
         },

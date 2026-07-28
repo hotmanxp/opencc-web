@@ -38,7 +38,6 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
-    "@zn-ai/zai-agent-core": "workspace:*",
     "@zn-ai/zn-agent-core": "workspace:*",
     "adm-zip": "^0.5.16",
     "commander": "^12.1.0",

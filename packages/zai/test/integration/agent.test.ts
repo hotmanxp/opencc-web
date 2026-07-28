@@ -41,7 +41,7 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
 
 // Mock zai-agent-core. 用 importOriginal 透传实际类, 再补齐 agent.ts / permissionMode.ts
 // 实际会用到的 exports (EXTERNAL_PERMISSION_MODES).
-vi.mock('@zn-ai/zai-agent-core', async (importOriginal) => {
+vi.mock('@zn-ai/zn-agent-core', async (importOriginal) => {
   const actual = (await importOriginal()) as Record<string, unknown>
   return {
     ...actual,

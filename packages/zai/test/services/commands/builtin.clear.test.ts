@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, vi } from 'vitest'
-import { setCommandRegistry, getCommandRegistry } from '@zn-ai/zai-agent-core'
+import { setCommandRegistry, getCommandRegistry } from '@zn-ai/zn-agent-core'
 import { clearCommand } from '../../../src/server/services/commands/builtin/clear.js'
 
 const runtimeMock = vi.hoisted(() => ({
