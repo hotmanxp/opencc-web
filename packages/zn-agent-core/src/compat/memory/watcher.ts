@@ -1,6 +1,6 @@
 import { watchFile, unwatchFile, statSync, existsSync } from 'fs'
 import { join } from 'path'
-import { clearMemoryCache } from './memoryLoader.js'
+import { clearMemoryCache } from './loader.js'
 
 /**
  * Watches AGENTS.md, AGENTS.local.md, and .claude/rules in a cwd
