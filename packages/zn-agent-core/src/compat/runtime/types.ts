@@ -174,6 +174,8 @@ export type QueryOptions = {
   /** @deprecated 用 transcriptId 代替. 文件不存在时会抛 ENOENT. */
   resumeFromTranscriptId?: string
   model?: string
+  tools?: Tool[]
+  sessionId?: string
   systemPrompt?: string | string[]
   additionalTools?: Tool[]
   abortSignal?: AbortSignal
@@ -210,4 +212,19 @@ export type QueryOptions = {
    * Wired into `getAgentStepLimit({ userOptIn })` by queryLoop.
    */
   agentStepLimit?: number
+}
+
+/**
+ * Configuration for the opencc adapter layer.
+ * Pass into DefaultAgentRuntime config to enable opencc query() delegation.
+ */
+export interface OpenccAdapterConfig {
+  /** MCP client pool — tools from connected MCP servers injected into query(). */
+  mcpPool?: import('../mcp/MCPClientPool.js').MCPClientPool | undefined
+  /** Plugin runtime — hooks (PreToolUse, PostToolUse, etc.) attached to query lifecycle. */
+  hookRunner?: import('../plugins/HookRunner.js').HookRunner | undefined
+  /** Skills directories to load skill definitions from. */
+  skillsDirs?: readonly string[] | undefined
+  /** Sandbox config (executor, maxCpuMs, env allowlist). */
+  sandbox?: import('./types.js').SandboxConfig | undefined
 }
