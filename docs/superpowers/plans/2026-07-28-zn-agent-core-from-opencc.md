@@ -277,7 +277,6 @@ src/compat/
     store.ts              # v2 transcript (port from packages/zai-agent-core/src/transcript/store.ts)
   sandboxManager.ts       # setDefaultSandboxManager / getDefaultSandboxManager
   requestApproveTool.ts   # RequestApproveTool + types (port from packages/zai-agent-core)
-```
 
 - [ ] **Step 4: Commit the gap matrix**
 
@@ -1340,3 +1339,5 @@ Already covered in the cleanup commit message: "old opencc-internals mirror is s
 - opencc's API surface may have drifted from zai-agent-core's; expect ~10-30 type errors in Task 17
 - Some opencc deps (orama, ripgrep binaries) may need to be added to `dependencies` if they're actually used by copied files — check during Task 17
 - v2 transcript store (Task 15) might be substantial if zai has invested in CompactMetadata — port carefully
+
+```

@@ -41,3 +41,15 @@ export * from './compat/mcp/index.js'
 
 // Plugin runtime (Batch 2c)
 export * from './compat/plugins/index.js'
+
+// DefaultAgentRuntime + abort + AgentRuntime interface (Batch 2d)
+export { DefaultAgentRuntime } from './compat/runtime/contract.js'
+export type { AgentRuntime } from './compat/runtime/contract.js'
+
+// TranscriptStore (compat) — already in compat/transcript/store.ts; re-export
+// the v2 store class so zai's main-entry import works.
+export { TranscriptStore } from './compat/transcript/store.js'
+
+// Data directory helpers
+export { resolveDataDir } from './compat/data/dataDir.js'
+export type { DataDirConfig } from './compat/data/dataDir.js'
