@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request, type Response } from 'express'
-import { bashBackgroundTracker } from '@zn-ai/zn-agent-core/bashTracker'
+import { bashBackgroundTracker } from '@zn-ai/zai-agent-core/bashTracker'
 
 const router: IRouter = Router()
 
