@@ -54,3 +54,6 @@ Thumbs.db
 # Superpowers local task artifacts (briefs/reviews)
 .superpowers/briefs/
 .superpowers/reviews/
+
+# superpowers skill scratch
+.superpowers/

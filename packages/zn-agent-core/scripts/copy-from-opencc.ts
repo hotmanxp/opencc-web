@@ -28,31 +28,50 @@ function shouldStrip(relPath: string): boolean {
   }
   // Strip top files: exact match
   if (STRIP_TOP_FILES.includes(relPath)) return true
-  // Hooks: default strip, except explicit keepers
-  if (relPath.startsWith('src/hooks/')) {
-    return !KEEP_HOOKS.some((k) => relPath === k || relPath.startsWith(k.replace(/\*\*$/, '')))
-  }
-  // Services: default strip, except explicit keepers
-  if (relPath.startsWith('src/services/')) {
-    return !KEEP_SERVICES.some((k) => relPath === k || relPath.startsWith(k.replace(/\*\*$/, '')))
-  }
-  // Entrypoints: default strip (cli.tsx), except SDK
-  if (relPath.startsWith('src/entrypoints/')) {
-    return !KEEP_ENTRYPOINTS.some((k) => relPath === k || relPath.startsWith(k.replace(/\*\*$/, '')))
-  }
   return false
 }
 
-function listFiles(dir: string, base = dir): string[] {
+function listFiles(dir: string, base = dir, parentRel = ''): string[] {
   const out: string[] = []
   for (const entry of readdirSync(dir)) {
     const full = join(dir, entry)
     const st = statSync(full)
     const rel = relative(base, full).split(sep).join('/')
     if (st.isDirectory()) {
+      // Strip if dir matches strip-list
       if (shouldStrip(rel)) continue
-      out.push(...listFiles(full, base))
+      // Strip if inside a default-strip section (hooks/services/entrypoints)
+      // UNLESS the path matches a keep entry (only check at depth > 1)
+      const section = rel.split('/')[0]
+      if (rel.includes('/') && (section === 'hooks' || section === 'services' || section === 'entrypoints')) {
+        const keepers = section === 'hooks' ? KEEP_HOOKS : section === 'services' ? KEEP_SERVICES : KEEP_ENTRYPOINTS
+        // KEEP_* patterns are sub-paths (e.g. "mcp/**", not "services/mcp/**")
+        // so compare against the sub-path after the section
+        const sub = rel.slice(section.length + 1)
+        const kept = keepers.some((k) => {
+          if (k.endsWith('/**')) {
+            const prefix = k.slice(0, -3) // strip /**
+            return sub === prefix || sub.startsWith(prefix + '/')
+          }
+          return sub === k
+        })
+        if (!kept) continue
+      }
+      out.push(...listFiles(full, base, rel))
     } else {
+      const section = rel.split('/')[0]
+      if (section === 'hooks' || section === 'services' || section === 'entrypoints') {
+        const keepers = section === 'hooks' ? KEEP_HOOKS : section === 'services' ? KEEP_SERVICES : KEEP_ENTRYPOINTS
+        const sub = rel.slice(section.length + 1)
+        const kept = keepers.some((k) => {
+          if (k.endsWith('/**')) {
+            const prefix = k.slice(0, -3)
+            return sub === prefix || sub.startsWith(prefix + '/')
+          }
+          return sub === k
+        })
+        if (!kept) continue
+      }
       if (shouldStrip(rel)) continue
       out.push(rel)
     }
