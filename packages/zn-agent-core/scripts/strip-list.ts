@@ -7,54 +7,54 @@
 
 export const STRIP_DIRS: string[] = [
   // TUI components & primitives
-  'src/components',
-  'src/ink',
-  'src/screens',
-  'src/buddy',
-  'src/assistant',
-  'src/vim',
-  'src/voice',
+  'components',
+  'ink',
+  'screens',
+  'buddy',
+  'assistant',
+  'vim',
+  'voice',
 
   // Internalizing UI voice bridge
-  'src/services/voice',
-  'src/services/PromptSuggestion',
-  'src/services/MagicDocs',
-  'src/services/wiki',
-  'src/services/extractMemories',
-  'src/services/goal',
-  'src/services/autoDream',
-  'src/services/autoFix',
-  'src/services/SessionMemory',
-  'src/services/teamMemorySync',
-  'src/services/AgentSummary',
+  'services/voice',
+  'services/PromptSuggestion',
+  'services/MagicDocs',
+  'services/wiki',
+  'services/extractMemories',
+  'services/goal',
+  'services/autoDream',
+  'services/autoFix',
+  'services/SessionMemory',
+  'services/teamMemorySync',
+  'services/AgentSummary',
 
   // TTS / voice / SSH / vim-specific
-  'src/ssh',
-  'src/grpc',
-  'src/proto',
-  'src/remote',
-  'src/upstreamproxy',
-  'src/integrations',
-  'src/memdir',
-  'src/outputStyles',
-  'src/proactive',
-  'src/keybindings',
-  'src/moreright',
-  'src/coordinator',
-  'src/native-ts',
-  'src/context',
-  'src/bridge',
+  'ssh',
+  'grpc',
+  'proto',
+  'remote',
+  'upstreamproxy',
+  'integrations',
+  'memdir',
+  'outputStyles',
+  'proactive',
+  'keybindings',
+  'moreright',
+  'coordinator',
+  'native-ts',
+  'context',
+  'bridge',
 ]
 
 export const STRIP_TOP_FILES: string[] = [
   // Top-level UI entry points
-  'src/main.tsx',
-  'src/setup.ts',
-  'src/replLauncher.tsx',
-  'src/interactiveHelpers.tsx',
-  'src/dialogLaunchers.tsx',
-  'src/history.ts',  // CLI history, not transcript
-  'src/cli.tsx',     // if exists at top
+  'main.tsx',
+  'setup.ts',
+  'replLauncher.tsx',
+  'interactiveHelpers.tsx',
+  'dialogLaunchers.tsx',
+  'history.ts',  // CLI history, not transcript
+  'cli.tsx',     // if exists at top
 ]
 
 /**
@@ -62,46 +62,46 @@ export const STRIP_TOP_FILES: string[] = [
  * core logic (keep). Explicitly listed keepers.
  */
 export const KEEP_HOOKS: string[] = [
-  'src/hooks/useCanUseTool.tsx',
-  'src/hooks/useMergedTools.ts',
-  'src/hooks/useMergedClients.ts',
-  'src/hooks/useQueueProcessor.ts',
-  'src/hooks/useApiKeyVerification.ts',  // might be UI; verify
-  'src/hooks/toolPermission/**',
+  'useCanUseTool.tsx',
+  'useMergedTools.ts',
+  'useMergedClients.ts',
+  'useQueueProcessor.ts',
+  'useApiKeyVerification.ts',  // might be UI; verify
+  'toolPermission/**',
 ]
 
 export const KEEP_ENTRYPOINTS: string[] = [
   // SDK part of entrypoints — re-export to zai
-  'src/entrypoints/sdk/**',
-  'src/entrypoints/sdk.d.ts',
-  'src/entrypoints/agentSdkTypes.ts',
-  'src/entrypoints/init.ts',
-  'src/entrypoints/sandboxTypes.ts',
+  'sdk/**',
+  'sdk.d.ts',
+  'agentSdkTypes.ts',
+  'init.ts',
+  'sandboxTypes.ts',
 ]
 
 export const KEEP_SERVICES: string[] = [
-  'src/services/api/**',
-  'src/services/mcp/**',
-  'src/services/compact/**',
-  'src/services/oauth/**',
-  'src/services/tools/**',
-  'src/services/toolUseSummary/**',
-  'src/services/lsp/**',
-  'src/services/claudeAiLimits.ts',
-  'src/services/claudeAiLimitsHook.ts',
-  'src/services/rateLimitMessages.ts',
-  'src/services/tokenEstimation.ts',
-  'src/services/diagnosticTracking.ts',
-  'src/services/internalLogging.ts',
-  'src/services/vcr.ts',
-  'src/services/policyLimits/**',
-  'src/services/mockRateLimits.ts',
-  'src/services/rateLimitMocking.ts',
-  'src/services/analytics/**',
-  'src/services/settingsSync/**',
-  'src/services/remoteManagedSettings/**',
-  'src/services/github/**',
-  'src/services/mcpServerApproval.tsx',  // verify UI vs core
-  'src/services/notifier.ts',
-  'src/services/preventSleep.ts',
+  'api/**',
+  'mcp/**',
+  'compact/**',
+  'oauth/**',
+  'tools/**',
+  'toolUseSummary/**',
+  'lsp/**',
+  'claudeAiLimits.ts',
+  'claudeAiLimitsHook.ts',
+  'rateLimitMessages.ts',
+  'tokenEstimation.ts',
+  'diagnosticTracking.ts',
+  'internalLogging.ts',
+  'vcr.ts',
+  'policyLimits/**',
+  'mockRateLimits.ts',
+  'rateLimitMocking.ts',
+  'analytics/**',
+  'settingsSync/**',
+  'remoteManagedSettings/**',
+  'github/**',
+  'mcpServerApproval.tsx',  // verify UI vs core
+  'notifier.ts',
+  'preventSleep.ts',
 ]
