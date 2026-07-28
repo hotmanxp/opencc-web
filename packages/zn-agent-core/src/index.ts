@@ -21,8 +21,6 @@ export type {
   SystemPrompt,
   Tool,
   UserMessage,
-  McpServerSpec,
-  MCPClientPool,
   PluginRuntime,
   PluginRuntimeConfig,
 } from './compat/runtime/types.js'
@@ -39,3 +37,6 @@ export type {
 
 // Background runtime (Batch 2a: persistence + scheduler compat shims)
 export * from './compat/background/index.js'
+
+// MCP client pool + related (Batch 2b)
+export * from './compat/mcp/index.js'
