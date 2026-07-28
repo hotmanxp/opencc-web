@@ -62,3 +62,6 @@ export type { AgentDefinition } from './compat/tools/loadAgentsDir.js'
 // Compact session (Batch 3b)
 export { compactSession } from './compat/runtime/compactService.js'
 export type { CompactSessionOptions, CompactSessionResult } from './compat/runtime/compactService.js'
+
+// Memory helpers (already in compat/memory/loader.js; re-export for main entry)
+export { clearMemoryCache } from './compat/memory/loader.js'

@@ -9,7 +9,7 @@ import type {
 } from './types.js'
 import type { TaskStore } from './store/TaskStore.js'
 import type { BackgroundRuntime } from './BackgroundRuntime.js'
-import type { AgentRuntime } from './AgentRuntime.js'
+import type { AgentRuntime } from '../runtime/contract.js'
 import {
   RETRY_POLICY,
   classifyRetryableError,

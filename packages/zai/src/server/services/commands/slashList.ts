@@ -1,4 +1,4 @@
-import { getCommandRegistry } from '@zn-ai/zai-agent-core'
+import { getCommandRegistry } from '@zn-ai/zn-agent-core'
 import { listSkills } from '../agentRuntime.js'
 
 export interface SlashItem {

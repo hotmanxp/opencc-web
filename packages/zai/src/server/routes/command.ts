@@ -1,5 +1,5 @@
 import { Router, type IRouter } from 'express'
-import { getCommandRegistry } from '@zn-ai/zai-agent-core'
+import { getCommandRegistry } from '@zn-ai/zn-agent-core'
 import { initCommands } from '../services/commands/registry.js'
 import { getCurrentSessionId, getRuntime } from '../services/agentRuntime.js'
 

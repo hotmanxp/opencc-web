@@ -1,5 +1,5 @@
-import { getCommandRegistry } from '@zn-ai/zai-agent-core'
-import type { CommandContext } from '@zn-ai/zai-agent-core'
+import { getCommandRegistry } from '@zn-ai/zn-agent-core'
+import type { CommandContext } from '@zn-ai/zn-agent-core'
 import { clearCommand } from './builtin/clear.js'
 import { compactCommand } from './builtin/compact.js'
 import { statusCommand } from './builtin/status.js'

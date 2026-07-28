@@ -1,4 +1,4 @@
-import type { BackgroundTask } from '@zn-ai/zai-agent-core'
+import type { BackgroundTask } from '@zn-ai/zn-agent-core'
 import { getRuntime, getCurrentSessionId, setCurrentSessionId } from './agentRuntime.js'
 import { resolveModel } from '../lib/resolveModel.js'
 import { eventBus } from './eventBus.js'
