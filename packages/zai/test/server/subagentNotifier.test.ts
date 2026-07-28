@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
 import { SubagentNotifier, renderTaskNotificationMessage } from '../../src/server/services/subagentNotifier.js'
-import type { BackgroundTask } from '@zn-ai/zai-agent-core'
+import type { BackgroundTask } from '@zn-ai/zn-agent-core'
 
 let lastRunOpts: any = null
 let runtimeEvents: Array<Record<string, unknown>> = [

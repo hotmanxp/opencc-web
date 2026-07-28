@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { RETRY_POLICY } from '@zn-ai/zai-agent-core/runtime'
+import { RETRY_POLICY } from '@zn-ai/zn-agent-core/runtime'
 
 type MockResponse =
   | { kind: 'throw'; error: Error }

@@ -18,8 +18,8 @@ vi.mock('../../../src/server/services/agentRuntime.js', () => ({
   getServerCwd: () => '/x',
 }))
 
-vi.mock('@zn-ai/zai-agent-core/runtime', async () => {
-  const actual = await vi.importActual<any>('@zn-ai/zai-agent-core/runtime')
+vi.mock('@zn-ai/zn-agent-core/runtime', async () => {
+  const actual = await vi.importActual<any>('@zn-ai/zn-agent-core/runtime')
   return {
     ...actual,
     repairAndPersistTranscript: (...args: unknown[]) => mocks.repair(...args),
@@ -32,7 +32,7 @@ describe('POST /api/transcript/:sessionId/repair', () => {
 
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'zai-route-repair-'))
-    const { TranscriptStore } = await import('@zn-ai/zai-agent-core/runtime')
+    const { TranscriptStore } = await import('@zn-ai/zn-agent-core/runtime')
     mocks.store = new TranscriptStore(dataDir)
     mocks.sessionId = await mocks.store.create({
       cwd: '/x',

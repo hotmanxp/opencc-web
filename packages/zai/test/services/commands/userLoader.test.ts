@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach } from 'vitest'
 import { mkdtempSync, mkdirSync, writeFileSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { setCommandRegistry, getCommandRegistry } from '@zn-ai/zai-agent-core'
+import { setCommandRegistry, getCommandRegistry } from '@zn-ai/zn-agent-core'
 import { loadUserCommands, reloadUserCommands } from '../../../src/server/services/commands/userLoader.js'
 
 let tmpHome: string

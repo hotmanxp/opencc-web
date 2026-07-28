@@ -60,7 +60,7 @@ vi.mock('../../src/server/services/agentRuntime.js', async () => {
   }
 })
 
-vi.mock('@zn-ai/zai-agent-core', () => ({
+vi.mock('@zn-ai/zn-agent-core', () => ({
   EXTERNAL_PERMISSION_MODES: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'],
 }))
 

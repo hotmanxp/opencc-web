@@ -56,7 +56,7 @@ vi.mock('@anthropic-ai/sdk', () => {
 
 // Import after mocks so the module reads the mocked fs/SKD.
 import { createAnthropicModelCaller } from '../../src/server/services/modelCaller.js'
-import type { ModelCaller } from '@zn-ai/zai-agent-core/runtime'
+import type { ModelCaller } from '@zn-ai/zn-agent-core/runtime'
 
 interface AnthropicCreateArgs {
   model: string

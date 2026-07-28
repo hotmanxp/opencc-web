@@ -55,7 +55,7 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
 
 // clearMemoryCache 是 zai-agent-core 的 side-effect flush,与本测试无关。
 // 把它替换成 no-op,避免测试加载整个 runtime module.
-vi.mock('@zn-ai/zai-agent-core', () => ({
+vi.mock('@zn-ai/zn-agent-core', () => ({
   clearMemoryCache: () => {},
 }))
 
