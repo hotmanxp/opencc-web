@@ -8,10 +8,10 @@
  */
 
 import { execSync } from 'child_process'
-import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'fs'
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync, rmSync } from 'fs'
 import { dirname, join, relative, sep } from 'path'
 import { fileURLToPath } from 'url'
-import { STRIP_DIRS, STRIP_TOP_FILES, KEEP_HOOKS, KEEP_ENTRYPOINTS, KEEP_SERVICES } from './strip-list.js'
+import { STRIP_DIRS, STRIP_TOP_FILES, STRIP_FILE_PATTERNS, KEEP_HOOKS, KEEP_ENTRYPOINTS, KEEP_SERVICES } from './strip-list.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -21,6 +21,35 @@ const DEST = join(ZAI_PKG, 'src', 'opencc-src')
 
 const dryRun = process.argv.includes('--dry-run')
 
+/**
+ * Convert a glob pattern to a RegExp. `**` matches any path segments, `*`
+ * matches any chars within a segment, `?` matches a single char.
+ */
+function patternToRegex(pattern: string): RegExp {
+  // Escape regex-special chars except `*` and `?`
+  let re = ''
+  for (let i = 0; i < pattern.length; i++) {
+    const c = pattern[i]
+    if (c === '*') {
+      if (pattern[i + 1] === '*') {
+        re += '.*'
+        i++ // consume second *
+      } else {
+        re += '[^/]*'
+      }
+    } else if (c === '?') {
+      re += '[^/]'
+    } else if ('.+^$|()[]{}'.includes(c)) {
+      re += '\\' + c
+    } else {
+      re += c
+    }
+  }
+  return new RegExp('^' + re + '$')
+}
+
+const STRIP_PATTERNS_RE = STRIP_FILE_PATTERNS.map(patternToRegex)
+
 function shouldStrip(relPath: string): boolean {
   // Strip dirs: match by prefix
   for (const d of STRIP_DIRS) {
@@ -28,6 +57,10 @@ function shouldStrip(relPath: string): boolean {
   }
   // Strip top files: exact match
   if (STRIP_TOP_FILES.includes(relPath)) return true
+  // Strip by file pattern (glob)
+  for (const re of STRIP_PATTERNS_RE) {
+    if (re.test(relPath)) return true
+  }
   return false
 }
 
@@ -95,6 +128,12 @@ function main() {
   }
 
   if (!existsSync(DEST)) mkdirSync(DEST, { recursive: true })
+
+  // Wipe DEST before re-copy so previously-copied files that are now
+  // stripped don't linger (the listFiles walk only visits paths that
+  // still pass the strip list).
+  rmSync(DEST, { recursive: true, force: true })
+  mkdirSync(DEST, { recursive: true })
 
   for (const rel of files) {
     const src = join(OPENCC_SRC, rel)
