@@ -14,7 +14,7 @@ vi.mock('@zn-ai/zai-agent-core/runtime', () => ({
     set: vi.fn(),
   },
 }))
-vi.mock('@zn-ai/zai-agent-core/taskListStore', () => ({
+vi.mock('@zn-ai/zn-agent-core/taskListStore', () => ({
   getTaskListStore: vi.fn(() => ({
     list: vi.fn(async (_sid: string) => []),
   })),
@@ -89,7 +89,7 @@ describe('GET /api/agent/sessions/:id/state', () => {
   })
 
   it('falls back to v2Tasks=[] when TaskListStore throws, others unaffected', async () => {
-    const { getTaskListStore } = await import('@zn-ai/zai-agent-core/taskListStore')
+    const { getTaskListStore } = await import('@zn-ai/zn-agent-core/taskListStore')
     vi.mocked(getTaskListStore).mockReturnValue({
       list: async () => {
         throw new Error('boom')
