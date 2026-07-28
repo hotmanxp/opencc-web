@@ -19,7 +19,7 @@ vi.mock('@zn-ai/zai-agent-core/taskListStore', () => ({
     list: vi.fn(async (_sid: string) => []),
   })),
 }))
-vi.mock('@zn-ai/zai-agent-core/bashTracker', () => ({
+vi.mock('@zn-ai/zn-agent-core/bashTracker', () => ({
   bashBackgroundTracker: {
     list: vi.fn((_filter?: { sessionId?: string; limit?: number }) => []),
   },
@@ -32,7 +32,7 @@ vi.mock('../services/backgroundRuntime.js', () => ({
 
 import sessionStateRouter from './sessionState.js'
 import { CwdStore } from '@zn-ai/zai-agent-core/runtime'
-import { bashBackgroundTracker } from '@zn-ai/zai-agent-core/bashTracker'
+import { bashBackgroundTracker } from '@zn-ai/zn-agent-core/bashTracker'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
 
 describe('GET /api/agent/sessions/:id/state', () => {
