@@ -29,6 +29,7 @@
 ## 核心入口
 
 - **`packages/zn-agent-core/src/compat/runtime/contract.ts`** — `DefaultAgentRuntime` 兼容垫片,目前 `run(opts)` 返回空 `AsyncIterable`(opencc `query()` 签名与 `StreamEvent` 类型与原 `queryLoop(opts,config)` + `RuntimeEvent` 不兼容,需后续适配 plan 接线)。其他 compat shim(`cwdStore` / `commands` / `transcript` / `background/DefaultBackgroundRuntime` / `mcp/MCPClientPool` / `plugins/HookRunner` / `runtime/skills-*` / `runtime/compactService`)均按 zai 端原 API 形态提供。
+- **运行时要求**:opencc 适配层 (`compat/runtime/openccAdapter.ts`) 依赖 `import 'bun:bundle'`,zai server **必须** 在 Bun 下运行 (`bun --cwd packages/zai src/cli/index.ts dev` 或 `bun --bun zai dev`)。Node.js 下 zai 构建可通过但运行时 `runOpenccQuery()` 会立即抛 `runtime.error` 提示切换到 Bun。
 - **`packages/zn-agent-core/src/opencc-src/`** — opencc 0.20.0 源码副本(`query.ts` 主循环入口 + `queryLoop.ts` / `services/tools/` / `services/api/` / `services/mcp/` 等),UI 已剔除。Bun-native,`import 'bun:bundle'` 与 `Bun.sleep` 等 API 在 Node 下抛 `ERR_MODULE_NOT_FOUND`,`pnpm --filter zai test` 27 个失败即此约束(非迁移 bug)。
 - **`packages/zai/src/server/index.ts`** — `createApp({cwd, cwdName, token, port?})` 按顺序 `initAgentRuntime → initSubagentNotifierLifecycle → initBackgroundRuntime`;挂 14 个 router 到 `/api/*`;`express.json({limit:'20mb'})`(图片粘贴);`/api` 整段禁缓存
 
