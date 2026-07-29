@@ -21,8 +21,63 @@ export interface Tool {
    * SDK takes `(input, options)` while the zai-native form takes nothing.
    */
   description: string | Function
-  /** Optional: zai callers may pass `Tool` shapes from opencc's SDK that omit this. */
-  input_schema?: unknown
+  /**
+   * zod input schema. Phase 4 buildDefaultTools() returns zod schemas
+   * directly; modelCaller calls zodToJsonSchema() on this before sending
+   * to the Anthropic SDK. The compat/runtime/types.ts `Tool` type keeps
+   * `input_schema?: unknown` (snake-case) for back-compat with the
+   * upstream-verbatim port — see compatToolsToModelCallerTools() in
+   * compat/tools/index.ts for the cross-shape transform.
+   */
+  inputSchema?: unknown
+  /**
+   * Tool execution. Optional — Phase 4 buildDefaultTools() wires a stub
+   * `call` for each registered tool; Phase 5 replaces stubs with real
+   * Bash/Read/Write/Edit/AskUserQuestion implementations. The compat
+   * openccAdapter.ts tool-use loop invokes this when the model emits a
+   * `content_block_start { type: 'tool_use' }` block.
+   *
+   * Args: (input, ctx) where:
+   *   - input: the parsed JSON from the model's tool_use block (validated
+   *     by the tool's zod schema inside the executor).
+   *   - ctx:  runtime context. 最小只要求 `{ cwd }`; openccAdapter 在
+   *     调工具时还会塞 sessionId / toolUseId / abortSignal / askRegistry /
+   *     onYield 等可选字段 — 见 `ToolCallCtx`。
+   *
+   * Returns: `{ output: string }` (preferred) or any value with a string
+   * `output` / `content` field that the adapter flattens.
+   */
+  call?: (args: unknown, ctx?: ToolCallCtx) => Promise<unknown>
+}
+
+/**
+ * openccAdapter 传给 `Tool.call(input, ctx)` 的上下文。
+ *
+ * `cwd` / `sessionId` / `toolUseId` / `abortSignal` 是只读元数据;
+ * `onYield` 允许工具 (典型是 AskUserQuestion) 在执行中途向 SSE 通道推
+ * 事件 — adapter 会把 onYield 推的事件先 buffer, 在 tool.call resolve
+ * 之后立即 yiled 到上游, 保证事件顺序 (tool_use:start → ask_pending →
+ * tool_result) 与 translateRuntimeEvents 的 switch 顺序对齐.
+ *
+ * `askRegistry` 是 server 端 AskRegistry 的抽象. AskUserQuestion 用它
+ * 注册/等待用户答复; 没注入时 (例如单测) 走 stub fallback.
+ */
+export type ToolCallCtx = {
+  cwd: string
+  sessionId?: string
+  toolUseId?: string
+  abortSignal?: AbortSignal
+  /**
+   * Push a `RuntimeEvent` to be emitted on the adapter's async generator
+   * after the current `tool.call` resolves. Synchronous only — async
+   * generators inside the tool should call this in order, not await it.
+   */
+  onYield?: (event: Record<string, unknown>) => void
+  /**
+   * AskRegistry abstraction. AskUserQuestion 调用 `register(toolUseId, sessionId, abortSignal)`
+   * 阻塞等待用户答复; resolve 时拿到 `{ questionText: selectedLabel, ... }` map.
+   */
+  askRegistry?: import('./types.js').AskRegistryLike
 }
 
 export type ModelCaller = (req: {

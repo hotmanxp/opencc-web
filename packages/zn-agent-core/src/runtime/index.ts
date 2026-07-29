@@ -1,11 +1,37 @@
-// @zn-ai/zn-agent-core/runtime
+// @zn-ai/zn-agent-core/runtime — public subpath entry.
+//
+// The original implementation re-exported `query`, `QueryEngine`, and
+// `registerProcessOutputErrorHandlers` from `opencc-src/`. That pulled in the
+// full opencc source tree (React JSX, opentelemetry, lodash-es, axios,
+// chalk, etc.) which is Bun-native and not buildable in the current
+// workspace.
+//
+// The actual zai server only consumes the compat layer below — it never
+// imports `query` / `QueryEngine` directly via this subpath. The opencc
+// runtime is wired through `DefaultAgentRuntime` (compat/runtime/contract.ts),
+// which lazy-imports `opencc-src/query.js` at call time inside a `try/catch`
+// and throws a friendly error if opencc is not vendored.
+//
+// `query` / `QueryEngine` are exposed as throwing stubs (see
+// `openccStubs.ts`) so any code that bypasses `DefaultAgentRuntime` gets a
+// clear actionable error. `registerProcessOutputErrorHandlers` is
+// inlined because it is just EPIPE wiring and zai's CLI calls it at
+// startup — making it a stub would crash the server on boot.
+
+import { throwNotWired, registerProcessOutputErrorHandlersImpl } from './openccStubs.js'
+
 export { CwdStore } from '../compat/cwdStore.js'
 export { runWithSessionId, getCurrentSessionId } from '../compat/runWithSessionId.js'
-export type { PermissionMode } from '../opencc-src/types/permissions.js'
+export type { PermissionMode } from '../compat/permissions.js'
 
-// Re-export opencc's core runtime pieces
-export { query } from '../opencc-src/query.js'
-export { QueryEngine } from '../opencc-src/QueryEngine.js'
+export function query(..._args: unknown[]): never {
+  throwNotWired('query')
+}
+export class QueryEngine {
+  constructor(..._args: unknown[]) {
+    throwNotWired('QueryEngine constructor')
+  }
+}
 
 // State event bus — zai server subscribes to translate into SSE events
 export {
@@ -14,8 +40,9 @@ export {
   type StateChangeEventMap,
 } from '../stateChangeBus.js'
 
-// Process-output error handlers — wired by zai CLI to surface EPIPE etc.
-export { registerProcessOutputErrorHandlers } from '../opencc-src/utils/process.js'
+export function registerProcessOutputErrorHandlers(): void {
+  registerProcessOutputErrorHandlersImpl()
+}
 
 // Transcript repair — ported from zai's old runtime, lives in compat
 export { repairAndPersistTranscript } from '../compat/transcript/repair.js'

@@ -10,6 +10,9 @@ import {
   resolveOpenccConfigDir,
   setDefaultSandboxManager,
   TranscriptStore,
+  buildDefaultTools,
+  loadSkillsFromDirs,
+  buildSkillsSystemPrompt,
 } from '@zn-ai/zn-agent-core'
 import { eventBus } from './eventBus.js'
 import {
@@ -127,6 +130,32 @@ export function initAgentRuntime(cwd: string): void {
       opencc: {
         configDir: resolveOpenccConfigDir() ?? join(homedir(), '.claude'),
       },
+    },
+    // opencc adapter config — read by compat/runtime/contract.ts::DefaultAgentRuntime.run()
+    // which delegates to compat/runtime/openccAdapter.ts::runOpenccQuery().
+    // Without this block, the adapter sees openccConfig = {} and never wires mcp /
+    // skills / sandbox into opencc's query() params, so the main loop runs with
+    // zero tools and zero capabilities even when the adapter is otherwise wired.
+    openccConfig: {
+      mcpPool: mcpClientPool,
+      mcpServers,
+      skillsDirs: resolveSkillsDirs(),
+      sandbox: resolveSandbox(cwd),
+      // Phase 1.b: openccAdapter calls modelCaller directly instead of
+      // importing opencc's query(). This bypasses the broken opencc vendor
+      // copy and reuses zai's own Anthropic SDK wrapper.
+      modelCaller: createAnthropicModelCaller(),
+      // Phase 4: register the default tool set (Bash/Read/Edit/Write/
+      // AskUserQuestion/Skill) so the model sees them. Tool execution is
+      // still stubbed in Phase 4 — model emits tool_use blocks (→ SSE
+      // `runtime.tool_call`), `call()` returns a Phase-4 stub message.
+      // Real execution loop lands in Phase 5.
+      tools: buildDefaultTools({ skillsDirs: resolveSkillsDirs() }),
+      // AskUserQuestion 的等待表: 工具 call 时挂起, 等用户 POST /api/agent/answer
+      // 才 resolve. 不传的话 AskUserQuestion 走 stub (返回 "askRegistry not
+      // configured"), QuestionCard 永远不弹. 把 server 启动时建的 askRegistry
+      // 单例直接挂上, 跨 session 复用.
+      askRegistry,
     },
     ...(mcpClientPool && mcpServers.length > 0 ? { mcpClientPool, mcpServers } : {}),
     ...(resolveSandbox(cwd) ? { sandbox: resolveSandbox(cwd) } : {}),

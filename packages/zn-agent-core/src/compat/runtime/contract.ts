@@ -42,14 +42,16 @@ export class DefaultAgentRuntime implements AgentRuntime {
    * Run a query and yield RuntimeEvents.
    *
    * Delegates to `runOpenccQuery(opts, openccConfig)` in `./openccAdapter.ts`,
-   * which translates `QueryOptions` → `QueryParams`, calls opencc's
-   * `query(params)` lazily (so module load does not pull in `bun:bundle`),
-   * wraps each event with zai meta fields (eventId / sessionId / ts / turnIndex),
-   * and converts opencc errors / aborts / soft stream-end into RuntimeEvents.
+   * which bypasses opencc's `query()` (the opencc vendor copy at
+   * `src/opencc-src/` is Bun-only — it imports `bun:bundle` / `bun:feature`,
+   * which crash under Node). The adapter calls zai's own `modelCaller`
+   * (Anthropic SDK) directly and runs tool.call() with the compat tools,
+   * so it works under both Node/tsx and Bun.
    *
-   * Bun runtime is required (opencc's `bun:bundle` imports crash in Node); the
-   * adapter yields a `runtime.error` and returns early when not running under
-   * Bun.
+   * Bun vs Node: this code path is runtime-agnostic. zai's `dev` script
+   * uses tsx (Node) by default — Bun is no longer required. If you ever
+   * need to call opencc's `query()` for some reason, that path WILL
+   * require Bun — but the runtime path here doesn't go through it.
    */
   run(opts: QueryOptions): AsyncIterable<RuntimeEvent> {
     // openccConfig is the optional subset of this.config that the adapter consumes.
