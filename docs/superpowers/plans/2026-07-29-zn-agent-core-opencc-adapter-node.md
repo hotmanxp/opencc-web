@@ -1405,7 +1405,7 @@ Before:
 
 After:
 ```json
-"dev": "tsx --import ./node_modules/@zn-ai/zn-agent-core/dist/compat/runtime/bun-protocol.mjs src/cli/index.ts dev"
+"dev": "tsx --loader ./node_modules/@zn-ai/zn-agent-core/dist/compat/runtime/bun-protocol.mjs src/cli/index.ts dev"
 ```
 
 (Note the path: `dist/compat/runtime/`, NOT `dist/runtime/`. The source file is `src/compat/runtime/bun-protocol.mjs` and tsx preserves the directory structure when emitting.)
