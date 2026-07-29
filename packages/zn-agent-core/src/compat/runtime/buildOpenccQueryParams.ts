@@ -25,20 +25,66 @@
 
 import { randomUUID } from 'node:crypto'
 import type { QueryOptions, OpenccAdapterConfig, QueryParamsOutput } from './types.js'
+import type { ModelCaller } from './modelCaller.js'
 
-/** Minimal deps — see opencc-src/query/deps.ts:QueryDeps. */
-function stubDeps() {
+/**
+ * Translate opencc's `queryModelWithStreaming` request to zai's
+ * `ModelCaller` request, call the zai ModelCaller, and yield its
+ * events through. The two event shapes are structurally identical
+ * (both based on Anthropic's `BetaRawMessageStreamEvent`:
+ * `message_start` / `content_block_*` / `message_delta` /
+ * `message_stop` / `error`), so events pass through with `as any`.
+ *
+ * `thinkingConfig` from opencc is intentionally dropped — zai's
+ * ModelCaller doesn't have an equivalent slot; thinking is configured
+ * via env / settings on the ModelCaller instance itself.
+ */
+async function* translateCallModel(
+  openccReq: {
+    messages: unknown
+    systemPrompt: unknown
+    tools: unknown
+    signal: AbortSignal
+    options?: { model?: string }
+    thinkingConfig?: unknown
+  },
+  zaiModelCaller: ModelCaller,
+): AsyncGenerator<any> {
+  const zaiReq = {
+    model: openccReq.options?.model ?? 'unknown',
+    systemPrompt: openccReq.systemPrompt as any,
+    messages: openccReq.messages as any,
+    tools: openccReq.tools as any,
+    signal: openccReq.signal,
+  }
+  const stream = zaiModelCaller(zaiReq) as AsyncIterable<any>
+  for await (const ev of stream) {
+    yield ev
+  }
+}
+
+/**
+ * Build the opencc `deps` object.
+ *
+ * If `zaiModelCaller` is supplied (production case: zai-server populates
+ * `openccConfig.modelCaller` via `createAnthropicModelCaller()`), the
+ * `callModel` field delegates to it through `translateCallModel`.
+ *
+ * If absent, `callModel` throws a clear "not implemented" error so the
+ * bridge yields a `runtime.error` event identifying the missing wire-up.
+ */
+function buildDeps(zaiModelCaller?: ModelCaller) {
+  const callModel = zaiModelCaller
+    ? (openccReq: any) => translateCallModel(openccReq, zaiModelCaller)
+    : async () => {
+        throw new Error(
+          '[openccQueryBridge] deps.callModel not implemented. ' +
+            'Wire zai ModelCaller via OpenccAdapterConfig.modelCaller.',
+        )
+      }
+
   return {
-    // callModel is what opencc actually uses to talk to the LLM. Until
-    // a real Anthropic (or alternate) client is wired, throw a
-    // recognisable error so the bridge yields a runtime.error and the
-    // SSE stream surfaces the missing-wiring to the UI.
-    callModel: async () => {
-      throw new Error(
-        '[openccQueryBridge] deps.callModel not implemented. ' +
-          'Future work: pipe zai modelCaller through here (or wire an opencc-compatible Anthropic client).',
-      )
-    },
+    callModel,
     // compact: pass-through. opencc calls these only when context grows;
     // for short prompts we never hit them.
     microcompact: async (messages: any[]) => ({ messages, tokensSaved: 0 }),
@@ -156,7 +202,7 @@ export async function buildOpenccQueryParams(
     querySource: 'sdk',
     maxTurns: opts.maxTurns ?? 50,
     skipCacheWrite: true,
-    deps: stubDeps(),
+    deps: buildDeps(config.modelCaller),
     agentStepLimit: undefined,
     mcpServers: config.mcpPool ? [config.mcpPool] : undefined,
     hookRuntime: config.hookRunner,

@@ -42,16 +42,17 @@ async function importOpenccSrc() {
       const queryPath = join(OPENCC_SRC_DIR, 'query.js')
       return await import(queryPath)
     } catch (err: any) {
-      // Two Node error shapes:
+      // Three error shapes we accept (Node direct, Node via loader, Vite):
       //   (a) `Cannot find module 'X.js'`
       //   (b) `Failed to load url X.js (resolved id: ...) in <file>. Does the file exist?`
+      //   (c) Vite: `Failed to resolve import "X" from "<file>". Does the file exist?`
       const missingSpec =
         err.message?.match(/Cannot find module ['"]([^'"]+)['"]/i)?.[1] ??
-        err.message?.match(/Failed to load url ([^\s(]+)/i)?.[1]
+        err.message?.match(/Failed to load url ([^\s(]+)/i)?.[1] ??
+        err.message?.match(/Failed to resolve import ['"]([^'"]+)['"]/i)?.[1]
       const importedFrom =
-        err.message?.match(
-          /Failed to load url .* in (\S+?)\. Does the file exist\?/i,
-        )?.[1]
+        err.message?.match(/Failed to load url .* in (\S+?)\. Does the file exist\?/i)?.[1] ??
+        err.message?.match(/Failed to resolve import.* from (\S+?)\. Does the file exist\?/i)?.[1]
 
       // Vendored opencc-src/ is read-only. If the missing file resolves
       // from inside it (typically a build artifact that the vendored

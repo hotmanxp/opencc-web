@@ -29,6 +29,28 @@ export default defineConfig({
         find: /^src\/(.+)$/,
         replacement: resolve(OPENCC_SRC_DIR, '$1'),
       },
+      // opencc vendor build artifacts (.generated.js / events_mono).
+      // These don't ship with the vendored source — opencc's internal
+      // build pipeline produces them. We route them all to a single
+      // hand-written stub. The leading `(?:\.\.\/)*` matches one or
+      // more `../` segments so the alias catches relative imports
+      // like `../integrations/generated/foo.generated.js` or
+      // `../../types/generated/events_mono/.../auth.ts`.
+      {
+        find: /(?:\.\.\/)+integrations\/generated\/.*\.generated\.js$/,
+        replacement: resolve(__dirname, 'src/compat/dangling-shims/opencc-generated.ts'),
+      },
+      {
+        find: /(?:\.\.\/)+types\/generated\/.*\.ts$/,
+        replacement: resolve(__dirname, 'src/compat/dangling-shims/opencc-generated.ts'),
+      },
+      // Small npm packages opencc vendor references but that aren't in
+      // our `dependencies`. Add more as the bridge's vendored-reference
+      // check surfaces them.
+      {
+        find: /^env-paths$/,
+        replacement: resolve(__dirname, 'src/compat/dangling-shims/env-paths.ts'),
+      },
     ],
   },
   test: {
