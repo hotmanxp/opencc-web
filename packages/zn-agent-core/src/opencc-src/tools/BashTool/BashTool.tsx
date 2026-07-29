@@ -1,4 +1,4 @@
-import { feature } from '../../shims/bun-bundle.js';
+import { feature } from 'bun:bundle';
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import { copyFile, stat as fsStat, link, unlink } from 'fs/promises';
 import { createReadStream, createWriteStream } from 'fs';
@@ -1293,7 +1293,7 @@ async function* runShellCommand({
           }, setAppState, toolUseId);
         }
         setToolJSX({
-          jsx: <BackgroundHint />,
+          jsx: null,
           shouldHidePromptInput: false,
           shouldContinueAnimation: true,
           showSpinner: true

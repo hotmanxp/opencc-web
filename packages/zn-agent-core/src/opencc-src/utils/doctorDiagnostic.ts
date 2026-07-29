@@ -93,6 +93,7 @@ export function getNativeInstallUnavailableFix(
 export type InstallationType =
   | 'npm-global'
   | 'npm-local'
+  | 'pnpm-global'
   | 'native'
   | 'package-manager'
   | 'development'

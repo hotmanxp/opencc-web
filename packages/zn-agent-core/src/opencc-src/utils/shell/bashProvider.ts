@@ -1,4 +1,4 @@
-import { feature } from '../../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 import { access } from 'fs/promises'
 import { tmpdir as osTmpdir } from 'os'
 import { join as nativeJoin } from 'path'

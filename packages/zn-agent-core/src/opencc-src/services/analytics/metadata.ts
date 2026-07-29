@@ -39,7 +39,7 @@ import {
   getTeamName,
   isTeammate,
 } from '../../utils/teammate.js'
-import { feature } from '../../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 
 /**
  * Marker type for verifying analytics metadata doesn't contain sensitive data

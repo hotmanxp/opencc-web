@@ -1,4 +1,4 @@
-import { feature } from '../../../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 import type { PendingClassifierCheck } from '../../../types/permissions.js'
 import { logError } from '../../../utils/log.js'
 import type { PermissionDecision } from '../../../utils/permissions/PermissionResult.js'

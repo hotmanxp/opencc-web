@@ -1,4 +1,4 @@
-import { feature } from '../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 import type { WriteFileOptions } from 'fs'
 import {
   closeSync,

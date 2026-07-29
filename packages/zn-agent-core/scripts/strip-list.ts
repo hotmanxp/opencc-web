@@ -19,11 +19,20 @@ export const STRIP_DIRS: string[] = [
   'cli',
   'commands',
 
-  // UI state store (Zustand React-coupled) — KEPT for now: many opencc
-  // files do `import type { AppState } from './state/AppState.js'`, and
-  // composite: true makes tsc resolve type-only imports too. Will need a
-  // shim/stub in Task 8+ before this can be safely stripped.
-  // 'state',
+  // UI state store (Zustand React-coupled) — Phase 2: STRIP now.
+  // zai uses its own Zustand store; opencc's AppState is React-coupled.
+  // Type-only imports of AppState from opencc-src files get a .d.ts shim.
+  'state',
+
+  // Tasks — zai uses its own background runtime (BackgroundRuntime)
+  'tasks/RemoteAgentTask',
+  'tasks/InProcessTeammateTask',
+  'tasks/LocalShellTask',
+  'tasks/LocalAgentTask',
+
+  // JSX-heavy prompt rendering
+  'utils/processUserInput',
+  'utils/swarm',
 
   // Internalizing UI voice bridge
   'services/voice',
@@ -98,6 +107,20 @@ export const STRIP_TOP_FILES: string[] = [
   'utils/semver.ts',                  // optional — uses bun:semver / npm semver
   'utils/task/framework.ts',          // uses AppState UI
   'utils/plugins/performStartupChecks.tsx',
+
+  // Phase 2: UI-only utilities (B class — pure JSX rendering)
+  'utils/teleport.tsx',
+  'utils/status.tsx',
+  'utils/preflightChecks.tsx',
+  'utils/highlightMatch.tsx',
+  'utils/staticRender.tsx',
+  'utils/autoRunIssue.tsx',
+
+  // Phase 2: zai uses its own canUseTool, not the React-coupled one
+  'hooks/useCanUseTool.tsx',
+
+  // Phase 2: tool test fixtures using JSX
+  'tools/testing/TestingPermissionTool.tsx',
 ]
 
 /**
@@ -135,7 +158,9 @@ export const STRIP_FILE_PATTERNS: string[] = [
  * core logic (keep). Explicitly listed keepers.
  */
 export const KEEP_HOOKS: string[] = [
-  'useCanUseTool.tsx',
+  // Phase 2: useCanUseTool.tsx — stripped (zai has its own canUseTool.ts).
+  // Remaining entries: pure logic hooks zai doesn't use either, but kept
+  // for now since they're .ts (no JSX); will assess in Phase 4.
   'useMergedTools.ts',
   'useMergedClients.ts',
   'useQueueProcessor.ts',

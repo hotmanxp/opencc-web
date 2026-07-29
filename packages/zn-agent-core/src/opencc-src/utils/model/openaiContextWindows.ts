@@ -3,24 +3,41 @@
  * Context window sizes for OpenAI-compatible models used via the shim.
  * Fixes: auto-compact and warnings using wrong 200k default for OpenAI models.
  *
- * When CLAUDE_CODE_USE_OPENAI=1, getContextWindowForModel() falls through to
- * MODEL_CONTEXT_WINDOW_DEFAULT (200k). This causes the warning and blocking
- * thresholds to be set at 200k even for models like gpt-4o (128k) or llama3 (8k),
- * meaning users get no warning before hitting a hard API error.
+* Built-in model limits, including legacy aliases, live in
+ * src/integrations/models. These helpers preserve the documented JSON env
+ * override path for custom/private deployments and a `modelLimits` settings
+ * map for the same effect via settings.json.
+ *
+ * This module only produces the *override candidates* (exact/prefix env-var
+ * matches and the settings `modelLimits` match); it does not decide the overall
+ * precedence. The authoritative runtime chain — exact env override, then the
+ * catalog/discovery cache, then the prefix env override, then settings
+ * `modelLimits`, then the descriptor default — is applied by
+ * resolveModelRuntimeLimits in integrations/runtimeMetadata.ts. Keep precedence
+ * changes there, not duplicated here.
  *
  * Prices in tokens as of April 2026 — update as needed.
  */
 
-// ── Upstream helpers: dynamic env-var overrides ──────────────────────────
+import { getInitialSettings } from '../settings/settings.js'
 
 type LimitEnvVar =
   | 'CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS'
   | 'CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS'
 
 export type OpenAILimitOverrideMatches = {
+  // Exact env-var override match.
   exact?: number
+  // settings.json `modelLimits` match (exact or prefix). Just a candidate here;
+  // its position in the overall precedence is decided by resolveModelRuntimeLimits
+  // (integrations/runtimeMetadata.ts), which applies settings after the exact and
+  // prefix env overrides and the catalog/discovery cache.
+  settings?: number
+  // Prefix env-var override match.
   prefix?: number
 }
+
+type SettingsLimitKey = 'contextWindow' | 'maxOutputTokens'
 
 function readExternalLimits(
   envVarName: LimitEnvVar,
@@ -106,6 +123,14 @@ function lookupByModel(
   const hostQualifiedModel =
     baseUrlHost && modelName ? `${baseUrlHost}:${modelName}` : undefined
 
+  // Match precedence, high to low: host-qualified exact, bare exact,
+  // host-qualified prefix, bare prefix. Within each match kind a host-qualified
+  // key (`<host>:<model>`) beats the bare key, so the same model name can carry
+  // a different limit per endpoint via a host-qualified EXACT key. An exact
+  // match always beats a prefix — including a host-qualified prefix — so a
+  // precise `gpt-4o` entry is not overridden by an `api.foo.com:gpt-4` prefix
+  // that only matches a different, shorter model name. (Consumers read
+  // `exact ?? prefix`.)
   return {
     exact:
       lookupExactByKey(entries, hostQualifiedModel) ??
@@ -630,20 +655,52 @@ function lookupExternalLimit(
   return matches.exact ?? matches.prefix
 }
 
+function readSettingsLimits(key: SettingsLimitKey): Record<string, number> {
+  let limits: unknown
+  try {
+    limits = getInitialSettings().modelLimits
+  } catch {
+    return {}
+  }
+  if (!limits || typeof limits !== 'object' || Array.isArray(limits)) {
+    return {}
+  }
+  const result: Record<string, number> = {}
+  for (const [modelName, entry] of Object.entries(limits)) {
+    if (!entry || typeof entry !== 'object') continue
+    const value = (entry as Record<string, unknown>)[key]
+    if (typeof value === 'number' && Number.isFinite(value) && value > 0) {
+      const trimmed = modelName.trim()
+      if (trimmed.length > 0) {
+        result[trimmed] = value
+      }
+    }
+  }
+  return result
+}
+
+function lookupSettingsLimit(
+  key: SettingsLimitKey,
+  model: string | undefined,
+  processEnv: NodeJS.ProcessEnv,
+): number | undefined {
+  const matches = lookupByModel(readSettingsLimits(key), model, processEnv)
+  return matches.exact ?? matches.prefix
+}
+
 export function getOpenAIContextWindow(
   model: string | undefined,
   processEnv: NodeJS.ProcessEnv = process.env,
 ): number | undefined {
-  // 1. Dynamic env-var override (upstream behavior)
-  const envOverride = lookupExternalLimit(
-    'CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS',
-    model,
-    processEnv,
+  return (
+    lookupExternalLimit(
+      'CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS',
+      model,
+      processEnv,
+    ) ??
+    lookupSettingsLimit('contextWindow', model, processEnv) ??
+    (model ? lookupByKey(OPENAI_CONTEXT_WINDOWS, model) : undefined)
   )
-  if (envOverride !== undefined) return envOverride
-  // 2. Static table fallback (local)
-  if (model === undefined) return undefined
-  return lookupByKey(OPENAI_CONTEXT_WINDOWS, model)
 }
 
 /**
@@ -657,36 +714,41 @@ export function getOpenAIContextWindowMatches(
   model: string | undefined,
   processEnv: NodeJS.ProcessEnv = process.env,
 ): OpenAILimitOverrideMatches {
-  return lookupExternalLimitMatches(
-    'CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS',
-    model,
-    processEnv,
-  )
+  return {
+    ...lookupExternalLimitMatches(
+      'CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS',
+      model,
+      processEnv,
+    ),
+    settings: lookupSettingsLimit('contextWindow', model, processEnv),
+  }
 }
 
 export function getOpenAIMaxOutputTokens(
   model: string | undefined,
   processEnv: NodeJS.ProcessEnv = process.env,
 ): number | undefined {
-  // 1. Dynamic env-var override (upstream behavior)
-  const envOverride = lookupExternalLimit(
-    'CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS',
-    model,
-    processEnv,
+  return (
+    lookupExternalLimit(
+      'CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS',
+      model,
+      processEnv,
+    ) ??
+    lookupSettingsLimit('maxOutputTokens', model, processEnv) ??
+    (model ? lookupByKey(OPENAI_MAX_OUTPUT_TOKENS, model) : undefined)
   )
-  if (envOverride !== undefined) return envOverride
-  // 2. Static table fallback (local)
-  if (model === undefined) return undefined
-  return lookupByKey(OPENAI_MAX_OUTPUT_TOKENS, model)
 }
 
 export function getOpenAIMaxOutputTokenMatches(
   model: string | undefined,
   processEnv: NodeJS.ProcessEnv = process.env,
 ): OpenAILimitOverrideMatches {
-  return lookupExternalLimitMatches(
-    'CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS',
-    model,
-    processEnv,
-  )
+  return {
+    ...lookupExternalLimitMatches(
+      'CLAUDE_CODE_OPENAI_MAX_OUTPUT_TOKENS',
+      model,
+      processEnv,
+    ),
+    settings: lookupSettingsLimit('maxOutputTokens', model, processEnv),
+  }
 }

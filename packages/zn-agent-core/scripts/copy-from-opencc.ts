@@ -67,6 +67,9 @@ function shouldStrip(relPath: string): boolean {
 function listFiles(dir: string, base = dir, parentRel = ''): string[] {
   const out: string[] = []
   for (const entry of readdirSync(dir)) {
+    // Skip opencc's bundled node_modules (it has nested pnpm dirs that
+    // cause symlink loops). We only want opencc's own src/ files.
+    if (entry === 'node_modules') continue
     const full = join(dir, entry)
     const st = statSync(full)
     const rel = relative(base, full).split(sep).join('/')

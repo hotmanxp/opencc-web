@@ -1,4 +1,4 @@
-import { feature } from '../../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
 import {
   getAllowedChannels,
