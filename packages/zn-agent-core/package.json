@@ -16,10 +16,11 @@
     "./agents/memoryWatcher": "./dist/agents/memoryWatcher.js"
   },
   "files": [
-    "dist/"
+    "dist/",
+    "scripts/copy-runtime-assets.mjs"
   ],
   "scripts": {
-    "build": "tsc -b",
+    "build": "tsc -b && node scripts/copy-runtime-assets.mjs",
     "dev": "tsc -b --watch",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",

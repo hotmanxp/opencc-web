@@ -37,6 +37,14 @@ export default defineConfig({
     outDir: 'dist/web',
     emptyOutDir: true,
     rollupOptions: {
+      external: [
+        'bun:bundle',
+        'bun:feature',
+        // Match opencc-src by both relative path (if Vite sees the source string)
+        // and absolute path (if Vite resolves through the bridge's constructed
+        // import path). The regex matches anywhere in the path.
+        /opencc-src\//,
+      ],
       output: {
         manualChunks: (id) => {
           if (!id.includes('node_modules')) return undefined;

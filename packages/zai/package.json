@@ -13,7 +13,7 @@
     "dist/"
   ],
   "scripts": {
-    "dev": "tsx src/cli/index.ts dev",
+    "dev": "tsx --loader ./node_modules/@zn-ai/zn-agent-core/dist/compat/runtime/bun-protocol.mjs src/cli/index.ts dev",
     "build": "tsc -b --force && npm run build:web",
     "build:web": "vite build --outDir dist/web",
     "start": "node dist/cli/index.js start",
