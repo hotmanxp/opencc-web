@@ -16,6 +16,8 @@ export default defineConfig({
   resolve: {
     alias: {
       '@shared': resolve(projectRoot, 'src', 'shared'),
+      'bun:bundle': resolve(projectRoot, 'node_modules/@zn-ai/zn-agent-core/src/compat/runtime/bun-shim.ts'),
+      'bun:feature': resolve(projectRoot, 'node_modules/@zn-ai/zn-agent-core/src/compat/runtime/bun-feature-shim.ts'),
     },
   },
   server: {
