@@ -67,10 +67,35 @@ describe('translateSdkToRuntime', () => {
     }
     const events = [...translateSdkToRuntime(msg, { ...meta, eventCounter: 5 })]
     for (const event of events) {
-      expect(event.eventId).toBe('evt-5')
+      expect(event.eventId).toMatch(/^evt-5(\.\d+)?$/)
       expect(event.sessionId).toBe('s1')
       expect(event.turnIndex).toBe(0)
       expect(typeof event.ts).toBe('number')
     }
+    // All emitted events from one message must have distinct eventIds
+    // (per-event uniqueness, required by SSE Last-Event-ID / dedupe).
+    const ids = events.map((event) => event.eventId)
+    expect(new Set(ids).size).toBe(ids.length)
+  })
+
+  it('translates thinking content blocks to thinking_delta + content_block{type:"thinking"}', () => {
+    const msg = {
+      type: 'assistant',
+      message: {
+        id: 'msg_2',
+        model: 'm',
+        content: [{ type: 'thinking', thinking: 'reasoning about the problem' }],
+        stop_reason: null,
+      },
+    }
+    const events = [...translateSdkToRuntime(msg, { ...meta, eventCounter: 1 })]
+    const start = events.find((event) => event.type === 'content_block_start')
+    expect(start?.content_block).toMatchObject({ type: 'thinking', thinking: '' })
+    const delta = events.find((event) => event.type === 'content_block_delta')
+    expect(delta?.delta).toMatchObject({
+      type: 'thinking_delta',
+      thinking: 'reasoning about the problem',
+    })
+    expect(events.map((event) => event.type)).toContain('content_block_stop')
   })
 })
