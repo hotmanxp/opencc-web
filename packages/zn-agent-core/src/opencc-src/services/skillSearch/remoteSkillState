@@ -1,0 +1,18 @@
+// @ts-nocheck
+/**
+ * AUTO-GENERATED STUB — Phase 1 placeholder.
+ *
+ * Created by /tmp/gen-stubs.mjs to satisfy the import graph rooted at
+ * `opencc-src/query.ts`. The real implementation is opencc 0.20.0's
+ * `services/skillSearch/remoteSkillState`, which was not vendored into this package (UI/Ink/memdir/etc.
+ * subsystems were stripped out). The runtime either:
+ *  - never reaches this module under the zai path (zai uses its own
+ *    runtime), or
+ *  - needs this to throw a clear "not wired" error so the failure is
+ *    diagnosable.
+ *
+ * Do NOT add real logic here. When the underlying capability is needed,
+ * implement it as a `compat/` shim that delegates to the zai-side
+ * implementation, not as a vendored opencc copy.
+ */
+throw new Error('[zn-agent-core stub] opencc-src/services/skillSearch/remoteSkillState not wired in zai build. The runtime should not reach this path; if it does, file a bug against compat/runtime/openccAdapter.ts.')

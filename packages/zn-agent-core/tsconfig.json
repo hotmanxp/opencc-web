@@ -14,5 +14,11 @@
     "sourceMap": true
   },
   "include": ["src/**/*.ts", "src/**/*.tsx"],
-  "exclude": ["node_modules", "dist", "test", "**/*.test.ts"]
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "**/*.test.ts",
+    "src/opencc-src"
+  ]
 }
