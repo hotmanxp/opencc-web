@@ -114,7 +114,7 @@ const autoModeStateModule = true
   ? (require('../../utils/permissions/autoModeState.js') as typeof import('../../utils/permissions/autoModeState.js'))
   : null
 
-import { feature } from 'bun:bundle'
+import { feature } from '../../shims/bun-bundle.js'
 import type { ClientOptions } from '@anthropic-ai/sdk'
 import {
   APIError,

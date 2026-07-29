@@ -1,5 +1,5 @@
 import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
-import { feature } from 'bun:bundle'
+import { feature } from '../../shims/bun-bundle.js'
 import memoize from 'lodash-es/memoize.js'
 import { basename } from 'path'
 import type { SettingSource } from 'src/utils/settings/constants.js'

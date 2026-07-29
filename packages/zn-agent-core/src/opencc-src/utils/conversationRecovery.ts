@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { feature } from 'bun:bundle'
+import { feature } from '../shims/bun-bundle.js'
 import type { UUID } from 'crypto'
 import { relative } from 'path'
 import { getCwd } from 'src/utils/cwd.js'

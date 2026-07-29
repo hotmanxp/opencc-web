@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { feature } from 'bun:bundle'
+import { feature } from '../../shims/bun-bundle.js'
 import { z } from 'zod/v4'
 import { clearInvokedSkillsForAgent } from '../../bootstrap/state.js'
 import {

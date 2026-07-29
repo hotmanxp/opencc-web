@@ -1,4 +1,4 @@
-import { feature } from 'bun:bundle'
+import { feature } from '../shims/bun-bundle.js'
 import { chmod, mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import {

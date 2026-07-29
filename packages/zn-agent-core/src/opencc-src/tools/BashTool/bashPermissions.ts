@@ -1,4 +1,4 @@
-import { feature } from 'bun:bundle'
+import { feature } from '../../shims/bun-bundle.js'
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import type { z } from 'zod/v4'
 import {

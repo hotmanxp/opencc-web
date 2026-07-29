@@ -134,7 +134,7 @@ import {
 } from './utils/config.js'
 import { productionDeps, type QueryDeps } from './query/deps.js'
 import type { Terminal, Continue } from './query/transitions.js'
-import { feature } from 'bun:bundle'
+import { feature } from './shims/bun-bundle.js'
 import {
   getCurrentTurnTokenBudget,
   getTurnOutputTokens,
