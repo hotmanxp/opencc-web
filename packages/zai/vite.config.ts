@@ -16,8 +16,12 @@ export default defineConfig({
   resolve: {
     alias: {
       '@shared': resolve(projectRoot, 'src', 'shared'),
-      'bun:bundle': resolve(projectRoot, 'node_modules/@zn-ai/zn-agent-core/src/compat/runtime/bun-shim.ts'),
-      'bun:feature': resolve(projectRoot, 'node_modules/@zn-ai/zn-agent-core/src/compat/runtime/bun-feature-shim.ts'),
+      // bun: protocol shims — alias to dist/ (not src/) so production
+      // builds work even when @zn-ai/zn-agent-core is consumed from npm
+      // (where only dist/ is published). Task 12 Step 1b's
+      // copy-runtime-assets.mjs is responsible for shipping the shims in dist/.
+      'bun:bundle': resolve(projectRoot, 'node_modules/@zn-ai/zn-agent-core/dist/compat/runtime/bun-shim.ts'),
+      'bun:feature': resolve(projectRoot, 'node_modules/@zn-ai/zn-agent-core/dist/compat/runtime/bun-feature-shim.ts'),
     },
   },
   server: {
