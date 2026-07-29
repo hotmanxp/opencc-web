@@ -2,8 +2,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { getWorkflowRegistry } from './singleton.js'
-import type { Workflow } from './types.js'
+import { getWorkflowRegistry } from './singleton.ts'
+import type { Workflow } from './types.ts'
 
 // The runtime tool has a no-arg prompt()/description() that returns the
 // static copy. The Tool interface declares them as `(options) => Promise<string>`,

@@ -1,7 +1,7 @@
 import type React from 'react'
 import { z } from 'zod/v4'
-import type { Tool, ToolResult } from '../../Tool.js'
-import { validateStructuredOutput } from './schemaValidator.js'
+import type { Tool, ToolResult } from '../../Tool.ts'
+import { validateStructuredOutput } from './schemaValidator.ts'
 
 export const STRUCTURED_OUTPUT_TOOL_NAME = 'StructuredOutput'
 

@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
-import type { Diagnostic, DiagnosticFile } from '../diagnosticTracking.js'
+import type { Diagnostic, DiagnosticFile } from '../diagnosticTracking.ts'
 
 const debugMessages: string[] = []
 

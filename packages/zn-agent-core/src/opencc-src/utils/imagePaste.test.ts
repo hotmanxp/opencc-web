@@ -7,7 +7,7 @@ import {
   asImageFilePath,
   LINUX_CLIPBOARD_IMAGE_MIME_TYPES,
   PASTE_THRESHOLD,
-} from './imagePaste.js'
+} from './imagePaste.ts'
 
 describe('LINUX_CLIPBOARD_IMAGE_MIME_TYPES', () => {
   test('includes standard image MIME types', () => {

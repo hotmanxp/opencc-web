@@ -6,7 +6,7 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock.js'
-import * as realTokenEstimation from '../services/tokenEstimation.js'
+import * as realTokenEstimation from '../services/tokenEstimation.ts'
 
 async function loadAnalyzeContextForTesting() {
   return import(`./analyzeContext.js?ts=${Date.now()}-${Math.random()}`)
@@ -65,7 +65,7 @@ describe('approximateMessageTokens', () => {
     try {
       const countMessagesTokensWithAPI = mock(async () => null)
       const countTokensViaHaikuFallback = mock(async () => null)
-      mock.module('../services/tokenEstimation.js', () => ({
+      mock.module('../services/tokenEstimation.ts', () => ({
         ...realTokenEstimation,
         countMessagesTokensWithAPI,
         countTokensViaHaikuFallback,

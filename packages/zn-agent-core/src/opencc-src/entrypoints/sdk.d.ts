@@ -195,7 +195,7 @@ import type {
   SDKMessage,
   SDKUserMessage,
   SDKResultMessage,
-} from './sdk/coreTypes.generated.js'
+} from './sdk/coreTypes.generated.ts'
 
 export type {
   AccountInfo,
@@ -206,7 +206,7 @@ export type {
   SDKMessage,
   SDKUserMessage,
   SDKResultMessage,
-} from './sdk/coreTypes.generated.js'
+} from './sdk/coreTypes.generated.ts'
 
 export type SDKControlInitializeResponse = {
   commands: SlashCommand[]

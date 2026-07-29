@@ -1,43 +1,43 @@
 import { feature } from 'bun:bundle'
 import { stat } from 'fs/promises'
-import { getClientType } from '../bootstrap/state.js'
-import { getRemoteSessionUrl, isRemoteSessionLocal } from '../constants/product.js'
-import { isEnvTruthy } from './envUtils.js'
-import { TERMINAL_OUTPUT_TAGS } from '../constants/xml.js'
+import { getClientType } from '../bootstrap/state.ts'
+import { getRemoteSessionUrl, isRemoteSessionLocal } from '../constants/product.ts'
+import { isEnvTruthy } from './envUtils.ts'
+import { TERMINAL_OUTPUT_TAGS } from '../constants/xml.ts'
 import type { AppState } from '../state/AppState.js'
-import { FILE_EDIT_TOOL_NAME } from '../tools/FileEditTool/constants.js'
-import { FILE_READ_TOOL_NAME } from '../tools/FileReadTool/constants.js'
-import { FILE_WRITE_TOOL_NAME } from '../tools/FileWriteTool/prompt.js'
-import { GLOB_TOOL_NAME } from '../tools/GlobTool/prompt.js'
-import { GREP_TOOL_NAME } from '../tools/GrepTool/prompt.js'
-import type { Entry } from '../types/logs.js'
+import { FILE_EDIT_TOOL_NAME } from '../tools/FileEditTool/constants.ts'
+import { FILE_READ_TOOL_NAME } from '../tools/FileReadTool/constants.ts'
+import { FILE_WRITE_TOOL_NAME } from '../tools/FileWriteTool/prompt.ts'
+import { GLOB_TOOL_NAME } from '../tools/GlobTool/prompt.ts'
+import { GREP_TOOL_NAME } from '../tools/GrepTool/prompt.ts'
+import type { Entry } from '../types/logs.ts'
 import {
   type AttributionData,
   calculateCommitAttribution,
   isInternalModelRepo,
   isInternalModelRepoCached,
   sanitizeModelName,
-} from './commitAttribution.js'
-import { logForDebugging } from './debug.js'
-import { parseJSONL } from './json.js'
-import { logError } from './log.js'
-import { getAPIProvider } from './model/providers.js'
+} from './commitAttribution.ts'
+import { logForDebugging } from './debug.ts'
+import { parseJSONL } from './json.ts'
+import { logError } from './log.ts'
+import { getAPIProvider } from './model/providers.ts'
 import {
   getGitAttributionOptIns,
   isGeneratedCommitAttributionBlocked,
   isGeneratedPrAttributionBlocked,
-} from './governancePolicy.js'
+} from './governancePolicy.ts'
 import {
   getCanonicalName,
   getMainLoopModel,
   getPublicModelDisplayName,
   getPublicModelName,
-} from './model/model.js'
-import { isMemoryFileAccess } from './sessionFileAccessHooks.js'
-import { getTranscriptPath } from './sessionStorage.js'
-import { readTranscriptForLoad } from './sessionStoragePortable.js'
-import { getInitialSettings } from './settings/settings.js'
-import { isUndercover } from './undercover.js'
+} from './model/model.ts'
+import { isMemoryFileAccess } from './sessionFileAccessHooks.ts'
+import { getTranscriptPath } from './sessionStorage.ts'
+import { readTranscriptForLoad } from './sessionStoragePortable.ts'
+import { getInitialSettings } from './settings/settings.ts'
+import { isUndercover } from './undercover.ts'
 
 export type AttributionTexts = {
   commit: string

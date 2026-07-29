@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, spyOn, test } from 'bun:test'
-import type { SettingsJson } from '../../utils/settings/types.js'
-import * as settingsModule from '../../utils/settings/settings.js'
+import type { SettingsJson } from '../../utils/settings/types.ts'
+import * as settingsModule from '../../utils/settings/settings.ts'
 import {
   CLEAR_ROUTE_VALUE,
   buildRouteOptions,
@@ -15,12 +15,12 @@ import {
   readAgentRoute,
   setAgentRoute,
   shadowRemediation,
-} from './agentRouteSettings.js'
-import type { SettingsWithSources } from '../../utils/settings/settings.js'
+} from './agentRouteSettings.ts'
+import type { SettingsWithSources } from '../../utils/settings/settings.ts'
 import {
   getAllowedSettingSources,
   setAllowedSettingSources,
-} from '../../bootstrap/state.js'
+} from '../../bootstrap/state.ts'
 
 const modelOnly: SettingsJson = {
   agentModels: { mini: { model: 'gpt-5-mini' } },

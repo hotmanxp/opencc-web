@@ -13,20 +13,20 @@ import {
   sep,
 } from 'path'
 import { logEvent } from 'src/services/analytics/index.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
-import { getCwd } from '../utils/cwd.js'
-import { logForDebugging } from './debug.js'
-import { isENOENT, isFsInaccessible } from './errors.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.ts'
+import { getCwd } from '../utils/cwd.ts'
+import { logForDebugging } from './debug.ts'
+import { isENOENT, isFsInaccessible } from './errors.ts'
 import {
   detectEncodingForResolvedPath,
   detectLineEndingsForString,
   type LineEndingType,
-} from './fileRead.js'
-import { fileReadCache } from './fileReadCache.js'
-import { getFsImplementation, safeResolvePath } from './fsOperations.js'
-import { logError } from './log.js'
-import { expandPath } from './path.js'
-import { getPlatform } from './platform.js'
+} from './fileRead.ts'
+import { fileReadCache } from './fileReadCache.ts'
+import { getFsImplementation, safeResolvePath } from './fsOperations.ts'
+import { logError } from './log.ts'
+import { expandPath } from './path.ts'
+import { getPlatform } from './platform.ts'
 
 export type File = {
   filename: string

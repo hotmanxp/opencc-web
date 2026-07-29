@@ -1,11 +1,11 @@
 // @ts-nocheck
 import type { BetaUsage as Usage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import type { Attachment } from './attachments.js'
-import { roughTokenCountEstimation, roughTokenCountEstimationForMessages } from '../services/tokenEstimation.js'
-import type { AssistantMessage, Message } from '../types/message.js'
-import { SYNTHETIC_MESSAGES, SYNTHETIC_MODEL } from './messages.js'
-import { jsonStringify } from './slowOperations.js'
-import { IncrementalTokenCounter } from './incrementalTokenCounter.js'
+import type { Attachment } from './attachments.ts'
+import { roughTokenCountEstimation, roughTokenCountEstimationForMessages } from '../services/tokenEstimation.ts'
+import type { AssistantMessage, Message } from '../types/message.ts'
+import { SYNTHETIC_MESSAGES, SYNTHETIC_MODEL } from './messages.ts'
+import { jsonStringify } from './slowOperations.ts'
+import { IncrementalTokenCounter } from './incrementalTokenCounter.ts'
 
 let _tokenCounter: IncrementalTokenCounter | undefined
 

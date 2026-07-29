@@ -23,8 +23,8 @@ import {
   hasEverDispatchedBackgroundAgent,
   renderInbox,
   type InboxMessage,
-} from './mailbox.js'
-import { DaemonError, requestDaemon } from './socket.js'
+} from './mailbox.ts'
+import { DaemonError, requestDaemon } from './socket.ts'
 
 /** Module-level cursor: highest inbox id we've already shown the LLM. */
 let lastInboxAckThrough = 0
@@ -52,7 +52,7 @@ export async function drainBgDaemonInbox(): Promise<{
   // Runtime gate: when the bg-agent feature is disabled, don't
   // touch the daemon socket at all.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const {isBgAgentRuntimeEnabled} = require('./mailbox.js') as {
+  const {isBgAgentRuntimeEnabled} = require('./mailbox.ts') as {
     isBgAgentRuntimeEnabled: () => boolean
   }
   if (!isBgAgentRuntimeEnabled()) {

@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
-import { getEmptyToolPermissionContext } from '../../Tool.js'
-import type { BashCommandAnalysis } from './bashCommandAnalysis.js'
-import { checkPathConstraints } from './pathValidation.js'
+import { getEmptyToolPermissionContext } from '../../Tool.ts'
+import type { BashCommandAnalysis } from './bashCommandAnalysis.ts'
+import { checkPathConstraints } from './pathValidation.ts'
 
 test('fails closed from shared parser failure during path validation', () => {
   const analysis = {

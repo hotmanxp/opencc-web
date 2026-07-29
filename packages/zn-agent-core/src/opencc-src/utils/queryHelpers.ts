@@ -7,35 +7,35 @@ import {
 } from 'src/bootstrap/state.js'
 import type { SDKMessage } from 'src/entrypoints/agentSdkTypes.js'
 import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
-import { runTools } from '../services/tools/toolOrchestration.js'
-import { findToolByName, type Tool, type Tools } from '../Tool.js'
-import { BASH_TOOL_NAME } from '../tools/BashTool/toolName.js'
-import { FILE_EDIT_TOOL_NAME } from '../tools/FileEditTool/constants.js'
-import type { Input as FileReadInput } from '../tools/FileReadTool/FileReadTool.js'
+import { runTools } from '../services/tools/toolOrchestration.ts'
+import { findToolByName, type Tool, type Tools } from '../Tool.ts'
+import { BASH_TOOL_NAME } from '../tools/BashTool/toolName.ts'
+import { FILE_EDIT_TOOL_NAME } from '../tools/FileEditTool/constants.ts'
+import type { Input as FileReadInput } from '../tools/FileReadTool/FileReadTool.ts'
 import {
   FILE_READ_TOOL_NAME,
   FILE_UNCHANGED_STUB,
-} from '../tools/FileReadTool/prompt.js'
-import { FILE_WRITE_TOOL_NAME } from '../tools/FileWriteTool/prompt.js'
-import type { Message } from '../types/message.js'
-import type { OrphanedPermission } from '../types/textInputTypes.js'
-import { logForDebugging } from './debug.js'
-import { isEnvTruthy } from './envUtils.js'
-import { isFsInaccessible } from './errors.js'
-import { getFileModificationTime, stripLineNumberPrefix } from './file.js'
-import { readFileSyncWithMetadata } from './fileRead.js'
+} from '../tools/FileReadTool/prompt.ts'
+import { FILE_WRITE_TOOL_NAME } from '../tools/FileWriteTool/prompt.ts'
+import type { Message } from '../types/message.ts'
+import type { OrphanedPermission } from '../types/textInputTypes.ts'
+import { logForDebugging } from './debug.ts'
+import { isEnvTruthy } from './envUtils.ts'
+import { isFsInaccessible } from './errors.ts'
+import { getFileModificationTime, stripLineNumberPrefix } from './file.ts'
+import { readFileSyncWithMetadata } from './fileRead.ts'
 import {
   createFileStateCacheWithSizeLimit,
   type FileStateCache,
-} from './fileStateCache.js'
-import { isNotEmptyMessage, normalizeMessages } from './messages.js'
-import { expandPath } from './path.js'
+} from './fileStateCache.ts'
+import { isNotEmptyMessage, normalizeMessages } from './messages.ts'
+import { expandPath } from './path.ts'
 import type {
   inputSchema as permissionToolInputSchema,
   outputSchema as permissionToolOutputSchema,
-} from './permissions/PermissionPromptToolResultSchema.js'
+} from './permissions/PermissionPromptToolResultSchema.ts'
 import type { ProcessUserInputContext } from './processUserInput/processUserInput.js'
-import { recordTranscript } from './sessionStorage.js'
+import { recordTranscript } from './sessionStorage.ts'
 
 export type PermissionPromptTool = Tool<
   ReturnType<typeof permissionToolInputSchema>,

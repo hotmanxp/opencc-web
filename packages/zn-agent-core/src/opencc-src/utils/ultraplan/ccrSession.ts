@@ -8,11 +8,11 @@ import type {
   ToolResultBlockParam,
   ToolUseBlock,
 } from '@anthropic-ai/sdk/resources'
-import type { SDKMessage } from '../../entrypoints/agentSdkTypes.js'
-import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../../tools/ExitPlanModeTool/constants.js'
-import { logForDebugging } from '../debug.js'
-import { sleep } from '../sleep.js'
-import { isTransientNetworkError } from '../teleport/api.js'
+import type { SDKMessage } from '../../entrypoints/agentSdkTypes.ts'
+import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../../tools/ExitPlanModeTool/constants.ts'
+import { logForDebugging } from '../debug.ts'
+import { sleep } from '../sleep.ts'
+import { isTransientNetworkError } from '../teleport/api.ts'
 import {
   type PollRemoteSessionResponse,
   pollRemoteSessionEvents,

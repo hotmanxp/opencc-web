@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { afterEach, expect, test } from 'bun:test'
-import { getEmptyToolPermissionContext } from '../Tool.js'
+import { getEmptyToolPermissionContext } from '../Tool.ts'
 import { BashTool } from '../tools/BashTool/BashTool.js'
-import { executeShellCommandsInPrompt } from './promptShellExecution.js'
+import { executeShellCommandsInPrompt } from './promptShellExecution.ts'
 
 const originalCall = BashTool.call
 const originalMapToolResultToToolResultBlockParam =

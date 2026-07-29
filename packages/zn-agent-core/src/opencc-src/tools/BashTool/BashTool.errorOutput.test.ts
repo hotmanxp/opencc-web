@@ -15,9 +15,9 @@ import {
   MAX_PERSISTED_SHELL_OUTPUT_SIZE,
   persistShellOutputFile,
 } from './BashTool.js'
-import { getEmptyToolPermissionContext } from '../../Tool.js'
-import { ShellError } from '../../utils/errors.js'
-import { formatError } from '../../utils/toolErrors.js'
+import { getEmptyToolPermissionContext } from '../../Tool.ts'
+import { ShellError } from '../../utils/errors.ts'
+import { formatError } from '../../utils/toolErrors.ts'
 
 // Regression for #1231 — non-zero exit must not hide captured stdout/stderr.
 // The Bash tool runs with a merged-fd setup (both streams to one file), so

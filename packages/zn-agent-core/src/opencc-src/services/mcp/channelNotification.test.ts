@@ -14,11 +14,11 @@ import {
   getAllowedChannels,
   setAllowedChannels,
   setHasDevChannels,
-} from '../../bootstrap/state.js'
-import type { ChannelEntry } from '../../bootstrap/state.js'
-import { findChannelEntry, gateChannelServer } from './channelNotification.js'
-import { filterPermissionRelayClients } from './channelPermissions.js'
-import { parsePluginIdentifier } from '../../utils/plugins/pluginIdentifier.js'
+} from '../../bootstrap/state.ts'
+import type { ChannelEntry } from '../../bootstrap/state.ts'
+import { findChannelEntry, gateChannelServer } from './channelNotification.ts'
+import { filterPermissionRelayClients } from './channelPermissions.ts'
+import { parsePluginIdentifier } from '../../utils/plugins/pluginIdentifier.ts'
 
 // Re-import the real channelAllowlist module via a cache-busting URL so
 // afterAll can re-register it. This MUST happen before mock.module() below

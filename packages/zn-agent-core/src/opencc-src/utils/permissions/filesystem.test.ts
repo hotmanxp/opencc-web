@@ -4,7 +4,7 @@ import { mkdtemp, mkdir, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { z } from 'zod/v4'
-import type { ToolPermissionContext } from '../../types/permissions.js'
+import type { ToolPermissionContext } from '../../types/permissions.ts'
 import {
   getOriginalCwd,
   getCwdState,
@@ -12,14 +12,14 @@ import {
   setCwdState,
   setOriginalCwd,
   setProjectRoot,
-} from '../../bootstrap/state.js'
+} from '../../bootstrap/state.ts'
 import { getAutoMemPath } from '../../memdir/paths.js'
 import { createToolFixture } from '../../test/toolFixtures.js'
 import {
   checkWritePermissionForTool,
   getResolvedWorkingDirPaths,
-} from './filesystem.js'
-import { resetSafetyLevelCache } from './safetyLevel.js'
+} from './filesystem.ts'
+import { resetSafetyLevelCache } from './safetyLevel.ts'
 import { resetSafetyLevelForTest } from '../../test/safetyLevelTestHelpers.js'
 
 const writeInputSchema = z.object({

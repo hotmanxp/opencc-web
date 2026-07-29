@@ -4,7 +4,7 @@ import {
   builtInCommandNames,
   formatDescriptionWithSource,
 } from './commands.js'
-import { isCommand } from './types/command.js'
+import { isCommand } from './types/command.ts'
 
 describe('builtInCommandNames', () => {
   test('includes the LSP command', () => {

@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, it } from 'bun:test'
-import { extractThinkingTokens } from './tokens.js'
+import { extractThinkingTokens } from './tokens.ts'
 
 describe('extractThinkingTokens', () => {
   it('extracts thinking and output separately', () => {

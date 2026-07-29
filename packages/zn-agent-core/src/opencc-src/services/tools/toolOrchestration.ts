@@ -1,9 +1,9 @@
 import type { ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
-import { findToolByName, type ToolUseContext } from '../../Tool.js'
-import type { AssistantMessage, Message } from '../../types/message.js'
-import { all } from '../../utils/generators.js'
-import { type MessageUpdateLazy, runToolUse } from './toolExecution.js'
+import { findToolByName, type ToolUseContext } from '../../Tool.ts'
+import type { AssistantMessage, Message } from '../../types/message.ts'
+import { all } from '../../utils/generators.ts'
+import { type MessageUpdateLazy, runToolUse } from './toolExecution.ts'
 
 function getMaxToolUseConcurrency(): number {
   return (

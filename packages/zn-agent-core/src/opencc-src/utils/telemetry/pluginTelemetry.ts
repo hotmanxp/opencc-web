@@ -17,16 +17,16 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
   logEvent,
-} from '../../services/analytics/index.js'
+} from '../../services/analytics/index.ts'
 import type {
   LoadedPlugin,
   PluginError,
   PluginManifest,
-} from '../../types/plugin.js'
+} from '../../types/plugin.ts'
 import {
   isOfficialMarketplaceName,
   parsePluginIdentifier,
-} from '../plugins/pluginIdentifier.js'
+} from '../plugins/pluginIdentifier.ts'
 
 // builtinPlugins.ts:BUILTIN_MARKETPLACE_NAME — inlined to avoid the cycle
 // through commands.js. Marketplace schemas.ts enforces 'builtin' is reserved.

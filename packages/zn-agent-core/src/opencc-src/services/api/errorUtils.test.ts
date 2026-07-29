@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import type { APIError } from '@anthropic-ai/sdk'
-import { briefAPIErrorReason } from './errorUtils.js'
+import { briefAPIErrorReason } from './errorUtils.ts'
 
 // Regression coverage for upstream PR #1862 ("honest feedback pass"): the
 // compact retry line in SystemAPIErrorMessage shows whatever phrase this

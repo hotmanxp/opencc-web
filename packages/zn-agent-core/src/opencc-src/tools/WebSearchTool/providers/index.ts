@@ -23,23 +23,23 @@
  *       It is only used when WEB_SEARCH_PROVIDER=custom is explicitly selected.
  */
 
-import type { SearchInput, SearchProvider } from './types.js'
-import type { ProviderOutput } from './types.js'
+import type { SearchInput, SearchProvider } from './types.ts'
+import type { ProviderOutput } from './types.ts'
 
-import { customProvider } from './custom.js'
-import { duckduckgoProvider } from './duckduckgo.js'
-import { firecrawlProvider } from './firecrawl.js'
-import { tavilyProvider } from './tavily.js'
-import { exaProvider } from './exa.js'
-import { youProvider } from './you.js'
-import { jinaProvider } from './jina.js'
-import { bingProvider } from './bing.js'
-import { mojeekProvider } from './mojeek.js'
-import { linkupProvider } from './linkup.js'
+import { customProvider } from './custom.ts'
+import { duckduckgoProvider } from './duckduckgo.ts'
+import { firecrawlProvider } from './firecrawl.ts'
+import { tavilyProvider } from './tavily.ts'
+import { exaProvider } from './exa.ts'
+import { youProvider } from './you.ts'
+import { jinaProvider } from './jina.ts'
+import { bingProvider } from './bing.ts'
+import { mojeekProvider } from './mojeek.ts'
+import { linkupProvider } from './linkup.ts'
 
-export { type SearchInput, type SearchProvider, type ProviderOutput, type SearchHit } from './types.js'
-export { applyDomainFilters, safeHostname, hostMatchesDomain } from './types.js'
-export { extractHits } from './custom.js'
+export { type SearchInput, type SearchProvider, type ProviderOutput, type SearchHit } from './types.ts'
+export { applyDomainFilters, safeHostname, hostMatchesDomain } from './types.ts'
+export { extractHits } from './custom.ts'
 
 // ---------------------------------------------------------------------------
 // All registered providers — order matters for auto mode

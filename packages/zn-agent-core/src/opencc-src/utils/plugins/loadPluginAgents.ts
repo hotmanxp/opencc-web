@@ -1,36 +1,36 @@
 import memoize from 'lodash-es/memoize.js'
 import { basename } from 'path'
 import { isAutoMemoryEnabled } from '../../memdir/paths.js'
-import type { AgentColorName } from '../../tools/AgentTool/agentColorManager.js'
+import type { AgentColorName } from '../../tools/AgentTool/agentColorManager.ts'
 import {
   type AgentMemoryScope,
   loadAgentMemoryPrompt,
-} from '../../tools/AgentTool/agentMemory.js'
-import type { AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js'
-import { FILE_EDIT_TOOL_NAME } from '../../tools/FileEditTool/constants.js'
-import { FILE_READ_TOOL_NAME } from '../../tools/FileReadTool/prompt.js'
-import { FILE_WRITE_TOOL_NAME } from '../../tools/FileWriteTool/prompt.js'
-import { getPluginErrorMessage } from '../../types/plugin.js'
-import { logForDebugging } from '../debug.js'
-import { EFFORT_LEVELS, parseEffortValue } from '../effort.js'
+} from '../../tools/AgentTool/agentMemory.ts'
+import type { AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.ts'
+import { FILE_EDIT_TOOL_NAME } from '../../tools/FileEditTool/constants.ts'
+import { FILE_READ_TOOL_NAME } from '../../tools/FileReadTool/prompt.ts'
+import { FILE_WRITE_TOOL_NAME } from '../../tools/FileWriteTool/prompt.ts'
+import { getPluginErrorMessage } from '../../types/plugin.ts'
+import { logForDebugging } from '../debug.ts'
+import { EFFORT_LEVELS, parseEffortValue } from '../effort.ts'
 import {
   coerceDescriptionToString,
   parseFrontmatter,
   parsePositiveIntFromFrontmatter,
-} from '../frontmatterParser.js'
-import { getFsImplementation, isDuplicatePath } from '../fsOperations.js'
+} from '../frontmatterParser.ts'
+import { getFsImplementation, isDuplicatePath } from '../fsOperations.ts'
 import {
   parseAgentToolsFromFrontmatter,
   parseSlashCommandToolsFromFrontmatter,
-} from '../markdownConfigLoader.js'
-import { loadAllPluginsCacheOnly } from './pluginLoader.js'
+} from '../markdownConfigLoader.ts'
+import { loadAllPluginsCacheOnly } from './pluginLoader.ts'
 import {
   loadPluginOptions,
   substitutePluginVariables,
   substituteUserConfigInContent,
-} from './pluginOptionsStorage.js'
-import type { PluginManifest } from './schemas.js'
-import { walkPluginMarkdown } from './walkPluginMarkdown.js'
+} from './pluginOptionsStorage.ts'
+import type { PluginManifest } from './schemas.ts'
+import { walkPluginMarkdown } from './walkPluginMarkdown.ts'
 
 const VALID_MEMORY_SCOPES: AgentMemoryScope[] = ['user', 'project', 'local']
 

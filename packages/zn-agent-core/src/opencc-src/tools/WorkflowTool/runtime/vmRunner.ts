@@ -1,9 +1,9 @@
 import { existsSync, readFileSync } from 'node:fs'
-import { sealForVmBoundary, isVmBoundaryError } from './vmSealer.js'
-import { createWorkflowVmContext, runWorkflowScript, type WorkflowApi } from './vmContext.js'
-import { stripStringsAndComments } from '../staticAnalyzer.js'
-import { parseMetaFromScript, type ParsedWorkflowMeta } from '../parseMetaFromScript.js'
-import { assertResumeSafe } from '../resumeSafety.js'
+import { sealForVmBoundary, isVmBoundaryError } from './vmSealer.ts'
+import { createWorkflowVmContext, runWorkflowScript, type WorkflowApi } from './vmContext.ts'
+import { stripStringsAndComments } from '../staticAnalyzer.ts'
+import { parseMetaFromScript, type ParsedWorkflowMeta } from '../parseMetaFromScript.ts'
+import { assertResumeSafe } from '../resumeSafety.ts'
 
 export type VmRunnerOpts = {
   /** File path to a workflow script, OR inline source code. */

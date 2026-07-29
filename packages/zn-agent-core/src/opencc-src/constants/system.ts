@@ -1,11 +1,11 @@
 // Critical system constants extracted to break circular dependencies
 
 import { feature } from 'bun:bundle'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
-import { logForDebugging } from '../utils/debug.js'
-import { isEnvDefinedFalsy } from '../utils/envUtils.js'
-import { getAPIProvider } from '../utils/model/providers.js'
-import { getWorkload } from '../utils/workloadContext.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.ts'
+import { logForDebugging } from '../utils/debug.ts'
+import { isEnvDefinedFalsy } from '../utils/envUtils.ts'
+import { getAPIProvider } from '../utils/model/providers.ts'
+import { getWorkload } from '../utils/workloadContext.ts'
 
 const DEFAULT_PREFIX =
   `You are OpenCC, an coding agent and CLI.`

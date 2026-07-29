@@ -1,38 +1,38 @@
 import { promises as fsp } from 'fs'
-import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js'
-import { getSystemPrompt } from '../../constants/prompts.js'
+import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.ts'
+import { getSystemPrompt } from '../../constants/prompts.ts'
 import { isCoordinatorMode } from '../../coordinator/coordinatorMode.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
-import type { ToolUseContext } from '../../Tool.js'
+import type { ToolUseContext } from '../../Tool.ts'
 import { registerAsyncAgent } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
-import { assembleToolPool } from '../../tools.js'
-import { asAgentId } from '../../types/ids.js'
-import { runWithAgentContext } from '../../utils/agentContext.js'
-import { runWithCwdOverride } from '../../utils/cwd.js'
-import { logForDebugging } from '../../utils/debug.js'
+import { assembleToolPool } from '../../tools.ts'
+import { asAgentId } from '../../types/ids.ts'
+import { runWithAgentContext } from '../../utils/agentContext.ts'
+import { runWithCwdOverride } from '../../utils/cwd.ts'
+import { logForDebugging } from '../../utils/debug.ts'
 import {
   createUserMessage,
   filterOrphanedThinkingOnlyMessages,
   filterUnresolvedToolUses,
   filterWhitespaceOnlyAssistantMessages,
-} from '../../utils/messages.js'
-import { getAgentModel } from '../../utils/model/agent.js'
-import { getQuerySourceForAgent } from '../../utils/promptCategory.js'
+} from '../../utils/messages.ts'
+import { getAgentModel } from '../../utils/model/agent.ts'
+import { getQuerySourceForAgent } from '../../utils/promptCategory.ts'
 import {
   getAgentTranscript,
   readAgentMetadata,
-} from '../../utils/sessionStorage.js'
-import { buildEffectiveSystemPrompt } from '../../utils/systemPrompt.js'
-import type { SystemPrompt } from '../../utils/systemPromptType.js'
-import { getTaskOutputPath } from '../../utils/task/diskOutput.js'
-import { getParentSessionId } from '../../utils/teammate.js'
-import { reconstructForSubagentResume } from '../../utils/toolResultStorage.js'
-import { runAsyncAgentLifecycle } from './agentToolUtils.js'
-import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
-import { FORK_AGENT, isForkSubagentEnabled } from './forkSubagent.js'
-import type { AgentDefinition } from './loadAgentsDir.js'
-import { isBuiltInAgent } from './loadAgentsDir.js'
-import { runAgent } from './runAgent.js'
+} from '../../utils/sessionStorage.ts'
+import { buildEffectiveSystemPrompt } from '../../utils/systemPrompt.ts'
+import type { SystemPrompt } from '../../utils/systemPromptType.ts'
+import { getTaskOutputPath } from '../../utils/task/diskOutput.ts'
+import { getParentSessionId } from '../../utils/teammate.ts'
+import { reconstructForSubagentResume } from '../../utils/toolResultStorage.ts'
+import { runAsyncAgentLifecycle } from './agentToolUtils.ts'
+import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.ts'
+import { FORK_AGENT, isForkSubagentEnabled } from './forkSubagent.ts'
+import type { AgentDefinition } from './loadAgentsDir.ts'
+import { isBuiltInAgent } from './loadAgentsDir.ts'
+import { runAgent } from './runAgent.ts'
 
 export type ResumeAgentResult = {
   agentId: string

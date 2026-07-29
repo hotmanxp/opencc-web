@@ -1,6 +1,6 @@
-import { API_IMAGE_MAX_BASE64_SIZE } from '../constants/apiLimits.js'
-import { logEvent } from '../services/analytics/index.js'
-import { formatFileSize } from './format.js'
+import { API_IMAGE_MAX_BASE64_SIZE } from '../constants/apiLimits.ts'
+import { logEvent } from '../services/analytics/index.ts'
+import { formatFileSize } from './format.ts'
 
 /**
  * Information about an oversized image.

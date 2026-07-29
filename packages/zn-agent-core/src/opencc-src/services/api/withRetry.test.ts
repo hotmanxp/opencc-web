@@ -3,7 +3,7 @@ import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 import type Anthropic from '@anthropic-ai/sdk'
 import { APIError, APIUserAbortError } from '@anthropic-ai/sdk'
 import { acquireSharedMutationLock, releaseSharedMutationLock } from '../../test/sharedMutationLock.js'
-import * as debugNs from '../../utils/debug.js'
+import * as debugNs from '../../utils/debug.ts'
 type ProvidersModule = typeof import('../../utils/model/providers.js')
 
 // Helper to build a mock APIError with specific headers

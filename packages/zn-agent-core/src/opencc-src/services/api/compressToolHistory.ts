@@ -20,10 +20,10 @@
  *
  * Anthropic native bypasses both shims, so it is unaffected by this module.
  */
-import { getEffectiveContextWindowSize } from '../compact/autoCompact.js'
-import { isCompactableTool } from '../compact/microCompact.js'
-import { TOOL_RESULT_CLEARED_MESSAGE } from '../../utils/toolResultStorage.js'
-import { getGlobalConfig } from '../../utils/config.js'
+import { getEffectiveContextWindowSize } from '../compact/autoCompact.ts'
+import { isCompactableTool } from '../compact/microCompact.ts'
+import { TOOL_RESULT_CLEARED_MESSAGE } from '../../utils/toolResultStorage.ts'
+import { getGlobalConfig } from '../../utils/config.ts'
 
 // Mid-tier truncation budget. 2k chars ≈ 500 tokens, enough to preserve the
 // shape of most tool outputs (file headers, command stderr, top grep hits)

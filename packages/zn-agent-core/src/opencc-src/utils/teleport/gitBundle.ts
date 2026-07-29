@@ -14,13 +14,13 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
-import { type FilesApiConfig, uploadFile } from '../../services/api/filesApi.js'
-import { getCwd } from '../cwd.js'
-import { logForDebugging } from '../debug.js'
-import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
-import { findGitRoot, gitExe } from '../git.js'
-import { generateTempFilePath } from '../tempfile.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
+import { type FilesApiConfig, uploadFile } from '../../services/api/filesApi.ts'
+import { getCwd } from '../cwd.ts'
+import { logForDebugging } from '../debug.ts'
+import { execFileNoThrowWithCwd } from '../execFileNoThrow.ts'
+import { findGitRoot, gitExe } from '../git.ts'
+import { generateTempFilePath } from '../tempfile.ts'
 
 // Tunable via tengu_ccr_bundle_max_bytes.
 const DEFAULT_BUNDLE_MAX_BYTES = 100 * 1024 * 1024

@@ -9,9 +9,9 @@
 
 import * as fs from 'fs/promises'
 import * as path from 'path'
-import { logForDebugging } from '../debug.js'
-import type { EnvironmentKind } from '../teleport/environments.js'
-import type { TurnStartTime } from './types.js'
+import { logForDebugging } from '../debug.ts'
+import type { EnvironmentKind } from '../teleport/environments.ts'
+import type { TurnStartTime } from './types.ts'
 
 /** Shared debug logger for file persistence modules */
 export function logDebug(message: string): void {

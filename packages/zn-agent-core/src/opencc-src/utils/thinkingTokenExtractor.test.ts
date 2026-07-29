@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, it } from 'bun:test'
-import { ThinkingTokenAnalyzer } from './thinkingTokenExtractor.js'
+import { ThinkingTokenAnalyzer } from './thinkingTokenExtractor.ts'
 
 describe('ThinkingTokenAnalyzer', () => {
   describe('extract', () => {

@@ -13,10 +13,10 @@
 
 import { spawn } from 'child_process'
 import { basename } from 'path'
-import { getGlobalConfig } from '../config.js'
-import { logForDebugging } from '../debug.js'
-import { execFileNoThrow } from '../execFileNoThrow.js'
-import { which } from '../which.js'
+import { getGlobalConfig } from '../config.ts'
+import { logForDebugging } from '../debug.ts'
+import { execFileNoThrow } from '../execFileNoThrow.ts'
+import { which } from '../which.ts'
 
 export type TerminalInfo = {
   name: string

@@ -1,6 +1,6 @@
 // src/tools/WorkflowTool/bundled/deep-research-phases.test.ts
 import { describe, expect, it } from 'bun:test'
-import { deepResearch, deepResearchSource, DEEP_RESEARCH_PHASES } from './deepResearch.js'
+import { deepResearch, deepResearchSource, DEEP_RESEARCH_PHASES } from './deepResearch.ts'
 
 describe('deepResearch metadata', () => {
   it('declares 5 phases matching upstream design', () => {

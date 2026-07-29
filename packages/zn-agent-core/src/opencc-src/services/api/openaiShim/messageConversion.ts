@@ -1,7 +1,7 @@
-import { isEnvTruthy } from '../../../utils/envUtils.js'
-import { logForDebugging } from '../../../utils/debug.js'
-import { hasGeminiApiHost } from './providerUtils.js'
-import type { OpenAIMessage } from './types.js'
+import { isEnvTruthy } from '../../../utils/envUtils.ts'
+import { logForDebugging } from '../../../utils/debug.ts'
+import { hasGeminiApiHost } from './providerUtils.ts'
+import type { OpenAIMessage } from './types.ts'
 
 function convertSystemPrompt(
   system: unknown,

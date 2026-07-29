@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { formatShellPrefixCommand } from './shellPrefix.js'
+import { formatShellPrefixCommand } from './shellPrefix.ts'
 
 describe('formatShellPrefixCommand', () => {
   test('bare executable with no args', () => {

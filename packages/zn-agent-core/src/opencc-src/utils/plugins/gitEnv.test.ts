@@ -4,7 +4,7 @@ import {
   __resetGitEnvWarningForTesting,
   buildGitChildEnv,
   sanitizeEnvForGit,
-} from './gitEnv.js'
+} from './gitEnv.ts'
 
 describe('sanitizeEnvForGit', () => {
   test('drops values containing LF', () => {

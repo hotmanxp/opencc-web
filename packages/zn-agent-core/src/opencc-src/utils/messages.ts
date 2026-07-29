@@ -1,6 +1,6 @@
 // @ts-nocheck — pre-existing typecheck debt, see docs/feature-gating.md
 import { feature } from 'bun:bundle'
-import { getAPIProvider } from './model/providers.js'
+import { getAPIProvider } from './model/providers.ts'
 import type { BetaUsage as Usage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type {
   ContentBlock,
@@ -24,13 +24,13 @@ import {
 import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js'
 import type { AgentId } from 'src/types/ids.js'
 import { companionIntroText } from '../buddy/prompt.js'
-import { NO_CONTENT_MESSAGE } from '../constants/messages.js'
-import { OUTPUT_STYLE_CONFIG } from '../constants/outputStyles.js'
+import { NO_CONTENT_MESSAGE } from '../constants/messages.ts'
+import { OUTPUT_STYLE_CONFIG } from '../constants/outputStyles.ts'
 import { isAutoMemoryEnabled } from '../memdir/paths.js'
 import {
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE,
   getFeatureValue_CACHED_MAY_BE_STALE,
-} from '../services/analytics/growthbook.js'
+} from '../services/analytics/growthbook.ts'
 import {
   getImageTooLargeErrorMessage,
   getPdfInvalidErrorMessage,
@@ -38,9 +38,9 @@ import {
   getPdfTooLargeErrorMessage,
   getRequestTooLargeErrorMessage,
   getVisionNotSupportedErrorMessages,
-} from '../services/api/errors.js'
-import type { AnyObject, Progress } from '../Tool.js'
-import { isConnectorTextBlock } from '../types/connectorText.js'
+} from '../services/api/errors.ts'
+import type { AnyObject, Progress } from '../Tool.ts'
+import { isConnectorTextBlock } from '../types/connectorText.ts'
 import type {
   AssistantMessage,
   AttachmentMessage,
@@ -70,20 +70,20 @@ import type {
   SystemTurnDurationMessage,
   ToolUseSummaryMessage,
   UserMessage,
-} from '../types/message.js'
-import { isAdvisorBlock } from './advisor.js'
-import { isAgentSwarmsEnabled } from './agentSwarmsEnabled.js'
-import { count } from './array.js'
-import { isEnvTruthy } from './envUtils.js'
+} from '../types/message.ts'
+import { isAdvisorBlock } from './advisor.ts'
+import { isAgentSwarmsEnabled } from './agentSwarmsEnabled.ts'
+import { count } from './array.ts'
+import { isEnvTruthy } from './envUtils.ts'
 import {
   type Attachment,
   type HookAttachment,
   type HookPermissionDecisionAttachment,
   memoryHeader,
-} from './attachments.js'
-import { quote } from './bash/shellQuote.js'
-import { formatNumber, formatTokens } from './format.js'
-import { jsonStringify } from './slowOperations.js'
+} from './attachments.ts'
+import { quote } from './bash/shellQuote.ts'
+import { formatNumber, formatTokens } from './format.ts'
+import { jsonStringify } from './slowOperations.ts'
 
 // Hook attachments that have a hookName field (excludes HookPermissionDecisionAttachment)
 type HookAttachmentWithName = Exclude<
@@ -111,45 +111,45 @@ import {
   MAX_LINES_TO_READ,
 } from 'src/tools/FileReadTool/prompt.js'
 import type { DeepImmutable } from 'src/types/utils.js'
-import { getStrictToolResultPairing } from '../bootstrap/state.js'
+import { getStrictToolResultPairing } from '../bootstrap/state.ts'
 import {
   COMMAND_ARGS_TAG,
   COMMAND_MESSAGE_TAG,
   COMMAND_NAME_TAG,
   LOCAL_COMMAND_CAVEAT_TAG,
   LOCAL_COMMAND_STDOUT_TAG,
-} from '../constants/xml.js'
-import { DiagnosticTrackingService } from '../services/diagnosticTracking.js'
+} from '../constants/xml.ts'
+import { DiagnosticTrackingService } from '../services/diagnosticTracking.ts'
 import {
   findToolByName,
   type Tool,
   type Tools,
   toolMatchesName,
-} from '../Tool.js'
+} from '../Tool.ts'
 import {
   FileReadTool,
   type Output as FileReadToolOutput,
-} from '../tools/FileReadTool/FileReadTool.js'
-import { SEND_MESSAGE_TOOL_NAME } from '../tools/SendMessageTool/constants.js'
-import { TASK_CREATE_TOOL_NAME } from '../tools/TaskCreateTool/constants.js'
-import { TASK_OUTPUT_TOOL_NAME } from '../tools/TaskOutputTool/constants.js'
-import { TASK_UPDATE_TOOL_NAME } from '../tools/TaskUpdateTool/constants.js'
-import type { PermissionMode } from '../types/permissions.js'
-import { normalizeToolInput, normalizeToolInputForAPI } from './api.js'
-import { logAntError, logForDebugging } from './debug.js'
-import { hasEmbeddedSearchTools } from './embeddedTools.js'
-import { formatFileSize } from './format.js'
-import { validateImagesForAPI } from './imageValidation.js'
-import { safeParseJSON } from './json.js'
-import { logError, logMCPDebug } from './log.js'
-import { normalizeLegacyToolName } from './permissions/permissionRuleParser.js'
-import { isDangerousPermissionMode } from './permissions/PermissionMode.js'
+} from '../tools/FileReadTool/FileReadTool.ts'
+import { SEND_MESSAGE_TOOL_NAME } from '../tools/SendMessageTool/constants.ts'
+import { TASK_CREATE_TOOL_NAME } from '../tools/TaskCreateTool/constants.ts'
+import { TASK_OUTPUT_TOOL_NAME } from '../tools/TaskOutputTool/constants.ts'
+import { TASK_UPDATE_TOOL_NAME } from '../tools/TaskUpdateTool/constants.ts'
+import type { PermissionMode } from '../types/permissions.ts'
+import { normalizeToolInput, normalizeToolInputForAPI } from './api.ts'
+import { logAntError, logForDebugging } from './debug.ts'
+import { hasEmbeddedSearchTools } from './embeddedTools.ts'
+import { formatFileSize } from './format.ts'
+import { validateImagesForAPI } from './imageValidation.ts'
+import { safeParseJSON } from './json.ts'
+import { logError, logMCPDebug } from './log.ts'
+import { normalizeLegacyToolName } from './permissions/permissionRuleParser.ts'
+import { isDangerousPermissionMode } from './permissions/PermissionMode.ts'
 import {
   getPlanModeV2AgentCount,
   getPlanModeV2ExploreAgentCount,
   isPlanModeInterviewPhaseEnabled,
-} from './planModeV2.js'
-import { isTodoV2Enabled } from './tasks.js'
+} from './planModeV2.ts'
+import { isTodoV2Enabled } from './tasks.ts'
 import {
   CANCEL_MESSAGE,
   createUserMessage,
@@ -157,25 +157,25 @@ import {
   INTERRUPT_MESSAGE_FOR_TOOL_USE,
   isSyntheticApiErrorMessage,
   REJECT_MESSAGE,
-} from './messages/factories.js'
+} from './messages/factories.ts'
 import {
   formatToolResultPairingIssue,
   validateToolResultPairing,
   type ToolResultPairingValidationContext,
-} from './messages/toolPairing.js'
+} from './messages/toolPairing.ts'
 import {
   getAutoModeInstructions,
   getPlanModeInstructions,
   wrapInSystemReminder,
   wrapMessagesInSystemReminder,
-} from './messages/planMode.js'
+} from './messages/planMode.ts'
 import {
   appendMessageTagToUserMessage,
   deriveShortMessageId,
   stripCallerFieldFromAssistantMessage,
   stripSnipTagsFromContent,
   stripToolReferenceBlocksFromUserMessage,
-} from './messages/apiTransform.js'
+} from './messages/apiTransform.ts'
 
 // Lazy import to avoid circular dependency (teammateMailbox -> teammate -> ... -> messages)
 function getTeammateMailbox(): typeof import('./teammateMailbox.js') {
@@ -186,7 +186,7 @@ function getTeammateMailbox(): typeof import('./teammateMailbox.js') {
 import {
   isToolReferenceBlock,
   isToolSearchEnabledOptimistic,
-} from './toolSearch.js'
+} from './toolSearch.ts'
 
 const MEMORY_CORRECTION_HINT =
   "\n\nNote: The user's next message may contain a correction or preference. Pay close attention — if they explain what went wrong or how they'd prefer you to work, consider saving that to memory for future sessions."
@@ -320,7 +320,7 @@ export {
   hasToolCallsInLastAssistantTurn,
   isSyntheticMessage,
   prepareUserContent,
-} from './messages/factories.js'
+} from './messages/factories.ts'
 
 export {
   extractTag,
@@ -331,7 +331,7 @@ export {
   isEmptyMessageText,
   stripPromptXMLTags,
   textForResubmit,
-} from './messages/content.js'
+} from './messages/content.ts'
 
 export function isNotEmptyMessage(message: Message): boolean {
   if (
@@ -366,7 +366,7 @@ export function isNotEmptyMessage(message: Message): boolean {
   )
 }
 
-export { deriveUUID, normalizeMessages, normalizeMessagesCached } from './messages/normalize.js'
+export { deriveUUID, normalizeMessages, normalizeMessagesCached } from './messages/normalize.ts'
 
 type ToolUseRequestMessage = NormalizedAssistantMessage & {
   message: { content: [ToolUseBlock] }
@@ -2290,8 +2290,8 @@ export function filterUnresolvedToolUses(messages: Message[]): Message[] {
 }
 
 
-export { handleMessageFromStream } from './messages/streaming.js'
-export type { StreamingThinking, StreamingToolUse } from './messages/streaming.js'
+export { handleMessageFromStream } from './messages/streaming.ts'
+export type { StreamingThinking, StreamingToolUse } from './messages/streaming.ts'
 
 export {
   PLAN_PHASE4_CONTROL,
@@ -2299,7 +2299,7 @@ export {
   getPlanModeInstructions,
   wrapInSystemReminder,
   wrapMessagesInSystemReminder,
-} from "./messages/planMode.js"
+} from "./messages/planMode.ts"
 
 export function normalizeAttachmentForAPI(
   attachment: Attachment,
@@ -3216,7 +3216,7 @@ export {
   findLastCompactBoundaryIndex,
   getMessagesAfterCompactBoundary,
   isCompactBoundaryMessage,
-} from "./messages/systemFactories.js"
+} from "./messages/systemFactories.ts"
 
 export function shouldShowUserMessage(
   message: NormalizedMessage,
@@ -3682,7 +3682,7 @@ export {
   selectToolPairSafeMessageRange,
   validateToolResultPairing,
   formatToolResultPairingIssue,
-} from './messages/toolPairing.js'
+} from './messages/toolPairing.ts'
 export type {
   ToolPairSafeMessageRangeDiagnostics,
   ToolPairSafeMessageRangeOptions,
@@ -3691,7 +3691,7 @@ export type {
   ToolResultPairingIssueKind,
   ToolResultPairingValidationContext,
   ToolResultPairingValidationResult,
-} from './messages/toolPairing.js'
+} from './messages/toolPairing.ts'
 
 /**
  * Defensive validation: ensure tool_use/tool_result pairing is correct.

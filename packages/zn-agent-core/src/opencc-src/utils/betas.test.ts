@@ -1,13 +1,13 @@
 import { afterEach, beforeAll, beforeEach, expect, mock, test } from 'bun:test'
-import * as realProviders from './model/providers.js'
+import * as realProviders from './model/providers.ts'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock.js'
 import {
   CLAUDE_CODE_20250219_BETA_HEADER,
-} from '../constants/betas.js'
-import { setSdkBetas } from '../bootstrap/state.js'
+} from '../constants/betas.ts'
+import { setSdkBetas } from '../bootstrap/state.ts'
 
 // Beta headers are Anthropic-specific. PR #1533 added a provider gate so that
 // non-Anthropic providers (OpenAI, Gemini, etc.) never receive Anthropic-only
@@ -73,7 +73,7 @@ function clearProviderEnv(): void {
 // process-global and not reverted by mock.restore(). Without this stub the
 // "firstParty provider" tests cascade-fail when a prior test mutated the
 // shared TEST_GLOBAL_CONFIG_FOR_TESTING singleton.
-mock.module('./model/providers.js', () => ({
+mock.module('./model/providers.ts', () => ({
   ...realProviders,
   getAPIProvider: () => 'firstParty',
 }))
@@ -96,7 +96,7 @@ afterEach(() => {
 })
 
 // Several earlier test files in the smoke suite call
-// mock.module('./model/providers.js', ...) to stub getAPIProvider. bun:test's
+// mock.module('./model/providers.ts', ...) to stub getAPIProvider. bun:test's
 // mock.module() registry is process-global and mock.restore() does NOT clear it,
 // so the cached bare-path import of providers.js inside betas.ts resolves to
 // that stub unless we override it. We import the real providers module through
@@ -105,9 +105,9 @@ afterEach(() => {
 // The explicit function references are used instead of spreading the namespace
 // object to avoid potential issues with Bun's mock.module handling.
 const _realProvidersModule = await import(
-  `./model/providers.js?real=${Date.now()}-${Math.random()}`
+  `./model/providers.ts?real=${Date.now()}-${Math.random()}`
 )
-mock.module('./model/providers.js', () => ({
+mock.module('./model/providers.ts', () => ({
   getAPIProvider: _realProvidersModule.getAPIProvider,
   usesAnthropicAccountFlow: _realProvidersModule.usesAnthropicAccountFlow,
   isGithubNativeAnthropicMode: _realProvidersModule.isGithubNativeAnthropicMode,

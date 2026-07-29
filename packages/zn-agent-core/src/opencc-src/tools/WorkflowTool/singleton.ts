@@ -1,8 +1,8 @@
 // src/tools/WorkflowTool/singleton.ts
 import { homedir } from 'os'
 import { readFileSync } from 'fs'
-import { WorkflowRegistry } from './registry.js'
-import { initBundledWorkflows, getBundledSource } from './bundled/index.js'
+import { WorkflowRegistry } from './registry.ts'
+import { initBundledWorkflows, getBundledSource } from './bundled/index.ts'
 
 const instances = new Map<string, WorkflowRegistry>()
 

@@ -3,8 +3,8 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../../../test/sharedMutationLock.js'
-import { getProviderMode, getProviderChain, getAvailableProviders } from './index.js'
-import type { ProviderMode } from './index.js'
+import { getProviderMode, getProviderChain, getAvailableProviders } from './index.ts'
+import type { ProviderMode } from './index.ts'
 
 const savedWebSearchEnv = {
   WEB_SEARCH_PROVIDER: process.env.WEB_SEARCH_PROVIDER,
@@ -182,7 +182,7 @@ describe('runSearch', () => {
 
     await expect(
       // Dynamic import to avoid circular issues
-      import('./index.js').then(m =>
+      import('./index.ts').then(m =>
         m.runSearch({ query: 'test' }, controller.signal),
       ),
     ).rejects.toThrow()
@@ -196,7 +196,7 @@ describe('runSearch', () => {
     process.env.WEB_SEARCH_PROVIDER = 'tavily'
 
     try {
-      const { runSearch } = await import('./index.js')
+      const { runSearch } = await import('./index.ts')
       await expect(runSearch({ query: 'test' })).rejects.toThrow(
         /not configured/i,
       )
@@ -224,7 +224,7 @@ describe('runSearch', () => {
       ],
     }))
 
-    const { runSearch } = await import('./index.js')
+    const { runSearch } = await import('./index.ts')
     const output = await runSearch({ query: 'timeout fallback' })
 
     expect(output.providerName).toBe('duckduckgo')
@@ -248,7 +248,7 @@ describe('runSearch', () => {
       ],
     }))
 
-    const { runSearch } = await import('./index.js')
+    const { runSearch } = await import('./index.ts')
     const output = await runSearch({ query: 'body timeout fallback' })
 
     expect(output.providerName).toBe('duckduckgo')
@@ -275,7 +275,7 @@ describe('runSearch', () => {
     const controller = new AbortController()
     controller.abort()
 
-    const { runSearch } = await import('./index.js')
+    const { runSearch } = await import('./index.ts')
     await expect(
       runSearch({ query: 'user abort' }, controller.signal),
     ).rejects.toMatchObject({ name: 'AbortError' })

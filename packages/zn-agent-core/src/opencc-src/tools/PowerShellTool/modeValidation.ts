@@ -6,21 +6,21 @@
  * Follows the same patterns as BashTool/modeValidation.ts.
  */
 
-import type { ToolPermissionContext } from '../../Tool.js'
-import type { PermissionResult } from '../../utils/permissions/PermissionResult.js'
-import type { ParsedPowerShellCommand } from '../../utils/powershell/parser.js'
+import type { ToolPermissionContext } from '../../Tool.ts'
+import type { PermissionResult } from '../../utils/permissions/PermissionResult.ts'
+import type { ParsedPowerShellCommand } from '../../utils/powershell/parser.ts'
 import {
   deriveSecurityFlags,
   getPipelineSegments,
   PS_TOKENIZER_DASH_CHARS,
-} from '../../utils/powershell/parser.js'
+} from '../../utils/powershell/parser.ts'
 import {
   argLeaksValue,
   isAllowlistedPipelineTail,
   isCwdChangingCmdlet,
   isSafeOutputCommand,
   resolveToCanonical,
-} from './readOnlyValidation.js'
+} from './readOnlyValidation.ts'
 
 /**
  * Filesystem-modifying cmdlets that are auto-allowed in acceptEdits mode.

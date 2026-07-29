@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import type { ToolUseContext, Tools } from '../Tool.js'
-import { BASH_TOOL_NAME } from '../tools/BashTool/toolName.js'
-import type { DiagnosticFile } from '../services/diagnosticTracking.js'
-import type { Attachment } from './attachments.js'
+import type { ToolUseContext, Tools } from '../Tool.ts'
+import { BASH_TOOL_NAME } from '../tools/BashTool/toolName.ts'
+import type { DiagnosticFile } from '../services/diagnosticTracking.ts'
+import type { Attachment } from './attachments.ts'
 
 const debugMessages: string[] = []
 const realDebugModule = await import(

@@ -5,35 +5,35 @@ import {
   getIsNonInteractiveSession,
   getKairosActive,
   preferThirdPartyAuthentication,
-} from '../bootstrap/state.js'
+} from '../bootstrap/state.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../services/analytics/index.js'
+} from '../services/analytics/index.ts'
 import {
   getAnthropicApiKey,
   getClaudeAIOAuthTokens,
   handleOAuth401Error,
   hasProfileScope,
-} from './auth.js'
-import { isInBundledMode } from './bundledMode.js'
-import { getGlobalConfig, saveGlobalConfig } from './config.js'
-import { logForDebugging } from './debug.js'
-import { isEnvTruthy } from './envUtils.js'
+} from './auth.ts'
+import { isInBundledMode } from './bundledMode.ts'
+import { getGlobalConfig, saveGlobalConfig } from './config.ts'
+import { logForDebugging } from './debug.ts'
+import { isEnvTruthy } from './envUtils.ts'
 import {
   getDefaultMainLoopModelSetting,
   isOpus1mMergeEnabled,
   type ModelSetting,
   parseUserSpecifiedModel,
-} from './model/model.js'
-import { getAPIProvider } from './model/providers.js'
-import { isEssentialTrafficOnly } from './privacyLevel.js'
+} from './model/model.ts'
+import { getAPIProvider } from './model/providers.ts'
+import { isEssentialTrafficOnly } from './privacyLevel.ts'
 import {
   getInitialSettings,
   getSettingsForSource,
   updateSettingsForSource,
-} from './settings/settings.js'
-import { createSignal } from './signal.js'
+} from './settings/settings.ts'
+import { createSignal } from './signal.ts'
 
 export function isFastModeEnabled(): boolean {
   if (getAPIProvider() !== 'firstParty') {

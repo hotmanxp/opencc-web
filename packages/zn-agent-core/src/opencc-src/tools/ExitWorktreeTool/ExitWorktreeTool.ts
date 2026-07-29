@@ -4,27 +4,27 @@ import {
   getProjectRoot,
   setOriginalCwd,
   setProjectRoot,
-} from '../../bootstrap/state.js'
-import { clearSystemPromptSections } from '../../constants/systemPromptSections.js'
-import { logEvent } from '../../services/analytics/index.js'
-import type { Tool } from '../../Tool.js'
-import { buildTool, type ToolDef } from '../../Tool.js'
-import { count } from '../../utils/array.js'
-import { clearMemoryFileCaches } from '../../utils/claudemd.js'
-import { execFileNoThrow } from '../../utils/execFileNoThrow.js'
-import { updateHooksConfigSnapshot } from '../../utils/hooks/hooksConfigSnapshot.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { getPlansDirectory } from '../../utils/plans.js'
-import { setCwd } from '../../utils/Shell.js'
-import { saveWorktreeState } from '../../utils/sessionStorage.js'
+} from '../../bootstrap/state.ts'
+import { clearSystemPromptSections } from '../../constants/systemPromptSections.ts'
+import { logEvent } from '../../services/analytics/index.ts'
+import type { Tool } from '../../Tool.ts'
+import { buildTool, type ToolDef } from '../../Tool.ts'
+import { count } from '../../utils/array.ts'
+import { clearMemoryFileCaches } from '../../utils/claudemd.ts'
+import { execFileNoThrow } from '../../utils/execFileNoThrow.ts'
+import { updateHooksConfigSnapshot } from '../../utils/hooks/hooksConfigSnapshot.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { getPlansDirectory } from '../../utils/plans.ts'
+import { setCwd } from '../../utils/Shell.ts'
+import { saveWorktreeState } from '../../utils/sessionStorage.ts'
 import {
   cleanupWorktree,
   getCurrentWorktreeSession,
   keepWorktree,
   killTmuxSession,
-} from '../../utils/worktree.js'
-import { EXIT_WORKTREE_TOOL_NAME } from './constants.js'
-import { getExitWorktreeToolPrompt } from './prompt.js'
+} from '../../utils/worktree.ts'
+import { EXIT_WORKTREE_TOOL_NAME } from './constants.ts'
+import { getExitWorktreeToolPrompt } from './prompt.ts'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
 const inputSchema = lazySchema(() =>

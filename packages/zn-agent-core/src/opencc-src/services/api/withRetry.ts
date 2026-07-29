@@ -24,10 +24,10 @@ import {
   handleOAuth401Error,
   isClaudeAISubscriber,
   isEnterpriseSubscriber,
-} from '../../utils/auth.js'
-import { isEnvTruthy } from '../../utils/envUtils.js'
-import { validateBoundedIntEnvVar } from '../../utils/envValidation.js'
-import { errorMessage } from '../../utils/errors.js'
+} from '../../utils/auth.ts'
+import { isEnvTruthy } from '../../utils/envUtils.ts'
+import { validateBoundedIntEnvVar } from '../../utils/envValidation.ts'
+import { errorMessage } from '../../utils/errors.ts'
 import {
   type CooldownReason,
   handleFastModeOverageRejection,
@@ -35,26 +35,26 @@ import {
   isFastModeCooldown,
   isFastModeEnabled,
   triggerFastModeCooldown,
-} from '../../utils/fastMode.js'
-import { isNonCustomOpusModel } from '../../utils/model/model.js'
-import { disableKeepAlive } from '../../utils/proxy.js'
-import { sleep } from '../../utils/sleep.js'
-import type { ThinkingConfig } from '../../utils/thinking.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+} from '../../utils/fastMode.ts'
+import { isNonCustomOpusModel } from '../../utils/model/model.ts'
+import { disableKeepAlive } from '../../utils/proxy.ts'
+import { sleep } from '../../utils/sleep.ts'
+import type { ThinkingConfig } from '../../utils/thinking.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../analytics/index.js'
+} from '../analytics/index.ts'
 import {
   checkMockRateLimitError,
   isMockRateLimitError,
-} from '../rateLimitMocking.js'
-import { REPEATED_529_ERROR_MESSAGE } from './errors.js'
-import { extractConnectionErrorDetails } from './errorUtils.js'
+} from '../rateLimitMocking.ts'
+import { REPEATED_529_ERROR_MESSAGE } from './errors.ts'
+import { extractConnectionErrorDetails } from './errorUtils.ts'
 import {
   extractOpenAICategoryMarker,
   isRetryableOpenAICompatibilityFailureCategory,
-} from './openaiErrorClassification.js'
+} from './openaiErrorClassification.ts'
 
 const abortError = () => new APIUserAbortError()
 

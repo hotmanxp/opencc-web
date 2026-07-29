@@ -20,8 +20,8 @@ import {
   findLastCompactBoundaryIndex,
   getMessagesAfterCompactBoundary,
   isCompactBoundaryMessage,
-} from './systemFactories.js'
-import type { Message } from '../../types/message.js'
+} from './systemFactories.ts'
+import type { Message } from '../../types/message.ts'
 
 test('createSystemMessage builds an informational system message', () => {
   const message = createSystemMessage('ready', 'info', 'toolu_1', true)

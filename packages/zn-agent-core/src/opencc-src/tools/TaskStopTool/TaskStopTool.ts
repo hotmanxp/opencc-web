@@ -1,10 +1,10 @@
 import { z } from 'zod/v4'
-import type { TaskStateBase } from '../../Task.js'
-import { buildTool, type ToolDef } from '../../Tool.js'
-import { stopTask } from '../../tasks/stopTask.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
-import { DESCRIPTION, TASK_STOP_TOOL_NAME } from './prompt.js'
+import type { TaskStateBase } from '../../Task.ts'
+import { buildTool, type ToolDef } from '../../Tool.ts'
+import { stopTask } from '../../tasks/stopTask.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { jsonStringify } from '../../utils/slowOperations.ts'
+import { DESCRIPTION, TASK_STOP_TOOL_NAME } from './prompt.ts'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
 const inputSchema = lazySchema(() =>

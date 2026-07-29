@@ -1,9 +1,9 @@
-import type { AnthropicStreamEvent } from '../codexShim.js'
+import type { AnthropicStreamEvent } from '../codexShim.ts'
 import {
   createReaderCanceller,
   getStreamIdleTimeoutMs,
   readWithIdleTimeout,
-} from './streaming.js'
+} from './streaming.ts'
 
 /**
  * Forwards an Anthropic-shaped SSE stream verbatim.

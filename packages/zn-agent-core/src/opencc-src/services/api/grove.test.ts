@@ -4,7 +4,7 @@ import {
   type AccountSettings,
   type ApiResult,
   type GroveConfig,
-} from './grove.js'
+} from './grove.ts'
 
 const DAY_MS = 24 * 60 * 60 * 1000
 

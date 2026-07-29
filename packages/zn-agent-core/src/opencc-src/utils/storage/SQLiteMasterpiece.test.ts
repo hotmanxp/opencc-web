@@ -7,13 +7,13 @@ import {
   addGlobalRelation,
   saveProjectGraph,
   initOrama
-} from '../knowledgeGraph.js'
+} from '../knowledgeGraph.ts'
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { getProjectsDir } from '../envUtils.js'
-import { sanitizePath } from '../sessionStoragePortable.js'
-import { getFsImplementation } from '../fsOperations.js'
+import { getProjectsDir } from '../envUtils.ts'
+import { sanitizePath } from '../sessionStoragePortable.ts'
+import { getFsImplementation } from '../fsOperations.ts'
 
 describe('SQLite Masterpiece: Edge Cases & Multi-Project Isolation', () => {
   const originalConfigDir = process.env.CLAUDE_CONFIG_DIR

@@ -1,4 +1,4 @@
-import { toRelativePath } from '../../utils/path.js'
+import { toRelativePath } from '../../utils/path.ts'
 
 /**
  * Normalize a single line of `rg -c` output into uniform "relpath:count" form.

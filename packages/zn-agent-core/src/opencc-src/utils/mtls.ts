@@ -3,9 +3,9 @@ import { Agent as HttpsAgent } from 'https'
 import memoize from 'lodash-es/memoize.js'
 import type * as tls from 'tls'
 import type * as undici from 'undici'
-import { getCACertificates } from './caCerts.js'
-import { logForDebugging } from './debug.js'
-import { getFsImplementation } from './fsOperations.js'
+import { getCACertificates } from './caCerts.ts'
+import { logForDebugging } from './debug.ts'
+import { getFsImplementation } from './fsOperations.ts'
 
 export type MTLSConfig = {
   cert?: string

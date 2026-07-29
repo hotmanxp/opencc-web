@@ -1,35 +1,35 @@
 // @ts-nocheck
-import { SNIP_TOOL_NAME } from '../tools/SnipTool/prompt.js'
+import { SNIP_TOOL_NAME } from '../tools/SnipTool/prompt.ts'
 import type { UUID } from 'crypto'
-import { findToolByName, type Tools } from '../Tool.js'
-import { extractBashCommentLabel } from '../tools/BashTool/commentLabel.js'
-import { BASH_TOOL_NAME } from '../tools/BashTool/toolName.js'
-import { FILE_EDIT_TOOL_NAME } from '../tools/FileEditTool/constants.js'
-import { FILE_WRITE_TOOL_NAME } from '../tools/FileWriteTool/prompt.js'
-import { REPL_TOOL_NAME } from '../tools/REPLTool/constants.js'
-import { getReplPrimitiveTools } from '../tools/REPLTool/primitiveTools.js'
+import { findToolByName, type Tools } from '../Tool.ts'
+import { extractBashCommentLabel } from '../tools/BashTool/commentLabel.ts'
+import { BASH_TOOL_NAME } from '../tools/BashTool/toolName.ts'
+import { FILE_EDIT_TOOL_NAME } from '../tools/FileEditTool/constants.ts'
+import { FILE_WRITE_TOOL_NAME } from '../tools/FileWriteTool/prompt.ts'
+import { REPL_TOOL_NAME } from '../tools/REPLTool/constants.ts'
+import { getReplPrimitiveTools } from '../tools/REPLTool/primitiveTools.ts'
 import {
   type BranchAction,
   type CommitKind,
   detectGitOperation,
   type PrAction,
-} from '../tools/shared/gitOperationTracking.js'
-import { TOOL_SEARCH_TOOL_NAME } from '../tools/ToolSearchTool/prompt.js'
+} from '../tools/shared/gitOperationTracking.ts'
+import { TOOL_SEARCH_TOOL_NAME } from '../tools/ToolSearchTool/prompt.ts'
 import type {
   CollapsedReadSearchGroup,
   CollapsibleMessage,
   RenderableMessage,
   StopHookInfo,
   SystemStopHookSummaryMessage,
-} from '../types/message.js'
-import { getDisplayPath } from './file.js'
-import { isFullscreenEnvEnabled } from './fullscreen.js'
+} from '../types/message.ts'
+import { getDisplayPath } from './file.ts'
+import { isFullscreenEnvEnabled } from './fullscreen.ts'
 import {
   isAutoManagedMemoryFile,
   isAutoManagedMemoryPattern,
   isMemoryDirectory,
   isShellCommandTargetingMemory,
-} from './memoryFileDetection.js'
+} from './memoryFileDetection.ts'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const teamMemOps = true

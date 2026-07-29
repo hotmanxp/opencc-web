@@ -8,7 +8,7 @@ import {
   formatCacheMetricsFull,
   addCacheMetrics,
   getCacheMetricsReliability,
-} from './cacheMetrics.js'
+} from './cacheMetrics.ts'
 
 describe('extractCacheMetrics — Anthropic (firstParty/bedrock/vertex/foundry)', () => {
   test('reports read/created separately and computes hit rate over total input', () => {

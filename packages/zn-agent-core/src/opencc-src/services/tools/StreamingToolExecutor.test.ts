@@ -8,13 +8,13 @@ import {
   getEmptyToolPermissionContext,
   type Tool,
   type ToolUseContext,
-} from '../../Tool.js'
-import type { AssistantMessage } from '../../types/message.js'
+} from '../../Tool.ts'
+import type { AssistantMessage } from '../../types/message.ts'
 import {
   type QueryActiveOperationSnapshot,
   QueryLifecycleOperationTracker,
-} from '../../utils/queryLifecycle.js'
-import { StreamingToolExecutor } from './StreamingToolExecutor.js'
+} from '../../utils/queryLifecycle.ts'
+import { StreamingToolExecutor } from './StreamingToolExecutor.ts'
 
 const assistantMessage = {
   uuid: 'assistant-message-1',

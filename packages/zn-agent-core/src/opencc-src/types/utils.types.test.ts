@@ -1,4 +1,4 @@
-import type { DeepImmutable } from './utils.js'
+import type { DeepImmutable } from './utils.ts'
 
 type Assert<T extends true> = T
 type IsEqual<A, B> = (<T>() => T extends A ? 1 : 2) extends <

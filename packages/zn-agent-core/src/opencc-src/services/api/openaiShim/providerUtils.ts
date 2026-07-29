@@ -1,8 +1,8 @@
-import { redactSecretValueForDisplay } from '../../../utils/providerProfile.js'
-import { isEnvTruthy } from '../../../utils/envUtils.js'
-import { isLocalProviderUrl } from '../providerConfig.js'
-import { GEMINI_API_HOST, MOONSHOT_API_HOSTS, SENSITIVE_URL_QUERY_PARAM_NAMES } from './constants.js'
-import type { SecretValueSource } from './types.js'
+import { redactSecretValueForDisplay } from '../../../utils/providerProfile.ts'
+import { isEnvTruthy } from '../../../utils/envUtils.ts'
+import { isLocalProviderUrl } from '../providerConfig.ts'
+import { GEMINI_API_HOST, MOONSHOT_API_HOSTS, SENSITIVE_URL_QUERY_PARAM_NAMES } from './constants.ts'
+import type { SecretValueSource } from './types.ts'
 
 function filterAnthropicHeaders(
   headers: Record<string, string> | undefined,

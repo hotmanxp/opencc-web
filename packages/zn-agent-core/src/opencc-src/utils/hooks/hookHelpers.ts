@@ -1,14 +1,14 @@
 import { z } from 'zod/v4'
-import type { Tool } from '../../Tool.js'
+import type { Tool } from '../../Tool.ts'
 import {
   SYNTHETIC_OUTPUT_TOOL_NAME,
   SyntheticOutputTool,
-} from '../../tools/SyntheticOutputTool/SyntheticOutputTool.js'
-import { substituteArguments } from '../argumentSubstitution.js'
-import { lazySchema } from '../lazySchema.js'
-import type { SetAppState } from '../messageQueueManager.js'
-import { hasSuccessfulToolCall } from '../messages.js'
-import { addFunctionHook } from './sessionHooks.js'
+} from '../../tools/SyntheticOutputTool/SyntheticOutputTool.ts'
+import { substituteArguments } from '../argumentSubstitution.ts'
+import { lazySchema } from '../lazySchema.ts'
+import type { SetAppState } from '../messageQueueManager.ts'
+import { hasSuccessfulToolCall } from '../messages.ts'
+import { addFunctionHook } from './sessionHooks.ts'
 
 /**
  * Schema for hook responses (shared by prompt and agent hooks)

@@ -6,7 +6,7 @@ import * as path from 'path'
 import {
   loadPluginWorkflows,
   clearPluginWorkflowsCache,
-} from './pluginWorkflowLoader.js'
+} from './pluginWorkflowLoader.ts'
 
 describe('loadPluginWorkflows (port of upstream)', () => {
   it('loads workflows from a plugin with workflowsPath set', async () => {

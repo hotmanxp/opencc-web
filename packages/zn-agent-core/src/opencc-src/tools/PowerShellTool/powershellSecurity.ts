@@ -12,11 +12,11 @@ import {
   DANGEROUS_SCRIPT_BLOCK_CMDLETS,
   FILEPATH_EXECUTION_CMDLETS,
   MODULE_LOADING_CMDLETS,
-} from '../../utils/powershell/dangerousCmdlets.js'
+} from '../../utils/powershell/dangerousCmdlets.ts'
 import type {
   ParsedCommandElement,
   ParsedPowerShellCommand,
-} from '../../utils/powershell/parser.js'
+} from '../../utils/powershell/parser.ts'
 import {
   COMMON_ALIASES,
   commandHasArgAbbreviation,
@@ -24,8 +24,8 @@ import {
   getAllCommands,
   getVariablesByScope,
   hasCommandNamed,
-} from '../../utils/powershell/parser.js'
-import { isClmAllowedType } from './clmTypes.js'
+} from '../../utils/powershell/parser.ts'
+import { isClmAllowedType } from './clmTypes.ts'
 
 type PowerShellSecurityResult = {
   behavior: 'passthrough' | 'ask' | 'allow'

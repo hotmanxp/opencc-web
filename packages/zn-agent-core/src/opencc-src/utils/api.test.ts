@@ -1,9 +1,9 @@
 // @ts-nocheck
 import { expect, test } from 'bun:test'
 import { z } from 'zod/v4'
-import { getEmptyToolPermissionContext, type Tool, type Tools } from '../Tool.js'
-import { SkillTool } from '../tools/SkillTool/SkillTool.js'
-import { toolToAPISchema } from './api.js'
+import { getEmptyToolPermissionContext, type Tool, type Tools } from '../Tool.ts'
+import { SkillTool } from '../tools/SkillTool/SkillTool.ts'
+import { toolToAPISchema } from './api.ts'
 
 test('toolToAPISchema preserves provider-specific schema keywords in input_schema', async () => {
   const schema = await toolToAPISchema(

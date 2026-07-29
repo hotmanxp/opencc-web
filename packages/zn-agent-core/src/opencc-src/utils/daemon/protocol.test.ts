@@ -22,7 +22,7 @@ import {
   JobShortIdSchema,
   encodeFrame,
   encodeFrames,
-} from './protocol.js'
+} from './protocol.ts'
 
 // ---------- Frame codec ----------
 

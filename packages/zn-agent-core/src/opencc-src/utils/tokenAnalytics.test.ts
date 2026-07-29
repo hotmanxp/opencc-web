@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, it, beforeEach } from 'bun:test'
-import { TokenUsageTracker } from './tokenAnalytics.js'
+import { TokenUsageTracker } from './tokenAnalytics.ts'
 
 describe('TokenUsageTracker', () => {
   let tracker: TokenUsageTracker

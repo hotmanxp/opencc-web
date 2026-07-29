@@ -3,7 +3,7 @@ import {
   importOptionalRuntimeModule,
   importRuntimeModule,
   isMissingSpecifierError,
-} from './optionalRuntimeModule.js'
+} from './optionalRuntimeModule.ts'
 
 function moduleNotFound(message: string): Error {
   const e = new Error(message)

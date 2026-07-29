@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, test } from 'bun:test'
-import { applyDomainFilters, hostMatchesDomain, normalizeHit, safeHostname } from './types.js'
+import { applyDomainFilters, hostMatchesDomain, normalizeHit, safeHostname } from './types.ts'
 
 // ---------------------------------------------------------------------------
 // safeHostname

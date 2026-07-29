@@ -2,18 +2,18 @@ import { randomBytes } from 'crypto'
 import {
   isCodexBaseUrl,
   parseOpenAICompatibleApiFormat,
-} from '../services/api/providerConfig.js'
+} from '../services/api/providerConfig.ts'
 import {
   getGlobalConfig,
   saveGlobalConfig,
   type ProviderProfile,
-} from './config.js'
-import { getSettings_DEPRECATED } from './settings/settings.js'
-import type { ProfileEnv } from './providerProfile.js'
-import { buildOpenAIProfileEnv } from './providerProfile.js'
-import type { ModelOption } from './model/modelOptions.js'
-import { getPrimaryModel, parseModelList } from './providerModels.js'
-import { isModelAlias } from './model/aliases.js'
+} from './config.ts'
+import { getSettings_DEPRECATED } from './settings/settings.ts'
+import type { ProfileEnv } from './providerProfile.ts'
+import { buildOpenAIProfileEnv } from './providerProfile.ts'
+import type { ModelOption } from './model/modelOptions.ts'
+import { getPrimaryModel, parseModelList } from './providerModels.ts'
+import { isModelAlias } from './model/aliases.ts'
 
 export type ProviderPreset =
   | 'anthropic'

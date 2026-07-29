@@ -1,13 +1,13 @@
 import axios from 'axios'
-import { getOauthConfig } from '../../constants/oauth.js'
+import { getOauthConfig } from '../../constants/oauth.ts'
 import {
   getClaudeAIOAuthTokens,
   hasProfileScope,
   isClaudeAISubscriber,
-} from '../../utils/auth.js'
-import { getAuthHeaders } from '../../utils/http.js'
-import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
-import { isOAuthTokenExpired } from '../oauth/client.js'
+} from '../../utils/auth.ts'
+import { getAuthHeaders } from '../../utils/http.ts'
+import { getClaudeCodeUserAgent } from '../../utils/userAgent.ts'
+import { isOAuthTokenExpired } from '../oauth/client.ts'
 
 export type RateLimit = {
   utilization: number | null // a percentage from 0 to 100

@@ -1,7 +1,7 @@
 // src/tools/WorkflowTool/bundled/index.ts
-import { deepResearch, deepResearchSource } from './deepResearch.js'
-import type { WorkflowRegistry } from '../registry.js'
-import type { Workflow } from '../types.js'
+import { deepResearch, deepResearchSource } from './deepResearch.ts'
+import type { WorkflowRegistry } from '../registry.ts'
+import type { Workflow } from '../types.ts'
 
 const bundledSourceRegistry = new Map<string, string>()
 

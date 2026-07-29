@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
-import { createOpenAIShimClient } from './openaiShim/index.js'
+import { createOpenAIShimClient } from './openaiShim/index.ts'
 
 // OpenCC does not currently ship a githubModelsCredentials module (GitHub Copilot
 // integration was upstream-only and falls outside the 3-provider policy). The

@@ -3,8 +3,8 @@ import {
   CRON_DELETE_TOOL_NAME,
   DEFAULT_MAX_AGE_DAYS,
   isKairosCronEnabled,
-} from '../../tools/ScheduleCronTool/prompt.js'
-import { registerBundledSkill } from '../bundledSkills.js'
+} from '../../tools/ScheduleCronTool/prompt.ts'
+import { registerBundledSkill } from '../bundledSkills.ts'
 
 type LoopMode =
   | 'dynamic-prompt'

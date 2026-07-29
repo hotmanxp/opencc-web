@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { createCombinedAbortSignal } from './combinedAbortSignal.js'
+import { createCombinedAbortSignal } from './combinedAbortSignal.ts'
 
 const delay = (ms: number): Promise<void> =>
   new Promise(resolve => setTimeout(resolve, ms))

@@ -1,6 +1,6 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 import { z } from 'zod/v4'
-import { lazySchema } from '../utils/lazySchema.js'
+import { lazySchema } from '../utils/lazySchema.ts'
 import {
   type HookEvent,
   HOOK_EVENTS,
@@ -63,7 +63,7 @@ import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js
 import { permissionBehaviorSchema } from 'src/utils/permissions/PermissionRule.js'
 import { permissionUpdateSchema } from 'src/utils/permissions/PermissionUpdateSchema.js'
 import type { AppState } from '../state/AppState.js'
-import type { AttributionState } from '../utils/commitAttribution.js'
+import type { AttributionState } from '../utils/commitAttribution.ts'
 
 export function isHookEvent(value: string): value is HookEvent {
   return HOOK_EVENTS.includes(value as HookEvent)

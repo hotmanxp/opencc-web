@@ -4,7 +4,7 @@ import {
   fallbackHookResult,
   parsePromptHookResponse,
   stripMinimaxToolCallWrapper,
-} from './execPromptHook.js'
+} from './execPromptHook.ts'
 
 describe('parsePromptHookResponse', () => {
   test('parses bare JSON object', () => {

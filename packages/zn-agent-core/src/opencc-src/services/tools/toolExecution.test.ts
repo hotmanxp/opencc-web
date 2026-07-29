@@ -6,25 +6,25 @@ import { z } from 'zod/v4'
 import {
   getReplayIndexBuilder,
   resetAllReplayIndexBuilders,
-} from '../../bootstrap/state.js'
+} from '../../bootstrap/state.ts'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import { createToolFixture } from '../../test/toolFixtures.js'
 import {
   getEmptyToolPermissionContext,
   type Tool,
   type ToolUseContext,
-} from '../../Tool.js'
-import { QueryLifecycleOperationTracker } from '../../utils/queryLifecycle.js'
-import { ReplayIndexBuilder } from '../../utils/replayIndexBuilder.js'
+} from '../../Tool.ts'
+import { QueryLifecycleOperationTracker } from '../../utils/queryLifecycle.ts'
+import { ReplayIndexBuilder } from '../../utils/replayIndexBuilder.ts'
 import { getDefaultAppState } from '../../state/AppStateStore.js'
-import { SkillTool } from '../../tools/SkillTool/SkillTool.js'
+import { SkillTool } from '../../tools/SkillTool/SkillTool.ts'
 import { AskUserQuestionTool } from '../../tools/AskUserQuestionTool/AskUserQuestionTool.js'
-import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
-import { FILE_EDIT_TOOL_NAME } from '../../tools/FileEditTool/constants.js'
-import { FILE_WRITE_TOOL_NAME } from '../../tools/FileWriteTool/constants.js'
-import { NOTEBOOK_EDIT_TOOL_NAME } from '../../tools/NotebookEditTool/constants.js'
-import { AbortError } from '../../utils/errors.js'
-import { CANCEL_MESSAGE, createAssistantMessage } from '../../utils/messages.js'
+import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.ts'
+import { FILE_EDIT_TOOL_NAME } from '../../tools/FileEditTool/constants.ts'
+import { FILE_WRITE_TOOL_NAME } from '../../tools/FileWriteTool/constants.ts'
+import { NOTEBOOK_EDIT_TOOL_NAME } from '../../tools/NotebookEditTool/constants.ts'
+import { AbortError } from '../../utils/errors.ts'
+import { CANCEL_MESSAGE, createAssistantMessage } from '../../utils/messages.ts'
 import {
   checkPermissionsAndCallTool,
   getReplayModifiedFiles,
@@ -35,7 +35,7 @@ import {
   normalizeToolInputForValidation,
   runToolUse,
   type MessageUpdateLazy,
-} from './toolExecution.js'
+} from './toolExecution.ts'
 
 function firstToolResultText(message: unknown): string {
   const content = (message as { message?: { content?: unknown } }).message

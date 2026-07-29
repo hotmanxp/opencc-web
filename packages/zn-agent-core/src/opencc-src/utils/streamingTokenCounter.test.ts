@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, it } from 'bun:test'
-import { StreamingTokenCounter } from './streamingTokenCounter.js'
+import { StreamingTokenCounter } from './streamingTokenCounter.ts'
 
 describe('StreamingTokenCounter', () => {
   describe('start', () => {

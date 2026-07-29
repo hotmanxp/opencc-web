@@ -4,11 +4,11 @@ import { mock } from 'bun:test'
 import {
   resetSettingsCache,
   setSessionSettingsCache,
-} from './settings/settingsCache.js'
+} from './settings/settingsCache.ts'
 
-import * as actualConfig from './config.js'
-import * as actualProviderProfiles from './providerProfiles.js'
-import * as actualSettings from './settings/settings.js'
+import * as actualConfig from './config.ts'
+import * as actualProviderProfiles from './providerProfiles.ts'
+import * as actualSettings from './settings/settings.ts'
 
 function buildProfile(
   overrides: Partial<actualConfig.ProviderProfile> = {},
@@ -29,7 +29,7 @@ async function importFreshProviderFallback(
   settingsOverride: Record<string, unknown> = {},
 ) {
   mock.restore()
-  mock.module('./providerProfiles.js', () => ({
+  mock.module('./providerProfiles.ts', () => ({
     ...actualProviderProfiles,
     ...profileMocks,
   }))
@@ -38,7 +38,7 @@ async function importFreshProviderFallback(
   // behavior under nonced re-imports. setSessionSettingsCache() works under
   // bun locally but doesn't survive a fresh `import('?ts=...')` because the
   // settings module loads its own cache instance on each fresh import.
-  mock.module('./settings/settings.js', () => ({
+  mock.module('./settings/settings.ts', () => ({
     ...actualSettings,
     getSettings_DEPRECATED: () => settingsOverride,
     getInitialSettings: () => settingsOverride,

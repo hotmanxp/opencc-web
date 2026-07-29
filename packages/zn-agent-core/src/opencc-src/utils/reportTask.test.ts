@@ -14,7 +14,7 @@ import {
   formatTaskReportAsMarkdown,
   formatTaskReportAsJson,
   type TaskReportGitMetadata,
-} from './taskReport.js'
+} from './taskReport.ts'
 
 const sessionId = 'aaaaaaaa-aaaa-4aaa-8aaa-aaaaaaaaaaaa'
 const cwd = '/workspace/opencc'

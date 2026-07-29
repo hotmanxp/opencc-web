@@ -7,7 +7,7 @@ import {
   getClaudeAiBaseUrl,
   isRemoteSessionLocal,
   isRemoteSessionStaging,
-} from './product.js'
+} from './product.ts'
 
 // --- isRemoteSessionLocal ---
 

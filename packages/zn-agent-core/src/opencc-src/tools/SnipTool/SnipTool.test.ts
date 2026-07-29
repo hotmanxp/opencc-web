@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { SnipTool } from './SnipTool.js'
+import { SnipTool } from './SnipTool.ts'
 
 describe('SnipTool.mapToolResultToToolResultBlockParam', () => {
   test('echoes the tool_use_id on a tool_result block', () => {

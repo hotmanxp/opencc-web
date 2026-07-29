@@ -1,8 +1,8 @@
 import { tmpdir } from 'os'
 import { join } from 'path'
 import { join as posixJoin } from 'path/posix'
-import { getSessionEnvVars } from '../sessionEnvVars.js'
-import type { ShellProvider } from './shellProvider.js'
+import { getSessionEnvVars } from '../sessionEnvVars.ts'
+import type { ShellProvider } from './shellProvider.ts'
 
 /**
  * PowerShell invocation flags + command. Shared by the provider's getSpawnArgs

@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { DESCRIPTION } from './prompt.js'
-import { FileWriteTool } from './FileWriteTool.js'
+import { DESCRIPTION } from './prompt.ts'
+import { FileWriteTool } from './FileWriteTool.ts'
 
 describe('FileWriteTool prompt', () => {
   test('DESCRIPTION matches upstream 2.1.177 canonical text', () => {

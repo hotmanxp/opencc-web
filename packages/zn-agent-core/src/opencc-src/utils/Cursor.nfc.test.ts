@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { Cursor } from './Cursor.js'
+import { Cursor } from './Cursor.ts'
 
 describe('Cursor.insert NFC boundary offset', () => {
   test('places the cursor correctly when the insert composes with the prefix', () => {

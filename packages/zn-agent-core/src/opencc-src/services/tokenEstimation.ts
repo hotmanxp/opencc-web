@@ -1,19 +1,19 @@
 import type { Anthropic } from '@anthropic-ai/sdk'
 import type { BetaMessageParam as MessageParam } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
-import type { Attachment } from '../utils/attachments.js'
-import { getModelBetas } from '../utils/betas.js'
-import { logError } from '../utils/log.js'
-import { normalizeAttachmentForAPI } from '../utils/messages.js'
+import type { Attachment } from '../utils/attachments.ts'
+import { getModelBetas } from '../utils/betas.ts'
+import { logError } from '../utils/log.ts'
+import { normalizeAttachmentForAPI } from '../utils/messages.ts'
 import {
   getMainLoopModel,
   getSmallFastModel,
   normalizeModelStringForAPI,
-} from '../utils/model/model.js'
-import { jsonStringify } from '../utils/slowOperations.js'
-import { isToolReferenceBlock } from '../utils/toolSearch.js'
-import { getAPIMetadata, getExtraBodyParams } from './api/claude.js'
-import { getAnthropicClient } from './api/client.js'
-import { withTokenCountVCR } from './vcr.js'
+} from '../utils/model/model.ts'
+import { jsonStringify } from '../utils/slowOperations.ts'
+import { isToolReferenceBlock } from '../utils/toolSearch.ts'
+import { getAPIMetadata, getExtraBodyParams } from './api/claude.ts'
+import { getAnthropicClient } from './api/client.ts'
+import { withTokenCountVCR } from './vcr.ts'
 
 // Minimal values for token counting with thinking enabled
 // API constraint: max_tokens must be greater than thinking.budget_tokens

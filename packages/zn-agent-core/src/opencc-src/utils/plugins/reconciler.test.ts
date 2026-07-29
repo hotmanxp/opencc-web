@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
-import { diffMarketplaces } from './reconciler.js'
-import type { DeclaredMarketplace } from './marketplaceManager.js'
-import type { KnownMarketplacesFile, MarketplaceSource } from './schemas.js'
+import { diffMarketplaces } from './reconciler.ts'
+import type { DeclaredMarketplace } from './marketplaceManager.ts'
+import type { KnownMarketplacesFile, MarketplaceSource } from './schemas.ts'
 
 const githubSource = (repo: string): MarketplaceSource => ({
   source: 'github',

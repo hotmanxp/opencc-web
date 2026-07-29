@@ -1,12 +1,12 @@
 import { describe, expect, test } from 'bun:test'
-import { getEmptyToolPermissionContext } from '../../Tool.js'
+import { getEmptyToolPermissionContext } from '../../Tool.ts'
 import {
   getAllowRules,
   getAskRules,
   getDenyRules,
   getDenyRuleForAgent,
   getDenyRuleForTool,
-} from './permissions.js'
+} from './permissions.ts'
 
 // Regression tests for the opencc startup crash:
 //

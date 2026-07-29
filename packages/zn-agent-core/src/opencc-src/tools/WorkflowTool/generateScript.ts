@@ -1,4 +1,4 @@
-import { parseCliArgs } from './cliArgs.js'
+import { parseCliArgs } from './cliArgs.ts'
 
 export type PromptArgs = {
   task: string

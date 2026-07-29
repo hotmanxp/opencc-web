@@ -10,13 +10,13 @@ import z from 'zod/v4'
 import type {
   PermissionUpdate,
   PermissionUpdateDestination,
-} from '../../types/permissions.js'
-import { lazySchema } from '../lazySchema.js'
-import { externalPermissionModeSchema } from './PermissionMode.js'
+} from '../../types/permissions.ts'
+import { lazySchema } from '../lazySchema.ts'
+import { externalPermissionModeSchema } from './PermissionMode.ts'
 import {
   permissionBehaviorSchema,
   permissionRuleValueSchema,
-} from './PermissionRule.js'
+} from './PermissionRule.ts'
 
 // Re-export for backwards compatibility
 export type { PermissionUpdate, PermissionUpdateDestination }

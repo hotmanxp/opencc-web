@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { substituteArguments } from './argumentSubstitution.js'
+import { substituteArguments } from './argumentSubstitution.ts'
 
 describe('substituteArguments named-argument regex safety', () => {
   test('substitutes a normal named argument', () => {

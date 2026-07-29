@@ -2,20 +2,20 @@
 import { expect, test } from 'bun:test'
 
 import type { ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
-import { query, type QueryParams } from '../query.js'
-import type { QueryDeps } from './deps.js'
-import { getMissingToolResultAbortMessage } from '../utils/abortReasons.js'
+import { query, type QueryParams } from '../query.ts'
+import type { QueryDeps } from './deps.ts'
+import { getMissingToolResultAbortMessage } from '../utils/abortReasons.ts'
 import {
   createAssistantMessage,
   createCompactBoundaryMessage,
   createUserMessage,
-} from '../utils/messages.js'
-import { asSystemPrompt } from '../utils/systemPromptType.js'
+} from '../utils/messages.ts'
+import { asSystemPrompt } from '../utils/systemPromptType.ts'
 import {
   createToolFailureLoopGuardState,
   getToolFailureLoopThreshold,
   updateToolFailureLoopGuard,
-} from './toolFailureLoopGuard.js'
+} from './toolFailureLoopGuard.ts'
 
 const querySourceFile = new URL('../query.ts', import.meta.url)
 

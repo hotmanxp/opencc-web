@@ -9,9 +9,9 @@
  * is eliminated.
  */
 
-import { getMcpConfigsByScope } from '../../services/mcp/config.js'
-import { getSettingsWithErrors } from './settings.js'
-import type { SettingsWithErrors } from './validation.js'
+import { getMcpConfigsByScope } from '../../services/mcp/config.ts'
+import { getSettingsWithErrors } from './settings.ts'
+import type { SettingsWithErrors } from './validation.ts'
 
 /**
  * Get merged settings with all validation errors, including MCP config errors.

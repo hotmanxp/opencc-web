@@ -1,4 +1,4 @@
-import { logForDebugging } from './debug.js'
+import { logForDebugging } from './debug.ts'
 
 export type EnvVarValidationResult = {
   effective: number

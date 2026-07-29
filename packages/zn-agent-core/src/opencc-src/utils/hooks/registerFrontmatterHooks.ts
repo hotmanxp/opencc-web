@@ -1,8 +1,8 @@
 import { HOOK_EVENTS, type HookEvent } from 'src/entrypoints/agentSdkTypes.js'
 import type { AppState } from 'src/state/AppState.js'
-import { logForDebugging } from '../debug.js'
-import type { HooksSettings } from '../settings/types.js'
-import { addSessionHook } from './sessionHooks.js'
+import { logForDebugging } from '../debug.ts'
+import type { HooksSettings } from '../settings/types.ts'
+import { addSessionHook } from './sessionHooks.ts'
 
 /**
  * Register hooks from frontmatter (agent or skill) into session-scoped hooks.

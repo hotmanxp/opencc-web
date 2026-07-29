@@ -7,7 +7,7 @@ import type {
   SpawnResult,
   WorkerInbound,
   WorkerOutbound,
-} from './types.js'
+} from './types.ts'
 
 describe('Workflow types', () => {
   test('Workflow has all required fields', () => {

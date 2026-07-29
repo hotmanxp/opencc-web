@@ -11,7 +11,7 @@ import {
   registerToolMessage,
   registerToolResult,
   resetCachedMCState,
-} from './cachedMicrocompact.js'
+} from './cachedMicrocompact.ts'
 
 describe('cachedMicrocompact stub', () => {
   test('feature is disabled', () => {

@@ -19,11 +19,11 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../../test/sharedMutationLock.js'
-import { getEmptyToolPermissionContext } from '../../Tool.js'
-import type { Message } from '../../types/message.js'
-import { asSystemPrompt } from '../../utils/systemPromptType.js'
-import { EMPTY_USAGE } from './emptyUsage.js'
-import type { Options } from './claude.js'
+import { getEmptyToolPermissionContext } from '../../Tool.ts'
+import type { Message } from '../../types/message.ts'
+import { asSystemPrompt } from '../../utils/systemPromptType.ts'
+import { EMPTY_USAGE } from './emptyUsage.ts'
+import type { Options } from './claude.ts'
 
 const actualClientModule = await import('./client.js')
 const originalEnv = { ...process.env }
@@ -250,7 +250,7 @@ async function collectStreamingMessages(
   options: Options,
 ): Promise<unknown[]> {
   const { queryModelWithStreaming } = await import(
-    `./claude.js?stream-watchdog-test-${importCounter++}`
+    `./claude.ts?stream-watchdog-test-${importCounter++}`
   )
   const messages: unknown[] = []
   for await (const message of queryModelWithStreaming({

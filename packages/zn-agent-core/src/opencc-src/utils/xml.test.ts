@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { escapeXml, escapeXmlAttr } from './xml.js'
+import { escapeXml, escapeXmlAttr } from './xml.ts'
 
 test('escapeXml escapes the core XML metacharacters', () => {
   expect(escapeXml('<tag>&"\'</tag>')).toBe(

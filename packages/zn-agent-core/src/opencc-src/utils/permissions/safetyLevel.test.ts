@@ -3,7 +3,7 @@ import {
   getSafetyLevel,
   isPermissiveSafety,
   resetSafetyLevelCache,
-} from './safetyLevel.js'
+} from './safetyLevel.ts'
 import { installSafetyLevelTestCleanup } from '../../test/safetyLevelTestHelpers.js'
 
 installSafetyLevelTestCleanup()

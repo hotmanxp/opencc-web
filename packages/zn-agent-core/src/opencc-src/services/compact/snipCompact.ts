@@ -1,7 +1,7 @@
 import { randomUUID } from 'crypto'
 import type { UUID } from 'crypto'
-import { getContextWindowForModel } from '../../utils/context.js'
-import { deriveShortMessageId } from '../../utils/messages.js'
+import { getContextWindowForModel } from '../../utils/context.ts'
+import { deriveShortMessageId } from '../../utils/messages.ts'
 
 // Module-level registry of message UUIDs queued for removal. We resolve the
 // model-facing short IDs to full UUIDs at mark time (against the snipping

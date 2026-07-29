@@ -1,10 +1,10 @@
 import { LRUCache } from 'lru-cache'
 import * as path from 'path'
-import { logForDebugging } from '../../utils/debug.js'
-import { toError } from '../../utils/errors.js'
-import { logError } from '../../utils/log.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
-import type { DiagnosticFile } from '../diagnosticTracking.js'
+import { logForDebugging } from '../../utils/debug.ts'
+import { toError } from '../../utils/errors.ts'
+import { logError } from '../../utils/log.ts'
+import { jsonStringify } from '../../utils/slowOperations.ts'
+import type { DiagnosticFile } from '../diagnosticTracking.ts'
 
 /**
  * Pending LSP diagnostic notification

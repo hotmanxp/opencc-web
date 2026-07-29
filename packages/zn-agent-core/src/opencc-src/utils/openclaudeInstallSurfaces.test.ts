@@ -8,10 +8,10 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock.js'
-import * as realEnv from './env.js'
-import * as realEnvUtils from './envUtils.js'
-import * as realExecFileNoThrow from './execFileNoThrow.js'
-import * as realDownload from './nativeInstaller/download.js'
+import * as realEnv from './env.ts'
+import * as realEnvUtils from './envUtils.ts'
+import * as realExecFileNoThrow from './execFileNoThrow.ts'
+import * as realDownload from './nativeInstaller/download.ts'
 
 const originalEnv = { ...process.env }
 const originalMacro = (globalThis as Record<string, unknown>).MACRO
@@ -51,7 +51,7 @@ const npmUninstallPackages: string[] = []
 const realDownloadModule = { ...realDownload }
 let recordedDownloadCalls: string[] | null = null
 
-mock.module('./nativeInstaller/download.js', () => ({
+mock.module('./nativeInstaller/download.ts', () => ({
   ...realDownloadModule,
   getLatestVersion: (
     ...args: Parameters<typeof realDownload.getLatestVersion>
@@ -73,7 +73,7 @@ mock.module('./nativeInstaller/download.js', () => ({
   },
 }))
 
-mock.module('./execFileNoThrow.js', () => ({
+mock.module('./execFileNoThrow.ts', () => ({
   ...realExecFileNoThrowModule,
   execFileNoThrowWithCwd: (
     ...args: Parameters<typeof realExecFileNoThrow.execFileNoThrowWithCwd>
@@ -131,7 +131,7 @@ afterEach(() => {
     recordedDownloadCalls = null
     mock.restore()
     mock.module('../utils/env.js', () => realEnv)
-    mock.module('./envUtils.js', () => realEnvUtils)
+    mock.module('./envUtils.ts', () => realEnvUtils)
   } finally {
     releaseSharedMutationLock()
   }
@@ -149,7 +149,7 @@ async function importFreshProtocolRegistration() {
   return import(`./deepLink/registerProtocol.ts?ts=${Date.now()}-${Math.random()}`)
 }
 async function mockEnvPlatform(platform: 'darwin' | 'win32') {
-  const actualEnvModule = await import(`./env.js?ts=${Date.now()}-${Math.random()}`)
+  const actualEnvModule = await import(`./env.ts?ts=${Date.now()}-${Math.random()}`)
   mock.module('../utils/env.js', () => ({
     ...actualEnvModule,
     env: {

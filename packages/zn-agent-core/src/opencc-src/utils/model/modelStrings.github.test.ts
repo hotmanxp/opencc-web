@@ -1,9 +1,9 @@
 // @ts-nocheck
 import { afterEach, expect, test } from 'bun:test'
 
-import { resetModelStringsForTestingOnly } from '../../bootstrap/state.js'
-import { parseUserSpecifiedModel } from './model.js'
-import { getModelStrings } from './modelStrings.js'
+import { resetModelStringsForTestingOnly } from '../../bootstrap/state.ts'
+import { parseUserSpecifiedModel } from './model.ts'
+import { getModelStrings } from './modelStrings.ts'
 
 const originalEnv = {
   CLAUDE_CODE_USE_GITHUB: process.env.CLAUDE_CODE_USE_GITHUB,

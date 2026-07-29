@@ -1,11 +1,11 @@
-import type { CommandSpec } from '../registry.js'
-import alias from './alias.js'
-import nohup from './nohup.js'
-import pyright from './pyright.js'
-import sleep from './sleep.js'
-import srun from './srun.js'
-import time from './time.js'
-import timeout from './timeout.js'
+import type { CommandSpec } from '../registry.ts'
+import alias from './alias.ts'
+import nohup from './nohup.ts'
+import pyright from './pyright.ts'
+import sleep from './sleep.ts'
+import srun from './srun.ts'
+import time from './time.ts'
+import timeout from './timeout.ts'
 
 export default [
   pyright,

@@ -1,10 +1,10 @@
 import { describe, expect, it } from 'bun:test'
-import { runWorkflowInVm } from './vmRunner.js'
+import { runWorkflowInVm } from './vmRunner.ts'
 import { writeFileSync, mkdtempSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { parseCliArgs } from '../cliArgs.js'
+import { parseCliArgs } from '../cliArgs.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)

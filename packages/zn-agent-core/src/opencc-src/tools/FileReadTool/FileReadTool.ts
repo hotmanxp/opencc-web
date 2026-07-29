@@ -7,39 +7,39 @@ import {
   PDF_AT_MENTION_INLINE_THRESHOLD,
   PDF_EXTRACT_SIZE_THRESHOLD,
   PDF_MAX_PAGES_PER_READ,
-} from '../../constants/apiLimits.js'
-import { hasBinaryExtension } from '../../constants/files.js'
+} from '../../constants/apiLimits.ts'
+import { hasBinaryExtension } from '../../constants/files.ts'
 import { memoryFreshnessNote } from '../../memdir/memoryAge.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
-import { logEvent } from '../../services/analytics/index.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
+import { logEvent } from '../../services/analytics/index.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   getFileExtensionForAnalytics,
-} from '../../services/analytics/metadata.js'
+} from '../../services/analytics/metadata.ts'
 import {
   countTokensWithAPI,
   roughTokenCountEstimationForFileType,
-} from '../../services/tokenEstimation.js'
+} from '../../services/tokenEstimation.ts'
 import {
   activateConditionalSkillsForPaths,
   addSkillDirectories,
   discoverSkillDirsForPaths,
-} from '../../skills/loadSkillsDir.js'
-import type { ToolUseContext } from '../../Tool.js'
-import { buildTool, type ToolDef } from '../../Tool.js'
-import { getCwd } from '../../utils/cwd.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from '../../utils/envUtils.js'
-import { getErrnoCode, isENOENT } from '../../utils/errors.js'
+} from '../../skills/loadSkillsDir.ts'
+import type { ToolUseContext } from '../../Tool.ts'
+import { buildTool, type ToolDef } from '../../Tool.ts'
+import { getCwd } from '../../utils/cwd.ts'
+import { getClaudeConfigHomeDir, isEnvTruthy } from '../../utils/envUtils.ts'
+import { getErrnoCode, isENOENT } from '../../utils/errors.ts'
 import {
   addLineNumbers,
   FILE_NOT_FOUND_CWD_NOTE,
   findSimilarFile,
   getFileModificationTimeAsync,
   suggestPathUnderCwd,
-} from '../../utils/file.js'
-import { logFileOperation } from '../../utils/fileOperationAnalytics.js'
-import { formatFileSize } from '../../utils/format.js'
-import { getFsImplementation } from '../../utils/fsOperations.js'
+} from '../../utils/file.ts'
+import { logFileOperation } from '../../utils/fileOperationAnalytics.ts'
+import { formatFileSize } from '../../utils/format.ts'
+import { getFsImplementation } from '../../utils/fsOperations.ts'
 import {
   compressImageBufferWithTokenLimit,
   createImageMetadataText,
@@ -47,39 +47,39 @@ import {
   type ImageDimensions,
   ImageResizeError,
   maybeResizeAndDownsampleImageBuffer,
-} from '../../utils/imageResizer.js'
+} from '../../utils/imageResizer.ts'
 import {
   getImageProcessor,
   ImageProcessorUnavailableError,
-} from './imageProcessor.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { logError } from '../../utils/log.js'
-import { isAutoMemFile } from '../../utils/memoryFileDetection.js'
-import { createUserMessage } from '../../utils/messages.js'
-import { getCanonicalName, getMainLoopModel } from '../../utils/model/model.js'
+} from './imageProcessor.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { logError } from '../../utils/log.ts'
+import { isAutoMemFile } from '../../utils/memoryFileDetection.ts'
+import { createUserMessage } from '../../utils/messages.ts'
+import { getCanonicalName, getMainLoopModel } from '../../utils/model/model.ts'
 import {
   mapNotebookCellsToToolResult,
   readNotebook,
-} from '../../utils/notebook.js'
-import { expandPath } from '../../utils/path.js'
-import { extractPDFPages, getPDFPageCount, readPDF } from '../../utils/pdf.js'
+} from '../../utils/notebook.ts'
+import { expandPath } from '../../utils/path.ts'
+import { extractPDFPages, getPDFPageCount, readPDF } from '../../utils/pdf.ts'
 import {
   isPDFExtension,
   isPDFSupported,
   parsePDFPageRange,
-} from '../../utils/pdfUtils.js'
+} from '../../utils/pdfUtils.ts'
 import {
   checkReadPermissionForTool,
   matchingRuleForInput,
-} from '../../utils/permissions/filesystem.js'
-import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
-import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.js'
-import { readFileInRange } from '../../utils/readFileInRange.js'
-import { semanticNumber } from '../../utils/semanticNumber.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
-import { BASH_TOOL_NAME } from '../BashTool/toolName.js'
-import { FILE_READ_TOOL_NAME } from './constants.js'
-import { getDefaultFileReadingLimits } from './limits.js'
+} from '../../utils/permissions/filesystem.ts'
+import type { PermissionDecision } from '../../utils/permissions/PermissionResult.ts'
+import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.ts'
+import { readFileInRange } from '../../utils/readFileInRange.ts'
+import { semanticNumber } from '../../utils/semanticNumber.ts'
+import { jsonStringify } from '../../utils/slowOperations.ts'
+import { BASH_TOOL_NAME } from '../BashTool/toolName.ts'
+import { FILE_READ_TOOL_NAME } from './constants.ts'
+import { getDefaultFileReadingLimits } from './limits.ts'
 import {
   DESCRIPTION,
   FILE_UNCHANGED_STUB,
@@ -87,7 +87,7 @@ import {
   OFFSET_INSTRUCTION_DEFAULT,
   OFFSET_INSTRUCTION_TARGETED,
   renderPromptTemplate,
-} from './prompt.js'
+} from './prompt.ts'
 import {
   getToolUseSummary,
   renderToolResultMessage,

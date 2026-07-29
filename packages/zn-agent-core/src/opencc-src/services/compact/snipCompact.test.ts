@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, mock, test } from 'bun:test'
-import { createAssistantMessage, createUserMessage, deriveShortMessageId } from '../../utils/messages.js'
+import { createAssistantMessage, createUserMessage, deriveShortMessageId } from '../../utils/messages.ts'
 import {
   _resetForTesting,
   isSnipRuntimeEnabled,
@@ -7,7 +7,7 @@ import {
   shouldNudgeForSnips,
   SNIP_NUDGE_TEXT,
   snipCompactIfNeeded,
-} from './snipCompact.js'
+} from './snipCompact.ts'
 
 beforeEach(() => {
   _resetForTesting()

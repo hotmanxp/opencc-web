@@ -4,9 +4,9 @@
  * Auth: optional Bearer for API tier
  */
 
-import type { SearchInput, SearchProvider } from './types.js'
-import { applyDomainFilters, safeHostname, type ProviderOutput } from './types.js'
-import { fetchJsonWithWebSearchTimeout } from './timeout.js'
+import type { SearchInput, SearchProvider } from './types.ts'
+import { applyDomainFilters, safeHostname, type ProviderOutput } from './types.ts'
+import { fetchJsonWithWebSearchTimeout } from './timeout.ts'
 
 export const mojeekProvider: SearchProvider = {
   name: 'mojeek',

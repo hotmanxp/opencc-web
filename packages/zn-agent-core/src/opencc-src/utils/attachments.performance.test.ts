@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { getEmptyToolPermissionContext, type ToolUseContext } from '../Tool.js'
-import { __test } from './attachments.js'
-import { createFileStateCacheWithSizeLimit } from './fileStateCache.js'
+import { getEmptyToolPermissionContext, type ToolUseContext } from '../Tool.ts'
+import { __test } from './attachments.ts'
+import { createFileStateCacheWithSizeLimit } from './fileStateCache.ts'
 
 function deferred(): {
   promise: Promise<void>

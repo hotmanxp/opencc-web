@@ -3,7 +3,7 @@ import {
   getAutoModeInstructions,
   getPlanModeInstructions,
   wrapInSystemReminder,
-} from './planMode.js'
+} from './planMode.ts'
 
 test('wrapInSystemReminder wraps content in system-reminder tags', () => {
   expect(wrapInSystemReminder('hello')).toBe(

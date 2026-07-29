@@ -1,6 +1,6 @@
-import { getCwd } from './cwd.js'
-import { logForDebugging } from './debug.js'
-import { getRemoteUrl } from './git.js'
+import { getCwd } from './cwd.ts'
+import { logForDebugging } from './debug.ts'
+import { getRemoteUrl } from './git.ts'
 
 export type ParsedRepository = {
   host: string

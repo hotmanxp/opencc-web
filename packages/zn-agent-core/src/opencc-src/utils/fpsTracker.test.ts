@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { FpsTracker } from './fpsTracker.js'
+import { FpsTracker } from './fpsTracker.ts'
 
 test('FpsTracker keeps a bounded frame-duration sample window', () => {
   const tracker = new FpsTracker()

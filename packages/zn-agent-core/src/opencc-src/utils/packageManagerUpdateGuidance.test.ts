@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import type { PackageManager } from './nativeInstaller/packageManagers.js'
-import { resolvePackageManagerUpdateGuidance } from './packageManagerUpdateGuidance.js'
+import type { PackageManager } from './nativeInstaller/packageManagers.ts'
+import { resolvePackageManagerUpdateGuidance } from './packageManagerUpdateGuidance.ts'
 
 const UPSTREAM_PACKAGE_URL = '@anthropic-ai/claude-code'
 const OPENCLAUDE_PACKAGE_URL = '@gitlawb/openclaude'

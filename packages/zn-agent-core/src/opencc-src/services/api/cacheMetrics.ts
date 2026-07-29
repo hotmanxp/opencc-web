@@ -45,7 +45,7 @@
  *                       usage.prompt_token_count
  *   - Copilot (non-OpenCC) / Ollama: not reported → supported=false
  */
-import type { APIProvider } from '../../utils/model/providers.js'
+import type { APIProvider } from '../../utils/model/providers.ts'
 
 /** Providers for which we know how to read cache fields. */
 export type CacheAwareProvider =

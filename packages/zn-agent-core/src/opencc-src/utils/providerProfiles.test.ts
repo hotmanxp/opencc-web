@@ -5,8 +5,8 @@ import { join } from 'node:path'
 
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
-import type { ProviderProfile } from './config.js'
-import { saveGlobalConfig } from './config.js'
+import type { ProviderProfile } from './config.ts'
+import { saveGlobalConfig } from './config.ts'
 
 async function importFreshProvidersModule() {
   return import(`./model/providers.ts?ts=${Date.now()}-${Math.random()}`)
@@ -94,8 +94,8 @@ afterEach(() => {
 
 async function importFreshProviderProfileModules() {
   mock.restore()
-  const actualConfig = await import(`./config.js?ts=${Date.now()}-${Math.random()}`)
-  mock.module('./config.js', () => ({
+  const actualConfig = await import(`./config.ts?ts=${Date.now()}-${Math.random()}`)
+  mock.module('./config.ts', () => ({
     ...actualConfig,
     // Spread the real config so the mock stays a COMPLETE GlobalConfig and only
     // the provider-profile fields are overridden. bun's mock.restore() does NOT

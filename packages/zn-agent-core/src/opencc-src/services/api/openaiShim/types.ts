@@ -1,4 +1,4 @@
-import type { AnthropicUsage, AnthropicStreamEvent, ShimCreateParams } from '../codexShim.js'
+import type { AnthropicUsage, AnthropicStreamEvent, ShimCreateParams } from '../codexShim.ts'
 
 // Re-export shared types from codexShim
 export type { AnthropicUsage, AnthropicStreamEvent, ShimCreateParams }

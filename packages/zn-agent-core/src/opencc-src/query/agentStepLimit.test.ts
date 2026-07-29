@@ -6,17 +6,17 @@
 import { describe, expect, test } from 'bun:test'
 import { z } from 'zod/v4'
 
-import { query, type QueryParams } from '../query.js'
-import { buildTool, type Tools } from '../Tool.js'
-import type { QueryDeps } from './deps.js'
+import { query, type QueryParams } from '../query.ts'
+import { buildTool, type Tools } from '../Tool.ts'
+import type { QueryDeps } from './deps.ts'
 import {
   createAssistantMessage,
   createUserMessage,
   normalizeMessagesForAPI,
-} from '../utils/messages.js'
-import { asSystemPrompt } from '../utils/systemPromptType.js'
-import { countToolUses } from '../tools/AgentTool/agentToolUtils.js'
-import { AGENT_STEP_LIMIT_TOOL_RESULT_PREFIX } from './agentStepLimit.js'
+} from '../utils/messages.ts'
+import { asSystemPrompt } from '../utils/systemPromptType.ts'
+import { countToolUses } from '../tools/AgentTool/agentToolUtils.ts'
+import { AGENT_STEP_LIMIT_TOOL_RESULT_PREFIX } from './agentStepLimit.ts'
 
 const echoCalls: string[] = []
 

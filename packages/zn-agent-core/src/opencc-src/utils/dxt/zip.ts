@@ -1,8 +1,8 @@
 import { isAbsolute, normalize } from 'path'
-import { logForDebugging } from '../debug.js'
-import { isENOENT } from '../errors.js'
-import { getFsImplementation } from '../fsOperations.js'
-import { containsPathTraversal } from '../path.js'
+import { logForDebugging } from '../debug.ts'
+import { isENOENT } from '../errors.ts'
+import { getFsImplementation } from '../fsOperations.ts'
+import { containsPathTraversal } from '../path.ts'
 
 const LIMITS = {
   MAX_FILE_SIZE: 512 * 1024 * 1024, // 512MB per file

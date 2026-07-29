@@ -12,37 +12,37 @@ import type {
   ToolPermissionContext,
   Tool as ToolType,
   ToolUseContext,
-} from '../../Tool.js'
-import { awaitClassifierAutoApproval } from '../../tools/BashTool/bashPermissions.js'
-import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
-import type { AssistantMessage } from '../../types/message.js'
+} from '../../Tool.ts'
+import { awaitClassifierAutoApproval } from '../../tools/BashTool/bashPermissions.ts'
+import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.ts'
+import type { AssistantMessage } from '../../types/message.ts'
 import type {
   PendingClassifierCheck,
   PermissionAllowDecision,
   PermissionDecisionReason,
   PermissionDenyDecision,
-} from '../../types/permissions.js'
-import { setClassifierApproval } from '../../utils/classifierApprovals.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { executePermissionRequestHooks } from '../../utils/hooks.js'
+} from '../../types/permissions.ts'
+import { setClassifierApproval } from '../../utils/classifierApprovals.ts'
+import { logForDebugging } from '../../utils/debug.ts'
+import { executePermissionRequestHooks } from '../../utils/hooks.ts'
 import {
   REJECT_MESSAGE,
   REJECT_MESSAGE_WITH_REASON_PREFIX,
   SUBAGENT_REJECT_MESSAGE,
   SUBAGENT_REJECT_MESSAGE_WITH_REASON_PREFIX,
   withMemoryCorrectionHint,
-} from '../../utils/messages.js'
-import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
+} from '../../utils/messages.ts'
+import type { PermissionDecision } from '../../utils/permissions/PermissionResult.ts'
 import {
   applyPermissionUpdates,
   persistPermissionUpdates,
   supportsPersistence,
-} from '../../utils/permissions/PermissionUpdate.js'
-import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js'
+} from '../../utils/permissions/PermissionUpdate.ts'
+import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.ts'
 import {
   logPermissionDecision,
   type PermissionDecisionArgs,
-} from './permissionLogging.js'
+} from './permissionLogging.ts'
 
 type PermissionApprovalSource =
   | { type: 'hook'; permanent?: boolean }

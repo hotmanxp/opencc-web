@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { createSyntheticOutputTool } from './SyntheticOutputTool.js'
-import type { AssistantMessage } from '../../types/message.js'
-import type { PermissionDecision } from '../../types/permissions.js'
+import { createSyntheticOutputTool } from './SyntheticOutputTool.ts'
+import type { AssistantMessage } from '../../types/message.ts'
+import type { PermissionDecision } from '../../types/permissions.ts'
 
 // Regression for #1256 — `--json-schema` failed when the user passed a
 // top-level array (or any non-object root) because the Anthropic tool_use

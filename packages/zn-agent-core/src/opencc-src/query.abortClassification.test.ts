@@ -1,17 +1,17 @@
 import { describe, expect, test } from 'bun:test'
 import { z } from 'zod/v4'
 
-import { query, type QueryParams } from './query.js'
-import type { QueryDeps } from './query/deps.js'
+import { query, type QueryParams } from './query.ts'
+import type { QueryDeps } from './query/deps.ts'
 import { createToolFixture } from './test/toolFixtures.js'
-import type { Tools } from './Tool.js'
+import type { Tools } from './Tool.ts'
 import {
   createAssistantMessage,
   createUserMessage,
   INTERRUPT_MESSAGE,
-} from './utils/messages.js'
-import { asSystemPrompt } from './utils/systemPromptType.js'
-import type { Message } from './types/message.js'
+} from './utils/messages.ts'
+import { asSystemPrompt } from './utils/systemPromptType.ts'
+import type { Message } from './types/message.ts'
 
 const DEFAULT_ABORT = Symbol('default abort')
 

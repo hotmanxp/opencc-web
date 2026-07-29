@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, test } from 'bun:test'
-import { interpretCommandResult } from './commandSemantics.js'
+import { interpretCommandResult } from './commandSemantics.ts'
 
 // =============================================================================
 // interpretCommandResult — exit code semantics per command

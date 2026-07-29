@@ -17,9 +17,9 @@ import {
   NodeFsOperations,
   setFsImplementation,
   type FsOperations,
-} from '../fsOperations.js'
+} from '../fsOperations.ts'
 
-import type { MarketplaceSource } from './schemas.js'
+import type { MarketplaceSource } from './schemas.ts'
 
 // @ts-expect-error -- query-string cache-buster: the import specifier ends with `?bust=...`
 // so TypeScript cannot resolve the bare path. The runtime import works under Bun (treats the

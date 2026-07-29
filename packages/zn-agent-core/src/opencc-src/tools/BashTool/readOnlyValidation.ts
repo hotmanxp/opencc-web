@@ -1,15 +1,15 @@
 import type { z } from 'zod/v4'
-import { getOriginalCwd } from '../../bootstrap/state.js'
+import { getOriginalCwd } from '../../bootstrap/state.ts'
 import {
   extractOutputRedirections,
   splitCommand_DEPRECATED,
-} from '../../utils/bash/commands.js'
-import { tryParseShellCommand } from '../../utils/bash/shellQuote.js'
-import { getCwd } from '../../utils/cwd.js'
-import { isCurrentDirectoryBareGitRepo } from '../../utils/git.js'
-import type { PermissionResult } from '../../utils/permissions/PermissionResult.js'
-import { getPlatform } from '../../utils/platform.js'
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
+} from '../../utils/bash/commands.ts'
+import { tryParseShellCommand } from '../../utils/bash/shellQuote.ts'
+import { getCwd } from '../../utils/cwd.ts'
+import { isCurrentDirectoryBareGitRepo } from '../../utils/git.ts'
+import type { PermissionResult } from '../../utils/permissions/PermissionResult.ts'
+import { getPlatform } from '../../utils/platform.ts'
+import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.ts'
 import {
   containsVulnerableUncPath,
   DOCKER_READ_ONLY_COMMANDS,
@@ -19,17 +19,17 @@ import {
   PYRIGHT_READ_ONLY_COMMANDS,
   RIPGREP_READ_ONLY_COMMANDS,
   validateFlags,
-} from '../../utils/shell/readOnlyCommandValidation.js'
+} from '../../utils/shell/readOnlyCommandValidation.ts'
 import type { BashTool } from './BashTool.js'
-import type { LegacyShellParseAnalysis } from './bashCommandAnalysis.js'
-import { isNormalizedGitCommand } from './bashPermissions.js'
-import { bashCommandIsSafe_DEPRECATED } from './bashSecurity.js'
+import type { LegacyShellParseAnalysis } from './bashCommandAnalysis.ts'
+import { isNormalizedGitCommand } from './bashPermissions.ts'
+import { bashCommandIsSafe_DEPRECATED } from './bashSecurity.ts'
 import {
   COMMAND_OPERATION_TYPE,
   PATH_EXTRACTORS,
   type PathCommand,
-} from './pathValidation.js'
-import { sedCommandIsAllowedByAllowlist } from './sedValidation.js'
+} from './pathValidation.ts'
+import { sedCommandIsAllowedByAllowlist } from './sedValidation.ts'
 
 // Unified command validation configuration system
 type CommandConfig = {

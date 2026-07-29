@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { expect, test } from 'bun:test'
 
-import { applySedSubstitution, type SedEditInfo } from './sedEditParser.js'
+import { applySedSubstitution, type SedEditInfo } from './sedEditParser.ts'
 
 function sedInfo(pattern: string, replacement: string, extendedRegex = false): SedEditInfo {
   return {

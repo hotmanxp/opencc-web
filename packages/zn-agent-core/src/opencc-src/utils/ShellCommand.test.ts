@@ -1,7 +1,7 @@
 import { EventEmitter } from 'events'
 import { expect, test } from 'bun:test'
-import { wrapSpawn } from './ShellCommand.js'
-import { TaskOutput } from './task/TaskOutput.js'
+import { wrapSpawn } from './ShellCommand.ts'
+import { TaskOutput } from './task/TaskOutput.ts'
 
 function createMockChildProcess(): EventEmitter & {
   pid?: number

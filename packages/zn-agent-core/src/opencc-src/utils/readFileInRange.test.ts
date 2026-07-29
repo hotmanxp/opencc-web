@@ -2,7 +2,7 @@ import { afterEach, describe, expect, test } from 'bun:test'
 import { mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { readFileInRange } from './readFileInRange.js'
+import { readFileInRange } from './readFileInRange.ts'
 
 const createdDirs: string[] = []
 

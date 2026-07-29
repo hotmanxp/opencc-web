@@ -1,4 +1,4 @@
-import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js'
+import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.ts'
 
 export const DESCRIPTION =
   'Create a new task in the task list. Use this to track progress, organize complex multi-step work, and demonstrate thoroughness. Tasks support metadata for tracking additional context.'

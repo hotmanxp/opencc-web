@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict'
 import test from 'node:test'
 
-import { validateOAuthCallbackParams } from './auth.js'
+import { validateOAuthCallbackParams } from './auth.ts'
 
 test('OAuth callback rejects error parameters before state validation can be bypassed', () => {
   const result = validateOAuthCallbackParams(

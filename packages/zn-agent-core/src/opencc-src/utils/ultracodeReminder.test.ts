@@ -5,7 +5,7 @@ import {
   ULTRACODE_EFFORT_ENTER_SHORT,
   ULTRACODE_EFFORT_EXIT,
   resetUltracodeReminderState,
-} from './ultracodeReminder.js'
+} from './ultracodeReminder.ts'
 
 describe('queueUltracodeReminder', () => {
   beforeEach(() => {

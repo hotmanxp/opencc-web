@@ -12,8 +12,8 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import {
   addToTotalLinesChanged,
   resetStateForTests,
-} from './bootstrap/state.js'
-import { formatTotalCost, resetCostState } from './cost-tracker.js'
+} from './bootstrap/state.ts'
+import { formatTotalCost, resetCostState } from './cost-tracker.ts'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
@@ -26,14 +26,14 @@ function anthropicUsage(partial: {
   output?: number
   cacheRead?: number
   cacheCreation?: number
-}): Parameters<typeof import('./cost-tracker.js').addToTotalSessionCost>[1] {
+}): Parameters<typeof import('./cost-tracker.ts').addToTotalSessionCost>[1] {
   return {
     input_tokens: partial.input ?? 0,
     output_tokens: partial.output ?? 0,
     cache_read_input_tokens: partial.cacheRead ?? 0,
     cache_creation_input_tokens: partial.cacheCreation ?? 0,
   } as Parameters<
-    typeof import('./cost-tracker.js').addToTotalSessionCost
+    typeof import('./cost-tracker.ts').addToTotalSessionCost
   >[1]
 }
 
@@ -70,7 +70,7 @@ describe('formatTotalCost — token bar output (PR #1610)', () => {
     // addToTotalSessionCost is a regular re-export from this module.
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { addToTotalSessionCost } =
-      require('./cost-tracker.js') as typeof import('./cost-tracker.js')
+      require('./cost-tracker.ts') as typeof import('./cost-tracker.ts')
     addToTotalSessionCost(
       0,
       anthropicUsage({ input: 1000, output: 200 }),
@@ -91,7 +91,7 @@ describe('formatTotalCost — token bar output (PR #1610)', () => {
   test('gates cache read / cache write rows on non-zero values', () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { addToTotalSessionCost } =
-      require('./cost-tracker.js') as typeof import('./cost-tracker.js')
+      require('./cost-tracker.ts') as typeof import('./cost-tracker.ts')
     // No cache read or cache write — neither row should appear.
     addToTotalSessionCost(
       0,
@@ -123,7 +123,7 @@ describe('formatTotalCost — token bar output (PR #1610)', () => {
   test('formats token counts using formatNumber (compact notation for ≥1000)', () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { addToTotalSessionCost } =
-      require('./cost-tracker.js') as typeof import('./cost-tracker.js')
+      require('./cost-tracker.ts') as typeof import('./cost-tracker.ts')
     // 12,345 input tokens → formatNumber() renders compact as "12.3k".
     // 67 output tokens stay as "67" (below the 1000 compact-notation threshold).
     addToTotalSessionCost(
@@ -140,7 +140,7 @@ describe('formatTotalCost — token bar output (PR #1610)', () => {
   test('keeps the legacy Total cost / Total duration / Total code changes block', () => {
     // eslint-disable-next-line @typescript-eslint/no-require-imports
     const { addToTotalSessionCost } =
-      require('./cost-tracker.js') as typeof import('./cost-tracker.js')
+      require('./cost-tracker.ts') as typeof import('./cost-tracker.ts')
     addToTotalSessionCost(
       0,
       anthropicUsage({ input: 100, output: 50 }),

@@ -5,7 +5,7 @@
  */
 
 import { randomUUID } from 'crypto'
-import { logForDebugging } from './debug.js'
+import { logForDebugging } from './debug.ts'
 
 export interface RequestLog {
   correlationId: string

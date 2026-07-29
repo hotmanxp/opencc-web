@@ -4,8 +4,8 @@ import {
   getWorkflowReportPath,
   readWorkflowReport,
   writeWorkflowReport,
-} from './diskOutput.js'
-import type { WorkflowReport } from './diskOutput.js'
+} from './diskOutput.ts'
+import type { WorkflowReport } from './diskOutput.ts'
 
 // Each test uses a unique taskId so concurrent runs of the same file
 // don't collide on the shared temp dir resolved by getProjectTempDir().

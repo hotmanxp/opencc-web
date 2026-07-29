@@ -28,7 +28,7 @@ import {
 import {
   getAttributionHeader,
   getCLISyspromptPrefix,
-} from '../../constants/system.js'
+} from '../../constants/system.ts'
 import {
   getEmptyToolPermissionContext,
   type QueryChainTracking,
@@ -36,49 +36,49 @@ import {
   type ToolPermissionContext,
   type Tools,
   toolMatchesName,
-} from '../../Tool.js'
-import type { AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.js'
+} from '../../Tool.ts'
+import type { AgentDefinition } from '../../tools/AgentTool/loadAgentsDir.ts'
 import {
   type ConnectorTextBlock,
   type ConnectorTextDelta,
   isConnectorTextBlock,
-} from '../../types/connectorText.js'
+} from '../../types/connectorText.ts'
 import type {
   AssistantMessage,
   Message,
   StreamEvent,
   SystemAPIErrorMessage,
   UserMessage,
-} from '../../types/message.js'
+} from '../../types/message.ts'
 import {
   type CacheScope,
   logAPIPrefix,
   splitSysPromptPrefix,
   toolToAPISchema,
-} from '../../utils/api.js'
-import { getOauthAccountInfo } from '../../utils/auth.js'
+} from '../../utils/api.ts'
+import { getOauthAccountInfo } from '../../utils/auth.ts'
 import {
   getStreamingAbortMessage,
   isExpectedSideTaskAbortReason,
   normalizeAbortReason,
   shouldCreateUserInterruptionMessage,
-} from '../../utils/abortReasons.js'
+} from '../../utils/abortReasons.ts'
 import {
   getBedrockExtraBodyParamsBetas,
   getMergedBetas,
   getModelBetas,
-} from '../../utils/betas.js'
-import { getOrCreateUserID } from '../../utils/config.js'
+} from '../../utils/betas.ts'
+import { getOrCreateUserID } from '../../utils/config.ts'
 import {
   CAPPED_DEFAULT_MAX_TOKENS,
   getModelMaxOutputTokens,
   getSonnet1mExpTreatmentEnabled,
-} from '../../utils/context.js'
-import { resolveAppliedEffort } from '../../utils/effort.js'
-import { isEnvTruthy } from '../../utils/envUtils.js'
-import { errorMessage } from '../../utils/errors.js'
-import { computeFingerprintFromMessages } from '../../utils/fingerprint.js'
-import { captureAPIRequest, logError } from '../../utils/log.js'
+} from '../../utils/context.ts'
+import { resolveAppliedEffort } from '../../utils/effort.ts'
+import { isEnvTruthy } from '../../utils/envUtils.ts'
+import { errorMessage } from '../../utils/errors.ts'
+import { computeFingerprintFromMessages } from '../../utils/fingerprint.ts'
+import { captureAPIRequest, logError } from '../../utils/log.ts'
 import {
   createAssistantAPIErrorMessage,
   createUserMessage,
@@ -88,26 +88,26 @@ import {
   stripAdvisorBlocks,
   stripCallerFieldFromAssistantMessage,
   stripToolReferenceBlocksFromUserMessage,
-} from '../../utils/messages.js'
+} from '../../utils/messages.ts'
 import {
   getDefaultOpusModel,
   getDefaultSonnetModel,
   getSmallFastModel,
   isNonCustomOpusModel,
-} from '../../utils/model/model.js'
+} from '../../utils/model/model.ts'
 import {
   asSystemPrompt,
   type SystemPrompt,
-} from '../../utils/systemPromptType.js'
-import { tokenCountFromLastAPIResponse } from '../../utils/tokens.js'
-import { getDynamicConfig_BLOCKS_ON_INIT } from '../analytics/growthbook.js'
+} from '../../utils/systemPromptType.ts'
+import { tokenCountFromLastAPIResponse } from '../../utils/tokens.ts'
+import { getDynamicConfig_BLOCKS_ON_INIT } from '../analytics/growthbook.ts'
 import {
   currentLimits,
   extractQuotaStatusFromError,
   extractQuotaStatusFromHeaders,
-} from '../claudeAiLimits.js'
-import { getAPIContextManagement } from '../compact/apiMicrocompact.js'
-import { getStreamIdleTimeoutMs } from './openaiShim.js'
+} from '../claudeAiLimits.ts'
+import { getAPIContextManagement } from '../compact/apiMicrocompact.ts'
+import { getStreamIdleTimeoutMs } from './openaiShim.ts'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const autoModeStateModule = true
@@ -196,52 +196,52 @@ import {
   isDeferredToolsDeltaEnabled,
   isToolSearchEnabled,
 } from 'src/utils/toolSearch.js'
-import { API_MAX_MEDIA_PER_REQUEST } from '../../constants/apiLimits.js'
-import { ADVISOR_BETA_HEADER } from '../../constants/betas.js'
+import { API_MAX_MEDIA_PER_REQUEST } from '../../constants/apiLimits.ts'
+import { ADVISOR_BETA_HEADER } from '../../constants/betas.ts'
 import {
   formatDeferredToolLine,
   isDeferredTool,
   TOOL_SEARCH_TOOL_NAME,
-} from '../../tools/ToolSearchTool/prompt.js'
-import { count } from '../../utils/array.js'
-import { insertBlockAfterToolResults } from '../../utils/contentArray.js'
-import { validateBoundedIntEnvVar } from '../../utils/envValidation.js'
-import { safeParseJSON } from '../../utils/json.js'
+} from '../../tools/ToolSearchTool/prompt.ts'
+import { count } from '../../utils/array.ts'
+import { insertBlockAfterToolResults } from '../../utils/contentArray.ts'
+import { validateBoundedIntEnvVar } from '../../utils/envValidation.ts'
+import { safeParseJSON } from '../../utils/json.ts'
 import {
   normalizeModelStringForAPI,
   parseUserSpecifiedModel,
-} from '../../utils/model/model.js'
+} from '../../utils/model/model.ts'
 import {
   startSessionActivity,
   stopSessionActivity,
-} from '../../utils/sessionActivity.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
+} from '../../utils/sessionActivity.ts'
+import { jsonStringify } from '../../utils/slowOperations.ts'
 import {
   isBetaTracingEnabled,
   type LLMRequestNewContext,
   startLLMRequestSpan,
-} from '../../utils/telemetry/sessionTracing.js'
+} from '../../utils/telemetry/sessionTracing.ts'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../analytics/index.js'
+} from '../analytics/index.ts'
 import {
   consumePendingCacheEdits,
   getPinnedCacheEdits,
   markToolsSentToAPIState,
   pinCacheEdits,
-} from '../compact/microCompact.js'
-import { getInitializationStatus } from '../lsp/manager.js'
-import { isToolFromMcpServer } from '../mcp/utils.js'
-import { withStreamingVCR, withVCR } from '../vcr.js'
-import { CLIENT_REQUEST_ID_HEADER, getAnthropicClient } from './client.js'
+} from '../compact/microCompact.ts'
+import { getInitializationStatus } from '../lsp/manager.ts'
+import { isToolFromMcpServer } from '../mcp/utils.ts'
+import { withStreamingVCR, withVCR } from '../vcr.ts'
+import { CLIENT_REQUEST_ID_HEADER, getAnthropicClient } from './client.ts'
 import {
   API_ERROR_MESSAGE_PREFIX,
   CUSTOM_OFF_SWITCH_MESSAGE,
   getAssistantMessageFromError,
   getErrorMessageIfRefusal,
-} from './errors.js'
+} from './errors.ts'
 import {
   EMPTY_USAGE,
   type GlobalCacheStrategy,
@@ -249,19 +249,19 @@ import {
   logAPIQuery,
   logAPISuccessAndDuration,
   type NonNullableUsage,
-} from './logging.js'
+} from './logging.ts'
 import {
   CACHE_TTL_1HOUR_MS,
   checkResponseForCacheBreak,
   recordPromptState,
-} from './promptCacheBreakDetection.js'
+} from './promptCacheBreakDetection.ts'
 import {
   CannotRetryError,
   FallbackTriggeredError,
   is529Error,
   type RetryContext,
   withRetry,
-} from './withRetry.js'
+} from './withRetry.ts'
 
 // Define a type that represents valid JSON values
 type JsonValue = string | number | boolean | null | JsonObject | JsonArray

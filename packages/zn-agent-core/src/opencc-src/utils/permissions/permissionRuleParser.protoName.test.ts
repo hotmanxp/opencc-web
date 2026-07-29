@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import { AGENT_TOOL_NAME } from '../../tools/AgentTool/constants.js'
+import { AGENT_TOOL_NAME } from '../../tools/AgentTool/constants.ts'
 import {
   normalizeLegacyToolName,
   permissionRuleValueFromString,
-} from './permissionRuleParser.js'
+} from './permissionRuleParser.ts'
 
 // Regression: LEGACY_TOOL_NAME_ALIASES is a plain object literal indexed by a
 // caller-supplied tool name. A bare bracket lookup resolves inherited

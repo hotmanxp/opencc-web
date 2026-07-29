@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import type { ToolPermissionContext } from '../../types/permissions.js'
-import type { ParsedPowerShellCommand } from '../../utils/powershell/parser.js'
-import { checkPathConstraints } from './pathValidation.js'
+import type { ToolPermissionContext } from '../../types/permissions.ts'
+import type { ParsedPowerShellCommand } from '../../utils/powershell/parser.ts'
+import { checkPathConstraints } from './pathValidation.ts'
 
 function defaultContext(): ToolPermissionContext {
   return {

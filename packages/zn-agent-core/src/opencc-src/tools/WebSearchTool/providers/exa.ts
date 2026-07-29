@@ -4,9 +4,9 @@
  * Auth: x-api-key: <key>
  */
 
-import type { SearchInput, SearchProvider } from './types.js'
-import { applyDomainFilters, safeHostname, type ProviderOutput } from './types.js'
-import { fetchJsonWithWebSearchTimeout } from './timeout.js'
+import type { SearchInput, SearchProvider } from './types.ts'
+import { applyDomainFilters, safeHostname, type ProviderOutput } from './types.ts'
+import { fetchJsonWithWebSearchTimeout } from './timeout.ts'
 
 export const exaProvider: SearchProvider = {
   name: 'exa',

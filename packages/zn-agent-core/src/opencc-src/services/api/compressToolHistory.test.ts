@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
-import { compressToolHistory, getTiers } from './compressToolHistory.js'
+import { compressToolHistory, getTiers } from './compressToolHistory.ts'
 
 // Mock the two dependencies so tests are deterministic and don't read disk config.
 const mockState = {

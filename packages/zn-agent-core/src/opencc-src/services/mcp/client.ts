@@ -40,103 +40,103 @@ import {
 import memoize from 'lodash-es/memoize.js'
 import zipObject from 'lodash-es/zipObject.js'
 import pMap from 'p-map'
-import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js'
+import { getOriginalCwd, getSessionId } from '../../bootstrap/state.ts'
 import type { Command } from '../../commands.js'
-import { getOauthConfig } from '../../constants/oauth.js'
-import { PRODUCT_URL } from '../../constants/product.js'
+import { getOauthConfig } from '../../constants/oauth.ts'
+import { PRODUCT_URL } from '../../constants/product.ts'
 import type { AppState } from '../../state/AppState.js'
 import {
   type Tool,
   type ToolCallProgress,
   toolMatchesName,
-} from '../../Tool.js'
-import { ListMcpResourcesTool } from '../../tools/ListMcpResourcesTool/ListMcpResourcesTool.js'
-import { type MCPProgress, MCPTool } from '../../tools/MCPTool/MCPTool.js'
-import { createMcpAuthTool } from '../../tools/McpAuthTool/McpAuthTool.js'
-import { ReadMcpResourceTool } from '../../tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
-import { createAbortController } from '../../utils/abortController.js'
-import { AbortError, isAbortError } from '../../utils/errors.js'
-import { count } from '../../utils/array.js'
+} from '../../Tool.ts'
+import { ListMcpResourcesTool } from '../../tools/ListMcpResourcesTool/ListMcpResourcesTool.ts'
+import { type MCPProgress, MCPTool } from '../../tools/MCPTool/MCPTool.ts'
+import { createMcpAuthTool } from '../../tools/McpAuthTool/McpAuthTool.ts'
+import { ReadMcpResourceTool } from '../../tools/ReadMcpResourceTool/ReadMcpResourceTool.ts'
+import { createAbortController } from '../../utils/abortController.ts'
+import { AbortError, isAbortError } from '../../utils/errors.ts'
+import { count } from '../../utils/array.ts'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
   getClaudeAIOAuthTokens,
   handleOAuth401Error,
-} from '../../utils/auth.js'
-import { registerCleanup } from '../../utils/cleanupRegistry.js'
-import { detectCodeIndexingFromMcpServerName } from '../../utils/codeIndexing.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { isEnvDefinedFalsy, isEnvTruthy, runtimeFeature } from '../../utils/envUtils.js'
+} from '../../utils/auth.ts'
+import { registerCleanup } from '../../utils/cleanupRegistry.ts'
+import { detectCodeIndexingFromMcpServerName } from '../../utils/codeIndexing.ts'
+import { logForDebugging } from '../../utils/debug.ts'
+import { isEnvDefinedFalsy, isEnvTruthy, runtimeFeature } from '../../utils/envUtils.ts'
 import {
   errorMessage,
   TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-} from '../../utils/errors.js'
-import { getMCPUserAgent } from '../../utils/http.js'
-import { maybeNotifyIDEConnected } from '../../utils/ide.js'
-import { maybeResizeAndDownsampleImageBuffer } from '../../utils/imageResizer.js'
-import { logMCPDebug, logMCPError } from '../../utils/log.js'
+} from '../../utils/errors.ts'
+import { getMCPUserAgent } from '../../utils/http.ts'
+import { maybeNotifyIDEConnected } from '../../utils/ide.ts'
+import { maybeResizeAndDownsampleImageBuffer } from '../../utils/imageResizer.ts'
+import { logMCPDebug, logMCPError } from '../../utils/log.ts'
 import {
   getBinaryBlobSavedMessage,
   getFormatDescription,
   getLargeOutputInstructions,
   persistBinaryContent,
-} from '../../utils/mcpOutputStorage.js'
+} from '../../utils/mcpOutputStorage.ts'
 import {
   getContentSizeEstimate,
   type MCPToolResult,
   mcpContentNeedsTruncation,
   truncateMcpContentIfNeeded,
-} from '../../utils/mcpValidation.js'
-import { WebSocketTransport } from '../../utils/mcpWebSocketTransport.js'
-import { memoizeWithLRU } from '../../utils/memoize.js'
-import { getWebSocketTLSOptions } from '../../utils/mtls.js'
+} from '../../utils/mcpValidation.ts'
+import { WebSocketTransport } from '../../utils/mcpWebSocketTransport.ts'
+import { memoizeWithLRU } from '../../utils/memoize.ts'
+import { getWebSocketTLSOptions } from '../../utils/mtls.ts'
 import {
   getProxyFetchOptions,
   getWebSocketProxyAgent,
   getWebSocketProxyUrl,
-} from '../../utils/proxy.js'
-import { recursivelySanitizeUnicode } from '../../utils/sanitization.js'
-import { getSessionIngressAuthToken } from '../../utils/sessionIngressAuth.js'
-import { subprocessEnv } from '../../utils/subprocessEnv.js'
+} from '../../utils/proxy.ts'
+import { recursivelySanitizeUnicode } from '../../utils/sanitization.ts'
+import { getSessionIngressAuthToken } from '../../utils/sessionIngressAuth.ts'
+import { subprocessEnv } from '../../utils/subprocessEnv.ts'
 import {
   isPersistError,
   persistToolResult,
-} from '../../utils/toolResultStorage.js'
+} from '../../utils/toolResultStorage.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../analytics/index.js'
+} from '../analytics/index.ts'
 import {
   type ElicitationWaitingState,
   runElicitationHooks,
   runElicitationResultHooks,
-} from './elicitationHandler.js'
-import { buildMcpToolName } from './mcpStringUtils.js'
-import { normalizeNameForMCP } from './normalization.js'
-import { getLoggingSafeMcpBaseUrl } from './utils.js'
+} from './elicitationHandler.ts'
+import { buildMcpToolName } from './mcpStringUtils.ts'
+import { normalizeNameForMCP } from './normalization.ts'
+import { getLoggingSafeMcpBaseUrl } from './utils.ts'
 
-import { fetchMcpSkillsForClient } from '../../skills/mcpSkills.js'
+import { fetchMcpSkillsForClient } from '../../skills/mcpSkills.ts'
 import { UnauthorizedError } from '@modelcontextprotocol/sdk/client/auth.js'
 import type { AssistantMessage } from 'src/types/message.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
-import { classifyMcpToolForCollapse } from '../../tools/MCPTool/classifyForCollapse.js'
-import { clearKeychainCache } from '../../utils/secureStorage/macOsKeychainHelpers.js'
-import { sleep } from '../../utils/sleep.js'
+import { classifyMcpToolForCollapse } from '../../tools/MCPTool/classifyForCollapse.ts'
+import { clearKeychainCache } from '../../utils/secureStorage/macOsKeychainHelpers.ts'
+import { sleep } from '../../utils/sleep.ts'
 import {
   ClaudeAuthProvider,
   hasMcpDiscoveryButNoToken,
   wrapFetchWithStepUpDetection,
-} from './auth.js'
-import { markClaudeAiMcpConnected } from './claudeai.js'
-import { getAllMcpConfigs, isMcpServerDisabled } from './config.js'
-import { getMcpServerHeaders } from './headersHelper.js'
-import { SdkControlClientTransport } from './SdkControlTransport.js'
+} from './auth.ts'
+import { markClaudeAiMcpConnected } from './claudeai.ts'
+import { getAllMcpConfigs, isMcpServerDisabled } from './config.ts'
+import { getMcpServerHeaders } from './headersHelper.ts'
+import { SdkControlClientTransport } from './SdkControlTransport.ts'
 import type {
   ConnectedMCPServer,
   MCPServerConnection,
   McpSdkServerConfig,
   ScopedMcpServerConfig,
   ServerResource,
-} from './types.js'
+} from './types.ts'
 
 /**
  * Custom error class to indicate that an MCP tool call failed due to
@@ -226,7 +226,7 @@ function getMcpToolTimeoutMs(): number {
   )
 }
 
-import { isClaudeInChromeMCPServer } from '../../utils/claudeInChrome/common.js'
+import { isClaudeInChromeMCPServer } from '../../utils/claudeInChrome/common.ts'
 
 // Lazy: toolRendering.tsx pulls React/ink; only needed when Claude-in-Chrome MCP server is connected
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -248,10 +248,10 @@ const isComputerUseMCPServer = feature('CHICAGO_MCP')
 
 import { mkdir, readFile, unlink, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
-import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getClaudeConfigHomeDir } from '../../utils/envUtils.ts'
 /* eslint-enable @typescript-eslint/no-require-imports */
-import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
-import { jsonRedactor } from '../../utils/redaction.js'
+import { jsonParse, jsonStringify } from '../../utils/slowOperations.ts'
+import { jsonRedactor } from '../../utils/redaction.ts'
 
 const MCP_AUTH_CACHE_TTL_MS = 15 * 60 * 1000 // 15 min
 

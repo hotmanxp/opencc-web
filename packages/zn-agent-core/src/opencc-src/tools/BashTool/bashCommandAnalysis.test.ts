@@ -3,10 +3,10 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../../test/sharedMutationLock.js'
-import { parseForSecurityFromAst } from '../../utils/bash/ast.js'
-import { PARSE_ABORTED } from '../../utils/bash/parser.js'
-import * as realDebug from '../../utils/debug.js'
-import { analyzeBashCommand } from './bashCommandAnalysis.js'
+import { parseForSecurityFromAst } from '../../utils/bash/ast.ts'
+import { PARSE_ABORTED } from '../../utils/bash/parser.ts'
+import * as realDebug from '../../utils/debug.ts'
+import { analyzeBashCommand } from './bashCommandAnalysis.ts'
 
 let importCounter = 0
 
@@ -19,18 +19,18 @@ async function importAnalysisWithDebugSpy(
     typeof mock<(message: string, options?: { level?: string }) => void>
   >,
 ) {
-  mock.module('../../utils/debug.js', () => ({
+  mock.module('../../utils/debug.ts', () => ({
     ...realDebug,
     logForDebugging: debugSpy,
   }))
 
-  return import(`./bashCommandAnalysis.js?analysisTest=${importCounter++}`)
+  return import(`./bashCommandAnalysis.ts?analysisTest=${importCounter++}`)
 }
 
 afterEach(() => {
   try {
     mock.restore()
-    mock.module('../../utils/debug.js', () => realDebug)
+    mock.module('../../utils/debug.ts', () => realDebug)
   } finally {
     releaseSharedMutationLock()
   }

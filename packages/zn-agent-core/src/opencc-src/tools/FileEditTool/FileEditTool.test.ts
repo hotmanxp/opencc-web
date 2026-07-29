@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test';
-import { FileEditTool } from './FileEditTool.js';
+import { FileEditTool } from './FileEditTool.ts';
 
 describe('FileEditTool description', () => {
   test('matches upstream 2.1.177 one-liner', async () => {

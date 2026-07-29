@@ -4,7 +4,7 @@ import {
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE,
   getFeatureValue_CACHED_MAY_BE_STALE,
 } from 'src/services/analytics/growthbook.js'
-import { getIsNonInteractiveSession, getSdkBetas } from '../bootstrap/state.js'
+import { getIsNonInteractiveSession, getSdkBetas } from '../bootstrap/state.ts'
 import {
   CLAUDE_CODE_20250219_BETA_HEADER,
   CLI_INTERNAL_BETA_HEADER,
@@ -18,15 +18,15 @@ import {
   TOKEN_EFFICIENT_TOOLS_BETA_HEADER,
   TOOL_SEARCH_BETA_HEADER_1P,
   TOOL_SEARCH_BETA_HEADER_3P,
-} from '../constants/betas.js'
-import { OAUTH_BETA_HEADER } from '../constants/oauth.js'
-import { isClaudeAISubscriber } from './auth.js'
-import { has1mContext } from './context.js'
-import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
-import { getCanonicalName } from './model/model.js'
-import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
-import { getAPIProvider, isGithubNativeAnthropicMode } from './model/providers.js'
-import { getInitialSettings } from './settings/settings.js'
+} from '../constants/betas.ts'
+import { OAUTH_BETA_HEADER } from '../constants/oauth.ts'
+import { isClaudeAISubscriber } from './auth.ts'
+import { has1mContext } from './context.ts'
+import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.ts'
+import { getCanonicalName } from './model/model.ts'
+import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.ts'
+import { getAPIProvider, isGithubNativeAnthropicMode } from './model/providers.ts'
+import { getInitialSettings } from './settings/settings.ts'
 
 /**
  * SDK-provided betas that are allowed for API key users.

@@ -1,11 +1,11 @@
 import { describe, expect, test } from 'bun:test'
 import { APIUserAbortError } from '@anthropic-ai/sdk'
-import { shouldCreateUserInterruptionMessage } from '../../utils/abortReasons.js'
+import { shouldCreateUserInterruptionMessage } from '../../utils/abortReasons.ts'
 import {
   getClaudeExpectedSideTaskApiAbortLogMessage,
   getClaudeStreamingAbortLogMessage,
-} from './claude.js'
-import { CannotRetryError } from './withRetry.js'
+} from './claude.ts'
+import { CannotRetryError } from './withRetry.ts'
 
 describe('Claude stream abort classification wiring', () => {
   test('formats timeout abort logs as timeout aborts, not user aborts', () => {

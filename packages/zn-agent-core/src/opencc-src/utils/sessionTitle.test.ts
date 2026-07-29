@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
-import type { AssistantMessage } from '../types/message.js'
+import type { AssistantMessage } from '../types/message.ts'
 
 // Mock claude.js before importing the module under test so queryHaiku resolves
 // to whatever the individual test wants. We preserve every other export from

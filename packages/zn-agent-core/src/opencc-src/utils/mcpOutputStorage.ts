@@ -3,12 +3,12 @@ import { join } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../services/analytics/index.js'
-import type { MCPResultType } from '../services/mcp/client.js'
-import { toError } from './errors.js'
-import { formatFileSize } from './format.js'
-import { logError } from './log.js'
-import { ensureToolResultsDir, getToolResultsDir } from './toolResultStorage.js'
+} from '../services/analytics/index.ts'
+import type { MCPResultType } from '../services/mcp/client.ts'
+import { toError } from './errors.ts'
+import { formatFileSize } from './format.ts'
+import { logError } from './log.ts'
+import { ensureToolResultsDir, getToolResultsDir } from './toolResultStorage.ts'
 
 /**
  * Generates a format description string based on the MCP result type and schema.

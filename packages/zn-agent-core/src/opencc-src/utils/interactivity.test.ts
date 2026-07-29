@@ -1,5 +1,5 @@
 import { expect, test, describe } from 'bun:test'
-import { isInteractiveSession } from './interactivity.js'
+import { isInteractiveSession } from './interactivity.ts'
 
 describe('isInteractiveSession', () => {
   test('returns true when stdout is TTY', () => {

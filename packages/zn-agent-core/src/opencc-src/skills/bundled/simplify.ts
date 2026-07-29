@@ -1,5 +1,5 @@
-import { AGENT_TOOL_NAME } from '../../tools/AgentTool/constants.js'
-import { registerBundledSkill } from '../bundledSkills.js'
+import { AGENT_TOOL_NAME } from '../../tools/AgentTool/constants.ts'
+import { registerBundledSkill } from '../bundledSkills.ts'
 
 const SIMPLIFY_PROMPT = `# Simplify: Code Review and Cleanup
 

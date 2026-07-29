@@ -1,12 +1,12 @@
 import { z } from 'zod/v4'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
-import { buildTool, type ToolDef } from '../../Tool.js'
-import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
+import { buildTool, type ToolDef } from '../../Tool.ts'
+import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.ts'
 import {
   executeTaskCompletedHooks,
   getTaskCompletedHookMessage,
-} from '../../utils/hooks.js'
-import { lazySchema } from '../../utils/lazySchema.js'
+} from '../../utils/hooks.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
 import {
   blockTask,
   deleteTask,
@@ -17,17 +17,17 @@ import {
   type TaskStatus,
   TaskStatusSchema,
   updateTask,
-} from '../../utils/tasks.js'
+} from '../../utils/tasks.ts'
 import {
   getAgentId,
   getAgentName,
   getTeammateColor,
   getTeamName,
-} from '../../utils/teammate.js'
-import { writeToMailbox } from '../../utils/teammateMailbox.js'
-import { VERIFICATION_AGENT_TYPE } from '../AgentTool/constants.js'
-import { TASK_UPDATE_TOOL_NAME } from './constants.js'
-import { DESCRIPTION, PROMPT } from './prompt.js'
+} from '../../utils/teammate.ts'
+import { writeToMailbox } from '../../utils/teammateMailbox.ts'
+import { VERIFICATION_AGENT_TYPE } from '../AgentTool/constants.ts'
+import { TASK_UPDATE_TOOL_NAME } from './constants.ts'
+import { DESCRIPTION, PROMPT } from './prompt.ts'
 
 const inputSchema = lazySchema(() => {
   // Extended status schema that includes 'deleted' as a special action

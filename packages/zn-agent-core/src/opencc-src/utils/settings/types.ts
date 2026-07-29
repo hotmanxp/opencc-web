@@ -1,16 +1,16 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
-import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
-import { SandboxSettingsSchema } from '../../entrypoints/sandboxTypes.js'
-import { isEnvTruthy } from '../envUtils.js'
-import { lazySchema } from '../lazySchema.js'
+import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.ts'
+import { SandboxSettingsSchema } from '../../entrypoints/sandboxTypes.ts'
+import { isEnvTruthy } from '../envUtils.ts'
+import { lazySchema } from '../lazySchema.ts'
 import {
   EXTERNAL_PERMISSION_MODES,
   PERMISSION_MODES,
-} from '../permissions/PermissionMode.js'
-import { MarketplaceSourceSchema } from '../plugins/schemas.js'
-import { CLAUDE_CODE_SETTINGS_SCHEMA_URL } from './constants.js'
-import { PermissionRuleSchema } from './permissionValidation.js'
+} from '../permissions/PermissionMode.ts'
+import { MarketplaceSourceSchema } from '../plugins/schemas.ts'
+import { CLAUDE_CODE_SETTINGS_SCHEMA_URL } from './constants.ts'
+import { PermissionRuleSchema } from './permissionValidation.ts'
 
 // Re-export hook schemas and types from centralized location for backward compatibility
 export {
@@ -24,12 +24,12 @@ export {
   type HooksSettings,
   type HttpHook,
   type PromptHook,
-} from '../../schemas/hooks.js'
+} from '../../schemas/hooks.ts'
 
 // Also import for use within this file
-import { type HookCommand, HooksSchema } from '../../schemas/hooks.js'
+import { type HookCommand, HooksSchema } from '../../schemas/hooks.ts'
 import { AutoFixConfigSchema } from '../../services/autoFix/autoFixConfig.js'
-import { count } from '../array.js'
+import { count } from '../array.ts'
 
 /**
  * Schema for environment variables

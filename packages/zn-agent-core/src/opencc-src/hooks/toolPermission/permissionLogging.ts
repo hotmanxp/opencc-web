@@ -7,15 +7,15 @@ import {
   logEvent,
 } from 'src/services/analytics/index.js'
 import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js'
-import { getCodeEditToolDecisionCounter } from '../../bootstrap/state.js'
-import type { Tool as ToolType, ToolUseContext } from '../../Tool.js'
-import { getLanguageName } from '../../utils/cliHighlight.js'
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
-import { logOTelEvent } from '../../utils/telemetry/events.js'
+import { getCodeEditToolDecisionCounter } from '../../bootstrap/state.ts'
+import type { Tool as ToolType, ToolUseContext } from '../../Tool.ts'
+import { getLanguageName } from '../../utils/cliHighlight.ts'
+import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.ts'
+import { logOTelEvent } from '../../utils/telemetry/events.ts'
 import type {
   PermissionApprovalSource,
   PermissionRejectionSource,
-} from './PermissionContext.js'
+} from './PermissionContext.ts'
 
 type PermissionLogContext = {
   tool: ToolType

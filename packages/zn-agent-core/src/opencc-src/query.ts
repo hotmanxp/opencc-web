@@ -5,19 +5,19 @@ import type {
   ToolUseBlock,
 } from '@anthropic-ai/sdk/resources/index.mjs'
 import type { CanUseToolFn } from './hooks/useCanUseTool.js'
-import { FallbackTriggeredError } from './services/api/withRetry.js'
+import { FallbackTriggeredError } from './services/api/withRetry.ts'
 import {
   calculateTokenWarningState,
   getAutoCompactThreshold,
   isAutoCompactEnabled,
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
   type AutoCompactTrackingState,
-} from './services/compact/autoCompact.js'
-import { resolveForceReason } from './services/compact/forceReasonResolver.js'
-import { consumeCompactionRequest } from './utils/memoryPressure.js'
-import { validateBoundedIntEnvVar } from './utils/envValidation.js'
-import { buildPostCompactMessages } from './services/compact/compact.js'
-import type { MicrocompactResult } from './services/compact/microCompact.js'
+} from './services/compact/autoCompact.ts'
+import { resolveForceReason } from './services/compact/forceReasonResolver.ts'
+import { consumeCompactionRequest } from './utils/memoryPressure.ts'
+import { validateBoundedIntEnvVar } from './utils/envValidation.ts'
+import { buildPostCompactMessages } from './services/compact/compact.ts'
+import type { MicrocompactResult } from './services/compact/microCompact.ts'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const reactiveCompact = feature('REACTIVE_COMPACT')
   ? (require('./services/compact/reactiveCompact.js') as typeof import('./services/compact/reactiveCompact.js'))
@@ -30,10 +30,10 @@ import {
   logEvent,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
 } from 'src/services/analytics/index.js'
-import { ImageSizeError } from './utils/imageValidation.js'
-import { ImageResizeError } from './utils/imageResizer.js'
-import { findToolByName, type ToolUseContext } from './Tool.js'
-import { asSystemPrompt, type SystemPrompt } from './utils/systemPromptType.js'
+import { ImageSizeError } from './utils/imageValidation.ts'
+import { ImageResizeError } from './utils/imageResizer.ts'
+import { findToolByName, type ToolUseContext } from './Tool.ts'
+import { asSystemPrompt, type SystemPrompt } from './utils/systemPromptType.ts'
 import type {
   AssistantMessage,
   AttachmentMessage,
@@ -43,19 +43,19 @@ import type {
   ToolUseSummaryMessage,
   UserMessage,
   TombstoneMessage,
-} from './types/message.js'
-import { logError } from './utils/log.js'
+} from './types/message.ts'
+import { logError } from './utils/log.ts'
 import {
   PROMPT_TOO_LONG_ERROR_MESSAGE,
   getProviderMaxTokensCapFromMessage,
   isPromptTooLongMessage,
-} from './services/api/errors.js'
-import { logAntError, logForDebugging } from './utils/debug.js'
+} from './services/api/errors.ts'
+import { logAntError, logForDebugging } from './utils/debug.ts'
 import {
   getMissingToolResultAbortMessage,
   getQueryAbortSystemMessage,
   shouldCreateUserInterruptionMessage,
-} from './utils/abortReasons.js'
+} from './utils/abortReasons.ts'
 import {
   createUserMessage,
   createUserInterruptionMessage,
@@ -66,21 +66,21 @@ import {
   createToolUseSummaryMessage,
   createMicrocompactBoundaryMessage,
   createAssistantMessage,
-} from './utils/messages.js'
-import { buildInboxSystemReminder } from './utils/daemon/inboxSection.js'
-import { analyzeContinuationIntent } from './utils/continuation.js'
-import { generateToolUseSummary } from './services/toolUseSummary/toolUseSummaryGenerator.js'
-import { prependUserContext, appendSystemContext } from './utils/api.js'
+} from './utils/messages.ts'
+import { buildInboxSystemReminder } from './utils/daemon/inboxSection.ts'
+import { analyzeContinuationIntent } from './utils/continuation.ts'
+import { generateToolUseSummary } from './services/toolUseSummary/toolUseSummaryGenerator.ts'
+import { prependUserContext, appendSystemContext } from './utils/api.ts'
 import {
   createAttachmentMessage,
   filterDuplicateMemoryAttachments,
   getAttachmentMessages,
   startRelevantMemoryPrefetch,
-} from './utils/attachments.js'
+} from './utils/attachments.ts'
 import {
   isAboveMaxActiveMessagesLimit,
   resolveMaxActiveMessagesLimit,
-} from './utils/maxActiveMessages.js'
+} from './utils/maxActiveMessages.ts'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const skillPrefetch = feature('EXPERIMENTAL_SKILL_SEARCH')
   ? (require('./services/skillSearch/prefetch.js') as typeof import('./services/skillSearch/prefetch.js'))
@@ -93,56 +93,56 @@ import {
   remove as removeFromQueue,
   getCommandsByMaxPriority,
   isSlashCommand,
-} from './utils/messageQueueManager.js'
-import { notifyCommandLifecycle } from './utils/commandLifecycle.js'
-import { headlessProfilerCheckpoint } from './utils/headlessProfiler.js'
+} from './utils/messageQueueManager.ts'
+import { notifyCommandLifecycle } from './utils/commandLifecycle.ts'
+import { headlessProfilerCheckpoint } from './utils/headlessProfiler.ts'
 import {
   getDefaultMainLoopModelSetting,
   getRuntimeMainLoopModel,
   parseUserSpecifiedModel,
   renderModelName,
-} from './utils/model/model.js'
+} from './utils/model/model.ts'
 import {
   doesMostRecentAssistantMessageExceed200k,
   finalContextTokensFromLastResponse,
   tokenCountWithEstimation,
-} from './utils/tokens.js'
-import { ESCALATED_MAX_TOKENS } from './utils/context.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from './services/analytics/growthbook.js'
-import { SLEEP_TOOL_NAME } from './tools/SleepTool/prompt.js'
-import { executePostSamplingHooks } from './utils/hooks/postSamplingHooks.js'
-import { executeStopFailureHooks } from './utils/hooks.js'
-import type { QuerySource } from './constants/querySource.js'
-import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.js'
-import { queryCheckpoint } from './utils/queryProfiler.js'
-import { runTools } from './services/tools/toolOrchestration.js'
-import { applyToolResultBudget } from './utils/toolResultStorage.js'
-import { resolveNextFallbackProviderFromState } from './utils/providerFallback.js'
-import { setActiveProviderProfile } from './utils/providerProfiles.js'
-import { getPrimaryModel } from './utils/providerModels.js'
-import { recordContentReplacement } from './utils/sessionStorage.js'
-import { handleStopHooks } from './query/stopHooks.js'
+} from './utils/tokens.ts'
+import { ESCALATED_MAX_TOKENS } from './utils/context.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from './services/analytics/growthbook.ts'
+import { SLEEP_TOOL_NAME } from './tools/SleepTool/prompt.ts'
+import { executePostSamplingHooks } from './utils/hooks/postSamplingHooks.ts'
+import { executeStopFailureHooks } from './utils/hooks.ts'
+import type { QuerySource } from './constants/querySource.ts'
+import { StreamingToolExecutor } from './services/tools/StreamingToolExecutor.ts'
+import { queryCheckpoint } from './utils/queryProfiler.ts'
+import { runTools } from './services/tools/toolOrchestration.ts'
+import { applyToolResultBudget } from './utils/toolResultStorage.ts'
+import { resolveNextFallbackProviderFromState } from './utils/providerFallback.ts'
+import { setActiveProviderProfile } from './utils/providerProfiles.ts'
+import { getPrimaryModel } from './utils/providerModels.ts'
+import { recordContentReplacement } from './utils/sessionStorage.ts'
+import { handleStopHooks } from './query/stopHooks.ts'
 import {
   createToolFailureLoopGuardState,
   updateToolFailureLoopGuard,
-} from './query/toolFailureLoopGuard.js'
-import { AGENT_STEP_LIMIT_TOOL_RESULT_PREFIX } from './query/agentStepLimit.js'
-import { buildQueryConfig } from './query/config.js'
+} from './query/toolFailureLoopGuard.ts'
+import { AGENT_STEP_LIMIT_TOOL_RESULT_PREFIX } from './query/agentStepLimit.ts'
+import { buildQueryConfig } from './query/config.ts'
 import {
   getGlobalConfig,
   normalizeMaxMessagesCompactionThreshold,
-} from './utils/config.js'
-import { productionDeps, type QueryDeps } from './query/deps.js'
-import type { Terminal, Continue } from './query/transitions.js'
+} from './utils/config.ts'
+import { productionDeps, type QueryDeps } from './query/deps.ts'
+import type { Terminal, Continue } from './query/transitions.ts'
 import { feature } from 'bun:bundle'
 import {
   getCurrentTurnTokenBudget,
   getTurnOutputTokens,
   incrementBudgetContinuationCount,
-} from './bootstrap/state.js'
-import { createBudgetTracker, checkTokenBudget } from './query/tokenBudget.js'
-import { count } from './utils/array.js'
-import { snipCompactIfNeeded } from './services/compact/snipCompact.js'
+} from './bootstrap/state.ts'
+import { createBudgetTracker, checkTokenBudget } from './query/tokenBudget.ts'
+import { count } from './utils/array.ts'
+import { snipCompactIfNeeded } from './services/compact/snipCompact.ts'
 
 function* yieldMissingToolResultBlocks(
   assistantMessages: AssistantMessage[],

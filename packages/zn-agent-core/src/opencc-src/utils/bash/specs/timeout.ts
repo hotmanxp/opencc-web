@@ -1,4 +1,4 @@
-import type { CommandSpec } from '../registry.js'
+import type { CommandSpec } from '../registry.ts'
 
 const timeout: CommandSpec = {
   name: 'timeout',

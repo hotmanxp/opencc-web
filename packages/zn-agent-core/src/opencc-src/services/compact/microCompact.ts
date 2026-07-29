@@ -1,27 +1,27 @@
 // @ts-nocheck
 import { feature } from 'bun:bundle'
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
-import type { QuerySource } from '../../constants/querySource.js'
-import type { ToolUseContext } from '../../Tool.js'
-import type { Message } from '../../types/message.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { getMainLoopModel } from '../../utils/model/model.js'
-import { SHELL_TOOL_NAMES } from '../../utils/shell/shellToolUtils.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
+import type { QuerySource } from '../../constants/querySource.ts'
+import type { ToolUseContext } from '../../Tool.ts'
+import type { Message } from '../../types/message.ts'
+import { logForDebugging } from '../../utils/debug.ts'
+import { getMainLoopModel } from '../../utils/model/model.ts'
+import { SHELL_TOOL_NAMES } from '../../utils/shell/shellToolUtils.ts'
+import { jsonStringify } from '../../utils/slowOperations.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../analytics/index.js'
-import { notifyCacheDeletion } from '../api/promptCacheBreakDetection.js'
-import { roughTokenCountEstimation } from '../tokenEstimation.js'
+} from '../analytics/index.ts'
+import { notifyCacheDeletion } from '../api/promptCacheBreakDetection.ts'
+import { roughTokenCountEstimation } from '../tokenEstimation.ts'
 import {
   clearCompactWarningSuppression,
   suppressCompactWarning,
-} from './compactWarningState.js'
+} from './compactWarningState.ts'
 import {
   getTimeBasedMCConfig,
   type TimeBasedMCConfig,
-} from './timeBasedMCConfig.js'
+} from './timeBasedMCConfig.ts'
 
 // Inline from utils/toolResultStorage.ts — importing that file pulls in
 // sessionStorage → utils/messages → services/api/errors, completing a

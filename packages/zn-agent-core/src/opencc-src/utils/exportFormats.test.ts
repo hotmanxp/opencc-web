@@ -7,7 +7,7 @@ import {
   normalizeExportFormat,
   parseExportArgs,
   resolveExportFilepath,
-} from './exportFormats.js'
+} from './exportFormats.ts'
 
 describe('normalizeExportFormat', () => {
   test('normalizes text variants', () => {

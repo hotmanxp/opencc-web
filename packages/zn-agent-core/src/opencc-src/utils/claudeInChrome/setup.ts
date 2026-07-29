@@ -7,29 +7,29 @@ import {
   getIsInteractive,
   getIsNonInteractiveSession,
   getSessionBypassPermissionsMode,
-} from '../../bootstrap/state.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
-import type { ScopedMcpServerConfig } from '../../services/mcp/types.js'
-import { isInBundledMode } from '../bundledMode.js'
-import { getGlobalConfig, saveGlobalConfig } from '../config.js'
-import { logForDebugging } from '../debug.js'
+} from '../../bootstrap/state.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
+import type { ScopedMcpServerConfig } from '../../services/mcp/types.ts'
+import { isInBundledMode } from '../bundledMode.ts'
+import { getGlobalConfig, saveGlobalConfig } from '../config.ts'
+import { logForDebugging } from '../debug.ts'
 import {
   getClaudeConfigHomeDir,
   isEnvDefinedFalsy,
   isEnvTruthy,
-} from '../envUtils.js'
-import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
-import { getPlatform } from '../platform.js'
-import { jsonStringify } from '../slowOperations.js'
+} from '../envUtils.ts'
+import { execFileNoThrowWithCwd } from '../execFileNoThrow.ts'
+import { getPlatform } from '../platform.ts'
+import { jsonStringify } from '../slowOperations.ts'
 import {
   CLAUDE_IN_CHROME_MCP_SERVER_NAME,
   getAllBrowserDataPaths,
   getAllNativeMessagingHostsDirs,
   getAllWindowsRegistryKeys,
   openInChrome,
-} from './common.js'
-import { getChromeSystemPrompt } from './prompt.js'
-import { isChromeExtensionInstalledPortable } from './setupPortable.js'
+} from './common.ts'
+import { getChromeSystemPrompt } from './prompt.ts'
+import { isChromeExtensionInstalledPortable } from './setupPortable.ts'
 
 const CHROME_EXTENSION_RECONNECT_URL = 'https://clau.de/chrome/reconnect'
 

@@ -1,5 +1,5 @@
 import { describe, expect, test, beforeEach } from 'bun:test'
-import { createSetTicketSection } from './setTicketSection.js'
+import { createSetTicketSection } from './setTicketSection.ts'
 import { clearTicketId, setTicketId } from '../../../state/setTicketStore.js'
 
 describe('setTicketSection', () => {

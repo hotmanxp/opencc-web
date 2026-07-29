@@ -5,7 +5,7 @@ import {
   _resetGitWorktreeMutationLocksForTesting,
   buildRevParseFailureMessage,
   withGitWorktreeMutationLock,
-} from './worktree.js'
+} from './worktree.ts'
 
 afterEach(() => {
   _resetGitWorktreeMutationLocksForTesting()

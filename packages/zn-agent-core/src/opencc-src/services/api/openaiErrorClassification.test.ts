@@ -10,7 +10,7 @@ import {
   formatOpenAICategoryMarker,
   isLocalhostLikeHost,
   isRetryableOpenAICompatibilityFailureCategory,
-} from './openaiErrorClassification.js'
+} from './openaiErrorClassification.ts'
 
 test('classifies localhost ECONNREFUSED as connection_refused', () => {
   const error = Object.assign(new TypeError('fetch failed'), {

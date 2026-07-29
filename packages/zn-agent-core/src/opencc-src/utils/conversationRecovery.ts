@@ -3,8 +3,8 @@ import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import { relative } from 'path'
 import { getCwd } from 'src/utils/cwd.js'
-import { addInvokedSkill } from '../bootstrap/state.js'
-import { asSessionId } from '../types/ids.js'
+import { addInvokedSkill } from '../bootstrap/state.ts'
+import { asSessionId } from '../types/ids.ts'
 import type {
   AttributionSnapshotMessage,
   ContextCollapseCommitEntry,
@@ -12,20 +12,20 @@ import type {
   LogOption,
   PersistedWorktreeSession,
   SerializedMessage,
-} from '../types/logs.js'
+} from '../types/logs.ts'
 import type {
   Message,
   NormalizedMessage,
   NormalizedUserMessage,
-} from '../types/message.js'
-import { PERMISSION_MODES } from '../types/permissions.js'
-import { suppressNextSkillListing } from './attachments.js'
+} from '../types/message.ts'
+import { PERMISSION_MODES } from '../types/permissions.ts'
+import { suppressNextSkillListing } from './attachments.ts'
 import {
   copyFileHistoryForResume,
   type FileHistorySnapshot,
-} from './fileHistory.js'
-import { logError } from './log.js'
-import { getAPIProvider } from './model/providers.js'
+} from './fileHistory.ts'
+import { logError } from './log.ts'
+import { getAPIProvider } from './model/providers.ts'
 import {
   createAssistantMessage,
   createUserMessage,
@@ -35,11 +35,11 @@ import {
   isToolUseResultMessage,
   NO_RESPONSE_REQUESTED,
   normalizeMessages,
-} from './messages.js'
+} from './messages.ts'
 import { resolveOpenAIShimRuntimeContext } from '../integrations/runtimeMetadata.js'
 import type { GoalState } from '../services/goal/types.js'
-import { copyPlanForResume } from './plans.js'
-import { processSessionStartHooks } from './sessionStart.js'
+import { copyPlanForResume } from './plans.ts'
+import { processSessionStartHooks } from './sessionStart.ts'
 import {
   buildConversationChain,
   checkResumeConsistency,
@@ -50,9 +50,9 @@ import {
   loadMessageLogs,
   loadTranscriptFile,
   removeExtraFields,
-} from './sessionStorage.js'
-import { jsonStringify } from './slowOperations.js'
-import type { ContentReplacementRecord } from './toolResultStorage.js'
+} from './sessionStorage.ts'
+import { jsonStringify } from './slowOperations.ts'
+import type { ContentReplacementRecord } from './toolResultStorage.ts'
 
 // Dead code elimination: internal-only tool names are conditionally required so
 // their strings don't leak into external builds. Static imports always bundle.

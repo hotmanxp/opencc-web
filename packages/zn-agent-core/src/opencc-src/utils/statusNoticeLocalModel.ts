@@ -1,16 +1,16 @@
 import { resolveActiveRouteIdFromEnv } from '../integrations/routeMetadata.js'
-import { isLocalProviderUrl } from '../services/api/providerConfig.js'
-import type { Tool, ToolPermissionContext } from '../Tool.js'
-import type { AgentDefinitionsResult } from '../tools/AgentTool/loadAgentsDir.js'
-import type { MemoryFileInfo } from './claudemd.js'
+import { isLocalProviderUrl } from '../services/api/providerConfig.ts'
+import type { Tool, ToolPermissionContext } from '../Tool.ts'
+import type { AgentDefinitionsResult } from '../tools/AgentTool/loadAgentsDir.ts'
+import type { MemoryFileInfo } from './claudemd.ts'
 import {
   checkContextWarnings,
   type ContextWarning,
   type ContextWarnings,
-} from './doctorContextWarnings.js'
-import { formatTokens } from './format.js'
-import { isEnvTruthy } from './envUtils.js'
-import { plural } from './stringUtils.js'
+} from './doctorContextWarnings.ts'
+import { formatTokens } from './format.ts'
+import { isEnvTruthy } from './envUtils.ts'
+import { plural } from './stringUtils.ts'
 
 type ContributorId = 'mcp_tools' | 'agent_descriptions' | 'claudemd_files'
 

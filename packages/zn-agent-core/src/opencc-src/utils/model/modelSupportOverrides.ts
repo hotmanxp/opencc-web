@@ -1,5 +1,5 @@
 import memoize from 'lodash-es/memoize.js'
-import { getAPIProvider } from './providers.js'
+import { getAPIProvider } from './providers.ts'
 
 export type ModelCapabilityOverride =
   | 'effort'

@@ -2,7 +2,7 @@ import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { getWorkflowRegistry, invalidateWorkflowCache } from './singleton.js'
+import { getWorkflowRegistry, invalidateWorkflowCache } from './singleton.ts'
 
 // CRITICAL: pass an isolated userDir to every registry so the cold-scan
 // in registry.scanDir never imports real scripts from ~/.claude/workflows/*.js

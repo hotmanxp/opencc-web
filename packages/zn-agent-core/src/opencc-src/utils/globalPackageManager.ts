@@ -2,9 +2,9 @@ import memoize from 'lodash-es/memoize.js'
 import { realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, resolve, sep } from 'node:path'
-import { logForDebugging } from './debug.js'
-import { execFileNoThrowWithCwd } from './execFileNoThrow.js'
-import { which } from './which.js'
+import { logForDebugging } from './debug.ts'
+import { execFileNoThrowWithCwd } from './execFileNoThrow.ts'
+import { which } from './which.ts'
 
 export type GlobalPackageManager = 'npm' | 'yarn' | 'pnpm' | 'bun'
 

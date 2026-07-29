@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 
-import { saveGlobalConfig } from '../config.js'
-import { getDefaultMainLoopModelSetting, getUserSpecifiedModelSetting } from './model.js'
+import { saveGlobalConfig } from '../config.ts'
+import { getDefaultMainLoopModelSetting, getUserSpecifiedModelSetting } from './model.ts'
 
 const env = {
   CLAUDE_CODE_USE_GITHUB: process.env.CLAUDE_CODE_USE_GITHUB,

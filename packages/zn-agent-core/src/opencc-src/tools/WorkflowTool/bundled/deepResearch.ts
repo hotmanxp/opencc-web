@@ -1,5 +1,5 @@
 // src/tools/WorkflowTool/bundled/deepResearch.ts
-import type { Workflow } from '../types.js'
+import type { Workflow } from '../types.ts'
 
 /**
  * Phase metadata for the PermissionDialog + WorkflowDetailDialog.

@@ -1,12 +1,12 @@
 import { feature } from 'bun:bundle'
 import { shouldAutoEnableClaudeInChrome } from 'src/utils/claudeInChrome/setup.js'
-import { registerBatchSkill } from './batch.js'
-import { registerClaudeInChromeSkill } from './claudeInChrome.js'
-import { registerDebugSkill } from './debug.js'
-import { registerKeybindingsSkill } from './keybindings.js'
-import { registerLoopSkill } from './loop.js'
-import { registerSimplifySkill } from './simplify.js'
-import { registerUpdateConfigSkill } from './updateConfig.js'
+import { registerBatchSkill } from './batch.ts'
+import { registerClaudeInChromeSkill } from './claudeInChrome.ts'
+import { registerDebugSkill } from './debug.ts'
+import { registerKeybindingsSkill } from './keybindings.ts'
+import { registerLoopSkill } from './loop.ts'
+import { registerSimplifySkill } from './simplify.ts'
+import { registerUpdateConfigSkill } from './updateConfig.ts'
 
 /**
  * Initialize all bundled skills.

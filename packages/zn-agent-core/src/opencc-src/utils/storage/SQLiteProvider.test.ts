@@ -5,13 +5,13 @@ import {
   clearMemoryOnly,
   getGlobalGraph,
   initOrama
-} from '../knowledgeGraph.js'
-import { SQLiteProvider } from './SQLiteProvider.js'
+} from '../knowledgeGraph.ts'
+import { SQLiteProvider } from './SQLiteProvider.ts'
 import { mkdtempSync, rmSync, existsSync, writeFileSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { getProjectsDir } from '../envUtils.js'
-import { sanitizePath } from '../sessionStoragePortable.js'
+import { getProjectsDir } from '../envUtils.ts'
+import { sanitizePath } from '../sessionStoragePortable.ts'
 
 describe('SQLite Storage Layer', () => {
   const originalConfigDir = process.env.CLAUDE_CONFIG_DIR

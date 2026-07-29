@@ -5,11 +5,11 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../../test/sharedMutationLock.js'
-import { _resetKeepAliveForTesting } from '../../utils/proxy.js'
+import { _resetKeepAliveForTesting } from '../../utils/proxy.ts'
 import {
   fetchWithProxyRetry,
   isRetryableFetchError,
-} from './fetchWithProxyRetry.js'
+} from './fetchWithProxyRetry.ts'
 
 type FetchType = typeof globalThis.fetch
 

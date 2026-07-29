@@ -12,12 +12,12 @@ import {
   getSessionCronTasks,
   removeSessionCronTasks,
   setScheduledTasksEnabled,
-} from '../bootstrap/state.js'
+} from '../bootstrap/state.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../services/analytics/index.js'
-import { cronToHuman } from './cron.js'
+} from '../services/analytics/index.ts'
+import { cronToHuman } from './cron.ts'
 import {
   type CronJitterConfig,
   type CronTask,
@@ -30,12 +30,12 @@ import {
   oneShotJitteredNextCronRunMs,
   readCronTasks,
   removeCronTasks,
-} from './cronTasks.js'
+} from './cronTasks.ts'
 import {
   releaseSchedulerLock,
   tryAcquireSchedulerLock,
-} from './cronTasksLock.js'
-import { logForDebugging } from './debug.js'
+} from './cronTasksLock.ts'
+import { logForDebugging } from './debug.ts'
 
 const CHECK_INTERVAL_MS = 1000
 const FILE_STABILITY_MS = 300

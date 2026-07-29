@@ -1,12 +1,12 @@
 import { expect, test, mock, describe, beforeEach, afterEach, afterAll, beforeAll } from "bun:test";
 import * as realExeca from "execa";
-import { getSecureStorageServiceName, CREDENTIALS_SERVICE_SUFFIX } from "./macOsKeychainHelpers.js";
+import { getSecureStorageServiceName, CREDENTIALS_SERVICE_SUFFIX } from "./macOsKeychainHelpers.ts";
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from "../../test/sharedMutationLock.js";
-import type { linuxSecretStorage as LinuxSecretStorage } from "./linuxSecretStorage.js";
-import type { windowsCredentialStorage as WindowsCredentialStorage } from "./windowsCredentialStorage.js";
+import type { linuxSecretStorage as LinuxSecretStorage } from "./linuxSecretStorage.ts";
+import type { windowsCredentialStorage as WindowsCredentialStorage } from "./windowsCredentialStorage.ts";
 
 type MockExecaOptions = {
   input?: string;
@@ -84,8 +84,8 @@ describe("Secure Storage Platform Implementations", () => {
       ...realExeca,
       execaSync: mockExecaSync,
     }));
-    ({ linuxSecretStorage } = await import("./linuxSecretStorage.js"));
-    ({ windowsCredentialStorage } = await import("./windowsCredentialStorage.js"));
+    ({ linuxSecretStorage } = await import("./linuxSecretStorage.ts"));
+    ({ windowsCredentialStorage } = await import("./windowsCredentialStorage.ts"));
   });
 
   beforeEach(() => {

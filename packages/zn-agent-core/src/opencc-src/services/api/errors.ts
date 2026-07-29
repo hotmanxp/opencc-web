@@ -31,32 +31,32 @@ import {
 } from 'src/utils/model/model.js'
 import { getModelStrings } from 'src/utils/model/modelStrings.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
-import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
+import { getIsNonInteractiveSession } from '../../bootstrap/state.ts'
 import {
   API_PDF_MAX_PAGES,
   PDF_TARGET_RAW_SIZE,
-} from '../../constants/apiLimits.js'
-import { isEnvTruthy } from '../../utils/envUtils.js'
-import { formatFileSize } from '../../utils/format.js'
-import { ImageResizeError } from '../../utils/imageResizer.js'
-import { ImageSizeError } from '../../utils/imageValidation.js'
+} from '../../constants/apiLimits.ts'
+import { isEnvTruthy } from '../../utils/envUtils.ts'
+import { formatFileSize } from '../../utils/format.ts'
+import { ImageResizeError } from '../../utils/imageResizer.ts'
+import { ImageSizeError } from '../../utils/imageValidation.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../analytics/index.js'
+} from '../analytics/index.ts'
 import {
   type ClaudeAILimits,
   getRateLimitErrorMessage,
   type OverageDisabledReason,
-} from '../claudeAiLimits.js'
-import { shouldProcessRateLimits } from '../rateLimitMocking.js' // Used for /mock-limits command
-import { extractConnectionErrorDetails, formatAPIError } from './errorUtils.js'
+} from '../claudeAiLimits.ts'
+import { shouldProcessRateLimits } from '../rateLimitMocking.ts' // Used for /mock-limits command
+import { extractConnectionErrorDetails, formatAPIError } from './errorUtils.ts'
 import {
   extractOpenAICategoryHost,
   extractOpenAICategoryMarker,
   isLocalhostLikeHost,
   type OpenAICompatibilityFailureCategory,
-} from './openaiErrorClassification.js'
+} from './openaiErrorClassification.ts'
 
 export const API_ERROR_MESSAGE_PREFIX = 'API Error'
 

@@ -4,18 +4,18 @@
  * SPDX-License-Identifier: Apache-2.0
  */
 
-import { logForDebugging } from './debug.js'
+import { logForDebugging } from './debug.ts'
 import * as fs from 'node:fs'
 import * as path from 'node:path'
 import * as childProcess from 'node:child_process'
 import process from 'node:process'
 import { execa } from 'execa'
-import { isInBundledMode } from './bundledMode.js'
+import { isInBundledMode } from './bundledMode.ts'
 import {
   getDetectedLocalInstallDir,
   isRunningFromLocalInstallation,
   localInstallationExists,
-} from './localInstaller.js'
+} from './localInstaller.ts'
 import {
   detectApk,
   detectAsdf,
@@ -26,8 +26,8 @@ import {
   detectRpm,
   detectWinget,
   getPackageManager,
-} from './nativeInstaller/packageManagers.js'
-import { getPlatform } from './platform.js'
+} from './nativeInstaller/packageManagers.ts'
+import { getPlatform } from './platform.ts'
 
 export const isDevelopment = process.env.NODE_ENV === 'development'
 

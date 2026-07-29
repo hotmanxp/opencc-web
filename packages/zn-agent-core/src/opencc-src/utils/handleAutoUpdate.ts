@@ -5,12 +5,12 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
-import type { UpdateObject } from './updateCheck.js'
-import type { SettingsJson } from './settings/types.js'
-import { getInstallationInfo, PackageManager } from './installationInfo.js'
-import { updateEventEmitter, UPDATE_EVENTS } from './updateEventEmitter.js'
-import { logForDebugging } from './debug.js'
-import { isInBundledMode } from './bundledMode.js'
+import type { UpdateObject } from './updateCheck.ts'
+import type { SettingsJson } from './settings/types.ts'
+import { getInstallationInfo, PackageManager } from './installationInfo.ts'
+import { updateEventEmitter, UPDATE_EVENTS } from './updateEventEmitter.ts'
+import { logForDebugging } from './debug.ts'
+import { isInBundledMode } from './bundledMode.ts'
 import {
   detectApk,
   detectAsdf,
@@ -20,7 +20,7 @@ import {
   detectPacman,
   detectRpm,
   detectWinget,
-} from './nativeInstaller/packageManagers.js'
+} from './nativeInstaller/packageManagers.ts'
 
 let _updateInProgress = false
 

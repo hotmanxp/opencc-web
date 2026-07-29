@@ -1,6 +1,6 @@
 import { expect, test } from 'bun:test'
 
-import { resolveProviderRequest } from './providerConfig.js'
+import { resolveProviderRequest } from './providerConfig.ts'
 
 test('resolveProviderRequest strips GLM model-query suffixes from API model value', () => {
   const request = resolveProviderRequest({

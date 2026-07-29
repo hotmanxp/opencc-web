@@ -6,7 +6,7 @@
 
 import latestVersion from 'latest-version'
 import * as semver from 'semver'
-import { logForDebugging } from './debug.js'
+import { logForDebugging } from './debug.ts'
 import { gt } from './semver.js'
 
 // semver's npm package ships no .d.ts and this project doesn't depend on

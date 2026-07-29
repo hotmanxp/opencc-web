@@ -3,12 +3,12 @@ import chalk from 'chalk'
 import {
   extractCacheMetrics,
   resolveCacheProvider,
-} from './services/api/cacheMetrics.js'
+} from './services/api/cacheMetrics.ts'
 import {
   recordRequest as recordCacheRequest,
   resetSessionCacheStats,
-} from './services/api/cacheStatsTracker.js'
-import { getAPIProvider } from './utils/model/providers.js'
+} from './services/api/cacheStatsTracker.ts'
+import { getAPIProvider } from './utils/model/providers.ts'
 import {
   addToTotalCostState,
   addToTotalLinesChanged,
@@ -35,26 +35,26 @@ import {
   resetStateForTests,
   setCostStateForRestore,
   setHasUnknownModelCost,
-} from './bootstrap/state.js'
-import type { ModelUsage } from './entrypoints/agentSdkTypes.js'
+} from './bootstrap/state.ts'
+import type { ModelUsage } from './entrypoints/agentSdkTypes.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from './services/analytics/index.js'
-import { getAdvisorUsage } from './utils/advisor.js'
+} from './services/analytics/index.ts'
+import { getAdvisorUsage } from './utils/advisor.ts'
 import {
   getCurrentProjectConfig,
   saveCurrentProjectConfig,
-} from './utils/config.js'
+} from './utils/config.ts'
 import {
   getContextWindowForModel,
   getModelMaxOutputTokens,
-} from './utils/context.js'
-import { isFastModeEnabled } from './utils/fastMode.js'
-import { formatDuration, formatNumber } from './utils/format.js'
-import type { FpsMetrics } from './utils/fpsTracker.js'
-import { getCanonicalName } from './utils/model/model.js'
-import { calculateUSDCost } from './utils/modelCost.js'
+} from './utils/context.ts'
+import { isFastModeEnabled } from './utils/fastMode.ts'
+import { formatDuration, formatNumber } from './utils/format.ts'
+import type { FpsMetrics } from './utils/fpsTracker.ts'
+import { getCanonicalName } from './utils/model/model.ts'
+import { calculateUSDCost } from './utils/modelCost.ts'
 export {
   getTotalCostUSD as getTotalCost,
   getTotalDuration,

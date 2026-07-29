@@ -1,6 +1,6 @@
 import { randomUUID } from 'crypto'
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js'
-import { queryModelWithoutStreaming } from '../../services/api/claude.js'
+import { queryModelWithoutStreaming } from '../../services/api/claude.ts'
 import {
   bumpGoalIteration,
   clearActiveGoalIfActive,
@@ -10,19 +10,19 @@ import {
   GOAL_STOP_CONDITION_PROMPT,
   RETRY_PROMPT,
 } from '../../services/goal/prompts.js'
-import type { ToolUseContext } from '../../Tool.js'
-import type { HookResultMessage, Message } from '../../types/message.js'
-import { createAttachmentMessage } from '../attachments.js'
-import { createCombinedAbortSignal } from '../combinedAbortSignal.js'
-import { logForDebugging } from '../debug.js'
-import { errorMessage } from '../errors.js'
-import type { HookResult } from '../hooks.js'
-import { safeParseJSON } from '../json.js'
-import { createUserMessage } from '../messages.js'
-import { getSmallFastModel } from '../model/model.js'
-import type { PromptHook } from '../settings/types.js'
-import { asSystemPrompt } from '../systemPromptType.js'
-import { addArgumentsToPrompt, hookResponseSchema } from './hookHelpers.js'
+import type { ToolUseContext } from '../../Tool.ts'
+import type { HookResultMessage, Message } from '../../types/message.ts'
+import { createAttachmentMessage } from '../attachments.ts'
+import { createCombinedAbortSignal } from '../combinedAbortSignal.ts'
+import { logForDebugging } from '../debug.ts'
+import { errorMessage } from '../errors.ts'
+import type { HookResult } from '../hooks.ts'
+import { safeParseJSON } from '../json.ts'
+import { createUserMessage } from '../messages.ts'
+import { getSmallFastModel } from '../model/model.ts'
+import type { PromptHook } from '../settings/types.ts'
+import { asSystemPrompt } from '../systemPromptType.ts'
+import { addArgumentsToPrompt, hookResponseSchema } from './hookHelpers.ts'
 
 /**
  * Strip a markdown code fence (``` or ```json), if present, and return the

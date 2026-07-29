@@ -1,12 +1,12 @@
 import { fileURLToPath } from 'url'
 import type { PublishDiagnosticsParams } from 'vscode-languageserver-protocol'
-import { logForDebugging } from '../../utils/debug.js'
-import { toError } from '../../utils/errors.js'
-import { logError } from '../../utils/log.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
-import type { DiagnosticFile } from '../diagnosticTracking.js'
-import { registerPendingLSPDiagnostic } from './LSPDiagnosticRegistry.js'
-import type { LSPServerManager } from './LSPServerManager.js'
+import { logForDebugging } from '../../utils/debug.ts'
+import { toError } from '../../utils/errors.ts'
+import { logError } from '../../utils/log.ts'
+import { jsonStringify } from '../../utils/slowOperations.ts'
+import type { DiagnosticFile } from '../diagnosticTracking.ts'
+import { registerPendingLSPDiagnostic } from './LSPDiagnosticRegistry.ts'
+import type { LSPServerManager } from './LSPServerManager.ts'
 
 /**
  * Map LSP severity to OpenCC diagnostic severity

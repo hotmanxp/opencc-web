@@ -2,24 +2,24 @@ import { execa } from 'execa'
 import { readFile, realpath } from 'fs/promises'
 import { homedir } from 'os'
 import { delimiter, join, posix, win32 } from 'path'
-import { checkGlobalInstallPermissions } from './autoUpdater.js'
-import { isInBundledMode } from './bundledMode.js'
+import { checkGlobalInstallPermissions } from './autoUpdater.ts'
+import { isInBundledMode } from './bundledMode.ts'
 import {
   formatAutoUpdaterDisabledReason,
   getAutoUpdaterDisabledReason,
   getGlobalConfig,
   type InstallMethod,
-} from './config.js'
-import { getCwd } from './cwd.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
-import { execFileNoThrow } from './execFileNoThrow.js'
-import { getFsImplementation } from './fsOperations.js'
+} from './config.ts'
+import { getCwd } from './cwd.ts'
+import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.ts'
+import { execFileNoThrow } from './execFileNoThrow.ts'
+import { getFsImplementation } from './fsOperations.ts'
 import {
   getDetectedLocalInstallDir,
   getShellType,
   isRunningFromLocalInstallation,
   localInstallationExists,
-} from './localInstaller.js'
+} from './localInstaller.ts'
 import {
   detectApk,
   detectAsdf,
@@ -30,20 +30,20 @@ import {
   detectRpm,
   detectWinget,
   getPackageManager,
-} from './nativeInstaller/packageManagers.js'
-import { hasNativeDistribution } from './nativeDistribution.js'
-import { getPlatform } from './platform.js'
-import { getRipgrepStatus } from './ripgrep.js'
-import { SandboxManager } from './sandbox/sandbox-adapter.js'
-import { getManagedFilePath } from './settings/managedPath.js'
-import { CUSTOMIZATION_SURFACES } from './settings/types.js'
+} from './nativeInstaller/packageManagers.ts'
+import { hasNativeDistribution } from './nativeDistribution.ts'
+import { getPlatform } from './platform.ts'
+import { getRipgrepStatus } from './ripgrep.ts'
+import { SandboxManager } from './sandbox/sandbox-adapter.ts'
+import { getManagedFilePath } from './settings/managedPath.ts'
+import { CUSTOMIZATION_SURFACES } from './settings/types.ts'
 import {
   findClaudeAlias,
   findValidClaudeAlias,
   getShellConfigPaths,
-} from './shellConfig.js'
-import { jsonParse } from './slowOperations.js'
-import { which } from './which.js'
+} from './shellConfig.ts'
+import { jsonParse } from './slowOperations.ts'
+import { which } from './which.ts'
 
 function getCliBinaryName(): string {
   return MACRO.PACKAGE_URL === '@anthropic-ai/claude-code'

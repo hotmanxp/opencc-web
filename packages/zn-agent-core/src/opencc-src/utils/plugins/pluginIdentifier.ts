@@ -1,11 +1,11 @@
 import type {
   EditableSettingSource,
   SettingSource,
-} from '../settings/constants.js'
+} from '../settings/constants.ts'
 import {
   ALLOWED_OFFICIAL_MARKETPLACE_NAMES,
   type PluginScope,
-} from './schemas.js'
+} from './schemas.ts'
 
 /**
  * Extended scope type that includes 'flag' for session-only plugins.

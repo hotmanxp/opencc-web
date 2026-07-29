@@ -7,7 +7,7 @@ import {
 } from '../../commands.js'
 import type { SuggestionItem } from '../../components/PromptInput/PromptInputFooterSuggestions.js'
 import { STACKED_SKILL_LIMIT } from '../processUserInput/processStackedSkillInvocation.js'
-import { getSkillUsageScore } from './skillUsageTracking.js'
+import { getSkillUsageScore } from './skillUsageTracking.ts'
 
 // Treat these characters as word separators for command search
 const SEPARATORS = /[:_-]/g

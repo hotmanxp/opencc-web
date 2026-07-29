@@ -1,7 +1,7 @@
 import type {
   RenderableMessage,
   SystemStopHookSummaryMessage,
-} from '../types/message.js'
+} from '../types/message.ts'
 
 function isLabeledHookSummary(
   msg: RenderableMessage,

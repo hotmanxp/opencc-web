@@ -1,15 +1,15 @@
-import type { ValidationError } from '../../utils/settings/validation.js'
-import { clearServerCache, connectToServer } from './client.js'
+import type { ValidationError } from '../../utils/settings/validation.ts'
+import { clearServerCache, connectToServer } from './client.ts'
 import {
   getAllMcpConfigs,
   getMcpConfigsByScope,
   isMcpServerDisabled,
-} from './config.js'
+} from './config.ts'
 import type {
   ConfigScope,
   ScopedMcpServerConfig,
-} from './types.js'
-import { describeMcpConfigFilePath, getProjectMcpServerStatus } from './utils.js'
+} from './types.ts'
+import { describeMcpConfigFilePath, getProjectMcpServerStatus } from './utils.ts'
 
 export type McpDoctorSeverity = 'info' | 'warn' | 'error'
 export type McpDoctorScopeFilter = 'local' | 'project' | 'user' | 'enterprise'

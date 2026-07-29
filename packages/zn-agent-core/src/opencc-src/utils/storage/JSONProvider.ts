@@ -1,7 +1,7 @@
 import { readFileSync, mkdirSync, existsSync, rmSync } from 'fs'
 import { join, dirname } from 'path'
-import type { KnowledgeGraph } from '../knowledgeGraph.js'
-import { writeFileSyncAndFlush_DEPRECATED } from '../file.js'
+import type { KnowledgeGraph } from '../knowledgeGraph.ts'
+import { writeFileSyncAndFlush_DEPRECATED } from '../file.ts'
 
 /**
  * JSON Storage Provider for Knowledge Graph.

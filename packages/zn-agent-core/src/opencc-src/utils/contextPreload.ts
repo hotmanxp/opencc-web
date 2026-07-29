@@ -5,8 +5,8 @@
  * Prediction based on conversation patterns.
  */
 
-import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
-import type { Message } from '../types/message.js'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
+import type { Message } from '../types/message.ts'
 
 export interface PreloadConfig {
   maxPreloadTokens: number

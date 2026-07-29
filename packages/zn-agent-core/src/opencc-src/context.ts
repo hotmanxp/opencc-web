@@ -3,19 +3,19 @@ import memoize from 'lodash-es/memoize.js'
 import {
   getAdditionalDirectoriesForClaudeMd,
   setCachedClaudeMdContent,
-} from './bootstrap/state.js'
-import { getLocalISODate } from './constants/common.js'
+} from './bootstrap/state.ts'
+import { getLocalISODate } from './constants/common.ts'
 import {
   filterInjectedMemoryFiles,
   getClaudeMds,
   getMemoryFiles,
-} from './utils/claudemd.js'
-import { logForDiagnosticsNoPII } from './utils/diagLogs.js'
-import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
-import { execFileNoThrow } from './utils/execFileNoThrow.js'
-import { getBranch, getDefaultBranch, getIsGit, gitExe } from './utils/git.js'
-import { shouldIncludeGitInstructions } from './utils/gitSettings.js'
-import { logError } from './utils/log.js'
+} from './utils/claudemd.ts'
+import { logForDiagnosticsNoPII } from './utils/diagLogs.ts'
+import { isBareMode, isEnvTruthy } from './utils/envUtils.ts'
+import { execFileNoThrow } from './utils/execFileNoThrow.ts'
+import { getBranch, getDefaultBranch, getIsGit, gitExe } from './utils/git.ts'
+import { shouldIncludeGitInstructions } from './utils/gitSettings.ts'
+import { logError } from './utils/log.ts'
 
 const MAX_STATUS_CHARS = 2000
 

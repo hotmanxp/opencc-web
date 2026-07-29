@@ -6,7 +6,7 @@ import {
   KEYWORD_IGNORED_UNDO_TEXT,
   logKeywordIgnoredDismissed,
   logKeywordIgnoredRestored,
-} from './ultracodeKeywordIgnored.js'
+} from './ultracodeKeywordIgnored.ts'
 
 describe('ultracodeKeywordIgnored', () => {
   test('KEYWORD_IGNORED_TEXT is verbatim from upstream v2.1.177', () => {
@@ -46,7 +46,7 @@ describe('ultracodeKeywordIgnored', () => {
           calls.push({ name, meta })
         },
       }))
-      const mod = await import(`./ultracodeKeywordIgnored.js?ts=${Date.now()}-${Math.random()}`)
+      const mod = await import(`./ultracodeKeywordIgnored.ts?ts=${Date.now()}-${Math.random()}`)
       mod.logKeywordIgnoredDismissed()
       const dismissCalls = calls.filter(c => c.name === 'tengu_workflow_keyword_dismissed')
       expect(dismissCalls.length).toBe(1)
@@ -60,7 +60,7 @@ describe('ultracodeKeywordIgnored', () => {
           calls.push({ name, meta })
         },
       }))
-      const mod = await import(`./ultracodeKeywordIgnored.js?ts=${Date.now()}-${Math.random()}`)
+      const mod = await import(`./ultracodeKeywordIgnored.ts?ts=${Date.now()}-${Math.random()}`)
       mod.logKeywordIgnoredRestored()
       const restoreCalls = calls.filter(c => c.name === 'tengu_workflow_keyword_restored')
       expect(restoreCalls.length).toBe(1)

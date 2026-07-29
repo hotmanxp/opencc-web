@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { parseGitDiff, parseRawDiffToToolUseDiff } from './gitDiff.js'
+import { parseGitDiff, parseRawDiffToToolUseDiff } from './gitDiff.ts'
 
 describe('parseGitDiff', () => {
   it('keeps hunk content lines whose text starts with -- or ++', () => {

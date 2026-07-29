@@ -5,7 +5,7 @@ import test from 'node:test'
 import {
   appendBoundedMcpStderr,
   cleanupFailedConnection,
-} from './client.js'
+} from './client.ts'
 
 test('cleanupFailedConnection awaits transport close before resolving', async () => {
   let closed = false

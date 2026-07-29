@@ -3,10 +3,10 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock.js'
-import type { DebugLogLevel } from './debug.js'
+import type { DebugLogLevel } from './debug.ts'
 
 type AnalyticsModule = typeof import('../services/analytics/index.js')
-type DebugModule = typeof import('./debug.js')
+type DebugModule = typeof import('./debug.ts')
 type LogEventSpy = ReturnType<
   typeof mock<(eventName: string, metadata?: Record<string, unknown>) => void>
 >
@@ -147,7 +147,7 @@ async function mockWarningHandlerDependencies(): Promise<{
     (_eventName: string, _metadata?: Record<string, unknown>) => {},
   )
 
-  mock.module('./debug.js', () => ({
+  mock.module('./debug.ts', () => ({
     ...actualDebugModule!,
     logForDebugging: debugSpy,
   }))
@@ -188,7 +188,7 @@ function restoreMockedModules(): void {
     }))
   }
   if (actualDebugModule) {
-    mock.module('./debug.js', () => ({ ...actualDebugModule! }))
+    mock.module('./debug.ts', () => ({ ...actualDebugModule! }))
     mock.module('src/utils/debug.js', () => ({ ...actualDebugModule! }))
   }
 }

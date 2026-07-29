@@ -39,34 +39,34 @@ import {
   addInvokedSkill,
   clearInvokedSkillsForAgent,
   getSessionId,
-} from '../../bootstrap/state.js'
-import { COMMAND_MESSAGE_TAG } from '../../constants/xml.js'
+} from '../../bootstrap/state.ts'
+import { COMMAND_MESSAGE_TAG } from '../../constants/xml.ts'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
   logEvent,
-} from '../../services/analytics/index.js'
-import { getAgentContext } from '../../utils/agentContext.js'
-import { errorMessage } from '../../utils/errors.js'
+} from '../../services/analytics/index.ts'
+import { getAgentContext } from '../../utils/agentContext.ts'
+import { errorMessage } from '../../utils/errors.ts'
 import {
   extractResultText,
   prepareForkedCommandContext,
-} from '../../utils/forkedAgent.js'
-import { parseFrontmatter } from '../../utils/frontmatterParser.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { createUserMessage, normalizeMessages } from '../../utils/messages.js'
-import type { ModelAlias } from '../../utils/model/aliases.js'
-import { resolveSkillModelOverride } from '../../utils/model/model.js'
-import { recordSkillUsage } from '../../utils/suggestions/skillUsageTracking.js'
-import { createAgentId } from '../../utils/uuid.js'
-import { runAgent } from '../AgentTool/runAgent.js'
+} from '../../utils/forkedAgent.ts'
+import { parseFrontmatter } from '../../utils/frontmatterParser.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { createUserMessage, normalizeMessages } from '../../utils/messages.ts'
+import type { ModelAlias } from '../../utils/model/aliases.ts'
+import { resolveSkillModelOverride } from '../../utils/model/model.ts'
+import { recordSkillUsage } from '../../utils/suggestions/skillUsageTracking.ts'
+import { createAgentId } from '../../utils/uuid.ts'
+import { runAgent } from '../AgentTool/runAgent.ts'
 import {
   getToolUseIDFromParentMessage,
   tagMessagesWithToolUseID,
-} from '../utils.js'
-import { SKILL_TOOL_NAME } from './constants.js'
-import { getPrompt } from './prompt.js'
+} from '../utils.ts'
+import { SKILL_TOOL_NAME } from './constants.ts'
+import { getPrompt } from './prompt.ts'
 import {
   renderToolResultMessage,
   renderToolUseErrorMessage,
@@ -95,9 +95,9 @@ async function getAllCommands(context: ToolUseContext): Promise<Command[]> {
 }
 
 // Re-export Progress from centralized types to break import cycles
-export type { SkillToolProgress as Progress } from '../../types/tools.js'
+export type { SkillToolProgress as Progress } from '../../types/tools.ts'
 
-import type { SkillToolProgress as Progress } from '../../types/tools.js'
+import type { SkillToolProgress as Progress } from '../../types/tools.ts'
 
 // Conditional require for remote skill modules — static imports here would
 // pull in akiBackend.ts (via remoteSkillLoader → akiBackend), which has

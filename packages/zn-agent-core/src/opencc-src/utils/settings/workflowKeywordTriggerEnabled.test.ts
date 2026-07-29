@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 
-import { SettingsSchema } from './types.js'
+import { SettingsSchema } from './types.ts'
 
 describe('SettingsSchema — workflowKeywordTriggerEnabled field', () => {
   it('accepts workflowKeywordTriggerEnabled: true', () => {

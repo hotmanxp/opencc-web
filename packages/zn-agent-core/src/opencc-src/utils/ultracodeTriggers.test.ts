@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 
-import { findUltracodeTriggerPositions, isUltracodeKeywordTriggered } from './ultracode.js'
+import { findUltracodeTriggerPositions, isUltracodeKeywordTriggered } from './ultracode.ts'
 
 describe('findUltracodeTriggerPositions', () => {
   it('finds a leading ultracode keyword (case-insensitive)', () => {

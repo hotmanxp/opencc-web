@@ -1,4 +1,4 @@
-import { isEnvTruthy } from './envUtils.js'
+import { isEnvTruthy } from './envUtils.ts'
 
 /**
  * Whether this build has bfs/ugrep embedded in the bun binary (ant-native only).

@@ -31,14 +31,14 @@ import {
   isSessionPersistenceDisabled,
   setSessionPersistenceDisabled,
   switchSession,
-} from '../bootstrap/state.js'
+} from '../bootstrap/state.ts'
 import type { GoalState } from '../services/goal/types.js'
-import type { SessionBranchEntry } from '../types/logs.js'
+import type { SessionBranchEntry } from '../types/logs.ts'
 import {
   getClaudeConfigHomeDir,
   setClaudeConfigHomeDirForTesting,
-} from './envUtils.js'
-import { resetSettingsCache } from './settings/settingsCache.js'
+} from './envUtils.ts'
+import { resetSettingsCache } from './settings/settingsCache.ts'
 
 const tempDirs: string[] = []
 const sessionId = '00000000-0000-4000-8000-000000000999'

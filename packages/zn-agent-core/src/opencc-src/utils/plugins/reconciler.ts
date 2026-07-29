@@ -9,23 +9,23 @@
 
 import isEqual from 'lodash-es/isEqual.js'
 import { isAbsolute, resolve } from 'path'
-import { getOriginalCwd } from '../../bootstrap/state.js'
-import { logForDebugging } from '../debug.js'
-import { errorMessage } from '../errors.js'
-import { pathExists } from '../file.js'
-import { findCanonicalGitRoot } from '../git.js'
-import { logError } from '../log.js'
+import { getOriginalCwd } from '../../bootstrap/state.ts'
+import { logForDebugging } from '../debug.ts'
+import { errorMessage } from '../errors.ts'
+import { pathExists } from '../file.ts'
+import { findCanonicalGitRoot } from '../git.ts'
+import { logError } from '../log.ts'
 import {
   addMarketplaceSource,
   type DeclaredMarketplace,
   getDeclaredMarketplaces,
   loadKnownMarketplacesConfigSafe,
-} from './marketplaceManager.js'
+} from './marketplaceManager.ts'
 import {
   isLocalMarketplaceSource,
   type KnownMarketplacesFile,
   type MarketplaceSource,
-} from './schemas.js'
+} from './schemas.ts'
 
 export type MarketplaceDiff = {
   /** Declared in settings, absent from known_marketplaces.json */

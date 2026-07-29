@@ -7,9 +7,9 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock.js'
-import * as analytics from '../services/analytics/index.js'
-import * as bootstrapState from '../bootstrap/state.js'
-import * as debug from './debug.js'
+import * as analytics from '../services/analytics/index.ts'
+import * as bootstrapState from '../bootstrap/state.ts'
+import * as debug from './debug.ts'
 
 const originalEnv = {
   CLAUDE_CODE_PROFILE_QUERY: process.env.CLAUDE_CODE_PROFILE_QUERY,
@@ -116,7 +116,7 @@ function handlePromptSubmitProfilerScript(
     mock.module('src/services/analytics/index.js', () => ({
       logEvent: () => {},
       // stripProtoFields is needed because handlePromptSubmit → startupProfiler → firstPartyEventLoggingExporter
-      // imports it from '../services/analytics/index.js'. Without this, the isolated Bun spawnSync sub-process
+      // imports it from '../services/analytics/index.ts'. Without this, the isolated Bun spawnSync sub-process
       // crashes with the named-export SyntaxError for stripProtoFields.
       stripProtoFields: (m: Record<string, unknown>) => m,
     }))

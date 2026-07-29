@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { mapWithConcurrency, raceAbort } from './boundedAsync.js'
+import { mapWithConcurrency, raceAbort } from './boundedAsync.ts'
 
 function deferred<T = void>(): {
   promise: Promise<T>

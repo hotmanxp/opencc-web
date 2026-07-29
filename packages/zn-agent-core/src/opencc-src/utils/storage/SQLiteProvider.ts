@@ -1,7 +1,7 @@
 import { join } from 'path'
 import { existsSync, mkdirSync, openSync, readSync, closeSync, unlinkSync } from 'fs'
-import type { Entity, Relation, SemanticSummary, KnowledgeGraph } from '../knowledgeGraph.js'
-import { registerCleanup } from '../cleanupRegistry.js'
+import type { Entity, Relation, SemanticSummary, KnowledgeGraph } from '../knowledgeGraph.ts'
+import { registerCleanup } from '../cleanupRegistry.ts'
 
 /**
  * SQLite Storage Provider for Knowledge Graph.

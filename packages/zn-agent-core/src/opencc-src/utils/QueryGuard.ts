@@ -34,7 +34,7 @@
  *     queryGuard.getSnapshot,
  *   )
  */
-import { createSignal } from './signal.js'
+import { createSignal } from './signal.ts'
 import type {
   QueryActiveOperationSnapshot,
   QueryGuardMetadata,
@@ -43,7 +43,7 @@ import type {
   QueryGuardTimeoutReason,
   QueryLifecycleContext,
   QueryTerminalReason,
-} from './queryLifecycle.js'
+} from './queryLifecycle.ts'
 
 export const DEFAULT_QUERY_IDLE_TIMEOUT_MS = 5 * 60 * 1000 // 5 minutes
 export const DEFAULT_QUERY_HARD_MAX_MS = 30 * 60 * 1000 // 30 minutes

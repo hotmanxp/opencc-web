@@ -3,7 +3,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { toSDKGoalStatusMessage } from './services/goal/sdk.js'
 import { isGoalStatusSystemMessage } from './services/goal/status.js'
-import { createSystemMessage } from './utils/messages.js'
+import { createSystemMessage } from './utils/messages.ts'
 
 describe('QueryEngine goal status visibility', () => {
   test('recognizes only goal status informational messages for SDK visibility', () => {

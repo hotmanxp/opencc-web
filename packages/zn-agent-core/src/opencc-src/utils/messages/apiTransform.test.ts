@@ -2,14 +2,14 @@ import { describe, expect, test } from 'bun:test'
 import {
   createUserMessage,
   mergeUserMessages,
-} from '../messages.js'
+} from '../messages.ts'
 import {
   appendMessageTagToUserMessage,
   deriveShortMessageId,
   stripCallerFieldFromAssistantMessage,
   stripToolReferenceBlocksFromUserMessage,
-} from './apiTransform.js'
-import type { UserMessage } from '../../types/message.js'
+} from './apiTransform.ts'
+import type { UserMessage } from '../../types/message.ts'
 
 const UUID = 'a1b2c3d4-0000-0000-0000-000000000099'
 const UUID_B = 'b2c3d4e5-0000-0000-0000-000000000088'

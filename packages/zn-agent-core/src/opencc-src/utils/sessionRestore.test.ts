@@ -14,15 +14,15 @@ import {
   isSessionPersistenceDisabled,
   setSessionPersistenceDisabled,
   switchSession,
-} from '../bootstrap/state.js'
+} from '../bootstrap/state.ts'
 import type { AppState } from '../state/AppStateStore.js'
 import { getDefaultAppState } from '../state/AppStateStore.js'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock.js'
-import type { PersistedWorktreeSession } from '../types/logs.js'
-import type { Message } from '../types/message.js'
+import type { PersistedWorktreeSession } from '../types/logs.ts'
+import type { Message } from '../types/message.ts'
 import {
   flushSessionStorage,
   getTranscriptPath,
@@ -34,8 +34,8 @@ import {
 import {
   processResumedConversation,
   type ProcessedResume,
-} from './sessionRestore.js'
-import type { ContentReplacementRecord } from './toolResultStorage.js'
+} from './sessionRestore.ts'
+import type { ContentReplacementRecord } from './toolResultStorage.ts'
 
 const tempDirs: string[] = []
 const ts = '2026-04-02T00:00:00.000Z'

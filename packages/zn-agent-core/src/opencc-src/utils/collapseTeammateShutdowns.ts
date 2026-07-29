@@ -1,5 +1,5 @@
 // @ts-nocheck
-import type { AttachmentMessage, RenderableMessage } from '../types/message.js'
+import type { AttachmentMessage, RenderableMessage } from '../types/message.ts'
 
 function isTeammateShutdownAttachment(
   msg: RenderableMessage,

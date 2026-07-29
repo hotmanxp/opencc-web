@@ -46,66 +46,66 @@ import {
 } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'path'
-import { getInlinePlugins } from '../../bootstrap/state.js'
+import { getInlinePlugins } from '../../bootstrap/state.ts'
 import {
   BUILTIN_MARKETPLACE_NAME,
   getBuiltinPlugins,
-} from '../../plugins/builtinPlugins.js'
+} from '../../plugins/builtinPlugins.ts'
 import type {
   LoadedPlugin,
   PluginComponent,
   PluginError,
   PluginLoadResult,
   PluginManifest,
-} from '../../types/plugin.js'
-import { logForDebugging } from '../debug.js'
-import { isEnvTruthy } from '../envUtils.js'
+} from '../../types/plugin.ts'
+import { logForDebugging } from '../debug.ts'
+import { isEnvTruthy } from '../envUtils.ts'
 import {
   errorMessage,
   getErrnoPath,
   isENOENT,
   isFsInaccessible,
   toError,
-} from '../errors.js'
-import { execFileNoThrow, execFileNoThrowWithCwd } from '../execFileNoThrow.js'
-import { pathExists } from '../file.js'
-import { getFsImplementation } from '../fsOperations.js'
-import { gitExe } from '../git.js'
-import { lazySchema } from '../lazySchema.js'
-import { logError } from '../log.js'
-import { getSettings_DEPRECATED } from '../settings/settings.js'
+} from '../errors.ts'
+import { execFileNoThrow, execFileNoThrowWithCwd } from '../execFileNoThrow.ts'
+import { pathExists } from '../file.ts'
+import { getFsImplementation } from '../fsOperations.ts'
+import { gitExe } from '../git.ts'
+import { lazySchema } from '../lazySchema.ts'
+import { logError } from '../log.ts'
+import { getSettings_DEPRECATED } from '../settings/settings.ts'
 import {
   clearPluginSettingsBase,
   getPluginSettingsBase,
   resetSettingsCache,
   setPluginSettingsBase,
-} from '../settings/settingsCache.js'
-import type { HooksSettings } from '../settings/types.js'
-import { SettingsSchema } from '../settings/types.js'
-import { jsonParse, jsonStringify } from '../slowOperations.js'
-import { getAddDirEnabledPlugins } from './addDirPluginSettings.js'
-import { verifyAndDemote } from './dependencyResolver.js'
-import { classifyFetchError, logPluginFetch } from './fetchTelemetry.js'
-import { checkGitAvailable } from './gitAvailability.js'
-import { buildGitChildEnv } from './gitEnv.js'
-import { getInMemoryInstalledPlugins } from './installedPluginsManager.js'
-import { getManagedPluginNames } from './managedPlugins.js'
+} from '../settings/settingsCache.ts'
+import type { HooksSettings } from '../settings/types.ts'
+import { SettingsSchema } from '../settings/types.ts'
+import { jsonParse, jsonStringify } from '../slowOperations.ts'
+import { getAddDirEnabledPlugins } from './addDirPluginSettings.ts'
+import { verifyAndDemote } from './dependencyResolver.ts'
+import { classifyFetchError, logPluginFetch } from './fetchTelemetry.ts'
+import { checkGitAvailable } from './gitAvailability.ts'
+import { buildGitChildEnv } from './gitEnv.ts'
+import { getInMemoryInstalledPlugins } from './installedPluginsManager.ts'
+import { getManagedPluginNames } from './managedPlugins.ts'
 import {
   formatSourceForDisplay,
   getBlockedMarketplaces,
   getStrictKnownMarketplaces,
   isSourceAllowedByPolicy,
   isSourceInBlocklist,
-} from './marketplaceHelpers.js'
+} from './marketplaceHelpers.ts'
 import {
   getMarketplaceCacheOnly,
   getPluginByIdCacheOnly,
   loadKnownMarketplacesConfigSafe,
-} from './marketplaceManager.js'
-import { getPluginSeedDirs, getPluginsDirectory } from './pluginDirectories.js'
-import { parsePluginIdentifier } from './pluginIdentifier.js'
-import { validatePathWithinBase } from './pluginInstallationHelpers.js'
-import { calculatePluginVersion } from './pluginVersioning.js'
+} from './marketplaceManager.ts'
+import { getPluginSeedDirs, getPluginsDirectory } from './pluginDirectories.ts'
+import { parsePluginIdentifier } from './pluginIdentifier.ts'
+import { validatePathWithinBase } from './pluginInstallationHelpers.ts'
+import { calculatePluginVersion } from './pluginVersioning.ts'
 import {
   type CommandMetadata,
   PluginHooksSchema,
@@ -113,13 +113,13 @@ import {
   PluginManifestSchema,
   type PluginMarketplaceEntry,
   type PluginSource,
-} from './schemas.js'
+} from './schemas.ts'
 import {
   convertDirectoryToZipInPlace,
   extractZipToDirectory,
   getSessionPluginCachePath,
   isPluginZipCacheEnabled,
-} from './zipCache.js'
+} from './zipCache.ts'
 
 /**
  * Get the path where plugin cache is stored

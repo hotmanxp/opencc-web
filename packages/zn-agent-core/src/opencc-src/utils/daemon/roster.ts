@@ -18,7 +18,7 @@ import {chmod, readFile, rename, writeFile} from 'node:fs/promises'
 import {homedir} from 'node:os'
 import {join, sep} from 'node:path'
 import {z} from 'zod/v4'
-import {JobRecordSchema} from './protocol.js'
+import {JobRecordSchema} from './protocol.ts'
 
 // ---------- Constants ----------
 

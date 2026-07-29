@@ -1,17 +1,17 @@
 import { resolve } from 'path'
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js'
-import { getSessionId } from '../../bootstrap/state.js'
-import { SETTINGS_PATH, SETTINGS_LOCAL_PATH, USER_SETTINGS_PATH } from '../../constants.js'
+import { getSessionId } from '../../bootstrap/state.ts'
+import { SETTINGS_PATH, SETTINGS_LOCAL_PATH, USER_SETTINGS_PATH } from '../../constants.ts'
 import type { AppState } from '../../state/AppState.js'
-import type { EditableSettingSource } from '../settings/constants.js'
-import { SOURCES } from '../settings/constants.js'
+import type { EditableSettingSource } from '../settings/constants.ts'
+import { SOURCES } from '../settings/constants.ts'
 import {
   getSettingsFilePathForSource,
   getSettingsForSource,
-} from '../settings/settings.js'
-import type { HookCommand, HookMatcher } from '../settings/types.js'
-import { DEFAULT_HOOK_SHELL } from '../shell/shellProvider.js'
-import { getSessionHooks } from './sessionHooks.js'
+} from '../settings/settings.ts'
+import type { HookCommand, HookMatcher } from '../settings/types.ts'
+import { DEFAULT_HOOK_SHELL } from '../shell/shellProvider.ts'
+import { getSessionHooks } from './sessionHooks.ts'
 
 export type HookSource =
   | EditableSettingSource

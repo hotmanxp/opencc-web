@@ -12,8 +12,8 @@
 import {
   __resetConfigDirEnvWarningForTesting,
   getClaudeConfigHomeDir,
-} from './envUtils.js'
-import { createAgentWorktree } from './worktree.js'
+} from './envUtils.ts'
+import { createAgentWorktree } from './worktree.ts'
 
 const [cfgDir, repoDir, name] = process.argv.slice(2)
 

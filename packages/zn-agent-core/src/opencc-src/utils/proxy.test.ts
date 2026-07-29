@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { shouldBypassProxy } from './proxy.js'
+import { shouldBypassProxy } from './proxy.ts'
 
 describe('shouldBypassProxy — NO_PROXY matching', () => {
   test('bare domain bypasses the domain and its subdomains', () => {

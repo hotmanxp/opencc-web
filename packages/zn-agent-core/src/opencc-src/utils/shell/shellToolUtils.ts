@@ -1,7 +1,7 @@
-import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
-import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.js'
-import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
-import { getPlatform } from '../platform.js'
+import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.ts'
+import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.ts'
+import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.ts'
+import { getPlatform } from '../platform.ts'
 
 export const SHELL_TOOL_NAMES: string[] = [BASH_TOOL_NAME, POWERSHELL_TOOL_NAME]
 

@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { afterEach, beforeEach, expect, test } from 'bun:test'
 import { acquireSharedMutationLock, releaseSharedMutationLock } from '../../test/sharedMutationLock.js'
-import { getAnthropicClient } from './client.js'
+import { getAnthropicClient } from './client.ts'
 
 type FetchType = typeof globalThis.fetch
 
@@ -195,10 +195,10 @@ afterEach(() => {
 })
 
 // SKIPPED: mock pollution from claude.streamWatchdog.test.ts.
-// That test calls `mock.module('./client.js', ...)` at module-load time
+// That test calls `mock.module('./client.ts', ...)` at module-load time
 // (line 54) which is a bun:test process-global and persists across every
 // test file run in the same `bun test` invocation. The four tests below
-// import the real `./client.js` via `getAnthropicClient` and end up
+// import the real `./client.ts` via `getAnthropicClient` and end up
 // resolving the watch-dog mock's `getAnthropicClient` stub, which throws
 // "test client create handler not configured" once the watchdog test's
 // `createHandler` has been cleared.

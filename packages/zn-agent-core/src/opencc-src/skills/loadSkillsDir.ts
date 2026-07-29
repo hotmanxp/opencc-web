@@ -9,31 +9,31 @@ import {
   sep as pathSep,
   relative,
 } from 'path'
-import { getAdditionalDirectoriesForClaudeMd, getSessionId } from '../bootstrap/state.js'
-import { AGENTS_DIRNAME, CONFIG_DIRNAME, SKILLS_DIRNAME } from '../constants.js'
+import { getAdditionalDirectoriesForClaudeMd, getSessionId } from '../bootstrap/state.ts'
+import { AGENTS_DIRNAME, CONFIG_DIRNAME, SKILLS_DIRNAME } from '../constants.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../services/analytics/index.js'
-import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
-import type { Command, PromptCommand } from '../types/command.js'
+} from '../services/analytics/index.ts'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
+import type { Command, PromptCommand } from '../types/command.ts'
 import {
   parseArgumentNames,
   substituteArguments,
-} from '../utils/argumentSubstitution.js'
-import { logForDebugging } from '../utils/debug.js'
+} from '../utils/argumentSubstitution.ts'
+import { logForDebugging } from '../utils/debug.ts'
 import {
   EFFORT_LEVELS,
   type EffortValue,
   parseEffortValue,
-} from '../utils/effort.js'
+} from '../utils/effort.ts'
 import {
   getClaudeConfigHomeDir,
   getUserAgentsDir,
   isBareMode,
   isEnvTruthy,
-} from '../utils/envUtils.js'
-import { isENOENT, isFsInaccessible } from '../utils/errors.js'
+} from '../utils/envUtils.ts'
+import { isENOENT, isFsInaccessible } from '../utils/errors.ts'
 import {
   coerceDescriptionToString,
   type FrontmatterData,
@@ -42,26 +42,26 @@ import {
   parseFrontmatter,
   parseShellFrontmatter,
   splitPathInFrontmatter,
-} from '../utils/frontmatterParser.js'
-import { getFsImplementation } from '../utils/fsOperations.js'
-import { isPathGitignored } from '../utils/git/gitignore.js'
-import { logError } from '../utils/log.js'
+} from '../utils/frontmatterParser.ts'
+import { getFsImplementation } from '../utils/fsOperations.ts'
+import { isPathGitignored } from '../utils/git/gitignore.ts'
+import { logError } from '../utils/log.ts'
 import {
   extractDescriptionFromMarkdown,
   getProjectDirsUpToHome,
   loadMarkdownFilesForSubdir,
   type MarkdownFile,
   parseSlashCommandToolsFromFrontmatter,
-} from '../utils/markdownConfigLoader.js'
-import { parseUserSpecifiedModel } from '../utils/model/model.js'
-import { executeShellCommandsInPrompt } from '../utils/promptShellExecution.js'
-import type { SettingSource } from '../utils/settings/constants.js'
-import { isSettingSourceEnabled } from '../utils/settings/constants.js'
-import { getManagedFilePath } from '../utils/settings/managedPath.js'
-import { isRestrictedToPluginOnly } from '../utils/settings/pluginOnlyPolicy.js'
-import { HooksSchema, type HooksSettings } from '../utils/settings/types.js'
-import { createSignal } from '../utils/signal.js'
-import { registerMCPSkillBuilders } from './mcpSkillBuilders.js'
+} from '../utils/markdownConfigLoader.ts'
+import { parseUserSpecifiedModel } from '../utils/model/model.ts'
+import { executeShellCommandsInPrompt } from '../utils/promptShellExecution.ts'
+import type { SettingSource } from '../utils/settings/constants.ts'
+import { isSettingSourceEnabled } from '../utils/settings/constants.ts'
+import { getManagedFilePath } from '../utils/settings/managedPath.ts'
+import { isRestrictedToPluginOnly } from '../utils/settings/pluginOnlyPolicy.ts'
+import { HooksSchema, type HooksSettings } from '../utils/settings/types.ts'
+import { createSignal } from '../utils/signal.ts'
+import { registerMCPSkillBuilders } from './mcpSkillBuilders.ts'
 
 export type LoadedFrom =
   | 'commands_DEPRECATED'

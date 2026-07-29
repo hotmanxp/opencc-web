@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 
 import { getDefaultAppState, type AppState } from '../state/AppStateStore.js'
 import { createGoalState } from '../services/goal/state.js'
-import { asSystemPrompt } from '../utils/systemPromptType.js'
+import { asSystemPrompt } from '../utils/systemPromptType.ts'
 
 function assistant(uuid: string, text: string) {
   return {

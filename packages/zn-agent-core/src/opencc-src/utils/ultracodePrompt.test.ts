@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
 
-import { withUltracodePrompt, ULTRACODE_SUBAGENT_PROMPT } from './ultracodePrompt.js'
+import { withUltracodePrompt, ULTRACODE_SUBAGENT_PROMPT } from './ultracodePrompt.ts'
 
 describe('ULTRACODE_SUBAGENT_PROMPT', () => {
   it('contains the ultracode opt-in rule', () => {

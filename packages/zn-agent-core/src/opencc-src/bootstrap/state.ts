@@ -27,7 +27,7 @@ import { createSignal } from 'src/utils/signal.js'
 type RegisteredHookMatcher = HookCallbackMatcher | PluginHookMatcher
 
 import type { SessionId } from 'src/types/ids.js'
-import { ReplayIndexBuilder } from '../utils/replayIndexBuilder.js'
+import { ReplayIndexBuilder } from '../utils/replayIndexBuilder.ts'
 
 type ReplayIndexBuilderEntry = {
   builder: ReplayIndexBuilder

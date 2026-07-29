@@ -4,21 +4,21 @@ import { LRUCache } from 'lru-cache'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../../services/analytics/index.js'
-import { queryHaiku } from '../../services/api/claude.js'
-import { AbortError } from '../../utils/errors.js'
-import { getWebFetchUserAgent } from '../../utils/http.js'
-import { logError } from '../../utils/log.js'
-import { getAPIProvider } from '../../utils/model/providers.js'
+} from '../../services/analytics/index.ts'
+import { queryHaiku } from '../../services/api/claude.ts'
+import { AbortError } from '../../utils/errors.ts'
+import { getWebFetchUserAgent } from '../../utils/http.ts'
+import { logError } from '../../utils/log.ts'
+import { getAPIProvider } from '../../utils/model/providers.ts'
 import {
   isBinaryContentType,
   persistBinaryContent,
-} from '../../utils/mcpOutputStorage.js'
-import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
-import { asSystemPrompt } from '../../utils/systemPromptType.js'
-import { ssrfGuardedLookup } from '../../utils/hooks/ssrfGuard.js'
-import { isPreapprovedHost } from './preapproved.js'
-import { makeSecondaryModelPrompt } from './prompt.js'
+} from '../../utils/mcpOutputStorage.ts'
+import { getSettings_DEPRECATED } from '../../utils/settings/settings.ts'
+import { asSystemPrompt } from '../../utils/systemPromptType.ts'
+import { ssrfGuardedLookup } from '../../utils/hooks/ssrfGuard.ts'
+import { isPreapprovedHost } from './preapproved.ts'
+import { makeSecondaryModelPrompt } from './prompt.ts'
 
 // Custom error classes for domain blocking
 class DomainBlockedError extends Error {

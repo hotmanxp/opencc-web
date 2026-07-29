@@ -5,10 +5,10 @@
  * on reaching a terminal state. The /workflows slash command and any
  * future workflow dashboard consume this to list all runs in the session.
  */
-import type { TaskStatus } from '../../Task.js'
-import type { LocalWorkflowTaskState } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js'
-import type { WorkflowRunStatus } from './types.js'
-import type { WorkflowRun } from './types.js'
+import type { TaskStatus } from '../../Task.ts'
+import type { LocalWorkflowTaskState } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.ts'
+import type { WorkflowRunStatus } from './types.ts'
+import type { WorkflowRun } from './types.ts'
 
 const _runs = new Map<string, LocalWorkflowTaskState>()
 

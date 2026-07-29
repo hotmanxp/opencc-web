@@ -5,15 +5,15 @@ import {
   resetStateForTests,
   setClientType,
   setMainLoopModelOverride,
-} from '../bootstrap/state.js'
-import * as actualModel from './model/model.js'
-import * as actualProviders from './model/providers.js'
+} from '../bootstrap/state.ts'
+import * as actualModel from './model/model.ts'
+import * as actualProviders from './model/providers.ts'
 import {
   resetSettingsCache,
   setSessionSettingsCache,
-} from './settings/settingsCache.js'
-import * as realSettings from './settings/settings.js'
-import type { SettingsJson } from './settings/types.js'
+} from './settings/settingsCache.ts'
+import * as realSettings from './settings/settings.ts'
+import type { SettingsJson } from './settings/types.ts'
 
 const actualSettings = { ...realSettings }
 
@@ -129,18 +129,18 @@ beforeEach(async () => {
   delete process.env.SESSION_INGRESS_URL
   delete process.env.USER_TYPE
 
-  mock.module('./model/model.js', () => ({
+  mock.module('./model/model.ts', () => ({
     ...actualModel,
     getMainLoopModel: () => process.env.OPENAI_MODEL ?? 'gpt-5.5',
   }))
-  mock.module('./model/providers.js', () => ({
+  mock.module('./model/providers.ts', () => ({
     ...actualProviders,
     getAPIProvider: () => 'openai',
   }))
   // Stub settings directly so attribution.ts observes this test's intended
   // settings even when a previous serialized Bun test has mocked the settings
   // module or a nonced import creates a separate cache instance.
-  mock.module('./settings/settings.js', () => ({
+  mock.module('./settings/settings.ts', () => ({
     ...actualSettings,
     getInitialSettings: () => testSettings,
     getSettings_DEPRECATED: () => testSettings,
@@ -162,9 +162,9 @@ afterEach(() => {
   testSettings = {}
   setClientType(originalClientType)
   setMainLoopModelOverride(originalMainLoopModelOverride)
-  mock.module('./model/model.js', () => actualModel)
-  mock.module('./model/providers.js', () => actualProviders)
-  mock.module('./settings/settings.js', () => actualSettings)
+  mock.module('./model/model.ts', () => actualModel)
+  mock.module('./model/providers.ts', () => actualProviders)
+  mock.module('./settings/settings.ts', () => actualSettings)
   restoreEnv()
 })
 

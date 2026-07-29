@@ -1,27 +1,27 @@
 // @ts-nocheck
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
-import { clearInvokedSkillsForAgent } from '../../bootstrap/state.js'
+import { clearInvokedSkillsForAgent } from '../../bootstrap/state.ts'
 import {
   ALL_AGENT_DISALLOWED_TOOLS,
   ASYNC_AGENT_ALLOWED_TOOLS,
   CUSTOM_AGENT_DISALLOWED_TOOLS,
   IN_PROCESS_TEAMMATE_ALLOWED_TOOLS,
-} from '../../constants/tools.js'
+} from '../../constants/tools.ts'
 import { startAgentSummarization } from '../../services/AgentSummary/agentSummary.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../../services/analytics/index.js'
-import { clearDumpState } from '../../services/api/dumpPrompts.js'
+} from '../../services/analytics/index.ts'
+import { clearDumpState } from '../../services/api/dumpPrompts.ts'
 import type { AppState } from '../../state/AppState.js'
 import type {
   Tool,
   ToolPermissionContext,
   Tools,
   ToolUseContext,
-} from '../../Tool.js'
-import { toolMatchesName } from '../../Tool.js'
+} from '../../Tool.ts'
+import { toolMatchesName } from '../../Tool.ts'
 import {
   completeAgentTask as completeAsyncAgent,
   createActivityDescriptionResolver,
@@ -36,30 +36,30 @@ import {
   updateAgentProgress as updateAsyncAgentProgress,
   updateProgressFromMessage,
 } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
-import { asAgentId } from '../../types/ids.js'
-import type { Message as MessageType } from '../../types/message.js'
-import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { isInProtectedNamespace } from '../../utils/envUtils.js'
-import { AbortError, errorMessage } from '../../utils/errors.js'
-import type { CacheSafeParams } from '../../utils/forkedAgent.js'
-import { lazySchema } from '../../utils/lazySchema.js'
+import { asAgentId } from '../../types/ids.ts'
+import type { Message as MessageType } from '../../types/message.ts'
+import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.ts'
+import { logForDebugging } from '../../utils/debug.ts'
+import { isInProtectedNamespace } from '../../utils/envUtils.ts'
+import { AbortError, errorMessage } from '../../utils/errors.ts'
+import type { CacheSafeParams } from '../../utils/forkedAgent.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
 import {
   extractTextContent,
   getLastAssistantMessage,
-} from '../../utils/messages.js'
-import type { PermissionMode } from '../../utils/permissions/PermissionMode.js'
-import { permissionRuleValueFromString } from '../../utils/permissions/permissionRuleParser.js'
+} from '../../utils/messages.ts'
+import type { PermissionMode } from '../../utils/permissions/PermissionMode.ts'
+import { permissionRuleValueFromString } from '../../utils/permissions/permissionRuleParser.ts'
 import {
   buildTranscriptForClassifier,
   classifyYoloAction,
-} from '../../utils/permissions/yoloClassifier.js'
-import { emitTaskProgress as emitTaskProgressEvent } from '../../utils/task/sdkProgress.js'
-import { isInProcessTeammate } from '../../utils/teammateContext.js'
-import { getTokenCountFromUsage } from '../../utils/tokens.js'
-import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../ExitPlanModeTool/constants.js'
-import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } from './constants.js'
-import type { AgentDefinition } from './loadAgentsDir.js'
+} from '../../utils/permissions/yoloClassifier.ts'
+import { emitTaskProgress as emitTaskProgressEvent } from '../../utils/task/sdkProgress.ts'
+import { isInProcessTeammate } from '../../utils/teammateContext.ts'
+import { getTokenCountFromUsage } from '../../utils/tokens.ts'
+import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../ExitPlanModeTool/constants.ts'
+import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } from './constants.ts'
+import type { AgentDefinition } from './loadAgentsDir.ts'
 export type ResolvedAgentTools = {
   hasWildcard: boolean
   validTools: string[]

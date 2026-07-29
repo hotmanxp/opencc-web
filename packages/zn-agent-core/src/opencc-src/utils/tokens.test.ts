@@ -4,8 +4,8 @@ import {
   getTokenCountFromUsage,
   finalContextTokensFromLastResponse,
   messageTokenCountFromLastAPIResponse,
-} from './tokens.js'
-import { IncrementalTokenCounter } from './incrementalTokenCounter.js'
+} from './tokens.ts'
+import { IncrementalTokenCounter } from './incrementalTokenCounter.ts'
 
 interface FakeUsage {
   input_tokens: number

@@ -14,7 +14,7 @@ import {
   relaunchToJob,
   detectRelaunch,
   __test__,
-} from './relaunch.js'
+} from './relaunch.ts'
 
 describe('isRelaunch', () => {
   test('returns false when env var unset', () => {

@@ -6,30 +6,30 @@ import {
 import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js'
 import type z from 'zod/v4'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
-import type { AnyObject, Tool, ToolUseContext } from '../../Tool.js'
-import type { HookProgress } from '../../types/hooks.js'
+import type { AnyObject, Tool, ToolUseContext } from '../../Tool.ts'
+import type { HookProgress } from '../../types/hooks.ts'
 import type {
   AssistantMessage,
   AttachmentMessage,
   ProgressMessage,
-} from '../../types/message.js'
-import type { PermissionDecision } from '../../types/permissions.js'
-import { createAttachmentMessage } from '../../utils/attachments.js'
-import { logForDebugging } from '../../utils/debug.js'
+} from '../../types/message.ts'
+import type { PermissionDecision } from '../../types/permissions.ts'
+import { createAttachmentMessage } from '../../utils/attachments.ts'
+import { logForDebugging } from '../../utils/debug.ts'
 import {
   executePostToolHooks,
   executePostToolUseFailureHooks,
   executePreToolHooks,
   getPreToolHookBlockingMessage,
-} from '../../utils/hooks.js'
-import { logError } from '../../utils/log.js'
+} from '../../utils/hooks.ts'
+import { logError } from '../../utils/log.ts'
 import {
   getRuleBehaviorDescription,
   type PermissionDecisionReason,
   type PermissionResult,
-} from '../../utils/permissions/PermissionResult.js'
-import { checkRuleBasedPermissions } from '../../utils/permissions/permissions.js'
-import { formatError } from '../../utils/toolErrors.js'
+} from '../../utils/permissions/PermissionResult.ts'
+import { checkRuleBasedPermissions } from '../../utils/permissions/permissions.ts'
+import { formatError } from '../../utils/toolErrors.ts'
 import { getAutoFixConfig } from '../autoFix/autoFixConfig.js'
 import { shouldRunAutoFix, buildAutoFixContext } from '../autoFix/autoFixHook.js'
 import { runAutoFixCheck } from '../autoFix/autoFixRunner.js'
@@ -37,8 +37,8 @@ import { runAutoFixCheck } from '../autoFix/autoFixRunner.js'
 // Track auto-fix retry count per query chain to enforce maxRetries cap.
 // Key: queryChainId (or 'default'), Value: number of auto-fix attempts used.
 const autoFixRetryCount = new Map<string, number>()
-import { isMcpTool } from '../mcp/utils.js'
-import type { McpServerType, MessageUpdateLazy } from './toolExecution.js'
+import { isMcpTool } from '../mcp/utils.ts'
+import type { McpServerType, MessageUpdateLazy } from './toolExecution.ts'
 
 export type PostToolUseHooksResult<Output> =
   | MessageUpdateLazy<AttachmentMessage | ProgressMessage<HookProgress>>

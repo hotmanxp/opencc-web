@@ -1,5 +1,5 @@
 import type { OllamaModelDescriptor } from './providerRecommendation.ts'
-import { DEFAULT_OPENAI_BASE_URL } from '../services/api/providerConfig.js'
+import { DEFAULT_OPENAI_BASE_URL } from '../services/api/providerConfig.ts'
 import {
   getRouteLabel,
   resolveRouteIdFromBaseUrl,

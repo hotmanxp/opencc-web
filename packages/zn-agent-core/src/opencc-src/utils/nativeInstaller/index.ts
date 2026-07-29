@@ -16,4 +16,4 @@ export {
   removeInstalledSymlink,
   repairNativeLauncher,
   type SetupMessage,
-} from './installer.js'
+} from './installer.ts'

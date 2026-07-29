@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { describe, expect, test } from 'bun:test'
 
-import { resolveForceReason } from './forceReasonResolver.js'
+import { resolveForceReason } from './forceReasonResolver.ts'
 
 describe('resolveForceReason', () => {
   test('below floor, message-count over threshold → undefined', () => {

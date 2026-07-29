@@ -29,7 +29,7 @@ import {
   formatCacheMetricsFull,
   resolveCacheProvider,
   type CacheAwareProvider,
-} from './cacheMetrics.js'
+} from './cacheMetrics.ts'
 
 type Scenario = {
   name: string

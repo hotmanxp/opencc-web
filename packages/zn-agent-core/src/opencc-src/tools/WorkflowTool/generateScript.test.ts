@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildScriptGenerationPrompt } from './generateScript.js'
+import { buildScriptGenerationPrompt } from './generateScript.ts'
 
 describe('buildScriptGenerationPrompt', () => {
   test('includes task description', () => {

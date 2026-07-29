@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { applyZhiniaoModelPrefix, isWizardAiBaseUrl } from './providerUtils.js'
+import { applyZhiniaoModelPrefix, isWizardAiBaseUrl } from './providerUtils.ts'
 
 describe('isWizardAiBaseUrl', () => {
   test('matches wizard-ai subdomain', () => {

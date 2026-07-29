@@ -5,10 +5,10 @@
 
 import { spawn } from 'cross-spawn'
 import path from 'node:path'
-import { getCwd } from '../utils/cwd.js'
-import { logError } from './log.js'
+import { getCwd } from '../utils/cwd.ts'
+import { logError } from './log.ts'
 
-export { execSyncWithDefaults_DEPRECATED } from './execFileNoThrowPortable.js'
+export { execSyncWithDefaults_DEPRECATED } from './execFileNoThrowPortable.ts'
 
 const MS_IN_SECOND = 1000
 const SECONDS_IN_MINUTE = 60

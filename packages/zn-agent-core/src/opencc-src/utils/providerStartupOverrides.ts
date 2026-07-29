@@ -1,5 +1,5 @@
-import { saveGlobalConfig } from './config.js'
-import { updateSettingsForSource } from './settings/settings.js'
+import { saveGlobalConfig } from './config.ts'
+import { updateSettingsForSource } from './settings/settings.ts'
 
 export const STARTUP_PROVIDER_OVERRIDE_ENV_KEYS = [
   'CLAUDE_CODE_USE_OPENAI',

@@ -2,12 +2,12 @@ import { describe, expect, test } from 'bun:test'
 import {
   createAssistantMessage,
   createUserMessage,
-} from '../messages.js'
+} from '../messages.ts'
 import {
   normalizeMessages,
   normalizeMessagesCached,
-} from './normalize.js'
-import type { Message } from '../../types/message.js'
+} from './normalize.ts'
+import type { Message } from '../../types/message.ts'
 
 // normalizeMessagesCached must be observably identical to normalizeMessages
 // for every mutation pattern the REPL produces (append, replace-last, filter,

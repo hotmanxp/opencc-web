@@ -1,14 +1,14 @@
 import { randomBytes } from 'crypto'
 import { open } from 'fs/promises'
 import { join } from 'path'
-import type { ModelUsage } from '../entrypoints/agentSdkTypes.js'
-import { logForDebugging } from './debug.js'
-import { getClaudeConfigHomeDir } from './envUtils.js'
-import { errorMessage } from './errors.js'
-import { getFsImplementation } from './fsOperations.js'
-import { logError } from './log.js'
-import { jsonParse, jsonStringify } from './slowOperations.js'
-import type { DailyActivity, DailyModelTokens, SessionStats } from './stats.js'
+import type { ModelUsage } from '../entrypoints/agentSdkTypes.ts'
+import { logForDebugging } from './debug.ts'
+import { getClaudeConfigHomeDir } from './envUtils.ts'
+import { errorMessage } from './errors.ts'
+import { getFsImplementation } from './fsOperations.ts'
+import { logError } from './log.ts'
+import { jsonParse, jsonStringify } from './slowOperations.ts'
+import type { DailyActivity, DailyModelTokens, SessionStats } from './stats.ts'
 
 export const STATS_CACHE_VERSION = 3
 const MIN_MIGRATABLE_VERSION = 1

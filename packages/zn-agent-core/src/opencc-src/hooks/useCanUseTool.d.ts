@@ -5,7 +5,7 @@
  * The .tsx (with React) was stripped; this .d.ts preserves the type.
  */
 
-import type { PermissionResult } from '../types/permissions.js'
+import type { PermissionResult } from '../types/permissions.ts'
 
 export type CanUseToolFn = (
   toolName: string,

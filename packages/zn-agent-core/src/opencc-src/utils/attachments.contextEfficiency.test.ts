@@ -1,16 +1,16 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
 import { feature } from 'bun:bundle'
-import type { Message } from '../types/message.js'
+import type { Message } from '../types/message.ts'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock.js'
-import { createUserMessage } from './messages.js'
+import { createUserMessage } from './messages.ts'
 import {
   getContextEfficiencyAttachment,
   getSnipNudgeRepeatInterval,
   getSnipNudgeStartThreshold,
-} from './attachments.js'
+} from './attachments.ts'
 
 const historySnipTest = feature('HISTORY_SNIP') ? test : test.skip
 

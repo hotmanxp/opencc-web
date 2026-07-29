@@ -5,7 +5,7 @@ import {
   predictContextNeeds,
   preloadContext,
   createPreloadStrategy,
-} from './contextPreload.js'
+} from './contextPreload.ts'
 
 function createMessage(role: string, content: string, createdAt: number = Date.now()): any {
   return {

@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import type { Tool } from '../Tool.js'
+import type { Tool } from '../Tool.ts'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock.js'
-import { TOOL_SEARCH_TOOL_NAME } from '../tools/ToolSearchTool/constants.js'
-import { countMcpToolTokens } from './analyzeContext.js'
-import { createRequestSizeReport } from './requestSizeBreakdown.js'
-import type { ContextData } from './analyzeContext.js'
+import { TOOL_SEARCH_TOOL_NAME } from '../tools/ToolSearchTool/constants.ts'
+import { countMcpToolTokens } from './analyzeContext.ts'
+import { createRequestSizeReport } from './requestSizeBreakdown.ts'
+import type { ContextData } from './analyzeContext.ts'
 
 const originalEnv = {
   CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS:

@@ -1,9 +1,9 @@
 /* eslint-disable @typescript-eslint/no-require-imports */
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import { z } from 'zod/v4'
-import { buildTool, type ToolDef } from '../../Tool.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { getPrompt, SNIP_TOOL_NAME } from './prompt.js'
+import { buildTool, type ToolDef } from '../../Tool.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { getPrompt, SNIP_TOOL_NAME } from './prompt.ts'
 
 const inputSchema = lazySchema(() =>
   z.object({

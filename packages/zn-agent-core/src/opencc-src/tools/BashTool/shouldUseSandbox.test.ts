@@ -1,11 +1,11 @@
 // @ts-nocheck
 import { afterEach, expect, test } from 'bun:test'
 
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
+import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.ts'
 import { BashTool } from './BashTool.js'
 import { PowerShellTool } from '../PowerShellTool/PowerShellTool.js'
-import type { BashCommandAnalysis } from './bashCommandAnalysis.js'
-import { shouldUseSandbox } from './shouldUseSandbox.js'
+import type { BashCommandAnalysis } from './bashCommandAnalysis.ts'
+import { shouldUseSandbox } from './shouldUseSandbox.ts'
 
 const originalSandboxMethods = {
   isSandboxingEnabled: SandboxManager.isSandboxingEnabled,

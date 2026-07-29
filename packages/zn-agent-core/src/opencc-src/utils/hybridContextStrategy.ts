@@ -5,8 +5,8 @@
  * Optimizes for cost vs accuracy.
  */
 
-import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
-import type { Message } from '../types/message.js'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
+import type { Message } from '../types/message.ts'
 
 export interface HybridConfig {
   cacheWeight: number

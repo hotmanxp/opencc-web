@@ -3,19 +3,19 @@ import { mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
 import type React from 'react'
 import { z } from 'zod/v4'
-import type { Tool } from '../../Tool.js'
-import type { LocalSpawner } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js'
+import type { Tool } from '../../Tool.ts'
+import type { LocalSpawner } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.ts'
 import {
   resolveClaudeConfigHomeDir,
   resolveConfigDirEnv,
-} from '../../utils/envUtils.js'
-import { parseCliArgs } from './cliArgs.js'
-import { getBundledSource } from './bundled/index.js'
-import { WORKFLOW_TOOL_NAME } from './constants.js'
-import { buildRealSpawner } from './realSpawner.js'
-import { getWorkflowRegistry } from './singleton.js'
-import { listWorkflowRuns } from './workflowRunStore.js'
-import { registerWorkflowInAppState } from '../../tasks/LocalWorkflowTask/lifecycle.js'
+} from '../../utils/envUtils.ts'
+import { parseCliArgs } from './cliArgs.ts'
+import { getBundledSource } from './bundled/index.ts'
+import { WORKFLOW_TOOL_NAME } from './constants.ts'
+import { buildRealSpawner } from './realSpawner.ts'
+import { getWorkflowRegistry } from './singleton.ts'
+import { listWorkflowRuns } from './workflowRunStore.ts'
+import { registerWorkflowInAppState } from '../../tasks/LocalWorkflowTask/lifecycle.ts'
 
 /**
  * List all workflow runs in this session. Newest-first.
@@ -426,7 +426,7 @@ export const WorkflowTool = {
       if (resumeFromRunId) {
         // Lazy-load to avoid the pre-existing settings.ts ↔ envUtils.ts
         // circular TDZ.
-        const { listWorkflowRuns } = await import('./workflowRunStore.js')
+        const { listWorkflowRuns } = await import('./workflowRunStore.ts')
         const prior = listWorkflowRuns().find(r => r.id === resumeFromRunId)
         if (prior && prior.status === 'running') {
           return {
@@ -643,7 +643,7 @@ export const WorkflowTool = {
       // level) to avoid the pre-existing circular-import TDZ. See the
       // module-level comment above.
       const [{ LocalWorkflowTask }, { logError }] = await Promise.all([
-        import('../../tasks/LocalWorkflowTask/LocalWorkflowTask.js'),
+        import('../../tasks/LocalWorkflowTask/LocalWorkflowTask.ts'),
         import('../../utils/log.js'),
       ])
 

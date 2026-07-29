@@ -5,7 +5,7 @@ import {
   getRelevanceStats,
   hasToolCalls,
   hasErrors,
-} from './relevancePruning.js'
+} from './relevancePruning.ts'
 
 function createMessage(role: string, content: string, createdAt: number = Date.now()): any {
   return {

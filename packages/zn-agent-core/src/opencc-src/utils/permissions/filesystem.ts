@@ -13,46 +13,46 @@ import {
   LEGACY_GLOBAL_CLAUDE_FOLDER_PERMISSION_PATTERN,
 } from 'src/tools/FileEditTool/constants.js'
 import type { z } from 'zod/v4'
-import { getOriginalCwd, getSessionId } from '../../bootstrap/state.js'
-import { PRODUCT_DISPLAY_NAME } from '../../constants/product.js'
-import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
-import type { AnyObject, Tool, ToolPermissionContext } from '../../Tool.js'
-import { FILE_READ_TOOL_NAME } from '../../tools/FileReadTool/prompt.js'
-import { getCwd } from '../cwd.js'
-import { logForDebugging } from '../debug.js'
-import { getClaudeConfigHomeDir } from '../envUtils.js'
-import { isFsInaccessible } from '../errors.js'
-import { isMemoryWriteApprovalRequired } from '../governancePolicy.js'
+import { getOriginalCwd, getSessionId } from '../../bootstrap/state.ts'
+import { PRODUCT_DISPLAY_NAME } from '../../constants/product.ts'
+import { checkStatsigFeatureGate_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
+import type { AnyObject, Tool, ToolPermissionContext } from '../../Tool.ts'
+import { FILE_READ_TOOL_NAME } from '../../tools/FileReadTool/prompt.ts'
+import { getCwd } from '../cwd.ts'
+import { logForDebugging } from '../debug.ts'
+import { getClaudeConfigHomeDir } from '../envUtils.ts'
+import { isFsInaccessible } from '../errors.ts'
+import { isMemoryWriteApprovalRequired } from '../governancePolicy.ts'
 import {
   getFsImplementation,
   getPathsForPermissionCheck,
-} from '../fsOperations.js'
+} from '../fsOperations.ts'
 import {
   containsPathTraversal,
   expandPath,
   getDirectoryForPath,
   sanitizePath,
-} from '../path.js'
-import { getPlanSlug, getPlansDirectory } from '../plans.js'
-import { getPlatform } from '../platform.js'
-import { getProjectDir } from '../sessionStorage.js'
-import { SETTING_SOURCES } from '../settings/constants.js'
+} from '../path.ts'
+import { getPlanSlug, getPlansDirectory } from '../plans.ts'
+import { getPlatform } from '../platform.ts'
+import { getProjectDir } from '../sessionStorage.ts'
+import { SETTING_SOURCES } from '../settings/constants.ts'
 import {
   getSettingsFilePathForSource,
   getSettingsRootPathForSource,
-} from '../settings/settings.js'
-import { containsVulnerableUncPath } from '../shell/readOnlyCommandValidation.js'
-import { getToolResultsDir } from '../toolResultStorage.js'
-import { windowsPathToPosixPath } from '../windowsPaths.js'
+} from '../settings/settings.ts'
+import { containsVulnerableUncPath } from '../shell/readOnlyCommandValidation.ts'
+import { getToolResultsDir } from '../toolResultStorage.ts'
+import { windowsPathToPosixPath } from '../windowsPaths.ts'
 import type {
   PermissionDecision,
   PermissionResult,
-} from './PermissionResult.js'
-import type { PermissionRule, PermissionRuleSource } from './PermissionRule.js'
-import { createReadRuleSuggestion } from './PermissionUpdate.js'
-import type { PermissionUpdate } from './PermissionUpdateSchema.js'
-import { getRuleByContentsForToolName } from './permissions.js'
-import { isPermissiveSafety } from './safetyLevel.js'
+} from './PermissionResult.ts'
+import type { PermissionRule, PermissionRuleSource } from './PermissionRule.ts'
+import { createReadRuleSuggestion } from './PermissionUpdate.ts'
+import type { PermissionUpdate } from './PermissionUpdateSchema.ts'
+import { getRuleByContentsForToolName } from './permissions.ts'
+import { isPermissiveSafety } from './safetyLevel.ts'
 
 declare const MACRO: { VERSION: string }
 

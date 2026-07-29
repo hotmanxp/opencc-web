@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { describe, expect, it } from 'bun:test'
 
-import { buildKeywordTurnRequest } from './ultracode.js'
+import { buildKeywordTurnRequest } from './ultracode.ts'
 
 const UPSTREAM_VERBATIM_REMINDER =
   'The user included the keyword "ultracode", opting this turn into multi-agent orchestration — use the Workflow tool to fulfill the request.'

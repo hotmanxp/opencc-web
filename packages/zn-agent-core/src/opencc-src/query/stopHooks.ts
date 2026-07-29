@@ -5,9 +5,9 @@ import { isExtractModeActive } from '../memdir/paths.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../services/analytics/index.js'
-import type { ToolUseContext } from '../Tool.js'
-import type { HookProgress } from '../types/hooks.js'
+} from '../services/analytics/index.ts'
+import type { ToolUseContext } from '../Tool.ts'
+import type { HookProgress } from '../types/hooks.ts'
 import type {
   AssistantMessage,
   Message,
@@ -16,15 +16,15 @@ import type {
   StreamEvent,
   TombstoneMessage,
   ToolUseSummaryMessage,
-} from '../types/message.js'
-import { createAttachmentMessage } from '../utils/attachments.js'
+} from '../types/message.ts'
+import { createAttachmentMessage } from '../utils/attachments.ts'
 import {
   getQueryAbortSystemMessage,
   shouldCreateUserInterruptionMessage,
-} from '../utils/abortReasons.js'
-import { logForDebugging } from '../utils/debug.js'
-import { errorMessage } from '../utils/errors.js'
-import type { REPLHookContext } from '../utils/hooks/postSamplingHooks.js'
+} from '../utils/abortReasons.ts'
+import { logForDebugging } from '../utils/debug.ts'
+import { errorMessage } from '../utils/errors.ts'
+import type { REPLHookContext } from '../utils/hooks/postSamplingHooks.ts'
 import {
   executeStopHooks,
   executeTaskCompletedHooks,
@@ -32,29 +32,29 @@ import {
   getStopHookMessage,
   getTaskCompletedHookMessage,
   getTeammateIdleHookMessage,
-} from '../utils/hooks.js'
+} from '../utils/hooks.ts'
 import {
   createStopHookSummaryMessage,
   createSystemMessage,
   createUserInterruptionMessage,
   createUserMessage,
-} from '../utils/messages.js'
-import type { SystemPrompt } from '../utils/systemPromptType.js'
-import { getTaskListId, listTasks } from '../utils/tasks.js'
-import { getAgentName, getTeamName, isTeammate } from '../utils/teammate.js'
+} from '../utils/messages.ts'
+import type { SystemPrompt } from '../utils/systemPromptType.ts'
+import { getTaskListId, listTasks } from '../utils/tasks.ts'
+import { getAgentName, getTeamName, isTeammate } from '../utils/teammate.ts'
 import {
   drainPendingExtraction,
   executeExtractMemories,
   initExtractMemories,
 } from '../services/extractMemories/extractMemories.js'
-import type { QuerySource } from '../constants/querySource.js'
+import type { QuerySource } from '../constants/querySource.ts'
 import { executeAutoDream } from '../services/autoDream/autoDream.js'
 import { executePromptSuggestion } from '../services/PromptSuggestion/promptSuggestion.js'
-import { isBareMode, isEnvDefinedFalsy } from '../utils/envUtils.js'
+import { isBareMode, isEnvDefinedFalsy } from '../utils/envUtils.ts'
 import {
   createCacheSafeParams,
   saveCacheSafeParams,
-} from '../utils/forkedAgent.js'
+} from '../utils/forkedAgent.ts'
 
 type StopHookResult = {
   blockingErrors: Message[]

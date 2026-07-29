@@ -1,15 +1,15 @@
 import { Worker } from 'node:worker_threads'
-import { buildWorkerScript } from '../../tools/WorkflowTool/runtime/workerScript.js'
-import { Scheduler } from '../../tools/WorkflowTool/runtime/scheduler.js'
+import { buildWorkerScript } from '../../tools/WorkflowTool/runtime/workerScript.ts'
+import { Scheduler } from '../../tools/WorkflowTool/runtime/scheduler.ts'
 import type {
   Workflow,
   SpawnOpts,
   SpawnResult,
   WorkerInbound,
   WorkerOutbound,
-} from '../../tools/WorkflowTool/types.js'
-import { logError } from '../../utils/log.js'
-import { findWorkflowTask } from './lifecycle.js'
+} from '../../tools/WorkflowTool/types.ts'
+import { logError } from '../../utils/log.ts'
+import { findWorkflowTask } from './lifecycle.ts'
 
 const DEFAULT_TIMEOUT_MS = 30 * 60 * 1000 // 30 min
 const SCHEDULER_OPTS = { maxConcurrent: 16, maxTotal: 1000 }

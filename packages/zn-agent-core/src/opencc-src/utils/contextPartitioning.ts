@@ -5,8 +5,8 @@
  * Used for intelligent context management when context window is tight.
  */
 
-import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
-import type { Message } from '../types/message.js'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
+import type { Message } from '../types/message.ts'
 
 export type PriorityZone = 'recent' | 'important' | 'background' | 'system'
 

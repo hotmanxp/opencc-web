@@ -5,7 +5,7 @@ import {
   getAllMessages,
   getAvailableSpace,
   type PriorityZone,
-} from './contextPartitioning.js'
+} from './contextPartitioning.ts'
 
 function createMessage(role: string, content: string, createdAt: number = Date.now()): any {
   return {

@@ -1,67 +1,67 @@
 import { dirname, isAbsolute, sep } from 'path'
-import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
+import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.ts'
 import { logEvent } from 'src/services/analytics/index.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
-import { diagnosticTracker } from '../../services/diagnosticTracking.js'
-import { clearDeliveredDiagnosticsForFile } from '../../services/lsp/LSPDiagnosticRegistry.js'
-import { getLspServerManager } from '../../services/lsp/manager.js'
-import { notifyVscodeFileUpdated } from '../../services/mcp/vscodeSdkMcp.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
+import { diagnosticTracker } from '../../services/diagnosticTracking.ts'
+import { clearDeliveredDiagnosticsForFile } from '../../services/lsp/LSPDiagnosticRegistry.ts'
+import { getLspServerManager } from '../../services/lsp/manager.ts'
+import { notifyVscodeFileUpdated } from '../../services/mcp/vscodeSdkMcp.ts'
 import { checkTeamMemSecrets } from '../../services/teamMemorySync/teamMemSecretGuard.js'
 import {
   activateConditionalSkillsForPaths,
   addSkillDirectories,
   discoverSkillDirsForPaths,
-} from '../../skills/loadSkillsDir.js'
-import type { ToolUseContext } from '../../Tool.js'
-import { buildTool, type ToolDef } from '../../Tool.js'
-import { getCwd } from '../../utils/cwd.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { countLinesChanged } from '../../utils/diff.js'
-import { isEnvTruthy } from '../../utils/envUtils.js'
-import { isENOENT } from '../../utils/errors.js'
+} from '../../skills/loadSkillsDir.ts'
+import type { ToolUseContext } from '../../Tool.ts'
+import { buildTool, type ToolDef } from '../../Tool.ts'
+import { getCwd } from '../../utils/cwd.ts'
+import { logForDebugging } from '../../utils/debug.ts'
+import { countLinesChanged } from '../../utils/diff.ts'
+import { isEnvTruthy } from '../../utils/envUtils.ts'
+import { isENOENT } from '../../utils/errors.ts'
 import {
   FILE_NOT_FOUND_CWD_NOTE,
   findSimilarFile,
   getFileModificationTime,
   suggestPathUnderCwd,
   writeTextContent,
-} from '../../utils/file.js'
+} from '../../utils/file.ts'
 import {
   fileHistoryEnabled,
   fileHistoryTrackEdit,
-} from '../../utils/fileHistory.js'
-import { logFileOperation } from '../../utils/fileOperationAnalytics.js'
+} from '../../utils/fileHistory.ts'
+import { logFileOperation } from '../../utils/fileOperationAnalytics.ts'
 import {
   type LineEndingType,
   readFileSyncWithMetadata,
-} from '../../utils/fileRead.js'
-import { formatFileSize } from '../../utils/format.js'
-import { getFsImplementation } from '../../utils/fsOperations.js'
+} from '../../utils/fileRead.ts'
+import { formatFileSize } from '../../utils/format.ts'
+import { getFsImplementation } from '../../utils/fsOperations.ts'
 import {
   fetchSingleFileGitDiff,
   type ToolUseDiff,
-} from '../../utils/gitDiff.js'
-import { logError } from '../../utils/log.js'
-import { expandPath } from '../../utils/path.js'
+} from '../../utils/gitDiff.ts'
+import { logError } from '../../utils/log.ts'
+import { expandPath } from '../../utils/path.ts'
 import {
   checkWritePermissionForTool,
   matchingRuleForInput,
-} from '../../utils/permissions/filesystem.js'
-import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
-import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.js'
-import { validateInputForSettingsFileEdit } from '../../utils/settings/validateEditTool.js'
-import { NOTEBOOK_EDIT_TOOL_NAME } from '../NotebookEditTool/constants.js'
+} from '../../utils/permissions/filesystem.ts'
+import type { PermissionDecision } from '../../utils/permissions/PermissionResult.ts'
+import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.ts'
+import { validateInputForSettingsFileEdit } from '../../utils/settings/validateEditTool.ts'
+import { NOTEBOOK_EDIT_TOOL_NAME } from '../NotebookEditTool/constants.ts'
 import {
   FILE_EDIT_TOOL_NAME,
   FILE_UNEXPECTEDLY_MODIFIED_ERROR,
-} from './constants.js'
-import { getEditToolDescription } from './prompt.js'
+} from './constants.ts'
+import { getEditToolDescription } from './prompt.ts'
 import {
   type FileEditInput,
   type FileEditOutput,
   inputSchema,
   outputSchema,
-} from './types.js'
+} from './types.ts'
 import {
   getToolUseSummary,
   renderToolResultMessage,
@@ -75,7 +75,7 @@ import {
   findActualString,
   getPatchForEdit,
   preserveQuoteStyle,
-} from './utils.js'
+} from './utils.ts'
 
 // V8/Bun string length limit is ~2^30 characters (~1 billion). For typical
 // ASCII/Latin-1 files, 1 byte on disk = 1 character, so 1 GiB in stat bytes

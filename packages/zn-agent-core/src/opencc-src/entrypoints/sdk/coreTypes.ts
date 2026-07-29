@@ -14,9 +14,9 @@ export type {
   SandboxIgnoreViolations,
   SandboxNetworkConfig,
   SandboxSettings,
-} from '../sandboxTypes.js'
+} from '../sandboxTypes.ts'
 // Re-export all generated types
-export * from './coreTypes.generated.js'
+export * from './coreTypes.generated.ts'
 
 // Re-export utility types that can't be expressed as Zod schemas
 // @ts-ignore

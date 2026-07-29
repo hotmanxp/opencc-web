@@ -7,7 +7,7 @@
  */
 
 import type { FetchLike } from '@modelcontextprotocol/sdk/shared/transport.js'
-import { logMCPDebug } from '../../utils/log.js'
+import { logMCPDebug } from '../../utils/log.ts'
 
 /**
  * Result of probing an MCP server for authentication requirements.

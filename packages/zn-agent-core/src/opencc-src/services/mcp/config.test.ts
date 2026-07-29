@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import type { ProjectConfig } from '../../utils/config.js'
+import type { ProjectConfig } from '../../utils/config.ts'
 
 // Capture every saveCurrentProjectConfig invocation through mock.module so
 // the spy is registered before the MCP module is imported. mock.module is
@@ -10,10 +10,10 @@ let saveCalls: Array<(c: ProjectConfig) => ProjectConfig> = []
 let lastSaveSpy: ReturnType<typeof mock> | null = null
 
 const actual = (await import(
-  `../../utils/config.js?ns=${Date.now()}-${Math.random()}`
-)) as typeof import('../../utils/config.js')
+  `../../utils/config.ts?ns=${Date.now()}-${Math.random()}`
+)) as typeof import('../../utils/config.ts')
 
-mock.module('../../utils/config.js', () => {
+mock.module('../../utils/config.ts', () => {
   return {
     ...actual,
     saveCurrentProjectConfig: (updater: (c: ProjectConfig) => ProjectConfig) => {
@@ -33,7 +33,7 @@ mock.module('../../utils/config.js', () => {
 // Imports below intentionally come AFTER mock.module so they resolve to the
 // overridden bindings.
 const mcpMod = (await import(`./config.js?ns=${Date.now()}`)) as typeof import('./config.js')
-const utilMod = (await import(`../../utils/config.js?ns=${Date.now()}`)) as typeof import('./config.js') & {
+const utilMod = (await import(`../../utils/config.ts?ns=${Date.now()}`)) as typeof import('./config.js') & {
   saveCurrentProjectConfig: (
     updater: (c: ProjectConfig) => ProjectConfig,
   ) => void

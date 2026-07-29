@@ -1,4 +1,4 @@
-import type { ModelAlias } from './aliases.js'
+import type { ModelAlias } from './aliases.ts'
 
 /**
  * Alias-tier overrides keyed by provider.

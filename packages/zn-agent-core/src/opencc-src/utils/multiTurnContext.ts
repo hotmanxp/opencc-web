@@ -5,8 +5,8 @@
  * Preserves state between tool invocations.
  */
 
-import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
-import type { Message } from '../types/message.js'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
+import type { Message } from '../types/message.ts'
 
 export interface TurnContext {
   turnId: string

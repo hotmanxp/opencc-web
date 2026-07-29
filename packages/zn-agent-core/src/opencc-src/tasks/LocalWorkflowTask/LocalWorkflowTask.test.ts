@@ -7,16 +7,16 @@ import {
   type LocalSpawner,
   type LocalWorkflowParentContext,
   formatCompletionMessage,
-} from './LocalWorkflowTask.js'
+} from './LocalWorkflowTask.ts'
 import type {
   SpawnOpts,
   SpawnResult,
   Workflow,
-} from '../../tools/WorkflowTool/types.js'
+} from '../../tools/WorkflowTool/types.ts'
 import {
   getWorkflowReportPath,
   readWorkflowReport,
-} from '../../utils/task/diskOutput.js'
+} from '../../utils/task/diskOutput.ts'
 
 const sampleWorkflow: Workflow = {
   name: 'echo',

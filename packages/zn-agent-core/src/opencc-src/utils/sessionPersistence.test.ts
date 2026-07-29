@@ -5,7 +5,7 @@ import {
   loadSession,
   listSessions,
   deleteSession,
-} from './sessionPersistence.js'
+} from './sessionPersistence.ts'
 import { join } from 'node:path'
 import { unlink } from 'node:fs/promises'
 import { mkdirSync, rmSync } from 'fs'

@@ -1,9 +1,9 @@
 /* eslint-disable eslint-plugin-n/no-unsupported-features/node-builtins */
 
-import { errorMessage } from '../utils/errors.js'
-import { jsonStringify } from '../utils/slowOperations.js'
-import type { DirectConnectConfig } from './directConnectManager.js'
-import { connectResponseSchema } from './types.js'
+import { errorMessage } from '../utils/errors.ts'
+import { jsonStringify } from '../utils/slowOperations.ts'
+import type { DirectConnectConfig } from './directConnectManager.ts'
+import { connectResponseSchema } from './types.ts'
 
 /**
  * Errors thrown by createDirectConnectSession when the connection fails.

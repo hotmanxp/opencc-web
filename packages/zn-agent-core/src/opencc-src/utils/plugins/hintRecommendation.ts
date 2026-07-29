@@ -10,26 +10,26 @@
  * marketplace filtering is hardcoded for v1.
  */
 
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
   logEvent,
-} from '../../services/analytics/index.js'
+} from '../../services/analytics/index.ts'
 import {
   type ClaudeCodeHint,
   hasShownHintThisSession,
   setPendingHint,
-} from '../claudeCodeHints.js'
-import { getGlobalConfig, saveGlobalConfig } from '../config.js'
-import { logForDebugging } from '../debug.js'
-import { isPluginInstalled } from './installedPluginsManager.js'
-import { getPluginById } from './marketplaceManager.js'
+} from '../claudeCodeHints.ts'
+import { getGlobalConfig, saveGlobalConfig } from '../config.ts'
+import { logForDebugging } from '../debug.ts'
+import { isPluginInstalled } from './installedPluginsManager.ts'
+import { getPluginById } from './marketplaceManager.ts'
 import {
   isOfficialMarketplaceName,
   parsePluginIdentifier,
-} from './pluginIdentifier.js'
-import { isPluginBlockedByPolicy } from './pluginPolicy.js'
+} from './pluginIdentifier.ts'
+import { isPluginBlockedByPolicy } from './pluginPolicy.ts'
 
 /**
  * Hard cap on `claudeCodeHints.plugin[]` — bounds config growth. Each shown

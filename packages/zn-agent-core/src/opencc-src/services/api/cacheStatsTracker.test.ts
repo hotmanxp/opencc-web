@@ -8,8 +8,8 @@ import {
   recordRequest,
   resetCurrentTurn,
   resetSessionCacheStats,
-} from './cacheStatsTracker.js'
-import type { CacheMetrics } from './cacheMetrics.js'
+} from './cacheStatsTracker.ts'
+import type { CacheMetrics } from './cacheMetrics.ts'
 
 function makeMetrics(partial: Partial<CacheMetrics>): CacheMetrics {
   return {

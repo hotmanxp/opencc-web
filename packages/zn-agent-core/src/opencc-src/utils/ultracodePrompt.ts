@@ -12,7 +12,7 @@
 // This file is the single source of truth for ultracode subagent text.
 // See Task 4 of docs/superpowers/plans/2026-06-10-plan9-ultracode-sync.md.
 
-import { getUltracodeReminder, isUltracodeActive } from './ultracode.js'
+import { getUltracodeReminder, isUltracodeActive } from './ultracode.ts'
 
 /**
  * Main-session opt-in block for the ultracode keyword trigger.

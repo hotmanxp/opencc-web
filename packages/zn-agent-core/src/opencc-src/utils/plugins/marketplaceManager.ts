@@ -23,39 +23,39 @@ import { writeFile } from 'fs/promises'
 import isEqual from 'lodash-es/isEqual.js'
 import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, isAbsolute, join, resolve, sep } from 'path'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
-import { logForDebugging } from '../debug.js'
-import { isEnvTruthy } from '../envUtils.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
+import { logForDebugging } from '../debug.ts'
+import { isEnvTruthy } from '../envUtils.ts'
 import {
   ConfigParseError,
   errorMessage,
   getErrnoCode,
   isENOENT,
   toError,
-} from '../errors.js'
-import { execFileNoThrow, execFileNoThrowWithCwd } from '../execFileNoThrow.js'
-import { getFsImplementation } from '../fsOperations.js'
-import { gitExe } from '../git.js'
-import { logError } from '../log.js'
+} from '../errors.ts'
+import { execFileNoThrow, execFileNoThrowWithCwd } from '../execFileNoThrow.ts'
+import { getFsImplementation } from '../fsOperations.ts'
+import { gitExe } from '../git.ts'
+import { logError } from '../log.ts'
 import {
   getInitialSettings,
   getSettingsForSource,
   updateSettingsForSource,
-} from '../settings/settings.js'
-import type { SettingsJson } from '../settings/types.js'
+} from '../settings/settings.ts'
+import type { SettingsJson } from '../settings/types.ts'
 import {
   jsonParse,
   jsonStringify,
   writeFileSync_DEPRECATED,
-} from '../slowOperations.js'
+} from '../slowOperations.ts'
 import {
   getAddDirEnabledPlugins,
   getAddDirExtraMarketplaces,
-} from './addDirPluginSettings.js'
-import { markPluginVersionOrphaned } from './cacheUtils.js'
-import { buildGitChildEnv } from './gitEnv.js'
-import { classifyFetchError, logPluginFetch } from './fetchTelemetry.js'
-import { removeAllPluginsForMarketplace } from './installedPluginsManager.js'
+} from './addDirPluginSettings.ts'
+import { markPluginVersionOrphaned } from './cacheUtils.ts'
+import { buildGitChildEnv } from './gitEnv.ts'
+import { classifyFetchError, logPluginFetch } from './fetchTelemetry.ts'
+import { removeAllPluginsForMarketplace } from './installedPluginsManager.ts'
 import {
   extractHostFromSource,
   formatSourceForDisplay,
@@ -63,19 +63,19 @@ import {
   getStrictKnownMarketplaces,
   isSourceAllowedByPolicy,
   isSourceInBlocklist,
-} from './marketplaceHelpers.js'
+} from './marketplaceHelpers.ts'
 import {
   OFFICIAL_MARKETPLACE_NAME,
   OFFICIAL_MARKETPLACE_SOURCE,
-} from './officialMarketplace.js'
-import { fetchOfficialMarketplaceFromGcs } from './officialMarketplaceGcs.js'
+} from './officialMarketplace.ts'
+import { fetchOfficialMarketplaceFromGcs } from './officialMarketplaceGcs.ts'
 import {
   deletePluginDataDir,
   getPluginSeedDirs,
   getPluginsDirectory,
-} from './pluginDirectories.js'
-import { parsePluginIdentifier } from './pluginIdentifier.js'
-import { deletePluginOptions } from './pluginOptionsStorage.js'
+} from './pluginDirectories.ts'
+import { parsePluginIdentifier } from './pluginIdentifier.ts'
+import { deletePluginOptions } from './pluginOptionsStorage.ts'
 import {
   isLocalMarketplaceSource,
   type KnownMarketplace,
@@ -86,7 +86,7 @@ import {
   type PluginMarketplaceEntry,
   PluginMarketplaceSchema,
   validateOfficialNameSource,
-} from './schemas.js'
+} from './schemas.ts'
 
 /**
  * Result of loading and caching a marketplace

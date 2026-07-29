@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { describe, expect, test } from 'bun:test'
 
-import { buildTranscriptForClassifier } from './yoloClassifier.js'
+import { buildTranscriptForClassifier } from './yoloClassifier.ts'
 
 const tools = [
   {

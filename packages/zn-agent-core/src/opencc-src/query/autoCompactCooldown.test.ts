@@ -2,16 +2,16 @@ import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import type { AutoCompactTrackingState } from '../services/compact/autoCompact.js'
+import type { AutoCompactTrackingState } from '../services/compact/autoCompact.ts'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock.js'
-import type { AssistantMessage, Message, SystemInformationalMessage } from '../types/message.js'
-import { createCompactBoundaryMessage } from '../utils/messages.js'
-import { asSystemPrompt } from '../utils/systemPromptType.js'
-import type { MaxMessagesCompactionThreshold } from '../utils/config.js'
-import type { QueryDeps } from './deps.js'
+import type { AssistantMessage, Message, SystemInformationalMessage } from '../types/message.ts'
+import { createCompactBoundaryMessage } from '../utils/messages.ts'
+import { asSystemPrompt } from '../utils/systemPromptType.ts'
+import type { MaxMessagesCompactionThreshold } from '../utils/config.ts'
+import type { QueryDeps } from './deps.ts'
 
 type AutocompactArgs = Parameters<QueryDeps['autocompact']>
 
@@ -19,17 +19,17 @@ type AutocompactArgs = Parameters<QueryDeps['autocompact']>
 // mock.module() registrations on mock.restore(). Pin this suite to the real
 // config before importing query so saved settings are visible to the query loop.
 const realConfigModule = (await import(
-  `../utils/config.js?autoCompactCooldownReal=${Date.now()}-${Math.random()}`
-)) as typeof import('../utils/config.js')
-mock.module('../utils/config.js', () => ({ ...realConfigModule }))
+  `../utils/config.ts?autoCompactCooldownReal=${Date.now()}-${Math.random()}`
+)) as typeof import('../utils/config.ts')
+mock.module('../utils/config.ts', () => ({ ...realConfigModule }))
 
 const { getGlobalConfig, saveGlobalConfig } = realConfigModule
 const {
   getAutoCompactThreshold,
   MAX_CONSECUTIVE_AUTOCOMPACT_FAILURES,
 } = (await import(
-  `../services/compact/autoCompact.js?autoCompactCooldownReal=${Date.now()}-${Math.random()}`
-)) as typeof import('../services/compact/autoCompact.js')
+  `../services/compact/autoCompact.ts?autoCompactCooldownReal=${Date.now()}-${Math.random()}`
+)) as typeof import('../services/compact/autoCompact.ts')
 
 const SAVED_ENV = {
   CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,

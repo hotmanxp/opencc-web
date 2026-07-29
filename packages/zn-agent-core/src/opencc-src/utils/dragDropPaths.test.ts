@@ -3,7 +3,7 @@ import { afterAll, describe, expect, test } from 'bun:test'
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { extractDraggedFilePaths } from './dragDropPaths.js'
+import { extractDraggedFilePaths } from './dragDropPaths.ts'
 
 function escapeFinderDraggedPath(filePath: string): string {
   return filePath.replace(/([\\ ])/g, '\\$1')

@@ -1,33 +1,33 @@
 // @ts-nocheck
 import { feature } from 'bun:bundle'
-import { getInvokedSkillsForAgent } from '../../bootstrap/state.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { getInvokedSkillsForAgent } from '../../bootstrap/state.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_PII_TAGGED,
   logEvent,
-} from '../../services/analytics/index.js'
-import { queryModelWithoutStreaming } from '../../services/api/claude.js'
-import { getEmptyToolPermissionContext } from '../../Tool.js'
-import type { Message } from '../../types/message.js'
-import { createAbortController } from '../abortController.js'
-import { count } from '../array.js'
-import { getCwd } from '../cwd.js'
-import { toError } from '../errors.js'
-import { logError } from '../log.js'
+} from '../../services/analytics/index.ts'
+import { queryModelWithoutStreaming } from '../../services/api/claude.ts'
+import { getEmptyToolPermissionContext } from '../../Tool.ts'
+import type { Message } from '../../types/message.ts'
+import { createAbortController } from '../abortController.ts'
+import { count } from '../array.ts'
+import { getCwd } from '../cwd.ts'
+import { toError } from '../errors.ts'
+import { logError } from '../log.ts'
 import {
   createUserMessage,
   extractTag,
   extractTextContent,
-} from '../messages.js'
-import { getSmallFastModel } from '../model/model.js'
-import { jsonParse } from '../slowOperations.js'
-import { asSystemPrompt } from '../systemPromptType.js'
+} from '../messages.ts'
+import { getSmallFastModel } from '../model/model.ts'
+import { jsonParse } from '../slowOperations.ts'
+import { asSystemPrompt } from '../systemPromptType.ts'
 import {
   type ApiQueryHookConfig,
   createApiQueryHook,
-} from './apiQueryHookHelper.js'
-import { registerPostSamplingHook } from './postSamplingHooks.js'
+} from './apiQueryHookHelper.ts'
+import { registerPostSamplingHook } from './postSamplingHooks.ts'
 
 const TURN_BATCH_SIZE = 5
 

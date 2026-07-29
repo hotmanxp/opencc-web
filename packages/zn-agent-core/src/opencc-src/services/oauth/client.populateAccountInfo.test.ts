@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { expect, test } from 'bun:test'
-import { shouldRefreshOAuthAccountInfo } from './client.js'
+import { shouldRefreshOAuthAccountInfo } from './client.ts'
 
 test('OAuth account info population does not refresh when Claude.ai auth is inactive', () => {
   expect(

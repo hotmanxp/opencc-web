@@ -11,21 +11,21 @@ import {
   getMainLoopModelOverride,
   getSessionBypassPermissionsMode,
   getSessionId,
-} from '../../bootstrap/state.js'
+} from '../../bootstrap/state.ts'
 import type { AppState } from '../../state/AppState.js'
-import { createTaskStateBase, generateTaskId } from '../../Task.js'
-import type { ToolUseContext } from '../../Tool.js'
+import { createTaskStateBase, generateTaskId } from '../../Task.ts'
+import type { ToolUseContext } from '../../Tool.ts'
 import type { InProcessTeammateTaskState } from '../../tasks/InProcessTeammateTask/types.js'
-import { formatAgentId } from '../../utils/agentId.js'
-import { quote } from '../../utils/bash/shellQuote.js'
-import { isInBundledMode } from '../../utils/bundledMode.js'
-import { getGlobalConfig } from '../../utils/config.js'
-import { getCwd } from '../../utils/cwd.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { errorMessage } from '../../utils/errors.js'
-import { execFileNoThrow } from '../../utils/execFileNoThrow.js'
-import { parseUserSpecifiedModel } from '../../utils/model/model.js'
-import type { PermissionMode } from '../../utils/permissions/PermissionMode.js'
+import { formatAgentId } from '../../utils/agentId.ts'
+import { quote } from '../../utils/bash/shellQuote.ts'
+import { isInBundledMode } from '../../utils/bundledMode.ts'
+import { getGlobalConfig } from '../../utils/config.ts'
+import { getCwd } from '../../utils/cwd.ts'
+import { logForDebugging } from '../../utils/debug.ts'
+import { errorMessage } from '../../utils/errors.ts'
+import { execFileNoThrow } from '../../utils/execFileNoThrow.ts'
+import { parseUserSpecifiedModel } from '../../utils/model/model.ts'
+import type { PermissionMode } from '../../utils/permissions/PermissionMode.ts'
 import { isTmuxAvailable } from '../../utils/swarm/backends/detection.js'
 import {
   detectAndGetBackend,
@@ -67,9 +67,9 @@ import {
 } from '../../utils/swarm/teammateLayoutManager.js'
 import { getHardcodedTeammateModelFallback } from '../../utils/swarm/teammateModel.js'
 import { registerTask } from '../../utils/task/framework.js'
-import { writeToMailbox } from '../../utils/teammateMailbox.js'
-import type { CustomAgentDefinition } from '../AgentTool/loadAgentsDir.js'
-import { isCustomAgent } from '../AgentTool/loadAgentsDir.js'
+import { writeToMailbox } from '../../utils/teammateMailbox.ts'
+import type { CustomAgentDefinition } from '../AgentTool/loadAgentsDir.ts'
+import { isCustomAgent } from '../AgentTool/loadAgentsDir.ts'
 
 function getDefaultTeammateModel(leaderModel: string | null): string {
   const configured = getGlobalConfig().teammateDefaultModel

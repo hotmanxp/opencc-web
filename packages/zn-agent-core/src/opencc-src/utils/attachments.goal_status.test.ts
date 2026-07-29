@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   createAttachmentMessage,
   type Attachment,
-} from './attachments.js'
+} from './attachments.ts'
 
 /**
  * The `createAttachmentMessage(attachment: Attachment)` factory returns a

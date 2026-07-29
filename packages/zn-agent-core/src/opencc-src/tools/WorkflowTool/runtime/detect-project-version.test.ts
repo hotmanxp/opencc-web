@@ -20,7 +20,7 @@ import { mkdtempSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { tmpdir } from 'node:os'
 import { fileURLToPath } from 'node:url'
-import { runWorkflowInVm } from './vmRunner.js'
+import { runWorkflowInVm } from './vmRunner.ts'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)

@@ -1,17 +1,17 @@
 import { z } from 'zod/v4'
-import { buildTool, type ToolDef } from '../../Tool.js'
-import { cronToHuman } from '../../utils/cron.js'
-import { listAllCronTasks } from '../../utils/cronTasks.js'
-import { truncate } from '../../utils/format.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { getTeammateContext } from '../../utils/teammateContext.js'
+import { buildTool, type ToolDef } from '../../Tool.ts'
+import { cronToHuman } from '../../utils/cron.ts'
+import { listAllCronTasks } from '../../utils/cronTasks.ts'
+import { truncate } from '../../utils/format.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { getTeammateContext } from '../../utils/teammateContext.ts'
 import {
   buildCronListPrompt,
   CRON_LIST_DESCRIPTION,
   CRON_LIST_TOOL_NAME,
   isDurableCronEnabled,
   isKairosCronEnabled,
-} from './prompt.js'
+} from './prompt.ts'
 import { renderListResultMessage, renderListToolUseMessage } from './UI.js'
 
 const inputSchema = lazySchema(() => z.strictObject({}))

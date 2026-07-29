@@ -16,11 +16,11 @@
  * test fails for the right reason if anyone breaks the wrapping.
  */
 import { beforeEach, describe, expect, test } from 'bun:test'
-import { addToTotalSessionCost, resetCostState } from './cost-tracker.js'
+import { addToTotalSessionCost, resetCostState } from './cost-tracker.ts'
 import {
   getCurrentTurnCacheMetrics,
   getSessionCacheMetrics,
-} from './services/api/cacheStatsTracker.js'
+} from './services/api/cacheStatsTracker.ts'
 
 // BetaUsage-compatible shape — minimum fields addToTotalSessionCost
 // needs to run without throwing. Cache fields are the ones we care

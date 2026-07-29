@@ -1,10 +1,10 @@
 // @ts-nocheck
 import { describe, expect, test } from 'bun:test'
-import { deriveMcpSkillName, fetchMcpSkillsForClient, isSkillResource } from './mcpSkills.js'
+import { deriveMcpSkillName, fetchMcpSkillsForClient, isSkillResource } from './mcpSkills.ts'
 // Importing loadSkillsDir registers the MCP skill builders (createSkillCommand /
 // parseSkillFrontmatterFields) that fetchMcpSkillsForClient resolves at runtime.
 import './loadSkillsDir.js'
-import type { MCPServerConnection } from '../services/mcp/types.js'
+import type { MCPServerConnection } from '../services/mcp/types.ts'
 
 describe('isSkillResource', () => {
   test('true for skill:// uri', () => {

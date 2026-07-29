@@ -1,7 +1,7 @@
-import { getEnabledSettingSources } from './settings/constants.js'
-import { getInitialSettings, getSettingsForSource } from './settings/settings.js'
-import type { SettingSource } from './settings/constants.js'
-import type { SettingsJson } from './settings/types.js'
+import { getEnabledSettingSources } from './settings/constants.ts'
+import { getInitialSettings, getSettingsForSource } from './settings/settings.ts'
+import type { SettingSource } from './settings/constants.ts'
+import type { SettingsJson } from './settings/types.ts'
 
 let getSettingsForSourceForTesting:
   | ((source: SettingSource) => SettingsJson | null)

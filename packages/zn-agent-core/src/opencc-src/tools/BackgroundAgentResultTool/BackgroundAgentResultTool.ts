@@ -16,9 +16,9 @@ import { existsSync, readFileSync, statSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { z } from 'zod/v4'
-import { buildTool } from '../../Tool.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { isBgAgentRuntimeEnabled } from '../../utils/daemon/mailbox.js'
+import { buildTool } from '../../Tool.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { isBgAgentRuntimeEnabled } from '../../utils/daemon/mailbox.ts'
 
 export const BACKGROUND_AGENT_RESULT_TOOL_NAME = 'BackgroundAgentResult'
 
