@@ -1,5 +1,7 @@
 # zn-agent-core OpenCC Adapter Implementation Plan
 
+> ⚠️ **DEPRECATED** — This plan implements the **Bun-only path A**. It was abandoned after commit `a88ebff5` removed the Bun runtime requirement. See `2026-07-29-zn-agent-core-opencc-adapter-node-design.md` (path B, Node/tsx) for the current direction. Tasks 1-6, 14, 15 remain conceptually valid and will be reused in the new plan; Tasks 7-13 (tool wrappers) are reused as-is.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
 **Goal:** Wire `DefaultAgentRuntime.run()` to opencc's `query()` via a thin adapter layer, so `/agent/prompt` produces real streaming events instead of an empty async iterable.

@@ -1,7 +1,7 @@
 # OpenCC Adapter for zn-agent-core — Design Spec
 
 **Date:** 2026-07-29
-**Status:** Approved (brainstorm complete)
+**Status:** ⚠️ **DEPRECATED** — superseded by `2026-07-29-zn-agent-core-opencc-adapter-node-design.md` (path B, Node/tsx). Kept for historical record. The Bun-only path A in this spec was abandoned after commit `a88ebff5` removed the Bun runtime requirement.
 **Author:** opencc-web migration team
 
 ## Context
