@@ -1469,12 +1469,23 @@ for (const f of ASSETS) {
 
 - [ ] **Step 2: Update vitest config to load the loader**
 
-In `packages/zn-agent-core/vitest.config.ts`, add `setupFiles`:
+In `packages/zn-agent-core/vitest.config.ts`, add `setupFiles` AND a
+`resolve.alias` so that Vite's resolver maps `bun:bundle` /
+`bun:feature` to the shim files (vitest's `setupFiles` does NOT install
+Node loader hooks, so the alias is the only way to make `import 'bun:bundle'`
+resolve inside the vitest process):
 
 ```ts
 import { defineConfig } from 'vitest/config'
+import { resolve } from 'node:path'
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      'bun:bundle': resolve(__dirname, 'src/compat/runtime/bun-shim.ts'),
+      'bun:feature': resolve(__dirname, 'src/compat/runtime/bun-feature-shim.ts'),
+    },
+  },
   test: {
     globals: true,
     environment: 'node',
@@ -1495,9 +1506,18 @@ Expected: PASS
 
 - [ ] **Step 3: Update Vite config to externalize opencc-src and bun:**
 
-In `packages/zai/vite.config.ts`, add to `rollupOptions`:
+In `packages/zai/vite.config.ts`, add to `rollupOptions` AND add the
+`bun:bundle` / `bun:feature` aliases under the existing `resolve.alias`
+block (so production builds also resolve the shim files at bundle time):
 
 ```ts
+resolve: {
+  alias: {
+    '@shared': resolve(projectRoot, 'src', 'shared'),
+    'bun:bundle': resolve(projectRoot, 'node_modules/@zn-ai/zn-agent-core/src/compat/runtime/bun-shim.ts'),
+    'bun:feature': resolve(projectRoot, 'node_modules/@zn-ai/zn-agent-core/src/compat/runtime/bun-feature-shim.ts'),
+  },
+},
 build: {
   // ... existing config
   rollupOptions: {

@@ -1,6 +1,13 @@
 import { defineConfig } from 'vitest/config'
+import { resolve } from 'node:path'
 
 export default defineConfig({
+  resolve: {
+    alias: {
+      'bun:bundle': resolve(__dirname, 'src/compat/runtime/bun-shim.ts'),
+      'bun:feature': resolve(__dirname, 'src/compat/runtime/bun-feature-shim.ts'),
+    },
+  },
   test: {
     globals: true,
     environment: 'node',
