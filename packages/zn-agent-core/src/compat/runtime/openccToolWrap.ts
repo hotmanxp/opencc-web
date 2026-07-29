@@ -52,6 +52,7 @@ export interface OpenccToolMinimal {
   description(input: unknown, options: unknown): Promise<string>
   isConcurrencySafe(input: unknown): boolean
   isReadOnly(input: unknown): boolean
+  isDestructive(input: unknown): boolean
   isEnabled(): boolean
   isMcp?: boolean
   isLsp?: boolean
@@ -84,6 +85,7 @@ export function wrapAsOpenccTool(tool: ZaiToolLike): OpenccToolMinimal {
 
     isConcurrencySafe: falseFn,
     isReadOnly: falseFn,
+    isDestructive: falseFn,
     isEnabled: trueFn,
     renderToolUseMessage: noopReactNode as any,
     renderToolResultMessage: noopReactNode as any,
