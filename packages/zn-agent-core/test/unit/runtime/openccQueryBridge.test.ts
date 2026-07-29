@@ -13,24 +13,7 @@ function makeOpts(overrides: Partial<any> = {}): any {
   }
 }
 
-describe('runViaOpenccQuery (lazy import + abort)', () => {
-  it('emits runtime.error if openccSrc cannot be imported', async () => {
-    // The bridge's lazy import may fail under vitest (no openccSrc wired in
-    // unit-test mode). That's OK — we verify the error path is graceful.
-    const events: any[] = []
-    try {
-      for await (const ev of runViaOpenccQuery(makeOpts(), {})) {
-        events.push(ev)
-        if (events.length > 5) break
-      }
-    } catch {
-      // OK — import may throw synchronously
-    }
-    // At least one event emitted before failure, OR the bridge yields
-    // a runtime.error rather than throwing.
-    expect(events.length).toBeGreaterThanOrEqual(0)
-  })
-
+describe('runViaOpenccQuery', () => {
   it('emits runtime.aborted if abortSignal is already aborted', async () => {
     const ac = new AbortController()
     ac.abort('test cancel')
@@ -43,15 +26,13 @@ describe('runViaOpenccQuery (lazy import + abort)', () => {
     expect(events[0].reason).toBe('test cancel')
   })
 
-  it('exposes defaultCoreToolsAsOpencc when config is empty', async () => {
-    // Bridge should not throw if config is `{}` (uses defaults).
+  it('does not throw when config is empty', async () => {
     const ac = new AbortController()
     ac.abort('stop before import')
     const events: any[] = []
     for await (const ev of runViaOpenccQuery(makeOpts({ abortSignal: ac.signal }), {})) {
       events.push(ev)
     }
-    // Just verify no throw.
     expect(events.length).toBeGreaterThan(0)
   })
 })
