@@ -14,18 +14,18 @@ import { markPostCompaction } from 'src/bootstrap/state.js'
 import {
   getInvokedSkillsForAgent,
   getOriginalCwd,
-} from '../../bootstrap/state.js'
-import type { QuerySource } from '../../constants/querySource.js'
+} from '../../bootstrap/state.ts'
+import type { QuerySource } from '../../constants/querySource.ts'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
-import type { Tool, ToolUseContext } from '../../Tool.js'
+import type { Tool, ToolUseContext } from '../../Tool.ts'
 import type { LocalAgentTaskState } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
-import { FileReadTool } from '../../tools/FileReadTool/FileReadTool.js'
+import { FileReadTool } from '../../tools/FileReadTool/FileReadTool.ts'
 import {
   FILE_READ_TOOL_NAME,
   FILE_UNCHANGED_STUB,
-} from '../../tools/FileReadTool/prompt.js'
-import { ToolSearchTool } from '../../tools/ToolSearchTool/ToolSearchTool.js'
-import type { AgentId } from '../../types/ids.js'
+} from '../../tools/FileReadTool/prompt.ts'
+import { ToolSearchTool } from '../../tools/ToolSearchTool/ToolSearchTool.ts'
+import type { AgentId } from '../../types/ids.ts'
 import type {
   AssistantMessage,
   AttachmentMessage,
@@ -35,34 +35,34 @@ import type {
   SystemCompactBoundaryMessage,
   SystemMessage,
   UserMessage,
-} from '../../types/message.js'
+} from '../../types/message.ts'
 import {
   createAttachmentMessage,
   generateFileAttachment,
   getAgentListingDeltaAttachment,
   getDeferredToolsDeltaAttachment,
   getMcpInstructionsDeltaAttachment,
-} from '../../utils/attachments.js'
-import { getGlobalConfig, getMemoryPath } from '../../utils/config.js'
-import { COMPACT_MAX_OUTPUT_TOKENS } from '../../utils/context.js'
+} from '../../utils/attachments.ts'
+import { getGlobalConfig, getMemoryPath } from '../../utils/config.ts'
+import { COMPACT_MAX_OUTPUT_TOKENS } from '../../utils/context.ts'
 import {
   analyzeContext,
   tokenStatsToStatsigMetrics,
-} from '../../utils/contextAnalysis.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { createChildAbortController } from '../../utils/abortController.js'
-import { hasExactErrorMessage } from '../../utils/errors.js'
-import { cacheToObject } from '../../utils/fileStateCache.js'
+} from '../../utils/contextAnalysis.ts'
+import { logForDebugging } from '../../utils/debug.ts'
+import { createChildAbortController } from '../../utils/abortController.ts'
+import { hasExactErrorMessage } from '../../utils/errors.ts'
+import { cacheToObject } from '../../utils/fileStateCache.ts'
 import {
   type CacheSafeParams,
   runForkedAgent,
-} from '../../utils/forkedAgent.js'
+} from '../../utils/forkedAgent.ts'
 import {
   executePostCompactHooks,
   executePreCompactHooks,
-} from '../../utils/hooks.js'
-import { logError } from '../../utils/log.js'
-import { MEMORY_TYPE_VALUES } from '../../utils/memory/types.js'
+} from '../../utils/hooks.ts'
+import { logError } from '../../utils/log.ts'
+import { MEMORY_TYPE_VALUES } from '../../utils/memory/types.ts'
 import {
   createCompactBoundaryMessage,
   createUserMessage,
@@ -72,62 +72,62 @@ import {
   isCompactBoundaryMessage,
   normalizeMessagesForAPI,
   selectToolPairSafeMessageRange,
-} from '../../utils/messages.js'
-import { expandPath } from '../../utils/path.js'
-import { getPlan, getPlanFilePath } from '../../utils/plans.js'
-import { getProjectInstructionFilePaths } from '../../utils/projectInstructions.js'
+} from '../../utils/messages.ts'
+import { expandPath } from '../../utils/path.ts'
+import { getPlan, getPlanFilePath } from '../../utils/plans.ts'
+import { getProjectInstructionFilePaths } from '../../utils/projectInstructions.ts'
 import {
   isSessionActivityTrackingActive,
   sendSessionActivitySignal,
-} from '../../utils/sessionActivity.js'
-import { processSessionStartHooks } from '../../utils/sessionStart.js'
+} from '../../utils/sessionActivity.ts'
+import { processSessionStartHooks } from '../../utils/sessionStart.ts'
 import {
   getTranscriptPath,
   reAppendSessionMetadata,
-} from '../../utils/sessionStorage.js'
-import { sleep } from '../../utils/sleep.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
+} from '../../utils/sessionStorage.ts'
+import { sleep } from '../../utils/sleep.ts'
+import { jsonStringify } from '../../utils/slowOperations.ts'
 /* eslint-enable @typescript-eslint/no-require-imports */
-import { asSystemPrompt } from '../../utils/systemPromptType.js'
-import { getTaskOutputPath } from '../../utils/task/diskOutput.js'
+import { asSystemPrompt } from '../../utils/systemPromptType.ts'
+import { getTaskOutputPath } from '../../utils/task/diskOutput.ts'
 import {
   getTokenUsage,
   tokenCountFromLastAPIResponse,
   tokenCountWithEstimation,
-} from '../../utils/tokens.js'
+} from '../../utils/tokens.ts'
 import {
   extractDiscoveredToolNames,
   isToolSearchEnabled,
-} from '../../utils/toolSearch.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
-import { isAnthropicProvider } from '../../utils/betas.js'
-import { parseUserSpecifiedModel } from '../../utils/model/model.js'
-import { isGithubNativeAnthropicMode } from '../../utils/model/providers.js'
+} from '../../utils/toolSearch.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.ts'
+import { isAnthropicProvider } from '../../utils/betas.ts'
+import { parseUserSpecifiedModel } from '../../utils/model/model.ts'
+import { isGithubNativeAnthropicMode } from '../../utils/model/providers.ts'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../analytics/index.js'
+} from '../analytics/index.ts'
 import {
   getMaxOutputTokensForModel,
   queryModelWithStreaming,
-} from '../api/claude.js'
+} from '../api/claude.ts'
 import {
   getPromptTooLongTokenGap,
   PROMPT_TOO_LONG_ERROR_MESSAGE,
   startsWithApiErrorPrefix,
-} from '../api/errors.js'
-import { notifyCompaction } from '../api/promptCacheBreakDetection.js'
-import { getRetryDelay } from '../api/withRetry.js'
+} from '../api/errors.ts'
+import { notifyCompaction } from '../api/promptCacheBreakDetection.ts'
+import { getRetryDelay } from '../api/withRetry.ts'
 import {
   roughTokenCountEstimation,
   roughTokenCountEstimationForMessages,
-} from '../tokenEstimation.js'
-import { groupMessagesByApiRound } from './grouping.js'
+} from '../tokenEstimation.ts'
+import { groupMessagesByApiRound } from './grouping.ts'
 import {
   getCompactPrompt,
   getCompactUserSummaryMessage,
   getPartialCompactPrompt,
-} from './prompt.js'
+} from './prompt.ts'
 
 export const POST_COMPACT_MAX_FILES_TO_RESTORE = 5
 export const POST_COMPACT_TOKEN_BUDGET = 50_000

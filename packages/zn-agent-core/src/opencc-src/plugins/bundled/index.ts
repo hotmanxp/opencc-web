@@ -14,7 +14,7 @@
  * 2. Call that helper from initBuiltinPlugins()
  */
 
-import { registerKarpathyGuidelinesPlugin } from './karpathyGuidelines.js'
+import { registerKarpathyGuidelinesPlugin } from './karpathyGuidelines.ts'
 
 /**
  * Initialize built-in plugins. Called during CLI startup.

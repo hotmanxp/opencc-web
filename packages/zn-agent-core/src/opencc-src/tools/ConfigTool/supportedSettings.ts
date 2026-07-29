@@ -2,15 +2,15 @@ import { feature } from 'bun:bundle'
 import {
   getRemoteControlAtStartup,
   SHOW_CACHE_STATS_MODES,
-} from '../../utils/config.js'
+} from '../../utils/config.ts'
 import {
   EDITOR_MODES,
   NOTIFICATION_CHANNELS,
   TEAMMATE_MODES,
-} from '../../utils/configConstants.js'
-import { getModelOptions } from '../../utils/model/modelOptions.js'
-import { validateModel } from '../../utils/model/validateModel.js'
-import { THEME_NAMES, THEME_SETTINGS } from '../../utils/theme.js'
+} from '../../utils/configConstants.ts'
+import { getModelOptions } from '../../utils/model/modelOptions.ts'
+import { validateModel } from '../../utils/model/validateModel.ts'
+import { THEME_NAMES, THEME_SETTINGS } from '../../utils/theme.ts'
 
 /** AppState keys that can be synced for immediate UI effect */
 type SyncableAppStateKey = 'verbose' | 'mainLoopModel' | 'thinkingEnabled'

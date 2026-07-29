@@ -4,7 +4,7 @@ import {
   parseCustomHeadersEnv,
   parseProfileCustomHeadersInput,
   serializeProfileCustomHeaders,
-} from './providerCustomHeaders.js'
+} from './providerCustomHeaders.ts'
 
 describe('parseProfileCustomHeadersInput', () => {
   test('accepts semicolon and newline separated custom headers', () => {

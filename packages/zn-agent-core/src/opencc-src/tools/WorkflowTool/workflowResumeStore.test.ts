@@ -4,7 +4,7 @@ import {
   saveAgentResult,
   getCachedAgentResult,
   clearRunCache,
-} from './workflowResumeStore.js'
+} from './workflowResumeStore.ts'
 
 describe('workflowResumeStore', () => {
   it('returns cached result for matching (prompt, opts)', () => {

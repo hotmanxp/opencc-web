@@ -7,11 +7,11 @@ import {
   initOrama,
   getGlobalGraph,
   clearMemoryOnly
-} from './knowledgeGraph.js'
+} from './knowledgeGraph.ts'
 import { mkdtempSync, rmSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { getFsImplementation } from './fsOperations.js'
+import { getFsImplementation } from './fsOperations.ts'
 
 describe('KnowledgeGraph Phase 1 Stress & Edge Cases', () => {
   const originalConfigDir = process.env.CLAUDE_CONFIG_DIR
@@ -81,7 +81,7 @@ describe('KnowledgeGraph Phase 1 Stress & Edge Cases', () => {
   it('recovers from corrupted Orama file (Edge Case)', async () => {
     // 1. Create a valid DB
     await addGlobalEntity('type', 'valid', { val: '1' })
-    const { getOramaPersistencePath } = await import('./knowledgeGraph.js')
+    const { getOramaPersistencePath } = await import('./knowledgeGraph.ts')
     const oramaPath = getOramaPersistencePath(cwd)
     expect(existsSync(oramaPath)).toBe(true)
 

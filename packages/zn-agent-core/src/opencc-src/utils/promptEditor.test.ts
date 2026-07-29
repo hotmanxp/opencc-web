@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { resolveEditorCommand } from './promptEditor.js'
+import { resolveEditorCommand } from './promptEditor.ts'
 
 describe('resolveEditorCommand', () => {
   test('applies known overrides', () => {

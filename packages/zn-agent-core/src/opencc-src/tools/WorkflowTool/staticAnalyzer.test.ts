@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { analyzeScript } from './staticAnalyzer.js'
+import { analyzeScript } from './staticAnalyzer.ts'
 
 describe('analyzeScript', () => {
   it('returns empty phases for empty source', () => {

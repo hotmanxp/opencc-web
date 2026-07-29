@@ -1,17 +1,17 @@
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import React from 'react'
 import { z } from 'zod/v4'
-import { buildTool, type ToolDef } from '../../Tool.js'
+import { buildTool, type ToolDef } from '../../Tool.ts'
 import { spawnShellTask } from '../../tasks/LocalShellTask/LocalShellTask.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { exec } from '../../utils/Shell.js'
-import { getTaskOutputPath } from '../../utils/task/diskOutput.js'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { exec } from '../../utils/Shell.ts'
+import { getTaskOutputPath } from '../../utils/task/diskOutput.ts'
 import {
   bashToolHasPermission,
   matchWildcardPattern,
   permissionRuleExtractPrefix,
-} from '../BashTool/bashPermissions.js'
-import { parseForSecurity } from '../../utils/bash/ast.js'
+} from '../BashTool/bashPermissions.ts'
+import { parseForSecurity } from '../../utils/bash/ast.ts'
 
 export const MONITOR_TOOL_NAME = 'Monitor'
 

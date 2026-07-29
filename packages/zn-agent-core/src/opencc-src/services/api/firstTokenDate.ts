@@ -1,9 +1,9 @@
 import axios from 'axios'
-import { getOauthConfig } from '../../constants/oauth.js'
-import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
-import { getAuthHeaders } from '../../utils/http.js'
-import { logError } from '../../utils/log.js'
-import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
+import { getOauthConfig } from '../../constants/oauth.ts'
+import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.ts'
+import { getAuthHeaders } from '../../utils/http.ts'
+import { logError } from '../../utils/log.ts'
+import { getClaudeCodeUserAgent } from '../../utils/userAgent.ts'
 
 /**
  * Fetch the user's first OpenCC token date and store in config.

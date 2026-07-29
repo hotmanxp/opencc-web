@@ -1,13 +1,13 @@
-import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
+import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.ts'
 import memoize from 'lodash-es/memoize.js'
 import type { HookEvent } from 'src/entrypoints/agentSdkTypes.js'
-import { getRegisteredHooks } from '../../bootstrap/state.js'
+import { getRegisteredHooks } from '../../bootstrap/state.ts'
 import type { AppState } from '../../state/AppState.js'
 import {
   getAllHooks,
   type IndividualHookConfig,
   sortMatchersByPriority,
-} from './hooksSettings.js'
+} from './hooksSettings.ts'
 
 export type MatcherMetadata = {
   fieldToMatch: string

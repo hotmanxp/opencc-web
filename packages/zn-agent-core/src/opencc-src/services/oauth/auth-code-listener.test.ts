@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { afterEach, expect, test } from 'bun:test'
 
-import { AuthCodeListener } from './auth-code-listener.js'
+import { AuthCodeListener } from './auth-code-listener.ts'
 
 const listeners: AuthCodeListener[] = []
 

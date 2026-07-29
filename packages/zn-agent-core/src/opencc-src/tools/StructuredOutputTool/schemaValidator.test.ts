@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { validateStructuredOutput } from './schemaValidator.js'
+import { validateStructuredOutput } from './schemaValidator.ts'
 
 describe('validateStructuredOutput', () => {
   it('returns parsed object when input matches schema', () => {

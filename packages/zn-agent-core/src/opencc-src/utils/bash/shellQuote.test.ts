@@ -3,7 +3,7 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../../test/sharedMutationLock.js'
-import * as realLog from '../log.js'
+import * as realLog from '../log.ts'
 
 let importCounter = 0
 
@@ -14,7 +14,7 @@ beforeEach(async () => {
 async function importShellQuoteWithLogSpy(
   logErrorSpy: ReturnType<typeof mock<(error: Error) => void>>,
 ) {
-  mock.module('../log.js', () => ({
+  mock.module('../log.ts', () => ({
     ...realLog,
     logError: logErrorSpy,
   }))
@@ -25,7 +25,7 @@ async function importShellQuoteWithLogSpy(
 afterEach(() => {
   try {
     mock.restore()
-    mock.module('../log.js', () => realLog)
+    mock.module('../log.ts', () => realLog)
   } finally {
     releaseSharedMutationLock()
   }

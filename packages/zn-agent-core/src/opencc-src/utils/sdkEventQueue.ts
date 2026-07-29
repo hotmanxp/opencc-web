@@ -1,8 +1,8 @@
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
-import { getIsNonInteractiveSession, getSessionId } from '../bootstrap/state.js'
+import { getIsNonInteractiveSession, getSessionId } from '../bootstrap/state.ts'
 // @ts-ignore
-import type { SdkWorkflowProgress } from '../types/tools.js'
+import type { SdkWorkflowProgress } from '../types/tools.ts'
 
 type TaskStartedEvent = {
   type: 'system'

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { sealForVmBoundary, MAX_ARRAY_LEN } from './vmSealer.js'
+import { sealForVmBoundary, MAX_ARRAY_LEN } from './vmSealer.ts'
 
 describe('sealForVmBoundary', () => {
   it('passes through plain objects', () => {

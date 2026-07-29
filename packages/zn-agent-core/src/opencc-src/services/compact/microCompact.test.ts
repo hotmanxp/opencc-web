@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { describe, expect, test } from 'bun:test'
 
-import type { Message } from '../../types/message.js'
-import { createAssistantMessage, createUserMessage } from '../../utils/messages.js'
+import type { Message } from '../../types/message.ts'
+import { createAssistantMessage, createUserMessage } from '../../utils/messages.ts'
 
 // We test the exported collectCompactableToolIds behavior indirectly via
 // the public microcompactMessages + time-based path. But first we need to
@@ -10,7 +10,7 @@ import { createAssistantMessage, createUserMessage } from '../../utils/messages.
 // compactable alongside the built-in tool set.
 
 // Import internals we can test
-import { evaluateTimeBasedTrigger } from './microCompact.js'
+import { evaluateTimeBasedTrigger } from './microCompact.ts'
 
 /**
  * Helper: build a minimal assistant message with a tool_use block.
@@ -61,14 +61,14 @@ describe('microCompact MCP tool compaction', () => {
   // built-in and MCP tools are treated consistently.
 
   test('module exports load correctly', async () => {
-    const mod = await import('./microCompact.js')
+    const mod = await import('./microCompact.ts')
     expect(mod.microcompactMessages).toBeFunction()
     expect(mod.estimateMessageTokens).toBeFunction()
     expect(mod.evaluateTimeBasedTrigger).toBeFunction()
   })
 
   test('estimateMessageTokens counts MCP tool_use blocks', async () => {
-    const { estimateMessageTokens } = await import('./microCompact.js')
+    const { estimateMessageTokens } = await import('./microCompact.ts')
 
     const builtinMessages: Message[] = [
       assistantWithToolUse('Read', 'tool-builtin-1'),
@@ -93,7 +93,7 @@ describe('microCompact MCP tool compaction', () => {
   })
 
   test('microcompactMessages processes MCP tools without error', async () => {
-    const { microcompactMessages } = await import('./microCompact.js')
+    const { microcompactMessages } = await import('./microCompact.ts')
 
     const messages: Message[] = [
       assistantWithToolUse('mcp__slack__send_message', 'tool-mcp-2'),
@@ -110,7 +110,7 @@ describe('microCompact MCP tool compaction', () => {
   })
 
   test('microcompactMessages processes mixed built-in and MCP tools', async () => {
-    const { microcompactMessages } = await import('./microCompact.js')
+    const { microcompactMessages } = await import('./microCompact.ts')
 
     const messages: Message[] = [
       assistantWithToolUse('Read', 'tool-read-1'),
@@ -128,7 +128,7 @@ describe('microCompact MCP tool compaction', () => {
 
   test('time-based microcompact clears native toolUseResult for old compacted results', async () => {
     const { maybeTimeBasedMicrocompact, TIME_BASED_MC_CLEARED_MESSAGE } =
-      await import('./microCompact.js')
+      await import('./microCompact.ts')
     const oldAssistant = {
       ...assistantWithToolUse('Read', 'tool-read-old'),
       timestamp: new Date(Date.now() - 120 * 60_000).toISOString(),
@@ -179,7 +179,7 @@ describe('microCompact MCP tool compaction', () => {
 
 describe('estimateMessageTokens coverage', () => {
   test('counts tokens from string content user messages', async () => {
-    const { estimateMessageTokens } = await import('./microCompact.js')
+    const { estimateMessageTokens } = await import('./microCompact.ts')
 
     // Real user messages from the session can have string content (plain user prompt)
     const content =
@@ -193,7 +193,7 @@ describe('estimateMessageTokens coverage', () => {
   })
 
   test('counts tokens across all block types including tool_result and tool_use', async () => {
-    const { estimateMessageTokens } = await import('./microCompact.js')
+    const { estimateMessageTokens } = await import('./microCompact.ts')
 
     const msg = createUserMessage({
       content: [

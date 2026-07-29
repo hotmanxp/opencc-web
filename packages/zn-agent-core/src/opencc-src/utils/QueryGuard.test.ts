@@ -7,9 +7,9 @@ import {
   spyOn,
   test,
 } from 'bun:test'
-import { QueryGuard } from './QueryGuard.js'
-import type { QueryLifecycleHook } from './QueryGuard.js'
-import { QueryLifecycleOperationTracker } from './queryLifecycle.js'
+import { QueryGuard } from './QueryGuard.ts'
+import type { QueryLifecycleHook } from './QueryGuard.ts'
+import { QueryLifecycleOperationTracker } from './queryLifecycle.ts'
 
 // bun:test's `mock()` infers argument arity from the provided function; the
 // lifecycle hook below takes four arguments, so the default `() => {}` would

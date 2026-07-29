@@ -1,42 +1,42 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { AGENT_INSTRUCTIONS_FILE } from './product.js'
+import { AGENT_INSTRUCTIONS_FILE } from './product.ts'
 import { type as osType, version as osVersion, release as osRelease } from 'os'
-import { env } from '../utils/env.js'
-import { getIsGit } from '../utils/git.js'
-import { getCwd } from '../utils/cwd.js'
-import { getIsNonInteractiveSession } from '../bootstrap/state.js'
-import { getCurrentWorktreeSession } from '../utils/worktree.js'
-import { getSessionStartDate } from './common.js'
-import { getInitialSettings } from '../utils/settings/settings.js'
+import { env } from '../utils/env.ts'
+import { getIsGit } from '../utils/git.ts'
+import { getCwd } from '../utils/cwd.ts'
+import { getIsNonInteractiveSession } from '../bootstrap/state.ts'
+import { getCurrentWorktreeSession } from '../utils/worktree.ts'
+import { getSessionStartDate } from './common.ts'
+import { getInitialSettings } from '../utils/settings/settings.ts'
 import {
   AGENT_TOOL_NAME,
   VERIFICATION_AGENT_TYPE,
-} from '../tools/AgentTool/constants.js'
-import { FILE_WRITE_TOOL_NAME } from '../tools/FileWriteTool/prompt.js'
-import { FILE_READ_TOOL_NAME } from '../tools/FileReadTool/constants.js'
-import { FILE_EDIT_TOOL_NAME } from '../tools/FileEditTool/constants.js'
-import { TODO_WRITE_TOOL_NAME } from '../tools/TodoWriteTool/constants.js'
-import { TASK_CREATE_TOOL_NAME } from '../tools/TaskCreateTool/constants.js'
-import type { Tools } from '../Tool.js'
-import type { Command } from '../types/command.js'
-import { BASH_TOOL_NAME } from '../tools/BashTool/toolName.js'
+} from '../tools/AgentTool/constants.ts'
+import { FILE_WRITE_TOOL_NAME } from '../tools/FileWriteTool/prompt.ts'
+import { FILE_READ_TOOL_NAME } from '../tools/FileReadTool/constants.ts'
+import { FILE_EDIT_TOOL_NAME } from '../tools/FileEditTool/constants.ts'
+import { TODO_WRITE_TOOL_NAME } from '../tools/TodoWriteTool/constants.ts'
+import { TASK_CREATE_TOOL_NAME } from '../tools/TaskCreateTool/constants.ts'
+import type { Tools } from '../Tool.ts'
+import type { Command } from '../types/command.ts'
+import { BASH_TOOL_NAME } from '../tools/BashTool/toolName.ts'
 import {
   getCanonicalName,
   getMarketingNameForModel,
-} from '../utils/model/model.js'
+} from '../utils/model/model.ts'
 import { getSkillToolCommands } from 'src/commands.js'
-import { SKILL_TOOL_NAME } from '../tools/SkillTool/constants.js'
-import { getOutputStyleConfig } from './outputStyles.js'
-import { codegraphSection } from './codegraphSection.js'
-import { createSetTicketSection } from '../utils/prompts/sections/setTicketSection.js'
+import { SKILL_TOOL_NAME } from '../tools/SkillTool/constants.ts'
+import { getOutputStyleConfig } from './outputStyles.ts'
+import { codegraphSection } from './codegraphSection.ts'
+import { createSetTicketSection } from '../utils/prompts/sections/setTicketSection.ts'
 import type {
   MCPServerConnection,
   ConnectedMCPServer,
-} from '../services/mcp/types.js'
+} from '../services/mcp/types.ts'
 import { GLOB_TOOL_NAME } from 'src/tools/GlobTool/prompt.js'
 import { GREP_TOOL_NAME } from 'src/tools/GrepTool/prompt.js'
 import { hasEmbeddedSearchTools } from 'src/utils/embeddedTools.js'
-import { ASK_USER_QUESTION_TOOL_NAME } from '../tools/AskUserQuestionTool/prompt.js'
+import { ASK_USER_QUESTION_TOOL_NAME } from '../tools/AskUserQuestionTool/prompt.ts'
 import {
   EXPLORE_AGENT,
   EXPLORE_AGENT_MIN_QUERIES,
@@ -45,24 +45,24 @@ import { areExplorePlanAgentsEnabled } from 'src/tools/AgentTool/builtInAgents.j
 import {
   isScratchpadEnabled,
   getScratchpadDir,
-} from '../utils/permissions/filesystem.js'
-import { isEnvTruthy } from '../utils/envUtils.js'
-import { isReplModeEnabled } from '../tools/REPLTool/constants.js'
+} from '../utils/permissions/filesystem.ts'
+import { isEnvTruthy } from '../utils/envUtils.ts'
+import { isReplModeEnabled } from '../tools/REPLTool/constants.ts'
 import { feature } from 'bun:bundle'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
-import { shouldUseGlobalCacheScope } from '../utils/betas.js'
-import { isForkSubagentEnabled } from '../tools/AgentTool/forkSubagent.js'
+import { shouldUseGlobalCacheScope } from '../utils/betas.ts'
+import { isForkSubagentEnabled } from '../tools/AgentTool/forkSubagent.ts'
 import {
   systemPromptSection,
   DANGEROUS_uncachedSystemPromptSection,
   resolveSystemPromptSections,
-} from './systemPromptSections.js'
-import { SLEEP_TOOL_NAME } from '../tools/SleepTool/prompt.js'
-import { TICK_TAG } from './xml.js'
-import { logForDebugging } from '../utils/debug.js'
+} from './systemPromptSections.ts'
+import { SLEEP_TOOL_NAME } from '../tools/SleepTool/prompt.ts'
+import { TICK_TAG } from './xml.ts'
+import { logForDebugging } from '../utils/debug.ts'
 import { loadMemoryPrompt } from '../memdir/memdir.js'
-import { isUndercover } from '../utils/undercover.js'
-import { isMcpInstructionsDeltaEnabled } from '../utils/mcpInstructionsDelta.js'
+import { isUndercover } from '../utils/undercover.ts'
+import { isMcpInstructionsDeltaEnabled } from '../utils/mcpInstructionsDelta.ts'
 
 // Dead code elimination: conditional imports for feature-gated modules
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -111,8 +111,8 @@ const skillSearchFeatureCheck = feature('EXPERIMENTAL_SKILL_SEARCH')
       require('../services/skillSearch/featureCheck.js') as typeof import('../services/skillSearch/featureCheck.js'))
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
-import type { OutputStyleConfig } from './outputStyles.js'
-import { CYBER_RISK_INSTRUCTION } from './cyberRiskInstruction.js'
+import type { OutputStyleConfig } from './outputStyles.ts'
+import { CYBER_RISK_INSTRUCTION } from './cyberRiskInstruction.ts'
 
 export const CLAUDE_CODE_DOCS_MAP_URL =
   'https://code.claude.com/docs/en/claude_code_docs_map.md'

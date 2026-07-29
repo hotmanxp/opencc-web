@@ -4,8 +4,8 @@
  * Prunes context to keep only messages relevant to current task.
  */
 
-import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
-import type { Message } from '../types/message.js'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
+import type { Message } from '../types/message.ts'
 
 export interface PruningOptions {
   targetTokens: number

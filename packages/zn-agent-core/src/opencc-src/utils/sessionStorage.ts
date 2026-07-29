@@ -30,18 +30,18 @@ import {
   getSessionProjectDir,
   isSessionPersistenceDisabled,
   switchSession,
-} from '../bootstrap/state.js'
-import { COMMAND_NAME_TAG, TICK_TAG } from '../constants/xml.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
-import * as sessionIngress from '../services/api/sessionIngress.js'
-import { REPL_TOOL_NAME } from '../tools/REPLTool/constants.js'
+} from '../bootstrap/state.ts'
+import { COMMAND_NAME_TAG, TICK_TAG } from '../constants/xml.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.ts'
+import * as sessionIngress from '../services/api/sessionIngress.ts'
+import { REPL_TOOL_NAME } from '../tools/REPLTool/constants.ts'
 import {
   type AgentId,
   asAgentId,
   asSessionId,
   type SessionId,
-} from '../types/ids.js'
-import type { AttributionSnapshotMessage } from '../types/logs.js'
+} from '../types/ids.ts'
+import type { AttributionSnapshotMessage } from '../types/logs.ts'
 import {
   type ContentReplacementEntry,
   type ContextCollapseCommitEntry,
@@ -54,7 +54,7 @@ import {
   type SessionBranchEntry,
   sortLogs,
   type TranscriptMessage,
-} from '../types/logs.js'
+} from '../types/logs.ts'
 import type {
   AssistantMessage,
   AttachmentMessage,
@@ -62,26 +62,26 @@ import type {
   SystemCompactBoundaryMessage,
   SystemMessage,
   UserMessage,
-} from '../types/message.js'
-import type { QueueOperationMessage } from '../types/messageQueueTypes.js'
-import { uniq } from './array.js'
-import { registerCleanup } from './cleanupRegistry.js'
-import { updateSessionName } from './concurrentSessions.js'
-import { getCwd } from './cwd.js'
-import { logForDebugging } from './debug.js'
-import { logForDiagnosticsNoPII } from './diagLogs.js'
-import { getClaudeConfigHomeDir, getProjectsDir, isEnvTruthy } from './envUtils.js'
-import { isFsInaccessible } from './errors.js'
-import type { FileHistorySnapshot } from './fileHistory.js'
-import { formatFileSize } from './format.js'
-import { getFsImplementation } from './fsOperations.js'
-import { getWorktreePaths } from './getWorktreePaths.js'
-import { getBranch } from './git.js'
-import { gracefulShutdownSync, isShuttingDown } from './gracefulShutdown.js'
-import { parseJSONL } from './json.js'
-import { logError } from './log.js'
-import { extractTag, isCompactBoundaryMessage } from './messages.js'
-import { sanitizePath } from './path.js'
+} from '../types/message.ts'
+import type { QueueOperationMessage } from '../types/messageQueueTypes.ts'
+import { uniq } from './array.ts'
+import { registerCleanup } from './cleanupRegistry.ts'
+import { updateSessionName } from './concurrentSessions.ts'
+import { getCwd } from './cwd.ts'
+import { logForDebugging } from './debug.ts'
+import { logForDiagnosticsNoPII } from './diagLogs.ts'
+import { getClaudeConfigHomeDir, getProjectsDir, isEnvTruthy } from './envUtils.ts'
+import { isFsInaccessible } from './errors.ts'
+import type { FileHistorySnapshot } from './fileHistory.ts'
+import { formatFileSize } from './format.ts'
+import { getFsImplementation } from './fsOperations.ts'
+import { getWorktreePaths } from './getWorktreePaths.ts'
+import { getBranch } from './git.ts'
+import { gracefulShutdownSync, isShuttingDown } from './gracefulShutdown.ts'
+import { parseJSONL } from './json.ts'
+import { logError } from './log.ts'
+import { extractTag, isCompactBoundaryMessage } from './messages.ts'
+import { sanitizePath } from './path.ts'
 import {
   extractJsonStringField,
   extractLastJsonStringField,
@@ -89,11 +89,11 @@ import {
   readHeadAndTail,
   readTranscriptForLoad,
   SKIP_PRECOMPACT_THRESHOLD,
-} from './sessionStoragePortable.js'
-import { getSettings_DEPRECATED } from './settings/settings.js'
-import { jsonParse, jsonStringify } from './slowOperations.js'
-import type { ContentReplacementRecord } from './toolResultStorage.js'
-import { validateUuid } from './uuid.js'
+} from './sessionStoragePortable.ts'
+import { getSettings_DEPRECATED } from './settings/settings.ts'
+import { jsonParse, jsonStringify } from './slowOperations.ts'
+import type { ContentReplacementRecord } from './toolResultStorage.ts'
+import { validateUuid } from './uuid.ts'
 
 // Cache MACRO.VERSION at module level to work around bun --define bug in async contexts
 // See: https://github.com/oven-sh/bun/issues/26168

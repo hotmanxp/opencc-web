@@ -5,12 +5,12 @@ import {
   isAutoMemoryEnabled,
   isAutoMemPath,
 } from '../memdir/paths.js'
-import { isAgentMemoryPath } from '../tools/AgentTool/agentMemory.js'
-import { getClaudeConfigHomeDir } from './envUtils.js'
+import { isAgentMemoryPath } from '../tools/AgentTool/agentMemory.ts'
+import { getClaudeConfigHomeDir } from './envUtils.ts'
 import {
   posixPathToWindowsPath,
   windowsPathToPosixPath,
-} from './windowsPaths.js'
+} from './windowsPaths.ts'
 
 import * as teamMemPaths from '../memdir/teamMemPaths.js'
 

@@ -1,13 +1,13 @@
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
-import * as realGrowthbook from '../../services/analytics/growthbook.js'
-import { getEmptyToolPermissionContext } from '../../Tool.js'
+import * as realGrowthbook from '../../services/analytics/growthbook.ts'
+import { getEmptyToolPermissionContext } from '../../Tool.ts'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../../test/sharedMutationLock.js'
-import * as realShell from '../../utils/Shell.js'
-import type { ExecResult, ShellCommand } from '../../utils/ShellCommand.js'
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
+import * as realShell from '../../utils/Shell.ts'
+import type { ExecResult, ShellCommand } from '../../utils/ShellCommand.ts'
+import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.ts'
 
 const originalSandboxMethods = {
   isSandboxingEnabled: SandboxManager.isSandboxingEnabled,
@@ -106,7 +106,7 @@ async function importBashToolWithExecutionMocks() {
     },
   )
 
-  mock.module('../../utils/Shell.js', () => ({
+  mock.module('../../utils/Shell.ts', () => ({
     ...realShell,
     exec: execMock,
   }))
@@ -114,7 +114,7 @@ async function importBashToolWithExecutionMocks() {
     ...realShell,
     exec: execMock,
   }))
-  mock.module('../../services/analytics/growthbook.js', () => ({
+  mock.module('../../services/analytics/growthbook.ts', () => ({
     ...realGrowthbook,
     getFeatureValue_CACHED_MAY_BE_STALE,
   }))
@@ -136,7 +136,7 @@ async function importSandboxPresentationWithMocks() {
     },
   )
 
-  mock.module('../../services/analytics/growthbook.js', () => ({
+  mock.module('../../services/analytics/growthbook.ts', () => ({
     ...realGrowthbook,
     getFeatureValue_CACHED_MAY_BE_STALE,
   }))
@@ -148,7 +148,7 @@ async function importSandboxPresentationWithMocks() {
   return import(`./shouldUseSandbox.js?presentationTest=${importCounter++}`)
 }
 
-// NOTE: This test installs a mock.module factory for '../../utils/Shell.js'
+// NOTE: This test installs a mock.module factory for '../../utils/Shell.ts'
 // and 'src/utils/Shell.js' that replaces Shell.exec. ESM live bindings mean
 // the mock persists for any subsequent import of Shell.js in the same test
 // process, which breaks downstream tests in BashTool.errorOutput.test.ts

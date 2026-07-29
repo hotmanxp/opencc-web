@@ -1,13 +1,13 @@
 import { describe, expect, test } from 'bun:test'
-import type { DiagnosticInfo, InstallationType } from './doctorDiagnostic.js'
-import type { PackageManager } from './nativeInstaller/packageManagers.js'
-import type { APIProvider } from './model/providers.js'
+import type { DiagnosticInfo, InstallationType } from './doctorDiagnostic.ts'
+import type { PackageManager } from './nativeInstaller/packageManagers.ts'
+import type { APIProvider } from './model/providers.ts'
 import {
   isThirdPartyBuildBlockedFor,
   planUpdate,
   resolveUpdateStrategy,
   type UpdateStrategyDeps,
-} from './updateStrategy.js'
+} from './updateStrategy.ts'
 
 describe('isThirdPartyBuildBlockedFor', () => {
   const UPSTREAM = '@anthropic-ai/claude-code'

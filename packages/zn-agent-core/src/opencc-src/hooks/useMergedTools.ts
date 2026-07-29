@@ -1,9 +1,9 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 import { useMemo } from 'react'
-import type { Tools, ToolPermissionContext } from '../Tool.js'
-import { assembleToolPool } from '../tools.js'
+import type { Tools, ToolPermissionContext } from '../Tool.ts'
+import { assembleToolPool } from '../tools.ts'
 import { useAppState } from '../state/AppState.js'
-import { mergeAndFilterTools } from '../utils/toolPool.js'
+import { mergeAndFilterTools } from '../utils/toolPool.ts'
 
 /**
  * React hook that assembles the full tool pool for the REPL.

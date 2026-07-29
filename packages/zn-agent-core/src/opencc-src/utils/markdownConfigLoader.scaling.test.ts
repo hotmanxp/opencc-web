@@ -6,7 +6,7 @@ import {
   clearOversizedMarkdownSkipsForTesting,
   getOversizedMarkdownSkips,
   loadMarkdownFilesForSubdir,
-} from './markdownConfigLoader.js'
+} from './markdownConfigLoader.ts'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,

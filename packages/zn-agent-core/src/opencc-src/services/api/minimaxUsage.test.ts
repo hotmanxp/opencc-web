@@ -6,7 +6,7 @@ import {
   buildMiniMaxUsageRows,
   getMiniMaxUsageUrls,
   normalizeMiniMaxUsagePayload,
-} from './minimaxUsage.js'
+} from './minimaxUsage.ts'
 
 const fixture = (name: string) =>
   Bun.file(resolve(import.meta.dir, '__fixtures__', name))

@@ -3,7 +3,7 @@ import {
   findWhitespaceAgnosticMatch,
   adjustNewStringIndentation,
   getSnippetForTwoFileDiff,
-} from './utils.js'
+} from './utils.ts'
 
 describe('findWhitespaceAgnosticMatch', () => {
   test('returns exact match for simple string', () => {

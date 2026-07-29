@@ -1,10 +1,10 @@
 import { describe, expect, test } from 'bun:test'
-import { DEFAULT_QUERY_HARD_MAX_MS } from './QueryGuard.js'
+import { DEFAULT_QUERY_HARD_MAX_MS } from './QueryGuard.ts'
 import {
   getDefaultBashTimeoutMs,
   getEffectiveBashTimeoutMs,
   getMaxBashTimeoutMs,
-} from './timeouts.js'
+} from './timeouts.ts'
 
 describe('bash timeout helpers', () => {
   test('effective timeout clamps explicit values to the configured max', () => {

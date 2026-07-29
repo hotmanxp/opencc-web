@@ -2,14 +2,14 @@
 import * as path from 'path'
 import { pathToFileURL } from 'url'
 import type { InitializeParams } from 'vscode-languageserver-protocol'
-import { getCwd } from '../../utils/cwd.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { errorMessage } from '../../utils/errors.js'
-import { logError } from '../../utils/log.js'
-import { sleep } from '../../utils/sleep.js'
-import type { createLSPClient as createLSPClientType } from './LSPClient.js'
+import { getCwd } from '../../utils/cwd.ts'
+import { logForDebugging } from '../../utils/debug.ts'
+import { errorMessage } from '../../utils/errors.ts'
+import { logError } from '../../utils/log.ts'
+import { sleep } from '../../utils/sleep.ts'
+import type { createLSPClient as createLSPClientType } from './LSPClient.ts'
 // @ts-ignore
-import type { LspServerState, ScopedLspServerConfig } from './types.js'
+import type { LspServerState, ScopedLspServerConfig } from './types.ts'
 
 /**
  * LSP error code for "content modified" - indicates the server's state changed
@@ -109,7 +109,7 @@ export function createLSPServerInstance(
   // vscode-jsonrpc (~129KB) only loads when an LSP server is actually
   // instantiated, not when the static import chain reaches this module.
   // eslint-disable-next-line @typescript-eslint/no-require-imports
-  const { createLSPClient } = require('./LSPClient.js') as {
+  const { createLSPClient } = require('./LSPClient.ts') as {
     createLSPClient: typeof createLSPClientType
   }
   let state: LspServerState = 'stopped'

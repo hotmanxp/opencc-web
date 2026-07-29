@@ -1,5 +1,5 @@
 import { describe, test, expect, beforeEach, afterEach } from 'bun:test'
-import { isAgentViewEnabled } from './agentView.js'
+import { isAgentViewEnabled } from './agentView.ts'
 
 describe('isAgentViewEnabled (default-off; opt-in via env or setting)', () => {
   let origEnv: string | undefined

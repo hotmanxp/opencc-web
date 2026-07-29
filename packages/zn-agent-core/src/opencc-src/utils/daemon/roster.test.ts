@@ -35,8 +35,8 @@ import {
   saveRoster,
   updateRoster,
   type Roster,
-} from './roster.js'
-import {JobShortIdSchema} from './protocol.js'
+} from './roster.ts'
+import {JobShortIdSchema} from './protocol.ts'
 
 // ---------- Helpers ----------
 

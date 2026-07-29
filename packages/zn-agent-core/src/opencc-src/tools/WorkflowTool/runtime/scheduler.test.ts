@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { Scheduler } from './scheduler.js'
+import { Scheduler } from './scheduler.ts'
 
 describe('Scheduler', () => {
   test('runs tasks concurrently up to maxConcurrent', async () => {

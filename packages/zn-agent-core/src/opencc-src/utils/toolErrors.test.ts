@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { describe, expect, test } from 'bun:test'
-import { ShellError, AbortError } from './errors.js'
-import { formatError, getErrorParts } from './toolErrors.js'
+import { ShellError, AbortError } from './errors.ts'
+import { formatError, getErrorParts } from './toolErrors.ts'
 
 // =============================================================================
 // getErrorParts — what the model sees when a tool fails

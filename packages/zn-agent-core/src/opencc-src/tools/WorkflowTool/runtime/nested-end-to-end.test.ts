@@ -3,7 +3,7 @@ import { Worker } from 'node:worker_threads'
 import { mkdtempSync, readFileSync, writeFileSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { buildWorkerScript } from './workerScript.js'
+import { buildWorkerScript } from './workerScript.ts'
 
 /**
  * End-to-end test for the workflow() RPC path: parent workflow -> bridge

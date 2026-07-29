@@ -13,16 +13,16 @@ import {
   getEmptyToolPermissionContext,
   type ToolPermissionContext,
   type Tool,
-} from '../../Tool.js'
-import type { MCPServerConnection, ScopedMcpServerConfig } from '../../services/mcp/types.js'
-import type { AdditionalWorkingDirectory, PermissionDecision } from '../../types/permissions.js'
-import { connectToServer, fetchToolsForClient } from '../../services/mcp/client.js'
+} from '../../Tool.ts'
+import type { MCPServerConnection, ScopedMcpServerConfig } from '../../services/mcp/types.ts'
+import type { AdditionalWorkingDirectory, PermissionDecision } from '../../types/permissions.ts'
+import { connectToServer, fetchToolsForClient } from '../../services/mcp/client.ts'
 import type {
   QueryPermissionMode,
   CanUseToolCallback,
   SDKPermissionRequestMessage,
   SDKPermissionTimeoutMessage,
-} from './shared.js'
+} from './shared.ts'
 
 // ============================================================================
 // Constants

@@ -1,18 +1,18 @@
-import { getDirectConnectServerUrl, getSessionId } from '../bootstrap/state.js'
+import { getDirectConnectServerUrl, getSessionId } from '../bootstrap/state.ts'
 import { stringWidth } from '../ink/stringWidth.js'
-import type { LogOption } from '../types/logs.js'
-import { getSubscriptionName, isClaudeAISubscriber } from './auth.js'
-import { getCwd } from './cwd.js'
-import { getDisplayPath } from './file.js'
+import type { LogOption } from '../types/logs.ts'
+import { getSubscriptionName, isClaudeAISubscriber } from './auth.ts'
+import { getCwd } from './cwd.ts'
+import { getDisplayPath } from './file.ts'
 import {
   truncate,
   truncateToWidth,
   truncateToWidthNoEllipsis,
-} from './format.js'
-import { getStoredChangelogFromMemory, parseChangelog } from './releaseNotes.js'
+} from './format.ts'
+import { getStoredChangelogFromMemory, parseChangelog } from './releaseNotes.ts'
 import { gt } from './semver.js'
-import { loadMessageLogs } from './sessionStorage.js'
-import { getInitialSettings } from './settings/settings.js'
+import { loadMessageLogs } from './sessionStorage.ts'
+import { getInitialSettings } from './settings/settings.ts'
 
 // Layout constants
 const MAX_LEFT_WIDTH = 50

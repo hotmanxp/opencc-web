@@ -4,7 +4,7 @@ import { afterEach, expect, test } from 'bun:test'
 import {
   getAdditionalModelOptionsCacheScope,
   isLocalProviderUrl,
-} from './providerConfig.js'
+} from './providerConfig.ts'
 
 const originalEnv = {
   CLAUDE_CODE_USE_OPENAI: process.env.CLAUDE_CODE_USE_OPENAI,

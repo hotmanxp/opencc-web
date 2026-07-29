@@ -8,7 +8,7 @@ import {
   isQueryLevelAbort,
   normalizeAbortReason,
   shouldCreateUserInterruptionMessage,
-} from './abortReasons.js'
+} from './abortReasons.ts'
 
 describe('abort reason normalization', () => {
   test('normalizes known query and user abort reasons', () => {

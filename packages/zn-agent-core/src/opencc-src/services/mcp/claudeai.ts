@@ -10,9 +10,9 @@ import { getGlobalConfig, saveGlobalConfig } from 'src/utils/config.js'
 import { logForDebugging } from 'src/utils/debug.js'
 import { isEnvDefinedFalsy } from 'src/utils/envUtils.js'
 import { getAPIProvider } from 'src/utils/model/providers.js'
-import { clearMcpAuthCache } from './client.js'
-import { normalizeNameForMCP } from './normalization.js'
-import type { ScopedMcpServerConfig } from './types.js'
+import { clearMcpAuthCache } from './client.ts'
+import { normalizeNameForMCP } from './normalization.ts'
+import type { ScopedMcpServerConfig } from './types.ts'
 
 type ClaudeAIMcpServer = {
   type: 'mcp_server'

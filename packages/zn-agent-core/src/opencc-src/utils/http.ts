@@ -3,16 +3,16 @@
  */
 
 import axios from 'axios'
-import { OAUTH_BETA_HEADER } from '../constants/oauth.js'
+import { OAUTH_BETA_HEADER } from '../constants/oauth.ts'
 import {
   getAnthropicApiKey,
   getClaudeAIOAuthTokens,
   handleOAuth401Error,
   isClaudeAISubscriber,
-} from './auth.js'
-import { getAPIProvider } from './model/providers.js'
-import { getClaudeCodeUserAgent } from './userAgent.js'
-import { getWorkload } from './workloadContext.js'
+} from './auth.ts'
+import { getAPIProvider } from './model/providers.ts'
+import { getClaudeCodeUserAgent } from './userAgent.ts'
+import { getWorkload } from './workloadContext.ts'
 
 // WARNING: We rely on `claude-cli` in the user agent for log filtering.
 // Please do NOT change this without making sure that logging also gets updated!

@@ -1,11 +1,11 @@
 import { useEffect, useSyncExternalStore } from 'react'
-import type { QueuedCommand } from '../types/textInputTypes.js'
+import type { QueuedCommand } from '../types/textInputTypes.ts'
 import {
   getCommandQueueSnapshot,
   subscribeToCommandQueue,
-} from '../utils/messageQueueManager.js'
-import type { QueryGuard } from '../utils/QueryGuard.js'
-import { processQueueIfReady } from '../utils/queueProcessor.js'
+} from '../utils/messageQueueManager.ts'
+import type { QueryGuard } from '../utils/QueryGuard.ts'
+import { processQueueIfReady } from '../utils/queueProcessor.ts'
 
 type UseQueueProcessorParams = {
   executeQueuedInput: (commands: QueuedCommand[]) => Promise<void>

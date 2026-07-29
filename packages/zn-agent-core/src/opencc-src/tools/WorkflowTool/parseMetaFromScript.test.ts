@@ -1,6 +1,6 @@
 // src/tools/WorkflowTool/parseMetaFromScript.test.ts
 import { describe, expect, it } from 'bun:test'
-import { parseMetaFromScript } from './parseMetaFromScript.js'
+import { parseMetaFromScript } from './parseMetaFromScript.ts'
 
 describe('parseMetaFromScript', () => {
  it('parses a valid export const meta = {...} as first statement', () => {

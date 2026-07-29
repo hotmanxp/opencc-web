@@ -9,8 +9,8 @@
 // Extracted from WorkflowTool.ts so the wiring can be unit-tested
 // without running a real Worker thread.
 
-import type { LocalSpawner } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js'
-import type { ToolCallRecord } from './types.js'
+import type { LocalSpawner } from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.ts'
+import type { ToolCallRecord } from './types.ts'
 
 // Loose shape of `runAgent` (it's @ts-nocheck so we re-declare the
 // surface we use). Lets us pass `toolUseContext` / `canUseTool` etc.
@@ -41,10 +41,10 @@ export type RealSpawnerDeps = {
   createUserMessage: CreateUserMessageFn | null
 }
 
-import { findFirstBalancedJsonValue } from '../StructuredOutputTool/textJsonExtractor.js'
+import { findFirstBalancedJsonValue } from '../StructuredOutputTool/textJsonExtractor.ts'
 
 // Re-export so existing callers of
-// `import { findFirstBalancedJsonValue } from './realSpawner.js'` keep
+// `import { findFirstBalancedJsonValue } from './realSpawner.ts'` keep
 // working without a second import path.
 export { findFirstBalancedJsonValue }
 

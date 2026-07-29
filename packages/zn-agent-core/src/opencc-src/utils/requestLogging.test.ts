@@ -4,7 +4,7 @@ import {
   createCorrelationId,
   logApiCallStart,
   logApiCallEnd,
-} from './requestLogging.js'
+} from './requestLogging.ts'
 
 describe('requestLogging', () => {
   describe('createCorrelationId', () => {

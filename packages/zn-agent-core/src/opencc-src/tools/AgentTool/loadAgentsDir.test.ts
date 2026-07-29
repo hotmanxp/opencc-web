@@ -5,8 +5,8 @@ import { dirname, join } from 'path'
 import {
   clearAgentDefinitionsCache,
   getAgentDefinitionsWithOverrides,
-} from './loadAgentsDir.js'
-import { loadMarkdownFilesForSubdir } from '../../utils/markdownConfigLoader.js'
+} from './loadAgentsDir.ts'
+import { loadMarkdownFilesForSubdir } from '../../utils/markdownConfigLoader.ts'
 
 const originalEnv = {
   CLAUDE_CONFIG_DIR: process.env.CLAUDE_CONFIG_DIR,

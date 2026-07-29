@@ -4,7 +4,7 @@ import {
   extractAtMentionedFiles,
   extractMcpResourceMentions,
   shouldIncludeSkillListingAttachment,
-} from './attachments.js'
+} from './attachments.ts'
 
 // Contract tests for the two @-mention extractors.
 //

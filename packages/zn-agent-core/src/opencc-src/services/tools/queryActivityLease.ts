@@ -1,7 +1,7 @@
-import type { QueryGuardLeaseInput } from '../../utils/QueryGuard.js'
-import { getEffectiveBashTimeoutMs } from '../../utils/timeouts.js'
-import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
-import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.js'
+import type { QueryGuardLeaseInput } from '../../utils/QueryGuard.ts'
+import { getEffectiveBashTimeoutMs } from '../../utils/timeouts.ts'
+import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.ts'
+import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.ts'
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)

@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { expandEnvVarsInString } from './envExpansion.js'
+import { expandEnvVarsInString } from './envExpansion.ts'
 
 describe('expandEnvVarsInString', () => {
   const saved: Record<string, string | undefined> = {}

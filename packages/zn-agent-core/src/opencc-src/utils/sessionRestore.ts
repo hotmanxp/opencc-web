@@ -8,49 +8,49 @@ import {
   setMainThreadAgentType,
   setOriginalCwd,
   switchSession,
-} from '../bootstrap/state.js'
-import { clearSystemPromptSections } from '../constants/systemPromptSections.js'
-import { restoreCostStateForSession } from '../cost-tracker.js'
+} from '../bootstrap/state.ts'
+import { clearSystemPromptSections } from '../constants/systemPromptSections.ts'
+import { restoreCostStateForSession } from '../cost-tracker.ts'
 import type { AppState } from '../state/AppState.js'
-import type { AgentColorName } from '../tools/AgentTool/agentColorManager.js'
+import type { AgentColorName } from '../tools/AgentTool/agentColorManager.ts'
 import {
   type AgentDefinition,
   type AgentDefinitionsResult,
   getActiveAgentsFromList,
   getAgentDefinitionsWithOverrides,
-} from '../tools/AgentTool/loadAgentsDir.js'
-import { TODO_WRITE_TOOL_NAME } from '../tools/TodoWriteTool/constants.js'
-import { asSessionId } from '../types/ids.js'
+} from '../tools/AgentTool/loadAgentsDir.ts'
+import { TODO_WRITE_TOOL_NAME } from '../tools/TodoWriteTool/constants.ts'
+import { asSessionId } from '../types/ids.ts'
 import type {
   AttributionSnapshotMessage,
   ContextCollapseCommitEntry,
   ContextCollapseSnapshotEntry,
   PersistedWorktreeSession,
-} from '../types/logs.js'
-import type { Message } from '../types/message.js'
-import { renameRecordingForSession } from './asciicast.js'
-import { clearMemoryFileCaches } from './claudemd.js'
+} from '../types/logs.ts'
+import type { Message } from '../types/message.ts'
+import { renameRecordingForSession } from './asciicast.ts'
+import { clearMemoryFileCaches } from './claudemd.ts'
 import {
   type AttributionState,
   attributionRestoreStateFromLog,
   restoreAttributionStateFromSnapshots,
-} from './commitAttribution.js'
-import { updateSessionName } from './concurrentSessions.js'
-import { getCwd } from './cwd.js'
-import { logForDebugging } from './debug.js'
-import type { FileHistorySnapshot } from './fileHistory.js'
-import { fileHistoryRestoreStateFromLog } from './fileHistory.js'
-import { createSystemMessage } from './messages.js'
-import { parseUserSpecifiedModel } from './model/model.js'
-import { getPlansDirectory } from './plans.js'
+} from './commitAttribution.ts'
+import { updateSessionName } from './concurrentSessions.ts'
+import { getCwd } from './cwd.ts'
+import { logForDebugging } from './debug.ts'
+import type { FileHistorySnapshot } from './fileHistory.ts'
+import { fileHistoryRestoreStateFromLog } from './fileHistory.ts'
+import { createSystemMessage } from './messages.ts'
+import { parseUserSpecifiedModel } from './model/model.ts'
+import { getPlansDirectory } from './plans.ts'
 import {
   getActiveGoalFromTranscript,
   GOAL_HOOK_MATCHER,
   GOAL_HOOK_TIMEOUT_S,
 } from '../services/goal/hooks.js'
 import { createActiveGoal } from '../services/goal/activeGoal.js'
-import { addSessionHook } from './hooks/sessionHooks.js'
-import { setCwd } from './Shell.js'
+import { addSessionHook } from './hooks/sessionHooks.ts'
+import { setCwd } from './Shell.ts'
 import {
   adoptResumedSessionFile,
   recordContentReplacement,
@@ -58,18 +58,18 @@ import {
   restoreSessionMetadata,
   saveMode,
   saveWorktreeState,
-} from './sessionStorage.js'
-import { isTodoV2Enabled } from './tasks.js'
-import type { TodoList } from './todo/types.js'
-import { TodoListSchema } from './todo/types.js'
+} from './sessionStorage.ts'
+import { isTodoV2Enabled } from './tasks.ts'
+import type { TodoList } from './todo/types.ts'
+import { TodoListSchema } from './todo/types.ts'
 import {
   filterContentReplacementsForMessages,
   type ContentReplacementRecord,
-} from './toolResultStorage.js'
+} from './toolResultStorage.ts'
 import {
   getCurrentWorktreeSession,
   restoreWorktreeSession,
-} from './worktree.js'
+} from './worktree.ts'
 
 type ResumeResult = {
   messages?: Message[]

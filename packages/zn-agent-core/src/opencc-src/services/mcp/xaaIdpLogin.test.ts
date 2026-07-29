@@ -4,7 +4,7 @@ import test from 'node:test'
 import {
   shouldCompleteXaaIdpCallback,
   validateXaaIdpCallbackParams,
-} from './xaaIdpCallback.js'
+} from './xaaIdpCallback.ts'
 
 test('XAA IdP callback rejects error parameters before state validation can be bypassed', () => {
   const result = validateXaaIdpCallbackParams(

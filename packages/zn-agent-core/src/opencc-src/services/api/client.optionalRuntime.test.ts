@@ -3,7 +3,7 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../../test/sharedMutationLock.js'
-import * as optionalRuntimeModule from '../../utils/optionalRuntimeModule.js'
+import * as optionalRuntimeModule from '../../utils/optionalRuntimeModule.ts'
 
 const originalEnv = { ...process.env }
 

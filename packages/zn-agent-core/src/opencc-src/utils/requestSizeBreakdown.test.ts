@@ -1,9 +1,9 @@
 import { describe, expect, test } from 'bun:test'
-import type { ContextData } from './analyzeContext.js'
+import type { ContextData } from './analyzeContext.ts'
 import {
   createRequestSizeReport,
   formatRequestSizeReport,
-} from './requestSizeBreakdown.js'
+} from './requestSizeBreakdown.ts'
 
 function makeContextData(overrides: Partial<ContextData> = {}): ContextData {
   return {

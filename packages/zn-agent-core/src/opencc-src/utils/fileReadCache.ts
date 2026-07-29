@@ -1,5 +1,5 @@
-import { detectFileEncoding } from './file.js'
-import { getFsImplementation } from './fsOperations.js'
+import { detectFileEncoding } from './file.ts'
+import { getFsImplementation } from './fsOperations.ts'
 
 type CachedFileData = {
   content: string

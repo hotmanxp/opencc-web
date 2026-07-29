@@ -7,7 +7,7 @@ import {
   isEmptyMessageText,
   stripPromptXMLTags,
   textForResubmit,
-} from './content.js'
+} from './content.ts'
 
 function userMessage(content: string) {
   return {

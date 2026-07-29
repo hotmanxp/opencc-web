@@ -2,7 +2,7 @@ import { describe, it, expect } from 'bun:test'
 import {
   StructuredOutputTool,
   STRUCTURED_OUTPUT_TOOL_NAME,
-} from './StructuredOutputTool.js'
+} from './StructuredOutputTool.ts'
 
 describe('StructuredOutputTool', () => {
   it('has the canonical tool name', () => {

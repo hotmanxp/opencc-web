@@ -1,4 +1,4 @@
-import type { ModelName } from './model.js'
+import type { ModelName } from './model.ts'
 
 export type ModelConfig = {
   firstParty: ModelName

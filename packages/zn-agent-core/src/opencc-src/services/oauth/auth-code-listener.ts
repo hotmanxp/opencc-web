@@ -2,9 +2,9 @@ import type { IncomingMessage, ServerResponse } from 'http'
 import { createServer, type Server } from 'http'
 import type { AddressInfo } from 'net'
 import { logEvent } from 'src/services/analytics/index.js'
-import { getOauthConfig } from '../../constants/oauth.js'
-import { logError } from '../../utils/log.js'
-import { shouldUseClaudeAIAuth } from './client.js'
+import { getOauthConfig } from '../../constants/oauth.ts'
+import { logError } from '../../utils/log.ts'
+import { shouldUseClaudeAIAuth } from './client.ts'
 
 /**
  * Temporary localhost HTTP server that listens for OAuth authorization code redirects.

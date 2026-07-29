@@ -7,13 +7,13 @@ import {
   getOriginalCwd,
   setAllowedSettingSources,
   setOriginalCwd,
-} from '../../bootstrap/state.js'
-import { SETTING_SOURCES } from '../../utils/settings/constants.js'
-import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
+} from '../../bootstrap/state.ts'
+import { SETTING_SOURCES } from '../../utils/settings/constants.ts'
+import { resetSettingsCache } from '../../utils/settings/settingsCache.ts'
 import {
   bashCommandIsSafe_DEPRECATED,
   stripSafeHeredocSubstitutions,
-} from './bashSecurity.js'
+} from './bashSecurity.ts'
 
 async function withProjectSettings(
   settings: Record<string, unknown>,

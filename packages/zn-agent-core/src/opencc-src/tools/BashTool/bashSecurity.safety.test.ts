@@ -2,8 +2,8 @@ import { describe, expect, it } from 'bun:test'
 import {
   bashCommandIsSafeAsync_DEPRECATED,
   bashCommandIsSafe_DEPRECATED,
-} from './bashSecurity.js'
-import { resetSafetyLevelCache } from '../../utils/permissions/safetyLevel.js'
+} from './bashSecurity.ts'
+import { resetSafetyLevelCache } from '../../utils/permissions/safetyLevel.ts'
 import { installSafetyLevelTestCleanup } from '../../test/safetyLevelTestHelpers.js'
 
 installSafetyLevelTestCleanup()

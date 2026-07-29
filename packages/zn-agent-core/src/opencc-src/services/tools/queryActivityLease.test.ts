@@ -7,13 +7,13 @@ import {
   type Tool,
   type ToolUseContext,
   type Tools,
-} from '../../Tool.js'
-import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
-import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.js'
-import { createAssistantMessage } from '../../utils/messages.js'
-import { type QueryGuardLeaseInput } from '../../utils/QueryGuard.js'
-import { createToolQueryLeaseInput } from './queryActivityLease.js'
-import { type MessageUpdateLazy, runToolUse } from './toolExecution.js'
+} from '../../Tool.ts'
+import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.ts'
+import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.ts'
+import { createAssistantMessage } from '../../utils/messages.ts'
+import { type QueryGuardLeaseInput } from '../../utils/QueryGuard.ts'
+import { createToolQueryLeaseInput } from './queryActivityLease.ts'
+import { type MessageUpdateLazy, runToolUse } from './toolExecution.ts'
 
 const shellInputSchema = z.object({
   command: z.string(),

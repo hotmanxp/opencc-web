@@ -3,13 +3,13 @@ import type {
   ImageBlockParam,
   TextBlockParam,
 } from '@anthropic-ai/sdk/resources/index.mjs'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.ts'
 import {
   countMessagesTokensWithAPI,
   roughTokenCountEstimation,
-} from '../services/tokenEstimation.js'
-import { compressImageBlock } from './imageResizer.js'
-import { logError } from './log.js'
+} from '../services/tokenEstimation.ts'
+import { compressImageBlock } from './imageResizer.ts'
+import { logError } from './log.ts'
 
 export const MCP_TOKEN_COUNT_THRESHOLD_FACTOR = 0.5
 export const IMAGE_TOKEN_ESTIMATE = 1600

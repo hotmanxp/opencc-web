@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import type { ProviderOutput } from './providers/types.js'
-import { __test } from './WebSearchTool.js'
+import type { ProviderOutput } from './providers/types.ts'
+import { __test } from './WebSearchTool.ts'
 
 const {
   buildEmptyAdapterResultHint,

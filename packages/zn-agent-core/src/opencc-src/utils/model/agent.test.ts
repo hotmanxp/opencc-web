@@ -3,7 +3,7 @@ import { describe, test, expect, afterEach, beforeEach, mock } from 'bun:test'
 
 // PROVIDER_ALIAS_OVERRIDES targets from src/utils/model/aliasOverrides.ts.
 // Re-exported here so the test file documents the expected post-fix output
-// without importing from a file that imports from './providers.js' (which
+// without importing from a file that imports from './providers.ts' (which
 // would re-trigger the original mock-cycle problem).
 const EXPECTED_OVERRIDES = {
   firstParty: {
@@ -38,7 +38,7 @@ function mockAliasOverrides(overrides = EXPECTED_OVERRIDES) {
 }
 
 function mockProviders({ provider, isFirstParty }) {
-  mock.module('./providers.js', () => ({
+  mock.module('./providers.ts', () => ({
     getAPIProvider: () => provider,
     isFirstPartyAnthropicBaseUrl: () => isFirstParty,
     // Pre-existing fixture in this file omitted these exports; without them

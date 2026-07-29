@@ -7,11 +7,11 @@ import {
   setAllowedSettingSources,
   setCwdState,
   setOriginalCwd,
-} from '../../bootstrap/state.js'
-import type { ToolPermissionContext } from '../../types/permissions.js'
-import { SETTING_SOURCES } from '../../utils/settings/constants.js'
-import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
-import { isUnsafeDotGitWritePathForPowerShell } from './powershellPermissions.js'
+} from '../../bootstrap/state.ts'
+import type { ToolPermissionContext } from '../../types/permissions.ts'
+import { SETTING_SOURCES } from '../../utils/settings/constants.ts'
+import { resetSettingsCache } from '../../utils/settings/settingsCache.ts'
+import { isUnsafeDotGitWritePathForPowerShell } from './powershellPermissions.ts'
 
 type CheckPowerShellCommitMessagePolicy =
   typeof import('./PowerShellTool.js')['checkPowerShellCommitMessagePolicy']

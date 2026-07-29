@@ -4,7 +4,7 @@ import test from 'node:test'
 import { Client } from '@modelcontextprotocol/sdk/client/index.js'
 import memoize from 'lodash-es/memoize.js'
 
-import type { ValidationError } from '../../utils/settings/validation.js'
+import type { ValidationError } from '../../utils/settings/validation.ts'
 
 import {
   buildEmptyDoctorReport,
@@ -12,13 +12,13 @@ import {
   doctorServer,
   findingsFromValidationErrors,
   type McpDoctorDependencies,
-} from './doctor.js'
-import { getServerCacheKey } from './client.js'
+} from './doctor.ts'
+import { getServerCacheKey } from './client.ts'
 import type {
   ConfigScope,
   MCPServerConnection,
   ScopedMcpServerConfig,
-} from './types.js'
+} from './types.ts'
 
 type AllConfigResult = Awaited<ReturnType<McpDoctorDependencies['getAllMcpConfigs']>>
 type ScopeConfigResult = ReturnType<McpDoctorDependencies['getMcpConfigsByScope']>

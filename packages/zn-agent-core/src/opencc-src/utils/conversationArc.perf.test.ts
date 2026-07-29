@@ -7,9 +7,9 @@ import {
   updateArcPhase, 
   getArcSummary,
   resetArc 
-} from './conversationArc.js'
-import { setClaudeConfigHomeDirForTesting } from './envUtils.js'
-import { getGlobalGraph, clearMemoryOnly, resetGlobalGraph } from './knowledgeGraph.js'
+} from './conversationArc.ts'
+import { setClaudeConfigHomeDirForTesting } from './envUtils.ts'
+import { getGlobalGraph, clearMemoryOnly, resetGlobalGraph } from './knowledgeGraph.ts'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,

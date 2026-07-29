@@ -1,7 +1,7 @@
 // src/tools/WorkflowTool/workflowConsent.ts
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { getClaudeConfigHomeDir } from '../../utils/envUtils.js'
+import { getClaudeConfigHomeDir } from '../../utils/envUtils.ts'
 
 /**
  * Per-workflow "yes-always" consent store.

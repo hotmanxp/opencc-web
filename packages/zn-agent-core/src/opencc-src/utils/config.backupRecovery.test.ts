@@ -1,11 +1,11 @@
 import { afterEach, beforeAll, describe, expect, mock, test } from 'bun:test'
-import type * as ConfigModule from './config.js'
+import type * as ConfigModule from './config.ts'
 import {
   NodeFsOperations,
   setFsImplementation,
   setOriginalFsImplementation,
   type FsOperations,
-} from './fsOperations.js'
+} from './fsOperations.ts'
 
 // These cases drive the #1807 recovery path through the injected filesystem
 // without touching the real ~/.openclaude.json. They cover three layers:
@@ -16,7 +16,7 @@ import {
 //     config is corrupt.
 //
 // Load config through a query-suffixed specifier so a leaked
-// mock.module('./config.js') from another file in the same process can never
+// mock.module('./config.ts') from another file in the same process can never
 // turn these assertions into no-ops (the deferredWrite.test.ts trap).
 
 const FILE = '/virtual/.openclaude.json'
@@ -35,7 +35,7 @@ function installFs(over: Partial<FsOperations>): void {
 
 async function freshConfig(): Promise<typeof ConfigModule> {
   return (await import(
-    `./config.js?backupRecoveryTest=${Date.now()}-${Math.random()}`
+    `./config.ts?backupRecoveryTest=${Date.now()}-${Math.random()}`
   )) as typeof ConfigModule
 }
 

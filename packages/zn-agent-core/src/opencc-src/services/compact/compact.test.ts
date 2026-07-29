@@ -16,7 +16,7 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../../test/sharedMutationLock.js'
-import type { Message } from '../../types/message.js'
+import type { Message } from '../../types/message.ts'
 
 // Several earlier test files in the smoke suite call
 // mock.module('../../utils/model/providers.js', ...) to stub getAPIProvider.

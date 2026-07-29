@@ -10,13 +10,13 @@ import {
   resetGlobalGraph,
   saveProjectGraph,
   clearMemoryOnly,
-} from './knowledgeGraph.js'
+} from './knowledgeGraph.ts'
 import { mkdtempSync, rmSync, existsSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { getFsImplementation } from './fsOperations.js'
-import { getProjectsDir } from './envUtils.js'
-import { sanitizePath } from './sessionStoragePortable.js'
+import { getFsImplementation } from './fsOperations.ts'
+import { getProjectsDir } from './envUtils.ts'
+import { sanitizePath } from './sessionStoragePortable.ts'
 
 describe('KnowledgeGraph Global Persistence & RAG', () => {
   const cwd = getFsImplementation().cwd()
@@ -66,7 +66,7 @@ describe('KnowledgeGraph Global Persistence & RAG', () => {
   })
 
   it('clears Orama database and persistence file on resetGlobalGraph', async () => {
-    const { initOrama, getOramaPersistencePath } = await import('./knowledgeGraph.js')
+    const { initOrama, getOramaPersistencePath } = await import('./knowledgeGraph.ts')
 
     await initOrama(cwd)
     await addGlobalSummary('Orama test summary', ['orama'])
@@ -125,7 +125,7 @@ describe('KnowledgeGraph Global Persistence & RAG', () => {
     })
 
     it('returns an empty string for no-hit searches even if rules exist', async () => {
-      const { addGlobalRule } = await import('./knowledgeGraph.js')
+      const { addGlobalRule } = await import('./knowledgeGraph.ts')
       resetGlobalGraph()
       await addGlobalRule('Always use TypeScript.')
       

@@ -1,6 +1,6 @@
 import { LRUCache } from 'lru-cache'
-import { logError } from './log.js'
-import { jsonStringify } from './slowOperations.js'
+import { logError } from './log.ts'
+import { jsonStringify } from './slowOperations.ts'
 
 type CacheEntry<T> = {
   value: T

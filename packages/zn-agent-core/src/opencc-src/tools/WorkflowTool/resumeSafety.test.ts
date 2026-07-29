@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { assertResumeSafe } from './resumeSafety.js'
+import { assertResumeSafe } from './resumeSafety.ts'
 
 describe('assertResumeSafe (port of upstream 2.1.170)', () => {
   test('accepts a clean script', () => {

@@ -2,7 +2,7 @@ import { describe, expect, test, beforeEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { getWorkflowCommands, workflowToCommand } from './createWorkflowCommand.js'
+import { getWorkflowCommands, workflowToCommand } from './createWorkflowCommand.ts'
 
 describe('getWorkflowCommands', () => {
   let tmp: string

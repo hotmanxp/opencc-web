@@ -6,23 +6,23 @@ import {
   SYSTEM_PROMPT_DYNAMIC_BOUNDARY,
 } from 'src/constants/prompts.js'
 import { microcompactMessages } from 'src/services/compact/microCompact.js'
-import { getSdkBetas } from '../bootstrap/state.js'
+import { getSdkBetas } from '../bootstrap/state.ts'
 import { getCommandName } from '../commands.js'
-import { getSystemContext } from '../context.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { getSystemContext } from '../context.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.ts'
 import {
   AUTOCOMPACT_BUFFER_TOKENS,
   getEffectiveContextWindowSize,
   isAutoCompactEnabled,
   MANUAL_COMPACT_BUFFER_TOKENS,
-} from '../services/compact/autoCompact.js'
+} from '../services/compact/autoCompact.ts'
 import {
   countMessagesTokensWithAPI,
   countTokensViaHaikuFallback,
   roughTokenCountEstimation,
   roughTokenCountEstimationForMessages,
-} from '../services/tokenEstimation.js'
-import { estimateSkillFrontmatterTokens } from '../skills/loadSkillsDir.js'
+} from '../services/tokenEstimation.ts'
+import { estimateSkillFrontmatterTokens } from '../skills/loadSkillsDir.ts'
 import {
   findToolByName,
   type Tool,
@@ -30,16 +30,16 @@ import {
   type Tools,
   type ToolUseContext,
   toolMatchesName,
-} from '../Tool.js'
+} from '../Tool.ts'
 import type {
   AgentDefinition,
   AgentDefinitionsResult,
-} from '../tools/AgentTool/loadAgentsDir.js'
-import { SKILL_TOOL_NAME } from '../tools/SkillTool/constants.js'
+} from '../tools/AgentTool/loadAgentsDir.ts'
+import { SKILL_TOOL_NAME } from '../tools/SkillTool/constants.ts'
 import {
   getLimitedSkillToolCommands,
   getSkillToolInfo as getSlashCommandInfo,
-} from '../tools/SkillTool/prompt.js'
+} from '../tools/SkillTool/prompt.ts'
 import type {
   AssistantMessage,
   AttachmentMessage,
@@ -47,22 +47,22 @@ import type {
   NormalizedAssistantMessage,
   NormalizedUserMessage,
   UserMessage,
-} from '../types/message.js'
-import { toolToAPISchema } from './api.js'
-import { filterInjectedMemoryFiles, getMemoryFiles } from './claudemd.js'
-import { getContextWindowForModel } from './context.js'
-import { getCwd } from './cwd.js'
-import { logForDebugging } from './debug.js'
-import { isEnvTruthy } from './envUtils.js'
-import { errorMessage, toError } from './errors.js'
-import { logError } from './log.js'
-import { normalizeMessagesForAPI } from './messages.js'
-import { getRuntimeMainLoopModel } from './model/model.js'
-import type { SettingSource } from './settings/constants.js'
-import { jsonStringify } from './slowOperations.js'
-import { buildEffectiveSystemPrompt } from './systemPrompt.js'
-import type { Theme } from './theme.js'
-import { getCurrentUsage } from './tokens.js'
+} from '../types/message.ts'
+import { toolToAPISchema } from './api.ts'
+import { filterInjectedMemoryFiles, getMemoryFiles } from './claudemd.ts'
+import { getContextWindowForModel } from './context.ts'
+import { getCwd } from './cwd.ts'
+import { logForDebugging } from './debug.ts'
+import { isEnvTruthy } from './envUtils.ts'
+import { errorMessage, toError } from './errors.ts'
+import { logError } from './log.ts'
+import { normalizeMessagesForAPI } from './messages.ts'
+import { getRuntimeMainLoopModel } from './model/model.ts'
+import type { SettingSource } from './settings/constants.ts'
+import { jsonStringify } from './slowOperations.ts'
+import { buildEffectiveSystemPrompt } from './systemPrompt.ts'
+import type { Theme } from './theme.ts'
+import { getCurrentUsage } from './tokens.ts'
 
 const RESERVED_CATEGORY_NAME = 'Autocompact buffer'
 const MANUAL_COMPACT_BUFFER_NAME = 'Compact buffer'

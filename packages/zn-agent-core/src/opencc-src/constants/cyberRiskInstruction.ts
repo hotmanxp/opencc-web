@@ -1,4 +1,4 @@
-import { BRAND_NAME } from './product.js'
+import { BRAND_NAME } from './product.ts'
 
 /**
  * CYBER_RISK_INSTRUCTION

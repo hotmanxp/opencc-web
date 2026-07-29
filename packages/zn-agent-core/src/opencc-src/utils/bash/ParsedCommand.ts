@@ -2,12 +2,12 @@ import memoize from 'lodash-es/memoize.js'
 import {
   extractOutputRedirections,
   splitCommandWithOperators,
-} from './commands.js'
-import type { Node } from './parser.js'
+} from './commands.ts'
+import type { Node } from './parser.ts'
 import {
   analyzeCommand,
   type TreeSitterAnalysis,
-} from './treeSitterAnalysis.js'
+} from './treeSitterAnalysis.ts'
 
 export type OutputRedirection = {
   target: string
@@ -239,7 +239,7 @@ class TreeSitterParsedCommand implements IParsedCommand {
 
 const getTreeSitterAvailable = memoize(async (): Promise<boolean> => {
   try {
-    const { parseCommand } = await import('./parser.js')
+    const { parseCommand } = await import('./parser.ts')
     const testResult = await parseCommand('echo test')
     return testResult !== null
   } catch {
@@ -273,7 +273,7 @@ async function doParse(command: string): Promise<IParsedCommand | null> {
   const treeSitterAvailable = await getTreeSitterAvailable()
   if (treeSitterAvailable) {
     try {
-      const { parseCommand } = await import('./parser.js')
+      const { parseCommand } = await import('./parser.ts')
       const data = await parseCommand(command)
       if (data) {
         // Native NAPI parser returns plain JS objects (no WASM handles);

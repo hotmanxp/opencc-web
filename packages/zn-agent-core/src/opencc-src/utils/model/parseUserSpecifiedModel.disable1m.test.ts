@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { parseUserSpecifiedModel } from './model.js'
+import { parseUserSpecifiedModel } from './model.ts'
 
 // Regression: when 1M context is disabled (CLAUDE_CODE_DISABLE_1M_CONTEXT, used
 // by C4E/HIPAA admins), `has1mContext` returns false. The parser gated the
@@ -9,7 +9,7 @@ import { parseUserSpecifiedModel } from './model.js'
 // for matching regardless; only the re-appended suffix depends on 1M being on.
 //
 // SKIPPED (cross-file mock pollution): every test in this file imports
-// `./model.js` statically. When `bun test` runs `fastMode.test.ts` in the same
+// `./model.ts` statically. When `bun test` runs `fastMode.test.ts` in the same
 // process first, its `mock.module('./model/model.js', () => ({...}))` replaces
 // the module globally (mock.module is a global cache replacement, not a
 // scoped override). This file then sees the identity stub for

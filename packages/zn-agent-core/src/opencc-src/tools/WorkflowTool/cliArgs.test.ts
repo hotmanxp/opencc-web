@@ -1,6 +1,6 @@
 // src/tools/WorkflowTool/cliArgs.test.ts
 import { describe, expect, it } from 'bun:test'
-import { parseCliArgs } from './cliArgs.js'
+import { parseCliArgs } from './cliArgs.ts'
 
 describe('parseCliArgs', () => {
   it('parses basic --key=value pairs', () => {

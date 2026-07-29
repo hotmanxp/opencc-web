@@ -17,20 +17,20 @@ import {
   getLspServerManager,
   isLspConnected,
   waitForInitialization,
-} from '../../services/lsp/manager.js'
-import type { ValidationResult } from '../../Tool.js'
-import { buildTool, type ToolDef } from '../../Tool.js'
-import { uniq } from '../../utils/array.js'
-import { getCwd } from '../../utils/cwd.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { isENOENT, toError } from '../../utils/errors.js'
-import { execFileNoThrowWithCwd } from '../../utils/execFileNoThrow.js'
-import { getFsImplementation } from '../../utils/fsOperations.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { logError } from '../../utils/log.js'
-import { expandPath } from '../../utils/path.js'
-import { checkReadPermissionForTool } from '../../utils/permissions/filesystem.js'
-import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
+} from '../../services/lsp/manager.ts'
+import type { ValidationResult } from '../../Tool.ts'
+import { buildTool, type ToolDef } from '../../Tool.ts'
+import { uniq } from '../../utils/array.ts'
+import { getCwd } from '../../utils/cwd.ts'
+import { logForDebugging } from '../../utils/debug.ts'
+import { isENOENT, toError } from '../../utils/errors.ts'
+import { execFileNoThrowWithCwd } from '../../utils/execFileNoThrow.ts'
+import { getFsImplementation } from '../../utils/fsOperations.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { logError } from '../../utils/log.ts'
+import { expandPath } from '../../utils/path.ts'
+import { checkReadPermissionForTool } from '../../utils/permissions/filesystem.ts'
+import type { PermissionDecision } from '../../utils/permissions/PermissionResult.ts'
 import {
   formatDocumentSymbolResult,
   formatFindReferencesResult,
@@ -40,9 +40,9 @@ import {
   formatOutgoingCallsResult,
   formatPrepareCallHierarchyResult,
   formatWorkspaceSymbolResult,
-} from './formatters.js'
-import { DESCRIPTION, LSP_TOOL_NAME } from './prompt.js'
-import { lspToolInputSchema } from './schemas.js'
+} from './formatters.ts'
+import { DESCRIPTION, LSP_TOOL_NAME } from './prompt.ts'
+import { lspToolInputSchema } from './schemas.ts'
 import {
   renderToolResultMessage,
   renderToolUseErrorMessage,

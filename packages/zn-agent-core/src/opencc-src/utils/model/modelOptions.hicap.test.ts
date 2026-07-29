@@ -1,12 +1,12 @@
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
 
-import { resetModelStringsForTestingOnly } from '../../bootstrap/state.js'
-import { acquireEnvMutex, releaseEnvMutex } from '../../entrypoints/sdk/shared.js'
-import { saveGlobalConfig } from '../config.js'
+import { resetModelStringsForTestingOnly } from '../../bootstrap/state.ts'
+import { acquireEnvMutex, releaseEnvMutex } from '../../entrypoints/sdk/shared.ts'
+import { saveGlobalConfig } from '../config.ts'
 import {
   resetSettingsCache,
   setSessionSettingsCache,
-} from '../settings/settingsCache.js'
+} from '../settings/settingsCache.ts'
 
 async function importFreshModelOptionsModule() {
   mock.restore()

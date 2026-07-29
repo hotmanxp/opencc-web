@@ -1,4 +1,4 @@
-import { tokenCountWithEstimation } from './tokens.js'
+import { tokenCountWithEstimation } from './tokens.ts'
 
 /**
  * Heuristics to detect if the agent intends to continue its task

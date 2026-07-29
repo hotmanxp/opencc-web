@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { sanitizeError } from './log.js'
+import { sanitizeError } from './log.ts'
 
 // Test sanitizeError directly (an exported wrapper around the inline
 // redaction logic in logError). Direct unit testing avoids races on

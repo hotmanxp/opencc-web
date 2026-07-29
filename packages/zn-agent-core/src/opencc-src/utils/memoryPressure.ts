@@ -5,8 +5,8 @@
  * Designed to prevent OOM when running multiple OpenCC sessions.
  */
 
-import { logForDebugging } from './debug.js'
-import { validateBoundedIntEnvVar } from './envValidation.js'
+import { logForDebugging } from './debug.ts'
+import { validateBoundedIntEnvVar } from './envValidation.ts'
 
 const MEMORY_PRESSURE_COOLDOWN_DEFAULT_MS = 300_000 // 5 min
 const MEMORY_PRESSURE_COOLDOWN_UPPER_MS = 1_800_000 // 30 min cap

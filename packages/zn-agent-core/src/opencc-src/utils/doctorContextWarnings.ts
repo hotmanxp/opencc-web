@@ -1,23 +1,23 @@
-import { AGENT_INSTRUCTIONS_FILE } from '../constants/product.js'
-import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
-import type { ToolPermissionContext, Tools } from '../Tool.js'
-import type { AgentDefinitionsResult } from '../tools/AgentTool/loadAgentsDir.js'
-import { countMcpToolTokens } from './analyzeContext.js'
+import { AGENT_INSTRUCTIONS_FILE } from '../constants/product.ts'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
+import type { ToolPermissionContext, Tools } from '../Tool.ts'
+import type { AgentDefinitionsResult } from '../tools/AgentTool/loadAgentsDir.ts'
+import { countMcpToolTokens } from './analyzeContext.ts'
 import {
   getLargeMemoryFiles,
   getMemoryFiles,
   MAX_MEMORY_CHARACTER_COUNT,
   type MemoryFileInfo,
-} from './claudemd.js'
-import { getMainLoopModel } from './model/model.js'
-import { permissionRuleValueToString } from './permissions/permissionRuleParser.js'
-import { detectUnreachableRules } from './permissions/shadowedRuleDetection.js'
-import { SandboxManager } from './sandbox/sandbox-adapter.js'
+} from './claudemd.ts'
+import { getMainLoopModel } from './model/model.ts'
+import { permissionRuleValueToString } from './permissions/permissionRuleParser.ts'
+import { detectUnreachableRules } from './permissions/shadowedRuleDetection.ts'
+import { SandboxManager } from './sandbox/sandbox-adapter.ts'
 import {
   AGENT_DESCRIPTIONS_THRESHOLD,
   getAgentDescriptionsTotalTokens,
-} from './statusNoticeHelpers.js'
-import { plural } from './stringUtils.js'
+} from './statusNoticeHelpers.ts'
+import { plural } from './stringUtils.ts'
 
 // Thresholds (matching status notices and existing patterns)
 const MCP_TOOLS_THRESHOLD = 25_000

@@ -1,12 +1,12 @@
 import { randomUUID } from 'crypto'
-import type { Tool, ToolUseContext } from '../Tool.js'
+import type { Tool, ToolUseContext } from '../Tool.ts'
 import { BashTool } from '../tools/BashTool/BashTool.js'
-import { logForDebugging } from './debug.js'
-import { errorMessage, MalformedCommandError, ShellError } from './errors.js'
-import type { FrontmatterShell } from './frontmatterParser.js'
-import { createAssistantMessage } from './messages.js'
-import { hasPermissionsToUseTool } from './permissions/permissions.js'
-import { processToolResultBlock } from './toolResultStorage.js'
+import { logForDebugging } from './debug.ts'
+import { errorMessage, MalformedCommandError, ShellError } from './errors.ts'
+import type { FrontmatterShell } from './frontmatterParser.ts'
+import { createAssistantMessage } from './messages.ts'
+import { hasPermissionsToUseTool } from './permissions/permissions.ts'
+import { processToolResultBlock } from './toolResultStorage.ts'
 
 // Narrow structural slice both BashTool and PowerShellTool satisfy. We can't
 // use the base Tool type: it marks call()'s canUseTool/parentMessage as
@@ -28,7 +28,7 @@ type PromptShellTool = Tool & {
   ): Promise<{ data: ShellOut }>
 }
 
-import { isPowerShellToolEnabled } from './shell/shellToolUtils.js'
+import { isPowerShellToolEnabled } from './shell/shellToolUtils.ts'
 
 // Lazy: this file is on the startup import chain (main → commands →
 // loadSkillsDir → here). A static import would load PowerShellTool.ts

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { createNestedWorkflowRunner } from './workflowNested.js'
+import { createNestedWorkflowRunner } from './workflowNested.ts'
 
 describe('createNestedWorkflowRunner', () => {
   it('runs a named workflow with args', async () => {

@@ -8,30 +8,30 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import { type ReleaseChannel, saveGlobalConfig } from './config.js'
-import { createCombinedAbortSignal } from './combinedAbortSignal.js'
-import { getAPIProvider } from './model/providers.js'
-import { logForDebugging } from './debug.js'
-import { env } from './env.js'
-import { getClaudeConfigHomeDir } from './envUtils.js'
-import { ClaudeError, getErrnoCode, isENOENT } from './errors.js'
-import { execFileNoThrowWithCwd } from './execFileNoThrow.js'
+import { type ReleaseChannel, saveGlobalConfig } from './config.ts'
+import { createCombinedAbortSignal } from './combinedAbortSignal.ts'
+import { getAPIProvider } from './model/providers.ts'
+import { logForDebugging } from './debug.ts'
+import { env } from './env.ts'
+import { getClaudeConfigHomeDir } from './envUtils.ts'
+import { ClaudeError, getErrnoCode, isENOENT } from './errors.ts'
+import { execFileNoThrowWithCwd } from './execFileNoThrow.ts'
 import {
   detectGlobalPackageManager,
   getGlobalInstallArgs,
-} from './globalPackageManager.js'
-import { getFsImplementation } from './fsOperations.js'
-import { gracefulShutdownSync } from './gracefulShutdown.js'
-import { logError } from './log.js'
+} from './globalPackageManager.ts'
+import { getFsImplementation } from './fsOperations.ts'
+import { gracefulShutdownSync } from './gracefulShutdown.ts'
+import { logError } from './log.ts'
 import { gte, lt } from './semver.js'
-import { getInitialSettings } from './settings/settings.js'
+import { getInitialSettings } from './settings/settings.ts'
 import {
   filterClaudeAliases,
   getShellConfigPaths,
   readFileLines,
   writeFileLines,
-} from './shellConfig.js'
-import { jsonParse } from './slowOperations.js'
+} from './shellConfig.ts'
+import { jsonParse } from './slowOperations.ts'
 
 const GCS_BUCKET_URL =
   'https://storage.googleapis.com/claude-code-dist-86c565f3-f756-42ad-8dfa-d59b1c096819/claude-code-releases'

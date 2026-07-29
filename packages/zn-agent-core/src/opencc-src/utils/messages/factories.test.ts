@@ -1,6 +1,6 @@
 // @ts-nocheck — pre-existing typecheck debt, see docs/feature-gating.md
 import { expect, test } from 'bun:test'
-import type { Message } from '../../types/message.js'
+import type { Message } from '../../types/message.ts'
 
 const factories = (await import(
   `./factories.js?factory-test=${Date.now()}-${Math.random()}`

@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { SettingsSchema } from './types.js'
+import { SettingsSchema } from './types.ts'
 
 test('agentModels accepts a model-only entry (no base_url/api_key)', () => {
   const result = SettingsSchema().safeParse({

@@ -8,23 +8,23 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import { getProjectRoot } from '../bootstrap/state.js'
-import { createCombinedAbortSignal } from './combinedAbortSignal.js'
-import { logForDebugging } from './debug.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
-import { errorMessage, isFsInaccessible } from './errors.js'
-import { normalizePathForComparison } from './file.js'
-import type { FrontmatterData } from './frontmatterParser.js'
-import { parseFrontmatter } from './frontmatterParser.js'
-import { findCanonicalGitRoot, findGitRoot } from './git.js'
-import { parseToolListFromCLI } from './permissions/permissionSetup.js'
-import { ripGrep } from './ripgrep.js'
+import { getProjectRoot } from '../bootstrap/state.ts'
+import { createCombinedAbortSignal } from './combinedAbortSignal.ts'
+import { logForDebugging } from './debug.ts'
+import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.ts'
+import { errorMessage, isFsInaccessible } from './errors.ts'
+import { normalizePathForComparison } from './file.ts'
+import type { FrontmatterData } from './frontmatterParser.ts'
+import { parseFrontmatter } from './frontmatterParser.ts'
+import { findCanonicalGitRoot, findGitRoot } from './git.ts'
+import { parseToolListFromCLI } from './permissions/permissionSetup.ts'
+import { ripGrep } from './ripgrep.ts'
 import {
   isSettingSourceEnabled,
   type SettingSource,
-} from './settings/constants.js'
-import { getManagedFilePath } from './settings/managedPath.js'
-import { isRestrictedToPluginOnly } from './settings/pluginOnlyPolicy.js'
+} from './settings/constants.ts'
+import { getManagedFilePath } from './settings/managedPath.ts'
+import { isRestrictedToPluginOnly } from './settings/pluginOnlyPolicy.ts'
 
 // OpenCC configuration directory names
 export const CLAUDE_CONFIG_DIRECTORIES = [

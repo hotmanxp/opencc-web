@@ -1,30 +1,30 @@
 import { randomUUID } from 'crypto'
-import type { Task, TaskStatus } from '../../Task.js'
+import type { Task, TaskStatus } from '../../Task.ts'
 import type {
   SpawnOpts,
   SpawnResult,
   Workflow,
   WorkflowAgentState,
   WorkflowPhaseMeta,
-} from '../../tools/WorkflowTool/types.js'
-import { registerWorkflowRun } from '../../tools/WorkflowTool/workflowRunStore.js'
-import { registerWorkflowTask, unregisterWorkflowTask } from './lifecycle.js'
-import { runWorkflowInWorker } from './schedulerBridge.js'
-import { runWorkflowInVm, type VmRunnerResult } from '../../tools/WorkflowTool/runtime/vmRunner.js'
-import type { ParsedWorkflowMeta } from '../../tools/WorkflowTool/parseMetaFromScript.js'
-import { createNestedWorkflowRunner } from '../../tools/WorkflowTool/runtime/workflowNested.js'
-import type { WorkflowApi } from '../../tools/WorkflowTool/runtime/vmContext.js'
-import { createInitialState, type LocalWorkflowTaskState } from './state.js'
-import { enqueuePendingNotification } from '../../utils/messageQueueManager.js'
-import { logError } from '../../utils/log.js'
+} from '../../tools/WorkflowTool/types.ts'
+import { registerWorkflowRun } from '../../tools/WorkflowTool/workflowRunStore.ts'
+import { registerWorkflowTask, unregisterWorkflowTask } from './lifecycle.ts'
+import { runWorkflowInWorker } from './schedulerBridge.ts'
+import { runWorkflowInVm, type VmRunnerResult } from '../../tools/WorkflowTool/runtime/vmRunner.ts'
+import type { ParsedWorkflowMeta } from '../../tools/WorkflowTool/parseMetaFromScript.ts'
+import { createNestedWorkflowRunner } from '../../tools/WorkflowTool/runtime/workflowNested.ts'
+import type { WorkflowApi } from '../../tools/WorkflowTool/runtime/vmContext.ts'
+import { createInitialState, type LocalWorkflowTaskState } from './state.ts'
+import { enqueuePendingNotification } from '../../utils/messageQueueManager.ts'
+import { logError } from '../../utils/log.ts'
 import {
   writeWorkflowReport,
   type WorkflowReport,
-} from '../../utils/task/diskOutput.js'
+} from '../../utils/task/diskOutput.ts'
 
 // Re-export so consumers (notably src/tasks/types.ts) can import
 // LocalWorkflowTaskState from this entrypoint.
-export type { LocalWorkflowTaskState } from './state.js'
+export type { LocalWorkflowTaskState } from './state.ts'
 
 /**
  * A pre-built spawner the parent task provides to LocalWorkflowTask. The
@@ -596,7 +596,7 @@ export class LocalWorkflowTask implements Task {
       const onProgress = (p: {
         tokensUsed?: number
         toolsUsed?: number
-        toolCalls?: import('../../tools/WorkflowTool/types.js').ToolCallRecord[]
+        toolCalls?: import('../../tools/WorkflowTool/types.ts').ToolCallRecord[]
         model?: string
       }) => {
         if (p.tokensUsed !== undefined) agent.tokensUsed = p.tokensUsed

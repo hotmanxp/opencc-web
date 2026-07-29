@@ -3,10 +3,10 @@ import {
   buildRealSpawner,
   type RunAgentFn,
   type CreateUserMessageFn,
-} from './realSpawner.js'
+} from './realSpawner.ts'
 import type {
   LocalSpawner,
-} from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.js'
+} from '../../tasks/LocalWorkflowTask/LocalWorkflowTask.ts'
 
 /**
  * These tests cover the spawner-resolution contract enforced by

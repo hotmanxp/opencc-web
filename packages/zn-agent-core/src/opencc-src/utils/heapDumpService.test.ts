@@ -6,7 +6,7 @@ import {
   getHeapDumpAnalyticsMetadata,
   getEffectiveHeapDumpNumber,
   getHeapDumpFilePaths,
-} from './heapDumpService.js'
+} from './heapDumpService.ts'
 
 test('manual heap dumps receive sequential effective dump numbers', () => {
   __resetManualHeapDumpCountForTesting()

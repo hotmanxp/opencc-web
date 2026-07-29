@@ -1,11 +1,11 @@
-import type { Command } from '../types/command.js'
-import { parseFrontmatter } from '../utils/frontmatterParser.js'
-import { memoizeWithLRU } from '../utils/memoize.js'
-import { recursivelySanitizeUnicode } from '../utils/sanitization.js'
-import { normalizeNameForMCP } from '../services/mcp/normalization.js'
-import type { MCPServerConnection, ServerResource } from '../services/mcp/types.js'
-import { getMCPSkillBuilders } from './mcpSkillBuilders.js'
-import { logForDebugging } from '../utils/debug.js'
+import type { Command } from '../types/command.ts'
+import { parseFrontmatter } from '../utils/frontmatterParser.ts'
+import { memoizeWithLRU } from '../utils/memoize.ts'
+import { recursivelySanitizeUnicode } from '../utils/sanitization.ts'
+import { normalizeNameForMCP } from '../services/mcp/normalization.ts'
+import type { MCPServerConnection, ServerResource } from '../services/mcp/types.ts'
+import { getMCPSkillBuilders } from './mcpSkillBuilders.ts'
+import { logForDebugging } from '../utils/debug.ts'
 import {
   ListResourcesResultSchema,
   type ReadResourceResult,

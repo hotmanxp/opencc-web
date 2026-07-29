@@ -17,10 +17,10 @@ export {
   unstable_v2_createSession,
   unstable_v2_prompt,
   unstable_v2_resumeSession,
-} from '../agentSdkTypes.js'
+} from '../agentSdkTypes.ts'
 
 // Control protocol types
-export type { SDKControlInitializeResponse } from './controlTypes.js'
+export type { SDKControlInitializeResponse } from './controlTypes.ts'
 
 // Core generated types
 export type {
@@ -37,13 +37,13 @@ export type {
   SDKSessionInfo,
   SDKUserMessage,
   SlashCommand,
-} from './coreTypes.generated.js'
+} from './coreTypes.generated.ts'
 
 // Permission types
-export type { PermissionResolveDecision } from './permissions.js'
+export type { PermissionResolveDecision } from './permissions.ts'
 
 // Runtime types
-export type { Query, SDKSession, SDKSessionOptions, SdkMcpToolDefinition } from './runtimeTypes.js'
+export type { Query, SDKSession, SDKSessionOptions, SdkMcpToolDefinition } from './runtimeTypes.ts'
 
 // Shared types
 export type {
@@ -58,7 +58,7 @@ export type {
   SDKPermissionTimeoutMessage,
   SessionMessage,
   SessionMutationOptions,
-} from './shared.js'
+} from './shared.ts'
 
 // Error classes
 export {
@@ -73,7 +73,7 @@ export {
   SDKRateLimitError,
   SDKServerError,
   sdkErrorFromType,
-} from '../../utils/errors.js'
+} from '../../utils/errors.ts'
 
 // Stub types declared in sdk.d.ts but not yet in source
 export type {
@@ -84,7 +84,7 @@ export type {
   SdkMcpSdkConfig,
   SdkMcpServerConfig,
   SdkScopedMcpServerConfig,
-} from './sdkTypes.js'
+} from './sdkTypes.ts'
 
 // Runtime deleteSession
-export { deleteSession } from '../../utils/sessionPersistence.js'
+export { deleteSession } from '../../utils/sessionPersistence.ts'

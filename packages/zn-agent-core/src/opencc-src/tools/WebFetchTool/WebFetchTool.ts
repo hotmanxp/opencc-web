@@ -1,13 +1,13 @@
 import { z } from 'zod/v4'
-import { buildTool, type ToolDef } from '../../Tool.js'
-import { isEnvTruthy } from '../../utils/envUtils.js'
-import type { PermissionUpdate } from '../../types/permissions.js'
-import { formatFileSize } from '../../utils/format.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
-import { getRuleByContentsForTool } from '../../utils/permissions/permissions.js'
-import { isPreapprovedHost } from './preapproved.js'
-import { DESCRIPTION, WEB_FETCH_TOOL_NAME } from './prompt.js'
+import { buildTool, type ToolDef } from '../../Tool.ts'
+import { isEnvTruthy } from '../../utils/envUtils.ts'
+import type { PermissionUpdate } from '../../types/permissions.ts'
+import { formatFileSize } from '../../utils/format.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import type { PermissionDecision } from '../../utils/permissions/PermissionResult.ts'
+import { getRuleByContentsForTool } from '../../utils/permissions/permissions.ts'
+import { isPreapprovedHost } from './preapproved.ts'
+import { DESCRIPTION, WEB_FETCH_TOOL_NAME } from './prompt.ts'
 import {
   getToolUseSummary,
   renderToolResultMessage,
@@ -20,7 +20,7 @@ import {
   getURLMarkdownContent,
   isPreapprovedUrl,
   MAX_MARKDOWN_LENGTH,
-} from './utils.js'
+} from './utils.ts'
 
 function isFirecrawlEnabled(): boolean {
   return Boolean(process.env.FIRECRAWL_API_KEY) || Boolean(process.env.FIRECRAWL_API_URL)

@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, test } from 'bun:test'
-import type { SetAppState } from '../../Task.js'
+import type { SetAppState } from '../../Task.ts'
 import type { AppState } from '../../state/AppStateStore.js'
-import type { WorkflowAgentState } from '../../tools/WorkflowTool/types.js'
-import { LocalWorkflowTask } from './LocalWorkflowTask.js'
+import type { WorkflowAgentState } from '../../tools/WorkflowTool/types.ts'
+import { LocalWorkflowTask } from './LocalWorkflowTask.ts'
 import {
   findWorkflowTask,
   killWorkflowTask,
@@ -11,8 +11,8 @@ import {
   retryWorkflowAgent,
   skipWorkflowAgent,
   unregisterWorkflowTask,
-} from './lifecycle.js'
-import type { LocalWorkflowTaskState } from './state.js'
+} from './lifecycle.ts'
+import type { LocalWorkflowTaskState } from './state.ts'
 
 const sampleWorkflow = {
   name: 'echo',

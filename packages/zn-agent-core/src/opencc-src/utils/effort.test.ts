@@ -3,7 +3,7 @@ import {
   getEffortLevelDescription,
   getEffortSuffix,
   modelSupportsUltracode,
-} from './effort.js'
+} from './effort.ts'
 
 describe('ultracode effort level', () => {
   test('describes ultracode as xhigh + workflow orchestration', () => {

@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { expect, test } from 'bun:test'
-import { shouldUseFirstPartyAnthropicAuthForProvider } from './authRouting.js'
+import { shouldUseFirstPartyAnthropicAuthForProvider } from './authRouting.ts'
 
 const providerOverride = {
   model: 'gpt-4o',

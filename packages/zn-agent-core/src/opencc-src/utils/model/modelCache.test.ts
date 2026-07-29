@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, it, beforeEach, afterEach, vi } from 'bun:test'
-import { isModelCacheValid, getCachedModelsFromDisk, saveModelsToCache } from '../model/modelCache.js'
+import { isModelCacheValid, getCachedModelsFromDisk, saveModelsToCache } from '../model/modelCache.ts'
 
 vi.mock('../model/ollamaModels.js', () => ({
   isOllamaProvider: vi.fn(() => true),

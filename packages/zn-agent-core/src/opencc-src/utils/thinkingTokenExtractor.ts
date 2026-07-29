@@ -6,9 +6,9 @@
  * Provides detailed breakdown, statistics, and insights.
  */
 
-import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
-import { jsonStringify } from './slowOperations.js'
-import type { AssistantMessage, Message } from '../types/message.js'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
+import { jsonStringify } from './slowOperations.ts'
+import type { AssistantMessage, Message } from '../types/message.ts'
 
 export interface ThinkingBlock {
   type: 'thinking' | 'redacted_thinking'

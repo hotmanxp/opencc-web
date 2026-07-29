@@ -1,41 +1,41 @@
 import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, join } from 'path'
-import { getInlinePlugins, getSessionId } from '../../bootstrap/state.js'
-import type { Command } from '../../types/command.js'
-import { getPluginErrorMessage } from '../../types/plugin.js'
+import { getInlinePlugins, getSessionId } from '../../bootstrap/state.ts'
+import type { Command } from '../../types/command.ts'
+import { getPluginErrorMessage } from '../../types/plugin.ts'
 import {
   parseArgumentNames,
   substituteArguments,
-} from '../argumentSubstitution.js'
-import { logForDebugging } from '../debug.js'
-import { EFFORT_LEVELS, parseEffortValue } from '../effort.js'
-import { isBareMode } from '../envUtils.js'
-import { isENOENT } from '../errors.js'
+} from '../argumentSubstitution.ts'
+import { logForDebugging } from '../debug.ts'
+import { EFFORT_LEVELS, parseEffortValue } from '../effort.ts'
+import { isBareMode } from '../envUtils.ts'
+import { isENOENT } from '../errors.ts'
 import {
   coerceDescriptionToString,
   type FrontmatterData,
   parseBooleanFrontmatter,
   parseFrontmatter,
   parseShellFrontmatter,
-} from '../frontmatterParser.js'
-import { getFsImplementation, isDuplicatePath } from '../fsOperations.js'
+} from '../frontmatterParser.ts'
+import { getFsImplementation, isDuplicatePath } from '../fsOperations.ts'
 import {
   extractDescriptionFromMarkdown,
   parseSlashCommandToolsFromFrontmatter,
-} from '../markdownConfigLoader.js'
-import { parseUserSpecifiedModel } from '../model/model.js'
-import { executeShellCommandsInPrompt } from '../promptShellExecution.js'
+} from '../markdownConfigLoader.ts'
+import { parseUserSpecifiedModel } from '../model/model.ts'
+import { executeShellCommandsInPrompt } from '../promptShellExecution.ts'
 import {
   loadAllPluginsCacheOnly,
   resolveExistingPluginComponentPath,
-} from './pluginLoader.js'
+} from './pluginLoader.ts'
 import {
   loadPluginOptions,
   substitutePluginVariables,
   substituteUserConfigInContent,
-} from './pluginOptionsStorage.js'
-import type { CommandMetadata, PluginManifest } from './schemas.js'
-import { walkPluginMarkdown } from './walkPluginMarkdown.js'
+} from './pluginOptionsStorage.ts'
+import type { CommandMetadata, PluginManifest } from './schemas.ts'
+import { walkPluginMarkdown } from './walkPluginMarkdown.ts'
 
 // Similar to MarkdownFile but for plugin sources
 type PluginMarkdownFile = {

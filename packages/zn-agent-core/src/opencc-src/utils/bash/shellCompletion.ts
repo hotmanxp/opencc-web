@@ -3,10 +3,10 @@ import {
   type ParseEntry,
   quote,
   tryParseShellCommand,
-} from '../bash/shellQuote.js'
-import { logForDebugging } from '../debug.js'
-import { getShellType } from '../localInstaller.js'
-import * as Shell from '../Shell.js'
+} from '../bash/shellQuote.ts'
+import { logForDebugging } from '../debug.ts'
+import { getShellType } from '../localInstaller.ts'
+import * as Shell from '../Shell.ts'
 
 // Constants
 const MAX_SHELL_COMPLETIONS = 15

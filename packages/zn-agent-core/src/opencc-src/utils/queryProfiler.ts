@@ -27,8 +27,8 @@
  * - query_end: End of query
  */
 
-import { logForDebugging } from './debug.js'
-import { isEnvTruthy } from './envUtils.js'
+import { logForDebugging } from './debug.ts'
+import { isEnvTruthy } from './envUtils.ts'
 import {
   clearProfilerEntries,
   formatMs,
@@ -37,7 +37,7 @@ import {
   getProfilerDisplayName,
   getProfilerEntries,
   getProfilerMarkName,
-} from './profilerBase.js'
+} from './profilerBase.ts'
 
 const PROFILER_SCOPE = 'query'
 

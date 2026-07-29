@@ -11,8 +11,8 @@ import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../../test/sharedMutationLock.js'
-import type { Message } from '../../types/message.js'
-import * as realConfig from '../../utils/config.js'
+import type { Message } from '../../types/message.ts'
+import * as realConfig from '../../utils/config.ts'
 
 const realContext = await import(
   `../../utils/context.js?real=${Date.now()}-${Math.random()}`
@@ -44,7 +44,7 @@ async function importAutoCompact(options: ImportAutoCompactOptions = {}) {
   mock.module('../../utils/context.js', () => ({ ...realContext }))
   mock.module('../../utils/errors.js', () => ({ ...realErrors }))
   mock.module('../../utils/tokens.js', () => ({ ...realTokens }))
-  mock.module('../../utils/config.js', () => ({
+  mock.module('../../utils/config.ts', () => ({
     ...realConfig,
     getGlobalConfig: () => ({ autoCompactEnabled: true }),
   }))
@@ -136,7 +136,7 @@ afterEach(async () => {
     mock.module('../../utils/context.js', () => ({ ...realContext }))
     mock.module('../../utils/errors.js', () => ({ ...realErrors }))
     mock.module('../../utils/tokens.js', () => ({ ...realTokens }))
-    mock.module('../../utils/config.js', () => ({ ...realConfig }))
+    mock.module('../../utils/config.ts', () => ({ ...realConfig }))
     mock.module('./compact.js', () => ({ ...realCompact }))
     mock.module('./sessionMemoryCompact.js', () => ({
       ...realSessionMemoryCompact,

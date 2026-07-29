@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { buildWorkerScript } from './workerScript.js'
+import { buildWorkerScript } from './workerScript.ts'
 
 describe('buildWorkerScript', () => {
   test('produces a string containing the user script wrapped in IIFE', () => {

@@ -1,8 +1,8 @@
 import { describe, expect, test } from 'bun:test'
 
-import { tryReadEditedImageAttachment } from './attachments.js'
-import { ImageProcessorUnavailableError } from '../tools/FileReadTool/imageProcessor.js'
-import type { readImageWithTokenBudget } from '../tools/FileReadTool/FileReadTool.js'
+import { tryReadEditedImageAttachment } from './attachments.ts'
+import { ImageProcessorUnavailableError } from '../tools/FileReadTool/imageProcessor.ts'
+import type { readImageWithTokenBudget } from '../tools/FileReadTool/FileReadTool.ts'
 
 // Pins the chosen contract for background edited-image attachments: they DEGRADE
 // (return null) on any read/compress failure instead of throwing, so a missing

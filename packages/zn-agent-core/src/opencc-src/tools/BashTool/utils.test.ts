@@ -7,7 +7,7 @@ import {
   formatOutput,
   createContentSummary,
   selectFailureOutput,
-} from './utils.js'
+} from './utils.ts'
 
 // =============================================================================
 // stripEmptyLines — removes leading/trailing blank lines

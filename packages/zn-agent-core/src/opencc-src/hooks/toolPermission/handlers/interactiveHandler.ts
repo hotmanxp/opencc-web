@@ -8,27 +8,27 @@ import {
   CHANNEL_PERMISSION_REQUEST_METHOD,
   type ChannelPermissionRequestParams,
   gateChannelServer,
-} from '../../../services/mcp/channelNotification.js'
-import type { ChannelPermissionCallbacks } from '../../../services/mcp/channelPermissions.js'
+} from '../../../services/mcp/channelNotification.ts'
+import type { ChannelPermissionCallbacks } from '../../../services/mcp/channelPermissions.ts'
 import {
   shortRequestId,
   truncateForPreview,
-} from '../../../services/mcp/channelPermissions.js'
-import type { ConnectedMCPServer } from '../../../services/mcp/types.js'
-import { executeAsyncClassifierCheck } from '../../../tools/BashTool/bashPermissions.js'
-import { BASH_TOOL_NAME } from '../../../tools/BashTool/toolName.js'
+} from '../../../services/mcp/channelPermissions.ts'
+import type { ConnectedMCPServer } from '../../../services/mcp/types.ts'
+import { executeAsyncClassifierCheck } from '../../../tools/BashTool/bashPermissions.ts'
+import { BASH_TOOL_NAME } from '../../../tools/BashTool/toolName.ts'
 import {
   clearClassifierChecking,
   setClassifierApproval,
   setClassifierChecking,
   setYoloClassifierApproval,
-} from '../../../utils/classifierApprovals.js'
-import { errorMessage } from '../../../utils/errors.js'
-import type { PermissionDecision } from '../../../utils/permissions/PermissionResult.js'
-import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js'
-import { hasPermissionsToUseTool } from '../../../utils/permissions/permissions.js'
-import type { PermissionContext } from '../PermissionContext.js'
-import { createResolveOnce } from '../PermissionContext.js'
+} from '../../../utils/classifierApprovals.ts'
+import { errorMessage } from '../../../utils/errors.ts'
+import type { PermissionDecision } from '../../../utils/permissions/PermissionResult.ts'
+import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.ts'
+import { hasPermissionsToUseTool } from '../../../utils/permissions/permissions.ts'
+import type { PermissionContext } from '../PermissionContext.ts'
+import { createResolveOnce } from '../PermissionContext.ts'
 
 type InteractivePermissionParams = {
   ctx: PermissionContext

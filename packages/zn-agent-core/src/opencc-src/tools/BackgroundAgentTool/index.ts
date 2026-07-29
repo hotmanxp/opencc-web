@@ -3,4 +3,4 @@ export {
   BACKGROUND_AGENT_TOOL_NAME,
   type BackgroundAgentInput,
   type BackgroundAgentOutput,
-} from './BackgroundAgentTool.js'
+} from './BackgroundAgentTool.ts'

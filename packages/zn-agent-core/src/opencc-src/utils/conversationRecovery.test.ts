@@ -5,13 +5,13 @@ import { join } from 'node:path'
 import {
   clearInvokedSkills,
   getInvokedSkills,
-} from '../bootstrap/state.js'
+} from '../bootstrap/state.ts'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../test/sharedMutationLock.js'
-import * as realUdsClient from './udsClient.js'
-import * as realProviders from './model/providers.js'
+import * as realUdsClient from './udsClient.ts'
+import * as realProviders from './model/providers.ts'
 
 const tempDirs: string[] = []
 const originalSimple = process.env.CLAUDE_CODE_SIMPLE
@@ -136,8 +136,8 @@ afterEach(async () => {
     clearInvokedSkills()
     // Bun 1.3.13 can leave restored module instances visible to later test
     // files, so re-register full exports after using partial module mocks.
-    mock.module('./udsClient.js', () => realUdsClient)
-    mock.module('./model/providers.js', () => realProviders)
+    mock.module('./udsClient.ts', () => realUdsClient)
+    mock.module('./model/providers.ts', () => realProviders)
     if (originalSimple === undefined) {
       delete process.env.CLAUDE_CODE_SIMPLE
     } else {
@@ -161,7 +161,7 @@ afterEach(async () => {
 
 async function importFreshConversationRecovery() {
   mock.restore()
-  mock.module('./model/providers.js', () => ({
+  mock.module('./model/providers.ts', () => ({
     ...realProviders,
     getAPIProvider: () => {
       if (process.env.CLAUDE_CODE_USE_GITHUB) return 'github'

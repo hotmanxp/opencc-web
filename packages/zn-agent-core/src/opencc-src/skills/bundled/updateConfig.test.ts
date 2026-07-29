@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { afterEach, expect, test } from 'bun:test'
 
-import { clearBundledSkills, getBundledSkills } from '../bundledSkills.js'
-import { registerUpdateConfigSkill } from './updateConfig.js'
+import { clearBundledSkills, getBundledSkills } from '../bundledSkills.ts'
+import { registerUpdateConfigSkill } from './updateConfig.ts'
 
 afterEach(() => {
   clearBundledSkills()

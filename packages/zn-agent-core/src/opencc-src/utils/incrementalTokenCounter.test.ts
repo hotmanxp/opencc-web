@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { describe, expect, it, beforeEach } from 'bun:test'
-import { roughTokenCountEstimationForMessages } from '../services/tokenEstimation.js'
-import { IncrementalTokenCounter, CounterFactory } from './incrementalTokenCounter.js'
-import type { Message } from '../types/message.js'
+import { roughTokenCountEstimationForMessages } from '../services/tokenEstimation.ts'
+import { IncrementalTokenCounter, CounterFactory } from './incrementalTokenCounter.ts'
+import type { Message } from '../types/message.ts'
 
 function createMessage(content: string): Message {
   return {

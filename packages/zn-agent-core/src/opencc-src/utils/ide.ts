@@ -7,25 +7,25 @@ import { createConnection } from 'net'
 import * as os from 'os'
 import { basename, join, sep as pathSeparator, resolve } from 'path'
 import { logEvent } from 'src/services/analytics/index.js'
-import { getIsScrollDraining, getOriginalCwd } from '../bootstrap/state.js'
-import { callIdeRpc } from '../services/mcp/client.js'
+import { getIsScrollDraining, getOriginalCwd } from '../bootstrap/state.ts'
+import { callIdeRpc } from '../services/mcp/client.ts'
 import type {
   ConnectedMCPServer,
   MCPServerConnection,
-} from '../services/mcp/types.js'
-import { getGlobalConfig, saveGlobalConfig } from './config.js'
-import { env } from './env.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
+} from '../services/mcp/types.ts'
+import { getGlobalConfig, saveGlobalConfig } from './config.ts'
+import { env } from './env.ts'
+import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.ts'
 import {
   execFileNoThrow,
   execFileNoThrowWithCwd,
   execSyncWithDefaults_DEPRECATED,
-} from './execFileNoThrow.js'
-import { getFsImplementation } from './fsOperations.js'
-import { getAncestorPidsAsync } from './genericProcessUtils.js'
-import { isJetBrainsPluginInstalledCached } from './jetbrains.js'
-import { logError } from './log.js'
-import { getPlatform } from './platform.js'
+} from './execFileNoThrow.ts'
+import { getFsImplementation } from './fsOperations.ts'
+import { getAncestorPidsAsync } from './genericProcessUtils.ts'
+import { isJetBrainsPluginInstalledCached } from './jetbrains.ts'
+import { logError } from './log.ts'
+import { getPlatform } from './platform.ts'
 import { lt } from './semver.js'
 
 // Lazy: IdeOnboardingDialog.tsx pulls React/ink; only needed in interactive onboarding path
@@ -34,17 +34,17 @@ const ideOnboardingDialog =
   (): typeof import('src/components/IdeOnboardingDialog.js') =>
     require('src/components/IdeOnboardingDialog.js')
 
-import { createAbortController } from './abortController.js'
-import { logForDebugging } from './debug.js'
-import { envDynamic } from './envDynamic.js'
-import { errorMessage, isFsInaccessible } from './errors.js'
+import { createAbortController } from './abortController.ts'
+import { logForDebugging } from './debug.ts'
+import { envDynamic } from './envDynamic.ts'
+import { errorMessage, isFsInaccessible } from './errors.ts'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import {
   checkWSLDistroMatch,
   WindowsToWSLConverter,
-} from './idePathConversion.js'
-import { sleep } from './sleep.js'
-import { jsonParse } from './slowOperations.js'
+} from './idePathConversion.ts'
+import { sleep } from './sleep.ts'
+import { jsonParse } from './slowOperations.ts'
 
 function isProcessRunning(pid: number): boolean {
   try {

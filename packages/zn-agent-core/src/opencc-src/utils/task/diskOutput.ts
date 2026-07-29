@@ -10,14 +10,14 @@ import {
   writeFile,
 } from 'fs/promises'
 import { join } from 'path'
-import { getSessionId } from '../../bootstrap/state.js'
-import { getErrnoCode } from '../errors.js'
-import { readFileRange, tailFile } from '../fsOperations.js'
-import { logError } from '../log.js'
-import { getProjectTempDir } from '../permissions/filesystem.js'
-import { getClaudeConfigHomeDir } from '../envUtils.js'
-import { sanitizePath } from '../sessionStoragePortable.js'
-import { getOriginalCwd } from '../../bootstrap/state.js'
+import { getSessionId } from '../../bootstrap/state.ts'
+import { getErrnoCode } from '../errors.ts'
+import { readFileRange, tailFile } from '../fsOperations.ts'
+import { logError } from '../log.ts'
+import { getProjectTempDir } from '../permissions/filesystem.ts'
+import { getClaudeConfigHomeDir } from '../envUtils.ts'
+import { sanitizePath } from '../sessionStoragePortable.ts'
+import { getOriginalCwd } from '../../bootstrap/state.ts'
 
 // SECURITY: O_NOFOLLOW prevents following symlinks when opening task output files.
 // Without this, an attacker in the sandbox could create symlinks in the tasks directory

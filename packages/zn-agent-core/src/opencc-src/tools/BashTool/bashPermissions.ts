@@ -4,53 +4,53 @@ import type { z } from 'zod/v4'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../../services/analytics/index.js'
-import type { ToolPermissionContext, ToolUseContext } from '../../Tool.js'
-import type { PendingClassifierCheck } from '../../types/permissions.js'
-import { count } from '../../utils/array.js'
+} from '../../services/analytics/index.ts'
+import type { ToolPermissionContext, ToolUseContext } from '../../Tool.ts'
+import type { PendingClassifierCheck } from '../../types/permissions.ts'
+import { count } from '../../utils/array.ts'
 import {
   checkSemantics,
   nodeTypeId,
   type Redirect,
   type SimpleCommand,
-} from '../../utils/bash/ast.js'
+} from '../../utils/bash/ast.ts'
 import {
   type CommandPrefixResult,
   extractOutputRedirections,
   getCommandSubcommandPrefix,
   splitCommand_DEPRECATED,
-} from '../../utils/bash/commands.js'
-import { tryParseShellCommand } from '../../utils/bash/shellQuote.js'
-import { getCwd } from '../../utils/cwd.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { isEnvTruthy, runtimeFeature } from '../../utils/envUtils.js'
-import { AbortError } from '../../utils/errors.js'
+} from '../../utils/bash/commands.ts'
+import { tryParseShellCommand } from '../../utils/bash/shellQuote.ts'
+import { getCwd } from '../../utils/cwd.ts'
+import { logForDebugging } from '../../utils/debug.ts'
+import { isEnvTruthy, runtimeFeature } from '../../utils/envUtils.ts'
+import { AbortError } from '../../utils/errors.ts'
 import type {
   ClassifierBehavior,
   ClassifierResult,
-} from '../../utils/permissions/bashClassifier.js'
+} from '../../utils/permissions/bashClassifier.ts'
 import {
   classifyBashCommand,
   getBashPromptAllowDescriptions,
   getBashPromptAskDescriptions,
   getBashPromptDenyDescriptions,
   isClassifierPermissionsEnabled,
-} from '../../utils/permissions/bashClassifier.js'
+} from '../../utils/permissions/bashClassifier.ts'
 import type {
   PermissionDecisionReason,
   PermissionResult,
-} from '../../utils/permissions/PermissionResult.js'
+} from '../../utils/permissions/PermissionResult.ts'
 import type {
   PermissionRule,
   PermissionRuleValue,
-} from '../../utils/permissions/PermissionRule.js'
-import { extractRules } from '../../utils/permissions/PermissionUpdate.js'
-import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js'
-import { permissionRuleValueToString } from '../../utils/permissions/permissionRuleParser.js'
+} from '../../utils/permissions/PermissionRule.ts'
+import { extractRules } from '../../utils/permissions/PermissionUpdate.ts'
+import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.ts'
+import { permissionRuleValueToString } from '../../utils/permissions/permissionRuleParser.ts'
 import {
   createPermissionRequestMessage,
   getRuleByContentsForTool,
-} from '../../utils/permissions/permissions.js'
+} from '../../utils/permissions/permissions.ts'
 import {
   parsePermissionRule,
   type ShellPermissionRule,
@@ -58,28 +58,28 @@ import {
   permissionRuleExtractPrefix as sharedPermissionRuleExtractPrefix,
   suggestionForExactCommand as sharedSuggestionForExactCommand,
   suggestionForPrefix as sharedSuggestionForPrefix,
-} from '../../utils/permissions/shellRuleMatching.js'
-import { getPlatform } from '../../utils/platform.js'
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
-import { windowsPathToPosixPath } from '../../utils/windowsPaths.js'
+} from '../../utils/permissions/shellRuleMatching.ts'
+import { getPlatform } from '../../utils/platform.ts'
+import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.ts'
+import { jsonStringify } from '../../utils/slowOperations.ts'
+import { windowsPathToPosixPath } from '../../utils/windowsPaths.ts'
 import { BashTool } from './BashTool.js'
 import {
   analyzeBashCommand,
   type BashCommandAnalysis,
   type LegacyShellParseAnalysis,
   logLegacyParserLimitationOnce,
-} from './bashCommandAnalysis.js'
-import { checkCommandOperatorPermissions } from './bashCommandHelpers.js'
+} from './bashCommandAnalysis.ts'
+import { checkCommandOperatorPermissions } from './bashCommandHelpers.ts'
 import {
   bashCommandIsSafeAsync_DEPRECATED,
   checkBashCommitMessagePolicy,
   stripSafeHeredocSubstitutions,
-} from './bashSecurity.js'
-import { checkPermissionMode } from './modeValidation.js'
-import { checkPathConstraints } from './pathValidation.js'
-import { checkSedConstraints } from './sedValidation.js'
-import { shouldUseSandbox } from './shouldUseSandbox.js'
+} from './bashSecurity.ts'
+import { checkPermissionMode } from './modeValidation.ts'
+import { checkPathConstraints } from './pathValidation.ts'
+import { checkSedConstraints } from './sedValidation.ts'
+import { shouldUseSandbox } from './shouldUseSandbox.ts'
 
 // DCE cliff: Bun's feature() evaluator has a per-function complexity budget.
 // bashToolHasPermission is right at the limit. `import { X as Y }` aliases

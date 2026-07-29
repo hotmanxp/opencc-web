@@ -1,18 +1,18 @@
-import type { UserMessage } from "../../types/message.js"
-import { ASK_USER_QUESTION_TOOL_NAME } from "../../tools/AskUserQuestionTool/prompt.js"
-import { ExitPlanModeV2Tool } from "../../tools/ExitPlanModeTool/ExitPlanModeV2Tool.js"
-import { FileEditTool } from "../../tools/FileEditTool/FileEditTool.js"
-import { FileWriteTool } from "../../tools/FileWriteTool/FileWriteTool.js"
-import { FILE_READ_TOOL_NAME } from "../../tools/FileReadTool/prompt.js"
-import { GLOB_TOOL_NAME } from "../../tools/GlobTool/prompt.js"
-import { GREP_TOOL_NAME } from "../../tools/GrepTool/prompt.js"
-import { EXPLORE_AGENT } from "../../tools/AgentTool/built-in/exploreAgent.js"
-import { PLAN_AGENT } from "../../tools/AgentTool/built-in/planAgent.js"
-import { areExplorePlanAgentsEnabled } from "../../tools/AgentTool/builtInAgents.js"
-import { getCurrentProjectConfig } from "../config.js"
-import { hasEmbeddedSearchTools } from "../embeddedTools.js"
-import { getPewterLedgerVariant, getPlanModeV2AgentCount, getPlanModeV2ExploreAgentCount, isPlanModeInterviewPhaseEnabled } from "../planModeV2.js"
-import { createUserMessage } from './factories.js'
+import type { UserMessage } from "../../types/message.ts"
+import { ASK_USER_QUESTION_TOOL_NAME } from "../../tools/AskUserQuestionTool/prompt.ts"
+import { ExitPlanModeV2Tool } from "../../tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts"
+import { FileEditTool } from "../../tools/FileEditTool/FileEditTool.ts"
+import { FileWriteTool } from "../../tools/FileWriteTool/FileWriteTool.ts"
+import { FILE_READ_TOOL_NAME } from "../../tools/FileReadTool/prompt.ts"
+import { GLOB_TOOL_NAME } from "../../tools/GlobTool/prompt.ts"
+import { GREP_TOOL_NAME } from "../../tools/GrepTool/prompt.ts"
+import { EXPLORE_AGENT } from "../../tools/AgentTool/built-in/exploreAgent.ts"
+import { PLAN_AGENT } from "../../tools/AgentTool/built-in/planAgent.ts"
+import { areExplorePlanAgentsEnabled } from "../../tools/AgentTool/builtInAgents.ts"
+import { getCurrentProjectConfig } from "../config.ts"
+import { hasEmbeddedSearchTools } from "../embeddedTools.ts"
+import { getPewterLedgerVariant, getPlanModeV2AgentCount, getPlanModeV2ExploreAgentCount, isPlanModeInterviewPhaseEnabled } from "../planModeV2.ts"
+import { createUserMessage } from './factories.ts'
 
 export function wrapInSystemReminder(content: string): string {
   return `<system-reminder>\n${content}\n</system-reminder>`

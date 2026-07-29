@@ -22,14 +22,14 @@ import { createServer, type Server, Socket } from 'node:net'
 import {
   BG_PROTO,
   encodeFrame,
-} from './protocol.js'
+} from './protocol.ts'
 import {
   DaemonError,
   connectToPath,
   getSockPath,
   pingDaemon,
   requestOnPath,
-} from './socket.js'
+} from './socket.ts'
 
 // ---------- Fake server helpers ----------
 

@@ -3,8 +3,8 @@ import { afterEach, expect, test } from 'bun:test'
 import {
   clearBuiltinPlugins,
   getBuiltinPluginDefinition,
-} from '../builtinPlugins.js'
-import { registerKarpathyGuidelinesPlugin } from './karpathyGuidelines.js'
+} from '../builtinPlugins.ts'
+import { registerKarpathyGuidelinesPlugin } from './karpathyGuidelines.ts'
 
 afterEach(() => {
   clearBuiltinPlugins()

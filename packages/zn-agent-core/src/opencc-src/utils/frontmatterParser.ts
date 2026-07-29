@@ -3,9 +3,9 @@
  * Extracts and parses YAML frontmatter between --- delimiters
  */
 
-import { logForDebugging } from './debug.js'
-import type { HooksSettings } from './settings/types.js'
-import { parseYaml } from './yaml.js'
+import { logForDebugging } from './debug.ts'
+import type { HooksSettings } from './settings/types.ts'
+import { parseYaml } from './yaml.ts'
 
 export type FrontmatterData = {
   // YAML can return null for keys with no value (e.g., "key:" with nothing after)

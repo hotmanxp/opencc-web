@@ -8,8 +8,8 @@ import { describe, expect, test } from 'bun:test'
 import React from 'react'
 
 import { createRoot } from '../../ink.js'
-import { analyzeScript } from './staticAnalyzer.js'
-import type { ScriptAnalysis } from './staticAnalyzer.js'
+import { analyzeScript } from './staticAnalyzer.ts'
+import type { ScriptAnalysis } from './staticAnalyzer.ts'
 import { WorkflowPermissionDialog } from './WorkflowPermissionDialog.js'
 
 const SYNC_START = '\x1B[?2026h'

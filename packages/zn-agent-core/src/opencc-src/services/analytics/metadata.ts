@@ -8,37 +8,37 @@
 
 import { extname } from 'path'
 import memoize from 'lodash-es/memoize.js'
-import { env, getHostPlatformForAnalytics } from '../../utils/env.js'
-import { envDynamic } from '../../utils/envDynamic.js'
-import { getModelBetas } from '../../utils/betas.js'
-import { getMainLoopModel } from '../../utils/model/model.js'
+import { env, getHostPlatformForAnalytics } from '../../utils/env.ts'
+import { envDynamic } from '../../utils/envDynamic.ts'
+import { getModelBetas } from '../../utils/betas.ts'
+import { getMainLoopModel } from '../../utils/model/model.ts'
 import {
   getSessionId,
   getIsInteractive,
   getKairosActive,
   getClientType,
   getParentSessionId as getParentSessionIdFromState,
-} from '../../bootstrap/state.js'
-import { isEnvTruthy } from '../../utils/envUtils.js'
-import { isOfficialMcpUrl } from '../mcp/officialRegistry.js'
-import { isClaudeAISubscriber, getSubscriptionType } from '../../utils/auth.js'
-import { getRepoRemoteHash } from '../../utils/git.js'
+} from '../../bootstrap/state.ts'
+import { isEnvTruthy } from '../../utils/envUtils.ts'
+import { isOfficialMcpUrl } from '../mcp/officialRegistry.ts'
+import { isClaudeAISubscriber, getSubscriptionType } from '../../utils/auth.ts'
+import { getRepoRemoteHash } from '../../utils/git.ts'
 import {
   getWslVersion,
   getLinuxDistroInfo,
   detectVcs,
-} from '../../utils/platform.js'
+} from '../../utils/platform.ts'
 import type { CoreUserData } from 'src/utils/user.js'
-import { getAgentContext } from '../../utils/agentContext.js'
-import type { EnvironmentMetadata } from '../../types/generated/events_mono/claude_code/v1/claude_code_internal_event.js'
-import type { PublicApiAuth } from '../../types/generated/events_mono/common/v1/auth.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
+import { getAgentContext } from '../../utils/agentContext.ts'
+import type { EnvironmentMetadata } from '../../types/generated/events_mono/claude_code/v1/claude_code_internal_event.ts'
+import type { PublicApiAuth } from '../../types/generated/events_mono/common/v1/auth.ts'
+import { jsonStringify } from '../../utils/slowOperations.ts'
 import {
   getAgentId,
   getParentSessionId as getTeammateParentSessionId,
   getTeamName,
   isTeammate,
-} from '../../utils/teammate.js'
+} from '../../utils/teammate.ts'
 import { feature } from 'bun:bundle'
 
 /**

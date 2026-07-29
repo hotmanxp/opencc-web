@@ -1,7 +1,7 @@
 import { expect, test } from 'bun:test'
 import type { ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
 import { BashTool } from '../../tools/BashTool/BashTool.js'
-import { _test } from './toolOrchestration.js'
+import { _test } from './toolOrchestration.ts'
 
 function bashToolUse(id: string, command: string): ToolUseBlock {
   return {

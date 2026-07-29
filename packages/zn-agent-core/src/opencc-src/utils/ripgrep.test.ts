@@ -2,7 +2,7 @@
 import { expect, test } from 'bun:test'
 import path from 'path'
 
-import { resolveRipgrepConfig, wrapRipgrepUnavailableError } from './ripgrep.js'
+import { resolveRipgrepConfig, wrapRipgrepUnavailableError } from './ripgrep.ts'
 
 const MOCK_BUILTIN_PATH = path.normalize(
   process.platform === 'win32'

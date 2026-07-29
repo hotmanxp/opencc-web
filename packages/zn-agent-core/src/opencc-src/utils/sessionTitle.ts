@@ -13,15 +13,15 @@
  */
 
 import { z } from 'zod/v4'
-import { getIsNonInteractiveSession } from '../bootstrap/state.js'
-import { logEvent } from '../services/analytics/index.js'
-import { queryHaiku } from '../services/api/claude.js'
-import type { Message } from '../types/message.js'
-import { logForDebugging } from './debug.js'
-import { safeParseJSON } from './json.js'
-import { lazySchema } from './lazySchema.js'
-import { extractTextContent } from './messages.js'
-import { asSystemPrompt } from './systemPromptType.js'
+import { getIsNonInteractiveSession } from '../bootstrap/state.ts'
+import { logEvent } from '../services/analytics/index.ts'
+import { queryHaiku } from '../services/api/claude.ts'
+import type { Message } from '../types/message.ts'
+import { logForDebugging } from './debug.ts'
+import { safeParseJSON } from './json.ts'
+import { lazySchema } from './lazySchema.ts'
+import { extractTextContent } from './messages.ts'
+import { asSystemPrompt } from './systemPromptType.ts'
 
 const MAX_CONVERSATION_TEXT = 1000
 

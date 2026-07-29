@@ -1,5 +1,5 @@
 import { beforeEach, expect, mock, test } from 'bun:test'
-import { getEmptyToolPermissionContext } from './Tool.js'
+import { getEmptyToolPermissionContext } from './Tool.ts'
 
 let lspConnected = false
 

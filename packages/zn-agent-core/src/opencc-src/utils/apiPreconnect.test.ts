@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
 
-import * as actualProviders from './model/providers.js'
+import * as actualProviders from './model/providers.ts'
 
 const originalEnv = { ...process.env }
 const originalFetch = globalThis.fetch
@@ -9,7 +9,7 @@ const originalFetch = globalThis.fetch
 function mockProviders(overrides: Record<string, unknown>): void {
   // Spread actualProviders so the override only swaps the named exports —
   // other tests that import providers.js transitively still see the rest.
-  mock.module('./model/providers.js', () => ({
+  mock.module('./model/providers.ts', () => ({
     ...actualProviders,
     ...overrides,
   }))

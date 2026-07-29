@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 import { withMockMacro } from 'src/test/mockMacro.js'
-import { getNativeInstallUnavailableFix } from './doctorDiagnostic.js'
+import { getNativeInstallUnavailableFix } from './doctorDiagnostic.ts'
 
 describe('getNativeInstallUnavailableFix', () => {
   test('uses npm guidance when this build has no native distribution', () => {

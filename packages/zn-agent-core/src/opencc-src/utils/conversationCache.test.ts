@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach } from 'bun:test'
-import { createConversationCache, type Message } from './conversationCache.js'
+import { createConversationCache, type Message } from './conversationCache.ts'
 
 describe('conversationCache', () => {
   let cache: ReturnType<typeof createConversationCache>

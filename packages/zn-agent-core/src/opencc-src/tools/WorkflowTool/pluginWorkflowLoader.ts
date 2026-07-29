@@ -1,8 +1,8 @@
 // src/tools/WorkflowTool/pluginWorkflowLoader.ts
 import * as fs from 'fs/promises'
 import * as path from 'path'
-import { parseMetaFromScript } from './parseMetaFromScript.js'
-import type { Workflow } from './types.js'
+import { parseMetaFromScript } from './parseMetaFromScript.ts'
+import type { Workflow } from './types.ts'
 
 const SCRIPT_BYTE_LIMIT = 52_428_800 // 50 MB; matches upstream
 

@@ -3,8 +3,8 @@ import { describe, expect, test, beforeEach } from 'bun:test'
 import { mkdtempSync, mkdirSync, writeFileSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { WorkflowRegistry } from './registry.js'
-import { clearPluginWorkflowsCache } from './pluginWorkflowLoader.js'
+import { WorkflowRegistry } from './registry.ts'
+import { clearPluginWorkflowsCache } from './pluginWorkflowLoader.ts'
 
 describe('WorkflowRegistry user script loading', () => {
   let tmp: string

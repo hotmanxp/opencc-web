@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
 
-import { getEmptyToolPermissionContext } from '../../Tool.js'
-import { applyPermissionUpdate } from './PermissionUpdate.js'
+import { getEmptyToolPermissionContext } from '../../Tool.ts'
+import { applyPermissionUpdate } from './PermissionUpdate.ts'
 
 describe('applyPermissionUpdate', () => {
   test('removeRules normalizes stored rules before matching removals', () => {

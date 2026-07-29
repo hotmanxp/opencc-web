@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { isSnipBoundaryMessage, projectSnippedView } from './snipProjection.js'
+import { isSnipBoundaryMessage, projectSnippedView } from './snipProjection.ts'
 
 describe('isSnipBoundaryMessage', () => {
   test('returns true for message with snipMetadata', () => {

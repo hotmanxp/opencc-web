@@ -4,20 +4,20 @@ import { mkdir, mkdtemp, rm, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
 
-import { getEmptyToolPermissionContext } from '../../Tool.js'
+import { getEmptyToolPermissionContext } from '../../Tool.ts'
 import {
   getOriginalCwd,
   setAllowedSettingSources,
   setOriginalCwd,
-} from '../../bootstrap/state.js'
-import { resetSettingsCache } from '../../utils/settings/settingsCache.js'
-import { SETTING_SOURCES } from '../../utils/settings/constants.js'
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
+} from '../../bootstrap/state.ts'
+import { resetSettingsCache } from '../../utils/settings/settingsCache.ts'
+import { SETTING_SOURCES } from '../../utils/settings/constants.ts'
+import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.ts'
 import {
   bashToolHasPermission,
   checkSandboxAutoAllow,
   stripAllLeadingEnvVars,
-} from './bashPermissions.js'
+} from './bashPermissions.ts'
 
 const originalSandboxMethods = {
   isSandboxingEnabled: SandboxManager.isSandboxingEnabled,

@@ -13,11 +13,11 @@ import {
 function makeUnwritablePlanPath(): string {
   return join(tmpdir(), `oc-exitplan-missing-${Date.now()}-${Math.random()}`, 'plan.md')
 }
-import { getEmptyToolPermissionContext } from '../../Tool.js'
+import { getEmptyToolPermissionContext } from '../../Tool.ts'
 import {
   setDynamicTeamContext,
   clearDynamicTeamContext,
-} from '../../utils/teammate.js'
+} from '../../utils/teammate.ts'
 
 type ExitPlanModeModule = typeof import('./ExitPlanModeV2Tool.js')
 type ExitPlanModeTool = ExitPlanModeModule['ExitPlanModeV2Tool']

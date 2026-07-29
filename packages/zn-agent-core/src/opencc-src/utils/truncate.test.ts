@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { truncate, truncateToWidth, truncatePathMiddle } from './truncate.js'
+import { truncate, truncateToWidth, truncatePathMiddle } from './truncate.ts'
 
 describe('truncate utilities', () => {
   test('truncate returns empty string for undefined input', () => {

@@ -1,24 +1,24 @@
 import reject from 'lodash-es/reject.js'
 import { z } from 'zod/v4'
-import { performMCPOAuthFlow } from '../../services/mcp/auth.js'
+import { performMCPOAuthFlow } from '../../services/mcp/auth.ts'
 import {
   clearMcpAuthCache,
   reconnectMcpServerImpl,
-} from '../../services/mcp/client.js'
+} from '../../services/mcp/client.ts'
 import {
   buildMcpToolName,
   getMcpPrefix,
-} from '../../services/mcp/mcpStringUtils.js'
+} from '../../services/mcp/mcpStringUtils.ts'
 import type {
   McpHTTPServerConfig,
   McpSSEServerConfig,
   ScopedMcpServerConfig,
-} from '../../services/mcp/types.js'
-import type { Tool } from '../../Tool.js'
-import { errorMessage } from '../../utils/errors.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { logMCPDebug, logMCPError } from '../../utils/log.js'
-import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
+} from '../../services/mcp/types.ts'
+import type { Tool } from '../../Tool.ts'
+import { errorMessage } from '../../utils/errors.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { logMCPDebug, logMCPError } from '../../utils/log.ts'
+import type { PermissionDecision } from '../../utils/permissions/PermissionResult.ts'
 
 const inputSchema = lazySchema(() => z.object({}))
 type InputSchema = ReturnType<typeof inputSchema>

@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'bun:test'
 import vm from 'node:vm'
-import { createWorkflowVmContext, type WorkflowApi } from './vmContext.js'
+import { createWorkflowVmContext, type WorkflowApi } from './vmContext.ts'
 
 // Cast helper: test stubs have looser return types than WorkflowApi's strict
 // Promise<unknown> signature. The runtime contract is what we test; the cast

@@ -23,9 +23,9 @@
  * See PR discussion 2956440848.
  */
 
-import { jsonRedactor, redactSensitiveInfo } from '../../utils/redaction.js'
-import { jsonStringify } from '../../utils/slowOperations.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.js'
+import { jsonRedactor, redactSensitiveInfo } from '../../utils/redaction.ts'
+import { jsonStringify } from '../../utils/slowOperations.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../analytics/growthbook.ts'
 
 /**
  * GrowthBook runtime gate — separate from the channels gate (tengu_harbor)

@@ -1,7 +1,7 @@
-import type { SettingsJson } from '../../utils/settings/types.js'
-import type { PermissionMode } from '../../utils/permissions/PermissionMode.js'
-import { getAgentModel } from '../../utils/model/agent.js'
-import { isModelAlias } from '../../utils/model/aliases.js'
+import type { SettingsJson } from '../../utils/settings/types.ts'
+import type { PermissionMode } from '../../utils/permissions/PermissionMode.ts'
+import { getAgentModel } from '../../utils/model/agent.ts'
+import { isModelAlias } from '../../utils/model/aliases.ts'
 
 /**
  * Provider override resolved from agent routing config.

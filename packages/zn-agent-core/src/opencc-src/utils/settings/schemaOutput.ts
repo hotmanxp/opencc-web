@@ -1,6 +1,6 @@
 import { toJSONSchema } from 'zod/v4'
-import { jsonStringify } from '../slowOperations.js'
-import { SettingsSchema } from './types.js'
+import { jsonStringify } from '../slowOperations.ts'
+import { SettingsSchema } from './types.ts'
 
 export function generateSettingsJSONSchema(): string {
   const jsonSchema = toJSONSchema(SettingsSchema(), { unrepresentable: 'any' })

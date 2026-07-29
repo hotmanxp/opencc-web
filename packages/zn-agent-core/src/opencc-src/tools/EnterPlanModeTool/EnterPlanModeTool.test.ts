@@ -1,5 +1,5 @@
 import { describe, expect, test } from 'bun:test'
-import { EnterPlanModeTool } from './EnterPlanModeTool.js'
+import { EnterPlanModeTool } from './EnterPlanModeTool.ts'
 
 describe('EnterPlanModeTool', () => {
   test('description matches upstream 2.1.177 hybrid text (preserved permission framing + user sign-off guidance)', async () => {

@@ -4,8 +4,8 @@ import { tmpdir } from 'os'
 import { join, resolve } from 'path'
 import { afterEach, describe, expect, test } from 'bun:test'
 
-import { setInlinePlugins } from '../../bootstrap/state.js'
-import type { LoadedPlugin } from '../../types/plugin.js'
+import { setInlinePlugins } from '../../bootstrap/state.ts'
+import type { LoadedPlugin } from '../../types/plugin.ts'
 import {
   clearPluginCache,
   createPluginFromPath,
@@ -13,8 +13,8 @@ import {
   mergePluginSources,
   resolveExistingPluginComponentPath,
   resolvePluginComponentPath,
-} from './pluginLoader.js'
-import { clearPluginSkillsCache, getPluginSkills } from './loadPluginCommands.js'
+} from './pluginLoader.ts'
+import { clearPluginSkillsCache, getPluginSkills } from './loadPluginCommands.ts'
 
 afterEach(() => {
   setInlinePlugins([])

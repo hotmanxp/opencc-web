@@ -25,94 +25,94 @@ import { getSlashCommandToolSkills } from './commands.js'
 import {
   LOCAL_COMMAND_STDERR_TAG,
   LOCAL_COMMAND_STDOUT_TAG,
-} from './constants/xml.js'
+} from './constants/xml.ts'
 import {
   getModelUsage,
   getTotalAPIDuration,
   getTotalCost,
-} from './cost-tracker.js'
+} from './cost-tracker.ts'
 import type { CanUseToolFn } from './hooks/useCanUseTool.js'
 import { loadMemoryPrompt } from './memdir/memdir.js'
 import { hasAutoMemPathOverride } from './memdir/paths.js'
-import { query as defaultQuery } from './query.js'
-import { categorizeRetryableAPIError } from './services/api/errors.js'
-import type { AutoCompactTrackingState } from './services/compact/autoCompact.js'
-import { snipCompactIfNeeded } from './services/compact/snipCompact.js'
-import { isSnipBoundaryMessage } from './services/compact/snipProjection.js'
-import type { MCPServerConnection } from './services/mcp/types.js'
+import { query as defaultQuery } from './query.ts'
+import { categorizeRetryableAPIError } from './services/api/errors.ts'
+import type { AutoCompactTrackingState } from './services/compact/autoCompact.ts'
+import { snipCompactIfNeeded } from './services/compact/snipCompact.ts'
+import { isSnipBoundaryMessage } from './services/compact/snipProjection.ts'
+import type { MCPServerConnection } from './services/mcp/types.ts'
 import type { AppState } from './state/AppState.js'
-import { type Tools, type ToolUseContext, toolMatchesName } from './Tool.js'
-import type { AgentDefinition } from './tools/AgentTool/loadAgentsDir.js'
-import { SYNTHETIC_OUTPUT_TOOL_NAME } from './tools/SyntheticOutputTool/SyntheticOutputTool.js'
-import type { Message } from './types/message.js'
-import type { OrphanedPermission } from './types/textInputTypes.js'
-import { createAbortController } from './utils/abortController.js'
-import { validateArrayOf, assertNonEmptyString, assertObject, assertFunction } from './utils/validation.js'
-import { invalidateRemovedToolSchemas } from './utils/toolSchemaCache.js'
-import type { AttributionState } from './utils/commitAttribution.js'
-import { getGlobalConfig } from './utils/config.js'
-import { getCwd } from './utils/cwd.js'
-import { isBareMode, isEnvTruthy } from './utils/envUtils.js'
-import { logForDebugging } from './utils/debug.js'
-import { getFastModeState } from './utils/fastMode.js'
+import { type Tools, type ToolUseContext, toolMatchesName } from './Tool.ts'
+import type { AgentDefinition } from './tools/AgentTool/loadAgentsDir.ts'
+import { SYNTHETIC_OUTPUT_TOOL_NAME } from './tools/SyntheticOutputTool/SyntheticOutputTool.ts'
+import type { Message } from './types/message.ts'
+import type { OrphanedPermission } from './types/textInputTypes.ts'
+import { createAbortController } from './utils/abortController.ts'
+import { validateArrayOf, assertNonEmptyString, assertObject, assertFunction } from './utils/validation.ts'
+import { invalidateRemovedToolSchemas } from './utils/toolSchemaCache.ts'
+import type { AttributionState } from './utils/commitAttribution.ts'
+import { getGlobalConfig } from './utils/config.ts'
+import { getCwd } from './utils/cwd.ts'
+import { isBareMode, isEnvTruthy } from './utils/envUtils.ts'
+import { logForDebugging } from './utils/debug.ts'
+import { getFastModeState } from './utils/fastMode.ts'
 import {
   type FileHistoryState,
   fileHistoryEnabled,
   fileHistoryMakeSnapshot,
-} from './utils/fileHistory.js'
+} from './utils/fileHistory.ts'
 import {
   cloneFileStateCache,
   type FileStateCache,
-} from './utils/fileStateCache.js'
-import { headlessProfilerCheckpoint } from './utils/headlessProfiler.js'
-import { registerStructuredOutputEnforcement } from './utils/hooks/hookHelpers.js'
-import { getInMemoryErrors } from './utils/log.js'
+} from './utils/fileStateCache.ts'
+import { headlessProfilerCheckpoint } from './utils/headlessProfiler.ts'
+import { registerStructuredOutputEnforcement } from './utils/hooks/hookHelpers.ts'
+import { getInMemoryErrors } from './utils/log.ts'
 import {
   countToolCalls,
   isCompactBoundaryMessage,
   SYNTHETIC_MESSAGES,
-} from './utils/messages.js'
+} from './utils/messages.ts'
 import {
   getMainLoopModel,
   parseUserSpecifiedModel,
-} from './utils/model/model.js'
-import { loadAllPluginsCacheOnly } from './utils/plugins/pluginLoader.js'
+} from './utils/model/model.ts'
+import { loadAllPluginsCacheOnly } from './utils/plugins/pluginLoader.ts'
 import {
   type ProcessUserInputContext,
   processUserInput,
 } from './utils/processUserInput/processUserInput.js'
-import { fetchSystemPromptParts } from './utils/queryContext.js'
-import { setCwd } from './utils/Shell.js'
+import { fetchSystemPromptParts } from './utils/queryContext.ts'
+import { setCwd } from './utils/Shell.ts'
 import {
   flushSessionStorage,
   recordTranscript,
-} from './utils/sessionStorage.js'
-import { asSystemPrompt } from './utils/systemPromptType.js'
-import { resolveThemeSetting } from './utils/systemTheme.js'
+} from './utils/sessionStorage.ts'
+import { asSystemPrompt } from './utils/systemPromptType.ts'
+import { resolveThemeSetting } from './utils/systemTheme.ts'
 import {
   shouldEnableThinkingByDefault,
   type ThinkingConfig,
-} from './utils/thinking.js'
-import { selectableUserMessagesFilter } from './utils/messageFilters.js'
+} from './utils/thinking.ts'
+import { selectableUserMessagesFilter } from './utils/messageFilters.ts'
 
 import {
   localCommandOutputToSDKAssistantMessage,
   toSDKCompactMetadata,
-} from './utils/messages/mappers.js'
+} from './utils/messages/mappers.ts'
 import {
   buildSystemInitMessage,
   sdkCompatToolName,
-} from './utils/messages/systemInit.js'
+} from './utils/messages/systemInit.ts'
 import {
   getScratchpadDir,
   isScratchpadEnabled,
-} from './utils/permissions/filesystem.js'
+} from './utils/permissions/filesystem.ts'
 /* eslint-enable @typescript-eslint/no-require-imports */
 import {
   handleOrphanedPermission,
   isResultSuccessful,
   normalizeMessage,
-} from './utils/queryHelpers.js'
+} from './utils/queryHelpers.ts'
 
 // Dead code elimination: conditional import for coordinator mode
 

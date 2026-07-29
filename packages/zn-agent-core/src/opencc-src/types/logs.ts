@@ -1,10 +1,10 @@
 import type { UUID } from 'crypto'
 import type { FileHistorySnapshot } from 'src/utils/fileHistory.js'
 import type { ContentReplacementRecord } from 'src/utils/toolResultStorage.js'
-import type { AgentId } from './ids.js'
-import type { Message } from './message.js'
+import type { AgentId } from './ids.ts'
+import type { Message } from './message.ts'
 // @ts-ignore
-import type { QueueOperationMessage } from './messageQueueTypes.js'
+import type { QueueOperationMessage } from './messageQueueTypes.ts'
 import type { GoalState } from '../services/goal/types.js'
 
 export type SerializedMessage = Message & {

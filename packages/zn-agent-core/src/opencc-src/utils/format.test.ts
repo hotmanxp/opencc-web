@@ -1,5 +1,5 @@
 import { expect, test } from 'bun:test'
-import { formatDuration, formatFileSize, formatSecondsShort } from './format.js'
+import { formatDuration, formatFileSize, formatSecondsShort } from './format.ts'
 
 test('formats sub-second durations with one decimal place', () => {
   // Regression: the < 1s branch was guarded by `ms < 1` (1 millisecond), so

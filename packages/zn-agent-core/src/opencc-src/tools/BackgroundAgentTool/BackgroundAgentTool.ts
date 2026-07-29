@@ -20,17 +20,17 @@ import { randomBytes, randomUUID } from 'node:crypto'
 import { spawn } from 'node:child_process'
 import { platform } from 'node:process'
 import { z } from 'zod/v4'
-import { buildTool } from '../../Tool.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { logError } from '../../utils/log.js'
-import { sleep } from '../../utils/sleep.js'
-import { DaemonError, pingDaemon, requestDaemon } from '../../utils/daemon/socket.js'
+import { buildTool } from '../../Tool.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { logError } from '../../utils/log.ts'
+import { sleep } from '../../utils/sleep.ts'
+import { DaemonError, pingDaemon, requestDaemon } from '../../utils/daemon/socket.ts'
 import {
   BG_PROTO,
   type JobSource,
   type JobShortId,
-} from '../../utils/daemon/protocol.js'
-import {getReplClientId, isBgAgentRuntimeEnabled, markBackgroundAgentDispatched} from '../../utils/daemon/mailbox.js'
+} from '../../utils/daemon/protocol.ts'
+import {getReplClientId, isBgAgentRuntimeEnabled, markBackgroundAgentDispatched} from '../../utils/daemon/mailbox.ts'
 
 export const BACKGROUND_AGENT_TOOL_NAME = 'BackgroundAgent'
 

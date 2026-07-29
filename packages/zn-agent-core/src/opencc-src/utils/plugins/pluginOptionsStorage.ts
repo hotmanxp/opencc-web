@@ -13,20 +13,20 @@
  */
 
 import memoize from 'lodash-es/memoize.js'
-import type { LoadedPlugin } from '../../types/plugin.js'
-import { logForDebugging } from '../debug.js'
-import { logError } from '../log.js'
-import { getSecureStorage } from '../secureStorage/index.js'
+import type { LoadedPlugin } from '../../types/plugin.ts'
+import { logForDebugging } from '../debug.ts'
+import { logError } from '../log.ts'
+import { getSecureStorage } from '../secureStorage/index.ts'
 import {
   getSettings_DEPRECATED,
   updateSettingsForSource,
-} from '../settings/settings.js'
+} from '../settings/settings.ts'
 import {
   type UserConfigSchema,
   type UserConfigValues,
   validateUserConfig,
-} from './mcpbHandler.js'
-import { getPluginDataDir } from './pluginDirectories.js'
+} from './mcpbHandler.ts'
+import { getPluginDataDir } from './pluginDirectories.ts'
 
 export type PluginOptionValues = UserConfigValues
 export type PluginOptionSchema = UserConfigSchema

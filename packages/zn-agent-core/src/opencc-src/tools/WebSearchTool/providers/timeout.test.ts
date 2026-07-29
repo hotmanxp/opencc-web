@@ -4,7 +4,7 @@ import {
   DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS,
   getWebSearchTimeoutMs,
   withWebSearchTimeout,
-} from './timeout.js'
+} from './timeout.ts'
 
 describe('getWebSearchTimeoutMs', () => {
   test('returns the 15 second default', () => {

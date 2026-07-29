@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { describe, expect, test, beforeEach } from 'bun:test'
-import { MCPTool } from './MCPTool.js'
+import { MCPTool } from './MCPTool.ts'
 
 // =============================================================================
 // MCPTool.validateInput — AJV schema validation

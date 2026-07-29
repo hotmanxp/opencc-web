@@ -1,6 +1,6 @@
 import { describe, test, expect } from 'bun:test'
 import type { Question } from '../tools/AskUserQuestionTool/AskUserQuestionTool.js'
-import { computeAutoContinueAnswers } from './autoContinueQuestion.js'
+import { computeAutoContinueAnswers } from './autoContinueQuestion.ts'
 
 const singleQ: Question = {
   question: 'Pick one',

@@ -10,10 +10,10 @@ import {
   resolveOutOfProcessTeammateProvider,
   resolveOutOfProcessTeammateProviderFromCliArgs,
   shouldEnforceModelAllowlist,
-} from './agentRouting.js'
-import { getAgentModel } from '../../utils/model/agent.js'
-import * as agentModelModule from '../../utils/model/agent.js'
-import type { SettingsJson } from '../../utils/settings/types.js'
+} from './agentRouting.ts'
+import { getAgentModel } from '../../utils/model/agent.ts'
+import * as agentModelModule from '../../utils/model/agent.ts'
+import type { SettingsJson } from '../../utils/settings/types.ts'
 
 const baseSettings = {
   agentModels: {

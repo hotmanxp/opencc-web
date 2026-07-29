@@ -3,27 +3,27 @@
  * EXPERIMENT: Session memory compaction
  */
 
-import type { AgentId } from '../../types/ids.js'
-import type { HookResultMessage, Message } from '../../types/message.js'
-import { logForDebugging } from '../../utils/debug.js'
-import { isEnvTruthy } from '../../utils/envUtils.js'
-import { errorMessage } from '../../utils/errors.js'
+import type { AgentId } from '../../types/ids.ts'
+import type { HookResultMessage, Message } from '../../types/message.ts'
+import { logForDebugging } from '../../utils/debug.ts'
+import { isEnvTruthy } from '../../utils/envUtils.ts'
+import { errorMessage } from '../../utils/errors.ts'
 import {
   createCompactBoundaryMessage,
   createUserMessage,
   isCompactBoundaryMessage,
-} from '../../utils/messages.js'
-import { getMainLoopModel } from '../../utils/model/model.js'
-import { getSessionMemoryPath } from '../../utils/permissions/filesystem.js'
-import { processSessionStartHooks } from '../../utils/sessionStart.js'
-import { getTranscriptPath } from '../../utils/sessionStorage.js'
-import { tokenCountFromLastAPIResponse } from '../../utils/tokens.js'
-import { extractDiscoveredToolNames } from '../../utils/toolSearch.js'
+} from '../../utils/messages.ts'
+import { getMainLoopModel } from '../../utils/model/model.ts'
+import { getSessionMemoryPath } from '../../utils/permissions/filesystem.ts'
+import { processSessionStartHooks } from '../../utils/sessionStart.ts'
+import { getTranscriptPath } from '../../utils/sessionStorage.ts'
+import { tokenCountFromLastAPIResponse } from '../../utils/tokens.ts'
+import { extractDiscoveredToolNames } from '../../utils/toolSearch.ts'
 import {
   getDynamicConfig_BLOCKS_ON_INIT,
   getFeatureValue_CACHED_MAY_BE_STALE,
-} from '../analytics/growthbook.js'
-import { logEvent } from '../analytics/index.js'
+} from '../analytics/growthbook.ts'
+import { logEvent } from '../analytics/index.ts'
 import {
   isSessionMemoryEmpty,
   truncateSessionMemoryForCompact,
@@ -38,9 +38,9 @@ import {
   buildPostCompactMessages,
   type CompactionResult,
   createPlanAttachmentIfNeeded,
-} from './compact.js'
-import { estimateMessageTokens } from './microCompact.js'
-import { getCompactUserSummaryMessage } from './prompt.js'
+} from './compact.ts'
+import { estimateMessageTokens } from './microCompact.ts'
+import { getCompactUserSummaryMessage } from './prompt.ts'
 
 /**
  * Configuration for session memory compaction thresholds

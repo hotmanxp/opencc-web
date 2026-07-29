@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'bun:test'
-import { withWorktreeIsolation, cleanupUnchangedWorktree } from './isolation.js'
+import { withWorktreeIsolation, cleanupUnchangedWorktree } from './isolation.ts'
 
 describe('withWorktreeIsolation', () => {
   it('creates a worktree, runs fn, and returns the result', async () => {

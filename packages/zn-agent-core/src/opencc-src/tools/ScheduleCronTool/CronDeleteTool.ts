@@ -1,20 +1,20 @@
 import { z } from 'zod/v4'
-import type { ValidationResult } from '../../Tool.js'
-import { buildTool, type ToolDef } from '../../Tool.js'
+import type { ValidationResult } from '../../Tool.ts'
+import { buildTool, type ToolDef } from '../../Tool.ts'
 import {
   getCronFilePath,
   listAllCronTasks,
   removeCronTasks,
-} from '../../utils/cronTasks.js'
-import { lazySchema } from '../../utils/lazySchema.js'
-import { getTeammateContext } from '../../utils/teammateContext.js'
+} from '../../utils/cronTasks.ts'
+import { lazySchema } from '../../utils/lazySchema.ts'
+import { getTeammateContext } from '../../utils/teammateContext.ts'
 import {
   buildCronDeletePrompt,
   CRON_DELETE_DESCRIPTION,
   CRON_DELETE_TOOL_NAME,
   isDurableCronEnabled,
   isKairosCronEnabled,
-} from './prompt.js'
+} from './prompt.ts'
 import { renderDeleteResultMessage, renderDeleteToolUseMessage } from './UI.js'
 
 const inputSchema = lazySchema(() =>

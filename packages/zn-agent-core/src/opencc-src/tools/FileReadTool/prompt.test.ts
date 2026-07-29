@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { DESCRIPTION } from './prompt.js'
-import { FileReadTool } from './FileReadTool.js'
+import { DESCRIPTION } from './prompt.ts'
+import { FileReadTool } from './FileReadTool.ts'
 
 describe('FileReadTool prompt', () => {
   test('DESCRIPTION matches upstream 2.1.177 canonical text', () => {

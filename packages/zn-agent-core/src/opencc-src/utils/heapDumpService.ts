@@ -13,14 +13,14 @@ import {
   getHeapStatistics,
   type HeapSpaceInfo,
 } from 'v8'
-import { getSessionId } from '../bootstrap/state.js'
-import { logEvent } from '../services/analytics/index.js'
-import { logForDebugging } from './debug.js'
-import { toError } from './errors.js'
-import { getDesktopPath } from './file.js'
-import { getFsImplementation } from './fsOperations.js'
-import { logError } from './log.js'
-import { jsonStringify } from './slowOperations.js'
+import { getSessionId } from '../bootstrap/state.ts'
+import { logEvent } from '../services/analytics/index.ts'
+import { logForDebugging } from './debug.ts'
+import { toError } from './errors.ts'
+import { getDesktopPath } from './file.ts'
+import { getFsImplementation } from './fsOperations.ts'
+import { logError } from './log.ts'
+import { jsonStringify } from './slowOperations.ts'
 
 export type HeapDumpResult = {
   success: boolean

@@ -1,17 +1,17 @@
 // @ts-nocheck
 import * as path from 'path'
 import { pathToFileURL } from 'url'
-import { logForDebugging } from '../../utils/debug.js'
-import { errorMessage } from '../../utils/errors.js'
-import { logError } from '../../utils/log.js'
-import { getAllLspServers } from './config.js'
-import { recordLSPDiagnosticFileActivity } from './LSPDiagnosticRegistry.js'
+import { logForDebugging } from '../../utils/debug.ts'
+import { errorMessage } from '../../utils/errors.ts'
+import { logError } from '../../utils/log.ts'
+import { getAllLspServers } from './config.ts'
+import { recordLSPDiagnosticFileActivity } from './LSPDiagnosticRegistry.ts'
 import {
   createLSPServerInstance,
   type LSPServerInstance,
-} from './LSPServerInstance.js'
+} from './LSPServerInstance.ts'
 // @ts-ignore
-import type { ScopedLspServerConfig } from './types.js'
+import type { ScopedLspServerConfig } from './types.ts'
 /**
  * LSP Server Manager interface returned by createLSPServerManager.
  * Manages multiple LSP server instances and routes requests based on file extensions.

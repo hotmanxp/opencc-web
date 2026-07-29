@@ -1,20 +1,20 @@
-import { isEnvTruthy } from '../../utils/envUtils.js'
-import { getMaxOutputLength } from '../../utils/shell/outputLimits.js'
+import { isEnvTruthy } from '../../utils/envUtils.ts'
+import { getMaxOutputLength } from '../../utils/shell/outputLimits.ts'
 import {
   getPowerShellEdition,
   type PowerShellEdition,
-} from '../../utils/shell/powershellDetection.js'
+} from '../../utils/shell/powershellDetection.ts'
 import {
   getDefaultBashTimeoutMs,
   getEffectiveBashTimeoutMs,
   getMaxBashTimeoutMs,
-} from '../../utils/timeouts.js'
-import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.js'
-import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
-import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/prompt.js'
-import { GLOB_TOOL_NAME } from '../GlobTool/prompt.js'
-import { GREP_TOOL_NAME } from '../GrepTool/prompt.js'
-import { POWERSHELL_TOOL_NAME } from './toolName.js'
+} from '../../utils/timeouts.ts'
+import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.ts'
+import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.ts'
+import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/prompt.ts'
+import { GLOB_TOOL_NAME } from '../GlobTool/prompt.ts'
+import { GREP_TOOL_NAME } from '../GrepTool/prompt.ts'
+import { POWERSHELL_TOOL_NAME } from './toolName.ts'
 
 export function getDefaultTimeoutMs(): number {
   return getDefaultBashTimeoutMs()

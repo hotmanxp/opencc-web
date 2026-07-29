@@ -4,7 +4,7 @@ import { describe, expect, it, mock } from 'bun:test'
 import {
   detectUltracodeTrigger,
   checkUltracodeKeywordState,
-} from './ultracode.js'
+} from './ultracode.ts'
 
 // These tests previously used `mock.module('./settings/settings.js', ...)`
 // to control the settings shape. bun's mock.module leaks across test files
@@ -68,7 +68,7 @@ describe('ultracode core utilities', () => {
           calls.push({ name, meta })
         },
       }))
-      const mod = await import(`./ultracode.js?ts=${Date.now()}-${Math.random()}`)
+      const mod = await import(`./ultracode.ts?ts=${Date.now()}-${Math.random()}`)
       mod.detectUltracodeTrigger('ultracode fix the bug', 'ultracode', true)
       const workflowCalls = calls.filter(c => c.name === 'tengu_workflow_keyword')
       expect(workflowCalls.length).toBeGreaterThan(0)
@@ -82,7 +82,7 @@ describe('ultracode core utilities', () => {
           calls.push({ name, meta })
         },
       }))
-      const mod = await import(`./ultracode.js?ts=${Date.now()}-${Math.random()}`)
+      const mod = await import(`./ultracode.ts?ts=${Date.now()}-${Math.random()}`)
       mod.detectUltracodeTrigger('fix the bug', 'ultracode', true)
       const workflowCalls = calls.filter(c => c.name === 'tengu_workflow_keyword')
       expect(workflowCalls.length).toBe(0)

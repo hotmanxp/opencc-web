@@ -1,8 +1,8 @@
 // @ts-nocheck
 import { describe, expect, test } from 'bun:test'
-import { getCwd } from '../../utils/cwd.js'
-import { relativizeContentLine } from '../../utils/path.js'
-import { normalizeCountLine } from './normalizeCountLine.js'
+import { getCwd } from '../../utils/cwd.ts'
+import { relativizeContentLine } from '../../utils/path.ts'
+import { normalizeCountLine } from './normalizeCountLine.ts'
 
 // =============================================================================
 // normalizeCountLine — converts `rg -c` output lines into uniform "relpath:count"

@@ -1,7 +1,7 @@
 // src/tools/WorkflowTool/bundled/deep-research-script.test.ts
 import { describe, expect, it } from 'bun:test'
 import * as vm from 'node:vm'
-import { deepResearchSource } from './deepResearch.js'
+import { deepResearchSource } from './deepResearch.ts'
 
 /**
  * Integration tests for the deepResearch bundled workflow script.

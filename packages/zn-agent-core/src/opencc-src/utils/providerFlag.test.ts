@@ -5,7 +5,7 @@ import {
   applyProviderFlag,
   applyProviderFlagFromArgs,
   VALID_PROVIDERS,
-} from './providerFlag.js'
+} from './providerFlag.ts'
 
 const ENV_KEYS = [
   'CLAUDE_CODE_USE_OPENAI',

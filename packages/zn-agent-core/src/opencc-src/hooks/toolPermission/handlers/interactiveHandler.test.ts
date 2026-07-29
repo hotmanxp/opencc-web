@@ -2,7 +2,7 @@ import { describe, expect, mock, test } from 'bun:test'
 import {
   handleInteractivePermission,
   type InteractivePermissionParams,
-} from './interactiveHandler.js'
+} from './interactiveHandler.ts'
 
 // Pin the watchdog pause/resume wiring: resume must fire exactly once per
 // terminal path (including aborts and setup throws), so a future path that

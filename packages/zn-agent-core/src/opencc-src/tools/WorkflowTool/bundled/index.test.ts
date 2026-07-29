@@ -1,6 +1,6 @@
 // src/tools/WorkflowTool/bundled/index.test.ts
 import { describe, expect, test } from 'bun:test'
-import { initBundledWorkflows, getBundledSource } from './index.js'
+import { initBundledWorkflows, getBundledSource } from './index.ts'
 
 describe('bundled workflow registration', () => {
   test('initBundledWorkflows registers deep-research into the registry', () => {

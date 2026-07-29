@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'bun:test'
-import { runWorkflowInWorker } from './schedulerBridge.js'
-import { LocalWorkflowTask } from './LocalWorkflowTask.js'
-import type { Workflow } from '../../tools/WorkflowTool/types.js'
+import { runWorkflowInWorker } from './schedulerBridge.ts'
+import { LocalWorkflowTask } from './LocalWorkflowTask.ts'
+import type { Workflow } from '../../tools/WorkflowTool/types.ts'
 
 describe('runWorkflowInWorker', () => {
   test('runs a trivial script and returns its result', async () => {

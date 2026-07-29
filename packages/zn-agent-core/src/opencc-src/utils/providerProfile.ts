@@ -11,7 +11,7 @@ import {
   type RecommendationGoal,
 } from './providerRecommendation.ts'
 import { getOllamaChatBaseUrl } from './providerDiscovery.ts'
-import { isEnvTruthy } from './envUtils.js'
+import { isEnvTruthy } from './envUtils.ts'
 
 export const PROFILE_FILE_NAME = '.claude-profile.json'
 

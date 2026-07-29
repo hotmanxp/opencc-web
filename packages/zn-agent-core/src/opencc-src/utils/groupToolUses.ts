@@ -1,7 +1,7 @@
 // @ts-nocheck
 import type { BetaToolUseBlock } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/messages/messages.mjs'
-import type { Tools } from '../Tool.js'
+import type { Tools } from '../Tool.ts'
 import type {
   GroupedToolUseMessage,
   NormalizedAssistantMessage,
@@ -9,7 +9,7 @@ import type {
   NormalizedUserMessage,
   ProgressMessage,
   RenderableMessage,
-} from '../types/message.js'
+} from '../types/message.ts'
 
 export type MessageWithoutProgress = NormalizedMessage
 

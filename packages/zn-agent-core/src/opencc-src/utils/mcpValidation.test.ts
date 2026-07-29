@@ -1,9 +1,9 @@
 import { afterEach, beforeEach, describe, expect, mock, test } from 'bun:test'
-import { mcpContentNeedsTruncation, truncateMcpContent } from './mcpValidation.js'
-import * as realGrowthbook from '../services/analytics/growthbook.js'
-import * as realTokenEstimation from '../services/tokenEstimation.js'
-import * as realImageResizer from './imageResizer.js'
-import * as realLog from './log.js'
+import { mcpContentNeedsTruncation, truncateMcpContent } from './mcpValidation.ts'
+import * as realGrowthbook from '../services/analytics/growthbook.ts'
+import * as realTokenEstimation from '../services/tokenEstimation.ts'
+import * as realImageResizer from './imageResizer.ts'
+import * as realLog from './log.ts'
 
 // 60_000-char inputs: real roughTokenCountEstimation returns 15_000, which exceeds
 // DEFAULT_MAX_MCP_OUTPUT_TOKENS * MCP_TOKEN_COUNT_THRESHOLD_FACTOR (25_000 * 0.5 = 12_500),
@@ -15,30 +15,30 @@ const tokenState = {
 }
 
 function applyMocks() {
-  mock.module('../services/analytics/growthbook.js', () => ({
+  mock.module('../services/analytics/growthbook.ts', () => ({
     // Only intercept the mcpValidation flag (tengu_satin_quoll); return defaultValue
     // for all other flags so this mock does not affect unrelated test files.
     getFeatureValue_CACHED_MAY_BE_STALE: (flag: string, defaultValue: unknown) =>
       flag === 'tengu_satin_quoll' ? null : defaultValue,
   }))
-  mock.module('../services/tokenEstimation.js', () => ({
+  mock.module('../services/tokenEstimation.ts', () => ({
     // Spread the real module so roughTokenCountEstimation is never replaced.
     // Only countMessagesTokensWithAPI is controlled per-test via tokenState.
     ...realTokenEstimation,
     countMessagesTokensWithAPI: async () => tokenState.apiReturn,
   }))
-  mock.module('./imageResizer.js', () => ({
+  mock.module('./imageResizer.ts', () => ({
     compressImageBlock: async (block: unknown) => block,
   }))
-  mock.module('./log.js', () => ({ logError: () => {} }))
+  mock.module('./log.ts', () => ({ logError: () => {} }))
 }
 
 function restoreMocks() {
   mock.restore()
-  mock.module('../services/analytics/growthbook.js', () => realGrowthbook)
-  mock.module('../services/tokenEstimation.js', () => realTokenEstimation)
-  mock.module('./imageResizer.js', () => realImageResizer)
-  mock.module('./log.js', () => realLog)
+  mock.module('../services/analytics/growthbook.ts', () => realGrowthbook)
+  mock.module('../services/tokenEstimation.ts', () => realTokenEstimation)
+  mock.module('./imageResizer.ts', () => realImageResizer)
+  mock.module('./log.ts', () => realLog)
 }
 
 // ---------- SEC-04: fail-closed on null ----------

@@ -3,20 +3,20 @@ import type { BetaToolUnion } from '@anthropic-ai/sdk/resources/beta/messages.js
 import {
   getLastApiCompletionTimestamp,
   setLastApiCompletionTimestamp,
-} from '../bootstrap/state.js'
-import { STRUCTURED_OUTPUTS_BETA_HEADER } from '../constants/betas.js'
-import type { QuerySource } from '../constants/querySource.js'
+} from '../bootstrap/state.ts'
+import { STRUCTURED_OUTPUTS_BETA_HEADER } from '../constants/betas.ts'
+import type { QuerySource } from '../constants/querySource.ts'
 import {
   getAttributionHeader,
   getCLISyspromptPrefix,
-} from '../constants/system.js'
-import { logEvent } from '../services/analytics/index.js'
-import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/metadata.js'
-import { getAPIMetadata } from '../services/api/claude.js'
-import { getAnthropicClient } from '../services/api/client.js'
-import { getModelBetas, modelSupportsStructuredOutputs } from './betas.js'
-import { computeFingerprint } from './fingerprint.js'
-import { normalizeModelStringForAPI } from './model/model.js'
+} from '../constants/system.ts'
+import { logEvent } from '../services/analytics/index.ts'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/metadata.ts'
+import { getAPIMetadata } from '../services/api/claude.ts'
+import { getAnthropicClient } from '../services/api/client.ts'
+import { getModelBetas, modelSupportsStructuredOutputs } from './betas.ts'
+import { computeFingerprint } from './fingerprint.ts'
+import { normalizeModelStringForAPI } from './model/model.ts'
 
 type MessageParam = Anthropic.MessageParam
 type TextBlockParam = Anthropic.TextBlockParam

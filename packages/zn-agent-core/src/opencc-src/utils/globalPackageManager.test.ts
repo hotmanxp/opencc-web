@@ -4,7 +4,7 @@ import {
   getGlobalInstallArgs,
   pickFallbackPackageManager,
   selectOwningPackageManager,
-} from './globalPackageManager.js'
+} from './globalPackageManager.ts'
 
 describe('getGlobalInstallArgs', () => {
   const spec = '@zn-ai/opencc@latest'

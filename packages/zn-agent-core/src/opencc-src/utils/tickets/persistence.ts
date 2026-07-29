@@ -1,8 +1,8 @@
 // src/utils/tickets/persistence.ts
 import fs from 'node:fs/promises'
 import path from 'node:path'
-import { TICKET_LIST_PATH } from './paths.js'
-import { logForDebugging } from '../debug.js'
+import { TICKET_LIST_PATH } from './paths.ts'
+import { logForDebugging } from '../debug.ts'
 
 const MAX_ENTRIES = 20
 

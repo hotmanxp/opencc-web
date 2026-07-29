@@ -4,7 +4,7 @@ import {
   formatQueryLifecycleLogMessage,
   getQueryTerminalReason,
   type QueryLifecycleContext,
-} from './queryLifecycle.js'
+} from './queryLifecycle.ts'
 
 describe('query lifecycle log formatting', () => {
   test('keeps timeout context abort reason distinct from abort signal reason', () => {

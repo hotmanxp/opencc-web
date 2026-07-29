@@ -1,13 +1,13 @@
 import { z } from 'zod/v4'
-import { mcpInfoFromString } from '../../services/mcp/mcpStringUtils.js'
-import { lazySchema } from '../lazySchema.js'
-import { permissionRuleValueFromString } from '../permissions/permissionRuleParser.js'
-import { capitalize } from '../stringUtils.js'
+import { mcpInfoFromString } from '../../services/mcp/mcpStringUtils.ts'
+import { lazySchema } from '../lazySchema.ts'
+import { permissionRuleValueFromString } from '../permissions/permissionRuleParser.ts'
+import { capitalize } from '../stringUtils.ts'
 import {
   getCustomValidation,
   isBashPrefixTool,
   isFilePatternTool,
-} from './toolValidationConfig.js'
+} from './toolValidationConfig.ts'
 
 /**
  * Checks if a character at a given index is escaped (preceded by odd number of backslashes).

@@ -1,16 +1,16 @@
 // @ts-nocheck
 import { afterEach, beforeEach, describe, expect, spyOn, test } from 'bun:test'
-import type { ProjectConfig } from './config.js'
+import type { ProjectConfig } from './config.ts'
 
 // Cache-bust the config module per test so each test gets a fresh
 // TEST_PROJECT_CONFIG_FOR_TESTING singleton AND fresh spyOn bindings.
 // bun:test's mock.module is process-global and not reverted by mock.restore(),
 // so per-test cache-busting is the only reliable way to scope the spy.
 async function importFreshConfig() {
-  return import(`./config.js?ts=${Date.now()}-${Math.random()}`)
+  return import(`./config.ts?ts=${Date.now()}-${Math.random()}`)
 }
 
-function resetSingleton(mod: typeof import('./config.js')): ProjectConfig {
+function resetSingleton(mod: typeof import('./config.ts')): ProjectConfig {
   const cfg = mod.getCurrentProjectConfig() as ProjectConfig
   cfg.allowedTools = []
   cfg.mcpContextUris = []
@@ -28,7 +28,7 @@ function resetSingleton(mod: typeof import('./config.js')): ProjectConfig {
 }
 
 describe('getCurrentProjectConfig — array field guards (v2.1.200 startup-crash fix)', () => {
-  let mod: typeof import('./config.js')
+  let mod: typeof import('./config.ts')
   let saveSpy: ReturnType<typeof spyOn>
 
   beforeEach(async () => {

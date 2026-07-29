@@ -1,11 +1,11 @@
-import type { ToolPermissionContext } from '../../Tool.js'
-import { logForDebugging } from '../debug.js'
-import type { PermissionMode } from './PermissionMode.js'
+import type { ToolPermissionContext } from '../../Tool.ts'
+import { logForDebugging } from '../debug.ts'
+import type { PermissionMode } from './PermissionMode.ts'
 import {
   getAutoModeUnavailableReason,
   isAutoModeGateEnabled,
   transitionPermissionMode,
-} from './permissionSetup.js'
+} from './permissionSetup.ts'
 
 // Checks both the cached isAutoModeAvailable (set at startup by
 // verifyAutoModeGateAccess) and the live isAutoModeGateEnabled() — these can

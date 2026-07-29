@@ -1,4 +1,4 @@
-import { getSettingsForSource } from '../settings/settings.js'
+import { getSettingsForSource } from '../settings/settings.ts'
 
 /**
  * Plugin names locked by org policy (policySettings.enabledPlugins).

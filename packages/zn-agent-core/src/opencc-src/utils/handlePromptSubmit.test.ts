@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
-import { getCommandQueue, resetCommandQueue } from './messageQueueManager.js'
+import { getCommandQueue, resetCommandQueue } from './messageQueueManager.ts'
 
 describe('handlePromptSubmit', () => {
   beforeEach(() => {

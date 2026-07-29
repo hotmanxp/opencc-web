@@ -6,7 +6,7 @@
 // realSpawner.test.ts (integration with schema validation).
 
 import { describe, expect, it } from 'bun:test'
-import { findFirstBalancedJsonValue } from './textJsonExtractor.js'
+import { findFirstBalancedJsonValue } from './textJsonExtractor.ts'
 
 describe('findFirstBalancedJsonValue', () => {
   describe('object values', () => {

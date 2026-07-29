@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   OFFICIAL_GITHUB_ORG,
   validateOfficialNameSource,
-} from './schemas.js'
+} from './schemas.ts'
 
 const RESERVED = 'claude-code-marketplace'
 

@@ -5,7 +5,7 @@ import {
   isAboveMaxActiveMessagesLimit,
   resolveMaxActiveMessagesLimit,
   shouldCompactActiveMessageHistory,
-} from './maxActiveMessages.js'
+} from './maxActiveMessages.ts'
 
 const SAVED_ENV = {
   OPENCLAUDE_MAX_ACTIVE_MESSAGES_HARD_CAP:

@@ -1,9 +1,9 @@
 import { describe, expect, test, mock } from 'bun:test'
-import { DEFAULT_QUERY_HARD_MAX_MS } from './QueryGuard.js'
+import { DEFAULT_QUERY_HARD_MAX_MS } from './QueryGuard.ts'
 import {
   getQueryGuardOptionsFromEnv,
   MAX_CONFIGURABLE_QUERY_HARD_MAX_MS,
-} from './queryGuardConfig.js'
+} from './queryGuardConfig.ts'
 
 describe('query guard config', () => {
   test('uses defaults when query hard max env is absent or empty', () => {

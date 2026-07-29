@@ -1,10 +1,10 @@
-import { AGENT_TOOL_NAME } from '../../tools/AgentTool/constants.js'
-import { ASK_USER_QUESTION_TOOL_NAME } from '../../tools/AskUserQuestionTool/prompt.js'
-import { ENTER_PLAN_MODE_TOOL_NAME } from '../../tools/EnterPlanModeTool/constants.js'
-import { EXIT_PLAN_MODE_TOOL_NAME } from '../../tools/ExitPlanModeTool/constants.js'
-import { SKILL_TOOL_NAME } from '../../tools/SkillTool/constants.js'
-import { getIsGit } from '../../utils/git.js'
-import { registerBundledSkill } from '../bundledSkills.js'
+import { AGENT_TOOL_NAME } from '../../tools/AgentTool/constants.ts'
+import { ASK_USER_QUESTION_TOOL_NAME } from '../../tools/AskUserQuestionTool/prompt.ts'
+import { ENTER_PLAN_MODE_TOOL_NAME } from '../../tools/EnterPlanModeTool/constants.ts'
+import { EXIT_PLAN_MODE_TOOL_NAME } from '../../tools/ExitPlanModeTool/constants.ts'
+import { SKILL_TOOL_NAME } from '../../tools/SkillTool/constants.ts'
+import { getIsGit } from '../../utils/git.ts'
+import { registerBundledSkill } from '../bundledSkills.ts'
 
 const MIN_AGENTS = 5
 const MAX_AGENTS = 30

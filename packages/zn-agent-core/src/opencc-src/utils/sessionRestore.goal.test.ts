@@ -8,7 +8,7 @@ import type { AppState } from '../state/AppState.js'
 const { restoreSessionStateFromLog } = await import('./sessionRestore.js')
 const { createAttachmentMessage } = await import('./attachments.js')
 const { getSessionId } = await import('../bootstrap/state.js')
-import type { Message } from '../types/message.js'
+import type { Message } from '../types/message.ts'
 
 function makeAppState(): AppState {
   return {

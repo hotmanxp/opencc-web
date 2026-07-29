@@ -9,7 +9,7 @@
  * - Connect / response timeouts surface as `DaemonError(ETIMEOUT)`.
  * - Connection drops before response surface as `DaemonError(ENOCONN)`.
  *
- * The frame codec and zod schemas live in `./protocol.js` (T2). The
+ * The frame codec and zod schemas live in `./protocol.ts` (T2). The
  * transport just shuttles bytes and converts net-layer errors into the
  * daemon's typed error codes so callers (`claude agents`, `--bg` flag,
  * `/background` slash) can branch on `err.code` instead of sniffing
@@ -33,7 +33,7 @@ import {
   encodeFrame,
   type BGRequest,
   type BGResponse,
-} from './protocol.js'
+} from './protocol.ts'
 
 // ---------- Error type ----------
 

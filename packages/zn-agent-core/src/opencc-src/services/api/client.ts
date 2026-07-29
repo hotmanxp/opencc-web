@@ -14,20 +14,20 @@ import {
   type OpenAIEffortLevel,
 } from 'src/utils/effort.js'
 import { getUserAgent } from 'src/utils/http.js'
-import { shouldUseFirstPartyAnthropicAuth } from './authRouting.js'
+import { shouldUseFirstPartyAnthropicAuth } from './authRouting.ts'
 import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
-} from '../../utils/model/providers.js'
+} from '../../utils/model/providers.ts'
 import { getProxyFetchOptions } from 'src/utils/proxy.js'
 import {
   getIsNonInteractiveSession,
   getSessionId,
-} from '../../bootstrap/state.js'
-import { getOauthConfig } from '../../constants/oauth.js'
-import { isDebugToStdErr, logForDebugging } from '../../utils/debug.js'
-import { isEnvTruthy } from '../../utils/envUtils.js'
-import { importOptionalRuntimeModule } from '../../utils/optionalRuntimeModule.js'
+} from '../../bootstrap/state.ts'
+import { getOauthConfig } from '../../constants/oauth.ts'
+import { isDebugToStdErr, logForDebugging } from '../../utils/debug.ts'
+import { isEnvTruthy } from '../../utils/envUtils.ts'
+import { importOptionalRuntimeModule } from '../../utils/optionalRuntimeModule.ts'
 
 type OptionalRuntimeImporter = typeof importOptionalRuntimeModule
 

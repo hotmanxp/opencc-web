@@ -1,4 +1,4 @@
-import { DEFAULT_QUERY_HARD_MAX_MS } from './QueryGuard.js'
+import { DEFAULT_QUERY_HARD_MAX_MS } from './QueryGuard.ts'
 
 // Constants for timeout values
 const DEFAULT_TIMEOUT_MS = 120_000 // 2 minutes

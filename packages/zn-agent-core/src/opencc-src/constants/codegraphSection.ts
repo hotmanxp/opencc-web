@@ -1,6 +1,6 @@
-import { pwd } from '../utils/cwd.js'
-import { hasCodegraphIndex } from '../utils/codegraph.js'
-import { systemPromptSection } from './systemPromptSections.js'
+import { pwd } from '../utils/cwd.ts'
+import { hasCodegraphIndex } from '../utils/codegraph.ts'
+import { systemPromptSection } from './systemPromptSections.ts'
 
 // Keep in sync with the CodeGraph section in AGENTS.md.
 //

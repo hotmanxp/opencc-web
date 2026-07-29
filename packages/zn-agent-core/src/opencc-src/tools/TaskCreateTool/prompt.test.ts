@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
-import { DESCRIPTION } from './prompt.js'
-import { TaskCreateTool } from './TaskCreateTool.js'
+import { DESCRIPTION } from './prompt.ts'
+import { TaskCreateTool } from './TaskCreateTool.ts'
 
 describe('TaskCreate description sync (upstream 2.1.177)', () => {
   test('description matches HYBRID final string (preserves metadata mention + adds UP track-progress steer)', () => {

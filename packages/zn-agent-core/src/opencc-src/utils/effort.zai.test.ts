@@ -3,7 +3,7 @@ import {
   modelLooksZaiCompatible,
   normalizeZaiReasoningEffort,
   supportsZaiReasoningEffort,
-} from './effort.js'
+} from './effort.ts'
 
 describe('supportsZaiReasoningEffort', () => {
   test('passes glm-5.2 (canonical id)', () => {

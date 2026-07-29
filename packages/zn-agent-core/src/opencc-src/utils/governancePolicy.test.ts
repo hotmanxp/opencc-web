@@ -2,13 +2,13 @@ import { afterEach, beforeEach, expect, test } from 'bun:test'
 import {
   getAllowedSettingSources,
   setAllowedSettingSources,
-} from '../bootstrap/state.js'
+} from '../bootstrap/state.ts'
 import {
   SETTING_SOURCES,
   type SettingSource,
-} from './settings/constants.js'
-import { resetSettingsCache } from './settings/settingsCache.js'
-import type { SettingsJson } from './settings/types.js'
+} from './settings/constants.ts'
+import { resetSettingsCache } from './settings/settingsCache.ts'
+import type { SettingsJson } from './settings/types.ts'
 type GovernancePolicyModule = typeof import('./governancePolicy.js')
 
 let originalAllowedSettingSources: ReturnType<typeof getAllowedSettingSources>

@@ -5,7 +5,7 @@
 // references them via the index.ts re-export. These types let the SDK API
 // surface match sdk.d.ts so validate-externals drift check passes.
 
-import type { SdkMcpToolDefinition } from './runtimeTypes.js'
+import type { SdkMcpToolDefinition } from './runtimeTypes.ts'
 
 export type QueryOptions = {
   cwd: string

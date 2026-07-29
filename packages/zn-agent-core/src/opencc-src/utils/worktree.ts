@@ -12,37 +12,37 @@ import {
 } from 'fs/promises'
 import ignore from 'ignore'
 import { basename, dirname, join } from 'path'
-import { saveCurrentProjectConfig } from './config.js'
-import { getCwd } from './cwd.js'
-import { logForDebugging } from './debug.js'
-import { errorMessage, getErrnoCode } from './errors.js'
-import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
-import { parseGitConfigValue } from './git/gitConfigParser.js'
+import { saveCurrentProjectConfig } from './config.ts'
+import { getCwd } from './cwd.ts'
+import { logForDebugging } from './debug.ts'
+import { errorMessage, getErrnoCode } from './errors.ts'
+import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.ts'
+import { parseGitConfigValue } from './git/gitConfigParser.ts'
 import {
   getCommonDir,
   readWorktreeHeadSha,
   resolveGitDir,
   resolveRef,
-} from './git/gitFilesystem.js'
+} from './git/gitFilesystem.ts'
 import {
   findCanonicalGitRoot,
   findGitRoot,
   getBranch,
   getDefaultBranch,
   gitExe,
-} from './git.js'
+} from './git.ts'
 import {
   executeWorktreeCreateHook,
   executeWorktreeRemoveHook,
   hasWorktreeCreateHook,
-} from './hooks.js'
-import { containsPathTraversal } from './path.js'
-import { getPlatform } from './platform.js'
+} from './hooks.ts'
+import { containsPathTraversal } from './path.ts'
+import { getPlatform } from './platform.ts'
 import {
   getInitialSettings,
   getRelativeSettingsFilePathForSource,
-} from './settings/settings.js'
-import { sleep } from './sleep.js'
+} from './settings/settings.ts'
+import { sleep } from './sleep.ts'
 import { isInITerm2 } from './swarm/backends/detection.js'
 
 const VALID_WORKTREE_SLUG_SEGMENT = /^[a-zA-Z0-9._-]+$/

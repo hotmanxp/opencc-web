@@ -21,49 +21,49 @@
  */
 
 import { APIError } from '@anthropic-ai/sdk'
-import { logForDebugging } from '../../../utils/debug.js'
-import { isEnvTruthy } from '../../../utils/envUtils.js'
+import { logForDebugging } from '../../../utils/debug.ts'
+import { isEnvTruthy } from '../../../utils/envUtils.ts'
 import {
   normalizeZaiReasoningEffort,
   supportsZaiReasoningEffort,
-} from '../../../utils/effort.js'
+} from '../../../utils/effort.ts'
 import {
   createThinkTagFilter,
   stripThinkTags,
-} from '../thinkTagSanitizer.js'
-import { type AnthropicStreamEvent, type AnthropicUsage, type ShimCreateParams, convertAnthropicMessagesToResponsesInput } from '../codexShim.js'
-import { compressToolHistory } from '../compressToolHistory.js'
-import { fetchWithProxyRetry } from '../fetchWithProxyRetry.js'
+} from '../thinkTagSanitizer.ts'
+import { type AnthropicStreamEvent, type AnthropicUsage, type ShimCreateParams, convertAnthropicMessagesToResponsesInput } from '../codexShim.ts'
+import { compressToolHistory } from '../compressToolHistory.ts'
+import { fetchWithProxyRetry } from '../fetchWithProxyRetry.ts'
 import {
   isLocalProviderUrl,
   resolveProviderRequest,
-} from '../providerConfig.js'
+} from '../providerConfig.ts'
 import {
   buildOpenAICompatibilityErrorMessage,
   classifyOpenAIHttpFailure,
   classifyOpenAINetworkFailure,
-} from '../openaiErrorClassification.js'
-import { sanitizeSchemaForOpenAICompat } from '../../../utils/schemaSanitizer.js'
-import { redactSecretValueForDisplay } from '../../../utils/providerProfile.js'
+} from '../openaiErrorClassification.ts'
+import { sanitizeSchemaForOpenAICompat } from '../../../utils/schemaSanitizer.ts'
+import { redactSecretValueForDisplay } from '../../../utils/providerProfile.ts'
 
-import { shouldRedactUrlQueryParam } from '../../../utils/redaction.js'
+import { shouldRedactUrlQueryParam } from '../../../utils/redaction.ts'
 import {
   normalizeToolArguments,
   hasToolFieldMapping,
-} from '../toolArgumentNormalization.js'
-import { logApiCallStart, logApiCallEnd } from '../../../utils/requestLogging.js'
+} from '../toolArgumentNormalization.ts'
+import { logApiCallStart, logApiCallEnd } from '../../../utils/requestLogging.ts'
 import {
   createStreamState,
   processStreamChunk,
   getStreamStats,
-} from '../../../utils/streamingOptimizer.js'
-import { stableStringifyJson } from '../../../utils/stableStringify.js'
-import { shouldAttemptLocalToollessRetry } from './providerUtils.js'
-import { applyZhiniaoModelPrefix } from './providerUtils.js'
-import { convertToolsToResponsesTools } from '../codexShim.js'
-import { createCombinedAbortSignal } from '../../../utils/combinedAbortSignal.js'
-import { openaiStreamToAnthropic } from './openaiStreamToAnthropic.js'
-import { anthropicSsePassthrough } from './anthropicSsePassthrough.js'
+} from '../../../utils/streamingOptimizer.ts'
+import { stableStringifyJson } from '../../../utils/stableStringify.ts'
+import { shouldAttemptLocalToollessRetry } from './providerUtils.ts'
+import { applyZhiniaoModelPrefix } from './providerUtils.ts'
+import { convertToolsToResponsesTools } from '../codexShim.ts'
+import { createCombinedAbortSignal } from '../../../utils/combinedAbortSignal.ts'
+import { openaiStreamToAnthropic } from './openaiStreamToAnthropic.ts'
+import { anthropicSsePassthrough } from './anthropicSsePassthrough.ts'
 
 type SecretValueSource = Partial<{
   OPENAI_API_KEY: string
@@ -785,7 +785,7 @@ function convertChunkUsage(
 }
 
 // The OpenAI→Anthropic streaming converter and its helpers live in
-// ./openaiStreamToAnthropic.js (modular split 518969a1). The legacy inline
+// ./openaiStreamToAnthropic.ts (modular split 518969a1). The legacy inline
 // copy in this file was removed when the cherry-pick stream controller abort
 // surface (commit 3a8fbf01) was wired through the runtime path.
 

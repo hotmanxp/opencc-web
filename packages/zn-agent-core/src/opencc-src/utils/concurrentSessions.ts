@@ -5,15 +5,15 @@ import {
   getOriginalCwd,
   getSessionId,
   onSessionSwitch,
-} from '../bootstrap/state.js'
-import { registerCleanup } from './cleanupRegistry.js'
-import { logForDebugging } from './debug.js'
-import { getClaudeConfigHomeDir } from './envUtils.js'
-import { errorMessage, isFsInaccessible } from './errors.js'
-import { isProcessRunning } from './genericProcessUtils.js'
-import { getPlatform } from './platform.js'
-import { jsonParse, jsonStringify } from './slowOperations.js'
-import { getAgentId } from './teammate.js'
+} from '../bootstrap/state.ts'
+import { registerCleanup } from './cleanupRegistry.ts'
+import { logForDebugging } from './debug.ts'
+import { getClaudeConfigHomeDir } from './envUtils.ts'
+import { errorMessage, isFsInaccessible } from './errors.ts'
+import { isProcessRunning } from './genericProcessUtils.ts'
+import { getPlatform } from './platform.ts'
+import { jsonParse, jsonStringify } from './slowOperations.ts'
+import { getAgentId } from './teammate.ts'
 
 export type SessionKind = 'interactive' | 'bg' | 'daemon' | 'daemon-worker'
 export type SessionStatus = 'busy' | 'idle' | 'waiting'

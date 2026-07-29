@@ -1,5 +1,5 @@
-import { FILE_READ_TOOL_NAME } from '../FileReadTool/constants.js'
-export { FILE_WRITE_TOOL_NAME } from './constants.js'
+import { FILE_READ_TOOL_NAME } from '../FileReadTool/constants.ts'
+export { FILE_WRITE_TOOL_NAME } from './constants.ts'
 export const DESCRIPTION = 'Writes a file to the local filesystem, overwriting if one exists.'
 
 function getPreReadInstruction(): string {

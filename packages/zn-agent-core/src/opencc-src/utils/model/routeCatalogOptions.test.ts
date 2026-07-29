@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'bun:test'
 
-import { buildRouteCatalogModelOptions } from './routeCatalogOptions.js'
+import { buildRouteCatalogModelOptions } from './routeCatalogOptions.ts'
 
 describe('buildRouteCatalogModelOptions', () => {
   test('marks the route default model as recommended without catalog metadata', () => {

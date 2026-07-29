@@ -1,12 +1,12 @@
-import { logForDebugging } from '../../utils/debug.js'
-import { isBareMode } from '../../utils/envUtils.js'
-import { errorMessage } from '../../utils/errors.js'
-import { logError } from '../../utils/log.js'
+import { logForDebugging } from '../../utils/debug.ts'
+import { isBareMode } from '../../utils/envUtils.ts'
+import { errorMessage } from '../../utils/errors.ts'
+import { logError } from '../../utils/log.ts'
 import {
   createLSPServerManager,
   type LSPServerManager,
-} from './LSPServerManager.js'
-import { registerLSPNotificationHandlers } from './passiveFeedback.js'
+} from './LSPServerManager.ts'
+import { registerLSPNotificationHandlers } from './passiveFeedback.ts'
 
 /**
  * Initialization state of the LSP server manager

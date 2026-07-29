@@ -1,37 +1,37 @@
 // @ts-nocheck
-import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
+import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.ts'
 import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import uniqBy from 'lodash-es/uniqBy.js'
 import { logForDebugging } from 'src/utils/debug.js'
-import { getProjectRoot, getSessionId } from '../../bootstrap/state.js'
+import { getProjectRoot, getSessionId } from '../../bootstrap/state.ts'
 import { getCommand, getSkillToolCommands, hasCommand } from '../../commands.js'
 import {
   DEFAULT_AGENT_PROMPT,
   enhanceSystemPromptWithEnvDetails,
-} from '../../constants/prompts.js'
-import type { QuerySource } from '../../constants/querySource.js'
-import { getSystemContext, getUserContext } from '../../context.js'
+} from '../../constants/prompts.ts'
+import type { QuerySource } from '../../constants/querySource.ts'
+import { getSystemContext, getUserContext } from '../../context.ts'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
-import { query } from '../../query.js'
-import type { Terminal } from '../../query/transitions.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
-import { getDumpPromptsPath } from '../../services/api/dumpPrompts.js'
-import { cleanupAgentTracking } from '../../services/api/promptCacheBreakDetection.js'
+import { query } from '../../query.ts'
+import type { Terminal } from '../../query/transitions.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
+import { getDumpPromptsPath } from '../../services/api/dumpPrompts.ts'
+import { cleanupAgentTracking } from '../../services/api/promptCacheBreakDetection.ts'
 import {
   connectToServer,
   fetchToolsForClient,
-} from '../../services/mcp/client.js'
-import { getMcpConfigByName } from '../../services/mcp/config.js'
+} from '../../services/mcp/client.ts'
+import { getMcpConfigByName } from '../../services/mcp/config.ts'
 import type {
   MCPServerConnection,
   ScopedMcpServerConfig,
-} from '../../services/mcp/types.js'
-import type { Tool, Tools, ToolUseContext } from '../../Tool.js'
+} from '../../services/mcp/types.ts'
+import type { Tool, Tools, ToolUseContext } from '../../Tool.ts'
 import { killShellTasksForAgent } from '../../tasks/LocalShellTask/killShellTasks.js'
-import type { Command } from '../../types/command.js'
-import type { AgentId } from '../../types/ids.js'
+import type { Command } from '../../types/command.ts'
+import type { AgentId } from '../../types/ids.ts'
 import type {
   AssistantMessage,
   Message,
@@ -42,55 +42,55 @@ import type {
   TombstoneMessage,
   ToolUseSummaryMessage,
   UserMessage,
-} from '../../types/message.js'
-import { createAttachmentMessage } from '../../utils/attachments.js'
-import { AbortError } from '../../utils/errors.js'
-import { getDisplayPath } from '../../utils/file.js'
+} from '../../types/message.ts'
+import { createAttachmentMessage } from '../../utils/attachments.ts'
+import { AbortError } from '../../utils/errors.ts'
+import { getDisplayPath } from '../../utils/file.ts'
 import {
   cloneFileStateCache,
   createFileStateCacheWithSizeLimit,
   READ_FILE_STATE_CACHE_SIZE,
-} from '../../utils/fileStateCache.js'
+} from '../../utils/fileStateCache.ts'
 import {
   type CacheSafeParams,
   createSubagentContext,
-} from '../../utils/forkedAgent.js'
-import { registerFrontmatterHooks } from '../../utils/hooks/registerFrontmatterHooks.js'
-import { clearSessionHooks } from '../../utils/hooks/sessionHooks.js'
-import { executeSubagentStartHooks } from '../../utils/hooks.js'
-import { createUserMessage } from '../../utils/messages.js'
-import { getAgentModel } from '../../utils/model/agent.js'
-import { isModelAllowed } from '../../utils/model/modelAllowlist.js'
-import { resolveAgentRunModelRouting, shouldEnforceModelAllowlist } from '../../services/api/agentRouting.js'
-import { getInitialSettings } from '../../utils/settings/settings.js'
-import type { ModelAlias } from '../../utils/model/aliases.js'
+} from '../../utils/forkedAgent.ts'
+import { registerFrontmatterHooks } from '../../utils/hooks/registerFrontmatterHooks.ts'
+import { clearSessionHooks } from '../../utils/hooks/sessionHooks.ts'
+import { executeSubagentStartHooks } from '../../utils/hooks.ts'
+import { createUserMessage } from '../../utils/messages.ts'
+import { getAgentModel } from '../../utils/model/agent.ts'
+import { isModelAllowed } from '../../utils/model/modelAllowlist.ts'
+import { resolveAgentRunModelRouting, shouldEnforceModelAllowlist } from '../../services/api/agentRouting.ts'
+import { getInitialSettings } from '../../utils/settings/settings.ts'
+import type { ModelAlias } from '../../utils/model/aliases.ts'
 import {
   withUltracodePrompt,
   withUltracodeReminder,
-} from '../../utils/ultracodePrompt.js'
+} from '../../utils/ultracodePrompt.ts'
 import {
   clearAgentTranscriptSubdir,
   recordSidechainTranscript,
   setAgentTranscriptSubdir,
   writeAgentMetadata,
-} from '../../utils/sessionStorage.js'
+} from '../../utils/sessionStorage.ts'
 import {
   isRestrictedToPluginOnly,
   isSourceAdminTrusted,
-} from '../../utils/settings/pluginOnlyPolicy.js'
+} from '../../utils/settings/pluginOnlyPolicy.ts'
 import {
   asSystemPrompt,
   type SystemPrompt,
-} from '../../utils/systemPromptType.js'
+} from '../../utils/systemPromptType.ts'
 import {
   isPerfettoTracingEnabled,
   registerAgent as registerPerfettoAgent,
   unregisterAgent as unregisterPerfettoAgent,
-} from '../../utils/telemetry/perfettoTracing.js'
-import type { ContentReplacementState } from '../../utils/toolResultStorage.js'
-import { createAgentId } from '../../utils/uuid.js'
-import { resolveAgentTools } from './agentToolUtils.js'
-import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.js'
+} from '../../utils/telemetry/perfettoTracing.ts'
+import type { ContentReplacementState } from '../../utils/toolResultStorage.ts'
+import { createAgentId } from '../../utils/uuid.ts'
+import { resolveAgentTools } from './agentToolUtils.ts'
+import { type AgentDefinition, isBuiltInAgent } from './loadAgentsDir.ts'
 
 /**
  * Initialize agent-specific MCP servers

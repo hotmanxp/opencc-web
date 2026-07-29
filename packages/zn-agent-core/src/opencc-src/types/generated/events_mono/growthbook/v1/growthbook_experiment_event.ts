@@ -1,6 +1,6 @@
 /* eslint-disable */
 
-import type { PublicApiAuth } from '../../common/v1/auth.js'
+import type { PublicApiAuth } from '../../common/v1/auth.ts'
 
 export interface GrowthbookExperimentEvent {
   event_id?: string | undefined

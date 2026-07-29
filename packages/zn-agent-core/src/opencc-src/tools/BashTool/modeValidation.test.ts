@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { expect, test } from 'bun:test'
-import { getEmptyToolPermissionContext } from '../../Tool.js'
-import { checkPermissionMode } from './modeValidation.js'
+import { getEmptyToolPermissionContext } from '../../Tool.ts'
+import { checkPermissionMode } from './modeValidation.ts'
 
 const acceptEditsContext = {
   ...getEmptyToolPermissionContext(),

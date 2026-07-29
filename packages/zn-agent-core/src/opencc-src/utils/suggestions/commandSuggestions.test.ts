@@ -2,7 +2,7 @@ import { describe, expect, test } from 'bun:test'
 import {
   findStackedMidInputSlashCommand,
   generateCommandSuggestions,
-} from './commandSuggestions.js'
+} from './commandSuggestions.ts'
 import type { Command } from '../../commands.js'
 
 // Helper to create a mock plugin command

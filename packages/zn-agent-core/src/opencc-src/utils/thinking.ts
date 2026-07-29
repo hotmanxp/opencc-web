@@ -1,12 +1,12 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import type { Theme } from './theme.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
-import { getCanonicalName } from './model/model.js'
-import { resolveAntModel } from './model/antModels.js'
-import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
-import { getAPIProvider } from './model/providers.js'
-import { getSettingsWithErrors } from './settings/settings.js'
-import { isZaiBaseUrl, isZaiGlmModel } from './zaiProvider.js'
+import type { Theme } from './theme.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.ts'
+import { getCanonicalName } from './model/model.ts'
+import { resolveAntModel } from './model/antModels.ts'
+import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.ts'
+import { getAPIProvider } from './model/providers.ts'
+import { getSettingsWithErrors } from './settings/settings.ts'
+import { isZaiBaseUrl, isZaiGlmModel } from './zaiProvider.ts'
 
 export type ThinkingConfig =
   | { type: 'adaptive' }

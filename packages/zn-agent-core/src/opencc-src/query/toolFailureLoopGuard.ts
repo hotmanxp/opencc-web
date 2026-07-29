@@ -1,7 +1,7 @@
 import type { ToolUseBlock } from '@anthropic-ai/sdk/resources/index.mjs'
 
-import type { AttachmentMessage, UserMessage } from '../types/message.js'
-import { getMissingToolResultAbortMessage } from '../utils/abortReasons.js'
+import type { AttachmentMessage, UserMessage } from '../types/message.ts'
+import { getMissingToolResultAbortMessage } from '../utils/abortReasons.ts'
 
 const DEFAULT_TOOL_FAILURE_LOOP_THRESHOLD = 5
 const MAX_FALLBACK_CATEGORY_LENGTH = 120

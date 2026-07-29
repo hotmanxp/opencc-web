@@ -9,10 +9,10 @@ import type {
 } from '@modelcontextprotocol/sdk/types.js'
 import type { UUID } from 'crypto'
 import type { z } from 'zod/v4'
-import { AGENT_INSTRUCTIONS_FILE } from './constants/product.js'
+import { AGENT_INSTRUCTIONS_FILE } from './constants/product.ts'
 import type { Command } from './commands.js'
 import type { CanUseToolFn } from './hooks/useCanUseTool.js'
-import type { ThinkingConfig } from './utils/thinking.js'
+import type { ThinkingConfig } from './utils/thinking.ts'
 
 export type ToolInputJSONSchema = {
   [x: string]: unknown
@@ -26,11 +26,11 @@ import type { Notification } from './context/notifications.js'
 import type {
   MCPServerConnection,
   ServerResource,
-} from './services/mcp/types.js'
+} from './services/mcp/types.ts'
 import type {
   AgentDefinition,
   AgentDefinitionsResult,
-} from './tools/AgentTool/loadAgentsDir.js'
+} from './tools/AgentTool/loadAgentsDir.ts'
 import type {
   AssistantMessage,
   AttachmentMessage,
@@ -39,14 +39,14 @@ import type {
   SystemLocalCommandMessage,
   SystemMessage,
   UserMessage,
-} from './types/message.js'
+} from './types/message.ts'
 // Import permission types from centralized location to break import cycles
 // Import PermissionResult from centralized location to break import cycles
 import type {
   AdditionalWorkingDirectory,
   PermissionMode,
   PermissionResult,
-} from './types/permissions.js'
+} from './types/permissions.ts'
 // Import tool progress types from centralized location to break import cycles
 import type {
   AgentToolProgress,
@@ -57,12 +57,12 @@ import type {
   TaskOutputProgress,
   ToolProgressData,
   WebSearchProgress,
-} from './types/tools.js'
-import type { FileStateCache } from './utils/fileStateCache.js'
-import type { DenialTrackingState } from './utils/permissions/denialTracking.js'
-import type { SystemPrompt } from './utils/systemPromptType.js'
-import type { ContentReplacementState } from './utils/toolResultStorage.js'
-import type { QueryLifecycleOperationTracker } from './utils/queryLifecycle.js'
+} from './types/tools.ts'
+import type { FileStateCache } from './utils/fileStateCache.ts'
+import type { DenialTrackingState } from './utils/permissions/denialTracking.ts'
+import type { SystemPrompt } from './utils/systemPromptType.ts'
+import type { ContentReplacementState } from './utils/toolResultStorage.ts'
+import type { QueryLifecycleOperationTracker } from './utils/queryLifecycle.ts'
 
 // Re-export progress types for backwards compatibility
 export type {
@@ -76,23 +76,23 @@ export type {
 }
 
 import type { SpinnerMode } from './components/Spinner.js'
-import type { QuerySource } from './constants/querySource.js'
-import type { SDKStatus } from './entrypoints/agentSdkTypes.js'
+import type { QuerySource } from './constants/querySource.ts'
+import type { SDKStatus } from './entrypoints/agentSdkTypes.ts'
 import type { AppState } from './state/AppState.js'
 import type {
   HookProgress,
   PromptRequest,
   PromptResponse,
-} from './types/hooks.js'
-import type { AgentId } from './types/ids.js'
-import type { DeepImmutable } from './types/utils.js'
-import type { AttributionState } from './utils/commitAttribution.js'
-import type { FileHistoryState } from './utils/fileHistory.js'
+} from './types/hooks.ts'
+import type { AgentId } from './types/ids.ts'
+import type { DeepImmutable } from './types/utils.ts'
+import type { AttributionState } from './utils/commitAttribution.ts'
+import type { FileHistoryState } from './utils/fileHistory.ts'
 import type {
   QueryGuardLease,
   QueryGuardLeaseInput,
-} from './utils/QueryGuard.js'
-import type { Theme, ThemeName } from './utils/theme.js'
+} from './utils/QueryGuard.ts'
+import type { Theme, ThemeName } from './utils/theme.ts'
 
 export type QueryChainTracking = {
   chainId: string
@@ -132,7 +132,7 @@ export type SetToolJSXFn = (
 ) => void
 
 // Import tool permission types from centralized location to break import cycles
-import type { ToolPermissionRulesBySource } from './types/permissions.js'
+import type { ToolPermissionRulesBySource } from './types/permissions.ts'
 
 // Re-export for backwards compatibility
 export type { ToolPermissionRulesBySource }

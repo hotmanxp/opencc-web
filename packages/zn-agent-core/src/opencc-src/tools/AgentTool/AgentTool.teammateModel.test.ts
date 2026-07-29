@@ -1,11 +1,11 @@
 import { afterEach, beforeEach, expect, mock, test } from 'bun:test'
-import type { ToolUseContext } from '../../Tool.js'
+import type { ToolUseContext } from '../../Tool.ts'
 import {
   acquireSharedMutationLock,
   releaseSharedMutationLock,
 } from '../../test/sharedMutationLock.js'
-import type { SettingsJson } from '../../utils/settings/types.js'
-import type { AgentDefinition } from './loadAgentsDir.js'
+import type { SettingsJson } from '../../utils/settings/types.ts'
+import type { AgentDefinition } from './loadAgentsDir.ts'
 
 type ModelAllowlistModule = typeof import('../../utils/model/modelAllowlist.js')
 type SettingsModule = typeof import('../../utils/settings/settings.js')
