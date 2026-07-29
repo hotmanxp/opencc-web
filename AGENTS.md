@@ -2,14 +2,14 @@
 
 ## 项目概述
 
-**opencc-web** 是 zai 的本地开发与运行工具集,在 `packages/zai`(Express + SSE server + React/Zustand/AntD 前端)与 `packages/zai-agent-core`(Agent 运行时核心库)两个 workspace 中实现 Agent 对话、流式 UI、命令/Skill/插件等能力。zai 仅监听 localhost,不依赖外部鉴权。
+**opencc-web** 是 zai 的本地开发与运行工具集,在 `packages/zai`(Express + SSE server + React/Zustand/AntD 前端)与 `packages/zn-agent-core`(Agent 运行时核心库,vendor 自 opencc 0.21)两个 workspace 中实现 Agent 对话、流式 UI、命令/Skill/插件等能力。zai 仅监听 localhost,不依赖外部鉴权。
 
 ## 目录说明
 
 | 目录 | 说明 |
 |------|------|
 | `packages/zai/` | `src/server/` 路由 + service,`src/web/` UI + store,`src/shared/` zod schema |
-| `packages/zai-agent-core/` | `runtime/`(`queryLoop` 主循环 + `query` shim + `streamAdapter` / `toolExecution` / `canUseTool` / `subagent` / `background/`)+ `tools/`(Bash/Read/Edit/Write/AskUserQuestion/TodoWrite/Task*/Agent/BackgroundAgent/...)+ `transcript/`(v2 落盘)+ `mcp/` + `plugins/`(OpenCC 插件)+ `skills/` |
+| `packages/zn-agent-core/` | vendor 自 opencc 0.21 + zai 适配层。`opencc-src/`(~1448 文件)是 vendor 副本(剥 UI / commands / state 等);`compat/`(~70 文件)是 zai 自己写的 7 个 shim(permissions / cwdStore / runWithSessionId / bashTracker / taskListStore / memory / transcript);`runtime/openccStubs.ts` + `compat/runtime/{contract,openccAdapter,openccQueryBridge,sdkEventAdapter,types,streamAdapter,modelCaller}.ts` 适配 zai 的 `DefaultAgentRuntime`。详见 `docs/superpowers/plans/2026-07-28-zn-agent-core-rescue-opencc-runtime.md` |
 | `docs/  examples/  scripts/` | 设计文档 / 示例 / 仓库脚本 |
 | `docs/superpowers/specs/` | 各特性设计文档(specs);`docs/superpowers/plans/` 是对应的实施计划(plans) |
 
