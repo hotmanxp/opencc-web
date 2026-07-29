@@ -17,6 +17,7 @@ import type { TranscriptFile, TranscriptMeta } from '../transcript/types.js'
 import { TranscriptStore } from '../transcript/store.js'
 import { abortSession } from './abort.js'
 import { runOpenccQuery } from './openccAdapter.js'
+import { runViaOpenccQuery } from './openccQueryBridge.js'
 import { DefaultPluginRuntime } from '../plugins/index.js'
 
 export interface AgentRuntime {

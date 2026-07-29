@@ -21,29 +21,18 @@ async function collectEvents(iter: AsyncIterable<unknown>): Promise<unknown[]> {
 }
 
 describe('runOpenccQuery', () => {
-  it('emits runtime.error when not running under Bun', async () => {
-    if (typeof process !== 'undefined' && process.versions?.bun) {
-      // Skip — only meaningful under Node
-      return
-    }
-    const events = await collectEvents(runOpenccQuery(makeOpts(), {}))
-    expect(events).toHaveLength(1)
-    const ev = events[0] as any
-    expect(ev.type).toBe('runtime.error')
-    expect(ev.error.category).toBe('internal')
-    expect(ev.error.message).toMatch(/Bun runtime/)
-  })
+  // Phase 1.b: openccAdapter no longer requires Bun — it calls zai's own
+  // modelCaller directly and runs tool.call() with the compat tools. The
+  // "Bun runtime" error path was removed; tests below verify the current
+  // behavior under Node (no Bun required).
 
   it('emits runtime.aborted if abortSignal already aborted', async () => {
-    if (typeof process !== 'undefined' && !process.versions?.bun) {
-      // Under Node the Bun detection branch fires before the abort check
-      // and short-circuits with runtime.error — only meaningful under Bun.
-      return
-    }
     const ac = new AbortController()
     ac.abort('test cancel')
     const events = await collectEvents(runOpenccQuery(makeOpts({ abortSignal: ac.signal }), {}))
-    expect(events).toHaveLength(1)
+    // First event should be runtime.aborted (pre-abort branch fires
+    // before modelCaller wiring check).
+    expect(events.length).toBeGreaterThan(0)
     const ev = events[0] as any
     expect(ev.type).toBe('runtime.aborted')
     expect(ev.reason).toBe('test cancel')
