@@ -42,23 +42,36 @@ export class DefaultAgentRuntime implements AgentRuntime {
   /**
    * Run a query and yield RuntimeEvents.
    *
-   * Delegates to `runOpenccQuery(opts, openccConfig)` in `./openccAdapter.ts`,
-   * which bypasses opencc's `query()` (the opencc vendor copy at
-   * `src/opencc-src/` is Bun-only — it imports `bun:bundle` / `bun:feature`,
-   * which crash under Node). The adapter calls zai's own `modelCaller`
-   * (Anthropic SDK) directly and runs tool.call() with the compat tools,
-   * so it works under both Node/tsx and Bun.
+   * Two backends, env-gated (Phase 5 close-out):
    *
-   * Bun vs Node: this code path is runtime-agnostic. zai's `dev` script
-   * uses tsx (Node) by default — Bun is no longer required. If you ever
-   * need to call opencc's `query()` for some reason, that path WILL
-   * require Bun — but the runtime path here doesn't go through it.
+   * - **Default — Phase 1.b bypass** (`runOpenccQuery` in `./openccAdapter.ts`):
+   *   Calls zai's own `modelCaller` (Anthropic SDK) directly and runs
+   *   `tool.call()` with the compat tools. Skips opencc vendor entirely.
+   *   Runtime-agnostic (works under Node/tsx + Bun). This is the path all
+   *   current users hit — proven stable.
+   *
+   * - **Bridge — `runViaOpenccQuery`** (`./openccQueryBridge.ts`):
+   *   Lazy-imports `opencc-src/query.js` (vendor), translates zai
+   *   `QueryOptions → opencc QueryParams`, attaches 5 wrapped core tools
+   *   (`defaultCoreToolsAsOpencc()`), and streams `SDKMessage → RuntimeEvent`.
+   *   Requires `tsx --import ./bun-protocol.mjs` (or vite alias) so the
+   *   `bun:` protocol resolves to the shim. Bridge yields a single
+   *   `runtime.error` event on import failure, so a misconfigured runtime
+   *   fails loudly rather than hanging.
+   *
+   * Switch: set `ZAI_OPENCC_BRIDGE=1` (or `'true'`) before constructing
+   * the runtime. Off by default to preserve the Phase 1.b behavior.
    */
   run(opts: QueryOptions): AsyncIterable<RuntimeEvent> {
     // openccConfig is the optional subset of this.config that the adapter consumes.
     // Cast is safe because the adapter only reads known fields (mcpPool, hookRunner, etc.)
     const openccConfig = (this.config as any).openccConfig ?? {}
-    return runOpenccQuery(opts, openccConfig)
+    const useBridge =
+      process.env.ZAI_OPENCC_BRIDGE === '1' ||
+      process.env.ZAI_OPENCC_BRIDGE === 'true'
+    return useBridge
+      ? runViaOpenccQuery(opts, openccConfig)
+      : runOpenccQuery(opts, openccConfig)
   }
 
   async abort(sessionId: string, reason?: string): Promise<void> {
