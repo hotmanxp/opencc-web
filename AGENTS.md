@@ -23,6 +23,8 @@
 | **SSE 状态推送设计** | `docs/superpowers/specs/2026-07-19-sse-state-push-design.md` | StateChangeBus → eventBus 桥接层设计 |
 | **会话压缩设计** | `docs/superpowers/specs/2026-07-19-zai-session-compaction-design.md` | 阶段 1 已交付(spec §11.6 目标:line ≥ 92%, branch ≥ 80%),阶段 2-4 见对应 plan |
 | **MCP disabled servers** | `docs/superpowers/plans/2026-07-20-zai-mcp-disabled-servers.md` | 尊重 Claude Code 过滤字段(`enabledMcpjsonServers` / `disabledMcpjsonServers` / `disabledMcpServers`) |
+| ~~OpenCC Adapter (Bun)~~ | `docs/superpowers/specs/2026-07-29-zn-agent-core-opencc-adapter-design.md` | ⚠️ **DEPRECATED** by 2026-07-29 node-design spec |
+| **OpenCC Adapter (Node/tsx)** | `docs/superpowers/specs/2026-07-29-zn-agent-core-opencc-adapter-node-design.md` | 替代 deprecated 的 Bun-only spec;含 bun:bundle Node loader hook + 5 个 core tool 包装 |
 
 > 历史 spec / plan 完整列表(按日期)见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名格式 `YYYY-MM-DD-<topic>.md`。
 
@@ -258,6 +260,7 @@ zai 端实现的能力,把 opencc 上游 `bashProvider.ts` 的"shell trailer 跟
 - MCP:从 `cwd/.mcp.json` 加载 → `MCPClientPool`;`mcpSkillLoading='off'` 关闭 `skill://`;zai 注册 SIGTERM/SIGINT 钩子;**尊重 Claude Code 的过滤字段** —— `enabledMcpjsonServers` / `disabledMcpjsonServers`(per-`.mcp.json` allowlist/blocklist,只在 project scope 生效)+ `disabledMcpServers`(user-scope 全局黑名单,post-merge 过滤;user 黑名单压过 project allowlist;enterprise exclusive 不被影响)。实现见 `packages/zai/src/server/services/mcpConfig.ts:88-108`,plan 在 `docs/superpowers/plans/2026-07-20-zai-mcp-disabled-servers.md`
 - 插件:`resolveOpenccConfigDir()` → `~/.claude` 加载 OpenCC plugin(skills / agents / hooks)
 - AGENTS.md 自动注入:每个 turn 调 `loadAgentsMd(options.cwd)` 拼到 system prompt 顶部;`enableAgentsMd:false` 关闭
+- **bun: protocol loader**: zai dev 脚本走 `tsx --import ./bun-protocol.mjs` (从 `@zn-ai/zn-agent-core` 包内),把 opencc 86 处 `from 'bun:bundle'` 拦截到本地 `bun-shim.ts`。Node 22+ tsx 4.23+ 必需;漏掉这个 flag 会 `ERR_UNSUPPORTED_ESM_URL_SCHEME`。
 - 前端鉴权:**默认不带** `X-Zai-Token` —— `lib/api.ts:1-35` 不读 localStorage,只有 `v2TaskApi / slash` 等少数手写 fetch 显式加;server 也不强制校验
 
 <!-- CODEGRAPH_START -->
