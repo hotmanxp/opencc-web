@@ -59,11 +59,12 @@
 
 **Files:**
 - Create: `packages/zn-agent-core/src/compat/runtime/bun-shim.ts`
+- Create: `packages/zn-agent-core/src/compat/runtime/bun-bundle.d.ts` (ambient module declaration)
 - Create: `packages/zn-agent-core/test/unit/runtime/bunShim.test.ts`
 
 **Interfaces:**
 - Consumes: nothing
-- Produces: `feature<T>(flag: string, defaultValue?: T): T | boolean` and `require(id: string): never` exported; `declare module 'bun:bundle'` for TypeScript
+- Produces: `feature<T>(flag: string, defaultValue?: T): T | boolean` and `require(id: string): never` exported from `bun-shim.ts`; `declare module 'bun:bundle'` ambient declaration from `bun-bundle.d.ts`
 
 - [ ] **Step 1: Write the failing test**
 
@@ -199,9 +200,11 @@ cd packages/zn-agent-core && pnpm vitest run test/unit/runtime/bunShim.test.ts
 
 Expected: PASS — 9 tests passing
 
-- [ ] **Step 5: Add `bun:bundle` ambient module declaration for TypeScript**
+- [ ] **Step 5: Add `bun:bundle` ambient module declaration**
 
-The shim is a runtime stub; for TypeScript type resolution, add an ambient declaration. Append to `packages/zn-agent-core/src/compat/runtime/bun-shim.ts`:
+The shim is a runtime stub; for TypeScript type resolution, add an ambient declaration in a separate `.d.ts` file (not appended to `bun-shim.ts` — that file is already a module, so an inline `declare module 'bun:bundle'` would be treated as augmentation, not a new declaration).
+
+`packages/zn-agent-core/src/compat/runtime/bun-bundle.d.ts`:
 
 ```ts
 declare module 'bun:bundle' {
@@ -221,8 +224,8 @@ Expected: PASS — no new errors
 - [ ] **Step 7: Commit**
 
 ```bash
-git -C /Users/ethan/code/opencc-web add packages/zn-agent-core/src/compat/runtime/bun-shim.ts packages/zn-agent-core/test/unit/runtime/bunShim.test.ts
-git -C /Users/ethan/code/opencc-web commit -m "feat(zn-agent-core): bun:bundle shim — feature() and require() stubs"
+git -C /Users/ethan/code/opencc-web add packages/zn-agent-core/src/compat/runtime/bun-shim.ts packages/zn-agent-core/src/compat/runtime/bun-bundle.d.ts packages/zn-agent-core/test/unit/runtime/bunShim.test.ts
+git -C /Users/ethan/code/opencc-web commit -m "feat(zn-agent-core): bun:bundle shim — feature() and require() stubs + ambient d.ts"
 ```
 
 ---
@@ -379,13 +382,13 @@ git -C /Users/ethan/code/opencc-web commit -m "feat(zn-agent-core): bun: protoco
 // no longer fails on the `bun:` protocol scheme. The first error we hit
 // (if any) is now a different problem (likely a dangling .js UI import).
 import { existsSync } from 'node:fs'
-import { resolve, dirname } from 'node:path'
+import { resolve } from 'node:path'
 import { pathToFileURL } from 'node:url'
-import { fileURLToPath } from 'node:url'
 
-const __dirname = dirname(fileURLToPath(import.meta.url))
+// Compute path from cwd so this diagnostic is portable.
 const QUERY = resolve(
-  '/Users/ethan/code/opencc-web/packages/zn-agent-core/src/opencc-src/query.ts',
+  process.cwd(),
+  'packages/zn-agent-core/src/opencc-src/query.ts',
 )
 
 console.log('Loading:', QUERY)
@@ -400,7 +403,7 @@ try {
 }
 ```
 
-- [ ] **Step 2: Run the diagnostic with the loader**
+- [ ] **Step 2: Run the diagnostic with the loader (from monorepo root)**
 
 ```bash
 cd /Users/ethan/code/opencc-web && node --import ./packages/zn-agent-core/src/compat/runtime/bun-protocol.mjs /tmp/diag-opencc-import-v2.mjs 2>&1 | head -30
@@ -1402,13 +1405,66 @@ Before:
 
 After:
 ```json
-"dev": "tsx --import ./node_modules/@zn-ai/zn-agent-core/dist/runtime/bun-protocol.mjs src/cli/index.ts dev"
+"dev": "tsx --import ./node_modules/@zn-ai/zn-agent-core/dist/compat/runtime/bun-protocol.mjs src/cli/index.ts dev"
 ```
 
-Verify: the `bun-protocol.mjs` should be present in `dist/` after Task 2's build. If the .mjs file isn't in tsconfig.json's emit (because .mjs is non-TS), add it manually to the package's `files` field in `package.json`:
+(Note the path: `dist/compat/runtime/`, NOT `dist/runtime/`. The source file is `src/compat/runtime/bun-protocol.mjs` and tsx preserves the directory structure when emitting.)
 
+- [ ] **Step 1b: Ensure `bun-protocol.mjs`, `bun-shim.ts`, `bun-bundle.d.ts` are shipped in `zn-agent-core`'s package**
+
+`.mjs` files are NOT emitted by `tsc -b`. They must be copied to `dist/` post-build OR included in the `files` field of `packages/zn-agent-core/package.json`.
+
+In `packages/zn-agent-core/package.json`, modify `build` script and `files` field:
+
+Before (in `scripts`):
 ```json
-"files": ["dist/**/*", "src/runtime/bun-protocol.mjs"]
+"build": "tsc -b"
+```
+
+After:
+```json
+"build": "tsc -b && node scripts/copy-runtime-assets.mjs"
+```
+
+Before (top-level `files`):
+```json
+"files": ["dist/"]
+```
+
+After:
+```json
+"files": ["dist/", "scripts/copy-runtime-assets.mjs"]
+```
+
+Create `packages/zn-agent-core/scripts/copy-runtime-assets.mjs`:
+
+```js
+#!/usr/bin/env node
+// Copies non-TS runtime assets (.mjs, .d.ts) from src/compat/runtime/
+// to dist/compat/runtime/ so the published package includes them.
+import { copyFileSync, mkdirSync, existsSync } from 'node:fs'
+import { resolve, dirname } from 'node:path'
+import { fileURLToPath } from 'node:url'
+
+const __dirname = dirname(fileURLToPath(import.meta.url))
+const SRC = resolve(__dirname, '..', 'src', 'compat', 'runtime')
+const DIST = resolve(__dirname, '..', 'dist', 'compat', 'runtime')
+
+const ASSETS = [
+  'bun-protocol.mjs',
+  'bun-shim.ts',
+  'bun-feature-shim.ts',
+  'bun-bundle.d.ts',
+]
+
+for (const f of ASSETS) {
+  const src = resolve(SRC, f)
+  if (!existsSync(src)) continue
+  const dest = resolve(DIST, f)
+  mkdirSync(dirname(dest), { recursive: true })
+  copyFileSync(src, dest)
+  console.log(`copied ${f}`)
+}
 ```
 
 - [ ] **Step 2: Update vitest config to load the loader**
@@ -1448,7 +1504,10 @@ build: {
     external: [
       'bun:bundle',
       'bun:feature',
-      /^opencc-src\//,
+      // Match opencc-src by both relative path (if Vite sees the source string)
+      // and absolute path (if Vite resolves through the bridge's constructed
+      // import path). The regex matches anywhere in the path.
+      /opencc-src\//,
     ],
     output: {
       // ... existing manualChunks
