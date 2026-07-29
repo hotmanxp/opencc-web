@@ -1,4 +1,4 @@
-import { feature } from 'bun:bundle';
+import { feature } from '../../shims/bun-bundle.js';
 import type { ToolResultBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import { createReadStream, createWriteStream } from 'fs';
 import { copyFile, stat as fsStat, link, unlink } from 'fs/promises';

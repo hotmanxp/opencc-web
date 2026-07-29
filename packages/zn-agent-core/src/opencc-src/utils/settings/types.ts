@@ -1,4 +1,4 @@
-import { feature } from 'bun:bundle'
+import { feature } from '../../shims/bun-bundle.js'
 import { z } from 'zod/v4'
 import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
 import { SandboxSettingsSchema } from '../../entrypoints/sandboxTypes.js'

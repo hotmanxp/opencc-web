@@ -1,5 +1,5 @@
 // @ts-nocheck — pre-existing typecheck debt, see docs/feature-gating.md
-import { feature } from 'bun:bundle'
+import { feature } from '../shims/bun-bundle.js'
 import { getAPIProvider } from './model/providers.js'
 import type { BetaUsage as Usage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type {

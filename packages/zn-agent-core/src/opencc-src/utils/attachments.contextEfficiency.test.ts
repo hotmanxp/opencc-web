@@ -1,5 +1,5 @@
 import { afterEach, beforeEach, describe, expect, test } from 'bun:test'
-import { feature } from 'bun:bundle'
+import { feature } from '../shims/bun-bundle.js'
 import type { Message } from '../types/message.js'
 import {
   acquireSharedMutationLock,

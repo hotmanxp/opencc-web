@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { feature } from 'bun:bundle'
+import { feature } from '../shims/bun-bundle.js'
 import type { Anthropic } from '@anthropic-ai/sdk'
 import {
   getSystemPrompt,

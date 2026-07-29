@@ -1,5 +1,5 @@
 // @ts-ignore - proactive module may not exist
-import { feature } from 'bun:bundle'
+import { feature } from '../../shims/bun-bundle.js'
 import type { PartialCompactDirection } from '../../types/message.js'
 
 // Dead code elimination: conditional import for proactive mode

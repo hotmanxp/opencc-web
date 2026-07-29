@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { feature } from 'bun:bundle'
+import { feature } from '../shims/bun-bundle.js'
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js'
 import { isExtractModeActive } from '../memdir/paths.js'
 import {
