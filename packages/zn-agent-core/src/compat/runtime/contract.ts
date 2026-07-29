@@ -41,18 +41,15 @@ export class DefaultAgentRuntime implements AgentRuntime {
   /**
    * Run a query and yield RuntimeEvents.
    *
-   * The original implementation called `queryLoop(opts, config)` from the old
-   * zai-agent-core runtime, which in turn wired to opencc's QueryEngine. The
-   * new package's opencc port exposes a different signature
-   * (`query(params: QueryParams)`) that takes a single QueryParams argument
-   * and yields StreamEvent | Message | ... — neither the param shape nor the
-   * event type match zai's RuntimeEvent contract 1:1, so a direct call here
-   * would silently drop semantics.
+   * Delegates to `runOpenccQuery(opts, openccConfig)` in `./openccAdapter.ts`,
+   * which translates `QueryOptions` → `QueryParams`, calls opencc's
+   * `query(params)` lazily (so module load does not pull in `bun:bundle`),
+   * wraps each event with zai meta fields (eventId / sessionId / ts / turnIndex),
+   * and converts opencc errors / aborts / soft stream-end into RuntimeEvents.
    *
-   * Until the opencc SDK adapter layer lands (Batch 3 / follow-up plan),
-   * `run` returns an empty AsyncIterable so callers iterate without crashing
-   * and the server stays bootable. Documented in
-   * `.superpowers/sdd/task-21-report.md` under "Subpath 8 — open blocker".
+   * Bun runtime is required (opencc's `bun:bundle` imports crash in Node); the
+   * adapter yields a `runtime.error` and returns early when not running under
+   * Bun.
    */
   run(opts: QueryOptions): AsyncIterable<RuntimeEvent> {
     // openccConfig is the optional subset of this.config that the adapter consumes.
