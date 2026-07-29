@@ -1,12 +1,35 @@
 import { defineConfig } from 'vitest/config'
 import { resolve } from 'node:path'
 
+const OPENCC_SRC_DIR = resolve(__dirname, 'src/opencc-src')
+
 export default defineConfig({
   resolve: {
-    alias: {
-      'bun:bundle': resolve(__dirname, 'src/compat/runtime/bun-shim.ts'),
-      'bun:feature': resolve(__dirname, 'src/compat/runtime/bun-feature-shim.ts'),
-    },
+    alias: [
+      {
+        find: /^bun:bundle$/,
+        replacement: resolve(__dirname, 'src/compat/runtime/bun-shim.ts'),
+      },
+      {
+        find: /^bun:feature$/,
+        replacement: resolve(__dirname, 'src/compat/runtime/bun-feature-shim.ts'),
+      },
+      // opencc's vendored source uses project-relative `src/...` specifiers
+      // (e.g. `from 'src/utils/abortReasons.js'`) which Node's ESM resolver
+      // can't handle — non-relative specifiers are looked up in node_modules.
+      // Strip the prefix and map to <OPENCC_SRC_DIR>/... (Vite's bundler
+      // resolves `.js` → `.ts` automatically per moduleResolution:"bundler").
+      // The `.mjs` and other-extension variants fall through to default
+      // resolution below; we only own the `.js` and no-ext forms here.
+      {
+        find: /^src\/(.+)\.js$/,
+        replacement: resolve(OPENCC_SRC_DIR, '$1.ts'),
+      },
+      {
+        find: /^src\/(.+)$/,
+        replacement: resolve(OPENCC_SRC_DIR, '$1'),
+      },
+    ],
   },
   test: {
     globals: true,

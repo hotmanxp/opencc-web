@@ -1,9 +1,9 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { DefaultAgentRuntime } from '../../../src/compat/runtime/contract.js'
 
-// Mock both backends so we can assert which one contract.run() delegates to.
-// The mocks return an empty AsyncIterable so the iterator chain terminates
-// without actual model I/O — we only care which export was called.
+// Bridge is now the default backend. We mock the two backends so we can
+// assert which one DefaultAgentRuntime.run() delegates to without hitting
+// the real opencc vendor.
 const openccAdapterMock = vi.hoisted(() => ({
   runOpenccQuery: vi.fn(),
 }))
@@ -17,7 +17,6 @@ vi.mock('../../../src/compat/runtime/openccQueryBridge.js', () => openccBridgeMo
 async function* emptyStream(): AsyncGenerator<never> {
   // never yields — iterator ends immediately.
 }
-// Suppress Bun-style TS check on no-yield async generator (TS 5.x).
 void (async function* () {})()
 
 function configureMocks() {
@@ -32,43 +31,22 @@ async function drain(run: AsyncIterable<unknown>): Promise<unknown[]> {
 }
 
 function makeRuntime(): DefaultAgentRuntime {
-  // Minimum viable RuntimeConfig — contract.run() only forwards opts
-  // and an openccConfig-shaped block; TranscriptStore needs dataDir.
-  return new DefaultAgentRuntime({
-    dataDir: '/tmp',
-  } as any)
+  // Minimum viable RuntimeConfig — contract.run() only forwards opts and
+  // an openccConfig-shaped block; TranscriptStore needs dataDir.
+  return new DefaultAgentRuntime({ dataDir: '/tmp' } as any)
 }
 
-describe('DefaultAgentRuntime.run — env-gated backend switch (Phase 5 close-out)', () => {
-  let savedBridge: string | undefined
-
+describe('DefaultAgentRuntime.run — bridge is now the default backend (Phase 5)', () => {
   beforeEach(() => {
     configureMocks()
-    savedBridge = process.env.ZAI_OPENCC_BRIDGE
-    delete process.env.ZAI_OPENCC_BRIDGE
   })
 
   afterEach(() => {
-    if (savedBridge === undefined) delete process.env.ZAI_OPENCC_BRIDGE
-    else process.env.ZAI_OPENCC_BRIDGE = savedBridge
     openccAdapterMock.runOpenccQuery.mockReset()
     openccBridgeMock.runViaOpenccQuery.mockReset()
   })
 
-  it('default: routes through runOpenccQuery (Phase 1.b bypass)', async () => {
-    const rt = makeRuntime()
-    await drain(rt.run({
-      prompt: { role: 'user', content: 'hi' },
-      cwd: '/tmp',
-      sessionId: 's',
-    } as any))
-
-    expect(openccAdapterMock.runOpenccQuery).toHaveBeenCalledTimes(1)
-    expect(openccBridgeMock.runViaOpenccQuery).not.toHaveBeenCalled()
-  })
-
-  it('ZAI_OPENCC_BRIDGE=1: routes through runViaOpenccQuery', async () => {
-    process.env.ZAI_OPENCC_BRIDGE = '1'
+  it('routes through runViaOpenccQuery (bridge) by default', async () => {
     const rt = makeRuntime()
     await drain(rt.run({
       prompt: { role: 'user', content: 'hi' },
@@ -80,40 +58,26 @@ describe('DefaultAgentRuntime.run — env-gated backend switch (Phase 5 close-ou
     expect(openccAdapterMock.runOpenccQuery).not.toHaveBeenCalled()
   })
 
-  it('ZAI_OPENCC_BRIDGE=true (alias): routes through runViaOpenccQuery', async () => {
-    process.env.ZAI_OPENCC_BRIDGE = 'true'
+  it('passes opts through to the bridge unchanged', async () => {
     const rt = makeRuntime()
-    await drain(rt.run({
+    const opts = {
       prompt: { role: 'user', content: 'hi' },
       cwd: '/tmp',
       sessionId: 's',
-    } as any))
-
-    expect(openccBridgeMock.runViaOpenccQuery).toHaveBeenCalledTimes(1)
+      model: 'm',
+      tools: [{ name: 'X' }],
+    } as any
+    await drain(rt.run(opts))
+    expect(openccBridgeMock.runViaOpenccQuery).toHaveBeenCalledWith(opts, {})
   })
 
-  it('ZAI_OPENCC_BRIDGE=0: still uses bypass (env:1 only)', async () => {
-    process.env.ZAI_OPENCC_BRIDGE = '0'
-    const rt = makeRuntime()
-    await drain(rt.run({
-      prompt: { role: 'user', content: 'hi' },
-      cwd: '/tmp',
-      sessionId: 's',
-    } as any))
-
-    expect(openccAdapterMock.runOpenccQuery).toHaveBeenCalledTimes(1)
-    expect(openccBridgeMock.runViaOpenccQuery).not.toHaveBeenCalled()
-  })
-
-  it('ZAI_OPENCC_BRIDGE=1 passes openccConfig through to the bridge', async () => {
-    process.env.ZAI_OPENCC_BRIDGE = '1'
+  it('passes openccConfig through to the bridge', async () => {
     const openccConfig = {
       mcpPool: { tag: 'pool' },
       hookRunner: { tag: 'hooks' },
+      skillsDirs: ['/agents'],
     }
     const rt = new DefaultAgentRuntime({ dataDir: '/tmp' } as any)
-    // Inject openccConfig via a manual override — RuntimeConfig doesn't
-    // expose it in the public type, contract.run() reads `this.config.openccConfig`.
     ;(rt as any).config = { ...(rt as any).config, openccConfig }
 
     await drain(rt.run({
@@ -125,6 +89,19 @@ describe('DefaultAgentRuntime.run — env-gated backend switch (Phase 5 close-ou
     expect(openccBridgeMock.runViaOpenccQuery).toHaveBeenCalledWith(
       expect.anything(),
       openccConfig,
+    )
+  })
+
+  it('falls back to {} openccConfig when none supplied', async () => {
+    const rt = makeRuntime()
+    await drain(rt.run({
+      prompt: { role: 'user', content: 'hi' },
+      cwd: '/tmp',
+      sessionId: 's',
+    } as any))
+    expect(openccBridgeMock.runViaOpenccQuery).toHaveBeenCalledWith(
+      expect.anything(),
+      {},
     )
   })
 })
