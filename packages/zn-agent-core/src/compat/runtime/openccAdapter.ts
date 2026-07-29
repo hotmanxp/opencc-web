@@ -14,7 +14,7 @@
 import type { QueryOptions, OpenccAdapterConfig } from './types.js'
 import type { RuntimeEvent } from './events.js'
 import { toQueryParams } from './queryParamsAdapter.js'
-import { toRuntimeErrorEvent, toAbortedEvent, classifyError } from './streamAdapter.js'
+import { toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
 
 const isBun = (): boolean =>
   typeof process !== 'undefined' && typeof process.versions?.bun === 'string'
