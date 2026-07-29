@@ -12,7 +12,7 @@ import { existsSync, mkdirSync, writeFileSync } from 'node:fs'
 import { dirname, join, resolve as pathResolve } from 'node:path'
 import type { QueryOptions, OpenccAdapterConfig } from './types.js'
 import type { RuntimeEvent } from './events.js'
-import { toQueryParams } from './queryParamsAdapter.js'
+import { buildOpenccQueryParams } from './buildOpenccQueryParams.js'
 import { translateSdkToRuntime } from './sdkEventAdapter.js'
 import { defaultCoreToolsAsOpencc } from '../tools/opencc/index.js'
 import { toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
@@ -42,23 +42,55 @@ async function importOpenccSrc() {
       const queryPath = join(OPENCC_SRC_DIR, 'query.js')
       return await import(queryPath)
     } catch (err: any) {
-      // Lazy-stub fallback: if a .js file is missing in opencc-src,
-      // create a minimal stub and retry the import.
-      if (err?.code === 'ERR_MODULE_NOT_FOUND' && stubCount < STUB_LIMIT) {
-        const match = err.message.match(/Cannot find module ['"]([^'"]+)['"]/i)
-        const missing = match?.[1]
-        if (missing && missing.endsWith('.js') && !missing.startsWith('node:') && !missing.includes('node_modules')) {
-          const stubPath = join(STUB_DIR, missing)
-          mkdirSync(dirname(stubPath), { recursive: true })
-          if (!existsSync(stubPath)) {
-            writeFileSync(stubPath, '// Auto-stub: lazy fallback for UI-shaped module\nexport default {}\n')
-            stubCount++
-            console.warn(`[openccQueryBridge] auto-stubbed: ${missing}`)
-          }
-          // Reset the promise so the next call retries the import.
-          openccModulePromise = null
-          return importOpenccSrc()
+      // Two Node error shapes:
+      //   (a) `Cannot find module 'X.js'`
+      //   (b) `Failed to load url X.js (resolved id: ...) in <file>. Does the file exist?`
+      const missingSpec =
+        err.message?.match(/Cannot find module ['"]([^'"]+)['"]/i)?.[1] ??
+        err.message?.match(/Failed to load url ([^\s(]+)/i)?.[1]
+      const importedFrom =
+        err.message?.match(
+          /Failed to load url .* in (\S+?)\. Does the file exist\?/i,
+        )?.[1]
+
+      // Vendored opencc-src/ is read-only. If the missing file resolves
+      // from inside it (typically a build artifact that the vendored
+      // snapshot omits, e.g. `../integrations/generated/foo.generated.js`),
+      // surface a clear error instead of polluting vendored code.
+      if (
+        importedFrom?.startsWith(OPENCC_SRC_DIR + '/') &&
+        missingSpec &&
+        !missingSpec.startsWith('node:') &&
+        !missingSpec.includes('node_modules')
+      ) {
+        throw new Error(
+          `[openccQueryBridge] vendored opencc-src references a missing file ` +
+            `(${missingSpec}). Hand-stub under dangling-shims/ and add a ` +
+            `resolve.alias for the relative path. Imported from: ${importedFrom}`,
+        )
+      }
+
+      // Out-of-tree missing module: drop a minimal stub in dangling-shims/
+      // and retry. Bounded to prevent infinite loops on recursive missing
+      // imports.
+      if (
+        stubCount < STUB_LIMIT &&
+        missingSpec &&
+        !missingSpec.startsWith('node:') &&
+        !missingSpec.includes('node_modules')
+      ) {
+        const stubPath = join(STUB_DIR, missingSpec)
+        mkdirSync(dirname(stubPath), { recursive: true })
+        if (!existsSync(stubPath)) {
+          writeFileSync(
+            stubPath,
+            '// Auto-stub: lazy fallback for out-of-tree missing module\nexport default {}\n',
+          )
+          stubCount++
+          console.warn(`[openccQueryBridge] auto-stubbed: ${missingSpec}`)
         }
+        openccModulePromise = null
+        return importOpenccSrc()
       }
       throw err
     }
@@ -78,8 +110,21 @@ export async function* runViaOpenccQuery(
     return
   }
 
-  // 2. Translate params + attach core tools.
-  const params = toQueryParams(opts, config)
+  // 2. Translate params + attach core tools. buildOpenccQueryParams is
+  // async because it dynamically imports opencc's `productionDeps()`
+  // factory (avoiding Vite's static bundling of opencc-src).
+  let params: any
+  try {
+    params = await buildOpenccQueryParams(opts, config)
+  } catch (err) {
+    yield toRuntimeErrorEvent(
+      new Error(
+        `[openccQueryBridge] failed to build QueryParams: ${(err as Error).message}`,
+      ),
+      { sessionId, turnIndex: 0 },
+    )
+    return
+  }
   const zaiTools = (opts.tools ?? []) as any[]
   const coreTools = defaultCoreToolsAsOpencc()
   // zai tools win on name collision.
@@ -87,6 +132,11 @@ export async function* runViaOpenccQuery(
   for (const t of coreTools) toolMap.set(t.name, t)
   for (const t of zaiTools) toolMap.set(t.name ?? t.name, t)
   params.tools = Array.from(toolMap.values())
+  // Mirror tools onto toolUseContext.options.tools so opencc internals
+  // that read `state.toolUseContext.options.tools` see them.
+  if (params.toolUseContext?.options) {
+    params.toolUseContext.options.tools = params.tools
+  }
 
   // 3. Lazy import opencc-src.
   let openccQuery: any
