@@ -242,6 +242,14 @@ git -C /Users/ethan/code/opencc-web commit -m "feat(zn-agent-core): bun:bundle s
 
 - [ ] **Step 1: Write the loader hook**
 
+> **Note (added by Task 11 follow-up):** opencc's vendored source also uses
+> project-relative `src/...` specifiers (e.g. `from 'src/services/...'`),
+> which Node's ESM resolver can't find because non-relative specifiers are
+> looked up in `node_modules`. The `bunResolve` hook must also detect
+> `src/` prefixes and map them to `<OPENCC_SRC_DIR>/...` BEFORE the
+> `REDIRECTS` lookup. Without this, the bridge hits `ERR_MODULE_NOT_FOUND:
+> Cannot find package 'src'` as soon as opencc's `query()` is loaded.
+
 `packages/zn-agent-core/src/compat/runtime/bun-protocol.mjs`:
 
 ```js
