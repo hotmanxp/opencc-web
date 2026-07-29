@@ -17,8 +17,8 @@
  * runtime.error event explaining the gap. The contract.ts fallthrough
  * routes callers to compat/openccAdapter.ts as before.
  *
- * Next step: implement convertPromptToMessages() + buildToolUseContext()
- * in subsequent commits, driven by what zai actually exercises in tests.
+ * The companion file `sdkEventAdapter.ts` has the full Message →
+ * RuntimeEvent shape mapping for when the bridge becomes live.
  */
 
 import type { QueryOptions, OpenccAdapterConfig } from './types.js'
@@ -26,7 +26,7 @@ import type { RuntimeEvent } from './events.js'
 
 export async function* runViaOpenccQuery(
   opts: QueryOptions,
-  config: OpenccAdapterConfig,
+  _config: OpenccAdapterConfig,
 ): AsyncIterable<RuntimeEvent> {
   const sessionId = opts.sessionId ?? opts.transcriptId ?? 'unknown'
 
