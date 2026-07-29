@@ -6,6 +6,10 @@ import { getActiveProviderProfile } from '../providerProfiles.js'
 
 export type APIProvider = 'firstParty' | Providers | 'hicap'
 
+/** @deprecated Use APIProvider — kept as alias for `updateStrategy.ts` and any
+ * upstream-cherry-picked callers still importing the pre-rebrand name. */
+export type LegacyAPIProvider = APIProvider
+
 /**
  * Legacy / fork-removed provider env vars that route to a non-Anthropic
  * model family. Listed here so `getAPIProvider()` can short-circuit them

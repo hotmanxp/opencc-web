@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { feature } from '../../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import uniqBy from 'lodash-es/uniqBy.js'
 

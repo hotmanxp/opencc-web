@@ -29,7 +29,7 @@ import { logForDebugging } from '../debug.js'
 import { errorMessage } from '../errors.js'
 import { logError } from '../log.js'
 import { clearAllCaches } from './cacheUtils.js'
-import { getPluginCommands } from './loadPluginCommands.js'
+import { getPluginCommands, getPluginSkills } from './loadPluginCommands.js'
 import { loadPluginHooks } from './loadPluginHooks.js'
 import { loadPluginLspServers } from './lspPluginIntegration.js'
 import { loadPluginMcpServers } from './mcpPluginIntegration.js'
@@ -87,12 +87,19 @@ export async function refreshActivePlugins(
   // the plugin, returning plugin-cache-miss. loadAllPlugins warms the
   // cache-only memoize on completion, so the awaits below are ~free.
   const pluginResult = await loadAllPlugins()
-  const [pluginCommands, agentDefinitions] = await Promise.all([
-    getPluginCommands(),
-    getAgentDefinitionsWithOverrides(getOriginalCwd()),
-  ])
+  const [pluginCommandsResult, pluginSkillsResult, agentDefinitions] =
+    await Promise.all([
+      getPluginCommands(),
+      getPluginSkills(),
+      getAgentDefinitionsWithOverrides(getOriginalCwd()),
+    ])
 
   const { enabled, disabled, errors } = pluginResult
+  // Same merge as useManagePlugins.ts initialPluginLoad: plugin skills
+  // (superpowers' brainstorming, etc.) only ship via skills/ so they're
+  // invisible to getPluginCommands(). Combining here keeps the typeahead
+  // consistent across initial mount and /reload-plugins.
+  const pluginCommands = [...pluginCommandsResult, ...pluginSkillsResult]
   setPluginCommandsState(pluginCommands)
 
   // Populate mcpServers/lspServers on each enabled plugin. These are lazy

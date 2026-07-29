@@ -22,7 +22,7 @@
  * 5. Open in ui.perfetto.dev to visualize
  */
 
-import { feature } from '../../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 import { mkdirSync, writeFileSync } from 'fs'
 import { mkdir, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'

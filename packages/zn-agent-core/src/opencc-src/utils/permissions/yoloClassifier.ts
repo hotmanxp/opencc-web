@@ -1,6 +1,6 @@
 // @ts-nocheck
 import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
-import { feature } from '../../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { BetaToolUnion } from '@anthropic-ai/sdk/resources/beta/messages.js'
 import { mkdir, writeFile } from 'fs/promises'

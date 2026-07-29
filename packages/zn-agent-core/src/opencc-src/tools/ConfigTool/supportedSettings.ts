@@ -1,4 +1,4 @@
-import { feature } from '../../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 import {
   getRemoteControlAtStartup,
   SHOW_CACHE_STATS_MODES,

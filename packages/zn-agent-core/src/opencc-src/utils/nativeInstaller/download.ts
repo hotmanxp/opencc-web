@@ -6,7 +6,7 @@
  * - GCS bucket
  */
 
-import { feature } from '../../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 import axios from 'axios'
 import { createHash } from 'crypto'
 import { chmod, writeFile } from 'fs/promises'

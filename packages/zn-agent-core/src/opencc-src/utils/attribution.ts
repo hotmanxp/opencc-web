@@ -1,4 +1,4 @@
-import { feature } from '../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 import { stat } from 'fs/promises'
 import { getClientType } from '../bootstrap/state.js'
 import { getRemoteSessionUrl, isRemoteSessionLocal } from '../constants/product.js'

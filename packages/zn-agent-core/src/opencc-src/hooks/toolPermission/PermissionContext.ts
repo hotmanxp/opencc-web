@@ -1,6 +1,6 @@
 // @ts-ignore
 import React from 'react'
-import { feature } from '../../shims/bun-bundle.js'
+import { feature } from 'bun:bundle'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,

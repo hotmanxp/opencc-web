@@ -98,6 +98,7 @@ export function planUpdate(input: {
     case 'npm-local':
       return { action: 'npm', method: 'local' }
     case 'npm-global':
+    case 'pnpm-global':
       return { action: 'npm', method: 'global' }
     case 'unknown':
       // Fall back to file detection, matching cli/update.ts's unknown branch.
