@@ -6,6 +6,10 @@
     "esModuleInterop": true,
     "skipLibCheck": true,
     "strict": true,
-    "noImplicitAny": false
+    "noImplicitAny": false,
+    "baseUrl": ".",
+    "paths": {
+      "bun:bundle": ["./packages/zn-agent-core/src/compat/runtime/bun-shim.ts"]
+    }
   }
 }
