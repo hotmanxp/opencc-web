@@ -423,56 +423,71 @@ function makeTool<T>(spec: {
  * Compatible with compat `Tool` (`input_schema`) via
  * `compatToolsToModelCallerTools` below.
  */
+
+// Named exports of each core tool. The opencc-side wrappers (in
+// compat/tools/opencc/) import these and override the `name` field so
+// zai's `FileRead` / `FileWrite` / `FileEdit` become opencc's `Read` /
+// `Write` / `Edit`.
+export const bashTool = makeTool({
+  name: 'Bash',
+  description:
+    'Execute a shell command in the project working directory. Returns stdout/stderr/exit_code. ' +
+    'Use this for git, npm, tests, file inspection, anything that fits a Unix pipe. ' +
+    'Shell can change cwd via `cd`; subsequent commands run from the new cwd.',
+  inputSchema: BashInput,
+  executor: bashCall,
+})
+
+export const fileReadTool = makeTool({
+  name: 'FileRead',
+  description:
+    'Read a file from the filesystem. Supports text only (no images in Phase 4c). ' +
+    'Use offset/limit for large files. Output is line-numbered (cat -n style).',
+  inputSchema: FileReadInput,
+  executor: fileReadCall,
+})
+
+export const fileWriteTool = makeTool({
+  name: 'FileWrite',
+  description:
+    'Write a full file to the filesystem, overwriting any existing content. ' +
+    'Prefer FileEdit for surgical changes — FileWrite is for new files or full rewrites.',
+  inputSchema: FileWriteInput,
+  executor: fileWriteCall,
+})
+
+export const fileEditTool = makeTool({
+  name: 'FileEdit',
+  description:
+    'Apply a surgical edit to a file: replace `old_string` with `new_string`. ' +
+    'Use `replace_all: true` for global find-and-replace. The old_string must match exactly.',
+  inputSchema: FileEditInput,
+  executor: fileEditCall,
+})
+
+export const askUserQuestionTool = makeTool({
+  name: 'AskUserQuestion',
+  description:
+    'Ask the user a multiple-choice question (or a free-text fallback). ' +
+    "Returns the user's selection. Use when you need a decision before proceeding. " +
+    'Wired to zai-server AskRegistry via openccConfig.askRegistry; the ' +
+    'tool yields a tool_use:ask_pending event so the frontend QuestionCard ' +
+    'can render, then awaits the user\'s submit/answer.',
+  inputSchema: AskUserQuestionInput,
+  executor: askUserQuestionCall,
+})
+
 export function buildDefaultTools(opts?: {
   skillsDirs?: readonly string[]
   cwd?: string
 }): Tool[] {
   const cwd = opts?.cwd ?? process.cwd()
   const tools: Tool[] = [
-    makeTool({
-      name: 'Bash',
-      description:
-        'Execute a shell command in the project working directory. Returns stdout/stderr/exit_code. ' +
-        'Use this for git, npm, tests, file inspection, anything that fits a Unix pipe. ' +
-        'Shell can change cwd via `cd`; subsequent commands run from the new cwd.',
-      inputSchema: BashInput,
-      executor: bashCall,
-    }),
-    makeTool({
-      name: 'FileRead',
-      description:
-        'Read a file from the filesystem. Supports text only (no images in Phase 4c). ' +
-        'Use offset/limit for large files. Output is line-numbered (cat -n style).',
-      inputSchema: FileReadInput,
-      executor: fileReadCall,
-    }),
-    makeTool({
-      name: 'FileWrite',
-      description:
-        'Write a full file to the filesystem, overwriting any existing content. ' +
-        'Prefer FileEdit for surgical changes — FileWrite is for new files or full rewrites.',
-      inputSchema: FileWriteInput,
-      executor: fileWriteCall,
-    }),
-    makeTool({
-      name: 'FileEdit',
-      description:
-        'Apply a surgical edit to a file: replace `old_string` with `new_string`. ' +
-        'Use `replace_all: true` for global find-and-replace. The old_string must match exactly.',
-      inputSchema: FileEditInput,
-      executor: fileEditCall,
-    }),
-    makeTool({
-      name: 'AskUserQuestion',
-      description:
-        'Ask the user a multiple-choice question (or a free-text fallback). ' +
-        'Returns the user\'s selection. Use when you need a decision before proceeding. ' +
-        'Wired to zai-server AskRegistry via openccConfig.askRegistry; the ' +
-        'tool yields a tool_use:ask_pending event so the frontend QuestionCard ' +
-        'can render, then awaits the user\'s submit/answer.',
-      inputSchema: AskUserQuestionInput,
-      executor: askUserQuestionCall,
-    }),
+    bashTool,
+    fileReadTool,
+    fileWriteTool,
+    fileEditTool,
+    askUserQuestionTool,
   ]
 
   const skillsDirs = opts?.skillsDirs ?? []
