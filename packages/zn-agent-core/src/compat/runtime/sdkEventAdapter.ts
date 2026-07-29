@@ -43,24 +43,31 @@ export function* translateSdkToRuntime(
 
   if (m.type === 'system') return
 
+  // Per-call sequence so every emitted event from one message gets a
+  // distinct eventId (evt-N, evt-N.1, evt-N.2, …). The SSE `Last-Event-ID`
+  // dedupe path in routes/agent.ts relies on uniqueness.
+  let seq = 0
+  const emit = (type: string, extra: Record<string, unknown> = {}): RuntimeEvent =>
+    makeEvent(type, meta, seq++, extra)
+
   if (m.type === 'assistant' && m.message) {
-    yield makeEvent('message_start', meta, {
+    yield emit('message_start', {
       message: { id: m.message.id, model: m.message.model, role: 'assistant' },
     })
     let blockIndex = 0
     for (const block of m.message.content ?? []) {
       if (block.type === 'text') {
-        yield makeEvent('content_block_start', meta, {
+        yield emit('content_block_start', {
           index: blockIndex,
           content_block: { type: 'text', text: '' },
         })
-        yield makeEvent('content_block_delta', meta, {
+        yield emit('content_block_delta', {
           index: blockIndex,
           delta: { type: 'text_delta', text: block.text ?? '' },
         })
-        yield makeEvent('content_block_stop', meta, { index: blockIndex })
+        yield emit('content_block_stop', { index: blockIndex })
       } else if (block.type === 'tool_use') {
-        yield makeEvent('content_block_start', meta, {
+        yield emit('content_block_start', {
           index: blockIndex,
           content_block: {
             type: 'tool_use',
@@ -69,44 +76,46 @@ export function* translateSdkToRuntime(
             input: block.input ?? {},
           },
         })
-        yield makeEvent('content_block_delta', meta, {
+        yield emit('content_block_delta', {
           index: blockIndex,
           delta: { type: 'input_json_delta', partial_json: JSON.stringify(block.input ?? {}) },
         })
-        yield makeEvent('content_block_stop', meta, { index: blockIndex })
+        yield emit('content_block_stop', { index: blockIndex })
       } else if (block.type === 'thinking') {
-        yield makeEvent('content_block_start', meta, {
+        yield emit('content_block_start', {
           index: blockIndex,
           content_block: { type: 'thinking', thinking: '' },
         })
-        yield makeEvent('content_block_delta', meta, {
+        yield emit('content_block_delta', {
           index: blockIndex,
           delta: { type: 'thinking_delta', thinking: block.thinking ?? '' },
         })
-        yield makeEvent('content_block_stop', meta, { index: blockIndex })
+        yield emit('content_block_stop', { index: blockIndex })
       }
       blockIndex++
     }
-    yield makeEvent('message_delta', meta, {
+    yield emit('message_delta', {
       delta: { stop_reason: m.message.stop_reason ?? 'end_turn' },
     })
     return
   }
 
   if (m.type === 'result') {
-    yield makeEvent('message_delta', meta, { delta: { stop_reason: 'end_turn' } })
-    yield makeEvent('message_stop', meta)
+    yield emit('message_delta', { delta: { stop_reason: 'end_turn' } })
+    yield emit('message_stop')
   }
 }
 
 function makeEvent(
   type: string,
   meta: SdkEventMeta,
+  seq: number,
   extra: Record<string, unknown> = {},
 ): RuntimeEvent {
+  const eventId = seq === 0 ? `evt-${meta.eventCounter}` : `evt-${meta.eventCounter}.${seq}`
   return {
     type,
-    eventId: `evt-${meta.eventCounter}`,
+    eventId,
     sessionId: meta.sessionId,
     turnIndex: meta.turnIndex,
     ts: Date.now(),
