@@ -59,6 +59,11 @@ export * from './compat/runtime/skills-index.js'
 export { loadAgentDefinitions, parseAgentMd } from './compat/tools/loadAgentsDir.js'
 export type { AgentDefinition } from './compat/tools/loadAgentsDir.js'
 
+// Default tool registry (Phase 4): buildDefaultTools() returns the chat-path
+// tool set (Bash/Read/Edit/Write/AskUserQuestion/Skill) with stub call()
+// implementations; tool execution lands in Phase 5.
+export { buildDefaultTools, compatToolsToModelCallerTools } from './compat/tools/index.js'
+
 // Compact session (Batch 3b)
 export { compactSession } from './compat/runtime/compactService.js'
 export type { CompactSessionOptions, CompactSessionResult } from './compat/runtime/compactService.js'

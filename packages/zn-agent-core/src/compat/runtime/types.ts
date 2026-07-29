@@ -156,6 +156,14 @@ export type RuntimeConfig = {
     /** Allow other loop-resilience keys without forcing them into the type. */
     [key: string]: unknown
   }
+
+  /**
+   * Phase 1.b — config block read by `compat/runtime/openccAdapter.ts` (the
+   * direct modelCaller path that bypasses the broken opencc vendor copy).
+   * zai-server wires mcp/skills/sandbox/modelCaller into this block. Kept
+   * off the top-level RuntimeConfig shape so other consumers don't see it.
+   */
+  openccConfig?: OpenccAdapterConfig
 }
 
 export type QueryOptions = {
@@ -221,10 +229,37 @@ export type QueryOptions = {
 export interface OpenccAdapterConfig {
   /** MCP client pool — tools from connected MCP servers injected into query(). */
   mcpPool?: import('../mcp/MCPClientPool.js').MCPClientPool | undefined
+  /** MCP server specs (name + transport config) consumed by opencc query(). */
+  mcpServers?: import('../mcp/types.js').McpServerSpec[] | undefined
   /** Plugin runtime — hooks (PreToolUse, PostToolUse, etc.) attached to query lifecycle. */
   hookRunner?: import('../plugins/HookRunner.js').HookRunner | undefined
   /** Skills directories to load skill definitions from. */
   skillsDirs?: readonly string[] | undefined
   /** Sandbox config (executor, maxCpuMs, env allowlist). */
   sandbox?: import('./types.js').SandboxConfig | undefined
+  /**
+   * Model caller — invokes Anthropic (or another provider) and yields the
+   * raw event stream. In Phase 1.b (compat/runtime/openccAdapter.ts) the
+   * adapter calls this directly instead of going through opencc's
+   * query(), so the opencc vendor copy never needs to load. zai-server
+   * wires `createAnthropicModelCaller()` into this slot.
+   */
+  modelCaller?: import('./modelCaller.js').ModelCaller | undefined
+  /**
+   * Default tool list to expose to the model. Merged with `opts.tools`
+   * at call-time by `runOpenccQuery` (opts wins on name collision).
+   * Phase 4 wires `buildDefaultTools({ skillsDirs })` here so the model
+   * sees Bash/Read/Edit/Write/AskUserQuestion/Skill; Phase 5 will hook
+   * the tool execution loop on top.
+   */
+  tools?: import('./modelCaller.js').Tool[] | undefined
+
+  /**
+   * AskRegistry abstraction. AskUserQuestion 工具在 Phase 4c 之前是 stub
+   * (直接返回 "[zai askRegistry stub] ..."); 接上 askRegistry 后, 工具
+   * 会 yield `tool_use:ask_pending` 事件 (→ 前端 QuestionCard 弹出), 然后
+   * await `register(toolUseId, sessionId, abortSignal)` 等用户答复. zai-server
+   * 把 `AskRegistry` 实例直接挂到这里即可, 不需要 server 自己改。
+   */
+  askRegistry?: import('./types.js').AskRegistryLike | undefined
 }

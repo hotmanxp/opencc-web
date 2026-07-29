@@ -1,10 +1,17 @@
 // @zn-ai/zn-agent-core compat shim — port of zai-agent-core runtime/skills/substitute.ts.
 //
-// Path adjustments:
-//   - `from '../../opencc-internals/utils/stringUtils.js'` →
-//     `from '../../opencc-src/utils/stringUtils.js'`
+// escapeRegExp is inlined here (verbatim from opencc-src/utils/stringUtils.ts)
+// so this file does not pull in the opencc source tree. opencc-src is a
+// vendored reference copy that retains UI/React dependencies; only the
+// runtime surface the compat layer needs is re-implemented locally.
 
-import { escapeRegExp } from '../../opencc-src/utils/stringUtils.js'
+/**
+ * Escapes special regex characters in a string so it can be used as a literal
+ * pattern in a RegExp constructor.
+ */
+function escapeRegExp(str: string): string {
+  return str.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')
+}
 
 /**
  * Tokenize an arguments string into individual positional args.
