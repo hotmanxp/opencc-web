@@ -132,18 +132,22 @@ export function initAgentRuntime(cwd: string): void {
       },
     },
     // opencc adapter config — read by compat/runtime/contract.ts::DefaultAgentRuntime.run()
-    // which delegates to compat/runtime/openccAdapter.ts::runOpenccQuery().
-    // Without this block, the adapter sees openccConfig = {} and never wires mcp /
-    // skills / sandbox into opencc's query() params, so the main loop runs with
-    // zero tools and zero capabilities even when the adapter is otherwise wired.
+    // which delegates to compat/runtime/openccQueryBridge.ts::runViaOpenccQuery()
+    // (Phase 5). The bridge lazy-imports opencc-src/query.js and runs opencc's
+    // main loop; deps.callModel is filled by buildDeps(config.modelCaller) below
+    // so the loop calls our zai-side modelCaller (Anthropic SDK wrapper) under
+    // the hood. Without this block, deps.callModel has no modelCaller and the
+    // bridge yields "deps.callModel not implemented" at the first turn.
     openccConfig: {
       mcpPool: mcpClientPool,
       mcpServers,
       skillsDirs: resolveSkillsDirs(),
       sandbox: resolveSandbox(cwd),
-      // Phase 1.b: openccAdapter calls modelCaller directly instead of
-      // importing opencc's query(). This bypasses the broken opencc vendor
-      // copy and reuses zai's own Anthropic SDK wrapper.
+      // Phase 5: ModelCaller feeds opencc's deps.callModel. The translator in
+      // buildOpenccQueryParams translates between opencc's request shape
+      // (messages + systemPrompt + tools + signal + options.model) and zai's
+      // (model + systemPrompt + messages + tools + signal) — both shapes
+      // wrap Anthropic's underlying SDK.
       modelCaller: createAnthropicModelCaller(),
       // Phase 4: register the default tool set (Bash/Read/Edit/Write/
       // AskUserQuestion/Skill) so the model sees them. Tool execution is
