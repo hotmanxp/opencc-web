@@ -28,7 +28,7 @@
 | File | Status | LOC | Responsibility |
 |------|--------|-----|----------------|
 | `packages/zn-agent-core/src/compat/runtime/bun-shim.ts` | NEW | ~50 | `feature(flag, defaultValue?)` and `require(id)` stubs; env override + static flag tree |
-| `packages/zn-agent-core/src/compat/runtime/bun-protocol.mjs` | NEW | ~30 | Node `register({ resolve })` hook redirecting `bun:` → `bun-shim.ts` |
+| `packages/zn-agent-core/src/compat/runtime/bun-protocol.mjs` | NEW | ~30 | Node `--loader` export pattern (named `resolve`/`load`); redirects `bun:` → `bun-shim.ts` |
 | `packages/zn-agent-core/src/compat/runtime/openccQueryBridge.ts` | FILL IN | ~250 | Lazy import opencc-src/query, params translation, tool wiring, stream forwarding, lazy-stub fallback |
 | `packages/zn-agent-core/src/compat/runtime/sdkEventAdapter.ts` | FILL IN | ~180 | SDKMessage union (System/User/Assistant/Attachment/Progress/ToolUseSummary/Result) → Anthropic primitives |
 | `packages/zn-agent-core/src/compat/runtime/dangling-shims/` (dir) | NEW (lazy) | varies | Auto-stub for UI-shaped modules; hand-stub for core modules that need real exports |
@@ -238,7 +238,7 @@ git -C /Users/ethan/code/opencc-web commit -m "feat(zn-agent-core): bun:bundle s
 
 **Interfaces:**
 - Consumes: `bun-shim.ts` (Task 1)
-- Produces: A Node `register({ resolve })` hook that, when `bun:bundle` is requested, returns the URL of `bun-shim.ts`
+- Produces: A Node loader hook (legacy `--loader` export pattern: `export { bunResolve as resolve, bunLoad as load }`); when `bun:bundle` is requested, returns the URL of `bun-shim.ts`
 
 - [ ] **Step 1: Write the loader hook**
 
@@ -264,7 +264,6 @@ git -C /Users/ethan/code/opencc-web commit -m "feat(zn-agent-core): bun:bundle s
  *   vitest.config.ts: setupFiles: ['./bun-protocol.mjs']
  */
 
-import { register } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { fileURLToPath } from 'node:url'
 import { dirname, resolve } from 'node:path'
@@ -279,19 +278,21 @@ const REDIRECTS = {
   'bun:feature': pathToFileURL(resolve(SHIM_DIR, 'bun-feature-shim.ts')).href,
 }
 
-register(
-  {
-    resolve(specifier, context, nextResolve) {
-      if (Object.prototype.hasOwnProperty.call(REDIRECTS, specifier)) {
-        const url = REDIRECTS[specifier]
-        return { url, shortCircuit: true, format: 'module' }
-      }
-      return nextResolve(specifier, context)
-    },
-  },
-  import.meta.url,
-)
+async function bunResolve(specifier, context, nextResolve) {
+  if (Object.prototype.hasOwnProperty.call(REDIRECTS, specifier)) {
+    return { url: REDIRECTS[specifier], shortCircuit: true, format: 'module' }
+  }
+  return nextResolve(specifier, context)
+}
+
+function bunLoad(url, context, nextLoad) {
+  return nextLoad(url, context)
+}
+
+export { bunResolve as resolve, bunLoad as load }
 ```
+
+(Note: the legacy `--loader` export pattern is used instead of `register()`. This is because Node 24's `register()` API has a known limitation when invoked via `--import` where internal `nextResolve` calls lack a valid parent URL context. The `--loader` form works under `tsx --loader`, `tsx --import` (tsx invokes the file as a loader via its own register), and the `vitest.config.ts` `setupFiles` mechanism (which Task 12 replaces with a Vite `resolve.alias` for the in-process path).)
 
 - [ ] **Step 2: Create a placeholder for `bun:feature` shim**
 
@@ -327,15 +328,11 @@ describe('bun-protocol loader hook', () => {
     const result = spawnSync(
       'node',
       [
-        '--import',
+        '--loader',
         protoPath,
         '--input-type=module',
         '-e',
-        `import { register } from 'node:module';
-         const hookPath = ${JSON.stringify(protoPath)};
-         // We can't easily inspect the registered hook, so re-export by
-         // importing bun:bundle and checking it loaded.
-         const mod = await import('bun:bundle');
+        `const mod = await import('bun:bundle');
          console.log(JSON.stringify(Object.keys(mod).sort()));`,
       ],
       { encoding: 'utf-8', cwd: process.cwd() },
