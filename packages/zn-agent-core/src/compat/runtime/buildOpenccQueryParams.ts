@@ -50,10 +50,41 @@ async function* translateCallModel(
   },
   zaiModelCaller: ModelCaller,
 ): AsyncGenerator<any> {
+  // opencc vendor's Message format: { type, uuid, timestamp, message: { role, content, ... } }
+  // zai's Anthropic modelCaller expects: { role, content }
+  // We must extract the inner `message` field and adapt content blocks.
+  const openccMessages = (openccReq.messages ?? []) as any[]
+  if (process.env.ZAI_DEBUG === '1') {
+    console.log('[debug] raw openccReq.messages (full):', JSON.stringify(openccMessages, null, 2).slice(0, 2000))
+  }
+  const zaiMessages = openccMessages.map((m: any) => {
+    // opencc Message has: { type: 'user'|'assistant', message: { role, content, ... }, ... }
+    // Inner message has the actual role + content.
+    const inner = m.message ?? m
+    const role: 'user' | 'assistant' = inner.role ?? (m.type === 'user' ? 'user' : 'assistant')
+    // Content can be a string OR an array of content blocks.
+    // opencc's assistant messages may have content blocks with tool_use;
+    // user messages may have tool_result blocks. Pass through.
+    const content = inner.content
+    return { role, content }
+  })
+  // opencc systemPrompt can be a string OR an array of {type, text} blocks.
+  // zai's modelCaller accepts both forms (lines 293-309 above).
+  const systemPrompt = openccReq.systemPrompt as any
+
+  if (process.env.ZAI_DEBUG === '1') {
+    console.log('[debug] translated zaiReq:', {
+      model: openccReq.options?.model,
+      messagesCount: zaiMessages.length,
+      firstMessage: zaiMessages[0],
+      systemPromptType: Array.isArray(systemPrompt) ? 'array' : typeof systemPrompt,
+      systemPromptLength: Array.isArray(systemPrompt) ? systemPrompt.length : (systemPrompt as string)?.length,
+    })
+  }
   const zaiReq = {
     model: openccReq.options?.model ?? 'unknown',
-    systemPrompt: openccReq.systemPrompt as any,
-    messages: openccReq.messages as any,
+    systemPrompt,
+    messages: zaiMessages,
     tools: openccReq.tools as any,
     signal: openccReq.signal,
   }
@@ -172,7 +203,28 @@ export async function buildOpenccQueryParams(
   opts: QueryOptions,
   config: OpenccAdapterConfig,
 ): Promise<QueryParamsOutput> {
-  const messages = Array.isArray(opts.prompt) ? opts.prompt : [opts.prompt]
+  // Convert zai QueryOptions.prompt (string | UserMessage | UserMessage[])
+  // to opencc's expected Message[] format:
+  //   { type: 'user'|'assistant', uuid, timestamp, message: { role, content } }
+  const rawMessages = Array.isArray(opts.prompt) ? opts.prompt : [opts.prompt]
+  const messages = rawMessages.map((m, i) => {
+    if (typeof m === 'string') {
+      return {
+        type: 'user' as const,
+        uuid: `msg-${Date.now()}-${i}`,
+        timestamp: new Date().toISOString(),
+        message: { role: 'user' as const, content: m },
+      }
+    }
+    // UserMessage shape: { role: 'user', content }. opencc's wrapper
+    // expects type: 'user' (matching the inner role).
+    return {
+      type: 'user' as const,
+      uuid: `msg-${Date.now()}-${i}`,
+      timestamp: new Date().toISOString(),
+      message: { role: 'user' as const, content: m.content },
+    }
+  })
   const tools = (opts.tools ?? []) as any[]
 
   const abortController = new AbortController()

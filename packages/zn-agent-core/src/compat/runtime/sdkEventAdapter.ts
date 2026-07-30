@@ -41,7 +41,21 @@ export function* translateSdkToRuntime(
   }
   if (!m || typeof m !== 'object') return
 
+  // opencc's query() can yield events in two shapes:
+  // (a) opencc Message wrapper: { type: 'assistant'|'user'|'system', message: { role, content } }
+  //     — older format that needs unwrapping to Anthropic primitives
+  // (b) Anthropic-style primitives: { type: 'message_start'|'content_block_start'|... }
+  //     — already in zai's RuntimeEvent shape, just attach meta and pass through
+  //
+  // Detect which format and handle accordingly.
   if (m.type === 'system') return
+
+  if (m.type !== 'assistant' && m.type !== 'user') {
+    // Format (b): Anthropic primitive (message_start, content_block_*, etc).
+    // Pass through with zai meta fields attached.
+    yield makeEvent(String(m.type), meta, 0, m as Record<string, unknown>)
+    return
+  }
 
   // Per-call sequence so every emitted event from one message gets a
   // distinct eventId (evt-N, evt-N.1, evt-N.2, …). The SSE `Last-Event-ID`
@@ -98,11 +112,6 @@ export function* translateSdkToRuntime(
       delta: { stop_reason: m.message.stop_reason ?? 'end_turn' },
     })
     return
-  }
-
-  if (m.type === 'result') {
-    yield emit('message_delta', { delta: { stop_reason: 'end_turn' } })
-    yield emit('message_stop')
   }
 }
 
