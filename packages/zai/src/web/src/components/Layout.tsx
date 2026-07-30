@@ -23,8 +23,8 @@ const { Sider, Header, Content } = AntLayout;
 
 const menuItems = [
   { key: '/login', icon: <LoginOutlined />, label: '登录' },
-  // / 路径保留为入口重定向到 /login，菜单的"系统信息"显式指向 /dashboard 子路由，
-  // 否则 antd Menu 拿 / 作为 selectedKey 会触发跳转再被 Navigate 弹回 /login。
+  // / 路径保留为入口重定向到 /agent，菜单的"系统信息"显式指向 /dashboard 子路由，
+  // 否则 antd Menu 拿 / 作为 selectedKey 会触发跳转再被 Navigate 弹回 /agent。
   { key: '/dashboard', icon: <DashboardOutlined />, label: '系统信息' },
   { key: '/tools', icon: <ToolOutlined />, label: '工具' },
   { key: '/resources', icon: <AppstoreOutlined />, label: '资源' },
