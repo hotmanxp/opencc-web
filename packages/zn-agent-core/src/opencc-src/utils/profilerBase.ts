@@ -5,7 +5,7 @@
  */
 
 import type { performance as PerformanceType } from 'perf_hooks'
-import { formatFileSize } from './format.ts'
+import { formatFileSize } from './format.js'
 
 const OPENCLAUDE_PERFORMANCE_PREFIX = 'openclaude:'
 

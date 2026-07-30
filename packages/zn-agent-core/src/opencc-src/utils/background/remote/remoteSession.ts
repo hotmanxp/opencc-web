@@ -1,15 +1,15 @@
 import type { SDKMessage } from 'src/entrypoints/agentSdkTypes.js'
-import { checkGate_CACHED_OR_BLOCKING } from '../../../services/analytics/growthbook.ts'
-import { isPolicyAllowed } from '../../../services/policyLimits/index.ts'
-import { detectCurrentRepositoryWithHost } from '../../detectRepository.ts'
-import { isEnvTruthy } from '../../envUtils.ts'
-import type { TodoList } from '../../todo/types.ts'
+import { checkGate_CACHED_OR_BLOCKING } from '../../../services/analytics/growthbook.js'
+import { isPolicyAllowed } from '../../../services/policyLimits/index.js'
+import { detectCurrentRepositoryWithHost } from '../../detectRepository.js'
+import { isEnvTruthy } from '../../envUtils.js'
+import type { TodoList } from '../../todo/types.js'
 import {
   checkGithubAppInstalled,
   checkHasRemoteEnvironment,
   checkIsInGitRepo,
   checkNeedsClaudeAiLogin,
-} from './preconditions.ts'
+} from './preconditions.js'
 
 /**
  * Background remote session type for managing teleport sessions

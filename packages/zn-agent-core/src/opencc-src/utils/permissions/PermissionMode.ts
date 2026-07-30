@@ -1,13 +1,13 @@
 import z from 'zod/v4'
-import { PAUSE_ICON } from '../../constants/figures.ts'
+import { PAUSE_ICON } from '../../constants/figures.js'
 // Types extracted to src/types/permissions.ts to break import cycles
 import {
   EXTERNAL_PERMISSION_MODES,
   type ExternalPermissionMode,
   PERMISSION_MODES,
   type PermissionMode,
-} from '../../types/permissions.ts'
-import { lazySchema } from '../lazySchema.ts'
+} from '../../types/permissions.js'
+import { lazySchema } from '../lazySchema.js'
 
 // Re-export for backwards compatibility
 export {

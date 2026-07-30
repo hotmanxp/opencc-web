@@ -12,15 +12,15 @@
 
 import axios from 'axios'
 import { dirname, join } from 'path'
-import { getSessionId } from '../bootstrap/state.ts'
-import { createBufferedWriter } from './bufferedWriter.ts'
-import { CACHE_PATHS } from './cachePaths.ts'
-import { registerCleanup } from './cleanupRegistry.ts'
-import { logForDebugging } from './debug.ts'
-import { getFsImplementation } from './fsOperations.ts'
-import { attachErrorLogSink, dateToFilename } from './log.ts'
-import { redactSensitiveInfo } from './redaction.ts'
-import { jsonStringify } from './slowOperations.ts'
+import { getSessionId } from '../bootstrap/state.js'
+import { createBufferedWriter } from './bufferedWriter.js'
+import { CACHE_PATHS } from './cachePaths.js'
+import { registerCleanup } from './cleanupRegistry.js'
+import { logForDebugging } from './debug.js'
+import { getFsImplementation } from './fsOperations.js'
+import { attachErrorLogSink, dateToFilename } from './log.js'
+import { redactSensitiveInfo } from './redaction.js'
+import { jsonStringify } from './slowOperations.js'
 
 const DATE = dateToFilename(new Date())
 

@@ -7,51 +7,51 @@ import * as React from 'react';
 import type { CanUseToolFn } from 'src/hooks/useCanUseTool.js';
 import type { AppState } from 'src/state/AppState.js';
 import { z } from 'zod/v4';
-import { getKairosActive } from '../../bootstrap/state.ts';
-import { TOOL_SUMMARY_MAX_LENGTH } from '../../constants/toolLimits.ts';
-import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../../services/analytics/index.ts';
-import { notifyVscodeFileUpdated } from '../../services/mcp/vscodeSdkMcp.ts';
-import type { SetToolJSXFn, ToolCallProgress, ToolUseContext, ValidationResult } from '../../Tool.ts';
-import { buildTool, type ToolDef } from '../../Tool.ts';
+import { getKairosActive } from '../../bootstrap/state.js';
+import { TOOL_SUMMARY_MAX_LENGTH } from '../../constants/toolLimits.js';
+import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../../services/analytics/index.js';
+import { notifyVscodeFileUpdated } from '../../services/mcp/vscodeSdkMcp.js';
+import type { SetToolJSXFn, ToolCallProgress, ToolUseContext, ValidationResult } from '../../Tool.js';
+import { buildTool, type ToolDef } from '../../Tool.js';
 import { backgroundExistingForegroundTask, markTaskNotified, registerForeground, spawnShellTask, unregisterForeground } from '../../tasks/LocalShellTask/LocalShellTask.js';
-import type { AgentId } from '../../types/ids.ts';
-import type { AssistantMessage } from '../../types/message.ts';
-import { parseForSecurity } from '../../utils/bash/ast.ts';
-import { splitCommand_DEPRECATED, splitCommandWithOperators } from '../../utils/bash/commands.ts';
-import { extractClaudeCodeHints } from '../../utils/claudeCodeHints.ts';
-import { detectCodeIndexingFromCommand } from '../../utils/codeIndexing.ts';
-import { isEnvTruthy } from '../../utils/envUtils.ts';
-import { isENOENT, ShellError } from '../../utils/errors.ts';
-import { detectFileEncoding, detectLineEndings, getFileModificationTime, writeTextContent } from '../../utils/file.ts';
-import { fileHistoryEnabled, fileHistoryTrackEdit } from '../../utils/fileHistory.ts';
-import { truncate } from '../../utils/format.ts';
-import { getFsImplementation } from '../../utils/fsOperations.ts';
-import { lazySchema } from '../../utils/lazySchema.ts';
-import { expandPath } from '../../utils/path.ts';
-import type { PermissionResult } from '../../utils/permissions/PermissionResult.ts';
-import { maybeRecordPluginHint } from '../../utils/plugins/hintRecommendation.ts';
-import { exec } from '../../utils/Shell.ts';
-import type { ExecResult } from '../../utils/ShellCommand.ts';
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.ts';
-import { semanticBoolean } from '../../utils/semanticBoolean.ts';
-import { semanticNumber } from '../../utils/semanticNumber.ts';
-import { EndTruncatingAccumulator } from '../../utils/stringUtils.ts';
-import { getTaskOutputPath } from '../../utils/task/diskOutput.ts';
-import { TaskOutput } from '../../utils/task/TaskOutput.ts';
-import { isOutputLineTruncated } from '../../utils/terminal.ts';
-import { buildLargeToolResultMessage, ensureToolResultsDir, generatePreview, getToolResultPath, PREVIEW_SIZE_BYTES } from '../../utils/toolResultStorage.ts';
+import type { AgentId } from '../../types/ids.js';
+import type { AssistantMessage } from '../../types/message.js';
+import { parseForSecurity } from '../../utils/bash/ast.js';
+import { splitCommand_DEPRECATED, splitCommandWithOperators } from '../../utils/bash/commands.js';
+import { extractClaudeCodeHints } from '../../utils/claudeCodeHints.js';
+import { detectCodeIndexingFromCommand } from '../../utils/codeIndexing.js';
+import { isEnvTruthy } from '../../utils/envUtils.js';
+import { isENOENT, ShellError } from '../../utils/errors.js';
+import { detectFileEncoding, detectLineEndings, getFileModificationTime, writeTextContent } from '../../utils/file.js';
+import { fileHistoryEnabled, fileHistoryTrackEdit } from '../../utils/fileHistory.js';
+import { truncate } from '../../utils/format.js';
+import { getFsImplementation } from '../../utils/fsOperations.js';
+import { lazySchema } from '../../utils/lazySchema.js';
+import { expandPath } from '../../utils/path.js';
+import type { PermissionResult } from '../../utils/permissions/PermissionResult.js';
+import { maybeRecordPluginHint } from '../../utils/plugins/hintRecommendation.js';
+import { exec } from '../../utils/Shell.js';
+import type { ExecResult } from '../../utils/ShellCommand.js';
+import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js';
+import { semanticBoolean } from '../../utils/semanticBoolean.js';
+import { semanticNumber } from '../../utils/semanticNumber.js';
+import { EndTruncatingAccumulator } from '../../utils/stringUtils.js';
+import { getTaskOutputPath } from '../../utils/task/diskOutput.js';
+import { TaskOutput } from '../../utils/task/TaskOutput.js';
+import { isOutputLineTruncated } from '../../utils/terminal.js';
+import { buildLargeToolResultMessage, ensureToolResultsDir, generatePreview, getToolResultPath, PREVIEW_SIZE_BYTES } from '../../utils/toolResultStorage.js';
 import { userFacingName as fileEditUserFacingName } from '../FileEditTool/UI.js';
-import { trackGitOperations } from '../shared/gitOperationTracking.ts';
-import { bashToolHasPermission, commandHasAnyCd, matchWildcardPattern, permissionRuleExtractPrefix } from './bashPermissions.ts';
-import { analyzeBashCommand, parseLegacyShellCommandForAnalysis, type BashCommandAnalysis } from './bashCommandAnalysis.ts';
-import { interpretCommandResult } from './commandSemantics.ts';
-import { getDefaultTimeoutMs, getEffectiveTimeoutMs, getMaxTimeoutMs, getSimplePrompt } from './prompt.ts';
-import { checkReadOnlyConstraints } from './readOnlyValidation.ts';
-import { parseSedEditCommand } from './sedEditParser.ts';
-import { shouldUseSandbox, shouldUseSandboxForPresentation } from './shouldUseSandbox.ts';
-import { BASH_TOOL_NAME } from './toolName.ts';
+import { trackGitOperations } from '../shared/gitOperationTracking.js';
+import { bashToolHasPermission, commandHasAnyCd, matchWildcardPattern, permissionRuleExtractPrefix } from './bashPermissions.js';
+import { analyzeBashCommand, parseLegacyShellCommandForAnalysis, type BashCommandAnalysis } from './bashCommandAnalysis.js';
+import { interpretCommandResult } from './commandSemantics.js';
+import { getDefaultTimeoutMs, getEffectiveTimeoutMs, getMaxTimeoutMs, getSimplePrompt } from './prompt.js';
+import { checkReadOnlyConstraints } from './readOnlyValidation.js';
+import { parseSedEditCommand } from './sedEditParser.js';
+import { shouldUseSandbox, shouldUseSandboxForPresentation } from './shouldUseSandbox.js';
+import { BASH_TOOL_NAME } from './toolName.js';
 import { BackgroundHint, renderToolResultMessage, renderToolUseErrorMessage, renderToolUseMessage, renderToolUseProgressMessage, renderToolUseQueuedMessage } from './UI.js';
-import { buildImageToolResult, isImageOutput, resetCwdIfOutsideProject, resizeShellImageOutput, selectFailureOutput, stdErrAppendShellResetMessage, stripEmptyLines } from './utils.ts';
+import { buildImageToolResult, isImageOutput, resetCwdIfOutsideProject, resizeShellImageOutput, selectFailureOutput, stdErrAppendShellResetMessage, stripEmptyLines } from './utils.js';
 const EOL = '\n';
 
 // Progress display constants
@@ -310,8 +310,8 @@ type OutputSchema = ReturnType<typeof outputSchema>;
 export type Out = z.infer<OutputSchema>;
 
 // Re-export BashProgress from centralized types to break import cycles
-export type { BashProgress } from '../../types/tools.ts';
-import type { BashProgress } from '../../types/tools.ts';
+export type { BashProgress } from '../../types/tools.js';
+import type { BashProgress } from '../../types/tools.js';
 
 /**
  * Checks if a command is allowed to be automatically backgrounded
@@ -1293,7 +1293,7 @@ async function* runShellCommand({
           }, setAppState, toolUseId);
         }
         setToolJSX({
-          jsx: null,
+          jsx: <BackgroundHint />,
           shouldHidePromptInput: false,
           shouldContinueAnimation: true,
           showSpinner: true

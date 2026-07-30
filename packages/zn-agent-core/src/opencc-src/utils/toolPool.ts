@@ -1,9 +1,9 @@
 import { isCoordinatorMode } from '../coordinator/coordinatorMode.js'
 import partition from 'lodash-es/partition.js'
 import uniqBy from 'lodash-es/uniqBy.js'
-import { COORDINATOR_MODE_ALLOWED_TOOLS } from '../constants/tools.ts'
-import { isMcpTool } from '../services/mcp/utils.ts'
-import type { Tool, ToolPermissionContext, Tools } from '../Tool.ts'
+import { COORDINATOR_MODE_ALLOWED_TOOLS } from '../constants/tools.js'
+import { isMcpTool } from '../services/mcp/utils.js'
+import type { Tool, ToolPermissionContext, Tools } from '../Tool.js'
 
 // MCP tool name suffixes for PR activity subscription. These are lightweight
 // orchestration actions the coordinator calls directly rather than delegating

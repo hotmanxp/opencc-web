@@ -6,14 +6,14 @@ import {
   DIFF_TIMEOUT_MS,
   getPatchForDisplay,
   getPatchFromContents,
-} from '../../utils/diff.ts'
-import { errorMessage, isENOENT } from '../../utils/errors.ts'
+} from '../../utils/diff.js'
+import { errorMessage, isENOENT } from '../../utils/errors.js'
 import {
   addLineNumbers,
   convertLeadingTabsToSpaces,
   readFileSyncCached,
-} from '../../utils/file.ts'
-import type { EditInput, FileEdit } from './types.ts'
+} from '../../utils/file.js'
+import type { EditInput, FileEdit } from './types.js'
 
 // OpenCC can't output curly quotes, so we define them as constants here for OpenCC to use
 // in the code. We do this because we normalize curly quotes to straight quotes

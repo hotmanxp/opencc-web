@@ -1,16 +1,16 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { MODEL_ALIASES } from './aliases.ts'
-import { isModelAllowed } from './modelAllowlist.ts'
-import { getAPIProvider } from './providers.ts'
-import { sideQuery } from '../sideQuery.ts'
+import { MODEL_ALIASES } from './aliases.js'
+import { isModelAllowed } from './modelAllowlist.js'
+import { getAPIProvider } from './providers.js'
+import { sideQuery } from '../sideQuery.js'
 import {
   NotFoundError,
   APIError,
   APIConnectionError,
   AuthenticationError,
 } from '@anthropic-ai/sdk'
-import { getModelStrings } from './modelStrings.ts'
-import { getCachedOllamaModelOptions, isOllamaProvider } from './ollamaModels.ts'
+import { getModelStrings } from './modelStrings.js'
+import { getCachedOllamaModelOptions, isOllamaProvider } from './ollamaModels.js'
 
 // Cache valid models to avoid repeated API calls
 const validModelCache = new Map<string, boolean>()

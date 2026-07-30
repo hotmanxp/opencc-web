@@ -14,10 +14,10 @@ import { getSessionId } from 'src/bootstrap/state.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../services/analytics/index.ts'
-import { logForDebugging } from './debug.ts'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.ts'
-import { getFsImplementation } from './fsOperations.ts'
+} from '../services/analytics/index.js'
+import { logForDebugging } from './debug.js'
+import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
+import { getFsImplementation } from './fsOperations.js'
 import {
   clearProfilerEntries,
   formatMs,
@@ -26,8 +26,8 @@ import {
   getProfilerDisplayName,
   getProfilerEntries,
   getProfilerMarkName,
-} from './profilerBase.ts'
-import { writeFileSync_DEPRECATED } from './slowOperations.ts'
+} from './profilerBase.js'
+import { writeFileSync_DEPRECATED } from './slowOperations.js'
 
 const PROFILER_SCOPE = 'startup'
 

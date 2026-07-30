@@ -1,5 +1,5 @@
-import type { PackageManager } from './nativeInstaller/packageManagers.ts'
-import { PRODUCT_DISPLAY_NAME } from '../constants/product.ts'
+import type { PackageManager } from './nativeInstaller/packageManagers.js'
+import { PRODUCT_DISPLAY_NAME } from '../constants/product.js'
 
 const UPSTREAM_PACKAGE_URL = '@anthropic-ai/claude-code'
 

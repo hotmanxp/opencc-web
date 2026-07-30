@@ -1,16 +1,16 @@
 import type { Tool, ToolUseContext } from 'src/Tool.js'
 import z from 'zod/v4'
-import { logForDebugging } from '../debug.ts'
-import { lazySchema } from '../lazySchema.ts'
+import { logForDebugging } from '../debug.js'
+import { lazySchema } from '../lazySchema.js'
 import type {
   PermissionDecision,
   PermissionDecisionReason,
-} from './PermissionResult.ts'
+} from './PermissionResult.js'
 import {
   applyPermissionUpdates,
   persistPermissionUpdates,
-} from './PermissionUpdate.ts'
-import { permissionUpdateSchema } from './PermissionUpdateSchema.ts'
+} from './PermissionUpdate.js'
+import { permissionUpdateSchema } from './PermissionUpdateSchema.js'
 
 export const inputSchema = lazySchema(() =>
   z.object({

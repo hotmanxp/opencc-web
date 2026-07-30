@@ -1,6 +1,6 @@
 import figures from 'figures'
 import { color } from '../components/design-system/color.js'
-import type { Theme, ThemeName } from './theme.ts'
+import type { Theme, ThemeName } from './theme.js'
 
 export type TreeNode = {
   [key: string]: TreeNode | string | undefined

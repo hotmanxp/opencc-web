@@ -21,14 +21,14 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import { logForDebugging } from '../debug.ts'
-import { getClaudeConfigHomeDir } from '../envUtils.ts'
-import { getErrnoCode } from '../errors.ts'
-import { execFileNoThrow } from '../execFileNoThrow.ts'
-import { getInitialSettings } from '../settings/settings.ts'
-import { which } from '../which.ts'
-import { getUserBinDir, getXDGDataHome } from '../xdg.ts'
-import { DEEP_LINK_PROTOCOL } from './parseDeepLink.ts'
+import { logForDebugging } from '../debug.js'
+import { getClaudeConfigHomeDir } from '../envUtils.js'
+import { getErrnoCode } from '../errors.js'
+import { execFileNoThrow } from '../execFileNoThrow.js'
+import { getInitialSettings } from '../settings/settings.js'
+import { which } from '../which.js'
+import { getUserBinDir, getXDGDataHome } from '../xdg.js'
+import { DEEP_LINK_PROTOCOL } from './parseDeepLink.js'
 
 export const MACOS_BUNDLE_ID = 'com.anthropic.claude-code-url-handler'
 const APP_NAME = 'OpenCC URL Handler'

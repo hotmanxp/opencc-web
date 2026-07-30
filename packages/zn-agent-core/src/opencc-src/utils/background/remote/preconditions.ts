@@ -1,19 +1,19 @@
 import axios from 'axios'
 import { getOauthConfig } from 'src/constants/oauth.js'
 import { getOrganizationUUID } from 'src/services/oauth/client.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../../services/analytics/growthbook.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../../services/analytics/growthbook.js'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
   getClaudeAIOAuthTokens,
   isClaudeAISubscriber,
-} from '../../auth.ts'
-import { getCwd } from '../../cwd.ts'
-import { logForDebugging } from '../../debug.ts'
-import { detectCurrentRepository } from '../../detectRepository.ts'
-import { errorMessage } from '../../errors.ts'
-import { findGitRoot, getIsClean } from '../../git.ts'
-import { getOAuthHeaders } from '../../teleport/api.ts'
-import { fetchEnvironments } from '../../teleport/environments.ts'
+} from '../../auth.js'
+import { getCwd } from '../../cwd.js'
+import { logForDebugging } from '../../debug.js'
+import { detectCurrentRepository } from '../../detectRepository.js'
+import { errorMessage } from '../../errors.js'
+import { findGitRoot, getIsClean } from '../../git.js'
+import { getOAuthHeaders } from '../../teleport/api.js'
+import { fetchEnvironments } from '../../teleport/environments.js'
 
 /**
  * Checks if user needs to log in with OpenCC.ai

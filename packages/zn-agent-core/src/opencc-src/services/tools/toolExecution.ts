@@ -24,13 +24,13 @@ import {
   getCodeEditToolDecisionCounter,
   getReplayIndexBuilder,
   getStatsStore,
-} from '../../bootstrap/state.ts'
-import type { QueryActiveToolUse } from '../../utils/queryLifecycle.ts'
-import { shouldSkipSessionPersistence } from '../../utils/sessionPersistencePolicy.ts'
+} from '../../bootstrap/state.js'
+import type { QueryActiveToolUse } from '../../utils/queryLifecycle.js'
+import { shouldSkipSessionPersistence } from '../../utils/sessionPersistencePolicy.js'
 import {
   buildCodeEditToolAttributes,
   isCodeEditingTool,
-} from '../../hooks/toolPermission/permissionLogging.ts'
+} from '../../hooks/toolPermission/permissionLogging.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import {
   findToolByName,
@@ -38,38 +38,38 @@ import {
   type ToolProgress,
   type ToolProgressData,
   type ToolUseContext,
-} from '../../Tool.ts'
+} from '../../Tool.js'
 import type { BashToolInput } from '../../tools/BashTool/BashTool.js'
-import { startSpeculativeClassifierCheck } from '../../tools/BashTool/bashPermissions.ts'
-import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.ts'
-import { FILE_EDIT_TOOL_NAME } from '../../tools/FileEditTool/constants.ts'
-import { ASK_USER_QUESTION_TOOL_NAME } from '../../tools/AskUserQuestionTool/prompt.ts'
-import { FILE_READ_TOOL_NAME } from '../../tools/FileReadTool/prompt.ts'
-import { FILE_WRITE_TOOL_NAME } from '../../tools/FileWriteTool/prompt.ts'
-import { NOTEBOOK_EDIT_TOOL_NAME } from '../../tools/NotebookEditTool/constants.ts'
-import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.ts'
-import { SKILL_TOOL_NAME } from '../../tools/SkillTool/constants.ts'
-import { parseGitCommitId } from '../../tools/shared/gitOperationTracking.ts'
+import { startSpeculativeClassifierCheck } from '../../tools/BashTool/bashPermissions.js'
+import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
+import { FILE_EDIT_TOOL_NAME } from '../../tools/FileEditTool/constants.js'
+import { ASK_USER_QUESTION_TOOL_NAME } from '../../tools/AskUserQuestionTool/prompt.js'
+import { FILE_READ_TOOL_NAME } from '../../tools/FileReadTool/prompt.js'
+import { FILE_WRITE_TOOL_NAME } from '../../tools/FileWriteTool/prompt.js'
+import { NOTEBOOK_EDIT_TOOL_NAME } from '../../tools/NotebookEditTool/constants.js'
+import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.js'
+import { SKILL_TOOL_NAME } from '../../tools/SkillTool/constants.js'
+import { parseGitCommitId } from '../../tools/shared/gitOperationTracking.js'
 import {
   isDeferredTool,
   TOOL_SEARCH_TOOL_NAME,
-} from '../../tools/ToolSearchTool/prompt.ts'
-import { getAllBaseTools } from '../../tools.ts'
-import type { HookProgress } from '../../types/hooks.ts'
+} from '../../tools/ToolSearchTool/prompt.js'
+import { getAllBaseTools } from '../../tools.js'
+import type { HookProgress } from '../../types/hooks.js'
 import type {
   AssistantMessage,
   AttachmentMessage,
   Message,
   ProgressMessage,
   StopHookInfo,
-} from '../../types/message.ts'
-import { count } from '../../utils/array.ts'
-import { createAttachmentMessage } from '../../utils/attachments.ts'
+} from '../../types/message.js'
+import { count } from '../../utils/array.js'
+import { createAttachmentMessage } from '../../utils/attachments.js'
 import {
   getMissingToolResultAbortMessage,
   shouldCreateUserInterruptionMessage,
-} from '../../utils/abortReasons.ts'
-import { logForDebugging } from '../../utils/debug.ts'
+} from '../../utils/abortReasons.js'
+import { logForDebugging } from '../../utils/debug.js'
 import {
   AbortError,
   errorMessage,
@@ -77,9 +77,9 @@ import {
   isAbortError,
   ShellError,
   TelemetrySafeError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-} from '../../utils/errors.ts'
-import { executePermissionDeniedHooks } from '../../utils/hooks.ts'
-import { logError } from '../../utils/log.ts'
+} from '../../utils/errors.js'
+import { executePermissionDeniedHooks } from '../../utils/hooks.js'
+import { logError } from '../../utils/log.js'
 import {
   CANCEL_MESSAGE,
   createProgressMessage,
@@ -87,19 +87,19 @@ import {
   createToolResultStopMessage,
   createUserMessage,
   withMemoryCorrectionHint,
-} from '../../utils/messages.ts'
+} from '../../utils/messages.js'
 import type {
   PermissionDecisionReason,
   PermissionResult,
-} from '../../utils/permissions/PermissionResult.ts'
+} from '../../utils/permissions/PermissionResult.js'
 import {
   startSessionActivity,
   stopSessionActivity,
-} from '../../utils/sessionActivity.ts'
-import { createToolQueryLeaseInput } from './queryActivityLease.ts'
-import { jsonStringify } from '../../utils/slowOperations.ts'
-import { Stream } from '../../utils/stream.ts'
-import { logOTelEvent } from '../../utils/telemetry/events.ts'
+} from '../../utils/sessionActivity.js'
+import { createToolQueryLeaseInput } from './queryActivityLease.js'
+import { jsonStringify } from '../../utils/slowOperations.js'
+import { Stream } from '../../utils/stream.js'
+import { logOTelEvent } from '../../utils/telemetry/events.js'
 import {
   addToolContentEvent,
   endToolBlockedOnUserSpan,
@@ -109,38 +109,38 @@ import {
   startToolBlockedOnUserSpan,
   startToolExecutionSpan,
   startToolSpan,
-} from '../../utils/telemetry/sessionTracing.ts'
+} from '../../utils/telemetry/sessionTracing.js'
 import {
   formatError,
   formatZodValidationError,
-} from '../../utils/toolErrors.ts'
+} from '../../utils/toolErrors.js'
 import {
   processPreMappedToolResultBlock,
   processToolResultBlock,
-} from '../../utils/toolResultStorage.ts'
+} from '../../utils/toolResultStorage.js'
 import {
   extractDiscoveredToolNames,
   isToolSearchEnabledOptimistic,
   isToolSearchToolAvailable,
-} from '../../utils/toolSearch.ts'
+} from '../../utils/toolSearch.js'
 import {
   McpAuthError,
   McpToolCallError_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
-} from '../mcp/client.ts'
-import { mcpInfoFromString } from '../mcp/mcpStringUtils.ts'
-import { normalizeNameForMCP } from '../mcp/normalization.ts'
-import type { MCPServerConnection } from '../mcp/types.ts'
+} from '../mcp/client.js'
+import { mcpInfoFromString } from '../mcp/mcpStringUtils.js'
+import { normalizeNameForMCP } from '../mcp/normalization.js'
+import type { MCPServerConnection } from '../mcp/types.js'
 import {
   getLoggingSafeMcpBaseUrl,
   getMcpServerScopeFromToolName,
   isMcpTool,
-} from '../mcp/utils.ts'
+} from '../mcp/utils.js'
 import {
   resolveHookPermissionDecision,
   runPostToolUseFailureHooks,
   runPostToolUseHooks,
   runPreToolUseHooks,
-} from './toolHooks.ts'
+} from './toolHooks.js'
 
 /** Minimum total hook duration (ms) to show inline timing summary */
 export const HOOK_TIMING_DISPLAY_THRESHOLD_MS = 500

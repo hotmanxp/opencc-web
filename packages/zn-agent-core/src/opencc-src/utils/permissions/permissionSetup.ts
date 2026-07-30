@@ -5,29 +5,29 @@ import {
   handlePlanModeTransition,
   setHasExitedPlanMode,
   setNeedsAutoModeExitAttachment,
-} from '../../bootstrap/state.ts'
+} from '../../bootstrap/state.js'
 import type {
   ToolPermissionContext,
   ToolPermissionRulesBySource,
-} from '../../Tool.ts'
-import { getCwd } from '../cwd.ts'
-import { isEnvTruthy } from '../envUtils.ts'
-import type { SettingSource } from '../settings/constants.ts'
-import { SETTING_SOURCES } from '../settings/constants.ts'
+} from '../../Tool.js'
+import { getCwd } from '../cwd.js'
+import { isEnvTruthy } from '../envUtils.js'
+import type { SettingSource } from '../settings/constants.js'
+import { SETTING_SOURCES } from '../settings/constants.js'
 import {
   getSettings_DEPRECATED,
   getSettingsFilePathForSource,
   getUseAutoModeDuringPlan,
   hasAllowBypassPermissionsMode,
   hasAutoModeOptIn,
-} from '../settings/settings.ts'
+} from '../settings/settings.js'
 import {
   type PermissionMode,
   permissionModeFromString,
-} from './PermissionMode.ts'
-import { isPermissiveSafety } from './safetyLevel.ts'
-import { applyPermissionRulesToPermissionContext } from './permissions.ts'
-import { loadAllPermissionRulesFromDisk } from './permissionsLoader.ts'
+} from './PermissionMode.js'
+import { isPermissiveSafety } from './safetyLevel.js'
+import { applyPermissionRulesToPermissionContext } from './permissions.js'
+import { loadAllPermissionRulesFromDisk } from './permissionsLoader.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const autoModeStateModule = true
@@ -48,39 +48,39 @@ import {
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../../services/analytics/index.ts'
-import { AGENT_TOOL_NAME } from '../../tools/AgentTool/constants.ts'
-import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.ts'
+} from '../../services/analytics/index.js'
+import { AGENT_TOOL_NAME } from '../../tools/AgentTool/constants.js'
+import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
-import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.ts'
-import { getToolsForDefaultPreset, parseToolPreset } from '../../tools.ts'
+import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.js'
+import { getToolsForDefaultPreset, parseToolPreset } from '../../tools.js'
 import {
   getFsImplementation,
   safeResolvePath,
-} from '../../utils/fsOperations.ts'
-import { modelSupportsAutoMode } from '../betas.ts'
-import { logForDebugging } from '../debug.ts'
-import { gracefulShutdown } from '../gracefulShutdown.ts'
-import { getMainLoopModel } from '../model/model.ts'
+} from '../../utils/fsOperations.js'
+import { modelSupportsAutoMode } from '../betas.js'
+import { logForDebugging } from '../debug.js'
+import { gracefulShutdown } from '../gracefulShutdown.js'
+import { getMainLoopModel } from '../model/model.js'
 import {
   CROSS_PLATFORM_CODE_EXEC,
   DANGEROUS_BASH_PATTERNS,
-} from './dangerousPatterns.ts'
+} from './dangerousPatterns.js'
 import type {
   PermissionRule,
   PermissionRuleSource,
   PermissionRuleValue,
-} from './PermissionRule.ts'
+} from './PermissionRule.js'
 import {
   type AdditionalWorkingDirectory,
   applyPermissionUpdate,
-} from './PermissionUpdate.ts'
-import type { PermissionUpdateDestination } from './PermissionUpdateSchema.ts'
+} from './PermissionUpdate.js'
+import type { PermissionUpdateDestination } from './PermissionUpdateSchema.js'
 import {
   normalizeLegacyToolName,
   permissionRuleValueFromString,
   permissionRuleValueToString,
-} from './permissionRuleParser.ts'
+} from './permissionRuleParser.js'
 
 /**
  * Checks if a Bash permission rule is dangerous for auto mode.

@@ -1,11 +1,11 @@
-import type { PluginError } from '../../types/plugin.ts'
-import { logForDebugging } from '../../utils/debug.ts'
-import { errorMessage, toError } from '../../utils/errors.ts'
-import { logError } from '../../utils/log.ts'
-import { getPluginLspServers } from '../../utils/plugins/lspPluginIntegration.ts'
-import { loadAllPluginsCacheOnly } from '../../utils/plugins/pluginLoader.ts'
+import type { PluginError } from '../../types/plugin.js'
+import { logForDebugging } from '../../utils/debug.js'
+import { errorMessage, toError } from '../../utils/errors.js'
+import { logError } from '../../utils/log.js'
+import { getPluginLspServers } from '../../utils/plugins/lspPluginIntegration.js'
+import { loadAllPluginsCacheOnly } from '../../utils/plugins/pluginLoader.js'
 // @ts-ignore
-import type { ScopedLspServerConfig } from './types.ts'
+import type { ScopedLspServerConfig } from './types.js'
 
 /**
  * Get all configured LSP servers from plugins.

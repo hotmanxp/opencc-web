@@ -3,8 +3,8 @@ import { existsSync, readdirSync, statSync } from 'fs'
 import { join } from 'path'
 import { pathToFileURL } from 'url'
 import chokidar, { type FSWatcher } from 'chokidar'
-import type { PluginLike } from './pluginWorkflowLoader.ts'
-import type { Workflow } from './types.ts'
+import type { PluginLike } from './pluginWorkflowLoader.js'
+import type { Workflow } from './types.js'
 
 export type RegistryOpts = {
   projectDir: string
@@ -90,7 +90,7 @@ export class WorkflowRegistry {
     // below will simply overwrite a same-named entry (last wins),
     // which matches the existing precedence order.
     if (this.opts.plugins && this.opts.plugins.length > 0) {
-      const { loadPluginWorkflows } = await import('./pluginWorkflowLoader.ts')
+      const { loadPluginWorkflows } = await import('./pluginWorkflowLoader.js')
       const pluginWorkflows = await loadPluginWorkflows(this.opts.plugins)
       for (const wf of pluginWorkflows) out.set(wf.name, wf)
     }

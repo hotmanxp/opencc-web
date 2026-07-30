@@ -1,4 +1,4 @@
-import { createCombinedAbortSignal } from '../../../utils/combinedAbortSignal.ts'
+import { createCombinedAbortSignal } from '../../../utils/combinedAbortSignal.js'
 
 export const DEFAULT_WEB_SEARCH_TIMEOUT_SECONDS = 15
 const MAX_WEB_SEARCH_TIMEOUT_SECONDS = 300

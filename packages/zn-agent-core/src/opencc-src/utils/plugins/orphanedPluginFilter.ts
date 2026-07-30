@@ -16,8 +16,8 @@
  */
 
 import { dirname, isAbsolute, join, normalize, relative, sep } from 'path'
-import { ripGrep } from '../ripgrep.ts'
-import { getPluginsDirectory } from './pluginDirectories.ts'
+import { ripGrep } from '../ripgrep.js'
+import { getPluginsDirectory } from './pluginDirectories.js'
 
 // Inlined from cacheUtils.ts to avoid a circular dep through commands.js.
 const ORPHANED_AT_FILENAME = '.orphaned_at'

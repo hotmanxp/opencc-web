@@ -19,7 +19,7 @@ import {
   isPermissionResponse,
   isSandboxPermissionResponse,
   type PlanApprovalResponseMessage,
-} from './teammateMailbox.ts'
+} from './teammateMailbox.js'
 
 type SetAppState = (updater: (prev: AppState) => AppState) => void
 

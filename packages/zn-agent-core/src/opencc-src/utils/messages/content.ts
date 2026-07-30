@@ -1,10 +1,10 @@
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
-import type { DeepImmutable } from '../../types/utils.ts'
-import type { Message, NormalizedMessage, UserMessage } from '../../types/message.ts'
-import { COMMAND_ARGS_TAG, COMMAND_NAME_TAG } from '../../constants/xml.ts'
-import { NO_CONTENT_MESSAGE } from '../../constants/messages.ts'
-import { stripIdeContextTags } from '../displayTags.ts'
-import { escapeRegExp } from '../stringUtils.ts'
+import type { DeepImmutable } from '../../types/utils.js'
+import type { Message, NormalizedMessage, UserMessage } from '../../types/message.js'
+import { COMMAND_ARGS_TAG, COMMAND_NAME_TAG } from '../../constants/xml.js'
+import { NO_CONTENT_MESSAGE } from '../../constants/messages.js'
+import { stripIdeContextTags } from '../displayTags.js'
+import { escapeRegExp } from '../stringUtils.js'
 
 export function extractTag(html: string, tagName: string): string | null {
   if (!html.trim() || !tagName.trim()) {

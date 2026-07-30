@@ -3,18 +3,18 @@ import memoize from 'lodash-es/memoize.js'
 import { dirname, join } from 'path'
 import { getSessionId } from 'src/bootstrap/state.js'
 
-import { type BufferedWriter, createBufferedWriter } from './bufferedWriter.ts'
-import { registerCleanup } from './cleanupRegistry.ts'
+import { type BufferedWriter, createBufferedWriter } from './bufferedWriter.js'
+import { registerCleanup } from './cleanupRegistry.js'
 import {
   type DebugFilter,
   parseDebugFilter,
   shouldShowDebugMessage,
-} from './debugFilter.ts'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.ts'
-import { getFsImplementation } from './fsOperations.ts'
-import { writeToStderr } from './process.ts'
-import { redactSensitiveInfo } from './redaction.ts'
-import { jsonStringify } from './slowOperations.ts'
+} from './debugFilter.js'
+import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
+import { getFsImplementation } from './fsOperations.js'
+import { writeToStderr } from './process.js'
+import { redactSensitiveInfo } from './redaction.js'
+import { jsonStringify } from './slowOperations.js'
 
 export type DebugLogLevel = 'verbose' | 'debug' | 'info' | 'warn' | 'error'
 

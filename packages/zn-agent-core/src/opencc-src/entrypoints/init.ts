@@ -1,43 +1,43 @@
-import { profileCheckpoint } from '../utils/startupProfiler.ts'
+import { profileCheckpoint } from '../utils/startupProfiler.js'
 import '../bootstrap/state.js'
-import '../utils/config.ts'
+import '../utils/config.js'
 import memoize from 'lodash-es/memoize.js'
 import { getIsNonInteractiveSession } from 'src/bootstrap/state.js'
-import { shutdownLspServerManager } from '../services/lsp/manager.ts'
-import { populateOAuthAccountInfoIfNeeded } from '../services/oauth/client.ts'
+import { shutdownLspServerManager } from '../services/lsp/manager.js'
+import { populateOAuthAccountInfoIfNeeded } from '../services/oauth/client.js'
 import {
   initializePolicyLimitsLoadingPromise,
   isPolicyLimitsEligible,
-} from '../services/policyLimits/index.ts'
+} from '../services/policyLimits/index.js'
 import {
   initializeRemoteManagedSettingsLoadingPromise,
   isEligibleForRemoteManagedSettings,
   waitForRemoteManagedSettingsToLoad,
 } from '../services/remoteManagedSettings/index.js'
-import { preconnectAnthropicApi } from '../utils/apiPreconnect.ts'
-import { applyExtraCACertsFromConfig } from '../utils/caCertsConfig.ts'
-import { registerCleanup } from '../utils/cleanupRegistry.ts'
-import { enableConfigs, recordFirstStartTime } from '../utils/config.ts'
-import { logForDebugging } from '../utils/debug.ts'
-import { detectCurrentRepository } from '../utils/detectRepository.ts'
-import { logForDiagnosticsNoPII } from '../utils/diagLogs.ts'
-import { initJetBrainsDetection } from '../utils/envDynamic.ts'
-import { isEnvTruthy } from '../utils/envUtils.ts'
-import { ConfigParseError, errorMessage } from '../utils/errors.ts'
+import { preconnectAnthropicApi } from '../utils/apiPreconnect.js'
+import { applyExtraCACertsFromConfig } from '../utils/caCertsConfig.js'
+import { registerCleanup } from '../utils/cleanupRegistry.js'
+import { enableConfigs, recordFirstStartTime } from '../utils/config.js'
+import { logForDebugging } from '../utils/debug.js'
+import { detectCurrentRepository } from '../utils/detectRepository.js'
+import { logForDiagnosticsNoPII } from '../utils/diagLogs.js'
+import { initJetBrainsDetection } from '../utils/envDynamic.js'
+import { isEnvTruthy } from '../utils/envUtils.js'
+import { ConfigParseError, errorMessage } from '../utils/errors.js'
 // showInvalidConfigDialog is dynamically imported in the error path to avoid loading React at init
 import {
   gracefulShutdownSync,
   setupGracefulShutdown,
-} from '../utils/gracefulShutdown.ts'
+} from '../utils/gracefulShutdown.js'
 import {
   applyConfigEnvironmentVariables,
   applySafeConfigEnvironmentVariables,
-} from '../utils/managedEnv.ts'
-import { configureGlobalMTLS } from '../utils/mtls.ts'
+} from '../utils/managedEnv.js'
+import { configureGlobalMTLS } from '../utils/mtls.js'
 import {
   ensureScratchpadDir,
   isScratchpadEnabled,
-} from '../utils/permissions/filesystem.ts'
+} from '../utils/permissions/filesystem.js'
 // bootstrapTelemetry is loaded lazily via import() in setMeterState() to defer
 // ~400KB of OpenTelemetry + protobuf modules until telemetry is actually initialized.
 // In the open build, telemetry is stubbed at source (instrumentation.ts exports
@@ -45,9 +45,9 @@ import {
 // STATE.* counters stay at their default `null` — `getSessionCounter()?.add(...)`
 // call sites elsewhere are safe no-ops via optional chaining.
 // gRPC exporters (~700KB via @grpc/grpc-js) are further lazy-loaded within instrumentation.ts.
-import { configureGlobalAgents } from '../utils/proxy.ts'
-import { isBetaTracingEnabled } from '../utils/telemetry/betaSessionTracing.ts'
-import { setShellIfWindows } from '../utils/windowsPaths.ts'
+import { configureGlobalAgents } from '../utils/proxy.js'
+import { isBetaTracingEnabled } from '../utils/telemetry/betaSessionTracing.js'
+import { setShellIfWindows } from '../utils/windowsPaths.js'
 
 // initialize1PEventLogging is dynamically imported to defer OpenTelemetry sdk-logs/resources
 

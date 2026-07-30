@@ -1,5 +1,5 @@
 import { z } from 'zod/v4'
-import { lazySchema } from '../lazySchema.ts'
+import { lazySchema } from '../lazySchema.js'
 
 const TodoStatusSchema = lazySchema(() =>
   z.enum(['pending', 'in_progress', 'completed']),

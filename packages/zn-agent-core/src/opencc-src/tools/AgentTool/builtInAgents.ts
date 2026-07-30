@@ -1,13 +1,13 @@
-import { getIsNonInteractiveSession } from '../../bootstrap/state.ts'
+import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { isCoordinatorMode } from '../../coordinator/coordinatorMode.js'
-import { isEnvTruthy } from '../../utils/envUtils.ts'
-import { CLAUDE_CODE_GUIDE_AGENT } from './built-in/claudeCodeGuideAgent.ts'
-import { EXPLORE_AGENT } from './built-in/exploreAgent.ts'
-import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.ts'
-import { PLAN_AGENT } from './built-in/planAgent.ts'
-import { STATUSLINE_SETUP_AGENT } from './built-in/statuslineSetup.ts'
+import { isEnvTruthy } from '../../utils/envUtils.js'
+import { CLAUDE_CODE_GUIDE_AGENT } from './built-in/claudeCodeGuideAgent.js'
+import { EXPLORE_AGENT } from './built-in/exploreAgent.js'
+import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
+import { PLAN_AGENT } from './built-in/planAgent.js'
+import { STATUSLINE_SETUP_AGENT } from './built-in/statuslineSetup.js'
 import { getCoordinatorAgents } from '../../coordinator/workerAgent.js'
-import type { AgentDefinition } from './loadAgentsDir.ts'
+import type { AgentDefinition } from './loadAgentsDir.js'
 
 export function areExplorePlanAgentsEnabled(): boolean {
   // Always enable Explore/Plan agents in opencc

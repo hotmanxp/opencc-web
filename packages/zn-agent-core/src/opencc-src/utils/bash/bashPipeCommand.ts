@@ -4,7 +4,7 @@ import {
   type ParseEntry,
   quote,
   tryParseShellCommand,
-} from './shellQuote.ts'
+} from './shellQuote.js'
 
 /**
  * Rearranges a command with pipes to place stdin redirect after the first command.

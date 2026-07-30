@@ -1,11 +1,11 @@
 import { z } from 'zod/v4'
-import { logEvent } from '../../services/analytics/index.ts'
-import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.ts'
-import type { Tool } from '../../Tool.ts'
-import { buildTool, type ToolDef } from '../../Tool.ts'
-import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import { jsonStringify } from '../../utils/slowOperations.ts'
+import { logEvent } from '../../services/analytics/index.js'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.js'
+import type { Tool } from '../../Tool.js'
+import { buildTool, type ToolDef } from '../../Tool.js'
+import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import { jsonStringify } from '../../utils/slowOperations.js'
 import { TEAM_LEAD_NAME } from '../../utils/swarm/constants.js'
 import {
   cleanupTeamDirectories,
@@ -13,9 +13,9 @@ import {
   unregisterTeamForSessionCleanup,
 } from '../../utils/swarm/teamHelpers.js'
 import { clearTeammateColors } from '../../utils/swarm/teammateLayoutManager.js'
-import { clearLeaderTeamName } from '../../utils/tasks.ts'
-import { TEAM_DELETE_TOOL_NAME } from './constants.ts'
-import { getPrompt } from './prompt.ts'
+import { clearLeaderTeamName } from '../../utils/tasks.js'
+import { TEAM_DELETE_TOOL_NAME } from './constants.js'
+import { getPrompt } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
 const inputSchema = lazySchema(() => z.strictObject({}))

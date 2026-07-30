@@ -5,7 +5,7 @@
  * High-level abstraction of conversation progress.
  */
 
-import type { Message } from '../types/message.ts'
+import type { Message } from '../types/message.js'
 import {
   addGlobalEntity,
   addGlobalRelation,
@@ -15,7 +15,7 @@ import {
   getGlobalGraphSummary,
   getOrchestratedMemory,
   extractKeywords
-} from './knowledgeGraph.ts'
+} from './knowledgeGraph.js'
 
 // ... (Goal, Decision, Milestone interfaces)
 

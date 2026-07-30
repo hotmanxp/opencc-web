@@ -1,4 +1,4 @@
-import { getAllowedSettingSources } from '../../bootstrap/state.ts'
+import { getAllowedSettingSources } from '../../bootstrap/state.js'
 
 /**
  * All possible sources where settings can come from

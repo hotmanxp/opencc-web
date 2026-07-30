@@ -1,4 +1,4 @@
-import { isEnvTruthy } from '../../../utils/envUtils.ts'
+import { isEnvTruthy } from '../../../utils/envUtils.js'
 
 const GEMINI_API_HOST = 'generativelanguage.googleapis.com'
 const MOONSHOT_API_HOSTS = new Set([

@@ -3,11 +3,11 @@ import { join } from 'path'
 import {
   getCurrentProjectConfig,
   saveCurrentProjectConfig,
-} from './utils/config.ts'
-import { AGENT_INSTRUCTIONS_FILE, AGENTS_FILENAME } from './constants/product.ts'
-import { getCwd } from './utils/cwd.ts'
-import { isDirEmpty } from './utils/file.ts'
-import { getFsImplementation } from './utils/fsOperations.ts'
+} from './utils/config.js'
+import { AGENT_INSTRUCTIONS_FILE, AGENTS_FILENAME } from './constants/product.js'
+import { getCwd } from './utils/cwd.js'
+import { isDirEmpty } from './utils/file.js'
+import { getFsImplementation } from './utils/fsOperations.js'
 
 export type Step = {
   key: string

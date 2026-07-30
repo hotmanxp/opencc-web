@@ -1,23 +1,23 @@
 import { feature } from 'bun:bundle'
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs'
 import type { Permutations } from 'src/types/utils.js'
-import { getSessionId } from '../bootstrap/state.ts'
+import { getSessionId } from '../bootstrap/state.js'
 import type { AppState } from '../state/AppState.js'
 import type {
   QueueOperation,
   QueueOperationMessage,
-} from '../types/messageQueueTypes.ts'
+} from '../types/messageQueueTypes.js'
 import type {
   EditablePromptInputMode,
   PromptInputMode,
   QueuedCommand,
   QueuePriority,
-} from '../types/textInputTypes.ts'
-import type { PastedContent } from './config.ts'
-import { extractTextContent } from './messages.ts'
-import { objectGroupBy } from './objectGroupBy.ts'
-import { recordQueueOperation } from './sessionStorage.ts'
-import { createSignal } from './signal.ts'
+} from '../types/textInputTypes.js'
+import type { PastedContent } from './config.js'
+import { extractTextContent } from './messages.js'
+import { objectGroupBy } from './objectGroupBy.js'
+import { recordQueueOperation } from './sessionStorage.js'
+import { createSignal } from './signal.js'
 
 export type SetAppState = (f: (prev: AppState) => AppState) => void
 

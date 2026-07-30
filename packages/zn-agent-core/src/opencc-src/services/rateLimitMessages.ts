@@ -7,10 +7,10 @@ import {
   getOauthAccountInfo,
   getSubscriptionType,
   isOverageProvisioningAllowed,
-} from '../utils/auth.ts'
-import { hasClaudeAiBillingAccess } from '../utils/billing.ts'
-import { formatResetTime } from '../utils/format.ts'
-import type { ClaudeAILimits } from './claudeAiLimits.ts'
+} from '../utils/auth.js'
+import { hasClaudeAiBillingAccess } from '../utils/billing.js'
+import { formatResetTime } from '../utils/format.js'
+import type { ClaudeAILimits } from './claudeAiLimits.js'
 
 const FEEDBACK_CHANNEL_ANT = '#briarpatch-cc'
 

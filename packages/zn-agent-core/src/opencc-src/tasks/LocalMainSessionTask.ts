@@ -19,36 +19,36 @@ import {
   TASK_ID_TAG,
   TASK_NOTIFICATION_TAG,
   TOOL_USE_ID_TAG,
-} from '../constants/xml.ts'
-import { type QueryParams, query } from '../query.ts'
-import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
-import type { SetAppState } from '../Task.ts'
-import { createTaskStateBase } from '../Task.ts'
+} from '../constants/xml.js'
+import { type QueryParams, query } from '../query.js'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
+import type { SetAppState } from '../Task.js'
+import { createTaskStateBase } from '../Task.js'
 import type {
   AgentDefinition,
   CustomAgentDefinition,
-} from '../tools/AgentTool/loadAgentsDir.ts'
-import { asAgentId } from '../types/ids.ts'
-import type { Message } from '../types/message.ts'
-import { createAbortController } from '../utils/abortController.ts'
+} from '../tools/AgentTool/loadAgentsDir.js'
+import { asAgentId } from '../types/ids.js'
+import type { Message } from '../types/message.js'
+import { createAbortController } from '../utils/abortController.js'
 import {
   runWithAgentContext,
   type SubagentContext,
-} from '../utils/agentContext.ts'
-import { registerCleanup } from '../utils/cleanupRegistry.ts'
-import { logForDebugging } from '../utils/debug.ts'
-import { logError } from '../utils/log.ts'
-import { enqueuePendingNotification } from '../utils/messageQueueManager.ts'
-import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.ts'
+} from '../utils/agentContext.js'
+import { registerCleanup } from '../utils/cleanupRegistry.js'
+import { logForDebugging } from '../utils/debug.js'
+import { logError } from '../utils/log.js'
+import { enqueuePendingNotification } from '../utils/messageQueueManager.js'
+import { emitTaskTerminatedSdk } from '../utils/sdkEventQueue.js'
 import {
   getAgentTranscriptPath,
   recordSidechainTranscript,
-} from '../utils/sessionStorage.ts'
+} from '../utils/sessionStorage.js'
 import {
   evictTaskOutput,
   getTaskOutputPath,
   initTaskOutputAsSymlink,
-} from '../utils/task/diskOutput.ts'
+} from '../utils/task/diskOutput.js'
 import { registerTask, updateTaskState } from '../utils/task/framework.js'
 import type { LocalAgentTaskState } from './LocalAgentTask/LocalAgentTask.js'
 

@@ -3,7 +3,7 @@ import {
   getAllowedChannels,
   setAllowedChannels,
   setHasDevChannels,
-} from "../bootstrap/state.ts";
+} from "../bootstrap/state.js";
 
 /**
  * Register development channels, marking each entry with `dev: true` so the

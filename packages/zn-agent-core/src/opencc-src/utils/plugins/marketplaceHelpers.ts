@@ -1,11 +1,11 @@
 import isEqual from 'lodash-es/isEqual.js'
-import { toError } from '../errors.ts'
-import { logError } from '../log.ts'
-import { getSettingsForSource } from '../settings/settings.ts'
-import { plural } from '../stringUtils.ts'
-import { checkGitAvailable } from './gitAvailability.ts'
-import { getMarketplace } from './marketplaceManager.ts'
-import type { KnownMarketplace, MarketplaceSource } from './schemas.ts'
+import { toError } from '../errors.js'
+import { logError } from '../log.js'
+import { getSettingsForSource } from '../settings/settings.js'
+import { plural } from '../stringUtils.js'
+import { checkGitAvailable } from './gitAvailability.js'
+import { getMarketplace } from './marketplaceManager.js'
+import type { KnownMarketplace, MarketplaceSource } from './schemas.js'
 
 /**
  * Format plugin failure details for user display

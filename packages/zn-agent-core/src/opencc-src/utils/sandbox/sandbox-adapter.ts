@@ -28,13 +28,13 @@ import {
   getAdditionalDirectoriesForClaudeMd,
   getCwdState,
   getOriginalCwd,
-} from '../../bootstrap/state.ts'
-import { logForDebugging } from '../debug.ts'
-import { expandPath } from '../path.ts'
-import { getPlatform, type Platform } from '../platform.ts'
-import { settingsChangeDetector } from '../settings/changeDetector.ts'
-import { SETTING_SOURCES, type SettingSource } from '../settings/constants.ts'
-import { getManagedSettingsDropInDir } from '../settings/managedPath.ts'
+} from '../../bootstrap/state.js'
+import { logForDebugging } from '../debug.js'
+import { expandPath } from '../path.js'
+import { getPlatform, type Platform } from '../platform.js'
+import { settingsChangeDetector } from '../settings/changeDetector.js'
+import { SETTING_SOURCES, type SettingSource } from '../settings/constants.js'
+import { getManagedSettingsDropInDir } from '../settings/managedPath.js'
 import {
   getInitialSettings,
   getSettings_DEPRECATED,
@@ -42,8 +42,8 @@ import {
   getSettingsForSource,
   getSettingsRootPathForSource,
   updateSettingsForSource,
-} from '../settings/settings.ts'
-import type { SettingsJson } from '../settings/types.ts'
+} from '../settings/settings.js'
+import type { SettingsJson } from '../settings/types.js'
 
 // ============================================================================
 // Settings Converter
@@ -53,10 +53,10 @@ import { BASH_TOOL_NAME } from 'src/tools/BashTool/toolName.js'
 import { FILE_EDIT_TOOL_NAME } from 'src/tools/FileEditTool/constants.js'
 import { FILE_READ_TOOL_NAME } from 'src/tools/FileReadTool/prompt.js'
 import { WEB_FETCH_TOOL_NAME } from 'src/tools/WebFetchTool/prompt.js'
-import { errorMessage } from '../errors.ts'
-import { getClaudeTempDir } from '../permissions/filesystem.ts'
-import type { PermissionRuleValue } from '../permissions/PermissionRule.ts'
-import { ripgrepCommand } from '../ripgrep.ts'
+import { errorMessage } from '../errors.js'
+import { getClaudeTempDir } from '../permissions/filesystem.js'
+import type { PermissionRuleValue } from '../permissions/PermissionRule.js'
+import { ripgrepCommand } from '../ripgrep.js'
 
 // Local copies to avoid circular dependency
 // (permissions.ts imports SandboxManager, bashPermissions.ts imports permissions.ts)

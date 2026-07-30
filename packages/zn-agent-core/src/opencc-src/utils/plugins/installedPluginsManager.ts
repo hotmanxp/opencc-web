@@ -14,16 +14,16 @@
  */
 
 import { dirname, join } from 'path'
-import { logForDebugging } from '../debug.ts'
-import { errorMessage, isENOENT, toError } from '../errors.ts'
-import { getFsImplementation } from '../fsOperations.ts'
-import { logError } from '../log.ts'
+import { logForDebugging } from '../debug.js'
+import { errorMessage, isENOENT, toError } from '../errors.js'
+import { getFsImplementation } from '../fsOperations.js'
+import { logError } from '../log.js'
 import {
   jsonParse,
   jsonStringify,
   writeFileSync_DEPRECATED,
-} from '../slowOperations.ts'
-import { getPluginsDirectory } from './pluginDirectories.ts'
+} from '../slowOperations.js'
+import { getPluginsDirectory } from './pluginDirectories.js'
 import {
   type InstalledPlugin,
   InstalledPluginsFileSchemaV1,
@@ -32,7 +32,7 @@ import {
   type InstalledPluginsFileV2,
   type PluginInstallationEntry,
   type PluginScope,
-} from './schemas.ts'
+} from './schemas.js'
 
 // Type alias for V2 plugins map
 type InstalledPluginsMapV2 = Record<string, PluginInstallationEntry[]>
@@ -40,20 +40,20 @@ type InstalledPluginsMapV2 = Record<string, PluginInstallationEntry[]>
 // Type for persistable scopes (excludes 'flag' which is session-only)
 export type PersistableScope = Exclude<PluginScope, never> // All scopes are persistable in the schema
 
-import { getOriginalCwd } from '../../bootstrap/state.ts'
-import { getCwd } from '../cwd.ts'
-import { getHeadForDir } from '../git/gitFilesystem.ts'
-import type { EditableSettingSource } from '../settings/constants.ts'
+import { getOriginalCwd } from '../../bootstrap/state.js'
+import { getCwd } from '../cwd.js'
+import { getHeadForDir } from '../git/gitFilesystem.js'
+import type { EditableSettingSource } from '../settings/constants.js'
 import {
   getSettings_DEPRECATED,
   getSettingsForSource,
-} from '../settings/settings.ts'
-import { getPluginById } from './marketplaceManager.ts'
+} from '../settings/settings.js'
+import { getPluginById } from './marketplaceManager.js'
 import {
   parsePluginIdentifier,
   settingSourceToScope,
-} from './pluginIdentifier.ts'
-import { getPluginCachePath, getVersionedCachePath } from './pluginLoader.ts'
+} from './pluginIdentifier.js'
+import { getPluginCachePath, getVersionedCachePath } from './pluginLoader.js'
 
 // Migration state to prevent running migration multiple times per session
 let migrationCompleted = false

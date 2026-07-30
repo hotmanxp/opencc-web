@@ -5,8 +5,8 @@ import type {
   PermissionRule,
   PermissionRuleSource,
   PermissionRuleValue,
-} from '../../types/permissions.ts'
-import { lazySchema } from '../lazySchema.ts'
+} from '../../types/permissions.js'
+import { lazySchema } from '../lazySchema.js'
 
 // Re-export for backwards compatibility
 export type {

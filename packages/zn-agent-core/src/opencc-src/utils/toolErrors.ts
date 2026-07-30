@@ -1,6 +1,6 @@
 import type { ZodError } from 'zod/v4'
-import { isAbortError, ShellError } from './errors.ts'
-import { INTERRUPT_MESSAGE_FOR_TOOL_USE } from './messages.ts'
+import { isAbortError, ShellError } from './errors.js'
+import { INTERRUPT_MESSAGE_FOR_TOOL_USE } from './messages.js'
 
 export function formatError(error: unknown): string {
   if (isAbortError(error)) {

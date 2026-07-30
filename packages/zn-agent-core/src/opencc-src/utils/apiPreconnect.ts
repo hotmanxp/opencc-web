@@ -23,10 +23,10 @@
  * - Bedrock/Vertex/Foundry (different endpoints, different auth)
  */
 
-import { getOauthConfig } from '../constants/oauth.ts'
-import { createCombinedAbortSignal } from './combinedAbortSignal.ts'
-import { isEnvTruthy } from './envUtils.ts'
-import { getAPIProvider } from './model/providers.ts'
+import { getOauthConfig } from '../constants/oauth.js'
+import { createCombinedAbortSignal } from './combinedAbortSignal.js'
+import { isEnvTruthy } from './envUtils.js'
+import { getAPIProvider } from './model/providers.js'
 
 let fired = false
 

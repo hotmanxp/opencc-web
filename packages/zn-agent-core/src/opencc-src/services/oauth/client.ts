@@ -10,18 +10,18 @@ import {
   CLAUDE_AI_INFERENCE_SCOPE,
   CLAUDE_AI_OAUTH_SCOPES,
   getOauthConfig,
-} from '../../constants/oauth.ts'
+} from '../../constants/oauth.js'
 import {
   checkAndRefreshOAuthTokenIfNeeded,
   getClaudeAIOAuthTokens,
   hasProfileScope,
   isClaudeAISubscriber,
   saveApiKey,
-} from '../../utils/auth.ts'
-import type { AccountInfo } from '../../utils/config.ts'
-import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.ts'
-import { logForDebugging } from '../../utils/debug.ts'
-import { getOauthProfileFromOauthToken } from './getOauthProfile.ts'
+} from '../../utils/auth.js'
+import type { AccountInfo } from '../../utils/config.js'
+import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
+import { logForDebugging } from '../../utils/debug.js'
+import { getOauthProfileFromOauthToken } from './getOauthProfile.js'
 import type {
   BillingType,
   OAuthProfileResponse,
@@ -30,7 +30,7 @@ import type {
   RateLimitTier,
   SubscriptionType,
   UserRolesResponse,
-} from './types.ts'
+} from './types.js'
 
 /**
  * Check if the user has OpenCC authentication scope

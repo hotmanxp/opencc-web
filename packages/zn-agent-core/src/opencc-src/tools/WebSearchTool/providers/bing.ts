@@ -4,9 +4,9 @@
  * Auth: Ocp-Apim-Subscription-Key: <key>
  */
 
-import type { SearchInput, SearchProvider } from './types.ts'
-import { applyDomainFilters, type ProviderOutput } from './types.ts'
-import { fetchJsonWithWebSearchTimeout } from './timeout.ts'
+import type { SearchInput, SearchProvider } from './types.js'
+import { applyDomainFilters, type ProviderOutput } from './types.js'
+import { fetchJsonWithWebSearchTimeout } from './timeout.js'
 
 export const bingProvider: SearchProvider = {
   name: 'bing',

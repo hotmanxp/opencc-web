@@ -1,21 +1,21 @@
 import { createHash, randomUUID, type UUID } from 'crypto'
 import { stat } from 'fs/promises'
 import { isAbsolute, join, relative, sep } from 'path'
-import { getOriginalCwd, getSessionId } from '../bootstrap/state.ts'
+import { getOriginalCwd, getSessionId } from '../bootstrap/state.js'
 import type {
   AttributionSnapshotMessage,
   FileAttributionState,
-} from '../types/logs.ts'
-import { getCwd } from './cwd.ts'
-import { logForDebugging } from './debug.ts'
-import { execFileNoThrowWithCwd } from './execFileNoThrow.ts'
-import { getFsImplementation } from './fsOperations.ts'
-import { isGeneratedFile } from './generatedFiles.ts'
-import { getRemoteUrlForDir, resolveGitDir } from './git/gitFilesystem.ts'
-import { findGitRoot, gitExe } from './git.ts'
-import { logError } from './log.ts'
-import { getCanonicalName, type ModelName } from './model/model.ts'
-import { sequential } from './sequential.ts'
+} from '../types/logs.js'
+import { getCwd } from './cwd.js'
+import { logForDebugging } from './debug.js'
+import { execFileNoThrowWithCwd } from './execFileNoThrow.js'
+import { getFsImplementation } from './fsOperations.js'
+import { isGeneratedFile } from './generatedFiles.js'
+import { getRemoteUrlForDir, resolveGitDir } from './git/gitFilesystem.js'
+import { findGitRoot, gitExe } from './git.js'
+import { logError } from './log.js'
+import { getCanonicalName, type ModelName } from './model/model.js'
+import { sequential } from './sequential.js'
 
 /**
  * List of repos where internal model names are allowed in trailers.

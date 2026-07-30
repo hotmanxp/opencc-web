@@ -4,12 +4,12 @@ import { join } from 'path'
 import {
   PDF_MAX_EXTRACT_SIZE,
   PDF_TARGET_RAW_SIZE,
-} from '../constants/apiLimits.ts'
-import { errorMessage } from './errors.ts'
-import { execFileNoThrow } from './execFileNoThrow.ts'
-import { formatFileSize } from './format.ts'
-import { getFsImplementation } from './fsOperations.ts'
-import { getToolResultsDir } from './toolResultStorage.ts'
+} from '../constants/apiLimits.js'
+import { errorMessage } from './errors.js'
+import { execFileNoThrow } from './execFileNoThrow.js'
+import { formatFileSize } from './format.js'
+import { getFsImplementation } from './fsOperations.js'
+import { getToolResultsDir } from './toolResultStorage.js'
 
 export type PDFError = {
   reason:

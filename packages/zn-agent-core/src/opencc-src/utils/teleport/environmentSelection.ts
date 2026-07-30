@@ -1,9 +1,9 @@
-import { SETTING_SOURCES, type SettingSource } from '../settings/constants.ts'
+import { SETTING_SOURCES, type SettingSource } from '../settings/constants.js'
 import {
   getSettings_DEPRECATED,
   getSettingsForSource,
-} from '../settings/settings.ts'
-import { type EnvironmentResource, fetchEnvironments } from './environments.ts'
+} from '../settings/settings.js'
+import { type EnvironmentResource, fetchEnvironments } from './environments.js'
 
 export type EnvironmentSelectionInfo = {
   availableEnvironments: EnvironmentResource[]

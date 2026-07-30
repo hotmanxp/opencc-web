@@ -1,13 +1,13 @@
 import { z } from 'zod/v4'
-import { getSessionId } from '../../bootstrap/state.ts'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
-import { buildTool, type ToolDef } from '../../Tool.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import { isTodoV2Enabled } from '../../utils/tasks.ts'
-import { TodoListSchema } from '../../utils/todo/types.ts'
-import { VERIFICATION_AGENT_TYPE } from '../AgentTool/constants.ts'
-import { TODO_WRITE_TOOL_NAME } from './constants.ts'
-import { DESCRIPTION, PROMPT } from './prompt.ts'
+import { getSessionId } from '../../bootstrap/state.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { buildTool, type ToolDef } from '../../Tool.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import { isTodoV2Enabled } from '../../utils/tasks.js'
+import { TodoListSchema } from '../../utils/todo/types.js'
+import { VERIFICATION_AGENT_TYPE } from '../AgentTool/constants.js'
+import { TODO_WRITE_TOOL_NAME } from './constants.js'
+import { DESCRIPTION, PROMPT } from './prompt.js'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({

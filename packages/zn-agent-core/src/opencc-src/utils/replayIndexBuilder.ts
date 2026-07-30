@@ -4,8 +4,8 @@ import type {
   ReplaySummary,
   ReplayRetryStep,
   ReplayToolStep,
-} from '../types/logs.ts'
-import { stableStringify } from './stableStringify.ts'
+} from '../types/logs.js'
+import { stableStringify } from './stableStringify.js'
 
 /**
  * Truncates a string to a maximum length, adding ellipsis if truncated.

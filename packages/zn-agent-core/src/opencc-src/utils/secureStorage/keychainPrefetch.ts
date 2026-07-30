@@ -22,13 +22,13 @@
  */
 
 import { execFile } from 'child_process'
-import { isBareMode } from '../envUtils.ts'
+import { isBareMode } from '../envUtils.js'
 import {
   CREDENTIALS_SERVICE_SUFFIX,
   getMacOsKeychainStorageServiceName,
   getUsername,
   primeKeychainCacheFromPrefetch,
-} from './macOsKeychainHelpers.ts'
+} from './macOsKeychainHelpers.js'
 
 const KEYCHAIN_PREFETCH_TIMEOUT_MS = 10_000
 

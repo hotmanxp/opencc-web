@@ -1,6 +1,6 @@
 import type { ValidationResult } from 'src/Tool.js'
-import { isClaudeSettingsPath } from '../permissions/filesystem.ts'
-import { validateSettingsFileContent } from './validation.ts'
+import { isClaudeSettingsPath } from '../permissions/filesystem.js'
+import { validateSettingsFileContent } from './validation.js'
 
 /**
  * Validates settings file edits to ensure the result conforms to SettingsSchema.

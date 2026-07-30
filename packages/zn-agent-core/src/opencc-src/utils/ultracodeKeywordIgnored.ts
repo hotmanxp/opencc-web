@@ -18,7 +18,7 @@
  * "to undo" string is exported for parity but rendered as static text.
  */
 
-import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../services/analytics/index.ts'
+import { type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS, logEvent } from '../services/analytics/index.js'
 
 /** Verbatim upstream text. */
 export const KEYWORD_IGNORED_TEXT = 'Ultracode keyword ignored for this prompt'

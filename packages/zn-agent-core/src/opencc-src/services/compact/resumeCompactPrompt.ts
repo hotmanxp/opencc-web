@@ -1,6 +1,6 @@
-import type { Message } from '../../types/message.ts'
-import { tokenCountWithEstimation } from '../../utils/tokens.ts'
-import { getAutoCompactThreshold } from './autoCompact.ts'
+import type { Message } from '../../types/message.js'
+import { tokenCountWithEstimation } from '../../utils/tokens.js'
+import { getAutoCompactThreshold } from './autoCompact.js'
 
 // Prompt compact on resume when the conversation exceeds this fraction of the
 // auto-compact threshold. Matches OpenCC's behavior of offering compaction

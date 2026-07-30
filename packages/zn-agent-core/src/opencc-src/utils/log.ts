@@ -7,20 +7,20 @@ import type { QuerySource } from 'src/constants/querySource.js'
 import {
   setLastAPIRequest,
   setLastAPIRequestMessages,
-} from '../bootstrap/state.ts'
-import { TICK_TAG } from '../constants/xml.ts'
+} from '../bootstrap/state.js'
+import { TICK_TAG } from '../constants/xml.js'
 import {
   type LogOption,
   type SerializedMessage,
   sortLogs,
-} from '../types/logs.ts'
-import { CACHE_PATHS } from './cachePaths.ts'
-import { stripDisplayTags, stripDisplayTagsAllowEmpty } from './displayTags.ts'
-import { isEnvTruthy } from './envUtils.ts'
-import { toError } from './errors.ts'
-import { isEssentialTrafficOnly } from './privacyLevel.ts'
-import { jsonRedactor, redactSensitiveInfo } from './redaction.ts'
-import { jsonParse } from './slowOperations.ts'
+} from '../types/logs.js'
+import { CACHE_PATHS } from './cachePaths.js'
+import { stripDisplayTags, stripDisplayTagsAllowEmpty } from './displayTags.js'
+import { isEnvTruthy } from './envUtils.js'
+import { toError } from './errors.js'
+import { isEssentialTrafficOnly } from './privacyLevel.js'
+import { jsonRedactor, redactSensitiveInfo } from './redaction.js'
+import { jsonParse } from './slowOperations.js'
 
 /**
  * Gets the display title for a log/session with fallback logic.

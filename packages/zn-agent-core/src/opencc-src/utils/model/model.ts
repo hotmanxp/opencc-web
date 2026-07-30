@@ -5,35 +5,35 @@
  * literals with process.env.USER_TYPE === 'ant' for Bun to remove the codenames
  * during dead code elimination
  */
-import { getMainLoopModelOverride } from '../../bootstrap/state.ts'
+import { getMainLoopModelOverride } from '../../bootstrap/state.js'
 import {
   getSubscriptionType,
   isClaudeAISubscriber,
   isMaxSubscriber,
   isProSubscriber,
   isTeamPremiumSubscriber,
-} from '../auth.ts'
+} from '../auth.js'
 import {
   has1mContext,
   is1mContextDisabled,
   modelSupports1M,
-} from '../context.ts'
-import { isEnvTruthy } from '../envUtils.ts'
-import { getModelStrings, resolveOverriddenModel } from './modelStrings.ts'
-import { formatModelPricing, getOpus46CostTier } from '../modelCost.ts'
-import { getInitialSettings } from '../settings/settings.ts'
-import type { PermissionMode } from '../permissions/PermissionMode.ts'
-import { getAPIProvider } from './providers.ts'
-import { getAntModelOverrideConfig, resolveAntModel } from './antModels.ts'
-import { LIGHTNING_BOLT } from '../../constants/figures.ts'
-import { isModelAllowed } from './modelAllowlist.ts'
-import { type ModelAlias, isModelAlias } from './aliases.ts'
+} from '../context.js'
+import { isEnvTruthy } from '../envUtils.js'
+import { getModelStrings, resolveOverriddenModel } from './modelStrings.js'
+import { formatModelPricing, getOpus46CostTier } from '../modelCost.js'
+import { getInitialSettings } from '../settings/settings.js'
+import type { PermissionMode } from '../permissions/PermissionMode.js'
+import { getAPIProvider } from './providers.js'
+import { getAntModelOverrideConfig, resolveAntModel } from './antModels.js'
+import { LIGHTNING_BOLT } from '../../constants/figures.js'
+import { isModelAllowed } from './modelAllowlist.js'
+import { type ModelAlias, isModelAlias } from './aliases.js'
 import {
   lookupAliasOverride,
   type AliasOverrideProvider,
   type AliasOverrideTier,
-} from './aliasOverrides.ts'
-import { capitalize } from '../stringUtils.ts'
+} from './aliasOverrides.js'
+import { capitalize } from '../stringUtils.js'
 
 export type ModelShortName = string
 export type ModelName = string

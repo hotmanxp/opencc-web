@@ -31,15 +31,15 @@ import {
   type Span,
 } from 'src/utils/telemetry/sessionTracing.js'
 import type { NonNullableUsage } from '../../entrypoints/sdk/sdkUtilityTypes.js'
-import { consumeInvokingRequestId } from '../../utils/agentContext.ts'
+import { consumeInvokingRequestId } from '../../utils/agentContext.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../analytics/index.ts'
-import { sanitizeToolNameForAnalytics } from '../analytics/metadata.ts'
-import { EMPTY_USAGE } from './emptyUsage.ts'
-import { classifyAPIError } from './errors.ts'
-import { extractConnectionErrorDetails } from './errorUtils.ts'
+} from '../analytics/index.js'
+import { sanitizeToolNameForAnalytics } from '../analytics/metadata.js'
+import { EMPTY_USAGE } from './emptyUsage.js'
+import { classifyAPIError } from './errors.js'
+import { extractConnectionErrorDetails } from './errorUtils.js'
 
 export type { NonNullableUsage }
 export { EMPTY_USAGE }

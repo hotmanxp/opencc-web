@@ -1,11 +1,11 @@
-import { logEvent } from '../../services/analytics/index.ts'
-import { logForDebugging } from '../debug.ts'
-import { runtimeFeature } from '../envUtils.ts'
+import { logEvent } from '../../services/analytics/index.js'
+import { logForDebugging } from '../debug.js'
+import { runtimeFeature } from '../envUtils.js'
 import {
   ensureParserInitialized,
   getParserModule,
   type TsNode,
-} from './bashParser.ts'
+} from './bashParser.js'
 
 export type Node = TsNode
 

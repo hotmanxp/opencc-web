@@ -1,5 +1,5 @@
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.ts'
-import { isEnvTruthy } from './envUtils.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { isEnvTruthy } from './envUtils.js'
 
 /**
  * Check if --agent-teams flag is provided via CLI.

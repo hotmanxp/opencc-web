@@ -3,15 +3,15 @@ export type {
   MiniMaxUsageRow,
   MiniMaxUsageSnapshot,
   MiniMaxUsageWindow,
-} from './minimaxUsage/types.ts'
+} from './minimaxUsage/types.js'
 
 export {
   buildMiniMaxUsageRows,
   normalizeMiniMaxUsagePayload,
-} from './minimaxUsage/parse.ts'
+} from './minimaxUsage/parse.js'
 
 export {
   fetchMiniMaxUsage,
   getMiniMaxUsageUrls,
   resolveMiniMaxUsageBaseUrl,
-} from './minimaxUsage/fetch.ts'
+} from './minimaxUsage/fetch.js'

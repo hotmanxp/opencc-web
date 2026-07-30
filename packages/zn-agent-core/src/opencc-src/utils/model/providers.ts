@@ -1,8 +1,8 @@
-import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.ts'
-import { type Providers } from '../config.ts'
-import { isEnvTruthy } from '../envUtils.ts'
-import { getGlobalConfig } from '../config.ts'
-import { getActiveProviderProfile } from '../providerProfiles.ts'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
+import { type Providers } from '../config.js'
+import { isEnvTruthy } from '../envUtils.js'
+import { getGlobalConfig } from '../config.js'
+import { getActiveProviderProfile } from '../providerProfiles.js'
 
 export type APIProvider = 'firstParty' | Providers | 'hicap'
 

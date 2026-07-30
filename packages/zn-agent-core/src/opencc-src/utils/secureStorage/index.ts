@@ -1,8 +1,8 @@
-import { createFallbackStorage } from './fallbackStorage.ts'
-import { macOsKeychainStorage } from './macOsKeychainStorage.ts'
-import { linuxSecretStorage } from './linuxSecretStorage.ts'
-import { windowsCredentialStorage } from './windowsCredentialStorage.ts'
-import { plainTextStorage } from './plainTextStorage.ts'
+import { createFallbackStorage } from './fallbackStorage.js'
+import { macOsKeychainStorage } from './macOsKeychainStorage.js'
+import { linuxSecretStorage } from './linuxSecretStorage.js'
+import { windowsCredentialStorage } from './windowsCredentialStorage.js'
+import { plainTextStorage } from './plainTextStorage.js'
 
 export interface SecureStorageData {
   codex?: {

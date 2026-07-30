@@ -4,39 +4,39 @@ import type { UUID } from 'crypto'
 import { logEvent } from 'src/services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from 'src/services/analytics/metadata.js'
 import { type Command, getCommandName, isCommandEnabled } from '../commands.js'
-import { selectableUserMessagesFilter } from './messageFilters.ts'
+import { selectableUserMessagesFilter } from './messageFilters.js'
 import type { SpinnerMode } from '../components/Spinner/types.js'
-import type { QuerySource } from '../constants/querySource.ts'
+import type { QuerySource } from '../constants/querySource.js'
 import { expandPastedTextRefs, parseReferences } from '../history.js'
 import type { CanUseToolFn } from '../hooks/useCanUseTool.js'
 import type { IDESelection } from '../hooks/useIdeSelection.js'
 import type { AppState } from '../state/AppState.js'
-import type { SetToolJSXFn } from '../Tool.ts'
-import type { LocalJSXCommandOnDone } from '../types/command.ts'
-import type { Message } from '../types/message.ts'
+import type { SetToolJSXFn } from '../Tool.js'
+import type { LocalJSXCommandOnDone } from '../types/command.js'
+import type { Message } from '../types/message.js'
 import {
   isValidImagePaste,
   type PromptInputMode,
   type QueuedCommand,
-} from '../types/textInputTypes.ts'
-import { createAbortController } from './abortController.ts'
-import type { PastedContent } from './config.ts'
-import { logForDebugging } from './debug.ts'
-import type { EffortValue } from './effort.ts'
-import type { FileHistoryState } from './fileHistory.ts'
-import { fileHistoryEnabled, fileHistoryMakeSnapshot } from './fileHistory.ts'
-import { gracefulShutdownSync } from './gracefulShutdown.ts'
-import { enqueue } from './messageQueueManager.ts'
-import { resolveSkillModelOverride } from './model/model.ts'
+} from '../types/textInputTypes.js'
+import { createAbortController } from './abortController.js'
+import type { PastedContent } from './config.js'
+import { logForDebugging } from './debug.js'
+import type { EffortValue } from './effort.js'
+import type { FileHistoryState } from './fileHistory.js'
+import { fileHistoryEnabled, fileHistoryMakeSnapshot } from './fileHistory.js'
+import { gracefulShutdownSync } from './gracefulShutdown.js'
+import { enqueue } from './messageQueueManager.js'
+import { resolveSkillModelOverride } from './model/model.js'
 import type { ProcessUserInputContext } from './processUserInput/processUserInput.js'
 import { processUserInput } from './processUserInput/processUserInput.js'
-import type { QueryGuard } from './QueryGuard.ts'
+import type { QueryGuard } from './QueryGuard.js'
 import {
   clearQueryProfile,
   queryCheckpoint,
   startQueryProfile,
-} from './queryProfiler.ts'
-import { runWithWorkload } from './workloadContext.ts'
+} from './queryProfiler.js'
+import { runWithWorkload } from './workloadContext.js'
 
 function exit(): void {
   gracefulShutdownSync(0)

@@ -1,4 +1,4 @@
-import type { CommandSpec } from '../registry.ts'
+import type { CommandSpec } from '../registry.js'
 
 export default {
   name: 'pyright',

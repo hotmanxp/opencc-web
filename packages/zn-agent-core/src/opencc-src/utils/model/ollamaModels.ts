@@ -4,8 +4,8 @@
  * so the synchronous getModelOptions() can use them.
  */
 
-import type { ModelOption } from './modelOptions.ts'
-import { getOllamaApiBaseUrl } from '../providerDiscovery.ts'
+import type { ModelOption } from './modelOptions.js'
+import { getOllamaApiBaseUrl } from '../providerDiscovery.js'
 
 let cachedOllamaOptions: ModelOption[] | null = null
 let fetchPromise: Promise<ModelOption[]> | null = null

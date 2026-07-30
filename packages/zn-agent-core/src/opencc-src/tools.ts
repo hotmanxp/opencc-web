@@ -1,19 +1,19 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { toolMatchesName, type Tool, type Tools } from './Tool.ts'
+import { toolMatchesName, type Tool, type Tools } from './Tool.js'
 import { AgentTool } from './tools/AgentTool/AgentTool.js'
-import { BackgroundAgentTool } from './tools/BackgroundAgentTool/index.ts'
-import { BackgroundAgentResultTool } from './tools/BackgroundAgentResultTool/index.ts'
-import { SkillTool } from './tools/SkillTool/SkillTool.ts'
+import { BackgroundAgentTool } from './tools/BackgroundAgentTool/index.js'
+import { BackgroundAgentResultTool } from './tools/BackgroundAgentResultTool/index.js'
+import { SkillTool } from './tools/SkillTool/SkillTool.js'
 import { BashTool } from './tools/BashTool/BashTool.js'
-import { FileEditTool } from './tools/FileEditTool/FileEditTool.ts'
-import { FileReadTool } from './tools/FileReadTool/FileReadTool.ts'
-import { FileWriteTool } from './tools/FileWriteTool/FileWriteTool.ts'
-import { GlobTool } from './tools/GlobTool/GlobTool.ts'
-import { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.ts'
-import { WebFetchTool } from './tools/WebFetchTool/WebFetchTool.ts'
-import { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.ts'
-import { BriefTool } from './tools/BriefTool/BriefTool.ts'
-import { SnipTool } from './tools/SnipTool/SnipTool.ts'
+import { FileEditTool } from './tools/FileEditTool/FileEditTool.js'
+import { FileReadTool } from './tools/FileReadTool/FileReadTool.js'
+import { FileWriteTool } from './tools/FileWriteTool/FileWriteTool.js'
+import { GlobTool } from './tools/GlobTool/GlobTool.js'
+import { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.js'
+import { WebFetchTool } from './tools/WebFetchTool/WebFetchTool.js'
+import { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.js'
+import { BriefTool } from './tools/BriefTool/BriefTool.js'
+import { SnipTool } from './tools/SnipTool/SnipTool.js'
 // Dead code elimination: conditional import for internal-only tools
 /* eslint-disable @typescript-eslint/no-require-imports */
 const REPLTool = null
@@ -45,12 +45,12 @@ const SubscribePRTool = feature('KAIROS_GITHUB_WEBHOOKS')
   : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 import { TaskOutputTool } from './tools/TaskOutputTool/TaskOutputTool.js'
-import { WebSearchTool } from './tools/WebSearchTool/WebSearchTool.ts'
-import { TodoWriteTool } from './tools/TodoWriteTool/TodoWriteTool.ts'
-import { ExitPlanModeV2Tool } from './tools/ExitPlanModeTool/ExitPlanModeV2Tool.ts'
-import { WorkflowTool } from './tools/WorkflowTool/WorkflowTool.ts'
+import { WebSearchTool } from './tools/WebSearchTool/WebSearchTool.js'
+import { TodoWriteTool } from './tools/TodoWriteTool/TodoWriteTool.js'
+import { ExitPlanModeV2Tool } from './tools/ExitPlanModeTool/ExitPlanModeV2Tool.js'
+import { WorkflowTool } from './tools/WorkflowTool/WorkflowTool.js'
 import { TestingPermissionTool } from './tools/testing/TestingPermissionTool.js'
-import { GrepTool } from './tools/GrepTool/GrepTool.ts'
+import { GrepTool } from './tools/GrepTool/GrepTool.js'
 // Lazy require to break circular dependency: tools.ts -> TeamCreateTool/TeamDeleteTool -> ... -> tools.ts
 /* eslint-disable @typescript-eslint/no-require-imports */
 const getTeamCreateTool = () =>
@@ -64,20 +64,20 @@ const getSendMessageTool = () =>
     .SendMessageTool as typeof import('./tools/SendMessageTool/SendMessageTool.js').SendMessageTool
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { AskUserQuestionTool } from './tools/AskUserQuestionTool/AskUserQuestionTool.js'
-import { LSPTool } from './tools/LSPTool/LSPTool.ts'
-import { ListMcpResourcesTool } from './tools/ListMcpResourcesTool/ListMcpResourcesTool.ts'
-import { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResourceTool.ts'
-import { ToolSearchTool } from './tools/ToolSearchTool/ToolSearchTool.ts'
-import { EnterPlanModeTool } from './tools/EnterPlanModeTool/EnterPlanModeTool.ts'
-import { EnterWorktreeTool } from './tools/EnterWorktreeTool/EnterWorktreeTool.ts'
-import { ExitWorktreeTool } from './tools/ExitWorktreeTool/ExitWorktreeTool.ts'
-import { TaskCreateTool } from './tools/TaskCreateTool/TaskCreateTool.ts'
-import { TaskGetTool } from './tools/TaskGetTool/TaskGetTool.ts'
-import { TaskUpdateTool } from './tools/TaskUpdateTool/TaskUpdateTool.ts'
-import { TaskListTool } from './tools/TaskListTool/TaskListTool.ts'
+import { LSPTool } from './tools/LSPTool/LSPTool.js'
+import { ListMcpResourcesTool } from './tools/ListMcpResourcesTool/ListMcpResourcesTool.js'
+import { ReadMcpResourceTool } from './tools/ReadMcpResourceTool/ReadMcpResourceTool.js'
+import { ToolSearchTool } from './tools/ToolSearchTool/ToolSearchTool.js'
+import { EnterPlanModeTool } from './tools/EnterPlanModeTool/EnterPlanModeTool.js'
+import { EnterWorktreeTool } from './tools/EnterWorktreeTool/EnterWorktreeTool.js'
+import { ExitWorktreeTool } from './tools/ExitWorktreeTool/ExitWorktreeTool.js'
+import { TaskCreateTool } from './tools/TaskCreateTool/TaskCreateTool.js'
+import { TaskGetTool } from './tools/TaskGetTool/TaskGetTool.js'
+import { TaskUpdateTool } from './tools/TaskUpdateTool/TaskUpdateTool.js'
+import { TaskListTool } from './tools/TaskListTool/TaskListTool.js'
 import uniqBy from 'lodash-es/uniqBy.js'
-import { isToolSearchEnabledOptimistic } from './utils/toolSearch.ts'
-import { isTodoV2Enabled } from './utils/tasks.ts'
+import { isToolSearchEnabledOptimistic } from './utils/toolSearch.js'
+import { isTodoV2Enabled } from './utils/tasks.js'
 // Dead code elimination: conditional import for CLAUDE_CODE_VERIFY_PLAN
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
 const VerifyPlanExecutionTool =
@@ -86,13 +86,13 @@ const VerifyPlanExecutionTool =
         .VerifyPlanExecutionTool
     : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
-import { SYNTHETIC_OUTPUT_TOOL_NAME } from './tools/SyntheticOutputTool/SyntheticOutputTool.ts'
+import { SYNTHETIC_OUTPUT_TOOL_NAME } from './tools/SyntheticOutputTool/SyntheticOutputTool.js'
 export {
   ALL_AGENT_DISALLOWED_TOOLS,
   CUSTOM_AGENT_DISALLOWED_TOOLS,
   ASYNC_AGENT_ALLOWED_TOOLS,
   COORDINATOR_MODE_ALLOWED_TOOLS,
-} from './constants/tools.ts'
+} from './constants/tools.js'
 import { feature } from 'bun:bundle'
 // Dead code elimination: conditional import for OVERFLOW_TEST_TOOL
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
@@ -114,18 +114,18 @@ const ListPeersTool = feature('UDS_INBOX')
   ? require('./tools/ListPeersTool/ListPeersTool.js').ListPeersTool
   : null
 /* eslint-enable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
-import type { ToolPermissionContext } from './Tool.ts'
-import { getDenyRuleForTool } from './utils/permissions/permissions.ts'
-import { hasEmbeddedSearchTools } from './utils/embeddedTools.ts'
-import { isEnvTruthy, isWorkflowsDisabled } from './utils/envUtils.ts'
-import { isPowerShellToolEnabled } from './utils/shell/shellToolUtils.ts'
-import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.ts'
-import { isWorktreeModeEnabled } from './utils/worktreeModeEnabled.ts'
+import type { ToolPermissionContext } from './Tool.js'
+import { getDenyRuleForTool } from './utils/permissions/permissions.js'
+import { hasEmbeddedSearchTools } from './utils/embeddedTools.js'
+import { isEnvTruthy, isWorkflowsDisabled } from './utils/envUtils.js'
+import { isPowerShellToolEnabled } from './utils/shell/shellToolUtils.js'
+import { isAgentSwarmsEnabled } from './utils/agentSwarmsEnabled.js'
+import { isWorktreeModeEnabled } from './utils/worktreeModeEnabled.js'
 import {
   REPL_TOOL_NAME,
   REPL_ONLY_TOOLS,
   isReplModeEnabled,
-} from './tools/REPLTool/constants.ts'
+} from './tools/REPLTool/constants.js'
 export { REPL_ONLY_TOOLS }
 /* eslint-disable @typescript-eslint/no-require-imports */
 const getPowerShellTool = () => {

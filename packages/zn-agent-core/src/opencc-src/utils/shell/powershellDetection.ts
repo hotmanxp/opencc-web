@@ -1,6 +1,6 @@
 import { realpath, stat } from 'fs/promises'
-import { getPlatform } from '../platform.ts'
-import { which } from '../which.ts'
+import { getPlatform } from '../platform.js'
+import { which } from '../which.js'
 
 async function probePath(p: string): Promise<string | null> {
   try {

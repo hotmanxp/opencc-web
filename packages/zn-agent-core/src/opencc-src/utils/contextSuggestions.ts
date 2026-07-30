@@ -1,10 +1,10 @@
-import { BASH_TOOL_NAME } from '../tools/BashTool/toolName.ts'
-import { FILE_READ_TOOL_NAME } from '../tools/FileReadTool/prompt.ts'
-import { GREP_TOOL_NAME } from '../tools/GrepTool/prompt.ts'
-import { WEB_FETCH_TOOL_NAME } from '../tools/WebFetchTool/prompt.ts'
-import type { ContextData } from './analyzeContext.ts'
-import { getDisplayPath } from './file.ts'
-import { formatTokens } from './format.ts'
+import { BASH_TOOL_NAME } from '../tools/BashTool/toolName.js'
+import { FILE_READ_TOOL_NAME } from '../tools/FileReadTool/prompt.js'
+import { GREP_TOOL_NAME } from '../tools/GrepTool/prompt.js'
+import { WEB_FETCH_TOOL_NAME } from '../tools/WebFetchTool/prompt.js'
+import type { ContextData } from './analyzeContext.js'
+import { getDisplayPath } from './file.js'
+import { formatTokens } from './format.js'
 
 // --
 

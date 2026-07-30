@@ -1,7 +1,7 @@
 import { homedir } from 'os'
 import { join } from 'path'
-import { logForDebugging } from './debug.ts'
-import { getPlatform, type Platform } from './platform.ts'
+import { logForDebugging } from './debug.js'
+import { getPlatform, type Platform } from './platform.js'
 
 export type SystemDirectories = {
   HOME: string

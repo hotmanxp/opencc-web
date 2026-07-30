@@ -1,1 +1,1 @@
-export { getCachedMCConfig } from './cachedMicrocompact.ts'
+export { getCachedMCConfig } from './cachedMicrocompact.js'

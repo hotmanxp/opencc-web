@@ -1,12 +1,12 @@
 import { logForDebugging } from 'src/utils/debug.js'
 import { z } from 'zod/v4'
-import { lazySchema } from '../../utils/lazySchema.ts'
+import { lazySchema } from '../../utils/lazySchema.js'
 import {
   checkStatsigFeatureGate_CACHED_MAY_BE_STALE,
   getFeatureValue_CACHED_MAY_BE_STALE,
-} from '../analytics/growthbook.ts'
-import { logEvent } from '../analytics/index.ts'
-import type { ConnectedMCPServer, MCPServerConnection } from './types.ts'
+} from '../analytics/growthbook.js'
+import { logEvent } from '../analytics/index.js'
+import type { ConnectedMCPServer, MCPServerConnection } from './types.js'
 
 // Mirror of AutoModeEnabledState in permissionSetup.ts — inlined because that
 // file pulls in too many deps for this thin IPC module.

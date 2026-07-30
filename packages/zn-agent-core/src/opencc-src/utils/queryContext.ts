@@ -10,22 +10,22 @@
  */
 
 import type { Command } from '../commands.js'
-import { getSystemPrompt } from '../constants/prompts.ts'
-import { getSystemContext, getUserContext } from '../context.ts'
-import type { MCPServerConnection } from '../services/mcp/types.ts'
+import { getSystemPrompt } from '../constants/prompts.js'
+import { getSystemContext, getUserContext } from '../context.js'
+import type { MCPServerConnection } from '../services/mcp/types.js'
 import type { AppState } from '../state/AppStateStore.js'
-import type { Tools, ToolUseContext } from '../Tool.ts'
-import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.ts'
-import type { Message } from '../types/message.ts'
-import { createAbortController } from './abortController.ts'
-import type { FileStateCache } from './fileStateCache.ts'
-import type { CacheSafeParams } from './forkedAgent.ts'
-import { getMainLoopModel } from './model/model.ts'
-import { asSystemPrompt } from './systemPromptType.ts'
+import type { Tools, ToolUseContext } from '../Tool.js'
+import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.js'
+import type { Message } from '../types/message.js'
+import { createAbortController } from './abortController.js'
+import type { FileStateCache } from './fileStateCache.js'
+import type { CacheSafeParams } from './forkedAgent.js'
+import { getMainLoopModel } from './model/model.js'
+import { asSystemPrompt } from './systemPromptType.js'
 import {
   shouldEnableThinkingByDefault,
   type ThinkingConfig,
-} from './thinking.ts'
+} from './thinking.js'
 
 /**
  * Fetch the three context pieces that form the API cache-key prefix:

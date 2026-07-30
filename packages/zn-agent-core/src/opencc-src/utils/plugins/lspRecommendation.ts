@@ -13,18 +13,18 @@
  */
 
 import { extname } from 'path'
-import { isBinaryInstalled } from '../binaryCheck.ts'
-import { getGlobalConfig, saveGlobalConfig } from '../config.ts'
-import { logForDebugging } from '../debug.ts'
-import { isPluginInstalled } from './installedPluginsManager.ts'
+import { isBinaryInstalled } from '../binaryCheck.js'
+import { getGlobalConfig, saveGlobalConfig } from '../config.js'
+import { logForDebugging } from '../debug.js'
+import { isPluginInstalled } from './installedPluginsManager.js'
 import {
   getMarketplace,
   loadKnownMarketplacesConfig,
-} from './marketplaceManager.ts'
+} from './marketplaceManager.js'
 import {
   ALLOWED_OFFICIAL_MARKETPLACE_NAMES,
   type PluginMarketplaceEntry,
-} from './schemas.ts'
+} from './schemas.js'
 
 /**
  * LSP plugin recommendation returned to the caller

@@ -5,8 +5,8 @@
  * Supports OpenAI-compatible, Ollama, Anthropic, Bedrock, Vertex.
  */
 
-import { getAPIProvider } from './providers.ts'
-import { createCombinedAbortSignal } from '../combinedAbortSignal.ts'
+import { getAPIProvider } from './providers.js'
+import { createCombinedAbortSignal } from '../combinedAbortSignal.js'
 
 export interface BenchmarkResult {
   model: string

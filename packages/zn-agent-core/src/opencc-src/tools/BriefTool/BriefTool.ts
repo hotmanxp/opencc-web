@@ -1,20 +1,20 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
-import { getKairosActive, getUserMsgOptIn } from '../../bootstrap/state.ts'
-import { getFeatureValue_CACHED_WITH_REFRESH } from '../../services/analytics/growthbook.ts'
-import { logEvent } from '../../services/analytics/index.ts'
-import type { ValidationResult } from '../../Tool.ts'
-import { buildTool, type ToolDef } from '../../Tool.ts'
-import { isEnvTruthy } from '../../utils/envUtils.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import { plural } from '../../utils/stringUtils.ts'
-import { resolveAttachments, validateAttachmentPaths } from './attachments.ts'
+import { getKairosActive, getUserMsgOptIn } from '../../bootstrap/state.js'
+import { getFeatureValue_CACHED_WITH_REFRESH } from '../../services/analytics/growthbook.js'
+import { logEvent } from '../../services/analytics/index.js'
+import type { ValidationResult } from '../../Tool.js'
+import { buildTool, type ToolDef } from '../../Tool.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import { plural } from '../../utils/stringUtils.js'
+import { resolveAttachments, validateAttachmentPaths } from './attachments.js'
 import {
   BRIEF_TOOL_NAME,
   BRIEF_TOOL_PROMPT,
   DESCRIPTION,
   LEGACY_BRIEF_TOOL_NAME,
-} from './prompt.ts'
+} from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
 const inputSchema = lazySchema(() =>

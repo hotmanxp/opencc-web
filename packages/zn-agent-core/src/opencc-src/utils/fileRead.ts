@@ -12,8 +12,8 @@
  * import from file.ts.
  */
 
-import { logForDebugging } from './debug.ts'
-import { getFsImplementation, safeResolvePath } from './fsOperations.ts'
+import { logForDebugging } from './debug.js'
+import { getFsImplementation, safeResolvePath } from './fsOperations.js'
 
 export type LineEndingType = 'CRLF' | 'LF'
 

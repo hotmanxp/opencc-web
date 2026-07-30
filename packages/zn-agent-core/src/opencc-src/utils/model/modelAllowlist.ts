@@ -1,7 +1,7 @@
-import { getSettings_DEPRECATED } from '../settings/settings.ts'
-import { isModelAlias, isModelFamilyAlias } from './aliases.ts'
-import { parseUserSpecifiedModel } from './model.ts'
-import { resolveOverriddenModel } from './modelStrings.ts'
+import { getSettings_DEPRECATED } from '../settings/settings.js'
+import { isModelAlias, isModelFamilyAlias } from './aliases.js'
+import { parseUserSpecifiedModel } from './model.js'
+import { resolveOverriddenModel } from './modelStrings.js'
 
 /**
  * Check if a model belongs to a given family by checking if its name

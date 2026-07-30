@@ -1,6 +1,6 @@
 /* eslint-disable */
 
-import type { PublicApiAuth } from '../../common/v1/auth.ts'
+import type { PublicApiAuth } from '../../common/v1/auth.js'
 
 export interface GitHubActionsMetadata {
   actor_id?: string | undefined

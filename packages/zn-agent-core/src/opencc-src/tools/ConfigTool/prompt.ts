@@ -1,10 +1,10 @@
 import { feature } from 'bun:bundle'
-import { getModelOptions } from '../../utils/model/modelOptions.ts'
+import { getModelOptions } from '../../utils/model/modelOptions.js'
 import { isVoiceGrowthBookEnabled } from '../../voice/voiceModeEnabled.js'
 import {
   getOptionsForSetting,
   SUPPORTED_SETTINGS,
-} from './supportedSettings.ts'
+} from './supportedSettings.js'
 
 export const DESCRIPTION = 'Get or set OpenCC configuration settings.'
 

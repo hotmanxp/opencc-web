@@ -4,27 +4,27 @@
  */
 
 import { resolve } from 'path'
-import { getOriginalCwd } from '../../bootstrap/state.ts'
-import type { ToolPermissionContext, ToolUseContext } from '../../Tool.ts'
+import { getOriginalCwd } from '../../bootstrap/state.js'
+import type { ToolPermissionContext, ToolUseContext } from '../../Tool.js'
 import type {
   PermissionDecisionReason,
   PermissionResult,
-} from '../../types/permissions.ts'
-import { getCwd } from '../../utils/cwd.ts'
-import { isCurrentDirectoryBareGitRepo } from '../../utils/git.ts'
-import { isOpenClaudeCommitMessagePath } from '../../utils/permissions/filesystem.ts'
-import type { PermissionRule } from '../../utils/permissions/PermissionRule.ts'
-import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.ts'
+} from '../../types/permissions.js'
+import { getCwd } from '../../utils/cwd.js'
+import { isCurrentDirectoryBareGitRepo } from '../../utils/git.js'
+import { isOpenClaudeCommitMessagePath } from '../../utils/permissions/filesystem.js'
+import type { PermissionRule } from '../../utils/permissions/PermissionRule.js'
+import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js'
 import {
   createPermissionRequestMessage,
   getRuleByContentsForToolName,
-} from '../../utils/permissions/permissions.ts'
+} from '../../utils/permissions/permissions.js'
 import {
   matchWildcardPattern,
   parsePermissionRule,
   type ShellPermissionRule,
   suggestionForExactCommand as sharedSuggestionForExactCommand,
-} from '../../utils/permissions/shellRuleMatching.ts'
+} from '../../utils/permissions/shellRuleMatching.js'
 import {
   classifyCommandName,
   deriveSecurityFlags,
@@ -35,19 +35,19 @@ import {
   PS_TOKENIZER_DASH_CHARS,
   parsePowerShellCommand,
   stripModulePrefix,
-} from '../../utils/powershell/parser.ts'
-import { containsVulnerableUncPath } from '../../utils/shell/readOnlyCommandValidation.ts'
-import { isDotGitPathPS, isGitInternalPathPS } from './gitSafety.ts'
+} from '../../utils/powershell/parser.js'
+import { containsVulnerableUncPath } from '../../utils/shell/readOnlyCommandValidation.js'
+import { isDotGitPathPS, isGitInternalPathPS } from './gitSafety.js'
 import {
   checkPermissionMode,
   isSymlinkCreatingCommand,
-} from './modeValidation.ts'
+} from './modeValidation.js'
 import {
   checkPathConstraints,
   dangerousRemovalDeny,
   isDangerousRemovalRawPath,
-} from './pathValidation.ts'
-import { powershellCommandIsSafe } from './powershellSecurity.ts'
+} from './pathValidation.js'
+import { powershellCommandIsSafe } from './powershellSecurity.js'
 import {
   argLeaksValue,
   isAllowlistedCommand,
@@ -56,8 +56,8 @@ import {
   isReadOnlyCommand,
   isSafeOutputCommand,
   resolveToCanonical,
-} from './readOnlyValidation.ts'
-import { POWERSHELL_TOOL_NAME } from './toolName.ts'
+} from './readOnlyValidation.js'
+import { POWERSHELL_TOOL_NAME } from './toolName.js'
 
 // Matches `$var = `, `$var += `, `$env:X = `, `$x ??= ` etc. Used to strip
 // nested assignment prefixes in the parse-failed fallback path.

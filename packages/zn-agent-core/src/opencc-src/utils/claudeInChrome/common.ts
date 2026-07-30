@@ -2,20 +2,20 @@ import { readdirSync } from 'fs'
 import { stat } from 'fs/promises'
 import { homedir, platform, tmpdir, userInfo } from 'os'
 import { join } from 'path'
-import { normalizeNameForMCP } from '../../services/mcp/normalization.ts'
-import { logForDebugging } from '../debug.ts'
-import { isFsInaccessible } from '../errors.ts'
-import { execFileNoThrow } from '../execFileNoThrow.ts'
-import { getPlatform } from '../platform.ts'
-import { which } from '../which.ts'
+import { normalizeNameForMCP } from '../../services/mcp/normalization.js'
+import { logForDebugging } from '../debug.js'
+import { isFsInaccessible } from '../errors.js'
+import { execFileNoThrow } from '../execFileNoThrow.js'
+import { getPlatform } from '../platform.js'
+import { which } from '../which.js'
 
 export const CLAUDE_IN_CHROME_MCP_SERVER_NAME = 'claude-in-chrome'
 
 // Re-export ChromiumBrowser type for setup.ts
-export type { ChromiumBrowser } from './setupPortable.ts'
+export type { ChromiumBrowser } from './setupPortable.js'
 
 // Import for local use
-import type { ChromiumBrowser } from './setupPortable.ts'
+import type { ChromiumBrowser } from './setupPortable.js'
 
 type BrowserConfig = {
   name: string

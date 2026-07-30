@@ -8,7 +8,7 @@ import type {
   AssistantMessage,
   UserMessage,
   UUID,
-} from '../../types/message.ts'
+} from '../../types/message.js'
 
 // Local message shapes with the `message` envelope narrowed to what normalize
 // needs. The parent `Message` interface leaves `message` optional (it is absent

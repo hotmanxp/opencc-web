@@ -11,12 +11,12 @@
 import axios from 'axios'
 import { chmod, mkdir, readFile, rename, rm, writeFile } from 'fs/promises'
 import { dirname, join, resolve, sep } from 'path'
-import { waitForScrollIdle } from '../../bootstrap/state.ts'
-import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.ts'
-import { logEvent } from '../../services/analytics/index.ts'
-import { logForDebugging } from '../debug.ts'
-import { parseZipModes, unzipFile } from '../dxt/zip.ts'
-import { errorMessage, getErrnoCode } from '../errors.ts'
+import { waitForScrollIdle } from '../../bootstrap/state.js'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/index.js'
+import { logEvent } from '../../services/analytics/index.js'
+import { logForDebugging } from '../debug.js'
+import { parseZipModes, unzipFile } from '../dxt/zip.js'
+import { errorMessage, getErrnoCode } from '../errors.js'
 
 type SafeString = AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
 

@@ -1,11 +1,11 @@
-import { AuthCodeListener } from '../oauth/auth-code-listener.ts'
-import {  } from '../../constants/product.ts'
-import { BRAND_NAME } from '../../constants.ts'
+import { AuthCodeListener } from '../oauth/auth-code-listener.js'
+import {  } from '../../constants/product.js'
+import { BRAND_NAME } from '../../constants.js'
 import {
   generateCodeChallenge,
   generateCodeVerifier,
   generateState,
-} from '../oauth/crypto.ts'
+} from '../oauth/crypto.js'
 import {
   asTrimmedString,
   CODEX_OAUTH_ISSUER,
@@ -16,8 +16,8 @@ import {
   getCodexOAuthCallbackPort,
   getCodexOAuthClientId,
   parseChatgptAccountId,
-} from './codexOAuthShared.ts'
-import { createCombinedAbortSignal } from '../../utils/combinedAbortSignal.ts'
+} from './codexOAuthShared.js'
+import { createCombinedAbortSignal } from '../../utils/combinedAbortSignal.js'
 
 type CodexOAuthTokenResponse = {
   id_token?: string

@@ -1,5 +1,5 @@
 import { randomUUID, type UUID } from 'crypto'
-import { validateUuid } from './uuid.ts'
+import { validateUuid } from './uuid.js'
 
 export type ParsedSessionUrl = {
   sessionId: UUID

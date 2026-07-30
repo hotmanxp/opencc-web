@@ -7,39 +7,39 @@
  */
 
 import memoize from 'lodash-es/memoize.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../services/analytics/index.ts'
-import type { Tool } from '../Tool.ts'
+} from '../services/analytics/index.js'
+import type { Tool } from '../Tool.js'
 import {
   type ToolPermissionContext,
   type Tools,
   toolMatchesName,
-} from '../Tool.ts'
-import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.ts'
+} from '../Tool.js'
+import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.js'
 import {
   formatDeferredToolLine,
   isDeferredTool,
   TOOL_SEARCH_TOOL_NAME,
-} from '../tools/ToolSearchTool/prompt.ts'
-import type { Message } from '../types/message.ts'
+} from '../tools/ToolSearchTool/prompt.js'
+import type { Message } from '../types/message.js'
 import {
   countToolDefinitionTokens,
   TOOL_TOKEN_COUNT_OVERHEAD,
-} from './analyzeContext.ts'
-import { count } from './array.ts'
-import { getMergedBetas } from './betas.ts'
-import { getContextWindowForModel } from './context.ts'
-import { logForDebugging } from './debug.ts'
-import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.ts'
+} from './analyzeContext.js'
+import { count } from './array.js'
+import { getMergedBetas } from './betas.js'
+import { getContextWindowForModel } from './context.js'
+import { logForDebugging } from './debug.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
-} from './model/providers.ts'
-import { jsonStringify } from './slowOperations.ts'
-import { zodToJsonSchema } from './zodToJsonSchema.ts'
+} from './model/providers.js'
+import { jsonStringify } from './slowOperations.js'
+import { zodToJsonSchema } from './zodToJsonSchema.js'
 
 /**
  * Default percentage of context window at which to auto-enable tool search.

@@ -9,12 +9,12 @@
 // "given the chain + the active profile, which profile id comes next, and
 // does it exist as a real configured profile?".
 
-import { getSettings_DEPRECATED } from './settings/settings.ts'
-import { type ProviderProfile } from './config.ts'
+import { getSettings_DEPRECATED } from './settings/settings.js'
+import { type ProviderProfile } from './config.js'
 import {
   getActiveProviderProfile,
   getProviderProfiles,
-} from './providerProfiles.ts'
+} from './providerProfiles.js'
 
 export type ProviderFallbackResolution = {
   /** The profile id that comes next in the chain after `activeProfileId`. */

@@ -16,11 +16,11 @@
  */
 
 import { spawn, spawnSync } from 'child_process'
-import { getSessionId } from '../bootstrap/state.ts'
+import { getSessionId } from '../bootstrap/state.js'
 import instances from '../ink/instances.js'
-import { registerCleanup } from './cleanupRegistry.ts'
-import { pwd } from './cwd.ts'
-import { logForDebugging } from './debug.ts'
+import { registerCleanup } from './cleanupRegistry.js'
+import { pwd } from './cwd.js'
+import { logForDebugging } from './debug.js'
 
 const TMUX_SESSION = 'panel'
 

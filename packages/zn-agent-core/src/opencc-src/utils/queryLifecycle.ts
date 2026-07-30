@@ -1,4 +1,4 @@
-import { normalizeAbortReason } from './abortReasons.ts'
+import { normalizeAbortReason } from './abortReasons.js'
 
 export type QueryTerminalReason =
   | 'ok'

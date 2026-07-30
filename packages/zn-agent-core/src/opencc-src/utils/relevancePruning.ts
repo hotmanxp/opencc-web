@@ -4,8 +4,8 @@
  * Prunes context to keep only messages relevant to current task.
  */
 
-import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
-import type { Message } from '../types/message.ts'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
+import type { Message } from '../types/message.js'
 
 export interface PruningOptions {
   targetTokens: number
@@ -91,7 +91,10 @@ export function hasErrors(message: Message): boolean {
  * Returns 0 for a missing/unparseable timestamp (sorts as oldest).
  */
 function messageTimeMs(message: Message | undefined): number {
-  const parsed = message?.timestamp ? Date.parse(message.timestamp) : NaN
+  // Message.timestamp is `number | string` per src/types/message.ts:65; coerce
+  // to string before Date.parse so the wide type narrows for the call site.
+  const raw = message?.timestamp
+  const parsed = raw !== undefined && raw !== null && raw !== '' ? Date.parse(String(raw)) : NaN
   return Number.isNaN(parsed) ? 0 : parsed
 }
 

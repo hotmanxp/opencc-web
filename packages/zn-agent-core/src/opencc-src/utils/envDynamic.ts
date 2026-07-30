@@ -1,10 +1,10 @@
 import { feature } from 'bun:bundle'
 import { stat } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
-import { env, JETBRAINS_IDES } from './env.ts'
-import { isEnvTruthy } from './envUtils.ts'
-import { execFileNoThrow } from './execFileNoThrow.ts'
-import { getAncestorCommandsAsync } from './genericProcessUtils.ts'
+import { env, JETBRAINS_IDES } from './env.js'
+import { isEnvTruthy } from './envUtils.js'
+import { execFileNoThrow } from './execFileNoThrow.js'
+import { getAncestorCommandsAsync } from './genericProcessUtils.js'
 
 // Functions that require execFileNoThrow and thus cannot be in env.ts
 

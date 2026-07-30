@@ -1,21 +1,21 @@
 import axios from 'axios'
-import { getOauthConfig } from '../../constants/oauth.ts'
+import { getOauthConfig } from '../../constants/oauth.js'
 import {
   getOauthAccountInfo,
   getSubscriptionType,
   isClaudeAISubscriber,
-} from '../../utils/auth.ts'
-import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.ts'
-import { logForDebugging } from '../../utils/debug.ts'
-import { logError } from '../../utils/log.ts'
-import { isEssentialTrafficOnly } from '../../utils/privacyLevel.ts'
-import { getOAuthHeaders, prepareApiRequest } from '../../utils/teleport/api.ts'
+} from '../../utils/auth.js'
+import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
+import { logForDebugging } from '../../utils/debug.js'
+import { logError } from '../../utils/log.js'
+import { isEssentialTrafficOnly } from '../../utils/privacyLevel.js'
+import { getOAuthHeaders, prepareApiRequest } from '../../utils/teleport/api.js'
 import type {
   ReferralCampaign,
   ReferralEligibilityResponse,
   ReferralRedemptionsResponse,
   ReferrerRewardInfo,
-} from '../oauth/types.ts'
+} from '../oauth/types.js'
 
 // Cache expiration time: 24 hours (eligibility changes only on subscription/experiment changes)
 const CACHE_EXPIRATION_MS = 24 * 60 * 60 * 1000

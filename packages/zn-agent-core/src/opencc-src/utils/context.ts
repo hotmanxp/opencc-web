@@ -1,13 +1,13 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { CONTEXT_1M_BETA_HEADER } from '../constants/betas.ts'
-import { getGlobalConfig } from './config.ts'
-import { isEnvTruthy } from './envUtils.ts'
-import { getCanonicalName } from './model/model.ts'
-import { getModelCapability } from './model/modelCapabilities.ts'
-import { getOpenAIContextWindow, getOpenAIMaxOutputTokens } from './model/openaiContextWindows.ts'
-import { resolveAntModel } from './model/antModels.ts'
+import { CONTEXT_1M_BETA_HEADER } from '../constants/betas.js'
+import { getGlobalConfig } from './config.js'
+import { isEnvTruthy } from './envUtils.js'
+import { getCanonicalName } from './model/model.js'
+import { getModelCapability } from './model/modelCapabilities.js'
+import { getOpenAIContextWindow, getOpenAIMaxOutputTokens } from './model/openaiContextWindows.js'
+import { resolveAntModel } from './model/antModels.js'
 import { resolveModelRuntimeLimits } from '../integrations/runtimeMetadata.js'
-import { logForDebugging } from './debug.ts'
+import { logForDebugging } from './debug.js'
 import {
   getTransportKindForRoute,
   resolveActiveRouteIdFromEnv,

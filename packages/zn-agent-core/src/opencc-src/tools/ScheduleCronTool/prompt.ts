@@ -1,12 +1,12 @@
 import { feature } from 'bun:bundle'
-import { getFeatureValue_CACHED_WITH_REFRESH } from '../../services/analytics/growthbook.ts'
-import { DEFAULT_CRON_JITTER_CONFIG } from '../../utils/cronTasks.ts'
-import { isEnvTruthy } from '../../utils/envUtils.ts'
+import { getFeatureValue_CACHED_WITH_REFRESH } from '../../services/analytics/growthbook.js'
+import { DEFAULT_CRON_JITTER_CONFIG } from '../../utils/cronTasks.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import {
   CRON_CREATE_TOOL_NAME,
   CRON_DELETE_TOOL_NAME,
   CRON_LIST_TOOL_NAME,
-} from './constants.ts'
+} from './constants.js'
 
 const KAIROS_CRON_REFRESH_MS = 5 * 60 * 1000
 
@@ -66,7 +66,7 @@ export {
   CRON_CREATE_TOOL_NAME,
   CRON_DELETE_TOOL_NAME,
   CRON_LIST_TOOL_NAME,
-} from './constants.ts'
+} from './constants.js'
 
 export function buildCronCreateDescription(durableEnabled: boolean): string {
   return durableEnabled

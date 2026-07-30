@@ -1,18 +1,18 @@
 import { z } from 'zod/v4'
-import { getSessionId } from '../../bootstrap/state.ts'
-import { logEvent } from '../../services/analytics/index.ts'
-import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.ts'
-import type { Tool } from '../../Tool.ts'
-import { buildTool, type ToolDef } from '../../Tool.ts'
-import { formatAgentId } from '../../utils/agentId.ts'
-import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.ts'
-import { getCwd } from '../../utils/cwd.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
+import { getSessionId } from '../../bootstrap/state.js'
+import { logEvent } from '../../services/analytics/index.js'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.js'
+import type { Tool } from '../../Tool.js'
+import { buildTool, type ToolDef } from '../../Tool.js'
+import { formatAgentId } from '../../utils/agentId.js'
+import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js'
+import { getCwd } from '../../utils/cwd.js'
+import { lazySchema } from '../../utils/lazySchema.js'
 import {
   getDefaultMainLoopModel,
   parseUserSpecifiedModel,
-} from '../../utils/model/model.ts'
-import { jsonStringify } from '../../utils/slowOperations.ts'
+} from '../../utils/model/model.js'
+import { jsonStringify } from '../../utils/slowOperations.js'
 import { getResolvedTeammateMode } from '../../utils/swarm/backends/registry.js'
 import { TEAM_LEAD_NAME } from '../../utils/swarm/constants.js'
 import type { TeamFile } from '../../utils/swarm/teamHelpers.js'
@@ -28,10 +28,10 @@ import {
   ensureTasksDir,
   resetTaskList,
   setLeaderTeamName,
-} from '../../utils/tasks.ts'
-import { generateWordSlug } from '../../utils/words.ts'
-import { TEAM_CREATE_TOOL_NAME } from './constants.ts'
-import { getPrompt } from './prompt.ts'
+} from '../../utils/tasks.js'
+import { generateWordSlug } from '../../utils/words.js'
+import { TEAM_CREATE_TOOL_NAME } from './constants.js'
+import { getPrompt } from './prompt.js'
 import { renderToolUseMessage } from './UI.js'
 
 const inputSchema = lazySchema(() =>

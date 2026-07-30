@@ -1,4 +1,4 @@
-import { AbortError } from './errors.ts'
+import { AbortError } from './errors.js'
 
 type MapWithConcurrencyOptions = {
   signal?: AbortSignal

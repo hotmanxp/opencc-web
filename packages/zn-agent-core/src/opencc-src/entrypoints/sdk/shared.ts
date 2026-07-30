@@ -9,8 +9,8 @@ import type { UUID } from 'crypto'
 import type {
   SDKMessage as GeneratedSDKMessage,
   SDKUserMessage as GeneratedSDKUserMessage,
-} from './coreTypes.generated.ts'
-import { validateUuid } from '../../utils/sessionStoragePortable.ts'
+} from './coreTypes.generated.js'
+import { validateUuid } from '../../utils/sessionStoragePortable.js'
 
 // ============================================================================
 // Session ID validation

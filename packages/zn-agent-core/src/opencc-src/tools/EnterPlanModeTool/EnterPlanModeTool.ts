@@ -3,15 +3,15 @@ import { z } from 'zod/v4'
 import {
   getAllowedChannels,
   handlePlanModeTransition,
-} from '../../bootstrap/state.ts'
-import type { Tool } from '../../Tool.ts'
-import { buildTool, type ToolDef } from '../../Tool.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import { applyPermissionUpdate } from '../../utils/permissions/PermissionUpdate.ts'
-import { prepareContextForPlanMode } from '../../utils/permissions/permissionSetup.ts'
-import { isPlanModeInterviewPhaseEnabled } from '../../utils/planModeV2.ts'
-import { ENTER_PLAN_MODE_TOOL_NAME } from './constants.ts'
-import { getEnterPlanModeToolPrompt } from './prompt.ts'
+} from '../../bootstrap/state.js'
+import type { Tool } from '../../Tool.js'
+import { buildTool, type ToolDef } from '../../Tool.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import { applyPermissionUpdate } from '../../utils/permissions/PermissionUpdate.js'
+import { prepareContextForPlanMode } from '../../utils/permissions/permissionSetup.js'
+import { isPlanModeInterviewPhaseEnabled } from '../../utils/planModeV2.js'
+import { ENTER_PLAN_MODE_TOOL_NAME } from './constants.js'
+import { getEnterPlanModeToolPrompt } from './prompt.js'
 import {
   renderToolResultMessage,
   renderToolUseMessage,

@@ -1,7 +1,7 @@
-import type { ContextData } from './analyzeContext.ts'
+import type { ContextData } from './analyzeContext.js'
 import { redactSecrets } from '../services/teamMemorySync/secretScanner.js'
-import { formatFileSize, formatTokens } from './format.ts'
-import { redactUrlForDisplay } from './redaction.ts'
+import { formatFileSize, formatTokens } from './format.js'
+import { redactUrlForDisplay } from './redaction.js'
 
 const ESTIMATED_BYTES_PER_TOKEN = 4
 

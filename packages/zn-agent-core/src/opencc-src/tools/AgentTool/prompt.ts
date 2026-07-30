@@ -1,16 +1,16 @@
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
-import { getSubscriptionType } from '../../utils/auth.ts'
-import { hasEmbeddedSearchTools } from '../../utils/embeddedTools.ts'
-import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.ts'
-import { isTeammate } from '../../utils/teammate.ts'
-import { isInProcessTeammate } from '../../utils/teammateContext.ts'
-import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.ts'
-import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/prompt.ts'
-import { GLOB_TOOL_NAME } from '../GlobTool/prompt.ts'
-import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.ts'
-import { AGENT_TOOL_NAME } from './constants.ts'
-import { isForkSubagentEnabled } from './forkSubagent.ts'
-import type { AgentDefinition } from './loadAgentsDir.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { getSubscriptionType } from '../../utils/auth.js'
+import { hasEmbeddedSearchTools } from '../../utils/embeddedTools.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
+import { isTeammate } from '../../utils/teammate.js'
+import { isInProcessTeammate } from '../../utils/teammateContext.js'
+import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
+import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/prompt.js'
+import { GLOB_TOOL_NAME } from '../GlobTool/prompt.js'
+import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
+import { AGENT_TOOL_NAME } from './constants.js'
+import { isForkSubagentEnabled } from './forkSubagent.js'
+import type { AgentDefinition } from './loadAgentsDir.js'
 
 function getToolsDescription(agent: AgentDefinition): string {
   const { tools, disallowedTools } = agent
@@ -265,7 +265,9 @@ Usage notes:
     process.env.USER_TYPE === 'ant'
       ? `\n- You can set \`isolation: "remote"\` to run the agent in a remote CCR environment. This is always a background task; you'll be notified when it completes. Use for long-running tasks that need a fresh sandbox.`
       : ''
-  }${
+  }
+- When the current session is outside a git repository (for example a parent folder that contains multiple git repos), set \`cwd\` to the absolute path of the target child repository. You can combine \`cwd\` with \`isolation: "worktree"\` so the worktree is created from that child repo. If worktree creation fails only because no git repository is available, the agent still runs with that \`cwd\` override instead of failing, and the tool result notes that worktree isolation was unavailable.${
+
     isInProcessTeammate()
       ? `
 - The run_in_background, name, team_name, and mode parameters are not available in this context. Only synchronous subagents are supported.`

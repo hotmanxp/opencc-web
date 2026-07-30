@@ -43,7 +43,7 @@
  */
 
 import { homedir } from "node:os";
-import { getKnownProviderSecretEnvKeys } from "./providerSecrets.ts";
+import { getKnownProviderSecretEnvKeys } from "./providerSecrets.js";
 
 // Anthropic API keys (sk-ant...)
 // Boundary class is `[A-Za-z0-9_-]` (not `[A-Za-z0-9]`) so a raw key

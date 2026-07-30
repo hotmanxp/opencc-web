@@ -2,19 +2,19 @@ import type { ChildProcess } from 'child_process'
 import { stat } from 'fs/promises'
 import type { Readable } from 'stream'
 import treeKill from 'tree-kill'
-import { generateTaskId } from '../Task.ts'
+import { generateTaskId } from '../Task.js'
 import {
   getShellAbortMessage,
   isQueryLevelAbort,
   normalizeAbortReason,
   type AbortReason,
-} from './abortReasons.ts'
-import { formatDuration } from './format.ts'
+} from './abortReasons.js'
+import { formatDuration } from './format.js'
 import {
   MAX_TASK_OUTPUT_BYTES,
   MAX_TASK_OUTPUT_BYTES_DISPLAY,
-} from './task/diskOutput.ts'
-import { TaskOutput } from './task/TaskOutput.ts'
+} from './task/diskOutput.js'
+import { TaskOutput } from './task/TaskOutput.js'
 
 export type ExecResult = {
   stdout: string

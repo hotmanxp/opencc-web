@@ -3,12 +3,12 @@
  * Used by both the CLI `claude agents` handler and the interactive `/agents` command.
  */
 
-import { getDefaultSubagentModel } from '../../utils/model/agent.ts'
+import { getDefaultSubagentModel } from '../../utils/model/agent.js'
 import {
   getSourceDisplayName,
   type SettingSource,
-} from '../../utils/settings/constants.ts'
-import type { AgentDefinition } from './loadAgentsDir.ts'
+} from '../../utils/settings/constants.js'
+import type { AgentDefinition } from './loadAgentsDir.js'
 
 type AgentSource = SettingSource | 'built-in' | 'plugin'
 

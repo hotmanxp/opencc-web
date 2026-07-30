@@ -1,13 +1,13 @@
 import { execaSync } from 'execa'
 import { join } from 'path'
-import { getClaudeConfigHomeDir } from '../envUtils.ts'
-import { jsonParse, jsonStringify } from '../slowOperations.ts'
+import { getClaudeConfigHomeDir } from '../envUtils.js'
+import { jsonParse, jsonStringify } from '../slowOperations.js'
 import {
   CREDENTIALS_SERVICE_SUFFIX,
   getSecureStorageServiceName,
   getUsername,
-} from './macOsKeychainHelpers.ts'
-import type { SecureStorage, SecureStorageData } from './index.ts'
+} from './macOsKeychainHelpers.js'
+import type { SecureStorage, SecureStorageData } from './index.js'
 
 /**
  * Windows-specific secure storage implementation using DPAPI for new writes,

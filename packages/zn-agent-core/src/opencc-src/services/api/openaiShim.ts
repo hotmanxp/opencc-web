@@ -22,45 +22,45 @@
 import { APIError } from '@anthropic-ai/sdk'
 import { createParser } from 'eventsource-parser'
 import { jsonrepair } from 'jsonrepair'
-import { logForDebugging } from '../../utils/debug.ts'
-import { isBareMode, isEnvTruthy } from '../../utils/envUtils.ts'
+import { logForDebugging } from '../../utils/debug.js'
+import { isBareMode, isEnvTruthy } from '../../utils/envUtils.js'
 import {
   createThinkTagFilter,
   stripThinkTags,
-} from './thinkTagSanitizer.ts'
-import { type AnthropicStreamEvent, type AnthropicUsage, type ShimCreateParams, convertAnthropicMessagesToResponsesInput } from './codexShim.ts'
-import { convertToolsToResponsesTools } from './codexShim.ts'
-import { compressToolHistory } from './compressToolHistory.ts'
-import { fetchWithProxyRetry } from './fetchWithProxyRetry.ts'
+} from './thinkTagSanitizer.js'
+import { type AnthropicStreamEvent, type AnthropicUsage, type ShimCreateParams, convertAnthropicMessagesToResponsesInput } from './codexShim.js'
+import { convertToolsToResponsesTools } from './codexShim.js'
+import { compressToolHistory } from './compressToolHistory.js'
+import { fetchWithProxyRetry } from './fetchWithProxyRetry.js'
 import {
   isLocalProviderUrl,
   resolveProviderRequest,
-} from './providerConfig.ts'
+} from './providerConfig.js'
 import {
   buildOpenAICompatibilityErrorMessage,
   classifyOpenAIHttpFailure,
   classifyOpenAINetworkFailure,
-} from './openaiErrorClassification.ts'
-import { sanitizeSchemaForOpenAICompat } from '../../utils/schemaSanitizer.ts'
-import { redactSecretValueForDisplay } from '../../utils/providerProfile.ts'
-import { isZaiBaseUrl } from '../../utils/zaiProvider.ts'
-import { shouldRedactUrlQueryParam } from '../../utils/redaction.ts'
-import { createCombinedAbortSignal } from '../../utils/combinedAbortSignal.ts'
+} from './openaiErrorClassification.js'
+import { sanitizeSchemaForOpenAICompat } from '../../utils/schemaSanitizer.js'
+import { redactSecretValueForDisplay } from '../../utils/providerProfile.js'
+import { isZaiBaseUrl } from '../../utils/zaiProvider.js'
+import { shouldRedactUrlQueryParam } from '../../utils/redaction.js'
+import { createCombinedAbortSignal } from '../../utils/combinedAbortSignal.js'
 import {
   normalizeToolArguments,
   hasToolFieldMapping,
-} from './toolArgumentNormalization.ts'
-import { applyZhiniaoModelPrefix } from './openaiShim/providerUtils.ts'
-import { logApiCallStart, logApiCallEnd } from '../../utils/requestLogging.ts'
+} from './toolArgumentNormalization.js'
+import { applyZhiniaoModelPrefix } from './openaiShim/providerUtils.js'
+import { logApiCallStart, logApiCallEnd } from '../../utils/requestLogging.js'
 import {
   createStreamState,
   processStreamChunk,
   getStreamStats,
-} from '../../utils/streamingOptimizer.ts'
-import { stableStringifyJson } from '../../utils/stableStringify.ts'
-import { buildAnthropicUsageFromRawUsage } from './cacheMetrics.ts'
-import { JSON_REPAIR_SUFFIXES } from './openaiShim/streaming.ts'
-import { getLocalProviderRetryBaseUrls, shouldAttemptLocalToollessRetry } from './openaiShim/providerUtils.ts'
+} from '../../utils/streamingOptimizer.js'
+import { stableStringifyJson } from '../../utils/stableStringify.js'
+import { buildAnthropicUsageFromRawUsage } from './cacheMetrics.js'
+import { JSON_REPAIR_SUFFIXES } from './openaiShim/streaming.js'
+import { getLocalProviderRetryBaseUrls, shouldAttemptLocalToollessRetry } from './openaiShim/providerUtils.js'
 
 type SecretValueSource = Partial<{
   OPENAI_API_KEY: string

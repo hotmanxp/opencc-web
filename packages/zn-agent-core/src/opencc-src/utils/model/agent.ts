@@ -1,15 +1,15 @@
-import type { SettingsJson } from '../settings/types.ts'
-import { getInitialSettings } from '../settings/settings.ts'
-import type { PermissionMode } from '../permissions/PermissionMode.ts'
-import { capitalize } from '../stringUtils.ts'
-import { MODEL_ALIASES, type ModelAlias } from './aliases.ts'
+import type { SettingsJson } from '../settings/types.js'
+import { getInitialSettings } from '../settings/settings.js'
+import type { PermissionMode } from '../permissions/PermissionMode.js'
+import { capitalize } from '../stringUtils.js'
+import { MODEL_ALIASES, type ModelAlias } from './aliases.js'
 import {
   getCanonicalName,
   getRuntimeMainLoopModel,
   parseUserSpecifiedModel,
-} from './model.ts'
-import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from './providers.ts'
-import { lookupAliasOverride } from './aliasOverrides.ts'
+} from './model.js'
+import { getAPIProvider, isFirstPartyAnthropicBaseUrl } from './providers.js'
+import { lookupAliasOverride } from './aliasOverrides.js'
 
 export const AGENT_MODEL_OPTIONS = [...MODEL_ALIASES, 'inherit'] as const
 export type AgentModelAlias = (typeof AGENT_MODEL_OPTIONS)[number]

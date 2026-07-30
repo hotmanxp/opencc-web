@@ -1,15 +1,15 @@
 import type { OptionWithDescription } from '../../components/CustomSelect/select.js'
-import { getAgentModelOptions } from '../../utils/model/agent.ts'
+import { getAgentModelOptions } from '../../utils/model/agent.js'
 import {
   getInitialSettings,
   getSettingsForSource,
   getSettingsWithSources,
   updateSettingsForSource,
   type SettingsWithSources,
-} from '../../utils/settings/settings.ts'
-import { isSettingSourceEnabled } from '../../utils/settings/constants.ts'
-import type { SettingSource } from '../../utils/settings/constants.ts'
-import type { SettingsJson } from '../../utils/settings/types.ts'
+} from '../../utils/settings/settings.js'
+import { isSettingSourceEnabled } from '../../utils/settings/constants.js'
+import type { SettingSource } from '../../utils/settings/constants.js'
+import type { SettingsJson } from '../../utils/settings/types.js'
 
 /** Sentinel Select value: open inline input for a custom model id. */
 export const CUSTOM_MODEL_VALUE = '__custom_model__'

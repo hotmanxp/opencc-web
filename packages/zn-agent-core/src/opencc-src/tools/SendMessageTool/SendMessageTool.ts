@@ -1,26 +1,26 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
-import { isReplBridgeActive } from '../../bootstrap/state.ts'
+import { isReplBridgeActive } from '../../bootstrap/state.js'
 import { getReplBridgeHandle } from '../../bridge/replBridgeHandle.js'
-import type { Tool, ToolUseContext } from '../../Tool.ts'
-import { buildTool, type ToolDef } from '../../Tool.ts'
+import type { Tool, ToolUseContext } from '../../Tool.js'
+import { buildTool, type ToolDef } from '../../Tool.js'
 import { findTeammateTaskByAgentId } from '../../tasks/InProcessTeammateTask/InProcessTeammateTask.js'
 import {
   isLocalAgentTask,
   queuePendingMessage,
 } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
-import { isMainSessionTask } from '../../tasks/LocalMainSessionTask.ts'
-import { toAgentId } from '../../types/ids.ts'
-import { generateRequestId } from '../../utils/agentId.ts'
-import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.ts'
-import { logForDebugging } from '../../utils/debug.ts'
-import { errorMessage } from '../../utils/errors.ts'
-import { truncate } from '../../utils/format.ts'
-import { gracefulShutdown } from '../../utils/gracefulShutdown.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import { parseAddress } from '../../utils/peerAddress.ts'
-import { semanticBoolean } from '../../utils/semanticBoolean.ts'
-import { jsonStringify } from '../../utils/slowOperations.ts'
+import { isMainSessionTask } from '../../tasks/LocalMainSessionTask.js'
+import { toAgentId } from '../../types/ids.js'
+import { generateRequestId } from '../../utils/agentId.js'
+import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js'
+import { logForDebugging } from '../../utils/debug.js'
+import { errorMessage } from '../../utils/errors.js'
+import { truncate } from '../../utils/format.js'
+import { gracefulShutdown } from '../../utils/gracefulShutdown.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import { parseAddress } from '../../utils/peerAddress.js'
+import { semanticBoolean } from '../../utils/semanticBoolean.js'
+import { jsonStringify } from '../../utils/slowOperations.js'
 import type { BackendType } from '../../utils/swarm/backends/types.js'
 import { TEAM_LEAD_NAME } from '../../utils/swarm/constants.js'
 import { readTeamFileAsync } from '../../utils/swarm/teamHelpers.js'
@@ -31,16 +31,16 @@ import {
   getTeamName,
   isTeamLead,
   isTeammate,
-} from '../../utils/teammate.ts'
+} from '../../utils/teammate.js'
 import {
   createShutdownApprovedMessage,
   createShutdownRejectedMessage,
   createShutdownRequestMessage,
   writeToMailbox,
-} from '../../utils/teammateMailbox.ts'
-import { resumeAgentBackground } from '../AgentTool/resumeAgent.ts'
-import { SEND_MESSAGE_TOOL_NAME } from './constants.ts'
-import { DESCRIPTION, getPrompt } from './prompt.ts'
+} from '../../utils/teammateMailbox.js'
+import { resumeAgentBackground } from '../AgentTool/resumeAgent.js'
+import { SEND_MESSAGE_TOOL_NAME } from './constants.js'
+import { DESCRIPTION, getPrompt } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
 const StructuredMessage = lazySchema(() =>

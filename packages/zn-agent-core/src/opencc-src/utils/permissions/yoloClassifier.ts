@@ -1,5 +1,5 @@
 // @ts-nocheck
-import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.ts'
+import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
 import { feature } from 'bun:bundle'
 import type Anthropic from '@anthropic-ai/sdk'
 import type { BetaToolUnion } from '@anthropic-ai/sdk/resources/beta/messages.js'
@@ -11,39 +11,39 @@ import {
   getLastClassifierRequests,
   getSessionId,
   setLastClassifierRequests,
-} from '../../bootstrap/state.ts'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
-import { logEvent } from '../../services/analytics/index.ts'
-import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.ts'
-import { getCacheControl } from '../../services/api/claude.ts'
-import { parsePromptTooLongTokenCounts } from '../../services/api/errors.ts'
-import { getDefaultMaxRetries } from '../../services/api/withRetry.ts'
-import type { Tool, ToolPermissionContext, Tools } from '../../Tool.ts'
-import type { Message } from '../../types/message.ts'
+} from '../../bootstrap/state.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { logEvent } from '../../services/analytics/index.js'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../../services/analytics/metadata.js'
+import { getCacheControl } from '../../services/api/claude.js'
+import { parsePromptTooLongTokenCounts } from '../../services/api/errors.js'
+import { getDefaultMaxRetries } from '../../services/api/withRetry.js'
+import type { Tool, ToolPermissionContext, Tools } from '../../Tool.js'
+import type { Message } from '../../types/message.js'
 import type {
   ClassifierUsage,
   YoloClassifierResult,
-} from '../../types/permissions.ts'
-import { isDebugMode, logForDebugging } from '../debug.ts'
-import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.ts'
-import { errorMessage } from '../errors.ts'
-import { lazySchema } from '../lazySchema.ts'
-import { extractTextContent } from '../messages.ts'
-import { resolveAntModel } from '../model/antModels.ts'
-import { getMainLoopModel } from '../model/model.ts'
-import { getAutoModeConfig } from '../settings/settings.ts'
-import { sideQuery } from '../sideQuery.ts'
-import { jsonStringify } from '../slowOperations.ts'
-import { tokenCountWithEstimation } from '../tokens.ts'
+} from '../../types/permissions.js'
+import { isDebugMode, logForDebugging } from '../debug.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
+import { errorMessage } from '../errors.js'
+import { lazySchema } from '../lazySchema.js'
+import { extractTextContent } from '../messages.js'
+import { resolveAntModel } from '../model/antModels.js'
+import { getMainLoopModel } from '../model/model.js'
+import { getAutoModeConfig } from '../settings/settings.js'
+import { sideQuery } from '../sideQuery.js'
+import { jsonStringify } from '../slowOperations.js'
+import { tokenCountWithEstimation } from '../tokens.js'
 import {
   getBashPromptAllowDescriptions,
   getBashPromptDenyDescriptions,
-} from './bashClassifier.ts'
+} from './bashClassifier.js'
 import {
   extractToolUseBlock,
   parseClassifierResponse,
-} from './classifierShared.ts'
-import { getClaudeTempDir } from './filesystem.ts'
+} from './classifierShared.js'
+import { getClaudeTempDir } from './filesystem.js'
 
 // Dead code elimination: conditional imports for auto mode classifier prompts.
 // At build time, the bundler inlines .txt files as string literals. At test

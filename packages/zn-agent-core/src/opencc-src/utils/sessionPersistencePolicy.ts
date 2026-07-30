@@ -1,6 +1,6 @@
-import { isSessionPersistenceDisabled } from '../bootstrap/state.ts'
-import { isEnvTruthy } from './envUtils.ts'
-import { getSettings_DEPRECATED } from './settings/settings.ts'
+import { isSessionPersistenceDisabled } from '../bootstrap/state.js'
+import { isEnvTruthy } from './envUtils.js'
+import { getSettings_DEPRECATED } from './settings/settings.js'
 
 export function shouldSkipSessionPersistence(): boolean {
   const allowTestPersistence = isEnvTruthy(

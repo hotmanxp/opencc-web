@@ -1,4 +1,4 @@
-import { isEnvTruthy } from './envUtils.ts'
+import { isEnvTruthy } from './envUtils.js'
 
 /**
  * Env vars to strip from subprocess environments when running inside GitHub

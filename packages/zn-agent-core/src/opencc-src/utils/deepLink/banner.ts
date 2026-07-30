@@ -12,13 +12,13 @@
  * notice which directory — and therefore which ${AGENT_INSTRUCTIONS_FILE} — was loaded.
  */
 
-import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.ts'
+import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
 import { stat } from 'fs/promises'
 import { homedir } from 'os'
 import { join, sep } from 'path'
-import { formatNumber, formatRelativeTimeAgo } from '../format.ts'
-import { getCommonDir } from '../git/gitFilesystem.ts'
-import { getGitDir } from '../git.ts'
+import { formatNumber, formatRelativeTimeAgo } from '../format.js'
+import { getCommonDir } from '../git/gitFilesystem.js'
+import { getGitDir } from '../git.js'
 
 const STALE_FETCH_WARN_MS = 7 * 24 * 60 * 60 * 1000
 

@@ -27,44 +27,44 @@ import { FileWriteTool } from 'src/tools/FileWriteTool/FileWriteTool.js'
 import { getTools } from 'src/tools.js'
 import type { AgentId } from 'src/types/ids.js'
 import type { z } from 'zod/v4'
-import { CLI_SYSPROMPT_PREFIXES } from '../constants/system.ts'
-import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
-import type { Tool, ToolPermissionContext, Tools } from '../Tool.ts'
-import { AGENT_TOOL_NAME } from '../tools/AgentTool/constants.ts'
-import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.ts'
-import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../tools/ExitPlanModeTool/constants.ts'
-import { TASK_OUTPUT_TOOL_NAME } from '../tools/TaskOutputTool/constants.ts'
-import type { Message } from '../types/message.ts'
-import { isAgentSwarmsEnabled } from './agentSwarmsEnabled.ts'
+import { CLI_SYSPROMPT_PREFIXES } from '../constants/system.js'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
+import type { Tool, ToolPermissionContext, Tools } from '../Tool.js'
+import { AGENT_TOOL_NAME } from '../tools/AgentTool/constants.js'
+import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.js'
+import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../tools/ExitPlanModeTool/constants.js'
+import { TASK_OUTPUT_TOOL_NAME } from '../tools/TaskOutputTool/constants.js'
+import type { Message } from '../types/message.js'
+import { isAgentSwarmsEnabled } from './agentSwarmsEnabled.js'
 import {
   modelSupportsStructuredOutputs,
   shouldUseGlobalCacheScope,
-} from './betas.ts'
-import { createCombinedAbortSignal } from './combinedAbortSignal.ts'
-import { getCwd } from './cwd.ts'
-import { logForDebugging } from './debug.ts'
-import { isEnvTruthy } from './envUtils.ts'
-import { createUserMessage } from './messages.ts'
+} from './betas.js'
+import { createCombinedAbortSignal } from './combinedAbortSignal.js'
+import { getCwd } from './cwd.js'
+import { logForDebugging } from './debug.js'
+import { isEnvTruthy } from './envUtils.js'
+import { createUserMessage } from './messages.js'
 import {
   getAPIProvider,
   isFirstPartyAnthropicBaseUrl,
-} from './model/providers.ts'
+} from './model/providers.js'
 import {
   getFileReadIgnorePatterns,
   normalizePatternsToPath,
-} from './permissions/filesystem.ts'
+} from './permissions/filesystem.js'
 import {
   getPlan,
   getPlanFilePath,
   persistFileSnapshotIfRemote,
-} from './plans.ts'
-import { getPlatform } from './platform.ts'
-import { countFilesRoundedRg } from './ripgrep.ts'
-import { jsonStringify } from './slowOperations.ts'
-import type { SystemPrompt } from './systemPromptType.ts'
-import { getToolSchemaCache } from './toolSchemaCache.ts'
-import { windowsPathToPosixPath } from './windowsPaths.ts'
-import { zodToJsonSchema } from './zodToJsonSchema.ts'
+} from './plans.js'
+import { getPlatform } from './platform.js'
+import { countFilesRoundedRg } from './ripgrep.js'
+import { jsonStringify } from './slowOperations.js'
+import type { SystemPrompt } from './systemPromptType.js'
+import { getToolSchemaCache } from './toolSchemaCache.js'
+import { windowsPathToPosixPath } from './windowsPaths.js'
+import { zodToJsonSchema } from './zodToJsonSchema.js'
 
 // Extended BetaTool type with strict mode and defer_loading support
 type BetaToolWithExtras = BetaTool & {
