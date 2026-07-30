@@ -88,9 +88,6 @@ export function wrapAsOpenccTool(
       // and onYield callback). The extra opencc-only params are ignored.
       if (!tool.call) throw new Error(`openccToolWrap: tool "${tool.name}" has no call method`)
       const finalCtx = opts.transformCtx ? opts.transformCtx(ctx) : ctx
-      if (process.env.ZAI_DEBUG === '1') {
-        console.log('[wrap] call', tool.name, 'has onYield?', typeof (finalCtx as any).onYield, 'askRegistry?', typeof (finalCtx as any).askRegistry, 'toolUseId?', (finalCtx as any).toolUseId)
-      }
       return tool.call(args, finalCtx as any)
     },
 

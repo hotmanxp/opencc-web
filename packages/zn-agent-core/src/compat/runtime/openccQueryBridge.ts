@@ -204,9 +204,6 @@ export async function* runViaOpenccQuery(
       // it so prompt.ask / tool_call events reach the SSE
       // immediately, while the tool is still blocked awaiting the
       // user's answer.
-      if (process.env.ZAI_DEBUG === '1') {
-        console.log('[bridge.onYield]', ev?.type, 'bus:', !!(globalThis as any).__zaiEventBus)
-      }
       const bus = (globalThis as any).__zaiEventBus
       if (bus && typeof bus.emit === 'function') {
         bus.emit({
@@ -259,16 +256,10 @@ export async function* runViaOpenccQuery(
   let eventCounter = 0
   try {
     const stream: AsyncIterable<unknown> = openccQuery(params)
-    if (process.env.ZAI_DEBUG === '1') {
-      console.log('[bridge] openccQuery returned stream, starting iteration')
-    }
     for await (const sdkMsg of stream) {
       if (opts.abortSignal?.aborted) {
         yield toAbortedEvent({ sessionId, turnIndex: 0 }, String(opts.abortSignal.reason ?? 'aborted'))
         return
-      }
-      if (process.env.ZAI_DEBUG === '1') {
-        console.log('[bridge] sdkMsg type:', (sdkMsg as any)?.type, 'keys:', Object.keys(sdkMsg as any).slice(0, 5))
       }
       // Drain any tool events buffered by tool callbacks (e.g.
       // AskUserQuestion's tool_use:ask_pending) BEFORE the next
@@ -278,9 +269,6 @@ export async function* runViaOpenccQuery(
         yield ev
       }
       for (const ev of translateSdkToRuntime(sdkMsg, { sessionId, turnIndex: 0, eventCounter })) {
-        if (process.env.ZAI_DEBUG === '1' && ((ev as any).type === 'content_block_delta')) {
-          console.log('[bridge] yield:', (ev as any).type, 'delta len:', ((ev as any).delta ?? '').length)
-        }
         yield ev
         eventCounter++
       }
