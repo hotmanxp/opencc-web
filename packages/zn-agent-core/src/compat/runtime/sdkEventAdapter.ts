@@ -63,6 +63,19 @@ export function* translateSdkToRuntime(
     // Pass through with zai meta fields attached. For tool_use
     // content_block_start, also record the toolUseId → tool name
     // mapping so we can attach the name to the later tool_result.
+    //
+    // CRITICAL: don't yield message_stop if there are pending
+    // tool_use blocks. routes/agent.ts::translateRuntimeEvents
+    // translates message_stop → runtime.done, which the consumer's
+    // outer for-await breaks on, which calls .return() on this
+    // generator and freezes opencc's tool execution. With the
+    // suppression, opencc continues to process the tool, the
+    // user message with tool_result comes through (handled by the
+    // user message branch below), and the LLM's follow-up turn
+    // produces the *real* final message_stop that we let through.
+    if (m.type === 'message_stop' && meta.toolNameByUseId && meta.toolNameByUseId.size > 0) {
+      return
+    }
     if (m.type === 'content_block_start' && meta.toolNameByUseId) {
       const cb = (m as any).content_block as
         | { type?: string; id?: string; name?: string }
@@ -99,6 +112,13 @@ export function* translateSdkToRuntime(
         })
         yield emit('content_block_stop', { index: blockIndex })
       } else if (block.type === 'tool_use') {
+        // Record the tool_use_id → name mapping so the matching
+        // tool_result (yielded later as a `user` message) can include
+        // the name. opencc's tool_result block doesn't repeat it.
+        if (meta.toolNameByUseId && block.id && block.name) {
+          meta.toolNameByUseId.set(block.id, block.name)
+          if (process.env.ZAI_DEBUG === '1') console.log('[adapter] recorded tool name', block.name, 'for', block.id, 'map size now', meta.toolNameByUseId.size)
+        }
         yield emit('content_block_start', {
           index: blockIndex,
           content_block: {

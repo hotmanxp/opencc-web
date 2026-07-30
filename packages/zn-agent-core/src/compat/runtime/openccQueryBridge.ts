@@ -310,6 +310,13 @@ export async function* runViaOpenccQuery(
         yield ev
         eventCounter++
       }
+      if (process.env.ZAI_DEBUG === '1') {
+        const sdkType = (sdkMsg.value as any)?.type
+        const msgStr = sdkType === 'user' ? JSON.stringify((sdkMsg.value as any)?.message?.content ?? []).slice(0, 300) : ''
+        const asstStr = sdkType === 'assistant' ? JSON.stringify((sdkMsg.value as any)?.message?.content ?? []).slice(0, 300) : ''
+        const cbType = (sdkMsg.value as any)?.content_block?.type
+        console.log('[bridge.iter] sdkType=', sdkType, 'cbType=', cbType, msgStr, asstStr)
+      }
       const sdkType = (sdkMsg.value as any)?.type
       // Arm the watchdog after any "end of LLM output" signal:
       //   - message_stop  (Anthropic stop primitive)
