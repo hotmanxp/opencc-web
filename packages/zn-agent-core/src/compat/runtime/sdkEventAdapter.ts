@@ -113,6 +113,32 @@ export function* translateSdkToRuntime(
     })
     return
   }
+
+  // User messages with tool_result content blocks: opencc yields these
+  // from runTools() to signal that a tool call has completed. Without
+  // translating them to tool_use:done, the frontend never sees a
+  // runtime.tool_result event and the tool block stays as "工具调用中..."
+  // (calling) forever — even after the LLM's follow-up turn streams
+  // in. routes/agent.ts::translateRuntimeEvents handles tool_use:done
+  // → runtime.tool_result, so emit one per tool_result block.
+  if (m.type === 'user' && m.message) {
+    const blocks = (m.message.content ?? []) as Array<{
+      type?: string
+      tool_use_id?: string
+      content?: unknown
+      is_error?: boolean
+    }>
+    for (const block of blocks) {
+      if (block.type !== 'tool_result') continue
+      yield emit('tool_use:done', {
+        id: block.tool_use_id,
+        toolUseId: block.tool_use_id,
+        output: block.content,
+        isError: block.is_error === true,
+      })
+    }
+    return
+  }
 }
 
 function makeEvent(
