@@ -34,7 +34,7 @@ export default function AppRouter() {
       <Routes>
         {/* 桌面端 — 走 Layout(含 Sider) */}
         <Route element={<Layout />}>
-          <Route path="/" element={<Navigate to="/login" replace />} />
+          <Route path="/" element={<Navigate to="/agent" replace />} />
           <Route path="/login" element={<Login />} />
           <Route path="/tools" element={<Tools />} />
           <Route path="/resources" element={<Resources />} />
@@ -42,7 +42,7 @@ export default function AppRouter() {
           <Route path="/dirs" element={<Directory />} />
           <Route path="/agent" element={<Agent />} />
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="*" element={<Navigate to="/login" replace />} />
+          <Route path="*" element={<Navigate to="/agent" replace />} />
         </Route>
 
         {/* 移动端 — 走 MobileLayout(无 Sider, 挂 visualViewport) */}
