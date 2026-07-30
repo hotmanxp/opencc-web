@@ -280,6 +280,14 @@ export async function* runViaOpenccQuery(
       }
     }
     const bus = (globalThis as any).__zaiEventBus
+    // Per-bridge map of tool_use_id → tool name. opencc's tool_result
+    // content blocks don't carry the name; we remember it from the
+    // matching tool_use content_block_start so the runtime.tool_result
+    // SSE event includes the correct toolName (otherwise
+    // translateRuntimeEvents in routes/agent.ts defaults to "unknown"
+    // and the frontend's upsertToolCall overwrites the stored
+    // "Bash"/"Read"/etc. label).
+    const toolNameByUseId = new Map<string, string>()
     while (true) {
       if (opts.abortSignal?.aborted) {
         disarmWatchdog()
@@ -298,7 +306,7 @@ export async function* runViaOpenccQuery(
       for (const ev of drainToolEvents()) {
         yield ev
       }
-      for (const ev of translateSdkToRuntime(sdkMsg.value, { sessionId, turnIndex: 0, eventCounter })) {
+      for (const ev of translateSdkToRuntime(sdkMsg.value, { sessionId, turnIndex: 0, eventCounter, toolNameByUseId })) {
         yield ev
         eventCounter++
       }
