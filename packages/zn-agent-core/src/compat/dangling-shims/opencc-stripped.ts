@@ -50,6 +50,16 @@ export function isCoordinatorMode() { return false }
 export function getCoordinatorUserContext() { return {} }
 export function getCoordinatorSystemPrompt() { return '' }
 
+// ─── ink/ — opencc's TUI primitives. We don't render Ink in zai, but
+// transitive imports still reach for these names.
+export function stringWidth(_s: string): number { return 0 }
+export function supportsHyperlinks(_stream: unknown): boolean { return false }
+export function wrapAnsi(_s: string, _opts?: unknown): string { return _s }
+export type RenderOptions = unknown
+export type TextProps = unknown
+export interface TerminalNotification { type: string; message: string }
+export const Key = { ENTER: 'enter', ESCAPE: 'escape', TAB: 'tab' } as const
+
 // ─── state/store.js ───────────────────────────────────────────────────
 export function createAppStore() { return {} }
 export function getStateStore() { return {} }
@@ -57,6 +67,22 @@ export function getStateStore() { return {} }
 // ─── integrations/routeMetadata.js ────────────────────────────────────
 export const ROUTE_METADATA: Record<string, unknown> = {}
 export function getRouteMetadata() { return null }
+
+// ─── services/analytics/index.js ──────────────────────────────────────
+// opencc vendor's `services/analytics/` directory is missing the
+// `index.ts` barrel, but transitive imports still reference it.
+// These names are imported across the codebase:
+export function logEvent(_event: string, _props?: unknown): void { /* noop */ }
+export type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS = unknown
+export function getDynamicConfig_BLOCKS_ON_INIT() { return {} }
+export function getFeatureValue_CACHED_MAY_BE_STALE(_flag: string, _defaultValue?: unknown) {
+  return false
+}
+export function getFileExtensionForAnalytics(_path: string): string {
+  return ''
+}
+export function isAnalyticsDisabled(): boolean { return true }
+export function sanitizeToolNameForAnalytics(_name: string): string { return _name }
 
 // ─── services/SessionMemory/prompts.js ────────────────────────────────
 export const SESSION_MEMORY_PROMPTS: Record<string, string> = {}
@@ -95,3 +121,94 @@ export interface ProcessUserInputContext {
   cwd?: string
   abortSignal?: AbortSignal
 }
+
+// ─── services/remoteManagedSettings — opencc's cloud-managed
+// settings sync. zai uses its own settings loader (zai has no
+// cloud-managed settings feature). Stub every name.
+export function getRemoteManagedSettingsSyncFromCache(): null { return null }
+export function isRemoteManagedSettingsEligible(): boolean { return false }
+export function getRemoteManagedSettingsSyncCacheKey(): string { return '' }
+export function setRemoteManagedSettingsSyncCache(_state: unknown): void { /* noop */ }
+export function clearRemoteManagedSettingsSyncCache(): void { /* noop */ }
+export function fetchRemoteManagedSettingsSync(): null { return null }
+
+// ─── services/teamMemorySync — opencc's team memory sync. zai
+// doesn't use this; stub every transitive name.
+export function getTeamMemorySyncFromCache(): null { return null }
+export function isTeamMemorySyncEligible(): boolean { return false }
+export function fetchTeamMemorySync(): null { return null }
+
+// ─── services/AgentSummary — opencc's agent summary aggregation.
+// Stub names imported transitively.
+export function getAgentSummaryFromCache(): null { return null }
+export function isAgentSummaryEligible(): boolean { return false }
+export function fetchAgentSummary(): null { return null }
+
+// ─── services/SessionMemory — opencc's session memory persistence.
+// Stub names imported transitively. (isSessionMemoryEmpty,
+// truncateSessionMemoryForCompact, setLastSummarizedMessageId,
+// getLastSummarizedMessageId, getSessionMemoryContent, and
+// waitForSessionMemoryExtraction are already stubbed above.)
+export function getSessionMemoryFromCache(_id: string): null { return null }
+
+// ─── services/MagicDocs / wiki / extractMemories / goal / autoDream /
+// autoFix / PromptSuggestion / voice — opencc's optional feature
+// services. Stub the names opencc vendor's transitive imports reach.
+export function getMagicDocsCache(): null { return null }
+export function isMagicDocsEligible(): boolean { return false }
+export function fetchMagicDocs(): null { return null }
+export function getWikiCache(): null { return null }
+export function fetchWiki(): null { return null }
+export function getExtractMemoriesCache(): null { return null }
+export function fetchExtractMemories(): null { return null }
+export function getGoalCache(): null { return null }
+export function fetchGoal(): null { return null }
+export function getAutoDreamCache(): null { return null }
+export function fetchAutoDream(): null { return null }
+export function getAutoFixCache(): null { return null }
+export function fetchAutoFix(): null { return null }
+export function getPromptSuggestionCache(): null { return null }
+export function fetchPromptSuggestion(): null { return null }
+export function getVoiceCache(): null { return null }
+export function fetchVoice(): null { return null }
+export function getGithubCache(): null { return null }
+export function fetchGithub(): null { return null }
+export function getSettingsSyncCache(): null { return null }
+export function fetchSettingsSync(): null { return null }
+
+// ─── remoteManagedSettings/syncCache.js — same dir, different file.
+export function getRemoteManagedSettingsSyncFromCache_v2(): null { return null }
+
+// ─── integrations/routeMetadata — opencc's route table for
+// integrations. zai doesn't use this. Stub names imported
+// transitively. (ROUTE_METADATA, getRouteMetadata are already
+// stubbed above.)
+export function getTransportKindForRoute(_route: string): string { return '' }
+export function resolveActiveRouteIdFromEnv(_env: unknown): string { return '' }
+
+// ─── default export: Proxy fallback for any name not explicitly
+// stubbed above. opencc vendor transitive imports frequently reach for
+// names we haven't enumerated. The Proxy makes every missing name
+// return a safe no-op callable / empty object / empty array so the
+// import resolves and downstream code doesn't crash.
+//
+// This is best-effort: it covers DEFAULT imports but not NAMED
+// imports (ESM named bindings are static). For named imports, see
+// the explicit exports above.
+const _stubDefault = {
+  // Placeholder; the actual default export is below.
+}
+
+export default new Proxy(_stubDefault, {
+  get(_target, prop: string | symbol) {
+    if (typeof prop === 'symbol') return undefined
+    if (prop in _stubDefault) return (_stubDefault as any)[prop]
+    // Return a callable no-op for function-like access; consumers
+    // can call it and get `undefined` back, which is the safe
+    // default for analytics/config getters.
+    return (..._args: unknown[]) => undefined
+  },
+  has(_target, prop: string | symbol) {
+    return true
+  },
+})

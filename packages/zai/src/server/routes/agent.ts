@@ -338,6 +338,38 @@ export async function* translateRuntimeEvents(
         pendingToolUseId = null;
         pendingToolName = null;
         break;
+      case "runtime.error":
+      case "runtime.aborted": {
+        // zai's openccQueryBridge yields these directly (not via opencc's
+        // message_start/stop pipeline). Pass through, re-binding sessionId
+        // so downstream consumers always see the canonical id.
+        // Without this case, runtime.error falls into `default: break` and
+        // gets silently dropped — frontend then only sees the auto-yielded
+        // runtime.done at line 350 below and thinks "success".
+        const errEv = ev as {
+          type?: string
+          reason?: string
+          error?: { message?: string; category?: string; recoverable?: boolean; detail?: string; code?: unknown }
+          toolUseId?: string
+          eventId?: string
+          ts?: number
+        }
+        const reason = String(errEv.reason ?? errEv.error?.message ?? errEv.type ?? 'unknown')
+        yield {
+          type: errEv.type === 'runtime.aborted' ? 'runtime.aborted' : 'runtime.error',
+          sessionId,
+          turnIndex,
+          reason: errEv.type === 'runtime.aborted' ? reason : undefined,
+          error: errEv.type === 'runtime.error' ? {
+            category: (errEv.error?.category as any) ?? 'internal',
+            message: reason,
+            recoverable: errEv.error?.recoverable ?? false,
+            detail: errEv.error?.detail,
+          } : undefined,
+          toolUseId: errEv.toolUseId,
+        } as any
+        break;
+      }
       // Ignore content_block_start by itself (we handle it above for tool_use)
       default:
         break;

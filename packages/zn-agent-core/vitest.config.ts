@@ -1,9 +1,33 @@
 import { defineConfig } from 'vitest/config'
 import { resolve } from 'node:path'
+import { ABSOLUTE_RE, RELATIVE_RE } from './src/compat/runtime/stripped-dirs.mjs'
+import type { Plugin } from 'vite'
 
 const OPENCC_SRC_DIR = resolve(__dirname, 'src/opencc-src')
 
+/**
+ * Vite plugin that intercepts module resolution at the deepest level.
+ * vite-node (vitest's runner) sometimes bypasses resolve.alias when
+ * handling dynamic `await import(absolute_path)` calls — particularly
+ * for `__vite_ssr_import_0__` wrapped imports. As a safety net we
+ * force-redirect a few known-problematic packages here too.
+ */
+const forceResolvePlugin: Plugin = {
+  name: 'zn-agent-core-force-resolve',
+  enforce: 'pre',
+  async resolveId(source: string) {
+    // @orama/orama + plugin-data-persistence — CJS interop breaks
+    // under vite-node. Redirect to no-op stubs that satisfy the
+    // names opencc vendor imports.
+    if (source === '@orama/orama' || source === '@orama/plugin-data-persistence') {
+      return resolve(__dirname, 'src/compat/dangling-shims/orama.ts')
+    }
+    return null
+  },
+}
+
 export default defineConfig({
+  plugins: [forceResolvePlugin],
   resolve: {
     alias: [
       {
@@ -14,6 +38,16 @@ export default defineConfig({
         find: /^bun:feature$/,
         replacement: resolve(__dirname, 'src/compat/runtime/bun-feature-shim.ts'),
       },
+      // CRITICAL ORDER: stripped-dir `src/<stripped>/...` aliases MUST come
+      // BEFORE the generic `src/...` catch-all below. Vite walks this
+      // array in order and stops at the first regex match — without this
+      // precedence, project-relative imports like `src/memdir/paths.js`
+      // would route to `<OPENCC_SRC_DIR>/memdir/paths.ts` (doesn't exist;
+      // stripped at vendoring) instead of the dangling-shim.
+      {
+        find: ABSOLUTE_RE,
+        replacement: resolve(__dirname, 'src/compat/dangling-shims/opencc-stripped.ts'),
+      },
       // opencc's vendored source uses project-relative `src/...` specifiers
       // (e.g. `from 'src/utils/abortReasons.js'`) which Node's ESM resolver
       // can't handle — non-relative specifiers are looked up in node_modules.
@@ -21,6 +55,7 @@ export default defineConfig({
       // resolves `.js` → `.ts` automatically per moduleResolution:"bundler").
       // The `.mjs` and other-extension variants fall through to default
       // resolution below; we only own the `.js` and no-ext forms here.
+      // (Stripped dirs are already handled by ABSOLUTE_RE above.)
       {
         find: /^src\/(.+)\.js$/,
         replacement: resolve(OPENCC_SRC_DIR, '$1.ts'),
@@ -29,30 +64,10 @@ export default defineConfig({
         find: /^src\/(.+)$/,
         replacement: resolve(OPENCC_SRC_DIR, '$1'),
       },
-      // Catch-all for files opencc vendor references but were stripped
-      // at vendoring time (see packages/zn-agent-core/scripts/strip-list.ts).
-      // opencc's transitive imports still reach into these stripped dirs
-      // ("zombie" imports) — this alias routes any such relative `.js`
-      // import to a single hand-written stub that exports safe defaults
-      // for every name we've seen the hot path actually read. See
-      // opencc-stripped.ts for the export list and default values.
-      //
-      // Stripped dirs (from strip-list.ts): components, ink, screens,
-      // buddy, assistant, vim, voice, cli, commands, state, migrations,
-      // __tests__, test, ssh, grpc, proto, remote, upstreamproxy,
-      // integrations, memdir, outputStyles, proactive, keybindings,
-      // moreright, coordinator, native-ts, context, bridge, tasks
-      // (LocalAgentTask / LocalShellTask / RemoteAgentTask /
-      // InProcessTeammateTask), utils/{processUserInput, swarm,
-      // computerUse, backgroundHousekeeping, installationInfo,
-      // doctorDiagnostic, updateStrategy, autoUpgrade,
-      // autoUpdaterRouting, handleAutoUpdate, cleanup},
-      // services/{voice, PromptSuggestion, MagicDocs, wiki,
-      // extractMemories, goal, autoDream, autoFix, SessionMemory,
-      // teamMemorySync, AgentSummary, remoteManagedSettings,
-      // settingsSync, github}.
+      // Relative-path stripped dirs (`../../state/store.js` etc.).
+      // Same routing — to dangling-shims/opencc-stripped.ts.
       {
-        find: /(?:\.\.\/)+(?:components|ink|screens|buddy|assistant|vim|voice|cli|commands|state|migrations|__tests__|test|ssh|grpc|proto|remote|upstreamproxy|integrations|memdir|outputStyles|proactive|keybindings|moreright|coordinator|native-ts|context|bridge|tasks\/(?:RemoteAgentTask|InProcessTeammateTask|LocalShellTask|LocalAgentTask)|utils\/(?:processUserInput|swarm|computerUse|backgroundHousekeeping|installationInfo|doctorDiagnostic|updateStrategy|autoUpgrade|autoUpdaterRouting|handleAutoUpdate|cleanup)|services\/(?:voice|PromptSuggestion|MagicDocs|wiki|extractMemories|goal|autoDream|autoFix|SessionMemory|teamMemorySync|AgentSummary|remoteManagedSettings|settingsSync|github))\/[^/]+\.js$/,
+        find: RELATIVE_RE,
         replacement: resolve(__dirname, 'src/compat/dangling-shims/opencc-stripped.ts'),
       },
       // opencc vendor build artifacts (.generated.js / events_mono).
@@ -80,6 +95,34 @@ export default defineConfig({
         find: /^lru-cache$/,
         replacement: resolve(__dirname, 'src/compat/dangling-shims/lru-cache.ts'),
       },
+      // jsonc-parser — installed as a real dep (see package.json). No alias
+      // needed; vite-node resolves it from node_modules normally.
+      // modelCost.ts — opencc vendor has a circular import
+      // (utils/model/model.ts ↔ utils/modelCost.ts) that throws
+      // "undefined is not a function" under Node ESM because the
+      // top-level MODEL_COSTS object uses `firstPartyNameToCanonical`
+      // as computed property keys while model.ts is still evaluating.
+      // The stub breaks the cycle by using hardcoded string keys.
+      // See dangling-shims/modelCost-stub.ts for the trade-off.
+      //
+      // Vite's resolve.alias replaces ONLY the regex match (not the
+      // whole specifier), so the regex must capture the full
+      // specifier including any leading `../`. Anchored regex:
+      {
+        find: /^(?:\.\.\/)+modelCost\.ts$/,
+        replacement: resolve(__dirname, 'src/compat/dangling-shims/modelCost-stub.ts'),
+      },
+      {
+        find: /^(?:\.\.\/)+modelCost\.js$/,
+        replacement: resolve(__dirname, 'src/compat/dangling-shims/modelCost-stub.ts'),
+      },
+      // @orama/orama has dual ESM+CJS entries; Vite SSR-import picks
+      // the CJS path which doesn't unwrap named exports correctly
+      // (`__vite_ssr_import_0__.createStore is not a function`).
+      // Including them in optimizeDeps.include above forces esbuild
+      // pre-bundling to the ESM entry, fixing this. (Earlier alias to
+      // a no-op stub also worked but pulled in ~30 lines of code we
+      // don't need; optimizeDeps is cleaner.)
     ],
   },
   test: {
@@ -98,6 +141,12 @@ export default defineConfig({
     // Without `include`, Vite SSR-imports them as-is and named imports
     // of constructor exports (e.g. `import { LRUCache } from 'lru-cache'`)
     // break with "X is not a constructor".
-    include: ['lru-cache', '@anthropic-ai/sdk'],
+    //
+    // @orama/orama + plugin-data-persistence — package.json has dual
+    // ESM+CJS entries. Vite picks CJS by default, which vite-node can't
+    // unwrap correctly. Including them here forces esbuild pre-bundling
+    // to the ESM entry, fixing the `__vite_ssr_import_0__.createStore
+    // is not a function` error.
+    include: ['lru-cache', '@anthropic-ai/sdk', '@orama/orama', '@orama/plugin-data-persistence'],
   },
 })

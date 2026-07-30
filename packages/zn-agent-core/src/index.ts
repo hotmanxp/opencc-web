@@ -10,6 +10,7 @@ export {
 export { RequestApproveTool } from './compat/requestApproveTool/RequestApproveTool.js'
 export { REQUEST_APPROVE_TOOL_NAME } from './compat/requestApproveTool/prompt.js'
 export type { RequestApproveInput, RequestApproveOutput } from './compat/requestApproveTool/schema.js'
+export { enableOpenccConfigs } from './compat/openccInit.js'
 // Runtime types (Batch 1: pure types/constants)
 export type {
   AskRegistryLike,
