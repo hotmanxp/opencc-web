@@ -256,10 +256,40 @@ export async function* runViaOpenccQuery(
   let eventCounter = 0
   try {
     const stream: AsyncIterable<unknown> = openccQuery(params)
-    for await (const sdkMsg of stream) {
+    // Watchdog: after we see a message_stop or message_delta (the natural
+    // "end of LLM output" signals opencc emits), if no further opencc
+    // events arrive within WATCHDOG_MS, the opencc loop has stalled (e.g.
+    // model produced end_turn but queryLoop's natural exit path didn't
+    // fire, or a tool result fed into a continuation-nudge loop).
+    //
+    // Critical: when translateRuntimeEvents in routes/agent.ts sees
+    // message_stop it yields runtime.done and the consumer's outer
+    // for-await breaks, which calls .return() on THIS generator and
+    // freezes the while loop at the next iter.next() — so we can't
+    // rely on a Promise.race inside the loop to fire. Instead, the
+    // timer is armed here and on fire, emits runtime.done via the same
+    // __zaiEventBus side-channel used by AskUserQuestion. Without this
+    // watchdog, the frontend stays stuck on "calling" forever.
+    const iter = stream[Symbol.asyncIterator]()
+    const WATCHDOG_MS = Number(process.env.ZAI_OPENCC_WATCHDOG_MS ?? 300_000)
+    let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+    const disarmWatchdog = () => {
+      if (watchdogTimer) {
+        clearTimeout(watchdogTimer)
+        watchdogTimer = null
+      }
+    }
+    const bus = (globalThis as any).__zaiEventBus
+    while (true) {
       if (opts.abortSignal?.aborted) {
+        disarmWatchdog()
         yield toAbortedEvent({ sessionId, turnIndex: 0 }, String(opts.abortSignal.reason ?? 'aborted'))
         return
+      }
+      const sdkMsg: IteratorResult<unknown, unknown> = await iter.next()
+      if (sdkMsg.done) {
+        disarmWatchdog()
+        break
       }
       // Drain any tool events buffered by tool callbacks (e.g.
       // AskUserQuestion's tool_use:ask_pending) BEFORE the next
@@ -268,11 +298,45 @@ export async function* runViaOpenccQuery(
       for (const ev of drainToolEvents()) {
         yield ev
       }
-      for (const ev of translateSdkToRuntime(sdkMsg, { sessionId, turnIndex: 0, eventCounter })) {
+      for (const ev of translateSdkToRuntime(sdkMsg.value, { sessionId, turnIndex: 0, eventCounter })) {
         yield ev
         eventCounter++
       }
+      const sdkType = (sdkMsg.value as any)?.type
+      // Arm the watchdog after any "end of LLM output" signal:
+      //   - message_stop  (Anthropic stop primitive)
+      //   - message_delta (last message_delta carries stop_reason)
+      // opencc doesn't always yield message_stop through the bridge
+      // (sometimes it wraps the stop in an assistant message and
+      // just closes the iterator), so trigger on either to be safe.
+      // On any further event from the next turn, disarm so a long
+      // follow-up turn doesn't trip the watchdog.
+      if (sdkType === 'message_stop' || sdkType === 'message_delta') {
+        if (WATCHDOG_MS > 0 && !watchdogTimer) {
+          watchdogTimer = setTimeout(() => {
+            console.warn(
+              `[openccQueryBridge] watchdog tripped after ${sdkType} with ` +
+                `no further opencc events for ${WATCHDOG_MS}ms — emitting runtime.done via side-channel`,
+            )
+            if (bus && typeof bus.emit === 'function') {
+              bus.emit({
+                type: 'runtime.done',
+                sessionId,
+                turnIndex: 0,
+                eventId: `evt-watchdog-${Date.now()}`,
+                ts: Date.now(),
+                forced: true,
+              })
+            }
+            watchdogTimer = null
+          }, WATCHDOG_MS)
+        }
+      } else {
+        // Disarm on any further event so a long next turn doesn't trip.
+        disarmWatchdog()
+      }
     }
+    disarmWatchdog()
     // Final drain — any tool events buffered after the last opencc
     // event (e.g. AskUserQuestion yielded ask_pending during its
     // call) need to flush before the bridge returns.
