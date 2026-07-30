@@ -61,7 +61,20 @@ export interface OpenccToolMinimal {
   // ... other methods are optional and default to no-ops
 }
 
-export function wrapAsOpenccTool(tool: ZaiToolLike): OpenccToolMinimal {
+export interface WrapOptions {
+  /**
+   * Transform opencc's ToolUseContext into zai's ToolCallCtx before
+   * invoking the tool. Use this to inject sessionId / askRegistry /
+   * onYield / abortSignal that zai's tools need but opencc's
+   * ToolUseContext doesn't provide.
+   */
+  transformCtx?: (openccCtx: unknown) => unknown
+}
+
+export function wrapAsOpenccTool(
+  tool: ZaiToolLike,
+  opts: WrapOptions = {},
+): OpenccToolMinimal {
   const wrapped: OpenccToolMinimal = {
     name: tool.name,
     inputSchema: tool.inputSchema,
@@ -70,9 +83,12 @@ export function wrapAsOpenccTool(tool: ZaiToolLike): OpenccToolMinimal {
     async call(args, ctx, _canUseTool, _parentMessage, _onProgress) {
       // zai's Tool.call has signature: (args, ctx) => Promise<ToolResult>
       // opencc's Tool.call has signature: (args, ctx, canUseTool, parentMessage, onProgress?) => Promise<ToolResult>
-      // We pass through args + ctx; ignore the extra opencc-only params.
+      // We pass through args + ctx (with optional transformCtx injection
+      // so tools like AskUserQuestion can access zai's AskRegistry
+      // and onYield callback). The extra opencc-only params are ignored.
       if (!tool.call) throw new Error(`openccToolWrap: tool "${tool.name}" has no call method`)
-      return tool.call(args, ctx as any)
+      const finalCtx = opts.transformCtx ? opts.transformCtx(ctx) : ctx
+      return tool.call(args, finalCtx as any)
     },
 
     async description(input, options) {

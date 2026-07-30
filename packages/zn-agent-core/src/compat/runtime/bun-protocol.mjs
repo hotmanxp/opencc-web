@@ -61,6 +61,11 @@ const REDIRECTS = {
   // read opencc's knowledge-graph state.
   '@orama/orama': pathToFileURL(resolve(DANGLING_SHIM, 'orama.js')).href,
   '@orama/plugin-data-persistence': pathToFileURL(resolve(DANGLING_SHIM, 'orama.js')).href,
+  // opencc-src/ink/screen.js — vendored copy is missing the `CellWidth`
+  // enum that selection.ts and ink.tsx import. Re-export real screen.js
+  // and add the missing named export. See
+  // compat/dangling-shims/ink-screen-shim.cjs.
+  'ink/screen.js': pathToFileURL(resolve(DANGLING_SHIM, 'ink-screen-shim.cjs')).href,
   // jsonc-parser — installed as a real dep (see package.json). No
   // redirect needed; Node resolves from node_modules.
 }
@@ -162,6 +167,14 @@ async function bunResolve(specifier, context, nextResolve) {
       // the bridge: "The requested module X does not provide an
       // export named Y" → add Y to opencc-stripped.ts).
       if (!matched) {
+        // ink/screen.js — vendored copy is missing the `CellWidth`
+        // enum that selection.ts and ink.tsx import. Re-export real
+        // screen.js + add the missing enum. Match by absolute path
+        // suffix so relative imports from selection.ts hit this.
+        if (/\/ink\/screen\.(?:js|ts|tsx)$/.test(resolved)) {
+          const url = pathToFileURL(resolve(DANGLING_SHIM, 'ink-screen-shim.cjs')).href
+          return { url, shortCircuit: true, format: 'module' }
+        }
         if (!existsSync(resolved)
             && !existsSync(resolved.replace(/\.js$/, '.ts'))
             && !existsSync(resolved.replace(/\.js$/, '.tsx'))) {
@@ -197,6 +210,15 @@ async function bunResolve(specifier, context, nextResolve) {
         const alt = resolved.replace(/\.js$/, ext)
         if (existsSync(alt)) { resolved = alt; break }
       }
+    }
+    // ink/screen.js is missing the `CellWidth` enum that selection.ts
+    // and ink.tsx import. Route to the shim that re-exports the
+    // real screen.js + adds CellWidth. Match by absolute path so
+    // both `src/ink/screen.js` (project-relative) and resolved
+    // absolute paths hit this.
+    if (resolved.endsWith('/ink/screen.js') || resolved.endsWith('/ink/screen.ts') || resolved.endsWith('/ink/screen.tsx')) {
+      const url = pathToFileURL(resolve(DANGLING_SHIM, 'ink-screen-shim.cjs')).href
+      return { url, shortCircuit: true, format: 'module' }
     }
     const url = pathToFileURL(resolved).href
     return { url, shortCircuit: true, format: 'module' }

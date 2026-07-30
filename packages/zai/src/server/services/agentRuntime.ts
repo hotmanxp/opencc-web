@@ -33,6 +33,14 @@ let serverCwd: string | null = null
 const askRegistry = new AskRegistry()
 const approveRegistry = new ApproveRegistry()
 
+// Bridge (zn-agent-core) emits tool events (e.g. AskUserQuestion's
+// tool_use:ask_pending) DIRECTLY through this bus when the tool
+// is blocked awaiting the user's answer. The bridge can't queue
+// these events on the opencc stream because the for-await loop is
+// itself blocked on the tool's await. Setting this global on init
+// gives the bridge a synchronous side-channel to reach the SSE.
+;(globalThis as any).__zaiEventBus = eventBus
+
 // Per-session AbortController registry. The HTTP layer (POST /api/agent/abort)
 // looks up the in-flight controller for a sessionId and calls .abort() to
 // signal the running queryLoop. The queryLoop is responsible for

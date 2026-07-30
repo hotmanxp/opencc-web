@@ -21,6 +21,10 @@ import { wrapAskUserQuestionToolAsOpencc } from './AskUserQuestionTool.js'
 
 /**
  * Returns the 5 wrapped core tools. Order matters for prompt stability.
+ * `bridgeCtx` is a global set by the bridge at run-time (see
+ * openccQueryBridge.ts) so AskUserQuestion can access sessionId /
+ * askRegistry / onYield at call time. Pass an empty object here
+ * — the wrapper reads from `(globalThis as any).__zaiBridgeCtx`.
  */
 export function defaultCoreToolsAsOpencc() {
   return [
@@ -28,6 +32,8 @@ export function defaultCoreToolsAsOpencc() {
     wrapReadToolAsOpencc(),
     wrapEditToolAsOpencc(),
     wrapWriteToolAsOpencc(),
-    wrapAskUserQuestionToolAsOpencc(),
+    wrapAskUserQuestionToolAsOpencc(
+      (globalThis as any).__zaiBridgeCtx ?? {},
+    ),
   ]
 }

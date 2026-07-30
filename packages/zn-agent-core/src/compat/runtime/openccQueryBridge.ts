@@ -14,7 +14,7 @@ import type { QueryOptions, OpenccAdapterConfig } from './types.js'
 import type { RuntimeEvent } from './events.js'
 import { buildOpenccQueryParams } from './buildOpenccQueryParams.js'
 import { translateSdkToRuntime } from './sdkEventAdapter.js'
-import { defaultCoreToolsAsOpencc } from '../tools/opencc/index.js'
+import { getOpenccBuiltinTools } from '../tools/opencc/builtin.js'
 import { toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
 
 const OPENCC_SRC_DIR = pathResolve(
@@ -164,7 +164,70 @@ export async function* runViaOpenccQuery(
     return
   }
   const zaiTools = (opts.tools ?? []) as any[]
-  const coreTools = defaultCoreToolsAsOpencc()
+  // Use opencc's BUILT-IN tools directly (Bash/Read/Edit/Write/
+  // AskUserQuestion/Glob/Grep) instead of zai's wrapper layer.
+  // See compat/tools/opencc/builtin.ts for trade-offs. The
+  // `bridgeCtx` global lets the AskUserQuestion wrapper (which was
+  // already constructed when getOpenccBuiltinTools() was first
+  // called) access sessionId / askRegistry / onYield at call time.
+  //
+  // Tool events (e.g. tool_use:ask_pending from AskUserQuestion) are
+  // pushed into pendingToolEvents. We drain this queue between
+  // opencc stream events so they flow through translateRuntimeEvents
+  // (which already handles tool_use:ask_pending → prompt.ask → SSE).
+  const pendingToolEvents: Array<{ type: string; [k: string]: unknown }> = []
+  const drainToolEvents = function* () {
+    while (pendingToolEvents.length > 0) {
+      const ev = pendingToolEvents.shift()!
+      for (const out of translateSdkToRuntime(
+        ev as unknown,
+        { sessionId, turnIndex: 0, eventCounter: ++eventCounter },
+      )) {
+        yield out
+      }
+    }
+  }
+  ;(globalThis as any).__zaiBridgeCtx = {
+    sessionId,
+    askRegistry: config.askRegistry,
+    abortSignal: opts.abortSignal,
+    onYield: (ev: any) => {
+      // CRITICAL: zai's tool callbacks (e.g. AskUserQuestion's
+      // tool_use:ask_pending) fire SYNCHRONOUSLY before the tool
+      // awaits. But the tool's await then blocks the bridge's
+      // for-await on the opencc stream — so a queue drained
+      // between opencc events never flushes until the tool returns
+      // (which is when the user has already answered, too late).
+      //
+      // Workaround: the route attaches an EventEmitter to
+      // globalThis.__zaiEventBus at init time. We emit directly to
+      // it so prompt.ask / tool_call events reach the SSE
+      // immediately, while the tool is still blocked awaiting the
+      // user's answer.
+      if (process.env.ZAI_DEBUG === '1') {
+        console.log('[bridge.onYield]', ev?.type, 'bus:', !!(globalThis as any).__zaiEventBus)
+      }
+      const bus = (globalThis as any).__zaiEventBus
+      if (bus && typeof bus.emit === 'function') {
+        bus.emit({
+          type: ev.type,
+          sessionId,
+          ...(ev.id ? { id: ev.id } : {}),
+          ...(ev.toolUseId ? { toolUseId: ev.toolUseId } : {}),
+          ...(ev.questions ? { questions: ev.questions } : {}),
+          ...(ev.metadata ? { metadata: ev.metadata } : {}),
+          ...(ev.toolName ? { toolName: ev.toolName } : {}),
+          ...(ev.input ? { input: ev.input } : {}),
+        })
+      } else {
+        // Fallback: queue. Drainage will happen on the next opencc
+        // stream event. (Without __zaiEventBus, ask_pending won't
+        // reach the frontend until the tool returns.)
+        pendingToolEvents.push({ type: ev.type, ...ev })
+      }
+    },
+  }
+  const coreTools = await getOpenccBuiltinTools()
   // zai tools win on name collision.
   const toolMap = new Map<string, any>()
   for (const t of coreTools) toolMap.set(t.name, t)
@@ -196,15 +259,37 @@ export async function* runViaOpenccQuery(
   let eventCounter = 0
   try {
     const stream: AsyncIterable<unknown> = openccQuery(params)
+    if (process.env.ZAI_DEBUG === '1') {
+      console.log('[bridge] openccQuery returned stream, starting iteration')
+    }
     for await (const sdkMsg of stream) {
       if (opts.abortSignal?.aborted) {
         yield toAbortedEvent({ sessionId, turnIndex: 0 }, String(opts.abortSignal.reason ?? 'aborted'))
         return
       }
-      eventCounter++
-      for (const ev of translateSdkToRuntime(sdkMsg, { sessionId, turnIndex: 0, eventCounter })) {
+      if (process.env.ZAI_DEBUG === '1') {
+        console.log('[bridge] sdkMsg type:', (sdkMsg as any)?.type, 'keys:', Object.keys(sdkMsg as any).slice(0, 5))
+      }
+      // Drain any tool events buffered by tool callbacks (e.g.
+      // AskUserQuestion's tool_use:ask_pending) BEFORE the next
+      // opencc stream event. The route's translateRuntimeEvents
+      // already maps these to prompt.ask / tool_call SSE events.
+      for (const ev of drainToolEvents()) {
         yield ev
       }
+      for (const ev of translateSdkToRuntime(sdkMsg, { sessionId, turnIndex: 0, eventCounter })) {
+        if (process.env.ZAI_DEBUG === '1' && ((ev as any).type === 'content_block_delta')) {
+          console.log('[bridge] yield:', (ev as any).type, 'delta len:', ((ev as any).delta ?? '').length)
+        }
+        yield ev
+        eventCounter++
+      }
+    }
+    // Final drain — any tool events buffered after the last opencc
+    // event (e.g. AskUserQuestion yielded ask_pending during its
+    // call) need to flush before the bridge returns.
+    for (const ev of drainToolEvents()) {
+      yield ev
     }
   } catch (err) {
     yield toRuntimeErrorEvent(err, { sessionId, turnIndex: 0 })
