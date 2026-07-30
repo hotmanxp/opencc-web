@@ -17,6 +17,14 @@ export interface SdkEventMeta {
   sessionId: string
   turnIndex: number
   eventCounter: number
+  /**
+   * Map of tool_use_id → tool name. Populated by the bridge when it
+   * sees a content_block_start with type=tool_use, consumed when a
+   * subsequent user message yields a matching tool_result block.
+   * opencc's tool_result block does not repeat the tool name, so the
+   * bridge has to remember the mapping across events.
+   */
+  toolNameByUseId?: Map<string, string>
 }
 
 export function* translateSdkToRuntime(
@@ -52,7 +60,17 @@ export function* translateSdkToRuntime(
 
   if (m.type !== 'assistant' && m.type !== 'user') {
     // Format (b): Anthropic primitive (message_start, content_block_*, etc).
-    // Pass through with zai meta fields attached.
+    // Pass through with zai meta fields attached. For tool_use
+    // content_block_start, also record the toolUseId → tool name
+    // mapping so we can attach the name to the later tool_result.
+    if (m.type === 'content_block_start' && meta.toolNameByUseId) {
+      const cb = (m as any).content_block as
+        | { type?: string; id?: string; name?: string }
+        | undefined
+      if (cb?.type === 'tool_use' && cb.id && cb.name) {
+        meta.toolNameByUseId.set(cb.id, cb.name)
+      }
+    }
     yield makeEvent(String(m.type), meta, 0, m as Record<string, unknown>)
     return
   }
@@ -130,9 +148,19 @@ export function* translateSdkToRuntime(
     }>
     for (const block of blocks) {
       if (block.type !== 'tool_result') continue
+      // The opencc `tool_result` block only carries `tool_use_id` — it
+      // doesn't repeat the tool name. The bridge tracks the name when
+      // it sees the matching tool_use content_block_start, so we can
+      // look it up here. If we don't, translateRuntimeEvents in
+      // routes/agent.ts will default `toolName` to "unknown" (its
+      // pendingToolName is cleared after content_block_stop emits
+      // the runtime.tool_call) and the frontend's upsertToolCall
+      // will overwrite the stored "Bash" with "unknown".
+      const toolName = meta.toolNameByUseId?.get(block.tool_use_id ?? '')
       yield emit('tool_use:done', {
         id: block.tool_use_id,
         toolUseId: block.tool_use_id,
+        ...(toolName ? { name: toolName } : {}),
         output: block.content,
         isError: block.is_error === true,
       })
