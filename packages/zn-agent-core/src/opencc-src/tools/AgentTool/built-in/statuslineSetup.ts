@@ -1,4 +1,4 @@
-import type { BuiltInAgentDefinition } from '../loadAgentsDir.ts'
+import type { BuiltInAgentDefinition } from '../loadAgentsDir.js'
 
 const STATUSLINE_SYSTEM_PROMPT = `You are a status line setup agent for OpenCC. Your job is to create or update the statusLine command in the user's OpenCC settings.
 

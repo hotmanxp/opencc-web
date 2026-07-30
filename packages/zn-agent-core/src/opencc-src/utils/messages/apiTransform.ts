@@ -1,6 +1,6 @@
 import type { ContentBlockParam, TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
-import type { AssistantMessage, UserMessage } from '../../types/message.ts'
-import { isToolReferenceBlock } from '../toolSearch.ts'
+import type { AssistantMessage, UserMessage } from '../../types/message.js'
+import { isToolReferenceBlock } from '../toolSearch.js'
 
 /**
  * Derive a short stable message ID (6-char base36 string) from a UUID.

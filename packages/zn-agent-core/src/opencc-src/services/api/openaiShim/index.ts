@@ -1,9 +1,9 @@
-export { createOpenAIShimClient } from './openaiClient.ts'
+export { createOpenAIShimClient } from './openaiClient.js'
 
 // Re-export from sub-modules
-export type { AnthropicUsage, AnthropicStreamEvent, ShimCreateParams } from './types.ts'
-export type { OpenAIMessage, OpenAITool, OpenAIStreamChunk } from './types.ts'
-export type { SecretValueSource } from './types.ts'
+export type { AnthropicUsage, AnthropicStreamEvent, ShimCreateParams } from './types.js'
+export type { OpenAIMessage, OpenAITool, OpenAIStreamChunk } from './types.js'
+export type { SecretValueSource } from './types.js'
 
 export {
   GEMINI_API_HOST,
@@ -11,7 +11,7 @@ export {
   SENSITIVE_URL_QUERY_PARAM_NAMES,
   isMistralMode,
   isGithubModelsMode,
-} from './constants.ts'
+} from './constants.js'
 
 export {
   filterAnthropicHeaders,
@@ -24,7 +24,7 @@ export {
   sleepMs,
   getLocalProviderRetryBaseUrls,
   shouldAttemptLocalToollessRetry,
-} from './providerUtils.ts'
+} from './providerUtils.js'
 
 export {
   convertSystemPrompt,
@@ -32,12 +32,12 @@ export {
   convertContentBlocks,
   isGeminiMode,
   convertMessages,
-} from './messageConversion.ts'
+} from './messageConversion.js'
 
 export {
   normalizeSchemaForOpenAI,
   convertTools,
-} from './schemaNormalization.ts'
+} from './schemaNormalization.js'
 
 export {
   JSON_REPAIR_SUFFIXES,
@@ -52,7 +52,7 @@ export {
   StreamIdleTimeoutError,
   getStreamIdleTimeoutMs,
   __test,
-} from './streaming.ts'
+} from './streaming.js'
 
-export { openaiStreamToAnthropic } from './openaiStreamToAnthropic.ts'
-export { anthropicSsePassthrough } from './anthropicSsePassthrough.ts'
+export { openaiStreamToAnthropic } from './openaiStreamToAnthropic.js'
+export { anthropicSsePassthrough } from './anthropicSsePassthrough.js'

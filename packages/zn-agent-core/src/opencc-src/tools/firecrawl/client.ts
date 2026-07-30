@@ -1,4 +1,4 @@
-import { createCombinedAbortSignal } from '../../utils/combinedAbortSignal.ts'
+import { createCombinedAbortSignal } from '../../utils/combinedAbortSignal.js'
 
 const DEFAULT_FIRECRAWL_API_URL = 'https://api.firecrawl.dev'
 const DEFAULT_TIMEOUT_MS = 300_000

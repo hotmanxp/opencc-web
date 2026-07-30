@@ -12,20 +12,20 @@ import { join, relative } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../../services/analytics/index.ts'
+} from '../../services/analytics/index.js'
 import {
   type FilesApiConfig,
   uploadSessionFiles,
-} from '../../services/api/filesApi.ts'
-import { getCwd } from '../cwd.ts'
-import { errorMessage } from '../errors.ts'
-import { logError } from '../log.ts'
-import { getSessionIngressAuthToken } from '../sessionIngressAuth.ts'
+} from '../../services/api/filesApi.js'
+import { getCwd } from '../cwd.js'
+import { errorMessage } from '../errors.js'
+import { logError } from '../log.js'
+import { getSessionIngressAuthToken } from '../sessionIngressAuth.js'
 import {
   findModifiedFiles,
   getEnvironmentKind,
   logDebug,
-} from './outputsScanner.ts'
+} from './outputsScanner.js'
 import {
   DEFAULT_UPLOAD_CONCURRENCY,
   type FailedPersistence,
@@ -34,7 +34,7 @@ import {
   OUTPUTS_SUBDIR,
   type PersistedFile,
   type TurnStartTime,
-} from './types.ts'
+} from './types.js'
 
 /**
  * Execute file persistence for modified files in the outputs directory.

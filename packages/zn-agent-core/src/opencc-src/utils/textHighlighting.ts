@@ -6,7 +6,7 @@ import {
   tokenize,
   undoAnsiCodes,
 } from '@alcalzone/ansi-tokenize'
-import type { Theme } from './theme.ts'
+import type { Theme } from './theme.js'
 
 export type TextHighlight = {
   start: number

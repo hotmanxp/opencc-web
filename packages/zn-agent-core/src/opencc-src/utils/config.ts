@@ -4,34 +4,34 @@ import { unwatchFile, watchFile } from 'fs'
 import memoize from 'lodash-es/memoize.js'
 import pickBy from 'lodash-es/pickBy.js'
 import { basename, dirname, join, resolve } from 'path'
-import { getOriginalCwd, getSessionTrustAccepted } from '../bootstrap/state.ts'
+import { getOriginalCwd, getSessionTrustAccepted } from '../bootstrap/state.js'
 import { getAutoMemEntrypoint } from '../memdir/paths.js'
-import { logEvent } from '../services/analytics/index.ts'
-import type { McpServerConfig } from '../services/mcp/types.ts'
+import { logEvent } from '../services/analytics/index.js'
+import type { McpServerConfig } from '../services/mcp/types.js'
 import type {
   BillingType,
   ReferralEligibilityResponse,
-} from '../services/oauth/types.ts'
-import { getCwd } from '../utils/cwd.ts'
-import { registerCleanup } from './cleanupRegistry.ts'
-import { logForDebugging } from './debug.ts'
-import { logForDiagnosticsNoPII } from './diagLogs.ts'
-import { getGlobalClaudeFile } from './env.ts'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.ts'
-import { AGENTS_FILENAME, AGENTS_LOCAL_FILENAME } from './claudemd.ts'
-import { ConfigParseError, getErrnoCode } from './errors.ts'
-import { writeFileSyncAndFlush_DEPRECATED } from './file.ts'
-import { getFsImplementation } from './fsOperations.ts'
-import { findCanonicalGitRoot } from './git.ts'
-import { safeParseJSON } from './json.ts'
-import { stripBOM } from './jsonRead.ts'
-import * as lockfile from './lockfile.ts'
-import { logError } from './log.ts'
-import type { MemoryType } from './memory/types.ts'
-import { normalizePathForConfigKey } from './path.ts'
-import { getEssentialTrafficOnlyReason } from './privacyLevel.ts'
-import { getManagedFilePath } from './settings/managedPath.ts'
-import type { ThemeSetting } from './theme.ts'
+} from '../services/oauth/types.js'
+import { getCwd } from '../utils/cwd.js'
+import { registerCleanup } from './cleanupRegistry.js'
+import { logForDebugging } from './debug.js'
+import { logForDiagnosticsNoPII } from './diagLogs.js'
+import { getGlobalClaudeFile } from './env.js'
+import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
+import { AGENTS_FILENAME, AGENTS_LOCAL_FILENAME } from './claudemd.js'
+import { ConfigParseError, getErrnoCode } from './errors.js'
+import { writeFileSyncAndFlush_DEPRECATED } from './file.js'
+import { getFsImplementation } from './fsOperations.js'
+import { findCanonicalGitRoot } from './git.js'
+import { safeParseJSON } from './json.js'
+import { stripBOM } from './jsonRead.js'
+import * as lockfile from './lockfile.js'
+import { logError } from './log.js'
+import type { MemoryType } from './memory/types.js'
+import { normalizePathForConfigKey } from './path.js'
+import { getEssentialTrafficOnlyReason } from './privacyLevel.js'
+import { getManagedFilePath } from './settings/managedPath.js'
+import type { ThemeSetting } from './theme.js'
 import * as teamMemPaths from '../memdir/teamMemPaths.js'
 
 
@@ -40,9 +40,9 @@ const ccrAutoConnect = feature('CCR_AUTO_CONNECT')
   : null
 
 /* eslint-enable @typescript-eslint/no-require-imports */
-import type { ImageDimensions } from './imageResizer.ts'
-import type { ModelOption } from './model/modelOptions.ts'
-import { jsonParse, jsonStringify } from './slowOperations.ts'
+import type { ImageDimensions } from './imageResizer.js'
+import type { ModelOption } from './model/modelOptions.js'
+import { jsonParse, jsonStringify } from './slowOperations.js'
 
 // Re-entrancy guard: prevents getConfig → logEvent → getGlobalConfig → getConfig
 // infinite recursion when the config file is corrupted. logEvent's sampling check
@@ -151,9 +151,9 @@ export type InstallMethod = 'local' | 'native' | 'global' | 'unknown'
 export {
   EDITOR_MODES,
   NOTIFICATION_CHANNELS,
-} from './configConstants.ts'
+} from './configConstants.js'
 
-import type { EDITOR_MODES, NOTIFICATION_CHANNELS, PROVIDERS } from './configConstants.ts'
+import type { EDITOR_MODES, NOTIFICATION_CHANNELS, PROVIDERS } from './configConstants.js'
 
 export type NotificationChannel = (typeof NOTIFICATION_CHANNELS)[number]
 

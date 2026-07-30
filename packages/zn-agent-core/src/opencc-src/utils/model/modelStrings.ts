@@ -2,14 +2,14 @@ import {
   getModelStrings as getModelStringsState,
   setModelStrings as setModelStringsState,
 } from 'src/bootstrap/state.js'
-import { getInitialSettings } from '../settings/settings.ts'
+import { getInitialSettings } from '../settings/settings.js'
 import {
   ALL_MODEL_CONFIGS,
   CANONICAL_ID_TO_KEY,
   type CanonicalModelId,
   type ModelKey,
-} from './configs.ts'
-import { type APIProvider, getAPIProvider } from './providers.ts'
+} from './configs.js'
+import { type APIProvider, getAPIProvider } from './providers.js'
 
 /**
  * Maps each model version to its provider-specific model ID string.

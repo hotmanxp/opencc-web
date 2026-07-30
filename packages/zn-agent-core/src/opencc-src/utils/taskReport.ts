@@ -15,13 +15,13 @@ import {
   STATUS_TAG,
   TASK_NOTIFICATION_TAG,
   TOOL_USE_ID_TAG,
-} from '../constants/xml.ts'
+} from '../constants/xml.js'
 import {
   redactDiagnosticObject,
   redactHomePath,
   redactLikelySecrets,
-} from './redaction.ts'
-import { stableStringifyJson } from './stableStringify.ts'
+} from './redaction.js'
+import { stableStringifyJson } from './stableStringify.js'
 
 export const TASK_REPORT_SCHEMA_VERSION = 1
 export const DEFAULT_TASK_REPORT_PREVIEW_CHARS = 1_000

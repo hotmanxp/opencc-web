@@ -1,17 +1,17 @@
-import { getIsNonInteractiveSession } from '../../bootstrap/state.ts'
-import { checkHasTrustDialogAccepted } from '../../utils/config.ts'
-import { logAntError } from '../../utils/debug.ts'
-import { errorMessage } from '../../utils/errors.ts'
-import { execFileNoThrowWithCwd } from '../../utils/execFileNoThrow.ts'
-import { logError, logMCPDebug, logMCPError } from '../../utils/log.ts'
-import { jsonParse } from '../../utils/slowOperations.ts'
-import { logEvent } from '../analytics/index.ts'
+import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
+import { checkHasTrustDialogAccepted } from '../../utils/config.js'
+import { logAntError } from '../../utils/debug.js'
+import { errorMessage } from '../../utils/errors.js'
+import { execFileNoThrowWithCwd } from '../../utils/execFileNoThrow.js'
+import { logError, logMCPDebug, logMCPError } from '../../utils/log.js'
+import { jsonParse } from '../../utils/slowOperations.js'
+import { logEvent } from '../analytics/index.js'
 import type {
   McpHTTPServerConfig,
   McpSSEServerConfig,
   McpWebSocketServerConfig,
   ScopedMcpServerConfig,
-} from './types.ts'
+} from './types.js'
 
 /**
  * Check if the MCP server config comes from project settings (projectSettings or localSettings)

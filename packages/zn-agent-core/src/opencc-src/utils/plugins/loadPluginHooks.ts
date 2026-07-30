@@ -4,17 +4,17 @@ import {
   clearRegisteredPluginHooks,
   getRegisteredHooks,
   registerHookCallbacks,
-} from '../../bootstrap/state.ts'
-import type { LoadedPlugin } from '../../types/plugin.ts'
-import { logForDebugging } from '../debug.ts'
-import { settingsChangeDetector } from '../settings/changeDetector.ts'
+} from '../../bootstrap/state.js'
+import type { LoadedPlugin } from '../../types/plugin.js'
+import { logForDebugging } from '../debug.js'
+import { settingsChangeDetector } from '../settings/changeDetector.js'
 import {
   getSettings_DEPRECATED,
   getSettingsForSource,
-} from '../settings/settings.ts'
-import type { PluginHookMatcher } from '../settings/types.ts'
-import { jsonStringify } from '../slowOperations.ts'
-import { clearPluginCache, loadAllPluginsCacheOnly } from './pluginLoader.ts'
+} from '../settings/settings.js'
+import type { PluginHookMatcher } from '../settings/types.js'
+import { jsonStringify } from '../slowOperations.js'
+import { clearPluginCache, loadAllPluginsCacheOnly } from './pluginLoader.js'
 
 // Track if hot reload subscription is set up
 let hotReloadSubscribed = false

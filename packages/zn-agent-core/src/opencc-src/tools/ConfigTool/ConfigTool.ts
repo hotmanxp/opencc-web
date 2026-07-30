@@ -1,34 +1,34 @@
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
-import {  } from '../../constants/product.ts'
-import { BRAND_NAME } from '../../constants.ts'
+import {  } from '../../constants/product.js'
+import { BRAND_NAME } from '../../constants.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../../services/analytics/index.ts'
-import { buildTool, type ToolDef } from '../../Tool.ts'
+} from '../../services/analytics/index.js'
+import { buildTool, type ToolDef } from '../../Tool.js'
 import {
   type GlobalConfig,
   getGlobalConfig,
   getRemoteControlAtStartup,
   saveGlobalConfig,
-} from '../../utils/config.ts'
-import { errorMessage } from '../../utils/errors.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import { logError } from '../../utils/log.ts'
+} from '../../utils/config.js'
+import { errorMessage } from '../../utils/errors.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import { logError } from '../../utils/log.js'
 import {
   getInitialSettings,
   updateSettingsForSource,
-} from '../../utils/settings/settings.ts'
-import { jsonStringify } from '../../utils/slowOperations.ts'
-import { CONFIG_TOOL_NAME } from './constants.ts'
-import { DESCRIPTION, generatePrompt } from './prompt.ts'
+} from '../../utils/settings/settings.js'
+import { jsonStringify } from '../../utils/slowOperations.js'
+import { CONFIG_TOOL_NAME } from './constants.js'
+import { DESCRIPTION, generatePrompt } from './prompt.js'
 import {
   getConfig,
   getOptionsForSetting,
   getPath,
   isSupported,
-} from './supportedSettings.ts'
+} from './supportedSettings.js'
 import {
   renderToolResultMessage,
   renderToolUseMessage,

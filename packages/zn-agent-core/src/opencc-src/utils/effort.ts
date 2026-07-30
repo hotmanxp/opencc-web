@@ -1,13 +1,13 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { isUltrathinkEnabled } from './thinking.ts'
-import { getInitialSettings } from './settings/settings.ts'
-import { isProSubscriber, isMaxSubscriber, isTeamSubscriber } from './auth.ts'
+import { isUltrathinkEnabled } from './thinking.js'
+import { getInitialSettings } from './settings/settings.js'
+import { isProSubscriber, isMaxSubscriber, isTeamSubscriber } from './auth.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
-import { getAPIProvider } from './model/providers.ts'
-import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.ts'
-import { getAntModelOverrideConfig, resolveAntModel } from './model/antModels.ts'
-import { supportsCodexReasoningEffort } from '../services/api/providerConfig.ts'
-import { isEnvTruthy } from './envUtils.ts'
+import { getAPIProvider } from './model/providers.js'
+import { get3PModelCapabilityOverride } from './model/modelSupportOverrides.js'
+import { getAntModelOverrideConfig, resolveAntModel } from './model/antModels.js'
+import { supportsCodexReasoningEffort } from '../services/api/providerConfig.js'
+import { isEnvTruthy } from './envUtils.js'
 import type { EffortLevel } from 'src/entrypoints/sdk/runtimeTypes.js'
 
 export type { EffortLevel }

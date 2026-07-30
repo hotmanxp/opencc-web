@@ -8,8 +8,8 @@
  */
 
 import { basename, posix, resolve, sep } from 'path'
-import { getCwd } from '../../utils/cwd.ts'
-import { PS_TOKENIZER_DASH_CHARS } from '../../utils/powershell/parser.ts'
+import { getCwd } from '../../utils/cwd.js'
+import { PS_TOKENIZER_DASH_CHARS } from '../../utils/powershell/parser.js'
 
 /**
  * If a normalized path starts with `../<cwd-basename>/`, it re-enters cwd

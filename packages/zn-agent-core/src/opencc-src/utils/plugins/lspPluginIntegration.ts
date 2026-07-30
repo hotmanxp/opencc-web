@@ -5,22 +5,22 @@ import { z } from 'zod/v4'
 import type {
   LspServerConfig,
   ScopedLspServerConfig,
-} from '../../services/lsp/types.ts'
-import { expandEnvVarsInString } from '../../services/mcp/envExpansion.ts'
-import type { LoadedPlugin, PluginError } from '../../types/plugin.ts'
-import { logForDebugging } from '../debug.ts'
-import { isENOENT, toError } from '../errors.ts'
-import { logError } from '../log.ts'
-import { jsonParse } from '../slowOperations.ts'
-import { getPluginDataDir } from './pluginDirectories.ts'
+} from '../../services/lsp/types.js'
+import { expandEnvVarsInString } from '../../services/mcp/envExpansion.js'
+import type { LoadedPlugin, PluginError } from '../../types/plugin.js'
+import { logForDebugging } from '../debug.js'
+import { isENOENT, toError } from '../errors.js'
+import { logError } from '../log.js'
+import { jsonParse } from '../slowOperations.js'
+import { getPluginDataDir } from './pluginDirectories.js'
 import {
   getPluginStorageId,
   loadPluginOptions,
   type PluginOptionValues,
   substitutePluginVariables,
   substituteUserConfigVariables,
-} from './pluginOptionsStorage.ts'
-import { LspServerConfigSchema } from './schemas.ts'
+} from './pluginOptionsStorage.js'
+import { LspServerConfigSchema } from './schemas.js'
 
 /**
  * Validate that a resolved path stays within the plugin directory.

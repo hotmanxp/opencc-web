@@ -1,5 +1,5 @@
-import { registerBuiltinPlugin } from '../builtinPlugins.ts'
-import { FALLBACK_PROJECT_INSTRUCTION_FILE } from '../../utils/projectInstructions.ts'
+import { registerBuiltinPlugin } from '../builtinPlugins.js'
+import { FALLBACK_PROJECT_INSTRUCTION_FILE } from '../../utils/projectInstructions.js'
 
 const KARPATHY_GUIDELINES_PROMPT = `# ${FALLBACK_PROJECT_INSTRUCTION_FILE}
 

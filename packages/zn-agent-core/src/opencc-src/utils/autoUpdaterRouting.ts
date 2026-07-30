@@ -1,5 +1,5 @@
-import type { InstallMethod } from './config.ts'
-import type { InstallationType } from './doctorDiagnostic.ts'
+import type { InstallMethod } from './config.js'
+import type { InstallationType } from './doctorDiagnostic.js'
 
 export function getAutoUpdaterNpmMethod(
   installationType: InstallationType,

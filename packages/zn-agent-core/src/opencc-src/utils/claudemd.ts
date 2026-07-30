@@ -43,39 +43,39 @@ import { logEvent } from 'src/services/analytics/index.js'
 import {
   getAdditionalDirectoriesForClaudeMd,
   getOriginalCwd,
-} from '../bootstrap/state.ts'
+} from '../bootstrap/state.js'
 import { truncateEntrypointContent } from '../memdir/memdir.js'
 import { getAutoMemEntrypoint, isAutoMemoryEnabled } from '../memdir/paths.js'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
 import {
   getCurrentProjectConfig,
   getManagedClaudeRulesDir,
   getMemoryPath,
   getUserClaudeRulesDir,
-} from './config.ts'
-import { logForDebugging } from './debug.ts'
-import { logForDiagnosticsNoPII } from './diagLogs.ts'
-import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.ts'
-import { getErrnoCode } from './errors.ts'
-import { normalizePathForComparison } from './file.ts'
-import { cacheKeys, type FileStateCache } from './fileStateCache.ts'
+} from './config.js'
+import { logForDebugging } from './debug.js'
+import { logForDiagnosticsNoPII } from './diagLogs.js'
+import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
+import { getErrnoCode } from './errors.js'
+import { normalizePathForComparison } from './file.js'
+import { cacheKeys, type FileStateCache } from './fileStateCache.js'
 import {
   parseFrontmatter,
   splitPathInFrontmatter,
-} from './frontmatterParser.ts'
-import { getFsImplementation, safeResolvePath } from './fsOperations.ts'
-import { findCanonicalGitRoot, findGitRoot } from './git.ts'
+} from './frontmatterParser.js'
+import { getFsImplementation, safeResolvePath } from './fsOperations.js'
+import { findCanonicalGitRoot, findGitRoot } from './git.js'
 import {
   executeInstructionsLoadedHooks,
   hasInstructionsLoadedHook,
   type InstructionsLoadReason,
   type InstructionsMemoryType,
-} from './hooks.ts'
-import type { MemoryType } from './memory/types.ts'
-import { expandPath } from './path.ts'
-import { pathInWorkingPath } from './permissions/filesystem.ts'
-import { isSettingSourceEnabled } from './settings/constants.ts'
-import { getInitialSettings } from './settings/settings.ts'
+} from './hooks.js'
+import type { MemoryType } from './memory/types.js'
+import { expandPath } from './path.js'
+import { pathInWorkingPath } from './permissions/filesystem.js'
+import { isSettingSourceEnabled } from './settings/constants.js'
+import { getInitialSettings } from './settings/settings.js'
 import * as teamMemPaths from '../memdir/teamMemPaths.js'
 
 
@@ -87,7 +87,7 @@ const MEMORY_INSTRUCTION_PROMPT =
 export const MAX_MEMORY_CHARACTER_COUNT = 40000
 
 // Memory file names
-import { AGENTS_FILENAME } from '../constants/product.ts'
+import { AGENTS_FILENAME } from '../constants/product.js'
 export { AGENTS_FILENAME }
 export const AGENTS_LOCAL_FILENAME = 'AGENTS.local.md'
 

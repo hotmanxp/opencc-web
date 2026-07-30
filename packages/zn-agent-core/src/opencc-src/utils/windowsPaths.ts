@@ -1,11 +1,11 @@
 import memoize from 'lodash-es/memoize.js'
 import * as path from 'path'
 import * as pathWin32 from 'path/win32'
-import { getCwd } from './cwd.ts'
-import { logForDebugging } from './debug.ts'
-import { execSync_DEPRECATED } from './execSyncWrapper.ts'
-import { memoizeWithLRU } from './memoize.ts'
-import { getPlatform } from './platform.ts'
+import { getCwd } from './cwd.js'
+import { logForDebugging } from './debug.js'
+import { execSync_DEPRECATED } from './execSyncWrapper.js'
+import { memoizeWithLRU } from './memoize.js'
+import { getPlatform } from './platform.js'
 
 /**
  * Check if a file or directory exists on Windows using the dir command

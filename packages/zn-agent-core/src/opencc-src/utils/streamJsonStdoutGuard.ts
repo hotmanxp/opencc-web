@@ -1,5 +1,5 @@
-import { registerCleanup } from './cleanupRegistry.ts'
-import { logForDebugging } from './debug.ts'
+import { registerCleanup } from './cleanupRegistry.js'
+import { logForDebugging } from './debug.js'
 
 /**
  * Sentinel written to stderr ahead of any diverted non-JSON line, so that

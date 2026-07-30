@@ -28,7 +28,7 @@
  * @see docs/superpowers/plans/2026-06-13-plan-bg-agent-view.md §T10
  */
 import { spawn } from 'node:child_process'
-import { JOB_SHORT_ID_REGEX, type JobShortId } from './protocol.ts'
+import { JOB_SHORT_ID_REGEX, type JobShortId } from './protocol.js'
 
 /**
  * Upstream-verbatim env key used to flag a CLI invocation as

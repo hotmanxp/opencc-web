@@ -1,30 +1,30 @@
 import { join } from 'path'
-import { getCwd } from '../cwd.ts'
-import { logForDebugging } from '../debug.ts'
-import { logError } from '../log.ts'
-import type { SettingSource } from '../settings/constants.ts'
+import { getCwd } from '../cwd.js'
+import { logForDebugging } from '../debug.js'
+import { logError } from '../log.js'
+import type { SettingSource } from '../settings/constants.js'
 import {
   getInitialSettings,
   getSettingsForSource,
   updateSettingsForSource,
-} from '../settings/settings.ts'
-import { getAddDirEnabledPlugins } from './addDirPluginSettings.ts'
+} from '../settings/settings.js'
+import { getAddDirEnabledPlugins } from './addDirPluginSettings.js'
 import {
   getInMemoryInstalledPlugins,
   migrateFromEnabledPlugins,
-} from './installedPluginsManager.ts'
-import { getPluginById } from './marketplaceManager.ts'
+} from './installedPluginsManager.js'
+import { getPluginById } from './marketplaceManager.js'
 import {
   type ExtendedPluginScope,
   type PersistablePluginScope,
   SETTING_SOURCE_TO_SCOPE,
   scopeToSettingSource,
-} from './pluginIdentifier.ts'
+} from './pluginIdentifier.js'
 import {
   cacheAndRegisterPlugin,
   registerPluginInstallation,
-} from './pluginInstallationHelpers.ts'
-import { isLocalPluginSource, type PluginScope } from './schemas.ts'
+} from './pluginInstallationHelpers.js'
+import { isLocalPluginSource, type PluginScope } from './schemas.js'
 
 /**
  * Checks for enabled plugins across all settings sources, including --add-dir.

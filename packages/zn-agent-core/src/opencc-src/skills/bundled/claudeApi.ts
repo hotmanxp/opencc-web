@@ -1,6 +1,6 @@
 import { readdir } from 'fs/promises'
-import { getCwd } from '../../utils/cwd.ts'
-import { registerBundledSkill } from '../bundledSkills.ts'
+import { getCwd } from '../../utils/cwd.js'
+import { registerBundledSkill } from '../bundledSkills.js'
 
 // claudeApiContent.js bundles 247KB of .md strings. Lazy-load inside
 // getPromptForCommand so they only enter memory when /claude-api is invoked.

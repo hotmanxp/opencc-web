@@ -1,6 +1,6 @@
 // @ts-ignore - proactive module may not exist
 import { feature } from 'bun:bundle'
-import type { PartialCompactDirection } from '../../types/message.ts'
+import type { PartialCompactDirection } from '../../types/message.js'
 
 // Dead code elimination: conditional import for proactive mode
 /* eslint-disable @typescript-eslint/no-require-imports */

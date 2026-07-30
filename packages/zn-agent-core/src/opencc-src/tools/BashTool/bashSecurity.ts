@@ -1,19 +1,19 @@
 import { logEvent } from 'src/services/analytics/index.js'
-import { extractHeredocs } from '../../utils/bash/heredoc.ts'
-import { ParsedCommand } from '../../utils/bash/ParsedCommand.ts'
+import { extractHeredocs } from '../../utils/bash/heredoc.js'
+import { ParsedCommand } from '../../utils/bash/ParsedCommand.js'
 import {
   findForbiddenCommitMessagePattern,
   getForbiddenCommitMessagePatterns,
   isGeneratedCommitAttributionBlocked,
-} from '../../utils/governancePolicy.ts'
+} from '../../utils/governancePolicy.js'
 import {
   hasMalformedTokens,
   hasShellQuoteSingleQuoteBug,
   tryParseShellCommand,
-} from '../../utils/bash/shellQuote.ts'
-import type { TreeSitterAnalysis } from '../../utils/bash/treeSitterAnalysis.ts'
-import type { PermissionResult } from '../../utils/permissions/PermissionResult.ts'
-import { isPermissiveSafety } from '../../utils/permissions/safetyLevel.ts'
+} from '../../utils/bash/shellQuote.js'
+import type { TreeSitterAnalysis } from '../../utils/bash/treeSitterAnalysis.js'
+import type { PermissionResult } from '../../utils/permissions/PermissionResult.js'
+import { isPermissiveSafety } from '../../utils/permissions/safetyLevel.js'
 
 const HEREDOC_IN_SUBSTITUTION = /\$\(.*<</
 

@@ -1,8 +1,8 @@
 import { feature } from 'bun:bundle'
-import { isReplBridgeActive } from '../../bootstrap/state.ts'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
-import type { Tool } from '../../Tool.ts'
-import { AGENT_TOOL_NAME } from '../AgentTool/constants.ts'
+import { isReplBridgeActive } from '../../bootstrap/state.js'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import type { Tool } from '../../Tool.js'
+import { AGENT_TOOL_NAME } from '../AgentTool/constants.js'
 
 // Dead code elimination: Brief tool name only needed when KAIROS or KAIROS_BRIEF is on
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -21,9 +21,9 @@ const SEND_USER_FILE_TOOL_NAME: string | null = feature('KAIROS')
 
 /* eslint-enable @typescript-eslint/no-require-imports */
 
-export { TOOL_SEARCH_TOOL_NAME } from './constants.ts'
+export { TOOL_SEARCH_TOOL_NAME } from './constants.js'
 
-import { TOOL_SEARCH_TOOL_NAME } from './constants.ts'
+import { TOOL_SEARCH_TOOL_NAME } from './constants.js'
 
 const PROMPT_HEAD = `Fetches full schema definitions for deferred tools so they can be called.
 

@@ -1,7 +1,7 @@
-import type { SearchInput, SearchProvider } from './types.ts'
-import { applyDomainFilters, type ProviderOutput } from './types.ts'
-import { firecrawlSearch } from '../../firecrawl/client.ts'
-import { withWebSearchTimeout } from './timeout.ts'
+import type { SearchInput, SearchProvider } from './types.js'
+import { applyDomainFilters, type ProviderOutput } from './types.js'
+import { firecrawlSearch } from '../../firecrawl/client.js'
+import { withWebSearchTimeout } from './timeout.js'
 
 export const firecrawlProvider: SearchProvider = {
   name: 'firecrawl',

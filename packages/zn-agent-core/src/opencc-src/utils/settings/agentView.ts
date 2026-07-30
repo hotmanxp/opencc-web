@@ -1,4 +1,4 @@
-import { isEnvTruthy } from '../envUtils.ts'
+import { isEnvTruthy } from '../envUtils.js'
 
 /**
  * Agent view is the upstream 2.1.177 feature that surfaces a Runnings panel

@@ -1,49 +1,49 @@
 import { dirname, sep } from 'path'
-import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.ts'
+import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
 import { logEvent } from 'src/services/analytics/index.js'
 import { z } from 'zod/v4'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
-import { diagnosticTracker } from '../../services/diagnosticTracking.ts'
-import { clearDeliveredDiagnosticsForFile } from '../../services/lsp/LSPDiagnosticRegistry.ts'
-import { getLspServerManager } from '../../services/lsp/manager.ts'
-import { notifyVscodeFileUpdated } from '../../services/mcp/vscodeSdkMcp.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { diagnosticTracker } from '../../services/diagnosticTracking.js'
+import { clearDeliveredDiagnosticsForFile } from '../../services/lsp/LSPDiagnosticRegistry.js'
+import { getLspServerManager } from '../../services/lsp/manager.js'
+import { notifyVscodeFileUpdated } from '../../services/mcp/vscodeSdkMcp.js'
 import { checkTeamMemSecrets } from '../../services/teamMemorySync/teamMemSecretGuard.js'
 import {
   activateConditionalSkillsForPaths,
   addSkillDirectories,
   discoverSkillDirsForPaths,
-} from '../../skills/loadSkillsDir.ts'
-import type { ToolUseContext } from '../../Tool.ts'
-import { buildTool, type ToolDef } from '../../Tool.ts'
-import { getCwd } from '../../utils/cwd.ts'
-import { logForDebugging } from '../../utils/debug.ts'
-import { countLinesChanged, getPatchForDisplay } from '../../utils/diff.ts'
-import { isEnvTruthy } from '../../utils/envUtils.ts'
-import { isENOENT } from '../../utils/errors.ts'
-import { getFileModificationTime, writeTextContent } from '../../utils/file.ts'
+} from '../../skills/loadSkillsDir.js'
+import type { ToolUseContext } from '../../Tool.js'
+import { buildTool, type ToolDef } from '../../Tool.js'
+import { getCwd } from '../../utils/cwd.js'
+import { logForDebugging } from '../../utils/debug.js'
+import { countLinesChanged, getPatchForDisplay } from '../../utils/diff.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
+import { isENOENT } from '../../utils/errors.js'
+import { getFileModificationTime, writeTextContent } from '../../utils/file.js'
 import {
   fileHistoryEnabled,
   fileHistoryTrackEdit,
-} from '../../utils/fileHistory.ts'
-import { logFileOperation } from '../../utils/fileOperationAnalytics.ts'
-import { readFileSyncWithMetadata } from '../../utils/fileRead.ts'
-import { getFsImplementation } from '../../utils/fsOperations.ts'
+} from '../../utils/fileHistory.js'
+import { logFileOperation } from '../../utils/fileOperationAnalytics.js'
+import { readFileSyncWithMetadata } from '../../utils/fileRead.js'
+import { getFsImplementation } from '../../utils/fsOperations.js'
 import {
   fetchSingleFileGitDiff,
   type ToolUseDiff,
-} from '../../utils/gitDiff.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import { logError } from '../../utils/log.ts'
-import { expandPath } from '../../utils/path.ts'
+} from '../../utils/gitDiff.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import { logError } from '../../utils/log.js'
+import { expandPath } from '../../utils/path.js'
 import {
   checkWritePermissionForTool,
   matchingRuleForInput,
-} from '../../utils/permissions/filesystem.ts'
-import type { PermissionDecision } from '../../utils/permissions/PermissionResult.ts'
-import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.ts'
-import { FILE_UNEXPECTEDLY_MODIFIED_ERROR } from '../FileEditTool/constants.ts'
-import { gitDiffSchema, hunkSchema } from '../FileEditTool/types.ts'
-import { FILE_WRITE_TOOL_NAME, getWriteToolDescription } from './prompt.ts'
+} from '../../utils/permissions/filesystem.js'
+import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
+import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.js'
+import { FILE_UNEXPECTEDLY_MODIFIED_ERROR } from '../FileEditTool/constants.js'
+import { gitDiffSchema, hunkSchema } from '../FileEditTool/types.js'
+import { FILE_WRITE_TOOL_NAME, getWriteToolDescription } from './prompt.js'
 import {
   getToolUseSummary,
   isResultTruncated,

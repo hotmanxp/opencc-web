@@ -1,7 +1,7 @@
 import axios from 'axios'
-import { logForDebugging } from '../debug.ts'
-import type { ModelOption } from './modelOptions.ts'
-import { getAPIProvider } from './providers.ts'
+import { logForDebugging } from '../debug.js'
+import type { ModelOption } from './modelOptions.js'
+import { getAPIProvider } from './providers.js'
 
 const DISCOVERY_TIMEOUT_MS = 5000
 const DISCOVERED_MODEL_DESCRIPTION =

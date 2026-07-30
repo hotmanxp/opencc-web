@@ -1,16 +1,16 @@
 import { open } from 'fs/promises'
 import { basename, dirname, join, sep } from 'path'
 import type { ModelUsage } from 'src/entrypoints/agentSdkTypes.js'
-import type { Entry, TranscriptMessage } from '../types/logs.ts'
-import { logForDebugging } from './debug.ts'
-import { errorMessage, isENOENT } from './errors.ts'
-import { getFsImplementation } from './fsOperations.ts'
-import { readJSONLFile } from './json.ts'
-import { SYNTHETIC_MODEL } from './messages.ts'
-import { getProjectsDir } from './envUtils.ts'
-import { isTranscriptMessage } from './sessionStorage.ts'
-import { SHELL_TOOL_NAMES } from './shell/shellToolUtils.ts'
-import { jsonParse } from './slowOperations.ts'
+import type { Entry, TranscriptMessage } from '../types/logs.js'
+import { logForDebugging } from './debug.js'
+import { errorMessage, isENOENT } from './errors.js'
+import { getFsImplementation } from './fsOperations.js'
+import { readJSONLFile } from './json.js'
+import { SYNTHETIC_MODEL } from './messages.js'
+import { getProjectsDir } from './envUtils.js'
+import { isTranscriptMessage } from './sessionStorage.js'
+import { SHELL_TOOL_NAMES } from './shell/shellToolUtils.js'
+import { jsonParse } from './slowOperations.js'
 import {
   getTodayDateString,
   getYesterdayDateString,
@@ -21,7 +21,7 @@ import {
   saveStatsCache,
   toDateString,
   withStatsCacheLock,
-} from './statsCache.ts'
+} from './statsCache.js'
 
 export type DailyActivity = {
   date: string // YYYY-MM-DD format

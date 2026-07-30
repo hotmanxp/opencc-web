@@ -1,29 +1,29 @@
 import { feature } from 'bun:bundle'
-import { prependBullets } from '../../constants/prompts.ts'
-import { getAttributionTexts } from '../../utils/attribution.ts'
-import { hasEmbeddedSearchTools } from '../../utils/embeddedTools.ts'
-import { isEnvTruthy } from '../../utils/envUtils.ts'
-import { shouldIncludeGitInstructions } from '../../utils/gitSettings.ts'
-import { getClaudeTempDir } from '../../utils/permissions/filesystem.ts'
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.ts'
-import { jsonStringify } from '../../utils/slowOperations.ts'
+import { prependBullets } from '../../constants/prompts.js'
+import { getAttributionTexts } from '../../utils/attribution.js'
+import { hasEmbeddedSearchTools } from '../../utils/embeddedTools.js'
+import { isEnvTruthy } from '../../utils/envUtils.js'
+import { shouldIncludeGitInstructions } from '../../utils/gitSettings.js'
+import { getClaudeTempDir } from '../../utils/permissions/filesystem.js'
+import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
+import { jsonStringify } from '../../utils/slowOperations.js'
 import {
   getDefaultBashTimeoutMs,
   getEffectiveBashTimeoutMs,
   getMaxBashTimeoutMs,
-} from '../../utils/timeouts.ts'
+} from '../../utils/timeouts.js'
 import {
   getUndercoverInstructions,
   isUndercover,
-} from '../../utils/undercover.ts'
-import { AGENT_TOOL_NAME } from '../AgentTool/constants.ts'
-import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.ts'
-import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.ts'
-import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/prompt.ts'
-import { GLOB_TOOL_NAME } from '../GlobTool/prompt.ts'
-import { GREP_TOOL_NAME } from '../GrepTool/prompt.ts'
-import { TodoWriteTool } from '../TodoWriteTool/TodoWriteTool.ts'
-import { BASH_TOOL_NAME } from './toolName.ts'
+} from '../../utils/undercover.js'
+import { AGENT_TOOL_NAME } from '../AgentTool/constants.js'
+import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.js'
+import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
+import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/prompt.js'
+import { GLOB_TOOL_NAME } from '../GlobTool/prompt.js'
+import { GREP_TOOL_NAME } from '../GrepTool/prompt.js'
+import { TodoWriteTool } from '../TodoWriteTool/TodoWriteTool.js'
+import { BASH_TOOL_NAME } from './toolName.js'
 
 export function getDefaultTimeoutMs(): number {
   return getDefaultBashTimeoutMs()

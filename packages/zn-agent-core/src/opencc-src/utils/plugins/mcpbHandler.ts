@@ -7,21 +7,21 @@ import axios from 'axios'
 import { createHash } from 'crypto'
 import { chmod, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
-import type { McpServerConfig } from '../../services/mcp/types.ts'
-import { logForDebugging } from '../debug.ts'
-import { parseAndValidateManifestFromBytes } from '../dxt/helpers.ts'
-import { parseZipModes, unzipFile } from '../dxt/zip.ts'
-import { errorMessage, getErrnoCode, isENOENT, toError } from '../errors.ts'
-import { getFsImplementation } from '../fsOperations.ts'
-import { logError } from '../log.ts'
-import { getSecureStorage } from '../secureStorage/index.ts'
+import type { McpServerConfig } from '../../services/mcp/types.js'
+import { logForDebugging } from '../debug.js'
+import { parseAndValidateManifestFromBytes } from '../dxt/helpers.js'
+import { parseZipModes, unzipFile } from '../dxt/zip.js'
+import { errorMessage, getErrnoCode, isENOENT, toError } from '../errors.js'
+import { getFsImplementation } from '../fsOperations.js'
+import { logError } from '../log.js'
+import { getSecureStorage } from '../secureStorage/index.js'
 import {
   getSettings_DEPRECATED,
   updateSettingsForSource,
-} from '../settings/settings.ts'
-import { jsonParse, jsonStringify } from '../slowOperations.ts'
-import { getSystemDirectories } from '../systemDirectories.ts'
-import { classifyFetchError, logPluginFetch } from './fetchTelemetry.ts'
+} from '../settings/settings.js'
+import { jsonParse, jsonStringify } from '../slowOperations.js'
+import { getSystemDirectories } from '../systemDirectories.js'
+import { classifyFetchError, logPluginFetch } from './fetchTelemetry.js'
 /**
  * User configuration values for MCPB
  */

@@ -4,9 +4,9 @@
  * Auth: Authorization: Bearer <key>
  */
 
-import type { SearchInput, SearchProvider } from './types.ts'
-import { applyDomainFilters, safeHostname, type ProviderOutput } from './types.ts'
-import { fetchJsonWithWebSearchTimeout } from './timeout.ts'
+import type { SearchInput, SearchProvider } from './types.js'
+import { applyDomainFilters, safeHostname, type ProviderOutput } from './types.js'
+import { fetchJsonWithWebSearchTimeout } from './timeout.js'
 
 export const jinaProvider: SearchProvider = {
   name: 'jina',

@@ -7,12 +7,12 @@ import {
   useSetAppState,
 } from 'src/state/AppState.js'
 import type { ToolPermissionContext } from 'src/Tool.js'
-import { getIsRemoteMode } from '../../bootstrap/state.ts'
+import { getIsRemoteMode } from '../../bootstrap/state.js'
 import {
   createDisabledBypassPermissionsContext,
   shouldDisableBypassPermissions,
   verifyAutoModeGateAccess,
-} from './permissionSetup.ts'
+} from './permissionSetup.js'
 
 let bypassPermissionsCheckRan = false
 

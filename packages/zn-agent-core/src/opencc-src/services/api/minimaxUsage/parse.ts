@@ -4,7 +4,7 @@ import {
   type MiniMaxUsageRow,
   type MiniMaxUsageSnapshot,
   type MiniMaxUsageWindow,
-} from './types.ts'
+} from './types.js'
 
 type RecordLike = Record<string, unknown>
 

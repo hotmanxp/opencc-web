@@ -1,1 +1,1 @@
-export { isAgentViewEnabled } from './agentView.ts'
+export { isAgentViewEnabled } from './agentView.js'

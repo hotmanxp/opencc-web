@@ -1,12 +1,12 @@
 // @ts-nocheck
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.ts'
-import { logEvent } from '../services/analytics/index.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
+import { logEvent } from '../services/analytics/index.js'
 import type {
   ConnectedMCPServer,
   MCPServerConnection,
-} from '../services/mcp/types.ts'
-import type { Message } from '../types/message.ts'
-import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.ts'
+} from '../services/mcp/types.js'
+import type { Message } from '../types/message.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
 
 export type McpInstructionsDelta = {
   /** Server names — for stateless-scan reconstruction. */

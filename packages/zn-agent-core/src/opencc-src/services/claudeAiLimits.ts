@@ -1,29 +1,29 @@
 import { APIError } from '@anthropic-ai/sdk'
 import type { MessageParam } from '@anthropic-ai/sdk/resources/index.mjs'
 import isEqual from 'lodash-es/isEqual.js'
-import { getIsNonInteractiveSession } from '../bootstrap/state.ts'
-import { isClaudeAISubscriber } from '../utils/auth.ts'
-import { getModelBetas } from '../utils/betas.ts'
-import { getGlobalConfig, saveGlobalConfig } from '../utils/config.ts'
-import { logError } from '../utils/log.ts'
-import { getSmallFastModel } from '../utils/model/model.ts'
-import { getAPIProvider } from '../utils/model/providers.ts'
-import { isEssentialTrafficOnly } from '../utils/privacyLevel.ts'
-import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from './analytics/index.ts'
-import { logEvent } from './analytics/index.ts'
-import { getAPIMetadata } from './api/claude.ts'
-import { getAnthropicClient } from './api/client.ts'
+import { getIsNonInteractiveSession } from '../bootstrap/state.js'
+import { isClaudeAISubscriber } from '../utils/auth.js'
+import { getModelBetas } from '../utils/betas.js'
+import { getGlobalConfig, saveGlobalConfig } from '../utils/config.js'
+import { logError } from '../utils/log.js'
+import { getSmallFastModel } from '../utils/model/model.js'
+import { getAPIProvider } from '../utils/model/providers.js'
+import { isEssentialTrafficOnly } from '../utils/privacyLevel.js'
+import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from './analytics/index.js'
+import { logEvent } from './analytics/index.js'
+import { getAPIMetadata } from './api/claude.js'
+import { getAnthropicClient } from './api/client.js'
 import {
   processRateLimitHeaders,
   shouldProcessRateLimits,
-} from './rateLimitMocking.ts'
+} from './rateLimitMocking.js'
 
 // Re-export message functions from centralized location
 export {
   getRateLimitErrorMessage,
   getRateLimitWarning,
   getUsingOverageText,
-} from './rateLimitMessages.ts'
+} from './rateLimitMessages.js'
 
 type QuotaStatus = 'allowed' | 'allowed_warning' | 'rejected'
 

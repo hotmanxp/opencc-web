@@ -1,12 +1,12 @@
-import { createCombinedAbortSignal } from '../../../utils/combinedAbortSignal.ts'
-import { logForDebugging } from '../../../utils/debug.ts'
-import { getClaudeCodeUserAgent } from '../../../utils/userAgent.ts'
+import { createCombinedAbortSignal } from '../../../utils/combinedAbortSignal.js'
+import { logForDebugging } from '../../../utils/debug.js'
+import { getClaudeCodeUserAgent } from '../../../utils/userAgent.js'
 import {
   DEFAULT_MINIMAX_BASE_URL,
   DEFAULT_MINIMAX_UNAVAILABLE_MESSAGE,
   type MiniMaxUsageData,
-} from './types.ts'
-import { normalizeMiniMaxUsagePayload } from './parse.ts'
+} from './types.js'
+import { normalizeMiniMaxUsagePayload } from './parse.js'
 
 function trimTrailingSlash(value: string): string {
   return value.replace(/\/+$/, '')

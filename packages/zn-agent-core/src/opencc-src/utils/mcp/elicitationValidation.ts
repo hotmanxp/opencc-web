@@ -5,12 +5,12 @@ import type {
   StringSchema,
 } from '@modelcontextprotocol/sdk/types.js'
 import { z } from 'zod/v4'
-import { jsonStringify } from '../slowOperations.ts'
-import { plural } from '../stringUtils.ts'
+import { jsonStringify } from '../slowOperations.js'
+import { plural } from '../stringUtils.js'
 import {
   looksLikeISO8601,
   parseNaturalLanguageDateTime,
-} from './dateTimeParser.ts'
+} from './dateTimeParser.js'
 
 export type ValidationResult = {
   value?: string | number | boolean

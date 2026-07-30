@@ -1,5 +1,5 @@
-import type { AnthropicUsage } from '../codexShim.ts'
-import type { OpenAIStreamChunk } from './types.ts'
+import type { AnthropicUsage } from '../codexShim.js'
+import type { OpenAIStreamChunk } from './types.js'
 
 const JSON_REPAIR_SUFFIXES = [
   '}', '"}', ']}', '"]}', '}}', '"}}', ']}}', '"]}}', '"]}]}', '}]}'

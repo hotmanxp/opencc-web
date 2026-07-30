@@ -1,12 +1,12 @@
-import { getInitialSettings } from './settings/settings.ts'
-import { isUltracodeReminderOn } from './ultracodeReminder.ts'
-import { isUltracodeKeywordIgnored } from './ultracodeKeywordIgnored.ts'
-import { findKeywordTriggerPositions } from './ultraplan/keyword.ts'
-import { createUserMessage } from './messages.ts'
+import { getInitialSettings } from './settings/settings.js'
+import { isUltracodeReminderOn } from './ultracodeReminder.js'
+import { isUltracodeKeywordIgnored } from './ultracodeKeywordIgnored.js'
+import { findKeywordTriggerPositions } from './ultraplan/keyword.js'
+import { createUserMessage } from './messages.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../services/analytics/index.ts'
+} from '../services/analytics/index.js'
 
 /**
  * Ultracode is xhigh effort + standing dynamic-workflow orchestration.

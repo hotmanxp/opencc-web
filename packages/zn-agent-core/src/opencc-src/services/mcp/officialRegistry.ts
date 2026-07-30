@@ -1,7 +1,7 @@
 import axios from 'axios'
-import { logForDebugging } from '../../utils/debug.ts'
-import { errorMessage } from '../../utils/errors.ts'
-import { getAPIProvider } from '../../utils/model/providers.ts'
+import { logForDebugging } from '../../utils/debug.js'
+import { errorMessage } from '../../utils/errors.js'
+import { getAPIProvider } from '../../utils/model/providers.js'
 
 type RegistryServer = {
   server: {

@@ -1,4 +1,4 @@
-import { logForDebugging } from '../debug.ts'
+import { logForDebugging } from '../debug.js'
 
 /**
  * Git 2.30+ refuses to start when any environment value contains a NUL,

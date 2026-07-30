@@ -3,12 +3,12 @@ import { readFileSync, realpathSync, statSync } from 'fs'
 import { open, readFile, realpath, stat } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
 import { basename, dirname, join, resolve, sep } from 'path'
-import { hasBinaryExtension, isBinaryContent } from '../constants/files.ts'
-import { getCwd } from './cwd.ts'
-import { logForDebugging } from './debug.ts'
-import { logForDiagnosticsNoPII } from './diagLogs.ts'
-import { execFileNoThrow } from './execFileNoThrow.ts'
-import { getFsImplementation } from './fsOperations.ts'
+import { hasBinaryExtension, isBinaryContent } from '../constants/files.js'
+import { getCwd } from './cwd.js'
+import { logForDebugging } from './debug.js'
+import { logForDiagnosticsNoPII } from './diagLogs.js'
+import { execFileNoThrow } from './execFileNoThrow.js'
+import { getFsImplementation } from './fsOperations.js'
 import {
   getCachedBranch,
   getCachedDefaultBranch,
@@ -17,10 +17,10 @@ import {
   getWorktreeCountFromFs,
   isShallowClone as isShallowCloneFs,
   resolveGitDir,
-} from './git/gitFilesystem.ts'
-import { logError } from './log.ts'
-import { memoizeWithLRU } from './memoize.ts'
-import { whichSync } from './which.ts'
+} from './git/gitFilesystem.js'
+import { logError } from './log.js'
+import { memoizeWithLRU } from './memoize.js'
+import { whichSync } from './which.js'
 
 const GIT_ROOT_NOT_FOUND = Symbol('git-root-not-found')
 

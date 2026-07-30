@@ -1,6 +1,6 @@
 // @ts-nocheck — pre-existing typecheck debt, see docs/feature-gating.md
-import type { Message, UserMessage, AssistantMessage } from '../../types/message.ts'
-import { logForDebugging } from '../debug.ts'
+import type { Message, UserMessage, AssistantMessage } from '../../types/message.js'
+import { logForDebugging } from '../debug.js'
 
 export type ToolResultPairingValidationContext = {
   phase?: string

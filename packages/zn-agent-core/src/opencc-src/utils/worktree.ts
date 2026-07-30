@@ -12,37 +12,37 @@ import {
 } from 'fs/promises'
 import ignore from 'ignore'
 import { basename, dirname, join } from 'path'
-import { saveCurrentProjectConfig } from './config.ts'
-import { getCwd } from './cwd.ts'
-import { logForDebugging } from './debug.ts'
-import { errorMessage, getErrnoCode } from './errors.ts'
-import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.ts'
-import { parseGitConfigValue } from './git/gitConfigParser.ts'
+import { saveCurrentProjectConfig } from './config.js'
+import { getCwd } from './cwd.js'
+import { logForDebugging } from './debug.js'
+import { errorMessage, getErrnoCode } from './errors.js'
+import { execFileNoThrow, execFileNoThrowWithCwd } from './execFileNoThrow.js'
+import { parseGitConfigValue } from './git/gitConfigParser.js'
 import {
   getCommonDir,
   readWorktreeHeadSha,
   resolveGitDir,
   resolveRef,
-} from './git/gitFilesystem.ts'
+} from './git/gitFilesystem.js'
 import {
   findCanonicalGitRoot,
   findGitRoot,
   getBranch,
   getDefaultBranch,
   gitExe,
-} from './git.ts'
+} from './git.js'
 import {
   executeWorktreeCreateHook,
   executeWorktreeRemoveHook,
   hasWorktreeCreateHook,
-} from './hooks.ts'
-import { containsPathTraversal } from './path.ts'
-import { getPlatform } from './platform.ts'
+} from './hooks.js'
+import { containsPathTraversal } from './path.js'
+import { getPlatform } from './platform.js'
 import {
   getInitialSettings,
   getRelativeSettingsFilePathForSource,
-} from './settings/settings.ts'
-import { sleep } from './sleep.ts'
+} from './settings/settings.js'
+import { sleep } from './sleep.js'
 import { isInITerm2 } from './swarm/backends/detection.js'
 
 const VALID_WORKTREE_SLUG_SEGMENT = /^[a-zA-Z0-9._-]+$/
@@ -987,14 +987,16 @@ export async function createAgentWorktree(
 }> {
   validateWorktreeSlug(slug)
 
-  // Resolve the parent session's working directory once. Defaults to the
-  // ambient session cwd; callers (and tests) may pin it explicitly so both the
-  // canonical-root and parent-HEAD lookups below stay consistent.
   const sessionCwd = options?.cwd ?? getCwd()
 
-  // Try hook-based worktree creation first (allows user-configured VCS)
+  // Try hook-based worktree creation first (allows user-configured VCS).
+  // Forward sessionCwd so hooks operating from a multi-repo parent can target
+  // the selected child repository (#2052). Hook failure remains terminal here —
+  // AgentTool decides whether to fall back to a cwd override.
   if (hasWorktreeCreateHook()) {
-    const hookResult = await executeWorktreeCreateHook(slug)
+    const hookResult = await executeWorktreeCreateHook(slug, {
+      cwd: sessionCwd,
+    })
     logForDebugging(
       `Created hook-based agent worktree at: ${hookResult.worktreePath}`,
     )

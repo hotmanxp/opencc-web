@@ -1,13 +1,13 @@
 import type { TerminalNotification } from '../ink/useTerminalNotification.js'
-import { getGlobalConfig } from '../utils/config.ts'
-import { env } from '../utils/env.ts'
-import { execFileNoThrow } from '../utils/execFileNoThrow.ts'
-import { executeNotificationHooks } from '../utils/hooks.ts'
-import { logError } from '../utils/log.ts'
+import { getGlobalConfig } from '../utils/config.js'
+import { env } from '../utils/env.js'
+import { execFileNoThrow } from '../utils/execFileNoThrow.js'
+import { executeNotificationHooks } from '../utils/hooks.js'
+import { logError } from '../utils/log.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from './analytics/index.ts'
+} from './analytics/index.js'
 
 export type NotificationOptions = {
   message: string

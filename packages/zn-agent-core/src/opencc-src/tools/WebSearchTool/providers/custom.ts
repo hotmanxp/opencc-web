@@ -26,15 +26,15 @@
  * 6. Audit log on first custom search (one-time warning)
  */
 
-import type { SearchInput, SearchProvider } from './types.ts'
-import { createCombinedAbortSignal } from '../../../utils/combinedAbortSignal.ts'
+import type { SearchInput, SearchProvider } from './types.js'
+import { createCombinedAbortSignal } from '../../../utils/combinedAbortSignal.js'
 import {
   applyDomainFilters,
   normalizeHit,
   safeHostname,
   type ProviderOutput,
   type SearchHit,
-} from './types.ts'
+} from './types.js'
 
 // ---------------------------------------------------------------------------
 // Built-in provider presets

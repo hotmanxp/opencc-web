@@ -1,4 +1,4 @@
-import { getGlobalConfig, saveGlobalConfig } from '../config.ts'
+import { getGlobalConfig, saveGlobalConfig } from '../config.js'
 
 const SKILL_USAGE_DEBOUNCE_MS = 60_000
 

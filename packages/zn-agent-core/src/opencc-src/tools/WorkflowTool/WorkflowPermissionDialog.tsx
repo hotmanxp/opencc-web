@@ -1,7 +1,7 @@
 // @ts-nocheck
 import React, { useState } from 'react'
 import { Box, Text } from '../../ink.js'
-import type { ScriptAnalysis } from './staticAnalyzer.ts'
+import type { ScriptAnalysis } from './staticAnalyzer.js'
 
 export type PermissionAnswer = 'yes' | 'yes-always' | 'no'
 

@@ -1,5 +1,5 @@
-import type { LocalWorkflowTask } from './LocalWorkflowTask.ts'
-import type { SetAppState } from '../../Task.ts'
+import type { LocalWorkflowTask } from './LocalWorkflowTask.js'
+import type { SetAppState } from '../../Task.js'
 import type { AppState } from '../../state/AppStateStore.js'
 import { registerTask } from '../../utils/task/framework.js'
 

@@ -4,56 +4,56 @@ import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import {
   getToolNameForPermissionCheck,
   mcpInfoFromString,
-} from '../../services/mcp/mcpStringUtils.ts'
-import type { Tool, ToolPermissionContext, ToolUseContext } from '../../Tool.ts'
-import { AGENT_TOOL_NAME } from '../../tools/AgentTool/constants.ts'
-import { shouldUseSandbox } from '../../tools/BashTool/shouldUseSandbox.ts'
-import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.ts'
-import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.ts'
-import { REPL_TOOL_NAME } from '../../tools/REPLTool/constants.ts'
-import type { AssistantMessage } from '../../types/message.ts'
-import { extractOutputRedirections } from '../bash/commands.ts'
-import { logForDebugging } from '../debug.ts'
-import { AbortError, toError } from '../errors.ts'
-import { logError } from '../log.ts'
-import { SandboxManager } from '../sandbox/sandbox-adapter.ts'
+} from '../../services/mcp/mcpStringUtils.js'
+import type { Tool, ToolPermissionContext, ToolUseContext } from '../../Tool.js'
+import { AGENT_TOOL_NAME } from '../../tools/AgentTool/constants.js'
+import { shouldUseSandbox } from '../../tools/BashTool/shouldUseSandbox.js'
+import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
+import { POWERSHELL_TOOL_NAME } from '../../tools/PowerShellTool/toolName.js'
+import { REPL_TOOL_NAME } from '../../tools/REPLTool/constants.js'
+import type { AssistantMessage } from '../../types/message.js'
+import { extractOutputRedirections } from '../bash/commands.js'
+import { logForDebugging } from '../debug.js'
+import { AbortError, toError } from '../errors.js'
+import { logError } from '../log.js'
+import { SandboxManager } from '../sandbox/sandbox-adapter.js'
 import {
   getSettingSourceDisplayNameLowercase,
   SETTING_SOURCES,
-} from '../settings/constants.ts'
-import { plural } from '../stringUtils.ts'
-import { permissionModeTitle } from './PermissionMode.ts'
+} from '../settings/constants.js'
+import { plural } from '../stringUtils.js'
+import { permissionModeTitle } from './PermissionMode.js'
 import type {
   PermissionAskDecision,
   PermissionDecision,
   PermissionDecisionReason,
   PermissionDenyDecision,
   PermissionResult,
-} from './PermissionResult.ts'
+} from './PermissionResult.js'
 import type {
   PermissionBehavior,
   PermissionRule,
   PermissionRuleSource,
   PermissionRuleValue,
-} from './PermissionRule.ts'
+} from './PermissionRule.js'
 import {
   applyPermissionUpdate,
   applyPermissionUpdates,
   persistPermissionUpdates,
-} from './PermissionUpdate.ts'
+} from './PermissionUpdate.js'
 import type {
   PermissionUpdate,
   PermissionUpdateDestination,
-} from './PermissionUpdateSchema.ts'
+} from './PermissionUpdateSchema.js'
 import {
   permissionRuleValueFromString,
   permissionRuleValueToString,
-} from './permissionRuleParser.ts'
+} from './permissionRuleParser.js'
 import {
   deletePermissionRuleFromSettings,
   type PermissionRuleFromEditableSettings,
   shouldAllowManagedPermissionRulesOnly,
-} from './permissionsLoader.ts'
+} from './permissionsLoader.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 const classifierDecisionModule = true
@@ -69,28 +69,28 @@ import {
   getTotalCacheReadInputTokens,
   getTotalInputTokens,
   getTotalOutputTokens,
-} from '../../bootstrap/state.ts'
-import { getFeatureValue_CACHED_WITH_REFRESH } from '../../services/analytics/growthbook.ts'
+} from '../../bootstrap/state.js'
+import { getFeatureValue_CACHED_WITH_REFRESH } from '../../services/analytics/growthbook.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../../services/analytics/index.ts'
-import { sanitizeToolNameForAnalytics } from '../../services/analytics/metadata.ts'
+} from '../../services/analytics/index.js'
+import { sanitizeToolNameForAnalytics } from '../../services/analytics/metadata.js'
 import {
   clearClassifierChecking,
   setClassifierChecking,
-} from '../classifierApprovals.ts'
-import { isInProtectedNamespace } from '../envUtils.ts'
-import { executePermissionRequestHooks } from '../hooks.ts'
+} from '../classifierApprovals.js'
+import { isInProtectedNamespace } from '../envUtils.js'
+import { executePermissionRequestHooks } from '../hooks.js'
 import {
   AUTO_REJECT_MESSAGE,
   buildClassifierUnavailableMessage,
   buildYoloRejectionMessage,
   DONT_ASK_REJECT_MESSAGE,
-} from '../messages.ts'
-import { calculateCostFromTokens } from '../modelCost.ts'
+} from '../messages.js'
+import { calculateCostFromTokens } from '../modelCost.js'
 /* eslint-enable @typescript-eslint/no-require-imports */
-import { jsonStringify } from '../slowOperations.ts'
+import { jsonStringify } from '../slowOperations.js'
 import {
   createDenialTrackingState,
   DENIAL_LIMITS,
@@ -98,11 +98,11 @@ import {
   recordDenial,
   recordSuccess,
   shouldFallbackToPrompting,
-} from './denialTracking.ts'
+} from './denialTracking.js'
 import {
   classifyYoloAction,
   formatActionForClassifier,
-} from './yoloClassifier.ts'
+} from './yoloClassifier.js'
 
 const CLASSIFIER_FAIL_CLOSED_REFRESH_MS = 30 * 60 * 1000 // 30 minutes
 

@@ -10,8 +10,8 @@
  * Arguments are parsed using shell-quote for proper shell argument handling.
  */
 
-import { tryParseShellCommand } from './bash/shellQuote.ts'
-import { escapeRegExp } from './stringUtils.ts'
+import { tryParseShellCommand } from './bash/shellQuote.js'
+import { escapeRegExp } from './stringUtils.js'
 
 /**
  * Parse an arguments string into an array of individual arguments.

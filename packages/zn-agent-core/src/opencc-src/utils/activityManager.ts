@@ -1,4 +1,4 @@
-import { getActiveTimeCounter as getActiveTimeCounterImpl } from '../bootstrap/state.ts'
+import { getActiveTimeCounter as getActiveTimeCounterImpl } from '../bootstrap/state.js'
 
 type ActivityManagerOptions = {
   getNow?: () => number

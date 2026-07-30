@@ -1,10 +1,10 @@
 import { Ajv } from 'ajv'
 import { z } from 'zod/v4'
-import { buildTool, type ToolDef, type ValidationResult } from '../../Tool.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import type { PermissionResult } from '../../types/permissions.ts'
-import { isOutputLineTruncated } from '../../utils/terminal.ts'
-import { DESCRIPTION, PROMPT } from './prompt.ts'
+import { buildTool, type ToolDef, type ValidationResult } from '../../Tool.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import type { PermissionResult } from '../../types/permissions.js'
+import { isOutputLineTruncated } from '../../utils/terminal.js'
+import { DESCRIPTION, PROMPT } from './prompt.js'
 import {
   renderToolResultMessage,
   renderToolUseMessage,
@@ -36,7 +36,7 @@ type OutputSchema = ReturnType<typeof outputSchema>
 export type Output = z.infer<OutputSchema>
 
 // Re-export MCPProgress from centralized types to break import cycles
-export type { MCPProgress } from '../../types/tools.ts'
+export type { MCPProgress } from '../../types/tools.js'
 
 const ajv = new Ajv({ strict: false })
 

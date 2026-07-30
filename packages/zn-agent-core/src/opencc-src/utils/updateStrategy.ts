@@ -1,10 +1,10 @@
-import type { DiagnosticInfo, InstallationType } from './doctorDiagnostic.ts'
-import { getDoctorDiagnostic } from './doctorDiagnostic.ts'
-import { localInstallationExists } from './localInstaller.ts'
-import { type LegacyAPIProvider, getAPIProvider } from './model/providers.ts'
-import { hasNativeDistribution } from './nativeDistribution.ts'
-import type { PackageManager } from './nativeInstaller/packageManagers.ts'
-import { getPackageManager } from './nativeInstaller/packageManagers.ts'
+import type { DiagnosticInfo, InstallationType } from './doctorDiagnostic.js'
+import { getDoctorDiagnostic } from './doctorDiagnostic.js'
+import { localInstallationExists } from './localInstaller.js'
+import { type LegacyAPIProvider, getAPIProvider } from './model/providers.js'
+import { hasNativeDistribution } from './nativeDistribution.js'
+import type { PackageManager } from './nativeInstaller/packageManagers.js'
+import { getPackageManager } from './nativeInstaller/packageManagers.js'
 
 /**
  * How the *currently running* OpenClaude installation should be updated.

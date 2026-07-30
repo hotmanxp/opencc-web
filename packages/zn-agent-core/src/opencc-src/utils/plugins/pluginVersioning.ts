@@ -11,9 +11,9 @@
  */
 
 import { createHash } from 'crypto'
-import { logForDebugging } from '../debug.ts'
-import { getHeadForDir } from '../git/gitFilesystem.ts'
-import type { PluginManifest, PluginSource } from './schemas.ts'
+import { logForDebugging } from '../debug.js'
+import { getHeadForDir } from '../git/gitFilesystem.js'
+import type { PluginManifest, PluginSource } from './schemas.js'
 
 /**
  * Calculate the version for a plugin based on its source.

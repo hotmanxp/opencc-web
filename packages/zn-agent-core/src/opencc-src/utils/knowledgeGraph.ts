@@ -1,14 +1,14 @@
 import { rmSync, renameSync, existsSync, readFileSync, writeFileSync } from 'fs'
 import { join } from 'path'
-import { getProjectsDir } from './envUtils.ts'
-import { sanitizePath } from './sessionStoragePortable.ts'
-import { getFsImplementation } from './fsOperations.ts'
+import { getProjectsDir } from './envUtils.js'
+import { sanitizePath } from './sessionStoragePortable.js'
+import { getFsImplementation } from './fsOperations.js'
 import { create, insert, search, type Orama, remove, getByID } from '@orama/orama'
 import { persist, restore } from '@orama/plugin-data-persistence'
 import { AsyncLocalStorage } from 'async_hooks'
-import { SQLiteProvider } from './storage/SQLiteProvider.ts'
-import { JSONProvider } from './storage/JSONProvider.ts'
-import { writeFileSyncAndFlush_DEPRECATED } from './file.ts'
+import { SQLiteProvider } from './storage/SQLiteProvider.js'
+import { JSONProvider } from './storage/JSONProvider.js'
+import { writeFileSyncAndFlush_DEPRECATED } from './file.js'
 
 export interface Entity {
   id: string

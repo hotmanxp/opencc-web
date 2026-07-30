@@ -2,14 +2,14 @@ import { feature } from 'bun:bundle'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../services/analytics/index.ts'
-import type { ToolUseContext } from '../Tool.ts'
-import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.ts'
-import { isBuiltInAgent } from '../tools/AgentTool/loadAgentsDir.ts'
+} from '../services/analytics/index.js'
+import type { ToolUseContext } from '../Tool.js'
+import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.js'
+import { isBuiltInAgent } from '../tools/AgentTool/loadAgentsDir.js'
 import { isCoordinatorMode, getCoordinatorSystemPrompt } from '../coordinator/coordinatorMode.js'
-import { asSystemPrompt, type SystemPrompt } from './systemPromptType.ts'
+import { asSystemPrompt, type SystemPrompt } from './systemPromptType.js'
 
-export { asSystemPrompt, type SystemPrompt } from './systemPromptType.ts'
+export { asSystemPrompt, type SystemPrompt } from './systemPromptType.js'
 
 // Dead code elimination: conditional import for proactive mode.
 // Same pattern as prompts.ts — lazy require to avoid pulling the module

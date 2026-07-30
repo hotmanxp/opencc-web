@@ -10,18 +10,18 @@
  */
 
 import { basename, join } from 'path'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
-import { logForDebugging } from '../debug.ts'
-import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.ts'
-import { isENOENT, toError } from '../errors.ts'
-import { getFsImplementation } from '../fsOperations.ts'
-import { getProcessCommand } from '../genericProcessUtils.ts'
-import { logError } from '../log.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { logForDebugging } from '../debug.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from '../envUtils.js'
+import { isENOENT, toError } from '../errors.js'
+import { getFsImplementation } from '../fsOperations.js'
+import { getProcessCommand } from '../genericProcessUtils.js'
+import { logError } from '../log.js'
 import {
   jsonParse,
   jsonStringify,
   writeFileSync_DEPRECATED,
-} from '../slowOperations.ts'
+} from '../slowOperations.js'
 
 /**
  * Check if PID-based version locking is enabled.

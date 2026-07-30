@@ -9,38 +9,38 @@ import {
   getOriginalCwd,
   getSessionId,
   setCwdState,
-} from '../bootstrap/state.ts'
-import { generateTaskId } from '../Task.ts'
-import { pwd } from './cwd.ts'
-import { logForDebugging } from './debug.ts'
-import { errorMessage, isENOENT } from './errors.ts'
-import { getFsImplementation } from './fsOperations.ts'
-import { logError } from './log.ts'
-import { normalizeAbortReason } from './abortReasons.ts'
+} from '../bootstrap/state.js'
+import { generateTaskId } from '../Task.js'
+import { pwd } from './cwd.js'
+import { logForDebugging } from './debug.js'
+import { errorMessage, isENOENT } from './errors.js'
+import { getFsImplementation } from './fsOperations.js'
+import { logError } from './log.js'
+import { normalizeAbortReason } from './abortReasons.js'
 import {
   createAbortedCommand,
   createFailedCommand,
   type ShellCommand,
   wrapSpawn,
-} from './ShellCommand.ts'
-import { getTaskOutputDir } from './task/diskOutput.ts'
-import { TaskOutput } from './task/TaskOutput.ts'
-import { which } from './which.ts'
+} from './ShellCommand.js'
+import { getTaskOutputDir } from './task/diskOutput.js'
+import { TaskOutput } from './task/TaskOutput.js'
+import { which } from './which.js'
 
-export type { ExecResult } from './ShellCommand.ts'
+export type { ExecResult } from './ShellCommand.js'
 
 import { accessSync } from 'fs'
-import { onCwdChangedForHooks } from './hooks/fileChangedWatcher.ts'
-import { getClaudeTempDirName } from './permissions/filesystem.ts'
-import { getPlatform } from './platform.ts'
-import { SandboxManager } from './sandbox/sandbox-adapter.ts'
-import { invalidateSessionEnvCache } from './sessionEnvironment.ts'
-import { createBashShellProvider } from './shell/bashProvider.ts'
-import { getCachedPowerShellPath } from './shell/powershellDetection.ts'
-import { createPowerShellProvider } from './shell/powershellProvider.ts'
-import type { ShellProvider, ShellType } from './shell/shellProvider.ts'
-import { subprocessEnv } from './subprocessEnv.ts'
-import { posixPathToWindowsPath } from './windowsPaths.ts'
+import { onCwdChangedForHooks } from './hooks/fileChangedWatcher.js'
+import { getClaudeTempDirName } from './permissions/filesystem.js'
+import { getPlatform } from './platform.js'
+import { SandboxManager } from './sandbox/sandbox-adapter.js'
+import { invalidateSessionEnvCache } from './sessionEnvironment.js'
+import { createBashShellProvider } from './shell/bashProvider.js'
+import { getCachedPowerShellPath } from './shell/powershellDetection.js'
+import { createPowerShellProvider } from './shell/powershellProvider.js'
+import type { ShellProvider, ShellType } from './shell/shellProvider.js'
+import { subprocessEnv } from './subprocessEnv.js'
+import { posixPathToWindowsPath } from './windowsPaths.js'
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000 // 30 minutes
 

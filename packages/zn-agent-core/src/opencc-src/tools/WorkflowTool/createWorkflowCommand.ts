@@ -1,7 +1,7 @@
-import { isWorkflowsDisabled } from '../../utils/envUtils.ts'
-import type { Command } from '../../types/command.ts'
-import { getWorkflowRegistry } from './singleton.ts'
-import type { Workflow } from './types.ts'
+import { isWorkflowsDisabled } from '../../utils/envUtils.js'
+import type { Command } from '../../types/command.js'
+import { getWorkflowRegistry } from './singleton.js'
+import type { Workflow } from './types.js'
 
 /**
  * Convert a loaded Workflow into a `type: 'prompt'` Command object so

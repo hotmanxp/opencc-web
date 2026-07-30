@@ -1,4 +1,4 @@
-import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.ts'
+import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
 import { feature } from 'bun:bundle'
 import memoize from 'lodash-es/memoize.js'
 import { basename } from 'path'
@@ -8,50 +8,50 @@ import { isAutoMemoryEnabled } from '../../memdir/paths.js'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
-} from '../../services/analytics/index.ts'
+} from '../../services/analytics/index.js'
 import {
   type McpServerConfig,
   McpServerConfigSchema,
-} from '../../services/mcp/types.ts'
-import type { ToolUseContext } from '../../Tool.ts'
-import { logForDebugging } from '../../utils/debug.ts'
+} from '../../services/mcp/types.js'
+import type { ToolUseContext } from '../../Tool.js'
+import { logForDebugging } from '../../utils/debug.js'
 import {
   EFFORT_LEVELS,
   type EffortValue,
   parseEffortValue,
-} from '../../utils/effort.ts'
-import { parsePositiveIntFromFrontmatter } from '../../utils/frontmatterParser.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import { logError } from '../../utils/log.ts'
+} from '../../utils/effort.js'
+import { parsePositiveIntFromFrontmatter } from '../../utils/frontmatterParser.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import { logError } from '../../utils/log.js'
 import {
   loadMarkdownFilesForSubdir,
   parseAgentToolsFromFrontmatter,
   parseSlashCommandToolsFromFrontmatter,
-} from '../../utils/markdownConfigLoader.ts'
+} from '../../utils/markdownConfigLoader.js'
 import {
   PERMISSION_MODES,
   type PermissionMode,
-} from '../../utils/permissions/PermissionMode.ts'
+} from '../../utils/permissions/PermissionMode.js'
 import {
   clearPluginAgentCache,
   loadPluginAgents,
-} from '../../utils/plugins/loadPluginAgents.ts'
-import { HooksSchema, type HooksSettings } from '../../utils/settings/types.ts'
-import { jsonStringify } from '../../utils/slowOperations.ts'
-import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.ts'
-import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.ts'
-import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/prompt.ts'
+} from '../../utils/plugins/loadPluginAgents.js'
+import { HooksSchema, type HooksSettings } from '../../utils/settings/types.js'
+import { jsonStringify } from '../../utils/slowOperations.js'
+import { FILE_EDIT_TOOL_NAME } from '../FileEditTool/constants.js'
+import { FILE_READ_TOOL_NAME } from '../FileReadTool/prompt.js'
+import { FILE_WRITE_TOOL_NAME } from '../FileWriteTool/prompt.js'
 import {
   AGENT_COLORS,
   type AgentColorName,
   setAgentColor,
-} from './agentColorManager.ts'
-import { type AgentMemoryScope, loadAgentMemoryPrompt } from './agentMemory.ts'
+} from './agentColorManager.js'
+import { type AgentMemoryScope, loadAgentMemoryPrompt } from './agentMemory.js'
 import {
   checkAgentMemorySnapshot,
   initializeFromSnapshot,
-} from './agentMemorySnapshot.ts'
-import { getBuiltInAgents } from './builtInAgents.ts'
+} from './agentMemorySnapshot.js'
+import { getBuiltInAgents } from './builtInAgents.js'
 
 // Type for MCP server specification in agent definitions
 // Can be either a reference to an existing server by name, or an inline definition as { [name]: config }

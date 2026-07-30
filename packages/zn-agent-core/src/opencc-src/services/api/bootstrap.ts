@@ -6,24 +6,24 @@ import {
   hasProfileScope,
 } from 'src/utils/auth.js'
 import { z } from 'zod'
-import { getOauthConfig, OAUTH_BETA_HEADER } from '../../constants/oauth.ts'
-import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.ts'
-import { logForDebugging } from '../../utils/debug.ts'
-import { withOAuth401Retry } from '../../utils/http.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import { logError } from '../../utils/log.ts'
-import { getAPIProvider } from '../../utils/model/providers.ts'
-import { isEssentialTrafficOnly } from '../../utils/privacyLevel.ts'
-import type { ModelOption } from '../../utils/model/modelOptions.ts'
+import { getOauthConfig, OAUTH_BETA_HEADER } from '../../constants/oauth.js'
+import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js'
+import { logForDebugging } from '../../utils/debug.js'
+import { withOAuth401Retry } from '../../utils/http.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import { logError } from '../../utils/log.js'
+import { getAPIProvider } from '../../utils/model/providers.js'
+import { isEssentialTrafficOnly } from '../../utils/privacyLevel.js'
+import type { ModelOption } from '../../utils/model/modelOptions.js'
 import {
   getLocalOpenAICompatibleProviderLabel,
   listOpenAICompatibleModels,
-} from '../../utils/providerDiscovery.ts'
-import { getClaudeCodeUserAgent } from '../../utils/userAgent.ts'
+} from '../../utils/providerDiscovery.js'
+import { getClaudeCodeUserAgent } from '../../utils/userAgent.js'
 import {
   getAdditionalModelOptionsCacheScope,
   resolveProviderRequest,
-} from './providerConfig.ts'
+} from './providerConfig.js'
 
 const bootstrapResponseSchema = lazySchema(() =>
   z.object({

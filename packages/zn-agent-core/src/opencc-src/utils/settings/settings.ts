@@ -7,33 +7,33 @@ import {
   getFlagSettingsPath,
   getOriginalCwd,
   getUseCoworkPlugins,
-} from '../../bootstrap/state.ts'
+} from '../../bootstrap/state.js'
 import { getRemoteManagedSettingsSyncFromCache } from '../../services/remoteManagedSettings/syncCacheState.js'
-import { uniq } from '../array.ts'
-import { logForDebugging } from '../debug.ts'
-import { logForDiagnosticsNoPII } from '../diagLogs.ts'
-import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.ts'
-import { getErrnoCode, isENOENT } from '../errors.ts'
-import { writeFileSyncAndFlush_DEPRECATED } from '../file.ts'
-import { readFileSync } from '../fileRead.ts'
-import { getFsImplementation, safeResolvePath } from '../fsOperations.ts'
-import { addFileGlobRuleToGitignore } from '../git/gitignore.ts'
-import { safeParseJSON } from '../json.ts'
-import { logError } from '../log.ts'
-import { getPlatform } from '../platform.ts'
-import { clone, jsonStringify } from '../slowOperations.ts'
-import { profileCheckpoint } from '../startupProfiler.ts'
+import { uniq } from '../array.js'
+import { logForDebugging } from '../debug.js'
+import { logForDiagnosticsNoPII } from '../diagLogs.js'
+import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
+import { getErrnoCode, isENOENT } from '../errors.js'
+import { writeFileSyncAndFlush_DEPRECATED } from '../file.js'
+import { readFileSync } from '../fileRead.js'
+import { getFsImplementation, safeResolvePath } from '../fsOperations.js'
+import { addFileGlobRuleToGitignore } from '../git/gitignore.js'
+import { safeParseJSON } from '../json.js'
+import { logError } from '../log.js'
+import { getPlatform } from '../platform.js'
+import { clone, jsonStringify } from '../slowOperations.js'
+import { profileCheckpoint } from '../startupProfiler.js'
 import {
   type EditableSettingSource,
   getEnabledSettingSources,
   type SettingSource,
-} from './constants.ts'
-import { markInternalWrite } from './internalWrites.ts'
+} from './constants.js'
+import { markInternalWrite } from './internalWrites.js'
 import {
   getManagedFilePath,
   getManagedSettingsDropInDir,
-} from './managedPath.ts'
-import { getHkcuSettings, getMdmSettings } from './mdm/settings.ts'
+} from './managedPath.js'
+import { getHkcuSettings, getMdmSettings } from './mdm/settings.js'
 import {
   getCachedParsedFile,
   getCachedSettingsForSource,
@@ -43,14 +43,14 @@ import {
   setCachedParsedFile,
   setCachedSettingsForSource,
   setSessionSettingsCache,
-} from './settingsCache.ts'
-import { type SettingsJson, SettingsSchema } from './types.ts'
+} from './settingsCache.js'
+import { type SettingsJson, SettingsSchema } from './types.js'
 import {
   filterInvalidPermissionRules,
   formatZodError,
   type SettingsWithErrors,
   type ValidationError,
-} from './validation.ts'
+} from './validation.js'
 
 /**
  * Get the path to the managed settings file based on the current platform

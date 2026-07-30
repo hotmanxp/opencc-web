@@ -1,13 +1,13 @@
 import { feature } from 'bun:bundle'
-import type { QuerySource } from '../../constants/querySource.ts'
-import { clearSystemPromptSections } from '../../constants/systemPromptSections.ts'
-import { getUserContext } from '../../context.ts'
-import { clearSpeculativeChecks } from '../../tools/BashTool/bashPermissions.ts'
-import { clearClassifierApprovals } from '../../utils/classifierApprovals.ts'
-import { resetGetMemoryFilesCache } from '../../utils/claudemd.ts'
-import { clearSessionMessagesCache } from '../../utils/sessionStorage.ts'
-import { clearBetaTracingState } from '../../utils/telemetry/betaSessionTracing.ts'
-import { resetMicrocompactState } from './microCompact.ts'
+import type { QuerySource } from '../../constants/querySource.js'
+import { clearSystemPromptSections } from '../../constants/systemPromptSections.js'
+import { getUserContext } from '../../context.js'
+import { clearSpeculativeChecks } from '../../tools/BashTool/bashPermissions.js'
+import { clearClassifierApprovals } from '../../utils/classifierApprovals.js'
+import { resetGetMemoryFilesCache } from '../../utils/claudemd.js'
+import { clearSessionMessagesCache } from '../../utils/sessionStorage.js'
+import { clearBetaTracingState } from '../../utils/telemetry/betaSessionTracing.js'
+import { resetMicrocompactState } from './microCompact.js'
 
 /**
  * Run cleanup of caches and tracking state after compaction.

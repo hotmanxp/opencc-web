@@ -4,20 +4,20 @@ import type {
   BetaWebSearchTool20250305,
 } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import { getAPIProvider } from 'src/utils/model/providers.js'
-import { isEnvTruthy } from '../../utils/envUtils.ts'
+import { isEnvTruthy } from '../../utils/envUtils.js'
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js'
 
 import { z } from 'zod/v4'
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
-import { queryModelWithStreaming } from '../../services/api/claude.ts'
-import { buildTool, type ToolDef } from '../../Tool.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import { logError } from '../../utils/log.ts'
-import { createUserMessage } from '../../utils/messages.ts'
-import { getMainLoopModel, getSmallFastModel } from '../../utils/model/model.ts'
-import { jsonParse, jsonStringify } from '../../utils/slowOperations.ts'
-import { asSystemPrompt } from '../../utils/systemPromptType.ts'
-import { getWebSearchPrompt, WEB_SEARCH_TOOL_NAME } from './prompt.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { queryModelWithStreaming } from '../../services/api/claude.js'
+import { buildTool, type ToolDef } from '../../Tool.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import { logError } from '../../utils/log.js'
+import { createUserMessage } from '../../utils/messages.js'
+import { getMainLoopModel, getSmallFastModel } from '../../utils/model/model.js'
+import { jsonParse, jsonStringify } from '../../utils/slowOperations.js'
+import { asSystemPrompt } from '../../utils/systemPromptType.js'
+import { getWebSearchPrompt, WEB_SEARCH_TOOL_NAME } from './prompt.js'
 import {
   getToolUseSummary,
   renderToolResultMessage,
@@ -30,7 +30,7 @@ import {
   getProviderMode,
   getAvailableProviders,
   type ProviderOutput,
-} from './providers/index.ts'
+} from './providers/index.js'
 
 const inputSchema = lazySchema(() =>
   z.strictObject({
@@ -79,9 +79,9 @@ type OutputSchema = ReturnType<typeof outputSchema>
 export type Output = z.infer<OutputSchema>
 
 // Re-export WebSearchProgress from centralized types to break import cycles
-export type { WebSearchProgress } from '../../types/tools.ts'
+export type { WebSearchProgress } from '../../types/tools.js'
 
-import type { WebSearchProgress } from '../../types/tools.ts'
+import type { WebSearchProgress } from '../../types/tools.js'
 
 // ---------------------------------------------------------------------------
 // Shared formatting: ProviderOutput → Output

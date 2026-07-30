@@ -20,11 +20,11 @@ export {
   isInProcessTeammate,
   runWithTeammateContext,
   type TeammateContext,
-} from './teammateContext.ts'
+} from './teammateContext.js'
 
 import type { AppState } from '../state/AppState.js'
-import { isEnvTruthy } from './envUtils.ts'
-import { getTeammateContext } from './teammateContext.ts'
+import { isEnvTruthy } from './envUtils.js'
+import { getTeammateContext } from './teammateContext.js'
 
 /**
  * Returns the parent session ID for this teammate.

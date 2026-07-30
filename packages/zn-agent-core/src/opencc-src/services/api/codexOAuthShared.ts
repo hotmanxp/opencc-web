@@ -1,4 +1,4 @@
-import { createCombinedAbortSignal } from '../../utils/combinedAbortSignal.ts'
+import { createCombinedAbortSignal } from '../../utils/combinedAbortSignal.js'
 
 export const CODEX_OAUTH_ISSUER = 'https://auth.openai.com'
 export const CODEX_REFRESH_URL = `${CODEX_OAUTH_ISSUER}/oauth/token`

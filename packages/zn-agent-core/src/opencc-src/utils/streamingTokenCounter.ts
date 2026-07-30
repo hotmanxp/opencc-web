@@ -5,7 +5,7 @@
  * to avoid dependency on arbitrary chunk boundaries.
  */
 
-import { roughTokenCountEstimation } from '../services/tokenEstimation.ts'
+import { roughTokenCountEstimation } from '../services/tokenEstimation.js'
 
 export class StreamingTokenCounter {
   private inputTokens = 0

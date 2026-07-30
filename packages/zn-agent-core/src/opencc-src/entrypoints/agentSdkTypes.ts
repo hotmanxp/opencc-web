@@ -20,17 +20,17 @@ import type {
 export type {
   SDKControlRequest,
   SDKControlResponse,
-} from './sdk/controlTypes.ts'
+} from './sdk/controlTypes.js'
 // Re-export core types (common serializable types)
-export * from './sdk/coreTypes.ts'
+export * from './sdk/coreTypes.js'
 // Re-export runtime types (callbacks, interfaces with methods)
-export * from './sdk/runtimeTypes.ts'
+export * from './sdk/runtimeTypes.js'
 
 // Re-export settings types (generated from settings JSON schema)
 // @ts-expect-error — generated at build time
 export type { Settings } from './sdk/settingsTypes.generated.js'
 // Re-export tool types (all marked @internal until SDK API stabilizes)
-export * from './sdk/toolTypes.ts'
+export * from './sdk/toolTypes.js'
 
 // ============================================================================
 // Functions
@@ -41,7 +41,7 @@ import type {
   SDKResultMessage,
   SDKSessionInfo,
   SDKUserMessage,
-} from './sdk/coreTypes.ts'
+} from './sdk/coreTypes.js'
 // Import types needed for function signatures
 import type {
   ForkSessionOptions,
@@ -56,7 +56,7 @@ import type {
   SdkMcpToolDefinition,
   SessionMessage,
   SessionMutationOptions,
-} from './sdk/shared.ts'
+} from './sdk/shared.js'
 
 export type {
   ListSessionsOptions,

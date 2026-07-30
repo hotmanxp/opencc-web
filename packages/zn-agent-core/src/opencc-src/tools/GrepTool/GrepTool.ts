@@ -1,33 +1,33 @@
 import { z } from 'zod/v4'
-import type { ValidationResult } from '../../Tool.ts'
-import { buildTool, type ToolDef } from '../../Tool.ts'
-import { getCwd } from '../../utils/cwd.ts'
-import { isENOENT } from '../../utils/errors.ts'
+import type { ValidationResult } from '../../Tool.js'
+import { buildTool, type ToolDef } from '../../Tool.js'
+import { getCwd } from '../../utils/cwd.js'
+import { isENOENT } from '../../utils/errors.js'
 import {
   FILE_NOT_FOUND_CWD_NOTE,
   suggestPathUnderCwd,
-} from '../../utils/file.ts'
-import { getFsImplementation } from '../../utils/fsOperations.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
+} from '../../utils/file.js'
+import { getFsImplementation } from '../../utils/fsOperations.js'
+import { lazySchema } from '../../utils/lazySchema.js'
 import {
   expandPath,
   relativizeContentLine,
   toRelativePath,
-} from '../../utils/path.ts'
+} from '../../utils/path.js'
 import {
   checkReadPermissionForTool,
   getFileReadIgnorePatterns,
   normalizePatternsToPath,
-} from '../../utils/permissions/filesystem.ts'
-import type { PermissionDecision } from '../../utils/permissions/PermissionResult.ts'
-import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.ts'
-import { getGlobExclusionsForPluginCache } from '../../utils/plugins/orphanedPluginFilter.ts'
-import { ripGrep } from '../../utils/ripgrep.ts'
-import { semanticBoolean } from '../../utils/semanticBoolean.ts'
-import { semanticNumber } from '../../utils/semanticNumber.ts'
-import { plural } from '../../utils/stringUtils.ts'
-import { GREP_TOOL_NAME, getDescription } from './prompt.ts'
-import { normalizeCountLine } from './normalizeCountLine.ts'
+} from '../../utils/permissions/filesystem.js'
+import type { PermissionDecision } from '../../utils/permissions/PermissionResult.js'
+import { matchWildcardPattern } from '../../utils/permissions/shellRuleMatching.js'
+import { getGlobExclusionsForPluginCache } from '../../utils/plugins/orphanedPluginFilter.js'
+import { ripGrep } from '../../utils/ripgrep.js'
+import { semanticBoolean } from '../../utils/semanticBoolean.js'
+import { semanticNumber } from '../../utils/semanticNumber.js'
+import { plural } from '../../utils/stringUtils.js'
+import { GREP_TOOL_NAME, getDescription } from './prompt.js'
+import { normalizeCountLine } from './normalizeCountLine.js'
 import {
   getToolUseSummary,
   renderToolResultMessage,

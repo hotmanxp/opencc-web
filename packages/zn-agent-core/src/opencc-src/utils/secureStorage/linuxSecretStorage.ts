@@ -1,11 +1,11 @@
 import { execaSync } from 'execa'
-import { jsonParse, jsonStringify } from '../slowOperations.ts'
+import { jsonParse, jsonStringify } from '../slowOperations.js'
 import {
   CREDENTIALS_SERVICE_SUFFIX,
   getSecureStorageServiceName,
   getUsername,
-} from './macOsKeychainHelpers.ts'
-import type { SecureStorage, SecureStorageData } from './index.ts'
+} from './macOsKeychainHelpers.js'
+import type { SecureStorage, SecureStorageData } from './index.js'
 
 /**
  * Linux-specific secure storage implementation using the secret-tool CLI.

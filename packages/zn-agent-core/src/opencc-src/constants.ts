@@ -9,7 +9,7 @@
 // Brand (re-exported from product.ts for centralized access)
 // ---------------------------------------------------------------------------
 
-export { BRAND_NAME } from './constants/product.ts'
+export { BRAND_NAME } from './constants/product.js'
 
 // ---------------------------------------------------------------------------
 // Config directory names

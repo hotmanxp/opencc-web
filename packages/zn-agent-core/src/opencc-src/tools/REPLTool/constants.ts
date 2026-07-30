@@ -1,4 +1,4 @@
-import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.ts'
+import { isEnvDefinedFalsy, isEnvTruthy } from '../../utils/envUtils.js'
 
 export const REPL_TOOL_NAME = 'REPL'
 

@@ -1,22 +1,22 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { getInitialMainLoopModel } from '../../bootstrap/state.ts'
-import { getAdditionalModelOptionsCacheScope } from '../../services/api/providerConfig.ts'
+import { getInitialMainLoopModel } from '../../bootstrap/state.js'
+import { getAdditionalModelOptionsCacheScope } from '../../services/api/providerConfig.js'
 import {
   isClaudeAISubscriber,
   isMaxSubscriber,
   isTeamPremiumSubscriber,
-} from '../auth.ts'
-import { getModelStrings } from './modelStrings.ts'
+} from '../auth.js'
+import { getModelStrings } from './modelStrings.js'
 import {
   COST_TIER_3_15,
   COST_HAIKU_35,
   COST_HAIKU_45,
   formatModelPricing,
-} from '../modelCost.ts'
-import { getSettings_DEPRECATED } from '../settings/settings.ts'
-import { checkOpus1mAccess, checkSonnet1mAccess } from './check1mAccess.ts'
-import { getAPIProvider } from './providers.ts'
-import { isModelAllowed } from './modelAllowlist.ts'
+} from '../modelCost.js'
+import { getSettings_DEPRECATED } from '../settings/settings.js'
+import { checkOpus1mAccess, checkSonnet1mAccess } from './check1mAccess.js'
+import { getAPIProvider } from './providers.js'
+import { isModelAllowed } from './modelAllowlist.js'
 import {
   getCanonicalName,
   getClaudeAiUserDefaultModelDescription,
@@ -30,16 +30,16 @@ import {
   getOpus46PricingSuffix,
   renderDefaultModelSetting,
   type ModelSetting,
-} from './model.ts'
-import { has1mContext } from '../context.ts'
-import { getGlobalConfig } from '../config.ts'
+} from './model.js'
+import { has1mContext } from '../context.js'
+import { getGlobalConfig } from '../config.js'
 import {
   getActiveOpenAIModelOptionsCache,
   getActiveProviderProfile,
   getProfileModelOptions,
-} from '../providerProfiles.ts'
-import { getCachedOllamaModelOptions, isOllamaProvider } from './ollamaModels.ts'
-import { getAntModels } from './antModels.ts'
+} from '../providerProfiles.js'
+import { getCachedOllamaModelOptions, isOllamaProvider } from './ollamaModels.js'
+import { getAntModels } from './antModels.js'
 
 // @[MODEL LAUNCH]: Update all the available and default model option strings below.
 

@@ -1,19 +1,19 @@
 import { isRemoteManagedSettingsEligible } from '../services/remoteManagedSettings/syncCache.js'
-import { clearCACertsCache } from './caCerts.ts'
-import { getGlobalConfig } from './config.ts'
-import { isEnvTruthy } from './envUtils.ts'
+import { clearCACertsCache } from './caCerts.js'
+import { getGlobalConfig } from './config.js'
+import { isEnvTruthy } from './envUtils.js'
 import {
   isProviderManagedEnvVar,
   SAFE_ENV_VARS,
-} from './managedEnvConstants.ts'
-import { clearMTLSCache } from './mtls.ts'
-import { clearProxyCache, configureGlobalAgents } from './proxy.ts'
-import { applyActiveProviderProfileFromConfig } from './providerProfiles.ts'
-import { isSettingSourceEnabled } from './settings/constants.ts'
+} from './managedEnvConstants.js'
+import { clearMTLSCache } from './mtls.js'
+import { clearProxyCache, configureGlobalAgents } from './proxy.js'
+import { applyActiveProviderProfileFromConfig } from './providerProfiles.js'
+import { isSettingSourceEnabled } from './settings/constants.js'
 import {
   getSettings_DEPRECATED,
   getSettingsForSource,
-} from './settings/settings.ts'
+} from './settings/settings.js'
 
 /**
  * `claude ssh` remote: ANTHROPIC_UNIX_SOCKET routes auth through a -R forwarded

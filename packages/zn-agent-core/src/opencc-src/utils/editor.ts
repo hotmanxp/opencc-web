@@ -7,8 +7,8 @@ import {
 import memoize from 'lodash-es/memoize.js'
 import { basename } from 'path'
 import instances from '../ink/instances.js'
-import { logForDebugging } from './debug.ts'
-import { whichSync } from './which.ts'
+import { logForDebugging } from './debug.js'
+import { whichSync } from './which.js'
 
 function isCommandAvailable(command: string): boolean {
   return !!whichSync(command)

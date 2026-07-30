@@ -1,8 +1,8 @@
-import { createThinkTagFilter } from '../thinkTagSanitizer.ts'
-import { hasToolFieldMapping, normalizeToolArguments } from '../toolArgumentNormalization.ts'
-import { createStreamState, processStreamChunk, getStreamStats } from '../../../utils/streamingOptimizer.ts'
-import { logForDebugging } from '../../../utils/debug.ts'
-import type { AnthropicStreamEvent } from '../codexShim.ts'
+import { createThinkTagFilter } from '../thinkTagSanitizer.js'
+import { hasToolFieldMapping, normalizeToolArguments } from '../toolArgumentNormalization.js'
+import { createStreamState, processStreamChunk, getStreamStats } from '../../../utils/streamingOptimizer.js'
+import { logForDebugging } from '../../../utils/debug.js'
+import type { AnthropicStreamEvent } from '../codexShim.js'
 import {
   makeMessageId,
   convertChunkUsage,
@@ -11,8 +11,8 @@ import {
   readWithIdleTimeout,
   createReaderCanceller,
   getStreamIdleTimeoutMs,
-} from './streaming.ts'
-import type { OpenAIStreamChunk } from './types.ts'
+} from './streaming.js'
+import type { OpenAIStreamChunk } from './types.js'
 
 async function* openaiStreamToAnthropic(
   response: Response,

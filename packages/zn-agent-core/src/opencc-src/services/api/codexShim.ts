@@ -1,18 +1,18 @@
 // @ts-nocheck
 import { APIError } from '@anthropic-ai/sdk'
-import { buildAnthropicUsageFromRawUsage } from './cacheMetrics.ts'
-import { compressToolHistory } from './compressToolHistory.ts'
-import { fetchWithProxyRetry } from './fetchWithProxyRetry.ts'
-import { stableStringifyJson } from '../../utils/stableStringify.ts'
+import { buildAnthropicUsageFromRawUsage } from './cacheMetrics.js'
+import { compressToolHistory } from './compressToolHistory.js'
+import { fetchWithProxyRetry } from './fetchWithProxyRetry.js'
+import { stableStringifyJson } from '../../utils/stableStringify.js'
 import type {
   ResolvedCodexCredentials,
   ResolvedProviderRequest,
-} from './providerConfig.ts'
-import { sanitizeSchemaForOpenAICompat } from './openaiSchemaSanitizer.ts'
+} from './providerConfig.js'
+import { sanitizeSchemaForOpenAICompat } from './openaiSchemaSanitizer.js'
 import {
   createThinkTagFilter,
   stripThinkTags,
-} from './thinkTagSanitizer.ts'
+} from './thinkTagSanitizer.js'
 
 export interface AnthropicUsage {
   input_tokens: number

@@ -1,26 +1,26 @@
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.ts'
-import { logEvent } from '../../services/analytics/index.ts'
+import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
+import { logEvent } from '../../services/analytics/index.js'
 import {
   checkSemantics,
   parseForSecurityFromAst,
   type ParseForSecurityResult,
   type Redirect,
   type SimpleCommand,
-} from '../../utils/bash/ast.ts'
-import { splitCommand_DEPRECATED } from '../../utils/bash/commands.ts'
+} from '../../utils/bash/ast.js'
+import { splitCommand_DEPRECATED } from '../../utils/bash/commands.js'
 import {
   PARSE_ABORTED,
   parseCommandRaw,
   type Node,
-} from '../../utils/bash/parser.ts'
+} from '../../utils/bash/parser.js'
 import {
   type ParseEntry,
   type ShellParseFailureKind,
   type ShellParseFailureReasonCode,
   tryParseShellCommand,
-} from '../../utils/bash/shellQuote.ts'
-import { logForDebugging } from '../../utils/debug.ts'
-import { isEnvTruthy, runtimeFeature } from '../../utils/envUtils.ts'
+} from '../../utils/bash/shellQuote.js'
+import { logForDebugging } from '../../utils/debug.js'
+import { isEnvTruthy, runtimeFeature } from '../../utils/envUtils.js'
 
 const splitCommand = splitCommand_DEPRECATED
 

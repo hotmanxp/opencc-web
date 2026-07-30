@@ -1,38 +1,38 @@
 import { promises as fsp } from 'fs'
-import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.ts'
-import { getSystemPrompt } from '../../constants/prompts.ts'
+import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js'
+import { getSystemPrompt } from '../../constants/prompts.js'
 import { isCoordinatorMode } from '../../coordinator/coordinatorMode.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
-import type { ToolUseContext } from '../../Tool.ts'
+import type { ToolUseContext } from '../../Tool.js'
 import { registerAsyncAgent } from '../../tasks/LocalAgentTask/LocalAgentTask.js'
-import { assembleToolPool } from '../../tools.ts'
-import { asAgentId } from '../../types/ids.ts'
-import { runWithAgentContext } from '../../utils/agentContext.ts'
-import { runWithCwdOverride } from '../../utils/cwd.ts'
-import { logForDebugging } from '../../utils/debug.ts'
+import { assembleToolPool } from '../../tools.js'
+import { asAgentId } from '../../types/ids.js'
+import { runWithAgentContext } from '../../utils/agentContext.js'
+import { runWithCwdOverride } from '../../utils/cwd.js'
+import { logForDebugging } from '../../utils/debug.js'
 import {
   createUserMessage,
   filterOrphanedThinkingOnlyMessages,
   filterUnresolvedToolUses,
   filterWhitespaceOnlyAssistantMessages,
-} from '../../utils/messages.ts'
-import { getAgentModel } from '../../utils/model/agent.ts'
-import { getQuerySourceForAgent } from '../../utils/promptCategory.ts'
+} from '../../utils/messages.js'
+import { getAgentModel } from '../../utils/model/agent.js'
+import { getQuerySourceForAgent } from '../../utils/promptCategory.js'
 import {
   getAgentTranscript,
   readAgentMetadata,
-} from '../../utils/sessionStorage.ts'
-import { buildEffectiveSystemPrompt } from '../../utils/systemPrompt.ts'
-import type { SystemPrompt } from '../../utils/systemPromptType.ts'
-import { getTaskOutputPath } from '../../utils/task/diskOutput.ts'
-import { getParentSessionId } from '../../utils/teammate.ts'
-import { reconstructForSubagentResume } from '../../utils/toolResultStorage.ts'
-import { runAsyncAgentLifecycle } from './agentToolUtils.ts'
-import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.ts'
-import { FORK_AGENT, isForkSubagentEnabled } from './forkSubagent.ts'
-import type { AgentDefinition } from './loadAgentsDir.ts'
-import { isBuiltInAgent } from './loadAgentsDir.ts'
-import { runAgent } from './runAgent.ts'
+} from '../../utils/sessionStorage.js'
+import { buildEffectiveSystemPrompt } from '../../utils/systemPrompt.js'
+import type { SystemPrompt } from '../../utils/systemPromptType.js'
+import { getTaskOutputPath } from '../../utils/task/diskOutput.js'
+import { getParentSessionId } from '../../utils/teammate.js'
+import { reconstructForSubagentResume } from '../../utils/toolResultStorage.js'
+import { runAsyncAgentLifecycle } from './agentToolUtils.js'
+import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
+import { FORK_AGENT, isForkSubagentEnabled } from './forkSubagent.js'
+import type { AgentDefinition } from './loadAgentsDir.js'
+import { isBuiltInAgent } from './loadAgentsDir.js'
+import { runAgent } from './runAgent.js'
 
 export type ResumeAgentResult = {
   agentId: string
@@ -78,13 +78,14 @@ export async function resumeAgentBackground({
     transcript.contentReplacements,
   )
   // Best-effort: if the original worktree was removed externally, fall back
-  // to parent cwd rather than crashing on chdir later.
+  // to a persisted cwd override (multi-repo parent sessions) or parent cwd
+  // rather than crashing on chdir later.
   const resumedWorktreePath = meta?.worktreePath
     ? await fsp.stat(meta.worktreePath).then(
         s => (s.isDirectory() ? meta.worktreePath : undefined),
         () => {
           logForDebugging(
-            `Resumed worktree ${meta.worktreePath} no longer exists; falling back to parent cwd`,
+            `Resumed worktree ${meta.worktreePath} no longer exists; falling back to persisted cwd or parent cwd`,
           )
           return undefined
         },
@@ -95,6 +96,20 @@ export async function resumeAgentBackground({
     const now = new Date()
     await fsp.utimes(resumedWorktreePath, now, now)
   }
+  const resumedCwdOverride = meta?.cwd
+    ? await fsp.stat(meta.cwd).then(
+        s => (s.isDirectory() ? meta.cwd : undefined),
+        () => {
+          logForDebugging(
+            `Resumed cwd override ${meta.cwd} no longer exists; falling back to parent cwd`,
+          )
+          return undefined
+        },
+      )
+    : undefined
+  // Prefer the live worktree when present; otherwise land in the persisted
+  // child-repo cwd (multi-repo parents) before falling back to the session cwd.
+  const resumedCwdPath = resumedWorktreePath ?? resumedCwdOverride
 
   // Skip filterDeniedAgents re-gating — original spawn already passed permission checks
   let selectedAgent: AgentDefinition
@@ -182,7 +197,7 @@ export async function resumeAgentBackground({
     model: undefined,
     // Fork resume: pass parent's system prompt (cache-identical prefix).
     // Non-fork: undefined → runAgent recomputes under wrapWithCwd so
-    // getCwd() sees resumedWorktreePath.
+    // getCwd() sees resumedWorktreePath / resumed cwd override.
     override: isResumedFork
       ? { systemPrompt: forkParentSystemPrompt }
       : undefined,
@@ -191,8 +206,11 @@ export async function resumeAgentBackground({
     // original fork. Re-supplying it would cause duplicate tool_use IDs.
     forkContextMessages: undefined,
     ...(isResumedFork && { useExactTools: true }),
-    // Re-persist so metadata survives runAgent's writeAgentMetadata overwrite
+    // Re-persist so metadata survives runAgent's writeAgentMetadata overwrite.
+    // Always keep the original meta.cwd string even if a transient stat check
+    // failed for execution — a later resume may still be able to use it.
     worktreePath: resumedWorktreePath,
+    cwd: meta?.cwd,
     description: meta?.description,
     contentReplacementState: resumedReplacementState,
   }
@@ -228,7 +246,7 @@ export async function resumeAgentBackground({
   }
 
   const wrapWithCwd = <T>(fn: () => T): T =>
-    resumedWorktreePath ? runWithCwdOverride(resumedWorktreePath, fn) : fn()
+    resumedCwdPath ? runWithCwdOverride(resumedCwdPath, fn) : fn()
 
   void runWithAgentContext(asyncAgentContext, () =>
     wrapWithCwd(() =>

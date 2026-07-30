@@ -1,8 +1,8 @@
-import { isEnvTruthy } from '../../../utils/envUtils.ts'
-import { sanitizeSchemaForOpenAICompat } from '../../../utils/schemaSanitizer.ts'
-import { normalizeToolArguments, hasToolFieldMapping } from '../toolArgumentNormalization.ts'
-import type { OpenAITool } from './types.ts'
-import { isGeminiMode } from './messageConversion.ts'
+import { isEnvTruthy } from '../../../utils/envUtils.js'
+import { sanitizeSchemaForOpenAICompat } from '../../../utils/schemaSanitizer.js'
+import { normalizeToolArguments, hasToolFieldMapping } from '../toolArgumentNormalization.js'
+import type { OpenAITool } from './types.js'
+import { isGeminiMode } from './messageConversion.js'
 
 function normalizeSchemaForOpenAI(
   schema: Record<string, unknown>,

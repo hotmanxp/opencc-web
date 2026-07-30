@@ -1,6 +1,6 @@
 // @ts-nocheck
 import type { ContentBlockParam, TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs'
-import type { Message, UserMessage } from '../types/message.ts'
+import type { Message, UserMessage } from '../types/message.js'
 import {
   BASH_STDERR_TAG,
   BASH_STDOUT_TAG,
@@ -9,8 +9,8 @@ import {
   TASK_NOTIFICATION_TAG,
   TEAMMATE_MESSAGE_TAG,
   TICK_TAG,
-} from '../constants/xml.ts'
-import { isSyntheticMessage, isToolUseResultMessage } from './messages.ts'
+} from '../constants/xml.js'
+import { isSyntheticMessage, isToolUseResultMessage } from './messages.js'
 
 function isTextBlock(block: ContentBlockParam): block is TextBlockParam {
   return block.type === 'text'

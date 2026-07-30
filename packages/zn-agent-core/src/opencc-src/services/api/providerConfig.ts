@@ -1,4 +1,4 @@
-import { logForDebugging } from '../../utils/debug.ts'
+import { logForDebugging } from '../../utils/debug.js'
 
 const LOCALHOST_HOSTNAMES = new Set(['localhost', '127.0.0.1', '::1'])
 const warnedUndefinedEnvNames = new Set<string>()

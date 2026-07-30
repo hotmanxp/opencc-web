@@ -34,35 +34,35 @@ import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
 } from 'src/services/analytics/index.js'
-import { getMaxVersion, shouldSkipVersion } from '../autoUpdater.ts'
-import { registerCleanup } from '../cleanupRegistry.ts'
-import { getGlobalConfig, saveGlobalConfig } from '../config.ts'
-import { logForDebugging } from '../debug.ts'
-import { getCurrentInstallationType } from '../doctorDiagnostic.ts'
-import { env } from '../env.ts'
-import { envDynamic } from '../envDynamic.ts'
-import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.ts'
-import { errorMessage, getErrnoCode, isENOENT, toError } from '../errors.ts'
-import { execFileNoThrowWithCwd } from '../execFileNoThrow.ts'
-import { getShellType } from '../localInstaller.ts'
-import * as lockfile from '../lockfile.ts'
-import { logError } from '../log.ts'
-import { hasNativeDistribution } from '../nativeDistribution.ts'
+import { getMaxVersion, shouldSkipVersion } from '../autoUpdater.js'
+import { registerCleanup } from '../cleanupRegistry.js'
+import { getGlobalConfig, saveGlobalConfig } from '../config.js'
+import { logForDebugging } from '../debug.js'
+import { getCurrentInstallationType } from '../doctorDiagnostic.js'
+import { env } from '../env.js'
+import { envDynamic } from '../envDynamic.js'
+import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
+import { errorMessage, getErrnoCode, isENOENT, toError } from '../errors.js'
+import { execFileNoThrowWithCwd } from '../execFileNoThrow.js'
+import { getShellType } from '../localInstaller.js'
+import * as lockfile from '../lockfile.js'
+import { logError } from '../log.js'
+import { hasNativeDistribution } from '../nativeDistribution.js'
 import { gt, gte } from '../semver.js'
 import {
   filterClaudeAliases,
   getShellConfigPaths,
   readFileLines,
   writeFileLines,
-} from '../shellConfig.ts'
-import { sleep } from '../sleep.ts'
+} from '../shellConfig.js'
+import { sleep } from '../sleep.js'
 import {
   getUserBinDir,
   getXDGCacheHome,
   getXDGDataHome,
   getXDGStateHome,
-} from '../xdg.ts'
-import { downloadVersion, getLatestVersion } from './download.ts'
+} from '../xdg.js'
+import { downloadVersion, getLatestVersion } from './download.js'
 import {
   acquireProcessLifetimeLock,
   cleanupStaleLocks,
@@ -70,7 +70,7 @@ import {
   isPidBasedLockingEnabled,
   readLockContent,
   withLock,
-} from './pidLock.ts'
+} from './pidLock.js'
 
 export const VERSION_RETENTION_COUNT = 2
 

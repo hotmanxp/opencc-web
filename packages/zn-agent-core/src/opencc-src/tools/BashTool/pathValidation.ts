@@ -1,32 +1,32 @@
 import { homedir } from 'os'
 import { isAbsolute, resolve } from 'path'
 import type { z } from 'zod/v4'
-import type { ToolPermissionContext } from '../../Tool.ts'
-import type { Redirect, SimpleCommand } from '../../utils/bash/ast.ts'
+import type { ToolPermissionContext } from '../../Tool.js'
+import type { Redirect, SimpleCommand } from '../../utils/bash/ast.js'
 import {
   extractOutputRedirections,
   splitCommand_DEPRECATED,
-} from '../../utils/bash/commands.ts'
-import { tryParseShellCommand } from '../../utils/bash/shellQuote.ts'
-import { getDirectoryForPath } from '../../utils/path.ts'
-import { allWorkingDirectories } from '../../utils/permissions/filesystem.ts'
-import type { PermissionResult } from '../../utils/permissions/PermissionResult.ts'
-import { createReadRuleSuggestion } from '../../utils/permissions/PermissionUpdate.ts'
-import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.ts'
+} from '../../utils/bash/commands.js'
+import { tryParseShellCommand } from '../../utils/bash/shellQuote.js'
+import { getDirectoryForPath } from '../../utils/path.js'
+import { allWorkingDirectories } from '../../utils/permissions/filesystem.js'
+import type { PermissionResult } from '../../utils/permissions/PermissionResult.js'
+import { createReadRuleSuggestion } from '../../utils/permissions/PermissionUpdate.js'
+import type { PermissionUpdate } from '../../utils/permissions/PermissionUpdateSchema.js'
 import {
   expandTilde,
   type FileOperationType,
   formatDirectoryList,
   isDangerousRemovalPath,
   validatePath,
-} from '../../utils/permissions/pathValidation.ts'
+} from '../../utils/permissions/pathValidation.js'
 import type { BashTool } from './BashTool.js'
 import type {
   BashCommandAnalysis,
   LegacyShellParseAnalysis,
-} from './bashCommandAnalysis.ts'
-import { stripSafeWrappers } from './bashPermissions.ts'
-import { sedCommandIsAllowedByAllowlist } from './sedValidation.ts'
+} from './bashCommandAnalysis.js'
+import { stripSafeWrappers } from './bashPermissions.js'
+import { sedCommandIsAllowedByAllowlist } from './sedValidation.js'
 
 export type PathCommand =
   | 'cd'

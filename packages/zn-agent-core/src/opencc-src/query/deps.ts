@@ -1,8 +1,8 @@
 import { randomUUID } from 'crypto'
-import { queryModelWithStreaming } from '../services/api/claude.ts'
-import { autoCompactIfNeeded } from '../services/compact/autoCompact.ts'
-import { microcompactMessages } from '../services/compact/microCompact.ts'
-import type { StopHookExecutionDeps } from './stopHooks.ts'
+import { queryModelWithStreaming } from '../services/api/claude.js'
+import { autoCompactIfNeeded } from '../services/compact/autoCompact.js'
+import { microcompactMessages } from '../services/compact/microCompact.js'
+import type { StopHookExecutionDeps } from './stopHooks.js'
 
 // -- deps
 

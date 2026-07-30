@@ -4,8 +4,8 @@
  */
 
 import { createHash } from 'crypto'
-import { roughTokenCountEstimation, roughTokenCountEstimationForMessages } from '../services/tokenEstimation.ts'
-import type { Message } from '../types/message.ts'
+import { roughTokenCountEstimation, roughTokenCountEstimationForMessages } from '../services/tokenEstimation.js'
+import type { Message } from '../types/message.js'
 
 export interface IncrementalCounterConfig {
   /** Token budget for context limit decisions (e.g., model context window) */

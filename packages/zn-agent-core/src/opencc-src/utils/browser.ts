@@ -1,4 +1,4 @@
-import { execFileNoThrow } from './execFileNoThrow.ts'
+import { execFileNoThrow } from './execFileNoThrow.js'
 
 function validateUrl(url: string): void {
   let parsedUrl: URL

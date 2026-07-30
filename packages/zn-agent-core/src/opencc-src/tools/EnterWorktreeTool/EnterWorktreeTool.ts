@@ -1,23 +1,23 @@
 import { z } from 'zod/v4'
-import { getSessionId, setOriginalCwd } from '../../bootstrap/state.ts'
-import { clearSystemPromptSections } from '../../constants/systemPromptSections.ts'
-import { logEvent } from '../../services/analytics/index.ts'
-import type { Tool } from '../../Tool.ts'
-import { buildTool, type ToolDef } from '../../Tool.ts'
-import { clearMemoryFileCaches } from '../../utils/claudemd.ts'
-import { getCwd } from '../../utils/cwd.ts'
-import { findCanonicalGitRoot } from '../../utils/git.ts'
-import { lazySchema } from '../../utils/lazySchema.ts'
-import { getPlanSlug, getPlansDirectory } from '../../utils/plans.ts'
-import { setCwd } from '../../utils/Shell.ts'
-import { saveWorktreeState } from '../../utils/sessionStorage.ts'
+import { getSessionId, setOriginalCwd } from '../../bootstrap/state.js'
+import { clearSystemPromptSections } from '../../constants/systemPromptSections.js'
+import { logEvent } from '../../services/analytics/index.js'
+import type { Tool } from '../../Tool.js'
+import { buildTool, type ToolDef } from '../../Tool.js'
+import { clearMemoryFileCaches } from '../../utils/claudemd.js'
+import { getCwd } from '../../utils/cwd.js'
+import { findCanonicalGitRoot } from '../../utils/git.js'
+import { lazySchema } from '../../utils/lazySchema.js'
+import { getPlanSlug, getPlansDirectory } from '../../utils/plans.js'
+import { setCwd } from '../../utils/Shell.js'
+import { saveWorktreeState } from '../../utils/sessionStorage.js'
 import {
   createWorktreeForSession,
   getCurrentWorktreeSession,
   validateWorktreeSlug,
-} from '../../utils/worktree.ts'
-import { ENTER_WORKTREE_TOOL_NAME } from './constants.ts'
-import { getEnterWorktreeToolPrompt } from './prompt.ts'
+} from '../../utils/worktree.js'
+import { ENTER_WORKTREE_TOOL_NAME } from './constants.js'
+import { getEnterWorktreeToolPrompt } from './prompt.js'
 import { renderToolResultMessage, renderToolUseMessage } from './UI.js'
 
 const inputSchema = lazySchema(() =>

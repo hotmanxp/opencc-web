@@ -1,4 +1,4 @@
-import { systemPromptSection } from '../../../constants/systemPromptSections.ts'
+import { systemPromptSection } from '../../../constants/systemPromptSections.js'
 import { getTicketId } from '../../../state/setTicketStore.js'
 
 /**

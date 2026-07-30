@@ -6,15 +6,15 @@ import {
   withMemoryCorrectionHint,
 } from 'src/utils/messages.js'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
-import { findToolByName, type Tools, type ToolUseContext } from '../../Tool.ts'
-import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.ts'
-import type { AssistantMessage, Message } from '../../types/message.ts'
-import { createChildAbortController } from '../../utils/abortController.ts'
+import { findToolByName, type Tools, type ToolUseContext } from '../../Tool.js'
+import { BASH_TOOL_NAME } from '../../tools/BashTool/toolName.js'
+import type { AssistantMessage, Message } from '../../types/message.js'
+import { createChildAbortController } from '../../utils/abortController.js'
 import {
   getMissingToolResultAbortMessage,
   shouldCreateUserInterruptionMessage,
-} from '../../utils/abortReasons.ts'
-import { runToolUse } from './toolExecution.ts'
+} from '../../utils/abortReasons.js'
+import { runToolUse } from './toolExecution.js'
 
 type MessageUpdate = {
   message?: Message

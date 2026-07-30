@@ -1,5 +1,5 @@
 import { APIUserAbortError } from '@anthropic-ai/sdk'
-import type { AbortReason } from './abortReasons.ts'
+import type { AbortReason } from './abortReasons.js'
 
 export class ClaudeError extends Error {
   constructor(message: string) {

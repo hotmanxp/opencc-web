@@ -19,7 +19,7 @@
  * Prices in tokens as of April 2026 — update as needed.
  */
 
-import { getInitialSettings } from '../settings/settings.ts'
+import { getInitialSettings } from '../settings/settings.js'
 
 type LimitEnvVar =
   | 'CLAUDE_CODE_OPENAI_CONTEXT_WINDOWS'

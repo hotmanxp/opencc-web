@@ -1,9 +1,9 @@
 import { spawnSync } from 'child_process'
-import { getIsInteractive } from '../bootstrap/state.ts'
-import { getGlobalConfig } from './config.ts'
-import { logForDebugging } from './debug.ts'
-import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.ts'
-import { execFileNoThrow } from './execFileNoThrow.ts'
+import { getIsInteractive } from '../bootstrap/state.js'
+import { getGlobalConfig } from './config.js'
+import { logForDebugging } from './debug.js'
+import { isEnvDefinedFalsy, isEnvTruthy } from './envUtils.js'
+import { execFileNoThrow } from './execFileNoThrow.js'
 
 let loggedTmuxCcDisable = false
 let checkedTmuxMouseHint = false

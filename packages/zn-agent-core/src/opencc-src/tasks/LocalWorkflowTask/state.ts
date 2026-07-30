@@ -1,8 +1,8 @@
-import type { TaskStateBase } from '../../Task.ts'
+import type { TaskStateBase } from '../../Task.js'
 import type {
   WorkflowAgentState,
   WorkflowPhaseMeta,
-} from '../../tools/WorkflowTool/types.ts'
+} from '../../tools/WorkflowTool/types.js'
 
 /**
  * State for a single in-process workflow task run. Extends TaskStateBase so

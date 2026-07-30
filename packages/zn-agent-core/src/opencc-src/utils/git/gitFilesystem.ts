@@ -15,11 +15,11 @@
 import { unwatchFile, watchFile } from 'fs'
 import { readdir, readFile, stat } from 'fs/promises'
 import { join, resolve } from 'path'
-import { waitForScrollIdle } from '../../bootstrap/state.ts'
-import { registerCleanup } from '../cleanupRegistry.ts'
-import { getCwd } from '../cwd.ts'
-import { findGitRoot } from '../git.ts'
-import { parseGitConfigValue } from './gitConfigParser.ts'
+import { waitForScrollIdle } from '../../bootstrap/state.js'
+import { registerCleanup } from '../cleanupRegistry.js'
+import { getCwd } from '../cwd.js'
+import { findGitRoot } from '../git.js'
+import { parseGitConfigValue } from './gitConfigParser.js'
 
 // ---------------------------------------------------------------------------
 // resolveGitDir — find the actual .git directory

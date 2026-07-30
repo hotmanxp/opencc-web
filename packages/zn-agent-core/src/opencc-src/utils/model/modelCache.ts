@@ -9,7 +9,7 @@ import { access, readFile, writeFile, mkdir, unlink } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { getAPIProvider } from './providers.ts'
+import { getAPIProvider } from './providers.js'
 
 const CACHE_VERSION = '1'
 const CACHE_TTL_HOURS = 24

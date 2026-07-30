@@ -26,18 +26,18 @@ import { feature } from 'bun:bundle'
 import { mkdirSync, writeFileSync } from 'fs'
 import { mkdir, writeFile } from 'fs/promises'
 import { dirname, join } from 'path'
-import { getSessionId } from '../../bootstrap/state.ts'
-import { registerCleanup } from '../cleanupRegistry.ts'
-import { logForDebugging } from '../debug.ts'
+import { getSessionId } from '../../bootstrap/state.js'
+import { registerCleanup } from '../cleanupRegistry.js'
+import { logForDebugging } from '../debug.js'
 import {
   getClaudeConfigHomeDir,
   isEnvDefinedFalsy,
   isEnvTruthy,
-} from '../envUtils.ts'
-import { errorMessage } from '../errors.ts'
-import { djb2Hash } from '../hash.ts'
-import { jsonStringify } from '../slowOperations.ts'
-import { getAgentId, getAgentName, getParentSessionId } from '../teammate.ts'
+} from '../envUtils.js'
+import { errorMessage } from '../errors.js'
+import { djb2Hash } from '../hash.js'
+import { jsonStringify } from '../slowOperations.js'
+import { getAgentId, getAgentName, getParentSessionId } from '../teammate.js'
 
 /**
  * Chrome Trace Event format types

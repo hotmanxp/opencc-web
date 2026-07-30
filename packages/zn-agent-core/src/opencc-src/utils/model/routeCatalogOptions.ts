@@ -1,5 +1,5 @@
 import type { ModelCatalogEntry } from '../../integrations/descriptors.js'
-import type { ModelOption } from './modelOptions.ts'
+import type { ModelOption } from './modelOptions.js'
 
 function toDescription(
   entry: ModelCatalogEntry,

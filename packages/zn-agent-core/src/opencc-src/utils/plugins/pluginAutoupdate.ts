@@ -11,23 +11,23 @@
  */
 
 import { updatePluginOp } from '../../services/plugins/pluginOperations.js'
-import { shouldSkipPluginAutoupdate } from '../config.ts'
-import { logForDebugging } from '../debug.ts'
-import { errorMessage } from '../errors.ts'
-import { logError } from '../log.ts'
+import { shouldSkipPluginAutoupdate } from '../config.js'
+import { logForDebugging } from '../debug.js'
+import { errorMessage } from '../errors.js'
+import { logError } from '../log.js'
 import {
   getPendingUpdatesDetails,
   hasPendingUpdates,
   isInstallationRelevantToCurrentProject,
   loadInstalledPluginsFromDisk,
-} from './installedPluginsManager.ts'
+} from './installedPluginsManager.js'
 import {
   getDeclaredMarketplaces,
   loadKnownMarketplacesConfig,
   refreshMarketplace,
-} from './marketplaceManager.ts'
-import { parsePluginIdentifier } from './pluginIdentifier.ts'
-import { isMarketplaceAutoUpdate, type PluginScope } from './schemas.ts'
+} from './marketplaceManager.js'
+import { parsePluginIdentifier } from './pluginIdentifier.js'
+import { isMarketplaceAutoUpdate, type PluginScope } from './schemas.js'
 
 /**
  * Callback type for notifying when plugins have been updated

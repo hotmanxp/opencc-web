@@ -1,18 +1,18 @@
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
-import { splitCommand_DEPRECATED } from '../../utils/bash/commands.ts'
-import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.ts'
-import { getSettings_DEPRECATED } from '../../utils/settings/settings.ts'
+import { splitCommand_DEPRECATED } from '../../utils/bash/commands.js'
+import { SandboxManager } from '../../utils/sandbox/sandbox-adapter.js'
+import { getSettings_DEPRECATED } from '../../utils/settings/settings.js'
 import {
   BINARY_HIJACK_VARS,
   bashPermissionRule,
   matchWildcardPattern,
   stripAllLeadingEnvVars,
   stripSafeWrappers,
-} from './bashPermissions.ts'
+} from './bashPermissions.js'
 import {
   parseLegacyShellCommandForAnalysis,
   type BashCommandAnalysis,
-} from './bashCommandAnalysis.ts'
+} from './bashCommandAnalysis.js'
 
 type SandboxInput = {
   command?: string

@@ -5,8 +5,8 @@
  * When pressure rises, triggers conversation compaction and cache pruning.
  */
 
-import { logForDebugging } from './debug.ts'
-import { onMemoryPressure } from './memoryPressure.ts'
+import { logForDebugging } from './debug.js'
+import { onMemoryPressure } from './memoryPressure.js'
 
 export interface CompactionTrigger {
   forceCompact(): void

@@ -1,6 +1,6 @@
 // Stub: session tracing disabled in open build
 export type { Span } from '@opentelemetry/api'
-export { isBetaTracingEnabled, type LLMRequestNewContext } from './betaSessionTracing.ts'
+export { isBetaTracingEnabled, type LLMRequestNewContext } from './betaSessionTracing.js'
 export const sessionTracing = {
   startSpan: () => null,
   endSpan: () => {},

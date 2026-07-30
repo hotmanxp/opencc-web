@@ -1,10 +1,10 @@
-import type { SearchInput, SearchProvider } from './types.ts'
-import { applyDomainFilters, type ProviderOutput } from './types.ts'
+import type { SearchInput, SearchProvider } from './types.js'
+import { applyDomainFilters, type ProviderOutput } from './types.js'
 import {
   isWebSearchTimeoutError,
   toAbortError,
   withWebSearchTimeout,
-} from './timeout.ts'
+} from './timeout.js'
 
 // DuckDuckGo's HTML scraper aggressively blocks datacenter / repeat IPs with
 // an "anomaly in the request" response. When that happens we surface an

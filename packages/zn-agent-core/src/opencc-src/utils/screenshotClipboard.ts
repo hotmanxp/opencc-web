@@ -1,10 +1,10 @@
 import { mkdir, unlink, writeFile } from 'fs/promises'
 import { tmpdir } from 'os'
 import { join } from 'path'
-import { type AnsiToPngOptions, ansiToPng } from './ansiToPng.ts'
-import { execFileNoThrowWithCwd } from './execFileNoThrow.ts'
-import { logError } from './log.ts'
-import { getPlatform } from './platform.ts'
+import { type AnsiToPngOptions, ansiToPng } from './ansiToPng.js'
+import { execFileNoThrowWithCwd } from './execFileNoThrow.js'
+import { logError } from './log.js'
+import { getPlatform } from './platform.js'
 
 /**
  * Copies an image (from ANSI text) to the system clipboard.

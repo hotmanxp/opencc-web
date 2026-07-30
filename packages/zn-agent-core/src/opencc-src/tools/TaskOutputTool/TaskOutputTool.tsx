@@ -7,28 +7,28 @@ import { FallbackToolUseRejectedMessage } from '../../components/FallbackToolUse
 import { MessageResponse } from '../../components/MessageResponse.js';
 import { Box, Text } from '../../ink.js';
 import { useShortcutDisplay } from '../../keybindings/useShortcutDisplay.js';
-import type { TaskType } from '../../Task.ts';
-import type { Tool } from '../../Tool.ts';
-import { buildTool, type ToolDef } from '../../Tool.ts';
+import type { TaskType } from '../../Task.js';
+import type { Tool } from '../../Tool.js';
+import { buildTool, type ToolDef } from '../../Tool.js';
 import type { LocalAgentTaskState } from '../../tasks/LocalAgentTask/LocalAgentTask.js';
 import type { LocalShellTaskState } from '../../tasks/LocalShellTask/guards.js';
 import type { RemoteAgentTaskState } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js';
-import type { TaskState } from '../../tasks/types.ts';
-import { AbortError } from '../../utils/errors.ts';
-import { lazySchema } from '../../utils/lazySchema.ts';
-import { extractTextContent } from '../../utils/messages.ts';
-import { semanticBoolean } from '../../utils/semanticBoolean.ts';
-import { sleep } from '../../utils/sleep.ts';
-import { jsonParse } from '../../utils/slowOperations.ts';
-import { countCharInString } from '../../utils/stringUtils.ts';
-import { getTaskOutput } from '../../utils/task/diskOutput.ts';
+import type { TaskState } from '../../tasks/types.js';
+import { AbortError } from '../../utils/errors.js';
+import { lazySchema } from '../../utils/lazySchema.js';
+import { extractTextContent } from '../../utils/messages.js';
+import { semanticBoolean } from '../../utils/semanticBoolean.js';
+import { sleep } from '../../utils/sleep.js';
+import { jsonParse } from '../../utils/slowOperations.js';
+import { countCharInString } from '../../utils/stringUtils.js';
+import { getTaskOutput } from '../../utils/task/diskOutput.js';
 import { updateTaskState } from '../../utils/task/framework.js';
-import { formatTaskOutput } from '../../utils/task/outputFormatting.ts';
-import type { ThemeName } from '../../utils/theme.ts';
+import { formatTaskOutput } from '../../utils/task/outputFormatting.js';
+import type { ThemeName } from '../../utils/theme.js';
 import { AgentPromptDisplay, AgentResponseDisplay } from '../AgentTool/UI.js';
 import BashToolResultMessage from '../BashTool/BashToolResultMessage.js';
-import { TASK_OUTPUT_TOOL_NAME } from './constants.ts';
-import { isAntEmployee } from '../../utils/buildConfig.ts';
+import { TASK_OUTPUT_TOOL_NAME } from './constants.js';
+import { isAntEmployee } from '../../utils/buildConfig.js';
 const inputSchema = lazySchema(() => z.strictObject({
   task_id: z.string().describe('The task ID to get output from'),
   block: semanticBoolean(z.boolean().default(true)).describe('Whether to wait for completion'),
@@ -56,7 +56,7 @@ type TaskOutputToolOutput = {
 };
 
 // Re-export Progress from centralized types to break import cycles
-export type { TaskOutputProgress as Progress } from '../../types/tools.ts';
+export type { TaskOutputProgress as Progress } from '../../types/tools.js';
 
 // Get output for any task type
 async function getTaskOutputData(task: TaskState): Promise<TaskOutput> {
