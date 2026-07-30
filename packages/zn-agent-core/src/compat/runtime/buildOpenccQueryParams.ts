@@ -89,9 +89,110 @@ async function* translateCallModel(
     signal: openccReq.signal,
   }
   const stream = zaiModelCaller(zaiReq) as AsyncIterable<any>
-  for await (const ev of stream) {
-    yield ev
+  // Accumulate Anthropic primitives into a single opencc AssistantMessage
+  // and yield it on message_stop. opencc's queryLoop iterates
+  // `for await (const message of deps.callModel(...))` and expects
+  // Message wrappers like `{ type: 'assistant', message: { role,
+  // content, stop_reason } }`. Without this accumulation, opencc sees
+  // raw content_block_start / message_delta / message_stop events and
+  // never populates `assistantMessages` or `toolUseBlocks` — so the
+  // tool execution path (runTools after message_delta) is never taken.
+  let assistantId: string | undefined
+  let assistantModel: string | undefined
+  let assistantContent: any[] = []
+  let pendingToolInputJson = ''
+  let lastStopReason: string | null = null
+  const flush = (stopReason: string | null) => {
+    if (assistantContent.length === 0 && !assistantId && !assistantModel) return
+    const message = {
+      type: 'assistant' as const,
+      uuid: `asst-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+      timestamp: new Date().toISOString(),
+      message: {
+        id: assistantId,
+        model: assistantModel,
+        role: 'assistant' as const,
+        content: assistantContent,
+        stop_reason: stopReason,
+      },
+    }
+    assistantId = undefined
+    assistantModel = undefined
+    assistantContent = []
+    pendingToolInputJson = ''
+    lastStopReason = null
+    return message
   }
+  for await (const ev of stream as AsyncIterable<any>) {
+    const t = ev?.type
+    if (t === 'message_start') {
+      assistantId = ev?.message?.id
+      assistantModel = ev?.message?.model
+    } else if (t === 'content_block_start') {
+      const cb = ev?.content_block
+      if (cb?.type === 'text') {
+        assistantContent.push({ type: 'text', text: '' })
+      } else if (cb?.type === 'thinking') {
+        assistantContent.push({ type: 'thinking', thinking: '' })
+      } else if (cb?.type === 'tool_use') {
+        assistantContent.push({
+          type: 'tool_use',
+          id: cb.id,
+          name: cb.name,
+          input: {},
+        })
+      }
+    } else if (t === 'content_block_delta') {
+      const d = ev?.delta
+      const idx = ev?.index
+      const block = assistantContent[idx]
+      if (!block) continue
+      if (d?.type === 'text_delta' && typeof d.text === 'string') {
+        block.text = (block.text ?? '') + d.text
+      } else if (d?.type === 'thinking_delta' && typeof d.thinking === 'string') {
+        block.thinking = (block.thinking ?? '') + d.thinking
+      } else if (d?.type === 'input_json_delta' && typeof d.partial_json === 'string') {
+        pendingToolInputJson += d.partial_json
+        // Mirror to the latest tool_use block; will be parsed at message_stop
+        const tu = assistantContent.filter((b: any) => b.type === 'tool_use').at(-1)
+        if (tu) tu.input = pendingToolInputJson
+      }
+    } else if (t === 'content_block_stop') {
+      // Parse accumulated tool_use input JSON now that the block closed.
+      const tu = assistantContent.filter((b: any) => b.type === 'tool_use').at(-1)
+      if (tu && typeof tu.input === 'string') {
+        try {
+          tu.input = JSON.parse(tu.input)
+        } catch {
+          // leave as string — opencc will see the partial JSON and error
+        }
+      }
+    } else if (t === 'message_delta') {
+      lastStopReason = ev?.delta?.stop_reason ?? null
+    } else if (t === 'message_stop') {
+      const message = flush(lastStopReason)
+      if (message) yield message
+    } else if (t === 'error') {
+      // Surface as an opencc assistant API error so the loop's recovery
+      // branches fire (rate limit / prompt too long / etc).
+      yield {
+        type: 'assistant' as const,
+        uuid: `asst-err-${Date.now()}`,
+        timestamp: new Date().toISOString(),
+        message: {
+          role: 'assistant' as const,
+          content: [],
+          stop_reason: ev?.error?.type ?? 'error',
+        },
+        isApiErrorMessage: true,
+        apiError: ev?.error,
+      }
+    }
+  }
+  // If the stream ended without a message_stop, flush whatever we have
+  // (rare — Anthropic always emits message_stop).
+  const tail = flush(null)
+  if (tail) yield tail
 }
 
 /**
