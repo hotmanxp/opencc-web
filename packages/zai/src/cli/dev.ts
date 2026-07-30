@@ -11,17 +11,20 @@ interface DevOptions {
   port?: string;
   apiPort?: string;
   open: boolean;
+  lan?: boolean;
 }
 
 export async function runDev(options: DevOptions) {
   const token = randomBytes(16).toString('hex');
   const cwd = resolve(process.cwd());
   const cwdName = basename(cwd) || cwd;
+  const host = options.lan ? '0.0.0.0' : '127.0.0.1';
 
-  const app = createApp({ token, cwd, cwdName });
+  const app = createApp({ token, cwd, cwdName, host });
 
   console.log(`[zai] dev token: ${token}`);
   console.log(`[zai] cwd: ${cwd}`);
+  if (options.lan) console.log(`[zai] LAN mode — binding to 0.0.0.0`);
 
   // Start Express API server with retry loop
   const baseApiPort = options.apiPort ? Number(options.apiPort) : 7715;
@@ -38,7 +41,7 @@ export async function runDev(options: DevOptions) {
           if (err.code === 'EADDRINUSE') reject(err);
           else reject(err);
         });
-        apiServer!.listen(apiPort, '127.0.0.1', () => {
+        apiServer!.listen(apiPort, host, () => {
           process.env.ZAI_PORT = String(apiPort);
           resolve();
         });
@@ -72,8 +75,12 @@ export async function runDev(options: DevOptions) {
           if (err.code === 'EADDRINUSE') reject(err);
           else reject(err);
         });
-        viteServer!.listen(vitePort, '127.0.0.1', () => resolve());
+        viteServer!.listen(vitePort, host, () => resolve());
       });
+      // Free the port immediately — Vite (spawned below) needs to bind
+      // the same port. Without this, validate listener holds 9201 and
+      // Vite fails with EADDRINUSE.
+      viteServer.close();
       break;
     } catch (err: any) {
       if (err.code === 'EADDRINUSE') {
@@ -96,7 +103,9 @@ export async function runDev(options: DevOptions) {
 
   const __dirname = dirname(fileURLToPath(import.meta.url));
   const pkgRoot = resolve(__dirname, '..', '..');
-  const vite = spawn('npx', ['vite', '--port', String(vitePort), '--strictPort'], {
+  const viteArgs = ['vite', '--port', String(vitePort), '--strictPort'];
+  if (options.lan) viteArgs.push('--host', '0.0.0.0');
+  const vite = spawn('npx', viteArgs, {
     cwd: pkgRoot,
     stdio: 'inherit',
     env: {
@@ -104,6 +113,14 @@ export async function runDev(options: DevOptions) {
       ZAI_API_ORIGIN: `http://localhost:${apiPort}`,
     },
   });
+
+  if (options.lan) {
+    const { detectLanIps } = await import('../server/utils/lanIps.js');
+    const ips = detectLanIps();
+    for (const ip of ips) {
+      console.log(`[zai]   LAN → http://${ip}:${vitePort}`);
+    }
+  }
 
   if (options.open) {
     setTimeout(() => {
