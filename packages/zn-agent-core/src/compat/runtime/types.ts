@@ -263,3 +263,11 @@ export interface OpenccAdapterConfig {
    */
   askRegistry?: import('./types.js').AskRegistryLike | undefined
 }
+
+/**
+ * Loose return shape from `buildOpenccQueryParams` — the opencc
+ * `query()` loop reads 30+ fields; we keep this structurally loose
+ * so the bridge can fill only what the lazy-imported opencc vendor
+ * actually reads at the first iteration.
+ */
+export type QueryParamsOutput = Record<string, unknown>

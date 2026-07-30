@@ -32,14 +32,38 @@ const STUB_DIR = pathResolve(
 let openccModulePromise: Promise<any> | null = null
 let stubCount = 0
 const STUB_LIMIT = 50
+// Track specs we've already auto-stubbed. If the same missing module
+// surfaces twice in a row, the resolve.alias isn't routing to the
+// stub — surface that as a clear diagnostic instead of looping
+// forever (the prior bug: stubCount++ was inside `if (!existsSync)`,
+// so once the stub existed, retries skipped the increment and
+// STUB_LIMIT was never reached).
+const stubbedSpecs = new Set<string>()
 
 async function importOpenccSrc() {
   if (openccModulePromise) return openccModulePromise
   openccModulePromise = (async () => {
     try {
       // Dynamic import to a constructed path so Vite's static analysis
-      // doesn't try to bundle opencc-src.
-      const queryPath = join(OPENCC_SRC_DIR, 'query.js')
+      // doesn't try to bundle opencc-src. Try `.js`, `.ts`, `.tsx`
+      // extensions — the bridge runs in both Node (via tsx) and Bun,
+      // and the vendored opencc source is .ts. Bun's dynamic import
+      // doesn't auto-substitute extensions on absolute paths, so we
+      // try each explicitly.
+      let queryPath: string | null = null
+      let lastErr: any
+      for (const ext of ['.js', '.ts', '.tsx']) {
+        const candidate = join(OPENCC_SRC_DIR, `query${ext}`)
+        if (existsSync(candidate)) {
+          queryPath = candidate
+          break
+        }
+      }
+      if (!queryPath) {
+        // Fall back to .js path — Bun's import() may handle TS
+        // resolution differently than existsSync.
+        queryPath = join(OPENCC_SRC_DIR, 'query.js')
+      }
       return await import(queryPath)
     } catch (err: any) {
       // Three error shapes we accept (Node direct, Node via loader, Vite):
@@ -80,6 +104,18 @@ async function importOpenccSrc() {
         !missingSpec.startsWith('node:') &&
         !missingSpec.includes('node_modules')
       ) {
+        if (stubbedSpecs.has(missingSpec)) {
+          // Same missing spec surfaced twice — the alias isn't routing
+          // to the stub we wrote. Surface a clear diagnostic instead of
+          // looping forever.
+          throw new Error(
+            `[openccQueryBridge] auto-stubbed ${missingSpec} but import ` +
+              `still fails. Check resolve.alias in vitest.config.ts and ` +
+              `bunResolve() in bun-protocol.mjs — the alias must route ` +
+              `${missingSpec} to dangling-shims before the generic ` +
+              `'src/...' catch-all maps it to <OPENCC_SRC_DIR>.`,
+          )
+        }
         const stubPath = join(STUB_DIR, missingSpec)
         mkdirSync(dirname(stubPath), { recursive: true })
         if (!existsSync(stubPath)) {
@@ -90,6 +126,7 @@ async function importOpenccSrc() {
           stubCount++
           console.warn(`[openccQueryBridge] auto-stubbed: ${missingSpec}`)
         }
+        stubbedSpecs.add(missingSpec)
         openccModulePromise = null
         return importOpenccSrc()
       }

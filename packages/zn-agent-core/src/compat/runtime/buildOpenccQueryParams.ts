@@ -110,10 +110,17 @@ function syntheticToolUseContext(opts: {
 }): any {
   const ac = opts.abortController ?? new AbortController()
   const noopAppState: any = {
-    toolPermissionContext: { alwaysAllow: new Set(), alwaysDeny: new Set() },
+    toolPermissionContext: {
+      alwaysAllow: new Set(),
+      alwaysDeny: new Set(),
+      mode: 'default',
+    },
     mainLoopModel: opts.model,
     mcpConfigs: new Map(),
     toolJsx: undefined,
+    // opencc's mainLoop reads appState.mcp.tools — provide empty list
+    // since zai doesn't expose opencc vendor's MCP tool registry.
+    mcp: { tools: [], clients: [], resources: {} },
   }
   return {
     options: {

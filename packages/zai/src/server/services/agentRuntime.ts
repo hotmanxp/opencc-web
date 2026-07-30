@@ -6,6 +6,7 @@ import {
   DefaultAgentRuntime,
   DefaultPluginRuntime,
   MCPClientPool,
+  enableOpenccConfigs,
   resolveDataDir,
   resolveOpenccConfigDir,
   setDefaultSandboxManager,
@@ -104,6 +105,16 @@ function resolveSandbox(cwd: string): import('@zn-ai/zn-agent-core').SandboxConf
 
 export function initAgentRuntime(cwd: string): void {
   if (runtime) return
+  // OpenCC vendor's config system has a `configReadingAllowed` flag
+  // (config.ts:1473) that throws on any getConfig() until set. The
+  // bridge's lazy import of opencc-src/query.js → queryLoop →
+  // getConfig() throws "Config accessed before allowed." unless we
+  // call enableConfigs() first. Fire-and-forget; the runtime
+  // construction below doesn't strictly need the config to be
+  // ready, but the next /api/agent/prompt will.
+  void enableOpenccConfigs().catch((err) => {
+    console.error('[initAgentRuntime] enableOpenccConfigs failed:', err)
+  })
   const { resolved: dataDir } = resolveDataDir()
   serverCwd = cwd
   transcriptStore = new TranscriptStore(dataDir)
