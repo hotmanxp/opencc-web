@@ -324,7 +324,7 @@ export async function* runViaOpenccQuery(
           watchdogTimer = setTimeout(() => {
             console.warn(
               `[openccQueryBridge] watchdog tripped after ${sdkType} with ` +
-                `no further opencc events for ${WATCHDOG_MS}ms — emitting runtime.done via side-channel`,
+                `no further opencc events for ${WATCHDOG_MS}ms — emitting runtime.done + tool_result for ${toolNameByUseId.size} pending tool(s)`,
             )
             if (bus && typeof bus.emit === 'function') {
               bus.emit({
@@ -335,6 +335,26 @@ export async function* runViaOpenccQuery(
                 ts: Date.now(),
                 forced: true,
               })
+              // For any tool_use blocks the LLM emitted but for which
+              // opencc never produced a tool_result, synthesize a
+              // runtime.tool_result with an error so the frontend
+              // closes the "工具调用中..." block instead of leaving
+              // it stuck forever. Without this, the user sees the
+              // tool as still calling even after the session goes
+              // back to idle.
+              for (const [toolUseId, toolName] of toolNameByUseId) {
+                bus.emit({
+                  type: 'runtime.tool_result',
+                  sessionId,
+                  turnIndex: 0,
+                  eventId: `evt-watchdog-tool-${toolUseId}`,
+                  ts: Date.now(),
+                  toolUseId,
+                  toolName,
+                  output: `[watchdog] opencc stalled for ${WATCHDOG_MS}ms after ${sdkType} — tool execution did not return a result. The bridge forced runtime.done; the LLM did not see a tool_result for this call.`,
+                  isError: true,
+                })
+              }
             }
             watchdogTimer = null
           }, WATCHDOG_MS)
