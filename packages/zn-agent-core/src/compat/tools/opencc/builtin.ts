@@ -20,6 +20,7 @@
  */
 
 import { wrapAskUserQuestionToolAsOpencc } from './AskUserQuestionTool.js'
+import { wrapTaskToolsAsOpencc } from './TaskTools.js'
 
 export type OpenccBuiltinTool = any
 
@@ -65,6 +66,12 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
     (globalThis as any).__zaiBridgeCtx ?? {},
   )
 
+  // 4 个 Task 工具 (TaskCreate / TaskGet / TaskUpdate / TaskList) 接
+  // compat/tools/tasks/ 的 zai-native 实现,通过 wrapTaskToolsAsOpencc
+  // 适配成 opencc Tool 接口。它们取代 opencc vendor 自带的 TodoWrite 工具,
+  // 走 zai 的 TaskListStore 持久化 + stateChangeBus → SSE v2_task.changed 路径。
+  const taskToolsOpencc = wrapTaskToolsAsOpencc()
+
   cachedTools = [
     BashTool,
     FileReadTool,
@@ -73,6 +80,7 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
     GlobTool,
     GrepTool,
     AskUserQuestionOpencc,
+    ...taskToolsOpencc,
   ]
   return cachedTools
 }
