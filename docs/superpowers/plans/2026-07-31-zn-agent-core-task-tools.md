@@ -911,7 +911,8 @@ import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import { runOpenccQuery } from '../../../src/compat/runtime/openccAdapter.js'
 import { buildDefaultTools } from '../../../src/compat/tools/index.js'
-import { setTaskListStore, TaskListStore, stateChangeBus } from '../../../src/compat/taskListStore.js'
+import { setTaskListStore, TaskListStore } from '../../../src/compat/taskListStore.js'
+import { stateChangeBus } from '../../../src/stateChangeBus.js'
 
 describe('runOpenccQuery with task tools', () => {
   let tmpDir: string
