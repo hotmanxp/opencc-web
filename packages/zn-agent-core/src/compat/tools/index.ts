@@ -416,7 +416,7 @@ async function skillCall(
 
 type ToolWithCall = Tool & { call: (args: unknown, ctx: unknown) => Promise<{ output: string }> }
 
-function makeTool<T>(spec: {
+export function makeTool<T>(spec: {
   name: string
   description: string
   inputSchema: z.ZodType<T>
