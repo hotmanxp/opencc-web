@@ -33,16 +33,16 @@ export interface Tool {
   /**
    * Tool execution. Optional — Phase 4 buildDefaultTools() wires a stub
    * `call` for each registered tool; Phase 5 replaces stubs with real
-   * Bash/Read/Write/Edit/AskUserQuestion implementations. The compat
-   * openccAdapter.ts tool-use loop invokes this when the model emits a
+   * Bash/Read/Write/Edit/AskUserQuestion implementations. The opencc
+   * query bridge's tool-use loop invokes this when the model emits a
    * `content_block_start { type: 'tool_use' }` block.
    *
    * Args: (input, ctx) where:
    *   - input: the parsed JSON from the model's tool_use block (validated
    *     by the tool's zod schema inside the executor).
-   *   - ctx:  runtime context. 最小只要求 `{ cwd }`; openccAdapter 在
-   *     调工具时还会塞 sessionId / toolUseId / abortSignal / askRegistry /
-   *     onYield 等可选字段 — 见 `ToolCallCtx`。
+   *   - ctx:  runtime context. 最小只要求 `{ cwd }`; the opencc query
+   *     bridge 在调工具时还会塞 sessionId / toolUseId / abortSignal /
+   *     askRegistry / onYield 等可选字段 — 见 `ToolCallCtx`。
    *
    * Returns: `{ output: string }` (preferred) or any value with a string
    * `output` / `content` field that the adapter flattens.
@@ -51,7 +51,7 @@ export interface Tool {
 }
 
 /**
- * openccAdapter 传给 `Tool.call(input, ctx)` 的上下文。
+ * opencc query bridge 传给 `Tool.call(input, ctx)` 的上下文。
  *
  * `cwd` / `sessionId` / `toolUseId` / `abortSignal` 是只读元数据;
  * `onYield` 允许工具 (典型是 AskUserQuestion) 在执行中途向 SSE 通道推

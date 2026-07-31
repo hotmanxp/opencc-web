@@ -1,26 +1,20 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 import { DefaultAgentRuntime } from '../../../src/compat/runtime/contract.js'
 
-// Bridge is now the default backend. We mock the two backends so we can
-// assert which one DefaultAgentRuntime.run() delegates to without hitting
-// the real opencc vendor.
-const openccAdapterMock = vi.hoisted(() => ({
-  runOpenccQuery: vi.fn(),
-}))
+// Bridge is the default backend. We mock it so we can assert that
+// DefaultAgentRuntime.run() delegates to it without hitting the real
+// opencc vendor.
 const openccBridgeMock = vi.hoisted(() => ({
   runViaOpenccQuery: vi.fn(),
 }))
 
-vi.mock('../../../src/compat/runtime/openccAdapter.js', () => openccAdapterMock)
 vi.mock('../../../src/compat/runtime/openccQueryBridge.js', () => openccBridgeMock)
 
 async function* emptyStream(): AsyncGenerator<never> {
   // never yields — iterator ends immediately.
 }
-void (async function* () {})()
 
 function configureMocks() {
-  openccAdapterMock.runOpenccQuery.mockImplementation(() => emptyStream())
   openccBridgeMock.runViaOpenccQuery.mockImplementation(() => emptyStream())
 }
 
@@ -42,7 +36,6 @@ describe('DefaultAgentRuntime.run — bridge is now the default backend (Phase 5
   })
 
   afterEach(() => {
-    openccAdapterMock.runOpenccQuery.mockReset()
     openccBridgeMock.runViaOpenccQuery.mockReset()
   })
 
@@ -55,7 +48,6 @@ describe('DefaultAgentRuntime.run — bridge is now the default backend (Phase 5
     } as any))
 
     expect(openccBridgeMock.runViaOpenccQuery).toHaveBeenCalledTimes(1)
-    expect(openccAdapterMock.runOpenccQuery).not.toHaveBeenCalled()
   })
 
   it('passes opts through to the bridge unchanged', async () => {

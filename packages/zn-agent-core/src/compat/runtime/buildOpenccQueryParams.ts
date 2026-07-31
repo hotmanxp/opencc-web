@@ -190,10 +190,9 @@ async function* translateCallModel(
       // tool_use blocks without ever emitting an `input_json_delta`,
       // so the LLM's tool call lands here with `input = {}` (or
       // undefined). opencc's zod validation rejects empty input with
-      // "required parameter missing" and the toolFailureLoopGuard
-      // trips after 5 retries. Patch the input with a safe default
-      // per tool so the tool actually runs and the conversation
-      // can move forward.
+      // "required parameter missing" and the loop trips after 5
+      // retries. Patch the input with a safe default per tool so the
+      // tool actually runs and the conversation can move forward.
       if (tu && tu.type === 'tool_use' && (tu.input === undefined || (typeof tu.input === 'object' && tu.input !== null && Object.keys(tu.input).length === 0))) {
         tu.input = BUILTIN_TOOL_DEFAULT_INPUT[tu.name] ?? {}
       }

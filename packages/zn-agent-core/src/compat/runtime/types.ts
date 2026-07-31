@@ -157,12 +157,7 @@ export type RuntimeConfig = {
     [key: string]: unknown
   }
 
-  /**
-   * Phase 1.b — config block read by `compat/runtime/openccAdapter.ts` (the
-   * direct modelCaller path that bypasses the broken opencc vendor copy).
-   * zai-server wires mcp/skills/sandbox/modelCaller into this block. Kept
-   * off the top-level RuntimeConfig shape so other consumers don't see it.
-   */
+  /** Configuration consumed by the OpenCC query bridge. */
   openccConfig?: OpenccAdapterConfig
 }
 
@@ -253,31 +248,8 @@ export interface OpenccAdapterConfig {
   mcpClientPool?: import('../mcp/MCPClientPool.js').MCPClientPool | undefined
   /** Sandbox config (executor, maxCpuMs, env allowlist). */
   sandbox?: import('./types.js').SandboxConfig | undefined
-  /**
-   * Model caller — invokes Anthropic (or another provider) and yields the
-   * raw event stream. In Phase 1.b (compat/runtime/openccAdapter.ts) the
-   * adapter calls this directly instead of going through opencc's
-   * query(), so the opencc vendor copy never needs to load. zai-server
-   * wires `createAnthropicModelCaller()` into this slot.
-   */
+  /** Model caller used by the OpenCC query bridge. */
   modelCaller?: import('./modelCaller.js').ModelCaller | undefined
-  /**
-   * Default tool list to expose to the model. Merged with `opts.tools`
-   * at call-time by `runOpenccQuery` (opts wins on name collision).
-   * Phase 4 wires `buildDefaultTools({ skillsDirs })` here so the model
-   * sees Bash/Read/Edit/Write/AskUserQuestion/Skill; Phase 5 will hook
-   * the tool execution loop on top.
-   */
-  tools?: import('./modelCaller.js').Tool[] | undefined
-  /**
-   * zai data dir (default `~/.zai`). `runOpenccQuery` uses this to
-   * instantiate its own `TranscriptStore` so it can read the session
-   * history before the first turn and write the full conversation
-   * back after the loop. The vendored opencc `query()` path used to
-   * own transcript I/O; the Phase 1.b adapter has to do it itself
-   * since it bypasses the opencc vendor copy entirely.
-   */
-  dataDir?: string
 
   /**
    * AskRegistry abstraction. AskUserQuestion 工具在 Phase 4c 之前是 stub

@@ -16,7 +16,6 @@ import type { RuntimeEvent } from './events.js'
 import type { TranscriptFile, TranscriptMeta } from '../transcript/types.js'
 import { TranscriptStore } from '../transcript/store.js'
 import { abortSession } from './abort.js'
-import { runOpenccQuery } from './openccAdapter.js'
 import { runViaOpenccQuery } from './openccQueryBridge.js'
 import { DefaultPluginRuntime } from '../plugins/index.js'
 
@@ -39,41 +38,6 @@ export class DefaultAgentRuntime implements AgentRuntime {
     }
   }
 
-  /**
-   * Run a query and yield RuntimeEvents.
-   *
-   * Default backend is `runViaOpenccQuery` (Phase 5 bridge): lazy-imports
-   * `opencc-src/query.js` (the opencc 0.20.0 vendored copy), translates zai
-   * `QueryOptions → opencc QueryParams`, attaches 5 wrapped core tools
-   * (`defaultCoreToolsAsOpencc()`), and streams `SDKMessage → RuntimeEvent`
-   * through `translateSdkToRuntime`.
-   *
-   * Requires the bun: protocol loader (`tsx --import ./bun-protocol.mjs` at
-   * dev time, or vite alias in tests) so 86 `bun:bundle` imports inside
-   * `opencc-src/` resolve to `bun-shim.ts`. Bridge yields a single
-   * `runtime.error` event on import failure, so a misconfigured runtime
-   * fails loudly rather than hanging.
-   *
-   * Permission model: vendor runs in `mode: 'bypassPermissions'` (set in
-   * `buildOpenccQueryParams.ts`) so the headless deny branch
-   * (`opencc-src/utils/permissions/permissions.ts:934`) is short-circuited
-   * at line 1270-1283 before the deny path is reached. BashTool's
-   * `bashPermissions.ts:1488,1526` also short-circuits on bypass mode.
-   * `shouldAvoidPermissionPrompts: true` is preserved for the rare
-   * `transcriptTooLong` boundary (line 825).
-   *
-   * Loop protection: the vendor `query()` main loop has 5 layers
-   * (toolFailureLoopGuard 5×, MAX_OUTPUT_TOKENS_RECOVERY_LIMIT 3×,
-   * MAX_CONTINUATION_NUDGES 20×, maxTurns, agentStepLimit). The
-   * compat-side `MAX_TOOL_ITERATIONS = 50` hard cap has been removed
-   * because it was killing legitimate long-running tasks (e.g. agents
-   * with 50+ tool_use turns that haven't tripped any vendor guard).
-   *
-   * The legacy `runOpenccQuery` Phase 1.b bypass is still exported from
-   * `./openccAdapter.js` for direct callers and unit tests. It now also
-   * relies on `toolFailureLoopGuard` + `abortSignal` for runaway-task
-   * protection; tests must use their own timeout.
-   */
   run(opts: QueryOptions): AsyncIterable<RuntimeEvent> {
     // openccConfig is the optional subset of this.config that the adapter consumes.
     // Merge `this.config.pluginRuntime` (set by the constructor when caller

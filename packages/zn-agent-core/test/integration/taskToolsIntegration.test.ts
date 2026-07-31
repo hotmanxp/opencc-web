@@ -2,12 +2,11 @@ import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
-import { runOpenccQuery } from '../../src/compat/runtime/openccAdapter.js'
 import { buildDefaultTools } from '../../src/compat/tools/index.js'
 import { setTaskListStore, TaskListStore } from '../../src/compat/taskListStore.js'
 import { stateChangeBus } from '../../src/stateChangeBus.js'
 
-describe('runOpenccQuery with task tools', () => {
+describe('task tools integration', () => {
   let tmpDir: string
   let store: TaskListStore
   let emitted: Array<unknown>
@@ -25,48 +24,10 @@ describe('runOpenccQuery with task tools', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  function fakeModelCaller(callSequence: Array<{ type: string; [k: string]: unknown }>) {
-    let i = 0
-    return async () => {
-      const events = callSequence[i++] ?? [{ type: 'message_stop' }]
-      return (async function* () {
-        for (const e of events) yield e as never
-      })()
-    }
-  }
-
   it('merged tool list contains TaskCreate/Get/Update/List', async () => {
     const tools = buildDefaultTools()
     const names = tools.map((t) => t.name)
     expect(names).toEqual(expect.arrayContaining(['TaskCreate', 'TaskGet', 'TaskUpdate', 'TaskList']))
-  })
-
-  it('runOpenccQuery passes task tools to modelCaller', async () => {
-    let receivedTools: Array<{ name: string }> = []
-    const modelCaller = async (req: { tools?: Array<{ name: string }> }) => {
-      receivedTools = req.tools ?? []
-      return (async function* () {
-        yield { type: 'message_stop' }
-      })()
-    }
-    const events: unknown[] = []
-    for await (const ev of runOpenccQuery(
-      {
-        prompt: 'noop',
-        cwd: tmpDir,
-        transcriptId: 'sess-int-A',
-        sessionId: 'sess-int-A',
-      },
-      {
-        modelCaller: modelCaller as never,
-        tools: buildDefaultTools(),
-      },
-    )) {
-      events.push(ev)
-    }
-    expect(receivedTools.map((t) => t.name)).toEqual(
-      expect.arrayContaining(['TaskCreate', 'TaskGet', 'TaskUpdate', 'TaskList']),
-    )
   })
 
   it('TaskCreate via store persists and emits stateChangeBus event', async () => {

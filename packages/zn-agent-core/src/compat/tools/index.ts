@@ -311,7 +311,7 @@ async function askUserQuestionCall(
         `[zai askRegistry not configured] Asked ${input.questions.length} question(s)\n` +
         input.questions.map((q) => `  - ${q.question}`).join('\n') +
         (allOpts ? `\nOptions:\n${allOpts}\n` : '') +
-        `(openccAdapter did not pass askRegistry / onYield / toolUseId / sessionId — no user answer was captured.)`,
+        `(opencc query bridge did not pass askRegistry / onYield / toolUseId / sessionId — no user answer was captured.)`,
     }
   }
   // 关键: 必须先 yield tool_use:ask_pending, 再 await askRegistry.

@@ -166,26 +166,20 @@ export function initAgentRuntime(cwd: string): void {
     openccConfig: {
       mcpPool: mcpClientPool,
       mcpServers,
-      // MCP instructions snapshot — openccAdapter calls
+      // MCP instructions snapshot — the opencc query bridge calls
       // `pool.getInstructionsSnapshot()` to fill the `<mcp_servers>`
       // system prompt block. Only meaningful when at least one MCP
       // server is configured (the pool is undefined otherwise).
       mcpClientPool,
       skillsDirs: resolveSkillsDirs(),
       sandbox: resolveSandbox(cwd),
-      // Phase 1.b: dataDir is read by runOpenccQuery to instantiate its
-      // own TranscriptStore so the session history (loaded before the
-      // first turn) and the full conversation (written after the loop)
-      // are persisted under ~/.zai. The vendored opencc query() path
-      // owns transcript I/O; the Phase 1.b adapter has to do it itself
-      // since it bypasses the opencc vendor copy entirely.
-      dataDir,
-      // Plugin runtime: openccAdapter reads `snapshot.skills` to merge
-      // plugin-installed skills into the `<skills>` system prompt block.
-      // Without this, the ~14 superpowers skills (brainstorming, TDD,
-      // etc.) never reach the model. The module-level `pluginRuntime` is
-      // nullable (lazy-initialized on first call to getPluginRuntime),
-      // but `openccConfig.pluginRuntime` expects `PluginRuntime | undefined`,
+      // Plugin runtime: the opencc query bridge reads `snapshot.skills`
+      // to merge plugin-installed skills into the `<skills>` system
+      // prompt block. Without this, the ~14 superpowers skills
+      // (brainstorming, TDD, etc.) never reach the model. The
+      // module-level `pluginRuntime` is nullable (lazy-initialized on
+      // first call to getPluginRuntime), but
+      // `openccConfig.pluginRuntime` expects `PluginRuntime | undefined`,
       // so collapse `null` to `undefined` here.
       ...(pluginRuntime ? { pluginRuntime } : {}),
       // Phase 5: ModelCaller feeds opencc's deps.callModel. The translator in
@@ -194,12 +188,6 @@ export function initAgentRuntime(cwd: string): void {
       // (model + systemPrompt + messages + tools + signal) — both shapes
       // wrap Anthropic's underlying SDK.
       modelCaller: createAnthropicModelCaller(),
-      // Phase 4: register the default tool set (Bash/Read/Edit/Write/
-      // AskUserQuestion/Skill) so the model sees them. Tool execution is
-      // still stubbed in Phase 4 — model emits tool_use blocks (→ SSE
-      // `runtime.tool_call`), `call()` returns a Phase-4 stub message.
-      // Real execution loop lands in Phase 5.
-      tools: buildDefaultTools({ skillsDirs: resolveSkillsDirs() }),
       // AskUserQuestion 的等待表: 工具 call 时挂起, 等用户 POST /api/agent/answer
       // 才 resolve. 不传的话 AskUserQuestion 走 stub (返回 "askRegistry not
       // configured"), QuestionCard 永远不弹. 把 server 启动时建的 askRegistry
