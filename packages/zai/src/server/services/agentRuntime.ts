@@ -183,8 +183,11 @@ export function initAgentRuntime(cwd: string): void {
       // Plugin runtime: openccAdapter reads `snapshot.skills` to merge
       // plugin-installed skills into the `<skills>` system prompt block.
       // Without this, the ~14 superpowers skills (brainstorming, TDD,
-      // etc.) never reach the model.
-      pluginRuntime,
+      // etc.) never reach the model. The module-level `pluginRuntime` is
+      // nullable (lazy-initialized on first call to getPluginRuntime),
+      // but `openccConfig.pluginRuntime` expects `PluginRuntime | undefined`,
+      // so collapse `null` to `undefined` here.
+      ...(pluginRuntime ? { pluginRuntime } : {}),
       // Phase 5: ModelCaller feeds opencc's deps.callModel. The translator in
       // buildOpenccQueryParams translates between opencc's request shape
       // (messages + systemPrompt + tools + signal + options.model) and zai's
