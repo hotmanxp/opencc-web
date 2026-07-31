@@ -243,9 +243,22 @@ function syntheticToolUseContext(opts: {
   const ac = opts.abortController ?? new AbortController()
   const noopAppState: any = {
     toolPermissionContext: {
-      alwaysAllow: new Set(),
+      // Always allow the opencc builtin tools the bridge wires in
+      // (Bash/Read/Edit/Write/Glob/Grep). zai's own permission UI
+      // is the ask/deny path; this stub keeps opencc from re-prompting
+      // and lets the tools run straight through. The AskUserQuestion
+      // wrapper still uses zai's askRegistry via the bridgeCtx global.
+      alwaysAllow: new Set([
+        'Bash',
+        'Read',
+        'Edit',
+        'Write',
+        'Glob',
+        'Grep',
+        'AskUserQuestion',
+      ]),
       alwaysDeny: new Set(),
-      mode: 'default',
+      mode: 'bypassPermissions',
     },
     mainLoopModel: opts.model,
     mcpConfigs: new Map(),
@@ -290,7 +303,7 @@ function syntheticToolUseContext(opts: {
 
 /** Always-allow permission callback (canUseTool). */
 function alwaysAllowCanUseTool(): any {
-  return async (_toolName: string, input: unknown) => ({
+  return async (_tool: any, input: unknown) => ({
     behavior: 'allow',
     updatedInput: input,
   })
