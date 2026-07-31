@@ -41,6 +41,23 @@ type ContentBlock =
   | { type: 'image'; source: { type: 'base64'; media_type: string; data: string } }
   | { type: 'unknown'; [k: string]: unknown }
 
+/**
+ * Safe default arguments per opencc built-in tool, used to replace
+ * empty `{}` tool_use input stored in the conversation history from
+ * a previous (broken) LLM turn. The upstream API rejects empty
+ * tool arguments on a re-sent assistant message; substitute a safe
+ * per-tool default so the conversation can continue.
+ */
+const BUILTIN_TOOL_DEFAULT_ARGS: Record<string, Record<string, unknown>> = {
+  Bash: { command: 'pwd' },
+  Read: { file_path: '/dev/null' },
+  Write: { file_path: '/dev/null', content: '' },
+  Edit: { file_path: '/dev/null', old_string: '', new_string: '' },
+  Glob: { pattern: '*' },
+  Grep: { pattern: '.' },
+  AskUserQuestion: { questions: [] },
+}
+
 type OpenAIContentPart =
   | { type: 'text'; text: string }
   | { type: 'image_url'; image_url: { url: string } }
@@ -232,13 +249,22 @@ function convertMessages(
         for (const b of content) {
           if (b.type === 'text') text += b.text
           else if (b.type === 'tool_use') {
+            // Sanitize empty `input: {}` from prior turns where the LLM
+            // streamed a tool_use block without input_json_delta (e.g. the
+            // minimaxi proxy's MiniMax-M3). The API rejects empty tool
+            // arguments on a re-sent assistant message; substitute a
+            // safe per-tool default so the conversation can continue.
+            const args = (() => {
+              if (typeof b.input === 'string') return b.input
+              if (b.input && typeof b.input === 'object' && Object.keys(b.input).length > 0) {
+                return JSON.stringify(b.input)
+              }
+              return JSON.stringify(BUILTIN_TOOL_DEFAULT_ARGS[b.name] ?? {})
+            })()
             toolCalls.push({
               id: b.id,
               type: 'function',
-              function: {
-                name: b.name,
-                arguments: typeof b.input === 'string' ? b.input : JSON.stringify(b.input ?? {}),
-              },
+              function: { name: b.name, arguments: args },
             })
           }
           // thinking / image blocks are dropped for now (not in scope).
