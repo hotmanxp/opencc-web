@@ -37,15 +37,6 @@ function clearUrlSid(): void {
   writeUrlSid(null)
 }
 
-// 与 agent-core TodoWriteInputSchema 的 zod 形态一致 (web 不直接 import zod schema,
-// 避免循环依赖; 字段类型用本地 type 即可, 实时流拿到的 input.todos 由本文件内的
-// safeParse 兜底, 失败时静默忽略).
-export type TodoItem = {
-  content: string
-  status: 'pending' | 'in_progress' | 'completed'
-  activeForm: string
-}
-
 // V2 TaskList 镜像 (mirror of zai-agent-core TaskListStore). 跟 TodoZone
 // 字段对齐: 客户端只读, 写操作走 TaskCreate/TaskUpdate tool call, server
 // 重新计算后通过本字段刷新. status 多一个 'deleted' (completed 之外
@@ -218,11 +209,6 @@ interface AgentState {
   textSegmentRev: number
   // 已经触发过 textSegmentRev++ 的 toolUseId 集合, 每个工具只 bump 一次.
   segmentedToolUseIds: Record<string, true>
-  // 会话级 todo 列表 (按 sessionId 索引). 不持久化, 切换会话时保留旧 sid 的
-  // todo, 刷新页面由 loadTranscript 走 extractTodosFromTranscript 还原.
-  todosBySession: Record<string, TodoItem[]>
-  setTodos: (sessionId: string, todos: TodoItem[]) => void
-
   // V2 TaskList 镜像: 与老 TodoWrite 分开存, 因为语义不同 (跨 turn、
   // 会话之间可被查询). key 用 sessionId (来自 tool_use:start.msg.sessionId).
   v2TasksBySession: Record<string, V2TaskItem[]>
@@ -455,8 +441,6 @@ export function loadTranscriptMessages(
             text: b.text as string,
           })
         } else if (b.type === 'tool_use') {
-          // TodoWrite tool_use 不进 messages 流; 它对应的状态由 TodoZone 渲染.
-          if ((b.name as string) === 'TodoWrite') continue
           out.push({
             ...baseFields,
             eventId: msg.uuid ?? `tool-${b.id}`,
@@ -472,49 +456,6 @@ export function loadTranscriptMessages(
   return out
 }
 
-// 从 transcript 历史里提取最近一次 TodoWrite 的 todos. 返回 null 表示没找到
-// 或解析失败. zai-web 用这个函数在 loadTranscript 末尾回填 todosBySession.
-export function extractTodosFromTranscript(
-  rawMessages: any[],
-): TodoItem[] | null {
-  // 倒序找最后一条 assistant message 含 TodoWrite tool_use 块.
-  for (let i = rawMessages.length - 1; i >= 0; i--) {
-    const msg = rawMessages[i]
-    if (!msg || msg.type !== 'assistant') continue
-    const content = msg.message?.content
-    if (!Array.isArray(content)) continue
-    const blocks = content as Array<Record<string, unknown>>
-    for (const b of blocks) {
-      if (b.type !== 'tool_use') continue
-      if ((b.name as string) !== 'TodoWrite') continue
-      const input = b.input as { todos?: unknown } | undefined
-      const rawTodos = input?.todos
-      if (!Array.isArray(rawTodos)) return null
-      const parsed: TodoItem[] = []
-      for (const raw of rawTodos) {
-        if (
-          !raw || typeof raw !== 'object' ||
-          typeof (raw as { content?: unknown }).content !== 'string' || (raw as { content: string }).content === '' ||
-          typeof (raw as { activeForm?: unknown }).activeForm !== 'string' || (raw as { activeForm: string }).activeForm === ''
-        ) {
-          return null
-        }
-        const s0 = (raw as { status?: unknown }).status
-        if (s0 !== 'pending' && s0 !== 'in_progress' && s0 !== 'completed') {
-          return null
-        }
-        parsed.push({
-          content: (raw as { content: string }).content,
-          status: s0,
-          activeForm: (raw as { activeForm: string }).activeForm,
-        })
-      }
-      return parsed
-    }
-  }
-  return null
-}
-
 export const useAgentStore = create<AgentState>((set, get) => ({
   sessionId: null,
   sessions: [],
@@ -528,12 +469,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   textSegmentRev: 0,
   segmentedToolUseIds: {},
   sendSeq: 0,
-  todosBySession: {},
   v2TasksBySession: {},
   // SSE state.* event 缓存 (Task 10): 每个 sessionId 一份, 默认空,
   // 由 applyCwdChanged / applyBashTaskChanged / applyV2TaskChanged /
   // applyAgentTaskChanged 4 个 reducer 写入. 切会话/清屏 时保留旧 sid
-  // 的条目, 与 todosBySession / v2TasksBySession 一致 — 用户切回 A 仍
+  // 的条目, 与 v2TasksBySession 一致 — 用户切回 A 仍
   // 能看到 A 的 bash 任务 / agent 任务历史.
   cwdBySession: {},
   bashTasksBySession: {},
@@ -547,13 +487,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 待清空定时器: 每 sessionId 一份, "全部任务完成" 后 5s 自动从 store 移除
   // (避免"全部完成还一直挂着"的 UI 噪音). 重新写入含未完成任务时取消.
   _taskClearTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
-
-  setTodos: (sessionId: string, todos: TodoItem[]) => {
-    set((s) => ({
-      todosBySession: { ...s.todosBySession, [sessionId]: todos },
-    }))
-    scheduleTaskListClearIfAllDone(sessionId)
-  },
 
   setV2Tasks: (sessionId, tasks) => {
     set((s) => ({
@@ -635,81 +568,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 同一个工具的 start → done/error 全程复用一条消息 + 一个 DOM 节点,
   // ToolCallBlock 内部 Collapse 折叠态不丢, React 也不再报 duplicate key.
   //
-  // 重要: TodoWrite 的 tool_use (start 阶段) 会主动 *吞掉* 这一帧不写 store,
-  // 但 tool_result (done 阶段) 来自 SSE, schema 上 *不* 带 toolName / input —
-  // shared/events.ts:27-29. 如果只在消息本身上看 name/input, 守卫在 done
-  // 路径永远漏判, TodoWrite 会被当成 unknown 工具渲染 JSON 卡片. 修法:
-  // 守卫同时检查 msg.name, 也从 prev (同 toolUseId 已存在的 start entry)
-  // 拿 name / input 兜底.
   upsertToolCall: (msg: AgentMessage) =>
     set((s) => {
       const t = msg.type as string
-      // 同 toolUseId 的 prev entry: SSE start 阶段已经在 store 里建好了,
-      // 由于 TodoWrite start 在守卫被吞掉, prev 在 done 路径上没有 prev,
-      // 但 *内容层面* 该条 toolUse 的 TodoWrite 身份仍能从 prev 没有 / 当前
-      // 输入中识别 — 守卫先看 msg.name, 拿不到再用 prev.name 做 fallback.
-      // (TodoWrite start 同样吞掉不留 prev, 所以此处实际只覆盖 '先有 prev
-      // entry' 的旁路场景, 主路径仍是看 msg.name 与 msg.input.)
-      const prevEntry = (() => {
-        if (!msg.toolUseId) return undefined
-        return s.messages.find(
-          (m) =>
-            (m.type as string).startsWith('tool_use:') &&
-            (m.toolUseId as string) === msg.toolUseId,
-        )
-      })()
-      const effectiveName =
-        (msg.name as string | undefined) ??
-        (prevEntry?.name as string | undefined)
-      // TodoWrite 的 tool_use/tool_result 全部不进 messages 流 (按 spec:
-      // TodoWrite 不显示 ToolCallBlock, 它的可见状态由 todosBySession 渲染).
-      if (effectiveName === 'TodoWrite') {
-        // done / error 阶段: 解析 todos 写回 todosBySession. 失败静默忽略.
-        // input 既可能来自 msg (手工调用 upsertToolCall), 也可能需要从
-        // prev entry 的 input 拿 (SSE done 路径 schema 不携带 input).
-        const t2 = t as string
-        if (t2 === 'tool_use:done' || t2 === 'tool_use:error') {
-          const msgInput = msg.input as { todos?: unknown } | undefined
-          const prevInput = prevEntry?.input as { todos?: unknown } | undefined
-          const rawTodos = msgInput?.todos ?? prevInput?.todos
-          if (Array.isArray(rawTodos)) {
-            const parsed: TodoItem[] = []
-            let ok = true
-            for (const raw of rawTodos) {
-              if (
-                !raw || typeof raw !== 'object' ||
-                typeof (raw as { content?: unknown }).content !== 'string' || (raw as { content: string }).content === '' ||
-                typeof (raw as { activeForm?: unknown }).activeForm !== 'string' || (raw as { activeForm: string }).activeForm === ''
-              ) {
-                ok = false
-                break
-              }
-              const s0 = (raw as { status?: unknown }).status
-              if (s0 !== 'pending' && s0 !== 'in_progress' && s0 !== 'completed') {
-                ok = false
-                break
-              }
-              parsed.push({
-                content: (raw as { content: string }).content,
-                status: s0,
-                activeForm: (raw as { activeForm: string }).activeForm,
-              })
-            }
-            if (ok) {
-              const sid = (msg.sessionId as string | undefined) ?? s.sessionId
-              if (sid) {
-                return {
-                  todosBySession: { ...s.todosBySession, [sid]: parsed },
-                }
-              }
-            }
-            // parse 失败: 静默忽略, 不 push messages, 不 bump segment.
-            return {}
-          }
-        }
-        // start 阶段 或 parse 后 sid 缺失: 直接吞掉, 不动 messages.
-        return {}
-      }
       // tool_use:ask_pending → 设置 pendingAsk 状态 (不进入 messages, 由 QuestionCard 独立渲染)
       if (t === 'tool_use:ask_pending') {
         const toolUseId = msg.toolUseId as string
@@ -926,11 +787,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   clearMessages: () =>
     set((s) => {
-      // 仅清空当前 sid 的 todo, 其他 sid 保留以便切回.
       const sid = s.sessionId
-      const { [sid as string]: _drop, ...rest } = (s.todosBySession ?? {}) as Record<string, TodoItem[]>
-      void _drop
-      // v2TasksBySession 与 todosBySession 一致: 切会话/清屏 只清理当前 sid
+      // 切会话/清屏只清理当前 sid 的 v2 task.
       const { [sid as string]: _dropV2, ...restV2 } = (s.v2TasksBySession ?? {}) as Record<string, V2TaskItem[]>
       void _dropV2
       return {
@@ -941,7 +799,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         textSegmentRev: 0,
         segmentedToolUseIds: {},
         sendSeq: 0,
-        todosBySession: sid ? rest : s.todosBySession,
         v2TasksBySession: sid ? restV2 : s.v2TasksBySession,
       }
     }),
@@ -1054,11 +911,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 立即清空当前 UI 态, 让用户感觉"切到了新会话"
     set((state) => {
       const sid = state.sessionId
-      const nextTodos = sid
-        ? Object.fromEntries(
-            Object.entries(state.todosBySession).filter(([k]) => k !== sid),
-          )
-        : state.todosBySession
       const nextV2 = sid
         ? Object.fromEntries(
             Object.entries(state.v2TasksBySession).filter(([k]) => k !== sid),
@@ -1078,7 +930,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         textSegmentRev: 0,
         segmentedToolUseIds: {},
         sendSeq: 0,
-        todosBySession: nextTodos,
         v2TasksBySession: nextV2,
         _taskClearTimers: nextTimers,
       }
@@ -1198,13 +1049,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         segmentedToolUseIds: {},
         sendSeq: 0,
       })
-      // 还原 transcript 中最后一次 TodoWrite 的 todos. 失败静默 — 不清空 store 已有 todo.
-      const todos = extractTodosFromTranscript((transcript.messages ?? []) as any[])
-      if (todos !== null) {
-        set((s) => ({
-          todosBySession: { ...s.todosBySession, [sessionId]: todos },
-        }))
-      }
     } catch {
       // ignore
     }
@@ -1471,8 +1315,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       case 'runtime.tool_result': {
         // runtime.tool_result schema 携带 toolUseId / toolName / input
         // (2026-07-18 加 toolName/input: 前端 upsertToolCall 守卫要靠这
-        // 两个字段识别 TodoWrite — TodoWrite tool_use (start) 在守卫被
-        // 吞掉, prev 同 toolUseId 不存在, 必须用本事件自身字段).
         const resultMsg: AgentMessage = {
           eventId: `tool-${event.toolUseId}`,
           sessionId: sid,
@@ -1819,9 +1661,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 }))
 
 /**
- * 自动清理 helper: 当某个 sessionId 的 todos + v2 tasks 全部 completed /
- * deleted, 5 秒后从 store 里把对应的 todosBySession[sid] + v2TasksBySession[sid]
- * 一起清掉. 中途重新写入含未完成任务则取消定时器.
+ * 自动清理 helper: 当某个 sessionId 的 v2 tasks 全部 completed / deleted,
+ * 5 秒后从 store 里清掉对应的 v2TasksBySession[sid]. 中途重新写入含未完成
+ * 任务则取消定时器.
  *
  * 设计: 不依赖 React 组件挂载, 直接用模块级 setTimeout + 写入 store.
  * - 使用 getState() 拿到最新值, 不需要通过 set 闭包传递
@@ -1831,10 +1673,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 const TASK_CLEAR_DELAY_MS = 5_000
 function scheduleTaskListClearIfAllDone(sessionId: string): void {
   const s = useAgentStore.getState()
-  const todos = s.todosBySession[sessionId] ?? []
   const v2 = s.v2TasksBySession[sessionId] ?? []
   // 没任务 → 取消已有定时器
-  if (todos.length === 0 && v2.length === 0) {
+  if (v2.length === 0) {
     if (s._taskClearTimers[sessionId]) {
       clearTimeout(s._taskClearTimers[sessionId])
       useAgentStore.setState((cur) => {
@@ -1845,10 +1686,10 @@ function scheduleTaskListClearIfAllDone(sessionId: string): void {
     }
     return
   }
-  // todo 的 completed 是终态; v2 的 completed + deleted 都是终态
-  const hasUnfinished =
-    todos.some((t) => t.status !== 'completed') ||
-    v2.some((t) => t.status !== 'completed' && t.status !== 'deleted')
+  // v2 的 completed + deleted 都是终态
+  const hasUnfinished = v2.some(
+    (t) => t.status !== 'completed' && t.status !== 'deleted',
+  )
   if (hasUnfinished) {
     if (s._taskClearTimers[sessionId]) {
       clearTimeout(s._taskClearTimers[sessionId])
@@ -1864,12 +1705,10 @@ function scheduleTaskListClearIfAllDone(sessionId: string): void {
   if (s._taskClearTimers[sessionId]) clearTimeout(s._taskClearTimers[sessionId])
   const timer = setTimeout(() => {
     useAgentStore.setState((cur) => {
-      const { [sessionId]: _, ...restTodos } = cur.todosBySession
-      const { [sessionId]: __, ...restV2 } = cur.v2TasksBySession
-      const { [sessionId]: ___, ...restTimers } = cur._taskClearTimers
-      void _; void __; void ___
+      const { [sessionId]: _, ...restV2 } = cur.v2TasksBySession
+      const { [sessionId]: __, ...restTimers } = cur._taskClearTimers
+      void _; void __
       return {
-        todosBySession: restTodos,
         v2TasksBySession: restV2,
         _taskClearTimers: restTimers,
       }
