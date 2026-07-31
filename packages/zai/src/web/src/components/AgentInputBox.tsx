@@ -17,7 +17,7 @@ import {
 import { useSplitPaneCompactLock } from "../hooks/useSplitPaneCompactLock.js";
 import { useSubmitPrompt } from "../hooks/useSubmitPrompt.js";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
-import type { TodoItem, V2TaskItem } from "../store/useAgentStore.js";
+import type { V2TaskItem } from "../store/useAgentStore.js";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import { useAppStore } from "../store/useAppStore";
 import { api } from "../lib/api";
@@ -90,17 +90,14 @@ export default React.memo(function AgentInputBox() {
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
   const isMobile = useAppStore((s) => s.isMobile);
   const pendingAsk = useAgentStore((s) => s.pendingAsk);
-  // 任务摘要: 从 store 取当前 session 的 todos + v2 tasks, 合并统计 N/M 任务.
+  // 任务摘要: 从 store 取当前 session 的 v2 tasks 统计 N/M 任务.
   // 修复: 任务摘要从独立 BottomStatusBar 行合并到状态行, 让 UI 更紧凑.
   // 取 store 字段而非 props — AgentInputBox 是叶子组件, 让 store selector
   // 自动追踪 sid 变化, 避免父组件多传一组 props.
-  const todos: TodoItem[] = useAgentStore((s) =>
-    s.sessionId ? s.todosBySession[s.sessionId] ?? [] : []
-  );
+  // 2026-07-31: 老 TODO (todosBySession) 已被 refactor 删除, 全部走 v2 task tools.
   const v2Tasks: V2TaskItem[] = useAgentStore((s) =>
     s.sessionId ? s.v2TasksBySession[s.sessionId] ?? [] : []
   );
-  const todoTotal = todos.length;
   // 单一布尔 transcriptCollapsed:Layout hydrate 时根据 settings.outputStyle
   // 把初始值定为 (compact === true),用户点工具栏按钮 → 直接翻转.
   // 这里 *不* 重新计算 visuallyCollapsed — transcriptCollapsed 本身就是
@@ -114,16 +111,13 @@ export default React.memo(function AgentInputBox() {
   // outputStyle 仅用于 tooltip 文案:让用户知道 settings 是 compact,
   // 刷新后会回到当前这个工具栏按钮点击后的反向设置.
   const outputStyle = useAppStore((s) => s.outputStyle);
-  const todoDone = todos.filter((t) => t.status === "completed").length;
-  const todoInProgress = todos.filter((t) => t.status === "in_progress").length;
   const v2Total = v2Tasks.length;
   const v2Done = v2Tasks.filter((t) => t.status === "completed").length;
   const v2InProgress = v2Tasks.filter((t) => t.status === "in_progress").length;
-  const totalTasks = todoTotal + v2Total;
-  const doneTasks = todoDone + v2Done;
-  const inProgressTasks = todoInProgress + v2InProgress;
-  const openTasks =
-    totalTasks - doneTasks - inProgressTasks;
+  const totalTasks = v2Total;
+  const doneTasks = v2Done;
+  const inProgressTasks = v2InProgress;
+  const openTasks = v2Total - v2Done - v2InProgress;
 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -633,7 +627,7 @@ export default React.memo(function AgentInputBox() {
             "X/Y 任务 · K 待开始" 整段被挤不可见. */}
         {totalTasks > 0 && (
           <Popover
-            content={<TodoDropdown todos={todos} v2Tasks={v2Tasks} />}
+            content={<TodoDropdown v2Tasks={v2Tasks} />}
             trigger="click"
             placement="topLeft"
             arrow={false}

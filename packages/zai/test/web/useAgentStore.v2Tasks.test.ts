@@ -3,8 +3,7 @@
 //
 // 修复目标:
 // 1. createNewSession 应当同时清掉 v2TasksBySession 的当前 sid
-//    (与 todosBySession 对称 — 老 TODO 已经在 createNewSession 里清,
-//    但 v2 任务被漏掉, 导致新建会话时残留上一个会话的 v2 任务)
+//    (防止新建会话时残留上一个会话的 v2 任务)
 // 2. loadTranscript 完成后, 自动 fetch /api/agent/sessions/:id/v2-tasks
 //    把磁盘上该 session 的任务 (TaskListStore 按 sessionId 隔离,
 //    实际存储 ~/.zai/tasks/<sessionId>.json) 回填进
@@ -46,7 +45,6 @@ beforeEach(() => {
     textSegmentRev: 0,
     segmentedToolUseIds: {},
     sendSeq: 0,
-    todosBySession: {},
     v2TasksBySession: {},
   })
 })

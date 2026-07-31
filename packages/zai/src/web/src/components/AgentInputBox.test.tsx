@@ -2,13 +2,10 @@
 import { describe, expect, test, beforeEach, beforeAll, vi } from "vitest";
 import "@testing-library/jest-dom";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
-import { useAgentStore, type TodoItem, type V2TaskItem } from "../store/useAgentStore.js";
+import { useAgentStore, type V2TaskItem } from "../store/useAgentStore.js";
 import { useAppStore } from "../store/useAppStore.js";
 import { api } from "../lib/api.js";
 
-const todo = (content: string, status: TodoItem["status"]): TodoItem => ({
-  content, status, activeForm: content,
-});
 const v2 = (id: string, subject: string, status: V2TaskItem["status"]): V2TaskItem => ({
   id, subject, status, blocks: [], blockedBy: [], updatedAt: 0,
 });
@@ -48,7 +45,6 @@ beforeEach(() => {
     textSegmentRev: 0,
     segmentedToolUseIds: {},
     sendSeq: 0,
-    todosBySession: {},
     v2TasksBySession: {},
   })
 })
@@ -107,8 +103,8 @@ describe('AgentInputBox — slash command UI visibility', () => {
   })
 })
 
-describe('AgentInputBox — 状态行合并任务摘要', () => {
-  test('空 todos + 空 v2 时状态行只显示 ● 就绪, 不展示任务摘要', () => {
+describe('AgentInputBox — 状态行合并 v2 任务摘要', () => {
+  test('空 v2 时状态行只显示 ● 就绪, 不展示任务摘要', () => {
     render(<AgentInputBox />);
     const row = screen.getByTestId('agent-input-status-row');
     expect(row).toHaveTextContent('就绪');
@@ -116,13 +112,13 @@ describe('AgentInputBox — 状态行合并任务摘要', () => {
     expect(screen.queryByTestId('agent-input-task-summary')).toBeNull();
   });
 
-  test('有 todos 时状态行显示 1/3 任务 · 1 进行中', () => {
+  test('有 v2 任务时状态行显示 1/3 任务 · 1 进行中', () => {
     useAgentStore.setState({
-      todosBySession: {
+      v2TasksBySession: {
         'sess-1': [
-          todo('a', 'completed'),
-          todo('b', 'in_progress'),
-          todo('c', 'pending'),
+          v2('v1', 'a', 'completed'),
+          v2('v2', 'b', 'in_progress'),
+          v2('v3', 'c', 'pending'),
         ],
       },
     })
@@ -135,11 +131,8 @@ describe('AgentInputBox — 状态行合并任务摘要', () => {
     expect(summary).toHaveTextContent('1 待开始');
   });
 
-  test('合并 todos + v2 时状态行只显示一份合并摘要', () => {
+  test('多个 v2 任务完成态时状态行只显示一份合并摘要', () => {
     useAgentStore.setState({
-      todosBySession: {
-        'sess-1': [todo('old', 'completed')],
-      },
       v2TasksBySession: {
         'sess-1': [
           v2('v1', 'A', 'completed'),
@@ -149,18 +142,17 @@ describe('AgentInputBox — 状态行合并任务摘要', () => {
     })
     render(<AgentInputBox />);
     const summary = screen.getByTestId('agent-input-task-summary');
-    expect(summary).toHaveTextContent('2/3 任务');
+    expect(summary).toHaveTextContent('1/2 任务');
     expect(summary).toHaveTextContent('1 待开始');
     // 全完成时染绿
     useAgentStore.setState({
-      todosBySession: { 'sess-1': [todo('a', 'completed')] },
-      v2TasksBySession: { 'sess-1': [v2('v1', 'A', 'completed')] },
+      v2TasksBySession: {
+        'sess-1': [
+          v2('v1', 'A', 'completed'),
+          v2('v2', 'B', 'completed'),
+        ],
+      },
     })
-    useAgentStore.setState({
-      todosBySession: { 'sess-1': [todo('a', 'completed'), todo('b', 'completed')] },
-      v2TasksBySession: { 'sess-1': [] },
-    })
-    // 第二个 setState 会触发合并后的状态, 此时 2/2 全完成
     render(<AgentInputBox />);
     // 第二次 render 之前 store 已更新, summary 应该反映 2/2 全完成
     // 注: render 是独立调用, 上一个组件已卸载, 此处只校验最后一次 store 状态.
@@ -174,11 +166,11 @@ describe('AgentInputBox — 状态行合并任务摘要', () => {
     // 让 spinner (✶✷✸✹) 抢视觉焦点, 任务数字保留可读.
     useAgentStore.setState({ status: 'streaming' });
     useAgentStore.setState({
-      todosBySession: {
+      v2TasksBySession: {
         'sess-1': [
-          todo('a', 'completed'),
-          todo('b', 'in_progress'),
-          todo('c', 'pending'),
+          v2('v1', 'a', 'completed'),
+          v2('v2', 'b', 'in_progress'),
+          v2('v3', 'c', 'pending'),
         ],
       },
     })
@@ -194,22 +186,22 @@ describe('AgentInputBox — 状态行合并任务摘要', () => {
     expect((summary as HTMLElement).style.opacity).toBe('0.7');
   });
 
-  // 修复: 状态行任务摘要可点击 → 弹出 TodoDropdown 列出 todo + v2 详情.
+  // 修复: 状态行任务摘要可点击 → 弹出 TodoDropdown 列出 v2 任务详情.
   // 之前合并到状态行后丢了 onClick, 用户无法查看任务列表.
-  test('点击任务摘要展开 popover, 渲染合并的 todo + v2 列表', async () => {
+  test('点击任务摘要展开 popover, 渲染 v2 任务列表', async () => {
     useAgentStore.setState({
-      todosBySession: {
-        'sess-1': [todo('old', 'in_progress')],
-      },
       v2TasksBySession: {
-        'sess-1': [v2('v1', 'A', 'pending')],
+        'sess-1': [
+          v2('v1', 'in-progress-task', 'in_progress'),
+          v2('v2', 'pending-task', 'pending'),
+        ],
       },
     })
     render(<AgentInputBox />);
     fireEvent.click(screen.getByTestId('agent-input-task-summary'))
     await waitFor(() => expect(screen.getByTestId('todo-dropdown')).toBeInTheDocument())
-    expect(screen.getByTestId('todo-dropdown-item-in_progress')).toHaveTextContent('old')
-    expect(screen.getByTestId('v2-task-dropdown-item-pending')).toHaveTextContent('A')
+    expect(screen.getByTestId('v2-task-dropdown-item-in_progress')).toHaveTextContent('in-progress-task')
+    expect(screen.getByTestId('v2-task-dropdown-item-pending')).toHaveTextContent('pending-task')
   });
 })
 

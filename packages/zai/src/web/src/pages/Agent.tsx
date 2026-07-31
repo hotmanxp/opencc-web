@@ -14,10 +14,7 @@ import {
   DeleteOutlined,
   PictureOutlined,
 } from "@ant-design/icons";
-import {
-  useAgentStore,
-  type TodoItem,
-} from "../store/useAgentStore";
+import { useAgentStore } from "../store/useAgentStore";
 import { useAppStore } from "../store/useAppStore";
 import ConfigStatusBar from "../components/ConfigStatusBar";
 import { SessionCwdBridge } from "../components/SessionCwdBridge";

@@ -1,6 +1,6 @@
-import type { TodoItem } from '../store/useAgentStore.js'
+import type { V2TaskItem } from '../store/useAgentStore.js'
 
-type Props = { todos: TodoItem[] }
+type Props = { tasks: V2TaskItem[] }
 
 // 样式与 zai-web 现有暗色主题靠齐. padding / 字号 / 行高按 zai-web 现有
 // MessageBubble 的视觉密度取近似值, 不引入新 design tokens.
@@ -22,31 +22,36 @@ const styles: Record<string, React.CSSProperties> = {
   content: { flex: 1 },
 }
 
-function statusIcon(status: TodoItem['status']): string {
+function statusIcon(status: V2TaskItem['status']): string {
   if (status === 'completed') return '✓'
   if (status === 'in_progress') return '■'
   return '☐'
 }
 
-export default function TodoZone({ todos }: Props) {
-  if (todos.length === 0) return null
-  const done = todos.filter((t) => t.status === 'completed').length
-  const inProgress = todos.filter((t) => t.status === 'in_progress').length
-  const open = todos.length - done - inProgress
+// 显示所有非 deleted 任务: pending / in_progress / completed 三个 bucket
+// 全终态(completed)是"done", 进行中(in_progress)是"in progress",
+// 其余未开始(pending)是"open". V2 'deleted' 是软删除态, 不在 TodoZone
+// 渲染, 详情见 TodoDropdown (popover 里带删除线).
+export default function TodoZone({ tasks }: Props) {
+  const visible = tasks.filter((t) => t.status !== 'deleted')
+  if (visible.length === 0) return null
+  const done = visible.filter((t) => t.status === 'completed').length
+  const inProgress = visible.filter((t) => t.status === 'in_progress').length
+  const open = visible.length - done - inProgress
   return (
     <div style={styles.wrap} data-testid="todo-zone">
       <div style={styles.header}>
-        {todos.length} tasks ({done} done, {inProgress} in progress, {open} open)
+        {visible.length} tasks ({done} done, {inProgress} in progress, {open} open)
       </div>
       <ul style={styles.list}>
-        {todos.map((t, i) => (
+        {visible.map((t, i) => (
           <li
-            key={i}
+            key={t.id ?? i}
             style={styles.item}
-            data-testid={`todo-item-${t.status}`}
+            data-testid={`task-item-${t.status}`}
           >
             <span style={styles.icon}>{statusIcon(t.status)}</span>
-            <span style={styles.content}>{t.content}</span>
+            <span style={styles.content}>{t.subject}</span>
           </li>
         ))}
       </ul>

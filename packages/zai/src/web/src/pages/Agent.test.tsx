@@ -60,10 +60,7 @@ vi.mock("./AgentConversation", () => ({
   default: () => <div data-testid="agent-conv" />,
 }))
 
-// BottomStatusBar mock: 如果 Agent 还在用它, 会渲染 test-id; 不再被调用就拿不到.
-vi.mock("../components/BottomStatusBar.js", () => ({
-  BottomStatusBar: () => <div data-testid="bottom-status-trigger">SHOULD NOT BE USED</div>,
-}))
+// (2026-07-31: BottomStatusBar 组件已删除, 顶层不再需要 mock.)
 vi.mock("../lib/v2TaskApi.js", () => ({
   fetchV2Tasks: vi.fn(async () => []),
 }))
@@ -83,21 +80,18 @@ beforeEach(async () => {
     textSegmentRev: 0,
     segmentedToolUseIds: {},
     sendSeq: 0,
-    todosBySession: {},
     v2TasksBySession: {},
   })
   // 重置 mock appState 的可变字段 (maxVisibleMessages 等)
   setAppState({ maxVisibleMessages: 20 })
 })
 
-describe("Agent.tsx — 不再渲染 BottomStatusBar (任务已合并到 AgentInputBox)", () => {
-  test("Agent 顶层不再调用 BottomStatusBar", async () => {
+describe("Agent.tsx — 顶层结构", () => {
+  test("Agent 顶层不渲染已被删除的 BottomStatusBar 行", async () => {
     const { default: Agent } = await import("./Agent.jsx")
     const { queryByTestId } = render(<Agent />)
     // 修复: 任务 dock 已合并到 AgentInputBox 内的状态行, 顶层不该再渲染
-    // BottomStatusBar 单独一行, 让 UI 更紧凑.
+    // BottomStatusBar 单独一行, 让 UI 更紧凑 (2026-07-31: 整组件已移除).
     expect(queryByTestId("bottom-status-trigger")).toBeNull();
-    // 既然任务行不在了, todosBySession / v2TasksBySession 这两个变量在 Agent.tsx
-    // 也变成了 dead code — 这个测试只关心渲染层面.
   })
 })

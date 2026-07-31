@@ -1,10 +1,7 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { Typography, Button } from 'antd'
 import { RobotFilled, UpOutlined } from '@ant-design/icons'
-import {
-  useAgentStore,
-  type TodoItem,
-} from '../store/useAgentStore'
+import { useAgentStore } from '../store/useAgentStore'
 import { useAppStore } from '../store/useAppStore'
 import QuestionCard from '../components/QuestionCard.jsx'
 import TodoZone from '../components/TodoZone.jsx'
@@ -70,9 +67,9 @@ export default function AgentConversation() {
   const submitAsk = useAgentStore((s) => s.submitAsk)
   const rejectAsk = useAgentStore((s) => s.rejectAsk)
 
-  const todosBySession = useAgentStore((s) => s.todosBySession)
-  const todosForCurrentSession: TodoItem[] =
-    sessionId != null ? (todosBySession[sessionId] ?? []) : []
+  const v2TasksBySession = useAgentStore((s) => s.v2TasksBySession)
+  const v2TasksForCurrentSession =
+    sessionId != null ? (v2TasksBySession[sessionId] ?? []) : []
 
   const stop = useAgentStore((s) => s.stop)
   const questionCardRef = useRef<HTMLDivElement>(null)
@@ -132,7 +129,7 @@ export default function AgentConversation() {
             </Paragraph>
           </div>
         )}
-        <TodoZone todos={todosForCurrentSession} />
+        <TodoZone tasks={v2TasksForCurrentSession} />
         {showPill && (
           <div
             style={{
