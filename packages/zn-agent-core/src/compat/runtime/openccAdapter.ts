@@ -32,9 +32,13 @@
  *      max iterations hit).
  */
 
+import { randomUUID } from 'node:crypto'
 import { toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
 import type { QueryOptions, OpenccAdapterConfig, Tool } from './types.js'
 import type { RuntimeEvent } from './events.js'
+import type { TranscriptMessage } from '../transcript/types.js'
+import { TranscriptStore } from '../transcript/store.js'
+import { serializeForAnthropic } from '../transcript/persistence.js'
 
 type ModelCaller = NonNullable<OpenccAdapterConfig['modelCaller']>
 
@@ -107,6 +111,85 @@ export async function* runOpenccQuery(
         ? [{ role: 'user', content: opts.prompt }]
         : [opts.prompt as { role: 'user' | 'assistant'; content: unknown }]
 
+  // 4b. Transcript bridge — vendor opencc's `query()` used to own its own
+  // transcript I/O (read on entry, write on exit). The Phase 1.b adapter
+  // bypasses the vendor copy entirely, so we replicate that I/O here:
+  //
+  //   - ENTRY: if the caller wired `config.dataDir` AND the request has
+  //     a transcriptId, load the existing transcript and convert it to
+  //     Anthropic-format messages via `serializeForAnthropic`. Prepend
+  //     those to `messages` so the model sees the full conversation
+  //     history. Without this, the LLM has no memory of prior turns in
+  //     the same session — every prompt looks like a brand-new chat.
+  //
+  //   - EXIT: `newTranscriptMessages` collects the user prompt + each
+  //     assistant turn + each tool_result turn as v2 TranscriptMessage
+  //     envelopes. After the loop drains (success / abort / error), we
+  //     `store.append()` each one so the next prompt's ENTRY step
+  //     re-reads the full conversation. ENOENT on read is the normal
+  //     "new session" path — silently start with empty history.
+  //
+  // We do NOT touch the transcript when `config.dataDir` is missing
+  // (e.g. unit tests calling runOpenccQuery with no wiring); the
+  // in-memory `messages` array still works for the LLM.
+  const transcriptStore =
+    config.dataDir && opts.transcriptId ? new TranscriptStore(config.dataDir) : null
+  let lastTranscriptUuid: string | null = null
+  const newTranscriptMessages: TranscriptMessage[] = []
+  if (transcriptStore && opts.transcriptId) {
+    try {
+      const existing = await transcriptStore.read(opts.transcriptId, { cwd: opts.cwd })
+      const history = serializeForAnthropic(existing.messages)
+      if (history.length > 0) {
+        // Prepend loaded history so the new user prompt lands at the end.
+        messages = [...history, ...messages]
+      }
+      // Track the last persisted uuid so new messages chain their parentUuid.
+      const last = existing.messages[existing.messages.length - 1]
+      lastTranscriptUuid = last?.uuid ?? null
+      if (process.env.ZAI_DEBUG === '1') {
+        console.error('[openccAdapter] transcript history loaded', {
+          transcriptId: opts.transcriptId,
+          historyCount: history.length,
+          originalCount: existing.messages.length,
+        })
+      }
+    } catch (err) {
+      const code = (err as NodeJS.ErrnoException).code
+      if (code !== 'ENOENT') {
+        // Real I/O error (corrupt file, permission denied, etc.) —
+        // don't crash the request, just log and start fresh.
+        if (process.env.ZAI_DEBUG === '1') {
+          console.error('[openccAdapter] transcript read failed', err)
+        }
+      }
+    }
+  }
+
+  // Persist the user prompt as the first new transcript message. Done
+  // BEFORE the loop so even a hard abort in the first iteration leaves
+  // the prompt on disk for the next session to see.
+  if (transcriptStore && opts.transcriptId) {
+    const userMsg = messages[messages.length - 1]
+    if (userMsg && userMsg.role === 'user') {
+      const content = userMsg.content
+      const normalized: string | unknown[] =
+        typeof content === 'string' || Array.isArray(content)
+          ? content
+          : String(content)
+      const tm = buildTranscriptMessage(
+        'user',
+        normalized,
+        lastTranscriptUuid,
+        0,
+        opts,
+        sessionId,
+      )
+      newTranscriptMessages.push(tm)
+      lastTranscriptUuid = tm.uuid
+    }
+  }
+
   try {
     // 5. Main loop: stream model → execute tools → re-stream. Bounded by
     // MAX_TOOL_ITERATIONS so a runaway tool_use chain can't hang the SSE.
@@ -157,17 +240,34 @@ export async function* runOpenccQuery(
             sawMessageStop = true
           }
 
-          buffered.push({
-            raw: rawEvent,
-            ev: {
-              ...rawEvent,
-              type: eventType,
-              eventId: nextEventId(),
-              sessionId,
-              ts: Date.now(),
-              turnIndex: iteration,
-            } as RuntimeEvent,
-          })
+          const stamped: RuntimeEvent = {
+            ...rawEvent,
+            type: eventType,
+            eventId: nextEventId(),
+            sessionId,
+            ts: Date.now(),
+            turnIndex: iteration,
+          } as RuntimeEvent
+
+          // Live-yield `content_block_delta` events with text/thinking
+          // payload so the SSE translator pushes `runtime.delta` /
+          // `runtime.thinking` to the frontend in real time. Without
+          // this, the buffered-everything-until-message_stop path
+          // (kept for tool_use block detection) flattens the entire
+          // LLM output into a single batch dump on completion, killing
+          // the streaming UX. Buffer the surrounding events
+          // (content_block_start, content_block_stop, message_*,
+          // non-text deltas) so tool_use block assembly stays
+          // complete and message_stop can still be deferred.
+          if (eventType === 'content_block_delta') {
+            const deltaType = String((rawEvent as any).delta?.type ?? '')
+            if (deltaType === 'text_delta' || deltaType === 'thinking_delta') {
+              yield stamped
+              continue
+            }
+          }
+
+          buffered.push({ raw: rawEvent, ev: stamped })
         }
         if (process.env.ZAI_DEBUG === '1') {
           console.error('[openccAdapter] drained upstream', {
@@ -227,6 +327,25 @@ export async function* runOpenccQuery(
           blockTypes: accumulated.blocks.map((b) => b.type),
           toolUseCount: toolUseBlocks.length,
         })
+      }
+
+      // Track the assistant turn for transcript persistence BEFORE the
+      // early "no tools" return. Otherwise a plain-text response (no
+      // tool_use) would skip the assistant message below and the
+      // transcript would only have the user prompt — breaking the
+      // context chain on the next prompt.
+      const assistantContentForTranscript = blocksToAnthropicContent(accumulated.blocks)
+      if (transcriptStore && opts.transcriptId && assistantContentForTranscript.length > 0) {
+        const assistantTm = buildTranscriptMessage(
+          'assistant',
+          assistantContentForTranscript,
+          lastTranscriptUuid,
+          iteration,
+          opts,
+          sessionId,
+        )
+        newTranscriptMessages.push(assistantTm)
+        lastTranscriptUuid = assistantTm.uuid
       }
 
       if (toolUseBlocks.length === 0) {
@@ -416,11 +535,28 @@ export async function* runOpenccQuery(
       // and a user message containing the tool_result blocks. Anthropic
       // protocol requires tool_result to come in a user message immediately
       // after the assistant's tool_use blocks.
+      const assistantContent = blocksToAnthropicContent(accumulated.blocks)
       messages = [
         ...messages,
-        { role: 'assistant', content: blocksToAnthropicContent(accumulated.blocks) },
+        { role: 'assistant', content: assistantContent },
         { role: 'user', content: toolResultBlocks },
       ]
+      // Track the tool_result turn for transcript persistence. The
+      // assistant turn itself was already tracked above (before the
+      // tool_use gating check) so it's captured even when this iteration
+      // produces text-only output.
+      if (transcriptStore && opts.transcriptId && toolResultBlocks.length > 0) {
+        const trTm = buildTranscriptMessage(
+          'user',
+          toolResultBlocks,
+          lastTranscriptUuid,
+          iteration,
+          opts,
+          sessionId,
+        )
+        newTranscriptMessages.push(trTm)
+        lastTranscriptUuid = trTm.uuid
+      }
     }
 
     yield toRuntimeErrorEvent(
@@ -429,6 +565,32 @@ export async function* runOpenccQuery(
     )
   } catch (err) {
     yield toRuntimeErrorEvent(err, { sessionId, turnIndex: 0 })
+  } finally {
+    // Persist everything we collected during the run. Wrap in try/catch so
+    // a transcript write failure doesn't mask the actual SSE event stream
+    // (and we don't want to crash mid-flight).
+    if (transcriptStore && opts.transcriptId && newTranscriptMessages.length > 0) {
+      try {
+        // `mutateMessages` would be more atomic, but we want to append
+        // each message with a single lock acquisition apiece so concurrent
+        // callers (e.g. background task hitting the same session) don't
+        // see a partial write. `store.append` uses proper-lockfile under
+        // the hood, so each individual append is atomic.
+        for (const tm of newTranscriptMessages) {
+          await transcriptStore.append(opts.transcriptId, tm, { cwd: opts.cwd })
+        }
+        if (process.env.ZAI_DEBUG === '1') {
+          console.error('[openccAdapter] transcript persisted', {
+            transcriptId: opts.transcriptId,
+            messageCount: newTranscriptMessages.length,
+          })
+        }
+      } catch (err) {
+        if (process.env.ZAI_DEBUG === '1') {
+          console.error('[openccAdapter] transcript write failed', err)
+        }
+      }
+    }
   }
 }
 
@@ -553,5 +715,39 @@ function extractToolOutput(result: unknown): string {
     return JSON.stringify(result)
   } catch {
     return String(result)
+  }
+}
+
+/**
+ * Build a v2 TranscriptMessage envelope for storage on disk. The
+ * `parentUuid` chain mirrors the prior transcript tail so the next
+ * ENTRY read can recover the full conversation order. `content` is
+ * passed through verbatim — for user prompts it's a string, for
+ * assistant turns it's the Anthropic content-block array (text +
+ * tool_use), and for tool_result turns it's the tool_result block
+ * array. The runtime field is optional in the schema; we include it
+ * so the UI can group events by turn.
+ */
+function buildTranscriptMessage(
+  type: 'user' | 'assistant',
+  content: string | unknown[],
+  parentUuid: string | null,
+  turnIndex: number,
+  opts: QueryOptions,
+  sessionId: string,
+): TranscriptMessage {
+  return {
+    uuid: randomUUID(),
+    parentUuid,
+    type,
+    timestamp: Date.now(),
+    raw: null,
+    cwd: opts.cwd,
+    userType: 'zai',
+    sessionId,
+    version: '2',
+    isSidechain: false,
+    runtime: { turnIndex },
+    message: { role: type, content: content as string | import('../transcript/types.js').ContentBlock[] },
   }
 }
