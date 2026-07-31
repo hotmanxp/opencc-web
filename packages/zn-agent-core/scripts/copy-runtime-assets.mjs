@@ -7,6 +7,7 @@
 // (in production). The vendored tree is already strip-listed by
 // copy-from-opencc.ts (run separately); we just mirror it.
 import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
+import { execFileSync } from 'node:child_process'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -96,6 +97,36 @@ function copyDirRecursive(srcDir, destDir) {
       continue
     } else {
       copyFileSync(srcPath, destPath)
+      // Mirror .generated.ts files as .js so runtime ESM imports that
+      // hardcode the `.js` extension resolve under Node (the .ts
+      // sources are excluded from tsc, so only a hand-mirrored .js
+      // copy exists at runtime). Use tsc to do the transpile so all
+      // TS syntax (as const / satisfies / type annotations) is
+      // handled correctly.
+      if (/\.generated\.ts$/.test(entry)) {
+        // Resolve typescript bin from pnpm's hoisted .pnpm tree.
+        const tscBin = resolve(
+          __dirname, '..', '..', '..',
+          'node_modules', '.pnpm', 'typescript@5.9.3',
+          'node_modules', 'typescript', 'bin', 'tsc'
+        )
+        execFileSync(
+          tscBin,
+          [
+            srcPath,
+            '--target', 'ES2023',
+            '--module', 'ESNext',
+            '--moduleResolution', 'bundler',
+            '--skipLibCheck',
+            '--esModuleInterop',
+            '--outDir', resolve(destDir, '..'),
+            '--rootDir', resolve(srcDir, '..'),
+            '--declaration', 'false',
+            '--sourceMap', 'false',
+          ],
+          { stdio: 'pipe' },
+        )
+      }
       count++
     }
   }
