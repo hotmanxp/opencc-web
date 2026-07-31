@@ -477,6 +477,16 @@ export const askUserQuestionTool = makeTool({
   executor: askUserQuestionCall,
 })
 
+export const skillTool = makeTool({
+  name: 'Skill',
+  description:
+    'Invoke a named skill (loads SKILL.md from the configured skills directories, ' +
+    'substitutes $ARGUMENTS, and returns the skill body as additional context). ' +
+    'Use this to opt into structured workflows (brainstorming, TDD, …).',
+  inputSchema: SkillInput,
+  executor: skillCall,
+})
+
 export function buildDefaultTools(opts?: {
   skillsDirs?: readonly string[]
   cwd?: string
@@ -489,22 +499,11 @@ export function buildDefaultTools(opts?: {
     fileEditTool,
     askUserQuestionTool,
     ...taskTools,
+    skillTool,
   ]
 
   const skillsDirs = opts?.skillsDirs ?? []
-  if (skillsDirs.length > 0) {
-    tools.push(
-      makeTool({
-        name: 'Skill',
-        description:
-          'Invoke a named skill (loads SKILL.md from the configured skills directories, ' +
-          'substitutes $ARGUMENTS, and returns the skill body as additional context). ' +
-          'Use this to opt into structured workflows (brainstorming, TDD, …).',
-        inputSchema: SkillInput,
-        executor: skillCall,
-      }),
-    )
-  }
+  void skillsDirs // previously gated; Skill now always included
 
   // Touch cwd to silence "unused" lints in tools that don't use it directly.
   void cwd
