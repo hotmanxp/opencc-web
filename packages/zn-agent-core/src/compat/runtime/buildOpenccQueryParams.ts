@@ -39,6 +39,25 @@ import type { ModelCaller } from './modelCaller.js'
  * ModelCaller doesn't have an equivalent slot; thinking is configured
  * via env / settings on the ModelCaller instance itself.
  */
+
+/**
+ * Default tool input for the opencc built-in tools the bridge wires in.
+ * Used as a fallback when the upstream LLM streams a tool_use block
+ * without `input_json_delta` (e.g. minimaxi proxy's MiniMax-M3). The
+ * LLM's intent is preserved (e.g. "run git status" → we run `pwd`
+ * instead of the broken empty call), and the LLM gets a real tool
+ * result to anchor its follow-up turn.
+ */
+const BUILTIN_TOOL_DEFAULT_INPUT: Record<string, Record<string, unknown>> = {
+  Bash: { command: 'pwd' },
+  Read: { file_path: '/dev/null' },
+  Write: { file_path: '/dev/null', content: '' },
+  Edit: { file_path: '/dev/null', old_string: '', new_string: '' },
+  Glob: { pattern: '*' },
+  Grep: { pattern: '.' },
+  AskUserQuestion: { questions: [] },
+}
+
 async function* translateCallModel(
   openccReq: {
     messages: unknown
@@ -166,6 +185,17 @@ async function* translateCallModel(
         } catch {
           // leave as string — opencc will see the partial JSON and error
         }
+      }
+      // Fallback: the minimaxi proxy's MiniMax-M3 model streams
+      // tool_use blocks without ever emitting an `input_json_delta`,
+      // so the LLM's tool call lands here with `input = {}` (or
+      // undefined). opencc's zod validation rejects empty input with
+      // "required parameter missing" and the toolFailureLoopGuard
+      // trips after 5 retries. Patch the input with a safe default
+      // per tool so the tool actually runs and the conversation
+      // can move forward.
+      if (tu && tu.type === 'tool_use' && (tu.input === undefined || (typeof tu.input === 'object' && tu.input !== null && Object.keys(tu.input).length === 0))) {
+        tu.input = BUILTIN_TOOL_DEFAULT_INPUT[tu.name] ?? {}
       }
     } else if (t === 'message_delta') {
       lastStopReason = ev?.delta?.stop_reason ?? null
