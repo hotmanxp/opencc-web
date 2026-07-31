@@ -81,3 +81,33 @@ describe('buildOpenccQueryParams — deps.callModel translator', () => {
     expect(modelCaller.mock.calls[0][0].model).toBe('unknown')
   })
 })
+
+describe('buildOpenccQueryParams — toolPermissionContext', () => {
+  describe('buildOpenccQueryParams — toolPermissionContext (via toolUseContext)', () => {
+  it('exposes mode "bypassPermissions" so vendor short-circuits headless deny', async () => {
+    const params = await buildOpenccQueryParams(minimalOpts, {})
+    const tpc = await params.toolUseContext.getToolPermissionContext()
+    expect(tpc.mode).toBe('bypassPermissions')
+  })
+
+  it('keeps shouldAvoidPermissionPrompts true (transcriptTooLong boundary at vendor permissions.ts:825)', async () => {
+    const params = await buildOpenccQueryParams(minimalOpts, {})
+    const tpc = await params.toolUseContext.getToolPermissionContext()
+    expect(tpc.shouldAvoidPermissionPrompts).toBe(true)
+  })
+
+  it('keeps isBypassPermissionsModeAvailable true', async () => {
+    const params = await buildOpenccQueryParams(minimalOpts, {})
+    const tpc = await params.toolUseContext.getToolPermissionContext()
+    expect(tpc.isBypassPermissionsModeAvailable).toBe(true)
+  })
+
+  it('always-allow rule covers the 7 vendor core tools (Bash/Read/Edit/Write/Glob/Grep/AskUserQuestion)', async () => {
+    const params = await buildOpenccQueryParams(minimalOpts, {})
+    const tpc = await params.toolUseContext.getToolPermissionContext()
+    expect([...tpc.alwaysAllowRules.session].sort()).toEqual(
+      ['AskUserQuestion', 'Bash', 'Edit', 'Glob', 'Grep', 'Read', 'Write'].sort(),
+    )
+  })
+})
+})
