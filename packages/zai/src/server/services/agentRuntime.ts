@@ -162,6 +162,13 @@ export function initAgentRuntime(cwd: string): void {
       mcpServers,
       skillsDirs: resolveSkillsDirs(),
       sandbox: resolveSandbox(cwd),
+      // Phase 1.b: dataDir is read by runOpenccQuery to instantiate its
+      // own TranscriptStore so the session history (loaded before the
+      // first turn) and the full conversation (written after the loop)
+      // are persisted under ~/.zai. The vendored opencc query() path
+      // owns transcript I/O; the Phase 1.b adapter has to do it itself
+      // since it bypasses the opencc vendor copy entirely.
+      dataDir,
       // Phase 5: ModelCaller feeds opencc's deps.callModel. The translator in
       // buildOpenccQueryParams translates between opencc's request shape
       // (messages + systemPrompt + tools + signal + options.model) and zai's
