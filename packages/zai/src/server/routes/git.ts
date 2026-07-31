@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request } from 'express';
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import { resolveSafePath } from '../utils/safePath.js';
+import { relative } from 'node:path';
 import type { GitDiff, GitRevertResult, GitStatus, GitStatusChar, GitStatusFile } from '../../shared/git.js';
 
 const execFileAsync = promisify(execFile);
@@ -106,8 +107,13 @@ gitRouter.get('/git/diff', async (req, res) => {
     res.json(body);
     return;
   }
-  // Decide whether the file is untracked. We use `git status --porcelain`
-  // for this so the diff endpoint is the single source of truth — the UI
+  const gitPath = relative(gitRoot, safe.abs);
+  if (gitPath.startsWith('..') || gitPath === '') {
+    const body: GitDiff = { ok: false, error: 'path 不在 Git 仓库内' };
+    res.json(body);
+    return;
+  }
+  // Decide whether the file is untracked.
   // doesn't have to pre-classify.
   let isUntracked = false;
   try {
