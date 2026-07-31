@@ -1,6 +1,6 @@
 import type { z } from 'zod'
 import type { Tool } from '../../runtime/modelCaller.js'
-import { makeTool } from '../index.js'
+import { makeTool } from '../makeTool.js'
 import { getTaskListStore } from '../../taskListStore.js'
 import { TaskListInput } from './schemas.js'
 

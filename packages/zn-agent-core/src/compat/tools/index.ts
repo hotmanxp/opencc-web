@@ -31,6 +31,9 @@ import { promisify } from 'node:util'
 import { z } from 'zod'
 import type { Tool, ToolCallCtx } from '../runtime/modelCaller.js'
 import type { Tool as RuntimeTool } from '../runtime/types.js'
+import { makeTool } from './makeTool.js'
+export { makeTool }
+import { taskTools } from './tasks/index.js'
 
 const execAsync = promisify(exec)
 
@@ -412,43 +415,6 @@ async function skillCall(
   }
 }
 
-// --- Tool factory ----------------------------------------------------------
-
-type ToolWithCall = Tool & { call: (args: unknown, ctx: unknown) => Promise<{ output: string }> }
-
-export function makeTool<T>(spec: {
-  name: string
-  description: string
-  inputSchema: z.ZodType<T>
-  /**
-   * Executor signature. 两种重载:
-   * - `(args, ctx)` 用 `ToolCallCtx`, 可拿 onYield / askRegistry / toolUseId
-   *   等可选字段; 典型用法是 AskUserQuestion.
-   * - `(args, { cwd })` 只关心 cwd 的简单工具, TS 也会接受.
-   */
-  executor: (args: T, ctx: ToolCallCtx) => Promise<{ output: string }>
-}): ToolWithCall {
-  return {
-    name: spec.name,
-    description: spec.description,
-    inputSchema: spec.inputSchema,
-    async call(args: unknown, ctx: unknown) {
-      const parsed = spec.inputSchema.safeParse(args)
-      if (!parsed.success) {
-        return {
-          output: `[error] invalid input for ${spec.name}: ${parsed.error.issues
-            .map((i) => `${i.path.join('.')}: ${i.message}`)
-            .join('; ')}`,
-        }
-      }
-      const ctxObj = (ctx ?? { cwd: process.cwd() }) as ToolCallCtx
-      // cwd 必须有兜底 (单独跑工具时 server 不一定注入).
-      if (!ctxObj.cwd) ctxObj.cwd = process.cwd()
-      return spec.executor(parsed.data, ctxObj)
-    },
-  }
-}
-
 /**
  * Build the default tool list. Pass `skillsDirs` non-empty to include the
  * Skill tool. The shape returned matches what `modelCaller.ts` consumes:
@@ -522,6 +488,7 @@ export function buildDefaultTools(opts?: {
     fileWriteTool,
     fileEditTool,
     askUserQuestionTool,
+    ...taskTools,
   ]
 
   const skillsDirs = opts?.skillsDirs ?? []
