@@ -133,4 +133,37 @@ export class MCPClientPool {
     const e = this.servers.get(name)
     return !!e && e.status === 'connected'
   }
+
+  /**
+   * Snapshot of connected clients with their MCP server instructions.
+   * Used by the runtime to inject `<mcp_servers>` into the system prompt
+   * so the model knows how to use each server's tools. Failed /
+   * disconnected servers are skipped — only return what's actually
+   * usable right now.
+   *
+   * `instructions` is the optional string the server returned during
+   * the `initialize` handshake; most servers don't publish one. The
+   * `name` matches the entry's `spec.name`.
+   */
+  getInstructionsSnapshot(): Array<{ name: string; type: string; instructions?: string }> {
+    const out: Array<{ name: string; type: string; instructions?: string }> = []
+    for (const [name, entry] of this.servers) {
+      if (entry.status !== 'connected') continue
+      let instructions: string | undefined
+      try {
+        const inst = entry.client.getInstructions?.()
+        if (typeof inst === 'string' && inst.length > 0) instructions = inst
+      } catch {
+        // MCP SDK throws if `getInstructions` runs before `initialize`
+        // completed; the entry's `status === 'connected'` guard should
+        // catch most races, but be defensive.
+      }
+      out.push({
+        name,
+        type: entry.spec.transport.kind,
+        ...(instructions ? { instructions } : {}),
+      })
+    }
+    return out
+  }
 }

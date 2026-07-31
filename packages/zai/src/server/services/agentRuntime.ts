@@ -145,6 +145,12 @@ export function initAgentRuntime(cwd: string): void {
     // 启用 OpenCC plugin loader (superpowers 等) —
     // 不传这个字段则 plugin 永远不会被实例化,见
     // zai-agent-core/src/runtime/contract.ts:23-25 + queryEngine.ts:54-70
+    //
+    // DefaultAgentRuntime.constructor 自己 new 一个 DefaultPluginRuntime
+    // 进去 (compat/runtime/contract.ts:37-40),然后 run() 把它写到
+    // openccConfig.pluginRuntime (compat/runtime/contract.ts:61-83),
+    // 所以 zai-server 不必再单独构造 — 避免双份 plugin runtime 重复
+    // 读盘 / 缓存分裂。
     plugins: {
       opencc: {
         configDir: resolveOpenccConfigDir() ?? join(homedir(), '.claude'),
@@ -160,6 +166,11 @@ export function initAgentRuntime(cwd: string): void {
     openccConfig: {
       mcpPool: mcpClientPool,
       mcpServers,
+      // MCP instructions snapshot — openccAdapter calls
+      // `pool.getInstructionsSnapshot()` to fill the `<mcp_servers>`
+      // system prompt block. Only meaningful when at least one MCP
+      // server is configured (the pool is undefined otherwise).
+      mcpClientPool,
       skillsDirs: resolveSkillsDirs(),
       sandbox: resolveSandbox(cwd),
       // Phase 1.b: dataDir is read by runOpenccQuery to instantiate its
@@ -169,6 +180,11 @@ export function initAgentRuntime(cwd: string): void {
       // owns transcript I/O; the Phase 1.b adapter has to do it itself
       // since it bypasses the opencc vendor copy entirely.
       dataDir,
+      // Plugin runtime: openccAdapter reads `snapshot.skills` to merge
+      // plugin-installed skills into the `<skills>` system prompt block.
+      // Without this, the ~14 superpowers skills (brainstorming, TDD,
+      // etc.) never reach the model.
+      pluginRuntime,
       // Phase 5: ModelCaller feeds opencc's deps.callModel. The translator in
       // buildOpenccQueryParams translates between opencc's request shape
       // (messages + systemPrompt + tools + signal + options.model) and zai's

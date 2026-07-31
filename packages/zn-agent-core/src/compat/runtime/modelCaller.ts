@@ -78,6 +78,15 @@ export type ToolCallCtx = {
    * 阻塞等待用户答复; resolve 时拿到 `{ questionText: selectedLabel, ... }` map.
    */
   askRegistry?: import('./types.js').AskRegistryLike
+  /**
+   * Skills discovered by the runtime — merged disk + plugin skills. The
+   * `Skill` tool uses this to look up `SKILL.md` by name when the model
+   * invokes a skill that came from a plugin (e.g. superpowers). Without
+   * this, plugin skills show up in the `<skills>` block but the tool
+   * can't find them on disk because the directory-walk only knew about
+   * `skillsDirs`.
+   */
+  skills?: import('./skills-types.js').LoadedSkill[]
 }
 
 export type ModelCaller = (req: {

@@ -233,8 +233,24 @@ export interface OpenccAdapterConfig {
   mcpServers?: import('../mcp/types.js').McpServerSpec[] | undefined
   /** Plugin runtime — hooks (PreToolUse, PostToolUse, etc.) attached to query lifecycle. */
   hookRunner?: import('../plugins/HookRunner.js').HookRunner | undefined
+  /**
+   * Plugin runtime — `load()` returns a snapshot whose `skills` array
+   * is merged into the `<skills>` system prompt block alongside disk
+   * loaded skills. Without this, plugin-installed skills (e.g. Claude
+   * Code's superpowers plugin) never reach the model.
+   */
+  pluginRuntime?: import('../plugins/types.js').PluginRuntime | undefined
   /** Skills directories to load skill definitions from. */
   skillsDirs?: readonly string[] | undefined
+  /**
+   * MCP client pool. The adapter calls `getInstructionsSnapshot()` on
+   * it to surface each connected server's `instructions` (the optional
+   * string the server returns during the MCP `initialize` handshake)
+   * into the `<mcp_servers>` block of the system prompt. Without this
+   * block, the model has no per-server guidance on how to use the
+   * tools each MCP server exposes.
+   */
+  mcpClientPool?: import('../mcp/MCPClientPool.js').MCPClientPool | undefined
   /** Sandbox config (executor, maxCpuMs, env allowlist). */
   sandbox?: import('./types.js').SandboxConfig | undefined
   /**

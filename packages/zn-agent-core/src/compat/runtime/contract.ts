@@ -60,8 +60,20 @@ export class DefaultAgentRuntime implements AgentRuntime {
    */
   run(opts: QueryOptions): AsyncIterable<RuntimeEvent> {
     // openccConfig is the optional subset of this.config that the adapter consumes.
-    // Cast is safe because the adapter only reads known fields (mcpPool, hookRunner, etc.)
-    const openccConfig = (this.config as any).openccConfig ?? {}
+    // Merge `this.config.pluginRuntime` (set by the constructor when caller
+    // passes `plugins` but not `pluginRuntime`) into the openccConfig so the
+    // adapter picks up plugin skills. Without this, callers would have to
+    // construct the `DefaultPluginRuntime` themselves and pass it both into
+    // `plugins` and into `openccConfig.pluginRuntime` — easy to forget and
+    // silently miss plugin skills.
+    const openccConfig = {
+      ...((this.config as any).openccConfig ?? {}),
+      // `pluginRuntime` is undefined-safe: if the caller never wired
+      // `plugins`, the adapter's plugin branch is skipped.
+      ...(this.config.pluginRuntime
+        ? { pluginRuntime: this.config.pluginRuntime }
+        : {}),
+    }
     // TEMP 2026-07-31: switched default from runViaOpenccQuery → runOpenccQuery
     // to bypass vendor's headless permission auto-deny.
     // vendor's permissions.ts:934-953 force-deny in headless mode when no

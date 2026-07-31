@@ -356,9 +356,43 @@ async function askUserQuestionCall(
 
 async function skillCall(
   input: z.infer<typeof SkillInput>,
+  ctx: ToolCallCtx,
 ): Promise<{ output: string }> {
-  // Phase 4c: simple "find SKILL.md under skillsDirs, substitute $ARGUMENTS,
-  // return the body as additional context." No body execution.
+  // 1. Try the runtime-passed skills first (covers plugin skills like
+  //    superpowers that aren't on the ZAI_SKILL_DIRS path). The adapter
+  //    passes the merged disk + plugin list in `ctx.skills`; lookup is
+  //    by `name` (matches the `<skills>` block advertised to the model).
+  const ctxSkills = ctx.skills
+  if (ctxSkills && ctxSkills.length > 0) {
+    const match = ctxSkills.find((s) => s.name === input.skill)
+    if (match) {
+      // Plugin skills come with `markdown` already set (the loader
+      // stored the body in `parsed.body` after stripping frontmatter).
+      // Disk skills with `filePath` need to be read on demand.
+      let body: string
+      if (match.markdown !== undefined) {
+        body = match.markdown
+      } else if (match.filePath) {
+        try {
+          body = await readFile(match.filePath, 'utf-8')
+        } catch (err) {
+          return {
+            output: `[error] failed to read skill "${input.skill}": ${(err as Error).message}`,
+          }
+        }
+      } else {
+        return {
+          output: `[error] skill "${input.skill}" matched but has no readable body`,
+        }
+      }
+      const args = input.args ?? ''
+      return {
+        output: body.replace(/\$\{?ARGUMENTS\}?/g, args).replace(/\$1\b/g, args),
+      }
+    }
+  }
+  // 2. Fall back to the env-driven directory walk (covers disk skills
+  //    that the runtime didn't pass through, e.g. legacy paths).
   const skillsDirs = (process.env.ZAI_SKILL_DIRS ?? join(process.env.HOME ?? '/', '.agents', 'skills'))
     .split(':')
     .filter(Boolean)

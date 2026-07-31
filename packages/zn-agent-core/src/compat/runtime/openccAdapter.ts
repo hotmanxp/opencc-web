@@ -37,8 +37,15 @@ import { toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
 import type { QueryOptions, OpenccAdapterConfig, Tool } from './types.js'
 import type { RuntimeEvent } from './events.js'
 import type { TranscriptMessage } from '../transcript/types.js'
+import type { PluginRuntime } from '../plugins/types.js'
 import { TranscriptStore } from '../transcript/store.js'
 import { serializeForAnthropic } from '../transcript/persistence.js'
+import { loadSkillsFromDirs, buildSkillsSystemPrompt } from './skills-index.js'
+import { loadMemoryForPrompt } from '../memory/loader.js'
+import {
+  createToolFailureLoopGuardState,
+  updateToolFailureLoopGuard,
+} from './toolFailureLoopGuard.js'
 
 type ModelCaller = NonNullable<OpenccAdapterConfig['modelCaller']>
 
@@ -61,8 +68,25 @@ type AccumulatedMessage = {
   stopReason: string | null
 }
 
-/** Hard cap on tool_use ↔ tool_result iterations to prevent infinite loops. */
-const MAX_TOOL_ITERATIONS = 10
+/**
+ * Hard cap on tool_use ↔ tool_result iterations to prevent infinite loops.
+ *
+ * Each iteration = one model turn that may emit ≥1 tool_use. The model
+ * decides when to stop emitting tools (final answer comes back without
+ * tool_use blocks); this cap only kicks in when something is wrong
+ * (runaway retry, model stuck on a permissions prompt, etc.).
+ *
+ * 50 is the empirically-sane ceiling for real debugging tasks:
+ *   - 5-10 turns: simple lookups, file reads
+ *   - 10-20 turns: multi-step debugging (e.g. "test ego-browser" — install
+ *     check, PATH fix, retry, snapshot capture)
+ *   - 20-30 turns: complex refactors that touch many files
+ * Beyond 30 the LLM is almost certainly looping on the same tool. We
+ * pick 50 as a soft cap so a runaway task gets a clean error instead of
+ * silently spinning forever, while leaving enough headroom for real
+ * work.
+ */
+const MAX_TOOL_ITERATIONS = 50
 
 export async function* runOpenccQuery(
   opts: QueryOptions,
@@ -190,9 +214,130 @@ export async function* runOpenccQuery(
     }
   }
 
+  // 4c. System prompt assembly — vendor opencc's `query()` used to own
+  // its own system-prompt stack (DEFAULT_STATIC_INTRO + dynamic sections
+  // + skills + AGENTS.md + MCP instructions). The Phase 1.b adapter
+  // bypasses the vendor copy, so we replicate the parts that matter for
+  // the model to actually USE the wired skills / memory / MCP servers:
+  //
+  //   - Load AGENTS.md / AGENTS.local.md via `loadMemoryForPrompt(cwd)`.
+  //     Goes at the TOP of the system prompt — these are non-negotiable
+  //     project rules that should override everything else.
+  //   - Load skills from `config.skillsDirs` (zai-server sets this to
+  //     `~/.agents/skills` by default).
+  //   - Load plugin skills from `config.pluginRuntime` (zai-server wires
+  //     this to `DefaultPluginRuntime` rooted at `~/.claude`, which scans
+  //     `~/.claude/plugins/cache/<marketplace>/<plugin>/<version>/skills/`
+  //     for `SKILL.md`). Plugin skills are merged in (same `LoadedSkill`
+  //     shape, distinguishable via `source: 'plugin'`).
+  //   - Load MCP instructions from `config.mcpClientPool` (post-connect
+  //     snapshot of { name, instructions } per server).
+  //   - Build the `<skills>` block via `buildSkillsSystemPrompt` (same
+  //     format the vendor copy uses).
+  //   - Append to whatever the caller passed in `opts.systemPrompt`
+  //     (zai-server currently passes `undefined`, so the assembled
+  //     blocks become the whole prompt).
+  //
+  // Without this, the Skill tool is registered but the model has no
+  // description of which skills exist, so it never picks `Skill` from
+  // its tool list on its own — only when the user explicitly names a
+  // skill by guessing from memory.
+  let resolvedSystemPrompt: string | string[] = opts.systemPrompt ?? []
+  const extraBlocks: string[] = []
+
+  // AGENTS.md + .local.md + @include chain. Read first so it sits at the
+  // top of the system prompt (project rules trump everything else).
+  try {
+    const memoryFiles = await loadMemoryForPrompt(opts.cwd)
+    if (memoryFiles.length > 0) {
+      const memoryBlock = memoryFiles
+        .map((m) => `<!-- ${m.type}: ${m.path} -->\n${m.content}`)
+        .join('\n\n')
+      extraBlocks.push(`<memory>\n${memoryBlock}\n</memory>`)
+    }
+  } catch (err) {
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[openccAdapter] memory load failed', err)
+    }
+  }
+
+  // Disk + plugin skills. Build the `<skills>` block as a single section.
+  const skillsDirs = config.skillsDirs ? [...config.skillsDirs] : []
+  const allSkills: import('../runtime/skills-types.js').LoadedSkill[] = []
+  if (skillsDirs.length > 0) {
+    try {
+      const diskSkills = await loadSkillsFromDirs(skillsDirs, { cwd: opts.cwd })
+      allSkills.push(...diskSkills)
+    } catch (err) {
+      if (process.env.ZAI_DEBUG === '1') {
+        console.error('[openccAdapter] disk skills load failed', err)
+      }
+    }
+  }
+  // Plugin skills — same priority as disk skills; plugin runtime's
+  // `loadPluginSkills` already dedups by name (plugin wins on collision),
+  // so we just concatenate after the disk load.
+  const pluginRuntime: PluginRuntime | undefined = config.pluginRuntime
+  if (pluginRuntime) {
+    try {
+      const snapshot = await pluginRuntime.load({ cwd: opts.cwd })
+      if (snapshot.skills.length > 0) {
+        allSkills.push(...snapshot.skills)
+      }
+    } catch (err) {
+      if (process.env.ZAI_DEBUG === '1') {
+        console.error('[openccAdapter] plugin skills load failed', err)
+      }
+    }
+  }
+  const skillsBlock = buildSkillsSystemPrompt(allSkills)
+  if (skillsBlock) extraBlocks.push(skillsBlock)
+
+  // MCP instructions — surface guidance from each connected MCP server
+  // so the model knows how to use its tools. Skip servers without
+  // instructions (they didn't publish any).
+  if (config.mcpClientPool) {
+    try {
+      const clients = config.mcpClientPool.getInstructionsSnapshot?.() ?? []
+      const withInstructions = clients.filter((c) => c.instructions)
+      if (withInstructions.length > 0) {
+        const mcpBlock = withInstructions
+          .map((c) => `<server name="${c.name}">\n${c.instructions}\n</server>`)
+          .join('\n\n')
+        extraBlocks.push(`<mcp_servers>\n${mcpBlock}\n</mcp_servers>`)
+      }
+    } catch (err) {
+      if (process.env.ZAI_DEBUG === '1') {
+        console.error('[openccAdapter] mcp instructions load failed', err)
+      }
+    }
+  }
+
+  if (extraBlocks.length > 0) {
+    const compos = extraBlocks.join('\n\n')
+    if (typeof resolvedSystemPrompt === 'string') {
+      resolvedSystemPrompt = `${resolvedSystemPrompt}\n\n${compos}`
+    } else if (Array.isArray(resolvedSystemPrompt) && resolvedSystemPrompt.length > 0) {
+      // Anthropic-style array form: append a text block.
+      const arr = resolvedSystemPrompt as unknown as Array<{ type: string; text?: string }>
+      arr.push({ type: 'text', text: compos })
+    } else {
+      resolvedSystemPrompt = compos
+    }
+  }
+
   try {
     // 5. Main loop: stream model → execute tools → re-stream. Bounded by
     // MAX_TOOL_ITERATIONS so a runaway tool_use chain can't hang the SSE.
+    //
+    // Per-iteration we also feed the tool_use + tool_result blocks into
+    // `toolFailureLoopGuard` (ported from opencc's vendor copy). It aborts
+    // the loop early when the model is stuck on the same failure pattern —
+    // e.g. trying to write the same protected file 5 times in a row. The
+    // guard is intentionally narrower than `MAX_TOOL_ITERATIONS` (5 vs 50)
+    // because it catches the actual failure *pattern* rather than just
+    // counting turns; a single turn can have its own retry loop.
+    const failureLoopGuardState = createToolFailureLoopGuardState()
     for (let iteration = 0; iteration < MAX_TOOL_ITERATIONS; iteration++) {
       if (opts.abortSignal?.aborted) {
         yield toAbortedEvent({ sessionId, turnIndex: iteration }, String(opts.abortSignal.reason ?? 'aborted'))
@@ -214,7 +359,7 @@ export async function* runOpenccQuery(
       // upstream completely, then yield each event downstream.
       const stream = (await modelCaller({
         model: opts.model ?? 'default',
-        systemPrompt: opts.systemPrompt ?? [],
+        systemPrompt: resolvedSystemPrompt,
         messages,
         tools: mergedTools,
         signal: opts.abortSignal ?? new AbortController().signal,
@@ -421,6 +566,12 @@ export async function* runOpenccQuery(
           toolUseId: tb.id,
           abortSignal: opts.abortSignal,
           askRegistry: config.askRegistry,
+          // Pass the merged disk + plugin skills so the Skill tool can
+          // invoke plugin-installed skills (e.g. superpowers) by name.
+          // Without this, the model sees the names in `<skills>` but
+          // <tool_use name="Skill" /> fails because the tool's directory
+          // walk only knew about `skillsDirs`.
+          skills: allSkills,
           onYield: (event: Record<string, unknown>) => {
             queue.push(event)
             notifyDrain()
@@ -557,10 +708,52 @@ export async function* runOpenccQuery(
         newTranscriptMessages.push(trTm)
         lastTranscriptUuid = trTm.uuid
       }
+
+      // 7b. Tool-failure-loop guard — fed the tool_use blocks from this
+      // iteration and the user message carrying the tool_result blocks
+      // (Anthropic protocol: tool_result blocks ride inside a user role).
+      // Trips when the same `(toolName, errorCategory)` pair, the same
+      // error category across tools, or the same file path on Edit/Write
+      // fails ≥ threshold (default 5) times. Replaces MAX_TOOL_ITERATIONS
+      // as the early-abort signal for stuck-on-error retries.
+      const guardDecision = updateToolFailureLoopGuard({
+        state: failureLoopGuardState,
+        toolUseBlocks: toolUseBlocks.map((tb) => ({
+          id: tb.id,
+          name: tb.name,
+          input: tb.input,
+        })),
+        toolResults: [
+          {
+            type: 'user',
+            message: { content: toolResultBlocks },
+          },
+        ],
+      })
+      if (guardDecision.tripped) {
+        if (process.env.ZAI_DEBUG === '1') {
+          console.error('[openccAdapter] toolFailureLoopGuard tripped', {
+            kind: guardDecision.kind,
+            threshold: guardDecision.threshold,
+            toolName: guardDecision.toolName,
+            errorCategory: guardDecision.errorCategory,
+            path: guardDecision.path,
+          })
+        }
+        yield toRuntimeErrorEvent(new Error(guardDecision.message), {
+          sessionId,
+          turnIndex: iteration,
+        })
+        return
+      }
     }
 
     yield toRuntimeErrorEvent(
-      new Error(`tool_use loop exceeded ${MAX_TOOL_ITERATIONS} iterations`),
+      new Error(
+        `agent loop exceeded ${MAX_TOOL_ITERATIONS} iterations — model kept emitting tool_use blocks ` +
+          `without reaching a final answer. This usually means the model is stuck on a permission prompt, ` +
+          `retrying a failing command, or genuinely needing more turns. Try re-prompting with a narrower scope.`,
+      ),
       { sessionId, turnIndex: MAX_TOOL_ITERATIONS },
     )
   } catch (err) {
