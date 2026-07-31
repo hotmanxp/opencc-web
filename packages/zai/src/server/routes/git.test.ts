@@ -94,6 +94,36 @@ describe('routes/git', () => {
     expect(res.body.diff).toMatch(/TWO/);
   });
 
+  test('GET /git/diff resolves status paths from the repository root when cwd is a subdirectory', async () => {
+    const subdir = join(repo, 'packages', 'app');
+    mkdirSync(subdir, { recursive: true });
+    writeFileSync(join(repo, 'a.txt'), 'one\nTWO\n');
+
+    const statusRes = await request(makeApp(subdir)).get('/api/git/status');
+    expect(statusRes.body.files).toEqual(expect.arrayContaining([
+      expect.objectContaining({ path: 'a.txt', status: 'M' }),
+    ]));
+
+    const diffRes = await request(makeApp(subdir)).get('/api/git/diff').query({ path: 'a.txt' });
+    expect(diffRes.body.ok).toBe(true);
+    expect(diffRes.body.isUntracked).toBe(false);
+    expect(diffRes.body.diff).toMatch(/TWO/);
+  });
+
+  test('GET /git/diff accepts the repository-root path returned by git status', async () => {
+    mkdirSync(join(repo, 'packages', 'app'), { recursive: true });
+    writeFileSync(join(repo, 'packages', 'app', 'nested.txt'), 'one\nTWO\n');
+    git(repo, ['add', 'packages/app/nested.txt']);
+    git(repo, ['commit', '-q', '-m', 'nested']);
+    writeFileSync(join(repo, 'packages', 'app', 'nested.txt'), 'one\nTHREE\n');
+
+    const res = await request(makeApp(join(repo, 'packages', 'app')))
+      .get('/api/git/diff')
+      .query({ path: 'packages/app/nested.txt' });
+    expect(res.body.ok).toBe(true);
+    expect(res.body.diff).toMatch(/THREE/);
+  });
+
   test('GET /git/diff?path=../etc/passwd refuses escape', async () => {
     const res = await request(makeApp(repo)).get('/api/git/diff').query({ path: '../escape' });
     expect(res.body.ok).toBe(false);

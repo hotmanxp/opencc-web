@@ -17,6 +17,14 @@ function ctx(req: Request): InstanceContextShape {
   return req.app.locals.instanceContext as InstanceContextShape;
 }
 
+async function resolveGitRoot(cwd: string): Promise<string> {
+  const { stdout } = await execFileAsync('git', ['rev-parse', '--show-toplevel'], {
+    cwd,
+    timeout: 3000,
+  });
+  return stdout.trim();
+}
+
 function mapStatus(staged: string, unstaged: string): { status: GitStatusChar; staged: boolean } {
   // Prefer the unstaged column when non-space (modified-in-workdir is what
   // users want to see). Fall back to the staged column.
@@ -79,7 +87,20 @@ gitRouter.get('/git/diff', async (req, res) => {
     res.status(400).json(body);
     return;
   }
-  const safe = resolveSafePath(cwd, rel);
+
+  let gitRoot: string;
+  try {
+    gitRoot = await resolveGitRoot(cwd);
+  } catch {
+    const body: GitDiff = { ok: false, error: 'not a git repository' };
+    res.json(body);
+    return;
+  }
+
+  // `git status` paths are relative to the repository root even when Git is
+  // invoked from a nested cwd. Resolve and run pathspec commands from that
+  // same root so the selected status entry keeps one consistent meaning.
+  const safe = resolveSafePath(gitRoot, rel);
   if (!safe.ok) {
     const body: GitDiff = { ok: false, error: safe.error };
     res.json(body);
@@ -95,8 +116,8 @@ gitRouter.get('/git/diff', async (req, res) => {
       // `-unormal` (single-arg) keeps parity with the status endpoint;
       // the brief's two-arg form (`-u`, `normal`) is parsed as a pathspec
       // on git 2.37 (macOS CLT). `-- <rel>` narrows the search to that path.
-      ['status', '--porcelain=v1', '-unormal', '--', rel],
-      { cwd, timeout: 3000 },
+      ['status', '--porcelain=v1', '-unormal', '--', safe.abs],
+      { cwd: gitRoot, timeout: 3000 },
     );
     isUntracked = stdout.trimStart().startsWith('??');
   } catch {
@@ -111,7 +132,7 @@ gitRouter.get('/git/diff', async (req, res) => {
       const result = await execFileAsync(
         'git',
         ['diff', '--no-color', '--no-index', '--', '/dev/null', safe.abs],
-        { cwd, timeout: 5000, maxBuffer: MAX_DIFF_BYTES * 2 },
+        { cwd: gitRoot, timeout: 5000, maxBuffer: MAX_DIFF_BYTES * 2 },
       ).catch((err: NodeJS.ErrnoException & { stdout?: string; stderr?: string }) => ({
         stdout: err.stdout ?? '',
         stderr: err.stderr ?? '',
@@ -123,8 +144,8 @@ gitRouter.get('/git/diff', async (req, res) => {
     } else {
       const { stdout } = await execFileAsync(
         'git',
-        ['diff', '--no-color', 'HEAD', '--', rel],
-        { cwd, timeout: 5000, maxBuffer: MAX_DIFF_BYTES * 2 },
+        ['diff', '--no-color', 'HEAD', '--', safe.abs],
+        { cwd: gitRoot, timeout: 5000, maxBuffer: MAX_DIFF_BYTES * 2 },
       );
       diff = stdout;
     }
@@ -164,7 +185,7 @@ gitRouter.post('/git/revert', async (req, res) => {
   try {
     const { stdout } = await execFileAsync(
       'git',
-      ['status', '--porcelain=v1', '-unormal', '--', rel],
+      ['status', '--porcelain=v1', '-unormal', '--', safe.abs],
       { cwd, timeout: 3000 },
     );
     isUntracked = stdout.trimStart().startsWith('??');

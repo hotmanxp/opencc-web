@@ -21,6 +21,7 @@
 
 import { wrapAskUserQuestionToolAsOpencc } from './AskUserQuestionTool.js'
 import { wrapTaskToolsAsOpencc } from './TaskTools.js'
+import { wrapSkillToolAsOpencc } from './SkillTool.js'
 
 export type OpenccBuiltinTool = any
 
@@ -45,6 +46,11 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
     { FileWriteTool },
     { GlobTool },
     { GrepTool },
+    { AgentTool },
+    { BackgroundAgentResultTool },
+    { TaskOutputTool },
+    { WebFetchTool },
+    { WebSearchTool },
   ] = await Promise.all([
     dyn('../../../opencc-src/tools/BashTool/BashTool.js'),
     dyn('../../../opencc-src/tools/FileReadTool/FileReadTool.js'),
@@ -52,6 +58,11 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
     dyn('../../../opencc-src/tools/FileWriteTool/FileWriteTool.js'),
     dyn('../../../opencc-src/tools/GlobTool/GlobTool.js'),
     dyn('../../../opencc-src/tools/GrepTool/GrepTool.js'),
+    dyn('../../../opencc-src/tools/AgentTool/AgentTool.js'),
+    dyn('../../../opencc-src/tools/BackgroundAgentResultTool/BackgroundAgentResultTool.js'),
+    dyn('../../../opencc-src/tools/TaskOutputTool/TaskOutputTool.js'),
+    dyn('../../../opencc-src/tools/WebFetchTool/WebFetchTool.js'),
+    dyn('../../../opencc-src/tools/WebSearchTool/WebSearchTool.js'),
   ])
 
   // AskUserQuestion uses zai's wrapper because zai-server has its own
@@ -72,6 +83,11 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
   // 走 zai 的 TaskListStore 持久化 + stateChangeBus → SSE v2_task.changed 路径。
   const taskToolsOpencc = wrapTaskToolsAsOpencc()
 
+  // Skill 走 zai-native wrapper (vendor 的 SkillTool 是 Bun-only,
+  // 不能在 Node+tsx 下跑;zai-native skillTool 已处理 ctx.skills +
+  // ZAI_SKILL_DIRS fallback,Node-safe).
+  const skillToolsOpencc = wrapSkillToolAsOpencc()
+
   cachedTools = [
     BashTool,
     FileReadTool,
@@ -81,6 +97,12 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
     GrepTool,
     AskUserQuestionOpencc,
     ...taskToolsOpencc,
+    ...skillToolsOpencc,
+    AgentTool,
+    BackgroundAgentResultTool,
+    TaskOutputTool,
+    WebFetchTool,
+    WebSearchTool,
   ]
   return cachedTools
 }
