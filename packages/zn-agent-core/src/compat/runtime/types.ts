@@ -253,6 +253,15 @@ export interface OpenccAdapterConfig {
    * the tool execution loop on top.
    */
   tools?: import('./modelCaller.js').Tool[] | undefined
+  /**
+   * zai data dir (default `~/.zai`). `runOpenccQuery` uses this to
+   * instantiate its own `TranscriptStore` so it can read the session
+   * history before the first turn and write the full conversation
+   * back after the loop. The vendored opencc `query()` path used to
+   * own transcript I/O; the Phase 1.b adapter has to do it itself
+   * since it bypasses the opencc vendor copy entirely.
+   */
+  dataDir?: string
 
   /**
    * AskRegistry abstraction. AskUserQuestion 工具在 Phase 4c 之前是 stub
