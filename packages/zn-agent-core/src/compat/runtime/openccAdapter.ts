@@ -361,14 +361,54 @@ export async function* runOpenccQuery(
             tool_use_id: tb.id,
             content: output,
           })
+          // Emit a `tool_use:done` event so the SSE translator in
+          // zai's routes/agent.ts:219 can push a runtime.tool_result
+          // to the frontend, closing the open ToolCallBlock. Without
+          // this, the frontend stays stuck on "调用中..." forever even
+          // though the LLM has already received the result via the
+          // next-turn messages array. Use the same field shape as the
+          // opencc vendor: { type, id, name, input, output, is_error }.
+          yield {
+            type: 'tool_use:done',
+            sessionId,
+            turnIndex: iteration,
+            eventId: nextEventId(),
+            ts: Date.now(),
+            id: tb.id,
+            name: tb.name,
+            input: tb.input,
+            toolUseId: tb.id,
+            toolName: tb.name,
+            output,
+            is_error: false,
+          } as RuntimeEvent
         } else {
           const err = finalOutcome.error
+          const errMsg = err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err)
           toolResultBlocks.push({
             type: 'tool_result',
             tool_use_id: tb.id,
-            content: err instanceof Error ? `${err.message}\n${err.stack ?? ''}` : String(err),
+            content: errMsg,
             is_error: true,
           })
+          // Mirror the success path: emit a tool_use:done so the frontend
+          // gets a runtime.tool_result / runtime.error and closes the
+          // ToolCallBlock instead of leaving it stuck in "调用中".
+          yield {
+            type: 'tool_use:error',
+            sessionId,
+            turnIndex: iteration,
+            eventId: nextEventId(),
+            ts: Date.now(),
+            id: tb.id,
+            name: tb.name,
+            input: tb.input,
+            toolUseId: tb.id,
+            toolName: tb.name,
+            output: errMsg,
+            is_error: true,
+            error: errMsg,
+          } as RuntimeEvent
         }
       }
 

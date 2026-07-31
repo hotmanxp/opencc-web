@@ -271,14 +271,28 @@ function syntheticToolUseContext(opts: {
   abortController?: AbortController
 }): any {
   const ac = opts.abortController ?? new AbortController()
-  const noopAppState: any = {
-    toolPermissionContext: {
-      // Always allow the opencc builtin tools the bridge wires in
-      // (Bash/Read/Edit/Write/Glob/Grep). zai's own permission UI
-      // is the ask/deny path; this stub keeps opencc from re-prompting
-      // and lets the tools run straight through. The AskUserQuestion
-      // wrapper still uses zai's askRegistry via the bridgeCtx global.
-      alwaysAllow: new Set([
+  // Hardcode permissionMode to 'bypassPermissions' so opencc's vendor
+  // permission system runs the bypass branch (no UI dialog, no
+  // permission prompt). Without this, vendor's BashTool.checkPermissions
+  // (opencc-src/tools/BashTool/BashTool.tsx:647) would invoke
+  // bashToolHasPermission → getToolPermissionContext → permissionSetup,
+  // which falls back to vendor's default mode when our stub is missing
+  // the right fields. That fallback pops a UI dialog that the zai HTTP
+  // server has no way to answer, so the tool gets a synthetic deny and
+  // the LLM sees "The user declined the action".
+  //
+  // Field names follow opencc-src/types/permissions.ts:417-441
+  // `ToolPermissionContext` exactly: `alwaysAllowRules` /
+  // `alwaysDenyRules` / `alwaysAskRules` (plural + Rules suffix, value
+  // is `{ [source]: string[] }` not a Set). `isBypassPermissionsModeAvailable: true`
+  // is required so the permissionSetup check at
+  // opencc-src/utils/permissions/permissionSetup.ts:975-980 lets the
+  // bypass branch run.
+  const toolPermissionContext = {
+    mode: 'bypassPermissions' as const,
+    additionalWorkingDirectories: new Map(),
+    alwaysAllowRules: {
+      session: [
         'Bash',
         'Read',
         'Edit',
@@ -286,10 +300,18 @@ function syntheticToolUseContext(opts: {
         'Glob',
         'Grep',
         'AskUserQuestion',
-      ]),
-      alwaysDeny: new Set(),
-      mode: 'bypassPermissions',
+      ],
     },
+    alwaysDenyRules: { session: [] },
+    alwaysAskRules: { session: [] },
+    isBypassPermissionsModeAvailable: true,
+    shouldAvoidPermissionPrompts: true,
+    awaitAutomatedChecksBeforeDialog: false,
+    prePlanMode: undefined,
+    strippedDangerousRules: undefined,
+  }
+  const noopAppState: any = {
+    toolPermissionContext,
     mainLoopModel: opts.model,
     mcpConfigs: new Map(),
     toolJsx: undefined,
@@ -326,6 +348,13 @@ function syntheticToolUseContext(opts: {
     },
     getAppState: () => noopAppState,
     setAppState: (_f: (prev: any) => any) => undefined,
+    // vendor BashTool.checkPermissions → bashToolHasPermission resolves
+    // the permission context through this callback (see
+    // opencc-src/utils/toolSearch.ts:342, AgentTool.tsx:303). Returning
+    // our hardcoded bypassPermissions context here makes the vendor
+    // permission system take the bypass branch and short-circuit to
+    // { behavior: 'allow' } without ever popping a UI dialog.
+    getToolPermissionContext: async () => toolPermissionContext,
     setInProgressToolUseIDs: () => undefined,
     userModified: false,
   }
