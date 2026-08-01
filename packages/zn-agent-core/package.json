@@ -29,7 +29,6 @@
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "copy-from-opencc": "tsx scripts/copy-from-opencc.ts",
     "verify": "tsx scripts/verify-imports.ts",
     "bundle": "node --experimental-strip-types scripts/bundle-opencc.ts"
   },
