@@ -74,6 +74,25 @@ export function installMacroStub(): void {
   if (g.MACRO && typeof g.MACRO === 'object' && typeof g.MACRO.VERSION === 'string') {
     return
   }
+  // zai patch: force `shouldInjectAgentListInMessages()` (opencc-src/tools/AgentTool/prompt.ts:59)
+  // to return false so AgentTool.prompt() embeds the sub-agent list inline
+  // in the tool description, instead of deferring to a `<system-reminder>`
+  // message. The deferred path is broken in zai's compat runtime because
+  // opencc's `agent_listing_delta` attachment is only emitted MID-TURN
+  // (query.ts:~2655, inside the per-iteration attachment loop), but zai
+  // pre-loads `params.messages` and passes them to `openccQuery()` — so
+  // the FIRST callModel never sees the attachment. The LLM ends up with
+  // a tool description that says "see <system-reminder>" but no such
+  // reminder exists in the conversation. Inline rendering side-steps the
+  // entire message-flow race.
+  //
+  // Only set when the env var isn't already configured, so an operator can
+  // override per-process (e.g. for parity debugging against an upstream
+  // opencc run). Acceptable truthy/falsy semantics match
+  // opencc-src/utils/envUtils.ts:122,148.
+  if (process.env.CLAUDE_CODE_AGENT_LIST_IN_MESSAGES === undefined) {
+    process.env.CLAUDE_CODE_AGENT_LIST_IN_MESSAGES = 'false'
+  }
   // zai's own pkg version is a reasonable proxy; build-time
   // reflection isn't worth the bundle-size cost here.
   const VERSION = '0.1.0'
