@@ -234,6 +234,19 @@ export const useAppStore = create<AppState>((set) => ({
         instanceContext: { ...state.instanceContext, branch: event.branch },
       };
     }
+    if (event.type === 'system.restarting') {
+      return {
+        ...state,
+        serviceState: {
+          phase: 'restarting',
+          reason: event.reason,
+          deadlineMs: event.deadlineMs,
+        },
+      };
+    }
+    if (event.type === 'system.restart.canceled') {
+      return { ...state, serviceState: null };
+    }
     return state;
   }),
   dismissToast: (id) => set((state) => ({

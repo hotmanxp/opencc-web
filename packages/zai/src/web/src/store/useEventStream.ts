@@ -69,6 +69,8 @@ function dispatch(event: ServerEvent) {
     }
     case 'server.error':
     case 'toast':
+    case 'system.restarting':
+    case 'system.restart.canceled':
       useAppStore.getState().applySystemEvent(event)
       break
     case 'branch.changed':
