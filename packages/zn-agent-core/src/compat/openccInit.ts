@@ -33,6 +33,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { translateCallModel } from './runtime/buildOpenccQueryParams.js'
 
 // Imported via the package's `./opencc-core` subpath export (see
 // package.json `exports`). All opencc vendor code is bundled into
@@ -119,6 +120,21 @@ export function installMacroStub(): void {
     FEEDBACK_CHANNEL,
     VERSION_CHANGELOG,
   }
+  // zai patch: expose translateCallModel as a global so the bundle's
+  // `query/deps.ts` `productionDeps` factory can route sub-agent
+  // `query()` calls (which pass no `params.deps` and therefore fall
+  // through to productionDeps) through zai's modelCaller instead of
+  // vendor's `queryModelWithStreaming`. Without this hook, sub-agents
+  // spawn via AgentTool get a direct Anthropic call that bypasses
+  // zai's profile resolution + 2013 sanitizer + per-model config
+  // and frequently returns empty, which surfaces to the parent as
+  // "(Subagent completed but returned no output.)".
+  //
+  // The matching `globalThis.__zaiModelCaller` is set by zai's
+  // `initAgentRuntime` after `createAnthropicModelCaller()`. Until
+  // both globals are set, productionDeps falls through to vendor's
+  // default — which is the correct behavior in non-zai embedders.
+  ;(globalThis as any).__zaiTranslateCallModel = translateCallModel
 }
 
 // ----- compat-side re-implementations of un-exported startup steps -----

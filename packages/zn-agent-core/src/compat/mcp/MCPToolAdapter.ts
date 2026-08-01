@@ -85,10 +85,20 @@ function adaptOne(
 
     userFacingName: () => `${serverName}:${t.name}`,
 
-    mapToolResultToToolResultBlockParam(content: unknown) {
+    mapToolResultToToolResultBlockParam(content: unknown, toolUseID: string) {
+      // zai patch: the vendor Tool interface declares this method with a
+      // second `toolUseID: string` arg (opencc-src/Tool.ts). Without it,
+      // every MCP tool_result lands as `tool_use_id: ''`, the upstream
+      // Anthropic API has no way to match it to the assistant's preceding
+      // tool_use block, and the next callModel turn returns
+      // `400 invalid_request_error: tool call result does not follow tool
+      // call` (verified via ZAI_DEBUG trace: orphan tool_result). The
+      // model then reports the dropped tool result and re-invokes the
+      // tool, which only succeeds if the same code path is taken again —
+      // i.e. never. Carry the toolUseID through to the block.
       return {
         type: 'tool_result',
-        tool_use_id: '',
+        tool_use_id: toolUseID,
         content: typeof content === 'string' ? content : JSON.stringify(content),
         is_error: false,
       }

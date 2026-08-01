@@ -48,6 +48,31 @@ export interface Tool {
    * `output` / `content` field that the adapter flattens.
    */
   call?: (args: unknown, ctx?: ToolCallCtx) => Promise<unknown>
+  /**
+   * zai patch: opencc's toolExecution (`services/tools/toolExecution.ts:1573`)
+   * calls `tool.mapToolResultToToolResultBlockParam(result.data, toolUseID)`
+   * to get the Anthropic-protocol `{ type: 'tool_result', tool_use_id, ... }`
+   * block for the user message that follows the assistant's tool_use. The
+   * second `toolUseID` arg is the ID of the tool_use block in the assistant
+   * message that this tool_result must match — Anthropic rejects the whole
+   * messages array with `400 tool call result does not follow tool call`
+   * if `tool_use_id` doesn't line up. The compat Tool interface declared
+   * this as a single-arg function (with `tool_use_id: ''`) which silently
+   * dropped the second arg and broke every MCP tool result.
+   *
+   * zai-native tools don't need this (the opencc vendor builds their tool_result
+   * blocks in services/api/claude.ts directly), so it's optional here. MCP
+   * tools MUST provide it (MCPToolAdapter.adaptOne does).
+   */
+  mapToolResultToToolResultBlockParam?: (
+    content: unknown,
+    toolUseID: string,
+  ) => {
+    type: 'tool_result'
+    tool_use_id: string
+    content: unknown
+    is_error: boolean
+  }
 }
 
 /**

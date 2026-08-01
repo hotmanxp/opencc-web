@@ -78,7 +78,13 @@ function inferPathFromMostRecentUserPrompt(messages: any[]): string | undefined 
   return undefined
 }
 
-async function* translateCallModel(
+// zai patch: also exposed as `globalThis.__zaiTranslateCallModel` by
+// `enableOpenccConfigs` so that the bundle's `query/deps.ts`
+// `productionDeps` factory can pick it up as the default callModel for
+// sub-agent `query()` calls (which don't pass `params.deps`). Without
+// this export, sub-agents would fall back to vendor's
+// `queryModelWithStreaming` and bypass zai's compat layer.
+export async function* translateCallModel(
   openccReq: {
     messages: unknown
     systemPrompt: unknown

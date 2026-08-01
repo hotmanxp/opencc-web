@@ -173,9 +173,20 @@ export function initAgentRuntime(cwd: string): void {
     })
   }
 
+  // Register the zai modelCaller as a global so the bundle's
+  // `query/deps.ts` `productionDeps` factory can pick it up as the
+  // default callModel for sub-agent `query()` calls. Without this,
+  // sub-agents (which don't pass `params.deps`) would fall back to
+  // vendor's `queryModelWithStreaming` — a direct Anthropic call that
+  // bypasses zai's profile resolution + 2013 sanitizer + per-model
+  // config — and silently return empty, surfacing to the parent as
+  // "(Subagent completed but returned no output.)".
+  const zaiModelCaller = createAnthropicModelCaller()
+  ;(globalThis as any).__zaiModelCaller = zaiModelCaller
+
   runtime = new DefaultAgentRuntime({
     dataDir,
-    modelCaller: createAnthropicModelCaller(),
+    modelCaller: zaiModelCaller,
     defaultModel:
       process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
       ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
