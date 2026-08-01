@@ -179,7 +179,6 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
       style={{
         width: 360,
         background: 'var(--bg-popup)',
-        color: '#fff',
         borderRadius: 6,
         padding: 8,
         maxHeight: 480,
@@ -357,7 +356,6 @@ function Row({ entry, isCurrent, isSelected, onClick, rowRef }: RowProps) {
           <span
             style={{
               fontSize: 13,
-              color: '#fff',
               fontWeight: isCurrent ? 600 : 400,
               whiteSpace: 'nowrap',
               overflow: 'hidden',
