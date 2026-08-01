@@ -13,7 +13,7 @@
 
 | zai subpath | zai export | opencc source | Notes |
 |---|---|---|---|
-| (main) | `EXTERNAL_PERMISSION_MODES` | `src/types/permissions.ts:EXTERNAL_PERMISSION_MODES` | Identical const array |
+| (main) | `EXTERNAL_PERMISSION_MODES` | `src/types/permissions.ts:EXTERNAL_PERMISSION_MODES` | Direct subpath import (`opencc-src/permissions`) since 2026-08-01 |
 | (main) | `PERMISSION_MODES` | `src/types/permissions.ts:PERMISSION_MODES` | Re-export; opencc uses `INTERNAL_PERMISSION_MODES` internally |
 | `./runtime` | `PermissionMode` | `src/types/permissions.ts:PermissionMode` | Same type alias |
 | `./runtime` | `EXTERNAL_PERMISSION_MODES` | `src/types/permissions.ts:EXTERNAL_PERMISSION_MODES` | Same const |
