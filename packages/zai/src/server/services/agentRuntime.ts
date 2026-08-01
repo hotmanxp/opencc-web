@@ -138,7 +138,7 @@ export function initAgentRuntime(cwd: string): void {
   // call enableConfigs() first. Fire-and-forget; the runtime
   // construction below doesn't strictly need the config to be
   // ready, but the next /api/agent/prompt will.
-  void enableOpenccConfigs().catch((err) => {
+  void enableOpenccConfigs({ cwd }).catch((err) => {
     console.error('[initAgentRuntime] enableOpenccConfigs failed:', err)
   })
   const { resolved: dataDir } = resolveDataDir()
