@@ -221,7 +221,26 @@ export async function appendAssistantMessageV2(
   }
 }
 
-/** v2 → Anthropic SDK messages. Groups consecutive tool_result blocks under one user role. */
+/**
+ * v2 → Anthropic SDK messages.
+ *
+ * Anthropic Messages API requires strict user/assistant alternation — you
+ * cannot have two assistant messages back-to-back, nor two user messages
+ * (except when the second user is a tool_result block, which is allowed
+ * to follow the matching tool_use). To honour this:
+ *
+ *   - consecutive `tool_use` transcript entries (each its own assistant
+ *     message in the file) are merged into a single assistant message
+ *     whose content is the concatenation of all their content blocks
+ *   - consecutive `user` tool_result entries are already merged (the
+ *     existing logic groups every tool_result block under one user role)
+ *
+ * Without the assistant-merge, a session with two back-to-back tool_use
+ * entries would resume with `[user, assistant(tool_use_A),
+ * assistant(tool_use_B), user(tool_results)]` — and the LLM API rejects
+ * the second consecutive assistant with 400 invalid_request_error. The
+ * user sees the resumed session produce no LLM reply on the next turn.
+ */
 export function serializeForAnthropic(
   messages: TranscriptMessage[],
 ): Array<{ role: 'user' | 'assistant'; content: unknown }> {
@@ -233,8 +252,28 @@ export function serializeForAnthropic(
     // 跳过 compact_boundary 消息 — 它是 transcript 内部标记, 不应喂给 LLM
     if (m.type === 'compact_boundary') continue
     if (m.type === 'tool_use') {
-      // tool_use 消息: 一条 assistant role, content 是单个 tool_use block
-      out.push({ role: 'assistant', content: m.message.content })
+      // tool_use 消息: 每条 transcript entry 都是一条独立的 assistant 消息,
+      // 但 Anthropic 协议禁止连续 assistant 消息, 所以要合并到上一条
+      // assistant 之后(若上一条存在);否则新建一条 assistant.
+      const blocks = m.message.content
+      const last = out.length > 0 ? out[out.length - 1] : null
+      if (
+        last?.role === 'assistant' &&
+        Array.isArray(last.content) &&
+        Array.isArray(blocks)
+      ) {
+        ;(last.content as unknown[]).push(...blocks)
+      } else if (last?.role === 'assistant' && typeof last.content === 'string') {
+        // previous assistant was a plain text message — convert its content
+        // to a [text, ...tool_use] block array so the merge lands in a
+        // single assistant message with the expected tool_use blocks.
+        last.content = [
+          { type: 'text', text: last.content },
+          ...(blocks as unknown[]),
+        ]
+      } else {
+        out.push({ role: 'assistant', content: blocks })
+      }
       continue
     }
     if (m.type === 'user' && Array.isArray(m.message.content)) {
@@ -264,7 +303,18 @@ export function serializeForAnthropic(
       }
     }
     if (m.type === 'assistant') {
-      out.push({ role: 'assistant', content: m.message.content })
+      const blocks = m.message.content
+      const last = out.length > 0 ? out[out.length - 1] : null
+      if (last?.role === 'assistant' && Array.isArray(last.content) && Array.isArray(blocks)) {
+        ;(last.content as unknown[]).push(...blocks)
+      } else if (last?.role === 'assistant' && typeof last.content === 'string' && Array.isArray(blocks)) {
+        last.content = [
+          { type: 'text', text: last.content },
+          ...blocks,
+        ]
+      } else {
+        out.push({ role: 'assistant', content: blocks })
+      }
       continue
     }
     if (m.type === 'user') {
