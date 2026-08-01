@@ -407,10 +407,29 @@ export function createAnthropicModelCaller(): ModelCaller {
         system: systemBlocks,
         messages: sdkMessages,
         tools: tools.length > 0
-          ? (tools.map((t) => ({
-              name: t.name,
-              description: t.description ?? '',
-              input_schema: buildAnthropicInputSchema(t.inputSchema),
+          ? (await Promise.all(tools.map(async (t) => {
+              // MCP / opencc SDK tools expose description() as an async
+              // function (MCPToolAdapter.adaptOne: description returns
+              // `[mcp:<server>] <full description>`). Reading the static
+              // `t.description` field gives `undefined` → empty string after
+              // `?? ''`, which the Anthropic API then drops the tool for
+              // (the model receives no `mcp__*` entry even though we sent
+              // it — visible in ZAI_DEBUG trace as
+              // "mcp__codegraph__codegraph_search:string" passing through
+              // but the model's own listing never mentions it). Await the
+              // function first; fall back to the static field for tools
+              // that already ship a literal string description.
+              let description = ''
+              if (typeof (t as any).description === 'function') {
+                description = await (t as any).description()
+              } else {
+                description = t.description ?? ''
+              }
+              return {
+                name: t.name,
+                description,
+                input_schema: buildAnthropicInputSchema(t.inputSchema),
+              }
             })) as Anthropic.Messages.ToolUnion[])
           : undefined,
         stream: true,

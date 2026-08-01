@@ -160,6 +160,18 @@ export function initAgentRuntime(cwd: string): void {
   // is a no-op.
   const mcpServers = loadMcpServers(cwd)
   const mcpClientPool = mcpServers.length > 0 ? new MCPClientPool() : undefined
+  // Kick off stdio connections to every configured MCP server. connectAll()
+  // never throws (failures surface via health()), so we fire-and-forget and
+  // log instead. Without this call, MCPClientPool stays empty and the
+  // Agent's system prompt has no `<mcp_servers>` block — the model never
+  // sees any `mcp__*` tool. Race note: a prompt arriving in the ~100ms
+  // before connectAll resolves may still see an empty pool; the next
+  // /api/agent/prompt request picks up the connected state.
+  if (mcpClientPool) {
+    void mcpClientPool.connectAll(mcpServers).catch((err) => {
+      console.error('[mcp] connectAll failed:', err)
+    })
+  }
 
   runtime = new DefaultAgentRuntime({
     dataDir,

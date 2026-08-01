@@ -11,6 +11,7 @@ import { existsSync } from 'node:fs'
 import { resolve as pathResolve } from 'node:path'
 import { pathToFileURL, fileURLToPath } from 'node:url'
 import type { QueryOptions, OpenccAdapterConfig } from './types.js'
+import { adaptMcpTools } from '../mcp/MCPToolAdapter.js'
 import type { RuntimeEvent } from './events.js'
 import { buildOpenccQueryParams } from './buildOpenccQueryParams.js'
 import { renderToolDescriptions } from './buildOpenccQueryParams.js'
@@ -198,6 +199,45 @@ export async function* runViaOpenccQuery(
   const toolMap = new Map<string, any>()
   for (const t of coreTools) toolMap.set(t.name, t)
   for (const t of zaiTools) toolMap.set(t.name ?? t.name, t)
+  // zai patch: surface MCP tools from the compat pool. zai owns its own
+  // MCP wiring (no opencc vendor registry), so we ask MCPClientPool for
+  // each connected server's tool list and merge into the final toolMap.
+  // Without this, the pool's connectAll() succeeds but the model never
+  // sees any `mcp__*` tool.
+  if (config.mcpPool && config.mcpServers) {
+    for (const spec of config.mcpServers) {
+      try {
+        const adapted = await adaptMcpTools(config.mcpPool, spec.name)
+        for (const t of adapted) {
+          // zai patch: MCPToolAdapter ships `description` as an async
+          // function (returns `[mcp:<server>] <desc>`). zai's
+          // modelCaller (`modelCaller.ts:412`) reads `t.description`
+          // statically — `t.description ?? ''` — and falls back to an
+          // empty string when the field is a function, so the
+          // Anthropic SDK then sends a tool with `description: ''`,
+          // which the upstream API silently drops from the model's
+          // visible tool list (ZAI_DEBUG trace confirms
+          // "mcp__codegraph__codegraph_search:string" reaches SDK
+          // but the model reports "None of these start with mcp__").
+          // Clone with a static description so modelCaller picks up
+          // the real value, while leaving the original `description()`
+          // method intact for vendor callers that await it.
+          if (typeof (t as any).description === 'function') {
+            try {
+              const staticDesc = await (t as any).description()
+              toolMap.set(t.name, { ...t, description: staticDesc })
+            } catch {
+              toolMap.set(t.name, t)
+            }
+          } else {
+            toolMap.set(t.name, t)
+          }
+        }
+      } catch (err) {
+        console.warn(`[openccQueryBridge] adaptMcpTools(${spec.name}) failed:`, err)
+      }
+    }
+  }
   params.tools = Array.from(toolMap.values())
   // Mirror tools onto toolUseContext.options.tools so opencc internals
   // that read `state.toolUseContext.options.tools` see them.
