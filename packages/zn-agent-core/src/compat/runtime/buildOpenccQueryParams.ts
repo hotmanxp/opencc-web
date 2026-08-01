@@ -383,7 +383,36 @@ async function* translateCallModel(
       // retries. Patch the input with a safe default per tool so the
       // tool actually runs and the conversation can move forward.
       if (tu && tu.type === 'tool_use' && (tu.input === undefined || (typeof tu.input === 'object' && tu.input !== null && Object.keys(tu.input).length === 0))) {
-        tu.input = BUILTIN_TOOL_DEFAULT_INPUT[tu.name] ?? {}
+        // Special-case AgentTool: its required fields `description` and
+        // `prompt` aren't satisfiable by a static default (BUILTIN_TOOL
+        // _DEFAULT_INPUT['Agent'] doesn't exist). The MiniMax-M3 model
+        // frequently emits an empty Agent tool_use right after a long
+        // `thinking` block whose content was the actual sub-agent
+        // intent — vendor's zod schema then rejects the empty input
+        // and the LLM gets stuck retrying "Agent failed 5 times with
+        // InputValidationError". Synthesize `description` (first ~60
+        // chars of the most recent thinking block) + `prompt` (full
+        // thinking text) + a default `subagent_type` so the sub-agent
+        // actually runs and the conversation can proceed. For other
+        // tools we fall back to BUILTIN_TOOL_DEFAULT_INPUT as before.
+        if (tu.name === 'Agent') {
+          const lastThinking = [...assistantContent]
+            .reverse()
+            .find((b: any) => b?.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.length > 0) as
+            | { type: 'thinking'; thinking: string }
+            | undefined
+          const text = lastThinking?.thinking.trim() ?? ''
+          const description = text.length > 0
+            ? text.slice(0, 60).replace(/\s+/g, ' ').trim()
+            : 'subagent task'
+          tu.input = {
+            description,
+            ...(text.length > 0 ? { prompt: text } : {}),
+            subagent_type: 'general-purpose',
+          }
+        } else {
+          tu.input = BUILTIN_TOOL_DEFAULT_INPUT[tu.name] ?? {}
+        }
       }
     } else if (t === 'message_delta') {
       lastStopReason = ev?.delta?.stop_reason ?? null
