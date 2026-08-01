@@ -723,31 +723,25 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
             turnIndex?: number
           }
           if (ev.toolUseId) {
-            // Push to current assistant buffer so the flushed
-            // message at runtime.done has the tool_use block too.
+            // Push to the assistant buffer so the flush at
+            // runtime.started/runtime.done emits ONE assistant
+            // message containing [thinking..., text..., tool_use].
+            // Previously this handler ALSO called appendToolUse
+            // for mid-turn reload visibility, but that produced a
+            // standalone tool_use transcript entry that, after
+            // serializeForAnthropic folds it into the next assistant
+            // message, left a duplicate tool_use block in the
+            // resumed messages array. Now that the flush actually
+            // fires before the buffer is reset (see the
+            // runtime.started handler below), the buffered path is
+            // fast enough — a reload mid-turn loses at most a few
+            // buffered deltas, which the next SSE event re-emits.
             turnContentBlocks.push({
               type: 'tool_use',
               id: ev.toolUseId,
               name: ev.toolName ?? 'unknown',
               input: ev.input ?? {},
             })
-            // Also persist immediately as its own message so a
-            // mid-turn reload shows the call (not just the buffered
-            // flush at the end).
-            try {
-              await appendToolUse(
-                getTranscriptStore(),
-                sessionId,
-                { id: ev.toolUseId, name: ev.toolName ?? 'unknown', input: ev.input ?? {} },
-                ev.turnIndex ?? turnIndex,
-                null,
-                cwd,
-              )
-            } catch (e) {
-              if (process.env.ZAI_DEBUG === '1') {
-                console.error('[zai.agent.prompt] appendToolUse failed', e)
-              }
-            }
           }
         } else if (event.type === 'runtime.tool_result') {
           const ev = event as {
@@ -778,8 +772,11 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
             }
           }
         } else if (event.type === 'runtime.thinking') {
-          const ev = event as { delta?: string; text?: string }
-          const text = ev.delta ?? ev.text ?? ''
+          // translateRuntimeEvents emits {type:'runtime.thinking', thinking:string};
+          // older zod schema variants also accepted {delta/text} — keep both
+          // for backward compat with any in-flight event consumers.
+          const ev = event as { delta?: string; text?: string; thinking?: string }
+          const text = ev.thinking ?? ev.delta ?? ev.text ?? ''
           if (text) {
             const last = turnContentBlocks[turnContentBlocks.length - 1]
             if (last && last.type === 'thinking') last.thinking = (last.thinking ?? '') + text
@@ -794,15 +791,30 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
             else turnContentBlocks.push({ type: 'text', text })
           }
         } else if (event.type === 'runtime.started') {
-          // New turn — advance turnIndex, reset buffer (the previous
-          // turn's content was already flushed at runtime.done).
+          // New turn — advance turnIndex. CRITICAL: flush the previous
+          // turn's accumulated thinking/text FIRST. The old code reset
+          // turnContentBlocks = [] here on the assumption that
+          // runtime.done would fire before the next runtime.started,
+          // but in practice opencc vendor streams message_start of the
+          // next turn WITHOUT emitting an intervening message_stop when
+          // a tool_use / tool_result pair bridges turns. So the new
+          // turn's runtime.started arrives BEFORE the old turn's
+          // runtime.done, and resetting here would discard the
+          // accumulated thinking/text/tool_use blocks without ever
+          // flushing them. flushAssistantMessage() also resets the
+          // buffer (it steals `blocks` before clearing), so calling
+          // it here + resetting here is a no-op duplication.
           const ev = event as { turnIndex?: number }
           if (typeof ev.turnIndex === 'number') turnIndex = ev.turnIndex
-          turnContentBlocks = []
+          await flushAssistantMessage()
         } else if (event.type === 'runtime.done' || event.type === 'runtime.aborted') {
           // End of current turn: flush accumulated thinking/text as
           // one assistant message. The tool_use blocks were already
           // appended by their own runtime.tool_call event.
+          //
+          // If the next turn's runtime.started already flushed this
+          // turn's buffer (see comment above), flushAssistantMessage()
+          // is a no-op because the buffer is empty.
           await flushAssistantMessage()
         }
 
