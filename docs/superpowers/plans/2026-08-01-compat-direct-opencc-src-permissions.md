@@ -17,6 +17,7 @@
 - 测试 mock 改路径时只改 mock target,不动 mock 内容(5 项 const 数组不变)
 - **UI / 权限短路规则**:源代码里有 UI 调用 / 权限判断需要 UI 交互的(例如 opencc 的 `Tool.checkPermissions` 返回 `'ask'` 弹权限对话框、`runPreToolUseHooks` 注入 `case 'stop'` 等),直接改原代码跳过,返回 `'allow'` / `true` 等允许值。**不**留 stub、**不**抛 error,真 WEB UI 配置后阶段再补。已经这么做的:`forceAllowCheckPermissions`(`compat/tools/opencc/builtin.ts`)、`__zaiSkipPreToolUseHooks` flag(per history 2026-07-31,绕过 zai runtime 下 vendor PreToolUse hooks 的 `stop` 类型 yield)
 - 本轮 `opencc-src/types/permissions.ts` 是纯 const + type 文件,不含 UI/权限交互,所以本规则不直接落地到本任务的代码改动;但适用于后续轮次(B 档: MCP pool / plugins / hook runner 委托时遇到 UI 调用就要短路)
+- **依赖补齐规则**:实施时若发现 package 缺依赖,直接 `pnpm add` 或 `pnpm add -D` 补齐,不要 stub、不要 mock 假装通过。本 plan 预检 `packages/zn-agent-core/package.json`:`esbuild 0.28.1`(devDep,Task 1 用)、`@anthropic-ai/sdk ^0.94.0`(dep,types/permissions.ts 类型导入)、`vitest ^2.1.0`(devDep,Task 2/4 测试)全部到位,无需新增
 
 ---
 
