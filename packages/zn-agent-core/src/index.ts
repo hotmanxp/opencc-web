@@ -57,8 +57,6 @@ export type { DataDirConfig } from './compat/data/dataDir.js'
 
 // Skills runtime (Batch 3a)
 export * from './compat/runtime/skills-index.js'
-export { loadAgentDefinitions, parseAgentMd } from './compat/tools/loadAgentsDir.js'
-export type { AgentDefinition } from './compat/tools/loadAgentsDir.js'
 
 // Default tool registry (Phase 4): buildDefaultTools() returns the chat-path
 // tool set (Bash/Read/Edit/Write/AskUserQuestion/Skill) with stub call()
