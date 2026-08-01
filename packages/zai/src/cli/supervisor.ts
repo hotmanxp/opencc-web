@@ -63,6 +63,40 @@ export async function runSupervisor(
 
     await deps.writeState({ state: 'starting', childPid: child.pid ?? null })
 
+    // Forward child IPC messages to the supervisor's own parent so
+    // wrappers (zai start, integration tests) can observe the lifecycle.
+    // In production the supervisor is the top-level process and has no
+    // parent IPC channel, in which case `process.send` is a no-op.
+    const forwardToParent = (raw: unknown) => {
+      if (typeof process.send === 'function') {
+        try {
+          process.send(raw)
+        } catch {
+          // parent IPC closed — ignore, child is still being managed
+        }
+      }
+    }
+    child.on('message', forwardToParent)
+
+    // Forward `restart` requests from the supervisor's own parent down to
+    // the child. Production supervisors have no parent IPC, so this is a
+    // no-op in normal operation. Integration tests use this path to
+    // exercise the restart cycle end-to-end.
+    const onParentMsg = (raw: unknown) => {
+      if (raw && typeof raw === 'object') {
+        const m = raw as { type?: string; reason?: RestartReason }
+        if (m.type === 'restart' && m.reason) {
+          pendingRestart = m.reason
+          try {
+            child.send(raw)
+          } catch {
+            // child IPC closed — ignore, exit handler will resolve soon
+          }
+        }
+      }
+    }
+    process.on('message', onParentMsg)
+
     const gotReady = await new Promise<boolean>((resolve) => {
       const onMsg = (msg: unknown) => {
         if (msg && typeof msg === 'object' && (msg as ChildMsg).type === 'ready') {
@@ -148,4 +182,15 @@ export async function runSupervisor(
   }
 
   return { exitCode }
+}
+
+// Allow `bun run src/cli/supervisor.ts --child-script <path>` to spawn a child
+// for integration tests. Production callers (start.ts) keep importing
+// runSupervisor directly and ignore this block.
+if (import.meta.main) {
+  const args = process.argv.slice(2)
+  const port = Number(process.env.ZAI_PORT ?? '9201')
+  runSupervisor({ args, env: process.env, port }).then(({ exitCode }) => {
+    process.exit(exitCode)
+  })
 }
