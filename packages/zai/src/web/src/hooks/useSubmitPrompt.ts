@@ -16,20 +16,28 @@ export interface UseSubmitPromptResult {
     text: string,
     opts?: { skipPushUserMsg?: boolean },
   ) => Promise<void>
-  pushUserMsg: (text: string, isRenderedPrompt?: boolean) => void
+  pushUserMsg: (
+    text: string,
+    isRenderedPrompt?: boolean,
+    attachments?: PendingAttachmentLike[],
+  ) => void
 }
 
 interface PendingAttachmentLike {
   localId: string
   mime: string
   filename: string
+  // thumbnailUrl 是 objectURL, MessageBubble.AttachmentStrip 用来渲染缩略图;
+  // 不写入 server 持久化, 仅前端 transient 渲染用. 上传时由 AgentInputBox
+  // 通过 URL.createObjectURL(file) 创建.
+  thumbnailUrl: string
   base64DataUrl: string
   status: 'reading' | 'ready' | 'error'
 }
 
 export function useSubmitPrompt(): UseSubmitPromptResult {
   const pushUserMsg = useCallback(
-    (text: string, isRenderedPrompt = false) => {
+    (text: string, isRenderedPrompt = false, attachments: PendingAttachmentLike[] = []) => {
       useAgentStore.setState((s) => ({
         status: 'streaming' as const,
         messages: [
@@ -42,7 +50,7 @@ export function useSubmitPrompt(): UseSubmitPromptResult {
             type: 'user.text',
             text,
             isRenderedPrompt,
-            attachments: [],
+            attachments,
           } as AgentMessage,
         ],
         sendSeq: s.sendSeq + 1,

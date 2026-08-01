@@ -319,3 +319,114 @@ describe('AgentInputBox — 移动端 [⚡] 按钮', () => {
     expect(screen.queryByTestId('mobile-quick-drawer-toggle')).toBeNull()
   })
 })
+
+// 修复: 首条带图片附件的消息发出去后, UI 必须渲染 user.text + 图片缩略图.
+// commit 87a44c0a (Jul 26 2026) 误删图片分支的 pushUserMsg, 用错误的"UI 走 transcript
+// 刷新路径"注释掩盖, 实际 loadTranscript 从未在 send 后触发, 首条带图消息不渲染.
+// 回归测试: 上传一张图 + 输入文字, 点发送 → store 必须立即多一条 user.text 且
+// attachments 非空.
+describe('AgentInputBox — 首条消息带图片附件时 UI 立即渲染', () => {
+  beforeAll(() => {
+    // happy-dom 没有 URL.createObjectURL/revokeObjectURL, 提前注入避免抛错.
+    if (typeof (URL as any).createObjectURL !== 'function') {
+      ;(URL as any).createObjectURL = vi.fn(() => 'blob:mock')
+    }
+    if (typeof (URL as any).revokeObjectURL !== 'function') {
+      ;(URL as any).revokeObjectURL = vi.fn()
+    }
+  })
+
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset()
+    vi.mocked(api.post).mockResolvedValue({ sessionId: 'sess-new' } as any)
+  })
+
+  it('图片 + 文字一起发: store 立即新增一条带 attachments 的 user.text', async () => {
+    // vi.spyOn readImageAsBase64 立刻 resolve, 不依赖 vi.doMock 模块缓存.
+    const imageReader = await import('../lib/imageReader.js')
+    const spy = vi
+      .spyOn(imageReader, 'readImageAsBase64')
+      .mockResolvedValue({
+        mime: 'image/png',
+        dataUrl: 'data:image/png;base64,AAA',
+        size: 1024,
+        filename: 'pasted.png',
+      })
+    try {
+      render(<AgentInputBox />)
+      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+      fireEvent.change(ta, { target: { value: 'describe this' } })
+
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File(['fake-bytes'], 'pasted.png', { type: 'image/png' })
+      Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
+      fireEvent.change(fileInput)
+
+      // 等 spy 至少被调一次 + addAttachments 内部 setState 把状态切到 ready.
+      await waitFor(() => expect(spy).toHaveBeenCalled())
+
+      // 点发送
+      fireEvent.keyDown(ta, { key: 'Enter', code: 'Enter', shiftKey: false })
+
+      // /agent/prompt 必须被调用一次 (说明 attachments 走完了 addAttachments 路径)
+      await waitFor(() =>
+        expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+          '/agent/prompt',
+          expect.objectContaining({
+            prompt: 'describe this',
+            contentBlocks: expect.any(Array),
+          }),
+          expect.anything(),
+        ),
+      )
+
+      const msgs = useAgentStore.getState().messages
+      const userMsg = msgs.find(
+        (m) =>
+          (m as { type?: string }).type === 'user.text' &&
+          (m as { text?: string }).text === 'describe this',
+      )
+      expect(userMsg).toBeDefined()
+      expect((userMsg as { attachments?: unknown[] }).attachments).toBeDefined()
+      expect(((userMsg as { attachments?: unknown[] }).attachments ?? []).length).toBe(1)
+      expect((userMsg as { isRenderedPrompt?: boolean }).isRenderedPrompt).toBe(false)
+    } finally {
+      spy.mockRestore()
+    }
+  })
+
+  it('仅图片 (无文字) 也能渲染 user.text', async () => {
+    const imageReader = await import('../lib/imageReader.js')
+    const spy = vi
+      .spyOn(imageReader, 'readImageAsBase64')
+      .mockResolvedValue({
+        mime: 'image/png',
+        dataUrl: 'data:image/png;base64,AAA',
+        size: 1024,
+        filename: 'pasted.png',
+      })
+    try {
+      render(<AgentInputBox />)
+      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File(['fake-bytes'], 'pasted.png', { type: 'image/png' })
+      Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
+      fireEvent.change(fileInput)
+
+      await waitFor(() => expect(spy).toHaveBeenCalled())
+
+      fireEvent.keyDown(ta, { key: 'Enter', code: 'Enter', shiftKey: false })
+
+      await waitFor(() => {
+        const msgs = useAgentStore.getState().messages
+        const userMsg = msgs.find((m) => (m as { type?: string }).type === 'user.text')
+        expect(userMsg).toBeDefined()
+        expect((userMsg as { text?: string }).text).toBe('')
+        expect((userMsg as { attachments?: unknown[] }).attachments?.length).toBe(1)
+      })
+    } finally {
+      spy.mockRestore()
+    }
+  })
+})

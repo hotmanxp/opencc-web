@@ -532,16 +532,21 @@ export default React.memo(function AgentInputBox() {
     if (status === "streaming") return;
     setInput("");
 
-    attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl));
-    setAttachments([]);
-
     if (blocks.length > 0) {
       // 含图片附件: 仍走原始内联实现 (submitPrompt hook 不接 contentBlocks,
       // 保持图片附件路径不抽到 hook — 与 handleSend 历史契约对齐, 避免破坏
       // 已有 ["AgentInputBox"] 附件提交路径).
-      // 注意: 该分支不调 pushUserMsg — UI 走 transcript 刷新路径,
-      // server 把 user 消息落盘后由 loadTranscript 渲染一条 user.text.
+      // 修复: 必须本地 push 一条 user.text, 把图片附件一并写进 store,
+      // 否则首条带图消息发出去后 UI 不渲染用户消息 (commit 87a44c0a 把这里的
+      // pushUserMsg 删了, 注释声称的 transcript 刷新路径实际不存在).
       // 纯文本分支由 submitPrompt 默认行为 push 一条 user.text, 不重复.
+      pushUserMsg(text, false, readyAttachments);
+      // 图片附件: 不要 revokeObjectURL, 缩略图 URL 被 push 进的 user.text
+      // 消息持有着, MessageBubble / AttachmentStrip 渲染时还在用. 提前 revoke
+      // 会让图片缩略图渲染成空 (revoked blob URL → <img> 拿不到资源).
+      // 清理时机: 切会话/清屏/session.ended 时由 MessageBubble unmount 路径
+      // 兜底; 或者用户重新上传新图覆盖同 localId 时.
+      setAttachments([]);
       const sid = sessionId || activeSessionId || undefined;
       const { sessionId: returnedSessionId } = await api.post<{
         sessionId: string;
