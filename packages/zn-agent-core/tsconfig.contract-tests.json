@@ -1,0 +1,40 @@
+{
+  "//": "Typecheck seam for compile-time contract assertions in test/. The main tsconfig.json excludes `test/` and `**/*.test.ts` (line 22-23) — so the `satisfies`, assignability probes, and literal RuntimeEvent bindings in openccRuntime-contract.test.ts never reach tsc. This dedicated config typechecks ONLY the contract test files (plus their imports), so the assignability probes in those tests actually fail the build when the contract drifts. Driven by the `typecheck:contract-tests` npm script in package.json — run via `pnpm --filter @zn-ai/zn-agent-core typecheck:contract-tests` (also invoked as a pre-commit step in CI).",
+
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "jsx": "preserve",
+    "jsxImportSource": "react",
+
+    "noEmit": true,
+
+    "baseUrl": ".",
+    "paths": {
+      "bun:bundle": ["./src/compat/runtime/bun-shim.ts"],
+      "src/*": ["./src/opencc-src/*"]
+    }
+  },
+
+  "include": [
+    "test/unit/server/openccRuntime-contract.test.ts",
+    "src/opencc-src/server/serverTypes.ts",
+    "src/opencc-src/server/index.ts",
+    "src/compat/runtime/events.ts",
+    "src/compat/transcript/types.ts",
+    "src/compat/permissions.ts",
+    "src/compat/permissionMode.ts",
+    "src/compat/runtime/bun-shim.ts"
+  ],
+
+  "exclude": [
+    "node_modules",
+    "dist",
+    "src/opencc-src"
+  ]
+}

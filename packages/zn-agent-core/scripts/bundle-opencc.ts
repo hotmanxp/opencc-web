@@ -442,16 +442,29 @@ console.log(`[bundle-opencc] permissions: ${PERMISSIONS_OUT}`)
 // `dist/opencc-src/server/index.js`. The package's `./opencc-server`
 // export subpath points at that file (see package.json).
 //
-// The d.ts files are emitted by hand below (same approach as
-// `permissions.d.ts` above) because tsc -b excludes `src/opencc-src/`
-// (the opencc vendor tree) so it never sees this file. Without a
-// d.ts, downstream TypeScript consumers of `@zn-ai/zn-agent-core/opencc-server`
-// fall back to `any` for every type — which defeats the seam's
-// purpose (locking the contract so callers and implementations
-// agree).
+// Declarations (`*.d.ts`) are mechanically emitted by `tsc -p
+// tsconfig.server.json` below, NOT written by hand. Hand-written d.ts
+// drifts from the source the moment someone extends
+// `OpenccRuntimeOptions` or adds methods to `OpenccRuntime`. The
+// dedicated tsconfig:
+//   * includes only the server module + the (vendor-tree-excluded)
+//     `compat/` types the module imports from;
+//   * excludes the opencc vendor tree (`src/opencc-src/**` except
+//     `server/`) so the emit doesn't drag React/JSX/opentelemetry/
+//     lodash-es into the dist;
+//   * uses `emitDeclarationOnly: true` + a tmp outDir — we only
+//     need the two `dist/opencc-src/server/*.d.ts` files, the rest
+//     of the tmp output is discarded.
+//
+// Without a d.ts, downstream TypeScript consumers of
+// `@zn-ai/zn-agent-core/opencc-server` fall back to `any` for every
+// type — which defeats the seam's purpose (locking the contract so
+// callers and implementations agree).
 const SERVER_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'index.ts')
 const SERVER_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'index.js')
-const SERVER_TYPES_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'serverTypes.d.ts')
+const SERVER_TSCONFIG = join(ROOT, 'tsconfig.server.json')
+const SERVER_TYPES_TMP = join(ROOT, 'dist', '.server-types-tmp')
+const SERVER_DIST_DIR = join(ROOT, 'dist', 'opencc-src', 'server')
 
 await esbuild.build({
   entryPoints: [SERVER_ENTRY],
@@ -462,50 +475,54 @@ await esbuild.build({
   target: 'node22',
 })
 
-// Hand-written d.ts for the server module. Mirrors the structure of
-// `src/opencc-src/server/serverTypes.ts` (re-exported by `index.ts`).
-// Kept minimal: only the public surface the brief mandates. If a
-// future Task extends `OpenccRuntimeOptions` or adds methods to
-// `OpenccRuntime`, update both the source and this d.ts — the
-// `verify-imports.ts` script (if it gains a server check) will catch
-// drift.
+// Mechanically emit declaration files for the server module via tsc.
+// `noEmit` requires the tsc program to typecheck; we point outDir at
+// a tmp dir, run the emit, then copy only the server d.ts files into
+// the real dist/opencc-src/server/ location (the compat/ and other
+// dependency d.ts the emit also produces are already produced by
+// `tsc -b` in the main build, so we discard the duplicates).
 {
-  const { writeFileSync } = await import('node:fs')
-  const serverDts = [
-    `import type { RuntimeEvent } from '../../compat/runtime/events.js';`,
-    `import type { TranscriptFile, TranscriptMeta } from '../../compat/transcript/types.js';`,
-    `export type OpenccRuntimeOptions = {`,
-    `    dataDir: string;`,
-    `    runtimeId?: string;`,
-    `    defaultCwd?: string;`,
-    `    defaultModel?: string;`,
-    `};`,
-    `export type OpenccQueryInput = {`,
-    `    sessionId: string;`,
-    `    prompt: string;`,
-    `    cwd: string;`,
-    `    model?: string;`,
-    `    abortSignal?: AbortSignal;`,
-    `};`,
-    `export type OpenccServerEvent = RuntimeEvent;`,
-    `export type OpenccRuntime = {`,
-    `    query(input: OpenccQueryInput): AsyncIterable<OpenccServerEvent>;`,
-    `    abort(sessionId: string, reason?: string): Promise<void>;`,
-    `    getSession(sessionId: string): Promise<TranscriptMeta | null>;`,
-    `    listSessions(opts?: { cwd?: string; includeSubagent?: boolean }): Promise<TranscriptMeta[]>;`,
-    `    readTranscript(sessionId: string, opts: { cwd: string }): Promise<TranscriptFile>;`,
-    `    patchSession(sessionId: string, patch: { title?: string; tags?: string[] }, opts: { cwd: string }): Promise<void>;`,
-    `    removeSession(sessionId: string, opts: { cwd: string }): Promise<void>;`,
-    `    shutdown(): Promise<void>;`,
-    `};`,
-    `export {};`,
-  ].join('\n')
-  writeFileSync(SERVER_TYPES_OUT, serverDts)
-  const indexDts = [
-    `export type { OpenccRuntime, OpenccRuntimeOptions, OpenccQueryInput, OpenccServerEvent } from './serverTypes.js';`,
-    `export declare function createOpenccRuntime(options: OpenccRuntimeOptions): Promise<OpenccRuntime>;`,
-  ].join('\n')
-  writeFileSync(SERVER_OUT.replace('.js', '.d.ts'), indexDts)
+  // Ensure a clean tmp dir.
+  if (existsSync(SERVER_TYPES_TMP)) {
+    const { rmSync } = await import('node:fs')
+    rmSync(SERVER_TYPES_TMP, { recursive: true, force: true })
+  }
+
+  const { spawnSync } = await import('node:child_process')
+  const tsBin = join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc')
+  const proc = spawnSync(process.execPath, [tsBin, '-p', SERVER_TSCONFIG], {
+    cwd: ROOT,
+    stdio: ['inherit', 'pipe', 'pipe'],
+  })
+  if (proc.status !== 0) {
+    if (proc.stderr) process.stderr.write(proc.stderr)
+    console.error(`[bundle-opencc] tsc -p tsconfig.server.json failed (exit ${proc.status})`)
+    process.exit(proc.status ?? 1)
+  }
+  if (proc.stdout) process.stdout.write(proc.stdout)
+
+  // Copy the two server d.ts files from the tmp emit into the real
+  // dist location. The other emitted files (compat/*, etc.) are
+  // produced by the main `tsc -b` pass — discarding the duplicates
+  // keeps the dist layout consistent with the rest of the build.
+  const { copyFileSync, mkdirSync, readdirSync, statSync } = await import('node:fs')
+  mkdirSync(SERVER_DIST_DIR, { recursive: true })
+  const tmpServerDir = join(SERVER_TYPES_TMP, 'opencc-src', 'server')
+  for (const name of readdirSync(tmpServerDir)) {
+    if (!name.endsWith('.d.ts')) continue
+    copyFileSync(join(tmpServerDir, name), join(SERVER_DIST_DIR, name))
+    console.log(`[bundle-opencc]   → ${join(SERVER_DIST_DIR, name)}`)
+  }
+  // Sanity check: the emit must have produced both .d.ts files the
+  // brief mandates. If a future task renames or drops one, fail fast
+  // here so the build doesn't silently produce an empty dist.
+  for (const required of ['index.d.ts', 'serverTypes.d.ts']) {
+    const p = join(SERVER_DIST_DIR, required)
+    if (!existsSync(p) || statSync(p).size === 0) {
+      console.error(`[bundle-opencc] missing or empty required declaration: ${p}`)
+      process.exit(1)
+    }
+  }
 }
 
 console.log(`[bundle-opencc] server: ${SERVER_OUT}`)

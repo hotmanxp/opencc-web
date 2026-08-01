@@ -1,0 +1,81 @@
+{
+  "//": "Mechanical declaration-emit tsconfig for the opencc-server subpath. Driven by scripts/bundle-opencc.ts. The main tsconfig.json/tsconfig.build.json excludes src/opencc-src/** so the server module — which lives under src/opencc-src/server/ per the AGENTS.md verbatim-vendor convention — is never typechecked by the regular tsc -b pass. This config reaches just the server module + the (vendor-tree-internal) compat/ types it imports, emits ONLY declaration files to a tmp dir, and lets bundle-opencc.ts copy the two server d.ts files into the real dist location. Hand-written d.ts drift is no longer possible because the .d.ts is mechanically derived from the source .ts on every build.",
+
+  "compilerOptions": {
+    "target": "ES2023",
+    "module": "ESNext",
+    "moduleResolution": "bundler",
+    "esModuleInterop": true,
+    "skipLibCheck": true,
+    "strict": true,
+    "noImplicitAny": false,
+    "jsx": "preserve",
+    "jsxImportSource": "react",
+
+    "noEmit": false,
+    "emitDeclarationOnly": true,
+    "declaration": true,
+    "declarationMap": false,
+    "sourceMap": false,
+
+    "outDir": "dist/.server-types-tmp",
+    "rootDir": "src",
+    "baseUrl": "src",
+    "paths": {
+      "src/*": ["./opencc-src/*"]
+    },
+
+    "composite": false,
+    "incremental": false
+  },
+
+  "include": [
+    "src/opencc-src/server/serverTypes.ts",
+    "src/opencc-src/server/index.ts"
+  ],
+
+  "exclude": [
+    "node_modules",
+    "dist",
+    "test",
+    "**/*.test.ts",
+    "src/opencc-src/assistant",
+    "src/opencc-src/bridge",
+    "src/opencc-src/buddy",
+    "src/opencc-src/cli",
+    "src/opencc-src/commands",
+    "src/opencc-src/components",
+    "src/opencc-src/context",
+    "src/opencc-src/coordinator",
+    "src/opencc-src/entrypoints",
+    "src/opencc-src/grpc",
+    "src/opencc-src/history.ts",
+    "src/opencc-src/intercept",
+    "src/opencc-src/keybindings",
+    "src/opencc-src/lineColumn",
+    "src/opencc-src/logger.ts",
+    "src/opencc-src/loop",
+    "src/opencc-src/main.tsx",
+    "src/opencc-src/PlanTool",
+    "src/opencc-src/plugins",
+    "src/opencc-src/queries",
+    "src/opencc-src/remote",
+    "src/opencc-src/scheduler",
+    "src/opencc-src/services",
+    "src/opencc-src/skills",
+    "src/opencc-src/state",
+    "src/opencc-src/task",
+    "src/opencc-src/Telemetry.tsx",
+    "src/opencc-src/tools",
+    "src/opencc-src/types/permissions.ts",
+    "src/opencc-src/utils",
+    "src/opencc-src/vendor",
+    "src/opencc-src/commands.ts",
+    "src/opencc-src/constants.ts",
+    "src/opencc-src/context.ts",
+    "src/opencc-src/cost-tracker.ts",
+    "src/opencc-src/costHook.ts",
+    "src/opencc-src/dialogLaunchers.tsx",
+    "src/opencc-src/global.d.ts"
+  ]
+}

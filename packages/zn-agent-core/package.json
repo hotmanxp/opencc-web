@@ -6,7 +6,10 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
     "./runtime": "./dist/runtime/index.js",
     "./transcript": "./dist/transcript/store.js",
     "./commands": "./dist/commands/index.js",
@@ -18,7 +21,10 @@
     "./opencc-core": "./dist/opencc-core.mjs",
     "./opencc-src/permissions": "./dist/opencc-src/types/permissions.js",
     "./opencc-src/server": "./dist/opencc-src/server/index.js",
-    "./opencc-server": "./dist/opencc-src/server/index.js",
+    "./opencc-server": {
+      "types": "./dist/opencc-src/server/index.d.ts",
+      "default": "./dist/opencc-src/server/index.js"
+    },
     "./compat/permissions": "./dist/compat/permissions.js"
   },
   "files": [
@@ -26,9 +32,10 @@
     "scripts/copy-runtime-assets.mjs"
   ],
   "scripts": {
-    "build": "node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && node scripts/copy-runtime-assets.mjs",
+    "build": "node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && tsc --noEmit -p tsconfig.contract-tests.json && node scripts/copy-runtime-assets.mjs",
     "dev": "tsc -b --watch",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc -b --noEmit && tsc --noEmit -p tsconfig.contract-tests.json",
+    "typecheck:contract-tests": "tsc --noEmit -p tsconfig.contract-tests.json",
     "test": "vitest run",
     "test:watch": "vitest",
     "verify": "tsx scripts/verify-imports.ts",
