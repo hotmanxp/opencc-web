@@ -29,17 +29,26 @@ let runtimeToolEvents: Array<Record<string, unknown>> = [
 ]
 vi.mock('../../src/server/services/agentRuntime.js', () => ({
   getRuntime: () => ({
-    run: (opts: any) => {
+    // Task 5: routes/agent.ts now invokes OpenccRuntime.query(input)
+    // instead of the legacy DefaultAgentRuntime.run(opts). The mock
+    // exposes `query` (the new shape) and keeps `run` as a no-op
+    // belt-and-suspenders fallback for any other consumer until Task 6
+    // deletes the legacy path.
+    query: (opts: any) => {
       lastRunOpts = opts
       return (async function* () {
         for (const ev of runtimeToolEvents) yield ev
       })()
     },
+    run: (_opts: any) => (async function* () {})(),
     abort: async () => {},
     listSessions: async () => [],
     readSession: async () => ({ version: 1, transcriptId: 'sess-1', meta: {} as any, messages: [] }),
+    readTranscript: async () => ({ version: 1, transcriptId: 'sess-1', meta: {} as any, messages: [] }),
+    getSession: async () => null,
     patchSession: async () => {},
     removeSession: async () => {},
+    shutdown: async () => {},
   }),
   getAskRegistry: () => ({ abortAll: () => {} }),
   getCurrentSessionId: () => 'sess-1',

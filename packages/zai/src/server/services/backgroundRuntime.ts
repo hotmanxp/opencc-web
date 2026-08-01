@@ -97,8 +97,13 @@ export function initBackgroundRuntime(): RestartAwareBackgroundRuntime {
   // hook. The wrapper (wrapWithJobStarted) increments the same counter on
   // dispatch and abortAll() resets it; onTaskStateChange here decrements
   // when a task reaches a terminal status.
+  //
+  // Task 5: `agentRuntime` now is the OpenccRuntime (which exposes
+  // `query`, not `run`); DefaultBackgroundRuntime's field is a structural
+  // subset. We only use `query` per attempt; any extra surface on the
+  // runtime object is ignored here.
   const inner = new DefaultBackgroundRuntime({
-    agentRuntime,
+    agentRuntime: agentRuntime as unknown as ConstructorParameters<typeof DefaultBackgroundRuntime>[0]['agentRuntime'],
     store,
     onTaskStateChange: (task: BackgroundTask) => {
       // 1) 把完成事件以 <task-notification> 形式回流到父 session (子 agent 任务)

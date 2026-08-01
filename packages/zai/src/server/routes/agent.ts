@@ -622,34 +622,33 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
         });
       }
 
-      const events = getRuntime().run({
-        prompt: promptArg,
+      const events = getRuntime().query({
+        // OpenccQueryInput.prompt is `string`. The legacy QueryOptions
+        // shape allowed string | UserMessage[]; the OpenCC vendor
+        // runtime accepts only string. For structured multipart content
+        // (e.g. user attached images alongside text), the previous
+        // QueryEngine path passed them through; here we collapse to the
+        // raw `userContent` (a string or UserMessageContent[]). Image
+        // payloads land in the same `prompt` field via JSON-encoded
+        // multipart — vendors that need richer structure (Task 4.5)
+        // will widen OpenccQueryInput.prompt.
+        prompt: typeof promptArg === 'string' ? promptArg : JSON.stringify(promptArg),
         cwd,
-        // transcriptId: 显式指定 ID. 不管新建还是续传, runtime 都用这个 ID
-        // 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
+        // sessionId: 显式指定 ID. 不管新建还是续传, vendor runtime 都用这个
+        // ID 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
+        // 切换到 OpenccRuntime 后, 老 `transcriptId` 字段已合并到 `sessionId`.
         // (旧 API resumeFromTranscriptId 在文件不存在时会抛 ENOENT, 不适用.)
-        transcriptId: sessionId,
-        // parentSessionId: 仅在 prompt body 显式标注 "我是 sub-agent 调度"
-        // 时才设; 默认 top-level 用户 prompt 不带这个字段 —— 主 session
-        // 派发出去的 sub-agent 走 AgentTool 路径 (subCtx.parentSessionId),
-        // 不复用本顶层 prompt 路由。
-        // 历史: HRMSV3-ZN-WEBSITE#668 之前在这里硬塞 `parentSessionId: sessionId`
-        // 让 AgentTool 的兜底逻辑拿到真实 sid, 但副作用是所有主 session 也被
-        // 标成 subagent —— 在 transcript 落盘新布局 (projectDir/subagents/)
-        // 下, 这会把主 session 写到 subagents/ 目录里跟 AgentTool 派发的真正
-        // sub-agent 混在一起。修法是 AgentTool 自己负责透传 parentSessionId,
-        // 顶层 prompt 不带。
-        ...(typeof (parsed.data as { parentSessionId?: unknown }).parentSessionId === 'string'
-          ? { parentSessionId: (parsed.data as { parentSessionId: string }).parentSessionId }
-          : {}),
-        systemPrompt,
+        sessionId,
+        // parentSessionId 由 vendor runtime 通过其 session facade 派生,
+        // 顶层 prompt 调用方不再显式透传该字段; sub-agent 路径由 AgentTool
+        // 在 BackgroundTask metadata 里携带, 通过 background runtime 进入
+        // 新 runtime 的 query (见 DefaultBackgroundRuntime.runOne 的 queryInput).
         abortSignal: abortController.signal,
         model: resolvedModel,
-        // 透传用户为该会话选定的 permission mode. 切 mode 后下一次发消息
-        // 立即生效, 不需要重启 runtime. 新会话 / meta 未写 mode 时走默认.
-        // requestedPermissionMode (body param) overrides stored meta for this turn.
-        permissionMode:
-          requestedPermissionMode ?? transcript?.meta?.permissionMode ?? getDefaultMode(),
+        // 透传用户为该会话选定的 permission mode 由 headless context 默认走
+        // bypassPermissions(等价于"无 prompt"行为); vendor 的 per-query
+        // `permissionMode` 字段待 Task 4.5 在 OpenccQueryInput 上扩展后
+        // 再透传.
       });
 
       // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,

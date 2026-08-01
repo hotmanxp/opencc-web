@@ -9,7 +9,7 @@ let runtimeEvents: Array<Record<string, unknown>> = [
 ]
 
 const mockRuntime = {
-  run: (opts: any) => {
+  query: (opts: any) => {
     lastRunOpts = opts
     return (async function* () {
       for (const ev of runtimeEvents) yield ev
@@ -84,11 +84,11 @@ describe('renderTaskNotificationMessage', () => {
 })
 
 describe('SubagentNotifier.handle', () => {
-  test('completed + parentSessionId → 触发 runtime.run,transcriptId=parentSessionId', async () => {
+  test('completed + parentSessionId → 触发 runtime.query,sessionId=parentSessionId', async () => {
     const n = new SubagentNotifier({ getRuntime: () => mockRuntime as any })
     await n.handle(makeTask({ status: 'completed', resultText: 'hi' }))
     expect(lastRunOpts).not.toBeNull()
-    expect(lastRunOpts.transcriptId).toBe('sess-parent')
+    expect(lastRunOpts.sessionId).toBe('sess-parent')
     expect(lastRunOpts.prompt).toContain('<task-notification>')
     expect(lastRunOpts.prompt).toContain('<result>hi</result>')
   })
@@ -130,10 +130,10 @@ describe('SubagentNotifier.handle', () => {
     expect(lastRunOpts).toBeNull()
   })
 
-  test('runtime.run 抛错 → handle 不抛,仅 console.warn', async () => {
+  test('runtime.query 抛错 → handle 不抛,仅 console.warn', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const broken = {
-      run: () => {
+      query: () => {
         throw new Error('runtime blew up')
       },
     }
