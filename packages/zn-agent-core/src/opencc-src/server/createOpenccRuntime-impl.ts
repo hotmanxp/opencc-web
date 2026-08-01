@@ -5,6 +5,7 @@ import { createSessionFacadeImpl } from './sessionFacade-impl.js'
 import { QueryEngine } from '../QueryEngine.js'
 import { FileStateCache } from '../utils/fileStateCache.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
+import { productionDeps } from '../query/deps.js'
 
 export async function createOpenccRuntimeImpl(options) {
   const cwd = options.defaultCwd ?? process.cwd()
@@ -29,6 +30,27 @@ export async function createOpenccRuntimeImpl(options) {
       }
     : undefined
 
+  // Optional deps override: when zai provides its own `callModel`
+  // (a wrapper around `createAnthropicModelCaller`), forward it as
+  // `deps.callModel` so the headless runtime routes model calls through
+  // the user's actual provider profile instead of the vendor default
+  // `queryModelWithStreaming` (which reads `ANTHROPIC_API_KEY` from the
+  // zai-server process env). The OTHER deps (microcompact, autocompact,
+  // uuid) MUST come from `productionDeps()` — `defaultQuery` invokes
+  // `deps.uuid()`, `deps.microcompact()`, `deps.autocompact()` directly
+  // and would throw `TypeError: deps.X is not a function` if we passed
+  // a partial object (this was the root cause of the original
+  // `deps.uuid is not a function` crash; fix merges productionDeps with
+  // the callModel override).
+  const engineDeps = options.callModel
+    ? {
+        ...productionDeps(),
+        callModel: async function* (req: any) {
+          yield* options.callModel!(req)
+        },
+      }
+    : undefined
+
   const engine = new QueryEngine({
     cwd,
     tools: ctx.tools,
@@ -41,6 +63,7 @@ export async function createOpenccRuntimeImpl(options) {
     readFileState: new FileStateCache(100, 25 * 1024 * 1024),
     abortController,
     query: customQuery,
+    deps: engineDeps as any,
   })
 
   function eventFor(sessionId, value) {

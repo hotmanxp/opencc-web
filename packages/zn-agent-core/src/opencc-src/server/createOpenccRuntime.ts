@@ -75,6 +75,24 @@ export type { OpenccRuntime } from './serverTypes.js'
 export type CreateOpenccRuntimeOptions = OpenccRuntimeOptions & {
   modelCaller?: (request: unknown) => AsyncIterable<unknown>
   query?: (params: unknown) => AsyncIterable<unknown>
+  /**
+   * Optional override for the model-calling dependency forwarded to
+   * `defaultQuery(params)`. Pass a zai-style
+   * `createAnthropicModelCaller()` factory to route the headless server
+   * through the user's actual provider profile (Anthropic / OpenAI-compat
+   * / etc.) instead of the vendor default `queryModelWithStreaming` (which
+   * reads `ANTHROPIC_API_KEY` from the zai-server process env and has no
+   * awareness of `~/.claude.json` provider profiles). The factory
+   * signature matches `vendor queryModelWithStreaming` so the vendor
+   * `for await` loop yields the same event stream without translation.
+   */
+  callModel?: (
+    req: import('../services/api/claude.js').queryModelWithStreaming extends (
+      a: infer R,
+    ) => unknown
+      ? R
+      : never,
+  ) => AsyncIterable<unknown>
 }
 
 export const createOpenccRuntime = async (options: CreateOpenccRuntimeOptions): Promise<OpenccRuntime> => {

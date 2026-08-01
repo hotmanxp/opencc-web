@@ -159,6 +159,17 @@ export type QueryEngineConfig = {
     store: Message[],
   ) => { messages: Message[]; executed: boolean } | undefined
   query?: typeof defaultQuery
+  /**
+   * Optional dependency override forwarded to `defaultQuery(params)`. The
+   * server runtime uses this to swap `callModel` for a zai-side
+   * `createAnthropicModelCaller` so the headless server can stream from the
+   * user's actual provider profile (Anthropic / OpenAI-compat / etc.)
+   * instead of the vendor default `queryModelWithStreaming` (which reads
+   * `ANTHROPIC_API_KEY` from env at the zai-server process level and has no
+   * awareness of `~/.claude.json` provider profiles). All other deps fall
+   * back to `productionDeps()` so the env-only path is unchanged.
+   */
+  deps?: import('./query/deps.js').QueryDeps
 }
 
 /**
@@ -691,6 +702,11 @@ export class QueryEngine {
       onAutoCompactTrackingChange: tracking => {
         this.autoCompactTracking = tracking
       },
+      // Forward the server-runtime's deps override (callModel, etc.) so
+      // the headless server can route through zai's modelCaller. When
+      // undefined, `defaultQuery` falls back to `productionDeps()` which
+      // reads ANTHROPIC_API_KEY from process.env.
+      deps: this.config.deps,
     })) {
       // Record assistant, user, and compact boundary messages
       if (

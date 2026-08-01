@@ -240,6 +240,20 @@ export async function initAgentRuntime(cwd: string): Promise<void> {
     const { createOpenccRuntime: factory } = await import(
       '@zn-ai/zn-agent-core/opencc-server'
     )
+    // zai's `createAnthropicModelCaller` returns a zai-ModelCaller shaped
+    // function (req → AsyncGenerator<StreamEvent>). The headless
+    // QueryEngine consumes a vendor-shape `callModel` (input has
+    // {messages, systemPrompt, thinkingConfig, tools, signal, options}).
+    // `wrapZaiModelCallerAsCallModel` adapts the input shape and
+    // passes the stream events through (zai already yields
+    // vendor-compatible snake_case StreamEvent).
+    const { createAnthropicModelCaller } = await import(
+      './modelCaller.js'
+    )
+    const { wrapZaiModelCallerAsCallModel } = await import(
+      './modelCallerAdapter.js'
+    )
+    const modelCaller = createAnthropicModelCaller()
     runtime = await factory({
       dataDir,
       runtimeId: 'zai-server',
@@ -247,6 +261,17 @@ export async function initAgentRuntime(cwd: string): Promise<void> {
       defaultModel:
         process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
         ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
+      // zai-server: skip MCP bootstrap so the headless runtime comes
+      // up even if the user's `~/.claude.json` lists MCP servers that
+      // block the connect call. The QueryEngine's per-query MCP
+      // refresh + the `/mcp` slash command reconnect on demand.
+      connectMcp: false,
+      // Route model calls through zai's `createAnthropicModelCaller`
+      // so the headless server uses the user's actual provider profile
+      // (`~/.claude.json` providerProfiles or `~/.zai/settings.json`
+      // env.ANTHROPIC_*), not the vendor default which reads only
+      // `process.env.ANTHROPIC_API_KEY`.
+      callModel: wrapZaiModelCallerAsCallModel(modelCaller),
     })
     const cleanup = () => {
       if (runtime) void runtime.shutdown()
