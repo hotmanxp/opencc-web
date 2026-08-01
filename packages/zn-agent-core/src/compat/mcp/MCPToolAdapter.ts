@@ -116,16 +116,19 @@ function adaptOne(
         (s: any) => s.name === serverName,
       )
       const timeoutMs = serverSpec?.callTimeoutMs ?? 30_000
+      // zai patch: zai's compat tool call sites don't always populate
+      // `ctx.abortSignal` (e.g. when a sub-agent reaches the tool
+      // through the productionDeps-routed translateCallModel path),
+      // but `AbortSignal.any` throws if any input is `undefined`.
+      // Build the list defensively — at minimum we always have the
+      // timeout, and we include the caller's signal if it's there.
+      const signals: AbortSignal[] = [AbortSignal.timeout(timeoutMs)]
+      if (ctx.abortSignal instanceof AbortSignal) signals.push(ctx.abortSignal)
       try {
         const result = await client.callTool(
           { name: t.name, arguments: input as Record<string, unknown> },
           CallToolResultSchema,
-          {
-            signal: AbortSignal.any([
-              ctx.abortSignal,
-              AbortSignal.timeout(timeoutMs),
-            ]),
-          },
+          { signal: AbortSignal.any(signals) },
         )
         const content = (result as { content?: Array<{ type: string; text?: string }> }).content ?? []
         const text = content
