@@ -5,9 +5,9 @@
 本仓库聚焦两件事:
 
 - **`@zn-ai/zai`** — 本地运行的 Web 管理平台(仪表盘 / 工具管理 / 资源浏览 / 登录管理 / 配置编辑 / Agent 对话)
-- **`@zn-ai/zai-agent-core`** — 从 OpenCC 抽离的进程内 Agent Runtime(对话 / 工具 / Skills / MCP / transcript)
+- **`@zn-ai/zn-agent-core`** — 从 OpenCC 抽离的进程内 Agent Runtime(对话 / 工具 / Skills / MCP / transcript)
 
-> 历史背景:本仓库早期承担 `zn-agent-assets` 资源库的载体,后转型为 zai + zai-agent-core 的 monorepo,资源仓库已拆分独立维护。
+> 历史背景:本仓库早期承担 `zn-agent-assets` 资源库的载体,后转型为 zai + zn-agent-core 的 monorepo,资源仓库已拆分独立维护。
 
 ---
 
@@ -23,13 +23,14 @@ opencc-web/
 │   │   ├── src/web/src/           # React 前端(pages + components + store)
 │   │   └── test/                  # Vitest 测试
 │   │
-│   └── zai-agent-core/            # @zn-ai/zai-agent-core — Agent Runtime
-│       ├── src/opencc-internals/  # 从 OpenCC 同步过来的运行时源码
+│   └── zn-agent-core/            # @zn-ai/zn-agent-core — Agent Runtime
+│       ├── src/opencc-src/        # 从 OpenCC 同步过来的运行时源码(un-stripped)
+│       ├── src/compat/            # compat shim 层(plugins / background / transcript / memory / ... )
 │       ├── src/runtime/           # query / DefaultAgentRuntime / streamAdapter
 │       ├── src/mcp/               # MCPClientPool + MCPToolAdapter
 │       ├── src/tools/             # 工具实现(Bash / Read / Write / ...)
 │       ├── src/transcript/        # JSON 文件 transcript 存储
-│       └── scripts/sync-from-opencc.ts
+│       └── scripts/copyFromOpencc.mjs
 │
 ├── scripts/
 │   └── zn-ai (zn-ai.bat)          # zn-env 环境管理脚本(检测 nova/opencc/opencode 等 CLI 安装状态)
@@ -69,8 +70,8 @@ opencc-web/
 # 1. 安装依赖(workspace 内一次性装齐)
 pnpm install
 
-# 2. 构建 @zn-ai/zai-agent-core(zai 依赖其 dist/)
-pnpm --filter @zn-ai/zai-agent-core build
+# 2. 构建 @zn-ai/zn-agent-core(zai 依赖其 dist/)
+pnpm --filter @zn-ai/zn-agent-core build
 
 # 3. 构建 @zn-ai/zai(后端 tsc + 前端 vite)
 pnpm --filter @zn-ai/zai build
@@ -106,7 +107,7 @@ CLI 子命令(由 `commander` 注册):
 ### 跑 MCP 冒烟测试
 
 ```bash
-pnpm --filter @zn-ai/zai-agent-core build
+pnpm --filter @zn-ai/zn-agent-core build
 node examples/mcp-smoke/smoke.mjs
 ```
 
@@ -142,7 +143,7 @@ packages/zai/src/web/src/pages/   # Dashboard / Tools / Resources / Login / Conf
 
 ### Agent 对话
 
-Web 管理平台内置的 Agent 交互界面,直接消费 `@zn-ai/zai-agent-core` 暴露的流式事件。
+Web 管理平台内置的 Agent 交互界面,直接消费 `@zn-ai/zn-agent-core` 暴露的流式事件。
 
 **入口**:`packages/zai/src/web/src/pages/Agent.tsx`(侧栏会话列表 + 主对话区 + 输入框),`cwd` 来自服务端启动参数 `app.locals.instanceContext.cwd`。
 
@@ -217,8 +218,8 @@ Web 管理平台内置的 Agent 交互界面,直接消费 `@zn-ai/zai-agent-core
 | `packages/zai/src/web/src/components/AgentInputBox.tsx` | 输入框 + slash + 粘贴/拖拽 |
 | `packages/zai/src/web/src/components/QuestionCard.tsx` | AskUserQuestion 渲染 |
 | `packages/zai/src/web/src/components/toolRenderers/` | 工具级 renderer 注册表 |
-| `packages/zai-agent-core/src/runtime/queryLoop.ts` | runtime 主循环 |
-| `packages/zai-agent-core/src/runtime/toolExecution.ts` | 工具执行 + AskUserQuestion 桥接 |
+| `packages/zn-agent-core/src/runtime/queryLoop.ts` | runtime 主循环 |
+| `packages/zn-agent-core/src/runtime/toolExecution.ts` | 工具执行 + AskUserQuestion 桥接 |
 
 **已知限制**:
 
@@ -229,13 +230,13 @@ Web 管理平台内置的 Agent 交互界面,直接消费 `@zn-ai/zai-agent-core
 
 详见 `packages/zai/README.md`。
 
-### `@zn-ai/zai-agent-core`
+### `@zn-ai/zn-agent-core`
 
-**版本**: 0.1.0 · **类型**: public(npm: `@zn-ai/zai-agent-core`,发到内部 Nexus)
+**版本**: 0.1.0 · **类型**: public(npm: `@zn-ai/zn-agent-core`,发到内部 Nexus)
 
 **用法**:
 ```ts
-import { DefaultAgentRuntime } from '@zn-ai/zai-agent-core'
+import { DefaultAgentRuntime } from '@zn-ai/zn-agent-core'
 
 const runtime = new DefaultAgentRuntime({ dataDir: '~/.zai' })
 const stream = runtime.run({ prompt: '你好', cwd: '/project' })
@@ -245,16 +246,16 @@ for await (const event of stream) {
 ```
 
 **架构**:
-- `src/opencc-internals/` — 从 OpenCC 同步过来的内部模块(TUI 已剔除)
+- `src/opencc-src/` — 从 OpenCC 同步过来的运行时源码(un-stripped 完整副本,Bun-native)
+- `src/compat/` — compat shim 层(plugins / background / transcript / memory / cwdStore / openccAdapter ...)
 - `src/runtime/` — runtime facade(`query()`,`DefaultAgentRuntime`,`streamAdapter`)
 - `src/transcript/` — JSON 文件 transcript 持久化
-- `src/data/` — dataDir 路径解析
 - `src/mcp/` — MCP 接入层(`MCPClientPool` / `MCPToolAdapter` / `mcpInstructions` / `permission-matcher`)
 
 **与上游 OpenCC 同步**:
 ```bash
-pnpm --filter @zn-ai/zai-agent-core sync-from-opencc --dry-run   # 预览
-pnpm --filter @zn-ai/zai-agent-core sync-from-opencc --apply     # 落地
+pnpm --filter @zn-ai/zn-agent-core copy-from-opencc --dry-run   # 预览
+pnpm --filter @zn-ai/zn-agent-core copy-from-opencc --apply     # 落地
 ```
 
 **测试**:
@@ -263,7 +264,7 @@ pnpm test        # 单元 + 集成
 pnpm test:e2e    # 真实 LLM(需凭据)
 ```
 
-详见 `packages/zai-agent-core/README.md`。
+详见 `packages/zn-agent-core/README.md`。
 
 ### `scripts/zn-ai`(`zn-env`)
 
@@ -296,9 +297,9 @@ MCP 集成冒烟测试示例,纯 Node + `@modelcontextprotocol/sdk`,无需打包
 # 全 monorepo 测试(vitest 会按 vitest.config.ts 的 include 抓包)
 pnpm test
 
-# 单独跑 zai 或 zai-agent-core
+# 单独跑 zai 或 zn-agent-core
 pnpm --filter @zn-ai/zai test
-pnpm --filter @zn-ai/zai-agent-core test
+pnpm --filter @zn-ai/zn-agent-core test
 
 # 监听模式
 pnpm test:watch
@@ -349,7 +350,7 @@ pnpm test:watch
 | `AGENTS.md` | 给 AI agent 看的项目说明(目录结构、构建、提交规范、平台差异) |
 | `CONTRIBUTING.md` | 贡献指南(沿用资源库时期的格式,新增资产时参考) |
 | `packages/zai/README.md` | zai 包级文档 |
-| `packages/zai-agent-core/README.md` | zai-agent-core 包级文档 |
+| `packages/zn-agent-core/README.md` | zn-agent-core 包级文档 |
 
 ---
 
@@ -366,7 +367,7 @@ chore: 工具链 | style: 格式 | test: 测试
 
 ## 平台差异(资源产出目标)
 
-zai / zai-agent-core 不是资源安装工具,但资源产出会落到下列目录:
+zai / zn-agent-core 不是资源安装工具,但资源产出会落到下列目录:
 
 | 资源 | Nova CLI | OpenCode | OpenCC |
 |------|----------|----------|--------|

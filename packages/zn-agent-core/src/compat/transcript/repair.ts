@@ -1,12 +1,21 @@
 import type { AnthropicMessage, ContentBlock, TranscriptMessage } from './types.js'
 
 /**
- * Structural type that accepts any TranscriptStore impl — the new package's
- * `compat/transcript/store.ts` and the old `@zn-ai/zai-agent-core` runtime's
- * `TranscriptStore` both expose `mutateMessages` with compatible signatures,
- * but TypeScript treats their private `dataDir` fields as distinct nominal
- * types. Using a duck-type here lets zai callers pass either during the
- * dual-track migration window.
+ * Transcript repair helpers.
+ *
+ * Walks a stored transcript and rewrites the parts that would otherwise
+ * trip the Anthropic protocol on resume:
+ *  - `tool_use` blocks orphaned by a truncated `tool_result` get a
+ *    synthesized user-side stub so the next prompt round can match IDs
+ *  - duplicate `tool_use_id` pairs (e.g. caused by retried writes) are
+ *    deduplicated against the last-seen block
+ *  - messages whose UUID is referenced by no live block are dropped
+ *    from the report (and the dropped list) so the store can GC them
+ *
+ * `RepairTargetStore` is a duck-typed shim over `TranscriptStore` so the
+ * repair routine can run against any store implementation sharing the
+ * `mutateMessages(sessionId, mutator, pathOpts)` signature, without
+ * pulling in transitive type deps from concrete subclasses.
  */
 type RepairTargetStore = {
   mutateMessages<T>(

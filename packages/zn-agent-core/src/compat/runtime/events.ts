@@ -1,12 +1,18 @@
 /**
- * RuntimeEvent contract — ported verbatim from
- * `@zn-ai/zai-agent-core/src/runtime/events.ts` as a compat shim.
+ * RuntimeEvent contract.
  *
- * The new package does not yet have its own runtime event schema (opencc's
- * internal RuntimeEvent lives elsewhere and doesn't match zai's surface).
- * Until Batch 2/3 lands the unified event types, this verbatim port gives
- * background/runtime shims a stable ErrorCategory + RuntimeEvent they can
- * type against without depending on opencc's internal types.
+ * The discriminated union `RuntimeEvent` plus the `ErrorCategory` taxonomy
+ * that the runtime, background subsystem, and SSE translator all type
+ * against. Every consumer — `openccAdapter`, `wrapWithZaiMeta`,
+ * `routes/agent.ts` `translateRuntimeEvents`, and the BackgroundRuntime
+ * event mapper — produces values matching this shape so the same event
+ * stream can flow through agent prompts and background tasks without
+ * per-call site adaptation.
+ *
+ * The `ErrorCategory` union is split (overloaded / rate_limit / server /
+ * auth) so retry policy in `BackgroundRuntime.runOne` can route 529
+ * differently from 5xx; `llm_provider` is kept as a deprecated catch-all
+ * for backward compatibility with older callers.
  */
 
 export type ErrorCategory =

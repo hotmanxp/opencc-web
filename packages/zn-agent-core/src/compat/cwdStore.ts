@@ -7,12 +7,6 @@
  *
  * 仅内存,不持久化:进程崩溃 = session 重启 = transcript 重跑,cwd 自然归零。
  *
- * NOTE: this implementation is the zai-native contract used by both the old
- * (`@zn-ai/zai-agent-core/runtime`) and new (`@zn-ai/zn-agent-core/runtime`)
- * packages. The shape MUST match exactly: callers (`packages/zai/src/server/...`)
- * import `CwdStore` from both packages during the dual-track migration window,
- * and any divergence surfaces as a TypeScript error at the import site.
- *
  * The `claude-<taskId>-cwd` trailer path (opencc's actual filename) lives in
  * `readTrailer` for any consumer that wants to read it directly; the regular
  * `get`/`set` API matches what callers expect.

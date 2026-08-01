@@ -1,8 +1,16 @@
 /**
- * Hook orchestrator — ported verbatim from
- * `@zn-ai/zai-agent-core/src/plugins/HookRunner.ts` as a compat shim.
+ * Hook orchestrator.
  *
- * No path adjustments: this file only imports from sibling `./types.js`.
+ * `HookRunner` is the bridge between plugin-declared hooks (`PluginHook[]`)
+ * and the `HookExecutor` that actually invokes them (child-process or
+ * in-process). It serializes a single hook chain per event, applies the
+ * default 30s per-hook timeout (overridable via `timeoutMs`), and treats
+ * `blocked: true` from a `PreToolUse` or `Stop` hook as authoritative
+ * (the rest of the chain short-circuits).
+ *
+ * `DefaultPluginRuntime` uses this class as the entry point for the eight
+ * hook events declared in `PluginHookEvent`; test code can inject a fake
+ * `HookExecutor` to drive the chain without spawning processes.
  */
 
 import type {

@@ -1,9 +1,14 @@
 /**
- * Plugin manifest reader + path resolver — ported verbatim from
- * `@zn-ai/zai-agent-core/src/plugins/manifest.ts` as a compat shim.
+ * Plugin manifest reader + path resolver.
  *
- * No path adjustments: this file only imports from sibling
- * `./types.js` and `./errors.js`.
+ * `readPluginManifest` parses `<plugin>/.claude-plugin/plugin.json` into a
+ * `PluginManifest` (or a `PluginLoadError` covering not-found, parse
+ * failure, invalid manifest). `resolvePluginComponentPath` and friends
+ * keep plugin paths inside the plugin's declared root so a misbehaving
+ * manifest can't reference files outside its sandbox.
+ *
+ * Pure I/O — no plugin runtime state, no caching. The registry layer
+ * (`registry.ts`) is responsible for caching the parsed snapshot.
  */
 
 import { realpath, readFile, stat } from 'fs/promises'

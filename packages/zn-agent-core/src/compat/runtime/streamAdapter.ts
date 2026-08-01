@@ -1,14 +1,19 @@
 /**
  * streamAdapter — RuntimeEvent helpers used by openccAdapter.
  *
- * Ported from `@zn-ai/zai-agent-core/src/runtime/streamAdapter.ts`. Provides:
- *  - wrapWithZaiMeta: enriches an opencc stream with zai meta fields
- *  - toRuntimeErrorEvent: convert any thrown value into a runtime.error event
- *  - toAbortedEvent: emit a runtime.aborted event
- *  - classifyError: best-effort ErrorCategory from error.message text
+ * Provides the small set of helpers that wrap an opencc vendor event
+ * stream into the zai-facing `RuntimeEvent` shape:
+ *  - `wrapWithZaiMeta`: enriches each event with `eventId`, `sessionId`,
+ *    `ts`, and a `turnIndex` that increments on `message_stop`
+ *  - `toRuntimeErrorEvent`: convert any thrown value into a `runtime.error`
+ *  - `toAbortedEvent`: emit a `runtime.aborted`
+ *  - `classifyError`: best-effort `ErrorCategory` from `error.message`
+ *    text (used when the upstream didn't tag the error)
  *
- * Uses module-local eventCounter so multiple consumers in the same process
- * don't collide on eventId. Mirrors the upstream implementation.
+ * `eventCounter` is module-local so multiple consumers in the same
+ * process don't collide on `eventId`; the front-end uses
+ * `${sendSeq}:${turnIndex}:${textSegmentRev}:${blockIndex}:kind` as the
+ * stream-block key and depends on uniqueness of the meta fields.
  */
 
 import type { RuntimeEvent, RuntimeErrorEvent, RuntimeAbortedEvent } from './events.js'

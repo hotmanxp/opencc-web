@@ -1,9 +1,12 @@
 /**
- * Plugin load error factories — ported verbatim from
- * `@zn-ai/zai-agent-core/src/plugins/errors.ts` as a compat shim.
+ * Plugin load error factories.
  *
- * No path adjustments: this file only imports from the sibling
- * `./types.js`, which lands in the same compat directory.
+ * Pure factory helpers that build fully-populated `PluginLoadError` objects
+ * so callers can `throw` or `return` them directly. The `code` field is a
+ * string literal union over the known plugin-load failure modes (manifest
+ * not found / parse failure / duplicate paths / path outside config root /
+ * etc.). Manifest readers and path resolvers consume these factories; the
+ * rest of the plugin runtime never sees raw errors from this file.
  */
 
 import type {

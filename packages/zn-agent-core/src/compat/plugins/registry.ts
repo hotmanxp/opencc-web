@@ -1,31 +1,25 @@
 /**
- * Plugin registry — ported verbatim from
- * `@zn-ai/zai-agent-core/src/plugins/registry.ts` as a compat shim.
+ * Plugin registry.
  *
- * Path adjustments vs. the original:
- *   - `import { loadOpenccPluginCandidates } from './sources/opencc.js'`
- *     → inlined here as `loadOpenccPluginCandidatesImpl`. The real
- *     `compat/plugins/sources/opencc.ts` would split this out; we keep
- *     it inline until plugins get a second source of complexity.
- *   - `import { loadPluginSkills } from './components/skills.js'`
- *     → inlined here as `loadPluginSkillsImpl`. Same rationale.
- *   - `loadZaiPluginCandidates`, `loadPluginCommands`, `loadPluginAgents`,
- *     `loadPluginMcpServers`, `loadPluginHooks` remain no-op pass-throughs
- *     because zai-server only consumes the opencc source for skills.
+ * Hosts `PluginRegistry` (the immutable snapshot cache) and
+ * `DefaultPluginRuntime` (the load coordinator that turns on-disk plugin
+ * layouts into a `PluginSnapshot` consumed by zai-server).
  *
- * What `loadOpenccPluginCandidates` does:
- *   - Walks `<configDir>/plugins/cache/<marketplace>/<plugin>/<version>/`
- *     (the layout Claude Code uses for installed plugins).
- *   - Reads `<plugin>/.claude-plugin/plugin.json` for the manifest.
- *   - Returns a `PluginCandidate` per plugin. The "best" version is the
- *     highest semver-like directory under each plugin name.
+ * `loadOpenccPluginCandidates` walks `<configDir>/plugins/cache/<marketplace>/
+ * <plugin>/<version>/` (Claude Code's installed-plugin layout), reads each
+ * `.claude-plugin/plugin.json`, and emits a `PluginCandidate` — highest
+ * semver-like directory per plugin name wins.
  *
- * What `loadPluginSkills` does:
- *   - Walks `<plugin-root>/skills/<skill-name>/SKILL.md` for each plugin.
- *   - Parses frontmatter via `parseSkillFrontmatter` (same parser the
- *     disk-loaded skills use, so the `<skills>` block format is identical).
- *   - Pushes `LoadedSkill` records into `snapshot.skills` with `source:
- *     'plugin'` so callers can distinguish from disk-loaded skills.
+ * `loadPluginSkills` walks each plugin's `skills/<skill-name>/SKILL.md`,
+ * runs them through the same frontmatter parser disk-loaded skills use,
+ * and pushes `LoadedSkill` records into `snapshot.skills` with
+ * `source: 'plugin'` so callers can distinguish them from disk skills.
+ *
+ * zai-server only consumes the opencc plugin source for skills; the other
+ * loaders (`loadZaiPluginCandidates`, `loadPluginCommands`,
+ * `loadPluginAgents`, `loadPluginMcpServers`, `loadPluginHooks`) are kept
+ * as no-op pass-throughs and will be split into a sibling module if a
+ * second source of plugin complexity shows up.
  */
 
 import { readdir, readFile } from 'node:fs/promises'

@@ -1,11 +1,15 @@
 /**
- * Background runtime types — ported verbatim from
- * `@zn-ai/zai-agent-core/src/runtime/background/types.ts`.
+ * Background runtime types.
  *
- * Compat shim lives under `compat/background/` so that zai's existing
- * `import { ... } from '@zn-ai/zai-agent-core'` (still aliased to the new
- * `@zn-ai/zn-agent-core` package via tsconfig paths in the dev monorepo)
- * keeps resolving without rewrites.
+ * Defines the public contract for background task records consumed by zai's
+ * task system: `TaskStatus` lifecycle, `DispatchInput` (the shape zai-server's
+ * `POST /api/tasks` accepts), `BackgroundTask` (the persisted record), and
+ * `TaskEvent` (the SSE-streamed event envelope).
+ *
+ * `metadata.parentSessionId` is the bridge that lets a sub-agent's terminal
+ * event bubble up to the parent session via `SubagentNotifier` — without it,
+ * `<task-notification>` injection falls back to `'sess-unknown'` and the
+ * notification silently drops.
  */
 
 export type TaskStatus = 'queued' | 'running' | 'completed' | 'failed' | 'cancelled'

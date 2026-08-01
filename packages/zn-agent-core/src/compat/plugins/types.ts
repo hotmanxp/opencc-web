@@ -1,25 +1,15 @@
 /**
- * Plugin runtime type contracts — ported verbatim from
- * `@zn-ai/zai-agent-core/src/plugins/types.ts` as a compat shim.
+ * Plugin runtime type contracts.
  *
- * Path adjustments vs. the original:
- *   - `import type { LoadedSkill } from '../runtime/skills/types.js'`
- *     → `import type { LoadedSkill } from '../runtime/skills-types.js'`
- *     (compat-local placeholder; Batch 3 will land a real skills/types.ts
- *     in compat/runtime/skills/ and replace this stub.)
- *   - `import type { AgentDefinition } from '../tools/AgentTool/loadAgentsDir.js'`
- *     → structural inline alias below (`AgentDefinition` was a vendor
- *     union-type that pulled in transitive deps from the un-stripped
- *     vendor copy; we keep this file's project reference clean while
- *     consumers stay type-compatible with the actual runtime shape
- *     returned by compat/runtime/buildOpenccQueryParams.ts loadAgentDefinitions).
- *   - `import type { McpServerSpec } from '../mcp/types.js'`
- *     → `import type { McpServerSpec } from '../mcp/types.js'`
- *     (compat/mcp/types.ts already exists from Batch 2b.)
+ * Public surface of the plugin runtime: `PluginManifest`, `PluginSnapshot`,
+ * `PluginLoadError`, `HookExecutor`, `PluginHook`, `PluginRuntime`,
+ * `PluginRuntimeConfig`, and the supporting enum-like unions
+ * (`PluginComponent`, `PluginSourceName`).
  *
- * `PluginRuntime` and `PluginRuntimeConfig` are real exports from this
- * file now. The placeholder declarations in `compat/runtime/types.ts`
- * will be replaced with imports from this file in Batch 2c.
+ * Consumers (`DefaultPluginRuntime`, `HookRunner`, `createDefaultHookExecutor`,
+ * `resolveOpenccConfigDir`, the manifest reader, the path resolver) type
+ * against these symbols so the snapshot/cache/hook pipeline stays consistent
+ * across opencc vendor and zai-native plugin sources.
  */
 
 import type { LoadedSkill } from '../runtime/skills-types.js'

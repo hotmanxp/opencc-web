@@ -1,8 +1,14 @@
 /**
- * Plugin path resolution helpers — ported verbatim from
- * `@zn-ai/zai-agent-core/src/plugins/paths.ts` as a compat shim.
+ * Plugin path resolution helpers.
  *
- * No path adjustments: this file only depends on `node:path`.
+ * `resolveOpenccConfigDir` is a pure function (no filesystem I/O, no
+ * implicit `process.env` reads) that picks the OpenCC plugin root from,
+ * in priority order: `opts.configDir`, `OPENCC_CONFIG_DIR`, `CLAUDE_CONFIG_DIR`,
+ * or `undefined` (caller decides — typically `~/.claude`).
+ *
+ * Inject `opts.env` for deterministic testing. The path resolvers used
+ * by `manifest.ts` (per-component path guards) live here so the rule
+ * "plugin paths must stay inside the plugin root" has one source of truth.
  */
 
 import { join } from 'node:path'

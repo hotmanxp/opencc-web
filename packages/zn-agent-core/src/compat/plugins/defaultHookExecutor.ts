@@ -1,9 +1,17 @@
 /**
- * Default child-process hook executor — ported verbatim from
- * `@zn-ai/zai-agent-core/src/plugins/defaultHookExecutor.ts` as a
- * compat shim.
+ * Default child-process hook executor.
  *
- * No path adjustments: this file only imports from sibling `./types.js`.
+ * `createDefaultHookExecutor` spawns a child process for each hook,
+ * feeding the hook event JSON on stdin and reading the parsed JSON
+ * response from stdout. Honors `timeoutMs` per hook (defaults to
+ * `DEFAULT_HOOK_TIMEOUT_MS` from `HookRunner.ts`) and treats a non-zero
+ * exit code or a missing response as `HookResult.blocked = false` plus
+ * a captured stderr message in `HookResult.error`.
+ *
+ * `tokenizeCommand` is deliberately minimal: handles double-quoted
+ * segments only, no env expansion, no globbing, no backticks — plugin
+ * authors who need richer syntax must ship a wrapper script. This keeps
+ * the executor's behavior predictable across OSes and hermetic for tests.
  */
 
 import { spawn } from 'node:child_process'
