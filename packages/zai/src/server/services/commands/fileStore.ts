@@ -6,7 +6,7 @@ import { createRequire } from 'node:module'
 // yaml 解析走 agent-core 的 js-yaml(其 package.json 已声明为依赖),
 // 通过 createRequire 跨包引用 node_modules,避免新增依赖。
 const requireFromAgentCore = createRequire(
-  new URL('../../../../../zai-agent-core/', import.meta.url).pathname + 'package.json',
+  new URL('../../../../../zn-agent-core/', import.meta.url).pathname + 'package.json',
 )
 const yaml = requireFromAgentCore('js-yaml') as { load(s: string): unknown }
 

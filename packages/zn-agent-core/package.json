@@ -13,20 +13,23 @@
     "./bashTracker": "./dist/tools/BashTool/bashTracker.js",
     "./taskListStore": "./dist/tools/Tasks/TaskListStore.js",
     "./agents/memoryLoader": "./dist/agents/memoryLoader.js",
-    "./agents/memoryWatcher": "./dist/agents/memoryWatcher.js"
+    "./agents/memoryWatcher": "./dist/agents/memoryWatcher.js",
+    "./compat/vendor/ripgrep": "./dist/compat/vendor/ripgrep.js",
+    "./opencc-core": "./dist/opencc-core.mjs"
   },
   "files": [
     "dist/",
     "scripts/copy-runtime-assets.mjs"
   ],
   "scripts": {
-    "build": "tsc -b && node scripts/copy-runtime-assets.mjs",
+    "build": "tsc -b && rm -rf dist/opencc-src && node --experimental-strip-types scripts/bundle-opencc.ts && node scripts/copy-runtime-assets.mjs",
     "dev": "tsc -b --watch",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
     "copy-from-opencc": "tsx scripts/copy-from-opencc.ts",
-    "verify": "tsx scripts/verify-imports.ts"
+    "verify": "tsx scripts/verify-imports.ts",
+    "bundle": "node --experimental-strip-types scripts/bundle-opencc.ts"
   },
   "dependencies": {
     "@alcalzone/ansi-tokenize": "^0.1.3",
@@ -59,6 +62,7 @@
     "env-paths": "^4.0.0",
     "eventsource-parser": "^1.1.2",
     "execa": "^9.5.1",
+    "fflate": "0.8.3",
     "figures": "^6.1.0",
     "fuse.js": "^7.5.0",
     "get-east-asian-width": "^1.6.0",
@@ -103,6 +107,7 @@
     "@types/lodash-es": "^4.17.12",
     "@types/node": "22.10.0",
     "@types/react": "^18.3.0",
+    "esbuild": "0.28.1",
     "typescript": "5.6.3",
     "vitest": "^2.1.0"
   }

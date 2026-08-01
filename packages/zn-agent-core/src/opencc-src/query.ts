@@ -1,5 +1,11 @@
 // @ts-nocheck
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
+// Force-include opencc's built-in tools in the bundled opencc-core.mjs.
+// Bun's tree-shaker drops files not reachable from query.ts; this import
+// pulls every tool into the bundle so compat/tools/opencc/builtin.ts can
+// destructure them as `BashTool`, `FileReadTool`, etc. instead of doing
+// individual dynamic imports of the (now nonexistent) per-file paths.
+import * as OpenccBuiltinTools from './tools/index.js'
 import type {
   ToolResultBlockParam,
   ToolUseBlock,
@@ -457,6 +463,41 @@ type State = {
   transition: Continue | undefined
   agentStepLimit: AgentStepLimitState | undefined
 }
+
+// Re-export opencc's built-in tools so consumers of the bundled
+// opencc-core.mjs can destructure them as `mod.BashTool`,
+// `mod.FileReadTool`, etc. without per-file dynamic imports.
+// See import above + tools/index.ts for the full set.
+export {
+  BashTool,
+  FileReadTool,
+  FileEditTool,
+  FileWriteTool,
+  GlobTool,
+  GrepTool,
+  AgentTool,
+  BackgroundAgentResultTool,
+  TaskOutputTool,
+  WebFetchTool,
+  WebSearchTool,
+} from './tools/index.js'
+
+// zai patch: re-export `ensureToolResultPairing` so the zai-side
+// `compat/runtime/buildOpenccQueryParams.translateCallModel` can
+// invoke it before handing the messages to Anthropic. The function
+// is already called inside vendor's own `services/api/claude.ts:1373`
+// when vendor drives the Anthropic client directly, but the zai
+// runtime path goes `openccQuery → deps.callModel →
+// translateCallModel → zai createAnthropicModelCaller`, which
+// bypasses vendor's claude.ts. Without zai calling
+// ensureToolResultPairing at translateCallModel time, multi-turn
+// transcripts accumulate orphan tool_result blocks (whose
+// tool_use_id has been compacted or merged away by upstream
+// transformations) that Anthropic rejects with 2013 ("tool call
+// result does not follow tool call" / "tool call and result not
+// match"). Importing from `./utils/messages.js` is safe at module
+// init — pure helper, no DOM-bound state.
+export { ensureToolResultPairing } from './utils/messages.js'
 
 export async function* query(
   params: QueryParams,

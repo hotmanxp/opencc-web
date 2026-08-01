@@ -50,6 +50,21 @@ export interface OpenccToolMinimal {
   readonly maxResultSizeChars: number
   call(args: unknown, ctx: unknown, canUseTool: unknown, parentMessage: unknown, onProgress?: unknown): Promise<unknown>
   description(input: unknown, options: unknown): Promise<string>
+  // vendor's permission main loop calls `tool.checkPermissions(input,
+  // context)` at packages/zn-agent-core/src/opencc-src/utils/permissions/
+  // permissions.ts:1122. The full vendor Tool interface lists this as
+  // optional (vendor Tool.ts:749 marks it a defaultable key). wrapAsOpenccTool
+  // supplies a guaranteed-allow default so wrapped zai-native tools
+  // (compat/tools/) don't fall through to a vendor `passthrough` message
+  // when called by the main loop. wrapWithOverrides callers (compat/tools/
+  // opencc/builtin.ts) override the default for vendor tools that need
+  // finer-grained permission behavior.
+  checkPermissions?(input: unknown): Promise<{
+    behavior: 'allow' | 'deny' | 'ask' | 'passthrough'
+    updatedInput?: unknown
+    decisionReason?: unknown
+    message?: string
+  }>
   isConcurrencySafe(input: unknown): boolean
   isReadOnly(input: unknown): boolean
   isDestructive(input: unknown): boolean
@@ -79,6 +94,39 @@ export function wrapAsOpenccTool(
     name: tool.name,
     inputSchema: tool.inputSchema,
     maxResultSizeChars: tool.maxResultSizeChars ?? 50_000,
+
+    // zai patch: vendor permission main-loop calls
+    // `tool.checkPermissions(input, context)` at
+    // packages/zn-agent-core/src/opencc-src/utils/permissions/permissions.ts:1122.
+    // The vendor Tool interface declares this method as defaultable
+    // (Tool.ts:749) — `buildTool` spreads TOOL_DEFAULTS.checkPermissions
+    // which returns `{behavior:'allow', updatedInput: input}` for built
+    // tools. zai-native tools built via `makeTool(...)` (compat/tools/)
+    // never got a checkPermissions because that file's ToolLike is the
+    // narrower ZaiToolLike we declare here. Without this default, a
+    // runtime call to `tool.checkPermissions` from the permission main
+    // loop throws TypeError; the try/catch at permissions.ts:1120-1128
+    // swallows it (logging only) and `toolPermissionResult` stays at
+    // `{behavior:'passthrough'}`, which usually still falls through to
+    // the bypassPermissions allow branch — but the `passthrough`
+    // message ("AskUserQuestion to use Skill …") leaks into the next LLM
+    // turn and we observed it precipitating `toolFailureLoopGuard`
+    // trips downstream. Setting this to a guaranteed allow sidesteps
+    // both paths. zai never depends on a vendor-permission pause for
+    // user-facing approval — user-facing approval flows (AskUserQuestion,
+    // permission prompts) live in their own zai-native tool wrappers
+    // (compat/tools/opencc/AskUserQuestionTool.ts and the
+    // /api/agent/answer AskRegistry route).
+    async checkPermissions(input: unknown) {
+      return {
+        behavior: 'allow' as const,
+        updatedInput: input,
+        decisionReason: {
+          type: 'mode' as const,
+          mode: 'bypassPermissions' as const,
+        },
+      }
+    },
 
     async call(args, ctx, _canUseTool, _parentMessage, _onProgress) {
       // zai's Tool.call has signature: (args, ctx) => Promise<ToolResult>

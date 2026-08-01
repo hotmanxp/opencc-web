@@ -25,6 +25,22 @@ export interface SdkEventMeta {
    * bridge has to remember the mapping across events.
    */
   toolNameByUseId?: Map<string, string>
+  /**
+   * Indices of content blocks that have already been streamed via the
+   * `stream_event` wrapper path. vendor `query()` emits BOTH the raw
+   * Anthropic SSE events (wrapped as `stream_event`) AND the terminal
+   * `assistant` message with the same content blocks. The
+   * assistant-message path re-emits each block as fresh
+   * content_block_start/delta/stop, which would double-render at the
+   * SSE consumer (e.g. two `runtime.tool_call` events for the same
+   * toolUseId → two `Bash` cards in the zai UI). Skip re-emission
+   * in the assistant-message path when the index is already in this
+   * set.
+   *
+   * Reset on each `stream_event message_start` so the set is scoped
+   * per assistant message.
+   */
+  streamedBlockIndices?: Set<number>
 }
 
 export function* translateSdkToRuntime(
@@ -57,6 +73,70 @@ export function* translateSdkToRuntime(
   //
   // Detect which format and handle accordingly.
   if (m.type === 'system') return
+
+  // opencc's vendor query() emits a `{ type: 'stream_event', event: <raw
+  // Anthropic SSE event> }` SDKMessage for every upstream token that arrives
+  // before the assistant-message is finalized. Without unpacking, this branch
+  // would fall through to the format-(b) catch-all below and yield a
+  // RuntimeEvent with `type:'stream_event'` — which routes/agent.ts does not
+  // understand, killing the live text_delta / thinking_delta streaming UX.
+  // Unwrap `m.event` and re-emit the raw event type so the downstream SSE
+  // translator sees the same primitives as a non-streaming path.
+  if (m.type === 'stream_event') {
+    const raw = (m as any).event as
+      | {
+          type?: string
+          index?: number
+          content_block?: { type?: string; id?: string; name?: string }
+        }
+      | undefined
+    if (!raw || typeof raw !== 'object' || typeof raw.type !== 'string') return
+    // Mirror the format-(b) message_stop pending-tool suppression (the
+    // comment block on lines 67-75) so an early stream_event-wrapped
+    // message_stop doesn't freeze opencc's tool execution on the consumer
+    // side. Same rule applies regardless of how message_stop arrived.
+    if (
+      raw.type === 'message_stop' &&
+      meta.toolNameByUseId &&
+      meta.toolNameByUseId.size > 0
+    ) {
+      return
+    }
+    // Reset per-message streaming index set on message_start so the
+    // terminal `assistant` message can skip blocks already streamed via
+    // this path. Without this reset, indices from a previous assistant
+    // message would falsely skip the next message's blocks.
+    if (raw.type === 'message_start' && meta.streamedBlockIndices) {
+      meta.streamedBlockIndices.clear()
+    }
+    // Track which block indices have been streamed via the stream_event
+    // path so the terminal `assistant` message can skip re-emitting
+    // them. Without this, each tool_use produces two `runtime.tool_call`
+    // SSE events (one from the streamed content_block_stop, one from the
+    // re-synthesized one) and the zai UI renders two Bash cards for
+    // the same toolUseId.
+    if (
+      raw.type === 'content_block_start' &&
+      meta.streamedBlockIndices &&
+      typeof raw.index === 'number'
+    ) {
+      meta.streamedBlockIndices.add(raw.index)
+    }
+    // Mirror the content_block_start(tool_use) mapping so a later
+    // user/tool_result message can attach the tool name to its
+    // tool_use:done event (see the match-up logic at lines 161-189).
+    if (
+      raw.type === 'content_block_start' &&
+      meta.toolNameByUseId &&
+      raw.content_block?.type === 'tool_use' &&
+      raw.content_block.id &&
+      raw.content_block.name
+    ) {
+      meta.toolNameByUseId.set(raw.content_block.id, raw.content_block.name)
+    }
+    yield makeEvent(raw.type, meta, 0, raw as unknown as Record<string, unknown>)
+    return
+  }
 
   if (m.type !== 'assistant' && m.type !== 'user') {
     // Format (b): Anthropic primitive (message_start, content_block_*, etc).
@@ -101,6 +181,19 @@ export function* translateSdkToRuntime(
     })
     let blockIndex = 0
     for (const block of m.message.content ?? []) {
+      // Skip blocks that were already streamed via the stream_event
+      // wrapper path. vendor `query()` emits the raw Anthropic SSE
+      // events as `stream_event` wrappers AND the terminal `assistant`
+      // message with the same content blocks; re-emitting them here
+      // would double-render at the SSE consumer (e.g. two
+      // `runtime.tool_call` events for the same toolUseId → two Bash
+      // cards in the zai UI). message_start / message_delta still
+      // emit because those are needed for the consumer's
+      // translateRuntimeEvents to finalize the turn.
+      if (meta.streamedBlockIndices?.has(blockIndex)) {
+        blockIndex++
+        continue
+      }
       if (block.type === 'text') {
         yield emit('content_block_start', {
           index: blockIndex,

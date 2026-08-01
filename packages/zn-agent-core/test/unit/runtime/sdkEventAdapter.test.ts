@@ -78,6 +78,92 @@ describe('translateSdkToRuntime', () => {
     expect(new Set(ids).size).toBe(ids.length)
   })
 
+  it('unpacks stream_event SDKMessage into Anthropic primitives (not pass-through)', () => {
+    // vendor query() emits `{ type: 'stream_event', event: <raw anthropic event> }`
+    // for every SDKMessage that wraps an upstream SSE event. The translator
+    // must extract `event` and re-emit the raw event type, NOT yield a
+    // RuntimeEvent with type:'stream_event' (which routes/agent.ts does not
+    // understand and which breaks text_delta streaming UX).
+    const streamEventTextDelta = {
+      type: 'stream_event',
+      event: {
+        type: 'content_block_delta',
+        index: 0,
+        delta: { type: 'text_delta', text: 'hi' },
+      },
+      parent_tool_use_id: null,
+    }
+    const events = [...translateSdkToRuntime(streamEventTextDelta, { ...meta, eventCounter: 1 })]
+    expect(events.map((e) => e.type)).toEqual(['content_block_delta'])
+    const [ev] = events
+    expect(ev?.delta).toMatchObject({ type: 'text_delta', text: 'hi' })
+    expect((ev as any).type).not.toBe('stream_event')
+  })
+
+  it('unpacks stream_event message_start / message_stop / content_block_start primitives', () => {
+    const streamStart = {
+      type: 'stream_event',
+      event: { type: 'message_start', message: { id: 'msg_x', model: 'm', role: 'assistant' } },
+    }
+    const streamBlockStart = {
+      type: 'stream_event',
+      event: {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'text', text: '' },
+      },
+    }
+    const streamStop = {
+      type: 'stream_event',
+      event: { type: 'message_stop', 'amazon-bedrock-invocationMetrics': undefined },
+    }
+    const out = [
+      ...translateSdkToRuntime(streamStart, { ...meta, eventCounter: 1 }),
+      ...translateSdkToRuntime(streamBlockStart, { ...meta, eventCounter: 1 }),
+      ...translateSdkToRuntime(streamStop, { ...meta, eventCounter: 1 }),
+    ]
+    expect(out.map((e) => e.type)).toEqual(['message_start', 'content_block_start', 'message_stop'])
+  })
+
+  it('records tool_use_id → name mapping from stream_event content_block_start(tool_use)', () => {
+    // Subsequent user/tool_result message (yielded later by runTools) will
+    // need to look up the tool name via toolNameByUseId. The stream_event
+    // path must populate it the same way the assistant-message path does.
+    const toolNameByUseId = new Map<string, string>()
+    const streamBlockStart = {
+      type: 'stream_event',
+      event: {
+        type: 'content_block_start',
+        index: 0,
+        content_block: { type: 'tool_use', id: 'tu_stream_1', name: 'Bash' },
+      },
+    }
+    const events = [
+      ...translateSdkToRuntime(streamBlockStart, { ...meta, eventCounter: 1, toolNameByUseId }),
+    ]
+    expect(events.map((e) => e.type)).toContain('content_block_start')
+    expect(toolNameByUseId.get('tu_stream_1')).toBe('Bash')
+  })
+
+  it('suppresses stream_event message_stop while tools are pending', () => {
+    // Mirror existing line 76-78 logic for the format-(b) pass-through branch:
+    // if there are pending tool_use blocks, defer message_stop until after
+    // the tool_result user message has cleared the map. Apply the same rule
+    // to stream_event-wrapped message_stops so vendor and adapter streams
+    // behave identically.
+    const toolNameByUseId = new Map<string, string>([['tu_pending', 'Bash']])
+    const streamStop = {
+      type: 'stream_event',
+      event: { type: 'message_stop' },
+    }
+    const events = [...translateSdkToRuntime(streamStop, { ...meta, eventCounter: 1, toolNameByUseId })]
+    // message_stop is suppressed — generator should yield nothing.
+    expect(events).toEqual([])
+    toolNameByUseId.delete('tu_pending')
+    const events2 = [...translateSdkToRuntime(streamStop, { ...meta, eventCounter: 2, toolNameByUseId })]
+    expect(events2.map((e) => e.type)).toEqual(['message_stop'])
+  })
+
   it('translates thinking content blocks to thinking_delta + content_block{type:"thinking"}', () => {
     const msg = {
       type: 'assistant',
@@ -97,5 +183,71 @@ describe('translateSdkToRuntime', () => {
       thinking: 'reasoning about the problem',
     })
     expect(events.map((event) => event.type)).toContain('content_block_stop')
+  })
+
+  it('skips re-emitting content_block_* in terminal assistant message for blocks already streamed via stream_event', () => {
+    // vendor query() emits BOTH the raw Anthropic SSE events (wrapped as
+    // `stream_event`) AND the terminal `assistant` message with the
+    // same content blocks. Re-emitting them in the assistant-message
+    // path produces two `runtime.tool_call` SSE events for the same
+    // toolUseId (→ two Bash cards in the zai UI). Track streamed
+    // indices from path A and skip them in path B.
+    const streamedBlockIndices = new Set<number>()
+    const streamSequence = [
+      { type: 'stream_event', event: { type: 'message_start', message: { id: 'msg_x', model: 'm', role: 'assistant' } } },
+      { type: 'stream_event', event: { type: 'content_block_start', index: 0, content_block: { type: 'tool_use', id: 'tu_stream_1', name: 'Bash' } } },
+      { type: 'stream_event', event: { type: 'content_block_delta', index: 0, delta: { type: 'input_json_delta', partial_json: '{"command":"ls"}' } } },
+      { type: 'stream_event', event: { type: 'content_block_stop', index: 0 } },
+      { type: 'stream_event', event: { type: 'message_delta', delta: { stop_reason: 'tool_use' } } },
+    ]
+    const assistantMsg = {
+      type: 'assistant',
+      message: {
+        id: 'msg_x',
+        model: 'm',
+        content: [{ type: 'tool_use', id: 'tu_stream_1', name: 'Bash', input: { command: 'ls' } }],
+        stop_reason: 'tool_use',
+      },
+    }
+    const metaWithIndex = {
+      ...meta,
+      eventCounter: 7,
+      toolNameByUseId: new Map<string, string>(),
+      streamedBlockIndices,
+    }
+    const streamedEvents = streamSequence.flatMap((m) =>
+      [...translateSdkToRuntime(m, metaWithIndex)],
+    )
+    // stream_event path emitted the block — its index is now tracked.
+    expect(streamedBlockIndices.has(0)).toBe(true)
+    const contentBlockStartTypes = streamedEvents
+      .map((e) => e.type)
+      .filter((t) => t === 'content_block_start')
+    expect(contentBlockStartTypes).toHaveLength(1)
+
+    // Terminal assistant message: the block at index 0 was already
+    // streamed, so it must NOT re-emit content_block_start/delta/stop.
+    const terminalEvents = [...translateSdkToRuntime(assistantMsg, metaWithIndex)]
+    const terminalTypes = terminalEvents.map((e) => e.type)
+    expect(terminalTypes).toContain('message_start')
+    expect(terminalTypes).toContain('message_delta')
+    expect(terminalTypes).not.toContain('content_block_start')
+    expect(terminalTypes).not.toContain('content_block_delta')
+    expect(terminalTypes).not.toContain('content_block_stop')
+  })
+
+  it('resets streamedBlockIndices on each stream_event message_start', () => {
+    // Without reset, indices from a previous assistant message would
+    // falsely skip blocks in the next message.
+    const streamedBlockIndices = new Set<number>([0, 1, 2])
+    const newMessageStart = {
+      type: 'stream_event',
+      event: { type: 'message_start', message: { id: 'msg_2', model: 'm', role: 'assistant' } },
+    }
+    const events = [
+      ...translateSdkToRuntime(newMessageStart, { ...meta, eventCounter: 1, streamedBlockIndices }),
+    ]
+    expect(streamedBlockIndices.size).toBe(0)
+    expect(events.map((e) => e.type)).toContain('message_start')
   })
 })

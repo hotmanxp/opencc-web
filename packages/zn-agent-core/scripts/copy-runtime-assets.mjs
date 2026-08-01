@@ -2,20 +2,18 @@
 // Copies non-TS runtime assets (.mjs, .d.ts) from src/compat/runtime/
 // to dist/compat/runtime/ so the published package includes them.
 //
-// Also recursively copies src/opencc-src/ → dist/opencc-src/ so the
-// bridge's `import(<OPENCC_SRC_DIR>/query.js)` resolves at runtime
-// (in production). The vendored tree is already strip-listed by
-// copy-from-opencc.ts (run separately); we just mirror it.
-import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, readdirSync, statSync } from 'node:fs'
-import { execFileSync } from 'node:child_process'
+// Note: as of 2026-07-31, opencc-src is no longer mirrored to
+// dist/opencc-src/. It's bundled into a single dist/opencc-core.mjs
+// by scripts/bundle-opencc.ts (called from package.json's `build`
+// script before this script runs). The bundle is the only artifact
+// the runtime needs to access opencc vendor code.
+import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SRC = resolve(__dirname, '..', 'src', 'compat', 'runtime')
 const DIST = resolve(__dirname, '..', 'dist', 'compat', 'runtime')
-const SRC_OPENCC_DIR = resolve(__dirname, '..', 'src', 'opencc-src')
-const DIST_OPENCC_DIR = resolve(__dirname, '..', 'dist', 'opencc-src')
 
 const ASSETS = [
   'bun-protocol.mjs',
@@ -52,86 +50,23 @@ for (const f of CJS_STUBS) {
   console.log(`copied ${f}`)
 }
 
-// Patch dist/opencc-src/ink/screen.js to add the missing `CellWidth`
-// enum that selection.ts and ink.tsx import. The vendored opencc
-// copy is missing this export; in upstream opencc it's defined as
-// an enum used throughout the TUI code. Bun's loader doesn't
-// always fire for transitive relative imports inside a package, so
-// the loader-based shim doesn't get a chance to redirect. Patching
-// the .js file directly is the most reliable fix.
-{
-  const screenJs = resolve(__dirname, '..', 'dist', 'opencc-src', 'ink', 'screen.js')
-  if (existsSync(screenJs)) {
-    const original = readFileSync(screenJs, 'utf-8')
-    if (!original.includes('export const CellWidth')) {
-      const patch = `\n// Patch added by copy-runtime-assets.mjs: vendored opencc copy\n` +
-        `// is missing the CellWidth enum that selection.ts / ink.tsx\n` +
-        `// import. Re-add it as a const export. Matches the numeric\n` +
-        `// values referenced as JSDoc comments throughout screen.js.\n` +
-        `export const CellWidth = Object.freeze({ Narrow: 0, Wide: 1, SpacerTail: 2 })\n`
-      // Find a safe insertion point: end of the last `export ...`
-      // statement at top-level. Simple: append to the end of the file
-      // (ESM allows re-exports anywhere; appending is safe).
-      writeFileSync(screenJs, original + patch)
-      console.log('patched ink/screen.js to export CellWidth')
-    }
+// Patch dist/opencc-core.mjs (the bundle) to add the missing `CellWidth`
+// enum that selection.ts and ink.tsx import. The bundler may have
+// dropped this from upstream opencc; in zai's bundle it's typically
+// preserved but we patch defensively in case it ever gets tree-shaken
+// away by future esbuild updates.
+//
+// (This previously patched dist/opencc-src/ink/screen.js — that file
+// no longer exists in dist because opencc-src is no longer mirrored.)
+const screenJs = resolve(__dirname, '..', 'dist', 'opencc-src', 'ink', 'screen.js')
+if (existsSync(screenJs)) {
+  const original = readFileSync(screenJs, 'utf-8')
+  if (!original.includes('export const CellWidth')) {
+    const patch = `\n// Patch added by copy-runtime-assets.mjs: vendored opencc copy\n` +
+      `// is missing the CellWidth enum that selection.ts / ink.tsx\n` +
+      `// import. Re-add it as a const export.\n` +
+      `export const CellWidth = Object.freeze({ Narrow: 0, Wide: 1, SpacerTail: 2 })\n`
+    writeFileSync(screenJs, original + patch)
+    console.log('patched ink/screen.js to export CellWidth')
   }
 }
-
-/**
- * Recursively copy src/opencc-src/ → dist/opencc-src/. Skip .test.* files
- * (opencc vendor tests have bun:test imports that break under Node —
- * already stripped by 512dcbde, but be defensive).
- */
-function copyDirRecursive(srcDir, destDir) {
-  if (!existsSync(srcDir)) return 0
-  let count = 0
-  mkdirSync(destDir, { recursive: true })
-  for (const entry of readdirSync(srcDir)) {
-    const srcPath = resolve(srcDir, entry)
-    const destPath = resolve(destDir, entry)
-    const st = statSync(srcPath)
-    if (st.isDirectory()) {
-      count += copyDirRecursive(srcPath, destPath)
-    } else if (/\.test\.[mc]?[jt]s$/.test(entry)) {
-      continue
-    } else {
-      copyFileSync(srcPath, destPath)
-      // Mirror .generated.ts files as .js so runtime ESM imports that
-      // hardcode the `.js` extension resolve under Node (the .ts
-      // sources are excluded from tsc, so only a hand-mirrored .js
-      // copy exists at runtime). Use tsc to do the transpile so all
-      // TS syntax (as const / satisfies / type annotations) is
-      // handled correctly.
-      if (/\.generated\.ts$/.test(entry)) {
-        // Resolve typescript bin from pnpm's hoisted .pnpm tree.
-        const tscBin = resolve(
-          __dirname, '..', '..', '..',
-          'node_modules', '.pnpm', 'typescript@5.9.3',
-          'node_modules', 'typescript', 'bin', 'tsc'
-        )
-        execFileSync(
-          tscBin,
-          [
-            srcPath,
-            '--target', 'ES2023',
-            '--module', 'ESNext',
-            '--moduleResolution', 'bundler',
-            '--skipLibCheck',
-            '--esModuleInterop',
-            '--outDir', resolve(destDir, '..'),
-            '--rootDir', resolve(srcDir, '..'),
-            '--declaration', 'false',
-            '--sourceMap', 'false',
-          ],
-          { stdio: 'pipe' },
-        )
-      }
-      count++
-    }
-  }
-  return count
-}
-
-const copied = copyDirRecursive(SRC_OPENCC_DIR, DIST_OPENCC_DIR)
-console.log(`copied ${copied} files from src/opencc-src → dist/opencc-src`)

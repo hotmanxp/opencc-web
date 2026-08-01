@@ -391,6 +391,88 @@ export function createAnthropicModelCaller(): ModelCaller {
         console.error('[zai.modelCaller] stream done normally', { eventCount, model: resolvedModel })
       }
     } catch (err) {
+      // zai patch: anthropic API 2013 "tool call result does not follow tool
+      // call" fires when zai's vendor SDKMessage serialization hands the
+      // upstream API a tool_result whose `tool_use_id` doesn't match any
+      // preceding tool_use in messages. Most common trigger: parallel
+      // tool_use blocks (vendor `runToolsConcurrently`) entering
+      // tool_result attachments in a different order than the tool_uses
+      // were declared, or vendor transcript-compact middleware stripping
+      // the assistant message that owns a tool_use while keeping the
+      // matching tool_result. Either way, the result is that
+      // `messages[last].content[i].tool_use_id` has no antecedent —
+      // Anthropic refuses. Recovery: pop the trailing user message whose
+      // tool_result is unmatchable and re-call. One retry is enough for
+      // the cases observed in practice (parallel sibling tools, single
+      // orphan tool_result). Bounded at 1 attempt — if it also fails the
+      // second time, propagate so the upstream subagent error path can
+      // surface a user-visible diagnostic.
+      const errAny = err as { status?: number; code?: string; message?: string }
+      const isOrphanToolResult =
+        errAny?.status === 400 &&
+        errAny?.code === 'invalid_request_error' &&
+        typeof errAny?.message === 'string' &&
+        // Anthropic returns two phrasings for the same tool_use_id
+        // mismatch (validated against the API docs and observed in
+        // production): "tool call result does not follow tool call" and
+        // "tool call and result not match". Both imply the same
+        // structure defect — a tool_result in `messages` whose
+        // `tool_use_id` doesn't match any preceding tool_use — so we
+        // pattern-match on the shared structure ("tool call ... result
+        // ... not match|follow") rather than the exact phrase.
+        /tool call[^\n]*result[^\n]*not (?:match|follow)/.test(errAny.message) &&
+        eventCount === 0
+      if (
+        isOrphanToolResult &&
+        Array.isArray(sdkMessages) &&
+        sdkMessages.length >= 2
+      ) {
+        const dropped = sdkMessages[sdkMessages.length - 1]
+        console.error(
+          '[zai.modelCaller] orphan tool_result, retrying with messages truncated:',
+          {
+            droppedRole: dropped?.role,
+            droppedContentType: Array.isArray(dropped?.content)
+              ? (dropped.content as Array<{ type?: string }>).map(c => c.type)
+              : typeof dropped?.content,
+          },
+        )
+        const trimmed = sdkMessages.slice(0, -1)
+        let recoveryEvents = 0
+        try {
+          const recoveryStream = await client.messages.create(
+            {
+              model: resolvedModel,
+              max_tokens: resolvedMaxTokens,
+              thinking: { type: 'enabled', budget_tokens: resolvedThinkingBudget },
+              system: systemBlocks,
+              messages: trimmed as Anthropic.Messages.MessageParam[],
+              tools: tools.length > 0
+                ? (tools.map((t) => ({
+                    name: t.name,
+                    description: t.description ?? '',
+                    input_schema: buildAnthropicInputSchema(t.inputSchema),
+                  })) as Anthropic.Messages.ToolUnion[])
+                : undefined,
+              stream: true,
+            },
+            { signal },
+          )
+          for await (const event of recoveryStream) {
+            recoveryEvents++
+            eventCount++
+            yield event as unknown as StreamEvent
+            if ((event as any).type === 'message_stop') break
+          }
+          if (process.env.ZAI_DEBUG === '1') {
+            console.error('[zai.modelCaller] recovery stream done', { recoveryEvents, model: resolvedModel })
+          }
+          return
+        } catch (recoveryErr) {
+          console.error('[zai.modelCaller] recovery failed, propagating:', (recoveryErr as Error).message)
+          throw recoveryErr
+        }
+      }
       // Always-on error log. 区分 create 阶段 (eventCount === 0) vs 流阶段。
       // minimax 413 / 529 / network 全在这里出；之前 ZAI_DEBUG 没开时静默丢。
       // eventCount === 0 → SDK 在 create 阶段就抛 (典型: 413/401/529 在 HTTP 响应)。

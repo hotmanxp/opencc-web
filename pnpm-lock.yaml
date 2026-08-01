@@ -255,6 +255,9 @@ importers:
       execa:
         specifier: ^9.5.1
         version: 9.5.1
+      fflate:
+        specifier: 0.8.3
+        version: 0.8.3
       figures:
         specifier: ^6.1.0
         version: 6.1.0
@@ -382,6 +385,9 @@ importers:
       '@types/react':
         specifier: ^18.3.0
         version: 18.3.31
+      esbuild:
+        specifier: 0.28.1
+        version: 0.28.1
       typescript:
         specifier: 5.6.3
         version: 5.6.3
