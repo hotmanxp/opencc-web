@@ -570,6 +570,10 @@ export default React.memo(function AgentInputBox() {
         });
       }
     } else {
+      // 纯文本分支: 没有图片块, 所有附件都是孤儿, revoke 它们的 blob URL.
+      // (image 分支的附件已经在 pushUserMsg 里被 user.text 引用, 不能 revoke.)
+      attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl));
+      setAttachments([]);
       await submitPrompt(text);
     }
   };
