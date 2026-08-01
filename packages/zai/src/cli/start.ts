@@ -60,7 +60,7 @@ async function runDirectServer(options: StartOptions): Promise<void> {
   const webDir = join(__dirname, '..', 'web');
 
   const host = options.lan ? '0.0.0.0' : '127.0.0.1';
-  const app = createApp({ token, cwd, cwdName, host });
+  const app = await createApp({ token, cwd, cwdName, host });
   app.use(express.static(webDir));
 
   app.get('*', (_req, res) => {

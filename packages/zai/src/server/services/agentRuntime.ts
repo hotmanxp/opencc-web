@@ -183,12 +183,13 @@ function resolveSkillsDirs(): string[] {
   return env.split(path.delimiter).filter(Boolean)
 }
 
-export function initAgentRuntime(cwd: string): void {
+export async function initAgentRuntime(cwd: string): Promise<void> {
   if (runtime) return
+
   // zai patch: skip vendor PreToolUse plugin hooks under the HTTP-server
   // runtime. Plugin hooks are shell scripts that expect an interactive
   // TTY + CLAUDE_PLUGIN_ROOT env; under zai's headless server they throw
-  // (ENOENT / spawn error), the vendor catch at
+  // (ENOUNT / spawn error), the vendor catch at
   // src/opencc-src/services/tools/toolHooks.ts:715 yields {type:'stop'},
   // and toolExecution.ts:1100 propagates that as
   // `createToolResultStopMessage(toolUseID)` — so the LLM receives a
@@ -203,69 +204,59 @@ export function initAgentRuntime(cwd: string): void {
   // compat/tools/opencc/builtin.ts already overwrites with always-allow
   // via forceAllowCheckPermissions — so every tool runs without prompt.
   ;(globalThis as any).__zaiSkipPreToolUseHooks = true
+
+  // The simple synchronous setup (serverCwd, transcriptStore) must
+  // run BEFORE the first `await` — the test surface calls
+  // `initAgentRuntime(cwd)` without awaiting and then synchronously
+  // reads `getServerCwd()`. Doing the work up-front keeps the
+  // legacy sync-read-after-init pattern working while we await the
+  // async runtime construction.
+  const { resolved: dataDir } = resolveDataDir()
+  serverCwd = cwd
+  transcriptStore = new TranscriptStore(dataDir)
+
   // OpenCC vendor's config system has a `configReadingAllowed` flag
   // (config.ts:1473) that throws on any getConfig() until set. The
   // runtime's headless context bootstrap calls enableConfigs() too —
   // calling it here is a no-op (already enabled) and just keeps the
   // ordering stable for any other vendor code paths triggered between
   // init and the first query.
-  void enableOpenccConfigs({ cwd }).catch((err) => {
+  await enableOpenccConfigs({ cwd }).catch((err) => {
     console.error('[initAgentRuntime] enableOpenccConfigs failed:', err)
   })
-  const { resolved: dataDir } = resolveDataDir()
-  serverCwd = cwd
-  transcriptStore = new TranscriptStore(dataDir)
 
-  // Build the new OpenccRuntime. Task 5 (current): use Option B — we
-  // construct the runtime with the bare minimum (dataDir / defaultCwd
-  // / defaultModel / runtimeId) and let vendor's `defaultQuery` +
-  // `productionDeps.callModel` drive the model calls. The vendor
-  // `defaultQuery` reads the model from `process.env.ANTHROPIC_*`
-  // (consistent with zai's existing model resolution), so callers
-  // don't see a regression. Threading the zai-side `modelCaller`
-  // through to the runtime's `deps.callModel` is deferred to Task 4.5
-  // because the Task 4 runtime doesn't yet expose a `modelCaller`
-  // option — the public `OpenccRuntimeOptions` surface is
-  // `dataDir / runtimeId / defaultCwd / defaultModel` only.
-  //
-  // Why the fire-and-forget spawn: callers have been doing the same
-  // for `enableOpenccConfigs` / `initCommands`, and the constructors
-  // awaited here are now async (vendor's `createHeadlessContext` reads
-  // from disk and resolves MCP client pools). The subsequent code
-  // path that depends on `runtime` (e.g. `getRuntime()` callers) will
-  // observe a non-null runtime by the time the first HTTP request
-  // lands because the server boot sequence awaits `initAgentRuntime`
-  // indirectly through the `createApp` startup hook.
-  void (async () => {
-    try {
-      // Defer the import to avoid pulling vendor headless bootstrap code
-      // (~5s transform) into modules that only need the small helper
-      // surface (the abort registry, session controllers).
-      const { createOpenccRuntime: factory } = await import(
-        '@zn-ai/zn-agent-core/opencc-server'
-      )
-      runtime = await factory({
-        dataDir,
-        runtimeId: 'zai-server',
-        defaultCwd: cwd,
-        defaultModel:
-          process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
-          ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
-      })
-      // Disconnect MCP clients on shutdown so child processes don't get orphaned
-      // when the zai server is killed by SIGTERM/SIGINT. The new runtime owns
-      // its own MCP lifecycle; for now we also disconnect any MCP pool we
-      // happened to build at init time (the legacy `MCPClientPool` may still
-      // be referenced by route handlers until Task 6 deletes them).
-      const cleanup = () => {
-        if (runtime) void runtime.shutdown()
-      }
-      process.once('SIGTERM', cleanup)
-      process.once('SIGINT', cleanup)
-    } catch (err) {
-      console.error('[initAgentRuntime] createOpenccRuntime failed:', err)
+  // Build the new OpenccRuntime. The runtime is awaited so the
+  // synchronous `initBackgroundRuntime()` call in `createApp` (the
+  // very next line) sees a non-null `runtime` and can read it via
+  // `getRuntime()`. The previous Task 5 implementation fired the
+  // construction off as a fire-and-forget IIFE; that worked for the
+  // vitest test surface (tests only read `getRuntime()` after the
+  // boot promise chain had advanced) but broke the dev server's
+  // `pnpm dev` boot. Threading the zai-side `modelCaller` through
+  // to the runtime's `deps.callModel` is deferred to Task 4.5 (the
+  // public `OpenccRuntimeOptions` surface is `dataDir / runtimeId /
+  // defaultCwd / defaultModel` only).
+  try {
+    const { createOpenccRuntime: factory } = await import(
+      '@zn-ai/zn-agent-core/opencc-server'
+    )
+    runtime = await factory({
+      dataDir,
+      runtimeId: 'zai-server',
+      defaultCwd: cwd,
+      defaultModel:
+        process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
+        ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
+    })
+    const cleanup = () => {
+      if (runtime) void runtime.shutdown()
     }
-  })()
+    process.once('SIGTERM', cleanup)
+    process.once('SIGINT', cleanup)
+  } catch (err) {
+    console.error('[initAgentRuntime] createOpenccRuntime failed:', err)
+    throw err
+  }
 
   process.once('SIGTERM', () => stopMemoryWatcher())
   process.once('SIGINT', () => stopMemoryWatcher())

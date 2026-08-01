@@ -40,7 +40,7 @@ import { redirectMobileUA } from './middleware/redirectMobileUA.js';
 // route is wide-open to anyone who can reach the port. The original
 // tokenGuard middleware added friction (token changes on every server
 // restart → 401 → manual paste dance) without buying real security.
-export function createApp(opts: AppOptions): express.Express {
+export async function createApp(opts: AppOptions): Promise<express.Express> {
   // Inject read-only instance context so routes can access cwd without process.cwd()
   const app = express();
   app.locals.instanceContext = {
@@ -50,8 +50,12 @@ export function createApp(opts: AppOptions): express.Express {
   };
 
   // Initialize the agent runtime singleton at boot. Idempotent — safe to call
-  // if createApp is invoked multiple times in tests.
-  initAgentRuntime(opts.cwd)
+  // if createApp is invoked multiple times in tests. `await`ed so
+  // `initBackgroundRuntime` (next line) sees a non-null runtime.
+  // The previous sync version + fire-and-forget IIFE was changed
+  // in Task 7 because `pnpm dev` boots `initBackgroundRuntime`
+  // synchronously and immediately reads `getRuntime()`.
+  await initAgentRuntime(opts.cwd)
   // SubagentNotifier 必须在 initBackgroundRuntime 之前注册,这样
   // onTaskStateChange 第一次触发就能拿到句柄 (backgroundRuntime.ts
   // 内部 tryGetNotifier 也兜底了反向顺序)。
