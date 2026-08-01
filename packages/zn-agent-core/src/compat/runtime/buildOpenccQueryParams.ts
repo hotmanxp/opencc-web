@@ -312,7 +312,36 @@ export async function* translateCallModel(
     tools: openccReq.tools as any,
     signal: openccReq.signal,
   }
-  const stream = zaiModelCaller(zaiReq) as AsyncIterable<any>
+  // zai patch: wrap the zai modelCaller stream in a try/catch so sub-agent
+  // LLM call failures don't silently propagate to queryLoop and emerge
+  // as opaque "Cannot read properties of undefined (reading 'X')" text
+  // — log the error and stack here so we can see which tool / model
+  // path failed.
+  let stream: AsyncIterable<any>
+  try {
+    stream = zaiModelCaller(zaiReq) as AsyncIterable<any>
+  } catch (err) {
+    const errMsg = (err as Error)?.message ?? String(err)
+    const errStack = (err as Error)?.stack ?? ''
+    console.error(
+      `[zai] sub-agent modelCaller threw synchronously:`,
+      errMsg,
+      errStack.slice(0, 800),
+      'tools.length=',
+      Array.isArray(zaiReq.tools) ? zaiReq.tools.length : 'not-array',
+      'tools sample=',
+      JSON.stringify(
+        Array.isArray(zaiReq.tools)
+          ? zaiReq.tools.slice(0, 2).map((t: any) => ({
+              name: t?.name,
+              descriptionType: typeof t?.description,
+              hasDescription: t?.description !== undefined,
+            }))
+          : 'n/a',
+      ),
+    )
+    throw err
+  }
   // Accumulate Anthropic primitives into a single opencc AssistantMessage
   // and yield it on message_stop. opencc's queryLoop iterates
   // `for await (const message of deps.callModel(...))` and expects

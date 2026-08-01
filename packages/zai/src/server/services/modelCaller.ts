@@ -294,6 +294,28 @@ export function createAnthropicModelCaller(): ModelCaller {
       tools: Array<{ name: string; description?: string; inputSchema: Parameters<typeof zodToJsonSchema>[0] }>
       signal: AbortSignal
     } = req
+    // zai patch: filter out any undefined / null entries in the tool list
+    // before processing. Sub-agent paths (AgentTool's vendor `runAgent` →
+    // bundled `query()` → productionDeps → translateCallModel) can hand
+    // us a tool array with stray undefined items (e.g. an MCP adapter that
+    // didn't fully populate the entry, or a tool that was removed mid-
+    // session). The map callback at line 422 reads `t.description` on
+    // every entry — an undefined entry throws "Cannot read properties of
+    // undefined (reading 'description')", which the upstream LLM API
+    // surfaces as a 400 and the sub-agent's callModel yields no
+    // output. Drop undefined entries up front and log a debug breadcrumb
+    // so the upstream bug doesn't silently hide.
+    const safeTools = (Array.isArray(tools) ? tools : []).filter(
+      (t): t is { name: string; description?: string; inputSchema: Parameters<typeof zodToJsonSchema>[0] } =>
+        t != null && typeof t === 'object' && typeof t.name === 'string',
+    )
+    if (safeTools.length !== (Array.isArray(tools) ? tools.length : 0)) {
+      console.warn(
+        '[zai] modelCaller: dropped',
+        (Array.isArray(tools) ? tools.length : 0) - safeTools.length,
+        'null/undefined/invalid tool entries before Anthropic call',
+      )
+    }
     const zaiSettings = getCachedZaiSettingsSync()
     const env = zaiSettings.env ?? {}
 
@@ -406,8 +428,8 @@ export function createAnthropicModelCaller(): ModelCaller {
         thinking: { type: 'enabled', budget_tokens: resolvedThinkingBudget },
         system: systemBlocks,
         messages: sdkMessages,
-        tools: tools.length > 0
-          ? (await Promise.all(tools.map(async (t) => {
+        tools: safeTools.length > 0
+          ? (await Promise.all(safeTools.map(async (t) => {
               // MCP / opencc SDK tools expose description() as an async
               // function (MCPToolAdapter.adaptOne: description returns
               // `[mcp:<server>] <full description>`). Reading the static
@@ -516,8 +538,8 @@ export function createAnthropicModelCaller(): ModelCaller {
               thinking: { type: 'enabled', budget_tokens: resolvedThinkingBudget },
               system: systemBlocks,
               messages: trimmed as Anthropic.Messages.MessageParam[],
-              tools: tools.length > 0
-                ? (tools.map((t) => ({
+              tools: safeTools.length > 0
+                ? (safeTools.map((t) => ({
                     name: t.name,
                     description: t.description ?? '',
                     input_schema: buildAnthropicInputSchema(t.inputSchema),
