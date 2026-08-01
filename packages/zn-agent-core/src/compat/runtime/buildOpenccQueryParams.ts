@@ -76,17 +76,92 @@ async function* translateCallModel(
   if (process.env.ZAI_DEBUG === '1') {
     console.log('[debug] raw openccReq.messages (full):', JSON.stringify(openccMessages, null, 2).slice(0, 2000))
   }
-  const zaiMessages = openccMessages.map((m: any) => {
-    // opencc Message has: { type: 'user'|'assistant', message: { role, content, ... }, ... }
-    // Inner message has the actual role + content.
+  // zai patch: handle opencc's non-conversational Message variants
+  // before serializing to zaiModelCaller. opencc emits more than
+  // user/assistant shapes — `attachment` messages carry model-facing
+  // metadata (`agent_listing_delta` / `plan_mode_reentry` /
+  // `relevant_memories` / queued commands / hook outputs / etc.).
+  // Serializing them raw (via `m.message ?? m` with `role = inner.role
+  // ?? 'assistant'`) reaches upstream Anthropic as `role: assistant,
+  // content: <object>` — which the MiniMax-M3 / Anthropic-compatible
+  // API rejects with 400 "invalid params, Syntax error no sources
+  // available, the input json is empty (2013)".
+  //
+  // Vendor's own `normalizeMessagesForAPI` (utils/messages.ts:1381)
+  // reshapes attachment messages into user `<system-reminder>` text
+  // blocks before they reach the SDK call; zai bypasses vendor's
+  // claude.ts entirely, so compat has to do this translation itself.
+  //
+  // Two accepted input shapes per message:
+  //   - opencc-native: { type: 'user'|'assistant', message: { role, content, ... } }
+  //   - already-flat: { role: 'user'|'assistant', content: ... } (used by some
+  //     opencc-internal callers and tests; also valid Anthropic messages)
+  // Anything else that doesn't match — `type:'system'`,
+  // `type:'queue-operation'`, future unknown variants — is dropped.
+  // Resolve vendor's `normalizeAttachmentForAPI` from the bundle once
+  // per call. Tolerate a missing-export bundle (vitest without built
+  // dist): the fallback returns an empty array, so attachments are
+  // silently dropped — the same behavior we had before this patch
+  // landed, and strictly an improvement over serializing the raw
+  // attachment object (which the upstream Anthropic-compatible API
+  // rejects with 2013 / "input json is empty").
+  const normalizeBundle: any = await import(
+    /* @vite-ignore */ BUNDLE_URL as any
+  ).catch(() => ({}))
+  const normalizeAttachmentForAPI =
+    typeof normalizeBundle?.normalizeAttachmentForAPI === 'function'
+      ? (m: any) => {
+          try {
+            return normalizeBundle.normalizeAttachmentForAPI(m) ?? []
+          } catch (err) {
+            if (process.env.ZAI_DEBUG === '1') {
+              console.warn(
+                '[compat.runtime] vendor normalizeAttachmentForAPI failed:',
+                (err as Error).message,
+              )
+            }
+            return []
+          }
+        }
+      : (_m: any) => []
+  const zaiMessagesRaw: Array<{ role: 'user' | 'assistant'; content: unknown }> = []
+  for (const m of openccMessages) {
+    if (!m) continue
+    if (m.type === 'attachment') {
+      // Translate the attachment into zero or more user messages
+      // (vendor returns UserMessage[]). Each returned message is
+      // pushed in order so the tool_use / tool_result pairing the
+      // downstream sanitizer computes still lines up.
+      const translated = normalizeAttachmentForAPI(m.attachment) ?? []
+      for (const u of translated) {
+        const inner = u.message ?? u
+        if (inner && inner.role === 'user') {
+          zaiMessagesRaw.push({
+            role: 'user',
+            content: inner.content,
+          })
+        }
+      }
+      continue
+    }
+    if (
+      m.type !== 'user' &&
+      m.type !== 'assistant' &&
+      m.role !== 'user' &&
+      m.role !== 'assistant'
+    ) {
+      continue
+    }
     const inner = m.message ?? m
-    const role: 'user' | 'assistant' = inner.role ?? (m.type === 'user' ? 'user' : 'assistant')
+    if (!inner || (inner.role !== 'user' && inner.role !== 'assistant')) continue
     // Content can be a string OR an array of content blocks.
     // opencc's assistant messages may have content blocks with tool_use;
     // user messages may have tool_result blocks. Pass through.
-    const content = inner.content
-    return { role, content }
-  })
+    zaiMessagesRaw.push({
+      role: inner.role,
+      content: inner.content,
+    })
+  }
 
   // zai patch: sanitize `tool_result` blocks whose `tool_use_id` doesn't
   // match any preceding assistant `tool_use.id`. Anthropic's API surfaces
@@ -114,7 +189,7 @@ async function* translateCallModel(
   let droppedOrphanCount = 0
   const droppedOrphanIds = new Set<string>()
   const sanitized: Array<{ role: 'user' | 'assistant'; content: unknown }> = []
-  for (const m of zaiMessages as Array<{ role: 'user' | 'assistant'; content: unknown }>) {
+  for (const m of zaiMessagesRaw as Array<{ role: 'user' | 'assistant'; content: unknown }>) {
     if (m.role === 'assistant' && Array.isArray(m.content)) {
       for (const block of m.content as Array<{ type?: string; id?: string }>) {
         if (block?.type === 'tool_use' && typeof block.id === 'string') {
@@ -198,8 +273,8 @@ async function* translateCallModel(
   if (process.env.ZAI_DEBUG === '1') {
     console.log('[debug] translated zaiReq:', {
       model: openccReq.options?.model,
-      messagesCount: zaiMessages.length,
-      firstMessage: zaiMessages[0],
+      messagesCount: zaiMessagesRaw.length,
+      firstMessage: zaiMessagesRaw[0],
       systemPromptType: Array.isArray(systemPrompt) ? 'array' : typeof systemPrompt,
       systemPromptLength: Array.isArray(systemPrompt) ? systemPrompt.length : (systemPrompt as string)?.length,
     })
@@ -376,12 +451,87 @@ function buildDeps(zaiModelCaller?: ModelCaller) {
  * first iterations touch (getAppState / setAppState / options.tools /
  * abortController / queryTracking).
  */
+/**
+ * Bundle URL for the vendored opencc core (esbuild output at
+ * `dist/opencc-core.mjs`). The bundle re-exports the agent loader
+ * (`getAgentDefinitionsWithOverrides` / `clearAgentDefinitionsCache`)
+ * added by the zai bundle patch in `scripts/bundle-opencc.ts` — see
+ * the comment block there for the rationale (without the re-export
+ * esbuild tree-shakes the dead-from-query.ts symbols and the
+ * compat runtime can't reach the agent list).
+ */
+const BUNDLE_URL = '@zn-ai/zn-agent-core/opencc-core'
+
+/**
+ * Read the live sub-agent list from the vendored bundle so AgentTool.prompt
+ * can render the sub-agent table into the system prompt. Without this the
+ * LLM has no idea which sub-agents exist (compat's hardcoded empty
+ * agentDefinitions: { agents: [] } silently dropped the list).
+ *
+ * The vendor loader is `getAgentDefinitionsWithOverrides(cwd)`, memoized
+ * per-cwd internally, with the result shape `AgentDefinitionsResult`
+ * (AppStateStore.ts:232):
+ *
+ *   { activeAgents, allAgents, failedFiles?, allowedAgentTypes? }
+ *
+ * Wrapped to:
+ *   1. Tolerate a missing-export bundle (dev:node tests where bundle is
+ *      absent fall back to builtin-only).
+ *   2. Tolerate vendor loader throwing on cwd-related I/O errors —
+ *      return an empty AgentDefinitionsResult rather than let an
+ *      unrelated sub-agent loading glitch abort the main prompt.
+ *   3. Defensive coalescing — vendor's optional fields may not exist
+ *      in all shapes.
+ */
+async function loadAgentDefinitions(
+  cwd: string,
+): Promise<{
+  activeAgents: any[]
+  allAgents: any[]
+  failedFiles?: Array<{ path: string; error: string }>
+  allowedAgentTypes?: string[]
+}> {
+  const bundle: any = await import(/* @vite-ignore */ BUNDLE_URL as any).catch(
+    () => ({}),
+  )
+  const loader = bundle?.getAgentDefinitionsWithOverrides
+  if (typeof loader !== 'function') {
+    // Bundle not generated yet (vitest/node dev) or build upgrade
+    // dropped the re-export. Empty list so vendor AgentTool.prompt
+    // renders no sub-agents rather than crashing.
+    return { activeAgents: [], allAgents: [] }
+  }
+  try {
+    const r: any = await loader(cwd)
+    return {
+      activeAgents: Array.isArray(r?.activeAgents) ? r.activeAgents : [],
+      allAgents: Array.isArray(r?.allAgents) ? r.allAgents : [],
+      failedFiles: r?.failedFiles,
+      allowedAgentTypes: r?.allowedAgentTypes,
+    }
+  } catch (err) {
+    if (process.env.ZAI_DEBUG === '1') {
+      console.warn(
+        '[loadAgentDefinitions] vendor loader failed, returning empty:',
+        err,
+      )
+    }
+    return { activeAgents: [], allAgents: [] }
+  }
+}
+
 function syntheticToolUseContext(opts: {
   tools: any[]
   model: string
   systemPrompt: string
   cwd: string
   abortController?: AbortController
+  agentDefinitions: {
+    activeAgents: any[]
+    allAgents: any[]
+    failedFiles?: Array<{ path: string; error: string }>
+    allowedAgentTypes?: string[]
+  }
 }): any {
   const ac = opts.abortController ?? new AbortController()
   // Hardcode permissionMode to 'bypassPermissions' so opencc's vendor
@@ -443,12 +593,16 @@ function syntheticToolUseContext(opts: {
       mcpClients: [],
       mcpResources: {},
       isNonInteractiveSession: true,
-      agentDefinitions: {
-        agents: [],
-        builtinAgents: [],
-        customAgents: [],
-        forAgents: new Map(),
-      },
+      // zai patch: feed vendor's AgentDefinitionsResult shape so
+      // AgentTool.prompt (opencc-src/tools/AgentTool/AgentTool.tsx:296)
+      // can read activeAgents and render the sub-agent list into
+      // the system prompt. Compat previously hardcoded an empty
+      // object with the wrong field names ({ agents, builtinAgents,
+      // customAgents, forAgents }) — vendor's Tool.ts:188 actually
+      // expects { activeAgents, allAgents, failedFiles?, allowedAgentTypes? }
+      // (AppStateStore.ts:232), so the prior shape never even
+      // matched the interface contract.
+      agentDefinitions: opts.agentDefinitions,
       customSystemPrompt: opts.systemPrompt,
       querySource: 'sdk',
     },
@@ -513,6 +667,14 @@ export async function buildOpenccQueryParams(
   })
   const tools = (opts.tools ?? []) as any[]
 
+  // zai patch: read the live sub-agent list from the vendor bundle so
+  // AgentTool.prompt can render the "Available agent types and the
+  // tools they have access to" section. Run BEFORE syntheticToolUseContext
+  // because vendor's getAgentDefinitionsWithOverrides may itself touch
+  // the plugin / agent md caches; the cwd-based memoization built into
+  // vendor keeps repeated calls cheap for our session-rotation flow.
+  const agentDefinitions = await loadAgentDefinitions(opts.cwd ?? process.cwd())
+
   const abortController = new AbortController()
   if (opts.abortSignal) {
     if (opts.abortSignal.aborted) abortController.abort(opts.abortSignal.reason)
@@ -542,6 +704,7 @@ export async function buildOpenccQueryParams(
       systemPrompt: '',
       cwd: opts.cwd ?? process.cwd(),
       abortController,
+      agentDefinitions,
     }),
     fallbackModel: undefined,
     querySource: 'sdk',
@@ -559,4 +722,66 @@ export async function buildOpenccQueryParams(
   }
 
   return params as QueryParamsOutput
+}
+
+/**
+ * Render every tool's dynamic description by invoking its async `prompt()`
+ * method, then mutate the result back onto `tool.description` so zai's
+ * modelCaller (which reads `t.description` statically) sees the post-
+ * rendered string.
+ *
+ * Why this is necessary:
+ *
+ *   vendor's `utils/api.ts:221` calls `await tool.prompt({...})` inside
+ *   `toolToAPISchema` to derive the LLM-facing description. The prompt
+ *   of `AgentTool` (opencc-src/tools/AgentTool/prompt.ts:188) reads the
+ *   live `agents` array and renders the `Available agent types and the
+ *   tools they have access to` section. zai's `modelCaller.ts` instead
+ *   reads `t.description` (the static base field, which for AgentTool
+ *   is just `'Launch a new agent'`) — bypassing the dynamic prompt
+ *   machinery entirely. Net effect: the LLM sees the AgentTool with
+ *   no sub-agent listing and cannot dispatch AgentTool correctly.
+ *
+ * The compat path skips vendor's claude.ts (which would have called
+ * `toolToAPISchema` automatically), so we have to render here. The
+ * mutation is safe because vendor's `Tool` interface declares
+ * `description` as a method, not a property — mutating the property
+ * after construction doesn't break any downstream reader (vendor only
+ * ever reads `description` as a method, and the mutation shadows the
+ * method via the property-of-the-same-name lookup).
+ *
+ * Tools without a `prompt` method (or where calling prompt throws) are
+ * left untouched — the static `description` is enough for those.
+ */
+export async function renderToolDescriptions(
+  tools: any[],
+  ctx: {
+    getToolPermissionContext: () => Promise<unknown>
+    agents: any[]
+    allowedAgentTypes?: string[]
+  },
+): Promise<void> {
+  await Promise.all(
+    tools.map(async (t) => {
+      if (typeof t?.prompt !== 'function') return
+      try {
+        const rendered = await t.prompt({
+          getToolPermissionContext: ctx.getToolPermissionContext,
+          tools,
+          agents: ctx.agents,
+          allowedAgentTypes: ctx.allowedAgentTypes,
+        })
+        if (typeof rendered === 'string' && rendered.length > 0) {
+          t.description = rendered
+        }
+      } catch (err) {
+        if (process.env.ZAI_DEBUG === '1') {
+          console.warn(
+            `[renderToolDescriptions] tool "${t?.name ?? 'unknown'}" prompt() failed, keeping static description:`,
+            (err as Error).message,
+          )
+        }
+      }
+    }),
+  )
 }

@@ -114,13 +114,10 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
   // AskRegistry that intercepts the tool's `ask_pending` event and
   // waits for the user to POST /api/agent/answer. opencc's default
   // AskUserQuestion assumes an in-process interactive prompt which
-  // doesn't fit zai's HTTP-driven flow. `bridgeCtx` is set at call
-  // time by the bridge (see runViaOpenccQuery); it's `{ sessionId,
-  // askRegistry, onYield }` so the wrapper can construct zai's
-  // ToolCallCtx.
-  const AskUserQuestionOpencc = wrapAskUserQuestionToolAsOpencc(
-    (globalThis as any).__zaiBridgeCtx ?? {},
-  )
+  // doesn't fit zai's HTTP-driven flow. The wrapper reads
+  // `__zaiBridgeCtx` itself at call time so the cached wrapper stays
+  // correct across concurrent sessions (matches SkillTool.ts pattern).
+  const AskUserQuestionOpencc = wrapAskUserQuestionToolAsOpencc()
 
   // 4 个 Task 工具 (TaskCreate / TaskGet / TaskUpdate / TaskList) 接
   // compat/tools/tasks/ 的 zai-native 实现,通过 wrapTaskToolsAsOpencc

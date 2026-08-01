@@ -13,6 +13,7 @@ import { pathToFileURL, fileURLToPath } from 'node:url'
 import type { QueryOptions, OpenccAdapterConfig } from './types.js'
 import type { RuntimeEvent } from './events.js'
 import { buildOpenccQueryParams } from './buildOpenccQueryParams.js'
+import { renderToolDescriptions } from './buildOpenccQueryParams.js'
 import { translateSdkToRuntime } from './sdkEventAdapter.js'
 import { getOpenccBuiltinTools } from '../tools/opencc/builtin.js'
 import { toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
@@ -26,6 +27,39 @@ import { toRuntimeErrorEvent, toAbortedEvent } from './streamAdapter.js'
 const BUNDLE_URL = '@zn-ai/zn-agent-core/opencc-core'
 
 let openccModulePromise: Promise<any> | null = null
+
+/**
+ * Translate a tool-callback RuntimeEvent into the ServerEvent shape the
+ * eventBus (and downstream SSE) expects. Today the only callback used is
+ * AskUserQuestion's `tool_use:ask_pending`, which must become a
+ * `prompt.ask` ServerEvent for the frontend's QuestionCard to render
+ * (useEventStream.ts:56 / eventSource.ts:35 only dispatch `prompt.ask`).
+ *
+ * Exported for unit testing — the production call site is the
+ * `__zaiBridgeCtx.onYield` closure inside `runViaOpenccQuery`.
+ *
+ * Returns `undefined` when the event has no known ServerEvent mapping;
+ * the caller should then either queue the raw event for later drainage
+ * or emit it as-is.
+ */
+export function translateToolCallbackToServerEvent(
+  ev: { type: string; [k: string]: unknown },
+  sessionId: string,
+): { type: 'prompt.ask'; sessionId: string; toolUseId: string; questions: unknown[]; metadata?: unknown } | undefined {
+  if (ev.type === 'tool_use:ask_pending') {
+    const askId = ((ev.id as string) ??
+      (ev.toolUseId as string) ??
+      '') as string
+    return {
+      type: 'prompt.ask',
+      sessionId,
+      toolUseId: askId,
+      questions: (ev.questions as unknown[]) ?? [],
+      ...(ev.metadata ? { metadata: ev.metadata } : {}),
+    }
+  }
+  return undefined
+}
 
 async function importOpenccSrc() {
   if (openccModulePromise) return openccModulePromise
@@ -115,13 +149,32 @@ export async function* runViaOpenccQuery(
       // between opencc events never flushes until the tool returns
       // (which is when the user has already answered, too late).
       //
-      // Workaround: the route attaches an EventEmitter to
+      // Workaround: the route attaches the ServerEventBus to
       // globalThis.__zaiEventBus at init time. We emit directly to
       // it so prompt.ask / tool_call events reach the SSE
       // immediately, while the tool is still blocked awaiting the
       // user's answer.
+      //
+      // CRITICAL (Bug B): the bus expects ServerEvent-shaped payloads,
+      // not raw RuntimeEvent. Emitting `{type:'tool_use:ask_pending',
+      // ...}` arrives at the SSE consumer with that exact event type —
+      // but the frontend's useEventStream only dispatches
+      // `prompt.ask` (useEventStream.ts:56 / eventSource.ts:35), so the
+      // modal never opens. Mirror routes/agent.ts:252-269 and translate
+      // ask_pending → prompt.ask here before emitting.
       const bus = (globalThis as any).__zaiEventBus
       if (bus && typeof bus.emit === 'function') {
+        const translated = translateToolCallbackToServerEvent(ev, sessionId)
+        if (translated) {
+          bus.emit(translated)
+          return
+        }
+        // Other RuntimeEvent types emitted from tool callbacks are
+        // forwarded as-is for now. Today the only known caller is
+        // AskUserQuestion (compat/tools/index.ts:326) which yields
+        // tool_use:ask_pending; future zai-native tools using ctx.onYield
+        // should add a translation branch in translateToolCallbackToServerEvent
+        // rather than relying on raw forwarding.
         bus.emit({
           type: ev.type,
           sessionId,
@@ -151,6 +204,23 @@ export async function* runViaOpenccQuery(
   if (params.toolUseContext?.options) {
     params.toolUseContext.options.tools = params.tools
   }
+  // zai patch: vendor's `utils/api.ts:221` derives each tool's LLM-facing
+  // description by awaiting `tool.prompt({ agents, ... })`. We can't go
+  // through vendor's `toolToAPISchema` because zai bypasses vendor's
+  // claude.ts and uses its own modelCaller (`modelCaller.ts:359-365`)
+  // which reads the static `t.description` field. Render every tool's
+  // dynamic description here and mutate back so the LLM sees the
+  // AgentTool listing the actual sub-agents it can dispatch. Especially
+  // important for AgentTool — without this, the LLM has no idea which
+  // `subagent_type` values are valid.
+  await renderToolDescriptions(params.tools, {
+    getToolPermissionContext: async () =>
+      (params.toolUseContext?.getToolPermissionContext?.()) ?? {},
+    agents:
+      params.toolUseContext?.options?.agentDefinitions?.activeAgents ?? [],
+    allowedAgentTypes:
+      params.toolUseContext?.options?.agentDefinitions?.allowedAgentTypes,
+  })
 
   // 3. Lazy import opencc-src.
   let openccQuery: any

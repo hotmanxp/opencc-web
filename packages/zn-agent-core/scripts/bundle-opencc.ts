@@ -127,6 +127,52 @@ const featureFlagPlugin: esbuild.Plugin = {
         modified = true
       }
 
+      // zai patch (sub-agent prompt injection): the entry module is
+      // `src/opencc-src/query.ts` — esbuild's tree-shaker trims every
+      // named export it can't see referenced by the entry. The vendor
+      // agent list loader (`getAgentDefinitionsWithOverrides` /
+      // `clearAgentDefinitionsCache` in `tools/AgentTool/loadAgentsDir.ts`)
+      // is dead code from query.ts' perspective, so its export would
+      // not survive bundling. compat's buildOpenccQueryParams needs to
+      // read the live agent list at runtime so AgentTool.prompt can
+      // render the sub-agent table into the system prompt (otherwise
+      // the LLM has no idea which sub-agents exist). Append a
+      // re-export pinned to the entry so esbuild keeps the symbols
+      // reachable AND names them on the bundle's export block.
+      const queryReExportSentinel = /\/\/ zai-bundle: agent-loader re-export\n$/
+      if (
+        args.path.endsWith('opencc-src/query.ts') &&
+        !queryReExportSentinel.test(contents)
+      ) {
+        contents =
+          contents +
+          '\n// zai-bundle: agent-loader re-export\n' +
+          'export { getAgentDefinitionsWithOverrides, clearAgentDefinitionsCache } from "./tools/AgentTool/loadAgentsDir.js"\n'
+        modified = true
+      }
+
+      // 2nd addition (also zai patch): compat needs vendor's
+      // `normalizeMessagesForAPI` + `normalizeAttachmentForAPI` from
+      // `utils/messages.ts` to translate `attachment` SDK messages
+      // (agent_listing_delta / plan_mode_reentry / relevant_memories /
+      // etc.) into user `<system-reminder>` text messages. Without
+      // this translation compat's filter has to drop those messages,
+      // losing model-facing state (plan re-entry flags, memory
+      // injections, hook outputs, etc.). Pin the symbols here so they
+      // survive tree-shaking and become reachable from compat.
+      const normalizeReExportSentinel =
+        /\/\/ zai-bundle: messages-normalize re-export\n$/
+      if (
+        args.path.endsWith('opencc-src/query.ts') &&
+        !normalizeReExportSentinel.test(contents)
+      ) {
+        contents =
+          contents +
+          '\n// zai-bundle: messages-normalize re-export\n' +
+          'export { normalizeMessagesForAPI, normalizeAttachmentForAPI } from "./utils/messages.js"\n'
+        modified = true
+      }
+
       // zai patch (3rd root cause, after vendor permission system +
       // wrapAsOpenccTool default + forceAllowCheckPermissions on every
       // vendor tool's checkPermissions): some OpenCC plugins loaded
