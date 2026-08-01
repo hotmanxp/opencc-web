@@ -318,7 +318,28 @@ async function* translateCallModel(
   let assistantId: string | undefined
   let assistantModel: string | undefined
   let assistantContent: any[] = []
-  const pendingToolInputJson = new Map<number, string>()
+  const pendingToolInputJson = new Map<string, string>()
+  // zai patch (third layer of the parallel-tool_use input corruption fix):
+  // 之前的 lookup 完全依赖 `assistantContent[ev.index]` 做位置对齐 — 但 proxy
+  // 可能在三种情况下破坏对齐 (实测回归测试覆盖):
+  //   A. content_block_delta 漏发 ev.index
+  //   B. 复用 ev.index (两个 tool_use 都给 idx=0)
+  //   C. start/stop 顺序错乱
+  // 这三种情况 push 后的 array 位置与 delta 期望的位置可能错位, 整个 input_json_delta
+  // 被写到错误的 block (或干脆因为 `assistantContent[undefined]===undefined` 静默丢).
+  //
+  // 修复: tool_use 的 input_json_delta + content_block_stop 走 cb.id lookup
+  // (`toolUseBlocksById.get(currentOpenToolUseId)`) 而不是 `assistantContent[ev.index]`
+  // — cb.id 是 Anthropic 协议保证的唯一不变量, 不依赖 proxy 的 index 行为.
+  // `currentOpenToolUseId` 每次 content_block_start(tool_use) 时更新, content_block_stop
+  // 时清掉. text_delta / thinking_delta 仍走 idx lookup (text/thinking blocks proxy
+  // 不会复用 idx, push 顺序即可信).
+  //
+  // `pendingToolInputJson` 仍按 key 分桶, 但 key 现在用 cb.id (string) 而不是 idx (number).
+  // 实际 Map<any, string> 容许 number + string 两种 key 同时存在, 但清理逻辑统一按
+  // cb.id 和 ev.index 双删, 防止一种路径漏掉另一种.
+  const toolUseBlocksById = new Map<string, any>()
+  let currentOpenToolUseId: string | null = null
   let lastStopReason: string | null = null
   const flush = (stopReason: string | null) => {
     if (assistantContent.length === 0 && !assistantId && !assistantModel) return
@@ -338,6 +359,8 @@ async function* translateCallModel(
     assistantModel = undefined
     assistantContent = []
     pendingToolInputJson.clear()
+    toolUseBlocksById.clear()
+    currentOpenToolUseId = null
     lastStopReason = null
     return message
   }
@@ -370,31 +393,74 @@ async function* translateCallModel(
       } else if (cb?.type === 'thinking') {
         assistantContent.push({ type: 'thinking', thinking: '' })
       } else if (cb?.type === 'tool_use') {
-        assistantContent.push({
+        const tuBlock = {
           type: 'tool_use',
           id: cb.id,
           name: cb.name,
           input: {},
-        })
+        }
+        assistantContent.push(tuBlock)
+        // Mirror to id-keyed map for delta/stop fallback lookup.
+        if (typeof cb.id === 'string') {
+          toolUseBlocksById.set(cb.id, tuBlock)
+          currentOpenToolUseId = cb.id
+        }
       }
     } else if (t === 'content_block_delta') {
       const d = ev?.delta
       const idx = ev?.index
-      const block = assistantContent[idx]
+      // Lookup strategy for tool_use input_json_delta:
+      //
+      // We MUST NOT trust `assistantContent[ev.index]` for tool_use blocks,
+      // because proxy index semantics are unreliable (observed live 2026-08-01:
+      //   A. idx missing on delta → assistantContent[undefined] === undefined
+      //   B. idx reused for two blocks → push order != delta lookup order
+      //   C. start/stop out of order → push positions don't match stop positions).
+      //
+      // Instead, ALWAYS route input_json_delta to the block keyed by
+      // currentOpenToolUseId (the most-recently-started tool_use that
+      // hasn't yet stopped). This works for ALL three cases plus the
+      // normal sequential case because content_block_start sets
+      // currentOpenToolUseId and content_block_stop clears it.
+      //
+      // text_delta / thinking_delta still use the idx-based lookup since
+      // text/thinking blocks are pushed in order and proxy doesn't reuse
+      // those indices.
+      let block: any = undefined
+      let effectiveIdx: any = idx
+      if (d?.type === 'input_json_delta' && currentOpenToolUseId) {
+        block = toolUseBlocksById.get(currentOpenToolUseId)
+        // Use the tool_use id as the pendingToolInputJson key so it's
+        // stable across the whole turn (idx may be wrong, id never is).
+        effectiveIdx = currentOpenToolUseId
+      } else {
+        block = typeof idx === 'number' ? assistantContent[idx] : undefined
+      }
       if (!block) continue
       if (d?.type === 'text_delta' && typeof d.text === 'string') {
         block.text = (block.text ?? '') + d.text
       } else if (d?.type === 'thinking_delta' && typeof d.thinking === 'string') {
         block.thinking = (block.thinking ?? '') + d.thinking
       } else if (d?.type === 'input_json_delta' && typeof d.partial_json === 'string') {
-        const partialJson = (pendingToolInputJson.get(idx) ?? '') + d.partial_json
-        pendingToolInputJson.set(idx, partialJson)
+        const key: any = effectiveIdx ?? idx ?? currentOpenToolUseId
+        const partialJson = (pendingToolInputJson.get(key) ?? '') + d.partial_json
+        pendingToolInputJson.set(key, partialJson)
         block.input = partialJson
       }
     } else if (t === 'content_block_stop') {
       // Parse accumulated tool_use input JSON now that the block closed.
+      // Same lookup strategy as content_block_delta: prefer
+      // currentOpenToolUseId (always set to the right tool_use block on
+      // content_block_start) over assistantContent[ev.index] (which is
+      // unreliable for proxy index quirks).
       const index = ev?.index
-      const tu = assistantContent[index]
+      let tu: any = undefined
+      if (currentOpenToolUseId) {
+        tu = toolUseBlocksById.get(currentOpenToolUseId)
+      }
+      if (!tu && typeof index === 'number') {
+        tu = assistantContent[index]
+      }
       if (tu?.type === 'tool_use' && typeof tu.input === 'string') {
         try {
           tu.input = JSON.parse(tu.input)
@@ -432,6 +498,17 @@ async function* translateCallModel(
             `upstream proxy likely failed to stream content_block_stop+input_json_delta. Aborting query; ` +
             `model must retry with explicit arguments. toolUseId=${tu.id ?? 'unknown'}`,
         )
+      }
+      // Cleanup the per-block state for the just-closed tool_use so the
+      // next parallel block can claim currentOpenToolUseId. We use the
+      // block's own id (not ev.index, which may be misaligned) and
+      // additionally clean the idx entry so the buffer map doesn't
+      // accumulate stale entries turn over turn.
+      if (tu?.type === 'tool_use' && typeof tu.id === 'string') {
+        if (currentOpenToolUseId === tu.id) {
+          currentOpenToolUseId = null
+        }
+        pendingToolInputJson.delete(tu.id)
       }
     } else if (t === 'message_delta') {
       lastStopReason = ev?.delta?.stop_reason ?? null

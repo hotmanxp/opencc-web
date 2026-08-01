@@ -104,9 +104,27 @@ export async function* translateRuntimeEvents(
   sessionId: string,
 ): AsyncGenerator<ServerEventInput> {
   let turnIndex = 0;
-  let toolInputBuffer = "";
-  let pendingToolUseId: string | null = null;
-  let pendingToolName: string | null = null;
+  // 平行 tool_use block: Anthropic SDK 在一条 assistant message 里允许 N 个
+  // tool_use blocks (各 block 自带 index 0..N-1). 老实现是单 string 缓冲,
+  // 第二个 block 的 input_json_delta 拼到第一个后面, JSON.parse 失败 →
+  // raw mashed string 进 runtime.tool_call.input, 触发
+  // "[buildOpenccQueryParams] tool_use ... emitted empty input" 路径.
+  // 按 ev.index 分桶避免 mash. 注意: buildOpenccQueryParams.ts 在更上游
+  // 已经有同款 Map<number, string> 修复, 但 translateRuntimeEvents 之前是
+  // 独立同款 bug 没修 — 这里修齐, 两条 buffer 都是 per-index.
+  //
+  // pendingToolUseId/pendingToolName 也按 index 分桶: 单 string 时 block 0
+  // content_block_stop 一旦 yield + 清空, block 1 stop 时 pendingToolUseId
+  // 已被清成 null → 跳过 emit, 仍只产 1 条 tool_call.
+  //
+  // tool_use:start / tool_use:done 是非流式事件对, 一次只对应一个 tool,
+  // 用单 string pending 也安全 — 走另一组局部变量, 不混用 per-index 桶.
+  const toolInputBuffers = new Map<number, string>();
+  const pendingToolUseIds = new Map<number, string>();
+  const pendingToolNames = new Map<number, string>();
+  let pendingBlockIndex: number | null = null;
+  let nonStreamedToolUseId: string | null = null;
+  let nonStreamedToolName: string | null = null;
   // 跟踪是否见过 message_stop. queryEngine 在 message_stop 时会 break
   // for-await modelStream 提前 return (避免 anthropic SDK 永远等 EOF), 这种
   // 情况下 message_stop event 可能不被 forward 给这里, 此时最后一次 yield
@@ -128,14 +146,18 @@ export async function* translateRuntimeEvents(
         // text 块的 content_block_stop 仍持有上一个 tool_use 的 pendingToolUseId,
         // 会再 emit 一条 input=空字符串 的 runtime.tool_call, 把客户端 store 里
         // 已经存好的 input (useAgentStore upsertToolCall 的 `||` 链) 覆盖成 {}.
+        const idx = typeof ev.index === "number" ? ev.index : null;
         if (block?.type === "tool_use") {
-          toolInputBuffer = "";
-          pendingToolUseId = block.id ?? null;
-          pendingToolName = block.name ?? null;
+          if (idx !== null) {
+            toolInputBuffers.set(idx, "");
+            if (block.id != null) pendingToolUseIds.set(idx, block.id);
+            if (block.name != null) pendingToolNames.set(idx, block.name);
+          }
+          pendingBlockIndex = idx;
         } else {
-          toolInputBuffer = "";
-          pendingToolUseId = null;
-          pendingToolName = null;
+          // 非 tool_use block 到达: 清掉当前 pending, 但其它并行 block 的
+          // 桶不动 — 它们仍在等自己的 deltas + stop.
+          pendingBlockIndex = null;
         }
         break;
       }
@@ -159,8 +181,18 @@ export async function* translateRuntimeEvents(
           delta?.type === "input_json_delta" &&
           typeof delta.partial_json === "string"
         ) {
-          // Stream the JSON fragments; the assembled input is emitted at content_block_stop
-          toolInputBuffer += delta.partial_json;
+          // Stream the JSON fragments; the assembled input is emitted at content_block_stop.
+          // 按 ev.index 分桶: 平行 tool_use blocks 的 delta 不能 mash 到同一
+          // string. 若 ev.index 缺失或与 pendingBlockIndex 不一致, 仍尝试
+          // 走 pendingBlockIndex (LLM proxy 可能漏发 index, 但 content_block_start
+          // 已经登记过); 都没有则丢弃该 delta 防止破坏其它 block 的 buffer.
+          const bufIdx = typeof ev.index === "number" ? ev.index : pendingBlockIndex;
+          if (bufIdx !== null) {
+            toolInputBuffers.set(
+              bufIdx,
+              (toolInputBuffers.get(bufIdx) ?? "") + delta.partial_json,
+            );
+          }
         } else if (
           delta?.type === "thinking_delta" &&
           typeof delta.thinking === "string"
@@ -178,31 +210,45 @@ export async function* translateRuntimeEvents(
         }
         break;
       }
-      case "content_block_stop":
-        if (pendingToolUseId && pendingToolName) {
-          let parsedInput: unknown = toolInputBuffer;
-          if (toolInputBuffer.trim()) {
-            try {
-              parsedInput = JSON.parse(toolInputBuffer);
-            } catch {
-              parsedInput = toolInputBuffer;
+      case "content_block_stop": {
+        // 用 ev.index (权威) 兜底 pendingBlockIndex: Anthropic SDK 通常两个
+        // 都给, 但万一对端只发其中一个, 仍能读到正确桶.
+        const stopIdx = typeof ev.index === "number" ? ev.index : pendingBlockIndex;
+        if (stopIdx !== null) {
+          const id = pendingToolUseIds.get(stopIdx);
+          const name = pendingToolNames.get(stopIdx);
+          if (id && name) {
+            const buf = toolInputBuffers.get(stopIdx) ?? "";
+            let parsedInput: unknown = buf;
+            if (buf.trim()) {
+              try {
+                parsedInput = JSON.parse(buf);
+              } catch {
+                parsedInput = buf;
+              }
             }
+            yield {
+              type: "runtime.tool_call",
+              sessionId,
+              turnIndex,
+              // toolUseId 必填 (见 shared/events.ts schema 注释): 客户端按它
+              // upsert, runtime.tool_result 同 id 才能命中 start 条目.
+              toolUseId: id,
+              toolName: name,
+              input: parsedInput,
+            };
           }
-          yield {
-            type: "runtime.tool_call",
-            sessionId,
-            turnIndex,
-            // toolUseId 必填 (见 shared/events.ts schema 注释): 客户端按它
-            // upsert, runtime.tool_result 同 id 才能命中 start 条目.
-            toolUseId: pendingToolUseId,
-            toolName: pendingToolName,
-            input: parsedInput,
-          };
-          toolInputBuffer = "";
-          pendingToolUseId = null;
-          pendingToolName = null;
         }
+        // 收尾: 删桶 + 清 pending (无论是否 emit 都清理, 避免下个 block
+        // 误用陈旧 buffer)
+        if (stopIdx !== null) {
+          toolInputBuffers.delete(stopIdx);
+          pendingToolUseIds.delete(stopIdx);
+          pendingToolNames.delete(stopIdx);
+        }
+        pendingBlockIndex = null;
         break;
+      }
       case "tool_use:start": {
         // Direct tool start (non-streamed); emit tool_call immediately.
         const id = (ev.id as string) ?? (ev.toolUseId as string) ?? "";
@@ -220,19 +266,19 @@ export async function* translateRuntimeEvents(
           input: startInput,
         };
         // Remember id so the subsequent done/error uses the same identifier
-        pendingToolUseId = id;
-        pendingToolName = name;
+        nonStreamedToolUseId = id;
+        nonStreamedToolName = name;
         break;
       }
       case "tool_use:done": {
         const id = ((ev.id as string) ??
           (ev.toolUseId as string) ??
-          pendingToolUseId) as string;
+          nonStreamedToolUseId) as string;
         // toolName / input 也一并 emit: 前端 upsertToolCall 守卫依靠这两个
         // 字段识别 TodoWrite — TodoWrite 的 tool_use (start) 阶段被守卫
         // 吞掉不写 store, done 路径上 prev 同 toolUseId 不存在, 必须用
         // 当前事件自身携带的 toolName / input.
-        const toolName = ((ev.name as string) ?? pendingToolName) as string;
+        const toolName = ((ev.name as string) ?? nonStreamedToolName) as string;
         // 关键: input 不要默认 `{}`. zai-agent-core 的 tool_use:done 事件
         // 不带 input (input 已经在 start 阶段从 content_block_stop 缓存到
         // pendingToolName 兄弟字段, 或者 prev entry 已存). 若强行给 `{}`
@@ -342,9 +388,10 @@ export async function* translateRuntimeEvents(
         yield { type: "runtime.done", sessionId, turnIndex };
         turnIndex++;
         // Reset tool accumulator between turns
-        toolInputBuffer = "";
-        pendingToolUseId = null;
-        pendingToolName = null;
+        toolInputBuffers.clear();
+        pendingToolUseIds.clear();
+        pendingToolNames.clear();
+        pendingBlockIndex = null;
         break;
       case "runtime.error":
       case "runtime.aborted": {
