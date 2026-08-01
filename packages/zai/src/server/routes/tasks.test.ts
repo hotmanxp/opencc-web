@@ -144,7 +144,7 @@ describe('GET /api/tasks', () => {
       async removeSession() {},
     } as unknown as AgentRuntime
     mockRuntime = await createRuntime(hangingAgent)
-    __setBackgroundRuntime(mockRuntime)
+    __setBackgroundRuntime(wrapWithJobStarted(mockRuntime))
 
     const dispatched = await mockRuntime.dispatch({ prompt: 'a' })
     // 等 scheduleNext (setImmediate macrotask) 把 task 推到 running
@@ -215,7 +215,7 @@ describe('GET /api/tasks/:id/events', () => {
       },
     ])
     mockRuntime = await createRuntime(agent)
-    __setBackgroundRuntime(mockRuntime)
+    __setBackgroundRuntime(wrapWithJobStarted(mockRuntime))
 
     const dispatchRes = await request(makeApp())
       .post('/api/tasks')
@@ -287,7 +287,7 @@ describe('GET /api/tasks/:id/events', () => {
       },
     ])
     mockRuntime = await createRuntime(agent)
-    __setBackgroundRuntime(mockRuntime)
+    __setBackgroundRuntime(wrapWithJobStarted(mockRuntime))
 
     const dispatchRes = await request(makeApp())
       .post('/api/tasks')
