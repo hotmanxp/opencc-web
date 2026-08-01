@@ -26,6 +26,8 @@
 import { randomUUID } from 'node:crypto'
 import type { QueryOptions, OpenccAdapterConfig, QueryParamsOutput } from './types.js'
 import type { ModelCaller } from './modelCaller.js'
+import { serializeForAnthropic } from '../transcript/persistence.js'
+import type { TranscriptMessage } from '../transcript/types.js'
 
 /**
  * Translate opencc's `queryModelWithStreaming` request to zai's
@@ -701,6 +703,63 @@ function alwaysAllowCanUseTool(): any {
 }
 
 /**
+ * Read the transcript for `opts.transcriptId` from the adapter's store and
+ * convert prior turns to opencc wire format. Returns [] when:
+ *   - no transcriptId was passed
+ *   - no store was wired in
+ *   - the file doesn't exist yet (new session — fall through)
+ *   - the file is empty / unreadable (best-effort)
+ *
+ * Never throws — a missing transcript must NOT block the request.
+ */
+async function loadTranscriptHistory(
+  opts: QueryOptions,
+  config: OpenccAdapterConfig,
+): Promise<any[]> {
+  const transcriptId = opts.transcriptId
+  const store = config.transcriptStore
+  if (!transcriptId || !store) return []
+
+  let file: Awaited<ReturnType<NonNullable<typeof store.read>>>
+  try {
+    file = await store.read(transcriptId, { cwd: opts.cwd })
+  } catch (err) {
+    // ENOENT is expected for a brand-new session; anything else gets a debug
+    // log so we can diagnose without blocking the user.
+    if (process.env.ZAI_DEBUG === '1') {
+      const code = (err as NodeJS.ErrnoException | undefined)?.code
+      if (code !== 'ENOENT') {
+        console.error('[buildOpenccQueryParams] transcript read failed', err)
+      }
+    }
+    return []
+  }
+
+  // serializeForAnthropic skips v1 (no `message` field) and compact_boundary;
+  // it also merges adjacent tool_result blocks into one user message per the
+  // Anthropic protocol — we get a clean `[user, assistant, user, …]` array.
+  const sdkMessages = serializeForAnthropic(file.messages ?? [])
+  if (sdkMessages.length === 0) return []
+
+  // Map to opencc's wrapper format. Reuse the transcript message's uuid
+  // so subsequent runs reference the same wire-id (stable across turns);
+  // fall back to a positional id for any entry that somehow lacks one.
+  return sdkMessages.map((m, i) => {
+    const sourceMsg = (file.messages ?? [])[i] as TranscriptMessage | undefined
+    const uuid = sourceMsg?.uuid ?? `resume-${transcriptId}-${i}`
+    const ts = sourceMsg?.timestamp
+      ? new Date(sourceMsg.timestamp).toISOString()
+      : new Date().toISOString()
+    return {
+      type: m.role,
+      uuid,
+      timestamp: ts,
+      message: { role: m.role, content: m.content },
+    }
+  })
+}
+
+/**
  * Map zai's QueryOptions + openccConfig to a minimally-populated opencc
  * QueryParams. Each missing subsystem is left as a small stub.
  */
@@ -708,11 +767,20 @@ export async function buildOpenccQueryParams(
   opts: QueryOptions,
   config: OpenccAdapterConfig,
 ): Promise<QueryParamsOutput> {
+  // Resume path: preload prior transcript turns so the LLM sees the full
+  // conversation history (otherwise every request is single-turn and
+  // session continuity breaks). Only runs when:
+  //   1. The caller passed a transcriptId (existing session, not a brand-new one)
+  //   2. The adapter received a transcriptStore from the host
+  //   3. The transcript file actually exists on disk (new session: skip)
+  // On any failure we fall through to single-turn behavior — better than
+  // crashing the whole request when one disk read fails.
+  const historyMessages = await loadTranscriptHistory(opts, config)
   // Convert zai QueryOptions.prompt (string | UserMessage | UserMessage[])
   // to opencc's expected Message[] format:
   //   { type: 'user'|'assistant', uuid, timestamp, message: { role, content } }
   const rawMessages = Array.isArray(opts.prompt) ? opts.prompt : [opts.prompt]
-  const messages = rawMessages.map((m, i) => {
+  const newTurnMessages = rawMessages.map((m, i) => {
     if (typeof m === 'string') {
       return {
         type: 'user' as const,
@@ -730,6 +798,9 @@ export async function buildOpenccQueryParams(
       message: { role: 'user' as const, content: m.content },
     }
   })
+  // History first so the new user turn lands at the tail of the conversation
+  // (Anthropic protocol: messages must alternate user/assistant).
+  const messages = [...historyMessages, ...newTurnMessages]
   const tools = (opts.tools ?? []) as any[]
 
   // zai patch: read the live sub-agent list from the vendor bundle so

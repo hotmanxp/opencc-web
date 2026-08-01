@@ -53,6 +53,11 @@ export class DefaultAgentRuntime implements AgentRuntime {
       ...(this.config.pluginRuntime
         ? { pluginRuntime: this.config.pluginRuntime }
         : {}),
+      // Expose the transcript store to the adapter so the resume path in
+      // `buildOpenccQueryParams` can preload prior turns into `params.messages`.
+      // The bridge only feeds `opts.prompt` by default; without this, each
+      // request is a single-turn context and session continuity breaks.
+      transcriptStore: this.store,
     }
     return runViaOpenccQuery(opts, openccConfig)
   }

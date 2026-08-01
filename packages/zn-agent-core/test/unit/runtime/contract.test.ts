@@ -60,7 +60,13 @@ describe('DefaultAgentRuntime.run — bridge is now the default backend (Phase 5
       tools: [{ name: 'X' }],
     } as any
     await drain(rt.run(opts))
-    expect(openccBridgeMock.runViaOpenccQuery).toHaveBeenCalledWith(opts, {})
+    // transcriptStore is always injected (built from dataDir) so the
+    // resume path can preload prior turns; assert on the opts arg, not
+    // the openccConfig shape (see next test).
+    expect(openccBridgeMock.runViaOpenccQuery).toHaveBeenCalledWith(
+      opts,
+      expect.objectContaining({ transcriptStore: expect.anything() }),
+    )
   })
 
   it('passes openccConfig through to the bridge', async () => {
@@ -78,9 +84,16 @@ describe('DefaultAgentRuntime.run — bridge is now the default backend (Phase 5
       sessionId: 's',
     } as any))
 
+    // openccConfig from caller is preserved AND transcriptStore is auto-
+    // appended; assert both keys make it through.
     expect(openccBridgeMock.runViaOpenccQuery).toHaveBeenCalledWith(
       expect.anything(),
-      openccConfig,
+      expect.objectContaining({
+        mcpPool: { tag: 'pool' },
+        hookRunner: { tag: 'hooks' },
+        skillsDirs: ['/agents'],
+        transcriptStore: expect.anything(),
+      }),
     )
   })
 
@@ -91,9 +104,10 @@ describe('DefaultAgentRuntime.run — bridge is now the default backend (Phase 5
       cwd: '/tmp',
       sessionId: 's',
     } as any))
+    // Even with no caller openccConfig, transcriptStore is always injected.
     expect(openccBridgeMock.runViaOpenccQuery).toHaveBeenCalledWith(
       expect.anything(),
-      {},
+      expect.objectContaining({ transcriptStore: expect.anything() }),
     )
   })
 })

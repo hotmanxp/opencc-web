@@ -222,6 +222,16 @@ export type QueryOptions = {
  * Pass into DefaultAgentRuntime config to enable opencc query() delegation.
  */
 export interface OpenccAdapterConfig {
+  /**
+   * Transcript store used by the adapter to resume prior conversation
+   * turns when `QueryOptions.transcriptId` matches an existing file.
+   * Without this, the bridge only feeds `opts.prompt` into `params.messages`
+   * and the LLM sees a single-turn context every time — session continuity
+   * (e.g. "remember my name") breaks. Wired by zai-server in
+   * `services/agentRuntime.ts` via the `TranscriptStore` already constructed
+   * at runtime init.
+   */
+  transcriptStore?: import('../transcript/store.js').TranscriptStore | undefined
   /** MCP client pool — tools from connected MCP servers injected into query(). */
   mcpPool?: import('../mcp/MCPClientPool.js').MCPClientPool | undefined
   /** MCP server specs (name + transport config) consumed by opencc query(). */

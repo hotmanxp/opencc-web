@@ -383,6 +383,11 @@ await esbuild.build({
     'zod/v3',
     'zod/v4',
     'zod/v4-mini',
+    // fflate: vendored via dynamic import in zip.ts / zipCache.ts.
+    // Listed in deps (0.8.3) but esbuild can't statically resolve
+    // `await import('fflate')` from outside its bundle graph when the
+    // call site is reached; keep external so Node resolves at runtime.
+    'fflate',
   ],
   // Tree-shake aggressively; mark pure for the feature-flag gates
   treeShaking: true,

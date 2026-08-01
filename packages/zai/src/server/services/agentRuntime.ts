@@ -182,6 +182,13 @@ export function initAgentRuntime(cwd: string): void {
     // the hood. Without this block, deps.callModel has no modelCaller and the
     // bridge yields "deps.callModel not implemented" at the first turn.
     openccConfig: {
+      // Resume prior conversation turns from this store when
+      // QueryOptions.transcriptId matches an existing transcript file.
+      // Without this the adapter only sees the current `opts.prompt` and
+      // every request is single-turn → LLM can't recall facts from prior
+      // turns in the same session. Built from the same `dataDir` so
+      // persisted turns land at the path DefaultAgentRuntime.store uses.
+      transcriptStore,
       mcpPool: mcpClientPool,
       mcpServers,
       // MCP instructions snapshot — the opencc query bridge calls

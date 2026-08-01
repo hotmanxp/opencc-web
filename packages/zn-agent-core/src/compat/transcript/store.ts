@@ -77,6 +77,39 @@ export class TranscriptStore {
     opts: TranscriptStoreOptions,
   ): Promise<void> {
     const filePath = this.resolvePath(transcriptId, opts)
+    await mkdir(join(filePath, '..'), { recursive: true })
+    // Bootstrap path: the file doesn't exist yet (brand-new session).
+    // `proper-lockfile` requires the lock target to exist as a regular file
+    // (it creates a sibling `.lock` directory), so we must writeFile() an
+    // empty v2 envelope before we can take the lock. The catch below also
+    // handles races where two concurrent appends both try to bootstrap — the
+    // lock serializes them and the second one re-reads the file the first
+    // wrote. Without this, every first-turn `appendUserMessageV2` swallows
+    // an ENOENT and the transcript is silently empty for the rest of the
+    // session — `appendAssistantMessageV2` then fails too because the file
+    // still doesn't exist.
+    //
+    // Callers that need richer meta (model, permissionMode, parentSessionId)
+    // should call `create()` first and patch the resulting file —
+    // `append()` is the lazy bootstrap path for callers that don't
+    // pre-create.
+    try {
+      await readFile(filePath, 'utf-8')
+    } catch (err) {
+      if ((err as NodeJS.ErrnoException).code !== 'ENOENT') throw err
+      const seed: TranscriptFile = {
+        version: 2,
+        transcriptId,
+        meta: {
+          cwd: opts.cwd,
+          model: 'unknown',
+          createdAt: msg.timestamp ?? Date.now(),
+          updatedAt: msg.timestamp ?? Date.now(),
+        },
+        messages: [],
+      }
+      await writeFile(filePath, serializeFile(seed), 'utf-8')
+    }
     const release = await lock(filePath, { retries: 3 })
     try {
       const raw = await readFile(filePath, 'utf-8')
