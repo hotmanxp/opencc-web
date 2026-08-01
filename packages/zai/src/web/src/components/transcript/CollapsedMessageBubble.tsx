@@ -4,6 +4,8 @@ import { RobotFilled, UserOutlined } from '@ant-design/icons'
 import type { AgentMessage } from '../../store/useAgentStore.js'
 import { MarkdownText } from '../markdown/MarkdownText.js'
 import { MessageCopyButton, StreamingMarkdown, ThinkingBlock } from './MessageBubble.js'
+import { AttachmentStrip } from '../AttachmentStrip.js'
+import type { StripAttachment } from '../AttachmentStrip.js'
 import { linkifyText } from '../../lib/linkify.js'
 
 const { Paragraph, Text } = Typography
@@ -95,6 +97,11 @@ export function CollapsedMessageBubble({
   // User text: 右对齐, antd Card + UserOutlined 图标, 与 expanded 一致 + clamp
   if (t === 'user.text' || t === 'user.message') {
     const text = (m.text as string) || (m.prompt as string) || ''
+    // 修复: collapsed 视图下也需要渲染附件缩略图. 历史上这里只渲染 text + 头像,
+    // 首条带图消息即使在 collapsed 视图也丢掉了图片预览. 与 expanded 视图
+    // (MessageBubble.tsx:716) 行为对齐 — 缩略图放在 text 之上, 用 previewHeight
+    // 模式控制高度让长图也能完整可见.
+    const attachments = (m.attachments as StripAttachment[] | undefined) ?? []
     return (
       <div
         style={{
@@ -104,7 +111,7 @@ export function CollapsedMessageBubble({
         }}
       >
         <Card size="small" style={{ maxWidth: '70%', borderRadius: 12, position: 'relative' }}>
-          {/* 横向 flex: [copy inline] [text flex:1] [UserOutlined]
+          {/* 横向 flex: [copy inline] [text+attachments flex:1] [UserOutlined]
               copy 与 expanded 视图一致用 inline 嵌最左, 避免短消息 + 右上绝对按钮盖住文字. */}
           <div
             style={{
@@ -115,7 +122,14 @@ export function CollapsedMessageBubble({
             }}
           >
             <MessageCopyButton text={text} variant="user" placement="inline" />
-            <div style={{ flex: 1, minWidth: 0 }}>
+            <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column', gap: 4 }}>
+              {attachments.length > 0 && (
+                <AttachmentStrip
+                  attachments={attachments}
+                  previewHeight={80}
+                  onPreview={(a) => undefined}
+                />
+              )}
               <Paragraph
                 ellipsis={{
                   rows: CLAMP_LINES,
