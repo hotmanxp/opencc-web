@@ -668,4 +668,47 @@ console.log(`[bundle-opencc] session-facade impl: ${SESSION_FACADE_IMPL_OUT}`)
   }
 }
 
-console.log(`[bundle-opencc] server: ${SERVER_OUT}`)
+const RUNTIME_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'createOpenccRuntime.ts')
+const RUNTIME_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createOpenccRuntime.js')
+const RUNTIME_IMPL_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'createOpenccRuntime-impl.ts')
+const RUNTIME_IMPL_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createOpenccRuntime-impl.js')
+
+await esbuild.build({
+  entryPoints: [RUNTIME_ENTRY],
+  bundle: false,
+  format: 'esm',
+  outdir: SERVER_DIST_DIR,
+  platform: 'node',
+  target: 'node22',
+  entryNames: '[name]',
+})
+
+await esbuild.build({
+  entryPoints: [RUNTIME_IMPL_ENTRY],
+  bundle: true,
+  format: 'esm',
+  outfile: RUNTIME_IMPL_OUT,
+  platform: 'node',
+  target: 'node22',
+  sourcemap: true,
+  minify: false,
+  logLevel: 'warning',
+  banner: {
+    js:
+      "import { createRequire as __createRequire } from 'node:module';\n" +
+      "const require = __createRequire(import.meta.url);\n",
+  },
+  plugins: [featureFlagPlugin, optionalStubPlugin],
+  external: [
+    'sharp',
+    'google-auth-library',
+    'zod',
+    'zod/v3',
+    'zod/v4',
+    'zod/v4-mini',
+    'fflate',
+  ],
+  treeShaking: true,
+})
+console.log(`[bundle-opencc] runtime: ${RUNTIME_OUT}`)
+

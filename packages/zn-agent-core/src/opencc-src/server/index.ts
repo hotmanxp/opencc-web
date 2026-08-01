@@ -58,19 +58,13 @@ export { createSessionFacade } from './sessionFacade.js'
  * Stable, recognisable error string. Grep for `openccRuntime: not
  * implemented` to find any caller still in the migration window.
  */
-const NOT_IMPLEMENTED =
-  'openccRuntime: not implemented yet (Task 1 seam only — real implementation lands in a follow-up task)'
+export type {
+  CreateOpenccRuntimeOptions,
+  OpenccRuntime,
+  OpenccRuntimeOptions,
+  OpenccQueryInput,
+  OpenccServerEvent,
+  OpenccSession,
+} from './createOpenccRuntime.js'
 
-/**
- * Construct a new OpenCC server runtime.
- *
- * Returns the runtime once it has finished initialising (loading
- * transcript store, opening event bus, etc.). The current Task 1
- * implementation always rejects — a real implementation will
- * resolve with an `OpenccRuntime`.
- */
-export async function createOpenccRuntime(
-  _options: OpenccRuntimeOptions,
-): Promise<OpenccRuntime> {
-  throw new Error(NOT_IMPLEMENTED)
-}
+export { createOpenccRuntime } from './createOpenccRuntime.js'

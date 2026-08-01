@@ -34,8 +34,8 @@
     "src/opencc-src/server/index.ts",
     "src/opencc-src/server/server-globals.d.ts",
     "src/opencc-src/server/createHeadlessContext.ts",
-    "src/opencc-src/server/sessionFacade.ts"
-  ],
+    "src/opencc-src/server/sessionFacade.ts",
+    "src/opencc-src/server/createOpenccRuntime.ts"  ],
 
   "exclude": [
     "node_modules",
