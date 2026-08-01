@@ -22,7 +22,7 @@
     "scripts/copy-runtime-assets.mjs"
   ],
   "scripts": {
-    "build": "tsc -b && rm -rf dist/opencc-src && node --experimental-strip-types scripts/bundle-opencc.ts && node scripts/copy-runtime-assets.mjs",
+    "build": "node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && node scripts/copy-runtime-assets.mjs",
     "dev": "tsc -b --watch",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
