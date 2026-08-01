@@ -13,9 +13,32 @@ interface StartOptions {
   port?: string;
   open: boolean;
   lan?: boolean;
+  /**
+   * Force the managed/supervisor code path. When `undefined`, the decision
+   * is taken from `process.env.ZAI_NO_MANAGED` (managed by default; set
+   * `ZAI_NO_MANAGED=1` to opt out for tests or single-shot runs).
+   */
+  managed?: boolean;
 }
 
-export async function runStart(options: StartOptions) {
+export async function runStart(options: StartOptions): Promise<void> {
+  const managed =
+    options.managed ?? process.env.ZAI_NO_MANAGED !== '1';
+
+  if (managed) {
+    const { runSupervisor } = await import('./supervisor.js');
+    const { exitCode } = await runSupervisor({
+      args: [process.argv[1], '--managed-child'],
+      env: { ...process.env, ZAI_PORT: options.port ?? '9201' },
+      port: Number(options.port ?? 9201),
+    });
+    process.exit(exitCode);
+  }
+
+  await runDirectServer(options);
+}
+
+async function runDirectServer(options: StartOptions): Promise<void> {
   const token = randomBytes(16).toString('hex');
   const cwd = resolve(process.cwd());
   const cwdName = basename(cwd) || cwd;
