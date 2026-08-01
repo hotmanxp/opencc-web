@@ -101,6 +101,23 @@ let _clientKey: string | null = null
  * Returns { baseURL, apiKey } from ~/.claude.json's providerProfiles when the
  * model is hosted by a non-Anthropic profile (e.g. zhiniao-* on the Wizard AI
  * OpenAI-compatible gateway). Falls back to the global Anthropic env config.
+ *
+ * zai patch: throw a clear error rather than returning an empty apiKey
+ * when no profile matches AND the env fallbacks are missing. The previous
+ * behavior — silent `apiKey = ''` going into `new Anthropic({authToken: ''})`
+ * — produced upstream HTTP 403 ("Authentication failed") the first time a
+ * sub-agent (Explore/Plan/etc) resolved to a model that's NOT in the
+ * configured profile.model list AND had no `~/.zai/settings.json →
+ * env.ANTHROPIC_AUTH_TOKEN` set. Repro transcript:
+ *   `~/.zai/transcripts/.../sess-ebb7834a-...json` → tool_result
+ *   "Failed to authenticate. API Error: Authentication failed (status 403)"
+ * Without this guard, the bad request never throws locally; vendor's
+ * upstream SDK turns the empty authToken into a 403 that LLM then
+ * prints back as a synthesized error.
+ *
+ * The throw path doesn't change behavior for the well-configured case
+ * (profile match still wins; env fallbacks with keys still return
+ * normally); it only fails loud when BOTH are absent.
  */
 function resolveProviderForModel(model: string | undefined): {
   baseURL: string
@@ -118,26 +135,50 @@ function resolveProviderForModel(model: string | undefined): {
         profile.provider === 'openai'
           ? (zaiEnv.OPENAI_API_KEY ?? '')
           : (zaiEnv.ANTHROPIC_AUTH_TOKEN ?? '')
+      const apiKey = profile.apiKey ?? fallbackKey
+      if (!apiKey) {
+        throw new Error(
+          `[modelCaller] profile "${profile.id}" (provider=${profile.provider}) matches model "${model}" but its apiKey is empty and ~/.zai/settings.json → env.${profile.provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_AUTH_TOKEN'} is unset. Either set the env var or update the profile.apiKey.`,
+        )
+      }
       return {
         baseURL: profile.baseUrl,
-        apiKey: profile.apiKey ?? fallbackKey,
+        apiKey,
         profile,
       }
     }
   }
 
-  return {
-    baseURL: zaiEnv.ANTHROPIC_BASE_URL ?? '',
-    apiKey: zaiEnv.ANTHROPIC_AUTH_TOKEN ?? '',
+  const baseURL = zaiEnv.ANTHROPIC_BASE_URL ?? ''
+  const apiKey = zaiEnv.ANTHROPIC_AUTH_TOKEN ?? ''
+  if (!apiKey) {
+    throw new Error(
+      `[modelCaller] no provider profile matches model "${model ?? '<unspecified>'}" AND ~/.zai/settings.json → env.ANTHROPIC_AUTH_TOKEN is unset. Sub-agent fallback path that previously sent an empty authToken (→ 403 upstream) is now blocked. Configure ANTHROPIC_AUTH_TOKEN in ~/.zai/settings.json or extend providerProfiles in ~/.claude.json to cover this model.`,
+    )
   }
+  return { baseURL, apiKey }
 }
 
 async function getAnthropicClientForModel(model?: string): Promise<Anthropic> {
-  // Reuse cached client when the model resolves to the same provider.
-  const cacheKey = model ?? '__default__'
-  if (_client && _clientKey === cacheKey) return _client
-
   const { baseURL, apiKey, profile } = resolveProviderForModel(model)
+
+  // Reuse cached client when (baseURL, apiKey) match — i.e. same
+  // effective provider. Cache key was previously `model ?? '__default__'`,
+  // which caused two unrelated cache entries when main agent uses
+  // `MiniMax-M3` and sub-agent uses `MiniMax-M2.7-highspeed` (or
+  // unresolved `haiku`) under the same profile. Switching the key to
+  // (baseURL, apiKey) means: same provider+credentials ⇒ same client,
+  // regardless of which model string was passed in. Different
+  // credentials or endpoint ⇒ new client (correct invalidation).
+  //
+  // The apiKey fingerprint uses the last 6 chars to avoid leaking the
+  // raw secret into log lines that may print `_clientKey` for debug
+  // (we don't currently print it, but defensive). Profile id is logged
+  // separately when the Anthropic client is built (see console.error
+  // in the openai branch — symmetric here would be reasonable, kept
+  // off to avoid log noise).
+  const cacheKey = `${baseURL}|${apiKey.slice(-6)}`
+  if (_client && _clientKey === cacheKey) return _client
 
   if (!apiKey) throw new Error('API key not found for selected model')
   if (!baseURL) throw new Error('Base URL not found for selected model')
@@ -248,7 +289,7 @@ export function createAnthropicModelCaller(): ModelCaller {
     const env = zaiSettings.env ?? {}
 
     const rawModel =
-      model && model !== 'default'
+      model && model !== 'default' && model !== 'unknown'
         ? model
         : (env.ANTHROPIC_DEFAULT_SONNET_MODEL
           ?? env.ANTHROPIC_SMALL_FAST_MODEL
