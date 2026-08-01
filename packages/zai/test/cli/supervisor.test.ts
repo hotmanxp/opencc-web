@@ -85,6 +85,22 @@ describe('supervisor', () => {
     expect(restartingWrite).toBeTruthy()
   })
 
+  it('increments restarts counter after a successful restart', async () => {
+    const pending = runSupervisor({ args: ['server'], env: {}, port: 9201 }, deps)
+    await new Promise((r) => setTimeout(r, 0))
+    const c1 = children[0]
+    c1.emit('message', { type: 'ready', pid: 1, port: 9201 })
+    c1.emit('message', { type: 'restart', reason: 'user_action' })
+    c1.emit('exit', 0, null)
+    await new Promise((r) => setTimeout(r, 0))
+    const c2 = children[1]
+    c2.emit('message', { type: 'ready', pid: 2, port: 9201 })
+    c2.emit('exit', 0, null)
+    await pending
+    const bumped = writes.find((w) => typeof w.restarts === 'number' && w.restarts >= 1)
+    expect(bumped).toBeTruthy()
+  })
+
   it('marks failed after MAX_RESTART_ATTEMPTS non-ready failures', async () => {
     const pending = runSupervisor({ args: ['server'], env: {}, port: 9201 }, deps)
     await new Promise((r) => setTimeout(r, 0))

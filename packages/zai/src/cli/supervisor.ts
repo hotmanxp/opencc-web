@@ -23,20 +23,27 @@ export async function runSupervisor(
     sleep: depsIn?.sleep ?? ((ms) => new Promise((r) => setTimeout(r, ms))),
   }
 
+  let attempts = 0
+  let pendingRestart: RestartReason | null = null
+  let exitCode: number | null = null
+  let restarts = 0
+
   await deps.writeState({
     supervisorPid: process.pid,
     state: 'starting',
     childPid: null,
     startedAt: new Date().toISOString(),
-    restarts: 0,
+    restarts,
     lastError: null,
   })
 
-  let attempts = 0
-  let pendingRestart: RestartReason | null = null
-  let exitCode: number | null = null
-
   while (exitCode === null) {
+    if (pendingRestart) {
+      // bump counter on entry of the restart iteration
+      restarts++
+      await deps.writeState({ restarts })
+      pendingRestart = null
+    }
     const child = deps.spawn(process.execPath, opts.args, {
       stdio: ['ipc', 'inherit', 'inherit'],
       detached: false,
