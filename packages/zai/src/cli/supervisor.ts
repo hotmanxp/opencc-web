@@ -1,6 +1,7 @@
 import { spawn as nodeSpawn, type ChildProcess, type SpawnOptions } from 'node:child_process'
 import { writeManagedState, type ManagedState } from './managedState.js'
 import { MAX_RESTART_ATTEMPTS, READY_TIMEOUT_MS, nextBackoffMs } from './backoff.js'
+import { appendRestartLog } from './restartLog.js'
 
 export type SupervisorDeps = {
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess
@@ -28,6 +29,8 @@ export async function runSupervisor(
   let exitCode: number | null = null
   let restarts = 0
   let currentChild: ChildProcess | null = null
+  let lastChildStartTs = 0
+  let lastChildPid: number | null = null
   let userShutdown = false
   let sigkillTimer: NodeJS.Timeout | null = null
   const onSigint = () => {
@@ -52,7 +55,17 @@ export async function runSupervisor(
       // bump counter on entry of the restart iteration
       restarts++
       await deps.writeState({ restarts })
+      const reason = pendingRestart
       pendingRestart = null
+      // log restart_executed for the previous child (from spawn to restart msg)
+      if (lastChildStartTs > 0) {
+        appendRestartLog({
+          type: 'restart_executed',
+          childPid: lastChildPid,
+          durationMs: Date.now() - lastChildStartTs,
+          ...(reason ? { reason } : {}),
+        }).catch(() => {})
+      }
     }
     const child = deps.spawn(process.execPath, opts.args, {
       stdio: ['ipc', 'inherit', 'inherit'],
@@ -60,6 +73,8 @@ export async function runSupervisor(
       env: { ...opts.env, ZAI_SUPERVISOR_PID: String(process.pid) },
     })
     currentChild = child
+    lastChildStartTs = Date.now()
+    lastChildPid = child.pid ?? null
 
     await deps.writeState({ state: 'starting', childPid: child.pid ?? null })
 
@@ -121,12 +136,22 @@ export async function runSupervisor(
         exitCode = 128 + 2
         break
       }
+      appendRestartLog({
+        type: 'ready_timeout',
+        childPid: child.pid ?? null,
+      }).catch(() => {})
       attempts++
       if (attempts >= MAX_RESTART_ATTEMPTS) {
         await deps.writeState({
           state: 'failed',
           lastError: { at: new Date().toISOString(), message: 'ready timeout' },
         })
+        appendRestartLog({
+          type: 'failed',
+          childPid: child.pid ?? null,
+          durationMs: lastChildStartTs > 0 ? Date.now() - lastChildStartTs : undefined,
+          reason: 'ready_timeout',
+        }).catch(() => {})
         exitCode = 1
         break
       }
@@ -160,6 +185,12 @@ export async function runSupervisor(
         if (m.type === 'restart' && m.reason) {
           pendingRestart = m.reason
           deps.log(`[supervisor] restart requested (${m.reason})`)
+          // best-effort log; failures must not block the restart cycle
+          appendRestartLog({
+            type: 'restart_requested',
+            childPid: child.pid ?? null,
+            reason: m.reason,
+          }).catch(() => {})
         }
       }
     })
