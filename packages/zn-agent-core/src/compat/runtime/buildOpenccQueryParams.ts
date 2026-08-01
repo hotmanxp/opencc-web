@@ -87,6 +87,110 @@ async function* translateCallModel(
     const content = inner.content
     return { role, content }
   })
+
+  // zai patch: sanitize `tool_result` blocks whose `tool_use_id` doesn't
+  // match any preceding assistant `tool_use.id`. Anthropic's API surfaces
+  // this as 2013 ("tool call and result not match" / "tool call result does
+  // not follow tool call") and refuses the entire request, killing whatever
+  // tool calls had already produced valid results upstream. Observed
+  // triggers in production (cf. screenshot #6 in this thread):
+  //   - vendor streaming-fallback path (query.ts:1331) reconstructs a new
+  //     executor on partial-stream failure and discards accumulated
+  //     tool_use_ids without rewriting the corresponding tool_result
+  //     attachments in the persisted transcript
+  //   - vendor `messagesForQuery` mid-loop transformations (line 685
+  //     inbox-reminder strip, 773 snip compact, 788 microcompact, etc.)
+  //     sometimes drop a tool_use block while leaving its tool_result
+  //     behind
+  //   - vendor parallel tool_use batches (toolOrchestration.ts:36) can
+  //     yield tool_results whose id ordering doesn't match the
+  //     tool_use block ordering the SDK accumulated
+  // Instead of letting 2013 propagate, drop the offending user-message
+  // tool_results (and any user message that ends up with no content after
+  // filtering — keeps the messages array dense so the next tool_use round
+  // still has a valid anchor). Helper logs the dropped ids once per
+  // session so an operator can investigate which vendor path misfired.
+  const knownToolUseIds = new Set<string>()
+  let droppedOrphanCount = 0
+  const droppedOrphanIds = new Set<string>()
+  const sanitized: Array<{ role: 'user' | 'assistant'; content: unknown }> = []
+  for (const m of zaiMessages as Array<{ role: 'user' | 'assistant'; content: unknown }>) {
+    if (m.role === 'assistant' && Array.isArray(m.content)) {
+      for (const block of m.content as Array<{ type?: string; id?: string }>) {
+        if (block?.type === 'tool_use' && typeof block.id === 'string') {
+          knownToolUseIds.add(block.id)
+        }
+      }
+      sanitized.push(m)
+      continue
+    }
+    if (m.role === 'user' && Array.isArray(m.content)) {
+      const filtered = (m.content as Array<Record<string, unknown>>).filter(
+        (block) => {
+          if (block?.type !== 'tool_result') return true
+          const id =
+            typeof block.tool_use_id === 'string' ? block.tool_use_id : ''
+          if (id && knownToolUseIds.has(id)) return true
+          if (id) {
+            droppedOrphanIds.add(id)
+            droppedOrphanCount++
+          }
+          return false
+        },
+      )
+      if (filtered.length === 0) {
+        // No content left after orphan stripping — substitute a sentinel
+        // user-text message so the messages array stays densely typed.
+        sanitized.push({
+          role: 'user',
+          content: `[orphan tool_result(s) stripped: ${[...droppedOrphanIds].join(', ') || 'unknown'}]`,
+        })
+      } else if (filtered.length === (m.content as unknown[]).length) {
+        sanitized.push(m)
+      } else {
+        sanitized.push({ role: 'user', content: filtered })
+      }
+      continue
+    }
+    sanitized.push(m)
+  }
+  if (droppedOrphanCount > 0 && process.env.ZAI_DEBUG === '1') {
+    console.warn(
+      '[translateCallModel] dropped orphan tool_result blocks:',
+      droppedOrphanCount,
+      [...droppedOrphanIds],
+    )
+  }
+  // zai patch: invoke vendor's own `ensureToolResultPairing` against the
+  // sanitized messages before they reach the Anthropic client. This is
+  // the SAME helper that vendor's `services/api/claude.ts:1373` calls
+  // when vendor drives the Anthropic client directly. The zai runtime
+  // path goes `openccQuery → deps.callModel → translateCallModel → zai
+  // createAnthropicModelCaller`, bypassing vendor's claude.ts entirely.
+  // Without this explicit invocation, multi-turn transcripts accumulate
+  // orphan / duplicate / missing tool_use-tool_result pairs from upstream
+  // compact / microcompact / parallel-tool orchestration transforms, and
+  // Anthropic rejects with 2013 ("tool call result does not follow tool
+  // call" / "tool call and result not match"). Pair this with the
+  // orphan tool_result strip above — the strip catches the simple case
+  // and ensureToolResultPairing covers missing tool_use inserts and
+  // duplicate tool_use_id / tool_result_id deduplication, which the
+  // simple set-membership check above can't express.
+  //
+  // Import from the bundled opencc-core (re-exported in `query.ts`'s
+  // export block) rather than a relative source path so we pick up
+  // whatever module loader transform the rest of the package uses.
+  // The catch keeps the runtime resilient if the import fails (e.g.,
+  // bundled module not yet generated) — in that case we fall back to
+  // the simpler orphan-only sanitize above.
+  const core = await import('@zn-ai/zn-agent-core/opencc-core').catch(
+    () => ({}) as any,
+  )
+  const ensureToolResultPairing = (core as any)?.ensureToolResultPairing
+  const zaiMessagesSanitized =
+    typeof ensureToolResultPairing === 'function'
+      ? (ensureToolResultPairing(sanitized as any) as typeof sanitized)
+      : sanitized
   // opencc systemPrompt can be a string OR an array of {type, text} blocks.
   // zai's modelCaller accepts both forms (lines 293-309 above).
   const systemPrompt = openccReq.systemPrompt as any
@@ -103,7 +207,7 @@ async function* translateCallModel(
   const zaiReq = {
     model: openccReq.options?.model ?? 'unknown',
     systemPrompt,
-    messages: zaiMessages,
+    messages: zaiMessagesSanitized,
     tools: openccReq.tools as any,
     signal: openccReq.signal,
   }
@@ -183,7 +287,17 @@ async function* translateCallModel(
         try {
           tu.input = JSON.parse(tu.input)
         } catch {
-          // leave as string — opencc will see the partial JSON and error
+          // zai patch: the upstream proxy (e.g. minimax MiniMax-M3) can
+          // emit `input_json_delta` fragments whose concatenation is
+          // not valid JSON (observed: literal "{}{}" concatenation when
+          // the model/proxy re-emits `{}` as separate deltas). If we
+          // leave the malformed string in place, vendor's
+          // tool.inputSchema.safeParse() rejects with "expected object,
+          // received string" and the LLM gets an InputValidationError
+          // tool_result. Fall back to an empty object so the next
+          // guard (MiniMax-M3 default-input patch below) can substitute
+          // a safe per-tool default.
+          tu.input = {}
         }
       }
       // Fallback: the minimaxi proxy's MiniMax-M3 model streams
