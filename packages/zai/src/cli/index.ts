@@ -47,6 +47,12 @@ program
   .option('--port <port>', 'Express port (default: 9888, auto-scan if occupied)')
   .option('--no-open', 'Do not auto-open browser')
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
+  // Internal marker: when the supervisor spawns a managed child it
+  // re-invokes `zai start --managed-child ...` so the child recognises
+  // it is already inside a managed session and skips the supervisor
+  // path. commander would otherwise reject the unknown flag.
+  .allowUnknownOption(false)
+  .option('--managed-child', 'internal: spawned by supervisor')
   .action(runStart);
 
 // 全局安装 `zai` 后的默认行为：当作 `zai start` 启动服务，

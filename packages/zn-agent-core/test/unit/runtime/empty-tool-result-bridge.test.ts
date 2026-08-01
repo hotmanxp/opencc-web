@@ -1,24 +1,31 @@
 import { describe, expect, it, vi, beforeEach, afterEach } from 'vitest'
 
 /**
- * Regression test for the broken error surfacing path in openccQueryBridge.
+ * Regression tests for the bridge's orphan-tool_use closure paths.
  *
- * Scenario (verified by user):
- *   1. LLM emits a tool_use for "Bash" with `input = {}` (empty).
- *   2. vendor's `buildOpenccQueryParams` (opencc-src) throws at the
- *      matching `content_block_stop` / `message_stop`.
- *   3. The throw escapes the for-await stream loop and lands in the
- *      bridge's outer `try { ... } catch (err) { yield toRuntimeErrorEvent(...) }`
- *      (openccQueryBridge.ts:404).
- *   4. Pre-fix: the bridge only yielded `runtime.error` — the orphan
- *      `Bash` tool_use (already pushed via the stream_event
- *      `content_block_start`) stayed "calling" forever in the UI and
- *      no `runtime.tool_result` was emitted, leaving the tool card
- *      dangling and the user with no visible error in the chat.
- *   5. Post-fix: the bridge additionally emits a synthetic
- *      `runtime.tool_result` (isError: true) for each orphan tool_use,
- *      and a `runtime.done`, BEFORE the `runtime.error` — so the UI
- *      closes the Bash card AND shows the error message.
+ * Two paths exist:
+ *   1. Vendor throws mid-stream (e.g. an internal SDK failure
+ *      unhandled by vendor) → bridge's outer try/catch closes the
+ *      orphan tool_use blocks via __zaiEventBus.
+ *   2. Vendor yields an assistant message with stop_reason='error'
+ *      → bridge's stream loop detects the stop reason and closes
+ *      the orphan tool_use blocks.
+ *
+ * In both cases the bridge must:
+ *   - Emit a `runtime.tool_result` (isError: true) for each orphan
+ *     tool_use (so the UI doesn't leave Bash/Read cards stuck in
+ *     "calling..." forever).
+ *   - Emit a matching `runtime.error` and `runtime.done` so the SSE
+ *     consumer closes the turn cleanly.
+ *
+ * Originally these paths were wired in to handle a specific
+ * "emitted empty input" throw from buildOpenccQueryParams. That
+ * throw has since been removed (empty tool_use inputs are now
+ * normalised to {} and handed to vendor's zod validation, which
+ * surfaces a recoverable <tool_use_error>InputValidationError the
+ * LLM can retry against). The defensive paths remain useful for
+ * other unhandled errors and assistant-error stop reasons, so the
+ * tests now exercise them with generic error triggers.
  */
 describe('openccQueryBridge — orphan tool_use closure on error', () => {
   let originalEmit: unknown
@@ -53,14 +60,17 @@ describe('openccQueryBridge — orphan tool_use closure on error', () => {
     vi.doUnmock('../../../src/compat/tools/opencc/builtin.js')
   })
 
-  it('emits runtime.tool_result (isError: true) + runtime.done for orphan Bash tool_use when vendor throws', async () => {
-    // Simulate the stream vendor yields when it decides to throw at
-    // content_block_stop on a tool_use with empty input:
+  it('emits runtime.tool_result (isError: true) + runtime.done for orphan Bash tool_use when vendor throws mid-stream', async () => {
+    // Simulate the stream vendor yields when something escapes its
+    // own error handling mid-stream (e.g. an unexpected internal
+    // exception in a tool execution path):
     //   message_start → content_block_start(tool_use Bash) → content_block_delta → content_block_stop
-    //   → THROW inside `deps.callModel`/buildOpenccQueryParams
-    // The throw must be visible to the bridge's outer try/catch.
+    //   → THROW from the opencc stream
+    // The bridge's outer try/catch must close any orphan tool_use
+    // blocks via __zaiEventBus so the UI doesn't leave the Bash
+    // card stuck in "calling..." and the error text reaches the user.
     const toolUseId = 'toolu_bash_orphan_1'
-    const errorText = '[buildOpenccQueryParams] tool_use "Bash" emitted empty input — refusing to execute.'
+    const errorText = 'simulated upstream SDK internal failure'
 
     async function* fakeOpenccStream() {
       yield {
@@ -90,7 +100,7 @@ describe('openccQueryBridge — orphan tool_use closure on error', () => {
         type: 'stream_event',
         event: { type: 'content_block_stop', index: 0 },
       }
-      // The vendor throws before message_stop — simulate that by
+      // Vendor throws before message_stop — simulate that by
       // throwing mid-stream:
       throw new Error(errorText)
     }
@@ -151,7 +161,7 @@ describe('openccQueryBridge — orphan tool_use closure on error', () => {
     expect(toolResult.toolUseId).toBe(toolUseId)
     expect(toolResult.toolName).toBe('Bash')
     expect(toolResult.isError).toBe(true)
-    expect(String(toolResult.output ?? '')).toMatch(/empty input/i)
+    expect(String(toolResult.output ?? '')).toMatch(/simulated upstream SDK internal failure/i)
 
     const errorEvents = captured.filter((event) => event.type === 'runtime.error')
     expect(errorEvents.length).toBeGreaterThanOrEqual(1)
@@ -159,22 +169,21 @@ describe('openccQueryBridge — orphan tool_use closure on error', () => {
     const errorMessage = String(
       errorEvent.message ?? errorEvent.error?.message ?? '',
     )
-    expect(errorMessage).toMatch(/empty input/i)
+    expect(errorMessage).toMatch(/simulated upstream SDK internal failure/i)
 
     const doneEvents = captured.filter((event) => event.type === 'runtime.done')
     expect(doneEvents.length).toBeGreaterThanOrEqual(1)
   })
 
-  it('emits runtime.tool_result (isError: true) + runtime.error when vendor yields an assistant error message with the empty-input text', async () => {
+  it('emits runtime.tool_result (isError: true) + runtime.error when vendor yields an assistant error message (stop_reason=error)', async () => {
     // Alternate failure mode: vendor doesn't throw — it yields a
-    // synthetic assistant message containing the empty-input error
-    // text and stop_reason:'error'. The bridge's stream loop sees
-    // this assistant message, but translateRuntimeEvents on the
-    // consumer side currently has no visible-event mapping for it.
-    // Bridge must detect this and emit synthetic closure events.
+    // synthetic assistant message with stop_reason:'error'. The
+    // bridge's stream loop sees this assistant message, but
+    // translateRuntimeEvents on the consumer side currently has no
+    // visible-event mapping for it. Bridge must detect this and
+    // emit synthetic closure events.
     const toolUseId = 'toolu_bash_orphan_2'
-    const errorText =
-      '[buildOpenccQueryParams] tool_use "Bash" emitted empty input — refusing to execute.'
+    const errorText = 'simulated upstream assistant error'
 
     async function* fakeOpenccStream() {
       yield {
@@ -254,7 +263,7 @@ describe('openccQueryBridge — orphan tool_use closure on error', () => {
     expect(toolResult.toolUseId).toBe(toolUseId)
     expect(toolResult.toolName).toBe('Bash')
     expect(toolResult.isError).toBe(true)
-    expect(String(toolResult.output ?? '')).toMatch(/empty input/i)
+    expect(String(toolResult.output ?? '')).toMatch(/simulated upstream assistant error/i)
 
     const errorEvents = captured.filter((event) => event.type === 'runtime.error')
     expect(errorEvents.length).toBeGreaterThanOrEqual(1)

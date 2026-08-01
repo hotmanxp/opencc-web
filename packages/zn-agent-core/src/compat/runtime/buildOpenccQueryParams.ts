@@ -42,41 +42,12 @@ import type { TranscriptMessage } from '../transcript/types.js'
  * via env / settings on the ModelCaller instance itself.
  */
 
-/**
- * Default tool input for the opencc built-in tools the bridge wires in.
- * Used as a fallback when the upstream LLM streams a tool_use block
- * without `input_json_delta` (e.g. minimaxi proxy's MiniMax-M3). The
- * LLM's intent is preserved (e.g. "run git status" → we run `pwd`
- * instead of the broken empty call), and the LLM gets a real tool
- * result to anchor its follow-up turn.
- */
-const BUILTIN_TOOL_DEFAULT_INPUT: Record<string, Record<string, unknown>> = {
-  Bash: { command: 'pwd' },
-  AskUserQuestion: { questions: [] },
-}
-
-const PATH_FALLBACK_TOOLS = new Set(['Read', 'Write', 'Edit'])
-const INPUT_DELTA_REQUIRED_TOOLS = new Set(['WebSearch', 'Glob', 'Grep'])
-const USER_PROMPT_PATH_RE = /[a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+/
-
-function inferPathFromMostRecentUserPrompt(messages: any[]): string | undefined {
-  for (let index = messages.length - 1; index >= 0; index--) {
-    const message = messages[index]
-    const inner = message?.message ?? message
-    if (inner?.role !== 'user') continue
-    const content = inner.content
-    const text = typeof content === 'string'
-      ? content
-      : Array.isArray(content)
-        ? content
-            .filter((block: any) => block?.type === 'text' && typeof block.text === 'string')
-            .map((block: any) => block.text)
-            .join('\n')
-        : ''
-    return text.match(USER_PROMPT_PATH_RE)?.[0]
-  }
-  return undefined
-}
+// Empty-input tool_use blocks (observed when the MiniMax-M3 proxy drops
+// `input_json_delta`) are normalised to `{}` so vendor's tool execution
+// (opencc-src/services/tools/toolExecution.ts:778) fails zod validation
+// and surfaces a `<tool_use_error>InputValidationError: ...</tool_use_error>`
+// user message — the LLM reads the error and retries with explicit
+// arguments on the next turn. No zai-side fallback patching needed.
 
 async function* translateCallModel(
   openccReq: {
@@ -481,10 +452,15 @@ async function* translateCallModel(
       // Fallback: the minimaxi proxy's MiniMax-M3 model streams
       // tool_use blocks without ever emitting an `input_json_delta`,
       // so the LLM's tool call lands here with `input = {}` (or
-      // undefined). opencc's zod validation rejects empty input with
-      // "required parameter missing" and the loop trips after 5
-      // retries. Patch the input with a safe default per tool so the
-      // tool actually runs and the conversation can move forward.
+      // undefined). Normalize to `{}` and let vendor's tool execution
+      // fail zod validation naturally — the opencc queryLoop then
+      // synthesizes a user message containing
+      // `<tool_use_error>InputValidationError: ...</tool_use_error>`
+      // which the LLM reads and uses to retry with explicit arguments
+      // on its next turn (see
+      // opencc-src/services/tools/toolExecution.ts:778-848). This
+      // mirrors upstream opencc's natural retry path instead of
+      // aborting the whole query.
       if (
         tu &&
         tu.type === 'tool_use' &&
@@ -493,11 +469,7 @@ async function* translateCallModel(
             tu.input !== null &&
             Object.keys(tu.input).length === 0))
       ) {
-        throw new Error(
-          `[buildOpenccQueryParams] tool_use "${tu.name}" emitted empty input — ` +
-            `upstream proxy likely failed to stream content_block_stop+input_json_delta. Aborting query; ` +
-            `model must retry with explicit arguments. toolUseId=${tu.id ?? 'unknown'}`,
-        )
+        tu.input = {}
       }
       // Cleanup the per-block state for the just-closed tool_use so the
       // next parallel block can claim currentOpenToolUseId. We use the
@@ -515,8 +487,10 @@ async function* translateCallModel(
     } else if (t === 'message_stop') {
       // Defensive second-chance check: if content_block_stop was skipped
       // (observed: MiniMax-M3 proxy doesn't emit it for some tool_use blocks),
-      // the throw in the content_block_stop handler never fires, leading to
-      // a hung conversation with empty tool_use inputs. Re-check here.
+      // the content_block_stop handler never runs and any empty tool_use
+      // would hang the conversation. Normalize empty inputs to {} so
+      // vendor's tool execution surfaces an InputValidationError and the
+      // LLM retries on the next turn (same rationale as above).
       for (const block of assistantContent) {
         if (
           block?.type === 'tool_use' &&
@@ -525,11 +499,7 @@ async function* translateCallModel(
               block.input !== null &&
               Object.keys(block.input).length === 0))
         ) {
-          throw new Error(
-            `[buildOpenccQueryParams] tool_use "${block.name}" emitted empty input — ` +
-              `upstream proxy likely failed to stream content_block_stop+input_json_delta. Aborting query; ` +
-              `model must retry with explicit arguments. toolUseId=${block.id ?? 'unknown'}`,
-          )
+          block.input = {}
         }
       }
       const message = flush(lastStopReason)

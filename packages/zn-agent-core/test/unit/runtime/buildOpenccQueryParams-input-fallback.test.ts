@@ -78,56 +78,70 @@ async function runToolStream(
   return output
 }
 
-describe('buildOpenccQueryParams — empty tool_use input must throw (no fallbacks)', () => {
-  it('throws when tool_use has empty input', async () => {
-    await expect(
-      runToolStream('Bash', [{ role: 'user', content: 'hello' }]),
-    ).rejects.toThrow(/empty input/i)
+describe('buildOpenccQueryParams — empty tool_use input yields with normalised {} (vendor retry)', () => {
+  // Empty input no longer aborts the query. The assistant message yields
+  // with `tu.input = {}` so the opencc queryLoop hands it to the tool
+  // executor; vendor's `tool.inputSchema.safeParse()` fails and
+  // synthesises a `<tool_use_error>InputValidationError: ...</tool_use_error>`
+  // user message (see opencc-src/services/tools/toolExecution.ts:778-848)
+  // which the LLM reads and uses to retry with explicit arguments on
+  // the next turn.
+  async function emptyInputAssistant(name: string) {
+    return runToolStream(name, [{ role: 'user', content: 'hello' }])
+  }
+
+  it('does not throw when Bash tool_use has empty input', async () => {
+    await expect(emptyInputAssistant('Bash')).resolves.toBeDefined()
   }, 15_000)
 
-  it('error message includes tool name and toolUseId', async () => {
-    await expect(
-      runToolStream('Bash', [{ role: 'user', content: 'hello' }]),
-    ).rejects.toThrow(/Bash.*tu-1|sess-input.*tu-1|toolUseId=tu-1/i)
+  it('yields an assistant message whose Bash tool_use has input normalised to {}', async () => {
+    const output = await emptyInputAssistant('Bash')
+    const asst = output.find((m: any) => m?.type === 'assistant')
+    const tu = asst?.message?.content?.find((b: any) => b.type === 'tool_use')
+    expect(tu?.id).toBe('tu-1')
+    expect(tu?.name).toBe('Bash')
+    expect(tu?.input).toEqual({})
   }, 15_000)
 
-  it('Bash with empty command throws (does not substitute pwd)', async () => {
-    await expect(
-      runToolStream('Bash', [{ role: 'user', content: 'check current dir' }]),
-    ).rejects.toThrow(/empty input/i)
+  it('does not throw for Read with empty input and a path-mentioning user prompt', async () => {
+    const output = await runToolStream('Read', [
+      { role: 'user', content: 'Read packages/zai/src/server/index.ts line 1-20' },
+    ])
+    const asst = output.find((m: any) => m?.type === 'assistant')
+    const tu = asst?.message?.content?.find((b: any) => b.type === 'tool_use')
+    expect(tu?.input).toEqual({})
   }, 15_000)
 
-  it('Read with empty input throws (does not substitute /dev/null and does not infer path from user prompt)', async () => {
-    await expect(
-      runToolStream('Read', [
-        { role: 'user', content: 'Read packages/zai/src/server/index.ts line 1-20' },
-      ]),
-    ).rejects.toThrow(/empty input/i)
-  }, 15_000)
-
-  it('Agent with empty input throws (does not synthesize from thinking)', async () => {
+  it('does not synthesise input from thinking for Agent with empty input', async () => {
     const thinking = 'Inspect startup behavior and report the relevant call path.'
-    await expect(
-      runToolStream('Agent', [{ role: 'user', content: 'Delegate this task' }], {
-        thinking,
-      }),
-    ).rejects.toThrow(/empty input/i)
-  }, 15_000)
-
-  it('Glob with empty input throws', async () => {
-    await expect(
-      runToolStream('Glob', [{ role: 'user', content: 'find ts files' }]),
-    ).rejects.toThrow(/empty input/i)
-  }, 15_000)
-
-  it('throws at message_stop when tool_use still has empty input', async () => {
-    await expect(
-      runToolStream('Bash', [{ role: 'user', content: 'hello' }], {
-        skipContentBlockStop: true,
-      }),
-    ).rejects.toThrow(
-      /\[buildOpenccQueryParams\] tool_use "Bash" emitted empty input.*toolUseId=tu-1/i,
+    const output = await runToolStream(
+      'Agent',
+      [{ role: 'user', content: 'Delegate this task' }],
+      { thinking },
     )
+    const asst = output.find((m: any) => m?.type === 'assistant')
+    const tu = asst?.message?.content?.find((b: any) => b.type === 'tool_use')
+    expect(tu?.input).toEqual({})
+  }, 15_000)
+
+  it('does not throw for Glob with empty input', async () => {
+    const output = await emptyInputAssistant('Glob')
+    const asst = output.find((m: any) => m?.type === 'assistant')
+    const tu = asst?.message?.content?.find((b: any) => b.type === 'tool_use')
+    expect(tu?.input).toEqual({})
+  }, 15_000)
+
+  it('normalises at message_stop when content_block_stop was skipped', async () => {
+    // Observed with MiniMax-M3 proxy: content_block_stop sometimes never
+    // arrives. The message_stop second-chance check must still normalise
+    // empty inputs to {} so vendor validation produces the retry path.
+    const output = await runToolStream('Bash', [{ role: 'user', content: 'hello' }], {
+      skipContentBlockStop: true,
+    })
+    const asst = output.find((m: any) => m?.type === 'assistant')
+    const tu = asst?.message?.content?.find((b: any) => b.type === 'tool_use')
+    expect(tu?.id).toBe('tu-1')
+    expect(tu?.input).toEqual({})
   }, 15_000)
 
   it('preserves valid input for every parallel tool_use block', async () => {

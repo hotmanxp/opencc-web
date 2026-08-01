@@ -394,11 +394,6 @@ export async function* runViaOpenccQuery(
         ts: Date.now(),
       })
     }
-    // Sentinel text that buildOpenccQueryParams emits when it
-    // refuses an empty-input tool_use. Used to detect the assistant
-    // error-message path so we can close orphan tool_use blocks
-    // without waiting for the watchdog.
-    const EMPTY_INPUT_ERROR_RE = /emitted empty input/i
     while (true) {
       if (opts.abortSignal?.aborted) {
         disarmWatchdog()
@@ -462,15 +457,14 @@ export async function* runViaOpenccQuery(
         // Disarm on any further event so a long next turn doesn't trip.
         disarmWatchdog()
       }
-      // Detect synthesized assistant error messages (e.g. the
-      // "emitted empty input" sentinel that buildOpenccQueryParams
-      // produces) and short-circuit the stream by closing any
-      // orphan tool_use blocks. Without this, translateRuntimeEvents
-      // in routes/agent.ts has no visible-SSE mapping for the
-      // error text and the orphan tool card stays "calling..."
-      // forever. We bypass the vendor→sdkEventAdapter→translateRuntimeEvents
-      // chain for the error case and emit the closure events
-      // directly via __zaiEventBus.
+      // Detect assistant error messages (stop_reason === 'error') and
+      // short-circuit the stream by closing any orphan tool_use blocks.
+      // Without this, translateRuntimeEvents in routes/agent.ts has no
+      // visible-SSE mapping for the error text and the orphan tool
+      // card stays "calling..." forever. We bypass the
+      // vendor→sdkEventAdapter→translateRuntimeEvents chain for the
+      // error case and emit the closure events directly via
+      // __zaiEventBus.
       if (sdkType === 'assistant') {
         const asst = sdkValue?.message
         const stopReason = asst?.stop_reason
@@ -480,17 +474,12 @@ export async function* runViaOpenccQuery(
           .map((b: any) => b.text)
           .join('\n')
           .trim()
-        const isErrorStop = stopReason === 'error'
-        const isEmptyInputError =
-          errorText.length > 0 && EMPTY_INPUT_ERROR_RE.test(errorText)
-        if (isErrorStop || isEmptyInputError) {
+        if (stopReason === 'error') {
           disarmWatchdog()
           if (process.env.ZAI_DEBUG === '1') {
             console.log(
               '[bridge.iter] detected assistant error message: stop_reason=',
               stopReason,
-              'isEmptyInputError=',
-              isEmptyInputError,
             )
           }
           closeOrphanToolUsesWithError(
