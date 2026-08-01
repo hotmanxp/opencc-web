@@ -214,3 +214,14 @@ git checkout packages/zai/src/server/routes/agent.ts \
 - 11 个 stale 文件头注释清理
 - `README.md` 中 `@zn-ai/zai-agent-core` 引用替换
 - B 档审计: MCP pool / plugin runtime / hook runner 委托可行性
+
+## 通用约束(apply to 后续所有 compat 轮次)
+
+源代码里有 UI 调用 / 权限判断需要 UI 交互的(例如 opencc 的 `Tool.checkPermissions` 返回 `'ask'` 弹权限对话框、`runPreToolUseHooks` 注入 `case 'stop'` 等),直接改原代码跳过,返回 `'allow'` / `true` 等允许值。**不**留 stub、**不**抛 error,真 WEB UI 配置后阶段再补。
+
+参考现成实现:
+
+- `forceAllowCheckPermissions`(`packages/zn-agent-core/src/compat/tools/opencc/builtin.ts`)— 强制 always-allow vendor Tool 的 `checkPermissions`
+- `__zaiSkipPreToolUseHooks` flag(`packages/zn-agent-core/src/compat/runtime/agentRuntime.ts`)— zai runtime 下跳过 vendor PreToolUse hooks 的 `stop` yield
+
+后续 B 档委托时,凡触及 vendor / compat 的 permission gate / UI prompt,**优先短路**而非完整实现 UI 桥接。
