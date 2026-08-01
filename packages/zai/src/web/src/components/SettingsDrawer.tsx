@@ -27,9 +27,10 @@
  * onChange 由父组件 SettingsDrawer 接到 store / 写盘动作(后续阶段)。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Drawer } from 'antd'
+import { Button, Drawer, Modal } from 'antd'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
+import { requestRestart } from '../lib/systemApi.js'
 import type { OutputStyle } from '../../../shared/settings.js'
 
 export type SettingsValue = string | number | boolean
@@ -854,6 +855,35 @@ export default function SettingsDrawer() {
         </div>
       }
     >
+      {open && (
+        <div
+          data-testid="settings-service-section"
+          style={{
+            marginBottom: 16,
+            padding: 12,
+            border: '1px solid var(--border-subtle)',
+            borderRadius: 6,
+          }}
+        >
+          <div style={{ fontWeight: 600, marginBottom: 8 }}>服务</div>
+          <Button
+            danger
+            onClick={() => {
+              Modal.confirm({
+                title: '重启服务?',
+                content: '将会中断当前对话与后台任务,确定?',
+                okText: '重启',
+                cancelText: '取消',
+                onOk: async () => {
+                  await requestRestart('user_action')
+                },
+              })
+            }}
+          >
+            重启服务
+          </Button>
+        </div>
+      )}
       <SettingsList schema={schema} onClose={close} onChange={handleChange} />
     </Drawer>
   )
