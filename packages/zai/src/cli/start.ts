@@ -28,8 +28,17 @@ export async function runStart(options: StartOptions): Promise<void> {
 
   if (managed) {
     const { runSupervisor } = await import('./supervisor.js');
+    // Forward the user's `zai start` invocation to the supervisor-spawned
+    // child. The child needs the `start` subcommand and the original
+    // options (`--lan`, `--port`, etc.) to bind the same port and host;
+    // `--managed-child` is a marker so the child can recognise it is
+    // already inside a managed session and skip re-entering the supervisor.
+    const childArgs: string[] = [process.argv[1], 'start', '--managed-child']
+    if (options.port) childArgs.push('--port', options.port)
+    if (options.lan) childArgs.push('--lan')
+    if (options.open) childArgs.push('--open')
     const { exitCode } = await runSupervisor({
-      args: [process.argv[1], '--managed-child'],
+      args: childArgs,
       env: { ...process.env, ZAI_PORT: options.port ?? '9201' },
       port: Number(options.port ?? 9201),
     });
