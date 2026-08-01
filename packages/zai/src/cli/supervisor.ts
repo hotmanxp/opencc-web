@@ -65,18 +65,19 @@ export async function runSupervisor(
 
     // Forward child IPC messages to the supervisor's own parent so
     // wrappers (zai start, integration tests) can observe the lifecycle.
-    // In production the supervisor is the top-level process and has no
-    // parent IPC channel, in which case `process.send` is a no-op.
-    const forwardToParent = (raw: unknown) => {
-      if (typeof process.send === 'function') {
+    // Only register when an IPC parent actually exists; in test/CI envs
+    // process.send is undefined, and adding a listener would interfere
+    // with the FakeChild's emit-time buffering seam used by unit tests.
+    if (typeof process.send === 'function') {
+      const parentSend = process.send
+      child.on('message', (raw: unknown) => {
         try {
-          process.send(raw)
+          parentSend(raw)
         } catch {
           // parent IPC closed — ignore, child is still being managed
         }
-      }
+      })
     }
-    child.on('message', forwardToParent)
 
     // Forward `restart` requests from the supervisor's own parent down to
     // the child. Production supervisors have no parent IPC, so this is a
