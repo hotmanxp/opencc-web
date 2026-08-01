@@ -50,26 +50,6 @@ class CwdStoreImpl {
   clear(): void {
     store.clear()
   }
-
-  /**
-   * Read the cwd trailer file produced by opencc's BashProvider.
-   * OpenCC writes `<tmpdir>/claude-<taskId>-cwd` after each sh -c
-   * (see `opencc-src/utils/shell/bashProvider.ts` — `nativeJoin(tmpdir, 'claude-${opts.id}-cwd')`).
-   * The `claude-` prefix is the upstream Claude Code convention carried over.
-   * This is a convenience read for any consumer that wants the freshest value
-   * straight off disk; the regular `get` API returns whatever's already in
-   * the in-memory map.
-   */
-  readTrailer(taskId: string): string | undefined {
-    const { readFileSync } = require('node:fs') as typeof import('node:fs')
-    const { tmpdir } = require('node:os') as typeof import('node:os')
-    const { join } = require('node:path') as typeof import('node:path')
-    try {
-      return readFileSync(join(tmpdir(), `claude-${taskId}-cwd`), 'utf-8').trim()
-    } catch {
-      return undefined
-    }
-  }
 }
 
 export const CwdStore = new CwdStoreImpl()
