@@ -39,4 +39,25 @@ describe('restartCoordinator', () => {
     expect(calls).not.toContain('close')
     expect(calls).not.toContain('send')
   })
+
+  it('aborts in-flight when drain timeout exceeded, then continues to close', async () => {
+    let inFlight = 5
+    let nowMs = 0
+    const calls: string[] = []
+    const handle = requestRestart('user_action', {
+      inFlightCount: () => inFlight,
+      abortAll: () => { calls.push('abort'); inFlight = 0; return 5 },
+      closeServer: async () => { calls.push('close') },
+      sendRestart: (r) => { calls.push(`send:${r}`); return true },
+      exit: () => calls.push('exit'),
+      log: () => {},
+      sleep: async () => undefined,
+      now: () => (nowMs += 100),
+    })
+    const result = await handle.promise
+    if (result.drain.drained) throw new Error('expected drained=false')
+    expect(result.drain.aborted).toBe(5)
+    expect(calls).toContain('abort')
+    expect(calls).toContain('close')
+  })
 })

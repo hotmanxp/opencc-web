@@ -18,7 +18,7 @@ export type RestartHandle = {
   cancel: () => void
 }
 
-const DRAIN_TIMEOUT_MS = 5000
+const DRAIN_TIMEOUT_MS = 10000
 const POLL_INTERVAL_MS = 100
 
 export function requestRestart(
