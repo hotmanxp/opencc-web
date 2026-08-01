@@ -12,7 +12,7 @@ import {
   type RuntimeEvent,
 } from '@zn-ai/zn-agent-core'
 import tasksRouter from './tasks.js'
-import { __setBackgroundRuntime } from '../services/backgroundRuntime.js'
+import { __setBackgroundRuntime, wrapWithJobStarted } from '../services/backgroundRuntime.js'
 
 let tmpDir: string
 let mockRuntime: DefaultBackgroundRuntime
@@ -69,7 +69,7 @@ async function createRuntime(
 beforeEach(async () => {
   tmpDir = await mkdtemp(join(tmpdir(), 'zai-tasks-route-'))
   mockRuntime = await createRuntime()
-  __setBackgroundRuntime(mockRuntime)
+  __setBackgroundRuntime(wrapWithJobStarted(mockRuntime))
 })
 
 afterEach(async () => {
