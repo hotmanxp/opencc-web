@@ -341,6 +341,23 @@ async function* translateCallModel(
   }
   for await (const ev of stream as AsyncIterable<any>) {
     const t = ev?.type
+    // zai patch: forward every Anthropic primitive to the bridge as a
+    // `stream_event` wrapper. The bridge's sdkEventAdapter unpacks
+    // `event` and yields the raw event type as a RuntimeEvent, so SSE
+    // consumers see per-token `content_block_delta { delta: { text_delta } }`
+    // events and the UI renders streaming text — without this, zai only
+    // sees the terminal `assistant` Message below and the UI shows the
+    // full text in one shot.
+    //
+    // The downstream opencc queryLoop receives every yielded message via
+    // its `for await (const message of deps.callModel(...))` loop;
+    // `stream_event` wrappers don't match any of its assistant/user/system
+    // branches, so queryLoop passes them through unchanged. The final
+    // `assistant` Message (yielded at message_stop below) is what drives
+    // queryLoop's tool-execution loop. streamedBlockIndices in
+    // sdkEventAdapter dedupes the terminal assistant's synthesized
+    // primitives against the streamed ones (see openccQueryBridge.ts).
+    yield { type: 'stream_event', event: ev }
     if (t === 'message_start') {
       assistantId = ev?.message?.id
       assistantModel = ev?.message?.model
@@ -400,60 +417,42 @@ async function* translateCallModel(
       // "required parameter missing" and the loop trips after 5
       // retries. Patch the input with a safe default per tool so the
       // tool actually runs and the conversation can move forward.
-      if (tu && tu.type === 'tool_use' && (tu.input === undefined || (typeof tu.input === 'object' && tu.input !== null && Object.keys(tu.input).length === 0))) {
-        // Special-case AgentTool: its required fields `description` and
-        // `prompt` aren't satisfiable by a static default (BUILTIN_TOOL
-        // _DEFAULT_INPUT['Agent'] doesn't exist). The MiniMax-M3 model
-        // frequently emits an empty Agent tool_use right after a long
-        // `thinking` block whose content was the actual sub-agent
-        // intent — vendor's zod schema then rejects the empty input
-        // and the LLM gets stuck retrying "Agent failed 5 times with
-        // InputValidationError". Synthesize `description` (first ~60
-        // chars of the most recent thinking block) + `prompt` (full
-        // thinking text) + a default `subagent_type` so the sub-agent
-        // actually runs and the conversation can proceed. For other
-        // tools we fall back to BUILTIN_TOOL_DEFAULT_INPUT as before.
-        if (tu.name === 'Agent') {
-          const lastThinking = [...assistantContent]
-            .reverse()
-            .find((b: any) => b?.type === 'thinking' && typeof b.thinking === 'string' && b.thinking.length > 0) as
-            | { type: 'thinking'; thinking: string }
-            | undefined
-          const text = lastThinking?.thinking.trim() ?? ''
-          const description = text.length > 0
-            ? text.slice(0, 60).replace(/\s+/g, ' ').trim()
-            : 'subagent task'
-          tu.input = {
-            description,
-            ...(text.length > 0 ? { prompt: text } : {}),
-            subagent_type: 'general-purpose',
-          }
-        } else if (PATH_FALLBACK_TOOLS.has(tu.name)) {
-          const filePath = inferPathFromMostRecentUserPrompt(openccMessages)
-          if (filePath) {
-            tu.input = tu.name === 'Read'
-              ? { file_path: filePath }
-              : tu.name === 'Write'
-                ? { file_path: filePath, content: '' }
-                : { file_path: filePath, old_string: '', new_string: '' }
-          } else {
-            assistantContent = assistantContent.filter((block: any) => block !== tu)
-            assistantContent.push({
-              type: 'tool_result',
-              tool_use_id: tu.id,
-              is_error: true,
-              content: `No path could be inferred for ${tu.name}; please retry with explicit file_path.`,
-            })
-          }
-        } else if (INPUT_DELTA_REQUIRED_TOOLS.has(tu.name)) {
-          throw new Error(`input_json_delta required for ${tu.name}`)
-        } else {
-          tu.input = BUILTIN_TOOL_DEFAULT_INPUT[tu.name] ?? {}
-        }
+      if (
+        tu &&
+        tu.type === 'tool_use' &&
+        (tu.input === undefined ||
+          (typeof tu.input === 'object' &&
+            tu.input !== null &&
+            Object.keys(tu.input).length === 0))
+      ) {
+        throw new Error(
+          `[buildOpenccQueryParams] tool_use "${tu.name}" emitted empty input — ` +
+            `upstream proxy likely failed to stream content_block_stop+input_json_delta. Aborting query; ` +
+            `model must retry with explicit arguments. toolUseId=${tu.id ?? 'unknown'}`,
+        )
       }
     } else if (t === 'message_delta') {
       lastStopReason = ev?.delta?.stop_reason ?? null
     } else if (t === 'message_stop') {
+      // Defensive second-chance check: if content_block_stop was skipped
+      // (observed: MiniMax-M3 proxy doesn't emit it for some tool_use blocks),
+      // the throw in the content_block_stop handler never fires, leading to
+      // a hung conversation with empty tool_use inputs. Re-check here.
+      for (const block of assistantContent) {
+        if (
+          block?.type === 'tool_use' &&
+          (block.input === undefined ||
+            (typeof block.input === 'object' &&
+              block.input !== null &&
+              Object.keys(block.input).length === 0))
+        ) {
+          throw new Error(
+            `[buildOpenccQueryParams] tool_use "${block.name}" emitted empty input — ` +
+              `upstream proxy likely failed to stream content_block_stop+input_json_delta. Aborting query; ` +
+              `model must retry with explicit arguments. toolUseId=${block.id ?? 'unknown'}`,
+          )
+        }
+      }
       const message = flush(lastStopReason)
       if (message) yield message
     } else if (t === 'error') {

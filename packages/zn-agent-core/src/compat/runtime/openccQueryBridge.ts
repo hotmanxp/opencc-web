@@ -240,6 +240,13 @@ export async function* runViaOpenccQuery(
 
   // 4. Call opencc + stream forward.
   let eventCounter = 0
+  // zai patch: track block indices already streamed via the stream_event
+  // path so the terminal `assistant` Message's synthesized primitives
+  // don't double-render at the SSE consumer (see sdkEventAdapter.ts:178-246
+  // for the synthesis branch and the comment block on lines 30-43 for
+  // the dedupe rationale). Reset per assistant message_start
+  // (sdkEventAdapter:109-111).
+  const streamedBlockIndices = new Set<number>()
   try {
     const stream: AsyncIterable<unknown> = openccQuery(params)
     // Watchdog: after we see a message_stop or message_delta (the natural
@@ -258,11 +265,19 @@ export async function* runViaOpenccQuery(
     // watchdog, the frontend stays stuck on "calling" forever.
     const iter = stream[Symbol.asyncIterator]()
     const WATCHDOG_MS = Number(process.env.ZAI_OPENCC_WATCHDOG_MS ?? 300_000)
+    const TOOL_RESULT_TIMEOUT_MS = Number(
+      process.env.ZAI_TOOL_RESULT_TIMEOUT_MS ?? 60_000,
+    )
     let watchdogTimer: ReturnType<typeof setTimeout> | null = null
+    let toolResultTimer: ReturnType<typeof setTimeout> | null = null
     const disarmWatchdog = () => {
       if (watchdogTimer) {
         clearTimeout(watchdogTimer)
         watchdogTimer = null
+      }
+      if (toolResultTimer) {
+        clearTimeout(toolResultTimer)
+        toolResultTimer = null
       }
     }
     const bus = (globalThis as any).__zaiEventBus
@@ -274,6 +289,48 @@ export async function* runViaOpenccQuery(
     // and the frontend's upsertToolCall overwrites the stored
     // "Bash"/"Read"/etc. label).
     const toolNameByUseId = new Map<string, string>()
+    const emitForcedCompletion = (timeoutMs: number, trigger: string) => {
+      console.warn(
+        `[openccQueryBridge] watchdog tripped after ${trigger} with ` +
+          `no tool result for ${timeoutMs}ms — emitting runtime.done + tool_result for ${toolNameByUseId.size} pending tool(s)`,
+      )
+      if (bus && typeof bus.emit === 'function') {
+        bus.emit({
+          type: 'runtime.done',
+          sessionId,
+          turnIndex: 0,
+          eventId: `evt-watchdog-${Date.now()}`,
+          ts: Date.now(),
+          forced: true,
+        })
+        for (const [toolUseId, toolName] of toolNameByUseId) {
+          bus.emit({
+            type: 'runtime.tool_result',
+            sessionId,
+            turnIndex: 0,
+            eventId: `evt-watchdog-tool-${toolUseId}`,
+            ts: Date.now(),
+            toolUseId,
+            toolName,
+            output: `[watchdog] opencc stalled for ${timeoutMs}ms after ${trigger} — tool execution did not return a result. The bridge forced runtime.done; the LLM did not see a tool_result for this call.`,
+            isError: true,
+          })
+        }
+      }
+    }
+    const armToolResultWatchdog = () => {
+      if (
+        TOOL_RESULT_TIMEOUT_MS <= 0 ||
+        toolResultTimer ||
+        toolNameByUseId.size === 0
+      ) {
+        return
+      }
+      toolResultTimer = setTimeout(() => {
+        emitForcedCompletion(TOOL_RESULT_TIMEOUT_MS, 'tool_use')
+        toolResultTimer = null
+      }, TOOL_RESULT_TIMEOUT_MS)
+    }
     while (true) {
       if (opts.abortSignal?.aborted) {
         disarmWatchdog()
@@ -292,7 +349,7 @@ export async function* runViaOpenccQuery(
       for (const ev of drainToolEvents()) {
         yield ev
       }
-      for (const ev of translateSdkToRuntime(sdkMsg.value, { sessionId, turnIndex: 0, eventCounter, toolNameByUseId })) {
+      for (const ev of translateSdkToRuntime(sdkMsg.value, { sessionId, turnIndex: 0, eventCounter, toolNameByUseId, streamedBlockIndices })) {
         yield ev
         eventCounter++
       }
@@ -303,7 +360,21 @@ export async function* runViaOpenccQuery(
         const cbType = (sdkMsg.value as any)?.content_block?.type
         console.log('[bridge.iter] sdkType=', sdkType, 'cbType=', cbType, msgStr, asstStr)
       }
-      const sdkType = (sdkMsg.value as any)?.type
+      const sdkValue = sdkMsg.value as any
+      const sdkType = sdkValue?.type
+      const contentBlock = sdkValue?.content_block
+      if (sdkType === 'content_block_start' && contentBlock?.type === 'tool_use') {
+        armToolResultWatchdog()
+      }
+      const hasToolResult =
+        sdkType === 'tool_result' ||
+        (sdkType === 'user' &&
+          Array.isArray(sdkValue?.message?.content) &&
+          sdkValue.message.content.some((block: any) => block?.type === 'tool_result'))
+      if (hasToolResult && toolResultTimer) {
+        clearTimeout(toolResultTimer)
+        toolResultTimer = null
+      }
       // Arm the watchdog after any "end of LLM output" signal:
       //   - message_stop  (Anthropic stop primitive)
       //   - message_delta (last message_delta carries stop_reason)
@@ -315,40 +386,7 @@ export async function* runViaOpenccQuery(
       if (sdkType === 'message_stop' || sdkType === 'message_delta') {
         if (WATCHDOG_MS > 0 && !watchdogTimer) {
           watchdogTimer = setTimeout(() => {
-            console.warn(
-              `[openccQueryBridge] watchdog tripped after ${sdkType} with ` +
-                `no further opencc events for ${WATCHDOG_MS}ms — emitting runtime.done + tool_result for ${toolNameByUseId.size} pending tool(s)`,
-            )
-            if (bus && typeof bus.emit === 'function') {
-              bus.emit({
-                type: 'runtime.done',
-                sessionId,
-                turnIndex: 0,
-                eventId: `evt-watchdog-${Date.now()}`,
-                ts: Date.now(),
-                forced: true,
-              })
-              // For any tool_use blocks the LLM emitted but for which
-              // opencc never produced a tool_result, synthesize a
-              // runtime.tool_result with an error so the frontend
-              // closes the "工具调用中..." block instead of leaving
-              // it stuck forever. Without this, the user sees the
-              // tool as still calling even after the session goes
-              // back to idle.
-              for (const [toolUseId, toolName] of toolNameByUseId) {
-                bus.emit({
-                  type: 'runtime.tool_result',
-                  sessionId,
-                  turnIndex: 0,
-                  eventId: `evt-watchdog-tool-${toolUseId}`,
-                  ts: Date.now(),
-                  toolUseId,
-                  toolName,
-                  output: `[watchdog] opencc stalled for ${WATCHDOG_MS}ms after ${sdkType} — tool execution did not return a result. The bridge forced runtime.done; the LLM did not see a tool_result for this call.`,
-                  isError: true,
-                })
-              }
-            }
+            emitForcedCompletion(WATCHDOG_MS, sdkType)
             watchdogTimer = null
           }, WATCHDOG_MS)
         }
