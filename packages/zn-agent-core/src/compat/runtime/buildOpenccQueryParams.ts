@@ -50,12 +50,30 @@ import type { ModelCaller } from './modelCaller.js'
  */
 const BUILTIN_TOOL_DEFAULT_INPUT: Record<string, Record<string, unknown>> = {
   Bash: { command: 'pwd' },
-  Read: { file_path: '/dev/null' },
-  Write: { file_path: '/dev/null', content: '' },
-  Edit: { file_path: '/dev/null', old_string: '', new_string: '' },
-  Glob: { pattern: '*' },
-  Grep: { pattern: '.' },
   AskUserQuestion: { questions: [] },
+}
+
+const PATH_FALLBACK_TOOLS = new Set(['Read', 'Write', 'Edit'])
+const INPUT_DELTA_REQUIRED_TOOLS = new Set(['WebSearch', 'Glob', 'Grep'])
+const USER_PROMPT_PATH_RE = /[a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+/
+
+function inferPathFromMostRecentUserPrompt(messages: any[]): string | undefined {
+  for (let index = messages.length - 1; index >= 0; index--) {
+    const message = messages[index]
+    const inner = message?.message ?? message
+    if (inner?.role !== 'user') continue
+    const content = inner.content
+    const text = typeof content === 'string'
+      ? content
+      : Array.isArray(content)
+        ? content
+            .filter((block: any) => block?.type === 'text' && typeof block.text === 'string')
+            .map((block: any) => block.text)
+            .join('\n')
+        : ''
+    return text.match(USER_PROMPT_PATH_RE)?.[0]
+  }
+  return undefined
 }
 
 async function* translateCallModel(
@@ -410,6 +428,25 @@ async function* translateCallModel(
             ...(text.length > 0 ? { prompt: text } : {}),
             subagent_type: 'general-purpose',
           }
+        } else if (PATH_FALLBACK_TOOLS.has(tu.name)) {
+          const filePath = inferPathFromMostRecentUserPrompt(openccMessages)
+          if (filePath) {
+            tu.input = tu.name === 'Read'
+              ? { file_path: filePath }
+              : tu.name === 'Write'
+                ? { file_path: filePath, content: '' }
+                : { file_path: filePath, old_string: '', new_string: '' }
+          } else {
+            assistantContent = assistantContent.filter((block: any) => block !== tu)
+            assistantContent.push({
+              type: 'tool_result',
+              tool_use_id: tu.id,
+              is_error: true,
+              content: `No path could be inferred for ${tu.name}; please retry with explicit file_path.`,
+            })
+          }
+        } else if (INPUT_DELTA_REQUIRED_TOOLS.has(tu.name)) {
+          throw new Error(`input_json_delta required for ${tu.name}`)
         } else {
           tu.input = BUILTIN_TOOL_DEFAULT_INPUT[tu.name] ?? {}
         }
@@ -748,6 +785,18 @@ export async function buildOpenccQueryParams(
     sessionId: opts.sessionId ?? 'unknown',
     parentSessionId: opts.parentSessionId,
     abortController,
+    // zai patch: opencc QueryEngine (QueryEngine.ts:222) 默认
+    // `includePartialMessages = false` 时不向消费者 yield `stream_event`
+    // wrapper, 只在终态 `assistant` 消息里一次性给齐 text. sdkEventAdapter
+    // 收到终态消息只能合成一个 content_block_delta 把整段文本吐出
+    // (sdkEventAdapter.ts:197-205) → 前端一次性收齐全部 runtime.delta,
+    // 没有 token-by-token 流式效果. 显式开启后, opencc 才会逐 token 透传
+    // `stream_event { type: 'content_block_delta', delta: { text_delta } }`,
+    // sdkEventAdapter 的 stream_event 分支 (line 85-139) 解包后逐个 yield
+    // 真实 delta → 前端 useAgentStore.upsertStreamBlock 逐 delta 追加.
+    // 终态 `assistant` 路径仍由 streamedBlockIndices (line 43-44) 去重,
+    // 不会双发.
+    includePartialMessages: true,
   }
 
   return params as QueryParamsOutput
