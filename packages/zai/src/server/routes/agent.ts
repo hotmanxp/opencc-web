@@ -74,6 +74,7 @@ const PromptRequest = z
       .optional(),
     cwd: z.string().optional(),
     sessionId: z.string().optional(),
+    permissionMode: z.enum(EXTERNAL_PERMISSION_MODES as readonly [UserFacingPermissionMode, ...UserFacingPermissionMode[]]).optional(),
   })
   .refine(
     (v) => Boolean(v.prompt?.trim()) || Boolean(v.contentBlocks?.length),
@@ -394,10 +395,24 @@ export async function* translateRuntimeEvents(
 router.post("/agent/prompt", async (req: Request, res: Response) => {
   const parsed = PromptRequest.safeParse(req.body);
   if (!parsed.success) {
-    return res.status(400).json({ error: "invalid body: need {prompt, cwd?}" });
+    const issues = parsed.error.issues;
+    const permissionModeIssue = issues.find((i) => i.path.join(".") === "permissionMode");
+    if (permissionModeIssue) {
+      return res.status(400).json({
+        error: "invalid permissionMode",
+        detail: permissionModeIssue.message,
+      });
+    }
+    const promptIssue = issues.find(
+      (i) => i.path.join(".") === "prompt" || i.path.join(".") === "contentBlocks",
+    );
+    if (promptIssue) {
+      return res.status(400).json({ error: promptIssue.message });
+    }
+    return res.status(400).json({ error: "invalid body" });
   }
 
-  const { prompt, contentBlocks, sessionId: existingSessionId } = parsed.data
+  const { prompt, contentBlocks, sessionId: existingSessionId, permissionMode: requestedPermissionMode } = parsed.data
   const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
   const cwd = ctx.cwd
   const sessionId = existingSessionId ?? newSessionId()
@@ -574,8 +589,9 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
         model: resolvedModel,
         // 透传用户为该会话选定的 permission mode. 切 mode 后下一次发消息
         // 立即生效, 不需要重启 runtime. 新会话 / meta 未写 mode 时走默认.
+        // requestedPermissionMode (body param) overrides stored meta for this turn.
         permissionMode:
-          transcript?.meta?.permissionMode ?? getDefaultMode(),
+          requestedPermissionMode ?? transcript?.meta?.permissionMode ?? getDefaultMode(),
       });
 
       // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,
