@@ -157,3 +157,128 @@ describe('zai prompt route appends events to transcript', () => {
     expect(typeof runtime.appendToolResult).toBe('function')
   })
 })
+
+// Regression test for the image-2013 bug (Aug 2026).
+//
+// Symptom: pasting an image into the AgentInputBox produced a 400
+// `messages.0.content.0: unsupported content type '' (2013)` from
+// Anthropic on the SECOND turn (the first turn succeeded because no
+// history was loaded). Root cause: the zai prompt route passed the
+// runtime's `UserMessage[]` shape (`[{role, content:[image,text]}]`)
+// to `appendUserMessageV2` as `content`, and the function stored the
+// wrapper array verbatim into `message.content`. On resume,
+// `serializeForAnthropic` passed it through, the first "content block"
+// reaching Anthropic was `{role:"user", content:[…]}` with no `type`
+// field, and the API rejected it.
+//
+// Fix has two layers:
+//   1. zai prompt route now passes `userContent` (the unwrapped content
+//      blocks) instead of `promptArg` (the wrapped UserMessage array).
+//   2. `appendUserMessageV2` defensively detects the wrapper shape and
+//      unwraps it, so a future regression at the call site can't poison
+//      the transcript again.
+describe('appendUserMessageV2 image-2013 regression', () => {
+  let dataDir: string
+  beforeEach(() => {
+    dataDir = mkdtempSync(join(tmpdir(), 'zai-image-2013-'))
+  })
+  afterEach(() => {
+    rmSync(dataDir, { recursive: true, force: true })
+  })
+
+  async function readUserContent(sid: string) {
+    const { TranscriptStore } = await import(
+      '../../../src/compat/transcript/store.js'
+    )
+    const store = new TranscriptStore(dataDir)
+    const file = await store.read(sid, {
+      cwd: '/Users/ethan/code/opencc-web/packages/zai',
+    })
+    return (file.messages[0]?.message as { content: unknown }).content
+  }
+
+  it('stores content blocks verbatim when caller passes image + text blocks', async () => {
+    const { TranscriptStore } = await import(
+      '../../../src/compat/transcript/store.js'
+    )
+    const { appendUserMessageV2 } = await import(
+      '../../../src/compat/transcript/persistence.js'
+    )
+    const store = new TranscriptStore(dataDir)
+    const cwd = '/Users/ethan/code/opencc-web/packages/zai'
+    const sid = await store.create(
+      { cwd, model: 'MiniMax-M3', permissionMode: 'default' },
+      { cwd },
+    )
+
+    const blocks = [
+      {
+        type: 'image',
+        source: {
+          type: 'base64',
+          media_type: 'image/png',
+          data: 'iVBORw0KGgo=',
+        },
+      },
+      { type: 'text', text: 'describe this' },
+    ]
+    await appendUserMessageV2(store, sid, blocks, 0, null, {
+      cwd,
+      sessionId: sid,
+      userType: 'zai',
+    })
+
+    const content = (await readUserContent(sid)) as Array<{ type: string }>
+    expect(Array.isArray(content)).toBe(true)
+    expect(content[0].type).toBe('image')
+    expect(content[1].type).toBe('text')
+  })
+
+  it('unwraps UserMessage[] wrapper (defense-in-depth for the agent.ts fix)', async () => {
+    const { TranscriptStore } = await import(
+      '../../../src/compat/transcript/store.js'
+    )
+    const { appendUserMessageV2 } = await import(
+      '../../../src/compat/transcript/persistence.js'
+    )
+    const store = new TranscriptStore(dataDir)
+    const cwd = '/Users/ethan/code/opencc-web/packages/zai'
+    const sid = await store.create(
+      { cwd, model: 'MiniMax-M3', permissionMode: 'default' },
+      { cwd },
+    )
+
+    // This is the shape agent.ts used to pass BEFORE the fix:
+    // `promptArg = [{role:"user", content:[imageBlock, textBlock]}]`.
+    const wrapped = [
+      {
+        role: 'user',
+        content: [
+          {
+            type: 'image',
+            source: {
+              type: 'base64',
+              media_type: 'image/png',
+              data: 'iVBORw0KGgo=',
+            },
+          },
+          { type: 'text', text: 'describe this' },
+        ],
+      },
+    ]
+    await appendUserMessageV2(store, sid, wrapped, 0, null, {
+      cwd,
+      sessionId: sid,
+      userType: 'zai',
+    })
+
+    const content = (await readUserContent(sid)) as Array<{ type: string }>
+    expect(Array.isArray(content)).toBe(true)
+    expect(content[0].type).toBe('image')
+    expect(content[1].type).toBe('text')
+    // Guard against the regression: a `{role, content}` wrapper stored
+    // as the first element of `message.content` would make Anthropic
+    // return 2013 "unsupported content type ''" on resume.
+    expect((content[0] as unknown as { role?: string }).role).toBeUndefined()
+  })
+})

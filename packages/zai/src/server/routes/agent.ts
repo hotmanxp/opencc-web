@@ -556,14 +556,22 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
       // new layout has `messages: []` and the UI shows a blank
       // transcript on reload — the opencc vendor `query()` only emits
       // stream events, it never writes to the transcript.
-      // We pass the same `promptArg` shape that the runtime gets, so
-      // images / contentBlocks round-trip identically.
+      //
+      // Pass `userContent` (the actual content blocks / string), NOT the
+      // wrapped `promptArg` array. The runtime accepts `UserMessage[]`
+      // (`[{role, content}]`) but the transcript stores Anthropic-protocol
+      // content blocks directly. If we wrote the wrapper array, resume
+      // would re-send `[{role:"user", content:[image,text]}]` and the
+      // first "block" reaches Anthropic as `{role:"user", content:…}`
+      // with no `type` field → 400 "unsupported content type '' (2013)".
+      // Round-trip identity is preserved because the runtime reads from
+      // params.messages, not from the persisted transcript.
       const transcriptCtx = { cwd, sessionId, userType: 'zai' }
       try {
         await appendUserMessageV2(
           getTranscriptStore(),
           sessionId,
-          promptArg as unknown,
+          userContent as unknown,
           0,
           null,
           transcriptCtx,

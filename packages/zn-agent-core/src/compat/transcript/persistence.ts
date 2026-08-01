@@ -85,6 +85,27 @@ function baseFields(
   }
 }
 
+/**
+ * Detect if an array is Anthropic-style content blocks (every element has
+ * `type`) vs zai runtime-style `UserMessage` wrappers (every element has
+ * `role`). Used by `appendUserMessageV2` to defensively unwrap callers that
+ * pass the runtime shape `{role, content}` instead of content blocks — the
+ * transcript must store Anthropic-protocol blocks, otherwise resume replays
+ * `{role, content}` as the first content block and the API rejects with
+ * "unsupported content type '' (2013)".
+ */
+function isUserMessageWrapperArray(arr: unknown[]): boolean {
+  if (arr.length === 0) return false
+  return arr.every(
+    (b) =>
+      b !== null &&
+      typeof b === 'object' &&
+      typeof (b as { role?: unknown }).role === 'string' &&
+      (b as { role: string }).role === 'user' &&
+      (b as { type?: unknown }).type === undefined,
+  )
+}
+
 export async function appendUserMessageV2(
   store: TranscriptStore,
   sessionId: string,
@@ -99,10 +120,27 @@ export async function appendUserMessageV2(
     const isSkillInjection = meta?.kind === 'skill_injection'
     // skill body 注入对齐 OpenCC isMeta: 前端按 isMeta=true 跳过渲染 (useAgentStore.loadTranscriptMessages)
     const isMeta = meta?.isMeta === true || isSkillInjection
-    const normalized =
-      typeof content === 'string' || Array.isArray(content)
-        ? content
-        : String(content)
+    let normalized: string | ContentBlock[]
+    if (typeof content === 'string') {
+      normalized = content
+    } else if (Array.isArray(content)) {
+      // Defensive: caller passed zai's `UserMessage[]` shape (the runtime
+      // also accepts it). Unwrap to content blocks so the transcript
+      // stores Anthropic-protocol content and resume doesn't 400 with
+      // "unsupported content type '' (2013)" on the first content block.
+      if (isUserMessageWrapperArray(content)) {
+        const merged: ContentBlock[] = []
+        for (const m of content as Array<{ content: unknown }>) {
+          if (Array.isArray(m.content)) merged.push(...(m.content as ContentBlock[]))
+          else if (typeof m.content === 'string') merged.push({ type: 'text', text: m.content })
+        }
+        normalized = merged
+      } else {
+        normalized = content as ContentBlock[]
+      }
+    } else {
+      normalized = String(content)
+    }
     const base = baseFields(ctx, turnIndex, parentUuid)
     const msg: TranscriptMessage = {
       ...base,
