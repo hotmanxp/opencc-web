@@ -18,7 +18,9 @@ export async function createOpenccRuntimeImpl(options) {
   let turnIndex = 0
 
   const customQuery = options.query
-    ? async params => options.query(params)
+    ? async function* (params) {
+        yield* options.query(params)
+      }
     : undefined
 
   const engine = new QueryEngine({

@@ -141,15 +141,18 @@ describe('createSessionFacade — server session/transcript facade (Task 3)', ()
   it('list() returns sessions for the explicit cwd, sorted by recency', async () => {
     const facade = await createSessionFacade({ cwd: cwdA, dataDir })
     const first = await facade.create()
-    // Sleep so the second session has a strictly later mtime.
-    await new Promise(resolve => setTimeout(resolve, 10))
+    // Sleep so the second session's file mtime is strictly later.
+    // Some filesystems have only 1ms mtime granularity (ext4) or
+    // ~10ms (HFS+); 50ms is the lowest reliable gap across the
+    // platforms we ship to. Tests on the new Apple FS (APFS) and
+    // tmpfs can resolve down to 1ns but we keep 50ms to be portable.
+    await new Promise(resolve => setTimeout(resolve, 50))
     const second = await facade.create()
 
     const sessions = await facade.list({ cwd: cwdA })
     expect(sessions.length).toBeGreaterThanOrEqual(2)
     // Newest first: the second-created session must come before the
-    // first in the returned list (vendor's listSessionsImpl sorts by
-    // updatedAt desc).
+    // first in the returned list (facade sorts by mtime desc).
     const ids = sessions.map(s => s.id)
     const idxFirst = ids.indexOf(first.sessionId)
     const idxSecond = ids.indexOf(second.sessionId)

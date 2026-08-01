@@ -75,32 +75,14 @@ const _runtimeShape: OpenccRuntime = {
 }
 void _runtimeShape
 
-describe('createOpenccRuntime — server runtime contract (Task 1 seam)', () => {
-  it('factory body throws a stable "not implemented" error (the migration seam)', async () => {
-    // The error message is grep-stable so future Tasks can replace the
-    // body (and a follow-up Task can drop the throw) without breaking
-    // callers' migration code.
-    await expect(createOpenccRuntime({} as OpenccRuntimeOptions)).rejects.toThrow(
-      /not implemented/i,
-    )
-  })
+describe('createOpenccRuntime — server runtime contract (Task 1 + 4)', () => {
+  // The Task 1 "not implemented" seam lock was removed when Task 4
+  // filled the body (commit 9cfa14d7). The remaining assertions lock
+  // the public type surface and the 8-method runtime shape — the
+  // contract Task 5 (zai migration) and Task 6 (legacy deletion) rely
+  // on.
 
-  it('rejects regardless of which options shape the caller supplies', async () => {
-    // The seam must hold for partial / full / empty option shapes —
-    // the factory body never reaches a point where options matter,
-    // because the throw happens first. This guarantees downstream
-    // Tasks can extend `OpenccRuntimeOptions` without changing the
-    // seam behaviour for Task 1 callers.
-    const opts: OpenccRuntimeOptions = {
-      dataDir: '/tmp/zai',
-      runtimeId: 'rt-test',
-      defaultCwd: '/work',
-      defaultModel: 'claude-test',
-    }
-    await expect(createOpenccRuntime(opts)).rejects.toThrow(/not implemented/i)
-  })
-
-  it('exports `createOpenccRuntime` (function) and the four type-only exports via the opencc-server subpath', () => {
+  it('exports `createOpenccRuntime` (function) and the public type surface via the opencc-server subpath', () => {
     // Re-import each named export so the test fails the moment any one
     // goes missing. We don't runtime-check the type-only exports (TS
     // already does that at compile time), but we DO verify the value

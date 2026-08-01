@@ -161,11 +161,16 @@ export async function createSessionFacadeImpl(
           readFile(filePath, 'utf8'),
           statAsync(filePath),
         ])
+        // updatedAt always comes from the file's mtime — independent
+        // of file content. `create()` writes an empty file, so
+        // without this `firstLine` branch the new session would
+        // report updatedAt=0 and list() would tie-sort all of them.
+        const updatedAt = stat.mtimeMs
+        const messageCount = raw.split('\n').filter(line => line.trim()).length
         // Lite header: parse the first non-empty line; if it's a
-        // transcript entry we extract id/cwd/createdAt/updatedAt
-        // from it. Vendor's `readSessionLite` does the same; for our
-        // minimal surface we read the whole file and take the first
-        // line (session files are JSONL with one entry per line).
+        // transcript entry we extract createdAt from it. Vendor's
+        // `readSessionLite` does the same; for our minimal surface
+        // we read the whole file and take the first line.
         const firstLine = raw
           .split('\n')
           .find(line => line.trim().length > 0)
@@ -174,13 +179,12 @@ export async function createSessionFacadeImpl(
             id: sessionId,
             cwd,
             filePath,
-            createdAt: 0,
-            updatedAt: 0,
+            createdAt: updatedAt,
+            updatedAt,
             messageCount: 0,
           }
         }
         const parsed = JSON.parse(firstLine) as Record<string, unknown>
-        const messageCount = raw.split('\n').filter(line => line.trim()).length
         return {
           id: sessionId,
           cwd,
@@ -188,14 +192,8 @@ export async function createSessionFacadeImpl(
           createdAt:
             typeof parsed.createdAt === 'number'
               ? (parsed.createdAt as number)
-              : 0,
-          // Use the file's mtime for `updatedAt` so list() can sort
-          // by recency. We avoid `Date.now()` here because two
-          // sessions created within the same millisecond would tie
-          // (the original test exposed this — the second's
-          // get() call rewrites both files' updatedAt to the
-          // current instant, breaking the sort).
-          updatedAt: stat.mtimeMs,
+              : updatedAt,
+          updatedAt,
           messageCount,
         }
       } catch (err) {
@@ -223,7 +221,16 @@ export async function createSessionFacadeImpl(
         const info = await this.get(sessionId, { cwd: opts?.cwd ?? cwd })
         if (info) sessions.push(info)
       }
-      sessions.sort((a, b) => b.updatedAt - a.updatedAt)
+      // Sort by mtime desc; tiebreak on sessionId ascending so two
+      // files created in the same millisecond (FS mtime granularity
+      // can be 1ms on ext4, ~10ms on HFS+) don't flip on every
+      // test run. Tests have hit this race — the brief's
+      // "two sessions concurrent writes" coverage requires a
+      // deterministic order.
+      sessions.sort((a, b) => {
+        if (b.updatedAt !== a.updatedAt) return b.updatedAt - a.updatedAt
+        return a.id < b.id ? -1 : a.id > b.id ? 1 : 0
+      })
       const limit = opts?.limit ?? Number.POSITIVE_INFINITY
       return sessions.slice(0, limit)
     },
