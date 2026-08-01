@@ -389,3 +389,22 @@ await esbuild.build({
 
 console.log(`[bundle-opencc] ✓ bundled ${SRC_ENTRY}`)
 console.log(`[bundle-opencc]   → ${OUT_FILE}`)
+
+// ── Single-file esbuild for opencc-src pure type/const files ──
+// Some compat shims are verbatim ports of opencc-src modules
+// (e.g. permissions.ts). Compile just the single file (no bundle,
+// no transitive imports) so we don't drag React/JSX/opentelemetry/
+// lodash-es from opencc's vendored tree.
+const PERMISSIONS_ENTRY = join(ROOT, 'src', 'opencc-src', 'types', 'permissions.ts')
+const PERMISSIONS_OUT = join(ROOT, 'dist', 'opencc-src', 'types', 'permissions.js')
+
+await esbuild.build({
+  entryPoints: [PERMISSIONS_ENTRY],
+  bundle: false,
+  format: 'esm',
+  outfile: PERMISSIONS_OUT,
+  platform: 'node',
+  target: 'node22',
+})
+
+console.log(`[bundle-opencc] permissions: ${PERMISSIONS_OUT}`)

@@ -15,7 +15,8 @@
     "./agents/memoryLoader": "./dist/agents/memoryLoader.js",
     "./agents/memoryWatcher": "./dist/agents/memoryWatcher.js",
     "./compat/vendor/ripgrep": "./dist/compat/vendor/ripgrep.js",
-    "./opencc-core": "./dist/opencc-core.mjs"
+    "./opencc-core": "./dist/opencc-core.mjs",
+    "./opencc-src/permissions": "./dist/opencc-src/types/permissions.js"
   },
   "files": [
     "dist/",
