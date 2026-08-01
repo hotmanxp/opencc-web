@@ -219,7 +219,7 @@ export async function runSupervisor(
 // Allow `bun run src/cli/supervisor.ts --child-script <path>` to spawn a child
 // for integration tests. Production callers (start.ts) keep importing
 // runSupervisor directly and ignore this block.
-if (import.meta.main) {
+if ((import.meta as { main?: boolean }).main) {
   const args = process.argv.slice(2)
   const port = Number(process.env.ZAI_PORT ?? '9201')
   runSupervisor({ args, env: process.env, port }).then(({ exitCode }) => {
