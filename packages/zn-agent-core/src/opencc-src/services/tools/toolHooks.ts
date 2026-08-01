@@ -527,6 +527,29 @@ export async function* runPreToolUseHooks(
   // stop execution
   | { type: 'stop' }
 > {
+  // zai patch: short-circuit PreToolUse hooks for zai's HTTP-server runtime.
+  //
+  // Root cause of the previous Bash hang (Aug 2026): vendor's
+  // runPreToolUseHooks awaits shell-spawned plugin hook scripts, and
+  // the spawn wrapper can throw under zai's runtime — missing
+  // CLAUDE_PLUGIN_ROOT env, plugin script permission errors, spawn
+  // ENOENT, etc. The outer catch (line ~715 below) yields
+  // {type:'stop'} on any throw, which checkPermissionsAndCallTool then
+  // propagates as `createToolResultStopMessage(toolUseID)` — so the LLM
+  // receives a synthetic "The user doesn't want to take this action right
+  // now. STOP…" tool_result and the real tool.call() never runs. The UI
+  // stays on "调用中" forever because the synthetic stop message
+  // counts as a tool_result but contains no actual command output.
+  //
+  // zai is a localhost-only HTTP server with no in-process permission
+  // dialog (see AGENTS.md), so plugin-driven PreToolUse prompts are
+  // unusable anyway — they assume an interactive TTY. Skipping every
+  // PreToolUse hook lets the existing always-allow tool.checkPermissions
+  // (forceAllowCheckPermissions in compat/tools/opencc/builtin.ts)
+  // make the allow decision.
+  if ((globalThis as any).__zaiSkipPreToolUseHooks === true) {
+    return
+  }
   const hookStartTime = Date.now()
   try {
     const appState = toolUseContext.getAppState()

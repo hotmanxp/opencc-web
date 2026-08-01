@@ -113,6 +113,24 @@ function resolveSandbox(cwd: string): import('@zn-ai/zn-agent-core').SandboxConf
 
 export function initAgentRuntime(cwd: string): void {
   if (runtime) return
+  // zai patch: skip vendor PreToolUse plugin hooks under the HTTP-server
+  // runtime. Plugin hooks are shell scripts that expect an interactive
+  // TTY + CLAUDE_PLUGIN_ROOT env; under zai's headless server they throw
+  // (ENOENT / spawn error), the vendor catch at
+  // src/opencc-src/services/tools/toolHooks.ts:715 yields {type:'stop'},
+  // and toolExecution.ts:1100 propagates that as
+  // `createToolResultStopMessage(toolUseID)` — so the LLM receives a
+  // synthetic "The user doesn't want to take this action right now. STOP…"
+  // tool_result and the real tool.call() never runs. The UI is stuck on
+  // "调用中" because the synthetic stop message closes the
+  // tool_use/tool_result pair without producing a real shell output.
+  //
+  // Setting this flag short-circuits runPreToolUseHooks in toolHooks.ts
+  // to return immediately (yielding nothing). checkPermissionsAndCallTool
+  // then falls through to the existing tool.checkPermissions path, which
+  // compat/tools/opencc/builtin.ts already overwrites with always-allow
+  // via forceAllowCheckPermissions — so every tool runs without prompt.
+  ;(globalThis as any).__zaiSkipPreToolUseHooks = true
   // OpenCC vendor's config system has a `configReadingAllowed` flag
   // (config.ts:1473) that throws on any getConfig() until set. The
   // bridge's lazy import of opencc-src/query.js → queryLoop →
