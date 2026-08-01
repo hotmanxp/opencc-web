@@ -17,7 +17,8 @@ import {
   setCurrentSessionId,
   listSkills,
 } from "../services/agentRuntime.js";
-import { EXTERNAL_PERMISSION_MODES, type UserFacingPermissionMode } from "@zn-ai/zn-agent-core";
+import { EXTERNAL_PERMISSION_MODES } from "@zn-ai/zn-agent-core/opencc-src/permissions";
+import type { UserFacingPermissionMode } from "@zn-ai/zn-agent-core/compat/permissions";
 import { CwdStore, runWithSessionId } from "@zn-ai/zn-agent-core/runtime";
 import {
   appendUserMessageV2,

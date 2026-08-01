@@ -1,7 +1,8 @@
 import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { EXTERNAL_PERMISSION_MODES, type UserFacingPermissionMode } from '@zn-ai/zn-agent-core'
+import { EXTERNAL_PERMISSION_MODES } from '@zn-ai/zn-agent-core/opencc-src/permissions'
+import type { UserFacingPermissionMode } from "@zn-ai/zn-agent-core/compat/permissions";
 
 const VALID_MODES: ReadonlySet<UserFacingPermissionMode> = new Set(EXTERNAL_PERMISSION_MODES)
 

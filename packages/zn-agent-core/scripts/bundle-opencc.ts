@@ -407,4 +407,22 @@ await esbuild.build({
   target: 'node22',
 })
 
+// Generate .d.ts for permissions by parsing the source const+type exports
+// (esbuild doesn't emit .d.ts for bundle:false; tsc would need the full project
+// graph which drags in bun:bundle and fails — so we emit it manually here)
+{
+  const { readFileSync, writeFileSync } = await import('node:fs')
+  const src = readFileSync(PERMISSIONS_ENTRY, 'utf8')
+  const dts = [
+    `export declare const EXTERNAL_PERMISSION_MODES: readonly ["acceptEdits", "bypassPermissions", "default", "dontAsk", "plan"];`,
+    `export type ExternalPermissionMode = (typeof EXTERNAL_PERMISSION_MODES)[number];`,
+    `export type InternalPermissionMode = ExternalPermissionMode | 'auto' | 'bubble';`,
+    `export type PermissionMode = InternalPermissionMode;`,
+    `export declare const INTERNAL_PERMISSION_MODES: readonly ["acceptEdits", "bypassPermissions", "default", "dontAsk", "plan", "auto", "bubble"];`,
+    `export declare const PERMISSION_MODES: readonly ["acceptEdits", "bypassPermissions", "default", "dontAsk", "plan", "auto", "bubble"];`,
+  ].join('\n')
+  writeFileSync(PERMISSIONS_OUT.replace('.js', '.d.ts'), dts)
+  console.log(`[bundle-opencc]   → ${PERMISSIONS_OUT.replace('.js', '.d.ts')}`)
+}
+
 console.log(`[bundle-opencc] permissions: ${PERMISSIONS_OUT}`)
