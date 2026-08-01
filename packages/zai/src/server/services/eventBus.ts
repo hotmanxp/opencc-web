@@ -41,6 +41,8 @@ function isGlobalEvent(event: ServerEvent): boolean {
     case 'job.progress':
     case 'job.done':
     case 'job.failed':
+    case 'system.restarting':
+    case 'system.restart.canceled':
       return true
     default:
       return false
@@ -144,7 +146,9 @@ export class ServerEventBus {
         type === 'server.connected' ||
         type === 'server.error' ||
         type === 'toast' ||
-        type === 'branch.changed'
+        type === 'branch.changed' ||
+        type === 'system.restarting' ||
+        type === 'system.restart.canceled'
       )) return true
     }
     return false

@@ -7,6 +7,7 @@ import { eventBus } from '../services/eventBus.js';
 import { isManagedChild, sendToSupervisor } from '../../cli/managedChild.js';
 import { requestRestart } from '../services/restartCoordinator.js';
 import { createRestartHooks } from '../services/restartHooks.js';
+import type { ServerEventInput } from '../services/eventBus.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -93,25 +94,6 @@ let activeHandle: { cancel: () => void } | null = null;
 
 export function __resetRestartRouter() { activeHandle = null }
 
-// Placeholder type for system.restarting event. T11 will add the canonical
-// zod schema in shared/events.ts; this local alias keeps the emit type-safe
-// in the interim. Replace with `z.infer<typeof SystemEvent>` once T11 lands.
-type SystemRestartingEvent = {
-  type: 'system.restarting'
-  reason: 'user_action' | 'auto_recovery' | 'update'
-  deadlineMs: number
-}
-
-// Forward-compatible emit: typed shim that bypasses the ServerEventInput
-// union narrowing for the not-yet-landed 'system.restarting' variant.
-// Once T11 adds the canonical entry to SystemEvent, replace this with a
-// direct `eventBus.emit({...})` call.
-function emitSystemRestarting(event: SystemRestartingEvent): void {
-  // The schema lands in T11; in the meantime we widen the emit surface so
-  // the call site keeps full type safety without `as any`.
-  eventBus.emit(event as unknown as Parameters<typeof eventBus.emit>[0])
-}
-
 router.post('/system/restart', async (req, res) => {
   const parsed = restartBody.safeParse(req.body)
   if (!parsed.success) return res.status(400).json({ error: parsed.error.message })
@@ -125,12 +107,12 @@ router.post('/system/restart', async (req, res) => {
     abortBackground: () => undefined,
   })
 
-  const restartingEvent: SystemRestartingEvent = {
+  const restartingEvent: ServerEventInput = {
     type: 'system.restarting',
     reason: parsed.data.reason,
     deadlineMs: 5000,
   }
-  emitSystemRestarting(restartingEvent)
+  eventBus.emit(restartingEvent)
 
   const handle = requestRestart(parsed.data.reason, {
     inFlightCount: hooks.inFlightCount,

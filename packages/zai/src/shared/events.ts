@@ -141,6 +141,10 @@ const SystemEvent = z.discriminatedUnion('type', [
              level: z.enum(['info','warn','error']), message: z.string() }),
   z.object({ ...Base.shape, type: z.literal('branch.changed'),
              branch: z.string() }),
+  z.object({ ...Base.shape, type: z.literal('system.restarting'),
+             reason: z.enum(['user_action','auto_recovery','update']),
+             deadlineMs: z.number() }),
+  z.object({ ...Base.shape, type: z.literal('system.restart.canceled') }),
 ])
 
 // state.* — 服务端 in-process StateChangeBus 经 zai server bridge 翻译后 emit。
