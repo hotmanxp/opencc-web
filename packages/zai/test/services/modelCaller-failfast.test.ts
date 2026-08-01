@@ -160,7 +160,7 @@ describe('createAnthropicModelCaller — fail-fast on missing credentials', () =
       thrown = e
     }
     expect(thrown).toBeInstanceOf(Error)
-    expect((thrown as Error).message).toMatch(/ANTHROPIC_AUTH_TOKEN is unset/)
+    expect((thrown as Error).message).toMatch(/ANTHROPIC_AUTH_TOKEN.*(also )?unset/)
     expect(thrown).not.toBeInstanceOf(TypeError)
     // Anthropic SDK must NOT have been constructed with an empty key —
     // any construction at all would mean upstream saw a forged authToken.
@@ -197,6 +197,128 @@ describe('createAnthropicModelCaller — fail-fast on missing credentials', () =
     }
     expect(thrown).toBeInstanceOf(Error)
     expect((thrown as Error).message).toMatch(/profile "p1".*apiKey is empty/)
+  })
+
+  it('falls back to env.ANTHROPIC_AUTH_TOKEN when profile.apiKey is empty string (not nullish)', async () => {
+    // Regression: providerProfiles[].apiKey is `""` (empty string) — the
+    // most common shape when the user toggles a profile in the UI and the
+    // backend writes the empty string back to ~/.claude.json. Previously
+    // `profile.apiKey ?? fallbackKey` would NOT fall back because `??`
+    // only handles null/undefined, not empty string — so the apiKey
+    // resolved to "" and the modelCaller threw the misleading
+    // "ANTHROPIC_AUTH_TOKEN is unset" error. Fix: use `||` so empty
+    // string falls back to the env key.
+    await setupHome({
+      env: {
+        ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic',
+        ANTHROPIC_AUTH_TOKEN: 'sk-cp-fallback-from-env',
+      },
+      providerProfiles: [
+        {
+          id: 'provider_2d12e1fa6159',
+          name: 'Anthropic-Mix',
+          provider: 'anthropic',
+          baseUrl: 'https://api.minimaxi.com/anthropic',
+          model: 'MiniMax-M3',
+          apiKey: '', // ← empty string, not undefined. ?? would not fall back.
+        },
+      ],
+    })
+    const caller = await newCaller()
+    const ac = new AbortController()
+    const events: unknown[] = []
+    for await (const ev of caller({
+      model: 'MiniMax-M3' as any,
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [],
+      signal: ac.signal,
+    } as any)) {
+      events.push(ev)
+    }
+    expect(events.some((e: any) => e.type === 'message_stop')).toBe(true)
+    // Anthropic SDK was constructed with the env fallback key, not ''.
+    expect(
+      constructionLog.some((c) => c.apiKey === 'sk-cp-fallback-from-env'),
+    ).toBe(true)
+    expect(constructionLog.some((c) => c.apiKey === '')).toBe(false)
+  })
+
+  it('falls back to env.ANTHROPIC_AUTH_TOKEN when profile.apiKey is whitespace', async () => {
+    // Same root cause as the empty-string case: any whitespace-only key
+    // would upstream as a forged auth header and 403. Trim-aware check
+    // should fall back instead of forwarding garbage.
+    await setupHome({
+      env: {
+        ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic',
+        ANTHROPIC_AUTH_TOKEN: 'sk-cp-fallback-trim',
+      },
+      providerProfiles: [
+        {
+          id: 'p1',
+          name: 'whitespace-profile',
+          provider: 'anthropic',
+          baseUrl: 'https://api.minimaxi.com/anthropic',
+          model: 'MiniMax-M3',
+          apiKey: '   ',
+        },
+      ],
+    })
+    const caller = await newCaller()
+    const ac = new AbortController()
+    const events: unknown[] = []
+    for await (const ev of caller({
+      model: 'MiniMax-M3' as any,
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [],
+      signal: ac.signal,
+    } as any)) {
+      events.push(ev)
+    }
+    expect(events.some((e: any) => e.type === 'message_stop')).toBe(true)
+    expect(
+      constructionLog.some((c) => c.apiKey === 'sk-cp-fallback-trim'),
+    ).toBe(true)
+  })
+
+  it('prefers profile.apiKey when it is a non-empty non-whitespace string', async () => {
+    // Sanity: when the profile actually has a key, use it (not the env
+    // fallback). Catches over-correction in the fix — e.g. if someone
+    // writes `apiKey || fallbackKey` without trimming, this still passes
+    // because 'sk-profile-set' is truthy. The whitespace test above pins
+    // the trim behavior.
+    await setupHome({
+      env: {
+        ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic',
+        ANTHROPIC_AUTH_TOKEN: 'sk-cp-fallback-should-not-be-used',
+      },
+      providerProfiles: [
+        {
+          id: 'p1',
+          name: 'profile-with-key',
+          provider: 'anthropic',
+          baseUrl: 'https://api.minimaxi.com/anthropic',
+          model: 'MiniMax-M3',
+          apiKey: 'sk-cp-profile-set',
+        },
+      ],
+    })
+    const caller = await newCaller()
+    const ac = new AbortController()
+    for await (const _ of caller({
+      model: 'MiniMax-M3' as any,
+      systemPrompt: 'sys',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [],
+      signal: ac.signal,
+    } as any)) void _
+    expect(
+      constructionLog.some((c) => c.apiKey === 'sk-cp-profile-set'),
+    ).toBe(true)
+    expect(
+      constructionLog.some((c) => c.apiKey === 'sk-cp-fallback-should-not-be-used'),
+    ).toBe(false)
   })
 
   it('succeeds (no throw, no 403) when ANTHROPIC_AUTH_TOKEN is set even with no profile', async () => {

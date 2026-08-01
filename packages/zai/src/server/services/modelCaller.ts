@@ -135,10 +135,19 @@ function resolveProviderForModel(model: string | undefined): {
         profile.provider === 'openai'
           ? (zaiEnv.OPENAI_API_KEY ?? '')
           : (zaiEnv.ANTHROPIC_AUTH_TOKEN ?? '')
-      const apiKey = profile.apiKey ?? fallbackKey
+      // Use profile.apiKey only if it is a non-empty, non-whitespace
+      // string — fall back to the env key otherwise. `??` would not
+      // catch empty-string or whitespace keys (the most common shape
+      // after the UI toggles a provider profile in/out), and forwarding
+      // whitespace to the Anthropic SDK produces an upstream 403 with
+      // no local error. See test:
+      // modelCaller-failfast.test.ts → "falls back to env.ANTHROPIC_AUTH_TOKEN
+      // when profile.apiKey is empty string (not nullish)".
+      const profileKey = profile.apiKey?.trim()
+      const apiKey = profileKey || fallbackKey
       if (!apiKey) {
         throw new Error(
-          `[modelCaller] profile "${profile.id}" (provider=${profile.provider}) matches model "${model}" but its apiKey is empty and ~/.zai/settings.json → env.${profile.provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_AUTH_TOKEN'} is unset. Either set the env var or update the profile.apiKey.`,
+          `[modelCaller] profile "${profile.id}" (provider=${profile.provider}) matches model "${model}" but its apiKey is empty AND ~/.zai/settings.json → env.${profile.provider === 'openai' ? 'OPENAI_API_KEY' : 'ANTHROPIC_AUTH_TOKEN'} is also unset/empty. Set the env var (and reload zai dev) or update providerProfiles[*].apiKey in ~/.claude.json.`,
         )
       }
       return {
@@ -153,7 +162,7 @@ function resolveProviderForModel(model: string | undefined): {
   const apiKey = zaiEnv.ANTHROPIC_AUTH_TOKEN ?? ''
   if (!apiKey) {
     throw new Error(
-      `[modelCaller] no provider profile matches model "${model ?? '<unspecified>'}" AND ~/.zai/settings.json → env.ANTHROPIC_AUTH_TOKEN is unset. Sub-agent fallback path that previously sent an empty authToken (→ 403 upstream) is now blocked. Configure ANTHROPIC_AUTH_TOKEN in ~/.zai/settings.json or extend providerProfiles in ~/.claude.json to cover this model.`,
+      `[modelCaller] no provider profile matches model "${model ?? '<unspecified>'}" AND ~/.zai/settings.json → env.ANTHROPIC_AUTH_TOKEN is unset/empty. Sub-agent fallback path that previously sent an empty authToken (→ 403 upstream) is now blocked. Set ANTHROPIC_AUTH_TOKEN in ~/.zai/settings.json (then reload zai dev) or extend providerProfiles in ~/.claude.json to cover this model.`,
     )
   }
   return { baseURL, apiKey }
