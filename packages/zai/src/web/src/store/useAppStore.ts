@@ -2,6 +2,12 @@ import { create } from 'zustand';
 import type { ServerEvent } from '../../../shared/events.js';
 import type { OutputStyle } from '../../../shared/settings.js';
 
+export type ServiceState = {
+  phase: 'restarting';
+  reason: 'user_action' | 'auto_recovery' | 'update';
+  deadlineMs: number;
+} | null;
+
 // 主菜单侧栏默认收起, 让首屏主区域占满. localStorage 显式存 'false' 时
 // 才展开; 任何其他情况 (无记录 / 'true' / 空值) 都视为收起.
 const getInitialSidebarCollapsed = (): boolean => {
@@ -114,6 +120,8 @@ interface AppState {
    */
   quickDrawerOpen: boolean;
   setQuickDrawerOpen: (open: boolean) => void;
+  serviceState: ServiceState;
+  setServiceState: (s: ServiceState) => void;
 }
 
 export const useAppStore = create<AppState>((set) => ({
@@ -241,6 +249,8 @@ export const useAppStore = create<AppState>((set) => ({
   setIsMobile: (v) => set({ isMobile: v }),
   quickDrawerOpen: false,
   setQuickDrawerOpen: (open) => set({ quickDrawerOpen: open }),
+  serviceState: null,
+  setServiceState: (s) => set({ serviceState: s }),
   // NOTE: openSettingsDrawer / closeSettingsDrawer / setSettingsTheme
   // 三个 action 必须保留(SPEC 阶段 1 4-store field requirement)。
   // 若有并行 rebase 误删,SettingsButton.test.tsx 会以
