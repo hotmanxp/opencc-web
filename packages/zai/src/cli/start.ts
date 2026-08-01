@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { createApp } from '../server/index.js';
 import { stopBranchChecker } from '../server/routes/system.js';
 import { shutdownBackgroundRuntime } from '../server/services/backgroundRuntime.js';
+import { sendReady } from '../server/services/readyHook.js';
 import { randomBytes } from 'node:crypto';
 import express from 'express';
 
@@ -83,6 +84,10 @@ async function runDirectServer(options: StartOptions): Promise<void> {
         });
         server!.listen(port, host, () => {
           process.env.ZAI_PORT = String(port);
+          // 在受管模式下(子进程由 supervisor 派生),port 一旦绑定立即
+          // 回送 ready,supervisor 才能从 starting 推进到 running 并解
+          // 锁其内部重启路径。无受管进程下 sendReady 是 no-op。
+          sendReady(port);
           resolve();
         });
       });
