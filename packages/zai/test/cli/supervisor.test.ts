@@ -101,6 +101,33 @@ describe('supervisor', () => {
     expect(bumped).toBeTruthy()
   })
 
+  it('forwards SIGINT to child on Ctrl-C, then SIGKILL after escalation window', async () => {
+    let killedWith: string | null = null
+    const child: any = new EventEmitter()
+    child.pid = 9999
+    child.kill = function(sig: string | undefined) { killedWith = sig ?? null; child.emit('exit', 0, sig ?? null); return true }
+    child.send = () => true
+    // emit ready BEFORE runSupervisor - FakeChild will buffer it until listener attaches
+    child.emit('message', { type: 'ready', pid: 9999, port: 9201 })
+    const localDeps: Partial<SupervisorDeps> = {
+      ...deps,
+      spawn: (() => child) as any,
+      sleep: async (ms: number) => { if (ms >= 5000) child.emit('exit', 0, null) },
+    }
+    const sigintListeners = process.listeners('SIGINT').slice()
+    process.removeAllListeners('SIGINT')
+    try {
+      const pending = runSupervisor({ args: ['server'], env: {}, port: 9201 }, localDeps)
+      // defer SIGINT to next event loop tick so runSupervisor has started
+      await new Promise((r) => setTimeout(r, 0))
+      process.emit('SIGINT')
+      await pending
+      expect(killedWith).toBe('SIGINT')
+    } finally {
+      for (const l of sigintListeners) process.on('SIGINT', l as any)
+    }
+  })
+
   it('marks failed after MAX_RESTART_ATTEMPTS non-ready failures', async () => {
     const pending = runSupervisor({ args: ['server'], env: {}, port: 9201 }, deps)
     await new Promise((r) => setTimeout(r, 0))

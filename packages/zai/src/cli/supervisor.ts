@@ -27,6 +27,14 @@ export async function runSupervisor(
   let pendingRestart: RestartReason | null = null
   let exitCode: number | null = null
   let restarts = 0
+  let currentChild: ChildProcess | null = null
+  let sigkillTimer: NodeJS.Timeout | null = null
+  const onSigint = () => {
+    if (currentChild) currentChild.kill('SIGINT')
+    if (sigkillTimer) clearTimeout(sigkillTimer)
+    sigkillTimer = setTimeout(() => { if (currentChild) currentChild.kill('SIGKILL') }, 10_000)
+  }
+  process.on('SIGINT', onSigint)
 
   await deps.writeState({
     supervisorPid: process.pid,
@@ -49,6 +57,7 @@ export async function runSupervisor(
       detached: false,
       env: { ...opts.env, ZAI_SUPERVISOR_PID: String(process.pid) },
     })
+    currentChild = child
 
     await deps.writeState({ state: 'starting', childPid: child.pid ?? null })
 
@@ -115,6 +124,7 @@ export async function runSupervisor(
     })
 
     const { code } = await exitPromise
+    currentChild = null
 
     if (pendingRestart) {
       await deps.writeState({ state: 'restarting' })
