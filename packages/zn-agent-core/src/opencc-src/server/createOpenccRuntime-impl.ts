@@ -12,6 +12,11 @@ export async function createOpenccRuntimeImpl(options) {
     cwd,
     dataDir: options.dataDir,
     runtimeId: options.runtimeId ?? randomUUID(),
+    // zai-server: skip MCP bootstrap so the headless runtime comes
+    // up even if the user's `~/.claude.json` lists MCP servers that
+    // block the connect call. The QueryEngine's per-query MCP
+    // refresh + the `/mcp` slash command reconnect on demand.
+    connectMcp: options.connectMcp ?? false,
   })
   const sessions = await createSessionFacadeImpl({ cwd, dataDir: options.dataDir })
   const abortController = new AbortController()

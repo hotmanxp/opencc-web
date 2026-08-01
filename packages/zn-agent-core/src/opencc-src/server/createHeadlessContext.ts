@@ -88,6 +88,16 @@ export interface CreateHeadlessContextOptions {
    * via `appState.setState(...)`.
    */
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
+  /**
+   * Whether to connect MCP servers during bootstrap. Defaults to `true`
+   * (current behaviour). zai-server sets this to `false` because the
+   * user's `~/.claude.json` MCP config can list servers that block the
+   * headless bootstrap indefinitely; the server connects MCP
+   * servers lazily via the QueryEngine's own per-query refresh path
+   * (or `/mcp` slash command) so startup is fast and the HTTP listener
+   * binds even when MCP config is broken.
+   */
+  connectMcp?: boolean
 }
 
 /**
@@ -104,6 +114,13 @@ export interface HeadlessContextConfig {
   clientType: string
   isInteractive: false
   permissionMode: CreateHeadlessContextOptions['permissionMode']
+  /**
+   * Whether MCP bootstrap ran during context construction. zai-server
+   * sets `false` so startup is not blocked by the user's MCP config;
+   * `true` for tests and other surfaces that want the full set of
+   * MCP tools registered up-front.
+   */
+  connectMcp: boolean
 }
 
 /**

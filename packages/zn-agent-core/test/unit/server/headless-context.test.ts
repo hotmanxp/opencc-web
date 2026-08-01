@@ -198,6 +198,18 @@ describe('createHeadlessContext — vendor headless bootstrap (Task 2)', () => {
     ).toBeUndefined()
   })
 
+  it('skips MCP bootstrap when connectMcp is false', async () => {
+    const ctx = await createHeadlessContext({
+      cwd: cwdA,
+      dataDir,
+      runtimeId: 'rt-test-no-mcp',
+      connectMcp: false,
+    })
+
+    expect(ctx.config.connectMcp).toBe(false)
+    expect(ctx.mcp).toEqual({ clients: [], tools: [], commands: [] })
+  })
+
   it('two contexts in the same process with different cwds do not overwrite each other', async () => {
     const ctxA = await createHeadlessContext({
       cwd: cwdA,

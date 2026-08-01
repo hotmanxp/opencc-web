@@ -104,6 +104,7 @@ export async function createHeadlessContextImpl(
   const runtimeId = options.runtimeId
   const clientType = options.clientType ?? 'zai-server'
   const permissionMode = options.permissionMode ?? 'default'
+  const connectMcp = options.connectMcp ?? true
 
   // Step 1: macro stub — required before any vendor module eval that
   // touches `MACRO.X`. We delegate to the existing compat helper so
@@ -152,33 +153,43 @@ export async function createHeadlessContextImpl(
   const tools: Tools = getTools(permissionContext as any)
 
   // Step 9: MCP. Best-effort — empty arrays on failure so the
-  // headless context still boots without MCP servers.
+  // headless context still boots without MCP servers. When
+  // `connectMcp` is `false` (zai-server's default) we skip the
+  // synchronous `getMcpToolsCommandsAndResources` call entirely;
+  // the function can block indefinitely on the user's `~/.claude/`
+  // MCP server config (a known issue when the user has live MCP
+  // servers listed in `~/.claude.json` from interactive Claude
+  // Code). zai-server refreshes MCP lazily via the QueryEngine's
+  // own per-query refresh path (and via the `/mcp` slash command),
+  // so an empty `mcp` surface at boot is acceptable.
   const mcp = {
     clients: [] as MCPServerConnection[],
     tools: [] as Tool[],
     commands: [] as Command[],
   }
-  try {
-    await getMcpToolsCommandsAndResources(
-      ({ client, tools: t, commands }) => {
-        mcp.clients.push(client)
-        mcp.tools.push(...t)
-        mcp.commands.push(...commands)
-      },
-      undefined,
-    )
-    appState.setState((prev: any) => ({
-      ...prev,
-      mcp: {
-        clients: mcp.clients,
-        tools: mcp.tools,
-        commands: mcp.commands,
-        resources: {},
-        pluginReconnectKey: 0,
-      },
-    }))
-  } catch {
-    // Best-effort — fall back to empty arrays.
+  if (connectMcp) {
+    try {
+      await getMcpToolsCommandsAndResources(
+        ({ client, tools: t, commands }) => {
+          mcp.clients.push(client)
+          mcp.tools.push(...t)
+          mcp.commands.push(...commands)
+        },
+        undefined,
+      )
+      appState.setState((prev: any) => ({
+        ...prev,
+        mcp: {
+          clients: mcp.clients,
+          tools: mcp.tools,
+          commands: mcp.commands,
+          resources: {},
+          pluginReconnectKey: 0,
+        },
+      }))
+    } catch {
+      // Best-effort — fall back to empty arrays.
+    }
   }
 
   // Step 10: hooks snapshot.
@@ -219,6 +230,7 @@ export async function createHeadlessContextImpl(
       clientType,
       isInteractive: false,
       permissionMode,
+      connectMcp,
     },
     appState: appState as unknown as HeadlessContext['appState'],
     tools: tools as unknown as HeadlessContext['tools'],

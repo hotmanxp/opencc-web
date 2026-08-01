@@ -3,6 +3,15 @@ export type OpenccRuntimeOptions = {
   runtimeId?: string
   defaultCwd?: string
   defaultModel?: string
+  /**
+   * Whether to attempt MCP server connections during headless
+   * bootstrap. Defaults to `false` (zai-server's path) so the
+   * server's HTTP listener binds even if the user's `~/.claude.json`
+   * lists MCP servers that block the connect call. Set `true` to
+   * register MCP tools up-front; the QueryEngine's per-query MCP
+   * refresh path is what actually wires them into the tool registry.
+   */
+  connectMcp?: boolean
 }
 
 export type OpenccQueryInput = {
