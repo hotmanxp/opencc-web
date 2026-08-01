@@ -5,6 +5,7 @@ import { z } from 'zod';
 import { getSystemInfo } from '../services/detect.js';
 import { eventBus } from '../services/eventBus.js';
 import { isManagedChild, sendToSupervisor } from '../../cli/managedChild.js';
+import { readManagedState } from '../../cli/managedState.js';
 import { requestRestart } from '../services/restartCoordinator.js';
 import { createRestartHooks } from '../services/restartHooks.js';
 import {
@@ -101,6 +102,26 @@ const restartBody = z.object({ reason: z.enum(['user_action', 'auto_recovery', '
 let activeHandle: { cancel: () => void } | null = null;
 
 export function __resetRestartRouter() { activeHandle = null }
+
+router.get('/system/status', async (req, res) => {
+  if (!isManagedChild()) return res.status(404).json({ error: 'not_managed' })
+  const state = await readManagedState()
+  if (!state) {
+    return res.json({
+      state: 'unknown',
+      childPid: null,
+      restarts: 0,
+      lastError: null,
+    })
+  }
+  return res.json({
+    state: state.state,
+    childPid: state.childPid,
+    restarts: state.restarts,
+    startedAt: state.startedAt,
+    lastError: state.lastError,
+  })
+})
 
 router.post('/system/restart', async (req, res) => {
   const parsed = restartBody.safeParse(req.body)
