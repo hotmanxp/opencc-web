@@ -39,6 +39,25 @@ import { fileURLToPath } from 'node:url'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const SERVER_DIST_DIR = resolve(__dirname, '..', 'dist', 'opencc-src', 'server')
 
+/**
+ * Files we own in the server public surface. The verify script only
+ * inspects these — vendored opencc files that happen to live in
+ * `src/opencc-src/server/` (e.g. `directConnectManager.ts`, refreshed
+ * via `chore(zn-agent-core): full opencc vendor refresh`) emit their
+ * own d.ts during `tsc -p tsconfig.server.json`'s transitive emit,
+ * but they're not part of our public surface and don't reach
+ * downstream consumers (the package export `./opencc-server` is
+ * `dist/opencc-src/server/index.js`, which only references the
+ * files we own).
+ *
+ * Add new public-surface files here as the brief grows.
+ */
+const PUBLIC_SURFACE_FILES = new Set([
+  'index.d.ts',
+  'serverTypes.d.ts',
+  'createHeadlessContext.d.ts',
+])
+
 const IMPORT_RE = /^\s*import\s+(?:type\s+)?(?:[^'";]+?\s+from\s+)?['"]([^'"]+)['"]/gm
 
 let inspected = 0
@@ -53,6 +72,10 @@ function walk(dir) {
       continue
     }
     if (!name.endsWith('.d.ts')) continue
+    // Only inspect files we own in the public surface. Vendored opencc
+    // files emitted into the same dir by tsc's transitive emit are
+    // out of scope (see PUBLIC_SURFACE_FILES comment).
+    if (!PUBLIC_SURFACE_FILES.has(name)) continue
     inspected++
     const src = readFileSync(full, 'utf8')
     const fromImportDir = dirname(full)

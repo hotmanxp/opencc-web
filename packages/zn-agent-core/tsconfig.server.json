@@ -31,7 +31,8 @@
 
   "include": [
     "src/opencc-src/server/serverTypes.ts",
-    "src/opencc-src/server/index.ts"
+    "src/opencc-src/server/index.ts",
+    "src/opencc-src/server/server-globals.d.ts"
   ],
 
   "exclude": [

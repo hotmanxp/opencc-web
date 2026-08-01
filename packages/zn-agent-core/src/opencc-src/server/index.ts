@@ -29,6 +29,18 @@ export type {
   OpenccTranscriptMeta,
 } from './serverTypes.js'
 
+export type {
+  CreateHeadlessContextOptions,
+  HeadlessContext,
+  HeadlessContextConfig,
+  HeadlessContextHooks,
+  HeadlessContextMcp,
+  HeadlessContextSandbox,
+  HeadlessContextSessions,
+} from './createHeadlessContext.js'
+
+export { createHeadlessContext } from './createHeadlessContext.js'
+
 /**
  * Stable, recognisable error string. Grep for `openccRuntime: not
  * implemented` to find any caller still in the migration window.
