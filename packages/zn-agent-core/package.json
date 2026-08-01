@@ -17,6 +17,8 @@
     "./compat/vendor/ripgrep": "./dist/compat/vendor/ripgrep.js",
     "./opencc-core": "./dist/opencc-core.mjs",
     "./opencc-src/permissions": "./dist/opencc-src/types/permissions.js",
+    "./opencc-src/server": "./dist/opencc-src/server/index.js",
+    "./opencc-server": "./dist/opencc-src/server/index.js",
     "./compat/permissions": "./dist/compat/permissions.js"
   },
   "files": [

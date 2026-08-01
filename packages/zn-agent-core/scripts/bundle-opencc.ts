@@ -432,3 +432,80 @@ await esbuild.build({
 }
 
 console.log(`[bundle-opencc] permissions: ${PERMISSIONS_OUT}`)
+
+// ── OpenCC server runtime seam (Task 1) ────────────────────────────
+//
+// `src/opencc-src/server/index.ts` re-exports the public types +
+// `createOpenccRuntime` factory. It's a thin module — no React, no
+// JSX, no opencc vendor coupling — so it compiles cleanly with
+// `bundle: false` (single-file esbuild) and lands at
+// `dist/opencc-src/server/index.js`. The package's `./opencc-server`
+// export subpath points at that file (see package.json).
+//
+// The d.ts files are emitted by hand below (same approach as
+// `permissions.d.ts` above) because tsc -b excludes `src/opencc-src/`
+// (the opencc vendor tree) so it never sees this file. Without a
+// d.ts, downstream TypeScript consumers of `@zn-ai/zn-agent-core/opencc-server`
+// fall back to `any` for every type — which defeats the seam's
+// purpose (locking the contract so callers and implementations
+// agree).
+const SERVER_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'index.ts')
+const SERVER_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'index.js')
+const SERVER_TYPES_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'serverTypes.d.ts')
+
+await esbuild.build({
+  entryPoints: [SERVER_ENTRY],
+  bundle: false,
+  format: 'esm',
+  outfile: SERVER_OUT,
+  platform: 'node',
+  target: 'node22',
+})
+
+// Hand-written d.ts for the server module. Mirrors the structure of
+// `src/opencc-src/server/serverTypes.ts` (re-exported by `index.ts`).
+// Kept minimal: only the public surface the brief mandates. If a
+// future Task extends `OpenccRuntimeOptions` or adds methods to
+// `OpenccRuntime`, update both the source and this d.ts — the
+// `verify-imports.ts` script (if it gains a server check) will catch
+// drift.
+{
+  const { writeFileSync } = await import('node:fs')
+  const serverDts = [
+    `import type { RuntimeEvent } from '../../compat/runtime/events.js';`,
+    `import type { TranscriptFile, TranscriptMeta } from '../../compat/transcript/types.js';`,
+    `export type OpenccRuntimeOptions = {`,
+    `    dataDir: string;`,
+    `    runtimeId?: string;`,
+    `    defaultCwd?: string;`,
+    `    defaultModel?: string;`,
+    `};`,
+    `export type OpenccQueryInput = {`,
+    `    sessionId: string;`,
+    `    prompt: string;`,
+    `    cwd: string;`,
+    `    model?: string;`,
+    `    abortSignal?: AbortSignal;`,
+    `};`,
+    `export type OpenccServerEvent = RuntimeEvent;`,
+    `export type OpenccRuntime = {`,
+    `    query(input: OpenccQueryInput): AsyncIterable<OpenccServerEvent>;`,
+    `    abort(sessionId: string, reason?: string): Promise<void>;`,
+    `    getSession(sessionId: string): Promise<TranscriptMeta | null>;`,
+    `    listSessions(opts?: { cwd?: string; includeSubagent?: boolean }): Promise<TranscriptMeta[]>;`,
+    `    readTranscript(sessionId: string, opts: { cwd: string }): Promise<TranscriptFile>;`,
+    `    patchSession(sessionId: string, patch: { title?: string; tags?: string[] }, opts: { cwd: string }): Promise<void>;`,
+    `    removeSession(sessionId: string, opts: { cwd: string }): Promise<void>;`,
+    `    shutdown(): Promise<void>;`,
+    `};`,
+    `export {};`,
+  ].join('\n')
+  writeFileSync(SERVER_TYPES_OUT, serverDts)
+  const indexDts = [
+    `export type { OpenccRuntime, OpenccRuntimeOptions, OpenccQueryInput, OpenccServerEvent } from './serverTypes.js';`,
+    `export declare function createOpenccRuntime(options: OpenccRuntimeOptions): Promise<OpenccRuntime>;`,
+  ].join('\n')
+  writeFileSync(SERVER_OUT.replace('.js', '.d.ts'), indexDts)
+}
+
+console.log(`[bundle-opencc] server: ${SERVER_OUT}`)
