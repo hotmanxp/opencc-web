@@ -19,6 +19,12 @@ import {
 } from "../services/agentRuntime.js";
 import { EXTERNAL_PERMISSION_MODES, type UserFacingPermissionMode } from "@zn-ai/zn-agent-core";
 import { CwdStore, runWithSessionId } from "@zn-ai/zn-agent-core/runtime";
+import {
+  appendUserMessageV2,
+  appendAssistantMessageV2,
+  appendToolUse,
+  appendToolResult,
+} from "@zn-ai/zn-agent-core/runtime";
 import { getDefaultMode } from "../services/permissionMode.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
@@ -479,6 +485,29 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
           ? userContent
           : [{ role: "user", content: userContent as UserMessageContent }];
 
+      // zai patch (Aug 2026): persist the user prompt to the transcript
+      // BEFORE the runtime starts. Without this, every session in the
+      // new layout has `messages: []` and the UI shows a blank
+      // transcript on reload — the opencc vendor `query()` only emits
+      // stream events, it never writes to the transcript.
+      // We pass the same `promptArg` shape that the runtime gets, so
+      // images / contentBlocks round-trip identically.
+      const transcriptCtx = { cwd, sessionId, userType: 'zai' }
+      try {
+        await appendUserMessageV2(
+          getTranscriptStore(),
+          sessionId,
+          promptArg as unknown,
+          0,
+          null,
+          transcriptCtx,
+        )
+      } catch (e) {
+        if (process.env.ZAI_DEBUG === '1') {
+          console.error('[zai.agent.prompt] appendUserMessageV2 failed', e)
+        }
+      }
+
       // 拉 transcript meta 给 resolveModel / permissionMode 用. 文件不存在
       // (新会话) 是正常路径, 静默忽略 — sessionModel 保持 null,
       // permissionMode 走 getDefaultMode() 兜底.
@@ -569,7 +598,147 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
         // 文件不存在 (新会话尚无 transcript) — title 未设, 首次消息触发 patch
       }
 
+      // zai patch (Aug 2026): per-event transcript persistence. The
+      // opencc vendor `query()` only emits stream events; it never
+      // writes to the transcript. We mirror each event to disk here
+      // so a page reload (or sharing `?sid=...` link) shows the
+      // full message history.
+      //
+      // Strategy:
+      // - runtime.tool_call → appendToolUse (one assistant message
+      //   carrying the tool_use block)
+      // - runtime.tool_result → appendToolResult (one user message
+      //   carrying the tool_result block)
+      // - runtime.thinking + runtime.delta → accumulate into
+      //   turnContentBlocks; flush via appendAssistantMessageV2 at
+      //   runtime.done / aborted
+      // Multiple assistant messages get folded on reload by
+      // serializeForAnthropic, so the tool_use-its-own-message
+      // and the flushed-thinking-text-message collapse correctly.
+      type ContentBlockShape = {
+        type: 'text' | 'thinking' | 'tool_use'
+        text?: string
+        thinking?: string
+        id?: string
+        name?: string
+        input?: unknown
+      }
+      let turnIndex = 0
+      let turnContentBlocks: ContentBlockShape[] = []
+      const flushAssistantMessage = async () => {
+        if (turnContentBlocks.length === 0) return
+        const blocks = turnContentBlocks
+        turnContentBlocks = []
+        try {
+          await appendAssistantMessageV2(
+            getTranscriptStore(),
+            sessionId,
+            blocks as unknown as Parameters<typeof appendAssistantMessageV2>[2],
+            turnIndex,
+            null,
+            transcriptCtx,
+          )
+        } catch (e) {
+          if (process.env.ZAI_DEBUG === '1') {
+            console.error('[zai.agent.prompt] appendAssistantMessageV2 failed', e)
+          }
+        }
+      }
+
       for await (const event of translated) {
+        // zai patch: persist per-event transcript before forwarding.
+        if (event.type === 'runtime.tool_call') {
+          const ev = event as {
+            type: 'runtime.tool_call'
+            toolUseId?: string
+            toolName?: string
+            input?: unknown
+            turnIndex?: number
+          }
+          if (ev.toolUseId) {
+            // Push to current assistant buffer so the flushed
+            // message at runtime.done has the tool_use block too.
+            turnContentBlocks.push({
+              type: 'tool_use',
+              id: ev.toolUseId,
+              name: ev.toolName ?? 'unknown',
+              input: ev.input ?? {},
+            })
+            // Also persist immediately as its own message so a
+            // mid-turn reload shows the call (not just the buffered
+            // flush at the end).
+            try {
+              await appendToolUse(
+                getTranscriptStore(),
+                sessionId,
+                { id: ev.toolUseId, name: ev.toolName ?? 'unknown', input: ev.input ?? {} },
+                ev.turnIndex ?? turnIndex,
+                null,
+                cwd,
+              )
+            } catch (e) {
+              if (process.env.ZAI_DEBUG === '1') {
+                console.error('[zai.agent.prompt] appendToolUse failed', e)
+              }
+            }
+          }
+        } else if (event.type === 'runtime.tool_result') {
+          const ev = event as {
+            type: 'runtime.tool_result'
+            toolUseId?: string
+            output?: unknown
+            isError?: boolean
+            turnIndex?: number
+          }
+          if (ev.toolUseId) {
+            try {
+              await appendToolResult(
+                getTranscriptStore(),
+                sessionId,
+                {
+                  tool_use_id: ev.toolUseId,
+                  content: ev.output ?? '',
+                  is_error: ev.isError === true,
+                },
+                ev.turnIndex ?? turnIndex,
+                null,
+                cwd,
+              )
+            } catch (e) {
+              if (process.env.ZAI_DEBUG === '1') {
+                console.error('[zai.agent.prompt] appendToolResult failed', e)
+              }
+            }
+          }
+        } else if (event.type === 'runtime.thinking') {
+          const ev = event as { delta?: string; text?: string }
+          const text = ev.delta ?? ev.text ?? ''
+          if (text) {
+            const last = turnContentBlocks[turnContentBlocks.length - 1]
+            if (last && last.type === 'thinking') last.thinking = (last.thinking ?? '') + text
+            else turnContentBlocks.push({ type: 'thinking', thinking: text })
+          }
+        } else if (event.type === 'runtime.delta') {
+          const ev = event as { delta?: string; text?: string }
+          const text = ev.delta ?? ev.text ?? ''
+          if (text) {
+            const last = turnContentBlocks[turnContentBlocks.length - 1]
+            if (last && last.type === 'text') last.text = (last.text ?? '') + text
+            else turnContentBlocks.push({ type: 'text', text })
+          }
+        } else if (event.type === 'runtime.started') {
+          // New turn — advance turnIndex, reset buffer (the previous
+          // turn's content was already flushed at runtime.done).
+          const ev = event as { turnIndex?: number }
+          if (typeof ev.turnIndex === 'number') turnIndex = ev.turnIndex
+          turnContentBlocks = []
+        } else if (event.type === 'runtime.done' || event.type === 'runtime.aborted') {
+          // End of current turn: flush accumulated thinking/text as
+          // one assistant message. The tool_use blocks were already
+          // appended by their own runtime.tool_call event.
+          await flushAssistantMessage()
+        }
+
         // runtime.* 事件均带 sessionId, 在这里直接 narrow 到字符串即可.
         // 用 event.type 同时锁定语义方向, 避免分布式联合中其它变体
         // (job.* / prompt.ask / server.*) 没有 sessionId 字段导致 TS2339.

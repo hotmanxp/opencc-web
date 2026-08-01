@@ -47,6 +47,20 @@ export function registerProcessOutputErrorHandlers(): void {
 // Transcript repair — ported from zai's old runtime, lives in compat
 export { repairAndPersistTranscript } from '../compat/transcript/repair.js'
 
+// zai patch (Aug 2026): append* helpers are the runtime transcript write
+// path. Previously the prompt route relied on the opencc `query()` loop
+// to persist user/assistant/tool messages, but the opencc runtime only
+// emits stream events — it never wrote to the transcript. Result: every
+// session in the new layout has `messages: []` and the UI shows a blank
+// transcript on reload. Importing the helpers here lets the zai prompt
+// route persist each runtime event as it consumes the stream.
+export {
+  appendUserMessageV2,
+  appendAssistantMessageV2,
+  appendToolUse,
+  appendToolResult,
+} from '../compat/transcript/persistence.js'
+
 // zai-specific model-caller contract (the factory in zai-server
 // implements this; runtime consumers accept it as the modelCaller option)
 export type { ModelCaller, Tool } from '../compat/runtime/modelCaller.js'
