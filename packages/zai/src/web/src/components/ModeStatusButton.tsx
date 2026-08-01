@@ -166,7 +166,6 @@ function Row({ mode, isCurrent, isSelected, onClick, onMouseEnter }: RowProps) {
           style={{
             fontSize: 13,
             fontWeight: isCurrent ? 600 : 500,
-            color: '#fff',
             lineHeight: 1.3,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
@@ -238,7 +237,6 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
       style={{
         width: 380,
         background: 'var(--bg-popup)',
-        color: '#fff',
         borderRadius: 10,
         padding: 10,
       }}
