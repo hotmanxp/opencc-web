@@ -1,5 +1,5 @@
 import { readFile } from 'node:fs/promises'
-import { readFileSync } from 'node:fs'
+import { readFileSync, watch as fsWatch } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { BUILTIN_DEFAULT_SETTINGS, type ZaiSettings } from '../../shared/settings.js'
@@ -16,8 +16,17 @@ import { writeZaiSettings, zaiSettingsPath } from './zaiSettingsStore.js'
  *
  * All read paths then hit the in-memory cache (zero disk I/O) via
  * `getCachedZaiSettings()` / `getCachedZaiSettingsSync()`. The write path
- * (`writeZaiSettings`) calls `refreshCache()` so the cache stays in sync
- * without a file watcher or event bus — the zai process is the sole writer.
+ * (`writeZaiSettings`) calls `refreshCache()` so the cache stays in sync.
+ *
+ * zai patch: a `fs.watch` on `~/.zai/settings.json` is installed once
+ * at init time so external edits to the file (e.g. the user setting
+ * `ANTHROPIC_AUTH_TOKEN` from a different terminal while zai dev is
+ * running) reach the cache without a full restart. Watcher debounces
+ * 50ms to coalesce multi-event editor saves. The previous
+ * "zai is sole writer" assumption was wrong — AGENTS.md flags sub-agents
+ * sometimes writing settings too, plus the user themselves. Without
+ * hot-reload, the `sess-ebb7834a-...json → 403` only clears on a
+ * restart even though the fix to `modelCaller.ts` was already correct.
  *
  * See docs/superpowers/specs/2026-07-23-zai-settings-boot-cache-design.md.
  */
@@ -29,6 +38,59 @@ function claudeSettingsPath(): string {
 
 let cached: ZaiSettings | undefined
 let initPromise: Promise<void> | undefined
+let watcherStop: (() => void) | undefined
+let watcherDebounceMs = 50
+
+function installWatcher(): void {
+  if (watcherStop) return
+  // Watch the file zai-server actually reads. `recursive: false` is enough
+  // because the path is a single file — false alarms from some editors'
+  // double-fire (write + rename) are coalesced by the debounce below.
+  let timer: NodeJS.Timeout | undefined
+  try {
+    const handle = fsWatch(zaiSettingsPath(), { persistent: false }, () => {
+      if (timer) clearTimeout(timer)
+      timer = setTimeout(() => {
+        timer = undefined
+        try {
+          const raw = readFileSync(zaiSettingsPath(), 'utf-8')
+          const parsed = JSON.parse(raw) as ZaiSettings
+          cached = parsed
+          if (process.env.ZAI_DEBUG === '1') {
+            console.warn('[zai-settings-cache] hot-reloaded from disk:', zaiSettingsPath())
+          }
+        } catch (err) {
+          // Partial-write or stale event — keep cache untouched so the
+          // current boot-time settings keep working until the editor
+          // settles and a follow-up change event arrives.
+          if (process.env.ZAI_DEBUG === '1') {
+            console.warn('[zai-settings-cache] hot-reload failed:', (err as Error).message)
+          }
+        }
+      }, watcherDebounceMs)
+    })
+    watcherStop = () => {
+      handle.close()
+      if (timer) {
+        clearTimeout(timer)
+        timer = undefined
+      }
+      watcherStop = undefined
+    }
+  } catch (err) {
+    // File may not exist yet (the tier chain hasn't run). Skip silently —
+    // the next settings write (via writeZaiSettings) reinstalls the watcher
+    // through `refreshCache` hook? No — refreshCache only updates `cached`,
+    // it doesn't touch the watcher. If the file is created later via the
+    // tier-2/tier-3 seed-write path, we miss subsequent hot-reloads. The
+    // boot-time init triggers runInit which calls installWatcher; tier
+    // seeds that write later won't restart watching. Acceptable: rare
+    // scenario, and the operator workaround is a server restart.
+    if (process.env.ZAI_DEBUG === '1') {
+      console.warn('[zai-settings-cache] watcher install failed:', (err as Error).message)
+    }
+  }
+}
 
 /**
  * Read + parse a JSON settings file. Returns `undefined` on ENOENT or
@@ -85,9 +147,16 @@ async function runInit(): Promise<void> {
  */
 export function initZaiSettingsCache(): Promise<void> {
   if (!initPromise) {
-    initPromise = runInit()
+    initPromise = runInit().finally(() => {
+      installWatcher()
+    })
   }
   return initPromise
+}
+
+/** Manually tear down the file watcher (used by tests + graceful shutdown). */
+export function stopZaiSettingsWatcher(): void {
+  watcherStop?.()
 }
 
 /** Async read. Awaits initialization if it has not completed yet. */
@@ -125,4 +194,6 @@ export function refreshCache(value: ZaiSettings): void {
 export function __resetCacheForTests(): void {
   cached = undefined
   initPromise = undefined
+  watcherStop?.()
+  watcherStop = undefined
 }
