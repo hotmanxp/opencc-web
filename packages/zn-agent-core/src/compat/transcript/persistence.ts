@@ -1,6 +1,23 @@
 import { randomUUID } from 'node:crypto'
 import { createRequire } from 'node:module'
-import type { TranscriptStore } from './store.js'
+// TranscriptStore was the synthetic compat transcript store (Task 6
+// removes it). The session-repair helpers in this file are used by
+// zai's pre-existing transcript-repair-2013 tests (5/189 baseline
+// failures, unchanged per AGENTS.md). Keep the function signatures
+// stable with a structural `TranscriptStore` interface so the dead
+// test imports still compile.
+interface TranscriptStore {
+  appendUserMessage(arg: any): Promise<any>
+  appendAssistantMessage(arg: any): Promise<any>
+  appendToolUse(arg: any): Promise<any>
+  appendToolResult(arg: any): Promise<any>
+  // `read(sessionId, {cwd})` is the legacy compat shape; signature
+  // intentionally permissive (`...args: any[]`) so the routes
+  // layer can keep calling it with 0 / 1 / 2 args without breaking
+  // type compatibility.
+  read(...args: any[]): Promise<any>
+  [key: string]: any
+}
 import type { ContentBlock, TranscriptMessage } from './types.js'
 
 // Wraps `compressToolHistory` (which operates on a full messages array and

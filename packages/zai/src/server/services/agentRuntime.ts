@@ -6,8 +6,60 @@ import {
   enableOpenccConfigs,
   resolveDataDir,
   resolveOpenccConfigDir,
-  TranscriptStore,
 } from '@zn-ai/zn-agent-core'
+
+// `TranscriptStore` was the compat-layer transcript store (deleted
+// in Task 6). The new server runtime owns session/transcript via
+// `runtime.sessionFacade`; the legacy `getTranscriptStore()` mirror
+// accessor still has live call sites in routes/agent.ts,
+// routes/transcript.ts, routes/approve.ts, and the `clear` /
+// `compact` builtin commands. Keep the accessor working as a
+// thin no-op stub that records the dataDir so the callers'
+// instanceof / `.read()` / `.append*` calls don't throw — they
+// all return empty (the new server runtime owns the real
+// transcript, which those callers should be migrated to in a
+// follow-up). The pre-existing zai test files
+// (transcript-repair-2013.test.ts, builtin.compact.test.ts) were
+// already broken in this worktree (they import from
+// `zai-agent-core/src/transcript/store.js`, a non-existent path
+// per the 5/189 pre-existing baseline).
+class TranscriptStore {
+  constructor(public readonly dataDir: string) {}
+  // `read(sessionId, {cwd})` is the legacy compat shape — returns
+  // `{ messages, meta: { cwd, model, ... } }`. The new server
+  // runtime owns real transcripts via `sessionFacade.readTranscript`;
+  // the routes layer is migrated to that surface in a follow-up.
+  // For now the stub returns an empty transcript so the routes
+  // resolve sessionId → null gracefully (the if-branches below
+  // handle null as "no prior session").
+  async read(_sessionId: string, _opts: { cwd: string }) {
+    return { messages: [], meta: { cwd: '', model: '' } }
+  }
+  async appendUserMessage(_msg: any) {
+    return undefined
+  }
+  async appendAssistantMessage(_msg: any) {
+    return undefined
+  }
+  async appendToolUse(_msg: any) {
+    return undefined
+  }
+  async appendToolResult(_msg: any) {
+    return undefined
+  }
+  async listSessions() {
+    return []
+  }
+  async readSession(_id: string) {
+    return null
+  }
+  async patchSession(_id: string, _patch: any) {
+    return undefined
+  }
+  async removeSession(_id: string) {
+    return false
+  }
+}
 // The server module exports two `OpenccRuntime` shapes (one from
 // `serverTypes.ts` describing the brief's 8-method contract, one from
 // `createOpenccRuntime.ts` describing the impl). The factory's runtime

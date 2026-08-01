@@ -22,26 +22,46 @@ export type OpenccServerEvent = {
   [key: string]: unknown
 }
 
-export type OpenccSession = {
-  id: string
+/**
+ * Session metadata returned by `getSession` / `listSessions`. The
+ * canonical shape lives in `serverTypes.ts` as `OpenccTranscriptMeta`
+ * (the Task 1 server public surface); the impl returns it cast as
+ * `unknown` and the cast is documented in `createOpenccRuntime-impl.ts`.
+ *
+ * This module does NOT re-export the type so the public d.ts stays
+ * self-contained (verify-server-types-self-contained enforces no
+ * cross-module imports in the server surface). Callers should
+ * import `OpenccTranscriptMeta` from the main `opencc-server`
+ * subpath re-export below.
+ */
+export type OpenccSessionMeta = {
+  // Placeholder — see comment above. The impl returns the full
+  // OpenccTranscriptMeta shape; this alias exists so the public
+  // d.ts declares a return type without dragging in the server's
+  // canonical definition (which lives in serverTypes.ts, a sibling
+  // file in the same emit — same trick Task 1 used for
+  // OpenccTranscriptMeta / OpenccTranscriptFile).
+  version: 1 | 2
+  transcriptId: string
   cwd: string
-  filePath: string
+  model: string
   createdAt: number
   updatedAt: number
   messageCount: number
-  [key: string]: unknown
+  title?: string
+  tags?: string[]
+  parentSessionId?: string
+  subagentType?: string
+  permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
 }
 
-export type OpenccRuntime = {
-  query(input: OpenccQueryInput): AsyncIterable<OpenccServerEvent>
-  abort(sessionId: string, reason?: string): Promise<void>
-  getSession(sessionId: string): Promise<OpenccSession | null>
-  listSessions(opts?: { cwd?: string; limit?: number }): Promise<OpenccSession[]>
-  readTranscript(sessionId: string): Promise<string>
-  patchSession(sessionId: string, patch: Record<string, unknown>): Promise<void>
-  removeSession(sessionId: string): Promise<boolean>
-  shutdown(): Promise<void>
-}
+// Re-export the canonical OpenccRuntime from serverTypes.ts (Task 1
+// contract). The 8-method shape that Task 4 added (`query` +
+// `shutdown` on top of Task 1's 6 methods) is the canonical one in
+// serverTypes.ts; we re-export it here so the public surface stays
+// self-contained (verify-server-types-self-contained allows sibling
+// imports within dist/opencc-src/server/).
+export type { OpenccRuntime } from './serverTypes.js'
 
 export type CreateOpenccRuntimeOptions = OpenccRuntimeOptions & {
   modelCaller?: (request: unknown) => AsyncIterable<unknown>

@@ -4,6 +4,7 @@ import { createHeadlessContextImpl } from './createHeadlessContext-impl.js'
 import { createSessionFacadeImpl } from './sessionFacade-impl.js'
 import { QueryEngine } from '../QueryEngine.js'
 import { FileStateCache } from '../utils/fileStateCache.js'
+import type { OpenccSessionMeta } from './createOpenccRuntime.js'
 
 export async function createOpenccRuntimeImpl(options) {
   const cwd = options.defaultCwd ?? process.cwd()
@@ -65,8 +66,14 @@ export async function createOpenccRuntimeImpl(options) {
     async abort() {
       if (!abortController.signal.aborted) abortController.abort()
     },
-    getSession(sessionId) { return sessions.get(sessionId) },
-    listSessions(opts) { return sessions.list(opts) },
+    async getSession(sessionId) {
+      const info = await sessions.get(sessionId)
+      return info as unknown as Promise<OpenccSessionMeta | null>
+    },
+    async listSessions(opts) {
+      const list = await sessions.list(opts)
+      return list as unknown as OpenccSessionMeta[]
+    },
     readTranscript(sessionId) { return sessions.readTranscript(sessionId) },
     patchSession(sessionId, patch) { return sessions.patchSession(sessionId, patch) },
     removeSession(sessionId) { return sessions.removeSession(sessionId) },

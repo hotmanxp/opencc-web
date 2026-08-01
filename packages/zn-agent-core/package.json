@@ -11,7 +11,6 @@
       "default": "./dist/index.js"
     },
     "./runtime": "./dist/runtime/index.js",
-    "./transcript": "./dist/transcript/store.js",
     "./commands": "./dist/commands/index.js",
     "./bashTracker": "./dist/tools/BashTool/bashTracker.js",
     "./taskListStore": "./dist/tools/Tasks/TaskListStore.js",
