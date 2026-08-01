@@ -404,12 +404,15 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
       });
     }
     const promptIssue = issues.find(
-      (i) => i.path.join(".") === "prompt" || i.path.join(".") === "contentBlocks",
+      (i) => i.path.join(".") === "prompt" || i.path.join(".") === "contentBlocks" || i.path.join(".") === "",
     );
     if (promptIssue) {
       return res.status(400).json({ error: promptIssue.message });
     }
-    return res.status(400).json({ error: "invalid body" });
+    return res.status(400).json({
+      error: "invalid body",
+      detail: issues[0]?.message ?? "validation failed",
+    });
   }
 
   const { prompt, contentBlocks, sessionId: existingSessionId, permissionMode: requestedPermissionMode } = parsed.data

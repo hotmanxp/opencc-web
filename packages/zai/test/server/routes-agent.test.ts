@@ -9,6 +9,7 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
   initAgentRuntime: vi.fn(),
   getOrCreateAgentSession: vi.fn().mockResolvedValue('test-session-id'),
   getAskRegistry: vi.fn().mockReturnValue({ abortAll: vi.fn() }),
+  getApproveRegistry: vi.fn().mockReturnValue({ abortAll: vi.fn() }),
   abortAgentSession: vi.fn().mockResolvedValue(undefined),
   // Task 3: routes/agent.ts 的 /agent/prompt 现在调 registerSessionController,
   // /agent/abort 调 abortSessionController + releaseSessionController (finally).
@@ -83,6 +84,47 @@ describe('POST /api/agent/prompt', () => {
       .post('/api/agent/prompt')
       .send({})
     expect(res.status).toBe(400)
+  })
+
+  // Task 5 Fix round 1: permissionMode validation + generic fallback detail field
+
+  it('accepts permissionMode "plan" and returns sessionId', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({ prompt: 'hello', permissionMode: 'plan' })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('sessionId')
+  })
+
+  it('rejects unknown permissionMode with error + detail listing valid modes', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({ prompt: 'hello', permissionMode: 'unknown_mode' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe('invalid permissionMode')
+    expect(res.body.detail).toContain('default')
+    expect(res.body.detail).toContain('acceptEdits')
+    expect(res.body.detail).toContain('plan')
+    expect(res.body.detail).toContain('bypassPermissions')
+    expect(res.body.detail).toContain('dontAsk')
+  })
+
+  it('rejects empty contentBlocks array with refine error message', async () => {
+    // prompt: '' AND contentBlocks: [] → fails the refine "prompt or contentBlocks required"
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({ prompt: '', contentBlocks: [] })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe('prompt or contentBlocks required')
+  })
+
+  it('permissionMode branch fires before contentBlocks branch on combined failure', async () => {
+    // ordering: permissionMode check runs first, so we get permissionMode error not contentBlocks error
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({ prompt: 'hello', permissionMode: 'unknown_mode', contentBlocks: [] })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe('invalid permissionMode')
   })
 })
 
