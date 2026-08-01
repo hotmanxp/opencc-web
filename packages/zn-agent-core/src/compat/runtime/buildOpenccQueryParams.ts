@@ -399,6 +399,7 @@ export async function* translateCallModel(
     lastStopReason = null
     return message
   }
+  try {
   for await (const ev of stream as AsyncIterable<any>) {
     const t = ev?.type
     // zai patch: forward every Anthropic primitive to the bridge as a
@@ -590,6 +591,16 @@ export async function* translateCallModel(
   // (rare — Anthropic always emits message_stop).
   const tail = flush(null)
   if (tail) yield tail
+  } catch (err) {
+    const errMsg = (err as Error)?.message ?? String(err)
+    const errStack = (err as Error)?.stack ?? ''
+    console.error(
+      `[zai] sub-agent modelCaller stream threw:`,
+      errMsg,
+      errStack.slice(0, 1500),
+    )
+    throw err
+  }
 }
 
 /**
