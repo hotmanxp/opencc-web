@@ -28,8 +28,10 @@ export async function runSupervisor(
   let exitCode: number | null = null
   let restarts = 0
   let currentChild: ChildProcess | null = null
+  let userShutdown = false
   let sigkillTimer: NodeJS.Timeout | null = null
   const onSigint = () => {
+    userShutdown = true
     if (currentChild) currentChild.kill('SIGINT')
     if (sigkillTimer) clearTimeout(sigkillTimer)
     sigkillTimer = setTimeout(() => { if (currentChild) currentChild.kill('SIGKILL') }, 10_000)
@@ -80,6 +82,10 @@ export async function runSupervisor(
     })
 
     if (!gotReady) {
+      if (userShutdown) {
+        exitCode = 128 + 2
+        break
+      }
       attempts++
       if (attempts >= MAX_RESTART_ATTEMPTS) {
         await deps.writeState({
@@ -130,6 +136,11 @@ export async function runSupervisor(
       await deps.writeState({ state: 'restarting' })
       // restart counter is bumped below on next iteration start (T5)
       continue
+    }
+
+    if (userShutdown) {
+      exitCode = 128 + 2
+      break
     }
 
     // 正常退出
