@@ -32,13 +32,15 @@
     "scripts/copy-runtime-assets.mjs"
   ],
   "scripts": {
-    "build": "node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && tsc --noEmit -p tsconfig.contract-tests.json && node scripts/copy-runtime-assets.mjs",
+    "build": "node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && tsc --noEmit -p tsconfig.contract-tests.json && tsc --noEmit -p tsconfig.consumer.json && node scripts/copy-runtime-assets.mjs && node scripts/verify-server-types-self-contained.mjs",
     "dev": "tsc -b --watch",
-    "typecheck": "tsc -b --noEmit && tsc --noEmit -p tsconfig.contract-tests.json",
+    "typecheck": "tsc -b --noEmit && tsc --noEmit -p tsconfig.contract-tests.json && tsc --noEmit -p tsconfig.consumer.json && node scripts/verify-server-types-self-contained.mjs",
     "typecheck:contract-tests": "tsc --noEmit -p tsconfig.contract-tests.json",
+    "typecheck:consumer": "tsc --noEmit -p tsconfig.consumer.json && node scripts/verify-server-types-self-contained.mjs",
+    "typecheck:server-types-self-contained": "node scripts/verify-server-types-self-contained.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "tsx scripts/verify-imports.ts",
+    "verify": "node scripts/verify-server-types-self-contained.mjs",
     "bundle": "node --experimental-strip-types scripts/bundle-opencc.ts"
   },
   "dependencies": {

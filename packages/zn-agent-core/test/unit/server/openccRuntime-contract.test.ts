@@ -120,12 +120,13 @@ describe('createOpenccRuntime — server runtime contract (Task 1 seam)', () => 
       type: 'runtime.done',
       sessionId: 'sess-1',
       ts: 0,
-      // RuntimeEvent (compat/runtime/events.ts:42-46) requires both
-      // `eventId` and `turnIndex` — the literal here MUST include them
-      // or the assignability probe fails when typechecked. The brief
-      // task spec puts the type behind the same contract as the
-      // server runtime's `query` return stream, so the test is the
-      // ground truth that callers can construct conformant events.
+      // OpenccServerEvent is the server-owned minimal event shape
+      // (see serverTypes.ts) — it requires both `eventId` and
+      // `turnIndex`, so the literal here MUST include them or the
+      // assignability probe fails when typechecked. The brief task
+      // spec puts the type behind the same contract as the server
+      // runtime's `query` return stream, so the test is the ground
+      // truth that callers can construct conformant events.
       eventId: 'evt-1',
       turnIndex: 0,
     }

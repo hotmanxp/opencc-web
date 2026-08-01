@@ -20,10 +20,13 @@ import type {
 } from './serverTypes.js'
 
 export type {
+  OpenccPermissionMode,
   OpenccRuntime,
   OpenccRuntimeOptions,
   OpenccQueryInput,
   OpenccServerEvent,
+  OpenccTranscriptFile,
+  OpenccTranscriptMeta,
 } from './serverTypes.js'
 
 /**
