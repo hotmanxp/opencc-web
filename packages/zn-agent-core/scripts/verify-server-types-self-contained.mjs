@@ -56,6 +56,7 @@ const PUBLIC_SURFACE_FILES = new Set([
   'index.d.ts',
   'serverTypes.d.ts',
   'createHeadlessContext.d.ts',
+  'sessionFacade.d.ts',
 ])
 
 const IMPORT_RE = /^\s*import\s+(?:type\s+)?(?:[^'";]+?\s+from\s+)?['"]([^'"]+)['"]/gm

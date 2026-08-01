@@ -479,8 +479,18 @@ const HEADLESS_CONTEXT_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createH
 const HEADLESS_CONTEXT_IMPL_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'createHeadlessContext-impl.ts')
 const HEADLESS_CONTEXT_IMPL_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createHeadlessContext-impl.js')
 
+// `sessionFacade.ts` is the public-surface re-export module for
+// Task 3 (server session/transcript lifecycle). Same thin/impl split
+// as `createHeadlessContext`. The impl file (`sessionFacade-impl.ts`)
+// is bundled separately because it pulls in vendored
+// `sessionStoragePortable.ts` whose compiled .js doesn't ship as a
+// separate file in dist/ (same situation as createHeadlessContext-impl).
+const SESSION_FACADE_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'sessionFacade.ts')
+const SESSION_FACADE_IMPL_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'sessionFacade-impl.ts')
+const SESSION_FACADE_IMPL_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'sessionFacade-impl.js')
+
 await esbuild.build({
-  entryPoints: [SERVER_ENTRY, HEADLESS_CONTEXT_ENTRY],
+  entryPoints: [SERVER_ENTRY, HEADLESS_CONTEXT_ENTRY, SESSION_FACADE_ENTRY],
   bundle: false,
   format: 'esm',
   outdir: SERVER_DIST_DIR,
@@ -547,6 +557,49 @@ await esbuild.build({
   treeShaking: true,
 })
 console.log(`[bundle-opencc] headless-context impl: ${HEADLESS_CONTEXT_IMPL_OUT}`)
+
+// `sessionFacade-impl.ts` reaches into vendored
+// `sessionStoragePortable.ts` (sanitizePath + readTranscriptForLoad).
+// Same situation as `createHeadlessContext-impl.ts` above — the
+// vendored tree is consumed in-process under vitest's alias map, not
+// shipped as separate files. The impl is bundled as a single file
+// for the published `opencc-server` subpath to resolve at runtime.
+await esbuild.build({
+  entryPoints: [SESSION_FACADE_IMPL_ENTRY],
+  bundle: true,
+  format: 'esm',
+  outfile: SESSION_FACADE_IMPL_OUT,
+  platform: 'node',
+  target: 'node22',
+  sourcemap: true,
+  minify: false,
+  logLevel: 'warning',
+  banner: {
+    js:
+      "import { createRequire as __createRequire } from 'node:module';\n" +
+      "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
+      "const require = __createRequire(import.meta.url);\n",
+  },
+  plugins: [featureFlagPlugin, optionalStubPlugin],
+  external: [
+    'sharp',
+    'google-auth-library',
+    '@vscode/ripgrep',
+    '@orama/orama',
+    '@orama/plugin-data-persistence',
+    'web-tree-shaker',
+    'tree-sitter-wasms',
+    'turndown',
+    '@ant/claude-for-chrome-mcp',
+    'zod',
+    'zod/v3',
+    'zod/v4',
+    'zod/v4-mini',
+    'fflate',
+  ],
+  treeShaking: true,
+})
+console.log(`[bundle-opencc] session-facade impl: ${SESSION_FACADE_IMPL_OUT}`)
 
 // Mechanically emit declaration files for the server module via tsc.
 // `noEmit` requires the tsc program to typecheck; we point outDir at

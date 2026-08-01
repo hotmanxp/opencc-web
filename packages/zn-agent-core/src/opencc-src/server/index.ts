@@ -41,6 +41,19 @@ export type {
 
 export { createHeadlessContext } from './createHeadlessContext.js'
 
+export type {
+  SessionCompactResult,
+  SessionCreateResult,
+  SessionFacade,
+  SessionFacadeOptions,
+  SessionGetOptions,
+  SessionInfo,
+  SessionListOptions,
+  SessionTranscriptEntry,
+} from './sessionFacade.js'
+
+export { createSessionFacade } from './sessionFacade.js'
+
 /**
  * Stable, recognisable error string. Grep for `openccRuntime: not
  * implemented` to find any caller still in the migration window.
