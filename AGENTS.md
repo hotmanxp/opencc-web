@@ -231,6 +231,7 @@ useAgentStore.applyCompactionEvent → 5s 自动消失的 toast
 - `BackgroundRuntime` retry 策略(529 vs 5xx)缺单元测试;`SubagentNotifier` 父 session 续传链路缺测试(关键路径任何一环断就静默丢通知)
 - `translateRuntimeEvents` 没有针对错位/损坏 input 的回归测试
 - MiniMax-M3 缃缺 `input_json_delta` 时,Read/Write/Edit 仅从最新 user prompt 用 `/[a-zA-Z0-9_./-]+\.[a-zA-Z0-9]+/` 推断第一个路径;多路径、无扩展名路径或自然语言中更早的误匹配仍可能选错,无匹配时返回可恢复的 error tool_result 要求模型显式重试 `file_path`。
+- 工具调用结果有双层 watchdog:`ZAI_TOOL_RESULT_TIMEOUT_MS` 默认 60s,从 `content_block_start(tool_use)` 起等待匹配 `tool_result`;`ZAI_OPENCC_WATCHDOG_MS` 默认 300s,在 `message_stop` / `message_delta` 后兜底。超时会通过 `__zaiEventBus` 合成 `runtime.done + runtime.tool_result(isError)` 防止 UI 永久卡住;这是恢复机制,LLM 本轮不会收到合成的 tool_result。
 - v2 transcript resume `tool_use` 顶层消息合并 + SubagentNotifier 注入后 user/tool_result 配对已有回归测试(`test/runtime/queryLoop-resume-2013.test.ts`、`test/runtime/subagentNotifier-2013.test.ts`),覆盖 tool_result+text 合并到同一条 user 的 Anthropic 协议约束
 - abort / SSE 重连 / 模式切换乐观更新 revert / `AgentInputBox` 图片粘贴 + Esc 中断 路径无单元测试
 - SSE state push 走 StateChangeBus 桥接层,见 docs/superpowers/specs/2026-07-19-sse-state-push-design.md

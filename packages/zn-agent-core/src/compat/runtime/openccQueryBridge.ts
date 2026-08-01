@@ -247,6 +247,13 @@ export async function* runViaOpenccQuery(
   // the dedupe rationale). Reset per assistant message_start
   // (sdkEventAdapter:109-111).
   const streamedBlockIndices = new Set<number>()
+  // Declared OUTSIDE the try block so the outer `catch (err)` can
+  // reach them without tripping over TDZ access on block-scoped
+  // `const` bindings. The bus is re-read from globalThis in the
+  // catch so the test's afterEach (which deletes the global) does
+  // not leave a stale reference dangling in the closure.
+  const bus = (globalThis as any).__zaiEventBus
+  const toolNameByUseId = new Map<string, string>()
   try {
     const stream: AsyncIterable<unknown> = openccQuery(params)
     // Watchdog: after we see a message_stop or message_delta (the natural
@@ -280,15 +287,8 @@ export async function* runViaOpenccQuery(
         toolResultTimer = null
       }
     }
-    const bus = (globalThis as any).__zaiEventBus
-    // Per-bridge map of tool_use_id → tool name. opencc's tool_result
-    // content blocks don't carry the name; we remember it from the
-    // matching tool_use content_block_start so the runtime.tool_result
-    // SSE event includes the correct toolName (otherwise
-    // translateRuntimeEvents in routes/agent.ts defaults to "unknown"
-    // and the frontend's upsertToolCall overwrites the stored
-    // "Bash"/"Read"/etc. label).
-    const toolNameByUseId = new Map<string, string>()
+    // (bus + toolNameByUseId live in the outer scope above the try
+    // block so the catch handler can reach them without TDZ pain.)
     const emitForcedCompletion = (timeoutMs: number, trigger: string) => {
       console.warn(
         `[openccQueryBridge] watchdog tripped after ${trigger} with ` +
@@ -331,6 +331,74 @@ export async function* runViaOpenccQuery(
         toolResultTimer = null
       }, TOOL_RESULT_TIMEOUT_MS)
     }
+    // Synthesize runtime.tool_result (isError: true) for every
+    // tool_use_id still pending in `toolNameByUseId` and emit a
+    // matching runtime.error + runtime.done. Used both when the
+    // vendor's opencc stream yields an assistant error message
+    // (stop_reason === 'error' or text containing the
+    // "emitted empty input" sentinel) and when the bridge's outer
+    // try/catch catches a thrown error mid-stream. Prevents the UI
+    // from leaving tool cards stuck in "calling..." forever and
+    // makes sure the synthesized error text reaches the chat pane.
+    const closeOrphanToolUsesWithError = (errorText: string) => {
+      if (!bus || typeof bus.emit !== 'function') return
+      if (toolNameByUseId.size === 0) {
+        // No orphan tool_use — still emit a runtime.error + done so
+        // the user sees the failure and the SSE consumer closes the
+        // turn cleanly.
+        bus.emit({
+          type: 'runtime.error',
+          sessionId,
+          turnIndex: 0,
+          eventId: `evt-bridge-error-${Date.now()}`,
+          ts: Date.now(),
+          message: errorText,
+          error: { category: 'internal', message: errorText, recoverable: false },
+        })
+        bus.emit({
+          type: 'runtime.done',
+          sessionId,
+          turnIndex: 0,
+          eventId: `evt-bridge-done-${Date.now()}`,
+          ts: Date.now(),
+        })
+        return
+      }
+      for (const [orphanToolUseId, orphanToolName] of toolNameByUseId) {
+        bus.emit({
+          type: 'runtime.tool_result',
+          sessionId,
+          turnIndex: 0,
+          eventId: `evt-bridge-orphan-tool-${orphanToolUseId}`,
+          ts: Date.now(),
+          toolUseId: orphanToolUseId,
+          toolName: orphanToolName,
+          output: errorText,
+          isError: true,
+        })
+      }
+      bus.emit({
+        type: 'runtime.error',
+        sessionId,
+        turnIndex: 0,
+        eventId: `evt-bridge-error-${Date.now()}`,
+        ts: Date.now(),
+        message: errorText,
+        error: { category: 'internal', message: errorText, recoverable: false },
+      })
+      bus.emit({
+        type: 'runtime.done',
+        sessionId,
+        turnIndex: 0,
+        eventId: `evt-bridge-done-${Date.now()}`,
+        ts: Date.now(),
+      })
+    }
+    // Sentinel text that buildOpenccQueryParams emits when it
+    // refuses an empty-input tool_use. Used to detect the assistant
+    // error-message path so we can close orphan tool_use blocks
+    // without waiting for the watchdog.
+    const EMPTY_INPUT_ERROR_RE = /emitted empty input/i
     while (true) {
       if (opts.abortSignal?.aborted) {
         disarmWatchdog()
@@ -394,6 +462,46 @@ export async function* runViaOpenccQuery(
         // Disarm on any further event so a long next turn doesn't trip.
         disarmWatchdog()
       }
+      // Detect synthesized assistant error messages (e.g. the
+      // "emitted empty input" sentinel that buildOpenccQueryParams
+      // produces) and short-circuit the stream by closing any
+      // orphan tool_use blocks. Without this, translateRuntimeEvents
+      // in routes/agent.ts has no visible-SSE mapping for the
+      // error text and the orphan tool card stays "calling..."
+      // forever. We bypass the vendor→sdkEventAdapter→translateRuntimeEvents
+      // chain for the error case and emit the closure events
+      // directly via __zaiEventBus.
+      if (sdkType === 'assistant') {
+        const asst = sdkValue?.message
+        const stopReason = asst?.stop_reason
+        const blocks = Array.isArray(asst?.content) ? asst.content : []
+        const errorText = blocks
+          .filter((b: any) => b?.type === 'text' && typeof b.text === 'string')
+          .map((b: any) => b.text)
+          .join('\n')
+          .trim()
+        const isErrorStop = stopReason === 'error'
+        const isEmptyInputError =
+          errorText.length > 0 && EMPTY_INPUT_ERROR_RE.test(errorText)
+        if (isErrorStop || isEmptyInputError) {
+          disarmWatchdog()
+          if (process.env.ZAI_DEBUG === '1') {
+            console.log(
+              '[bridge.iter] detected assistant error message: stop_reason=',
+              stopReason,
+              'isEmptyInputError=',
+              isEmptyInputError,
+            )
+          }
+          closeOrphanToolUsesWithError(
+            errorText || `[openccQueryBridge] assistant stop_reason=${String(stopReason)}`,
+          )
+          // Clear the map so subsequent turns don't re-emit the
+          // same synthetic tool_result.
+          toolNameByUseId.clear()
+          return
+        }
+      }
     }
     disarmWatchdog()
     // Final drain — any tool events buffered after the last opencc
@@ -403,6 +511,54 @@ export async function* runViaOpenccQuery(
       yield ev
     }
   } catch (err) {
+    const errMessage = (err as Error)?.message ?? String(err)
+    // Mirror the assistant-error-message path: when a hard throw
+    // escapes the opencc stream loop (e.g. buildOpenccQueryParams
+    // throwing on empty input), close any orphan tool_use blocks
+    // via __zaiEventBus so the UI doesn't leave Bash/Read cards
+    // stuck in "calling..." and the error text reaches the user.
+    // Re-read the bus from globalThis so the test's afterEach
+    // (which deletes the global) does not leave a stale reference
+    // dangling in the closure.
+    const errBus = bus ?? (globalThis as any).__zaiEventBus
+    if (errBus && typeof errBus.emit === 'function') {
+      if (toolNameByUseId.size > 0) {
+        for (const [orphanToolUseId, orphanToolName] of toolNameByUseId) {
+          errBus.emit({
+            type: 'runtime.tool_result',
+            sessionId,
+            turnIndex: 0,
+            eventId: `evt-bridge-catch-tool-${orphanToolUseId}`,
+            ts: Date.now(),
+            toolUseId: orphanToolUseId,
+            toolName: orphanToolName,
+            output: errMessage,
+            isError: true,
+          })
+        }
+        toolNameByUseId.clear()
+      }
+      errBus.emit({
+        type: 'runtime.error',
+        sessionId,
+        turnIndex: 0,
+        eventId: `evt-bridge-catch-error-${Date.now()}`,
+        ts: Date.now(),
+        message: errMessage,
+        error: {
+          category: 'internal',
+          message: errMessage,
+          recoverable: false,
+        },
+      })
+      errBus.emit({
+        type: 'runtime.done',
+        sessionId,
+        turnIndex: 0,
+        eventId: `evt-bridge-catch-done-${Date.now()}`,
+        ts: Date.now(),
+      })
+    }
     yield toRuntimeErrorEvent(err, { sessionId, turnIndex: 0 })
   }
 }

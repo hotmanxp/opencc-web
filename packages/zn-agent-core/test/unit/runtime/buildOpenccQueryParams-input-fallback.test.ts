@@ -10,11 +10,21 @@ const minimalOpts: QueryOptions = {
   sessionId: 's-input-fallback',
 }
 
+/**
+ * Drive `deps.callModel` with an Anthropic-style SSE stream and collect
+ * the opencc assistant messages it yields. Throws are propagated up
+ * (re-thrown from the for-await) so test bodies can assert with
+ * `.rejects.toThrow(...)`.
+ */
 async function runToolStream(
   name: string,
   messages: unknown[],
-  options: { thinking?: string; partialJson?: string } = {},
-) {
+  options: {
+    thinking?: string
+    partialJson?: string
+    skipContentBlockStop?: boolean
+  } = {},
+): Promise<any[]> {
   async function* stream() {
     yield { type: 'message_start', message: { id: 'm1', model: 'm' } }
     let index = 0
@@ -44,7 +54,9 @@ async function runToolStream(
         delta: { type: 'input_json_delta', partial_json: options.partialJson },
       }
     }
-    yield { type: 'content_block_stop', index }
+    if (!options.skipContentBlockStop) {
+      yield { type: 'content_block_stop', index }
+    }
     yield { type: 'message_delta', delta: { stop_reason: 'tool_use' } }
     yield { type: 'message_stop' }
   }
@@ -66,71 +78,127 @@ async function runToolStream(
   return output
 }
 
-function toolUseFrom(output: any[]) {
-  return output[0]?.message?.content?.find((block: any) => block.type === 'tool_use')
-}
-
-describe('buildOpenccQueryParams missing input_json_delta fallback', () => {
-  it('infers Read file_path from the most recent user prompt', async () => {
-    const output = await runToolStream('Read', [
-      { role: 'user', content: 'Ignore old/path.ts' },
-      { role: 'assistant', content: 'Okay' },
-      { role: 'user', content: 'Read packages/zai/src/server/index.ts line 1-20' },
-    ])
-
-    expect(toolUseFrom(output).input).toEqual({
-      file_path: 'packages/zai/src/server/index.ts',
-    })
+describe('buildOpenccQueryParams — empty tool_use input must throw (no fallbacks)', () => {
+  it('throws when tool_use has empty input', async () => {
+    await expect(
+      runToolStream('Bash', [{ role: 'user', content: 'hello' }]),
+    ).rejects.toThrow(/empty input/i)
   }, 15_000)
 
-  it('throws input_json_delta required for WebSearch', async () => {
-    await expect(runToolStream('WebSearch', [
-      { role: 'user', content: 'Search the web for OpenCC' },
-    ])).rejects.toThrow(/input_json_delta required.*WebSearch/i)
-  })
+  it('error message includes tool name and toolUseId', async () => {
+    await expect(
+      runToolStream('Bash', [{ role: 'user', content: 'hello' }]),
+    ).rejects.toThrow(/Bash.*tu-1|sess-input.*tu-1|toolUseId=tu-1/i)
+  }, 15_000)
 
-  it('keeps Agent synthesis from the latest thinking block', async () => {
+  it('Bash with empty command throws (does not substitute pwd)', async () => {
+    await expect(
+      runToolStream('Bash', [{ role: 'user', content: 'check current dir' }]),
+    ).rejects.toThrow(/empty input/i)
+  }, 15_000)
+
+  it('Read with empty input throws (does not substitute /dev/null and does not infer path from user prompt)', async () => {
+    await expect(
+      runToolStream('Read', [
+        { role: 'user', content: 'Read packages/zai/src/server/index.ts line 1-20' },
+      ]),
+    ).rejects.toThrow(/empty input/i)
+  }, 15_000)
+
+  it('Agent with empty input throws (does not synthesize from thinking)', async () => {
     const thinking = 'Inspect startup behavior and report the relevant call path.'
-    const output = await runToolStream('Agent', [
-      { role: 'user', content: 'Delegate this task' },
-    ], { thinking })
+    await expect(
+      runToolStream('Agent', [{ role: 'user', content: 'Delegate this task' }], {
+        thinking,
+      }),
+    ).rejects.toThrow(/empty input/i)
+  }, 15_000)
 
-    expect(toolUseFrom(output).input).toEqual({
-      description: thinking,
-      prompt: thinking,
-      subagent_type: 'general-purpose',
+  it('Glob with empty input throws', async () => {
+    await expect(
+      runToolStream('Glob', [{ role: 'user', content: 'find ts files' }]),
+    ).rejects.toThrow(/empty input/i)
+  }, 15_000)
+
+  it('throws at message_stop when tool_use still has empty input', async () => {
+    await expect(
+      runToolStream('Bash', [{ role: 'user', content: 'hello' }], {
+        skipContentBlockStop: true,
+      }),
+    ).rejects.toThrow(
+      /\[buildOpenccQueryParams\] tool_use "Bash" emitted empty input.*toolUseId=tu-1/i,
+    )
+  }, 15_000)
+
+  it('preserves valid input for every parallel tool_use block', async () => {
+    async function* stream() {
+      yield { type: 'message_start', message: { id: 'm-parallel', model: 'm' } }
+      const calls = [
+        { id: 'tu-1', command: 'ls /etc/hostname' },
+        { id: 'tu-2', command: 'whoami' },
+      ]
+      for (const [index, call] of calls.entries()) {
+        yield {
+          type: 'content_block_start',
+          index,
+          content_block: { type: 'tool_use', id: call.id, name: 'Bash' },
+        }
+        yield {
+          type: 'content_block_delta',
+          index,
+          delta: {
+            type: 'input_json_delta',
+            partial_json: JSON.stringify({ command: call.command }),
+          },
+        }
+        yield { type: 'content_block_stop', index }
+      }
+      yield { type: 'message_delta', delta: { stop_reason: 'tool_use' } }
+      yield { type: 'message_stop' }
+    }
+
+    const params = await buildOpenccQueryParams(minimalOpts, {
+      modelCaller: vi.fn().mockReturnValue(stream()) as any,
     })
-  })
+    const output = []
+    for await (const message of params.deps!.callModel({
+      messages: [{ role: 'user', content: 'run both' }],
+      systemPrompt: '',
+      tools: [],
+      signal: new AbortController().signal,
+      options: { model: 'm' },
+    } as any) as AsyncIterable<any>) {
+      output.push(message)
+    }
 
-  it('keeps the harmless Bash pwd fallback', async () => {
-    const output = await runToolStream('Bash', [
-      { role: 'user', content: 'Check the current directory' },
+    const assistant = output.find((message: any) => message?.type === 'assistant')
+    expect(assistant?.message?.content).toEqual([
+      {
+        type: 'tool_use',
+        id: 'tu-1',
+        name: 'Bash',
+        input: { command: 'ls /etc/hostname' },
+      },
+      {
+        type: 'tool_use',
+        id: 'tu-2',
+        name: 'Bash',
+        input: { command: 'whoami' },
+      },
     ])
+  }, 15_000)
 
-    expect(toolUseFrom(output).input).toEqual({ command: 'pwd' })
-  })
-
-  it('does not replace valid streamed tool input', async () => {
-    const output = await runToolStream('Read', [
-      { role: 'user', content: 'Read wrong/path.ts' },
-    ], { partialJson: '{"file_path":"actual/path.ts","offset":7}' })
-
-    expect(toolUseFrom(output).input).toEqual({
-      file_path: 'actual/path.ts',
-      offset: 7,
-    })
-  })
-
-  it('synthesizes a recoverable tool result when no Read path can be inferred', async () => {
-    const output = await runToolStream('Read', [
-      { role: 'user', content: 'Read the file I meant' },
-    ])
-
-    expect(output[0]?.message?.content).toContainEqual(expect.objectContaining({
-      type: 'tool_result',
-      tool_use_id: 'tu-1',
-      is_error: true,
-      content: expect.stringMatching(/no path could be inferred.*explicit file_path/i),
-    }))
-  })
+  it('does NOT throw when the upstream LLM streams valid input_json_delta', async () => {
+    const output = await runToolStream(
+      'Read',
+      [{ role: 'user', content: 'Read wrong/path.ts' }],
+      { partialJson: '{"file_path":"actual/path.ts","offset":7}' },
+    )
+    // translateCallModel yields stream_event wrappers for every primitive +
+    // a terminal assistant Message at message_stop. The terminal assistant
+    // is what carries the parsed tool_use input.
+    const asst = output.find((m: any) => m?.type === 'assistant')
+    const tu = asst?.message?.content?.find((b: any) => b.type === 'tool_use')
+    expect(tu?.input).toEqual({ file_path: 'actual/path.ts', offset: 7 })
+  }, 15_000)
 })

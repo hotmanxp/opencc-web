@@ -316,7 +316,7 @@ async function* translateCallModel(
   let assistantId: string | undefined
   let assistantModel: string | undefined
   let assistantContent: any[] = []
-  let pendingToolInputJson = ''
+  const pendingToolInputJson = new Map<number, string>()
   let lastStopReason: string | null = null
   const flush = (stopReason: string | null) => {
     if (assistantContent.length === 0 && !assistantId && !assistantModel) return
@@ -335,7 +335,7 @@ async function* translateCallModel(
     assistantId = undefined
     assistantModel = undefined
     assistantContent = []
-    pendingToolInputJson = ''
+    pendingToolInputJson.clear()
     lastStopReason = null
     return message
   }
@@ -385,15 +385,15 @@ async function* translateCallModel(
       } else if (d?.type === 'thinking_delta' && typeof d.thinking === 'string') {
         block.thinking = (block.thinking ?? '') + d.thinking
       } else if (d?.type === 'input_json_delta' && typeof d.partial_json === 'string') {
-        pendingToolInputJson += d.partial_json
-        // Mirror to the latest tool_use block; will be parsed at message_stop
-        const tu = assistantContent.filter((b: any) => b.type === 'tool_use').at(-1)
-        if (tu) tu.input = pendingToolInputJson
+        const partialJson = (pendingToolInputJson.get(idx) ?? '') + d.partial_json
+        pendingToolInputJson.set(idx, partialJson)
+        block.input = partialJson
       }
     } else if (t === 'content_block_stop') {
       // Parse accumulated tool_use input JSON now that the block closed.
-      const tu = assistantContent.filter((b: any) => b.type === 'tool_use').at(-1)
-      if (tu && typeof tu.input === 'string') {
+      const index = ev?.index
+      const tu = assistantContent[index]
+      if (tu?.type === 'tool_use' && typeof tu.input === 'string') {
         try {
           tu.input = JSON.parse(tu.input)
         } catch {
