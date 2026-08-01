@@ -73,6 +73,16 @@ export function __resetSessionControllersForTests(): void {
   sessionControllers.clear()
 }
 
+/**
+ * In-flight prompt count for the restart drain. Reads the same
+ * sessionControllers map that HTTP /api/agent/abort already uses to
+ * signal running queryLoops — any sessionId currently registered
+ * counts as one in-flight prompt.
+ */
+export function getActivePromptCount(): number {
+  return sessionControllers.size
+}
+
 export function getAskRegistry(): AskRegistry {
   return askRegistry
 }
@@ -295,6 +305,20 @@ export async function abortAgentSession(reason?: string): Promise<void> {
   approveRegistry.abortAll(reason ?? 'session_aborted')
   if (currentSessionId) {
     abortSessionController(currentSessionId, reason)
+  }
+}
+
+/**
+ * Abort every in-flight prompt + every pending AskUserQuestion /
+ * RequestApprove decision. Used by the restart coordinator when its
+ * drain timeout elapses — at that point we want all sessions in the
+ * sessionControllers map signalled, not just currentSessionId.
+ */
+export function abortAllAgentPrompts(reason?: string): void {
+  askRegistry.abortAll(reason ?? 'restart_drain_timeout')
+  approveRegistry.abortAll(reason ?? 'restart_drain_timeout')
+  for (const sessionId of Array.from(sessionControllers.keys())) {
+    abortSessionController(sessionId, reason ?? 'restart_drain_timeout')
   }
 }
 

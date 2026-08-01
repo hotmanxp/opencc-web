@@ -14,8 +14,49 @@ import {
   type SubagentNotifier,
 } from './subagentNotifier.js'
 
-let backgroundRuntime: BackgroundRuntime | null = null
+/**
+ * Extended runtime surface used by the restart coordinator. Adds two
+ * capabilities beyond the published `BackgroundRuntime` interface:
+ *   - `activeCount()` for drain-time polling (queued + running tasks).
+ *     Synchronous because the wrapper maintains its own counter, bumped
+ *     on dispatch and drained when the task reaches a terminal status
+ *     via onTaskStateChange.
+ *   - `abortAll(reason?)` for the drain-timeout fallback path. Returns
+ *     synchronously after kicking off the async cancel; the restart
+ *     coordinator polls inFlightCount() afterward so exact aborted count
+ *     is irrelevant.
+ */
+export type RestartAwareBackgroundRuntime = BackgroundRuntime & {
+  activeCount: () => number
+  abortAll: (reason?: string) => number
+}
+
+let backgroundRuntime: RestartAwareBackgroundRuntime | null = null
 let notifier: SubagentNotifier | null = null
+
+/**
+ * Module-level hooks used by wrapWithJobStarted to maintain a
+ * synchronous "in-flight background task" counter for the restart
+ * drain. They are reset in __resetBackgroundRuntimeForTests so each
+ * test starts from a clean slate.
+ *
+ * - incrementBackgroundTask: bumped by the wrapper on every dispatch
+ * - decrementBackgroundTask: bumped by onTaskStateChange when a task
+ *   reaches a terminal status
+ */
+let activeBackgroundTasks = 0
+function incrementBackgroundTask(): void {
+  activeBackgroundTasks += 1
+}
+function decrementBackgroundTask(): void {
+  if (activeBackgroundTasks > 0) activeBackgroundTasks -= 1
+}
+function resetBackgroundTaskCounter(): void {
+  activeBackgroundTasks = 0
+}
+export function getActiveBackgroundTaskCount(): number {
+  return activeBackgroundTasks
+}
 
 /**
  * Initialize the background runtime singleton. Idempotent — safe to call
@@ -32,7 +73,7 @@ let notifier: SubagentNotifier | null = null
  * 通过 initSubagentNotifier() 注册,这样 onTaskStateChange 第一次触发
  * 就能拿到句柄。
  */
-export function initBackgroundRuntime(): BackgroundRuntime {
+export function initBackgroundRuntime(): RestartAwareBackgroundRuntime {
   if (backgroundRuntime) return backgroundRuntime
 
   const store = new JsonTaskStore(BACKGROUND_DIR)
@@ -52,6 +93,10 @@ export function initBackgroundRuntime(): BackgroundRuntime {
     return notifier
   }
 
+  // Build the inner DefaultBackgroundRuntime with a module-level counter
+  // hook. The wrapper (wrapWithJobStarted) increments the same counter on
+  // dispatch and abortAll() resets it; onTaskStateChange here decrements
+  // when a task reaches a terminal status.
   const inner = new DefaultBackgroundRuntime({
     agentRuntime,
     store,
@@ -83,6 +128,12 @@ export function initBackgroundRuntime(): BackgroundRuntime {
           sessionId: jobSessionId,
         })
       }
+      // 3) Terminal transitions decrement the in-flight count so the
+      // restart drain (createRestartHooks.backgroundActive) converges
+      // to zero once tasks settle.
+      if (task.status === 'completed' || task.status === 'failed' || task.status === 'cancelled') {
+        decrementBackgroundTask()
+      }
     },
   })
 
@@ -109,12 +160,13 @@ export function initBackgroundRuntime(): BackgroundRuntime {
  *   仍然传默认 hook, 行为不变。
  */
 export function wrapWithJobStarted(
-  inner: BackgroundRuntime,
+  inner: DefaultBackgroundRuntime,
   sessionIdHook: (task: BackgroundTask) => string | null = (t) => t.parentSessionId ?? null,
-): BackgroundRuntime {
+): RestartAwareBackgroundRuntime {
   return {
     dispatch: async (input) => {
       const task = await inner.dispatch(input)
+      incrementBackgroundTask()
       eventBus.emit({
         type: 'job.started',
         jobId: task.id,
@@ -129,10 +181,46 @@ export function wrapWithJobStarted(
     cancel: (id, reason) => inner.cancel(id, reason),
     events: (id, fromSeq, signal) => inner.events(id, fromSeq, signal),
     shutdown: () => inner.shutdown(),
+    activeCount: () => getActiveBackgroundTaskCount(),
+    abortAll: (reason?: string) => abortAllBackground(inner, reason),
   }
 }
 
-export function getBackgroundRuntime(): BackgroundRuntime {
+/**
+ * Snapshot the current active count for the return value, then async-cancel
+ * every queued + running task via the existing cancel() path. The
+ * coordinator polls activeCount() afterward so it doesn't need an exact
+ * aborted total — we reset the counter eagerly to unblock the next
+ * inFlightCount() poll without waiting for onTaskStateChange to drain.
+ */
+function abortAllBackground(
+  inner: DefaultBackgroundRuntime,
+  reason: string | undefined,
+): number {
+  const snapshot = getActiveBackgroundTaskCount()
+  // Kick off cancellation in the background. cancel() is itself a no-op for
+  // terminal tasks, so the race against onTaskStateChange is harmless —
+  // both paths decrement the counter and we may double-decrement if
+  // onTaskStateChange fires *between* our list() snapshot and cancel();
+  // we guard against that with the early reset below.
+  void (async () => {
+    try {
+      const [queued, running] = await Promise.all([
+        inner.list({ status: 'queued' }),
+        inner.list({ status: 'running' }),
+      ])
+      for (const t of [...running, ...queued]) {
+        await inner.cancel(t.id, reason ?? 'restart_drain_timeout')
+      }
+    } catch (err) {
+      console.warn('[restart] abortAllBackground cancel loop failed:', err)
+    }
+  })()
+  resetBackgroundTaskCounter()
+  return snapshot
+}
+
+export function getBackgroundRuntime(): RestartAwareBackgroundRuntime {
   if (!backgroundRuntime) {
     throw new Error('Background runtime not initialized')
   }
@@ -143,7 +231,7 @@ export function getBackgroundRuntime(): BackgroundRuntime {
  * Test seam: replace the singleton. Used by routes/tasks.test.ts to
  * inject a fixture backed by tmpdir.
  */
-export function __setBackgroundRuntime(runtime: BackgroundRuntime | null): void {
+export function __setBackgroundRuntime(runtime: RestartAwareBackgroundRuntime | null): void {
   backgroundRuntime = runtime
 }
 
@@ -168,4 +256,16 @@ export function initSubagentNotifierLifecycle(): SubagentNotifier {
 export function __resetBackgroundRuntimeForTests(): void {
   backgroundRuntime = null
   notifier = null
+  resetBackgroundTaskCounter()
+}
+
+/**
+ * Cancel every in-flight background task. Safe to call before
+ * initBackgroundRuntime has run (returns 0 and no-ops), so callers in
+ * the restart coordinator don't need to special-case the un-initialized
+ * path.
+ */
+export function abortAllBackgroundTasks(reason?: string): number {
+  if (!backgroundRuntime) return 0
+  return backgroundRuntime.abortAll(reason ?? 'restart_drain_timeout')
 }

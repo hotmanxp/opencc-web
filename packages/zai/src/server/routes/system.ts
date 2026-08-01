@@ -7,6 +7,14 @@ import { eventBus } from '../services/eventBus.js';
 import { isManagedChild, sendToSupervisor } from '../../cli/managedChild.js';
 import { requestRestart } from '../services/restartCoordinator.js';
 import { createRestartHooks } from '../services/restartHooks.js';
+import {
+  abortAllAgentPrompts,
+  getActivePromptCount,
+} from '../services/agentRuntime.js';
+import {
+  abortAllBackgroundTasks,
+  getActiveBackgroundTaskCount,
+} from '../services/backgroundRuntime.js';
 import type { ServerEventInput } from '../services/eventBus.js';
 
 const execFileAsync = promisify(execFile);
@@ -101,10 +109,10 @@ router.post('/system/restart', async (req, res) => {
   if (activeHandle) return res.status(409).json({ error: 'already_pending' })
 
   const hooks = createRestartHooks({
-    agentActive: () => 0,           // TODO: wire to agentRuntime in T12
-    backgroundActive: () => 0,      // TODO: wire to backgroundRuntime in T12
-    abortAgent: () => undefined,
-    abortBackground: () => undefined,
+    agentActive: () => getActivePromptCount(),
+    backgroundActive: () => getActiveBackgroundTaskCount(),
+    abortAgent: () => abortAllAgentPrompts('restart_drain_timeout'),
+    abortBackground: () => abortAllBackgroundTasks('restart_drain_timeout'),
   })
 
   const restartingEvent: ServerEventInput = {
