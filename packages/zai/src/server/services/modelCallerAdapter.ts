@@ -74,10 +74,21 @@ export function wrapZaiModelCallerAsCallModel(
     ?? process.env.ANTHROPIC_SMALL_FAST_MODEL
   return async function* (req: VendorCallModelInput) {
     const model = req.options?.model || fallbackModel || 'MiniMax-M3'
+    // Vendor `Message` shape is { type, message: { role, content }, uuid,
+    // timestamp, ... }, NOT the Anthropic `{ role, content }` shape. zai's
+    // createAnthropicModelCaller does `messages.map((m) => ({ role: m.role,
+    // content: m.content }))` which would yield `{ role: undefined, content:
+    // undefined }` and Anthropic would 400 with "input json is empty"
+    // (2013). Lift the inner `m.message.{role, content}` here so the zai
+    // adapter downstream sees the right shape.
+    const sdkMessages = req.messages.map((m: any) => ({
+      role: m.message?.role ?? m.role,
+      content: m.message?.content ?? m.content,
+    }))
     yield* modelCaller({
       model: String(model),
       systemPrompt: req.systemPrompt as any,
-      messages: req.messages as any,
+      messages: sdkMessages as any,
       tools: req.tools as any,
       signal: req.signal,
     })

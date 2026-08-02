@@ -19,7 +19,7 @@
  *   tree-shaking reliably.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as esbuild from 'esbuild'
@@ -600,6 +600,49 @@ await esbuild.build({
   treeShaking: true,
 })
 console.log(`[bundle-opencc] session-facade impl: ${SESSION_FACADE_IMPL_OUT}`)
+
+// `compat/transcript/persistence.ts` does a runtime
+// `createRequire(import.meta.url)` to load
+// `../../opencc-src/services/api/compressToolHistory.js` as a graceful
+// fallback (the require is wrapped in try/catch so a missing file
+// only logs a debug warning, never crashes boot). The vendored
+// compressToolHistory.ts pulls in 5+ vendored helpers (autoCompact,
+// microCompact, toolResultStorage, config, ...) that aren't separately
+// emitted to dist; a full `bundle: true` of those helpers would
+// produce an 18 MB single-file blob that drags React 19 + JSX + the
+// whole opencc-src vendor tree into a hot path that ONLY runs in
+// the transcript-repair edge case (and the 5/189 transcript-repair
+// tests are pre-existing baseline failures per AGENTS.md).
+//
+// The pre-existing fallback contract is: if the require fails,
+// `compressToolHistory` is undefined and the helper degrades to
+// passthrough. We honor that contract by emitting a tiny stub that
+// re-exports `compressToolHistory` as the identity function
+// (no compression). This is functionally equivalent to the load
+// failure path — both end up with no compression applied — but
+// satisfies the dynamic require so the 1.8 KB stack-frame warning
+// goes away from every /api/agent/prompt log.
+const COMPRESS_TOOL_HISTORY_OUT = join(ROOT, 'dist', 'opencc-src', 'services', 'api', 'compressToolHistory.js')
+mkdirSync(dirname(COMPRESS_TOOL_HISTORY_OUT), { recursive: true })
+writeFileSync(
+  COMPRESS_TOOL_HISTORY_OUT,
+  `// Stub emitted by bundle-opencc.ts — see comment in the script.
+// The runtime loads this file via createRequire(import.meta.url) from
+// compat/transcript/persistence.ts. The vendored source file in
+// src/opencc-src/services/api/compressToolHistory.ts is a full
+// implementation; we emit a passthrough stub here so the dynamic
+// require resolves without dragging 18 MB of vendored tree into
+// dist. compressToolHistory is only consulted by the transcript-repair
+// helpers, and the pre-existing fallback contract is "if undefined,
+// passthrough" — this stub exports the identity function which is
+// behaviorally equivalent to the fallback path.
+export function compressToolHistory(messages) {
+  return messages
+}
+`,
+  'utf8',
+)
+console.log(`[bundle-opencc] compress-tool-history: ${COMPRESS_TOOL_HISTORY_OUT}`)
 
 // Mechanically emit declaration files for the server module via tsc.
 // `noEmit` requires the tsc program to typecheck; we point outDir at

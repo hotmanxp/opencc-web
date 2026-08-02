@@ -120,4 +120,35 @@ describe('wrapZaiModelCallerAsCallModel — zai-ModelCaller <-> vendor callModel
 
     expect(capturedSignal).toBe(ac.signal)
   })
+
+  it('lifts vendor Message shape { message: { role, content } } to zai { role, content }', async () => {
+    // Vendor `Message` is { type, message: { role, content }, uuid, ... }
+    // — not { role, content }. Without the lift, zai's downstream
+    // `messages.map((m) => ({ role: m.role, content: m.content }))` sees
+    // undefined for both, and Anthropic returns 400 "input json is
+    // empty" 2013.
+    let capturedReq: any = null
+    const zaiCaller = makeFakeZaiModelCaller({
+      events: [{ type: 'message_stop' }],
+      onCall: (req) => { capturedReq = req },
+    })
+    const wrapped = wrapZaiModelCallerAsCallModel(zaiCaller)
+
+    for await (const _ of wrapped({
+      messages: [
+        { type: 'user', message: { role: 'user', content: 'hi' }, uuid: 'u1', timestamp: 't1' },
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] }, uuid: 'a1' },
+      ],
+      systemPrompt: '',
+      thinkingConfig: { type: 'disabled' },
+      tools: [],
+      signal: new AbortController().signal,
+      options: { model: 'MiniMax-M3' },
+    } as any)) { /* drain */ }
+
+    expect(capturedReq.messages).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+    ])
+  })
 })

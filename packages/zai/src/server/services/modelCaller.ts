@@ -398,6 +398,20 @@ export function createAnthropicModelCaller(): ModelCaller {
         max_tokens: resolvedMaxTokens,
         thinking_budget: resolvedThinkingBudget,
       })
+      console.error('[zai.modelCaller] raw messages[0]', {
+        role: messages[0]?.role,
+        content_type: typeof messages[0]?.content,
+        is_array: Array.isArray(messages[0]?.content),
+        content_preview: JSON.stringify(messages[0]?.content).slice(0, 500),
+      })
+      console.error('[zai.modelCaller] upstream body preview', {
+        messages_count: sdkMessages.length,
+        messages_0: JSON.stringify(sdkMessages[0]).slice(0, 300),
+        system_type: Array.isArray(systemBlocks) ? `array[${systemBlocks.length}]` : typeof systemBlocks,
+        system_0: JSON.stringify(Array.isArray(systemBlocks) ? systemBlocks[0] : systemBlocks).slice(0, 250),
+        tools_count: tools.length,
+        tool_0: tools[0] ? { name: tools[0].name, schema_type: typeof tools[0].inputSchema, schema_preview: JSON.stringify(tools[0].inputSchema).slice(0, 200) } : null,
+      })
     }
     const stream = await client.messages.create(
       {

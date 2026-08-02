@@ -25,39 +25,74 @@ import {
 // per the 5/189 pre-existing baseline).
 class TranscriptStore {
   constructor(public readonly dataDir: string) {}
-  // `read(sessionId, {cwd})` is the legacy compat shape — returns
-  // `{ messages, meta: { cwd, model, ... } }`. The new server
-  // runtime owns real transcripts via `sessionFacade.readTranscript`;
-  // the routes layer is migrated to that surface in a follow-up.
-  // For now the stub returns an empty transcript so the routes
-  // resolve sessionId → null gracefully (the if-branches below
-  // handle null as "no prior session").
-  async read(_sessionId: string, _opts: { cwd: string }) {
-    return { messages: [], meta: { cwd: '', model: '' } }
+  // The legacy compat `TranscriptStore` was deleted in Task 6 along
+  // with the synthetic compat runtime. The new `OpenccRuntime`
+  // exposes 8 methods (getSession, listSessions, readTranscript,
+  // patchSession, removeSession, query, abort, shutdown) — there
+  // is no `sessionFacade` and no `create`; the runtime auto-creates
+  // a session when `query()` first sees a sessionId. Route handlers
+  // in `routes/agent.ts` / `routes/transcript.ts` /
+  // `routes/approve.ts` / builtin commands `clear` / `compact`
+  // still call into `getTranscriptStore()` with the legacy method
+  // names. We satisfy that contract by:
+  //   - create:    generate a fresh UUID now, the runtime will
+  //                materialize the session on first query().
+  //   - read/list: delegate to runtime.listSessions / getSession.
+  //   - patch:     delegate to runtime.patchSession.
+  //   - remove:    delegate to runtime.removeSession.
+  //   - append*:   no-op (the runtime owns transcript writing via
+  //                its internal sessionStorage path; zai's per-event
+  //                transcript persistence in routes/agent.ts
+  //                becomes redundant in this model).
+  private rt(): OpenccRuntime {
+    if (!runtime) throw new Error('Agent runtime not initialized')
+    return runtime
   }
-  async appendUserMessage(_msg: any) {
+  async create(_meta: { cwd: string; model: string; permissionMode?: string }): Promise<string> {
+    // OpenccRuntime auto-materializes on first query(); for
+    // POST /api/agent/sessions we just need a stable id.
+    return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  }
+  async read(sessionId: string, opts: { cwd: string }) {
+    const info = await this.rt().getSession(sessionId)
+    if (!info) {
+      // New session that runtime hasn't materialized yet
+      // (the runtime auto-creates on first query()). For the
+      // legacy cwd check in routes/agent.ts we return the
+      // caller's cwd so the session resolves correctly when
+      // the runtime first sees it.
+      return { messages: [], meta: { cwd: opts.cwd, model: '' } }
+    }
+    return {
+      messages: [],
+      meta: {
+        cwd: info.cwd,
+        model: info.model,
+        title: info.title,
+        permissionMode: info.permissionMode,
+      },
+    }
+  }
+  async appendUserMessage(_msg: any) { return undefined }
+  async appendAssistantMessage(_msg: any) { return undefined }
+  async appendToolUse(_msg: any) { return undefined }
+  async appendToolResult(_msg: any) { return undefined }
+  async list(opts: { cwd: string; excludeSubagent?: boolean } = { cwd: '' }) {
+    return this.rt().listSessions({ cwd: opts.cwd, excludeSubagent: opts.excludeSubagent })
+  }
+  async listSessions() { return this.list({ cwd: this.dataDir }) }
+  async readSession(id: string) {
+    return this.rt().getSession(id)
+  }
+  async patchSession(id: string, patch: any, _opts?: { cwd?: string }) {
+    return this.rt().patchSession(id, patch)
+  }
+  async removeSession(id: string, _opts?: { cwd?: string }) {
+    await this.rt().removeSession(id, { cwd: this.dataDir })
+    return true
+  }
+  async append(_sessionId: string, _msg: any, _pathOpts?: any) {
     return undefined
-  }
-  async appendAssistantMessage(_msg: any) {
-    return undefined
-  }
-  async appendToolUse(_msg: any) {
-    return undefined
-  }
-  async appendToolResult(_msg: any) {
-    return undefined
-  }
-  async listSessions() {
-    return []
-  }
-  async readSession(_id: string) {
-    return null
-  }
-  async patchSession(_id: string, _patch: any) {
-    return undefined
-  }
-  async removeSession(_id: string) {
-    return false
   }
 }
 // The server module exports two `OpenccRuntime` shapes (one from
