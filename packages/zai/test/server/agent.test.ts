@@ -133,6 +133,49 @@ describe('POST /api/agent/prompt with contentBlocks', () => {
       close()
     }
   })
+
+  // 回归: 带图片附件时 prompt 必须作为 ContentBlockParam[] 透传给 runtime,
+  // 而不是 JSON.stringify 压成字符串 — 否则 base64 变纯文本, 模型报
+  // "无法读取消息中嵌入的 base64 图片数据". OpenccQueryInput.prompt 已扩宽为
+  // string | OpenccContentBlockParam[], 这里锁住路由行为.
+  it('forwards image content blocks as an array prompt, not a JSON string', async () => {
+    lastRunOpts = null
+    const { url, close } = await startApp()
+    try {
+      // 1x1 PNG — magic bytes 需与 image/png 一致 (agent.ts assertImageMagicMatches)
+      const imageData =
+        'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mP8z8BQDwAEhQGAhKmMIQAAAABJRU5ErkJggg=='
+      const res = await fetch(`${url}/api/agent/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'sess-img-1',
+          contentBlocks: [
+            {
+              type: 'image',
+              source: { type: 'base64', media_type: 'image/png', data: imageData },
+            },
+            { type: 'text', text: '识别这个图标' },
+          ],
+        }),
+      })
+      expect(res.status).toBe(200)
+      const reader = res.body!.getReader()
+      while (true) {
+        const { done } = await reader.read()
+        if (done) break
+      }
+      expect(lastRunOpts).not.toBeNull()
+      expect(Array.isArray(lastRunOpts.prompt)).toBe(true)
+      expect(lastRunOpts.prompt[0]).toMatchObject({
+        type: 'image',
+        source: { type: 'base64', media_type: 'image/png', data: imageData },
+      })
+      expect(lastRunOpts.prompt[1]).toEqual({ type: 'text', text: '识别这个图标' })
+    } finally {
+      close()
+    }
+  })
 })
 
 // 关键: /agent/prompt 必须从 transcript.meta.model 读到 session 选过的

@@ -31,11 +31,6 @@ import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
 import { resolveModel } from "../lib/resolveModel.js";
 
-// Mirror zai-agent-core's runtime/types.ts UserMessage shape because the package
-// does not re-export these types — keep them in sync if the upstream shape changes.
-type UserMessageContent = Array<{ type: string; [key: string]: unknown }>;
-type UserMessage = { role: "user"; content: string | UserMessageContent };
-
 const router: IRouter = Router();
 router.use('/agent', commandRouter)
 router.use('/agent', commandsRouter)
@@ -684,17 +679,15 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
       const text = prompt?.trim() ?? "";
       const blocks = contentBlocks;
 
-      // ★ image-paste v2: contentBlocks 拼成 user message array; 走 queryEngine array 路径
-      // (zai-agent-core queryEngine.ts:114-118 把每个元素 append 到 messages[]).
-      // 当 contentBlocks 为空时, promptArg 退化为 string, 走 queryEngine 的 string 路径.
+      // ★ image-paste v2: contentBlocks 拼成 user content-block array; 直接作为
+      // OpenccQueryInput.prompt 传给 runtime, 走 QueryEngine.submitMessage
+      // (prompt: string | ContentBlockParam[]) 的多模态路径 — image block 原样
+      // 转成 Anthropic protocol 发给模型. 当 contentBlocks 为空时退化为 string,
+      // 走纯文本路径.
       const userContent =
         blocks && blocks.length
           ? [...blocks, ...(text ? [{ type: "text" as const, text }] : [])]
           : text;
-      const promptArg: string | UserMessage[] =
-        typeof userContent === "string"
-          ? userContent
-          : [{ role: "user", content: userContent as UserMessageContent }];
 
       // zai patch (Aug 2026): persist the user prompt to the transcript
       // BEFORE the runtime starts. Without this, every session in the
@@ -702,13 +695,13 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
       // transcript on reload — the opencc vendor `query()` only emits
       // stream events, it never writes to the transcript.
       //
-      // Pass `userContent` (the actual content blocks / string), NOT the
-      // wrapped `promptArg` array. The runtime accepts `UserMessage[]`
-      // (`[{role, content}]`) but the transcript stores Anthropic-protocol
-      // content blocks directly. If we wrote the wrapper array, resume
-      // would re-send `[{role:"user", content:[image,text]}]` and the
-      // first "block" reaches Anthropic as `{role:"user", content:…}`
-      // with no `type` field → 400 "unsupported content type '' (2013)".
+      // Pass `userContent` (the actual content blocks / string), NOT a
+      // wrapper `[{role:'user', content:[...]}]` array. The transcript
+      // stores Anthropic-protocol content blocks directly. If we wrote
+      // the wrapper array, resume would re-send
+      // `[{role:"user", content:[image,text]}]` and the first "block"
+      // reaches Anthropic as `{role:"user", content:…}` with no `type`
+      // field → 400 "unsupported content type '' (2013)".
       // Round-trip identity is preserved because the runtime reads from
       // params.messages, not from the persisted transcript.
       const transcriptCtx = { cwd, sessionId, userType: 'zai' }
@@ -768,16 +761,14 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
       }
 
       const events = getRuntime().query({
-        // OpenccQueryInput.prompt is `string`. The legacy QueryOptions
-        // shape allowed string | UserMessage[]; the OpenCC vendor
-        // runtime accepts only string. For structured multipart content
-        // (e.g. user attached images alongside text), the previous
-        // QueryEngine path passed them through; here we collapse to the
-        // raw `userContent` (a string or UserMessageContent[]). Image
-        // payloads land in the same `prompt` field via JSON-encoded
-        // multipart — vendors that need richer structure (Task 4.5)
-        // will widen OpenccQueryInput.prompt.
-        prompt: typeof promptArg === 'string' ? promptArg : JSON.stringify(promptArg),
+        // OpenccQueryInput.prompt accepts `string | OpenccContentBlockParam[]`.
+        // For multimodal input we pass the raw `userContent` block array —
+        // createOpenccRuntime-impl submits it directly to the vendor
+        // QueryEngine.submitMessage(string | ContentBlockParam[]), which
+        // converts image blocks to Anthropic protocol before hitting the
+        // API. JSON-encoding here would leak base64 as plain text and the
+        // model can't read the image.
+        prompt: userContent,
         cwd,
         // sessionId: 显式指定 ID. 不管新建还是续传, vendor runtime 都用这个
         // ID 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.

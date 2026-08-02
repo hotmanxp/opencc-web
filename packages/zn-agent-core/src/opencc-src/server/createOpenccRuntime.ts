@@ -1,3 +1,5 @@
+import type { OpenccContentBlockParam } from './serverTypes.js'
+
 export type OpenccRuntimeOptions = {
   dataDir: string
   runtimeId?: string
@@ -16,7 +18,8 @@ export type OpenccRuntimeOptions = {
 
 export type OpenccQueryInput = {
   sessionId: string
-  prompt: string
+  /** Plain text prompt, or content-block array for multimodal input (see serverTypes.ts). */
+  prompt: string | OpenccContentBlockParam[]
   cwd?: string
   model?: string
   abortSignal?: AbortSignal

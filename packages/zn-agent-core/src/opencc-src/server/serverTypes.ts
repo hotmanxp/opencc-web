@@ -171,8 +171,15 @@ export type OpenccRuntimeOptions = {
 export type OpenccQueryInput = {
   /** Session id — used for transcript continuity + event correlation. */
   sessionId: string
-  /** The user prompt (string or structured message). */
-  prompt: string
+  /**
+   * The user prompt: a plain text string, or an array of
+   * Anthropic-protocol content blocks (text / base64 image) for
+   * multimodal input (e.g. screenshot attachments). Mirrors the
+   * upstream `QueryEngine.submitMessage(prompt: string | ContentBlockParam[])`
+   * contract. Defined locally so the public d.ts stays self-contained
+   * (no bare imports — see verify-server-types-self-contained.mjs).
+   */
+  prompt: string | OpenccContentBlockParam[]
   /** Working directory for this query. */
   cwd: string
   /** Optional model override. */
@@ -180,6 +187,31 @@ export type OpenccQueryInput = {
   /** Optional abort signal — `query` must subscribe and stop on abort. */
   abortSignal?: AbortSignal
 }
+
+/**
+ * Content block shape accepted by `OpenccQueryInput.prompt` when a
+ * query carries multimodal content. Structurally a subset of
+ * Anthropic's `ContentBlockParam` (text + base64 image only — the two
+ * block types zai's HTTP layer accepts today). Extra keys are allowed
+ * (`[k: string]: unknown`) so future block kinds pass through without
+ * widening this union.
+ */
+export type OpenccContentBlockParam =
+  | {
+      type: 'text'
+      text: string
+      [k: string]: unknown
+    }
+  | {
+      type: 'image'
+      source: {
+        type: 'base64'
+        media_type: string
+        data: string
+        [k: string]: unknown
+      }
+      [k: string]: unknown
+    }
 
 /**
  * The runtime contract every implementation must satisfy. The eight
