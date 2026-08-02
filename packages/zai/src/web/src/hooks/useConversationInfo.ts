@@ -120,7 +120,7 @@ export function useConversationInfo(): ConversationInfo {
   return useMemo<ConversationInfo>(() => {
     const effectiveSessionId = sessionId ?? activeSessionId ?? null
     const sess = effectiveSessionId
-      ? sessions.find((s) => s.transcriptId === effectiveSessionId) ?? null
+      ? sessions.find((s) => s.sessionId === effectiveSessionId) ?? null
       : null
     const firstTs = messages[0]?.ts ?? sess?.createdAt ?? null
     const turns = countCompletedTurns(messages)

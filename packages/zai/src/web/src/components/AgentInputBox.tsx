@@ -447,7 +447,7 @@ export default React.memo(function AgentInputBox() {
       e.preventDefault();
       const currentMode =
         useAgentStore.getState().sessions.find(
-          (s) => s.transcriptId === sessionId,
+          (s) => s.sessionId === sessionId,
         )?.permissionMode ?? "default";
       const idx = MODE_CYCLE_ORDER.indexOf(currentMode);
       const next = MODE_CYCLE_ORDER[(idx + 1) % MODE_CYCLE_ORDER.length]!;

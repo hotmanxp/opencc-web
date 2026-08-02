@@ -9,7 +9,7 @@ export interface MobileHeaderProps {
 
 /**
  * 移动端 44px 顶栏:
- *   左: [≡] 抽屉触发按钮 + 当前会话标题(取 sessions.find(s => s.transcriptId === sessionId).title)
+ *   左: [≡] 抽屉触发按钮 + 当前会话标题(取 sessions.find(s => s.sessionId === sessionId).title)
  *   右: [+] 新建会话按钮
  * 不渲染设置/分享按钮 — 这两个由 AgentInputBox 内部工具栏提供。
  */
@@ -17,7 +17,7 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
   const sessionId = useAgentStore((s) => s.sessionId)
   const sessions = useAgentStore((s) => s.sessions)
   const createNewSession = useAgentStore((s) => s.createNewSession)
-  const current = sessions.find((s) => s.transcriptId === sessionId)
+  const current = sessions.find((s) => s.sessionId === sessionId)
   const title = current?.title || '新会话'
 
   return (

@@ -205,7 +205,7 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
 
   const currentSessionId = sessionId ?? activeSessionId ?? null
   const currentSession = useMemo(
-    () => sessions.find((s) => s.transcriptId === currentSessionId) ?? null,
+    () => sessions.find((s) => s.sessionId === currentSessionId) ?? null,
     [sessions, currentSessionId],
   )
   const currentMode: PermissionMode = currentSession?.permissionMode ?? 'default'

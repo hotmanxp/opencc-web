@@ -300,16 +300,16 @@ describe('useAgentStore.applyRuntimeEvent', () => {
 })
 
 describe('useAgentStore.applySessionEvent', () => {
-  test('session.created registers session via transcriptId into array', () => {
+  test('session.created registers session via sessionId into array', () => {
     useAgentStore.getState().applySessionEvent({
       type: 'session.created',
       eventId: 'e1', ts: 1, sessionId: 's1', title: 'Hello', cwd: '/tmp',
     })
     const sessions = useAgentStore.getState().sessions
-    expect(sessions.some((x) => x.transcriptId === 's1' && x.title === 'Hello')).toBe(true)
+    expect(sessions.some((x) => x.sessionId === 's1' && x.title === 'Hello')).toBe(true)
   })
 
-  test('session.deleted removes session by transcriptId', () => {
+  test('session.deleted removes session by sessionId', () => {
     useAgentStore.getState().applySessionEvent({
       type: 'session.created',
       eventId: 'e1', ts: 1, sessionId: 's1', title: 'X', cwd: '/tmp',
@@ -319,12 +319,12 @@ describe('useAgentStore.applySessionEvent', () => {
       eventId: 'e2', ts: 2, sessionId: 's1',
     })
     const sessions = useAgentStore.getState().sessions
-    expect(sessions.some((x) => x.transcriptId === 's1')).toBe(false)
+    expect(sessions.some((x) => x.sessionId === 's1')).toBe(false)
   })
 
-  test('session.renamed updates existing session title by transcriptId', () => {
+  test('session.renamed updates existing session title by sessionId', () => {
     // 这是修复的核心 regression: 老代码按 Record 索引 sessions[sid] 永远
-    // undefined, case 静默早退. 现在改成按 transcriptId findIndex.
+    // undefined, case 静默早退. 现在改成按 sessionId findIndex.
     useAgentStore.getState().applySessionEvent({
       type: 'session.created',
       eventId: 'e1', ts: 1, sessionId: 's1', title: 'old', cwd: '/tmp',
@@ -334,7 +334,7 @@ describe('useAgentStore.applySessionEvent', () => {
       eventId: 'e2', ts: 2, sessionId: 's1', title: 'new',
     })
     const sessions = useAgentStore.getState().sessions
-    const found = sessions.find((x) => x.transcriptId === 's1')
+    const found = sessions.find((x) => x.sessionId === 's1')
     expect(found?.title).toBe('new')
   })
 })
@@ -375,7 +375,7 @@ describe('useAgentStore.applyPromptAsk', () => {
 // 每个 case 独立 stub fetch (loadSessions 调), 同时在初始 URL 上预设
 // ?sid=xxx (模拟用户刷新或贴分享链接进来), 然后检查 store sessionId 与 URL 的最终形态.
 
-function mockFetchSessions(sessions: Array<{ transcriptId: string; title?: string; updatedAt: number }>) {
+function mockFetchSessions(sessions: Array<{ sessionId: string; title?: string; updatedAt: number }>) {
   vi.stubGlobal('fetch', vi.fn(async (url: string) => {
     if (url.includes('/api/agent/sessions') && url.endsWith('/sessions')) {
       return new Response(JSON.stringify({ sessions }), { status: 200 })
@@ -416,9 +416,9 @@ describe('URL <-> sessionId sync (Agent ?sid=...)', () => {
   test('loadSessions: URL ?sid=xxx 命中列表 → store 用 URL 的会话, 不取首条', async () => {
     setLocationHref('http://localhost:3000/agent?sid=second')
     mockFetchSessions([
-      { transcriptId: 'first', updatedAt: 1000 },
-      { transcriptId: 'second', updatedAt: 2000 },
-      { transcriptId: 'third', updatedAt: 3000 },
+      { sessionId: 'first', updatedAt: 1000 },
+      { sessionId: 'second', updatedAt: 2000 },
+      { sessionId: 'third', updatedAt: 3000 },
     ])
     await useAgentStore.getState().loadSessions()
     expect(useAgentStore.getState().sessionId).toBe('second')
@@ -427,8 +427,8 @@ describe('URL <-> sessionId sync (Agent ?sid=...)', () => {
   test('loadSessions: URL ?sid=xxx 不在列表 (已删/换机) → 回退首条 + 清掉 URL 的 sid', async () => {
     setLocationHref('http://localhost:3000/agent?sid=ghost')
     mockFetchSessions([
-      { transcriptId: 'first', updatedAt: 1000 },
-      { transcriptId: 'second', updatedAt: 2000 },
+      { sessionId: 'first', updatedAt: 1000 },
+      { sessionId: 'second', updatedAt: 2000 },
     ])
     await useAgentStore.getState().loadSessions()
     // 回退
@@ -440,8 +440,8 @@ describe('URL <-> sessionId sync (Agent ?sid=...)', () => {
   test('loadSessions: 无 URL ?sid → 保持旧行为 (取 sessions[0])', async () => {
     setLocationHref('http://localhost:3000/agent')
     mockFetchSessions([
-      { transcriptId: 'first', updatedAt: 1000 },
-      { transcriptId: 'second', updatedAt: 2000 },
+      { sessionId: 'first', updatedAt: 1000 },
+      { sessionId: 'second', updatedAt: 2000 },
     ])
     await useAgentStore.getState().loadSessions()
     expect(useAgentStore.getState().sessionId).toBe('first')
@@ -464,7 +464,7 @@ describe('URL <-> sessionId sync (Agent ?sid=...)', () => {
         return new Response(JSON.stringify({ sessionId: 'brand-new' }), { status: 200 })
       }
       if (url.endsWith('/sessions')) {
-        return new Response(JSON.stringify({ sessions: [{ transcriptId: 'brand-new', updatedAt: Date.now() }] }), { status: 200 })
+        return new Response(JSON.stringify({ sessions: [{ sessionId: 'brand-new', updatedAt: Date.now() }] }), { status: 200 })
       }
       if (url.endsWith('/api/agent/settings')) {
         return new Response(JSON.stringify({ models: [] }), { status: 200 })
@@ -479,7 +479,7 @@ describe('URL <-> sessionId sync (Agent ?sid=...)', () => {
   test('loadSessions: URL ?sid=newID → 拦截并 createNewSession, URL 改成真实 sid', async () => {
     // ConfigStatusBar 上 N 按钮的新 tab 入口: URL 携带 newID 字面量,
     // 表示"全新会话"特殊标记, 不应回退到列表首条, 而是直接调
-    // createNewSession 并把 URL 同步成 server 回的 transcriptId.
+    // createNewSession 并把 URL 同步成 server 回的 sessionId.
     setLocationHref('http://localhost:3000/agent?sid=newID')
     vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
       if (url.endsWith('/sessions') && init?.method === 'POST') {
@@ -488,8 +488,8 @@ describe('URL <-> sessionId sync (Agent ?sid=...)', () => {
       if (url.endsWith('/sessions')) {
         return new Response(JSON.stringify({
           sessions: [
-            { transcriptId: 'first', updatedAt: 1000 },
-            { transcriptId: 'created-from-newid', updatedAt: Date.now() },
+            { sessionId: 'first', updatedAt: 1000 },
+            { sessionId: 'created-from-newid', updatedAt: Date.now() },
           ],
         }), { status: 200 })
       }
@@ -510,8 +510,8 @@ describe('URL <-> sessionId sync (Agent ?sid=...)', () => {
     // 先有两条, 当前激活 first
     useAgentStore.setState({
       sessions: [
-        { transcriptId: 'first', updatedAt: 1000 },
-        { transcriptId: 'second', updatedAt: 2000 },
+        { sessionId: 'first', updatedAt: 1000 },
+        { sessionId: 'second', updatedAt: 2000 },
       ],
       sessionId: 'first',
     })

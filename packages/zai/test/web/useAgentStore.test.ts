@@ -548,7 +548,7 @@ describe('useAgentStore.patchSessionModel', () => {
 
     useAgentStore.setState({
       sessions: [{
-        transcriptId: 'sess-1',
+        sessionId: 'sess-1',
         title: 'old',
         updatedAt: 1,
         cwd: '/x',
@@ -576,7 +576,7 @@ describe('useAgentStore.patchSessionModel', () => {
 
     useAgentStore.setState({
       sessions: [{
-        transcriptId: 'sess-1',
+        sessionId: 'sess-1',
         title: 'old',
         updatedAt: 1,
         // No model field set yet.

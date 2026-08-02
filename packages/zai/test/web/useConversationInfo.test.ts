@@ -109,7 +109,7 @@ describe('useConversationInfo (integration)', () => {
     useAgentStore.setState({
       sessionId,
       sessions: [{
-        transcriptId: sessionId,
+        sessionId: sessionId,
         cwd: '/repo',
         model: 'claude-opus-4-6',
         createdAt: 1000,
@@ -144,7 +144,7 @@ describe('useConversationInfo (integration)', () => {
     useAgentStore.setState({
       sessionId,
       sessions: [{
-        transcriptId: sessionId,
+        sessionId: sessionId,
         cwd: '/x',
         model: 'unknown',
         createdAt: 1,
@@ -162,7 +162,7 @@ describe('useConversationInfo (integration)', () => {
     useAgentStore.setState({
       sessionId,
       sessions: [{
-        transcriptId: sessionId,
+        sessionId: sessionId,
         cwd: '/x',
         model: 'MiniMax-M3',
         createdAt: 1,
@@ -179,7 +179,7 @@ describe('useConversationInfo (integration)', () => {
     useAgentStore.setState({
       sessionId,
       sessions: [{
-        transcriptId: sessionId,
+        sessionId: sessionId,
         cwd: '/x',
         model: 'MiniMax-M2.7-highspeed',
         createdAt: 1,
@@ -196,7 +196,7 @@ describe('useConversationInfo (integration)', () => {
     useAgentStore.setState({
       sessionId,
       sessions: [{
-        transcriptId: sessionId,
+        sessionId: sessionId,
         cwd: '/x',
         model: 'unknown-from-upstream',
         createdAt: 1,

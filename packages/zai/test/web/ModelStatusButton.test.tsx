@@ -28,7 +28,7 @@ beforeEach(() => {
     sessionId: 'sess-1',
     activeSessionId: 'sess-1',
     sessions: [{
-      transcriptId: 'sess-1',
+      sessionId: 'sess-1',
       title: 'test',
       updatedAt: 1,
       cwd: '/x',
@@ -102,7 +102,7 @@ describe('ModelStatusButton', () => {
 describe('ModelStatusButton TUI picker (extended)', () => {
   // Reuse the existing beforeEach that sets up sessions / availableModels / fetch.
   // Existing beforeEach sets:
-  //   - sessions: [{ transcriptId: 'sess-1', model: 'MiniMax-M3', cwd: '/x', updatedAt: 1 }]
+  //   - sessions: [{ sessionId: 'sess-1', model: 'MiniMax-M3', cwd: '/x', updatedAt: 1 }]
   //   - availableModels: 2 models with aliases 'M3' and 'haiku'
   //     (model strings: 'MiniMax-M3', 'MiniMax-M2.7-highspeed')
   //   - globalThis.fetch mocked to return settings with defaultModel: 'MiniMax-M3'
@@ -151,9 +151,9 @@ describe('ModelStatusButton TUI picker (extended)', () => {
     // Override sessions to have 3 entries: two with M3, one with M2.7-highspeed.
     useAgentStore.setState({
       sessions: [
-        { transcriptId: 's-1', title: 'a', updatedAt: 3, model: 'MiniMax-M3' },
-        { transcriptId: 's-2', title: 'b', updatedAt: 2, model: 'MiniMax-M3' },
-        { transcriptId: 's-3', title: 'c', updatedAt: 1, model: 'MiniMax-M2.7-highspeed' },
+        { sessionId: 's-1', title: 'a', updatedAt: 3, model: 'MiniMax-M3' },
+        { sessionId: 's-2', title: 'b', updatedAt: 2, model: 'MiniMax-M3' },
+        { sessionId: 's-3', title: 'c', updatedAt: 1, model: 'MiniMax-M2.7-highspeed' },
       ],
     })
     render(<ModelStatusButton />)

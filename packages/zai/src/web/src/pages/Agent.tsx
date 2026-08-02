@@ -308,11 +308,11 @@ export default function Agent() {
                   style={{ display: "flex", flexDirection: "column", gap: 2 }}
                 >
                   {visibleSessions.map((s) => {
-                    const active = s.transcriptId === sessionId;
-                    const hovered = s.transcriptId === hoveredSessionId;
+                    const active = s.sessionId === sessionId;
+                    const hovered = s.sessionId === hoveredSessionId;
                     return (
                       <div
-                        key={s.transcriptId}
+                        key={s.sessionId}
                         style={{
                           position: "relative",
                           cursor: "pointer",
@@ -323,19 +323,19 @@ export default function Agent() {
                             : "transparent",
                         }}
                         onMouseEnter={() => {
-                          setHoveredSessionId(s.transcriptId);
+                          setHoveredSessionId(s.sessionId);
                           // hover 任何会话项都重置 10s 倒计时,避免
                           // 用户正在浏览列表时被自动收回.
                           sessionPanel.schedule();
                         }}
                         onMouseLeave={() =>
                           setHoveredSessionId((cur) =>
-                            cur === s.transcriptId ? null : cur,
+                            cur === s.sessionId ? null : cur,
                           )
                         }
                         onClick={() => {
-                          setCurrentSession(s.transcriptId);
-                          loadTranscript(s.transcriptId);
+                          setCurrentSession(s.sessionId);
+                          loadTranscript(s.sessionId);
                           // 切会话也重置 10s 倒计时.
                           sessionPanel.schedule();
                         }}
@@ -361,7 +361,7 @@ export default function Agent() {
                           okText="删除"
                           cancelText="取消"
                           okButtonProps={{ danger: true }}
-                          onConfirm={() => void deleteSession(s.transcriptId)}
+                          onConfirm={() => void deleteSession(s.sessionId)}
                         >
                           <Button
                             type="text"

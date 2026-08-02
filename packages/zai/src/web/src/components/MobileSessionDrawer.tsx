@@ -48,20 +48,20 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
       )}
       <div style={{ display: 'flex', flexDirection: 'column' }}>
         {sessions.map((s) => {
-          const active = s.transcriptId === sessionId
+          const active = s.sessionId === sessionId
           return (
             <div
-              key={s.transcriptId}
+              key={s.sessionId}
               role="button"
               tabIndex={0}
-              onClick={() => handlePick(s.transcriptId)}
+              onClick={() => handlePick(s.sessionId)}
               onKeyDown={(e) => {
                 if (e.key === 'Enter' || e.key === ' ') {
                   e.preventDefault()
-                  handlePick(s.transcriptId)
+                  handlePick(s.sessionId)
                 }
               }}
-              data-testid={`mobile-session-item-${s.transcriptId}`}
+              data-testid={`mobile-session-item-${s.sessionId}`}
               style={{
                 padding: '12px 16px',
                 cursor: 'pointer',
@@ -95,7 +95,7 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
                 okButtonProps={{ danger: true }}
                 onConfirm={(e) => {
                   e?.stopPropagation()
-                  void deleteSession(s.transcriptId)
+                  void deleteSession(s.sessionId)
                 }}
                 onCancel={(e) => e?.stopPropagation()}
               >

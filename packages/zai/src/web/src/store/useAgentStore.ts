@@ -176,7 +176,7 @@ export type CompactionToast = {
 interface AgentState {
   sessionId: string | null
   sessions: Array<{
-    transcriptId: string
+    sessionId: string
     title?: string
     updatedAt: number
     /** Resolved model name (from transcript.meta.model). 'unknown' or absent = not set. */
@@ -832,13 +832,13 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // 优先使用 URL ?sid=... 指定的会话, 让刷新/分享链接能落到对应会话上.
         // URL 不带 / 带但 sid 不存在(已删除/换机) → 回退到首条, 并清掉 URL
         // 里的 sid, 避免下次刷新又卡在已死的 sid 上.
-        const target = requested && sessions.some((s: { transcriptId: string }) => s.transcriptId === requested)
-          ? sessions.find((s: { transcriptId: string }) => s.transcriptId === requested)
+        const target = requested && sessions.some((s) => s.sessionId === requested)
+          ? sessions.find((s) => s.sessionId === requested)
           : undefined
         if (requested && !target) clearUrlSid()
         const picked = target ?? sessions[0]
-        set({ sessionId: picked.transcriptId })
-        await get().loadTranscript(picked.transcriptId)
+        set({ sessionId: picked.sessionId })
+        await get().loadTranscript(picked.sessionId)
       }
     } catch {
       // ignore — list load is best-effort
@@ -967,12 +967,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       return
     }
     const s = get()
-    const remaining = s.sessions.filter((x) => x.transcriptId !== sessionId)
+    const remaining = s.sessions.filter((x) => x.sessionId !== sessionId)
     set({ sessions: remaining })
     // 删掉的是当前会话时, 切到剩余里最新的一条; 没有则回到空白新会话.
     if (s.sessionId === sessionId) {
       if (remaining.length > 0) {
-        const nextSid = remaining[0].transcriptId
+        const nextSid = remaining[0].sessionId
         set({ sessionId: nextSid })
         // 同步 URL: 避免 URL 还指着已删除的 sid, 下次刷新卡死.
         writeUrlSid(nextSid)
@@ -989,7 +989,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // Optimistic local update so the badge switches immediately.
     set({
       sessions: prev.map((x) =>
-        x.transcriptId === sid ? { ...x, model } : x,
+        x.sessionId === sid ? { ...x, model } : x,
       ),
     })
     try {
@@ -1012,7 +1012,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // Optimistic local update so the badge switches immediately.
     set({
       sessions: prev.map((x) =>
-        x.transcriptId === sid ? { ...x, permissionMode: mode } : x,
+        x.sessionId === sid ? { ...x, permissionMode: mode } : x,
       ),
     })
     try {
@@ -1416,27 +1416,27 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     const sid = event.sessionId
     switch (event.type) {
       case 'session.created': {
-        // state.sessions 实际是 Array<{ transcriptId, title?, updatedAt }>
-        // (loadSessions 从 /api/agent/sessions 拿到的就是数组, sidebar 用
-        // s.transcriptId 渲染). 老代码当 Record 处理, sessions[sid] 完全
+        // state.sessions 是 Array<{ sessionId, title?, updatedAt }>, 由
+        // loadSessions 从 /api/agent/sessions (server 返回 sessionId 字段) 拉来,
+        // sidebar 用 s.sessionId 渲染. 老代码当 Record 处理, sessions[sid] 完全
         // 不工作, 静默吞掉 server 来的 session.created. 改成 unshift 进数组.
-        const list = state.sessions as Array<{ transcriptId: string; title?: string; updatedAt: number; permissionMode?: PermissionMode }>
-        if (list.some((x) => x.transcriptId === sid)) return state
+        const list = state.sessions as Array<{ sessionId: string; title?: string; updatedAt: number; permissionMode?: PermissionMode }>
+        if (list.some((x) => x.sessionId === sid)) return state
         return {
           ...state,
-          sessions: [{ transcriptId: sid, title: event.title, updatedAt: Date.now() }, ...list],
+          sessions: [{ sessionId: sid, title: event.title, updatedAt: Date.now() }, ...list],
         }
       }
       case 'session.deleted': {
-        const list = state.sessions as Array<{ transcriptId: string; title?: string; updatedAt: number; permissionMode?: PermissionMode }>
-        return { ...state, sessions: list.filter((x) => x.transcriptId !== sid) }
+        const list = state.sessions as Array<{ sessionId: string; title?: string; updatedAt: number; permissionMode?: PermissionMode }>
+        return { ...state, sessions: list.filter((x) => x.sessionId !== sid) }
       }
       case 'session.renamed': {
         // 跟 session.created 同样的根因: 老代码 sessions[sid] 在 Array 上
         // 永远 undefined, case 静默早退, server SSE 来的 session.renamed
-        // 被丢掉 — 这就是"刷新页面才生效"的根因. 改成按 transcriptId 查找.
-        const list = state.sessions as Array<{ transcriptId: string; title?: string; updatedAt: number }>
-        const idx = list.findIndex((x) => x.transcriptId === sid)
+        // 被丢掉 — 这就是"刷新页面才生效"的根因. 改成按 sessionId 查找.
+        const list = state.sessions as Array<{ sessionId: string; title?: string; updatedAt: number }>
+        const idx = list.findIndex((x) => x.sessionId === sid)
         if (idx === -1) return state
         const next = list.slice()
         next[idx] = { ...list[idx], title: event.title }

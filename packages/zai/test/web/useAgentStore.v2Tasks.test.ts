@@ -38,8 +38,8 @@ beforeEach(() => {
   useAgentStore.setState({
     sessionId: 'sess-A',
     sessions: [
-      { transcriptId: 'sess-A', updatedAt: 1 },
-      { transcriptId: 'sess-B', updatedAt: 2 },
+      { sessionId: 'sess-A', updatedAt: 1 },
+      { sessionId: 'sess-B', updatedAt: 2 },
     ],
     messages: [],
     textSegmentRev: 0,

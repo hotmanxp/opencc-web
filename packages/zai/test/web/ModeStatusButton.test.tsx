@@ -11,7 +11,7 @@ beforeEach(() => {
     sessionId: 'sess-1',
     activeSessionId: 'sess-1',
     sessions: [{
-      transcriptId: 'sess-1',
+      sessionId: 'sess-1',
       title: 'test',
       updatedAt: 1,
       cwd: '/x',
