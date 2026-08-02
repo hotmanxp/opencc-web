@@ -425,6 +425,92 @@ export async function* translateRuntimeEvents(
         } as any
         break;
       }
+      // Vendor's `defaultQuery` yields these event types when
+      // `engine.submitMessage` (vendor's full tool loop) is the
+      // runtime path. The runtime used to bypass vendor's
+      // defaultQuery and yield raw SDK events (`message_start` /
+      // `content_block_*` / `message_stop`); now that vendor's
+      // built-in callModel is the default, the translator needs
+      // to also handle the Message shape the vendor emits.
+      case "assistant": {
+        const msg = (ev as { message?: { content?: unknown } }).message
+        const blocks = Array.isArray(msg?.content) ? (msg!.content as Array<Record<string, unknown>>) : []
+        // First assistant event in a turn = turn-start.
+        yield { type: 'runtime.started', sessionId, turnIndex }
+        for (const block of blocks) {
+          if (block?.type === 'text' && typeof block.text === 'string' && block.text) {
+            yield { type: 'runtime.delta', sessionId, turnIndex, delta: block.text }
+          } else if (block?.type === 'thinking' && typeof block.thinking === 'string' && block.thinking) {
+            yield { type: 'runtime.thinking', sessionId, turnIndex, thinking: block.thinking }
+          } else if (block?.type === 'tool_use' && typeof block.id === 'string') {
+            yield {
+              type: 'runtime.tool_call',
+              sessionId,
+              turnIndex,
+              toolUseId: block.id,
+              toolName: typeof block.name === 'string' ? block.name : 'unknown',
+              input: block.input,
+            }
+          }
+        }
+        // NOTE: do NOT emit `runtime.done` here. Vendor may yield
+        // multiple `assistant` events per turn (e.g. one for
+        // thinking, one for text, or one per tool_use block in a
+        // tool loop). `runtime.done` is reserved for the `result`
+        // case below; the route's `for await` breaks on
+        // `runtime.done`, so emitting it eagerly would tear the
+        // route down before the actual final response.
+        break
+      }
+      case "user": {
+        // Vendor's tool loop yields a `user` Message per tool_result
+        // after executing each tool.
+        const msg = (ev as { message?: { content?: unknown } }).message
+        const blocks = Array.isArray(msg?.content) ? (msg!.content as Array<Record<string, unknown>>) : []
+        for (const block of blocks) {
+          if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string') {
+            const output =
+              typeof block.content === 'string'
+                ? block.content
+                : Array.isArray(block.content)
+                  ? (block.content as Array<Record<string, unknown>>)
+                      .map((c) => (typeof c?.text === 'string' ? c.text : JSON.stringify(c)))
+                      .join('')
+                  : ''
+            yield {
+              type: 'runtime.tool_result',
+              sessionId,
+              turnIndex,
+              toolUseId: block.tool_use_id,
+              toolName: '',
+              input: undefined,
+              output,
+            }
+          }
+        }
+        break
+      }
+      case "result": {
+        const r = ev as { is_error?: boolean }
+        if (r.is_error) {
+          yield {
+            type: 'runtime.error',
+            sessionId,
+            turnIndex,
+            error: {
+              category: 'internal',
+              message: 'vendor defaultQuery reported an error',
+              recoverable: false,
+            },
+          } as any
+        }
+        if (!sawMessageStop) {
+          sawMessageStop = true
+          yield { type: 'runtime.done', sessionId, turnIndex }
+          turnIndex++
+        }
+        break
+      }
       // Ignore content_block_start by itself (we handle it above for tool_use)
       default:
         break;
