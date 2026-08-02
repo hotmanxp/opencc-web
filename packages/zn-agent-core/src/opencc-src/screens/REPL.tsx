@@ -766,7 +766,7 @@ export function REPL({
 
   // Note: standaloneAgentContext is initialized in main.tsx (via initialState) or
   // ResumeConversation.tsx (via setAppState before rendering REPL) to avoid
-  // useEffect-based state initialization on mount (per CLAUDE.md guidelines)
+  // useEffect-based state initialization on mount (per AGENTS.md guidelines)
 
   // Local state for commands (hot-reloadable when skill files change)
   const [localCommands, setLocalCommands] = useState(initialCommands);
@@ -2153,8 +2153,8 @@ export function REPL({
   // before onQuery builds its own context, and discovery on turn N must
   // still attribute a SkillTool call on turn N+k. Cleared in clearConversation.
   const discoveredSkillNamesRef = useRef(new Set<string>());
-  // Session-level dedup for nested_memory CLAUDE.md attachments.
-  // readFileState is a 100-entry LRU; once it evicts a CLAUDE.md path,
+  // Session-level dedup for nested_memory AGENTS.md attachments.
+  // readFileState is a 100-entry LRU; once it evicts a AGENTS.md path,
   // the next discovery cycle re-injects it. Cleared in clearConversation.
   const loadedNestedMemoryPathsRef = useRef(new Set<string>());
 
@@ -4148,13 +4148,13 @@ export function REPL({
     // bottom right corner of the screen if the API key is invalid.
     void reverify();
 
-    // Populate readFileState with CLAUDE.md files at startup
+    // Populate readFileState with AGENTS.md files at startup
     const memoryFiles = await getMemoryFiles();
     if (memoryFiles.length > 0) {
       const fileList = memoryFiles.map(f => `  [${f.type}] ${f.path} (${f.content.length} chars)${f.parent ? ` (included by ${f.parent})` : ''}`).join('\n');
-      logForDebugging(`Loaded ${memoryFiles.length} CLAUDE.md/rules files:\n${fileList}`);
+      logForDebugging(`Loaded ${memoryFiles.length} AGENTS.md/rules files:\n${fileList}`);
     } else {
-      logForDebugging('No CLAUDE.md/rules files found');
+      logForDebugging('No AGENTS.md/rules files found');
     }
     for (const file of memoryFiles) {
       // When the injected content doesn't match disk (stripped HTML comments,
