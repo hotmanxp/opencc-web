@@ -103,7 +103,24 @@ export async function createHeadlessContextImpl(
   const dataDir = options.dataDir
   const runtimeId = options.runtimeId
   const clientType = options.clientType ?? 'zai-server'
-  const permissionMode = options.permissionMode ?? 'default'
+  // zai-server runs as a local dev tool with no per-prompt
+  // approval UI; we default to `bypassPermissions` so the model
+  // can call Bash / Read / Edit / Write / Glob / Grep / etc.
+  // directly. Vendor's `hasPermissionsToUseTool` returns
+  // `{behavior: 'allow'}` immediately when this mode is set
+  // (utils/permissions/permissions.ts:1270-1283), subject to:
+  // - the bypassPermissionsKillswitch (Statsig gate
+  //   `shouldDisableBypassPermissions` flips it off if the org's
+  //   policy requires user approval; runs once at boot)
+  // - content-specific ask rules from `tool.checkPermissions`
+  //   (e.g. an explicit `Bash(npm publish:*)` ask rule is
+  //   respected even in bypass mode, per permissions.ts:1240-1252)
+  // - path safety checks (.git/, .claude/, .vscode/, shell
+  //   configs — these still prompt, per permissions.ts:1254-1262)
+  // Callers that need stricter per-tool rules can pass
+  // `permissionMode: 'default'` and write `allow` / `deny` rules
+  // in their `toolPermissionContext` themselves.
+  const permissionMode = options.permissionMode ?? 'bypassPermissions'
   const connectMcp = options.connectMcp ?? true
 
   // Step 1: macro stub — required before any vendor module eval that
@@ -139,9 +156,21 @@ export async function createHeadlessContextImpl(
   // default then wrap in createAppStateStore — the brief mandates
   // "AppState 不加载 Ink", and the store surface is plain
   // { getState, setState, subscribe } (no React/Ink).
+  //
+  // `isBypassPermissionsModeAvailable: true` is required for
+  // vendor's bypass path to fire — `getEmptyToolPermissionContext`
+  // defaults it to false. Without this flag,
+  // `hasPermissionsToUseToolInner` (`permissions.ts:1270-1283`)
+  // returns `behavior: 'allow'` ONLY when mode is
+  // `bypassPermissions`; setting mode alone isn't enough. Pair
+  // with the bypassPermissionsKillswitch in
+  // `utils/permissions/bypassPermissionsKillswitch.ts:19-47` which
+  // can disable bypass at boot if the org's policy requires user
+  // approval.
   const permissionContext = {
     ...getEmptyToolPermissionContext(),
     mode: permissionMode,
+    isBypassPermissionsModeAvailable: true,
   }
   const initialState = getDefaultAppState()
   const appState = createAppStateStore({
