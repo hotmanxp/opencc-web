@@ -86,6 +86,35 @@ export async function createOpenccRuntimeImpl(options) {
         if (input.abortSignal.aborted) abortController.abort(input.abortSignal.reason)
         else input.abortSignal.addEventListener('abort', () => abortController.abort(input.abortSignal.reason), { once: true })
       }
+      // When zai provides a custom `callModel` (e.g. its raw
+      // fetch-based `createAnthropicModelCaller`), bypass
+      // `engine.submitMessage` entirely. The vendored
+      // `defaultQuery → for await (const message of deps.callModel(...))`
+      // collapses zai's raw SDK events
+      // (`message_start` / `content_block_delta` / ...) into a
+      // single `runtime.done` because its switch statement
+      // expects the vendor `Message` shape (assistant with full
+      // `message.content` populated), not raw streaming events.
+      // Going directly through `options.callModel` keeps the
+      // stream shape; `eventFor` wraps each event with our
+      // sessionId + eventId + ts + turnIndex metadata; the zai
+      // routes' `translateRuntimeEvents` already handles the
+      // raw Anthropic event shape (message_start,
+      // content_block_delta, etc).
+      if (options.callModel) {
+        const zaiStream = options.callModel({
+          messages: [{ type: 'user', message: { role: 'user', content: input.prompt } }],
+          systemPrompt: '',
+          thinkingConfig: { type: 'disabled' },
+          tools: [],
+          signal: input.abortSignal,
+          options: { model: input.model },
+        } as any)
+        for await (const value of zaiStream) {
+          yield eventFor(input.sessionId, value)
+        }
+        return
+      }
       const stream = engine.submitMessage(input.prompt, { uuid: input.sessionId, model: input.model })
       for await (const value of stream) {
         yield eventFor(input.sessionId, value)
