@@ -19,8 +19,16 @@
  *   tree-shaking reliably.
  */
 
-import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
-import { dirname, join } from 'node:path'
+import { createHash } from 'node:crypto'
+import {
+  existsSync,
+  mkdirSync,
+  readdirSync,
+  readFileSync,
+  statSync,
+  writeFileSync,
+} from 'node:fs'
+import { dirname, join, relative, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as esbuild from 'esbuild'
 import ts from 'typescript'
@@ -28,12 +36,75 @@ import ts from 'typescript'
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
 const SRC_ENTRY = join(ROOT, 'src', 'opencc-src', 'query.ts')
+const SRC_ROOT = join(ROOT, 'src', 'opencc-src')
 const OUT_DIR = join(ROOT, 'dist')
 const OUT_FILE = join(OUT_DIR, 'opencc-core.mjs')
+// Stamp file holding the input hash for the last successful bundle.
+// When the input hash matches and OUT_FILE exists, skip the esbuild
+// call entirely (saves ~11s on warm builds).
+const STAMP_FILE = join(OUT_DIR, '.bundle-opencc.stamp')
 
 if (!existsSync(SRC_ENTRY)) {
   console.error(`[bundle-opencc] missing entry: ${SRC_ENTRY}`)
   process.exit(1)
+}
+
+// ── Input fingerprint cache ──────────────────────────────────────
+// esbuild bundles the transitive graph from `SRC_ENTRY`. We can't
+// know the exact input set without running esbuild, so we use a
+// conservative fingerprint over every .ts/.tsx under `src/opencc-src/`.
+// Mtime+size is enough — file content changes show up as mtime or
+// size deltas; mtime is preserved on `cp` (which is what `git
+// checkout` ultimately does), and on most editors. The hash includes
+// the relative path so a renamed file also invalidates the cache.
+function walkTs(root: string): string[] {
+  const out: string[] = []
+  const stack = [root]
+  while (stack.length) {
+    const dir = stack.pop()!
+    for (const entry of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, entry.name)
+      if (entry.isDirectory()) {
+        if (entry.name === 'node_modules' || entry.name.startsWith('.')) continue
+        stack.push(full)
+      } else if (entry.isFile() && /\.[cm]?tsx?$/.test(entry.name)) {
+        out.push(full)
+      }
+    }
+  }
+  out.sort()
+  return out
+}
+
+function inputHash(): string {
+  const h = createHash('sha1')
+  for (const file of walkTs(SRC_ROOT)) {
+    const rel = relative(ROOT, file).split(sep).join('/')
+    const st = statSync(file)
+    h.update(`${rel}\0${st.mtimeMs}\0${st.size}\n`)
+  }
+  // Bump this string when the bundle recipe (FEATURE_FLAGS, configCheckPatchRe,
+  // featureCallRe, plugins, externals) changes so old stamps are
+  // treated as stale.
+  h.update('recipe:v1\n')
+  return h.digest('hex').slice(0, 16)
+}
+
+if (existsSync(STAMP_FILE) && existsSync(OUT_FILE)) {
+  let cached = ''
+  try {
+    cached = readFileSync(STAMP_FILE, 'utf8').trim()
+  } catch {
+    cached = ''
+  }
+  if (cached === inputHash()) {
+    console.log(`[bundle-opencc] cached (input hash ${cached}) — skipping esbuild`)
+    // Skip directly to the end — the second esbuild call below is for
+    // the single-file type/const subpath exports, but those read the
+    // already-emitted bundle and don't depend on the bundle's content
+    // shape, so a content-hash match is sufficient to skip both.
+    process.exit(0)
+  }
 }
 
 // ── Feature-flag plugin ─────────────────────────────────────────────
@@ -765,4 +836,13 @@ await esbuild.build({
   treeShaking: true,
 })
 console.log(`[bundle-opencc] runtime: ${RUNTIME_OUT}`)
+
+// ── Persist input fingerprint stamp ──────────────────────────────
+// Write the input hash after all esbuild calls succeed so the next
+// build can short-circuit via the cache check at the top of this
+// file. We compute the hash once and reuse it (avoid the second
+// walkTs() pass on the same build).
+if (!existsSync(OUT_DIR)) mkdirSync(OUT_DIR, { recursive: true })
+writeFileSync(STAMP_FILE, `${inputHash()}\n`)
+console.log(`[bundle-opencc] stamp: ${STAMP_FILE} (${inputHash()})`)
 
