@@ -20,11 +20,22 @@ interface StartOptions {
    * `ZAI_NO_MANAGED=1` to opt out for tests or single-shot runs).
    */
   managed?: boolean;
+  /**
+   * Set when the supervisor re-invokes `zai start --managed-child` to run
+   * the actual server. A managed child must NOT re-enter the supervisor —
+   * doing so recursively spawns a new supervisor on every generation and
+   * the node process tree grows unboundedly until the machine runs out of
+   * memory. commander maps `--managed-child` to this field, not `managed`.
+   */
+  managedChild?: boolean;
 }
 
 export async function runStart(options: StartOptions): Promise<void> {
   const managed =
-    options.managed ?? process.env.ZAI_NO_MANAGED !== '1';
+    options.managed ??
+    (options.managedChild === true
+      ? false
+      : process.env.ZAI_NO_MANAGED !== '1');
 
   if (managed) {
     const { runSupervisor } = await import('./supervisor.js');
