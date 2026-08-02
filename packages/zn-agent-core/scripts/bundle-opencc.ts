@@ -605,43 +605,54 @@ console.log(`[bundle-opencc] session-facade impl: ${SESSION_FACADE_IMPL_OUT}`)
 // `createRequire(import.meta.url)` to load
 // `../../opencc-src/services/api/compressToolHistory.js` as a graceful
 // fallback (the require is wrapped in try/catch so a missing file
-// only logs a debug warning, never crashes boot). The vendored
-// compressToolHistory.ts pulls in 5+ vendored helpers (autoCompact,
-// microCompact, toolResultStorage, config, ...) that aren't separately
-// emitted to dist; a full `bundle: true` of those helpers would
-// produce an 18 MB single-file blob that drags React 19 + JSX + the
-// whole opencc-src vendor tree into a hot path that ONLY runs in
-// the transcript-repair edge case (and the 5/189 transcript-repair
-// tests are pre-existing baseline failures per AGENTS.md).
+// only logs a debug warning, never crashes boot). We ship the real
+// vendored `compressToolHistory.ts` so the dynamic require resolves
+// at runtime. Without this entry the zai-server boot path logs
+//   `[transcript] compressToolHistory load failed error: Cannot find
+//    module '../../opencc-src/services/api/compressToolHistory.js'`
+// on every /api/agent/prompt call, polluting the request log with
+// 1.8 KB of stack frames per request.
 //
-// The pre-existing fallback contract is: if the require fails,
-// `compressToolHistory` is undefined and the helper degrades to
-// passthrough. We honor that contract by emitting a tiny stub that
-// re-exports `compressToolHistory` as the identity function
-// (no compression). This is functionally equivalent to the load
-// failure path — both end up with no compression applied — but
-// satisfies the dynamic require so the 1.8 KB stack-frame warning
-// goes away from every /api/agent/prompt log.
+// `bundle: true` because compressToolHistory.ts transitively
+// imports 4+ vendored helpers (autoCompact + microCompact +
+// toolResultStorage + config) that aren't separately emitted to
+// dist. The transitive import graph from these helpers reaches
+// into the full opencc-src vendor tree (bootstrap/state,
+// SessionMemory, forkedAgent, ...), and `bundle: false` would
+// require emitting every transitively-reachable file (hundreds of
+// files) before the require can resolve at runtime. The 18 MB
+// single-file bundle is the cost of keeping the full real
+// implementation. We accept the size in exchange for the dynamic
+// require resolving at runtime.
+const COMPRESS_TOOL_HISTORY_ENTRY = join(ROOT, 'src', 'opencc-src', 'services', 'api', 'compressToolHistory.ts')
 const COMPRESS_TOOL_HISTORY_OUT = join(ROOT, 'dist', 'opencc-src', 'services', 'api', 'compressToolHistory.js')
-mkdirSync(dirname(COMPRESS_TOOL_HISTORY_OUT), { recursive: true })
-writeFileSync(
-  COMPRESS_TOOL_HISTORY_OUT,
-  `// Stub emitted by bundle-opencc.ts — see comment in the script.
-// The runtime loads this file via createRequire(import.meta.url) from
-// compat/transcript/persistence.ts. The vendored source file in
-// src/opencc-src/services/api/compressToolHistory.ts is a full
-// implementation; we emit a passthrough stub here so the dynamic
-// require resolves without dragging 18 MB of vendored tree into
-// dist. compressToolHistory is only consulted by the transcript-repair
-// helpers, and the pre-existing fallback contract is "if undefined,
-// passthrough" — this stub exports the identity function which is
-// behaviorally equivalent to the fallback path.
-export function compressToolHistory(messages) {
-  return messages
-}
-`,
-  'utf8',
-)
+
+await esbuild.build({
+  entryPoints: [COMPRESS_TOOL_HISTORY_ENTRY],
+  bundle: true,
+  format: 'esm',
+  outfile: COMPRESS_TOOL_HISTORY_OUT,
+  platform: 'node',
+  target: 'node22',
+  sourcemap: true,
+  minify: false,
+  logLevel: 'warning',
+  banner: {
+    js:
+      "import { createRequire as __createRequire } from 'node:module';\n" +
+      "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
+      "const require = __createRequire(import.meta.url);\n",
+  },
+  plugins: [featureFlagPlugin, optionalStubPlugin],
+  external: [
+    'sharp', 'google-auth-library', '@vscode/ripgrep',
+    '@orama/orama', '@orama/plugin-data-persistence',
+    'web-tree-shaker', 'tree-sitter-wasms',
+    'turndown', '@ant/claude-for-chrome-mcp',
+    'zod', 'zod/v3', 'zod/v4', 'zod/v4-mini', 'fflate',
+  ],
+  treeShaking: true,
+})
 console.log(`[bundle-opencc] compress-tool-history: ${COMPRESS_TOOL_HISTORY_OUT}`)
 
 // Mechanically emit declaration files for the server module via tsc.
