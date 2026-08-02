@@ -52,24 +52,36 @@ router.use('/agent', commandsRouter)
 // abortController。
 const HARD_TIMEOUT_MS = 2 * 60 * 60 * 1000;
 
+// Image content block: 对齐 Anthropic SDK Base64ImageSource.
+// 收紧要点:
+// - type / source.type 必须是字面量 ('image' / 'base64'), 拒绝未知字面量与 url 源
+//   (zai 当前只走 base64, url 留待后续加 ImageUrlSource 路径再开)
+// - media_type 必须是 Anthropic 接受的 4 个 enum, 拒绝 image/svg+xml 等
+// - data: 至少 1 字符, 避免空 data 进入上游触发 "unknown format (2013)"
+const ImageBlock = z.object({
+  type: z.literal("image"),
+  source: z.object({
+    type: z.literal("base64"),
+    media_type: z.enum([
+      "image/jpeg",
+      "image/png",
+      "image/gif",
+      "image/webp",
+    ]),
+    data: z.string().min(1),
+  }),
+})
+
+const TextBlock = z.object({
+  type: z.literal("text"),
+  text: z.string().min(1),
+})
+
 const PromptRequest = z
   .object({
     prompt: z.string().max(32_000).optional(),
     contentBlocks: z
-      .array(
-        z
-          .object({
-            type: z.string(),
-            source: z
-              .object({
-                type: z.enum(["base64", "url"]),
-                media_type: z.string(),
-                data: z.string(),
-              })
-              .passthrough(),
-          })
-          .passthrough(),
-      )
+      .array(z.discriminatedUnion("type", [ImageBlock, TextBlock]))
       .max(10)
       .optional(),
     cwd: z.string().optional(),
@@ -79,7 +91,39 @@ const PromptRequest = z
   .refine(
     (v) => Boolean(v.prompt?.trim()) || Boolean(v.contentBlocks?.length),
     { message: "prompt or contentBlocks required" },
-  );
+  )
+
+/**
+ * 验证 image 块 base64 解码后的 magic bytes 与声明的 media_type 一致.
+ * 上游 api.minimaxi.com/anthropic 在 mismatch 时返回
+ * `invalid image content: decode image config: image: unknown format (2013)`,
+ * 这里在 zai 边缘先拦, 给出可读错误而不是让请求打到 proxy 才被 400 退回.
+ * 只检 magic 不做完整解析: 误报罕见, 性能成本低.
+ */
+const IMAGE_MAGIC: Record<string, { offset: number; bytes: number[] }[]> = {
+  "image/png": [
+    { offset: 0, bytes: [0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a] },
+  ],
+  "image/jpeg": [{ offset: 0, bytes: [0xff, 0xd8, 0xff] }],
+  // "GIF8" 4 字节同时覆盖 GIF87a (0x37 0x61) 与 GIF89a (0x39 0x61)
+  "image/gif": [{ offset: 0, bytes: [0x47, 0x49, 0x46, 0x38] }],
+  "image/webp": [
+    { offset: 0, bytes: [0x52, 0x49, 0x46, 0x46] }, // "RIFF"
+    { offset: 8, bytes: [0x57, 0x45, 0x42, 0x50] }, // "WEBP"
+  ],
+}
+
+function assertImageMagicMatches(buf: Buffer, mediaType: string): boolean {
+  const checks = IMAGE_MAGIC[mediaType]
+  if (!checks) return false
+  return checks.every(({ offset, bytes }) => {
+    if (buf.length < offset + bytes.length) return false
+    for (let i = 0; i < bytes.length; i++) {
+      if (buf[offset + i] !== bytes[i]) return false
+    }
+    return true
+  })
+}
 
 // 关键: 格式必须与 zai-agent-core queryEngine.ts:25 一致 (sess-<uuid>),
 // 否则 server 返回的 sessionId 与 runtime 写出的 transcript 文件名不匹配,
@@ -463,6 +507,21 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   }
 
   const { prompt, contentBlocks, sessionId: existingSessionId, permissionMode: requestedPermissionMode } = parsed.data
+  // image 块 magic bytes 预检: 在进 runtime / 上 proxy 前拒掉 mismatched
+  // media_type, 避免上游 "unknown format (2013)" 400 打到 client 难以诊断.
+  if (contentBlocks) {
+    for (const block of contentBlocks) {
+      if (block.type === "image") {
+        const buf = Buffer.from(block.source.data, "base64")
+        if (!assertImageMagicMatches(buf, block.source.media_type)) {
+          return res.status(400).json({
+            error: "image_format_mismatch",
+            detail: `图片格式与声明的 media_type "${block.source.media_type}" 不一致，请检查上传的文件`,
+          })
+        }
+      }
+    }
+  }
   const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
   const cwd = ctx.cwd
   const sessionId = existingSessionId ?? newSessionId()

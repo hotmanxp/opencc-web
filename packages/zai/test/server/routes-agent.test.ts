@@ -1,4 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { Buffer } from 'node:buffer'
 import request from 'supertest'
 import express from 'express'
 import agentRouter from '../../src/server/routes/agent.js'
@@ -125,6 +126,186 @@ describe('POST /api/agent/prompt', () => {
       .send({ prompt: 'hello', permissionMode: 'unknown_mode', contentBlocks: [] })
     expect(res.status).toBe(400)
     expect(res.body.error).toBe('invalid permissionMode')
+  })
+})
+
+// 真实 image content blocks 走 Anthropic 协议: schema 收紧 + server-side
+// magic bytes 预检. 上游 api.minimaxi.com/anthropic 在 image 数据 magic 与
+// 声明 media_type 不一致时返回 400 "invalid image content: decode image
+// config: image: unknown format (2013)" — 我们在 zai 边缘先校验, 避免请求
+// 上到 proxy 才被打回. 这些 case 在 production 之前就要被 400 拦下.
+describe('POST /api/agent/prompt with image contentBlocks', () => {
+  // PNG 头 8 字节: 89 50 4E 47 0D 0A 1A 0A
+  const PNG_DATA = Buffer.concat([
+    Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]),
+    Buffer.from('IHDR extra payload bytes'),
+  ]).toString('base64')
+  // JPEG SOI 3 字节
+  const JPEG_DATA = Buffer.concat([
+    Buffer.from([0xff, 0xd8, 0xff]),
+    Buffer.from('e0 JFIF payload'),
+  ]).toString('base64')
+  // GIF8 头 4 字节, 同时覆盖 GIF87a (0x3761) 和 GIF89a (0x3961)
+  const GIF_DATA = Buffer.concat([
+    Buffer.from('GIF87a'),
+    Buffer.from(' rest of gif data'),
+  ]).toString('base64')
+  // WEBP: RIFF (offset 0) + 4 字节大小 + WEBP (offset 8)
+  const WEBP_DATA = Buffer.concat([
+    Buffer.from('RIFF'),
+    Buffer.from([0x1a, 0x00, 0x00, 0x00]),
+    Buffer.from('WEBP'),
+    Buffer.from('VP8 payload'),
+  ]).toString('base64')
+  // 纯文本, 不是有效 image — magic 必不匹配
+  const TEXT_DATA = Buffer.from('hello world this is plain text', 'utf-8').toString('base64')
+
+  it('accepts a valid PNG image block', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        prompt: '看看这张图',
+        contentBlocks: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG_DATA } },
+        ],
+      })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('sessionId')
+  })
+
+  it('accepts a valid JPEG image block', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: JPEG_DATA } },
+        ],
+      })
+    expect(res.status).toBe(200)
+  })
+
+  it('accepts a valid GIF image block', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/gif', data: GIF_DATA } },
+        ],
+      })
+    expect(res.status).toBe(200)
+  })
+
+  it('accepts a valid WEBP image block', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/webp', data: WEBP_DATA } },
+        ],
+      })
+    expect(res.status).toBe(200)
+  })
+
+  it('rejects image block with empty data field', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: '' } },
+        ],
+      })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects image block with magic bytes not matching media_type (PNG data declared as image/jpeg)', async () => {
+    // PNG_DATA 真实是 PNG 字节, 但声明 media_type=image/jpeg → magic 预检失败
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/jpeg', data: PNG_DATA } },
+        ],
+      })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe('image_format_mismatch')
+    expect(res.body.detail).toContain('image/jpeg')
+  })
+
+  it('rejects image block with plain text data declared as image/png', async () => {
+    // TEXT_DATA 是 base64("hello world ..."), 不以 PNG 头开头
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: TEXT_DATA } },
+        ],
+      })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toBe('image_format_mismatch')
+  })
+
+  it('rejects image block with unknown media_type (image/svg+xml)', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/svg+xml', data: PNG_DATA } },
+        ],
+      })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects image block with source.type=url (only base64 supported)', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [
+          { type: 'image', source: { type: 'url', media_type: 'image/png', data: 'https://example.com/img.png' } },
+        ],
+      })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects block with unknown type literal (e.g. type=video)', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [
+          { type: 'video', source: { type: 'base64', media_type: 'video/mp4', data: 'xxxx' } },
+        ],
+      })
+    expect(res.status).toBe(400)
+  })
+
+  it('rejects text block missing text field', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [{ type: 'text' }],
+      })
+    expect(res.status).toBe(400)
+  })
+
+  it('accepts text-only contentBlocks', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [{ type: 'text', text: 'hi' }],
+      })
+    expect(res.status).toBe(200)
+    expect(res.body).toHaveProperty('sessionId')
+  })
+
+  it('accepts mixed image+text contentBlocks', async () => {
+    const res = await request(app)
+      .post('/api/agent/prompt')
+      .send({
+        contentBlocks: [
+          { type: 'image', source: { type: 'base64', media_type: 'image/png', data: PNG_DATA } },
+          { type: 'text', text: '描述一下' },
+        ],
+      })
+    expect(res.status).toBe(200)
   })
 })
 
