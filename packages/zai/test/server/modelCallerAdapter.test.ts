@@ -151,4 +151,42 @@ describe('wrapZaiModelCallerAsCallModel — zai-ModelCaller <-> vendor callModel
       { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
     ])
   })
+
+  it('filters out empty messages (role undefined or content empty)', async () => {
+    // Sessions can accumulate a synthetic placeholder entry like
+    // `{ type, message: undefined, ... }` from a previous-turn
+    // assistant stub that never received a body. Sending these to
+    // upstream trips Anthropic's parser with "input json is empty"
+    // 2013 — the empty `{ role: undefined, content: undefined }`
+    // is indistinguishable from a literal empty body once
+    // serialized. The adapter drops these at the boundary.
+    let capturedReq: any = null
+    const zaiCaller = makeFakeZaiModelCaller({
+      events: [{ type: 'message_stop' }],
+      onCall: (req) => { capturedReq = req },
+    })
+    const wrapped = wrapZaiModelCallerAsCallModel(zaiCaller)
+
+    for await (const _ of wrapped({
+      messages: [
+        { type: 'user', message: { role: 'user', content: 'hi' }, uuid: 'u1' },
+        // Both role and content undefined (placeholder stub)
+        { type: 'assistant', message: undefined, uuid: 'a1' },
+        // Role set but content empty string
+        { type: 'user', message: { role: 'user', content: '' }, uuid: 'u2' },
+        // Normal assistant message
+        { type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'ok' }] }, uuid: 'a2' },
+      ],
+      systemPrompt: '',
+      thinkingConfig: { type: 'disabled' },
+      tools: [],
+      signal: new AbortController().signal,
+      options: { model: 'MiniMax-M3' },
+    } as any)) { /* drain */ }
+
+    expect(capturedReq.messages).toEqual([
+      { role: 'user', content: 'hi' },
+      { role: 'assistant', content: [{ type: 'text', text: 'ok' }] },
+    ])
+  })
 })

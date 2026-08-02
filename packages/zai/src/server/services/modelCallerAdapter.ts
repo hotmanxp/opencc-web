@@ -81,10 +81,21 @@ export function wrapZaiModelCallerAsCallModel(
     // undefined }` and Anthropic would 400 with "input json is empty"
     // (2013). Lift the inner `m.message.{role, content}` here so the zai
     // adapter downstream sees the right shape.
-    const sdkMessages = req.messages.map((m: any) => ({
-      role: m.message?.role ?? m.role,
-      content: m.message?.content ?? m.content,
-    }))
+    //
+    // Drop empty messages: a session can have a synthetic
+    // placeholder entry with `{ type, message: { role: undefined,
+    // content: undefined }, ... }` (e.g. a previous-turn assistant
+    // stub that never received a body). Sending these to upstream
+    // trips Anthropic's parser with the same "input json is empty"
+    // 2013 — the empty `{ role: undefined, content: undefined }` is
+    // indistinguishable from a literal empty body once serialized.
+    // We filter at the adapter boundary so all callers benefit.
+    const sdkMessages = req.messages
+      .map((m: any) => ({
+        role: m.message?.role ?? m.role,
+        content: m.message?.content ?? m.content,
+      }))
+      .filter((m: any) => m.role && m.content !== undefined && m.content !== null && m.content !== '')
     yield* modelCaller({
       model: String(model),
       systemPrompt: req.systemPrompt as any,
