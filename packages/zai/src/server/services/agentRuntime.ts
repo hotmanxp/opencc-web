@@ -71,6 +71,59 @@ const approveRegistry = new ApproveRegistry()
 // gives the bridge a synchronous side-channel to reach the SSE.
 ;(globalThis as any).__zaiEventBus = eventBus
 
+// zai patch: AskUserQuestion bridge context — static parts injected
+// once at init. The zai-native AskUserQuestion wrapper
+// (compat/tools/opencc/AskUserQuestionTool.ts) reads
+// globalThis.__zaiBridgeCtx at CALL time for sessionId / askRegistry /
+// onYield; the per-query sessionId is merged in by
+// createOpenccRuntime-impl.query() (opencc-src/server). onYield
+// translates the tool's `tool_use:ask_pending` into a `prompt.ask`
+// ServerEvent — the only shape the Web frontend consumes (see
+// useEventStream.ts dispatch) — and pushes it through __zaiEventBus,
+// because the query stream's for-await is itself blocked on the
+// tool's await while it waits for the user's answer.
+;(globalThis as any).__zaiBridgeCtx = {
+  askRegistry,
+  onYield: bridgeAskPendingToPromptAsk,
+}
+
+/**
+ * Translate an AskUserQuestion `tool_use:ask_pending` yield into a
+ * `prompt.ask` ServerEvent on the SSE bus. The wrapper emits
+ * `tool_use:ask_pending` (its own event vocabulary); the Web frontend
+ * only consumes `prompt.ask` (useEventStream.ts dispatch), so the
+ * bridge must translate. Extracted as a standalone export so the
+ * translation contract can be unit-tested without booting the full
+ * runtime (~5s).
+ */
+export function bridgeAskPendingToPromptAsk(
+  event:
+    | {
+        type?: string
+        id?: string
+        toolUseId?: string
+        questions?: unknown[]
+        metadata?: { source?: string }
+      }
+    | undefined,
+): void {
+  if (!event || event.type !== 'tool_use:ask_pending') return
+  const bus = (globalThis as any).__zaiEventBus as
+    | { emit: (e: unknown) => void }
+    | undefined
+  if (!bus) return
+  const bridge = ((globalThis as any).__zaiBridgeCtx ?? {}) as {
+    sessionId?: string
+  }
+  bus.emit({
+    type: 'prompt.ask',
+    sessionId: bridge.sessionId ?? '',
+    toolUseId: event.id ?? event.toolUseId ?? '',
+    questions: event.questions ?? [],
+    ...(event.metadata ? { metadata: event.metadata } : {}),
+  })
+}
+
 // Per-session AbortController registry. The HTTP layer (POST /api/agent/abort)
 // looks up the in-flight controller for a sessionId and calls .abort() to
 // signal the running queryLoop. The queryLoop is responsible for

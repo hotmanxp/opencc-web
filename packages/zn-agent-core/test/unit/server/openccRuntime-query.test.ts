@@ -79,6 +79,52 @@ describe('createOpenccRuntime', { timeout: 30_000 }, () => {
     void drained
   })
 
+  it('query() injects sessionId into __zaiBridgeCtx for the AskUserQuestion bridge', async () => {
+    // The zai-native AskUserQuestion wrapper reads
+    // globalThis.__zaiBridgeCtx at call time; the per-query sessionId
+    // is merged in by query() (static askRegistry/onYield are set by
+    // zai-server). Regression guard: without this injection the
+    // wrapper's askUserQuestionCall falls into its stub branch and the
+    // Web UI QuestionCard never receives tool_use:ask_pending.
+    const saved = (globalThis as any).__zaiBridgeCtx
+    const r = await runtime()
+    const input = {
+      sessionId: 'session-bridge-1',
+      prompt: 'hello',
+      cwd: process.cwd(),
+    }
+    const stream = r.query(input)
+    const first = stream.next()
+    // The bridgeCtx assignment runs synchronously in the generator body
+    // before the first await on engine.submitMessage; one microtask
+    // turn lets the body start executing.
+    await Promise.resolve()
+    expect((globalThis as any).__zaiBridgeCtx?.sessionId).toBe(
+      'session-bridge-1',
+    )
+    // Tear down: abort + drain so the generator's finally restores the
+    // global (no stale sessionId leaks into later queries).
+    await r.abort()
+    try {
+      await first
+    } catch {
+      // abort may surface as a throw on the pending yield — acceptable
+    }
+    try {
+      for await (const _event of stream) {
+        // drain
+      }
+    } catch {
+      // same
+    }
+    await r.shutdown()
+    if (saved === undefined) {
+      expect((globalThis as any).__zaiBridgeCtx).toBeUndefined()
+    } else {
+      expect((globalThis as any).__zaiBridgeCtx).toBe(saved)
+    }
+  })
+
   it('delegates session CRUD to the session facade and makes shutdown idempotent', async () => {
     const r = await runtime()
     // The runtime owns the session facade internally. Exercise the

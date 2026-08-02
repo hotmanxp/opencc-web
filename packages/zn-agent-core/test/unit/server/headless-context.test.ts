@@ -198,6 +198,45 @@ describe('createHeadlessContext — vendor headless bootstrap (Task 2)', () => {
     ).toBeUndefined()
   })
 
+  it('AskUserQuestion is the zai-native wrapper, not the TUI-bound vendor tool', async () => {
+    const ctx = await createHeadlessContext({
+      cwd: cwdA,
+      dataDir,
+      runtimeId: 'rt-test-ask-wrapper',
+    })
+
+    const tool = (ctx.tools ?? []).find(
+      (t: { name: string }) => t.name === 'AskUserQuestion',
+    )
+    expect(tool, 'AskUserQuestion tool must be registered').toBeDefined()
+
+    // Regression guard for the "Agent 调用了 AskUserQuestion 但 UI 不弹框"
+    // bug: the vendor TUI tool's checkPermissions returns
+    // `{behavior:'ask'}` + requiresUserInteraction()=true, so
+    // permissions.ts step 1e keeps the decision 'ask' even in
+    // bypassPermissions mode and the headless server (no TUI) can
+    // never answer — its `call()` returns empty answers and never
+    // emits `tool_use:ask_pending`. The zai wrapper's checkPermissions
+    // always allows, so the call flows into the AskRegistry + prompt.ask
+    // path that drives the Web UI QuestionCard.
+    const perm = await (tool as any).checkPermissions({
+      questions: [
+        {
+          question: 'q?',
+          header: 'h',
+          options: [{ label: 'a' }, { label: 'b' }],
+        },
+      ],
+    })
+    expect(perm?.behavior).toBe('allow')
+
+    // The wrapper also exposes interruptBehavior() = 'block' (vendor
+    // TUI tool does not) — belt-and-suspenders identity check so a
+    // future sync that swaps the wrapper back to the vendor tool
+    // fails this test with an actionable message.
+    expect(typeof (tool as any).interruptBehavior).toBe('function')
+  })
+
   it('skips MCP bootstrap when connectMcp is false', async () => {
     const ctx = await createHeadlessContext({
       cwd: cwdA,

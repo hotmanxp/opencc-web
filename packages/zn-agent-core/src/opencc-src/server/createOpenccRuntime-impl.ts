@@ -63,15 +63,32 @@ export async function createOpenccRuntimeImpl(options) {
         if (input.abortSignal.aborted) abortController.abort(input.abortSignal.reason)
         else input.abortSignal.addEventListener('abort', () => abortController.abort(input.abortSignal.reason), { once: true })
       }
-      // Delegate to vendor's full `defaultQuery` agent loop. The
-      // engine's deps.callModel defaults to vendor's
-      // `queryModelWithStreaming`, which yields the vendor
-      // Message shape (`{type: 'assistant' | 'user' | 'result' |
-      // ...}`) — that is the shape `defaultQuery`'s tool loop
-      // (streamingToolExecutor) consumes.
-      const stream = engine.submitMessage(input.prompt, { uuid: input.sessionId, model: input.model })
-      for await (const value of stream) {
-        yield eventFor(input.sessionId, value)
+      // zai patch: per-query bridge ctx. The zai-native AskUserQuestion
+      // wrapper (compat/tools/opencc/AskUserQuestionTool.ts) reads
+      // globalThis.__zaiBridgeCtx at CALL time for sessionId /
+      // askRegistry / onYield. The static parts (askRegistry / onYield)
+      // are set once by zai-server's initAgentRuntime; sessionId varies
+      // per query, so we merge it here and restore on exit so a stale
+      // sessionId never leaks into a later query.
+      const prevBridge = (globalThis as any).__zaiBridgeCtx
+      ;(globalThis as any).__zaiBridgeCtx = {
+        ...(prevBridge ?? {}),
+        sessionId: input.sessionId,
+      }
+      try {
+        // Delegate to vendor's full `defaultQuery` agent loop. The
+        // engine's deps.callModel defaults to vendor's
+        // `queryModelWithStreaming`, which yields the vendor
+        // Message shape (`{type: 'assistant' | 'user' | 'result' |
+        // ...}`) — that is the shape `defaultQuery`'s tool loop
+        // (streamingToolExecutor) consumes.
+        const stream = engine.submitMessage(input.prompt, { uuid: input.sessionId, model: input.model })
+        for await (const value of stream) {
+          yield eventFor(input.sessionId, value)
+        }
+      } finally {
+        if (prevBridge === undefined) delete (globalThis as any).__zaiBridgeCtx
+        else (globalThis as any).__zaiBridgeCtx = prevBridge
       }
     },
     async abort() {

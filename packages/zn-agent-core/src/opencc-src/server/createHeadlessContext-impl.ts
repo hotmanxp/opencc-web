@@ -37,6 +37,7 @@ import type { CreateHeadlessContextOptions, HeadlessContext } from './createHead
 import type { CanUseToolFn } from '../Tool.js'
 import type { Tools } from '../tools.js'
 import { installMacroStub } from '../../compat/openccInit.js'
+import { wrapAskUserQuestionToolAsOpencc } from '../../compat/tools/opencc/AskUserQuestionTool.js'
 import { getMcpToolsCommandsAndResources } from '../services/mcp/client.js'
 import { captureHooksConfigSnapshot } from '../utils/hooks/hooksConfigSnapshot.js'
 import { SandboxManager } from '../utils/sandbox/sandbox-adapter.js'
@@ -180,6 +181,27 @@ export async function createHeadlessContextImpl(
 
   // Step 8: built-in tool registry.
   const tools: Tools = getTools(permissionContext as any)
+
+  // zai patch: replace vendor's TUI-bound AskUserQuestion with the
+  // zai-native wrapper. The vendor tool assumes an in-process
+  // interactive prompt — its checkPermissions returns `behavior:'ask'`
+  // and requiresUserInteraction() is true, so permissions.ts step 1e
+  // (permissions.ts:1232-1238) keeps the decision 'ask' even in
+  // bypassPermissions mode, and there's no TUI in the headless server
+  // to answer it. Its `call()` returns empty answers and never emits
+  // `tool_use:ask_pending`, so the Web UI QuestionCard never renders.
+  // The wrapper (wrapAskUserQuestionToolAsOpencc) reads
+  // __zaiBridgeCtx at call time (sessionId / askRegistry / onYield —
+  // injected by zai-server's initAgentRuntime + createOpenccRuntime-
+  // impl.query) and drives the server's AskRegistry + POST
+  // /api/agent/answer flow, letting the frontend render the question
+  // card and POST answers back.
+  const askUserQuestionIdx = tools.findIndex(
+    (t) => (t as Tool).name === 'AskUserQuestion',
+  )
+  if (askUserQuestionIdx >= 0) {
+    tools[askUserQuestionIdx] = wrapAskUserQuestionToolAsOpencc() as unknown as Tool
+  }
 
   // Step 9: MCP. Best-effort — empty arrays on failure so the
   // headless context still boots without MCP servers. When

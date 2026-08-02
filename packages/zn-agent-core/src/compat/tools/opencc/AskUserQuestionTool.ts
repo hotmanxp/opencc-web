@@ -1,5 +1,6 @@
 import { wrapAsOpenccTool } from '../../runtime/openccToolWrap.js'
 import { askUserQuestionTool } from '../../tools/index.js'
+import { z as z4 } from 'zod/v4'
 
 export interface AskUserQuestionBridgeContext {
   sessionId?: string
@@ -21,6 +22,50 @@ export interface AskUserQuestionBridgeContext {
  * (matching SkillTool.ts's pattern) keeps the cached wrapper correct
  * across concurrent sessions.
  */
+// opencc's `toolToAPISchema` (utils/api.ts:210) converts a tool's
+// inputSchema with `zodToJsonSchema` (utils/zodToJsonSchema.ts), which
+// imports `toJSONSchema` from `zod/v4` and reads `schema._zod.def`. The
+// zai-native `askUserQuestionTool.inputSchema` is built with the
+// workspace's zod v3 (`compat/tools/index.ts`), whose instances have no
+// `_zod` property — every API request with the wrapped tool crashed with
+// "undefined is not an object (evaluating 'schema._zod.def')". The vendor
+// tools all use `zod/v4` (137 files in opencc-src). So the wrapper
+// exposes a zod-v4 input schema mirroring the same fields, while the
+// tool's `call` path still parses through the zai-native v3 schema
+// (makeTool's safeParse) — the two never disagree because the model
+// emits the vendor schema shape and the v3 parse is lenient (z.object).
+//
+// Loose z4.object (not strictObject): the vendor tool declares extra
+// fields (e.g. option.preview) that this mirror may lag on; strict mode
+// would reject the model's input and break the call.
+const AskUserQuestionInputV4 = z4.object({
+  questions: z4
+    .array(
+      z4.object({
+        question: z4.string(),
+        header: z4.string(),
+        options: z4
+          .array(
+            z4.object({
+              label: z4.string(),
+              description: z4.string().optional(),
+              preview: z4.string().optional(),
+            }),
+          )
+          .min(2)
+          .max(4),
+        multiSelect: z4.boolean().optional(),
+      }),
+    )
+    .min(1)
+    .max(4),
+  metadata: z4
+    .object({
+      source: z4.string().optional(),
+    })
+    .optional(),
+})
+
 export function wrapAskUserQuestionToolAsOpencc(): unknown {
   const wrapped = wrapAsOpenccTool(askUserQuestionTool as any, {
     transformCtx: (openccCtx: any) => {
@@ -35,6 +80,9 @@ export function wrapAskUserQuestionToolAsOpencc(): unknown {
     },
   }) as any
   wrapped.name = 'AskUserQuestion'
+  // opencc converts `tool.inputSchema` with zod/v4's toJSONSchema — see
+  // the module-level comment for why the v3 zai-native schema would crash.
+  wrapped.inputSchema = AskUserQuestionInputV4
   // Tell opencc this tool needs user input — opencc will pause the loop.
   wrapped.requiresUserInteraction = () => true
   // Don't cancel on new user message — wait for current question to resolve.
