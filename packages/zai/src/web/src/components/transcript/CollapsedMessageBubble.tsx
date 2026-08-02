@@ -168,6 +168,37 @@ export function CollapsedMessageBubble({
     )
   }
 
+  // runtime.error (SSE 流水线 push 进来的顶层错误事件). expanded 视图 (MessageBubble.tsx:935)
+  // 渲染成红色 Card + Text type="danger"; collapsed 视图历史上落到下面 "兜底: 未知文本类型"
+  // 分支, 错误信息会和普通用户消息混在一起, 用户反馈 "错误信息不见了". 这里补一条
+  // 红色 Card + "错误: " 前缀的紧凑展示, 与 expanded 视觉对齐 (同为 Card + danger 色),
+  // 不使用 text-clamp — 错误信息通常很短, clamp 反而把 stack trace 截断.
+  if (t === 'runtime.error') {
+    const err = (m.error as { category?: string; message?: string } | string | undefined) ?? undefined
+    const message = typeof err === 'string'
+      ? err
+      : err?.message || '发生未知错误'
+    const category = typeof err === 'object' && err !== null ? err.category : undefined
+    return (
+      <div style={{ marginBottom: 8 }}>
+        <Card
+          size="small"
+          style={{
+            background: 'var(--bg-card)',
+            borderColor: 'var(--accent-end)',
+            borderRadius: 12,
+          }}
+        >
+          <Text type="danger" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+            <strong>错误: </strong>
+            {message}
+            {category ? ` (${category})` : ''}
+          </Text>
+        </Card>
+      </div>
+    )
+  }
+
   // 兜底: 未知文本类型 — 纯文本 + clamp, 至少不丢内容
   const text = (m.text as string) ?? (m.content as string) ?? ''
   return (
