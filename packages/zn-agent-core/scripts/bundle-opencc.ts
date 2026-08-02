@@ -19,7 +19,7 @@
  *   tree-shaking reliably.
  */
 
-import { existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs'
 import { dirname, join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as esbuild from 'esbuild'
@@ -432,3 +432,337 @@ await esbuild.build({
 }
 
 console.log(`[bundle-opencc] permissions: ${PERMISSIONS_OUT}`)
+
+// ── OpenCC server runtime seam (Task 1) ────────────────────────────
+//
+// `src/opencc-src/server/index.ts` re-exports the public types +
+// `createOpenccRuntime` factory. It's a thin module — no React, no
+// JSX, no opencc vendor coupling — so it compiles cleanly with
+// `bundle: false` (single-file esbuild) and lands at
+// `dist/opencc-src/server/index.js`. The package's `./opencc-server`
+// export subpath points at that file (see package.json).
+//
+// Declarations (`*.d.ts`) are mechanically emitted by `tsc -p
+// tsconfig.server.json` below, NOT written by hand. Hand-written d.ts
+// drifts from the source the moment someone extends
+// `OpenccRuntimeOptions` or adds methods to `OpenccRuntime`. The
+// dedicated tsconfig:
+//   * includes only the server module + the (vendor-tree-excluded)
+//     `compat/` types the module imports from;
+//   * excludes the opencc vendor tree (`src/opencc-src/**` except
+//     `server/`) so the emit doesn't drag React/JSX/opentelemetry/
+//     lodash-es into the dist;
+//   * uses `emitDeclarationOnly: true` + a tmp outDir — we only
+//     need the two `dist/opencc-src/server/*.d.ts` files, the rest
+//     of the tmp output is discarded.
+//
+// Without a d.ts, downstream TypeScript consumers of
+// `@zn-ai/zn-agent-core/opencc-server` fall back to `any` for every
+// type — which defeats the seam's purpose (locking the contract so
+// callers and implementations agree).
+const SERVER_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'index.ts')
+const SERVER_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'index.js')
+const SERVER_TSCONFIG = join(ROOT, 'tsconfig.server.json')
+const SERVER_TYPES_TMP = join(ROOT, 'dist', '.server-types-tmp')
+const SERVER_DIST_DIR = join(ROOT, 'dist', 'opencc-src', 'server')
+
+// `createHeadlessContext.ts` is the public-surface re-export module
+// (Task 2). The runtime body lives in `createHeadlessContext-impl.ts`
+// (also emitted). `bundle: false` matches the index.ts path — single-
+// file esbuild for each entry, no transitive bundling — so the d.ts
+// emit (`tsc -p tsconfig.server.json`) and the JS emit stay in sync.
+// `@ts-nocheck` on the impl file keeps tsc's transitive-vendor-error
+// noise out of the build's exit code; runtime contract is locked by
+// vitest (`test/unit/server/headless-context.test.ts`).
+const HEADLESS_CONTEXT_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'createHeadlessContext.ts')
+const HEADLESS_CONTEXT_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createHeadlessContext.js')
+const HEADLESS_CONTEXT_IMPL_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'createHeadlessContext-impl.ts')
+const HEADLESS_CONTEXT_IMPL_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createHeadlessContext-impl.js')
+
+// `sessionFacade.ts` is the public-surface re-export module for
+// Task 3 (server session/transcript lifecycle). Same thin/impl split
+// as `createHeadlessContext`. The impl file (`sessionFacade-impl.ts`)
+// is bundled separately because it pulls in vendored
+// `sessionStoragePortable.ts` whose compiled .js doesn't ship as a
+// separate file in dist/ (same situation as createHeadlessContext-impl).
+const SESSION_FACADE_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'sessionFacade.ts')
+const SESSION_FACADE_IMPL_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'sessionFacade-impl.ts')
+const SESSION_FACADE_IMPL_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'sessionFacade-impl.js')
+
+await esbuild.build({
+  entryPoints: [SERVER_ENTRY, HEADLESS_CONTEXT_ENTRY, SESSION_FACADE_ENTRY],
+  bundle: false,
+  format: 'esm',
+  outdir: SERVER_DIST_DIR,
+  platform: 'node',
+  target: 'node22',
+  // Per-entry outfile naming: esbuild's `outdir` mode derives the
+  // output filename from each entry's basename. We want:
+  //   src/opencc-src/server/index.ts                    → dist/opencc-src/server/index.js
+  //   src/opencc-src/server/createHeadlessContext.ts    → dist/opencc-src/server/createHeadlessContext.js
+  // `entryNames` defaults to `[dir]/[name]-[hash]`; we override to
+  // `[name]` (no hash) so the d.ts copy logic below can match `.d.ts`
+  // files to their `.js` siblings by basename.
+  entryNames: '[name]',
+})
+
+// The impl file (`createHeadlessContext-impl.ts`) reaches into many
+// vendored opencc-src modules whose compiled .js files are NOT in
+// `dist/` (only `opencc-core.mjs` is bundled; the rest of the
+// vendored tree is consumed in-process under vitest's alias map, not
+// shipped as separate files). For the published `opencc-server`
+// subpath to resolve its imports at runtime, the impl file must be
+// a SINGLE-FILE bundle with all transitive deps inlined — same
+// pattern as `opencc-core.mjs` for the runtime.
+//
+// `bundle: true` makes esbuild walk the import graph and inline.
+// Plugins mirror the opencc-core bundle (`featureFlagPlugin` +
+// `optionalStubPlugin`) so the same ant-only / stripped-dir fallbacks
+// apply. Externals are kept narrow — only npm deps that are also in
+// the published package's deps (so Node resolves at runtime).
+await esbuild.build({
+  entryPoints: [HEADLESS_CONTEXT_IMPL_ENTRY],
+  bundle: true,
+  format: 'esm',
+  outfile: HEADLESS_CONTEXT_IMPL_OUT,
+  platform: 'node',
+  target: 'node22',
+  sourcemap: true,
+  minify: false,
+  logLevel: 'warning',
+  banner: {
+    js:
+      "import { createRequire as __createRequire } from 'node:module';\n" +
+      "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
+      "const require = __createRequire(import.meta.url);\n",
+  },
+  plugins: [featureFlagPlugin, optionalStubPlugin],
+  // Keep external — Node resolves at runtime via package deps.
+  external: [
+    'sharp',
+    'google-auth-library',
+    '@vscode/ripgrep',
+    '@orama/orama',
+    '@orama/plugin-data-persistence',
+    'web-tree-shaker',
+    'tree-sitter-wasms',
+    'turndown',
+    '@ant/claude-for-chrome-mcp',
+    'zod',
+    'zod/v3',
+    'zod/v4',
+    'zod/v4-mini',
+    'fflate',
+  ],
+  treeShaking: true,
+})
+console.log(`[bundle-opencc] headless-context impl: ${HEADLESS_CONTEXT_IMPL_OUT}`)
+
+// `sessionFacade-impl.ts` reaches into vendored
+// `sessionStoragePortable.ts` (sanitizePath + readTranscriptForLoad).
+// Same situation as `createHeadlessContext-impl.ts` above — the
+// vendored tree is consumed in-process under vitest's alias map, not
+// shipped as separate files. The impl is bundled as a single file
+// for the published `opencc-server` subpath to resolve at runtime.
+await esbuild.build({
+  entryPoints: [SESSION_FACADE_IMPL_ENTRY],
+  bundle: true,
+  format: 'esm',
+  outfile: SESSION_FACADE_IMPL_OUT,
+  platform: 'node',
+  target: 'node22',
+  sourcemap: true,
+  minify: false,
+  logLevel: 'warning',
+  banner: {
+    js:
+      "import { createRequire as __createRequire } from 'node:module';\n" +
+      "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
+      "const require = __createRequire(import.meta.url);\n",
+  },
+  plugins: [featureFlagPlugin, optionalStubPlugin],
+  external: [
+    'sharp',
+    'google-auth-library',
+    '@vscode/ripgrep',
+    '@orama/orama',
+    '@orama/plugin-data-persistence',
+    'web-tree-shaker',
+    'tree-sitter-wasms',
+    'turndown',
+    '@ant/claude-for-chrome-mcp',
+    'zod',
+    'zod/v3',
+    'zod/v4',
+    'zod/v4-mini',
+    'fflate',
+  ],
+  treeShaking: true,
+})
+console.log(`[bundle-opencc] session-facade impl: ${SESSION_FACADE_IMPL_OUT}`)
+
+// `compat/transcript/persistence.ts` does a runtime
+// `createRequire(import.meta.url)` to load
+// `../../opencc-src/services/api/compressToolHistory.js` as a graceful
+// fallback (the require is wrapped in try/catch so a missing file
+// only logs a debug warning, never crashes boot). We ship the real
+// vendored `compressToolHistory.ts` so the dynamic require resolves
+// at runtime. Without this entry the zai-server boot path logs
+//   `[transcript] compressToolHistory load failed error: Cannot find
+//    module '../../opencc-src/services/api/compressToolHistory.js'`
+// on every /api/agent/prompt call, polluting the request log with
+// 1.8 KB of stack frames per request.
+//
+// `bundle: true` because compressToolHistory.ts transitively
+// imports 4+ vendored helpers (autoCompact + microCompact +
+// toolResultStorage + config) that aren't separately emitted to
+// dist. The transitive import graph from these helpers reaches
+// into the full opencc-src vendor tree (bootstrap/state,
+// SessionMemory, forkedAgent, ...), and `bundle: false` would
+// require emitting every transitively-reachable file (hundreds of
+// files) before the require can resolve at runtime. The 18 MB
+// single-file bundle is the cost of keeping the full real
+// implementation. We accept the size in exchange for the dynamic
+// require resolving at runtime.
+const COMPRESS_TOOL_HISTORY_ENTRY = join(ROOT, 'src', 'opencc-src', 'services', 'api', 'compressToolHistory.ts')
+const COMPRESS_TOOL_HISTORY_OUT = join(ROOT, 'dist', 'opencc-src', 'services', 'api', 'compressToolHistory.js')
+
+await esbuild.build({
+  entryPoints: [COMPRESS_TOOL_HISTORY_ENTRY],
+  bundle: true,
+  format: 'esm',
+  outfile: COMPRESS_TOOL_HISTORY_OUT,
+  platform: 'node',
+  target: 'node22',
+  sourcemap: true,
+  minify: false,
+  logLevel: 'warning',
+  banner: {
+    js:
+      "import { createRequire as __createRequire } from 'node:module';\n" +
+      "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
+      "const require = __createRequire(import.meta.url);\n",
+  },
+  plugins: [featureFlagPlugin, optionalStubPlugin],
+  external: [
+    'sharp', 'google-auth-library', '@vscode/ripgrep',
+    '@orama/orama', '@orama/plugin-data-persistence',
+    'web-tree-shaker', 'tree-sitter-wasms',
+    'turndown', '@ant/claude-for-chrome-mcp',
+    'zod', 'zod/v3', 'zod/v4', 'zod/v4-mini', 'fflate',
+  ],
+  treeShaking: true,
+})
+console.log(`[bundle-opencc] compress-tool-history: ${COMPRESS_TOOL_HISTORY_OUT}`)
+
+// Mechanically emit declaration files for the server module via tsc.
+// `noEmit` requires the tsc program to typecheck; we point outDir at
+// a tmp dir, run the emit, then copy only the server d.ts files into
+// the real dist/opencc-src/server/ location (the compat/ and other
+// dependency d.ts the emit also produces are already produced by
+// `tsc -b` in the main build, so we discard the duplicates).
+{
+  // Ensure a clean tmp dir.
+  if (existsSync(SERVER_TYPES_TMP)) {
+    const { rmSync } = await import('node:fs')
+    rmSync(SERVER_TYPES_TMP, { recursive: true, force: true })
+  }
+
+  const { spawnSync } = await import('node:child_process')
+  const tsBin = join(ROOT, 'node_modules', 'typescript', 'bin', 'tsc')
+  const proc = spawnSync(process.execPath, [tsBin, '-p', SERVER_TSCONFIG], {
+    cwd: ROOT,
+    stdio: ['inherit', 'pipe', 'pipe'],
+  })
+  if (proc.status !== 0) {
+    // tsc may report errors in vendored transitive files (the opencc-src
+    // tree has known vendor-type drift that doesn't affect our server
+    // public surface). The server emit contract is "the two required
+    // d.ts files exist" — we sanity-check that below. tsc emits
+    // declaration files for the include files regardless of errors in
+    // transitive dependencies (default `noEmitOnError: false`), so the
+    // d.ts we need are written before this branch fires.
+    //
+    // We log stderr/stdout for visibility but do NOT bail — Task 2's
+    // `createHeadlessContext.ts` reaches into many vendored files whose
+    // isolated tsc surface is not portable. The runtime contract is
+    // enforced by vitest (test/unit/server/headless-context.test.ts),
+    // not by `tsc -p tsconfig.server.json`.
+    if (proc.stderr) {
+      process.stderr.write(
+        '[bundle-opencc] note: tsc -p tsconfig.server.json reported errors in vendored transitive files;\n' +
+          '[bundle-opencc]       relying on the emit + required-d.ts sanity check below. stderr:\n',
+      )
+      process.stderr.write(proc.stderr)
+    }
+  }
+  if (proc.stdout) process.stdout.write(proc.stdout)
+
+  // Copy the two server d.ts files from the tmp emit into the real
+  // dist location. The other emitted files (compat/*, etc.) are
+  // produced by the main `tsc -b` pass — discarding the duplicates
+  // keeps the dist layout consistent with the rest of the build.
+  const { copyFileSync, mkdirSync, readdirSync, statSync } = await import('node:fs')
+  mkdirSync(SERVER_DIST_DIR, { recursive: true })
+  const tmpServerDir = join(SERVER_TYPES_TMP, 'opencc-src', 'server')
+  for (const name of readdirSync(tmpServerDir)) {
+    if (!name.endsWith('.d.ts')) continue
+    copyFileSync(join(tmpServerDir, name), join(SERVER_DIST_DIR, name))
+    console.log(`[bundle-opencc]   → ${join(SERVER_DIST_DIR, name)}`)
+  }
+  // Sanity check: the emit must have produced both .d.ts files the
+  // brief mandates. If a future task renames or drops one, fail fast
+  // here so the build doesn't silently produce an empty dist.
+  for (const required of ['index.d.ts', 'serverTypes.d.ts']) {
+    const p = join(SERVER_DIST_DIR, required)
+    if (!existsSync(p) || statSync(p).size === 0) {
+      console.error(`[bundle-opencc] missing or empty required declaration: ${p}`)
+      process.exit(1)
+    }
+  }
+}
+
+const RUNTIME_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'createOpenccRuntime.ts')
+const RUNTIME_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createOpenccRuntime.js')
+const RUNTIME_IMPL_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'createOpenccRuntime-impl.ts')
+const RUNTIME_IMPL_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createOpenccRuntime-impl.js')
+
+await esbuild.build({
+  entryPoints: [RUNTIME_ENTRY],
+  bundle: false,
+  format: 'esm',
+  outdir: SERVER_DIST_DIR,
+  platform: 'node',
+  target: 'node22',
+  entryNames: '[name]',
+})
+
+await esbuild.build({
+  entryPoints: [RUNTIME_IMPL_ENTRY],
+  bundle: true,
+  format: 'esm',
+  outfile: RUNTIME_IMPL_OUT,
+  platform: 'node',
+  target: 'node22',
+  sourcemap: true,
+  minify: false,
+  logLevel: 'warning',
+  banner: {
+    js:
+      "import { createRequire as __createRequire } from 'node:module';\n" +
+      "const require = __createRequire(import.meta.url);\n",
+  },
+  plugins: [featureFlagPlugin, optionalStubPlugin],
+  external: [
+    'sharp',
+    'google-auth-library',
+    'zod',
+    'zod/v3',
+    'zod/v4',
+    'zod/v4-mini',
+    'fflate',
+  ],
+  treeShaking: true,
+})
+console.log(`[bundle-opencc] runtime: ${RUNTIME_OUT}`)
+

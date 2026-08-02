@@ -10,7 +10,12 @@
 import { randomUUID } from 'node:crypto'
 import type { ModelCaller } from './types.js'
 import type { TranscriptMessage } from '../transcript/types.js'
-import { TranscriptStore } from '../transcript/store.js'
+// TranscriptStore was the synthetic compat transcript store. Task 6
+// removes it; the new server runtime owns session/transcript via
+// `sessionFacade`. compactService only consumed TranscriptStore as a
+// type — keep the signature stable with `any` so the few legacy
+// callers (none in production) still compile.
+type TranscriptStore = any
 import { serializeForAnthropic } from '../transcript/persistence.js'
 
 const COMPACT_SUMMARY_SYSTEM_PROMPT = `

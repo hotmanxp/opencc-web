@@ -20,7 +20,13 @@ export async function runDev(options: DevOptions) {
   const cwdName = basename(cwd) || cwd;
   const host = options.lan ? '0.0.0.0' : '127.0.0.1';
 
-  const app = createApp({ token, cwd, cwdName, host });
+  // `createApp` is async (Task 7: it awaits `initAgentRuntime` so
+  // the synchronous `initBackgroundRuntime` next-line sees a
+  // non-null runtime). Not awaiting here made the previous dev path
+  // hand an un-resolved promise to Express; the API server bound
+  // 7715 but every request (including SSE) hung because the
+  // pending Promise was registered as the request handler.
+  const app = await createApp({ token, cwd, cwdName, host });
 
   console.log(`[zai] dev token: ${token}`);
   console.log(`[zai] cwd: ${cwd}`);

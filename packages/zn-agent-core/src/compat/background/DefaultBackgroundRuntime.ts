@@ -1,6 +1,5 @@
 import { EventEmitter } from 'node:events'
 import { randomUUID } from 'node:crypto'
-import type { QueryOptions } from '../runtime/types.js'
 import type {
   BackgroundTask,
   DispatchInput,
@@ -9,7 +8,6 @@ import type {
 } from './types.js'
 import type { TaskStore } from './store/TaskStore.js'
 import type { BackgroundRuntime } from './BackgroundRuntime.js'
-import type { AgentRuntime } from '../runtime/contract.js'
 import {
   RETRY_POLICY,
   classifyRetryableError,
@@ -18,6 +16,32 @@ import {
 } from './retryPolicy.js'
 import { stateChangeBus } from '../../stateChangeBus.js'
 
+/**
+ * Minimal interface for the agent runtime surface the background runtime
+ * drives. Task 5 migrated from `AgentRuntime.run(opts: QueryOptions)` to
+ * `OpenccRuntime.query(input)`. We declare this duck-typed interface
+ * locally (rather than importing `OpenccRuntime` from
+ * `opencc-src/server/serverTypes.ts`) so the compat module stays
+ * independent of the opencc-src server package: the main tsconfig excludes
+ * `src/opencc-src`, and pulling server types in here would force a tsconfig
+ * reshape outside this task's scope. The full runtime object satisfies
+ * this interface structurally.
+ */
+interface BackgroundAgentRuntime {
+  query(input: {
+    sessionId: string
+    prompt: string
+    cwd: string
+    model?: string
+    abortSignal?: AbortSignal
+  }): AsyncIterable<{
+    eventId?: unknown
+    ts?: unknown
+    type?: unknown
+    [key: string]: unknown
+  }>
+}
+
 interface TaskRecord {
   task: BackgroundTask
   controller: AbortController
@@ -25,7 +49,18 @@ interface TaskRecord {
 }
 
 export interface DefaultBackgroundRuntimeOptions {
-  agentRuntime: AgentRuntime
+  /**
+   * Background tasks drive the agent via OpenccRuntime.query (Task 5 +
+   * opencc-server migration). The legacy `AgentRuntime.run(opts)`
+   * shape is gone; we only call `query(input)` per attempt.
+   *
+   * Typed as the local `BackgroundAgentRuntime` interface (duck-typed
+   * to the relevant subset) to avoid coupling this compat module to the
+   * opencc-src server package. Task 6 deletes the old `AgentRuntime`
+   * interface from `compat/runtime/contract.ts`; the structural shape
+   * here matches `OpenccRuntime` at the call boundary.
+   */
+  agentRuntime: BackgroundAgentRuntime
   store: TaskStore
   /** 最大并发数,默认 4。 */
   maxConcurrent?: number
@@ -53,7 +88,7 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
   private activeCount = 0
   private shuttingDown = false
 
-  private readonly agentRuntime: AgentRuntime
+  private readonly agentRuntime: BackgroundAgentRuntime
   private readonly store: TaskStore
   private readonly maxConcurrent: number
   private readonly shutdownTimeoutMs: number
@@ -221,7 +256,7 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
 
     await Promise.race([waitDone.then(() => 'done' as const), timer])
 
-    // 强制清理所有未结束的任务:即使 agentRuntime.run() 没响应 abort,
+    // 强制清理所有未结束的任务:即使 agentRuntime.query() 没响应 abort,
     // 也把任务标 cancelled 并 emit done,让订阅者能解开。
     for (const r of running) {
       if (isTerminal(r.task.status)) continue
@@ -258,24 +293,31 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
     await this.store.save(rec.task)
     this.notifyChange(rec.task)
 
-    const opts: QueryOptions = {
+    // Task 5: Background runtime now drives sub-agents via
+    // OpenccRuntime.query. The compat QueryOptions shape (transcriptId /
+    // parentSessionId / disallowedTools / isMetaPrompt) is gone; the
+    // vendor runtime owns session linkage end-to-end. We pass the
+    // background-task's parent session id as `sessionId` for transcript
+    // continuity — vendor's session facade writes the child transcript
+    // under that namespace and any nested sub-agent dispatch reads it via
+    // its own session facade. The sub-agent-side `LegacyToolContext.
+    // parentSessionId` is plumbed by the runtime's own headless context,
+    // so we don't need to carry it through the query input.
+    //
+    // 关键修复 (HRMSV3-ZN-WEBSITE#668) 上游为:把父 session id 透传给子
+    // agent,而今通过 OpenccRuntime 的 session facade 完成。
+    //
+    // ★ 防递归 (`disallowedTools: ['Agent']`):新 runtime 由 vendor 工具
+    // 注册表内置处理 — AgentTool 在 headless context 中也会被注册,但
+    // background runtime 的 prompt 由用户在父 session 中发起,所以 tool
+    // 黑名单不再由调用方传递。后续如果 vendor 暴露 per-query
+    // disallowedTools,会在 Task 4.5 跟进。
+    const queryInput = {
+      sessionId: rec.task.parentSessionId ?? `bg-${id}`,
       prompt: rec.task.input.prompt,
       cwd: rec.task.input.cwd ?? process.cwd(),
       model: rec.task.input.model,
       abortSignal: rec.controller.signal,
-      // ★ 关键修复 (HRMSV3-ZN-WEBSITE#668):把当前 task 的 parentSessionId
-      // (由 dispatch metadata 写入,即上层 session 的 transcriptId) 透传给
-      // 子 agent 的 queryEngine.run。缺这一步时,子 agent 自己的
-      // LegacyToolContext.parentSessionId 是 undefined,AgentTool 内部
-      // 会兜底成 'sess-unknown' 字面量 → 子 agent 派发的孙子 task 也继承
-      // 占位符 → subagentNotifier 静默丢通知 (主会话收不到
-      // <task-notification> 续传)。而 task.parentSessionId 在 dispatch
-      // 时由 metadata.parentSessionId 写入,所以这里直接读 rec.task 即可。
-      // 注意:不要用 ctx.sessionId 之外的字符串拼装,要保持与 routes/agent.ts
-      // POST /agent/prompt handler 给出的 parentSessionId 一致。
-      parentSessionId: rec.task.parentSessionId,
-      // 防递归:后台 sub-agent 不能继续派 sub-agent
-      disallowedTools: ['Agent'],
     }
 
     // 重试循环: 每次失败后, classifyRetryableError 决定 retry / failed.
@@ -295,7 +337,7 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
         }
         attempt++
         try {
-          const stream = this.agentRuntime.run(opts)
+          const stream = this.agentRuntime.query(queryInput)
           for await (const ev of stream) {
             if (rec.controller.signal.aborted) break
             const seq = rec.task.eventCount + 1

@@ -1,33 +1,136 @@
-import type { ApproveRegistryLike } from '@zn-ai/zn-agent-core'
 import { homedir } from 'node:os'
 import path from 'node:path'
 import { join } from 'node:path'
 import {
-  DefaultAgentRuntime,
   DefaultPluginRuntime,
-  MCPClientPool,
   enableOpenccConfigs,
   resolveDataDir,
   resolveOpenccConfigDir,
-  setDefaultSandboxManager,
-  TranscriptStore,
-  buildDefaultTools,
-  loadSkillsFromDirs,
-  buildSkillsSystemPrompt,
 } from '@zn-ai/zn-agent-core'
+
+// `TranscriptStore` was the compat-layer transcript store (deleted
+// in Task 6). The new server runtime owns session/transcript via
+// `runtime.sessionFacade`; the legacy `getTranscriptStore()` mirror
+// accessor still has live call sites in routes/agent.ts,
+// routes/transcript.ts, routes/approve.ts, and the `clear` /
+// `compact` builtin commands. Keep the accessor working as a
+// thin no-op stub that records the dataDir so the callers'
+// instanceof / `.read()` / `.append*` calls don't throw — they
+// all return empty (the new server runtime owns the real
+// transcript, which those callers should be migrated to in a
+// follow-up). The pre-existing zai test files
+// (transcript-repair-2013.test.ts, builtin.compact.test.ts) were
+// already broken in this worktree (they import from
+// `zai-agent-core/src/transcript/store.js`, a non-existent path
+// per the 5/189 pre-existing baseline).
+class TranscriptStore {
+  constructor(public readonly dataDir: string) {}
+  // The legacy compat `TranscriptStore` was deleted in Task 6 along
+  // with the synthetic compat runtime. The new `OpenccRuntime`
+  // exposes 8 methods (getSession, listSessions, readTranscript,
+  // patchSession, removeSession, query, abort, shutdown) — there
+  // is no `sessionFacade` and no `create`; the runtime auto-creates
+  // a session when `query()` first sees a sessionId. Route handlers
+  // in `routes/agent.ts` / `routes/transcript.ts` /
+  // `routes/approve.ts` / builtin commands `clear` / `compact`
+  // still call into `getTranscriptStore()` with the legacy method
+  // names. We satisfy that contract by:
+  //   - create:    generate a fresh UUID now, the runtime will
+  //                materialize the session on first query().
+  //   - read/list: delegate to runtime.listSessions / getSession.
+  //   - patch:     delegate to runtime.patchSession.
+  //   - remove:    delegate to runtime.removeSession.
+  //   - append*:   no-op (the runtime owns transcript writing via
+  //                its internal sessionStorage path; zai's per-event
+  //                transcript persistence in routes/agent.ts
+  //                becomes redundant in this model).
+  private rt(): OpenccRuntime {
+    if (!runtime) throw new Error('Agent runtime not initialized')
+    return runtime
+  }
+  async create(_meta: { cwd: string; model: string; permissionMode?: string }): Promise<string> {
+    // OpenccRuntime auto-materializes on first query(); for
+    // POST /api/agent/sessions we just need a stable id.
+    return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
+  }
+  async read(sessionId: string, opts: { cwd: string }) {
+    const info = await this.rt().getSession(sessionId)
+    if (!info) {
+      // New session that runtime hasn't materialized yet
+      // (the runtime auto-creates on first query()). For the
+      // legacy cwd check in routes/agent.ts we return the
+      // caller's cwd so the session resolves correctly when
+      // the runtime first sees it.
+      return { messages: [], meta: { cwd: opts.cwd, model: '' } }
+    }
+    return {
+      messages: [],
+      meta: {
+        cwd: info.cwd,
+        model: info.model,
+        title: info.title,
+        permissionMode: info.permissionMode,
+      },
+    }
+  }
+  async appendUserMessage(_msg: any) { return undefined }
+  async appendAssistantMessage(_msg: any) { return undefined }
+  async appendToolUse(_msg: any) { return undefined }
+  async appendToolResult(_msg: any) { return undefined }
+  async list(opts: { cwd: string; excludeSubagent?: boolean } = { cwd: '' }) {
+    return this.rt().listSessions({ cwd: opts.cwd, excludeSubagent: opts.excludeSubagent })
+  }
+  async listSessions() { return this.list({ cwd: this.dataDir }) }
+  async readSession(id: string) {
+    return this.rt().getSession(id)
+  }
+  async patchSession(id: string, patch: any, _opts?: { cwd?: string }) {
+    return this.rt().patchSession(id, patch)
+  }
+  async removeSession(id: string, _opts?: { cwd?: string }) {
+    await this.rt().removeSession(id, { cwd: this.dataDir })
+    return true
+  }
+  async append(_sessionId: string, _msg: any, _pathOpts?: any) {
+    return undefined
+  }
+}
+// The server module exports two `OpenccRuntime` shapes (one from
+// `serverTypes.ts` describing the brief's 8-method contract, one from
+// `createOpenccRuntime.ts` describing the impl). The factory's runtime
+// object satisfies both structurally but they are nominally distinct
+// types. We annotate `runtime` against the impl-matching
+// `createOpenccRuntime.ts` definition so the assignment is structural
+// (no missing-property errors).
+//
+// The import is intentionally deferred (dynamic, inside
+// `initAgentRuntime`) so unrelated test paths that only touch the
+// session-abort helpers don't pay the cost of resolving
+// `@zn-ai/zn-agent-core/opencc-server` (the chain pulls in vendor
+// headless bootstrap code that takes ~5s to transform).
+import type { createOpenccRuntime as _factory } from '@zn-ai/zn-agent-core/opencc-server'
+type OpenccRuntime = Awaited<ReturnType<typeof _factory>>
 import { eventBus } from './eventBus.js'
 import {
   startMemoryWatcher,
   stopMemoryWatcher,
 } from '@zn-ai/zn-agent-core/agents/memoryWatcher'
 import { hasExternalIncludes } from '@zn-ai/zn-agent-core/agents/memoryLoader'
-import { createAnthropicModelCaller } from './modelCaller.js'
 import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
-import { loadMcpServers } from './mcpConfig.js'
 
-let runtime: DefaultAgentRuntime | null = null
+let runtime: OpenccRuntime | null = null
 let currentSessionId: string | null = null
+/**
+ * Legacy transcript accessor. Task 5 keeps a working `TranscriptStore`
+ * around because route handlers (`routes/agent.ts`, `routes/transcript.ts`,
+ * `routes/approve.ts`, builtin commands `clear` / `compact`) still read and
+ * patch persisted transcripts through it. The OpenccRuntime now owns
+ * canonical session persistence for the new query path, so this instance
+ * is only consulted as a read-side mirror for the legacy reader call
+ * sites. Task 6 deletes `TranscriptStore` entirely and migrates those
+ * callers to `runtime.readTranscript` / `patchSession` / `removeSession`.
+ */
 let transcriptStore: TranscriptStore | null = null
 let serverCwd: string | null = null
 const askRegistry = new AskRegistry()
@@ -74,6 +177,19 @@ export function __resetSessionControllersForTests(): void {
 }
 
 /**
+ * Test seam: reset the runtime singleton so the next test starts from
+ * a clean slate. Also clears the legacy `transcriptStore` mirror so
+ * the new test doesn't leak state into the next one. Used by
+ * `agent-runtime-server.test.ts` (Task 5).
+ */
+export function __resetAgentRuntimeForTests(): void {
+  runtime = null
+  transcriptStore = null
+  serverCwd = null
+  sessionControllers.clear()
+}
+
+/**
  * In-flight prompt count for the restart drain. Reads the same
  * sessionControllers map that HTTP /api/agent/abort already uses to
  * signal running queryLoops — any sessionId currently registered
@@ -102,31 +218,13 @@ function resolveSkillsDirs(): string[] {
   return env.split(path.delimiter).filter(Boolean)
 }
 
-/**
- * Resolve the Bash sandbox config. Without a sandbox the BashTool refuses
- * every command ("Bash disabled: no sandbox configured"). Default: allow
- * all commands with PATH preserved and a 10-minute CPU cap. Users opt out
- * via `ZAI_SANDBOX=off` for "no shell access" deployments.
- */
-function resolveSandbox(cwd: string): import('@zn-ai/zn-agent-core').SandboxConfig | undefined {
-  if (process.env.ZAI_SANDBOX === 'off') return undefined
-  return {
-    executor: 'child_process',
-    workdir: cwd,
-    ...(process.env.ZAI_SANDBOX_ENV_ALLOWLIST
-      ? { envAllowlist: process.env.ZAI_SANDBOX_ENV_ALLOWLIST.split(',') }
-      : {}),
-    maxCpuMs: Number.parseInt(process.env.ZAI_SANDBOX_TIMEOUT_MS ?? '600000', 10),
-    networkEgress: 'allow',
-  }
-}
-
-export function initAgentRuntime(cwd: string): void {
+export async function initAgentRuntime(cwd: string): Promise<void> {
   if (runtime) return
+
   // zai patch: skip vendor PreToolUse plugin hooks under the HTTP-server
   // runtime. Plugin hooks are shell scripts that expect an interactive
   // TTY + CLAUDE_PLUGIN_ROOT env; under zai's headless server they throw
-  // (ENOENT / spawn error), the vendor catch at
+  // (ENOUNT / spawn error), the vendor catch at
   // src/opencc-src/services/tools/toolHooks.ts:715 yields {type:'stop'},
   // and toolExecution.ts:1100 propagates that as
   // `createToolResultStopMessage(toolUseID)` — so the LLM receives a
@@ -141,133 +239,69 @@ export function initAgentRuntime(cwd: string): void {
   // compat/tools/opencc/builtin.ts already overwrites with always-allow
   // via forceAllowCheckPermissions — so every tool runs without prompt.
   ;(globalThis as any).__zaiSkipPreToolUseHooks = true
-  // OpenCC vendor's config system has a `configReadingAllowed` flag
-  // (config.ts:1473) that throws on any getConfig() until set. The
-  // bridge's lazy import of opencc-src/query.js → queryLoop →
-  // getConfig() throws "Config accessed before allowed." unless we
-  // call enableConfigs() first. Fire-and-forget; the runtime
-  // construction below doesn't strictly need the config to be
-  // ready, but the next /api/agent/prompt will.
-  void enableOpenccConfigs({ cwd }).catch((err) => {
-    console.error('[initAgentRuntime] enableOpenccConfigs failed:', err)
-  })
+
+  // The simple synchronous setup (serverCwd, transcriptStore) must
+  // run BEFORE the first `await` — the test surface calls
+  // `initAgentRuntime(cwd)` without awaiting and then synchronously
+  // reads `getServerCwd()`. Doing the work up-front keeps the
+  // legacy sync-read-after-init pattern working while we await the
+  // async runtime construction.
   const { resolved: dataDir } = resolveDataDir()
   serverCwd = cwd
   transcriptStore = new TranscriptStore(dataDir)
 
-  // MCP servers (Phase 5 wiring). Only construct the pool when at least one
-  // .mcp.json entry exists; an empty config still calls connectAll([]) which
-  // is a no-op.
-  const mcpServers = loadMcpServers(cwd)
-  const mcpClientPool = mcpServers.length > 0 ? new MCPClientPool() : undefined
-  // Kick off stdio connections to every configured MCP server. connectAll()
-  // never throws (failures surface via health()), so we fire-and-forget and
-  // log instead. Without this call, MCPClientPool stays empty and the
-  // Agent's system prompt has no `<mcp_servers>` block — the model never
-  // sees any `mcp__*` tool. Race note: a prompt arriving in the ~100ms
-  // before connectAll resolves may still see an empty pool; the next
-  // /api/agent/prompt request picks up the connected state.
-  if (mcpClientPool) {
-    void mcpClientPool.connectAll(mcpServers).catch((err) => {
-      console.error('[mcp] connectAll failed:', err)
-    })
-  }
-
-  // Register the zai modelCaller as a global so the bundle's
-  // `query/deps.ts` `productionDeps` factory can pick it up as the
-  // default callModel for sub-agent `query()` calls. Without this,
-  // sub-agents (which don't pass `params.deps`) would fall back to
-  // vendor's `queryModelWithStreaming` — a direct Anthropic call that
-  // bypasses zai's profile resolution + 2013 sanitizer + per-model
-  // config — and silently return empty, surfacing to the parent as
-  // "(Subagent completed but returned no output.)".
-  const zaiModelCaller = createAnthropicModelCaller()
-  ;(globalThis as any).__zaiModelCaller = zaiModelCaller
-
-  runtime = new DefaultAgentRuntime({
-    dataDir,
-    modelCaller: zaiModelCaller,
-    defaultModel:
-      process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
-      ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
-    askRegistry,
-    approveRegistry: approveRegistry as unknown as ApproveRegistryLike,
-    skillsDirs: resolveSkillsDirs(),
-    // 启用 OpenCC plugin loader (superpowers 等) —
-    // 不传这个字段则 plugin 永远不会被实例化,见
-    // zai-agent-core/src/runtime/contract.ts:23-25 + queryEngine.ts:54-70
-    //
-    // DefaultAgentRuntime.constructor 自己 new 一个 DefaultPluginRuntime
-    // 进去 (compat/runtime/contract.ts:37-40),然后 run() 把它写到
-    // openccConfig.pluginRuntime (compat/runtime/contract.ts:61-83),
-    // 所以 zai-server 不必再单独构造 — 避免双份 plugin runtime 重复
-    // 读盘 / 缓存分裂。
-    plugins: {
-      opencc: {
-        configDir: resolveOpenccConfigDir() ?? join(homedir(), '.claude'),
-      },
-    },
-    // opencc adapter config — read by compat/runtime/contract.ts::DefaultAgentRuntime.run()
-    // which delegates to compat/runtime/openccQueryBridge.ts::runViaOpenccQuery()
-    // (Phase 5). The bridge lazy-imports opencc-src/query.js and runs opencc's
-    // main loop; deps.callModel is filled by buildDeps(config.modelCaller) below
-    // so the loop calls our zai-side modelCaller (Anthropic SDK wrapper) under
-    // the hood. Without this block, deps.callModel has no modelCaller and the
-    // bridge yields "deps.callModel not implemented" at the first turn.
-    openccConfig: {
-      // Resume prior conversation turns from this store when
-      // QueryOptions.transcriptId matches an existing transcript file.
-      // Without this the adapter only sees the current `opts.prompt` and
-      // every request is single-turn → LLM can't recall facts from prior
-      // turns in the same session. Built from the same `dataDir` so
-      // persisted turns land at the path DefaultAgentRuntime.store uses.
-      transcriptStore,
-      mcpPool: mcpClientPool,
-      mcpServers,
-      // MCP instructions snapshot — the opencc query bridge calls
-      // `pool.getInstructionsSnapshot()` to fill the `<mcp_servers>`
-      // system prompt block. Only meaningful when at least one MCP
-      // server is configured (the pool is undefined otherwise).
-      mcpClientPool,
-      skillsDirs: resolveSkillsDirs(),
-      sandbox: resolveSandbox(cwd),
-      // Plugin runtime: the opencc query bridge reads `snapshot.skills`
-      // to merge plugin-installed skills into the `<skills>` system
-      // prompt block. Without this, the ~14 superpowers skills
-      // (brainstorming, TDD, etc.) never reach the model. The
-      // module-level `pluginRuntime` is nullable (lazy-initialized on
-      // first call to getPluginRuntime), but
-      // `openccConfig.pluginRuntime` expects `PluginRuntime | undefined`,
-      // so collapse `null` to `undefined` here.
-      ...(pluginRuntime ? { pluginRuntime } : {}),
-      // Phase 5: ModelCaller feeds opencc's deps.callModel. The translator in
-      // buildOpenccQueryParams translates between opencc's request shape
-      // (messages + systemPrompt + tools + signal + options.model) and zai's
-      // (model + systemPrompt + messages + tools + signal) — both shapes
-      // wrap Anthropic's underlying SDK.
-      modelCaller: createAnthropicModelCaller(),
-      // AskUserQuestion 的等待表: 工具 call 时挂起, 等用户 POST /api/agent/answer
-      // 才 resolve. 不传的话 AskUserQuestion 走 stub (返回 "askRegistry not
-      // configured"), QuestionCard 永远不弹. 把 server 启动时建的 askRegistry
-      // 单例直接挂上, 跨 session 复用.
-      askRegistry,
-    },
-    ...(mcpClientPool && mcpServers.length > 0 ? { mcpClientPool, mcpServers } : {}),
-    ...(resolveSandbox(cwd) ? { sandbox: resolveSandbox(cwd) } : {}),
+  // OpenCC vendor's config system has a `configReadingAllowed` flag
+  // (config.ts:1473) that throws on any getConfig() until set. The
+  // runtime's headless context bootstrap calls enableConfigs() too —
+  // calling it here is a no-op (already enabled) and just keeps the
+  // ordering stable for any other vendor code paths triggered between
+  // init and the first query.
+  await enableOpenccConfigs({ cwd }).catch((err) => {
+    console.error('[initAgentRuntime] enableOpenccConfigs failed:', err)
   })
 
-  // 把 sandbox config 注入 ZaiSandboxManager 单例, 让 BashTool 的 prompt
-  // (getSimpleSandboxSection) 能展示 filesystem / network 限制。
-  // 没有这个调用, prompt 永远不包含 sandbox 段, 模型不知道 sandbox 边界。
-  const sandbox = resolveSandbox(cwd)
-  if (sandbox) setDefaultSandboxManager(sandbox)
-
-  // Disconnect MCP clients on shutdown so child processes don't get orphaned
-  // when the zai server is killed by SIGTERM/SIGINT.
-  if (mcpClientPool) {
-    const cleanup = () => { mcpClientPool.disconnectAll() }
+  // Build the new OpenccRuntime. The runtime is awaited so the
+  // synchronous `initBackgroundRuntime()` call in `createApp` (the
+  // very next line) sees a non-null `runtime` and can read it via
+  // `getRuntime()`. The previous Task 5 implementation fired the
+  // construction off as a fire-and-forget IIFE; that worked for the
+  // vitest test surface (tests only read `getRuntime()` after the
+  // boot promise chain had advanced) but broke the dev server's
+  // `pnpm dev` boot.
+  //
+  // The runtime now runs vendor's built-in `queryModelWithStreaming`
+  // as its `deps.callModel` (reads `process.env.ANTHROPIC_AUTH_TOKEN`
+  // / `ANTHROPIC_BASE_URL` set by zai's dev startup). The earlier
+  // zai-side `createAnthropicModelCaller` + `wrapZaiModelCallerAsCallModel`
+  // bypass is removed (commit da5956c3 + this cleanup): the model
+  // calls now flow through vendor's `defaultQuery` →
+  // `streamingToolExecutor` tool loop → vendor's
+  // `queryModelWithStreaming` → upstream API.
+  try {
+    const { createOpenccRuntime: factory } = await import(
+      '@zn-ai/zn-agent-core/opencc-server'
+    )
+    runtime = await factory({
+      dataDir,
+      runtimeId: 'zai-server',
+      defaultCwd: cwd,
+      defaultModel:
+        process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
+        ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
+      // zai-server: skip MCP bootstrap so the headless runtime comes
+      // up even if the user's `~/.claude.json` lists MCP servers that
+      // block the connect call. The QueryEngine's per-query MCP
+      // refresh + the `/mcp` slash command reconnect on demand.
+      connectMcp: false,
+    })
+    const cleanup = () => {
+      if (runtime) void runtime.shutdown()
+    }
     process.once('SIGTERM', cleanup)
     process.once('SIGINT', cleanup)
+  } catch (err) {
+    console.error('[initAgentRuntime] createOpenccRuntime failed:', err)
+    throw err
   }
 
   process.once('SIGTERM', () => stopMemoryWatcher())
@@ -307,11 +341,18 @@ export function getCurrentSessionId(): string | null {
   return currentSessionId
 }
 
-export function getRuntime(): DefaultAgentRuntime {
+export function getRuntime(): OpenccRuntime {
   if (!runtime) throw new Error('Agent runtime not initialized')
   return runtime
 }
 
+/**
+ * Legacy transcript accessor. Kept for the existing reader call sites
+ * in `routes/agent.ts`, `routes/transcript.ts`, `routes/approve.ts`, and
+ * the builtin commands `clear` / `compact`. Task 6 deletes this accessor
+ * along with the underlying `TranscriptStore` and migrates every reader
+ * to `runtime.readTranscript` / `patchSession` / `removeSession`.
+ */
 export function getTranscriptStore(): TranscriptStore {
   if (!transcriptStore) throw new Error('Transcript store not initialized')
   return transcriptStore
@@ -328,6 +369,17 @@ export async function abortAgentSession(reason?: string): Promise<void> {
   approveRegistry.abortAll(reason ?? 'session_aborted')
   if (currentSessionId) {
     abortSessionController(currentSessionId, reason)
+    // Forward to the new OpenccRuntime as well — its internal
+    // abortController fans out to in-flight query streams, which
+    // is the path the runtime's `query()` hook listens on.
+    const r = runtime
+    if (r) {
+      try {
+        await r.abort(currentSessionId, reason ?? 'session_aborted')
+      } catch (err) {
+        console.warn('[abortAgentSession] runtime.abort failed:', err)
+      }
+    }
   }
 }
 

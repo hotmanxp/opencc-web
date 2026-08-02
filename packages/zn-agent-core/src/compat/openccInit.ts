@@ -33,7 +33,6 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
-import { translateCallModel } from './runtime/buildOpenccQueryParams.js'
 
 // Imported via the package's `./opencc-core` subpath export (see
 // package.json `exports`). All opencc vendor code is bundled into
@@ -75,25 +74,6 @@ export function installMacroStub(): void {
   if (g.MACRO && typeof g.MACRO === 'object' && typeof g.MACRO.VERSION === 'string') {
     return
   }
-  // zai patch: force `shouldInjectAgentListInMessages()` (opencc-src/tools/AgentTool/prompt.ts:59)
-  // to return false so AgentTool.prompt() embeds the sub-agent list inline
-  // in the tool description, instead of deferring to a `<system-reminder>`
-  // message. The deferred path is broken in zai's compat runtime because
-  // opencc's `agent_listing_delta` attachment is only emitted MID-TURN
-  // (query.ts:~2655, inside the per-iteration attachment loop), but zai
-  // pre-loads `params.messages` and passes them to `openccQuery()` — so
-  // the FIRST callModel never sees the attachment. The LLM ends up with
-  // a tool description that says "see <system-reminder>" but no such
-  // reminder exists in the conversation. Inline rendering side-steps the
-  // entire message-flow race.
-  //
-  // Only set when the env var isn't already configured, so an operator can
-  // override per-process (e.g. for parity debugging against an upstream
-  // opencc run). Acceptable truthy/falsy semantics match
-  // opencc-src/utils/envUtils.ts:122,148.
-  if (process.env.CLAUDE_CODE_AGENT_LIST_IN_MESSAGES === undefined) {
-    process.env.CLAUDE_CODE_AGENT_LIST_IN_MESSAGES = 'false'
-  }
   // zai's own pkg version is a reasonable proxy; build-time
   // reflection isn't worth the bundle-size cost here.
   const VERSION = '0.1.0'
@@ -120,21 +100,6 @@ export function installMacroStub(): void {
     FEEDBACK_CHANNEL,
     VERSION_CHANGELOG,
   }
-  // zai patch: expose translateCallModel as a global so the bundle's
-  // `query/deps.ts` `productionDeps` factory can route sub-agent
-  // `query()` calls (which pass no `params.deps` and therefore fall
-  // through to productionDeps) through zai's modelCaller instead of
-  // vendor's `queryModelWithStreaming`. Without this hook, sub-agents
-  // spawn via AgentTool get a direct Anthropic call that bypasses
-  // zai's profile resolution + 2013 sanitizer + per-model config
-  // and frequently returns empty, which surfaces to the parent as
-  // "(Subagent completed but returned no output.)".
-  //
-  // The matching `globalThis.__zaiModelCaller` is set by zai's
-  // `initAgentRuntime` after `createAnthropicModelCaller()`. Until
-  // both globals are set, productionDeps falls through to vendor's
-  // default — which is the correct behavior in non-zai embedders.
-  ;(globalThis as any).__zaiTranslateCallModel = translateCallModel
 }
 
 // ----- compat-side re-implementations of un-exported startup steps -----

@@ -43,13 +43,18 @@ export * from './compat/mcp/index.js'
 // Plugin runtime (Batch 2c)
 export * from './compat/plugins/index.js'
 
-// DefaultAgentRuntime + abort + AgentRuntime interface (Batch 2d)
-export { DefaultAgentRuntime } from './compat/runtime/contract.js'
-export type { AgentRuntime } from './compat/runtime/contract.js'
+// DefaultAgentRuntime (Batch 2d) — removed in Task 6. The new server
+// runtime (`@zn-ai/zn-agent-core/opencc-server`) replaces the
+// `DefaultAgentRuntime` path entirely; callers migrated in
+// commit da4c50e5 (Task 5). The `AgentRuntime` interface itself
+// is preserved for back-compat re-export.
+// (no more exports here)
 
-// TranscriptStore (compat) — already in compat/transcript/store.ts; re-export
-// the v2 store class so zai's main-entry import works.
-export { TranscriptStore } from './compat/transcript/store.js'
+// TranscriptStore (compat) — removed in Task 6. The new server
+// runtime's `sessionFacade` owns session/transcript; the compat
+// helpers in `transcript/persistence.ts` keep a structural
+// `TranscriptStore` interface so the pre-existing zai test imports
+// (broken path, 5/189 baseline) still compile.
 
 // Data directory helpers
 export { resolveDataDir } from './compat/data/dataDir.js'

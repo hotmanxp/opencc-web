@@ -6,9 +6,11 @@
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
   "exports": {
-    ".": "./dist/index.js",
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
     "./runtime": "./dist/runtime/index.js",
-    "./transcript": "./dist/transcript/store.js",
     "./commands": "./dist/commands/index.js",
     "./bashTracker": "./dist/tools/BashTool/bashTracker.js",
     "./taskListStore": "./dist/tools/Tasks/TaskListStore.js",
@@ -17,6 +19,11 @@
     "./compat/vendor/ripgrep": "./dist/compat/vendor/ripgrep.js",
     "./opencc-core": "./dist/opencc-core.mjs",
     "./opencc-src/permissions": "./dist/opencc-src/types/permissions.js",
+    "./opencc-src/server": "./dist/opencc-src/server/index.js",
+    "./opencc-server": {
+      "types": "./dist/opencc-src/server/index.d.ts",
+      "default": "./dist/opencc-src/server/index.js"
+    },
     "./compat/permissions": "./dist/compat/permissions.js"
   },
   "files": [
@@ -24,12 +31,15 @@
     "scripts/copy-runtime-assets.mjs"
   ],
   "scripts": {
-    "build": "node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && node scripts/copy-runtime-assets.mjs",
+    "build": "node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && tsc --noEmit -p tsconfig.contract-tests.json && tsc --noEmit -p tsconfig.consumer.json && node scripts/copy-runtime-assets.mjs && node scripts/verify-server-types-self-contained.mjs",
     "dev": "tsc -b --watch",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc -b --noEmit && tsc --noEmit -p tsconfig.contract-tests.json && tsc --noEmit -p tsconfig.consumer.json && node scripts/verify-server-types-self-contained.mjs",
+    "typecheck:contract-tests": "tsc --noEmit -p tsconfig.contract-tests.json",
+    "typecheck:consumer": "tsc --noEmit -p tsconfig.consumer.json && node scripts/verify-server-types-self-contained.mjs",
+    "typecheck:server-types-self-contained": "node scripts/verify-server-types-self-contained.mjs",
     "test": "vitest run",
     "test:watch": "vitest",
-    "verify": "tsx scripts/verify-imports.ts",
+    "verify": "node scripts/verify-server-types-self-contained.mjs",
     "bundle": "node --experimental-strip-types scripts/bundle-opencc.ts"
   },
   "dependencies": {

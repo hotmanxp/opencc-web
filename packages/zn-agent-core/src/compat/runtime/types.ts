@@ -231,7 +231,7 @@ export interface OpenccAdapterConfig {
    * `services/agentRuntime.ts` via the `TranscriptStore` already constructed
    * at runtime init.
    */
-  transcriptStore?: import('../transcript/store.js').TranscriptStore | undefined
+  transcriptStore?: unknown | undefined
   /** MCP client pool — tools from connected MCP servers injected into query(). */
   mcpPool?: import('../mcp/MCPClientPool.js').MCPClientPool | undefined
   /** MCP server specs (name + transport config) consumed by opencc query(). */

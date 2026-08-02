@@ -7,7 +7,7 @@
 // by scripts/bundle-opencc.ts (called from package.json's `build`
 // script before this script runs). The bundle is the only artifact
 // the runtime needs to access opencc vendor code.
-import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync } from 'node:fs'
+import { copyFileSync, mkdirSync, existsSync, readFileSync, writeFileSync, rmSync } from 'node:fs'
 import { resolve, dirname } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
@@ -48,6 +48,16 @@ for (const f of CJS_STUBS) {
   mkdirSync(dirname(dest), { recursive: true })
   copyFileSync(src, dest)
   console.log(`copied ${f}`)
+}
+
+// Clean up the tmp dir the server-types tsc emit writes into. The two
+// server d.ts files have already been copied to dist/opencc-src/server/
+// by bundle-opencc.ts; the rest of the tmp tree is leftover noise that
+// would otherwise ship in the published package's dist/ folder.
+const SERVER_TYPES_TMP = resolve(__dirname, '..', 'dist', '.server-types-tmp')
+if (existsSync(SERVER_TYPES_TMP)) {
+  rmSync(SERVER_TYPES_TMP, { recursive: true, force: true })
+  console.log('removed dist/.server-types-tmp')
 }
 
 // Patch dist/opencc-core.mjs (the bundle) to add the missing `CellWidth`
