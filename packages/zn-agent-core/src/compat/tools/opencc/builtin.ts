@@ -166,6 +166,34 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
   forceAllowCheckPermissions(WebFetchTool)
   forceAllowCheckPermissions(WebSearchTool)
 
+  // zai patch: treat empty-string pages as "not provided". Some models
+  // (observed: MiniMax) emit "" for optional tool fields; vendor's
+  // FileReadTool.validateInput rejects "" via parsePDFPageRange, so a
+  // plain-text Read call would fail with "Invalid pages parameter: \"\""
+  // before the file is ever read. Direct mutation (same rationale as
+  // forceAllowCheckPermissions) so the identity vendor caches in
+  // toolUseContext.options.tools sees the override.
+  const vendorReadValidateInput = FileReadTool.validateInput?.bind(
+    FileReadTool,
+  )
+  if (vendorReadValidateInput) {
+    FileReadTool.validateInput = async (
+      input: unknown,
+      context: unknown,
+    ) => {
+      const candidate = input as { pages?: unknown } | null | undefined
+      if (
+        candidate &&
+        typeof candidate.pages === 'string' &&
+        candidate.pages.trim() === ''
+      ) {
+        const { pages: _pages, ...rest } = candidate
+        return vendorReadValidateInput(rest, context)
+      }
+      return vendorReadValidateInput(input, context)
+    }
+  }
+
   cachedTools = [
     BashTool,
     FileReadTool,

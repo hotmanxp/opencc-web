@@ -38,7 +38,7 @@ export async function createOpenccRuntimeImpl(options) {
     canUseTool: ctx.permission,
     getAppState: ctx.appState.getState,
     setAppState: ctx.appState.setState,
-    readFileState: new FileStateCache(100, 25 * 1024 * 1024),
+    readFileCache: new FileStateCache(100, 25 * 1024 * 1024),
     abortController,
     query: customQuery,
   })
