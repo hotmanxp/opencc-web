@@ -267,28 +267,20 @@ export async function initAgentRuntime(cwd: string): Promise<void> {
   // construction off as a fire-and-forget IIFE; that worked for the
   // vitest test surface (tests only read `getRuntime()` after the
   // boot promise chain had advanced) but broke the dev server's
-  // `pnpm dev` boot. Threading the zai-side `modelCaller` through
-  // to the runtime's `deps.callModel` is deferred to Task 4.5 (the
-  // public `OpenccRuntimeOptions` surface is `dataDir / runtimeId /
-  // defaultCwd / defaultModel` only).
+  // `pnpm dev` boot.
+  //
+  // The runtime now runs vendor's built-in `queryModelWithStreaming`
+  // as its `deps.callModel` (reads `process.env.ANTHROPIC_AUTH_TOKEN`
+  // / `ANTHROPIC_BASE_URL` set by zai's dev startup). The earlier
+  // zai-side `createAnthropicModelCaller` + `wrapZaiModelCallerAsCallModel`
+  // bypass is removed (commit da5956c3 + this cleanup): the model
+  // calls now flow through vendor's `defaultQuery` →
+  // `streamingToolExecutor` tool loop → vendor's
+  // `queryModelWithStreaming` → upstream API.
   try {
     const { createOpenccRuntime: factory } = await import(
       '@zn-ai/zn-agent-core/opencc-server'
     )
-    // zai's `createAnthropicModelCaller` returns a zai-ModelCaller shaped
-    // function (req → AsyncGenerator<StreamEvent>). The headless
-    // QueryEngine consumes a vendor-shape `callModel` (input has
-    // {messages, systemPrompt, thinkingConfig, tools, signal, options}).
-    // `wrapZaiModelCallerAsCallModel` adapts the input shape and
-    // passes the stream events through (zai already yields
-    // vendor-compatible snake_case StreamEvent).
-    const { createAnthropicModelCaller } = await import(
-      './modelCaller.js'
-    )
-    const { wrapZaiModelCallerAsCallModel } = await import(
-      './modelCallerAdapter.js'
-    )
-    const modelCaller = createAnthropicModelCaller()
     runtime = await factory({
       dataDir,
       runtimeId: 'zai-server',
@@ -301,12 +293,6 @@ export async function initAgentRuntime(cwd: string): Promise<void> {
       // block the connect call. The QueryEngine's per-query MCP
       // refresh + the `/mcp` slash command reconnect on demand.
       connectMcp: false,
-      // Route model calls through zai's `createAnthropicModelCaller`
-      // so the headless server uses the user's actual provider profile
-      // (`~/.claude.json` providerProfiles or `~/.zai/settings.json`
-      // env.ANTHROPIC_*), not the vendor default which reads only
-      // `process.env.ANTHROPIC_API_KEY`.
-      callModel: wrapZaiModelCallerAsCallModel(modelCaller),
     })
     const cleanup = () => {
       if (runtime) void runtime.shutdown()

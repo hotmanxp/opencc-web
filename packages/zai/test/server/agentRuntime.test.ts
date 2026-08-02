@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 
-// initAgentRuntime 会真实构造 TranscriptStore / createAnthropicModelCaller / loadMcpServers
+// initAgentRuntime 会真实构造 TranscriptStore / loadMcpServers
 // 等副作用, 拖入 IO / 网络. 这里只测纯函数式的 getOrCreateAgentSession 路径, 不调 initAgentRuntime.
 // 注: DefaultAgentRuntime / resolveDataDir 等 mock 在 initAgentRuntime 测试里需要, 这里就不 mock
 // 以免干扰其它用例.
