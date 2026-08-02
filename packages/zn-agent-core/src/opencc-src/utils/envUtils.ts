@@ -14,8 +14,16 @@ export function resolveClaudeConfigHomeDir(options?: {
   }
 
   const homeDir = options?.homeDir ?? homedir()
-  const openClaudeDir = join(homeDir, '.claude')
-  const legacyClaudeDir = join(homeDir, '.claude')
+  // zai patch: base 统一到 zai 的 dataDir。生产默认 ~/.zai; 显式设置
+  // ZAI_DATA_DIR (与 zai 侧 compat/data/dataDir.ts 的 resolveDataDir 优先
+  // 级一致) 时以它为准, 否则测试/自定义 dataDir 场景下 vendor 写
+  // ~/.zai/projects 而读取端读 ${ZAI_DATA_DIR}/projects, 目录又错位。
+  const zaiDataDir = process.env.ZAI_DATA_DIR
+  if (zaiDataDir) {
+    return zaiDataDir.normalize('NFC')
+  }
+  const openClaudeDir = join(homeDir, '.zai')
+  const legacyClaudeDir = join(homeDir, '.zai')
   const openClaudeExists =
     options?.openClaudeExists ?? existsSync(openClaudeDir)
   const legacyClaudeExists =
@@ -91,7 +99,7 @@ export const getClaudeConfigHomeDir = memoize(
     }),
   }),
   () =>
-    `${process.env.OPENCC_CONFIG_DIR ?? ''}\0${process.env.CLAUDE_CONFIG_DIR ?? ''}`,
+    `${process.env.OPENCC_CONFIG_DIR ?? ''}\0${process.env.CLAUDE_CONFIG_DIR ?? ''}\0${process.env.ZAI_DATA_DIR ?? ''}`,
 )
 
 export function getTeamsDir(): string {

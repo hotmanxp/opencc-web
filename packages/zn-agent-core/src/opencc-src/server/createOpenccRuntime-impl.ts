@@ -2,6 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import { createHeadlessContextImpl } from './createHeadlessContext-impl.js'
 import { createSessionFacadeImpl } from './sessionFacade-impl.js'
+import { runWithSdkContext } from '../bootstrap/state.js'
 import { QueryEngine } from '../QueryEngine.js'
 import { FileStateCache } from '../utils/fileStateCache.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
@@ -34,7 +35,14 @@ export async function createOpenccRuntimeImpl(options) {
     tools: ctx.tools,
     commands: ctx.mcp.commands,
     mcpClients: ctx.mcp.clients,
-    agents: [],
+    // zai patch: read agents from AppState (populated by
+    // createHeadlessContextImpl via getAgentDefinitionsWithOverrides).
+    // QueryEngine constructs its own `options.agentDefinitions` from
+    // this param (QueryEngine.ts:363, :519) and uses that for
+    // AgentTool's lookup — an empty array here means any
+    // `Agent(subagent_type: 'general-purpose', ...)` call throws
+    // "Agent type 'general-purpose' not found. Available agents: ".
+    agents: ctx.appState.getState().agentDefinitions.activeAgents,
     canUseTool: ctx.permission,
     getAppState: ctx.appState.getState,
     setAppState: ctx.appState.setState,
@@ -83,8 +91,30 @@ export async function createOpenccRuntimeImpl(options) {
         // ...}`) — that is the shape `defaultQuery`'s tool loop
         // (streamingToolExecutor) consumes.
         const stream = engine.submitMessage(input.prompt, { uuid: input.sessionId, model: input.model })
-        for await (const value of stream) {
-          yield eventFor(input.sessionId, value)
+        // zai patch: 绑定 vendor SDK context, 让 vendor 的 getSessionId()
+        // 在本 query 的异步链上返回 input.sessionId, 从而 transcript 文件
+        // 以 `${input.sessionId}.jsonl` 命名写入
+        // ${dataDir}/projects/<cwd>/ — 与读取端 (sessionFacade / compat
+        // TranscriptStore) 使用同一个 id / 目录. 不绑定的话 vendor 回落到
+        // 全局 STATE.sessionId (纯 UUID), 前端 URL 的 sid 对不上文件名,
+        // 刷新页面后历史对话读不到.
+        //
+        // 注意: 不能用 `yield* engine.submitMessage(...)` 一次性包进
+        // runWithSdkContext — AsyncLocalStorage 只向 fn 内创建的异步资源
+        // 传播, 而 async generator 是惰性迭代, 首次 .next() 发生在外层
+        // yield*, 已脱离 ALS context. 必须把每次 .next() 放进
+        // runWithSdkContext 内驱动, 让 recordTranscript 等内部 await
+        // 全程继承 context.
+        const sdkCtx =
+          typeof input.sessionId === 'string' && input.sessionId
+            ? { sessionId: input.sessionId, sessionProjectDir: null, cwd, originalCwd: cwd }
+            : null
+        while (true) {
+          const step = sdkCtx
+            ? await runWithSdkContext(sdkCtx, () => stream.next())
+            : await stream.next()
+          if (step.done) break
+          yield eventFor(input.sessionId, step.value)
         }
       } finally {
         if (prevBridge === undefined) delete (globalThis as any).__zaiBridgeCtx
