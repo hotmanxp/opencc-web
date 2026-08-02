@@ -55,6 +55,10 @@ export * from './compat/plugins/index.js'
 // helpers in `transcript/persistence.ts` keep a structural
 // `TranscriptStore` interface so the pre-existing zai test imports
 // (broken path, 5/189 baseline) still compile.
+//
+// Re-export a no-op stub class for zai callers (route handlers,
+// test mocks) that still instantiate `new TranscriptStore(dataDir)`.
+export { TranscriptStore } from './compat/runtime/legacyTranscriptStore.js'
 
 // Data directory helpers
 export { resolveDataDir } from './compat/data/dataDir.js'

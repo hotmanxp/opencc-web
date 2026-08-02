@@ -6,95 +6,22 @@ import {
   enableOpenccConfigs,
   resolveDataDir,
   resolveOpenccConfigDir,
+  TranscriptStore,
 } from '@zn-ai/zn-agent-core'
 
-// `TranscriptStore` was the compat-layer transcript store (deleted
-// in Task 6). The new server runtime owns session/transcript via
-// `runtime.sessionFacade`; the legacy `getTranscriptStore()` mirror
-// accessor still has live call sites in routes/agent.ts,
-// routes/transcript.ts, routes/approve.ts, and the `clear` /
-// `compact` builtin commands. Keep the accessor working as a
-// thin no-op stub that records the dataDir so the callers'
-// instanceof / `.read()` / `.append*` calls don't throw — they
-// all return empty (the new server runtime owns the real
-// transcript, which those callers should be migrated to in a
-// follow-up). The pre-existing zai test files
-// (transcript-repair-2013.test.ts, builtin.compact.test.ts) were
-// already broken in this worktree (they import from
-// `zai-agent-core/src/transcript/store.js`, a non-existent path
-// per the 5/189 pre-existing baseline).
-class TranscriptStore {
-  constructor(public readonly dataDir: string) {}
-  // The legacy compat `TranscriptStore` was deleted in Task 6 along
-  // with the synthetic compat runtime. The new `OpenccRuntime`
-  // exposes 8 methods (getSession, listSessions, readTranscript,
-  // patchSession, removeSession, query, abort, shutdown) — there
-  // is no `sessionFacade` and no `create`; the runtime auto-creates
-  // a session when `query()` first sees a sessionId. Route handlers
-  // in `routes/agent.ts` / `routes/transcript.ts` /
-  // `routes/approve.ts` / builtin commands `clear` / `compact`
-  // still call into `getTranscriptStore()` with the legacy method
-  // names. We satisfy that contract by:
-  //   - create:    generate a fresh UUID now, the runtime will
-  //                materialize the session on first query().
-  //   - read/list: delegate to runtime.listSessions / getSession.
-  //   - patch:     delegate to runtime.patchSession.
-  //   - remove:    delegate to runtime.removeSession.
-  //   - append*:   no-op (the runtime owns transcript writing via
-  //                its internal sessionStorage path; zai's per-event
-  //                transcript persistence in routes/agent.ts
-  //                becomes redundant in this model).
-  private rt(): OpenccRuntime {
-    if (!runtime) throw new Error('Agent runtime not initialized')
-    return runtime
-  }
-  async create(_meta: { cwd: string; model: string; permissionMode?: string }): Promise<string> {
-    // OpenccRuntime auto-materializes on first query(); for
-    // POST /api/agent/sessions we just need a stable id.
-    return `sess-${Date.now()}-${Math.random().toString(36).slice(2, 10)}`
-  }
-  async read(sessionId: string, opts: { cwd: string }) {
-    const info = await this.rt().getSession(sessionId)
-    if (!info) {
-      // New session that runtime hasn't materialized yet
-      // (the runtime auto-creates on first query()). For the
-      // legacy cwd check in routes/agent.ts we return the
-      // caller's cwd so the session resolves correctly when
-      // the runtime first sees it.
-      return { messages: [], meta: { cwd: opts.cwd, model: '' } }
-    }
-    return {
-      messages: [],
-      meta: {
-        cwd: info.cwd,
-        model: info.model,
-        title: info.title,
-        permissionMode: info.permissionMode,
-      },
-    }
-  }
-  async appendUserMessage(_msg: any) { return undefined }
-  async appendAssistantMessage(_msg: any) { return undefined }
-  async appendToolUse(_msg: any) { return undefined }
-  async appendToolResult(_msg: any) { return undefined }
-  async list(opts: { cwd: string; excludeSubagent?: boolean } = { cwd: '' }) {
-    return this.rt().listSessions({ cwd: opts.cwd, excludeSubagent: opts.excludeSubagent })
-  }
-  async listSessions() { return this.list({ cwd: this.dataDir }) }
-  async readSession(id: string) {
-    return this.rt().getSession(id)
-  }
-  async patchSession(id: string, patch: any, _opts?: { cwd?: string }) {
-    return this.rt().patchSession(id, patch)
-  }
-  async removeSession(id: string, _opts?: { cwd?: string }) {
-    await this.rt().removeSession(id, { cwd: this.dataDir })
-    return true
-  }
-  async append(_sessionId: string, _msg: any, _pathOpts?: any) {
-    return undefined
-  }
-}
+// `TranscriptStore` is now imported from `@zn-ai/zn-agent-core` (the
+// compat shim at compat/runtime/legacyTranscriptStore.ts) — Task 6
+// deleted the synthetic compat store. The shim is a no-op facade:
+// the real session/transcript data is owned by the new
+// `OpenccRuntime` (see opencc-src/server/sessionFacade.ts). Route
+// handlers in `routes/agent.ts` / `routes/transcript.ts` /
+// builtin commands `clear` / `compact` continue to call
+// `getTranscriptStore().read/patch/remove/replace` against this
+// instance; the shim satisfies the call shape and the runtime
+// materializes real transcripts on first `query()`. Pre-existing
+// zai test files (transcript-repair-2013.test.ts,
+// builtin.compact.test.ts) were already broken in this worktree
+// per the 5/189 pre-existing baseline.
 // The server module exports two `OpenccRuntime` shapes (one from
 // `serverTypes.ts` describing the brief's 8-method contract, one from
 // `createOpenccRuntime.ts` describing the impl). The factory's runtime

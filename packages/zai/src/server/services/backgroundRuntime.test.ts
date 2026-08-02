@@ -22,10 +22,19 @@ import { tmpdir } from 'os'
 import {
   DefaultBackgroundRuntime,
   JsonTaskStore,
-  type AgentRuntime,
   type BackgroundRuntime,
   type RuntimeEvent,
 } from '@zn-ai/zn-agent-core'
+// AgentRuntime was the legacy compat contract deleted in Task 6 — tests
+// only need an object compatible with what DefaultBackgroundRuntime
+// expects (a minimal run-stream + abort + query shape). Define locally
+// to keep the test file self-contained; OpenccRuntime satisfies this
+// structurally.
+type AgentRuntime = {
+  run(opts: any): AsyncIterable<any>
+  abort(sessionId: string, reason?: string): Promise<void>
+  query(opts: any): AsyncIterable<any>
+}
 import { eventBus } from './eventBus.js'
 import {
   wrapWithJobStarted,
