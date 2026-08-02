@@ -237,6 +237,39 @@ describe('createHeadlessContext — vendor headless bootstrap (Task 2)', () => {
     expect(typeof (tool as any).interruptBehavior).toBe('function')
   })
 
+  it('agentDefinitions.activeAgents contains built-in agents (general-purpose, Explore, Plan)', async () => {
+    // Regression guard for the "Agent type 'general-purpose' not
+    // found. Available agents: " (empty) bug. The default AppState
+    // has `agentDefinitions: { activeAgents: [], allAgents: [] }`
+    // (AppStateStore.ts:528). Without `getAgentDefinitionsWithOverrides`
+    // being called by createHeadlessContext, the AgentTool's lookup
+    // table stays empty and any `Agent(subagent_type: 'general-purpose', ...)`
+    // call throws. This test asserts the headless factory now populates
+    // the list from disk + the built-in registry so the LLM can resolve
+    // built-in sub-agent types.
+    const ctx = await createHeadlessContext({
+      cwd: cwdA,
+      dataDir,
+      runtimeId: 'rt-test-agents-loaded',
+    })
+
+    const active = (ctx.appState.getState() as any).agentDefinitions
+      .activeAgents as Array<{ agentType: string; source: string }>
+    const types = active.map(a => a.agentType)
+
+    // Built-in agents must be present. GENERAL_PURPOSE_AGENT is
+    // always included (builtInAgents.ts:33-36); Explore/Plan are
+    // always-on in opencc (builtInAgents.ts:38-40).
+    expect(types).toContain('general-purpose')
+    expect(types).toContain('Explore')
+    expect(types).toContain('Plan')
+
+    // And they should be tagged as built-in, not custom — confirms
+    // the source field survived the loader pass.
+    const builtIn = active.filter(a => a.source === 'built-in')
+    expect(builtIn.length).toBeGreaterThan(0)
+  })
+
   it('skips MCP bootstrap when connectMcp is false', async () => {
     const ctx = await createHeadlessContext({
       cwd: cwdA,

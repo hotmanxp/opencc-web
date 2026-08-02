@@ -38,6 +38,7 @@ import type { CanUseToolFn } from '../Tool.js'
 import type { Tools } from '../tools.js'
 import { installMacroStub } from '../../compat/openccInit.js'
 import { wrapAskUserQuestionToolAsOpencc } from '../../compat/tools/opencc/AskUserQuestionTool.js'
+import { getAgentDefinitionsWithOverrides } from '../tools/AgentTool/loadAgentsDir.js'
 import { getMcpToolsCommandsAndResources } from '../services/mcp/client.js'
 import { captureHooksConfigSnapshot } from '../utils/hooks/hooksConfigSnapshot.js'
 import { SandboxManager } from '../utils/sandbox/sandbox-adapter.js'
@@ -181,6 +182,22 @@ export async function createHeadlessContextImpl(
 
   // Step 8: built-in tool registry.
   const tools: Tools = getTools(permissionContext as any)
+
+  // zai patch: load agent definitions BEFORE tools are wired into the
+  // toolUseContext path. Vendor's CLI bootstrap populates
+  // AppState.agentDefinitions from `getAgentDefinitionsWithOverrides`
+  // (main.tsx:2097-2119) before QueryEngine init; without it the
+  // default `getDefaultAppState()` value — `{ activeAgents: [], allAgents: [] }`
+  // (AppStateStore.ts:528) — flows through to AgentTool.tsx:481, and
+  // any `Agent(subagent_type: 'general-purpose', ...)` call throws
+  // "Agent type 'general-purpose' not found. Available agents: " (the
+  // available list is empty so the error is unreadable). The loader
+  // is memoized (first call may read disk for `.claude/agents/*.md`;
+  // subsequent calls hit the cache) and has its own try/catch that
+  // returns built-in agents on error (loadAgentsDir.ts:372-384), so
+  // a broken user/project agent markdown can't take down the runtime.
+  const agentDefinitions = await getAgentDefinitionsWithOverrides(cwd)
+  appState.setState((prev: any) => ({ ...prev, agentDefinitions }))
 
   // zai patch: replace vendor's TUI-bound AskUserQuestion with the
   // zai-native wrapper. The vendor tool assumes an in-process
