@@ -49,6 +49,63 @@ function buildAnthropicInputSchema(zodSchema: Parameters<typeof zodToJsonSchema>
   return zodToJsonSchema(zodSchema, { target: 'jsonSchema7', $refStrategy: 'none' }) as unknown as Anthropic.Messages.Tool.InputSchema
 }
 
+/**
+ * zai patch (Aug 2026): defensive normalization of `zodToJsonSchema`'s
+ * output for tool `input_schema` fields.
+ *
+ * Vendor tools shipped by the opencc runtime (Agent / Bash / Read / Edit
+ * / Write / Task / Cron / etc.) come through `compat/runtime/
+ * openccToolWrap.ts:wrapAsOpenccTool` which threads `tool.inputSchema`
+ * verbatim from the zai-native Tool definition. Most zai-native tools
+ * built via `makeTool(...)` declare a concrete zod object — but several
+ * vendor-built tools that the headless runtime registers (Agent, Bash,
+ * Glob, Grep, Read, Edit, Write, TodoWrite, CronCreate, ...) declare
+ * `inputSchema` as a `ZodUnknown()` / `ZodAny()` or have no schema at
+ * all. For these, `zodToJsonSchema(...)` emits the bare envelope
+ * `{"$schema": "http://json-schema.org/draft-07/schema#"}` with no
+ * `type: "object"` and no `properties`.
+ *
+ * The Anthropic API rejects such an `input_schema` as malformed (the
+ * MiniMax proxy translates that into `invalid_request_error (2013)
+ * "input json is empty"`), which causes `client.messages.create(...)`
+ * to either throw or — in zai-server's specific runtime context — hang
+ * forever at the SSE reader. Either way no assistant event ever
+ * reaches the engine's `defaultQuery` consumer.
+ *
+ * Replace any non-object / missing-schema output with a permissive
+ * `{"type": "object", "additionalProperties": true}` so the proxy
+ * accepts the request. The model still sees the tool's `name` and
+ * `description` (which is what tool_use selection actually keys off
+ * of); the loose schema lets the model pass any JSON object as the
+ * tool input, which is fine — the engine's toolExecution layer validates
+ * the actual shape against the registered zod schema before invoking
+ * the tool.
+ */
+function normalizeToolSchema(zodSchema: unknown): Anthropic.Messages.Tool.InputSchema {
+  let converted: unknown
+  try {
+    converted = zodSchema == null
+      ? null
+      : buildAnthropicInputSchema(zodSchema as Parameters<typeof zodToJsonSchema>[0])
+  } catch {
+    converted = null
+  }
+  if (
+    converted
+    && typeof converted === 'object'
+    && (converted as Record<string, unknown>).type === 'object'
+    && typeof (converted as Record<string, unknown>).properties === 'object'
+  ) {
+    return converted as Anthropic.Messages.Tool.InputSchema
+  }
+  // Fallback permissive object schema — accepted by the Anthropic API
+  // and the MiniMax proxy; gives the model room to send any object.
+  return {
+    type: 'object',
+    additionalProperties: true,
+  } as Anthropic.Messages.Tool.InputSchema
+}
+
 interface ClaudeProviderProfile {
   id: string
   name: string
@@ -413,30 +470,92 @@ export function createAnthropicModelCaller(): ModelCaller {
         tool_0: tools[0] ? { name: tools[0].name, schema_type: typeof tools[0].inputSchema, schema_preview: JSON.stringify(tools[0].inputSchema).slice(0, 200) } : null,
       })
     }
-    const stream = await client.messages.create(
-      {
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.modelCaller] awaiting client.messages.create', {
         model: resolvedModel,
-        max_tokens: resolvedMaxTokens,
-        thinking: { type: 'enabled', budget_tokens: resolvedThinkingBudget },
-        system: systemBlocks,
-        messages: sdkMessages,
-        tools: tools.length > 0
-          ? (tools.map((t) => ({
-              name: t.name,
-              description: t.description ?? '',
-              input_schema: buildAnthropicInputSchema(t.inputSchema),
-            })) as Anthropic.Messages.ToolUnion[])
-          : undefined,
-        stream: true,
-      },
-      { signal },
-    )
+        signalAborted: signal?.aborted,
+      })
+    }
+    // zai patch (Aug 2026): bypass `client.messages.create(...)` and
+    // drive the Anthropic SSE format ourselves.
+    //
+    // Why this exists:
+    //   zai-server's request body contains 23 tool definitions whose zod
+    //   inputSchema cannot be serialized to a usable Anthropic tool schema
+    //   by `zodToJsonSchema` (each tool's `input_schema` becomes just
+    //   `{"$schema":"http://json-schema.org/draft-07/schema#"}` with no
+    //   `type: "object"` or `properties`). The MiniMax proxy rejects this
+    //   with `invalid_request_error (2013) — "input json is empty"`. That
+    //   400 response caused two cascading symptoms in zai-server:
+    //
+    //   1. The Anthropic SDK's `shouldRetry` returns false for 4xx, but
+    //      `makeRequest` is observed to never return at all inside zai-
+    //      server's dev runtime — `client.messages.create(...)` hangs
+    //      indefinitely, no error, no event. Same SDK call from a
+    //      standalone `bun -e` script against the same proxy returns
+    //      cleanly (error or success).
+    //
+    //   2. The engine's `defaultQuery` (`query.ts:1272`) consumes the
+    //      `deps.callModel(...)` async generator. With the SDK stuck in
+    //      `makeRequest`, the generator yields nothing — `for await`
+    //      waits forever, no assistant event ever reaches the SSE bridge,
+    //      and the UI shows a blank transcript with status `streaming`.
+    //
+    // Fix:
+    //   - Replace empty / non-object `input_schema` with a permissive
+    //     `{ type: "object", additionalProperties: true }` so the proxy
+    //     accepts the request (the model still gets to see the tool's
+    //     name + description, which is what tool_use selection actually
+    //     keys off of).
+    //   - Drive the SSE format ourselves via raw `fetch` so the consumer
+    //     sees `message_start` as soon as the first chunk arrives —
+    //     avoiding the SDK's APIPromise → Stream.fromSSEResponse path
+    //     which is where the hang was triggered in zai-server's process
+    //     context.
+    //
+    // Wire format and event shapes are unchanged from the SDK: the
+    // proxy already speaks Anthropic SSE (`event: message_start\ndata:
+    // {...}\n\n`), and the engine already iterates the same
+    // snake_case event stream.
+    const requestBody = {
+      model: resolvedModel,
+      max_tokens: resolvedMaxTokens,
+      thinking: { type: 'enabled', budget_tokens: resolvedThinkingBudget },
+      system: systemBlocks,
+      messages: sdkMessages,
+      tools: tools.length > 0
+        ? (tools.map((t) => ({
+            name: t.name,
+            description: t.description ?? '',
+            input_schema: normalizeToolSchema(t.inputSchema),
+          })) as Anthropic.Messages.ToolUnion[])
+        : undefined,
+      stream: true,
+    }
+
+    const stream = await fetchAnthropicStream({
+      client,
+      body: requestBody,
+      signal,
+      modelForLog: resolvedModel,
+    })
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.modelCaller] create() returned', {
+        model: resolvedModel,
+        streamType: typeof stream,
+        hasAsyncIter: typeof stream?.[Symbol.asyncIterator] === 'function',
+        signalAborted: signal?.aborted,
+      })
+    }
 
     try {
+      if (process.env.ZAI_DEBUG === '1') {
+        console.error('[zai.modelCaller] entering for-await loop', { model: resolvedModel })
+      }
       for await (const event of stream) {
         eventCount++
-        if (process.env.ZAI_DEBUG === '1' && (eventCount <= 3 || event.type === 'message_stop')) {
-          console.error('[zai.modelCaller] yield', { n: eventCount, type: event.type, model: resolvedModel })
+        if (process.env.ZAI_DEBUG === '1' && (eventCount <= 3 || (event as any).type === 'message_stop')) {
+          console.error('[zai.modelCaller] yield', { n: eventCount, type: (event as any).type, model: resolvedModel })
         }
         // SDK 已经把事件映射成 snake_case; 直接 yield.
         // 重要: 这里必须同步 yield, 不要 batch/buffer, 才能保证上游逐字流出.
@@ -567,4 +686,215 @@ export function createAnthropicModelCaller(): ModelCaller {
       throw err
     }
   })
+}
+
+/**
+ * zai patch (Aug 2026): bypass `Anthropic#messages.create(...)` and drive
+ * the Anthropic SSE format directly with `fetch`.
+ *
+ * Why this exists:
+ *   zai-server hangs at `await client.messages.create(...)` inside its
+ *   dev runtime (Express + Vite + Bun-direct, all in one process). The
+ *   same call from `bun -e` against the same proxy returns 15 events in
+ *   ~1.7s — same SDK, same body, same baseURL. The hang appears to be
+ *   inside the SDK's APIPromise chain: `messages.create` returns an
+ *   APIPromise whose `.then()` walks `parseResponse` → `Stream.fromSSEResponse`
+ *   which constructs the stream object synchronously but never drives
+ *   the underlying SSE reader. The consumer's `for await` therefore
+ *   never sees `message_start`.
+ *
+ *   Driving the SSE format ourselves with raw `fetch` is a tiny parser
+ *   (~30 lines) and avoids the entire SDK APIPromise/Stream layer. The
+ *   wire format is unchanged — the proxy already speaks Anthropic SSE —
+ *   so the engine sees the same event shapes (`message_start`,
+ *   `content_block_delta`, `message_stop`, …).
+ *
+ * What this returns:
+ *   An `AsyncGenerator<unknown, void>` that yields each parsed SSE
+ *   event as a JS object (snake_case, identical to the SDK's
+ *   RawMessageStreamEvent shape). Caller is expected to break on
+ *   `{type: 'message_stop'}` per the existing for-await contract.
+ *
+ * What this preserves from the SDK call path:
+ *   - `authToken` (Authorization: Bearer ...) header.
+ *   - `x-api-key` header (SDK picks bearer when authToken is set).
+ *   - `anthropic-beta` defaultHeaders from the client.
+ *   - The `signal` (AbortSignal) — fetch aborts the in-flight request
+ *     on abort, the SSE reader bails on its next read.
+ *   - The non-2xx error → throw path (yielded upstream as a synthetic
+ *     `{type: 'error', status, message}` event from the existing
+ *     modelCaller catch block, see `[zai.modelCaller] ← error`).
+ */
+async function fetchAnthropicStream(opts: {
+  client: Anthropic
+  body: Record<string, unknown>
+  signal?: AbortSignal
+  modelForLog: string
+}): Promise<AsyncIterable<unknown>> {
+  // Extract URL + headers from the SDK client so we don't have to
+  // duplicate provider-profile resolution logic. The SDK exposes both
+  // on the BaseAnthropic instance (`this.baseURL`, `this._options`).
+  const sdkAny = opts.client as unknown as {
+    baseURL: string
+    apiKey: string | null
+    authToken: string | null
+    _options: {
+      defaultHeaders?: Record<string, string | undefined>
+      timeout?: number
+    }
+  }
+  // Anthropic Messages API lives at /v1/messages relative to baseURL.
+  // The proxy URL is `https://api.minimaxi.com/anthropic` — full URL
+  // must be `https://api.minimaxi.com/anthropic/v1/messages`. SDK
+  // strips the trailing slash and appends `/v1/messages` internally.
+  const base = (sdkAny.baseURL ?? '').replace(/\/+$/, '')
+  const url = `${base}/v1/messages`
+
+  const headers: Record<string, string> = {
+    'content-type': 'application/json',
+    accept: 'application/json',
+    'anthropic-version': '2023-06-01',
+    'user-agent': 'zai-server/0 (fetch-bypass)',
+    ...(sdkAny._options.defaultHeaders ?? {}),
+  }
+  // SDK prefers `authToken` over `apiKey` (see client.mjs line 80). Match.
+  if (sdkAny.authToken) {
+    headers['authorization'] = `Bearer ${sdkAny.authToken}`
+  } else if (sdkAny.apiKey) {
+    headers['x-api-key'] = sdkAny.apiKey
+  }
+
+  if (process.env.ZAI_DEBUG === '1') {
+    console.error('[zai.modelCaller] fetchAnthropicStream POST', {
+      url,
+      model: opts.modelForLog,
+      hasAuth: Boolean(headers.authorization ?? headers['x-api-key']),
+      signalAborted: opts.signal?.aborted,
+    })
+  }
+
+  let response: Response
+  try {
+    const bodyStr = JSON.stringify(opts.body)
+    // Some proxies (notably MiniMax's anthropic gateway) reject requests
+    // whose Content-Length header is missing — they see "input json is
+    // empty" even though the body was sent. Setting it explicitly
+    // sidesteps Bun's fetch occasionally omitting it on streaming
+    // bodies / large payloads.
+    headers['content-length'] = String(new TextEncoder().encode(bodyStr).byteLength)
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.modelCaller] fetchAnthropicStream bodyLen', {
+        model: opts.modelForLog,
+        bodyLen: bodyStr.length,
+        byteLen: headers['content-length'],
+        bodyHead: bodyStr.slice(0, 200),
+      })
+      // Dump the body to a temp file so we can replay it via curl to
+      // diagnose any upstream-parser failures independent of the fetch.
+      try {
+        const fs = await import('node:fs')
+        fs.writeFileSync('/tmp/zai-fetch-body.json', bodyStr)
+        console.error('[zai.modelCaller] body dumped to /tmp/zai-fetch-body.json')
+      } catch (dumpErr) {
+        console.error('[zai.modelCaller] body dump failed:', dumpErr)
+      }
+    }
+    response = await fetch(url, {
+      method: 'POST',
+      headers,
+      body: bodyStr,
+      signal: opts.signal,
+    })
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err)
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.modelCaller] fetchAnthropicStream fetch threw', msg)
+    }
+    throw err
+  }
+
+  if (!response.ok || !response.body) {
+    const text = await response.text().catch(() => '')
+    const errMsg = `OpenAI HTTP ${response.status}: ${text.slice(0, 500)}`
+    if (process.env.ZAI_DEBUG === '1') {
+      console.error('[zai.modelCaller] fetchAnthropicStream non-2xx', {
+        status: response.status,
+        body: text.slice(0, 500),
+      })
+    }
+    throw new Error(`[zai.modelCaller] upstream HTTP ${response.status}: ${text.slice(0, 500)}`)
+  }
+
+  return readSseAsAnthropicEvents(response.body, opts.signal)
+}
+
+/**
+ * Consume a ReadableStream<Uint8Array> body (the Anthropic SSE response)
+ * and yield each parsed event object to the consumer.
+ *
+ * Wire format expected:
+ *   event: message_start
+ *   data: {"type":"message_start","message":{...}}
+ *
+ *   event: content_block_delta
+ *   data: {"type":"content_block_delta","index":0,"delta":{...}}
+ *
+ *   ...
+ *
+ *   event: message_stop
+ *   data: {"type":"message_stop"}
+ *
+ *   <blank line separates events>
+ */
+async function* readSseAsAnthropicEvents(
+  body: ReadableStream<Uint8Array>,
+  signal?: AbortSignal,
+): AsyncGenerator<unknown, void, undefined> {
+  const reader = body.getReader()
+  const decoder = new TextDecoder('utf-8')
+  let buf = ''
+  try {
+    while (true) {
+      if (signal?.aborted) {
+        try { await reader.cancel() } catch { /* ignore */ }
+        return
+      }
+      const { value, done } = await reader.read()
+      if (done) return
+      buf += decoder.decode(value, { stream: true })
+      // Anthropic SSE separates events with a blank line (`\n\n`).
+      // Process every complete event in the buffer.
+      let sep: number
+      while ((sep = buf.indexOf('\n\n')) !== -1) {
+        const rawEvent = buf.slice(0, sep)
+        buf = buf.slice(sep + 2)
+        if (!rawEvent) continue
+        let eventName = ''
+        let dataLines: string[] = []
+        for (const line of rawEvent.split('\n')) {
+          if (line.startsWith('event:')) eventName = line.slice(6).trim()
+          else if (line.startsWith('data:')) dataLines.push(line.slice(5).trim())
+        }
+        if (dataLines.length === 0) continue
+        const dataStr = dataLines.join('\n')
+        if (dataStr === '[DONE]') return
+        // Anthropic SSE carries the event type both as `event:` line AND
+        // inside the data payload (`{"type":"message_start", ...}`). Prefer
+        // the data payload's `type` (it's authoritative for SDK consumers
+        // like queryEngine which switch on `message.type`).
+        try {
+          const parsed = JSON.parse(dataStr)
+          if (parsed && typeof parsed === 'object' && 'type' in parsed) {
+            yield parsed
+          } else if (eventName) {
+            yield { type: eventName, ...(typeof parsed === 'object' ? parsed : { value: parsed }) }
+          }
+        } catch {
+          if (eventName) yield { type: eventName, data: dataStr }
+        }
+      }
+    }
+  } finally {
+    try { await reader.cancel() } catch { /* ignore */ }
+  }
 }
