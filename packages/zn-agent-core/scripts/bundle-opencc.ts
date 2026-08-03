@@ -83,9 +83,8 @@ function inputHash(): string {
     const st = statSync(file)
     h.update(`${rel}\0${st.mtimeMs}\0${st.size}\n`)
   }
-  // Bump this string when the bundle recipe (FEATURE_FLAGS, configCheckPatchRe,
-  // featureCallRe, plugins, externals) changes so old stamps are
-  // treated as stale.
+  // Bump this string when the bundle recipe (configCheckPatchRe,
+  // plugins, externals) changes so old stamps are treated as stale.
   h.update('recipe:v1\n')
   return h.digest('hex').slice(0, 16)
 }
@@ -107,51 +106,95 @@ if (existsSync(STAMP_FILE) && existsSync(OUT_FILE)) {
   }
 }
 
-// ── Feature-flag plugin ─────────────────────────────────────────────
-// opencc vendor uses `import { feature } from 'bun:bundle'` (Bun-only)
-// with `feature('FLAG')` ternaries gating optional `require()` calls.
-// esbuild can't resolve `bun:bundle` as a bare specifier, so we
-// pre-process source: strip the import and replace feature() calls
-// with the boolean literal from FEATURE_FLAGS (default `false`).
-// Files where the flag is `false` then tree-shake the dead require()
-// branches away (see query.ts:22-27).
+// ── Vendor-patches plugin ─────────────────────────────────────────────
+// Apply targeted, file-specific patches to vendored opencc files.
+// Each replacement is the smallest possible text change — no
+// embedded comments or backticks in replacement strings (those
+// caused parse failures in earlier iterations).
 //
-// Ship with all flags false — zai has its own autoCompactIfNeeded
-// (compat/runtime/compactService.ts) and doesn't exercise any gated
-// code path. To enable a flag in the bundle, add it below.
+//   * Config guard: opencc's `Config accessed before allowed.`
+//     guard throws if getConfig() is called before `enableConfigs()`
+//     runs. In zai's chat path the bridge can hit getConfig() (via
+//     session setup) before the explicit enableOpenccConfigs() call
+//     wired in compat/openccInit.ts. Flipping the default to `true`
+//     is the cleanest way to disable the guard without rewriting
+//     the read sites.
+//
+//   * Vendor return/else patches: silence esbuild warnings on
+//     vendored files without modifying them on disk (AGENTS.md:
+//     opencc-src/ is read-only).
+//     - `return\n` → `return;\n` makes ASI disambiguation unambiguous
+//       so esbuild stops flagging [semicolon-after-return]; the
+//       unreachable statements after are tree-shaken regardless.
+//     - `?? 0` → `` removal silences [suspicious-nullish-coalescing]
+//       when the left operand is provably a number.
+//
+//   * Sub-agent prompt injection: the entry module is
+//     `src/opencc-src/query.ts` — esbuild's tree-shaker trims every
+//     named export it can't see referenced by the entry. The vendor
+//     agent list loader (`getAgentDefinitionsWithOverrides` /
+//     `clearAgentDefinitionsCache` in `tools/AgentTool/loadAgentsDir.ts`)
+//     is dead code from query.ts' perspective, so its export would
+//     not survive bundling. compat's buildOpenccQueryParams needs to
+//     read the live agent list at runtime so AgentTool.prompt can
+//     render the sub-agent table into the system prompt (otherwise
+//     the LLM has no idea which sub-agents exist). Append a
+//     re-export pinned to the entry so esbuild keeps the symbols
+//     reachable AND names them on the bundle's export block.
+//
+//   * Messages-normalize re-export: compat needs vendor's
+//     `normalizeMessagesForAPI` + `normalizeAttachmentForAPI` from
+//     `utils/messages.ts` to translate `attachment` SDK messages
+//     (agent_listing_delta / plan_mode_reentry / relevant_memories /
+//     etc.) into user `<system-reminder>` text messages. Without
+//     this translation compat's filter has to drop those messages,
+//     losing model-facing state (plan re-entry flags, memory
+//     injections, hook outputs, etc.). Pin the symbols here so they
+//     survive tree-shaking and become reachable from compat.
+//
+//   * PreToolUse 'stop' suppression: some OpenCC plugins loaded
+//     from `~/.claude/plugins/<name>/hooks/hooks.json` register a
+//     PreToolUse hook that returns `{block: true}` (or `decision:
+//     'block'}`) when they don't want a specific command to run (e.g.
+//     `git commit` policy, dangerous shell pattern, etc.). vendor
+//     exposes this via `runPreToolUseHooks` (services/tools/
+//     toolHooks.ts:503) yielding `{type:'stop'}`. toolExecution.ts
+//     case 'stop' at line 1044 then synthesizes a synthetic tool
+//     result `{content: createToolResultStopMessage(toolUseID)}`
+//     which expands to the CANCEL_MESSAGE constant from
+//     utils/messages/factories.ts:36 — the exact "The user doesn't
+//     want to take this action right now. STOP what you are doing
+//     and wait for the user to tell you how to proceed." string
+//     observed at the LLM boundary in screenshot #3.
+//
+//     For zai's HTTP-server deployment there is no interactive
+//     dialog AND no plugin-ecosystem UX expectation that requires
+//     these hooks — the user has not configured them interactively,
+//     they get installed as a side-effect of `~/.claude/plugins/`
+//     sharing with other Anthropic tooling that the user did opt
+//     into elsewhere. Short-circuit `case 'stop'` to fall through
+//     (return []), letting the existing permission / input gates
+//     decide. The postToolHook bridge for `permissionDecision:
+//     'block'` (line 554 `hookPermissionResult: { behavior: 'deny' }`)
+//     is left intact — that path produces a zod-shaped denial
+//     result the LLM can act on, not a STOP message.
 
-const FEATURE_FLAGS: Record<string, boolean> = {}
-
-const featureCallRe = /\bfeature\(\s*['"](\w+)['"][,\s]*\)/g
-const featureImportRe = /import\s*\{[^}]*\bfeature\b[^}]*\}\s*from\s*['"]bun:bundle['"];?\s*\n?/g
-
-// Patches applied to specific vendored files at bundle time. These
-// are functional workarounds — opencc's `Config accessed before
-// allowed.` guard throws if getConfig() is called before
-// `enableConfigs()` runs. In zai's chat path the bridge can hit
-// getConfig() (via session setup) before the explicit
-// enableOpenccConfigs() call wired in compat/openccInit.ts. Flipping
-// the default to `true` is the cleanest way to disable the guard
-// without rewriting the read sites.
 const configCheckPatchRe = /^let configReadingAllowed = false$/m
+const vendorReturnPatchRe = /^  return\n  delete processEnv\.CLAUDE_CODE_USE_OPENAI/m
+const vendorReturnElseRe = /^      return\n      delete process\.env\.ANTHROPIC_API_KEY/m
+const vendorNullishCoalesceRe =
+  /\b(totalUsage|messageUsage)\?\.([a-zA-Z_]+) \?\? 0/g
 
-const featureFlagPlugin: esbuild.Plugin = {
-  name: 'feature-flag-preprocess',
+const toolExecutionStopCaseRe =
+  /case 'stop':\n        getStatsStore\(\)\?\.observe\(\n          'pre_tool_hook_duration_ms',\n          Date\.now\(\) - preToolHookStart,\n        \)\n        resultingMessages\.push\(\{\n          message: createUserMessage\(\{\n            content: \[createToolResultStopMessage\(toolUseID\)\],\n            toolUseResult: `Error: \$\{stopReason\}`,\n            sourceToolAssistantUUID: assistantMessage\.uuid,\n          \}\),\n        \}\)\n        return resultingMessages/
+
+const vendorPatchesPlugin: esbuild.Plugin = {
+  name: 'vendor-patches',
   setup(build) {
     build.onLoad({ filter: /\.[cm]?tsx?$/ }, async (args) => {
-      const raw = readFileSync(args.path, 'utf-8')
-      let contents = raw
+      const contents0 = readFileSync(args.path, 'utf-8')
+      let contents = contents0
       let modified = false
-
-      if (featureImportRe.test(raw) || featureCallRe.test(raw)) {
-        featureImportRe.lastIndex = 0
-        featureCallRe.lastIndex = 0
-        contents = contents.replace(featureImportRe, '')
-        contents = contents.replace(featureCallRe, (_m, name) =>
-          String(FEATURE_FLAGS[name] ?? false),
-        )
-        modified = true
-      }
 
       if (configCheckPatchRe.test(contents)) {
         contents = contents.replace(
@@ -160,27 +203,6 @@ const featureFlagPlugin: esbuild.Plugin = {
         )
         modified = true
       }
-
-      // zai patches: silence esbuild warnings on vendored files without
-      // modifying them on disk (AGENTS.md: opencc-src/ is read-only).
-      // Each replacement is the smallest possible text change — no
-      // embedded comments or backticks in replacement strings (those
-      // caused parse failures in earlier iterations).
-      //   * `return\n` → `return;\n` makes the ASI disambiguation
-      //     unambiguous so esbuild stops flagging
-      //     [semicolon-after-return]; the unreachable statements
-      //     after are tree-shaken regardless.
-      //   * `?? 0` → `` removal silences [suspicious-nullish-coalescing]
-      //     when the left operand is provably a number.
-      const vendorReturnPatchRe = /^  return\n  delete processEnv\.CLAUDE_CODE_USE_OPENAI/m
-      const vendorReturnElseRe = /^      return\n      delete process\.env\.ANTHROPIC_API_KEY/m
-      // Catch every redundant `?? 0` after a `totalUsage?.X` /
-      // `messageUsage?.X` chain — esbuild flags these because the line
-      // above directly accesses `totalUsage.X`, proving the field is
-      // non-nullable. Each match is a one-token deletion, behavior
-      // unchanged (left operand is in fact a number at runtime).
-      const vendorNullishCoalesceRe =
-        /\b(totalUsage|messageUsage)\?\.([a-zA-Z_]+) \?\? 0/g
 
       if (vendorReturnPatchRe.test(contents)) {
         contents = contents.replace(vendorReturnPatchRe, '  return;\n  delete processEnv.CLAUDE_CODE_USE_OPENAI')
@@ -199,18 +221,7 @@ const featureFlagPlugin: esbuild.Plugin = {
         modified = true
       }
 
-      // zai patch (sub-agent prompt injection): the entry module is
-      // `src/opencc-src/query.ts` — esbuild's tree-shaker trims every
-      // named export it can't see referenced by the entry. The vendor
-      // agent list loader (`getAgentDefinitionsWithOverrides` /
-      // `clearAgentDefinitionsCache` in `tools/AgentTool/loadAgentsDir.ts`)
-      // is dead code from query.ts' perspective, so its export would
-      // not survive bundling. compat's buildOpenccQueryParams needs to
-      // read the live agent list at runtime so AgentTool.prompt can
-      // render the sub-agent table into the system prompt (otherwise
-      // the LLM has no idea which sub-agents exist). Append a
-      // re-export pinned to the entry so esbuild keeps the symbols
-      // reachable AND names them on the bundle's export block.
+      // zai patch (sub-agent prompt injection): see vendor-patches header.
       const queryReExportSentinel = /\/\/ zai-bundle: agent-loader re-export\n$/
       if (
         args.path.endsWith('opencc-src/query.ts') &&
@@ -223,15 +234,7 @@ const featureFlagPlugin: esbuild.Plugin = {
         modified = true
       }
 
-      // 2nd addition (also zai patch): compat needs vendor's
-      // `normalizeMessagesForAPI` + `normalizeAttachmentForAPI` from
-      // `utils/messages.ts` to translate `attachment` SDK messages
-      // (agent_listing_delta / plan_mode_reentry / relevant_memories /
-      // etc.) into user `<system-reminder>` text messages. Without
-      // this translation compat's filter has to drop those messages,
-      // losing model-facing state (plan re-entry flags, memory
-      // injections, hook outputs, etc.). Pin the symbols here so they
-      // survive tree-shaking and become reachable from compat.
+      // zai patch (messages-normalize re-export): see vendor-patches header.
       const normalizeReExportSentinel =
         /\/\/ zai-bundle: messages-normalize re-export\n$/
       if (
@@ -245,36 +248,7 @@ const featureFlagPlugin: esbuild.Plugin = {
         modified = true
       }
 
-      // zai patch (3rd root cause, after vendor permission system +
-      // wrapAsOpenccTool default + forceAllowCheckPermissions on every
-      // vendor tool's checkPermissions): some OpenCC plugins loaded
-      // from `~/.claude/plugins/<name>/hooks/hooks.json` register a
-      // PreToolUse hook that returns `{block: true}` (or `decision:
-      // 'block'`) when they don't want a specific command to run (e.g.
-      // `git commit` policy, dangerous shell pattern, etc.). vendor
-      // exposes this via `runPreToolUseHooks` (services/tools/
-      // toolHooks.ts:503) yielding `{type:'stop'}`. toolExecution.ts
-      // case 'stop' at line 1044 then synthesizes a synthetic tool
-      // result `{content: createToolResultStopMessage(toolUseID)}`
-      // which expands to the CANCEL_MESSAGE constant from
-      // utils/messages/factories.ts:36 — the exact "The user doesn't
-      // want to take this action right now. STOP what you are doing
-      // and wait for the user to tell you how to proceed." string
-      // observed at the LLM boundary in screenshot #3.
-      //
-      // For zai's HTTP-server deployment there is no interactive
-      // dialog AND no plugin-ecosystem UX expectation that requires
-      // these hooks — the user has not configured them interactively,
-      // they get installed as a side-effect of `~/.claude/plugins/`
-      // sharing with other Anthropic tooling that the user did opt
-      // into elsewhere. Short-circuit `case 'stop'` to fall through
-      // (return []), letting the existing permission / input gates
-      // decide. The postToolHook bridge for `permissionDecision:
-      // 'block'` (line 554 `hookPermissionResult: { behavior: 'deny' }`)
-      // is left intact — that path produces a zod-shaped denial
-      // result the LLM can act on, not a STOP message.
-      const toolExecutionStopCaseRe =
-        /case 'stop':\n        getStatsStore\(\)\?\.observe\(\n          'pre_tool_hook_duration_ms',\n          Date\.now\(\) - preToolHookStart,\n        \)\n        resultingMessages\.push\(\{\n          message: createUserMessage\(\{\n            content: \[createToolResultStopMessage\(toolUseID\)\],\n            toolUseResult: `Error: \$\{stopReason\}`,\n            sourceToolAssistantUUID: assistantMessage\.uuid,\n          \}\),\n        \}\)\n        return resultingMessages/
+      // zai patch (PreToolUse 'stop' suppression): see vendor-patches header.
       if (toolExecutionStopCaseRe.test(contents)) {
         contents = contents.replace(
           toolExecutionStopCaseRe,
@@ -435,7 +409,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [featureFlagPlugin, optionalStubPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin],
   external: [
     // Native / not-in-deps
     'sharp',
@@ -460,7 +434,7 @@ await esbuild.build({
     // call site is reached; keep external so Node resolves at runtime.
     'fflate',
   ],
-  // Tree-shake aggressively; mark pure for the feature-flag gates
+  // Tree-shake aggressively.
   treeShaking: true,
 })
 
@@ -486,7 +460,7 @@ await esbuild.build({
 
 // Generate .d.ts for permissions by parsing the source const+type exports
 // (esbuild doesn't emit .d.ts for bundle:false; tsc would need the full project
-// graph which drags in bun:bundle and fails — so we emit it manually here)
+// graph — so we emit it manually here).
 {
   const { readFileSync, writeFileSync } = await import('node:fs')
   const src = readFileSync(PERMISSIONS_ENTRY, 'utf8')
@@ -587,7 +561,7 @@ await esbuild.build({
 // pattern as `opencc-core.mjs` for the runtime.
 //
 // `bundle: true` makes esbuild walk the import graph and inline.
-// Plugins mirror the opencc-core bundle (`featureFlagPlugin` +
+// Plugins mirror the opencc-core bundle (`vendorPatchesPlugin` +
 // `optionalStubPlugin`) so the same ant-only / stripped-dir fallbacks
 // apply. Externals are kept narrow — only npm deps that are also in
 // the published package's deps (so Node resolves at runtime).
@@ -607,7 +581,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [featureFlagPlugin, optionalStubPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin],
   // Keep external — Node resolves at runtime via package deps.
   external: [
     'sharp',
@@ -651,7 +625,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [featureFlagPlugin, optionalStubPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin],
   external: [
     'sharp',
     'google-auth-library',
@@ -714,7 +688,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [featureFlagPlugin, optionalStubPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin],
   external: [
     'sharp', 'google-auth-library', '@vscode/ripgrep',
     '@orama/orama', '@orama/plugin-data-persistence',
@@ -823,7 +797,7 @@ await esbuild.build({
       "import { createRequire as __createRequire } from 'node:module';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [featureFlagPlugin, optionalStubPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin],
   external: [
     'sharp',
     'google-auth-library',
