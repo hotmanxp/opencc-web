@@ -11,6 +11,7 @@ import {
   RobotOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
+  ClusterOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../store/useAppStore';
 import { useAgentStore } from '../store/useAgentStore';
@@ -31,6 +32,7 @@ const menuItems = [
   { key: '/config', icon: <SettingOutlined />, label: '配置' },
   { key: '/dirs', icon: <FolderOutlined />, label: '目录' },
   { key: '/agent', icon: <RobotOutlined />, label: 'Agent' },
+  { key: '/instances', icon: <ClusterOutlined />, label: '实例管理' },
 ];
 
 export default function Layout() {

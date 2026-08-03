@@ -9,6 +9,7 @@ const Login = lazy(() => import('./pages/Login'));
 const Config = lazy(() => import('./pages/Config'));
 const Directory = lazy(() => import('./pages/Directory'));
 const Agent = lazy(() => import('./pages/Agent'));
+const Instances = lazy(() => import('./pages/Instances'));
 const MobileLayout = lazy(() => import('./components/MobileLayout'));
 const MobileAgent = lazy(() => import('./pages/MobileAgent'));
 
@@ -42,6 +43,7 @@ export default function AppRouter() {
           <Route path="/dirs" element={<Directory />} />
           <Route path="/agent" element={<Agent />} />
           <Route path="/dashboard" element={<Dashboard />} />
+          <Route path="/instances" element={<Instances />} />
           <Route path="*" element={<Navigate to="/agent" replace />} />
         </Route>
 
