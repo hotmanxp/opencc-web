@@ -111,3 +111,103 @@ describe('agentRuntime — bridgeAskPendingToPromptAsk', () => {
     ).not.toThrow()
   })
 })
+
+describe('agentRuntime — bridgePermissionPendingToPromptPermission', () => {
+  let savedBus: unknown
+  let savedBridge: unknown
+
+  beforeEach(() => {
+    savedBus = (globalThis as any)[BUS_KEY]
+    savedBridge = (globalThis as any)[BRIDGE_KEY]
+  })
+
+  afterEach(() => {
+    if (savedBus === undefined) delete (globalThis as any)[BUS_KEY]
+    else (globalThis as any)[BUS_KEY] = savedBus
+    if (savedBridge === undefined) delete (globalThis as any)[BRIDGE_KEY]
+    else (globalThis as any)[BRIDGE_KEY] = savedBridge
+  })
+
+  it('translates tool_use:permission_pending into prompt.permission on __zaiEventBus', async () => {
+    const mod = await import('../../src/server/services/agentRuntime.js')
+    const emitted: unknown[] = []
+    ;(globalThis as any)[BUS_KEY] = { emit: (e: unknown) => emitted.push(e) }
+    ;(globalThis as any)[BRIDGE_KEY] = { sessionId: 'sess-perm-1' }
+
+    mod.bridgePermissionPendingToPromptPermission({
+      type: 'tool_use:permission_pending',
+      id: 'tu-perm-1',
+      toolName: 'ExitPlanMode',
+      description: 'Prompts the user to exit plan mode and start coding',
+      input: { allowedPrompts: [] },
+      message: 'Exit plan mode?',
+    })
+
+    expect(emitted).toHaveLength(1)
+    expect(emitted[0]).toEqual({
+      type: 'prompt.permission',
+      sessionId: 'sess-perm-1',
+      toolUseId: 'tu-perm-1',
+      toolName: 'ExitPlanMode',
+      description: 'Prompts the user to exit plan mode and start coding',
+      input: { allowedPrompts: [] },
+      message: 'Exit plan mode?',
+    })
+  })
+
+  it('ignores non-permission_pending events', async () => {
+    const mod = await import('../../src/server/services/agentRuntime.js')
+    const emitted: unknown[] = []
+    ;(globalThis as any)[BUS_KEY] = { emit: (e: unknown) => emitted.push(e) }
+    ;(globalThis as any)[BRIDGE_KEY] = { sessionId: 'sess-perm-2' }
+
+    mod.bridgePermissionPendingToPromptPermission({ type: 'tool_use:ask_pending' })
+    mod.bridgePermissionPendingToPromptPermission(undefined)
+    expect(emitted).toHaveLength(0)
+  })
+})
+
+describe('agentRuntime — bridgeToolYieldToPrompt dispatch', () => {
+  let savedBus: unknown
+  let savedBridge: unknown
+
+  beforeEach(() => {
+    savedBus = (globalThis as any)[BUS_KEY]
+    savedBridge = (globalThis as any)[BRIDGE_KEY]
+  })
+
+  afterEach(() => {
+    if (savedBus === undefined) delete (globalThis as any)[BUS_KEY]
+    else (globalThis as any)[BUS_KEY] = savedBus
+    if (savedBridge === undefined) delete (globalThis as any)[BRIDGE_KEY]
+    else (globalThis as any)[BRIDGE_KEY] = savedBridge
+  })
+
+  it('routes ask_pending to prompt.ask and permission_pending to prompt.permission', async () => {
+    const mod = await import('../../src/server/services/agentRuntime.js')
+    const emitted: unknown[] = []
+    ;(globalThis as any)[BUS_KEY] = { emit: (e: unknown) => emitted.push(e) }
+    ;(globalThis as any)[BRIDGE_KEY] = { sessionId: 'sess-dispatch-1' }
+
+    mod.bridgeToolYieldToPrompt({
+      type: 'tool_use:ask_pending',
+      id: 'tu-a',
+      questions: [],
+    })
+    mod.bridgeToolYieldToPrompt({
+      type: 'tool_use:permission_pending',
+      id: 'tu-p',
+      toolName: 'Bash',
+      description: 'd',
+      input: null,
+      message: 'm',
+    })
+    mod.bridgeToolYieldToPrompt({ type: 'unknown.event' })
+
+    expect(emitted.map((e) => (e as { type: string }).type)).toEqual([
+      'prompt.ask',
+      'prompt.permission',
+    ])
+    expect((emitted[1] as { toolUseId?: string }).toolUseId).toBe('tu-p')
+  })
+})

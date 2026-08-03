@@ -4,6 +4,7 @@ import { RobotFilled, UpOutlined } from '@ant-design/icons'
 import { useAgentStore } from '../store/useAgentStore'
 import { useAppStore } from '../store/useAppStore'
 import QuestionCard from '../components/QuestionCard.jsx'
+import PermissionConfirmCard from '../components/PermissionConfirmCard.jsx'
 import TodoZone from '../components/TodoZone.jsx'
 import AgentInputBox from '../components/AgentInputBox'
 import { MessageListView } from '../components/transcript/MessageListView.js'
@@ -170,6 +171,7 @@ export default function AgentConversation() {
             />
           </div>
         )}
+        <PermissionConfirmCard />
       </div>
       <div className="bottom-stack">
         <AgentInputBox />

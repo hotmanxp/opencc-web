@@ -781,10 +781,21 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
         // 新 runtime 的 query (见 DefaultBackgroundRuntime.runOne 的 queryInput).
         abortSignal: abortController.signal,
         model: resolvedModel,
-        // 透传用户为该会话选定的 permission mode 由 headless context 默认走
-        // bypassPermissions(等价于"无 prompt"行为); vendor 的 per-query
-        // `permissionMode` 字段待 Task 4.5 在 OpenccQueryInput 上扩展后
-        // 再透传.
+        // 透传会话选定的 permission mode（如 plan）到 runtime AppState，让
+        // vendor 权限管线按该模式运行（plan mode 下模型可调用 ExitPlanMode，
+        // 其 `ask` 决策经 headless permission bridge 走 Web 确认 UI）。
+        // 未设置（或 auto）时缺省不传 → runtime 保持 bypassPermissions 语义。
+        ...(transcript?.meta.permissionMode &&
+        transcript.meta.permissionMode !== 'auto'
+          ? {
+              permissionMode: transcript.meta.permissionMode as
+                | 'default'
+                | 'acceptEdits'
+                | 'bypassPermissions'
+                | 'dontAsk'
+                | 'plan',
+            }
+          : {}),
       });
 
       // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,

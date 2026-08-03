@@ -62,6 +62,7 @@ import {
 } from '../bootstrap/state.js'
 import { enableConfigs } from '../utils/config.js'
 import { getCanUseToolFn } from '../cli/print.js'
+import { wrapHeadlessPermissionFn } from './headlessPermissionBridge.js'
 import { getTools } from '../tools.js'
 
 /**
@@ -220,6 +221,12 @@ export async function createHeadlessContextImpl(
     tools[askUserQuestionIdx] = wrapAskUserQuestionToolAsOpencc() as unknown as Tool
   }
 
+  // ExitPlanMode keeps vendor's original implementation (checkPermissions
+  // returns `{behavior:'ask'}` when in plan mode). The `ask` decision flows
+  // through the headless permission bridge (headlessPermissionBridge.ts,
+  // wrapping `permission` below) which surfaces a web PermissionConfirmCard —
+  // no TUI-only wrapper needed.
+  //
   // Step 9: MCP. Best-effort — empty arrays on failure so the
   // headless context still boots without MCP servers. When
   // `connectMcp` is `false` (zai-server's default) we skip the
@@ -272,10 +279,12 @@ export async function createHeadlessContextImpl(
   // Step 11: permission rules. Pass `permissionPromptToolName:
   // undefined` so `getCanUseToolFn` returns the rules-based fallback
   // (`hasPermissionsToUseTool`), not a stdio-style prompt.
-  const permission: CanUseToolFn = getCanUseToolFn(
-    undefined,
-    null as unknown as Parameters<typeof getCanUseToolFn>[1],
-    () => mcp.tools,
+  const permission: CanUseToolFn = wrapHeadlessPermissionFn(
+    getCanUseToolFn(
+      undefined,
+      null as unknown as Parameters<typeof getCanUseToolFn>[1],
+      () => mcp.tools,
+    ),
   )
 
   // Step 12: sandbox. We expose the manager but DO NOT call

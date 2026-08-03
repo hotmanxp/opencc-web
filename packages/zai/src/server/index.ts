@@ -16,6 +16,7 @@ import agentRouter from './routes/agent.js';
 import agentSettingsRouter from './routes/agentSettings.js';
 import answerRouter from './routes/answer.js';
 import approveRouter from './routes/approve.js';
+import permissionRouter from './routes/permission.js';
 import tasksRouter from './routes/tasks.js';
 import v2TasksRouter from './routes/v2Tasks.js';
 import sessionStateRouter from './routes/sessionState.js';
@@ -25,7 +26,7 @@ import bashReplRouter from './routes/bashRepl.js';
 import replHistoryRouter from './routes/replHistory.js';
 import transcriptRouter from './routes/transcript.js';
 import { ensureManifestDir } from './services/manifest.js';
-import { initAgentRuntime, getAskRegistry, getApproveRegistry } from './services/agentRuntime.js';
+import { initAgentRuntime, getAskRegistry, getApproveRegistry, getPermissionRegistry } from './services/agentRuntime.js';
 import {
   initBackgroundRuntime,
   initSubagentNotifierLifecycle,
@@ -136,12 +137,17 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   app.use('/api', (req, _res, next) => {
     (req as any)._askRegistry = getAskRegistry()
     ;(req as any)._approveRegistry = getApproveRegistry()
+    ;(req as any)._permissionRegistry = getPermissionRegistry()
     next()
   }, answerRouter)
   // ApproveRouter: 与 answerRouter 同一模式 — 共享 /api 前缀 + 上面的
   // middleware 已经把 _approveRegistry 绑到 req. 内部 path 是 /agent/approve
   // + /agent/approve/reject, 拼成 /api/agent/approve 与前端 ApproveDrawer 期望一致.
   app.use('/api', approveRouter)
+  // PermissionRouter: 同一模式 — middleware 已把 _permissionRegistry 绑到 req.
+  // 内部 path 是 /agent/permission-response, 拼成 /api/agent/permission-response
+  // 与前端 PermissionConfirmCard 期望一致.
+  app.use('/api', permissionRouter)
 
   // 移动端 UA 检测: 命中手机/平板 UA 时把 /agent 302 到 /m,
   // 让分享到 LAN 的链接在移动设备上自动进入移动版对话页面。

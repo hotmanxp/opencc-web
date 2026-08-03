@@ -45,6 +45,7 @@ import {
 import { hasExternalIncludes } from '@zn-ai/zn-agent-core/agents/memoryLoader'
 import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
+import { PermissionRegistry } from './permissionRegistry.js'
 
 let runtime: OpenccRuntime | null = null
 let currentSessionId: string | null = null
@@ -62,6 +63,7 @@ let transcriptStore: TranscriptStore | null = null
 let serverCwd: string | null = null
 const askRegistry = new AskRegistry()
 const approveRegistry = new ApproveRegistry()
+const permissionRegistry = new PermissionRegistry()
 
 // Bridge (zn-agent-core) emits tool events (e.g. AskUserQuestion's
 // tool_use:ask_pending) DIRECTLY through this bus when the tool
@@ -84,7 +86,8 @@ const approveRegistry = new ApproveRegistry()
 // tool's await while it waits for the user's answer.
 ;(globalThis as any).__zaiBridgeCtx = {
   askRegistry,
-  onYield: bridgeAskPendingToPromptAsk,
+  permissionRegistry,
+  onYield: bridgeToolYieldToPrompt,
 }
 
 /**
@@ -122,6 +125,71 @@ export function bridgeAskPendingToPromptAsk(
     questions: event.questions ?? [],
     ...(event.metadata ? { metadata: event.metadata } : {}),
   })
+}
+
+/**
+ * Translate a headless permission `tool_use:permission_pending` yield into a
+ * `prompt.permission` ServerEvent on the SSE bus. Same contract as
+ * `bridgeAskPendingToPromptAsk`: the wrapper (headlessPermissionBridge.ts)
+ * emits its own event vocabulary; the Web frontend only consumes
+ * `prompt.permission` (useEventStream.ts dispatch). Pushed through
+ * `__zaiEventBus` because the tool loop is itself blocked on the user's
+ * answer while the permission decision awaits the registry.
+ */
+export function bridgePermissionPendingToPromptPermission(
+  event:
+    | {
+        type?: string
+        id?: string
+        toolUseId?: string
+        toolName?: string
+        description?: string
+        input?: unknown
+        message?: string
+      }
+    | undefined,
+): void {
+  if (!event || event.type !== 'tool_use:permission_pending') return
+  const bus = (globalThis as any).__zaiEventBus as
+    | { emit: (e: unknown) => void }
+    | undefined
+  if (!bus) return
+  const bridge = ((globalThis as any).__zaiBridgeCtx ?? {}) as {
+    sessionId?: string
+  }
+  bus.emit({
+    type: 'prompt.permission',
+    sessionId: bridge.sessionId ?? '',
+    toolUseId: event.id ?? event.toolUseId ?? '',
+    toolName: event.toolName ?? '',
+    description: event.description ?? '',
+    input: event.input ?? null,
+    message: event.message ?? '',
+  })
+}
+
+/**
+ * Unified bridge onYield dispatcher. The AskUserQuestion wrapper and the
+ * headless permission bridge both emit through `__zaiBridgeCtx.onYield`; the
+ * per-tool bridge functions translate each vocabulary to the matching
+ * `prompt.*` ServerEvent.
+ */
+export function bridgeToolYieldToPrompt(
+  event:
+    | { type?: string; [k: string]: unknown }
+    | undefined,
+): void {
+  if (!event?.type) return
+  switch (event.type) {
+    case 'tool_use:ask_pending':
+      bridgeAskPendingToPromptAsk(event)
+      break
+    case 'tool_use:permission_pending':
+      bridgePermissionPendingToPromptPermission(event)
+      break
+    default:
+      break
+  }
 }
 
 // Per-session AbortController registry. The HTTP layer (POST /api/agent/abort)
@@ -185,6 +253,10 @@ export function getAskRegistry(): AskRegistry {
 
 export function getApproveRegistry(): ApproveRegistry {
   return approveRegistry
+}
+
+export function getPermissionRegistry(): PermissionRegistry {
+  return permissionRegistry
 }
 
 // 默认走 ~/.agents/skills (与 Nova CLI / OpenCode / OpenCC 共享, 见根 AGENTS.md).
@@ -347,6 +419,7 @@ export function getServerCwd(): string {
 export async function abortAgentSession(reason?: string): Promise<void> {
   askRegistry.abortAll(reason ?? 'session_aborted')
   approveRegistry.abortAll(reason ?? 'session_aborted')
+  permissionRegistry.abortAll(reason ?? 'session_aborted')
   if (currentSessionId) {
     abortSessionController(currentSessionId, reason)
     // Forward to the new OpenccRuntime as well — its internal
@@ -372,6 +445,7 @@ export async function abortAgentSession(reason?: string): Promise<void> {
 export function abortAllAgentPrompts(reason?: string): void {
   askRegistry.abortAll(reason ?? 'restart_drain_timeout')
   approveRegistry.abortAll(reason ?? 'restart_drain_timeout')
+  permissionRegistry.abortAll(reason ?? 'restart_drain_timeout')
   for (const sessionId of Array.from(sessionControllers.keys())) {
     abortSessionController(sessionId, reason ?? 'restart_drain_timeout')
   }

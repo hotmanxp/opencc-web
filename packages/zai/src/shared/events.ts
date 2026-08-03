@@ -130,6 +130,21 @@ const PromptEvent = z.discriminatedUnion('type', [
     summary: z.string().optional(),
     filePath: z.string(),
   }),
+  // prompt.permission — vendor 权限系统返回 behavior:'ask' 时的通用确认.
+  // headless permission bridge (headlessPermissionBridge.ts) 发
+  // tool_use:permission_pending, agentRuntime.ts 翻译成此事件; 前端
+  // PermissionConfirmCard 显示 toolName/description/input, 用户 allow/deny
+  // 后 POST /api/agent/permission-response 触发 registry resolve.
+  z.object({
+    ...Base.shape,
+    type: z.literal('prompt.permission'),
+    sessionId: z.string(),
+    toolUseId: z.string(),
+    toolName: z.string(),
+    description: z.string(),
+    input: z.unknown().nullable(),
+    message: z.string(),
+  }),
 ])
 
 const SystemEvent = z.discriminatedUnion('type', [

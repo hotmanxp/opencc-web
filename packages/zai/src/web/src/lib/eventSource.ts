@@ -34,6 +34,7 @@ const NAMED_EVENT_TYPES = [
   // prompt.*
   'prompt.ask',
   'prompt.approve',
+  'prompt.permission',
   // system.*
   'server.connected',
   'server.error',

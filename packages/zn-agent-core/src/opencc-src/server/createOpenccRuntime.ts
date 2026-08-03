@@ -23,6 +23,15 @@ export type OpenccQueryInput = {
   cwd?: string
   model?: string
   abortSignal?: AbortSignal
+  /**
+   * Optional per-query permission mode override. When absent the runtime
+   * keeps whatever mode the headless context was created with (zai-server:
+   * bypassPermissions). When present, the mode is applied to the shared
+   * AppState before the query runs — the canonical path for surfacing a
+   * session's plan mode to the vendor permission pipeline (so
+   * ExitPlanMode's `ask` flows through the web confirm UI).
+   */
+  permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'dontAsk' | 'plan'
 }
 
 export type OpenccServerEvent = {

@@ -6,6 +6,7 @@ import { runWithSdkContext, getSessionId } from '../bootstrap/state.js'
 import { wrapTaskAwareSetState } from '../../compat/runtime/agentTaskBridge.js'
 import { QueryEngine } from '../QueryEngine.js'
 import { FileStateCache } from '../utils/fileStateCache.js'
+import { transitionPermissionMode } from '../utils/permissions/permissionSetup.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
 
 export async function createOpenccRuntimeImpl(options) {
@@ -77,6 +78,31 @@ export async function createOpenccRuntimeImpl(options) {
     async *query(input) {
       if (closed) throw new Error('openccRuntime: shutdown')
       turnIndex += 1
+      // zai patch: apply a per-query permission mode override (e.g. a
+      // session switched to plan mode) onto the shared AppState before the
+      // tool loop runs. `transitionPermissionMode` maintains prePlanMode /
+      // auto-mode invariants the same way the TUI does. Without this, the
+      // headless context stays at its bootstrap mode (bypassPermissions)
+      // and ExitPlanMode's validateInput rejects the call ("not in plan
+      // mode") before the confirm UI ever appears.
+      if (input.permissionMode) {
+        ctx.appState.setState(prev => {
+          const current = prev.toolPermissionContext.mode
+          if (current === input.permissionMode) return prev
+          const next = transitionPermissionMode(
+            current,
+            input.permissionMode,
+            prev.toolPermissionContext,
+          )
+          return {
+            ...prev,
+            toolPermissionContext: {
+              ...next,
+              mode: input.permissionMode,
+            },
+          }
+        })
+      }
       if (input.abortSignal) {
         if (input.abortSignal.aborted) abortController.abort(input.abortSignal.reason)
         else input.abortSignal.addEventListener('abort', () => abortController.abort(input.abortSignal.reason), { once: true })

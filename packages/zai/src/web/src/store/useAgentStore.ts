@@ -136,6 +136,21 @@ export type ApproveState = {
   errorMessage?: string
 }
 
+// Per-tool-Use pending state for the vendor `behavior:'ask'` permission flow.
+// The headless permission bridge (headlessPermissionBridge.ts) surfaces every
+// `ask` decision as a prompt.permission SSE event; PermissionConfirmCard
+// renders it and POSTs /api/agent/permission-response.
+export type PermissionState = {
+  toolUseId: string
+  sessionId: string
+  toolName: string
+  description: string
+  input: unknown
+  message: string
+  status: 'pending' | 'submitting' | 'error'
+  errorMessage?: string
+}
+
 // 后台 agent_task 任务的"summary 视图" (Task 10 — SSE state push).
 //
 // 形态与 hooks/useBackgroundTasks.ts 里的同名 export interface 完全一致 —
@@ -193,6 +208,7 @@ interface AgentState {
   abortController: AbortController | null
   pendingAsk: AskState | null
   pendingApprove: ApproveState | null
+  pendingPermission: PermissionState | null
   setApproveComment: (comment: string) => void
   submitApprove: (decision: 'approved' | 'rejected') => Promise<void>
   applyPromptApprove: (event: any) => void
@@ -203,6 +219,9 @@ interface AgentState {
       | { ok: false; error: string },
   ) => void
   clearPendingApprove: (toolUseId: string) => void
+  applyPromptPermission: (event: any) => void
+  submitPermissionResponse: (decision: 'allow' | 'deny', message?: string) => Promise<void>
+  clearPendingPermission: (toolUseId: string) => void
   // 工具边界计数: 每出现一个新的 tool_use 起点, 计数 +1, 用于把
   // 工具调用前后的文字段强制放进不同 stream block. 不依赖 Anthropic SDK
   // 的 content_block_delta.index 是否正确递增.
@@ -466,6 +485,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   abortController: null,
   pendingAsk: null,
   pendingApprove: null,
+  pendingPermission: null,
   textSegmentRev: 0,
   segmentedToolUseIds: {},
   sendSeq: 0,
@@ -606,6 +626,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         (t === 'tool_use:done' || t === 'tool_use:error' ||
          t === 'tool_use:invalid' || t === 'tool_use:denied') &&
         s.pendingApprove.toolUseId === toolUseId
+      const shouldClearPermission =
+        s.pendingPermission &&
+        (t === 'tool_use:done' || t === 'tool_use:error' ||
+         t === 'tool_use:invalid' || t === 'tool_use:denied') &&
+        s.pendingPermission.toolUseId === toolUseId
       // 归一化成 'tool_use:start' 形态, ToolCallBlock 据此识别 status / 显示字段.
       // name 优先取 incoming (start 第一次写), 之后 done/error 不会带 name,
       // 落到 prev 上保留 start 的 name; 同理 input.
@@ -655,6 +680,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           const updates: Partial<AgentState> = {}
           if (shouldClearPending) updates.pendingAsk = null
           if (shouldClearApprove) updates.pendingApprove = null
+          if (shouldClearPermission) updates.pendingPermission = null
           if (shouldBumpSegment) {
             updates.textSegmentRev = s.textSegmentRev + 1
             updates.segmentedToolUseIds = {
@@ -727,6 +753,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const updates: Partial<AgentState> = { messages: next }
       if (shouldClearPending) updates.pendingAsk = null
       if (shouldClearApprove) updates.pendingApprove = null
+      if (shouldClearPermission) updates.pendingPermission = null
       // 安全网: 如果 start 条目早已存在但因为某种原因 segmented 标记缺失
       // (例如服务重启后部分状态恢复), 同样补一次 bump, 避免文段粘连.
       if (shouldBumpSegment) {
@@ -1561,6 +1588,68 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   clearPendingApprove: (toolUseId) => set((s) => {
     if (!s.pendingApprove || s.pendingApprove.toolUseId !== toolUseId) return s
     return { ...s, pendingApprove: null }
+  }),
+
+  // prompt.permission → pendingPermission. The headless permission bridge
+  // surfaces every vendor `behavior:'ask'` decision here; PermissionConfirmCard
+  // renders toolName/description/input and lets the user allow/deny.
+  applyPromptPermission: (event) => set((state) => {
+    if (!event || event.type !== 'prompt.permission') return state
+    return {
+      ...state,
+      pendingPermission: {
+        sessionId: event.sessionId,
+        toolUseId: event.toolUseId,
+        toolName: event.toolName ?? '',
+        description: event.description ?? '',
+        input: event.input ?? null,
+        message: event.message ?? '',
+        status: 'pending',
+      },
+    }
+  }),
+
+  // POST /api/agent/permission-response — resolves the pending registry
+  // entry in the headless permission bridge (allow → tool runs, deny →
+  // rejection surfaces to the model).
+  submitPermissionResponse: async (decision, message) => {
+    const s = get()
+    if (!s.pendingPermission) return
+    set({ pendingPermission: { ...s.pendingPermission, status: 'submitting' } })
+    try {
+      const headers: Record<string, string> = { 'Content-Type': 'application/json' }
+      const claimSid = s.pendingPermission.sessionId ?? s.sessionId
+      if (claimSid) headers['X-Session-Id'] = claimSid
+      const res = await fetch('/api/agent/permission-response', {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          toolUseId: s.pendingPermission.toolUseId,
+          decision,
+          ...(message ? { message } : {}),
+        }),
+      })
+      if (res.status === 404) {
+        set({ pendingPermission: { ...s.pendingPermission, status: 'error', errorMessage: '权限请求已过期' } })
+        return
+      }
+      if (res.status === 409) {
+        set({ pendingPermission: { ...s.pendingPermission, status: 'error', errorMessage: 'Session mismatch — refresh?' } })
+        return
+      }
+      if (!res.ok) {
+        set({ pendingPermission: { ...s.pendingPermission, status: 'error', errorMessage: `HTTP ${res.status}` } })
+        return
+      }
+      set({ pendingPermission: null })
+    } catch (err) {
+      set({ pendingPermission: { ...s.pendingPermission, status: 'error', errorMessage: (err as Error).message } })
+    }
+  },
+
+  clearPendingPermission: (toolUseId) => set((s) => {
+    if (!s.pendingPermission || s.pendingPermission.toolUseId !== toolUseId) return s
+    return { ...s, pendingPermission: null }
   }),
 
   // ── SSE state.* event reducers (Task 10) ───────────────────────────
