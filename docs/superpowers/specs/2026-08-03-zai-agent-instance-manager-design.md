@@ -179,7 +179,7 @@ interface InstanceStatus {              // 运行期状态，同样落盘
 
 - **同一 cwd 多个实例**：允许。端口已隔离；会话共享 `~/.zai/transcripts` 按 cwd 隔离（复用现有 multi-pwd 机制）。
 - **子实例间端口冲突**：spawn 时 `findAvailablePort` 实际 bind 探测，天然避开。
-- **当前实例**：`isCurrent` 标记，UI 禁操作，API 层拒绝 stop/restart/delete。
+- **当前实例**：`isCurrent` 标记，UI 禁操作，API 层拒绝 stop/restart/delete。当前实例的 port 取 `process.env.ZAI_PORT`（dev 下为 API 端口，仅用于「当前」标记展示，不参与子实例端口分配）；子实例端口分配由 `findAvailablePort` 实际 bind 探测保证不与当前实例任何端口冲突。
 - **心跳丢失但进程活着**：超时后 supervisor kill 进程，避免占端口。
 
 ## 测试设计
