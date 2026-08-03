@@ -2,6 +2,7 @@ import { useEffect } from 'react'
 import { subscribeServerEvents } from '../lib/eventSource.js'
 import { useAgentStore } from './useAgentStore.js'
 import { useAppStore } from './useAppStore.js'
+import { useInstanceStore } from './useInstanceStore.js'
 import type { ServerEvent } from '../../../shared/events.js'
 
 // 订阅 useAgentStore.sessionId 变化 — sessionId 改变时 React 会重跑 effect,
@@ -90,5 +91,8 @@ function dispatch(event: ServerEvent) {
       useAgentStore.getState().applyV2TaskChanged(event); break
     case 'agent_task.changed':
       useAgentStore.getState().applyAgentTaskChanged(event); break
+    case 'instance.changed':
+      useInstanceStore.getState().applyInstanceChanged(event)
+      break
   }
 }
