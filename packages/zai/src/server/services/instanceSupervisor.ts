@@ -206,9 +206,14 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       const timeout = deps.sleep(STOP_TIMEOUT_MS).then(() => 'timeout' as const)
       if (await Promise.race([exitPromise.then(() => 'exit' as const), timeout]) === 'timeout') {
         // Child ignored SIGINT. Escalate to SIGKILL and keep awaiting exit
-        // up to a bounded post-SIGKILL window before returning.
+        // up to a bounded post-SIGKILL window. If exit still doesn't fire
+        // we settle the state to `stopped` so callers don't see a hung
+        // `stopping` snapshot.
         try { child.kill('SIGKILL') } catch { /* ignore */ }
-        await Promise.race([exitPromise, deps.sleep(POST_SIGKILL_EXIT_GRACE_MS)])
+        const settled = await Promise.race([exitPromise, deps.sleep(POST_SIGKILL_EXIT_GRACE_MS).then(() => 'grace' as const)])
+        if (settled === 'grace' && entry.child === child) {
+          setStatus(entry, { state: 'stopped', port: null, pid: null, lastError: null }); emit(id, entry.status); persistSafe()
+        }
       }
       return snapshotOf(entry)
     }
