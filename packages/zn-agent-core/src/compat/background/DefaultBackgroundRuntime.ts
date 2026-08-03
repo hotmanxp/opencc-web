@@ -48,6 +48,21 @@ interface TaskRecord {
   emitter: EventEmitter
 }
 
+/** attach() 的入参。caller 提供预先生成的 id(例如 AgentTool agentId),
+ * 由 DefaultBackgroundRuntime 只做"登记 + 持久化 + SSE 通知",不调度执行
+ * —— 执行由 caller(AgentTool / runAgent)自己驱动,通过 appendTaskEvent
+ * 推送活动事件,完成后调 finalizeTask 标终态。 */
+export interface AttachInput {
+  id: string
+  input: DispatchInput
+  /**
+   * 与 dispatch 同样的 metadata schema:
+   *   parentSessionId / agentType / description
+   * 用于 SubagentNotifier 把完成事件回流到父 session。
+   */
+  metadata?: Record<string, unknown>
+}
+
 export interface DefaultBackgroundRuntimeOptions {
   /**
    * Background tasks drive the agent via OpenccRuntime.query (Task 5 +
@@ -172,6 +187,129 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
     }
     rec.controller.abort(reason)
     return { ok: true }
+  }
+
+  /**
+   * 登记一个 caller 外部管理的任务(AgentTool 子代理走这条路径)。与 dispatch 的区别:
+   *   - id 由 caller 提供(AgentTool 已用 createAgentId() 生成),不重新分配
+   *   - 不入 queue,不调 runOne —— 执行由 caller(AgentTool 调用 runAgent)
+   *     驱动,caller 通过 appendTaskEvent / finalizeTask 推送活动事件 + 终态
+   *   - 落盘 + emit agent_task.changed,与 dispatch 的 notifyChange 保持同一通知链
+   *
+   * 幂等:已存在相同 id 时直接返回现有 task(用于 AgentTool 重试 / 重复注册场景)。
+   */
+  async attach(input: AttachInput): Promise<BackgroundTask> {
+    const existing = this.records.get(input.id)
+    if (existing) return existing.task
+
+    const now = Date.now()
+    const meta = (input.metadata ?? {}) as {
+      parentSessionId?: unknown
+      agentType?: unknown
+      description?: unknown
+    }
+    const task: BackgroundTask = {
+      id: input.id,
+      status: 'queued',
+      input: input.input,
+      createdAt: now,
+      eventCount: 0,
+      ...(typeof meta.parentSessionId === 'string'
+        ? { parentSessionId: meta.parentSessionId }
+        : {}),
+      ...(typeof meta.agentType === 'string' ? { agentType: meta.agentType } : {}),
+      ...(typeof meta.description === 'string'
+        ? { description: meta.description }
+        : {}),
+    }
+    await this.store.save(task)
+
+    const record: TaskRecord = {
+      task,
+      controller: new AbortController(),
+      emitter: new EventEmitter(),
+    }
+    this.records.set(input.id, record)
+    this.notifyChange(task)
+    return task
+  }
+
+  /**
+   * 把 caller 推过来的子代理事件包装为 TaskEvent,落盘 + 转发给 SSE 订阅者。
+   * 镜像 dispatch+runOne 内 `store.appendEvent + emitter.emit('event', taskEv)` 的两步,
+   * 但不调度下一次 attempt —— caller 自己控制 agent 循环。
+   *
+   * 鲁棒性:
+   *   - task 在 records 中(attach 走过):直接 append
+   *   - task 不在 records 但 disk 有(进程重启后 AgentTool 还在跑):懒重建 record 再 append
+   *   - 都没有:warn + silent drop(避免 AgentTool 路径因 SSE 漏接而崩溃)
+   */
+  async appendTaskEvent(
+    taskId: string,
+    rawEv: { type: string; [k: string]: unknown },
+  ): Promise<void> {
+    const rec = await this.ensureRecord(taskId)
+    if (!rec) {
+      console.warn(
+        `[DefaultBackgroundRuntime] appendTaskEvent: task ${taskId} not found (never attached?)`,
+      )
+      return
+    }
+
+    const seq = rec.task.eventCount + 1
+    const taskEv: TaskEvent = {
+      seq,
+      eventId: String(
+        (rawEv as { eventId?: unknown }).eventId ??
+          `attach-${taskId}-${seq}`,
+      ),
+      ts: Number((rawEv as { ts?: unknown }).ts ?? Date.now()),
+      type: String(rawEv.type),
+      data: stripMeta(rawEv),
+    }
+    rec.task.eventCount = seq
+    await this.store.save(rec.task)
+    await this.store.appendEvent(taskId, taskEv)
+    rec.emitter.emit('event', taskEv)
+  }
+
+  /**
+   * 把 caller 外部管理的任务标终态(completed / failed / cancelled)。
+   * 幂等:已 terminal 直接返回。同步触发 agent_task.changed + emitter.emit('done'),
+   * 让抽屉 SSE 立即结束流。
+   */
+  async finalizeTask(
+    taskId: string,
+    status: 'completed' | 'failed' | 'cancelled',
+    error?: BackgroundTask['error'],
+  ): Promise<void> {
+    const rec = await this.ensureRecord(taskId)
+    if (!rec) return
+    if (isTerminal(rec.task.status)) return
+    rec.task.status = status
+    rec.task.finishedAt = Date.now()
+    if (error) rec.task.error = error
+    await this.store.save(rec.task)
+    this.notifyChange(rec.task)
+    rec.emitter.emit('done')
+  }
+
+  /**
+   * 拿 task 的 TaskRecord。records 没找到但 store 有:重建;都没有:返回 null。
+   * 重建路径让 zai server 重启后 AgentTool 还能继续 appendTaskEvent。
+   */
+  private async ensureRecord(taskId: string): Promise<TaskRecord | null> {
+    const inMem = this.records.get(taskId)
+    if (inMem) return inMem
+    const persisted = await this.store.load(taskId)
+    if (!persisted) return null
+    const record: TaskRecord = {
+      task: persisted,
+      controller: new AbortController(),
+      emitter: new EventEmitter(),
+    }
+    this.records.set(taskId, record)
+    return record
   }
 
   async *events(

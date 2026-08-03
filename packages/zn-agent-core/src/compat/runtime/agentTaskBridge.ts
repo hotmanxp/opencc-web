@@ -26,6 +26,8 @@
  */
 import { stateChangeBus } from '../../stateChangeBus.js'
 import type { BackgroundTask, TaskStatus } from '../background/types.js'
+import type { BackgroundRuntime } from '../background/BackgroundRuntime.js'
+import { getBackgroundRuntime } from '../background/registry.js'
 
 interface ZaiEventBusLike {
   emit: (event: unknown) => void
@@ -181,5 +183,88 @@ export function wrapTaskAwareSetState(
         )
       }
     }
+  }
+}
+
+/* -------------------------------------------------------------------------
+ * AgentTool → DefaultBackgroundRuntime 事件镜像 helper
+ * -----------------------------------------------------------------------
+ * AgentTool 在 headless AppState 中维护 LocalAgentTask(走 setAppState + 上面
+ * 的 wrapTaskAwareSetState 桥接)但抽屉的 timeline 走的是
+ * GET /api/tasks/:id/events → DefaultBackgroundRuntime.events()。两者原本是
+ * 两条独立管道 —— 上一段解决了"task 状态变化"(`agent_task.changed`),本段
+ * 解决"task 活动事件"(assistant / tool_use / 用户消息)。
+ *
+ * 设计:
+ *   - 用 caller 已有的 agentId 作为 BackgroundRuntime 的 taskId(无 id 翻译)
+ *   - attach 通知 DefaultBackgroundRuntime "登记"这条任务但不调度执行
+ *     (AgentTool 自己跑 agent 循环,DefaultBackgroundRuntime 只负责落盘 +
+ *     SSE 转发)
+ *   - appendTaskEvent 在 AgentTool 拿到每个 Message 后推过去 —— 通过 SSE,
+ *     抽屉订阅就能渲染工具调用 + 内容流
+ *   - finalizeTask 在 completeAsyncAgent / killAsyncAgent / failAsyncAgent /
+ *     unregisterAgentForeground 旁补一次终态广播
+ *
+ * 调用方全部 `try { ... } catch {}` 风格 — 在纯 zn-agent-core 单测环境
+ * / 老 zai server 没 init BackgroundRuntime 时静默跳过,不影响
+ * LocalAgentTask 主路径。
+ */
+
+type AttachInput = Parameters<BackgroundRuntime['attach']>[0]
+
+function tryGetBg(): BackgroundRuntime | null {
+  try {
+    return getBackgroundRuntime()
+  } catch {
+    // BackgroundRuntime 未初始化(纯 zn-agent-core 单测 / 早期 boot 阶段) —
+    // 静默回退,AgentTool 路径继续走 LocalAgentTask,不影响主流程。
+    return null
+  }
+}
+
+/** AgentTool 用:登记 task 到 DefaultBackgroundRuntime(若已 init)。 */
+export async function mirrorAttachTaskToBg(
+  input: AttachInput,
+): Promise<void> {
+  const bg = tryGetBg()
+  if (!bg) return
+  try {
+    await bg.attach(input)
+  } catch (err) {
+    console.warn('[agentTaskBridge] mirrorAttachTaskToBg failed:', err)
+  }
+}
+
+/** AgentTool 用:把每个 from runAgent() 的 yielded Message 推给 BackgroundRuntime,
+ * 落盘 + 转发给 SSE 抽屉订阅。type 直接用 message.type,data 字段由 bg 自己
+ * stripMeta —— 与 DefaultBackgroundRuntime.runOne 内部对 rawEv 的处理一致。 */
+export async function mirrorAppendBgEvent(
+  taskId: string,
+  message: { type: string; [k: string]: unknown },
+): Promise<void> {
+  const bg = tryGetBg()
+  if (!bg) return
+  try {
+    await bg.appendTaskEvent(taskId, message)
+  } catch (err) {
+    console.warn('[agentTaskBridge] mirrorAppendBgEvent failed:', err)
+  }
+}
+
+type FinalizeStatus = 'completed' | 'failed' | 'cancelled'
+
+/** AgentTool 用:在 LocalAgentTask 终态切换时同步标 BackgroundRuntime 终态,
+ * SSE 抽屉订阅流立即结束。 */
+export async function mirrorFinalizeBgTask(
+  taskId: string,
+  status: FinalizeStatus,
+  error?: BackgroundTask['error'],
+): Promise<void> {
+  const bg = tryGetBg()
+  if (!bg) return
+  try {
+    await bg.finalizeTask(taskId, status, error)
+  } catch (err) {
+    console.warn('[agentTaskBridge] mirrorFinalizeBgTask failed:', err)
   }
 }

@@ -5,6 +5,13 @@ import type {
   TaskListFilter,
 } from './types.js'
 
+/** attach() 的入参;详见 DefaultBackgroundRuntime.attach。 */
+export interface AttachInput {
+  id: string
+  input: DispatchInput
+  metadata?: Record<string, unknown>
+}
+
 export interface BackgroundRuntime {
   /** 入队任务,返回当前状态(queued 或 running)。 */
   dispatch(input: DispatchInput): Promise<BackgroundTask>
@@ -29,4 +36,27 @@ export interface BackgroundRuntime {
   ): AsyncIterable<TaskEvent>
   /** 优雅停止:等待 running 任务完成或超时后强制 abort。 */
   shutdown(): Promise<void>
+  /**
+   * 登记 caller 外部管理的任务(AgentTool 子代理走这条路径)。不调度执行,
+   * 由 caller 通过 appendTaskEvent / finalizeTask 推活动事件 + 终态。详见
+   * DefaultBackgroundRuntime.attach。
+   */
+  attach(input: AttachInput): Promise<BackgroundTask>
+  /**
+   * 把 caller 推过来的事件包装为 TaskEvent 落盘 + 转发给 SSE 订阅者。详见
+   * DefaultBackgroundRuntime.appendTaskEvent。
+   */
+  appendTaskEvent(
+    taskId: string,
+    rawEv: { type: string; [k: string]: unknown },
+  ): Promise<void>
+  /**
+   * 把 caller 外部管理的任务标终态(completed / failed / cancelled)。详见
+   * DefaultBackgroundRuntime.finalizeTask。
+   */
+  finalizeTask(
+    taskId: string,
+    status: 'completed' | 'failed' | 'cancelled',
+    error?: BackgroundTask['error'],
+  ): Promise<void>
 }

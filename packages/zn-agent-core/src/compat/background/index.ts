@@ -8,7 +8,7 @@ export type {
 } from './types.js'
 export { TaskNotFoundError } from './types.js'
 
-export type { BackgroundRuntime } from './BackgroundRuntime.js'
+export type { BackgroundRuntime, AttachInput } from './BackgroundRuntime.js'
 // `AgentRuntime` interface from `compat/runtime/contract.ts` was the
 // legacy compat surface. Task 6 deletes contract.ts; the new
 // `OpenccRuntime` interface from `opencc-src/server/serverTypes.ts`
