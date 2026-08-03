@@ -1,5 +1,6 @@
 // @ts-nocheck
 import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js';
+import { mirrorFinalizeBgTask } from '../../../compat/runtime/agentTaskBridge.js';
 import { OUTPUT_FILE_TAG, STATUS_TAG, SUMMARY_TAG, TASK_ID_TAG, TASK_NOTIFICATION_TAG, TOOL_USE_ID_TAG, WORKTREE_BRANCH_TAG, WORKTREE_PATH_TAG, WORKTREE_TAG } from '../../constants/xml.js';
 import { abortSpeculation } from '../../services/PromptSuggestion/speculation.js';
 import type { AppState } from '../../state/AppState.js';
@@ -300,6 +301,8 @@ export function killAsyncAgent(taskId: string, setAppState: SetAppState): void {
   });
   if (killed) {
     void evictTaskOutput(taskId);
+    // zai patch: 镜像终态到 DefaultBackgroundRuntime,让 SSE 抽屉流立即结束。
+    void mirrorFinalizeBgTask(taskId, 'cancelled');
   }
 }
 
@@ -429,6 +432,11 @@ export function completeAgentTask(result: AgentToolResult, setAppState: SetAppSt
     };
   });
   void evictTaskOutput(taskId);
+  // zai patch: 镜像终态到 DefaultBackgroundRuntime(BG Runtime 那边 finalizeTask
+  // 内部幂等,所以即使 LocalAgentTask 切换也安全)。注意:completeAgentTask 可能在
+  // foreground 终态清洗路径被复用 —— 那里 AgentTool.tsx 也会再调一次,在
+  // DefaultBackgroundRuntime 的幂等性保护下重复 finalize 是 no-op。
+  void mirrorFinalizeBgTask(taskId, 'completed');
   // Note: Notification is sent by AgentTool via enqueueAgentNotification
 }
 
@@ -453,6 +461,8 @@ export function failAgentTask(taskId: string, error: string, setAppState: SetApp
     };
   });
   void evictTaskOutput(taskId);
+  // zai patch: 镜像终态到 DefaultBackgroundRuntime
+  void mirrorFinalizeBgTask(taskId, 'failed', { message: error, category: 'internal' });
   // Note: Notification is sent by AgentTool via enqueueAgentNotification
 }
 

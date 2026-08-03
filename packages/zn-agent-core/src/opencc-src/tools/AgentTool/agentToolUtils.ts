@@ -1,6 +1,10 @@
 // @ts-nocheck
 import { feature } from 'bun:bundle'
 import { z } from 'zod/v4'
+import {
+  mirrorAppendBgEvent,
+  mirrorFinalizeBgTask,
+} from '../../../compat/runtime/agentTaskBridge.js'
 import { clearInvokedSkillsForAgent } from '../../bootstrap/state.js'
 import {
   ALL_AGENT_DISALLOWED_TOOLS,
@@ -610,6 +614,8 @@ export async function runAsyncAgentLifecycle({
           lastToolName,
         )
       }
+      // zai patch: 推给 DefaultBackgroundRuntime → 抽屉 SSE timeline。
+      void mirrorAppendBgEvent(taskId, message as { type: string; [k: string]: unknown })
     }
 
     stopSummarization?.()
@@ -621,6 +627,8 @@ export async function runAsyncAgentLifecycle({
     // (git exec) are notification embellishments that can hang — they must
     // not gate the status transition (gh-20236).
     completeAsyncAgent(agentResult, rootSetAppState)
+    // zai patch: 同步镜像终态到 DefaultBackgroundRuntime —— SSE 抽屉流立刻结束。
+    void mirrorFinalizeBgTask(taskId, 'completed')
 
     let finalMessage = extractTextContent(agentResult.content, '\n')
 
@@ -663,6 +671,8 @@ export async function runAsyncAgentLifecycle({
       // must fire unconditionally. Transition status BEFORE worktree cleanup
       // so TaskOutput unblocks even if git hangs (gh-20236).
       killAsyncAgent(taskId, rootSetAppState)
+      // zai patch: 同步镜像终态
+      void mirrorFinalizeBgTask(taskId, 'cancelled')
       logEvent('tengu_agent_tool_terminated', {
         agent_type:
           metadata.agentType as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
@@ -689,6 +699,8 @@ export async function runAsyncAgentLifecycle({
     }
     const msg = errorMessage(error)
     failAsyncAgent(taskId, msg, rootSetAppState)
+    // zai patch: 同步镜像终态(failed)附 error 信息
+    void mirrorFinalizeBgTask(taskId, 'failed', { message: msg, category: 'internal' })
     const worktreeResult = await getWorktreeResult()
     enqueueAgentNotification({
       taskId,

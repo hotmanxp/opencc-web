@@ -4,6 +4,11 @@ import { statSync } from 'fs';
 import { isAbsolute } from 'path';
 import * as React from 'react';
 import { buildTool, type ToolDef, toolMatchesName } from 'src/Tool.js';
+import {
+  mirrorAppendBgEvent,
+  mirrorAttachTaskToBg,
+  mirrorFinalizeBgTask,
+} from '../../../compat/runtime/agentTaskBridge.js';
 import type { Message as MessageType, NormalizedUserMessage } from 'src/types/message.js';
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js';
 import { z } from 'zod/v4';
@@ -893,6 +898,20 @@ export const AgentTool = buildTool({
         // They are killed explicitly via chat:killAgents.
         toolUseId: toolUseContext.toolUseId
       });
+      // zai patch: 把子代理登记到 DefaultBackgroundRuntime 让抽屉 SSE timeline
+      // 能拿到 per-task 事件流(zai Web `subscribeTaskEvents` → events(id))。
+      // attach 不调度执行 —— AgentTool 自己跑 runAgent 循环,后续通过
+      // mirrorAppendBgEvent 推送每个 yielded Message。
+      void mirrorAttachTaskToBg({
+        id: asyncAgentId,
+        input: { prompt, cwd: toolUseContext.options.isNonInteractiveSession ? process.cwd() : getCwd(), agent: selectedAgent.agentType, model: model ?? toolUseContext.options.mainLoopModel },
+        metadata: {
+          parentSessionId: getParentSessionId(),
+          agentType: selectedAgent.agentType,
+          description,
+          ...(name ? { agentName: name } : {}),
+        },
+      });
 
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
       // so we don't leave a stale entry if spawn fails. Sync agents skipped —
@@ -1025,6 +1044,18 @@ export const AgentTool = buildTool({
             type: 'background' as const
           }));
           cancelAutoBackground = registration.cancelAutoBackground;
+          // zai patch: 同步 (foreground) 子代理同样登记到 DefaultBackgroundRuntime,
+          // 让抽屉 SSE timeline 能跟着 sub-agent 的 tool_use 流走完。
+          void mirrorAttachTaskToBg({
+            id: syncAgentId,
+            input: { prompt, cwd: getCwd(), agent: selectedAgent.agentType, model: model ?? toolUseContext.options.mainLoopModel },
+            metadata: {
+              parentSessionId: getParentSessionId(),
+              agentType: selectedAgent.agentType,
+              description,
+              ...(name ? { agentName: name } : {}),
+            },
+          });
         }
 
         // Track if we've shown the background hint UI
@@ -1272,6 +1303,10 @@ export const AgentTool = buildTool({
                   updateAsyncAgentProgress(foregroundTaskId, getProgressUpdate(syncTracker), rootSetAppState);
                 }
               }
+              // zai patch: 推给 DefaultBackgroundRuntime 让抽屉 SSE timeline
+              // 看到每个 tool_use / assistant message。appendTaskEvent 在
+              // BackgroundRuntime 未初始化时内部 try/catch 静默回退。
+              void mirrorAppendBgEvent(foregroundTaskId, message as { type: string; [k: string]: unknown });
             }
 
             // Forward bash_progress events from sub-agent to parent so the SDK
@@ -1356,6 +1391,16 @@ export const AgentTool = buildTool({
           // Unregister foreground task if agent completed without being backgrounded
           if (foregroundTaskId) {
             unregisterAgentForeground(foregroundTaskId, rootSetAppState);
+            // zai patch: 同步镜像终态到 DefaultBackgroundRuntime。LocalAgentTask
+            // unregister 后从 appState.tasks 删掉,但 BG Runtime 的 record 留着
+            // — 抽屉 SSE 重连 / 关闭重开 仍能回放历史事件,然后读到终态完成流。
+            void mirrorFinalizeBgTask(
+              foregroundTaskId,
+              syncAgentError ? 'failed' : wasAborted ? 'cancelled' : 'completed',
+              syncAgentError
+                ? { message: syncAgentError.message, category: 'internal' }
+                : undefined,
+            );
             // Notify SDK consumers (e.g. VS Code subagent panel) that this
             // foreground agent is done. Goes through drainSdkEvents() — does
             // NOT trigger the print.ts XML task_notification parser or the LLM loop.
