@@ -29,7 +29,7 @@ export default function PermissionConfirmCard(): JSX.Element | null {
 
   return (
     <div
-      className="question-card-scope"
+      className="question-card-scope permission-confirm-card"
       style={{
         margin: '12px 24px',
         padding: '12px 14px',
@@ -79,7 +79,7 @@ export default function PermissionConfirmCard(): JSX.Element | null {
             background: 'var(--bg-body)',
             border: '1px solid var(--border-light)',
             borderRadius: 4,
-            color: 'var(--text-dim-75)',
+            color: 'var(--text-primary)',
             fontSize: 12,
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-all',

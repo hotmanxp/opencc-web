@@ -313,6 +313,9 @@ body {
 .question-card-scope *:not(.ant-tag):not(.ant-tag *) {
   color: #1f1f1f !important;
 }
+.question-card-scope.permission-confirm-card pre:not(.ant-tag):not(.ant-tag *) {
+  color: var(--text-primary) !important;
+}
 /* antd Tag 在 darkAlgorithm 下用紫色背景 + 白色文字, 通配符不能把它强制成深色
    (否则深色字 on 紫色背景完全看不清). 这里显式覆盖回白色, 让 pill 内部文字
    仍然能看清. */
