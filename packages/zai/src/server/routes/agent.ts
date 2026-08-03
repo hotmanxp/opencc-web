@@ -10,6 +10,7 @@ import {
   getCurrentSessionId,
   getAskRegistry,
   getApproveRegistry,
+  getPermissionRegistry,
   getRuntime,
   getTranscriptStore,
   registerSessionController,
@@ -46,6 +47,14 @@ router.use('/agent', commandsRouter)
 // 应该在 askRegistry.register 里接一个独立的 setTimeout,而不是复用这里的
 // abortController。
 const HARD_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
+// ExitPlanMode 退出 plan 后的 mode 回写表。用户把会话切到 plan（PATCH
+// permissionMode='plan'）时记录"进入 plan 前的 mode"；当模型调用
+// ExitPlanMode 且用户确认（headless permission bridge allow → vendor
+// ExitPlanMode.call 把 AppState mode 恢复为 prePlanMode）后，/agent/prompt
+// 把 transcript.meta.permissionMode 回写为该值。否则下一轮查询又从 meta
+// 透传 'plan'，会话永远卡在 plan mode。key 用 sessionId（跨会话隔离）。
+const planPreModeBySession = new Map<string, string>();
 
 // Image content block: 对齐 Anthropic SDK Base64ImageSource.
 // 收紧要点:
@@ -657,6 +666,9 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
     // ApproveRegistry 同样要在 client 断开时释放: 阻止 /api/agent/approve
     // 路由对一个已经死掉的 client 永久挂起. spec §4.4.
     getApproveRegistry().abortAll("client_disconnect");
+    // PermissionRegistry（behavior:'ask' 确认）同样释放，否则 pending 权限
+    // 会挂到 HARD_TIMEOUT。
+    getPermissionRegistry().abortAll("client_disconnect");
   });
 
   // 立即响应，事件通过 eventBus → /api/event SSE
@@ -665,6 +677,9 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   // 异步 fire-and-forget 运行 runtime; 整段包进 runWithSessionId 让 queryLoop
   // 里的 getCwd() 通过 ALS 解析到本 session 的逻辑 cwd。
   void runWithSessionId(sessionId, async () => {
+    // ExitPlanMode 确认（用户 allow → vendor 退出 plan mode）检测标记。
+    // 声明在 try 外：finally 块（回写 meta）需要读到它。
+    let exitPlanConfirmed = false;
     try {
       // System-prompt 拼装由 queryLoop.assembleSystemPrompt 内部完成:
       //   1. 7 段 DEFAULT_STATIC_INTRO (static intro)
@@ -904,7 +919,9 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
             output?: unknown
             isError?: boolean
             turnIndex?: number
+            toolName?: string
           }
+          if (ev.toolName === 'ExitPlanMode') exitPlanConfirmed = true
           if (ev.toolUseId) {
             try {
               await appendToolResult(
@@ -1035,6 +1052,24 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
       } as any);
     } finally {
       clearTimeout(timer);
+      // ExitPlanMode 确认（用户 allow → vendor 已退出 plan mode）后，把
+      // transcript.meta.permissionMode 回写为进入 plan 前的 mode。否则
+      // 下一轮查询又从 meta 透传 'plan'，会话永远卡在 plan mode。
+      if (exitPlanConfirmed) {
+        const pre = planPreModeBySession.get(sessionId)
+        planPreModeBySession.delete(sessionId)
+        if (pre) {
+          try {
+            await getTranscriptStore().patch(
+              sessionId,
+              { permissionMode: pre },
+              { cwd },
+            )
+          } catch {
+            // 回写失败不影响本轮结果；下轮仍可能切回 plan，用户可手动切。
+          }
+        }
+      }
       // 无论正常结束 / abort / 异常抛出 — 都必须从 sessionControllers map
       // 释放掉, 否则这个 sid 会一直留在 map 里, 下一次同 sid 的 prompt
       // registerSessionController 会覆盖. 留着不算 bug, 但内存会慢慢涨.
@@ -1146,6 +1181,22 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
       await store.patch(sid, { model: parsed.data.model }, { cwd: ctx.cwd });
     }
     if (parsed.data.permissionMode) {
+      if (parsed.data.permissionMode === "plan") {
+        // 记录进入 plan 前的 mode，供 ExitPlanMode 确认后回写 meta。
+        if (!planPreModeBySession.has(sid)) {
+          let pre = "bypassPermissions";
+          try {
+            const cur = await store.read(sid, { cwd: ctx.cwd });
+            const curMode = (cur.meta as { permissionMode?: string }).permissionMode;
+            if (curMode && curMode !== "plan") pre = curMode;
+          } catch {
+            // 会话文件不可读 → 用默认底层 mode
+          }
+          planPreModeBySession.set(sid, pre);
+        }
+      } else {
+        planPreModeBySession.delete(sid);
+      }
       await store.patch(sid, { permissionMode: parsed.data.permissionMode }, { cwd: ctx.cwd });
     }
     res.json({ ok: true });
