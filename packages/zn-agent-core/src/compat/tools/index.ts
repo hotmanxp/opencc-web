@@ -32,6 +32,7 @@ import { z } from 'zod'
 import type { Tool, ToolCallCtx } from '../runtime/modelCaller.js'
 import type { Tool as RuntimeTool } from '../runtime/types.js'
 import { makeTool } from './makeTool.js'
+import { taskTools } from './tasks/index.js'
 export { makeTool }
 
 const execAsync = promisify(exec)
@@ -498,6 +499,7 @@ export function buildDefaultTools(opts?: {
     fileEditTool,
     askUserQuestionTool,
     skillTool,
+    ...taskTools,
   ]
 
   const skillsDirs = opts?.skillsDirs ?? []
