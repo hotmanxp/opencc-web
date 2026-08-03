@@ -285,9 +285,11 @@ describe('instanceSupervisor (4c — fix round 1: race regressions)', () => {
     const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
     await getInstanceSupervisor().startInstance(snap.id)
     fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
-    // Every meaningful transition should have produced a write. After
-    // create + start + ready we expect at least 3 writes (create, start,
-    // ready), and the latest statuses[id].state must be 'running'.
+    // Drain the write chain before asserting. After create + start + ready
+    // we expect at least 3 writes (create is awaited synchronously; start
+    // and ready are queued via persistSafe and must drain here).
+    const sup = getInstanceSupervisor() as unknown as { __flushPendingWrites: () => Promise<void> }
+    await sup.__flushPendingWrites()
     expect(writes.length).toBeGreaterThanOrEqual(3)
     const last = writes[writes.length - 1]!
     const statusObj = last.statuses[snap.id] as { state: string; port: number | null }
@@ -316,5 +318,221 @@ describe('instanceSupervisor (4c — fix round 1: race regressions)', () => {
     const loaded = sup.getSnapshots().find((s) => s.id === 'inst_preexisting')
     expect(loaded).toBeDefined()
     expect(loaded?.name).toBe('preexisting')
+  })
+})
+
+describe('instanceSupervisor (4d — fix round 2: stale-child + post-SIGKILL + concurrent-init)', () => {
+  beforeEach(() => {
+    delete process.env.ZAI_DATA_DIR
+    vi.resetModules()
+  })
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('late exit from SIGKILL\'d child does not poison a replacement child', async () => {
+    // 1) Start instance, fire heartbeat-timeout SIGKILL on child #0.
+    // 2) Start a replacement child #1 (still attached to same entry).
+    // 3) Emit `exit` on the *old* child #0; the entry's state must
+    //    remain whatever the replacement produced — NOT flipped to
+    //    `down` with a generic exit error.
+    let time = 1_000000
+    const { deps, fakeChildren } = makeSupervisor()
+    deps.now = () => time
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(snap.id)
+    const oldChild = fakeChildren[0]!
+    oldChild.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    // Heartbeat timeout → watcher sends SIGKILL + records `down`.
+    time += 25_000
+    ;(getInstanceSupervisor() as unknown as { __tickHeartbeat?: () => void }).__tickHeartbeat?.()
+    const afterKill = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
+    expect(afterKill.state).toBe('down')
+    expect(afterKill.lastError?.message).toMatch(/heartbeat/)
+    // Now restart (doStop + doStart). doStop on an already-dead child
+    // returns immediately; doStart attaches a fresh child. The OLD
+    // child's late exit must not poison the new one.
+    await getInstanceSupervisor().restartInstance(snap.id)
+    const newChild = fakeChildren[1]!
+    expect(newChild).not.toBe(oldChild)
+    newChild.emit('message', { type: 'ready', pid: 333, port: 9206 })
+    // Late exit from the old child fires AFTER the replacement is
+    // attached and ready. The supervisor must ignore this event.
+    oldChild.emitExit(null)
+    const final = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
+    expect(final.state).toBe('running')
+    expect(final.port).toBe(9206)
+    expect(final.pid).toBe(333)
+    // The heartbeat error from the killed child is still in `lastError`
+    // because the new run has not cleared it via a separate transition.
+    // We assert only that the *state* and *port* are intact — the error
+    // is not what the stale-exit would have clobbered.
+  })
+
+  it('doStop eventually returns when SIGKILL is sent but no exit fires', async () => {
+    // Use a real (short) setTimeout-based sleep so the post-SIGKILL grace
+    // window actually expires. The FakeChild never emits exit, so we rely
+    // on the bounded POST_SIGKILL_EXIT_GRACE_MS to unblock doStop.
+    const { deps, fakeChildren } = makeSupervisor()
+    deps.sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, Math.min(ms, 20)))
+    // Override SHUTDOWN_TIMEOUT via global? Not available. Instead, force
+    // SIGKILL by making the first kill('SIGINT') go through and the
+    // STOP_TIMEOUT_MS sleep resolve quickly. The FakeChild kill() does not
+    // emit exit, so doStop races exitPromise (never resolves) against the
+    // short sleep (resolves instantly). The race falls into the SIGKILL
+    // branch, then awaits POST_SIGKILL_EXIT_GRACE_MS (also short).
+    const { getInstanceSupervisor } = await initSup(deps)
+    const sup = getInstanceSupervisor()
+    const snap = await sup.createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await sup.startInstance(snap.id)
+    const child = fakeChildren[0]!
+    child.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = sup.stopInstance(snap.id)
+    // Bound the wait so a hung doStop fails the test loudly.
+    const result = await Promise.race([
+      stopP.then((s) => ({ ok: true, snap: s } as const)),
+      new Promise<{ ok: false }>((r) => setTimeout(() => r({ ok: false }), 2000)),
+    ])
+    expect(result.ok).toBe(true)
+    if (result.ok) {
+      // SIGKILL was sent (escalation path), but doStop still returned.
+      expect(child.kill).toHaveBeenCalledWith('SIGKILL')
+      // Snapshot ends in `stopped` (or `down` if SIGKILL triggered a
+      // non-user exit; with our `userStopping=true` flag it must be
+      // `stopped`).
+      expect(result.snap.state).toBe('stopped')
+    }
+  })
+
+  it('concurrent initInstanceSupervisor calls share one singleton', async () => {
+    let resolveRead: (v: { definitions: Array<{ id: string; name: string; cwd: string; createdAt: string }>; statuses: Record<string, unknown> }) => void = () => {}
+    const readPromise = new Promise<{ definitions: Array<{ id: string; name: string; cwd: string; createdAt: string }>; statuses: Record<string, unknown> }>((res) => { resolveRead = res })
+    const { deps } = makeSupervisor({ readFile: () => readPromise })
+    const { initInstanceSupervisor, getInstanceSupervisor } = await import('../../../src/server/services/instanceSupervisor.js')
+    const p1 = initInstanceSupervisor({ cwd: '/tmp/current', dataDir: '/tmp/x', deps: deps as never })
+    const p2 = initInstanceSupervisor({ cwd: '/tmp/current', dataDir: '/tmp/x', deps: deps as never })
+    const p3 = initInstanceSupervisor({ cwd: '/tmp/current', dataDir: '/tmp/x', deps: deps as never })
+    resolveRead({ definitions: [], statuses: {} })
+    const [s1, s2, s3] = await Promise.all([p1, p2, p3])
+    // All three promises must resolve to the SAME supervisor instance.
+    expect(s1).toBe(s2)
+    expect(s2).toBe(s3)
+    // And `getInstanceSupervisor` must return that same singleton.
+    expect(getInstanceSupervisor()).toBe(s1)
+  })
+
+  it('hydrated instance survives a status transition round-trip on disk', async () => {
+    // Step 1: create + start + ready + assert running on disk.
+    // Step 2: re-init supervisor with readFile returning the captured
+    //   statuses; assert the running snapshot survives (port + state).
+    const writeCapture: { definitions?: Array<{ id: string; name: string; cwd: string; createdAt: string }>; statuses?: Record<string, unknown> } = {}
+    const { deps, writes, fakeChildren } = makeSupervisor({
+      onWriteFile: async (w) => { writeCapture.definitions = w.definitions as never; writeCapture.statuses = w.statuses; writes.push(w) },
+    })
+    const { getInstanceSupervisor } = await initSup(deps, '/tmp/current', '/tmp/persist-data')
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(snap.id)
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    await (getInstanceSupervisor() as unknown as { __flushPendingWrites: () => Promise<void> }).__flushPendingWrites()
+    // The last write must include `state: 'running'`.
+    const running = writes.find((w) => (w.statuses[snap.id] as { state?: string } | undefined)?.state === 'running')
+    expect(running).toBeDefined()
+    // Step 2: re-init with readFile returning the captured data.
+    vi.resetModules()
+    const deps2 = { ...deps, readFile: async () => ({ definitions: writeCapture.definitions!, statuses: writeCapture.statuses! }) }
+    const mod2 = await import('../../../src/server/services/instanceSupervisor.js')
+    await mod2.initInstanceSupervisor({ cwd: '/tmp/current', dataDir: '/tmp/persist-data', deps: deps2 as never })
+    const reloaded = mod2.getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)
+    expect(reloaded).toBeDefined()
+    expect(reloaded?.state).toBe('running')
+    expect(reloaded?.port).toBe(9205)
+  })
+
+  it('persistSafe serialises writes — latest snapshot lands last on disk', async () => {
+    // Burst several transitions: create (awaited), start, ready, then a
+    // heartbeat-timeout. The on-disk snapshots must monotonically reflect
+    // the latest state — no older write (e.g. `starting`) may land AFTER
+    // a later write (e.g. `running`, `down`).
+    let time = 1_000000
+    const { deps, writes, fakeChildren } = makeSupervisor()
+    deps.now = () => time
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(snap.id)
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    time += 25_000
+    ;(getInstanceSupervisor() as unknown as { __tickHeartbeat?: () => void }).__tickHeartbeat?.()
+    await (getInstanceSupervisor() as unknown as { __flushPendingWrites: () => Promise<void> }).__flushPendingWrites()
+    // Walk the recorded writes in order and assert the state field
+    // never goes backwards for this instance (stopped < starting <
+    // running < down by lifecycle; we accept any re-entry into the same
+    // state, but never an older state landing after a newer one).
+    const order: string[] = []
+    const rank: Record<string, number> = { stopped: 0, starting: 1, running: 2, down: 3 }
+    for (const w of writes) {
+      const st = (w.statuses[snap.id] as { state?: string } | undefined)?.state
+      if (st) order.push(st)
+    }
+    // The final state must be `down` (heartbeat timeout).
+    expect(order[order.length - 1]).toBe('down')
+    // No write may have a state with rank LOWER than a later write's
+    // rank for the same instance — the chain guarantees this.
+    for (let i = 0; i < order.length; i++) {
+      for (let j = i + 1; j < order.length; j++) {
+        expect(rank[order[j]!]!).toBeGreaterThanOrEqual(rank[order[i]!]!)
+      }
+    }
+  })
+})
+
+describe('instanceSupervisor (4e — fix round 2: shutdown SIGKILL escalation)', () => {
+  beforeEach(() => {
+    delete process.env.ZAI_DATA_DIR
+    vi.resetModules()
+  })
+  afterEach(() => { vi.restoreAllMocks() })
+
+  it('shutdown sends exactly one SIGINT then one SIGKILL per child', async () => {
+    // Use a short real-timer sleep so the scheduled SIGKILL actually
+    // fires before the test's own timeout. The FakeChild never emits
+    // exit, so `scheduleKill` is the only thing that unblocks shutdown.
+    const { deps, fakeChildren } = makeSupervisor()
+    deps.sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, Math.min(ms, 10)))
+    const { getInstanceSupervisor, shutdownInstanceSupervisor } = await initSup(deps)
+    const a = await getInstanceSupervisor().createInstance({ name: 'a', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(a.id)
+    const b = await getInstanceSupervisor().createInstance({ name: 'b', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(b.id)
+    fakeChildren.forEach((c) => c.emit('message', { type: 'ready', pid: 1, port: 9205 }))
+    await shutdownInstanceSupervisor()
+    // Per-child: exactly one SIGINT then exactly one SIGKILL.
+    for (const c of fakeChildren) {
+      const sigint = vi.mocked(c.kill).mock.calls.filter(([s]) => s === 'SIGINT')
+      const sigkill = vi.mocked(c.kill).mock.calls.filter(([s]) => s === 'SIGKILL')
+      expect(sigint).toHaveLength(1)
+      expect(sigkill).toHaveLength(1)
+      // SIGKILL must come AFTER SIGINT.
+      const sigintAt = vi.mocked(c.kill).mock.invocationCallOrder[0]!
+      const sigkillAt = vi.mocked(c.kill).mock.invocationCallOrder[1]!
+      expect(sigkillAt).toBeGreaterThan(sigintAt)
+    }
+  })
+
+  it('shutdown waits for actual exit when child emits promptly', async () => {
+    // If the child emits exit BEFORE the scheduled SIGKILL fires, the
+    // kill must be cancelled and shutdown must still resolve.
+    const { deps, fakeChildren } = makeSupervisor()
+    deps.sleep = (ms: number) => new Promise<void>((r) => setTimeout(r, Math.min(ms, 200)))
+    const { getInstanceSupervisor, shutdownInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(snap.id)
+    const child = fakeChildren[0]!
+    child.emit('message', { type: 'ready', pid: 1, port: 9205 })
+    const sdP = shutdownInstanceSupervisor()
+    // Emit exit on the child BEFORE the 200ms scheduled SIGKILL fires.
+    await new Promise((r) => setTimeout(r, 5))
+    child.emitExit(0)
+    await sdP
+    const sigkill = vi.mocked(child.kill).mock.calls.filter(([s]) => s === 'SIGKILL')
+    expect(sigkill).toHaveLength(0)
   })
 })
