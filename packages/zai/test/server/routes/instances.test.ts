@@ -8,7 +8,8 @@ const DATA_DIR = '/tmp/zai-test-instances-route'
 
 afterEach(async () => {
   delete process.env.ZAI_DATA_DIR
-  try { await rm(DATA_DIR, { recursive: true, force: true }) } catch {}
+  vi.resetModules()
+  try { await rm(DATA_DIR, { recursive: true, force: true }) } catch { /* best-effort tmp cleanup */ }
 })
 
 async function bootstrap() {
