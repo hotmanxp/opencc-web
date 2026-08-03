@@ -63,6 +63,28 @@ export const Key = { ENTER: 'enter', ESCAPE: 'escape', TAB: 'tab' } as const
 // ─── state/store.js ───────────────────────────────────────────────────
 export function createAppStore() { return {} }
 export function getStateStore() { return {} }
+// Minimal zustand-style vanilla store. `services/compact/compactWarningState.ts`
+// calls `createStore<boolean>(false)` at module top level; the real `state/`
+// dir is stripped, but compact survives in the vendor snapshot and its
+// transitive imports still reach for this name under vitest.
+export function createStore<T>(initial: T) {
+  let state = initial
+  const listeners = new Set<() => void>()
+  return {
+    getState: () => state,
+    setState: (partial: T | ((prev: T) => T)) => {
+      state =
+        typeof partial === 'function'
+          ? (partial as (prev: T) => T)(state)
+          : partial
+      for (const listener of listeners) listener()
+    },
+    subscribe: (listener: () => void) => {
+      listeners.add(listener)
+      return () => listeners.delete(listener)
+    },
+  }
+}
 
 // ─── integrations/routeMetadata.js ────────────────────────────────────
 export const ROUTE_METADATA: Record<string, unknown> = {}

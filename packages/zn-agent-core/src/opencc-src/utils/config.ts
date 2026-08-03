@@ -218,6 +218,12 @@ export type ProviderProfile = {
   authHeaderValue?: string
 }
 
+export type ProviderModelRouteOverride = {
+  baseUrl: string
+  apiKey?: string
+  authToken?: string
+}
+
 export type GlobalConfig = {
   /**
    * @deprecated Use settings.apiKeyHelper instead.
@@ -620,6 +626,10 @@ export type GlobalConfig = {
   // which API provider env vars are applied for the current session.
   providerProfiles?: ProviderProfile[]
   activeProviderProfileId?: string
+
+  // 按具体模型名覆盖 API 端点与 key（叠加在 active provider profile 之上）。
+  // key 为解析后的最终模型名（parseUserSpecifiedModel 的输出）。
+  providerModelOverrides?: Record<string, ProviderModelRouteOverride>
 
   // Per-profile cache for models discovered from OpenAI-compatible endpoints.
   // Keyed by provider profile id.

@@ -7,6 +7,7 @@ import {
   getGlobalConfig,
   saveGlobalConfig,
   type ProviderProfile,
+  type ProviderModelRouteOverride,
 } from './config.js'
 import { getSettings_DEPRECATED } from './settings/settings.js'
 import type { ProfileEnv } from './providerProfile.js'
@@ -251,6 +252,44 @@ export function maybeResetMainLoopModel(
   }
 
   return { reset: true, previousModel: currentModel, newModel: defaultModel }
+}
+
+export type ModelRouteOverride = ProviderModelRouteOverride
+
+function isValidModelRouteOverride(
+  override: ModelRouteOverride | undefined,
+): override is ModelRouteOverride {
+  if (!override || typeof override !== 'object') return false
+  if (typeof override.baseUrl !== 'string' || override.baseUrl.trim() === '') {
+    return false
+  }
+  return (
+    (typeof override.apiKey === 'string' && override.apiKey !== '') ||
+    (typeof override.authToken === 'string' && override.authToken !== '')
+  )
+}
+
+/**
+ * 按解析后的最终模型名查找 per-model 端点+key 覆盖条目。
+ * 匹配顺序：剥离 [1m] 后缀 → 精确匹配 → 小写匹配。非法条目忽略。
+ */
+export function getModelRouteOverride(
+  model: string,
+): ModelRouteOverride | undefined {
+  const overrides = getGlobalConfig().providerModelOverrides
+  if (!overrides) return undefined
+
+  const base = model.replace(/\[1m\]$/i, '').trim()
+  const exact = overrides[base]
+  if (isValidModelRouteOverride(exact)) return exact
+
+  const lower = base.toLowerCase()
+  for (const [name, override] of Object.entries(overrides)) {
+    if (name.toLowerCase() === lower && isValidModelRouteOverride(override)) {
+      return override
+    }
+  }
+  return undefined
 }
 
 export function getProviderProfiles(
