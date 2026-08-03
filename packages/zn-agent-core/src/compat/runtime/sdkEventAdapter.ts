@@ -138,6 +138,31 @@ export function* translateSdkToRuntime(
     return
   }
 
+  // opencc's `query()` may emit a terminal `result` SDKMessage after the
+  // assistant message's message_stop (e.g. when the run produced a final
+  // synthetic summary, or when the loop completes with a structured
+  // envelope — duration_ms / total_cost_usd). The format-(b) catch-all
+  // below would yield a `result`-typed RuntimeEvent, but zai's SSE
+  // translator (routes/agent.ts::translateRuntimeEvents) only recognises
+  // Anthropic primitives — anything else is dropped on the floor.
+  // Synthesize a final `message_delta` + `message_stop` pair so the
+  // consumer sees a normal end-of-turn signal: routes/agent.ts maps
+  // message_stop → runtime.done, which closes the for-await loop.
+  //
+  // Mirror the format-(b) message_stop suppression (lines 156-158): if
+  // there are pending tool_use blocks, hold back — opencc will issue
+  // another assistant turn after the tool results land, and that turn's
+  // own message_stop is the one we want to propagate. (The test
+  // sdkEventAdapter.test.ts asserts the non-pending path.)
+  if (m.type === 'result') {
+    yield makeEvent('message_delta', meta, 0, {
+      delta: { stop_reason: 'end_turn' },
+    })
+    if (meta.toolNameByUseId && meta.toolNameByUseId.size > 0) return
+    yield makeEvent('message_stop', meta, 1, {})
+    return
+  }
+
   if (m.type !== 'assistant' && m.type !== 'user') {
     // Format (b): Anthropic primitive (message_start, content_block_*, etc).
     // Pass through with zai meta fields attached. For tool_use

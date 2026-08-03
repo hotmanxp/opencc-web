@@ -40,8 +40,19 @@ const SHIM_DIR = __dirname
 const DANGLING_SHIM = resolve(SHIM_DIR, '..', 'dangling-shims')
 
 const REDIRECTS = {
-  'bun:bundle': pathToFileURL(resolve(SHIM_DIR, 'bun-shim.js')).href,
-  'bun:feature': pathToFileURL(resolve(SHIM_DIR, 'bun-feature-shim.js')).href,
+  // zai patch: redirect to the .ts source (not .js) so the loader hook
+  // works under tsx in-process. tsx intercepts .ts resolves and compiles
+  // them to JS before handing the resolved URL to Node's loader hooks,
+  // so a redirect to the .ts file URL flows through the same code path
+  // as a redirect to .js would. Previously this hard-coded `bun-shim.js`,
+  // but src/compat/runtime/ only ships .ts; only dist/ (the tsc
+  // compile output) has .js, and the loader hook runs before tsc emits
+  // anything — so `tsx --loader bun-protocol.mjs` (used by
+  // bunProtocol.test.mjs and Node-direct production paths) hit
+  // ENOENT on the redirect target. Pointing at the .ts source lets
+  // tsx do the .ts→.js compilation itself.
+  'bun:bundle': pathToFileURL(resolve(SHIM_DIR, 'bun-shim.ts')).href,
+  'bun:feature': pathToFileURL(resolve(SHIM_DIR, 'bun-feature-shim.ts')).href,
   'env-paths': pathToFileURL(resolve(DANGLING_SHIM, 'env-paths.js')).href,
   'lru-cache': pathToFileURL(resolve(DANGLING_SHIM, 'lru-cache.js')).href,
   // @orama/orama — Vite SSR wrapper (`__vite_ssr_import_0__`) can't
