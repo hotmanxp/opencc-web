@@ -14,7 +14,7 @@ interface StartOptions {
   port?: string;
   open: boolean;
   lan?: boolean;
-  cli?: boolean;
+  sdk?: boolean;
   /**
    * Force the managed/supervisor code path. When `undefined`, the decision
    * is taken from `process.env.ZAI_NO_MANAGED` (managed by default; set
@@ -48,7 +48,7 @@ export async function runStart(options: StartOptions): Promise<void> {
     const childArgs: string[] = [process.argv[1], 'start', '--managed-child']
     if (options.port) childArgs.push('--port', options.port)
     if (options.lan) childArgs.push('--lan')
-    if (options.cli) childArgs.push('--cli')
+    if (options.sdk) childArgs.push('--sdk')
     // Always pass --no-open to the child so it does not double-open the
     // browser — the user's `--open` request was already handled by the
     // supervisor's direct invocation, and we don't want a second tab.
@@ -73,7 +73,7 @@ async function runDirectServer(options: StartOptions): Promise<void> {
   const webDir = join(__dirname, '..', 'web');
 
   const host = options.lan ? '0.0.0.0' : '127.0.0.1';
-  const app = await createApp({ token, cwd, cwdName, host, cli: options.cli });
+  const app = await createApp({ token, cwd, cwdName, host, sdk: options.sdk });
   app.use(express.static(webDir));
 
   app.get('*', (_req, res) => {

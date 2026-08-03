@@ -161,10 +161,10 @@ export type OpenccRuntimeOptions = {
    */
   defaultModel?: string
   /**
-   * Experimental: treat sessions as an interactive OpenCC CLI
-   * (`STATE.isInteractive = true`). Mirrors `interactive` in
-   * `createOpenccRuntime.ts` so both OpenccRuntimeOptions type
-   * definitions stay in sync.
+   * Treat sessions as an interactive OpenCC CLI (`STATE.isInteractive =
+   * true`). Defaults to `true`; pass `false` for SDK / headless mode.
+   * Mirrors `interactive` in `createOpenccRuntime.ts` so both
+   * OpenccRuntimeOptions type definitions stay in sync.
    */
   interactive?: boolean
 }

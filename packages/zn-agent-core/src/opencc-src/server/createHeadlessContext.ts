@@ -99,16 +99,14 @@ export interface CreateHeadlessContextOptions {
    */
   connectMcp?: boolean
   /**
-   * Experimental: treat the session as an interactive OpenCC CLI
-   * (`STATE.isInteractive = true`, so vendor branches read
-   * `getIsNonInteractiveSession() === false`). Defaults to `false`
-   * (headless server invariant). Exposed via `zai dev --cli` /
-   * `zai start --cli` to observe interactive-mode behaviour — note
-   * that TUI-bound components (interactiveHandler permission prompts,
-   * REPL ask queue) do NOT exist in the server process, so interactive
-   * mode can stall or reject permission requests that the headless
-   * permission bridge (headlessPermissionBridge.ts) would otherwise
-   * surface to the web UI.
+   * Whether the session is treated as an interactive OpenCC CLI
+   * (`STATE.isInteractive`). Defaults to `true` — verified against
+   * the real zai Web UI that permission asks and AskUserQuestion still
+   * bridge to the web (headlessPermissionBridge / AskUserQuestion
+   * wrapper intercept at the tool layer regardless of this flag).
+   * Pass `false` for SDK / headless mode: vendor branches read
+   * `getIsNonInteractiveSession() === true` (exposed via
+   * `zai dev --sdk` / `zai start --sdk`).
    */
   isInteractive?: boolean
 }

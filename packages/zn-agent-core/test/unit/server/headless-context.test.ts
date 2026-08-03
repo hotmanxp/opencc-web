@@ -117,35 +117,39 @@ describe('createHeadlessContext — vendor headless bootstrap (Task 2)', () => {
     expect(ctx.config.cwd).toBe(cwdA)
   })
 
-  it('non-interactive client type — server never has a TTY', async () => {
+  it('default runtime is interactive — behaves like an OpenCC CLI', async () => {
+    const ctx = await createHeadlessContext({
+      cwd: cwdA,
+      dataDir,
+      runtimeId: 'rt-test-default-interactive',
+    })
+
+    // Default is interactive (STATE.isInteractive = true): the server
+    // behaves like an interactive OpenCC CLI — vendor's
+    // getIsNonInteractiveSession() reads false. Verified against the
+    // real zai Web UI that permission asks / AskUserQuestion still
+    // bridge to the web via headlessPermissionBridge / the wrapper.
+    expect(ctx.config.isInteractive).toBe(true)
+  })
+
+  it('SDK / headless mode (isInteractive: false) — server has no TTY', async () => {
     const ctx = await createHeadlessContext({
       cwd: cwdA,
       dataDir,
       runtimeId: 'rt-test-noninteractive',
+      // `zai --sdk` opts into SDK/headless mode: STATE.isInteractive
+      // becomes false, so vendor's getIsNonInteractiveSession() reads
+      // true and ~83 call sites take the headless branch.
+      isInteractive: false,
     })
 
     // Two surfaces assert the headless contract:
     //   (a) ctx.config.clientType === 'zai-server' (or other server-
     //       surfaced marker) — vendor branches on clientType in
     //       ~17 places (auth preference, analytics, settings sources).
-    //   (b) ctx.config.isInteractive === false — vendor's
-    //       getIsNonInteractiveSession() reads STATE.isInteractive;
-    //       ~83 call sites take the headless branch when true.
+    //   (b) ctx.config.isInteractive === false.
     expect(ctx.config.clientType).toBe('zai-server')
     expect(ctx.config.isInteractive).toBe(false)
-  })
-
-  it('--cli escape hatch flips STATE to interactive (isInteractive: true)', async () => {
-    const ctx = await createHeadlessContext({
-      cwd: cwdA,
-      dataDir,
-      runtimeId: 'rt-test-interactive',
-      // Experimental `zai --cli` mode: STATE.isInteractive becomes true,
-      // so vendor's getIsNonInteractiveSession() reads false.
-      isInteractive: true,
-    })
-
-    expect(ctx.config.isInteractive).toBe(true)
   })
 
   it('default tools exist — built-in tool registry resolves to a non-empty list', async () => {

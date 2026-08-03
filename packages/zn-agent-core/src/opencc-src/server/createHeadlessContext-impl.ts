@@ -77,8 +77,8 @@ import { loadAllPermissionRulesFromDisk } from '../utils/permissions/permissions
  *   1. installMacroStub()              — globalThis.MACRO must exist
  *                                       before bundle eval
  *   2. enableConfigs()                 — settings/globalConfig readable
- *   3. setIsInteractive(isInteractive) — non-interactive server by default;
- *                                       `--cli` escape hatch flips to true
+ *   3. setIsInteractive(isInteractive) — interactive by default; SDK mode
+ *                                       passes `isInteractive: false`
  *   4. setOriginalCwd(opts.cwd)        — STATE.originalCwd
  *   5. setCwdState(opts.cwd)           — STATE.cwd
  *   6. setClientType(opts.clientType)  — STATE.clientType
@@ -142,12 +142,14 @@ export async function createHeadlessContextImpl(
   // tests under vitest don't pull in the production-only bundle.
   enableConfigs()
 
-  // Steps 3-6: vendor STATE. server-runtime default: non-interactive
-  // (no TTY). `isInteractive` is an experimental escape hatch (zai
-  // `--cli`) that flips STATE.isInteractive to true so vendor branches
-  // read `getIsNonInteractiveSession() === false`; clientType marker
-  // stays so vendor branches take the server path.
-  const isInteractive = options.isInteractive ?? false
+  // Steps 3-6: vendor STATE. Default is interactive (the server behaves
+  // like an interactive OpenCC CLI; verified against the real zai Web UI —
+  // permission asks and AskUserQuestion still bridge to the web via
+  // headlessPermissionBridge / the AskUserQuestion wrapper). Pass
+  // `isInteractive: false` for SDK / headless mode (no TTY): vendor
+  // branches then read `getIsNonInteractiveSession() === true`. The
+  // clientType marker stays set so vendor branches take the server path.
+  const isInteractive = options.isInteractive ?? true
   setIsInteractive(isInteractive)
   setOriginalCwd(cwd)
   setCwdState(cwd)

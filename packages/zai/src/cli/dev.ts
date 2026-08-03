@@ -12,7 +12,7 @@ interface DevOptions {
   apiPort?: string;
   open: boolean;
   lan?: boolean;
-  cli?: boolean;
+  sdk?: boolean;
 }
 
 export async function runDev(options: DevOptions) {
@@ -27,12 +27,13 @@ export async function runDev(options: DevOptions) {
   // hand an un-resolved promise to Express; the API server bound
   // 7715 but every request (including SSE) hung because the
   // pending Promise was registered as the request handler.
-  const app = await createApp({ token, cwd, cwdName, host, cli: options.cli });
+  const app = await createApp({ token, cwd, cwdName, host, sdk: options.sdk });
 
   console.log(`[zai] dev token: ${token}`);
   console.log(`[zai] cwd: ${cwd}`);
   if (options.lan) console.log(`[zai] LAN mode — binding to 0.0.0.0`);
-  if (options.cli) console.log(`[zai] CLI mode — runtime treated as interactive OpenCC (experimental)`);
+  if (options.sdk) console.log(`[zai] SDK mode — runtime treated as non-interactive (headless)`);
+  else console.log(`[zai] Interactive mode — runtime treated as interactive OpenCC CLI`);
 
   // Start Express API server with retry loop
   const baseApiPort = options.apiPort ? Number(options.apiPort) : 7715;

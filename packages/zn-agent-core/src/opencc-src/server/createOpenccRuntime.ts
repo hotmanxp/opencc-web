@@ -15,10 +15,10 @@ export type OpenccRuntimeOptions = {
    */
   connectMcp?: boolean
   /**
-   * Experimental: treat sessions as an interactive OpenCC CLI
-   * (`STATE.isInteractive = true`). Mirrors `zai --cli`; forwarded to
-   * `createHeadlessContext` as `isInteractive`. Defaults to `false`
-   * (headless server invariant).
+   * Treat sessions as an interactive OpenCC CLI (`STATE.isInteractive =
+   * true`). Defaults to `true`; pass `false` for SDK / headless mode
+   * (`zai --sdk`). Forwarded to `createHeadlessContext` as
+   * `isInteractive`.
    */
   interactive?: boolean
 }
