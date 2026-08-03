@@ -2,7 +2,6 @@
 // @ts-nocheck
 import { c as _c } from "react-compiler-runtime";
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { feature } from 'bun:bundle';
 import { spawnSync } from 'child_process';
 import { snapshotOutputTokensForTurn, getCurrentTurnTokenBudget, getTurnOutputTokens, getBudgetContinuationCount, getTotalInputTokens } from '../bootstrap/state.js';
 import { parseTokenBudget } from '../utils/tokenBudget.js';
@@ -104,12 +103,12 @@ import { isHumanTurn } from '../utils/messagePredicates.js';
 import { logError } from '../utils/log.js';
 // Dead code elimination: conditional imports
 /* eslint-disable custom-rules/no-process-env-top-level, @typescript-eslint/no-require-imports */
-const useVoiceIntegration: typeof import('../hooks/useVoiceIntegration.js').useVoiceIntegration = feature('VOICE_MODE') ? require('../hooks/useVoiceIntegration.js').useVoiceIntegration : () => ({
+const useVoiceIntegration: typeof import('../hooks/useVoiceIntegration.js').useVoiceIntegration = false ? require('../hooks/useVoiceIntegration.js').useVoiceIntegration : () => ({
   stripTrailing: () => 0,
   handleKeyEvent: () => { },
   resetAnchor: () => { }
 });
-const VoiceKeybindingHandler: typeof import('../hooks/useVoiceIntegration.js').VoiceKeybindingHandler = feature('VOICE_MODE') ? require('../hooks/useVoiceIntegration.js').VoiceKeybindingHandler : () => null;
+const VoiceKeybindingHandler: typeof import('../hooks/useVoiceIntegration.js').VoiceKeybindingHandler = false ? require('../hooks/useVoiceIntegration.js').VoiceKeybindingHandler : () => null;
 // Coordinator mode is unconditionally on — require the helper directly
 // Coordinator mode is unconditionally on — require the helper directly
 const getCoordinatorUserContext: (mcpClients: ReadonlyArray<{
@@ -196,11 +195,11 @@ import { getActiveSessionAgentModelSelection } from './replActiveAgentModel.js';
 import type { ModelSetting } from '../utils/model/model.js';
 // Dead code elimination: conditional import for loop mode
 /* eslint-disable @typescript-eslint/no-require-imports */
-const proactiveModule = feature('PROACTIVE') || feature('KAIROS') ? require('../proactive/index.js') : null;
+const proactiveModule = false || false ? require('../proactive/index.js') : null;
 const PROACTIVE_NO_OP_SUBSCRIBE = (_cb: () => void) => () => { };
 const PROACTIVE_FALSE = () => false;
 const SUGGEST_BG_PR_NOOP = (_p: string, _n: string): boolean => false;
-const useProactive = feature('PROACTIVE') || feature('KAIROS') ? require('../proactive/useProactive.js').useProactive : null;
+const useProactive = false || false ? require('../proactive/useProactive.js').useProactive : null;
 const useScheduledTasks = require('../hooks/useScheduledTasks.js').useScheduledTasks;
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { isAgentSwarmsEnabled } from '../utils/agentSwarmsEnabled.js';
@@ -281,7 +280,7 @@ import { AutoRunIssueNotification, shouldAutoRunIssue, getAutoRunIssueReasonText
 import type { HookProgress } from '../types/hooks.js';
 import { TungstenLiveMonitor } from '../tools/TungstenTool/TungstenLiveMonitor.js';
 /* eslint-disable @typescript-eslint/no-require-imports */
-const WebBrowserPanelModule = feature('WEB_BROWSER_TOOL') ? require('../tools/WebBrowserTool/WebBrowserPanel.js') as typeof import('../tools/WebBrowserTool/WebBrowserPanel.js') : null;
+const WebBrowserPanelModule = false ? require('../tools/WebBrowserTool/WebBrowserPanel.js') as typeof import('../tools/WebBrowserTool/WebBrowserPanel.js') : null;
 /* eslint-enable @typescript-eslint/no-require-imports */
 import { IssueFlagBanner } from '../components/PromptInput/IssueFlagBanner.js';
 import { useIssueFlagBanner } from '../hooks/useIssueFlagBanner.js';
@@ -1388,7 +1387,7 @@ export function REPL({
   // as useUnseenDivider above).
   const {
     maybeLoadOlder
-  } = feature('KAIROS') ?
+  } = false ?
       // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
       useAssistantHistory({
         config: remoteSessionConfig,
@@ -1403,7 +1402,7 @@ export function REPL({
       onRepin();
     } else {
       onScrollAway(handle);
-      if (feature('KAIROS')) maybeLoadOlder(handle);
+      if (false) maybeLoadOlder(handle);
       // Dismiss the companion bubble on scroll — it's absolute-positioned
       // at bottom-right and covers transcript content. Scrolling = user is
       // trying to read something under it.
@@ -1828,7 +1827,7 @@ export function REPL({
     if (timeout.activeOperations.apiCalls.length > 0) {
       logForDebugging(`api.call.active_on_abort queryId=${timeout.context.queryId} generation=${timeout.generation} ${timeoutOperations}`);
     }
-    if (feature('TOKEN_BUDGET')) {
+    if (false) {
       snapshotOutputTokensForTurn(null);
     }
 
@@ -2113,7 +2112,7 @@ export function REPL({
       setInputValue('');
 
       // Prompt to compact if the resumed session is large
-      if (feature('RESUME_COMPACT_PROMPT')) {
+      if (false) {
         const { shouldPromptCompactOnResume } = await import('../services/compact/resumeCompactPrompt.js');
         if (shouldPromptCompactOnResume(hydratedMessages, mainLoopModel, false)) {
           const tokenCount = (await import('../utils/tokens.js')).tokenCountWithEstimation(hydratedMessages);
@@ -2184,7 +2183,7 @@ export function REPL({
       // the resume() callback at line ~2024, so schedule the compact prompt
       // here too. Uses the already-hydrated `messages` state, which mirrors
       // the hydration applied in resume().
-      if (feature('RESUME_COMPACT_PROMPT')) {
+      if (false) {
         void (async () => {
           const { shouldPromptCompactOnResume } = await import('../services/compact/resumeCompactPrompt.js');
           if (shouldPromptCompactOnResume(messages, mainLoopModel, false)) {
@@ -2243,8 +2242,8 @@ export function REPL({
     if (allowDialogsWithAnimation && elicitation.queue[0]) return 'elicitation';
     if (allowDialogsWithAnimation && showingCostDialog) return 'cost';
     if (allowDialogsWithAnimation && idleReturnPending) return 'idle-return';
-    if (feature('ULTRAPLAN') && allowDialogsWithAnimation && !isLoading && ultraplanPendingChoice) return 'ultraplan-choice';
-    if (feature('ULTRAPLAN') && allowDialogsWithAnimation && !isLoading && ultraplanLaunchPending) return 'ultraplan-launch';
+    if (false && allowDialogsWithAnimation && !isLoading && ultraplanPendingChoice) return 'ultraplan-choice';
+    if (false && allowDialogsWithAnimation && !isLoading && ultraplanLaunchPending) return 'ultraplan-launch';
 
     // Onboarding dialogs (special conditions)
     if (allowDialogsWithAnimation && showIdeOnboarding) return 'ide-onboarding';
@@ -2322,7 +2321,7 @@ export function REPL({
 
     // Pause proactive mode so the user gets control back.
     // It will resume when they submit their next input (see onSubmit).
-    if (feature('PROACTIVE') || feature('KAIROS')) {
+    if (false || false) {
       proactiveModule?.pauseProactive();
     }
     queryGuard.forceEnd();
@@ -2475,7 +2474,7 @@ export function REPL({
       // When the REPL bridge is connected, also forward the sandbox
       // permission request as a can_use_tool control_request so the
       // remote user (e.g. on claude.ai) can approve it too.
-      if (feature('BRIDGE_MODE')) {
+      if (false) {
         const bridgeCallbacks = store.getState().replBridgePermissionCallbacks;
         if (bridgeCallbacks) {
           const bridgeRequestId = randomUUID();
@@ -2856,7 +2855,7 @@ export function REPL({
         // stale memoized rows remount with post-compact content.
         setConversationId(randomUUID());
         // Compaction succeeded — clear the context-blocked flag so ticks resume
-        if (feature('PROACTIVE') || feature('KAIROS')) {
+        if (false || false) {
           proactiveModule?.setContextBlocked(false);
         }
       } else if (newMessage.type === 'progress' && isEphemeralToolProgress(newMessage.data.type)) {
@@ -2885,7 +2884,7 @@ export function REPL({
       // Block ticks on API errors to prevent tick → error → tick
       // runaway loops (e.g., auth failure, rate limit, blocking limit).
       // Cleared on compact boundary (above) or successful response (below).
-      if (feature('PROACTIVE') || feature('KAIROS')) {
+      if (false || false) {
         if (newMessage.type === 'assistant' && 'isApiErrorMessage' in newMessage && newMessage.isApiErrorMessage) {
           proactiveModule?.setContextBlocked(true);
         } else if (newMessage.type === 'assistant') {
@@ -2990,7 +2989,7 @@ export function REPL({
         // Bump conversationId so Messages.tsx row keys change and
         // stale memoized rows remount with post-compact content.
         setConversationId(randomUUID());
-        if (feature('PROACTIVE') || feature('KAIROS')) {
+        if (false || false) {
           proactiveModule?.setContextBlocked(false);
         }
       }
@@ -3028,7 +3027,7 @@ export function REPL({
     const userContext = {
       ...baseUserContext,
       ...getCoordinatorUserContext(freshMcpClients, isScratchpadEnabled() ? getScratchpadDir() : undefined),
-      ...((feature('PROACTIVE') || feature('KAIROS')) && proactiveModule?.isProactiveActive() && !terminalFocusRef.current ? {
+      ...((false || false) && proactiveModule?.isProactiveActive() && !terminalFocusRef.current ? {
         terminalFocus: 'The terminal is unfocused \u2014 the user is not actively watching.'
       } : {})
     };
@@ -3442,7 +3441,7 @@ export function REPL({
     repinScroll();
 
     // Resume loop mode if paused
-    if (feature('PROACTIVE') || feature('KAIROS')) {
+    if (false || false) {
       proactiveModule?.resumeProactive();
     }
 
@@ -3742,7 +3741,7 @@ export function REPL({
 
       // Increment prompt count for attribution tracking and save snapshot
       // The snapshot persists promptCount so it survives compaction
-      if (feature('COMMIT_ATTRIBUTION')) {
+      if (false) {
         setAppState(prev => ({
           ...prev,
           attribution: incrementPromptCount(prev.attribution, snapshot => {
@@ -4028,7 +4027,7 @@ export function REPL({
     // Reset cached microcompact state so stale pinned cache edits
     // don't reference tool_use_ids from truncated messages
     resetMicrocompactState();
-    if (feature('CONTEXT_COLLAPSE')) {
+    if (false) {
       // Rewind truncates the REPL array. Commits whose archived span
       // was past the rewind point can't be projected anymore
       // (projectView silently skips them) but the staged queue and ID
@@ -4373,7 +4372,7 @@ export function REPL({
   }, [onQuery, mainLoopModel, store]);
 
   // Voice input integration (VOICE_MODE builds only)
-  const voice = feature('VOICE_MODE') ?
+  const voice = false ?
     // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
     useVoiceIntegration({
       setInputValueRaw,
@@ -4752,7 +4751,7 @@ export function REPL({
     const transcriptReturn = <KeybindingSetup>
       <AnimatedTerminalTitle isAnimating={titleIsAnimating} title={terminalTitle} disabled={titleDisabled} noPrefix={showStatusInTerminalTab} />
       <GlobalKeybindingHandlers {...globalKeybindingProps} />
-      {feature('VOICE_MODE') ? <VoiceKeybindingHandler voiceHandleKeyEvent={voice.handleKeyEvent} stripTrailing={voice.stripTrailing} resetAnchor={voice.resetAnchor} isActive={!toolJSX?.isLocalJSXCommand} /> : null}
+      {false ? <VoiceKeybindingHandler voiceHandleKeyEvent={voice.handleKeyEvent} stripTrailing={voice.stripTrailing} resetAnchor={voice.resetAnchor} isActive={!toolJSX?.isLocalJSXCommand} /> : null}
       <CommandKeybindingHandlers onSubmit={onSubmit} isActive={!toolJSX?.isLocalJSXCommand} />
       {transcriptScrollRef ?
         // ScrollKeybindingHandler must mount before CancelRequestHandler so
@@ -4894,7 +4893,7 @@ export function REPL({
   const mainReturn = <KeybindingSetup>
     <AnimatedTerminalTitle isAnimating={titleIsAnimating} title={terminalTitle} disabled={titleDisabled} noPrefix={showStatusInTerminalTab} />
     <GlobalKeybindingHandlers {...globalKeybindingProps} />
-    {feature('VOICE_MODE') ? <VoiceKeybindingHandler voiceHandleKeyEvent={voice.handleKeyEvent} stripTrailing={voice.stripTrailing} resetAnchor={voice.resetAnchor} isActive={!toolJSX?.isLocalJSXCommand} /> : null}
+    {false ? <VoiceKeybindingHandler voiceHandleKeyEvent={voice.handleKeyEvent} stripTrailing={voice.stripTrailing} resetAnchor={voice.resetAnchor} isActive={!toolJSX?.isLocalJSXCommand} /> : null}
     <CommandKeybindingHandlers onSubmit={onSubmit} isActive={!toolJSX?.isLocalJSXCommand} />
     {/* ScrollKeybindingHandler must mount before CancelRequestHandler so
           ctrl+c-with-selection copies instead of cancelling the active task.
@@ -4928,11 +4927,11 @@ export function REPL({
           {toolJSX.jsx}
         </Box>}
         {isAntEmployee() && <TungstenLiveMonitor />}
-        {feature('WEB_BROWSER_TOOL') ? WebBrowserPanelModule && <WebBrowserPanelModule.WebBrowserPanel /> : null}
+        {false ? WebBrowserPanelModule && <WebBrowserPanelModule.WebBrowserPanel /> : null}
         <Box flexGrow={1} />
         {showSpinner && <SpinnerWithVerb mode={streamMode} spinnerTip={spinnerTip} responseLengthRef={responseLengthRef} overrideMessage={spinnerMessage} spinnerSuffix={stopHookSpinnerSuffix} verbose={verbose} loadingStartTimeRef={loadingStartTimeRef} totalPausedMsRef={totalPausedMsRef} pauseStartTimeRef={pauseStartTimeRef} overrideColor={spinnerColor} overrideShimmerColor={spinnerShimmerColor} hasActiveTools={inProgressToolUseIDs.size > 0} leaderIsIdle={!isLoading} />}
         {/* CompletionFlash removed: depends on PR #1605 (UI upgraded) skipped per AGENTS.md sync policy */}
-        {compactProgressRatio !== null && feature('RESUME_COMPACT_PROMPT') && <CompactProgressBar ratio={compactProgressRatio} />}
+        {compactProgressRatio !== null && false && <CompactProgressBar ratio={compactProgressRatio} />}
         {!showSpinner && !isLoading && !userInputOnProcessing && !hasRunningTeammates && isBriefOnly && !viewedAgentTask && <BriefIdleStatus />}
         {isFullscreenEnvEnabled() && <PromptInputQueuedCommands />}
       </>} bottom={<Box flexDirection={isBuddyEnabled() && companionNarrow ? 'column' : 'row'} width="100%" alignItems={isBuddyEnabled() && companionNarrow ? undefined : 'flex-end'}>
@@ -5211,9 +5210,9 @@ export function REPL({
 
           {focusedInputDialog === 'desktop-upsell' && <DesktopUpsellStartup onDone={() => setShowDesktopUpsellStartup(false)} />}
 
-          {feature('ULTRAPLAN') ? focusedInputDialog === 'ultraplan-choice' && ultraplanPendingChoice && <UltraplanChoiceDialog plan={ultraplanPendingChoice.plan} sessionId={ultraplanPendingChoice.sessionId} taskId={ultraplanPendingChoice.taskId} setMessages={setMessages} readFileState={readFileState.current} getAppState={() => store.getState()} setConversationId={setConversationId} /> : null}
+          {false ? focusedInputDialog === 'ultraplan-choice' && ultraplanPendingChoice && <UltraplanChoiceDialog plan={ultraplanPendingChoice.plan} sessionId={ultraplanPendingChoice.sessionId} taskId={ultraplanPendingChoice.taskId} setMessages={setMessages} readFileState={readFileState.current} getAppState={() => store.getState()} setConversationId={setConversationId} /> : null}
 
-          {feature('ULTRAPLAN') ? focusedInputDialog === 'ultraplan-launch' && ultraplanLaunchPending && <UltraplanLaunchDialog onChoice={(choice, opts) => {
+          {false ? focusedInputDialog === 'ultraplan-launch' && ultraplanLaunchPending && <UltraplanLaunchDialog onChoice={(choice, opts) => {
             const blurb = ultraplanLaunchPending.blurb;
             setAppState(prev => prev.ultraplanLaunchPending ? {
               ...prev,
@@ -5264,7 +5263,7 @@ export function REPL({
             { }
             <PromptInput debug={debug} ideSelection={ideSelection} hasSuppressedDialogs={!!hasSuppressedDialogs} isLocalJSXCommandActive={isShowingLocalJSXCommand} getToolUseContext={getToolUseContext} toolPermissionContext={toolPermissionContext} setToolPermissionContext={setToolPermissionContext} apiKeyStatus={apiKeyStatus} commands={renderCommands} agents={agentDefinitions.activeAgents} isLoading={isLoading} onExit={handleExit} verbose={verbose} messages={messages} onAutoUpdaterResult={setAutoUpdaterResult} autoUpdaterResult={autoUpdaterResult} input={inputValue} onInputChange={setInputValue} mode={inputMode} onModeChange={setInputMode} stashedPrompt={stashedPrompt} setStashedPrompt={setStashedPrompt} submitCount={submitCount} onShowMessageSelector={handleShowMessageSelector} onMessageActionsEnter={
               // Works during isLoading — edit cancels first; uuid selection survives appends.
-              isFullscreenEnvEnabled() && !disableMessageActions ? enterMessageActions : undefined} mcpClients={mcpClients} pastedContents={pastedContents} setPastedContents={setPastedContents} vimMode={vimMode} setVimMode={setVimMode} showBashesDialog={showBashesDialog} setShowBashesDialog={setShowBashesDialog} onSubmit={onSubmit} onAgentSubmit={onAgentSubmit} isSearchingHistory={isSearchingHistory} setIsSearchingHistory={setIsSearchingHistory} helpOpen={isHelpOpen} setHelpOpen={setIsHelpOpen} insertTextRef={feature('VOICE_MODE') ? insertTextRef : undefined} voiceInterimRange={voice.interimRange} />
+              isFullscreenEnvEnabled() && !disableMessageActions ? enterMessageActions : undefined} mcpClients={mcpClients} pastedContents={pastedContents} setPastedContents={setPastedContents} vimMode={vimMode} setVimMode={setVimMode} showBashesDialog={showBashesDialog} setShowBashesDialog={setShowBashesDialog} onSubmit={onSubmit} onAgentSubmit={onAgentSubmit} isSearchingHistory={isSearchingHistory} setIsSearchingHistory={setIsSearchingHistory} helpOpen={isHelpOpen} setHelpOpen={setIsHelpOpen} insertTextRef={false ? insertTextRef : undefined} voiceInterimRange={voice.interimRange} />
             <SessionBackgroundHint onBackgroundSession={handleBackgroundSession} isLoading={isLoading} />
           </>}
           {cursor &&
@@ -5327,7 +5326,7 @@ export function REPL({
             }
             // Partial compact bypasses handleMessageFromStream — clear
             // the context-blocked flag so proactive ticks resume.
-            if (feature('PROACTIVE') || feature('KAIROS')) {
+            if (false || false) {
               proactiveModule?.setContextBlocked(false);
             }
             setConversationId(randomUUID());

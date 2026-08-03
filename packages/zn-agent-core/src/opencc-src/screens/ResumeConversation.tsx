@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { c as _c } from "react-compiler-runtime";
-import { feature } from 'bun:bundle';
 import { isCoordinatorMode, matchSessionMode } from '../coordinator/coordinatorMode.js';
 import { dirname } from 'path';
 import React from 'react';
@@ -247,7 +246,7 @@ export function ResumeConversation({
           adoptResumedSessionFile();
         }
       }
-      if (feature('CONTEXT_COLLAPSE')) {
+      if (false) {
         /* eslint-disable @typescript-eslint/no-require-imports */
         ;
         (require('../services/contextCollapse/persist.ts') as typeof import('../services/contextCollapse/persist.ts')).restoreFromEntries(result_3.contextCollapseCommits ?? [], result_3.contextCollapseSnapshot);

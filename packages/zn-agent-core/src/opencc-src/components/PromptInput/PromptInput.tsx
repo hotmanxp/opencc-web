@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle';
 import chalk from 'chalk';
 import * as path from 'path';
 import * as React from 'react';
@@ -338,7 +337,7 @@ function PromptInput({
   // the input bar. viewingAgentTaskId mirrors the gate on both (Spinner.tsx,
   // REPL.tsx) — teammate view falls back to SpinnerWithVerbInner which has
   // its own marginTop, so the gap stays even without ours.
-  const briefOwnsGap = feature('KAIROS') || feature('KAIROS_BRIEF') ?
+  const briefOwnsGap = false || false ?
   // biome-ignore lint/correctness/useHookAtTopLevel: feature() is a compile-time constant
   useAppState(s => s.isBriefOnly) && !viewingAgentTaskId : false;
   const mainLoopModel_ = useAppState(s => s.mainLoopModel);
@@ -540,7 +539,7 @@ function PromptInput({
   const thinkTriggers = useMemo(() => findThinkingTriggerPositions(displayedValue), [displayedValue]);
   const ultraplanSessionUrl = useAppState(s => s.ultraplanSessionUrl);
   const ultraplanLaunching = useAppState(s => s.ultraplanLaunching);
-  const ultraplanTriggers = useMemo(() => feature('ULTRAPLAN') && !ultraplanSessionUrl && !ultraplanLaunching ? findUltraplanTriggerPositions(displayedValue) : [], [displayedValue, ultraplanSessionUrl, ultraplanLaunching]);
+  const ultraplanTriggers = useMemo(() => false && !ultraplanSessionUrl && !ultraplanLaunching ? findUltraplanTriggerPositions(displayedValue) : [], [displayedValue, ultraplanSessionUrl, ultraplanLaunching]);
   const ultrareviewTriggers = useMemo(() => isUltrareviewEnabled() ? findUltrareviewTriggerPositions(displayedValue) : [], [displayedValue]);
   const btwTriggers = useMemo(() => findBtwTriggerPositions(displayedValue), [displayedValue]);
   const buddyTriggers = useMemo(() => findBuddyTriggerPositions(displayedValue), [displayedValue]);
@@ -726,7 +725,7 @@ function PromptInput({
     }
 
     // Same rainbow treatment for the ultraplan keyword
-    if (feature('ULTRAPLAN')) {
+    if (false) {
       for (const trigger of ultraplanTriggers) {
         for (let i = trigger.start; i < trigger.end; i++) {
           highlights.push({
@@ -802,7 +801,7 @@ function PromptInput({
     }
   }, [addNotification, removeNotification, thinkTriggers.length]);
   useEffect(() => {
-    if (feature('ULTRAPLAN') && ultraplanTriggers.length) {
+    if (false && ultraplanTriggers.length) {
       addNotification({
         key: 'ultraplan-active',
         text: 'This prompt will launch an ultraplan session in OpenCC on the web',

@@ -1,11 +1,10 @@
-import { feature } from 'bun:bundle'
 import { initAutoDream } from '../services/autoDream/autoDream.js'
 import { initMagicDocs } from '../services/MagicDocs/magicDocs.js'
 import { initSkillImprovement } from './hooks/skillImprovement.js'
 import { initExtractMemories } from '../services/extractMemories/extractMemories.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const registerProtocolModule = feature('LODESTONE')
+const registerProtocolModule = false
   ? (require('./deepLink/registerProtocol.js') as typeof import('./deepLink/registerProtocol.js'))
   : null
 
@@ -32,7 +31,7 @@ export function startBackgroundHousekeeping(): void {
   initExtractMemories()
   initAutoDream()
   void autoUpdateMarketplacesAndPluginsInBackground()
-  if (feature('LODESTONE') && getIsInteractive()) {
+  if (false && getIsInteractive()) {
     void registerProtocolModule!.ensureDeepLinkProtocolRegistered()
   }
 

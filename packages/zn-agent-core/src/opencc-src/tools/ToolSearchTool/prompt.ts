@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { isReplBridgeActive } from '../../bootstrap/state.js'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import type { Tool } from '../../Tool.js'
@@ -7,12 +6,12 @@ import { AGENT_TOOL_NAME } from '../AgentTool/constants.js'
 // Dead code elimination: Brief tool name only needed when KAIROS or KAIROS_BRIEF is on
 /* eslint-disable @typescript-eslint/no-require-imports */
 const BRIEF_TOOL_NAME: string | null =
-  feature('KAIROS') || feature('KAIROS_BRIEF')
+  false || false
     ? (
         require('../BriefTool/prompt.js') as typeof import('../BriefTool/prompt.js')
       ).BRIEF_TOOL_NAME
     : null
-const SEND_USER_FILE_TOOL_NAME: string | null = feature('KAIROS')
+const SEND_USER_FILE_TOOL_NAME: string | null = false
   ? (
       // @ts-ignore
       require('../SendUserFileTool/prompt.js') as typeof import('../SendUserFileTool/prompt.js')
@@ -88,7 +87,7 @@ export function isDeferredTool(tool: Tool): boolean {
   // tool's isEnabled() IS isBriefEnabled(), so being asked about its deferral
   // status implies the gate already passed.
   if (
-    (feature('KAIROS') || feature('KAIROS_BRIEF')) &&
+    (false || false) &&
     BRIEF_TOOL_NAME &&
     tool.name === BRIEF_TOOL_NAME
   ) {
@@ -98,7 +97,7 @@ export function isDeferredTool(tool: Tool): boolean {
   // SendUserFile is a file-delivery communication channel (sibling of Brief).
   // Must be immediately available without a ToolSearch round-trip.
   if (
-    feature('KAIROS') &&
+    false &&
     SEND_USER_FILE_TOOL_NAME &&
     tool.name === SEND_USER_FILE_TOOL_NAME &&
     isReplBridgeActive()

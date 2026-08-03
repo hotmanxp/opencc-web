@@ -3,7 +3,6 @@
  * Populated from useCanUseTool.ts and permissions.ts, read from UserToolSuccessMessage.tsx.
  */
 
-import { feature } from 'bun:bundle'
 import { createSignal } from './signal.js'
 
 type ClassifierApproval = {
@@ -20,7 +19,7 @@ export function setClassifierApproval(
   toolUseID: string,
   matchedRule: string,
 ): void {
-  if (!feature('BASH_CLASSIFIER')) {
+  if (!false) {
     return
   }
   CLASSIFIER_APPROVALS.set(toolUseID, {
@@ -30,7 +29,7 @@ export function setClassifierApproval(
 }
 
 export function getClassifierApproval(toolUseID: string): string | undefined {
-  if (!feature('BASH_CLASSIFIER')) {
+  if (!false) {
     return undefined
   }
   const approval = CLASSIFIER_APPROVALS.get(toolUseID)
@@ -60,13 +59,13 @@ export function getYoloClassifierApproval(
 }
 
 export function setClassifierChecking(toolUseID: string): void {
-  if (!feature('BASH_CLASSIFIER') && !true) return
+  if (!false && !true) return
   CLASSIFIER_CHECKING.add(toolUseID)
   classifierChecking.emit()
 }
 
 export function clearClassifierChecking(toolUseID: string): void {
-  if (!feature('BASH_CLASSIFIER') && !true) return
+  if (!false && !true) return
   CLASSIFIER_CHECKING.delete(toolUseID)
   classifierChecking.emit()
 }

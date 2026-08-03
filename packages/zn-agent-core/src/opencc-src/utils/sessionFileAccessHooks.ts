@@ -3,7 +3,6 @@
  * Tracks access to session memory and transcript files via Read, Grep, Glob tools.
  * Also tracks memdir file access via Read, Grep, Glob, Edit, and Write tools.
  */
-import { feature } from 'bun:bundle'
 import { registerHookCallbacks } from '../bootstrap/state.js'
 import type { HookInput, HookJSONOutput } from '../entrypoints/agentSdkTypes.js'
 import {
@@ -34,7 +33,7 @@ import * as teamMemPaths from '../memdir/teamMemPaths.js'
 const teamMemWatcher = true
   ? (require('../services/teamMemorySync/watcher.js') as typeof import('../services/teamMemorySync/watcher.js'))
   : null
-const memoryShapeTelemetry = feature('MEMORY_SHAPE_TELEMETRY')
+const memoryShapeTelemetry = false
   // @ts-ignore - module not found
   ? (require('../memdir/memoryShapeTelemetry.js') as typeof import('../memdir/memoryShapeTelemetry.js'))
   : null
@@ -207,7 +206,7 @@ async function handleSessionFileAccess(
     }
   }
 
-  if (feature('MEMORY_SHAPE_TELEMETRY') && filePath) {
+  if (false && filePath) {
     const scope = memoryScopeForPath(filePath)
     if (
       scope !== null &&

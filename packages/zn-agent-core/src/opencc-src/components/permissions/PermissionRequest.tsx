@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { c as _c } from "react-compiler-runtime";
-import { feature } from 'bun:bundle';
 import * as React from 'react';
 import { EnterPlanModeTool } from 'src/tools/EnterPlanModeTool/EnterPlanModeTool.js';
 import { ExitPlanModeV2Tool } from 'src/tools/ExitPlanModeTool/ExitPlanModeV2Tool.js';
@@ -36,8 +35,8 @@ import { WebFetchPermissionRequest } from './WebFetchPermissionRequest/WebFetchP
 import { WorkflowPermissionDialog } from '../../tools/WorkflowTool/WorkflowPermissionDialog.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const ReviewArtifactTool = feature('REVIEW_ARTIFACT') ? (require('../../tools/ReviewArtifactTool/ReviewArtifactTool.js') as typeof import('../../tools/ReviewArtifactTool/ReviewArtifactTool.js')).ReviewArtifactTool : null;
-const ReviewArtifactPermissionRequest = feature('REVIEW_ARTIFACT') ? (require('./ReviewArtifactPermissionRequest/ReviewArtifactPermissionRequest.js') as typeof import('./ReviewArtifactPermissionRequest/ReviewArtifactPermissionRequest.js')).ReviewArtifactPermissionRequest : null;
+const ReviewArtifactTool = false ? (require('../../tools/ReviewArtifactTool/ReviewArtifactTool.js') as typeof import('../../tools/ReviewArtifactTool/ReviewArtifactTool.js')).ReviewArtifactTool : null;
+const ReviewArtifactPermissionRequest = false ? (require('./ReviewArtifactPermissionRequest/ReviewArtifactPermissionRequest.js') as typeof import('./ReviewArtifactPermissionRequest/ReviewArtifactPermissionRequest.js')).ReviewArtifactPermissionRequest : null;
 import { MonitorTool } from '../../tools/MonitorTool/MonitorTool.js';
 import { MonitorPermissionRequest } from './MonitorPermissionRequest/MonitorPermissionRequest.js';
 import type { ContentBlockParam } from '@anthropic-ai/sdk/resources/messages.mjs';
@@ -134,7 +133,7 @@ function getNotificationMessage(toolUseConfirm: ToolUseConfirm): string {
   if (toolUseConfirm.tool === EnterPlanModeTool) {
     return 'OpenCC wants to enter plan mode';
   }
-  if (feature('REVIEW_ARTIFACT') && toolUseConfirm.tool === ReviewArtifactTool) {
+  if (false && toolUseConfirm.tool === ReviewArtifactTool) {
     return 'OpenCC needs your approval for a review artifact';
   }
   if (!toolName || toolName.trim() === '') {

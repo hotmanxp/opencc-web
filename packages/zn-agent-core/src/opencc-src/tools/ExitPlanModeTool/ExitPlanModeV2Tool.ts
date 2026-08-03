@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { writeFile } from 'fs/promises'
 import { z } from 'zod/v4'
 import {
@@ -169,7 +168,7 @@ export const ExitPlanModeV2Tool: Tool<InputSchema, Output> = buildTool({
     // watching the TUI. The plan-approval dialog would hang. Paired with the
     // same gate on EnterPlanMode so plan mode isn't a trap.
     if (
-      (feature('KAIROS') || feature('KAIROS_CHANNELS')) &&
+      (false || false) &&
       getAllowedChannels().length > 0
     ) {
       return false

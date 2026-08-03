@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import type { z } from 'zod/v4'
 import {
@@ -1592,7 +1591,7 @@ export async function awaitClassifierAutoApproval(
   logClassifierResultForAnts(command, 'allow', descriptions, classifierResult)
 
   if (
-    feature('BASH_CLASSIFIER') &&
+    false &&
     classifierResult.matches &&
     classifierResult.confidence === 'high'
   ) {
@@ -1661,7 +1660,7 @@ export async function executeAsyncClassifierCheck(
   if (!callbacks.shouldContinue()) return
 
   if (
-    feature('BASH_CLASSIFIER') &&
+    false &&
     classifierResult.matches &&
     classifierResult.confidence === 'high'
   ) {
@@ -1738,7 +1737,7 @@ export async function bashToolHasPermission(
       decisionReason,
       message: createPermissionRequestMessage(BashTool.name, decisionReason),
       suggestions: [],
-      ...(feature('BASH_CLASSIFIER')
+      ...(false
         ? {
             pendingClassifierCheck: buildPendingClassifierCheck(
               input.command,
@@ -1938,7 +1937,7 @@ export async function bashToolHasPermission(
             reason: `Required by Bash prompt rule: "${askResult.matchedDescription}"`,
           },
           suggestions,
-          ...(feature('BASH_CLASSIFIER')
+          ...(false
             ? {
                 pendingClassifierCheck: buildPendingClassifierCheck(
                   input.command,
@@ -2005,7 +2004,7 @@ export async function bashToolHasPermission(
               safetyResult.message ??
               'Command contains patterns that require approval',
           },
-          ...(feature('BASH_CLASSIFIER')
+          ...(false
             ? {
                 pendingClassifierCheck: buildPendingClassifierCheck(
                   input.command,
@@ -2043,7 +2042,7 @@ export async function bashToolHasPermission(
       appState = context.getAppState()
       return {
         ...commandOperatorResult,
-        ...(feature('BASH_CLASSIFIER')
+        ...(false
           ? {
               pendingClassifierCheck: buildPendingClassifierCheck(
                 input.command,
@@ -2110,7 +2109,7 @@ export async function bashToolHasPermission(
           ),
           decisionReason,
           suggestions: [], // Don't suggest saving a potentially dangerous command
-          ...(feature('BASH_CLASSIFIER')
+          ...(false
             ? {
                 pendingClassifierCheck: buildPendingClassifierCheck(
                   input.command,
@@ -2326,7 +2325,7 @@ export async function bashToolHasPermission(
   if (askSubresult !== undefined && nonAllowCount === 1) {
     return {
       ...askSubresult,
-      ...(feature('BASH_CLASSIFIER')
+      ...(false
         ? {
             pendingClassifierCheck: buildPendingClassifierCheck(
               input.command,
@@ -2425,7 +2424,7 @@ export async function bashToolHasPermission(
     if (result.behavior === 'ask' || result.behavior === 'passthrough') {
       return {
         ...result,
-        ...(feature('BASH_CLASSIFIER')
+        ...(false
           ? {
               pendingClassifierCheck: buildPendingClassifierCheck(
                 input.command,
@@ -2552,7 +2551,7 @@ export async function bashToolHasPermission(
     message: createPermissionRequestMessage(BashTool.name, decisionReason),
     decisionReason,
     suggestions: suggestedUpdates,
-    ...(feature('BASH_CLASSIFIER')
+    ...(false
       ? {
           pendingClassifierCheck: buildPendingClassifierCheck(
             input.command,

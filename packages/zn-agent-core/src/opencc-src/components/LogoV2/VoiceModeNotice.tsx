@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { c as _c } from "react-compiler-runtime";
-import { feature } from 'bun:bundle';
 import { useEffect, useState } from 'react';
 import { Box, Text } from '../../ink.js';
 import { getGlobalConfig, saveGlobalConfig } from '../../utils/config.js';
@@ -13,7 +12,7 @@ export function VoiceModeNotice() {
   const $ = _c(1);
   let t0;
   if ($[0] === Symbol.for("react.memo_cache_sentinel")) {
-    t0 = feature("VOICE_MODE") ? <VoiceModeNoticeInner /> : null;
+    t0 = false ? <VoiceModeNoticeInner /> : null;
     $[0] = t0;
   } else {
     t0 = $[0];

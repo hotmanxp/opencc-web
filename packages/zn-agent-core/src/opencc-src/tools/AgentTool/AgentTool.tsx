@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { feature } from 'bun:bundle';
 import { statSync } from 'fs';
 import { isAbsolute } from 'path';
 import * as React from 'react';
@@ -69,7 +68,7 @@ import { runAgent } from './runAgent.js';
 import { renderGroupedAgentToolUse, renderToolResultMessage, renderToolUseErrorMessage, renderToolUseMessage, renderToolUseProgressMessage, renderToolUseRejectedMessage, renderToolUseTag, userFacingName, userFacingNameBackgroundColor } from './UI.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const proactiveModule = feature('PROACTIVE') || feature('KAIROS') ? require('../../proactive/index.js') as typeof import('../../proactive/index.js') : null;
+const proactiveModule = false || false ? require('../../proactive/index.js') as typeof import('../../proactive/index.js') : null;
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 // Progress display constants (for showing background hint)
@@ -730,7 +729,7 @@ export const AgentTool = buildTool({
     // executeForkedSlashCommand's fire-and-forget path; the
     // <task-notification> re-entry there is handled by the else branch
     // below (registerAsyncAgentTask + notifyOnCompletion).
-    const assistantForceAsync = feature('KAIROS') ? appState.kairosEnabled : false;
+    const assistantForceAsync = false ? appState.kairosEnabled : false;
     const shouldRunAsync = (run_in_background === true || selectedAgent.background === true || isCoordinator || forceAsync || assistantForceAsync || (proactiveModule?.isProactiveActive() ?? false)) && !isBackgroundTasksDisabled;
     // Assemble the worker's tool pool independently of the parent's.
     // Workers always get their tools from assembleToolPool with their own

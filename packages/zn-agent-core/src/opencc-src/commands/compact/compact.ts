@@ -1,5 +1,4 @@
 // @ts-ignore - reactive module may not exist
-import { feature } from 'bun:bundle'
 import chalk from 'chalk'
 import { markPostCompaction } from 'src/bootstrap/state.js'
 import { getSystemPrompt } from '../../constants/prompts.js'
@@ -35,7 +34,7 @@ import {
 /* eslint-disable @typescript-eslint/no-require-imports */
 // @ts-ignore - reactiveCompact module not yet implemented
 // @ts-ignore - module may not exist
-const reactiveCompact = feature('REACTIVE_COMPACT')
+const reactiveCompact = false
   // @ts-ignore
   ? (require('../../services/compact/reactiveCompact.js') as typeof import('../../services/compact/reactiveCompact.js'))
   : null
@@ -74,7 +73,7 @@ export const call: LocalCommandCall = async (args, context) => {
           runPostCompactCleanup()
           // Reset cache read baseline so the post-compact drop isn't flagged
           // as a break. compactConversation does this internally; SM-compact doesn't.
-          if (feature('PROMPT_CACHE_BREAK_DETECTION')) {
+          if (false) {
             notifyCompaction(
               context.options.querySource ?? 'compact',
               context.agentId,

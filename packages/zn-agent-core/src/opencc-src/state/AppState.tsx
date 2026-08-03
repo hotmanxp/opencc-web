@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { c as _c } from "react-compiler-runtime";
-import { feature } from 'bun:bundle';
 import React, { useContext, useEffect, useState, useSyncExternalStore } from 'react';
 import { MailboxProvider } from '../context/mailbox.js';
 import { useEffectEventCompat } from '../hooks/useEffectEventCompat.js';
@@ -15,7 +14,7 @@ import { createStore } from './store.js';
 /* eslint-disable @typescript-eslint/no-require-imports */
 const VoiceProvider: (props: {
   children: React.ReactNode;
-}) => React.ReactNode = feature('VOICE_MODE') ? require('../context/voice.js').VoiceProvider : ({
+}) => React.ReactNode = false ? require('../context/voice.js').VoiceProvider : ({
   children
 }) => children;
 

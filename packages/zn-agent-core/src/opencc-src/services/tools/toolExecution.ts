@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { feature } from 'bun:bundle'
 import type {
   ContentBlockParam,
   ToolResultBlockParam,

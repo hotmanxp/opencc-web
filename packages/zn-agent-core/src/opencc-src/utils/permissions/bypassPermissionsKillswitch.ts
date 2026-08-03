@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { useEffect, useRef } from 'react'
 import {
   type AppState,

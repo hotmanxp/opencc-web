@@ -1,6 +1,5 @@
 // @ts-nocheck — pre-existing typecheck debt (mirrors src/utils/messages.ts:1;
 // System*Message types don't include isMeta/uuid/timestamp yet runtime writes them).
-import { feature } from "bun:bundle"
 import type { APIError } from "@anthropic-ai/sdk"
 import { randomUUID, type UUID } from "crypto"
 import type { Message, NormalizedMessage, StopHookInfo, SystemAgentsKilledMessage, SystemAPIErrorMessage, SystemApiMetricsMessage, SystemAwaySummaryMessage, SystemBridgeStatusMessage, SystemCompactBoundaryMessage, SystemInformationalMessage, SystemLocalCommandMessage, SystemMemorySavedMessage, SystemMicrocompactBoundaryMessage, SystemPermissionRetryMessage, SystemScheduledTaskFireMessage, SystemStopHookSummaryMessage, SystemTurnDurationMessage, SystemMessageLevel } from "../../types/message.js"
@@ -320,7 +319,7 @@ export function getMessagesAfterCompactBoundary<
 >(messages: T[], options?: { includeSnipped?: boolean }): T[] {
   const boundaryIndex = findLastCompactBoundaryIndex(messages)
   const sliced = boundaryIndex === -1 ? messages : messages.slice(boundaryIndex)
-  if (!options?.includeSnipped && feature('HISTORY_SNIP')) {
+  if (!options?.includeSnipped && false) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { projectSnippedView } =
       require('../../services/compact/snipProjection.js') as typeof import('../../services/compact/snipProjection.js')

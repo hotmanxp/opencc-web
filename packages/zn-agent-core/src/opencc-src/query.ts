@@ -25,10 +25,10 @@ import { validateBoundedIntEnvVar } from './utils/envValidation.js'
 import { buildPostCompactMessages } from './services/compact/compact.js'
 import type { MicrocompactResult } from './services/compact/microCompact.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
-const reactiveCompact = feature('REACTIVE_COMPACT')
+const reactiveCompact = false
   ? (require('./services/compact/reactiveCompact.js') as typeof import('./services/compact/reactiveCompact.js'))
   : null
-const contextCollapse = feature('CONTEXT_COLLAPSE')
+const contextCollapse = false
   ? (require('./services/contextCollapse/index.js') as typeof import('./services/contextCollapse/index.js'))
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -88,10 +88,10 @@ import {
   resolveMaxActiveMessagesLimit,
 } from './utils/maxActiveMessages.js'
 /* eslint-disable @typescript-eslint/no-require-imports */
-const skillPrefetch = feature('EXPERIMENTAL_SKILL_SEARCH')
+const skillPrefetch = false
   ? (require('./services/skillSearch/prefetch.js') as typeof import('./services/skillSearch/prefetch.js'))
   : null
-const jobClassifier = feature('TEMPLATES')
+const jobClassifier = false
   ? (require('./jobs/classifier.js') as typeof import('./jobs/classifier.js'))
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -140,7 +140,6 @@ import {
 } from './utils/config.js'
 import { productionDeps, type QueryDeps } from './query/deps.js'
 import type { Terminal, Continue } from './query/transitions.js'
-import { feature } from 'bun:bundle'
 import {
   getCurrentTurnTokenBudget,
   getTurnOutputTokens,
@@ -534,7 +533,7 @@ async function* queryLoop(
 > {
   // Start a new turn for multi-turn context tracking
   if (
-    feature('MULTI_TURN_CONTEXT') &&
+    false &&
     getGlobalConfig().knowledgeGraphEnabled
   ) {
     const { startNewTurn } = await import('./utils/multiTurnContext.js')
@@ -732,7 +731,7 @@ async function* queryLoop(
 
     // Extract facts and update phase from the latest message (user input or tool result)
     if (
-      feature('CONVERSATION_ARC') &&
+      false &&
       getGlobalConfig().knowledgeGraphEnabled &&
       messagesForQuery.length > 0
     ) {
@@ -828,7 +827,7 @@ async function* queryLoop(
     // Within a turn, the view flows forward via state.messages at the
     // continue site (query.ts:1192), and the next projectView() no-ops
     // because the archived messages are already gone from its input.
-    if (feature('CONTEXT_COLLAPSE') && contextCollapse) {
+    if (false && contextCollapse) {
       const collapseResult = await contextCollapse.applyCollapsesIfNeeded(
         messagesForQuery,
         toolUseContext,
@@ -840,7 +839,7 @@ async function* queryLoop(
     // arcSummary must be a separate array element; concatenating it into a
     // template string makes [...systemPrompt] spread chars, shredding the prompt.
     let promptWithArc: readonly string[] = systemPrompt
-    if (feature('CONVERSATION_ARC')) {
+    if (false) {
       if (getGlobalConfig().knowledgeGraphEnabled) {
         const lastMessage = messagesForQuery[messagesForQuery.length - 1]
         const userQueryText =
@@ -1128,7 +1127,7 @@ async function* queryLoop(
     // conjunct preserves the user's explicit "no automatic anything"
     // config — if they set DISABLE_AUTO_COMPACT, they get the preempt.
     let collapseOwnsIt = false
-    if (feature('CONTEXT_COLLAPSE')) {
+    if (false) {
       collapseOwnsIt =
         (contextCollapse?.isContextCollapseEnabled() ?? false) &&
         isAutoCompactEnabled()
@@ -1415,7 +1414,7 @@ async function* queryLoop(
             // tree-shaking constraint), so the collapse check is nested
             // rather than composed.
             let withheld = false
-            if (feature('CONTEXT_COLLAPSE')) {
+            if (false) {
               if (
                 contextCollapse?.isWithheldPromptTooLong(
                   message,
@@ -1677,7 +1676,7 @@ if (
       // chicago MCP: auto-unhide + lock release on interrupt. Same cleanup
       // as the natural turn-end path in stopHooks.ts. Main thread only —
       // see stopHooks.ts for the subagent-releasing-main's-lock rationale.
-      if (feature('CHICAGO_MCP') && !toolUseContext.agentId) {
+      if (false && !toolUseContext.agentId) {
         try {
           const { cleanupComputerUseAfterTurn } = await import(
             './utils/computerUse/cleanup.js'
@@ -1737,7 +1736,7 @@ if (
         // transition not being collapse_drain_retry — if we already drained
         // and the retry still 413'd, fall through to reactive compact.
         if (
-          feature('CONTEXT_COLLAPSE') &&
+          false &&
           contextCollapse &&
           state.transition?.reason !== 'collapse_drain_retry'
         ) {
@@ -1843,7 +1842,7 @@ if (
         yield lastMessage
         void executeStopFailureHooks(lastMessage, toolUseContext)
         return { reason: isWithheldMedia ? 'image_error' : 'prompt_too_long' }
-      } else if (feature('CONTEXT_COLLAPSE') && isWithheld413) {
+      } else if (false && isWithheld413) {
         // reactiveCompact compiled out but contextCollapse withheld and
         // couldn't recover (staged queue empty/stale). Surface. Same
         // early-return rationale — don't fall through to stop hooks.
@@ -2398,7 +2397,7 @@ if (
 
     // Track multi-turn context after tool execution
     if (
-      feature('MULTI_TURN_CONTEXT') &&
+      false &&
       getGlobalConfig().knowledgeGraphEnabled
     ) {
       const { addMessageToTurn, addToolCallToTurn } = await import(
@@ -2417,7 +2416,7 @@ if (
 
     // Update conversation arc phase
     if (
-      feature('CONVERSATION_ARC') &&
+      false &&
       getGlobalConfig().knowledgeGraphEnabled
     ) {
       const { updateArcPhase, finalizeArcTurn } = await import(
@@ -2433,7 +2432,7 @@ if (
       // chicago MCP: auto-unhide + lock release when aborted mid-tool-call.
       // This is the most likely Ctrl+C path for CU (e.g. slow screenshot).
       // Main thread only — see stopHooks.ts for the subagent rationale.
-      if (feature('CHICAGO_MCP') && !toolUseContext.agentId) {
+      if (false && !toolUseContext.agentId) {
         try {
           const { cleanupComputerUseAfterTurn } = await import(
             './utils/computerUse/cleanup.js'

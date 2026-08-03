@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { randomBytes } from 'crypto'
 import { unwatchFile, watchFile } from 'fs'
 import memoize from 'lodash-es/memoize.js'
@@ -35,7 +34,7 @@ import type { ThemeSetting } from './theme.js'
 import * as teamMemPaths from '../memdir/teamMemPaths.js'
 
 
-const ccrAutoConnect = feature('CCR_AUTO_CONNECT')
+const ccrAutoConnect = false
   ? (require('../bridge/bridgeEnabled.js') as typeof import('../bridge/bridgeEnabled.js'))
   : null
 
@@ -1214,7 +1213,7 @@ export function getGlobalConfig(): GlobalConfig {
 export function getRemoteControlAtStartup(): boolean {
   const explicit = getGlobalConfig().remoteControlAtStartup
   if (explicit !== undefined) return explicit
-  if (feature('CCR_AUTO_CONNECT')) {
+  if (false) {
     if (ccrAutoConnect?.getCcrAutoConnectDefault()) return true
   }
   return false

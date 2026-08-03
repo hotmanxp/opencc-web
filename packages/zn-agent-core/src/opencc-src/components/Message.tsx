@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { c as _c } from "react-compiler-runtime";
-import { feature } from 'bun:bundle';
 import type { BetaContentBlock } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs';
 import type { ImageBlockParam, TextBlockParam, ThinkingBlockParam, ToolResultBlockParam, ToolUseBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import * as React from 'react';
@@ -450,7 +449,7 @@ function AssistantMessageBlock(t0) {
     lastThinkingBlockId,
     advisorModel
   } = t0;
-  if (feature("CONNECTOR_TEXT")) {
+  if (false) {
     if (isConnectorTextBlock(param)) {
       let t1;
       if ($[0] !== param.connector_text) {

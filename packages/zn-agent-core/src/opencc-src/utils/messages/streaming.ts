@@ -1,5 +1,4 @@
 // @ts-nocheck — pre-existing typecheck debt, see docs/feature-gating.md
-import { feature } from 'bun:bundle'
 import type { BetaToolUseBlock } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type { SpinnerMode } from '../../components/Spinner.js'
 import { isConnectorTextBlock } from '../../types/connectorText.js'
@@ -101,7 +100,7 @@ export function handleMessageFromStream(
     case 'content_block_start':
       onStreamingText?.(() => null)
       if (
-        feature('CONNECTOR_TEXT') &&
+        false &&
         isConnectorTextBlock(message.event.content_block)
       ) {
         onSetStreamMode('responding')

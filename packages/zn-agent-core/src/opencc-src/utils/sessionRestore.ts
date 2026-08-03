@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import { dirname } from 'path'
 import {
@@ -120,7 +119,7 @@ export function restoreSessionStateFromLog(
 
   // Restore attribution state (internal-only feature)
   if (
-    feature('COMMIT_ATTRIBUTION') &&
+    false &&
     result.attributionSnapshots &&
     (result.attributionSnapshots as []).length > 0
   ) {
@@ -135,7 +134,7 @@ export function restoreSessionStateFromLog(
   // undefined/empty entries) because restoreFromEntries resets the store
   // first — without that, an in-session /resume into a session with no
   // commits would leave the prior session's stale commit log intact.
-  if (feature('CONTEXT_COLLAPSE')) {
+  if (false) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     ;(
       require('../services/contextCollapse/persist.ts') as typeof import('../services/contextCollapse/persist.js')
@@ -221,7 +220,7 @@ export function computeRestoredAttributionState(
   result: ResumeResult,
 ): AttributionState | undefined {
   if (
-    feature('COMMIT_ATTRIBUTION') &&
+    false &&
     result.attributionSnapshots &&
     (result.attributionSnapshots as []).length > 0
   ) {
@@ -582,7 +581,7 @@ export async function processResumedConversation(
   // /resume path goes through restoreSessionStateFromLog (REPL.tsx); CLI
   // --continue/--resume goes through here instead. Called unconditionally
   // — see the restoreSessionStateFromLog callsite above for why.
-  if (feature('CONTEXT_COLLAPSE')) {
+  if (false) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     ;(
       require('../services/contextCollapse/persist.ts') as typeof import('../services/contextCollapse/persist.js')

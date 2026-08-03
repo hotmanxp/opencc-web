@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { runtimeFeature } from '../../utils/envUtils.js'
 import { basename } from 'path'
 import { useCallback, useEffect, useRef } from 'react'
@@ -21,7 +20,7 @@ import type {
 
 import { fetchMcpSkillsForClient } from '../../skills/mcpSkills.js'
 
-const clearSkillIndexCache = feature('EXPERIMENTAL_SKILL_SEARCH')
+const clearSkillIndexCache = false
   ? (
       // @ts-ignore - localSearch module not available in open repo
       require('../skillSearch/localSearch.js') as typeof import('../skillSearch/localSearch.js')
@@ -167,7 +166,7 @@ export function useManageMCPConnections(
     null,
   )
   if (
-    (feature('KAIROS') || feature('KAIROS_CHANNELS')) &&
+    (false || false) &&
     channelPermCallbacksRef.current === null
   ) {
     channelPermCallbacksRef.current = createChannelPermissionCallbacks()
@@ -175,7 +174,7 @@ export function useManageMCPConnections(
   // Store callbacks in AppState so interactiveHandler.ts can reach them via
   // ctx.toolUseContext.getAppState(). One-time set — the ref is stable.
   useEffect(() => {
-    if (feature('KAIROS') || feature('KAIROS_CHANNELS')) {
+    if (false || false) {
       const callbacks = channelPermCallbacksRef.current
       if (!callbacks) return
       // GrowthBook runtime gate — separate from channels so channels can
@@ -468,7 +467,7 @@ export function useManageMCPConnections(
           // Channel push: notifications/claude/channel → enqueue().
           // Gate decides whether to register the handler; connection stays
           // up either way (allowedMcpServers controls that).
-          if (feature('KAIROS') || feature('KAIROS_CHANNELS')) {
+          if (false || false) {
             const gate = gateChannelServer(
               client.name,
               client.capabilities,

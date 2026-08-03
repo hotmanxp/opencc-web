@@ -71,46 +71,45 @@ import usage from './commands/usage/index.js'
 import theme from './commands/theme/index.js'
 import vim from './commands/vim/index.js'
 import workflows from './commands/workflows/index.js'
-import { feature } from 'bun:bundle'
 import { isWorkflowsDisabled, runtimeFeature } from './utils/envUtils.js'
 import { isBuddyEnabled } from './buddy/feature.js'
 // Dead code elimination: conditional imports
 /* eslint-disable @typescript-eslint/no-require-imports */
 const proactive =
-  feature('PROACTIVE') || feature('KAIROS')
+  false || false
     ? require('./commands/proactive.js').default
     : null
 const briefCommand =
-  feature('KAIROS') || feature('KAIROS_BRIEF')
+  false || false
     ? require('./commands/brief.js').default
     : null
-const assistantCommand = feature('KAIROS')
+const assistantCommand = false
   ? require('./commands/assistant/index.js').default
   : null
-const bridge = feature('BRIDGE_MODE')
+const bridge = false
   ? require('./commands/bridge/index.js').default
   : null
-const remoteControlServerCommand = feature('BRIDGE_MODE')
+const remoteControlServerCommand = false
   ? require('./commands/remoteControlServer/index.js').default
   : null
-const voiceCommand = feature('VOICE_MODE')
+const voiceCommand = false
   ? require('./commands/voice/index.js').default
   : null
 const forceSnip = null
-const webCmd = feature('CCR_REMOTE_SETUP')
+const webCmd = false
   ? (
       require('./commands/remote-setup/index.js') as typeof import('./commands/remote-setup/index.js')
     ).default
   : null
 // [FORK_SUBAGENT] was: feature-gated require, but ./services/skillSearch/ never existed
 const clearSkillIndexCache: (() => void) | null = null
-const subscribePr = feature('KAIROS_GITHUB_WEBHOOKS')
+const subscribePr = false
   ? require('./commands/subscribe-pr.js').default
   : null
-const ultraplan = feature('ULTRAPLAN')
+const ultraplan = false
   ? require('./commands/ultraplan.js').default
   : null
-const torch = feature('TORCH') ? require('./commands/torch.js').default : null
+const torch = false ? require('./commands/torch.js').default : null
 // [FORK_SUBAGENT] was: feature-gated require, but ./commands/peers/ never existed
 const peersCmd: null = null
 // [FORK_SUBAGENT] was: feature-gated require, but ./commands/fork/ never existed

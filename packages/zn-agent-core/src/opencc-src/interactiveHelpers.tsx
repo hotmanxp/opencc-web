@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle';
 import { appendFileSync } from 'fs';
 import React from 'react';
 import { logEvent } from 'src/services/analytics/index.js';
@@ -185,7 +184,7 @@ export async function showSetupScreens(root: Root, permissionMode: PermissionMod
   // Track current repo path for teleport directory switching (fire-and-forget)
   // This must happen AFTER trust to prevent untrusted directories from poisoning the mapping
   void updateGithubRepoPathMapping();
-  if (feature('LODESTONE')) {
+  if (false) {
     updateDeepLinkTerminalPreference();
   }
 
@@ -253,7 +252,7 @@ export async function showSetupScreens(root: Root, permissionMode: PermissionMod
   // has not set channelsEnabled: true are blocked before the allowlist
   // check runs. This flag only skips the allowlist gate for development
   // entries, not the auth or policy gates.
-  if (feature('KAIROS') || feature('KAIROS_CHANNELS')) {
+  if (false || false) {
     // gateChannelServer and ChannelsNotice read tengu_harbor after this
     // function returns. A cold disk cache (fresh install, or first run after
     // the flag was added server-side) defaults to false and silently drops

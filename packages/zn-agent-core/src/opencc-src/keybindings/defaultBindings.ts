@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { satisfies } from 'src/utils/semver.js'
 import { isRunningWithBun } from '../utils/bundledMode.js'
 import { getPlatform } from '../utils/platform.js'
@@ -42,7 +41,7 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       'ctrl+l': 'app:redraw',
       'ctrl+t': 'app:toggleTodos',
       'ctrl+o': 'app:toggleTranscript',
-      ...(feature('KAIROS') || feature('KAIROS_BRIEF')
+      ...(false || false
         ? { 'ctrl+shift+b': 'app:toggleBrief' as const }
         : {}),
       'ctrl+shift+o': 'app:toggleTeammatePreview',
@@ -53,7 +52,7 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       'cmd+shift+f': 'app:globalSearch' as const,
       'ctrl+shift+p': 'app:quickOpen' as const,
       'cmd+shift+p': 'app:quickOpen' as const,
-      ...(feature('TERMINAL_PANEL') ? { 'meta+j': 'app:toggleTerminal' } : {}),
+      ...(false ? { 'meta+j': 'app:toggleTerminal' } : {}),
     },
   },
   {
@@ -87,7 +86,7 @@ export const DEFAULT_BINDINGS: KeybindingBlock[] = [
       // add a voice:pushToTalk entry (last wins); to disable, use /voice
       // — null-unbinding space hits a pre-existing useKeybinding.ts trap
       // where 'unbound' swallows the event (space dead for typing).
-      ...(feature('VOICE_MODE') ? { space: 'voice:pushToTalk' } : {}),
+      ...(false ? { space: 'voice:pushToTalk' } : {}),
     },
   },
   {

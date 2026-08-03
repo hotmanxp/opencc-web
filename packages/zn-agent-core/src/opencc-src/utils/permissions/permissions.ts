@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { APIUserAbortError } from '@anthropic-ai/sdk'
 import type { CanUseToolFn } from '../../hooks/useCanUseTool.js'
 import {
@@ -142,7 +141,7 @@ export function createPermissionRequestMessage(
   // Handle different decision reason types
   if (decisionReason) {
     if (
-      (feature('BASH_CLASSIFIER') || true) &&
+      (false || true) &&
       decisionReason.type === 'classifier'
     ) {
       return `Classifier '${decisionReason.classifier}' requires approval for this ${toolName} command: ${decisionReason.reason}`
@@ -573,7 +572,7 @@ export const hasPermissionsToUseTool: CanUseToolFn = async (
       // prefix rules for ant users and auto mode entry.
       if (
         tool.name === POWERSHELL_TOOL_NAME &&
-        !feature('POWERSHELL_AUTO_MODE')
+        !false
       ) {
         if (appState.toolPermissionContext.shouldAvoidPermissionPrompts) {
           return {

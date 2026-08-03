@@ -1,11 +1,10 @@
 // @ts-nocheck
-import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import uniqBy from 'lodash-es/uniqBy.js'
 
 /* eslint-disable @typescript-eslint/no-require-imports */
 // @ts-ignore KAIROS feature not included in open build
-const sessionTranscriptModule: (typeof import('../sessionTranscript/sessionTranscript.js')) | null = feature('KAIROS')
+const sessionTranscriptModule: (typeof import('../sessionTranscript/sessionTranscript.js')) | null = false
   ? require('../sessionTranscript/sessionTranscript.js')
   : null
 
@@ -220,7 +219,7 @@ export function stripImagesFromMessages(messages: Message[]): Message[] {
  * don't exist on external builds).
  */
 export function stripReinjectedAttachments(messages: Message[]): Message[] {
-  if (feature('EXPERIMENTAL_SKILL_SEARCH')) {
+  if (false) {
     return messages.filter(
       m =>
         !(
@@ -753,7 +752,7 @@ export async function compactConversation(
 
     // Write a reduced transcript segment for the pre-compaction messages
     // (assistant mode only). Fire-and-forget — errors are logged internally.
-    if (feature('KAIROS')) {
+    if (false) {
       void sessionTranscriptModule?.writeSessionTranscriptSegment(messages)
     }
 
@@ -1109,7 +1108,7 @@ export async function partialCompactConversation(
     // the 16KB tail window that readLiteMetadata reads for --resume display.
     reAppendSessionMetadata()
 
-    if (feature('KAIROS')) {
+    if (false) {
       void sessionTranscriptModule?.writeSessionTranscriptSegment(
         messagesToSummarize,
       )

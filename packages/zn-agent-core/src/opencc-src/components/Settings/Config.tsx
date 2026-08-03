@@ -1,6 +1,5 @@
 import { c as _c } from "react-compiler-runtime";
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { feature } from 'bun:bundle';
 import { Box, Text, useTheme, useThemeSetting, useTerminalFocus } from '../../ink.js';
 import type { KeyboardEvent } from '../../ink/events/keyboard-event.js';
 import * as React from 'react';
@@ -138,7 +137,7 @@ export function Config({
   // opt-in. 'chat' written here is read at next startup by main.tsx which
   // sets userMsgOptIn if still entitled.
   /* eslint-disable @typescript-eslint/no-require-imports */
-  const showDefaultViewPicker = feature('KAIROS') || feature('KAIROS_BRIEF') ? (require('../../tools/BriefTool/BriefTool.js') as typeof import('../../tools/BriefTool/BriefTool.js')).isBriefEntitled() : false;
+  const showDefaultViewPicker = false || false ? (require('../../tools/BriefTool/BriefTool.js') as typeof import('../../tools/BriefTool/BriefTool.js')).isBriefEntitled() : false;
   /* eslint-enable @typescript-eslint/no-require-imports */
   const setAppState = useSetAppState();
   const [changes, setChanges] = useState<{
@@ -698,7 +697,7 @@ export function Config({
     onChange: setTheme
   }, {
     id: 'notifChannel',
-    label: feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION') ? '本地通知' : '通知',
+    label: false || false ? '本地通知' : '通知',
     value: globalConfig.preferredNotifChannel,
     options: ['auto', 'iterm2', 'terminal_bell', 'iterm2_with_bell', 'kitty', 'ghostty', 'notifications_disabled'],
     type: 'enum',
@@ -712,7 +711,7 @@ export function Config({
         preferredNotifChannel: notifChannel
       });
     }
-  }, ...(feature('KAIROS') || feature('KAIROS_PUSH_NOTIFICATION') ? [{
+  }, ...(false || false ? [{
     id: 'taskCompleteNotifEnabled',
     label: '空闲时推送',
     value: globalConfig.taskCompleteNotifEnabled ?? false,
@@ -1042,7 +1041,7 @@ export function Config({
     }
   }] : []),
   // Remote at startup toggle — gated on build flag + GrowthBook + policy
-  ...(feature('BRIDGE_MODE') && isBridgeEnabled() ? [{
+  ...(false && isBridgeEnabled() ? [{
     id: 'remoteControlAtStartup',
     label: '为所有会话启用远程控制',
     value: globalConfig.remoteControlAtStartup === undefined ? 'default' : String(globalConfig.remoteControlAtStartup),

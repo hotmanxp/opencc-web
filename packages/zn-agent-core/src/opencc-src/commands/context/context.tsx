@@ -1,5 +1,4 @@
 import * as React from 'react';
-import { feature } from 'bun:bundle';
 import type { LocalJSXCommandContext, LocalJSXCommandOnDone } from '../../types/command.js';
 import type { Message } from '../../types/message.js';
 import { getMessagesAfterCompactBoundary } from '../../utils/messages.js';
@@ -14,7 +13,7 @@ import { plural } from '../../utils/stringUtils.js';
 
 function toApiView(messages: Message[]): Message[] {
   let view = getMessagesAfterCompactBoundary(messages);
-  if (feature('CONTEXT_COLLAPSE')) {
+  if (false) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const {
       projectView
@@ -69,7 +68,7 @@ function formatContextAsMarkdownTable(data: ContextData): string {
   output += `**Tokens:** ${formatTokens(totalTokens)} / ${formatTokens(rawMaxTokens)} (${percentage}%)\n`;
 
   // Context-collapse status
-  if (feature('CONTEXT_COLLAPSE')) {
+  if (false) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { getStats, isContextCollapseEnabled } =
       require('../../services/contextCollapse/index.js') as typeof import('../../services/contextCollapse/index.js');

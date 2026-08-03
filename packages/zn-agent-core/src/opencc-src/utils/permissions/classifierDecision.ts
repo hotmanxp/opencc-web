@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { ASK_USER_QUESTION_TOOL_NAME } from '../../tools/AskUserQuestionTool/prompt.js'
 import { ENTER_PLAN_MODE_TOOL_NAME } from '../../tools/EnterPlanModeTool/constants.js'
 import { EXIT_PLAN_MODE_TOOL_NAME } from '../../tools/ExitPlanModeTool/constants.js'
@@ -25,13 +24,13 @@ import { YOLO_CLASSIFIER_TOOL_NAME } from './yoloClassifier.js'
 // Ant-only tool names: conditional require so Bun can DCE these in external builds.
 // Gates mirror tools.ts. Keeps the tool name strings out of cli.js.
 /* eslint-disable @typescript-eslint/no-require-imports */
-const TERMINAL_CAPTURE_TOOL_NAME = feature('TERMINAL_PANEL')
+const TERMINAL_CAPTURE_TOOL_NAME = false
   ? (
       // @ts-ignore - module may not exist
       require('../../tools/TerminalCaptureTool/prompt.js') as typeof import('../../tools/TerminalCaptureTool/prompt.js')
     ).TERMINAL_CAPTURE_TOOL_NAME
   : null
-const OVERFLOW_TEST_TOOL_NAME = feature('OVERFLOW_TEST_TOOL')
+const OVERFLOW_TEST_TOOL_NAME = false
   ? (
       // @ts-ignore - module may not exist
       require('../../tools/OverflowTestTool/OverflowTestTool.js') as typeof import('../../tools/OverflowTestTool/OverflowTestTool.js')

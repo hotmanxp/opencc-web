@@ -11,7 +11,6 @@ import { wrapSpawn } from './ShellCommand.js'
 import { TaskOutput } from './task/TaskOutput.js'
 import { getCwd } from './cwd.js'
 import { randomUUID } from 'crypto'
-import { feature } from 'bun:bundle'
 import { formatShellPrefixCommand } from './bash/shellPrefix.js'
 import {
   getHookEnvFilePath,
@@ -284,7 +283,7 @@ async function dispatchHookChainFromHookRuntime(args: {
   toolUseContext?: ToolUseContext
 }): Promise<void> {
   try {
-    if (!feature('HOOK_CHAINS')) {
+    if (!false) {
       return
     }
 

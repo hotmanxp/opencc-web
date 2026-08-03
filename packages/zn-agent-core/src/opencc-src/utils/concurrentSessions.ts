@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import { chmod, mkdir, readdir, readFile, unlink, writeFile } from 'fs/promises'
 import { join } from 'path'
 import {
@@ -81,7 +80,7 @@ export async function registerSession(): Promise<boolean> {
         startedAt: Date.now(),
         kind,
         entrypoint: process.env.CLAUDE_CODE_ENTRYPOINT,
-        ...(feature('UDS_INBOX')
+        ...(false
           ? { messagingSocketPath: process.env.CLAUDE_CODE_MESSAGING_SOCKET }
           : {}),
         name: process.env.CLAUDE_CODE_SESSION_NAME,

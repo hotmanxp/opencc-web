@@ -48,7 +48,6 @@ import {
 } from '../utils/permissions/filesystem.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 import { isReplModeEnabled } from '../tools/REPLTool/constants.js'
-import { feature } from 'bun:bundle'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from 'src/services/analytics/growthbook.js'
 import { shouldUseGlobalCacheScope } from '../utils/betas.js'
 import { isForkSubagentEnabled } from '../tools/AgentTool/forkSubagent.js'
@@ -82,22 +81,20 @@ const getCachedMCConfigForFRC = true
   : null
 
 const proactiveModule =
-  feature('PROACTIVE') || feature('KAIROS')
+  false || false
     ? require('../proactive/index.js')
     : null
 const BRIEF_PROACTIVE_SECTION: string | null =
-  feature('KAIROS') || feature('KAIROS_BRIEF')
+  false || false
     ? (
         require('../tools/BriefTool/prompt.js') as typeof import('../tools/BriefTool/prompt.js')
       ).BRIEF_PROACTIVE_SECTION
     : null
 const briefToolModule =
-  feature('KAIROS') || feature('KAIROS_BRIEF')
+  false || false
     ? (require('../tools/BriefTool/BriefTool.js') as typeof import('../tools/BriefTool/BriefTool.js'))
     : null
-const DISCOVER_SKILLS_TOOL_NAME: string | null = feature(
-  'EXPERIMENTAL_SKILL_SEARCH',
-)
+const DISCOVER_SKILLS_TOOL_NAME: string | null = false
   ? (
       // @ts-ignore - generated during build
       require('../tools/DiscoverSkillsTool/prompt.js') as typeof import('../tools/DiscoverSkillsTool/prompt.js')
@@ -105,7 +102,7 @@ const DISCOVER_SKILLS_TOOL_NAME: string | null = feature(
   : null
 // Capture the module (not .isSkillSearchEnabled directly) so spyOn() in tests
 // patches what we actually call — a captured function ref would point past the spy.
-const skillSearchFeatureCheck = feature('EXPERIMENTAL_SKILL_SEARCH')
+const skillSearchFeatureCheck = false
   ? (
       // @ts-ignore - generated during build
       require('../services/skillSearch/featureCheck.js') as typeof import('../services/skillSearch/featureCheck.js'))
@@ -350,7 +347,7 @@ function getAgentToolSection(): string {
  */
 function getDiscoverSkillsGuidance(): string | null {
   if (
-    feature('EXPERIMENTAL_SKILL_SEARCH') &&
+    false &&
     DISCOVER_SKILLS_TOOL_NAME !== null
   ) {
     return `Relevant skills are automatically surfaced each turn as "Skills relevant to your task:" reminders. If you're about to do something those don't cover — a mid-task pivot, an unusual workflow, a multi-step plan — call ${DISCOVER_SKILLS_TOOL_NAME} with a specific description of what you're doing. Skills already visible or loaded are filtered automatically. Skip this if the surfaced skills already cover your next action.`
@@ -481,7 +478,7 @@ export async function getSystemPrompt(
   const enabledTools = new Set(tools.map(_ => _.name))
 
   if (
-    (feature('PROACTIVE') || feature('KAIROS')) &&
+    (false || false) &&
     proactiveModule?.isProactiveActive()
   ) {
     logForDebugging(`[SystemPrompt] path=simple-proactive`)
@@ -566,7 +563,7 @@ ${CYBER_RISK_INSTRUCTION}`,
           ),
         ]
       : []),
-    ...(feature('KAIROS') || feature('KAIROS_BRIEF')
+    ...(false || false
       ? [systemPromptSection('brief', () => getBriefSection())]
       : []),
     codegraphSection,
@@ -798,7 +795,7 @@ export async function enhanceSystemPromptWithEnvDetails(
   // AgentTool.tsx:768 builds the prompt before assembleToolPool:830 so it
   // omits this param — `?? true` preserves guidance there.
   const discoverSkillsGuidance =
-    feature('EXPERIMENTAL_SKILL_SEARCH') &&
+    false &&
     skillSearchFeatureCheck?.isSkillSearchEnabled() &&
     DISCOVER_SKILLS_TOOL_NAME !== null &&
     (enabledToolNames?.has(DISCOVER_SKILLS_TOOL_NAME) ?? true)
@@ -869,7 +866,7 @@ Old tool results will be automatically cleared from context to free up space. Th
 const SUMMARIZE_TOOL_RESULTS_SECTION = `When working with tool results, write down any important information you might need later in your response, as the original tool result may be cleared later.`
 
 function getBriefSection(): string | null {
-  if (!(feature('KAIROS') || feature('KAIROS_BRIEF'))) return null
+  if (!(false || false)) return null
   if (!BRIEF_PROACTIVE_SECTION) return null
   // Whenever the tool is available, the model is told to use it. The
   // /brief toggle and --brief flag now only control the isBriefOnly
@@ -878,7 +875,7 @@ function getBriefSection(): string | null {
   // When proactive is active, getProactiveSection() already appends the
   // section inline. Skip here to avoid duplicating it in the system prompt.
   if (
-    (feature('PROACTIVE') || feature('KAIROS')) &&
+    (false || false) &&
     proactiveModule?.isProactiveActive()
   )
     return null
@@ -886,7 +883,7 @@ function getBriefSection(): string | null {
 }
 
 function getProactiveSection(): string | null {
-  if (!(feature('PROACTIVE') || feature('KAIROS'))) return null
+  if (!(false || false)) return null
   if (!proactiveModule?.isProactiveActive()) return null
 
   return `# Autonomous work

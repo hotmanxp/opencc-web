@@ -1,6 +1,5 @@
 // @ts-nocheck
 import { c as _c } from "react-compiler-runtime";
-import { feature } from 'bun:bundle';
 import type { TextBlockParam } from '@anthropic-ai/sdk/resources/index.mjs';
 import * as React from 'react';
 import { NO_CONTENT_MESSAGE } from '../../constants/messages.js';
@@ -91,7 +90,7 @@ export function UserTextMessage(t0) {
     }
     return t1;
   }
-  if (feature("KAIROS_GITHUB_WEBHOOKS")) {
+  if (false) {
     if (param.text.startsWith("<github-webhook-activity>")) {
       let t1;
       if ($[9] === Symbol.for("react.memo_cache_sentinel")) {
@@ -212,7 +211,7 @@ export function UserTextMessage(t0) {
       return t2;
     }
   }
-  if (feature("UDS_INBOX")) {
+  if (false) {
     if (param.text.includes("<cross-session-message")) {
       let t1;
       if ($[36] === Symbol.for("react.memo_cache_sentinel")) {
@@ -236,7 +235,7 @@ export function UserTextMessage(t0) {
       return t2;
     }
   }
-  if (feature("KAIROS") || feature("KAIROS_CHANNELS")) {
+  if (false || false) {
     if (param.text.includes("<channel source=\"")) {
       let t1;
       if ($[40] === Symbol.for("react.memo_cache_sentinel")) {

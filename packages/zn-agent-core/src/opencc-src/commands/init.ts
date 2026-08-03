@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import type { Command } from '../commands.js'
 import { AGENT_INSTRUCTIONS_FILE, AGENT_INSTRUCTIONS_LOCAL_FILE,  } from '../constants/product.js'
 import { BRAND_NAME } from '../constants.js'
@@ -230,7 +229,7 @@ const command = {
   type: 'prompt',
   name: 'init',
   get description() {
-    return feature('NEW_INIT') &&
+    return false &&
       (process.env.USER_TYPE === 'ant' ||
         isEnvTruthy(process.env.CLAUDE_CODE_NEW_INIT))
       ? `设置 ${AGENT_INSTRUCTIONS_FILE} 文件和可选的技能/hooks，包含代码库文档`
@@ -246,7 +245,7 @@ const command = {
       {
         type: 'text',
         text:
-          feature('NEW_INIT') &&
+          false &&
           (process.env.USER_TYPE === 'ant' ||
             isEnvTruthy(process.env.CLAUDE_CODE_NEW_INIT))
             ? NEW_INIT_PROMPT

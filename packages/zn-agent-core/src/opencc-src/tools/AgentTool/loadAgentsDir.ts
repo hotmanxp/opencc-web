@@ -1,5 +1,4 @@
 import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
-import { feature } from 'bun:bundle'
 import memoize from 'lodash-es/memoize.js'
 import { basename } from 'path'
 import type { SettingSource } from 'src/utils/settings/constants.js'
@@ -338,7 +337,7 @@ export const getAgentDefinitionsWithOverrides = memoize(
       // loadPluginAgents is memoized and takes no args, so it's independent.
       // Join both so neither becomes a floating promise if the other throws.
       let pluginAgentsPromise = loadPluginAgents()
-      if (feature('AGENT_MEMORY_SNAPSHOT') && isAutoMemoryEnabled()) {
+      if (false && isAutoMemoryEnabled()) {
         const [pluginAgents_] = await Promise.all([
           pluginAgentsPromise,
           initializeAgentMemorySnapshots(customAgents),

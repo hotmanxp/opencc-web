@@ -2,7 +2,6 @@
  * Conversation clearing utility.
  * This module has heavier dependencies and should be lazy-loaded when possible.
  */
-import { feature } from 'bun:bundle'
 import { randomUUID, type UUID } from 'crypto'
 import {
   getLastMainRequestId,
@@ -118,7 +117,7 @@ export async function clearConversation({
   setMessages(() => [])
 
   // Clear context-blocked flag so proactive ticks resume after /clear
-  if (feature('PROACTIVE') || feature('KAIROS')) {
+  if (false || false) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { setContextBlocked } = require('../../proactive/index.js')
     /* eslint-enable @typescript-eslint/no-require-imports */

@@ -1,5 +1,4 @@
 // @ts-nocheck — pre-existing typecheck debt, see docs/feature-gating.md
-import { feature } from 'bun:bundle'
 import { getAPIProvider } from './model/providers.js'
 import type { BetaUsage as Usage } from '@anthropic-ai/sdk/resources/beta/messages/messages.mjs'
 import type {
@@ -269,7 +268,7 @@ export function isClassifierDenial(content: string): boolean {
 export function buildYoloRejectionMessage(reason: string): string {
   const prefix = AUTO_MODE_REJECTION_PREFIX
 
-  const ruleHint = feature('BASH_CLASSIFIER')
+  const ruleHint = false
     ? `To allow this type of action in the future, the user can add a permission rule like ` +
       `Bash(prompt: <description of allowed action>) to their settings. ` +
       `At the end of your session, recommend what permission rules to add so you don't get blocked again.`
@@ -1390,7 +1389,7 @@ export function normalizeMessagesForAPI(
   // hashes, breaking VCR fixture lookup. Computed once here so the pre-merge
   // injection (in the user case) and the post-merge sweep below share it.
   let injectSnipTags = false
-  if (feature('HISTORY_SNIP') && process.env.NODE_ENV !== 'test') {
+  if (false && process.env.NODE_ENV !== 'test') {
     const { isSnipRuntimeEnabled } =
       // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../services/compact/snipCompact.js') as typeof import('../services/compact/snipCompact.js')
@@ -1866,7 +1865,7 @@ export function mergeUserMessages(a: UserMessage, b: UserMessage): UserMessage {
     content: string | ContentBlockParam[],
   ): string | ContentBlockParam[] =>
     isCollapseSummary ? stripSnipTagsFromContent(content) : content
-  if (feature('HISTORY_SNIP')) {
+  if (false) {
     // A merged message is only meta if ALL merged messages are meta. If any
     // operand is real user content, the result must not be flagged isMeta
     // (so internal snip ids get injected and it's treated as user-visible content).
@@ -2354,7 +2353,7 @@ Read the team config to discover your teammates' names. Check the task list peri
   // skill_discovery handled here (not in the switch) so the 'skill_discovery'
   // string literal lives inside a feature()-guarded block. A case label can't
   // be gated, but this pattern can — same approach as teammate_mailbox above.
-  if (feature('EXPERIMENTAL_SKILL_SEARCH')) {
+  if (false) {
     if (attachment.type === 'skill_discovery') {
       if (attachment.skills.length === 0) return []
       const lines = attachment.skills.map(s => `- ${s.name}: ${s.description}`)
@@ -3003,7 +3002,7 @@ You have exited auto mode. The user may now want to interact more directly. You 
       ])
     }
     case 'context_efficiency': {
-      if (feature('HISTORY_SNIP')) {
+      if (false) {
         const { SNIP_NUDGE_TEXT } =
           // eslint-disable-next-line @typescript-eslint/no-require-imports
           require('../services/compact/snipCompact.js') as typeof import('../services/compact/snipCompact.js')
@@ -3229,7 +3228,7 @@ export function shouldShowUserMessage(
     // should see what arrived. The <channel> tag in UserTextMessage handles
     // the actual rendering.
     if (
-      (feature('KAIROS') || feature('KAIROS_CHANNELS')) &&
+      (false || false) &&
       message.origin?.kind === 'channel'
     )
       return true
@@ -3636,7 +3635,7 @@ export function stripSignatureBlocks(messages: Message[]): Message[] {
 
     const filtered = content.filter(block => {
       if (isThinkingBlock(block)) return false
-      if (feature('CONNECTOR_TEXT')) {
+      if (false) {
         if (isConnectorTextBlock(block)) return false
       }
       return true

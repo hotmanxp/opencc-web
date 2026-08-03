@@ -1,6 +1,5 @@
 // @ts-nocheck
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
-import { feature } from 'bun:bundle'
 import { isCoordinatorMode, matchSessionMode } from '../coordinator/coordinatorMode.js'
 import { readFile, stat } from 'fs/promises'
 import { dirname } from 'path'
@@ -372,7 +371,7 @@ import { isExtractModeActive } from '../memdir/paths.js'
 // Dead code elimination: conditional imports
 /* eslint-disable @typescript-eslint/no-require-imports */
 const proactiveModule: any =
-  feature('PROACTIVE') || feature('KAIROS')
+  false || false
     ? // eslint-disable-next-line @typescript-eslint/no-require-imports
       require('../proactive/index.js')
     : null
@@ -514,7 +513,7 @@ export async function runHeadless(
   // installPluginsAndApplyMcpInBackground before plugin install reads
   // enabledPlugins.
   if (
-    feature('DOWNLOAD_USER_SETTINGS') &&
+    false &&
     (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) || getIsRemoteMode())
   ) {
     void downloadUserSettings()
@@ -542,7 +541,7 @@ export async function runHeadless(
   // where CLAUDE_CODE_PROACTIVE is set but main.tsx's check didn't fire
   // (e.g. env was injected by the SDK transport after argv parsing).
   if (
-    (feature('PROACTIVE') || feature('KAIROS')) &&
+    (false || false) &&
     proactiveModule &&
     !proactiveModule.isProactiveActive() &&
     isEnvTruthy(process.env.CLAUDE_CODE_PROACTIVE)
@@ -862,7 +861,7 @@ export async function runHeadless(
   // Callback for when a permission prompt is shown
   const onPermissionPrompt = (details: RequiresActionDetails) => {
     heartbeat?.setPhase('waiting_for_permission')
-    if (feature('COMMIT_ATTRIBUTION')) {
+    if (false) {
       setAppState(prev => ({
         ...prev,
         attribution: {
@@ -910,7 +909,7 @@ export async function runHeadless(
   // Streamlined mode transforms messages when CLAUDE_CODE_STREAMLINED_OUTPUT=true and using stream-json
   // Build flag gates this out of external builds; env var is the runtime opt-in for ant builds
   const transformToStreamlined =
-    feature('STREAMLINED_OUTPUT') &&
+    false &&
     isEnvTruthy(process.env.CLAUDE_CODE_STREAMLINED_OUTPUT) &&
     options.outputFormat === 'stream-json'
       ? createStreamlinedTransformer()
@@ -1825,7 +1824,7 @@ function runHeadlessStreaming(
       // handler re-runs the full gate); just avoids dead buttons.
       let capabilities: { experimental?: Record<string, unknown> } | undefined
       if (
-        (feature('KAIROS') || feature('KAIROS_CHANNELS')) &&
+        (false || false) &&
         connection.type === 'connected' &&
         connection.capabilities.experimental
       ) {
@@ -1862,7 +1861,7 @@ function runHeadlessStreaming(
       // settings (fired in main.tsx preAction). downloadUserSettings() caches
       // its promise so this awaits the same in-flight request.
       await Promise.all([
-        feature('DOWNLOAD_USER_SETTINGS') &&
+        false &&
         (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) || getIsRemoteMode())
           ? withDiagnosticsTiming('headless_user_settings_download', () =>
               downloadUserSettings(),
@@ -1981,7 +1980,7 @@ function runHeadlessStreaming(
   // setTimeout(0) yields to the event loop so pending stdin messages
   // (interrupts, user messages) are processed before the tick fires.
   const scheduleProactiveTick =
-    feature('PROACTIVE') || feature('KAIROS')
+    false || false
       ? () => {
           setTimeout(() => {
             if (
@@ -2281,7 +2280,7 @@ function runHeadlessStreaming(
           }
 
           abortController = createAbortController()
-          const turnStartTime = feature('FILE_PERSISTENCE')
+          const turnStartTime = false
             ? Date.now()
             : undefined
 
@@ -2404,7 +2403,7 @@ function runHeadlessStreaming(
           forwardMessagesToBridge()
           bridgeHandle?.sendResult()
 
-          if (feature('FILE_PERSISTENCE') && turnStartTime !== undefined) {
+          if (false && turnStartTime !== undefined) {
             void executeFilePersistence(
               turnStartTime,
               abortController.signal,
@@ -2631,7 +2630,7 @@ function runHeadlessStreaming(
 
     // Proactive tick: if proactive is active and queue is empty, inject a tick
     if (
-      (feature('PROACTIVE') || feature('KAIROS')) &&
+      (false || false) &&
       proactiveModule?.isProactiveActive() &&
       !proactiveModule.isProactivePaused()
     ) {
@@ -2838,7 +2837,7 @@ function runHeadlessStreaming(
 
   // Set up UDS inbox callback so the query loop is kicked off
   // when a message arrives via the UDS socket in headless mode.
-  if (feature('UDS_INBOX')) {
+  if (false) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { setOnEnqueue } = require('../utils/udsMessaging.js')
     /* eslint-enable @typescript-eslint/no-require-imports */
@@ -2982,7 +2981,7 @@ function runHeadlessStreaming(
       if (message.type === 'control_request') {
         if (message.request.subtype === 'interrupt') {
           // Track escapes for attribution (internal-only feature)
-          if (feature('COMMIT_ATTRIBUTION')) {
+          if (false) {
             setAppState(prev => ({
               ...prev,
               attribution: {
@@ -3217,7 +3216,7 @@ function runHeadlessStreaming(
         } else if (message.request.subtype === 'reload_plugins') {
           try {
             if (
-              feature('DOWNLOAD_USER_SETTINGS') &&
+              false &&
               (isEnvTruthy(process.env.CLAUDE_CODE_REMOTE) || getIsRemoteMode())
             ) {
               // Re-pull user settings so enabledPlugins pushed from the
@@ -4025,7 +4024,7 @@ clients: prev.mcp.clients.map((c: MCPServerConnection) =>
             }
           })()
         } else if (
-          (feature('PROACTIVE') || feature('KAIROS')) &&
+          (false || false) &&
           (message.request as { subtype: string }).subtype === 'set_proactive'
         ) {
           const req = message.request as unknown as {
@@ -4261,7 +4260,7 @@ clients: prev.mcp.clients.map((c: MCPServerConnection) =>
       })
       // Increment prompt count for attribution tracking and save snapshot
       // The snapshot persists promptCount so it survives compaction
-      if (feature('COMMIT_ATTRIBUTION')) {
+      if (false) {
         setAppState(prev => ({
           ...prev,
           attribution: incrementPromptCount(prev.attribution, snapshot => {
@@ -4823,7 +4822,7 @@ function handleChannelEnable(
       response: { subtype: 'error', request_id: requestId, error },
     })
 
-  if (!(feature('KAIROS') || feature('KAIROS_CHANNELS'))) {
+  if (!(false || false)) {
     return respondError('channels feature not available in this build')
   }
 
@@ -4938,7 +4937,7 @@ function handleChannelEnable(
 function reregisterChannelHandlerAfterReconnect(
   connection: MCPServerConnection,
 ): void {
-  if (!(feature('KAIROS') || feature('KAIROS_CHANNELS'))) return
+  if (!(false || false)) return
   if (connection.type !== 'connected') return
 
   const gate = gateChannelServer(

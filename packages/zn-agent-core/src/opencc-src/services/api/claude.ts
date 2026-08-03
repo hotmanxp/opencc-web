@@ -114,7 +114,6 @@ const autoModeStateModule = true
   ? (require('../../utils/permissions/autoModeState.js') as typeof import('../../utils/permissions/autoModeState.js'))
   : null
 
-import { feature } from 'bun:bundle'
 import type { ClientOptions } from '@anthropic-ai/sdk'
 import {
   APIError,
@@ -314,7 +313,7 @@ export function getExtraBodyParams(betaHeaders?: string[]): JsonObject {
 
   // Anti-distillation: send fake_tools opt-in for 1P CLI only
   if (
-    feature('ANTI_DISTILLATION_CC')
+    false
       ? process.env.CLAUDE_CODE_ENTRYPOINT === 'cli' &&
         shouldIncludeFirstPartyOnlyBetas() &&
         getFeatureValue_CACHED_MAY_BE_STALE(
@@ -670,7 +669,7 @@ export function assistantMessageToMessageParam(
           ...(i === message.message.content.length - 1 &&
           _.type !== 'thinking' &&
           _.type !== 'redacted_thinking' &&
-          (feature('CONNECTOR_TEXT') ? !isConnectorTextBlock(_) : true)
+          (false ? !isConnectorTextBlock(_) : true)
             ? enablePromptCaching
               ? { cache_control: getCacheControl({ querySource }) }
               : {}
@@ -1321,7 +1320,7 @@ async function* queryModel(
   queryCheckpoint('query_message_normalization_end')
 
   // Apply hybrid context strategy for optimal cache/fresh balance
-  if (feature('HYBRID_CONTEXT_STRATEGY')) {
+  if (false) {
     const { applyHybridStrategy } = await import('../../utils/hybridContextStrategy.js')
     // Cap at 200k to avoid edge case with very large context windows
     const strategyResult = applyHybridStrategy(messagesForAPI, {
@@ -2230,7 +2229,7 @@ async function* queryModel(
               throw new RangeError('Content block not found')
             }
             if (
-              feature('CONNECTOR_TEXT') &&
+              false &&
               delta.type === 'connector_text_delta'
             ) {
               if (contentBlock.type !== 'connector_text') {
@@ -2292,7 +2291,7 @@ async function* queryModel(
                   break
                 case 'signature_delta':
                   if (
-                    feature('CONNECTOR_TEXT') &&
+                    false &&
                     contentBlock.type === 'connector_text'
                   ) {
                     contentBlock.signature = delta.signature

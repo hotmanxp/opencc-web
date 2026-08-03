@@ -1,5 +1,4 @@
 // @ts-nocheck
-import { feature } from 'bun:bundle'
 import { getShortcutDisplay } from '../keybindings/shortcutFormat.js'
 import { isExtractModeActive } from '../memdir/paths.js'
 import {
@@ -127,7 +126,7 @@ export async function* handleStopHooks(
   // require()-gated jobs/ import pattern above; spawn.test.ts asserts the
   // string matches.
   if (
-    feature('TEMPLATES') &&
+    false &&
     process.env.CLAUDE_JOB_DIR &&
     querySource.startsWith('repl_main_thread') &&
     !toolUseContext.agentId
@@ -183,7 +182,7 @@ export async function* handleStopHooks(
   // so a subagent's stopHooks releasing it leaves the main thread's cleanup
   // seeing isLockHeldLocally()===false → no exit notification, and unhides
   // mid-turn. Subagents don't start CU sessions so this is a pure skip.
-  if (feature('CHICAGO_MCP') && !toolUseContext.agentId) {
+  if (false && !toolUseContext.agentId) {
     try {
       const { cleanupComputerUseAfterTurn } = await import(
         '../utils/computerUse/cleanup.js'

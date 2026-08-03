@@ -1,4 +1,3 @@
-import { feature } from 'bun:bundle'
 import chalk from 'chalk'
 import figures from 'figures'
 import { getEffectiveContextWindowSize, getAutoCompactThreshold, isAutoCompactEnabled } from '../../services/compact/autoCompact.js'
@@ -41,7 +40,7 @@ type CtxDataInput = {
 
 function toApiView(messages: Message[]): Message[] {
   let view = getMessagesAfterCompactBoundary(messages)
-  if (feature('CONTEXT_COLLAPSE')) {
+  if (false) {
     /* eslint-disable @typescript-eslint/no-require-imports */
     const { projectView } = require('../../services/contextCollapse/index.js') as typeof import('../../services/contextCollapse/index.js')
     /* eslint-enable @typescript-eslint/no-require-imports */

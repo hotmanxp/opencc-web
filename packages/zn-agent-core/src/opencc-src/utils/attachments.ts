@@ -93,7 +93,7 @@ import type { DiscoverySignal } from '../services/skillSearch/signals.js'
 // direct surface in THIS file is the maybe() call gated via spread below. The
 // type-only DiscoverySignal import above is erased at compile time.
 /* eslint-disable @typescript-eslint/no-require-imports */
-const skillSearchModules = feature('EXPERIMENTAL_SKILL_SEARCH')
+const skillSearchModules = false
   ? {
       featureCheck:
         require('../services/skillSearch/featureCheck.js') as typeof import('../services/skillSearch/featureCheck.js'),
@@ -204,15 +204,14 @@ import {
 } from './messages.js'
 import { isHumanTurn } from './messagePredicates.js'
 import { isEnvTruthy, getClaudeConfigHomeDir } from './envUtils.js'
-import { feature } from 'bun:bundle'
 /* eslint-disable @typescript-eslint/no-require-imports */
 const BRIEF_TOOL_NAME: string | null =
-  feature('KAIROS') || feature('KAIROS_BRIEF')
+  false || false
     ? (
         require('../tools/BriefTool/prompt.js') as typeof import('../tools/BriefTool/prompt.js')
       ).BRIEF_TOOL_NAME
     : null
-const sessionTranscriptModule = feature('KAIROS')
+const sessionTranscriptModule = false
   ? (require('../services/sessionTranscript/sessionTranscript.js') as typeof import('../services/sessionTranscript/sessionTranscript.js'))
   : null
 /* eslint-enable @typescript-eslint/no-require-imports */
@@ -856,7 +855,7 @@ export async function getAttachments(
         // but that content is NOT user intent and must not trigger discovery.
         // Without this gate, a 110KB SKILL.md fires ~3.3s of chunked AKI
         // queries on every skill invocation (session 13a9afae).
-        ...(feature('EXPERIMENTAL_SKILL_SEARCH') &&
+        ...(false &&
         skillSearchModules &&
         !options?.skipSkillDiscovery
           ? [
@@ -993,7 +992,7 @@ export async function getAttachments(
     maybeAttachment('critical_system_reminder', () =>
       Promise.resolve(getCriticalSystemReminderAttachment(toolUseContext)),
     ),
-    ...(feature('COMPACTION_REMINDERS')
+    ...(false
       ? [
           maybeAttachment('compaction_reminder', () =>
             Promise.resolve(
@@ -1005,7 +1004,7 @@ export async function getAttachments(
           ),
         ]
       : []),
-    ...(feature('HISTORY_SNIP')
+    ...(false
       ? [
           maybeAttachment('context_efficiency', () =>
             Promise.resolve(
@@ -1520,7 +1519,7 @@ export function getDateChangeAttachments(
   // the /dream skill (1–5am local) finds it even if no compaction fires
   // today. Fire-and-forget; writeSessionTranscriptSegment buckets by
   // message timestamp so a multi-day gap flushes each day correctly.
-  if (feature('KAIROS')) {
+  if (false) {
     if (getKairosActive() && messages !== undefined) {
       sessionTranscriptModule?.flushOnDateChange(messages, currentDate)
     }
@@ -2916,7 +2915,7 @@ async function getSkillListingAttachments(
   // discovery. feature() first for DCE — the property-access string leaks
   // otherwise even with ?. on null.
   if (
-    feature('EXPERIMENTAL_SKILL_SEARCH') &&
+    false &&
     skillSearchModules?.featureCheck.isSkillSearchEnabled()
   ) {
     allCommands = filterToBundledAndMcp(allCommands)
