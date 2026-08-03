@@ -43,6 +43,7 @@ function isGlobalEvent(event: ServerEvent): boolean {
     case 'job.failed':
     case 'system.restarting':
     case 'system.restart.canceled':
+    case 'instance.changed':
       return true
     default:
       return false

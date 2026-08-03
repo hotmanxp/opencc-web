@@ -194,6 +194,18 @@ const StateEvent = z.discriminatedUnion('type', [
   }),
 ])
 
+// instance.* — 中央实例管理器的状态变更广播. isGlobalEvent 登记, 所有 tab 实时收到.
+const InstanceEvent = z.discriminatedUnion('type', [
+  z.object({
+    ...Base.shape,
+    type: z.literal('instance.changed'),
+    instanceId: z.string(),
+    state: z.enum(['stopped', 'starting', 'running', 'stopping', 'down']),
+    port: z.number().nullable(),
+    pid: z.number().nullable(),
+  }),
+])
+
 export const ServerEvent = z.discriminatedUnion('type', [
   ...RuntimeEvent.options,
   ...SessionEvent.options,
@@ -201,5 +213,6 @@ export const ServerEvent = z.discriminatedUnion('type', [
   ...PromptEvent.options,
   ...SystemEvent.options,
   ...StateEvent.options,
+  ...InstanceEvent.options,
 ])
 export type ServerEvent = z.infer<typeof ServerEvent>
