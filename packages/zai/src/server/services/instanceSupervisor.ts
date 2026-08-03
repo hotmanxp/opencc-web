@@ -163,9 +163,9 @@ export function initInstanceSupervisor(opts: InitOptions): InstanceSupervisor {
         try { entry.child.kill('SIGINT') } catch { /* ignore */ }
         const child = entry.child
         killPromises.push(new Promise<void>((resolve) => {
-          const killTimer = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* ignore */ } }, SHUTDOWN_TIMEOUT_MS); killTimer.unref()
+          const killTimer = setTimeout(() => { try { child.kill('SIGKILL') } catch { /* ignore */ }; resolve() }, SHUTDOWN_TIMEOUT_MS); killTimer.unref()
           const onExit = () => { clearTimeout(killTimer); resolve() }; child.once('exit', onExit)
-          if (child.exitCode != null || child.signalCode != null) onExit()
+          if (child.exitCode != null || child.signalCode != null || (child as ChildProcess & { killed?: boolean }).killed) onExit()
         }))
       }
       await Promise.all(killPromises)
