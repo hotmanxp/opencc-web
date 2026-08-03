@@ -33,7 +33,6 @@ import type { Tool, ToolCallCtx } from '../runtime/modelCaller.js'
 import type { Tool as RuntimeTool } from '../runtime/types.js'
 import { makeTool } from './makeTool.js'
 export { makeTool }
-import { taskTools } from './tasks/index.js'
 
 const execAsync = promisify(exec)
 
@@ -498,7 +497,6 @@ export function buildDefaultTools(opts?: {
     fileWriteTool,
     fileEditTool,
     askUserQuestionTool,
-    ...taskTools,
     skillTool,
   ]
 

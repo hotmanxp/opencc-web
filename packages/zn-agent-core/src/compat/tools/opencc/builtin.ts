@@ -30,7 +30,6 @@
 import { existsSync } from 'node:fs'
 import { fileURLToPath } from 'node:url'
 import { wrapAskUserQuestionToolAsOpencc } from './AskUserQuestionTool.js'
-import { wrapTaskToolsAsOpencc } from './TaskTools.js'
 import { wrapSkillToolAsOpencc } from './SkillTool.js'
 
 export type OpenccBuiltinTool = any
@@ -119,12 +118,6 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
   // correct across concurrent sessions (matches SkillTool.ts pattern).
   const AskUserQuestionOpencc = wrapAskUserQuestionToolAsOpencc()
 
-  // 4 个 Task 工具 (TaskCreate / TaskGet / TaskUpdate / TaskList) 接
-  // compat/tools/tasks/ 的 zai-native 实现,通过 wrapTaskToolsAsOpencc
-  // 适配成 opencc Tool 接口。它们取代 opencc vendor 自带的 TodoWrite 工具,
-  // 走 zai 的 TaskListStore 持久化 + stateChangeBus → SSE v2_task.changed 路径。
-  const taskToolsOpencc = wrapTaskToolsAsOpencc()
-
   // Skill 走 zai-native wrapper (vendor 的 SkillTool 是 Bun-only,
   // 不能在 Node+tsx 下跑;zai-native skillTool 已处理 ctx.skills +
   // ZAI_SKILL_DIRS fallback,Node-safe).
@@ -202,7 +195,6 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
     GlobTool,
     GrepTool,
     AskUserQuestionOpencc,
-    ...taskToolsOpencc,
     ...skillToolsOpencc,
     AgentTool,
     BackgroundAgentResultTool,

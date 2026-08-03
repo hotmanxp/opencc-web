@@ -27,8 +27,8 @@ function buildSkillTransformCtx(bridgeCtx: SkillBridgeContext) {
 
 /**
  * Wrap the zai-native Skill tool as an opencc-compatible Tool so vendor's
- * `query()` can call it. Returns an array (length 1) to keep the same
- * shape as wrapTaskToolsAsOpencc.
+ * `query()` can call it. Returns an array (length 1) so builtin.ts can
+ * spread it alongside the other wrappers.
  *
  * Why zai-native and not vendor's SkillTool:
  * - vendor's SkillTool is Bun-only (imports `feature` from `bun:bundle`)
