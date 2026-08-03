@@ -134,6 +134,17 @@ export const STRIP_TOP_FILES: string[] = [
  *   utils/ink/`**`        — strip the entire ink dir if it sneaks in
  */
 export const STRIP_FILE_PATTERNS: string[] = [
+  // Test files of any flavor — zai's test runner targets packages/zn-agent-core/test/
+  // (and packages/zai/test/) only. Anything under opencc-src/ would either import
+  // vendor-only modules that don't resolve in our setup or assume bun:test globals.
+  // See vitest.config.ts `exclude: ['src/opencc-src/**']` — these were never run.
+  // Known offenders before strip was added: cli/bg.test.js (28 cases),
+  // entrypoints/daemon/main.test.js (9 cases), both `bun:test`.
+  '**/*.test.js',
+  '**/*.test.ts',
+  '**/*.test.tsx',
+  '**/*.test.mjs',
+  '**/*.test.jsx',
   // Tool permission UI dialogs (zai has no permission UI)
   '**/UI.tsx',
   '**/UI.test.tsx',
