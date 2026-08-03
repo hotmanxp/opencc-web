@@ -212,7 +212,28 @@ export function wrapTaskAwareSetState(
 
 type AttachInput = Parameters<BackgroundRuntime['attach']>[0]
 
+/**
+ * zai globalThis bridge:zai server 在 setCurrentSessionId 时同步写入
+ * `globalThis.__zaiCurrentSessionId`。compat 模块在 opencc-src bundle
+ * 内联,无法 import zai server 模块 — 通过 globalThis 读(与
+ * __zaiEventBus 同款模式)。纯 zn-agent-core / 单测环境下值为 undefined。
+ */
+function readZaiCurrentSessionId(): string | null | undefined {
+  const v = (globalThis as { __zaiCurrentSessionId?: string | null }).__zaiCurrentSessionId
+  return typeof v === 'string' ? v : v === null ? null : undefined
+}
+
 function tryGetBg(): BackgroundRuntime | null {
+  // zai patch: 必须从 globalThis 读 —— opencc-src/server 的 bundle 由
+  // esbuild 单文件打包,会把 compat/background/registry 内联成 bundle 私有
+  // 实例, zai server 在 dist/compat/background/registry.js 注入的
+  // setBackgroundRuntime 写的是另一个模块的 `_runtime`, 与本 bundle 内
+  // getBackgroundRuntime 看到的不是同一个。与 __zaiEventBus 同款 globalThis
+  // bridge 模式 (compat/runtime/agentTaskBridge.ts 顶部注释)。
+  // 纯 zn-agent-core 单测 / vendor OpenCC CLI 直接跑 zai-server 这条 path
+  // 时无 zai 注入, fallback 到 module registry 以保留原行为。
+  const fromGlobal = (globalThis as { __zaiBackgroundRuntime?: BackgroundRuntime | null }).__zaiBackgroundRuntime
+  if (fromGlobal !== undefined) return fromGlobal
   try {
     return getBackgroundRuntime()
   } catch {
@@ -222,14 +243,34 @@ function tryGetBg(): BackgroundRuntime | null {
   }
 }
 
-/** AgentTool 用:登记 task 到 DefaultBackgroundRuntime(若已 init)。 */
+/** AgentTool 用:登记 task 到 DefaultBackgroundRuntime(若已 init)。
+ *
+ * zai patch:补 parentSessionId fallback。AgentTool 派发时从 upstream
+ * opencc `getParentSessionId()` 取父 session,该函数只对 in-process teammate
+ * / dynamicTeamContext 有值,普通 main REPL → sub-agent 场景下返回 undefined,
+ * 导致 DefaultBackgroundRuntime 落盘的 task.parentSessionId 为空,
+ * SubagentNotifier.handle() 静默吞掉 `<task-notification>` 回流,主对话
+ * 收不到完成事件。此处优先用调用方传的 metadata.parentSessionId;
+ * 缺失时回退到 zai server 注入的 currentSessionId (globalThis bridge)。 */
 export async function mirrorAttachTaskToBg(
   input: AttachInput,
 ): Promise<void> {
   const bg = tryGetBg()
   if (!bg) return
+  const meta = (input.metadata ?? {}) as Record<string, unknown>
+  const hasParent = typeof meta.parentSessionId === 'string' && meta.parentSessionId.length > 0
+  let patchedInput = input
+  if (!hasParent) {
+    const fallback = readZaiCurrentSessionId()
+    if (typeof fallback === 'string' && fallback.length > 0) {
+      patchedInput = {
+        ...input,
+        metadata: { ...meta, parentSessionId: fallback },
+      }
+    }
+  }
   try {
-    await bg.attach(input)
+    await bg.attach(patchedInput)
   } catch (err) {
     console.warn('[agentTaskBridge] mirrorAttachTaskToBg failed:', err)
   }

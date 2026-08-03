@@ -150,6 +150,13 @@ export function initBackgroundRuntime(): RestartAwareBackgroundRuntime {
   backgroundRuntime = wrapWithJobStarted(inner)
   // 注册到 zai-agent-core 的全局 registry,让 AgentTool(run_in_background: true)等可访问
   setBackgroundRuntime(backgroundRuntime)
+  // 同步写入 globalThis 桥:opencc-src/server 的 bundle (createOpenccRuntime-impl.js /
+  // opencc-core.mjs) 把 compat/background/registry 内联成 bundle 私有实例,
+  // 上面 setBackgroundRuntime 写的是 dist/compat/background/registry.js 的
+  // `_runtime`, bundle 内 getBackgroundRuntime 看不到。compat/runtime/agentTaskBridge
+  // 的 tryGetBg 优先读 globalThis.__zaiBackgroundRuntime。与 __zaiEventBus
+  // 同款 bridge 模式。
+  ;(globalThis as { __zaiBackgroundRuntime?: BackgroundRuntime }).__zaiBackgroundRuntime = backgroundRuntime
   return backgroundRuntime
 }
 

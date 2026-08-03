@@ -674,6 +674,15 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   // 立即响应，事件通过 eventBus → /api/event SSE
   res.json({ sessionId });
 
+  // ★ 立即绑定 currentSessionId。queryLoop 启动后第一个 runtime.started
+  // 事件才会再 setCurrentSessionId 一次(兜底),但如果 AgentTool 是 query
+  // 第一批 tool_calls 之一(LLM 在 runtime.started 之前就调 sub-agent),
+  // compat/agentTaskBridge.mirrorAttachTaskToBg 的 parentSessionId
+  // fallback 链(globalThis.__zaiCurrentSessionId)需要这里先准备好,否则
+  // sub-agent 完成后 SubagentNotifier.handle() 拿不到父 session,主对话
+  // 收不到 <task-notification>。
+  setCurrentSessionId(sessionId);
+
   // 异步 fire-and-forget 运行 runtime; 整段包进 runWithSessionId 让 queryLoop
   // 里的 getCwd() 通过 ALS 解析到本 session 的逻辑 cwd。
   void runWithSessionId(sessionId, async () => {

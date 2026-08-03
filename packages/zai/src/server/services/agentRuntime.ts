@@ -393,6 +393,14 @@ export async function getOrCreateAgentSession(): Promise<string | null> {
 
 export function setCurrentSessionId(id: string): void {
   currentSessionId = id
+  // 同步写入 globalThis 桥:opencc-src bundle 内的 compat 模块
+  // (例如 mirrorAttachTaskToBg) 拿不到 zai server 的 module state,
+  // 通过 __zaiCurrentSessionId 读取。与 __zaiEventBus 同款模式 (见
+  // compat/runtime/agentTaskBridge.ts 的 globalThis bridge 注释)。
+  // 用于给 metadata.parentSessionId fallback —— AgentTool 派发的
+  // sub-agent 完成后 SubagentNotifier 能找到父 session,把
+  // <task-notification> 回流到主对话。
+  ;(globalThis as { __zaiCurrentSessionId?: string }).__zaiCurrentSessionId = id
 }
 
 export function getCurrentSessionId(): string | null {
