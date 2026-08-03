@@ -2,9 +2,10 @@ import { wrapAsOpenccTool } from '../../runtime/openccToolWrap.js'
 import { skillTool } from '../index.js'
 
 /**
- * Bridge context for Skill — same shape as TaskTools' TaskBridgeContext.
- * `__zaiBridgeCtx` is set by runViaOpenccQuery before vendor `query()` is
- * invoked (see compat/runtime/openccQueryBridge.ts:190). Skill only needs
+ * Bridge context for Skill — same shape as AskUserQuestionTool's
+ * `AskUserQuestionBridgeContext`. `__zaiBridgeCtx` is set by
+ * runViaOpenccQuery before vendor `query()` is invoked (see
+ * compat/runtime/openccQueryBridge.ts:190). Skill only needs
  * `sessionId` + `abortSignal`.
  */
 export interface SkillBridgeContext {
