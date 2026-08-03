@@ -137,6 +137,15 @@ export type QueryEngineConfig = {
   taskBudget?: { total: number }
   jsonSchema?: Record<string, unknown>
   verbose?: boolean
+  /**
+   * Recompute the model-visible tool list mid-query. defaultQuery calls this
+   * between turns (query.ts "Refresh tools between turns so newly-connected
+   * MCP servers become available") so MCP tools that connect after bootstrap
+   * still enter the tool loop. zai-server's headless runtime wires this to a
+   * closure that merges `appState.mcp.tools` via assembleToolPool /
+   * mergeAndFilterTools — mirroring the REPL's `computeTools`.
+   */
+  refreshTools?: () => Tools
   replayUserMessages?: boolean
   /** Handler for URL elicitations triggered by MCP tool -32042 errors. */
   handleElicitation?: ToolUseContext['handleElicitation']
@@ -214,7 +223,7 @@ export class QueryEngine {
     const {
       cwd,
       commands,
-      tools,
+      tools: initialTools,
       mcpClients,
       verbose = false,
       thinkingConfig,
@@ -235,6 +244,17 @@ export class QueryEngine {
       setSDKStatus,
       orphanedPermission,
     } = this.config
+
+    // zai patch: refresh the model-visible tool list before this turn
+    // starts. `config.tools` is a construction-time snapshot (built-ins
+    // only for zai-server), and the mid-query refresh in query.ts only
+    // runs *between* turns — so MCP tools that finished connecting after
+    // bootstrap (connectMcp: false async path) never appeared in the
+    // first system init message. Refreshing here (mirroring the REPL's
+    // computeTools-per-query) makes them visible from turn 1.
+    const tools = this.config.refreshTools
+      ? this.config.refreshTools()
+      : initialTools
 
     this.discoveredSkillNames.clear()
     setCwd(cwd)
@@ -363,6 +383,7 @@ export class QueryEngine {
         agentDefinitions: { activeAgents: agents, allAgents: agents },
         theme: resolveThemeSetting(getGlobalConfig().theme),
         maxBudgetUsd,
+        refreshTools: this.config.refreshTools,
       },
       getAppState,
       setAppState,
@@ -518,6 +539,7 @@ export class QueryEngine {
         theme: resolveThemeSetting(getGlobalConfig().theme),
         agentDefinitions: { activeAgents: agents, allAgents: agents },
         maxBudgetUsd,
+        refreshTools: this.config.refreshTools,
       },
       getAppState,
       setAppState,

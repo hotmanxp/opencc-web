@@ -7,6 +7,9 @@ import { wrapTaskAwareSetState } from '../../compat/runtime/agentTaskBridge.js'
 import { QueryEngine } from '../QueryEngine.js'
 import { FileStateCache } from '../utils/fileStateCache.js'
 import { transitionPermissionMode } from '../utils/permissions/permissionSetup.js'
+import { assembleToolPool } from '../tools.js'
+import { mergeAndFilterTools } from '../utils/toolPool.js'
+import { getMcpToolsCommandsAndResources } from '../services/mcp/client.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
 
 export async function createOpenccRuntimeImpl(options) {
@@ -32,11 +35,79 @@ export async function createOpenccRuntimeImpl(options) {
       }
     : undefined
 
+  // zai patch: MCP tools were never reaching the model-visible tool list.
+  // Two independent gaps:
+  //   1. `connectMcp: false` (zai-server's boot default) makes
+  //      createHeadlessContextImpl skip getMcpToolsCommandsAndResources, so
+  //      `appState.mcp.tools` stays empty — MCP servers (e.g. codegraph from
+  //      .mcp.json) are never connected.
+  //   2. QueryEngine's tool loop reads `config.tools` (built-ins only).
+  //      query.ts "Refresh tools between turns" only runs when
+  //      `options.refreshTools` is provided — the REPL wires it as
+  //      `computeTools`, the headless runtime did not.
+  //
+  // Mirror the REPL's computeTools (REPL.tsx): assemble built-ins + MCP
+  // tools from live appState, then merge/filter by permission mode. Used
+  // both for the initial tool list and as `refreshTools` for mid-query
+  // updates once MCP servers finish connecting.
+  const computeTools = () => {
+    const state = ctx.appState.getState()
+    const permissionContext = state.toolPermissionContext
+    const assembled = assembleToolPool(permissionContext, state.mcp?.tools ?? [])
+    return mergeAndFilterTools(ctx.tools, assembled, permissionContext.mode)
+  }
+
+  // When MCP bootstrap was skipped, connect servers asynchronously so
+  // startup stays fast (HTTP listener binds immediately) but MCP tools
+  // still become available for the first query's later turns (and are
+  // picked up by computeTools via appState.mcp.tools). Dedup by name.
+  if (!ctx.config.connectMcp) {
+    void getMcpToolsCommandsAndResources(
+      ({ client, tools: mcpTools, commands: mcpCommands }) => {
+        ctx.appState.setState(prev => {
+          const mcp =
+            prev.mcp ?? {
+              clients: [],
+              tools: [],
+              commands: [],
+              resources: {},
+              pluginReconnectKey: 0,
+            }
+          const mcpToolNames = new Set(mcpTools.map(t => t.name))
+          return {
+            ...prev,
+            mcp: {
+              ...mcp,
+              clients: [
+                ...mcp.clients.filter(c => c.name !== client.name),
+                client,
+              ],
+              tools: [
+                ...mcp.tools.filter(t => !mcpToolNames.has(t.name)),
+                ...mcpTools,
+              ],
+              commands: [
+                ...mcp.commands.filter(
+                  c => !mcpCommands.some(nc => nc.name === c.name),
+                ),
+                ...mcpCommands,
+              ],
+              pluginReconnectKey: (mcp.pluginReconnectKey ?? 0) + 1,
+            },
+          }
+        })
+      },
+    ).catch(err => {
+      console.warn('[openccRuntime] async MCP connect failed:', err)
+    })
+  }
+
   const engine = new QueryEngine({
     cwd,
-    tools: ctx.tools,
+    tools: computeTools(),
     commands: ctx.mcp.commands,
     mcpClients: ctx.mcp.clients,
+    refreshTools: computeTools,
     // zai patch: read agents from AppState (populated by
     // createHeadlessContextImpl via getAgentDefinitionsWithOverrides).
     // QueryEngine constructs its own `options.agentDefinitions` from
