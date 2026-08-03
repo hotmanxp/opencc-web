@@ -2,7 +2,8 @@
 import { randomUUID } from 'node:crypto'
 import { createHeadlessContextImpl } from './createHeadlessContext-impl.js'
 import { createSessionFacadeImpl } from './sessionFacade-impl.js'
-import { runWithSdkContext } from '../bootstrap/state.js'
+import { runWithSdkContext, getSessionId } from '../bootstrap/state.js'
+import { wrapTaskAwareSetState } from '../../compat/runtime/agentTaskBridge.js'
 import { QueryEngine } from '../QueryEngine.js'
 import { FileStateCache } from '../utils/fileStateCache.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
@@ -45,7 +46,16 @@ export async function createOpenccRuntimeImpl(options) {
     agents: ctx.appState.getState().agentDefinitions.activeAgents,
     canUseTool: ctx.permission,
     getAppState: ctx.appState.getState,
-    setAppState: ctx.appState.setState,
+    // zai patch: 包装 setAppState 把 LocalAgentTask 状态桥接为
+    // `agent_task.changed` (compat/runtime/agentTaskBridge.ts),让前端
+    // 后台任务 dock 能看到 AgentTool 派发的子代理执行。AgentTool 的
+    // `setAppStateForTasks ?? setAppState` 两条路径都落到这里。
+    // getSessionId() 在 query loop 的 runWithSdkContext 上下文内返回
+    // 父 sessionId, dock 据此按 session 过滤任务。
+    setAppState: wrapTaskAwareSetState(
+      ctx.appState.setState as unknown as Parameters<typeof wrapTaskAwareSetState>[0],
+      () => getSessionId() as string | null | undefined,
+    ),
     readFileCache: new FileStateCache(100, 25 * 1024 * 1024),
     abortController,
     query: customQuery,

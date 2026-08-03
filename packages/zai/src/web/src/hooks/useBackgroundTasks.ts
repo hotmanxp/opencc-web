@@ -64,13 +64,20 @@ export function useBackgroundTasks() {
       const next = new Map(prev)
       for (const summary of storeTasks) {
         const existing = next.get(summary.taskId)
-        // 已存在 → 保留 jobs effect 写入的 live status (jobs 是最即时源),
-        // 只补 store 字段 (prompt / detail / lastKnownSessionId);
+        // 已存在 → 补 store 快照字段, 且 status / finishedAt / error 也取
+        // store 值 —— 任务终态可能只经 agent_task.changed 推送 (AgentTool
+        // 内联子代理路径没有 job.* 事件, jobs effect 只管
+        // DefaultBackgroundRuntime 那条 lifecycle 通道)。jobs effect 先
+        // 写入的 status 会被 SSE 顺序到达的最新快照覆盖, 两者同源 (同一
+        // 状态机), 不会互相打回。
         // 不存在 → 直接落入。
         if (existing) {
           next.set(summary.taskId, {
             ...existing,
+            status: summary.status || existing.status,
             prompt: summary.prompt || existing.prompt,
+            finishedAt: summary.finishedAt ?? existing.finishedAt,
+            error: summary.error ?? existing.error,
             detail: summary.detail ?? existing.detail,
             lastKnownSessionId: summary.lastKnownSessionId ?? existing.lastKnownSessionId,
           })

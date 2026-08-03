@@ -9,6 +9,15 @@ interface Props {
   streaming?: boolean
 }
 
+// Agent 工具调用不在主 transcript 内联展示 —— 子代理的执行改由后台任务 dock
+// 呈现 (服务端 agentTaskBridge 把 LocalAgentTask 状态推成 agent_task.changed)。
+// 这里在渲染入口统一过滤,expanded (直接 map) 与 collapsed (deriveTranscriptNodes)
+// 两条路径都覆盖。
+function isAgentToolMessage(m: AgentMessage): boolean {
+  const name = (m as { name?: unknown }).name ?? (m as { toolName?: unknown }).toolName
+  return name === 'Agent'
+}
+
 export function MessageListView({ messages, streaming }: Props) {
   // 单一布尔字段,初值由 Layout hydrate 时根据 settings.outputStyle 设置:
   //   - outputStyle === 'compact' → transcriptCollapsed = true (默认收起)
@@ -16,12 +25,13 @@ export function MessageListView({ messages, streaming }: Props) {
   // 用户点工具栏按钮 → setTranscriptCollapsed(!transcriptCollapsed) 直接翻转;
   // 刷新回到 settings.outputStyle 决定的值.
   const collapsed = useAgentStore((s) => s.transcriptCollapsed)
+  const visibleMessages = messages.filter((m) => !isAgentToolMessage(m))
 
   if (!collapsed) {
     // expanded: byte-identical to the original Agent.tsx map.
     return (
       <>
-        {messages.map((msg, idx) => {
+        {visibleMessages.map((msg, idx) => {
           const t = msg.type as string
           const toolUseId = t.startsWith('tool_use:')
             ? (msg as any).toolUseId
@@ -32,7 +42,7 @@ export function MessageListView({ messages, streaming }: Props) {
             <MessageBubble
               key={reactKey}
               msg={msg}
-              streaming={streaming && idx === messages.length - 1}
+              streaming={streaming && idx === visibleMessages.length - 1}
             />
           )
         })}
@@ -43,13 +53,13 @@ export function MessageListView({ messages, streaming }: Props) {
   // collapsed: derive nodes, fall back to expanded on any derive error.
   let nodes
   try {
-    nodes = deriveTranscriptNodes(messages)
+    nodes = deriveTranscriptNodes(visibleMessages)
   } catch (err) {
     // eslint-disable-next-line no-console
     console.error('deriveTranscriptNodes failed; falling back to expanded view', err)
     return (
       <>
-        {messages.map((msg, idx) => (
+        {visibleMessages.map((msg, idx) => (
           <MessageBubble key={(msg as any).eventId || String(idx)} msg={msg} streaming={false} />
         ))}
       </>
@@ -62,8 +72,8 @@ export function MessageListView({ messages, streaming }: Props) {
   // 仍然 clamp — 这条规则与 splitPaneOpen 无关 (transcriptCollapsed 已经是
   // 单一真源, useSplitPaneCompactLock 把它锁到 true).
   const lastAssistantIdx = (() => {
-    for (let i = messages.length - 1; i >= 0; i--) {
-      if ((messages[i] as { type?: string }).type === 'assistant.text') return i
+    for (let i = visibleMessages.length - 1; i >= 0; i--) {
+      if ((visibleMessages[i] as { type?: string }).type === 'assistant.text') return i
     }
     return -1
   })()
@@ -89,7 +99,7 @@ export function MessageListView({ messages, streaming }: Props) {
             <MessageBubble
               key={`think-${node.index}-${i}`}
               msg={node.message}
-              streaming={streaming && node.index === messages.length - 1}
+              streaming={streaming && node.index === visibleMessages.length - 1}
             />
           )
         }
@@ -116,7 +126,7 @@ export function MessageListView({ messages, streaming }: Props) {
                 <CollapsedMessageBubble
                   key={evtId}
                   message={m}
-                  streaming={streaming && node.endIndex === messages.length - 1}
+                  streaming={streaming && node.endIndex === visibleMessages.length - 1}
                   forceExpanded={isLastAssistant}
                 />
               )

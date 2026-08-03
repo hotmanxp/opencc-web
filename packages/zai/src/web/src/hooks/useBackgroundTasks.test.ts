@@ -214,6 +214,45 @@ describe('useBackgroundTasks session 隔离 (100% SSE)', () => {
     expect(result.current.runningTasks.map((t) => t.taskId)).toContain('task-A1')
   })
 
+  test('agent_task.changed 驱动的状态流转: running → completed (AgentTool 内联子代理, 无 job.* 事件)', () => {
+    // 只经 agent_task.changed 推送, 没有 job.started/done —— bridge 只发
+    // agent_task.changed。store 快照的 status 必须驱动 dock 状态, 不能
+    // 卡在初次写入的 running。
+    act(() => {
+      useAgentStore.getState().applyAgentTaskChanged({
+        sessionId: 'sess-A',
+        task: {
+          id: 'task-A1', status: 'running',
+          input: { prompt: 'do X', cwd: '/a', model: 'm' },
+          createdAt: 1000, eventCount: 1, parentSessionId: 'sess-A',
+        } as any,
+      })
+    })
+    act(() => {
+      useAgentStore.setState({ sessionId: 'sess-A' })
+    })
+    const { result, rerender } = renderHook(() => useBackgroundTasks())
+    rerender()
+    expect(result.current.runningTasks.map((t) => t.taskId)).toContain('task-A1')
+
+    // 终态: SSE 推送 completed 快照 → 应移到 recentTasks, 不再 running
+    act(() => {
+      useAgentStore.getState().applyAgentTaskChanged({
+        sessionId: 'sess-A',
+        task: {
+          id: 'task-A1', status: 'completed',
+          input: { prompt: 'do X', cwd: '/a', model: 'm' },
+          createdAt: 1000, finishedAt: 2000, eventCount: 2, parentSessionId: 'sess-A',
+        } as any,
+      })
+    })
+    rerender()
+    expect(result.current.runningTasks.map((t) => t.taskId)).not.toContain('task-A1')
+    expect(result.current.recentTasks.map((t) => t.taskId)).toContain('task-A1')
+    const t = result.current.recentTasks.find((x) => x.taskId === 'task-A1')
+    expect(t?.status).toBe('completed')
+  })
+
   test('store 为空时 不再调 listTasks fallback (100% SSE)', async () => {
     // 100% SSE 设计: 冷启动不再发 listTasks. 切到空 store 的 session
     // 不会自动拉历史,直到 SSE 推过来或 job 通道触发。
