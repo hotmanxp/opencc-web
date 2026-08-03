@@ -25,7 +25,9 @@ import bashTasksRouter from './routes/bashTasks.js';
 import bashReplRouter from './routes/bashRepl.js';
 import replHistoryRouter from './routes/replHistory.js';
 import transcriptRouter from './routes/transcript.js';
+import instancesRouter from './routes/instances.js';
 import { ensureManifestDir } from './services/manifest.js';
+import { initInstanceSupervisor } from './services/instanceSupervisor.js';
 import { initAgentRuntime, getAskRegistry, getApproveRegistry, getPermissionRegistry } from './services/agentRuntime.js';
 import {
   initBackgroundRuntime,
@@ -76,6 +78,11 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
     console.warn('[zai-settings-cache] boot init failed:', err),
   )
 
+  // Init central instance supervisor before any router that depends on it.
+  // Reads ~/.zai/instances.json (async, fire-and-forget); snapshots start
+  // with isCurrent row already visible via getInstanceSupervisor().
+  await initInstanceSupervisor({ cwd: opts.cwd })
+
   // Ensure ~/.zai/ exists for persistent cache (manifest.json) and future
   // config data. This is fire-and-forget — if it fails the app still works,
   // just without disk persistence.
@@ -122,6 +129,7 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   // 拉到本地 v2TasksBySession 缓存 (SSE 增量之外的兜底).
   app.use('/api', v2TasksRouter);
   app.use('/api', sessionStateRouter);
+  app.use('/api', instancesRouter);
   // /api/transcript/* 手动修复端点 — 给当前会话的 transcript 跑一次
   // repairAndPersistTranscript,补齐历史上漏写的 tool_result
   app.use('/api/transcript', transcriptRouter);

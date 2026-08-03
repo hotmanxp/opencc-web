@@ -5,6 +5,7 @@ import { spawn } from 'node:child_process';
 import { createApp } from '../server/index.js';
 import { stopBranchChecker } from '../server/routes/system.js';
 import { shutdownBackgroundRuntime } from '../server/services/backgroundRuntime.js';
+import { shutdownInstanceSupervisor } from '../server/services/instanceSupervisor.js';
 import { randomBytes } from 'node:crypto';
 
 interface DevOptions {
@@ -138,11 +139,13 @@ export async function runDev(options: DevOptions) {
   }
 
   const cleanup = () => {
-    void shutdownBackgroundRuntime().finally(() => {
-      vite.kill('SIGTERM');
-      apiServer.close();
-      stopBranchChecker();
-      process.exit(0);
+    void shutdownInstanceSupervisor().finally(() => {
+      void shutdownBackgroundRuntime().finally(() => {
+        vite.kill('SIGTERM');
+        apiServer.close();
+        stopBranchChecker();
+        process.exit(0);
+      });
     });
   };
   process.on('SIGINT', cleanup);

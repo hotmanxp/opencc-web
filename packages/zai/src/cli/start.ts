@@ -6,6 +6,8 @@ import { spawn } from 'node:child_process';
 import { createApp } from '../server/index.js';
 import { stopBranchChecker } from '../server/routes/system.js';
 import { shutdownBackgroundRuntime } from '../server/services/backgroundRuntime.js';
+import { createInstanceHeartbeat, getInstanceHeartbeatConfig } from '../server/services/instanceHeartbeat.js';
+import { shutdownInstanceSupervisor } from '../server/services/instanceSupervisor.js';
 import { sendReady } from '../server/services/readyHook.js';
 import { randomBytes } from 'node:crypto';
 import express from 'express';
@@ -113,6 +115,17 @@ async function runDirectServer(options: StartOptions): Promise<void> {
           // 回送 ready,supervisor 才能从 starting 推进到 running 并解
           // 锁其内部重启路径。无受管进程下 sendReady 是 no-op。
           sendReady(port);
+          // 受管子进程 (ZAI_INSTANCE_ID + ZAI_SUPERVISOR_PID 已设) 定时回送
+          // heartbeat,中央 supervisor 据此判断存活;普通启动时 config 为
+          // null,整个块是 no-op。
+          const hb = getInstanceHeartbeatConfig();
+          if (hb) {
+            createInstanceHeartbeat({
+              intervalMs: hb.intervalMs,
+              instanceId: hb.instanceId,
+              getPort: () => Number(process.env.ZAI_PORT ?? 0) || null,
+            }).start();
+          }
           resolve();
         });
       });
@@ -147,10 +160,12 @@ async function runDirectServer(options: StartOptions): Promise<void> {
   }
 
   const cleanup = () => {
-    void shutdownBackgroundRuntime().finally(() => {
-      server.close();
-      stopBranchChecker();
-      process.exit(0);
+    void shutdownInstanceSupervisor().finally(() => {
+      void shutdownBackgroundRuntime().finally(() => {
+        server.close();
+        stopBranchChecker();
+        process.exit(0);
+      });
     });
   };
   process.on('SIGINT', cleanup);
