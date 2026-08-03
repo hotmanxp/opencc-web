@@ -233,4 +233,111 @@ describe('createOpenccRuntime', { timeout: 30_000 }, () => {
     expect(tools).toContain('mcp__fake__doThing')
     await r.shutdown()
   })
+
+  it('query() after abort() yields a fresh per-query controller (regression: ESC + new message)', async () => {
+    // Regression for: 按 ESC 取消后再发消息报
+    // "vendor defaultQuery reported an error (internal)".
+    //
+    // Root cause: the runtime reused a single AbortController across
+    // all query() calls. Once ESC aborted it, the signal stayed aborted
+    // forever, and defaultQuery() short-circuited at query.ts:1660 with
+    // `{reason:'aborted_streaming'}`. QueryEngine then emitted an
+    // `error_during_execution` result with is_error:true, which zai's
+    // translator surfaced as the cryptic internal-error message.
+    //
+    // We bypass the real model by injecting a stub `query` option that
+    // mirrors defaultQuery's aborted-signal short-circuit: when the
+    // engine hands it an already-aborted toolUseContext.abortController
+    // the stub yields nothing (same shape as the real path); otherwise
+    // it yields a synthetic assistant message + success result.
+    const stubQuery = async function* (
+      params: { toolUseContext: { abortController: AbortController } },
+    ) {
+      if (params.toolUseContext.abortController.signal.aborted) {
+        // Mimic defaultQuery: yield nothing, just return.
+        return
+      }
+      // Yield exactly one assistant message with text content. QueryEngine
+      // computes the final result from `messages` (its local snapshot
+      // that the for-await populates via messages.push at line 775),
+      // NOT from anything we yield — a {type:'result',...} we yielded
+      // would be discarded by the for-await's switch (no 'result' case)
+      // and the post-loop `isResultSuccessful(messages.last assistant|user)`
+      // check would still determine the outcome. So an assistant text
+      // message here → isResultSuccessful → true → success result.
+      yield {
+        type: 'assistant',
+        message: {
+          role: 'assistant',
+          content: [{ type: 'text', text: 'stub-ok' }],
+          stop_reason: 'end_turn',
+          usage: {
+            input_tokens: 1,
+            output_tokens: 1,
+            cache_creation_input_tokens: 0,
+            cache_read_input_tokens: 0,
+          },
+        },
+        session_id: 'stub',
+        parent_tool_use_id: null,
+        uuid: 'stub-uuid',
+      }
+    }
+
+    const r = await createOpenccRuntime({
+      dataDir: await mkdtemp(join(tmpdir(), 'opencc-runtime-abort-')),
+      defaultCwd: process.cwd(),
+      runtimeId: 'test-abort-freshness',
+      query: stubQuery,
+    })
+
+    // First query — simulate ESC by giving it an already-aborted
+    // input.abortSignal. The runtime should bridge that abort into its
+    // per-query controller; the stub sees the aborted signal and yields
+    // nothing (matching real defaultQuery's aborted_streaming
+    // short-circuit).
+    const abortedSignal = new AbortController()
+    abortedSignal.abort('user_abort')
+    const s1 = r.query({
+      sessionId: 'abort-freshness-1',
+      prompt: 'first',
+      cwd: process.cwd(),
+      abortSignal: abortedSignal.signal,
+    })
+    try {
+      for await (const _ of s1) { /* drain */ }
+    } catch {
+      // abort may surface as a throw on pending yield — acceptable
+    }
+
+    // Second query — fresh signal, should NOT be aborted. Without the
+    // per-query controller fix, QueryEngine's internal
+    // `this.abortController` would still be in the aborted state from
+    // query 1, the stub would see it as aborted, yield nothing, and
+    // QueryEngine would emit `error_during_execution` with is_error:true
+    // (translated by zai as the offending "vendor defaultQuery reported
+    // an error" message).
+    const freshSignal = new AbortController()
+    const events: unknown[] = []
+    const s2 = r.query({
+      sessionId: 'abort-freshness-2',
+      prompt: 'second',
+      cwd: process.cwd(),
+      abortSignal: freshSignal.signal,
+    })
+    for await (const ev of s2) events.push(ev)
+
+    // The stub yielded one assistant + one success result for a
+    // non-aborted controller. After QueryEngine translation, the user
+    // sees a normal success path. Critically: there must be NO
+    // error_during_execution result with is_error:true.
+    const errorResults = events.filter(
+      (e) =>
+        (e as { type?: string }).type === 'result' &&
+        (e as { is_error?: boolean }).is_error === true,
+    )
+    expect(errorResults).toEqual([])
+
+    await r.shutdown()
+  })
 })

@@ -1235,6 +1235,27 @@ export class QueryEngine {
     this.abortController.abort()
   }
 
+  /**
+   * Replace the engine's internal abortController. Used by the headless
+   * zai server runtime (createOpenccRuntime-impl.ts) which reuses a single
+   * QueryEngine across many query() calls — `this.abortController` is
+   * single-use (calling .abort() leaves its signal permanently aborted),
+   * so the next defaultQuery() short-circuits at query.ts:1660 with
+   * `aborted_streaming` and QueryEngine emits an `error_during_execution`
+   * result with is_error:true. zai's translator then surfaces
+   * "vendor defaultQuery reported an error (internal)" to the UI on the
+   * message that follows a user-initiated ESC abort. Vendor callers
+   * (print.ts: ask, grpc/server.ts) don't trigger this path because they
+   * construct a fresh QueryEngine per call.
+   *
+   * Callers MUST wire the new controller's signal to whatever upstream
+   * abort source they care about (e.g. the per-request AbortSignal from
+   * the HTTP route) before the next submitMessage().
+   */
+  replaceAbortController(controller: AbortController): void {
+    this.abortController = controller
+  }
+
   getMessages(): readonly Message[] {
     return this.mutableMessages
   }

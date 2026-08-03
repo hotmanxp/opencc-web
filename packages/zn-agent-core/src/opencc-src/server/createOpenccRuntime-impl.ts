@@ -5,6 +5,7 @@ import { createSessionFacadeImpl } from './sessionFacade-impl.js'
 import { runWithSdkContext, getSessionId } from '../bootstrap/state.js'
 import { wrapTaskAwareSetState } from '../../compat/runtime/agentTaskBridge.js'
 import { QueryEngine } from '../QueryEngine.js'
+import { createAbortController } from '../utils/abortController.js'
 import { FileStateCache } from '../utils/fileStateCache.js'
 import { transitionPermissionMode } from '../utils/permissions/permissionSetup.js'
 import { assembleToolPool } from '../tools.js'
@@ -28,9 +29,23 @@ export async function createOpenccRuntimeImpl(options) {
     isInteractive: options.interactive ?? true,
   })
   const sessions = await createSessionFacadeImpl({ cwd, dataDir: options.dataDir })
-  const abortController = new AbortController()
+  // Single shared AbortController for the runtime's lifetime — used as
+  // the QueryEngine's initial abortController. Note this is *not* the
+  // one we hand to defaultQuery per query call: AbortController is
+  // single-use, so once ESC aborts a query the controller's signal stays
+  // aborted forever and the next defaultQuery() would short-circuit at
+  // query.ts:1660, causing QueryEngine to emit an `error_during_execution`
+  // result with is_error:true (surfaced to the UI as
+  // "vendor defaultQuery reported an error (internal)"). Per-query
+  // controllers are created in `runtime.query(input)` below — see
+  // `currentQueryAbortController`.
+  const initialAbortController = new AbortController()
   let closed = false
   let turnIndex = 0
+  // Tracks the AbortController currently in use by the in-flight query,
+  // if any. `runtime.abort()` and `runtime.shutdown()` target this so
+  // they don't accidentally trip the next query's fresh controller.
+  let currentQueryAbortController: AbortController | null = null
 
   const customQuery = options.query
     ? async function* (params) {
@@ -132,7 +147,7 @@ export async function createOpenccRuntimeImpl(options) {
       () => getSessionId() as string | null | undefined,
     ),
     readFileCache: new FileStateCache(100, 25 * 1024 * 1024),
-    abortController,
+    abortController: initialAbortController,
     query: customQuery,
   })
 
@@ -177,10 +192,24 @@ export async function createOpenccRuntimeImpl(options) {
           }
         })
       }
+      // zai patch: per-query fresh AbortController. The shared
+      // initialAbortController we seeded QueryEngine with is now
+      // permanently aborted (one-shot); defaultQuery checks
+      // toolUseContext.abortController.signal.aborted at query.ts:1660
+      // and would short-circuit on every subsequent query, with
+      // QueryEngine emitting an error_during_execution result whose
+      // is_error:true surfaces to the UI as "vendor defaultQuery
+      // reported an error (internal)". Mirror vendor print.ts:2282's
+      // per-turn `abortController = createAbortController()` by
+      // building a fresh one here and replacing QueryEngine's internal
+      // reference for this query only.
+      const queryAbortController = createAbortController()
       if (input.abortSignal) {
-        if (input.abortSignal.aborted) abortController.abort(input.abortSignal.reason)
-        else input.abortSignal.addEventListener('abort', () => abortController.abort(input.abortSignal.reason), { once: true })
+        if (input.abortSignal.aborted) queryAbortController.abort(input.abortSignal.reason)
+        else input.abortSignal.addEventListener('abort', () => queryAbortController.abort(input.abortSignal.reason), { once: true })
       }
+      engine.replaceAbortController(queryAbortController)
+      currentQueryAbortController = queryAbortController
       // zai patch: per-query bridge ctx. The zai-native AskUserQuestion
       // wrapper (compat/tools/opencc/AskUserQuestionTool.ts) reads
       // globalThis.__zaiBridgeCtx at CALL time for sessionId /
@@ -232,7 +261,11 @@ export async function createOpenccRuntimeImpl(options) {
       }
     },
     async abort() {
-      if (!abortController.signal.aborted) abortController.abort()
+      // Target only the current query's controller — never the initial
+      // shared one (it stays armed as a fallback for shutdown, and we
+      // never want to leak its aborted state into the next query).
+      const c = currentQueryAbortController
+      if (c && !c.signal.aborted) c.abort()
     },
     async getSession(sessionId) {
       const info = await sessions.get(sessionId)
@@ -248,7 +281,13 @@ export async function createOpenccRuntimeImpl(options) {
     async shutdown() {
       if (closed) return
       closed = true
-      if (!abortController.signal.aborted) abortController.abort()
+      // Abort the in-flight query, if any. We don't touch
+      // initialAbortController (already done in QueryEngine) — that
+      // single-use controller is unreferenced now and will be GC'd
+      // when the runtime closure is torn down.
+      const c = currentQueryAbortController
+      if (c && !c.signal.aborted) c.abort()
+      currentQueryAbortController = null
     },
   }
 }
