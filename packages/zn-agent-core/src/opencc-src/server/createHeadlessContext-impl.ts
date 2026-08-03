@@ -64,6 +64,8 @@ import { enableConfigs } from '../utils/config.js'
 import { getCanUseToolFn } from '../cli/print.js'
 import { wrapHeadlessPermissionFn } from './headlessPermissionBridge.js'
 import { getTools } from '../tools.js'
+import { applyPermissionRulesToPermissionContext } from '../utils/permissions/permissions.js'
+import { loadAllPermissionRulesFromDisk } from '../utils/permissions/permissionsLoader.js'
 
 /**
  * Build a fully-initialized headless OpenCC context keyed by the
@@ -170,10 +172,26 @@ export async function createHeadlessContextImpl(
   // `utils/permissions/bypassPermissionsKillswitch.ts:19-47` which
   // can disable bypass at boot if the org's policy requires user
   // approval.
-  const permissionContext = {
+  // zai patch: load permission rules from settings (allow/deny/ask) into
+  // the headless permission context. The previous code used
+  // getEmptyToolPermissionContext() directly, leaving alwaysAllowRules
+  // empty — a user's `permissions.allow: ["mcp__codegraph__*"]` never
+  // took effect, so MCP tools fell through to `ask` (web confirm card)
+  // even in 'default' mode. Mirrors vendor's initializeToolPermissionContext
+  // (permissionSetup.ts:983-1028): loadAllPermissionRulesFromDisk then
+  // applyPermissionRulesToPermissionContext.
+  let permissionContext = {
     ...getEmptyToolPermissionContext(),
     mode: permissionMode,
     isBypassPermissionsModeAvailable: true,
+  }
+  try {
+    permissionContext = applyPermissionRulesToPermissionContext(
+      permissionContext,
+      loadAllPermissionRulesFromDisk(),
+    )
+  } catch (err) {
+    console.warn('[createHeadlessContext] permission rules load failed:', err)
   }
   const initialState = getDefaultAppState()
   const appState = createAppStateStore({
