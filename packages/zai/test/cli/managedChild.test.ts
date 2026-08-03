@@ -1,4 +1,4 @@
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'vitest'
 import { isManagedChild, sendToSupervisor, onSupervisorMessage } from '../../src/cli/managedChild.js'
 
 afterEach(() => {

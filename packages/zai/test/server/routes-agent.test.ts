@@ -11,6 +11,7 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
   getOrCreateAgentSession: vi.fn().mockResolvedValue('test-session-id'),
   getAskRegistry: vi.fn().mockReturnValue({ abortAll: vi.fn() }),
   getApproveRegistry: vi.fn().mockReturnValue({ abortAll: vi.fn() }),
+  getPermissionRegistry: vi.fn().mockReturnValue({ abortAll: vi.fn() }),
   abortAgentSession: vi.fn().mockResolvedValue(undefined),
   // Task 3: routes/agent.ts 的 /agent/prompt 现在调 registerSessionController,
   // /agent/abort 调 abortSessionController + releaseSessionController (finally).

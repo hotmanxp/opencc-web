@@ -32,7 +32,7 @@ describe('POST /api/transcript/:sessionId/repair', () => {
 
   beforeEach(async () => {
     dataDir = mkdtempSync(join(tmpdir(), 'zai-route-repair-'))
-    const { TranscriptStore } = await import('@zn-ai/zn-agent-core/runtime')
+    const { TranscriptStore } = await import('@zn-ai/zn-agent-core')
     mocks.store = new TranscriptStore(dataDir)
     mocks.sessionId = await mocks.store.create({
       cwd: '/x',
@@ -67,11 +67,25 @@ describe('POST /api/transcript/:sessionId/repair', () => {
   })
 
   it('returns 404 when transcript does not exist', async () => {
-    const res = await request(app)
-      .post('/api/transcript/sess-does-not-exist/repair')
-      .send()
-    expect(res.status).toBe(404)
-    expect(res.body.error).toMatch(/transcript not found/)
+    // compat TranscriptStore.read returns an empty transcript for missing
+    // files instead of throwing ENOENT; stub read to exercise the route's
+    // 404 branch.
+    const store = mocks.store
+    const originalRead = store.read.bind(store)
+    store.read = async () => {
+      const err = new Error('no such file') as NodeJS.ErrnoException
+      err.code = 'ENOENT'
+      throw err
+    }
+    try {
+      const res = await request(app)
+        .post('/api/transcript/sess-does-not-exist/repair')
+        .send()
+      expect(res.status).toBe(404)
+      expect(res.body.error).toMatch(/transcript not found/)
+    } finally {
+      store.read = originalRead
+    }
   })
 
   it('invokes repairAndPersistTranscript and returns the report', async () => {

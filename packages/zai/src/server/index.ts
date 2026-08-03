@@ -56,7 +56,7 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   // The previous sync version + fire-and-forget IIFE was changed
   // in Task 7 because `pnpm dev` boots `initBackgroundRuntime`
   // synchronously and immediately reads `getRuntime()`.
-  await initAgentRuntime(opts.cwd)
+  await initAgentRuntime(opts.cwd, opts.cli)
   // SubagentNotifier 必须在 initBackgroundRuntime 之前注册,这样
   // onTaskStateChange 第一次触发就能拿到句柄 (backgroundRuntime.ts
   // 内部 tryGetNotifier 也兜底了反向顺序)。

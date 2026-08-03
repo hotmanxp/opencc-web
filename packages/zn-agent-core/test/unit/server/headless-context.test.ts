@@ -135,6 +135,19 @@ describe('createHeadlessContext — vendor headless bootstrap (Task 2)', () => {
     expect(ctx.config.isInteractive).toBe(false)
   })
 
+  it('--cli escape hatch flips STATE to interactive (isInteractive: true)', async () => {
+    const ctx = await createHeadlessContext({
+      cwd: cwdA,
+      dataDir,
+      runtimeId: 'rt-test-interactive',
+      // Experimental `zai --cli` mode: STATE.isInteractive becomes true,
+      // so vendor's getIsNonInteractiveSession() reads false.
+      isInteractive: true,
+    })
+
+    expect(ctx.config.isInteractive).toBe(true)
+  })
+
   it('default tools exist — built-in tool registry resolves to a non-empty list', async () => {
     const ctx = await createHeadlessContext({
       cwd: cwdA,

@@ -98,6 +98,19 @@ export interface CreateHeadlessContextOptions {
    * binds even when MCP config is broken.
    */
   connectMcp?: boolean
+  /**
+   * Experimental: treat the session as an interactive OpenCC CLI
+   * (`STATE.isInteractive = true`, so vendor branches read
+   * `getIsNonInteractiveSession() === false`). Defaults to `false`
+   * (headless server invariant). Exposed via `zai dev --cli` /
+   * `zai start --cli` to observe interactive-mode behaviour — note
+   * that TUI-bound components (interactiveHandler permission prompts,
+   * REPL ask queue) do NOT exist in the server process, so interactive
+   * mode can stall or reject permission requests that the headless
+   * permission bridge (headlessPermissionBridge.ts) would otherwise
+   * surface to the web UI.
+   */
+  isInteractive?: boolean
 }
 
 /**
@@ -112,7 +125,7 @@ export interface HeadlessContextConfig {
   dataDir: string
   runtimeId: string
   clientType: string
-  isInteractive: false
+  isInteractive: boolean
   permissionMode: CreateHeadlessContextOptions['permissionMode']
   /**
    * Whether MCP bootstrap ran during context construction. zai-server

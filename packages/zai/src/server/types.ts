@@ -4,4 +4,6 @@ export interface AppOptions {
   cwd: string;
   cwdName: string;
   host?: string;   // server bind host, 默认 '127.0.0.1', --lan 时 '0.0.0.0'
+  /** Experimental: treat the runtime as an interactive OpenCC CLI (`zai --cli`). */
+  cli?: boolean;
 }

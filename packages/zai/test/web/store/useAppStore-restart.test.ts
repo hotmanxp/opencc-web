@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { useAppStore } from '../../../src/web/src/store/useAppStore.js'
 
 describe('useAppStore service state', () => {

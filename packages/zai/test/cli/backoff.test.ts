@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { nextBackoffMs, MAX_RESTART_ATTEMPTS, READY_TIMEOUT_MS } from '../../src/cli/backoff.js'
 
 describe('backoff', () => {

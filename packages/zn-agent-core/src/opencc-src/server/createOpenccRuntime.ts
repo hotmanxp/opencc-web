@@ -14,6 +14,13 @@ export type OpenccRuntimeOptions = {
    * refresh path is what actually wires them into the tool registry.
    */
   connectMcp?: boolean
+  /**
+   * Experimental: treat sessions as an interactive OpenCC CLI
+   * (`STATE.isInteractive = true`). Mirrors `zai --cli`; forwarded to
+   * `createHeadlessContext` as `isInteractive`. Defaults to `false`
+   * (headless server invariant).
+   */
+  interactive?: boolean
 }
 
 export type OpenccQueryInput = {

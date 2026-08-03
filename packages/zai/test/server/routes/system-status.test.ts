@@ -1,6 +1,6 @@
 import express from 'express'
 import request from 'supertest'
-import { afterEach, describe, expect, it } from 'bun:test'
+import { afterEach, describe, expect, it } from 'vitest'
 import systemRouter from '../../../src/server/routes/system.js'
 import { writeManagedState } from '../../../src/cli/managedState.js'
 import { rm } from 'node:fs/promises'

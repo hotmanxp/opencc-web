@@ -23,6 +23,8 @@ export async function createOpenccRuntimeImpl(options) {
     // block the connect call. The QueryEngine's per-query MCP
     // refresh + the `/mcp` slash command reconnect on demand.
     connectMcp: options.connectMcp ?? false,
+    // Experimental escape hatch (`zai --cli`): flip STATE.isInteractive.
+    isInteractive: options.interactive ?? false,
   })
   const sessions = await createSessionFacadeImpl({ cwd, dataDir: options.dataDir })
   const abortController = new AbortController()

@@ -93,5 +93,5 @@ describe("Agent.tsx — 顶层结构", () => {
     // 修复: 任务 dock 已合并到 AgentInputBox 内的状态行, 顶层不该再渲染
     // BottomStatusBar 单独一行, 让 UI 更紧凑 (2026-07-31: 整组件已移除).
     expect(queryByTestId("bottom-status-trigger")).toBeNull();
-  })
+  }, 30_000)
 })

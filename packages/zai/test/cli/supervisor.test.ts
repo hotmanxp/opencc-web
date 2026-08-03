@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events'
-import { afterEach, beforeEach, describe, expect, it, mock } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { runSupervisor, type SupervisorDeps } from '../../src/cli/supervisor.js'
 
 class FakeChild extends EventEmitter {
@@ -7,7 +7,7 @@ class FakeChild extends EventEmitter {
   exitCode: number | null = null
   signalCode: string | null = null
   private _messageBuffer: unknown[] = []
-  send = mock(() => true)
+  send = vi.fn(() => true)
   killed = false
   emit(event: string | symbol, ...args: unknown[]): boolean {
     if (event === 'exit') {
@@ -70,10 +70,18 @@ describe('supervisor', () => {
     await new Promise((r) => setTimeout(r, 0))
     const c1 = children[0]
     c1.emit('message', { type: 'ready', pid: 1, port: 9201 })
+    // let runSupervisor finish ready-handling and register the restart
+    // message handler before we send the restart message — otherwise the
+    // emit races the microtask chain and the restart is dropped.
+    await new Promise((r) => setTimeout(r, 0))
     c1.emit('message', { type: 'restart', reason: 'user_action' })
     c1.emit('exit', 0, null)
-    // second child
-    await new Promise((r) => setTimeout(r, 0))
+    // second child — the restart cycle awaits writeState + appendRestartLog
+    // (real fs I/O) before respawning, so poll instead of a single tick.
+    const deadline = Date.now() + 2000
+    while (children.length < 2 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
     const c2 = children[1]
     expect(c2).toBeTruthy()
     c2.emit('message', { type: 'ready', pid: 2, port: 9201 })
@@ -90,9 +98,13 @@ describe('supervisor', () => {
     await new Promise((r) => setTimeout(r, 0))
     const c1 = children[0]
     c1.emit('message', { type: 'ready', pid: 1, port: 9201 })
+    await new Promise((r) => setTimeout(r, 0))
     c1.emit('message', { type: 'restart', reason: 'user_action' })
     c1.emit('exit', 0, null)
-    await new Promise((r) => setTimeout(r, 0))
+    const deadline = Date.now() + 2000
+    while (children.length < 2 && Date.now() < deadline) {
+      await new Promise((r) => setTimeout(r, 5))
+    }
     const c2 = children[1]
     c2.emit('message', { type: 'ready', pid: 2, port: 9201 })
     c2.emit('exit', 0, null)

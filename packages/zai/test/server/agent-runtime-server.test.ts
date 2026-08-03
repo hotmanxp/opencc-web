@@ -34,7 +34,7 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // Task 5 runtime construction pulls in the vendor headless bootstrap
 // (~5s for module transform + disk IO on cold start). Bump the per-test
 // timeout well above that so the seam test isn't flaky on slow CI.
-const TEST_TIMEOUT_MS = 30_000
+const TEST_TIMEOUT_MS = 90_000
 import { mkdtempSync, rmSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'

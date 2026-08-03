@@ -1,4 +1,4 @@
-import { describe, expect, it } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 
 describe('systemApi', () => {
   it('requestRestart POSTs to /api/system/restart with reason', async () => {

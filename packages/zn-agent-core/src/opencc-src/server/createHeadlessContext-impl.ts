@@ -77,7 +77,8 @@ import { loadAllPermissionRulesFromDisk } from '../utils/permissions/permissions
  *   1. installMacroStub()              — globalThis.MACRO must exist
  *                                       before bundle eval
  *   2. enableConfigs()                 — settings/globalConfig readable
- *   3. setIsInteractive(false)         — non-interactive server
+ *   3. setIsInteractive(isInteractive) — non-interactive server by default;
+ *                                       `--cli` escape hatch flips to true
  *   4. setOriginalCwd(opts.cwd)        — STATE.originalCwd
  *   5. setCwdState(opts.cwd)           — STATE.cwd
  *   6. setClientType(opts.clientType)  — STATE.clientType
@@ -141,19 +142,26 @@ export async function createHeadlessContextImpl(
   // tests under vitest don't pull in the production-only bundle.
   enableConfigs()
 
-  // Steps 3-6: vendor STATE. server-runtime invariant: non-interactive
-  // always (no TTY), clientType marker so vendor branches take the
-  // server path.
-  setIsInteractive(false)
+  // Steps 3-6: vendor STATE. server-runtime default: non-interactive
+  // (no TTY). `isInteractive` is an experimental escape hatch (zai
+  // `--cli`) that flips STATE.isInteractive to true so vendor branches
+  // read `getIsNonInteractiveSession() === false`; clientType marker
+  // stays so vendor branches take the server path.
+  const isInteractive = options.isInteractive ?? false
+  setIsInteractive(isInteractive)
   setOriginalCwd(cwd)
   setCwdState(cwd)
   setClientType(clientType)
 
   // Sanity: getIsNonInteractiveSession() reads STATE.isInteractive.
-  if (!getIsNonInteractiveSession()) {
+  // Assert the invariant matches what we just set (either direction),
+  // so a vendor bootstrap race is caught instead of silently flipping
+  // the mode under us.
+  if (isInteractive ? getIsNonInteractiveSession() : !getIsNonInteractiveSession()) {
     throw new Error(
-      '[createHeadlessContext] STATE.isInteractive is true after setIsInteractive(false). ' +
-        'Vendor bootstrap may have raced; check setIsInteractive export in bootstrap/state.ts.',
+      '[createHeadlessContext] STATE.isInteractive mismatch after setIsInteractive(' +
+        `${isInteractive}). Vendor bootstrap may have raced; check setIsInteractive ` +
+        'export in bootstrap/state.ts.',
     )
   }
 
@@ -323,7 +331,7 @@ export async function createHeadlessContextImpl(
       dataDir,
       runtimeId,
       clientType,
-      isInteractive: false,
+      isInteractive,
       permissionMode,
       connectMcp,
     },

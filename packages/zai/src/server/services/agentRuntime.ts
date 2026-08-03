@@ -270,7 +270,7 @@ function resolveSkillsDirs(): string[] {
   return env.split(path.delimiter).filter(Boolean)
 }
 
-export async function initAgentRuntime(cwd: string): Promise<void> {
+export async function initAgentRuntime(cwd: string, isCli?: boolean): Promise<void> {
   if (runtime) return
 
   // zai patch: skip vendor PreToolUse plugin hooks under the HTTP-server
@@ -345,6 +345,10 @@ export async function initAgentRuntime(cwd: string): Promise<void> {
       // block the connect call. The QueryEngine's per-query MCP
       // refresh + the `/mcp` slash command reconnect on demand.
       connectMcp: false,
+      // Experimental: `zai dev --cli` / `zai start --cli` flips
+      // STATE.isInteractive so vendor branches run as an interactive
+      // OpenCC CLI (system prompt prefix, permission handler, etc.).
+      interactive: isCli ?? false,
     })
     const cleanup = () => {
       if (runtime) void runtime.shutdown()

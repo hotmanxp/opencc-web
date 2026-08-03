@@ -12,6 +12,14 @@ import { runStart } from './start.js';
 // 因为 unhandled 'error' event 直接 crash.
 registerProcessOutputErrorHandlers();
 
+// bun run / pnpm 追加参数给脚本时会留下一个裸 `--` (例如
+// `pnpm dev -- --cli` → `bun run src/cli/index.ts dev -- --cli`, bun
+// 把 `--` 原样放进 argv)。commander 把 `--` 当作 option 终止符, 后面
+// 的 `--cli` 会变成 positional 参数, flag 解析静默失败 (options.cli
+// 为 undefined)。zai 的 CLI 只有 flag 没有 positional 参数, 过滤掉
+// 裸 `--` 是安全的。
+process.argv = process.argv.filter((arg) => arg !== '--');
+
 const program = new Command();
 
 // 运行时读 package.json 拿真实版本号，避免发布时把硬编码的版本号漏改。
@@ -39,6 +47,7 @@ program
   .option('--api-port <port>', 'Express API port (default: 7715, auto-scan if occupied)')
   .option('--no-open', 'Do not auto-open browser')
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
+  .option('--cli', 'Experimental: treat the runtime as an interactive OpenCC CLI')
   .action(runDev);
 
 program
@@ -47,6 +56,7 @@ program
   .option('--port <port>', 'Express port (default: 9888, auto-scan if occupied)')
   .option('--no-open', 'Do not auto-open browser')
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
+  .option('--cli', 'Experimental: treat the runtime as an interactive OpenCC CLI')
   // Internal marker: when the supervisor spawns a managed child it
   // re-invokes `zai start --managed-child ...` so the child recognises
   // it is already inside a managed session and skips the supervisor

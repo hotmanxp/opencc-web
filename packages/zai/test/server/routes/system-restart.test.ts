@@ -1,5 +1,5 @@
 import express from 'express'
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import request from 'supertest'
 import systemRouter, { __resetRestartRouter } from '../../../src/server/routes/system.js'
 

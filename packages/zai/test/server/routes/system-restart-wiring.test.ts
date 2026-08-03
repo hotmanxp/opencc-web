@@ -1,6 +1,6 @@
 import express from 'express'
 import request from 'supertest'
-import { afterEach, beforeEach, describe, expect, it } from 'bun:test'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 import systemRouter, { __resetRestartRouter } from '../../../src/server/routes/system.js'
 import { eventBus } from '../../../src/server/services/eventBus.js'
 import { __resetBackgroundRuntimeForTests } from '../../../src/server/services/backgroundRuntime.js'

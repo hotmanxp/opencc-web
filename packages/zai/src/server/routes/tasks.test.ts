@@ -31,6 +31,9 @@ function makeNoopAgent(): AgentRuntime {
     async *run(): AsyncGenerator<RuntimeEvent> {
       // empty stream completes immediately
     },
+    async *query(): AsyncGenerator<RuntimeEvent> {
+      // empty stream completes immediately
+    },
     async abort() {},
     async listSessions() {
       return []
@@ -46,6 +49,11 @@ function makeNoopAgent(): AgentRuntime {
 function makeYieldingAgent(events: RuntimeEvent[]): AgentRuntime {
   return {
     async *run(): AsyncGenerator<RuntimeEvent> {
+      for (const ev of events) {
+        yield ev
+      }
+    },
+    async *query(): AsyncGenerator<RuntimeEvent> {
       for (const ev of events) {
         yield ev
       }
@@ -144,6 +152,9 @@ describe('GET /api/tasks', () => {
     await mockRuntime.shutdown().catch(() => {})
     const hangingAgent: AgentRuntime = {
       async *run(): AsyncGenerator<RuntimeEvent> {
+        await new Promise<RuntimeEvent>(() => {}) // 永不 resolve,依赖 shutdown 强制 abort
+      },
+      async *query(): AsyncGenerator<RuntimeEvent> {
         await new Promise<RuntimeEvent>(() => {}) // 永不 resolve,依赖 shutdown 强制 abort
       },
       async abort() {},

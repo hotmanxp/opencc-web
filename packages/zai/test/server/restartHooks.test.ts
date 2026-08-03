@@ -1,4 +1,4 @@
-import { describe, expect, it, mock } from 'bun:test'
+import { describe, expect, it } from 'vitest'
 import { createRestartHooks } from '../../src/server/services/restartHooks.js'
 
 describe('restartHooks', () => {

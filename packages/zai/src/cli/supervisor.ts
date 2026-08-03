@@ -162,7 +162,11 @@ export async function runSupervisor(
     attempts = 0
     await deps.writeState({ state: 'running' })
 
-    pendingRestart = null
+    // NOTE: do not clear pendingRestart here. A restart request forwarded by
+    // onParentMsg (integration tests drive the cycle via parent IPC) can land
+    // while this await chain is still unwinding — clearing it would drop the
+    // request and the supervisor would exit instead of respawning. The while
+    // loop head already nulls it after each restart iteration.
     const exitPromise = new Promise<{ code: number | null }>((resolve) => {
       let resolved = false
       const tryResolve = (code: number | null) => {
