@@ -137,6 +137,23 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)).toBeUndefined()
   })
 
+  it('removeInstance delete write is serialised after queued writes (no disk resurrection)', async () => {
+    const { deps, writes, fakeChildren } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(snap.id)
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    // Crash the child: the exit handler queues a `down` persistSafe write
+    // that still contains the instance. Removing the entry right after must
+    // not let that queued write land AFTER the delete write on disk.
+    fakeChildren[0]!.emit('exit', 1)
+    await getInstanceSupervisor().removeInstance(snap.id)
+    const lastWrite = writes[writes.length - 1]!
+    // The harness types writes as { def, statuses } but the supervisor
+    // persists { definitions, statuses } — cast to the runtime shape.
+    expect((lastWrite as unknown as { definitions: unknown[] }).definitions).toHaveLength(0)
+  })
+
   it('reject operations on current instance', async () => {
     const { deps } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)

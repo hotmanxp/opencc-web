@@ -213,7 +213,18 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       return snapshotOf(entry)
     }
 
-    const doRemove = async (id: string) => { ensureNotCurrent(id); const entry = getEntry(id); if (entry.child) await doStop(id); entries.delete(id); await persist() }
+    const doRemove = async (id: string) => {
+      ensureNotCurrent(id)
+      const entry = getEntry(id)
+      if (entry.child) await doStop(id)
+      entries.delete(id)
+      // Serialise the delete write through writeChain: a queued persistSafe
+      // (e.g. the exit handler's `stopped`/`down` write, which still contains
+      // the instance) must not land AFTER this removal and resurrect the
+      // deleted definition on disk. `persistSafe` chains + we drain the chain.
+      persistSafe()
+      await writeChain
+    }
     const tickHeartbeat = () => {
       const nowMs = deps.now()
       for (const entry of entries.values()) {
