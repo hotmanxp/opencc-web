@@ -2,10 +2,9 @@
 import memoize from 'lodash-es/memoize.js'
 import { homedir } from 'os'
 import { join } from 'path'
-import { fileSuffixForOauthConfig } from '../constants/oauth.js'
 import { isRunningWithBun } from './bundledMode.js'
 import { createCombinedAbortSignal } from './combinedAbortSignal.js'
-import { getClaudeConfigHomeDir, isEnvTruthy, resolveConfigDirEnv } from './envUtils.js'
+import { getClaudeConfigHomeDir, isEnvTruthy } from './envUtils.js'
 import { findExecutable } from './findExecutable.js'
 import { getFsImplementation } from './fsOperations.js'
 import { which } from './which.js'
@@ -14,34 +13,17 @@ type Platform = 'win32' | 'darwin' | 'linux'
 
 // Config and data paths
 export const getGlobalClaudeFile = memoize((): string => {
-  // Legacy fallback for backwards compatibility
-  if (
-    getFsImplementation().existsSync(
-      join(getClaudeConfigHomeDir(), '.config.json'),
-    )
-  ) {
-    return join(getClaudeConfigHomeDir(), '.config.json')
-  }
-
-  const oauthSuffix = fileSuffixForOauthConfig()
-  const configDirEnv = resolveConfigDirEnv({
-    openccConfigDir: process.env.OPENCC_CONFIG_DIR,
-    legacyConfigDir: process.env.CLAUDE_CONFIG_DIR,
-  })
-  const configDir = configDirEnv || homedir()
-
-  // Default to .claude.json. Fall back to .claude.json only if the new
-  // file doesn't exist yet and the legacy one does (same migration pattern
-  // as resolveClaudeConfigHomeDir for the config directory).
-  const newFilename = `.claude${oauthSuffix}.json`
-  const legacyFilename = `.claude${oauthSuffix}.json`
-  if (
-    !getFsImplementation().existsSync(join(configDir, newFilename)) &&
-    getFsImplementation().existsSync(join(configDir, legacyFilename))
-  ) {
-    return join(configDir, legacyFilename)
-  }
-  return join(configDir, newFilename)
+  // zai patch: 全局配置与用户设置统一到 ~/.zai/settings.json。
+  //
+  // 上游默认写 ~/.claude.json（含 auth/oauth、apiKeyHelper、theme 等），
+  // zai 作为独立本地工具不应触碰用户的 ~/.claude。config home 已由
+  // resolveClaudeConfigHomeDir 统一到 ~/.zai（envUtils.ts zai patch），
+  // 这里把"全局配置"文件名也从 .claude.json 改为 settings.json ——
+  // zai 的 ~/.zai/settings.json 本身是 opencc 兼容结构（env /
+  // permissions.defaultMode / model / enabledPlugins 等），core 的
+  // getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig) 能直接
+  // 解析；SettingsSchema 外层 .passthrough() 保留 zai 专属字段。
+  return join(getClaudeConfigHomeDir(), 'settings.json')
 })
 
 const hasInternetAccess = memoize(async (): Promise<boolean> => {
