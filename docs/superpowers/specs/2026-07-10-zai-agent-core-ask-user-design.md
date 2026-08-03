@@ -568,7 +568,7 @@ case 'tool_use:denied':
 - Auto-continue 倒计时(`questionAutoContinueTimeoutSec`)
 - Plan mode interview 流程
 - Web 端 React Testing Library 组件测
-- `scripts/sync-from-opencc.ts` 自动同步增强
+- 上游自动同步增强(已废弃,`opencc-src/` 为静态拷贝)
 
 ## 8. 实施顺序
 

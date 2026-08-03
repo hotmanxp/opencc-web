@@ -22,7 +22,7 @@
 - `runForkedAgent({skipTranscript: true})` — zai v2 transcript absorbs sub-agents via parent resume, never sidechain.
 - `saveCacheSafeParams(...)` is wrapped in `try/finally` so its throw does not abort the main loop (R3).
 - All new commit messages follow the project's pattern: `refactor(zai-agent-core): ...` / `chore(zai-agent-core): ...`.
-- OPENCC_SRC override: required when running `pnpm sync-from-opencc`. Local default is `/Users/liangxuechao572/code/opencc/src`; override via `OPENCC_SRC=...`.
+- OPENCC_SRC override: was required when syncing from upstream opencc. Local default was `/Users/liangxuechao572/code/opencc/src`; the sync script has since been removed (`opencc-src/` is now a static copy).
 
 ---
 
@@ -32,7 +32,6 @@ This plan touches the following files:
 
 | Path | Phase | Purpose |
 |---|---|---|
-| `packages/zai-agent-core/scripts/sync-from-opencc.ts` | 1 | Whitelist 5 fork-prerequisite modules |
 | `packages/zai-agent-core/src/opencc-internals/utils/sessionStorage.ts` | 1 | NEW — `recordSidechainTranscript` |
 | `packages/zai-agent-core/src/opencc-internals/utils/toolResultStorage.ts` | 1 | NEW — `cloneContentReplacementState` |
 | `packages/zai-agent-core/src/opencc-internals/utils/abortController.ts` | 1 | NEW — `createChildAbortController` |
@@ -51,9 +50,7 @@ This plan touches the following files:
 ### Task 1: sync 5 fork-prerequisite modules
 
 **Files:**
-- Modify: `packages/zai-agent-core/scripts/sync-from-opencc.ts:255-269`
-- Create (5 new files under `packages/zai-agent-core/src/opencc-internals/`): `utils/sessionStorage.ts`, `utils/toolResultStorage.ts`, `utils/abortController.ts`, `utils/fileStateCache.ts`, `types/toolResultStorage.ts`
-- Read: `packages/zai-agent-core/scripts/sync-from-opencc.ts` (whole file, especially `HARD_EXCLUDE_FILES` and `REMOVED_IMPORT_PATTERNS`)
+- Sync (via the then-current sync script, since removed): 5 new files under `packages/zai-agent-core/src/opencc-internals/` — `utils/sessionStorage.ts`, `utils/toolResultStorage.ts`, `utils/abortController.ts`, `utils/fileStateCache.ts`, `types/toolResultStorage.ts`
 
 **Interfaces:**
 - Consumes: nothing (off-tree sync)
@@ -71,12 +68,11 @@ ls "${OPENCC_SRC:-/Users/liangxuechao572/code/opencc/src}/utils/sessionStorage.t
 
 Expected: 5 paths print without "No such file". If any are missing, set `OPENCC_SRC` to a valid path and re-run. If upstream is missing, stop and report — do not invent replacements.
 
-- [ ] **Step 2: Append 5 lines to `WHITELIST_PATTERNS`**
+- [ ] **Step 2: Add the 5 paths to the sync whitelist**
 
-Open `packages/zai-agent-core/scripts/sync-from-opencc.ts`. Find the section ending with the `// BashTool port — P-tier pure-logic modules (no Bun, no TUI, no analytics).` comment (line ~256). After the closing `]` of `WHITELIST_PATTERNS` (line ~270) **but before the closing of the array literal**, append a new block:
+The then-current sync script (`packages/zai-agent-core/scripts/sync-from-opencc.ts`, since removed) listed these under a new `// AgentTool port — fork prerequisites` section in `WHITELIST_PATTERNS`:
 
 ```ts
-  // AgentTool port — fork prerequisites (runForkedAgent transitive deps).
   'utils/sessionStorage.ts',
   'utils/toolResultStorage.ts',
   'utils/abortController.ts',
@@ -84,23 +80,16 @@ Open `packages/zai-agent-core/scripts/sync-from-opencc.ts`. Find the section end
   'types/toolResultStorage.ts',
 ```
 
-The trailing `]` must remain after these entries. Verify the file is still valid TypeScript by saving; do not run typecheck yet.
+- [ ] **Step 3: Dry-run sync (historical)**
 
-- [ ] **Step 3: Dry-run sync**
+The sync script's dry-run confirmed the 5 new files appear in the copy
+list. The script has since been removed, so this step is record only.
 
-```bash
-cd packages/zai-agent-core && OPENCC_SRC="$OPENCC_SRC" pnpm sync-from-opencc --dry-run 2>&1 | grep -E "^\s*COPY:" | sort -u
-```
+- [ ] **Step 4: Apply sync (historical)**
 
-Expected: At minimum the 5 new files appear in COPY lines.
-
-- [ ] **Step 4: Apply sync**
-
-```bash
-cd packages/zai-agent-core && OPENCC_SRC="$OPENCC_SRC" pnpm sync-from-opencc --apply
-```
-
-Expected: `[sync-from-opencc] applied: <N> files` with N increased by 5 over the previous baseline. New files appear under `src/opencc-internals/{utils,types}/`.
+The sync script's apply copied the 5 files under
+`src/opencc-internals/{utils,types}/`. The script has since been
+removed, so this step is record only.
 
 - [ ] **Step 5: Type-check**
 
@@ -113,7 +102,7 @@ Expected: PASS — no errors. If forkedAgent.ts now resolves its imports (good s
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/zai-agent-core/scripts/sync-from-opencc.ts packages/zai-agent-core/src/opencc-internals/utils/sessionStorage.ts packages/zai-agent-core/src/opencc-internals/utils/toolResultStorage.ts packages/zai-agent-core/src/opencc-internals/utils/abortController.ts packages/zai-agent-core/src/opencc-internals/utils/fileStateCache.ts packages/zai-agent-core/src/opencc-internals/types/toolResultStorage.ts
+git add packages/zai-agent-core/src/opencc-internals/utils/sessionStorage.ts packages/zai-agent-core/src/opencc-internals/utils/toolResultStorage.ts packages/zai-agent-core/src/opencc-internals/utils/abortController.ts packages/zai-agent-core/src/opencc-internals/utils/fileStateCache.ts packages/zai-agent-core/src/opencc-internals/types/toolResultStorage.ts
 
 git commit -m "$(cat <<'EOF'
 chore(zai-agent-core): sync 5 fork-prerequisite modules for AgentTool port
@@ -127,9 +116,9 @@ transitive deps that zai had not yet pulled from upstream opencc:
 - utils/fileStateCache.ts          (cloneFileStateCache)
 - types/toolResultStorage.ts       (ContentReplacementState)
 
-Added to sync-from-opencc WHITELIST_PATTERNS under a new section marker.
-Pre-existing tooling (REMOVED_IMPORT_PATTERNS, STUB_FILES) handles any
-React/ink imports inside these files unchanged.
+Added to the sync whitelist under a new section marker (the sync script
+has since been removed). Pre-existing tooling (REMOVED_IMPORT_PATTERNS,
+STUB_FILES) handles any React/ink imports inside these files unchanged.
 
 Co-Authored-By: Claude <noreply@anthropic.com>
 EOF
@@ -400,7 +389,7 @@ Replace renderPrompt() with the upstream opencc-style exported function:
   full description incl. <AVAILABLE_AGENTS> section. The body mirrors
   the upstream AgentTool.tsx text where available; where OPENCC_SRC is
   not reachable, the body is the zai-port version flagged for future
-  sync-from-opencc replacement.
+  upstream replacement.
 - renderAvailableAgentsSection(agents?) preserves the prior helper but
   accepts optional agent list (defaults to []) and still returns '' on
   empty so the system-prompt assembler can simply `if (section) push`.

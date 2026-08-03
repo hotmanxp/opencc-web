@@ -208,15 +208,15 @@ abort zai's main loop (R3 mitigation).
 | `utils/fileStateCache.ts` | `OPENCC_SRC/utils/fileStateCache.ts` | `cloneFileStateCache` |
 | `types/toolResultStorage.ts` | `OPENCC_SRC/types/toolResultStorage.ts` | `ContentReplacementState` |
 
-These are added to `scripts/sync-from-opencc.ts` `WHITELIST_PATTERNS`
-under a new section marker `// AgentTool port — fork prerequisites`.
+These were synced into `src/opencc-internals/` under the AgentTool port
+(the sync mechanism has since been removed; `opencc-src/` is now a
+static copy).
 
 ## File changes
 
 ### Phase 1 — pre-flight chore commit
 
 ```
-modified  packages/zai-agent-core/scripts/sync-from-opencc.ts   (+5 lines)
 new file  packages/zai-agent-core/src/opencc-internals/utils/sessionStorage.ts
 new file  packages/zai-agent-core/src/opencc-internals/utils/toolResultStorage.ts
 new file  packages/zai-agent-core/src/opencc-internals/utils/abortController.ts
@@ -271,11 +271,11 @@ weakness posture).
 ## Risks
 
 ### R1. OPENCC_SRC path inaccessible
-`sync-from-opencc.ts:37` hardcodes `/Users/liangxuechao572/code/opencc/src`.
-The local dev environment may not have that path. Resolution paths:
-(a) run with `OPENCC_SRC=/path/to/opencc/src pnpm sync-from-opencc --apply`,
-(b) manually copy the 5 files and amend.
-The spec is committed before the sync is run; CI must catch any
+The sync script hardcoded `/Users/liangxuechao572/code/opencc/src` for
+the source tree. The local dev environment may not have that path.
+Resolution was `OPENCC_SRC=/path/to/opencc/src` or manual copy; the
+sync script has since been removed and `opencc-src/` is a static copy.
+The spec was committed before the sync ran; CI must catch any
 subsequent desync via `pnpm typecheck`.
 
 ### R2. Upstream `Tool` exact shape unknown locally
@@ -342,6 +342,6 @@ Final merge commit on main: `494b808 feat(agent-tool): align AgentTool to upstre
   spec.
 - **OI2.** zai's main `queryLoop` could itself be replaced by the
   `QueryEngine` class upstream exposes — separate spec.
-- **OI3.** prompt verbatim text relies on periodic
-  `pnpm sync-from-opencc --apply` runs post-merge; this spec does not
-  set up a CI auto-sync.
+- **OI3.** prompt verbatim text relies on periodic re-sync from
+  upstream opencc (post-merge); this spec does not set up a CI
+  auto-sync.

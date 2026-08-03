@@ -252,11 +252,7 @@ for await (const event of stream) {
 - `src/transcript/` — JSON 文件 transcript 持久化
 - `src/mcp/` — MCP 接入层(`MCPClientPool` / `MCPToolAdapter` / `mcpInstructions` / `permission-matcher`)
 
-**与上游 OpenCC 同步**:
-```bash
-pnpm --filter @zn-ai/zn-agent-core copy-from-opencc --dry-run   # 预览
-pnpm --filter @zn-ai/zn-agent-core copy-from-opencc --apply     # 落地
-```
+**与上游 OpenCC 的关系**:`src/opencc-src/` 是 opencc 0.20.0 的静态拷贝(经 strip-list 裁剪),不随上游自动同步。
 
 **测试**:
 ```bash

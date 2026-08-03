@@ -77,7 +77,7 @@ opencc-web 是一个 monorepo,包含两个 workspace,目标是把 OpenCC Agent �
 | `src/commands/{index,registry,promptRender,types}.ts` | 自定义命令注册 |
 | `src/opencc-internals/` | **OpenCC 兼容垫片**:bridge / bootstrap / constants / hooks / migrations / services(api/analytics/compact/mcp)/ skills / state / tools / types / utils(settings/permissions/bash/model)/ entrypoints。`AgentTool.ts` 等核心类直接复用 OpenCC 实现,通过 zai 适配层把 query 函数替换为 queryLoop |
 | `src/index.ts` | 主入口 barrel |
-| `scripts/sync-from-opencc.ts` | 从 OpenCC 上游 sync 代码的工具 |
+| `scripts/strip-list.ts` | opencc-src 静态拷贝的裁剪清单(上游同步脚本已移除) |
 
 ---
 
@@ -624,7 +624,7 @@ logEvent('auto_compact_succeeded' | 'auto_compact_failed') → ~/.zai/logs/compa
 | 决策 | 权衡 |
 |---|---|
 | **QueryLoop + QueryEngine 并存** | queryEngine 是下一代实现(显式 turn、父子 user 合并),queryLoop 是当前主用;contract.ts 通过 DefaultAgentRuntime 包装 queryLoop,query.ts 是 shim。共存期间 spec 与实现可能 drift |
-| **opencc-internals/ 目录保留 OpenCC 源码** | 通过 zai 适配层(queryLoop 替代 opencc query)复用大量 OpenCC 代码;代价是同步负担(由 `scripts/sync-from-opencc.ts` 处理) |
+| **opencc-internals/ 目录保留 OpenCC 源码** | 通过 zai 适配层(queryLoop 替代 opencc query)复用大量 OpenCC 代码;代价是同步负担(同步脚本已移除,现为静态拷贝) |
 | **tool schema strict mode(additionalProperties:false)** | 部分 provider 不容忍;zai 端在 openaiClient 里硬加;provider 切换可能 schema 不兼容 |
 | **reasoning_content → thinking 桥接** | 让 OpenAI 兼容模型(reasoning 模型)的思考输出复用 Anthropic SDK 的 thinking channel;但语义不完全等价(Anthropic 是显式 budget 参数,OpenAI 是 reasoning_effort) |
 | **tool_use 顶层消息合并到上一条 assistant(resume 路径)** | Anthropic 协议约束 tool_result 必须紧跟 tool_use;resume 时 store.read 必须做这个合并,否则 2013 错误 |

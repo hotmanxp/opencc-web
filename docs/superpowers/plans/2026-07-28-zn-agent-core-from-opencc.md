@@ -323,7 +323,6 @@ git commit -m "docs(zn-agent-core): API gap matrix zai vs opencc"
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "copy-from-opencc": "tsx scripts/copy-from-opencc.ts",
     "verify": "tsx scripts/verify-imports.ts"
   },
   "dependencies": {
@@ -408,10 +407,10 @@ git commit -m "feat(zn-agent-core): tsconfig"
 
 # Phase 3: Copy Source from opencc
 
-## Task 5: Write the copy script
+## Task 5: Write the copy script *(脚本已移除,此节仅留档)*
 
 **Files:**
-- Create: `packages/zn-agent-core/scripts/copy-from-opencc.ts`
+- Create: `packages/zn-agent-core/scripts/copy-from-opencc.ts` (since removed)
 
 **Interfaces:**
 - Consumes: `STRIP_LIST` and `OPENCC_SRC` env var
@@ -516,7 +515,7 @@ function main() {
 main()
 ```
 
-- [ ] **Step 2: Commit the copy script**
+- [ ] **Step 2: Commit the copy script** *(historical — script removed)*
 
 ```bash
 git add packages/zn-agent-core/scripts/copy-from-opencc.ts
@@ -525,12 +524,12 @@ git commit -m "feat(zn-agent-core): copy script with strip list"
 
 ---
 
-## Task 6: Run the copy
+## Task 6: Run the copy *(脚本已移除,此节仅留档)*
 
 **Files:**
 - Modify: `packages/zn-agent-core/src/opencc-src/` (created by script)
 
-- [ ] **Step 1: Dry run**
+- [ ] **Step 1: Dry run** *(historical)*
 
 ```bash
 cd /Users/ethan/code/opencc-web-zn-agent-core
@@ -539,7 +538,7 @@ OPENCC_SRC=/Users/ethan/code/opencc pnpm --filter @zn-ai/zn-agent-core copy-from
 
 Expected: prints file count + first 20 paths. Should be 800-1100 files (opencc src has ~1500 files, ~50% stripped).
 
-- [ ] **Step 2: Actual copy**
+- [ ] **Step 2: Actual copy** *(historical)*
 
 ```bash
 OPENCC_SRC=/Users/ethan/code/opencc pnpm --filter @zn-ai/zn-agent-core copy-from-opencc
@@ -606,7 +605,7 @@ For each error pointing to a UI import we missed, add the file to `STRIP_TOP_FIL
 ```bash
 # Edit packages/zn-agent-core/scripts/strip-list.ts
 # Add problematic files/dirs to STRIP_TOP_FILES or STRIP_DIRS
-OPENCC_SRC=/Users/ethan/code/opencc pnpm --filter @zn-ai/zn-agent-core copy-from-opencc
+OPENCC_SRC=/Users/ethan/code/opencc pnpm --filter @zn-ai/zn-agent-core copy-from-opencc   # historical — script removed
 pnpm --filter @zn-ai/zn-agent-core typecheck 2>&1 | grep "error TS" | wc -l
 ```
 
@@ -1277,7 +1276,7 @@ Change the `packages/zai-agent-core/src/runtime/queryLoop.ts` reference to `pack
 
 - [ ] **Step 3: Update sync notes**
 
-Remove mentions of `scripts/sync-from-opencc.ts`. Add note about the copy approach.
+Remove mentions of the sync script. `opencc-src/` is now a static copy with no sync tooling.
 
 - [ ] **Step 4: Commit**
 

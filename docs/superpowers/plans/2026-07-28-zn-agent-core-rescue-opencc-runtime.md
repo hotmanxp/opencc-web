@@ -205,9 +205,9 @@ export const STRIP_TOP_FILES: string[] = [
 ]
 ```
 
-- [ ] **Step 6: 改 `scripts/copy-from-opencc.ts` 把 shims/ 目录单独 copy 进去(不被 strip)**
+- [ ] **Step 6: 改 copy 脚本把 shims/ 目录单独 copy 进去(不被 strip)** *(脚本已移除,此步仅留档)*
 
-In `copy-from-opencc.ts`, after the main copy loop, ensure `src/opencc-src/shims/` is preserved:
+In the copy script, after the main copy loop, ensure `src/opencc-src/shims/` is preserved:
 
 ```ts
 // After main copy loop:
@@ -222,9 +222,9 @@ for (const f of readdirSync(join(ZAI_PKG, 'src', 'opencc-src', 'shims'))) {
 }
 ```
 
-- [ ] **Step 7: 改 vendored 源文件里的 `from 'bun:bundle'` 路径**
+- [ ] **Step 7: 改 vendored 源文件里的 `from 'bun:bundle'` 路径** *(脚本已移除,此步仅留档)*
 
-Add a script `packages/zn-agent-core/scripts/rewrite-bun-bundle-imports.ts`:
+Add a script `packages/zn-agent-core/scripts/rewrite-bun-bundle-imports.ts` (since removed):
 
 ```ts
 #!/usr/bin/env tsx
@@ -268,7 +268,7 @@ for (const f of walk(ROOT)) {
 console.log(`Rewrote bun:bundle imports in ${rewritten} files`)
 ```
 
-Run it:
+Run it (historical — script removed):
 ```bash
 pnpm --filter @zn-ai/zn-agent-core exec tsx scripts/rewrite-bun-bundle-imports.ts
 ```
@@ -293,7 +293,7 @@ pnpm --filter @zn-ai/zn-agent-core typecheck 2>&1 | grep "Cannot find module 'bu
 - [ ] **Step 10: Commit**
 
 ```bash
-git add packages/zn-agent-core/src/opencc-src/shims/ packages/zn-agent-core/scripts/rewrite-bun-bundle-imports.ts packages/zn-agent-core/scripts/copy-from-opencc.ts
+git add packages/zn-agent-core/src/opencc-src/shims/
 git commit -m "feat(zn-agent-core): bun:bundle static feature stub + import rewriter"
 ```
 
@@ -397,14 +397,11 @@ export const BashTool = buildTool({
 })
 ```
 
-- [ ] **Step 5: 重新跑 copy 脚本**
+- [ ] **Step 5: 重新跑 copy 脚本** *(脚本已移除,此步仅留档)*
 
-```bash
-cd /Users/ethan/code/opencc-web-zn-agent-core
-OPENCC_SRC=/Users/ethan/code/opencc pnpm --filter @zn-ai/zn-agent-core copy-from-opencc
-git status -s packages/zn-agent-core/src/opencc-src/ | head -30
-# Expected: A 类 tsx → ts 改名;B/C 类文件被删
-```
+Re-run the copy script against `OPENCC_SRC=/Users/ethan/code/opencc` and
+verify `git status -s packages/zn-agent-core/src/opencc-src/`:
+A 类 tsx → ts 改名;B/C 类文件被删。
 
 - [ ] **Step 6: 跑 typecheck**
 
@@ -437,9 +434,9 @@ git commit -m "feat(zn-agent-core): strip .tsx UI from opencc tools, retain call
 
 ## Task 3.1: 批量改 import 路径
 
-- [ ] **Step 1: 写改写脚本**
+- [ ] **Step 1: 写改写脚本** *(脚本已移除,此步仅留档)*
 
-Create `packages/zn-agent-core/scripts/rewrite-js-imports.ts`:
+Create `packages/zn-agent-core/scripts/rewrite-js-imports.ts` (since removed):
 
 ```ts
 #!/usr/bin/env tsx
@@ -492,7 +489,7 @@ console.log(`Rewrote .js → .ts in ${rewritten} files`)
 console.log(`Run typecheck to verify (expect 'Cannot find module .foo' errors to drop)`)
 ```
 
-- [ ] **Step 2: 跑脚本**
+- [ ] **Step 2: 跑脚本** *(脚本已移除,此步仅留档)*
 
 ```bash
 cd /Users/ethan/code/opencc-web-zn-agent-core
@@ -514,9 +511,9 @@ pnpm --filter @zn-ai/zn-agent-core typecheck 2>&1 | grep "Cannot find module" | 
 2. 是否路径写错? — 手动修
 3. 是否缺中间 `.d.ts`? — 加 ambient declaration
 
-- [ ] **Step 5: 更新 copy-from-opencc.ts 让 copy 完后跑 rewrite 脚本**
+- [ ] **Step 5: 更新 copy 脚本让 copy 完后跑 rewrite 脚本** *(脚本已移除,此步仅留档)*
 
-In `packages/zn-agent-core/scripts/copy-from-opencc.ts`, 在 main copy loop 之后加:
+In the copy script, 在 main copy loop 之后加:
 
 ```ts
 // After main copy + shims copy:
@@ -535,7 +532,7 @@ if (rewrite.status !== 0) {
 - [ ] **Step 6: Commit**
 
 ```bash
-git add packages/zn-agent-core/scripts/rewrite-js-imports.ts packages/zn-agent-core/scripts/copy-from-opencc.ts packages/zn-agent-core/src/opencc-src/
+git add packages/zn-agent-core/src/opencc-src/
 git commit -m "fix(zn-agent-core): rewrite .js → .ts imports in vendored opencc src"
 ```
 

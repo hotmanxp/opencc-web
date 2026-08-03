@@ -12,7 +12,7 @@
 - `compat/runtime/contract.ts::DefaultAgentRuntime.run()` is wired to `compat/runtime/openccAdapter.ts` (Phase 1.b), which calls zai's own `modelCaller` and bypasses `opencc-src/` entirely.
 - `compat/runtime/openccQueryBridge.ts` and `sdkEventAdapter.ts` exist as Phase 5 **stubs** that yield `runtime.error: not_implemented` and route to the Phase 1.b adapter.
 - `opencc-src/query.ts` cannot be loaded under Node/tsx: the first import reaches `services/api/withRetry.ts:1` which does `import { feature } from 'bun:bundle'`, causing `ERR_UNSUPPORTED_ESM_URL_SCHEME: protocol 'bun:'`.
-- 86 non-test source files in `opencc-src/` still import `bun:bundle`; a shim existed in commit `bfc44360` and was later deleted by a sync-from-opencc.
+- 86 non-test source files in `opencc-src/` still import `bun:bundle`; a shim existed in commit `bfc44360` and was later deleted by a re-sync.
 - 424 dangling `.js` imports exist (UI files stripped), but they only fire if a non-core tool's import path is exercised at runtime.
 
 **This spec** defines a Node/tsx-compatible adapter layer that actually calls `openccSrc.query()` and ships 6 wrapped core tools, replacing the Phase 1.b bypass.
@@ -24,12 +24,12 @@ The original Bun-only spec (`2026-07-29-zn-agent-core-opencc-adapter-design.md`)
 | Decision | Choice | Rationale |
 |----------|--------|-----------|
 | Runtime | **Node 22+ / tsx** (already deployed) | Reverts Bun requirement; matches recent pivot commits `a88ebff5` + `a441b0f8` |
-| bun: protocol handling | **Node loader hook** (not file rewrite) | Vendored code stays untouched; survives `pnpm copy-from-opencc` |
+| bun: protocol handling | **Node loader hook** (not file rewrite) | Vendored code stays untouched; survives upstream re-copies |
 | `openccSrc.query()` call site | **openccQueryBridge** (fills existing Phase 5 stub) | Bridge was scaffolded for this; no new entrypoint |
 | Stream translation | **sdkEventAdapter** (fills existing Phase 5 stub) | Same — SDKMessage → Anthropic primitives, then zai `translateRuntimeEvents` is unchanged |
 | Tool port scope | **6 core tools** (Bash, Read, Edit, Write, Agent, AskUserQuestion) | Same as path A; covers 80% of use cases |
 | Dangling .js imports | **Lazy stub on encounter** | Don't pre-stub 424 files; only stub paths the import chain actually reaches |
-| Vendored code | **Read-only** | `opencc-src/` never edited; sync-from-opencc stays safe |
+| Vendored code | **Read-only** | `opencc-src/` never edited; upstream re-syncs stay safe |
 
 ## Deprecation
 
@@ -166,14 +166,14 @@ zai dev script: tsx --import ./bun-protocol.mjs src/cli/index.ts dev
 
 Strategy: **lazy stub on first encounter**, not pre-stub 424 files.
 
-**What is "dangling" here**: a file `import './foo.js'` where the corresponding `foo.ts` is a `.tsx` UI component (e.g. `Spinner.tsx`) that was stripped by `copy-from-opencc.mjs` `STRIP_DIRS`. These are distinct from the `bun:` problem (handled by `bun-protocol.mjs`); they are ordinary file-not-found errors during Node ESM resolution.
+**What is "dangling" here**: a file `import './foo.js'` where the corresponding `foo.ts` is a `.tsx` UI component (e.g. `Spinner.tsx`) that was stripped by the vendoring strip list (`STRIP_DIRS`). These are distinct from the `bun:` problem (handled by `bun-protocol.mjs`); they are ordinary file-not-found errors during Node ESM resolution.
 
 **What works vs what doesn't**:
 - ✅ **UI-shaped modules** (React components, Ink components, TUI handlers) → `export default {}` is fine because opencc only touches them from renderer code paths that zai never reaches
 - ❌ **Core modules** (e.g. `services/api/withRetry.ts` which exports `FallbackTriggeredError`) → `export default {}` would crash opencc's `instanceof` / class checks. These must be hand-stubbed with the actual exports
 - ⚠️ **Mixed modules** (rare) — same as core; hand-stub
 
-**The 424 dangling imports from the Phase 3 grep are predominantly UI-shaped** (verified against `STRIP_DIRS` in `scripts/copy-from-opencc.mjs`). Core exports (the 4-5 that need real values) will be hand-stubbed in `compat/runtime/dangling-shims/` during implementation; see "Dangling .js pre-stub (hand-written)" in the implementation plan.
+**The 424 dangling imports from the Phase 3 grep are predominantly UI-shaped** (verified against `STRIP_DIRS` in the vendoring strip list). Core exports (the 4-5 that need real values) will be hand-stubbed in `compat/runtime/dangling-shims/` during implementation; see "Dangling .js pre-stub (hand-written)" in the implementation plan.
 
 **Mechanism (for UI-shaped modules):**
 1. Bridge first does `await import('opencc-src/query.js')` at the start of each `runViaOpenccQuery` call. The result is cached in module scope after first success.

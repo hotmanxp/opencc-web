@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - **文件边界:** 所有改动限于 `packages/zai-agent-core/src/tools/GrepTool/` + `vendor/ripgrep/` + `scripts/fetch-vendor-ripgrep.mjs` + `package.json`
-- **不动:** `opencc-internals/` 只读镜像、`sync-from-opencc.ts` 白名单、GrepTool 对外签名（`name`、`inputSchema`、`call(rawInput, ctx): Promise<{ output, isError? }>`）
+- **不动:** `opencc-internals/` 只读镜像、镜像白名单、GrepTool 对外签名（`name`、`inputSchema`、`call(rawInput, ctx): Promise<{ output, isError? }>`）
 - **依赖:** 不新增 npm 依赖；vendor 二进制从 OpenCC `/Users/liangxuechao572/code/opencc/vendor/ripgrep/` 直接 cp
 - **vendor 二进制:** 3 个 `rg-{platform}-{arch}{.exe}`（darwin-arm64/darwin-x64/win32-x64），进 git，约 11 MB
 - **超时:** 默认 20s（WSL 60s），`CLAUDE_CODE_GLOB_TIMEOUT_SECONDS` env 可配

@@ -22,7 +22,7 @@ OpenCC 的 `src/utils/ripgrep.ts` 镜像(`packages/zai-agent-core/src/opencc-int
 
 ## 1. 方案
 
-**内联增强 `GrepTool.ts`** — 把 OpenCC ripgrep.ts 的关键能力吸收进 `GrepTool.ts` 同文件内的 private helper, 不冒泡到 `src/utils/`、不动 `sync-from-opencc` 白名单。
+**内联增强 `GrepTool.ts`** — 把 OpenCC ripgrep.ts 的关键能力吸收进 `GrepTool.ts` 同文件内的 private helper, 不冒泡到 `src/utils/`、不动镜像白名单。
 
 ### 1.1 文件改动
 
@@ -36,7 +36,7 @@ OpenCC 的 `src/utils/ripgrep.ts` 镜像(`packages/zai-agent-core/src/opencc-int
 ### 1.2 不动
 
 - `packages/zai-agent-core/src/opencc-internals/`(只读镜像,保留)
-- `packages/zai-agent-core/scripts/sync-from-opencc.ts` 白名单(`utils/ripgrep.ts` 等保留)
+- 镜像白名单(`utils/ripgrep.ts` 等保留)
 - `packages/zai-agent-core/.gitignore`(`vendor/ripgrep/` 不进 ignore)
 - GrepTool 对外签名(`name`, `inputSchema`, `call(rawInput, ctx): Promise<{ output, isError? }>`, `isReadOnly`)
 
@@ -225,7 +225,7 @@ mock 框架: vitest `vi.mock('node:child_process')` + `vi.mocked(existsSync)`, �
 2. **包体增大** — 3 个 vendor 二进制约 11 MB, 影响 npm 包下载, zai-agent-core 仍发到 nexus internal registry, 内部网络不受影响。linux 用户需自备 system rg。
 3. **Windows 行为** — `execFile('where', ['rg'])` 在 Windows 上确实存在, 但 `spawn` 默认信号行为不同 → 使用 `windowsHide: true`, killSignal 用 `undefined`(同 OpenCC)。
 4. **Bun 不支持** — 不引入 `bun:bundle` 与 `Bun.spawn`, 与 zai 现有 Node + tsx runtime 保持一致。
-5. **同步脚本副作用** — 不动 `sync-from-opencc.ts` 白名单, 镜像中的 `utils/ripgrep.ts` 等保留作为参考, 但 zai-agent-core 运行时**不依赖**镜像。
+5. **同步脚本副作用** — 不动镜像白名单, 镜像中的 `utils/ripgrep.ts` 等保留作为参考, 但 zai-agent-core 运行时**不依赖**镜像。
 
 ## 11. 不做 (YAGNI)
 

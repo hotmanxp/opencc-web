@@ -1106,7 +1106,7 @@ test('abort: abort signal 透传到子 query', async () => {
 | **modelCaller 兼容性**（各家 SDK 流 delta 顺序不同）| RuntimeConfig 接受 `normalizeOutputStream` 回调, zai-server 注入把各家流归一到 Anthropic 形态（v1 不实现, 留字段） |
 | **transcript 并发**（proper-lockfile 跨进程不行）| zai-server 假设单进程多 session, 跨进程 zai 不支持（README 注明） |
 | **AGENTS.md 大文件** | loadAgentsMd 限制 1MB, 超大文件发 warning 跳过 |
-| **OpenCC 镜像漂移**（将来 sync-from-opencc 跑一次可能冲掉注释）| 镜像 README 加注: 'sub-agent + Bash 不在镜像范围' |
+| **OpenCC 镜像漂移**（将来同步 opencc 可能冲掉注释）| 镜像 README 加注: 'sub-agent + Bash 不在镜像范围' |
 
 ### 8.5 验收标准
 

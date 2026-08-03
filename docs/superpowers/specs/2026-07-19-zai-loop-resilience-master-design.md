@@ -224,11 +224,11 @@ packages/zai-agent-core/test/integration/agent/resilience/
 - 每个 Agent prompt = "读对应 sub-spec,按 contract 实现 + 写测试 + 自跑 verify gate"
 - 主 session 收齐 5 result 后再起集成 PR
 
-## 8. 与 OpenCC 上游 sync-from-opencc 的关系
+## 8. 与 OpenCC 上游同步的关系
 
 - 5 个新增子项目**不进 `opencc-internals/`**,仅放 `src/runtime/{errors,streaming,nudge,attachment,summary}/`(直接 zai 内部干净实现,不 vendor opencc)
 - `opencc-internals/foldTopLevelToolUses.ts` 等已 vendor 的不动
-- 下次 sync-from-opencc 同步上游 opencc 时,如果上游引入同能力,由 sync-from-opencc 维护者决定是否替换;**本次不强制**
+- 下次同步上游 opencc 时,如果上游引入同能力,由同步维护者决定是否替换;**本次不强制**
 
 ## 9. 风险与边界
 
