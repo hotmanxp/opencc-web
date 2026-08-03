@@ -85,7 +85,7 @@ function inputHash(): string {
   }
   // Bump this string when the bundle recipe (configCheckPatchRe,
   // plugins, externals) changes so old stamps are treated as stale.
-  h.update('recipe:v1\n')
+  h.update('recipe:v2\n')
   return h.digest('hex').slice(0, 16)
 }
 
