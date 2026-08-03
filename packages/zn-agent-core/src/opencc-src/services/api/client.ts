@@ -28,6 +28,7 @@ import { getOauthConfig } from '../../constants/oauth.js'
 import { isDebugToStdErr, logForDebugging } from '../../utils/debug.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import { importOptionalRuntimeModule } from '../../utils/optionalRuntimeModule.js'
+import { getModelRouteOverride } from '../../utils/providerProfiles.js'
 
 type OptionalRuntimeImporter = typeof importOptionalRuntimeModule
 
@@ -62,6 +63,7 @@ export async function getAnthropicClient({
   source,
   providerOverride,
   effortValue,
+  model,
 }: {
   apiKey?: string
   maxRetries: number
@@ -70,6 +72,7 @@ export async function getAnthropicClient({
   // @ts-ignore
   providerOverride?: ProviderOverride
   effortValue?: EffortValue
+  model?: string
 }): Promise<Anthropic> {
   // Convert the runtime effort value to the OpenAI-shaped enum the shim
   // expects. Undefined → shim falls back to descriptor/alias defaults.
@@ -107,8 +110,13 @@ export async function getAnthropicClient({
     defaultHeaders['x-anthropic-additional-protection'] = 'true'
   }
 
+  // Per-model route override (anthropic native path only): when the final
+  // model name matches a providerModelOverrides entry, use that entry's
+  // endpoint + credentials instead of the profile env defaults.
+  const routeOverride = model ? getModelRouteOverride(model) : undefined
+
   const shouldUseFirstPartyAuth =
-    shouldUseFirstPartyAnthropicAuth(providerOverride)
+    !routeOverride && shouldUseFirstPartyAnthropicAuth(providerOverride)
 
   if (shouldUseFirstPartyAuth) {
     logForDebugging('[API:auth] OAuth token check starting')
@@ -167,18 +175,24 @@ export async function getAnthropicClient({
   }
 
   // Determine authentication method based on available tokens
-  const resolvedApiKey = isClaudeAISubscriber() ? null : apiKey || getAnthropicApiKey()
+  const resolvedApiKey = isClaudeAISubscriber()
+    ? null
+    : routeOverride?.apiKey || apiKey || getAnthropicApiKey()
+
+  // baseURL: per-model override wins; else OAuth staging; else SDK default
+  // (reads ANTHROPIC_BASE_URL from env).
+  const baseURL = routeOverride?.baseUrl ?? (
+    process.env.USER_TYPE === 'ant' && isEnvTruthy(process.env.USE_STAGING_OAUTH)
+      ? getOauthConfig().BASE_API_URL
+      : undefined
+  )
 
   const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
     apiKey: resolvedApiKey,
     authToken: isClaudeAISubscriber()
       ? getClaudeAIOAuthTokens()?.accessToken
-      : undefined,
-    // Set baseURL from OAuth config when using staging OAuth
-    ...(process.env.USER_TYPE === 'ant' &&
-    isEnvTruthy(process.env.USE_STAGING_OAUTH)
-      ? { baseURL: getOauthConfig().BASE_API_URL }
-      : {}),
+      : routeOverride?.authToken ?? undefined,
+    ...(baseURL ? { baseURL } : {}),
     ...ARGS,
     ...(isDebugToStdErr() && { logger: createStderrLogger() }),
   }
