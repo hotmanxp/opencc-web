@@ -2,12 +2,15 @@ import { useEffect, useState } from 'react'
 import {
   Button,
   Card,
+  Col,
+  Descriptions,
+  Empty,
   Form,
   Input,
   Modal,
   Popconfirm,
+  Row,
   Space,
-  Table,
   Tag,
   Typography,
   message,
@@ -84,82 +87,60 @@ export default function Instances(): JSX.Element {
     void loadInstances()
   }
 
-  const columns = [
-    { title: '名称', dataIndex: 'name', key: 'name' },
-    {
-      title: '状态',
-      key: 'state',
-      render: (_: unknown, row: InstanceSnapshot) => (
-        <Space>
-          <Tag color={STATE_TAG_COLOR[row.state]}>{stateLabel(row.state)}</Tag>
-          {row.isCurrent && <Tag>当前</Tag>}
-          {row.lastError && <Tag color="red">{row.lastError.message}</Tag>}
-        </Space>
-      ),
-    },
-    { title: '端口', dataIndex: 'port', key: 'port', render: (v: number | null) => v ?? '-' },
-    { title: 'cwd', dataIndex: 'cwd', key: 'cwd' },
-    { title: 'pid', dataIndex: 'pid', key: 'pid', render: (v: number | null) => v ?? '-' },
-    { title: '最后心跳', dataIndex: 'lastHeartbeatAt', key: 'lastHeartbeatAt', render: relativeAgo },
-    {
-      title: '操作',
-      key: 'actions',
-      render: (_: unknown, row: InstanceSnapshot) => {
-        const canStart = !row.isCurrent && (row.state === 'stopped' || row.state === 'down')
-        const canStop = !row.isCurrent && (row.state === 'running' || row.state === 'starting')
-        const canRestart = !row.isCurrent && row.state === 'running'
-        const canDelete = !row.isCurrent
-        return (
-          <Space>
-            <Button
-              size="small"
-              icon={<PlayCircleOutlined />}
-              disabled={!canStart}
-              onClick={() => void act('POST', row.id, 'start')}
-            >
-              启动
-            </Button>
-            <Button
-              size="small"
-              icon={<StopOutlined />}
-              disabled={!canStop}
-              onClick={() => void act('POST', row.id, 'stop')}
-            >
-              停止
-            </Button>
-            <Button
-              size="small"
-              icon={<ReloadOutlined />}
-              disabled={!canRestart}
-              onClick={() => void act('POST', row.id, 'restart')}
-            >
-              重启
-            </Button>
-            <Popconfirm
-              title="确定删除该实例定义？"
-              description="如果实例正在运行，会先停止。"
-              onConfirm={() => void act('DELETE', row.id)}
-            >
-              <Button size="small" danger icon={<DeleteOutlined />} disabled={!canDelete}>
-                删除
-              </Button>
-            </Popconfirm>
-            {row.port != null && !row.isCurrent && (
-              <Button
-                size="small"
-                icon={<ExportOutlined />}
-                href={`http://localhost:${row.port}`}
-                target="_blank"
-                rel="noreferrer"
-              >
-                打开
-              </Button>
-            )}
-          </Space>
-        )
-      },
-    },
-  ]
+  function renderActions(row: InstanceSnapshot): JSX.Element {
+    const canStart = !row.isCurrent && (row.state === 'stopped' || row.state === 'down')
+    const canStop = !row.isCurrent && (row.state === 'running' || row.state === 'starting')
+    const canRestart = !row.isCurrent && row.state === 'running'
+    const canDelete = !row.isCurrent
+    return (
+      <Space wrap>
+        <Button
+          size="small"
+          icon={<PlayCircleOutlined />}
+          disabled={!canStart}
+          onClick={() => void act('POST', row.id, 'start')}
+        >
+          启动
+        </Button>
+        <Button
+          size="small"
+          icon={<StopOutlined />}
+          disabled={!canStop}
+          onClick={() => void act('POST', row.id, 'stop')}
+        >
+          停止
+        </Button>
+        <Button
+          size="small"
+          icon={<ReloadOutlined />}
+          disabled={!canRestart}
+          onClick={() => void act('POST', row.id, 'restart')}
+        >
+          重启
+        </Button>
+        <Popconfirm
+          title="确定删除该实例定义？"
+          description="如果实例正在运行，会先停止。"
+          onConfirm={() => void act('DELETE', row.id)}
+        >
+          <Button size="small" danger icon={<DeleteOutlined />} disabled={!canDelete}>
+            删除
+          </Button>
+        </Popconfirm>
+        {row.port != null && !row.isCurrent && (
+          <Button
+            size="small"
+            icon={<ExportOutlined />}
+            href={`http://localhost:${row.port}`}
+            target="_blank"
+            rel="noreferrer"
+          >
+            打开
+          </Button>
+        )}
+      </Space>
+    )
+  }
 
   return (
     <Card
@@ -171,13 +152,38 @@ export default function Instances(): JSX.Element {
       }
       style={{ margin: 24 }}
     >
-      <Table<InstanceSnapshot>
-        rowKey="id"
-        loading={loading}
-        dataSource={instances}
-        columns={columns}
-        pagination={false}
-      />
+      <Row gutter={[16, 16]}>
+        {loading && instances.length === 0 ? (
+          <Col xs={24} md={12} lg={8}><Card loading /></Col>
+        ) : instances.length === 0 ? (
+          <Col span={24}><Empty description="暂无实例" /></Col>
+        ) : instances.map((inst) => (
+          <Col key={inst.id} xs={24} md={12} lg={8}>
+            <Card
+              title={
+                <Space>
+                  {inst.name}
+                  {inst.isCurrent && <Tag color="blue">当前</Tag>}
+                </Space>
+              }
+              extra={<Tag color={STATE_TAG_COLOR[inst.state]}>{stateLabel(inst.state)}</Tag>}
+            >
+              <Descriptions size="small" column={1}>
+                <Descriptions.Item label="端口">{inst.port ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="cwd">{inst.cwd}</Descriptions.Item>
+                <Descriptions.Item label="pid">{inst.pid ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="最后心跳">{relativeAgo(inst.lastHeartbeatAt)}</Descriptions.Item>
+                {inst.lastError ? (
+                  <Descriptions.Item label="错误">
+                    <Tag color="red">{inst.lastError.message}</Tag>
+                  </Descriptions.Item>
+                ) : null}
+              </Descriptions>
+              <div style={{ marginTop: 12 }}>{renderActions(inst)}</div>
+            </Card>
+          </Col>
+        ))}
+      </Row>
       <Modal
         title="新建实例"
         open={open}
