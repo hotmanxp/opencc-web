@@ -30,7 +30,7 @@
  *     runs the agent loop and streams SDKMessages; costs are computed
  *     post-hoc for analytics.
  *   - If zai ever needs real cost data, delete this stub and patch
- *     the cycle at vendoring time (see copy-from-opencc.ts).
+ *     the cycle at vendoring time.
  *
  * Wired via vitest.config.ts + bun-protocol.mjs aliases:
  *   { find: /opencc-src\/utils\/modelCost(\.ts|\.js)?$/,

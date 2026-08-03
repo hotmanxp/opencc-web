@@ -1,7 +1,8 @@
 /**
- * Hand-stub for opencc-src directories that copy-from-opencc strips
- * (see strip-list.ts: components, ink, state, memdir, coordinator,
- * integrations, services/autoDream, services/autoFix, etc.).
+ * Hand-stub for opencc-src directories that the vendoring strip list
+ * removes (see scripts/strip-list.ts: components, ink, state, memdir,
+ * coordinator, integrations, services/autoDream, services/autoFix,
+ * etc.).
  *
  * Most of these are runtime dead code in zai:
  *   - memdir:    opencc's memory directory system (zai has its own)
@@ -10,8 +11,7 @@
  *   - ink:       opencc's CLI TUI primitives (zai has React web UI)
  *   - components, screens, buddy, vim, voice, etc.: CLI/UI surfaces
  *
- * The strip list is applied at vendoring time (see
- * packages/zn-agent-core/scripts/copy-from-opencc.ts), but opencc's
+ * The strip list is applied at vendoring time, but opencc's
  * transitive imports still reference these stripped paths as
  * "zombie" imports. This file's exports satisfy every name the hot
  * opencc runtime path actually reads, so the bridge can reach
