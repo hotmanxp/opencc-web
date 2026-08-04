@@ -7,6 +7,7 @@ import cliRouter from './routes/cli.js';
 import dirsRouter from './routes/dirs.js';
 import gitRouter from './routes/git.js';
 import fsRouter from './routes/fs.js';
+import fsPickerRouter from './routes/fsPicker.js';
 import loginRouter from './routes/login.js';
 import configRouter from './routes/config.js';
 import resourcesRouter from './routes/resources.js';
@@ -113,6 +114,9 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   app.use('/api', dirsRouter);
   app.use('/api', gitRouter);
   app.use('/api', fsRouter);
+  // /fs/picker — 通用目录选择器,默认起点为用户 home;不受 instance cwd
+  // 限制(zai 只监听 localhost,等同于本机 ls 暴露面,见 routes/fsPicker.ts 头注)。
+  app.use('/api', fsPickerRouter);
   app.use('/api', loginRouter);
   app.use('/api', configRouter);
   app.use('/api', resourcesRouter);

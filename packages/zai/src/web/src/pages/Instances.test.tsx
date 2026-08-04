@@ -81,7 +81,7 @@ describe('Instances page', () => {
     render(<MemoryRouter><Instances /></MemoryRouter>)
     fireEvent.click(screen.getByText('新建实例'))
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'demo' } })
-    fireEvent.change(screen.getByLabelText('工作目录'), { target: { value: '/tmp/demo' } })
+    fireEvent.change(screen.getByTestId('cwd-input'), { target: { value: '/tmp/demo' } })
     fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }))
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
@@ -120,7 +120,7 @@ describe('Instances page', () => {
     render(<MemoryRouter><Instances /></MemoryRouter>)
     fireEvent.click(screen.getByText('新建实例'))
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'demo' } })
-    fireEvent.change(screen.getByLabelText('工作目录'), { target: { value: '/tmp/demo' } })
+    fireEvent.change(screen.getByTestId('cwd-input'), { target: { value: '/tmp/demo' } })
     fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }))
 
     await waitFor(() => {
@@ -164,7 +164,7 @@ describe('Instances page', () => {
     render(<MemoryRouter><Instances /></MemoryRouter>)
     fireEvent.click(screen.getByText('新建实例'))
     fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'demo' } })
-    fireEvent.change(screen.getByLabelText('工作目录'), { target: { value: '/tmp/demo' } })
+    fireEvent.change(screen.getByTestId('cwd-input'), { target: { value: '/tmp/demo' } })
     fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }))
 
     await waitFor(() => {
