@@ -406,7 +406,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                     style={{
                       width: 16,
                       color: isSelected
-                        ? 'rgb(99, 226, 183)'
+                        ? 'var(--accent-start)'
                         : 'transparent',
                       fontWeight: 'bold',
                     }}
@@ -531,10 +531,10 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                   style={{
                     padding: '6px 16px',
                     background: isHighlight
-                      ? 'rgba(99, 226, 183, 0.15)'
+                      ? 'rgba(249, 115, 22, 0.15)'
                       : 'transparent',
                     color: isHighlight
-                      ? 'rgb(99, 226, 183)'
+                      ? 'var(--accent-start)'
                       : 'var(--ui-text-color)',
                     cursor: 'pointer',
                   }}
