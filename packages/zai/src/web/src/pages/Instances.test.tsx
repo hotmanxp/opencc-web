@@ -47,6 +47,13 @@ const running: InstanceSnapshot = {
   startedAt: '2026-08-04T00:00:00.000Z',
 }
 
+const lan: InstanceSnapshot = {
+  ...demo,
+  id: 'inst_lan',
+  name: 'lan-demo',
+  lan: true,
+}
+
 describe('Instances page', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"instances":[]}', { status: 200 })))
@@ -169,6 +176,112 @@ describe('Instances page', () => {
 
     await waitFor(() => {
       expect(popup.close).toHaveBeenCalled()
+    })
+  })
+
+  it('renders a LAN switch on each non-current card with the persisted flag reflected', () => {
+    seed([current, demo, lan])
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+    // antd Switch renders a `button[role=switch]` with `aria-checked`.
+    // demo has no lan → switch unchecked.
+    const demoSwitch = screen.getByTestId('lan-switch-inst_1') as HTMLElement
+    expect(demoSwitch.getAttribute('aria-checked')).toBe('false')
+    // lan has lan=true → switch checked.
+    const lanSwitch = screen.getByTestId('lan-switch-inst_lan') as HTMLElement
+    expect(lanSwitch.getAttribute('aria-checked')).toBe('true')
+    // current row never shows the switch.
+    expect(screen.queryByTestId('lan-switch-__current__')).not.toBeInTheDocument()
+  })
+
+  it('PATCH /api/instances/:id with {lan:true} when the LAN switch is toggled on', async () => {
+    seed([current, demo])
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/instances/inst_1' && init?.method === 'PATCH') {
+        const body = JSON.parse(init.body as string) as { lan: boolean }
+        return new Response(
+          JSON.stringify({ instance: { ...demo, lan: body.lan } }),
+          { status: 200, headers: { 'Content-Type': 'application/json' } },
+        )
+      }
+      return new Response('{"instances":[]}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+    fireEvent.click(screen.getByTestId('lan-switch-inst_1'))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/instances/inst_1',
+        expect.objectContaining({
+          method: 'PATCH',
+          body: JSON.stringify({ lan: true }),
+        }),
+      )
+    })
+  })
+
+  it('rolls back the LAN switch when PATCH fails', async () => {
+    seed([current, lan])
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/instances/inst_lan' && init?.method === 'PATCH') {
+        return new Response(JSON.stringify({ error: 'nope' }), {
+          status: 500,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response('{"instances":[]}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+    const sw = screen.getByTestId('lan-switch-inst_lan') as HTMLElement
+    expect(sw.getAttribute('aria-checked')).toBe('true')
+    fireEvent.click(sw) // optimistic flip to false
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/instances/inst_lan',
+        expect.objectContaining({ method: 'PATCH' }),
+      )
+    })
+    // After rollback, the switch must reflect the original (true) state.
+    await waitFor(() => {
+      expect((screen.getByTestId('lan-switch-inst_lan') as HTMLElement).getAttribute('aria-checked')).toBe('true')
+    })
+  })
+
+  it('submits lan=true in POST body when the new-instance modal checkbox is ticked', async () => {
+    seed([])
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/instances' && init?.method === 'POST') {
+        return new Response(JSON.stringify({ instance: { ...demo, lan: true } }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response('{"instances":[]}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    vi.spyOn(window, 'open').mockReturnValue({ closed: false, location: { href: '' }, close: vi.fn() } as unknown as Window)
+
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+    fireEvent.click(screen.getByText('新建实例'))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'demo' } })
+    fireEvent.change(screen.getByTestId('cwd-input'), { target: { value: '/tmp/demo' } })
+    // Tick the LAN checkbox. Antd renders a real <input type="checkbox">
+    // inside Form.Item; we click it to toggle, then assert the body.
+    const checkbox = screen.getByTestId('lan-checkbox').querySelector('input[type="checkbox"]') as HTMLInputElement
+    fireEvent.click(checkbox)
+    fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }))
+
+    await waitFor(() => {
+      expect(fetchMock).toHaveBeenCalledWith(
+        '/api/instances',
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ name: 'demo', cwd: '/tmp/demo', lan: true }),
+        }),
+      )
     })
   })
 })

@@ -3,6 +3,7 @@ import {
   Alert,
   Button,
   Card,
+  Checkbox,
   Col,
   Descriptions,
   Empty,
@@ -13,7 +14,9 @@ import {
   Row,
   Space,
   Spin,
+  Switch,
   Tag,
+  Tooltip,
   Typography,
   message,
 } from 'antd'
@@ -271,8 +274,13 @@ export default function Instances(): JSX.Element {
   const { instances, loading, loadInstances, applyInstanceSnapshot } = useInstanceStore()
   const [open, setOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
-  const [form] = Form.useForm<{ name: string; cwd: string }>()
-  const currentCwd = instances.find((s) => s.isCurrent)?.cwd ?? ''
+  const [lanBusyId, setLanBusyId] = useState<string | null>(null)
+  const [form] = Form.useForm<{ name: string; cwd: string; lan?: boolean }>()
+  // Defensive: zustand guarantees an array, but a stray `undefined`
+  // entry would still blow up `find` downstream. Filter so render
+  // stays robust against partial hydration glitches.
+  const safeInstances = instances.filter((s): s is InstanceSnapshot => s != null)
+  const currentCwd = safeInstances.find((s) => s.isCurrent)?.cwd ?? ''
 
   useEffect(() => {
     void loadInstances()
@@ -288,6 +296,39 @@ export default function Instances(): JSX.Element {
     void loadInstances()
   }
 
+  // Toggle the persisted `lan` flag on a definition. Optimistic update
+  // — flip the snapshot locally first so the Switch animates without
+  // waiting for the round trip, then PATCH the server and roll back on
+  // failure. The optimistic mutation uses `applyInstanceSnapshot` so
+  // the zustand store stays the single source of truth.
+  async function setLan(id: string, lan: boolean): Promise<void> {
+    const before = instances.find((s) => s.id === id)
+    if (!before) return
+    const optimistic: InstanceSnapshot = { ...before, lan }
+    applyInstanceSnapshot(optimistic)
+    setLanBusyId(id)
+    try {
+      const res = await fetch(`/api/instances/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ lan }),
+      })
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        applyInstanceSnapshot(before)
+        message.error(data.error ?? '切换 LAN 失败')
+      } else {
+        const data = (await res.json()) as { instance: InstanceSnapshot }
+        applyInstanceSnapshot(data.instance)
+      }
+    } catch (err) {
+      applyInstanceSnapshot(before)
+      message.error(err instanceof Error ? err.message : '切换 LAN 失败')
+    } finally {
+      setLanBusyId(null)
+    }
+  }
+
   async function onCreate(): Promise<void> {
     const popup = window.open('about:blank', '_blank', 'noopener,noreferrer')
     try {
@@ -295,7 +336,7 @@ export default function Instances(): JSX.Element {
       const res = await fetch('/api/instances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(values),
+        body: JSON.stringify({ ...values, lan: values.lan === true }),
       })
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -306,7 +347,10 @@ export default function Instances(): JSX.Element {
       form.resetFields()
       void loadInstances()
       const started = await waitForRunningInstance(data.instance.id, applyInstanceSnapshot)
-      const url = `http://localhost:${started.port}`
+      // LAN instances also listen on 127.0.0.1 (they bind 0.0.0.0 which
+      // covers both), so `localhost:<port>` is always reachable from
+      // the browser that just opened the popup.
+      const url = started.port != null ? `http://localhost:${started.port}` : 'about:blank'
       if (popup && !popup.closed) popup.location.href = url
     } catch (err) {
       if (popup && !popup.closed) popup.close()
@@ -369,6 +413,31 @@ export default function Instances(): JSX.Element {
     )
   }
 
+  function renderLanToggle(row: InstanceSnapshot): JSX.Element | null {
+    if (row.isCurrent) return null
+    const lan = row.lan === true
+    const busy = lanBusyId === row.id
+    return (
+      <Tooltip
+        title={lan ? 'LAN 模式:该实例会以 --lan 启动并监听 0.0.0.0' : '仅本机访问 (127.0.0.1)。开启后下次启动会以 --lan 启动'}
+      >
+        <Space size={8}>
+          <span style={{ color: 'var(--text-dim-65)', fontSize: 12 }}>LAN</span>
+          <Switch
+            size="small"
+            checked={lan}
+            disabled={busy}
+            loading={busy}
+            aria-label="LAN 启动"
+            data-testid={`lan-switch-${row.id}`}
+            onChange={(next) => void setLan(row.id, next)}
+          />
+          {lan ? <Tag color="cyan" style={{ marginInlineEnd: 0 }}>--lan</Tag> : null}
+        </Space>
+      </Tooltip>
+    )
+  }
+
   return (
     <Card
       title={<Typography.Title level={4} style={{ margin: 0 }}>实例管理</Typography.Title>}
@@ -380,11 +449,11 @@ export default function Instances(): JSX.Element {
       style={{ margin: 24 }}
     >
       <Row gutter={[16, 16]}>
-        {loading && instances.length === 0 ? (
+        {loading && safeInstances.length === 0 ? (
           <Col xs={24} md={12} lg={8}><Card loading /></Col>
-        ) : instances.length === 0 ? (
+        ) : safeInstances.length === 0 ? (
           <Col span={24}><Empty description="暂无实例" /></Col>
-        ) : instances.map((inst) => (
+        ) : safeInstances.map((inst) => (
           <Col key={inst.id} xs={24} md={12} lg={8}>
             <Card
               title={
@@ -393,7 +462,12 @@ export default function Instances(): JSX.Element {
                   {inst.isCurrent && <Tag color="blue">当前</Tag>}
                 </Space>
               }
-              extra={<Tag color={STATE_TAG_COLOR[inst.state]}>{stateLabel(inst.state)}</Tag>}
+              extra={
+                <Space size={8} align="center">
+                  {renderLanToggle(inst)}
+                  <Tag color={STATE_TAG_COLOR[inst.state]}>{stateLabel(inst.state)}</Tag>
+                </Space>
+              }
             >
               <Descriptions size="small" column={1}>
                 <Descriptions.Item label="端口">{inst.port ?? '-'}</Descriptions.Item>
@@ -419,7 +493,7 @@ export default function Instances(): JSX.Element {
         okText="创建"
         cancelText="取消"
       >
-        <Form form={form} layout="vertical" initialValues={{ cwd: currentCwd }}>
+        <Form form={form} layout="vertical" initialValues={{ cwd: currentCwd, lan: false }}>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
             <Input placeholder="例如 demo" />
           </Form.Item>
@@ -455,6 +529,16 @@ export default function Instances(): JSX.Element {
                 浏览
               </Button>
             </div>
+          </Form.Item>
+          <Form.Item
+            name="lan"
+            valuePropName="checked"
+            // Tooltip wraps the field so the Switch inherits the same
+            // keyboard-focusable surface as the rest of the form.
+            tooltip="勾选后,该实例会以 --lan 启动,监听 0.0.0.0,局域网其他设备可访问"
+            data-testid="lan-checkbox"
+          >
+            <Checkbox>LAN 模式启动 (--lan)</Checkbox>
           </Form.Item>
         </Form>
       </Modal>

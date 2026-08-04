@@ -26,6 +26,10 @@ function handleError(res: import('express').Response, err: unknown): void {
     res.status(409).json({ error: err instanceof Error ? err.message : 'duplicate' })
     return
   }
+  if (code === 'INVALID_STATE') {
+    badRequest(res, err instanceof Error ? err.message : 'invalid state')
+    return
+  }
   res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
 }
 
@@ -40,14 +44,19 @@ router.get('/instances/:id', (req, res) => {
 })
 
 router.post('/instances', async (req, res) => {
-  const { name, cwd } = (req.body ?? {}) as { name?: unknown; cwd?: unknown }
+  const { name, cwd, lan } = (req.body ?? {}) as { name?: unknown; cwd?: unknown; lan?: unknown }
   if (typeof name !== 'string' || name.trim() === '') return badRequest(res, 'name is required')
   if (typeof cwd !== 'string' || cwd.trim() === '') return badRequest(res, 'cwd is required')
   if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
     return badRequest(res, 'cwd must be an existing directory')
   }
+  // `lan` is optional. Anything truthy → true, anything else (incl. undefined)
+  // → false. We don't reject `null`/string here because the form-control
+  // wire shape is a plain boolean — defensive normalisation keeps the
+  // contract narrow without surprising the UI with a 400.
+  if (lan !== undefined && typeof lan !== 'boolean') return badRequest(res, 'lan must be a boolean')
   try {
-    const instance = await getInstanceSupervisor().createInstance({ name: name.trim(), cwd })
+    const instance = await getInstanceSupervisor().createInstance({ name: name.trim(), cwd, lan: lan === true })
     res.status(201).json({ instance })
   } catch (err) {
     handleError(res, err)
@@ -56,8 +65,13 @@ router.post('/instances', async (req, res) => {
 
 router.post('/instances/:id/start', async (req, res) => {
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot start current instance')
+  const { lan } = (req.body ?? {}) as { lan?: unknown }
+  if (lan !== undefined && typeof lan !== 'boolean') return badRequest(res, 'lan must be a boolean')
   try {
-    const instance = await getInstanceSupervisor().startInstance(req.params.id)
+    // Per-call `lan` overrides the persisted `def.lan` so the UI can
+    // "start this one with --lan just this once" without rewriting the
+    // definition. `undefined` means "use the persisted value".
+    const instance = await getInstanceSupervisor().startInstance(req.params.id, lan !== undefined ? { lan: lan === true } : undefined)
     res.json({ instance })
   } catch (err) {
     handleError(res, err)
@@ -76,8 +90,22 @@ router.post('/instances/:id/stop', async (req, res) => {
 
 router.post('/instances/:id/restart', async (req, res) => {
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot restart current instance')
+  const { lan } = (req.body ?? {}) as { lan?: unknown }
+  if (lan !== undefined && typeof lan !== 'boolean') return badRequest(res, 'lan must be a boolean')
   try {
-    const instance = await getInstanceSupervisor().restartInstance(req.params.id)
+    const instance = await getInstanceSupervisor().restartInstance(req.params.id, lan !== undefined ? { lan: lan === true } : undefined)
+    res.json({ instance })
+  } catch (err) {
+    handleError(res, err)
+  }
+})
+
+router.patch('/instances/:id', async (req, res) => {
+  if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot patch current instance')
+  const patch = (req.body ?? {}) as { lan?: unknown }
+  if (patch.lan !== undefined && typeof patch.lan !== 'boolean') return badRequest(res, 'lan must be a boolean')
+  try {
+    const instance = await getInstanceSupervisor().updateInstance(req.params.id, { lan: patch.lan === true })
     res.json({ instance })
   } catch (err) {
     handleError(res, err)

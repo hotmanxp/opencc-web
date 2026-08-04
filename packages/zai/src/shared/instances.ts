@@ -16,6 +16,13 @@ export interface InstanceDefinition {
   name: string
   cwd: string
   createdAt: string
+  /**
+   * When `true`, the supervisor spawns the child with `--lan` so the
+   * instance binds `0.0.0.0` and is reachable from other devices on the
+   * LAN. Defaults to `false` (loopback only) — opt-in per-instance so a
+   * dev's notebook doesn't accidentally expose unrelated workspaces.
+   */
+  lan?: boolean
 }
 
 export interface InstanceStatus {

@@ -56,11 +56,17 @@ type Entry = { def: InstanceDefinition; status: InstanceStatus; child: ChildProc
 
 export interface InstanceSupervisor {
   getSnapshots: () => InstanceSnapshot[]
-  createInstance: (input: { name: string; cwd: string }) => Promise<InstanceSnapshot>
-  startInstance: (id: string) => Promise<InstanceSnapshot>
+  createInstance: (input: { name: string; cwd: string; lan?: boolean }) => Promise<InstanceSnapshot>
+  startInstance: (id: string, opts?: { lan?: boolean }) => Promise<InstanceSnapshot>
   stopInstance: (id: string) => Promise<InstanceSnapshot>
-  restartInstance: (id: string) => Promise<InstanceSnapshot>
+  restartInstance: (id: string, opts?: { lan?: boolean }) => Promise<InstanceSnapshot>
   removeInstance: (id: string) => Promise<void>
+  /**
+   * Patch a definition field (`lan` only, for now). The supervisor only
+   * exposes the bare `lan` knob — other fields (cwd/name) require a
+   * remove + recreate so we don't surprise the user with silent rewrites.
+   */
+  updateInstance: (id: string, patch: { lan?: boolean }) => Promise<InstanceSnapshot>
   shutdown: () => Promise<void>
 }
 
@@ -184,7 +190,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       })
     }
 
-    const doStart = async (id: string) => {
+    const doStart = async (id: string, opts?: { lan?: boolean }) => {
       const entry = getEntry(id)
       if (entry.status.state === 'starting' || entry.status.state === 'running') return snapshotOf(entry)
       setStatus(entry, { state: 'starting', lastError: null })
@@ -193,9 +199,16 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
 
       try {
         const port = await deps.probePort(INSTANCE_BASE_PORT)
+        // `opts.lan` (per-call override from /start) wins over the
+        // persisted `def.lan`. Default is loopback — opting in to LAN
+        // exposure must be deliberate so a dev's machine doesn't leak
+        // workspaces they didn't intend to share.
+        const useLan = opts?.lan ?? entry.def.lan ?? false
+        const args: string[] = [cliEntry, 'start', '--managed-child', '--port', String(port), '--no-open']
+        if (useLan) args.push('--lan')
         const child = deps.spawn(
           process.execPath,
-          [cliEntry, 'start', '--managed-child', '--port', String(port), '--no-open'],
+          args,
           {
             cwd: entry.def.cwd,
             stdio: ['ipc', 'inherit', 'inherit'],
@@ -284,19 +297,33 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       // assertions can observe the latest persisted snapshot deterministically.
       // Production callers should never invoke this.
       __flushPendingWrites: async () => { await writeChain },
-      async createInstance({ name, cwd }: { name: string; cwd: string }) {
+      async createInstance({ name, cwd, lan }: { name: string; cwd: string; lan?: boolean }) {
         const trimmed = name.trim(); for (const entry of entries.values()) if (entry.def.name === trimmed) throw new InstanceSupervisorError('DUPLICATE_NAME', `duplicate name: ${trimmed}`)
-        const def: InstanceDefinition = { id: `inst_${randomUUID().slice(0, 8)}`, name: trimmed, cwd, createdAt: new Date(deps.now()).toISOString() }
+        const def: InstanceDefinition = { id: `inst_${randomUUID().slice(0, 8)}`, name: trimmed, cwd, createdAt: new Date(deps.now()).toISOString(), lan: lan === true }
         const entry: Entry = { def, status: { ...EMPTY_INSTANCE_STATUS }, child: null, childState: null }
         entries.set(def.id, entry)
         await persist()
         emit(def.id, entry.status)
         return doStart(def.id)
       },
-      startInstance: async (id: string) => { ensureNotCurrent(id); return doStart(id) },
+      startInstance: async (id: string, opts?: { lan?: boolean }) => { ensureNotCurrent(id); return doStart(id, opts) },
       stopInstance: async (id: string) => { ensureNotCurrent(id); return doStop(id) },
-      restartInstance: async (id: string) => { ensureNotCurrent(id); await doStop(id); return doStart(id) },
+      restartInstance: async (id: string, opts?: { lan?: boolean }) => { ensureNotCurrent(id); await doStop(id); return doStart(id, opts) },
       removeInstance: async (id: string) => doRemove(id),
+      async updateInstance(id: string, patch: { lan?: boolean }) {
+        ensureNotCurrent(id)
+        const entry = getEntry(id)
+        // Refuse unknown fields explicitly so a typo in the API caller
+        // doesn't silently no-op. Today only `lan` is patchable; adding
+        // new fields here forces the same type narrowing.
+        const next: Partial<InstanceDefinition> = {}
+        if (patch.lan !== undefined) next.lan = patch.lan === true
+        if (Object.keys(next).length === 0) throw new InstanceSupervisorError('INVALID_STATE', 'no patchable fields supplied')
+        entry.def = { ...entry.def, ...next }
+        await persist()
+        emit(id, entry.status)
+        return snapshotOf(entry)
+      },
       async shutdown() {
         // Snapshot the child references first. The supervisor may receive
         // exit events mid-shutdown; we must continue to wait for each

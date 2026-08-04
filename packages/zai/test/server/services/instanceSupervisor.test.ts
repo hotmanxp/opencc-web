@@ -35,12 +35,14 @@ function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['
   let probeStart = 9201
   const fakeChildren: FakeChild[] = []
   const spawnOptions: SpawnOptions[] = []
+  const spawnArgs: string[][] = []
   const deps: Deps = {
     now: () => time,
     sleep: () => Promise.resolve(),
     emit: extra?.emit ?? ((e) => { events.push(e) }),
-    spawn: (_cmd, _args, opts) => {
+    spawn: (_cmd, args, opts) => {
       spawnOptions.push(opts)
+      spawnArgs.push(args)
       const c = new FakeChild()
       fakeChildren.push(c)
       return c as unknown as FakeChild
@@ -52,7 +54,7 @@ function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['
     writeFile: extra?.onWriteFile ?? (async (w) => { writes.push(w) }),
     readFile: extra?.readFile,
   }
-  return { events, writes, deps, fakeChildren, spawnOptions, advance: (t: number) => { time = t }, setProbe: (n: number) => { probeStart = n } }
+  return { events, writes, deps, fakeChildren, spawnOptions, spawnArgs, advance: (t: number) => { time = t }, setProbe: (n: number) => { probeStart = n } }
 }
 
 async function initSup(deps: Deps, cwd = '/tmp/current', dataDir = '/tmp/x') {
@@ -204,6 +206,100 @@ describe('instanceSupervisor (4a — state machine)', () => {
     const { deps } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)
     await expect(getInstanceSupervisor().startInstance('inst_missing')).rejects.toMatchObject({ code: 'NOT_FOUND' })
+  })
+
+  it('createInstance with lan=true passes --lan to the spawned child', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', lan: true })
+    expect(snap.lan).toBe(true)
+    expect(fakeChildren).toHaveLength(1)
+    expect(spawnArgs[0]).toContain('--lan')
+  })
+
+  it('startInstance without lan arg uses persisted def.lan (no override → def wins)', async () => {
+    // Per-call `lan` is an override, not a requirement. When the
+    // caller omits the override, the persisted def.lan decides.
+    // createInstance already auto-spawns with lan=true; after a
+    // stop + start-with-no-args, the second spawn must keep
+    // --lan because the def still says true.
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', lan: true })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(fakeChildren).toHaveLength(2)
+    expect(spawnArgs[0]).toContain('--lan')
+    expect(spawnArgs[1]).toContain('--lan')
+  })
+
+  it('startInstance with lan:false override strips --lan from persisted lan=true', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', lan: true })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    // Override to false → no --lan on the new spawn even though the
+    // persisted def says true.
+    await getInstanceSupervisor().restartInstance(snap.id, { lan: false })
+    expect(fakeChildren).toHaveLength(2)
+    expect(spawnArgs[0]).toContain('--lan')
+    expect(spawnArgs[1]).not.toContain('--lan')
+  })
+
+  it('startInstance with lan:true override adds --lan even when def.lan is false', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id, { lan: true })
+    expect(fakeChildren).toHaveLength(2)
+    expect(spawnArgs[0]).not.toContain('--lan')
+    expect(spawnArgs[1]).toContain('--lan')
+  })
+
+  it('updateInstance({lan:true}) persists, restartInstance uses it without an override', async () => {
+    // End-to-end: PATCH-style updateInstance flips def.lan, and the
+    // very next restart picks up the new value. This is the path the
+    // UI exercises when the user toggles the LAN switch.
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    await getInstanceSupervisor().updateInstance(snap.id, { lan: true })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(fakeChildren).toHaveLength(2)
+    expect(spawnArgs[0]).not.toContain('--lan')
+    expect(spawnArgs[1]).toContain('--lan')
+  })
+
+  it('updateInstance toggles lan on the snapshot and is observable via getSnapshots', async () => {
+    const { deps } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    expect(snap.lan).toBeFalsy()
+    const patched = await getInstanceSupervisor().updateInstance(snap.id, { lan: true })
+    expect(patched.lan).toBe(true)
+    const fromSnap = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)
+    expect(fromSnap?.lan).toBe(true)
+  })
+
+  it('updateInstance refuses an empty patch with code INVALID_STATE', async () => {
+    const { deps } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await expect(getInstanceSupervisor().updateInstance(snap.id, {})).rejects.toMatchObject({ code: 'INVALID_STATE' })
   })
 })
 
