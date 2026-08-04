@@ -330,6 +330,9 @@ importers:
       semver:
         specifier: ^7.8.5
         version: 7.8.5
+      sharp:
+        specifier: ^0.33.5
+        version: 0.33.5
       shell-quote:
         specifier: ^1.10.0
         version: 1.10.0
