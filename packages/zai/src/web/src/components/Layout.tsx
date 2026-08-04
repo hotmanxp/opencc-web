@@ -19,6 +19,7 @@ import { api } from '../lib/api';
 import type { OutputStyle, Theme } from '../../shared/settings.js';
 import ZnLogo from './ZnLogo';
 import { useIsMobile } from '../hooks/useIsMobile';
+import { useEffectiveTheme } from '../hooks/useEffectiveTheme.js';
 
 const { Sider, Header, Content } = AntLayout;
 
@@ -39,6 +40,12 @@ export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
   const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setMaxVisibleMessages } = useAppStore();
+  // Menu 跟随 effective theme: 之前硬编码 theme="dark" 让 AntD 在 light 主题下
+  // 仍按暗色算法把 menu-item 文字渲成 rgba(255,255,255,0.65), 但 sider 背景
+  // 被全局 CSS 强制为浅色 --bg-sidebar, 白字 + 浅底 = 几乎不可见。
+  // 让 Menu 跟随主题后, light 主题下走 light 算法(深色文字) + 浅色 sider 配对,
+  // dark 主题下走 dark 算法(白色文字) + 深色 sider 配对, 各自 OK。
+  const effectiveTheme = useEffectiveTheme();
   const [version, setVersion] = useState<string>('…');
   // 视口宽度监听 → 写 useAppStore.isMobile. 全局一次挂载即可, 子组件用
   // useAppStore((s) => s.isMobile) 直接读, 避免 props 透传.
@@ -156,7 +163,7 @@ export default function Layout() {
           {!sidebarCollapsed && <span>Z.AI</span>}
         </div>
         <Menu
-          theme="dark"
+          theme={effectiveTheme === 'dark' ? 'dark' : 'light'}
           mode="inline"
           selectedKeys={[location.pathname]}
           items={menuItems}

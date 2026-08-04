@@ -153,11 +153,19 @@ body {
 .ant-layout-header { background: rgba(18, 18, 26, 0.8) !important; backdrop-filter: blur(12px); border-bottom: 1px solid var(--border-subtle) !important; }
 .ant-layout-content { background: var(--bg-body) !important; }
 
-.ant-menu-dark { background: transparent !important; }
-.ant-menu-dark .ant-menu-item { transition: all 0.2s ease !important; }
-.ant-menu-dark .ant-menu-item:hover { background: rgba(249, 115, 22, 0.12) !important; }
-.ant-menu-dark .ant-menu-item-selected { background: linear-gradient(135deg, rgba(249,115,22,0.22), rgba(251,146,60,0.12)) !important; }
-.ant-menu-dark .ant-menu-item-selected::after { display: none !important; }
+.ant-menu-dark, .ant-menu-light { background: transparent !important; }
+.ant-menu-dark .ant-menu-item, .ant-menu-light .ant-menu-item { transition: all 0.2s ease !important; }
+.ant-menu-dark .ant-menu-item:hover, .ant-menu-light .ant-menu-item:hover { background: rgba(249, 115, 22, 0.12) !important; }
+.ant-menu-dark .ant-menu-item-selected, .ant-menu-light .ant-menu-item-selected { background: linear-gradient(135deg, rgba(249,115,22,0.22), rgba(251,146,60,0.12)) !important; }
+.ant-menu-dark .ant-menu-item-selected::after, .ant-menu-light .ant-menu-item-selected::after { display: none !important; }
+
+/* Light 主题下 selected item 默认色 = 主题橙, 跟背景同色系对比度差。
+   这里强制 selected 文字为深色, 与橙渐变背景形成对比, 选中态更醒目。
+   dark 主题下 selected 默认就是白色 (#fff) 配橙背景, 不需要覆盖。 */
+:root[data-theme='light'] .ant-menu-light .ant-menu-item-selected,
+:root[data-theme='light'] .ant-menu-light .ant-menu-item-selected .anticon {
+  color: var(--text-primary) !important;
+}
 
 .ant-card { background: var(--bg-card) !important; border: 1px solid var(--border-subtle) !important; border-radius: 12px !important; transition: all 0.2s ease; }
 .ant-card:hover { border-color: var(--border-active) !important; box-shadow: 0 0 20px var(--glow); }
