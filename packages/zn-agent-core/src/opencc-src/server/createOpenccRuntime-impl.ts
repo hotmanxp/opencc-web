@@ -46,7 +46,8 @@ export async function createOpenccRuntimeImpl(options) {
   // Tracks the AbortController currently in use by the in-flight query,
   // if any. `runtime.abort()` and `runtime.shutdown()` target this so
   // they don't accidentally trip the next query's fresh controller.
-  let currentQueryAbortController: AbortController | null = null
+  // (zai patch) per-session query AbortController 由 queryAbortControllers map
+  // 管理, 不再用单值 currentQueryAbortController (并发下无法精确命中 session)。
 
   const customQuery = options.query
     ? async function* (params) {
@@ -121,36 +122,51 @@ export async function createOpenccRuntimeImpl(options) {
     })
   }
 
-  const engine = new QueryEngine({
-    cwd,
-    tools: computeTools(),
-    commands: ctx.mcp.commands,
-    mcpClients: ctx.mcp.clients,
-    refreshTools: computeTools,
-    // zai patch: read agents from AppState (populated by
-    // createHeadlessContextImpl via getAgentDefinitionsWithOverrides).
-    // QueryEngine constructs its own `options.agentDefinitions` from
-    // this param (QueryEngine.ts:363, :519) and uses that for
-    // AgentTool's lookup — an empty array here means any
-    // `Agent(subagent_type: 'general-purpose', ...)` call throws
-    // "Agent type 'general-purpose' not found. Available agents: ".
-    agents: ctx.appState.getState().agentDefinitions.activeAgents,
-    canUseTool: ctx.permission,
-    getAppState: ctx.appState.getState,
-    // zai patch: 包装 setAppState 把 LocalAgentTask 状态桥接为
-    // `agent_task.changed` (compat/runtime/agentTaskBridge.ts),让前端
-    // 后台任务 dock 能看到 AgentTool 派发的子代理执行。AgentTool 的
-    // `setAppStateForTasks ?? setAppState` 两条路径都落到这里。
-    // getSessionId() 在 query loop 的 runWithSdkContext 上下文内返回
-    // 父 sessionId, dock 据此按 session 过滤任务。
-    setAppState: wrapTaskAwareSetState(
-      ctx.appState.setState as unknown as Parameters<typeof wrapTaskAwareSetState>[0],
-      () => getSessionId() as string | null | undefined,
-    ),
-    readFileCache: new FileStateCache(100, 25 * 1024 * 1024),
-    abortController: initialAbortController,
-    query: customQuery,
-  })
+  // zai patch (并发多会话): vendor QueryEngine 是单会话设计——`mutableMessages`
+  // 是实例级共享状态,跨 submitMessage 调用保留(支撑续传历史),但 zai server
+  // 的 runtime 是单例,旧会话 queryLoop 未结束(fire-and-forget)就新建会话并发
+  // query 时,两个 query 共享同一 engine 的 mutableMessages,消息互相污染
+  // (A 的 user/tool_result 被 B 的 turn 写入 B 的 transcript)。
+  //
+  // 修复: 每 session 一个独立 QueryEngine。同 session 复用 engine 使
+  // mutableMessages 跨 query 保留(续传历史不丢,与旧行为一致);不同 session
+  // 互不共享 mutableMessages,并发隔离。
+  const createEngine = () =>
+    new QueryEngine({
+      cwd,
+      tools: computeTools(),
+      commands: ctx.mcp.commands,
+      mcpClients: ctx.mcp.clients,
+      refreshTools: computeTools,
+      // zai patch: read agents from AppState (populated by
+      // createHeadlessContextImpl via getAgentDefinitionsWithOverrides).
+      // QueryEngine constructs its own `options.agentDefinitions` from
+      // this param (QueryEngine.ts:363, :519) and uses that for
+      // AgentTool's lookup — an empty array here means any
+      // `Agent(subagent_type: 'general-purpose', ...)` call throws
+      // "Agent type 'general-purpose' not found. Available agents: ".
+      agents: ctx.appState.getState().agentDefinitions.activeAgents,
+      canUseTool: ctx.permission,
+      getAppState: ctx.appState.getState,
+      // zai patch: 包装 setAppState 把 LocalAgentTask 状态桥接为
+      // `agent_task.changed` (compat/runtime/agentTaskBridge.ts),让前端
+      // 后台任务 dock 能看到 AgentTool 派发的子代理执行。AgentTool 的
+      // `setAppStateForTasks ?? setAppState` 两条路径都落到这里。
+      // getSessionId() 在 query loop 的 runWithSdkContext 上下文内返回
+      // 父 sessionId, dock 据此按 session 过滤任务。
+      setAppState: wrapTaskAwareSetState(
+        ctx.appState.setState as unknown as Parameters<typeof wrapTaskAwareSetState>[0],
+        () => getSessionId() as string | null | undefined,
+      ),
+      readFileCache: new FileStateCache(100, 25 * 1024 * 1024),
+      abortController: initialAbortController,
+      query: customQuery,
+    })
+  const engines = new Map<string, QueryEngine>()
+  // sessionId → 该 session 当前 in-flight query 的 AbortController。
+  // 旧实现只 track 单个 currentQueryAbortController,并发下 abort 无法精确
+  // 命中目标 session;per-session 后按 sessionId 查表。
+  const queryAbortControllers = new Map<string, AbortController>()
 
   function eventFor(sessionId, value) {
     const source = value && typeof value === 'object' ? value : { value }
@@ -209,8 +225,15 @@ export async function createOpenccRuntimeImpl(options) {
         if (input.abortSignal.aborted) queryAbortController.abort(input.abortSignal.reason)
         else input.abortSignal.addEventListener('abort', () => queryAbortController.abort(input.abortSignal.reason), { once: true })
       }
+      // zai patch (并发多会话): 每 session 独立 engine, mutableMessages 不
+      // 跨 session 共享。同 session 复用 engine 保留续传历史。
+      let engine = engines.get(input.sessionId)
+      if (!engine) {
+        engine = createEngine()
+        engines.set(input.sessionId, engine)
+      }
       engine.replaceAbortController(queryAbortController)
-      currentQueryAbortController = queryAbortController
+      queryAbortControllers.set(input.sessionId, queryAbortController)
       // zai patch: per-query bridge ctx. The zai-native AskUserQuestion
       // wrapper (compat/tools/opencc/AskUserQuestionTool.ts) reads
       // globalThis.__zaiBridgeCtx at CALL time for sessionId /
@@ -275,14 +298,25 @@ export async function createOpenccRuntimeImpl(options) {
       } finally {
         if (prevBridge === undefined) delete (globalThis as any).__zaiBridgeCtx
         else (globalThis as any).__zaiBridgeCtx = prevBridge
+        // zai patch: 本 query 结束, 释放该 session 的 abort controller。
+        // engine 保留在 engines map 中——同 session 续传复用 mutableMessages。
+        if (typeof input.sessionId === 'string') {
+          queryAbortControllers.delete(input.sessionId)
+        }
       }
     },
-    async abort() {
-      // Target only the current query's controller — never the initial
-      // shared one (it stays armed as a fallback for shutdown, and we
-      // never want to leak its aborted state into the next query).
-      const c = currentQueryAbortController
-      if (c && !c.signal.aborted) c.abort()
+    async abort(sessionId, reason) {
+      // zai patch: 按 sessionId 精确 abort 目标 session 的 in-flight query。
+      // 旧实现只 abort 单值 currentQueryAbortController(最后启动的 query),
+      // 并发下无法命中正确 session。不传 sessionId 时兜底 abort 全部。
+      if (typeof sessionId === 'string' && sessionId) {
+        const c = queryAbortControllers.get(sessionId)
+        if (c && !c.signal.aborted) c.abort(reason)
+        return
+      }
+      for (const c of queryAbortControllers.values()) {
+        if (!c.signal.aborted) c.abort(reason)
+      }
     },
     async getSession(sessionId) {
       const info = await sessions.get(sessionId)
@@ -294,17 +328,25 @@ export async function createOpenccRuntimeImpl(options) {
     },
     readTranscript(sessionId) { return sessions.readTranscript(sessionId) },
     patchSession(sessionId, patch) { return sessions.patchSession(sessionId, patch) },
-    removeSession(sessionId) { return sessions.removeSession(sessionId) },
+    removeSession(sessionId) {
+      // zai patch: 删除 session 时释放其 engine(含 mutableMessages)与
+      // abort controller, 防止 map 无限增长。
+      engines.delete(sessionId)
+      queryAbortControllers.delete(sessionId)
+      return sessions.removeSession(sessionId)
+    },
     async shutdown() {
       if (closed) return
       closed = true
-      // Abort the in-flight query, if any. We don't touch
+      // Abort every in-flight query. We don't touch
       // initialAbortController (already done in QueryEngine) — that
       // single-use controller is unreferenced now and will be GC'd
       // when the runtime closure is torn down.
-      const c = currentQueryAbortController
-      if (c && !c.signal.aborted) c.abort()
-      currentQueryAbortController = null
+      for (const c of queryAbortControllers.values()) {
+        if (!c.signal.aborted) c.abort()
+      }
+      queryAbortControllers.clear()
+      engines.clear()
     },
   }
 }

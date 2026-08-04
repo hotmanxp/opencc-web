@@ -546,6 +546,11 @@ class Project {
   currentSessionAgentName: string | undefined
   currentSessionAgentColor: string | undefined
   currentSessionLastPrompt: string | undefined
+  // zai patch: currentSessionLastPrompt 归属的 sessionId。Project 是全局单例，
+  // 并发多会话下 lastPrompt 缓存会被后写入的 session 覆盖，reAppend 时会把
+  // 别的 session 的最后 prompt 写进当前 session 文件（last-prompt 条目串写）。
+  // 写入前校验归属，不一致则跳过，宁缺毋错。
+  currentSessionLastPromptSessionId: string | null = null
   currentSessionAgentSetting: string | undefined
   currentSessionMode: 'coordinator' | 'normal' | undefined
   // Tri-state: undefined = never touched (don't write), null = exited worktree,
@@ -559,6 +564,13 @@ class Project {
   currentSessionBranch: SessionBranchEntry | undefined
 
   sessionFile: string | null = null
+  // zai patch: sessionFile 归属的 sessionId。Project 是全局单例而 zai server
+  // 的 OpenccRuntime 也是单例——旧会话 queryLoop 未结束（fire-and-forget，
+  // 最长 2h）就新建会话并发 query 时，sessionFile 会停留在旧会话的写路径，
+  // 新会话消息物理写入旧会话 JSONL（消息条目的 sessionId 字段是新的，但
+  // 落盘文件是旧的）。用 sessionId 标记写路径归属，appendEntry /
+  // insertMessageChain 检测到属于其他 session 时重建写路径。
+  sessionFileSessionId: string | null = null
   // Entries buffered while sessionFile is null. Flushed by materializeSessionFile
   // on the first user/assistant message — prevents metadata-only session files.
   private pendingEntries: Entry[] = []
@@ -699,6 +711,7 @@ class Project {
 
   resetSessionFile(): void {
     this.sessionFile = null
+    this.sessionFileSessionId = null
     this.pendingEntries = []
   }
 
@@ -776,7 +789,10 @@ class Project {
     // lastPrompt is re-appended so readLiteMetadata can show what the
     // user was most recently doing. Written first so customTitle/tag/etc
     // land closer to EOF (they're the more critical fields for tail reads).
-    if (this.currentSessionLastPrompt) {
+    // zai patch: 并发多会话下 lastPrompt 缓存可能属于另一个 session（单例被
+    // 覆盖），校验归属不一致则跳过，避免把别的 session 的最后 prompt 写进
+    // 当前 session 文件。
+    if (this.currentSessionLastPrompt && this.currentSessionLastPromptSessionId === sessionId) {
       appendEntryToFile(this.sessionFile, {
         type: 'last-prompt',
         lastPrompt: this.currentSessionLastPrompt,
@@ -1029,6 +1045,20 @@ class Project {
     return this.trackWrite(async () => {
       let parentUuid: UUID | null = startingParentUuid ?? null
 
+      // zai patch: 并发多会话下 sessionFile 可能仍指向另一个 session 的写
+      // 路径（旧会话 queryLoop 未结束就开新会话）。先按当前 sessionId 校验，
+      // 不匹配则重置，让下方 materialize 重建为当前会话的文件。此时
+      // pendingEntries 恒为空（sessionFile 非 null 时不会缓冲），重置不丢消息。
+      const chainSessionId = getSessionId()
+      if (
+        this.sessionFile !== null &&
+        this.sessionFileSessionId !== chainSessionId
+      ) {
+        this.sessionFile = null
+        this.sessionFileSessionId = null
+        this.pendingEntries = []
+      }
+
       // First user/assistant message materializes the session file.
       // Hook progress/attachment messages alone stay buffered.
       if (
@@ -1100,12 +1130,15 @@ class Project {
       // Cache this turn's user prompt for reAppendSessionMetadata —
       // the --resume picker shows what the user was last doing.
       // Overwritten every turn by design.
+      // zai patch: 同步记录归属 sessionId，供 reAppendSessionMetadata 写
+      // last-prompt 时校验，防止单例缓存被并发 session 覆盖后串写。
       if (!isSidechain) {
         const text = getFirstMeaningfulUserMessageTextContent(messages)
         if (text) {
           const flat = text.replace(/\n/g, ' ').trim()
           this.currentSessionLastPrompt =
             flat.length > 200 ? flat.slice(0, 200).trim() + '…' : flat
+          this.currentSessionLastPromptSessionId = chainSessionId
         }
       }
     })
@@ -1164,6 +1197,19 @@ class Project {
 
     let sessionFile: string
     if (isCurrentSession) {
+      // zai patch: sessionFile 是全局单例，可能属于另一个并发 session（旧
+      // 会话 queryLoop 未结束就开新会话）。直接复用会把当前 session 的消息
+      // 物理写入旧会话 JSONL。检测到写路径不属于当前 session 时重置并
+      // materialize 到当前会话——不能只重置为 null 走缓冲：缓冲的 entry
+      // 会被另一个 session 的 materializeSessionFile 误 flush 到错文件。
+      if (
+        this.sessionFile !== null &&
+        this.sessionFileSessionId !== sessionId
+      ) {
+        this.sessionFile = null
+        this.sessionFileSessionId = null
+        await this.materializeSessionFile()
+      }
       // Buffer until materializeSessionFile runs (first user/assistant message).
       if (this.sessionFile === null) {
         this.pendingEntries.push(entry)
@@ -1309,6 +1355,7 @@ class Project {
   private ensureCurrentSessionFile(): string {
     if (this.sessionFile === null) {
       this.sessionFile = getTranscriptPath()
+      this.sessionFileSessionId = getSessionId()
     }
 
     return this.sessionFile
@@ -3101,6 +3148,7 @@ export function clearSessionMetadata(): void {
   project.currentSessionAgentName = undefined
   project.currentSessionAgentColor = undefined
   project.currentSessionLastPrompt = undefined
+  project.currentSessionLastPromptSessionId = null
   project.currentSessionAgentSetting = undefined
   project.currentSessionMode = undefined
   project.currentSessionWorktree = undefined
