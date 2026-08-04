@@ -167,6 +167,17 @@ body {
   color: var(--text-primary) !important;
 }
 
+/* Collapse header / header-text 限制最大宽度 = 父容器宽度 — 不加这层
+   限宽, label 内长字符串 (e.g. tool-call args、thinking 摘要) 会把
+   header 撑爆超出父容器,出现横向溢出/挤压分屏布局。
+   - .ant-collapse-header 是整个可点击的折叠头容器 (flex 布局)
+   - .ant-collapse-header-text 是 header 内包裹 label 文本的 span,
+     配合 max-width:100% + 父级 min-width:0 才能让内部文本溢出截断 */
+.ant-collapse-header,
+.ant-collapse-header-text {
+  max-width: 100%;
+}
+
 .ant-card { background: var(--bg-card) !important; border: 1px solid var(--border-subtle) !important; border-radius: 12px !important; transition: all 0.2s ease; }
 .ant-card:hover { border-color: var(--border-active) !important; box-shadow: 0 0 20px var(--glow); }
 .ant-card-head { border-bottom: 1px solid var(--border-subtle) !important; }
