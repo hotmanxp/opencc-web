@@ -33,9 +33,10 @@ describe('useInstanceStore', () => {
       state: 'running',
       port: 9202,
       pid: 42,
+      lastHeartbeatAt: '2026-08-03T00:00:10.000Z',
     })
     const list = useInstanceStore.getState().instances
-    expect(list.find((s) => s.id === 'a')).toMatchObject({ state: 'running', port: 9202, pid: 42 })
+    expect(list.find((s) => s.id === 'a')).toMatchObject({ state: 'running', port: 9202, pid: 42, lastHeartbeatAt: '2026-08-03T00:00:10.000Z' })
     expect(list.find((s) => s.id === 'b')?.state).toBe('stopped')
   })
 
@@ -47,8 +48,28 @@ describe('useInstanceStore', () => {
         state: 'running',
         port: null,
         pid: null,
+        lastHeartbeatAt: null,
       }),
     ).not.toThrow()
     expect(useInstanceStore.getState().instances).toHaveLength(1)
+  })
+
+  it('applyInstanceSnapshot replaces an existing row', () => {
+    useInstanceStore.getState().seed([{ ...baseSnap, state: 'starting' }])
+    useInstanceStore.getState().applyInstanceSnapshot({
+      ...baseSnap,
+      state: 'running',
+      port: 9202,
+      pid: 42,
+    })
+    expect(useInstanceStore.getState().instances).toEqual([
+      expect.objectContaining({ id: 'inst_1', state: 'running', port: 9202 }),
+    ])
+  })
+
+  it('applyInstanceSnapshot appends an unknown row', () => {
+    useInstanceStore.getState().seed([])
+    useInstanceStore.getState().applyInstanceSnapshot({ ...baseSnap, id: 'inst_new' })
+    expect(useInstanceStore.getState().instances.map((s) => s.id)).toEqual(['inst_new'])
   })
 })

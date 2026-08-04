@@ -203,6 +203,7 @@ const InstanceEvent = z.discriminatedUnion('type', [
     state: z.enum(['stopped', 'starting', 'running', 'stopping', 'down']),
     port: z.number().nullable(),
     pid: z.number().nullable(),
+    lastHeartbeatAt: z.string().nullable(),
   }),
 ])
 

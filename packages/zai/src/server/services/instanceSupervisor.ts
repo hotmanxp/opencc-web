@@ -117,7 +117,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
     const cliEntry = opts.cliEntry ?? process.argv[1] ?? ''
     const entries = new Map<string, Entry>()
     let heartbeatTimer: ReturnType<typeof setInterval> | null = null
-    const emit = (instanceId: string, status: InstanceStatus) => deps.emit({ type: 'instance.changed', instanceId, state: status.state, port: status.port, pid: status.pid })
+    const emit = (instanceId: string, status: InstanceStatus) => deps.emit({ type: 'instance.changed', instanceId, state: status.state, port: status.port, pid: status.pid, lastHeartbeatAt: status.lastHeartbeatAt })
     const snapshotOf = (entry: Entry): InstanceSnapshot => ({ ...entry.def, ...entry.status, isCurrent: false })
     const currentSnapshot = (): InstanceSnapshot => ({ id: CURRENT_INSTANCE_ID, name: basename(opts.cwd) || opts.cwd, cwd: opts.cwd, createdAt: '', state: 'running', port: Number(process.env.ZAI_PORT ?? 0) || null, pid: process.pid, startedAt: new Date(deps.now()).toISOString(), lastHeartbeatAt: null, lastError: null, isCurrent: true })
     const ensureNotCurrent = (id: string) => { if (id === CURRENT_INSTANCE_ID) throw new InstanceSupervisorError('CURRENT_INSTANCE', 'cannot operate on current instance') }
@@ -167,6 +167,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
           persistSafe()
         } else if (isChildHeartbeatMessage(msg)) {
           setStatus(entry, { lastHeartbeatAt: new Date(deps.now()).toISOString() })
+          emit(entry.def.id, entry.status)
         }
       })
       child.on('exit', (code: number | null) => {
@@ -186,11 +187,41 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
     const doStart = async (id: string) => {
       const entry = getEntry(id)
       if (entry.status.state === 'starting' || entry.status.state === 'running') return snapshotOf(entry)
-      setStatus(entry, { state: 'starting', lastError: null }); emit(id, entry.status); persistSafe()
-      const port = await deps.probePort(INSTANCE_BASE_PORT)
-      const child = deps.spawn(process.execPath, [cliEntry, 'start', '--managed-child', '--port', String(port), '--no-open'], { stdio: ['ipc', 'inherit', 'inherit'], detached: false, env: { ...process.env, ZAI_INSTANCE_ID: id, ZAI_SUPERVISOR_PID: String(process.pid), ZAI_INSTANCE_HEARTBEAT_MS: '5000' } })
-      attachChild(entry, child)
-      return snapshotOf(entry)
+      setStatus(entry, { state: 'starting', lastError: null })
+      emit(id, entry.status)
+      persistSafe()
+
+      try {
+        const port = await deps.probePort(INSTANCE_BASE_PORT)
+        const child = deps.spawn(
+          process.execPath,
+          [cliEntry, 'start', '--managed-child', '--port', String(port), '--no-open'],
+          {
+            cwd: entry.def.cwd,
+            stdio: ['ipc', 'inherit', 'inherit'],
+            detached: false,
+            env: {
+              ...process.env,
+              ZAI_INSTANCE_ID: id,
+              ZAI_SUPERVISOR_PID: String(process.pid),
+              ZAI_INSTANCE_HEARTBEAT_MS: '5000',
+            },
+          },
+        )
+        attachChild(entry, child)
+        return snapshotOf(entry)
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err)
+        setStatus(entry, {
+          state: 'down',
+          port: null,
+          pid: null,
+          lastError: { at: new Date(deps.now()).toISOString(), message },
+        })
+        emit(id, entry.status)
+        persistSafe()
+        throw err
+      }
     }
 
     const doStop = async (id: string) => {
@@ -256,7 +287,11 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       async createInstance({ name, cwd }: { name: string; cwd: string }) {
         const trimmed = name.trim(); for (const entry of entries.values()) if (entry.def.name === trimmed) throw new InstanceSupervisorError('DUPLICATE_NAME', `duplicate name: ${trimmed}`)
         const def: InstanceDefinition = { id: `inst_${randomUUID().slice(0, 8)}`, name: trimmed, cwd, createdAt: new Date(deps.now()).toISOString() }
-        const entry: Entry = { def, status: { ...EMPTY_INSTANCE_STATUS }, child: null, childState: null }; entries.set(def.id, entry); await persist(); emit(def.id, entry.status); return snapshotOf(entry)
+        const entry: Entry = { def, status: { ...EMPTY_INSTANCE_STATUS }, child: null, childState: null }
+        entries.set(def.id, entry)
+        await persist()
+        emit(def.id, entry.status)
+        return doStart(def.id)
       },
       startInstance: async (id: string) => { ensureNotCurrent(id); return doStart(id) },
       stopInstance: async (id: string) => { ensureNotCurrent(id); return doStop(id) },

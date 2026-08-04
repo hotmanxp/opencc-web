@@ -64,6 +64,7 @@ import { enableConfigs } from '../utils/config.js'
 import { getCanUseToolFn } from '../cli/print.js'
 import { wrapHeadlessPermissionFn } from './headlessPermissionBridge.js'
 import { getTools } from '../tools.js'
+import { onTaskChanged } from '../utils/tasks.js'
 import { applyPermissionRulesToPermissionContext } from '../utils/permissions/permissions.js'
 import { loadAllPermissionRulesFromDisk } from '../utils/permissions/permissionsLoader.js'
 
@@ -322,6 +323,36 @@ export async function createHeadlessContextImpl(
     available: SandboxManager.isSandboxingEnabled(),
     manager: SandboxManager,
   }
+
+  // zai patch: bridge vendor task mutations → SSE event bus via
+  // globalThis.__zaiEventBus (set by zai-server's agentRuntime.ts).
+  // This subscribes to the SAME bundle's taskChanged signal that the
+  // TaskCreate/Update tools (from getTools() above) emit on.
+  // The subscription is in createHeadlessContext-impl.js (not opencc-core.mjs)
+  // because utils/tasks.ts is duplicated across bundles, and the tools
+  // are created by this same bundle's getTools().
+  onTaskChanged(({ taskListId, task, action }) => {
+    const bus = (globalThis as any).__zaiEventBus as
+      | { emit: (e: unknown) => void }
+      | undefined
+    if (!bus) return
+    bus.emit({
+      type: 'v2_task.changed' as const,
+      sessionId: taskListId,
+      task: {
+        id: task.id,
+        subject: task.subject ?? '',
+        description: task.description,
+        activeForm: task.activeForm,
+        status: task.status ?? 'pending',
+        blocks: Array.isArray(task.blocks) ? task.blocks : [],
+        blockedBy: Array.isArray(task.blockedBy) ? task.blockedBy : [],
+        owner: task.owner,
+        updatedAt: Date.now(),
+      },
+      action: action === 'delete' ? 'delete' : 'upsert',
+    })
+  })
 
   // Cast at the boundary: vendor types (AppStateStore, CanUseToolFn,
   // Tools, etc.) are structurally compatible with the public types in

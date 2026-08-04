@@ -39,6 +39,14 @@ const demo: InstanceSnapshot = {
   isCurrent: false,
 }
 
+const running: InstanceSnapshot = {
+  ...demo,
+  state: 'running',
+  port: 9202,
+  pid: 42,
+  startedAt: '2026-08-04T00:00:00.000Z',
+}
+
 describe('Instances page', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"instances":[]}', { status: 200 })))
@@ -80,6 +88,87 @@ describe('Instances page', () => {
         '/api/instances',
         expect.objectContaining({ method: 'POST' }),
       )
+    })
+  })
+
+  it('navigates the popup to the running instance port after create', async () => {
+    seed([])
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/instances' && init?.method === 'POST') {
+        const starting: InstanceSnapshot = { ...demo, state: 'starting' }
+        return new Response(JSON.stringify({ instance: starting }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url === '/api/instances/inst_1' && (!init || init.method === undefined || init.method === 'GET')) {
+        return new Response(JSON.stringify({ instance: running }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response('{"instances":[]}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const popup = {
+      closed: false,
+      location: { href: 'about:blank' },
+      close: vi.fn(),
+    }
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
+
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+    fireEvent.click(screen.getByText('新建实例'))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'demo' } })
+    fireEvent.change(screen.getByLabelText('工作目录'), { target: { value: '/tmp/demo' } })
+    fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }))
+
+    await waitFor(() => {
+      expect(popup.location.href).toBe('http://localhost:9202')
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/instances/inst_1')
+    expect(openSpy).toHaveBeenCalled()
+  })
+
+  it('closes the popup and surfaces the error when the instance goes down', async () => {
+    seed([])
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/instances' && init?.method === 'POST') {
+        const starting: InstanceSnapshot = { ...demo, state: 'starting' }
+        return new Response(JSON.stringify({ instance: starting }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url === '/api/instances/inst_1') {
+        const down: InstanceSnapshot = {
+          ...demo,
+          state: 'down',
+          lastError: { at: '2026-08-04T00:00:00.000Z', message: 'cwd failed' },
+        }
+        return new Response(JSON.stringify({ instance: down }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response('{"instances":[]}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const popup = {
+      closed: false,
+      location: { href: 'about:blank' },
+      close: vi.fn(),
+    }
+    vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
+
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+    fireEvent.click(screen.getByText('新建实例'))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'demo' } })
+    fireEvent.change(screen.getByLabelText('工作目录'), { target: { value: '/tmp/demo' } })
+    fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }))
+
+    await waitFor(() => {
+      expect(popup.close).toHaveBeenCalled()
     })
   })
 })

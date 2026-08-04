@@ -248,6 +248,24 @@ const vendorPatchesPlugin: esbuild.Plugin = {
         modified = true
       }
 
+      // zai patch (task-changed signal re-export): expose onTaskChanged so
+      // the compat layer can subscribe to task mutations and bridge them to
+      // stateChangeBus for SSE delivery to the web frontend. Also export
+      // listTasks + getTaskListId for cold-start hydration fallback (sessionState
+      // route reads vendor task storage when the compat TaskListStore is empty).
+      const taskChangedReExportSentinel =
+        /\/\/ zai-bundle: task-changed re-export\n$/
+      if (
+        args.path.endsWith('opencc-src/query.ts') &&
+        !taskChangedReExportSentinel.test(contents)
+      ) {
+        contents =
+          contents +
+          '\n// zai-bundle: task-changed re-export\n' +
+          'export { onTaskChanged, listTasks, getTaskListId } from "./utils/tasks.js"\n'
+        modified = true
+      }
+
       // zai patch (PreToolUse 'stop' suppression): see vendor-patches header.
       if (toolExecutionStopCaseRe.test(contents)) {
         contents = contents.replace(

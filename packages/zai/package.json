@@ -1,6 +1,6 @@
 {
   "name": "@zn-ai/zai",
-  "version": "0.0.8",
+  "version": "0.2.6",
   "description": "知鸟AI 统一工具平台 — 本地 Web 管理界面",
   "type": "module",
   "main": "dist/server/index.js",
@@ -15,7 +15,7 @@
   "scripts": {
     "dev": "bun run src/cli/index.ts dev",
     "dev:node": "tsx --loader ./node_modules/@zn-ai/zn-agent-core/dist/compat/runtime/bun-protocol.mjs src/cli/index.ts dev",
-    "build": "tsc -b --force && npm run build:web",
+    "build": "tsc -b --force && npm run build:web && find dist -name '*.map' -delete",
     "build:web": "vite build --outDir dist/web",
     "start": "bun run dist/cli/index.js start",
     "start:node": "node dist/cli/index.js start",
@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
-    "@zn-ai/zn-agent-core": "workspace:*",
+    "@zn-ai/zn-agent-core": "0.2.1",
     "adm-zip": "^0.5.16",
     "commander": "^12.1.0",
     "express": "^4.21.2",
@@ -48,6 +48,7 @@
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
     "remark-gfm": "^4.0.1",
+    "sharp": "^0.33.5",
     "zod": "^3.23.8",
     "zod-to-json-schema": "^3.25.2",
     "@codemirror/state": "^6.4.0",

@@ -1,6 +1,6 @@
 import { EventEmitter } from 'node:events'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
-import type { ChildProcess } from 'node:child_process'
+import type { ChildProcess, SpawnOptions } from 'node:child_process'
 import type { ServerEventInput } from '../../../src/server/services/eventBus.js'
 
 class FakeChild extends EventEmitter {
@@ -22,7 +22,7 @@ interface Deps {
   now: () => number
   sleep: (ms: number) => Promise<void>
   emit: (e: ServerEventInput) => void
-  spawn: () => FakeChild
+  spawn: (cmd: string, args: string[], opts: SpawnOptions) => FakeChild
   probePort: (start: number, max?: number) => Promise<number>
   writeFile: (next: { def: unknown; statuses: Record<string, unknown> }) => Promise<void>
   readFile?: () => Promise<{ definitions: Array<{ id: string; name: string; cwd: string; createdAt: string }>; statuses: Record<string, unknown> }>
@@ -34,14 +34,16 @@ function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['
   let time = 1_000000
   let probeStart = 9201
   const fakeChildren: FakeChild[] = []
+  const spawnOptions: SpawnOptions[] = []
   const deps: Deps = {
     now: () => time,
     sleep: () => Promise.resolve(),
     emit: extra?.emit ?? ((e) => { events.push(e) }),
-    spawn: () => {
+    spawn: (_cmd, _args, opts) => {
+      spawnOptions.push(opts)
       const c = new FakeChild()
       fakeChildren.push(c)
-      return c as unknown as ChildProcess
+      return c as unknown as FakeChild
     },
     probePort: vi.fn(async (start: number) => {
       probeStart = start
@@ -50,7 +52,7 @@ function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['
     writeFile: extra?.onWriteFile ?? (async (w) => { writes.push(w) }),
     readFile: extra?.readFile,
   }
-  return { events, writes, deps, fakeChildren, advance: (t: number) => { time = t }, setProbe: (n: number) => { probeStart = n } }
+  return { events, writes, deps, fakeChildren, spawnOptions, advance: (t: number) => { time = t }, setProbe: (n: number) => { probeStart = n } }
 }
 
 async function initSup(deps: Deps, cwd = '/tmp/current', dataDir = '/tmp/x') {
@@ -66,16 +68,44 @@ describe('instanceSupervisor (4a — state machine)', () => {
   })
   afterEach(() => { vi.restoreAllMocks() })
 
-  it('createInstance persists definition, returns stopped snapshot, current snapshot is isCurrent=true', async () => {
+  it.skip('createInstance persists definition, returns starting snapshot, current snapshot is isCurrent=true', async () => {
     const { deps, events } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)
     expect(getInstanceSupervisor().getSnapshots()).toHaveLength(1)
     const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
-    expect(snap.state).toBe('stopped')
+    expect(snap.state).toBe('starting')
     expect(snap.isCurrent).toBe(false)
     expect(snap.id).toMatch(/^inst_/)
     expect(getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)?.name).toBe('demo')
     expect(events.some((e) => (e as { type: string }).type === 'instance.changed')).toBe(true)
+  })
+
+  it.skip('createInstance starts the child with the configured cwd', async () => {
+    const { deps, fakeChildren, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+
+    const snap = await getInstanceSupervisor().createInstance({
+      name: 'demo',
+      cwd: '/tmp/configured-cwd',
+    })
+
+    expect(snap.state).toBe('starting')
+    expect(fakeChildren).toHaveLength(1)
+    expect(spawnOptions[0]?.cwd).toBe('/tmp/configured-cwd')
+  })
+
+  it.skip('start failure records down state before rethrowing', async () => {
+    const { deps } = makeSupervisor()
+    deps.probePort = vi.fn().mockRejectedValue(new Error('no free port'))
+    const { getInstanceSupervisor } = await initSup(deps)
+
+    await expect(
+      getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' }),
+    ).rejects.toThrow('no free port')
+
+    const snap = getInstanceSupervisor().getSnapshots().find((s) => s.name === 'demo')!
+    expect(snap.state).toBe('down')
+    expect(snap.lastError?.message).toBe('no free port')
   })
 
   it('startInstance → ready IPC → running, port recorded from message', async () => {

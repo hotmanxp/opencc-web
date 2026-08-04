@@ -12,7 +12,10 @@
     "dev": "pnpm -r run dev",
     "dev:web": "pnpm --filter @zn-ai/zai run dev",
     "test": "pnpm -r run test",
-    "test:watch": "pnpm -r --parallel run test"
+    "test:watch": "pnpm -r --parallel run test",
+    "release:patch": "node scripts/release.mjs patch",
+    "release:minor": "node scripts/release.mjs minor",
+    "release:major": "node scripts/release.mjs major"
   },
   "keywords": [
     "nova",

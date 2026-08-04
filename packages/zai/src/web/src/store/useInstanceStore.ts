@@ -11,7 +11,9 @@ interface InstanceStoreState {
     state: InstanceState
     port: number | null
     pid: number | null
+    lastHeartbeatAt: string | null
   }) => void
+  applyInstanceSnapshot: (snapshot: InstanceSnapshot) => void
 }
 
 export const useInstanceStore = create<InstanceStoreState>((set) => ({
@@ -37,9 +39,18 @@ export const useInstanceStore = create<InstanceStoreState>((set) => ({
     set((s) => ({
       instances: s.instances.map((inst) =>
         inst.id === e.instanceId
-          ? { ...inst, state: e.state, port: e.port, pid: e.pid }
+          ? { ...inst, state: e.state, port: e.port, pid: e.pid, lastHeartbeatAt: e.lastHeartbeatAt }
           : inst,
       ),
     }))
+  },
+  applyInstanceSnapshot(snapshot) {
+    set((state) => {
+      const index = state.instances.findIndex((item) => item.id === snapshot.id)
+      if (index < 0) return { instances: [...state.instances, snapshot] }
+      const instances = [...state.instances]
+      instances[index] = snapshot
+      return { instances }
+    })
   },
 }))

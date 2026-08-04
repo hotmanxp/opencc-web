@@ -1,0 +1,1 @@
+# .map 由 build 脚本中 `find dist -name '*.map' -delete` 清理，不在 .npmignore 处理

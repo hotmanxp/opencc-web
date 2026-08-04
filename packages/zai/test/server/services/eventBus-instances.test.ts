@@ -13,6 +13,7 @@ describe('eventBus instance.changed', () => {
       state: 'running',
       port: 9202,
       pid: 42,
+      lastHeartbeatAt: null,
     } as never)
     expect(got).toEqual(['instance.changed'])
   })
@@ -26,6 +27,7 @@ describe('eventBus instance.changed', () => {
       state: 'starting',
       port: null,
       pid: 999,
+      lastHeartbeatAt: null,
     })
     expect(parsed.type).toBe('instance.changed')
   })

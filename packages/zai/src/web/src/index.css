@@ -214,7 +214,7 @@ body {
   border-radius: 3px !important;
 }
 
-.ant-tree-node-content-wrapper .anticon {
+[data-testid="fs-tree"] .ant-tree-node-content-wrapper .anticon {
   vertical-align: 0.5em;
 }
 

@@ -50,8 +50,32 @@ function relativeAgo(iso: string | null): string {
   return `${hr} 小时前`
 }
 
+const INSTANCE_START_POLL_MS = 250
+const INSTANCE_START_TIMEOUT_MS = 30_000
+
+export async function waitForRunningInstance(
+  id: string,
+  applySnapshot: (snapshot: InstanceSnapshot) => void,
+): Promise<InstanceSnapshot> {
+  const deadline = Date.now() + INSTANCE_START_TIMEOUT_MS
+  while (true) {
+    const res = await fetch(`/api/instances/${id}`)
+    if (!res.ok) throw new Error('无法读取实例状态')
+    const data = (await res.json()) as { instance: InstanceSnapshot }
+    applySnapshot(data.instance)
+    if (data.instance.state === 'running' && data.instance.port !== null) {
+      return data.instance
+    }
+    if (data.instance.state === 'down') {
+      throw new Error(data.instance.lastError?.message ?? '实例启动失败')
+    }
+    if (Date.now() >= deadline) throw new Error('实例启动超时,请稍后手动打开')
+    await new Promise<void>((resolve) => setTimeout(resolve, INSTANCE_START_POLL_MS))
+  }
+}
+
 export default function Instances(): JSX.Element {
-  const { instances, loading, loadInstances } = useInstanceStore()
+  const { instances, loading, loadInstances, applyInstanceSnapshot } = useInstanceStore()
   const [open, setOpen] = useState(false)
   const [form] = Form.useForm<{ name: string; cwd: string }>()
   const currentCwd = instances.find((s) => s.isCurrent)?.cwd ?? ''
@@ -71,20 +95,29 @@ export default function Instances(): JSX.Element {
   }
 
   async function onCreate(): Promise<void> {
-    const values = await form.validateFields()
-    const res = await fetch('/api/instances', {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(values),
-    })
-    if (!res.ok) {
-      const data = (await res.json().catch(() => ({}))) as { error?: string }
-      message.error(data.error ?? '创建失败')
-      return
+    const popup = window.open('about:blank', '_blank', 'noopener,noreferrer')
+    try {
+      const values = await form.validateFields()
+      const res = await fetch('/api/instances', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify(values),
+      })
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        throw new Error(data.error ?? '创建失败')
+      }
+      const data = (await res.json()) as { instance: InstanceSnapshot }
+      setOpen(false)
+      form.resetFields()
+      void loadInstances()
+      const started = await waitForRunningInstance(data.instance.id, applyInstanceSnapshot)
+      const url = `http://localhost:${started.port}`
+      if (popup && !popup.closed) popup.location.href = url
+    } catch (err) {
+      if (popup && !popup.closed) popup.close()
+      message.error(err instanceof Error ? err.message : '创建失败')
     }
-    setOpen(false)
-    form.resetFields()
-    void loadInstances()
   }
 
   function renderActions(row: InstanceSnapshot): JSX.Element {

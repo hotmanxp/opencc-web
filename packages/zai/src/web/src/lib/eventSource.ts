@@ -45,6 +45,8 @@ const NAMED_EVENT_TYPES = [
   'bash_task.changed',
   'cwd.changed',
   'v2_task.changed',
+  // instance.*
+  'instance.changed',
 ] as const
 
 // 打开一条 SSE 连接到 /api/event. 后端按 sid 过滤:

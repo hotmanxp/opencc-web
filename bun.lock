@@ -11,7 +11,7 @@
     },
     "packages/zai": {
       "name": "@zn-ai/zai",
-      "version": "0.0.8",
+      "version": "0.1.2",
       "bin": {
         "zai": "bin/zai.js",
       },

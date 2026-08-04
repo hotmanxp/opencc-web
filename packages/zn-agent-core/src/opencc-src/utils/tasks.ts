@@ -18,6 +18,25 @@ import { getTeammateContext } from './teammateContext.js'
 const tasksUpdated = createSignal()
 
 /**
+ * Task change event with payload — used for bridging to external state systems
+ * (e.g. zai SSE). Carries the affected task's info so subscribers don't need
+ * to re-read the full task list and diff.
+ */
+export type TaskChangedEvent = {
+  taskListId: string
+  task: { id: string; subject?: string; description?: string; activeForm?: string; status?: string; blocks?: string[]; blockedBy?: string[]; owner?: string }
+  action: 'upsert' | 'delete'
+}
+
+const taskChanged = createSignal<[TaskChangedEvent]>()
+
+/**
+ * Register a listener for task change events with payload.
+ * Returns an unsubscribe function.
+ */
+export const onTaskChanged = taskChanged.subscribe
+
+/**
  * Team name set by the leader when creating a team.
  * Used by getTaskListId() so the leader's tasks are stored under the team name
  * (matching where tmux/iTerm2 teammates look), not under the session ID.
@@ -299,6 +318,7 @@ export async function createTask(
     const path = getTaskPath(taskListId, id)
     await writeFile(path, jsonStringify(task, null, 2))
     notifyTasksUpdated()
+    taskChanged.emit({ taskListId, task: { ...task, blocks: task.blocks ?? [], blockedBy: task.blockedBy ?? [] }, action: 'upsert' })
     return id
   } finally {
     if (release) {
@@ -364,6 +384,7 @@ async function updateTaskUnsafe(
   const path = getTaskPath(taskListId, taskId)
   await writeFile(path, jsonStringify(updated, null, 2))
   notifyTasksUpdated()
+  taskChanged.emit({ taskListId, task: updated, action: 'upsert' })
   return updated
 }
 
@@ -434,6 +455,7 @@ export async function deleteTask(
     }
 
     notifyTasksUpdated()
+    taskChanged.emit({ taskListId, task: { id: taskId }, action: 'delete' })
     return true
   } catch {
     return false

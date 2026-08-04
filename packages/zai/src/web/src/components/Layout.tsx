@@ -23,6 +23,8 @@ import { useIsMobile } from '../hooks/useIsMobile';
 const { Sider, Header, Content } = AntLayout;
 
 const menuItems = [
+  { key: '/agent', icon: <RobotOutlined />, label: 'Agent' },
+  { key: '/instances', icon: <ClusterOutlined />, label: '实例管理' },
   { key: '/login', icon: <LoginOutlined />, label: '登录' },
   // / 路径保留为入口重定向到 /agent，菜单的"系统信息"显式指向 /dashboard 子路由，
   // 否则 antd Menu 拿 / 作为 selectedKey 会触发跳转再被 Navigate 弹回 /agent。
@@ -31,8 +33,6 @@ const menuItems = [
   { key: '/resources', icon: <AppstoreOutlined />, label: '资源' },
   { key: '/config', icon: <SettingOutlined />, label: '配置' },
   { key: '/dirs', icon: <FolderOutlined />, label: '目录' },
-  { key: '/agent', icon: <RobotOutlined />, label: 'Agent' },
-  { key: '/instances', icon: <ClusterOutlined />, label: '实例管理' },
 ];
 
 export default function Layout() {

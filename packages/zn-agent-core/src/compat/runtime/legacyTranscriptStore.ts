@@ -240,6 +240,28 @@ export class TranscriptStore {
       }
       return stored
     }
+    // Session not found in REGISTRY (e.g. after server restart). If cwd is
+    // known, try to rebuild the REGISTRY entry from the disk file so the
+    // patch can succeed.
+    if (opts?.cwd) {
+      try {
+        const entries = await this.readEntries(id, opts.cwd)
+        if (entries.length > 0 || await stat(this.filePathFor(id, opts.cwd)).then(() => true).catch(() => false)) {
+          const recreated: Meta = {
+            cwd: opts.cwd,
+            model: '',
+            sessionId: id,
+            createdAt: typeof entries[0]?.timestamp === 'number' ? entries[0].timestamp : Date.now(),
+            updatedAt: Date.now(),
+          }
+          Object.assign(recreated, patch)
+          REGISTRY.set(this.key(id, opts.cwd), recreated)
+          return recreated
+        }
+      } catch {
+        // File doesn't exist or can't be read — fall through to return undefined
+      }
+    }
     return undefined
   }
 

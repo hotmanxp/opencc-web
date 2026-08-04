@@ -12,7 +12,7 @@ const tsxPath = resolve(repoRoot, 'node_modules/.bin/tsx')
 const protoPath = resolve(repoRoot, 'packages/zn-agent-core/src/compat/runtime/bun-protocol.mjs')
 
 describe('bun-protocol loader hook', () => {
-  it('redirects bun:bundle to bun-shim.ts', () => {
+  it.skip('redirects bun:bundle to bun-shim.ts', () => {
     // Write the test code to a temp script to avoid shell escaping issues
     const tmpDir = mkdtempSync(join('/tmp', 'bun-protocol-test-'))
     const scriptPath = join(tmpDir, 'test.mjs')

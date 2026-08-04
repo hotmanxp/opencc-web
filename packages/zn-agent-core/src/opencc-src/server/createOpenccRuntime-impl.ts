@@ -29,6 +29,7 @@ export async function createOpenccRuntimeImpl(options) {
     isInteractive: options.interactive ?? true,
   })
   const sessions = await createSessionFacadeImpl({ cwd, dataDir: options.dataDir })
+
   // Single shared AbortController for the runtime's lifetime — used as
   // the QueryEngine's initial abortController. Note this is *not* the
   // one we hand to defaultQuery per query call: AbortController is
@@ -223,13 +224,29 @@ export async function createOpenccRuntimeImpl(options) {
         sessionId: input.sessionId,
       }
       try {
+        // zai patch: per-query model override. Without this, every query
+        // uses the initial default model — the `model` field in options
+        // passed to `engine.submitMessage()` is silently ignored because
+        // `submitMessage`'s signature only accepts `{ uuid, isMeta }`.
+        // `engine.setModel()` sets `this.config.userSpecifiedModel`, which
+        // `submitMessage` reads to compute `initialMainLoopModel` and passes
+        // it into `toolUseContext.options.mainLoopModel`. However,
+        // `defaultQuery` (query.ts:1088-1091) resolves the effective model
+        // from `appState.mainLoopModelForSession ?? appState.mainLoopModel`,
+        // both of which are null in the headless runtime — so it falls back
+        // to `getDefaultMainLoopModelSetting()` regardless of the user's
+        // selection. Setting `appState.mainLoopModel` here bridges the gap.
+        if (input.model) {
+          engine.setModel(input.model)
+          ctx.appState.setState(prev => ({ ...prev, mainLoopModel: input.model }))
+        }
         // Delegate to vendor's full `defaultQuery` agent loop. The
         // engine's deps.callModel defaults to vendor's
         // `queryModelWithStreaming`, which yields the vendor
         // Message shape (`{type: 'assistant' | 'user' | 'result' |
         // ...}`) — that is the shape `defaultQuery`'s tool loop
         // (streamingToolExecutor) consumes.
-        const stream = engine.submitMessage(input.prompt, { uuid: input.sessionId, model: input.model })
+        const stream = engine.submitMessage(input.prompt, { uuid: input.sessionId })
         // zai patch: 绑定 vendor SDK context, 让 vendor 的 getSessionId()
         // 在本 query 的异步链上返回 input.sessionId, 从而 transcript 文件
         // 以 `${input.sessionId}.jsonl` 命名写入

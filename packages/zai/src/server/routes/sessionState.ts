@@ -72,10 +72,17 @@ router.get('/agent/sessions/:id/state', async (req: Request, res: Response) => {
 
     getTaskListStore()
       .list(sid)
-      .then((tasks) => tasks.map(trimV2Task))
+      .then((tasks) => {
+        if (tasks.length > 0) return tasks.map(trimV2Task)
+        // Fallback: read from vendor's task storage (~/.zai/tasks/<sid>/<id>.json)
+        // when the compat TaskListStore file (~/.zai/tasks/<sid>.json) is empty.
+        // This happens when tasks were created by the vendor's TaskCreate tool
+        // (opencc-src) and the page hasn't received SSE v2_task.changed yet.
+        return loadVendorV2Tasks(sid)
+      })
       .catch((err: unknown) => {
         console.warn('[sessionState] v2 failed', err)
-        return [] as V2TaskItemWire[]
+        return loadVendorV2Tasks(sid)
       }),
 
     Promise.resolve()
@@ -103,3 +110,39 @@ router.get('/agent/sessions/:id/state', async (req: Request, res: Response) => {
 })
 
 export default router
+
+/**
+ * Fallback: load tasks from the vendor's task storage (~/.zai/tasks/<sid>/<id>.json).
+ * The vendor's TaskCreate/Update tools store tasks as individual JSON files per task,
+ * while the compat TaskListStore uses a single JSON file per session. When the page
+ * refreshes, the compat store may be empty but the vendor store has the data.
+ *
+ * Dynamically imports the opencc-core bundle to call the vendor's listTasks().
+ */
+async function loadVendorV2Tasks(sid: string): Promise<V2TaskItemWire[]> {
+  try {
+    // @ts-expect-error — opencc-core.mjs has no d.ts, but IS available at runtime
+    const bundle = (await import('@zn-ai/zn-agent-core/opencc-core')) as {
+      listTasks?: (taskListId: string) => Promise<Array<{
+        id: string; subject: string; description?: string; activeForm?: string;
+        status: string; blocks?: string[]; blockedBy?: string[]; owner?: string
+      }>>
+    }
+    if (typeof bundle.listTasks !== 'function') return []
+    const vendorTasks = await bundle.listTasks(sid)
+    return vendorTasks.map((t) => ({
+      id: t.id,
+      subject: t.subject,
+      description: t.description,
+      activeForm: t.activeForm,
+      status: t.status,
+      blocks: t.blocks ?? [],
+      blockedBy: t.blockedBy ?? [],
+      owner: t.owner,
+      updatedAt: Date.now(),
+    }))
+  } catch (err) {
+    console.warn('[sessionState] vendor v2 task fallback failed', err)
+    return []
+  }
+}

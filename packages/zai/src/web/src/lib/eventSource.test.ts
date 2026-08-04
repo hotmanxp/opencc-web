@@ -84,6 +84,28 @@ describe('subscribeServerEvents', () => {
     expect(types).toContain('runtime.done')
   })
 
+  test('dispatches instance.changed named events', () => {
+    MockEventSource.instances = []
+    const onEvent = vi.fn()
+    subscribeServerEvents('s1', onEvent)
+    const es = MockEventSource.instances[0]
+
+    es.dispatchNamed('instance.changed', {
+      type: 'instance.changed',
+      eventId: 'e-instance',
+      ts: 1,
+      instanceId: 'inst_1',
+      state: 'running',
+      port: 9202,
+      pid: 42,
+      lastHeartbeatAt: '2026-08-04T00:00:00.000Z',
+    })
+
+    expect(onEvent).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'instance.changed', instanceId: 'inst_1' }),
+    )
+  })
+
   test('parses failure logs but does not throw', () => {
     MockEventSource.instances = []
     const onEvent = vi.fn()

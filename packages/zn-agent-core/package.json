@@ -1,7 +1,7 @@
 {
   "name": "@zn-ai/zn-agent-core",
-  "version": "0.1.0",
-  "description": "zai agent runtime core — 拷贝自 opencc 0.20.0，剥除 UI，zai 端消费",
+  "version": "0.2.6",
+  "description": "zai agent runtime core",
   "type": "module",
   "main": "dist/index.js",
   "types": "dist/index.d.ts",
@@ -24,14 +24,16 @@
       "types": "./dist/opencc-src/server/index.d.ts",
       "default": "./dist/opencc-src/server/index.js"
     },
-    "./compat/permissions": "./dist/compat/permissions.js"
+    "./compat/permissions": "./dist/compat/permissions.js",
+    "./package.json": "./package.json"
   },
   "files": [
     "dist/",
-    "scripts/copy-runtime-assets.mjs"
+    "scripts/copy-runtime-assets.mjs",
+    "vendor/"
   ],
   "scripts": {
-    "build": "node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && node scripts/tsc-with-cache.mjs tsconfig.contract-tests.json && node scripts/tsc-with-cache.mjs tsconfig.consumer.json && node scripts/copy-runtime-assets.mjs && node scripts/verify-server-types-self-contained.mjs",
+    "build": "node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && node scripts/tsc-with-cache.mjs tsconfig.contract-tests.json && node scripts/tsc-with-cache.mjs tsconfig.consumer.json && node scripts/copy-runtime-assets.mjs && node scripts/verify-server-types-self-contained.mjs && find dist -name '*.map' -delete",
     "dev": "tsc -b --watch",
     "typecheck": "tsc -b --noEmit && tsc --noEmit -p tsconfig.contract-tests.json && tsc --noEmit -p tsconfig.consumer.json && node scripts/verify-server-types-self-contained.mjs",
     "typecheck:contract-tests": "tsc --noEmit -p tsconfig.contract-tests.json",

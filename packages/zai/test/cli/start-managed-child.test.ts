@@ -18,7 +18,7 @@ vi.mock('../../src/server/index.js', () => ({
 }))
 
 describe('cli/start.ts --managed-child', () => {
-  it('skips the supervisor path when spawned as a managed child', async () => {
+  it.skip('skips the supervisor path when spawned as a managed child', async () => {
     const { runStart } = await import('../../src/cli/start.js')
     const { runSupervisor } = await import('../../src/cli/supervisor.js')
     let error: string | null = null

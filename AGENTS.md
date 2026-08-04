@@ -39,6 +39,20 @@ pnpm --filter @zn-ai/zai dev
 /ego-browser                  # 通过 skill 调 ego-browser 驱动 zai Web UI
 ```
 
+## 发布流程
+
+```bash
+# patch / minor / major
+pnpm release:patch
+pnpm release:minor
+pnpm release:major
+```
+
+**已知坑点**：
+- `pnpm publish` 在 workspace 上下文中 auth 传递有问题，第二个包（`@zn-ai/zai`）会报 `ENEEDAUTH`，即使 `npm whoami` 正常。**解决方案**：脚本已内置 fallback 自动降级到 `npm publish`。
+- `npm publish` 不识别 pnpm 的 `workspace:*` 协议，如果降级到 `npm publish`，脚本会自动将 `workspace:*` 替换为实际版本号再发布，发布后恢复原始内容。
+- 发布后 tag 不会自动推送，需手动执行 `git push && git push --tags`。
+
 ## 文档入口
 
 - 架构与实现细节 → `docs/DEVELOPMENT_REFERENCE.md`

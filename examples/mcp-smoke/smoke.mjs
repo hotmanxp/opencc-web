@@ -1,5 +1,5 @@
 #!/usr/bin/env node
-// Smoke test for zai-agent-core's opencc-internals MCP integration.
+// Smoke test for zn-agent-core's compat/mcp integration.
 //
 // Spawns the stdio MCP server (server.mjs), connects via MCPClientPool,
 // verifies:
@@ -16,9 +16,9 @@ import { spawn } from 'node:child_process'
 import { resolve } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import { dirname } from 'node:path'
-import { MCPClientPool } from '../../packages/zai-agent-core/dist/mcp/MCPClientPool.js'
-import { adaptMcpTools } from '../../packages/zai-agent-core/dist/mcp/MCPToolAdapter.js'
-import { getMcpInstructionsSection } from '../../packages/zai-agent-core/dist/mcp/mcpInstructions.js'
+import { MCPClientPool } from '../../packages/zn-agent-core/dist/compat/mcp/MCPClientPool.js'
+import { adaptMcpTools } from '../../packages/zn-agent-core/dist/compat/mcp/MCPToolAdapter.js'
+import { getMcpInstructionsSection } from '../../packages/zn-agent-core/dist/compat/mcp/mcpInstructions.js'
 
 const __filename = fileURLToPath(import.meta.url)
 const __dirname = dirname(__filename)
@@ -31,7 +31,7 @@ function log(label, ok, detail) {
 }
 
 async function main() {
-  console.log('=== zai-agent-core MCP smoke ===\n')
+  console.log('=== zn-agent-core MCP smoke ===\n')
 
   // 1. Spawn the smoke server.
   const child = spawn('node', [serverPath], { stdio: ['ignore', 'pipe', 'pipe'] })
