@@ -40,7 +40,7 @@
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
-    "@zn-ai/zn-agent-core": "0.2.1",
+    "@zn-ai/zn-agent-core": "workspace:*",
     "adm-zip": "^0.5.16",
     "commander": "^12.1.0",
     "express": "^4.21.2",
