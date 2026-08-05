@@ -223,7 +223,7 @@ export default function Layout() {
               style={{
                 position: 'absolute',
                 top: 0,
-                right: 20,
+                right: 5,
                 zIndex: 100,
                 display: 'inline-flex',
                 alignItems: 'center',
