@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react';
-import { Layout as AntLayout, Menu, Tag } from 'antd';
+import { Layout as AntLayout, Menu, Switch, Tag } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   DashboardOutlined,
@@ -12,6 +12,8 @@ import {
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   ClusterOutlined,
+  SunOutlined,
+  MoonOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../store/useAppStore';
 import { useAgentStore } from '../store/useAgentStore';
@@ -46,6 +48,22 @@ export default function Layout() {
   // 让 Menu 跟随主题后, light 主题下走 light 算法(深色文字) + 浅色 sider 配对,
   // dark 主题下走 dark 算法(白色文字) + 深色 sider 配对, 各自 OK。
   const effectiveTheme = useEffectiveTheme();
+  // 桌面端右上角浮动主题切换 Switch — 直接复用 setSettingsTheme +
+  // PUT /api/agent/settings/theme 写盘路径,与 SettingsDrawer 里"主题"行
+  // 完全一致. 移动端 (isMobile===true) 不渲染, 避免挡住底部 home indicator
+  // 和原本的 MobileHeader 工具栏.
+  const isMobile = useAppStore((s) => s.isMobile);
+  const handleToggleTheme = (checked: boolean) => {
+    const next: Theme = checked ? 'light' : 'dark';
+    setSettingsTheme(next);
+    void fetch('/api/agent/settings/theme', {
+      method: 'PUT',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ theme: next }),
+    }).catch(() => {
+      // swallow — 下次 GET 会重新对齐磁盘状态
+    });
+  };
   const [version, setVersion] = useState<string>('…');
   // 视口宽度监听 → 写 useAppStore.isMobile. 全局一次挂载即可, 子组件用
   // useAppStore((s) => s.isMobile) 直接读, 避免 props 透传.
@@ -199,7 +217,40 @@ export default function Layout() {
             调整 Header 高度或 padding 都不会再把对话输入框挤出底部.
             注意 Content 自身必须有 flex: 1 才能在 AntLayout (flex column) 里
             占满 Header 之外的剩余高度, 否则子页面会以 content 高度为准溢出. */}
-        <Content style={{ flex: 1, padding: '0', width: '100%', display: 'flex', flexDirection: 'column' }}>
+        <Content style={{ flex: 1, padding: '0', width: '100%', display: 'flex', flexDirection: 'column', position: 'relative' }}>
+          {/* 桌面端右上角悬浮主题切换 Switch — 复用现有 setSettingsTheme +
+              PUT /api/agent/settings/theme 写盘路径,与 SettingsDrawer 里"主题"
+              行同源;移动端不渲染. */}
+          {!isMobile && (
+            <div
+              data-testid="theme-floating-switch"
+              style={{
+                position: 'absolute',
+                top: 0,
+                right: 20,
+                zIndex: 100,
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '4px 8px',
+                borderRadius: 999,
+                background: 'var(--bg-card)',
+                border: '1px solid var(--border-subtle)',
+                boxShadow: '0 2px 8px rgba(0,0,0,0.08)',
+              }}
+            >
+              <MoonOutlined style={{ fontSize: 12, color: effectiveTheme === 'dark' ? 'var(--accent-start)' : 'var(--text-tertiary)' }} />
+              <Switch
+                size="small"
+                checked={effectiveTheme === 'light'}
+                onChange={handleToggleTheme}
+                checkedChildren={<SunOutlined />}
+                unCheckedChildren={<MoonOutlined />}
+                aria-label="切换主题"
+              />
+              <SunOutlined style={{ fontSize: 12, color: effectiveTheme === 'light' ? 'var(--accent-start)' : 'var(--text-tertiary)' }} />
+            </div>
+          )}
           <Outlet />
         </Content>
       </AntLayout>
