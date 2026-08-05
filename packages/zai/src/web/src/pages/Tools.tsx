@@ -1,6 +1,6 @@
 import { Card, Row, Col, Button, Tag, Spin, Typography, Modal, Space, message } from 'antd';
 import { SettingOutlined, DownloadOutlined, ReloadOutlined, SyncOutlined } from '@ant-design/icons';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import type { CliStatus, SseEvent } from '@shared/types';
 import { api } from '../lib/api';
@@ -73,6 +73,10 @@ export default function Tools() {
   const [installLabel, setInstallLabel] = useState<string>('');
   const [installEvents, setInstallEvents] = useState<SseEvent[]>([]);
   const [installSeq, setInstallSeq] = useState(0);
+  // Captured synchronously inside the SSE `onEvent` so `onEnd` (fired on the
+  // same tick) can read the latest exit code without waiting for React's
+  // setState batch to flush.
+  const lastExitCodeRef = useRef<number | undefined>(undefined);
   const navigate = useNavigate();
 
   // 默认加载：currentVersion 每次都现拉（detect.ts 不缓存本地版本），
@@ -103,6 +107,7 @@ export default function Tools() {
   const handleInstall = (pkg: string, label: string) => {
     if (installPkg) return;
     setInstallEvents([]);
+    lastExitCodeRef.current = undefined;
     setInstallPkg(pkg);
     setInstallLabel(label);
     setInstallSeq((n) => n + 1);
@@ -225,13 +230,27 @@ export default function Tools() {
           <InstallSseSubscriber
             key={`${installPkg}-${installSeq}`}
             path={`/install/cli?pkg=${encodeURIComponent(installPkg)}`}
-            onEvent={(ev) => setInstallEvents((prev) => [...prev, ev])}
-            onEnd={() => {
-              const last = installEvents[installEvents.length - 1];
-              if (last?.type === 'exit' && last.code === 0) {
-                message.success(`${installLabel}完成`);
-                fetchTools();
+            onEvent={(ev) => {
+              setInstallEvents((prev) => [...prev, ev]);
+              if (ev.type === 'exit') {
+                lastExitCodeRef.current = ev.code;
               }
+            }}
+            onEnd={() => {
+              // useSse calls onEnd on the same tick as the terminal event, so
+              // `installEvents` (React state) doesn't yet contain the exit
+              // row. The ref above is updated synchronously inside onEvent
+              // and is the only source that's up-to-date here.
+              const code = lastExitCodeRef.current;
+              if (code === 0) {
+                message.success(`${installLabel}成功`);
+                fetchTools();
+              } else if (code !== undefined) {
+                message.error(`${installLabel}失败: 退出码 ${code}`);
+              } else {
+                message.error(`${installLabel}失败: 连接已断开`);
+              }
+              setInstallPkg(null);
             }}
           />
         )}

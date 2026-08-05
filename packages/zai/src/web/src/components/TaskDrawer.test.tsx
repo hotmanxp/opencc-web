@@ -90,6 +90,49 @@ describe('buildTimeline', () => {
     expect(timeline[0]).toMatchObject({ kind: 'tool', entry: { status: 'error' } })
     expect(JSON.stringify(timeline)).not.toContain('secret error')
   })
+
+  test('原生 assistant message: 提取文本 + 工具块', () => {
+    const timeline = buildTimeline([
+      {
+        seq: 1,
+        type: 'assistant',
+        ts: 100,
+        data: {
+          content: '',
+          message: {
+            content: [
+              { type: 'text', text: '开始处理' },
+              { type: 'tool_use', id: 'tool-1', name: 'Read', input: { file_path: '/tmp/a' } },
+              { type: 'text', text: '完成' },
+            ],
+          },
+        },
+      },
+    ])
+
+    expect(timeline).toHaveLength(2)
+    expect(timeline[0]).toMatchObject({ kind: 'text', text: '开始处理完成' })
+    expect(timeline[1]).toMatchObject({
+      kind: 'tool',
+      entry: { toolUseId: 'tool-1', name: 'Read', status: 'done' },
+    })
+  })
+
+  test('原生 assistant message: content 为字符串时作为文本', () => {
+    const timeline = buildTimeline([
+      { seq: 1, type: 'assistant', ts: 100, data: { content: 'Hello', message: { content: 'Hello' } } },
+    ])
+    expect(timeline).toHaveLength(1)
+    expect(timeline[0]).toMatchObject({ kind: 'text', text: 'Hello' })
+  })
+
+  test('原生 user message: 单独作为一条文本', () => {
+    const timeline = buildTimeline([
+      { seq: 1, type: 'user', ts: 100, data: { content: '', message: { content: [{ type: 'text', text: '你好' }] } } },
+    ])
+    expect(timeline).toHaveLength(1)
+    expect(timeline[0]).toMatchObject({ kind: 'text', text: '你好' })
+  })
 })
 
 describe('MarkdownText (kind="text" 渲染器)', () => {

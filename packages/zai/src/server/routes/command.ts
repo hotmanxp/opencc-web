@@ -1,7 +1,7 @@
 import { Router, type IRouter } from 'express'
 import { getCommandRegistry } from '@zn-ai/zn-agent-core'
 import { initCommands } from '../services/commands/registry.js'
-import { getCurrentSessionId, getRuntime } from '../services/agentRuntime.js'
+import { getCurrentSessionId, getRuntime, resolveSkillPrompt } from '../services/agentRuntime.js'
 
 export const commandRouter: IRouter = Router()
 
@@ -21,6 +21,14 @@ commandRouter.post('/command', async (req, res) => {
     const reg = getCommandRegistry()
     const cmd = name ? reg.get(name) : undefined
     if (!cmd) {
+      // Skills 不在 command registry 里(registry 只装 builtin + ~/.zai|~/.claude
+      // commands),但前端 autocomplete 的 /skill 列表来自 listSkills。这里兜底
+      // 解析 skill 并渲染其 markdown prompt,否则 /skill args 会落到 unknown,
+      // 原始 "/skill args" 文本被原样丢给模型,skill 永不激活。
+      const rendered = name ? await resolveSkillPrompt(name, args) : null
+      if (rendered !== null) {
+        return res.json({ type: 'prompt', payload: { rendered } })
+      }
       return res.json({ type: 'unknown', payload: { input: `/${name}` } })
     }
 

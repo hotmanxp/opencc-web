@@ -33,6 +33,26 @@ function handleError(res: import('express').Response, err: unknown): void {
   res.status(500).json({ error: err instanceof Error ? err.message : String(err) })
 }
 
+/**
+ * Parse an optional boolean body field. The contract is intentionally
+ * strict: only `undefined` (absent) and a real `boolean` are accepted.
+ * - absent → `{ value: undefined }` so callers that distinguish "use the
+ *   default" from "explicit false" (POST /start, POST /restart) can
+ *   forward `undefined` through to the supervisor;
+ * - boolean → `{ value: true | false }` after normalising via `=== true`
+ *   so JSON-truthy like `1`/`"yes"` can't slip past;
+ * - everything else → `{ ok: false, error }` so the route can return 400
+ *   with the offending field name in the message.
+ */
+function parseBoolField(
+  v: unknown,
+  field: string,
+): { ok: true; value: boolean | undefined } | { ok: false; error: string } {
+  if (v === undefined) return { ok: true, value: undefined }
+  if (typeof v !== 'boolean') return { ok: false, error: `${field} must be a boolean` }
+  return { ok: true, value: v === true }
+}
+
 router.get('/instances', (_req, res) => {
   res.json({ instances: getInstanceSupervisor().getSnapshots() })
 })
@@ -44,19 +64,16 @@ router.get('/instances/:id', (req, res) => {
 })
 
 router.post('/instances', async (req, res) => {
-  const { name, cwd, lan } = (req.body ?? {}) as { name?: unknown; cwd?: unknown; lan?: unknown }
+  const { name, cwd } = (req.body ?? {}) as { name?: unknown; cwd?: unknown }
   if (typeof name !== 'string' || name.trim() === '') return badRequest(res, 'name is required')
   if (typeof cwd !== 'string' || cwd.trim() === '') return badRequest(res, 'cwd is required')
   if (!existsSync(cwd) || !statSync(cwd).isDirectory()) {
     return badRequest(res, 'cwd must be an existing directory')
   }
-  // `lan` is optional. Anything truthy → true, anything else (incl. undefined)
-  // → false. We don't reject `null`/string here because the form-control
-  // wire shape is a plain boolean — defensive normalisation keeps the
-  // contract narrow without surprising the UI with a 400.
-  if (lan !== undefined && typeof lan !== 'boolean') return badRequest(res, 'lan must be a boolean')
+  const lan = parseBoolField((req.body ?? {}).lan, 'lan')
+  if (!lan.ok) return badRequest(res, lan.error)
   try {
-    const instance = await getInstanceSupervisor().createInstance({ name: name.trim(), cwd, lan: lan === true })
+    const instance = await getInstanceSupervisor().createInstance({ name: name.trim(), cwd, lan: lan.value === true })
     res.status(201).json({ instance })
   } catch (err) {
     handleError(res, err)
@@ -65,13 +82,16 @@ router.post('/instances', async (req, res) => {
 
 router.post('/instances/:id/start', async (req, res) => {
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot start current instance')
-  const { lan } = (req.body ?? {}) as { lan?: unknown }
-  if (lan !== undefined && typeof lan !== 'boolean') return badRequest(res, 'lan must be a boolean')
+  const lan = parseBoolField((req.body ?? {}).lan, 'lan')
+  if (!lan.ok) return badRequest(res, lan.error)
   try {
     // Per-call `lan` overrides the persisted `def.lan` so the UI can
     // "start this one with --lan just this once" without rewriting the
-    // definition. `undefined` means "use the persisted value".
-    const instance = await getInstanceSupervisor().startInstance(req.params.id, lan !== undefined ? { lan: lan === true } : undefined)
+    // definition. `value === undefined` means "use the persisted value".
+    const instance = await getInstanceSupervisor().startInstance(
+      req.params.id,
+      lan.value !== undefined ? { lan: lan.value } : undefined,
+    )
     res.json({ instance })
   } catch (err) {
     handleError(res, err)
@@ -90,10 +110,13 @@ router.post('/instances/:id/stop', async (req, res) => {
 
 router.post('/instances/:id/restart', async (req, res) => {
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot restart current instance')
-  const { lan } = (req.body ?? {}) as { lan?: unknown }
-  if (lan !== undefined && typeof lan !== 'boolean') return badRequest(res, 'lan must be a boolean')
+  const lan = parseBoolField((req.body ?? {}).lan, 'lan')
+  if (!lan.ok) return badRequest(res, lan.error)
   try {
-    const instance = await getInstanceSupervisor().restartInstance(req.params.id, lan !== undefined ? { lan: lan === true } : undefined)
+    const instance = await getInstanceSupervisor().restartInstance(
+      req.params.id,
+      lan.value !== undefined ? { lan: lan.value } : undefined,
+    )
     res.json({ instance })
   } catch (err) {
     handleError(res, err)
@@ -102,10 +125,10 @@ router.post('/instances/:id/restart', async (req, res) => {
 
 router.patch('/instances/:id', async (req, res) => {
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot patch current instance')
-  const patch = (req.body ?? {}) as { lan?: unknown }
-  if (patch.lan !== undefined && typeof patch.lan !== 'boolean') return badRequest(res, 'lan must be a boolean')
+  const lan = parseBoolField((req.body ?? {}).lan, 'lan')
+  if (!lan.ok) return badRequest(res, lan.error)
   try {
-    const instance = await getInstanceSupervisor().updateInstance(req.params.id, { lan: patch.lan === true })
+    const instance = await getInstanceSupervisor().updateInstance(req.params.id, { lan: lan.value === true })
     res.json({ instance })
   } catch (err) {
     handleError(res, err)

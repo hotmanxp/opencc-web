@@ -31,6 +31,13 @@ export type OpenccQueryInput = {
   model?: string
   abortSignal?: AbortSignal
   /**
+   * 标记本 query 的 prompt 为 system-injected meta message(对 LLM 可见、
+   * 不在 transcript UI 展示)。用于后台任务完成时触发的一轮占位 query——
+   * 占位 prompt 本身不承载内容,真正的 <task-notification> 由 QueryEngine
+   * 首轮 mid-turn drain 从 commandQueue 注入(opencc 原生机制)。
+   */
+  isMeta?: boolean
+  /**
    * Optional per-query permission mode override. When absent the runtime
    * keeps whatever mode the headless context was created with (zai-server:
    * bypassPermissions). When present, the mode is applied to the shared

@@ -24,7 +24,7 @@
  *                        (default: HRMSV3-ZN-WEBSITE#668)
  */
 import { readFileSync, writeFileSync } from 'node:fs';
-import { execSync } from 'node:child_process';
+import { execSync, spawnSync } from 'node:child_process';
 import { resolve } from 'node:path';
 
 const bumpType = process.argv[2];
@@ -48,56 +48,75 @@ const run = (cmd, label) => {
 };
 
 /**
- * Publish a package with pnpm, falling back to npm if pnpm fails with
- * ENEEDAUTH (known workspace auth issue — see AGENTS.md).
+ * Publish a package, ensuring workspace protocol deps are concrete version
+ * pins in the *published* tarball while leaving them as `workspace:*` in
+ * the git working tree.
  *
- * Rationale: pnpm publish in a workspace context sometimes fails to
- * pass auth credentials for the second package, even though `npm whoami`
- * returns a valid user. `npm publish` in the package directory works
- * reliably. This fallback avoids blocking the release pipeline.
+ * Why this dance: pnpm's `workspace:*` is a workspace-only protocol.
+ * pnpm publish resolves it on pack; npm publish does not — it ships the
+ * literal string `workspace:*` and the consumer's npm install then fails
+ * with `EUNSUPPORTEDPROTOCOL` or similar. We therefore rewrite workspace:*
+ * → resolved version before either publish command runs, then restore the
+ * original `workspace:*` after so the working tree still works for local
+ * `pnpm install`.
+ *
+ * ENEEDAUTH fallback: pnpm publish in a workspace context sometimes fails
+ * to forward auth credentials to the second package, even though `npm whoami`
+ * returns a valid user. We use `spawnSync` (stdio:'pipe') so we can capture
+ * stderr for the ENEEDAUTH marker, then fall back to `npm publish` in the
+ * package directory (which works against the same internal registry).
+ *
+ * Restoration is in a finally block: even if the publish fails partway, we
+ * always restore the workspace references so subsequent commands don't see
+ * a half-baked package.json.
  */
 const publish = (pkg) => {
-  const label = `[publish] ${pkg.name}@${newVersion}`;
-  const pnpmCmd = `pnpm --filter ${pkg.name} publish --no-git-checks`;
-  console.log(`\n>>> ${label}`);
-  try {
-    execSync(pnpmCmd, { stdio: 'inherit' });
-  } catch (e) {
-    const stderr = (e.stderr ?? '').toString();
-    const msg = (e.message ?? '').toString();
-    if (stderr.includes('ENEEDAUTH') || msg.includes('ENEEDAUTH')) {
-      console.log(`  pnpm publish failed with ENEEDAUTH — falling back to npm publish in ${pkg.path}`);
-      // pnpm replaces `workspace:*` with the actual version on publish, but
-      // npm does not. Without this replacement, the published package has a
-      // broken `workspace:*` dependency that npm cannot resolve at install.
-      const pkgJsonPath = resolve(pkg.path, 'package.json');
-      const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
-      const origDeps = {};
-      for (const section of ['dependencies', 'devDependencies', 'peerDependencies']) {
-        if (!pkgJson[section]) continue;
-        origDeps[section] = { ...pkgJson[section] };
-        for (const [name, ver] of Object.entries(pkgJson[section])) {
-          if (ver === 'workspace:*' || ver.startsWith('workspace:')) {
-            // Resolve the workspace version from the target package's package.json
-            const targetPkg = packages.find(p => p.name === name);
-            const targetVer = targetPkg
-              ? JSON.parse(readFileSync(resolve(targetPkg.path, 'package.json'), 'utf-8')).version
-              : newVersion;
-            pkgJson[section][name] = targetVer;
-            console.log(`  workspace:* -> ${targetVer} for ${name}`);
-          }
-        }
+  console.log(`\n>>> [publish] ${pkg.name}@${newVersion}`);
+  const pkgJsonPath = resolve(pkg.path, 'package.json');
+  const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
+  const origDeps = {};
+  for (const section of ['dependencies', 'devDependencies', 'peerDependencies']) {
+    if (!pkgJson[section]) continue;
+    origDeps[section] = { ...pkgJson[section] };
+    for (const [name, ver] of Object.entries(pkgJson[section])) {
+      if (ver === 'workspace:*' || ver.startsWith('workspace:')) {
+        // Resolve the workspace version from the target package's package.json
+        const targetPkg = packages.find(p => p.name === name);
+        const targetVer = targetPkg
+          ? JSON.parse(readFileSync(resolve(targetPkg.path, 'package.json'), 'utf-8')).version
+          : newVersion;
+        pkgJson[section][name] = targetVer;
+        console.log(`  workspace:* -> ${targetVer} for ${name}`);
       }
-      writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n');
-      execSync(`cd ${resolve(pkg.path)} && npm publish --no-git-checks`, { stdio: 'inherit' });
-      // Restore original package.json (workspace:* references)
-      for (const [section, deps] of Object.entries(origDeps)) {
-        pkgJson[section] = deps;
-      }
-      writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n');
-    } else {
-      throw e;
     }
+  }
+  writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n');
+
+  try {
+    // Try pnpm publish first. Capture stderr/stdout so we can grep for the
+    // ENEEDAUTH marker that signals the workspace auth issue.
+    const pnpmResult = spawnSync('pnpm', ['--filter', pkg.name, 'publish', '--no-git-checks'], {
+      encoding: 'utf-8',
+    });
+    if (pnpmResult.stdout) process.stdout.write(pnpmResult.stdout);
+    if (pnpmResult.stderr) process.stderr.write(pnpmResult.stderr);
+    if (pnpmResult.status === 0) return;
+    const combined = (pnpmResult.stdout ?? '') + (pnpmResult.stderr ?? '');
+    if (!combined.includes('ENEEDAUTH')) {
+      process.exit(pnpmResult.status ?? 1);
+    }
+    console.log(`  pnpm publish failed with ENEEDAUTH — falling back to npm publish in ${pkg.path}`);
+    // package.json on disk already has workspace:* resolved above; npm
+    // publish will pack that file directly.
+    execSync(`cd ${resolve(pkg.path)} && npm publish --no-git-checks`, { stdio: 'inherit' });
+  } finally {
+    // Always restore the workspace:* references in git's working tree, even
+    // on failure, so subsequent `pnpm install` continues to link to the
+    // sibling packages instead of trying to fetch concrete versions.
+    for (const [section, deps] of Object.entries(origDeps)) {
+      pkgJson[section] = deps;
+    }
+    writeFileSync(pkgJsonPath, JSON.stringify(pkgJson, null, 2) + '\n');
   }
 };
 

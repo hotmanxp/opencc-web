@@ -18,12 +18,21 @@ async function bootstrap(extra?: { spawn?: (...args: never[]) => unknown; readFi
   const { initInstanceSupervisor } = await import('../../../src/server/services/instanceSupervisor.js')
   const { default: router } = await import('../../../src/server/routes/instances.js')
   const { EventEmitter } = await import('node:events')
-  // Default spawn returns a no-op EventEmitter so `createInstance`'s
-  // auto-start succeeds without setting up a full fake child. Tests
-  // that need to assert spawn behaviour should pass a custom `spawn`.
+  // Default spawn returns an EventEmitter + emits a fake IPC `ready` on
+  // the next microtask. The supervisor's `child.on('message')` listener
+  // (instanceSupervisor.ts:166-178) drives `starting → running` only when
+  // it sees `{type:'ready',...}`. Without emitting it the entry stays in
+  // `starting` forever (heartbeat only times out *running* instances) and
+  // downstream assertions like "expect body.port === 9201" would fail.
+  // mirror FakeChild in services/instanceSupervisor.test.ts to keep the
+  // two test fixtures consistent. Tests that need to assert spawn
+  // behaviour should pass `extra.spawn`.
   const defaultSpawn = () => {
     const ee = new EventEmitter()
     ;(ee as unknown as { pid: number }).pid = 99999
+    queueMicrotask(() => {
+      ee.emit('message', { type: 'ready', pid: 99999, port: 9201 })
+    })
     return ee as unknown as never
   }
   initInstanceSupervisor({
@@ -132,9 +141,10 @@ describe('routes/instances', () => {
   it('POST /api/instances/:id/start rejects non-boolean lan with 400', async () => {
     const { app } = await bootstrap()
     // Create a real instance (POST), then exercise the start route's
-    // body validation. The start itself fails (default spawn returns
-    // a fake child that never emits `ready`, supervisor will time
-    // out), but we only assert on the 400 case for a bad body.
+    // body validation. We only assert on the 400 case for a bad body —
+    // the spawn itself succeeds in test mode (defaultSpawn emits a
+    // fake `ready` IPC), so the underlying start is no longer the
+    // focus of this test.
     await request(app).post('/api/instances').send({ name: 'demo', cwd: '/tmp/x' })
     const bad = await request(app)
       .post('/api/instances/inst_does_not_matter/start')

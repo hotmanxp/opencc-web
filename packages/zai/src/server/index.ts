@@ -35,6 +35,7 @@ import {
   initSubagentNotifierLifecycle,
 } from './services/backgroundRuntime.js';
 import { initStateBridge } from './services/stateBridge.js';
+import { initBashNotifier } from './services/bashNotifier.js';
 import { initZaiSettingsCache } from './services/zaiSettingsStore.js';
 import { startBranchChecker } from './routes/system.js';
 import { noCacheForApi } from './middleware/noCache.js';
@@ -65,6 +66,9 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   // 内部 tryGetNotifier 也兜底了反向顺序)。
   initSubagentNotifierLifecycle()
   initBackgroundRuntime()
+  // 后台 Bash 完成 → 通知 LLM 的 BashNotifier。stateBridge 订阅
+  // bash_task.changed 时经 getBashNotifier() 懒取,这里先注册保证可用。
+  initBashNotifier()
   // 桥接 agent-core StateChangeBus → eventBus. 必须在 initBackgroundRuntime
   // 之后调: agent-core 才会发 agent_task.changed, 先订阅才不会丢第一批;
   // 同时 stateBridge 必须存在, emit 才有下游订阅 (eventBus) 接收.

@@ -17,6 +17,30 @@ import { backgroundAgentTask, isLocalAgentTask } from '../LocalAgentTask/LocalAg
 import { isMainSessionTask } from '../LocalMainSessionTask.js';
 import { type BashTaskKind, isLocalShellTask, type LocalShellTaskState } from './guards.js';
 import { killTask } from './killShellTasks.js';
+import { getBashBackgroundTracker } from '../../../compat/bashTracker.js';
+
+/**
+ * zai patch: 桥接 LocalShellTask 生命周期到 compat BashBackgroundTracker,
+ * 让 bash_task.changed SSE 事件真正发出 → 前端状态栏显示后台 bash 任务。
+ *
+ * 背景: BashTool 走的是本文件 (LocalShellTask) 的原生 register/spawn 路径,
+ * 只更新 useAgentStore.tasks, 从未调用 compat bashBackgroundTracker —— 那个
+ * 是唯一 emit `bash_task.changed` 的地方, 因此整条 SSE 链路 (stateBridge →
+ * eventBus → 前端 bashTasksBySession) 恒为空, 状态栏看不到 bash 后台任务。
+ *
+ * 注意: 必须经 getBashBackgroundTracker() (globalThis.__zaiBashTracker 桥)
+ * 拿 server 端实例 — 本文件会随 opencc-core.mjs 被 esbuild 单文件内联,
+ * 直接 import bashBackgroundTracker 会得到 bundle 私有 isolate 实例,
+ * 事件到不了 zai server 的 stateBridge (与 agentTaskBridge 同根问题)。
+ *
+ * sessionId 通过 zai server 注入的 globalThis.__zaiCurrentSessionId 读取
+ * (与 compat/runtime/agentTaskBridge.readZaiCurrentSessionId 同款 bridge)。
+ */
+function zaiBashSessionId(): string {
+  const v = (globalThis as { __zaiCurrentSessionId?: string }).__zaiCurrentSessionId
+  return typeof v === 'string' && v.length > 0 ? v : ''
+}
+const zaiBashTracker = () => getBashBackgroundTracker()
 
 /** Prefix that identifies a LocalShellTask summary to the UI collapse transform. */
 export const BACKGROUND_BASH_SUMMARY_PREFIX = 'Background command ';
@@ -213,6 +237,14 @@ export async function spawnShellTask(input: LocalShellSpawnInput & {
     kind
   };
   registerTask(taskState, setAppState);
+  // zai patch: 镜像到 compat BashBackgroundTracker, 让后台 bash 任务在状态栏可见。
+  zaiBashTracker().register(taskId, {
+    sessionId: zaiBashSessionId(),
+    command,
+    description: description || command,
+    startedAt: Date.now(),
+  });
+  zaiBashTracker().backgroundExistingForegroundTask(taskId);
 
   // Data flows through TaskOutput automatically — no stream listeners needed.
   // Just transition to backgrounded state so the process keeps running.
@@ -239,6 +271,9 @@ export async function spawnShellTask(input: LocalShellSpawnInput & {
         endTime: Date.now()
       };
     });
+    // zai patch: 终态同步到 compat tracker, 触发 bash_task.changed 推送。
+    zaiBashTracker().markFinished(taskId, wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed', { exitCode: result.code });
+    zaiBashTracker().markTaskNotified(taskId);
     enqueueShellNotification(taskId, description, wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed', result.code, setAppState, toolUseId, kind, agentId);
     void evictTaskOutput(taskId);
   });
@@ -282,6 +317,14 @@ export function registerForeground(input: LocalShellSpawnInput & {
     agentId
   };
   registerTask(taskState, setAppState);
+  // zai patch: 镜像到 compat BashBackgroundTracker —— 前台任务可后台化,
+  // 让状态栏能看到 (register 即发 bash_task.changed running)。
+  zaiBashTracker().register(taskId, {
+    sessionId: zaiBashSessionId(),
+    command,
+    description: description || command,
+    startedAt: Date.now(),
+  });
   return taskId;
 }
 
@@ -308,6 +351,8 @@ function backgroundTask(taskId: string, getAppState: () => AppState, setAppState
   if (!shellCommand.background(taskId)) {
     return false;
   }
+  // zai patch: 同步 compat tracker 的 foreground → background 翻转 (Ctrl+B)。
+  zaiBashTracker().backgroundExistingForegroundTask(taskId);
   setAppState(prev => {
     const prevTask = prev.tasks[taskId];
     if (!isLocalShellTask(prevTask) || prevTask.isBackgrounded) {
@@ -355,6 +400,9 @@ function backgroundTask(taskId: string, getAppState: () => AppState, setAppState
 
     // Call cleanup outside of the state updater (avoid side effects in updater)
     cleanupFn?.();
+    // zai patch: 终态同步到 compat tracker (Ctrl+B 后台化任务)。
+    zaiBashTracker().markFinished(taskId, wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed', { exitCode: result.code });
+    zaiBashTracker().markTaskNotified(taskId);
     if (wasKilled) {
       enqueueShellNotification(taskId, description, 'killed', result.code, setAppState, toolUseId, kind, agentId);
     } else {
@@ -420,6 +468,8 @@ export function backgroundExistingForegroundTask(taskId: string, shellCommand: S
   if (!shellCommand.background(taskId)) {
     return false;
   }
+  // zai patch: 同步 compat tracker 的 foreground → background 翻转。
+  zaiBashTracker().backgroundExistingForegroundTask(taskId);
   let agentId: AgentId | undefined;
   setAppState(prev => {
     const prevTask = prev.tasks[taskId];
@@ -466,6 +516,9 @@ export function backgroundExistingForegroundTask(taskId: string, shellCommand: S
     });
     cleanupFn?.();
     const finalStatus = wasKilled ? 'killed' : result.code === 0 ? 'completed' : 'failed';
+    // zai patch: 终态同步到 compat tracker, 触发 bash_task.changed 推送。
+    zaiBashTracker().markFinished(taskId, finalStatus, { exitCode: result.code });
+    zaiBashTracker().markTaskNotified(taskId);
     enqueueShellNotification(taskId, description, finalStatus, result.code, setAppState, toolUseId, undefined, agentId);
     void evictTaskOutput(taskId);
   });
@@ -489,6 +542,7 @@ export function markTaskNotified(taskId: string, setAppState: SetAppState): void
  */
 export function unregisterForeground(taskId: string, setAppState: SetAppState): void {
   let cleanupFn: (() => void) | undefined;
+  let zaiRemoved = false;
   setAppState(prev => {
     const task = prev.tasks[taskId];
     // Only remove if it's a foreground task (not backgrounded)
@@ -502,11 +556,21 @@ export function unregisterForeground(taskId: string, setAppState: SetAppState): 
       [taskId]: removed,
       ...rest
     } = prev.tasks;
+    zaiRemoved = true;
     return {
       ...prev,
       tasks: rest
     };
   });
+
+  // zai patch: 前台任务自然完成 → 同步 compat tracker 终态 (bash_task.changed)。
+  // 已 backgrounded 的任务不进这里 (isBackgrounded 时上方 return), 由后台完成
+  // 回调 markFinished; 这里只处理前台跑完的, 标 completed。
+  if (zaiRemoved) {
+    zaiBashTracker().markFinished(taskId, 'completed');
+  } else {
+    zaiBashTracker().unregisterForeground(taskId);
+  }
 
   // Call cleanup outside of the state updater (avoid side effects in updater)
   cleanupFn?.();

@@ -1,2 +1,7 @@
 // @zn-ai/zn-agent-core/bashTracker
-export { bashBackgroundTracker, BashBackgroundTracker } from '../../compat/bashTracker.js'
+export {
+  bashBackgroundTracker,
+  BashBackgroundTracker,
+  type BashTaskInfo,
+  type BashTaskStatus,
+} from '../../compat/bashTracker.js'
