@@ -92,3 +92,23 @@ export function resolveTheme(settings: ZaiSettings): Theme {
 export function isValidTheme(value: unknown): value is Theme {
   return typeof value === 'string' && VALID_THEMES.has(value as Theme)
 }
+
+/**
+ * Resolve the persisted "default split screen" flag with validation.
+ * Unknown / missing values collapse to false so a hand-edited
+ * settings.json can never leave the UI in an unrenderable state.
+ *
+ * Used by GET /api/agent/settings to feed SettingsDrawer and by
+ * SplitPane / Agent.tsx as the first-run seed for the split-pane
+ * open state in localStorage. Users who manually toggle split-pane
+ * in the UI get an explicit localStorage override that wins over
+ * this default — see SplitPane.tsx first-run seed effect.
+ */
+export function resolveDefaultSplitScreen(settings: ZaiSettings): boolean {
+  return settings.defaultSplitScreen === true
+}
+
+/** Validate a candidate default-split-screen value before persisting. */
+export function isValidDefaultSplitScreen(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}

@@ -4,6 +4,7 @@ import { GitTab } from './GitTab.js';
 import { FsTab } from './FsTab.js';
 import { BashTab } from './BashTab.js';
 import { useAgentStore } from '../../store/useAgentStore.js';
+import { useAppStore } from '../../store/useAppStore.js';
 import {
   STORAGE_KEYS,
   MIN_WIDTH,
@@ -38,7 +39,11 @@ export interface SplitPaneProps {
  * passes `cwd` here. The panel column is fully owned by SplitPane.
  */
 export function SplitPane({ cwd }: SplitPaneProps) {
-  const [openStored, setOpenStored] = useLocalStorageState<boolean>(STORAGE_KEYS.open, false);
+  // 默认值取自 useAppStore.defaultSplitScreen(由 Layout 在 mount 时从
+  // settings.json hydrate).localStorage 已有显式值时,显式值胜出 — 用户
+  // 手动 toggle 过的偏好不会被此设置覆盖.
+  const defaultSplitScreen = useAppStore((s) => s.defaultSplitScreen);
+  const [openStored, setOpenStored] = useLocalStorageState<boolean>(STORAGE_KEYS.open, defaultSplitScreen);
   const [tab, setTab] = useLocalStorageState<TabKey>(STORAGE_KEYS.tab, 'git');
   const [widthStored, setWidthStored] = useLocalStorageState<number>(
     STORAGE_KEYS.width,
@@ -46,6 +51,20 @@ export function SplitPane({ cwd }: SplitPaneProps) {
   );
   const width = clampWidth(widthStored);
   const activeSessionId = useAgentStore((s) => s.sessionId ?? null)
+
+  // 实时同步 defaultSplitScreen → localStorage:用户在 /agent 页面打开设置,
+  // 切换"默认启动分屏"且此前从未手动 toggle 过 split-pane(localStorage 为空)
+  // 时,立即把种子值写入 localStorage 让面板按新设置显示,无需刷新页面.
+  // 一旦 localStorage 已有显式值就不再覆盖 — 用户的"我手动关过"语义保留.
+  useEffect(() => {
+    if (typeof window === 'undefined') return;
+    if (window.localStorage.getItem(STORAGE_KEYS.open) !== null) return;
+    setOpenStored(defaultSplitScreen);
+    // setOpenStored 内部已经写 localStorage + 派发 zai-localstorage-sync,
+    // Agent.tsx 的同名 hook 会通过 storage/sync 事件同步刷新.
+    // 依赖 defaultSplitScreen:仅当该值变化时才重新评估.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [defaultSplitScreen]);
 
   // Responsive: collapse when window is narrow regardless of stored state.
   const [responsiveClosed, setResponsiveClosed] = useState(

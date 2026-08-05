@@ -39,7 +39,7 @@ const menuItems = [
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setMaxVisibleMessages } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setMaxVisibleMessages, setDefaultSplitScreen } = useAppStore();
   // Menu 跟随 effective theme: 之前硬编码 theme="dark" 让 AntD 在 light 主题下
   // 仍按暗色算法把 menu-item 文字渲成 rgba(255,255,255,0.65), 但 sider 背景
   // 被全局 CSS 强制为浅色 --bg-sidebar, 白字 + 浅底 = 几乎不可见。
@@ -91,7 +91,7 @@ export default function Layout() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<{ outputStyle?: OutputStyle; theme?: Theme; maxVisibleMessages?: number }>(
+      .get<{ outputStyle?: OutputStyle; theme?: Theme; maxVisibleMessages?: number; defaultSplitScreen?: boolean }>(
         '/agent/settings',
       )
       .then((data) => {
@@ -121,6 +121,9 @@ export default function Layout() {
             Math.max(1, Math.min(1000, Math.floor(data.maxVisibleMessages))),
           )
         }
+        if (typeof data.defaultSplitScreen === 'boolean') {
+          setDefaultSplitScreen(data.defaultSplitScreen)
+        }
       })
       .catch(() => {
         // swallow — keep default
@@ -128,7 +131,7 @@ export default function Layout() {
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setSettingsTheme, setMaxVisibleMessages, setTranscriptCollapsed]);
+  }, [setOutputStyle, setSettingsTheme, setMaxVisibleMessages, setDefaultSplitScreen, setTranscriptCollapsed]);
 
   return (
     // 用 height: 100vh (而不是 minHeight) 把 AntLayout 锁死在视口高度,

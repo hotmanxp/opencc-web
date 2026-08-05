@@ -577,6 +577,7 @@ function buildStaticSchema(
   theme: Theme,
   outputStyle: OutputStyle,
   maxVisibleMessages: number,
+  defaultSplitScreen: boolean,
 ): SettingsSchema {
   return [
     {
@@ -630,6 +631,16 @@ function buildStaticSchema(
           min: 1,
           max: 1000,
           step: 1,
+        },
+        // 桌面端打开 Agent 页面时是否默认启动右侧分屏 (File / Git / Bash 面板).
+        // 移动端 / 窄屏 (< 1024px) 仍会自动收起,所以这条只对 PC 视口生效.
+        // 仅在 localStorage 无显式覆盖时作为种子值 — 用户手动 toggle 后
+        // 的选择永远胜出,不会因为修改此设置而被重置.
+        {
+          key: 'defaultSplitScreen',
+          label: '默认启动分屏',
+          kind: 'boolean',
+          value: defaultSplitScreen,
         },
       ],
     },
@@ -714,6 +725,8 @@ export default function SettingsDrawer() {
   const setOutputStyle = useAppStore((s) => s.setOutputStyle)
   const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages)
   const setMaxVisibleMessages = useAppStore((s) => s.setMaxVisibleMessages)
+  const defaultSplitScreen = useAppStore((s) => s.defaultSplitScreen)
+  const setDefaultSplitScreen = useAppStore((s) => s.setDefaultSplitScreen)
   // 切换 outputStyle 时同步把 transcriptCollapsed 重置为新默认 — 'compact' 切换到
   // 'default' 时立即展开,'default' 切到 'compact' 时立即折叠;避免用户得再点
   // 一次工具栏按钮才生效.
@@ -721,7 +734,7 @@ export default function SettingsDrawer() {
 
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, maxVisibleMessages),
+    buildStaticSchema(theme, outputStyle, maxVisibleMessages, defaultSplitScreen),
   )
   // 同步 store theme → schema.theme 行(其它行的 value 内部维护)。
   useEffect(() => {
@@ -768,6 +781,22 @@ export default function SettingsDrawer() {
       })),
     )
   }, [maxVisibleMessages])
+  // 同步 store defaultSplitScreen → schema.defaultSplitScreen 行;store 是
+  // settings.json 持久化的真源,这里仅单向把已持久化的值投影到 schema 渲染态,
+  // 跟 outputStyle / maxVisibleMessages 行的同步策略一致。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'defaultSplitScreen' && r.kind === 'boolean') {
+            return { ...r, value: defaultSplitScreen }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [defaultSplitScreen])
 
   const handleChange = useCallback(
     (key: string, value: SettingsValue) => {
@@ -814,6 +843,19 @@ export default function SettingsDrawer() {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })
       }
+      // "默认启动分屏" 走 store + PUT settings.json 持久化路径 — 同上.
+      // 注意:这只是一个"首次启动种子值",不会立即重新打开已经关闭的分屏;
+      // 已 toggle 过 splitPane 的用户偏好永远胜出(见 SplitPane first-run seed).
+      if (key === 'defaultSplitScreen' && typeof value === 'boolean') {
+        setDefaultSplitScreen(value)
+        void fetch('/api/agent/settings/default-split-screen', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
       // 其它行目前只更新内部 schema state(阶段 2 接真实写盘)
       setSchema((prev) =>
         prev.map((s) => ({
@@ -834,7 +876,7 @@ export default function SettingsDrawer() {
         })),
       )
     },
-    [setTheme, setOutputStyle, setTranscriptCollapsed, setMaxVisibleMessages],
+    [setTheme, setOutputStyle, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen],
   )
 
   if (!open) return null
