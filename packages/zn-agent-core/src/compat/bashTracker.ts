@@ -381,3 +381,19 @@ export function __cleanupTempFilesForTests(): { cleaned: string[] } {
 }
 
 export const bashBackgroundTracker = new BashBackgroundTracker()
+
+/**
+ * zai patch: 返回 BashBackgroundTracker 单例, 优先用 zai server 注入的
+ * globalThis.__zaiBashTracker (与 compat/runtime/agentTaskBridge.ts 的
+ * __zaiBackgroundRuntime bridge 同款)。LocalShellTask 等被 esbuild 单文件
+ * 打包进 opencc-core.mjs 的调用方, 直接 import 本模块会拿到 bundle 私有
+ * 的 isolate 实例 + isolate 的 stateChangeBus —— emit 的 bash_task.changed
+ * 到不了 zai server 的 stateBridge, `/api/bash-tasks` 也读不到任务。zai
+ * server 在 initStateBridge 时把 server 端的 bashBackgroundTracker 注入
+ * globalThis.__zaiBashTracker, bundle 内调用方经此桥绕开 isolate 实例。
+ * 纯 zn-agent-core / 单测环境下无注入, 回退到本模块实例。
+ */
+export function getBashBackgroundTracker(): BashBackgroundTracker {
+  const bridged = (globalThis as { __zaiBashTracker?: BashBackgroundTracker }).__zaiBashTracker
+  return bridged ?? bashBackgroundTracker
+}

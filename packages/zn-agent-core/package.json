@@ -1,6 +1,6 @@
 {
   "name": "@zn-ai/zn-agent-core",
-  "version": "0.2.6",
+  "version": "0.2.12",
   "description": "zai agent runtime core",
   "type": "module",
   "main": "dist/index.js",

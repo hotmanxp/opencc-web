@@ -43,6 +43,7 @@ import {
   stopMemoryWatcher,
 } from '@zn-ai/zn-agent-core/agents/memoryWatcher'
 import { hasExternalIncludes } from '@zn-ai/zn-agent-core/agents/memoryLoader'
+import type { LoadedSkill } from '@zn-ai/zn-agent-core'
 import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
 import { PermissionRegistry } from './permissionRegistry.js'
@@ -484,30 +485,97 @@ function getPluginRuntime(): DefaultPluginRuntime {
 }
 
 /**
- * Load skills from configured skills dirs AND from OpenCC plugins
- * (superpowers 等), return a lightweight list suitable for the frontend
- * autocomplete UI.
+ * Load all skills from configured skills dirs AND from OpenCC plugins
+ * (superpowers 等), returning full `LoadedSkill` records (markdown content
+ * included). Shares the exact same sources as `listSkills` so the autocomplete
+ * list and the slash-command resolver never diverge.
  */
-export async function listSkills(): Promise<Array<{ name: string; description: string }>> {
+async function loadAllSkills(): Promise<LoadedSkill[]> {
   const cwd = process.cwd()
   const dirs = resolveSkillsDirs()
 
   // Dynamic import to avoid top-level dependency on the loader module
   // when the runtime hasn't been initialized yet.
   const { loadSkillsFromDirs } = await import('@zn-ai/zn-agent-core')
-  type LoadedSkill = { name: string; description?: string; frontmatter?: { description?: string } }
 
-  const diskSkills: LoadedSkill[] = dirs.length > 0
-    ? ((await loadSkillsFromDirs(dirs, { cwd })) as LoadedSkill[])
-    : []
-
+  const diskSkills = dirs.length > 0 ? await loadSkillsFromDirs(dirs, { cwd }) : []
   const snapshot = await getPluginRuntime().load({ cwd })
-  const pluginSkills = snapshot.skills as LoadedSkill[]
 
-  const toEntry = (s: LoadedSkill) => ({
+  return [...diskSkills, ...(snapshot.skills as LoadedSkill[])]
+}
+
+/**
+ * Load skills from configured skills dirs AND from OpenCC plugins
+ * (superpowers 等), return a lightweight list suitable for the frontend
+ * autocomplete UI.
+ */
+export async function listSkills(): Promise<Array<{ name: string; description: string }>> {
+  const skills = await loadAllSkills()
+  return skills.map((s) => ({
     name: s.name,
     description: s.frontmatter?.description || s.description || '',
-  })
+  }))
+}
 
-  return [...diskSkills.map(toEntry), ...pluginSkills.map(toEntry)]
+/**
+ * Resolve a skill by name and render its markdown prompt with the given args.
+ * Mirrors opencc's `createSkillCommand.getPromptForCommand` (loadSkillsDir.ts):
+ * prepend the base dir, substitute `$ARGUMENTS` / `${name}` tokens, and expand
+ * `${CLAUDE_SKILL_DIR}`. Returns null when no skill matches the name.
+ *
+ * This is the missing link that makes `/skill-name args` work: skills are
+ * loaded for the autocomplete list but were never registered in the command
+ * registry, so `POST /agent/command` returned `unknown` and the raw slash text
+ * was sent to the model instead of the expanded skill prompt.
+ */
+export async function resolveSkillPrompt(
+  name: string,
+  args: string,
+): Promise<string | null> {
+  const skills = await loadAllSkills()
+  const skill = skills.find((s) => s.name === name)
+  if (!skill) return null
+
+  const markdown = skill.markdown ?? skill.body ?? ''
+  if (!markdown) return null
+
+  const baseDir = skill.baseDir
+  const base = baseDir
+    ? `Base directory for this skill: ${baseDir}\n\n${markdown}`
+    : markdown
+
+  const { renderPrompt } = await import('@zn-ai/zn-agent-core')
+  const argNames = parseSkillArgNames(skill.frontmatter?.arguments)
+  let content = renderPrompt({ body: base, args, argNames })
+
+  // opencc port (argumentSubstitution.substituteArguments,
+  // appendIfNoPlaceholder=true): 当 skill 模板没有任何占位符 (${name} /
+  // $ARGUMENTS / $N) 时, raw args 会被静默丢弃, 模型看不到用户的具体指令
+  // (如 `/ego-browser 测试一下` 里的 "测试一下")。这里在 args 非空且渲染前后
+  // 无变化的 case 下,把 args 追加进内容, 保证指令不丢失。
+  if (args.trim()) {
+    const withEmptyArgs = renderPrompt({ body: base, args: '', argNames })
+    if (content === withEmptyArgs) {
+      content = content + `\n\nARGUMENTS: ${args.trim()}`
+    }
+  }
+
+  // Replace ${CLAUDE_SKILL_DIR} with the skill's own directory so inline
+  // bash (!`...`) can reference bundled scripts. Normalize backslashes to
+  // forward slashes on Windows so shell commands don't treat them as escapes.
+  if (baseDir) {
+    const skillDir = process.platform === 'win32' ? baseDir.replace(/\\/g, '/') : baseDir
+    content = content.replace(/\$\{CLAUDE_SKILL_DIR\}/g, skillDir)
+  }
+
+  return content
+}
+
+/** Normalize skill frontmatter `arguments:` (string or string[]) to an argNames list. */
+function parseSkillArgNames(argumentsFm: string | string[] | undefined): string[] | undefined {
+  if (Array.isArray(argumentsFm)) return argumentsFm
+  if (typeof argumentsFm === 'string' && argumentsFm.trim()) {
+    return argumentsFm.split(/\s+/)
+  }
+  return undefined
 }

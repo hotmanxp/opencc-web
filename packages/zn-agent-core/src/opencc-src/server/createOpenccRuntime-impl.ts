@@ -269,7 +269,12 @@ export async function createOpenccRuntimeImpl(options) {
         // Message shape (`{type: 'assistant' | 'user' | 'result' |
         // ...}`) — that is the shape `defaultQuery`'s tool loop
         // (streamingToolExecutor) consumes.
-        const stream = engine.submitMessage(input.prompt, { uuid: input.sessionId })
+        const stream = engine.submitMessage(input.prompt, {
+          uuid: input.sessionId,
+          // zai patch: 透传 isMeta — 后台任务完成触发的占位 query 用 meta
+          // prompt(UI 隐藏),真正内容由 QueryEngine 首轮 drain 注入。
+          ...(input.isMeta ? { isMeta: true } : {}),
+        })
         // zai patch: 绑定 vendor SDK context, 让 vendor 的 getSessionId()
         // 在本 query 的异步链上返回 input.sessionId, 从而 transcript 文件
         // 以 `${input.sessionId}.jsonl` 命名写入
@@ -329,8 +334,15 @@ export async function createOpenccRuntimeImpl(options) {
     readTranscript(sessionId) { return sessions.readTranscript(sessionId) },
     patchSession(sessionId, patch) { return sessions.patchSession(sessionId, patch) },
     removeSession(sessionId) {
-      // zai patch: 删除 session 时释放其 engine(含 mutableMessages)与
-      // abort controller, 防止 map 无限增长。
+      // zai patch (并发多会话): 删除 session 前先 abort 该 session 仍在跑的
+      // query。否则该 query 还在 for-await loop 里持有 engine 引用(包括
+      // mutableMessages),直到 for-await 自然退出才被 GC。短时间不会
+      // 泄漏,但高 churn 场景(用户频繁移除会话)下内存涨幅可观。
+      // 跳过已 aborted 的 controller — abort 监听者抛 AbortError,再次
+      // abort 会让监听者代码路径抛 `signal already aborted` 类型错误,
+      // 这里 c.abort(reason) 自带 idempotent 即可,但加一道防止误用。
+      const c = queryAbortControllers.get(sessionId)
+      if (c && !c.signal.aborted) c.abort('session removed')
       engines.delete(sessionId)
       queryAbortControllers.delete(sessionId)
       return sessions.removeSession(sessionId)

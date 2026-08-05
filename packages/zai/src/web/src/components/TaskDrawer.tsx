@@ -471,6 +471,43 @@ export function ToolCallCard({ entry }: { entry: ToolCallEntry }) {
 }
 
 /**
+ * 解析后台 Agent 经 BackgroundRuntime 推送的原生 opencc Message content
+ * (assistant user 的 `message.message.content`,可能是 string 或 ContentBlock[]),
+ * 拆出累积文本 + 工具调用块。修复 HRMSV3-ZN-WEBSITE#668:之前 buildTimeline
+ * 只识别 SDK 流式类型 (content_block_delta / tool_use:start …),而
+ * AgentTool.mirrorAppendBgEvent 推送的是原生 assistant/user message,
+ * switch 无匹配 → 抽屉 timeline 恒为空, 显示"等待事件..."。
+ */
+function splitNativeContent(content: unknown): {
+  text: string
+  tools: { id: string; name: string; input: unknown }[]
+} {
+  if (typeof content === 'string') return { text: content, tools: [] }
+  if (!Array.isArray(content)) return { text: '', tools: [] }
+  let text = ''
+  const tools: { id: string; name: string; input: unknown }[] = []
+  for (const block of content) {
+    if (!block || typeof block !== 'object') continue
+    const b = block as { type?: unknown }
+    if (b.type === 'text') {
+      text += (block as { text?: unknown }).text ?? ''
+    } else if (b.type === 'thinking') {
+      text += (block as { thinking?: unknown }).thinking ?? ''
+    } else if (b.type === 'tool_use') {
+      const tu = block as { id?: unknown; name?: unknown; input?: unknown }
+      if (typeof tu.id === 'string') {
+        tools.push({
+          id: tu.id,
+          name: typeof tu.name === 'string' ? tu.name : 'tool',
+          input: tu.input,
+        })
+      }
+    }
+  }
+  return { text, tools }
+}
+
+/**
  * 把事件流聚合成两类展示单元:
  * - 累积文本(text deltas)
  * - 工具调用(tool_use:start / done / error / invalid / denied)
@@ -491,6 +528,40 @@ export function buildTimeline(events: StreamedEvent[]): Array<
   for (const ev of events) {
     const data = ev.data
     switch (ev.type) {
+      case 'assistant': {
+        // 原生 opencc assistant message (AgentTool.mirrorAppendBgEvent 推送)。
+        // data = { content, message: { content: string | block[] }, … }。
+        const native = data as { content?: unknown; message?: { content?: unknown } }
+        const blocks = splitNativeContent(native.message?.content ?? native.content)
+        if (blocks.text) pendingText += blocks.text
+        // assistant message 到达时该回合的工具调用已由模型生成,视为完成,
+        // 前端抽屉以绿色 Done 展示(无后续 tool_result 事件来更新状态)。
+        for (const t of blocks.tools) {
+          if (pendingText) {
+            out.push({ kind: 'text', key: `text-${ev.seq}`, text: pendingText })
+            pendingText = ''
+          }
+          out.push({
+            kind: 'tool',
+            key: `tool-native-${ev.seq}-${t.id}`,
+            entry: { toolUseId: t.id, name: t.name, input: t.input, status: 'done', ts: ev.ts },
+          })
+        }
+        break
+      }
+      case 'user': {
+        // 原生 opencc user message — 单独作为一条文本显示。
+        const native = data as { content?: unknown; message?: { content?: unknown } }
+        const blocks = splitNativeContent(native.message?.content ?? native.content)
+        if (blocks.text) {
+          if (pendingText) {
+            out.push({ kind: 'text', key: `text-${ev.seq}`, text: pendingText })
+            pendingText = ''
+          }
+          out.push({ kind: 'text', key: `user-${ev.seq}`, text: blocks.text })
+        }
+        break
+      }
       case 'content_block_delta': {
         const delta = data.delta as { type?: string; text?: string; thinking?: string } | undefined
         if (delta?.type === 'text_delta' && delta.text) {

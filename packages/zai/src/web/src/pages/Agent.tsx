@@ -147,7 +147,7 @@ export default function Agent() {
         maxWidth: "100%",
         minHeight: 0,
         display: "flex",
-        flexDirection: "row"
+        flexDirection: "row",
       }}
     >
       <div
