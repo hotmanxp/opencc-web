@@ -71,7 +71,7 @@ export async function runDev(options: DevOptions) {
   console.log(`[zai] API server on http://localhost:${apiPort}`);
 
   // Start Vite dev server with retry loop
-  const baseVitePort = options.port ? Number(options.port) : 9201;
+  const baseVitePort = options.port ? Number(options.port) : 8101;
   let vitePort = baseVitePort;
   let viteServer: http.Server;
 
