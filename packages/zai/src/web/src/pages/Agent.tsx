@@ -84,6 +84,22 @@ export default function Agent() {
     useLocalStorageState<boolean>(STORAGE_KEYS.open, defaultSplitScreen);
   const splitPaneOpen = splitPaneOpenStored;
   const toggleSplitPane = () => setSplitPaneOpenStored(!splitPaneOpenStored);
+
+  // 追踪 defaultSplitScreen 的变化:当用户在 Settings drawer 把"默认启动分屏"
+  // 从 false 改为 true 时,如果 localStorage 里仍是 false(旧的默认/从未手动 toggle 过),
+  // 就立即打开分屏.当 localStorage 已有用户手动设置过的值时不覆盖——
+  // 用户手动关过分屏,settings.json 的新默认值不应再次强制打开.
+  const prevDefaultSplitScreenRef = useRef(defaultSplitScreen);
+  useEffect(() => {
+    if (
+      prevDefaultSplitScreenRef.current === false &&
+      defaultSplitScreen === true &&
+      splitPaneOpenStored === false
+    ) {
+      setSplitPaneOpenStored(true);
+    }
+    prevDefaultSplitScreenRef.current = defaultSplitScreen;
+  }, [defaultSplitScreen, splitPaneOpenStored, setSplitPaneOpenStored]);
   // Hook 必须在 splitPaneOpen 派生之后调用, hook 依赖该 boolean.
   const sessionPanel = useSplitPaneSessionAutoCollapse({ splitPaneOpen });
   const sessionsCollapsed = sessionPanel.collapsed;
