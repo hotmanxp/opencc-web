@@ -24,6 +24,7 @@ import { api } from "../lib/api";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import ConversationInfoButton from "../components/ConversationInfoButton";
 import SettingsButton from './SettingsButton'
+import PluginButton from './PluginButton'
 import SharePopover from "./SharePopover.js";
 import { toolbarIconButtonStyle, TOOLBAR_ACTIVE_COLOR } from "./toolbarStyles.js";
 import TodoDropdown from "./TodoDropdown.js";
@@ -732,6 +733,7 @@ export default React.memo(function AgentInputBox() {
           </Popover>
         </Tooltip>
         <SettingsButton />
+        <PluginButton />
         {/* 折叠/展开 transcript 按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
             图标在 collapsed=false 时显示 ExpandOutlined (可折叠), true 时显示
             CompressOutlined (可展开), hover Tooltip 给完整文案, 与同行其他图标按钮
