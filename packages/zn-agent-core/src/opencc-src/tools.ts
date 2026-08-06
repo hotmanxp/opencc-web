@@ -9,7 +9,7 @@ import { FileEditTool } from './tools/FileEditTool/FileEditTool.js'
 import { FileReadTool } from './tools/FileReadTool/FileReadTool.js'
 import { FileWriteTool } from './tools/FileWriteTool/FileWriteTool.js'
 import { GlobTool } from './tools/GlobTool/GlobTool.js'
-import { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.js'
+// import { NotebookEditTool } from './tools/NotebookEditTool/NotebookEditTool.js' // zai web 场景无需 Jupyter notebook 编辑,保留 vendor 文件仅作类型兼容
 import { WebFetchTool } from './tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from './tools/BriefTool/BriefTool.js'
@@ -197,7 +197,7 @@ export function getAllBaseTools(): Tools {
     FileReadTool,
     FileEditTool,
     FileWriteTool,
-    NotebookEditTool,
+    // NotebookEditTool, // zai web 场景无需 Jupyter notebook 编辑
     WebFetchTool,
     TodoWriteTool,
     WebSearchTool,
