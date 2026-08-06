@@ -102,6 +102,31 @@ export const getClaudeConfigHomeDir = memoize(
     `${process.env.OPENCC_CONFIG_DIR ?? ''}\0${process.env.CLAUDE_CONFIG_DIR ?? ''}\0${process.env.ZAI_DATA_DIR ?? ''}`,
 )
 
+/**
+ * Resolve a directory under the user's home with zai→claude fallback.
+ *
+ * Returns `~/.zai/<dirName>` if it exists; otherwise falls back to
+ * `~/.claude/<dirName>`. Mirrors the legacy migration strategy used by
+ * `getClaudeConfigHomeDir` — newer installs land in `~/.zai`, but users
+ * who migrated from upstream claude-code still have their data in
+ * `~/.claude` and we should keep reading from there.
+ *
+ * Use this for subdirectories that the user may have populated outside
+ * of the running binary (e.g. plugins, marketplaces).
+ *
+ * Pure path helper — does not mkdir. Does not consult env overrides
+ * (`OPENCC_CONFIG_DIR`, `ZAI_DATA_DIR`); callers that need those should
+ * layer their own precedence on top.
+ */
+export function getDirInHome(dirName: string): string {
+  const zaiPath = join(homedir(), '.zai', dirName)
+  const claudePath = join(homedir(), '.claude', dirName)
+  if (existsSync(zaiPath)) {
+    return zaiPath
+  }
+  return claudePath
+}
+
 export function getTeamsDir(): string {
   return join(getClaudeConfigHomeDir(), 'teams')
 }

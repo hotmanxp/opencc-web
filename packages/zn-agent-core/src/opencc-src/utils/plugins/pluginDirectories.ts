@@ -14,7 +14,7 @@ import { readdir, rm, stat } from 'fs/promises'
 import { delimiter, join } from 'path'
 import { getUseCoworkPlugins } from '../../bootstrap/state.js'
 import { logForDebugging } from '../debug.js'
-import { getClaudeConfigHomeDir, isEnvTruthy } from '../envUtils.js'
+import { getClaudeConfigHomeDir, getDirInHome, isEnvTruthy } from '../envUtils.js'
 import { errorMessage, isFsInaccessible } from '../errors.js'
 import { formatFileSize } from '../format.js'
 import { expandTilde } from '../permissions/pathValidation.js'
@@ -48,7 +48,8 @@ function getPluginsDirectoryName(): string {
  *
  * Priority:
  * 1. CLAUDE_CODE_PLUGIN_CACHE_DIR env var (explicit override)
- * 2. Default: ~/.claude/plugins or ~/.claude/cowork_plugins
+ * 2. Default: ~/.zai/plugins or ~/.claude/plugins (via getDirInHome fallback)
+ *    — uses ~/.zai/<pluginsDirName> if it exists, otherwise ~/.claude/<pluginsDirName>
  */
 export function getPluginsDirectory(): string {
   // expandTilde: when CLAUDE_CODE_PLUGIN_CACHE_DIR is set via settings.json
@@ -59,7 +60,7 @@ export function getPluginsDirectory(): string {
   if (envOverride) {
     return expandTilde(envOverride)
   }
-  return join(getClaudeConfigHomeDir(), getPluginsDirectoryName())
+  return getDirInHome(getPluginsDirectoryName())
 }
 
 /**
