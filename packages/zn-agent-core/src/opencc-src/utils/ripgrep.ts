@@ -45,10 +45,25 @@ function resolveBuiltinRgPath(): string | null {
   // So from dist/cli.mjs, we go up one level (..) to reach vendor/ripgrep.
   const currentFile = fileURLToPath(import.meta.url)
   const currentDir = path.dirname(currentFile)
-  const vendorPath = path.join(currentDir, '..', 'vendor', 'ripgrep', binName)
 
-  if (existsSync(vendorPath)) {
-    return vendorPath
+  // `import.meta.url` may not point to the expected location in every
+  // host runtime (Bun bundle, Node ESM, or loaders like OpenCC that
+  // serve the bundle from a non-standard path). Try several candidate
+  // shapes so we still resolve vendor/ripgrep when import.meta.url
+  // is one or two layers off:
+  //   1. dist/opencc-core.mjs            → dist/.. → vendor/
+  //   2. dist/compat/vendor/ripgrep.js   → dist/compat/vendor/../../.. → vendor/
+  //   3. dist/opencc-src/utils/*.js      → dist/opencc-src/utils/../../.. → vendor/
+  const candidates = [
+    path.join(currentDir, '..', 'vendor', 'ripgrep', binName),
+    path.join(currentDir, '..', '..', 'vendor', 'ripgrep', binName),
+    path.join(currentDir, '..', '..', '..', 'vendor', 'ripgrep', binName),
+  ]
+
+  for (const candidate of candidates) {
+    if (existsSync(candidate)) {
+      return candidate
+    }
   }
 
   return null
