@@ -78,6 +78,13 @@ export interface ZaiSettings {
    * 默认 20. clamp [1, 1000].
    */
   maxVisibleMessages?: number
+  /**
+   * 桌面端打开 Agent 页面时是否默认启动右侧分屏 (File / Git / Bash 面板).
+   * 仅在 localStorage 中无显式覆盖时生效 — 用户手动 toggle 后的选择永远胜出,
+   * 因此此设置只是"首次启动"的种子值,不会每次重置用户的偏好.
+   * 缺失 / 非 boolean → false. 详见 SplitPane.tsx 的 first-run seed 逻辑.
+   */
+  defaultSplitScreen?: boolean
 }
 
 /**

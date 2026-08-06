@@ -1108,9 +1108,17 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
   try {
     const ctx = req.app.locals.instanceContext as { cwd: string; cwdName: string }
     const store = getTranscriptStore()
+    // 可选 model: 前端在 createNewSession 时会把"用户最近手动选过的模型"
+    // 传过来, 让新建会话默认继承. 缺省/'unknown'/空串都视为不指定, 维持
+    // 旧行为 (useConversationInfo 看到 'unknown' 就会回退到 runtime.defaultModel).
+    const requested = (req.body as { model?: unknown } | undefined)?.model
+    const model =
+      typeof requested === 'string' && requested.length > 0 && requested !== 'unknown'
+        ? requested
+        : 'unknown'
     const sessionId = await store.create({
       cwd: ctx.cwd,
-      model: 'unknown',
+      model,
       permissionMode: getDefaultMode(),
     }, { cwd: ctx.cwd })
     res.json({ sessionId })

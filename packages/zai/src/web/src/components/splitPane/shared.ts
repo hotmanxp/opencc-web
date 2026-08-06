@@ -5,6 +5,9 @@ export const STORAGE_KEYS = {
   open: 'zai.splitPane.open',
   tab: 'zai.splitPane.tab',
   width: 'zai.splitPane.widthVw',
+  // 2026-08-05: 分屏宽度拖动锁开关 — 默认 true (锁定) 防止误触, 用户点
+  // 悬浮按钮解锁后才能拖动调整宽度. 持久化偏好 (跟 width/tab 同级).
+  locked: 'zai.splitPane.locked',
   // 2026-07-26+: 移动端常用指令 Drawer 的本地 prompt 片段持久化。
   // 独立命名空间避开既有 zai.splitPane.* / zai.app.* 前缀。
   quickPrompts: 'zai.quickPrompts.v1',

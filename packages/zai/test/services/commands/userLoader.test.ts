@@ -60,6 +60,31 @@ describe('loadUserCommands', () => {
     const cmds = await loadUserCommands({ cwd: '/x', dataDir: tmpHome })
     expect(cmds.map((c) => c.name)).toEqual(['good'])
   })
+
+  it('merges project-level .claude/commands with home-level commands', async () => {
+    const cwd = join(tmpHome, 'proj')
+    const projDir = join(cwd, '.claude', 'commands')
+    mkdirSync(projDir, { recursive: true })
+    // home-level
+    writeCommand('greet', { description: 'home' }, 'home body')
+    // project-level
+    writeFileSync(join(projDir, 'release.md'), '---\ndescription: "Release OpenCC"\n---\nbody', 'utf-8')
+    const cmds = await loadUserCommands({ cwd, dataDir: tmpHome })
+    const names = cmds.map((c) => c.name)
+    expect(names).toContain('greet')
+    expect(names).toContain('release')
+  })
+
+  it('project-level command overrides same-named home command', async () => {
+    const cwd = join(tmpHome, 'proj2')
+    const projDir = join(cwd, '.claude', 'commands')
+    mkdirSync(projDir, { recursive: true })
+    writeCommand('greet', { description: 'home greet' }, 'home')
+    writeFileSync(join(projDir, 'greet.md'), '---\ndescription: "proj greet"\n---\nproj', 'utf-8')
+    const cmds = await loadUserCommands({ cwd, dataDir: tmpHome })
+    expect(cmds).toHaveLength(1)
+    expect(cmds[0]!.description).toBe('proj greet')
+  })
 })
 
 describe('reloadUserCommands', () => {

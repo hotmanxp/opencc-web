@@ -1146,6 +1146,31 @@ export const SettingsSchema = lazySchema(() =>
         .describe(
           'Git governance settings for AI attribution and commit-message policy.',
         ),
+      glob: z
+        .object({
+          respectGitIgnore: z
+            .boolean()
+            .optional()
+            .describe(
+              'Whether GlobTool respects .gitignore files when listing files. ' +
+                'Defaults to true. Set to false to search all files including ' +
+                'node_modules, .git, dist, build, etc.',
+            ),
+          additionalExcludePatterns: z
+            .array(z.string())
+            .optional()
+            .describe(
+              'Extra directory/file patterns to exclude from file listing in ' +
+                'addition to the built-in defaults (node_modules, .git, .svn, .hg). ' +
+                'Patterns use ripgrep glob syntax matched against relative paths, ' +
+                'e.g. ["dist", "coverage", "*.generated.ts"].',
+            ),
+        })
+        .optional()
+        .describe(
+          'Glob tool behavior overrides. Controls .gitignore handling and ' +
+            'additional exclude patterns for the Glob tool. Does not affect GrepTool.',
+        ),
       autoMemoryDirectory: z
         .string()
         .optional()

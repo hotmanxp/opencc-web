@@ -4,6 +4,17 @@
 
 **opencc-web** 是 zai 的本地开发与运行工具集,在 `packages/zai`(Express + SSE server + React/Zustand/AntD 前端)与 `packages/zn-agent-core`(Agent 运行时核心库)两个 workspace 中实现 Agent 对话、流式 UI、命令/Skill/插件等能力。zai 仅监听 localhost,不依赖外部鉴权。
 
+## 技术栈
+
+| 层 | 技术 | 版本 |
+|----|------|------|
+| 语言 | TypeScript | ^5.6 |
+| 运行时 | Bun(direct) / Node 兜底 | Node >=20 |
+| zai 前端 | React + Zustand + AntD + Vite | 18.3 / 4.5 / 5.22 / 8.1 |
+| zai 服务端 | Express + SSE | ^4.21 |
+| zn-agent-core vendor | opencc 0.20.0(Bun-direct) | — |
+| 测试 | Vitest | ^4.1 |
+
 ## 目录
 
 | 目录 | 职责 |
@@ -15,7 +26,7 @@
 
 ## 强制开发规则
 
-- **真实浏览器验收**:任何问题修复或特性新增,完成前必须用 `/ego-browser` skill 启动真实 zai 实例并走完用户路径(页面加载、按钮点击、表单提交、截图等)。**禁止**用 Chrome DevTools MCP、Playwright、Puppeteer、`curl + WebFetch` 或单元测试替代。环境阻塞时必须显式报告。
+- **真实浏览器验收**:任何问题修复或特性新增,完成前必须用 `/ego-browser` skill 启动真实 zai 实例并走完用户路径(页面加载、按钮点击、表单提交、截图等)。**禁止**用 Chrome DevTools MCP、Playwright、Puppeteer、`curl + WebFetch` 或单元测试替代。环境阻塞时必须显式报告。**注意**:`/ego-browser` 测试本地功能时,不要 kill 920x 端口所在的服务进程——920x 是 zai 正式服务端口, kill 后会导致真实实例不可用,应改为让 ego 使用另一个可用端口(如 8101 起)访问,或用 `pnpm --filter @zn-ai/zai dev` 启动独立开发服务。
 - **Bun-direct runtime**:`zai dev` 默认走 Bun;Node 兜底入口需 `--import bun-protocol.mjs` 拦截 `bun:bundle` / `bun:feature`,漏掉会 `ERR_UNSUPPORTED_ESM_URL_SCHEME`。opencc vendor 是 un-stripped 全量,Node 兜底包加载较慢,只用于 CI / 测试。
 - **opencc-src vs compat**:verbatim 移植的 compat 文件,若 opencc 上游是纯类型/常量,优先让 zai 调用方**直接**从 `opencc-src/<name>` 取值,compat 仅留作 zai 专属别名载体。`scripts/bundle-opencc.mjs` 用 esbuild `bundle: false` 单文件编 → `dist/opencc-src/types/<name>.js` 暴露子路径。**禁止**用 tsc 整编 opencc-src(拖入 UI 传递依赖)。详见 plan `docs/superpowers/plans/2026-08-01-compat-direct-opencc-src-permissions.md`。
 - **MACRO stub**:`zai-server` 启动时需在 `enableOpenccConfigs` 内调 `installMacroStub()` 预填 `globalThis.MACRO`,否则 vendor 顶层 `MACRO.X` 引用 panic。
@@ -55,11 +66,18 @@ pnpm release:major
 
 ## 文档入口
 
-- 架构与实现细节 → `docs/DEVELOPMENT_REFERENCE.md`
-- 架构总览研究 → `docs/superpowers/specs/2026-07-25-opencc-web-architecture-overview.md`
-- SSE 状态推送设计 → `docs/superpowers/specs/2026-07-19-sse-state-push-design.md`
-- 会话压缩设计 → `docs/superpowers/specs/2026-07-19-zai-session-compaction-design.md`
-- MCP 过滤字段 → `docs/superpowers/plans/2026-07-20-zai-mcp-disabled-servers.md`
-- OpenCC Adapter(Node/tsx) → `docs/superpowers/specs/2026-07-29-zn-agent-core-opencc-adapter-node-design.md`(Bun 版 spec 已 deprecated)
+| 类别 | 路径 |
+|------|------|
+| 架构与实现细节 | `docs/DEVELOPMENT_REFERENCE.md` |
+| 架构总览研究 | `docs/superpowers/specs/2026-07-25-opencc-web-architecture-overview.md` |
+| SSE 状态推送设计 | `docs/superpowers/specs/2026-07-19-sse-state-push-design.md` |
+| 会话压缩设计 | `docs/superpowers/specs/2026-07-19-zai-session-compaction-design.md` |
+| opencc-src 直取约定 | `docs/superpowers/plans/2026-08-01-compat-direct-opencc-src-permissions.md` |
+| OpenCC Server 运行时 | `docs/superpowers/specs/2026-08-01-opencc-server-runtime-design.md` |
+| Provider/Model 路由覆盖 | `docs/superpowers/specs/2026-08-03-provider-model-route-overrides-design.md` |
+| Agent 实例管理 | `docs/superpowers/specs/2026-08-03-zai-agent-instance-manager-design.md` |
+| OpenCC Adapter(Node/tsx) | `docs/superpowers/specs/2026-07-29-zn-agent-core-opencc-adapter-node-design.md`(Bun 版已 deprecated) |
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
+
+<!-- updated: 2026-08-06 -->

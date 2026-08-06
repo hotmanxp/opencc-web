@@ -961,6 +961,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         _taskClearTimers: nextTimers,
       }
     })
+    // 提取"用户最近手动选过的模型" — 按 sessions.updatedAt 倒序扫描, 第一个
+    // model 非空且非 'unknown' 的会话即用户在 ModelStatusButton picker 里选过
+    // 模型的最近一次 (pickEntry → patchSessionModel 写入 meta.model 并刷新
+    // updatedAt). 找不到时 (用户从未手动选过) 返回 null, body 不带 model,
+    // server 端维持 'unknown', useConversationInfo 走 runtime.defaultModel 回退.
+    const previousSessions = get().sessions
+    let lastSelectedModel: string | null = null
+    const sortedSessions = [...previousSessions].sort(
+      (a, b) => b.updatedAt - a.updatedAt,
+    )
+    for (const s of sortedSessions) {
+      if (s.model && s.model !== 'unknown') {
+        lastSelectedModel = s.model
+        break
+      }
+    }
     // 同步在 server 端建一条空 transcript, 让 sidebar 立即多一条
     // '新会话' 占位条目 (而不是等第一条消息发出去才出现).
     try {
@@ -968,7 +984,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const res = await fetch('/api/agent/sessions', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
-        body: JSON.stringify({}),
+        body: JSON.stringify(
+          lastSelectedModel ? { model: lastSelectedModel } : {},
+        ),
       })
       if (!res.ok) return
       const data = (await res.json()) as { sessionId: string }

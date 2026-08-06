@@ -5,14 +5,18 @@ import { spawn } from '../services/spawner.js';
 import { createSseStream } from './stream.js';
 
 const router: IRouter = Router();
+const CliNameSchema = z.enum(['nova', 'opencode', 'opencc', 'agent-login', 'codegraph', 'zai']);
 
 router.get('/cli', async (req, res) => {
   try {
     // ?refresh=1 跳过 latestVersion 的 24h 缓存，重新跑 npm view 拿仓库最新版本号。
+    // ?name=<工具名> 仅检测指定工具，供工具卡片单独重新检测。
     // 当前 currentVersion 因为从不缓存，强制刷新和正常调用结果一致——保留 refresh
     // 语义主要是给前端一个统一的"重新拉取"触发点。
     const forceRefresh = req.query.refresh === '1';
-    const list = await getCliStatuses(forceRefresh);
+    const parsedName = typeof req.query.name === 'string' ? CliNameSchema.safeParse(req.query.name) : undefined;
+    if (parsedName && !parsedName.success) return res.status(400).json({ error: 'invalid name' });
+    const list = await getCliStatuses(forceRefresh, parsedName?.success ? parsedName.data : undefined);
     res.json(list);
   } catch (err) {
     res.status(500).json({ error: String(err) });

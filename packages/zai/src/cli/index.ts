@@ -43,7 +43,7 @@ program
 program
   .command('dev')
   .description('Development mode (Vite HMR + Express)')
-  .option('--port <port>', 'Vite dev server port (default: 9888, auto-scan if occupied)')
+  .option('--port <port>', 'Vite dev server port (default: 8101, auto-scan if occupied)')
   .option('--api-port <port>', 'Express API port (default: 7715, auto-scan if occupied)')
   .option('--no-open', 'Do not auto-open browser')
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')

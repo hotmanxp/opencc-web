@@ -107,6 +107,15 @@ interface AppState {
   maxVisibleMessages: number;
   setMaxVisibleMessages: (n: number) => void;
   /**
+   * 桌面端打开 Agent 页面时是否默认启动右侧分屏. 持久化到
+   * ~/.zai/settings.json(settings.defaultSplitScreen),Layout mount effect
+   * 用 GET /api/agent/settings hydrate. 仅在 localStorage 无显式覆盖时生效,
+   * SplitPane / Agent.tsx 在 first-run seed effect 里用它作为 localStorage
+   * 缺失时的种子值 — 用户手动 toggle 的选择永远胜出.
+   */
+  defaultSplitScreen: boolean;
+  setDefaultSplitScreen: (v: boolean) => void;
+  /**
    * 是否移动端视口. 由 `useIsMobile()` hook 通过 matchMedia 维护, 任何组件
    * 直接读 store 即可, 无需 props 透传. 路由层 Layout/MobileLayout 也用
    * 这个值决定走哪一套布局 (Sider + SettingsDrawer vs. MobileHeader).
@@ -143,6 +152,7 @@ export const useAppStore = create<AppState>((set) => ({
   // cold-load reflects the user's persisted choice without a flash.
   outputStyle: 'default',
   maxVisibleMessages: 20,
+  defaultSplitScreen: false,
   setConnected: (v) => set({ connected: v }),
   setInstanceContext: (ctx) => set({ instanceContext: ctx }),
   applyJobEvent: (event) => set((state) => {
@@ -258,6 +268,7 @@ export const useAppStore = create<AppState>((set) => ({
   setSettingsTheme: (t) => set({ settingsTheme: t }),
   setOutputStyle: (style) => set({ outputStyle: style }),
   setMaxVisibleMessages: (n) => set({ maxVisibleMessages: n }),
+  setDefaultSplitScreen: (v) => set({ defaultSplitScreen: v }),
   isMobile: false,
   setIsMobile: (v) => set({ isMobile: v }),
   quickDrawerOpen: false,

@@ -53,6 +53,29 @@ function parseBoolField(
   return { ok: true, value: v === true }
 }
 
+/**
+ * Parse an optional port body field. Tri-state contract:
+ * - `undefined` (absent) → `{ value: undefined }` so callers can forward
+ *   "no override" through to the supervisor (used by /start, /restart);
+ * - `null` → `{ value: null }` only meaningful for PATCH, where it
+ *   explicitly clears the pin back to auto. POST /instances rejects
+ *   `null` at the call-site because there's nothing to clear on a
+ *   brand-new definition;
+ * - integer 1..65535 → `{ value: number }`;
+ * - everything else → 400.
+ */
+function parsePortField(
+  v: unknown,
+  field: string,
+): { ok: true; value: number | null | undefined } | { ok: false; error: string } {
+  if (v === undefined) return { ok: true, value: undefined }
+  if (v === null) return { ok: true, value: null }
+  if (typeof v !== 'number' || !Number.isInteger(v) || v < 1 || v > 65535) {
+    return { ok: false, error: `${field} must be an integer between 1 and 65535` }
+  }
+  return { ok: true, value: v }
+}
+
 router.get('/instances', (_req, res) => {
   res.json({ instances: getInstanceSupervisor().getSnapshots() })
 })
@@ -72,8 +95,20 @@ router.post('/instances', async (req, res) => {
   }
   const lan = parseBoolField((req.body ?? {}).lan, 'lan')
   if (!lan.ok) return badRequest(res, lan.error)
+  // POST /instances never accepts `null` for `port` — a brand-new
+  // definition has no pin to clear. Treat `null` as a type error here
+  // even though parsePortField allows it for PATCH symmetry.
+  const rawPort = (req.body ?? {}).port
+  if (rawPort === null) return badRequest(res, 'port must be an integer between 1 and 65535')
+  const port = parsePortField(rawPort, 'port')
+  if (!port.ok) return badRequest(res, port.error)
   try {
-    const instance = await getInstanceSupervisor().createInstance({ name: name.trim(), cwd, lan: lan.value === true })
+    const instance = await getInstanceSupervisor().createInstance({
+      name: name.trim(),
+      cwd,
+      lan: lan.value === true,
+      port: port.value as number | undefined,
+    })
     res.status(201).json({ instance })
   } catch (err) {
     handleError(res, err)
@@ -84,13 +119,19 @@ router.post('/instances/:id/start', async (req, res) => {
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot start current instance')
   const lan = parseBoolField((req.body ?? {}).lan, 'lan')
   if (!lan.ok) return badRequest(res, lan.error)
+  const port = parsePortField((req.body ?? {}).port, 'port')
+  if (!port.ok) return badRequest(res, port.error)
   try {
-    // Per-call `lan` overrides the persisted `def.lan` so the UI can
-    // "start this one with --lan just this once" without rewriting the
-    // definition. `value === undefined` means "use the persisted value".
+    // Per-call `lan` / `port` override the persisted definition so the
+    // UI can "start this one with --lan / on port X just this once"
+    // without rewriting the definition. `value === undefined` means
+    // "use the persisted value".
+    const overrides: { lan?: boolean; port?: number | null } = {}
+    if (lan.value !== undefined) overrides.lan = lan.value
+    if (port.value !== undefined) overrides.port = port.value
     const instance = await getInstanceSupervisor().startInstance(
       req.params.id,
-      lan.value !== undefined ? { lan: lan.value } : undefined,
+      Object.keys(overrides).length > 0 ? overrides : undefined,
     )
     res.json({ instance })
   } catch (err) {
@@ -112,10 +153,15 @@ router.post('/instances/:id/restart', async (req, res) => {
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot restart current instance')
   const lan = parseBoolField((req.body ?? {}).lan, 'lan')
   if (!lan.ok) return badRequest(res, lan.error)
+  const port = parsePortField((req.body ?? {}).port, 'port')
+  if (!port.ok) return badRequest(res, port.error)
   try {
+    const overrides: { lan?: boolean; port?: number | null } = {}
+    if (lan.value !== undefined) overrides.lan = lan.value
+    if (port.value !== undefined) overrides.port = port.value
     const instance = await getInstanceSupervisor().restartInstance(
       req.params.id,
-      lan.value !== undefined ? { lan: lan.value } : undefined,
+      Object.keys(overrides).length > 0 ? overrides : undefined,
     )
     res.json({ instance })
   } catch (err) {
@@ -127,8 +173,13 @@ router.patch('/instances/:id', async (req, res) => {
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot patch current instance')
   const lan = parseBoolField((req.body ?? {}).lan, 'lan')
   if (!lan.ok) return badRequest(res, lan.error)
+  const port = parsePortField((req.body ?? {}).port, 'port')
+  if (!port.ok) return badRequest(res, port.error)
   try {
-    const instance = await getInstanceSupervisor().updateInstance(req.params.id, { lan: lan.value === true })
+    const patch: { lan?: boolean; port?: number | null } = {}
+    if (lan.value !== undefined) patch.lan = lan.value
+    if (port.value !== undefined) patch.port = port.value
+    const instance = await getInstanceSupervisor().updateInstance(req.params.id, patch)
     res.json({ instance })
   } catch (err) {
     handleError(res, err)

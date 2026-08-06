@@ -82,4 +82,35 @@ describe("MessageListView — Agent 工具卡过滤", () => {
     expect(screen.getByText("hi")).toBeInTheDocument()
     expect(screen.getByText("hello back")).toBeInTheDocument()
   })
+
+  test("collapsed 视图: 新消息 append 到同一 text bucket 不重挂载已渲染的消息", () => {
+    // 回归: 旧实现用 `txt-${startIndex}-${endIndex}-${i}` 作包裹 div key,
+    // 新消息并入同一 text node 会让 endIndex 变大 → key 变化 → 整棵子树
+    // 卸载重挂载 → CollapsedMessageBubble / AssistantTextBody 内部展开态丢失.
+    collapsed.value = true
+    const { rerender } = render(
+      <MessageListView
+        messages={[
+          { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" },
+          { eventId: "a1", sessionId: "sess-1", ts: 2, turnIndex: 0, type: "assistant.text", text: "long answer" },
+        ]}
+      />,
+    )
+    // forceExpanded 让 "long answer" 直接渲染, getByText 返回承载该文本的 DOM 节点.
+    const before = screen.getByText("long answer")
+    // 新 turn: 用户再发一条 + 助手回复, 全部并入同一 text bucket (无工具边界).
+    rerender(
+      <MessageListView
+        messages={[
+          { eventId: "u1", sessionId: "sess-1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" },
+          { eventId: "a1", sessionId: "sess-1", ts: 2, turnIndex: 0, type: "assistant.text", text: "long answer" },
+          { eventId: "u2", sessionId: "sess-1", ts: 3, turnIndex: 1, type: "user.text", text: "again" },
+          { eventId: "a2", sessionId: "sess-1", ts: 4, turnIndex: 1, type: "assistant.text", text: "second reply" },
+        ]}
+      />,
+    )
+    // 同一 DOM 节点 → 未被重挂载, 内部状态保留.
+    expect(screen.getByText("long answer")).toBe(before)
+    expect(screen.getByText("second reply")).toBeInTheDocument()
+  })
 })

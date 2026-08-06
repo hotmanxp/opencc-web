@@ -76,10 +76,30 @@ export default function Agent() {
   // 默认收起, 让对话区首屏占满主视图, 用户按需点开.
   // 后续会被 useSplitPaneSessionAutoCollapse 接管 — 进入分屏时强制收起,
   // 用户点开可在 10s 内 (切会话 / hover / mousemove 重置) 自动收回.
+  // splitPaneOpen 的初始默认值取自 useAppStore.defaultSplitScreen
+  // (由 Layout 在 mount 时从 settings.json hydrate),跟 SplitPane.tsx 同源 —
+  // localStorage 已有显式值时显式值胜出,确保两侧 toggle 状态一致.
+  const defaultSplitScreen = useAppStore((s) => s.defaultSplitScreen);
   const [splitPaneOpenStored, setSplitPaneOpenStored] =
-    useLocalStorageState<boolean>(STORAGE_KEYS.open, false);
+    useLocalStorageState<boolean>(STORAGE_KEYS.open, defaultSplitScreen);
   const splitPaneOpen = splitPaneOpenStored;
   const toggleSplitPane = () => setSplitPaneOpenStored(!splitPaneOpenStored);
+
+  // 追踪 defaultSplitScreen 的变化:当用户在 Settings drawer 把"默认启动分屏"
+  // 从 false 改为 true 时,如果 localStorage 里仍是 false(旧的默认/从未手动 toggle 过),
+  // 就立即打开分屏.当 localStorage 已有用户手动设置过的值时不覆盖——
+  // 用户手动关过分屏,settings.json 的新默认值不应再次强制打开.
+  const prevDefaultSplitScreenRef = useRef(defaultSplitScreen);
+  useEffect(() => {
+    if (
+      prevDefaultSplitScreenRef.current === false &&
+      defaultSplitScreen === true &&
+      splitPaneOpenStored === false
+    ) {
+      setSplitPaneOpenStored(true);
+    }
+    prevDefaultSplitScreenRef.current = defaultSplitScreen;
+  }, [defaultSplitScreen, splitPaneOpenStored, setSplitPaneOpenStored]);
   // Hook 必须在 splitPaneOpen 派生之后调用, hook 依赖该 boolean.
   const sessionPanel = useSplitPaneSessionAutoCollapse({ splitPaneOpen });
   const sessionsCollapsed = sessionPanel.collapsed;

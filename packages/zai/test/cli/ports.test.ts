@@ -1,5 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import {
+  assertPortAvailable,
   findAvailablePort,
   listen,
   parsePort,
@@ -68,5 +69,37 @@ describe('findAvailablePort', () => {
       'No available port found',
     );
     for (const s of servers) s.close();
+  });
+});
+
+describe('assertPortAvailable', () => {
+  it('resolves when the port is free', async () => {
+    const base = 49500;
+    // Best-effort cleanup if a previous run left a listener.
+    const probe = await listen(0);
+    const used = (probe.address() as { port: number }).port;
+    probe.close();
+    const candidate = used === base ? base + 1 : base;
+    await expect(assertPortAvailable(candidate)).resolves.toBeUndefined();
+  });
+
+  it('rejects with a port-bearing error when the port is already bound', async () => {
+    const blocker = await listen(0);
+    try {
+      const occupied = (blocker.address() as { port: number }).port;
+      await expect(assertPortAvailable(occupied)).rejects.toThrow();
+    } finally {
+      blocker.close();
+    }
+  });
+
+  it('does not leak the probe server (port is reusable after resolve)', async () => {
+    const probe = await listen(0);
+    const port = (probe.address() as { port: number }).port;
+    probe.close();
+    await assertPortAvailable(port);
+    // A second assertPortAvailable on the same port should still succeed,
+    // proving the previous probe closed cleanly.
+    await expect(assertPortAvailable(port)).resolves.toBeUndefined();
   });
 });

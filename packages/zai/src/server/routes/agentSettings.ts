@@ -8,9 +8,11 @@ import type { ProviderProfile } from '../../shared/types.js'
 import { getDefaultMode } from '../services/permissionMode.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
 import {
+  isValidDefaultSplitScreen,
   isValidOutputStyle,
   isValidTheme,
   readZaiSettings,
+  resolveDefaultSplitScreen,
   resolveOutputStyle,
   resolveTheme,
   writeZaiSettings,
@@ -128,6 +130,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       typeof settings.maxVisibleMessages === 'number'
         ? Math.max(1, Math.min(1000, Math.floor(settings.maxVisibleMessages)))
         : 20
+    const defaultSplitScreen = resolveDefaultSplitScreen(settings)
     res.json({
       defaultModel,
       baseURL,
@@ -136,6 +139,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       outputStyle,
       theme,
       maxVisibleMessages,
+      defaultSplitScreen,
     })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
@@ -216,6 +220,37 @@ router.put(
       const next: ZaiSettings = { ...settings, maxVisibleMessages: clamped }
       await writeZaiSettings(next)
       res.json({ value: next.maxVisibleMessages })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  },
+)
+
+/**
+ * PUT /api/agent/settings/default-split-screen — persist the web UI's
+ * "默认启动分屏" setting. Body is `{ value: boolean }`.
+ *
+ * Used by SettingsDrawer when the user toggles the "默认启动分屏" row.
+ * Returns the persisted value so the client echoes back the canonical form.
+ *
+ * Note: this only seeds the first-run default in localStorage — a user who
+ * has already toggled the split-pane manually retains their explicit choice
+ * (see SplitPane.tsx first-run seed effect for details).
+ */
+router.put(
+  '/agent/settings/default-split-screen',
+  async (req: Request, res: Response) => {
+    const raw = (req.body as { value?: unknown } | undefined)?.value
+    if (!isValidDefaultSplitScreen(raw)) {
+      return res
+        .status(400)
+        .json({ error: `invalid defaultSplitScreen: ${String(raw)}` })
+    }
+    try {
+      const settings = await readZaiSettings()
+      const next: ZaiSettings = { ...settings, defaultSplitScreen: raw }
+      await writeZaiSettings(next)
+      res.json({ value: next.defaultSplitScreen })
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
     }

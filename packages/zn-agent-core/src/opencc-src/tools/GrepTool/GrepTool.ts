@@ -106,6 +106,20 @@ const VCS_DIRECTORIES_TO_EXCLUDE = [
   '.sl',
 ] as const
 
+// Heavy/build directories to exclude from searches by default. Mirrors
+// GlobTool's DEFAULT_EXCLUDE_PATTERNS so grep results are consistent with
+// what `Glob` would return — without these, GrepTool content searches
+// happily hit node_modules/dist/build outputs and flood the result with
+// third-party code.
+const DEFAULT_EXCLUDE_DIRECTORIES = [
+  'node_modules',
+  'dist',
+  'build',
+  '.next',
+  '.cache',
+  'coverage',
+] as const
+
 // Default cap on grep results when head_limit is unspecified. Unbounded content-mode
 // greps can fill up to the 20KB persist threshold (~6-24K tokens/grep-heavy session).
 // 250 is generous enough for exploratory searches while preventing context bloat.
@@ -338,6 +352,14 @@ export const GrepTool = buildTool({
 
     // Exclude VCS directories to avoid noise from version control metadata
     for (const dir of VCS_DIRECTORIES_TO_EXCLUDE) {
+      args.push('--glob', `!${dir}`)
+    }
+
+    // Exclude heavy/build directories by default to keep grep results
+    // consistent with GlobTool. ripgrep matches the directory name anywhere
+    // in the path, so a bare `node_modules` correctly excludes
+    // `**/node_modules/**` at any depth.
+    for (const dir of DEFAULT_EXCLUDE_DIRECTORIES) {
       args.push('--glob', `!${dir}`)
     }
 

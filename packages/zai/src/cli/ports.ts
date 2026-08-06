@@ -37,3 +37,23 @@ export async function findAvailablePort(
     `No available port found in range [${start}, ${start + maxAttempts - 1}]`,
   );
 }
+
+/**
+ * Verify a specific port is bindable on `host` (default loopback) without
+ * keeping the listener around. Used by the instance supervisor when the
+ * user pins a fixed port on an instance definition: bind a probe server,
+ * close it immediately, and let the real child process race for the port
+ * afterwards. If `listen` rejects (e.g. `EADDRINUSE`) the caller surfaces
+ * a clear error and marks the instance `down`.
+ *
+ * Kept separate from `findAvailablePort` so the auto-allocation path
+ * remains a pure scan; this entrypoint makes the "user asked for X,
+ * X is not free" contract explicit.
+ */
+export async function assertPortAvailable(
+  port: number,
+  host = '127.0.0.1',
+): Promise<void> {
+  const server = await listen(port, host);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+}

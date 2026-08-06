@@ -23,6 +23,21 @@ export interface InstanceDefinition {
    * dev's notebook doesn't accidentally expose unrelated workspaces.
    */
   lan?: boolean
+  /**
+   * Optional fixed port for `start`/`restart`. When a positive integer is
+   * set the supervisor MUST start the child on that exact port and fails
+   * the start (instance → `down`) if the port is already bound. `null` or
+   * omitted preserves the legacy behaviour: the supervisor scans from
+   * `INSTANCE_BASE_PORT` (9201) upward via `probePort`. Kept on the
+   * definition so a user-set port persists across restarts and is
+   * overridable per-start (see `startInstance({ port })`).
+   *
+   * Named `startPort` (not `port`) to disambiguate from
+   * `InstanceStatus.port`, which carries the *runtime* port the child
+   * bound to — `InstanceSnapshot` extends both interfaces so the two
+   * fields cannot share a name without one of them losing precision.
+   */
+  startPort?: number | null
 }
 
 export interface InstanceStatus {

@@ -69,6 +69,7 @@ export default function Tools() {
   const [tools, setTools] = useState<CliStatus[]>([]);
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
+  const [refreshingPkg, setRefreshingPkg] = useState<string | null>(null);
   const [installPkg, setInstallPkg] = useState<string | null>(null);
   const [installLabel, setInstallLabel] = useState<string>('');
   const [installEvents, setInstallEvents] = useState<SseEvent[]>([]);
@@ -104,6 +105,20 @@ export default function Tools() {
     message.success('已重新拉取所有工具最新版本');
   };
 
+  const handleRefreshOne = async (cli: CliStatus, label: string) => {
+    setRefreshingPkg(cli.pkg);
+    try {
+      const [data] = await api.get<CliStatus[]>(`/cli?refresh=1&name=${encodeURIComponent(cli.name)}`);
+      if (!data) throw new Error('未找到工具');
+      setTools((current) => current.map((tool) => tool.name === data.name ? data : tool));
+      message.success(`已重新检测 ${label}`);
+    } catch {
+      message.error(`${label} 检测失败`);
+    } finally {
+      setRefreshingPkg(null);
+    }
+  };
+
   const handleInstall = (pkg: string, label: string) => {
     if (installPkg) return;
     setInstallEvents([]);
@@ -128,7 +143,7 @@ export default function Tools() {
 
   return (
     <div className="space-y-4">
-      <div style={{ display: 'flex', justifyContent: 'flex-end' }}>
+      <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
         <Button
           icon={<SyncOutlined spin={refreshing} />}
           loading={refreshing}
@@ -199,6 +214,15 @@ export default function Tools() {
                     onClick={() => cli && handleInstall(cli.pkg, status.installed ? '更新' : '安装')}
                   >
                     {status.upToDate ? '已是最新' : (status.installed ? '更新' : '安装')}
+                  </Button>
+                  <Button
+                    style={{ flex: 1, minWidth: 0 }}
+                    icon={<SyncOutlined spin={refreshingPkg === cli?.pkg} />}
+                    loading={refreshingPkg === cli?.pkg}
+                    disabled={!cli || !!refreshingPkg || refreshing}
+                    onClick={() => cli && handleRefreshOne(cli, card.label)}
+                  >
+                    重新检测
                   </Button>
                   {showConfig && (
                     <Button

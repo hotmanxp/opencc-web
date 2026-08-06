@@ -63,7 +63,7 @@ describe('AgentInputBox — slash command UI visibility', () => {
     await waitFor(() => expect(vi.mocked(api.post)).toHaveBeenCalled())
   }
 
-  test("'prompt' branch pushes the raw /cmd args and a rendered user.text", async () => {
+  test("'prompt' branch pushes only the raw /cmd args (no rendered prompt line)", async () => {
     vi.mocked(api.post).mockResolvedValueOnce({
       type: "prompt",
       payload: { rendered: "Hello alice" },
@@ -71,14 +71,11 @@ describe('AgentInputBox — slash command UI visibility', () => {
     await typeAndSubmit("/greet alice")
     await waitFor(() => {
       const msgs = useAgentStore.getState().messages
-      expect(msgs.length).toBeGreaterThanOrEqual(2)
-      const tail = msgs.slice(-2)
-      expect(tail[0]).toMatchObject({ type: "user.text", text: "/greet alice" })
-      expect(tail[1]).toMatchObject({
-        type: "user.text",
-        text: "Hello alice",
-        isRenderedPrompt: true,
-      })
+      const tail = msgs[msgs.length - 1]
+      expect(tail).toMatchObject({ type: "user.text", text: "/greet alice" })
+      expect((tail as { isRenderedPrompt?: boolean }).isRenderedPrompt).toBe(
+        false,
+      )
     })
   })
 
