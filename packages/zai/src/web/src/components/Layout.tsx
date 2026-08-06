@@ -2,7 +2,6 @@ import { useEffect, useState } from 'react';
 import { Layout as AntLayout, Menu, Switch, Tag } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  DashboardOutlined,
   ToolOutlined,
   AppstoreOutlined,
   LoginOutlined,
@@ -29,9 +28,6 @@ const menuItems = [
   { key: '/agent', icon: <RobotOutlined />, label: 'Agent' },
   { key: '/instances', icon: <ClusterOutlined />, label: '实例管理' },
   { key: '/login', icon: <LoginOutlined />, label: '登录' },
-  // / 路径保留为入口重定向到 /agent，菜单的"系统信息"显式指向 /dashboard 子路由，
-  // 否则 antd Menu 拿 / 作为 selectedKey 会触发跳转再被 Navigate 弹回 /agent。
-  { key: '/dashboard', icon: <DashboardOutlined />, label: '系统信息' },
   { key: '/tools', icon: <ToolOutlined />, label: '工具' },
   { key: '/resources', icon: <AppstoreOutlined />, label: '资源' },
   { key: '/config', icon: <SettingOutlined />, label: '配置' },

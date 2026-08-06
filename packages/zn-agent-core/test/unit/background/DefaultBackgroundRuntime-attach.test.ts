@@ -289,6 +289,33 @@ describe('events() replay', () => {
   })
 })
 
+describe('JsonTaskStore.save() 并发竞态', () => {
+  it('同一 task 并发 save 不触发 verifyWrite mismatch,且最终文件合法', async () => {
+    const id = 'agent-race'
+    // 结构相同、长度几乎一致的不同 eventCount,模拟 appendTaskEvent/finalizeTask
+    // 并发写同一路径 —— 修复前 verifyWrite 会误判 mismatch 并 unlink 文件。
+    const tasks: BackgroundTask[] = Array.from({ length: 20 }, (_, i) => ({
+      id,
+      status: i === 19 ? 'completed' : 'queued',
+      input: { prompt: `step ${i}` },
+      createdAt: 1000 + i,
+      eventCount: i,
+    }))
+
+    const results = await Promise.allSettled(tasks.map((t) => store.save(t)))
+
+    // 没有任何一次 save 因 read-back mismatch 抛错
+    const rejected = results.filter((r) => r.status === 'rejected') as PromiseRejectedResult[]
+    expect(rejected).toHaveLength(0)
+
+    // 文件仍存在且能完整 parse 出合法 task(没有被误删)
+    const persisted = await store.load(id)
+    expect(persisted).not.toBeNull()
+    expect(persisted?.id).toBe(id)
+    expect(persisted?.eventCount).toBe(19)
+  })
+})
+
 // 在测试期间不污染类型层签名,只是把 BackgroundTask / TaskEvent re-export
 // 让上面 import 看起来自然
 type _ = BackgroundTask & TaskEvent

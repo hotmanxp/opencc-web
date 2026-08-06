@@ -8,7 +8,7 @@ import {
   writeInstancesFile,
   type InstancesFile,
 } from './instanceStore.js'
-import { listen } from '../../cli/ports.js'
+import { assertPortAvailable, listen } from '../../cli/ports.js'
 import type { InstanceDefinition, InstanceSnapshot, InstanceStatus } from '../../shared/instances.js'
 
 export const INSTANCE_BASE_PORT = 9201
@@ -34,6 +34,13 @@ export class InstanceSupervisorError extends Error {
 export type InstanceSupervisorDeps = {
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => ChildProcess
   probePort: (start: number, maxAttempts?: number) => Promise<number>
+  /**
+   * Verify a user-pinned port is bindable; rejects if the port is
+   * already in use. Used when an instance definition (or per-start
+   * override) carries a fixed `port`. Default impl delegates to
+   * `assertPortAvailable` from `cli/ports.ts`.
+   */
+  assertPortAvailable: (port: number) => Promise<void>
   readFile: () => Promise<InstancesFile>
   writeFile: (file: InstancesFile) => Promise<void>
   emit: (event: ServerEventInput) => void
@@ -56,17 +63,20 @@ type Entry = { def: InstanceDefinition; status: InstanceStatus; child: ChildProc
 
 export interface InstanceSupervisor {
   getSnapshots: () => InstanceSnapshot[]
-  createInstance: (input: { name: string; cwd: string; lan?: boolean }) => Promise<InstanceSnapshot>
-  startInstance: (id: string, opts?: { lan?: boolean }) => Promise<InstanceSnapshot>
+  createInstance: (input: { name: string; cwd: string; lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
+  startInstance: (id: string, opts?: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
   stopInstance: (id: string) => Promise<InstanceSnapshot>
-  restartInstance: (id: string, opts?: { lan?: boolean }) => Promise<InstanceSnapshot>
+  restartInstance: (id: string, opts?: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
   removeInstance: (id: string) => Promise<void>
   /**
-   * Patch a definition field (`lan` only, for now). The supervisor only
-   * exposes the bare `lan` knob — other fields (cwd/name) require a
-   * remove + recreate so we don't surprise the user with silent rewrites.
+   * Patch definition fields exposed in the UI. Today: `lan` and `port`.
+   * `lan` is a boolean toggle; `port` follows the same tri-state contract
+   * as the request body — `number` persists, `null` clears back to
+   * auto, `undefined` is a no-op. Other definition fields (cwd/name)
+   * are intentionally not patchable — they require a remove + recreate
+   * so we don't surprise the user with silent rewrites.
    */
-  updateInstance: (id: string, patch: { lan?: boolean }) => Promise<InstanceSnapshot>
+  updateInstance: (id: string, patch: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
   shutdown: () => Promise<void>
 }
 
@@ -114,6 +124,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
     const deps: InstanceSupervisorDeps = {
       spawn: opts.deps?.spawn ?? nodeSpawn,
       probePort: opts.deps?.probePort ?? probePortDefault,
+      assertPortAvailable: opts.deps?.assertPortAvailable ?? ((port) => assertPortAvailable(port)),
       readFile: opts.deps?.readFile ?? (() => readInstancesFile(opts.dataDir)),
       writeFile: opts.deps?.writeFile ?? ((f) => writeInstancesFile(f, opts.dataDir)),
       emit: opts.deps?.emit ?? ((e) => eventBus.emit(e)),
@@ -190,7 +201,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       })
     }
 
-    const doStart = async (id: string, opts?: { lan?: boolean }) => {
+    const doStart = async (id: string, opts?: { lan?: boolean; port?: number | null }) => {
       const entry = getEntry(id)
       if (entry.status.state === 'starting' || entry.status.state === 'running') return snapshotOf(entry)
       setStatus(entry, { state: 'starting', lastError: null })
@@ -198,7 +209,23 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       persistSafe()
 
       try {
-        const port = await deps.probePort(INSTANCE_BASE_PORT)
+        // Port resolution priority:
+        //   1. `opts.port` per-call override (e.g. POST /start body)
+        //   2. `entry.def.startPort` persisted user-pinned port
+        //   3. `probePort(INSTANCE_BASE_PORT)` legacy auto-scan
+        // Both explicit paths validate via `assertPortAvailable` so a
+        // stale / already-bound pin fails loudly (we never silently
+        // bump to a neighbouring port — that surprises users who
+        // expected a specific number). `null` / `undefined` opt back
+        // into auto-scan, preserving the pre-pin behaviour exactly.
+        let port: number
+        const pinned = opts?.port !== undefined ? opts.port : entry.def.startPort
+        if (typeof pinned === 'number' && Number.isInteger(pinned)) {
+          await deps.assertPortAvailable(pinned)
+          port = pinned
+        } else {
+          port = await deps.probePort(INSTANCE_BASE_PORT)
+        }
         // `opts.lan` (per-call override from /start) wins over the
         // persisted `def.lan`. Default is loopback — opting in to LAN
         // exposure must be deliberate so a dev's machine doesn't leak
@@ -297,27 +324,43 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       // assertions can observe the latest persisted snapshot deterministically.
       // Production callers should never invoke this.
       __flushPendingWrites: async () => { await writeChain },
-      async createInstance({ name, cwd, lan }: { name: string; cwd: string; lan?: boolean }) {
+      async createInstance({ name, cwd, lan, port }: { name: string; cwd: string; lan?: boolean; port?: number | null }) {
         const trimmed = name.trim(); for (const entry of entries.values()) if (entry.def.name === trimmed) throw new InstanceSupervisorError('DUPLICATE_NAME', `duplicate name: ${trimmed}`)
-        const def: InstanceDefinition = { id: `inst_${randomUUID().slice(0, 8)}`, name: trimmed, cwd, createdAt: new Date(deps.now()).toISOString(), lan: lan === true }
+        const def: InstanceDefinition = {
+          id: `inst_${randomUUID().slice(0, 8)}`,
+          name: trimmed,
+          cwd,
+          createdAt: new Date(deps.now()).toISOString(),
+          lan: lan === true,
+          // Persist a user-pinned port on creation. `null` / `undefined`
+          // round-trip to `undefined` on disk so older readers continue
+          // to treat it as "no pin set" — same shape as `lan`.
+          startPort: typeof port === 'number' && Number.isInteger(port) ? port : undefined,
+        }
         const entry: Entry = { def, status: { ...EMPTY_INSTANCE_STATUS }, child: null, childState: null }
         entries.set(def.id, entry)
         await persist()
         emit(def.id, entry.status)
         return doStart(def.id)
       },
-      startInstance: async (id: string, opts?: { lan?: boolean }) => { ensureNotCurrent(id); return doStart(id, opts) },
+      startInstance: async (id: string, opts?: { lan?: boolean; port?: number | null }) => { ensureNotCurrent(id); return doStart(id, opts) },
       stopInstance: async (id: string) => { ensureNotCurrent(id); return doStop(id) },
-      restartInstance: async (id: string, opts?: { lan?: boolean }) => { ensureNotCurrent(id); await doStop(id); return doStart(id, opts) },
+      restartInstance: async (id: string, opts?: { lan?: boolean; port?: number | null }) => { ensureNotCurrent(id); await doStop(id); return doStart(id, opts) },
       removeInstance: async (id: string) => doRemove(id),
-      async updateInstance(id: string, patch: { lan?: boolean }) {
+      async updateInstance(id: string, patch: { lan?: boolean; port?: number | null }) {
         ensureNotCurrent(id)
         const entry = getEntry(id)
-        // Refuse unknown fields explicitly so a typo in the API caller
-        // doesn't silently no-op. Today only `lan` is patchable; adding
-        // new fields here forces the same type narrowing.
+        // Refuse unknown / no-op patches explicitly so a typo in the
+        // API caller doesn't silently no-op. Allowed fields here must
+        // stay in sync with the `InstanceSupervisor['updateInstance']`
+        // signature; adding one forces the same narrowing in the route.
         const next: Partial<InstanceDefinition> = {}
         if (patch.lan !== undefined) next.lan = patch.lan === true
+        if (patch.port !== undefined) {
+          // `null` clears the pin back to auto (so the next start scans);
+          // `number` sets a new pin (route already validated 1..65535).
+          next.startPort = patch.port === null ? null : patch.port
+        }
         if (Object.keys(next).length === 0) throw new InstanceSupervisorError('INVALID_STATE', 'no patchable fields supplied')
         entry.def = { ...entry.def, ...next }
         await persist()

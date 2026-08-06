@@ -8,6 +8,7 @@ import {
 import { getPlatform } from './platform.js'
 import { getGlobExclusionsForPluginCache } from './plugins/orphanedPluginFilter.js'
 import { ripGrep } from './ripgrep.js'
+import { getInitialSettings } from './settings/settings.js'
 
 /**
  * Extracts the static base directory from a glob pattern.
@@ -63,6 +64,19 @@ export function extractGlobBaseDirectory(pattern: string): {
   return { baseDir, relativePattern }
 }
 
+/**
+ * Default patterns always excluded from glob results, in addition to user-
+ * configured exclusions and .gitignore. Mirrors GrepTool's
+ * VCS_DIRECTORIES_TO_EXCLUDE but extended with node_modules which GrepTool
+ * happens to skip because its typical callers don't recurse into dependency
+ * trees. GlobTool is used for codebase exploration and almost always needs
+ * these skipped to keep result sets sane.
+ *
+ * Patterns are passed to ripgrep via `--glob !{pattern}` — ripgrep matches
+ * directory name anywhere in the path, so `node_modules` correctly excludes
+ */
+const DEFAULT_EXCLUDE_PATTERNS = ['node_modules', '.git', '.svn', '.hg']
+
 export async function glob(
   filePattern: string,
   cwd: string,
@@ -88,14 +102,26 @@ export async function glob(
     searchDir,
   )
 
+  // Read glob settings: respectGitIgnore defaults to true (ripgrep respects
+  // .gitignore natively when --no-ignore is not passed), and user may add
+  // extra exclude patterns on top of the built-in defaults.
+  const globSettings = getInitialSettings().glob
+  const respectGitIgnore = globSettings?.respectGitIgnore ?? true
+  const additionalExcludePatterns = globSettings?.additionalExcludePatterns ?? []
+
   // Use ripgrep for better memory performance
   // --files: list files instead of searching content
   // --glob: filter by pattern
   // --sort=modified: sort by modification time (oldest first)
-  // --no-ignore: don't respect .gitignore (default true, set CLAUDE_CODE_GLOB_NO_IGNORE=false to respect .gitignore)
+  // --no-ignore: don't respect .gitignore. Defaults from settings
+  //   (glob.respectGitIgnore, default true); env var CLAUDE_CODE_GLOB_NO_IGNORE
+  //   wins for backward compat — set to "true" to restore old "search everywhere"
+  //   behavior.
   // --hidden: include hidden files (default true, set CLAUDE_CODE_GLOB_HIDDEN=false to exclude)
-  // Note: use || instead of ?? to treat empty string as unset (defaulting to true)
-  const noIgnore = isEnvTruthy(process.env.CLAUDE_CODE_GLOB_NO_IGNORE || 'true')
+  // Note: use || instead of ?? to treat empty string as unset (defaulting to settings-derived value)
+  const noIgnore = isEnvTruthy(
+    process.env.CLAUDE_CODE_GLOB_NO_IGNORE || (!respectGitIgnore).toString(),
+  )
   const hidden = isEnvTruthy(process.env.CLAUDE_CODE_GLOB_HIDDEN || 'true')
   const args = [
     '--files',
@@ -106,7 +132,19 @@ export async function glob(
     ...(hidden ? ['--hidden'] : []),
   ]
 
-  // Add ignore patterns
+  // Add built-in default exclude patterns (node_modules, VCS dirs).
+  // These apply regardless of .gitignore so the tool stays useful even when
+  // .gitignore is absent (e.g. fresh repos without git init).
+  for (const pattern of DEFAULT_EXCLUDE_PATTERNS) {
+    args.push('--glob', `!${pattern}`)
+  }
+
+  // Add user-configured additional exclude patterns (from settings.globs)
+  for (const pattern of additionalExcludePatterns) {
+    args.push('--glob', `!${pattern}`)
+  }
+
+  // Add ignore patterns from permission system deny rules
   for (const pattern of ignorePatterns) {
     args.push('--glob', `!${pattern}`)
   }

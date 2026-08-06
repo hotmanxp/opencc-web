@@ -4,6 +4,17 @@
 
 **opencc-web** 是 zai 的本地开发与运行工具集,在 `packages/zai`(Express + SSE server + React/Zustand/AntD 前端)与 `packages/zn-agent-core`(Agent 运行时核心库)两个 workspace 中实现 Agent 对话、流式 UI、命令/Skill/插件等能力。zai 仅监听 localhost,不依赖外部鉴权。
 
+## 技术栈
+
+| 层 | 技术 | 版本 |
+|----|------|------|
+| 语言 | TypeScript | ^5.6 |
+| 运行时 | Bun(direct) / Node 兜底 | Node >=20 |
+| zai 前端 | React + Zustand + AntD + Vite | 18.3 / 4.5 / 5.22 / 8.1 |
+| zai 服务端 | Express + SSE | ^4.21 |
+| zn-agent-core vendor | opencc 0.20.0(Bun-direct) | — |
+| 测试 | Vitest | ^4.1 |
+
 ## 目录
 
 | 目录 | 职责 |
@@ -55,11 +66,18 @@ pnpm release:major
 
 ## 文档入口
 
-- 架构与实现细节 → `docs/DEVELOPMENT_REFERENCE.md`
-- 架构总览研究 → `docs/superpowers/specs/2026-07-25-opencc-web-architecture-overview.md`
-- SSE 状态推送设计 → `docs/superpowers/specs/2026-07-19-sse-state-push-design.md`
-- 会话压缩设计 → `docs/superpowers/specs/2026-07-19-zai-session-compaction-design.md`
-- MCP 过滤字段 → `docs/superpowers/plans/2026-07-20-zai-mcp-disabled-servers.md`
-- OpenCC Adapter(Node/tsx) → `docs/superpowers/specs/2026-07-29-zn-agent-core-opencc-adapter-node-design.md`(Bun 版 spec 已 deprecated)
+| 类别 | 路径 |
+|------|------|
+| 架构与实现细节 | `docs/DEVELOPMENT_REFERENCE.md` |
+| 架构总览研究 | `docs/superpowers/specs/2026-07-25-opencc-web-architecture-overview.md` |
+| SSE 状态推送设计 | `docs/superpowers/specs/2026-07-19-sse-state-push-design.md` |
+| 会话压缩设计 | `docs/superpowers/specs/2026-07-19-zai-session-compaction-design.md` |
+| opencc-src 直取约定 | `docs/superpowers/plans/2026-08-01-compat-direct-opencc-src-permissions.md` |
+| OpenCC Server 运行时 | `docs/superpowers/specs/2026-08-01-opencc-server-runtime-design.md` |
+| Provider/Model 路由覆盖 | `docs/superpowers/specs/2026-08-03-provider-model-route-overrides-design.md` |
+| Agent 实例管理 | `docs/superpowers/specs/2026-08-03-zai-agent-instance-manager-design.md` |
+| OpenCC Adapter(Node/tsx) | `docs/superpowers/specs/2026-07-29-zn-agent-core-opencc-adapter-node-design.md`(Bun 版已 deprecated) |
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
+
+<!-- updated: 2026-08-06 -->

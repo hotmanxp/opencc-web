@@ -9,6 +9,7 @@ import {
   Empty,
   Form,
   Input,
+  InputNumber,
   Modal,
   Popconfirm,
   Row,
@@ -275,16 +276,60 @@ export default function Instances(): JSX.Element {
   const [open, setOpen] = useState(false)
   const [pickerOpen, setPickerOpen] = useState(false)
   const [lanBusyId, setLanBusyId] = useState<string | null>(null)
-  const [form] = Form.useForm<{ name: string; cwd: string; lan?: boolean }>()
+  // Instance whose pinned port is currently being edited in the per-row
+  // modal. `null` means the modal is closed. We open the modal with the
+  // snapshot we already have so the form can pre-fill from `def.port`
+  // before the PATCH response comes back.
+  const [portEditRow, setPortEditRow] = useState<InstanceSnapshot | null>(null)
+  const [form] = Form.useForm<{
+    name: string
+    cwd: string
+    lan?: boolean
+    /**
+     * When `true`, the user wants to pin a port on the new instance;
+     * `portNumber` carries the actual number. Mirrors the supervisor's
+     * `InstanceDefinition.port` field: `null` / `undefined` → auto,
+     * `number` → supervisor must start on exactly this port.
+     */
+    portEnabled?: boolean
+    portNumber?: number
+  }>()
+  // Separate form for the per-row "edit port" modal — kept independent
+  // from the create form so its lifecycle never collides with the
+  // create flow (e.g. resetting create form fields shouldn't clobber
+  // the edit modal).
+  const [portForm] = Form.useForm<{ portEnabled?: boolean; portNumber?: number }>()
   // Defensive: zustand guarantees an array, but a stray `undefined`
   // entry would still blow up `find` downstream. Filter so render
   // stays robust against partial hydration glitches.
   const safeInstances = instances.filter((s): s is InstanceSnapshot => s != null)
   const currentCwd = safeInstances.find((s) => s.isCurrent)?.cwd ?? ''
+  // `useWatch` keeps the port-required rule in sync with the Switch —
+  // switching back to "auto" clears the required flag so validation
+  // passes without forcing the user to clear the InputNumber first.
+  const portEnabled = Form.useWatch('portEnabled', form)
+  const editPortEnabled = Form.useWatch('portEnabled', portForm)
 
   useEffect(() => {
     void loadInstances()
   }, [loadInstances])
+
+  // Seed the per-row edit form whenever a row is opened (or re-opened
+  // with a fresh snapshot). `destroyOnClose` on the modal handles the
+  // teardown — we just have to land the right initial values before
+  // the user can interact. Reading the latest snapshot from the store
+  // — not `portEditRow` — so a concurrent PATCH that already landed
+  // wins over our captured copy. `startPort` is the user-pinned port
+  // (vs. `port` which carries the runtime port the child bound to).
+  useEffect(() => {
+    if (!portEditRow) return
+    const live = instances.find((s) => s.id === portEditRow.id) ?? portEditRow
+    const pinned = typeof live.startPort === 'number'
+    portForm.setFieldsValue({
+      portEnabled: pinned,
+      portNumber: pinned ? live.startPort : undefined,
+    })
+  }, [portEditRow?.id, instances, portForm])
 
   async function act(method: 'POST' | 'DELETE', id: string, action?: 'start' | 'stop' | 'restart'): Promise<void> {
     const url = action ? `/api/instances/${id}/${action}` : `/api/instances/${id}`
@@ -329,14 +374,53 @@ export default function Instances(): JSX.Element {
     }
   }
 
+  // Patch the persisted `port` field on a definition. Same optimistic
+  // pattern as `setLan`: write the intended value to the local store
+  // first, PATCH the server, and roll back on failure. `null` clears
+  // the pin (next start falls back to auto-scan); a number persists.
+  async function setPort(id: string, port: number | null): Promise<void> {
+    const before = instances.find((s) => s.id === id)
+    if (!before) return
+    const optimistic: InstanceSnapshot = { ...before, port }
+    applyInstanceSnapshot(optimistic)
+    try {
+      const res = await fetch(`/api/instances/${id}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ port }),
+      })
+      if (!res.ok) {
+        const data = (await res.json().catch(() => ({}))) as { error?: string }
+        applyInstanceSnapshot(before)
+        message.error(data.error ?? '修改启动端口失败')
+        return false
+      }
+      const data = (await res.json()) as { instance: InstanceSnapshot }
+      applyInstanceSnapshot(data.instance)
+      return true
+    } catch (err) {
+      applyInstanceSnapshot(before)
+      message.error(err instanceof Error ? err.message : '修改启动端口失败')
+      return false
+    }
+  }
+
   async function onCreate(): Promise<void> {
     const popup = window.open('about:blank', '_blank', 'noopener,noreferrer')
     try {
       const values = await form.validateFields()
+      // Translate the Switch + InputNumber pair into the supervisor's
+      // single `port` field: `null` when auto, the typed number when
+      // manual. The server route rejects literal `null` for POST
+      // (nothing to clear on a new definition) so we send `undefined`
+      // here and let JSON.stringify drop the key entirely.
+      const port = values.portEnabled === true && typeof values.portNumber === 'number'
+        ? values.portNumber
+        : undefined
       const res = await fetch('/api/instances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ...values, lan: values.lan === true }),
+        body: JSON.stringify({ name: values.name, cwd: values.cwd, lan: values.lan === true, port }),
       })
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -470,7 +554,27 @@ export default function Instances(): JSX.Element {
               }
             >
               <Descriptions size="small" column={1}>
-                <Descriptions.Item label="端口">{inst.port ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="启动端口">
+                  <Space size={4} align="center">
+                    {inst.startPort == null ? (
+                      <Tag color="default" style={{ marginInlineEnd: 0 }}>auto</Tag>
+                    ) : (
+                      <span data-testid={`startup-port-${inst.id}`}>{inst.startPort}</span>
+                    )}
+                    {!inst.isCurrent && (
+                      <Button
+                        size="small"
+                        type="link"
+                        style={{ padding: 0 }}
+                        data-testid={`edit-port-${inst.id}`}
+                        onClick={() => setPortEditRow(inst)}
+                      >
+                        编辑
+                      </Button>
+                    )}
+                  </Space>
+                </Descriptions.Item>
+                <Descriptions.Item label="运行端口">{inst.port ?? '-'}</Descriptions.Item>
                 <Descriptions.Item label="cwd">{inst.cwd}</Descriptions.Item>
                 <Descriptions.Item label="pid">{inst.pid ?? '-'}</Descriptions.Item>
                 <Descriptions.Item label="最后心跳">{relativeAgo(inst.lastHeartbeatAt)}</Descriptions.Item>
@@ -493,7 +597,7 @@ export default function Instances(): JSX.Element {
         okText="创建"
         cancelText="取消"
       >
-        <Form form={form} layout="vertical" initialValues={{ cwd: currentCwd, lan: false }}>
+        <Form form={form} layout="vertical" initialValues={{ cwd: currentCwd, lan: false, portEnabled: false }}>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
             <Input placeholder="例如 demo" />
           </Form.Item>
@@ -539,6 +643,113 @@ export default function Instances(): JSX.Element {
             data-testid="lan-checkbox"
           >
             <Checkbox>LAN 模式启动 (--lan)</Checkbox>
+          </Form.Item>
+          {/*
+            端口配置:Switch 切 auto / 手动;手动时 InputNumber 必填。
+            Switch + InputNumber 放在同一个 Form.Item (noStyle inner) 里
+            是为了共用同一行 label / tooltip,跟 cwd 字段的浏览按钮
+            用的是同一种 outer + noStyle 内嵌的模式。`useWatch` 让
+            "必填" 规则随 Switch 切换 — 切回 auto 时不再强制用户清空
+            InputNumber 才能提交。
+          */}
+          <Form.Item
+            label="启动端口"
+            tooltip="默认自动分配（从 9201 起）。开启后可手动指定端口；端口被占用时启动失败。"
+            data-testid="port-form-item"
+          >
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Form.Item name="portEnabled" valuePropName="checked" noStyle>
+                <Switch
+                  checkedChildren="手动"
+                  unCheckedChildren="自动"
+                  data-testid="port-mode-switch"
+                />
+              </Form.Item>
+              <Form.Item
+                name="portNumber"
+                noStyle
+                rules={portEnabled === true ? [{ required: true, message: '请输入端口' }, { type: 'integer', min: 1024, max: 65535, message: '端口需为 1024-65535 之间的整数' }] : []}
+              >
+                <InputNumber
+                  min={1024}
+                  max={65535}
+                  placeholder="端口号"
+                  disabled={portEnabled !== true}
+                  data-testid="port-number"
+                  style={{ width: 180 }}
+                />
+              </Form.Item>
+              {portEnabled !== true ? <Tag color="default" style={{ marginInlineEnd: 0 }}>auto</Tag> : null}
+            </div>
+          </Form.Item>
+        </Form>
+      </Modal>
+      {/*
+        Per-row "edit port" modal. Re-uses the same Switch + InputNumber
+        layout as the create form but operates against `portForm` (an
+        independent antd Form instance) so its lifecycle doesn't clash
+        with the create flow. We seed `portForm` from `portEditRow.port`
+        on every (re)open so a freshly-loaded snapshot wins over a stale
+        optimistic value the user might have rolled back.
+      */}
+      <Modal
+        title={portEditRow ? `编辑「${portEditRow.name}」启动端口` : '编辑启动端口'}
+        open={portEditRow != null}
+        onCancel={() => setPortEditRow(null)}
+        onOk={async () => {
+          if (!portEditRow) return
+          // Mirror the create flow: Switch on + a number → pin it;
+          // anything else → clear the pin (null → PATCH clears back
+          // to auto on the supervisor).
+          const enabled = portForm.getFieldValue('portEnabled') === true
+          const number = portForm.getFieldValue('portNumber')
+          const next = enabled && typeof number === 'number' ? number : null
+          try {
+            await portForm.validateFields()
+          } catch {
+            return
+          }
+          const ok = await setPort(portEditRow.id, next)
+          if (ok) setPortEditRow(null)
+        }}
+        okText="保存"
+        cancelText="取消"
+        destroyOnClose
+      >
+        <Form
+          form={portForm}
+          layout="vertical"
+          initialValues={{ portEnabled: false }}
+          data-testid="port-edit-form"
+        >
+          <Form.Item
+            label="启动端口"
+            tooltip="默认自动分配（从 9201 起）。开启后可手动指定端口；端口被占用时启动失败。"
+          >
+            <div style={{ display: 'flex', gap: 8, alignItems: 'center' }}>
+              <Form.Item name="portEnabled" valuePropName="checked" noStyle>
+                <Switch
+                  checkedChildren="手动"
+                  unCheckedChildren="自动"
+                  data-testid="port-edit-mode-switch"
+                />
+              </Form.Item>
+              <Form.Item
+                name="portNumber"
+                noStyle
+                rules={editPortEnabled === true ? [{ required: true, message: '请输入端口' }, { type: 'integer', min: 1024, max: 65535, message: '端口需为 1024-65535 之间的整数' }] : []}
+              >
+                <InputNumber
+                  min={1024}
+                  max={65535}
+                  placeholder="端口号"
+                  disabled={editPortEnabled !== true}
+                  data-testid="port-edit-number"
+                  style={{ width: 180 }}
+                />
+              </Form.Item>
+              {editPortEnabled !== true ? <Tag color="default" style={{ marginInlineEnd: 0 }}>auto</Tag> : null}
+            </div>
           </Form.Item>
         </Form>
       </Modal>

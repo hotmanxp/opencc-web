@@ -15,23 +15,38 @@ const yaml = requireFromAgentCore('js-yaml') as { load(s: string): unknown }
 const NAME_RE = /^[a-z0-9][a-z0-9-_]*$/
 
 interface CommandsDirsOpts {
+  cwd?: string
   dataDir?: string
   homeDir?: string
 }
 
 /**
- * Resolve which command directory should be loaded. Policy:
- * 1. `~/.zai/commands` always wins if it exists (single-source for zai users).
- * 2. Otherwise fall back to `~/.claude/commands` for OpenCC workflows.
- * 3. Never merge — only one directory is scanned per server boot.
+ * Resolve which command directories should be loaded. Merges:
+ *   - project-level: `<cwd>/.claude/commands` and `<cwd>/.zai/commands` (if any)
+ *   - home-level: `~/.zai/commands` wins if it exists (single-source for zai
+ *     users), otherwise fall back to `~/.claude/commands` for OpenCC workflows.
+ * Project-level dirs come first so a project command overrides a same-named
+ * home-level command on name conflicts.
  */
 export function defaultCommandsDirs(opts: CommandsDirsOpts = {}): string[] {
   const home = opts.homeDir ?? homedir()
   const zaiDir = opts.dataDir
     ? join(opts.dataDir, '.zai', 'commands')
     : join(home, '.zai', 'commands')
-  const claudeDir = join(home, '.claude', 'commands')
-  return existsSync(zaiDir) ? [zaiDir] : [claudeDir].filter((d) => existsSync(d))
+  const homeClaudeDir = join(home, '.claude', 'commands')
+
+  const dirs: string[] = []
+  // project-level first (project overrides home on name conflicts)
+  if (opts.cwd) {
+    const cwdClaude = join(opts.cwd, '.claude', 'commands')
+    const cwdZai = join(opts.cwd, '.zai', 'commands')
+    if (existsSync(cwdClaude)) dirs.push(cwdClaude)
+    if (existsSync(cwdZai)) dirs.push(cwdZai)
+  }
+  // home-level: keep the original single-source policy
+  if (existsSync(zaiDir)) dirs.push(zaiDir)
+  else if (existsSync(homeClaudeDir)) dirs.push(homeClaudeDir)
+  return dirs
 }
 
 interface CommandFrontmatter {
@@ -98,7 +113,7 @@ function buildPromptCommand(
   }
 }
 
-/** Scan one directory for `*.md` files; first dir with content wins. */
+/** Scan one directory for `*.md` files. */
 async function scanDir(dir: string): Promise<PromptCommand[]> {
   let entries: string[]
   try {
@@ -140,13 +155,20 @@ async function scanDir(dir: string): Promise<PromptCommand[]> {
 export async function loadUserCommands(
   context: CommandContext & { homeDir?: string },
 ): Promise<PromptCommand[]> {
-  for (const dir of defaultCommandsDirs({ dataDir: context.dataDir, homeDir: context.homeDir })) {
-    const cmds = await scanDir(dir)
-    if (cmds.length > 0 || existsSync(dir)) {
-      return cmds
+  const dirs = defaultCommandsDirs({
+    cwd: context.cwd,
+    dataDir: context.dataDir,
+    homeDir: context.homeDir,
+  })
+  if (dirs.length === 0) return []
+  // 合并所有目录的扫描结果,同名命令保留第一个(dir 顺序:项目级优先,故项目覆盖 home)。
+  const seen = new Map<string, PromptCommand>()
+  for (const dir of dirs) {
+    for (const cmd of await scanDir(dir)) {
+      if (!seen.has(cmd.name)) seen.set(cmd.name, cmd)
     }
   }
-  return []
+  return Array.from(seen.values())
 }
 
 /**

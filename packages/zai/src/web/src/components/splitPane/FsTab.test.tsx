@@ -1233,3 +1233,61 @@ it('cwd change resets mode and pendingLine', () => {
   const sw = screen.getByTestId('fs-search-mode');
   expect(sw.getAttribute('aria-checked')).toBe('false');
 });
+
+it('刷新会重拉根目录及已展开的子目录,而不是只刷新根节点', async () => {
+  // Regression: 刷新按钮此前只调 root.refetch(),懒加载的子目录
+  // (loaded 映射)停留在旧状态,导致目录树不反映最新文件状态。
+  const refetch = vi.fn();
+  mockList.mockReturnValue({
+    data: {
+      ok: true,
+      entries: [{ name: 'src', path: 'src', type: 'dir', size: null }],
+    },
+    loading: false,
+    error: null,
+    refetch,
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+
+  const fetchMock = vi.fn(async (url: string) => {
+    const dir = decodeURIComponent(String(url).split('?')[1].split('=')[1]);
+    if (dir === 'src') {
+      return {
+        ok: true,
+        json: async () => ({
+          ok: true,
+          entries: [{ name: 'a.ts', path: 'src/a.ts', type: 'file', size: 1 }],
+        }),
+      };
+    }
+    return { ok: true, json: async () => ({ ok: true, entries: [] }) };
+  });
+  vi.stubGlobal('fetch', fetchMock);
+
+  try {
+    render(<FsTab cwd="/repo" />);
+    expect(screen.getByText('src')).toBeTruthy();
+
+    // 展开 src → antd Tree 触发 loadData → fetch('/api/fs/list?dir=src')
+    const switcher = document.querySelector('.ant-tree-switcher');
+    expect(switcher).toBeTruthy();
+    fireEvent.click(switcher as Element);
+    await waitFor(() => expect(screen.getByText('a.ts')).toBeTruthy());
+
+    // 记录展开后的 fetch 调用次数,再点刷新
+    fetchMock.mockClear();
+    refetch.mockClear();
+    fireEvent.click(screen.getByRole('button', { name: /刷新/i }));
+
+    // 根目录被 refetch
+    expect(refetch).toHaveBeenCalled();
+    // 已展开的子目录 `src` 被重新拉取
+    await waitFor(() => {
+      expect(
+        fetchMock.mock.calls.some(([url]) => String(url).includes('dir=src')),
+      ).toBe(true);
+    });
+  } finally {
+    vi.unstubAllGlobals();
+  }
+});

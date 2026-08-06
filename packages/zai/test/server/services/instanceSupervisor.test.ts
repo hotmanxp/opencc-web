@@ -24,11 +24,12 @@ interface Deps {
   emit: (e: ServerEventInput) => void
   spawn: (cmd: string, args: string[], opts: SpawnOptions) => FakeChild
   probePort: (start: number, max?: number) => Promise<number>
+  assertPortAvailable?: (port: number) => Promise<void>
   writeFile: (next: { def: unknown; statuses: Record<string, unknown> }) => Promise<void>
-  readFile?: () => Promise<{ definitions: Array<{ id: string; name: string; cwd: string; createdAt: string }>; statuses: Record<string, unknown> }>
+  readFile?: () => Promise<{ definitions: Array<{ id: string; name: string; cwd: string; createdAt: string; port?: number | null }>; statuses: Record<string, unknown> }>
 }
 
-function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['emit']; readFile?: Deps['readFile'] }) {
+function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['emit']; readFile?: Deps['readFile']; assertPortAvailable?: Deps['assertPortAvailable'] }) {
   const events: ServerEventInput[] = []
   const writes: { def: unknown; statuses: Record<string, unknown> }[] = []
   let time = 1_000000
@@ -51,6 +52,7 @@ function makeSupervisor(extra?: { onWriteFile?: Deps['writeFile']; emit?: Deps['
       probeStart = start
       return start
     }),
+    assertPortAvailable: extra?.assertPortAvailable ?? (async () => undefined),
     writeFile: extra?.onWriteFile ?? (async (w) => { writes.push(w) }),
     readFile: extra?.readFile,
   }
@@ -300,6 +302,113 @@ describe('instanceSupervisor (4a — state machine)', () => {
     const { getInstanceSupervisor } = await initSup(deps)
     const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
     await expect(getInstanceSupervisor().updateInstance(snap.id, {})).rejects.toMatchObject({ code: 'INVALID_STATE' })
+  })
+
+  // ───────── port 配置相关 ─────────
+  // 用户在创建时钉死一个端口 → supervisor 用该端口启动,probePort 不调用。
+  it('createInstance with port pins the child to that exact port (probePort not used)', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const probeCalls = vi.spyOn(deps, 'probePort')
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', port: 9500 })
+    // `startPort` carries the user-pinned port on the definition;
+    // `port` is the runtime port the child bound to (still null at this
+    // point — the fake spawn hasn't emitted `ready` yet).
+    expect(snap.startPort).toBe(9500)
+    expect(fakeChildren).toHaveLength(1)
+    // --port 9500 must appear in the spawn args, with 9500 as the value.
+    const portIdx = spawnArgs[0]!.indexOf('--port')
+    expect(portIdx).toBeGreaterThanOrEqual(0)
+    expect(spawnArgs[0]![portIdx + 1]).toBe('9500')
+    // Probe is bypassed entirely on the pinned path.
+    expect(probeCalls).not.toHaveBeenCalled()
+  })
+
+  // 钉死端口被占用 → 抛出错误,实例进入 down,lastError 携带端口号。
+  it('createInstance with a port that is already bound → instance down + lastError mentions the port', async () => {
+    const { deps } = makeSupervisor({
+      assertPortAvailable: vi.fn(async () => { throw new Error('listen EADDRINUSE: address already in use :::9500') }),
+    })
+    const { getInstanceSupervisor } = await initSup(deps)
+    await expect(
+      getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', port: 9500 }),
+    ).rejects.toThrow(/9500|EADDRINUSE/)
+    const snap = getInstanceSupervisor().getSnapshots().find((s) => s.name === 'demo')!
+    expect(snap.state).toBe('down')
+    expect(snap.lastError?.message).toMatch(/9500|EADDRINUSE/)
+    // Status.port is null on a failed start (no child bound a port);
+    // the user-pinned startPort stays put so the next attempt re-runs
+    // the same probe (and presumably fails the same way, unless the
+    // user frees the port or clears the pin).
+    expect(snap.port).toBeNull()
+    expect(snap.startPort).toBe(9500)
+  })
+
+  // 不传 port → 走 auto,与改动前完全一致(probePort 被调用)。
+  it('createInstance without port falls back to probePort (legacy auto-scan path)', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const probeCalls = vi.spyOn(deps, 'probePort')
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    expect(probeCalls).toHaveBeenCalledWith(9201)
+    const portIdx = spawnArgs[0]!.indexOf('--port')
+    expect(spawnArgs[0]![portIdx + 1]).toBe('9201')
+    expect(fakeChildren).toHaveLength(1)
+  })
+
+  // 临时覆盖:opts.port 优先于 def.startPort。
+  it('startInstance port override beats def.startPort', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    // Create with a pin of 9500, then restart with a one-shot override
+    // to 9700. The second spawn must use 9700 (override wins).
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', port: 9500 })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9500 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id, { port: 9700 })
+    expect(fakeChildren).toHaveLength(2)
+    expect(spawnArgs[0]!.indexOf('--port')).toBeGreaterThanOrEqual(0)
+    expect(spawnArgs[0]![spawnArgs[0]!.indexOf('--port') + 1]).toBe('9500')
+    expect(spawnArgs[1]![spawnArgs[1]!.indexOf('--port') + 1]).toBe('9700')
+  })
+
+  // PATCH 改 def.startPort 后,下一次 start 用新值。
+  it('updateInstance({port}) persists, next restart uses the new pin', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9201 })
+    const patched = await getInstanceSupervisor().updateInstance(snap.id, { port: 9600 })
+    expect(patched.startPort).toBe(9600)
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(fakeChildren).toHaveLength(2)
+    const portIdx = spawnArgs[1]!.indexOf('--port')
+    expect(portIdx).toBeGreaterThanOrEqual(0)
+    expect(spawnArgs[1]![portIdx + 1]).toBe('9600')
+  })
+
+  // PATCH port:null 清除 pin,下一次 start 走 auto(probePort 被调用)。
+  it('updateInstance({port: null}) clears the pin, next restart auto-scans', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const probeCalls = vi.spyOn(deps, 'probePort')
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', port: 9500 })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9500 })
+    const patched = await getInstanceSupervisor().updateInstance(snap.id, { port: null })
+    expect(patched.startPort).toBeNull()
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    probeCalls.mockClear()
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(probeCalls).toHaveBeenCalledWith(9201)
+    expect(fakeChildren).toHaveLength(2)
+    expect(spawnArgs[1]![spawnArgs[1]!.indexOf('--port') + 1]).toBe('9201')
   })
 })
 

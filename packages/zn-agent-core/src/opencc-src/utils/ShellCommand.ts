@@ -333,11 +333,19 @@ class ShellCommandImpl implements ShellCommand {
     }
 
     const stdout = await this.taskOutput.getStdout()
-    const signalAborted = this.#abortSignal.aborted
+    // clean up() nulls #abortSignal to release the AbortController chain. If
+    // that happened before this queued #handleExit runs (kill() resolves the
+    // exit promise as a microtask, then cleanup() nulls the ref), reading
+    // `.aborted` here would throw. Snapshot the signal and treat a nulled ref
+    // as not-aborted; #killedByAbort still records the kill intent above.
+    const abortSignal = this.#abortSignal
+    const signalAborted = abortSignal ? abortSignal.aborted : false
     const normalizedAbortReason = this.#timedOut
       ? 'tool-timeout'
       : signalAborted || this.#killedByAbort
-        ? normalizeAbortReason(this.#abortSignal.reason)
+        ? abortSignal
+          ? normalizeAbortReason(abortSignal.reason)
+          : undefined
         : undefined
     const isAbort =
       normalizedAbortReason !== undefined &&

@@ -204,7 +204,13 @@ export function SplitPane({ cwd }: SplitPaneProps) {
           {/* Splitter lock toggle — floating button 居中悬浮在分割线上.
               永远可点击 (zIndex > handle); 锁定时显示锁图标, 解锁时显示开锁
               图标 + ew-resize cursor (按钮自身也是拖动目标的一环).
-              位置 left: -14 让按钮左右对称跨在 borderLeft 这条线上. */}
+              位置 left: -14 让按钮左右对称跨在 borderLeft 这条线上.
+
+              颜色全部走 CSS 变量 (不写死 hex / rgba): 锁定态用 --bg-card
+              + --text-secondary (两主题都有定义), 解锁态用品牌橙
+              --accent-start (两主题同色). 旧实现用 var(--bg-elevated, #2a2a2a)
+              在 light 主题下 fallback 出深色块, 跟浅色背景不协调, 这里改用
+              真正存在的 --bg-card. */}
           <button
             type="button"
             data-testid="split-pane-lock-toggle"
@@ -220,8 +226,8 @@ export function SplitPane({ cwd }: SplitPaneProps) {
               padding: 0,
               borderRadius: 14,
               border: '1px solid var(--border-light)',
-              background: lockedStored ? 'var(--bg-elevated, #2a2a2a)' : 'rgba(255,102,0,0.95)',
-              color: lockedStored ? 'var(--text-secondary, #aaa)' : '#fff',
+              background: lockedStored ? 'var(--bg-card)' : 'var(--accent-start)',
+              color: lockedStored ? 'var(--text-secondary)' : '#fff',
               cursor: lockedStored ? 'pointer' : 'ew-resize',
               display: 'flex',
               alignItems: 'center',

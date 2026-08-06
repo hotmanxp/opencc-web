@@ -205,7 +205,8 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                     padding: "1px 6px",
                     borderRadius: 10,
                     background: THINKING_ACCENT,
-                    color: "var(--text-primary)",
+                    // pill 是颜色填充背景, 文字固定白色保证对比度, 不随主题切换.
+                    color: "#fff",
                     fontSize: 11,
                     fontWeight: 600,
                     lineHeight: 1.6,

@@ -502,12 +502,10 @@ export default React.memo(function AgentInputBox() {
             );
             return;
           case "prompt":
+            // 与 opencc 一致: 只显示用户输入的 `/<command-name> <args>`,
+            // 不把 skill 展开后的完整 prompt(rendered)以「渲染后」行显示。
+            // rendered 仍作为模型输入发送,不影响命令执行语义。
             pushUserMsg(text, false);
-            if (result.payload?.rendered) {
-              pushUserMsg(result.payload.rendered, true);
-            }
-            // 上方已手工 pushUserMsg 原文本 + 渲染版,这里 skip 让
-            // submitPrompt 不重复 push,避免 msgs 出现 duplicate user.text.
             await submitPrompt(result.payload?.rendered ?? text, {
               skipPushUserMsg: true,
             });

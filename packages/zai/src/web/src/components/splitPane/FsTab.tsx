@@ -574,28 +574,40 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     );
   }
 
-  const handleLoadData = (treeNode: DataNode): Promise<void> =>
-    new Promise((resolve) => {
-      const key = String(treeNode.key);
-      if (loaded[key]) {
-        resolve();
-        return;
+  // 拉取单个目录的 entries 并写入 loaded 映射。lazy 展开与「刷新」共用,
+  // 保证刷新时能重拉已展开的子目录,而不只是根节点。
+  const fetchDirEntries = async (key: string): Promise<void> => {
+    try {
+      const r = await fetch(`/api/fs/list?dir=${encodeURIComponent(key)}`);
+      const j = await r.json();
+      if (j?.ok && Array.isArray(j.entries)) {
+        setLoaded((cur) => ({ ...cur, [key]: j.entries }));
+      } else {
+        setLoaded((cur) => ({ ...cur, [key]: [] }));
       }
-      void fetch(`/api/fs/list?dir=${encodeURIComponent(key)}`)
-        .then((r) => r.json())
-        .then((j) => {
-          if (j?.ok && Array.isArray(j.entries)) {
-            setLoaded((cur) => ({ ...cur, [key]: j.entries }));
-          } else {
-            setLoaded((cur) => ({ ...cur, [key]: [] }));
-          }
-          resolve();
-        })
-        .catch(() => {
-          setLoaded((cur) => ({ ...cur, [key]: [] }));
-          resolve();
-        });
-    });
+    } catch {
+      setLoaded((cur) => ({ ...cur, [key]: [] }));
+    }
+  };
+
+  const handleLoadData = (treeNode: DataNode): Promise<void> => {
+    const key = String(treeNode.key);
+    if (loaded[key]) {
+      return Promise.resolve();
+    }
+    return fetchDirEntries(key);
+  };
+
+  // 刷新目录树:重拉根目录,并重拉所有已加载(已展开)的子目录,让整棵
+  // 树反映最新的文件状态。只调 root.refetch() 仅刷新根节点,懒加载的
+  // 子目录(loaded 映射)会一直停留在旧状态 —— 这正是「刷新无效」的根因。
+  const refreshAll = () => {
+    void root.refetch();
+    const loadedKeys = Object.keys(loaded);
+    if (loadedKeys.length > 0) {
+      void Promise.all(loadedKeys.map((key) => fetchDirEntries(key)));
+    }
+  };
 
   const renderTree = (entries: Array<{ name: string; path: string; type: 'dir' | 'file'; size: number | null }>): DataNode[] =>
     entries.map((e) => {
@@ -652,7 +664,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       size="small"
       icon={<ReloadOutlined />}
       loading={root.loading}
-      onClick={() => root.refetch()}
+      onClick={refreshAll}
       title="刷新目录"
     >
       刷新
@@ -873,7 +885,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           cwd={cwd}
           position={{ x: contextMenu.x, y: contextMenu.y }}
           onClose={() => setContextMenu(null)}
-          onDeleted={() => { setContextMenu(null); void root.refetch(); }}
+          onDeleted={() => { setContextMenu(null); refreshAll(); }}
         />
       )}
     </div>

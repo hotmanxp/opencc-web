@@ -26,6 +26,13 @@ export class JsonTaskStore implements TaskStore {
   /** 进程内累计的损坏 task 文件计数(load 失败时 +1);用于 list() 聚合 warn。 */
   private corruptedCount = 0
 
+  /**
+   * 按 taskId 串行化 save(),避免并发写同一路径导致的 verify read-back 竞态。
+   * 两个并发 save 各自 atomic rename 后,前一个的 verifyWrite 可能读到后一个
+   * 的字节(长度相同、内容不同),被误判为损坏而 unlink 掉合法任务。
+   */
+  private readonly saveQueues = new Map<string, Promise<void>>()
+
   constructor(private readonly rootDir: string) {
     this.tasksDir = join(rootDir, 'tasks')
     this.eventsDir = join(rootDir, 'events')
@@ -48,8 +55,24 @@ export class JsonTaskStore implements TaskStore {
   async save(task: BackgroundTask): Promise<void> {
     const serialized = JSON.stringify(task, null, 2)
     const path = this.taskPath(task.id)
-    await atomicWriteFile(path, serialized)
-    await this.verifyWrite(path, serialized, task.id)
+    // 同一 task 的 save 串行执行:write + verify read-back 作为一个整体排队,
+    // 避免前一个 save 的 verify 读到后一个 save 覆盖后的字节(见 saveQueues 注释)。
+    const prev = this.saveQueues.get(task.id) ?? Promise.resolve()
+    const run = prev
+      .catch(() => {})
+      .then(async () => {
+        await atomicWriteFile(path, serialized)
+        await this.verifyWrite(path, serialized, task.id)
+      })
+    this.saveQueues.set(task.id, run)
+    try {
+      await run
+    } finally {
+      // 仅当队列里还是我们这条时才清理,避免误删后续已入队的 save。
+      if (this.saveQueues.get(task.id) === run) {
+        this.saveQueues.delete(task.id)
+      }
+    }
   }
 
   /**

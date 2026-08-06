@@ -82,10 +82,12 @@ export function MessageListView({ messages, streaming }: Props) {
     <>
       {nodes.map((node, i) => {
         if (node.kind === 'toolGroup') {
-          // group key spans its indices so streaming updates don't churn keys
+          // 用首条 tool entry 的 eventId 作稳定 key, 而非下标区间. 否则新消息
+          // (或同一 turn 追加的新工具) 会改变 group 的 endIndex → key 变化 →
+          // 整棵子树卸载重挂载, ToolGroupCard 内部折叠态被重置.
           return (
             <ToolGroupCard
-              key={`grp-${node.startIndex}-${node.endIndex}-${i}`}
+              key={`grp-${node.toolCalls[0]?.message.eventId ?? node.startIndex}`}
               entries={node.toolCalls}
             />
           )
@@ -114,8 +116,11 @@ export function MessageListView({ messages, streaming }: Props) {
           )
         }
         // text node: render each contained message through CollapsedMessageBubble (single-msg view)
+        // key 用首条消息的 eventId (而非此时的下标区间) 作为稳定标识: 新消息
+        // append 到同一 text bucket 末尾时, 首条 eventId 不变, key 不变 →
+        // 子树不重挂载, CollapsedMessageBubble / AssistantTextBody 内部展开态保留.
         return (
-          <div key={`txt-${node.startIndex}-${node.endIndex}-${i}`}>
+          <div key={`txt-${node.messages[0]?.eventId ?? node.startIndex}`}>
             {node.messages.map((m, mi) => {
               const evtId = ((m as any).eventId as string) ?? `txt-${node.startIndex}-${mi}`
               const msgIdx = node.startIndex + mi

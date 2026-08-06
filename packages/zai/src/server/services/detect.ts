@@ -82,7 +82,10 @@ export async function getSystemInfo(): Promise<SystemInfo> {
   };
 }
 
-export async function getCliStatuses(forceRefresh = false): Promise<CliStatus[]> {
+export async function getCliStatuses(
+  forceRefresh = false,
+  name?: CliStatus['name'],
+): Promise<CliStatus[]> {
   const targets: Array<{ name: CliStatus['name']; pkg: string; bin: string }> = [
     { name: 'nova', pkg: '@zn-ai/nova', bin: 'nova' },
     { name: 'opencode', pkg: 'opencode-ai', bin: 'opencode' },
@@ -96,6 +99,9 @@ export async function getCliStatuses(forceRefresh = false): Promise<CliStatus[]>
     { name: 'zai', pkg: '@zn-ai/zai', bin: 'zai' },
   ];
 
+  const selectedTargets = name ? targets.filter((target) => target.name === name) : targets;
+  if (selectedTargets.length === 0) return [];
+
   const registry = await getNpmConfig('registry');
 
   // Warm the latestVersion cache BEFORE the per-CLI parallel loop. Even
@@ -104,14 +110,14 @@ export async function getCliStatuses(forceRefresh = false): Promise<CliStatus[]>
   // also lets later requests hit the cache. Each entry takes ~0.4s on a
   // cold cache; ~50ms on warm. `forceRefresh=true` 让 getLatestVersion
   // 跳过 TTL，重新查 npm view。
-  await Promise.all(targets.map((t) => getLatestVersion(t.pkg, registry, forceRefresh)));
+  await Promise.all(selectedTargets.map((t) => getLatestVersion(t.pkg, registry, forceRefresh)));
 
   // which + version lookups are independent — run them concurrently per CLI
   // so a slow registry can't stack up across the 4 targets. 注意
   // getInstalledVersion 从来不读 latestCache，每次都现跑 `which bin`
   // 和 `node -p require(...)`，所以本地安装版本永远 fresh。
   const results: CliStatus[] = await Promise.all(
-    targets.map(async (t) => {
+    selectedTargets.map(async (t) => {
       const [path, currentVersion, latestVersion] = await Promise.all([
         which(t.bin),
         getInstalledVersion(t.bin, t.pkg),

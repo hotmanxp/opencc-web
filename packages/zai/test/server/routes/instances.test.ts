@@ -12,7 +12,7 @@ afterEach(async () => {
   try { await rm(DATA_DIR, { recursive: true, force: true }) } catch { /* best-effort tmp cleanup */ }
 })
 
-async function bootstrap(extra?: { spawn?: (...args: never[]) => unknown; readFile?: () => Promise<{ definitions: Array<{ id: string; name: string; cwd: string; createdAt: string; lan?: boolean }>; statuses: Record<string, unknown> }> }) {
+async function bootstrap(extra?: { spawn?: (...args: never[]) => unknown; readFile?: () => Promise<{ definitions: Array<{ id: string; name: string; cwd: string; createdAt: string; lan?: boolean; startPort?: number | null }>; statuses: Record<string, unknown> }> }) {
   process.env.ZAI_DATA_DIR = DATA_DIR
   if (!existsSync(DATA_DIR)) mkdirSync(DATA_DIR, { recursive: true })
   const { initInstanceSupervisor } = await import('../../../src/server/services/instanceSupervisor.js')
@@ -40,6 +40,9 @@ async function bootstrap(extra?: { spawn?: (...args: never[]) => unknown; readFi
     dataDir: DATA_DIR,
     deps: { spawn: (extra?.spawn as never) ?? defaultSpawn,
             probePort: async () => 9201,
+            // Default `assertPortAvailable` is a no-op so tests that
+            // don't care about port pinning don't have to seed one.
+            assertPortAvailable: async () => undefined,
             writeFile: async () => undefined,
             readFile: (extra?.readFile as never) ?? (async () => ({ definitions: [], statuses: {} })),
             emit: () => undefined,
@@ -151,5 +154,152 @@ describe('routes/instances', () => {
       .send({ lan: 'maybe' })
     expect(bad.status).toBe(400)
     expect(bad.body.error).toMatch(/lan/)
+  })
+
+  // ───────── port 配置相关 ─────────
+  // POST 创建:接受数字,持久化到定义;拒绝 null / 字符串 / 越界 / 浮点。
+  it('POST /api/instances accepts port and persists it on the definition', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', port: 9500 })
+    expect(res.status).toBe(201)
+    expect(res.body.instance.startPort).toBe(9500)
+  })
+
+  it('POST /api/instances omits port (defaults to auto) when absent', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp' })
+    expect(res.status).toBe(201)
+    // `undefined` lands as no field on the JSON snapshot — the form
+    // caller treats the absence as "auto", matching the pre-pin UX.
+    expect(res.body.instance.startPort).toBeUndefined()
+  })
+
+  it('POST /api/instances rejects port=null with 400 (no pin to clear on creation)', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', port: null })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/port/)
+  })
+
+  it.each([
+    ['non-integer string', '9201'],
+    ['out-of-range high', 99999],
+    ['out-of-range low', 0],
+    ['negative integer', -1],
+    ['float', 9201.5],
+    ['boolean', true],
+  ])('POST /api/instances rejects invalid port (%s) with 400', async (_label, port) => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', port })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/port/)
+  })
+
+  // PATCH:接受 number 设值,接受 null 清除,拒绝无效值。
+  it('PATCH /api/instances/:id sets port', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z' }],
+        statuses: {},
+      }),
+    })
+    const patch = await request(app)
+      .patch('/api/instances/inst_seed')
+      .send({ port: 9600 })
+    expect(patch.status).toBe(200)
+    expect(patch.body.instance.startPort).toBe(9600)
+  })
+
+  it('PATCH /api/instances/:id with port=null clears the pin back to auto', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z', startPort: 9600 }],
+        statuses: {},
+      }),
+    })
+    const patch = await request(app)
+      .patch('/api/instances/inst_seed')
+      .send({ port: null })
+    expect(patch.status).toBe(200)
+    // Cleared pin → `null` on the snapshot (round-trips through the
+    // supervisor's tri-state contract). The UI renders this as "auto".
+    expect(patch.body.instance.startPort).toBeNull()
+  })
+
+  it('PATCH /api/instances/:id with absent port is a no-op', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z', startPort: 9600 }],
+        statuses: {},
+      }),
+    })
+    // Send an empty body — the supervisor's `updateInstance` throws
+    // INVALID_STATE when no patchable keys are supplied. That's the
+    // existing pre-pin behaviour and we want to preserve it: a typo
+    // shouldn't silently rewrite a definition.
+    const patch = await request(app)
+      .patch('/api/instances/inst_seed')
+      .send({})
+    expect(patch.status).toBe(400)
+    // Pre-existing pin untouched — verify via a follow-up PATCH.
+    const followUp = await request(app)
+      .patch('/api/instances/inst_seed')
+      .send({ lan: false })
+    expect(followUp.status).toBe(200)
+    expect(followUp.body.instance.startPort).toBe(9600)
+  })
+
+  it('PATCH /api/instances/:id rejects invalid port with 400', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z' }],
+        statuses: {},
+      }),
+    })
+    const res = await request(app)
+      .patch('/api/instances/inst_seed')
+      .send({ port: 'nope' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/port/)
+  })
+
+  // /start 接受 port 覆盖;不传则走持久化值。
+  it('POST /api/instances/:id/start accepts port override', async () => {
+    const { app } = await bootstrap()
+    // Create a real instance (POST), then call /start on its id.
+    // defaultSpawn emits a fake `ready` IPC with port 9201 regardless
+    // of the override, so we only assert on 200 here — the supervisor
+    // unit test covers the actual --port arg wiring.
+    const create = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', port: 9500 })
+    expect(create.status).toBe(201)
+    const id = create.body.instance.id as string
+    // Stop first so /start has something to act on (createInstance
+    // already auto-spawned; supervisor's doStart is a no-op when
+    // state is `starting`/`running`, so we need to get back to
+    // stopped via /stop).
+    await request(app).post(`/api/instances/${id}/stop`).send({})
+    const start = await request(app)
+      .post(`/api/instances/${id}/start`)
+      .send({ port: 9700 })
+    expect(start.status).toBe(200)
+  })
+
+  it('POST /api/instances/:id/start rejects invalid port with 400', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances/inst_does_not_matter/start')
+      .send({ port: 99999 })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/port/)
   })
 })
