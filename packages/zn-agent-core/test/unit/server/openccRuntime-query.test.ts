@@ -94,6 +94,7 @@ describe('createOpenccRuntime', { timeout: 30_000 }, () => {
         'getSession',
         'listSessions',
         'patchSession',
+        'plugins',
         'query',
         'readTranscript',
         'removeSession',

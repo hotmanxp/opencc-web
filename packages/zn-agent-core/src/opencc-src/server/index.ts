@@ -27,6 +27,13 @@ export type {
   OpenccServerEvent,
   OpenccTranscriptFile,
   OpenccTranscriptMeta,
+  OpenccPluginDto,
+  OpenccMarketplacePluginDto,
+  OpenccPluginActionResult,
+  OpenccPluginListResult,
+  OpenccPluginScope,
+  OpenccPluginComponentCounts,
+  OpenccPluginReloadCounts,
 } from './serverTypes.js'
 
 export type {

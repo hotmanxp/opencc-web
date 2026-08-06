@@ -252,4 +252,75 @@ export type OpenccRuntime = {
   ): Promise<void>
   removeSession(sessionId: string, opts: { cwd: string }): Promise<void>
   shutdown(): Promise<void>
+  plugins: OpenccPluginApi
+}
+
+export type OpenccPluginScope = 'user' | 'project' | 'local' | 'builtin'
+
+export type OpenccPluginComponentCounts = {
+  commands: number
+  agents: number
+  skills: number
+  hooks: number
+  mcpServers: number
+}
+
+export type OpenccPluginDto = {
+  id: string
+  name: string
+  description?: string
+  version?: string
+  author?: string
+  marketplace: string
+  scope: OpenccPluginScope
+  enabled: boolean
+  writable: boolean
+  hasUpdate: boolean
+  components: OpenccPluginComponentCounts
+  errors: string[]
+}
+
+export type OpenccMarketplacePluginDto = {
+  id: string
+  name: string
+  description?: string
+  version?: string
+  author?: string
+  marketplace: string
+  category?: string
+  tags?: string[]
+  installed: boolean
+  homepage?: string
+}
+
+export type OpenccPluginListResult = {
+  plugins: OpenccPluginDto[]
+  errors: string[]
+}
+
+export type OpenccPluginReloadCounts = {
+  plugins: number
+  commands: number
+  agents: number
+  hooks: number
+  mcpServers: number
+  errors: number
+}
+
+export type OpenccPluginActionResult = {
+  success: boolean
+  message: string
+  reloadFailed?: boolean
+  reload?: OpenccPluginReloadCounts
+  state?: OpenccPluginListResult
+}
+
+export type OpenccPluginApi = {
+  listInstalled(): Promise<OpenccPluginListResult>
+  listAvailable(): Promise<OpenccMarketplacePluginDto[]>
+  setEnabled(id: string, enabled: boolean): Promise<OpenccPluginActionResult>
+  install(id: string): Promise<OpenccPluginActionResult>
+  uninstall(id: string): Promise<OpenccPluginActionResult>
+  update(id: string): Promise<OpenccPluginActionResult>
+  reload(): Promise<OpenccPluginActionResult>
 }
