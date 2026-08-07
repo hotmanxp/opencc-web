@@ -24,6 +24,15 @@ export interface BackgroundRuntime {
    */
   cancel(id: string, reason?: string): Promise<{ ok: boolean }>
   /**
+   * 按父会话取消该会话派生的全部未结束后台任务(dispatch 与 attach 两条
+   * 路径都覆盖)。返回实际取消的数量。ESC / /agent/abort 用它终止当前会话
+   * 关联的后台 agent,否则后台任务会继续跑、继续向共享 API key 发请求。
+   */
+  cancelByParentSession(
+    sessionId: string,
+    reason?: string,
+  ): Promise<{ cancelled: number }>
+  /**
    * 流式读取任务事件。语义:
    *   1) 先回放 store 中 seq > fromSeq 的所有历史事件
    *   2) 若任务已结束,流完成后立即终止

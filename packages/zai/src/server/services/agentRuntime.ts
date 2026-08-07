@@ -218,6 +218,12 @@ export function abortSessionController(
   const c = sessionControllers.get(sessionId)
   if (!c || c.signal.aborted) return false
   c.abort(reason ?? 'user_abort')
+  // 同步取消该会话关联的后台任务。动态 import 避免与 backgroundRuntime.ts
+  // 顶部已 import getRuntime 的模块环;fire-and-forget 不阻塞 abort 返回。
+  void import('./backgroundRuntime.js').then(
+    ({ cancelBackgroundTasksByParentSession }) =>
+      cancelBackgroundTasksByParentSession(sessionId, reason ?? 'user_abort'),
+  )
   return true
 }
 
@@ -437,6 +443,20 @@ export async function abortAgentSession(reason?: string): Promise<void> {
   permissionRegistry.abortAll(reason ?? 'session_aborted')
   if (currentSessionId) {
     abortSessionController(currentSessionId, reason)
+    // 覆盖"turn 已结束但后台任务还在跑"的场景:此时 sessionControllers 里
+    // 可能没有该 sid 的 controller(abortSessionController 会直接 return
+    // false),但后台任务仍应被终止,否则会继续向共享 API key 发请求。
+    try {
+      const { cancelBackgroundTasksByParentSession } = await import(
+        './backgroundRuntime.js'
+      )
+      await cancelBackgroundTasksByParentSession(
+        currentSessionId,
+        reason ?? 'session_aborted',
+      )
+    } catch (err) {
+      console.warn('[abortAgentSession] cancelBackgroundTasks failed:', err)
+    }
     // Forward to the new OpenccRuntime as well — its internal
     // abortController fans out to in-flight query streams, which
     // is the path the runtime's `query()` hook listens on.

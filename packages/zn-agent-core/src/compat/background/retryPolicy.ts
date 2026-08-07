@@ -138,14 +138,20 @@ export function getRetryDelay(
 export function retrySleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.resolve()
   return new Promise<void>((resolve) => {
-    const t = setTimeout(resolve, ms)
+    let t: ReturnType<typeof setTimeout> | undefined
+    const onAbort = () => {
+      if (t) clearTimeout(t)
+      resolve()
+    }
     if (signal) {
-      const onAbort = () => {
-        clearTimeout(t)
-        resolve()
-      }
       signal.addEventListener('abort', onAbort, { once: true })
     }
+    t = setTimeout(() => {
+      // 正常到期:移除 abort listener,避免并发请求长时间挂在同一 signal
+      // 上触发 MaxListenersExceededWarning。
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
   })
 }
 

@@ -11,6 +11,7 @@ import { shutdownInstanceSupervisor } from '../server/services/instanceSuperviso
 import { sendReady } from '../server/services/readyHook.js';
 import { randomBytes } from 'node:crypto';
 import express from 'express';
+import { resolveServerPort } from './ports.js';
 
 interface StartOptions {
   port?: string;
@@ -90,59 +91,50 @@ async function runDirectServer(options: StartOptions): Promise<void> {
   console.log(`[zai] start token: ${token}`);
   console.log(`[zai] cwd: ${cwd}`);
 
-  // Port allocation: try to bind, if EADDRINUSE, close and retry next port
+  // Port allocation. 显式 --port 被占用 → 报错退出(不静默递增,多实例静默
+  // 换端口是请求风暴根因之一);未指定时自动扫描空闲端口。
   const basePort = options.port ? Number(options.port) : 9201;
-  const maxAttempts = 100;
-  let port = basePort;
-  let server: http.Server;
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    port = basePort + attempt;
-    server = http.createServer(app);
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        server!.on('error', (err: NodeJS.ErrnoException) => {
-          if (err.code === 'EADDRINUSE') {
-            reject(err);
-          } else {
-            reject(err);
-          }
-        });
-        server!.listen(port, host, () => {
-          process.env.ZAI_PORT = String(port);
-          // 在受管模式下(子进程由 supervisor 派生),port 一旦绑定立即
-          // 回送 ready,supervisor 才能从 starting 推进到 running 并解
-          // 锁其内部重启路径。无受管进程下 sendReady 是 no-op。
-          sendReady(port);
-          // 受管子进程 (ZAI_INSTANCE_ID + ZAI_SUPERVISOR_PID 已设) 定时回送
-          // heartbeat,中央 supervisor 据此判断存活;普通启动时 config 为
-          // null,整个块是 no-op。
-          const hb = getInstanceHeartbeatConfig();
-          if (hb) {
-            createInstanceHeartbeat({
-              intervalMs: hb.intervalMs,
-              instanceId: hb.instanceId,
-              getPort: () => Number(process.env.ZAI_PORT ?? 0) || null,
-            }).start();
-          }
-          resolve();
-        });
-      });
-      // Successfully bound
-      break;
-    } catch (err: any) {
-      if (err.code === 'EADDRINUSE' && attempt < maxAttempts - 1) {
-        server.close();
-        if (attempt === 0) {
-          console.log(`[zai] port ${port} occupied, trying ${port + 1}...`);
-        }
-        continue;
-      }
-      console.error(`[zai] port ${port} already in use (max attempts exhausted)`);
+  let port: number;
+  try {
+    port = await resolveServerPort({
+      explicit: options.port ? Number(options.port) : undefined,
+      base: basePort,
+      host,
+    });
+  } catch (err: any) {
+    if (err?.code === 'EADDRINUSE') {
+      console.error(
+        `[zai] error: port ${basePort} is already in use. ` +
+          `Use --port to pick a free port.`,
+      );
       process.exit(1);
     }
+    console.error(`[zai] port allocation error: ${err?.message ?? err}`);
+    process.exit(1);
   }
+  const server = http.createServer(app);
+  await new Promise<void>((resolve, reject) => {
+    server.on('error', reject);
+    server.listen(port, host, () => {
+      process.env.ZAI_PORT = String(port);
+      // 在受管模式下(子进程由 supervisor 派生),port 一旦绑定立即
+      // 回送 ready,supervisor 才能从 starting 推进到 running 并解
+      // 锁其内部重启路径。无受管进程下 sendReady 是 no-op。
+      sendReady(port);
+      // 受管子进程 (ZAI_INSTANCE_ID + ZAI_SUPERVISOR_PID 已设) 定时回送
+      // heartbeat,中央 supervisor 据此判断存活;普通启动时 config 为
+      // null,整个块是 no-op。
+      const hb = getInstanceHeartbeatConfig();
+      if (hb) {
+        createInstanceHeartbeat({
+          intervalMs: hb.intervalMs,
+          instanceId: hb.instanceId,
+          getPort: () => Number(process.env.ZAI_PORT ?? 0) || null,
+        }).start();
+      }
+      resolve();
+    });
+  });
 
   if (options.lan) {
     const { detectLanIps } = await import('../server/utils/lanIps.js');

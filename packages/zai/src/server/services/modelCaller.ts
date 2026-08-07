@@ -168,7 +168,9 @@ async function getAnthropicClientForModel(model?: string): Promise<Anthropic> {
   _client = new Anthropic({
     authToken: apiKey,
     baseURL,
-    maxRetries: 2,
+    // maxRetries: 0 — 重试统一由 zn-agent-core withRetry 层负责(含 429
+    // 冷却门),SDK 自重试会与 withRetry 叠加重试放大请求风暴。
+    maxRetries: 0,
     // anthropic-beta header: comma-separated list of beta features.
     // - anthropic-tot-control: tool orchestration extras (legacy from upstream proxy)
     // - interleaved-thinking-2025-05-14: keeps extended thinking active across
@@ -200,7 +202,9 @@ function getAnthropicClient(): Anthropic {
   _client = new Anthropic({
     authToken,
     baseURL,
-    maxRetries: 2,
+    // maxRetries: 0 — 重试统一由 zn-agent-core withRetry 层负责(含 429
+    // 冷却门),SDK 自重试会与 withRetry 叠加重试放大请求风暴。
+    maxRetries: 0,
     // anthropic-beta header: comma-separated list of beta features.
     // - anthropic-tot-control: tool orchestration extras (legacy from upstream proxy)
     // - interleaved-thinking-2025-05-14: keeps extended thinking active across

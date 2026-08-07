@@ -61,6 +61,13 @@ const DEFAULT_MAX_RETRIES = 10
 const MAX_CONFIGURABLE_RETRIES = 100
 const FLOOR_OUTPUT_TOKENS = 3000
 const MAX_529_RETRIES = 3
+// rate_limit(429) 重试上限:限流风暴下每请求 ×N 次重试会把并发放大到
+// 上游网关无法恢复。收紧到 3 次(与 529 对齐),避免共享 key 的多实例
+// 一起把重试堆积成请求风暴。
+const MAX_429_RETRIES = 3
+// per-provider 429 冷却窗口默认值(ms)。收到 429 后该 provider 的所有
+// 请求先等窗口结束再发,让上游限流复位,而不是各自立刻重试。
+const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 30_000
 export const DEFAULT_RETRY_DELAY_MS = 500
 export const BASE_DELAY_MS = DEFAULT_RETRY_DELAY_MS
 const MAX_RETRY_DELAY_BASE_MS = 60_000
@@ -113,6 +120,44 @@ const PERSISTENT_MAX_ATTEMPTS = 100
 // (tests must enable UNATTENDED_RETRY via `bun test --feature=UNATTENDED_RETRY`
 // and set CLAUDE_CODE_UNATTENDED_RETRY to exercise this path).
 export { PERSISTENT_MAX_ATTEMPTS as _PERSISTENT_MAX_ATTEMPTS_FOR_TEST, isPersistentRetryEnabled }
+
+// ---------------------------------------------------------------------------
+// Per-provider 429 rate-limit cooldown gate.
+//
+// 请求风暴的根因之一:多个 zai 实例共享同一 provider key,并发请求同时撞
+// 429 后各自指数退避重试,重试又立刻被限流 → 请求数随时间二次增长。这里
+// 加一个 per-provider 冷却门:任何一路收到 429 后,把该 provider 标记为
+// "冷却中",后续所有请求在窗口内先 sleep 再发,让上游限流复位而不是继续
+// 堆积。窗口默认 30s(可用 retry-after 覆盖)。
+// ---------------------------------------------------------------------------
+const rateLimitCooldowns = new Map<string, { until: number }>()
+
+function getRateLimitGate(): { remainingMs: number } | null {
+  const now = Date.now()
+  for (const [provider, entry] of rateLimitCooldowns) {
+    if (entry.until <= now) {
+      rateLimitCooldowns.delete(provider)
+      continue
+    }
+    if (provider === getAPIProvider()) {
+      return { remainingMs: entry.until - now }
+    }
+  }
+  return null
+}
+
+function setRateLimitCooldown(retryAfterMs?: number | null): void {
+  const windowMs =
+    retryAfterMs && retryAfterMs > 0
+      ? retryAfterMs
+      : DEFAULT_RATE_LIMIT_COOLDOWN_MS
+  rateLimitCooldowns.set(getAPIProvider(), { until: Date.now() + windowMs })
+}
+
+/** 测试 seam:清空冷却门状态,避免单测间互相污染。 */
+export function __resetRateLimitStateForTests(): void {
+  rateLimitCooldowns.clear()
+}
 
 function isPersistentRetryEnabled(): boolean {
   return false
@@ -211,11 +256,22 @@ export async function* withRetry<T>(
   }
   let client: Anthropic | null = null
   let consecutive529Errors = options.initialConsecutive529Errors ?? 0
+  let consecutive429Errors = 0
   let lastError: unknown
   let persistentAttempt = 0
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     if (options.signal?.aborted) {
       throw new APIUserAbortError()
+    }
+
+    // 429 冷却门:同一 provider 最近收到过 rate_limit 时,本请求先等
+    // 窗口结束再发(带少量抖动避免同时唤醒),让上游限流复位。abort
+    // 会立即中断等待。
+    const gate = getRateLimitGate()
+    if (gate) {
+      await sleep(gate.remainingMs + Math.random() * 2000, options.signal, {
+        abortError,
+      })
     }
 
     // Capture whether fast mode is active before this attempt
@@ -359,6 +415,19 @@ export async function* withRetry<T>(
         handleFastModeRejectedByAPI()
         retryContext.fastMode = false
         continue
+      }
+
+      // 429 rate_limit:收紧重试上限 + 触发 per-provider 冷却门。计数
+      // 只在本请求链内累积(非 429 错误重置),连续 3 次 429 直接失败,
+      // 不再用默认 maxRetries(10) 放大请求风暴。
+      if (error instanceof APIError && error.status === 429) {
+        consecutive429Errors++
+        setRateLimitCooldown(getRetryAfterMs(error))
+        if (consecutive429Errors >= MAX_429_RETRIES) {
+          throw new CannotRetryError(error, retryContext)
+        }
+      } else {
+        consecutive429Errors = 0
       }
 
       // Non-foreground sources bail immediately on 529 — no retry amplification
