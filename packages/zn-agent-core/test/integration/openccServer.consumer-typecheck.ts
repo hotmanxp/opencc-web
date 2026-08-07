@@ -147,6 +147,8 @@ const _runtimeShape: OpenccRuntime = {
     install: async () => ({ success: true, message: 'ok' }),
     uninstall: async () => ({ success: true, message: 'ok' }),
     update: async () => ({ success: true, message: 'ok' }),
+    listMarketplaces: async () => [],
+    addMarketplace: async () => ({ success: true, message: 'ok' }),
     reload: async () => ({ success: true, message: 'ok' }),
   },
 }
