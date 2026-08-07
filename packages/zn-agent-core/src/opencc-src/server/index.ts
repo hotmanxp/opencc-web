@@ -34,6 +34,8 @@ export type {
   OpenccPluginScope,
   OpenccPluginComponentCounts,
   OpenccPluginReloadCounts,
+  OpenccMarketplaceDto,
+  OpenccMarketplaceActionResult,
 } from './serverTypes.js'
 
 export type {

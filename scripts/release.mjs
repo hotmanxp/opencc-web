@@ -23,9 +23,9 @@
  *   RELEASE_TICKET_ID  — ticket prefix for the commit message
  *                        (default: HRMSV3-ZN-WEBSITE#668)
  */
-import { readFileSync, writeFileSync } from 'node:fs';
+import { readFileSync, writeFileSync, readdirSync, existsSync, chmodSync } from 'node:fs';
 import { execSync, spawnSync } from 'node:child_process';
-import { resolve } from 'node:path';
+import { resolve, join, relative } from 'node:path';
 
 const bumpType = process.argv[2];
 if (!['patch', 'minor', 'major'].includes(bumpType)) {
@@ -45,6 +45,45 @@ const packages = [
 const run = (cmd, label) => {
   console.log(`\n>>> ${label ?? cmd}`);
   execSync(cmd, { stdio: 'inherit' });
+};
+
+/**
+ * Restore the executable bit on every file under `<pkg>/vendor/` before
+ * publish.
+ *
+ * Background: npm's tar packing pipeline drops the +x mode bit on
+ * vendored binaries on some hosts/CI runners (notably when pack/unpack
+ * crosses a host whose default mode mask strips the user-exec bit, or
+ * when the local checkout was checked out with `core.fileMode=false`).
+ * `zai` vendors ripgrep under `vendor/ripgrep/`; if those land in the
+ * published tarball without +x, the FileSearch tool can't spawn `rg` and
+ * silently falls back to a slower walker.
+ *
+ * This is a defensive reset at publish time, scoped to the package
+ * being packed. It is intentionally a no-op for packages without a
+ * `vendor/` directory (e.g. `@zn-ai/zai`).
+ *
+ * On Windows we skip entirely: chmod() throws EPERM there and the
+ * Windows binary is `.exe`-suffixed anyway, so the +x bit is meaningless.
+ */
+const ensureVendorBinariesExecutable = (pkg) => {
+  if (process.platform === 'win32') return;
+  const vendorDir = resolve(pkg.path, 'vendor');
+  if (!existsSync(vendorDir)) return;
+  const entries = readdirSync(vendorDir, { recursive: true, withFileTypes: true });
+  let chmodded = 0;
+  for (const entry of entries) {
+    if (!entry.isFile()) continue;
+    // .exe is a Windows PE; chmod'ing it on POSIX is harmless but pointless —
+    // skip for clarity and so the log line stays accurate.
+    if (entry.name.endsWith('.exe')) continue;
+    const filePath = join(entry.parentPath ?? entry.path ?? vendorDir, entry.name);
+    chmodSync(filePath, 0o755);
+    chmodded += 1;
+  }
+  if (chmodded > 0) {
+    console.log(`  chmod +x on ${chmodded} vendor file(s) under ${relative(process.cwd(), vendorDir)}`);
+  }
 };
 
 /**
@@ -72,6 +111,9 @@ const run = (cmd, label) => {
  */
 const publish = (pkg) => {
   console.log(`\n>>> [publish] ${pkg.name}@${newVersion}`);
+  // Defense against npm publish dropping +x on packed vendor binaries
+  // (see ensureVendorBinariesExecutable docstring).
+  ensureVendorBinariesExecutable(pkg);
   const pkgJsonPath = resolve(pkg.path, 'package.json');
   const pkgJson = JSON.parse(readFileSync(pkgJsonPath, 'utf-8'));
   const origDeps = {};

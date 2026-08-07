@@ -8,6 +8,24 @@ import { python } from '@codemirror/lang-python';
 import { rust } from '@codemirror/lang-rust';
 import { go } from '@codemirror/lang-go';
 import { sql } from '@codemirror/lang-sql';
+import { css } from '@codemirror/lang-css';
+import { sass } from '@codemirror/lang-sass';
+import { less } from '@codemirror/lang-less';
+import { xml } from '@codemirror/lang-xml';
+import { html } from '@codemirror/lang-html';
+import { java } from '@codemirror/lang-java';
+import { cpp } from '@codemirror/lang-cpp';
+import { markdown } from '@codemirror/lang-markdown';
+import { yaml } from '@codemirror/lang-yaml';
+import { php } from '@codemirror/lang-php';
+import { StreamLanguage } from '@codemirror/language';
+import { ruby } from '@codemirror/legacy-modes/mode/ruby';
+import { swift } from '@codemirror/legacy-modes/mode/swift';
+import { shell } from '@codemirror/legacy-modes/mode/shell';
+import { powerShell } from '@codemirror/legacy-modes/mode/powershell';
+import { toml } from '@codemirror/legacy-modes/mode/toml';
+import { properties } from '@codemirror/legacy-modes/mode/properties';
+import { dockerFile } from '@codemirror/legacy-modes/mode/dockerfile';
 
 export interface TextEditorProps {
   initialContent: string;
@@ -22,6 +40,10 @@ export interface TextEditorProps {
  * Map Prism-style language ids from `extToLanguage` to CodeMirror language
  * extensions. Anything not in the map falls back to plain text (no lang
  * extension is added — CM's default behavior).
+ *
+ * For the few languages without a first-party CodeMirror language — kotlin
+ * and graphql — we use the closest cousin (java / javascript) so the editor
+ * still gets keyword/string highlighting rather than plain text.
  */
 function langLoader(language: string | null) {
   switch (language) {
@@ -40,6 +62,45 @@ function langLoader(language: string | null) {
       return go();
     case 'sql':
       return sql();
+    case 'css':
+      return css();
+    case 'scss':
+      return sass();
+    case 'less':
+      return less();
+    case 'xml':
+      return xml();
+    case 'html':
+      return html();
+    case 'java':
+    case 'kotlin':
+      return java();
+    case 'c':
+    case 'cpp':
+      return cpp();
+    case 'ruby':
+      return StreamLanguage.define(ruby);
+    case 'swift':
+      return StreamLanguage.define(swift);
+    case 'bash':
+    case 'shell':
+      return StreamLanguage.define(shell);
+    case 'powershell':
+      return StreamLanguage.define(powerShell);
+    case 'graphql':
+      return javascript();
+    case 'toml':
+      return StreamLanguage.define(toml);
+    case 'markdown':
+      return markdown();
+    case 'yaml':
+      return yaml();
+    case 'php':
+      return php();
+    case 'dockerfile':
+      return StreamLanguage.define(dockerFile);
+    case 'properties':
+      return StreamLanguage.define(properties);
     default:
       return null;
   }

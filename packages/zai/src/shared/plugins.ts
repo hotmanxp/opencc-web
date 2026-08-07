@@ -9,4 +9,6 @@ export type {
   OpenccPluginScope as PluginScope,
   OpenccPluginComponentCounts as PluginComponentCounts,
   OpenccPluginReloadCounts as PluginReloadCounts,
+  OpenccMarketplaceDto as MarketplaceDto,
+  OpenccMarketplaceActionResult as MarketplaceActionResult,
 } from '@zn-ai/zn-agent-core/opencc-server'

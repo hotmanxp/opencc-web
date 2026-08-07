@@ -315,6 +315,34 @@ export type OpenccPluginActionResult = {
   state?: OpenccPluginListResult
 }
 
+/** A configured marketplace source, as shown in the "市场来源" tab. */
+export type OpenccMarketplaceDto = {
+  name: string
+  /** Human-readable source, e.g. `github:owner/repo` — from getMarketplaceSourceDisplay. */
+  source: string
+  /** Discriminant of the underlying MarketplaceSource: github | git | url | file | directory. */
+  sourceType: string
+  lastUpdated?: string
+  /** Plugins the marketplace declares, or undefined when its cache can't be read. */
+  pluginCount?: number
+  /** How many of those are currently installed. */
+  installedCount: number
+}
+
+/**
+ * Result of adding a marketplace. On success the fresh `marketplaces` and
+ * `available` lists ride along so the UI can repaint without a refetch —
+ * same convention as {@link OpenccPluginActionResult.state}.
+ */
+export type OpenccMarketplaceActionResult = {
+  success: boolean
+  message: string
+  /** Resolved marketplace name (comes from its marketplace.json, not the input). */
+  name?: string
+  marketplaces?: OpenccMarketplaceDto[]
+  available?: OpenccMarketplacePluginDto[]
+}
+
 export type OpenccPluginApi = {
   listInstalled(): Promise<OpenccPluginListResult>
   listAvailable(): Promise<OpenccMarketplacePluginDto[]>
@@ -323,4 +351,7 @@ export type OpenccPluginApi = {
   uninstall(id: string): Promise<OpenccPluginActionResult>
   update(id: string): Promise<OpenccPluginActionResult>
   reload(): Promise<OpenccPluginActionResult>
+  listMarketplaces(): Promise<OpenccMarketplaceDto[]>
+  /** `source` is raw user input — `owner/repo`, an https/git URL, or a local path. */
+  addMarketplace(source: string): Promise<OpenccMarketplaceActionResult>
 }

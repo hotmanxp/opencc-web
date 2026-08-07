@@ -2,6 +2,8 @@ import { useCallback, useEffect, useState } from 'react'
 import { api } from '../../lib/api'
 import type {
   PluginActionResult,
+  MarketplaceActionResult,
+  MarketplaceDto,
   MarketplacePluginDto,
   PluginListResult,
 } from '../../../../shared/plugins.js'
@@ -22,19 +24,23 @@ export type PluginWriteOp = 'enable' | 'disable' | 'install' | 'uninstall' | 'up
 export function usePlugins(enabled: boolean) {
   const [installed, setInstalled] = useState<PluginListResult>({ plugins: [], errors: [] })
   const [available, setAvailable] = useState<MarketplacePluginDto[]>([])
+  const [marketplaces, setMarketplaces] = useState<MarketplaceDto[]>([])
   const [status, setStatus] = useState<FetchStatus>('idle')
   const [writing, setWriting] = useState<WriteState>({})
+  const [addingMarketplace, setAddingMarketplace] = useState(false)
 
   const refresh = useCallback(async () => {
     if (!enabled) return
     setStatus('loading')
     try {
-      const [inst, av] = await Promise.all([
+      const [inst, av, mk] = await Promise.all([
         api.get<PluginListResult>('/plugins/'),
         api.get<{ plugins: MarketplacePluginDto[] }>('/plugins/available'),
+        api.get<{ marketplaces: MarketplaceDto[] }>('/plugins/marketplaces'),
       ])
       setInstalled(inst)
       setAvailable(av.plugins)
+      setMarketplaces(mk.marketplaces)
       setStatus('ready')
     } catch {
       setStatus('error')
@@ -60,5 +66,33 @@ export function usePlugins(enabled: boolean) {
     }
   }, [])
 
-  return { installed, available, status, writing, refresh, write, setInstalled }
+  /**
+   * 添加市场 — 克隆/拉取可能较慢, 用独立的 `addingMarketplace` 而不是
+   * 按 id 索引的 `writing`(此时还没有 id). 成功时后端会回带最新的
+   * `marketplaces` + `available`, 同 `write` 一样省掉一次 refetch.
+   */
+  const addMarketplace = useCallback(async (source: string): Promise<MarketplaceActionResult> => {
+    setAddingMarketplace(true)
+    try {
+      const r = await api.post<MarketplaceActionResult>('/plugins/marketplaces/add', { source })
+      if (r.marketplaces) setMarketplaces(r.marketplaces)
+      if (r.available) setAvailable(r.available)
+      return r
+    } finally {
+      setAddingMarketplace(false)
+    }
+  }, [])
+
+  return {
+    installed,
+    available,
+    marketplaces,
+    status,
+    writing,
+    addingMarketplace,
+    refresh,
+    write,
+    addMarketplace,
+    setInstalled,
+  }
 }

@@ -23,10 +23,14 @@ import { getPluginCommands, getPluginSkills } from '../utils/plugins/loadPluginC
 import { getAgentDefinitionsWithOverrides } from '../tools/AgentTool/loadAgentsDir.js'
 import { refreshActivePlugins } from '../utils/plugins/refresh.js'
 import { loadInstalledPluginsV2, hasPendingUpdates, getPendingUpdatesDetails } from '../utils/plugins/installedPluginsManager.js'
-import { getMarketplace, getDeclaredMarketplaces } from '../utils/plugins/marketplaceManager.js'
+import { getMarketplace, getDeclaredMarketplaces, loadKnownMarketplacesConfig, addMarketplaceSource, saveMarketplaceToSettings, clearMarketplacesCache } from '../utils/plugins/marketplaceManager.js'
+import { getMarketplaceSourceDisplay } from '../utils/plugins/marketplaceHelpers.js'
+import { parseMarketplaceInput } from '../utils/plugins/parseMarketplaceInput.js'
+import { parsePluginIdentifier } from '../utils/plugins/pluginIdentifier.js'
+import { clearAllCaches } from '../utils/plugins/cacheUtils.js'
 import { getSettingsForSource } from '../utils/settings/settings.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
-import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto } from './serverTypes.js'
+import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto, OpenccMarketplaceDto, OpenccMarketplaceActionResult } from './serverTypes.js'
 
 export async function createOpenccRuntimeImpl(options) {
   const cwd = options.defaultCwd ?? process.cwd()
@@ -269,37 +273,78 @@ export async function createOpenccRuntimeImpl(options) {
     }
   }
 
+  async function buildAvailable(): Promise<OpenccMarketplacePluginDto[]> {
+    const installed = await buildList()
+    const installedIds = new Set(installed.plugins.map((p) => p.id))
+    const declared = getDeclaredMarketplaces()
+    const out: OpenccMarketplacePluginDto[] = []
+    for (const [marketplaceName, decl] of Object.entries(declared)) {
+      const mp = await getMarketplace(marketplaceName).catch(() => null)
+      if (!mp) continue
+      for (const entry of mp.plugins ?? []) {
+        const id = `${entry.name}@${marketplaceName}`
+        if (installedIds.has(id)) continue
+        out.push({
+          id,
+          name: entry.name,
+          description: entry.description,
+          version: entry.version,
+          author: typeof entry.author === 'string' ? entry.author : entry.author?.name,
+          marketplace: marketplaceName,
+          category: entry.category,
+          tags: entry.tags,
+          installed: false,
+          homepage: entry.homepage,
+        })
+      }
+    }
+    return out
+  }
+
+  /**
+   * The "市场来源" list. Reads known_marketplaces.json (the state layer) rather
+   * than getDeclaredMarketplaces() (the settings intent layer) so that a
+   * marketplace materialized on disk still shows up if the settings write is
+   * lagging. `pluginCount` is left undefined when the cache can't be read —
+   * that's a degraded row, not a zero-plugin marketplace.
+   *
+   * For installedCount we parse the `id` (`plugin@marketplace`) — the
+   * `OpenccPluginDto.marketplace` field is set to `LoadedPlugin.repository`,
+   * which for marketplace-loaded plugins is the entry's local source path
+   * (e.g. `./plugins/superpowers`), NOT the marketplace name.
+   */
+  async function buildMarketplaces(): Promise<OpenccMarketplaceDto[]> {
+    const config = await loadKnownMarketplacesConfig()
+    const installed = await buildList()
+    const installedCount = new Map<string, number>()
+    for (const p of installed.plugins) {
+      const { marketplace } = parsePluginIdentifier(p.id)
+      if (!marketplace) continue
+      installedCount.set(marketplace, (installedCount.get(marketplace) ?? 0) + 1)
+    }
+    const out: OpenccMarketplaceDto[] = []
+    for (const [name, entry] of Object.entries(config)) {
+      const mp = await getMarketplace(name).catch(() => null)
+      out.push({
+        name,
+        source: getMarketplaceSourceDisplay(entry.source),
+        sourceType: entry.source?.source ?? 'unknown',
+        lastUpdated: entry.lastUpdated,
+        pluginCount: mp ? (mp.plugins?.length ?? 0) : undefined,
+        installedCount: installedCount.get(name) ?? 0,
+      })
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name))
+    return out
+  }
+
   const plugins: OpenccPluginApi = {
     async listInstalled() {
       return buildList()
     },
 
     async listAvailable(): Promise<OpenccMarketplacePluginDto[]> {
-      const installed = await buildList()
-      const installedIds = new Set(installed.plugins.map((p) => p.id))
-      const declared = getDeclaredMarketplaces()
-      const out: OpenccMarketplacePluginDto[] = []
-      for (const [marketplaceName, decl] of Object.entries(declared)) {
-        const mp = await getMarketplace(marketplaceName).catch(() => null)
-        if (!mp) continue
-        for (const entry of mp.plugins ?? []) {
-          const id = `${entry.name}@${marketplaceName}`
-          if (installedIds.has(id)) continue
-          out.push({
-            id,
-            name: entry.name,
-            description: entry.description,
-            version: entry.version,
-            author: typeof entry.author === 'string' ? entry.author : entry.author?.name,
-            marketplace: marketplaceName,
-            category: entry.category,
-            tags: entry.tags,
-            installed: false,
-            homepage: entry.homepage,
-          })
-        }
-      }
-      return out
+      return buildAvailable()
     },
 
     async setEnabled(id, enabled) {
@@ -348,6 +393,60 @@ export async function createOpenccRuntimeImpl(options) {
       const reload = await reloadActive()
       if (reload === undefined) return { success: false, message: 'Hot reload failed' }
       return { success: true, message: 'Reloaded', reload, state: await buildList() }
+    },
+
+    async listMarketplaces(): Promise<OpenccMarketplaceDto[]> {
+      return buildMarketplaces()
+    },
+
+    /**
+     * Mirrors the CLI's `marketplaceAddHandler`: parse → materialize on disk →
+     * declare in user settings. Both writes are required — `addMarketplaceSource`
+     * only touches known_marketplaces.json (state), while `listAvailable` reads
+     * `getDeclaredMarketplaces()` (settings intent). Skipping
+     * `saveMarketplaceToSettings` would add a marketplace whose plugins never
+     * appear in the 市场 tab.
+     */
+    async addMarketplace(source: string): Promise<OpenccMarketplaceActionResult> {
+      const raw = (source ?? '').trim()
+      if (!raw) return { success: false, message: '请填写市场地址' }
+
+      let parsed
+      try {
+        parsed = await parseMarketplaceInput(raw)
+      } catch (e) {
+        return { success: false, message: `解析市场地址失败: ${e instanceof Error ? e.message : String(e)}` }
+      }
+      if (!parsed) {
+        return {
+          success: false,
+          message: '无法识别的市场地址格式。可用形式: owner/repo、https://... 或本地路径 ./path',
+        }
+      }
+      if ('error' in parsed) {
+        return { success: false, message: parsed.error }
+      }
+
+      try {
+        const { name, alreadyMaterialized, resolvedSource } = await addMarketplaceSource(parsed)
+        // Declare the intent at user scope so getDeclaredMarketplaces() sees it.
+        saveMarketplaceToSettings(name, { source: resolvedSource }, 'userSettings')
+        // getMarketplace is memoized and clearAllCaches() does not touch that
+        // memo — without this the freshly added marketplace reads as missing.
+        clearMarketplacesCache()
+        clearAllCaches()
+        return {
+          success: true,
+          name,
+          message: alreadyMaterialized
+            ? `市场 '${name}' 已存在于本地，已重新登记`
+            : `已添加市场: ${name}`,
+          marketplaces: await buildMarketplaces(),
+          available: await buildAvailable(),
+        }
+      } catch (e) {
+        return { success: false, message: e instanceof Error ? e.message : String(e) }
+      }
     },
   }
 

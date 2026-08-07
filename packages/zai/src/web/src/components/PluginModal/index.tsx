@@ -6,9 +6,10 @@ import type { PluginActionResult } from '../../../../shared/plugins.js'
 import { usePlugins } from './usePlugins'
 import { InstalledPanel } from './InstalledPanel'
 import { MarketplacePanel } from './MarketplacePanel'
+import { MarketplaceSourcePanel } from './MarketplaceSourcePanel'
 
 /**
- * 插件管理弹框 — 两个 Tab:已安装 / 市场.
+ * 插件管理弹框 — 三个 Tab:已安装 / 市场 / 市场来源.
  *
  * 数据层在 `usePlugins`,只在弹框打开时拉;写操作后端会回带最新列表,
  * 因此这里不需要额外 refetch. 反馈统一走 antd 静态 `message`(与
@@ -18,8 +19,18 @@ import { MarketplacePanel } from './MarketplacePanel'
 export function PluginModal() {
   const open = useAppStore((s) => s.pluginModalOpen)
   const close = useAppStore((s) => s.closePluginModal)
-  const [tab, setTab] = useState<'installed' | 'marketplace'>('installed')
-  const { installed, available, status, writing, write, setInstalled } = usePlugins(open)
+  const [tab, setTab] = useState<'installed' | 'marketplace' | 'sources'>('installed')
+  const {
+    installed,
+    available,
+    marketplaces,
+    status,
+    writing,
+    addingMarketplace,
+    write,
+    addMarketplace,
+    setInstalled,
+  } = usePlugins(open)
 
   const showResult = useCallback(
     (r: PluginActionResult) => {
@@ -74,6 +85,24 @@ export function PluginModal() {
     }
   }, [setInstalled, showResult])
 
+  // 添加成功后跳到「市场」Tab —— 新市场的插件就在那儿等着安装.
+  const handleAddMarketplace = useCallback(
+    async (source: string) => {
+      try {
+        const r = await addMarketplace(source)
+        if (r.success) {
+          message.success(r.message)
+          setTab('marketplace')
+        } else {
+          message.error(r.message)
+        }
+      } catch (e) {
+        message.error(`添加市场失败: ${String(e)}`)
+      }
+    },
+    [addMarketplace],
+  )
+
   return (
     <Modal
       open={open}
@@ -85,7 +114,7 @@ export function PluginModal() {
     >
       <Tabs
         activeKey={tab}
-        onChange={(k) => setTab(k as 'installed' | 'marketplace')}
+        onChange={(k) => setTab(k as 'installed' | 'marketplace' | 'sources')}
         items={[
           {
             key: 'installed',
@@ -111,6 +140,18 @@ export function PluginModal() {
                 status={status}
                 writing={writing}
                 onInstall={handleInstall}
+              />
+            ),
+          },
+          {
+            key: 'sources',
+            label: `市场来源 (${marketplaces.length})`,
+            children: (
+              <MarketplaceSourcePanel
+                marketplaces={marketplaces}
+                status={status}
+                adding={addingMarketplace}
+                onAdd={handleAddMarketplace}
               />
             ),
           },

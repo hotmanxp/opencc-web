@@ -289,6 +289,42 @@ describe('TaskDrawer', () => {
     expect(getByText('pwd')).toBeTruthy()
   })
 
+  // 回归: opencc LocalShellTask.generateTaskId('local_bash') 生成的真实
+  // taskId 前缀是 'b'(9 字符, 如 'b1a2b3c4d'), 不是 'bash-'。
+  // 原实现用 taskId.startsWith('bash-') 判定 bash 任务, 永远命中不了
+  // 真实任务, 导致抽屉弹空白。修复后改为"在 bashTasksBySession 中
+  // 实际查找"的数据驱动判定。
+  test('真实格式 taskId (b 前缀) 也能在抽屉中渲染 Bash 详情与 stdout', () => {
+    useAgentStore.setState({
+      agentTasksBySession: {},
+      bashTasksBySession: {
+        'session-1': [
+          {
+            taskId: 'b1a2b3c4d',
+            sessionId: 'session-1',
+            command: 'echo hello',
+            description: 'echo hello',
+            startedAt: Date.now(),
+            status: 'running',
+            stdout: 'hello\nworld\n',
+            stderr: '',
+          },
+        ],
+      },
+    })
+
+    const { baseElement, queryByText } = render(
+      <TaskDrawer taskId="b1a2b3c4d" onClose={() => {}} />,
+    )
+    // BashTaskView 的 Command 区域应渲染命令
+    expect(baseElement.textContent).toContain('echo hello')
+    // stdout 'world' 是 Output 区独有 (description 只含 'echo hello'),
+    // 出现即说明 stdout 真的被渲染了 (不是 '(空)')。
+    expect(baseElement.textContent).toContain('world')
+    // 不应误入 agent task 路径 (PromptBlock label 'Prompt:')
+    expect(queryByText(/^Prompt:$/)).toBeNull()
+  })
+
   test('收到 task.ended 时追加时间线且不调用已删除的本地 setter', async () => {
     const fetchMock = vi.fn(async () => new Response(
       'id: 1\nevent: task.ended\ndata: {"status":"completed","resultText":"done"}\n\n',

@@ -91,6 +91,12 @@ const _runtimeShape: OpenccRuntime = {
     update: async () => {
       throw new Error('compile-time shape only')
     },
+    listMarketplaces: async () => {
+      throw new Error('compile-time shape only')
+    },
+    addMarketplace: async () => {
+      throw new Error('compile-time shape only')
+    },
     reload: async () => {
       throw new Error('compile-time shape only')
     },

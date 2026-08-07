@@ -4,6 +4,8 @@ import { getRuntime } from '../services/agentRuntime.js'
 
 const IdBody = z.object({ id: z.string().min(1) })
 
+const MarketplaceAddBody = z.object({ source: z.string().min(1) })
+
 function runtimeOr503(res: Response) {
   try {
     const r = getRuntime()
@@ -92,6 +94,25 @@ pluginsRouter.post('/reload', async (_req, res) => {
   const r = runtimeOr503(res)
   if (!r) return
   const result = await r.plugins.reload()
+  res.json(result)
+})
+
+pluginsRouter.get('/marketplaces', async (_req, res) => {
+  const r = runtimeOr503(res)
+  if (!r) return
+  const list = await r.plugins.listMarketplaces()
+  res.json({ marketplaces: list })
+})
+
+// Adding a marketplace clones/fetches from the network, so this can be slow.
+// Failures come back as 200 + `{ success: false, message }` (not 4xx) so the
+// UI can surface the parse/policy/clone error text verbatim.
+pluginsRouter.post('/marketplaces/add', async (req, res) => {
+  const r = runtimeOr503(res)
+  if (!r) return
+  const body = parseBody(MarketplaceAddBody, req, res)
+  if (!body) return
+  const result = await r.plugins.addMarketplace(body.source)
   res.json(result)
 })
 

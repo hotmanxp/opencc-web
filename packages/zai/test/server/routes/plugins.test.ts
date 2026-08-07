@@ -10,6 +10,8 @@ const mockPlugins = {
   uninstall: vi.fn(),
   update: vi.fn(),
   reload: vi.fn(),
+  listMarketplaces: vi.fn(),
+  addMarketplace: vi.fn(),
 }
 const mockGetRuntime = vi.fn()
 
@@ -98,5 +100,56 @@ describe('routes/plugins', () => {
     const r = await request(app).get('/api/plugins/available')
     expect(r.status).toBe(200)
     expect(r.body.plugins[0].name).toBe('p')
+  })
+
+  it('GET /marketplaces returns configured sources', async () => {
+    mockPlugins.listMarketplaces.mockResolvedValue([
+      { name: 'zn-plugins-market', source: 'org/repo', sourceType: 'github', pluginCount: 11, installedCount: 3 },
+    ])
+    const { app } = await bootstrap({ plugins: mockPlugins })
+    const r = await request(app).get('/api/plugins/marketplaces')
+    expect(r.status).toBe(200)
+    expect(r.body.marketplaces[0].name).toBe('zn-plugins-market')
+    expect(r.body.marketplaces[0].pluginCount).toBe(11)
+  })
+
+  it('GET /marketplaces returns 503 when runtime is null', async () => {
+    const { app } = await bootstrap(null)
+    const r = await request(app).get('/api/plugins/marketplaces')
+    expect(r.status).toBe(503)
+  })
+
+  it('POST /marketplaces/add forwards source and returns fresh lists', async () => {
+    mockPlugins.addMarketplace.mockResolvedValue({
+      success: true,
+      name: 'zn-plugins-market',
+      message: '已添加市场: zn-plugins-market',
+      marketplaces: [{ name: 'zn-plugins-market' }],
+      available: [{ id: 'p@zn-plugins-market', name: 'p' }],
+    })
+    const { app } = await bootstrap({ plugins: mockPlugins })
+    const r = await request(app).post('/api/plugins/marketplaces/add').send({ source: 'org/repo' })
+    expect(r.status).toBe(200)
+    expect(mockPlugins.addMarketplace).toHaveBeenCalledWith('org/repo')
+    expect(r.body.success).toBe(true)
+    expect(r.body.available[0].id).toBe('p@zn-plugins-market')
+  })
+
+  it('POST /marketplaces/add without source returns 400', async () => {
+    const { app } = await bootstrap({ plugins: mockPlugins })
+    const r = await request(app).post('/api/plugins/marketplaces/add').send({})
+    expect(r.status).toBe(400)
+    expect(mockPlugins.addMarketplace).not.toHaveBeenCalled()
+  })
+
+  // Parse / policy / clone failures are domain errors, not transport errors —
+  // the UI needs the message verbatim, so they must not become 4xx.
+  it('POST /marketplaces/add surfaces failure as 200 + success:false', async () => {
+    mockPlugins.addMarketplace.mockResolvedValue({ success: false, message: '无法识别的市场地址格式。' })
+    const { app } = await bootstrap({ plugins: mockPlugins })
+    const r = await request(app).post('/api/plugins/marketplaces/add').send({ source: '???' })
+    expect(r.status).toBe(200)
+    expect(r.body.success).toBe(false)
+    expect(r.body.message).toContain('无法识别')
   })
 })

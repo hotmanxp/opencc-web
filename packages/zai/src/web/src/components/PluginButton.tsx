@@ -1,5 +1,5 @@
 import { Button, Tooltip } from 'antd'
-import { AppstoreOutlined } from '@ant-design/icons'
+import { BlockOutlined } from '@ant-design/icons'
 import { useAppStore } from '../store/useAppStore'
 import { toolbarIconButtonStyle } from './toolbarStyles'
 import { PluginModal } from './PluginModal'
@@ -16,7 +16,7 @@ export default function PluginButton() {
     <>
       <Tooltip title="插件管理" placement="top">
         <Button
-          icon={<AppstoreOutlined />}
+          icon={<BlockOutlined />}
           onClick={open}
           aria-label="插件管理"
           data-testid="agent-plugin-button"
