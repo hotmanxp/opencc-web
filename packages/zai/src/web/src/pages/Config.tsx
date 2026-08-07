@@ -417,6 +417,34 @@ function PluginForm() {
 }
 
 function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; label: string; defaultContent?: Record<string, unknown> }) {
+  return (
+    <JsonFileEditor
+      endpoint={`/config/${tool}`}
+      title={`${label} settings`}
+      modalTitle={`编辑 ${label} settings`}
+      defaultContent={defaultContent}
+    />
+  );
+}
+
+/**
+ * 通用 JSON 配置文件编辑器 — 走显式 endpoint(不再拼 `tool`),给
+ * 现有 SettingsEditor 以及新增的"顶层 JSON 配置文件"小节共用。
+ * 行为与原 SettingsEditor 完全一致:GET 拉内容,客户端 JSON 校验,
+ * PUT 保存后重读刷新。title/modalTitle 让 caller 决定卡片标题文案,
+ * 不在组件里硬拼 `${label} settings` 之类的后缀,以兼容中文标签。
+ */
+function JsonFileEditor({
+  endpoint,
+  title,
+  modalTitle,
+  defaultContent,
+}: {
+  endpoint: string;
+  title: string;
+  modalTitle: string;
+  defaultContent?: Record<string, unknown>;
+}) {
   const [content, setContent] = useState<Record<string, unknown> | null>(null);
   const [filePath, setFilePath] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -428,7 +456,7 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
   const fetchContent = async () => {
     setLoading(true);
     try {
-      const data = await api.get<{ path: string; exists: boolean; content: Record<string, unknown>; missing?: boolean }>(`/config/${tool}`);
+      const data = await api.get<{ path: string; exists: boolean; content: Record<string, unknown>; missing?: boolean }>(endpoint);
       setFilePath(data.path);
       setContent(data.content);
       setMissing(!!data.missing);
@@ -441,7 +469,8 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
 
   useEffect(() => {
     fetchContent();
-  }, [tool]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpoint]);
 
   const openEditor = () => {
     // When the file is missing, seed the editor with `defaultContent` (or {})
@@ -468,7 +497,7 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
     }
     setSaving(true);
     try {
-      await api.put(`/config/${tool}`, parsed as Record<string, unknown>);
+      await api.put(endpoint, parsed as Record<string, unknown>);
       message.success('配置已保存');
       setModalOpen(false);
       await fetchContent();
@@ -483,7 +512,7 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
 
   return (
     <Card
-      title={`${label} settings`}
+      title={title}
       size="small"
       extra={
         <Button type="primary" icon={<EditOutlined />} onClick={openEditor}>
@@ -517,7 +546,7 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
       </pre>
 
       <Modal
-        title={`编辑 ${label} settings`}
+        title={modalTitle}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={handleSave}
@@ -585,8 +614,34 @@ export default function Config() {
       <Col
         xs={24}
         md={18}
-        style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)' }}
+        style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', overflow: 'auto' }}
       >
+        {/* JSON 配置文件 — 始终可见的小节,挂在 activeTool 条件渲染之前,
+            让 ~/.claude.json / ~/.zai.json 不依赖菜单 tab 选中就能看到/编辑。
+            两张内层卡片各自固定高度(~280px),JsonFileEditor 里的 pre
+            块用 flex:1 在卡片内独立滚动,避免遮挡下方 tab 内容。 */}
+        <Card
+          title="JSON 配置文件"
+          size="small"
+          style={{ marginTop: 16 }}
+          styles={{ body: { display: 'flex', flexDirection: 'column', gap: 12, padding: 12 } }}
+        >
+          <div style={{ height: 280, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <JsonFileEditor
+              endpoint="/config/claude-json"
+              title="OpenCC 配置"
+              modalTitle="编辑 OpenCC 配置"
+            />
+          </div>
+          <div style={{ height: 280, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+            <JsonFileEditor
+              endpoint="/config/zai-json"
+              title="Zai 配置"
+              modalTitle="编辑 Zai 配置"
+            />
+          </div>
+        </Card>
+
         {activeTool === 'opencc' ? (
           <>
             <ProviderForm />
