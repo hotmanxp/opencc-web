@@ -61,30 +61,6 @@ function relativeAgo(iso: string | null): string {
   return `${hr} 小时前`
 }
 
-const INSTANCE_START_POLL_MS = 250
-const INSTANCE_START_TIMEOUT_MS = 30_000
-
-export async function waitForRunningInstance(
-  id: string,
-  applySnapshot: (snapshot: InstanceSnapshot) => void,
-): Promise<InstanceSnapshot> {
-  const deadline = Date.now() + INSTANCE_START_TIMEOUT_MS
-  while (true) {
-    const res = await fetch(`/api/instances/${id}`)
-    if (!res.ok) throw new Error('无法读取实例状态')
-    const data = (await res.json()) as { instance: InstanceSnapshot }
-    applySnapshot(data.instance)
-    if (data.instance.state === 'running' && data.instance.port !== null) {
-      return data.instance
-    }
-    if (data.instance.state === 'down') {
-      throw new Error(data.instance.lastError?.message ?? '实例启动失败')
-    }
-    if (Date.now() >= deadline) throw new Error('实例启动超时,请稍后手动打开')
-    await new Promise<void>((resolve) => setTimeout(resolve, INSTANCE_START_POLL_MS))
-  }
-}
-
 type DirectoryPickerProps = {
   open: boolean
   initialPath: string
@@ -406,12 +382,6 @@ export default function Instances(): JSX.Element {
   }
 
   async function onCreate(): Promise<void> {
-    // 必须在第一次 await 之前同步开窗 — 浏览器只在用户手势同步上下文
-    // 里允许 window.open, 推迟到 fetch / wait 之后会被弹窗拦截器静默
-    // 挡掉 (Chrome / Firefox 行为一致)。这里开 about:blank 仅为占位,
-    // 保留弹窗权限; 后续导航到实例 URL, 失败路径必须 close, 否则用户
-    // 会看到永不消失的 about:blank 标签页 (这就是本次修复要消除的 bug)。
-    const popup = window.open('about:blank', '_blank', 'noopener,noreferrer')
     try {
       const values = await form.validateFields()
       // Translate the Switch + InputNumber pair into the supervisor's
@@ -431,21 +401,10 @@ export default function Instances(): JSX.Element {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
         throw new Error(data.error ?? '创建失败')
       }
-      const data = (await res.json()) as { instance: InstanceSnapshot }
       setOpen(false)
       form.resetFields()
       void loadInstances()
-      const started = await waitForRunningInstance(data.instance.id, applyInstanceSnapshot)
-      // waitForRunningInstance 只在 state==='running' && port!==null 时返回,
-      // 这里再做一次防御性检查: 万一端口交付语义变化 (例如返回端口
-      // 暂未确定), 不要把 popup 留在 about:blank — 直接抛错让 catch
-      // 关窗; 用户可从卡片上手动"打开"。
-      if (started.port == null) throw new Error('实例已启动但端口未知')
-      // LAN 实例绑 0.0.0.0 同时含 127.0.0.1, 浏览器端 localhost:<port>
-      // 总可达。
-      if (popup && !popup.closed) popup.location.href = `http://localhost:${started.port}`
     } catch (err) {
-      if (popup && !popup.closed) popup.close()
       message.error(err instanceof Error ? err.message : '创建失败')
     }
   }
