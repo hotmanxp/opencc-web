@@ -190,6 +190,27 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
   }
 
   /**
+   * 取消某父会话派生且尚未结束的全部任务。dispatch 与 attach 两条 record
+   * 路径都带 parentSessionId,这里统一匹配并 abort。任务终态由 runOne 的
+   * finally(dispatch 路径)或 finalizeTask(attach 路径)落盘 + emit done,
+   * 这里只负责触发 abort。
+   */
+  async cancelByParentSession(
+    sessionId: string,
+    reason?: string,
+  ): Promise<{ cancelled: number }> {
+    let cancelled = 0
+    for (const rec of this.records.values()) {
+      if (rec.task.parentSessionId !== sessionId) continue
+      const st = rec.task.status
+      if (st === 'completed' || st === 'failed' || st === 'cancelled') continue
+      rec.controller.abort(reason ?? 'user_abort')
+      cancelled++
+    }
+    return { cancelled }
+  }
+
+  /**
    * 登记一个 caller 外部管理的任务(AgentTool 子代理走这条路径)。与 dispatch 的区别:
    *   - id 由 caller 提供(AgentTool 已用 createAgentId() 生成),不重新分配
    *   - 不入 queue,不调 runOne —— 执行由 caller(AgentTool 调用 runAgent)

@@ -57,3 +57,24 @@ export async function assertPortAvailable(
   const server = await listen(port, host);
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }
+
+/**
+ * 解析服务端口:
+ * - 显式指定了端口(explicit):必须空闲,被占用直接抛 EADDRINUSE 错误
+ *   (调用方应报错退出,禁止静默递增 —— 多实例静默换端口是请求风暴根因之一)。
+ * - 未指定端口:自动扫描 base 起的空闲端口(保留原宽松行为)。
+ * 探测用的 server 在返回前已关闭,不占用端口。
+ */
+export async function resolveServerPort(opts: {
+  explicit?: number;
+  base: number;
+  host?: string;
+}): Promise<number> {
+  if (opts.explicit !== undefined) {
+    await assertPortAvailable(opts.explicit, opts.host);
+    return opts.explicit;
+  }
+  const { port, server } = await findAvailablePort(opts.base);
+  await new Promise<void>((resolve) => server.close(() => resolve()));
+  return port;
+}

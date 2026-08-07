@@ -4,6 +4,7 @@ import {
   findAvailablePort,
   listen,
   parsePort,
+  resolveServerPort,
 } from '../../src/cli/ports.js';
 
 describe('parsePort', () => {
@@ -101,5 +102,55 @@ describe('assertPortAvailable', () => {
     // A second assertPortAvailable on the same port should still succeed,
     // proving the previous probe closed cleanly.
     await expect(assertPortAvailable(port)).resolves.toBeUndefined();
+  });
+});
+
+describe('resolveServerPort', () => {
+  it('returns the explicit port when it is free', async () => {
+    const probe = await listen(0);
+    const port = (probe.address() as { port: number }).port;
+    probe.close();
+    await expect(resolveServerPort({ explicit: port, base: port })).resolves.toBe(port);
+  });
+
+  it('rejects with EADDRINUSE when the explicit port is occupied (no silent bump)', async () => {
+    const blocker = await listen(0);
+    try {
+      const occupied = (blocker.address() as { port: number }).port;
+      await expect(
+        resolveServerPort({ explicit: occupied, base: occupied }),
+      ).rejects.toThrow();
+    } finally {
+      blocker.close();
+    }
+  });
+
+  it('scans from base when no explicit port is given', async () => {
+    const probe = await listen(0);
+    const free = (probe.address() as { port: number }).port;
+    probe.close();
+    // base = free → auto path returns the same free port
+    const port = await resolveServerPort({ base: free });
+    expect(port).toBe(free);
+  });
+
+  it('skips an occupied base and returns base+1 when auto-allocating', async () => {
+    const blocker = await listen(0);
+    const base = (blocker.address() as { port: number }).port;
+    try {
+      const port = await resolveServerPort({ base });
+      expect(port).toBe(base + 1);
+    } finally {
+      blocker.close();
+    }
+  });
+
+  it('closes the probe server after auto-allocation (port is reusable)', async () => {
+    const probe = await listen(0);
+    const base = (probe.address() as { port: number }).port;
+    probe.close();
+    const port = await resolveServerPort({ base });
+    // 第二次调用(显式传刚拿到的端口)应成功,证明探测 server 已关
+    await expect(resolveServerPort({ explicit: port, base: port })).resolves.toBe(port);
   });
 });
