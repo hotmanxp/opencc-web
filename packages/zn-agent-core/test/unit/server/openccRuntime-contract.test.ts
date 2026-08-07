@@ -72,6 +72,35 @@ const _runtimeShape: OpenccRuntime = {
   shutdown: async () => {
     throw new Error('compile-time shape only')
   },
+  plugins: {
+    listInstalled: async () => {
+      throw new Error('compile-time shape only')
+    },
+    listAvailable: async () => {
+      throw new Error('compile-time shape only')
+    },
+    setEnabled: async () => {
+      throw new Error('compile-time shape only')
+    },
+    install: async () => {
+      throw new Error('compile-time shape only')
+    },
+    uninstall: async () => {
+      throw new Error('compile-time shape only')
+    },
+    update: async () => {
+      throw new Error('compile-time shape only')
+    },
+    listMarketplaces: async () => {
+      throw new Error('compile-time shape only')
+    },
+    addMarketplace: async () => {
+      throw new Error('compile-time shape only')
+    },
+    reload: async () => {
+      throw new Error('compile-time shape only')
+    },
+  },
 }
 void _runtimeShape
 

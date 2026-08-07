@@ -56,6 +56,20 @@ const EXT_TO_LANG: Record<string, string> = {
   sql: 'sql',
   graphql: 'graphql',
   gql: 'graphql',
+  // Config / markup / general
+  toml: 'toml',
+  tomllib: 'toml',
+  md: 'markdown',
+  markdown: 'markdown',
+  yaml: 'yaml',
+  yml: 'yaml',
+  php: 'php',
+  dockerfile: 'dockerfile',
+  properties: 'properties',
+  ini: 'properties',
+  env: 'properties',
+  conf: 'properties',
+  yml_loader: 'yaml',
 };
 
 /**

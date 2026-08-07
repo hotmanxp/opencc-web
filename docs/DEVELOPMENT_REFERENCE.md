@@ -11,7 +11,7 @@
 ## 2. 核心入口
 
 - `packages/zn-agent-core/src/compat/runtime/contract.ts` — `DefaultAgentRuntime` 兼容垫片,`run(opts)` 委托 `openccAdapter.runOpenccQuery()`。其他 compat shim(`cwdStore` / `commands` / `transcript` / `background/DefaultBackgroundRuntime` / `mcp/MCPClientPool` / `plugins/HookRunner` / `runtime/skills-*` / `runtime/compactService`)均按 zai 端原 API 形态提供。
-- `packages/zn-agent-core/src/compat/runtime/openccAdapter.ts` — Bun-direct 的 surface bridge(BUNDLE_URL → vendor bundle + `tool.prompt({agents})` 动态渲染 + attachment 翻译)。`dev:node` / `start:node` 是 CI / 测试用兜底入口。
+- `packages/zn-agent-core/src/compat/runtime/openccAdapter.ts` — surface bridge(BUNDLE_URL → vendor bundle + `tool.prompt({agents})` 动态渲染 + attachment 翻译),经 `bun-protocol.mjs` loader 在 Node 下运行。`dev`(tsx)为默认入口,`dev:bun` 为可选 Bun 快速运行;`start:node` 为发布态 Node 入口。
 - `packages/zn-agent-core/src/opencc-src/` — opencc 0.20.0 源码副本,UI 已剔除,`query.ts` 主循环入口 + `queryLoop.ts` / `services/tools/` / `services/api/` / `services/mcp/` 等。un-stripped 全量(commit `80a769b1`),`import 'bun:bundle'` 与 `Bun.sleep` 直接吃 Bun runtime;runtime path 走 compat bridge,只有 unit test 直接 import vendor 才撞 Bun-only 约束。
 - `packages/zn-agent-core/scripts/bundle-opencc.mjs` — esbuild `bundle: false` 单文件编 `src/opencc-src/types/<name>.ts` → `dist/opencc-src/types/<name>.js`;`package.json` 子路径 `"./opencc-src/<name>"` 暴露。
 - `packages/zai/src/server/index.ts` — `createApp({cwd, cwdName, token, port?})` 顺序 `initAgentRuntime → initSubagentNotifierLifecycle → initBackgroundRuntime`,挂 14 个 router 到 `/api/*`;`express.json({limit:'20mb'})`(图片粘贴);`/api` 整段禁缓存。

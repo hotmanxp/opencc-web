@@ -1,6 +1,6 @@
 {
   "name": "@zn-ai/zn-agent-core",
-  "version": "0.2.19",
+  "version": "0.2.23",
   "description": "zai agent runtime core",
   "type": "module",
   "main": "dist/index.js",
@@ -32,6 +32,11 @@
     "scripts/copy-runtime-assets.mjs",
     "vendor/"
   ],
+  "bin": {
+    "rg-darwin-arm64": "vendor/ripgrep/rg-darwin-arm64",
+    "rg-darwin-x64": "vendor/ripgrep/rg-darwin-x64",
+    "rg-win32-x64": "vendor/ripgrep/rg-win32-x64.exe"
+  },
   "scripts": {
     "build": "node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && node scripts/tsc-with-cache.mjs tsconfig.contract-tests.json && node scripts/tsc-with-cache.mjs tsconfig.consumer.json && node scripts/copy-runtime-assets.mjs && node scripts/verify-server-types-self-contained.mjs && find dist -name '*.map' -delete",
     "dev": "tsc -b --watch",

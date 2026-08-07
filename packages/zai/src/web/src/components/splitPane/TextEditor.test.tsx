@@ -10,6 +10,24 @@ vi.mock('@codemirror/lang-python', () => ({ python: () => [] }));
 vi.mock('@codemirror/lang-rust', () => ({ rust: () => [] }));
 vi.mock('@codemirror/lang-go', () => ({ go: () => [] }));
 vi.mock('@codemirror/lang-sql', () => ({ sql: () => [] }));
+vi.mock('@codemirror/lang-css', () => ({ css: () => [] }));
+vi.mock('@codemirror/lang-sass', () => ({ sass: () => [] }));
+vi.mock('@codemirror/lang-less', () => ({ less: () => [] }));
+vi.mock('@codemirror/lang-xml', () => ({ xml: () => [] }));
+vi.mock('@codemirror/lang-html', () => ({ html: () => [] }));
+vi.mock('@codemirror/lang-java', () => ({ java: () => [] }));
+vi.mock('@codemirror/lang-cpp', () => ({ cpp: () => [] }));
+vi.mock('@codemirror/lang-markdown', () => ({ markdown: () => [] }));
+vi.mock('@codemirror/lang-yaml', () => ({ yaml: () => [] }));
+vi.mock('@codemirror/lang-php', () => ({ php: () => [] }));
+vi.mock('@codemirror/language', () => ({ StreamLanguage: { define: (m: any) => [] } }));
+vi.mock('@codemirror/legacy-modes/mode/ruby', () => ({ ruby: {} }));
+vi.mock('@codemirror/legacy-modes/mode/swift', () => ({ swift: {} }));
+vi.mock('@codemirror/legacy-modes/mode/shell', () => ({ shell: {} }));
+vi.mock('@codemirror/legacy-modes/mode/powershell', () => ({ powerShell: {} }));
+vi.mock('@codemirror/legacy-modes/mode/toml', () => ({ toml: {} }));
+vi.mock('@codemirror/legacy-modes/mode/properties', () => ({ properties: {} }));
+vi.mock('@codemirror/legacy-modes/mode/dockerfile', () => ({ dockerFile: {} }));
 
 import { TextEditor } from './TextEditor.js';
 
@@ -63,5 +81,18 @@ describe('TextEditor', () => {
       .map((s) => s.textContent ?? '')
       .join('\n');
     expect(styles).toMatch(/\.cm-cursor[^{}]*\{[^}]*border-left-color\s*:\s*rgb\(\s*167\s*,\s*139\s*,\s*250\s*\)/);
+  });
+
+  test.each([
+    'css', 'scss', 'less', 'xml', 'html', 'java', 'kotlin', 'c', 'cpp',
+    'ruby', 'swift', 'bash', 'shell', 'powershell', 'graphql',
+    'toml', 'markdown', 'yaml', 'php', 'dockerfile', 'properties',
+  ])('mounts a language extension for %s (no throw)', (lang) => {
+    // 回归:langLoader 曾只覆盖 6 种语言,其余(web/系统/shell 等)落回纯文本。
+    // 该用例确保为 extToLanguage 能返回的每个语言 id 挂载扩展都不抛错。
+    expect(() =>
+      render(<TextEditor initialContent="x" language={lang} onSave={() => {}} onCancel={() => {}} />),
+    ).not.toThrow();
+    cleanup();
   });
 });

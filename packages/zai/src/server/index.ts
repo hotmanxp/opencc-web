@@ -15,6 +15,7 @@ import quickstartRouter from './routes/quickstart.js';
 import execRouter from './routes/exec.js';
 import agentRouter from './routes/agent.js';
 import agentSettingsRouter from './routes/agentSettings.js';
+import { pluginsRouter } from './routes/plugins.js';
 import answerRouter from './routes/answer.js';
 import approveRouter from './routes/approve.js';
 import permissionRouter from './routes/permission.js';
@@ -128,6 +129,7 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   app.use('/api', execRouter);
   app.use('/api', agentRouter);
   app.use('/api', agentSettingsRouter);
+  app.use('/api/plugins', pluginsRouter);
   app.use('/api', tasksRouter);
   app.use('/api', bashTasksRouter);
   app.use('/api', bashReplRouter);

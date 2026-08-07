@@ -84,6 +84,9 @@ interface AppState {
   settingsTheme: 'auto' | 'dark' | 'light' | 'high-contrast';
   openSettingsDrawer: () => void;
   closeSettingsDrawer: () => void;
+  pluginModalOpen: boolean;
+  openPluginModal: () => void;
+  closePluginModal: () => void;
   setSettingsTheme: (t: 'auto' | 'dark' | 'light' | 'high-contrast') => void;
   /**
    * Web transcript output style — see OutputStyle in shared/settings.ts.
@@ -146,6 +149,7 @@ export const useAppStore = create<AppState>((set) => ({
   toasts: [],
   instanceContext: null,
   settingsDrawerOpen: false,
+  pluginModalOpen: false,
   settingsTheme: 'dark',
   // Default before the GET /api/agent/settings fetch resolves; the
   // Layout mount effect re-hydrates this from disk on first paint so
@@ -265,6 +269,8 @@ export const useAppStore = create<AppState>((set) => ({
   })),
   openSettingsDrawer: () => set({ settingsDrawerOpen: true }),
   closeSettingsDrawer: () => set({ settingsDrawerOpen: false }),
+  openPluginModal: () => set({ pluginModalOpen: true }),
+  closePluginModal: () => set({ pluginModalOpen: false }),
   setSettingsTheme: (t) => set({ settingsTheme: t }),
   setOutputStyle: (style) => set({ outputStyle: style }),
   setMaxVisibleMessages: (n) => set({ maxVisibleMessages: n }),

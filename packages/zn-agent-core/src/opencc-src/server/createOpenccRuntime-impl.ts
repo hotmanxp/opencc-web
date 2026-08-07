@@ -2,7 +2,7 @@
 import { randomUUID } from 'node:crypto'
 import { createHeadlessContextImpl } from './createHeadlessContext-impl.js'
 import { createSessionFacadeImpl } from './sessionFacade-impl.js'
-import { runWithSdkContext, getSessionId } from '../bootstrap/state.js'
+import { runWithSdkContext, getSessionId, getOriginalCwd } from '../bootstrap/state.js'
 import { wrapTaskAwareSetState } from '../../compat/runtime/agentTaskBridge.js'
 import { QueryEngine } from '../QueryEngine.js'
 import { createAbortController } from '../utils/abortController.js'
@@ -11,7 +11,26 @@ import { transitionPermissionMode } from '../utils/permissions/permissionSetup.j
 import { assembleToolPool } from '../tools.js'
 import { mergeAndFilterTools } from '../utils/toolPool.js'
 import { getMcpToolsCommandsAndResources } from '../services/mcp/client.js'
+import { assemblePluginList } from './pluginListAssembly.js'
+import {
+  installPluginOp,
+  uninstallPluginOp,
+  setPluginEnabledOp,
+  updatePluginOp,
+} from '../services/plugins/pluginOperations.js'
+import { loadAllPlugins } from '../utils/plugins/pluginLoader.js'
+import { getPluginCommands, getPluginSkills } from '../utils/plugins/loadPluginCommands.js'
+import { getAgentDefinitionsWithOverrides } from '../tools/AgentTool/loadAgentsDir.js'
+import { refreshActivePlugins } from '../utils/plugins/refresh.js'
+import { loadInstalledPluginsV2, hasPendingUpdates, getPendingUpdatesDetails } from '../utils/plugins/installedPluginsManager.js'
+import { getMarketplace, getDeclaredMarketplaces, loadKnownMarketplacesConfig, addMarketplaceSource, saveMarketplaceToSettings, clearMarketplacesCache } from '../utils/plugins/marketplaceManager.js'
+import { getMarketplaceSourceDisplay } from '../utils/plugins/marketplaceHelpers.js'
+import { parseMarketplaceInput } from '../utils/plugins/parseMarketplaceInput.js'
+import { parsePluginIdentifier } from '../utils/plugins/pluginIdentifier.js'
+import { clearAllCaches } from '../utils/plugins/cacheUtils.js'
+import { getSettingsForSource } from '../utils/settings/settings.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
+import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto, OpenccMarketplaceDto, OpenccMarketplaceActionResult } from './serverTypes.js'
 
 export async function createOpenccRuntimeImpl(options) {
   const cwd = options.defaultCwd ?? process.cwd()
@@ -178,6 +197,257 @@ export async function createOpenccRuntimeImpl(options) {
       ts: source.ts ?? Date.now(),
       turnIndex: source.turnIndex ?? turnIndex,
     }
+  }
+
+  async function buildComponentCounts(): Promise<Map<string, OpenccPluginComponentCounts>> {
+    const counts = new Map<string, OpenccPluginComponentCounts>()
+    const [cmds, skills, agents] = await Promise.all([
+      getPluginCommands(),
+      getPluginSkills(),
+      getAgentDefinitionsWithOverrides(getOriginalCwd()),
+    ])
+    // 1) per-plugin commands/skills counts
+    // Command.name is "pluginName:namespace:commandName" (loadPluginCommands.ts:83-84, 97-98)
+    for (const c of cmds) {
+      if (c.source !== 'plugin') continue
+      const pluginName = c.name.split(':')[0]
+      const e = counts.get(pluginName) ?? { commands: 0, agents: 0, skills: 0, hooks: 0, mcpServers: 0 }
+      e.commands += 1
+      counts.set(pluginName, e)
+    }
+    // Skill.name is "pluginName:namespace:skillName" — same encoding
+    for (const s of skills) {
+      if (s.source !== 'plugin') continue
+      const pluginName = s.name.split(':')[0]
+      const e = counts.get(pluginName) ?? { commands: 0, agents: 0, skills: 0, hooks: 0, mcpServers: 0 }
+      e.skills += 1
+      counts.set(pluginName, e)
+    }
+    // 2) agents: PluginAgentDefinition has pluginName as a top-level field (loadAgentsDir.ts:155)
+    for (const a of agents.allAgents ?? []) {
+      if (a.source !== 'plugin' || !('pluginName' in a) || !a.pluginName) continue
+      const e = counts.get(a.pluginName) ?? { commands: 0, agents: 0, skills: 0, hooks: 0, mcpServers: 0 }
+      e.agents += 1
+      counts.set(a.pluginName, e)
+    }
+    return counts
+  }
+
+  async function buildList(): Promise<OpenccPluginListResult> {
+    const [loadResult, v2, counts] = await Promise.all([
+      loadAllPlugins(),
+      loadInstalledPluginsV2(),
+      buildComponentCounts(),
+    ])
+    // 3) hooks + mcpServers from the loaded plugins (cheap, no extra I/O)
+    for (const p of [...loadResult.enabled, ...loadResult.disabled]) {
+      const e = counts.get(p.name) ?? { commands: 0, agents: 0, skills: 0, hooks: 0, mcpServers: 0 }
+      e.hooks = Object.keys(p.hooksConfig ?? {}).length
+      e.mcpServers = Object.keys(p.mcpServers ?? {}).length
+      counts.set(p.name, e)
+    }
+    // 4) hasUpdate via pending updates registry
+    const pendingMap = new Map<string, boolean>()
+    if (hasPendingUpdates()) {
+      for (const u of getPendingUpdatesDetails()) {
+        pendingMap.set(u.id, true)
+      }
+    }
+    const enabled = getSettingsForSource('userSettings')?.enabledPlugins as Record<string, boolean> | undefined
+    return assemblePluginList(loadResult, v2, enabled, counts, (id) => pendingMap.get(id) === true)
+  }
+
+  async function reloadActive(): Promise<OpenccPluginActionResult['reload']> {
+    try {
+      const r = await refreshActivePlugins(ctx.appState.setState)
+      return {
+        plugins: r.enabled_count,
+        commands: r.command_count,
+        agents: r.agent_count,
+        hooks: r.hook_count,
+        mcpServers: r.mcp_count,
+        errors: r.error_count,
+      }
+    } catch (e) {
+      return undefined
+    }
+  }
+
+  async function buildAvailable(): Promise<OpenccMarketplacePluginDto[]> {
+    const installed = await buildList()
+    const installedIds = new Set(installed.plugins.map((p) => p.id))
+    const declared = getDeclaredMarketplaces()
+    const out: OpenccMarketplacePluginDto[] = []
+    for (const [marketplaceName, decl] of Object.entries(declared)) {
+      const mp = await getMarketplace(marketplaceName).catch(() => null)
+      if (!mp) continue
+      for (const entry of mp.plugins ?? []) {
+        const id = `${entry.name}@${marketplaceName}`
+        if (installedIds.has(id)) continue
+        out.push({
+          id,
+          name: entry.name,
+          description: entry.description,
+          version: entry.version,
+          author: typeof entry.author === 'string' ? entry.author : entry.author?.name,
+          marketplace: marketplaceName,
+          category: entry.category,
+          tags: entry.tags,
+          installed: false,
+          homepage: entry.homepage,
+        })
+      }
+    }
+    return out
+  }
+
+  /**
+   * The "市场来源" list. Reads known_marketplaces.json (the state layer) rather
+   * than getDeclaredMarketplaces() (the settings intent layer) so that a
+   * marketplace materialized on disk still shows up if the settings write is
+   * lagging. `pluginCount` is left undefined when the cache can't be read —
+   * that's a degraded row, not a zero-plugin marketplace.
+   *
+   * For installedCount we parse the `id` (`plugin@marketplace`) — the
+   * `OpenccPluginDto.marketplace` field is set to `LoadedPlugin.repository`,
+   * which for marketplace-loaded plugins is the entry's local source path
+   * (e.g. `./plugins/superpowers`), NOT the marketplace name.
+   */
+  async function buildMarketplaces(): Promise<OpenccMarketplaceDto[]> {
+    const config = await loadKnownMarketplacesConfig()
+    const installed = await buildList()
+    const installedCount = new Map<string, number>()
+    for (const p of installed.plugins) {
+      const { marketplace } = parsePluginIdentifier(p.id)
+      if (!marketplace) continue
+      installedCount.set(marketplace, (installedCount.get(marketplace) ?? 0) + 1)
+    }
+    const out: OpenccMarketplaceDto[] = []
+    for (const [name, entry] of Object.entries(config)) {
+      const mp = await getMarketplace(name).catch(() => null)
+      out.push({
+        name,
+        source: getMarketplaceSourceDisplay(entry.source),
+        sourceType: entry.source?.source ?? 'unknown',
+        lastUpdated: entry.lastUpdated,
+        pluginCount: mp ? (mp.plugins?.length ?? 0) : undefined,
+        installedCount: installedCount.get(name) ?? 0,
+      })
+    }
+    out.sort((a, b) => a.name.localeCompare(b.name))
+    return out
+  }
+
+  const plugins: OpenccPluginApi = {
+    async listInstalled() {
+      return buildList()
+    },
+
+    async listAvailable(): Promise<OpenccMarketplacePluginDto[]> {
+      return buildAvailable()
+    },
+
+    async setEnabled(id, enabled) {
+      const op = await setPluginEnabledOp(id, enabled, 'user')
+      if (!op.success) return { success: false, message: op.message }
+      const reload = await reloadActive()
+      if (reload === undefined) {
+        return { success: true, message: op.message, reloadFailed: true, state: await buildList() }
+      }
+      return { success: true, message: op.message, reload, state: await buildList() }
+    },
+
+    async install(id) {
+      const op = await installPluginOp(id, 'user')
+      if (!op.success) return { success: false, message: op.message }
+      const reload = await reloadActive()
+      if (reload === undefined) {
+        return { success: true, message: op.message, reloadFailed: true, state: await buildList() }
+      }
+      return { success: true, message: op.message, reload, state: await buildList() }
+    },
+
+    async uninstall(id) {
+      const op = await uninstallPluginOp(id, 'user', true)
+      if (!op.success) return { success: false, message: op.message }
+      const reload = await reloadActive()
+      if (reload === undefined) {
+        return { success: true, message: op.message, reloadFailed: true, state: await buildList() }
+      }
+      return { success: true, message: op.message, reload, state: await buildList() }
+    },
+
+    async update(id) {
+      const op = await updatePluginOp(id, 'user')
+      if (!op.success) {
+        return { success: false, message: op.message }
+      }
+      const reload = await reloadActive()
+      if (reload === undefined) {
+        return { success: true, message: op.message, reloadFailed: true, state: await buildList() }
+      }
+      return { success: true, message: op.message, reload, state: await buildList() }
+    },
+
+    async reload() {
+      const reload = await reloadActive()
+      if (reload === undefined) return { success: false, message: 'Hot reload failed' }
+      return { success: true, message: 'Reloaded', reload, state: await buildList() }
+    },
+
+    async listMarketplaces(): Promise<OpenccMarketplaceDto[]> {
+      return buildMarketplaces()
+    },
+
+    /**
+     * Mirrors the CLI's `marketplaceAddHandler`: parse → materialize on disk →
+     * declare in user settings. Both writes are required — `addMarketplaceSource`
+     * only touches known_marketplaces.json (state), while `listAvailable` reads
+     * `getDeclaredMarketplaces()` (settings intent). Skipping
+     * `saveMarketplaceToSettings` would add a marketplace whose plugins never
+     * appear in the 市场 tab.
+     */
+    async addMarketplace(source: string): Promise<OpenccMarketplaceActionResult> {
+      const raw = (source ?? '').trim()
+      if (!raw) return { success: false, message: '请填写市场地址' }
+
+      let parsed
+      try {
+        parsed = await parseMarketplaceInput(raw)
+      } catch (e) {
+        return { success: false, message: `解析市场地址失败: ${e instanceof Error ? e.message : String(e)}` }
+      }
+      if (!parsed) {
+        return {
+          success: false,
+          message: '无法识别的市场地址格式。可用形式: owner/repo、https://... 或本地路径 ./path',
+        }
+      }
+      if ('error' in parsed) {
+        return { success: false, message: parsed.error }
+      }
+
+      try {
+        const { name, alreadyMaterialized, resolvedSource } = await addMarketplaceSource(parsed)
+        // Declare the intent at user scope so getDeclaredMarketplaces() sees it.
+        saveMarketplaceToSettings(name, { source: resolvedSource }, 'userSettings')
+        // getMarketplace is memoized and clearAllCaches() does not touch that
+        // memo — without this the freshly added marketplace reads as missing.
+        clearMarketplacesCache()
+        clearAllCaches()
+        return {
+          success: true,
+          name,
+          message: alreadyMaterialized
+            ? `市场 '${name}' 已存在于本地，已重新登记`
+            : `已添加市场: ${name}`,
+          marketplaces: await buildMarketplaces(),
+          available: await buildAvailable(),
+        }
+      } catch (e) {
+        return { success: false, message: e instanceof Error ? e.message : String(e) }
+      }
+    },
   }
 
   return {
@@ -360,5 +630,6 @@ export async function createOpenccRuntimeImpl(options) {
       queryAbortControllers.clear()
       engines.clear()
     },
+    plugins,
   }
 }

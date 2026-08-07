@@ -1,0 +1,309 @@
+{
+  "input": [
+    [
+      {
+        "type": "text",
+        "text": "<system-reminder>\nAvailable agent types for the Agent tool:\n- browser-operator: 使用 ego-browser 驱动真实浏览器完成多步骤 Web 交互、页面验证和结果确认。适用于需要点击、输入、滚动、截图、登录态或动态页面反馈的任务。\n\n<example>\nContext: 用户要在 JavaScript-heavy Web app 中填写表单\nuser: \"在 https://example.com/signup 注册账号，邮箱 test@example.com，密码 P@ssw0rd!\"\nassistant: \"我会使用 browser-operator，通过 ego-browser 完成注册流程。\"\n</example>\n\n<example>\nContext: 用户要验证 Web app 功能\nuser: \"登录 https://app.example.com 创建一个新项目并截图保存\"\nassistant: \"我会委托 browser-operator，使用 ego-browser 驱动登录、创建和验证流程。\"\n</example>\n\n<example>\nContext: 用户要操作富文本编辑器或表格\nuser: \"在 Google Sheet 里把 A1 改成 'Hello'，A2 填公式 =NOW()\"\nassistant: \"我会委托 browser-operator，使用 ego-browser 的视觉工作流和真实键盘操作。\"\n</example>\n\n不要把此 agent 用于不需要真实浏览器的纯本地文件任务；只要任务涉及真实浏览器，就必须使用 ego-browser，不要改用 Chrome DevTools MCP、Playwright、Puppeteer、curl 或其他浏览器替代方案。\n (Tools: Bash, Read, Grep, Glob)\n- claude-code-guide: Use this agent when the user asks questions (\"Can OpenCC...\", \"Does OpenCC...\", \"How do I...\") about: (1) OpenCC (the CLI tool) - features, hooks, slash commands, MCP servers, settings, IDE integrations, keyboard shortcuts; (2) OpenCC Agent SDK - building custom agents; (3) OpenCC API (formerly Anthropic API) - API usage, tool use, Anthropic SDK usage. **IMPORTANT:** Before spawning a new agent, check if there is already a running or recently completed claude-code-guide agent that you can continue via SendMessage. (Tools: Glob, Grep, Read, WebFetch, WebSearch)\n- Explore: Fast agent specialized for exploring codebases. Use this when you need to quickly find files by patterns (eg. \"src/components/**/*.tsx\"), search code for keywords (eg. \"API endpoints\"), or answer questions about the codebase (eg. \"how do API endpoints work?\"). When calling this agent, specify the desired thoroughness level: \"quick\" for basic searches, \"medium\" for moderate exploration, or \"very thorough\" for comprehensive analysis across multiple locations and naming conventions. (Tools: All tools except Agent, ExitPlanMode, Edit, Write, NotebookEdit)\n- feature-dev:code-architect: Designs feature architectures by analyzing existing codebase patterns and conventions, then providing comprehensive implementation blueprints with specific files to create/modify, component designs, data flows, and build sequences (Tools: Glob, Grep, LS, Read, NotebookRead, WebFetch, TodoWrite, WebSearch, KillShell, BashOutput)\n- feature-dev:code-explorer: Deeply analyzes existing codebase features by tracing execution paths, mapping architecture layers, understanding patterns and abstractions, and documenting dependencies to inform new development (Tools: Glob, Grep, LS, Read, NotebookRead, WebFetch, TodoWrite, WebSearch, KillShell, BashOutput)\n- feature-dev:code-reviewer: Reviews code for bugs, logic errors, security vulnerabilities, code quality issues, and adherence to project conventions, using confidence-based filtering to report only high-priority issues that truly matter (Tools: Glob, Grep, LS, Read, NotebookRead, WebFetch, TodoWrite, WebSearch, KillShell, BashOutput)\n- general-purpose: General-purpose agent for researching complex questions, searching for code, and executing multi-step tasks. When you are searching for a keyword or file and are not confident that you will find the right match in the first few tries use this agent to perform the search for you. (Tools: *)\n- Plan: Software architect agent for designing implementation plans. Use this when you need to plan the implementation strategy for a task. Returns step-by-step plans, identifies critical files, and considers architectural trade-offs. (Tools: All tools except Agent, ExitPlanMode, Edit, Write, NotebookEdit)\n- statusline-setup: Use this agent to configure the user's OpenCC status line setting. (Tools: Read, Edit)\n- tui-func-verifier: Use this agent when manually triggered by a coordinator to verify CLI/TUI functionality through terminal automation and command execution. Examples:\n\n<example>\nContext: Coordinator wants to verify /help command renders correctly in TUI\nuser: \"Verify /help displays plugin commands correctly in the TUI\"\nassistant: \"I'll use the cli-tui-verifier agent to execute and verify this.\"\n</example>\n\n<example>\nContext: Post-task verification of provider switching\nuser: \"Verify 'opencc provider set' command changes provider in the TUI\"\nassistant: \"Running cli-tui-verifier to validate this behavior.\"\n</example>\n\n<example>\nContext: Build verification after code change\nuser: \"Verify build succeeds and CLI entrypoint works in TUI\"\nassistant: \"Using cli-tui-verifier to validate build and TUI function.\"\n</example>\n (Tools: Bash, Glob, Grep, Read)\n- web-func-verifier: Use this agent when manually triggered by a coordinator to verify web UI functionality through Chrome DevTools MCP. Examples:\n\n<example>\nContext: Verify a login page renders correctly\nuser: \"Verify https://example.com/login loads and shows username/password fields\"\nassistant: \"I'll use the web-url-verifier agent to navigate and verify this.\"\n</example>\n\n<example>\nContext: Verify a web component works after interaction\nuser: \"Verify the search input on page /dashboard filters results correctly\"\nassistant: \"Running web-url-verifier to test this interaction.\"\n</example>\n\n<example>\nContext: Post-deployment verification\nuser: \"Verify the new feature flag UI at /features shows toggle switches\"\nassistant: \"Using web-url-verifier to validate the UI renders correctly.\"\n</example>\n (Tools: mcp__plugin_chrome-devtools-mcp_chrome-devtools__navigate_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_snapshot, mcp__plugin_chrome-devtools-mcp_chrome-devtools__take_screenshot, mcp__plugin_chrome-devtools-mcp_chrome-devtools__click, mcp__plugin_chrome-devtools-mcp_chrome-devtools__fill, mcp__plugin_chrome-devtools-mcp_chrome-devtools__fill_form, mcp__plugin_chrome-devtools-mcp_chrome-devtools__wait_for, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_pages, mcp__plugin_chrome-devtools-mcp_chrome-devtools__select_page, mcp__plugin_chrome-devtools-mcp_chrome-devtools__evaluate_script, mcp__plugin_chrome-devtools-mcp_chrome-devtools__list_console_messages, Bash)\n\nLaunch multiple agents concurrently whenever possible, to maximize performance; to do that, use a single message with multiple tool uses.\n</system-reminder>\n"
+      },
+      {
+        "type": "text",
+        "text": "hello"
+      }
+    ]
+  ],
+  "output": [
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "message_start",
+        "message": {
+          "id": "06c3dc384ddc5b943cee77faac80fb13",
+          "type": "message",
+          "role": "assistant",
+          "content": [],
+          "model": "MiniMax-M3",
+          "stop_reason": null,
+          "stop_sequence": null,
+          "usage": {
+            "input_tokens": 0,
+            "output_tokens": 0,
+            "service_tier": "standard"
+          },
+          "service_tier": "standard"
+        }
+      },
+      "ttftMs": 2163
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_start",
+        "index": 0,
+        "content_block": {
+          "type": "thinking",
+          "thinking": ""
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": "The user said"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " \"hello\" -"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " a simple greeting."
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " I should respond briefly"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " and naturally"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " in Chinese as"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " per the language"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": " settings"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "thinking_delta",
+          "thinking": "."
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 0,
+        "delta": {
+          "type": "signature_delta",
+          "signature": "7e84ae205b46f17a68bad59d3ce00dde61aa4a39915945796e408887ab0db571"
+        }
+      }
+    },
+    {
+      "uuid": "UUID-12",
+      "requestId": "REQUEST_ID",
+      "timestamp": "2026-08-06T15:33:14.373Z",
+      "message": {
+        "id": "06c3dc384ddc5b943cee77faac80fb13",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "thinking",
+            "thinking": "The user said \"hello\" - a simple greeting. I should respond briefly and naturally in Chinese as per the language settings.",
+            "signature": "7e84ae205b46f17a68bad59d3ce00dde61aa4a39915945796e408887ab0db571"
+          }
+        ],
+        "model": "MiniMax-M3",
+        "stop_reason": null,
+        "stop_sequence": null,
+        "usage": {
+          "input_tokens": 0,
+          "output_tokens": 0,
+          "service_tier": "standard"
+        },
+        "service_tier": "standard"
+      },
+      "type": "assistant"
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_stop",
+        "index": 0
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_start",
+        "index": 1,
+        "content_block": {
+          "type": "text",
+          "text": ""
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {
+          "type": "text_delta",
+          "text": "你好！"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {
+          "type": "text_delta",
+          "text": "有什么我可以帮你的"
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_delta",
+        "index": 1,
+        "delta": {
+          "type": "text_delta",
+          "text": "吗？"
+        }
+      }
+    },
+    {
+      "uuid": "UUID-18",
+      "requestId": "REQUEST_ID",
+      "timestamp": "2026-08-06T15:33:14.551Z",
+      "message": {
+        "id": "06c3dc384ddc5b943cee77faac80fb13",
+        "type": "message",
+        "role": "assistant",
+        "content": [
+          {
+            "type": "text",
+            "text": "你好！有什么我可以帮你的吗？",
+            "citations": []
+          }
+        ],
+        "model": "MiniMax-M3",
+        "stop_reason": "end_turn",
+        "stop_sequence": null,
+        "usage": {
+          "input_tokens": 28024,
+          "cache_creation_input_tokens": 0,
+          "cache_read_input_tokens": 128,
+          "output_tokens": 36,
+          "server_tool_use": {
+            "web_search_requests": 0,
+            "web_fetch_requests": 0
+          },
+          "service_tier": "standard",
+          "cache_creation": {
+            "ephemeral_1h_input_tokens": 0,
+            "ephemeral_5m_input_tokens": 0
+          },
+          "cache_deleted_input_tokens": 0,
+          "inference_geo": "",
+          "iterations": [],
+          "speed": "standard"
+        },
+        "service_tier": "standard"
+      },
+      "type": "assistant"
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "content_block_stop",
+        "index": 1
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "message_delta",
+        "delta": {
+          "stop_reason": "end_turn"
+        },
+        "usage": {
+          "input_tokens": 28024,
+          "output_tokens": 36,
+          "cache_read_input_tokens": 128,
+          "service_tier": "standard",
+          "output_tokens_details": {
+            "thinking_tokens": 25
+          }
+        }
+      }
+    },
+    {
+      "type": "stream_event",
+      "event": {
+        "type": "message_stop"
+      }
+    }
+  ]
+}

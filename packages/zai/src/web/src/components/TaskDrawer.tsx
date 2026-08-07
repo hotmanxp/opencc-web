@@ -648,9 +648,16 @@ export function TaskDrawer({
   // detail / bashTask 100% 从 useAgentStore 读 — SSE agent_task.changed /
   // bash_task.changed 推送的 BackgroundTaskSummary.detail 已含完整 task。
   // 切 session 期间 store 里没当前 taskId 的 entry 时显示 "not found"。
+  //
+  // 数据驱动判定: 不再用 taskId 前缀约定区分 agent / bash — opencc vendor
+  // LocalShellTask.generateTaskId('local_bash') 生成的实际前缀是 'b'(见
+  // packages/zn-agent-core/src/opencc-src/Task.ts:81, e.g. 'b1a2b3c4d'),
+  // 不是 'bash-'。原 taskId.startsWith('bash-') 永远命中不了真实 bash 任务,
+  // 导致 bashTask 恒为 null、抽屉空白。改为按 taskId 在两个 store 中实际
+  // 查找 — 找到了就归属对应类型。
   const allSessionIds = useAgentStore((s) => Object.keys(s.agentTasksBySession))
   const detail = useAgentStore((s) => {
-    if (!taskId || taskId.startsWith('bash-')) return null
+    if (!taskId) return null
     for (const sid of Object.keys(s.agentTasksBySession)) {
       const summary = s.agentTasksBySession[sid]?.find((t) => t.taskId === taskId)
       if (summary?.detail) return summary.detail
@@ -658,7 +665,7 @@ export function TaskDrawer({
     return null
   })
   const bashTask = useAgentStore((s) => {
-    if (!taskId || !taskId.startsWith('bash-')) return null
+    if (!taskId) return null
     for (const sid of Object.keys(s.bashTasksBySession)) {
       const t = s.bashTasksBySession[sid]?.find((task) => task.taskId === taskId)
       if (t) return t
@@ -669,8 +676,8 @@ export function TaskDrawer({
   const [loading, setLoading] = useState(false)
   const aborterRef = useRef<AbortController | null>(null)
 
-  // 区分 agent task 与 bash task: taskId 以 "bash-" 开头为 bash.
-  const isBashTask = !!taskId && taskId.startsWith('bash-')
+  // 数据驱动判定: 在 bashTasksBySession 找到了就是 bash 任务.
+  const isBashTask = !!bashTask
 
   // taskId 变化时清 events;detail/bashTask 由上面 selector 实时算。
   useEffect(() => {

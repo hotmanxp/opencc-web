@@ -140,6 +140,15 @@ const _runtimeShape: OpenccRuntime = {
   patchSession: async () => undefined,
   removeSession: async () => undefined,
   shutdown: async () => undefined,
+  plugins: {
+    listInstalled: async () => ({ plugins: [], errors: [] }),
+    listAvailable: async () => [],
+    setEnabled: async () => ({ success: true, message: 'ok' }),
+    install: async () => ({ success: true, message: 'ok' }),
+    uninstall: async () => ({ success: true, message: 'ok' }),
+    update: async () => ({ success: true, message: 'ok' }),
+    reload: async () => ({ success: true, message: 'ok' }),
+  },
 }
 void _runtimeShape
 
