@@ -62,7 +62,7 @@ async function writeClaudeJson(data: Record<string, unknown>): Promise<void> {
   await rename(tmpPath, path);
 }
 
-// 顶层 JSON 配置文件(~/.zai.json / ~/.zai.json)的读取与原子写。
+// 顶层 JSON 配置文件(~/.claude.json / ~/.claude/settings.json)的读取与原子写。
 // 注册顺序必须在 /config/:tool 之前 — Express 按注册顺序匹配,
 // /config/claude-json 会被 /config/:tool (tool=claude-json) 抢先吃掉,
 // 然后 ConfigToolSchema 校验失败。直读直写 ConfigFile 形状,不走
@@ -87,20 +87,20 @@ router.put('/config/claude-json', async (req, res) => {
   }
 });
 
-router.get('/config/zai-json', async (_req, res) => {
+router.get('/config/claude-settings', async (_req, res) => {
   try {
-    res.json(await readTopLevelJson('zai-json'));
+    res.json(await readTopLevelJson('claude-settings'));
   } catch (err) {
     res.status(500).json({ error: String(err) });
   }
 });
 
-router.put('/config/zai-json', async (req, res) => {
+router.put('/config/claude-settings', async (req, res) => {
   if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
     return res.status(400).json({ error: 'body must be a JSON object' });
   }
   try {
-    await writeTopLevelJson('zai-json', req.body as Record<string, unknown>);
+    await writeTopLevelJson('claude-settings', req.body as Record<string, unknown>);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });

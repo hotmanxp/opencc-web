@@ -8,9 +8,9 @@ import {
   writeTopLevelJson,
 } from '../../src/server/services/fileStore.js';
 
-// ~/.zai.json / ~/.zai.json 顶层 JSON 配置的 read/write 服务测试。
+// ~/.claude.json / ~/.claude/settings.json 顶层 JSON 配置的 read/write 服务测试。
 // 沿用 fileStore.test.ts 的 HOME-override 模式:把 process.env.HOME
-// 指向临时目录,确保不会污染真实的 ~/.zai.json / ~/.zai.json。
+// 指向临时目录,确保不会污染真实的 ~/.claude.json / ~/.claude/settings.json。
 
 const ORIGINAL_HOME = process.env.HOME;
 let tempHome: string;
@@ -26,23 +26,23 @@ afterAll(() => {
 });
 
 describe('readTopLevelJson', () => {
-  it('returns missing:true when ~/.zai.json does not exist', async () => {
+  it('returns missing:true when ~/.claude.json does not exist', async () => {
     const result = await readTopLevelJson('claude-json');
     expect(result.exists).toBe(false);
     expect(result.missing).toBe(true);
-    expect(result.path).toBe(join(tempHome, '.zai.json'));
+    expect(result.path).toBe(join(tempHome, '.claude.json'));
   });
 
-  it('returns missing:true when ~/.zai.json does not exist', async () => {
-    const result = await readTopLevelJson('zai-json');
+  it('returns missing:true when ~/.claude/settings.json does not exist', async () => {
+    const result = await readTopLevelJson('claude-settings');
     expect(result.exists).toBe(false);
     expect(result.missing).toBe(true);
-    expect(result.path).toBe(join(tempHome, '.zai.json'));
+    expect(result.path).toBe(join(tempHome, '.claude', 'settings.json'));
   });
 });
 
 describe('writeTopLevelJson + readTopLevelJson roundtrip', () => {
-  it('writes and reads back ~/.zai.json atomically', async () => {
+  it('writes and reads back ~/.claude.json atomically', async () => {
     const content = { providerProfiles: [{ name: 'test', provider: 'openai' }] };
     await writeTopLevelJson('claude-json', content);
     const result = await readTopLevelJson('claude-json');
@@ -54,10 +54,10 @@ describe('writeTopLevelJson + readTopLevelJson roundtrip', () => {
     expect(JSON.parse(readFileSync(result.path, 'utf-8'))).toEqual(content);
   });
 
-  it('writes and reads back ~/.zai.json atomically', async () => {
-    const content = { mcpServers: { foo: { command: 'echo' } } };
-    await writeTopLevelJson('zai-json', content);
-    const result = await readTopLevelJson('zai-json');
+  it('writes and reads back ~/.claude/settings.json atomically', async () => {
+    const content = { permissions: { defaultMode: 'bypassPermissions' } };
+    await writeTopLevelJson('claude-settings', content);
+    const result = await readTopLevelJson('claude-settings');
     expect(result.exists).toBe(true);
     expect(result.content).toEqual(content);
     expect(existsSync(result.path + '.tmp')).toBe(false);

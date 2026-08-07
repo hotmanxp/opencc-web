@@ -28,42 +28,6 @@ const KNOWN_PROVIDERS = [
 // (which seeds the Add form) keeps working without churn.
 const BUILTIN_PROFILES: ProviderProfile[] = BUILTIN_PROVIDERS;
 
-const OPENCC_DEFAULT_CONTENT: Record<string, unknown> = {
-  permissions: {
-    allow: [
-      'Bash(*)',
-      'Read',
-      'Write',
-      'Edit',
-      'Monitor(*)',
-      'mcp__chrome-devtools-mcp__*',
-      'mcp__codegraph__codegraph_search',
-      'mcp__codegraph__codegraph_context',
-      'mcp__codegraph__codegraph_callers',
-      'mcp__codegraph__codegraph_callees',
-      'mcp__codegraph__codegraph_impact',
-      'mcp__codegraph__codegraph_node',
-      'mcp__codegraph__codegraph_status',
-    ],
-    defaultMode: 'bypassPermissions',
-  },
-  attribution: {
-    commit: '',
-  },
-  env: {
-    ANTHROPIC_BASE_URL: 'https://zn-nova.paic.com.cn/novai',
-    OPENAI_BASE_URL: 'https://wizard-ai.paic.com.cn/code_pilot/api/v1',
-  },
-  extraKnownMarketplaces: {
-    'zn-plugins-market': {
-      source: {
-        source: 'git',
-        url: 'git@code.paic.com.cn:git/zn-agent-assets.git',
-      },
-    },
-  },
-};
-
 function ProviderForm() {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [loading, setLoading] = useState(true);
@@ -519,8 +483,8 @@ function JsonFileEditor({
           {missing ? '新增' : '编辑'}
         </Button>
       }
-      style={{ marginTop: 16, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-      styles={{ body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 12 } }}
+      style={{ marginTop: 16, flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+      styles={{ body: { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 12 } }}
     >
       <Tooltip title={filePath}>
         <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
@@ -617,27 +581,27 @@ export default function Config() {
         style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', overflow: 'auto' }}
       >
         {/* JSON 配置文件 — 始终可见的小节,挂在 activeTool 条件渲染之前,
-            让 ~/.zai.json 不依赖菜单 tab 选中就能看到/编辑。
+            让 ~/.claude.json / ~/.claude/settings.json 不依赖菜单 tab 选中就能看到/编辑。
             两张内层卡片各自固定高度(~280px),JsonFileEditor 里的 pre
             块用 flex:1 在卡片内独立滚动,避免遮挡下方 tab 内容。 */}
         <Card
           title="JSON 配置文件"
           size="small"
           style={{ marginTop: 16 }}
-          styles={{ body: { display: 'flex', flexDirection: 'column', gap: 12, padding: 12 } }}
+          styles={{ body: { display: 'flex', flexDirection: 'row', gap: 12, padding: 12 } }}
         >
-          <div style={{ height: 280, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <JsonFileEditor
               endpoint="/config/claude-json"
               title="OpenCC 配置"
               modalTitle="编辑 OpenCC 配置"
             />
           </div>
-          <div style={{ height: 280, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+          <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
             <JsonFileEditor
-              endpoint="/config/zai-json"
-              title="Zai 配置"
-              modalTitle="编辑 Zai 配置"
+              endpoint="/config/claude-settings"
+              title="Settings"
+              modalTitle="编辑 Settings"
             />
           </div>
         </Card>
@@ -645,7 +609,6 @@ export default function Config() {
         {activeTool === 'opencc' ? (
           <>
             <ProviderForm />
-            <SettingsEditor tool="opencc" label="OpenCC" defaultContent={OPENCC_DEFAULT_CONTENT} />
           </>
         ) : activeTool === 'opencode' ? (
           <>

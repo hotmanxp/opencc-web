@@ -13,12 +13,13 @@ const CONFIG_PATHS: Record<ConfigTool, () => string> = {
 // 顶层 JSON 配置文件直读直写 — 与 readConfig/writeConfig 同语义
 // (返回 ConfigFile、缺失返回 missing:true、写走 tmp+rename 原子),
 // 但不走 ConfigTool 枚举(这两个文件不在用户视角的"工具"分类里)。
+// 注:`~/.zai.json` 仍由 mcpConfig.ts 单独读取,不在此处暴露 UI。
 const TOP_LEVEL_JSON_PATHS: Record<TopLevelJsonKey, () => string> = {
-  'claude-json': () => join(homedir(), '.zai.json'),
-  'zai-json': () => join(homedir(), '.zai.json'),
+  'claude-json': () => join(homedir(), '.claude.json'),
+  'claude-settings': () => join(homedir(), '.claude', 'settings.json'),
 };
 
-export type TopLevelJsonKey = 'claude-json' | 'zai-json';
+export type TopLevelJsonKey = 'claude-json' | 'claude-settings';
 
 export async function readTopLevelJson(key: TopLevelJsonKey): Promise<ConfigFile> {
   const path = TOP_LEVEL_JSON_PATHS[key]();
