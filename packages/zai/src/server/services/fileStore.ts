@@ -10,6 +10,41 @@ const CONFIG_PATHS: Record<ConfigTool, () => string> = {
   zai: () => join(homedir(), '.zai', 'settings.json'),
 };
 
+// 顶层 JSON 配置文件直读直写 — 与 readConfig/writeConfig 同语义
+// (返回 ConfigFile、缺失返回 missing:true、写走 tmp+rename 原子),
+// 但不走 ConfigTool 枚举(这两个文件不在用户视角的"工具"分类里)。
+const TOP_LEVEL_JSON_PATHS: Record<TopLevelJsonKey, () => string> = {
+  'claude-json': () => join(homedir(), '.claude.json'),
+  'zai-json': () => join(homedir(), '.zai.json'),
+};
+
+export type TopLevelJsonKey = 'claude-json' | 'zai-json';
+
+export async function readTopLevelJson(key: TopLevelJsonKey): Promise<ConfigFile> {
+  const path = TOP_LEVEL_JSON_PATHS[key]();
+  try {
+    const raw = await readFile(path, 'utf-8');
+    return { path, exists: true, content: JSON.parse(raw) };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { path, exists: false, content: {}, missing: true };
+    }
+    throw err;
+  }
+}
+
+export async function writeTopLevelJson(
+  key: TopLevelJsonKey,
+  content: Record<string, unknown>,
+): Promise<{ ok: true }> {
+  const path = TOP_LEVEL_JSON_PATHS[key]();
+  await mkdir(dirname(path), { recursive: true });
+  const tmpPath = `${path}.tmp`;
+  await writeFile(tmpPath, JSON.stringify(content, null, 2), 'utf-8');
+  await rename(tmpPath, path);
+  return { ok: true };
+}
+
 export async function readConfig(tool: ConfigTool): Promise<ConfigFile> {
   const path = CONFIG_PATHS[tool]();
   try {
