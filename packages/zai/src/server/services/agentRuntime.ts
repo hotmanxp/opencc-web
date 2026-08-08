@@ -497,7 +497,10 @@ function getPluginRuntime(): DefaultPluginRuntime {
   if (!pluginRuntime) {
     pluginRuntime = new DefaultPluginRuntime({
       opencc: {
-        configDir: resolveOpenccConfigDir() ?? join(homedir(), '.claude'),
+        // OPENCC_CONFIG_DIR / CLAUDE_CONFIG_DIR 未显式设置时,OpenCC 插件
+        // 根目录统一到 zai 的 dataDir(~/.zai),与 vendor 侧
+        // getClaudeConfigHomeDir 的默认值一致,不再回退 ~/.claude。
+        configDir: resolveOpenccConfigDir() ?? resolveDataDir().resolved,
       },
     })
   }

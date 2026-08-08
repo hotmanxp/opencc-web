@@ -4,7 +4,7 @@
  * `resolveOpenccConfigDir` is a pure function (no filesystem I/O, no
  * implicit `process.env` reads) that picks the OpenCC plugin root from,
  * in priority order: `opts.configDir`, `OPENCC_CONFIG_DIR`, `CLAUDE_CONFIG_DIR`,
- * or `undefined` (caller decides — typically `~/.claude`).
+ * or `undefined` (caller decides — zai falls back to `~/.zai`).
  *
  * Inject `opts.env` for deterministic testing. The path resolvers used
  * by `manifest.ts` (per-component path guards) live here so the rule
@@ -27,7 +27,7 @@ export type ResolveOpenccConfigDirOptions = {
  *   1. `opts.configDir` (explicit)
  *   2. `OPENCC_CONFIG_DIR` env var
  *   3. `CLAUDE_CONFIG_DIR` env var
- *   4. `undefined` — caller decides the default (typically `~/.claude`)
+ *   4. `undefined` — caller decides the default (zai uses `~/.zai`)
  *
  * Pure function: no filesystem I/O, no implicit `process.env` reads.
  * Pass `opts.env` to inject a deterministic environment in tests.

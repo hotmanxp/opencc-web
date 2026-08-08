@@ -6,36 +6,22 @@ import { join } from 'path'
 export function resolveClaudeConfigHomeDir(options?: {
   configDirEnv?: string
   homeDir?: string
-  openClaudeExists?: boolean
-  legacyClaudeExists?: boolean
 }): string {
   if (options?.configDirEnv) {
     return options.configDirEnv.normalize('NFC')
   }
 
   const homeDir = options?.homeDir ?? homedir()
-  // zai patch: base 统一到 zai 的 dataDir。生产默认 ~/.zai; 显式设置
-  // ZAI_DATA_DIR (与 zai 侧 compat/data/dataDir.ts 的 resolveDataDir 优先
-  // 级一致) 时以它为准, 否则测试/自定义 dataDir 场景下 vendor 写
-  // ~/.zai/projects 而读取端读 ${ZAI_DATA_DIR}/projects, 目录又错位。
+  // zai patch: config home 统一到 zai 的 dataDir,不再回退 ~/.claude。
+  // 显式设置 ZAI_DATA_DIR (与 zai 侧 compat/data/dataDir.ts 的
+  // resolveDataDir 优先级一致) 时以它为准, 否则测试/自定义 dataDir
+  // 场景下 vendor 写 ~/.zai/projects 而读取端读 ${ZAI_DATA_DIR}/projects,
+  // 目录又错位。
   const zaiDataDir = process.env.ZAI_DATA_DIR
   if (zaiDataDir) {
     return zaiDataDir.normalize('NFC')
   }
-  const openClaudeDir = join(homeDir, '.zai')
-  const legacyClaudeDir = join(homeDir, '.zai')
-  const openClaudeExists =
-    options?.openClaudeExists ?? existsSync(openClaudeDir)
-  const legacyClaudeExists =
-    options?.legacyClaudeExists ?? existsSync(legacyClaudeDir)
-
-  // Preserve existing user config/install state until we ship an explicit
-  // migration. New installs (neither path exists) use ~/.claude.
-  if (!openClaudeExists && legacyClaudeExists) {
-    return legacyClaudeDir.normalize('NFC')
-  }
-
-  return openClaudeDir.normalize('NFC')
+  return join(homeDir, '.zai').normalize('NFC')
 }
 
 /**
