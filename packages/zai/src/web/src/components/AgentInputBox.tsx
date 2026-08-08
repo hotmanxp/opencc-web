@@ -505,13 +505,22 @@ export default React.memo(function AgentInputBox() {
     async (promptId: string) => {
       canceledQueuedRef.current.add(promptId);
       const sid = sessionId || activeSessionId || undefined;
+      let removed = true;
       try {
-        await api.post("/agent/queue/cancel", {
+        const resp = await api.post<{ removed?: boolean }>("/agent/queue/cancel", {
           sessionId: sid,
           promptId,
         });
+        removed = resp.removed !== false;
       } catch {
         // 失败回滚取消标记, 让 watcher 下次按正常路径处理(消息仍在排队)。
+        canceledQueuedRef.current.delete(promptId);
+        return;
+      }
+      if (!removed) {
+        // 后端返回 removed:false — 消息已被消费(开始执行)或已不存在。
+        // 撤销取消标记, 让 watcher 正常 push 进 transcript, 否则这条
+        // 用户消息会永久缺失。
         canceledQueuedRef.current.delete(promptId);
         return;
       }
@@ -593,6 +602,15 @@ export default React.memo(function AgentInputBox() {
     setInput("");
 
     if (blocks.length > 0) {
+      // 第一版排队仅文本: streaming 中图片消息不可发送(图片按钮/drop 已禁用,
+      // 但 streaming 前挂载的附件仍可能随 Enter 提交), 拦截并提示 — 否则
+      // pushUserMsg 写 transcript + 后端排队(queued:true)双显, 消费时 watcher
+      // 再 push 一次造成三份。
+      if (status === "streaming") {
+        message.warning("对话进行中暂不支持发送图片,请等待当前回复结束");
+        setInput(text); // 恢复文字(附件保留在 attachments 状态)
+        return;
+      }
       // 含图片附件: 仍走原始内联实现 (submitPrompt hook 不接 contentBlocks,
       // 保持图片附件路径不抽到 hook — 与 handleSend 历史契约对齐, 避免破坏
       // 已有 ["AgentInputBox"] 附件提交路径).

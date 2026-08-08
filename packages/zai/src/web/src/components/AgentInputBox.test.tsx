@@ -465,6 +465,44 @@ describe('AgentInputBox — 首条消息带图片附件时 UI 立即渲染', () 
     vi.mocked(api.post).mockResolvedValue({ sessionId: 'sess-new' } as any)
   })
 
+  it('streaming 中带图片发送: 拦截不提交(图片不排队, 避免双显)', async () => {
+    useAgentStore.setState({ status: 'streaming', messages: [], sendSeq: 0 })
+    const imageReader = await import('../lib/imageReader.js')
+    const spy = vi
+      .spyOn(imageReader, 'readImageAsBase64')
+      .mockResolvedValue({
+        mime: 'image/png',
+        dataUrl: 'data:image/png;base64,AAA',
+        size: 1024,
+        filename: 'pasted.png',
+      })
+    try {
+      render(<AgentInputBox />)
+      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+      fireEvent.change(ta, { target: { value: 'describe this' } })
+      const fileInput = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = new File(['fake-bytes'], 'pasted.png', { type: 'image/png' })
+      Object.defineProperty(fileInput, 'files', { value: [file], configurable: true })
+      fireEvent.change(fileInput)
+      await waitFor(() => expect(spy).toHaveBeenCalled())
+      fireEvent.keyDown(ta, { key: 'Enter', code: 'Enter', shiftKey: false })
+      // 拦截: 不调 /agent/prompt, 不写 user.text
+      expect(vi.mocked(api.post)).not.toHaveBeenCalledWith(
+        '/agent/prompt',
+        expect.anything(),
+        expect.anything(),
+      )
+      expect(
+        useAgentStore.getState().messages.some(
+          (m) => (m as { type?: string }).type === 'user.text',
+        ),
+      ).toBe(false)
+    } finally {
+      spy.mockRestore()
+      useAgentStore.setState({ status: 'idle' })
+    }
+  })
+
   it('图片 + 文字一起发: store 立即新增一条带 attachments 的 user.text', async () => {
     // vi.spyOn readImageAsBase64 立刻 resolve, 不依赖 vi.doMock 模块缓存.
     const imageReader = await import('../lib/imageReader.js')

@@ -17,6 +17,9 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
   const sessionId = useAgentStore((s) => s.sessionId)
   const sessions = useAgentStore((s) => s.sessions)
   const createNewSession = useAgentStore((s) => s.createNewSession)
+  // 对话进行中(streaming)禁用新建 — 与抽屉/桌面端侧栏一致, 防止切走当前流。
+  const status = useAgentStore((s) => s.status)
+  const isBusy = status === "streaming"
   const current = sessions.find((s) => s.sessionId === sessionId)
   const title = current?.title || '新会话'
 
@@ -60,6 +63,8 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
         type="text"
         icon={<PlusOutlined />}
         onClick={() => void createNewSession()}
+        disabled={isBusy}
+        title={isBusy ? "对话进行中,请等待当前回复结束" : undefined}
         data-testid="mobile-header-new-session"
         aria-label="新建会话"
         style={{ width: 36, height: 36, padding: 0 }}

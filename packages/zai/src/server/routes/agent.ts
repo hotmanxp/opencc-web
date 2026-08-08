@@ -1336,6 +1336,9 @@ router.post("/agent/queue/cancel", async (req: Request, res: Response) => {
   const idx = q.findIndex((c) => c.id === promptId)
   if (idx === -1) return res.json({ removed: false })
   q.splice(idx, 1)
+  // 队列清空后删除 Map 条目, 避免空数组残留(与 runNextInQueue 的空队列
+  // delete 行为一致, 防 Map 条目堆积)。
+  if (q.length === 0) sessionQueues.delete(sessionId)
   emitQueueChanged(sessionId)
   res.json({ removed: true })
 });
