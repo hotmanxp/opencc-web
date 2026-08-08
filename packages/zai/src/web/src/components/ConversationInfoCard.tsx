@@ -70,6 +70,13 @@ export default function ConversationInfoCard({ info }: Props) {
       <Descriptions.Item label="最后更新">{fmtTime(info.lastUpdate)}</Descriptions.Item>
       <Descriptions.Item label="对话轮次">{info.turnCount}</Descriptions.Item>
       <Descriptions.Item label="消息数">{info.messageCount}</Descriptions.Item>
+      <Descriptions.Item label="当前上下文大小">
+        {info.contextTokens === null ? '—' : info.contextTokens.toLocaleString()}
+      </Descriptions.Item>
+      <Descriptions.Item label="API 请求次数">{info.apiRequestCount}</Descriptions.Item>
+      <Descriptions.Item label="模型支持上下文大小">
+        {info.contextWindow === null ? '—' : info.contextWindow.toLocaleString()}
+      </Descriptions.Item>
       <Descriptions.Item label="状态">{statusLabel(info.status)}</Descriptions.Item>
     </Descriptions>
   )

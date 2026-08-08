@@ -38,7 +38,17 @@ const RuntimeEvent = z.discriminatedUnion('type', [
              output: z.unknown() }),
   z.object({ ...Base.shape, type: z.literal('runtime.done'),
              sessionId: z.string(), turnIndex: z.number(),
-             usage: z.object({ input: z.number(), output: z.number() }).optional() }),
+             usage: z.object({ input: z.number(), output: z.number() }).optional(),
+             // zai patch (2026-08-09): 该 session 截至本次 runtime.done 为止
+             // 累计打给 AI provider 的请求次数(包含子代理/通知 query/非流式
+             // fallback;不含 retry,详见 vendor sessionApiCounter.ts 注释)。
+             // 前端 useAgentStore 用来显示"API 请求次数"行。
+             apiRequestCount: z.number().optional(),
+             // zai patch (2026-08-09): 最近一次 API 调用的 total context
+             // tokens(input + cache_creation + cache_read,不含 output)。
+             // session 首次 runtime.done 之前为 undefined,前端用 "—" 显示。
+             // 用于会话信息面板"当前上下文大小"行。
+             contextTokens: z.number().optional() }),
   z.object({ ...Base.shape, type: z.literal('runtime.aborted'),
              sessionId: z.string(), turnIndex: z.number(),
              reason: z.string() }),

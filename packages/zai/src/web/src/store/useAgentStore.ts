@@ -254,6 +254,15 @@ interface AgentState {
   cwdBySession: Record<string, string>
   bashTasksBySession: Record<string, BashTaskInfo[]>
   agentTasksBySession: Record<string, BackgroundTaskSummary[]>
+  // zai patch (2026-08-09): 后端 vendor sessionApiCounter 推过来的
+  // 累计 API 请求数(每次 runtime.done 带 total,monotonic 增)。
+  // UI 会话信息面板"API 请求次数"行读这里。
+  apiRequestCountBySession: Record<string, number>
+  // zai patch (2026-08-09): 后端 translateRuntimeEvents 从 Anthropic SDK
+  // message_delta.usage 捕获的最近一次 API 调用的 total context tokens。
+  // 每次 runtime.done 覆盖(取最新值,非累加 — usage 字段已是 cumulative)。
+  // UI 会话信息面板"当前上下文大小"行读这里。
+  contextTokensBySession: Record<string, number>
 
   // 每次 sendMessage 递增的发送序号. 拼进 stream block key 作为"本轮命名空间",
   // 保证跨轮次的文本块 key 永不碰撞. 后端 turnIndex 恒为 0 (wrapWithZaiMeta 被
@@ -522,6 +531,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 待清空定时器: 每 sessionId 一份, "全部任务完成" 后 5s 自动从 store 移除
   // (避免"全部完成还一直挂着"的 UI 噪音). 重新写入含未完成任务时取消.
   _taskClearTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
+  apiRequestCountBySession: {},
+  contextTokensBySession: {},
 
   setV2Tasks: (sessionId, tasks) => {
     set((s) => ({
@@ -1429,6 +1440,35 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // 还有排队任务时保持 streaming, 等 queue.changed + 下一条
         // runtime.started 自然流转; 队列清空才回 idle。
         if (useAgentStore.getState().queuedPrompts.length > 0) return
+        // zai patch (2026-08-09): 累加 API 请求次数 + 当前上下文大小。
+        // server 端 vendor sessionApiCounter 单调增,apiRequestCount 直接
+        // 覆盖 sid→total;用 max 防御 SSE snapshot replay 出现 stale total
+        // > current 的极端场景。contextTokens 也直接覆盖(usage 字段本身
+        // 就是 cumulative,新值总是 ≥ 旧值,但仍走 max 防御)。
+        const incoming = (event as { apiRequestCount?: unknown }).apiRequestCount
+        if (typeof incoming === 'number') {
+          useAgentStore.setState((s) => {
+            const prev = s.apiRequestCountBySession[sid] ?? 0
+            return {
+              apiRequestCountBySession: {
+                ...s.apiRequestCountBySession,
+                [sid]: Math.max(prev, incoming),
+              },
+            }
+          })
+        }
+        const incomingContext = (event as { contextTokens?: unknown }).contextTokens
+        if (typeof incomingContext === 'number') {
+          useAgentStore.setState((s) => {
+            const prev = s.contextTokensBySession[sid] ?? 0
+            return {
+              contextTokensBySession: {
+                ...s.contextTokensBySession,
+                [sid]: Math.max(prev, incomingContext),
+              },
+            }
+          })
+        }
         useAgentStore.getState().setStatus('idle')
         return
       }

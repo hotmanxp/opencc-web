@@ -254,6 +254,7 @@ import {
   checkResponseForCacheBreak,
   recordPromptState,
 } from './promptCacheBreakDetection.js'
+import { recordApiCall } from '@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter'
 import {
   CannotRetryError,
   FallbackTriggeredError,
@@ -913,6 +914,9 @@ export async function* executeNonStreamingRequest(
    */
   originatingRequestId?: string | null,
 ): AsyncGenerator<SystemAPIErrorMessage, BetaMessage> {
+  // zai patch (2026-08-09): 每次外层非流式 fallback 入口记 1 次
+  // API 请求;内部 withRetry retry 不重复计(详见 sessionApiCounter.ts 注释)。
+  recordApiCall()
   const fallbackTimeoutMs = getNonstreamingFallbackTimeoutMs()
   const generator = withRetry(
     () =>
@@ -1865,6 +1869,9 @@ async function* queryModel(
   let isAdvisorInProgress = false
 
   try {
+    // zai patch (2026-08-09): 每次外层流式 query 入口记 1 次 API 请求;
+    // 内部 withRetry retry 不重复计(详见 sessionApiCounter.ts 注释)。
+    recordApiCall()
     queryCheckpoint('query_client_creation_start')
     const generator = withRetry(
       () =>

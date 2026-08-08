@@ -33,6 +33,12 @@ export interface ConversationInfo {
   settingsLoaded: boolean
   /** Alias-aware display label. Falls back: alias.label → alias.alias → model → null. */
   displayLabel: string | null
+  /** zai patch (2026-08-09): 该 session 截至目前累计的 API 请求次数(后端 vendor 计数)。0 表示还没推到。 */
+  apiRequestCount: number
+  /** zai patch (2026-08-09): 该 session 最近一次 API 调用的 total context tokens(input + cache_creation + cache_read)。null 表示还没推过(transcript 重放/早期 query)。 */
+  contextTokens: number | null
+  /** zai patch (2026-08-09): 当前 sid 用的模型支持的上下文大小(从 settings.models 查 sid.model → capabilities.contextWindow)。null 表示无数据。 */
+  contextWindow: number | null
 }
 
 interface RuntimeSettings {
@@ -80,7 +86,7 @@ function findAliasForModel(model: string | null, models: ModelEntry[]): ModelEnt
  * cheap because countCompletedTurns is O(n).
  */
 export function useConversationInfo(): ConversationInfo {
-  const { sessionId, activeSessionId, sessions, messages, status } =
+  const { sessionId, activeSessionId, sessions, messages, status, apiRequestCountBySession, contextTokensBySession } =
     useAgentStore()
   const { instanceContext } = useAppStore()
   const cwd = instanceContext?.cwd || null
@@ -130,6 +136,13 @@ export function useConversationInfo(): ConversationInfo {
         : runtime.defaultModel
     const alias = findAliasForModel(model, runtime.models)
     const displayLabel = alias?.label ?? alias?.alias ?? model ?? null
+    // zai patch (2026-08-09): 派生当前 session 的 context window。
+    // 从 runtime.models 找 sid.model 对应的 capabilities.contextWindow。
+    // 找不到时(null / unknown model / 无 capabilities)返回 null,UI 用 "—" 显示。
+    const contextWindow =
+      model && model !== 'unknown'
+        ? (runtime.models.find((m) => m.model === model)?.capabilities?.contextWindow ?? null)
+        : null
 
     return {
       sessionId: effectiveSessionId,
@@ -143,6 +156,13 @@ export function useConversationInfo(): ConversationInfo {
       model,
       settingsLoaded,
       displayLabel,
+      apiRequestCount: effectiveSessionId
+        ? (apiRequestCountBySession[effectiveSessionId] ?? 0)
+        : 0,
+      contextTokens: effectiveSessionId
+        ? (contextTokensBySession[effectiveSessionId] ?? null)
+        : null,
+      contextWindow,
     }
-  }, [sessionId, activeSessionId, sessions, messages, status, cwd, runtime, settingsLoaded])
+  }, [sessionId, activeSessionId, sessions, messages, status, cwd, runtime, settingsLoaded, apiRequestCountBySession, contextTokensBySession])
 }

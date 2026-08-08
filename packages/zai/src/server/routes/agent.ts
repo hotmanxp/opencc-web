@@ -19,6 +19,11 @@ import {
   listSkills,
 } from "../services/agentRuntime.js";
 import { EXTERNAL_PERMISSION_MODES } from "@zn-ai/zn-agent-core/opencc-src/permissions";
+import {
+  getApiCallCount,
+  setCurrentApiCountSession,
+  clearApiCallCount,
+} from "@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter";
 import type { UserFacingPermissionMode } from "@zn-ai/zn-agent-core/compat/permissions";
 import { CwdStore, runWithSessionId } from "@zn-ai/zn-agent-core/runtime";
 import {
@@ -148,6 +153,34 @@ function newSessionId(): string {
 // 导出:subagentNotifier.ts 在 <task-notification> 触发的副 run 里也要把
 // runtime 事件翻译后 emit 到 eventBus,否则前端 SSE 渠道拿不到续写事件
 // (只写了 transcript,前端 status 永远卡在 idle)。
+
+// zai patch (2026-08-09): per-session 最近一次 API usage 缓存。
+// translateRuntimeEvents 在 Anthropic SDK message_delta 里捕获 usage
+// (streaming 模式下唯一带 usage 的事件),emit runtime.done 时读出
+// 附带 contextTokens,前端 store 累加显示"当前上下文大小"。
+// 用 module-level Map 而不是 globalThis:多 session 并行(zai 服虽
+// runQueryLoop 串行,但 BashNotifier / SubagentNotifier 触发的副 run
+// 走不同 sessionId)需要 per-session 隔离。
+interface LastUsage {
+  input: number
+  cache_creation: number
+  cache_read: number
+  output: number
+  model: string | null
+}
+const lastUsageBySession = new Map<string, LastUsage>()
+
+/**
+ * 读某 session 最近一次 API 调用的 total context tokens(input +
+ * cache_creation + cache_read,不含 output)。无记录返回 null(对应
+ * 该 session 还没推过 usage,或 transcript 重放时尚未见过 streaming 事件)。
+ * zai 服 emit runtime.done 时调用,把 total 推给前端 store。
+ */
+function getContextTokensForSession(sid: string): number | null {
+  const u = lastUsageBySession.get(sid)
+  if (!u) return null
+  return u.input + u.cache_creation + u.cache_read
+}
 export async function* translateRuntimeEvents(
   events: AsyncIterable<Record<string, unknown>>,
   sessionId: string,
@@ -432,9 +465,40 @@ export async function* translateRuntimeEvents(
         };
         break;
       }
+      case "message_delta": {
+        // Anthropic SDK 在 streaming 模式唯一带 usage 的事件(输入 token
+        // 累计 + cache + 本次 output)。每个 message_delta 都累一次,
+        // 最后一个是完整数据;这里"最新即覆盖"足够(同 sessionId 串行
+        // 推,中间态会被最后一个覆盖)。
+        const usage = (ev as { usage?: unknown }).usage as
+          | { input_tokens?: number; cache_creation_input_tokens?: number;
+              cache_read_input_tokens?: number; output_tokens?: number }
+          | undefined
+        if (usage && typeof usage === "object") {
+          const prev = lastUsageBySession.get(sessionId)
+          lastUsageBySession.set(sessionId, {
+            input: typeof usage.input_tokens === "number" ? usage.input_tokens : (prev?.input ?? 0),
+            cache_creation: typeof usage.cache_creation_input_tokens === "number" ? usage.cache_creation_input_tokens : (prev?.cache_creation ?? 0),
+            cache_read: typeof usage.cache_read_input_tokens === "number" ? usage.cache_read_input_tokens : (prev?.cache_read ?? 0),
+            output: typeof usage.output_tokens === "number" ? usage.output_tokens : (prev?.output ?? 0),
+            model: prev?.model ?? null,
+          })
+        }
+        break
+      }
       case "message_stop":
         sawMessageStop = true;
-        yield { type: "runtime.done", sessionId, turnIndex };
+        yield {
+          type: "runtime.done",
+          sessionId,
+          turnIndex,
+          // zai patch (2026-08-09): 携带该 session 截至本次 runtime.done
+          // 为止的累计 API 请求数;前端 store 累加显示。
+          apiRequestCount: getApiCallCount(sessionId),
+          // 当前上下文大小(最近一次 API 调用的 input + cache tokens);
+          // 无记录时为 null,前端用 "—" 显示。
+          contextTokens: getContextTokensForSession(sessionId) ?? undefined,
+        };
         turnIndex++;
         // Reset tool accumulator between turns
         toolInputBuffers.clear();
@@ -555,7 +619,13 @@ export async function* translateRuntimeEvents(
         }
         if (!sawMessageStop) {
           sawMessageStop = true
-          yield { type: 'runtime.done', sessionId, turnIndex }
+          yield {
+            type: 'runtime.done',
+            sessionId,
+            turnIndex,
+            apiRequestCount: getApiCallCount(sessionId),
+            contextTokens: getContextTokensForSession(sessionId) ?? undefined,
+          }
           turnIndex++
         }
         break
@@ -570,7 +640,13 @@ export async function* translateRuntimeEvents(
   // 不会被 forward 给我们 — for-await 上面没见到 message_stop, 兜底 yield
   // runtime.done 让前端 status:'idle' 能点亮.
   if (!sawMessageStop) {
-    yield { type: "runtime.done", sessionId, turnIndex };
+    yield {
+      type: "runtime.done",
+      sessionId,
+      turnIndex,
+      apiRequestCount: getApiCallCount(sessionId),
+      contextTokens: getContextTokensForSession(sessionId) ?? undefined,
+    };
   }
 }
 
@@ -687,6 +763,10 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
   // 整段包进 runWithSessionId 让 queryLoop 里的 getCwd() 通过 ALS
   // 解析到本 session 的逻辑 cwd(与原 /agent/prompt 行为一致)。
   return runWithSessionId(cmd.sessionId, async () => {
+  // zai patch (2026-08-09): 把当前 sessionId 注入 vendor globalThis,
+  // 让 claude.ts 内 recordApiCall 同步读到并累加 API 请求数。
+  // 必须在 runQueryLoop 入口(所有 vendor 调用之前)同步设。
+  setCurrentApiCountSession(cmd.sessionId)
   const { sessionId, cwd } = cmd
   // zai patch (2026-08-08): 会话级 429 冷却拦截。上一轮 query 因
   // rate_limit 终止后,冷却窗口内本会话的新 query 不再向 API 发请求,

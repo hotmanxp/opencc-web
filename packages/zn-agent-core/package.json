@@ -20,6 +20,7 @@
     "./opencc-core": "./dist/opencc-core.mjs",
     "./opencc-src/permissions": "./dist/opencc-src/types/permissions.js",
     "./opencc-src/server": "./dist/opencc-src/server/index.js",
+    "./opencc-src/services/api/sessionApiCounter": "./dist/opencc-src/services/api/sessionApiCounter.js",
     "./opencc-server": {
       "types": "./dist/opencc-src/server/index.d.ts",
       "default": "./dist/opencc-src/server/index.js"
