@@ -19,6 +19,14 @@ type Pending = {
   toolUseId: string
   sessionId: string
   filePath: string
+  /**
+   * 持有当前 entry 注册到 abortSignal 上的 listener 引用,使后续
+   * 同 toolUseId 的 register() 在覆盖 pending 前能把它从 signal 摘掉,
+   * 避免旧 listener 变成孤儿挂在 signal 上(直到 signal 真的 abort 才被
+   * { once: true } 自动清掉 — fire-and-forget 请求路径下 signal 经常
+   * 不 abort,孤儿堆积到 50+ 触发 MaxListenersExceededWarning)。
+   */
+  onAbort: () => void
 }
 
 export class ApproveRegistry {
@@ -31,6 +39,13 @@ export class ApproveRegistry {
     abortSignal: AbortSignal,
   ): Promise<{ decision: PendingDecision; comment?: string }> {
     return new Promise((resolve, reject) => {
+      // 幂等保护:同 toolUseId 二次 register 时,先把旧 listener 从 signal
+      // 上摘掉再覆盖 pending。否则旧 entry 的包装 resolve/reject 不可达,
+      // onAbort 永远清不掉,直到 signal 真的 abort 才被 { once: true } 兜底。
+      const existing = this.pending.get(toolUseId)
+      if (existing) {
+        abortSignal.removeEventListener('abort', existing.onAbort)
+      }
       const onAbort = () => {
         if (this.pending.delete(toolUseId)) {
           reject(new Error('aborted'))
@@ -49,6 +64,7 @@ export class ApproveRegistry {
         toolUseId,
         sessionId,
         filePath,
+        onAbort,
       })
     })
   }
