@@ -586,7 +586,7 @@ export async function setPluginEnabledOp(
   // Built-in plugins: always use user-scope settings, bypass the normal
   // scope-resolution + installed_plugins lookup (they're not installed).
   // User-scope plugin state now lives in the unified user config JSON
-  // (~/.zai.json, fallback ~/.claude.json), not the vendor settings cascade.
+  // (~/.zai.json, fallback ~/.zai.json), not the vendor settings cascade.
   if (isBuiltinPluginId(plugin)) {
     const { error } = setUserConfigJsonValue('enabledPlugins', {
       ...getUserConfigJson().enabledPlugins,
@@ -665,7 +665,7 @@ export async function setPluginEnabledOp(
 
   const settingSource = scopeToSettingSource(resolvedScope)
   // user-scope plugin state lives in the unified user config JSON
-  // (~/.zai.json, fallback ~/.claude.json) — read from there for the
+  // (~/.zai.json, fallback ~/.zai.json) — read from there for the
   // idempotency/cross-scope check below, mirroring the write target.
   const scopeSettingsValue =
     settingSource === 'userSettings'
@@ -737,7 +737,7 @@ export async function setPluginEnabledOp(
 
   // ── ACTION: write settings ──
   // User-scope plugin state now lives in the unified user config JSON
-  // (~/.zai.json, fallback ~/.claude.json) instead of the vendor settings
+  // (~/.zai.json, fallback ~/.zai.json) instead of the vendor settings
   // cascade. Project/local/managed scopes still flow through the vendor
   // settings path.
   const { error } =

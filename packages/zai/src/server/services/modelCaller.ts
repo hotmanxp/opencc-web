@@ -59,10 +59,10 @@ interface ClaudeProviderProfile {
   apiFormat?: string
 }
 
-/** Read ~/.claude.json and return providerProfiles (or empty). */
+/** Read ~/.zai.json and return providerProfiles (or empty). */
 function readClaudeProviderProfiles(): ClaudeProviderProfile[] {
   try {
-    const path = join(homedir(), '.claude.json')
+    const path = join(homedir(), '.zai.json')
     const raw = JSON.parse(readFileSync(path, 'utf-8'))
     return Array.isArray(raw?.providerProfiles) ? raw.providerProfiles : []
   } catch {
@@ -98,7 +98,7 @@ let _clientKey: string | null = null
 
 /**
  * Pick the right provider profile (if any) for the requested model.
- * Returns { baseURL, apiKey } from ~/.claude.json's providerProfiles when the
+ * Returns { baseURL, apiKey } from ~/.zai.json's providerProfiles when the
  * model is hosted by a non-Anthropic profile (e.g. zhiniao-* on the Wizard AI
  * OpenAI-compatible gateway). Falls back to the global Anthropic env config.
  */

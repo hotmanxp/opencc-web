@@ -262,7 +262,7 @@ export async function createHeadlessContextImpl(
   // synchronous `getMcpToolsCommandsAndResources` call entirely;
   // the function can block indefinitely on the user's `~/.claude/`
   // MCP server config (a known issue when the user has live MCP
-  // servers listed in `~/.claude.json` from interactive Claude
+  // servers listed in `~/.zai.json` from interactive Claude
   // Code). zai-server refreshes MCP lazily via the QueryEngine's
   // own per-query refresh path (and via the `/mcp` slash command),
   // so an empty `mcp` surface at boot is acceptable.

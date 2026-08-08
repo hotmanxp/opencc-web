@@ -175,7 +175,7 @@ export type QueryEngineConfig = {
    * user's actual provider profile (Anthropic / OpenAI-compat / etc.)
    * instead of the vendor default `queryModelWithStreaming` (which reads
    * `ANTHROPIC_API_KEY` from env at the zai-server process level and has no
-   * awareness of `~/.claude.json` provider profiles). All other deps fall
+   * awareness of `~/.zai.json` provider profiles). All other deps fall
    * back to `productionDeps()` so the env-only path is unchanged.
    */
   deps?: import('./query/deps.js').QueryDeps

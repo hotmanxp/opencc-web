@@ -26,7 +26,7 @@ type McpJsonFile = {
   enabledMcpjsonServers?: unknown
   disabledMcpjsonServers?: unknown
   // Claude Code compat: global disable list, typically in user-scope
-  // (~/.claude.json / ~/.zai.json). Applied as final filter across all
+  // (~/.zai.json / ~/.zai.json). Applied as final filter across all
   // scopes' merged spec list.
   disabledMcpServers?: unknown
 }
@@ -64,7 +64,7 @@ type ScopeLoadResult = {
  *
  *   user (cross-project, override project):
  *     - $HOME/.zai.json
- *     - $HOME/.claude.json
+ *     - $HOME/.zai.json
  *
  *   local (project-scoped, override project, gitignored):
  *     - $cwd/.claude/settings.local.json
@@ -143,13 +143,13 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
   }
 
   // 3. user: $HOME/.zai.json (zai-specific) if present, else fall back to
-  //    $HOME/.claude.json (opencc compat). Mutually exclusive —
+  //    $HOME/.zai.json (opencc compat). Mutually exclusive —
   //    zai.json fully shadows claude.json so users on a shared box can't leak
   //    MCP servers across tools.
   const home = homedir()
   const userLoads: ScopeLoadResult[] = []
   const zaiJsonPath = join(home, '.zai.json')
-  const claudeJsonPath = join(home, '.claude.json')
+  const claudeJsonPath = join(home, '.zai.json')
   let userPath: string | null = null
   if (existsSync(zaiJsonPath)) {
     userPath = zaiJsonPath
@@ -210,7 +210,7 @@ export function describeMcpSources(cwd: string): ScopeLoadResult[] {
   }
   // user
   const zj = join(homedir(), '.zai.json')
-  const cj = join(homedir(), '.claude.json')
+  const cj = join(homedir(), '.zai.json')
   const userSource = existsSync(zj) ? zj : existsSync(cj) ? cj : zj
   out.push({
     scope: 'user',

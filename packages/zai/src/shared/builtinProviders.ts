@@ -11,7 +11,7 @@
  *
  * Used by:
  *   - Config UI (ProviderForm "Add" modal presets) — packages/zai/src/web/src/pages/Config.tsx
- *   - First-run provisioning — if ~/.claude.json has no providerProfiles,
+ *   - First-run provisioning — if ~/.zai.json has no providerProfiles,
  *     zai can seed it from this catalog so the picker isn't empty.
  *
  * Edit this file to add/remove a system provider or refresh capability

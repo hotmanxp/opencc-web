@@ -50,7 +50,7 @@ export async function checkEnabledPlugins(): Promise<string[]> {
   }
 
   // User-scope plugin state lives in the unified user config JSON
-  // (~/.zai.json, fallback ~/.claude.json), not the vendor settings
+  // (~/.zai.json, fallback ~/.zai.json), not the vendor settings
   // cascade. We merge it on top of --add-dir/plugins so that toggling a
   // plugin in the zai UI takes effect immediately.
   const userEnabled = getUserConfigJson().enabledPlugins ?? {}

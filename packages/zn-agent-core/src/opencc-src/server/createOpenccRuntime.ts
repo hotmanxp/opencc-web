@@ -8,7 +8,7 @@ export type OpenccRuntimeOptions = {
   /**
    * Whether to attempt MCP server connections during headless
    * bootstrap. Defaults to `false` (zai-server's path) so the
-   * server's HTTP listener binds even if the user's `~/.claude.json`
+   * server's HTTP listener binds even if the user's `~/.zai.json`
    * lists MCP servers that block the connect call. Set `true` to
    * register MCP tools up-front; the QueryEngine's per-query MCP
    * refresh path is what actually wires them into the tool registry.
@@ -108,7 +108,7 @@ export type CreateOpenccRuntimeOptions = OpenccRuntimeOptions & {
    * through the user's actual provider profile (Anthropic / OpenAI-compat
    * / etc.) instead of the vendor default `queryModelWithStreaming` (which
    * reads `ANTHROPIC_API_KEY` from the zai-server process env and has no
-   * awareness of `~/.claude.json` provider profiles). The factory
+   * awareness of `~/.zai.json` provider profiles). The factory
    * signature matches `vendor queryModelWithStreaming` so the vendor
    * `for await` loop yields the same event stream without translation.
    */

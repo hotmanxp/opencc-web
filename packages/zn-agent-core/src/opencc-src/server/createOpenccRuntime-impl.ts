@@ -39,7 +39,7 @@ export async function createOpenccRuntimeImpl(options) {
     dataDir: options.dataDir,
     runtimeId: options.runtimeId ?? randomUUID(),
     // zai-server: skip MCP bootstrap so the headless runtime comes
-    // up even if the user's `~/.claude.json` lists MCP servers that
+    // up even if the user's `~/.zai.json` lists MCP servers that
     // block the connect call. The QueryEngine's per-query MCP
     // refresh + the `/mcp` slash command reconnect on demand.
     connectMcp: options.connectMcp ?? false,
@@ -254,7 +254,7 @@ export async function createOpenccRuntimeImpl(options) {
       }
     }
     // Plugin enable/disable state is stored in the unified user config JSON
-    // (~/.zai.json, fallback ~/.claude.json) — not the vendor settings
+    // (~/.zai.json, fallback ~/.zai.json) — not the vendor settings
     // cascade. See utils/userConfigJson.ts for the read/write contract.
     const userConfig = getUserConfigJson()
     const enabled = userConfig.enabledPlugins as Record<string, boolean> | undefined

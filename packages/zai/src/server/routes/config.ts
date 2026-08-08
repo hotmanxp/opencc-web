@@ -14,7 +14,7 @@ import type { ConfigTool, ProviderProfile } from '../../shared/types.js';
 const router: IRouter = Router();
 const ConfigToolSchema = z.enum(['nova', 'opencode', 'opencc', 'zai']);
 
-const CLAUDE_JSON_PATH = () => join(homedir(), '.claude.json');
+const CLAUDE_JSON_PATH = () => join(homedir(), '.zai.json');
 
 // Capability metadata for one model entry on a provider profile.
 // All fields optional so existing pre-capability profiles round-trip cleanly.
@@ -62,7 +62,7 @@ async function writeClaudeJson(data: Record<string, unknown>): Promise<void> {
   await rename(tmpPath, path);
 }
 
-// 顶层 JSON 配置文件(~/.claude.json / ~/.zai.json)的读取与原子写。
+// 顶层 JSON 配置文件(~/.zai.json / ~/.zai.json)的读取与原子写。
 // 注册顺序必须在 /config/:tool 之前 — Express 按注册顺序匹配,
 // /config/claude-json 会被 /config/:tool (tool=claude-json) 抢先吃掉,
 // 然后 ConfigToolSchema 校验失败。直读直写 ConfigFile 形状,不走
@@ -133,7 +133,7 @@ router.put('/config/:tool', async (req, res) => {
   }
 });
 
-// OpenCC ProviderProfile 配置（读写 ~/.claude.json 的 providerProfiles 字段）
+// OpenCC ProviderProfile 配置（读写 ~/.zai.json 的 providerProfiles 字段）
 router.get('/config/opencc/provider', async (_req, res) => {
   try {
     const data = await readClaudeJson();

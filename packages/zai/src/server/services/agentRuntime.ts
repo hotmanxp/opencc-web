@@ -348,7 +348,7 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
         process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
         ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
       // zai-server: skip MCP bootstrap so the headless runtime comes
-      // up even if the user's `~/.claude.json` lists MCP servers that
+      // up even if the user's `~/.zai.json` lists MCP servers that
       // block the connect call. The QueryEngine's per-query MCP
       // refresh + the `/mcp` slash command reconnect on demand.
       connectMcp: false,

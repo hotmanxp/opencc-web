@@ -8,9 +8,9 @@ import {
   writeTopLevelJson,
 } from '../../src/server/services/fileStore.js';
 
-// ~/.claude.json / ~/.zai.json 顶层 JSON 配置的 read/write 服务测试。
+// ~/.zai.json / ~/.zai.json 顶层 JSON 配置的 read/write 服务测试。
 // 沿用 fileStore.test.ts 的 HOME-override 模式:把 process.env.HOME
-// 指向临时目录,确保不会污染真实的 ~/.claude.json / ~/.zai.json。
+// 指向临时目录,确保不会污染真实的 ~/.zai.json / ~/.zai.json。
 
 const ORIGINAL_HOME = process.env.HOME;
 let tempHome: string;
@@ -26,11 +26,11 @@ afterAll(() => {
 });
 
 describe('readTopLevelJson', () => {
-  it('returns missing:true when ~/.claude.json does not exist', async () => {
+  it('returns missing:true when ~/.zai.json does not exist', async () => {
     const result = await readTopLevelJson('claude-json');
     expect(result.exists).toBe(false);
     expect(result.missing).toBe(true);
-    expect(result.path).toBe(join(tempHome, '.claude.json'));
+    expect(result.path).toBe(join(tempHome, '.zai.json'));
   });
 
   it('returns missing:true when ~/.zai.json does not exist', async () => {
@@ -42,7 +42,7 @@ describe('readTopLevelJson', () => {
 });
 
 describe('writeTopLevelJson + readTopLevelJson roundtrip', () => {
-  it('writes and reads back ~/.claude.json atomically', async () => {
+  it('writes and reads back ~/.zai.json atomically', async () => {
     const content = { providerProfiles: [{ name: 'test', provider: 'openai' }] };
     await writeTopLevelJson('claude-json', content);
     const result = await readTopLevelJson('claude-json');

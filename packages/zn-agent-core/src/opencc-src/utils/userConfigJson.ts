@@ -1,9 +1,9 @@
 /**
  * Unified reader/writer for the zai-owned top-level user config JSON file.
  *
- * Reads `~/.zai.json` first; if it doesn't exist, falls back to `~/.claude.json`
+ * Reads `~/.zai.json` first; if it doesn't exist, falls back to `~/.zai.json`
  * (so a Claude Code session's config can be picked up by zai on first run).
- * Writes target `~/.zai.json` if it exists, else `~/.claude.json`, else the
+ * Writes target `~/.zai.json` if it exists, else `~/.zai.json`, else the
  * writer creates `~/.zai.json`. Unrelated top-level keys are preserved
  * (`mcpServers`, `numStartups`, etc.) via shallow merge.
  *
@@ -35,7 +35,7 @@ import { markInternalWrite } from './settings/internalWrites.js'
 import { resetSettingsCache } from './settings/settingsCache.js'
 
 /**
- * Mirrors the top-level shape of `~/.zai.json` / `~/.claude.json`. The
+ * Mirrors the top-level shape of `~/.zai.json` / `~/.zai.json`. The
  * `enabledPlugins` field type matches the vendor zod schema
  * (`utils/settings/types.ts:619-627`): values are `boolean` or `string[]`
  * (string[] is reserved for future version-constraint extensions).
@@ -50,7 +50,7 @@ export type UserConfigJson = {
 export type UserConfigJsonRead = UserConfigJson
 
 const ZAI_JSON_FILENAME = '.zai.json'
-const CLAUDE_JSON_FILENAME = '.claude.json'
+const CLAUDE_JSON_FILENAME = '.zai.json'
 
 function getZaiJsonPath(): string {
   return join(homedir(), ZAI_JSON_FILENAME)
@@ -70,7 +70,7 @@ type CacheEntry = {
 let cached: CacheEntry | null = null
 
 /**
- * Resolve which file to read: `~/.zai.json` if it exists, else `~/.claude.json`,
+ * Resolve which file to read: `~/.zai.json` if it exists, else `~/.zai.json`,
  * else null (caller returns `{}`).
  */
 function resolveReadPath(): string | null {
@@ -83,7 +83,7 @@ function resolveReadPath(): string | null {
 
 /**
  * Resolve which file to write: `~/.zai.json` if it exists, else
- * `~/.claude.json` if it exists, else `~/.zai.json` (caller creates it).
+ * `~/.zai.json` if it exists, else `~/.zai.json` (caller creates it).
  */
 function resolveWritePath(): { path: string; create: boolean } {
   const zai = getZaiJsonPath()
@@ -122,7 +122,7 @@ function readJsonFile(path: string): UserConfigJson {
  * Read the user-level config JSON. Returns a fresh clone so callers can
  * mutate the returned object without poisoning the in-process cache.
  *
- * Returns `{}` if neither `~/.zai.json` nor `~/.claude.json` exists.
+ * Returns `{}` if neither `~/.zai.json` nor `~/.zai.json` exists.
  */
 export function getUserConfigJson(): UserConfigJsonRead {
   const path = resolveReadPath()
@@ -144,7 +144,7 @@ export function getUserConfigJson(): UserConfigJsonRead {
  *
  * Write target:
  *   1. `~/.zai.json` if it exists
- *   2. else `~/.claude.json` if it exists
+ *   2. else `~/.zai.json` if it exists
  *   3. else creates `~/.zai.json`
  *
  * Side effects on success: marks the resolved path as an internal write

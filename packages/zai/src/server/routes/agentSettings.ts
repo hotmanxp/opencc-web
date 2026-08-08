@@ -19,13 +19,13 @@ import {
 } from '../services/zaiSettingsStore.js'
 
 /**
- * Read ~/.claude.json → providerProfiles. Returns empty array when the
+ * Read ~/.zai.json → providerProfiles. Returns empty array when the
  * file is missing or the field is absent. The OpenCC schema rejects
  * unknown fields so the read here is best-effort and untyped.
  */
 function readClaudeProviderProfiles(): ProviderProfile[] {
   try {
-    const path = join(homedir(), '.claude.json')
+    const path = join(homedir(), '.zai.json')
     const raw = JSON.parse(readFileSync(path, 'utf-8'))
     return Array.isArray(raw?.providerProfiles) ? raw.providerProfiles : []
   } catch {
@@ -78,7 +78,7 @@ function slugifyModelName(model: string): string {
  *
  *   1. User-configured `~/.zai/settings.json → models[]` (the user
  *      owns this; nothing auto-overrides their entries).
- *   2. Saved OpenCC `~/.claude.json → providerProfiles` (projected
+ *   2. Saved OpenCC `~/.zai.json → providerProfiles` (projected
  *      into ModelEntry rows with capability metadata).
  *   3. System default catalog (BUILTIN_PROVIDERS) so the picker is
  *      never empty on a fresh install.

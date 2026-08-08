@@ -46,12 +46,12 @@ const PROVIDER_MODEL_MAPPINGS: Record<ProviderType, Record<string, string>> = {
 }
 
 /**
- * Determine the current provider from ~/.claude.json providerProfiles.
+ * Determine the current provider from ~/.zai.json providerProfiles.
  * Takes the first profile's `provider` field. Defaults to 'anthropic'.
  */
 export function resolveCurrentProvider(): ProviderType {
   try {
-    const path = join(homedir(), '.claude.json')
+    const path = join(homedir(), '.zai.json')
     const raw = JSON.parse(readFileSync(path, 'utf-8'))
     const profiles = Array.isArray(raw?.providerProfiles) ? raw.providerProfiles : []
     if (profiles.length > 0 && profiles[0]?.provider) {

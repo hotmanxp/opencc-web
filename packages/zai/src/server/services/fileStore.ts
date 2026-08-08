@@ -14,7 +14,7 @@ const CONFIG_PATHS: Record<ConfigTool, () => string> = {
 // (返回 ConfigFile、缺失返回 missing:true、写走 tmp+rename 原子),
 // 但不走 ConfigTool 枚举(这两个文件不在用户视角的"工具"分类里)。
 const TOP_LEVEL_JSON_PATHS: Record<TopLevelJsonKey, () => string> = {
-  'claude-json': () => join(homedir(), '.claude.json'),
+  'claude-json': () => join(homedir(), '.zai.json'),
   'zai-json': () => join(homedir(), '.zai.json'),
 };
 

@@ -75,7 +75,7 @@ function writeZaiJson(content: object): void {
 }
 
 function writeClaudeJson(content: object): void {
-  writeFileSync(join(tmpHome, '.claude.json'), JSON.stringify(content))
+  writeFileSync(join(tmpHome, '.zai.json'), JSON.stringify(content))
 }
 
 function readZaiJson(): Record<string, unknown> {
@@ -83,7 +83,7 @@ function readZaiJson(): Record<string, unknown> {
 }
 
 function readClaudeJson(): Record<string, unknown> {
-  return JSON.parse(readFileSync(join(tmpHome, '.claude.json'), 'utf-8'))
+  return JSON.parse(readFileSync(join(tmpHome, '.zai.json'), 'utf-8'))
 }
 
 describe('getUserConfigJson', () => {

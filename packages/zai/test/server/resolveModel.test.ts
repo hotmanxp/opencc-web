@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 
-// Mock fs so we control what ~/.zai/settings.json and ~/.claude.json return.
+// Mock fs so we control what ~/.zai/settings.json and ~/.zai.json return.
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs')
   return { ...actual, readFileSync: vi.fn() }
@@ -133,7 +133,7 @@ describe('resolveModel', () => {
 })
 
 describe('resolveCurrentProvider', () => {
-  it('returns anthropic when ~/.claude.json is missing', () => {
+  it('returns anthropic when ~/.zai.json is missing', () => {
     vi.mocked(readFileSync).mockImplementation(() => { throw new Error('ENOENT') })
     expect(resolveCurrentProvider()).toBe('anthropic')
   })

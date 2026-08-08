@@ -15,10 +15,10 @@ type Platform = 'win32' | 'darwin' | 'linux'
 export const getGlobalClaudeFile = memoize((): string => {
   // zai patch: 全局配置与用户设置统一到 ~/.zai/settings.json。
   //
-  // 上游默认写 ~/.claude.json（含 auth/oauth、apiKeyHelper、theme 等），
+  // 上游默认写 ~/.zai.json（含 auth/oauth、apiKeyHelper、theme 等），
   // zai 作为独立本地工具不应触碰用户的 ~/.claude。config home 已由
   // resolveClaudeConfigHomeDir 统一到 ~/.zai（envUtils.ts zai patch），
-  // 这里把"全局配置"文件名也从 .claude.json 改为 settings.json ——
+  // 这里把"全局配置"文件名也从 .zai.json 改为 settings.json ——
   // zai 的 ~/.zai/settings.json 本身是 opencc 兼容结构（env /
   // permissions.defaultMode / model / enabledPlugins 等），core 的
   // getConfig(getGlobalClaudeFile(), createDefaultGlobalConfig) 能直接

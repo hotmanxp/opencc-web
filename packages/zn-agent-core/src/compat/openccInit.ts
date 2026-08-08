@@ -141,7 +141,7 @@ export function setZaiIsNonInteractive(): void {
  * `~/.zai/settings.json → env` to `process.env`.
  *
  * Vendor's `applySafeConfigEnvironmentVariables()` reads from
- * `getGlobalConfig()` (~/.claude.json) and `getSettingsForSource('userSettings')`
+ * `getGlobalConfig()` (~/.zai.json) and `getSettingsForSource('userSettings')`
  * (~/.claude/settings.json). zai stores its own settings at
  * `~/.zai/settings.json` (see packages/zai/src/shared/settings.ts
  * `ZaiSettings`), so we can't directly call the vendor function even

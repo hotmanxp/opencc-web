@@ -231,7 +231,7 @@ export function getDeclaredMarketplaces(): Record<string, DeclaredMarketplace> {
   // built-in source we know. Other marketplaces have no default source to inject.
   // Explicitly-disabled entries (value: false) don't count.
   // User-scope plugin state lives in the unified user config JSON
-  // (~/.zai.json, fallback ~/.claude.json) — merge it into the implicit
+  // (~/.zai.json, fallback ~/.zai.json) — merge it into the implicit
   // declaration set so the official marketplace stays surfaced.
   const enabledPlugins = {
     ...getAddDirEnabledPlugins(),

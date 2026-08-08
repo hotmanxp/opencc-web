@@ -993,7 +993,7 @@ let configCacheHits = 0
 let configCacheMisses = 0
 // Session-total count of actual disk writes to the global config file.
 // Exposed for internal-only dev diagnostics (see inc-4552) so anomalous write
-// rates surface in the UI before they corrupt ~/.claude.json.
+// rates surface in the UI before they corrupt ~/.zai.json.
 let globalConfigWriteCount = 0
 
 export function getGlobalConfigWriteCount(): number {
@@ -1345,7 +1345,7 @@ function saveConfigWithLock<A extends object>(
     const currentConfig = getConfig(file, createDefault)
     if (file === getGlobalClaudeFile() && wouldLoseAuthState(currentConfig)) {
       logForDebugging(
-        'saveConfigWithLock: re-read config is missing auth that cache has; refusing to write to avoid wiping ~/.claude.json. See GH #3117.',
+        'saveConfigWithLock: re-read config is missing auth that cache has; refusing to write to avoid wiping ~/.zai.json. See GH #3117.',
         { level: 'error' },
       )
       logEvent('tengu_config_auth_loss_prevented', {})
@@ -1508,7 +1508,7 @@ export function enableConfigs(): void {
 // its backups may still be filed under (#1807). Compared by basename so backup
 // recovery works against an injected virtual path in tests.
 const GLOBAL_CONFIG_BASENAME = '.openclaude.json'
-const LEGACY_GLOBAL_CONFIG_BASENAME = '.claude.json'
+const LEGACY_GLOBAL_CONFIG_BASENAME = '.zai.json'
 
 /**
  * Returns the directory where config backup files are stored.
@@ -1533,10 +1533,10 @@ function getConfigBackupDir(): string {
  */
 function listBackupsNewestFirst(file: string): string[] {
   const fs = getFsImplementation()
-  // The global config was renamed `.claude.json` -> `.openclaude.json`. #1807's
+  // The global config was renamed `.zai.json` -> `.openclaude.json`. #1807's
   // reported scenario is that repeated corrupt writes poisoned every
   // `.openclaude.json.backup.*` snapshot and the only clean sources left were
-  // the pre-rename `.claude.json.backup.*` files sitting in the same backup
+  // the pre-rename `.zai.json.backup.*` files sitting in the same backup
   // dir. Recover the global config from that legacy basename too, otherwise the
   // recovery still fails for exactly the case the issue calls out.
   const fileBases = [basename(file)]
@@ -1547,7 +1547,7 @@ function listBackupsNewestFirst(file: string): string[] {
     fileBases.some(base => name.startsWith(`${base}.backup.`))
   // Order by the numeric timestamp after `.backup.` so the current and legacy
   // basenames interleave by recency instead of grouping by filename (a plain
-  // lexicographic sort would put every `.claude.json.*` before every
+  // lexicographic sort would put every `.zai.json.*` before every
   // `.openclaude.json.*` regardless of when each was written).
   const backupTimestamp = (name: string): number => {
     const suffix = name.split('.backup.').pop()
@@ -1867,7 +1867,7 @@ export const getProjectPathForConfig = memoize((): string => {
  * rest of the codebase can safely do `[...arr]` / `arr.includes(...)`.
  * Returns true if any field was repaired.
  *
- * Background: a .claude.json written by a third party may set
+ * Background: a .zai.json written by a third party may set
  * `disabledMcpServers` / `enabledMcpServers` to an object, string, or any
  * non-array value. v2.1.200 upstream fixed the resulting "xxx is not
  * iterable" / "includes is not a function" startup crash by coercing these
