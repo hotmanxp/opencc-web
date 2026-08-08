@@ -9,6 +9,7 @@ import {
   ShareAltOutlined,
   StopOutlined,
   AppstoreAddOutlined,
+  CloseOutlined,
 } from "@ant-design/icons";
 import {
   STORAGE_KEYS,
@@ -17,7 +18,7 @@ import {
 import { useSplitPaneCompactLock } from "../hooks/useSplitPaneCompactLock.js";
 import { useSubmitPrompt } from "../hooks/useSubmitPrompt.js";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
-import type { V2TaskItem } from "../store/useAgentStore.js";
+import type { V2TaskItem, QueuedPrompt } from "../store/useAgentStore.js";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import { useAppStore } from "../store/useAppStore";
 import { api } from "../lib/api";
@@ -91,6 +92,9 @@ export default React.memo(function AgentInputBox() {
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
   const isMobile = useAppStore((s) => s.isMobile);
   const pendingAsk = useAgentStore((s) => s.pendingAsk);
+  // 排队中的 prompt(对话进行中提交, 后端串行队列等待执行) — 渲染在输入框
+  // 上方排队预览区; 某条开始执行时由 watcher 移入 transcript。
+  const queuedPrompts = useAgentStore((s) => s.queuedPrompts);
   // 任务摘要: 从 store 取当前 session 的 v2 tasks 统计 N/M 任务.
   // 修复: 任务摘要从独立 BottomStatusBar 行合并到状态行, 让 UI 更紧凑.
   // 取 store 字段而非 props — AgentInputBox 是叶子组件, 让 store selector
@@ -463,6 +467,62 @@ export default React.memo(function AgentInputBox() {
 
   const { submitPrompt, pushUserMsg } = useSubmitPrompt();
 
+  // 排队消息生命周期:
+  // - 提交时若后端排队(响应 queued:true), 消息只在排队预览区(不写
+  //   transcript)。queue.changed 事件持续刷新 queuedPrompts。
+  // - 某条 id 从 queuedPrompts 消失 = 开始执行(被后端消费)→ pushUserMsg
+  //   写入 transcript, 与正常发送一致。
+  // - 被用户取消的 id 进 canceledQueuedRef, watcher 跳过, 不写 transcript。
+  //
+  // 实现用"待 push 集合"(pendingPushRef)而不是 prev/next diff: diff 在
+  // "消息入队显示"与"被消费消失"落在同一个 React 批次时(abort 后 drain
+  // 快速连续消费、或事件批处理合并)会漏 — prev 永远捕获不到那条消息的
+  // 存在, 消失时无从感知。pendingPushRef 记录所有曾进入队列的 id, 无论
+  // 是否稳定渲染过, 消失时都能被识别。
+  const canceledQueuedRef = useRef<Set<string>>(new Set());
+  const pendingPushRef = useRef<Map<string, string>>(new Map());
+  useEffect(() => {
+    const currentIds = new Set(queuedPrompts.map((p) => p.id));
+    // 新出现的排队消息 → 记录待 push(text 可能被后一个快照覆盖, 保首见值)
+    for (const p of queuedPrompts) {
+      if (!pendingPushRef.current.has(p.id)) {
+        pendingPushRef.current.set(p.id, p.text);
+      }
+    }
+    // 消失且未取消 → 开始执行, push 进 transcript
+    for (const [id, text] of pendingPushRef.current) {
+      if (currentIds.has(id)) continue;
+      if (canceledQueuedRef.current.delete(id)) {
+        pendingPushRef.current.delete(id); // 被取消, 丢弃
+        continue;
+      }
+      pendingPushRef.current.delete(id);
+      pushUserMsg(text);
+    }
+  }, [queuedPrompts, pushUserMsg]);
+
+  const cancelQueued = useCallback(
+    async (promptId: string) => {
+      canceledQueuedRef.current.add(promptId);
+      const sid = sessionId || activeSessionId || undefined;
+      try {
+        await api.post("/agent/queue/cancel", {
+          sessionId: sid,
+          promptId,
+        });
+      } catch {
+        // 失败回滚取消标记, 让 watcher 下次按正常路径处理(消息仍在排队)。
+        canceledQueuedRef.current.delete(promptId);
+        return;
+      }
+      // 立即本地移除避免闪烁; 后端 queue.changed 事件也会刷新快照。
+      useAgentStore.setState((s) => ({
+        queuedPrompts: s.queuedPrompts.filter((p) => p.id !== promptId),
+      }));
+    },
+    [sessionId, activeSessionId],
+  );
+
   const handleSend = async () => {
     const text = input.trim();
     const readyAttachments = attachments.filter((a) => a.status === "ready");
@@ -528,7 +588,8 @@ export default React.memo(function AgentInputBox() {
       }
     }
     if (!text && blocks.length === 0) return;
-    if (status === "streaming") return;
+    // 追齐 OPENCC: 对话进行中(streaming)不禁用发送 — 消息进入后端
+    // per-session 串行队列, 当前轮结束后自动执行, 输入框上方显示排队预览。
     setInput("");
 
     if (blocks.length > 0) {
@@ -880,6 +941,79 @@ export default React.memo(function AgentInputBox() {
 
       {/* TextArea + slash dropdown 区 */}
       <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
+        {/* 排队预览区: 对话进行中提交的消息在此等待, 当前轮结束后自动执行。
+            每条可单独取消(×)。渲染在输入框上方, 追齐 OPENCC 的 queued
+            commands 预览。 */}
+        {queuedPrompts.length > 0 && (
+          <div
+            data-testid="queued-prompts-preview"
+            style={{
+              border: "1px solid var(--border-subtle)",
+              borderBottom: "none",
+              borderRadius: "8px 8px 0 0",
+              background: "var(--bg-card)",
+              maxHeight: 120,
+              overflowY: "auto",
+              padding: "4px 8px",
+              display: "flex",
+              flexDirection: "column",
+              gap: 2,
+            }}
+          >
+            {queuedPrompts.map((p) => (
+              <div
+                key={p.id}
+                data-testid={`queued-prompt-${p.id}`}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  gap: 8,
+                  fontSize: 12,
+                  color: "var(--text-secondary)",
+                  padding: "2px 4px",
+                  borderRadius: 4,
+                }}
+              >
+                <span
+                  style={{
+                    flexShrink: 0,
+                    color: "#a78bfa",
+                    fontWeight: 600,
+                    fontFamily:
+                      "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
+                  }}
+                >
+                  排队中
+                </span>
+                <span
+                  style={{
+                    flex: 1,
+                    minWidth: 0,
+                    whiteSpace: "nowrap",
+                    overflow: "hidden",
+                    textOverflow: "ellipsis",
+                  }}
+                >
+                  {p.text}
+                </span>
+                <Button
+                  type="text"
+                  size="small"
+                  icon={<CloseOutlined />}
+                  onClick={() => void cancelQueued(p.id)}
+                  aria-label="取消排队消息"
+                  style={{
+                    flexShrink: 0,
+                    width: 20,
+                    height: 20,
+                    fontSize: 10,
+                    color: "var(--text-dim-45)",
+                  }}
+                />
+              </div>
+            ))}
+          </div>
+        )}
         <div
           style={{
             display: "flex",
@@ -999,9 +1133,7 @@ export default React.memo(function AgentInputBox() {
             onPaste={handlePaste}
             placeholder="输入消息, 按 Enter 发送, Shift+Enter 换行. 可直接粘贴或拖拽图片."
             rows={3}
-            disabled={
-              status === "streaming" || pendingAsk?.status === "pending"
-            }
+            disabled={pendingAsk?.status === "pending"}
             style={{ resize: "none", flex: 1 }}
           />
           {/* 移动端"停止"按钮: 替代桌面端的 Esc 键 —

@@ -651,3 +651,65 @@ describe('useAgentStore.loadSessions', () => {
     expect(useAgentStore.getState().availableModels).toEqual([])
   })
 })
+
+describe('useAgentStore — 消息排队 (queuedPrompts + status 状态机)', () => {
+  const doneEvent = { eventId: 'd', ts: 1, sessionId: 's1', turnIndex: 0, type: 'runtime.done' } as any
+  const abortedEvent = {
+    eventId: 'ab', ts: 1, sessionId: 's1', turnIndex: 0,
+    type: 'runtime.aborted', reason: 'user_abort',
+  } as any
+
+  beforeEach(() => {
+    useAgentStore.setState({
+      sessionId: 's1',
+      status: 'idle',
+      queuedPrompts: [],
+      messages: [],
+    })
+  })
+
+  it('applyQueueChanged 快照覆盖 queuedPrompts (非 append)', () => {
+    useAgentStore.getState().applyQueueChanged({
+      pending: [
+        { id: 'q1', text: 'a' },
+        { id: 'q2', text: 'b' },
+      ],
+    })
+    expect(useAgentStore.getState().queuedPrompts).toEqual([
+      { id: 'q1', text: 'a' },
+      { id: 'q2', text: 'b' },
+    ])
+    useAgentStore.getState().applyQueueChanged({ pending: [{ id: 'q3', text: 'c' }] })
+    expect(useAgentStore.getState().queuedPrompts).toEqual([{ id: 'q3', text: 'c' }])
+  })
+
+  it('runtime.done 且队列非空 → 保持 streaming (等下一条排队任务)', () => {
+    useAgentStore.setState({
+      status: 'streaming',
+      queuedPrompts: [{ id: 'q1', text: 'a' }],
+    })
+    useAgentStore.getState().applyRuntimeEvent(doneEvent)
+    expect(useAgentStore.getState().status).toBe('streaming')
+  })
+
+  it('runtime.done 且队列空 → 回 idle', () => {
+    useAgentStore.setState({ status: 'streaming', queuedPrompts: [] })
+    useAgentStore.getState().applyRuntimeEvent(doneEvent)
+    expect(useAgentStore.getState().status).toBe('idle')
+  })
+
+  it('runtime.aborted 且队列非空 → 置回 streaming (下一条马上开始)', () => {
+    useAgentStore.setState({
+      status: 'streaming',
+      queuedPrompts: [{ id: 'q1', text: 'a' }],
+    })
+    useAgentStore.getState().applyRuntimeEvent(abortedEvent)
+    expect(useAgentStore.getState().status).toBe('streaming')
+  })
+
+  it('runtime.aborted 且队列空 → aborted', () => {
+    useAgentStore.setState({ status: 'streaming', queuedPrompts: [] })
+    useAgentStore.getState().applyRuntimeEvent(abortedEvent)
+    expect(useAgentStore.getState().status).toBe('aborted')
+  })
+})

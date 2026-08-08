@@ -63,6 +63,9 @@ function dispatch(event: ServerEvent) {
     case 'prompt.permission':
       useAgentStore.getState().applyPromptPermission(event)
       break
+    case 'queue.changed':
+      useAgentStore.getState().applyQueueChanged(event)
+      break
     case 'server.connected': {
       useAppStore.getState().setConnected(true)
       // Cold-start 快照补全 — SSE per-sid slice 已注册, 此时拉 REST 不会漏事件。

@@ -34,6 +34,8 @@ async function dispatch(event: any) {
       useAgentStore.getState().applyV2TaskChanged(event); break
     case 'agent_task.changed':
       useAgentStore.getState().applyAgentTaskChanged(event); break
+    case 'queue.changed':
+      useAgentStore.getState().applyQueueChanged(event); break
   }
 }
 
@@ -68,5 +70,19 @@ describe('eventStream dispatch routing', () => {
     const task = { id: 'a1', status: 'running', input: { prompt: 'p' } }
     await dispatch({ type: 'agent_task.changed', sessionId: 's1', task })
     expect(useAgentStore.getState().agentTasksBySession['s1']).toHaveLength(1)
+  })
+
+  it('routes queue.changed to applyQueueChanged', async () => {
+    await dispatch({
+      type: 'queue.changed',
+      sessionId: 's1',
+      running: true,
+      queueLength: 2,
+      pending: [{ id: 'q1', text: 'first' }, { id: 'q2', text: 'second' }],
+    })
+    expect(useAgentStore.getState().queuedPrompts).toEqual([
+      { id: 'q1', text: 'first' },
+      { id: 'q2', text: 'second' },
+    ])
   })
 })

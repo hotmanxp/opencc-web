@@ -80,6 +80,22 @@ describe('useSubmitPrompt — submitPrompt', () => {
     expect(apiPost).toHaveBeenCalledTimes(1)
   })
 
+  it('后端响应 queued:true(对话进行中排队)→ 不 push user.text, 等开始执行时由 watcher 写入', async () => {
+    apiPost.mockResolvedValueOnce({
+      sessionId: 'sess-x',
+      queued: true,
+      queueLength: 1,
+      pending: [{ id: 'q1', text: 'hello' }],
+    } as any)
+    const { result } = renderHook(() => useSubmitPrompt())
+    await act(async () => {
+      await result.current.submitPrompt('hello')
+    })
+    const s = useAgentStore.getState()
+    expect(s.messages.some((m: any) => m.text === 'hello')).toBe(false)
+    expect(apiPost).toHaveBeenCalledTimes(1)
+  })
+
   it('sessionId 为空时回退 activeSessionId', async () => {
     useAgentStore.setState({ sessionId: null, activeSessionId: 'sess-2' })
     const { result } = renderHook(() => useSubmitPrompt())

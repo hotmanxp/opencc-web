@@ -209,6 +209,21 @@ const InstanceEvent = z.discriminatedUnion('type', [
   }),
 ])
 
+// queue.* — 每 session 的消息排队状态快照（对话进行中提交的 prompt 进入后端
+// per-session 串行队列, 排队预览 + 状态机依赖此事件）。sid-scoped: 带
+// sessionId, eventBus 按 sid 过滤 + historyBySid replay, 刷新后前端可恢复
+// 排队状态。pending 为等待中命令的 {id, text} 列表（不含正在执行的那条）。
+const QueueEvent = z.discriminatedUnion('type', [
+  z.object({
+    ...Base.shape,
+    type: z.literal('queue.changed'),
+    sessionId: z.string(),
+    running: z.boolean(),
+    queueLength: z.number(),
+    pending: z.array(z.object({ id: z.string(), text: z.string() })),
+  }),
+])
+
 export const ServerEvent = z.discriminatedUnion('type', [
   ...RuntimeEvent.options,
   ...SessionEvent.options,
@@ -217,5 +232,6 @@ export const ServerEvent = z.discriminatedUnion('type', [
   ...SystemEvent.options,
   ...StateEvent.options,
   ...InstanceEvent.options,
+  ...QueueEvent.options,
 ])
 export type ServerEvent = z.infer<typeof ServerEvent>

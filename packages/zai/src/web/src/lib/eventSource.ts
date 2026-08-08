@@ -47,6 +47,8 @@ const NAMED_EVENT_TYPES = [
   'v2_task.changed',
   // instance.*
   'instance.changed',
+  // queue.* — 消息排队状态快照 (追齐 OPENCC 排队交互)
+  'queue.changed',
 ] as const
 
 // 打开一条 SSE 连接到 /api/event. 后端按 sid 过滤:

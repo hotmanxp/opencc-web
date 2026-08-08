@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, test, beforeEach, beforeAll, vi } from "vitest";
 import "@testing-library/jest-dom";
-import { fireEvent, render, screen, waitFor } from "@testing-library/react";
+import { act, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { useAgentStore, type V2TaskItem } from "../store/useAgentStore.js";
 import { useAppStore } from "../store/useAppStore.js";
 import { api } from "../lib/api.js";
@@ -322,6 +322,133 @@ describe('AgentInputBox — 移动端 [⚡] 按钮', () => {
 // 刷新路径"注释掩盖, 实际 loadTranscript 从未在 send 后触发, 首条带图消息不渲染.
 // 回归测试: 上传一张图 + 输入文字, 点发送 → store 必须立即多一条 user.text 且
 // attachments 非空.
+describe('AgentInputBox — 消息排队 (追齐 OPENCC)', () => {
+  beforeEach(() => {
+    vi.mocked(api.post).mockReset()
+    useAgentStore.setState({
+      status: 'streaming',
+      queuedPrompts: [],
+      messages: [],
+      sendSeq: 0,
+    })
+  })
+
+  test('streaming 时输入框不禁用', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    expect(ta.disabled).toBe(false)
+  })
+
+  test('streaming 时发送: 后端响应 queued:true → 不 push user.text (消息排队等待)', async () => {
+    vi.mocked(api.post).mockResolvedValueOnce({
+      sessionId: 'sess-1',
+      queued: true,
+      queueLength: 1,
+      pending: [{ id: 'q1', text: 'second message' }],
+    } as any)
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: 'second message' } })
+    fireEvent.keyDown(ta, { key: 'Enter', code: 'Enter', shiftKey: false })
+    await waitFor(() => expect(vi.mocked(api.post)).toHaveBeenCalled())
+    // 排队消息不立即写 transcript — 由 queue.changed 事件在真正开始执行时写入
+    expect(useAgentStore.getState().messages).toEqual([])
+  })
+
+  test('排队预览区渲染 queuedPrompts, 点 × 取消', async () => {
+    vi.mocked(api.post).mockResolvedValueOnce({ removed: true } as any)
+    useAgentStore.setState({
+      queuedPrompts: [
+        { id: 'q1', text: 'first queued' },
+        { id: 'q2', text: 'second queued' },
+      ],
+    })
+    render(<AgentInputBox />)
+    const preview = screen.getByTestId('queued-prompts-preview')
+    expect(preview).toHaveTextContent('first queued')
+    expect(preview).toHaveTextContent('second queued')
+    // 点 q1 的取消按钮 → POST /agent/queue/cancel
+    const q1 = screen.getByTestId('queued-prompt-q1')
+    const cancelBtn = q1.querySelector('button')
+    fireEvent.click(cancelBtn!)
+    await waitFor(() =>
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        '/agent/queue/cancel',
+        expect.objectContaining({ sessionId: 'sess-1', promptId: 'q1' }),
+      ),
+    )
+    // 本地立即移除, 避免闪烁
+    expect(
+      useAgentStore.getState().queuedPrompts.map((p) => p.id),
+    ).not.toContain('q1')
+  })
+
+  test('排队消息开始执行(从 queuedPrompts 消失)→ pushUserMsg 写入 transcript', async () => {
+    useAgentStore.setState({
+      queuedPrompts: [{ id: 'q1', text: 'first queued' }],
+      messages: [],
+    })
+    render(<AgentInputBox />)
+    // 模拟后端 queue.changed: q1 被消费开始执行, 从排队列表消失
+    act(() => {
+      useAgentStore.setState({ queuedPrompts: [] })
+    })
+    await waitFor(() => {
+      const msgs = useAgentStore.getState().messages
+      expect(
+        msgs.some(
+          (m) => (m as { type?: string }).type === 'user.text' && (m as { text?: string }).text === 'first queued',
+        ),
+      ).toBe(true)
+    })
+  })
+
+  test('挂载时队列已有消息, 消息被消费 → 仍 push 到 transcript(不依赖 render 中间态)', async () => {
+    // 组件挂载时 queuedPrompts 已含 q1(reload / HMR 后队列非空), 直接消费消失。
+    useAgentStore.setState({
+      queuedPrompts: [{ id: 'q1', text: 'mount queued' }],
+      messages: [],
+    })
+    render(<AgentInputBox />)
+    act(() => {
+      useAgentStore.setState({ queuedPrompts: [] })
+    })
+    await waitFor(() => {
+      const msgs = useAgentStore.getState().messages
+      expect(
+        msgs.some(
+          (m) => (m as { type?: string }).type === 'user.text' && (m as { text?: string }).text === 'mount queued',
+        ),
+      ).toBe(true)
+    })
+  })
+
+  test('被取消的排队消息不写 transcript', async () => {
+    useAgentStore.setState({
+      queuedPrompts: [{ id: 'q1', text: 'to be canceled' }],
+      messages: [],
+    })
+    render(<AgentInputBox />)
+    // 用户点取消
+    const q1 = screen.getByTestId('queued-prompt-q1')
+    fireEvent.click(q1.querySelector('button')!)
+    await waitFor(() =>
+      expect(
+        useAgentStore.getState().queuedPrompts.map((p) => p.id),
+      ).not.toContain('q1'),
+    )
+    // 模拟 queue.changed 确认移除(重复移除 no-op)
+    act(() => {
+      useAgentStore.setState({ queuedPrompts: [] })
+    })
+    expect(
+      useAgentStore.getState().messages.some(
+        (m) => (m as { text?: string }).text === 'to be canceled',
+      ),
+    ).toBe(false)
+  })
+})
+
 describe('AgentInputBox — 首条消息带图片附件时 UI 立即渲染', () => {
   beforeAll(() => {
     // happy-dom 没有 URL.createObjectURL/revokeObjectURL, 提前注入避免抛错.

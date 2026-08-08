@@ -54,6 +54,10 @@ export default function Agent() {
   const loadTranscript = useAgentStore((s) => s.loadTranscript);
   const createNewSession = useAgentStore((s) => s.createNewSession);
   const deleteSession = useAgentStore((s) => s.deleteSession);
+  // 对话进行中(streaming)禁用会话切换/新建/删除 — 避免打断当前流的
+  // transcript 上下文与排队归属。
+  const status = useAgentStore((s) => s.status);
+  const isBusy = status === "streaming";
   // v2TasksBySession 仍订阅在 store, 但渲染层 Agent.tsx 不再使用 —
   // 任务摘要现在由 AgentInputBox 内部从 store 直接取 (避免 props 透传).
   void v2TasksBySession;
@@ -205,7 +209,12 @@ export default function Agent() {
                 size="small"
                 icon={<PlusOutlined />}
                 onClick={createNewSession}
-                title="创建新会话"
+                disabled={isBusy}
+                title={
+                  isBusy
+                    ? "对话进行中,请等待当前回复结束"
+                    : "创建新会话"
+                }
                 style={{
                   position: "absolute",
                   top: 0,
@@ -224,7 +233,12 @@ export default function Agent() {
                 type="text"
                 size="small"
                 onClick={openNewSessionInNewTab}
-                title="在新标签页打开新会话"
+                disabled={isBusy}
+                title={
+                  isBusy
+                    ? "对话进行中,请等待当前回复结束"
+                    : "在新标签页打开新会话"
+                }
                 data-testid="new-session-in-new-tab"
                 style={{
                   position: "absolute",
@@ -280,14 +294,24 @@ export default function Agent() {
                   size="small"
                   icon={<PlusOutlined />}
                   onClick={createNewSession}
-                  title="创建新会话"
+                  disabled={isBusy}
+                  title={
+                    isBusy
+                      ? "对话进行中,请等待当前回复结束"
+                      : "创建新会话"
+                  }
                 />
                 {/* N 按钮: 在新 tab 打开全新会话, 不影响当前 tab. */}
                 <Button
                   type="text"
                   size="small"
                   onClick={openNewSessionInNewTab}
-                  title="在新标签页打开新会话"
+                  disabled={isBusy}
+                  title={
+                    isBusy
+                      ? "对话进行中,请等待当前回复结束"
+                      : "在新标签页打开新会话"
+                  }
                   data-testid="new-session-in-new-tab"
                   style={{
                     color: "#722ed1",
@@ -332,14 +356,20 @@ export default function Agent() {
                     return (
                       <div
                         key={s.sessionId}
+                        title={
+                          isBusy
+                            ? "对话进行中,请等待当前回复结束"
+                            : undefined
+                        }
                         style={{
                           position: "relative",
-                          cursor: "pointer",
+                          cursor: isBusy ? "not-allowed" : "pointer",
                           padding: "6px 8px",
                           borderRadius: 6,
                           background: active
                             ? 'rgba(255,102,0,0.10)'
                             : "transparent",
+                          opacity: isBusy ? 0.6 : 1,
                         }}
                         onMouseEnter={() => {
                           setHoveredSessionId(s.sessionId);
@@ -353,6 +383,9 @@ export default function Agent() {
                           )
                         }
                         onClick={() => {
+                          // 对话进行中禁用会话切换 — 防止切走当前流的
+                          // transcript 上下文 / 排队归属错乱。
+                          if (isBusy) return;
                           setCurrentSession(s.sessionId);
                           loadTranscript(s.sessionId);
                           // 切会话也重置 10s 倒计时.
@@ -387,8 +420,13 @@ export default function Agent() {
                             size="small"
                             danger
                             icon={<DeleteOutlined />}
+                            disabled={isBusy}
                             onClick={(e) => e.stopPropagation()}
-                            title="删除会话"
+                            title={
+                              isBusy
+                                ? "对话进行中,请等待当前回复结束"
+                                : "删除会话"
+                            }
                             style={{
                               position: "absolute",
                               top: 4,

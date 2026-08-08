@@ -188,6 +188,14 @@ export type CompactionToast = {
   expiresAt: number
 }
 
+// 排队中的 prompt(对话进行中提交, 后端 per-session 串行队列等待执行)。
+// 由 queue.changed SSE 事件驱动; AgentInputBox 排队预览区渲染 + 开始执行时
+// 移入 transcript。
+export type QueuedPrompt = {
+  id: string
+  text: string
+}
+
 interface AgentState {
   sessionId: string | null
   sessions: Array<{
@@ -205,6 +213,10 @@ interface AgentState {
   cwd: string
   messages: AgentMessage[]
   status: AgentStatus
+  // 排队中的 prompt(对话进行中提交, 后端 per-session 串行队列等待执行)。
+  // queue.changed SSE 事件写入; AgentInputBox 排队预览区渲染, 某条开始
+  // 执行(从 pending 消失)时移入 transcript。
+  queuedPrompts: QueuedPrompt[]
   abortController: AbortController | null
   pendingAsk: AskState | null
   pendingApprove: ApproveState | null
@@ -256,6 +268,8 @@ interface AgentState {
   applyRuntimeEvent: (event: ServerEvent) => void
   applySessionEvent: (event: ServerEvent) => void
   applyPromptAsk: (event: ServerEvent) => void
+  // queue.changed 事件 reducer: 用后端队列快照覆盖 queuedPrompts。
+  applyQueueChanged: (event: { pending: QueuedPrompt[] }) => void
 
   // SSE state.* event reducers (Task 10) — 由 useEventStream (Task 11) 在
   // 收到 cwd.changed / bash_task.changed / v2_task.changed /
@@ -482,6 +496,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   cwd: '',
   messages: [],
   status: 'idle',
+  queuedPrompts: [],
   abortController: null,
   pendingAsk: null,
   pendingApprove: null,
@@ -809,6 +824,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 视觉态,直接设值;刷新回到 settings.outputStyle 决定的值.
   transcriptCollapsed: false,
   setStatus: (status: AgentStatus) => set({ status }),
+  // queue.changed 快照覆盖排队列表 — 后端 per-session 串行队列的等待中
+  // 命令 {id, text} 列表(不含正在执行的那条)。
+  applyQueueChanged: (event) => set({ queuedPrompts: event.pending }),
   setTranscriptCollapsed: (collapsed: boolean) =>
     set({ transcriptCollapsed: collapsed }),
 
@@ -1407,12 +1425,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }
         })
         return
-      case 'runtime.done':
+      case 'runtime.done': {
+        // 还有排队任务时保持 streaming, 等 queue.changed + 下一条
+        // runtime.started 自然流转; 队列清空才回 idle。
+        if (useAgentStore.getState().queuedPrompts.length > 0) return
         useAgentStore.getState().setStatus('idle')
         return
-      case 'runtime.aborted':
+      }
+      case 'runtime.aborted': {
+        // Esc 中断当前轮: 若队列里还有排队任务, 后端 runNextInQueue 会立刻
+        // 消费下一条, 前端置回 streaming 让它自然流转; 队列空则显示 aborted。
+        if (useAgentStore.getState().queuedPrompts.length > 0) {
+          useAgentStore.getState().setStatus('streaming')
+          return
+        }
         useAgentStore.getState().setStatus('aborted')
         return
+      }
       case 'runtime.error': {
         // 携带 toolUseId 的 runtime.error 来自 server 把 runtime 的
         // tool_use:error/invalid/denied 翻译过来的事件 — 指向一个具体的
