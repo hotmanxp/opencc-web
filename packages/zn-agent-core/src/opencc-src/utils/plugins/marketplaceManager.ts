@@ -42,6 +42,7 @@ import {
   getSettingsForSource,
   updateSettingsForSource,
 } from '../settings/settings.js'
+import { getUserConfigJson } from '../userConfigJson.js'
 import type { SettingsJson } from '../settings/types.js'
 import {
   jsonParse,
@@ -229,8 +230,12 @@ export function getDeclaredMarketplaces(): Record<string, DeclaredMarketplace> {
   // Only the official marketplace can be implicitly declared — it's the one
   // built-in source we know. Other marketplaces have no default source to inject.
   // Explicitly-disabled entries (value: false) don't count.
+  // User-scope plugin state lives in the unified user config JSON
+  // (~/.zai.json, fallback ~/.claude.json) — merge it into the implicit
+  // declaration set so the official marketplace stays surfaced.
   const enabledPlugins = {
     ...getAddDirEnabledPlugins(),
+    ...(getUserConfigJson().enabledPlugins ?? {}),
     ...(getInitialSettings().enabledPlugins ?? {}),
   }
   for (const [pluginId, value] of Object.entries(enabledPlugins)) {

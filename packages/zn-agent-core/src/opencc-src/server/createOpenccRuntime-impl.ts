@@ -28,7 +28,7 @@ import { getMarketplaceSourceDisplay } from '../utils/plugins/marketplaceHelpers
 import { parseMarketplaceInput } from '../utils/plugins/parseMarketplaceInput.js'
 import { parsePluginIdentifier } from '../utils/plugins/pluginIdentifier.js'
 import { clearAllCaches } from '../utils/plugins/cacheUtils.js'
-import { getSettingsForSource } from '../utils/settings/settings.js'
+import { getUserConfigJson } from '../utils/userConfigJson.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
 import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto, OpenccMarketplaceDto, OpenccMarketplaceActionResult } from './serverTypes.js'
 
@@ -253,7 +253,11 @@ export async function createOpenccRuntimeImpl(options) {
         pendingMap.set(u.id, true)
       }
     }
-    const enabled = getSettingsForSource('userSettings')?.enabledPlugins as Record<string, boolean> | undefined
+    // Plugin enable/disable state is stored in the unified user config JSON
+    // (~/.zai.json, fallback ~/.claude.json) — not the vendor settings
+    // cascade. See utils/userConfigJson.ts for the read/write contract.
+    const userConfig = getUserConfigJson()
+    const enabled = userConfig.enabledPlugins as Record<string, boolean> | undefined
     return assemblePluginList(loadResult, v2, enabled, counts, (id) => pendingMap.get(id) === true)
   }
 

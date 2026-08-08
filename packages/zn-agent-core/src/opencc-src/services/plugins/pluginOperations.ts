@@ -67,6 +67,10 @@ import {
   getSettingsForSource,
   updateSettingsForSource,
 } from '../../utils/settings/settings.js'
+import {
+  getUserConfigJson,
+  setUserConfigJsonValue,
+} from '../../utils/userConfigJson.js'
 import { plural } from '../../utils/stringUtils.js'
 
 /** Valid installable scopes (excludes 'managed' which can only be installed from managed-settings.json) */
@@ -581,12 +585,12 @@ export async function setPluginEnabledOp(
 
   // Built-in plugins: always use user-scope settings, bypass the normal
   // scope-resolution + installed_plugins lookup (they're not installed).
+  // User-scope plugin state now lives in the unified user config JSON
+  // (~/.zai.json, fallback ~/.claude.json), not the vendor settings cascade.
   if (isBuiltinPluginId(plugin)) {
-    const { error } = updateSettingsForSource('userSettings', {
-      enabledPlugins: {
-        ...getSettingsForSource('userSettings')?.enabledPlugins,
-        [plugin]: enabled,
-      },
+    const { error } = setUserConfigJsonValue('enabledPlugins', {
+      ...getUserConfigJson().enabledPlugins,
+      [plugin]: enabled,
     })
     if (error) {
       return {
@@ -660,8 +664,13 @@ export async function setPluginEnabledOp(
   }
 
   const settingSource = scopeToSettingSource(resolvedScope)
+  // user-scope plugin state lives in the unified user config JSON
+  // (~/.zai.json, fallback ~/.claude.json) — read from there for the
+  // idempotency/cross-scope check below, mirroring the write target.
   const scopeSettingsValue =
-    getSettingsForSource(settingSource)?.enabledPlugins?.[pluginId]
+    settingSource === 'userSettings'
+      ? getUserConfigJson().enabledPlugins?.[pluginId]
+      : getSettingsForSource(settingSource)?.enabledPlugins?.[pluginId]
 
   // ── Cross-scope hint: explicit scope given but plugin is elsewhere ──
   // If the plugin is absent from the requested scope but present at a
@@ -721,12 +730,22 @@ export async function setPluginEnabledOp(
   }
 
   // ── ACTION: write settings ──
-  const { error } = updateSettingsForSource(settingSource, {
-    enabledPlugins: {
-      ...getSettingsForSource(settingSource)?.enabledPlugins,
-      [pluginId]: enabled,
-    },
-  })
+  // User-scope plugin state now lives in the unified user config JSON
+  // (~/.zai.json, fallback ~/.claude.json) instead of the vendor settings
+  // cascade. Project/local/managed scopes still flow through the vendor
+  // settings path.
+  const { error } =
+    settingSource === 'userSettings'
+      ? setUserConfigJsonValue('enabledPlugins', {
+          ...getUserConfigJson().enabledPlugins,
+          [pluginId]: enabled,
+        })
+      : updateSettingsForSource(settingSource, {
+          enabledPlugins: {
+            ...getSettingsForSource(settingSource)?.enabledPlugins,
+            [pluginId]: enabled,
+          },
+        })
   if (error) {
     return {
       success: false,

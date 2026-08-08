@@ -48,6 +48,7 @@ import {
   getSettings_DEPRECATED,
   getSettingsForSource,
 } from '../settings/settings.js'
+import { getUserConfigJson } from '../userConfigJson.js'
 import { getPluginById } from './marketplaceManager.js'
 import {
   parsePluginIdentifier,
@@ -1048,7 +1049,12 @@ function getPluginVersionFromManifest(
 export async function migrateFromEnabledPlugins(): Promise<void> {
   // Use merged settings for shouldSkipSync check
   const settings = getSettings_DEPRECATED()
-  const enabledPlugins = settings.enabledPlugins || {}
+  // The user-scope plugin state now lives in the unified user config JSON
+  // (~/.zai.json, fallback ~/.claude.json). Merge it into the deprecation
+  // snapshot so this quick-exit / skip-migration check sees the same set
+  // of plugins the UI toggles.
+  const userEnabled = getUserConfigJson().enabledPlugins ?? {}
+  const enabledPlugins = { ...userEnabled, ...(settings.enabledPlugins || {}) }
 
   // No plugins in settings = nothing to sync
   if (Object.keys(enabledPlugins).length === 0) {
@@ -1111,8 +1117,13 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
   ]
 
   for (const source of settingSources) {
-    const sourceSettings = getSettingsForSource(source)
-    const sourceEnabledPlugins = sourceSettings?.enabledPlugins || {}
+    // user-scope plugin state lives in the unified user config JSON
+    // (~/.zai.json, fallback ~/.claude.json), not the vendor settings
+    // cascade. project/local still flow through getSettingsForSource.
+    const sourceEnabledPlugins =
+      source === 'userSettings'
+        ? (getUserConfigJson().enabledPlugins ?? {})
+        : (getSettingsForSource(source)?.enabledPlugins ?? {})
 
     for (const pluginId of Object.keys(sourceEnabledPlugins)) {
       // Skip non-standard plugin IDs
