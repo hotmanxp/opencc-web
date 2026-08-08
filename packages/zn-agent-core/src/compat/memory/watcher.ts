@@ -74,7 +74,7 @@ export function startMemoryWatcher(opts: {
   const candidates = [
     join(opts.cwd, 'AGENTS.md'),
     join(opts.cwd, 'AGENTS.local.md'),
-    join(opts.cwd, '.claude', 'AGENTS.md'),
+    join(opts.cwd, '.zai', 'AGENTS.md'),
   ]
   for (const p of candidates) watchOne(p)
   return {

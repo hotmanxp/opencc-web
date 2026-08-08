@@ -240,8 +240,8 @@ export function convertToSandboxRuntimeConfig(
   const cwd = getCwdState()
   const originalCwd = getOriginalCwd()
   if (cwd !== originalCwd) {
-    denyWrite.push(resolve(cwd, '.claude', 'settings.json'))
-    denyWrite.push(resolve(cwd, '.claude', 'settings.local.json'))
+    denyWrite.push(resolve(cwd, '.zai', 'settings.json'))
+    denyWrite.push(resolve(cwd, '.zai', 'settings.local.json'))
   }
 
   // Block writes to .claude/skills in both original and current working directories.
@@ -249,9 +249,9 @@ export function convertToSandboxRuntimeConfig(
   // .claude/agents but not .claude/skills. Skills have the same privilege level
   // (auto-discovered, auto-loaded, full OpenCC capabilities) so they need the
   // same OS-level sandbox protection.
-  denyWrite.push(resolve(originalCwd, '.claude', 'skills'))
+  denyWrite.push(resolve(originalCwd, '.zai', 'skills'))
   if (cwd !== originalCwd) {
-    denyWrite.push(resolve(cwd, '.claude', 'skills'))
+    denyWrite.push(resolve(cwd, '.zai', 'skills'))
   }
 
   // SECURITY: Git's is_git_directory() treats cwd as a bare repo if it has

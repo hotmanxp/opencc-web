@@ -33,12 +33,12 @@ export function defaultCommandsDirs(opts: CommandsDirsOpts = {}): string[] {
   const zaiDir = opts.dataDir
     ? join(opts.dataDir, '.zai', 'commands')
     : join(home, '.zai', 'commands')
-  const homeClaudeDir = join(home, '.claude', 'commands')
+  const homeClaudeDir = join(home, '.zai', 'commands')
 
   const dirs: string[] = []
   // project-level first (project overrides home on name conflicts)
   if (opts.cwd) {
-    const cwdClaude = join(opts.cwd, '.claude', 'commands')
+    const cwdClaude = join(opts.cwd, '.zai', 'commands')
     const cwdZai = join(opts.cwd, '.zai', 'commands')
     if (existsSync(cwdClaude)) dirs.push(cwdClaude)
     if (existsSync(cwdZai)) dirs.push(cwdZai)

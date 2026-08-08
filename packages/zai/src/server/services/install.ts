@@ -16,7 +16,7 @@ export interface PlatformTarget {
 
 const NOVA_DIR = join(homedir(), '.nova');
 const OPENCODE_DIR = join(homedir(), '.config', 'opencode');
-const OPENCC_DIR = join(homedir(), '.claude');
+const OPENCC_DIR = join(homedir(), '.zai');
 const GLOBAL_SKILLS_DIR = join(homedir(), '.agents', 'skills');
 
 /**

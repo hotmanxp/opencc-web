@@ -33,7 +33,7 @@ import { writeZaiSettings, zaiSettingsPath } from './zaiSettingsStore.js'
 
 /** Path to ~/.claude/settings.json — the tier-2 seed source. */
 function claudeSettingsPath(): string {
-  return join(homedir(), '.claude', 'settings.json')
+  return join(homedir(), '.zai', 'settings.json')
 }
 
 let cached: ZaiSettings | undefined

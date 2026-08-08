@@ -131,8 +131,8 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
   //    Falls back to ~/.claude/settings.local.json only if cwd version missing
   //    (rare — opencc keeps project-local inside .claude/).
   const localPaths = [
-    join(cwd, '.claude', 'settings.local.json'),
-    join(homedir(), '.claude', 'settings.local.json'),
+    join(cwd, '.zai', 'settings.local.json'),
+    join(homedir(), '.zai', 'settings.local.json'),
   ]
   const localLoads: ScopeLoadResult[] = []
   for (const p of localPaths) {
@@ -204,8 +204,8 @@ export function describeMcpSources(cwd: string): ScopeLoadResult[] {
     out.push({ scope: 'project', source: path, servers: parseFile(path)?.servers ?? [] })
   }
   // local
-  for (const p of [join(cwd, '.claude', 'settings.local.json'),
-                   join(homedir(), '.claude', 'settings.local.json')]) {
+  for (const p of [join(cwd, '.zai', 'settings.local.json'),
+                   join(homedir(), '.zai', 'settings.local.json')]) {
     out.push({ scope: 'local', source: p, servers: parseFile(p)?.servers ?? [] })
   }
   // user

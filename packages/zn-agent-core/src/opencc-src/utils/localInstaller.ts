@@ -22,7 +22,7 @@ export function getLocalInstallDir(): string {
 }
 
 function getLegacyLocalInstallDir(homeDir = homedir()): string {
-  return join(homeDir, '.claude', 'local')
+  return join(homeDir, '.zai', 'local')
 }
 
 export function getCandidateLocalInstallDirs(options?: {

@@ -52,10 +52,10 @@ export class WorkflowRegistry {
   async reload(): Promise<void> {
     this.diskWorkflows.clear()
     this._diskScanned = false
-    for (const wf of await this.scanDir(join(this.opts.userDir, '.claude', 'workflows'), 'user')) {
+    for (const wf of await this.scanDir(join(this.opts.userDir, '.zai', 'workflows'), 'user')) {
       this.diskWorkflows.set(wf.name, wf)
     }
-    for (const wf of await this.scanDir(join(this.opts.projectDir, '.claude', 'workflows'), 'project')) {
+    for (const wf of await this.scanDir(join(this.opts.projectDir, '.zai', 'workflows'), 'project')) {
       this.diskWorkflows.set(wf.name, wf)
     }
     this._diskScanned = true
@@ -112,8 +112,8 @@ export class WorkflowRegistry {
     if (this.watchers.length > 0) return  // already watching
 
     const dirs = [
-      join(this.opts.projectDir, '.claude', 'workflows'),
-      join(this.opts.userDir, '.claude', 'workflows'),
+      join(this.opts.projectDir, '.zai', 'workflows'),
+      join(this.opts.userDir, '.zai', 'workflows'),
     ]
     for (const dir of dirs) {
       let stat

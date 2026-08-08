@@ -63,7 +63,7 @@ describe('loadUserCommands', () => {
 
   it('merges project-level .claude/commands with home-level commands', async () => {
     const cwd = join(tmpHome, 'proj')
-    const projDir = join(cwd, '.claude', 'commands')
+    const projDir = join(cwd, '.zai', 'commands')
     mkdirSync(projDir, { recursive: true })
     // home-level
     writeCommand('greet', { description: 'home' }, 'home body')
@@ -77,7 +77,7 @@ describe('loadUserCommands', () => {
 
   it('project-level command overrides same-named home command', async () => {
     const cwd = join(tmpHome, 'proj2')
-    const projDir = join(cwd, '.claude', 'commands')
+    const projDir = join(cwd, '.zai', 'commands')
     mkdirSync(projDir, { recursive: true })
     writeCommand('greet', { description: 'home greet' }, 'home')
     writeFileSync(join(projDir, 'greet.md'), '---\ndescription: "proj greet"\n---\nproj', 'utf-8')

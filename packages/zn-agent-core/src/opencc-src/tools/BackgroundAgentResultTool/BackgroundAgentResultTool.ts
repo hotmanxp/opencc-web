@@ -61,7 +61,7 @@ type OutputSchema = ReturnType<typeof outputSchema>
 export type BackgroundAgentResultOutput = z.infer<OutputSchema>
 
 function getLogPath(shortId: string): string {
-  return join(homedir(), '.claude', 'background', `${shortId}.log`)
+  return join(homedir(), '.zai', 'background', `${shortId}.log`)
 }
 
 const TRUNCATE_HEAD_KEEP = 4_000

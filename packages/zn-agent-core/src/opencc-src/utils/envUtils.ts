@@ -106,7 +106,7 @@ export const getClaudeConfigHomeDir = memoize(
  */
 export function getDirInHome(dirName: string): string {
   const zaiPath = join(homedir(), '.zai', dirName)
-  const claudePath = join(homedir(), '.claude', dirName)
+  const claudePath = join(homedir(), '.zai', dirName)
   if (existsSync(zaiPath)) {
     return zaiPath
   }

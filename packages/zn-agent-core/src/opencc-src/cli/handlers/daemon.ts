@@ -182,7 +182,7 @@ function broadcastInbox(
 
 /** Path under `~/.claude/background/<shortId>.log` for a worker's captured output. */
 export function getJobLogPath(shortId: JobShortId): string {
-  return join(homedir(), '.claude', 'background', `${shortId}.log`)
+  return join(homedir(), '.zai', 'background', `${shortId}.log`)
 }
 
 /** Fire-and-forget save of the in-memory job map to the on-disk roster. */

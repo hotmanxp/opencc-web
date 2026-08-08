@@ -81,7 +81,7 @@ export const DANGEROUS_DIRECTORIES = [
   '.git',
   '.vscode',
   '.idea',
-  '.claude',
+  '.zai',
   '.openclaude',
 ] as const
 
@@ -115,7 +115,7 @@ export function getClaudeSkillScope(
 
   const bases = [
     {
-      dir: expandPath(join(getOriginalCwd(), '.claude', 'skills')),
+      dir: expandPath(join(getOriginalCwd(), '.zai', 'skills')),
       prefix: '/.claude/skills/',
     },
     {
@@ -123,7 +123,7 @@ export function getClaudeSkillScope(
       prefix: '~/.openclaude/skills/',
     },
     {
-      dir: expandPath(join(homedir(), '.claude', 'skills')),
+      dir: expandPath(join(homedir(), '.zai', 'skills')),
       prefix: '~/.claude/skills/',
     },
   ]
@@ -245,9 +245,9 @@ function isClaudeConfigFilePath(filePath: string): boolean {
   // Check if file is within .claude/commands or .claude/agents directories
   // using proper path segment validation (not string matching with includes())
   // pathInWorkingPath now handles case-insensitive comparison to prevent bypasses
-  const commandsDir = join(getOriginalCwd(), '.claude', 'commands')
-  const agentsDir = join(getOriginalCwd(), '.claude', 'agents')
-  const skillsDir = join(getOriginalCwd(), '.claude', 'skills')
+  const commandsDir = join(getOriginalCwd(), '.zai', 'commands')
+  const agentsDir = join(getOriginalCwd(), '.zai', 'agents')
+  const skillsDir = join(getOriginalCwd(), '.zai', 'skills')
   const openCommandsDir = join(getOriginalCwd(), '.openclaude', 'commands')
   const openAgentsDir = join(getOriginalCwd(), '.openclaude', 'agents')
   const openSkillsDir = join(getOriginalCwd(), '.openclaude', 'skills')
@@ -318,7 +318,7 @@ function isProjectDirPath(absolutePath: string): boolean {
  */
 function isUnderGlobalClaudeProjects(absolutePath: string): boolean {
   const normalizedPath = normalize(expandPath(absolutePath))
-  const globalProjectsDir = join(homedir(), '.claude', 'projects') + sep
+  const globalProjectsDir = join(homedir(), '.zai', 'projects') + sep
   return normalizedPath.startsWith(globalProjectsDir)
 }
 
@@ -560,7 +560,7 @@ function isDangerousFilePathToAutoEdit(
       // under ~/.claude/projects/, not just memory/. Override-path memory
       // (CLAUDE_COWORK_MEMORY_PATH_OVERRIDE) remains protected by the explicit
       // approval check further down.
-      if (dir === '.claude') {
+      if (dir === '.zai') {
         const nextSegment = pathSegments[i + 1]
         if (
           nextSegment &&
@@ -1729,7 +1729,7 @@ export function checkEditableInternalPath(
   // .claude/ only (not ~/.claude/) since launch.json is per-project.
   if (
     normalizeCaseForComparison(normalizedPath) ===
-    normalizeCaseForComparison(join(getOriginalCwd(), '.claude', 'launch.json'))
+    normalizeCaseForComparison(join(getOriginalCwd(), '.zai', 'launch.json'))
   ) {
     return {
       behavior: 'allow',

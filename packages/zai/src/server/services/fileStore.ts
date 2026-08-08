@@ -6,7 +6,7 @@ import type { ConfigFile, ConfigTool } from '../../shared/types.js';
 const CONFIG_PATHS: Record<ConfigTool, () => string> = {
   nova: () => join(homedir(), '.nova', 'settings.json'),
   opencode: () => join(homedir(), '.config', 'opencode', 'opencode.json'),
-  opencc: () => join(homedir(), '.claude', 'settings.json'),
+  opencc: () => join(homedir(), '.zai', 'settings.json'),
   zai: () => join(homedir(), '.zai', 'settings.json'),
 };
 

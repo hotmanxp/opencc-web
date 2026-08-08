@@ -42,7 +42,7 @@ router.get('/dirs', async (_req, res) => {
     const status: DirectoryStatus = {
       nova: await buildDirInfo(join(home, '.nova')),
       opencode: await buildDirInfo(join(home, '.config', 'opencode')),
-      opencc: await buildDirInfo(join(home, '.claude')),
+      opencc: await buildDirInfo(join(home, '.zai')),
       globalSkills: await buildDirInfo(join(home, '.agents', 'skills')),
     };
     res.json(status);
@@ -85,7 +85,7 @@ function platformRoots(): string[] {
   return [
     join(home, '.nova'),
     join(home, '.config', 'opencode'),
-    join(home, '.claude'),
+    join(home, '.zai'),
     join(home, '.agents', 'skills'),
   ].map((p) => resolve(p));
 }

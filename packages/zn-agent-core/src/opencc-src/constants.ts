@@ -16,10 +16,10 @@ export { BRAND_NAME } from './constants/product.js'
 // ---------------------------------------------------------------------------
 
 /** Project-level config directory name (dot-prefixed) */
-export const CONFIG_DIRNAME = '.claude'
+export const CONFIG_DIRNAME = '.zai'
 
 /** User-level config directory name (dot-prefixed, inside home directory) */
-export const USER_CONFIG_DIRNAME = '.claude'
+export const USER_CONFIG_DIRNAME = '.zai'
 
 // ---------------------------------------------------------------------------
 // Settings files

@@ -26,7 +26,7 @@ import {JobRecordSchema} from './protocol.js'
  *  directory's lifecycle; this module must not silently create
  *  intermediate dirs or accept arbitrary call sites that might point
  *  elsewhere (e.g. `/etc/passwd`). */
-export const ROSTER_ROOT = join(homedir(), '.claude')
+export const ROSTER_ROOT = join(homedir(), '.zai')
 
 export const ROSTER_PATH = join(ROSTER_ROOT, 'roster.json')
 
@@ -88,7 +88,7 @@ function assertUnderRosterRoot(path: string): void {
   if (
     !path.includes(claudeSegment) &&
     !path.endsWith(claudeSegmentTail) &&
-    path !== '.claude'
+    path !== '.zai'
   ) {
     throw new Error(
       `roster: refusing to write outside ${ROSTER_ROOT}: ${path}`,
