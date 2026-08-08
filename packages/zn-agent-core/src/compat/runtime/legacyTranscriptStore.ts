@@ -20,6 +20,7 @@
 import { randomUUID } from 'node:crypto'
 import { mkdir, readFile, readdir, rm, stat, writeFile } from 'node:fs/promises'
 import { join } from 'node:path'
+import { getDefaultMode } from '../permissions.js'
 
 // 与 opencc-src/utils/sessionStoragePortable.ts 的 sanitizePath 保持一致的
 // 内联实现 (compat 不能 import opencc-src, 否则把整个 vendor 图拖进
@@ -155,6 +156,11 @@ export class TranscriptStore {
     if (stored) {
       return { messages: entries, meta: stored }
     }
+    // REGISTRY miss usually means "session created via OpenccRuntime, not
+    // via create() below" — those sessions have no in-memory meta. Fall
+    // back to the user's configured default mode so the bottom-bar badge
+    // (which reads `currentSession.permissionMode`) reflects settings.json
+    // rather than being pinned to the opencc CLI's hardcoded 'default'.
     return {
       messages: entries,
       meta: {
@@ -162,7 +168,7 @@ export class TranscriptStore {
         model: '',
         sessionId,
         ...(inferredTitle ? { title: inferredTitle } : { title: '' }),
-        permissionMode: 'default',
+        permissionMode: getDefaultMode(),
         createdAt: typeof entries[0]?.timestamp === 'number' ? entries[0].timestamp : Date.now(),
       },
     }
@@ -191,7 +197,11 @@ export class TranscriptStore {
         cwd: opts.cwd,
         model: stored?.model ?? 'unknown',
         sessionId,
-        permissionMode: stored?.permissionMode ?? 'default',
+        // For sessions written by OpenccRuntime, REGISTRY has no entry
+        // and stored?.permissionMode is undefined — fall back to the
+        // user's configured default (typically bypassPermissions) instead
+        // of pinning the badge to 'default'.
+        permissionMode: stored?.permissionMode ?? getDefaultMode(),
         createdAt: stored?.createdAt ?? Date.now(),
         ...(stored?.title ? { title: stored.title } : {}),
         updatedAt,
