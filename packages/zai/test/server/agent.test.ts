@@ -2,7 +2,12 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import express from 'express'
 import http from 'node:http'
 import { readFileSync } from 'node:fs'
-import agentRouter from '../../src/server/routes/agent.js'
+import agentRouter, {
+  isRateLimitErrorMessage,
+  markSessionRateLimited,
+  getSessionRateLimitRemainingMs,
+  __resetSessionRateLimitsForTests,
+} from '../../src/server/routes/agent.js'
 
 // Mock node:fs so resolveModel's readZaiSettings() can be controlled.
 // Mirrors the pattern in test/server/agentSettings.test.ts:7-13.
@@ -99,6 +104,7 @@ vi.mock('@zn-ai/zn-agent-core/opencc-src/permissions', () => ({
 // 返回 {}, 整链路最终命中 BUILTIN_FALLBACK_MODEL.
 beforeEach(() => {
   vi.mocked(readFileSync).mockReset()
+  __resetSessionRateLimitsForTests()
 })
 
 function startApp(): Promise<{ url: string; close: () => void }> {
@@ -417,5 +423,34 @@ describe('translateRuntimeEvents — tool_use:error 携带 toolUseId', () => {
     } finally {
       off()
     }
+  })
+})
+
+describe('会话级 429 冷却', () => {
+  it('isRateLimitErrorMessage 识别 MiniMax 429 错误文本', () => {
+    expect(
+      isRateLimitErrorMessage(
+        'API Error: 429 {"type":"error","error":{"type":"rate_limit_error","message":"rate limit exceeded(TPM) (1039)"}}',
+      ),
+    ).toBe(true)
+    expect(isRateLimitErrorMessage('rate_limit')).toBe(true)
+    expect(isRateLimitErrorMessage('rate limit exceeded')).toBe(true)
+    expect(isRateLimitErrorMessage('rate limit exceeded(TPM) (1039)')).toBe(true)
+    expect(isRateLimitErrorMessage('普通对话文本')).toBe(false)
+    expect(isRateLimitErrorMessage('tool_use:invalid')).toBe(false)
+    // 模型正常输出讨论 TPM 芯片/tpm2-tools 不应误判
+    expect(isRateLimitErrorMessage('该设备支持 TPM 2.0 安全芯片')).toBe(false)
+    expect(isRateLimitErrorMessage('tpm2-tools 安装成功')).toBe(false)
+  })
+
+  it('markSessionRateLimited 后冷却期内 remaining > 0, 到期归 0', async () => {
+    markSessionRateLimited('sess-rate-1', 50)
+    expect(getSessionRateLimitRemainingMs('sess-rate-1')).toBeGreaterThan(0)
+    await new Promise((r) => setTimeout(r, 80))
+    expect(getSessionRateLimitRemainingMs('sess-rate-1')).toBe(0)
+  })
+
+  it('未标记的会话 remaining 为 0', () => {
+    expect(getSessionRateLimitRemainingMs('sess-unknown')).toBe(0)
   })
 })

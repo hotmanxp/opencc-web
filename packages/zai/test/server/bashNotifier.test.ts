@@ -3,6 +3,10 @@ import {
   BashNotifier,
   BASH_NOTIFY_PLACEHOLDER,
 } from '../../src/server/services/bashNotifier.js'
+import {
+  registerSessionController,
+  releaseSessionController,
+} from '../../src/server/services/agentRuntime.js'
 import type { BashTaskInfo } from '@zn-ai/zn-agent-core/bashTracker'
 
 let lastRunOpts: any = null
@@ -45,6 +49,7 @@ beforeEach(() => {
 })
 
 afterEach(() => {
+  releaseSessionController('sess-parent')
   vi.restoreAllMocks()
 })
 
@@ -81,6 +86,22 @@ describe('BashNotifier.handle', () => {
   test('sessionId=sess-unknown (父 session 占位) → 不触发 query', async () => {
     const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
     await n.handle({ sessionId: 'sess-unknown', task: makeTask() })
+    expect(lastRunOpts).toBeNull()
+  })
+
+  test('isBackgrounded=false (前台命令完成) → 不触发 query', async () => {
+    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    await n.handle({
+      sessionId: 'sess-parent',
+      task: makeTask({ isBackgrounded: false }),
+    })
+    expect(lastRunOpts).toBeNull()
+  })
+
+  test('主线有活跃 query (running 守卫) → 不触发 query', async () => {
+    registerSessionController('sess-parent', new AbortController())
+    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    await n.handle({ sessionId: 'sess-parent', task: makeTask() })
     expect(lastRunOpts).toBeNull()
   })
 

@@ -211,6 +211,19 @@ export function releaseSessionController(sessionId: string): void {
   sessionControllers.delete(sessionId)
 }
 
+/**
+ * 某 session 当前是否有活跃 query 在跑。runQueryLoop 在开始时
+ * registerSessionController、结束(含 abort/异常)时 releaseSessionController,
+ * 所以这个 Map 的键集就是"正在跑 query 的 session"。
+ *
+ * 供 BashNotifier 做 running 守卫:主线活跃时不另起通知 query
+ * (通知已在 commandQueue,靠 QueryEngine mid-turn drain 注入),对齐
+ * opencc `if (running) return` 语义。
+ */
+export function hasActiveQuery(sessionId: string): boolean {
+  return sessionControllers.has(sessionId)
+}
+
 export function abortSessionController(
   sessionId: string,
   reason?: string,

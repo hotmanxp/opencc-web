@@ -1,5 +1,10 @@
 import type { BashTaskInfo } from '@zn-ai/zn-agent-core/bashTracker'
-import { getRuntime, getCurrentSessionId, setCurrentSessionId } from './agentRuntime.js'
+import {
+  getRuntime,
+  getCurrentSessionId,
+  setCurrentSessionId,
+  hasActiveQuery,
+} from './agentRuntime.js'
 import { resolveModel } from '../lib/resolveModel.js'
 import { eventBus } from './eventBus.js'
 import { translateRuntimeEvents } from '../routes/agent.js'
@@ -59,8 +64,22 @@ export class BashNotifier {
     if (task.status !== 'completed' && task.status !== 'failed' && task.status !== 'killed') {
       return
     }
+    // zai patch (2026-08-09): 只对真后台任务通知 LLM。前台命令(运行 ≥2s
+    // 触发 registerForeground 的前台任务)完成时也会 emit bash_task.changed,
+    // 但它们的执行结果已经直接回到工具循环,不该再触发通知 query —— 对齐
+    // opencc 语义:只有 isBackgrounded 任务才 enqueueShellNotification。
+    // 会话 sess-1786201578807 现场:每个 ≥2s 的前台命令完成都触发一个并行
+    // runtime.query(),30 个并行循环共享"提交代码"上下文各自重跑 → 请求风暴。
+    if (!task.isBackgrounded) return
     const sessionId = e.sessionId
     if (!sessionId || sessionId === 'sess-unknown') return // 兜底:无父 session 的占位 ID
+
+    // zai patch (2026-08-09): running 守卫 —— 主 session 有活跃 query 时不
+    // 另起 query。通知已 enqueue 到 commandQueue,由 QueryEngine 的
+    // mid-turn drain 注入给模型(对齐 opencc `if (running) return` 语义);
+    // 只有主线 idle(没有活跃 query 去 drain)时才补一轮 query。防止通知
+    // query 与主线并行、各自执行工具造成请求叠加。
+    if (hasActiveQuery(sessionId)) return
 
     try {
       await this.inject(sessionId)

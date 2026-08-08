@@ -599,6 +599,54 @@ type PendingPrompt = {
 const sessionQueues = new Map<string, PendingPrompt[]>()
 const sessionRunning = new Set<string>()
 
+// ---------------------------------------------------------------------------
+// 会话级 429 冷却(zai patch 2026-08-08)
+// ---------------------------------------------------------------------------
+// 上一轮 query 因 rate_limit(429)终止后,本会话在冷却窗口(30s)内的新
+// query 直接拒绝,不再向 API 发请求。即使 vendor withRetry 的 gate 也会
+// 等窗口,这里在入口拦截更干净:不挂起请求、前端立即得到明确反馈、
+// 限流窗口内不会累积排队请求。窗口结束自动恢复。
+const SESSION_RATE_LIMIT_COOLDOWN_MS = 30_000
+const sessionRateLimitUntil = new Map<string, number>()
+
+export function markSessionRateLimited(
+  sessionId: string,
+  windowMs: number = SESSION_RATE_LIMIT_COOLDOWN_MS,
+): void {
+  sessionRateLimitUntil.set(sessionId, Date.now() + windowMs)
+}
+
+/** 本会话距 429 冷却窗口结束的剩余毫秒;不在冷却窗口内时返回 0。 */
+export function getSessionRateLimitRemainingMs(sessionId: string): number {
+  const until = sessionRateLimitUntil.get(sessionId)
+  if (until === undefined) return 0
+  const remaining = until - Date.now()
+  if (remaining <= 0) {
+    sessionRateLimitUntil.delete(sessionId)
+    return 0
+  }
+  return remaining
+}
+
+/** 测试 seam:清空会话级冷却状态。 */
+export function __resetSessionRateLimitsForTests(): void {
+  sessionRateLimitUntil.clear()
+}
+
+/** 判断错误消息是否命中 rate-limit(duck-type,兼容 MiniMax status 不可靠)。 */
+export function isRateLimitErrorMessage(message: unknown): boolean {
+  if (typeof message !== 'string') return false
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('rate_limit') ||
+    lower.includes('rate limit') ||
+    // "rate limit exceeded(TPM) (1039)" 已命中上面的 "rate limit";这里只
+    // 匹配 429 + api error 组合,不裸匹配 "tpm"(模型正常输出讨论 TPM 芯片/
+    // tpm2-tools 会误触发会话级冷却)。
+    (lower.includes('429') && lower.includes('api error'))
+  )
+}
+
 function emitQueueChanged(sid: string): void {
   const q = sessionQueues.get(sid) ?? []
   eventBus.emit({
@@ -639,6 +687,28 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
   // 解析到本 session 的逻辑 cwd(与原 /agent/prompt 行为一致)。
   return runWithSessionId(cmd.sessionId, async () => {
   const { sessionId, cwd } = cmd
+  // zai patch (2026-08-08): 会话级 429 冷却拦截。上一轮 query 因
+  // rate_limit 终止后,冷却窗口内本会话的新 query 不再向 API 发请求,
+  // 直接 emit runtime.error(rate_limit)让前端明确感知"限流中,稍后重试",
+  // 避免用户/前端快速重试时每个请求都打一次 MiniMax 触发新一轮 429
+  // (请求风暴的最后一环:429 后 2 秒内自动重发)。
+  const rateLimitRemainingMs = getSessionRateLimitRemainingMs(sessionId)
+  if (rateLimitRemainingMs > 0) {
+    const waitSeconds = Math.ceil(rateLimitRemainingMs / 1000)
+    eventBus.emit({
+      type: "runtime.error",
+      eventId: "err-rate-limit",
+      sessionId,
+      ts: Date.now(),
+      turnIndex: 0,
+      error: {
+        category: "rate_limit",
+        message: `API 限流中,请 ${waitSeconds}s 后重试。`,
+        recoverable: true,
+      },
+    } as any);
+    return
+  }
   // ★ 立即绑定 currentSessionId。queryLoop 启动后第一个 runtime.started
   // 事件才会再 setCurrentSessionId 一次(兜底),但如果 AgentTool 是 query
   // 第一批 tool_calls 之一(LLM 在 runtime.started 之前就调 sub-agent),
@@ -1008,6 +1078,26 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
           } catch {
             /* title 失败不阻断 */
           }
+        }
+      }
+      // zai patch (2026-08-08): 检测 rate_limit 终止 → 进入会话级冷却。
+      // 覆盖两种形态: query 终止时 defaultQuery yield 的 assistant 错误
+      // 文本(经 translateRuntimeEvents 变 runtime.delta,如
+      // "API Error: 429 ... rate_limit_error"),以及 runtime.error 事件
+      // 的 message。命中后 30s 内本会话的新 query 在 runQueryLoop 入口
+      // 被拦截,不再向 API 发请求。
+      if (event.type === "runtime.delta" && typeof event.sessionId === "string") {
+        const ev = event as { delta?: string }
+        if (typeof ev.delta === "string" && isRateLimitErrorMessage(ev.delta)) {
+          markSessionRateLimited(event.sessionId)
+        }
+      } else if (
+        event.type === "runtime.error" &&
+        typeof event.sessionId === "string"
+      ) {
+        const ev = event as { error?: { message?: string } }
+        if (isRateLimitErrorMessage(ev.error?.message)) {
+          markSessionRateLimited(event.sessionId)
         }
       }
       // ★ 替代原 stream.send：通过总线推送
