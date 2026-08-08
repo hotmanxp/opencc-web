@@ -122,4 +122,42 @@ describe('assemblePluginList', () => {
     expect(r.plugins[0].description).toBe('hi')
     expect(r.plugins[0].author).toBe('me')
   })
+
+  it('plugin.repository 是完整 pluginId (name@marketplace) 时不重复拼接', () => {
+    // 模拟 pluginLoader.ts:1464 把 repository=source(source 本身是 pluginId)
+    // 的污染场景,以及 settings 里存的 enabledPlugins key 是 name@marketplace。
+    const load: PluginLoadResult = {
+      enabled: [makePlugin({
+        name: 'chrome-devtools-mcp',
+        repository: 'chrome-devtools-mcp@claude-plugins-official',
+      })],
+      disabled: [],
+      errors: [],
+    }
+    const v2: InstalledPluginsFileV2 = {
+      version: 2,
+      plugins: { 'chrome-devtools-mcp': { installs: { user: { path: '/p' } } } },
+    }
+    const enabled = { 'chrome-devtools-mcp@claude-plugins-official': true }
+    const r = assemblePluginList(load, v2, enabled, new Map())
+    expect(r.plugins[0].id).toBe('chrome-devtools-mcp@claude-plugins-official')
+    expect(r.plugins[0].marketplace).toBe('claude-plugins-official')
+    expect(r.plugins[0].enabled).toBe(true)
+  })
+
+  it('plugin.repository 是裸 marketplace 名 (不含 @) 时仍正确拼接', () => {
+    const load: PluginLoadResult = {
+      enabled: [makePlugin({ name: 'a', repository: 'market' })],
+      disabled: [],
+      errors: [],
+    }
+    const v2: InstalledPluginsFileV2 = {
+      version: 2,
+      plugins: { a: { installs: { user: { path: '/p' } } } },
+    }
+    const enabled = { 'a@market': true }
+    const r = assemblePluginList(load, v2, enabled, new Map())
+    expect(r.plugins[0].id).toBe('a@market')
+    expect(r.plugins[0].marketplace).toBe('market')
+  })
 })

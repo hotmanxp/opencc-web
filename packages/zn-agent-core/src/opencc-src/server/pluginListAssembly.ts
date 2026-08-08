@@ -18,6 +18,27 @@ import type {
   OpenccPluginComponentCounts,
 } from './serverTypes.js'
 import { getPluginErrorMessage } from '../types/plugin.js'
+import {
+  buildPluginId,
+  parsePluginIdentifier,
+} from '../utils/plugins/pluginIdentifier.js'
+
+/**
+ * `plugin.repository` 在 `pluginLoader.ts:1464` 被赋值为 `source`,而 `source`
+ * 在上游多处会被填成完整 pluginId 形如 `pluginName@marketplace`(而非纯
+ * marketplace 名),导致直接拼接 `${name}@${repository}` 产出
+ * `name@name@marketplace` 这种重复 id。这里统一抽 marketplace:
+ *   - 不含 `@` → 视为纯 marketplace 名(如单元测试与部分 builtin 场景)
+ *   - 含 `@` → 取第一个 `@` 之后的部分(marketplace 名,parsePluginIdentifier 语义)
+ *
+ * 这样不管 repository 是裸名还是被 source 污染的完整 id,id 永远形如
+ * `name@marketplace`,parsePluginIdentifier(id).marketplace 也能拿到正确值。
+ */
+function resolveMarketplace(repository: string): string | undefined {
+  return repository.includes('@')
+    ? parsePluginIdentifier(repository).marketplace
+    : repository
+}
 
 const WRITABLE_SCOPES: ReadonlySet<OpenccPluginScope> = new Set(['user', 'builtin'])
 
@@ -69,7 +90,15 @@ function toDto(
 ): OpenccPluginDto {
   const isBuiltin = plugin.isBuiltin === true
   // Built-in plugin ids use the full repository value (e.g. 'b@builtin') set by getBuiltinPlugins().
-  const id = isBuiltin ? plugin.repository : `${plugin.name}@${plugin.repository}`
+  // Non built-in: `plugin.repository` may be either a bare marketplace name
+  // (e.g. 'market') or a full pluginId ('pluginName@marketplace') depending
+  // on how the loader filled `source`. resolveMarketplace() handles both —
+  // see its doc above. Built-in keeps the full repository value as before
+  // (e.g. 'b@builtin') for backwards compatibility with PluginRow's Tag.
+  const marketplace = isBuiltin
+    ? plugin.repository
+    : (resolveMarketplace(plugin.repository) ?? plugin.repository)
+  const id = isBuiltin ? plugin.repository : buildPluginId(plugin.name, marketplace)
   const scope = isBuiltin ? 'builtin' : deriveScope(plugin.name, installedV2)
   // enabled: built-in always reads enabledPlugins; otherwise read from settings.
   const enabled = isBuiltin
@@ -85,7 +114,7 @@ function toDto(
         ? plugin.manifest.author
         : plugin.manifest.author.name
       : undefined,
-    marketplace: plugin.repository,
+    marketplace,
     scope,
     enabled,
     writable: scopeToWritable(scope, isBuiltin),
