@@ -417,17 +417,38 @@ export async function* withRetry<T>(
         continue
       }
 
-      // 429 rate_limit:收紧重试上限 + 触发 per-provider 冷却门。计数
-      // 只在本请求链内累积(非 429 错误重置),连续 3 次 429 直接失败,
-      // 不再用默认 maxRetries(10) 放大请求风暴。
-      if (error instanceof APIError && error.status === 429) {
-        consecutive429Errors++
-        setRateLimitCooldown(getRetryAfterMs(error))
-        if (consecutive429Errors >= MAX_429_RETRIES) {
-          throw new CannotRetryError(error, retryContext)
-        }
-      } else {
-        consecutive429Errors = 0
+      // zai patch (2026-08-08): 强制冷却请求 + 注释重置逻辑
+      //
+      // 修复背景:z ai session sess-1786118761277-6ybrv2mm 30 分钟
+      // 累积 171 个 429 错误,但 30 秒 per-provider cooldown 完全没生效。
+      // 根因是 minimax proxy 在 streaming 模式下抛出的 429 error 对象
+      // `error.status` 不可靠(参考 is529Error 注释 "the SDK sometimes
+      // fails to properly pass the 529 status code during streaming" —
+      // 429 同样问题),导致:
+      //   1) `error.status === 429` 检查失败 → 走 else 分支
+      //   2) `consecutive429Errors = 0` 重置 → 永远到不了 MAX(3)
+      //   3) `setRateLimitCooldown` 不调用 → cooldown Map 永远空
+      //   4) 30s sleep 永远 sleep 0ms
+      //
+      // 临时修复:
+      //   1) 注释 else 重置分支 — 不再因"非 429 错误"重置计数
+      //   2) 把 setRateLimitCooldown 移到 if 外 — 任何 SDK error 都触发
+      //      冷却(不再依赖 error.status === 429 判断)
+      //   3) 留 MAX_429_RETRIES 限制 — 3 次连续失败后 throw CannotRetryError
+      //
+      // 这样无论 SDK 抛的错误 status 是什么,每次失败都会:
+      //   - consecutive429Errors++(永不重置)
+      //   - setRateLimitCooldown 30s(让 rateLimitCooldowns Map 始终有 entry)
+      //   - 下次 attempt 起点 getRateLimitGate() 返回 30s → sleep 30s
+      //   - 3 次连续失败后 throw CannotRetryError → queryLoop 终止
+      //
+      // 长期修复方向(vendor 应该做):
+      //   - error.status 不可靠时,fallback 到 error.message.includes('rate_limit')
+      //   - streaming mode SDK 错误的 status code 修复
+      consecutive429Errors++
+      setRateLimitCooldown(getRetryAfterMs(error) ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS)
+      if (consecutive429Errors >= MAX_429_RETRIES) {
+        throw new CannotRetryError(error, retryContext)
       }
 
       // Non-foreground sources bail immediately on 529 — no retry amplification
