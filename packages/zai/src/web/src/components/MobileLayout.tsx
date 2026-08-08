@@ -27,15 +27,34 @@ export default function MobileLayout() {
 
   useEffect(() => {
     api
-      .get<{ ok: boolean; cwd: string; cwdName: string; branch?: string | null }>('/system')
+      .get<{
+        ok: boolean
+        cwd: string
+        cwdName: string
+        branch: string | null
+        host: string
+        port: number
+        ips: string[]
+        // 与桌面端 Layout.tsx 对齐:MobileLayout 必须把 supervisor 关系字段
+        // 一起灌进 store,否则 SettingsDrawer 的 isManagedChild 判断永远
+        // false,「重启/关闭服务」section 在 /m 路由下整体不渲染。
+        isManagedChild?: boolean
+        supervisorPid?: number | null
+        instanceId?: string | null
+      }>('/system')
       .then((data) => {
         setInstanceContext({
           cwd: data.cwd,
           cwdName: data.cwdName,
           branch: data.branch ?? null,
-          host: '',
-          port: 0,
-          ips: [],
+          host: data.host,
+          port: data.port,
+          ips: data.ips ?? [],
+          isManagedChild: data.isManagedChild === true,
+          supervisorPid:
+            typeof data.supervisorPid === 'number' ? data.supervisorPid : null,
+          instanceId:
+            typeof data.instanceId === 'string' ? data.instanceId : null,
         })
         document.title = `${data.cwdName}-Z.AI`
       })

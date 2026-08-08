@@ -3,9 +3,19 @@ export type SupervisorMessage =
   | { type: 'restart'; reason: 'user_action' | 'auto_recovery' | 'update' }
   | { type: 'shutdown' }
 
+/**
+ * 子进程 → supervisor 消息。
+ *
+ * 注意:`restart` 必须是 child → supervisor 方向的「我要重启」消息,
+ * supervisor 收到后 pendingRestart 置位,等 child exit 后 spawn 新 child
+ * (见 supervisor.ts:188)。早期占位的 `'restarted'` 类型 supervisor 不识别,
+ * 导致 SettingsDrawer 的「重启服务」按钮即便走通 IPC 也不会触发 respawn —
+ * 这是按钮无响应的一个根因。spec `2026-08-01-zai-service-restart-design.md`
+ * §4.2 step 4 与本类型对齐。
+ */
 export type ChildMessage =
   | { type: 'ready'; pid: number; port: number }
-  | { type: 'restarted' }
+  | { type: 'restart'; reason: 'user_action' | 'auto_recovery' | 'update' }
   | { type: 'shutdown-ack' }
 
 export function isManagedChild(): boolean {

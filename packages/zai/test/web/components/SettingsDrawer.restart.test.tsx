@@ -12,10 +12,11 @@ afterEach(() => {
 })
 
 describe('SettingsDrawer service section', () => {
-  // isManagedChild=true 后,整个"服务"section 仅在受管子服务时渲染。
-  // SettingsDrawer 的 useAppStore 读 instanceContext.isManagedChild,
-  // 这里通过 setState 把它打开,模拟 Layout hydrate 之后的状态。
-  const setManagedChild = (isManagedChild: boolean) => {
+  // isManagedChild=true 后,整个"服务"section 仅在 instance 子实例(带
+  // ZAI_INSTANCE_ID,instance manager 派生)时渲染。SettingsDrawer 的
+  // useAppStore 读 instanceContext.isManagedChild + instanceId,这里通过
+  // setState 把它打开,模拟 Layout hydrate 之后的状态。
+  const setManagedChild = (isManagedChild: boolean, instanceId: string | null = 'inst_abc') => {
     useAppStore.setState({
       settingsDrawerOpen: true,
       serviceState: null,
@@ -24,6 +25,7 @@ describe('SettingsDrawer service section', () => {
         cwdName: 'x',
         branch: null,
         isManagedChild,
+        instanceId,
       } as never,
     })
   }
@@ -34,12 +36,19 @@ describe('SettingsDrawer service section', () => {
     expect(queryByTestId('settings-service-section')).toBeNull()
   })
 
-  it('renders section with restart button when drawer open and isManagedChild', () => {
+  it('renders section with restart button when drawer open and isManagedChild with instanceId', () => {
     useAppStore.setState({ settingsDrawerOpen: true, serviceState: null })
     setManagedChild(true)
     const { getByTestId, getByRole } = render(<SettingsDrawer />)
     expect(getByTestId('settings-service-section')).toBeTruthy()
     expect(getByRole('button', { name: /重启服务/ })).toBeTruthy()
+  })
+
+  it('does not render section on managed child without instanceId (top-level entry)', () => {
+    useAppStore.setState({ settingsDrawerOpen: true, serviceState: null })
+    setManagedChild(true, null)
+    const { queryByTestId } = render(<SettingsDrawer />)
+    expect(queryByTestId('settings-service-section')).toBeNull()
   })
 
   it('does not render section when isManagedChild=false', () => {

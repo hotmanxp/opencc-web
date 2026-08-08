@@ -46,6 +46,15 @@ const lan: InstanceSnapshot = {
   lan: true,
 }
 
+const running: InstanceSnapshot = {
+  ...demo,
+  state: 'running',
+  port: 9202,
+  pid: 12345,
+  startedAt: new Date().toISOString(),
+  lastHeartbeatAt: new Date().toISOString(),
+}
+
 describe('Instances page', () => {
   beforeEach(() => {
     vi.stubGlobal('fetch', vi.fn(async () => new Response('{"instances":[]}', { status: 200 })))
@@ -94,6 +103,85 @@ describe('Instances page', () => {
     })
   })
 
+  it('opens the new instance tab only after it is running, not as a blank about:blank', async () => {
+    seed([])
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/instances' && init?.method === 'POST') {
+        const starting: InstanceSnapshot = { ...demo, state: 'starting' }
+        return new Response(JSON.stringify({ instance: starting }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url === '/api/instances/inst_1' && (!init || init.method === undefined || init.method === 'GET')) {
+        return new Response(JSON.stringify({ instance: running }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response('{"instances":[]}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+    fireEvent.click(screen.getByText('新建实例'))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'demo' } })
+    fireEvent.change(screen.getByTestId('cwd-input'), { target: { value: '/tmp/demo' } })
+    fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }))
+
+    await waitFor(() => {
+      expect(openSpy).toHaveBeenCalledWith(
+        'http://localhost:9202',
+        '_blank',
+        expect.stringContaining('noopener'),
+      )
+    })
+    expect(fetchMock).toHaveBeenCalledWith('/api/instances/inst_1')
+    // 关键断言: 不应在创建初期就预开 about:blank — 这就是用户报告的
+    // "新建实例后默认打开 about:blank 空白页" bug 的根因。
+    const preOpen = openSpy.mock.calls.find((c) => c[0] === 'about:blank')
+    expect(preOpen).toBeUndefined()
+  })
+
+  it('does not open a new tab and surfaces the error when the instance goes down', async () => {
+    seed([])
+    const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+      if (url === '/api/instances' && init?.method === 'POST') {
+        const starting: InstanceSnapshot = { ...demo, state: 'starting' }
+        return new Response(JSON.stringify({ instance: starting }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      if (url === '/api/instances/inst_1') {
+        const down: InstanceSnapshot = {
+          ...demo,
+          state: 'down',
+          lastError: { at: '2026-08-04T00:00:00.000Z', message: 'cwd failed' },
+        }
+        return new Response(JSON.stringify({ instance: down }), {
+          status: 200,
+          headers: { 'Content-Type': 'application/json' },
+        })
+      }
+      return new Response('{"instances":[]}', { status: 200 })
+    })
+    vi.stubGlobal('fetch', fetchMock)
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
+
+    render(<MemoryRouter><Instances /></MemoryRouter>)
+    fireEvent.click(screen.getByText('新建实例'))
+    fireEvent.change(screen.getByLabelText('名称'), { target: { value: 'demo' } })
+    fireEvent.change(screen.getByTestId('cwd-input'), { target: { value: '/tmp/demo' } })
+    fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }))
+
+    await waitFor(() => {
+      expect(screen.getByText('cwd failed')).toBeInTheDocument()
+    })
+    // 错误路径不应打开任何新标签页。
+    expect(openSpy).not.toHaveBeenCalled()
+  })
   it('renders a LAN switch on each non-current card with the persisted flag reflected', () => {
     seed([current, demo, lan])
     render(<MemoryRouter><Instances /></MemoryRouter>)

@@ -151,6 +151,23 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(afterStop.port).toBeNull()
   })
 
+  it('clean exit (code 0) without userStopping → stopped, not down (close-service path)', async () => {
+    // instance child 设置面板「关闭服务」→ /api/system/stop → cleanupAndExit(0)
+    // → 进程 exit code 0。父进程 exit handler 没收到 userStopping,但 code 0
+    // 是主动退出,应标记 stopped 而非 down。
+    const { deps, fakeChildren } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(snap.id)
+    const child = fakeChildren[0]!
+    child.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    child.emitExit(0)
+    const after = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
+    expect(after.state).toBe('stopped')
+    expect(after.lastError).toBeNull()
+    expect(after.port).toBeNull()
+  })
+
   it('restartInstance = stop + start', async () => {
     const { deps, fakeChildren } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)
@@ -494,6 +511,27 @@ describe('instanceSupervisor (4c — fix round 1: race regressions)', () => {
     fakeChildren[0]!.emitExit(0)
     await restartP
     expect(fakeChildren).toHaveLength(2)
+  })
+
+  it('child IPC restart message → supervisor stop+start respawn (restart-only-closes bug fix)', async () => {
+    // instance child 的设置面板「重启服务」→ /api/system/restart → IPC
+    // {type:'restart'} 发到 instanceSupervisor 所在进程。supervisor 必须
+    // stop+start 重新拉起,否则 child 退出后只会被标记 down,永不 respawn。
+    const { deps, fakeChildren } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    expect(getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)?.state).toBe('running')
+
+    fakeChildren[0]!.emit('message', { type: 'restart', reason: 'user_action' })
+    // doStop 等旧 child exit / SIGKILL 超时(测试 sleep 立即 resolve),然后 doStart spawn 新 child。
+    await vi.waitFor(() => {
+      expect(fakeChildren).toHaveLength(2)
+    })
+    fakeChildren[1]!.emit('message', { type: 'ready', pid: 333, port: 9206 })
+    const updated = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
+    expect(updated.state).toBe('running')
+    expect(updated.port).toBe(9206)
   })
 
   it('doStop waits for actual exit after SIGINT timeout before returning', async () => {

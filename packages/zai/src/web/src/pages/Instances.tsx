@@ -90,6 +90,44 @@ export function effectiveState(s: InstanceSnapshot): InstanceState {
   return s.state
 }
 
+/**
+ * 轮询 GET /api/instances/:id,直到实例进入 running(且端口已知)才 resolve;
+ * 进入 down 立即 reject(带 lastError.message,供 message.error 展示);
+ * 超时兜底 reject。每轮把最新 snapshot 经 `apply` 写进 store,让卡片状态
+ * 跟着实时刷新。
+ *
+ * 这是"创建后打开新标签页"的前置:必须先确认实例真的跑起来(拿到端口),
+ * 再 window.open — 否则用户在 supervisor ready IPC 等待期间会看到
+ * about:blank 空白标签(用户报告的 bug)。
+ */
+async function waitForRunningInstance(
+  id: string,
+  apply: (s: InstanceSnapshot) => void,
+): Promise<InstanceSnapshot> {
+  const DEADLINE_MS = 20_000
+  const INTERVAL_MS = 500
+  const start = Date.now()
+  for (;;) {
+    const res = await fetch(`/api/instances/${id}`)
+    if (res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { instance?: InstanceSnapshot }
+      if (data.instance) {
+        apply(data.instance)
+        if (data.instance.state === 'running' && data.instance.port != null) {
+          return data.instance
+        }
+        if (data.instance.state === 'down') {
+          throw new Error(data.instance.lastError?.message ?? '实例启动失败')
+        }
+      }
+    }
+    if (Date.now() - start >= DEADLINE_MS) {
+      throw new Error('实例启动超时')
+    }
+    await new Promise((r) => setTimeout(r, INTERVAL_MS))
+  }
+}
+
 type DirectoryPickerProps = {
   open: boolean
   initialPath: string
@@ -443,9 +481,21 @@ export default function Instances(): JSX.Element {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
         throw new Error(data.error ?? '创建失败')
       }
+      const data = (await res.json().catch(() => ({}))) as { instance?: InstanceSnapshot }
+      if (!data.instance) throw new Error('创建失败:响应缺少实例信息')
       setOpen(false)
       form.resetFields()
       void loadInstances()
+      const started = await waitForRunningInstance(data.instance.id, applyInstanceSnapshot)
+      // waitForRunningInstance 只在 state==='running' && port!==null 时返回,
+      // 这里再做一次防御性检查以满足 TS 收窄 + 兜底(避免假设实现细节)。
+      if (started.port == null) throw new Error('实例已启动但端口未知')
+      // LAN 实例绑 0.0.0.0 同时含 127.0.0.1,浏览器端 localhost:<port>
+      // 总可达。仅在实例确认 running 且端口可用之后才打开新标签页,
+      // 避免用户在 supervisor ready IPC 等待期间看到一个 about:blank
+      // 空白标签 — 这就是用户报告的"创建后默认弹出 about:blank 空白页"
+      // bug 的真正来源。
+      window.open(`http://localhost:${started.port}`, '_blank', 'noopener,noreferrer')
     } catch (err) {
       message.error(err instanceof Error ? err.message : '创建失败')
     }

@@ -109,12 +109,16 @@ async function probePortDefault(start: number, maxAttempts = MAX_PORT_ATTEMPTS):
 
 interface ChildReadyMessage { type: 'ready'; pid?: number; port: number }
 interface ChildHeartbeatMessage { type: 'heartbeat' }
-type ChildIpcMessage = ChildReadyMessage | ChildHeartbeatMessage | { type?: string }
+interface ChildRestartMessage { type: 'restart'; reason?: string }
+type ChildIpcMessage = ChildReadyMessage | ChildHeartbeatMessage | ChildRestartMessage | { type?: string }
 function isChildReadyMessage(msg: ChildIpcMessage): msg is ChildReadyMessage {
   return msg?.type === 'ready' && typeof (msg as { port?: unknown }).port === 'number'
 }
 function isChildHeartbeatMessage(msg: ChildIpcMessage): msg is ChildHeartbeatMessage {
   return msg?.type === 'heartbeat'
+}
+function isChildRestartMessage(msg: ChildIpcMessage): msg is ChildRestartMessage {
+  return msg?.type === 'restart'
 }
 
 export async function initInstanceSupervisor(opts: InitOptions): Promise<InstanceSupervisor> {
@@ -185,6 +189,17 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         } else if (isChildHeartbeatMessage(msg)) {
           setStatus(entry, { lastHeartbeatAt: new Date(deps.now()).toISOString() })
           emit(entry.def.id, entry.status)
+        } else if (isChildRestartMessage(msg)) {
+          // instance child 请求重启(设置面板「重启服务」→ /api/system/restart →
+          // sendRestart → IPC 'restart')。复用 restartInstance(stop+start)重新
+          // 拉起;否则 child 退出后 exit handler 只把它标记为 down,永远不会
+          // respawn — 表现为「重启只关闭不重启」。先置 userStopping,让中途的
+          // exit 标记成 stopped 而非 down。
+          childState.userStopping = true
+          void supervisor.restartInstance(entry.def.id).catch((err) => {
+            const message = err instanceof Error ? err.message : String(err)
+            console.warn(`[instanceSupervisor] restart child ${entry.def.id} failed: ${message}`)
+          })
         }
       })
       child.on('exit', (code: number | null) => {
@@ -196,7 +211,10 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         entry.childState = null
         if (childState.scheduledKill) { clearTimeout(childState.scheduledKill); childState.scheduledKill = null }
         if (childState.timeoutKilled) { childState.timeoutKilled = false; return }
-        if (childState.userStopping) { setStatus(entry, { state: 'stopped', port: null, pid: null, lastError: null }); emit(entry.def.id, entry.status); persistSafe(); return }
+        // 主动退出(设置面板「关闭服务」→ cleanupAndExit(0)→ exit code 0)
+        // 与 userStopping 一样标记 stopped;只有非 0 / 信号退出才算异常 down。
+        // 与顶层 supervisor.ts 的约定一致(exitCode = code ?? 0)。
+        if (childState.userStopping || code === 0) { setStatus(entry, { state: 'stopped', port: null, pid: null, lastError: null }); emit(entry.def.id, entry.status); persistSafe(); return }
         setStatus(entry, { state: 'down', port: null, pid: null, lastError: { at: new Date(deps.now()).toISOString(), message: `process exited with code ${code ?? 'null'}` } }); emit(entry.def.id, entry.status); persistSafe()
       })
     }

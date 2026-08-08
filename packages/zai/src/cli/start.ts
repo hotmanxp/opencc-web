@@ -4,14 +4,15 @@ import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createApp } from '../server/index.js';
-import { stopBranchChecker } from '../server/routes/system.js';
-import { shutdownBackgroundRuntime } from '../server/services/backgroundRuntime.js';
 import { createInstanceHeartbeat, getInstanceHeartbeatConfig } from '../server/services/instanceHeartbeat.js';
-import { shutdownInstanceSupervisor } from '../server/services/instanceSupervisor.js';
 import { sendReady } from '../server/services/readyHook.js';
 import { randomBytes } from 'node:crypto';
 import express from 'express';
 import { resolveServerPort } from './ports.js';
+import {
+  cleanupAndExit,
+  registerHttpServer,
+} from '../server/services/runtimeLifecycle.js';
 
 interface StartOptions {
   port?: string;
@@ -113,6 +114,11 @@ async function runDirectServer(options: StartOptions): Promise<void> {
     process.exit(1);
   }
   const server = http.createServer(app);
+  // 把 server 句柄交给 runtimeLifecycle 统一管理关闭流程。
+  // 强制 closeAllConnections:production 受管模式下,supervisor 重启 child 时
+  // 旧 child 必须立即释放端口,否则 supervisor 会因 EADDRINUSE 失败。SIGINT
+  // 路径同样走 closeAndExit(force=true),端口释放后再 process.exit。
+  registerHttpServer(server, { forceCloseAllConnections: true });
   await new Promise<void>((resolve, reject) => {
     server.on('error', reject);
     server.listen(port, host, () => {
@@ -151,15 +157,9 @@ async function runDirectServer(options: StartOptions): Promise<void> {
     spawn('open', [`http://localhost:${port}`], { stdio: 'ignore' });
   }
 
-  const cleanup = () => {
-    void shutdownInstanceSupervisor().finally(() => {
-      void shutdownBackgroundRuntime().finally(() => {
-        server.close();
-        stopBranchChecker();
-        process.exit(0);
-      });
-    });
-  };
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
+  // SIGINT/SIGTERM cleanup:统一走 cleanupAndExit,与 restart/stop route 共用
+  // 同一套 runtimeLifecycle,关闭顺序(关 server → 停 runtimes → 停 branch
+  // checker → process.exit)集中维护,不会三处分叉。
+  process.on('SIGINT', () => { void cleanupAndExit(0) });
+  process.on('SIGTERM', () => { void cleanupAndExit(0) });
 }

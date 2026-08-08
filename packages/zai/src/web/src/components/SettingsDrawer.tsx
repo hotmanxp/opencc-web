@@ -904,16 +904,26 @@ export default function SettingsDrawer() {
     [setTheme, setOutputStyle, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen],
   )
 
-  // 整个"服务"section 仅在受管子服务(isManagedChild === true)时显示:
-  //   - 重启/关闭都依赖 supervisor(顶层 managed → IPC;instance managed →
-  //     /api/instances/{id}/restart stop+start),独立 zai-server 没有
-  //     supervisor 可以委托,按钮没用。
-  //   - 调 /api/system/stop / restart 在非受管进程上会直接 409 'not_managed',
-  //     用户点完只会看到错误,体验差。
+  // 整个"服务"section 仅在「instance 子实例」(instance manager 派生的子进程,
+  // 带 ZAI_INSTANCE_ID)时显示:
+  //   - instance 子实例的「重启」走 /api/system/restart → IPC 'restart' 发给
+  //     instanceSupervisor 所在进程,instanceSupervisor 收到后 stop+start
+  //     重新拉起该实例(见 instanceSupervisor.ts child.on('message') 的 restart
+  //     分支);「关闭」走 /api/system/stop → cleanupAndExit,进程退出后由
+  //     exit handler 收尾。两条按钮只影响当前这一个子实例。
+  //   - 顶层受管服务(supervisor 直接派生的 child,无 ZAI_INSTANCE_ID)是
+  //     supervisor 的管理入口:重启它相当于重启整个实例群(supervisor 拒绝
+  //     重启自己,fallback 走 system restart 会连带其他实例),关闭它等于关闭
+  //     所有实例,单实例的"重启/关闭"控制不该暴露在管理入口上。
+  //   - 独立 zai-server(ZAI_SUPERVISOR_PID 未设)没有 supervisor 可以委托,
+  //     调 /api/system/stop / restart 会直接 409 'not_managed',按钮没用。
+  //
   // isManagedChild 由 Layout 在 GET /api/system hydrate 时灌进 instanceContext,
   // 详见 useAppStore + Layout.tsx。initState 时(instanceContext 还没 hydrate)
   // 这里取 undefined → 不显示,这是预期:用户冷启动首屏不应有按钮。
   const isManagedChild = useAppStore((s) => s.instanceContext?.isManagedChild === true)
+  const instanceId = useAppStore((s) => s.instanceContext?.instanceId ?? null)
+  const showServiceSection = isManagedChild && instanceId != null
 
   if (!open) return null
 
@@ -933,7 +943,7 @@ export default function SettingsDrawer() {
         </div>
       }
     >
-      {open && isManagedChild && (
+      {open && showServiceSection && (
         <div
           data-testid="settings-service-section"
           style={{

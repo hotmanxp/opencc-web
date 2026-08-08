@@ -3,11 +3,13 @@ import { dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { createApp } from '../server/index.js';
-import { stopBranchChecker } from '../server/routes/system.js';
-import { shutdownBackgroundRuntime } from '../server/services/backgroundRuntime.js';
-import { shutdownInstanceSupervisor } from '../server/services/instanceSupervisor.js';
 import { randomBytes } from 'node:crypto';
 import { resolveServerPort } from './ports.js';
+import {
+  cleanupAndExit,
+  registerHttpServer,
+  registerViteProcess,
+} from '../server/services/runtimeLifecycle.js';
 
 interface DevOptions {
   port?: string;
@@ -59,6 +61,9 @@ export async function runDev(options: DevOptions) {
     process.exit(1);
   }
   const apiServer = http.createServer(app);
+  // dev 模式不开 forceCloseAllConnections:vite 还在跑,server 关闭后 HMR
+  // 还要收尾;硬断连接会留下半截 reload 请求。
+  registerHttpServer(apiServer, { forceCloseAllConnections: false });
   await new Promise<void>((resolve, reject) => {
     apiServer.on('error', reject);
     apiServer.listen(apiPort, host, () => {
@@ -111,6 +116,8 @@ export async function runDev(options: DevOptions) {
       ZAI_API_ORIGIN: `http://localhost:${apiPort}`,
     },
   });
+  // SIGINT 路径同时收掉 vite,避免 dev 退出后 vite 还残留。
+  registerViteProcess(vite);
 
   if (options.lan) {
     const { detectLanIps } = await import('../server/utils/lanIps.js');
@@ -126,16 +133,9 @@ export async function runDev(options: DevOptions) {
     }, 2000);
   }
 
-  const cleanup = () => {
-    void shutdownInstanceSupervisor().finally(() => {
-      void shutdownBackgroundRuntime().finally(() => {
-        vite.kill('SIGTERM');
-        apiServer.close();
-        stopBranchChecker();
-        process.exit(0);
-      });
-    });
-  };
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
+  // SIGINT/SIGTERM cleanup:统一走 cleanupAndExit,与 restart/stop route 共用
+  // 同一套 runtimeLifecycle。vite 子进程由 registerViteProcess 注册,closeServer
+  // 内部统一发 SIGTERM 收掉,避免三处分叉。
+  process.on('SIGINT', () => { void cleanupAndExit(0) });
+  process.on('SIGTERM', () => { void cleanupAndExit(0) });
 }
