@@ -4,6 +4,19 @@ import { getInstanceSupervisor, CURRENT_INSTANCE_ID } from '../services/instance
 
 const router: IRouter = Router()
 
+// instance 子实例(instance manager 派生)不能再 spawn 孙实例:
+// 持有 ZAI_INSTANCE_ID 的进程就是 instance child,所有 /api/instances/* 路由
+// 在这里直接 404,让前端拿到明确的"不可用"信号而不是 500。
+// 服务端 server/index.ts 的 initInstanceSupervisor 也会跳过这种进程,
+// 但路由层兜底 — 防止有人手动注入 env 绕过 init 检查。
+function ensureNotInstanceChild(res: import('express').Response): boolean {
+  if (process.env.ZAI_INSTANCE_ID) {
+    res.status(404).json({ error: 'instance management not available on child' })
+    return false
+  }
+  return true
+}
+
 function notFound(res: import('express').Response, msg: string): void {
   res.status(404).json({ error: msg })
 }
@@ -77,16 +90,19 @@ function parsePortField(
 }
 
 router.get('/instances', (_req, res) => {
+  if (!ensureNotInstanceChild(res)) return
   res.json({ instances: getInstanceSupervisor().getSnapshots() })
 })
 
 router.get('/instances/:id', (req, res) => {
+  if (!ensureNotInstanceChild(res)) return
   const snap = getInstanceSupervisor().getSnapshots().find((s) => s.id === req.params.id)
   if (!snap) return notFound(res, `instance ${req.params.id} not found`)
   res.json({ instance: snap })
 })
 
 router.post('/instances', async (req, res) => {
+  if (!ensureNotInstanceChild(res)) return
   const { name, cwd } = (req.body ?? {}) as { name?: unknown; cwd?: unknown }
   if (typeof name !== 'string' || name.trim() === '') return badRequest(res, 'name is required')
   if (typeof cwd !== 'string' || cwd.trim() === '') return badRequest(res, 'cwd is required')
@@ -116,6 +132,7 @@ router.post('/instances', async (req, res) => {
 })
 
 router.post('/instances/:id/start', async (req, res) => {
+  if (!ensureNotInstanceChild(res)) return
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot start current instance')
   const lan = parseBoolField((req.body ?? {}).lan, 'lan')
   if (!lan.ok) return badRequest(res, lan.error)
@@ -140,6 +157,7 @@ router.post('/instances/:id/start', async (req, res) => {
 })
 
 router.post('/instances/:id/stop', async (req, res) => {
+  if (!ensureNotInstanceChild(res)) return
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot stop current instance')
   try {
     const instance = await getInstanceSupervisor().stopInstance(req.params.id)
@@ -150,6 +168,7 @@ router.post('/instances/:id/stop', async (req, res) => {
 })
 
 router.post('/instances/:id/restart', async (req, res) => {
+  if (!ensureNotInstanceChild(res)) return
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot restart current instance')
   const lan = parseBoolField((req.body ?? {}).lan, 'lan')
   if (!lan.ok) return badRequest(res, lan.error)
@@ -170,6 +189,7 @@ router.post('/instances/:id/restart', async (req, res) => {
 })
 
 router.patch('/instances/:id', async (req, res) => {
+  if (!ensureNotInstanceChild(res)) return
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot patch current instance')
   const lan = parseBoolField((req.body ?? {}).lan, 'lan')
   if (!lan.ok) return badRequest(res, lan.error)
@@ -187,6 +207,7 @@ router.patch('/instances/:id', async (req, res) => {
 })
 
 router.delete('/instances/:id', async (req, res) => {
+  if (!ensureNotInstanceChild(res)) return
   if (req.params.id === CURRENT_INSTANCE_ID) return badRequest(res, 'cannot delete current instance')
   try {
     await getInstanceSupervisor().removeInstance(req.params.id)

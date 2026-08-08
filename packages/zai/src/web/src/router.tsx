@@ -1,7 +1,8 @@
-import { lazy, Suspense } from 'react';
-import { Routes, Route, Navigate } from 'react-router-dom';
-import { Spin } from 'antd';
+import { lazy, Suspense, useEffect, type ReactNode } from 'react';
+import { Routes, Route, Navigate, useNavigate } from 'react-router-dom';
+import { Spin, message } from 'antd';
 import Layout from './components/Layout';
+import { useAppStore } from './store/useAppStore';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
 const Tools = lazy(() => import('./pages/Tools'));
 const Resources = lazy(() => import('./pages/Resources'));
@@ -29,6 +30,27 @@ const routeFallback = (
   </div>
 );
 
+/**
+ * /instances 路由守卫:instance 子实例(instance manager 派生的子进程)
+ * 不能 spawn 孙实例,给它挂 /instances 入口只会 404。在路由层直接 redirect
+ * 到 /agent,避免用户看到一个空白 / 404 页面。Layout 也会隐藏菜单,但路由
+ * 守卫是兜底 — 用户直接 URL 访问 /instances 也能被截走。
+ */
+function InstanceRouteGuard({ children }: { children: ReactNode }): JSX.Element {
+  const isInstanceChild = useAppStore(
+    (s) => s.instanceContext?.isManagedChild === true && (s.instanceContext?.instanceId ?? null) != null,
+  )
+  const navigate = useNavigate()
+  useEffect(() => {
+    if (isInstanceChild) {
+      message.info('当前进程是受管子实例,不支持实例管理')
+      navigate('/agent', { replace: true })
+    }
+  }, [isInstanceChild, navigate])
+  if (isInstanceChild) return <></>
+  return <>{children}</>
+}
+
 export default function AppRouter() {
   return (
     <Suspense fallback={routeFallback}>
@@ -43,7 +65,14 @@ export default function AppRouter() {
           <Route path="/dirs" element={<Directory />} />
           <Route path="/agent" element={<Agent />} />
           <Route path="/dashboard" element={<Dashboard />} />
-          <Route path="/instances" element={<Instances />} />
+          <Route
+            path="/instances"
+            element={
+              <InstanceRouteGuard>
+                <Instances />
+              </InstanceRouteGuard>
+            }
+          />
           <Route path="*" element={<Navigate to="/agent" replace />} />
         </Route>
 

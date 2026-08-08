@@ -61,6 +61,35 @@ function relativeAgo(iso: string | null): string {
   return `${hr} 小时前`
 }
 
+// 启动时间 / 运行时长 渲染:{inst.startedAt ? formatDuration(...) : '-'}。
+// 运行时长需要定期 re-render 才不会卡在同一数字,见页面顶部的
+// now-tick useState。
+function formatDuration(ms: number): string {
+  if (ms < 0) return '-'
+  const totalSec = Math.floor(ms / 1000)
+  const days = Math.floor(totalSec / 86400)
+  const hours = Math.floor((totalSec % 86400) / 3600)
+  const min = Math.floor((totalSec % 3600) / 60)
+  const sec = totalSec % 60
+  if (days > 0) return `${days}天${hours}小时`
+  if (hours > 0) return `${hours}小时${min}分`
+  if (min > 0) return `${min}分${sec}秒`
+  return `${sec}秒`
+}
+
+// 死透了的实例在 UI 层视作 stopped:
+// 服务端 20s 心跳超时只把它打 'down',但 3 分钟还没复活就等同于
+// "没人管了",UI 上把 Tag 颜色切到 stopped 的 default,启动按钮可点。
+// 服务端 state 不变(保留历史),只改 UI 渲染。
+export const STALE_THRESHOLD_MS = 3 * 60 * 1000
+export function effectiveState(s: InstanceSnapshot): InstanceState {
+  if (s.state === 'down' && s.lastHeartbeatAt) {
+    const last = new Date(s.lastHeartbeatAt).getTime()
+    if (Date.now() - last > STALE_THRESHOLD_MS) return 'stopped'
+  }
+  return s.state
+}
+
 type DirectoryPickerProps = {
   open: boolean
   initialPath: string
@@ -290,6 +319,19 @@ export default function Instances(): JSX.Element {
     void loadInstances()
   }, [loadInstances])
 
+  // 运行时长需要定期 re-render 才不会卡在同一数字。每 60s tick 一次,
+  // 60s 粒度对"X 分 Y 秒"足够细;粒度更细会让 setInterval 频繁触发
+  // re-render 但视觉上肉眼无差异。一个 1 小时的实例跑 60s 后才多 1 分钟,
+  // tick 频率足够。
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(id)
+  }, [])
+  // 让 lint 别报"unused":now 的用途在下面的 Descriptions 里取 Date.now()
+  // 替换为 now,触发依赖 `now` 的 re-render。
+  void now
+
   // Seed the per-row edit form whenever a row is opened (or re-opened
   // with a fresh snapshot). `destroyOnClose` on the modal handles the
   // teardown — we just have to land the right initial values before
@@ -410,9 +452,13 @@ export default function Instances(): JSX.Element {
   }
 
   function renderActions(row: InstanceSnapshot): JSX.Element {
-    const canStart = !row.isCurrent && (row.state === 'stopped' || row.state === 'down')
-    const canStop = !row.isCurrent && (row.state === 'running' || row.state === 'starting')
-    const canRestart = !row.isCurrent && row.state === 'running'
+    // 按钮可用性按 effectiveState 走:down + 超过 3 分钟视为 stopped,
+    // "启动"按钮可点,让用户能重新拉起。"停止"/"重启"对死了 3 分钟的实例
+    // 都没意义(进程已经没了),disable。
+    const es = effectiveState(row)
+    const canStart = !row.isCurrent && (es === 'stopped' || es === 'down')
+    const canStop = !row.isCurrent && (es === 'running' || es === 'starting')
+    const canRestart = !row.isCurrent && es === 'running'
     const canDelete = !row.isCurrent
     return (
       <Space wrap>
@@ -516,7 +562,7 @@ export default function Instances(): JSX.Element {
               extra={
                 <Space size={8} align="center">
                   {renderLanToggle(inst)}
-                  <Tag color={STATE_TAG_COLOR[inst.state]}>{stateLabel(inst.state)}</Tag>
+                  <Tag color={STATE_TAG_COLOR[effectiveState(inst)]}>{stateLabel(effectiveState(inst))}</Tag>
                 </Space>
               }
             >
@@ -544,6 +590,15 @@ export default function Instances(): JSX.Element {
                 <Descriptions.Item label="运行端口">{inst.port ?? '-'}</Descriptions.Item>
                 <Descriptions.Item label="cwd">{inst.cwd}</Descriptions.Item>
                 <Descriptions.Item label="pid">{inst.pid ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="启动时间">
+                  {inst.startedAt ? new Date(inst.startedAt).toLocaleString() : '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="运行时长">
+                  {inst.startedAt ? formatDuration(now - new Date(inst.startedAt).getTime()) : '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="创建时间">
+                  {inst.createdAt ? new Date(inst.createdAt).toLocaleString() : '-'}
+                </Descriptions.Item>
                 <Descriptions.Item label="最后心跳">{relativeAgo(inst.lastHeartbeatAt)}</Descriptions.Item>
                 {inst.lastError ? (
                   <Descriptions.Item label="错误">

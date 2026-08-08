@@ -48,6 +48,9 @@ interface AppState {
   toasts: ToastInfo[];
   // host/port/ips 由后续 LAN-share 阶段注入;字段可选以保证 Layout / 测试
   // 等已有调用方 (只传 cwd/cwdName/branch) 仍能 typecheck.
+  // isManagedChild/supervisorPid/instanceId 由 Layout 从 GET /api/system
+  // hydrate 进来,SettingsDrawer 用 isManagedChild 条件渲染重启/关闭按钮,
+  // Layout 用它决定"实例管理"菜单是否显示。
   instanceContext: {
     cwd: string;
     cwdName: string;
@@ -55,6 +58,9 @@ interface AppState {
     host?: string;
     port?: number;
     ips?: string[];
+    isManagedChild?: boolean;
+    supervisorPid?: number | null;
+    instanceId?: string | null;
   } | null;
   setConnected: (v: boolean) => void;
   setInstanceContext: (ctx: {
@@ -64,6 +70,9 @@ interface AppState {
     host?: string;
     port?: number;
     ips?: string[];
+    isManagedChild?: boolean;
+    supervisorPid?: number | null;
+    instanceId?: string | null;
   }) => void;
   applyJobEvent: (event: ServerEvent) => void;
   applySystemEvent: (event: ServerEvent) => void;

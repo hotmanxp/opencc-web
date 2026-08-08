@@ -87,7 +87,25 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   // Init central instance supervisor before any router that depends on it.
   // Reads ~/.zai/instances.json (async, fire-and-forget); snapshots start
   // with isCurrent row already visible via getInstanceSupervisor().
-  await initInstanceSupervisor({ cwd: opts.cwd })
+  //
+  // 子实例不能再 spawn 孙实例:只有被 instance manager(`InstanceSupervisor`)
+  // 派生的子进程带 `ZAI_INSTANCE_ID`(见 instanceSupervisor.ts:245),所以
+  // 这里看到这个 env 就直接跳过 init。env 未设说明是顶层独立 zai 或顶层
+  // managed child(后者虽无意义但仍允许 init,避免破坏其它路径)。
+  // routes/instances.ts 路由层还有第二道 404 兜底,防止有人手动注入 env
+  // 绕过 init 检查。
+  //
+  // `opts.forceInitInstanceSupervisor: true` 测试用:vitest 进程可能继承
+  // shell 的 ZAI_INSTANCE_ID(按 env 决定 init 跳过会让 tests fail)。此时
+  // 先 unset env 再 init,确保 routes/instances.ts 后续调用也按"非子实例"
+  // 路径走通 — 不 restore。生产路径不调用 forceInit,触不到这里。
+  if (opts.forceInitInstanceSupervisor) {
+    delete process.env.ZAI_INSTANCE_ID
+    delete process.env.ZAI_SUPERVISOR_PID
+  }
+  if (opts.forceInitInstanceSupervisor || !process.env.ZAI_INSTANCE_ID) {
+    await initInstanceSupervisor({ cwd: opts.cwd })
+  }
 
   // Ensure ~/.zai/ exists for persistent cache (manifest.json) and future
   // config data. This is fire-and-forget — if it fails the app still works,

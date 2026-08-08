@@ -31,7 +31,7 @@ import { Button, Drawer, Modal, message } from 'antd'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
 import { useInstanceStore } from '../store/useInstanceStore.js'
-import { requestRestart } from '../lib/systemApi.js'
+import { requestRestart, requestStop } from '../lib/systemApi.js'
 import type { OutputStyle } from '../../../shared/settings.js'
 
 export type SettingsValue = string | number | boolean
@@ -904,6 +904,17 @@ export default function SettingsDrawer() {
     [setTheme, setOutputStyle, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen],
   )
 
+  // 整个"服务"section 仅在受管子服务(isManagedChild === true)时显示:
+  //   - 重启/关闭都依赖 supervisor(顶层 managed → IPC;instance managed →
+  //     /api/instances/{id}/restart stop+start),独立 zai-server 没有
+  //     supervisor 可以委托,按钮没用。
+  //   - 调 /api/system/stop / restart 在非受管进程上会直接 409 'not_managed',
+  //     用户点完只会看到错误,体验差。
+  // isManagedChild 由 Layout 在 GET /api/system hydrate 时灌进 instanceContext,
+  // 详见 useAppStore + Layout.tsx。initState 时(instanceContext 还没 hydrate)
+  // 这里取 undefined → 不显示,这是预期:用户冷启动首屏不应有按钮。
+  const isManagedChild = useAppStore((s) => s.instanceContext?.isManagedChild === true)
+
   if (!open) return null
 
   return (
@@ -922,7 +933,7 @@ export default function SettingsDrawer() {
         </div>
       }
     >
-      {open && (
+      {open && isManagedChild && (
         <div
           data-testid="settings-service-section"
           style={{
@@ -933,70 +944,95 @@ export default function SettingsDrawer() {
           }}
         >
           <div style={{ fontWeight: 600, marginBottom: 8 }}>服务</div>
-          <Button
-            danger
-            onClick={() => {
-              Modal.confirm({
-                title: '重启服务?',
-                content: '将会中断当前对话与后台任务,确定?',
-                okText: '重启',
-                cancelText: '取消',
-                onOk: async () => {
-                  // 优先走实例管理重启:从 useInstanceStore 拿当前正在
-                  // 访问的 instance,调 /api/instances/{id}/restart(走
-                  // supervisor 的 stop+start 路径,与实例管理页面"重启"
-                  // 按钮完全一致的逻辑)。这条路径在 zai start --managed
-                  // 下可用,且对 supervisor 启动的其他 instance 也成立。
-                  //
-                  // Fallback 触发条件:
-                  //   - 当前 instance 是 supervisor 自己的 __current__,
-                  //     supervisor 拒绝重启自己(避免自杀循环)
-                  //   - store 里没找到匹配 port 的 instance
-                  //   - 实例 API 返回 4xx/5xx
-                  // 全部走 /api/system/restart(managed-child IPC →
-                  // supervisor respawn),与原先"重启服务"按钮语义一致。
-                  //
-                  // store 空时按需触发一次拉取——日常 layout hydrate 已
-                  // 拉过,这里只兜底冷启动/缓存失败的边角场景。
-                  let target = currentInstance
-                  if (!target) {
-                    await loadInstances().catch(() => {})
-                    const fresh = useInstanceStore.getState().instances
-                    const port = useAppStore.getState().instanceContext?.port ?? null
-                    target = port != null ? fresh.find((s) => s.port === port) ?? null : null
-                    if (!target) target = fresh.find((s) => s.isCurrent) ?? null
-                  }
-                  if (target && target.id !== '__current__') {
-                    try {
-                      const res = await fetch(
-                        `/api/instances/${encodeURIComponent(target.id)}/restart`,
-                        { method: 'POST' },
-                      )
-                      if (res.ok) return
-                      // 4xx/5xx → fallback 到 service restart
-                      const errBody = (await res.json().catch(() => ({}))) as {
-                        error?: string
-                      }
-                      message.warning(
-                        errBody.error
-                          ? `实例重启失败,回退到服务重启: ${errBody.error}`
-                          : '实例重启失败,回退到服务重启',
-                      )
-                    } catch (err) {
-                      message.warning(
-                        `实例重启请求失败,回退到服务重启: ${
-                          err instanceof Error ? err.message : String(err)
-                        }`,
-                      )
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Button
+              danger
+              onClick={() => {
+                Modal.confirm({
+                  title: '重启服务?',
+                  content: '将会中断当前对话与后台任务,确定?',
+                  okText: '重启',
+                  cancelText: '取消',
+                  onOk: async () => {
+                    // 优先走实例管理重启:从 useInstanceStore 拿当前正在
+                    // 访问的 instance,调 /api/instances/{id}/restart(走
+                    // supervisor 的 stop+start 路径,与实例管理页面"重启"
+                    // 按钮完全一致的逻辑)。这条路径在 zai start --managed
+                    // 下可用,且对 supervisor 启动的其他 instance 也成立。
+                    //
+                    // Fallback 触发条件:
+                    //   - 当前 instance 是 supervisor 自己的 __current__,
+                    //     supervisor 拒绝重启自己(避免自杀循环)
+                    //   - store 里没找到匹配 port 的 instance
+                    //   - 实例 API 返回 4xx/5xx
+                    // 全部走 /api/system/restart(managed-child IPC →
+                    // supervisor respawn),与原先"重启服务"按钮语义一致。
+                    //
+                    // store 空时按需触发一次拉取——日常 layout hydrate 已
+                    // 拉过,这里只兜底冷启动/缓存失败的边角场景。
+                    let target = currentInstance
+                    if (!target) {
+                      await loadInstances().catch(() => {})
+                      const fresh = useInstanceStore.getState().instances
+                      const port = useAppStore.getState().instanceContext?.port ?? null
+                      target = port != null ? fresh.find((s) => s.port === port) ?? null : null
+                      if (!target) target = fresh.find((s) => s.isCurrent) ?? null
                     }
-                  }
-                  await requestRestart('user_action')
-                },
-              })
-            }}
-          >
-            重启服务
-          </Button>
+                    if (target && target.id !== '__current__') {
+                      try {
+                        const res = await fetch(
+                          `/api/instances/${encodeURIComponent(target.id)}/restart`,
+                          { method: 'POST' },
+                        )
+                        if (res.ok) return
+                        // 4xx/5xx → fallback 到 service restart
+                        const errBody = (await res.json().catch(() => ({}))) as {
+                          error?: string
+                        }
+                        message.warning(
+                          errBody.error
+                            ? `实例重启失败,回退到服务重启: ${errBody.error}`
+                            : '实例重启失败,回退到服务重启',
+                        )
+                      } catch (err) {
+                        message.warning(
+                          `实例重启请求失败,回退到服务重启: ${
+                            err instanceof Error ? err.message : String(err)
+                          }`,
+                        )
+                      }
+                    }
+                    await requestRestart('user_action')
+                  },
+                })
+              }}
+            >
+              重启服务
+            </Button>
+            <Button
+              danger
+              data-testid="settings-shutdown-service"
+              onClick={() => {
+                Modal.confirm({
+                  title: '关闭服务?',
+                  content: '将停止整个 zai 进程,需要手动重启才能恢复访问。',
+                  okText: '关闭',
+                  cancelText: '取消',
+                  okButtonProps: { danger: true },
+                  onOk: async () => {
+                    // 与"重启服务"不同:关闭服务没有实例级别 fallback,
+                    // 没有 fallback 路径——浏览器本身就在这个被关闭的 instance 上,
+                    // 无法在它自己请求到达后还路由回 supervisor。直接走
+                    // /api/system/stop,服务端 drain in-flight → exit →
+                    // supervisor 看到无 pendingRestart → 正常退出。
+                    await requestStop()
+                  },
+                })
+              }}
+            >
+              关闭服务
+            </Button>
+          </div>
         </div>
       )}
       <SettingsList schema={schema} onClose={close} onChange={handleChange} />

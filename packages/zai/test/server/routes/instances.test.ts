@@ -1,16 +1,10 @@
 import express from 'express'
 import request from 'supertest'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { rm } from 'node:fs/promises'
 import { existsSync, mkdirSync } from 'node:fs'
 
 const DATA_DIR = '/tmp/zai-test-instances-route'
-
-afterEach(async () => {
-  delete process.env.ZAI_DATA_DIR
-  vi.resetModules()
-  try { await rm(DATA_DIR, { recursive: true, force: true }) } catch { /* best-effort tmp cleanup */ }
-})
 
 async function bootstrap(extra?: { spawn?: (...args: never[]) => unknown; readFile?: () => Promise<{ definitions: Array<{ id: string; name: string; cwd: string; createdAt: string; lan?: boolean; startPort?: number | null }>; statuses: Record<string, unknown> }> }) {
   process.env.ZAI_DATA_DIR = DATA_DIR
@@ -56,6 +50,22 @@ async function bootstrap(extra?: { spawn?: (...args: never[]) => unknown; readFi
 }
 
 describe('routes/instances', () => {
+  // routes/instances.ts 的 `ensureNotInstanceChild` 看到 ZAI_INSTANCE_ID
+  // 会直接 404。vitest 进程可能继承 shell env — 必须在每个测试前清理,
+  // 保证路由的"非子实例"逻辑走通。
+  beforeEach(() => {
+    delete process.env.ZAI_INSTANCE_ID
+    delete process.env.ZAI_SUPERVISOR_PID
+  })
+
+  afterEach(async () => {
+    delete process.env.ZAI_DATA_DIR
+    delete process.env.ZAI_INSTANCE_ID
+    delete process.env.ZAI_SUPERVISOR_PID
+    vi.resetModules()
+    try { await rm(DATA_DIR, { recursive: true, force: true }) } catch { /* best-effort tmp cleanup */ }
+  })
+
   it('GET /api/instances returns the current instance row', async () => {
     const { app } = await bootstrap()
     const res = await request(app).get('/api/instances')

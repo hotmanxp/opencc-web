@@ -12,21 +12,45 @@ afterEach(() => {
 })
 
 describe('SettingsDrawer service section', () => {
+  // isManagedChild=true 后,整个"服务"section 仅在受管子服务时渲染。
+  // SettingsDrawer 的 useAppStore 读 instanceContext.isManagedChild,
+  // 这里通过 setState 把它打开,模拟 Layout hydrate 之后的状态。
+  const setManagedChild = (isManagedChild: boolean) => {
+    useAppStore.setState({
+      settingsDrawerOpen: true,
+      serviceState: null,
+      instanceContext: {
+        cwd: '/tmp/x',
+        cwdName: 'x',
+        branch: null,
+        isManagedChild,
+      } as never,
+    })
+  }
+
   it('does not render when drawer closed', () => {
     useAppStore.setState({ settingsDrawerOpen: false })
     const { queryByTestId } = render(<SettingsDrawer />)
     expect(queryByTestId('settings-service-section')).toBeNull()
   })
 
-  it('renders section with restart button when drawer open', () => {
+  it('renders section with restart button when drawer open and isManagedChild', () => {
     useAppStore.setState({ settingsDrawerOpen: true, serviceState: null })
+    setManagedChild(true)
     const { getByTestId, getByRole } = render(<SettingsDrawer />)
     expect(getByTestId('settings-service-section')).toBeTruthy()
     expect(getByRole('button', { name: /重启服务/ })).toBeTruthy()
   })
 
-  it('shows confirmation modal before calling API', async () => {
+  it('does not render section when isManagedChild=false', () => {
     useAppStore.setState({ settingsDrawerOpen: true, serviceState: null })
+    setManagedChild(false)
+    const { queryByTestId } = render(<SettingsDrawer />)
+    expect(queryByTestId('settings-service-section')).toBeNull()
+  })
+
+  it('shows confirmation modal before calling API', async () => {
+    setManagedChild(true)
     const origFetch = globalThis.fetch
     let called = 0
     globalThis.fetch = vi.fn(() => {

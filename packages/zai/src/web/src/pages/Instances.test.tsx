@@ -3,7 +3,7 @@ import { describe, expect, it, beforeEach, vi, afterEach } from 'vitest'
 import '@testing-library/jest-dom'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import Instances from './Instances.js'
+import Instances, { effectiveState, STALE_THRESHOLD_MS } from './Instances.js'
 import { useInstanceStore } from '../store/useInstanceStore.js'
 import type { InstanceSnapshot } from '../../shared/instances.js'
 
@@ -197,5 +197,56 @@ describe('Instances page', () => {
         }),
       )
     })
+  })
+})
+
+describe('effectiveState (3 分钟 stale 阈值)', () => {
+  const base: InstanceSnapshot = {
+    id: 'inst_x',
+    name: 'x',
+    cwd: '/tmp/x',
+    createdAt: '',
+    state: 'down',
+    port: null,
+    pid: null,
+    startedAt: null,
+    lastHeartbeatAt: null,
+    lastError: null,
+    isCurrent: false,
+  }
+
+  it('down 但 lastHeartbeatAt 刚发生 → 仍按 down 渲染', () => {
+    const snap: InstanceSnapshot = { ...base, lastHeartbeatAt: new Date().toISOString() }
+    expect(effectiveState(snap)).toBe('down')
+  })
+
+  it('down + lastHeartbeatAt 在阈值内 → 仍按 down', () => {
+    const snap: InstanceSnapshot = {
+      ...base,
+      lastHeartbeatAt: new Date(Date.now() - (STALE_THRESHOLD_MS - 1000)).toISOString(),
+    }
+    expect(effectiveState(snap)).toBe('down')
+  })
+
+  it('down + lastHeartbeatAt 超过阈值 → 视作 stopped', () => {
+    const snap: InstanceSnapshot = {
+      ...base,
+      lastHeartbeatAt: new Date(Date.now() - (STALE_THRESHOLD_MS + 1000)).toISOString(),
+    }
+    expect(effectiveState(snap)).toBe('stopped')
+  })
+
+  it('down 但 lastHeartbeatAt 为 null → 仍按 down(没数据不假阳)', () => {
+    const snap: InstanceSnapshot = { ...base, lastHeartbeatAt: null }
+    expect(effectiveState(snap)).toBe('down')
+  })
+
+  it('非 down 状态不受阈值影响', () => {
+    const snap: InstanceSnapshot = {
+      ...base,
+      state: 'running',
+      lastHeartbeatAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    }
+    expect(effectiveState(snap)).toBe('running')
   })
 })

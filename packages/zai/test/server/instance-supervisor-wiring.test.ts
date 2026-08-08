@@ -8,6 +8,8 @@ const DATA_DIR = '/tmp/zai-test-supervisor-wiring'
 
 afterEach(async () => {
   delete process.env.ZAI_DATA_DIR
+  delete process.env.ZAI_INSTANCE_ID
+  delete process.env.ZAI_SUPERVISOR_PID
   vi.resetModules()
   try { await rm(DATA_DIR, { recursive: true, force: true }) } catch { /* best-effort tmp cleanup */ }
 })
@@ -26,6 +28,7 @@ describe('instance supervisor wiring inside createApp', () => {
       cwdName: 'current',
       host: '127.0.0.1',
       sdk: false,
+      forceInitInstanceSupervisor: true,
     })
     const res = await request(app).get('/api/instances')
     expect(res.status).toBe(200)
