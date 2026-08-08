@@ -103,7 +103,7 @@ router.get('/dirs/file', async (req, res) => {
   if (!matchedRoot) {
     res
       .status(403)
-      .json({ error: '禁止访问：仅允许预览 ~/.nova、~/.config/opencode、~/.claude、~/.agents/skills 下的文件' });
+      .json({ error: '禁止访问：仅允许预览 ~/.nova、~/.config/opencode、~/.zai、~/.agents/skills 下的文件' });
     return;
   }
 

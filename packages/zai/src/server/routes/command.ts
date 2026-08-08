@@ -21,7 +21,7 @@ commandRouter.post('/command', async (req, res) => {
     const reg = getCommandRegistry()
     const cmd = name ? reg.get(name) : undefined
     if (!cmd) {
-      // Skills 不在 command registry 里(registry 只装 builtin + ~/.zai|~/.claude
+      // Skills 不在 command registry 里(registry 只装 builtin + ~/.zai
       // commands),但前端 autocomplete 的 /skill 列表来自 listSkills。这里兜底
       // 解析 skill 并渲染其 markdown prompt,否则 /skill args 会落到 unknown,
       // 原始 "/skill args" 文本被原样丢给模型,skill 永不激活。

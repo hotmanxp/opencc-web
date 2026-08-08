@@ -72,7 +72,7 @@ function ProviderForm() {
   // Tracks the builtin seed chosen when the modal was opened so we can
   // copy its capabilities map onto the new profile on save. The form
   // itself does not expose per-model capability edits — those come from
-  // the builtin catalog (or hand-edited ~/.claude.json).
+  // the builtin catalog (or hand-edited ~/.zai.json).
   const [pendingCapabilities, setPendingCapabilities] = useState<ProviderProfile['capabilities']>(undefined);
   const [form] = Form.useForm();
 
@@ -617,7 +617,7 @@ export default function Config() {
         style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', overflow: 'auto' }}
       >
         {/* JSON 配置文件 — 始终可见的小节,挂在 activeTool 条件渲染之前,
-            让 ~/.claude.json / ~/.zai.json 不依赖菜单 tab 选中就能看到/编辑。
+            让 ~/.zai.json 不依赖菜单 tab 选中就能看到/编辑。
             两张内层卡片各自固定高度(~280px),JsonFileEditor 里的 pre
             块用 flex:1 在卡片内独立滚动,避免遮挡下方 tab 内容。 */}
         <Card
