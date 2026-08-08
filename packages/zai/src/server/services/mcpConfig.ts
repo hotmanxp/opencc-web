@@ -143,13 +143,13 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
   }
 
   // 3. user: $HOME/.zai.json (zai-specific) if present, else fall back to
-  //    $HOME/.zai.json (opencc compat). Mutually exclusive —
+  //    $HOME/.claude.json (legacy upstream claude-code). Mutually exclusive —
   //    zai.json fully shadows claude.json so users on a shared box can't leak
   //    MCP servers across tools.
   const home = homedir()
   const userLoads: ScopeLoadResult[] = []
   const zaiJsonPath = join(home, '.zai.json')
-  const claudeJsonPath = join(home, '.zai.json')
+  const claudeJsonPath = join(home, '.claude.json')
   let userPath: string | null = null
   if (existsSync(zaiJsonPath)) {
     userPath = zaiJsonPath

@@ -106,7 +106,7 @@ export const getClaudeConfigHomeDir = memoize(
  */
 export function getDirInHome(dirName: string): string {
   const zaiPath = join(homedir(), '.zai', dirName)
-  const claudePath = join(homedir(), '.zai', dirName)
+  const claudePath = join(homedir(), '.claude', dirName)
   if (existsSync(zaiPath)) {
     return zaiPath
   }
@@ -122,8 +122,15 @@ export function getProjectsDir(): string {
 }
 
 export function getUserAgentsDir(): string {
-  const homeDir = homedir()
-  return join(homeDir, '.agents')
+  // zai patch: user skills (the only consumer of this helper, see
+  // skills/loadSkillsDir.ts: `join(getUserAgentsDir(), 'skills')`) now live
+  // under ~/.zai/skills instead of ~/.agents/skills. The legacy ~/.agents
+  // location is no longer read — zai's boot-time migration
+  // (packages/zai/src/server/services/zaiMigration.ts) copies any
+  // pre-existing data forward on first start, then the sentinel prevents
+  // the migration from re-running. Function name kept for blast-radius
+  // stability; only the path returned changed.
+  return join(getClaudeConfigHomeDir(), 'agents')
 }
 
 /**

@@ -35,8 +35,8 @@ function writeZaiFile(content: string): void {
 }
 
 function writeClaudeFile(content: string): void {
-  mkdirSync(join(currentHome, '.zai'), { recursive: true })
-  writeFileSync(join(currentHome, '.zai', 'settings.json'), content, 'utf-8')
+  mkdirSync(join(currentHome, '.claude'), { recursive: true })
+  writeFileSync(join(currentHome, '.claude', 'settings.json'), content, 'utf-8')
 }
 
 function readZaiFile(): unknown {

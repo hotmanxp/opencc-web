@@ -11,8 +11,12 @@ import { writeZaiSettings, zaiSettingsPath } from './zaiSettingsStore.js'
  * `createApp()` calls `initZaiSettingsCache()` once at boot to resolve
  * ~/.zai/settings.json by tier:
  *   1. ~/.zai/settings.json exists + valid JSON  → use it
- *   2. else ~/.zai/settings.json exists+valid → seed it into ~/.zai, use it
+ *   2. else ~/.claude/settings.json exists+valid → seed it into ~/.zai, use it
  *   3. else BUILTIN_DEFAULT_SETTINGS             → seed it into ~/.zai, use it
+ *
+ * Tier 2 lets users who upgraded from upstream claude-code keep their
+ * pre-existing settings without manual copying — once seeded into ~/.zai,
+ * subsequent boots hit tier 1 and the legacy file is left untouched.
  *
  * All read paths then hit the in-memory cache (zero disk I/O) via
  * `getCachedZaiSettings()` / `getCachedZaiSettingsSync()`. The write path
@@ -31,9 +35,12 @@ import { writeZaiSettings, zaiSettingsPath } from './zaiSettingsStore.js'
  * See docs/superpowers/specs/2026-07-23-zai-settings-boot-cache-design.md.
  */
 
-/** Path to ~/.zai/settings.json — the tier-2 seed source. */
+/** Path to ~/.claude/settings.json — the tier-2 seed source. Users
+ * upgrading from upstream claude-code keep their pre-existing settings at
+ * this location; zai reads them on first boot and seeds them into
+ * ~/.zai/settings.json so subsequent boots hit tier 1. */
 function claudeSettingsPath(): string {
-  return join(homedir(), '.zai', 'settings.json')
+  return join(homedir(), '.claude', 'settings.json')
 }
 
 let cached: ZaiSettings | undefined
@@ -118,7 +125,7 @@ async function runInit(): Promise<void> {
     return
   }
 
-  // Tier 2: ~/.zai/settings.json → seed into ~/.zai. A read failure here
+  // Tier 2: ~/.claude/settings.json → seed into ~/.zai. A read failure here
   // is non-fatal: warn and fall through to tier 3 rather than block boot.
   let tier2: ZaiSettings | undefined
   try {
