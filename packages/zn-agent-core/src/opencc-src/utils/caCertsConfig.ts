@@ -28,7 +28,7 @@ import { getSettingsForSource } from './settings/settings.js'
  * is lazy-initialized) and ensure Node.js compatibility.
  *
  * This is safe to call before the trust dialog because we only read from
- * user-controlled files (~/.claude/settings.json and ~/.zai.json),
+ * user-controlled files (~/.zai/settings.json and ~/.zai.json),
  * not from project-level settings.
  */
 export function applyExtraCACertsFromConfig(): void {
@@ -53,14 +53,14 @@ export function applyExtraCACertsFromConfig(): void {
  * connection to an HTTPS proxy during init().
  *
  * We read from global config (~/.zai.json) and user settings
- * (~/.claude/settings.json). These are user-controlled files that don't
+ * (~/.zai/settings.json). These are user-controlled files that don't
  * require trust approval.
  */
 function getExtraCertsPathFromConfig(): string | undefined {
   try {
     const globalConfig = getGlobalConfig()
     const globalEnv = globalConfig?.env
-    // Only read from user-controlled settings (~/.claude/settings.json),
+    // Only read from user-controlled settings (~/.zai/settings.json),
     // not project-level settings, to prevent malicious projects from
     // injecting CA certs before the trust dialog.
     const settings = getSettingsForSource('userSettings')

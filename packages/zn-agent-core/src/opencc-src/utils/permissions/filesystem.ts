@@ -99,13 +99,13 @@ export function normalizeCaseForComparison(path: string): string {
 }
 
 /**
- * If filePath is inside a .claude/skills/{name}/ directory (project) or
+ * If filePath is inside a .zai/skills/{name}/ directory (project) or
  * .openclaude/skills/{name}/ directory (global), plus the legacy global
- * .claude/skills path, return the skill name and a session-allow pattern
+ * .zai/skills path, return the skill name and a session-allow pattern
  * scoped to just that skill.
  * Used to offer a narrower "allow edits to this skill only" option in the
  * permission dialog and SDK suggestions, so iterating on one skill doesn't
- * require granting session access to all of .claude/ (settings.json, hooks/, etc.).
+ * require granting session access to all of .zai/ (settings.json, hooks/, etc.).
  */
 export function getClaudeSkillScope(
   filePath: string,
@@ -116,7 +116,7 @@ export function getClaudeSkillScope(
   const bases = [
     {
       dir: expandPath(join(getOriginalCwd(), '.zai', 'skills')),
-      prefix: '/.claude/skills/',
+      prefix: '/.zai/skills/',
     },
     {
       dir: expandPath(join(homedir(), '.openclaude', 'skills')),
@@ -124,7 +124,7 @@ export function getClaudeSkillScope(
     },
     {
       dir: expandPath(join(homedir(), '.zai', 'skills')),
-      prefix: '~/.claude/skills/',
+      prefix: '~/.zai/skills/',
     },
   ]
 
@@ -158,7 +158,7 @@ export function getClaudeSkillScope(
         // Reject glob metacharacters. skillName is interpolated into a
         // gitignore pattern consumed by ignore().add() in matchingRuleForInput
         // at step 1.6. A directory literally named '*' (valid on POSIX) would
-        // produce '/.claude/skills/*/**' which matches ALL skills. Return null
+        // produce '/.zai/skills/*/**' which matches ALL skills. Return null
         // to fall through to generateSuggestions() instead.
         if (/[*?[\]]/.test(skillName)) return null
         return { skillName, pattern: prefix + skillName + '/**' }
@@ -212,7 +212,7 @@ function getSettingsPaths(): string[] {
 
 export function isClaudeSettingsPath(filePath: string): boolean {
   // SECURITY: Normalize path structure first to prevent bypass via redundant ./
-  // sequences like `./.claude/./settings.json` which would evade the endsWith() check
+  // sequences like `./.zai/./settings.json` which would evade the endsWith() check
   const expandedPath = expandPath(filePath)
 
   // Normalize for case-insensitive comparison to prevent bypassing security
@@ -223,10 +223,10 @@ export function isClaudeSettingsPath(filePath: string): boolean {
   if (
     normalizedPath.endsWith(`${sep}.openclaude${sep}settings.json`) ||
     normalizedPath.endsWith(`${sep}.openclaude${sep}settings.local.json`) ||
-    normalizedPath.endsWith(`${sep}.claude${sep}settings.json`) ||
-    normalizedPath.endsWith(`${sep}.claude${sep}settings.local.json`)
+    normalizedPath.endsWith(`${sep}.zai${sep}settings.json`) ||
+    normalizedPath.endsWith(`${sep}.zai${sep}settings.local.json`)
   ) {
-    // Include .claude/settings.json even for other projects
+    // Include .zai/settings.json even for other projects
     return true
   }
   // Check for current project's settings files (including managed settings and CLI args)
@@ -242,7 +242,7 @@ function isClaudeConfigFilePath(filePath: string): boolean {
     return true
   }
 
-  // Check if file is within .claude/commands or .claude/agents directories
+  // Check if file is within .zai/commands or .zai/agents directories
   // using proper path segment validation (not string matching with includes())
   // pathInWorkingPath now handles case-insensitive comparison to prevent bypasses
   const commandsDir = join(getOriginalCwd(), '.zai', 'commands')
@@ -300,7 +300,7 @@ function isSessionMemoryPath(absolutePath: string): boolean {
 
 /**
  * Check if file is within the current project's directory.
- * Path format: ~/.claude/projects/{sanitized-cwd}/...
+ * Path format: ~/.zai/projects/{sanitized-cwd}/...
  */
 function isProjectDirPath(absolutePath: string): boolean {
   const projectDir = getProjectDir(getCwd())
@@ -312,9 +312,9 @@ function isProjectDirPath(absolutePath: string): boolean {
 }
 
 /**
- * Check if a path is under the global ~/.claude/projects/ directory.
+ * Check if a path is under the global ~/.zai/projects/ directory.
  * Used by the auto-memory approval carve-out to skip safetyCheck prompts for
- * default-path memory (which lives under ~/.claude/projects/{cwd}/memory/).
+ * default-path memory (which lives under ~/.zai/projects/{cwd}/memory/).
  */
 function isUnderGlobalClaudeProjects(absolutePath: string): boolean {
   const normalizedPath = normalize(expandPath(absolutePath))
@@ -550,14 +550,14 @@ function isDangerousFilePathToAutoEdit(
         continue
       }
 
-      // Special case: .claude/worktrees/ is a structural path (where Claude stores
+      // Special case: .zai/worktrees/ is a structural path (where Claude stores
       // git worktrees), not a user-created dangerous directory. Skip the .claude
       // segment when it's followed by 'worktrees'. Any nested .claude directories
       // within the worktree (not followed by 'worktrees') are still blocked.
       //
-      // .claude/projects/ is the per-project data dir (auto-memory index, todos,
+      // .zai/projects/ is the per-project data dir (auto-memory index, todos,
       // session-scoped settings). User opted-in: bypass safetyCheck for everything
-      // under ~/.claude/projects/, not just memory/. Override-path memory
+      // under ~/.zai/projects/, not just memory/. Override-path memory
       // (CLAUDE_COWORK_MEMORY_PATH_OVERRIDE) remains protected by the explicit
       // approval check further down.
       if (dir === '.zai') {
@@ -711,7 +711,7 @@ function hasSuspiciousWindowsPathPattern(path: string): boolean {
  *
  * This function performs comprehensive safety checks including:
  * - Suspicious Windows path patterns (NTFS streams, 8.3 names, long path prefixes, etc.)
- * - Claude config files (.claude/settings.json, .claude/commands/, .claude/agents/)
+ * - Claude config files (.zai/settings.json, .zai/commands/, .zai/agents/)
  * - MCP CLI state files (managed internally by Claude Code)
  * - Dangerous files (.bashrc, .gitconfig, .git/, .vscode/, .idea/, etc.)
  *
@@ -1005,7 +1005,7 @@ function patternWithRoot(
       root: homedir().normalize('NFC'),
     }
   } else if (pattern.startsWith(DIR_SEP)) {
-    // Patterns starting with / resolve relative to the directory where settings are stored (without .claude/)
+    // Patterns starting with / resolve relative to the directory where settings are stored (without .zai/)
     return {
       relativePattern: pattern,
       root: rootPathForSource(source),
@@ -1366,10 +1366,10 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
     return internalEditResult
   }
 
-  // 1.6. Check for .claude/** allow rules BEFORE safety checks
-  // This allows session-level permissions to bypass the safety blocks for .claude/
+  // 1.6. Check for .zai/** allow rules BEFORE safety checks
+  // This allows session-level permissions to bypass the safety blocks for .zai/
   // We only allow this for session-level rules to prevent users from accidentally
-  // permanently granting broad access to their .claude/ folder.
+  // permanently granting broad access to their .zai/ folder.
   //
   // matchingRuleForInput returns the first match across all sources. If the user
   // also has a broader Edit(.claude) rule in userSettings (e.g. from sandbox
@@ -1389,13 +1389,13 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
   )
   if (claudeFolderAllowRule) {
     // Check if this rule is scoped under a Claude config folder.
-    // Accepts broad project/global patterns ('/.claude/**',
-    // '~/.openclaude/**', and legacy '~/.claude/**') plus narrowed skill
+    // Accepts broad project/global patterns ('/.zai/**',
+    // '~/.openclaude/**', and legacy '~/.zai/**') plus narrowed skill
     // patterns like '~/.openclaude/skills/my-skill/**' so users can grant
     // session access to a single skill without also exposing settings.json
     // or hooks/. The rule already matched the path via matchingRuleForInput;
     // this is an additional scope check. Reject '..' to prevent a rule like
-    // '/.claude/../**' from leaking this bypass outside the config folder.
+    // '/.zai/../**' from leaking this bypass outside the config folder.
     const ruleContent = claudeFolderAllowRule.ruleValue.ruleContent
     if (
       ruleContent &&
@@ -1425,9 +1425,9 @@ export function checkWritePermissionForTool<Input extends AnyObject>(
   // permission to edit protected files
   const safetyCheck = checkPathSafetyForAutoEdit(path, pathsToCheck)
   if (!safetyCheck.safe) {
-    // SDK suggestion: if under .claude/skills/{name}/, emit the narrowed
+    // SDK suggestion: if under .zai/skills/{name}/, emit the narrowed
     // session-scoped addRules that step 1.6 will honor on the next call.
-    // Everything else (.claude/settings.json, .git/, .vscode/, .idea/) falls
+    // Everything else (.zai/settings.json, .git/, .vscode/, .idea/) falls
     // back to generateSuggestions — its setMode suggestion doesn't bypass
     // this check, but preserving it avoids a surprising empty array.
     const skillScope = getClaudeSkillScope(path)
@@ -1633,7 +1633,7 @@ export function checkEditableInternalPath(
   // Template job's own directory. Env key hardcoded (vs importing JOB_ENV_KEY
   // from jobs/state) so tree-shaking eliminates the string from external
   // builds — spawn.test.ts asserts the string matches. Hijack guard: the env
-  // var value must itself resolve under ~/.claude/jobs/. Symlink guard: every
+  // var value must itself resolve under ~/.zai/jobs/. Symlink guard: every
   // resolved form of the target (lexical + symlink chain) must fall under some
   // resolved form of the job dir, so a symlink inside the job dir pointing at
   // e.g. ~/.ssh/authorized_keys does not get a free write. Resolving both
@@ -1688,10 +1688,10 @@ export function checkEditableInternalPath(
   // Explicit memory-write approval applies even when the env override points
   // memory at a caller-designated directory. The silent pre-safety-check
   // carve-out below exists only for the default/settings-backed path because
-  // it can live under ~/.claude/, which is in DANGEROUS_DIRECTORIES.
+  // it can live under ~/.zai/, which is in DANGEROUS_DIRECTORIES.
   //
   // User opted-in: skip the approval prompt for default-path memory under
-  // ~/.claude/projects/ (the carve-out above). Override-path memory
+  // ~/.zai/projects/ (the carve-out above). Override-path memory
   // (CLAUDE_COWORK_MEMORY_PATH_OVERRIDE) still requires explicit approval.
   if (
     isAutoMemPath(normalizedPath) &&
@@ -1720,13 +1720,13 @@ export function checkEditableInternalPath(
     }
   }
 
-  // .claude/launch.json — desktop preview config (dev server command + port).
+  // .zai/launch.json — desktop preview config (dev server command + port).
   // The desktop's preview_start MCP tool instructs Claude to create/update
   // this file as part of the preview workflow. Without this carve-out the
-  // .claude/ DANGEROUS_DIRECTORIES check prompts for it, which in SDK mode
+  // .zai/ DANGEROUS_DIRECTORIES check prompts for it, which in SDK mode
   // cascades: user clicks "Always allow" → setMode:acceptEdits suggestion
   // applied → silent downgrade from auto mode. Matches the project-level
-  // .claude/ only (not ~/.claude/) since launch.json is per-project.
+  // .zai/ only (not ~/.zai/) since launch.json is per-project.
   if (
     normalizeCaseForComparison(normalizedPath) ===
     normalizeCaseForComparison(join(getOriginalCwd(), '.zai', 'launch.json'))
@@ -1787,7 +1787,7 @@ export function checkReadableInternalPath(
   }
 
   // Project directory (for reading past session memories)
-  // Path format: ~/.claude/projects/{sanitized-cwd}/...
+  // Path format: ~/.zai/projects/{sanitized-cwd}/...
   if (isProjectDirPath(normalizedPath)) {
     return {
       behavior: 'allow',
@@ -1882,7 +1882,7 @@ export function checkReadableInternalPath(
     }
   }
 
-  // Tasks directory (~/.claude/tasks/) for swarm task coordination
+  // Tasks directory (~/.zai/tasks/) for swarm task coordination
   const tasksDir = join(getClaudeConfigHomeDir(), 'tasks') + sep
   if (
     normalizedPath === tasksDir.slice(0, -1) ||
@@ -1898,7 +1898,7 @@ export function checkReadableInternalPath(
     }
   }
 
-  // Teams directory (~/.claude/teams/) for swarm coordination
+  // Teams directory (~/.zai/teams/) for swarm coordination
   const teamsReadDir = join(getClaudeConfigHomeDir(), 'teams') + sep
   if (
     normalizedPath === teamsReadDir.slice(0, -1) ||

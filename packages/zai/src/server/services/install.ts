@@ -24,7 +24,7 @@ const GLOBAL_SKILLS_DIR = join(homedir(), '.agents', 'skills');
  * `type`. Mirrors publisher's PlatformAdapter matrix:
  *   - Nova: ~/.nova/{agents,commands,skills,extensions}
  *   - OpenCode: ~/.config/opencode/{agents,commands} + ~/.agents/skills
- *   - OpenCC: ~/.claude/{agents,commands} + ~/.agents/skills
+ *   - OpenCC: ~/.zai/{agents,commands} + ~/.agents/skills
  * Notably, Nova skills live in ~/.nova/skills/ (Nova-private), while
  * OpenCode/OpenCC skills share ~/.agents/skills/. So a skill installed
  * on a Nova+OpenCode box lands in BOTH locations.

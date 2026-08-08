@@ -50,7 +50,7 @@ export type RosterTransform = (r: Roster) => Roster | Promise<Roster>
 
 /** Optional overrides for {@link loadRoster} / {@link saveRoster} / {@link updateRoster}. */
 export interface RosterOptions {
-  /** Override the default `~/.claude/roster.json` path. Tests use `mkdtempSync` paths. */
+  /** Override the default `~/.zai/roster.json` path. Tests use `mkdtempSync` paths. */
   path?: string
   /** Suppress the `console.warn` line emitted on parse failure. */
   silent?: boolean
@@ -83,8 +83,8 @@ function emptyRoster(): Roster {
  * without touching the real home directory.
  */
 function assertUnderRosterRoot(path: string): void {
-  const claudeSegment = `${sep}.claude${sep}`
-  const claudeSegmentTail = `${sep}.claude`
+  const claudeSegment = `${sep}.zai${sep}`
+  const claudeSegmentTail = `${sep}.zai`
   if (
     !path.includes(claudeSegment) &&
     !path.endsWith(claudeSegmentTail) &&
@@ -106,7 +106,7 @@ function assertUnderRosterRoot(path: string): void {
  *   - `path` is under `~/.claude` (asserted via
  *     {@link assertUnderRosterRoot}).
  *   - The parent directory exists. The supervisor (T5) owns the
- *     `~/.claude/sock/` and similar lifecycle; this helper no longer
+ *     `~/.zai/sock/` and similar lifecycle; this helper no longer
  *     silently `mkdir`s intermediate dirs.
  */
 async function atomicWriteFile(

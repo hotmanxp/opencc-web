@@ -67,7 +67,7 @@ type ScopeLoadResult = {
  *     - $HOME/.zai.json
  *
  *   local (project-scoped, override project, gitignored):
- *     - $cwd/.claude/settings.local.json
+ *     - $cwd/.zai/settings.local.json
  *
  *   project (committed to repo, walk up from cwd to root):
  *     - $cwd/.mcp.json, $parent/.mcp.json, ..., $root/.mcp.json
@@ -127,9 +127,9 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
     }
   }
 
-  // 2. local: $cwd/.claude/settings.local.json (zai's project-local).
-  //    Falls back to ~/.claude/settings.local.json only if cwd version missing
-  //    (rare — opencc keeps project-local inside .claude/).
+  // 2. local: $cwd/.zai/settings.local.json (zai's project-local).
+  //    Falls back to ~/.zai/settings.local.json only if cwd version missing
+  //    (rare — opencc keeps project-local inside .zai/).
   const localPaths = [
     join(cwd, '.zai', 'settings.local.json'),
     join(homedir(), '.zai', 'settings.local.json'),

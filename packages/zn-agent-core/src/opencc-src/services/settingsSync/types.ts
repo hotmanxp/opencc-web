@@ -62,8 +62,8 @@ export type SettingsSyncUploadResult = {
  */
 export const SYNC_KEYS = {
   USER_SETTINGS: USER_SETTINGS_PATH,
-  USER_MEMORY: `~/.claude/${AGENT_INSTRUCTIONS_FILE}`,
+  USER_MEMORY: `~/.zai/${AGENT_INSTRUCTIONS_FILE}`,
   projectSettings: (projectId: string) =>
-    `projects/${projectId}/.claude/settings.local.json`,
+    `projects/${projectId}/.zai/settings.local.json`,
   projectMemory: (projectId: string) => `projects/${projectId}/${AGENT_INSTRUCTIONS_LOCAL_FILE}`,
 } as const

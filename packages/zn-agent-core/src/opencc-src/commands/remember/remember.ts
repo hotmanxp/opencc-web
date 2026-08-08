@@ -14,7 +14,7 @@ function isMemoryType(value: string): value is MemoryType {
 
 /**
  * Get memory directory path based on memory type.
- * - user/feedback/reference → user-level (~/.claude/memory/)
+ * - user/feedback/reference → user-level (~/.zai/memory/)
  * - project → project-level (getAutoMemPath)
  */
 function getMemoryDir(type: MemoryType): string {

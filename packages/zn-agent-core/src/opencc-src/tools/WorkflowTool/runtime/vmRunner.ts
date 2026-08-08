@@ -54,7 +54,7 @@ function extractUserScriptBody(source: string): string | null {
  * a plain script inside the VM. This is the regression fix for Plan6
  * Task2: Plan5's VM migration (commit 57887ab7) dropped the legacy
  * workerScript.ts stripper, so the 4 of 6 user workflows in
- * `.claude/workflows/` that start with `export const meta = {...}`
+ * `.zai/workflows/` that start with `export const meta = {...}`
  * crashed with `SyntaxError: Unexpected token 'export'`.
  *
  * Mirrors the chain in `workerScript.ts` lines 41-45:

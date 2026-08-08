@@ -153,7 +153,7 @@ if (existsSync(STAMP_FILE) && existsSync(OUT_FILE)) {
 //     survive tree-shaking and become reachable from compat.
 //
 //   * PreToolUse 'stop' suppression: some OpenCC plugins loaded
-//     from `~/.claude/plugins/<name>/hooks/hooks.json` register a
+//     from `~/.zai/plugins/<name>/hooks/hooks.json` register a
 //     PreToolUse hook that returns `{block: true}` (or `decision:
 //     'block'}`) when they don't want a specific command to run (e.g.
 //     `git commit` policy, dangerous shell pattern, etc.). vendor
@@ -170,7 +170,7 @@ if (existsSync(STAMP_FILE) && existsSync(OUT_FILE)) {
 //     For zai's HTTP-server deployment there is no interactive
 //     dialog AND no plugin-ecosystem UX expectation that requires
 //     these hooks — the user has not configured them interactively,
-//     they get installed as a side-effect of `~/.claude/plugins/`
+//     they get installed as a side-effect of `~/.zai/plugins/`
 //     sharing with other Anthropic tooling that the user did opt
 //     into elsewhere. Short-circuit `case 'stop'` to fall through
 //     (return []), letting the existing permission / input gates

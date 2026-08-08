@@ -92,7 +92,7 @@ export const getClaudeConfigHomeDir = memoize(
  * Resolve a directory under the user's home with zai→claude fallback.
  *
  * Returns `~/.zai/<dirName>` if it exists; otherwise falls back to
- * `~/.claude/<dirName>`. Mirrors the legacy migration strategy used by
+ * `~/.zai/<dirName>`. Mirrors the legacy migration strategy used by
  * `getClaudeConfigHomeDir` — newer installs land in `~/.zai`, but users
  * who migrated from upstream claude-code still have their data in
  * `~/.claude` and we should keep reading from there.
@@ -315,7 +315,7 @@ export function getVertexRegionForModel(
 // OpenCC Dynamic Workflows — env var helpers
 // ---------------------------------------------------------------------------
 // Runtime knobs for the WorkflowTool. Mirrored in settings.workflows.* so
-// users can pin them in .claude/settings.json instead of exporting env vars.
+// users can pin them in .zai/settings.json instead of exporting env vars.
 // Either source opts in (truthy env var OR settings.workflows.enabled === true).
 
 /**

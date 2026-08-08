@@ -17,7 +17,7 @@ const instances = new Map<string, WorkflowRegistry>()
  *
  * projectDir defaults to process.cwd() so workflows in the current project
  * take precedence over user-dir workflows (see registry.ts resolution order).
- * userDir defaults to homedir() — `~/.claude/workflows/*.js`.
+ * userDir defaults to homedir() — `~/.zai/workflows/*.js`.
  *
  * One registry per projectDir so two callers running in different project
  * directories (e.g. a sub-shell or a test that switches cwd) get isolated
@@ -54,7 +54,7 @@ export function getWorkflowRegistry(
  * sources without separately clearing the process-static bundled
  * source map. Useful for:
  *   - plugin install/uninstall flows that need to re-read workflows
- *   - tests that mutate `.claude/workflows/*.js` between runs
+ *   - tests that mutate `.zai/workflows/*.js` between runs
  *   - hot-reload after a watcher detects a workflow file change
  */
 export function invalidateWorkflowCache(): void {
@@ -66,7 +66,7 @@ export function invalidateWorkflowCache(): void {
  * `workflow(nameOrRef, args)` call) to the script source string.
  * Bundled workflows (e.g. `deep-research`) read from the in-process
  * `bundledSourceRegistry`; project + user workflows read from
- * `.claude/workflows/<name>.js`; `scriptPath` refs read the file
+ * `.zai/workflows/<name>.js`; `scriptPath` refs read the file
  * directly. Throws with a clear error if the name is unknown.
  *
  * Used by LocalWorkflowTask to wire `workflow()` calls to the actual
@@ -85,7 +85,7 @@ export async function resolveChildScript(
       throw new Error(
         `workflow('${ref.value}'): no workflow with that name. ` +
           `Use a bundled name (deep-research) or place a .js file in ` +
-          `.claude/workflows/${ref.value}.js.`,
+          `.zai/workflows/${ref.value}.js.`,
       )
     }
     return readFileSync(wf.path, 'utf-8')

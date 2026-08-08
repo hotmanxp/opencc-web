@@ -45,8 +45,8 @@ function getCandidateLocalBinaryPaths(localInstallDir: string): string[] {
 
 export function isManagedLocalInstallationPath(execPath: string): boolean {
   return (
-    execPath.includes('/.claude/local/node_modules/') ||
-    execPath.includes('/.claude/local/node_modules/')
+    execPath.includes('/.zai/local/node_modules/') ||
+    execPath.includes('/.zai/local/node_modules/')
   )
 }
 

@@ -3,7 +3,7 @@
  *
  * Pairs with `BackgroundAgent`:
  *   1. LLM calls `BackgroundAgent(prompt: "...")` → daemon spawns worker
- *   2. Worker runs, stdout/stderr captured to `~/.claude/background/<shortId>.log`
+ *   2. Worker runs, stdout/stderr captured to `~/.zai/background/<shortId>.log`
  *   3. LLM calls `BackgroundAgentResult(shortId: "...")` → returns the captured
  *      output, truncated to `maxResultSizeChars` so it fits in the LLM context.
  *
@@ -74,7 +74,7 @@ export const BackgroundAgentResultTool = buildTool({
     return (
       'Fetch the captured output of a background agent previously spawned via ' +
       'the `BackgroundAgent` tool. The worker output is appended to ' +
-      '`~/.claude/background/<shortId>.log` as it runs; this tool returns the ' +
+      '`~/.zai/background/<shortId>.log` as it runs; this tool returns the ' +
       "current contents (truncated to fit in the LLM's context window). Use the " +
       '`tail` argument to grab only the last N characters for long outputs.'
     )
@@ -84,7 +84,7 @@ export const BackgroundAgentResultTool = buildTool({
       '## BackgroundAgentResult\n\n' +
       'Use this tool after `BackgroundAgent` to fetch the worker\'s captured ' +
       'output. The worker stdout+stderr is logged to ' +
-      '`~/.claude/background/<shortId>.log`; this tool reads that file and ' +
+      '`~/.zai/background/<shortId>.log`; this tool reads that file and ' +
       'returns its current contents.\n\n' +
       '**Flow:**\n' +
       '1. `BackgroundAgent(prompt: "...")` → returns `shortId`\n' +

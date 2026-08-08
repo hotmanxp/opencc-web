@@ -22,9 +22,9 @@ interface CommandsDirsOpts {
 
 /**
  * Resolve which command directories should be loaded. Merges:
- *   - project-level: `<cwd>/.claude/commands` and `<cwd>/.zai/commands` (if any)
+ *   - project-level: `<cwd>/.zai/commands` and `<cwd>/.zai/commands` (if any)
  *   - home-level: `~/.zai/commands` wins if it exists (single-source for zai
- *     users), otherwise fall back to `~/.claude/commands` for OpenCC workflows.
+ *     users), otherwise fall back to `~/.zai/commands` for OpenCC workflows.
  * Project-level dirs come first so a project command overrides a same-named
  * home-level command on name conflicts.
  */

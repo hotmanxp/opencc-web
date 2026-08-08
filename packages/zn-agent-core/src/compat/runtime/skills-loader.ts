@@ -26,7 +26,7 @@ export type LoadSkillsOptions = {
   /**
    * Optional callback that decides whether a given directory should be loaded.
    * Returning false blocks the directory (used to skip gitignored paths like
-   * `node_modules/pkg/.claude/skills`). Defaults to "always allow".
+   * `node_modules/pkg/.zai/skills`). Defaults to "always allow".
    */
   isDirGitignored?: (dir: string) => Promise<boolean>
 }
@@ -172,7 +172,7 @@ async function walk(
   if (dirId) visitedDirs.add(dirId)
 
   // Optional gitignore gate. Default behavior is permissive (load everything);
-  // callers wire this in for safety against `node_modules/.../.claude/skills`
+  // callers wire this in for safety against `node_modules/.../.zai/skills`
   // style bloat. Mirrors opencc's `isPathGitignored` wiring.
   if (opts?.isDirGitignored && dirId && (await opts.isDirGitignored(dirId))) {
     return

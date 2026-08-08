@@ -70,7 +70,7 @@ export interface BgDaemonStatus {
   sockPath: string
   /** Present iff the supervisor is reachable on the socket. */
   supervisorPid?: number
-  /** Path to the roster file (`~/.claude/roster.json`). */
+  /** Path to the roster file (`~/.zai/roster.json`). */
   rosterPath: string
   /**
    * Path to the launchd plist (`~/Library/LaunchAgents/com.anthropic.claude-daemon.plist`).

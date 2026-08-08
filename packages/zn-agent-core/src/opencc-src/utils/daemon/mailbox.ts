@@ -209,7 +209,7 @@ export function renderInbox(messages: InboxMessage[]): string {
     '',
     'Background agent activity since your last turn. If a job you spawned is',
     'listed here, call `BackgroundAgentResult(shortId)` to read its captured',
-    'output (the log file at `~/.claude/background/<shortId>.log`).',
+    'output (the log file at `~/.zai/background/<shortId>.log`).',
     '',
   ]
   for (const m of messages) {

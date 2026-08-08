@@ -75,7 +75,7 @@ describe('createSessionFacade — server session/transcript facade (Task 3)', ()
       /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i,
     )
     // filePath is the vendor JSONL path under
-    // `~/.claude/projects/<sanitized-cwd>/<sessionId>.jsonl`.
+    // `~/.zai/projects/<sanitized-cwd>/<sessionId>.jsonl`.
     expect(created.filePath).toMatch(/[\\/][0-9a-f-]{36}\.jsonl$/i)
     // cwd echoes the caller's cwd so downstream operations can be
     // re-issued with the same context.

@@ -165,7 +165,7 @@ export function getVersionedCachePathIn(
 
 /**
  * Get versioned cache path for a plugin under the primary plugins directory.
- * Format: ~/.claude/plugins/cache/{marketplace}/{plugin}/{version}/
+ * Format: ~/.zai/plugins/cache/{marketplace}/{plugin}/{version}/
  *
  * @param pluginId - Plugin identifier in format "name@marketplace"
  * @param version - Version string (semver, git SHA, etc.)
@@ -241,7 +241,7 @@ export async function probeSeedCacheAnyVersion(
 
 /**
  * Get legacy (non-versioned) cache path for a plugin.
- * Format: ~/.claude/plugins/cache/{plugin-name}/
+ * Format: ~/.zai/plugins/cache/{plugin-name}/
  *
  * Used for backward compatibility with existing installations.
  *

@@ -24,8 +24,8 @@ export type RegistryOpts = {
  *
  * Resolution order (later wins on name conflict):
  *   1. Bundled workflows (registered programmatically via `registerBundled`)
- *   2. User workflows from `<userDir>/.claude/workflows/*.js`
- *   3. Project workflows from `<projectDir>/.claude/workflows/*.js`
+ *   2. User workflows from `<userDir>/.zai/workflows/*.js`
+ *   3. Project workflows from `<projectDir>/.zai/workflows/*.js`
  *
  * Discovery is cold-scan-once: the project + user dirs are scanned the
  * first time `list()`/`get()` is called (or when `reload()` is forced

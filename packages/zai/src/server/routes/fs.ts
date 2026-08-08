@@ -242,7 +242,7 @@ fsRouter.get('/fs/list', async (req, res) => {
   const entries: FsEntry[] = [];
   for (const name of names) {
     if (IGNORED.has(name)) continue;
-    // Hide hidden entries below top level so .claude/.config remain
+    // Hide hidden entries below top level so .zai/.config remain
     // visible at dir="" but not deeper.
     if (depthOf(dir) >= 1 && name.startsWith('.')) continue;
     const abs = `${safe.abs}${sep}${name}`;

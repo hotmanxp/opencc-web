@@ -1166,7 +1166,7 @@ export type AgentMcpServerSpec = string | Record<string, SDKUsage4>
 /** Definition for a custom subagent that can be invoked via the Agent tool. */
 export type AgentDefinition = SDKUsage52
 
-/** Source for loading filesystem-based settings. 'user' - Global user settings (~/.claude/settings.json). 'project' - Project settings (.claude/settings.json). 'local' - Local settings (.claude/settings.local.json). */
+/** Source for loading filesystem-based settings. 'user' - Global user settings (~/.zai/settings.json). 'project' - Project settings (.zai/settings.json). 'local' - Local settings (.zai/settings.local.json). */
 export type SettingSource = "user" | "project" | "local"
 
 /** Configuration for loading a plugin. */

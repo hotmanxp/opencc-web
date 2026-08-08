@@ -61,7 +61,7 @@ describe('loadUserCommands', () => {
     expect(cmds.map((c) => c.name)).toEqual(['good'])
   })
 
-  it('merges project-level .claude/commands with home-level commands', async () => {
+  it('merges project-level .zai/commands with home-level commands', async () => {
     const cwd = join(tmpHome, 'proj')
     const projDir = join(cwd, '.zai', 'commands')
     mkdirSync(projDir, { recursive: true })

@@ -320,7 +320,7 @@ export const WorkflowTool = {
   //   1. If the user previously answered `yes-always` for this
   //      workflowName, short-circuit to `allow` so the dialog never
   //      re-fires. The consent file lives in
-  //      `~/.claude/workflow-consents.json` (see workflowConsent.ts).
+  //      `~/.zai/workflow-consents.json` (see workflowConsent.ts).
   //   2. Otherwise, return `ask` with the WorkflowPermissionDialog
   //      prompt. The runtime permission system is responsible for
   //      rendering the dialog and calling `onPermissionAnswer` with

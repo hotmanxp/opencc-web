@@ -378,7 +378,7 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     initCommands({ cwd, dataDir: process.env.ZAI_DATA_DIR ?? '', sessionId: undefined })
   ).catch((err) => console.error('[initCommands] failed:', err))
 
-  // AGENTS.md / .claude/rules hot-reload watcher
+  // AGENTS.md / .zai/rules hot-reload watcher
   startMemoryWatcher({ cwd })
 
   // External include warning (best-effort, never blocks init)

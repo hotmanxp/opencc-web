@@ -244,9 +244,9 @@ export type GlobalConfig = {
   lastOnboardingVersion?: string
   // Tracks the last version for which release notes were seen, used for managing release notes
   lastReleaseNotesSeen?: string
-  // Timestamp when changelog was last fetched (content stored in ~/.claude/cache/changelog.md)
+  // Timestamp when changelog was last fetched (content stored in ~/.zai/cache/changelog.md)
   changelogLastFetched?: number
-  // @deprecated - Migrated to ~/.claude/cache/changelog.md. Keep for migration support.
+  // @deprecated - Migrated to ~/.zai/cache/changelog.md. Keep for migration support.
   cachedChangelog?: string
   mcpServers?: Record<string, McpServerConfig>
   // claude.ai MCP connectors that have successfully connected at least once.
@@ -1369,7 +1369,7 @@ function saveConfigWithLock<A extends object>(
 
     // Create timestamped backup of existing config before writing
     // We keep multiple backups to prevent data loss if a reset/corrupted config
-    // overwrites a good backup. Backups are stored in ~/.claude/backups/ to
+    // overwrites a good backup. Backups are stored in ~/.zai/backups/ to
     // keep the home directory clean.
     try {
       const fileBase = basename(file)
@@ -1512,7 +1512,7 @@ const LEGACY_GLOBAL_CONFIG_BASENAME = '.zai.json'
 
 /**
  * Returns the directory where config backup files are stored.
- * Uses ~/.claude/backups/ to keep the home directory clean.
+ * Uses ~/.zai/backups/ to keep the home directory clean.
  */
 function getConfigBackupDir(): string {
   return join(getClaudeConfigHomeDir(), 'backups')
@@ -1520,7 +1520,7 @@ function getConfigBackupDir(): string {
 
 /**
  * Find the most recent backup file for a given config file.
- * Checks ~/.claude/backups/ first, then falls back to the legacy location
+ * Checks ~/.zai/backups/ first, then falls back to the legacy location
  * (next to the config file) for backwards compatibility.
  * Returns the full path to the most recent backup, or null if none exist.
  */
@@ -1596,7 +1596,7 @@ function findMostRecentBackup(file: string): string | null {
 /**
  * Attempt to recover a config whose live file is present but corrupt by
  * reading the most recent healthy backup and parsing it. Backups in
- * ~/.claude/backups are written from previously-valid configs, so this lets a
+ * ~/.zai/backups are written from previously-valid configs, so this lets a
  * one-off bad write be undone instead of silently discarding the user's
  * settings. Returns the merged config when a backup exists and parses, or
  * undefined when there is no usable backup (#1807).
@@ -1710,7 +1710,7 @@ function getConfig<A>(
 
     // A present-but-corrupt config previously reset to defaults (or crashed the
     // startup validation path), discarding the user's settings even though
-    // healthy backups exist in ~/.claude/backups. Recover the most recent
+    // healthy backups exist in ~/.zai/backups. Recover the most recent
     // backup that still parses before doing anything destructive, so a one-off
     // bad write no longer wipes config or crashes startup (#1807).
     if (error instanceof ConfigParseError) {
