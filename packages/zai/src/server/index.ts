@@ -38,6 +38,7 @@ import {
 import { initStateBridge } from './services/stateBridge.js';
 import { initBashNotifier } from './services/bashNotifier.js';
 import { initZaiSettingsCache } from './services/zaiSettingsStore.js';
+import { runClaudeToZaiMigration } from './services/zaiMigration.js';
 import { startBranchChecker } from './routes/system.js';
 import { noCacheForApi } from './middleware/noCache.js';
 import { redirectMobileUA } from './middleware/redirectMobileUA.js';
@@ -83,6 +84,24 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   initZaiSettingsCache().catch((err) =>
     console.warn('[zai-settings-cache] boot init failed:', err),
   )
+
+  // One-shot boot-time migration: copy user data from ~/.claude/ to
+  // ~/.zai/ on first start so users upgrading from upstream claude-code
+  // keep their settings / agents / commands / plugins / skills / output
+  // styles. Guarded by sentinel + ZAI_DATA_DIR check inside; never throws.
+  // Runs alongside the settings cache init so the cache's tier-2 read of
+  // ~/.claude/settings.json still works even if the explicit copy below
+  // is a no-op (e.g. settings.json already exists in ~/.zai).
+  runClaudeToZaiMigration()
+    .then((r) => {
+      if (r.copied.length > 0) {
+        console.log(
+          `[zai-migration] copied ${r.copied.length} resource(s) from ~/.claude to ~/.zai` +
+            (r.errors.length > 0 ? ` (${r.errors.length} error(s))` : ''),
+        );
+      }
+    })
+    .catch((err) => console.warn('[zai-migration] boot migration failed:', err))
 
   // Init central instance supervisor before any router that depends on it.
   // Reads ~/.zai/instances.json (async, fire-and-forget); snapshots start
