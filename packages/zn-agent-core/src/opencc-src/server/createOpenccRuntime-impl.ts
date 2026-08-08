@@ -352,7 +352,16 @@ export async function createOpenccRuntimeImpl(options) {
     },
 
     async setEnabled(id, enabled) {
-      const op = await setPluginEnabledOp(id, enabled, 'user')
+      // Auto-detect the scope where the plugin lives rather than forcing
+      // 'user'. The UI displays the merged state across scopes, but a
+      // hardcoded user-scope write produced false "already disabled"
+      // errors whenever the plugin was enabled at project/local scope but
+      // absent from user-scope settings — the merged state was enabled
+      // while user-scope saw undefined. Letting setPluginEnabledOp resolve
+      // the most specific scope (local > project > user) keeps the toggle
+      // aligned with the visible state and matches the CLI's /plugin
+      // command behavior (ManagePlugins.tsx:1180,1194).
+      const op = await setPluginEnabledOp(id, enabled)
       if (!op.success) return { success: false, message: op.message }
       const reload = await reloadActive()
       if (reload === undefined) {

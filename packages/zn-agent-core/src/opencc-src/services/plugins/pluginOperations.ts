@@ -702,14 +702,20 @@ export async function setPluginEnabledOp(
   // When explicit scope given: check that scope's settings value directly
   // (merged state can be wrong if plugin is enabled elsewhere but disabled here).
   // When auto-detected: use merged effective state.
-  // When overriding a lower scope: check merged state — scopeSettingsValue is
-  // undefined (plugin not in this scope yet), which would read as "already
-  // disabled", but the whole point of the override is to write an explicit
-  // `false` that masks the lower scope's `true`.
-  const isCurrentlyEnabled =
+  // When overriding a lower scope: scopeSettingsValue is undefined (plugin not
+  // in this scope yet) — returning `undefined` here lets us write an explicit
+  // `false` to mask a higher scope's `true`. Same for plugins never declared
+  // in any scope but loaded as enabled by default — there's no existing entry
+  // to be idempotent against, so the operation should declare one.
+  const editableHas = getPluginEditableScopes().has(pluginId)
+  const isCurrentlyEnabled: boolean | undefined =
     scope && !isOverride
-      ? scopeSettingsValue === true
-      : getPluginEditableScopes().has(pluginId)
+      ? scopeSettingsValue === undefined
+        ? undefined
+        : scopeSettingsValue === true
+      : editableHas
+        ? true
+        : undefined
   if (enabled === isCurrentlyEnabled) {
     return {
       success: false,

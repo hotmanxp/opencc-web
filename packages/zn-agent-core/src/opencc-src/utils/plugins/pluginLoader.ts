@@ -114,6 +114,7 @@ import {
   type PluginMarketplaceEntry,
   type PluginSource,
 } from './schemas.js'
+import { getUserConfigJson } from '../userConfigJson.js'
 import {
   convertDirectoryToZipInPlace,
   extractZipToDirectory,
@@ -2071,9 +2072,12 @@ async function loadPluginsFromMarketplaces({
   errors: PluginError[]
 }> {
   const settings = getSettings_DEPRECATED()
-  // Merge --add-dir plugins at lowest priority; standard settings win on conflict
+  // user-scope 开关的真值已搬到 ~/.zai.json(userConfigJson.ts),pluginLoader
+  // 也读它。settings.enabledPlugins 只承载 project/local 覆盖,放最后写以确保
+  // 高优先级胜出。
   const enabledPlugins = {
     ...getAddDirEnabledPlugins(),
+    ...(getUserConfigJson().enabledPlugins ?? {}),
     ...(settings.enabledPlugins || {}),
   }
   const plugins: LoadedPlugin[] = []
