@@ -1,5 +1,10 @@
 import type { BackgroundTask } from '@zn-ai/zn-agent-core'
-import { getRuntime, getCurrentSessionId, setCurrentSessionId } from './agentRuntime.js'
+import {
+  getRuntime,
+  getCurrentSessionId,
+  setCurrentSessionId,
+  hasActiveQuery,
+} from './agentRuntime.js'
 import { resolveModel } from '../lib/resolveModel.js'
 import { eventBus } from './eventBus.js'
 import { translateRuntimeEvents } from '../routes/agent.js'
@@ -35,6 +40,31 @@ export interface SubagentNotifierOptions {
 
 let notifier: SubagentNotifier | null = null
 
+// zai patch (2026-08-09): 父 session 主线活跃时暂存的子代理完成通知。
+// 子代理完成时若父 query 正在跑,直接 submitMessage 会与主线并行
+// (BashNotifier 同构问题:通知 query 加载完整父上下文,模型可能续跑
+// 主任务 → 重复执行 → 请求叠加)。主线结束后由
+// flushPendingSubagentNotifications 补发,保证通知 query 不与主线并行。
+const pendingNotifications = new Map<string, BackgroundTask[]>()
+
+/** 补发某 session 暂存的子代理完成通知。主线 query 结束(agent.ts finally)时调用。 */
+export function flushPendingSubagentNotifications(sessionId: string): void {
+  const tasks = pendingNotifications.get(sessionId)
+  if (!tasks || tasks.length === 0) return
+  pendingNotifications.delete(sessionId)
+  // 主线已结束(idle),重新走 handle —— running 守卫放行,注入通知。
+  for (const task of tasks) {
+    void (notifier?.handle(task) ?? Promise.resolve()).catch((err) =>
+      console.warn('[SubagentNotifier] flush failed:', err),
+    )
+  }
+}
+
+/** 测试 seam:清空暂存队列。 */
+export function __resetSubagentNotifierPendingForTests(): void {
+  pendingNotifications.clear()
+}
+
 export class SubagentNotifier {
   private readonly getRuntimeFn: typeof getRuntime
 
@@ -58,6 +88,17 @@ export class SubagentNotifier {
     const parentSessionId = task.parentSessionId
     if (!parentSessionId) return
     if (parentSessionId === 'sess-unknown') return // 兜底:无父 session 的占位 ID
+
+    // zai patch (2026-08-09): running 守卫 —— 父 session 主线活跃时不
+    // 并行注入通知 query(对齐 BashNotifier 修复)。通知暂存,主线结束后
+    // 由 flushPendingSubagentNotifications 补发。避免通知 query 与主线
+    // 并行、各自加载完整父上下文重复执行主任务。
+    if (hasActiveQuery(parentSessionId)) {
+      const list = pendingNotifications.get(parentSessionId) ?? []
+      list.push(task)
+      pendingNotifications.set(parentSessionId, list)
+      return
+    }
 
     try {
       await this.inject(task)

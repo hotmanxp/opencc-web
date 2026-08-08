@@ -28,6 +28,7 @@ import {
   appendToolResult,
 } from "@zn-ai/zn-agent-core/runtime";
 import { getDefaultMode } from "../services/permissionMode.js";
+import { flushPendingSubagentNotifications } from "../services/subagentNotifier.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
 import { resolveModel } from "../lib/resolveModel.js";
@@ -1151,6 +1152,10 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // release 只删 map 项, 不主动 .abort(). abort 已经发生过的 controller
     // 自然 abort, 还没发生的就让它跑完.
     releaseSessionController(sessionId)
+    // zai patch (2026-08-09): 主线 query 结束(idle)后补发暂存的子代理
+    // 完成通知。子代理完成时若主线活跃,SubagentNotifier 暂存通知
+    // (running 守卫),这里 flush 让通知在主线结束后注入,不与主线并行。
+    flushPendingSubagentNotifications(sessionId)
   }
   })
 }

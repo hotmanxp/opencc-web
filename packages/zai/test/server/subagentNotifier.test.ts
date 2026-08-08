@@ -1,5 +1,15 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
-import { SubagentNotifier, renderTaskNotificationMessage } from '../../src/server/services/subagentNotifier.js'
+import {
+  SubagentNotifier,
+  renderTaskNotificationMessage,
+  flushPendingSubagentNotifications,
+  __resetSubagentNotifierPendingForTests,
+  __setSubagentNotifier,
+} from '../../src/server/services/subagentNotifier.js'
+import {
+  registerSessionController,
+  releaseSessionController,
+} from '../../src/server/services/agentRuntime.js'
 import type { BackgroundTask } from '@zn-ai/zn-agent-core'
 
 let lastRunOpts: any = null
@@ -37,9 +47,13 @@ beforeEach(() => {
     { type: 'message_start' },
     { type: 'message_stop' },
   ]
+  __resetSubagentNotifierPendingForTests()
 })
 
 afterEach(() => {
+  releaseSessionController('sess-parent')
+  __resetSubagentNotifierPendingForTests()
+  __setSubagentNotifier(null)
   vi.restoreAllMocks()
 })
 
@@ -141,5 +155,31 @@ describe('SubagentNotifier.handle', () => {
     // 不应 throw
     await expect(n.handle(makeTask())).resolves.toBeUndefined()
     expect(warn).toHaveBeenCalled()
+  })
+
+  test('父 session 主线活跃 (running 守卫) → 暂存通知,不注入', async () => {
+    registerSessionController('sess-parent', new AbortController())
+    const n = new SubagentNotifier({ getRuntime: () => mockRuntime as any })
+    await n.handle(makeTask({ status: 'completed', resultText: 'hi' }))
+    expect(lastRunOpts).toBeNull()
+  })
+
+  test('主线结束后 flushPendingSubagentNotifications → 补发注入', async () => {
+    // flush 走模块单例,先注册带 mock runtime 的单例
+    __setSubagentNotifier(
+      new SubagentNotifier({ getRuntime: () => mockRuntime as any }),
+    )
+    registerSessionController('sess-parent', new AbortController())
+    const n = new SubagentNotifier({ getRuntime: () => mockRuntime as any })
+    await n.handle(makeTask({ status: 'completed', resultText: 'hi' }))
+    expect(lastRunOpts).toBeNull() // 活跃时不注入
+
+    releaseSessionController('sess-parent')
+    flushPendingSubagentNotifications('sess-parent')
+    // flush 是 fire-and-forget,等微任务
+    await new Promise((r) => setTimeout(r, 10))
+    expect(lastRunOpts).not.toBeNull()
+    expect(lastRunOpts.sessionId).toBe('sess-parent')
+    expect(lastRunOpts.prompt).toContain('<result>hi</result>')
   })
 })
