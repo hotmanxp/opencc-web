@@ -11,6 +11,8 @@ import type { BackgroundRuntime } from './BackgroundRuntime.js'
 import {
   RETRY_POLICY,
   classifyRetryableError,
+  enterRateLimitCooldown,
+  getRateLimitCooldownRemainingMs,
   getRetryDelay,
   retrySleep,
 } from './retryPolicy.js'
@@ -574,8 +576,21 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
               break
             }
           }
+          // zai patch (2026-08-08): 429(rate_limit)进入冷却门。MiniMax
+          // 的 TPM 限流通常持续 >30s,指数退避在限流恢复前反复打 API,
+          // 多个后台任务并发时互相放大。收到 429 后重试至少等到冷却窗口
+          // 结束再发(与主会话 withRetry 的 per-provider 冷却门对齐)。
+          if (decision.category === 'llm_provider_rate_limit') {
+            enterRateLimitCooldown()
+          }
           // 计算 backoff, 等完再 retry
-          const delayMs = getRetryDelay(consecutive529 > 0 ? consecutive529 : attempt)
+          let delayMs = getRetryDelay(
+            consecutive529 > 0 ? consecutive529 : attempt,
+          )
+          const cooldownRemainingMs = getRateLimitCooldownRemainingMs()
+          if (cooldownRemainingMs > delayMs) {
+            delayMs = cooldownRemainingMs
+          }
           await retrySleep(delayMs, rec.controller.signal)
           // sleep 中被 abort → 退出
           if (rec.controller.signal.aborted) break

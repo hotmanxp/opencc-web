@@ -1,11 +1,18 @@
-import { describe, it, expect, vi } from 'vitest'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
 import {
   classifyRetryableError,
   retrySleep,
   isQuotaExhausted,
   getRetryDelay,
+  enterRateLimitCooldown,
+  getRateLimitCooldownRemainingMs,
+  __resetRateLimitCooldownForTests,
   RETRY_POLICY,
 } from '../../../src/compat/background/retryPolicy.js'
+
+beforeEach(() => {
+  __resetRateLimitCooldownForTests()
+})
 
 describe('classifyRetryableError', () => {
   it('429 rate limit 判为可重试 transient capacity', () => {
@@ -101,6 +108,30 @@ describe('retrySleep abort listener 清理', () => {
     const start = Date.now()
     await retrySleep(5)
     expect(Date.now() - start).toBeLessThan(100)
+  })
+})
+
+describe('429 冷却门', () => {
+  it('未冷却时剩余为 0', () => {
+    expect(getRateLimitCooldownRemainingMs()).toBe(0)
+  })
+
+  it('enterRateLimitCooldown 后剩余时间 > 0 且 <= 窗口', () => {
+    enterRateLimitCooldown(30_000)
+    const remaining = getRateLimitCooldownRemainingMs()
+    expect(remaining).toBeGreaterThan(0)
+    expect(remaining).toBeLessThanOrEqual(30_000)
+  })
+
+  it('默认窗口为 30s', () => {
+    enterRateLimitCooldown()
+    expect(getRateLimitCooldownRemainingMs()).toBeGreaterThan(29_000)
+  })
+
+  it('短窗口到期后剩余归 0', async () => {
+    enterRateLimitCooldown(10)
+    await new Promise((r) => setTimeout(r, 30))
+    expect(getRateLimitCooldownRemainingMs()).toBe(0)
   })
 })
 

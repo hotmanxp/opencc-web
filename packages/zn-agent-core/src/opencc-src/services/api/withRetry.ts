@@ -154,6 +154,17 @@ function setRateLimitCooldown(retryAfterMs?: number | null): void {
   rateLimitCooldowns.set(getAPIProvider(), { until: Date.now() + windowMs })
 }
 
+/**
+ * zai patch (2026-08-08): streaming-mode 的 429/529 错误发生在 withRetry
+ * 的 operation 之外(错误在流迭代时抛出),不会走本模块 catch →
+ * setRateLimitCooldown 的路径,导致限流后冷却门从不生效、请求在
+ * 429 后立刻重发(请求风暴)。export 通知入口,让 claude.ts 的流错误
+ * 处理处补触发同一个冷却门,使后续请求在 getRateLimitGate 等待窗口结束。
+ */
+export function notifyRateLimitCooldown(retryAfterMs?: number | null): void {
+  setRateLimitCooldown(retryAfterMs ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS)
+}
+
 /** 测试 seam:清空冷却门状态,避免单测间互相污染。 */
 export function __resetRateLimitStateForTests(): void {
   rateLimitCooldowns.clear()

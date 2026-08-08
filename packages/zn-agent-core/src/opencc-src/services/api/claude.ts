@@ -258,6 +258,7 @@ import {
   CannotRetryError,
   FallbackTriggeredError,
   is529Error,
+  notifyRateLimitCooldown,
   type RetryContext,
   withRetry,
 } from './withRetry.js'
@@ -797,6 +798,25 @@ export function getClaudeStreamingAbortLogMessage(
   streamingError: unknown,
 ): string {
   return getStreamingAbortMessage(signal.reason, errorMessage(streamingError))
+}
+
+/**
+ * zai patch (2026-08-08): duck-type 判断流中错误是否为 rate-limit /
+ * overloaded。MiniMax proxy 在 streaming 模式下抛出的 429 error 对象
+ * `error.status` 不可靠(与 is529Error 注释的 SDK status 丢失是同类问题),
+ * 所以除了 status 还匹配 message 里的 rate_limit / rate limit / tpm 标记。
+ */
+export function isStreamingRateLimitError(err: unknown): boolean {
+  if (is529Error(err)) return true
+  if (!err || typeof err !== 'object') return false
+  const e = err as { status?: unknown; message?: unknown }
+  if (e.status === 429) return true
+  const msg = typeof e.message === 'string' ? e.message.toLowerCase() : ''
+  return (
+    msg.includes('rate_limit') ||
+    msg.includes('rate limit') ||
+    msg.includes('tpm')
+  )
 }
 
 export function getClaudeExpectedSideTaskApiAbortLogMessage(
@@ -2629,6 +2649,18 @@ async function* queryModel(
           getClaudeStreamingAbortLogMessage(signal, streamingError),
         )
         throw new APIUserAbortError()
+      }
+
+      // zai patch (2026-08-08): streaming-mode 的 429/529 错误发生在
+      // withRetry 的 operation 之外(错误在流迭代时抛出),不触发
+      // withRetry 内部的 rateLimitCooldowns 冷却门。这里补触发冷却,
+      // 让后续请求(agent 下一轮 / 并发会话 / non-streaming fallback)
+      // 在 withRetry 循环顶部的 gate 等待窗口结束,避免 429 后立刻
+      // 重发形成请求风暴(会话 sess-1786201578807 现场:429 后 2 秒内
+      // 并行重发相同命令)。MiniMax 的 TPM 限流通常持续 >30s,30s
+      // 冷却窗口能覆盖限流恢复期。
+      if (isStreamingRateLimitError(streamingError)) {
+        notifyRateLimitCooldown()
       }
 
       // When the flag is enabled, skip the non-streaming fallback and let the
