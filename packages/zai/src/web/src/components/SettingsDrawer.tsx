@@ -27,9 +27,10 @@
  * onChange 由父组件 SettingsDrawer 接到 store / 写盘动作(后续阶段)。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Drawer, Modal } from 'antd'
+import { Button, Drawer, Modal, message } from 'antd'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
+import { useInstanceStore } from '../store/useInstanceStore.js'
 import { requestRestart } from '../lib/systemApi.js'
 import type { OutputStyle } from '../../../shared/settings.js'
 
@@ -731,6 +732,30 @@ export default function SettingsDrawer() {
   // 'default' 时立即展开,'default' 切到 'compact' 时立即折叠;避免用户得再点
   // 一次工具栏按钮才生效.
   const setTranscriptCollapsed = useAgentStore((s) => s.setTranscriptCollapsed)
+  // 重启按钮"对接到实例管理的重启":用 instanceContext.port 匹配当前正在
+  // 访问的 instance(而非 supervisor 的 __current__ 占位),调
+  // /api/instances/{id}/restart 走 supervisor 的 stop+start 路径。失败
+  // 时回退到 service restart(/api/system/restart → managed-child IPC →
+  // supervisor respawn),所以即便当前访问的是 __current__ 也能 fall
+  // through 到原始的 system.restarting 链路。详见 useInstanceStore。
+  //
+  // 拉取 instance 列表刻意延迟到 onOk 时触发(modal 确认后),而不是
+  // drawer 打开就拉——这样不会污染"cancel 后 fetch 没被调用"这类测试,
+  // 也避免 drawer 在用户浏览其他设置时就触发一次额外请求。
+  const instances = useInstanceStore((s) => s.instances)
+  const loadInstances = useInstanceStore((s) => s.loadInstances)
+  const currentPort = useAppStore((s) => s.instanceContext?.port ?? null)
+  // 当前正在访问的 instance:用当前 zai 进程的 port 去 instance 列表里
+  // 匹配,匹配上的那一条就是用户浏览器实际访问的 instance(可能是 supervisor
+  // 启动的某个 child,也可能就是 supervisor 自己的 __current__ 条目)。
+  // 匹配不到说明 instanceSupervisor 还没初始化(比如 zai dev),退回到
+  // __current__ 标志位那条。
+  const currentInstance = (() => {
+    if (currentPort == null) return null
+    const byPort = instances.find((s) => s.port === currentPort)
+    if (byPort) return byPort
+    return instances.find((s) => s.isCurrent) ?? null
+  })()
 
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
@@ -917,6 +942,54 @@ export default function SettingsDrawer() {
                 okText: '重启',
                 cancelText: '取消',
                 onOk: async () => {
+                  // 优先走实例管理重启:从 useInstanceStore 拿当前正在
+                  // 访问的 instance,调 /api/instances/{id}/restart(走
+                  // supervisor 的 stop+start 路径,与实例管理页面"重启"
+                  // 按钮完全一致的逻辑)。这条路径在 zai start --managed
+                  // 下可用,且对 supervisor 启动的其他 instance 也成立。
+                  //
+                  // Fallback 触发条件:
+                  //   - 当前 instance 是 supervisor 自己的 __current__,
+                  //     supervisor 拒绝重启自己(避免自杀循环)
+                  //   - store 里没找到匹配 port 的 instance
+                  //   - 实例 API 返回 4xx/5xx
+                  // 全部走 /api/system/restart(managed-child IPC →
+                  // supervisor respawn),与原先"重启服务"按钮语义一致。
+                  //
+                  // store 空时按需触发一次拉取——日常 layout hydrate 已
+                  // 拉过,这里只兜底冷启动/缓存失败的边角场景。
+                  let target = currentInstance
+                  if (!target) {
+                    await loadInstances().catch(() => {})
+                    const fresh = useInstanceStore.getState().instances
+                    const port = useAppStore.getState().instanceContext?.port ?? null
+                    target = port != null ? fresh.find((s) => s.port === port) ?? null : null
+                    if (!target) target = fresh.find((s) => s.isCurrent) ?? null
+                  }
+                  if (target && target.id !== '__current__') {
+                    try {
+                      const res = await fetch(
+                        `/api/instances/${encodeURIComponent(target.id)}/restart`,
+                        { method: 'POST' },
+                      )
+                      if (res.ok) return
+                      // 4xx/5xx → fallback 到 service restart
+                      const errBody = (await res.json().catch(() => ({}))) as {
+                        error?: string
+                      }
+                      message.warning(
+                        errBody.error
+                          ? `实例重启失败,回退到服务重启: ${errBody.error}`
+                          : '实例重启失败,回退到服务重启',
+                      )
+                    } catch (err) {
+                      message.warning(
+                        `实例重启请求失败,回退到服务重启: ${
+                          err instanceof Error ? err.message : String(err)
+                        }`,
+                      )
+                    }
+                  }
                   await requestRestart('user_action')
                 },
               })
