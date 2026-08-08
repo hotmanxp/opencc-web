@@ -33,6 +33,15 @@
 - **CodeGraph 优先**:理解代码用 `codegraph_explore` 单调用,不要 grep + read 轮询;索引未初始化时跑 `codegraph init -i`。`codegraph_context` / `codegraph_trace` 当前 v1.4.1 不可用。
 - **端口使用(必查)**:启动 `zai dev` / `zai start` 或任何本地服务前,先 `lsof -i :<port>` 确认端口空闲再起。显式 `--port` / `--api-port` 被占用必须报错退出(EADDRINUSE,dev.ts/start.ts 已实现),**禁止**静默递增换端口——多个实例静默换端口共享同一 API key 是请求风暴根因(见 `docs/superpowers/plans/` 请求风暴修复)。只有未显式指定端口时才允许自动扫描(`ports.ts resolveServerPort`)。开发中如需多实例,用不同 `--port` 显式指定空闲端口。
 - **小步可逆**:实现细节见 `docs/DEVELOPMENT_REFERENCE.md`;设计/取舍见 `docs/superpowers/specs/` 与对应 `plans/`。
+- **测试粒度:功能改动后只跑相关单元测试**:`pnpm -r test` 全量跑 zai + zn-agent-core 全部 190+ 测试文件 / 1400+ 用例,冷启动 ~30s+ 解析 + 数十秒执行,日常反馈太慢。功能改动后只跑**直接受影响**的测试文件(以及它们的依赖文件若有连锁影响),用路径过滤:
+  ```bash
+  # 改了 packages/zai/src/web/src/components/SettingsDrawer.tsx
+  pnpm --filter @zn-ai/zai test src/web/src/components/SettingsDrawer.test.tsx \
+                                test/web/components/SettingsDrawer.restart.test.tsx
+  # 改了 packages/zai/src/server/routes/instances.ts
+  pnpm --filter @zn-ai/zai test test/server/routes/instances.test.ts
+  ```
+  仅在以下情况才跑 `pnpm -r test`:跨 workspace 重构、合并前 sanity check、CI 镜像。**禁止**把全量测试当成"完成前必跑"——这是浪费 token 和时间,反馈回路越长越容易错过真实问题。
 
 ## 常用验证命令
 
@@ -40,9 +49,9 @@
 # TypeScript 类型检查(顶层 + 各 workspace)
 pnpm -r exec tsc --noEmit
 
-# 单元测试
-pnpm -r test                  # 全部
-pnpm -r test -t "<pattern>"   # 单文件 / 单用例
+# 单元测试 — 只跑相关文件,不要全量
+pnpm --filter @zn-ai/zai test <path/to/file.test.tsx>   # 单文件
+pnpm -r test -t "<describe-block-name>"                  # 按 describe 名匹配
 
 # 启动 dev(zai + 前端)
 pnpm --filter @zn-ai/zai dev
