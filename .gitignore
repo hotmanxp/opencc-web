@@ -25,7 +25,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # TypeScript
-**/tsconfig.tsbuildinfo
+**/tsconfig*.tsbuildinfo
 
 # Coverage (vitest --coverage output)
 coverage/
