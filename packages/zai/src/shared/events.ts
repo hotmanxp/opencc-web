@@ -159,6 +159,8 @@ const SystemEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('system.restarting'),
              reason: z.enum(['user_action','auto_recovery','update']),
              deadlineMs: z.number() }),
+  z.object({ ...Base.shape, type: z.literal('system.stopping'),
+             deadlineMs: z.number() }),
   z.object({ ...Base.shape, type: z.literal('system.restart.canceled') }),
 ])
 
