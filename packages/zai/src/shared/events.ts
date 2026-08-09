@@ -7,7 +7,12 @@ const Base = z.object({
 
 const RuntimeEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('runtime.started'),
-             sessionId: z.string(), turnIndex: z.number() }),
+             sessionId: z.string(), turnIndex: z.number(),
+             // zai patch (2026-08-09): 把 metrics 提升到 runtime.started
+             // 上推送,每次 LLM 调用起点就刷新一次,不再等 runtime.done
+             // (整条 prompt 跑完才发一次)。详见 routes/agent.ts 注释。
+             apiRequestCount: z.number().optional(),
+             contextTokens: z.number().optional() }),
   z.object({ ...Base.shape, type: z.literal('runtime.delta'),
              sessionId: z.string(), turnIndex: z.number(),
              delta: z.string() }),

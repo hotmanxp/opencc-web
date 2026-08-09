@@ -231,7 +231,20 @@ export async function* translateRuntimeEvents(
     const t = ev.type as string | undefined;
     switch (t) {
       case "message_start":
-        yield { type: "runtime.started", sessionId, turnIndex };
+        // zai patch (2026-08-09): 把 metrics 提升到 runtime.started 推送。
+        // 中间轮次的 message_stop 被 sdkEventAdapter 抑制(避免冻结 vendor
+        // 工具循环),导致整条 prompt 期间 apiRequestCount / contextTokens
+        // 都不更新。这里在每次 LLM 调用起点(message_start 不被抑制)同步
+        // 推送:recordApiCall() 已在 claude.ts:1877 早于 message_start 触发,
+        // getContextTokensForSession 在 message_start 路径上拿到的是上一轮
+        // message_delta 的最终值,作为"本轮入站 context"显示稳定。
+        yield {
+          type: "runtime.started",
+          sessionId,
+          turnIndex,
+          apiRequestCount: getApiCallCount(sessionId),
+          contextTokens: getContextTokensForSession(sessionId) ?? undefined,
+        };
         break;
       case "content_block_start": {
         const block = ev.content_block as

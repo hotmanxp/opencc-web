@@ -1329,6 +1329,38 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             textSegmentRev: s.textSegmentRev + 1,
           }))
         }
+        // zai patch (2026-08-09): 把 metrics 更新挂在 runtime.started 上。
+        // server 在每次 LLM 调用起点就推这两个字段(claude.ts:1877
+        // recordApiCall 已早于 message_start 触发,getContextTokensForSession
+        // 在 message_start 路径拿到上一轮 message_delta 的最终值) —
+        // 中间轮次的 message_stop 被 sdkEventAdapter 抑制导致 runtime.done
+        // 频率太低,挂在 started 上就能逐 turn 推送。与下方 runtime.done
+        // 用同一 Math.max 防御保证单调增。
+        const startedApi = (event as { apiRequestCount?: unknown }).apiRequestCount
+        const startedCtx = (event as { contextTokens?: unknown }).contextTokens
+        if (typeof startedApi === 'number' || typeof startedCtx === 'number') {
+          useAgentStore.setState((s) => {
+            const next: {
+              apiRequestCountBySession?: Record<string, number>
+              contextTokensBySession?: Record<string, number>
+            } = {}
+            if (typeof startedApi === 'number') {
+              const prev = s.apiRequestCountBySession[sid] ?? 0
+              next.apiRequestCountBySession = {
+                ...s.apiRequestCountBySession,
+                [sid]: Math.max(prev, startedApi),
+              }
+            }
+            if (typeof startedCtx === 'number') {
+              const prev = s.contextTokensBySession[sid] ?? 0
+              next.contextTokensBySession = {
+                ...s.contextTokensBySession,
+                [sid]: Math.max(prev, startedCtx),
+              }
+            }
+            return next
+          })
+        }
         return
       }
       case 'runtime.delta': {
@@ -1437,38 +1469,45 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         })
         return
       case 'runtime.done': {
-        // 还有排队任务时保持 streaming, 等 queue.changed + 下一条
-        // runtime.started 自然流转; 队列清空才回 idle。
-        if (useAgentStore.getState().queuedPrompts.length > 0) return
         // zai patch (2026-08-09): 累加 API 请求次数 + 当前上下文大小。
         // server 端 vendor sessionApiCounter 单调增,apiRequestCount 直接
         // 覆盖 sid→total;用 max 防御 SSE snapshot replay 出现 stale total
         // > current 的极端场景。contextTokens 也直接覆盖(usage 字段本身
         // 就是 cumulative,新值总是 ≥ 旧值,但仍走 max 防御)。
+        //
+        // 关键: metric 更新必须在 queuedPrompts 早退守卫之前执行 —
+        // 用户连发 A/B/C 三条 prompt,A 的 runtime.done 触发时
+        // queuedPrompts 已有 B/C,旧逻辑整个 case 早退,A 的 metrics 永远
+        // 推不到前端,直到 C 跑完才一次性更新。拆开后:metric 每次
+        // runtime.done 必推,status 才受排队守卫影响。
         const incoming = (event as { apiRequestCount?: unknown }).apiRequestCount
-        if (typeof incoming === 'number') {
+        const incomingContext = (event as { contextTokens?: unknown }).contextTokens
+        if (typeof incoming === 'number' || typeof incomingContext === 'number') {
           useAgentStore.setState((s) => {
-            const prev = s.apiRequestCountBySession[sid] ?? 0
-            return {
-              apiRequestCountBySession: {
+            const next: {
+              apiRequestCountBySession?: Record<string, number>
+              contextTokensBySession?: Record<string, number>
+            } = {}
+            if (typeof incoming === 'number') {
+              const prev = s.apiRequestCountBySession[sid] ?? 0
+              next.apiRequestCountBySession = {
                 ...s.apiRequestCountBySession,
                 [sid]: Math.max(prev, incoming),
-              },
+              }
             }
-          })
-        }
-        const incomingContext = (event as { contextTokens?: unknown }).contextTokens
-        if (typeof incomingContext === 'number') {
-          useAgentStore.setState((s) => {
-            const prev = s.contextTokensBySession[sid] ?? 0
-            return {
-              contextTokensBySession: {
+            if (typeof incomingContext === 'number') {
+              const prev = s.contextTokensBySession[sid] ?? 0
+              next.contextTokensBySession = {
                 ...s.contextTokensBySession,
                 [sid]: Math.max(prev, incomingContext),
-              },
+              }
             }
+            return next
           })
         }
+        // 还有排队任务时保持 streaming, 等 queue.changed + 下一条
+        // runtime.started 自然流转; 队列清空才回 idle。
+        if (useAgentStore.getState().queuedPrompts.length > 0) return
         useAgentStore.getState().setStatus('idle')
         return
       }

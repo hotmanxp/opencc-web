@@ -454,3 +454,123 @@ describe('会话级 429 冷却', () => {
     expect(getSessionRateLimitRemainingMs('sess-unknown')).toBe(0)
   })
 })
+
+// zai patch (2026-08-09): runtime.started 在每次 LLM 调用起点就推送
+// apiRequestCount / contextTokens,不再等 runtime.done(整条 prompt 跑完
+// 才发一次)。中间轮次的 message_stop 被 sdkEventAdapter 抑制,导致
+// metrics 长期不更新 — 挂在 runtime.started 上就逐 turn 推送。
+//
+// 这里直接测 translateRuntimeEvents 的 message_start 路径:前置
+// sessionApiCounter state(recordApiCall + setLastContextUsage),然后
+// 投一条 message_start,断言 eventBus 推出来的 runtime.started 携带
+// 正确的 metrics 字段。
+describe('translateRuntimeEvents — runtime.started 携带 metrics', () => {
+  // 直接 import sessionApiCounter 改 globalThis。zai 服走 dist/.js
+  // (globalThis 共享),测试用源模块 set,agent.ts 用同一模块 set/get
+  // (通过 runtime path 走 dist 时也读 globalThis)— 两条路径都打到
+  // 同一个 globalThis.__zaiApiCounts / __zaiApiCountLastUsage,断言稳。
+  let counter: typeof import('@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter')
+
+  beforeEach(async () => {
+    counter = await import('@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter')
+    counter.__resetApiCallCountsForTests()
+    counter.setCurrentApiCountSession(null)
+  })
+
+  it('message_start 翻译成 runtime.started 时携带 apiRequestCount + contextTokens', async () => {
+    counter.setCurrentApiCountSession('sess-metrics-1')
+    // 模拟 vendor 一次 LLM 调用:recordApiCall +1,setLastContextUsage 写入
+    counter.recordApiCall()
+    counter.recordApiCall() // 第二次 (代表历史已累计 2 次)
+    counter.setLastContextUsage({
+      input: 1234,
+      cache_creation: 56,
+      cache_read: 78,
+      output: 0,
+    })
+    // input + cache_creation + cache_read = 1234 + 56 + 78 = 1368
+    runtimeToolEvents = [
+      { type: 'message_start' },
+      { type: 'message_stop' },
+    ]
+    const { eventBus } = await import('../../src/server/services/eventBus.js')
+    const busEvents: any[] = []
+    const off = eventBus.subscribe((e) => busEvents.push(e))
+    try {
+      const { url, close } = await startApp()
+      try {
+        const res = await fetch(`${url}/api/agent/prompt`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: 'hello',
+            sessionId: 'sess-metrics-1',
+          }),
+        })
+        expect(res.status).toBe(200)
+        const reader = res.body!.getReader()
+        while (true) {
+          const { done } = await reader.read()
+          if (done) break
+        }
+        await new Promise((r) => setTimeout(r, 50))
+        const started = busEvents.find((e) => e.type === 'runtime.started')
+        expect(started).toBeDefined()
+        expect(started.apiRequestCount).toBe(2)
+        expect(started.contextTokens).toBe(1368)
+        // runtime.done 路径也得带同样数字 — 同一 source of truth,
+        // 两条路径分别覆盖逐 turn 刷新 + 整 prompt 终结兜底。
+        const done = busEvents.find((e) => e.type === 'runtime.done')
+        expect(done).toBeDefined()
+        expect(done.apiRequestCount).toBe(2)
+        expect(done.contextTokens).toBe(1368)
+      } finally {
+        close()
+      }
+    } finally {
+      off()
+    }
+  })
+
+  it('没有前置 metrics 时,runtime.started 的 apiRequestCount 为 0,contextTokens 为 undefined', async () => {
+    runtimeToolEvents = [
+      { type: 'message_start' },
+      { type: 'message_stop' },
+    ]
+    const { eventBus } = await import('../../src/server/services/eventBus.js')
+    const busEvents: any[] = []
+    const off = eventBus.subscribe((e) => busEvents.push(e))
+    try {
+      const { url, close } = await startApp()
+      try {
+        const res = await fetch(`${url}/api/agent/prompt`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            prompt: 'hello',
+            sessionId: 'sess-metrics-2',
+          }),
+        })
+        expect(res.status).toBe(200)
+        const reader = res.body!.getReader()
+        while (true) {
+          const { done } = await reader.read()
+          if (done) break
+        }
+        await new Promise((r) => setTimeout(r, 50))
+        const started = busEvents.find((e) => e.type === 'runtime.started')
+        expect(started).toBeDefined()
+        // getApiCallCount 在没有 recordApiCall 时返回 0(显式 number),
+        // getContextTokensForSession 返回 null → (?? undefined) → undefined.
+        // 前端 reducer 对 0 走 Math.max(prev, 0) = prev(默认 0),
+        // 不破坏既有的 prev > 0 的累加路径;对 undefined 跳过更新。
+        expect(started.apiRequestCount).toBe(0)
+        expect(started.contextTokens).toBeUndefined()
+      } finally {
+        close()
+      }
+    } finally {
+      off()
+    }
+  })
+})
