@@ -163,3 +163,112 @@ describe('useBashRepl — topCommands (Task 4)', () => {
     expect(result.current.topCommands).toEqual([])
   })
 })
+
+// -----------------------------------------------------------------------------
+// wait=true 模式 — exec 透传给 execRepl,返回值带 code/signal/durationMs
+// -----------------------------------------------------------------------------
+
+describe('useBashRepl — exec wait 模式', () => {
+  beforeEach(() => {
+    MockEventSource.instances.length = 0
+    fetchMock.mockReset()
+  })
+
+  it('exec(cmd, {wait:true}) 把 {wait:true} 透传给 execRepl,并把 code/signal 透传出来', async () => {
+    // wait=true 模式:execRepl 应被以 wait:true 调用,返回值含 code/signal/durationMs。
+    fetchMock.mockImplementation(async (url: any) => {
+      const u = typeof url === 'string' ? url : ''
+      if (u.includes('/exec')) {
+        const body = JSON.parse((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body as string)
+        expect(body.wait).toBe(true)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            execId: 'e-wait',
+            code: 0,
+            signal: null,
+            durationMs: 42,
+          }),
+        } as unknown as Response
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ entries: [] }),
+        text: async () => JSON.stringify({ entries: [] }),
+      } as unknown as Response
+    })
+    const { result } = renderHook(() => useBashRepl('sess-1', '/tmp'))
+    let execResult: any
+    await act(async () => {
+      execResult = await result.current.exec('echo hello', { wait: true })
+    })
+    expect(execResult.ok).toBe(true)
+    expect(execResult.execId).toBe('e-wait')
+    expect(execResult.code).toBe(0)
+    expect(execResult.signal).toBeNull()
+    expect(execResult.durationMs).toBe(42)
+  })
+
+  it('exec(cmd) (不传 wait) 不带 wait 字段 (向后兼容 fire-and-forget)', async () => {
+    fetchMock.mockImplementation(async (url: any) => {
+      const u = typeof url === 'string' ? url : ''
+      if (u.includes('/exec')) {
+        const body = JSON.parse((fetchMock.mock.calls.at(-1)?.[1] as RequestInit).body as string)
+        expect(body.wait).toBeUndefined()
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, execId: 'e-ff' }),
+        } as unknown as Response
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ entries: [] }),
+        text: async () => JSON.stringify({ entries: [] }),
+      } as unknown as Response
+    })
+    const { result } = renderHook(() => useBashRepl('sess-1', '/tmp'))
+    let execResult: any
+    await act(async () => {
+      execResult = await result.current.exec('echo no-wait')
+    })
+    expect(execResult.ok).toBe(true)
+    expect(execResult.code).toBeUndefined() // fire-and-forget 不带 code
+    expect(execResult.durationMs).toBeUndefined()
+  })
+
+  it('wait=true 返回 code 非 0 → 调用方可读 result.code 判断失败', async () => {
+    fetchMock.mockImplementation(async (url: any) => {
+      const u = typeof url === 'string' ? url : ''
+      if (u.includes('/exec')) {
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({
+            ok: true,
+            execId: 'e-fail',
+            code: 7,
+            signal: null,
+            durationMs: 10,
+          }),
+        } as unknown as Response
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ entries: [] }),
+        text: async () => JSON.stringify({ entries: [] }),
+      } as unknown as Response
+    })
+    const { result } = renderHook(() => useBashRepl('sess-1', '/tmp'))
+    let execResult: any
+    await act(async () => {
+      execResult = await result.current.exec('sh -c "exit 7"', { wait: true })
+    })
+    expect(execResult.code).toBe(7)
+  })
+})

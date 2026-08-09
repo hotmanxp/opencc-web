@@ -7,7 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // so any cross-mock references must live inside a hoisted object.
 const mocks = vi.hoisted(() => {
   return {
-    execReplMock: vi.fn(async () => ({ ok: true as const, execId: 'e1' })),
+    execReplMock: vi.fn(async (_cmd: string, _opts?: { wait?: boolean }) => ({
+      ok: true as const,
+      execId: 'e1',
+      code: 0,
+      signal: null,
+      durationMs: 12,
+    })),
     refreshTopCommandsMock: vi.fn(),
     submitPromptMock: vi.fn(async () => undefined),
     pushUserMsgMock: vi.fn(),
@@ -165,12 +171,81 @@ describe('MobileQuickDrawer — 打开/关闭', () => {
 })
 
 describe('MobileQuickDrawer — Bash tab', () => {
-  it('点击 row 调 execRepl + 触发 onClose', async () => {
+  it('点击 row 调 execRepl (wait=true) + 触发 onClose', async () => {
     const onClose = vi.fn()
     render(<MobileQuickDrawer open onClose={onClose} />)
     fireEvent.click(screen.getByText('ls -la'))
-    await waitFor(() => expect(mocks.execReplMock).toHaveBeenCalledWith('ls -la'))
+    // wait=true 用于同步拿到真实终态(code/signal),以决定 success/error toast。
+    await waitFor(() =>
+      expect(mocks.execReplMock).toHaveBeenCalledWith('ls -la', { wait: true }),
+    )
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('点击 row 后 code=0 → message.success (已执行: ...)', async () => {
+    mocks.execReplMock.mockResolvedValueOnce({
+      ok: true as const,
+      execId: 'e-ok',
+      code: 0,
+      signal: null,
+      durationMs: 5,
+    })
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    fireEvent.click(screen.getByText('ls -la'))
+    await waitFor(() => expect(mocks.execReplMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(mocks.messageSuccessMock).toHaveBeenCalledWith('已执行: ls -la'),
+    )
+    expect(mocks.messageErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('点击 row 后 code 非 0 → message.error (执行失败 (exit N): ...)', async () => {
+    mocks.execReplMock.mockResolvedValueOnce({
+      ok: true as const,
+      execId: 'e-fail',
+      code: 7,
+      signal: null,
+      durationMs: 5,
+    })
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    fireEvent.click(screen.getByText('ls -la'))
+    await waitFor(() => expect(mocks.execReplMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(mocks.messageErrorMock).toHaveBeenCalledWith('执行失败 (exit 7): ls -la'),
+    )
+    expect(mocks.messageSuccessMock).not.toHaveBeenCalled()
+  })
+
+  it('点击 row 后 signal 非空 → message.error (执行失败 (signal SIGxxx): ...)', async () => {
+    mocks.execReplMock.mockResolvedValueOnce({
+      ok: true as const,
+      execId: 'e-sig',
+      code: null,
+      signal: 'SIGTERM',
+      durationMs: 5,
+    })
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    fireEvent.click(screen.getByText('ls -la'))
+    await waitFor(() => expect(mocks.execReplMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(mocks.messageErrorMock).toHaveBeenCalledWith(
+        '执行失败 (signal SIGTERM): ls -la',
+      ),
+    )
+  })
+
+  it('busy 响应 → message.warning (已有命令在执行)', async () => {
+    mocks.execReplMock.mockResolvedValueOnce({
+      ok: false as const,
+      busy: true as const,
+      currentExecId: 'e-existing',
+    })
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    fireEvent.click(screen.getByText('ls -la'))
+    await waitFor(() => expect(mocks.execReplMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(mocks.messageWarningMock).toHaveBeenCalledWith('已有命令在执行'),
+    )
   })
 
   it('sessionId 缺失时列表项渲染为禁用提示', () => {

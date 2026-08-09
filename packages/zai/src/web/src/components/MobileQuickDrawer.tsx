@@ -293,11 +293,25 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
   async function handleBashClick(command: string) {
     if (!effectiveSid) return
     try {
-      const result = await exec(command)
-      if (result.ok) {
+      // wait=true:等服务端真实终态,根据 code/signal 决定 success/error toast。
+      // fire-and-forget 模式 (默认) 拿到的是 {ok, execId},无法区分"执行中"和"已失败",
+      // 会让用户看到虚假 "已执行" 提示 — 实际命令可能 exit code 非 0 或被信号杀。
+      const result = await exec(command, { wait: true })
+      if (!result.ok) {
+        if ('busy' in result && result.busy) {
+          message.warning('已有命令在执行')
+        }
+        return
+      }
+      // ok:true + wait=true:result 含 {code, signal, durationMs}
+      // - code === 0 && !signal → 成功
+      // - 其他 (非 0 退出码 / 被信号终止) → 失败,提示 code 让用户知道为什么失败
+      const { code, signal } = result
+      if (code === 0 && !signal) {
         message.success(`已执行: ${command}`)
-      } else if ('busy' in result && result.busy) {
-        message.warning('已有命令在执行')
+      } else {
+        const reason = signal ? `signal ${signal}` : `exit ${code ?? '?'}`
+        message.error(`执行失败 (${reason}): ${command}`)
       }
     } catch (err) {
       message.error(`执行失败: ${err instanceof Error ? err.message : String(err)}`)

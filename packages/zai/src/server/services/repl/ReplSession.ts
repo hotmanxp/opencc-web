@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
-import type { ReplEvent } from '../../../shared/repl.js'
+import type { ExitResult, ReplEvent } from '../../../shared/repl.js'
 import {
   getReplHistoryService,
   type ReplHistoryService,
@@ -49,6 +49,14 @@ export class ReplSession extends EventEmitter {
   private child: ChildProcess | null = null
   private currentExecId: string | null = null
   private killTimer: NodeJS.Timeout | null = null
+  /**
+   * wait=true 调用的 completion resolver:每个 execId 一个 resolver,在
+   * child 'exit' 或运行中 'error' 事件触发 finish() 时 resolve。无需等待 SSE
+   * 订阅者,也不影响 SSE 实时推送。Map 在 dispose() 中清空防止悬挂 resolve。
+   */
+  private readonly pendingCompletions = new Map<string, (result: ExitResult) => void>()
+  /** exec() 注册 completion 时记录 startedAt,finish() 算 durationMs 用。 */
+  private readonly startedAtByExecId = new Map<string, number>()
   readonly cwd: string
   /** 用于写入全局命令历史;测试可注入。默认拿单例。 */
   private readonly historyService: ReplHistoryService
@@ -79,7 +87,7 @@ export class ReplSession extends EventEmitter {
     command: string,
     sessionId: string,
     opts: { cwd?: string } = {},
-  ): Promise<{ execId: string; startedAt: number }> {
+  ): Promise<{ execId: string; startedAt: number; completion: Promise<ExitResult> }> {
     if (this.child) {
       throw new ReplBusyError(this.currentExecId ?? 'unknown')
     }
@@ -96,6 +104,14 @@ export class ReplSession extends EventEmitter {
 
     this.child = child
     this.currentExecId = execId
+
+    // 注册 completion resolver — finish() 触发时通过 pendingCompletions 拿到并 resolve。
+    // 不订阅 SSE;event 总线已经通知 SSE 订阅者,completion 是独立通道,wait=true 调用方
+    // 只需要 await 它就拿到真实终态。
+    this.startedAtByExecId.set(execId, startedAt)
+    const completion = new Promise<ExitResult>((resolve) => {
+      this.pendingCompletions.set(execId, resolve)
+    })
 
     // fire-and-forget:appendCommand 内部已用 Promise-chain 串行化,失败不抛。
     // 用 .catch 兜底防 TS 抱怨未处理 promise;真正错误吞掉(不写进用户面)。
@@ -121,7 +137,7 @@ export class ReplSession extends EventEmitter {
       this.finish(execId, code, signal)
     })
 
-    return { execId, startedAt }
+    return { execId, startedAt, completion }
   }
 
   /**
@@ -157,10 +173,15 @@ export class ReplSession extends EventEmitter {
       this.killTimer = null
     }
     this.currentExecId = null
+    // 清空 pending completions:dispose() 后调用方再 await 会永久挂起,这里主动 reject。
+    // 用 never-resolve promise 标记 — 调用方应该不会在 dispose 后 await,但保险起见。
+    this.pendingCompletions.clear()
+    this.startedAtByExecId.clear()
     this.removeAllListeners()
   }
 
   private finish(execId: string, code: number | null, signal: NodeJS.Signals | null): void {
+    const finishedAt = Date.now()
     if (this.child) {
       this.child = null
     }
@@ -169,6 +190,22 @@ export class ReplSession extends EventEmitter {
       this.killTimer = null
     }
     this.currentExecId = null
-    this.emit('event', { kind: 'exit', execId, code, signal, ts: Date.now() } satisfies ReplEvent)
+    // 先 emit 'exit' 事件(SSE 订阅者收),再 resolve completion(wait=true 调用方收)。
+    // 两路独立:event bus 走 EventEmitter.emit,completion 走 pendingCompletions Map。
+    this.emit('event', { kind: 'exit', execId, code, signal, ts: finishedAt } satisfies ReplEvent)
+    const resolveCompletion = this.pendingCompletions.get(execId)
+    if (resolveCompletion) {
+      // durationMs 需要 startedAt — exec() 时记录在 startedAtByExecId。
+      const startedAt = this.startedAtByExecId.get(execId) ?? finishedAt
+      resolveCompletion({
+        execId,
+        code,
+        signal,
+        finishedAt,
+        durationMs: finishedAt - startedAt,
+      })
+      this.pendingCompletions.delete(execId)
+      this.startedAtByExecId.delete(execId)
+    }
   }
 }
