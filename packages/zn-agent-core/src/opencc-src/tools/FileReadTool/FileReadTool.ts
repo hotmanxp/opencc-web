@@ -41,6 +41,7 @@ import { logFileOperation } from '../../utils/fileOperationAnalytics.js'
 import { formatFileSize } from '../../utils/format.js'
 import { getFsImplementation } from '../../utils/fsOperations.js'
 import {
+  assertValidImageBuffer,
   compressImageBufferWithTokenLimit,
   createImageMetadataText,
   detectImageFormatFromBuffer,
@@ -1129,6 +1130,13 @@ export async function readImageWithTokenBudget(
   if (originalSize === 0) {
     throw new Error(`Image file is empty: ${filePath}`)
   }
+
+  // Magic bytes 预检:损坏/非图片文件(例如截图路径字符串被误当 base64
+  // 解码后写入的 .png)在这里直接抛可读错误,而不是生成一个必然被上游
+  // API 以 `invalid image content ... unknown format (2013)` 拒绝的
+  // image block。detectImageFormatFromBuffer 对未知格式默认返回 png,
+  // 无法拦截,故用严格检测。
+  assertValidImageBuffer(imageBuffer, filePath)
 
   const detectedMediaType = detectImageFormatFromBuffer(imageBuffer)
   const detectedFormat = detectedMediaType.split('/')[1] || 'png'

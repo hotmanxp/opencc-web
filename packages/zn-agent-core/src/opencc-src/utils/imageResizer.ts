@@ -812,6 +812,74 @@ export function detectImageFormatFromBuffer(buffer: Buffer): ImageMediaType {
 }
 
 /**
+ * 严格 magic bytes 校验:能识别时返回对应格式,无法识别返回 null。
+ * 与 detectImageFormatFromBuffer 的区别:后者对未知格式默认返回
+ * 'image/png',会把损坏/非图片文件(例如截图路径字符串被误当 base64
+ * 解码后写入的 .png)误判为 png,继续生成一个必然被上游 API 以
+ * `invalid image content ... unknown format (2013)` 拒绝的 image block。
+ * 调用方应在生成 image block 前用本函数拦截损坏文件。
+ */
+export function detectImageFormatStrict(
+  buffer: Buffer,
+): ImageMediaType | null {
+  // JPEG's magic is the shortest (3 bytes, FFD8FF); buffers shorter than
+  // that can never match any format. Longer formats guard their own length
+  // below, so out-of-range byte reads compare against undefined (no match).
+  if (buffer.length < 3) return null
+
+  // PNG signature
+  if (
+    buffer[0] === 0x89 &&
+    buffer[1] === 0x50 &&
+    buffer[2] === 0x4e &&
+    buffer[3] === 0x47
+  ) {
+    return 'image/png'
+  }
+
+  // JPEG signature (FFD8FF)
+  if (buffer[0] === 0xff && buffer[1] === 0xd8 && buffer[2] === 0xff) {
+    return 'image/jpeg'
+  }
+
+  // GIF signature (GIF87a or GIF89a)
+  if (buffer[0] === 0x47 && buffer[1] === 0x49 && buffer[2] === 0x46) {
+    return 'image/gif'
+  }
+
+  // WebP signature (RIFF....WEBP)
+  if (
+    buffer.length >= 12 &&
+    buffer[0] === 0x52 &&
+    buffer[1] === 0x49 &&
+    buffer[2] === 0x46 &&
+    buffer[3] === 0x46 &&
+    buffer[8] === 0x57 &&
+    buffer[9] === 0x45 &&
+    buffer[10] === 0x42 &&
+    buffer[11] === 0x50
+  ) {
+    return 'image/webp'
+  }
+
+  return null
+}
+
+/**
+ * Magic bytes 门卫:buffer 不是任何已知图片格式时抛可读错误。
+ * 供 Read 工具/附件等入口在生成 image block 前调用,避免把损坏或
+ * 非图片文件(例如截图路径字符串被误当 base64 解码后写入的 .png)
+ * 发往 API 触发 `invalid image content ... unknown format (2013)` 400。
+ */
+export function assertValidImageBuffer(buffer: Buffer, filePath: string): void {
+  if (detectImageFormatStrict(buffer) === null) {
+    throw new Error(
+      `File is not a valid image (unrecognized format): ${filePath}`,
+    )
+  }
+}
+
+/**
  * Detect image format from base64 data using magic bytes
  * @param base64Data Base64 encoded image data
  * @returns Media type string (e.g., 'image/png', 'image/jpeg') or 'image/png' as default
