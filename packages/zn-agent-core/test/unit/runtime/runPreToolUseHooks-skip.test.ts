@@ -98,17 +98,10 @@ describe('vendor patch is present in toolHooks.ts', () => {
   })
 })
 
-describe('zai initAgentRuntime sets the flag', () => {
-  it('sets __zaiSkipPreToolUseHooks = true in zai agentRuntime.ts', () => {
-    const zaiPath = resolve(
-      HERE,
-      '..',
-      '..',
-      '..',
-      '..',
-      'zai/src/server/services/agentRuntime.ts',
-    )
-    const src = readFileSync(zaiPath, 'utf-8')
-    expect(src).toMatch(/__zaiSkipPreToolUseHooks\s*=\s*true/)
-  })
-})
+// Removed: 'zai initAgentRuntime sets the flag' describe block.
+// Aug 2026: decided to actually open the PreToolUse path (drop the
+// __zaiSkipPreToolUseHooks = true assignment in agentRuntime.ts) after
+// ego-browser validation showed hook execution (exit 0 + block output)
+// does not hang the UI under zai's HTTP-server runtime. The vendor gate
+// in toolHooks.ts is kept for defense-in-depth and verified by the
+// 'vendor patch is present in toolHooks.ts' describe block above.
