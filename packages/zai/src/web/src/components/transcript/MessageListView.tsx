@@ -3,6 +3,7 @@ import { MessageBubble } from './MessageBubble.js'
 import { CollapsedMessageBubble } from './CollapsedMessageBubble.js'
 import { ToolGroupCard } from './ToolGroupCard.js'
 import { deriveTranscriptNodes } from './deriveTranscriptNodes.js'
+import { lastAssistantTextIndex } from './deriveStreamLive.js'
 
 interface Props {
   messages: AgentMessage[]
@@ -38,20 +39,15 @@ export function MessageListView({ messages, streaming }: Props) {
             : undefined
           const reactKey =
             (toolUseId ? `tool-${toolUseId}` : (msg as any).eventId) || String(idx)
-          // "正在被流式累积"的精确判定 — 不依赖 status (status === 'streaming'
-          // 在 thinking_delta / text_delta 累积期间都是 true, 但语义上是
-          // "正在被累积" 的 lastIndex message). 关键是:
-          //   - lastIndex && type === 'assistant.thinking' → 正在 thinking_delta 累积
-          //   - lastIndex && type === 'assistant.text' && streaming → 正在 text_delta 累积
-          //   - 其他情况 (历史 / 已完成 / tool_use) → false
-          // 不依赖 SSE 长连接 status, 也不依赖 zustand 全局 status 标志,
-          // 只看 message 自身是不是 lastIndex + 类型, 避免 SSE 阻塞 / status
-          // 错位导致动画不触发.
+          // 判定: "最后一条消息是 thinking" 即视为流式 thinking 累积中,
+          // 给 ThinkingBlock 传 streaming={true} 启动动画. 旧实现这里
+          // 用 idx === lastIdx 也能覆盖大多数场景; text 一切到, lastIdx
+          // 立刻变成 text → thinking 自动失活 → 动画停. 简单可靠.
           const lastIdx = visibleMessages.length - 1
-          const isLive = idx === lastIdx && (
-            t === 'assistant.thinking' ||
-            (t === 'assistant.text' && Boolean(streaming))
-          )
+          const isLive =
+            t === 'assistant.thinking'
+              ? idx === lastIdx
+              : t === 'assistant.text' && Boolean(streaming) && idx === lastIdx
           return (
             <MessageBubble
               key={reactKey}
@@ -85,12 +81,7 @@ export function MessageListView({ messages, streaming }: Props) {
   // (transcriptCollapsed=true) 用户期望看到 AI 的最近一条完整回答, 历史
   // 仍然 clamp — 这条规则与 splitPaneOpen 无关 (transcriptCollapsed 已经是
   // 单一真源, useSplitPaneCompactLock 把它锁到 true).
-  const lastAssistantIdx = (() => {
-    for (let i = visibleMessages.length - 1; i >= 0; i--) {
-      if ((visibleMessages[i] as { type?: string }).type === 'assistant.text') return i
-    }
-    return -1
-  })()
+  const lastAssistantIdx = lastAssistantTextIndex(visibleMessages)
 
   return (
     <>
@@ -107,14 +98,16 @@ export function MessageListView({ messages, streaming }: Props) {
           )
         }
         if (node.kind === 'thinking') {
-          // Thinking 在 collapsed 视图下: 用 lastIndex 判定 (与 expanded 视图
-          // 保持一致). 如果当前节点就是 messages 最后一条且 type === 'assistant.thinking',
-          // 说明它正在被 thinking_delta 累积, 折叠态用户需要看到思考动画反馈.
+          // 注意: collapsed 视图下, 流式 'assistant.thinking' 不会进这种
+          // 节点 (deriveTranscriptNodes 只把 legacy 'assistant' + thinking
+          // 字段提为 kind: 'thinking'). 流式 'assistant.thinking' 走
+          // text bucket, 见下面的 isThinkingMsg 分支.
+          // 这里是历史回放里的 legacy thinking 节点, 始终静态 (不闪烁).
           return (
             <MessageBubble
               key={`think-${node.index}-${i}`}
               msg={node.message}
-              streaming={node.index === visibleMessages.length - 1}
+              streaming={false}
             />
           )
         }
@@ -140,11 +133,21 @@ export function MessageListView({ messages, streaming }: Props) {
               // "最后一条 assistant.text" 完整展开 (绕开 clamp);
               // 历史 assistant.text 仍走默认 6 行 clamp + "显示更多" 按钮.
               const isLastAssistant = msgIdx === lastAssistantIdx
+              // 判定: 最后一条消息是 thinking → 走 streaming=true; 否则
+              // 走 status-based streaming (text 累积光标等).
+              // assistant.thinking 在 collapsed 视图走 text bucket;
+              // 简单规则: "thinking 是最后一条 messages" 即可.
+              const mt = (m as { type?: string }).type
+              const isThinkingMsg = mt === 'assistant.thinking'
+              const lastOverallIdx = visibleMessages.length - 1
+              const itemStreaming = isThinkingMsg
+                ? msgIdx === lastOverallIdx
+                : streaming && node.endIndex === lastOverallIdx
               return (
                 <CollapsedMessageBubble
                   key={evtId}
                   message={m}
-                  streaming={streaming && node.endIndex === visibleMessages.length - 1}
+                  streaming={itemStreaming}
                   forceExpanded={isLastAssistant}
                 />
               )

@@ -114,3 +114,137 @@ describe("MessageListView — Agent 工具卡过滤", () => {
     expect(screen.getByText("second reply")).toBeInTheDocument()
   })
 })
+
+describe("MessageListView — thinking live 判定", () => {
+  // 紫色"思考"pill 的流式动画在 MessageBubble.ThinkingBlock 内, 由 <style id="zai-think-glow-style">
+  // 注入到 document.head 控制. 我们这里不直接断言 DOM (RTL 在 happy-dom 下
+  // 抓不到 useEffect 注入的 <style>), 而是通过 MessageBubble 组件 spy: render
+  // 时给 ThinkingBlock 传 streaming={true/false} 的差别是 className (pill-active
+  // / dot-* 类) 与 useEffect 的 cleanup 时机. 用 mock MessageBubble 抓 props
+  // 是最稳的回归断言.
+  const bubbleProps: Array<{ streaming?: boolean; msg: AgentMessage }> = []
+  const MockMessageBubble = (props: { msg: AgentMessage; streaming?: boolean }) => {
+    bubbleProps.push(props)
+    return <div data-testid="bubble" />
+  }
+  const MockCollapsed = () => <div data-testid="collapsed" />
+  const MockToolGroup = () => <div data-testid="tool-group" />
+
+  beforeEach(() => {
+    bubbleProps.length = 0
+    vi.resetModules()
+  })
+
+  test("expanded: thinking 在 text 之前 → MessageBubble streaming={true}", async () => {
+    collapsed.value = false
+    vi.doMock("./MessageBubble.js", () => ({ MessageBubble: MockMessageBubble }))
+    vi.doMock("./CollapsedMessageBubble.js", () => ({ CollapsedMessageBubble: MockCollapsed }))
+    vi.doMock("./ToolGroupCard.js", () => ({ ToolGroupCard: MockToolGroup }))
+    const { MessageListView: MLV } = await import("./MessageListView.js")
+    render(
+      <MLV
+        messages={[
+          { eventId: "u1", sessionId: "s1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" } as unknown as AgentMessage,
+          { eventId: "t1", sessionId: "s1", ts: 2, turnIndex: 0, type: "assistant.thinking", thinking: "reasoning" } as unknown as AgentMessage,
+        ]}
+      />,
+    )
+    const thinkingProp = bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.thinking")
+    expect(thinkingProp?.streaming).toBe(true)
+  })
+
+  test("expanded: thinking 之后出现 text → MessageBubble streaming={false}", async () => {
+    collapsed.value = false
+    vi.doMock("./MessageBubble.js", () => ({ MessageBubble: MockMessageBubble }))
+    vi.doMock("./CollapsedMessageBubble.js", () => ({ CollapsedMessageBubble: MockCollapsed }))
+    vi.doMock("./ToolGroupCard.js", () => ({ ToolGroupCard: MockToolGroup }))
+    const { MessageListView: MLV } = await import("./MessageListView.js")
+    render(
+      <MLV
+        streaming={true}
+        messages={[
+          { eventId: "u1", sessionId: "s1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" } as unknown as AgentMessage,
+          { eventId: "t1", sessionId: "s1", ts: 2, turnIndex: 0, type: "assistant.thinking", thinking: "reasoning" } as unknown as AgentMessage,
+          { eventId: "a1", sessionId: "s1", ts: 3, turnIndex: 0, type: "assistant.text", text: "reply" } as unknown as AgentMessage,
+        ]}
+      />,
+    )
+    const thinkingProp = bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.thinking")
+    expect(thinkingProp?.streaming).toBe(false)
+    const textProp = bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.text")
+    expect(textProp?.streaming).toBe(true) // 最后一条 text + streaming=true
+  })
+
+  test("expanded: 历史回放 [thinking, text] → thinking streaming={false}", async () => {
+    collapsed.value = false
+    vi.doMock("./MessageBubble.js", () => ({ MessageBubble: MockMessageBubble }))
+    vi.doMock("./CollapsedMessageBubble.js", () => ({ CollapsedMessageBubble: MockCollapsed }))
+    vi.doMock("./ToolGroupCard.js", () => ({ ToolGroupCard: MockToolGroup }))
+    const { MessageListView: MLV } = await import("./MessageListView.js")
+    render(
+      <MLV
+        messages={[
+          { eventId: "u1", sessionId: "s1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" } as unknown as AgentMessage,
+          { eventId: "t1", sessionId: "s1", ts: 2, turnIndex: 0, type: "assistant.thinking", thinking: "reasoning" } as unknown as AgentMessage,
+          { eventId: "a1", sessionId: "s1", ts: 3, turnIndex: 0, type: "assistant.text", text: "reply" } as unknown as AgentMessage,
+        ]}
+      />,
+    )
+    const thinkingProp = bubbleProps.find((p) => (p.msg as { type?: string }).type === "assistant.thinking")
+    expect(thinkingProp?.streaming).toBe(false)
+  })
+
+  test("collapsed: thinking 在 text 之前 → CollapsedMessageBubble streaming={false}", async () => {
+    // assistant.thinking 走 text bucket (deriveTranscriptNodes 只把 legacy
+    // 'assistant' + thinking 字段提为 kind:'thinking' 节点); 因此 collapsed
+    // 视图下通过 CollapsedMessageBubble 渲染. 这里 spy 它的 props.
+    const collapsedProps: Array<{ streaming?: boolean; message: AgentMessage }> = []
+    const MockCollapsedSpy = (props: { message: AgentMessage; streaming?: boolean }) => {
+      collapsedProps.push(props)
+      return <div data-testid="collapsed-spy" />
+    }
+    collapsed.value = true
+    vi.doMock("./MessageBubble.js", () => ({ MessageBubble: MockMessageBubble }))
+    vi.doMock("./CollapsedMessageBubble.js", () => ({ CollapsedMessageBubble: MockCollapsedSpy }))
+    vi.doMock("./ToolGroupCard.js", () => ({ ToolGroupCard: MockToolGroup }))
+    const { MessageListView: MLV } = await import("./MessageListView.js")
+    render(
+      <MLV
+        streaming={true}
+        messages={[
+          { eventId: "u1", sessionId: "s1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" } as unknown as AgentMessage,
+          { eventId: "t1", sessionId: "s1", ts: 2, turnIndex: 0, type: "assistant.thinking", thinking: "reasoning" } as unknown as AgentMessage,
+          { eventId: "a1", sessionId: "s1", ts: 3, turnIndex: 0, type: "assistant.text", text: "reply" } as unknown as AgentMessage,
+        ]}
+      />,
+    )
+    const thinkingProp = collapsedProps.find((p) => (p.message as { type?: string }).type === "assistant.thinking")
+    // text 已经切到 (最后一条是 assistant.text) → thinking 不再 live
+    expect(thinkingProp?.streaming).toBe(false)
+  })
+
+  test("collapsed: thinking 之后无 text (即尾部) → CollapsedMessageBubble streaming={true}", async () => {
+    const collapsedProps: Array<{ streaming?: boolean; message: AgentMessage }> = []
+    const MockCollapsedSpy = (props: { message: AgentMessage; streaming?: boolean }) => {
+      collapsedProps.push(props)
+      return <div data-testid="collapsed-spy" />
+    }
+    collapsed.value = true
+    vi.doMock("./MessageBubble.js", () => ({ MessageBubble: MockMessageBubble }))
+    vi.doMock("./CollapsedMessageBubble.js", () => ({ CollapsedMessageBubble: MockCollapsedSpy }))
+    vi.doMock("./ToolGroupCard.js", () => ({ ToolGroupCard: MockToolGroup }))
+    const { MessageListView: MLV } = await import("./MessageListView.js")
+    render(
+      <MLV
+        streaming={true}
+        messages={[
+          { eventId: "u1", sessionId: "s1", ts: 1, turnIndex: 0, type: "user.text", text: "hi" } as unknown as AgentMessage,
+          { eventId: "t1", sessionId: "s1", ts: 2, turnIndex: 0, type: "assistant.thinking", thinking: "reasoning" } as unknown as AgentMessage,
+        ]}
+      />,
+    )
+    const thinkingProp = collapsedProps.find((p) => (p.message as { type?: string }).type === "assistant.thinking")
+    // text 还没切到 → thinking 块 live (走 isThinkingLive)
+    expect(thinkingProp?.streaming).toBe(true)
+  })
+})

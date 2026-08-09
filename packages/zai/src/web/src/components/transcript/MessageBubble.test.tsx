@@ -282,3 +282,48 @@ describe("MessageBubble — Skill tool pill", () => {
     expect(screen.getByText("已完成")).toBeInTheDocument()
   })
 })
+
+describe("MessageBubble — thinking_delta streaming 透传", () => {
+  test("content_block_delta + thinking_delta, 外层 streaming=true → 动画 className 挂上", () => {
+    // 透传外层 streaming (由 MessageListView 决定: thinking 是 messages
+    // 末尾时为 true). 这里验证 streaming=true 时 .zai-thinking-pill-active
+    // 挂上 + 三个点渲染.
+    const { container } = render(
+      <MessageBubble
+        streaming={true}
+        msg={{
+          eventId: "d-1",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "content_block_delta",
+          delta: { type: "thinking_delta", thinking: "trace..." },
+        }}
+      />,
+    )
+    expect(container.querySelector(".zai-thinking-pill-active")).not.toBeNull()
+    expect(container.querySelector(".zai-think-dot-1")).not.toBeNull()
+    expect(container.querySelector(".zai-think-dot-2")).not.toBeNull()
+    expect(container.querySelector(".zai-think-dot-3")).not.toBeNull()
+  })
+
+  test("content_block_delta + thinking_delta, 外层 streaming=false → 不挂动画 className", () => {
+    // text 已经切到, MessageListView 给外层 streaming=false → thinking_delta
+    // 路径也不应有动画.
+    const { container } = render(
+      <MessageBubble
+        streaming={false}
+        msg={{
+          eventId: "d-1",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "content_block_delta",
+          delta: { type: "thinking_delta", thinking: "trace..." },
+        }}
+      />,
+    )
+    expect(container.querySelector(".zai-thinking-pill-active")).toBeNull()
+    expect(container.querySelector(".zai-think-dot-1")).toBeNull()
+  })
+})

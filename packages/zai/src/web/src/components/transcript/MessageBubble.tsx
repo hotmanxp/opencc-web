@@ -1010,9 +1010,12 @@ export const MessageBubble = React.memo(function MessageBubble({
     const delta = msg.delta as
       | { type?: string; text?: string; thinking?: string }
       | undefined;
-    // thinking_delta: 模型内部推理, 折叠成灰色面板
+    // thinking_delta: 模型内部推理, 折叠成灰色面板.
+    // 沿用外层 streaming (由 MessageListView 决定: thinking 是 messages
+    // 末尾时为 true). 这样 thinking 切到 text 后, 外层 streaming=false
+    // 会让动画也停掉.
     if (delta?.type === "thinking_delta") {
-      return <ThinkingBlock text={delta.thinking || ""} streaming={streaming} />;
+      return <ThinkingBlock text={delta.thinking || ""} streaming={streaming ?? false} />;
     }
     // text_delta: 可见回复正文
     const text = delta?.text || "";
