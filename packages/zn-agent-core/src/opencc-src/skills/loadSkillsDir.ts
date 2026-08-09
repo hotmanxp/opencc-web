@@ -1,6 +1,7 @@
 import { realpath } from 'fs/promises'
 import ignore from 'ignore'
 import memoize from 'lodash-es/memoize.js'
+import { homedir } from 'os'
 import {
   basename,
   dirname,
@@ -82,7 +83,7 @@ export function getSkillsPath(
     case 'policySettings':
       return join(getManagedFilePath(), CONFIG_DIRNAME, dir)
     case 'userSettings':
-      return join(getClaudeConfigHomeDir(), dir)
+      return join(homedir(), '.agents', dir)
     case 'projectSettings':
       return `${CONFIG_DIRNAME}/${dir}`
     case 'plugin':

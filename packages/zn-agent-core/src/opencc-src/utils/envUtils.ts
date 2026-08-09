@@ -122,15 +122,13 @@ export function getProjectsDir(): string {
 }
 
 export function getUserAgentsDir(): string {
-  // zai patch: user skills (the only consumer of this helper, see
-  // skills/loadSkillsDir.ts: `join(getUserAgentsDir(), 'skills')`) now live
-  // under ~/.zai/skills instead of ~/.agents/skills. The legacy ~/.agents
-  // location is no longer read — zai's boot-time migration
-  // (packages/zai/src/server/services/zaiMigration.ts) copies any
-  // pre-existing data forward on first start, then the sentinel prevents
-  // the migration from re-running. Function name kept for blast-radius
-  // stability; only the path returned changed.
-  return join(getClaudeConfigHomeDir(), 'agents')
+  // User skills (the only consumer of this helper, see
+  // skills/loadSkillsDir.ts: `join(getUserAgentsDir(), 'skills')`) live
+  // under `~/.agents/skills`. Returning `~/.agents` so that callers can
+  // join('skills') to reach the actual skills directory. Function name
+  // kept for blast-radius stability; the helper now points at the user's
+  // `~/.agents` home rather than a `~/.zai/agents` subdirectory.
+  return join(homedir(), '.agents')
 }
 
 /**
