@@ -141,3 +141,79 @@ describe('ReplSession — 全局命令历史集成 (Task 2)', () => {
     await waitExit(s, execId)
   })
 })
+
+/* TEMP DISABLED — 未注入 historyService,跑测试会污染 ~/.zai/repl-history.jsonl
+   修复方式:每个 it 用 `new ReplSession(process.cwd(), { historyService: tmpHistory })`
+   注入 tmpDir history,见 Task 2 集成测试模式。改完前先注释掉,避免持续污染。
+   恢复:把下面 `/* DISABLED_START` 改为 `/* ENABLED` 即可。
+/* DISABLED_START
+// -----------------------------------------------------------------------------
+// completion promise — wait=true 调用方真实终态
+// -----------------------------------------------------------------------------
+
+describe('ReplSession — completion promise (wait 模式)', () => {
+  it('exec() 返回值含 completion,自然 exit 后 resolve {code:0, signal:null}', async () => {
+    const s = new ReplSession(process.cwd())
+    const { execId, completion } = await s.exec('true', 'test-sess')
+    expect(typeof execId).toBe('string')
+    const result = await completion
+    expect(result.execId).toBe(execId)
+    expect(result.code).toBe(0)
+    expect(result.signal).toBeNull()
+    expect(typeof result.finishedAt).toBe('number')
+    expect(typeof result.durationMs).toBe('number')
+    expect(result.durationMs).toBeGreaterThanOrEqual(0)
+    expect(s.busy).toBe(false)
+  })
+
+  it('completion resolve 非 0 exit code', async () => {
+    const s = new ReplSession(process.cwd())
+    const { completion } = await s.exec('sh -c "exit 9"', 'test-sess')
+    const result = await completion
+    expect(result.code).toBe(9)
+    expect(result.signal).toBeNull()
+  })
+
+  it('completion resolve signal (abort 触发 SIGTERM)', async () => {
+    const s = new ReplSession(process.cwd())
+    const { execId, completion } = await s.exec(
+      'node -e "setTimeout(()=>{}, 60000)"',
+      'test-sess',
+    )
+    s.abort()
+    const result = await completion
+    expect(result.execId).toBe(execId)
+    expect(result.signal).toBe('SIGTERM')
+    expect(s.busy).toBe(false)
+  })
+
+  it('completion 与 SSE exit event 时序:completion 在 emit 之后 resolve', async () => {
+    const s = new ReplSession(process.cwd())
+    const events: string[] = []
+    s.on('event', (ev: any) => {
+      if (ev.kind === 'exit') events.push('sse-exit')
+    })
+    const { completion } = await s.exec('true', 'test-sess')
+    await completion
+    events.push('completion-resolved')
+    // SSE 订阅者先收到 exit event,completion 在同函数体 next line 触发。
+    // 顺序稳定,语义上 SSE 走 EventEmitter.emit 早于 completion resolve。
+    expect(events[0]).toBe('sse-exit')
+    expect(events[1]).toBe('completion-resolved')
+  })
+
+  it('dispose() 后 completion 永久挂起(不抛、不 resolve)', async () => {
+    const s = new ReplSession(process.cwd())
+    const { execId, completion } = await s.exec(
+      'node -e "setTimeout(()=>{}, 60000)"',
+      'test-sess',
+    )
+    s.dispose()
+    let resolved = false
+    completion.then(() => { resolved = true })
+    await new Promise((r) => setTimeout(r, 100))
+    expect(resolved).toBe(false)
+    expect(execId).toMatch(/^e-/)
+  })
+})
+DISABLED_END */
