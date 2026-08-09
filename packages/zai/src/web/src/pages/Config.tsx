@@ -580,40 +580,42 @@ export default function Config() {
         md={18}
         style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', overflow: 'auto' }}
       >
-        {/* JSON 配置文件 — 始终可见的小节,挂在 activeTool 条件渲染之前,
-            让 ~/.claude.json / ~/.claude/settings.json 不依赖菜单 tab 选中就能看到/编辑。
-            两张内层卡片各自固定高度(~280px),JsonFileEditor 里的 pre
-            块用 flex:1 在卡片内独立滚动,避免遮挡下方 tab 内容。 */}
-        <Card
-          title="JSON 配置文件"
-          size="small"
-          style={{ marginTop: 16 }}
-          styles={{ body: { display: 'flex', flexDirection: 'row', gap: 12, padding: 12 } }}
-        >
-          <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <JsonFileEditor
-              endpoint="/config/claude-json"
-              title="OpenCC 配置"
-              modalTitle="编辑 OpenCC 配置"
-            />
-          </div>
-          <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-            <JsonFileEditor
-              endpoint="/config/claude-settings"
-              title="Settings"
-              modalTitle="编辑 Settings"
-            />
-          </div>
-        </Card>
-
         {activeTool === 'opencc' ? (
           <>
+            {/* 顶部并排两张 JSON 配置卡 — 只在 opencc tab 显示。
+                opencode / nova / zai tab 完全不出现。 */}
+            <Card
+              title="JSON 配置文件"
+              size="small"
+              style={{ marginTop: 16 }}
+              styles={{ body: { display: 'flex', flexDirection: 'row', gap: 12, padding: 12 } }}
+            >
+              <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <JsonFileEditor
+                  endpoint="/config/claude-json"
+                  title="Configs"
+                  modalTitle="编辑 OpenCC 配置"
+                />
+              </div>
+              <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                <JsonFileEditor
+                  endpoint="/config/claude-settings"
+                  title="Settings"
+                  modalTitle="编辑 Settings"
+                />
+              </div>
+            </Card>
+            {/* 下方 Provider 配置 */}
             <ProviderForm />
           </>
         ) : activeTool === 'opencode' ? (
           <>
             <PluginForm />
             <SettingsEditor tool="opencode" label="OpenCode" defaultContent={opencodeDefaultContent} />
+          </>
+        ) : activeTool === 'zai' ? (
+          <>
+            <SettingsEditor tool="zai" label="Zai" />
           </>
         ) : (
           <SettingsEditor tool={activeTool} label={tools.find((t) => t.key === activeTool)?.label || activeTool} />
