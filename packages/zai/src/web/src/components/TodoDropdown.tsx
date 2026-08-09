@@ -6,7 +6,9 @@ type Props = { v2Tasks: V2TaskItem[] }
 // 仅追加 Popover 包裹所需的宽度 / maxHeight / 滚动 / 分割线.
 const styles: Record<string, React.CSSProperties> = {
   wrap: {
-    width: 360,
+    // 桌面端固定 360; 手机视口较窄时按 100vw - 84px 自适应 (iPhone 14 ~390 → 306),
+    // 避免占满全屏. 64px 留白在 390 视口减幅 ~9% 仍偏紧, 84px 拉到 306 更明显.
+    width: 'min(360px, calc(100vw - 84px))',
     background: 'var(--bg-popup)',
     borderRadius: 6,
     padding: 10,
