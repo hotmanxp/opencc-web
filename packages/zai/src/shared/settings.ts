@@ -85,6 +85,23 @@ export interface ZaiSettings {
    * 缺失 / 非 boolean → false. 详见 SplitPane.tsx 的 first-run seed 逻辑.
    */
   defaultSplitScreen?: boolean
+  /**
+   * 是否启用动态工作流 (WorkflowTool — 多 agent 编排工具)。
+   *
+   * 默认 false — workflow 会一次性起几十个 sub-agent 烧大量 token,
+   * 必须由用户在 SettingsDrawer 主动打开才暴露给 LLM。
+   *
+   * 关闭时:`process.env.OPENCC_ENABLE_WORKFLOWS` 不设 →
+   * vendor `isWorkflowsDisabled()` 返回 true → `getAllBaseTools()`
+   * 把 WorkflowTool 从工具池里过滤掉,LLM 完全看不到这个工具。
+   * 开启时:server 端 PUT handler 同步写 `process.env.OPENCC_ENABLE_WORKFLOWS=1`,
+   * 下次 `query()` 触发的 `getAllBaseTools()` 调用就会把 WorkflowTool
+   * 重新纳入。中途切换不需要重启。
+   *
+   * 缺失 / 非 boolean → false。详见 `agentSettings.ts` 的 PUT route
+   * 与 `openccInit.ts:enableOpenccConfigs()` 的 boot-time bridge。
+   */
+  enableDynamicWorkflow?: boolean
 }
 
 /**

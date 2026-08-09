@@ -9,10 +9,12 @@ import { getDefaultMode } from '../services/permissionMode.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
 import {
   isValidDefaultSplitScreen,
+  isValidEnableDynamicWorkflow,
   isValidOutputStyle,
   isValidTheme,
   readZaiSettings,
   resolveDefaultSplitScreen,
+  resolveEnableDynamicWorkflow,
   resolveOutputStyle,
   resolveTheme,
   writeZaiSettings,
@@ -131,6 +133,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
         ? Math.max(1, Math.min(1000, Math.floor(settings.maxVisibleMessages)))
         : 20
     const defaultSplitScreen = resolveDefaultSplitScreen(settings)
+    const enableDynamicWorkflow = resolveEnableDynamicWorkflow(settings)
     res.json({
       defaultModel,
       baseURL,
@@ -140,6 +143,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       theme,
       maxVisibleMessages,
       defaultSplitScreen,
+      enableDynamicWorkflow,
     })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
@@ -251,6 +255,56 @@ router.put(
       const next: ZaiSettings = { ...settings, defaultSplitScreen: raw }
       await writeZaiSettings(next)
       res.json({ value: next.defaultSplitScreen })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  },
+)
+
+/**
+ * PUT /api/agent/settings/enable-dynamic-workflow — persist the web UI's
+ * "启用动态工作流" toggle. Body is `{ value: boolean }`.
+ *
+ * Why this lives in zai-server (not vendor's settings pipeline):
+ *   - zai controls whether the WorkflowTool gets registered into the
+ *     LLM-facing tool pool. Default is OFF (workflows cost dozens of
+ *     agents + tokens per run) — the user must opt in.
+ *   - The toggle writes the persisted flag AND mutates
+ *     `process.env.OPENCC_ENABLE_WORKFLOWS` so vendor's
+ *     `isWorkflowsDisabled()` returns false on the very next
+ *     `getAllBaseTools()` call. env var mutation is safe — vendor reads
+ *     it fresh on every call, and a process restart will read the
+ *     persisted settings.json again on boot via
+ *     `enableOpenccConfigs → applyZaiWorkflowEnableFromSettings`.
+ *
+ * Returns the persisted value so the client echoes back the canonical
+ * form (true/false, never undefined).
+ */
+router.put(
+  '/agent/settings/enable-dynamic-workflow',
+  async (req: Request, res: Response) => {
+    const raw = (req.body as { value?: unknown } | undefined)?.value
+    if (!isValidEnableDynamicWorkflow(raw)) {
+      return res
+        .status(400)
+        .json({ error: `invalid enableDynamicWorkflow: ${String(raw)}` })
+    }
+    try {
+      const settings = await readZaiSettings()
+      const next: ZaiSettings = { ...settings, enableDynamicWorkflow: raw }
+      await writeZaiSettings(next)
+      // Bridge to vendor's runtime gate. Mirror of the boot-time logic
+      // in `enableOpenccConfigs() → applyZaiWorkflowEnableFromSettings()`:
+      // mutate `process.env.OPENCC_ENABLE_WORKFLOWS` so the very next
+      // `query()` call's `getAllBaseTools()` filters WorkflowTool in/out
+      // accordingly. The persisted settings.json is the source of truth;
+      // a process restart re-applies this bridge from disk.
+      if (raw) {
+        process.env.OPENCC_ENABLE_WORKFLOWS = '1'
+      } else {
+        delete process.env.OPENCC_ENABLE_WORKFLOWS
+      }
+      res.json({ value: next.enableDynamicWorkflow })
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
     }

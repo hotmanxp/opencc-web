@@ -41,7 +41,7 @@ const ALL_MENU_ITEMS = [
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setMaxVisibleMessages, setDefaultSplitScreen } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow } = useAppStore();
   // 顶层 zai 实例(独立启动 / 顶层 managed supervisor)显示"实例管理"菜单;
   // instance 子实例(被 instance manager 派生的子进程)不显示 — 它不能 spawn
   // 孙实例,给它看到这个入口只会跳到 404 页面迷惑用户。
@@ -156,6 +156,9 @@ export default function Layout() {
         if (typeof data.defaultSplitScreen === 'boolean') {
           setDefaultSplitScreen(data.defaultSplitScreen)
         }
+        if (typeof data.enableDynamicWorkflow === 'boolean') {
+          setEnableDynamicWorkflow(data.enableDynamicWorkflow)
+        }
       })
       .catch(() => {
         // swallow — keep default
@@ -163,7 +166,7 @@ export default function Layout() {
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setSettingsTheme, setMaxVisibleMessages, setDefaultSplitScreen, setTranscriptCollapsed]);
+  }, [setOutputStyle, setSettingsTheme, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setTranscriptCollapsed]);
 
   return (
     // 用 height: 100vh (而不是 minHeight) 把 AntLayout 锁死在视口高度,

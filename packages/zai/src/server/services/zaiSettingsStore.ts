@@ -112,3 +112,23 @@ export function resolveDefaultSplitScreen(settings: ZaiSettings): boolean {
 export function isValidDefaultSplitScreen(value: unknown): value is boolean {
   return typeof value === 'boolean'
 }
+
+/**
+ * Resolve the persisted "enable dynamic workflow" flag with validation.
+ * Unknown / missing values collapse to false — workflows stay opt-in.
+ *
+ * The setting is the zai-side mirror of vendor's `OPENCC_ENABLE_WORKFLOWS`
+ * env var: `enableDynamicWorkflow === true` maps to env=1 in the PUT route,
+ * and `enableOpenccConfigs()` does the same bridge on boot. The vendor
+ * `isWorkflowsDisabled()` check at `getAllBaseTools()` consults the env
+ * var first, so a runtime toggle takes effect on the next `query()` call
+ * without restarting the process.
+ */
+export function resolveEnableDynamicWorkflow(settings: ZaiSettings): boolean {
+  return settings.enableDynamicWorkflow === true
+}
+
+/** Validate a candidate enable-dynamic-workflow value before persisting. */
+export function isValidEnableDynamicWorkflow(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}

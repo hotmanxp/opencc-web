@@ -25,6 +25,7 @@ import {
   applySafeZaiSettingsEnv,
   applyZaiExtraCACertsFromConfig,
   applyZaiSettingsEnvFull,
+  applyZaiWorkflowEnableFromSettings,
   installMacroStub,
   readZaiSettingsEnv,
   setZaiIsNonInteractive,
@@ -288,5 +289,112 @@ describe('openccInit startup gaps (compat-side)', () => {
     )
     const env = readZaiSettingsEnv()
     expect(env.ZAI_TEST_E2E).toBe('ok')
+  })
+})
+
+/**
+ * Regression tests for `applyZaiWorkflowEnableFromSettings()` — the
+ * bridge that maps `settings.enableDynamicWorkflow` → vendor's runtime
+ * gate `process.env.OPENCC_ENABLE_WORKFLOWS`. vendor's
+ * `isWorkflowsDisabled()` consults the env var FIRST, so flipping it
+ * at boot is enough to add/remove WorkflowTool from the tool pool
+ * without restarting the process.
+ */
+describe('applyZaiWorkflowEnableFromSettings', () => {
+  let tempDataDir: string
+  let savedDataDir: string | undefined
+  let savedEnv: string | undefined
+
+  beforeEach(() => {
+    tempDataDir = mkdtempSync(join(tmpdir(), 'opencc-workflow-bridge-'))
+    savedDataDir = process.env.ZAI_DATA_DIR
+    savedEnv = process.env.OPENCC_ENABLE_WORKFLOWS
+    process.env.ZAI_DATA_DIR = tempDataDir
+    delete process.env.OPENCC_ENABLE_WORKFLOWS
+  })
+
+  afterEach(() => {
+    if (savedDataDir === undefined) {
+      delete process.env.ZAI_DATA_DIR
+    } else {
+      process.env.ZAI_DATA_DIR = savedDataDir
+    }
+    if (savedEnv === undefined) {
+      delete process.env.OPENCC_ENABLE_WORKFLOWS
+    } else {
+      process.env.OPENCC_ENABLE_WORKFLOWS = savedEnv
+    }
+    rmSync(tempDataDir, { recursive: true, force: true })
+  })
+
+  it('returns false and clears env var when settings.json is missing', () => {
+    expect(applyZaiWorkflowEnableFromSettings()).toBe(false)
+    expect(process.env.OPENCC_ENABLE_WORKFLOWS).toBeUndefined()
+  })
+
+  it('returns false and clears env var when enableDynamicWorkflow is unset', () => {
+    writeFileSync(
+      join(tempDataDir, 'settings.json'),
+      JSON.stringify({ outputStyle: 'compact' }),
+    )
+    expect(applyZaiWorkflowEnableFromSettings()).toBe(false)
+    expect(process.env.OPENCC_ENABLE_WORKFLOWS).toBeUndefined()
+  })
+
+  it('returns false and clears env var when enableDynamicWorkflow is not boolean', () => {
+    writeFileSync(
+      join(tempDataDir, 'settings.json'),
+      JSON.stringify({ enableDynamicWorkflow: 'yes' }),
+    )
+    expect(applyZaiWorkflowEnableFromSettings()).toBe(false)
+    expect(process.env.OPENCC_ENABLE_WORKFLOWS).toBeUndefined()
+  })
+
+  it('returns true and sets env var to "1" when enableDynamicWorkflow is true', () => {
+    writeFileSync(
+      join(tempDataDir, 'settings.json'),
+      JSON.stringify({ enableDynamicWorkflow: true }),
+    )
+    expect(applyZaiWorkflowEnableFromSettings()).toBe(true)
+    expect(process.env.OPENCC_ENABLE_WORKFLOWS).toBe('1')
+  })
+
+  it('returns true and sets env var when enableDynamicWorkflow is true alongside other fields', () => {
+    writeFileSync(
+      join(tempDataDir, 'settings.json'),
+      JSON.stringify({
+        enableDynamicWorkflow: true,
+        outputStyle: 'compact',
+        env: { ZAI_TEST_KEEP: '1' },
+      }),
+    )
+    expect(applyZaiWorkflowEnableFromSettings()).toBe(true)
+    expect(process.env.OPENCC_ENABLE_WORKFLOWS).toBe('1')
+    // 不应该误碰其他 env 字段 — applyZaiSettingsEnvFull 是另一个函数的事
+    expect(process.env.ZAI_TEST_KEEP).toBeUndefined()
+  })
+
+  it('clears a stale env var when settings.json is later flipped to false', () => {
+    // 模拟"用户先在外部设了 env var, 后来又写到 settings.json=false"的场景:
+    // 我们的 bridge 必须以 settings.json 为真源,清掉 stale env var。
+    process.env.OPENCC_ENABLE_WORKFLOWS = '1'
+    writeFileSync(
+      join(tempDataDir, 'settings.json'),
+      JSON.stringify({ enableDynamicWorkflow: false }),
+    )
+    expect(applyZaiWorkflowEnableFromSettings()).toBe(false)
+    expect(process.env.OPENCC_ENABLE_WORKFLOWS).toBeUndefined()
+  })
+
+  it('treats malformed settings.json as disabled (does not crash boot)', () => {
+    writeFileSync(join(tempDataDir, 'settings.json'), '{ not json')
+    expect(applyZaiWorkflowEnableFromSettings()).toBe(false)
+    expect(process.env.OPENCC_ENABLE_WORKFLOWS).toBeUndefined()
+  })
+
+  it('treats empty settings.json as disabled', () => {
+    writeFileSync(join(tempDataDir, 'settings.json'), '')
+    expect(applyZaiWorkflowEnableFromSettings()).toBe(false)
+    expect(process.env.OPENCC_ENABLE_WORKFLOWS).toBeUndefined()
   })
 })

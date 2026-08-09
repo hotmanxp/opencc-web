@@ -128,6 +128,21 @@ interface AppState {
   defaultSplitScreen: boolean;
   setDefaultSplitScreen: (v: boolean) => void;
   /**
+   * 是否启用动态工作流 (WorkflowTool — 多 agent 编排工具).
+   * 持久化到 ~/.zai/settings.json(settings.enableDynamicWorkflow),
+   * Layout mount effect 用 GET /api/agent/settings hydrate.
+   *
+   * 默认 false — 工作流一次会起几十个 sub-agent 烧大量 token,必须由
+   * 用户在 SettingsDrawer 主动打开才暴露给 LLM。关闭时 vendor 的
+   * `isWorkflowsDisabled()` 返回 true,WorkflowTool 从工具池里被过滤掉,
+   * LLM 完全看不到这个工具 — 不只是"调用被拒绝",而是 schema 都不发。
+   * 开启时 PUT handler 同步写 `process.env.OPENCC_ENABLE_WORKFLOWS=1`,
+   * 下次 query() 触发的 getAllBaseTools() 调用就会把 WorkflowTool
+   * 重新纳入。中途切换不需要重启。
+   */
+  enableDynamicWorkflow: boolean;
+  setEnableDynamicWorkflow: (v: boolean) => void;
+  /**
    * 是否移动端视口. 由 `useIsMobile()` hook 通过 matchMedia 维护, 任何组件
    * 直接读 store 即可, 无需 props 透传. 路由层 Layout/MobileLayout 也用
    * 这个值决定走哪一套布局 (Sider + SettingsDrawer vs. MobileHeader).
@@ -166,6 +181,7 @@ export const useAppStore = create<AppState>((set) => ({
   outputStyle: 'default',
   maxVisibleMessages: 20,
   defaultSplitScreen: false,
+  enableDynamicWorkflow: false,
   setConnected: (v) => set({ connected: v }),
   setInstanceContext: (ctx) => set({ instanceContext: ctx }),
   applyJobEvent: (event) => set((state) => {
@@ -284,6 +300,7 @@ export const useAppStore = create<AppState>((set) => ({
   setOutputStyle: (style) => set({ outputStyle: style }),
   setMaxVisibleMessages: (n) => set({ maxVisibleMessages: n }),
   setDefaultSplitScreen: (v) => set({ defaultSplitScreen: v }),
+  setEnableDynamicWorkflow: (v) => set({ enableDynamicWorkflow: v }),
   isMobile: false,
   setIsMobile: (v) => set({ isMobile: v }),
   quickDrawerOpen: false,

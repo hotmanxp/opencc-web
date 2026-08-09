@@ -23,6 +23,7 @@ export default function MobileLayout() {
   const setInstanceContext = useAppStore((s) => s.setInstanceContext)
   const setOutputStyle = useAppStore((s) => s.setOutputStyle)
   const setMaxVisibleMessages = useAppStore((s) => s.setMaxVisibleMessages)
+  const setEnableDynamicWorkflow = useAppStore((s) => s.setEnableDynamicWorkflow)
   const setTranscriptCollapsed = useAgentStore((s) => s.setTranscriptCollapsed)
 
   useEffect(() => {
@@ -66,7 +67,11 @@ export default function MobileLayout() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<{ outputStyle?: 'default' | 'compact' | 'verbose'; maxVisibleMessages?: number }>(
+      .get<{
+        outputStyle?: 'default' | 'compact' | 'verbose'
+        maxVisibleMessages?: number
+        enableDynamicWorkflow?: boolean
+      }>(
         '/agent/settings',
       )
       .then((data) => {
@@ -82,12 +87,15 @@ export default function MobileLayout() {
         if (typeof data.maxVisibleMessages === 'number') {
           setMaxVisibleMessages(Math.max(1, Math.min(1000, Math.floor(data.maxVisibleMessages))))
         }
+        if (typeof data.enableDynamicWorkflow === 'boolean') {
+          setEnableDynamicWorkflow(data.enableDynamicWorkflow)
+        }
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setMaxVisibleMessages, setTranscriptCollapsed])
+  }, [setOutputStyle, setMaxVisibleMessages, setEnableDynamicWorkflow, setTranscriptCollapsed])
 
   return (
     <div

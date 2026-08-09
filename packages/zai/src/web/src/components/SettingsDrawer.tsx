@@ -579,6 +579,7 @@ function buildStaticSchema(
   outputStyle: OutputStyle,
   maxVisibleMessages: number,
   defaultSplitScreen: boolean,
+  enableDynamicWorkflow: boolean,
 ): SettingsSchema {
   return [
     {
@@ -714,6 +715,23 @@ function buildStaticSchema(
         },
       ],
     },
+    {
+      // 动态工作流 toggle — 默认 OFF (workflow 一次会起几十个 sub-agent,
+      // 烧大量 token,必须由用户主动打开)。
+      // 关闭时 server 端不设 OPENCC_ENABLE_WORKFLOWS → vendor 的
+      // isWorkflowsDisabled() 返回 true → WorkflowTool 从工具池里
+      // 被过滤掉,LLM 完全看不到这个工具(不是"调用被拒",而是 schema
+      // 都不发)。开启时 server 端同步写 process.env,下次 query() 自然生效。
+      section: 'Workflow',
+      rows: [
+        {
+          key: 'enableDynamicWorkflow',
+          label: '启用动态工作流',
+          kind: 'boolean',
+          value: enableDynamicWorkflow,
+        },
+      ],
+    },
   ]
 }
 
@@ -728,6 +746,8 @@ export default function SettingsDrawer() {
   const setMaxVisibleMessages = useAppStore((s) => s.setMaxVisibleMessages)
   const defaultSplitScreen = useAppStore((s) => s.defaultSplitScreen)
   const setDefaultSplitScreen = useAppStore((s) => s.setDefaultSplitScreen)
+  const enableDynamicWorkflow = useAppStore((s) => s.enableDynamicWorkflow)
+  const setEnableDynamicWorkflow = useAppStore((s) => s.setEnableDynamicWorkflow)
   // 切换 outputStyle 时同步把 transcriptCollapsed 重置为新默认 — 'compact' 切换到
   // 'default' 时立即展开,'default' 切到 'compact' 时立即折叠;避免用户得再点
   // 一次工具栏按钮才生效.
@@ -759,7 +779,7 @@ export default function SettingsDrawer() {
 
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, maxVisibleMessages, defaultSplitScreen),
+    buildStaticSchema(theme, outputStyle, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow),
   )
   // 同步 store theme → schema.theme 行(其它行的 value 内部维护)。
   useEffect(() => {
@@ -822,6 +842,21 @@ export default function SettingsDrawer() {
       })),
     )
   }, [defaultSplitScreen])
+  // 同步 store enableDynamicWorkflow → schema 行。store 是持久化真源,
+  // 这里单向投影,跟 defaultSplitScreen 策略一致。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'enableDynamicWorkflow' && r.kind === 'boolean') {
+            return { ...r, value: enableDynamicWorkflow }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [enableDynamicWorkflow])
 
   const handleChange = useCallback(
     (key: string, value: SettingsValue) => {
@@ -881,6 +916,21 @@ export default function SettingsDrawer() {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })
       }
+      // "启用动态工作流" 走 store + PUT settings.json 持久化路径。
+      // server PUT handler 同步写 process.env.OPENCC_ENABLE_WORKFLOWS,
+      // 下次 query() 触发的 getAllBaseTools() 会把 WorkflowTool 加进
+      // 工具池(或从中过滤掉)。关闭时 WorkflowTool 直接消失 — LLM
+      // 看不到这个工具的 schema,不只是"调用被拒"。
+      if (key === 'enableDynamicWorkflow' && typeof value === 'boolean') {
+        setEnableDynamicWorkflow(value)
+        void fetch('/api/agent/settings/enable-dynamic-workflow', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
       // 其它行目前只更新内部 schema state(阶段 2 接真实写盘)
       setSchema((prev) =>
         prev.map((s) => ({
@@ -901,7 +951,7 @@ export default function SettingsDrawer() {
         })),
       )
     },
-    [setTheme, setOutputStyle, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen],
+    [setTheme, setOutputStyle, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow],
   )
 
   // 整个"服务"section 仅在「instance 子实例」(instance manager 派生的子进程,

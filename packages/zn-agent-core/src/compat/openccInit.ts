@@ -252,6 +252,51 @@ export function applyZaiExtraCACertsFromConfig(): string | undefined {
   return undefined
 }
 
+/**
+ * Step 9b — bridge `settings.enableDynamicWorkflow` (zai's persisted
+ * flag) into `process.env.OPENCC_ENABLE_WORKFLOWS` (vendor's runtime
+ * gate). vendor's `isWorkflowsDisabled()` at opencc-src/utils/envUtils.ts:338
+ * reads the env var FIRST before consulting `settings.workflows.enabled`,
+ * so flipping the env var at boot is enough to make WorkflowTool show up
+ * or disappear from the next `getAllBaseTools()` call.
+ *
+ * Why the env var and not vendor's settings field directly:
+ *   1. zai-server's `~/.zai/settings.json` is its own schema (ZaiSettings),
+ *      not vendor's SettingsJson. Writing to vendor's settings would
+ *      leak zai concepts into vendor territory.
+ *   2. `process.env` is mutable at runtime, so the same function is
+ *      safe to call from the live PUT route too — toggling takes effect
+ *      on the next `query()` call without restarting the process.
+ *
+ * Idempotent. Safe to call multiple times: each call reflects the
+ * current settings.json on disk.
+ */
+export function applyZaiWorkflowEnableFromSettings(): boolean {
+  const settingsPath = join(
+    process.env.ZAI_DATA_DIR ?? join(homedir(), '.zai'),
+    'settings.json',
+  )
+  let enabled = false
+  if (existsSync(settingsPath)) {
+    try {
+      const raw = readFileSync(settingsPath, 'utf8')
+      const parsed = raw.trim() ? (JSON.parse(raw) as { enableDynamicWorkflow?: unknown }) : null
+      enabled = parsed?.enableDynamicWorkflow === true
+    } catch {
+      // Corrupt settings.json — default to disabled (the new opt-in
+      // default). Don't crash boot on a malformed file; the user can
+      // still flip the toggle once they fix settings.json.
+      enabled = false
+    }
+  }
+  if (enabled) {
+    process.env.OPENCC_ENABLE_WORKFLOWS = '1'
+  } else {
+    delete process.env.OPENCC_ENABLE_WORKFLOWS
+  }
+  return enabled
+}
+
 // ----- entry point -----
 
 let enabled = false
@@ -329,6 +374,16 @@ export async function enableOpenccConfigs(
   // for any fallback code path.
   applySafeZaiSettingsEnv()
   applyZaiExtraCACertsFromConfig()
+
+  // Step 9b — bridge `settings.enableDynamicWorkflow` into
+  // `OPENCC_ENABLE_WORKFLOWS` so vendor's `isWorkflowsDisabled()` returns
+  // the right answer from the first `getAllBaseTools()` call. Done before
+  // the bundle import because some vendor code paths consult
+  // `isWorkflowsDisabled()` during their own module evaluation. The
+  // live PUT route also calls this function after writing settings,
+  // so a runtime toggle takes effect on the next `query()` call without
+  // requiring this boot sequence to re-run.
+  applyZaiWorkflowEnableFromSettings()
 
   const bundle = (await import(/* @vite-ignore */ BUNDLE_URL as any)) as any
 
