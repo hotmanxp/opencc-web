@@ -27,6 +27,17 @@
   --success: #22c55e;
   --error: #ef4444;
   --warning: #f59e0b;
+  --success-bg: rgba(82,196,26,0.06);
+  --error-bg: rgba(255,77,79,0.06);
+  --warning-bg: rgba(250,173,20,0.06);
+  /* Thinking 块 / ToolGroupCard dark 主题: 紫色降饱和 (#722ed1 → #8b5cf6)
+     + 透明度 14% → 10%, 让 pill + 卡片在深色背景上不抢眼.
+     light 主题单独覆盖成主题橙, 见下方 :root[data-theme='light'] 块. */
+  --thinking-accent: #8b5cf6;
+  --thinking-bg: rgba(139, 92, 246, 0.10);
+  --tool-group-bg: rgba(139, 92, 246, 0.08);
+  --tool-group-border: rgba(139, 92, 246, 0.40);
+  --tool-group-header-bg: rgba(139, 92, 246, 0.18);
   --text-dim-90: rgba(255,255,255,0.9);
   --text-dim-85: rgba(255,255,255,0.85);
   --text-dim-72: rgba(255,255,255,0.72);
@@ -77,6 +88,19 @@
   --success: #16a34a;
   --error: #dc2626;
   --warning: #d97706;
+  /* Success/Error/Warn 浅色背景: 亮色主题下从 6% 提到 12%, 让 Bash 输出
+     success/error 块在白底上明显, 避免被误看成 warning 黄. */
+  --success-bg: rgba(22, 163, 74, 0.12);
+  --error-bg: rgba(220, 38, 38, 0.10);
+  --warning-bg: rgba(217, 119, 6, 0.12);
+  /* Thinking / ToolGroupCard 主题橙统一: 浅色主题下用主题橙主色 (#f97316) +
+     更低透明度 6%/5%/4%, 避免橙色在白底上过于鲜艳. 边框 0.30 alpha 保留
+     可见轮廓. */
+  --thinking-accent: #f97316;
+  --thinking-bg: rgba(249, 115, 22, 0.04);
+  --tool-group-bg: rgba(249, 115, 22, 0.04);
+  --tool-group-border: rgba(249, 115, 22, 0.30);
+  --tool-group-header-bg: rgba(249, 115, 22, 0.08);
   --text-dim-90: rgba(0,0,0,0.9);
   --text-dim-85: rgba(0,0,0,0.85);
   --text-dim-72: rgba(0,0,0,0.72);
@@ -147,6 +171,26 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--text-tertiary); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+/* dark 主题: 显式锁定滚动条颜色, 防止 light 主题 selector 渗漏.
+   与 :root --text-tertiary = #94a3b8 (slate-400) / --text-secondary = #cbd5e1
+   (slate-300) 当前值一致, 后续 --text-* 变化不会影响滚动条. */
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+}
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
+}
+
+/* light 主题下滚动条颜色在浅色背景上太深 (slate-500 #64748b),
+   改成 slate-600 32% alpha — 静止可见但不抢眼, hover 加深到 55% 表示
+   激活. dark 主题走上面 :root[data-theme='dark'] 显式定义, 不会受影响. */
+:root[data-theme='light'] ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.32);
+}
+:root[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.55);
+}
 
 .ant-layout { background: var(--bg-body) !important; }
 .ant-layout-sider { background: var(--bg-sidebar) !important; border-right: 1px solid var(--border-subtle) !important; }

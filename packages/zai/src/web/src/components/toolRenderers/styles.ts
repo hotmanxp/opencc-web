@@ -12,22 +12,24 @@ export const STYLE = {
     fontFamily: CODE_FONT_FAMILY,
   },
   preMuted: { background: "var(--bg-faint-02)" },
+  // 语义色用 CSS 变量, light 主题下 light 浅色背景 + dark 边框形成稳定对比;
+  // dark 主题下 AntD 算法将 -bg 转换成深色, 边框保留饱和色. 消除"亮色下偏黄"的视觉问题.
   preSuccess: {
-    background: "rgba(82,196,26,0.06)",
-    borderLeft: "2px solid #52c41a",
+    background: "var(--success-bg, rgba(82,196,26,0.06))",
+    borderLeft: "2px solid var(--success, #52c41a)",
     maxHeight: 360,
     overflow: "auto" as const,
   },
   preError: {
-    background: "rgba(255,77,79,0.06)",
-    borderLeft: "2px solid #ff4d4f",
+    background: "var(--error-bg, rgba(255,77,79,0.06))",
+    borderLeft: "2px solid var(--error, #ff4d4f)",
     color: "#cf1322",
     maxHeight: 360,
     overflow: "auto" as const,
   },
   preWarn: {
-    background: "rgba(250,173,20,0.06)",
-    borderLeft: "2px solid #faad14",
+    background: "var(--warning-bg, rgba(250,173,20,0.06))",
+    borderLeft: "2px solid var(--warning, #faad14)",
     maxHeight: 360,
     overflow: "auto" as const,
   },

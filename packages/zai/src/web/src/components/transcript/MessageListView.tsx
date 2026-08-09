@@ -38,11 +38,25 @@ export function MessageListView({ messages, streaming }: Props) {
             : undefined
           const reactKey =
             (toolUseId ? `tool-${toolUseId}` : (msg as any).eventId) || String(idx)
+          // "正在被流式累积"的精确判定 — 不依赖 status (status === 'streaming'
+          // 在 thinking_delta / text_delta 累积期间都是 true, 但语义上是
+          // "正在被累积" 的 lastIndex message). 关键是:
+          //   - lastIndex && type === 'assistant.thinking' → 正在 thinking_delta 累积
+          //   - lastIndex && type === 'assistant.text' && streaming → 正在 text_delta 累积
+          //   - 其他情况 (历史 / 已完成 / tool_use) → false
+          // 不依赖 SSE 长连接 status, 也不依赖 zustand 全局 status 标志,
+          // 只看 message 自身是不是 lastIndex + 类型, 避免 SSE 阻塞 / status
+          // 错位导致动画不触发.
+          const lastIdx = visibleMessages.length - 1
+          const isLive = idx === lastIdx && (
+            t === 'assistant.thinking' ||
+            (t === 'assistant.text' && Boolean(streaming))
+          )
           return (
             <MessageBubble
               key={reactKey}
               msg={msg}
-              streaming={streaming && idx === visibleMessages.length - 1}
+              streaming={isLive}
             />
           )
         })}
@@ -93,15 +107,14 @@ export function MessageListView({ messages, streaming }: Props) {
           )
         }
         if (node.kind === 'thinking') {
-          // Thinking in collapsed view: 与 expanded 走同一个 MessageBubble 渲染分支,
-          // 让 ThinkingBlock (含 pill + 折叠 + 预览) 在两种视图下完全一致.
-          // 原因: 早期 CollapsedMessageBubble 自渲染 thinking 文本, 用户反馈"思考模块不见了";
-          // 根因是旧分支只匹配 type==='assistant', 而真正的思考消息 type 是 'assistant.thinking'.
+          // Thinking 在 collapsed 视图下: 用 lastIndex 判定 (与 expanded 视图
+          // 保持一致). 如果当前节点就是 messages 最后一条且 type === 'assistant.thinking',
+          // 说明它正在被 thinking_delta 累积, 折叠态用户需要看到思考动画反馈.
           return (
             <MessageBubble
               key={`think-${node.index}-${i}`}
               msg={node.message}
-              streaming={streaming && node.index === visibleMessages.length - 1}
+              streaming={node.index === visibleMessages.length - 1}
             />
           )
         }

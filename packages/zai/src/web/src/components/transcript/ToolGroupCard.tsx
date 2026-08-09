@@ -30,9 +30,10 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
     : `${entries.length} 个工具调用`
 
   return (
-    // 工具折叠卡片宽度与 LLM 文字气泡一致 (maxWidth:100%), 用深色半透明
-    // 面板 + 紫色左边条与浅绿 (#f6ffed) 文字气泡视觉区分: 文字气泡表达
-    // "模型回复", 工具面板表达 "工具调用汇总", 颜色互不抢占.
+    // 工具折叠卡片宽度与 LLM 文字气泡一致 (maxWidth:100%), 用主题橙
+    // 半透明面板 + 主题橙左边条与 LLM 文字气泡视觉区分: 文字气泡表达
+    // "模型回复", 工具面板表达 "工具调用汇总". 颜色与全局 accent 统一,
+    // 不再抢占 LLM 文字气泡的浅绿 (#f6ffed) 视觉.
     <Card
       size="small"
       style={{
@@ -44,20 +45,19 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
         maxWidth: 'calc(100% - 20px)',
         marginRight: 20,
         // 与 LLM 文字气泡 (#f6ffed 浅绿) 形成稳定对比:
-        // 工具面板用紫色半透明底 + 紫色左边条, 表达"工具调用汇总".
-        // 透明度从 0.04 提到 0.10, 让面板在深色页面背景上清晰可见.
-        background: 'rgba(114,45,209,0.10)',
-        borderColor: 'rgba(114,45,209,0.45)',
-        borderLeft: '3px solid #722ed1',
+        // 工具面板用半透明底 + 紫色左边条, 表达"工具调用汇总".
+        // 透明度从 0.04 提到 0.08, 让面板在深色页面背景上清晰可见.
+        // dark 主题用降饱和紫 (#8b5cf6), light 主题覆盖成主题橙.
+        background: 'var(--tool-group-bg, rgba(139,92,246,0.08))',
+        borderColor: 'var(--tool-group-border, rgba(139,92,246,0.40))',
+        borderLeft: '3px solid var(--thinking-accent, #8b5cf6)',
         borderRadius: 12,
       }}
       styles={{
-        // 头部背景用你取的紫色 (#602272 + 透明). 之前我用了纯 #602272
-        // 没带 alpha,在深色卡片体上显得太亮; 改成 #60227233 (alpha=0x33≈20%)
-        // 让深色透过来, 与"半透明紫底"卡片体形成同一色系深浅层次.
+        // 头部背景: 与卡片体同色系深浅层次.
         // ⚠ AntD Card styles 槽位叫 header 不是 head (semantic-dom 命名),
         // 用 head 会被静默忽略.
-        header: { background: '#60227233' },
+        header: { background: 'var(--tool-group-header-bg, rgba(139,92,246,0.18))' },
         body: { padding: 12 },
       }}
       title={

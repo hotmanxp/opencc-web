@@ -95,8 +95,8 @@ export const StreamingMarkdown = React.memo(function StreamingMarkdown({ text }:
   );
 });
 
-const THINKING_ACCENT = "#722ed1"; // TODO: theme-constant (purple — no CSS var mapping yet)
-const THINKING_BG = "rgba(114, 45, 209, 0.14)"; // TODO: theme-constant (purple bg — no CSS var mapping yet)
+const THINKING_ACCENT = "var(--thinking-accent, #8b5cf6)"; // CSS var preferred, hardcoded fallback for tests/storybook
+const THINKING_BG = "var(--thinking-bg, rgba(139, 92, 246, 0.10))"; // CSS var preferred, hardcoded fallback for tests/storybook
 const THINKING_PREVIEW_MAX = 80;
 
 // 模块级计数器: 当前有几个 ThinkingBlock 处于 streaming 状态。
@@ -135,6 +135,11 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
   // <style> 元素会被吃掉、不到 DOM. 通过 useEffect 注入更稳.
   // 用模块级 refcount: 第一个 streaming=true 挂载, 最后一个 streaming 消失
   // (含组件卸载) 才卸载 — 避免历史回放中也跟着跑动画.
+  // 折叠态四重视觉信号 (让用户明显感知"正在思考"):
+  //   - 灯泡 fill 颜色循环 (zai-think-glow, 1.4s) — 浅黄 → 亮白 + 缩放 1.0 → 1.15
+  //   - pill 背景透明度呼吸 (zai-think-pill-pulse, 1.6s)
+  //   - "思考" 后面三个点循环闪烁 (zai-think-dot, 1.2s, 错开 0.15s)
+  // prefers-reduced-motion: reduce 全部降级为静态, 颜色不变.
   useEffect(() => {
     const id = "zai-think-glow-style";
     if (streaming) {
@@ -143,15 +148,43 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
         const style = document.createElement("style");
         style.id = id;
         style.textContent = `
+          /* 灯泡 fill 颜色循环 + 缩放呼吸:
+             fill 范围 #f7d774 暗黄 → #ffffff 亮白 (对比度最大, 紫色 pill 上一眼可见),
+             transform scale 1.0 → 1.15 配合 fill-box 让灯泡"呼吸".
+             transform-origin: center + transform-box: fill-box 是 SVG path
+             缩放必须有的一对, 不然缩放中心是 SVG 容器 origin. */
           @keyframes zai-think-glow {
-            0%, 100% { fill: #f7d774; }
-            50%      { fill: #ffe999; }
+            0%, 100% { fill: #f7d774; transform: scale(1); }
+            50%      { fill: #ffffff; transform: scale(1.15); }
           }
           .zai-thinking-bulb-active svg path {
             animation: zai-think-glow 1.4s ease-in-out infinite;
+            transform-origin: center;
+            transform-box: fill-box;
           }
+          /* pill 背景呼吸: opacity 1.0 ↔ 0.78, 让"思考"标签在折叠态视觉跳动 */
+          @keyframes zai-think-pill-pulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.78; }
+          }
+          .zai-thinking-pill-active {
+            animation: zai-think-pill-pulse 1.6s ease-in-out infinite;
+          }
+          /* "思考"后面三个点循环: 每个 dot opacity 0.2 → 1.0, 错开 0.15s
+             形成打字机"思考中"视觉, 跟 StreamingMarkdown 末尾光标呼应 */
+          @keyframes zai-think-dot {
+            0%, 80%, 100% { opacity: 0.2; }
+            40%           { opacity: 1; }
+          }
+          .zai-think-dot-1 { animation: zai-think-dot 1.2s infinite; }
+          .zai-think-dot-2 { animation: zai-think-dot 1.2s 0.15s infinite; }
+          .zai-think-dot-3 { animation: zai-think-dot 1.2s 0.30s infinite; }
           @media (prefers-reduced-motion: reduce) {
-            @keyframes zai-think-glow { 0%, 100% { fill: #cacaca; } }
+            @keyframes zai-think-glow {
+              0%, 100% { fill: #cacaca; transform: scale(1); }
+            }
+            @keyframes zai-think-pill-pulse { 0%, 100% { opacity: 1; } }
+            @keyframes zai-think-dot { 0%, 100% { opacity: 1; } }
           }
         `;
         document.head.appendChild(style);
@@ -198,6 +231,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                 {/* 紫色 pill: 仿 opencc userFacingNameBackgroundColor,
                     把 "思考" 标签用主色背景包裹, 视觉权重高于纯文字标签. */}
                 <span
+                  className={streaming ? "zai-thinking-pill-active" : undefined}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -218,6 +252,23 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                     style={{ fontSize: 11 }}
                   />
                   思考
+                  {/* 三个点循环: streaming 时让"思考"标签尾部有打字机视觉,
+                      折叠态用户一眼能看出模型还在思考. 历史回放/流式结束
+                      时点不渲染, 不会残留. */}
+                  {streaming && (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        display: "inline-flex",
+                        gap: 1,
+                        marginLeft: 1,
+                      }}
+                    >
+                      <span className="zai-think-dot-1">.</span>
+                      <span className="zai-think-dot-2">.</span>
+                      <span className="zai-think-dot-3">.</span>
+                    </span>
+                  )}
                 </span>
                 {/* 箭头: 折叠态 › (CaretRight), 展开态 ⌄ (CaretDown).
                     紧贴 pill 之后, 视觉顺序: pill → 箭头 → 预览文字.
