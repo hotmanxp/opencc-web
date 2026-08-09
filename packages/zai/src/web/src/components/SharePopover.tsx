@@ -54,7 +54,7 @@ export default function SharePopover() {
   return (
     <div style={{ maxWidth: 360, padding: "4px 0" }}>
       <div style={{ fontSize: 12, color: 'var(--text-dim-45)', marginBottom: 8 }}>
-        分享到 LAN — 点 Copy 把链接发给同事
+        分享到 LAN — 点 Copy 把链接发给小伙伴
       </div>
 
       {/* 主二维码区: 锁白底黑前景, 暗色背景下扫码更稳 */}
