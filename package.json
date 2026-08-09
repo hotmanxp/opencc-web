@@ -8,6 +8,9 @@
   ],
   "scripts": {
     "build": "pnpm --filter @zn-ai/zn-agent-core run build && pnpm --filter @zn-ai/zai run build",
+    "build:core": "pnpm --filter @zn-ai/zn-agent-core run build",
+    "build:zai": "pnpm --filter @zn-ai/zai run build",
+    "build:web": "pnpm --filter @zn-ai/zai run build:web",
     "clean": "pnpm -r run clean",
     "dev": "pnpm -r run dev",
     "dev:web": "pnpm --filter @zn-ai/zai run dev",

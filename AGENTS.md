@@ -45,6 +45,7 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 ## 强制开发规则
 
 - **真实浏览器验收**:任何问题修复或特性新增,完成前必须用 `/ego-browser` skill 启动真实 zai 实例并走完用户路径(页面加载、按钮点击、表单提交、截图等)。**禁止**用 Chrome DevTools MCP、Playwright、Puppeteer、`curl + WebFetch` 或单元测试替代。环境阻塞时必须显式报告。**注意**:`/ego-browser` 测试本地功能时,不要 kill 920x 端口所在的服务进程——920x 是 zai 正式服务端口, kill 后会导致真实实例不可用,应改为让 ego 使用另一个可用端口(如 8101 起)访问,或用 `pnpm --filter @zn-ai/zai dev` 启动独立开发服务。
+- **core 改动必须先 build:core**:`packages/zn-agent-core/` 改完后的修复或特性,ego-browser 验证前**必须**先 `pnpm run build:core`。zai 进程通过 `node_modules/@zn-ai/zn-agent-core/` 加载的内容里,`dist/compat/runtime/bun-protocol.mjs` loader、`dist/opencc-core.mjs` 捆绑、以及 `./opencc-src/*` 等子路径 dist 都是构建产物,改源不会自动生效;不重建就用 ego 验证会复现到旧 core 行为,误导排错。仅改 `packages/zai/src/web/`(纯前端)或只改 zai 服务端源码(无 core 依赖)时**不需要** build:core。
 - **Node-direct runtime(默认)**:`zai dev` 默认走 Node,入口为 `tsx --loader .../bun-protocol.mjs`,通过 loader 拦截 `bun:bundle` / `bun:feature`(漏掉会 `ERR_UNSUPPORTED_ESM_URL_SCHEME`)。保留 `dev:bun`(`bun run src/cli/index.ts dev`)作为可选快速运行方式。opencc vendor 是 un-stripped 全量,Node 冷启动加载较慢,属预期。
 - **opencc-src vs compat**:verbatim 移植的 compat 文件,若 opencc 上游是纯类型/常量,优先让 zai 调用方**直接**从 `opencc-src/<name>` 取值,compat 仅留作 zai 专属别名载体。`scripts/bundle-opencc.mjs` 用 esbuild `bundle: false` 单文件编 → `dist/opencc-src/types/<name>.js` 暴露子路径。**禁止**用 tsc 整编 opencc-src(拖入 UI 传递依赖)。详见 plan `docs/superpowers/plans/2026-08-01-compat-direct-opencc-src-permissions.md`。
 - **MACRO stub**:`zai-server` 启动时需在 `enableOpenccConfigs` 内调 `installMacroStub()` 预填 `globalThis.MACRO`,否则 vendor 顶层 `MACRO.X` 引用 panic。
@@ -66,6 +67,12 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 ```bash
 # TypeScript 类型检查(顶层 + 各 workspace)
 pnpm -r exec tsc --noEmit
+
+# 单 workspace 构建(开发期加速反馈,只编自己改过的部分)
+pnpm run build:core           # 只构建 @zn-ai/zn-agent-core(loader / opencc-core.mjs / opencc-src/* 子路径 dist)
+pnpm run build:web            # 只构建 @zn-ai/zai 的前端(vite → dist/web)
+pnpm run build:zai            # 只构建 @zn-ai/zai(tsc + vite,假设 core 已构建)
+# pnpm run build 仍是 core → zai 的链式全量构建(发版 / 冷启动场景)
 
 # 单元测试 — 只跑相关文件,不要全量
 pnpm --filter @zn-ai/zai test <path/to/file.test.tsx>   # 单文件
