@@ -54,8 +54,34 @@ describe('translateSdkToRuntime', () => {
     expect(events.map((event) => event.type)).toContain('message_stop')
   })
 
-  it('skips SystemMessage (init / local_command) — zai handles those separately', () => {
-    const sys = { type: 'system', subtype: 'init', cwd: '/x', tools: [] }
+  it('passes through system/init (carries tools list, required by SDK consumers)', () => {
+    // opencc vendor's QueryEngine yields system/init as the FIRST
+    // SDKMessage of every query — it carries the model-visible tools
+    // list (built-ins + mcp__*) plus session/cwd metadata. The SDK
+    // contract requires consumers to receive it; zai's runtime tests
+    // (openccRuntime-query.test.ts) and remote SDK clients depend on
+    // it. Filtering it here broke both `exposes MCP tools to the model`
+    // regression tests.
+    const sys = { type: 'system', subtype: 'init', cwd: '/x', tools: ['Bash'] }
+    const events = [...translateSdkToRuntime(sys, meta)]
+    expect(events.map((e) => e.type)).toEqual(['system'])
+    expect(events[0]).toMatchObject({ type: 'system', subtype: 'init', tools: ['Bash'] })
+  })
+
+  it('passes through system/compact_boundary (transcript truncation marker)', () => {
+    // QueryEngine emits system/compact_boundary when the autocompact
+    // loop truncates the transcript — session readers rely on this
+    // marker to know where to slice.
+    const sys = { type: 'system', subtype: 'compact_boundary', uuid: 'u1', compact_metadata: {} }
+    const events = [...translateSdkToRuntime(sys, meta)]
+    expect(events.map((e) => e.type)).toEqual(['system'])
+  })
+
+  it('filters other system subtypes (local_command etc.)', () => {
+    // Anything else with type:'system' is dropped — QueryEngine
+    // converts local_command output to assistant messages BEFORE
+    // yielding (QueryEngine.ts:629), so this branch is defensive.
+    const sys = { type: 'system', subtype: 'local_command', content: '<local-command-stdout>ls</local-command-stdout>' }
     const events = [...translateSdkToRuntime(sys, meta)]
     expect(events).toEqual([])
   })

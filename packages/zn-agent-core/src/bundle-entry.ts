@@ -15,6 +15,13 @@
  */
 export * from './opencc-src/query.js'
 export { createOpenccRuntime } from './opencc-src/server/createOpenccRuntime.js'
+// zai patch (2026-08-09): Task 2/3 公共 API 也走 bundle — `opencc-server`
+// 子路径的 `default` 指向 `dist/opencc-core.mjs`,测试与运行时通过
+// `@zn-ai/zn-agent-core/opencc-server` 取 createHeadlessContext /
+// createSessionFacade 必须从同一 bundle 拿到,才能与 createOpenccRuntime
+// 共享 module 实例(STATE / commandQueue / bashTracker)。
+export { createHeadlessContext } from './opencc-src/server/createHeadlessContext.js'
+export { createSessionFacade } from './opencc-src/server/sessionFacade.js'
 export * from './index.js'
 
 // ---------------------------------------------------------------------------
