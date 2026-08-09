@@ -25,6 +25,15 @@ export * from './index.js'
 
 // ./runtime(避开 runtime/index.ts 的 query/QueryEngine 抛错 stub —— bundle
 // 导出的是 opencc-src/query.ts 的真实 query)
+//
+// zai patch (2026-08-09): 暴露 vendor 的 queryModelWithStreaming 给 zai 直接复用。
+// zai 之前的 compat/runtime/compactService 通过显式注入 ModelCaller 调用 LLM,
+// 但 commit da5956c3 已经移除了 zai 自建 modelCaller 路径——模型调用全部走
+// vendor 的 query/deps.ts productionDeps().callModel = queryModelWithStreaming
+// (读 ANTHROPIC_AUTH_TOKEN / ANTHROPIC_BASE_URL)。让 compat/compactSession 也
+// 内部直接走这条路径,统一调用语义,消除"modelCaller 未配置" 错误。
+export { queryModelWithStreaming } from './opencc-src/services/api/claude.js'
+export { asSystemPrompt } from './opencc-src/utils/systemPromptType.js'
 export { CwdStore } from './compat/cwdStore.js'
 export { runWithSessionId, getCurrentSessionId } from './compat/runWithSessionId.js'
 export type { PermissionMode } from './compat/permissions.js'

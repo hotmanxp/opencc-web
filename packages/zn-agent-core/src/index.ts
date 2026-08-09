@@ -19,7 +19,6 @@ export type {
   QueryOptions,
   RuntimeConfig,
   SandboxConfig,
-  SystemPrompt,
   Tool,
   UserMessage,
 } from './compat/runtime/types.js'
@@ -79,3 +78,52 @@ export type { CompactSessionOptions, CompactSessionResult } from './compat/runti
 // Memory helpers (already in compat/memory/loader.js; re-export for main entry)
 export { clearMemoryCache, loadMemoryForPrompt } from './compat/memory/loader.js'
 export type { MemoryFile, MemoryType } from './compat/memory/loader.js'
+
+// zai patch (2026-08-09): vendor queryModelWithStreaming 的 types stub。
+//
+// 运行时 esbuild bundle (`dist/opencc-core.mjs`) 把 vendor 的
+// queryModelWithStreaming / asSystemPrompt 编入 bundle 并通过 re-export
+// 暴露(zai/src/server/services/commands/builtin/compact.ts 直接 import,
+// 拿 runtime 值)。types 不走 dist/opencc-src/** — 主 tsconfig.json 把
+// src/opencc-src 排除(vendor 有未修的 ts 错误),让 src/index.ts 引用
+// ./opencc-src/** 会触发 TS6307 错误(transitive file 不在项目文件列表)。
+//
+// 这里 declare-only 的签名是 zai 端 compact 调用所需的最小契约:
+//   - messages: vendor 的 Message[]
+//   - systemPrompt: branded readonly string[] (用 asSystemPrompt 构造)
+//   - thinkingConfig / tools / signal / options: 调 vendor 的标准参数
+//
+// runtime 调用的是 esbuild bundle 里的真实实现,types 只是给 zai tsc 看的
+// 契约表面,签名不匹配处 zai 端用 `as` cast 即可。
+export type Message = {
+  type: string
+  content: string
+  message?: { content: string | unknown[]; role?: string }
+  uuid?: string
+  parentUuid?: string | null
+  timestamp?: string | number
+}
+
+export type SystemPrompt = readonly string[] & { readonly __brand: 'SystemPrompt' }
+
+export function asSystemPrompt(value: readonly string[]): SystemPrompt {
+  return value as SystemPrompt
+}
+
+export declare function queryModelWithStreaming(args: {
+  messages: Message[]
+  systemPrompt: SystemPrompt
+  thinkingConfig: { type: 'disabled' | 'enabled'; budgetTokens?: number }
+  tools: unknown[]
+  signal: AbortSignal
+  options: {
+    model: string
+    querySource: string
+    isNonInteractiveSession: boolean
+    hasAppendSystemPrompt: boolean
+    agents: unknown[]
+    mcpTools: unknown[]
+    getToolPermissionContext: () => Promise<unknown>
+    [key: string]: unknown
+  }
+}): AsyncIterable<unknown>
