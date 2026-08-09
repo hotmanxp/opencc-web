@@ -79,8 +79,19 @@ export default function SharePopover() {
         <div style={{ fontSize: 12, color: 'var(--text-dim-45)' }}>
           扫码在手机上打开 <code>/m?sid={sessionId}</code>
         </div>
-        <div style={{ fontSize: 12, color: 'var(--text-dim-65)' }}>
-          首选: <code>{primaryIp}:{ctx.port}</code>
+        <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+          <div style={{ fontSize: 12, color: 'var(--text-dim-65)' }}>
+            首选: <code>{primaryIp}:{ctx.port}</code>
+          </div>
+          <Button
+            size="small"
+            icon={<CopyOutlined />}
+            data-testid="share-copy-primary"
+            onClick={() => void handleCopy(primaryIp)}
+            aria-label="复制首选 URL"
+          >
+            复制
+          </Button>
         </div>
       </div>
 
