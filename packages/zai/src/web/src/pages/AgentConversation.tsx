@@ -61,6 +61,7 @@ export default function AgentConversation() {
 
   const status = useAgentStore((s) => s.status)
   const sessionId = useAgentStore((s) => s.sessionId)
+  const transcriptCollapsed = useAgentStore((s) => s.transcriptCollapsed)
   const pendingAsk = useAgentStore((s) => s.pendingAsk)
   const setAskAnswer = useAgentStore((s) => s.setAskAnswer)
   const setAskNotes = useAgentStore((s) => s.setAskNotes)
@@ -82,8 +83,17 @@ export default function AgentConversation() {
       questionCardRef.current?.scrollIntoView({ behavior: 'smooth', block: 'end' })
       return
     }
-    autoScroll.scrollToBottom(messages.length)
-  }, [messages, pendingAsk, autoScroll])
+    // 补传 folded + messagesRef,激活 useAutoScrollToBottom 的折叠视图 fallback 路径:
+    //   - folded=true 时 CollapsedMessageBubble 的 maxHeight:140 clamp 让 outer
+    //     scrollHeight 失真, contentGrew=false 但 store 真的写过新数据 (引用换),
+    //     hook 内部规则 #3.5 用 messagesRefChanged 兜底 follow。
+    //   - expanded 视图下这两个 opts 是 noop (folded=false 走原路径, messagesRef
+    //     仅作 hook 内部 prevMessagesRef 缓存)。
+    autoScroll.scrollToBottom(messages.length, {
+      folded: transcriptCollapsed,
+      messagesRef: messages,
+    })
+  }, [messages, pendingAsk, transcriptCollapsed, autoScroll])
 
   useEffect(() => {
     if (status !== 'streaming') return

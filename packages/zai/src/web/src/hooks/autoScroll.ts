@@ -60,13 +60,48 @@ export interface DecideAutoScrollInput {
    * 变, 这正是折叠视图不滚的根因 — 但 store 真的写过新数据, UI 必须跟.
    */
   messagesRefChanged?: boolean
+  /**
+   * 上一帧调用结束时, 用户 scrollTop 是否与本帧相同 (容差 5px). hook
+   * 层在 `scrollTo` 之后把 `el.scrollTop` 写进 `prevScrollTopRef`, 下
+   * 次事件拿 `el.scrollTop` 与之比较, 几乎不动视作 "user 仍在底部".
+   *
+   * 触发场景: 滚动容器内容在两次 effect 之间涨 > 80px (典型 streaming
+   * delta), hook 调 `scrollTo({top: scrollHeight})` 被浏览器 clamp 到
+   * `scrollHeight - clientHeight`, 但 React 后续 render 让 scrollHeight
+   * 再涨, 下一次 effect 时 `scrollTop` 仍停在旧 max 处, `distanceToBottomPx`
+   * 显示 > 80px 误判 userScrolledAway. 此时若 `wasAtBottom=true` (user
+   * 上一帧就在底部没动), 实际是 scrollTop 落后于新内容, 应 follow.
+   */
+  wasAtBottom?: boolean
 }
 
 export type AutoScrollDecision = 'follow' | 'stay'
 
+/**
+ * 决策原因 — 决策函数每个 return 分支都打一个稳定 id, 调用方打印日志时
+ * 直接带出来. 这样可以一眼看出 "为什么不滚" 是 rule #1 (用户锁) 还是
+ * rule #4 (无变化) 还是 rule #5 (用户上滚). 测试也用同一 id 做断言.
+ *
+ * 命名规则: <rule 名> + (适用条件). 不重复规则序号, 留出新增规则的余地.
+ */
+export type AutoScrollReason =
+  | 'scrollFollowLocked'  // rule #1: 用户 5s 内主动滚, 锁中
+  | 'init'                // rule #2: 首次 effect, 强制落到底
+  | 'contentGrewInBottom' // rule #3: scrollHeight 涨 + 用户在底部
+  | 'foldedFallback'      // rule #3.5: 折叠视图 + 引用换了 + !contentGrew + 在底部
+  | 'noChange'            // rule #4: length 没增 + 内容没长高
+  | 'userScrolledAway'    // rule #5: distanceToBottomPx > NEAR_BOTTOM_PX, user 真走开
+  | 'wasAtBottomContentGrew' // rule #5a: 上一帧在底部 + contentGrew, clamp 落后补滚
+  | 'default'             // rule #6: 兜底 follow
+
+export interface AutoScrollDecisionResult {
+  decision: AutoScrollDecision
+  reason: AutoScrollReason
+}
+
 export function decideAutoScroll(
   input: DecideAutoScrollInput,
-): AutoScrollDecision {
+): AutoScrollDecisionResult {
   const {
     prevLength,
     nextLength,
@@ -75,22 +110,25 @@ export function decideAutoScroll(
     distanceToBottomPx,
     folded = false,
     messagesRefChanged = false,
+    wasAtBottom = false,
   } = input
 
   // 1) 用户主动滚 → 5s 锁内一律不滚 (用户主动翻历史期间, 不打扰)。
   //    注意: 即便 contentGrew, 用户手势期间也不要拉回 — 让 "N 条新消息" 提示
   //    (另一组件) 处理视觉反馈。
-  if (scrollFollowLocked) return 'stay'
+  if (scrollFollowLocked) return { decision: 'stay', reason: 'scrollFollowLocked' }
 
   // 2) 初始化 (首次 effect) → 强制落到底部, 让首屏对齐。
   //    之后 prevLength 才是真实历史值, 进入下面的 length 检查。
-  if (prevLength < 0) return 'follow'
+  if (prevLength < 0) return { decision: 'follow', reason: 'init' }
 
   // 3) 内容真的长高 (scrollHeight 增长) + 用户在底部 → 跟随。
   //    这是 streaming delta 期间的正确行为: 同一 bubble 持续 append, length
   //    没变但容器长高, 用户在底部 → 跟到底, 让新字符出现在视口里。
   //    用户不在底部 (> 80px) 时不打扰, 留给 5) 的距离判断。
-  if (contentGrew && distanceToBottomPx <= NEAR_BOTTOM_PX) return 'follow'
+  if (contentGrew && distanceToBottomPx <= NEAR_BOTTOM_PX) {
+    return { decision: 'follow', reason: 'contentGrewInBottom' }
+  }
 
   // 3.5) 折叠视图 fallback: CollapsedMessageBubble 的 maxHeight:140 +
   //    overflow:hidden clamp 让 outer scrollHeight 在文字越过 ~6 行后
@@ -107,17 +145,28 @@ export function decideAutoScroll(
     nextLength === prevLength &&
     distanceToBottomPx <= NEAR_BOTTOM_PX
   ) {
-    return 'follow'
+    return { decision: 'follow', reason: 'foldedFallback' }
   }
 
   // 4) 长度和内容都没变 → effect 重跑但无新增 (例如 React strict-mode 二次挂载、
   //    store 引用刷新但数据未变)。保持当前位置。
-  if (nextLength <= prevLength && !contentGrew) return 'stay'
+  if (nextLength <= prevLength && !contentGrew) {
+    return { decision: 'stay', reason: 'noChange' }
+  }
 
-  // 5) 用户已经上滚离开底部 (> 80px), 即便有新消息也不拉回, 让他继续读。
-  //    视觉上的"新消息 N"标记是另一个组件的事, 这里只做"不拉回"决策。
-  if (distanceToBottomPx > NEAR_BOTTOM_PX) return 'stay'
+  // 5) 用户已经上滚离开底部 (> 80px). 但是 ——
+  //    若 user 上一帧就停在底部 (wasAtBottom=true) 且 contentGrew, 实际是
+  //    scrollTop 被 clamp 落后于新 scrollHeight (浏览器把 scrollTo({top:
+  //    scrollHeight}) 限到 scrollHeight - clientHeight, 但 React 后续 render
+  //    让 scrollHeight 又涨). 这种情况不能让 user 被永久甩在旧内容上方.
+  //    反之 (wasAtBottom=false), user 真的在看历史, 留给 "新消息 N" 处理.
+  if (distanceToBottomPx > NEAR_BOTTOM_PX) {
+    if (wasAtBottom && contentGrew) {
+      return { decision: 'follow', reason: 'wasAtBottomContentGrew' }
+    }
+    return { decision: 'stay', reason: 'userScrolledAway' }
+  }
 
   // 6) 默认: 有新消息 / 有新内容, 用户在底部, 自动跟 AI 滚到底。
-  return 'follow'
+  return { decision: 'follow', reason: 'default' }
 }
