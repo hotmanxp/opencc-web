@@ -183,6 +183,12 @@ export function renderTaskNotificationMessage(task: BackgroundTask): string {
         ? `Sub-agent "${task.description ?? task.id}" failed: ${task.error?.message ?? 'unknown error'}`
         : `Sub-agent "${task.description ?? task.id}" was cancelled`
 
+  // zai patch: 指引主 Agent 用 TaskOutput(task_id) 取最终结果,而不是直接
+  // Read output 文件。与 vendor enqueueAgentNotification (LocalAgentTask.tsx)
+  // 的 guidance 同构;内联进 summary 避免出现同名并列/嵌套 tag。
+  const guidance = '\nUse TaskOutput with task_id to retrieve the final result.'
+  const summaryWithGuidance = `${summary}${guidance}`
+
   // failed 时把 error 信息放在 result 字段里,让模型看到诊断细节
   const resultSection =
     task.status === 'completed' && task.resultText
@@ -199,7 +205,7 @@ export function renderTaskNotificationMessage(task: BackgroundTask): string {
     (task.agentType ? `<agent-type>${escapeXml(task.agentType)}</agent-type>\n` : '') +
     (task.description ? `<description>${escapeXml(task.description)}</description>\n` : '') +
     `<status>${statusText}</status>\n` +
-    `<summary>${escapeXml(summary)}</summary>` +
+    `<summary>${escapeXml(summaryWithGuidance)}</summary>` +
     resultSection +
     `\n</task-notification>`
   )

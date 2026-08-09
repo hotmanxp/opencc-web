@@ -58,3 +58,6 @@ Thumbs.db
 # superpowers skill scratch
 .superpowers/
 .verify
+
+# Local runtime artifacts (ego browser task outputs etc.)
+var/

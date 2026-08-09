@@ -290,6 +290,15 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
       type: String(rawEv.type),
       data: stripMeta(rawEv),
     }
+    // 兜底捕获 resultText:zai runtime.query 的 vendor 流在 minimax
+    // keep-alive 下永不发 runtime.done,runOne 只认 runtime.done 的提取
+    // 拿不到值。attach 路径(caller 用 appendTaskEvent 驱动)在每条
+    // assistant 消息时顺带记录最后一条 text,让 SubagentNotifier 的通知
+    // 能带上 <result>。只认 text block;thinking/tool_use 不算结果。
+    if (rawEv.type === 'assistant') {
+      const text = extractAssistantText(rawEv)
+      if (text) rec.task.resultText = text
+    }
     rec.task.eventCount = seq
     await this.store.save(rec.task)
     await this.store.appendEvent(taskId, taskEv)
@@ -524,6 +533,11 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
                   category: err.category ?? 'internal',
                 }
               }
+            } else if (ev.type === 'assistant') {
+              // 与 appendTaskEvent 相同的兜底:vendor 流没有 runtime.done 时
+              // 用最后一条 assistant text 作为 resultText。
+              const text = extractAssistantText(ev)
+              if (text) rec.task.resultText = text
             }
           }
           // 流正常结束 → 任务成功 (abort 由外层 while 顶部捕获)
@@ -643,4 +657,27 @@ function stripMeta(ev: { eventId?: unknown; sessionId?: unknown; ts?: unknown; t
     data[k] = v
   }
   return data
+}
+
+/**
+ * 从 assistant Message 里提取最后一条 text block 的内容。
+ * 只认 `{type:'text', text}`;thinking / tool_use 不算结果。
+ * 返回空串时调用方跳过(不覆盖已有 resultText)。
+ */
+function extractAssistantText(rawEv: Record<string, unknown>): string | undefined {
+  const content = (rawEv as { message?: { content?: unknown } }).message?.content
+  if (!Array.isArray(content)) return undefined
+  let last: string | undefined
+  for (const block of content) {
+    if (
+      block &&
+      typeof block === 'object' &&
+      (block as { type?: unknown }).type === 'text' &&
+      typeof (block as { text?: unknown }).text === 'string'
+    ) {
+      const text = (block as { text: string }).text
+      if (text) last = text
+    }
+  }
+  return last
 }
