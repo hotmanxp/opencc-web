@@ -297,7 +297,10 @@ export async function enableOpenccConfigs(
   // code that references MACRO.X — without this stub the first
   // reference throws ReferenceError and aborts startup.
   installMacroStub()
-  setZaiIsNonInteractive()
+  // (REMOVED: `setZaiIsNonInteractive()` — zai is interactive, not SDK.
+  // The compat-side `globalThis.__zaiIsNonInteractive` flag is unused at
+  // runtime; vendor STATE.isInteractive is the source of truth and
+  // defaults to `true` from `bootstrap/state.ts:getInitialState()`.)
 
   const cwd = opts.cwd ?? process.cwd()
 
@@ -335,12 +338,21 @@ export async function enableOpenccConfigs(
     bundle.enableConfigs()
   }
 
-  // Step 3: setIsInteractive(false) — non-interactive (HTTP server,
-  // no TTY). Use the bundle's exported setter so vendor STATE stays
-  // in sync; falls back to the compat global if the setter is gone.
-  if (typeof bundle.setIsInteractive === 'function') {
-    bundle.setIsInteractive(false)
-  }
+  // Step 3 (REMOVED): zai previously called `bundle.setIsInteractive(false)`
+  // here to force non-interactive SDK mode. That override made vendor see
+  // `STATE.isInteractive = false` regardless of the source-of-truth default
+  // in `bootstrap/state.ts`, which caused `getCLISyspromptPrefix({isNonInteractive:true})`
+  // to return `AGENT_SDK_PREFIX` ("built on the OpenCC Agent SDK") for every
+  // zai session — wrong, since zai's Web UI is interactive (the
+  // headlessPermissionBridge + AskUserQuestion wrapper route permission asks
+  // through the web, which is exactly the `isInteractive = true` branch in
+  // vendor STATE). With this override removed, vendor defaults to
+  // `STATE.isInteractive = true`, system prompt resolves to
+  // `DEFAULT_PREFIX` ("You are OpenCC, an coding agent and CLI."), and the
+  // permission/AskUserQuestion web-bridge UX continues to work as
+  // `createHeadlessContext-impl.ts:146-152` documents. To re-enter SDK mode,
+  // use `zai --sdk` (which sets `interactive: false` on the headless context,
+  // distinct from the vendor STATE flag).
 
   // Step 4 + 5: originalCwd + cwdState — both same value initially;
   // cwdState diverges later when LLM self-tracks cwd via BashTool

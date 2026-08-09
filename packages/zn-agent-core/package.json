@@ -8,24 +8,48 @@
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "default": "./dist/opencc-core.mjs"
     },
-    "./runtime": "./dist/runtime/index.js",
-    "./commands": "./dist/commands/index.js",
-    "./bashTracker": "./dist/tools/BashTool/bashTracker.js",
-    "./taskListStore": "./dist/tools/Tasks/TaskListStore.js",
-    "./agents/memoryLoader": "./dist/agents/memoryLoader.js",
-    "./agents/memoryWatcher": "./dist/agents/memoryWatcher.js",
-    "./compat/vendor/ripgrep": "./dist/compat/vendor/ripgrep.js",
+    "./runtime": {
+      "types": "./dist/runtime/index.d.ts",
+      "default": "./dist/opencc-core.mjs"
+    },
+    "./commands": {
+      "types": "./dist/commands/index.d.ts",
+      "default": "./dist/opencc-core.mjs"
+    },
+    "./bashTracker": {
+      "types": "./dist/tools/BashTool/bashTracker.d.ts",
+      "default": "./dist/opencc-core.mjs"
+    },
+    "./taskListStore": {
+      "types": "./dist/tools/Tasks/TaskListStore.d.ts",
+      "default": "./dist/opencc-core.mjs"
+    },
+    "./agents/memoryLoader": {
+      "types": "./dist/agents/memoryLoader.d.ts",
+      "default": "./dist/opencc-core.mjs"
+    },
+    "./agents/memoryWatcher": {
+      "types": "./dist/agents/memoryWatcher.d.ts",
+      "default": "./dist/opencc-core.mjs"
+    },
+    "./compat/vendor/ripgrep": {
+      "types": "./dist/compat/vendor/ripgrep.d.ts",
+      "default": "./dist/opencc-core.mjs"
+    },
     "./opencc-core": "./dist/opencc-core.mjs",
     "./opencc-src/permissions": "./dist/opencc-src/types/permissions.js",
     "./opencc-src/server": "./dist/opencc-src/server/index.js",
     "./opencc-src/services/api/sessionApiCounter": "./dist/opencc-src/services/api/sessionApiCounter.js",
     "./opencc-server": {
       "types": "./dist/opencc-src/server/index.d.ts",
-      "default": "./dist/opencc-src/server/index.js"
+      "default": "./dist/opencc-core.mjs"
     },
-    "./compat/permissions": "./dist/compat/permissions.js",
+    "./compat/permissions": {
+      "types": "./dist/compat/permissions.d.ts",
+      "default": "./dist/opencc-core.mjs"
+    },
     "./package.json": "./package.json"
   },
   "files": [

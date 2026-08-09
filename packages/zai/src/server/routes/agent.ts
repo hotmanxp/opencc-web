@@ -35,6 +35,7 @@ import {
 } from "@zn-ai/zn-agent-core/runtime";
 import { getDefaultMode } from "../services/permissionMode.js";
 import { flushPendingSubagentNotifications } from "../services/subagentNotifier.js";
+import { flushPendingBashNotifications } from "../services/bashNotifier.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
 import { resolveModel } from "../lib/resolveModel.js";
@@ -1249,6 +1250,9 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // 完成通知。子代理完成时若主线活跃,SubagentNotifier 暂存通知
     // (running 守卫),这里 flush 让通知在主线结束后注入,不与主线并行。
     flushPendingSubagentNotifications(sessionId)
+    // 同上:暂存的后台 Bash 完成通知(BashNotifier running 守卫暂存)在
+    // 主线结束后补发,避免通知 query 与主线并行 / 通知之间互相并行。
+    flushPendingBashNotifications(sessionId)
   }
   })
 }

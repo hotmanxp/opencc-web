@@ -35,7 +35,11 @@ import ts from 'typescript'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
-const SRC_ENTRY = join(ROOT, 'src', 'opencc-src', 'query.ts')
+// zai patch (2026-08-09): 单一入口 —— 聚合 vendor(query) + server
+// (createOpenccRuntime) + compat(index.ts) 到同一份 bundle,让 zai 运行时
+// vendor/compat 只有一个 module 实例(STATE/commandQueue/bashTracker 共享,
+// 消除跨 bundle/dist 状态隔离导致的请求风暴)。
+const SRC_ENTRY = join(ROOT, 'src', 'bundle-entry.ts')
 const SRC_ROOT = join(ROOT, 'src', 'opencc-src')
 const OUT_DIR = join(ROOT, 'dist')
 const OUT_FILE = join(OUT_DIR, 'opencc-core.mjs')
@@ -78,14 +82,29 @@ function walkTs(root: string): string[] {
 
 function inputHash(): string {
   const h = createHash('sha1')
-  for (const file of walkTs(SRC_ROOT)) {
+  // zai patch (2026-08-09): 扫描 src/ 全量(含聚合入口 bundle-entry.ts、
+  // compat/、agents/),不限于 opencc-src —— 单一入口后这些文件的变化都
+  // 会改变 bundle 内容,漏扫会导致 stamp 缓存命中旧产物。
+  for (const file of walkTs(join(ROOT, 'src'))) {
     const rel = relative(ROOT, file).split(sep).join('/')
     const st = statSync(file)
     h.update(`${rel}\0${st.mtimeMs}\0${st.size}\n`)
   }
+  // Also hash this build script itself so editing
+  // `vendorPatchesPlugin` (e.g. adding/removing a patch regex) is
+  // picked up as a recipe change. Without this the stamp cache would
+  // stay valid and the new patch logic would silently never run — the
+  // "I added a patch but the bundle didn't change" trap.
+  const scriptRel = relative(ROOT, fileURLToPath(import.meta.url))
+    .split(sep)
+    .join('/')
+  const scriptSt = statSync(fileURLToPath(import.meta.url))
+  h.update(
+    `${scriptRel}\0${scriptSt.mtimeMs}\0${scriptSt.size}\n`,
+  )
   // Bump this string when the bundle recipe (configCheckPatchRe,
   // plugins, externals) changes so old stamps are treated as stale.
-  h.update('recipe:v2\n')
+  h.update('recipe:v3\n')
   return h.digest('hex').slice(0, 16)
 }
 
@@ -188,6 +207,27 @@ const vendorNullishCoalesceRe =
 const toolExecutionStopCaseRe =
   /case 'stop':\n        getStatsStore\(\)\?\.observe\(\n          'pre_tool_hook_duration_ms',\n          Date\.now\(\) - preToolHookStart,\n        \)\n        resultingMessages\.push\(\{\n          message: createUserMessage\(\{\n            content: \[createToolResultStopMessage\(toolUseID\)\],\n            toolUseResult: `Error: \$\{stopReason\}`,\n            sourceToolAssistantUUID: assistantMessage\.uuid,\n          \}\),\n        \}\)\n        return resultingMessages/
 
+// zai patch (QueryEngine hardcoded `isNonInteractiveSession: true`):
+// vendor's QueryEngine (src/opencc-src/QueryEngine.ts:380 and :536) builds
+// toolUseContext.options with `isNonInteractiveSession: true` hardcoded,
+// regardless of `STATE.isInteractive`. That makes
+// `getCLISyspromptPrefix({isNonInteractive: true})` always return
+// `AGENT_SDK_PREFIX` ("built on the OpenCC Agent SDK") even when zai is
+// running as an interactive OpenCC CLI — the prefix is decoupled from
+// STATE. zai wants the interactive prefix to flow through when the Web
+// UI is active, so both hardcoded `true`s are rerouted to read STATE via
+// `getIsNonInteractiveSession()`. With this patch in place, `zai --sdk`
+// (which sets `STATE.isInteractive = false` via `createHeadlessContext`)
+// flips the prefix to SDK, and default `zai dev` (STATE.isInteractive =
+// true) gives the interactive prefix. Scoped to QueryEngine.ts only —
+// other vendor files with hardcoded `isNonInteractiveSession: true`
+// (entrypoints/mcp.ts:160, utils/queryContext.ts:157,
+// services/awaySummary.ts:65, etc.) are intentionally SDK by design.
+const queryEngineImportPatchRe =
+  /import \{\n  getSessionId,\n  isSessionPersistenceDisabled,\n\} from 'src\/bootstrap\/state\.js'/
+const queryEngineNonInteractivePatchRe =
+  /isNonInteractiveSession: true,/g
+
 const vendorPatchesPlugin: esbuild.Plugin = {
   name: 'vendor-patches',
   setup(build) {
@@ -273,6 +313,33 @@ const vendorPatchesPlugin: esbuild.Plugin = {
           "case 'stop': /* zai-bundle: case 'stop' suppressed so plugin PreToolUse hooks can't synthesize CANCEL_MESSAGE into the LLM stream; fall through */\n        return []",
         )
         modified = true
+      }
+
+      // zai patch (QueryEngine hardcoded `isNonInteractiveSession: true`):
+      // see regex header above. Scoped to QueryEngine.ts so other vendor
+      // files' intentional SDK flags aren't touched. Match by basename
+      // (not full path) because esbuild may pass absolute or relative
+      // `args.path` depending on entry resolution.
+      if (args.path.endsWith('/QueryEngine.ts') || args.path.endsWith('QueryEngine.ts')) {
+        console.log('[zai-debug] QueryEngine.ts plugin hit, endsWith:', true)
+        if (queryEngineImportPatchRe.test(contents)) {
+          contents = contents.replace(
+            queryEngineImportPatchRe,
+            `import {\n  getIsNonInteractiveSession,\n  getSessionId,\n  isSessionPersistenceDisabled,\n} from 'src/bootstrap/state.js'`,
+          )
+          modified = true
+        } else {
+          console.log('[zai-debug] QueryEngine import regex DID NOT MATCH')
+        }
+        if (queryEngineNonInteractivePatchRe.test(contents)) {
+          contents = contents.replace(
+            queryEngineNonInteractivePatchRe,
+            `isNonInteractiveSession: getIsNonInteractiveSession(),`,
+          )
+          modified = true
+        } else {
+          console.log('[zai-debug] QueryEngine noninteractive regex DID NOT MATCH')
+        }
       }
 
       if (!modified) return null

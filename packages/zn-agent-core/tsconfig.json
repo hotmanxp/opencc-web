@@ -21,6 +21,10 @@
     "dist",
     "test",
     "**/*.test.ts",
-    "src/opencc-src"
+    "src/opencc-src",
+    // zai patch (2026-08-09): esbuild-only 聚合入口,横跨 vendor(opencc-src)
+    // 与 compat 两个 tsconfig 项目,由 scripts/bundle-opencc.ts 编译,不进
+    // tsc 主项目(否则 TS6307:引用被 exclude 的 opencc-src)。
+    "src/bundle-entry.ts"
   ]
 }

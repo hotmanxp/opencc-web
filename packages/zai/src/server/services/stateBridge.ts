@@ -11,7 +11,7 @@
  */
 
 import { stateChangeBus } from '@zn-ai/zn-agent-core/runtime'
-import { bashBackgroundTracker, type BashTaskInfo } from '@zn-ai/zn-agent-core/bashTracker'
+import type { BashTaskInfo } from '@zn-ai/zn-agent-core/bashTracker'
 import { eventBus } from './eventBus.js'
 import { getBashNotifier } from './bashNotifier.js'
 
@@ -22,14 +22,12 @@ export function initStateBridge(): () => void {
     // 重复 init 安全: 先 dispose 旧的,避免 listener 叠加
     _stateBridgeDispose()
   }
-
-  // zai patch: 注入 GlobalThis 桥 —— opencc-src/server 的 bundle (opencc-core.mjs)
-  // 把 LocalShellTask 连同其 import 的 compat/bashTracker 一起内联成 bundle 私有
-  // 实例, 直接用模块级 bashBackgroundTracker 无法跨 bundle 共享。这里把 server
-  // 端单例注入 globalThis.__zaiBashTracker, bundle 内的 LocalShellTask 经
-  // compat/bashTracker.getBashBackgroundTracker() 拿回同一实例, register /
-  // markFinished 写入的 bash_task.changed 才能经下面 stateChangeBus 订阅到。
-  ;(globalThis as { __zaiBashTracker?: unknown }).__zaiBashTracker = bashBackgroundTracker
+  // zai patch (2026-08-09): 不再注入 globalThis.__zaiBashTracker 桥 —— 单一
+  // 入口后 `@zn-ai/zn-agent-core` 全部子路径的运行时都解析到同一个
+  // dist/opencc-core.mjs bundle, compat/bashTracker 只存在一份 module 实例。
+  // bundle 内的 LocalShellTask 与这里订阅的 stateChangeBus 共享同一个
+  // bashBackgroundTracker, getBashBackgroundTracker() 的 globalThis 桥回退
+  // 到模块单例即可,无需 server 端注入。
 
   const onCwdChanged = (e: { sessionId: string; cwd: string; updatedAt: number }) => {
     eventBus.emit({ type: 'cwd.changed', ...e })
