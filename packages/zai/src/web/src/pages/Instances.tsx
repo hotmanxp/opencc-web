@@ -586,15 +586,15 @@ export default function Instances(): JSX.Element {
   }
 
   return (
-    <Card
-      title={<Typography.Title level={4} style={{ margin: 0 }}>实例管理</Typography.Title>}
-      extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
-          新建实例
-        </Button>
-      }
-      style={{ margin: 24 }}
-    >
+    <div style={{ padding: 24 }}>
+      <Card
+        title={<Typography.Title level={4} style={{ margin: 0 }}>实例管理</Typography.Title>}
+        extra={
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+            新建实例
+          </Button>
+        }
+      >
       <Row gutter={[16, 16]}>
         {loading && safeInstances.length === 0 ? (
           <Col xs={24} md={12} lg={8}><Card loading /></Col>
@@ -834,6 +834,7 @@ export default function Instances(): JSX.Element {
           setPickerOpen(false)
         }}
       />
-    </Card>
+      </Card>
+    </div>
   )
 }

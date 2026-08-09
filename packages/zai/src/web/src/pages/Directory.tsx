@@ -165,7 +165,7 @@ export default function Directory() {
   ];
 
   return (
-    <>
+    <div style={{ padding: 24 }}>
       <Row gutter={[16, 16]}>
         {treeData.map((item) => (
           <Col key={item.key} xs={24} md={12}>
@@ -269,6 +269,6 @@ export default function Directory() {
           </pre>
         ) : null}
       </Modal>
-    </>
+    </div>
   );
 }

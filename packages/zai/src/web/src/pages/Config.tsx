@@ -561,72 +561,74 @@ export default function Config() {
   };
 
   return (
-    <Row gutter={24}>
-      <Col xs={24} md={6}>
-        <Card size="small">
-          <Menu
-            mode="inline"
-            selectedKeys={[activeTool]}
-            onClick={handleMenuClick}
-            items={tools.map((t) => ({
-              key: t.key,
-              label: t.label,
-            }))}
-          />
-        </Card>
-      </Col>
-      <Col
-        xs={24}
-        md={18}
-        style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', overflow: 'auto' }}
-      >
-        {activeTool === 'opencc' ? (
-          <>
-            {/* 顶部并排两张 JSON 配置卡 — 只在 opencc tab 显示。
-                opencode / nova / zai tab 完全不出现。 */}
-            <Card
-              title="JSON 配置文件"
-              size="small"
-              style={{ marginTop: 16 }}
-              styles={{ body: { display: 'flex', flexDirection: 'row', gap: 12, padding: 12 } }}
-            >
-              <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <JsonFileEditor
-                  endpoint="/config/claude-json"
-                  title="Configs"
-                  modalTitle="编辑 OpenCC 配置"
-                />
-              </div>
-              <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
-                <JsonFileEditor
-                  endpoint="/config/claude-settings"
-                  title="Settings"
-                  modalTitle="编辑 Settings"
-                />
-              </div>
-            </Card>
-            {/* 下方 Provider 配置 */}
-            <ProviderForm />
-          </>
-        ) : activeTool === 'opencode' ? (
-          <>
-            <PluginForm />
-            <SettingsEditor tool="opencode" label="OpenCode" defaultContent={opencodeDefaultContent} />
-          </>
-        ) : activeTool === 'zai' ? (
-          <>
-            <SettingsEditor tool="zai" label="Zai" />
-            {/* ~/.zai.json 全文编辑 — 只在 zai tab 显示。opencc / opencode / nova tab 不出现。 */}
-            <JsonFileEditor
-              endpoint="/config/zai-json"
-              title="Config"
-              modalTitle="编辑 Config"
+    <div style={{ padding: 24 }}>
+      <Row gutter={24}>
+        <Col xs={24} md={6}>
+          <Card size="small">
+            <Menu
+              mode="inline"
+              selectedKeys={[activeTool]}
+              onClick={handleMenuClick}
+              items={tools.map((t) => ({
+                key: t.key,
+                label: t.label,
+              }))}
             />
-          </>
-        ) : (
-          <SettingsEditor tool={activeTool} label={tools.find((t) => t.key === activeTool)?.label || activeTool} />
-        )}
-      </Col>
-    </Row>
+          </Card>
+        </Col>
+        <Col
+          xs={24}
+          md={18}
+          style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', overflow: 'auto' }}
+        >
+          {activeTool === 'opencc' ? (
+            <>
+              {/* 顶部并排两张 JSON 配置卡 — 只在 opencc tab 显示。
+                  opencode / nova / zai tab 完全不出现。 */}
+              <Card
+                title="JSON 配置文件"
+                size="small"
+                style={{ marginTop: 16 }}
+                styles={{ body: { display: 'flex', flexDirection: 'row', gap: 12, padding: 12 } }}
+              >
+                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                  <JsonFileEditor
+                    endpoint="/config/claude-json"
+                    title="Configs"
+                    modalTitle="编辑 OpenCC 配置"
+                  />
+                </div>
+                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                  <JsonFileEditor
+                    endpoint="/config/claude-settings"
+                    title="Settings"
+                    modalTitle="编辑 Settings"
+                  />
+                </div>
+              </Card>
+              {/* 下方 Provider 配置 */}
+              <ProviderForm />
+            </>
+          ) : activeTool === 'opencode' ? (
+            <>
+              <PluginForm />
+              <SettingsEditor tool="opencode" label="OpenCode" defaultContent={opencodeDefaultContent} />
+            </>
+          ) : activeTool === 'zai' ? (
+            <>
+              <SettingsEditor tool="zai" label="Zai" />
+              {/* ~/.zai.json 全文编辑 — 只在 zai tab 显示。opencc / opencode / nova tab 不出现。 */}
+              <JsonFileEditor
+                endpoint="/config/zai-json"
+                title="Config"
+                modalTitle="编辑 Config"
+              />
+            </>
+          ) : (
+            <SettingsEditor tool={activeTool} label={tools.find((t) => t.key === activeTool)?.label || activeTool} />
+          )}
+        </Col>
+      </Row>
+    </div>
   );
 }

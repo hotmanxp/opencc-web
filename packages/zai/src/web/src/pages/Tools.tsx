@@ -142,17 +142,19 @@ export default function Tools() {
   if (loading) return <Spin size="large" className="block mx-auto my-20" />;
 
   return (
-    <div className="space-y-4">
-      <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-        <Button
-          icon={<SyncOutlined spin={refreshing} />}
-          loading={refreshing}
-          onClick={handleRefreshAll}
-        >
-          刷新最新版本
-        </Button>
-      </div>
-
+    <div style={{ padding: 24 }}>
+      <Card
+        title={<Typography.Title level={4} style={{ margin: 0 }}>工具管理</Typography.Title>}
+        extra={
+          <Button
+            icon={<SyncOutlined spin={refreshing} />}
+            loading={refreshing}
+            onClick={handleRefreshAll}
+          >
+            刷新最新版本
+          </Button>
+        }
+      >
       <Row gutter={[16, 16]}>
         {TOOL_CARDS.map((card) => {
           const status = getStatus(card);
@@ -240,6 +242,7 @@ export default function Tools() {
           );
         })}
       </Row>
+      </Card>
 
       <Modal
         title={`${installLabel}日志: ${installPkg}`}

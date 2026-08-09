@@ -1,4 +1,4 @@
-import { Card, Button, Row, Col, message, Alert } from 'antd';
+import { Card, Button, Row, Col, message, Alert, Typography } from 'antd';
 import { LoginOutlined, ApiOutlined } from '@ant-design/icons';
 import { useState } from 'react';
 import type { SseEvent, LoginType } from '@shared/types';
@@ -56,12 +56,16 @@ export default function Login() {
   const anyDone = Object.values(logs).some((l) => l.done);
 
   return (
-    <div className="space-y-4">
+    <div style={{ padding: 24 }} className="space-y-4">
+      <Card
+        title={<Typography.Title level={4} style={{ margin: 0 }}>账号登录</Typography.Title>}
+      >
       <Alert
         type="info"
         showIcon
         message="登录说明"
         description="点击登录按钮后,系统将在后台执行登录流程,请在页面查看实时输出日志。"
+        style={{ marginBottom: 16 }}
       />
 
       <Row gutter={[16, 16]}>
@@ -101,6 +105,7 @@ export default function Login() {
           </Col>
         ))}
       </Row>
+      </Card>
 
       {running !== null && (
         <LoginStream
