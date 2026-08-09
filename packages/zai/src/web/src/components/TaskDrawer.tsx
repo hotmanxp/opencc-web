@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Badge, Button, Drawer, Empty, Tag, Tooltip } from 'antd'
+import { useAppStore } from '../store/useAppStore'
 
 // React-syntax-highlighter lazy: SyntaxHighlighter + the prism style sheet
 // live in /components/markdown/syntaxHighlighter.ts (shared chunk with
@@ -656,6 +657,8 @@ export function TaskDrawer({
   // 导致 bashTask 恒为 null、抽屉空白。改为按 taskId 在两个 store 中实际
   // 查找 — 找到了就归属对应类型。
   const allSessionIds = useAgentStore((s) => Object.keys(s.agentTasksBySession))
+  // 移动端走满屏宽度,避免 560px 在 <768px 视口溢出遮挡内容。
+  const isMobile = useAppStore((s) => s.isMobile)
   const detail = useAgentStore((s) => {
     if (!taskId) return null
     for (const sid of Object.keys(s.agentTasksBySession)) {
@@ -788,7 +791,7 @@ export function TaskDrawer({
         </div>
       }
       placement="right"
-      width={560}
+      width={isMobile ? '100%' : 560}
       open={!!taskId}
       onClose={onClose}
       destroyOnClose
