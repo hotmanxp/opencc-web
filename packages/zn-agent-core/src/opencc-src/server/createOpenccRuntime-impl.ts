@@ -562,7 +562,13 @@ export async function createOpenccRuntimeImpl(options) {
         // ...}`) — that is the shape `defaultQuery`'s tool loop
         // (streamingToolExecutor) consumes.
         const stream = engine.submitMessage(input.prompt, {
-          uuid: input.sessionId,
+          // zai patch (2026-08-09): 不用 sessionId 当 user 消息 uuid。
+          // 该 uuid 会成为本条 prompt 的 user 文本消息 uuid;若固定为
+          // sessionId,同会话第 2 轮起 uuid 重复,recordTranscript 的
+          // messageSet dedup 会跳过写入 → 用户消息永不落盘,UI 刷新后
+          // 只剩 assistant 回复,表现为"会话错位"。每条 user 消息必须
+          // 唯一,用随机 UUID。
+          uuid: randomUUID(),
           // zai patch: 透传 isMeta — 后台任务完成触发的占位 query 用 meta
           // prompt(UI 隐藏),真正内容由 QueryEngine 首轮 drain 注入。
           ...(input.isMeta ? { isMeta: true } : {}),
