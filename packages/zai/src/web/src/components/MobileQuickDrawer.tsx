@@ -1,5 +1,5 @@
 import { useEffect, useState } from 'react'
-import { Drawer, Segmented, Button, Input, App as AntApp, Tag, Modal, Empty, Spin } from 'antd'
+import { Drawer, Segmented, Button, Input, App as AntApp, Modal, Empty, Spin } from 'antd'
 import {
   ReloadOutlined,
   PlusOutlined,
@@ -17,6 +17,7 @@ import { useGitDiff } from './splitPane/useGitDiff.js'
 import { gitApi } from '../lib/gitApi.js'
 import { STATUS_COLORS } from './splitPane/shared.js'
 import { DiffView } from './splitPane/DiffView.js'
+import BranchSelector from './BranchSelector'
 import { message } from 'antd'
 import type { GitStatusChar } from '../../../shared/git.js'
 
@@ -102,11 +103,14 @@ function GitTab({ cwd }: GitTabProps) {
       >
         <span style={{ fontSize: 12, color: 'var(--text-dim-55)' }}>
           Git
-          {branch ? (
-            <Tag color="orange" style={{ marginLeft: 6 }}>
-              {branch}
-            </Tag>
-          ) : null}
+          {/* BranchSelector 内部处理 store 兜底 + 移动端 Popover placement='bottom'.
+              cwd 不传(未开启会话)时它退化为只读 span, 跟旧 Tag 行为一致. */}
+          <BranchSelector
+            cwd={cwd}
+            branch={branch ?? '(无)'}
+            triggerStyle={{ marginLeft: 6 }}
+            testIdPrefix="mobile-branch-"
+          />
           <span style={{ marginLeft: 8, color: 'var(--text-dim-35)' }}>
             {files.length} 项变更
           </span>

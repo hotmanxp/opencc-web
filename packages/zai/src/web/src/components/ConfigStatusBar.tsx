@@ -1,6 +1,7 @@
 import ModelStatusButton from "./ModelStatusButton";
 import ModeStatusButton from "./ModeStatusButton";
 import { TaskDock } from "./TaskDock";
+import BranchSelector from "./BranchSelector";
 
 type Props = {
   cwdName: string;
@@ -13,6 +14,13 @@ type Props = {
    * 后台任务只显示图标),给窄屏幕 / 分屏态腾出横向空间. 默认 false(收起).
    */
   splitPaneOpen?: boolean;
+  /**
+   * 工作目录绝对路径. 传入后分支名变 clickable, 点击弹出分支列表(本地 + 远程,
+   * 最多 10 条), 点击可切换分支. 不传则分支名只读(兼容老调用方 & 测试).
+   * 分支切换走 gitApi (复用通用 /exec), 切完后通过 store 把 instanceContext.branch
+   * 立刻刷成新值, 不必等 10s 的 startBranchChecker 轮询.
+   */
+  cwd?: string | null;
 };
 
 export default function ConfigStatusBar({
@@ -21,6 +29,7 @@ export default function ConfigStatusBar({
   branch,
   onTaskSelect,
   splitPaneOpen = false,
+  cwd,
 }: Props) {
   // When sessionCwd is provided, show its basename; otherwise fall back to the static cwdName.
   // Browser side has no node:path, so use string split. Empty parts (from leading "/") are filtered.
@@ -49,7 +58,12 @@ export default function ConfigStatusBar({
       <ModeStatusButton compact={splitPaneOpen} />
       <span style={{ color: "#eab308" }}>{displayName}</span>
       <span style={{ color: "var(--text-tertiary)" }}>·</span>
-      <span style={{ color: "var(--success)" }}>{branch}</span>
+      {/*
+        BranchSelector 内部从 useAppStore 读 instanceContext.branch 与 isMobile,
+        自己处理 store 兜底 + 移动端 Popover placement. cwd 不传时它退化为只读 span,
+        老调用方/测试无需改动.
+      */}
+      <BranchSelector cwd={cwd} branch={branch} />
       <span style={{ color: "var(--text-tertiary)" }}>·</span>
       <span style={{ color: "var(--accent-start)" }}>
         <ModelStatusButton compact={splitPaneOpen} />

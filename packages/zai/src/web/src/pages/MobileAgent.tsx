@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useMemo, useState } from 'react'
 import { useAgentStore } from '../store/useAgentStore'
 import { useAppStore } from '../store/useAppStore'
 import AgentConversation from './AgentConversation'
@@ -36,6 +36,15 @@ export default function MobileAgent() {
   const cwdName = instanceContext?.cwdName || '~'
   const branch = instanceContext?.branch || 'master'
 
+  // 与 Agent.tsx:47-50 对齐: instanceContext.cwd 是 server 注入的绝对路径,
+  // 冷启动立即可用; cwdBySessionForSid 仅在用户跑过 bash 后才填充.
+  // 不传 cwd 给 ConfigStatusBar 会导致 BranchSelector 退化为只读 span
+  // (原 MobileAgent 漏传 bug — 分支名在移动端点击无反应).
+  const cwd = useMemo(() => {
+    if (instanceContext?.cwd) return instanceContext.cwd
+    return cwdBySessionForSid ?? null
+  }, [instanceContext?.cwd, cwdBySessionForSid])
+
   // 首次挂载:拉 sessions;为空则自动建一条空会话(与 Agent.tsx 行为对齐)
   useEffect(() => {
     ;(async () => {
@@ -54,6 +63,7 @@ export default function MobileAgent() {
         cwdName={cwdName}
         sessionCwd={cwdBySessionForSid}
         branch={branch}
+        cwd={cwd}
         onTaskSelect={setSelectedTaskId}
       />
       <MobileSessionDrawer open={drawerOpen} onClose={() => setDrawerOpen(false)} />
