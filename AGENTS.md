@@ -26,34 +26,21 @@
 
 ## 本机数据目录 `~/.zai/`
 
-zai 把用户级配置、plugin 元数据与缓存、后台任务持久化等统一放在 `~/.zai/`(根目录常量 `ZAI_DIR = join(homedir(), '.zai')`,见 `packages/zai/src/server/services/paths.ts:23`)。**插件元数据/缓存全部在此目录,**`~/.claude/plugins/` 只是历史遗留的 Claude Code 副本,迁移后不再改动。
+zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(根目录常量 `ZAI_DIR = join(homedir(), '.zai')`,见 `packages/zai/src/server/services/paths.ts:23`)。**plugin 元数据/缓存全部在此目录**;`~/.claude/plugins/` 只是历史遗留的 Claude Code 副本,迁移后不再改动。
 
 | 路径 | 职责 |
 |------|------|
-| `~/.zai/plugins/` | **plugin 元数据 + 缓存根**。`installed_plugins.json`(V2 schema)在这里;实际 plugin 文件在 `cache/<marketplace>/<plugin>/<version>/`,`<version>/.in_use/` 空目录标记当前使用版本。**改 plugin 走这里**,不要回 `~/.claude/plugins/cache/`。`~/.zai/plugins/cache/` 历史上是 marketplace 拉取缓存,2026-08-09 起 installPath 全部指向这里。 |
-| `~/.zai/agents/` | 用户级 agent 定义(`zai agents` 子命令) |
-| `~/.zai/skills/` | 用户级 skill 定义,默认被 `SkillTool` 加载(可被 `ZAI_SKILLS_DIRS=''` 显式禁用) |
-| `~/.zai/background/` | bg-agent 后台任务运行时持久化:`tasks/<id>.json` + `events/<id>.log`(见 `paths.ts:26`) |
-| `~/.zai/settings.json` | 用户级 zai 设置(全局生效);**项目级** 设置走 `<cwd>/.zai/settings.json`,不要混 |
-| `~/.zai/instances.json` | 多实例注册表(zai instance manager) |
-| `~/.zai/file-history/` | zai 编辑历史(`FileEditTool` 写入的快照) |
-| `~/.zai/session-env/` | session 环境变量快照 |
-| `~/.zai/shell-snapshots/` | Bash REPL 状态 snapshot(用于 session 恢复) |
-| `~/.zai/repl-history.jsonl` | Bash REPL 命令历史 |
+| `~/.zai/plugins/` | **plugin 元数据 + 缓存根**。`installed_plugins.json`(V2 schema)在这里;实际 plugin 文件在 `cache/<marketplace>/<plugin>/<version>/`,`<version>/.in_use/` 空目录标记当前使用版本。**改 plugin 走这里**,不要回 `~/.claude/plugins/cache/`。 |
+| `~/.zai/projects/` | 项目级数据(per-cwd,按 cwd 路径分段命名) |
+| `~/.zai/agents/` `~/.zai/skills/` | 用户级 agent/skill 定义(zai CLI 的 `agents`/`skills` 子命令来源;`ZAI_SKILLS_DIRS=''` 显式禁用) |
+| `~/.zai/settings.json` | 用户级 zai 设置(全局);**项目级** 走 `<cwd>/.zai/settings.json`,不要混 |
 | `~/.zai/tasks/` | 任务定义持久化 |
 | `~/.zai/plans/` | plan 文件持久化 |
-| `~/.zai/logs/` | zai 运行日志 |
-| `~/.zai/backups/` | 自动备份 |
-| `~/.zai/scratchpad/` | 临时 scratch |
-| `~/.zai/state/` | 全局 state(可跨 session) |
-| `~/.zai/projects/` | 项目级数据(per-cwd) |
-| `~/.zai/manifest.json` | 顶层 manifest |
-| `~/.zai/.claude-migration-v1.json` | Claude Code → zai 迁移标记,删了会导致重新迁移 |
 
-**关键陷阱**：
-- **plugin 改文件走 `~/.zai/plugins/cache/claude-plugins-official/<name>/<version>/`**,不要去 `~/.claude/plugins/cache/` 找(那是迁移前 installPath 指向的历史位置,迁移后 zai 不读它)。
-- **LSP/MCP 类 plugin**(typescript-lsp / pyright-lsp / context7 / chrome-devtools-mcp / ralph-loop / code-review)在 `~/.zai/plugins/cache/` 下**有缓存但 zai 的 `/api/plugins` 不返回**——它们要么缺 `.claude-plugin/plugin.json`、要么走 LSP/MCP 路径被静默排除;installed_plugins.json 列了不等于 zai 实际加载。
-- **`~/.zai/zn-assets/<version>/{agents,commands,skills,extensions}/`** 是 `paths.ts:7-17` 注释里描述的预期 layout(`ZN_ASSETS_DIR` 常量),用于将来缓存 `@zn-ai/plugin` 资源。**当前未部署**——实际 `@zn-ai/plugin` 资源走 `~/.agents/skills`(`AGENTS_SKILLS_DIR` 常量,见 `agentRuntime.ts:285`),与 Nova CLI / OpenCode / OpenCC 共享(根 `AGENTS.md` 默认约定)。`~/.zai/zn-assets/` 不存在属预期,不要手动 mkdir。
+**关键陷阱**:
+- **plugin 改文件走 `~/.zai/plugins/cache/claude-plugins-official/<name>/<version>/`**,不要去 `~/.claude/plugins/cache/`(迁移后 zai 不读)。
+- **LSP/MCP 类 plugin**(typescript-lsp / pyright-lsp / context7 / chrome-devtools-mcp / ralph-loop / code-review)在 `~/.zai/plugins/cache/` 下有缓存但 zai 的 `/api/plugins` 不返回——要么缺 `.claude-plugin/plugin.json`、要么走 LSP/MCP 路径被静默排除。
+- **`~/.zai/zn-assets/`** 是 `paths.ts:7-17` 注释里描述的预期 layout,当前未部署,实际 `@zn-ai/plugin` 资源走 `~/.agents/skills`(见 `agentRuntime.ts:285`)。
 
 ## 强制开发规则
 
