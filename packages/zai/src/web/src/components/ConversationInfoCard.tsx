@@ -56,8 +56,12 @@ export default function ConversationInfoCard({ info }: Props) {
       bordered
       // 跟随外层容器宽度 (桌面 Popover 自带 360px / 移动 Modal 90vw),
       // 避免固定 360 在窄屏 modal 内被 Descriptions label + 内容撑破.
+      // zai patch (2026-08-09): label 列从 110 加宽到 140 + nowrap,
+      // 防止 "首条消息时间" / "API 请求次数" 这类 6 字 label 在窄屏
+      // modal 内被强制换行。content 列随之自适应(Descriptions 用 table,
+      // 单列布局下剩余宽度全部给 content,Session ID 仍走 break-all 折行)。
       style={{ width: '100%' }}
-      labelStyle={{ width: 110, color: 'var(--text-dim-65)' }}
+      labelStyle={{ width: 140, whiteSpace: 'nowrap', color: 'var(--text-dim-65)' }}
     >
       <Descriptions.Item label="Session ID">
         <span style={{ display: 'inline-flex', alignItems: 'center', gap: 6 }}>
