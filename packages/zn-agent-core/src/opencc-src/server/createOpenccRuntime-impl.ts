@@ -4,6 +4,7 @@ import { createHeadlessContextImpl } from './createHeadlessContext-impl.js'
 import { createSessionFacadeImpl } from './sessionFacade-impl.js'
 import { runWithSdkContext, getSessionId, getOriginalCwd } from '../bootstrap/state.js'
 import { wrapTaskAwareSetState } from '../../compat/runtime/agentTaskBridge.js'
+import { translateSdkToRuntime, type SdkEventMeta } from '../../compat/runtime/sdkEventAdapter.js'
 import { QueryEngine } from '../QueryEngine.js'
 import { createAbortController } from '../utils/abortController.js'
 import { FileStateCache } from '../utils/fileStateCache.js'
@@ -156,6 +157,14 @@ export async function createOpenccRuntimeImpl(options) {
       tools: computeTools(),
       commands: ctx.mcp.commands,
       mcpClients: ctx.mcp.clients,
+      // zai patch (2026-08-09): includePartialMessages:true 让 vendor 把每条
+      // SDK 流事件包成 stream_event envelope 透传出来 —— 否则 query.ts:847
+      // 会吞掉所有 envelope,只 yield batched 的 assistant Message,导致
+      // zai-server 上层 translateRuntimeEvents 只能按 content_block 整块
+      // yield runtime.delta,失去 token-by-token 流式。sdkEventAdapter
+      // (compat/runtime/sdkEventAdapter.ts) 已实现 streamedBlockIndices
+      // dedup,避免 assistant Message 路径重发已 stream 过的 block。
+      includePartialMessages: true,
       refreshTools: computeTools,
       // zai patch: read agents from AppState (populated by
       // createHeadlessContextImpl via getAgentDefinitionsWithOverrides).
@@ -576,12 +585,43 @@ export async function createOpenccRuntimeImpl(options) {
           typeof input.sessionId === 'string' && input.sessionId
             ? { sessionId: input.sessionId, sessionProjectDir: null, cwd, originalCwd: cwd }
             : null
+        // zai patch (2026-08-09): sdkMeta 必须在 query 生命周期内常驻
+        // —— streamedBlockIndices / toolNameByUseId 需要跨 stream.next()
+        // 累计状态,eventCounter 每次 translateSdkToRuntime 调用前 +1,
+        // 作为 sdkEventAdapter 的"外层序列号"(见 sdkEventAdapter.ts:316-324
+        // 的 makeEvent:eventId = evt-${eventCounter}[.${seq}])。
+        const sdkMeta: SdkEventMeta = {
+          sessionId: input.sessionId,
+          turnIndex,
+          eventCounter: 0,
+          toolNameByUseId: new Map(),
+          streamedBlockIndices: new Set(),
+        }
         while (true) {
           const step = sdkCtx
             ? await runWithSdkContext(sdkCtx, () => stream.next())
             : await stream.next()
           if (step.done) break
-          yield eventFor(input.sessionId, step.value)
+          const value = step.value
+          // 'result' SDKMessage 旁路 adapter:vendor 在 is_error 路径
+          // (QueryEngine.ts:915 error_max_turns, :1061 error_max_budget_usd,
+          // :1214 success with isApiError) 产 result,但 adapter 的
+          // case 'result' (sdkEventAdapter.ts:157-164) 不感知 is_error,
+          // 只 yield message_delta + message_stop —— 会丢失
+          // translateRuntimeEvents 里 case "result" 现有的 runtime.error
+          // 映射。其余 SDKMessage 都走 adapter(token-by-token 流式)。
+          if (
+            value &&
+            typeof value === 'object' &&
+            (value as { type?: string }).type === 'result'
+          ) {
+            yield eventFor(input.sessionId, value)
+          } else {
+            sdkMeta.eventCounter++
+            for (const ev of translateSdkToRuntime(value, sdkMeta)) {
+              yield ev as unknown as ReturnType<typeof eventFor>
+            }
+          }
         }
       } finally {
         if (prevBridge === undefined) delete (globalThis as any).__zaiBridgeCtx
