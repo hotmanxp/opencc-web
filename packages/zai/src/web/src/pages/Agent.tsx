@@ -496,6 +496,7 @@ export default function Agent() {
           <ConfigStatusBar
             cwdName={cwdName}
             branch={branch}
+            cwd={cwd}
             onTaskSelect={setSelectedTaskId}
             splitPaneOpen={splitPaneOpen}
           />

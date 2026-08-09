@@ -12,6 +12,12 @@ function stripAnsi(s: string): string {
 interface SpawnOptions {
   timeout?: number;
   env?: NodeJS.ProcessEnv;
+  /**
+   * Working directory for the child process. Defaults to process.cwd().
+   * Required for workspace-scoped commands (e.g. `git` must run inside the
+   * repo's cwd; `git rev-parse` in process.cwd() returns nothing useful).
+   */
+  cwd?: string;
 }
 
 export async function spawn(
@@ -26,6 +32,7 @@ export async function spawn(
 
   const child: ChildProcess = nodeSpawn(command, args, {
     env: { ...process.env, ...opts.env },
+    ...(opts.cwd ? { cwd: opts.cwd } : {}),
   });
 
   // Close stdin immediately. With default stdio='pipe' the writable end stays
