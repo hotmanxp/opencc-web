@@ -39,6 +39,13 @@ describe('readTopLevelJson', () => {
     expect(result.missing).toBe(true);
     expect(result.path).toBe(join(tempHome, '.claude', 'settings.json'));
   });
+
+  it('returns missing:true when ~/.zai.json does not exist', async () => {
+    const result = await readTopLevelJson('zai-json');
+    expect(result.exists).toBe(false);
+    expect(result.missing).toBe(true);
+    expect(result.path).toBe(join(tempHome, '.zai.json'));
+  });
 });
 
 describe('writeTopLevelJson + readTopLevelJson roundtrip', () => {
@@ -58,6 +65,16 @@ describe('writeTopLevelJson + readTopLevelJson roundtrip', () => {
     const content = { permissions: { defaultMode: 'bypassPermissions' } };
     await writeTopLevelJson('claude-settings', content);
     const result = await readTopLevelJson('claude-settings');
+    expect(result.exists).toBe(true);
+    expect(result.content).toEqual(content);
+    expect(existsSync(result.path + '.tmp')).toBe(false);
+    expect(JSON.parse(readFileSync(result.path, 'utf-8'))).toEqual(content);
+  });
+
+  it('writes and reads back ~/.zai.json atomically', async () => {
+    const content = { providerProfiles: [{ name: 'test', provider: 'openai' }] };
+    await writeTopLevelJson('zai-json', content);
+    const result = await readTopLevelJson('zai-json');
     expect(result.exists).toBe(true);
     expect(result.content).toEqual(content);
     expect(existsSync(result.path + '.tmp')).toBe(false);

@@ -107,6 +107,29 @@ router.put('/config/claude-settings', async (req, res) => {
   }
 });
 
+// ~/.zai.json — zai tab 下 "Config" 卡的全文编辑端点。
+// providerProfiles 字段仍走 /config/opencc/provider(自有 schema),
+// 二者写同一文件,但路径不同:本端点写整对象,provider 端点只换 providerProfiles。
+router.get('/config/zai-json', async (_req, res) => {
+  try {
+    res.json(await readTopLevelJson('zai-json'));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.put('/config/zai-json', async (req, res) => {
+  if (!req.body || typeof req.body !== 'object' || Array.isArray(req.body)) {
+    return res.status(400).json({ error: 'body must be a JSON object' });
+  }
+  try {
+    await writeTopLevelJson('zai-json', req.body as Record<string, unknown>);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
 router.get('/config/:tool', async (req, res) => {
   const parsed = ConfigToolSchema.safeParse(req.params.tool);
   if (!parsed.success) {

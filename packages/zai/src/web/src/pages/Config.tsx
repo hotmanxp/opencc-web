@@ -616,6 +616,12 @@ export default function Config() {
         ) : activeTool === 'zai' ? (
           <>
             <SettingsEditor tool="zai" label="Zai" />
+            {/* ~/.zai.json 全文编辑 — 只在 zai tab 显示。opencc / opencode / nova tab 不出现。 */}
+            <JsonFileEditor
+              endpoint="/config/zai-json"
+              title="Config"
+              modalTitle="编辑 Config"
+            />
           </>
         ) : (
           <SettingsEditor tool={activeTool} label={tools.find((t) => t.key === activeTool)?.label || activeTool} />
