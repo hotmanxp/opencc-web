@@ -254,7 +254,10 @@ import {
   checkResponseForCacheBreak,
   recordPromptState,
 } from './promptCacheBreakDetection.js'
-import { recordApiCall } from '@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter'
+import {
+  recordApiCall,
+  setLastContextUsage,
+} from '@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter'
 import {
   CannotRetryError,
   FallbackTriggeredError,
@@ -2173,6 +2176,17 @@ async function* queryModel(
             partialMessage = part.message
             ttftMs = Date.now() - start
             usage = updateUsage(usage, part.message?.usage)
+            // zai patch (2026-08-09): 把"截至当前 turn 的累计 usage"同步写到
+            // globalThis, zai-server emit runtime.done 时读 getLastContextTokens()
+            // 推给前端 store 显示"当前上下文大小"。globalThis 单 slot 设计:
+            // zai 服 runQueryLoop 串行,不会出现两个 session 并行覆盖;同一
+            // session 内 message_delta 后续覆盖 message_start 的值。
+            setLastContextUsage({
+              input: usage.input_tokens ?? 0,
+              cache_creation: usage.cache_creation_input_tokens ?? 0,
+              cache_read: usage.cache_read_input_tokens ?? 0,
+              output: usage.output_tokens ?? 0,
+            })
             // Capture research from message_start if available (internal only).
             // Always overwrite with the latest value.
             if (
@@ -2404,6 +2418,15 @@ async function* queryModel(
           }
           case 'message_delta': {
             usage = updateUsage(usage, part.usage)
+            // zai patch (2026-08-09): message_delta 带 usage 是 streaming 路径下
+            // 累计 input + cache 的权威来源(Anthropic streaming API 每条 message_delta
+            // 携带完整 usage,不是增量)。这里覆盖 message_start 的初始值。
+            setLastContextUsage({
+              input: usage.input_tokens ?? 0,
+              cache_creation: usage.cache_creation_input_tokens ?? 0,
+              cache_read: usage.cache_read_input_tokens ?? 0,
+              output: usage.output_tokens ?? 0,
+            })
             // Capture research from message_delta if available (internal only).
             // Always overwrite with the latest value. Also write back to
             // already-yielded messages since message_delta arrives after
@@ -3054,6 +3077,16 @@ async function* queryModel(
     if (fallbackMessage) {
       const fallbackUsage = fallbackMessage.message.usage
       usage = updateUsage(EMPTY_USAGE, fallbackUsage)
+      // zai patch (2026-08-09): non-streaming fallback 路径同样把 usage
+      // 写到 globalThis, 让 zai-server emit runtime.done 能读到正确的
+      // 当前上下文大小。streaming 主路径失败 / 触发 fallback 时,这是
+      // 唯一一次能捕获 usage 的机会(只有一条 message, 没有 message_delta)。
+      setLastContextUsage({
+        input: usage.input_tokens ?? 0,
+        cache_creation: usage.cache_creation_input_tokens ?? 0,
+        cache_read: usage.cache_read_input_tokens ?? 0,
+        output: usage.output_tokens ?? 0,
+      })
       stopReason = fallbackMessage.message.stop_reason
       const fallbackCost = calculateUSDCost(resolvedModel, fallbackUsage)
       costUSD += addToTotalSessionCost(

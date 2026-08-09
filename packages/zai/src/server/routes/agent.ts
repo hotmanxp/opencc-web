@@ -21,6 +21,7 @@ import {
 import { EXTERNAL_PERMISSION_MODES } from "@zn-ai/zn-agent-core/opencc-src/permissions";
 import {
   getApiCallCount,
+  getLastContextTokens,
   setCurrentApiCountSession,
   clearApiCallCount,
 } from "@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter";
@@ -155,12 +156,18 @@ function newSessionId(): string {
 // (只写了 transcript,前端 status 永远卡在 idle)。
 
 // zai patch (2026-08-09): per-session 最近一次 API usage 缓存。
-// translateRuntimeEvents 在 Anthropic SDK message_delta 里捕获 usage
-// (streaming 模式下唯一带 usage 的事件),emit runtime.done 时读出
-// 附带 contextTokens,前端 store 累加显示"当前上下文大小"。
-// 用 module-level Map 而不是 globalThis:多 session 并行(zai 服虽
-// runQueryLoop 串行,但 BashNotifier / SubagentNotifier 触发的副 run
-// 走不同 sessionId)需要 per-session 隔离。
+//
+// 设计 — usage 实际上来自上游 vendor(claude.ts)在 message_start /
+// message_delta / non-streaming fallback 时通过 sessionApiCounter.ts 的
+// setLastContextUsage() 写到 globalThis.__zaiApiCountLastUsage 单 slot。
+// zai 服 emit runtime.done 时通过 getLastContextTokens() 读出。
+//
+// lastUsageBySession Map 是早期版本的占位(原计划在 translateRuntimeEvents
+// 的 case "message_delta" 里捕获,但 vendor 事件被 stream_event 包装,
+// 走 default 静默丢弃 — 永远不命中)。保留 Map 仅作 future-proof:
+// 若以后 unwrap stream_event 直接透传 SDK 原生事件,可同时填充 Map +
+// globalThis, getContextTokensForSession 优先用 Map(globalThis 在
+// 多 session 并行场景会被互相覆盖,Map 隔离更稳)。
 interface LastUsage {
   input: number
   cache_creation: number
@@ -172,14 +179,20 @@ const lastUsageBySession = new Map<string, LastUsage>()
 
 /**
  * 读某 session 最近一次 API 调用的 total context tokens(input +
- * cache_creation + cache_read,不含 output)。无记录返回 null(对应
- * 该 session 还没推过 usage,或 transcript 重放时尚未见过 streaming 事件)。
+ * cache_creation + cache_read,不含 output)。
+ *
+ * 优先查 per-session Map(为未来 unwrap stream_event 留 hook);若没有
+ * 命中,回退到 globalThis 的单 slot 值(getLastContextTokens — claude.ts
+ * 的 message_start / message_delta / fallback 路径实时写入)。
+ *
  * zai 服 emit runtime.done 时调用,把 total 推给前端 store。
  */
 function getContextTokensForSession(sid: string): number | null {
   const u = lastUsageBySession.get(sid)
-  if (!u) return null
-  return u.input + u.cache_creation + u.cache_read
+  if (u) return u.input + u.cache_creation + u.cache_read
+  // Fallback 到 globalThis 上游写入的最近一次 usage。zai-server 串行
+  // 处理 query,单 slot 不会出现 session 间串扰。
+  return getLastContextTokens()
 }
 export async function* translateRuntimeEvents(
   events: AsyncIterable<Record<string, unknown>>,
