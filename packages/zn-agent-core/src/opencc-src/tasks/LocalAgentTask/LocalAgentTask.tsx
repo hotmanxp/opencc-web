@@ -1,7 +1,7 @@
 // @ts-nocheck
 import { getSdkAgentProgressSummariesEnabled } from '../../bootstrap/state.js';
 import { mirrorFinalizeBgTask } from '../../../compat/runtime/agentTaskBridge.js';
-import { OUTPUT_FILE_TAG, STATUS_TAG, SUMMARY_TAG, TASK_ID_TAG, TASK_NOTIFICATION_TAG, TOOL_USE_ID_TAG, WORKTREE_BRANCH_TAG, WORKTREE_PATH_TAG, WORKTREE_TAG } from '../../constants/xml.js';
+import { STATUS_TAG, SUMMARY_TAG, TASK_ID_TAG, TASK_NOTIFICATION_TAG, TOOL_USE_ID_TAG, WORKTREE_BRANCH_TAG, WORKTREE_PATH_TAG, WORKTREE_TAG } from '../../constants/xml.js';
 import { abortSpeculation } from '../../services/PromptSuggestion/speculation.js';
 import type { AppState } from '../../state/AppState.js';
 import type { SetAppState, Task, TaskStateBase } from '../../Task.js';
@@ -18,7 +18,7 @@ import { registerCleanup } from '../../utils/cleanupRegistry.js';
 import { getToolSearchOrReadInfo } from '../../utils/collapseReadSearch.js';
 import { enqueuePendingNotification } from '../../utils/messageQueueManager.js';
 import { getAgentTranscriptPath } from '../../utils/sessionStorage.js';
-import { evictTaskOutput, getTaskOutputPath, initTaskOutputAsSymlink } from '../../utils/task/diskOutput.js';
+import { evictTaskOutput, initTaskOutputAsSymlink } from '../../utils/task/diskOutput.js';
 import { PANEL_GRACE_MS, registerTask, updateTaskState } from '../../utils/task/framework.js';
 import { emitTaskProgress } from '../../utils/task/sdkProgress.js';
 import type { TaskState } from '../types.js';
@@ -246,16 +246,16 @@ export function enqueueAgentNotification({
   // preserved; only the pre-computed response is discarded.
   abortSpeculation(setAppState);
   const summary = status === 'completed' ? `Agent "${description}" completed` : status === 'failed' ? `Agent "${description}" failed: ${error || 'Unknown error'}` : `Agent "${description}" was stopped`;
-  const outputPath = getTaskOutputPath(taskId);
   const toolUseIdLine = toolUseId ? `\n<${TOOL_USE_ID_TAG}>${toolUseId}</${TOOL_USE_ID_TAG}>` : '';
   const resultSection = finalMessage ? `\n<result>${finalMessage}</result>` : '';
   const usageSection = usage ? `\n<usage><total_tokens>${usage.totalTokens}</total_tokens><tool_uses>${usage.toolUses}</tool_uses><duration_ms>${usage.durationMs}</duration_ms></usage>` : '';
   const worktreeSection = worktreePath ? `\n<${WORKTREE_TAG}><${WORKTREE_PATH_TAG}>${worktreePath}</${WORKTREE_PATH_TAG}>${worktreeBranch ? `<${WORKTREE_BRANCH_TAG}>${worktreeBranch}</${WORKTREE_BRANCH_TAG}>` : ''}</${WORKTREE_TAG}>` : '';
+  const guidance = 'Use TaskOutput with task_id to retrieve the final result.';
   const message = `<${TASK_NOTIFICATION_TAG}>
 <${TASK_ID_TAG}>${taskId}</${TASK_ID_TAG}>${toolUseIdLine}
-<${OUTPUT_FILE_TAG}>${outputPath}</${OUTPUT_FILE_TAG}>
 <${STATUS_TAG}>${status}</${STATUS_TAG}>
-<${SUMMARY_TAG}>${summary}</${SUMMARY_TAG}>${resultSection}${usageSection}${worktreeSection}
+<${SUMMARY_TAG}>${summary}</${SUMMARY_TAG}>
+<${SUMMARY_TAG}>${guidance}</${SUMMARY_TAG}>${resultSection}${usageSection}${worktreeSection}
 </${TASK_NOTIFICATION_TAG}>`;
   enqueuePendingNotification({
     value: message,

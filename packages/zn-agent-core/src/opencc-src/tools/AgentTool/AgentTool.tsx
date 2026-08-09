@@ -332,7 +332,7 @@ export const AgentTool = buildTool({
   aliases: [LEGACY_AGENT_TOOL_NAME],
   maxResultSizeChars: 100_000,
   async description() {
-    return 'Launch a new agent';
+    return 'Launch a new agent. After the agent finishes, retrieve its final result by calling TaskOutput with the returned task_id. Do not read task output files directly.';
   },
   get inputSchema(): InputSchema {
     return inputSchema();
