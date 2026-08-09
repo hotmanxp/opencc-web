@@ -24,6 +24,37 @@
 | `docs/` | 设计/参考/操作指南;`docs/superpowers/specs/` 是各特性 spec,`docs/superpowers/plans/` 是实施计划 |
 | `examples/` `scripts/` | 示例 / 仓库脚本 |
 
+## 本机数据目录 `~/.zai/`
+
+zai 把用户级配置、plugin 元数据与缓存、后台任务持久化等统一放在 `~/.zai/`(根目录常量 `ZAI_DIR = join(homedir(), '.zai')`,见 `packages/zai/src/server/services/paths.ts:23`)。**插件元数据/缓存全部在此目录,**`~/.claude/plugins/` 只是历史遗留的 Claude Code 副本,迁移后不再改动。
+
+| 路径 | 职责 |
+|------|------|
+| `~/.zai/plugins/` | **plugin 元数据 + 缓存根**。`installed_plugins.json`(V2 schema)在这里;实际 plugin 文件在 `cache/<marketplace>/<plugin>/<version>/`,`<version>/.in_use/` 空目录标记当前使用版本。**改 plugin 走这里**,不要回 `~/.claude/plugins/cache/`。`~/.zai/plugins/cache/` 历史上是 marketplace 拉取缓存,2026-08-09 起 installPath 全部指向这里。 |
+| `~/.zai/agents/` | 用户级 agent 定义(`zai agents` 子命令) |
+| `~/.zai/skills/` | 用户级 skill 定义,默认被 `SkillTool` 加载(可被 `ZAI_SKILLS_DIRS=''` 显式禁用) |
+| `~/.zai/background/` | bg-agent 后台任务运行时持久化:`tasks/<id>.json` + `events/<id>.log`(见 `paths.ts:26`) |
+| `~/.zai/settings.json` | 用户级 zai 设置(全局生效);**项目级** 设置走 `<cwd>/.zai/settings.json`,不要混 |
+| `~/.zai/instances.json` | 多实例注册表(zai instance manager) |
+| `~/.zai/file-history/` | zai 编辑历史(`FileEditTool` 写入的快照) |
+| `~/.zai/session-env/` | session 环境变量快照 |
+| `~/.zai/shell-snapshots/` | Bash REPL 状态 snapshot(用于 session 恢复) |
+| `~/.zai/repl-history.jsonl` | Bash REPL 命令历史 |
+| `~/.zai/tasks/` | 任务定义持久化 |
+| `~/.zai/plans/` | plan 文件持久化 |
+| `~/.zai/logs/` | zai 运行日志 |
+| `~/.zai/backups/` | 自动备份 |
+| `~/.zai/scratchpad/` | 临时 scratch |
+| `~/.zai/state/` | 全局 state(可跨 session) |
+| `~/.zai/projects/` | 项目级数据(per-cwd) |
+| `~/.zai/manifest.json` | 顶层 manifest |
+| `~/.zai/.claude-migration-v1.json` | Claude Code → zai 迁移标记,删了会导致重新迁移 |
+
+**关键陷阱**：
+- **plugin 改文件走 `~/.zai/plugins/cache/claude-plugins-official/<name>/<version>/`**,不要去 `~/.claude/plugins/cache/` 找(那是迁移前 installPath 指向的历史位置,迁移后 zai 不读它)。
+- **LSP/MCP 类 plugin**(typescript-lsp / pyright-lsp / context7 / chrome-devtools-mcp / ralph-loop / code-review)在 `~/.zai/plugins/cache/` 下**有缓存但 zai 的 `/api/plugins` 不返回**——它们要么缺 `.claude-plugin/plugin.json`、要么走 LSP/MCP 路径被静默排除;installed_plugins.json 列了不等于 zai 实际加载。
+- **`~/.zai/zn-assets/<version>/{agents,commands,skills,extensions}/`** 是 `paths.ts:7-17` 注释里描述的预期 layout(`ZN_ASSETS_DIR` 常量),用于将来缓存 `@zn-ai/plugin` 资源。**当前未部署**——实际 `@zn-ai/plugin` 资源走 `~/.agents/skills`(`AGENTS_SKILLS_DIR` 常量,见 `agentRuntime.ts:285`),与 Nova CLI / OpenCode / OpenCC 共享(根 `AGENTS.md` 默认约定)。`~/.zai/zn-assets/` 不存在属预期,不要手动 mkdir。
+
 ## 强制开发规则
 
 - **真实浏览器验收**:任何问题修复或特性新增,完成前必须用 `/ego-browser` skill 启动真实 zai 实例并走完用户路径(页面加载、按钮点击、表单提交、截图等)。**禁止**用 Chrome DevTools MCP、Playwright、Puppeteer、`curl + WebFetch` 或单元测试替代。环境阻塞时必须显式报告。**注意**:`/ego-browser` 测试本地功能时,不要 kill 920x 端口所在的服务进程——920x 是 zai 正式服务端口, kill 后会导致真实实例不可用,应改为让 ego 使用另一个可用端口(如 8101 起)访问,或用 `pnpm --filter @zn-ai/zai dev` 启动独立开发服务。
