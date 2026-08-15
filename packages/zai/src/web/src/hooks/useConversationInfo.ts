@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAgentStore } from '../store/useAgentStore.js'
 import { useAppStore } from '../store/useAppStore.js'
+import { useProjection } from '../store/useProjection.js'
 import type { AgentMessage, AgentStatus } from '../store/useAgentStore.js'
 import type { ModelEntry } from '../../../shared/settings.js'
 
@@ -113,6 +114,12 @@ export function useConversationInfo(): ConversationInfo {
   })
   const [settingsLoaded, setSettingsLoaded] = useState(false)
 
+  // dsh 投影试点 (2026-08-15): 当前上下文大小改由 host 推送的
+  // session/projection 帧提供 (useProjection 订阅), fallback 到旧的
+  // contextTokensBySession (runtime.done 路径保留)。
+  const effectiveSessionId = sessionId ?? activeSessionId ?? null
+  const projectedCtxTokens = useProjection<number>(effectiveSessionId, 'context.tokens')
+
   // 1-shot fetch on mount. Failure is silent — `defaultModel` stays null
   // and the card shows "未知".
   useEffect(() => {
@@ -139,7 +146,6 @@ export function useConversationInfo(): ConversationInfo {
   }, [])
 
   return useMemo<ConversationInfo>(() => {
-    const effectiveSessionId = sessionId ?? activeSessionId ?? null
     const sess = effectiveSessionId
       ? sessions.find((s) => s.sessionId === effectiveSessionId) ?? null
       : null
@@ -181,9 +187,9 @@ export function useConversationInfo(): ConversationInfo {
         ? (apiRequestCountBySession[effectiveSessionId] ?? 0)
         : 0,
       contextTokens: effectiveSessionId
-        ? (contextTokensBySession[effectiveSessionId] ?? null)
+        ? (projectedCtxTokens ?? contextTokensBySession[effectiveSessionId] ?? null)
         : null,
       contextWindow,
     }
-  }, [sessionId, activeSessionId, sessions, messages, status, cwd, runtime, settingsLoaded, apiRequestCountBySession, contextTokensBySession])
+  }, [effectiveSessionId, projectedCtxTokens, sessions, messages, status, cwd, runtime, settingsLoaded, apiRequestCountBySession, contextTokensBySession])
 }

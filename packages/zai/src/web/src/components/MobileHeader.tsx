@@ -1,6 +1,7 @@
 import { Button } from 'antd'
 import { MenuOutlined, PlusOutlined } from '@ant-design/icons'
 import { useAgentStore } from '../store/useAgentStore'
+import { useProjection } from '../store/useProjection'
 
 export interface MobileHeaderProps {
   /** 点左上角 [≡] 按钮触发(父组件打开会话列表 Drawer) */
@@ -21,7 +22,10 @@ export default function MobileHeader({ onOpenSessionDrawer }: MobileHeaderProps)
   const status = useAgentStore((s) => s.status)
   const isBusy = status === "streaming"
   const current = sessions.find((s) => s.sessionId === sessionId)
-  const title = current?.title || '新会话'
+  // dsh 投影试点 (2026-08-15): 标题优先走 host 推送的 session/projection 帧
+  // (重连后 host 重算整体重发), fallback 到 sessions 列表的 title。
+  const projectedTitle = useProjection<string>(sessionId, 'title')
+  const title = projectedTitle ?? current?.title ?? '新会话'
 
   return (
     <div

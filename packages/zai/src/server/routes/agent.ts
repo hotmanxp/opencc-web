@@ -1242,6 +1242,15 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
               sessionId: event.sessionId,
               title,
             } as any);
+            // dsh 投影试点 (2026-08-15): 标题变化同步投影帧 — 前端
+            // useProjection(sid, 'title') 订阅 Sidebar 会话标题。重连后
+            // host 重算整体重发, 前端不用关心 diff 合并。
+            eventBus.emit({
+              type: "session/projection",
+              sessionId: event.sessionId,
+              key: "title",
+              value: title,
+            } as any);
           } catch {
             /* title 失败不阻断 */
           }
@@ -1269,6 +1278,21 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       }
       // ★ 替代原 stream.send：通过总线推送
       eventBus.emit(event);
+      // dsh 投影试点 (2026-08-15): runtime.done 携带 contextTokens 时, 同步
+      // emit session/projection 帧 — 前端 useProjection(sid, 'context.tokens')
+      // 订阅会话信息面板的"当前上下文大小"行。seq 由 eventBus.emit 自动分配
+      // (省略即填全局单调 seq, 作为投影 watermark, higher-seq-wins 合并)。
+      if (event.type === "runtime.done" && typeof event.sessionId === "string") {
+        const ev = event as { contextTokens?: number }
+        if (typeof ev.contextTokens === "number") {
+          eventBus.emit({
+            type: "session/projection",
+            sessionId: event.sessionId,
+            key: "context.tokens",
+            value: ev.contextTokens,
+          } as any);
+        }
+      }
       if (event.type === "runtime.done" || event.type === "runtime.aborted")
         break;
     }
