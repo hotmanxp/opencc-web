@@ -91,6 +91,10 @@ export default React.memo(function AgentInputBox() {
   const sessionId = useAgentStore((s) => s.sessionId);
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
   const isMobile = useAppStore((s) => s.isMobile);
+  // dsh 连接状态指示 (2026-08-15): SSE 断流时显示"重连中…/连接已断开",
+  // 恢复后自动消失。connected/connecting 不显示 — 连接正常时保持状态行整洁。
+  const streamState = useAppStore((s) => s.streamState);
+  const streamAttempt = useAppStore((s) => s.streamAttempt);
   const pendingAsk = useAgentStore((s) => s.pendingAsk);
   // 排队中的 prompt(对话进行中提交, 后端串行队列等待执行) — 渲染在输入框
   // 上方排队预览区; 某条开始执行时由 watcher 移入 transcript。
@@ -703,6 +707,28 @@ export default React.memo(function AgentInputBox() {
             {status === "streaming" && `对话中… (${elapsed}s)`}
             {status === "aborted" && "已中止"}
             {status === "error" && "错误"}
+          </span>
+        )}
+        {streamState === "reconnecting" && (
+          <span
+            data-testid="conn-reconnecting"
+            style={{ color: "var(--warning, #d4a72c)", marginLeft: 4 }}
+          >
+            重连中… ({streamAttempt}/3)
+          </span>
+        )}
+        {streamState === "error" && (
+          <span
+            data-testid="conn-error"
+            style={{ color: "var(--danger, #ff4d4f)", marginLeft: 4 }}
+          >
+            连接已断开
+            <a
+              onClick={() => window.location.reload()}
+              style={{ marginLeft: 6, textDecoration: "underline", cursor: "pointer" }}
+            >
+              重连
+            </a>
           </span>
         )}
         {/* 任务摘要: 始终展示, 避免对话进行中被"遮挡"造成用户找不到任务进度.
