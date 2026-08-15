@@ -1,6 +1,7 @@
 import { create } from 'zustand';
 import type { ServerEvent } from '../../../shared/events.js';
 import type { OutputStyle } from '../../../shared/settings.js';
+import type { StreamState } from '../lib/eventSource.js';
 
 export type ServiceState = {
   phase: 'restarting';
@@ -44,6 +45,16 @@ interface AppState {
   sidebarCollapsed: boolean;
   toggleSidebar: () => void;
   connected: boolean;
+  /**
+   * SSE 连接状态机 — 由 useEventStream 经 subscribeServerEvents onState 回调
+   * 写入。UI 顶栏据此显示连接指示:
+   *   connected → 隐藏; reconnecting → 黄色"重连中…"; error → 红色 + 手动重连。
+   * 初始 'connecting'（页面加载后立即连 SSE）。
+   */
+  streamState: StreamState;
+  /** 连续失败次数 (onState 的第二参, attempt <= 3 时 reconnecting, 否则 error)。 */
+  streamAttempt: number;
+  setStreamState: (state: StreamState, attempt: number) => void;
   jobs: Record<string, JobInfo>;
   toasts: ToastInfo[];
   // host/port/ips 由后续 LAN-share 阶段注入;字段可选以保证 Layout / 测试
@@ -202,6 +213,8 @@ export const useAppStore = create<AppState>((set) => ({
       return { sidebarCollapsed: next };
     }),
   connected: false,
+  streamState: 'connecting',
+  streamAttempt: 0,
   jobs: {},
   toasts: [],
   instanceContext: null,
@@ -221,6 +234,7 @@ export const useAppStore = create<AppState>((set) => ({
   autoUpdate: true,
   appUpdate: { status: 'idle' },
   setConnected: (v) => set({ connected: v }),
+  setStreamState: (state, attempt) => set({ streamState: state, streamAttempt: attempt }),
   setInstanceContext: (ctx) => set({ instanceContext: ctx }),
   applyJobEvent: (event) => set((state) => {
     if (!('jobId' in event) || typeof event.jobId !== 'string') return state;
