@@ -8,9 +8,13 @@ const nextId = () => `evt_${Date.now().toString(36)}_${(++counter).toString(36)}
 
 // Indexed-mapping input type: distributes ServerEvent variants by `type` discriminator
 // so inline object literals narrow correctly without excess property checks rejecting
-// variant-specific fields. eventId/ts remain optional (filled in by emit).
+// variant-specific fields. eventId/ts/seq remain optional (filled in by emit).
 export type ServerEventInput = {
-  [K in ServerEvent as K['type']]: Omit<K, 'eventId' | 'ts'> & { eventId?: string; ts?: number }
+  [K in ServerEvent as K['type']]: Omit<K, 'eventId' | 'ts' | 'seq'> & {
+    eventId?: string
+    ts?: number
+    seq?: number
+  }
 }[ServerEvent['type']]
 
 // 哪些事件不受 sid 限制 (与具体 session 解耦, 所有 tab 都应收)

@@ -23,6 +23,7 @@ describe('eventBus instance.changed', () => {
       type: 'instance.changed',
       eventId: 'evt_x',
       ts: 1700000000000,
+      seq: 1,
       instanceId: 'inst_1',
       state: 'starting',
       port: null,

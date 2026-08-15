@@ -3,6 +3,10 @@ import { z } from 'zod'
 const Base = z.object({
   eventId: z.string(),
   ts: z.number(),
+  // 服务端全局单调递增顺序号 — 消息合并 / 重连补发 / 投影合并的唯一基准。
+  // 由 eventBus.emit 分配（emit 时省略则自动填充）。只保证单进程内单调，
+  // 跨重启由 eventId + history replay 兜底，不得当持久化 ID 用。
+  seq: z.number(),
 })
 
 const RuntimeEvent = z.discriminatedUnion('type', [
@@ -252,6 +256,46 @@ const QueueEvent = z.discriminatedUnion('type', [
   }),
 ])
 
+// stream/error — 结构化帧级错误。server 在 SSE 写入中途崩溃 / 业务侧捕获
+// 未预期异常且无法继续推送时，发一个闭合 code 的错误帧再关闭连接。
+// code 为闭合 union，前端按 code 路由，新错误类型无需字符串匹配。
+// 纯 server→client 推送，无 sid（可选 sessionId），isGlobalEvent 登记为全局。
+const RpcErrorCode = z.enum([
+  'internal',
+  'bad-request',
+  'session-not-found',
+  'session-conflict',
+  'model-unavailable',
+  'timeout',
+  'cancelled',
+  'agent-busy',
+  'stream-write-failed',
+  'invalid-response',
+])
+
+const StreamErrorEvent = z.object({
+  ...Base.shape,
+  type: z.literal('stream/error'),
+  error: z.object({
+    code: RpcErrorCode,
+    message: z.string(),
+    details: z.record(z.unknown()).default({}),
+  }),
+})
+
+// session/projection — host 算完的派生值快照按 key 整体推送（不是 diff）。
+// client 只做 higher-seq-wins 合并（seq 即投影单元的 watermark，复用全局
+// 事件 seq：emit 省略时由 eventBus 分配）。重连后 host 重算整体重发，
+// client 无需关心合并。
+const ProjectionEvent = z.object({
+  ...Base.shape,
+  type: z.literal('session/projection'),
+  sessionId: z.string(),
+  key: z.string().min(1),
+  value: z.unknown(), // host 侧 schema 已校验；此处保持 wide
+  seq: z.number().int().nonnegative(), // 投影单元的 watermark，higher-seq-wins
+})
+
 export const ServerEvent = z.discriminatedUnion('type', [
   ...RuntimeEvent.options,
   ...SessionEvent.options,
@@ -261,5 +305,7 @@ export const ServerEvent = z.discriminatedUnion('type', [
   ...StateEvent.options,
   ...InstanceEvent.options,
   ...QueueEvent.options,
+  StreamErrorEvent,
+  ProjectionEvent,
 ])
 export type ServerEvent = z.infer<typeof ServerEvent>

@@ -59,7 +59,7 @@ describe('subscribeServerEvents', () => {
     const es = MockEventSource.instances[0]
     es.dispatchNamed('runtime.delta', {
       type: 'runtime.delta',
-      eventId: 'e1', ts: 1, sessionId: 's1', turnIndex: 0, delta: 'hi',
+      eventId: 'e1', ts: 1, seq: 1, sessionId: 's1', turnIndex: 0, delta: 'hi',
     })
     expect(onEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'runtime.delta', delta: 'hi' }),
@@ -73,11 +73,11 @@ describe('subscribeServerEvents', () => {
     const es = MockEventSource.instances[0]
     es.dispatchNamed('runtime.started', {
       type: 'runtime.started',
-      eventId: 'e1', ts: 1, sessionId: 's1', turnIndex: 0,
+      eventId: 'e1', ts: 1, seq: 2, sessionId: 's1', turnIndex: 0,
     })
     es.dispatchNamed('runtime.done', {
       type: 'runtime.done',
-      eventId: 'e2', ts: 2, sessionId: 's1', turnIndex: 0,
+      eventId: 'e2', ts: 2, seq: 3, sessionId: 's1', turnIndex: 0,
     })
     const types = onEvent.mock.calls.map((c) => (c[0] as { type: string }).type)
     expect(types).toContain('runtime.started')
@@ -94,6 +94,7 @@ describe('subscribeServerEvents', () => {
       type: 'instance.changed',
       eventId: 'e-instance',
       ts: 1,
+      seq: 4,
       instanceId: 'inst_1',
       state: 'running',
       port: 9202,
