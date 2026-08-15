@@ -21,6 +21,7 @@ import type { OutputStyle, Theme } from '../../shared/settings.js';
 import ZnLogo from './ZnLogo';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useEffectiveTheme } from '../hooks/useEffectiveTheme.js';
+import { UpdateNotifier } from './UpdateNotifier';
 
 const { Sider, Header, Content } = AntLayout;
 
@@ -41,7 +42,7 @@ const ALL_MENU_ITEMS = [
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate } = useAppStore();
   // 顶层 zai 实例(独立启动 / 顶层 managed supervisor)显示"实例管理"菜单;
   // instance 子实例(被 instance manager 派生的子进程)不显示 — 它不能 spawn
   // 孙实例,给它看到这个入口只会跳到 404 页面迷惑用户。
@@ -159,6 +160,9 @@ export default function Layout() {
         if (typeof data.enableDynamicWorkflow === 'boolean') {
           setEnableDynamicWorkflow(data.enableDynamicWorkflow)
         }
+        if (typeof data.autoUpdate === 'boolean') {
+          setAutoUpdate(data.autoUpdate)
+        }
       })
       .catch(() => {
         // swallow — keep default
@@ -166,13 +170,17 @@ export default function Layout() {
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setSettingsTheme, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setTranscriptCollapsed]);
+  }, [setOutputStyle, setSettingsTheme, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate, setTranscriptCollapsed]);
 
   return (
     // 用 height: 100vh (而不是 minHeight) 把 AntLayout 锁死在视口高度,
     // 这样内部 flex: 1 (Content / 子页面 wrapper) 才有确定的剩余空间可分配,
     // 否则内容一长 AntLayout 会跟着拉高, 整页出现滚动条, 把底部输入框推出视口.
     <AntLayout style={{ height: '100vh' }}>
+      {/* zai 自升级弹窗组件。监听 useAppStore.appUpdate 状态,complete/
+          failed 时弹 Modal,checking/installing 时顶部 notification。
+          AntD Modal/notification 默认 portal 到 body,DOM 位置不影响渲染。 */}
+      <UpdateNotifier />
       <Sider
         collapsible
         collapsed={sidebarCollapsed}

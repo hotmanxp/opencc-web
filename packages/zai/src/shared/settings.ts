@@ -35,6 +35,15 @@ export interface ModelEntry {
   /** Upstream OpenAI-compatible base URL; falls back to OpenAI default when omitted. */
   baseUrl?: string
   capabilities?: ModelCapabilities
+  /**
+   * Identifier of the provider profile this entry came from. When
+   * present, the server-side matcher prefers this provider for the
+   * model over the first profile whose model list happens to contain
+   * the same model name. Sourced from `ProviderProfile.id`; absent
+   * for user-defined entries in `~/.zai/settings.json → models[]`
+   * (which the server treats as "no preference, pick first match").
+   */
+  providerId?: string
 }
 
 /**
@@ -57,6 +66,19 @@ export type OutputStyle = 'default' | 'compact' | 'verbose'
  */
 export type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 
+/**
+ * Permission rules block in ~/.zai/settings.json — opencc convention.
+ * `allow` / `deny` / `ask` are tool-permission rule lists; `defaultMode`
+ * is the default permission mode new sessions boot into (read first by
+ * `getDefaultMode()` via `permissions.defaultMode`).
+ */
+export interface ZaiPermissions {
+  allow?: string[]
+  deny?: string[]
+  ask?: string[]
+  defaultMode?: string
+}
+
 /** Shape of ~/.zai/settings.json. */
 export interface ZaiSettings {
   env?: Record<string, string>
@@ -66,6 +88,8 @@ export interface ZaiSettings {
   models?: ModelEntry[]
   /** Default permission mode surfaced in the Settings drawer. */
   defaultMode?: string
+  /** Permission rules + default mode (opencc convention). See ZaiPermissions. */
+  permissions?: ZaiPermissions
   /** Web transcript output style — see OutputStyle. */
   outputStyle?: OutputStyle
   /**
@@ -102,6 +126,22 @@ export interface ZaiSettings {
    * 与 `openccInit.ts:enableOpenccConfigs()` 的 boot-time bridge。
    */
   enableDynamicWorkflow?: boolean
+  /**
+   * 是否启用 zai 自身版本自动升级检测。
+   *
+   * 默认 true — 启动时 `maybeAutoUpdate()`(services/updater.ts)在后台异步
+   * 跑 `npm view @zn-ai/zai version`,对比当前 `package.json` 版本,
+   * 有新版则静默 `npm install -g @zn-ai/zai@<version>`,完成后 SSE
+   * 推送 `app.update.complete` 事件,前端 UpdateNotifier 弹窗提示「请重启」。
+   *
+   * 关闭时启动完全跳过该流程,无网络调用、无 npm 子进程、无事件。
+   *
+   * 缺失 / 非 boolean → true(`BUILTIN_DEFAULT_SETTINGS.autoUpdate = true`)。
+   * 开发模式(`zai dev` 从 workspace 源起)走 ZAI_FROM_GLOBAL_INSTALL
+   * 检测,直接跳过 — 避免每次 dev 启动都跟 npm registry 对比 source
+   * 包版本。
+   */
+  autoUpdate?: boolean
 }
 
 /**
@@ -116,4 +156,7 @@ export const BUILTIN_DEFAULT_SETTINGS: ZaiSettings = {
   defaultMode: 'default',
   outputStyle: 'default',
   maxVisibleMessages: 20,
+  // 默认开启 zai 自身版本自动升级 — 用户在 SettingsDrawer 关闭后
+  // 会写入 settings.json,显式覆盖这个默认。
+  autoUpdate: true,
 }

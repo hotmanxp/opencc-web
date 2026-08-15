@@ -110,6 +110,15 @@ export type OpenccTranscriptMeta = {
   subagentType?: string
   /** Permission mode the session was opened with. */
   permissionMode?: OpenccPermissionMode
+  /**
+   * zai patch: id of the provider profile the user picked when this
+   * session selected its model. Lets the server-side matcher route
+   * the model to the exact provider the user chose even when several
+   * provider profiles share the same model name. Optional — sessions
+   * persisted before this field existed keep working (the matcher
+   * falls back to the first matching profile by name, legacy behavior).
+   */
+  providerId?: string
 }
 
 /**

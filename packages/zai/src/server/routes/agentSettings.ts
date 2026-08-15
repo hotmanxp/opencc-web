@@ -8,11 +8,13 @@ import type { ProviderProfile } from '../../shared/types.js'
 import { getDefaultMode } from '../services/permissionMode.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
 import {
+  isValidAutoUpdate,
   isValidDefaultSplitScreen,
   isValidEnableDynamicWorkflow,
   isValidOutputStyle,
   isValidTheme,
   readZaiSettings,
+  resolveAutoUpdate,
   resolveDefaultSplitScreen,
   resolveEnableDynamicWorkflow,
   resolveOutputStyle,
@@ -40,6 +42,11 @@ function readClaudeProviderProfiles(): ProviderProfile[] {
  * the picker. Each comma-separated model in profile.model becomes one
  * ModelEntry whose alias encodes the provider name (e.g. `nova-m3`).
  *
+ * `providerId` is set from `profile.id` so the picker can preserve the
+ * user-picked provider across the model → service roundtrip (the
+ * server-side `findProfileForModel` uses it to disambiguate when
+ * multiple profiles share the same model name).
+ *
  * Capabilities come from profile.capabilities[<model>] when the user
  * has saved per-model metadata; otherwise undefined and the picker
  * renders without capability badges.
@@ -61,6 +68,13 @@ function profilesToModelEntries(profiles: ProviderProfile[]): ModelEntry[] {
         description: p.name,
         baseUrl: p.baseUrl,
         capabilities: p.capabilities?.[model],
+        // zai patch: thread providerId through to the picker so
+        // ModelStatusButton.pickEntry can persist the user's choice
+        // back to transcript.meta.providerId. Profiles without an id
+        // (legacy configs) intentionally leave providerId undefined
+        // — findProfileForModel falls back to legacy first-match
+        // behavior when no preferred id is set.
+        providerId: p.id,
       })
     }
   }
@@ -134,6 +148,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
         : 20
     const defaultSplitScreen = resolveDefaultSplitScreen(settings)
     const enableDynamicWorkflow = resolveEnableDynamicWorkflow(settings)
+    const autoUpdate = resolveAutoUpdate(settings)
     res.json({
       defaultModel,
       baseURL,
@@ -144,6 +159,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       maxVisibleMessages,
       defaultSplitScreen,
       enableDynamicWorkflow,
+      autoUpdate,
     })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
@@ -310,5 +326,33 @@ router.put(
     }
   },
 )
+
+/**
+ * PUT /api/agent/settings/auto-update — 持久化 zai 自身版本自动升级开关。
+ * Body 是 `{ value: boolean }`。
+ *
+ * 与 enable-dynamic-workflow 的区别:本开关不需要同步写 process.env。
+ * `maybeAutoUpdate()` 在每次启动读 settings.json 时已经走了 resolveAutoUpdate
+ * (默认 true);运行中的 toggle 只影响"下次启动"的判断 — 用户切到 false 后,
+ * 重启 zai 才会跳过 npm view / npm install -g,运行中的进程可能仍在
+ * 后台跑完这次的 install。这是 by-design:运行中已发出的 installing
+ * 不应被半路取消,免得新版本残留在 npm cache 但未安装。
+ *
+ * SettingsDrawer 改这一行时调用,返回持久化后的值让客户端 echo canonical。
+ */
+router.put('/agent/settings/auto-update', async (req: Request, res: Response) => {
+  const raw = (req.body as { value?: unknown } | undefined)?.value
+  if (!isValidAutoUpdate(raw)) {
+    return res.status(400).json({ error: `invalid autoUpdate: ${String(raw)}` })
+  }
+  try {
+    const settings = await readZaiSettings()
+    const next: ZaiSettings = { ...settings, autoUpdate: raw }
+    await writeZaiSettings(next)
+    res.json({ value: next.autoUpdate })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
 
 export default router

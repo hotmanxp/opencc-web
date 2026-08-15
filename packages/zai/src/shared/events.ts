@@ -177,6 +177,19 @@ const SystemEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('system.stopping'),
              deadlineMs: z.number() }),
   z.object({ ...Base.shape, type: z.literal('system.restart.canceled') }),
+  // app.update.* — zai 自身版本自动升级通道。启动时 `maybeAutoUpdate`
+  // (services/updater.ts) 在后台跑 `npm view @zn-ai/zai version` →
+  // 比较 → 必要时 `npm install -g`,全程异步,通过这些事件把阶段
+  // 同步给前端。payload 故意不带 sessionId(纯 system 级事件),
+  // eventBus.isGlobalEvent() 必须显式登记才能跨 sid 广播。
+  z.object({ ...Base.shape, type: z.literal('app.update.checking') }),
+  z.object({ ...Base.shape, type: z.literal('app.update.installing'),
+             from: z.string(), to: z.string() }),
+  z.object({ ...Base.shape, type: z.literal('app.update.complete'),
+             from: z.string(), to: z.string() }),
+  z.object({ ...Base.shape, type: z.literal('app.update.failed'),
+             from: z.string().optional(), to: z.string().optional(),
+             error: z.string() }),
 ])
 
 // state.* — 服务端 in-process StateChangeBus 经 zai server bridge 翻译后 emit。

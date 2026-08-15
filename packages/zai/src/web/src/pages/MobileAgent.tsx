@@ -10,6 +10,7 @@ import ApproveDrawer from '../components/ApproveDrawer.jsx'
 import SettingsDrawer from '../components/SettingsDrawer'
 import ConfigStatusBar from '../components/ConfigStatusBar'
 import MobileQuickDrawer from '../components/MobileQuickDrawer.jsx'
+import { UpdateNotifier } from '../components/UpdateNotifier'
 
 /**
  * 移动端 /agent 页面:
@@ -57,6 +58,10 @@ export default function MobileAgent() {
 
   return (
     <>
+      {/* zai 自升级弹窗。useAppStore 是单例,Layout 已挂一份;
+          这里再挂一份确保移动端路由(不共享 Layout)也能响应。
+          UpdateNotifier 内部用 shownKeyRef 自抑制重复弹窗。 */}
+      <UpdateNotifier />
       <MobileHeader onOpenSessionDrawer={() => setDrawerOpen(true)} />
       <AgentConversation />
       <ConfigStatusBar

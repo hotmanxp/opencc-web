@@ -93,19 +93,21 @@ export function setShellIfWindows(): void {
 }
 
 /**
- * Find the path where `bash.exe` included with git-bash exists, exiting the process if not found.
+ * Resolve the path where `bash.exe` included with git-bash lives, returning
+ * `null` when it cannot be found. Like `findGitBashPath()` but does NOT exit
+ * the process — safe for callers that want to fall back to another shell
+ * (e.g. `findSuitableShell` in Shell.ts) instead of hard-stopping.
  */
-export const findGitBashPath = memoize((): string => {
+export const resolveGitBashPath = memoize((): string | null => {
   if (process.env.CLAUDE_CODE_GIT_BASH_PATH) {
     if (checkPathExists(process.env.CLAUDE_CODE_GIT_BASH_PATH)) {
       return process.env.CLAUDE_CODE_GIT_BASH_PATH
     }
-    // biome-ignore lint/suspicious/noConsole:: intentional console output
-    console.error(
-      `OpenCC was unable to find CLAUDE_CODE_GIT_BASH_PATH path "${process.env.CLAUDE_CODE_GIT_BASH_PATH}"`,
+    logForDebugging(
+      `CLAUDE_CODE_GIT_BASH_PATH "${process.env.CLAUDE_CODE_GIT_BASH_PATH}" does not exist`,
+      { level: 'warn' },
     )
-    // eslint-disable-next-line custom-rules/no-process-exit
-    process.exit(1)
+    return null
   }
 
   const gitPath = findExecutable('git')
@@ -114,6 +116,18 @@ export const findGitBashPath = memoize((): string => {
     if (checkPathExists(bashPath)) {
       return bashPath
     }
+  }
+
+  return null
+})
+
+/**
+ * Find the path where `bash.exe` included with git-bash exists, exiting the process if not found.
+ */
+export const findGitBashPath = memoize((): string => {
+  const resolved = resolveGitBashPath()
+  if (resolved) {
+    return resolved
   }
 
   // biome-ignore lint/suspicious/noConsole:: intentional console output

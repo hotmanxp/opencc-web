@@ -188,6 +188,15 @@ export async function createOpenccRuntimeImpl(options) {
       ),
       readFileCache: new FileStateCache(100, 25 * 1024 * 1024),
       abortController: initialAbortController,
+      // zai patch: 打开 vendor 的实时 stream_event 透传。默认 false 时
+      // QueryEngine 只在整轮结束后 yield 终端 `assistant` 消息,
+      // sdkEventAdapter 走 assistant 分支把全文压成单个
+      // content_block_delta —— 前端表现为「回复一次性蹦出来」,没有流式。
+      // 打开后 vendor 逐 token yield `{type:'stream_event', event}`,
+      // adapter 的 stream_event 分支原样透传 Anthropic primitives,
+      // 并用 streamedBlockIndices 让终端 assistant 消息跳过已流式过的
+      // block,避免同一 block 双发。
+      includePartialMessages: true,
       query: customQuery,
     })
   const engines = new Map<string, QueryEngine>()
@@ -195,18 +204,6 @@ export async function createOpenccRuntimeImpl(options) {
   // 旧实现只 track 单个 currentQueryAbortController,并发下 abort 无法精确
   // 命中目标 session;per-session 后按 sessionId 查表。
   const queryAbortControllers = new Map<string, AbortController>()
-
-  function eventFor(sessionId, value) {
-    const source = value && typeof value === 'object' ? value : { value }
-    return {
-      ...source,
-      type: source.type ?? source.message?.type ?? 'runtime.event',
-      sessionId: source.sessionId ?? sessionId,
-      eventId: source.eventId ?? source.uuid ?? randomUUID(),
-      ts: source.ts ?? Date.now(),
-      turnIndex: source.turnIndex ?? turnIndex,
-    }
-  }
 
   async function buildComponentCounts(): Promise<Map<string, OpenccPluginComponentCounts>> {
     const counts = new Map<string, OpenccPluginComponentCounts>()
@@ -572,6 +569,22 @@ export async function createOpenccRuntimeImpl(options) {
           // zai patch: 透传 isMeta — 后台任务完成触发的占位 query 用 meta
           // prompt(UI 隐藏),真正内容由 QueryEngine 首轮 drain 注入。
           ...(input.isMeta ? { isMeta: true } : {}),
+          // zai patch: per-query provider override. zai resolves the model
+          // → provider profile on the call site and threads the openai-
+          // compatible baseURL/apiKey/model through QueryEngine.submitMessage
+          // → processUserInputContext.options.providerOverride → vendor
+          // query.ts:1312 → queryModel → getAnthropicClient(providerOverride)
+          // → createOpenAIShimClient (openai-shim). Without this,
+          // zhiniao-* models would be POSTed to ANTHROPIC_BASE_URL and
+          // return `Model not found`.
+          ...(input.providerOverride ? { providerOverride: input.providerOverride } : {}),
+          // zai patch: per-query provider id (from transcript.meta.providerId).
+          // Mirrors the providerOverride plumbing above, but is read by the
+          // anthropic-side modelCaller (zai's createAnthropicModelCaller)
+          // instead of the openai-shim. Lets findProfileForModel route a
+          // model to the exact provider the user picked when several
+          // provider profiles share the same model name.
+          ...(input.providerId ? { providerId: input.providerId } : {}),
         })
         // zai patch: 绑定 vendor SDK context, 让 vendor 的 getSessionId()
         // 在本 query 的异步链上返回 input.sessionId, 从而 transcript 文件
@@ -591,43 +604,35 @@ export async function createOpenccRuntimeImpl(options) {
           typeof input.sessionId === 'string' && input.sessionId
             ? { sessionId: input.sessionId, sessionProjectDir: null, cwd, originalCwd: cwd }
             : null
-        // zai patch (2026-08-09): sdkMeta 必须在 query 生命周期内常驻
-        // —— streamedBlockIndices / toolNameByUseId 需要跨 stream.next()
-        // 累计状态,eventCounter 每次 translateSdkToRuntime 调用前 +1,
-        // 作为 sdkEventAdapter 的"外层序列号"(见 sdkEventAdapter.ts:316-324
-        // 的 makeEvent:eventId = evt-${eventCounter}[.${seq}])。
-        const sdkMeta: SdkEventMeta = {
+        // zai patch (2026-08-10): 接线 sdkEventAdapter。vendor
+        // submitMessage() 产出 SDK Message(assistant / user / stream_event /
+        // result),translateSdkToRuntime 把它们翻译成 Anthropic primitives
+        // (message_start / content_block_* / message_stop),供下游
+        // translateRuntimeEvents 消费。97ab9d1 删除了 translateRuntimeEvents
+        // 里对 assistant / user Message 的直接处理并依赖这里接线 ——
+        // 之前未接线导致 vendor 原始流全被 default 丢弃,只剩 result →
+        // runtime.done,模型回复文本丢失(Web 收不到消息)。adapter 同时处理
+        // stream_event 实时流与 assistant 终端消息,并用 streamedBlockIndices
+        // 去重避免同一 block 双发。
+        const adapterMeta = {
           sessionId: input.sessionId,
           turnIndex,
           eventCounter: 0,
-          toolNameByUseId: new Map(),
-          streamedBlockIndices: new Set(),
+          toolNameByUseId: new Map<string, string>(),
+          streamedBlockIndices: new Set<number>(),
         }
         while (true) {
           const step = sdkCtx
             ? await runWithSdkContext(sdkCtx, () => stream.next())
             : await stream.next()
           if (step.done) break
-          const value = step.value
-          // 'result' SDKMessage 旁路 adapter:vendor 在 is_error 路径
-          // (QueryEngine.ts:915 error_max_turns, :1061 error_max_budget_usd,
-          // :1214 success with isApiError) 产 result,但 adapter 的
-          // case 'result' (sdkEventAdapter.ts:157-164) 不感知 is_error,
-          // 只 yield message_delta + message_stop —— 会丢失
-          // translateRuntimeEvents 里 case "result" 现有的 runtime.error
-          // 映射。其余 SDKMessage 都走 adapter(token-by-token 流式)。
-          if (
-            value &&
-            typeof value === 'object' &&
-            (value as { type?: string }).type === 'result'
-          ) {
-            yield eventFor(input.sessionId, value)
-          } else {
-            sdkMeta.eventCounter++
-            for (const ev of translateSdkToRuntime(value, sdkMeta)) {
-              yield ev as unknown as ReturnType<typeof eventFor>
-            }
+          for (const ev of translateSdkToRuntime(step.value, adapterMeta)) {
+            yield ev as any
           }
+          // adapter 用 meta.eventCounter 前缀生成 eventId(evt-N / evt-N.M),
+          // 每条 vendor 消息内部用 seq 区分,跨消息需递增(单次 makeEvent 不
+          // 自动递增 eventCounter)。
+          adapterMeta.eventCounter++
         }
       } finally {
         if (prevBridge === undefined) delete (globalThis as any).__zaiBridgeCtx

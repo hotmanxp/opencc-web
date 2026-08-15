@@ -878,9 +878,9 @@ class OpenAIShimStream {
 class OpenAIShimMessages {
   private defaultHeaders: Record<string, string>
   private reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh'
-  private providerOverride?: { model: string; baseURL: string; apiKey: string }
+  private providerOverride?: { model: string; baseURL: string; apiKey: string; extraParams?: Record<string, unknown> }
 
-  constructor(defaultHeaders: Record<string, string>, reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh', providerOverride?: { model: string; baseURL: string; apiKey: string }) {
+  constructor(defaultHeaders: Record<string, string>, reasoningEffort?: 'low' | 'medium' | 'high' | 'xhigh', providerOverride?: { model: string; baseURL: string; apiKey: string; extraParams?: Record<string, unknown> }) {
     this.defaultHeaders = filterAnthropicHeaders(defaultHeaders)
     this.reasoningEffort = reasoningEffort
     this.providerOverride = providerOverride
@@ -1084,6 +1084,19 @@ class OpenAIShimMessages {
 
     if (params.temperature !== undefined) body.temperature = params.temperature
     if (params.top_p !== undefined) body.top_p = params.top_p
+
+    // zai patch: per-provider extraParams (e.g. enable_search / top_p /
+    // reasoning_effort) merged on the OPENAI side too. Sourced from
+    // ProviderProfile.extraParams in ~/.zai.json, threaded here via
+    // ProviderOverride.extraParams → OpenAIShimMessages. Spread last so
+    // identical keys in extraParams override the shim's built-in defaults.
+    if (this.providerOverride?.extraParams) {
+      Object.assign(body, this.providerOverride.extraParams)
+      // zai patch diagnostic: 直接证明 extraParams 进了请求体(不必抓包)。
+      console.error(
+        `[zai.openaiShim] extraParams merged keys=${Object.keys(this.providerOverride.extraParams).join(',')} model=${request.resolvedModel}`,
+      )
+    }
 
     if (params.tools && params.tools.length > 0) {
       const converted = convertTools(

@@ -53,16 +53,16 @@ export default defineGateway({
     source: 'static',
     models: [
       {
-        id: 'zhiniao-minimax-m2.7-highspeed',
+        id: 'zhiniao-MiniMax-M2.7-highspeed',
         apiName: 'zhiniao-MiniMax-M2.7-highspeed',
         label: 'MiniMax M2.7 Highspeed (via Wizard AI)',
-        modelDescriptorId: 'zhiniao-minimax-m2.7-highspeed',
+        modelDescriptorId: 'zhiniao-MiniMax-M2.7-highspeed',
       },
       {
-        id: 'zhiniao-minimax-m2.7',
+        id: 'zhiniao-MiniMax-M2.7',
         apiName: 'zhiniao-MiniMax-M2.7',
         label: 'MiniMax M3 (via Wizard AI)',
-        modelDescriptorId: 'zhiniao-minimax-m2.7',
+        modelDescriptorId: 'zhiniao-MiniMax-M2.7',
       },
       {
         id: 'zhiniao-qwen3.6-plus',

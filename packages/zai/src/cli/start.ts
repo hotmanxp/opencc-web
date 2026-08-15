@@ -2,17 +2,18 @@ import { existsSync } from 'node:fs';
 import http from 'node:http';
 import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
 import { createApp } from '../server/index.js';
 import { createInstanceHeartbeat, getInstanceHeartbeatConfig } from '../server/services/instanceHeartbeat.js';
 import { sendReady } from '../server/services/readyHook.js';
 import { randomBytes } from 'node:crypto';
 import express from 'express';
 import { resolveServerPort } from './ports.js';
+import { openBrowser } from './openBrowser.js';
 import {
   cleanupAndExit,
   registerHttpServer,
 } from '../server/services/runtimeLifecycle.js';
+import { handleProxyUpgrade } from '../server/services/reverseProxy.js';
 
 interface StartOptions {
   port?: string;
@@ -114,6 +115,13 @@ async function runDirectServer(options: StartOptions): Promise<void> {
     process.exit(1);
   }
   const server = http.createServer(app);
+  // WebSocket 反向代理:`--lan` 时启用,转发 `/proxy/<port>/ws` 到
+  // 127.0.0.1:<port>。Express 默认不处理 upgrade,handler 在 server 层面
+  // 接管 socket。手写 HTTP/1.1 upgrade 请求(`http.request` 不能用于
+  // upgrade),然后双向 pipe。
+  server.on('upgrade', handleProxyUpgrade({
+    isEnabled: () => options.lan === true,
+  }));
   // 把 server 句柄交给 runtimeLifecycle 统一管理关闭流程。
   // 强制 closeAllConnections:production 受管模式下,supervisor 重启 child 时
   // 旧 child 必须立即释放端口,否则 supervisor 会因 EADDRINUSE 失败。SIGINT
@@ -147,6 +155,11 @@ async function runDirectServer(options: StartOptions): Promise<void> {
     const ips = detectLanIps();
     console.log(`[zai] Production server on http://localhost:${port}`);
     console.log(`[zai] LAN mode — listening on 0.0.0.0:${port}`);
+    // 反向代理暴露面提示(同 dev.ts:任何同 LAN 访客可访问任意本机端口)
+    console.log(
+      `[zai] WARNING: --lan enables reverse proxy at /proxy/<port>/* → 127.0.0.1:<port>.` +
+        `\n[zai]          Anyone on your LAN can reach any local port you have running.`,
+    );
     for (const ip of ips) {
       console.log(`[zai]   → http://${ip}:${port}`);
     }
@@ -154,7 +167,7 @@ async function runDirectServer(options: StartOptions): Promise<void> {
     console.log(`[zai] Production server on http://localhost:${port}`);
   }
   if (options.open) {
-    spawn('open', [`http://localhost:${port}`], { stdio: 'ignore' });
+    openBrowser(`http://localhost:${port}`);
   }
 
   // SIGINT/SIGTERM cleanup:统一走 cleanupAndExit,与 restart/stop route 共用

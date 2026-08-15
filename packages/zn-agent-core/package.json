@@ -1,47 +1,19 @@
 {
   "name": "@zn-ai/zn-agent-core",
-  "version": "0.2.23",
+  "version": "0.3.13",
   "description": "zai agent runtime core",
   "type": "module",
-  "main": "dist/index.js",
+  "main": "dist/opencc-core.mjs",
   "types": "dist/index.d.ts",
   "exports": {
     ".": {
       "types": "./dist/index.d.ts",
       "default": "./dist/opencc-core.mjs"
     },
-    "./runtime": {
-      "types": "./dist/runtime/index.d.ts",
-      "default": "./dist/opencc-core.mjs"
-    },
-    "./commands": {
-      "types": "./dist/commands/index.d.ts",
-      "default": "./dist/opencc-core.mjs"
-    },
-    "./bashTracker": {
-      "types": "./dist/tools/BashTool/bashTracker.d.ts",
-      "default": "./dist/opencc-core.mjs"
-    },
-    "./taskListStore": {
-      "types": "./dist/tools/Tasks/TaskListStore.d.ts",
-      "default": "./dist/opencc-core.mjs"
-    },
-    "./agents/memoryLoader": {
-      "types": "./dist/agents/memoryLoader.d.ts",
-      "default": "./dist/opencc-core.mjs"
-    },
-    "./agents/memoryWatcher": {
-      "types": "./dist/agents/memoryWatcher.d.ts",
-      "default": "./dist/opencc-core.mjs"
-    },
-    "./compat/vendor/ripgrep": {
-      "types": "./dist/compat/vendor/ripgrep.d.ts",
-      "default": "./dist/opencc-core.mjs"
-    },
     "./opencc-core": "./dist/opencc-core.mjs",
     "./opencc-src/permissions": "./dist/opencc-src/types/permissions.js",
-    "./opencc-src/server": "./dist/opencc-src/server/index.js",
     "./opencc-src/services/api/sessionApiCounter": "./dist/opencc-src/services/api/sessionApiCounter.js",
+    "./opencc-src/server": "./dist/opencc-src/server/index.js",
     "./opencc-server": {
       "types": "./dist/opencc-src/server/index.d.ts",
       "default": "./dist/opencc-core.mjs"

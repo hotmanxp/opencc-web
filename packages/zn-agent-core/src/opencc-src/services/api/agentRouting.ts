@@ -14,6 +14,12 @@ export interface ProviderOverride {
   baseURL: string
   /** API key for this provider */
   apiKey: string
+  /**
+   * zai patch: free-form request-body fields merged into every
+   * POST `/chat/completions` (sourced from zai's
+   * `ProviderProfile.extraParams` in ~/.zai.json). Optional.
+   */
+  extraParams?: Record<string, unknown>
 }
 
 /** A model-only route: reuse the session's current provider, just change the model. */

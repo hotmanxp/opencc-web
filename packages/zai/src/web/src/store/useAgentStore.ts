@@ -204,6 +204,16 @@ interface AgentState {
     updatedAt: number
     /** Resolved model name (from transcript.meta.model). 'unknown' or absent = not set. */
     model?: string
+    /**
+     * zai patch: id of the provider profile the user picked in the
+     * model picker for this session (from transcript.meta.providerId).
+     * Carried alongside `model` so the server-side matcher can route
+     * the request to the exact provider the user chose when several
+     * provider profiles share the same model name. Sessions persisted
+     * before this field existed simply omit it — the server treats the
+     * absence as "no preference" and uses the legacy first-match path.
+     */
+    providerId?: string
     /** Per-session permission mode (default/acceptEdits/plan/bypassPermissions/dontAsk). */
     permissionMode?: PermissionMode
     cwd?: string
@@ -346,7 +356,14 @@ interface AgentState {
   /** Models list synced from /api/agent/settings → models[]. */
   availableModels: ModelEntry[]
   /** Optimistic PATCH /api/agent/sessions/:id + local session model update. */
-  patchSessionModel: (sid: string, model: string) => Promise<void>
+  /**
+   * zai patch: payload now carries { model, providerId } instead of a
+   * bare model string. Backward-compatible: callers passing a plain
+   * string (legacy behavior) still work — see the runtime check below
+   * that normalizes string-or-object to the object form before
+   * reaching the PATCH body.
+   */
+  patchSessionModel: (sid: string, payload: string | { model: string; providerId?: string }) => Promise<void>
   /** Optimistic PATCH /api/agent/sessions/:id + local session mode update. */
   patchSessionMode: (sid: string, mode: PermissionMode) => Promise<void>
   sendMessage: (prompt: string) => Promise<void>
@@ -995,14 +1012,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 模型的最近一次 (pickEntry → patchSessionModel 写入 meta.model 并刷新
     // updatedAt). 找不到时 (用户从未手动选过) 返回 null, body 不带 model,
     // server 端维持 'unknown', useConversationInfo 走 runtime.defaultModel 回退.
+    // zai patch: also carry the providerId the user picked alongside the
+    // model so the new session's first prompt routes to the same
+    // provider (instead of falling back to the first-match-by-name).
     const previousSessions = get().sessions
     let lastSelectedModel: string | null = null
+    let lastSelectedProviderId: string | null = null
     const sortedSessions = [...previousSessions].sort(
       (a, b) => b.updatedAt - a.updatedAt,
     )
     for (const s of sortedSessions) {
       if (s.model && s.model !== 'unknown') {
         lastSelectedModel = s.model
+        if (s.providerId) lastSelectedProviderId = s.providerId
         break
       }
     }
@@ -1014,7 +1036,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
         body: JSON.stringify(
-          lastSelectedModel ? { model: lastSelectedModel } : {},
+          lastSelectedModel
+            ? {
+                model: lastSelectedModel,
+                ...(lastSelectedProviderId ? { providerId: lastSelectedProviderId } : {}),
+              }
+            : {},
         ),
       })
       if (!res.ok) return
@@ -1057,13 +1084,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  patchSessionModel: async (sid, model) => {
+  patchSessionModel: async (sid, payload) => {
+    // zai patch: accept legacy bare-string callers by normalizing the
+    // payload to the object form. ModelStatusButton always passes the
+    // new shape; older callers (none in-tree today, but the type
+    // signature keeps the option open) would pass a string.
+    const next =
+      typeof payload === 'string' ? { model: payload } : payload
     // Snapshot for revert on failure.
     const prev = get().sessions
     // Optimistic local update so the badge switches immediately.
+    // providerId is written alongside model so the badgeText lookup in
+    // ModelStatusButton keeps showing the right provider's description
+    // after a switch.
     set({
       sessions: prev.map((x) =>
-        x.sessionId === sid ? { ...x, model } : x,
+        x.sessionId === sid
+          ? { ...x, model: next.model, ...(next.providerId ? { providerId: next.providerId } : {}) }
+          : x,
       ),
     })
     try {
@@ -1071,7 +1109,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sid)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
-        body: JSON.stringify({ model }),
+        // Only include providerId in the body when present, so callers
+        // that pass `{model}` without providerId don't accidentally
+        // wipe the persisted providerId server-side (the PATCH handler
+        // would otherwise treat the field as "explicitly set to this
+        // string"). See plan §阶段 4 patchSessionModel note.
+        body: JSON.stringify(
+          next.providerId
+            ? { model: next.model, providerId: next.providerId }
+            : { model: next.model },
+        ),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
     } catch {

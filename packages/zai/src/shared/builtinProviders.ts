@@ -58,12 +58,20 @@ const openplatformCaps: Record<string, ModelCapabilities> = {
  *   2. zhiniao       — OpenAI-compatible protocol (Wizard AI gateway).
  *      4 models including M2.7, Qwen 3.6 Plus, GLM 5.1.
  *
- * `id` is intentionally absent; the user-assigned `id` is generated on
- * first save (see ProviderForm.handleModalOk) so we don't pin a stable
- * id into the catalog that would clash across installations.
+ * `id` is a hard-coded stable slug (see plan §阶段 1) — sessions can
+ * persist this id in transcript.meta.providerId to mean "this model
+ * came from the built-in openplatform / zhiniao profile", and the
+ * matcher will route back to the matching builtin even if the user
+ * has not saved the profile into their providerProfiles yet.
+ *
+ * The `id` does NOT collide with user-created profiles (which use
+ * the `provider_<timestamp>` scheme in ProviderForm.handleModalOk) —
+ * both namespaces live in the same provider list but are
+ * disambiguated by the slug prefix.
  */
 export const BUILTIN_PROVIDERS: ProviderProfile[] = [
   {
+    id: 'builtin-openplatform',
     name: 'Open Platform (Nova)',
     provider: 'anthropic',
     baseUrl: 'https://zn-nova.paic.com.cn/novai',
@@ -71,6 +79,7 @@ export const BUILTIN_PROVIDERS: ProviderProfile[] = [
     capabilities: openplatformCaps,
   },
   {
+    id: 'builtin-zhiniao',
     name: 'ZhiNiao (Wizard AI)',
     provider: 'openai',
     baseUrl: 'https://wizard-ai.paic.com.cn/code_pilot/api/v1',

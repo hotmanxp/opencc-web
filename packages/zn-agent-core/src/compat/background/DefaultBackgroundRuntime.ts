@@ -508,6 +508,12 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
         attempt++
         try {
           const stream = this.agentRuntime.query(queryInput)
+          // zai patch (2026-08-10): query 出口已接线 sdkEventAdapter,vendor
+          // 事件被翻译成 Anthropic primitives(content_block_delta / message_stop),
+          // 原 assistant 分支(直接读 vendor Message)不再命中。改为从 text_delta
+          // 累积当前 turn 文本,message_stop 时落为 resultText,保持
+          // SubagentNotifier 的 <result> 与 TaskOutput 的 resultText。
+          let turnText = ''
           for await (const ev of stream) {
             if (rec.controller.signal.aborted) break
             const seq = rec.task.eventCount + 1
@@ -533,11 +539,15 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
                   category: err.category ?? 'internal',
                 }
               }
-            } else if (ev.type === 'assistant') {
-              // 与 appendTaskEvent 相同的兜底:vendor 流没有 runtime.done 时
-              // 用最后一条 assistant text 作为 resultText。
-              const text = extractAssistantText(ev)
-              if (text) rec.task.resultText = text
+            } else if (ev.type === 'content_block_delta') {
+              // 只认 text_delta;thinking_delta / input_json_delta 不算结果。
+              const delta = (ev as { delta?: { type?: string; text?: string } }).delta
+              if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+                turnText += delta.text
+              }
+            } else if (ev.type === 'message_stop') {
+              if (turnText) rec.task.resultText = turnText
+              turnText = ''
             }
           }
           // 流正常结束 → 任务成功 (abort 由外层 while 顶部捕获)

@@ -97,5 +97,14 @@ function dispatch(event: ServerEvent) {
     case 'instance.changed':
       useInstanceStore.getState().applyInstanceChanged(event)
       break
+    // app.update.* — zai 自身版本自动升级通道的事件,UpdateNotifier 监听
+    // appUpdate 状态显示 Modal / notification。统一走 useAppStore,
+    // 不进 useAgentStore(这是 system 级,不是会话级)。
+    case 'app.update.checking':
+    case 'app.update.installing':
+    case 'app.update.complete':
+    case 'app.update.failed':
+      useAppStore.getState().applyAppUpdate(event)
+      break
   }
 }

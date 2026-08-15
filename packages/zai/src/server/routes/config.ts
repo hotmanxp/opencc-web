@@ -1,8 +1,5 @@
 import { Router, type IRouter } from 'express';
 import { z } from 'zod';
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
-import { dirname, join } from 'node:path';
-import { homedir } from 'node:os';
 import {
   readConfig,
   writeConfig,
@@ -13,8 +10,6 @@ import type { ConfigTool, ProviderProfile } from '../../shared/types.js';
 
 const router: IRouter = Router();
 const ConfigToolSchema = z.enum(['nova', 'opencode', 'opencc', 'zai']);
-
-const CLAUDE_JSON_PATH = () => join(homedir(), '.zai.json');
 
 // Capability metadata for one model entry on a provider profile.
 // All fields optional so existing pre-capability profiles round-trip cleanly.
@@ -41,26 +36,6 @@ const ProviderProfileSchema = z.object({
 }).strict();
 
 export type ProviderProfileInput = z.infer<typeof ProviderProfileSchema>;
-
-async function readClaudeJson(): Promise<Record<string, unknown>> {
-  try {
-    const raw = await readFile(CLAUDE_JSON_PATH(), 'utf-8');
-    return JSON.parse(raw);
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
-      return {};
-    }
-    throw err;
-  }
-}
-
-async function writeClaudeJson(data: Record<string, unknown>): Promise<void> {
-  const path = CLAUDE_JSON_PATH();
-  await mkdir(dirname(path), { recursive: true });
-  const tmpPath = `${path}.tmp`;
-  await writeFile(tmpPath, JSON.stringify(data, null, 2), 'utf-8');
-  await rename(tmpPath, path);
-}
 
 // 顶层 JSON 配置文件(~/.claude.json / ~/.claude/settings.json)的读取与原子写。
 // 注册顺序必须在 /config/:tool 之前 — Express 按注册顺序匹配,
@@ -108,7 +83,7 @@ router.put('/config/claude-settings', async (req, res) => {
 });
 
 // ~/.zai.json — zai tab 下 "Config" 卡的全文编辑端点。
-// providerProfiles 字段仍走 /config/opencc/provider(自有 schema),
+// providerProfiles 字段走 /config/zai/provider(自有 schema),
 // 二者写同一文件,但路径不同:本端点写整对象,provider 端点只换 providerProfiles。
 router.get('/config/zai-json', async (_req, res) => {
   try {
@@ -156,11 +131,12 @@ router.put('/config/:tool', async (req, res) => {
   }
 });
 
-// OpenCC ProviderProfile 配置（读写 ~/.zai.json 的 providerProfiles 字段）
+// OpenCC ProviderProfile 配置（读写 ~/.claude.json 的 providerProfiles 字段）
 router.get('/config/opencc/provider', async (_req, res) => {
   try {
-    const data = await readClaudeJson();
-    const profiles: ProviderProfile[] = (data.providerProfiles as ProviderProfile[]) || [];
+    const file = await readTopLevelJson('claude-json');
+    const profiles: ProviderProfile[] =
+      (file.content.providerProfiles as ProviderProfile[]) || [];
     res.json({ profiles });
   } catch (err) {
     res.status(500).json({ error: String(err) });
@@ -176,9 +152,41 @@ router.put('/config/opencc/provider', async (req, res) => {
     return res.status(400).json({ error: `invalid body: ${parsed.error.message}` });
   }
   try {
-    const data = await readClaudeJson();
-    data.providerProfiles = parsed.data.profiles;
-    await writeClaudeJson(data);
+    const file = await readTopLevelJson('claude-json');
+    file.content.providerProfiles = parsed.data.profiles;
+    await writeTopLevelJson('claude-json', file.content);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// Zai ProviderProfile 配置（读写 ~/.zai.json 的 providerProfiles 字段 —
+// zai 运行时 modelCaller/resolveModel/agentSettings 均从该字段读取）.
+// 与 opencc/provider 共享同一 schema,但落在不同文件。
+router.get('/config/zai/provider', async (_req, res) => {
+  try {
+    const file = await readTopLevelJson('zai-json');
+    const profiles: ProviderProfile[] =
+      (file.content.providerProfiles as ProviderProfile[]) || [];
+    res.json({ profiles });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.put('/config/zai/provider', async (req, res) => {
+  const schema = z.object({
+    profiles: z.array(ProviderProfileSchema),
+  });
+  const parsed = schema.safeParse(req.body);
+  if (!parsed.success) {
+    return res.status(400).json({ error: `invalid body: ${parsed.error.message}` });
+  }
+  try {
+    const file = await readTopLevelJson('zai-json');
+    file.content.providerProfiles = parsed.data.profiles;
+    await writeTopLevelJson('zai-json', file.content);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });

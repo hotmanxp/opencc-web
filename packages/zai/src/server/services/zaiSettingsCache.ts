@@ -2,7 +2,7 @@ import { readFile } from 'node:fs/promises'
 import { readFileSync, watch as fsWatch } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { BUILTIN_DEFAULT_SETTINGS, type ZaiSettings } from '../../shared/settings.js'
+import { BUILTIN_DEFAULT_SETTINGS, type ZaiPermissions, type ZaiSettings } from '../../shared/settings.js'
 import { writeZaiSettings, zaiSettingsPath } from './zaiSettingsStore.js'
 
 /**
@@ -41,6 +41,36 @@ import { writeZaiSettings, zaiSettingsPath } from './zaiSettingsStore.js'
  * ~/.zai/settings.json so subsequent boots hit tier 1. */
 function claudeSettingsPath(): string {
   return join(homedir(), '.claude', 'settings.json')
+}
+
+/**
+ * Default `permissions` block backfilled into ~/.zai/settings.json at boot
+ * when the file has no `permissions` config at all. Carries the allow rules
+ * for the day-to-day tools (Bash/Read/Write/Edit/Monitor + the Chrome
+ * DevTools MCP surface and the codegraph MCP tools) and boots new sessions
+ * into `bypassPermissions` — matching the opencc convention that
+ * `getDefaultMode()` reads first.
+ *
+ * Only written when `permissions` is entirely absent; an existing block
+ * (even a partial one) is left untouched so the user's own rules win.
+ */
+export const DEFAULT_PERMISSIONS: ZaiPermissions = {
+  allow: [
+    'Bash(*)',
+    'Read',
+    'Write',
+    'Edit',
+    'Monitor(*)',
+    'mcp__chrome-devtools-mcp__*',
+    'mcp__codegraph__codegraph_search',
+    'mcp__codegraph__codegraph_context',
+    'mcp__codegraph__codegraph_callers',
+    'mcp__codegraph__codegraph_callees',
+    'mcp__codegraph__codegraph_impact',
+    'mcp__codegraph__codegraph_node',
+    'mcp__codegraph__codegraph_status',
+  ],
+  defaultMode: 'bypassPermissions',
 }
 
 let cached: ZaiSettings | undefined
@@ -119,33 +149,35 @@ async function tryReadSettings(path: string): Promise<ZaiSettings | undefined> {
 async function runInit(): Promise<void> {
   // Tier 1: ~/.zai/settings.json. A real IO error (not ENOENT/SyntaxError)
   // propagates — that's a bug signal, not a missing-file condition.
+  let settings: ZaiSettings
   const tier1 = await tryReadSettings(zaiSettingsPath())
   if (tier1 !== undefined) {
-    cached = tier1
-    return
+    settings = tier1
+  } else {
+    // Tier 2: ~/.claude/settings.json. A read failure here is non-fatal:
+    // warn and fall through to tier 3 rather than block boot.
+    let tier2: ZaiSettings | undefined
+    try {
+      tier2 = await tryReadSettings(claudeSettingsPath())
+    } catch (err) {
+      console.warn('[zai-settings-cache] tier-2 read failed:', err)
+    }
+    // Tier 3: builtin defaults.
+    settings = tier2 ?? BUILTIN_DEFAULT_SETTINGS
   }
 
-  // Tier 2: ~/.claude/settings.json → seed into ~/.zai. A read failure here
-  // is non-fatal: warn and fall through to tier 3 rather than block boot.
-  let tier2: ZaiSettings | undefined
-  try {
-    tier2 = await tryReadSettings(claudeSettingsPath())
-  } catch (err) {
-    console.warn('[zai-settings-cache] tier-2 read failed:', err)
-  }
-  if (tier2 !== undefined) {
-    cached = tier2
-    await writeZaiSettings(tier2).catch((e) =>
-      console.warn('[zai-settings-cache] tier-2 seed write failed:', e),
+  // Permissions default backfill: if the resolved settings carry no
+  // `permissions` block, merge in the boot defaults and persist to
+  // ~/.zai/settings.json. This single write also seeds tiers 2/3 into
+  // ~/.zai when the tier-1 file was missing, so the whole chain settles
+  // in one pass. An existing `permissions` block is left untouched.
+  if (settings.permissions === undefined) {
+    settings = { ...settings, permissions: DEFAULT_PERMISSIONS }
+    await writeZaiSettings(settings).catch((e) =>
+      console.warn('[zai-settings-cache] default permissions seed write failed:', e),
     )
-    return
   }
-
-  // Tier 3: builtin defaults → seed into ~/.zai.
-  cached = BUILTIN_DEFAULT_SETTINGS
-  await writeZaiSettings(BUILTIN_DEFAULT_SETTINGS).catch((e) =>
-    console.warn('[zai-settings-cache] tier-3 seed write failed:', e),
-  )
+  cached = settings
 }
 
 /**

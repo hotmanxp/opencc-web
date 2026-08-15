@@ -38,7 +38,58 @@ import { flushPendingSubagentNotifications } from "../services/subagentNotifier.
 import { flushPendingBashNotifications } from "../services/bashNotifier.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
+import { logHttp } from "../services/accessLog.js";
 import { resolveModel } from "../lib/resolveModel.js";
+import { resolveProviderForModel as resolveProviderForModelImpl } from "../services/modelCaller.js";
+
+/**
+ * zai patch: 把所选 model 解析到对应 provider profile，仅在 profile.provider
+ * 为 'openai' 时返回 providerOverride（model/baseURL/apiKey）。命中 anthropic
+ * profile 或未匹配到任何 profile 时返回空对象，让上游 `getRuntime().query` 不传
+ * providerOverride（保持 ANTHROPIC_BASE_URL 路径，行为不变）。
+ *
+ * vendor `getAnthropicClient({ providerOverride })` 检测到 providerOverride 即
+ * 走 `createOpenAIShimClient`（openai-shim），POST 到 wizard-ai 等 OpenAI 兼容
+ * 网关的 /chat/completions。
+ *
+ * `preferredProfileId` is forwarded to the matcher so when several
+ * provider profiles host the same model name (e.g. `MiniMax-M3` on
+ * both Open Platform and ZhiNiao), we route to the one the user
+ * actually picked in the picker instead of the first one in the array.
+ */
+async function resolveProviderOverrideForModel(
+  model: string | undefined,
+  preferredProfileId?: string | null,
+): Promise<
+  | {
+      providerOverride: {
+        model: string
+        baseURL: string
+        apiKey: string
+        /**
+         * zai patch: per-provider extraParams (e.g. enable_search) merged
+         * by the vendor openai-shim into every chat/completions body.
+         * Optional — absent for profiles without extraParams so the
+         * shim's built-in defaults keep winning.
+         */
+        extraParams?: Record<string, unknown>
+      }
+    }
+  | Record<string, never>
+> {
+  if (!model) return {}
+  const { baseURL, apiKey, profile } = resolveProviderForModelImpl(model, preferredProfileId)
+  if (profile?.provider !== 'openai') return {}
+  if (!baseURL || !apiKey) return {}
+  return {
+    providerOverride: {
+      model,
+      baseURL,
+      apiKey,
+      ...(profile.extraParams ? { extraParams: profile.extraParams } : {}),
+    },
+  }
+}
 
 const router: IRouter = Router();
 router.use('/agent', commandRouter)
@@ -746,6 +797,9 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
   // 必须在 runQueryLoop 入口(所有 vendor 调用之前)同步设。
   setCurrentApiCountSession(cmd.sessionId)
   const { sessionId, cwd } = cmd
+  // 入口落盘: 区分"prompt 根本没进 queryLoop" vs "queryLoop 内部失败"。
+  // 前端 fire-and-forget 立刻 200, 异步链任何一环无日志都表现为"发了没反应"。
+  logHttp(`[zai.agent.prompt] start sid=${sessionId} text=${JSON.stringify(cmd.prompt ?? '').slice(0, 100)}`, 'debug')
   // zai patch (2026-08-08): 会话级 429 冷却拦截。上一轮 query 因
   // rate_limit 终止后,冷却窗口内本会话的新 query 不再向 API 发请求,
   // 直接 emit runtime.error(rate_limit)让前端明确感知"限流中,稍后重试",
@@ -853,6 +907,11 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // (新会话) 是正常路径, 静默忽略 — sessionModel 保持 null,
     // permissionMode 走 getDefaultMode() 兜底.
     let sessionModel: string | null = null;
+    // zai patch: also pull the session's providerId (persisted when the
+    // user picked a model in ModelStatusButton). Forwarded to the
+    // modelCaller via resolveModel + OpenccQueryInput.providerId so the
+    // matcher routes the model to the exact provider the user chose.
+    let sessionProviderId: string | null = null;
     let transcript:
       | Awaited<ReturnType<ReturnType<typeof getTranscriptStore>["read"]>>
       | null = null;
@@ -861,6 +920,15 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       transcript = existing;
       if (existing.meta.model && existing.meta.model !== "unknown") {
         sessionModel = existing.meta.model;
+      }
+      // Read providerId off transcript.meta — it's optional on the
+      // vendor type (see OpenccTranscriptMeta.providerId) and only set
+      // when the user explicitly picked a model via the picker. Old
+      // sessions without it keep working: the matcher falls back to
+      // legacy first-match-by-name behavior.
+      const metaProviderId = (existing.meta as { providerId?: string }).providerId;
+      if (typeof metaProviderId === 'string' && metaProviderId.length > 0) {
+        sessionProviderId = metaProviderId;
       }
     } catch {
       // 新会话 / 无 transcript — sessionModel 保持 null, transcript 保持 null
@@ -872,10 +940,12 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // 兜底到 BUILTIN_FALLBACK_MODEL 让 LLM 仍然能跑起来.
     let resolvedModel: string;
     let modelSource: string;
+    let resolvedProviderId: string | undefined;
     try {
-      const r = resolveModel({ sessionModel, cwd });
+      const r = resolveModel({ sessionModel, sessionProviderId, cwd });
       resolvedModel = r.model;
       modelSource = r.source;
+      resolvedProviderId = r.providerId;
     } catch {
       resolvedModel = "MiniMax-M3";
       modelSource = "builtin_fallback";
@@ -888,6 +958,13 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         resolvedModel,
       });
     }
+    // 落盘 query 快照: model / providerId / providerOverride — 判定"走了
+    // 哪个 provider 分支"和"providerId 是否透传"的最直接证据。
+    logHttp(
+      `[zai.agent.prompt] query sid=${sessionId} model=${resolvedModel} source=${modelSource}` +
+        (resolvedProviderId ? ` providerId=${resolvedProviderId}` : " providerId=(none)"),
+      'debug',
+    );
 
     const events = getRuntime().query({
       // OpenccQueryInput.prompt accepts `string | OpenccContentBlockParam[]`.
@@ -925,6 +1002,22 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
               | 'plan',
           }
         : {}),
+      // zai patch: 按所选 model 解析 provider profile,对 openai provider
+      // (e.g. zhiniao-* → wizard-ai OpenAI-Mix) 注入 providerOverride,
+      // 让 vendor `getAnthropicClient` 走 `createOpenAIShimClient`(openai-shim),
+      // 而不是默认的 Anthropic SDK + ANTHROPIC_BASE_URL(zn-nova)。
+      // 未命中 openai profile (anthropic 模型或无 profile) 不注入,行为不变。
+      // resolvedProviderId is forwarded so the matcher prefers the
+      // user-picked profile when several profiles host the same model
+      // name (e.g. MiniMax-M3 on both Open Platform and ZhiNiao).
+      ...(await resolveProviderOverrideForModel(resolvedModel, resolvedProviderId)),
+      // zai patch: per-query providerId (from transcript.meta.providerId).
+      // Threaded into the vendor runtime so the anthropic-side
+      // modelCaller can route the model to the exact provider the user
+      // picked. Mirrors the providerOverride plumbing but lands at
+      // zai's createAnthropicModelCaller instead of vendor's
+      // openai-shim. See plan §阶段 2 vendor 透传 chain.
+      ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
     });
 
     // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,
@@ -1165,6 +1258,12 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         break;
     }
   } catch (err) {
+    // 无条件落盘(不依赖 ZAI_DEBUG): query 流异常是"发了没反应/页面上
+    // API Error"的最后一环, 只打 console 的话 console 没人盯就丢了。
+    logHttp(
+      `[zai.agent.prompt] for-await threw sid=${sessionId} ${(err as Error).message}\n${(err as Error).stack?.split("\n").slice(0, 8).join("\n") ?? ""}`,
+      'error',
+    );
     if (process.env.ZAI_DEBUG === "1") {
       console.error("[zai.agent.prompt] for-await threw", {
         sessionId,
@@ -1350,16 +1449,32 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     // 可选 model: 前端在 createNewSession 时会把"用户最近手动选过的模型"
     // 传过来, 让新建会话默认继承. 缺省/'unknown'/空串都视为不指定, 维持
     // 旧行为 (useConversationInfo 看到 'unknown' 就会回退到 runtime.defaultModel).
-    const requested = (req.body as { model?: unknown } | undefined)?.model
+    const body = req.body as { model?: unknown; providerId?: unknown } | undefined
+    const requested = body?.model
     const model =
       typeof requested === 'string' && requested.length > 0 && requested !== 'unknown'
         ? requested
         : 'unknown'
+    // zai patch: also accept the providerId the user picked for the
+    // most recent model. Same sanity rules as `model` — empty / unknown
+    // / non-string fall back to "not specified" so old clients without
+    // providerId keep working unchanged.
+    const requestedProviderId = body?.providerId
+    const providerId =
+      typeof requestedProviderId === 'string' && requestedProviderId.length > 0
+        ? requestedProviderId
+        : undefined
     const sessionId = await store.create({
       cwd: ctx.cwd,
       model,
+      // zai patch: pass providerId through to transcript.meta so the
+      // matcher can route the next prompt to the right provider. Cast
+      // through unknown to keep the public transcript meta type
+      // loose about this new optional field (OpenccTranscriptMeta is
+      // vendor-owned and only widened in serverTypes.ts).
+      ...(providerId ? { providerId } : {}),
       permissionMode: getDefaultMode(),
-    }, { cwd: ctx.cwd })
+    } as Parameters<typeof store.create>[0], { cwd: ctx.cwd })
     res.json({ sessionId })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -1415,12 +1530,16 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
 });
 
 // PATCH /agent/sessions/:id — partial-update a session's transcript meta.
-// Supports `model` and `permissionMode`. The model field must include a
-// non-empty string that's not the placeholder 'unknown' — silently
-// dropping the patch when 'unknown' is sent prevents accidentally
+// Supports `model`, `providerId`, and `permissionMode`. The model field
+// must include a non-empty string that's not the placeholder 'unknown' —
+// silently dropping the patch when 'unknown' is sent prevents accidentally
 // resetting the user's selection back to the env/settings fallback.
+// providerId follows the same "drop if empty/invalid" rule (we don't
+// reject the request — we just skip the patch — so old clients without
+// providerId can still PATCH model alone).
 const PatchSessionRequest = z.object({
   model: z.string().min(1).max(256).optional(),
+  providerId: z.string().min(1).max(256).optional(),
   permissionMode: z.enum(EXTERNAL_PERMISSION_MODES as readonly [UserFacingPermissionMode, ...UserFacingPermissionMode[]]).optional(),
 });
 
@@ -1435,6 +1554,18 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
     const store = getTranscriptStore();
     if (parsed.data.model && parsed.data.model !== "unknown") {
       await store.patch(sid, { model: parsed.data.model }, { cwd: ctx.cwd });
+    }
+    // zai patch: providerId persistence. Same "skip if absent" rule as
+    // model so the absence of the field (old clients) never wipes an
+    // existing providerId. Cast through unknown — the store.patch type
+    // accepts a partial meta shape, but the vendor OpenccTranscriptMeta
+    // type is widened in serverTypes.ts.
+    if (parsed.data.providerId) {
+      await store.patch(
+        sid,
+        { providerId: parsed.data.providerId } as { providerId: string },
+        { cwd: ctx.cwd },
+      );
     }
     if (parsed.data.permissionMode) {
       if (parsed.data.permissionMode === "plan") {

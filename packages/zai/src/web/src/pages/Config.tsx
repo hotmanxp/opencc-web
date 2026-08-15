@@ -28,7 +28,18 @@ const KNOWN_PROVIDERS = [
 // (which seeds the Add form) keeps working without churn.
 const BUILTIN_PROFILES: ProviderProfile[] = BUILTIN_PROVIDERS;
 
-function ProviderForm() {
+/**
+ * Provider 一键配置 — opencc / zai tab 共用。endpoint 决定读写哪个文件:
+ * opencc → ~/.claude.json（/config/opencc/provider）,
+ * zai → ~/.zai.json（/config/zai/provider）。
+ */
+function ProviderForm({
+  endpoint = '/config/opencc/provider',
+  title = 'Provider 一键配置',
+}: {
+  endpoint?: string;
+  title?: string;
+}) {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
@@ -36,14 +47,14 @@ function ProviderForm() {
   // Tracks the builtin seed chosen when the modal was opened so we can
   // copy its capabilities map onto the new profile on save. The form
   // itself does not expose per-model capability edits — those come from
-  // the builtin catalog (or hand-edited ~/.zai.json).
+  // the builtin catalog (or hand-edited json).
   const [pendingCapabilities, setPendingCapabilities] = useState<ProviderProfile['capabilities']>(undefined);
   const [form] = Form.useForm();
 
   const fetchProfiles = async () => {
     setLoading(true);
     try {
-      const data = await api.get<{ profiles: ProviderProfile[] }>('/config/opencc/provider');
+      const data = await api.get<{ profiles: ProviderProfile[] }>(endpoint);
       setProfiles(data.profiles || []);
     } catch (err) {
       console.error(err);
@@ -54,7 +65,7 @@ function ProviderForm() {
 
   useEffect(() => {
     fetchProfiles();
-  }, []);
+  }, [endpoint]);
 
   const openAddModal = () => {
     // Pre-fill with the first existing profile, or the first builtin as a starting point.
@@ -66,6 +77,9 @@ function ProviderForm() {
       baseUrl: seed.baseUrl,
       model: seed.model,
       apiFormat: seed.apiFormat,
+      // zai patch: seed apiKeyEnv too so adding a provider built on top
+      // of an existing one preserves the per-provider key config.
+      apiKeyEnv: seed.apiKeyEnv,
     });
     // Carry the seed's capabilities map so newly-added builtin presets
     // ship with per-model context window / vision metadata.
@@ -87,6 +101,7 @@ function ProviderForm() {
       baseUrl: preset.baseUrl,
       model: preset.model,
       apiFormat: preset.apiFormat,
+      apiKeyEnv: preset.apiKeyEnv,
     });
     setPendingCapabilities(preset.capabilities);
   }, [watchedProvider, modalOpen, form]);
@@ -102,10 +117,18 @@ function ProviderForm() {
         model: values.model,
         apiFormat: values.apiFormat,
         capabilities: pendingCapabilities,
+        // zai patch: persist per-provider API key env var so this
+        // profile routes to its own key (instead of the global
+        // OPENAI_API_KEY / ANTHROPIC_AUTH_TOKEN fallback). Empty
+        // string is normalized to undefined so the persisted profile
+        // doesn't carry a meaningless empty env name.
+        ...(values.apiKeyEnv && String(values.apiKeyEnv).trim()
+          ? { apiKeyEnv: String(values.apiKeyEnv).trim() }
+          : {}),
       };
       const updated = [...profiles, newProfile];
       setSaving(true);
-      await api.put('/config/opencc/provider', { profiles: updated });
+      await api.put(endpoint, { profiles: updated });
       setProfiles(updated);
       message.success('Provider 已添加');
       setModalOpen(false);
@@ -121,7 +144,7 @@ function ProviderForm() {
     const updated = profiles.filter((p) => p.id !== id);
     setSaving(true);
     try {
-      await api.put('/config/opencc/provider', { profiles: updated });
+      await api.put(endpoint, { profiles: updated });
       setProfiles(updated);
       message.success('已删除');
     } catch (err) {
@@ -135,7 +158,7 @@ function ProviderForm() {
 
   return (
     <Card
-      title="Provider 一键配置"
+      title={title}
       size="small"
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
@@ -165,6 +188,9 @@ function ProviderForm() {
                   <Text type="secondary" style={{ fontSize: 12 }}>Provider: {item.provider}</Text>
                   {item.baseUrl && <Text type="secondary" style={{ fontSize: 12 }}>BaseURL: {item.baseUrl}</Text>}
                   {item.model && <Text type="secondary" style={{ fontSize: 12 }}>模型: {item.model}</Text>}
+                  {item.apiKeyEnv && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>API Key 环境变量: {item.apiKeyEnv}</Text>
+                  )}
                   {item.capabilities && Object.keys(item.capabilities).length > 0 && (
                     <ProviderCapabilitySummary capabilities={item.capabilities} />
                   )}
@@ -208,6 +234,19 @@ function ProviderForm() {
                 { value: 'responses', label: 'responses' },
               ]}
             />
+          </Form.Item>
+          {/* zai patch: per-provider API key env var. Lets two providers
+              share the same provider-family (e.g. two anthropic ones)
+              while each uses its own key. Resolution order at runtime:
+              inline apiKey (none in UI yet) → env[apiKeyEnv] →
+              provider-family global env (OPENAI_API_KEY /
+              ANTHROPIC_AUTH_TOKEN). Leave blank to use the global env. */}
+          <Form.Item
+            name="apiKeyEnv"
+            label="API Key 环境变量名(可选)"
+            extra="如 DEEPSEEK_API_KEY。留空则使用全局 OPENAI_API_KEY / ANTHROPIC_AUTH_TOKEN。高级参数(如 temperature)可在 ~/.zai.json 中编辑 extraParams。"
+          >
+            <Input placeholder="如 DEEPSEEK_API_KEY" allowClear />
           </Form.Item>
         </Form>
       </Modal>
@@ -616,13 +655,26 @@ export default function Config() {
             </>
           ) : activeTool === 'zai' ? (
             <>
-              <SettingsEditor tool="zai" label="Zai" />
-              {/* ~/.zai.json 全文编辑 — 只在 zai tab 显示。opencc / opencode / nova tab 不出现。 */}
-              <JsonFileEditor
-                endpoint="/config/zai-json"
-                title="Config"
-                modalTitle="编辑 Config"
-              />
+              {/* 顶部并排两张 JSON 配置卡 — 与 opencc tab 一致 */}
+              <Card
+                title="JSON 配置文件"
+                size="small"
+                style={{ marginTop: 16 }}
+                styles={{ body: { display: 'flex', flexDirection: 'row', gap: 12, padding: 12 } }}
+              >
+                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                  <SettingsEditor tool="zai" label="Zai" />
+                </div>
+                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                  <JsonFileEditor
+                    endpoint="/config/zai-json"
+                    title="Config"
+                    modalTitle="编辑 Config"
+                  />
+                </div>
+              </Card>
+              {/* 下方 Provider 配置 — 读写 ~/.zai.json 的 providerProfiles */}
+              <ProviderForm endpoint="/config/zai/provider" title="Provider 配置" />
             </>
           ) : (
             <SettingsEditor tool={activeTool} label={tools.find((t) => t.key === activeTool)?.label || activeTool} />

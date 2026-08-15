@@ -257,7 +257,7 @@ import {
 import {
   recordApiCall,
   setLastContextUsage,
-} from '@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter'
+} from '../../services/api/sessionApiCounter.js'
 import {
   CannotRetryError,
   FallbackTriggeredError,

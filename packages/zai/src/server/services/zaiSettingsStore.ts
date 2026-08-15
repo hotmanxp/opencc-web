@@ -132,3 +132,21 @@ export function resolveEnableDynamicWorkflow(settings: ZaiSettings): boolean {
 export function isValidEnableDynamicWorkflow(value: unknown): value is boolean {
   return typeof value === 'boolean'
 }
+
+/**
+ * Resolve the persisted "auto-update zai" flag with validation.
+ * Unknown / missing values collapse to true — we want new users to get
+ * silent auto-updates by default. SettingsDrawer is the explicit opt-out.
+ *
+ * The setting gates `maybeAutoUpdate()` in services/updater.ts: on every
+ * boot, fire-and-forget; if disabled, no `npm view`, no `npm install -g`,
+ * no SSE events — completely silent.
+ */
+export function resolveAutoUpdate(settings: ZaiSettings): boolean {
+  return settings.autoUpdate !== false
+}
+
+/** Validate a candidate auto-update value before persisting. */
+export function isValidAutoUpdate(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}

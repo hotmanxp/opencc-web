@@ -1,6 +1,6 @@
 {
   "name": "@zn-ai/zai",
-  "version": "0.2.23",
+  "version": "0.3.13",
   "description": "知鸟AI 统一工具平台 — 本地 Web 管理界面",
   "type": "module",
   "main": "dist/server/index.js",
@@ -65,6 +65,7 @@
     "adm-zip": "^0.5.16",
     "commander": "^12.1.0",
     "express": "^4.21.2",
+    "open": "^11.0.0",
     "proper-lockfile": "^4.1.2",
     "react-markdown": "^10.1.0",
     "react-syntax-highlighter": "^16.1.1",
@@ -85,6 +86,7 @@
     "@types/react-dom": "^18.3.0",
     "@types/react-syntax-highlighter": "^15.5.13",
     "@types/supertest": "^6.0.2",
+    "@types/ws": "^8.5.10",
     "@vitejs/plugin-react": "^5.2.0",
     "antd": "^5.22.0",
     "autoprefixer": "^10.4.20",
@@ -100,6 +102,7 @@
     "typescript": "^5.6.0",
     "vite": "^8.1.5",
     "vitest": "^4.1.10",
+    "ws": "^8.18.0",
     "zustand": "^4.5.5"
   }
 }

@@ -130,6 +130,27 @@ export interface ProviderProfile {
    * round-trip. Unrecognised keys are ignored.
    */
   capabilities?: Record<string, ModelCapabilities>;
+  /**
+   * Name of the env var to read as the API key for this provider.
+   * Resolution order at request time:
+   *   1. `profile.apiKey` (inline, if set — not currently surfaced in UI)
+   *   2. `zaiEnv[profile.apiKeyEnv]` (e.g. `DEEPSEEK_API_KEY`)
+   *   3. `OPENAI_API_KEY` (openai providers) or `ANTHROPIC_AUTH_TOKEN`
+   *      (anthropic providers) — the global zai default.
+   *
+   * Lets users host multiple providers that each need their own key
+   * without changing the global env var.
+   */
+  apiKeyEnv?: string;
+  /**
+   * Free-form request-body fields merged into every LLM call routed
+   * through this profile (anthropic → `messages.create({...})`,
+   * openai → POST `/chat/completions` body). Lets users pin per-
+   * provider defaults like `temperature`, `top_p`, `reasoning_effort`,
+   * etc. without code changes. Keys here overwrite identical keys the
+   * caller already set.
+   */
+  extraParams?: Record<string, unknown>;
 }
 export type LoginType = 'pa' | 'pa-long' | 'op';
 

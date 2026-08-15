@@ -7,6 +7,8 @@ import { defineModel } from '../define.js'
 // a no-op. The contextWindow / maxOutputTokens values mirror the static
 // table in src/utils/model/openaiContextWindows.ts (entries 297-307, 490-493).
 
+// wizard-ai 网关上除 zhiniao-glm-5.1 外都支持视觉。
+// (zhiniao-glm-5.1 后端是纯文本模型, 收图静默丢)
 const zhiniaoCapabilities = {
   supportsVision: true,
   supportsStreaming: true,
@@ -23,7 +25,7 @@ const zhiniaoGlmCapabilities = {
 
 export default [
   defineModel({
-    id: 'zhiniao-minimax-m2.7-highspeed',
+    id: 'zhiniao-MiniMax-M2.7-highspeed',
     label: 'MiniMax-M2.7 Highspeed (ZhiNiao)',
     brandId: 'zhiniao',
     vendorId: 'openai-compatible',
@@ -34,7 +36,7 @@ export default [
     maxOutputTokens: 131_072,
   }),
   defineModel({
-    id: 'zhiniao-minimax-m2.7',
+    id: 'zhiniao-MiniMax-M2.7',
     label: 'MiniMax-M3 (ZhiNiao)',
     brandId: 'zhiniao',
     vendorId: 'openai-compatible',

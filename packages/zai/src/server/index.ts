@@ -39,9 +39,12 @@ import { initStateBridge } from './services/stateBridge.js';
 import { initBashNotifier } from './services/bashNotifier.js';
 import { initZaiSettingsCache } from './services/zaiSettingsStore.js';
 import { runClaudeToZaiMigration } from './services/zaiMigration.js';
+import { maybeAutoUpdate } from './services/updater.js';
 import { startBranchChecker } from './routes/system.js';
 import { noCacheForApi } from './middleware/noCache.js';
 import { redirectMobileUA } from './middleware/redirectMobileUA.js';
+import { createReverseProxyMiddleware } from './services/reverseProxy.js';
+import { logHttp } from './services/accessLog.js';
 
 // zai is a local dev tool — the server only listens on localhost and every
 // route is wide-open to anyone who can reach the port. The original
@@ -103,6 +106,15 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
     })
     .catch((err) => console.warn('[zai-migration] boot migration failed:', err))
 
+  // zai 自身版本自动升级通道。fire-and-forget:createApp 必须立刻 return app,
+  // 不能等 npm view + 可能的 npm install -g 跑完。内部 dev-mode / settings
+  // autoUpdate=false / 无新版 都会提前 return,只有全局 install 且有更新时才
+  // 真正跑 npm;done 后 SSE 推 'app.update.complete' / '.failed',前端
+  // UpdateNotifier 弹窗提示。任何错误 swallow 进 console.warn,不冒泡。
+  maybeAutoUpdate().catch((err) =>
+    console.warn('[updater] boot trigger failed:', err),
+  )
+
   // Init central instance supervisor before any router that depends on it.
   // Reads ~/.zai/instances.json (async, fire-and-forget); snapshots start
   // with isCurrent row already visible via getInstanceSupervisor().
@@ -144,10 +156,43 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   // Anthropic / 上游 base64 限额约束, 这里只是放行到 server.
   app.use(express.json({ limit: '20mb' }));
 
+  // 全量 HTTP 接口日志 — 定位 4xx/5xx 用。response finish 时记录一行:
+  // method + path + status + 耗时。>=500 打 console.error, >=400 打
+  // console.warn, 其余仅在 ZAI_DEBUG=1 时打,避免刷屏。SSE 长连接在
+  // 会话结束才 finish,该场景日志延迟属预期。console + /tmp/zai-http.log
+  // 双写(logHttp), 终端没盯着也能从文件排查。
+  app.use('/api', (req, res, next) => {
+    const startedAt = Date.now();
+    res.on('finish', () => {
+      const ms = Date.now() - startedAt;
+      const line = `[zai-http] :${req.socket.localPort} ${req.method} ${req.originalUrl} → ${res.statusCode} (${ms}ms)`;
+      if (res.statusCode >= 500) {
+        logHttp(line, 'error');
+      } else if (res.statusCode >= 400) {
+        logHttp(line, 'warn');
+      } else {
+        logHttp(line, 'debug');
+      }
+    });
+    next();
+  });
+
   // /api/* 必须禁浏览器缓存 (304 会让前端拿到启动时的旧响应)。
   // SSE 路由自带 Cache-Control, 中间件不覆盖。
   app.set('etag', false);
   app.use('/api', noCacheForApi);
+
+  // 反向代理(`/proxy/<localPort>/<path>` → 127.0.0.1:<localPort>)仅在
+  // --lan 时启用,默认 127.0.0.1 模式统一 403。闭包读 `opts.host` 与
+  // `instanceContext.host` 同源,所以 UI 看到的启用状态与服务端一致。
+  // 挂载顺序:必须在 /api noCache 之后,且不走 /agent 重定向;这里是 root
+  // mount,跟 /api /agent 路径不冲突。
+  // WebSocket upgrade 不在 Express 层面处理,由 dev/start.ts 在
+  // `http.createServer(app)` 之后单独挂 `server.on('upgrade')`。
+  const reverseProxyMw = createReverseProxyMiddleware({
+    isEnabled: () => (opts.host ?? '127.0.0.1') === '0.0.0.0',
+  });
+  app.use('/proxy', reverseProxyMw);
 
   app.use('/api', eventRouter);
   app.use('/api', healthRouter);
@@ -211,6 +256,21 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
 
   // 启动分支检查器（每 10 秒检测一次 git 分支变化）
   startBranchChecker(opts.cwd);
+
+  // 兜底 error handler: 路由 try/catch 漏网的异常统一打 stack — 否则 500
+  // 只在响应体里、控制台没有任何线索, 排障要开着路由源码一个个翻。
+  // headersSent(如 SSE 已开始流出) 时无法再发响应, 交给 Express 默认
+  // handler 关连接; 否则回 500 JSON 与其它路由风格一致。
+  app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const e = err instanceof Error ? err : new Error(String(err));
+    const line = `[zai-http] uncaught :${req.socket.localPort} ${req.method} ${req.originalUrl} → 500: ${e.message}\n${e.stack ?? ''}`;
+    logHttp(line, 'error');
+    if (res.headersSent) {
+      next(err);
+      return;
+    }
+    res.status(500).json({ error: e.message });
+  });
 
   return app;
 }

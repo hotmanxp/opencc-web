@@ -46,6 +46,26 @@ export type OpenccQueryInput = {
    * ExitPlanMode's `ask` flows through the web confirm UI).
    */
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'dontAsk' | 'plan'
+  /**
+   * zai patch: per-query provider override. When set, vendor
+   * `getAnthropicClient({ providerOverride })` (`services/api/client.ts:151`)
+   * routes through `createOpenAIShimClient` instead of the default Anthropic
+   * SDK path — so third-party OpenAI-compatible gateways (e.g. Wizard AI
+   * hosting zhiniao-* models) get hit with /chat/completions POSTs rather
+   * than Anthropic-shaped /v1/messages. Mirrors the shape used by agent
+   * routing (`services/api/agentRouting.ts:10`).
+   */
+  providerOverride?: { model: string; baseURL: string; apiKey: string }
+  /**
+   * zai patch: id of the provider profile the user picked for this
+   * query. Threaded through `submitMessage → processUserInputContext →
+   * query.ts:1312 → callModel options → modelCaller req.providerId`
+   * so the anthropic-side matcher can route the model to the exact
+   * provider the user chose when several profiles share the same model
+   * name. Optional — when absent, the matcher falls back to legacy
+   * first-match-by-name behavior.
+   */
+  providerId?: string
 }
 
 export type OpenccServerEvent = {

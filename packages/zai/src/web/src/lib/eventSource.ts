@@ -49,6 +49,13 @@ const NAMED_EVENT_TYPES = [
   'instance.changed',
   // queue.* — 消息排队状态快照 (追齐 OPENCC 排队交互)
   'queue.changed',
+  // app.update.* — zai 自身版本自动升级通道。UpdaterNotifier 监听,
+  // 弹窗「升级完成 / 失败」。对齐 shared/events.ts SystemEvent union,
+  // 新增事件必须同步加到 NAMED_EVENT_TYPES,否则 EventSource 静默丢事件。
+  'app.update.checking',
+  'app.update.installing',
+  'app.update.complete',
+  'app.update.failed',
 ] as const
 
 // 打开一条 SSE 连接到 /api/event. 后端按 sid 过滤:

@@ -26,7 +26,7 @@ let lastRunOpts: any = null
 // - patchCalls 记录所有 patch 调用, 断言 title 是否被写入
 let mockTranscriptHasTitle = false
 let mockTranscriptMetaModel: string = 'unknown'
-let patchCalls: Array<{ id: string; patch: { title?: string; tags?: string[]; model?: string } }> = []
+let patchCalls: Array<{ id: string; patch: { title?: string; tags?: string[]; model?: string; providerId?: string } }> = []
 // runtimeToolEvents: 让 tool_use:error/invalid/denied 翻译测试可注入事件序列.
 let runtimeToolEvents: Array<Record<string, unknown>> = [
   { type: 'message_start' },
@@ -75,7 +75,7 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
       },
       messages: [],
     }),
-    patch: async (id: string, patch: { title?: string; tags?: string[]; model?: string }) => {
+    patch: async (id: string, patch: { title?: string; tags?: string[]; model?: string; providerId?: string }) => {
       patchCalls.push({ id, patch })
     },
     remove: async () => {},
@@ -571,6 +571,69 @@ describe('translateRuntimeEvents — runtime.started 携带 metrics', () => {
       }
     } finally {
       off()
+    }
+  })
+})
+// zai patch (2026-08-13): PATCH /agent/sessions/:id now accepts
+// providerId alongside model. Tests below exercise both shapes and
+// confirm the existing model-only path is unaffected (the handler
+// only calls store.patch when the field is present + non-empty).
+describe('PATCH /api/agent/sessions/:id — providerId', () => {
+  it('writes providerId when supplied', async () => {
+    patchCalls = []
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/sessions/sess-provider-1`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'MiniMax-M3', providerId: 'provider_a' }),
+      })
+      expect(res.status).toBe(200)
+      expect(patchCalls.length).toBeGreaterThanOrEqual(2)
+      const providerPatch = patchCalls.find((c) => c.patch.providerId === 'provider_a')
+      const modelPatch = patchCalls.find((c) => c.patch.model === 'MiniMax-M3')
+      expect(providerPatch).toBeDefined()
+      expect(providerPatch?.id).toBe('sess-provider-1')
+      expect(modelPatch).toBeDefined()
+    } finally {
+      close()
+    }
+  })
+
+  it('only writes model when providerId is omitted (backward compatible)', async () => {
+    patchCalls = []
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/sessions/sess-provider-2`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'MiniMax-M3' }),
+      })
+      expect(res.status).toBe(200)
+      // No patch should carry providerId — the handler skips the field
+      // when it's absent so legacy clients can't accidentally wipe a
+      // previously-persisted providerId.
+      const providerPatches = patchCalls.filter((c) => 'providerId' in c.patch)
+      expect(providerPatches).toHaveLength(0)
+    } finally {
+      close()
+    }
+  })
+
+  it('rejects invalid body (providerId too long)', async () => {
+    patchCalls = []
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/sessions/sess-provider-3`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        // 257 chars > max 256
+        body: JSON.stringify({ model: 'MiniMax-M3', providerId: 'x'.repeat(257) }),
+      })
+      expect(res.status).toBe(400)
+      expect(patchCalls).toHaveLength(0)
+    } finally {
+      close()
     }
   })
 })

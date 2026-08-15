@@ -11,6 +11,12 @@ export const STORAGE_KEYS = {
   // 2026-07-26+: 移动端常用指令 Drawer 的本地 prompt 片段持久化。
   // 独立命名空间避开既有 zai.splitPane.* / zai.app.* 前缀。
   quickPrompts: 'zai.quickPrompts.v1',
+  // 2026-08-10+: FsTab 文件树 ↔ 预览区 之间的宽度 (相对 FsTab 自身 %).
+  // 单位是百分比 (不是 vw), 因为文件树在 SplitPane 内部, 宽度是相对 FsTab
+  // 容器, 跟 SplitPane 自己的 vw 单位正交. 同时持久化一个 lock 标志 —
+  // 跟 SplitPane 一致默认锁定, 防误触.
+  fsTreeWidth: 'zai.fsTab.treeWidthPct',
+  fsTreeLocked: 'zai.fsTab.treeWidthLocked',
 } as const;
 
 // 宽度单位从 px 改成 vw (viewport width 百分比), 跟随窗口宽度变化, 窄屏
@@ -28,6 +34,25 @@ export const COLLAPSED_WIDTH = 0;
 export function clampWidth(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_WIDTH_VW;
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(value)));
+}
+
+// FsTab 文件树宽度 — 单位是百分比 (相对 FsTab 自身), 不是 vw.
+// 文件树在 SplitPane 内部, 它的宽度是相对 FsTab 容器, 跟 SplitPane 自己的
+// vw 单位正交 (SplitPane 缩放时 FsTab 跟着缩, 但 fs-tree/preview 之间的
+// 比例不变). 范围 15-85% 给两边都留有最低展示空间:
+//   15% @ 1920 ≈ 115px  — 文件名勉强能看清
+//   85% @ 1920 ≈ 653px  — 预览区有 ~135px 也够看基础内容
+// 默认 40% 跟硬编码的旧值一致, 升级时不会跳变.
+export const FS_TREE_MIN_WIDTH = 15;
+export const FS_TREE_MAX_WIDTH = 85;
+export const DEFAULT_FS_TREE_WIDTH = 40;
+
+export function clampFsTreeWidth(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_FS_TREE_WIDTH;
+  return Math.min(
+    FS_TREE_MAX_WIDTH,
+    Math.max(FS_TREE_MIN_WIDTH, Math.round(value)),
+  );
 }
 
 /**

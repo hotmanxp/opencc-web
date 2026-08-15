@@ -788,3 +788,130 @@ describe('useAgentStore — 消息排队 (queuedPrompts + status 状态机)', ()
     expect(useAgentStore.getState().apiRequestCountBySession['s1']).toBe(5)
   })
 })
+
+// zai patch (2026-08-13): patchSessionModel now accepts
+// `{ model, providerId }` so the picker can persist the user's exact
+// provider choice. Backward compatibility: bare-string callers still
+// work and the body stays `{ model }` only (no providerId key).
+describe('useAgentStore.patchSessionModel — {model, providerId} payload', () => {
+  let originalFetch: typeof globalThis.fetch
+  let originalLocalStorage: Storage
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    originalLocalStorage = globalThis.localStorage
+    const store: Record<string, string> = {}
+    globalThis.localStorage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v },
+      removeItem: (k: string) => { delete store[k] },
+      clear: () => { for (const k of Object.keys(store)) delete store[k] },
+      key: (i: number) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length },
+    } as Storage
+    useAgentStore.setState({ sessions: [], availableModels: [] })
+  })
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    globalThis.localStorage = originalLocalStorage
+  })
+
+  it('writes providerId alongside model in both local store and PATCH body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    })
+    globalThis.fetch = fetchMock as any
+
+    useAgentStore.setState({
+      sessions: [{
+        sessionId: 'sess-1',
+        title: 'old',
+        updatedAt: 1,
+        cwd: '/x',
+      }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', {
+      model: 'MiniMax-M3',
+      providerId: 'provider_a',
+    })
+
+    const updated = useAgentStore.getState().sessions[0]
+    expect(updated!.model).toBe('MiniMax-M3')
+    expect(updated!.providerId).toBe('provider_a')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({
+      model: 'MiniMax-M3',
+      providerId: 'provider_a',
+    })
+  })
+
+  it('legacy bare-string callers keep sending only { model }', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    })
+    globalThis.fetch = fetchMock as any
+
+    useAgentStore.setState({
+      sessions: [{ sessionId: 'sess-1', title: 'old', updatedAt: 1 }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', 'MiniMax-M3')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(init.body as string)
+    // providerId is omitted entirely — not set to undefined / null /
+    // empty — so the server-side PATCH handler treats the absence as
+    // "leave the persisted providerId alone" rather than "wipe it".
+    expect(body).toEqual({ model: 'MiniMax-M3' })
+    expect('providerId' in body).toBe(false)
+  })
+
+  it('object payload without providerId also sends only { model }', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    })
+    globalThis.fetch = fetchMock as any
+    useAgentStore.setState({
+      sessions: [{ sessionId: 'sess-1', title: 'old', updatedAt: 1 }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', {
+      model: 'MiniMax-M3',
+    })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({ model: 'MiniMax-M3' })
+  })
+
+  it('reverts providerId on PATCH failure', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: 'boom' }),
+    })
+    globalThis.fetch = fetchMock as any
+    useAgentStore.setState({
+      sessions: [{
+        sessionId: 'sess-1',
+        title: 'old',
+        updatedAt: 1,
+        providerId: 'provider_b',
+      }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', {
+      model: 'MiniMax-M3',
+      providerId: 'provider_a',
+    })
+
+    const after = useAgentStore.getState().sessions[0]
+    expect(after!.providerId).toBe('provider_b')
+  })
+})

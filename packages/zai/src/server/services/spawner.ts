@@ -1,4 +1,5 @@
 import { spawn as nodeSpawn, type ChildProcess } from 'node:child_process';
+import process from 'node:process';
 import type { SseEvent } from '../../shared/types.js';
 
 // Strip ANSI escape sequences (colors, cursor moves, OSC). Many CLIs emit
@@ -7,6 +8,48 @@ import type { SseEvent } from '../../shared/types.js';
 const ANSI_RE = /\x1b\[[0-9;?]*[ -/]*[@-~]|\x1b\][^\x07]*\x07|\x1b[@-Z\\-_]/g;
 function stripAnsi(s: string): string {
   return s.replace(ANSI_RE, '');
+}
+
+const IS_WIN32 = process.platform === 'win32';
+
+// cmd.exe metacharacters that force an argument to be quoted. Plain flags,
+// package names (`@zn-ai/plugin@latest`) and URLs dominate current callers
+// and pass through untouched.
+const WIN_META_RE = /[\s"&|<>^]/;
+
+// Quote a single token for inclusion in a `cmd /c` command line. Tokens
+// without metacharacters are left as-is; others are wrapped in double
+// quotes with inner quotes doubled (`""` → literal `"` inside cmd).
+function quoteForCmd(token: string): string {
+  if (!WIN_META_RE.test(token)) return token;
+  return `"${token.replace(/"/g, '""')}"`;
+}
+
+export interface ResolvedCommand {
+  command: string;
+  args: string[];
+}
+
+/**
+ * Resolve a (command, args) pair for spawning on the current platform.
+ *
+ * On Windows, npm/npx/yarn etc. are installed as `.cmd` batch shims. Node's
+ * `spawn`/`execFile` calls `CreateProcess`, which cannot execute a `.cmd`/
+ * `.bat` without a shell — it resolves to ENOENT even when the command is
+ * on PATH (e.g. login's `spawn npx ENOENT`). Wrap the whole invocation in
+ * `cmd.exe /d /s /c <command line>` so these shims run transparently.
+ *
+ * Non-Windows platforms pass through unchanged. Note this deliberately
+ * applies to every command on win32 (not just `.cmd` ones) so the wrapper
+ * is uniform and never has to guess whether a name resolves to a batch
+ * shim or a real `.exe`; the cost is a slightly different error shape for
+ * unknown commands (cmd prints "is not recognized" + exit 1 instead of an
+ * ENOENT throw), which is the native Windows behavior anyway.
+ */
+export function resolveSpawnCommand(command: string, args: string[]): ResolvedCommand {
+  if (!IS_WIN32) return { command, args };
+  const line = [command, ...args].map(quoteForCmd).join(' ');
+  return { command: 'cmd.exe', args: ['/d', '/s', '/c', line] };
 }
 
 interface SpawnOptions {
@@ -30,7 +73,10 @@ export async function spawn(
 
   onLine({ type: 'start', command: `${command} ${args.join(' ')}`.trim() });
 
-  const child: ChildProcess = nodeSpawn(command, args, {
+  // On win32, npx/npm are `.cmd` shims that Node's spawn can't run directly
+  // (ENOENT) — resolveSpawnCommand rewrites them to `cmd /c ...`.
+  const { command: resolvedCmd, args: resolvedArgs } = resolveSpawnCommand(command, args);
+  const child: ChildProcess = nodeSpawn(resolvedCmd, resolvedArgs, {
     env: { ...process.env, ...opts.env },
     ...(opts.cwd ? { cwd: opts.cwd } : {}),
   });

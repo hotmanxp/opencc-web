@@ -580,6 +580,7 @@ function buildStaticSchema(
   maxVisibleMessages: number,
   defaultSplitScreen: boolean,
   enableDynamicWorkflow: boolean,
+  autoUpdate: boolean,
 ): SettingsSchema {
   return [
     {
@@ -732,6 +733,22 @@ function buildStaticSchema(
         },
       ],
     },
+    {
+      // zai 自身版本自动升级。默认 ON — dev 模式 (ZAI_FROM_GLOBAL_INSTALL
+      // 未设) server 端直接 skip,不影响开发体验。关闭后启动时不再跑
+      // `npm view @zn-ai/zai version` 也不会 spawn npm install -g。
+      // 升级完成后 SSE 推 `app.update.complete` 事件,UpdateNotifier 弹窗
+      // 提示「请重启 zai 以生效」— 仅通知,不自动重启(用户决策)。
+      section: 'Updates',
+      rows: [
+        {
+          key: 'autoUpdate',
+          label: '自动检测并升级 zai',
+          kind: 'boolean',
+          value: autoUpdate,
+        },
+      ],
+    },
   ]
 }
 
@@ -748,6 +765,8 @@ export default function SettingsDrawer() {
   const setDefaultSplitScreen = useAppStore((s) => s.setDefaultSplitScreen)
   const enableDynamicWorkflow = useAppStore((s) => s.enableDynamicWorkflow)
   const setEnableDynamicWorkflow = useAppStore((s) => s.setEnableDynamicWorkflow)
+  const autoUpdate = useAppStore((s) => s.autoUpdate)
+  const setAutoUpdate = useAppStore((s) => s.setAutoUpdate)
   // 切换 outputStyle 时同步把 transcriptCollapsed 重置为新默认 — 'compact' 切换到
   // 'default' 时立即展开,'default' 切到 'compact' 时立即折叠;避免用户得再点
   // 一次工具栏按钮才生效.
@@ -779,7 +798,7 @@ export default function SettingsDrawer() {
 
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow),
+    buildStaticSchema(theme, outputStyle, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate),
   )
   // 同步 store theme → schema.theme 行(其它行的 value 内部维护)。
   useEffect(() => {
@@ -857,6 +876,21 @@ export default function SettingsDrawer() {
       })),
     )
   }, [enableDynamicWorkflow])
+  // 同步 store autoUpdate → schema 行。跟 enableDynamicWorkflow 完全对称:
+  // store 是 settings.json 持久化的真源,单向投影,不改用户输入。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'autoUpdate' && r.kind === 'boolean') {
+            return { ...r, value: autoUpdate }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [autoUpdate])
 
   const handleChange = useCallback(
     (key: string, value: SettingsValue) => {
@@ -931,6 +965,19 @@ export default function SettingsDrawer() {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })
       }
+      // zai 自升级 toggle — 写 store 让 settings UI 立即翻牌,PUT
+      // settings.json 让下次启动生效。运行中的 install 不会被中途
+      // 取消,这是 PUT route 注释里说明的 by-design。
+      if (key === 'autoUpdate' && typeof value === 'boolean') {
+        setAutoUpdate(value)
+        void fetch('/api/agent/settings/auto-update', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
       // 其它行目前只更新内部 schema state(阶段 2 接真实写盘)
       setSchema((prev) =>
         prev.map((s) => ({
@@ -951,7 +998,7 @@ export default function SettingsDrawer() {
         })),
       )
     },
-    [setTheme, setOutputStyle, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow],
+    [setTheme, setOutputStyle, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate],
   )
 
   // 整个"服务"section 仅在「instance 子实例」(instance manager 派生的子进程,

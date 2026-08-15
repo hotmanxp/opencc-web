@@ -218,7 +218,28 @@ export class QueryEngine {
 
   async *submitMessage(
     prompt: string | ContentBlockParam[],
-    options?: { uuid?: string; isMeta?: boolean },
+    options?: {
+      uuid?: string
+      isMeta?: boolean
+      /**
+       * zai patch: per-call provider override. Mirrors
+       * `ToolUseContext.options.providerOverride` (Tool.ts:199). When set,
+       * vendor query.ts:1312 forwards it to `getAnthropicClient` →
+       * `createOpenAIShimClient` so third-party OpenAI-compatible
+       * gateways (e.g. Wizard AI hosting zhiniao-* models) receive
+       * /chat/completions POSTs instead of Anthropic /v1/messages.
+       */
+      providerOverride?: { model: string; baseURL: string; apiKey: string }
+      /**
+       * zai patch: id of the provider profile the user picked for this
+       * query. Threaded into processUserInputContext.options.providerId
+       * (mirroring `providerOverride` above) so query.ts:1312 forwards
+       * it through to `callModel` options → zai's modelCaller → the
+       * `findProfileForModel` matcher. Optional — absence means the
+       * matcher uses legacy first-match-by-name.
+       */
+      providerId?: string
+    },
   ): AsyncGenerator<SDKMessage, void, unknown> {
     const {
       cwd,
@@ -244,6 +265,17 @@ export class QueryEngine {
       setSDKStatus,
       orphanedPermission,
     } = this.config
+
+    // zai patch: extract the per-call providerOverride from submitMessage
+    // options so it can be threaded into processUserInputContext.options
+    // (consumed by query.ts:1312 → getAnthropicClient → openai-shim).
+    const callProviderOverride = options?.providerOverride
+    // zai patch: same plumbing for per-call providerId (zai-specific).
+    // Read from submitMessage options (set by createOpenccRuntime-impl.ts
+    // when input.providerId is set from transcript.meta.providerId) and
+    // forwarded below into processUserInputContext.options so query.ts
+    // can pass it to callModel options → modelCaller.
+    const callProviderId = options?.providerId
 
     // zai patch: refresh the model-visible tool list before this turn
     // starts. `config.tools` is a construction-time snapshot (built-ins
@@ -384,6 +416,15 @@ export class QueryEngine {
         theme: resolveThemeSetting(getGlobalConfig().theme),
         maxBudgetUsd,
         refreshTools: this.config.refreshTools,
+        // zai patch: thread per-call provider override into the tool-use
+        // context so vendor query.ts:1312 forwards it to getAnthropicClient
+        // (which routes to createOpenAIShimClient when present).
+        ...(callProviderOverride ? { providerOverride: callProviderOverride } : {}),
+        // zai patch: thread per-call provider id (zai-specific) into the
+        // tool-use context so query.ts:1312 forwards it to callModel
+        // options → zai's modelCaller. Optional — when absent, matcher
+        // uses legacy first-match-by-name behavior.
+        ...(callProviderId ? { providerId: callProviderId } : {}),
       },
       getAppState,
       setAppState,
@@ -540,6 +581,15 @@ export class QueryEngine {
         agentDefinitions: { activeAgents: agents, allAgents: agents },
         maxBudgetUsd,
         refreshTools: this.config.refreshTools,
+        // zai patch: re-attach per-call provider override after the
+        // processUserInputContext rebuild triggered by slash-command
+        // processing (mirrors the first construction above).
+        ...(callProviderOverride ? { providerOverride: callProviderOverride } : {}),
+        // zai patch: thread per-call provider id (zai-specific) into the
+        // tool-use context so query.ts:1312 forwards it to callModel
+        // options → zai's modelCaller. Optional — when absent, matcher
+        // uses legacy first-match-by-name behavior.
+        ...(callProviderId ? { providerId: callProviderId } : {}),
       },
       getAppState,
       setAppState,

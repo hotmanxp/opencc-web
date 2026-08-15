@@ -49,16 +49,29 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
   // for both user models and builtin entries) — e.g.
   // "MiniMax-M3 (Open Platform (Nova))".
   //
+  // zai patch: when the same model name appears in multiple provider
+  // groups (e.g. `MiniMax-M3` on both Open Platform and ZhiNiao), we
+  // prefer the entry whose `providerId` matches the one the user
+  // picked for this session. Falls back to first-match by model name
+  // when providerId is absent (legacy sessions without the field).
+  //
   // compact=true (分屏态) 或移动端时只返回模型名, 不带括号 provider,
   // 把宽度留给其他状态栏元素. hover title 仍保留完整文案, 鼠标 hover
   // (桌面端) 或展开 picker 仍能拿到 provider 信息.
+  const currentProviderId = useMemo<string | undefined>(() => {
+    const sess = sessionId ? sessions.find((s) => s.sessionId === sessionId) : undefined
+    return sess?.providerId
+  }, [sessionId, sessions])
   const badgeText = useMemo<string | null>(() => {
     if (!currentModel) return null
     if (compact || isMobile) return currentModel
-    const entry = availableModels.find((m) => m.model === currentModel)
+    const exact = availableModels.find(
+      (m) => m.model === currentModel && m.providerId === currentProviderId,
+    )
+    const entry = exact ?? availableModels.find((m) => m.model === currentModel)
     if (!entry || !entry.description) return currentModel
     return `${currentModel} (${entry.description})`
-  }, [currentModel, availableModels, compact, isMobile])
+  }, [currentModel, currentProviderId, availableModels, compact, isMobile])
 
   // Derived: recent models from sessions, recency-weighted, deduped, max 5.
   const recentModels = useMemo<ModelEntry[]>(() => {
@@ -158,17 +171,32 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
     } else if (e.key === 'Enter') {
       e.preventDefault()
       const entry = flatList[selectedIndex]
-      if (entry && entry.model !== currentModel && sessionId) {
-        void patchSessionModel(sessionId, entry.model)
+      // zai patch: also pass providerId so the server-side matcher can
+      // route to the exact provider the user picked. The (model,
+      // providerId) tuple is the canonical identity for a picker row;
+      // comparing on model alone is not enough when several provider
+      // groups host the same model name.
+      if (
+        entry
+        && (entry.model !== currentModel || entry.providerId !== currentProviderId)
+        && sessionId
+      ) {
+        void patchSessionModel(sessionId, {
+          model: entry.model,
+          providerId: entry.providerId,
+        })
       }
     }
     // Esc: let antd Popover default handle (close)
   }
 
   const pickEntry = (entry: ModelEntry) => {
-    if (entry.model === currentModel) return
+    if (entry.model === currentModel && entry.providerId === currentProviderId) return
     if (!sessionId) return
-    void patchSessionModel(sessionId, entry.model)
+    void patchSessionModel(sessionId, {
+      model: entry.model,
+      providerId: entry.providerId,
+    })
   }
 
   const content = (

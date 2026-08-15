@@ -45,6 +45,13 @@ function isGlobalEvent(event: ServerEvent): boolean {
     case 'system.stopping':
     case 'system.restart.canceled':
     case 'instance.changed':
+    // app.update.* — zai 自身版本升级通道的事件,所有打开的 tab 都应收,
+    // 否则只有最初连 SSE 的那个 tab 会看到「升级完成」弹窗,后开的
+    // tab 永远不会被通知。
+    case 'app.update.checking':
+    case 'app.update.installing':
+    case 'app.update.complete':
+    case 'app.update.failed':
       return true
     default:
       return false

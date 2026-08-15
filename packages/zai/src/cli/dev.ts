@@ -1,15 +1,18 @@
 import http from 'node:http';
 import { dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
+import { spawn as nodeSpawn } from 'node:child_process';
 import { createApp } from '../server/index.js';
 import { randomBytes } from 'node:crypto';
 import { resolveServerPort } from './ports.js';
+import { openBrowser } from './openBrowser.js';
+import { resolveSpawnCommand } from '../server/services/spawner.js';
 import {
   cleanupAndExit,
   registerHttpServer,
   registerViteProcess,
 } from '../server/services/runtimeLifecycle.js';
+import { handleProxyUpgrade } from '../server/services/reverseProxy.js';
 
 interface DevOptions {
   port?: string;
@@ -35,7 +38,17 @@ export async function runDev(options: DevOptions) {
 
   console.log(`[zai] dev token: ${token}`);
   console.log(`[zai] cwd: ${cwd}`);
-  if (options.lan) console.log(`[zai] LAN mode — binding to 0.0.0.0`);
+  if (options.lan) {
+    console.log(`[zai] LAN mode — binding to 0.0.0.0`);
+    // 反向代理(`/proxy/<port>/*` → 127.0.0.1:<port>)会把同 LAN 内任意
+    // 访客对本机端口的访问面暴露到 zai 外网端口上。这是按用户决策
+    // ("任意本机端口"+"警告提示")做的,提示信息保留在控制台供 owner
+    // 自查。`runtimeLifecycle.closeServer` 会随 apiServer 一起关掉。
+    console.log(
+      `[zai] WARNING: --lan enables reverse proxy at /proxy/<port>/* → 127.0.0.1:<port>.` +
+        `\n[zai]          Anyone on your LAN can reach any local port you have running.`,
+    );
+  }
   if (options.sdk) console.log(`[zai] SDK mode — runtime treated as non-interactive (headless)`);
   else console.log(`[zai] Interactive mode — runtime treated as interactive OpenCC CLI`);
 
@@ -61,6 +74,14 @@ export async function runDev(options: DevOptions) {
     process.exit(1);
   }
   const apiServer = http.createServer(app);
+  // WebSocket 反向代理:Express 不处理 `upgrade` 事件,handler 在 server 层
+  // 直接接管 socket。仅 --lan 时启用,默认 127.0.0.1 模式仍收到 `Upgrade`
+  // 请求(其他路由用了 Vite 的 HMR)——这些走 Vite 的 ws 而非 /proxy,本
+  // handler 只解析 `/proxy/<port>/...`,非匹配路径放行让其它 listener
+  // 接手(Vite 自己挂了 upgrade 在 apiServer.listen 之后)。
+  apiServer.on('upgrade', handleProxyUpgrade({
+    isEnabled: () => options.lan === true,
+  }));
   // dev 模式不开 forceCloseAllConnections:vite 还在跑,server 关闭后 HMR
   // 还要收尾;硬断连接会留下半截 reload 请求。
   registerHttpServer(apiServer, { forceCloseAllConnections: false });
@@ -108,7 +129,10 @@ export async function runDev(options: DevOptions) {
   const pkgRoot = resolve(__dirname, '..', '..');
   const viteArgs = ['vite', '--port', String(vitePort), '--strictPort'];
   if (options.lan) viteArgs.push('--host', '0.0.0.0');
-  const vite = spawn('npx', viteArgs, {
+  // `npx` 在 Windows 上是 .cmd shim,Node 的 spawn 不能直接执行(ENOENT),
+  // resolveSpawnCommand 在 win32 下会改写成 `cmd /c npx ...`。
+  const { command, args: resolvedArgs } = resolveSpawnCommand('npx', viteArgs);
+  const vite = nodeSpawn(command, resolvedArgs, {
     cwd: pkgRoot,
     stdio: 'inherit',
     env: {
@@ -129,7 +153,7 @@ export async function runDev(options: DevOptions) {
 
   if (options.open) {
     setTimeout(() => {
-      spawn('open', [`http://localhost:${vitePort}`], { stdio: 'ignore' });
+      openBrowser(`http://localhost:${vitePort}`);
     }, 2000);
   }
 

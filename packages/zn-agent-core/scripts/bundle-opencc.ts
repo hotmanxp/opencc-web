@@ -563,6 +563,49 @@ await esbuild.build({
 
 console.log(`[bundle-opencc] permissions: ${PERMISSIONS_OUT}`)
 
+// ── Session API counter (zai patch) ────────────────────────────────
+// Per-session API request counter consumed by the zai conversation
+// panel via `@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter`.
+// The module is fully self-contained (no imports), so a single-file
+// `bundle: false` esbuild emit is safe — it won't drag the vendored
+// tree into the zai runtime the way a transitive import would. The
+// hand-written d.ts mirrors the permissions pattern above (esbuild
+// doesn't emit d.ts for `bundle: false`).
+const API_COUNTER_ENTRY = join(ROOT, 'src', 'opencc-src', 'services', 'api', 'sessionApiCounter.ts')
+const API_COUNTER_OUT = join(ROOT, 'dist', 'opencc-src', 'services', 'api', 'sessionApiCounter.js')
+
+await esbuild.build({
+  entryPoints: [API_COUNTER_ENTRY],
+  bundle: false,
+  format: 'esm',
+  outfile: API_COUNTER_OUT,
+  platform: 'node',
+  target: 'node22',
+})
+
+{
+  const dts = [
+    `// Type declarations for the self-contained session API counter.`,
+    `// Mirror the source signatures in src/opencc-src/services/api/sessionApiCounter.ts.`,
+    `export declare function setLastContextUsage(usage: {`,
+    `  input: number;`,
+    `  cache_creation: number;`,
+    `  cache_read: number;`,
+    `  output: number;`,
+    `}): void;`,
+    `export declare function getLastContextTokens(): number | null;`,
+    `export declare function setCurrentApiCountSession(sessionId: string | null | undefined): void;`,
+    `export declare function recordApiCall(): void;`,
+    `export declare function getApiCallCount(sessionId: string): number;`,
+    `export declare function clearApiCallCount(sessionId: string): void;`,
+    `export declare function __resetApiCallCountsForTests(): void;`,
+  ].join('\n')
+  writeFileSync(API_COUNTER_OUT.replace('.js', '.d.ts'), dts)
+  console.log(`[bundle-opencc]   → ${API_COUNTER_OUT.replace('.js', '.d.ts')}`)
+}
+
+console.log(`[bundle-opencc] session-api-counter: ${API_COUNTER_OUT}`)
+
 // ── OpenCC server runtime seam (Task 1) ────────────────────────────
 //
 // `src/opencc-src/server/index.ts` re-exports the public types +

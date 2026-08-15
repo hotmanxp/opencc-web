@@ -75,8 +75,23 @@ export function countCompletedTurns(messages: AgentMessage[]): number {
   return turns
 }
 
-function findAliasForModel(model: string | null, models: ModelEntry[]): ModelEntry | null {
+function findAliasForModel(
+  model: string | null,
+  models: ModelEntry[],
+  providerId?: string | null,
+): ModelEntry | null {
   if (!model) return null
+  // zai patch: prefer the (model, providerId) tuple match when
+  // providerId is supplied. Several provider profiles can host the
+  // same model name (e.g. `MiniMax-M3` on Open Platform and
+  // ZhiNiao) — without this tuple match, displayLabel / contextWindow
+  // would surface whichever provider happened to be first in the
+  // list, not the one the user actually picked. Falls back to
+  // first-match-by-model for legacy sessions without providerId.
+  if (providerId) {
+    const exact = models.find((m) => m.model === model && m.providerId === providerId)
+    if (exact) return exact
+  }
   return models.find((m) => m.model === model) ?? null
 }
 
@@ -134,14 +149,20 @@ export function useConversationInfo(): ConversationInfo {
       sess?.model && sess.model !== 'unknown'
         ? sess.model
         : runtime.defaultModel
-    const alias = findAliasForModel(model, runtime.models)
+    // zai patch: thread session.providerId into the alias lookup so a
+    // model hosted on multiple providers surfaces the right one
+    // (displayLabel / contextWindow / etc.). Without this, the card
+    // would show whichever provider happened to be first in
+    // runtime.models, not the one the user actually picked.
+    const alias = findAliasForModel(model, runtime.models, sess?.providerId)
     const displayLabel = alias?.label ?? alias?.alias ?? model ?? null
     // zai patch (2026-08-09): 派生当前 session 的 context window。
     // 从 runtime.models 找 sid.model 对应的 capabilities.contextWindow。
     // 找不到时(null / unknown model / 无 capabilities)返回 null,UI 用 "—" 显示。
+    // 同样按 (model, providerId) 精确匹配;同名跨 provider 时取当前 provider 的能力。
     const contextWindow =
       model && model !== 'unknown'
-        ? (runtime.models.find((m) => m.model === model)?.capabilities?.contextWindow ?? null)
+        ? (alias?.capabilities?.contextWindow ?? null)
         : null
 
     return {
