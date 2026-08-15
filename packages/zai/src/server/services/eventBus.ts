@@ -85,6 +85,9 @@ const STATE_EVENT_TYPES = new Set<string>([
 
 export class ServerEventBus {
   private subs = new Set<Subscriber>()
+  // 全局单调 seq 计数器 — emit 时分配, 单进程内单调递增, 进程重启后从 0
+  // 重新计数 (跨重启的排序由 history replay + eventId 兜底, 见 shared/events.ts Base.seq 注释).
+  private seqCounter = 0
   private history: ServerEvent[] = []
   // per-sid 历史切片, 给 SSE 路由按 sid replay 用. 仅缓存有 sessionId 的事件;
   // 全局事件 (session.* / system.*) 留在全局 history, 它们不归某个 sid.
@@ -96,15 +99,24 @@ export class ServerEventBus {
       ...event,
       eventId: event.eventId ?? nextId(),
       ts: event.ts ?? Date.now(),
+      seq: event.seq ?? ++this.seqCounter,
     } as ServerEvent
     this.history.push(full)
-    if (this.history.length > CAPACITY) this.history.shift()
+    if (this.history.length > CAPACITY) {
+      // 溢出告警: 长时间运行 + 高频事件时早期事件静默丢失, 重连后视图不完整.
+      // 只 console.warn 不推 toast, 避免高频刷屏.
+      console.warn(`[eventBus] history overflow: 全局缓冲已达 ${CAPACITY} 条, 最旧事件将被丢弃`)
+      this.history.shift()
+    }
     // 写 per-sid 切片 (仅当 event 带明确的 string sessionId)
     const sid = eventSessionId(full)
     if (typeof sid === 'string') {
       const arr = this.historyBySid.get(sid) ?? []
       arr.push(full)
-      if (arr.length > CAPACITY) arr.shift()
+      if (arr.length > CAPACITY) {
+        console.warn(`[eventBus] history overflow: 会话 ${sid} 缓冲已达 ${CAPACITY} 条, 最旧事件将被丢弃`)
+        arr.shift()
+      }
       this.historyBySid.set(sid, arr)
     }
     for (const sub of this.subs) {
