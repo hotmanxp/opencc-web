@@ -36,6 +36,7 @@ describe('useEventStream batch dispatch', () => {
       textSegmentRev: 0,
       segmentedToolUseIds: {},
       queuedPrompts: [],
+      lastSeqBySession: {},
     })
     useAppStore.setState({ connected: false, streamState: 'connecting', streamAttempt: 0 })
   })

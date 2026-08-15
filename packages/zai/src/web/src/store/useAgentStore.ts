@@ -282,6 +282,14 @@ interface AgentState {
   // 气泡. sendSeq 提供跨轮唯一性, 根治该归并 bug.
   sendSeq: number
 
+  // dsh 借鉴 (2026-08-15): seq 守卫 + 投影存储。
+  // 每 session 已应用的最大事件 seq (只升不降) — 重放/乱序事件被丢弃,
+  // 替代部分手工 key 拼接防御 (手工 key 仍负责 React 渲染分组, 渐进式)。
+  lastSeqBySession: Record<string, number>
+  // 投影值存储: sessionId → key → { value, seq }, higher-seq-wins 合并。
+  // host 算完的派生值快照 (title / context.tokens), 重连后整体重发。
+  projectionsBySession: Record<string, Record<string, { value: unknown; seq: number }>>
+
   // SSE reducers (Task 6)
   activeSessionId: string | null
   applyRuntimeEvent: (event: ServerEvent) => void
@@ -289,6 +297,8 @@ interface AgentState {
   applyPromptAsk: (event: ServerEvent) => void
   // queue.changed 事件 reducer: 用后端队列快照覆盖 queuedPrompts。
   applyQueueChanged: (event: { pending: QueuedPrompt[] }) => void
+  // session/projection 帧 reducer: higher-seq-wins 写入投影存储 (T5)。
+  applyProjection: (event: Extract<ServerEvent, { type: 'session/projection' }>) => void
 
   // SSE state.* event reducers (Task 10) — 由 useEventStream (Task 11) 在
   // 收到 cwd.changed / bash_task.changed / v2_task.changed /
@@ -550,6 +560,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   _taskClearTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
   apiRequestCountBySession: {},
   contextTokensBySession: {},
+  // seq 守卫 / 投影存储 (T5): 初始为空, 事件到达时惰性写入。
+  lastSeqBySession: {},
+  projectionsBySession: {},
 
   setV2Tasks: (sessionId, tasks) => {
     set((s) => ({
@@ -633,6 +646,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   //
   upsertToolCall: (msg: AgentMessage) =>
     set((s) => {
+      // seq 守卫 (T5): 与 upsertStreamBlock 同款 — 读 msg.seq (applyRuntimeEvent
+      // 构造 startMsg/resultMsg 时从事件带入), 重放/乱序直接丢弃。
+      const guardSid = msg.sessionId as string | undefined
+      const guardSeq = guardSid ? (msg as { seq?: number }).seq : undefined
+      if (guardSid && typeof guardSeq === 'number') {
+        const prev = s.lastSeqBySession[guardSid] ?? 0
+        // 严格递增才合并: <= prev 的 (乱序 / 重放 / 同 seq 重复投递) 直接丢弃。
+        if (guardSeq <= prev) return s
+        s.lastSeqBySession[guardSid] = guardSeq
+      }
       const t = msg.type as string
       // tool_use:ask_pending → 设置 pendingAsk 状态 (不进入 messages, 由 QuestionCard 独立渲染)
       if (t === 'tool_use:ask_pending') {
@@ -818,6 +841,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // - kind=text 和 thinking 也互斥, 不会串到同一 entry.
   upsertStreamBlock: (kind, base, delta) =>
     set((s) => {
+      // seq 守卫 (T5): 读 base.seq (applyRuntimeEvent 构造 base 时从事件带
+      // 入)。重放/乱序的 delta (seq <= lastSeqBySession[sid]) 直接丢弃;
+      // 通过则把 lastSeq 只升不降地推进 (mutate 共享对象, 随下方 return
+      // 的对象一并落进新 state)。
+      const guardSid = base.sessionId as string | undefined
+      const guardSeq = guardSid ? (base as { seq?: number }).seq : undefined
+      if (guardSid && typeof guardSeq === 'number') {
+        const prev = s.lastSeqBySession[guardSid] ?? 0
+        // 严格递增才合并: <= prev 的 (乱序 / 重放 / 同 seq 重复投递) 直接丢弃。
+        if (guardSeq <= prev) return s
+        s.lastSeqBySession[guardSid] = guardSeq
+      }
       const textField = kind === 'thinking' ? 'thinking' : 'text'
       const type = kind === 'thinking' ? 'assistant.thinking' : 'assistant.text'
       const blockIndex = (base as { index?: number }).index ?? 0
@@ -855,6 +890,22 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // queue.changed 快照覆盖排队列表 — 后端 per-session 串行队列的等待中
   // 命令 {id, text} 列表(不含正在执行的那条)。
   applyQueueChanged: (event) => set({ queuedPrompts: event.pending }),
+  // session/projection 帧 — host 算完的派生值快照, higher-seq-wins 合并。
+  // value 是完整快照(不是 diff); 重放/低 seq 直接丢弃, 高 seq 覆盖。
+  applyProjection: (event) => set((s) => {
+    const sid = event.sessionId
+    const cur = s.projectionsBySession[sid]?.[event.key]
+    if (cur !== undefined && event.seq < cur.seq) return s
+    return {
+      projectionsBySession: {
+        ...s.projectionsBySession,
+        [sid]: {
+          ...(s.projectionsBySession[sid] ?? {}),
+          [event.key]: { value: event.value, seq: event.seq },
+        },
+      },
+    }
+  }),
   setTranscriptCollapsed: (collapsed: boolean) =>
     set({ transcriptCollapsed: collapsed }),
 
@@ -1419,6 +1470,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           eventId: '',
           sessionId: sid,
           ts: event.ts,
+          seq: event.seq,
           turnIndex: event.turnIndex,
           type: 'assistant.text',
           index: sendSeq,
@@ -1434,6 +1486,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           eventId: '',
           sessionId: sid,
           ts: event.ts,
+          seq: event.seq,
           turnIndex: event.turnIndex,
           type: 'assistant.thinking',
           index: sendSeq,
@@ -1452,6 +1505,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           eventId: `tool-${tuId}`,
           sessionId: sid,
           ts: event.ts,
+          seq: event.seq,
           turnIndex: event.turnIndex,
           type: 'tool_use:start',
           toolUseId: tuId,
@@ -1472,6 +1526,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           eventId: `tool-${event.toolUseId}`,
           sessionId: sid,
           ts: event.ts,
+          seq: event.seq,
           turnIndex: event.turnIndex,
           type: 'tool_use:done',
           toolUseId: event.toolUseId,
@@ -1584,6 +1639,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             eventId: `err-${toolUseId}`,
             sessionId: sid,
             ts: event.ts,
+            seq: event.seq,
             turnIndex: event.turnIndex,
             type: 'tool_use:error',
             toolUseId,

@@ -108,6 +108,9 @@ export function applyBatch(batch: ServerEvent[]): void {
     case 'queue.changed':
       useAgentStore.getState().applyQueueChanged(event)
       break
+    case 'session/projection':
+      useAgentStore.getState().applyProjection(event)
+      break
     // server.connected 已在 applyBatch 顶部统一处理 (置 connected + hydrate)。
     case 'stream/error':
       // 结构化帧级错误: 置 error 态 (UI 显示红色错误 + 手动重连)。
