@@ -318,6 +318,17 @@ export const useAppStore = create<AppState>((set) => ({
         }],
       };
     }
+    // stream/error — 结构化帧级错误 (T7): 复用 toast 池, 消息带闭合 code。
+    if (event.type === 'stream/error') {
+      return {
+        ...state,
+        toasts: [...state.toasts, {
+          id: event.eventId, level: 'error',
+          message: `连接错误[${event.error.code}]: ${event.error.message}`,
+          ts: event.ts,
+        }],
+      };
+    }
     if (event.type === 'branch.changed') {
       if (!state.instanceContext) return state;
       return {

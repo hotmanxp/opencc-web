@@ -70,6 +70,27 @@ queryLoop 每轮 turn 进入
   → useAgentStore.applyCompactionEvent → 5s 自动消失的 toast
 ```
 
+### 3.5 SSE 事件序列化与投影状态推送（dsh 借鉴）
+
+设计稿: `docs/superpowers/specs/2026-08-15-dsh-event-seq-projection-design.md`；实施计划 `docs/superpowers/plans/2026-08-15-dsh-event-seq-projection.md`。三个核心机制:
+
+**1. `ServerEvent.seq` 单调递增**
+- `shared/events.ts` Base 加 `seq: z.number()`（必填）。`ServerEventBus.emit` 分配: `seq: event.seq ?? ++seqCounter`，全局单调、**单进程内**语义——跨重启由 `eventId` + history replay 兜底，**不得把 seq 当持久化 ID**。
+- SSE `id:` 行自动携带 seq（`sse.ts` `writeSse` 的 `event.seq ?? event.eventId`），`Last-Event-ID` 续读不受影响（eventBus history 仍按 `eventId` 比对）。
+- 前端 `useAgentStore.lastSeqBySession[sid]` 记录每 session 已应用的最大 seq（只升不降）;`upsertStreamBlock` / `upsertToolCall` 入口做 seq 守卫: `seq <= prev` 的重放/乱序/同 seq 重复投递直接丢弃,严格递增才合并。手工 key 拼接（`sendSeq/textSegmentRev`）仍负责 React 渲染分组,防御代码渐进式清理。
+
+**2. 连接状态机**
+- `eventSource.ts` 导出 `StreamState = 'connecting' | 'connected' | 'reconnecting' | 'error'`,`subscribeServerEvents(sid, onEvent, onState?)` 第三参由旧 `onError` 改为 `onState`。`onopen` → connected(重置计数);`onerror` → `attempt++`,`attempt <= 3` 报 reconnecting,否则 error(第 4 次失败)。
+- `useEventStream` 把 onState 写入 `useAppStore.streamState / streamAttempt`;`server.connected` 事件到达仍置 connected + 触发 `hydrateSessionState`(冷启动快照补全)。
+- `useEventStream.dispatch` 重构为批量 `applyBatch(batch)`(导出): 按 seq 全局排序 → 逐事件路由 → reducer。`enqueue` 用 `queueMicrotask` 把同 tick 的 N 个 SSE 事件合并成一次 flush(P4: 避免逐事件 setState)。
+- 新增 `stream/error` 帧(闭合 `RpcErrorCode` union): 路由到 `setStreamState('error')` + toast(`applySystemEvent` 的 stream/error 分支)。
+
+**3. `session/projection` 投影帧**
+- host 算完的派生值快照按 `{sessionId, key, value, seq}` 整体推送,前端 `useAgentStore.projectionsBySession` 做 higher-seq-wins 合并(低 seq 丢弃),重连后 host 重算整体重发。
+- 订阅面: `useProjection(sessionId, key, selector?, equal?)` hook(`store/useProjection.ts`)。
+- 试点 key: `title`(`session.renamed` emit 时同步投影,`routes/agent.ts`)+ `context.tokens`(`runtime.done` emit 时同步投影)。消费:`useConversationInfo` 的"当前上下文大小"行 + `MobileHeader` 标题(投影优先,fallback 到 sessions 列表)。
+- **新增事件必须同步**: `shared/events.ts` union + `eventSource.ts` `NAMED_EVENT_TYPES` + `eventBus.ts` `isGlobalEvent`(stream/error 是全局帧;session/projection 走 per-sid history)。漏一处即前端静默丢事件。
+
 ## 4. 关键文件
 
 | 路径 | 职责 |
