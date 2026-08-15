@@ -44,6 +44,8 @@ function ProviderForm({
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  // id of the profile being edited; null means the modal is in "add" mode.
+  const [editingId, setEditingId] = useState<string | null>(null);
   // Tracks the builtin seed chosen when the modal was opened so we can
   // copy its capabilities map onto the new profile on save. The form
   // itself does not expose per-model capability edits — those come from
@@ -71,6 +73,7 @@ function ProviderForm({
     // Pre-fill with the first existing profile, or the first builtin as a starting point.
     // The user said "以我的当前的配置未初始值（默认值）" — current config first, then builtin fallback.
     const seed = profiles[0] ?? BUILTIN_PROFILES[0];
+    setEditingId(null);
     form.setFieldsValue({
       provider: seed.provider,
       name: seed.name,
@@ -87,14 +90,31 @@ function ProviderForm({
     setModalOpen(true);
   };
 
-  // Watch the Provider select so switching anthropic ↔ openai auto-refills
-  // the rest of the form with the matching builtin defaults. This makes the
-  // modal behave as a "one-click preset" for both protocol flavours.
-  const watchedProvider = Form.useWatch('provider', form);
-  useEffect(() => {
-    if (!modalOpen) return;
-    if (watchedProvider !== 'anthropic' && watchedProvider !== 'openai') return;
-    const preset = BUILTIN_PROFILES.find((p) => p.provider === watchedProvider);
+  const openEditModal = (item: ProviderProfile) => {
+    setEditingId(item.id ?? null);
+    form.setFieldsValue({
+      provider: item.provider,
+      name: item.name,
+      baseUrl: item.baseUrl,
+      model: item.model,
+      apiFormat: item.apiFormat,
+      apiKeyEnv: item.apiKeyEnv,
+    });
+    // Keep the saved capabilities map so per-model metadata survives
+    // the round-trip untouched (the form has no capability fields).
+    setPendingCapabilities(item.capabilities);
+    setModalOpen(true);
+  };
+
+  // Fill the rest of the form with the matching builtin preset when the
+  // user manually switches the Provider select. Wired to the Select's
+  // onChange (not a Form.useWatch effect) so the modal-opening
+  // setFieldsValue in openAddModal/openEditModal never clobbers the
+  // seeded values with builtin defaults — the "one-click preset" only
+  // kicks in on an explicit user switch.
+  const fillFromBuiltin = (value: string) => {
+    if (value !== 'anthropic' && value !== 'openai') return;
+    const preset = BUILTIN_PROFILES.find((p) => p.provider === value);
     if (!preset) return;
     form.setFieldsValue({
       name: preset.name,
@@ -104,13 +124,15 @@ function ProviderForm({
       apiKeyEnv: preset.apiKeyEnv,
     });
     setPendingCapabilities(preset.capabilities);
-  }, [watchedProvider, modalOpen, form]);
+  };
 
   const handleModalOk = async () => {
     try {
       const values = await form.validateFields();
-      const newProfile: ProviderProfile = {
-        id: `provider_${Date.now()}`,
+      // Editing reuses the existing profile id; adding mints a fresh one.
+      const existing = editingId ? profiles.find((p) => p.id === editingId) : undefined;
+      const nextProfile: ProviderProfile = {
+        id: editingId ?? `provider_${Date.now()}`,
         name: values.name,
         provider: values.provider,
         baseUrl: values.baseUrl,
@@ -125,14 +147,20 @@ function ProviderForm({
         ...(values.apiKeyEnv && String(values.apiKeyEnv).trim()
           ? { apiKeyEnv: String(values.apiKeyEnv).trim() }
           : {}),
+        // The form has no extraParams field — keep whatever the profile
+        // already carried (e.g. hand-edited temperature/reasoning pins).
+        ...(existing?.extraParams ? { extraParams: existing.extraParams } : {}),
       };
-      const updated = [...profiles, newProfile];
+      const updated = editingId
+        ? profiles.map((p) => (p.id === editingId ? nextProfile : p))
+        : [...profiles, nextProfile];
       setSaving(true);
       await api.put(endpoint, { profiles: updated });
       setProfiles(updated);
-      message.success('Provider 已添加');
+      message.success(editingId ? 'Provider 已更新' : 'Provider 已添加');
       setModalOpen(false);
       setPendingCapabilities(undefined);
+      setEditingId(null);
     } catch (err) {
       console.error(err);
     } finally {
@@ -176,6 +204,14 @@ function ProviderForm({
         renderItem={(item) => (
           <List.Item
             actions={[
+              <Button
+                key="edit"
+                type="text"
+                size="small"
+                icon={<EditOutlined />}
+                disabled={!item.id}
+                onClick={() => openEditModal(item)}
+              />,
               <Popconfirm key="del" title="确定删除？" onConfirm={() => item.id && handleDelete(item.id)}>
                 <Button type="text" danger size="small" icon={<DeleteOutlined />} loading={saving} />
               </Popconfirm>,
@@ -202,9 +238,12 @@ function ProviderForm({
       />
 
       <Modal
-        title="添加 Provider"
+        title={editingId ? '编辑 Provider' : '添加 Provider'}
         open={modalOpen}
-        onCancel={() => setModalOpen(false)}
+        onCancel={() => {
+          setModalOpen(false);
+          setEditingId(null);
+        }}
         onOk={handleModalOk}
         confirmLoading={saving}
         okText="确定"
@@ -214,7 +253,7 @@ function ProviderForm({
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item name="provider" label="Provider" rules={[{ required: true, message: '请选择 Provider' }]}>
-            <Select placeholder="选择 Provider" options={KNOWN_PROVIDERS} />
+            <Select placeholder="选择 Provider" options={KNOWN_PROVIDERS} onChange={fillFromBuiltin} />
           </Form.Item>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
             <Input placeholder="如 Anthropic-MIX" />
