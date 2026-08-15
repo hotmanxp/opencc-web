@@ -1,5 +1,5 @@
-import { useEffect, useMemo, useState } from "react";
-import { Popover, Spin, Tooltip, message } from "antd";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { Input, Popover, Spin, Tooltip, message } from "antd";
 import { CheckOutlined, BranchesOutlined } from "@ant-design/icons";
 import { gitApi } from "../lib/gitApi.js";
 import { useAppStore } from "../store/useAppStore.js";
@@ -86,13 +86,13 @@ export default function BranchSelector({
 
   // 本地分支优先 + 截断到 MAX_BRANCHES 条; 远程分支展开放后面(折叠到 N 条以内).
   // 排序: 当前 HEAD 始终在最前; 其余按本地优先 + 字典序.
+  // 这里只排序不截断 — 截断/过滤交由 BranchList(搜索时取消 MAX_BRANCHES 限制).
   const sortedBranches = useMemo(() => {
-    const localFirst = [...branches].sort((a, b) => {
+    return [...branches].sort((a, b) => {
       if (a.isCurrent !== b.isCurrent) return a.isCurrent ? -1 : 1;
       if (a.isRemote !== b.isRemote) return a.isRemote ? 1 : -1;
       return a.name.localeCompare(b.name);
     });
-    return localFirst.slice(0, MAX_BRANCHES);
   }, [branches]);
 
   const handleSwitch = async (name: string) => {
@@ -147,14 +147,13 @@ export default function BranchSelector({
           loading={loading}
           error={errorText}
           switchingTo={switchingTo}
-          totalCount={branches.length}
           onSelect={handleSwitch}
           testIdPrefix={testIdPrefix}
         />
       }
     >
       <Tooltip
-        title="点击查看/切换分支(最多显示 10 个)"
+        title="点击查看/切换分支(可搜索过滤)"
         placement="top"
         destroyOnHidden
       >
@@ -194,7 +193,6 @@ function BranchList({
   loading,
   error,
   switchingTo,
-  totalCount,
   onSelect,
   testIdPrefix,
 }: {
@@ -202,10 +200,31 @@ function BranchList({
   loading: boolean;
   error: string | null;
   switchingTo: string | null;
-  totalCount: number;
   onSelect: (name: string) => void;
   testIdPrefix: string;
 }) {
+  const [query, setQuery] = useState("");
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  // 弹层挂载时自动 focus 搜索框, 减少一次点击.
+  useEffect(() => {
+    searchInputRef.current?.focus();
+  }, []);
+
+  // 查询非空 → 在全集(branches)里按 name.includes 过滤, 取消 MAX_BRANCHES 截断,
+  // 让用户真正能找到被截断掉的分支; 查询为空 → 保留原 MAX_BRANCHES 截断行为.
+  const filteredBranches = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return branches.slice(0, MAX_BRANCHES);
+    return branches.filter((b) => b.name.toLowerCase().includes(q));
+  }, [branches, query]);
+
+  const isSearching = query.trim().length > 0;
+  const headerCountLabel = isSearching
+    ? `${filteredBranches.length}/${branches.length} 个匹配`
+    : branches.length > MAX_BRANCHES
+      ? `显示前 ${MAX_BRANCHES}/${branches.length}`
+      : `${branches.length} 个`;
+
   const styles: Record<string, React.CSSProperties> = {
     wrap: {
       width: "min(280px, calc(100vw - 84px))",
@@ -228,6 +247,7 @@ function BranchList({
       justifyContent: "space-between",
       alignItems: "center",
     },
+    search: { marginBottom: 8 },
     list: { listStyle: "none", padding: 0, margin: 0 },
     item: {
       display: "flex",
@@ -249,11 +269,19 @@ function BranchList({
       <div style={styles.header}>
         <span>分支</span>
         <span style={{ fontWeight: 400, color: "var(--text-dim-45)" }}>
-          {totalCount > MAX_BRANCHES
-            ? `显示前 ${MAX_BRANCHES}/${totalCount}`
-            : `${totalCount} 个`}
+          {headerCountLabel}
         </span>
       </div>
+      <Input
+        ref={searchInputRef}
+        size="small"
+        allowClear
+        placeholder="搜索分支"
+        value={query}
+        onChange={(e) => setQuery(e.target.value)}
+        data-testid={`${testIdPrefix}list-search`}
+        style={styles.search}
+      />
       {loading && branches.length === 0 ? (
         <div style={{ ...styles.empty, display: "flex", justifyContent: "center" }}>
           <Spin size="small" />
@@ -262,11 +290,13 @@ function BranchList({
         <div style={styles.empty} data-testid={`${testIdPrefix}list-error`}>
           {error}
         </div>
-      ) : branches.length === 0 ? (
-        <div style={styles.empty}>暂无分支</div>
+      ) : filteredBranches.length === 0 ? (
+        <div style={styles.empty}>
+          {isSearching ? `无匹配 “${query.trim()}” 的分支` : "暂无分支"}
+        </div>
       ) : (
         <ul style={styles.list}>
-          {branches.map((b) => {
+          {filteredBranches.map((b) => {
             const switching = switchingTo === b.name;
             return (
               <li
