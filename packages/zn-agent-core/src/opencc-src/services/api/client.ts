@@ -149,6 +149,44 @@ export async function getAnthropicClient({
   // Strip auth-related headers to prevent leaking Anthropic credentials
   // to third-party endpoints (SSRF / credential forwarding mitigation).
   if (providerOverride) {
+    // zai patch (2026-08-15): anthropic 格式 override — baseURL 指向
+    // Anthropic Messages 兼容端点（如 api.deepseek.com/anthropic），用
+    // Anthropic SDK + override 的 baseURL/apiKey，而不是 openai-shim 的
+    // /chat/completions。zai 的 `provider: 'anthropic'` profile（如
+    // deepseek）命中时注入 `format: 'anthropic'`，让用户选择的 profile
+    // 配置真正参与调用，而不是回落到 ANTHROPIC_BASE_URL 的 env 默认。
+    // 其余（format 缺省 / 'openai'）保持走 openai-shim，行为不变。
+    if ((providerOverride as { format?: string }).format === 'anthropic') {
+      // zai patch (2026-08-15): 剥离 defaultHeaders 里的认证 header。
+      // 上游 configureApiKeyHeaders（shouldUseFirstPartyAuth 分支）可能已
+      // 用 process.env.ANTHROPIC_AUTH_TOKEN 写入 `Authorization: Bearer`
+      // （MiniMax token）。若残留，deepseek 等 anthropic 兼容端点会优先读
+      // Authorization 而不是 apiKey 的 x-api-key → 401
+      // "Authentication Fails, Your api key: **** is invalid"。
+      // anthropic override 的凭据只应来自 override.apiKey。
+      const cleanDefaultHeaders: Record<string, string> = {}
+      for (const [k, v] of Object.entries(defaultHeaders)) {
+        const lower = k.toLowerCase()
+        if (lower === 'authorization' || lower === 'x-api-key' || lower === 'api-key') continue
+        cleanDefaultHeaders[k] = v
+      }
+      const clientConfig: ConstructorParameters<typeof Anthropic>[0] = {
+        apiKey: providerOverride.apiKey,
+        baseURL: providerOverride.baseURL,
+        // 显式 null：阻止 SDK 从 process.env.ANTHROPIC_AUTH_TOKEN 读取
+        // authToken。zai 服务进程的 env 里有 MiniMax token（settings.env
+        // 注入），SDK 会把它作为 `Authorization: Bearer` 加进请求头，与
+        // apiKey 的 x-api-key 同时发送 → deepseek 等 anthropic 兼容端点
+        // 优先读 Authorization → 401 "**** is invalid"。override 的凭据
+        // 只应来自 override.apiKey。
+        authToken: null as never,
+        ...ARGS,
+        // 覆盖 ARGS 里的 defaultHeaders（剥离任何认证 header）
+        defaultHeaders: cleanDefaultHeaders,
+        ...(isDebugToStdErr() && { logger: createStderrLogger() }),
+      }
+      return new Anthropic(clientConfig)
+    }
     const { createOpenAIShimClient } = await import('./openaiShim/index.js')
     const safeHeaders: Record<string, string> = {}
     for (const [k, v] of Object.entries(defaultHeaders)) {

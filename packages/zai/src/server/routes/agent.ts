@@ -43,14 +43,19 @@ import { resolveModel } from "../lib/resolveModel.js";
 import { resolveProviderForModel as resolveProviderForModelImpl } from "../services/modelCaller.js";
 
 /**
- * zai patch: 把所选 model 解析到对应 provider profile，仅在 profile.provider
- * 为 'openai' 时返回 providerOverride（model/baseURL/apiKey）。命中 anthropic
- * profile 或未匹配到任何 profile 时返回空对象，让上游 `getRuntime().query` 不传
- * providerOverride（保持 ANTHROPIC_BASE_URL 路径，行为不变）。
+ * zai patch: 把所选 model 解析到对应 provider profile，命中 profile 即返回
+ * providerOverride（model/baseURL/apiKey）。provider 类型决定请求走哪条 API
+ * 通道（vendor `getAnthropicClient({ providerOverride })` 消费）：
  *
- * vendor `getAnthropicClient({ providerOverride })` 检测到 providerOverride 即
- * 走 `createOpenAIShimClient`（openai-shim），POST 到 wizard-ai 等 OpenAI 兼容
- * 网关的 /chat/completions。
+ * - `provider: 'openai'` → 带 `format: 'openai'`（缺省语义），走 vendor
+ *   `createOpenAIShimClient`（openai-shim），POST 到 wizard-ai 等 OpenAI
+ *   兼容网关的 /chat/completions。
+ * - `provider: 'anthropic'`（如 deepseek）→ 带 `format: 'anthropic'`，vendor
+ *   改用 Anthropic SDK + override 的 baseURL/apiKey 打 Anthropic Messages
+ *   兼容端点。修复点：此前 anthropic profile 命中时返回空对象，请求落到
+ *   ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN 的 env 默认（MiniMax 端点），
+ *   用户选择的 deepseek profile 配置从未参与调用。
+ * - 未匹配到任何 profile → 空对象，走 env 默认路径，行为不变。
  *
  * `preferredProfileId` is forwarded to the matcher so when several
  * provider profiles host the same model name (e.g. `MiniMax-M3` on
@@ -67,6 +72,12 @@ async function resolveProviderOverrideForModel(
         baseURL: string
         apiKey: string
         /**
+         * 请求 API 通道：'anthropic' → Anthropic SDK + override
+         * baseURL/apiKey（Messages 兼容端点）；缺省/'openai' →
+         * openai-shim（chat/completions）。由 profile.provider 决定。
+         */
+        format?: 'anthropic' | 'openai'
+        /**
          * zai patch: per-provider extraParams (e.g. enable_search) merged
          * by the vendor openai-shim into every chat/completions body.
          * Optional — absent for profiles without extraParams so the
@@ -79,13 +90,17 @@ async function resolveProviderOverrideForModel(
 > {
   if (!model) return {}
   const { baseURL, apiKey, profile } = resolveProviderForModelImpl(model, preferredProfileId)
-  if (profile?.provider !== 'openai') return {}
+  if (!profile) return {}
   if (!baseURL || !apiKey) return {}
+  const isAnthropicProfile = profile.provider !== 'openai'
   return {
     providerOverride: {
       model,
       baseURL,
       apiKey,
+      // anthropic profile → Anthropic SDK + profile baseURL/apiKey；
+      // openai profile（缺省 format）→ vendor openai-shim。
+      ...(isAnthropicProfile ? { format: 'anthropic' as const } : {}),
       ...(profile.extraParams ? { extraParams: profile.extraParams } : {}),
     },
   }

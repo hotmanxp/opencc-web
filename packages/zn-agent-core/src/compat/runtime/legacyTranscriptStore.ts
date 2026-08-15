@@ -48,6 +48,11 @@ type Meta = {
   model: string
   sessionId: string
   title?: string
+  // zai patch: provider profile id persisted alongside the session
+  // (mirrors the model field above). Picker selection writes this so
+  // findProfileForModel() can disambiguate when several saved
+  // providerProfiles share the same model name.
+  providerId?: string
   permissionMode?: string
   createdAt: number
   updatedAt?: number
@@ -107,6 +112,56 @@ export class TranscriptStore {
     await writeFile(fp, JSON.stringify(entry) + '\n', { flag: 'a', mode: 0o600 })
   }
 
+  /**
+   * zai patch: find the most-recent `session-meta` entry on disk.
+   * Picker / model-switch writes these via patchSession() so the
+   * user-picked model + providerId survive a server restart (REGISTRY
+   * alone is in-memory and gets wiped). Returns the latest entry's
+   * `model` / `providerId` so callers can rebuild `Meta` from disk.
+   *
+   * zai patch (2026-08-15): a single picker click produces TWO session-meta
+   * lines (one for `model`, one for `providerId` — see patchSession's two
+   * appendEntry calls). The old version returned at the FIRST entry from
+   * the tail, so when `{providerId}` happened to come AFTER `{model}`
+   * (the typical ordering — line N=model, N+1=providerId, written
+   * 2ms apart by the same PATCH handler), the result carried only
+   * `providerId` and `model` was dropped. read() then returned
+   * `meta.model = ''` and resolveModel fell through to
+   * ANTHROPIC_DEFAULT_SONNET_MODEL / BUILTIN_FALLBACK_MODEL, so the
+   * user's deepseek pick silently flipped back to MiniMax-M3 on the
+   * next /agent/prompt. (Live case: sess-1786796310223-jiccyott's
+   * tail had {providerId} immediately after {model} and read() missed
+   * the model.)
+   *
+   * Walk the tail and pick the LATEST model + LATEST providerId
+   * independently — same field-level "latest wins" semantic the picker
+   * expects, just over two axes instead of one. Stops once both fields
+   * have been seen; skips entries with the wrong type or non-string
+   * payloads so partial / corrupted lines don't poison the lookup
+   * (readEntries already swallows per-line JSON parse errors, but
+   * defence-in-depth here).
+   */
+  private static findLatestSessionMeta(entries: any[]): { model?: string; providerId?: string } | undefined {
+    let latestModel: string | undefined
+    let latestProviderId: string | undefined
+    for (let i = entries.length - 1; i >= 0; i--) {
+      const e = entries[i]
+      if (e?.type !== 'session-meta') continue
+      if (latestModel === undefined && typeof e.model === 'string' && e.model.length > 0) {
+        latestModel = e.model
+      }
+      if (latestProviderId === undefined && typeof e.providerId === 'string' && e.providerId.length > 0) {
+        latestProviderId = e.providerId
+      }
+      if (latestModel !== undefined && latestProviderId !== undefined) break
+    }
+    if (latestModel === undefined && latestProviderId === undefined) return undefined
+    return {
+      ...(latestModel !== undefined ? { model: latestModel } : {}),
+      ...(latestProviderId !== undefined ? { providerId: latestProviderId } : {}),
+    }
+  }
+
   /** 从磁盘条目推断 title: custom-title 优先, 否则首条 user 文本。 */
   private static inferTitle(entries: any[]): string | undefined {
     for (let i = entries.length - 1; i >= 0; i--) {
@@ -156,6 +211,13 @@ export class TranscriptStore {
     if (stored) {
       return { messages: entries, meta: stored }
     }
+    // zai patch: REGISTRY is in-memory and gets wiped on restart. Pull the
+    // last user-picked (model, providerId) from the JSONL's session-meta
+    // entries so resolveModel()'s Layer-1 (sessionModel) actually reads
+    // what the picker wrote, even after a fresh process start. Falls
+    // back to empty string when no session-meta entry exists yet (e.g.
+    // brand-new session the user hasn't picked anything for).
+    const persistedMeta = TranscriptStore.findLatestSessionMeta(entries)
     // REGISTRY miss usually means "session created via OpenccRuntime, not
     // via create() below" — those sessions have no in-memory meta. Fall
     // back to the user's configured default mode so the bottom-bar badge
@@ -165,9 +227,10 @@ export class TranscriptStore {
       messages: entries,
       meta: {
         cwd: opts.cwd,
-        model: '',
+        model: persistedMeta?.model ?? '',
         sessionId,
         ...(inferredTitle ? { title: inferredTitle } : { title: '' }),
+        ...(persistedMeta?.providerId ? { providerId: persistedMeta.providerId } : {}),
         permissionMode: getDefaultMode(),
         createdAt: typeof entries[0]?.timestamp === 'number' ? entries[0].timestamp : Date.now(),
       },
@@ -193,9 +256,23 @@ export class TranscriptStore {
       } catch {
         // mtime 读不到 (竞态删除) 时用 REGISTRY 值兜底
       }
+      // zai patch: REGISTRY-only model is wrong after server restart.
+      // Always read entries once and pull the latest session-meta off
+      // disk so the sidebar badge / picker current-row lookup survives a
+      // process restart (REGISTRY is in-memory, session-meta is on disk).
+      // See read() for the same fix + the same picker-vs-RESTART trace.
+      const entries = await this.readEntries(sessionId, opts.cwd)
+      const persistedMeta = TranscriptStore.findLatestSessionMeta(entries)
       const meta: Meta = {
         cwd: opts.cwd,
-        model: stored?.model ?? 'unknown',
+        // REGISTRY wins when set (preserves live state mid-session),
+        // otherwise fall through to the persisted session-meta. Only
+        // return 'unknown' when NEITHER source has the value — that's
+        // the true "user never picked anything" case.
+        model: stored?.model ?? persistedMeta?.model ?? 'unknown',
+        ...(persistedMeta?.providerId && !stored?.providerId
+          ? { providerId: persistedMeta.providerId }
+          : {}),
         sessionId,
         // For sessions written by OpenccRuntime, REGISTRY has no entry
         // and stored?.permissionMode is undefined — fall back to the
@@ -207,7 +284,7 @@ export class TranscriptStore {
         updatedAt,
       }
       if (!meta.title) {
-        const inferred = TranscriptStore.inferTitle(await this.readEntries(sessionId, opts.cwd))
+        const inferred = TranscriptStore.inferTitle(entries)
         if (inferred) meta.title = inferred
       }
       out.push(meta)
@@ -248,6 +325,28 @@ export class TranscriptStore {
           // 落盘失败不阻断内存更新
         }
       }
+      // zai patch: model / providerId 持久化。Picker / 模型切换时由
+      // /api/agent/sessions/:id PATCH 调用,只有写入 JSONL 才能跨进程重启
+      // 存活(REGISTRY 进程内,重启空,resolveModel Layer-1 直接失效)。
+      // 与 title 的 custom-title 同模式:append 一条 discriminator 行,
+      // 重启后 read() 扫 entries 合并回 meta。
+      if (opts?.cwd && (patch.model !== undefined || patch.providerId !== undefined)) {
+        try {
+          await this.appendEntry(id, opts.cwd, {
+            type: 'session-meta',
+            uuid: randomUUID(),
+            timestamp: Date.now(),
+            ...(typeof patch.model === 'string' && patch.model.length > 0
+              ? { model: patch.model }
+              : {}),
+            ...(typeof patch.providerId === 'string' && patch.providerId.length > 0
+              ? { providerId: patch.providerId }
+              : {}),
+          })
+        } catch {
+          // 同 custom-title:落盘失败不阻断内存 REGISTRY 更新
+        }
+      }
       return stored
     }
     // Session not found in REGISTRY (e.g. after server restart). If cwd is
@@ -266,6 +365,27 @@ export class TranscriptStore {
           }
           Object.assign(recreated, patch)
           REGISTRY.set(this.key(id, opts.cwd), recreated)
+          // zai patch: 同样把 model/providerId 写到 JSONL,这样即使这次 PATCH
+          // 走的是重建路径(磁盘文件已存在但 REGISTRY 没缓存),picker 选择
+          // 也能跨重启保留。appendEntry 与上面 REGISTRY 命中分支使用相同的
+          // session-meta 行格式。
+          if (patch.model !== undefined || patch.providerId !== undefined) {
+            try {
+              await this.appendEntry(id, opts.cwd, {
+                type: 'session-meta',
+                uuid: randomUUID(),
+                timestamp: Date.now(),
+                ...(typeof patch.model === 'string' && patch.model.length > 0
+                  ? { model: patch.model }
+                  : {}),
+                ...(typeof patch.providerId === 'string' && patch.providerId.length > 0
+                  ? { providerId: patch.providerId }
+                  : {}),
+              })
+            } catch {
+              // 落盘失败不阻断内存重建
+            }
+          }
           return recreated
         }
       } catch {

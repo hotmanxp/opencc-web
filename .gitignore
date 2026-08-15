@@ -58,6 +58,7 @@ Thumbs.db
 # superpowers skill scratch
 .superpowers/
 .verify
+.zai-screenshots
 
 # Local runtime artifacts (ego browser task outputs etc.)
 var/

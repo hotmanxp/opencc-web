@@ -30,10 +30,29 @@ const ProviderProfileSchema = z.object({
   baseUrl: z.string().optional(),
   model: z.string().optional(),
   apiFormat: z.string().optional(),
+  // zai patch: per-provider API key env var name. Lets two profiles
+  // share the same provider-family (e.g. two anthropic ones) while
+  // each uses its own key. Resolution order: inline apiKey →
+  // env[apiKeyEnv] → provider-family global env
+  // (OPENAI_API_KEY / ANTHROPIC_AUTH_TOKEN).
+  apiKeyEnv: z.string().optional(),
+  // zai patch: free-form request-body fields merged into every LLM
+  // call routed through this profile (anthropic → messages.create,
+  // openai → POST /chat/completions). Lets users pin per-provider
+  // defaults like temperature / top_p / reasoning_effort without
+  // code changes. Schema is open because the consumer (modelCaller)
+  // forwards keys verbatim.
+  extraParams: z.record(z.string(), z.unknown()).optional(),
   // Map keyed by model name → per-model capabilities. Unknown model keys
   // are passed through (the picker filters by what it knows about).
   capabilities: z.record(z.string(), ModelCapabilitiesSchema).optional(),
-}).strict();
+});
+// Not .strict() — zai profile shapes evolved beyond the opencc baseline
+// (apiKeyEnv / extraParams were added in zai-specific patches), and
+// ~/.zai.json may already carry legacy keys (e.g. authToken) from
+// hand-edits or migration scripts. Strip unknown keys on save so the
+// on-disk profile stays clean and round-trips stay idempotent, instead
+// of failing every PUT once a stray key shows up.
 
 export type ProviderProfileInput = z.infer<typeof ProviderProfileSchema>;
 

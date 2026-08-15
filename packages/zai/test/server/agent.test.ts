@@ -8,6 +8,7 @@ import agentRouter, {
   getSessionRateLimitRemainingMs,
   __resetSessionRateLimitsForTests,
 } from '../../src/server/routes/agent.js'
+import { __resetCacheForTests as __resetSettingsCacheForTests } from '../../src/server/services/zaiSettingsStore.js'
 
 // Mock node:fs so resolveModel's readZaiSettings() can be controlled.
 // Mirrors the pattern in test/server/agentSettings.test.ts:7-13.
@@ -243,6 +244,107 @@ describe('POST /api/agent/prompt model resolution', () => {
 // Session title patch: 用户新建会话后, 第一次发消息应当用 prompt 的
 // 第一行作为标题写入 transcript, 并 emit session.renamed 给前端. 重现
 // "新建会话后 sidebar 标题不更新"的 bug.
+describe('POST /api/agent/prompt — anthropic profile 注入 providerOverride', () => {
+  const DEEPSEEK_PROFILE = {
+    id: 'provider_ds_test',
+    name: 'Anthropic-DS',
+    provider: 'anthropic',
+    baseUrl: 'https://api.deepseek.com/anthropic',
+    model: 'deepseek-v4-flash,deepseek-v4-pro',
+    apiFormat: 'chat_completions',
+    apiKeyEnv: 'DEEPSEEK_API_KEY',
+  }
+
+  beforeEach(() => {
+    // 清掉模块级 settings 缓存，让 getCachedZaiSettingsSync 的 fallback
+    // 走 mock 的 readFileSync 读到测试注入的 env。
+    __resetSettingsCacheForTests()
+  })
+
+  it('命中 anthropic profile（deepseek）时注入 format:"anthropic" 的 override', async () => {
+    lastRunOpts = null
+    mockTranscriptMetaModel = 'deepseek-v4-flash'
+    vi.mocked(readFileSync).mockImplementation((p: unknown) => {
+      const path = String(p)
+      if (path.includes('.zai.json')) {
+        return JSON.stringify({ providerProfiles: [DEEPSEEK_PROFILE] })
+      }
+      if (path.includes('settings.json')) {
+        return JSON.stringify({
+          env: {
+            DEEPSEEK_API_KEY: 'ds-key',
+            ANTHROPIC_AUTH_TOKEN: 'anth-key',
+            ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic',
+          },
+        })
+      }
+      throw new Error(`ENOENT: ${path}`)
+    })
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'hi', sessionId: 'sess-ds-1' }),
+      })
+      expect(res.status).toBe(200)
+      const reader = res.body!.getReader()
+      while (true) {
+        const { done } = await reader.read()
+        if (done) break
+      }
+      expect(lastRunOpts).not.toBeNull()
+      expect(lastRunOpts.model).toBe('deepseek-v4-flash')
+      // 关键断言：anthropic profile 的 baseUrl/apiKey 参与调用，且
+      // format 标记走 Anthropic SDK（而不是回落到 ANTHROPIC_BASE_URL env）。
+      expect(lastRunOpts.providerOverride).toMatchObject({
+        model: 'deepseek-v4-flash',
+        baseURL: 'https://api.deepseek.com/anthropic',
+        apiKey: 'ds-key',
+        format: 'anthropic',
+      })
+    } finally {
+      close()
+    }
+  })
+
+  it('未命中任何 profile 时不注入 override（env 默认路径不变）', async () => {
+    lastRunOpts = null
+    mockTranscriptMetaModel = 'deepseek-v4-flash'
+    vi.mocked(readFileSync).mockImplementation((p: unknown) => {
+      const path = String(p)
+      if (path.includes('.zai.json')) {
+        // 没有任何 profile 收录 deepseek-v4-flash
+        return JSON.stringify({ providerProfiles: [] })
+      }
+      if (path.includes('settings.json')) {
+        return JSON.stringify({
+          env: { ANTHROPIC_AUTH_TOKEN: 'anth-key', ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic' },
+        })
+      }
+      throw new Error(`ENOENT: ${path}`)
+    })
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ prompt: 'hi', sessionId: 'sess-ds-2' }),
+      })
+      expect(res.status).toBe(200)
+      const reader = res.body!.getReader()
+      while (true) {
+        const { done } = await reader.read()
+        if (done) break
+      }
+      expect(lastRunOpts.model).toBe('deepseek-v4-flash')
+      expect(lastRunOpts.providerOverride).toBeUndefined()
+    } finally {
+      close()
+    }
+  })
+})
+
 describe('POST /api/agent/prompt title patch', () => {
   it('writes title derived from prompt first line and emits session.renamed', async () => {
     mockTranscriptHasTitle = false
