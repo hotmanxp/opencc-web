@@ -60,9 +60,13 @@ vi.mock('../../src/server/services/agentRuntime.js', async () => {
   }
 })
 
-vi.mock('@zn-ai/zn-agent-core/opencc-src/permissions', () => ({
-  EXTERNAL_PERMISSION_MODES: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'],
-}))
+vi.mock('@zn-ai/zn-agent-core', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return {
+    ...actual,
+    EXTERNAL_PERMISSION_MODES: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'],
+  }
+})
 
 import agentRouter from '../../src/server/routes/agent.js'
 

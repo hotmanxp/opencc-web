@@ -2,6 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态：已过期(2026-08-16)**
+> 本文档提到的 subpath(`@zn-ai/zn-agent-core/compat/commands/handoffFs` 等)已全部废除,统一从主入口 `@zn-ai/zn-agent-core` 导出。本文档保留作为历史记录,不再代表当前实现。
+
 **Goal:** 在 zai web/mobile 端实现 `/handoff` slash 命令,行为对齐 OpenCC vendor(`commands/handoff/index.ts`):PICKUP 扫 `.agent_working_dir/handoff/`,GENERATE 让 LLM 写新交接文档;handler 在 zai 服务端确定性构造 prompt,实际写盘/读取交给 zai LLM 用现有工具完成。
 
 **Architecture:** zai server 注册一个 `type: 'prompt'` 命令,handler 复用 vendor 纯 fs 工具(`listHandoffs` / `getLatestHandoff` / `buildHandoffPath`),按 `assistantCount ≤ 4` / `> 4` 走 PICKUP / GENERATE 分支,在服务端组装完整 prompt 文本,前端通过 `/api/agent/command` 拿到 `{type:'prompt', payload:{rendered}}` 后调 `submitPrompt` 把 rendered 作为模型输入,LLM 用 zai 的 `Write` / `Read` / `AskUserQuestion` 工具完成落盘与交互。

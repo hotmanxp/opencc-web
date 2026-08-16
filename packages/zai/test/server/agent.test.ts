@@ -93,11 +93,15 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
   abortSessionController: () => false,
 }))
 
-vi.mock('@zn-ai/zn-agent-core/opencc-src/permissions', () => ({
-  // permissionMode.ts:6 启动时用 EXTERNAL_PERMISSION_MODES 构造 VALID_MODES set,
-  // mock 必须提供. 真实值见 zai-agent-core 导出 (5 个 user-facing mode).
-  EXTERNAL_PERMISSION_MODES: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'],
-}))
+vi.mock('@zn-ai/zn-agent-core', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return {
+    ...actual,
+    // permissionMode.ts:6 启动时用 EXTERNAL_PERMISSION_MODES 构造 VALID_MODES set,
+    // mock 必须提供. 真实值见 zai-agent-core 导出 (5 个 user-facing mode).
+    EXTERNAL_PERMISSION_MODES: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'],
+  }
+})
 
 // Reset readFileSync between tests — 防止 'falls back' 测试把 mock
 // 状态抛错泄漏到后续标题/翻译测试. resolveModel 走 default 时
@@ -571,10 +575,10 @@ describe('translateRuntimeEvents — runtime.started 携带 metrics', () => {
   // (globalThis 共享),测试用源模块 set,agent.ts 用同一模块 set/get
   // (通过 runtime path 走 dist 时也读 globalThis)— 两条路径都打到
   // 同一个 globalThis.__zaiApiCounts / __zaiApiCountLastUsage,断言稳。
-  let counter: typeof import('@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter')
+  let counter: typeof import('@zn-ai/zn-agent-core')
 
   beforeEach(async () => {
-    counter = await import('@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter')
+    counter = await import('@zn-ai/zn-agent-core')
     counter.__resetApiCallCountsForTests()
     counter.setCurrentApiCountSession(null)
   })

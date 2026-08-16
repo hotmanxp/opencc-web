@@ -3,7 +3,7 @@ import {
   getServerCwd,
   getTranscriptStore,
 } from '../services/agentRuntime.js'
-import { repairAndPersistTranscript } from '@zn-ai/zn-agent-core/runtime'
+import { repairAndPersistTranscript } from '@zn-ai/zn-agent-core'
 
 const router: Router = Router()
 

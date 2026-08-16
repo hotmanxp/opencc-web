@@ -3,6 +3,9 @@
 **日期：** 2026-08-06
 **状态：** 已确认，待实施
 
+> **状态：已过期(2026-08-16)**
+> 本设计提到的 `package.json` exports subpath(`@zn-ai/zn-agent-core/<subpath>`)已全部废除,运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出。本文档保留作为历史记录,不再代表当前实现。
+
 ## 背景
 
 opencc 的 `/plugin` slash command 提供了完整的插件管理 TUI（`packages/zn-agent-core/src/opencc-src/commands/plugin/`，19 个文件约 7700 行），视图状态机定义在 `commands/plugin/types.ts:12`，覆盖已安装插件管理、marketplace 浏览安装、marketplace 源增删、插件发现、manifest 校验等十个视图。

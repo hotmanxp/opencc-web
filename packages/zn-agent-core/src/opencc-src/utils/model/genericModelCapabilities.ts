@@ -40,9 +40,10 @@
 // which sidesteps vitest's stub-alias routing of relative imports of
 // `../../integrations/...` (see vitest.config.ts → RELATIVE_RE).
 //
-// At runtime the bundle is what zai-server loads via the package
-// subpath `@zn-ai/zn-agent-core/opencc-src/utils/model/genericModelCapabilities`,
-// so test and runtime paths exercise the same compiled code.
+// At runtime the bundle is what zai-server loads via the package main
+// entry `@zn-ai/zn-agent-core` (bundle-entry.ts re-exports this module;
+// the old subpath was removed 2026-08-16), so test and runtime paths
+// exercise the same compiled code.
 
 // Register the integration descriptors (vendor / brand / gateway / model)
 // the first time this module is imported. `integrations/index.ts` runs

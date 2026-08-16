@@ -23,7 +23,7 @@ import {
   type OpenccRuntime,
   type OpenccRuntimeOptions,
   type OpenccServerEvent,
-} from '@zn-ai/zn-agent-core/opencc-server'
+} from '@zn-ai/zn-agent-core'
 
 /**
  * Locked method names the runtime must expose, per the brief.

@@ -1,4 +1,4 @@
-import type { BashTaskInfo } from '@zn-ai/zn-agent-core/bashTracker'
+import type { BashTaskInfo } from '@zn-ai/zn-agent-core'
 import {
   getRuntime,
   getCurrentSessionId,
@@ -19,15 +19,19 @@ import { translateRuntimeEvents } from '../routes/agent.js'
  *   HRMSV3-ZN-WEBSITE#668 观察到的现象。
  *
  * zai patch (2026-08-09): **不再依赖 vendor commandQueue drain**。
- *   背景:LocalShellTask 被 esbuild 打包进 `dist/opencc-core.mjs`(bundle 私有,
- *   见 compat/bashTracker.ts:389 的注释),它的 enqueueShellNotification 把
- *   <task-notification> 写进 **bundle 内**的 messageQueueManager commandQueue;
- *   而 runtime.query() 走 `@zn-ai/zn-agent-core/opencc-server`(dist 独立 module
- *   实例),QueryEngine 的 mid-turn drain(query.ts:2644)读的是 **dist 的**
- *   commandQueue。两个 commandQueue 是不同 module 实例,通知永远 drain 不到 ——
- *   "通知作为系统消息插入"的假设完全失效(请求风暴根因:agent 收不到 dev 失败
- *   通知 → 盲目反复重启 dev → 每轮 1 次 API 调用雪崩,会话
- *   sess-1786243017001 现场 78 次/分钟)。
+ *   背景(2026-08-09 的状态):LocalShellTask 被 esbuild 打包进
+ *   `dist/opencc-core.mjs`(bundle 私有,见 compat/bashTracker.ts:389 的注释),
+ *   它的 enqueueShellNotification 把 <task-notification> 写进 **bundle 内**的
+ *   messageQueueManager commandQueue;而当时 runtime.query() 走
+ *   `@zn-ai/zn-agent-core/opencc-server`(原 subpath,`dist/opencc-src/server/*.js`,
+ *   与 bundle 是独立 module 实例),QueryEngine 的 mid-turn drain(query.ts:2644)
+ *   读的是 **dist 的** commandQueue。两个 commandQueue 是不同 module 实例,
+ *   通知永远 drain 不到 —— "通知作为系统消息插入"的假设完全失效(请求风暴
+ *   根因:agent 收不到 dev 失败通知 → 盲目反复重启 dev → 每轮 1 次 API 调用
+ *   雪崩,会话 sess-1786243017001 现场 78 次/分钟)。
+ *   2026-08-16:opencc-server subpath 已废除,运行时统一主入口 = 单一 bundle
+ *   实例,模块状态分裂问题不存在了。但本模块仍按 zai patch 的设计:不依赖
+ *   vendor drain,直接用 BashTaskInfo 自己构造 <task-notification> 作为 prompt。
  *
  *   修复:这里用 BashTaskInfo 自己构造 <task-notification> 文本直接作为 prompt
  *   发给模型(与 SubagentNotifier 同构),不再依赖 vendor drain。running 守卫

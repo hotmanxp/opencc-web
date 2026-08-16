@@ -2,6 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态：已过期(2026-08-16)**
+> 本文档提到的 6 个 subpath API surface 已全部废除,运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出(原 6 个 subpath 见 §1 Goal)。本文档保留作为历史记录,不再代表当前实现。
+
 **Goal:** Replace `packages/zai-agent-core` (an unstable fork of opencc) with a new `packages/zn-agent-core` package built by copying the mature opencc source (v0.20.0), stripping all UI, and adding a thin shim layer to preserve zai's existing 6 subpath API surface.
 
 **Architecture:** Dual-track migration. New `packages/zn-agent-core/` is a clean copy of `/Users/ethan/code/opencc/src/` minus UI directories, with a `src/compat/` shim directory for the small set of zai-specific singletons (CwdStore, bashBackgroundTracker, getTaskListStore, runWithSessionId, memoryLoader/Watcher). The package re-exports opencc internals through 6 subpath entries matching zai's current consumption pattern, so zai's source code needs zero changes. After verification, delete old `packages/zai-agent-core/`.

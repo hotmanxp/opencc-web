@@ -2,6 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态：已过期(2026-08-16)**
+> 本文档提到的 `package.json` exports subpath(`@zn-ai/zn-agent-core/<subpath>`)已全部废除,运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出(参见 plan `~/.zai/plans/glowing-toasting-elephant.md`)。本文档保留作为历史记录,不再代表当前实现。
+
 **Goal:** 把 zai 服务对 `EXTERNAL_PERMISSION_MODES` 的导入从 `@zn-ai/zn-agent-core` 顶层改为直调 `@zn-ai/zn-agent-core/opencc-src/permissions`(走 opencc-src 而非 compat shim),`UserFacingPermissionMode` 仍走 compat(zai 专属别名)。
 
 **Architecture:** 在 `zn-agent-core` 暴露 `opencc-src/permissions` 子路径,通过 esbuild 单文件编译 `src/opencc-src/types/permissions.ts`(不打 bundle,types 全部擦除)产出 `dist/opencc-src/types/permissions.js`。zai 改 2 处 import + 4 处 mock + 新增 1 个静态扫描回归测试。

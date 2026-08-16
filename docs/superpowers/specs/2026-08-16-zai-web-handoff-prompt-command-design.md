@@ -2,6 +2,9 @@
 
 > 文档版本: 1.0 · 2026-08-16 · 状态: 设计已敲定, 待用户 review
 
+> **状态：已过期(2026-08-16)**
+> 本设计提到的 subpath(`@zn-ai/zn-agent-core/compat/commands/handoffFs` 等)已全部废除,统一从主入口 `@zn-ai/zn-agent-core` 导出。本文档保留作为历史记录,不再代表当前实现。
+
 ## 0. 背景
 
 OpenCC vendor(`packages/zn-agent-core/opencc-src/commands/handoff/index.ts`)定义了一个 `type: 'prompt'` 的内置 `/handoff` 指令,行为分两支:

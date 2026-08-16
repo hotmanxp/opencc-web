@@ -13,7 +13,7 @@
 // tool 的内部读取路径一致.
 
 import { Router, type IRouter, type Request, type Response } from 'express'
-import { getTaskListStore } from '@zn-ai/zn-agent-core/taskListStore'
+import { getTaskListStore } from '@zn-ai/zn-agent-core'
 
 const router: IRouter = Router()
 

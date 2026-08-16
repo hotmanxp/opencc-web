@@ -2,6 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态：已过期(2026-08-16)**
+> 本文档提到的 subpath(`@zn-ai/zn-agent-core/opencc-src/utils/lockfile.js` 等)已全部废除,统一从主入口 `@zn-ai/zn-agent-core` 导出。本文档保留作为历史记录,不再代表当前实现。
+
 **Goal:** 在 `zai start` 受管模式下,允许用户在 Settings 抽屉底部触发整个服务的优雅重启;新组件只新增,不修改 dev / 单元测试路径。
 
 **Architecture:** CLI 新增 `supervisor.ts`,在 `zai start` 启动时派生一个 detached 子进程并通过 IPC 监听 `ready / restart / shutdown` 消息。子进程识别 `ZAI_SUPERVISOR_PID` 后在 gracefulClose 阶段发 `restart` 并退出。设置抽屉新增「服务」区段,带二次确认 Modal 调 `POST /api/system/restart`。

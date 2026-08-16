@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import {
   stateChangeBus,
   resetStateChangeBusForTests,
-} from '@zn-ai/zn-agent-core/runtime'
+} from '@zn-ai/zn-agent-core'
 import { eventBus } from '../../../services/eventBus.js'
 import {
   initStateBridge,

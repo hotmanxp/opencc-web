@@ -2,6 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态：已过期(2026-08-16)**
+> 本文档提到的 subpath(`@zn-ai/zn-agent-core/opencc-src/...`)已全部废除,统一从主入口 `@zn-ai/zn-agent-core` 导出。本文档保留作为历史记录,不再代表当前实现。
+
 **Goal:** 把 `TaskNotification` 中暴露的 `OutputFile` 路径移除，并让 AgentTool 工具描述明确指引主 Agent 通过 `TaskOutput(task_id)` 读取子 Agent 结果。
 
 **Architecture:** 仅修改通知模板字符串与 AgentTool 描述文案；保留 `diskOutput.ts` 的 `.output` 软链接供 UI 调试使用；保留 `TaskOutputTool` 的 finalMessage 优先策略。改动面集中在 zn-agent-core 内两个文件 + 一个新增单测。

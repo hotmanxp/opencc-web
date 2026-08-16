@@ -8,5 +8,4 @@
 // dependency. See `compat/permissions.ts` for the resolution order and
 // error semantics.
 
-export { getDefaultMode } from '@zn-ai/zn-agent-core/compat/permissions'
-export type { UserFacingPermissionMode } from '@zn-ai/zn-agent-core/compat/permissions'
+export { getDefaultMode, type UserFacingPermissionMode } from '@zn-ai/zn-agent-core'

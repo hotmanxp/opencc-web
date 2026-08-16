@@ -32,17 +32,17 @@ import {
 //
 // The import is intentionally deferred (dynamic, inside
 // `initAgentRuntime`) so unrelated test paths that only touch the
-// session-abort helpers don't pay the cost of resolving
-// `@zn-ai/zn-agent-core/opencc-server` (the chain pulls in vendor
+// session-abort helpers don't pay the cost of resolving the package
+// main entry `@zn-ai/zn-agent-core` (the chain pulls in vendor
 // headless bootstrap code that takes ~5s to transform).
-import type { createOpenccRuntime as _factory } from '@zn-ai/zn-agent-core/opencc-server'
+import type { createOpenccRuntime as _factory } from '@zn-ai/zn-agent-core'
 type OpenccRuntime = Awaited<ReturnType<typeof _factory>>
 import { eventBus } from './eventBus.js'
 import {
   startMemoryWatcher,
   stopMemoryWatcher,
-} from '@zn-ai/zn-agent-core/agents/memoryWatcher'
-import { hasExternalIncludes } from '@zn-ai/zn-agent-core/agents/memoryLoader'
+  hasExternalIncludes,
+} from '@zn-ai/zn-agent-core'
 import type { LoadedSkill } from '@zn-ai/zn-agent-core'
 import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
@@ -332,7 +332,7 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // `queryModelWithStreaming` → upstream API.
   try {
     const { createOpenccRuntime: factory } = await import(
-      '@zn-ai/zn-agent-core/opencc-server'
+      '@zn-ai/zn-agent-core'
     )
     runtime = await factory({
       dataDir,

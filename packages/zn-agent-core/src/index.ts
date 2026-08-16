@@ -44,10 +44,10 @@ export * from './compat/mcp/index.js'
 export * from './compat/plugins/index.js'
 
 // DefaultAgentRuntime (Batch 2d) — removed in Task 6. The new server
-// runtime (`@zn-ai/zn-agent-core/opencc-server`) replaces the
-// `DefaultAgentRuntime` path entirely; callers migrated in
-// commit da4c50e5 (Task 5). The `AgentRuntime` interface itself
-// is preserved for back-compat re-export.
+// runtime (opencc-src/server's createOpenccRuntime, exposed via the
+// main entry through bundle-entry.ts) replaces the `DefaultAgentRuntime`
+// path entirely; callers migrated in commit da4c50e5 (Task 5). The
+// `AgentRuntime` interface itself is preserved for back-compat re-export.
 // (no more exports here)
 
 // TranscriptStore (compat) — removed in Task 6. The new server

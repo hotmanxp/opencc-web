@@ -10,8 +10,7 @@
  * 时调)。
  */
 
-import { stateChangeBus } from '@zn-ai/zn-agent-core/runtime'
-import type { BashTaskInfo } from '@zn-ai/zn-agent-core/bashTracker'
+import { stateChangeBus, type BashTaskInfo } from '@zn-ai/zn-agent-core'
 import { eventBus } from './eventBus.js'
 import { getBashNotifier } from './bashNotifier.js'
 

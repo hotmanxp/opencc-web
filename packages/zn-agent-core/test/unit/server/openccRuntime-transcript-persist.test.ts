@@ -30,7 +30,7 @@ describe('createOpenccRuntime — per-turn user message transcript persistence',
     const configDir = mkdtempSync(join(tmpdir(), 'opencc-runtime-transcript-'))
     process.env.CLAUDE_CONFIG_DIR = configDir
 
-    const { createOpenccRuntime } = await import('@zn-ai/zn-agent-core/opencc-server')
+    const { createOpenccRuntime } = await import('@zn-ai/zn-agent-core')
 
     // 绕过真实模型:stub query 直接产出一条 assistant 文本消息。QueryEngine
     // 会把 user prompt 落盘后进入 query loop,消费该消息并正常结束。

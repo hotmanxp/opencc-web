@@ -18,8 +18,8 @@ vi.mock('../../../src/server/services/agentRuntime.js', () => ({
   getServerCwd: () => '/x',
 }))
 
-vi.mock('@zn-ai/zn-agent-core/runtime', async () => {
-  const actual = await vi.importActual<any>('@zn-ai/zn-agent-core/runtime')
+vi.mock('@zn-ai/zn-agent-core', async () => {
+  const actual = await vi.importActual<any>('@zn-ai/zn-agent-core')
   return {
     ...actual,
     repairAndPersistTranscript: (...args: unknown[]) => mocks.repair(...args),

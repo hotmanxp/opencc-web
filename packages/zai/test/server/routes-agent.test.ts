@@ -58,11 +58,15 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
 }))
 
 // Mock @zn-ai/zn-agent-core
-vi.mock('@zn-ai/zn-agent-core/opencc-src/permissions', () => ({
-  // permissionMode.ts:6 启动时用 EXTERNAL_PERMISSION_MODES 构造 VALID_MODES set,
-  // mock 必须提供. 真实值见 zai-agent-core 导出 (5 个 user-facing mode).
-  EXTERNAL_PERMISSION_MODES: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'],
-}))
+vi.mock('@zn-ai/zn-agent-core', async (importOriginal) => {
+  const actual = (await importOriginal()) as Record<string, unknown>
+  return {
+    ...actual,
+    // permissionMode.ts:6 启动时用 EXTERNAL_PERMISSION_MODES 构造 VALID_MODES set,
+    // mock 必须提供. 真实值见 zai-agent-core 导出 (5 个 user-facing mode).
+    EXTERNAL_PERMISSION_MODES: ['default', 'acceptEdits', 'plan', 'bypassPermissions', 'dontAsk'],
+  }
+})
 
 const app = express()
 app.use(express.json())

@@ -10,7 +10,7 @@ import {
   registerSessionController,
   releaseSessionController,
 } from '../../src/server/services/agentRuntime.js'
-import type { BashTaskInfo } from '@zn-ai/zn-agent-core/bashTracker'
+import type { BashTaskInfo } from '@zn-ai/zn-agent-core'
 
 let lastRunOpts: any = null
 let queryCalls = 0

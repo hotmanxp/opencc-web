@@ -34,10 +34,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Imported via the package's `./opencc-core` subpath export (see
-// package.json `exports`). All opencc vendor code is bundled into
-// this single .mjs by scripts/bundle-opencc.ts.
-const BUNDLE_URL = '@zn-ai/zn-agent-core/opencc-core'
+// Imported via the package's main entry — the runtime `default` export
+// IS the single bundle (dist/opencc-core.mjs, see package.json
+// `exports`). All opencc vendor code is bundled into this one .mjs by
+// scripts/bundle-opencc.ts; resolving the main entry instead of the
+// old `./opencc-core` subpath keeps a single module instance.
+const BUNDLE_URL = '@zn-ai/zn-agent-core'
 
 /**
  * zai patch: pre-populate `globalThis.MACRO` before the opencc bundle

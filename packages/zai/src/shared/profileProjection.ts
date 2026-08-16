@@ -16,7 +16,7 @@
  */
 import type { ModelEntry, ModelCapabilities } from './settings.js'
 import type { ProviderProfile } from './types.js'
-import { lookupGenericModelCapabilities } from '@zn-ai/zn-agent-core/opencc-src/utils/model/genericModelCapabilities'
+import { lookupGenericModelCapabilities } from '@zn-ai/zn-agent-core'
 
 /**
  * Project a list of provider profiles onto a flat ModelEntry table for

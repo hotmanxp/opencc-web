@@ -33,7 +33,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createSessionFacade } from '@zn-ai/zn-agent-core/opencc-server'
+import { createSessionFacade } from '@zn-ai/zn-agent-core'
 
 describe('createSessionFacade — server session/transcript facade (Task 3)', () => {
   let dataDir: string

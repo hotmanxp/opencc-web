@@ -83,7 +83,7 @@ describe('AgentTool description rendering — zai compat inline agent list', () 
     process.env.OPENCC_CONFIG_DIR = fixtureConfigDir
 
     installMacroStub()
-    const bundle = await import('@zn-ai/zn-agent-core/opencc-core')
+    const bundle = await import('@zn-ai/zn-agent-core')
     AgentTool = bundle.AgentTool
     getAgentDefinitionsWithOverrides = bundle.getAgentDefinitionsWithOverrides
   }, TIMEOUT)

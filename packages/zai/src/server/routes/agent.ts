@@ -18,21 +18,20 @@ import {
   setCurrentSessionId,
   listSkills,
 } from "../services/agentRuntime.js";
-import { EXTERNAL_PERMISSION_MODES } from "@zn-ai/zn-agent-core/opencc-src/permissions";
 import {
+  EXTERNAL_PERMISSION_MODES,
   getApiCallCount,
   getLastContextTokens,
   setCurrentApiCountSession,
   clearApiCallCount,
-} from "@zn-ai/zn-agent-core/opencc-src/services/api/sessionApiCounter";
-import type { UserFacingPermissionMode } from "@zn-ai/zn-agent-core/compat/permissions";
-import { CwdStore, runWithSessionId } from "@zn-ai/zn-agent-core/runtime";
-import {
+  CwdStore,
+  runWithSessionId,
   appendUserMessageV2,
   appendAssistantMessageV2,
   appendToolUse,
   appendToolResult,
-} from "@zn-ai/zn-agent-core/runtime";
+  type UserFacingPermissionMode,
+} from "@zn-ai/zn-agent-core";
 import { getDefaultMode } from "../services/permissionMode.js";
 import { flushPendingSubagentNotifications } from "../services/subagentNotifier.js";
 import { flushPendingBashNotifications } from "../services/bashNotifier.js";

@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { mkdtemp, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createOpenccRuntime } from '@zn-ai/zn-agent-core/opencc-server'
+import { createOpenccRuntime } from '@zn-ai/zn-agent-core'
 
 // Minimal stdio MCP server (newline-delimited JSON-RPC over stdin/stdout).
 // The runtime's MCP client (official @modelcontextprotocol/sdk

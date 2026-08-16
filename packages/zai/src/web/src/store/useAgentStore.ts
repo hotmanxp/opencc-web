@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { flushSync } from 'react-dom'
 import type { ServerEvent } from '../../../shared/events.js'
 import type { ModelEntry } from '../../../shared/settings.js'
-import type { PermissionMode } from '@zn-ai/zn-agent-core/runtime'
+import type { PermissionMode } from '@zn-ai/zn-agent-core'
 import type { BashTaskInfo, BackgroundTask, TaskStatus } from '../lib/taskApi.js'
 
 // ========== URL <-> sessionId 双向同步 ==========

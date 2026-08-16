@@ -35,9 +35,9 @@ import { wrapSkillToolAsOpencc } from './SkillTool.js'
 export type OpenccBuiltinTool = any
 
 // Same bundle as openccQueryBridge.ts. Imported via the package's
-// `./opencc-core` subpath export so we don't depend on the relative
-// layout of dist/ subdirs.
-const BUNDLE_URL = '@zn-ai/zn-agent-core/opencc-core'
+// main entry (whose runtime `default` IS the bundle) so we don't
+// depend on the relative layout of dist/ subdirs.
+const BUNDLE_URL = '@zn-ai/zn-agent-core'
 
 /**
  * zai patch: overwrite `tool.checkPermissions` on the live vendor Tool

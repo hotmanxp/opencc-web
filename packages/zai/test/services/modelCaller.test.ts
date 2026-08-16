@@ -2,7 +2,7 @@ import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { RETRY_POLICY } from '@zn-ai/zn-agent-core/runtime'
+import { RETRY_POLICY } from '@zn-ai/zn-agent-core'
 
 type MockResponse =
   | { kind: 'throw'; error: Error }
@@ -19,12 +19,15 @@ vi.mock('@anthropic-ai/sdk', () => ({
   },
 }))
 
-let tmpHome = ''
+// vi.mock factory 是 hoisted 的,而 bundle(主入口)顶层会在 import 时立即
+// 触发 homedir()(isForkSubagentEnabled → getSettingsForSource)。用
+// vi.hoisted 保证容器先于 mock factory 求值,避免 TDZ ReferenceError。
+const tmpHomeBox = vi.hoisted(() => ({ path: '' }))
 vi.mock('node:os', async () => {
   const actual = await vi.importActual<typeof import('node:os')>('node:os')
   return {
     ...actual,
-    homedir: () => tmpHome,
+    homedir: () => tmpHomeBox.path,
   }
 })
 
@@ -49,10 +52,10 @@ function make401Error() {
 }
 
 async function setupMockHome() {
-  tmpHome = mkdtempSync(join(tmpdir(), 'zai-mc-test-'))
-  mkdirSync(join(tmpHome, '.zai'), { recursive: true })
+  tmpHomeBox.path = mkdtempSync(join(tmpdir(), 'zai-mc-test-'))
+  mkdirSync(join(tmpHomeBox.path, '.zai'), { recursive: true })
   writeFileSync(
-    join(tmpHome, '.zai', 'settings.json'),
+    join(tmpHomeBox.path, '.zai', 'settings.json'),
     JSON.stringify({
       env: {
         ANTHROPIC_AUTH_TOKEN: 'test-key',
@@ -103,7 +106,7 @@ afterEach(() => {
     ;(RETRY_POLICY as { baseDelayMs: number }).baseDelayMs = 500
     ;(RETRY_POLICY as { maxDelayMs: number }).maxDelayMs = 32_000
   }
-  if (tmpHome) rmSync(tmpHome, { recursive: true, force: true })
+  if (tmpHomeBox.path) rmSync(tmpHomeBox.path, { recursive: true, force: true })
 })
 
 async function callModelCaller() {
@@ -178,7 +181,7 @@ describe('createAnthropicModelCaller — 529 retry loop', () => {
 
 function writeProviderProfiles(profiles: unknown[]) {
   writeFileSync(
-    join(tmpHome, '.zai.json'),
+    join(tmpHomeBox.path, '.zai.json'),
     JSON.stringify({ providerProfiles: profiles }),
   )
 }
@@ -245,7 +248,7 @@ describe('resolveProviderForModel — apiKeyEnv resolution', () => {
   // and our per-test env overrides would be silently ignored.
   async function primeCache(env: Record<string, string>) {
     writeFileSync(
-      join(tmpHome, '.zai', 'settings.json'),
+      join(tmpHomeBox.path, '.zai', 'settings.json'),
       JSON.stringify({ env }),
     )
     const cacheMod = await import('../../src/server/services/zaiSettingsCache.js')

@@ -37,8 +37,8 @@ vi.mock('../services/agentRuntime.js', async (importOriginal) => {
   }
 })
 
-vi.mock('@zn-ai/zn-agent-core/runtime', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('@zn-ai/zn-agent-core/runtime')>()
+vi.mock('@zn-ai/zn-agent-core', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('@zn-ai/zn-agent-core')>()
   return {
     ...actual,
     runWithSessionId: (_sid: string, fn: () => unknown) => fn(),
