@@ -106,7 +106,7 @@ function inputHash(): string {
   )
   // Bump this string when the bundle recipe (configCheckPatchRe,
   // plugins, externals) changes so old stamps are treated as stale.
-  h.update('recipe:v5\n')
+  h.update('recipe:v6\n')
   return h.digest('hex').slice(0, 16)
 }
 
@@ -496,9 +496,9 @@ const UI_COMPONENT_KEEP_FILES = [
   // color.ts — color() 纯函数被 ink.ts, services/tips/tipRegistry.ts,
   //            utils/treeify.ts, utils/completionCache.ts, utils/markdown.ts 引用
   'components/design-system/color.ts',
-  // ThemeProvider.tsx — useTheme/useThemeSetting/usePreviewTheme hooks
-  //            被 hooks/useCopyOnSelect.ts 引用,组件 JSX 是死代码但 hooks 不能 stub
-  'components/design-system/ThemeProvider.tsx',
+  // ThemeProvider.tsx — 工作块 C:从 KEEP_FILES 移到 FILE_LOCAL_STUB_PATHS,
+  //            用 file-local AST 替换只 stub 组件函数体,保留 hooks。
+  //            见 THEME_PROVIDER_FILE + commandImplStubPlugin。
   // PromptInput 纯函数工具 — 被 hooks/useHistorySearch.ts、
   //            hooks/useTextInput.ts、hooks/useCancelRequest.ts 引用
   'components/PromptInput/inputModes.ts',
@@ -569,10 +569,33 @@ const COMMAND_IMPL_STUB_PATHS: ReadonlySet<string> = (() => {
   return new Set(out)
 })()
 
-const FILE_LOCAL_STUB_PATHS: Set<string> = new Set(COMMAND_IMPL_STUB_PATHS)
+// 工作块 C:ThemeProvider 函数体 stub
+// ThemeProvider.tsx 是"组件 + hooks(useTheme / useThemeSetting /
+// usePreviewTheme)混排":hooks 被 hooks/useCopyOnSelect.ts 等 .ts 引用
+// 保留;组件 JSX 在 zai 上不会被渲染(zai 是 HTTP server,ink 渲染
+// 入口已在工作块 B stub,ThemeProvider.Provider 只在 ink.ts 的
+// withTheme 包裹里被引用 → withTheme 自身是死代码)。所以这里登记
+// 单文件走 file-local AST 替换:只把 `ThemeProvider` 函数体换成
+// `return null`,hooks 全部保留。
+//
+// 之前 ThemeProvider.tsx 在 UI_COMPONENT_KEEP_FILES 里,理由是
+// "hooks 不能 stub";现在 file-local AST 路径可以细粒度只动组件
+// 函数体,所以从 KEEP_FILES 移除、加入 FILE_LOCAL_STUB_PATHS。
+const THEME_PROVIDER_FILE = join(
+  ROOT,
+  'src',
+  'opencc-src',
+  'components',
+  'design-system',
+  'ThemeProvider.tsx',
+)
+const FILE_LOCAL_STUB_PATHS: Set<string> = new Set([
+  ...COMMAND_IMPL_STUB_PATHS,
+  ...(existsSync(THEME_PROVIDER_FILE) ? [THEME_PROVIDER_FILE] : []),
+])
 
-// 工作块 C 兜底 —— 当前为空;未来 ThemeProvider.tsx 等"组件+hooks 混排"文件
-// 加入后,这里登记需要走 file-local 替换但当前不在 COMMAND_IMPL_STUB_PATHS
+// 工作块 C 兜底 —— 当前为空;未来其它"组件+hooks 混排"文件加入后,
+// 这里登记需要走 file-local 替换但当前不在 COMMAND_IMPL_STUB_PATHS
 // 范围(commands/ 外)的文件。
 const FILE_LOCAL_STUB_KEEP_FILES: string[] = []
 
@@ -664,7 +687,13 @@ const commandImplStubPlugin: esbuild.Plugin = {
     // loader,**绕过我 plugin 的 onResolve filter**。onLoad 对任何进
     // 入 graph 的文件必经(无论 import 路径形态),更适合精确匹配本地
     // 路径清单做"文件内 AST 替换"。
-    build.onLoad({ filter: /\.[cm]?tsx?$/ }, (args) => {
+    //
+    // namespace 维度:ThemeProvider.tsx 在 design-system/ 下,被
+    // uiComponentStubPlugin 的 onResolve 标 `ui-component-stub`
+    // namespace。esbuild 的 onLoad 只调用匹配 namespace 的 handler,
+    // 所以这里两个 namespace 都注册(file 默认 namespace 也覆盖
+    // 命令模块路径)。
+    const handler = (args: { path: string }): esbuild.OnLoadResult | null => {
       if (!FILE_LOCAL_STUB_PATHS.has(args.path)) return null
       // 一期 UI_COMPONENT_KEEP_FILES 命中的仍走原文件,避免整文件 stub
       // 与文件内 AST stub 同时命中的混乱场景。
@@ -685,8 +714,18 @@ const commandImplStubPlugin: esbuild.Plugin = {
       return {
         contents: out,
         loader: args.path.endsWith('.tsx') ? 'tsx' : 'ts',
+        // ThemeProvider.tsx 在 ui-component-stub namespace(被
+        // uiComponentStubPlugin 标 namespace 后被本 plugin 接管),
+        // esbuild 默认不再用文件路径作为 resolveDir,必须显式提供
+        // 否则它内嵌的 import('../../utils/config.js') 等无法解析。
+        resolveDir: dirname(args.path),
       }
-    })
+    }
+    build.onLoad({ filter: /\.[cm]?tsx?$/ }, handler)
+    build.onLoad(
+      { filter: /\.[cm]?tsx?$/, namespace: 'ui-component-stub' },
+      handler,
+    )
   },
 }
 
