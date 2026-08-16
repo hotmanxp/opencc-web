@@ -1,11 +1,8 @@
 import path from 'node:path'
+import fs from 'node:fs/promises'
 import type { PromptCommand, CommandContext } from '@zn-ai/zn-agent-core'
 import type { ContentBlockParam } from '@zn-ai/zn-agent-core'
-import {
-  listHandoffs,
-  getLatestHandoff,
-  buildHandoffPath,
-} from '@zn-ai/zn-agent-core'
+import { listHandoffs } from '@zn-ai/zn-agent-core'
 import { buildGeneratePrompt } from './handoff/prompts/generate.js'
 import { buildPickupPrompt, HandoffArgsError } from './handoff/prompts/pickup.js'
 
@@ -107,7 +104,7 @@ export const handoffCommand: PromptCommand = {
       const files: { path: string; mtimeMs: number }[] = await Promise.all(
         filePaths.map(async (p) => {
           try {
-            const st = await import('node:fs/promises').then((m) => m.stat(p))
+            const st = await fs.stat(p)
             return { path: p, mtimeMs: st.mtimeMs }
           } catch {
             return { path: p, mtimeMs: 0 }
