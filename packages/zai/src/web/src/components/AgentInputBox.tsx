@@ -780,8 +780,36 @@ export default React.memo(function AgentInputBox() {
             minWidth:0 关键 — 不加时 flex item 默认 min-width:auto (= content 尺寸),
             在窄屏下 spacer 会反向挤压任务摘要到 0 宽, 表现为"被遮挡". */}
         <span style={{ flex: 1, minWidth: 0 }} />
+        {/* 「+ 命令」按钮: 桌面 + 移动端均挂载. 行为完全相同 — 点击弹出
+            QuickCommandPopover (跨端复用). 移动端另保留 AppstoreAddOutlined
+            按钮 (→ MobileQuickDrawer 3 Tab) 作为补充入口 (bash/prompt/git
+            移动端专属).
+            位置: spacer 后第一个,作为工具栏右端第一入口 — 命令面板是用户最
+            常用的辅助操作之一,放在最左能让拇指/鼠标最快够到. aria-pressed
+            传达开关态, 红色高亮 active 状态. */}
+        <Tooltip title="命令/技能" placement="top">
+          <Button
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setQuickOpen((v) => !v);
+              // 两条路径互斥: 打开 + 弹层时关闭 / slash 自动补全下拉,
+              // 避免两个 dropdown 叠在同一锚点上互相遮挡.
+              setShowSkillMenu(false);
+            }}
+            data-testid="quick-command-trigger"
+            aria-label="打开命令/技能列表"
+            aria-pressed={quickOpen}
+            style={{
+              ...toolbarIconButtonStyle,
+              ...(quickOpen && {
+                color: TOOLBAR_ACTIVE_COLOR,
+                borderColor: TOOLBAR_ACTIVE_COLOR,
+              }),
+            }}
+          />
+        </Tooltip>
         {/* Share 按钮: 分享当前 session 到 LAN.
-            - 位置: spacer 后最右, 作为工具栏右端第一入口 (演示场景核心操作).
+            - 位置: spacer 后第二, 工具栏右端第二个入口 (演示场景核心操作).
             - disabled: 无 sessionId 时 disabled (分享空 session 无意义).
             - Popover: 受控 open={shareOpen}, 内部渲染 SharePopover.
             - 图标色与同行其他按钮一致 (var(--text-dim-45)).
@@ -921,34 +949,6 @@ export default React.memo(function AgentInputBox() {
           disabled={status === "streaming" || pendingAsk?.status === "pending"}
           style={toolbarIconButtonStyle}
         />
-        {/* 「+ 命令」按钮: 桌面 + 移动端均挂载. 行为完全相同 — 点击弹出
-            QuickCommandPopover (跨端复用). 移动端另保留 AppstoreAddOutlined
-            按钮 (→ MobileQuickDrawer 3 Tab) 作为补充入口 (bash/prompt/git
-            移动端专属).
-            位置: 上传图片按钮之后, ConversationInfoButton 之前 — 介于"媒体操作"
-            与"会话信息"之间, 视觉上与图片按钮同组(都是输入相关辅助).
-            aria-pressed 传达开关态, 红色高亮 active 状态. */}
-        <Tooltip title="命令/技能" placement="top">
-          <Button
-            icon={<PlusOutlined />}
-            onClick={() => {
-              setQuickOpen((v) => !v);
-              // 两条路径互斥: 打开 + 弹层时关闭 / slash 自动补全下拉,
-              // 避免两个 dropdown 叠在同一锚点上互相遮挡.
-              setShowSkillMenu(false);
-            }}
-            data-testid="quick-command-trigger"
-            aria-label="打开命令/技能列表"
-            aria-pressed={quickOpen}
-            style={{
-              ...toolbarIconButtonStyle,
-              ...(quickOpen && {
-                color: TOOLBAR_ACTIVE_COLOR,
-                borderColor: TOOLBAR_ACTIVE_COLOR,
-              }),
-            }}
-          />
-        </Tooltip>
         <ConversationInfoButton />
         {/* 移动端「常用指令」按钮: 仅 isMobile 时挂载.
             位置: 工具栏最右端 (紧贴 ConversationInfoButton), 与桌面端
