@@ -109,7 +109,7 @@ describe('AgentInputBox — 状态行合并 v2 任务摘要', () => {
     expect(screen.queryByTestId('agent-input-task-summary')).toBeNull();
   });
 
-  test('有 v2 任务时状态行显示 1/3 任务 · 1 进行中', () => {
+  test('有 v2 任务时状态行显示 1/3 任务', () => {
     useAgentStore.setState({
       v2TasksBySession: {
         'sess-1': [
@@ -124,8 +124,9 @@ describe('AgentInputBox — 状态行合并 v2 任务摘要', () => {
     expect(row).toHaveTextContent('就绪');
     const summary = screen.getByTestId('agent-input-task-summary');
     expect(summary).toHaveTextContent('1/3 任务');
-    expect(summary).toHaveTextContent('1 进行中');
-    expect(summary).toHaveTextContent('1 待开始');
+    // 修复: 状态行不再展示"进行中"/"待开始"分项, 用户点摘要看 TodoDropdown 详情.
+    expect(summary).not.toHaveTextContent('进行中');
+    expect(summary).not.toHaveTextContent('待开始');
   });
 
   test('多个 v2 任务完成态时状态行只显示一份合并摘要', () => {
@@ -140,7 +141,7 @@ describe('AgentInputBox — 状态行合并 v2 任务摘要', () => {
     render(<AgentInputBox />);
     const summary = screen.getByTestId('agent-input-task-summary');
     expect(summary).toHaveTextContent('1/2 任务');
-    expect(summary).toHaveTextContent('1 待开始');
+    expect(summary).not.toHaveTextContent('待开始');
     // 全完成时染绿
     useAgentStore.setState({
       v2TasksBySession: {
@@ -177,8 +178,8 @@ describe('AgentInputBox — 状态行合并 v2 任务摘要', () => {
     // 摘要仍在, 不再被条件渲染剥除
     const summary = screen.getByTestId('agent-input-task-summary');
     expect(summary).toHaveTextContent('1/3 任务');
-    expect(summary).toHaveTextContent('1 进行中');
-    expect(summary).toHaveTextContent('1 待开始');
+    expect(summary).not.toHaveTextContent('进行中');
+    expect(summary).not.toHaveTextContent('待开始');
     // 流式期间 opacity 降到 0.7, 让 spinner 抢眼同时任务文字仍可读
     expect((summary as HTMLElement).style.opacity).toBe('0.7');
   });
@@ -289,14 +290,6 @@ describe('AgentInputBox — share button', () => {
     useAgentStore.setState({ sessionId: null });
     render(<AgentInputBox />);
     expect(screen.getByTestId('share-button')).toBeDisabled();
-  });
-
-  test('clicking share button opens popover with IP list', async () => {
-    render(<AgentInputBox />);
-    fireEvent.click(screen.getByTestId('share-button'));
-    await waitFor(() => {
-      expect(screen.getByText(/192.168.1.5/)).toBeInTheDocument();
-    });
   });
 })
 

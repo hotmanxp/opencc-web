@@ -120,13 +120,10 @@ export default React.memo(function AgentInputBox() {
   // outputStyle 仅用于 tooltip 文案:让用户知道 settings 是 compact,
   // 刷新后会回到当前这个工具栏按钮点击后的反向设置.
   const outputStyle = useAppStore((s) => s.outputStyle);
-  const v2Total = v2Tasks.length;
-  const v2Done = v2Tasks.filter((t) => t.status === "completed").length;
-  const v2InProgress = v2Tasks.filter((t) => t.status === "in_progress").length;
-  const totalTasks = v2Total;
-  const doneTasks = v2Done;
-  const inProgressTasks = v2InProgress;
-  const openTasks = v2Total - v2Done - v2InProgress;
+  // 任务摘要: 只统计完成数与总数, 不再展示"进行中"/"待开始"分项 — 状态行更紧凑,
+  // 用户需要看分项时点摘要 → 弹出 TodoDropdown 详细列表.
+  const totalTasks = v2Tasks.length;
+  const doneTasks = v2Tasks.filter((t) => t.status === "completed").length;
 
   const [input, setInput] = useState("");
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
@@ -766,16 +763,6 @@ export default React.memo(function AgentInputBox() {
                 <span style={{ color: doneTasks === totalTasks ? "var(--success)" : "var(--text-primary)" }}>
                   {doneTasks}/{totalTasks} 任务
                 </span>
-                {inProgressTasks > 0 && (
-                  <span style={{ color: "#a78bfa", marginLeft: 8 }}>
-                    · {inProgressTasks} 进行中
-                  </span>
-                )}
-                {openTasks > 0 && (
-                  <span style={{ color: "var(--text-tertiary)", marginLeft: 8 }}>
-                    · {openTasks} 待开始
-                  </span>
-                )}
               </span>
             </Tooltip>
           </Popover>
