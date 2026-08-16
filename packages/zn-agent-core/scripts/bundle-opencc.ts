@@ -28,7 +28,7 @@ import {
   statSync,
   writeFileSync,
 } from 'node:fs'
-import { dirname, join, relative, sep } from 'node:path'
+import { dirname, isAbsolute, join, relative, resolve, sep } from 'node:path'
 import { fileURLToPath } from 'node:url'
 import * as esbuild from 'esbuild'
 import ts from 'typescript'
@@ -436,6 +436,103 @@ const STUB_EXPORTS: Record<string, string[]> = {
   'react-reconciler': ['default'],
 }
 
+// ── UI 组件 stub 清单(zai patch 2026-08-16)────────────────────────────
+// opencc-src/components/ 下的 React UI 组件在 zai 运行路径上完全不会被
+// 渲染(zai 是 Node HTTP server,无 DOM/TTY;preact-shim.ts:12 已确认)。
+// 但 vendor 命令注册表(commands.ts)静态 import 命令模块,命令模块 import
+// 组件 → esbuild 把整棵组件树打进 bundle(17MB 中 1.5MB 来自 components/)。
+// 这里把"纯组件模块"列入 stub 清单,组件导出变成 `() => null`,依赖
+// (preact/design-system/其他组件)随之被 tree-shake。
+//
+// 不动 commands/、ink/、screens/、state/、cli/、buddy/、assistant/、
+// vim/、voice/ —— 那些混排运行逻辑/非组件导出,留给二期精准处理。
+const UI_COMPONENT_STUB_DIRS = [
+  'components/design-system',
+  'components/agents',
+  'components/CustomSelect',
+  'components/FeedbackSurvey',
+  'components/LogoV2',
+  'components/mcp',
+  'components/memory',
+  'components/messages',
+  'components/permissions',
+  'components/PromptInput',
+  'components/Spinner',
+  'components/StructuredDiff',
+  'components/tasks',
+  'components/wizard',
+  'components/ui',
+  'components/hooks',
+  'components/shell',
+  'components/sandbox',
+  'components/Settings',
+  'components/teams',
+  'components/diff',
+  'components/HelpV2',
+  'components/ClaudeCodeHint',
+  'components/DesktopUpsell',
+  'components/grove',
+  'components/HighlightedCode',
+  'components/LspRecommendation',
+  'components/ManagedSettingsSecurityDialog',
+  'components/Passes',
+  'components/TrustDialog',
+  'components/StartupHeader',
+  'components/ExitDialog',
+  'components/skills',
+]
+
+// 显式"不能 stub"的混排文件(被 .ts 文件 import 了非组件导出 —— 纯
+// 函数/常量/hooks/类型)。explore 报告已系统排查 .ts 引用方。
+//
+// 设计原则:路径匹配以"完整路径"或"目录前缀"形式登记,plugin 在
+// `endsWith(/${keep})` 命中时跳过 stub,走原始文件。re-export/类型导出
+// 即使留存在 stub 模块里也不影响运行时(类型编译擦除、re-export 走
+// 原文件保留),所以这里保守地"只排除确实有非组件导出被 .ts 用的"。
+const UI_COMPONENT_KEEP_FILES = [
+  // color.ts — color() 纯函数被 ink.ts, services/tips/tipRegistry.ts,
+  //            utils/treeify.ts, utils/completionCache.ts, utils/markdown.ts 引用
+  'components/design-system/color.ts',
+  // ThemeProvider.tsx — useTheme/useThemeSetting/usePreviewTheme hooks
+  //            被 hooks/useCopyOnSelect.ts 引用,组件 JSX 是死代码但 hooks 不能 stub
+  'components/design-system/ThemeProvider.tsx',
+  // PromptInput 纯函数工具 — 被 hooks/useHistorySearch.ts、
+  //            hooks/useTextInput.ts、hooks/useCancelRequest.ts 引用
+  'components/PromptInput/inputModes.ts',
+  'components/PromptInput/utils.ts',
+  'components/PromptInput/footerVisibility.ts',
+  'components/PromptInput/goalFormat.ts',
+  'components/PromptInput/inputPaste.ts',
+  // Spinner 工具 — types.ts 的 SpinnerMode 类型被 .ts hooks/services
+  //            引用(types 编译擦除,保留即可);utils.ts + index.ts 提供
+  //            纯函数给组件本身用,组件被 stub 后这些 .ts 不再被
+  //            import,可一起 stub 但保险起见保留
+  'components/Spinner/types.ts',
+  'components/Spinner/index.ts',
+  'components/Spinner/utils.ts',
+  // FeedbackSurvey 工具 — utils.ts 类型被 hooks/useSkillImprovementSurvey.ts 引用
+  'components/FeedbackSurvey/utils.ts',
+  // mcp/types.ts, mcp/index.ts — 类型/re-export 被 services/mcp/utils.ts 引用
+  'components/mcp/types.ts',
+  'components/mcp/index.ts',
+  'components/mcp/utils',
+  // CustomSelect 内部 hooks + 类型 re-export
+  'components/CustomSelect/index.ts',
+  'components/CustomSelect/option-map.ts',
+  'components/CustomSelect/use-select-state.ts',
+  'components/CustomSelect/use-select-input.ts',
+  'components/CustomSelect/use-select-navigation.ts',
+  'components/CustomSelect/use-multi-select-state.ts',
+  // agents 内部纯函数工具
+  'components/agents/agentFileUtils.ts',
+  'components/agents/generateAgent.ts',
+  'components/agents/types.ts',
+  'components/agents/utils.ts',
+  'components/agents/validateAgent.ts',
+  // StartupHeader 工具
+  'components/StartupHeader/StartupHeader.pure.ts',
+]
+
 const optionalStubPlugin: esbuild.Plugin = {
   name: 'optional-stub',
   setup(build) {
@@ -497,6 +594,134 @@ export const getPublicRootInstance = () => null
   },
 }
 
+// ── UI 组件 stub 插件(zai patch 2026-08-16)─────────────────────────────
+// 把 UI_COMPONENT_STUB_DIRS 下、被 import 的纯组件模块在构建时替换为
+// "导出全部为 () => null"的 stub 模块。被 stub 的模块的依赖(preact
+// 运行时、其他组件、design-system 原子)被 esbuild 视为无引用,自动
+// tree-shake。预期:components/ 对 bundle 输出的字节贡献从 1.5MB 降到
+// ~0.3-0.4MB(只剩 KEEP_FILES 中混排的纯函数/类型),整体 bundle
+// 从 17MB → ~15.7MB。
+//
+// stub 内容生成:用 TypeScript 编译器 API 读原文件顶层 export 标识符。
+// 兜底覆盖 function/const/var/class/default;类型/接口 export 编译时
+// 擦除,不需要生成。re-export 在纯组件模块里罕见,如漏报
+// "No matching export",定位后追加即可。
+function extractExportedNames(contents: string, filePath: string): string[] {
+  const sf = ts.createSourceFile(filePath, contents, ts.ScriptTarget.Latest, true)
+  const names: string[] = []
+  const EXPORT = ts.SyntaxKind.ExportKeyword
+  const DEFAULT = ts.SyntaxKind.DefaultKeyword
+  for (const stmt of sf.statements) {
+    // export default X 是 ExportAssignment 节点,本身就是 export 形式,
+    // 不需要 ExportKeyword modifier。优先识别避免漏 default export。
+    if (ts.isExportAssignment(stmt)) {
+      names.push('default')
+      continue
+    }
+    // export { X, Y } from './foo.js'(re-export)和 export { X, Y }(本地 re-export)
+    // 是 ExportDeclaration 节点,同样自带 export 语义。
+    if (ts.isExportDeclaration(stmt)) {
+      if (stmt.exportClause && ts.isNamedExports(stmt.exportClause)) {
+        for (const el of stmt.exportClause.elements) {
+          names.push(el.name.text)
+        }
+      }
+      continue
+    }
+    const mods = stmt.modifiers
+    if (!mods || !mods.some((m: { kind: number }) => m.kind === EXPORT)) continue
+    // export default fn/const/class 同时含 ExportKeyword + DefaultKeyword;
+    // export default X 单独 assignment 已被上面的 isExportAssignment 捕获。
+    const isDefault = mods.some((m: { kind: number }) => m.kind === DEFAULT)
+    if (ts.isFunctionDeclaration(stmt) && stmt.name) {
+      if (isDefault) names.push('default')
+      names.push(stmt.name.text)
+    } else if (ts.isVariableStatement(stmt)) {
+      if (isDefault) names.push('default')
+      for (const decl of stmt.declarationList.declarations) {
+        if (ts.isIdentifier(decl.name)) names.push(decl.name.text)
+      }
+    } else if (ts.isClassDeclaration(stmt) && stmt.name) {
+      if (isDefault) names.push('default')
+      names.push(stmt.name.text)
+    }
+    // type/interface/enum 编译擦除,跳过
+  }
+  return names
+}
+
+function buildUiStub(exportedNames: string[], isTsx: boolean): string {
+  const seen = new Set<string>()
+  const lines: string[] = []
+  for (const name of exportedNames) {
+    if (seen.has(name)) continue
+    seen.add(name)
+    if (name === 'default') {
+      // 默认导出:组件 → () => null;常量/类 → null。stub 目录都是纯
+      // 组件,但 .ts 也可能 default export 一个函数/常量 —— 统一
+      // () => null 在 zai 渲染语境下安全(返回 null 由调用方处理)
+      lines.push('export default () => null')
+    } else if (isTsx) {
+      lines.push(`export function ${name}() { return null }`)
+    } else {
+      lines.push(`export const ${name} = null`)
+    }
+  }
+  if (lines.length === 0) lines.push('export default {}')
+  return lines.join('\n') + '\n'
+}
+
+const uiComponentStubPlugin: esbuild.Plugin = {
+  name: 'ui-component-stub',
+  setup(build) {
+    build.onResolve({ filter: /.*/ }, (args) => {
+      // 只对文件路径解析,跳过 npm 包和已 namespace 化的路径
+      if (args.namespace !== 'file' && args.namespace !== '') return null
+      if (!args.path.startsWith('/') && !args.path.startsWith('.')) return null
+      // esbuild 的 args.path 对相对 import 是 import 字符串(常以 .js
+      // 后缀结尾,即使源是 .ts/.tsx),onLoad 里 readFileSync 需要磁盘上
+      // 真实存在的文件路径,这里 resolve + 扩展名候选解析。
+      const absolutePath = isAbsolute(args.path)
+        ? args.path
+        : resolve(args.resolveDir, args.path)
+      // components/ 下都是 .ts/.tsx;尝试加/替扩展名直到 exists
+      let resolvedPath = absolutePath
+      if (!existsSync(resolvedPath)) {
+        const stripped = resolvedPath.replace(/\.js$/, '')
+        if (existsSync(stripped + '.tsx')) resolvedPath = stripped + '.tsx'
+        else if (existsSync(stripped + '.ts')) resolvedPath = stripped + '.ts'
+        else return null
+      }
+      for (const dir of UI_COMPONENT_STUB_DIRS) {
+        // 匹配 `/${dir}/`(components/ 子目录)避免误伤 opencc-src 之外
+        // 同名路径
+        if (resolvedPath.includes(`/${dir}/`)) {
+          // 保留清单命中 → 走原始文件
+          for (const keep of UI_COMPONENT_KEEP_FILES) {
+            if (
+              resolvedPath.endsWith(`/${keep}`) ||
+              resolvedPath.includes(`/${keep}/`)
+            ) {
+              return null
+            }
+          }
+          return { path: resolvedPath, namespace: 'ui-component-stub' }
+        }
+      }
+      return null
+    })
+    build.onLoad({ filter: /.*/, namespace: 'ui-component-stub' }, (args) => {
+      const contents = readFileSync(args.path, 'utf8')
+      const exportedNames = extractExportedNames(contents, args.path)
+      const isTsx = args.path.endsWith('.tsx')
+      return {
+        contents: buildUiStub(exportedNames, isTsx),
+        loader: 'js',
+      }
+    })
+  },
+}
+
 // ── react → preact/compat alias 插件 ─────────────────────────────────
 // opencc-src 的 'react' import 全部指向 preact-shim(见 src/compat/preact-shim.ts)。
 // preact/compat 提供 react 兼容 API 且体积远小于 react;bundle 不再内联
@@ -541,7 +766,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   external: [
     // Native / not-in-deps
     'sharp',
@@ -756,7 +981,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   // Keep external — Node resolves at runtime via package deps.
   external: [
     'sharp',
@@ -800,7 +1025,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   external: [
     'sharp',
     'google-auth-library',
@@ -863,7 +1088,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   external: [
     'sharp', 'google-auth-library', '@vscode/ripgrep',
     '@orama/orama', '@orama/plugin-data-persistence',
@@ -927,7 +1152,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   external: [
     'sharp', 'google-auth-library', '@vscode/ripgrep',
     '@orama/orama', '@orama/plugin-data-persistence',
@@ -1078,7 +1303,7 @@ await esbuild.build({
       "import { createRequire as __createRequire } from 'node:module';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   external: [
     'sharp',
     'google-auth-library',
