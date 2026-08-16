@@ -69,7 +69,13 @@
   --bg-body: #ffffff;
   --bg-card: #f1f5f5;
   --bg-card-hover: #e2e8f0;
-  --bg-card-ansi: #64748b;
+  /* PermissionConfirmCard / QuestionCard 卡片底色: 与 dark 主题对称,
+     都用浅灰 #f1f5f5. 之前 light 是 #64748b (深灰) 在白底 + 黑字下看起来
+     像维护面板, 深灰卡片上叠 4% 黑又趋近全黑, 改回浅灰后:
+       - dark: #f1f5f5 + --bg-faint-04 (4% 白) = 稍亮浅灰
+       - light: #f1f5f5 + --bg-faint-04 (4% 黑) = 稍深浅灰
+     两个主题视觉对称. */
+  --bg-card-ansi: #f1f5f5;
   --ui-text-color: #1a1a2e;
   --ui-text-dim: #c6c6c6;
   --bg-tab: '#e4e4e4';
@@ -375,9 +381,6 @@ body {
 .question-card-scope,
 .question-card-scope *:not(.ant-tag):not(.ant-tag *) {
   color: #1f1f1f !important;
-}
-.question-card-scope.permission-confirm-card pre:not(.ant-tag):not(.ant-tag *) {
-  color: var(--text-primary) !important;
 }
 /* antd Tag 在 darkAlgorithm 下用紫色背景 + 白色文字, 通配符不能把它强制成深色
    (否则深色字 on 紫色背景完全看不清). 这里显式覆盖回白色, 让 pill 内部文字
