@@ -98,6 +98,12 @@ export class ServerEventBus {
   // 全局事件 (session.* / system.*) 留在全局 history, 它们不归某个 sid.
   // 容量同样按 CAPACITY 裁, 避免单 sid 长期占满内存.
   private historyBySid = new Map<string, ServerEvent[]>()
+  // 溢出告警边沿触发标志: 首次溢出时 console.warn 一次, 之后静默。
+  // 原实现每条 emit 都 warn, 高频 emit 场景下 (LLM 流式 + 后台多任务) 终端被刷屏,
+  // 真正的错误信号反而被淹没。"正在溢出"是状态不是离散事件, 边沿触发足够 —
+  // 既保留可观测性 (grep "全局缓冲已达" 可定位溢出起点), 又不刷屏。
+  private globalOverflowWarned = false
+  private sidOverflowWarned = new Set<string>()
 
   emit(event: ServerEventInput) {
     const full: ServerEvent = {
@@ -109,8 +115,11 @@ export class ServerEventBus {
     this.history.push(full)
     if (this.history.length > CAPACITY) {
       // 溢出告警: 长时间运行 + 高频事件时早期事件静默丢失, 重连后视图不完整.
-      // 只 console.warn 不推 toast, 避免高频刷屏.
-      console.warn(`[eventBus] history overflow: 全局缓冲已达 ${CAPACITY} 条, 最旧事件将被丢弃`)
+      // 只在首次溢出时输出, 之后静默, 避免高频 emit 刷屏.
+      if (!this.globalOverflowWarned) {
+        console.warn(`[eventBus] history overflow: 全局缓冲已达 ${CAPACITY} 条, 最旧事件将被丢弃 (后续溢出静默)`)
+        this.globalOverflowWarned = true
+      }
       this.history.shift()
     }
     // 写 per-sid 切片 (仅当 event 带明确的 string sessionId)
@@ -119,7 +128,10 @@ export class ServerEventBus {
       const arr = this.historyBySid.get(sid) ?? []
       arr.push(full)
       if (arr.length > CAPACITY) {
-        console.warn(`[eventBus] history overflow: 会话 ${sid} 缓冲已达 ${CAPACITY} 条, 最旧事件将被丢弃`)
+        if (!this.sidOverflowWarned.has(sid)) {
+          console.warn(`[eventBus] history overflow: 会话 ${sid} 缓冲已达 ${CAPACITY} 条, 最旧事件将被丢弃 (后续溢出静默)`)
+          this.sidOverflowWarned.add(sid)
+        }
         arr.shift()
       }
       this.historyBySid.set(sid, arr)

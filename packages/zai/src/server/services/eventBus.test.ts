@@ -232,10 +232,14 @@ describe('ServerEventBus', () => {
     expect(got).toBe(99)
   })
 
-  test('emit warns when global history overflows', () => {
+  test('emit warns once on global history overflow, then stays silent', () => {
     const bus = new ServerEventBus()
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    for (let i = 0; i < 257; i++) bus.emit(baseEvent)
-    expect(warn).toHaveBeenCalled()
+    // 触发首次溢出(257 条),继续 emit 到 500 条验证不刷屏
+    for (let i = 0; i < 500; i++) bus.emit(baseEvent)
+    const overflowCalls = warn.mock.calls.filter((call) =>
+      String(call[0] ?? '').includes('全局缓冲已达'),
+    )
+    expect(overflowCalls.length).toBe(1)
   })
 })
