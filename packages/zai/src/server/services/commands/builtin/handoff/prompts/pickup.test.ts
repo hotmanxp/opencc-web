@@ -1,6 +1,6 @@
 import { describe, it, expect } from 'vitest'
 import path from 'node:path'
-import { buildPickupPrompt } from './pickup'
+import { buildPickupPrompt } from './pickup.js'
 
 const baseParams = {
   cwd: '/Users/x/project',
