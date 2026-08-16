@@ -10,6 +10,7 @@ import {
   StopOutlined,
   AppstoreAddOutlined,
   CloseOutlined,
+  PlusOutlined,
 } from "@ant-design/icons";
 import {
   STORAGE_KEYS,
@@ -29,6 +30,8 @@ import PluginButton from './PluginButton'
 import SharePopover from "./SharePopover.js";
 import { toolbarIconButtonStyle, TOOLBAR_ACTIVE_COLOR } from "./toolbarStyles.js";
 import TodoDropdown from "./TodoDropdown.js";
+import QuickCommandPopover from "./QuickCommandPopover.js";
+import type { SlashItem } from "./quickCommandTypes.js";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
 
 type PendingAttachment = {
@@ -68,19 +71,6 @@ function deriveLocalTitle(prompt: string): string {
   if (firstLine.length <= TITLE_MAX_LEN) return firstLine;
   return firstLine.slice(0, TITLE_MAX_LEN - 1) + "…";
 }
-
-type SlashItem = {
-  kind: "command" | "skill";
-  name: string;
-  description: string;
-  argumentHint?: string;
-  whenToUse?: string;
-  isBuiltIn?: boolean;
-  isConflict?: boolean;
-  type?: "local" | "prompt";
-  displayName?: string;
-  pluginName?: string;
-};
 
 /**
  * AgentInputBox 直接从 useAppStore.isMobile 读取移动端判断, 不再接受 props.
@@ -196,6 +186,10 @@ export default React.memo(function AgentInputBox() {
   const skillMenuRef = useRef<HTMLDivElement>(null);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [skillMenuIdx, setSkillMenuIdx] = useState(0);
+  // 桌面端 "+" 按钮弹出的命令/技能选择层: 独立的 on/off 状态, 与 / slash
+  // 自动补全下拉(showSkillMenu)互不干扰。两条路径共用 selectSlashItem 选择
+  // 行为,只是触发方式不同 — 输入法触发 vs 显式按钮触发。
+  const [quickOpen, setQuickOpen] = useState(false);
   // transcript 修复按钮 loading 态: 与 status === "streaming" 互斥(避免
   // 在对话进行中触发对当前文件的写操作;否则 concurrent append 会跟 repair 的
   // fileLock 撞车, 报 EAGAIN)。
@@ -927,6 +921,34 @@ export default React.memo(function AgentInputBox() {
           disabled={status === "streaming" || pendingAsk?.status === "pending"}
           style={toolbarIconButtonStyle}
         />
+        {/* 「+ 命令」按钮: 桌面 + 移动端均挂载. 行为完全相同 — 点击弹出
+            QuickCommandPopover (跨端复用). 移动端另保留 AppstoreAddOutlined
+            按钮 (→ MobileQuickDrawer 3 Tab) 作为补充入口 (bash/prompt/git
+            移动端专属).
+            位置: 上传图片按钮之后, ConversationInfoButton 之前 — 介于"媒体操作"
+            与"会话信息"之间, 视觉上与图片按钮同组(都是输入相关辅助).
+            aria-pressed 传达开关态, 红色高亮 active 状态. */}
+        <Tooltip title="命令/技能" placement="top">
+          <Button
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setQuickOpen((v) => !v);
+              // 两条路径互斥: 打开 + 弹层时关闭 / slash 自动补全下拉,
+              // 避免两个 dropdown 叠在同一锚点上互相遮挡.
+              setShowSkillMenu(false);
+            }}
+            data-testid="quick-command-trigger"
+            aria-label="打开命令/技能列表"
+            aria-pressed={quickOpen}
+            style={{
+              ...toolbarIconButtonStyle,
+              ...(quickOpen && {
+                color: TOOLBAR_ACTIVE_COLOR,
+                borderColor: TOOLBAR_ACTIVE_COLOR,
+              }),
+            }}
+          />
+        </Tooltip>
         <ConversationInfoButton />
         {/* 移动端「常用指令」按钮: 仅 isMobile 时挂载.
             位置: 工具栏最右端 (紧贴 ConversationInfoButton), 与桌面端
@@ -1155,6 +1177,21 @@ export default React.memo(function AgentInputBox() {
                 </div>
               ))}
             </div>
+          )}
+          {/* "+" 按钮触发的命令/技能选择弹层.
+              与 / slash 下拉不同: 弹层带搜索框 + 显式卡片, 锚定在输入框上方
+              (与 slash 同一锚点). 打开时焦点交给内部搜索框, 选中调用相同的
+              selectSlashItem — 行为差异仅在触发方式, 不在执行语义.
+              桌面 + 移动端均使用 (maxHeight 360 控制高度, 不会溢出视口). */}
+          {quickOpen && (
+            <QuickCommandPopover
+              items={slashItems}
+              onClose={() => setQuickOpen(false)}
+              onSelect={async (item) => {
+                setQuickOpen(false);
+                await selectSlashItem(item);
+              }}
+            />
           )}
           <TextArea
             ref={textareaRef}
