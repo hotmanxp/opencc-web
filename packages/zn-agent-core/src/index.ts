@@ -3,6 +3,7 @@ export const VERSION = '0.1.0'
 export * from './compat/permissions.js'
 export * from './compat/permissionMode.js'
 export * from './compat/commands/index.js'
+export * from './compat/commands/handoffFs.js'
 export {
   setDefaultSandboxManager,
   getDefaultSandboxManager,

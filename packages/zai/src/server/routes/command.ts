@@ -53,13 +53,23 @@ commandRouter.post('/command', async (req, res) => {
       }
     }
     // PromptCommand
-    const blocks = await cmd.getPromptForCommand(args, context)
-    // 合并 text 块为单字符串(实际场景绝大多数命令只有一段 text)。
-    const text = blocks
-      .map((b) => (b.type === 'text' ? (b as { text: string }).text : ''))
-      .filter(Boolean)
-      .join('\n')
-    return res.json({ type: 'prompt', payload: { rendered: text } })
+    try {
+      const blocks = await cmd.getPromptForCommand(args, context)
+      // 合并 text 块为单字符串(实际场景绝大多数命令只有一段 text)。
+      const text = blocks
+        .map((b) => (b.type === 'text' ? (b as { text: string }).text : ''))
+        .filter(Boolean)
+        .join('\n')
+      return res.json({ type: 'prompt', payload: { rendered: text } })
+    } catch (err) {
+      console.error('[handoff] handler failed:', err)
+      return res.json({
+        type: 'error',
+        payload: {
+          message: `生成交接提示失败:${err instanceof Error ? err.message : String(err)}`,
+        },
+      })
+    }
   } catch (err) {
     return res.status(500).json({ type: 'error', payload: { message: (err as Error).message } })
   }

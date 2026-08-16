@@ -23,16 +23,32 @@ vi.mock("../lib/api.js", () => ({
 }))
 
 // AgentInputBox 挂载时调裸 fetch("/api/slash") 拉 slash items. 之前没 mock
-// → happy-dom 触发真请求 → ECONNREFUSED,导致整个 describe 挂掉. 我们只关心
-// transcript-collapse 按钮的渲染,不关心 slash 数据,直接 resolve 一个空 items.
+// → happy-dom 触发真请求 → ECONNREFUSED,导致整个 describe 挂掉. 这里 stub
+// 出 handoff builtin 命令项,让 web composer 输入 `/` 触发下拉时能看到它;
+// 测试不需要关注其它 slash 数据.
 beforeAll(() => {
   vi.stubGlobal(
     "fetch",
     vi.fn(async () =>
-      new Response(JSON.stringify({ items: [] }), {
-        status: 200,
-        headers: { "Content-Type": "application/json" },
-      }),
+      new Response(
+        JSON.stringify({
+          items: [
+            {
+              kind: "command",
+              name: "handoff",
+              description: "交接当前会话:消息多时生成交接文档,消息少时恢复最近的交接",
+              argumentHint: "[--pick <filename>]",
+              type: "prompt",
+              source: "builtin",
+              isBuiltIn: true,
+            },
+          ],
+        }),
+        {
+          status: 200,
+          headers: { "Content-Type": "application/json" },
+        },
+      ),
     ),
   )
 })
@@ -96,6 +112,18 @@ describe('AgentInputBox — slash command UI visibility', () => {
       const tail = msgs[msgs.length - 1]
       expect(tail).toMatchObject({ type: "user.text", text: "/greet alice" })
       expect((tail as { isRenderedPrompt?: boolean }).isRenderedPrompt).toBe(false)
+    })
+  })
+
+  test("'/' 触发下拉里出现 handoff builtin 命令", async () => {
+    // /api/slash mock (above beforeAll) 已返回 handoff 项.
+    // 输入 "/" 后 dropdown 应该列出 handoff 命令.
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: "/" } })
+    // 等 slash items 异步加载 + dropdown 渲染
+    await waitFor(() => {
+      expect(screen.getByText("/handoff")).toBeInTheDocument()
     })
   })
 })
