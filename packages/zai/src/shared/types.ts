@@ -79,6 +79,21 @@ export interface ConfigFile {
   missing?: boolean;
 }
 
+/**
+ * AGENTS.md (Markdown 文本) 文件的读取结果 — 与 ConfigFile 同形但
+ * content 是 string 而非 Record<string, unknown>。用独立类型避免 string-or-record
+ * 二义性,前端可强类型拿到 content: string,不需要 ?? {} 兜底。
+ *
+ * missing=true 时 content 一定为空串;exists=true + content='' 表示文件存在但为空。
+ */
+export interface AgentsMdFile {
+  path: string;
+  exists: boolean;
+  /** Markdown 原文。缺失或空文件时为 '' */
+  content: string;
+  missing?: boolean;
+}
+
 export type SseEventType = 'start' | 'stdout' | 'stderr' | 'exit' | 'error';
 
 export interface SseEvent {

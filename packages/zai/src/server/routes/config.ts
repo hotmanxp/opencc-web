@@ -5,6 +5,8 @@ import {
   writeConfig,
   readTopLevelJson,
   writeTopLevelJson,
+  readAgentsMd,
+  writeAgentsMd,
 } from '../services/fileStore.js';
 import type { ConfigTool, ProviderProfile } from '../../shared/types.js';
 
@@ -118,6 +120,41 @@ router.put('/config/zai-json', async (req, res) => {
   }
   try {
     await writeTopLevelJson('zai-json', req.body as Record<string, unknown>);
+    res.json({ ok: true });
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+// AGENTS.md 编辑 — 每个 tool 独立路径(missing 时写盘自动 mkdir 父目录)。
+// 必须注册在 /config/:tool 之前:Express 按注册顺序匹配,新路由被通用路由
+// 抢先匹配会触发 ConfigToolSchema 解析 tool 后调 readConfig(tool),返回
+// content:{} (Record) 而不是 string,形状错乱。4 个工具互不共享:
+// opencc → ~/.claude/AGENTS.md,zai → ~/.zai/AGENTS.md,
+// opencode/nova 各自落到自己的 config dir。
+router.get('/config/:tool/agents-md', async (req, res) => {
+  const parsed = ConfigToolSchema.safeParse(req.params.tool);
+  if (!parsed.success) {
+    return res.status(400).json({ error: `invalid tool: ${req.params.tool}` });
+  }
+  try {
+    res.json(await readAgentsMd(parsed.data as ConfigTool));
+  } catch (err) {
+    res.status(500).json({ error: String(err) });
+  }
+});
+
+router.put('/config/:tool/agents-md', async (req, res) => {
+  const parsed = ConfigToolSchema.safeParse(req.params.tool);
+  if (!parsed.success) {
+    return res.status(400).json({ error: `invalid tool: ${req.params.tool}` });
+  }
+  const body = req.body as { content?: unknown } | undefined;
+  if (!body || typeof body.content !== 'string') {
+    return res.status(400).json({ error: 'content must be a string' });
+  }
+  try {
+    await writeAgentsMd(parsed.data as ConfigTool, body.content);
     res.json({ ok: true });
   } catch (err) {
     res.status(500).json({ error: String(err) });

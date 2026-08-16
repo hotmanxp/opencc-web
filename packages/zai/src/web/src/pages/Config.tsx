@@ -2,7 +2,7 @@ import { Card, Form, Input, Button, message, Spin, Row, Col, Typography, Menu, L
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import type { ConfigTool, ProviderProfile, SystemInfo, ModelCapabilities } from '@shared/types';
+import type { ConfigTool, ProviderProfile, SystemInfo, ModelCapabilities, AgentsMdFile } from '@shared/types';
 import { BUILTIN_PROVIDERS } from '@shared/builtinProviders';
 import { api } from '../lib/api';
 
@@ -613,6 +613,145 @@ function JsonFileEditor({
   );
 }
 
+/**
+ * AGENTS.md 编辑卡 — 骨架对齐 JsonFileEditor,差异:
+ * - content 是 string(Markdown),不做 JSON.parse 校验;
+ * - PUT body 是 {content: draft} 字符串透传;
+ * - <pre> 加 whiteSpace:pre-wrap + wordBreak:break-word,避免单行超长撑破布局;
+ * - missing 时 Modal placeholder 提示用户如何起步,空字符串保存合法。
+ *
+ * 每个 tool tab 都嵌入一份,4 个工具互不共享:
+ * opencc → ~/.claude/AGENTS.md,
+ * zai → ~/.zai/AGENTS.md,
+ * opencode → ~/.config/opencode/AGENTS.md,
+ * nova → ~/.nova/AGENTS.md。
+ */
+function AgentsMdEditor({
+  tool,
+  label,
+  defaultContent = '',
+}: {
+  tool: ConfigTool;
+  label: string;
+  defaultContent?: string;
+}) {
+  const [content, setContent] = useState<string>('');
+  const [filePath, setFilePath] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [missing, setMissing] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const endpoint = `/config/${tool}/agents-md`;
+
+  const fetchContent = async () => {
+    setLoading(true);
+    try {
+      const data = await api.get<AgentsMdFile>(endpoint);
+      setFilePath(data.path);
+      setContent(data.content);
+      setMissing(!!data.missing);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchContent();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpoint]);
+
+  const openEditor = () => {
+    // missing 时给 defaultContent 让用户有起步内容;已有文件则直接编辑现有内容。
+    const seed = missing ? defaultContent : content;
+    setDraft(seed);
+    setModalOpen(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      // 纯文本:不做 JSON/语法校验,服务端只校验 content 字段是 string。
+      await api.put(endpoint, { content: draft });
+      message.success(missing ? 'AGENTS.md 已创建' : 'AGENTS.md 已保存');
+      setModalOpen(false);
+      await fetchContent();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <Spin />;
+
+  return (
+    <Card
+      title={`${label} AGENTS.md`}
+      size="small"
+      extra={
+        <Button type="primary" icon={<EditOutlined />} onClick={openEditor}>
+          {missing ? '新增' : '编辑'}
+        </Button>
+      }
+      style={{ marginTop: 16, flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+      styles={{ body: { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 12 } }}
+    >
+      <Tooltip title={filePath}>
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+          路径: {filePath}{missing && ' (文件不存在，保存后将创建)'}
+        </Text>
+      </Tooltip>
+      <pre
+        style={{
+          background: 'var(--bg-body)',
+          color: 'var(--text-primary)',
+          padding: 12,
+          borderRadius: 8,
+          fontSize: 12,
+          lineHeight: 1.6,
+          overflow: 'auto',
+          flex: 1,
+          minHeight: 0,
+          margin: 0,
+          fontFamily: 'JetBrains Mono, Fira Code, monospace',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {content || (missing ? '(空文件)' : '')}
+      </pre>
+
+      <Modal
+        title={`编辑 ${label} AGENTS.md`}
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        onOk={handleSave}
+        confirmLoading={saving}
+        okText="保存"
+        cancelText="取消"
+        width={760}
+        destroyOnClose
+      >
+        <Input.TextArea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          autoSize={{ minRows: 16, maxRows: 30 }}
+          spellCheck={false}
+          placeholder={missing ? '# AGENTS.md\n\n在此编写工具说明...' : undefined}
+          style={{ fontFamily: 'JetBrains Mono, Fira Code, monospace', fontSize: 12 }}
+        />
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+          纯文本 (Markdown)。保存时使用原子写 (tmp + rename)。
+        </Text>
+      </Modal>
+    </Card>
+  );
+}
+
 export default function Config() {
   const [searchParams] = useSearchParams();
   const initialTool = searchParams.get('tool') as ConfigTool | null;
@@ -686,11 +825,15 @@ export default function Config() {
               </Card>
               {/* 下方 Provider 配置 */}
               <ProviderForm />
+              {/* AGENTS.md 编辑卡 — opencc 走 ~/.claude/AGENTS.md,与 zai 互不共享 */}
+              <AgentsMdEditor tool="opencc" label="OpenCC" />
             </>
           ) : activeTool === 'opencode' ? (
             <>
               <PluginForm />
               <SettingsEditor tool="opencode" label="OpenCode" defaultContent={opencodeDefaultContent} />
+              {/* AGENTS.md 编辑卡 — opencode 走 ~/.config/opencode/AGENTS.md */}
+              <AgentsMdEditor tool="opencode" label="OpenCode" />
             </>
           ) : activeTool === 'zai' ? (
             <>
@@ -714,9 +857,15 @@ export default function Config() {
               </Card>
               {/* 下方 Provider 配置 — 读写 ~/.zai.json 的 providerProfiles */}
               <ProviderForm endpoint="/config/zai/provider" title="Provider 配置" />
+              {/* AGENTS.md 编辑卡 — zai 走 ~/.zai/AGENTS.md */}
+              <AgentsMdEditor tool="zai" label="Zai" />
             </>
           ) : (
-            <SettingsEditor tool={activeTool} label={tools.find((t) => t.key === activeTool)?.label || activeTool} />
+            <>
+              <SettingsEditor tool={activeTool} label={tools.find((t) => t.key === activeTool)?.label || activeTool} />
+              {/* AGENTS.md 编辑卡 — nova 走 ~/.nova/AGENTS.md */}
+              <AgentsMdEditor tool="nova" label="Nova" />
+            </>
           )}
         </Col>
       </Row>

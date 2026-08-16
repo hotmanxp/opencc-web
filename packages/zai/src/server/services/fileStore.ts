@@ -1,7 +1,7 @@
 import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
 import { dirname, join } from 'node:path';
 import { homedir } from 'node:os';
-import type { ConfigFile, ConfigTool } from '../../shared/types.js';
+import type { AgentsMdFile, ConfigFile, ConfigTool } from '../../shared/types.js';
 
 const CONFIG_PATHS: Record<ConfigTool, () => string> = {
   nova: () => join(homedir(), '.nova', 'settings.json'),
@@ -69,6 +69,53 @@ export async function writeConfig(
   await mkdir(dirname(path), { recursive: true });
   const tmpPath = `${path}.tmp`;
   await writeFile(tmpPath, JSON.stringify(content, null, 2), 'utf-8');
+  await rename(tmpPath, path);
+  return { ok: true };
+}
+
+// AGENTS.md — 4 个 tool 完全互不共享,各自独立路径:
+// opencc → ~/.claude/AGENTS.md  (opencc 自身 config home,与 zai 不共享)
+// opencode → ~/.config/opencode/AGENTS.md
+// nova → ~/.nova/AGENTS.md
+// zai → ~/.zai/AGENTS.md       (zai 自身 dataDir,与 opencc 不共享)
+// Config 页面 4 个 tab 各暴露一份编辑器,跨 tab 编辑相互独立。
+const AGENTS_MD_PATHS: Record<ConfigTool, () => string> = {
+  nova: () => join(homedir(), '.nova', 'AGENTS.md'),
+  opencode: () => join(homedir(), '.config', 'opencode', 'AGENTS.md'),
+  opencc: () => join(homedir(), '.claude', 'AGENTS.md'),
+  zai: () => join(homedir(), '.zai', 'AGENTS.md'),
+};
+
+/**
+ * 读取 tool 对应的 AGENTS.md。ENOENT 视为"缺失",返回
+ * `{path, exists:false, content:'', missing:true}` 让前端可走 "新增" 分支。
+ * 不区分空文件 vs missing — 空文件按 exists=true + content='' 显示。
+ */
+export async function readAgentsMd(tool: ConfigTool): Promise<AgentsMdFile> {
+  const path = AGENTS_MD_PATHS[tool]();
+  try {
+    const raw = await readFile(path, 'utf-8');
+    return { path, exists: true, content: raw };
+  } catch (err) {
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') {
+      return { path, exists: false, content: '', missing: true };
+    }
+    throw err;
+  }
+}
+
+/**
+ * 原子写 AGENTS.md。原样写入 content(不自动追加 \n,也不 JSON.stringify);
+ * 空字符串合法 (=清空文件)。tmp+rename 保证写到一半崩了不会留半截文件。
+ */
+export async function writeAgentsMd(
+  tool: ConfigTool,
+  content: string,
+): Promise<{ ok: true }> {
+  const path = AGENTS_MD_PATHS[tool]();
+  await mkdir(dirname(path), { recursive: true });
+  const tmpPath = `${path}.tmp`;
+  await writeFile(tmpPath, content, 'utf-8');
   await rename(tmpPath, path);
   return { ok: true };
 }
