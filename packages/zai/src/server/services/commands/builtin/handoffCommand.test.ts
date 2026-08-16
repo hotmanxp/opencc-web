@@ -43,41 +43,45 @@ describe('parseArgs', () => {
 
 describe('resolveCwd', () => {
   it('优先 context.cwd', () => {
-    expect(resolveCwd({ cwd: '/from/ctx' })).toBe('/from/ctx')
+    expect(resolveCwd({ cwd: '/from/ctx', dataDir: '/tmp/test' } as any)).toBe('/from/ctx')
   })
 
   it('context.cwd 缺失时 fallback process.cwd()', () => {
     const fallback = process.cwd()
-    expect(resolveCwd({})).toBe(fallback)
-  })
-
-  it('context 是 null 时仍能 fallback', () => {
-    expect(resolveCwd(null as any)).toBe(process.cwd())
+    expect(resolveCwd({ dataDir: '/tmp/test' } as any)).toBe(fallback)
   })
 })
 
 describe('countAssistantMessages', () => {
   it('context.assistantMessageCount 是 number 时返回它', async () => {
-    expect(await countAssistantMessages({ assistantMessageCount: 3 })).toBe(3)
-    expect(await countAssistantMessages({ assistantMessageCount: 100 })).toBe(100)
+    expect(
+      await countAssistantMessages({ cwd: '/x', dataDir: '/d', assistantMessageCount: 3 } as any),
+    ).toBe(3)
+    expect(
+      await countAssistantMessages({ cwd: '/x', dataDir: '/d', assistantMessageCount: 100 } as any),
+    ).toBe(100)
   })
 
   it('context 没字段时返回 +Infinity(强制 GENERATE)', async () => {
-    expect(await countAssistantMessages({})).toBe(Number.POSITIVE_INFINITY)
+    expect(await countAssistantMessages({ cwd: '/x', dataDir: '/d' } as any)).toBe(
+      Number.POSITIVE_INFINITY,
+    )
   })
 })
 
 describe('readTaskListText', () => {
   it('context.taskListText 是 string 时返回它', async () => {
-    expect(await readTaskListText({ taskListText: '- [ ] task' })).toBe('- [ ] task')
+    expect(
+      await readTaskListText({ cwd: '/x', dataDir: '/d', taskListText: '- [ ] task' } as any),
+    ).toBe('- [ ] task')
   })
 
   it('context.taskListText 是 null 时返回 null', async () => {
-    expect(await readTaskListText({ taskListText: null })).toBeNull()
+    expect(await readTaskListText({ cwd: '/x', dataDir: '/d', taskListText: null } as any)).toBeNull()
   })
 
   it('context 没字段时返回 null(fallback 触发 generate prompt 占位)', async () => {
-    expect(await readTaskListText({})).toBeNull()
+    expect(await readTaskListText({ cwd: '/x', dataDir: '/d' } as any)).toBeNull()
   })
 })
 
@@ -99,6 +103,7 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
       '',
       {
         cwd: tmpDir,
+        dataDir: '/tmp/test-data',
         assistantMessageCount: 2,
         taskListText: null,
       } as any,
@@ -113,6 +118,7 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
       '',
       {
         cwd: tmpDir,
+        dataDir: '/tmp/test-data',
         assistantMessageCount: 10,
         taskListText: '- [ ] next',
       } as any,
@@ -128,6 +134,7 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
       '',
       {
         cwd: tmpDir,
+        dataDir: '/tmp/test-data',
         assistantMessageCount: 10,
         taskListText: null,
       } as any,
@@ -145,6 +152,7 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
       '--pick picked.md',
       {
         cwd: tmpDir,
+        dataDir: '/tmp/test-data',
         assistantMessageCount: 50,
         taskListText: null,
       } as any,
@@ -159,7 +167,12 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
     await expect(
       handoffCommand.getPromptForCommand(
         '--pick nope.md',
-        { cwd: tmpDir, assistantMessageCount: 2, taskListText: null } as any,
+        {
+          cwd: tmpDir,
+          dataDir: '/tmp/test-data',
+          assistantMessageCount: 2,
+          taskListText: null,
+        } as any,
       ),
     ).rejects.toThrow(HandoffArgsError)
   })
@@ -169,6 +182,7 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
       '',
       {
         cwd: tmpDir,
+        dataDir: '/tmp/test-data',
         assistantMessageCount: 2,
         taskListText: null,
       } as any,
@@ -177,10 +191,10 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
     expect(text).toContain('未找到')
   })
 
-  it('context 完全无字段时走 GENERATE(+Infinity fallback)', async () => {
+  it('context 仅含必需字段时走 GENERATE(+Infinity fallback)', async () => {
     const blocks = await handoffCommand.getPromptForCommand(
       '',
-      {} as any,
+      { cwd: tmpDir, dataDir: '/tmp/test-data' } as any,
     )
     const text = (blocks[0] as any).text
     expect(text).toContain('Task title') // GENERATE 标识

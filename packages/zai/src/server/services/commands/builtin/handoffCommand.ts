@@ -1,7 +1,6 @@
 import path from 'node:path'
 import fs from 'node:fs/promises'
 import type { PromptCommand, CommandContext } from '@zn-ai/zn-agent-core'
-import type { ContentBlockParam } from '@zn-ai/zn-agent-core'
 import { listHandoffs } from '@zn-ai/zn-agent-core'
 import { buildGeneratePrompt } from './handoff/prompts/generate.js'
 import { buildPickupPrompt, HandoffArgsError } from './handoff/prompts/pickup.js'
@@ -12,6 +11,20 @@ export class HandoffCwdError extends Error {}
 
 const PICKUP_THRESHOLD = 4
 const HANDOFF_SUBDIR = path.join('.agent_working_dir', 'handoff')
+
+// handoff 仅返回 text block;局部结构类型避免把 anthropic-sdk 类型拖入 zai。
+type ContentBlock = { type: 'text'; text: string }
+
+// 真实 CommandContext 是 { cwd, dataDir, sessionId?, model? }。
+// 路由层会在 prompt getPromptForCommand 调用前向 context 注入
+// `assistantMessageCount` 与 `taskListText`(由 session/transcript
+// 计算 + agent state 取值);PromptCommand 类型不暴露这两字段,这里
+// 用 intersection 局部扩展,保持 helper 签名贴近真实 context。
+type HandoffContext = CommandContext & {
+  cwd?: string
+  assistantMessageCount?: number
+  taskListText?: string | null
+}
 
 interface ParsedArgs {
   pickFile?: string
@@ -37,8 +50,8 @@ export function parseArgs(args: string): ParsedArgs {
   return out
 }
 
-export function resolveCwd(context: CommandContext | null | undefined): string {
-  const cwd = (context as { cwd?: string } | null | undefined)?.cwd
+export function resolveCwd(context: HandoffContext): string {
+  const cwd = context.cwd
   if (cwd) return cwd
   const fallback = process.cwd()
   if (!fallback) throw new HandoffCwdError('无法解析当前工作目录')
@@ -46,18 +59,17 @@ export function resolveCwd(context: CommandContext | null | undefined): string {
 }
 
 export async function countAssistantMessages(
-  context: CommandContext | null | undefined,
+  context: HandoffContext,
 ): Promise<number> {
-  const injected = (context as { assistantMessageCount?: unknown } | null | undefined)
-    ?.assistantMessageCount
+  const injected = context.assistantMessageCount
   if (typeof injected === 'number') return injected
   return Number.POSITIVE_INFINITY
 }
 
 export async function readTaskListText(
-  context: CommandContext | null | undefined,
+  context: HandoffContext,
 ): Promise<string | null> {
-  const injected = (context as { taskListText?: unknown } | null | undefined)?.taskListText
+  const injected = context.taskListText
   if (typeof injected === 'string') return injected
   return null
 }
@@ -75,14 +87,17 @@ export const handoffCommand: PromptCommand = {
   source: 'builtin',
   progressMessage: 'preparing handoff',
   contentLength: 0,
-  isEnabled: () => true,
-  async getPromptForCommand(args: string, context: CommandContext): Promise<ContentBlockParam[]> {
+  async getPromptForCommand(
+    args: string,
+    context: CommandContext,
+  ): Promise<ContentBlock[]> {
+    const handoffCtx = context as HandoffContext
     const parsed = parseArgs(args)
-    const cwd = resolveCwd(context)
+    const cwd = resolveCwd(handoffCtx)
     const root = path.join(cwd, HANDOFF_SUBDIR)
     const date = todayISO()
-    const assistantCount = await countAssistantMessages(context)
-    const taskListText = await readTaskListText(context)
+    const assistantCount = await countAssistantMessages(handoffCtx)
+    const taskListText = await readTaskListText(handoffCtx)
 
     const isPickup = parsed.pickFile !== undefined || assistantCount <= PICKUP_THRESHOLD
 
