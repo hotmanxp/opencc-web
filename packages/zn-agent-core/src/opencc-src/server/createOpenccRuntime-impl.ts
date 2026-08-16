@@ -188,15 +188,6 @@ export async function createOpenccRuntimeImpl(options) {
       ),
       readFileCache: new FileStateCache(100, 25 * 1024 * 1024),
       abortController: initialAbortController,
-      // zai patch: 打开 vendor 的实时 stream_event 透传。默认 false 时
-      // QueryEngine 只在整轮结束后 yield 终端 `assistant` 消息,
-      // sdkEventAdapter 走 assistant 分支把全文压成单个
-      // content_block_delta —— 前端表现为「回复一次性蹦出来」,没有流式。
-      // 打开后 vendor 逐 token yield `{type:'stream_event', event}`,
-      // adapter 的 stream_event 分支原样透传 Anthropic primitives,
-      // 并用 streamedBlockIndices 让终端 assistant 消息跳过已流式过的
-      // block,避免同一 block 双发。
-      includePartialMessages: true,
       query: customQuery,
     })
   const engines = new Map<string, QueryEngine>()

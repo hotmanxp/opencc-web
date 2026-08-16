@@ -1,11 +1,9 @@
 import { getIsNonInteractiveSession } from '../../bootstrap/state.js'
 import { isCoordinatorMode } from '../../coordinator/coordinatorMode.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
-import { CLAUDE_CODE_GUIDE_AGENT } from './built-in/claudeCodeGuideAgent.js'
 import { EXPLORE_AGENT } from './built-in/exploreAgent.js'
 import { GENERAL_PURPOSE_AGENT } from './built-in/generalPurposeAgent.js'
 import { PLAN_AGENT } from './built-in/planAgent.js'
-import { STATUSLINE_SETUP_AGENT } from './built-in/statuslineSetup.js'
 import { getCoordinatorAgents } from '../../coordinator/workerAgent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
 
@@ -32,22 +30,22 @@ export function getBuiltInAgents(): AgentDefinition[] {
 
   const agents: AgentDefinition[] = [
     GENERAL_PURPOSE_AGENT,
-    STATUSLINE_SETUP_AGENT,
+    // STATUSLINE_SETUP_AGENT, // commented out - not used in zai
   ]
 
   if (areExplorePlanAgentsEnabled()) {
     agents.push(EXPLORE_AGENT, PLAN_AGENT)
   }
 
-  // Include Code Guide agent for non-SDK entrypoints
-  const isNonSdkEntrypoint =
-    process.env.CLAUDE_CODE_ENTRYPOINT !== 'sdk-ts' &&
-    process.env.CLAUDE_CODE_ENTRYPOINT !== 'sdk-py' &&
-    process.env.CLAUDE_CODE_ENTRYPOINT !== 'sdk-cli'
-
-  if (isNonSdkEntrypoint) {
-    agents.push(CLAUDE_CODE_GUIDE_AGENT)
-  }
+  // // Include Code Guide agent for non-SDK entrypoints
+  // const isNonSdkEntrypoint =
+  //   process.env.CLAUDE_CODE_ENTRYPOINT !== 'sdk-ts' &&
+  //   process.env.CLAUDE_CODE_ENTRYPOINT !== 'sdk-py' &&
+  //   process.env.CLAUDE_CODE_ENTRYPOINT !== 'sdk-cli'
+  //
+  // if (isNonSdkEntrypoint) {
+  //   agents.push(CLAUDE_CODE_GUIDE_AGENT)
+  // }
 
   return agents
 }
