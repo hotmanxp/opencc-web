@@ -48,7 +48,7 @@ export const useRef = React.useRef
 export const useState = React.useState
 export const useSyncExternalStore = React.useSyncExternalStore
 
-export function use<T>(resource: T): T {
+export function use<T>(resource: T | Promise<T>): T {
   const maybePromise = resource as { then?: unknown } | null
   if (maybePromise && typeof maybePromise.then === 'function') {
     throw new Error(

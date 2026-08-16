@@ -1,4 +1,7 @@
-import type { OpenccContentBlockParam } from './serverTypes.js'
+import type {
+  OpenccContentBlockParam,
+  OpenccRuntime,
+} from './serverTypes.js'
 
 export type OpenccRuntimeOptions = {
   dataDir: string
@@ -133,15 +136,21 @@ export type CreateOpenccRuntimeOptions = OpenccRuntimeOptions & {
    * `for await` loop yields the same event stream without translation.
    */
   callModel?: (
-    req: import('../services/api/claude.js').queryModelWithStreaming extends (
-      a: infer R,
-    ) => unknown
-      ? R
-      : never,
+    // Type-querying the vendor `queryModelWithStreaming` member from here
+    // fails the server tsconfig's declaration emit (TS2694 in emit mode —
+    // the import() namespace member lookup isn't portable) AND would drag a
+    // cross-module import into the published d.ts (blocked by
+    // verify-server-types-self-contained.mjs). `unknown` keeps the surface
+    // self-contained; zai passes a factory whose req shape matches vendor's
+    // `queryModelWithStreaming` first argument at runtime.
+    req: unknown,
   ) => AsyncIterable<unknown>
 }
 
 export const createOpenccRuntime = async (options: CreateOpenccRuntimeOptions): Promise<OpenccRuntime> => {
   const mod = await import('./createOpenccRuntime-impl.js')
-  return mod.createOpenccRuntimeImpl(options)
+  // impl carries `@ts-nocheck`; its inferred return shape is loose, so
+  // cast to the canonical runtime contract here (runtime shape is
+  // enforced by vitest, not by tsc).
+  return mod.createOpenccRuntimeImpl(options) as unknown as Promise<OpenccRuntime>
 }

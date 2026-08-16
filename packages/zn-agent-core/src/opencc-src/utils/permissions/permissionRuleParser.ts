@@ -23,7 +23,7 @@ const LEGACY_TOOL_NAME_ALIASES: Record<string, string> = {
   AgentOutputTool: TASK_OUTPUT_TOOL_NAME,
   BashOutputTool: TASK_OUTPUT_TOOL_NAME,
   ...((false || false) && BRIEF_TOOL_NAME
-    ? { Brief: BRIEF_TOOL_NAME }
+    ? { Brief: BRIEF_TOOL_NAME as string }
     : {}),
 }
 

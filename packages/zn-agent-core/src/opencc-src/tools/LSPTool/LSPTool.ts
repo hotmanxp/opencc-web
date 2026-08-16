@@ -553,7 +553,7 @@ function uriToFilePath(uri: string): string {
  * Filters out locations whose file paths are gitignored.
  * Uses `git check-ignore` with batched path arguments for efficiency.
  */
-async function filterGitIgnoredLocations<T extends Location>(
+async function filterGitIgnoredLocations<T extends { uri: string }>(
   locations: T[],
   cwd: string,
 ): Promise<T[]> {

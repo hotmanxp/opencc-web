@@ -10,7 +10,10 @@
  * self-contained per `verify-server-types-self-contained.mjs`.
  */
 import type { PluginError, PluginLoadResult, LoadedPlugin } from '../types/plugin.js'
-import type { InstalledPluginsFileV2 } from '../utils/plugins/installedPluginsManager.js'
+// InstalledPluginsFileV2 is defined in schemas.ts and only *imported*
+// (not re-exported) by installedPluginsManager.ts, so pull it from the
+// defining module directly.
+import type { InstalledPluginsFileV2 } from '../utils/plugins/schemas.js'
 import type {
   OpenccPluginDto,
   OpenccPluginListResult,
@@ -56,9 +59,8 @@ function deriveScope(
   installedV2: InstalledPluginsFileV2,
 ): OpenccPluginScope {
   if (isBuiltinPluginId(pluginName)) return 'builtin'
-  const v2 = installedV2.plugins[pluginName]
-  if (!v2) return 'user'
-  const scopes = Object.keys(v2.installs ?? {})
+  const entries = installedV2.plugins[pluginName] ?? []
+  const scopes = entries.map((e) => e.scope)
   if (scopes.includes('user')) return 'user'
   if (scopes.includes('project')) return 'project'
   if (scopes.includes('local')) return 'local'

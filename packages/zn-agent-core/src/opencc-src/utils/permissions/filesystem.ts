@@ -1112,7 +1112,10 @@ export function matchingRuleForInput(
       continue
     }
 
-    const igResult = ig.test(relativePathStr)
+    const igResult = ig.test(relativePathStr) as {
+      ignored: boolean
+      rule?: { pattern: string }
+    }
 
     if (igResult.ignored && igResult.rule) {
       // Map the matched pattern back to the original rule
@@ -1643,7 +1646,8 @@ export function checkEditableInternalPath(
     const jobDir = process.env.CLAUDE_JOB_DIR
     if (jobDir) {
       const jobsRoot = join(getClaudeConfigHomeDir(), 'jobs')
-      const jobDirForms = getPathsForPermissionCheck(jobDir).map(normalize)
+      // tsc drops the `if (jobDir)` narrow inside the `if (false)` block.
+      const jobDirForms = getPathsForPermissionCheck(jobDir!).map(normalize)
       const jobsRootForms = getPathsForPermissionCheck(jobsRoot).map(normalize)
       // Hijack guard: every resolved form of the job dir must sit under
       // some resolved form of the jobs root. Resolving both sides handles

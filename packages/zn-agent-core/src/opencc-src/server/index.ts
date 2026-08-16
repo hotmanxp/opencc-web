@@ -69,9 +69,6 @@ export { createSessionFacade } from './sessionFacade.js'
  */
 export type {
   CreateOpenccRuntimeOptions,
-  OpenccRuntimeOptions,
-  OpenccQueryInput,
-  OpenccServerEvent,
   OpenccSessionMeta,
 } from './createOpenccRuntime.js'
 

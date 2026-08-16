@@ -87,7 +87,9 @@ export const duckduckgoProvider: SearchProvider = {
     for (let attempt = 0; attempt < MAX_RETRIES; attempt++) {
       if (signal?.aborted) throw new DOMException('Aborted', 'AbortError')
       try {
-        const response = await withWebSearchTimeout(
+        const response = await withWebSearchTimeout<{
+          results: Array<{ title?: string; url: string; description?: string }>
+        }>(
           combinedSignal =>
             search(
               input.query,

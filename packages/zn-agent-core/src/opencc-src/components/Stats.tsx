@@ -2,7 +2,10 @@ import { c as _c } from "react-compiler-runtime";
 import { plot as asciichart } from 'asciichart';
 import chalk from 'chalk';
 import figures from 'figures';
-import React, { Suspense, use, useCallback, useEffect, useMemo, useState } from 'react';
+import React, { Suspense, useCallback, useEffect, useMemo, useState } from 'react';
+// React 19 `use()` — @types/react 18 doesn't declare it; preact-shim provides
+// the runtime implementation (and its type) in the bundled build.
+import { use } from '../../compat/preact-shim.js';
 import { stripVTControlCharacters as stripAnsi } from 'node:util';
 import type { CommandResultDisplay } from '../commands.js';
 import { useTerminalSize } from '../hooks/useTerminalSize.js';

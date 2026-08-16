@@ -875,6 +875,99 @@ await esbuild.build({
 })
 console.log(`[bundle-opencc] compress-tool-history: ${COMPRESS_TOOL_HISTORY_OUT}`)
 
+// ── Generic model capabilities (zai patch) ──────────────────────────
+// Single-file `bundle: true` emit so zai-server can import
+// `@zn-ai/zn-agent-core/opencc-src/utils/model/genericModelCapabilities`
+// without pulling in the full opencc-core.mjs bundle at every consumer.
+//
+// The module aggregates per-model capability data from three already-built
+// sources (defineModel registry, OPENAI_CONTEXT_WINDOWS /
+// OPENAI_MAX_OUTPUT_TOKENS, COPILOT_MODELS) so a `bundle: true` emit
+// inlines ~25 KB of static tables + lookup helpers. Acceptable trade-off:
+// the only consumer is zai-server's profile → ModelEntry projection
+// (agentSettings.ts:70), which runs once per request to /api/agent/settings.
+// The alternative (re-exporting through `bundle-entry.ts` into
+// opencc-core.mjs) bloats every consumer of the main bundle (CLI,
+// server runtime, etc.) for a UI-only concern.
+//
+// `bundle: true` is necessary because the module imports
+// `integrations/index.js` (which itself imports vendor descriptor
+// files); emitting without bundling would leave those imports
+// unresolvable at runtime since vendored opencc-src is not shipped as
+// separate .js files in dist.
+//
+// State isolation note: the descriptor registry
+// (`integrations/registry.ts → _models: Map`) is initialised at module
+// load via `ensureIntegrationsLoaded()`. This single-file bundle has
+// its own private registry instance, separate from the one in
+// opencc-core.mjs. That's fine here — we only READ descriptors (immutable
+// data), never mutate them. Lookup results are deterministic.
+const GENERIC_MODEL_CAPABILITIES_ENTRY = join(ROOT, 'src', 'opencc-src', 'utils', 'model', 'genericModelCapabilities.ts')
+const GENERIC_MODEL_CAPABILITIES_OUT = join(ROOT, 'dist', 'opencc-src', 'utils', 'model', 'genericModelCapabilities.js')
+
+await esbuild.build({
+  entryPoints: [GENERIC_MODEL_CAPABILITIES_ENTRY],
+  outfile: GENERIC_MODEL_CAPABILITIES_OUT,
+  bundle: true,
+  format: 'esm',
+  platform: 'node',
+  target: 'node22',
+  // `sourcemap: false` (not true): the build's final `find dist -name
+  // '*.map' -delete` removes every .map, so a generated sourceMappingURL
+  // comment would dangle — and because zai-server imports this file via
+  // the `@zn-ai/zn-agent-core/opencc-src/utils/model/genericModelCapabilities`
+  // subpath, vite/vitest transforms it and logs
+  // `[vite] Failed to load source map ... ENOENT` on every load.
+  sourcemap: false,
+  minify: false,
+  logLevel: 'warning',
+  banner: {
+    js:
+      "import { createRequire as __createRequire } from 'node:module';\n" +
+      "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
+      "const require = __createRequire(import.meta.url);\n",
+  },
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
+  external: [
+    'sharp', 'google-auth-library', '@vscode/ripgrep',
+    '@orama/orama', '@orama/plugin-data-persistence',
+    'web-tree-shaker', 'tree-sitter-wasms',
+    'turndown', '@ant/claude-for-chrome-mcp',
+    'zod', 'zod/v3', 'zod/v4', 'zod/v4-mini', 'fflate',
+  ],
+  treeShaking: true,
+})
+console.log(`[bundle-opencc] generic-model-capabilities: ${GENERIC_MODEL_CAPABILITIES_OUT}`)
+
+// Hand-written .d.ts for the genericModelCapabilities subpath.
+// esbuild doesn't emit d.ts for `bundle: true`. The public surface is
+// narrow (one type alias + one function), so a hand-written d.ts stays
+// in sync without much maintenance burden. Update this block if
+// `GenericModelCapabilities` adds fields or `lookupGenericModelCapabilities`
+// changes signature.
+{
+  const GENERIC_MODEL_CAPABILITIES_DTS = join(
+    ROOT, 'dist', 'opencc-src', 'utils', 'model', 'genericModelCapabilities.d.ts',
+  )
+  const dts = [
+    `// Type declarations for the generic model capability lookup.`,
+    `// Mirror the source in src/opencc-src/utils/model/genericModelCapabilities.ts.`,
+    `export interface GenericModelCapabilities {`,
+    `  contextWindow?: number;`,
+    `  maxOutputTokens?: number;`,
+    `  supportsVision?: boolean;`,
+    `  supportsFunctionCalling?: boolean;`,
+    `  supportsReasoning?: boolean;`,
+    `  supportsJsonMode?: boolean;`,
+    `  supportsStreaming?: boolean;`,
+    `}`,
+    `export declare function lookupGenericModelCapabilities(model: string | undefined): GenericModelCapabilities | undefined;`,
+    ``,
+  ].join('\n')
+  writeFileSync(GENERIC_MODEL_CAPABILITIES_DTS, dts)
+  console.log(`[bundle-opencc]   → ${GENERIC_MODEL_CAPABILITIES_DTS}`)
+}
+
 // Mechanically emit declaration files for the server module via tsc.
 // `noEmit` requires the tsc program to typecheck; we point outDir at
 // a tmp dir, run the emit, then copy only the server d.ts files into
@@ -895,28 +988,41 @@ console.log(`[bundle-opencc] compress-tool-history: ${COMPRESS_TOOL_HISTORY_OUT}
     stdio: ['inherit', 'pipe', 'pipe'],
   })
   if (proc.status !== 0) {
-    // tsc may report errors in vendored transitive files (the opencc-src
-    // tree has known vendor-type drift that doesn't affect our server
-    // public surface). The server emit contract is "the two required
-    // d.ts files exist" — we sanity-check that below. tsc emits
-    // declaration files for the include files regardless of errors in
-    // transitive dependencies (default `noEmitOnError: false`), so the
-    // d.ts we need are written before this branch fires.
+    // tsc reports errors in vendored transitive files (the opencc-src
+    // tree has known vendor-type drift — 89× TS2742 lodash portability
+    // + other assorted strict-mode issues — that does not affect our
+    // server public surface). The server emit contract is "the two
+    // required d.ts files exist" — we sanity-check that below. tsc
+    // emits declaration files for the include files regardless of
+    // errors in transitive dependencies (default `noEmitOnError: false`),
+    // so the d.ts we need are written before this branch fires.
     //
-    // We log stderr/stdout for visibility but do NOT bail — Task 2's
-    // `createHeadlessContext.ts` reaches into many vendored files whose
-    // isolated tsc surface is not portable. The runtime contract is
-    // enforced by vitest (test/unit/server/headless-context.test.ts),
-    // not by `tsc -p tsconfig.server.json`.
-    if (proc.stderr) {
+    // The runtime contract is enforced by vitest
+    // (test/unit/server/headless-context.test.ts), NOT by `tsc -p
+    // tsconfig.server.json`. Vendor files MAY be edited for type fixes
+    // (see AGENTS.md — opencc-src is a zai patch surface, not a frozen
+    // upstream copy); any remaining errors are logged as a one-line
+    // summary and we rely on the required-d.ts sanity check below.
+    //
+    // tsc writes its errors to stdout (not stderr) by default; capture
+    // from both streams so the count is accurate regardless of host
+    // tsc version.
+    const stdoutStr = proc.stdout?.toString() ?? ''
+    const stderrStr = proc.stderr?.toString() ?? ''
+    const errorCount = (stdoutStr.match(/error TS/g) ?? []).length +
+      (stderrStr.match(/error TS/g) ?? []).length
+    if (errorCount > 0) {
       process.stderr.write(
-        '[bundle-opencc] note: tsc -p tsconfig.server.json reported errors in vendored transitive files;\n' +
-          '[bundle-opencc]       relying on the emit + required-d.ts sanity check below. stderr:\n',
+        `[bundle-opencc] note: tsc -p tsconfig.server.json reported ${errorCount} errors in vendored transitive files; ` +
+          `relying on the emit + required-d.ts sanity check below.\n`,
       )
-      process.stderr.write(proc.stderr)
+      // Temporary: dump full stderr/stdout to investigate remaining errors.
+      if (process.env.BUNDLE_OPENCC_DEBUG_TS) {
+        if (proc.stdout) process.stderr.write(proc.stdout)
+        if (proc.stderr) process.stderr.write(proc.stderr)
+      }
     }
   }
-  if (proc.stdout) process.stdout.write(proc.stdout)
 
   // Copy the two server d.ts files from the tmp emit into the real
   // dist location. The other emitted files (compat/*, etc.) are

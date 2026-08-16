@@ -273,7 +273,7 @@ export function initializePerfettoTracing(): void {
       tracePath = join(tracesDir, `trace-${getSessionId()}.json`)
     } else {
       // Use the provided path
-      tracePath = envValue
+      tracePath = envValue ?? null
     }
 
     logForDebugging(
@@ -290,7 +290,7 @@ export function initializePerfettoTracing(): void {
         void periodicWrite()
       }, intervalSec * 1000)
       // Don't let the interval keep the process alive on its own
-      if (writeIntervalId.unref) writeIntervalId.unref()
+      writeIntervalId?.unref?.()
       logForDebugging(
         `[Perfetto] Periodic write enabled, interval: ${intervalSec}s`,
       )
@@ -301,7 +301,7 @@ export function initializePerfettoTracing(): void {
       evictStaleSpans()
       evictOldestEvents()
     }, STALE_SPAN_CLEANUP_INTERVAL_MS)
-    if (staleSpanCleanupId.unref) staleSpanCleanupId.unref()
+    staleSpanCleanupId?.unref?.()
 
     // Register cleanup to write final trace on exit
     registerCleanup(async () => {

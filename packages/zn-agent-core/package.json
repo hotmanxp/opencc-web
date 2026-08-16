@@ -21,6 +21,7 @@
     "./opencc-src/permissions": "./dist/opencc-src/types/permissions.js",
     "./opencc-src/services/api/sessionApiCounter": "./dist/opencc-src/services/api/sessionApiCounter.js",
     "./opencc-src/server": "./dist/opencc-src/server/index.js",
+    "./opencc-src/utils/model/genericModelCapabilities": "./dist/opencc-src/utils/model/genericModelCapabilities.js",
     "./opencc-server": {
       "types": "./dist/opencc-src/server/index.d.ts",
       "default": "./dist/opencc-src/server/index.js"
@@ -122,6 +123,7 @@
   "devDependencies": {
     "@types/bun": "^1.1.13",
     "@types/js-yaml": "^4.0.9",
+    "@types/lodash": "^4.17.24",
     "@types/lodash-es": "^4.17.12",
     "@types/node": "22.10.0",
     "@types/react": "^18.3.0",

@@ -13,12 +13,26 @@ import { jsonParse } from '../slowOperations.js'
 export async function validateManifest(
   manifestJson: unknown,
 ): Promise<McpbManifest> {
-  const { McpbManifestSchema } = await import('@anthropic-ai/mcpb')
-  const parseResult = McpbManifestSchema.safeParse(manifestJson)
+  // The installed @anthropic-ai/mcpb package doesn't export the schema from
+  // its entry (internal schemas/* are not re-exported), so reach it through
+  // the module object.
+  const mcpbMod = (await import('@anthropic-ai/mcpb')) as {
+    McpbManifestSchema: { safeParse(input: unknown): unknown }
+  }
+  const McpbManifestSchema = mcpbMod.McpbManifestSchema
+  const parseResult = McpbManifestSchema.safeParse(manifestJson) as {
+    success: boolean
+    error?: { flatten(): unknown }
+    data?: McpbManifest
+  }
 
   if (!parseResult.success) {
-    // @ts-ignore - error exists when success is false
-    const errors = parseResult.error.flatten()
+    // error exists when success is false; flatten's shape is zod's standard
+    // { fieldErrors: Record<string, string[]>, formErrors: string[] }.
+    const errors = parseResult.error!.flatten() as {
+      fieldErrors: Record<string, unknown[]>
+      formErrors: unknown[]
+    }
     const errorMessages = [
       ...Object.entries(errors.fieldErrors).map(
         ([field, errs]) => `${field}: ${errs?.join(', ')}`,

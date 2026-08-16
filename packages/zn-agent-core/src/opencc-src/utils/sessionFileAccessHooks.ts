@@ -207,7 +207,8 @@ async function handleSessionFileAccess(
   }
 
   if (false && filePath) {
-    const scope = memoryScopeForPath(filePath)
+    // tsc drops the `filePath` narrow inside the dead `false &&` block.
+    const scope = memoryScopeForPath(filePath!)
     if (
       scope !== null &&
       (input.tool_name === FILE_EDIT_TOOL_NAME ||

@@ -202,6 +202,33 @@ export type OpenccQueryInput = {
   model?: string
   /** Optional abort signal — `query` must subscribe and stop on abort. */
   abortSignal?: AbortSignal
+  /**
+   * zai patch: mark this query's prompt as a system-injected meta message
+   * (visible to the LLM, hidden from the transcript UI). Used for the
+   * placeholder query fired when a background task completes.
+   */
+  isMeta?: boolean
+  /**
+   * zai patch: optional per-query permission mode override. When absent the
+   * runtime keeps whatever mode the headless context was created with.
+   */
+  permissionMode?:
+    | 'default'
+    | 'acceptEdits'
+    | 'bypassPermissions'
+    | 'dontAsk'
+    | 'plan'
+  /**
+   * zai patch: per-query provider override — routes through an
+   * OpenAI-compatible shim client instead of the default Anthropic SDK path.
+   */
+  providerOverride?: { model: string; baseURL: string; apiKey: string }
+  /**
+   * zai patch: id of the provider profile the user picked for this query.
+   * Lets the server-side matcher route the model to the exact provider the
+   * user chose when several profiles share the same model name.
+   */
+  providerId?: string
 }
 
 /**

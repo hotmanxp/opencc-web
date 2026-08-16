@@ -457,7 +457,9 @@ export async function* withRetry<T>(
       //   - error.status 不可靠时,fallback 到 error.message.includes('rate_limit')
       //   - streaming mode SDK 错误的 status code 修复
       consecutive429Errors++
-      setRateLimitCooldown(getRetryAfterMs(error) ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS)
+      setRateLimitCooldown(
+        getRetryAfterMs(error as APIError) ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS,
+      )
       if (consecutive429Errors >= MAX_429_RETRIES) {
         throw new CannotRetryError(error, retryContext)
       }

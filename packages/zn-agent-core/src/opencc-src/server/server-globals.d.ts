@@ -27,7 +27,9 @@ declare const MACRO: {
   readonly VERSION: string
   readonly DISPLAY_VERSION: string
   readonly BUILD_TIME: string
-  readonly IS_DEVELOPMENT_BUILD: boolean
+  // string (not boolean): vendored code compares `MACRO.IS_DEVELOPMENT_BUILD
+  // === 'true'`; upstream opencc defines it as a build-time string literal.
+  readonly IS_DEVELOPMENT_BUILD: string
   readonly PACKAGE_URL: string
   readonly NATIVE_PACKAGE_URL: string | undefined
   readonly ISSUES_EXPLAINER: string

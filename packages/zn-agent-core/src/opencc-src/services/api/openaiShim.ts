@@ -1424,6 +1424,9 @@ async function* openaiStreamToAnthropic(
 
   // Create eventsource-parser for proper SSE parsing
   // eventsource-parser handles line buffering, multi-line data, and event types correctly
+  // Installed eventsource-parser is v1+ (callback-style createParser); this
+  // vendored call site uses the legacy options-object API. Type-assert to the
+  // expected callback so the SSE bridge keeps its original shape.
   const parser = createParser({
     onEvent: (sseEvent) => {
       // eventsource-parser emits an event when data is complete (after empty line)
@@ -1440,7 +1443,7 @@ async function* openaiStreamToAnthropic(
     onComment: (comment) => {
       // Comments start with ':' - we can ignore them
     },
-  })
+  } as unknown as Parameters<typeof createParser>[0])
 
   const closeActiveContentBlock = async function* () {
     if (!hasEmittedContentStart) return

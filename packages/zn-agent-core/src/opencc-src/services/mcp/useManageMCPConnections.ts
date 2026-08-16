@@ -13,6 +13,7 @@ import {
   reconnectMcpServerImpl,
 } from './client.js'
 import type {
+  ConnectedMCPServer,
   MCPServerConnection,
   ScopedMcpServerConfig,
   ServerResource,
@@ -67,7 +68,9 @@ import {
   findChannelEntry,
   gateChannelServer,
   wrapChannelMessage,
+  type ChannelGateResult,
 } from './channelNotification.js'
+import type { ChannelEntry } from '../../bootstrap/state.js'
 import {
   type ChannelPermissionCallbacks,
   createChannelPermissionCallbacks,
@@ -183,9 +186,16 @@ export function useManageMCPConnections(
       // undefined → never sends → intercept has nothing pending → "yes tbxkq"
       // flows to Claude as normal chat. One gate, full disable.
       if (!isChannelPermissionRelayEnabled()) return
+      // tsc drops the `if (!callbacks) return` narrow here: callbacks is
+      // extracted from ref.current, whose property is written elsewhere in
+      // this component, and tsc resets aliased narrows across the nested
+      // closure boundary. `!` re-asserts what the guard already proved.
       setAppState(prev => {
         if (prev.channelPermissionCallbacks === callbacks) return prev
-        return { ...prev, channelPermissionCallbacks: callbacks }
+        return {
+          ...prev,
+          channelPermissionCallbacks: callbacks as ChannelPermissionCallbacks,
+        }
       })
       return () => {
         setAppState(prev => {
@@ -468,30 +478,47 @@ export function useManageMCPConnections(
           // Gate decides whether to register the handler; connection stays
           // up either way (allowedMcpServers controls that).
           if (false || false) {
+            // Runtime gate is disabled (false || false above), but tsc still
+            // typechecks the block. `client` is a function param captured
+            // by the enclosing onclose closure, so tsc won't preserve the
+            // `type === 'connected'` narrow here — re-assert via a local
+            // alias typed as the connected member. Dead code: never runs.
+            const connectedClient = client as ConnectedMCPServer
             const gate = gateChannelServer(
-              client.name,
-              client.capabilities,
-              client.config.pluginSource,
+              connectedClient.name,
+              connectedClient.capabilities,
+              connectedClient.config.pluginSource,
             )
-            const entry = findChannelEntry(client.name, getAllowedChannels(), client.config.pluginSource)
+            const entry = findChannelEntry(connectedClient.name, getAllowedChannels(), connectedClient.config.pluginSource)
             // Plugin identifier for telemetry — log name@marketplace for any
             // plugin-kind entry (same tier as tengu_plugin_installed, which
             // logs arbitrary plugin_id+marketplace_name ungated). server-kind
             // names are MCP-server-name tier; those are opt-in-only elsewhere
             // (see isAnalyticsToolDetailsLoggingEnabled in metadata.ts) and
             // stay unlogged here. is_dev/entry_kind segment the rest.
-            const pluginId =
-              entry?.kind === 'plugin'
-                ? (`${entry.name}@${entry.marketplace}` as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-                : undefined
+            // tsc drops the discriminant narrow (`kind` / `action`) inside
+            // this dead-code block, so extract the narrowed shapes explicitly
+            // with `Extract` instead of relying on control-flow narrowing.
+            let pluginId: AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS | undefined
+            if (entry !== undefined) {
+              const pluginEntry = entry as Extract<ChannelEntry, { kind: 'plugin' }>
+              if (pluginEntry.kind === 'plugin') {
+                pluginId = `${pluginEntry.name}@${pluginEntry.marketplace}` as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+              }
+            }
+            const skipGate = gate.action === 'skip'
+              ? (gate as Extract<ChannelGateResult, { action: 'skip' }>)
+              : undefined
             // Skip capability-miss — every non-channel MCP server trips it.
-            if (gate.action === 'register' || gate.kind !== 'capability') {
+            if (
+              gate.action === 'register' ||
+              (gate.action === 'skip' && skipGate!.kind !== 'capability')
+            ) {
               logEvent('tengu_mcp_channel_gate', {
                 registered: gate.action === 'register',
-                skip_kind:
-                  gate.action === 'skip'
-                    ? (gate.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS)
-                    : undefined,
+                skip_kind: skipGate?.kind as
+                  | AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS
+                  | undefined,
                 entry_kind:
                   entry?.kind as AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
                 is_dev: entry?.dev ?? false,
@@ -501,7 +528,7 @@ export function useManageMCPConnections(
             switch (gate.action) {
               case 'register':
                 logMCPDebug(client.name, 'Channel notifications registered')
-                client.client.setNotificationHandler(
+                connectedClient.client.setNotificationHandler(
                   ChannelMessageNotificationSchema(),
                   async notification => {
                     const { content, meta } = notification.params
@@ -535,11 +562,11 @@ export function useManageMCPConnections(
                 // behavior}; no regex on our side, text in the general
                 // channel can't accidentally match.
                 if (
-                  client.capabilities?.experimental?.[
+                  connectedClient.capabilities?.experimental?.[
                     'claude/channel/permission'
                   ]
                 ) {
-                  client.client.setNotificationHandler(
+                  connectedClient.client.setNotificationHandler(
                     ChannelPermissionNotificationSchema(),
                     async notification => {
                       const { request_id, behavior } = notification.params
@@ -563,15 +590,15 @@ export function useManageMCPConnections(
                 // handler. Without this, mid-session demotion is one-way:
                 // the gate says skip but the earlier handler keeps enqueuing.
                 // Map.delete — safe when never registered.
-                client.client.removeNotificationHandler(
+                connectedClient.client.removeNotificationHandler(
                   'notifications/claude/channel',
                 )
-                client.client.removeNotificationHandler(
+                connectedClient.client.removeNotificationHandler(
                   CHANNEL_PERMISSION_METHOD,
                 )
                 logMCPDebug(
                   client.name,
-                  `Channel notifications skipped: ${gate.reason}`,
+                  `Channel notifications skipped: ${skipGate?.reason}`,
                 )
                 // Surface a once-per-kind toast when a channel server is
                 // blocked. This is the only
@@ -579,24 +606,33 @@ export function useManageMCPConnections(
                 // Capability/session skips are expected noise and stay
                 // debug-only. marketplace/allowlist run after session — if
                 // we're here with those kinds, the user asked for it.
+                // `skipGate!` is safe: this case only runs when
+                // gate.action === 'skip'.
+                // The `has`/`add` casts are needed because tsc's
+                // `!== 'capability'` / `!== 'session'` narrow is dropped in
+                // this dead-code block, so `kind` keeps its full union.
                 if (
-                  gate.kind !== 'capability' &&
-                  gate.kind !== 'session' &&
-                  !channelWarnedKindsRef.current.has(gate.kind) &&
-                  (gate.kind === 'marketplace' ||
-                    gate.kind === 'allowlist' ||
+                  skipGate!.kind !== 'capability' &&
+                  skipGate!.kind !== 'session' &&
+                  !channelWarnedKindsRef.current.has(
+                    skipGate!.kind as 'disabled' | 'auth' | 'policy' | 'marketplace' | 'allowlist',
+                  ) &&
+                  (skipGate!.kind === 'marketplace' ||
+                    skipGate!.kind === 'allowlist' ||
                     entry !== undefined)
                 ) {
-                  channelWarnedKindsRef.current.add(gate.kind)
+                  channelWarnedKindsRef.current.add(
+                    skipGate!.kind as 'disabled' | 'auth' | 'policy' | 'marketplace' | 'allowlist',
+                  )
                   // disabled gets custom toast copy (shorter, actionable);
                   // marketplace/allowlist reuse the gate's reason verbatim
                   // since it already names the mismatch.
                   const text =
-                    gate.kind === 'disabled'
+                    skipGate!.kind === 'disabled'
                       ? 'Channels are not currently available'
-                      : gate.reason
+                      : skipGate!.reason
                   addNotification({
-                    key: `channels-blocked-${gate.kind}`,
+                    key: `channels-blocked-${skipGate!.kind}`,
                     priority: 'high',
                     text,
                     color: 'warning',

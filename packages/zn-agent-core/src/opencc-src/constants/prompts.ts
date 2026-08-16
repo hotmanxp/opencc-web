@@ -798,7 +798,7 @@ export async function enhanceSystemPromptWithEnvDetails(
     false &&
     skillSearchFeatureCheck?.isSkillSearchEnabled() &&
     DISCOVER_SKILLS_TOOL_NAME !== null &&
-    (enabledToolNames?.has(DISCOVER_SKILLS_TOOL_NAME) ?? true)
+    (enabledToolNames?.has(DISCOVER_SKILLS_TOOL_NAME!) ?? true)
       ? getDiscoverSkillsGuidance()
       : null
   const envInfo = await computeEnvInfo(model, additionalWorkingDirectories)

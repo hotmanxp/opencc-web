@@ -7,6 +7,7 @@ import type { ModelEntry, OutputStyle, Theme, ZaiSettings } from '../../shared/s
 import type { ProviderProfile } from '../../shared/types.js'
 import { getDefaultMode } from '../services/permissionMode.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
+import { profilesToModelEntries } from '../../shared/profileProjection.js'
 import {
   isValidAutoUpdate,
   isValidDefaultSplitScreen,
@@ -35,58 +36,6 @@ function readClaudeProviderProfiles(): ProviderProfile[] {
   } catch {
     return []
   }
-}
-
-/**
- * Project a list of provider profiles onto a flat ModelEntry table for
- * the picker. Each comma-separated model in profile.model becomes one
- * ModelEntry whose alias encodes the provider name (e.g. `nova-m3`).
- *
- * `providerId` is set from `profile.id` so the picker can preserve the
- * user-picked provider across the model → service roundtrip (the
- * server-side `findProfileForModel` uses it to disambiguate when
- * multiple profiles share the same model name).
- *
- * Capabilities come from profile.capabilities[<model>] when the user
- * has saved per-model metadata; otherwise undefined and the picker
- * renders without capability badges.
- */
-function profilesToModelEntries(profiles: ProviderProfile[]): ModelEntry[] {
-  const out: ModelEntry[] = []
-  for (const p of profiles) {
-    if (!p.model) continue
-    const models = p.model.split(',').map((m) => m.trim()).filter(Boolean)
-    // profile.id is the canonical namespace; older saved profiles may
-    // lack it but the name is unique enough to disambiguate in the
-    // picker when no id is present.
-    const profileKey = p.id ?? slugifyProfileName(p.name)
-    for (const model of models) {
-      out.push({
-        alias: `${profileKey}-${slugifyModelName(model)}`,
-        model,
-        label: model,
-        description: p.name,
-        baseUrl: p.baseUrl,
-        capabilities: p.capabilities?.[model],
-        // zai patch: thread providerId through to the picker so
-        // ModelStatusButton.pickEntry can persist the user's choice
-        // back to transcript.meta.providerId. Profiles without an id
-        // (legacy configs) intentionally leave providerId undefined
-        // — findProfileForModel falls back to legacy first-match
-        // behavior when no preferred id is set.
-        providerId: p.id,
-      })
-    }
-  }
-  return out
-}
-
-function slugifyProfileName(name: string): string {
-  return name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'profile'
-}
-
-function slugifyModelName(model: string): string {
-  return model.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'model'
 }
 
 /**

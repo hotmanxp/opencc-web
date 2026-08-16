@@ -167,12 +167,12 @@ function SpinnerWithVerbInner({
   // Stale read of the refs for showBtwTip below — we're off the 50ms clock
   // so this only updates when props/app state change, which is sufficient for
   // a coarse 30s threshold.
-  const elapsedSnapshot = pauseStartTimeRef.current !== null ? pauseStartTimeRef.current - loadingStartTimeRef.current - totalPausedMsRef.current : Date.now() - loadingStartTimeRef.current - totalPausedMsRef.current;
+  const elapsedSnapshot = pauseStartTimeRef.current !== null ? pauseStartTimeRef.current - loadingStartTimeRef.current! - totalPausedMsRef.current! : Date.now() - loadingStartTimeRef.current! - totalPausedMsRef.current!;
 
   // Leader token count for TeammateSpinnerTree — read raw (non-animated) from
   // the ref. The tree is only shown when teammates are running; teammate
   // progress updates to s.tasks trigger re-renders that keep this fresh.
-  const leaderTokenCount = Math.round(responseLengthRef.current / 4);
+  const leaderTokenCount = Math.round(responseLengthRef.current! / 4);
   const defaultColor: keyof Theme = 'claude';
   const defaultShimmerColor = 'claudeShimmer';
   const messageColor = overrideColor ?? defaultColor;

@@ -27,6 +27,7 @@ import type { PermissionDecision } from '../../../utils/permissions/PermissionRe
 import type { PermissionUpdate } from '../../../utils/permissions/PermissionUpdateSchema.js'
 import { hasPermissionsToUseTool } from '../../../utils/permissions/permissions.js'
 import type { PermissionContext } from '../PermissionContext.js'
+import type { PermissionDecisionReason } from '../../../types/permissions.js'
 import { createResolveOnce } from '../PermissionContext.js'
 
 type InteractivePermissionParams = {
@@ -421,7 +422,9 @@ function handleInteractivePermission(
         // dead closure stayed registered on the session-scoped abort signal
         // until the session ended. Not a functional bug (Map.delete is
         // idempotent), but it held the closure alive.
-        const mapUnsub = channelCallbacks.onResponse(
+        // `channelCallbacks` was truthy-checked in the (false || false)
+        // gate above; tsc drops that narrow inside this block, so re-assert.
+        const mapUnsub = channelCallbacks!.onResponse(
           channelRequestId,
           response => {
             if (!claim()) return // Another racer won
@@ -462,7 +465,7 @@ function handleInteractivePermission(
           channelSignal.removeEventListener('abort', channelUnsubscribe!)
         }
 
-        channelSignal.addEventListener('abort', channelUnsubscribe, {
+        channelSignal.addEventListener('abort', channelUnsubscribe!, {
           once: true,
         })
       }
@@ -503,7 +506,7 @@ function handleInteractivePermission(
       // don't flash the indicator for a split second before allow returns.
       setClassifierChecking(ctx.toolUseID)
       void executeAsyncClassifierCheck(
-        result.pendingClassifierCheck,
+        result.pendingClassifierCheck!,
         ctx.toolUseContext.abortController.signal,
         ctx.toolUseContext.options.isNonInteractiveSession,
         {
@@ -540,10 +543,15 @@ function handleInteractivePermission(
               false &&
               decisionReason.type === 'classifier'
             ) {
-              if (decisionReason.classifier === 'auto-mode') {
-                setYoloClassifierApproval(ctx.toolUseID, decisionReason.reason)
+              // Discriminant narrow is dropped inside the `false &&` block.
+              const classifierDecision = decisionReason as Extract<
+                PermissionDecisionReason,
+                { type: 'classifier' }
+              >
+              if (classifierDecision.classifier === 'auto-mode') {
+                setYoloClassifierApproval(ctx.toolUseID, classifierDecision.reason)
               } else if (matchedRule) {
-                setClassifierApproval(ctx.toolUseID, matchedRule)
+                setClassifierApproval(ctx.toolUseID, matchedRule!)
               }
             }
 
