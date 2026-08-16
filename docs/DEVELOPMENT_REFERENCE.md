@@ -295,3 +295,44 @@ zai 端实现的能力,把 opencc 上游 `bashProvider.ts` 的"shell trailer 跟
 **前端路由**:`packages/zai/src/web/src/lib/eventSource.ts` `NAMED_EVENT_TYPES` 已同步加 `command.run` / `command.done`,`EventSource` 不会静默丢。当前前端**不主动** toast(留给后续 UI 优化),但 store 仍可读取用于调试面板。
 
 **测试**:`test/server/routes/command.lifecycle.test.ts` — 14 个 case 覆盖 5 处出口 + 异常路径 + args 截断 + commandId 配对 + durationMs 边界。
+
+## 14. 类型化 RPC Client Stub (`apiRpc`)
+
+`packages/zai/src/shared/rpc.ts` 的 `RpcMethodMap` 是 **REST path + request/response** 的单一真相源,前后端共享类型。`scripts/generate-rpc-client.ts` AST 扫描它,生成 `packages/zai/src/web/src/lib/api.generated.ts`(generated stub,`as const` + `_Map[key]` 索引访问,无 drift 风险)。
+
+**调用方式**(优先用):
+
+```ts
+import { apiRpc } from '@/lib/api.js'
+const r = await apiRpc.agent.command.post({ name: 'clear', args: '', sessionId: 's1' })
+if (r.type === 'cleared') { ... }   // discriminated union 自动收窄
+```
+
+**当前覆盖**(高频 5 个 route,渐进迁移第一步):
+
+| Generated stub | Route |
+|----------------|-------|
+| `apiRpc.health.get()` | `GET /api/health` |
+| `apiRpc.cli.get()` | `GET /api/cli` |
+| `apiRpc.agent.command.post(body)` | `POST /api/agent/command` |
+| `apiRpc.agent.prompt.post(body)` | `POST /api/agent/prompt` |
+| `apiRpc.agent.sessions.get()` | `GET /api/agent/sessions` |
+| `apiRpc.agent.sessions.post(body)` | `POST /api/agent/sessions` |
+
+**加新 route**:
+1. 在 `shared/rpc.ts` 的 `RpcMethodMap` 加一行 `${METHOD} /api/...`: `{ request: T, response: U }`
+2. 跑 `pnpm run codegen:rpc` 重新生成 `api.generated.ts`
+3. commit generated stub + RpcMethodMap 一起
+4. 调用方用 `apiRpc.<path>.post(...)` 立即拿到类型
+
+**兼容老 `api.get/post/put`**: `web/src/lib/api.ts` 仍导出 `api`(走 `apiBase.request` 同样的 fetch 实现),迁移期间共存;新代码优先 `apiRpc`。
+
+**底层 fetch**:`web/src/lib/apiBase.ts` 抽 `request(method, path, body?)` — 路径含 `/api` 前缀的(generated stub)直接用,否则加前缀(老 `api.get/post/put`),自动跳过重复前缀。
+
+**测试**:
+- `test/web/lib/apiRpc.test.ts` — 12 个 case 验证 `apiBase.request` + `apiRpc` 各 method 调用 + 老 `api` 兼容
+- `test/scripts/generate-rpc-client.test.ts` — 2 个 case 验证 codegen 产物与 committed 文件 byte-for-byte 一致(snapshot),防止 RpcMethodMap 改了但忘了跑 codegen
+
+**限制**:
+- 当前 codegen 不支持 path 含动态参数(`:id` 等)的 route — 含 `:id` 的 entry 会被 skip 并 warn。迁移这些 route 时单独处理(e.g. 加 helper `withPathId` 拼接 `\`/sessions/${id}\``)。
+- 30 个 routes 渐进迁移的进度, 后续 plan 跟进 — 没有这条路线的统一 plan, 优先按"高频调用方"顺序迁(`agent.ts` → `cli.ts` → `plugin` → `git` → `fs`)。
