@@ -44,7 +44,7 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 
 ## 强制开发规则
 
-- **真实浏览器验收**:任何问题修复或特性新增,完成前必须用 `/ego-browser` skill 启动真实 zai 实例并走完用户路径(页面加载、按钮点击、表单提交、截图等)。**禁止**用 Chrome DevTools MCP、Playwright、Puppeteer、`curl + WebFetch` 或单元测试替代。环境阻塞时必须显式报告。**注意**:`/ego-browser` 测试本地功能时,不要 kill 920x 端口所在的服务进程——920x 是 zai 正式服务端口, kill 后会导致真实实例不可用,应改为让 ego 使用另一个可用端口(如 8101 起)访问,或用 `pnpm --filter @zn-ai/zai dev` 启动独立开发服务。
+- **真实浏览器验收**:任何问题修复或特性新增,完成前必须用 `/ego-browser` skill 启动真实 zai 实例并走完用户路径(页面加载、按钮点击、表单提交、截图等)。**禁止**用 Chrome DevTools MCP、Playwright、Puppeteer、`curl + WebFetch` 或单元测试替代。环境阻塞时必须显式报告。**注意**:`/ego-browser` 测试本地功能时,不要 kill 920x 端口所在的服务进程——920x 是 zai 正式服务端口, kill 后会导致真实实例不可用,应改为让 ego 使用另一个可用端口(如 8101 起)访问,或用 `pnpm --filter @zn-ai/zai dev` 启动独立开发服务。**ego-browser 在 zai dev 跑着时(SSE 长连接)实际可用**——通过 `browser-operator` skill 调真实浏览器(ego-browser)即可。早期 `feedback-ego-browser-sse-blocked` memory 已过时,不要因为旧经验跳过视觉验证。
 - **移动端路由访问路径**:zai 提供两条独立路径,验证 mobile-only 功能(`MobileQuickDrawer` / `MobileAgent.tsx` / `useBashRepl` 在 drawer 内的 toast 等)时务必切到 `/m`,不要在 `/agent` 上靠缩窗口判断:
   - **`/agent`** → PC 端(`Layout.tsx` + `AgentConversation.tsx`,左侧 Sider + 右侧分屏 tab)。
   - **`/m`** → 移动端(`pages/MobileAgent.tsx`,整页重写为顶部 hamburger + 底部输入 + Drawer)。
@@ -84,6 +84,16 @@ pnpm -r test -t "<describe-block-name>"                  # 按 describe 名匹�
 
 # 启动 dev(zai + 前端)
 pnpm --filter @zn-ai/zai dev
+# 指定独立端口(避免与 920x 正式服务 / 8101 已占用实例冲突)
+# 注意: `--` 是必需的 — `--port` / `--api-port` 是 zai CLI 的参数,
+# 要靠 pnpm 的 `--` 透传,否则被 pnpm 自身吞掉或传给上一层。
+# 默认 Vite 8101 / Express 7715;未显式指定时这两个端口被占用会自动扫描;
+# 显式指定时若被占用会 EADDRINUSE 报错退出,不会静默换端口。
+pnpm --filter @zn-ai/zai dev -- --port 8102 --api-port 7715
+# 禁止: 顶层 `pnpm dev` 会同时跑所有 workspace 的 dev — zai 之外,
+# zn-agent-core 的 dev 是 `tsc -b --watch`,会拒绝 `--port` 参数(TS5072),
+# 整条 dev 链路失败。需要 core tsc watch 时单独跑:
+pnpm --filter @zn-ai/zn-agent-core exec tsc -b --watch
 
 # 真实浏览器验收(强制项)
 /ego-browser                  # 通过 skill 调 ego-browser 驱动 zai Web UI
@@ -121,4 +131,4 @@ pnpm release:major
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
 
-<!-- updated: 2026-08-06 -->
+<!-- updated: 2026-08-16 -->
