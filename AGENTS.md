@@ -116,6 +116,8 @@ pnpm release:major
 | Provider/Model 路由覆盖 | `docs/superpowers/specs/2026-08-03-provider-model-route-overrides-design.md` |
 | Agent 实例管理 | `docs/superpowers/specs/2026-08-03-zai-agent-instance-manager-design.md` |
 | OpenCC Adapter(Node/tsx) | `docs/superpowers/specs/2026-07-29-zn-agent-core-opencc-adapter-node-design.md`(Bun 版已 deprecated) |
+| 类型化 RPC client stub | `docs/superpowers/specs/2026-08-16-rpc-type-safe-client-stubs.md` |
+| 命令生命周期事件埋点 | `docs/superpowers/specs/2026-08-16-command-lifecycle-events.md` |
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
 
