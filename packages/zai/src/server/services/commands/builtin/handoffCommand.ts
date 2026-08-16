@@ -15,14 +15,13 @@ const HANDOFF_SUBDIR = path.join('.agent_working_dir', 'handoff')
 // handoff 仅返回 text block;局部结构类型避免把 anthropic-sdk 类型拖入 zai。
 type ContentBlock = { type: 'text'; text: string }
 
-// 真实 CommandContext 是 { cwd, dataDir, sessionId?, model? }。
-// 路由层会在 prompt getPromptForCommand 调用前向 context 注入
-// `assistantMessageCount` 与 `taskListText`(由 session/transcript
-// 计算 + agent state 取值);PromptCommand 类型不暴露这两字段,这里
-// 用 intersection 局部扩展,保持 helper 签名贴近真实 context。
+// 真实 CommandContext 是 { cwd, dataDir, sessionId?, model?, messages? }。
+// 路由层在 prompt getPromptForCommand 调用前会向 context 注入
+// `messages`(由 TranscriptStore.read 读出的 transcript entries)与
+// `taskListText`(由 agent state 取值);`messages` 已在 PromptCommand 类型
+// 上暴露, `taskListText` 则是 zai 局部扩展 — 这里用 intersection 保留
+// 这条 helper 签名,贴近调用现场。
 type HandoffContext = CommandContext & {
-  cwd?: string
-  assistantMessageCount?: number
   taskListText?: string | null
 }
 
@@ -40,11 +39,11 @@ export function parseArgs(args: string): ParsedArgs {
     if (t === '--pick') {
       const v = tokens[++i]
       if (!v || v.startsWith('--')) {
-        throw new HandoffArgsError('用法:/handoff [--pick <filename>]')
+        throw new HandoffArgsError('用法:/handoff [--pick <​filename>]')
       }
       out.pickFile = v
     } else {
-      throw new HandoffArgsError(`未知参数:${t};用法:/handoff [--pick <filename>]`)
+      throw new HandoffArgsError(`未知参数:${t};用法:/handoff [--pick <​filename>]`)
     }
   }
   return out
@@ -58,12 +57,24 @@ export function resolveCwd(context: HandoffContext): string {
   return fallback
 }
 
+/**
+ * 与 vendor 一致:从 context.messages 自己数 assistant 消息。
+ *
+ * 为什么不靠 router 注入 `assistantMessageCount`? 之前 zai 走注入路由,
+ * 未注入时 countAssistantMessages fallback 返回 +Infinity,导致 isPickup
+ * 永远 false → 永远走 generate。新会话跑 /handoff 拿不到现有交接文档,
+ * 转去写新文档就是这个 bug。改为从 context.messages filter 真实轮次。
+ *
+ * 路由未注入 messages(最早期前端 stub、单测、或没传 sessionId)时,fallback
+ * 为 0(对称"新会话")— 与 vendor 把未定义 messages 视作 [] 的行为一致。
+ * 0 走 pickup 但 0 文件会触发 pickup prompt 的"未找到"友好提示,引导用户
+ * 主动 `/handoff --generate` 走另一边。比 +Infinity fallback 安全得多。
+ */
 export async function countAssistantMessages(
   context: HandoffContext,
 ): Promise<number> {
-  const injected = context.assistantMessageCount
-  if (typeof injected === 'number') return injected
-  return Number.POSITIVE_INFINITY
+  const messages = context.messages ?? []
+  return messages.filter((m) => m.type === 'assistant').length
 }
 
 export async function readTaskListText(
@@ -78,12 +89,14 @@ function todayISO(): string {
   return new Date().toISOString().slice(0, 10)
 }
 
-// Command definition exported below; getPromptForCommand body added in Step 5.
+// Command definition exported below; getPromptForCommand mirrors OpenCC vendor
+// intent: assistant message count <= PICKUP_THRESHOLD → resume existing handoff,
+// otherwise generate a new one. --pick overrides the threshold and forces pickup.
 export const handoffCommand: PromptCommand = {
   type: 'prompt',
   name: 'handoff',
   description: '交接当前会话:消息多时生成交接文档,消息少时恢复最近的交接',
-  argumentHint: '[--pick <filename>]',
+  argumentHint: '[--pick <​filename>]',
   source: 'builtin',
   progressMessage: 'preparing handoff',
   contentLength: 0,

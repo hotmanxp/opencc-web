@@ -53,19 +53,44 @@ describe('resolveCwd', () => {
 })
 
 describe('countAssistantMessages', () => {
-  it('context.assistantMessageCount 是 number 时返回它', async () => {
+  it('context.messages 过滤 type === assistant', async () => {
+    const messages = [
+      { type: 'user' },
+      { type: 'assistant' },
+      { type: 'user' },
+      { type: 'assistant' },
+      { type: 'assistant' },
+    ]
     expect(
-      await countAssistantMessages({ cwd: '/x', dataDir: '/d', assistantMessageCount: 3 } as any),
+      await countAssistantMessages({ cwd: '/x', dataDir: '/d', messages } as any),
     ).toBe(3)
-    expect(
-      await countAssistantMessages({ cwd: '/x', dataDir: '/d', assistantMessageCount: 100 } as any),
-    ).toBe(100)
   })
 
-  it('context 没字段时返回 +Infinity(强制 GENERATE)', async () => {
-    expect(await countAssistantMessages({ cwd: '/x', dataDir: '/d' } as any)).toBe(
-      Number.POSITIVE_INFINITY,
-    )
+  it('context.messages 为空时返回 0(等同"新会话")', async () => {
+    expect(
+      await countAssistantMessages({ cwd: '/x', dataDir: '/d', messages: [] } as any),
+    ).toBe(0)
+  })
+
+  it('context 没 messages 字段时不返回 +Infinity,退化为 0', async () => {
+    // 之前此 fallback 返回 +Infinity,把 isPickup 永远推成 false,导致
+    // 路由层没注入 messages 时新会话里 /handoff 永远走 generate — 这就是
+    // 当前 bug 的根因。修复后 fallback 改为 0,跟 vendor 对 undefined messages
+    // 的兜底一致。
+    expect(await countAssistantMessages({ cwd: '/x', dataDir: '/d' } as any)).toBe(0)
+  })
+
+  it('非 assistant 类型(user / tool / system / ...)不计入', async () => {
+    const messages = [
+      { type: 'user' },
+      { type: 'tool_use' },
+      { type: 'tool_result' },
+      { type: 'system' },
+      { type: 'compact_boundary' },
+    ]
+    expect(
+      await countAssistantMessages({ cwd: '/x', dataDir: '/d', messages } as any),
+    ).toBe(0)
   })
 })
 
@@ -94,7 +119,14 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
     await fs.rm(tmpDir, { recursive: true, force: true })
   })
 
-  it('PICKUP: assistantCount=2 时走 pickup 分支', async () => {
+  // 构造 N 个 assistant 消息的 helper,user 消息穿插模拟真实 transcript。
+  const assistantMessages = (n: number) =>
+    Array.from({ length: n }, (_, i) => [
+      { type: 'user' },
+      { type: 'assistant', message: { id: String(i) } },
+    ]).flat()
+
+  it('PICKUP: assistant 消息数 <= PICKUP_THRESHOLD(4)时走 pickup 分支', async () => {
     const file = path.join(tmpDir, '.agent_working_dir/handoff', 'old.md')
     await fs.mkdir(path.dirname(file), { recursive: true })
     await fs.writeFile(file, '# old')
@@ -104,7 +136,7 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
       {
         cwd: tmpDir,
         dataDir: '/tmp/test-data',
-        assistantMessageCount: 2,
+        messages: assistantMessages(2),
         taskListText: null,
       } as any,
     )
@@ -113,13 +145,13 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
     expect(text).toContain('old.md')
   })
 
-  it('GENERATE: assistantCount=10 时走 generate 分支', async () => {
+  it('GENERATE: assistant 消息数 > PICKUP_THRESHOLD(4)时走 generate 分支', async () => {
     const blocks = await handoffCommand.getPromptForCommand(
       '',
       {
         cwd: tmpDir,
         dataDir: '/tmp/test-data',
-        assistantMessageCount: 10,
+        messages: assistantMessages(10),
         taskListText: '- [ ] next',
       } as any,
     )
@@ -135,7 +167,7 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
       {
         cwd: tmpDir,
         dataDir: '/tmp/test-data',
-        assistantMessageCount: 10,
+        messages: assistantMessages(10),
         taskListText: null,
       } as any,
     )
@@ -143,7 +175,7 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
     expect(text).toContain('(未提供 — 请从对话上文推断当前任务列表)')
   })
 
-  it('--pick 强制 PICKUP 即便 assistantCount 高', async () => {
+  it('--pick 强制 PICKUP 即便 assistant 消息数 > 4', async () => {
     const file = path.join(tmpDir, '.agent_working_dir/handoff', 'picked.md')
     await fs.mkdir(path.dirname(file), { recursive: true })
     await fs.writeFile(file, '# picked')
@@ -153,7 +185,7 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
       {
         cwd: tmpDir,
         dataDir: '/tmp/test-data',
-        assistantMessageCount: 50,
+        messages: assistantMessages(50),
         taskListText: null,
       } as any,
     )
@@ -170,7 +202,7 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
         {
           cwd: tmpDir,
           dataDir: '/tmp/test-data',
-          assistantMessageCount: 2,
+          messages: assistantMessages(2),
           taskListText: null,
         } as any,
       ),
@@ -183,7 +215,7 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
       {
         cwd: tmpDir,
         dataDir: '/tmp/test-data',
-        assistantMessageCount: 2,
+        messages: assistantMessages(2),
         taskListText: null,
       } as any,
     )
@@ -191,12 +223,17 @@ describe('handoffCommand.getPromptForCommand (end-to-end)', () => {
     expect(text).toContain('未找到')
   })
 
-  it('context 仅含必需字段时走 GENERATE(+Infinity fallback)', async () => {
+  it('context 仅含必需字段(无 messages)时走 PICKUP(0 fallback)而非 +Infinity', async () => {
+    // 修复回归: 之前 +Infinity fallback 会让"sessionId 未注入 / 没 messages"
+    // 路径永远走 generate,这是当前 bug 根因。改为 0 后这条路径走 pickup,
+    // 0 文件时跟上面"PICKUP 0 文件时返回友好提示"一样的行为(交给用户
+    // 主动 /handoff --generate 或先 /handoff --pick 指定的文件)。
     const blocks = await handoffCommand.getPromptForCommand(
       '',
       { cwd: tmpDir, dataDir: '/tmp/test-data' } as any,
     )
     const text = (blocks[0] as any).text
-    expect(text).toContain('Task title') // GENERATE 标识
+    expect(text).toContain('未找到') // PICKUP 0 文件分支
+    expect(text).not.toContain('Task title') // 不该是 GENERATE
   })
 })

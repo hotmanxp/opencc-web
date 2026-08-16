@@ -1,7 +1,12 @@
 import { Router, type IRouter } from 'express'
 import { getCommandRegistry } from '@zn-ai/zn-agent-core'
 import { initCommands } from '../services/commands/registry.js'
-import { getCurrentSessionId, getRuntime, resolveSkillPrompt } from '../services/agentRuntime.js'
+import {
+  getCurrentSessionId,
+  getRuntime,
+  getTranscriptStore,
+  resolveSkillPrompt,
+} from '../services/agentRuntime.js'
 
 export const commandRouter: IRouter = Router()
 
@@ -35,11 +40,27 @@ commandRouter.post('/command', async (req, res) => {
     // 取当前 session;若 body 带 sessionId,优先用。
     const sid = sessionId ?? getCurrentSessionId() ?? undefined
     const runtime = getRuntime() as unknown as { config?: { defaultModel?: string } } | null
+    // 把 transcript messages 注入到 context(commands 端只读 `m.type` 判 role,
+    // 不需要完整 Message 形状)。未传 sessionId / transcript 读失败时缺省
+    // 空数组,让命令自身(例如 handoff 的 countAssistantMessages)走
+    // "无 assistant 消息"的安全 fallback,而不再被 +Infinity 推入 generate。
+    let messages: ReadonlyArray<{ type: string }> = []
+    if (sid) {
+      try {
+        const store = getTranscriptStore()
+        const { messages: entries } = await store.read(sid, { cwd: process.cwd() })
+        messages = entries as ReadonlyArray<{ type: string }>
+      } catch {
+        // transcript 缺失 / 损坏不阻断命令 — 跟 vendor 把 messages 视作 []
+        // 的兜底语义一致;harness 走"无 assistant 消息"分支(新会话)。
+      }
+    }
     const context = {
       cwd: process.cwd(),
       dataDir: process.env.ZAI_DATA_DIR ?? '',
       ...(sid ? { sessionId: sid } : {}),
       ...(runtime?.config?.defaultModel ? { model: runtime.config.defaultModel } : {}),
+      messages,
     }
 
     if (cmd.type === 'local') {
