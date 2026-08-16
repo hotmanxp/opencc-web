@@ -106,7 +106,7 @@ function inputHash(): string {
   )
   // Bump this string when the bundle recipe (configCheckPatchRe,
   // plugins, externals) changes so old stamps are treated as stale.
-  h.update('recipe:v4\n')
+  h.update('recipe:v5\n')
   return h.digest('hex').slice(0, 16)
 }
 
@@ -892,6 +892,99 @@ const preactAliasPlugin: esbuild.Plugin = {
   },
 }
 
+// ── ink 渲染入口 stub 插件(工作块 B)───────────────────────────────
+// zai 是 Node HTTP server,无 DOM/TTY。opencc 启动交互模式会调 ink 的
+// `render(node, options)` / `createRoot(options)` 在 terminal 渲染
+// React 树——zai 走自己的 React/SSE/Express 链路,根本不调这两个函数;
+// 它们只是被 main.tsx / interactiveHelpers.tsx / dialogLaunchers.tsx /
+// replLauncher.tsx 等 import,但运行时调用路径在 zai 上永远不触发
+// (main.tsx 入口走 `launchRepl`,非 `render`)。
+//
+// 不 stub 时,ink/root.ts 的 `render` → `renderSync` → `new Ink(...)`
+// → react-reconciler / Yoga / 实例池,这些被 components/ 通过
+// Box/Text 间接引用而被打进 bundle。即便 components/ 已 stub 到 ()=>null,
+// ink 的 reconciler/yoga/termio/log-update/screen 还在 bundle 里(~1MB+)。
+//
+// 此 plugin 拦截 ink/root.ts(ink 的渲染入口),把所有 export 替换为
+// no-op dummy:
+//
+//   - default export `wrappedRender`: () => Promise<{rerender:noop,
+//     unmount:noop, waitUntilExit:noop-resolved, cleanup:noop}>
+//   - `renderSync`: () => 同上 Instance
+//   - `createRoot`: () => Promise<{render:noop, unmount:noop,
+//     waitUntilExit:noop-resolved}>
+//   - 类型 export(Instance / Root / RenderOptions / InkOptions)保留为空
+//     import,因为 opencc-src 内很多 .ts 用 `import type`,tsc -b 不会
+//     走这个文件,但 esbuild 见到 runtime import 会用 stub 替身。
+//
+// 副作用:ink.ts(顶层 re-export)、instances.ts、App.tsx、ink 自己的
+// components/(Box/Text/...)、layout/yoga、reconciler、screen、frame 等
+// 都不再有 root 引用它们(因为 root.ts 自身只 no-op),esbuild
+// tree-shake 掉整棵 ink 运行时树。
+//
+// 不动 ink 组件层(Box / Text / useInput / useApp 等)——它们仍可能被
+// 非渲染路径(如 util、类型推导)间接引用,stub 太激进会伤及无辜。这
+// 里只动 root.ts 一个文件的源码 body。
+const inkRenderStubPlugin: esbuild.Plugin = {
+  name: 'ink-render-stub',
+  setup(build) {
+    build.onLoad({ filter: /\.[cm]?tsx?$/ }, (args) => {
+      // 只拦截 ink/root.ts 一个文件。绝对路径匹配,避免误伤同名组件。
+      // ink 在 src/opencc-src/ink/root.ts,这是 ink 渲染的唯一入口。
+      if (!args.path.endsWith(`${sep}src${sep}opencc-src${sep}ink${sep}root.ts`)) {
+        return null
+      }
+      return {
+        contents: [
+          '// ink render-entry stub (zai patch 2026-08-16)',
+          '// zai is a Node HTTP server — no TTY, no DOM. opencc\'s interactive',
+          '// ink render path (render / createRoot / renderSync) is never invoked.',
+          '// Replace with no-op dummies so esbuild tree-shakes ink.tsx, instances.ts,',
+          '// Box/Text/components/, layout/yoga, reconciler, screen, frame, termio, etc.',
+          '',
+          'export type Instance = {',
+          '  rerender: (...args: unknown[]) => void',
+          '  unmount: (...args: unknown[]) => void',
+          '  waitUntilExit: () => Promise<void>',
+          '  cleanup: (...args: unknown[]) => void',
+          '}',
+          '',
+          'export type Root = {',
+          '  render: (...args: unknown[]) => void',
+          '  unmount: (...args: unknown[]) => void',
+          '  waitUntilExit: () => Promise<void>',
+          '}',
+          '',
+          'export type RenderOptions = Record<string, unknown>',
+          '',
+          'const noopInstance: Instance = {',
+          '  rerender: () => {},',
+          '  unmount: () => {},',
+          '  waitUntilExit: () => Promise.resolve(),',
+          '  cleanup: () => {},',
+          '}',
+          '',
+          'export const renderSync = (): Instance => noopInstance',
+          '',
+          'export default async function wrappedRender(): Promise<Instance> {',
+          '  return noopInstance',
+          '}',
+          '',
+          'export async function createRoot(): Promise<Root> {',
+          '  return {',
+          '    render: () => {},',
+          '    unmount: () => {},',
+          '    waitUntilExit: () => Promise.resolve(),',
+          '  }',
+          '}',
+          '',
+        ].join('\n'),
+        loader: 'ts',
+      }
+    })
+  },
+}
+
 // ── Build ────────────────────────────────────────────────────────────
 // Externals:
 //   - sharp / google-auth-library / @vscode/ripgrep / @orama / etc —
@@ -923,7 +1016,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
   external: [
     // Native / not-in-deps
     'sharp',
@@ -1138,7 +1231,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
   // Keep external — Node resolves at runtime via package deps.
   external: [
     'sharp',
@@ -1182,7 +1275,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
   external: [
     'sharp',
     'google-auth-library',
@@ -1245,7 +1338,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
   external: [
     'sharp', 'google-auth-library', '@vscode/ripgrep',
     '@orama/orama', '@orama/plugin-data-persistence',
@@ -1309,7 +1402,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
   external: [
     'sharp', 'google-auth-library', '@vscode/ripgrep',
     '@orama/orama', '@orama/plugin-data-persistence',
@@ -1460,7 +1553,7 @@ await esbuild.build({
       "import { createRequire as __createRequire } from 'node:module';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
   external: [
     'sharp',
     'google-auth-library',
