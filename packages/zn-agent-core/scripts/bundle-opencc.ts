@@ -106,7 +106,7 @@ function inputHash(): string {
   )
   // Bump this string when the bundle recipe (configCheckPatchRe,
   // plugins, externals) changes so old stamps are treated as stale.
-  h.update('recipe:v3\n')
+  h.update('recipe:v4\n')
   return h.digest('hex').slice(0, 16)
 }
 
@@ -444,8 +444,11 @@ const STUB_EXPORTS: Record<string, string[]> = {
 // 这里把"纯组件模块"列入 stub 清单,组件导出变成 `() => null`,依赖
 // (preact/design-system/其他组件)随之被 tree-shake。
 //
-// 不动 commands/、ink/、screens/、state/、cli/、buddy/、assistant/、
-// vim/、voice/ —— 那些混排运行逻辑/非组件导出,留给二期精准处理。
+// 不动 ink/、screens/、state/、cli/、buddy/、assistant/、vim/、
+// voice/ —— 那些混排运行逻辑/非组件导出,留给二期后续或不动。
+// commands/<name>/<name>.tsx 是"组件 + call 回调/逻辑函数"混排,工作块 A
+// 在 line ~723+ 用 file-local AST 替换(只 stub 大写命名 + 含 JSX 的
+// 函数体),不走此清单。ink/ 在工作块 B 用 inkRenderStubPlugin 单独处理。
 const UI_COMPONENT_STUB_DIRS = [
   'components/design-system',
   'components/agents',
@@ -532,6 +535,160 @@ const UI_COMPONENT_KEEP_FILES = [
   // StartupHeader 工具
   'components/StartupHeader/StartupHeader.pure.ts',
 ]
+
+// ── 文件内 AST 替换(工作块 A:commands/ 实现层)──────────────────────
+// 一期 uiComponentStubPlugin 整文件 stub(所有 export 替换为 () => null),
+// 但 commands/<name>/<name>.tsx 是 "组件 + call 回调/逻辑函数" 混排 —— `call`
+// 是 LocalJSXCommandCall 运行时回调被 vendor 命令表调用(`/help` 等场景),
+// 必须保留;若整文件 stub,call 变 `() => null`,vendor 走 call 时抛错。
+//
+// 此 plugin 走精细化 "文件内 AST 替换":对 FILE_LOCAL_STUB_PATHS 命中的文件,
+// 只把 "名字首字母大写 + 函数体含 JSX/createElement 信号" 的顶层
+// `function Xxx(...)` 函数体替换为 `return null`。其他 export(箭头
+// `call`、小写纯函数、class、type、const)原样保留。
+//
+// 工作块 A:COMMAND_IMPL_STUB_PATHS = commands/ 下所有 .tsx 实现文件(86 个)。
+// const Xxx = forwardRef(...) / const Xxx = (...) => JSX 暂时不替换 —— 命令
+// `call` 多为 `export const call = async (...) => {...}`,const 形式误伤面积
+// 太大,稳妥走 function 声明形式。
+const COMMAND_IMPL_STUB_PATHS: ReadonlySet<string> = (() => {
+  // 扫描 src/opencc-src/commands 下所有 .tsx 实现文件。注册层
+  // commands/<name>/index.ts 不含 JSX,无需处理。
+  const out: string[] = []
+  const root = join(ROOT, 'src', 'opencc-src', 'commands')
+  if (!existsSync(root)) return new Set()
+  const stack = [root]
+  while (stack.length) {
+    const dir = stack.pop()!
+    for (const e of readdirSync(dir, { withFileTypes: true })) {
+      const full = join(dir, e.name)
+      if (e.isDirectory()) stack.push(full)
+      else if (e.isFile() && e.name.endsWith('.tsx')) out.push(full)
+    }
+  }
+  return new Set(out)
+})()
+
+const FILE_LOCAL_STUB_PATHS: Set<string> = new Set(COMMAND_IMPL_STUB_PATHS)
+
+// 工作块 C 兜底 —— 当前为空;未来 ThemeProvider.tsx 等"组件+hooks 混排"文件
+// 加入后,这里登记需要走 file-local 替换但当前不在 COMMAND_IMPL_STUB_PATHS
+// 范围(commands/ 外)的文件。
+const FILE_LOCAL_STUB_KEEP_FILES: string[] = []
+
+// 工作块 C 注入入口:Map<绝对路径, Set<函数名>>。如果只有 Set 空集合或未命中,
+// 走默认规则(大写命名 + JSX 信号);如果命中,只替换指定函数名(无视命名)。
+const FILE_LOCAL_STUB_ONLY_NAMES: Map<string, ReadonlySet<string>> = new Map()
+
+function isComponentFunction(
+  node: ts.Node,
+  onlyNames: ReadonlySet<string> | undefined,
+): boolean {
+  if (!ts.isFunctionDeclaration(node) || !node.name || !node.body) return false
+  const name = node.name.text
+  if (onlyNames) {
+    if (!onlyNames.has(name)) return false
+  } else {
+    // 大写驼峰组件名约定(见 components/AGENTS.md "Named exports (not
+    // default): `export function ComponentName`")。纯函数 buildXxx 即使
+    // 大写开头,函数体不含 JSX 时也不被识别 → 安全。
+    if (!/^[A-Z]/.test(name)) return false
+  }
+  // 强信号:函数体内任一处出现 JSX 节点或 createElement 调用 → 判定为组件
+  let isComponent = false
+  function walk(n: ts.Node) {
+    if (isComponent) return
+    if (
+      ts.isJsxElement(n) ||
+      ts.isJsxSelfClosingElement(n) ||
+      ts.isJsxFragment(n)
+    ) {
+      isComponent = true
+      return
+    }
+    if (
+      ts.isCallExpression(n) &&
+      ts.isIdentifier(n.expression) &&
+      n.expression.text === 'createElement'
+    ) {
+      isComponent = true
+      return
+    }
+    ts.forEachChild(n, walk)
+  }
+  walk(node.body)
+  return isComponent
+}
+
+function runFileLocalTransform(
+  contents: string,
+  filePath: string,
+): string | null {
+  const onlyNames = FILE_LOCAL_STUB_ONLY_NAMES.get(filePath)
+  const sf = ts.createSourceFile(filePath, contents, ts.ScriptTarget.Latest, true)
+  const transformer: ts.TransformerFactory<ts.SourceFile> = (context) => (rootNode) => {
+    function visitor(node: ts.Node): ts.Node {
+      if (isComponentFunction(node, onlyNames)) {
+        const fn = node as ts.FunctionDeclaration
+        return ts.factory.updateFunctionDeclaration(
+          fn,
+          fn.modifiers,
+          fn.asteriskToken,
+          fn.name,
+          fn.typeParameters,
+          fn.parameters,
+          fn.type,
+          ts.factory.createBlock(
+            [ts.factory.createReturnStatement(ts.factory.createNull())],
+            true,
+          ),
+        )
+      }
+      return ts.visitEachChild(node, visitor, context)
+    }
+    return ts.visitNode(rootNode, visitor) as ts.SourceFile
+  }
+  const result = ts.transform(sf, [transformer])
+  const printer = ts.createPrinter()
+  const out = printer.printFile(result.transformed[0] as ts.SourceFile)
+  result.dispose()
+  return out
+}
+
+const commandImplStubPlugin: esbuild.Plugin = {
+  name: 'command-impl-stub',
+  setup(build) {
+    // 关键发现:esbuild 处理 `commands/<name>/index.ts` 里
+    // `load: () => import('./<name>.js')` 这条动态 import 字符串时,
+    // 把目标模块 (<name>.tsx) 经内建 dynamic-import 流程直接交给 file
+    // loader,**绕过我 plugin 的 onResolve filter**。onLoad 对任何进
+    // 入 graph 的文件必经(无论 import 路径形态),更适合精确匹配本地
+    // 路径清单做"文件内 AST 替换"。
+    build.onLoad({ filter: /\.[cm]?tsx?$/ }, (args) => {
+      if (!FILE_LOCAL_STUB_PATHS.has(args.path)) return null
+      // 一期 UI_COMPONENT_KEEP_FILES 命中的仍走原文件,避免整文件 stub
+      // 与文件内 AST stub 同时命中的混乱场景。
+      for (const keep of UI_COMPONENT_KEEP_FILES) {
+        if (
+          args.path.endsWith(`/${keep}`) ||
+          args.path.includes(`/${keep}/`)
+        ) {
+          return null
+        }
+      }
+      for (const keep of FILE_LOCAL_STUB_KEEP_FILES) {
+        if (args.path.endsWith(`/${keep}`)) return null
+      }
+      const contents = readFileSync(args.path, 'utf8')
+      const out = runFileLocalTransform(contents, args.path)
+      if (out === null) return null
+      return {
+        contents: out,
+        loader: args.path.endsWith('.tsx') ? 'tsx' : 'ts',
+      }
+    })
+  },
+}
 
 const optionalStubPlugin: esbuild.Plugin = {
   name: 'optional-stub',
@@ -766,7 +923,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   external: [
     // Native / not-in-deps
     'sharp',
@@ -981,7 +1138,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   // Keep external — Node resolves at runtime via package deps.
   external: [
     'sharp',
@@ -1025,7 +1182,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   external: [
     'sharp',
     'google-auth-library',
@@ -1088,7 +1245,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   external: [
     'sharp', 'google-auth-library', '@vscode/ripgrep',
     '@orama/orama', '@orama/plugin-data-persistence',
@@ -1152,7 +1309,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   external: [
     'sharp', 'google-auth-library', '@vscode/ripgrep',
     '@orama/orama', '@orama/plugin-data-persistence',
@@ -1303,7 +1460,7 @@ await esbuild.build({
       "import { createRequire as __createRequire } from 'node:module';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, preactAliasPlugin],
   external: [
     'sharp',
     'google-auth-library',
