@@ -67,13 +67,14 @@ vi.mock('antd', async () => {
 
 import { useAppStore } from '../store/useAppStore.js'
 
-function resetStore(overrides?: { isMobile?: boolean; branch?: string }) {
+function resetStore(overrides?: { isMobile?: boolean; branch?: string | null }) {
   useAppStore.setState({
     isMobile: overrides?.isMobile ?? false,
     instanceContext: {
       cwd: '/tmp/proj',
       cwdName: 'proj',
-      branch: overrides?.branch ?? 'main',
+      // 给 null 留显式覆盖口 (模拟 PWD 不是 Git 目录); 否则默认 'main'.
+      branch: overrides?.branch === undefined ? 'main' : overrides.branch,
     },
   })
 }
@@ -92,6 +93,19 @@ describe('BranchSelector 基础行为', () => {
     render(<BranchSelector cwd={null} branch="main" />)
     expect(screen.queryByTestId('branch-trigger')).toBeNull()
     expect(screen.getByText('main')).toBeInTheDocument()
+  })
+
+  test('branch=null 时退化为只读 (防御性互锁, 防止非 Git 目录触发 listBranches 失败)', () => {
+    // 配置 store.branch=null, 模拟 server /system 端点判定 PWD 不是 Git 目录.
+    // 即使 cwd 还在 (父组件没及时过滤), 也不渲染 trigger — 跟 cwd=null 同
+    // 行为, 防止用户点了触发 listBranches 拉 'not a git repository' 错误行.
+    resetStore({ branch: null })
+    render(<BranchSelector cwd="/tmp/not-repo" branch={null} />)
+    expect(screen.queryByTestId('branch-trigger')).toBeNull()
+    // store.branch=null, prop.branch=null, displayedBranch 仍是 null, span
+    // 渲染空字符串 (验证: 文档里没有 'master' / 'main' 兜底字样)
+    expect(screen.queryByText('master')).toBeNull()
+    expect(screen.queryByText('main')).toBeNull()
   })
 
   test('传入 cwd 后分支名变 clickable trigger', () => {

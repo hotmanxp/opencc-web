@@ -35,7 +35,11 @@ export default function MobileAgent() {
     s.sessionId ? s.cwdBySession[s.sessionId] : undefined,
   )
   const cwdName = instanceContext?.cwdName || '~'
-  const branch = instanceContext?.branch || 'master'
+  // branch=null 表示当前 PWD 不是 Git 目录 (server /system 端点在
+  // git rev-parse --is-inside-work-tree 失败时返回 null). ConfigStatusBar
+  // 据此隐藏整个分支段 + 前后分隔符, 不显示误导性的 'master' 兜底, 也
+  // 不会触发 listBranches 失败弹错. 与 Agent.tsx 同步.
+  const branch = instanceContext?.branch ?? null
 
   // 与 Agent.tsx:47-50 对齐: instanceContext.cwd 是 server 注入的绝对路径,
   // 冷启动立即可用; cwdBySessionForSid 仅在用户跑过 bash 后才填充.

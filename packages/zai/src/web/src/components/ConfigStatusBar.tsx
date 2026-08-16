@@ -8,7 +8,14 @@ type Props = {
   cwdName: string;
   /** Per-session cwd (overrides cwdName when provided; e.g., "/Users/me/proj/sub" → renders "sub"). */
   sessionCwd?: string;
-  branch: string;
+  /**
+   * 当前 Git 分支. **null** 表示当前 PWD 不是 Git 目录 (server /system
+   * 端点在 git rev-parse --is-inside-work-tree 失败时返回 null). 此时整段
+   * <BranchSelector> 加前后两个 `·` 分隔符都不渲染, 状态栏只保留
+   * `dir · model · tasks` 三段 — 避免显示误导性的 'master' 兜底.
+   * 字符串 (例如 'main') 则走 BranchSelector 渲染 trigger / 弹层.
+   */
+  branch: string | null;
   onTaskSelect: (taskId: string) => void;
   /**
    * 右侧分屏是否展开. 展开时按钮文本做精简(权限模式去掉 (shift+tab) 提示,
@@ -17,7 +24,8 @@ type Props = {
   splitPaneOpen?: boolean;
   /**
    * 工作目录绝对路径. 传入后分支名变 clickable, 点击弹出分支列表(本地 + 远程,
-   * 最多 10 条), 点击可切换分支. 不传则分支名只读(兼容老调用方 & 测试).
+   * 最多 10 条), 点击可切换分支. 不传 (或与 branch=null 组合) 则分支名只读
+   * (兼容老调用方 & 测试).
    * 分支切换走 gitApi (复用通用 /exec), 切完后通过 store 把 instanceContext.branch
    * 立刻刷成新值, 不必等 10s 的 startBranchChecker 轮询.
    */
@@ -65,13 +73,22 @@ export default function ConfigStatusBar({
           splitPaneOpen 是分屏局部状态, 仍以 prop 形式传入. */}
       <ModeStatusButton compact={splitPaneOpen} />
       <span style={{ color: "#eab308" }}>{displayName}</span>
-      <span style={{ color: "var(--text-tertiary)" }}>·</span>
       {/*
+        非 Git 目录: branch=null. 整段 [· <BranchSelector> ·] 都不渲染,
+        状态栏从 `dir · main · model · tasks` 收缩为 `dir · model · tasks`.
+        不显示 'master' 兜底 (会误导用户以为 PWD 是 repo); 也不渲染 trigger,
+        避免点击后 listBranches 拉 `not a git repository` 错误行.
+        Git 目录: branch 是字符串, 走 BranchSelector 渲染 trigger / 弹层.
         BranchSelector 内部从 useAppStore 读 instanceContext.branch 与 isMobile,
         自己处理 store 兜底 + 移动端 Popover placement. cwd 不传时它退化为只读 span,
         老调用方/测试无需改动.
       */}
-      <BranchSelector cwd={cwd} branch={branch} />
+      {branch !== null && (
+        <>
+          <span style={{ color: "var(--text-tertiary)" }}>·</span>
+          <BranchSelector cwd={cwd} branch={branch} />
+        </>
+      )}
       <span style={{ color: "var(--text-tertiary)" }}>·</span>
       <span style={{ color: "var(--accent-start)" }}>
         <ModelStatusButton compact={splitPaneOpen} />

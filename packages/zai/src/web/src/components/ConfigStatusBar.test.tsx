@@ -259,3 +259,66 @@ describe('ConfigStatusBar 分支切换弹层', () => {
     expect(err).toHaveTextContent('not a git repository')
   })
 })
+
+describe('ConfigStatusBar 非 Git 目录 (branch=null)', () => {
+  beforeEach(() => {
+    mocks.listBranches.mockReset()
+    mocks.switchBranch.mockReset()
+    mocks.message.success.mockReset()
+    mocks.message.error.mockReset()
+    // 把 store.branch 设为 null, 模拟 server /system 端点判定 PWD 不是 Git 目录
+    useAppStore.setState({
+      instanceContext: {
+        cwd: '/tmp/not-repo',
+        cwdName: 'not-repo',
+        branch: null,
+      },
+    })
+  })
+
+  test('不渲染 BranchSelector trigger, 也不显示任何分支名', () => {
+    render(
+      <ConfigStatusBar
+        cwdName="not-repo"
+        branch={null}
+        cwd="/tmp/not-repo"
+        onTaskSelect={() => {}}
+      />,
+    )
+    // 关键: 不渲染 trigger, 防止点击触发 listBranches 失败弹错
+    expect(screen.queryByTestId('branch-trigger')).toBeNull()
+    // 也不应出现 'master' 这类误导性兜底分支名
+    expect(screen.queryByText('master')).toBeNull()
+    // dir 名称仍正常显示
+    expect(screen.getByText('not-repo')).toBeInTheDocument()
+  })
+
+  test('不渲染 git 段之后的两个 `·` 分隔符之一 (dir · 仅剩 model · tasks)', () => {
+    render(
+      <ConfigStatusBar
+        cwdName="not-repo"
+        branch={null}
+        cwd="/tmp/not-repo"
+        onTaskSelect={() => {}}
+      />,
+    )
+    // 状态栏结构: [ModeStatusButton][dir][·][model][·][TaskDock]
+    // 即原 4 段 (dir · branch · model · tasks) 收缩成 3 段 (dir · model · tasks),
+    // 整段 [· <BranchSelector>] 内的 '·' 都不渲染.
+    // 分隔符用 queryAllByText 收集, Git 目录场景下应有 3 个; 非 Git 目录场景下应是 2 个.
+    const seps = screen.queryAllByText('·')
+    expect(seps).toHaveLength(2)
+  })
+
+  test('不调用 gitApi.listBranches, 即使用户理论上点不到 trigger', () => {
+    render(
+      <ConfigStatusBar
+        cwdName="not-repo"
+        branch={null}
+        cwd="/tmp/not-repo"
+        onTaskSelect={() => {}}
+      />,
+    )
+    expect(mocks.listBranches).not.toHaveBeenCalled()
+  })
+})

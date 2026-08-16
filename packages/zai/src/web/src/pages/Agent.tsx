@@ -62,7 +62,12 @@ export default function Agent() {
   // 任务摘要现在由 AgentInputBox 内部从 store 直接取 (避免 props 透传).
   void v2TasksBySession;
   const cwdName = instanceContext?.cwdName || '~'
-  const branch = instanceContext?.branch || 'master'
+  // branch=null 表示当前 PWD 不是 Git 目录 (server /system 端点在
+  // git rev-parse --is-inside-work-tree 失败时返回 null). ConfigStatusBar
+  // 据此隐藏整个分支段 + 前后分隔符, 不显示误导性的 'master' 兜底, 也
+  // 不会触发 listBranches 失败弹错. 兜底之所以不能在父组件做: 旧 fallback
+  // 'master' 让用户以为 PWD 下有 git repo, 实际什么都没有, 误导更严重.
+  const branch = instanceContext?.branch ?? null
   // 会话列表 active 高亮色 — 用 ConfigProvider 默认 token.colorPrimary(#ff6600),
   // 硬编码而不是 theme.useToken() 让 Agent.tsx 不依赖 antd theme 上下文,
   // 避免某些测试 (无 ConfigProvider 包裹) 抛 "theme is not defined".

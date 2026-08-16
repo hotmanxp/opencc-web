@@ -10,8 +10,14 @@ const MAX_BRANCHES = 10;
 type Props = {
   /** 工作目录绝对路径. 不传则分支名只读(返回纯 span),与 ConfigStatusBar 老调用方行为一致. */
   cwd: string | null;
-  /** 当前分支名(Prop 兜底,store 已有值时优先用 store). */
-  branch: string;
+  /**
+   * 当前分支名. **null** 表示当前 PWD 不是 Git 目录 (server /system 端点
+   * 在 git rev-parse --is-inside-work-tree 失败时返回 null). 此时组件
+   * 退化为只读, 渲染纯 span (text=null) 也不渲染 trigger, 跟 cwd=null 同
+   * 效果 — 防御性互锁, 防止父组件漏传导致点击 trigger 触发 listBranches
+   * 失败弹错. Prop 兜底: store 已有值时优先用 store (instanceContext.branch).
+   */
+  branch: string | null;
   /**
    * 触发器样式覆盖. 默认是 ConfigStatusBar 风格的紧凑绿字带分支图标;
    * MobileQuickDrawer Git tab 可传 marginLeft 等微调.
@@ -129,8 +135,13 @@ export default function BranchSelector({
   };
 
   // 不传 cwd 时分支名只读 — 兼容老调用方 & 测试.
-  if (!cwd) {
-    return <span style={{ color: "var(--success)" }}>{displayedBranch}</span>;
+  // branch=null 时也退化为只读 (防御性): 即使 cwd 还在, 但 PWD 不是 Git
+  // 目录, 没有可切换的分支列表, 渲染 trigger 反而会让用户点了弹错.
+  // ConfigStatusBar 当前已在 branch=null 时跳过整段不渲染, 这里主要
+  // 防御其它调用方 (e.g. MobileQuickDrawer 它已经 `branch ?? '(无)'` 兜底,
+  // 走不到分支). 极端情况: store 滞后 + prop=null 一起发生, 显示空字符串.
+  if (!cwd || displayedBranch === null) {
+    return <span style={{ color: "var(--success)" }}>{displayedBranch ?? ''}</span>;
   }
 
   return (
