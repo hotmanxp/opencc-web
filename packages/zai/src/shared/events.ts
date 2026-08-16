@@ -256,6 +256,64 @@ const QueueEvent = z.discriminatedUnion('type', [
   }),
 ])
 
+// command.* — 命令生命周期埋点。/api/agent/command 入口发 command.run,
+// 三处出口(local call / prompt branch / skill fallthrough / exception)各自
+// 发 command.done,共享同一 commandId 配对。设计借鉴 dsh `command/run` +
+// `command/done` 模式,用于会话日志、调试、慢命令分析。
+//
+// 决策(2026-08-16):
+// - 归 `command.*` group,与 session.* / job.* / prompt.* 同级(语义集中,避免
+//   堆到 system.* 里变成杂项)。isGlobalEvent 同步登记,跨 sid 广播;前端
+//   NAMED_EVENT_TYPES 同步加,否则 EventSource 静默丢。
+// - `ts` 字段手动填 Date.now():run.ts = 触发瞬间,done.ts = 结束瞬间;
+//   durationMs = done.ts - run.ts,精确测量而非依赖 eventBus 自动填充。
+// - args 1KB 截断:超过 MAX_ARGS_LENGTH 时 args 截断到 1024 bytes,加
+//   argsTruncated:true 标记,防止 1MB 文本注入把 history/context 撑爆。
+// - trigger: 'user' = /cmd 直接调用, 'skill' = skill fallthrough;
+//   后续 AI 内部主动跑命令再加 'agent'。
+const CommandEvent = z.discriminatedUnion('type', [
+  z.object({
+    ...Base.shape,
+    type: z.literal('command.run'),
+    sessionId: z.string(),
+    // uuid, run/done 配对 (crypto.randomUUID() 生成,单进程全局唯一)
+    commandId: z.string(),
+    // 命令名, e.g. 'compact' / 'handoff' / 'unknown' (cmd.get 没找到时空字串)
+    name: z.string(),
+    // 原始 args 字符串(已 1KB 截断, 截断时同时设 argsTruncated:true)
+    args: z.string(),
+    argsTruncated: z.boolean().optional(),
+    trigger: z.enum(['user', 'skill']),
+    // 触发瞬间, 命令进入路由时手动填 Date.now()
+    ts: z.number(),
+  }),
+  z.object({
+    ...Base.shape,
+    type: z.literal('command.done'),
+    sessionId: z.string(),
+    commandId: z.string(),
+    name: z.string(),
+    // 出口类型: 'cleared' / 'compacted' / 'status' / 'message' / 'prompt' /
+    // 'error' / 'unknown'。union 与 routes/command.ts 的 res.json 类型严格
+    // 对齐,新增 kind 时必须同步这里(以及 routes/command.ts 的 res.json),
+    // zod 编译期拦截飘移。
+    result: z.enum([
+      'cleared',
+      'compacted',
+      'status',
+      'message',
+      'prompt',
+      'error',
+      'unknown',
+    ]),
+    durationMs: z.number(),
+    // 异常时填充,result='error' 时必填
+    error: z.string().optional(),
+    // 结束瞬间, 手动填 Date.now()
+    ts: z.number(),
+  }),
+])
+
 // stream/error — 结构化帧级错误。server 在 SSE 写入中途崩溃 / 业务侧捕获
 // 未预期异常且无法继续推送时，发一个闭合 code 的错误帧再关闭连接。
 // code 为闭合 union，前端按 code 路由，新错误类型无需字符串匹配。
@@ -305,6 +363,7 @@ export const ServerEvent = z.discriminatedUnion('type', [
   ...StateEvent.options,
   ...InstanceEvent.options,
   ...QueueEvent.options,
+  ...CommandEvent.options,
   StreamErrorEvent,
   ProjectionEvent,
 ])

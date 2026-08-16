@@ -56,6 +56,11 @@ function isGlobalEvent(event: ServerEvent): boolean {
     case 'app.update.installing':
     case 'app.update.complete':
     case 'app.update.failed':
+    // command.* — 命令生命周期埋点(/api/agent/command 路由发,所有 tab
+    // 都该看见 — 调试 / 日志 / 慢命令分析不依赖具体 sid,跨 sid 广播)。命令
+    // 起停对调试面板与活动指示器是关键信号。
+    case 'command.run':
+    case 'command.done':
       return true
     default:
       return false

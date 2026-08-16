@@ -131,6 +131,7 @@ queryLoop 每轮 turn 进入
 - **prompt.ask**:`sessionId + toolUseId + questions[{question, header, options}]`
 - **system.\***:server.connected / server.error / toast / branch.changed
 - **state.\***:cwd.changed / bash_task.changed / v2_task.changed / agent_task.changed
+- **command.\***:`command.run` + `command.done` 配对(`/api/agent/command` 路由发,`commandId` 配对,debugging / 慢命令分析埋点,见 §13)
 
 ## 6. RuntimeEvent 翻译表(`routes/agent.ts` 内 `translateRuntimeEvents`)
 
@@ -258,3 +259,39 @@ zai 端实现的能力,把 opencc 上游 `bashProvider.ts` 的"shell trailer 跟
 - AGENTS.md 自动注入:每个 turn 调 `loadAgentsMd(options.cwd)` 拼到 system prompt 顶部;`enableAgentsMd:false` 关闭
 - **bun: protocol loader**: zai dev 脚本走 `tsx --import ./bun-protocol.mjs` (从 `@zn-ai/zn-agent-core` 包内),把 opencc 86 处 `from 'bun:bundle'` 拦截到本地 `bun-shim.ts`。Node 22+ tsx 4.23+ 必需;漏掉这个 flag 会 `ERR_UNSUPPORTED_ESM_URL_SCHEME`。
 - 前端鉴权:**默认不带** `X-Zai-Token` —— `lib/api.ts:1-35` 不读 localStorage,只有 `v2TaskApi / slash` 等少数手写 fetch 显式加;server 也不强制校验
+
+## 13. 命令路由生命周期埋点 (`command.run` / `command.done`)
+
+`/api/agent/command` 路由自 2026-08-16 起在入口 + 5 处出口 emit `command.run` / `command.done` 配对 SSE 事件,用于会话日志、调试、慢命令分析。设计借鉴 dsh `command/run` + `command/done` 模式。
+
+**事件 schema**(`packages/zai/src/shared/events.ts` `CommandEvent`):
+
+- `command.run`: `{ sessionId, commandId, name, args, argsTruncated?, trigger: 'user' | 'skill', ts }`
+  - `commandId`: `crypto.randomUUID()`,单进程全局唯一,与 `command.done` 配对
+  - `args`: > 1024 字节时截断,带 `argsTruncated: true`
+  - `ts`: 触发瞬间, 手动填 `Date.now()`(非 eventBus 自动填充,这样 `run.ts` 与 `done.ts` 都能精确算 `durationMs`)
+- `command.done`: `{ sessionId, commandId, name, result, durationMs, error?, ts }`
+  - `result`: `'cleared' | 'compacted' | 'status' | 'message' | 'prompt' | 'error' | 'unknown'`(与 `routes/command.ts` 的 `res.json` type 严格对齐,新增 kind 必须同步这里)
+  - `error`: 仅 `result='error'` 时填
+  - `durationMs`: `done.ts - run.ts`
+
+**5 处出口**(`routes/command.ts` ):
+
+| 路径 | result | 触发位置 |
+|------|--------|----------|
+| skill fallthrough | `prompt` | `if (rendered !== null)` 分支 |
+| unknown command | `unknown` | `if (!cmd)` 兜底 |
+| local cmd cleared | `cleared` | `result.kind === 'cleared'` |
+| local cmd compacted | `compacted` | `result.kind === 'compacted'` |
+| local cmd status | `status` | `result.kind === 'status'` |
+| local cmd message | `message` | `result.kind === 'message'` |
+| local cmd error | `error` | `result.kind === 'error'` |
+| PromptCommand success | `prompt` | `cmd.getPromptForCommand` 路径 |
+| PromptCommand 抛错 | `error` | `cmd.getPromptForCommand` 内部 try/catch |
+| outer catch | `error` | 路由最外层 try/catch(`initCommands` 抛错等) |
+
+**全局事件**:`command.{run,done}` 已在 `eventBus.isGlobalEvent` 登记为 `true`,跨 sid 广播(所有 tab 都能看见,调试面板 / 活动指示器不依赖具体 sid)。
+
+**前端路由**:`packages/zai/src/web/src/lib/eventSource.ts` `NAMED_EVENT_TYPES` 已同步加 `command.run` / `command.done`,`EventSource` 不会静默丢。当前前端**不主动** toast(留给后续 UI 优化),但 store 仍可读取用于调试面板。
+
+**测试**:`test/server/routes/command.lifecycle.test.ts` — 14 个 case 覆盖 5 处出口 + 异常路径 + args 截断 + commandId 配对 + durationMs 边界。

@@ -67,6 +67,13 @@ const NAMED_EVENT_TYPES = [
   'stream/error',
   // session/projection — host 算完的派生值快照 (title / context.tokens)
   'session/projection',
+  // command.* — 命令生命周期埋点。routes/command.ts 入口 emit command.run
+  // + 出口 emit command.done, commandId 配对。前端 useCommandLifecycle
+  // (TBD) 可选择性订阅(默认不弹 toast, 调试面板可见)。与 shared/events.ts
+  // CommandEvent union 同步, 新增事件必须同步加到 NAMED_EVENT_TYPES,
+  // 否则 EventSource 静默丢事件。
+  'command.run',
+  'command.done',
 ] as const
 
 // 打开一条 SSE 连接到 /api/event. 后端按 sid 过滤:
