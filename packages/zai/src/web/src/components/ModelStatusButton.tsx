@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Input, Popover, Tag, Tooltip } from 'antd'
-import { CheckOutlined, EyeOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { CaretDownOutlined, CheckOutlined, EyeOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useConversationInfo } from '../hooks/useConversationInfo.js'
 import { useAgentStore } from '../store/useAgentStore.js'
 import { useAppStore } from '../store/useAppStore.js'
@@ -343,6 +343,7 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
         }}
       >
         {badgeText ?? '未知'}
+        <CaretDownOutlined style={{ fontSize: 10, opacity: 0.6, marginLeft: -8 }} />
       </Button>
     </Popover>
   )

@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { Input, Popover, Spin, Tooltip, message } from "antd";
-import { CheckOutlined, BranchesOutlined } from "@ant-design/icons";
+import { CaretDownOutlined, CheckOutlined, BranchesOutlined } from "@ant-design/icons";
 import { gitApi } from "../lib/gitApi.js";
 import { useAppStore } from "../store/useAppStore.js";
 import type { GitBranch } from "../../../shared/git.js";
@@ -182,6 +182,7 @@ export default function BranchSelector({
         >
           <BranchesOutlined style={{ fontSize: 11, opacity: 0.85 }} />
           {displayedBranch}
+          <CaretDownOutlined style={{ fontSize: 10, opacity: 0.6, marginLeft: -4 }} />
         </span>
       </Tooltip>
     </Popover>
