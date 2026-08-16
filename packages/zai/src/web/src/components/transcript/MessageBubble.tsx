@@ -136,7 +136,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
   // 用模块级 refcount: 第一个 streaming=true 挂载, 最后一个 streaming 消失
   // (含组件卸载) 才卸载 — 避免历史回放中也跟着跑动画.
   // 折叠态四重视觉信号 (让用户明显感知"正在思考"):
-  //   - 灯泡 fill 颜色循环 (zai-think-glow, 1.4s) — 浅黄 → 亮白 + 缩放 1.0 → 1.08
+  //   - 灯泡 fill 颜色循环 (zai-think-glow, 1.4s) — 浅黄 → 亮白 + 缩放 0.8 → 1.1
   //   - pill 背景透明度呼吸 (zai-think-pill-pulse, 1.6s)
   //   - "思考" 后面三个点循环闪烁 (zai-think-dot, 1.2s, 错开 0.15s)
   // prefers-reduced-motion: reduce 全部降级为静态, 颜色不变.
@@ -150,18 +150,16 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
         style.textContent = `
           /* 灯泡 fill 颜色循环 + 缩放呼吸:
              fill 范围 #f7d774 暗黄 → #ffffff 亮白 (对比度最大, 紫色 pill 上一眼可见),
-             transform scale 1.0 → 1.08 配合 fill-box 让灯泡"呼吸".
+             transform scale 0.8 → 1.1 配合 fill-box 让灯泡"呼吸".
              transform-origin: center + transform-box: fill-box 是 SVG path
              缩放必须有的一对, 不然缩放中心是 SVG 容器 origin.
 
-             缩放上限用 1.08 而不是更大的值: SVG 默认 overflow:hidden,
-             缩放过大时 path 顶部凸出会被 SVG 边界裁掉(11px 字号下 1.15 倍
-             凸出 ~0.83px 肉眼明显, 1.08 倍凸出 ~0.44px 不被察觉).
-             同时 svg 加 overflow:visible 兜底, 即便后续调大 scale 也不会
-             被裁切. */
+             缩放下限 0.8 是为了收缩时也形成明显节拍, 不止是"放大→恢复";
+             上限 1.1 之前实测 SVG 默认 overflow:hidden 会裁切, 因此 svg
+             加 overflow:visible 兜底 (即便继续调大 scale 也不会被裁). */
           @keyframes zai-think-glow {
-            0%, 100% { fill: #f7d774; transform: scale(1); }
-            50%      { fill: #ffffff; transform: scale(1.08); }
+            0%, 100% { fill: #f7d774; transform: scale(0.8); }
+            50%      { fill: #ffffff; transform: scale(1.1); }
           }
           .zai-thinking-bulb-active svg {
             overflow: visible;
