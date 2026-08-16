@@ -1,3 +1,4 @@
+import { useAppStore } from "../store/useAppStore";
 import ModelStatusButton from "./ModelStatusButton";
 import ModeStatusButton from "./ModeStatusButton";
 import { TaskDock } from "./TaskDock";
@@ -37,20 +38,27 @@ export default function ConfigStatusBar({
     ? sessionCwd.split('/').filter(Boolean).pop() || sessionCwd
     : cwdName
 
+  // 移动端走 /m 路由, 视口窄(< 768). 桌面 gap=8 让分隔符 `·` 周围留白舒服;
+  // 移动端降到 gap=2 + padding 收紧, 避免 `opencc-web · main · MiniMax-M3`
+  // 把整行撑爆, 分隔符贴在一起也不至于糊.
+  const isMobile = useAppStore((s) => s.isMobile)
+  const gap = isMobile ? 2 : 8
+  const padding = isMobile ? "4px 8px" : "6px 10px"
+
   return (
     <div
       data-testid="config-status-bar"
       style={{
         background: "var(--bg-card-hover)",
         borderTop: "1px solid var(--border-subtle)",
-        padding: "6px 10px",
+        padding,
         fontSize: 12,
         fontFamily:
           "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
         color: "var(--text-tertiary)",
         display: "flex",
         alignItems: "center",
-        gap: 8,
+        gap,
       }}
     >
       {/* ModeStatusButton 内部从 useAppStore.isMobile 自动判断移动端.

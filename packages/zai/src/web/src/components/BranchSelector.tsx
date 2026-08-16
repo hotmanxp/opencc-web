@@ -167,8 +167,11 @@ export default function BranchSelector({
             cursor: "pointer",
             display: "inline-flex",
             alignItems: "center",
-            gap: 4,
-            padding: "0 4px",
+            // 移动端走 ConfigStatusBar 状态栏: trigger 自身 padding 收紧到 0,
+            // gap 缩到 2, 把视觉间距统一交给外层 ConfigStatusBar 的 gap 管控,
+            // 避免 caret 右侧留出 "自身 padding 4px + 外层 gap 2px" 的双倍空隙.
+            gap: isMobile ? 2 : 4,
+            padding: isMobile ? "0" : "0 4px",
             borderRadius: 3,
             userSelect: "none",
             ...triggerStyle,

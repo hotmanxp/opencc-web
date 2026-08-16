@@ -340,6 +340,11 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
           fontSize: 12,
           fontFamily:
             'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+          // 移动端走 ConfigStatusBar: antd small Button 默认 padding 0 7px
+          // 会在 caret 右侧留出一大块空白. 收紧到 0 2px, 把间距交给外层
+          // ConfigStatusBar 的 gap 统一管控, 否则底栏 '· main · MiniMax-M3 ·'
+          // 在窄屏里被撑爆.
+          padding: isMobile ? '0 2px' : undefined,
         }}
       >
         {badgeText ?? '未知'}
