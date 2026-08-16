@@ -130,16 +130,20 @@ function resolveCwd(context: CommandContext): string {
 }
 
 async function countAssistantMessages(context: CommandContext): Promise<number> {
-  // 优先 context 注入;兜底从 session store 取;再兜底返回 Infinity(强制 GENERATE)
+  // 优先从 context 注入字段取(实现阶段由调用方 routes/command.ts 注入);
+  // 兜底返回 +Infinity → 强制走 GENERATE(优于 PICKUP,新会话默认行为更安全,
+  // 因为空 cwd 上 PICKUP 总是返回 0 文件,提示用户用 vendor CLI 反而打断流程)。
   const injected = (context as { assistantMessageCount?: number }).assistantMessageCount
   if (typeof injected === 'number') return injected
-  // 实现阶段再决定 session store 取法;此处占位
   return Number.POSITIVE_INFINITY
 }
 
-async function readTaskListText(_context: CommandContext): Promise<string | null> {
-  // 优先 context 注入 taskListText;实现阶段再决定从 ~/.zai/tasks/<session>/ 取
-  // 返回 null 表示不可用,prompt fallback
+async function readTaskListText(context: CommandContext): Promise<string | null> {
+  // 优先从 context 注入字段取(实现阶段由调用方注入);
+  // 不可用时返回 null → generate prompt 内嵌"(未提供)"占位,
+  // LLM 据对话上文推断当前任务列表。
+  const injected = (context as { taskListText?: string | null }).taskListText
+  if (typeof injected === 'string') return injected
   return null
 }
 
@@ -503,7 +507,7 @@ try {
 |--------|------|
 | `parseArgs` | 空 args → `{}` / `--pick foo` → `{pickFile:'foo'}` / `--pick foo --pick bar` 后者覆盖 / `--pick`(无值抛 `HandoffArgsError`)/ 未知 flag 抛 / 多余 token 抛 |
 | `resolveCwd` | context.cwd 提供 → 返回 / 不提供 → fallback process.cwd / 全部不可用抛 `HandoffCwdError` |
-| `buildGeneratePrompt` | 输出包含关键章节标识(`Task title` / `Original Request` / `Goal` / `Artifacts` / `Key Findings` / `Pitfalls` / `Current TaskList` / `Next Skills` / `Skills Used`)/ 嵌入 cwd / date / taskListText 占位 |
+| `buildGeneratePrompt` | 输出包含关键章节标识(`Task title` / `Original Request` / `Goal` / `Artifacts` / `Key Findings` / `Pitfalls` / `Current TaskList` / `Next Steps` / `Skills Used`)/ 嵌入 cwd / date / taskListText 占位 |
 | `buildPickupPrompt` | 0 文件(友好提示文案)/ 1 文件(pick 路径)/ 2+ 文件(列表 + AskUserQuestion 指令)/ `--pick` 指定(跳过列表)/ `--pick` 指定但文件不存在抛 `HandoffArgsError` |
 | `listHandoffs` 集成 | tmpdir + 真实 fs 创建 2 个 `.md` 验证 mtime 倒序 / 不存在目录返回 `[]` / 非 .md 文件被过滤 |
 | `handoffCommand.getPromptForCommand` 端到端 | mock context(assistantCount=2 → PICKUP 分支)/ mock context(assistantCount=10 → GENERATE 分支)/ `--pick foo` → 强制 PICKUP / GENERATE + taskListText=null → 走占位 |
@@ -559,7 +563,7 @@ pnpm -r exec tsc --noEmit
 
 ## 6. 设计自审
 
-- [x] 没有 placeholder / TBD:`countAssistantMessages` / `readTaskListText` 实现占位已收口(由 spec 标注"实现阶段再决定",有 fallback 兜底)
+- [x] 没有 placeholder / TBD:`countAssistantMessages` / `readTaskListText` 都有显式 fallback(`+Infinity` / `null`),spec 段 4 错误处理 #5、#2 已对齐;vendoring re-export 文件路径也已收口到选项 A
 - [x] 内部一致:组件接口 / 数据流 / 错误处理 / 测试 各段对齐(`pickFile` 强制 PICKUP / `assistantCount ≤ 4` / `root = .agent_working_dir/handoff` / 中文 prompt 模板在 generate.ts 和 pickup.ts 内对齐 vendor 章节结构)
 - [x] 范围聚焦:只加 handoff 一个命令 + 一次 routes/command.ts try/catch 改造 + compat 层一个 re-export 文件,无无关 refactor
 - [x] 歧义消解:`--pick` 强制 PICKUP / cwd fallback 链 / TaskList 缺失降级 / `Write` 工具不可用兜底 / LLM 写失败回退 plain text / 错误统一 error 分支 / mobile 与 web 共享同一来源
