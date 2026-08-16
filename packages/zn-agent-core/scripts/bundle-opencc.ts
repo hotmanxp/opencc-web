@@ -41,6 +41,8 @@ const ROOT = join(__dirname, '..')
 // 消除跨 bundle/dist 状态隔离导致的请求风暴)。
 const SRC_ENTRY = join(ROOT, 'src', 'bundle-entry.ts')
 const SRC_ROOT = join(ROOT, 'src', 'opencc-src')
+// react → preact/compat shim(bundle 内联 preact 而非 react,见 src/compat/preact-shim.ts)
+const PREACT_SHIM = join(ROOT, 'src', 'compat', 'preact-shim.ts')
 const OUT_DIR = join(ROOT, 'dist')
 const OUT_FILE = join(OUT_DIR, 'opencc-core.mjs')
 // Stamp file holding the input hash for the last successful bundle.
@@ -386,6 +388,10 @@ const OPTIONAL_STUB_BARE_MODULES = new Set([
   '@ant/claude-for-chrome-mcp',
   '@growthbook/growthbook',
   '@mendable/firecrawl-js',
+  // react-reconciler:ink 专用渲染引擎,preact 无等价,stub 掉(死代码)。
+  // 加载时 ink/reconciler.ts 顶层调用 createReconciler(config) +
+  // discreteUpdates.bind —— stub 提供最小可工作实现,渲染方法不被 zai 调用。
+  'react-reconciler',
 ])
 
 // esbuild stub output: provide the expected named exports as `null`.
@@ -427,6 +433,7 @@ const STUB_EXPORTS: Record<string, string[]> = {
     'ServerCapabilities',
   ],
   'vscode-languageserver-types': [],
+  'react-reconciler': ['default'],
 }
 
 const optionalStubPlugin: esbuild.Plugin = {
@@ -442,6 +449,33 @@ const optionalStubPlugin: esbuild.Plugin = {
       return null
     })
     build.onLoad({ filter: /.*/, namespace: 'optional-stub' }, (args) => {
+      if (args.path === 'react-reconciler') {
+        // ink/reconciler.ts 顶层 createReconciler(config) 创建实例 +
+        // dispatcher.discreteUpdates = reconciler.discreteUpdates.bind ——
+        // 加载时必须可工作;渲染方法(render/createContainer)是 ink 专用
+        // 死代码,zai 从不渲染,调用即抛错。
+        return {
+          contents: `// react-reconciler stub — ink 渲染引擎,zai 不渲染(dead code)
+export default function createReconciler(config) { return {
+  render: () => { throw new Error('[react-reconciler-stub] render called (zai does not render ink)') },
+  unmount: () => {},
+  discreteUpdates: (fn, ...args) => fn(...args),
+  createContainer: () => ({ root: null, tag: 0 }),
+  updateContainer: () => 0,
+  updateContainerSync: () => 0,
+  flushSyncWork: () => {},
+  injectIntoDevTools: () => {},
+  getPublicRootInstance: () => null,
+  batchedUpdates: (fn) => fn(),
+} }
+export const createHostConfig = null
+export const injectIntoDevTools = () => {}
+export const reconciler = null
+export const getPublicRootInstance = () => null
+`,
+          loader: 'js',
+        }
+      }
       if (STUB_EXPORTS[args.path]) {
         const names = STUB_EXPORTS[args.path]
         const lines = names
@@ -459,6 +493,19 @@ const optionalStubPlugin: esbuild.Plugin = {
         contents: `// opencc optional/runtime stub — not exercised in zai\nexport const ${base} = null\nexport default null\n`,
         loader: 'js',
       }
+    })
+  },
+}
+
+// ── react → preact/compat alias 插件 ─────────────────────────────────
+// opencc-src 的 'react' import 全部指向 preact-shim(见 src/compat/preact-shim.ts)。
+// preact/compat 提供 react 兼容 API 且体积远小于 react;bundle 不再内联
+// react core + development 双份源码。
+const preactAliasPlugin: esbuild.Plugin = {
+  name: 'preact-alias',
+  setup(build) {
+    build.onResolve({ filter: /^react$/ }, (args) => {
+      return { path: PREACT_SHIM }
     })
   },
 }
@@ -494,7 +541,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
   external: [
     // Native / not-in-deps
     'sharp',
@@ -709,7 +756,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
   // Keep external — Node resolves at runtime via package deps.
   external: [
     'sharp',
@@ -753,7 +800,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
   external: [
     'sharp',
     'google-auth-library',
@@ -816,7 +863,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
   external: [
     'sharp', 'google-auth-library', '@vscode/ripgrep',
     '@orama/orama', '@orama/plugin-data-persistence',
@@ -925,7 +972,7 @@ await esbuild.build({
       "import { createRequire as __createRequire } from 'node:module';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [vendorPatchesPlugin, optionalStubPlugin],
+  plugins: [vendorPatchesPlugin, optionalStubPlugin, preactAliasPlugin],
   external: [
     'sharp',
     'google-auth-library',

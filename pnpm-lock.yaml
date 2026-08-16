@@ -354,24 +354,18 @@ importers:
       picomatch:
         specifier: ^4.0.5
         version: 4.0.5
+      preact:
+        specifier: ^10.29.8
+        version: 10.29.8
       proper-lockfile:
         specifier: ^4.1.2
         version: 4.1.2
       qrcode:
         specifier: ^1.5.4
         version: 1.5.4
-      react:
-        specifier: ^19.2.8
-        version: 19.2.8
       react-compiler-runtime:
         specifier: ^1.0.0
         version: 1.0.0(react@19.2.8)
-      react-dom:
-        specifier: ^19.2.8
-        version: 19.2.8(react@19.2.8)
-      react-reconciler:
-        specifier: ^0.33.0
-        version: 0.33.0(react@19.2.8)
       semver:
         specifier: ^7.8.5
         version: 7.8.5
@@ -439,6 +433,12 @@ importers:
       esbuild:
         specifier: 0.28.1
         version: 0.28.1
+      react:
+        specifier: ^19.2.8
+        version: 19.2.8
+      react-reconciler:
+        specifier: ^0.33.0
+        version: 0.33.0(react@19.2.8)
       typescript:
         specifier: 5.6.3
         version: 5.6.3
@@ -3538,6 +3538,14 @@ packages:
     resolution: {integrity: sha512-dM0jVuXJPsDN6DvRpea484tCUaMiXWjuCn++HGTqUWzGDjv5tZkEZldAJ/UMlqRYGFrD/etByo4/xOuC/snX2A==}
     engines: {node: '>=20'}
 
+  preact@10.29.8:
+    resolution: {integrity: sha512-ej2aVZ+vZ8WO7tvlQWRM9N63A0KzF9q4mWJfDUHgYaIofWY9hu74QdnQrjoPMmZi2/nZ5gN0bJCQF49xQqx09Q==}
+    peerDependencies:
+      preact-render-to-string: '>=5'
+    peerDependenciesMeta:
+      preact-render-to-string:
+        optional: true
+
   pretty-bytes@5.6.0:
     resolution: {integrity: sha512-FFw039TmrBqFK8ma/7OL3sDz/VytdtJr044/QUJtH0wK9lb9jLq9tJyIxUwtQJHwar2BqtiA4iCWSwo9JLkzFg==}
     engines: {node: '>=6'}
@@ -3840,11 +3848,6 @@ packages:
     resolution: {integrity: sha512-5m4nQKp+rZRb09LNH59GM4BxTh9251/ylbKIbpe7TpGxfJ+9kv6BLkLBXIjjspbgbnIBNqlI23tRnTWT0snUIw==}
     peerDependencies:
       react: ^18.3.1
-
-  react-dom@19.2.8:
-    resolution: {integrity: sha512-rVprimfGBG3DR+Tq0IQG2DT5PxKth1WIGDmj5yPmlzr4YBe7uyE+Du4oVqTDXZSHGGGXRtTJEGSSePyQCMBglQ==}
-    peerDependencies:
-      react: ^19.2.8
 
   react-is@17.0.2:
     resolution: {integrity: sha512-w2GsyukL62IJnlaff/nRegPQR94C/XXamvMWmSHRJ4y7Ts/4ocGRmTHvOs8PSE6pB3dWOrD/nueuU5sduBsQ4w==}
@@ -8020,6 +8023,8 @@ snapshots:
 
   powershell-utils@0.1.0: {}
 
+  preact@10.29.8: {}
+
   pretty-bytes@5.6.0: {}
 
   pretty-format@27.5.1:
@@ -8418,11 +8423,6 @@ snapshots:
       loose-envify: 1.4.0
       react: 18.3.1
       scheduler: 0.23.2
-
-  react-dom@19.2.8(react@19.2.8):
-    dependencies:
-      react: 19.2.8
-      scheduler: 0.27.0
 
   react-is@17.0.2: {}
 
