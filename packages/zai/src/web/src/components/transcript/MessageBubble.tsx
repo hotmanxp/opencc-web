@@ -29,6 +29,7 @@ import { copyToClipboard } from "../../lib/clipboard.js";
 import { linkifyText } from "../../lib/linkify.js";
 import { splitMarkdownOnIncomplete } from "../../lib/splitMarkdown.js";
 import { getRenderer } from "../toolRenderers/registry.js";
+import { useExpandUserBubble } from "./useExpandUserBubble.js";
 
 const { Text } = Typography;
 
@@ -710,6 +711,10 @@ export const MessageBubble = React.memo(function MessageBubble({
     | null
   >(null);
 
+  // 移动端 / 分屏开启时, user 气泡撑满对话区 (与 AI 气泡一致);
+  // 桌面端无分屏保留 70% 让短消息右对齐有视觉呼吸. 详见 useExpandUserBubble.ts.
+  const expandUserBubble = useExpandUserBubble()
+
   // 来自 transcript 历史回放: 思考块作为独立条目, 与 assistant.text 配对出现
   if (msg.type === "assistant.thinking") {
     return (
@@ -732,6 +737,7 @@ export const MessageBubble = React.memo(function MessageBubble({
     const visibleText = ((msg.text as string) || (msg.prompt as string) || "")
     return (
       <div
+        data-testid="user-bubble-container"
         style={{
           display: "flex",
           justifyContent: "flex-end",
@@ -741,7 +747,10 @@ export const MessageBubble = React.memo(function MessageBubble({
         <Card
           size="small"
           style={{
-            maxWidth: "70%",
+            // 移动端或分屏开启时, 对话区被压窄, 70% 显得局促; 撑满与 AI 气泡
+            // 行为一致 (见上方 expandUserBubble 计算). 桌面端无分屏仍维持
+            // 70% 以保留短消息右对齐的视觉呼吸.
+            maxWidth: expandUserBubble ? "100%" : "70%",
             background: "var(--bg-card)",
             borderRadius: 12,
             position: "relative",
