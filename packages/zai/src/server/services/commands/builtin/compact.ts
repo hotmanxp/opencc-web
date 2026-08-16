@@ -100,7 +100,12 @@ function serializeForCompact(messages: AnthropicMessage[]): string {
 
 /**
  * /compact 真正实现: 读 transcript → 调 vendor queryModelWithStreaming 生成
- * summary → 追加 compact_boundary + assistant(summary) 两条 message 落盘。
+ * summary → store.replace() 整文件重写为 [boundary, summary, ...最近 2 条
+ * user/assistant]。vendor 的 `legacyTranscriptStore.replace()` 会把传入数组
+ * 完整 JSON-serialize 覆盖 JSONL,所以这里必须显式只传"压缩后的新列表",
+ * 否则原始消息会原样保留 —— 之前 `replace([...existing, boundary, summary])`
+ * 的写法就是这个 bug,transcript 文件长度不减,UI 看到 boundary 之前的消息
+ * 仍全部渲染。
  *
  * 设计见 docs/superpowers/specs/2026-07-18-compact-command-design.md §6-7。
  *
@@ -243,14 +248,35 @@ export const compactCommand: LocalCommand = {
         return { kind: 'error', message: '生成摘要失败: 模型返回空结果' }
       }
 
-      // 5. 构造 boundary + summary 两条
+      // 5. 收集保留段: 从末尾往前数, type 为 user/assistant 的最后 2 条
+      //    (压缩后对话上下文不丢末尾的最新约束/决策)。少于 2 条就少保留。
+      const KEEP_RECENT_USER_ASSISTANT = 2
+      const keptRecent: typeof existing.messages = []
+      for (
+        let i = existing.messages.length - 1;
+        i >= 0 && keptRecent.length < KEEP_RECENT_USER_ASSISTANT;
+        i--
+      ) {
+        const m = existing.messages[i] as { type?: string }
+        if (m?.type === 'user' || m?.type === 'assistant') {
+          keptRecent.unshift(m as (typeof existing.messages)[number])
+        }
+      }
+
+      // 6. 构造 boundary + summary 两条
       const boundaryUuid = randomUUID()
       const summaryUuid = randomUUID()
       const lastTurn = (lastMsg.runtime?.turnIndex ?? 0) + 1
+      // boundary 的 parentUuid 指真正的"压缩后最后一条":有保留段就用保留段
+      // 最后一条,否则 fallback 到原始最后一条。
+      const newLastUuid =
+        keptRecent.length > 0
+          ? keptRecent[keptRecent.length - 1]!.uuid
+          : lastMsg.uuid
 
       const boundaryMsg = {
         uuid: boundaryUuid,
-        parentUuid: lastMsg.uuid,
+        parentUuid: newLastUuid,
         type: 'compact_boundary',
         timestamp: Date.now(),
         raw: null,
@@ -286,11 +312,15 @@ export const compactCommand: LocalCommand = {
         isSidechain: false,
       }
 
-      // 6. 落盘
+      // 7. 落盘 — 整文件重写为 [boundary, summary, ...最近 2 条 user/assistant]。
+      //    boundary 在最前,query engine / UI 遇到它才认压缩边界;
+      //    keptRecent 在末尾保留最近对话上下文。
+      //    注意: vendor legacyTranscriptStore.replace() 是整文件覆盖(把
+      //    传入数组 JSON-serialize 写盘),所以原始消息必须显式不放进来。
       try {
         await store.replace(
           sessionId,
-          [...existing.messages, boundaryMsg, summaryMsg],
+          [boundaryMsg, summaryMsg, ...keptRecent],
           { cwd: context.cwd },
         )
       } catch (err) {
@@ -299,7 +329,7 @@ export const compactCommand: LocalCommand = {
 
       return {
         kind: 'compacted',
-        removedMessages: existing.messages.length - 2,
+        removedMessages: existing.messages.length - keptRecent.length,
         summary,
       }
     } catch (err) {
