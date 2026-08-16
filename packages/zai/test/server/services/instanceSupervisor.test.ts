@@ -236,6 +236,23 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(spawnArgs[0]).toContain('--lan')
   })
 
+  // 进程命名:`argv0` 让 ps/top 显示 `zai[name]:port`,env.ZAI_PROCESS_TITLE
+  // 让 child 启动早期把内部 `process.title` 也设上。两条信息都在 spawn 那一
+  // 刻传到 child,跟随 supervisor 重启子进程链路自动续传。port 来自
+  // spawn 那一刻 supervisor 选定的(INSTANCE_BASE_PORT=9201 + probePort 自动
+  // 扫描;user-pin 走 entry.def.startPort / opts.port),不是 child ready
+  // 消息里上报的 port。
+  it('createInstance names the child with argv0 + ZAI_PROCESS_TITLE for `zai[name]:port`', async () => {
+    const { deps, fakeChildren, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'myproj', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    expect(fakeChildren).toHaveLength(1)
+    const opts = spawnOptions[0] as SpawnOptions & { argv0?: string; env: NodeJS.ProcessEnv }
+    expect(opts.argv0).toBe('zai[myproj]:9201')
+    expect(opts.env.ZAI_PROCESS_TITLE).toBe('zai[myproj]:9201')
+  })
+
   it('startInstance without lan arg uses persisted def.lan (no override → def wins)', async () => {
     // Per-call `lan` is an override, not a requirement. When the
     // caller omits the override, the persisted def.lan decides.

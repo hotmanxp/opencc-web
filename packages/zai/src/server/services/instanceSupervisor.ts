@@ -251,6 +251,13 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         const useLan = opts?.lan ?? entry.def.lan ?? false
         const args: string[] = [cliEntry, 'start', '--managed-child', '--port', String(port), '--no-open']
         if (useLan) args.push('--lan')
+        // 进程标题:让 ps / top / macOS Activity Monitor 在 spawn 后立即
+        // 显示 `zai[name]:port` 而不是 `node .../bin/zai.js`。`argv0` 改
+        // `argv[0]`(Linux ps/macOS ps 列都从 argv[0] 起始读);`ZAI_PROCESS_TITLE`
+        // 让 child 启动早期(`start.ts:runStart` 顶部)把内部 `process.title`
+        // 也设上,补 macOS Activity Monitor / Linux `top` 取 `comm` 字段
+        // 的路径。entry.def.name 由 createInstance 校验非空,这里直接拼。
+        const title = `zai[${entry.def.name}]:${port}`
         const child = deps.spawn(
           process.execPath,
           args,
@@ -258,11 +265,13 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
             cwd: entry.def.cwd,
             stdio: ['ipc', 'inherit', 'inherit'],
             detached: false,
+            argv0: title,
             env: {
               ...process.env,
               ZAI_INSTANCE_ID: id,
               ZAI_SUPERVISOR_PID: String(process.pid),
               ZAI_INSTANCE_HEARTBEAT_MS: '5000',
+              ZAI_PROCESS_TITLE: title,
             },
           },
         )

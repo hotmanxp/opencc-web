@@ -35,11 +35,13 @@ class FakeChild extends EventEmitter {
 let children: FakeChild[] = []
 let writes: any[] = []
 let logs: string[] = []
+let spawnCalls: Array<{ cmd: string; args: string[]; opts: any }> = []
 
 const deps: Partial<SupervisorDeps> = {
-  spawn: ((_cmd: string, _args: string[], _opts: any) => {
+  spawn: ((cmd: string, args: string[], opts: any) => {
     const c = new FakeChild()
     children.push(c)
+    spawnCalls.push({ cmd, args, opts })
     return c as any
   }) as any,
   writeState: async (patch) => { writes.push(patch); return undefined },
@@ -47,7 +49,7 @@ const deps: Partial<SupervisorDeps> = {
   sleep: async () => undefined,
 }
 
-beforeEach(() => { children = []; writes = []; logs = [] })
+beforeEach(() => { children = []; writes = []; logs = []; spawnCalls = [] })
 afterEach(() => { /* nothing global to clear */ })
 
 describe('supervisor', () => {
@@ -157,5 +159,38 @@ describe('supervisor', () => {
     expect([0, 1]).toContain(exitCode)
     const failedWrite = writes.find((w) => w.state === 'failed')
     expect(failedWrite).toBeTruthy()
+  })
+
+  // 进程命名:`argv0` 让 ps/top 显示 `zai[label]:port`,env.ZAI_PROCESS_TITLE
+  // 让 child 启动早期把内部 `process.title` 也设上。没有 label 时降级到
+  // `zai:port`。两条 spawn 路径(CLI supervisor / server instance
+  // supervisor)都依赖这两条信息,在 spawn 那一刻就要传到 child。
+  it('names child via argv0 + ZAI_PROCESS_TITLE env when label is provided', async () => {
+    const pending = runSupervisor({ args: ['server'], env: {}, port: 9201, label: 'myproj' }, deps)
+    await new Promise((r) => setTimeout(r, 0))
+    const c = children[0]
+    c.emit('message', { type: 'ready', pid: 1, port: 9201 })
+    c.emit('exit', 0, null)
+    await pending
+
+    expect(spawnCalls).toHaveLength(1)
+    const call = spawnCalls[0]
+    expect(call.opts.argv0).toBe('zai[myproj]:9201')
+    expect(call.opts.env.ZAI_PROCESS_TITLE).toBe('zai[myproj]:9201')
+    expect(call.opts.env.ZAI_SUPERVISOR_PID).toBe(String(process.pid))
+  })
+
+  it('falls back to `zai:port` when no label is provided', async () => {
+    const pending = runSupervisor({ args: ['server'], env: {}, port: 9988 }, deps)
+    await new Promise((r) => setTimeout(r, 0))
+    const c = children[0]
+    c.emit('message', { type: 'ready', pid: 1, port: 9988 })
+    c.emit('exit', 0, null)
+    await pending
+
+    expect(spawnCalls).toHaveLength(1)
+    const call = spawnCalls[0]
+    expect(call.opts.argv0).toBe('zai:9988')
+    expect(call.opts.env.ZAI_PROCESS_TITLE).toBe('zai:9988')
   })
 })

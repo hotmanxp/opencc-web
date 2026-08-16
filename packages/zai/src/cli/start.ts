@@ -37,6 +37,16 @@ interface StartOptions {
 }
 
 export async function runStart(options: StartOptions): Promise<void> {
+  // 受管子进程(`--managed-child`)早期设进程标题。supervisor spawn 时
+  // 已经传了 `argv0`,Linux/macOS `ps -o args` 列从 argv[0] 起始读会
+  // 显示新名;这里再补一刀 `process.title`,覆盖 macOS Activity Monitor
+  // 与 Linux `top` 取 `comm` 字段的路径。Env 为空时不动 title,自然降级
+  // 到默认 node 标题(对应未受管或测试 spawn 不传 title 的场景)。
+  if (options.managedChild) {
+    const titleFromEnv = process.env.ZAI_PROCESS_TITLE
+    if (titleFromEnv) process.title = titleFromEnv
+  }
+
   const managed =
     options.managed ??
     (options.managedChild === true
@@ -58,10 +68,15 @@ export async function runStart(options: StartOptions): Promise<void> {
     // browser — the user's `--open` request was already handled by the
     // supervisor's direct invocation, and we don't want a second tab.
     if (!options.open) childArgs.push('--no-open')
+    // CLI 路径无 instance name(只有 web UI 创建的多实例才有 name),fallback
+    // 到 cwd basename,让 supervisor 把子进程命名为 `zai[<project>]:<port>`。
+    const cliLabel = basename(resolve(process.cwd())) || resolve(process.cwd())
+    const cliPort = Number(options.port ?? 9201)
     const { exitCode } = await runSupervisor({
       args: childArgs,
       env: { ...process.env, ZAI_PORT: options.port ?? '9201' },
-      port: Number(options.port ?? 9201),
+      port: cliPort,
+      label: cliLabel,
     });
     process.exit(exitCode);
   }
