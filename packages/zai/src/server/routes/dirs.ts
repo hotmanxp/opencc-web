@@ -2,6 +2,7 @@ import { Router, type IRouter } from 'express';
 import { readdir, access, stat, readFile } from 'node:fs/promises';
 import { join, resolve, sep, extname, basename } from 'node:path';
 import { homedir } from 'node:os';
+import { expandTilde } from '../utils/expandTilde.js';
 import type { DirectoryStatus, DirInfo, FileCount } from '../../shared/types.js';
 
 const router: IRouter = Router();
@@ -97,7 +98,9 @@ router.get('/dirs/file', async (req, res) => {
     return;
   }
 
-  const abs = resolve(raw);
+  // expandTilde 处理 ~/foo 这类 shell 简写,然后 platformRoots() 的 prefix
+  // 校验会基于展开后的绝对路径比对(参见 expandTilde.ts 注释)。
+  const abs = resolve(expandTilde(raw));
   const roots = platformRoots();
   const matchedRoot = roots.find((root) => abs === root || abs.startsWith(root + sep));
   if (!matchedRoot) {
