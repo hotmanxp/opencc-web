@@ -31,6 +31,7 @@ import { writeFile, mkdir, readFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { WEIXIN_ACCOUNTS_DIR } from './paths-internal.js'
+import QRCode from 'qrcode'
 
 export type WeixinManagerState =
   | 'disabled'
@@ -274,7 +275,7 @@ export class WeixinBotManager {
 
   // ─── QR 登录 wizard (B5) ─────────────────────────────────────
 
-  /** 启动 QR 登录流程 —— 调 iLink getBotQrcode,返回 qrcodeId + qrcodeUrl */
+  /** 启动 QR 登录流程 —— 调 iLink getBotQrcode,服务端渲染 QR PNG data URL */
   async startSetup(): Promise<{ qrcodeId: string; qrcodeUrl: string; pollUrl: string } | null> {
     if (!this.adapter) {
       // 自动创建 adapter(不需要 connect,只是为了 iLink client)。
@@ -308,8 +309,24 @@ export class WeixinBotManager {
     // iLink 真实 schema:`qrcode` (ID) + `qrcode_img_content` (URL);hermes 旧实现用
     // `qrcode_id` / `qrcode_url`,都接受,normalize 到统一字段。
     const qrcodeId = result.qrcode ?? result.qrcode_id
-    const qrcodeUrl = result.qrcode_img_content ?? result.qrcode_url ?? result.qrcode_img_url
-    if (!qrcodeId || !qrcodeUrl) return null
+    const scanUrl = result.qrcode_img_content ?? result.qrcode_url ?? result.qrcode_img_url
+    if (!qrcodeId || !scanUrl) return null
+    // 服务端用 `qrcode` npm 把 liteapp URL 渲染成 PNG data URL。
+    // 直接 <img src={scanUrl}> 会显示 liteapp HTML(扫码确认页),不是 QR 图;
+    // 改用 data:image/png;base64,... 让浏览器原生渲染 QR。
+    // 详见 hermes-agent gateway/platforms/weixin.py:1065 同样模式。
+    let qrcodeUrl: string
+    try {
+      qrcodeUrl = await QRCode.toDataURL(scanUrl, {
+        errorCorrectionLevel: 'M',
+        margin: 2,
+        width: 240,
+        color: { dark: '#000000', light: '#FFFFFF' },
+      })
+    } catch (err) {
+      this.lastError = `QRCode.toDataURL failed: ${(err as Error).message}`
+      return null
+    }
     this.activeSetup = {
       qrcodeId,
       qrcodeUrl,
@@ -347,14 +364,22 @@ export class WeixinBotManager {
       if (this.activeSetup && this.activeSetup.retries < 3) {
         const fresh = await iLink.getBotQrcode()
         const freshId = fresh.qrcode ?? fresh.qrcode_id
-        const freshUrl = fresh.qrcode_img_content ?? fresh.qrcode_url
-        if (freshId && freshUrl) {
-          this.activeSetup = {
-            qrcodeId: freshId,
-            qrcodeUrl: freshUrl,
-            retries: this.activeSetup.retries + 1,
+        const freshScan = fresh.qrcode_img_content ?? fresh.qrcode_url
+        if (freshId && freshScan) {
+          let freshQrPng: string | null = null
+          try {
+            freshQrPng = await QRCode.toDataURL(freshScan, {
+              errorCorrectionLevel: 'M', margin: 2, width: 240,
+            })
+          } catch { /* ignore */ }
+          if (freshQrPng) {
+            this.activeSetup = {
+              qrcodeId: freshId,
+              qrcodeUrl: freshQrPng,
+              retries: this.activeSetup.retries + 1,
+            }
+            return { status: 'expired' }
           }
-          return { status: 'expired' }
         }
       }
       this.activeSetup = null

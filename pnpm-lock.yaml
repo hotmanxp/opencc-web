@@ -104,6 +104,9 @@ importers:
       proper-lockfile:
         specifier: ^4.1.2
         version: 4.1.2
+      qrcode:
+        specifier: ^1.5.4
+        version: 1.5.4
       react-markdown:
         specifier: ^10.1.0
         version: 10.1.0(@types/react@18.3.31)(react@18.3.1)
@@ -144,6 +147,9 @@ importers:
       '@types/proper-lockfile':
         specifier: ^4.1.4
         version: 4.1.4
+      '@types/qrcode':
+        specifier: ^1.5.5
+        version: 1.5.6
       '@types/react':
         specifier: ^18.3.0
         version: 18.3.31
@@ -1813,6 +1819,9 @@ packages:
 
   '@types/proper-lockfile@4.1.4':
     resolution: {integrity: sha512-uo2ABllncSqg9F1D4nugVl9v93RmjxF6LJzQLMLDdPaXCUIDPeOJ21Gbqi43xNKzBi/WQ0Q0dICqufzQbMjipQ==}
+
+  '@types/qrcode@1.5.6':
+    resolution: {integrity: sha512-te7NQcV2BOvdj2b1hCAHzAoMNuj65kNBMz0KBaxM6c3VGBOhU0dURQKOtH8CFNI/dsKkwlv32p26qYQTWoB5bw==}
 
   '@types/qs@6.15.0':
     resolution: {integrity: sha512-JawvT8iBVWpzTrz3EGw9BTQFg3BQNmwERdKE22vlTxawwtbyUSlMppvZYKLZzB5zgACXdXxbD3m1bXaMqP/9ow==}
@@ -6059,6 +6068,10 @@ snapshots:
   '@types/proper-lockfile@4.1.4':
     dependencies:
       '@types/retry': 0.12.5
+
+  '@types/qrcode@1.5.6':
+    dependencies:
+      '@types/node': 25.5.0
 
   '@types/qs@6.15.0': {}
 

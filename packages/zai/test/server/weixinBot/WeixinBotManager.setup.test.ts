@@ -90,14 +90,17 @@ describe('WeixinBotManager — QR setup', () => {
     vi.clearAllMocks()
   })
 
-  it('startSetup returns qrcodeId + qrcodeUrl + pollUrl', async () => {
+  it('startSetup returns qrcodeId + qrcodeUrl (data URL) + pollUrl', async () => {
     const { manager } = makeManager({
       qrcode: { qrcode_id: 'qr-1', qrcode_url: 'https://wx.qq.com/qr/1.png' },
     })
     const r = await manager.startSetup()
     expect(r).not.toBeNull()
     expect(r!.qrcodeId).toBe('qr-1')
-    expect(r!.qrcodeUrl).toBe('https://wx.qq.com/qr/1.png')
+    // B7.3 修复后:qrcodeUrl 是 server-side 渲染的 PNG data URL (qrcode npm 库),
+    // 不是原始 liteapp HTML URL (img tag 显示是 HTML 文档不是图片)。
+    expect(r!.qrcodeUrl).toMatch(/^data:image\/png;base64,/)
+    expect(r!.qrcodeUrl.length).toBeGreaterThan(100)
     expect(r!.pollUrl).toContain('/api/weixin/setup/poll')
     manager.cancelSetup()
   })
