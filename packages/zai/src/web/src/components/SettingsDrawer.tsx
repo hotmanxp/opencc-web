@@ -28,7 +28,6 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Drawer, Modal, message } from 'antd'
-import { useState } from 'react'
 import { WeixinBotPanel } from './WeixinBotPanel.js'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
@@ -1028,6 +1027,7 @@ export default function SettingsDrawer() {
   if (!open) return null
 
   return (
+    <>
     <Drawer
       title="设置"
       width={480}
@@ -1157,6 +1157,6 @@ export default function SettingsDrawer() {
       <SettingsList schema={schema} onClose={close} onChange={handleChange} />
     </Drawer>
     <WeixinBotPanel open={weixinOpen} onClose={() => setWeixinOpen(false)} />
+    </>
   )
-}
 }
