@@ -46,6 +46,13 @@ function makeMockManager() {
     reload: vi.fn(async () => undefined),
     saveAccount: vi.fn(async () => undefined),
     getAdapter: vi.fn(() => null),
+    startSetup: vi.fn(async () => ({
+      qrcodeId: 'qr-1',
+      qrcodeUrl: 'https://wx.qq.com/qr/1.png',
+      pollUrl: '/api/weixin/setup/poll?qrcodeId=qr-1',
+    })),
+    pollSetup: vi.fn(async () => ({ status: 'waiting' })),
+    cancelSetup: vi.fn(() => undefined),
   }
 }
 
@@ -89,13 +96,6 @@ describe('weixin routes', () => {
     expect(res.status).toBe(400)
   })
 
-  it('GET /api/weixin/setup/poll returns 503 when adapter not initialized', async () => {
-    const app = makeApp()
-    mockManager.getAdapter.mockReturnValue(null)
-    const res = await request(app).get('/api/weixin/setup/poll?qrcodeId=qr1')
-    expect(res.status).toBe(503)
-  })
-
   it('POST /api/weixin/setup/confirm validates body', async () => {
     const app = makeApp()
     const res = await request(app).post('/api/weixin/setup/confirm').send({})
@@ -113,30 +113,19 @@ describe('weixin routes', () => {
     expect(mockManager.reload).toHaveBeenCalled()
   })
 
-  it('POST /api/weixin/setup/start requires adapter', async () => {
-    const app = makeApp()
-    mockManager.getAdapter.mockReturnValue(null)
-    const res = await request(app).post('/api/weixin/setup/start').send({})
-    expect(res.status).toBe(503)
-  })
-
-  it('POST /api/weixin/setup/start returns 502 when iLink returns empty', async () => {
-    const mockClient = { getBotQrcode: vi.fn(async () => ({ ret: 0, errcode: 0 })) }
-    mockManager.getAdapter.mockReturnValue({ getClient: () => mockClient })
+  it('POST /api/weixin/setup/start returns 502 when manager returns null', async () => {
+    mockManager.startSetup.mockResolvedValue(null)
     const app = makeApp()
     const res = await request(app).post('/api/weixin/setup/start').send({})
     expect(res.status).toBe(502)
   })
 
   it('POST /api/weixin/setup/start returns qrcodeId + qrcodeUrl on success', async () => {
-    const mockClient = {
-      getBotQrcode: vi.fn(async () => ({
-        ret: 0, errcode: 0,
-        qrcode_id: 'qr-1',
-        qrcode_url: 'https://wx.qq.com/qr/1.png',
-      })),
-    }
-    mockManager.getAdapter.mockReturnValue({ getClient: () => mockClient })
+    mockManager.startSetup.mockResolvedValue({
+      qrcodeId: 'qr-1',
+      qrcodeUrl: 'https://wx.qq.com/qr/1.png',
+      pollUrl: '/api/weixin/setup/poll?qrcodeId=qr-1',
+    })
     const app = makeApp()
     const res = await request(app).post('/api/weixin/setup/start').send({})
     expect(res.status).toBe(200)
@@ -144,22 +133,18 @@ describe('weixin routes', () => {
     expect(res.body.qrcodeUrl).toBe('https://wx.qq.com/qr/1.png')
   })
 
-  it('GET /api/weixin/setup/poll returns status from iLink', async () => {
-    const mockClient = {
-      getQrcodeStatus: vi.fn(async () => ({
-        ret: 0, errcode: 0,
-        status: 'scanned',
-        account_id: 'a1',
-        base_url: 'https://ilinkai.weixin.qq.com',
-      })),
-    }
-    mockManager.getAdapter.mockReturnValue({ getClient: () => mockClient })
+  it('GET /api/weixin/setup/poll returns status from manager', async () => {
+    mockManager.pollSetup.mockResolvedValue({
+      status: 'scanned',
+      accountId: 'a1',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+    })
     const app = makeApp()
     const res = await request(app).get('/api/weixin/setup/poll?qrcodeId=qr-1')
     expect(res.status).toBe(200)
     expect(res.body.status).toBe('scanned')
     expect(res.body.accountId).toBe('a1')
-    expect(mockClient.getQrcodeStatus).toHaveBeenCalledWith('qr-1')
+    expect(mockManager.pollSetup).toHaveBeenCalledWith('qr-1')
   })
 
   it('POST /api/weixin/setup/cancel returns cancelled', async () => {
@@ -167,5 +152,6 @@ describe('weixin routes', () => {
     const res = await request(app).post('/api/weixin/setup/cancel').send({})
     expect(res.status).toBe(200)
     expect(res.body.status).toBe('cancelled')
+    expect(mockManager.cancelSetup).toHaveBeenCalled()
   })
 })

@@ -79,6 +79,8 @@ export class WeixinBotManager {
   private lastConnAt: number | null = null
   /** runtime.delta 缓冲:runtimes 流式输出按 sessionId 累积, runtime.done 触发 send */
   private outboundBuffers = new Map<string, { chatId: string; text: string }>()
+  /** QR 登录当前活动状态 */
+  private activeSetup: { qrcodeId: string; qrcodeUrl: string; retries: number } | null = null
 
   constructor(private deps: WeixinBotManagerDeps = DEFAULT_DEPS) {}
 
@@ -269,6 +271,85 @@ export class WeixinBotManager {
 
   /** 给 B4 / 测试用:暴露 adapter */
   getAdapter(): WeixinAdapter | null { return this.adapter }
+
+  // ─── QR 登录 wizard (B5) ─────────────────────────────────────
+
+  /** 启动 QR 登录流程 —— 调 iLink getBotQrcode,返回 qrcodeId + qrcodeUrl */
+  async startSetup(): Promise<{ qrcodeId: string; qrcodeUrl: string; pollUrl: string } | null> {
+    if (!this.adapter) {
+      // 自动创建 adapter(不需要 connect,只是为了 iLink client)。
+      // settings 缺失时使用 dummy token,实际 QR 拿到后我们覆盖保存。
+      const settings = this.deps.getSettings() ?? {
+        enabled: true,
+        accountId: 'pending',
+        token: 'pending',
+      }
+      try {
+        this.adapter = this.deps.createAdapter(settings)
+      } catch {
+        return null
+      }
+    }
+    const iLink = this.adapter.getClient()
+    const result = await iLink.getBotQrcode()
+    if (!result.qrcode_id || !result.qrcode_url) return null
+    this.activeSetup = {
+      qrcodeId: result.qrcode_id,
+      qrcodeUrl: result.qrcode_url,
+      retries: 0,
+    }
+    return {
+      qrcodeId: result.qrcode_id,
+      qrcodeUrl: result.qrcode_url,
+      pollUrl: `/api/weixin/setup/poll?qrcodeId=${encodeURIComponent(result.qrcode_id)}`,
+    }
+  }
+
+  /**
+   * 轮询 QR 状态。iLink 返回 confirmed 时,自动 saveAccount + reload。
+   * expired 时,自动重新拉(最多 3 次,失败超限放弃)。
+   */
+  async pollSetup(qrcodeId: string): Promise<{
+    status: 'waiting' | 'scanned' | 'confirmed' | 'expired' | 'gone'
+    accountId?: string
+    baseUrl?: string
+  }> {
+    if (!this.adapter) return { status: 'gone' }
+    const iLink = this.adapter.getClient()
+    const result = await iLink.getQrcodeStatus(qrcodeId)
+    const status = result.status ?? 'waiting'
+    if (status === 'confirmed' && result.account_id && result.token) {
+      await this.saveAccount(result.account_id, result.token, result.base_url)
+      this.activeSetup = null
+      await this.reload()
+      return { status: 'confirmed', accountId: result.account_id, baseUrl: result.base_url }
+    }
+    if (status === 'expired') {
+      if (this.activeSetup && this.activeSetup.retries < 3) {
+        const fresh = await iLink.getBotQrcode()
+        if (fresh.qrcode_id && fresh.qrcode_url) {
+          this.activeSetup = {
+            qrcodeId: fresh.qrcode_id,
+            qrcodeUrl: fresh.qrcode_url,
+            retries: this.activeSetup.retries + 1,
+          }
+          return { status: 'expired' }
+        }
+      }
+      this.activeSetup = null
+      return { status: 'expired' }
+    }
+    return { status: status as 'waiting' | 'scanned', accountId: result.account_id, baseUrl: result.base_url }
+  }
+
+  /** 取消 QR 登录 */
+  cancelSetup(): void {
+    this.activeSetup = null
+  }
+
+  getActiveSetup(): { qrcodeId: string; qrcodeUrl: string; retries: number } | null {
+    return this.activeSetup
+  }
 }
 
 // 单例 — 与 zai 主进程同进程启动,initAgentRuntime 末尾调用 weixinBotManager.start()

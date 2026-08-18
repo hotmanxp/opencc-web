@@ -72,18 +72,12 @@ router.get('/settings', async (_req: Request, res: Response) => {
 
 router.post('/setup/start', async (_req: Request, res: Response) => {
   try {
-    const adapter = getManager().getAdapter()
-    if (!adapter) {
-      res.status(503).json({ error: 'weixin adapter not initialized' })
+    const result = await getManager().startSetup()
+    if (!result) {
+      res.status(502).json({ error: 'iLink getBotQrcode returned empty or adapter init failed' })
       return
     }
-    const iLink = adapter.getClient()
-    const result = await iLink.getBotQrcode()
-    if (!result.qrcode_id || !result.qrcode_url) {
-      res.status(502).json({ error: 'iLink getBotQrcode returned empty' })
-      return
-    }
-    res.json({ qrcodeId: result.qrcode_id, qrcodeUrl: result.qrcode_url })
+    res.json(result)
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }
@@ -96,17 +90,8 @@ router.get('/setup/poll', async (req: Request, res: Response) => {
       res.status(400).json({ error: 'qrcodeId required' })
       return
     }
-    const adapter = getManager().getAdapter()
-    if (!adapter) {
-      res.status(503).json({ error: 'weixin adapter not initialized' })
-      return
-    }
-    const result = await adapter.getClient().getQrcodeStatus(qrcodeId)
-    res.json({
-      status: result.status ?? 'waiting',
-      accountId: result.account_id,
-      baseUrl: result.base_url,
-    })
+    const result = await getManager().pollSetup(qrcodeId)
+    res.json(result)
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }
@@ -135,6 +120,7 @@ router.post('/setup/confirm', async (req: Request, res: Response) => {
 
 router.post('/setup/cancel', async (_req: Request, res: Response) => {
   try {
+    getManager().cancelSetup()
     res.json({ status: 'cancelled' })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
