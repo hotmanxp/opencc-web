@@ -186,6 +186,29 @@ export class ILinkClient {
     return ILinkGetQrcodeStatusResponse.parse(raw)
   }
 
+  /**
+   * 把已经 AES-128-ECB 加密的 ciphertext 上传到 iLink 提供的 CDN URL。
+   * 抽到 client 内部是为了让 server 端的 fetch 注入(test-mock)在此也生效,
+   * 避免直接调全局 fetch。
+   */
+  async uploadCiphertext(
+    uploadUrl: string,
+    ciphertext: Uint8Array,
+  ): Promise<{ xEncryptedParam: string | null }> {
+    return await this.fetchImpl(uploadUrl, {
+      method: 'POST',
+      body: ciphertext as unknown as BodyInit,
+      headers: { 'Content-Type': 'application/octet-stream' },
+    }).then(async (res) => {
+      if (res.status !== 200) {
+        const raw = await res.text().catch(() => '')
+        throw new Error(`cdn upload HTTP ${res.status}: ${raw.slice(0, 200)}`)
+      }
+      const xEncryptedParam = res.headers.get('x-encrypted-param')
+      return { xEncryptedParam }
+    })
+  }
+
   static defaultBaseUrl(): string {
     return ILINK_BASE_URL
   }

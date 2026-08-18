@@ -37,16 +37,21 @@ import {
   ITEM_VOICE,
   ITEM_FILE,
   ITEM_VIDEO,
+  TYPING_START,
+  TYPING_STOP,
+  MSG_TYPE_BOT,
 } from './iLinkTypes.js'
 import { ContextTokenStore } from './stores/ContextTokenStore.js'
 import { SyncBufStore } from './stores/SyncBufStore.js'
 import { TypingTicketCache } from './stores/TypingTicketCache.js'
 import { MessageDeduplicator } from './stores/MessageDeduplicator.js'
 import { TextDebouncer } from './debounce.js'
+import { AsyncMutex } from './asyncMutex.js'
 import { AccountLock } from './AccountLock.js'
 import { evaluateAccessPolicy, guessChatType, type DmPolicy, type GroupPolicy } from './accessPolicy.js'
-import { decryptAes128Ecb, assertSafeCdnUrl, mimeForMediaType } from './mediaCrypto.js'
+import { decryptAes128Ecb, assertSafeCdnUrl, encryptAes128Ecb, generateKey, mimeForMediaType } from './mediaCrypto.js'
 import { WEIXIN_MEDIA_DIR } from './paths-internal.js'
+import { splitText } from './outbound.js'
 import {
   LONG_POLL_TIMEOUT_MS,
   MESSAGE_DEDUP_TTL_SECONDS,
@@ -57,6 +62,8 @@ import {
   TYPING_TICKET_TTL_SECONDS,
   API_TIMEOUT_MS,
   WEIXIN_CDN_BASE_URL,
+  DEFAULT_SEND_CHUNK_DELAY_SECONDS,
+  MAX_MESSAGE_LENGTH,
 } from './constants.js'
 import type { ILinkClientOptions } from './iLinkClient.js'
 
@@ -78,6 +85,18 @@ export interface WeixinAdapterOptions {
   globalAllowAll?: boolean
   /** 持久化媒体目录 */
   mediaDir?: string
+  /** 出站 chunk 间隔 (s) */
+  sendChunkDelaySeconds?: number
+  /** 出站单 chunk 重试次数 */
+  sendChunkRetries?: number
+  /** 出站单 chunk 基础回退延迟 (s) */
+  sendChunkRetryDelaySeconds?: number
+  /** Rate limit 熔断阈值 */
+  rateLimitCircuitThreshold?: number
+  /** Rate limit 熔断窗口 (s) */
+  rateLimitCircuitWindowSeconds?: number
+  /** Rate limit 熔断打开时长 (s) */
+  rateLimitCircuitOpenSeconds?: number
 }
 
 export interface InternalWeixinMessage {
@@ -109,6 +128,12 @@ export class WeixinAdapter {
   private readonly opts: Required<Omit<WeixinAdapterOptions, 'fetchImpl' | 'mediaDir'>> & {
     fetchImpl: typeof fetch | undefined
     mediaDir: string
+    sendChunkDelaySeconds: number
+    sendChunkRetries: number
+    sendChunkRetryDelaySeconds: number
+    rateLimitCircuitThreshold: number
+    rateLimitCircuitWindowSeconds: number
+    rateLimitCircuitOpenSeconds: number
   }
   private readonly client: ILinkClient
   private readonly contextStore = new ContextTokenStore()
@@ -118,6 +143,9 @@ export class WeixinAdapter {
   private readonly debounce = new TextDebouncer()
   private readonly statusListeners = new Set<StatusListener>()
   private lock: AccountLock | null = null
+  private sendTextGate = new AsyncMutex()
+  private rateLimitUntil = 0
+  private rateLimitEvents: number[] = []
   private _state: AdapterState = 'disconnected'
   private lastError: string | null = null
   private lastConnAt: number | null = null
@@ -141,6 +169,12 @@ export class WeixinAdapter {
       groupAllowFrom: options.groupAllowFrom ?? [],
       globalAllowAll: options.globalAllowAll ?? false,
       mediaDir: options.mediaDir ?? WEIXIN_MEDIA_DIR,
+      sendChunkDelaySeconds: options.sendChunkDelaySeconds ?? DEFAULT_SEND_CHUNK_DELAY_SECONDS,
+      sendChunkRetries: options.sendChunkRetries ?? 4,
+      sendChunkRetryDelaySeconds: options.sendChunkRetryDelaySeconds ?? 1.0,
+      rateLimitCircuitThreshold: options.rateLimitCircuitThreshold ?? 1,
+      rateLimitCircuitWindowSeconds: options.rateLimitCircuitWindowSeconds ?? 30.0,
+      rateLimitCircuitOpenSeconds: options.rateLimitCircuitOpenSeconds ?? 30.0,
       fetchImpl: options.fetchImpl,
     }
     const clientOpts: ILinkClientOptions = {
@@ -517,5 +551,233 @@ export class WeixinAdapter {
     const path = join(this.opts.mediaDir, filename)
     await writeFile(path, buffer)
     return path
+  }
+
+  // ─── 出站 (B2) ─────────────────────────────────────────────
+
+  /** 串行 send 一段文本;失败会按 sendChunkRetries 指数回退;session expired 自动剥 token 重试 */
+  async sendText(chatId: string, text: string): Promise<{ success: boolean; clientId?: string; error?: string }> {
+    if (!text || !text.trim()) return { success: true }
+    if (this._state !== 'connected') {
+      return { success: false, error: 'weixin adapter not connected' }
+    }
+    const contextToken = await this.contextStore.get(this.opts.accountId, chatId)
+    const chunks = splitText(text, MAX_MESSAGE_LENGTH)
+    let lastClientId: string | undefined
+    for (let i = 0; i < chunks.length; i += 1) {
+      const chunk = chunks[i]
+      const clientId = `hermes-weixin-${Date.now()}-${i}-${Math.random().toString(36).slice(2, 8)}`
+      try {
+        await this._sendTextChunk({
+          chatId,
+          chunk,
+          contextToken: contextToken,
+          clientId,
+        })
+        lastClientId = clientId
+        if (i < chunks.length - 1 && this.opts.sendChunkDelaySeconds > 0) {
+          await this._sleep(this.opts.sendChunkDelaySeconds)
+        }
+      } catch (err) {
+        return { success: false, error: (err as Error).message }
+      }
+    }
+    return { success: true, clientId: lastClientId }
+  }
+
+  private async _sendTextChunk(args: {
+    chatId: string
+    chunk: string
+    contextToken: string | null
+    clientId: string
+  }): Promise<void> {
+    await this.sendTextGate.runExclusive(async () => {
+      await this._sendTextChunkLocked(args)
+    })
+  }
+
+  private async _sendTextChunkLocked(args: {
+    chatId: string
+    chunk: string
+    contextToken: string | null
+    clientId: string
+  }): Promise<void> {
+    let lastError: Error | null = null
+    let tokenLessTried = false
+    let effectiveToken = args.contextToken
+    for (let attempt = 0; attempt <= this.opts.sendChunkRetries; attempt += 1) {
+      if (this.rateLimitCooldownRemaining() > 0) {
+        throw new Error(`weixin rate-limited: cooldown ${this.opts.rateLimitCircuitOpenSeconds}s`)
+      }
+      try {
+        const resp = await this.client.sendMessage({
+          from_user_id: '',
+          to_user_id: args.chatId,
+          client_id: args.clientId,
+          message_type: MSG_TYPE_BOT,
+          content: {
+            text: args.chunk,
+            context_token: effectiveToken ?? undefined,
+          },
+          base_info: { ilink_app_id: 'bot', ilink_app_client_version: '0x020200' },
+        }) as Record<string, unknown> | null
+        if (resp && typeof resp === 'object') {
+          const ret = Number(resp.ret ?? 0)
+          const errcode = Number(resp.errcode ?? 0)
+          if (ret !== 0 || errcode !== 0) {
+            if ((ret === ILINK_ERROR.SESSION_EXPIRED || errcode === ILINK_ERROR.SESSION_EXPIRED) && !tokenLessTried && effectiveToken) {
+              tokenLessTried = true
+              effectiveToken = null
+              continue
+            }
+            if (ret === ILINK_ERROR.RATE_LIMIT || errcode === ILINK_ERROR.RATE_LIMIT) {
+              const errmsg = String(resp.errmsg ?? resp.msg ?? 'rate limited')
+              lastError = new Error(`iLink sendmessage rate limited: ret=${ret} errcode=${errcode} errmsg=${errmsg}`)
+              if (this._recordRateLimitEvent()) {
+                throw new Error(`weixin rate-limited: cooldown ${this.opts.rateLimitCircuitOpenSeconds}s`)
+              }
+              if (attempt >= this.opts.sendChunkRetries) break
+              await this._sleep(this.opts.sendChunkRetryDelaySeconds * 3) // 3x backoff for rate limit
+              continue
+            }
+            const errmsg = String(resp.errmsg ?? resp.msg ?? 'unknown error')
+            throw new Error(`iLink sendmessage error: ret=${ret} errcode=${errcode} errmsg=${errmsg}`)
+          }
+        }
+        this._resetRateLimitCircuit()
+        return
+      } catch (err) {
+        lastError = err as Error
+        if (attempt >= this.opts.sendChunkRetries) break
+        await this._sleep(this.opts.sendChunkRetryDelaySeconds * (attempt + 1))
+      }
+    }
+    throw lastError ?? new Error('weixin send chunk failed: unknown')
+  }
+
+  private rateLimitCooldownRemaining(): number {
+    if (this.rateLimitUntil === 0) return 0
+    const remaining = (this.rateLimitUntil - Date.now()) / 1000
+    return remaining > 0 ? remaining : 0
+  }
+
+  private _recordRateLimitEvent(): boolean {
+    const now = Date.now()
+    const windowStart = now - this.opts.rateLimitCircuitWindowSeconds * 1000
+    this.rateLimitEvents = this.rateLimitEvents.filter((ts) => ts >= windowStart)
+    this.rateLimitEvents.push(now)
+    if (this.rateLimitEvents.length >= this.opts.rateLimitCircuitThreshold) {
+      this.rateLimitUntil = now + this.opts.rateLimitCircuitOpenSeconds * 1000
+      return true
+    }
+    return false
+  }
+
+  private _resetRateLimitCircuit(): void {
+    this.rateLimitEvents = []
+    this.rateLimitUntil = 0
+  }
+
+  // ─── 媒体出站 ─────────────────────────────────────────────
+
+  /** 通用出站:本地文件 → 加密 → CDN 上传 → sendmessage 转发 */
+  async sendImageFile(chatId: string, imagePath: string): Promise<{ success: boolean; error?: string }> {
+    return this._sendFile(chatId, imagePath, ITEM_IMAGE, 'image')
+  }
+  async sendDocument(chatId: string, filePath: string): Promise<{ success: boolean; error?: string }> {
+    return this._sendFile(chatId, filePath, ITEM_FILE, 'file')
+  }
+  async sendVideo(chatId: string, videoPath: string): Promise<{ success: boolean; error?: string }> {
+    return this._sendFile(chatId, videoPath, ITEM_VIDEO, 'video')
+  }
+  async sendVoice(chatId: string, voicePath: string): Promise<{ success: boolean; error?: string }> {
+    return this._sendFile(chatId, voicePath, ITEM_VOICE, 'voice')
+  }
+
+  private async _sendFile(
+    chatId: string,
+    filePath: string,
+    itemType: number,
+    kind: 'image' | 'file' | 'video' | 'voice',
+  ): Promise<{ success: boolean; error?: string }> {
+    if (this._state !== 'connected') return { success: false, error: 'adapter not connected' }
+    try {
+      const { readFile } = await import('node:fs/promises')
+      const buffer = await readFile(filePath)
+      const key = generateKey()
+      const ciphertext = encryptAes128Ecb(buffer, key)
+      const uploadInfo = await this.client.getUploadUrl()
+      const uploadUrl = uploadInfo.upload_url
+      const encryptedParam = uploadInfo.encrypted_query_param
+      if (!uploadUrl || !encryptedParam) {
+        return { success: false, error: 'iLink getUploadUrl returned empty' }
+      }
+      const filekey = uploadInfo.filekey ?? 'hermes'
+      const fullUploadUrl = `${this.opts.cdnBaseUrl.replace(/\/$/, '')}/upload?encrypted_query_param=${encodeURIComponent(encryptedParam)}&filekey=${encodeURIComponent(filekey)}`
+      const { xEncryptedParam } = await this.client.uploadCiphertext(fullUploadUrl, new Uint8Array(ciphertext))
+      if (!xEncryptedParam) {
+        return { success: false, error: 'cdn upload missing x-encrypted-param header' }
+      }
+      const filename = filePath.split('/').pop() ?? 'file'
+      const contextToken = await this.contextStore.get(this.opts.accountId, chatId)
+      const clientId = `hermes-weixin-media-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+      const resp = await this.client.sendMediaMessage({
+        from_user_id: '',
+        to_user_id: chatId,
+        client_id: clientId,
+        message_type: MSG_TYPE_BOT,
+        content: {
+          media: {
+            type: itemType,
+            encrypt_query_param: xEncryptedParam,
+            aes_key: key,
+            file_name: kind === 'file' ? filename : undefined,
+          },
+          context_token: contextToken ?? undefined,
+        },
+        base_info: { ilink_app_id: 'bot', ilink_app_client_version: '0x020200' },
+      }) as Record<string, unknown> | null
+      if (resp && typeof resp === 'object') {
+        const ret = Number(resp.ret ?? 0)
+        const errcode = Number(resp.errcode ?? 0)
+        if (ret !== 0 || errcode !== 0) {
+          const errmsg = String(resp.errmsg ?? resp.msg ?? 'unknown')
+          return { success: false, error: `iLink sendmedia error: ret=${ret} errcode=${errcode} errmsg=${errmsg}` }
+        }
+      }
+      return { success: true }
+    } catch (err) {
+      return { success: false, error: (err as Error).message }
+    }
+  }
+
+  // ─── typing 状态 ─────────────────────────────────────────
+
+  /** 异步触发 typing_ticket 刷新,缓存 miss 时调 getConfig */
+  async sendTyping(chatId: string, status: 'start' | 'stop' = 'start'): Promise<void> {
+    if (this._state !== 'connected') return
+    const ticket = await this._ensureTypingTicket(chatId)
+    if (!ticket) return
+    try {
+      await this.client.sendTyping(chatId, ticket, status === 'start' ? TYPING_START : TYPING_STOP)
+    } catch {
+      // silent — typing 不应影响主流程
+    }
+  }
+
+  private async _ensureTypingTicket(chatId: string): Promise<string | null> {
+    const cached = this.typingCache.get(chatId)
+    if (cached) return cached
+    const contextToken = await this.contextStore.get(this.opts.accountId, chatId)
+    try {
+      const res = await this.client.getConfig(chatId, contextToken)
+      if (res.typing_ticket) {
+        this.typingCache.set(chatId, res.typing_ticket)
+        return res.typing_ticket
+      }
+    } catch {
+      // ignore
+    }
+    return null
   }
 }
