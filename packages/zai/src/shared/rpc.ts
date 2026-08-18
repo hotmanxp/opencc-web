@@ -90,4 +90,95 @@ export interface RpcMethodMap {
     request: PromptRequest
     response: PromptResponse
   }
+
+  // ─── Weixin (微信) 机器人路由 — B4 阶段 ──────────────
+  // 详见 docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md
+
+  /** GET /api/weixin/status — 微信适配器状态 */
+  'GET /api/weixin/status': {
+    request: undefined
+    response: {
+      configured: boolean
+      enabled: boolean
+      state: 'unconfigured' | 'disabled' | 'failed' | 'connecting' | 'connected' | 'disconnected'
+      accountId?: string
+      lastError?: string
+      lastConnAt?: number
+    }
+  }
+
+  /** POST /api/weixin/connect — 启用 + 连接 */
+  'POST /api/weixin/connect': {
+    request: Record<string, never> | undefined
+    response: {
+      configured: boolean
+      enabled: boolean
+      state: 'unconfigured' | 'disabled' | 'failed' | 'connecting' | 'connected' | 'disconnected'
+      accountId?: string
+      lastError?: string
+      lastConnAt?: number
+    }
+  }
+
+  /** POST /api/weixin/disconnect — 断开 */
+  'POST /api/weixin/disconnect': {
+    request: Record<string, never> | undefined
+    response: {
+      configured: boolean
+      enabled: boolean
+      state: 'unconfigured' | 'disabled' | 'failed' | 'connecting' | 'connected' | 'disconnected'
+      accountId?: string
+      lastError?: string
+      lastConnAt?: number
+    }
+  }
+
+  /** POST /api/weixin/reload — 重启 adapter(settings 改后) */
+  'POST /api/weixin/reload': {
+    request: Record<string, never> | undefined
+    response: {
+      configured: boolean
+      enabled: boolean
+      state: 'unconfigured' | 'disabled' | 'failed' | 'connecting' | 'connected' | 'disconnected'
+      accountId?: string
+      lastError?: string
+      lastConnAt?: number
+    }
+  }
+
+  /** POST /api/weixin/setup/start — 启动 QR 登录 */
+  'POST /api/weixin/setup/start': {
+    request: Record<string, never> | undefined
+    response: {
+      qrcodeId: string
+      qrcodeUrl: string
+      pollUrl: string
+    }
+  }
+
+  /** GET /api/weixin/setup/poll?qrcodeId= */
+  'GET /api/weixin/setup/poll': {
+    request: { qrcodeId: string }
+    response: {
+      status: 'waiting' | 'scanned' | 'confirmed' | 'expired' | 'gone'
+      accountId?: string
+      baseUrl?: string
+    }
+  }
+
+  /** POST /api/weixin/setup/confirm — 手动凭据 + reload */
+  'POST /api/weixin/setup/confirm': {
+    request: { accountId: string; token: string; baseUrl?: string }
+    response: {
+      configured: boolean
+      enabled: boolean
+      state: 'unconfigured' | 'disabled' | 'failed' | 'connecting' | 'connected' | 'disconnected'
+    }
+  }
+
+  /** POST /api/weixin/setup/cancel */
+  'POST /api/weixin/setup/cancel': {
+    request: Record<string, never> | undefined
+    response: { status: 'cancelled' }
+  }
 }

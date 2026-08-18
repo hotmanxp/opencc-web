@@ -279,11 +279,24 @@ export class WeixinBotManager {
     if (!this.adapter) {
       // 自动创建 adapter(不需要 connect,只是为了 iLink client)。
       // settings 缺失时使用 dummy token,实际 QR 拿到后我们覆盖保存。
-      const settings = this.deps.getSettings() ?? {
+      const dummySettings: WeixinBotSettings = {
         enabled: true,
         accountId: 'pending',
         token: 'pending',
+        baseUrl: 'https://ilinkai.weixin.qq.com',
+        cdnBaseUrl: 'https://novac2c.cdn.weixin.qq.com/c2c',
+        dmPolicy: 'pairing',
+        groupPolicy: 'disabled',
+        allowFrom: [],
+        groupAllowFrom: [],
+        textBatchDelaySeconds: 3.0,
+        textBatchSplitDelaySeconds: 5.0,
+        sendChunkDelaySeconds: 1.5,
+        sendChunkRetries: 4,
+        rateLimitCircuitThreshold: 1,
+        rateLimitCircuitOpenSeconds: 30.0,
       }
+      const settings = this.deps.getSettings() ?? dummySettings
       try {
         this.adapter = this.deps.createAdapter(settings)
       } catch {

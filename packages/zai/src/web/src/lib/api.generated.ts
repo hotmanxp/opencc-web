@@ -19,6 +19,34 @@ export const api = {
       post: (body: _Map["POST /api/agent/sessions"]['request']) => request<_Map["POST /api/agent/sessions"]['response']>("POST", "/api/agent/sessions", body),
     },
   },
+  weixin: {
+    setup: {
+      cancel: {
+        post: (body: _Map["POST /api/weixin/setup/cancel"]['request']) => request<_Map["POST /api/weixin/setup/cancel"]['response']>("POST", "/api/weixin/setup/cancel", body),
+      },
+      confirm: {
+        post: (body: _Map["POST /api/weixin/setup/confirm"]['request']) => request<_Map["POST /api/weixin/setup/confirm"]['response']>("POST", "/api/weixin/setup/confirm", body),
+      },
+      poll: {
+        get: (body: _Map["GET /api/weixin/setup/poll"]['request']) => request<_Map["GET /api/weixin/setup/poll"]['response']>("GET", "/api/weixin/setup/poll", body),
+      },
+      start: {
+        post: (body: _Map["POST /api/weixin/setup/start"]['request']) => request<_Map["POST /api/weixin/setup/start"]['response']>("POST", "/api/weixin/setup/start", body),
+      },
+    },
+    connect: {
+      post: (body: _Map["POST /api/weixin/connect"]['request']) => request<_Map["POST /api/weixin/connect"]['response']>("POST", "/api/weixin/connect", body),
+    },
+    disconnect: {
+      post: (body: _Map["POST /api/weixin/disconnect"]['request']) => request<_Map["POST /api/weixin/disconnect"]['response']>("POST", "/api/weixin/disconnect", body),
+    },
+    reload: {
+      post: (body: _Map["POST /api/weixin/reload"]['request']) => request<_Map["POST /api/weixin/reload"]['response']>("POST", "/api/weixin/reload", body),
+    },
+    status: {
+      get: () => request<_Map["GET /api/weixin/status"]['response']>("GET", "/api/weixin/status"),
+    },
+  },
   cli: {
     get: () => request<_Map["GET /api/cli"]['response']>("GET", "/api/cli"),
   },

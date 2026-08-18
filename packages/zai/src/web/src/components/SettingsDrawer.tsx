@@ -28,6 +28,8 @@
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { Button, Drawer, Modal, message } from 'antd'
+import { useState } from 'react'
+import { WeixinBotPanel } from './WeixinBotPanel.js'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
 import { useInstanceStore } from '../store/useInstanceStore.js'
@@ -755,6 +757,7 @@ function buildStaticSchema(
 export default function SettingsDrawer() {
   const open = useAppStore((s) => s.settingsDrawerOpen)
   const close = useAppStore((s) => s.closeSettingsDrawer)
+  const [weixinOpen, setWeixinOpen] = useState(false)
   const theme = useAppStore((s) => s.settingsTheme)
   const setTheme = useAppStore((s) => s.setSettingsTheme)
   const outputStyle = useAppStore((s) => s.outputStyle)
@@ -1033,6 +1036,15 @@ export default function SettingsDrawer() {
       onClose={close}
       destroyOnClose
       data-testid="settings-drawer"
+      extra={
+        <Button
+          size="small"
+          onClick={() => setWeixinOpen(true)}
+          data-testid="open-weixin-bot"
+        >
+          微信机器人
+        </Button>
+      }
       styles={{ body: { padding: '12px 16px' } }}
       footer={
         <div style={{ fontSize: 11, color: 'var(--text-dim-45)' }}>
@@ -1144,5 +1156,7 @@ export default function SettingsDrawer() {
       )}
       <SettingsList schema={schema} onClose={close} onChange={handleChange} />
     </Drawer>
+    <WeixinBotPanel open={weixinOpen} onClose={() => setWeixinOpen(false)} />
   )
+}
 }
