@@ -33,6 +33,10 @@ import TodoDropdown from "./TodoDropdown.js";
 import QuickCommandPopover from "./QuickCommandPopover.js";
 import type { SlashItem } from "./quickCommandTypes.js";
 import { readImageAsBase64, ImageReadError } from "../lib/imageReader";
+import {
+  AGENT_INPUT_INSERT_EVENT,
+  type AgentInputInsertDetail,
+} from "../lib/agentInputEvents";
 
 type PendingAttachment = {
   localId: string;
@@ -70,6 +74,21 @@ function deriveLocalTitle(prompt: string): string {
   if (!firstLine) return "";
   if (firstLine.length <= TITLE_MAX_LEN) return firstLine;
   return firstLine.slice(0, TITLE_MAX_LEN - 1) + "…";
+}
+
+/**
+ * rc-textarea(antd Input.TextArea)把 ref 变成命令式句柄
+ * { focus, blur, resizableTextArea: { textArea }, ... } 而非原生 <textarea>。
+ * 需要读 selection / value 或设光标时,解码到原生节点;解不出返回 null。
+ */
+function textAreaNode(
+  refValue: unknown,
+): HTMLTextAreaElement | null {
+  if (!refValue || typeof refValue !== "object") return null;
+  const resizable = (refValue as {
+    resizableTextArea?: { textArea?: HTMLTextAreaElement | null } | null;
+  }).resizableTextArea;
+  return resizable?.textArea ?? null;
 }
 
 /**
@@ -181,6 +200,47 @@ export default React.memo(function AgentInputBox() {
         if (Array.isArray(data.items)) setSlashItems(data.items);
       })
       .catch(() => {});
+  }, []);
+
+  // 分屏文件管理「插入对话」→ 光标处插入相对路径。FsContextMenu dispatch
+  // agent-input-insert 事件,detail.text 为路径;插入后聚焦输入框并把光标
+  // 移到路径末尾,便于直接继续打字。输入 value 是本地 state,故用事件桥接
+  // 而非跨子树传 props(见 lib/agentInputEvents.ts)。
+  useEffect(() => {
+    const onInsert = (e: Event) => {
+      const detail = (e as CustomEvent<AgentInputInsertDetail>).detail;
+      const text = detail?.text;
+      if (typeof text !== "string" || !text) return;
+      // rc-textarea(antd Input.TextArea)把 ref 变成命令式句柄
+      // { resizableTextArea: { textArea } },需要解码到原生 <textarea>
+      // 才能读 selection / 设光标。
+      const ta = textAreaNode(textareaRef.current);
+      const valLen = ta?.value.length ?? 0;
+      // happy-dom 等环境可能不实现 textarea selection API(selectionStart 为
+      // undefined),归一化后退化为「追加到末尾」,避免 slice(0, undefined)
+      // 把整段文本重复插入。
+      const rawStart = ta ? ta.selectionStart : 0;
+      const rawEnd = ta ? ta.selectionEnd : rawStart;
+      const start = Number.isFinite(rawStart) ? rawStart : valLen;
+      const end = Number.isFinite(rawEnd) ? rawEnd : start;
+      setInput((prev) => prev.slice(0, start) + text + prev.slice(end));
+      requestAnimationFrame(() => {
+        const el = textAreaNode(textareaRef.current);
+        if (!el) return;
+        el.focus();
+        const pos = start + text.length;
+        // happy-dom 未实现 setSelectionRange(测试环境),退回标准 selectionStart/
+        // selectionEnd 属性赋值,两者在真实浏览器均有等价效果。
+        if (typeof el.setSelectionRange === "function") {
+          el.setSelectionRange(pos, pos);
+        } else {
+          el.selectionStart = pos;
+          el.selectionEnd = pos;
+        }
+      });
+    };
+    window.addEventListener(AGENT_INPUT_INSERT_EVENT, onInsert);
+    return () => window.removeEventListener(AGENT_INPUT_INSERT_EVENT, onInsert);
   }, []);
 
   const skillMenuRef = useRef<HTMLDivElement>(null);

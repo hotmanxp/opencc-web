@@ -33,10 +33,10 @@ import {
   type UserFacingPermissionMode,
 } from "@zn-ai/zn-agent-core";
 import { getDefaultMode } from "../services/permissionMode.js";
-import { flushPendingSubagentNotifications } from "../services/subagentNotifier.js";
 import { flushPendingBashNotifications } from "../services/bashNotifier.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
+import { sessionInbox, type InboxMessage } from "../services/sessionInbox.js";
 import { logHttp } from "../services/accessLog.js";
 import { resolveModel } from "../lib/resolveModel.js";
 import { resolveProviderForModel as resolveProviderForModelImpl } from "../services/modelCaller.js";
@@ -780,22 +780,105 @@ function emitQueueChanged(sid: string): void {
 
 async function runNextInQueue(sid: string): Promise<void> {
   if (sessionRunning.has(sid)) return
-  const q = sessionQueues.get(sid)
-  if (!q || q.length === 0) {
+
+  const httpCmd = nextHttpPrompt(sid)
+  const inboxMsg = sessionInbox.consumeNextTurn(sid)
+
+  let cmd: PendingPrompt | null
+  if (httpCmd) {
+    // 用户人工输入 → 重置唤醒预算(对齐 SessionInbox.resetWakeBudget 语义)
+    sessionInbox.resetWakeBudget(sid)
+    cmd = httpCmd
+  } else if (inboxMsg) {
+    cmd = inboxToPendingPrompt(sid, inboxMsg)
+  } else {
     sessionQueues.delete(sid)
     emitQueueChanged(sid)
     return
   }
+
+  // ★ 同步段原子性: sessionRunning.add 与首个 await (runQueryLoop) 之间不得
+  // 插入任何 await — 「同一 tick 二次触发被 has(sid) 拦截」靠这段同步代码
+  // 保证。JS 单线程模型 + 入队/wake 触发都是同步段, 守卫不会被打断。
   sessionRunning.add(sid)
-  const cmd = q.shift()!
+  sessionInbox.setBusy(sid)
   emitQueueChanged(sid)
   try {
     await runQueryLoop(cmd)
   } finally {
     sessionRunning.delete(sid)
+    sessionInbox.clearRunning(sid)
+    // turn 结束 → 消费 next-step lane: 多条消息合并为单条 prompt 喂给下一轮
+    const nextStep = sessionInbox.consumeNextStep(sid)
+    if (nextStep.length > 0) {
+      enqueueInboxPrompt(sid, mergeInboxMessages(nextStep))
+    }
     void runNextInQueue(sid)
   }
 }
+
+/** HTTP 队列队首(shift + emitQueueChanged);空则 null。 */
+function nextHttpPrompt(sid: string): PendingPrompt | null {
+  const q = sessionQueues.get(sid)
+  if (!q || q.length === 0) return null
+  return q.shift()!
+}
+
+/** inbox 消息 → PendingPrompt(cwd 从 CwdStore 取;缺则 process.cwd 兜底)。 */
+function inboxToPendingPrompt(sid: string, msg: InboxMessage): PendingPrompt {
+  return {
+    id: `inbox-${msg.id}`,
+    sessionId: sid,
+    cwd: resolveInboxCwd(sid),
+    prompt: msg.content,
+  }
+}
+
+/** 多条 next-step 合并为单条 prompt(对齐 DSH steer 批处理语义)。 */
+function mergeInboxMessages(msgs: InboxMessage[]): string {
+  return msgs.map((m) => m.content).join('\n\n')
+}
+
+/**
+ * 把 inbox 合并的 prompt 排到 HTTP 队列顶 — HTTP 之后、未来输入之前。
+ * 直接 prepend 到 sessionQueues 头部(不再 wake: 已在本 tick 上下文中)。
+ */
+function enqueueInboxPrompt(sid: string, prompt: string): void {
+  const cwd = resolveInboxCwd(sid)
+  const cmd: PendingPrompt = {
+    id: `inbox-merged-${crypto.randomUUID()}`,
+    sessionId: sid,
+    cwd,
+    prompt,
+  }
+  const q = sessionQueues.get(sid) ?? []
+  q.unshift(cmd)
+  sessionQueues.set(sid, q)
+}
+
+/** 从 CwdStore 取 session 当前 cwd;缺则 process.cwd 兜底。 */
+function resolveInboxCwd(sid: string): string {
+  try {
+    const v = CwdStore.get(sid)
+    if (v) return v
+  } catch {
+    // CwdStore.get 不抛 (它走内部 Map), 兜底 catch 防 vendor 行为变更。
+  }
+  return process.cwd()
+}
+
+// ============================================================================
+// Inbox → zai scheduler wake bridge
+//
+// SessionInbox.followup / steer 在 idle 且 wakeBudget 预算内会调 wakeHandler
+// 唤醒父 session — 这里注册为 runNextInQueue, 把 next-turn lane 的消息
+// 作为一条 prompt 喂给 LLM。handler 抛错仅 console.warn, 不让后台回调把
+// server 弄崩(与 SubagentNotifier / BashNotifier 同款防御)。
+sessionInbox.setWakeHandler((sid) => {
+  void runNextInQueue(sid).catch((err) =>
+    console.warn('[agent] inbox wake runNextInQueue failed:', err),
+  )
+})
 
 /**
  * 单条 prompt 的 queryLoop(原 /agent/prompt 的 runWithSessionId body)。
@@ -1347,10 +1430,6 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // release 只删 map 项, 不主动 .abort(). abort 已经发生过的 controller
     // 自然 abort, 还没发生的就让它跑完.
     releaseSessionController(sessionId)
-    // zai patch (2026-08-09): 主线 query 结束(idle)后补发暂存的子代理
-    // 完成通知。子代理完成时若主线活跃,SubagentNotifier 暂存通知
-    // (running 守卫),这里 flush 让通知在主线结束后注入,不与主线并行。
-    flushPendingSubagentNotifications(sessionId)
     // 同上:暂存的后台 Bash 完成通知(BashNotifier running 守卫暂存)在
     // 主线结束后补发,避免通知 query 与主线并行 / 通知之间互相并行。
     flushPendingBashNotifications(sessionId)
@@ -1441,6 +1520,8 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
   // (追齐 OPENCC 的消息排队交互); 空闲 → 立即启动 queryLoop。入队与
   // 启动判定在同一同步块内完成, JS 单线程保证原子性, 杜绝并发 queryLoop
   // 写同一 transcript。排队状态经 queue.changed SSE 事件 + 响应快照推给前端。
+  // 用户人工输入 → 重置 inbox wakeBudget, 让后台通知在主线下次空闲时仍能唤醒。
+  sessionInbox.resetWakeBudget(sessionId)
   const text = prompt?.trim() ?? "";
   const blocks = contentBlocks;
   const queue = sessionQueues.get(sessionId) ?? []

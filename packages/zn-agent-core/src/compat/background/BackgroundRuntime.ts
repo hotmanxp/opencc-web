@@ -33,6 +33,16 @@ export interface BackgroundRuntime {
     reason?: string,
   ): Promise<{ cancelled: number }>
   /**
+   * zai patch (HRMSV3-ZN-WEBSITE#668 / subagent_control.send_message):
+   * 把父 agent 的指令投递到子 agent 的 pending 队列,子 agent 下一轮
+   * turn 时拼到 query prompt 前缀消费。任务不存在 / 已终态返回
+   * {ok:false};否则返回 {ok:true}。调用方负责幂等性。
+   */
+  sendMessageToTask(
+    taskId: string,
+    prompt: string,
+  ): Promise<{ ok: boolean }>
+  /**
    * 流式读取任务事件。语义:
    *   1) 先回放 store 中 seq > fromSeq 的所有历史事件
    *   2) 若任务已结束,流完成后立即终止

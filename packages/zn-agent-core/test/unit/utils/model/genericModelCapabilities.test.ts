@@ -9,15 +9,17 @@
  * Each test pins a model that should hit a known source with known values,
  * so regressions in any single layer surface as a concrete value mismatch.
  */
-// Test the compiled bundle, not the source. The source path
+// Test the compiled MAIN-ENTRY bundle (dist/opencc-core.mjs), exactly as
+// zai consumes it — not the source. The source path
 // `src/opencc-src/utils/model/genericModelCapabilities.ts` imports
 // from `../../integrations/registry.js`, which under vitest's
 // resolve.alias (see vitest.config.ts → RELATIVE_RE) routes to the
 // stripped-dir stub `dangling-shims/opencc-stripped.ts` and breaks
-// `getModel` / `getAllModels`. The bundled dist file has the registry
-// inlined, so it works under both vitest and the runtime.
+// `getModel` / `getAllModels`. The bundle has the registry inlined,
+// so it works under both vitest and the runtime. (dist 清理后不再保留
+// standalone 的 genericModelCapabilities.js,统一走主入口。)
 import { describe, expect, it } from 'vitest'
-import { lookupGenericModelCapabilities } from '../../../../dist/opencc-src/utils/model/genericModelCapabilities.js'
+import { lookupGenericModelCapabilities } from '@zn-ai/zn-agent-core'
 
 describe('lookupGenericModelCapabilities', () => {
   describe('defineModel() registry hits', () => {

@@ -5,6 +5,7 @@ import { act, fireEvent, render, screen, waitFor } from "@testing-library/react"
 import { useAgentStore, type V2TaskItem } from "../store/useAgentStore.js";
 import { useAppStore } from "../store/useAppStore.js";
 import { api } from "../lib/api.js";
+import { AGENT_INPUT_INSERT_EVENT } from "../lib/agentInputEvents.js";
 
 const v2 = (id: string, subject: string, status: V2TaskItem["status"]): V2TaskItem => ({
   id, subject, status, blocks: [], blockedBy: [], updatedAt: 0,
@@ -611,5 +612,77 @@ describe('AgentInputBox — 首条消息带图片附件时 UI 立即渲染', () 
     } finally {
       spy.mockRestore()
     }
+  })
+})
+
+describe('AgentInputBox — 插入对话 (分屏文件管理 agent-input-insert 事件)', () => {
+  const INSERT_TEXT = 'src/index.ts'
+
+  test('事件后把相对路径插入到光标处, 光标落在路径末尾', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: 'look at now!' } })
+    // happy-dom 20.10.6 未实现 textarea selection API(selectionStart 读出
+    // undefined → 生产代码会退化为追加末尾),用实例访问器模拟「光标在
+    // 'look at ' 与 'now!' 之间 (index 8)」,语义与真实浏览器一致。若
+    // happy-dom 自带 setSelectionRange,它只更新内部槽、绕不开访问器,
+    // 需一并覆盖,让生产代码两条设光标路径都落进同一个 sel。
+    let sel = 8
+    Object.defineProperty(ta, 'selectionStart', {
+      configurable: true,
+      get: () => sel,
+      set: (v: number) => { sel = v },
+    })
+    Object.defineProperty(ta, 'selectionEnd', {
+      configurable: true,
+      get: () => sel,
+      set: (v: number) => { sel = v },
+    })
+    ta.setSelectionRange = (start: number, end: number) => { sel = end }
+    try {
+      act(() => {
+        window.dispatchEvent(
+          new CustomEvent(AGENT_INPUT_INSERT_EVENT, { detail: { text: INSERT_TEXT } }),
+        )
+      })
+      await waitFor(() => expect(ta.value).toBe('look at src/index.tsnow!'))
+      // rAF 后光标应落在插入文本末尾
+      await waitFor(() => expect(ta.selectionStart).toBe(8 + INSERT_TEXT.length))
+    } finally {
+      Reflect.deleteProperty(ta, 'selectionStart')
+      Reflect.deleteProperty(ta, 'selectionEnd')
+    }
+  })
+
+  test('空输入框时插入相对路径', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(AGENT_INPUT_INSERT_EVENT, { detail: { text: INSERT_TEXT } }),
+      )
+    })
+    await waitFor(() => expect(ta.value).toBe(INSERT_TEXT))
+  })
+
+  test('已有内容且 selection API 缺失时退化为追加到末尾', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    fireEvent.change(ta, { target: { value: 'look at now!' } })
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent(AGENT_INPUT_INSERT_EVENT, { detail: { text: INSERT_TEXT } }),
+      )
+    })
+    await waitFor(() => expect(ta.value).toBe('look at now!src/index.ts'))
+  })
+
+  test('detail 缺 text 时不写入输入框', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    act(() => {
+      window.dispatchEvent(new CustomEvent(AGENT_INPUT_INSERT_EVENT, { detail: {} }))
+    })
+    expect(ta.value).toBe('')
   })
 })

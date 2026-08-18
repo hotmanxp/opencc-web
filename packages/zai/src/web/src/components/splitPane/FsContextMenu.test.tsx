@@ -45,6 +45,19 @@ describe('FsContextMenu', () => {
     expect((navigator.clipboard.writeText as any)).toHaveBeenCalledWith(path);
   });
 
+  it('dispatches agent-input-insert with relative path and closes menu', async () => {
+    const dispatchSpy = vi.spyOn(window, 'dispatchEvent');
+    const onClose = vi.fn();
+    render(<FsContextMenu path={path} absPath={absPath} cwd={cwd} position={{ x: 0, y: 0 }} onClose={onClose} />);
+    const item = await waitFor(() => document.querySelector('[data-testid="fs-cm-insert"]') as HTMLElement);
+    await act(async () => { fireEvent.click(item); });
+    const insertEvent = dispatchSpy.mock.calls
+      .map((c) => c[0] as CustomEvent<{ text: string }>)
+      .find((ev) => ev.type === 'agent-input-insert');
+    expect(insertEvent?.detail).toEqual({ text: path });
+    expect(onClose).toHaveBeenCalled();
+  });
+
   it('copies absolute path to clipboard', async () => {
     render(<FsContextMenu path={path} absPath={absPath} cwd={cwd} position={{ x: 0, y: 0 }} onClose={vi.fn()} />);
     const item = await waitFor(() => document.querySelector('[data-testid="fs-cm-copy-abs"]') as HTMLElement);

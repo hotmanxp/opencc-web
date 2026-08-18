@@ -1,4 +1,4 @@
-import { Card, Form, Input, Button, message, Spin, Row, Col, Typography, Menu, List, Popconfirm, Select, Space, Modal, Tooltip, Tag } from 'antd';
+import { Card, Form, Input, Button, message, Spin, Row, Col, Typography, Menu, Popconfirm, Select, Space, Modal, Tooltip, Tag } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
@@ -198,44 +198,59 @@ function ProviderForm({
         已配置 {profiles.length} 个 Provider
       </Text>
 
-      <List
-        dataSource={profiles}
-        locale={{ emptyText: '暂无配置的 Provider，点击右上角"添加"创建' }}
-        renderItem={(item) => (
-          <List.Item
-            actions={[
-              <Button
-                key="edit"
-                type="text"
+      {profiles.length === 0 ? (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          暂无配置的 Provider，点击右上角“添加”创建
+        </Text>
+      ) : (
+        <Row gutter={[12, 12]}>
+          {profiles.map((item) => (
+            <Col key={item.id ?? item.name} xs={24} sm={12} md={8} lg={8} xl={6}>
+              <Card
                 size="small"
-                icon={<EditOutlined />}
-                disabled={!item.id}
-                onClick={() => openEditModal(item)}
-              />,
-              <Popconfirm key="del" title="确定删除？" onConfirm={() => item.id && handleDelete(item.id)}>
-                <Button type="text" danger size="small" icon={<DeleteOutlined />} loading={saving} />
-              </Popconfirm>,
-            ]}
-          >
-            <List.Item.Meta
-              title={item.name || item.provider}
-              description={
-                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+                hoverable
+                styles={{ body: { padding: 12 } }}
+                title={
+                    <Text ellipsis style={{ width: '100%' }} title={item.name || item.provider}>
+                      {item.name || item.provider}
+                    </Text>
+                  }
+                extra={
+                  <Space size={0} onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<EditOutlined />}
+                      disabled={!item.id}
+                      onClick={() => openEditModal(item)}
+                    />
+                    <Popconfirm title="确定删除？" onConfirm={() => item.id && handleDelete(item.id)}>
+                      <Button type="text" danger size="small" icon={<DeleteOutlined />} loading={saving} />
+                    </Popconfirm>
+                  </Space>
+                }
+              >
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
                   <Text type="secondary" style={{ fontSize: 12 }}>Provider: {item.provider}</Text>
-                  {item.baseUrl && <Text type="secondary" style={{ fontSize: 12 }}>BaseURL: {item.baseUrl}</Text>}
-                  {item.model && <Text type="secondary" style={{ fontSize: 12 }}>模型: {item.model}</Text>}
+                  {item.baseUrl && (
+                    <Tooltip title={item.baseUrl}>
+                      <Text type="secondary" style={{ fontSize: 12 }} ellipsis>
+                        BaseURL: {item.baseUrl}
+                      </Text>
+                    </Tooltip>
+                  )}
                   {item.apiKeyEnv && (
-                    <Text type="secondary" style={{ fontSize: 12 }}>API Key 环境变量: {item.apiKeyEnv}</Text>
+                    <Text type="secondary" style={{ fontSize: 12 }}>API Key: {item.apiKeyEnv}</Text>
                   )}
                   {item.capabilities && Object.keys(item.capabilities).length > 0 && (
                     <ProviderCapabilitySummary capabilities={item.capabilities} />
                   )}
                 </Space>
-              }
-            />
-          </List.Item>
-        )}
-      />
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      )}
 
       <Modal
         title={editingId ? '编辑 Provider' : '添加 Provider'}

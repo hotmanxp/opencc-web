@@ -11,6 +11,12 @@
     "noEmit": false,
     "declaration": true,
     "declarationMap": true,
+    // zai patch (2026-08-18): 只发类型,不发 .js。运行时唯一入口是
+    // dist/opencc-core.mjs(bundle-opencc.ts esbuild 合成),tsc 编译出的
+    // dist/compat/**/*.js / index.js / stateChangeBus.js 无人 import
+    // (死重)。这里用 emitDeclarationOnly 只发射 bundle-entry.d.ts 类型
+    // 链需要的 .d.ts,从源头消灭死 js(tsconfig.server.json 早已如此)。
+    "emitDeclarationOnly": true,
     "sourceMap": true,
     "jsx": "preserve",
     "jsxImportSource": "react"

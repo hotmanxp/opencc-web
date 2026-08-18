@@ -47,6 +47,7 @@ import type { LoadedSkill } from '@zn-ai/zn-agent-core'
 import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
 import { PermissionRegistry } from './permissionRegistry.js'
+import { sessionInbox, type InboxMessage } from './sessionInbox.js'
 
 let runtime: OpenccRuntime | null = null
 let currentSessionId: string | null = null
@@ -73,6 +74,21 @@ const permissionRegistry = new PermissionRegistry()
 // itself blocked on the tool's await. Setting this global on init
 // gives the bridge a synchronous side-channel to reach the SSE.
 ;(globalThis as any).__zaiEventBus = eventBus
+
+// zai patch (2026-08-17): bridge for zn-agent-core to enqueue session
+// inbox messages (sub-agent completion notices, bash task results, etc.).
+// The core side can't directly reach the zai-side `sessionInbox` singleton
+// (different module space) — it reads this global to call
+// `followup`/`inject` and rely on the zai scheduler's wake handler to
+// consume them via `runNextInQueue`. Aligns with `__zaiEventBus` /
+// `__zaiBridgeCtx` injection pattern (see compat/runtime/* for the
+// global-bridge convention).
+;(globalThis as any).__zaiSessionInbox = {
+  followup: (sid: string, msg: unknown) =>
+    sessionInbox.followup(sid, msg as InboxMessage),
+  inject: (sid: string, msg: unknown) =>
+    sessionInbox.inject(sid, msg as InboxMessage),
+}
 
 // zai patch: AskUserQuestion bridge context — static parts injected
 // once at init. The zai-native AskUserQuestion wrapper

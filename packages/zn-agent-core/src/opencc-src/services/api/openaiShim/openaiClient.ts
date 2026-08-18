@@ -1092,10 +1092,6 @@ class OpenAIShimMessages {
     // identical keys in extraParams override the shim's built-in defaults.
     if (this.providerOverride?.extraParams) {
       Object.assign(body, this.providerOverride.extraParams)
-      // zai patch diagnostic: 直接证明 extraParams 进了请求体(不必抓包)。
-      console.error(
-        `[zai.openaiShim] extraParams merged keys=${Object.keys(this.providerOverride.extraParams).join(',')} model=${request.resolvedModel}`,
-      )
     }
 
     if (params.tools && params.tools.length > 0) {

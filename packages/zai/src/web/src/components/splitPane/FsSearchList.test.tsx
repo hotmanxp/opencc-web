@@ -69,6 +69,24 @@ describe('FsSearchList', () => {
     expect(onSelect).toHaveBeenCalledWith('src/foo.ts');
   });
 
+  test('right-clicking a row fires onItemContextMenu with path and coords', () => {
+    const onItemContextMenu = vi.fn();
+    render(
+      <FsSearchList
+        entries={sampleEntries}
+        loading={false}
+        error={null}
+        truncated={false}
+        query="foo"
+        onSelect={() => {}}
+        onItemContextMenu={onItemContextMenu}
+      />,
+    );
+    const rows = screen.getAllByTestId('fs-search-row');
+    fireEvent.contextMenu(rows[1], { clientX: 120, clientY: 240 });
+    expect(onItemContextMenu).toHaveBeenCalledWith('src/FooRunner.tsx', 120, 240);
+  });
+
   test('renders plain path without per-character highlight', () => {
     render(
       <FsSearchList

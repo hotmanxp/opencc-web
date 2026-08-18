@@ -117,14 +117,60 @@ function inputHash(): string {
 // 注意:仅支持 re-export 语句(export * / export { } / export type * /
 // export type { } from '...');若 bundle-entry.ts 未来出现本地导出声明,
 // 需在生成器中补 d.ts 类型输出。
+//
+// 例外(2026-08-18):`export * from './opencc-src/query.js'` 等 4 条直接
+// 引用的 vendor 模块被主 tsconfig exclude(opencc-src),tsc 不为它们发
+// d.ts —— 原样镜像会在 bundle-entry.d.ts 里留下指向不存在文件的悬挂引用
+// (靠 zai 的 skipLibCheck 静默消化,符号则碰巧在 dist/index.d.ts 里另有
+// 本地声明)。运行时真值不受影响(esbuild 把它们打进了 opencc-core.mjs),
+// 所以这里只在类型镜像层把这些路径改指 ./index.js,保持"每个运行时
+// export 都有可用类型"的镜像契约。改动后由 emitDts 的悬挂校验兜底:
+// 若有 re-export 目标在 dist 里仍解析不到,构建直接报错。
+const DTS_PATH_REWRITE: Readonly<Record<string, string>> = {
+  './opencc-src/query.js': './index.js',
+  './opencc-src/services/api/claude.js': './index.js',
+  './opencc-src/utils/systemPromptType.js': './index.js',
+  './opencc-src/types/message.js': './index.js',
+}
+
+/** 把 bundle-entry.ts 的 re-export 目标改写为 dist 里真实存在的类型面。 */
+function rewriteDtsSourcePath(line: string): string {
+  for (const [from, to] of Object.entries(DTS_PATH_REWRITE)) {
+    if (line.includes(from)) return line.replace(from, to)
+  }
+  return line
+}
+
+/** 校验生成文件里的每个 re-export 目标在 dist 下都可解析(.js → .d.ts)。 */
+function assertDtsTargetsResolve(bundleEntryDts: string): void {
+  const fromRe = /from\s+['"](\.[^'"]+)['"]/g
+  for (const m of bundleEntryDts.matchAll(fromRe)) {
+    const target = m[1]
+    if (target === './package.json' || !target.startsWith('.')) continue
+    const expected = join(OUT_DIR, target.replace(/\.js$/, '.d.ts'))
+    if (!existsSync(expected)) {
+      console.error(
+        `[bundle-opencc] ERROR: bundle-entry.d.ts re-export target has no d.ts on disk: ${target} (expected ${relative(ROOT, expected)})`,
+      )
+      console.error(
+        '[bundle-opencc] vendor opencc-src modules are excluded from tsc; add the target to DTS_PATH_REWRITE (point it at a module tsc emits, e.g. ./index.js) or make the emitter produce a d.ts for it.',
+      )
+      process.exit(1)
+    }
+  }
+}
+
 function generateBundleEntryDts(): void {
+  // Ensure OUT_DIR exists — this runs before any esbuild call, so we
+  // can't rely on esbuild to create the dist/ directory for us.
+  if (!existsSync(OUT_DIR)) mkdirSync(OUT_DIR, { recursive: true })
   const src = readFileSync(SRC_ENTRY, 'utf8')
   const sf = ts.createSourceFile(SRC_ENTRY, src, ts.ScriptTarget.Latest, true)
   const exportLines: string[] = []
   for (const stmt of sf.statements) {
     if (ts.isExportDeclaration(stmt)) {
       // export * / export { a, b } / export type * / export type { ... } from '...'
-      exportLines.push(stmt.getText(sf))
+      exportLines.push(rewriteDtsSourcePath(stmt.getText(sf)))
       continue
     }
     if (ts.isExportAssignment(stmt)) {
@@ -149,6 +195,7 @@ function generateBundleEntryDts(): void {
     ...exportLines,
     '',
   ].join('\n')
+  assertDtsTargetsResolve(dts)
   const out = join(OUT_DIR, 'bundle-entry.d.ts')
   writeFileSync(out, dts)
   console.log(
@@ -1134,65 +1181,20 @@ await esbuild.build({
 console.log(`[bundle-opencc] ✓ bundled ${SRC_ENTRY}`)
 console.log(`[bundle-opencc]   → ${OUT_FILE}`)
 
-// ── Single-file esbuild for opencc-src pure type/const files ──
-// Some compat shims are verbatim ports of opencc-src modules
-// (e.g. permissions.ts). Compile just the single file (no bundle,
-// no transitive imports) so we don't drag React/JSX/opentelemetry/
-// lodash-es from opencc's vendored tree.
-const PERMISSIONS_ENTRY = join(ROOT, 'src', 'opencc-src', 'types', 'permissions.ts')
-const PERMISSIONS_OUT = join(ROOT, 'dist', 'opencc-src', 'types', 'permissions.js')
-
-await esbuild.build({
-  entryPoints: [PERMISSIONS_ENTRY],
-  bundle: false,
-  format: 'esm',
-  outfile: PERMISSIONS_OUT,
-  platform: 'node',
-  target: 'node22',
-})
-
-// Generate .d.ts for permissions by parsing the source const+type exports
-// (esbuild doesn't emit .d.ts for bundle:false; tsc would need the full project
-// graph — so we emit it manually here).
-{
-  const { readFileSync, writeFileSync } = await import('node:fs')
-  const src = readFileSync(PERMISSIONS_ENTRY, 'utf8')
-  const dts = [
-    `export declare const EXTERNAL_PERMISSION_MODES: readonly ["acceptEdits", "bypassPermissions", "default", "dontAsk", "plan"];`,
-    `export type ExternalPermissionMode = (typeof EXTERNAL_PERMISSION_MODES)[number];`,
-    `export type InternalPermissionMode = ExternalPermissionMode | 'auto' | 'bubble';`,
-    `export type PermissionMode = InternalPermissionMode;`,
-    `export declare const INTERNAL_PERMISSION_MODES: readonly ["acceptEdits", "bypassPermissions", "default", "dontAsk", "plan", "auto", "bubble"];`,
-    `export declare const PERMISSION_MODES: readonly ["acceptEdits", "bypassPermissions", "default", "dontAsk", "plan", "auto", "bubble"];`,
-  ].join('\n')
-  writeFileSync(PERMISSIONS_OUT.replace('.js', '.d.ts'), dts)
-  console.log(`[bundle-opencc]   → ${PERMISSIONS_OUT.replace('.js', '.d.ts')}`)
-}
-
-console.log(`[bundle-opencc] permissions: ${PERMISSIONS_OUT}`)
-
-// ── Session API counter (zai patch) ────────────────────────────────
-// Per-session API request counter consumed by the zai conversation
-// panel via the package main entry (re-exported by bundle-entry.ts).
-// The module is fully self-contained (no imports), so a single-file
-// `bundle: false` esbuild emit is safe — it won't drag the vendored
-// tree into the zai runtime the way a transitive import would. The
-// hand-written d.ts mirrors the permissions pattern above (esbuild
-// doesn't emit d.ts for `bundle: false`).
-const API_COUNTER_ENTRY = join(ROOT, 'src', 'opencc-src', 'services', 'api', 'sessionApiCounter.ts')
-const API_COUNTER_OUT = join(ROOT, 'dist', 'opencc-src', 'services', 'api', 'sessionApiCounter.js')
-
-await esbuild.build({
-  entryPoints: [API_COUNTER_ENTRY],
-  bundle: false,
-  format: 'esm',
-  outfile: API_COUNTER_OUT,
-  platform: 'node',
-  target: 'node22',
-})
+// ── Session API counter 类型(zai patch 2026-08-18)─────────────────
+// standalone 的 sessionApiCounter.js 不再发射:subpath 废除后无人
+// import,运行时经 bundle-entry.ts `export * from
+// './opencc-src/services/api/sessionApiCounter.js'` 打进
+// opencc-core.mjs 单入口。这里只保留手写 d.ts —— bundle-entry.d.ts
+// 的类型链经该 re-export 依赖它,消费端 typecheck 必需。
+// (permissions 的独立 d.ts 已在 2026-08-18 移除:主入口类型链不经过
+// 它,compat/permissions.ts 是 verbatim 移植自包含,无读者。)
+const API_COUNTER_OUT = join(ROOT, 'dist', 'opencc-src', 'services', 'api', 'sessionApiCounter.d.ts')
 
 {
-  const dts = [
+  const { writeFileSync } = await import('node:fs')
+  mkdirSync(dirname(API_COUNTER_OUT), { recursive: true })
+  writeFileSync(API_COUNTER_OUT, [
     `// Type declarations for the self-contained session API counter.`,
     `// Mirror the source signatures in src/opencc-src/services/api/sessionApiCounter.ts.`,
     `export declare function setLastContextUsage(usage: {`,
@@ -1207,180 +1209,34 @@ await esbuild.build({
     `export declare function getApiCallCount(sessionId: string): number;`,
     `export declare function clearApiCallCount(sessionId: string): void;`,
     `export declare function __resetApiCallCountsForTests(): void;`,
-  ].join('\n')
-  writeFileSync(API_COUNTER_OUT.replace('.js', '.d.ts'), dts)
-  console.log(`[bundle-opencc]   → ${API_COUNTER_OUT.replace('.js', '.d.ts')}`)
+  ].join('\n'))
+  console.log(`[bundle-opencc]   → ${API_COUNTER_OUT}`)
 }
 
-console.log(`[bundle-opencc] session-api-counter: ${API_COUNTER_OUT}`)
-
-// ── OpenCC server runtime seam (Task 1) ────────────────────────────
+// ── OpenCC server 类型声明(zai patch 2026-08-18)──────────────────
+// server 的运行时入口(createOpenccRuntime / createHeadlessContext /
+// createSessionFacade + plugin DTO 类型)统一经 src/bundle-entry.ts
+// re-export 打进 opencc-core.mjs 单入口,不再发射独立的
+// dist/opencc-src/server/*.js(2026-08-16 废除 subpath 后无人 import,
+// 之前遗留的 bundle:false thin 层与 bundle:true impl 单文件均冗余)。
 //
-// `src/opencc-src/server/index.ts` re-exports the public types +
-// `createOpenccRuntime` factory. It's a thin module — no React, no
-// JSX, no opencc vendor coupling — so it compiles cleanly with
-// `bundle: false` (single-file esbuild) and lands at
-// `dist/opencc-src/server/index.js`. The package's `./opencc-server`
-// export subpath points at that file (see package.json).
-//
-// Declarations (`*.d.ts`) are mechanically emitted by `tsc -p
-// tsconfig.server.json` below, NOT written by hand. Hand-written d.ts
-// drifts from the source the moment someone extends
-// `OpenccRuntimeOptions` or adds methods to `OpenccRuntime`. The
-// dedicated tsconfig:
+// 声明文件(`*.d.ts`)由下方 `tsc -p tsconfig.server.json` 机械发射:
 //   * includes only the server module + the (vendor-tree-excluded)
 //     `compat/` types the module imports from;
 //   * excludes the opencc vendor tree (`src/opencc-src/**` except
 //     `server/`) so the emit doesn't drag React/JSX/opentelemetry/
 //     lodash-es into the dist;
 //   * uses `emitDeclarationOnly: true` + a tmp outDir — we only
-//     need the two `dist/opencc-src/server/*.d.ts` files, the rest
-//     of the tmp output is discarded.
+//     need the server d.ts files, the rest of the tmp output is
+//     discarded.
 //
-// Without a d.ts, downstream TypeScript consumers of the package
-// main entry fall back to `any` for every opencc-server type —
-// which defeats the seam's purpose (locking the contract so
-// callers and implementations agree).
-const SERVER_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'index.ts')
-const SERVER_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'index.js')
+// 主入口 types(dist/bundle-entry.d.ts)re-export 自
+// `./opencc-src/server/index.js` / `createOpenccRuntime.js` 等,TS 消费
+// 者顺着这些路径解析对应的 .d.ts —— 没有 d.ts,下游 import type 全变
+// `any`,契约锁不住。
 const SERVER_TSCONFIG = join(ROOT, 'tsconfig.server.json')
 const SERVER_TYPES_TMP = join(ROOT, 'dist', '.server-types-tmp')
 const SERVER_DIST_DIR = join(ROOT, 'dist', 'opencc-src', 'server')
-
-// `createHeadlessContext.ts` is the public-surface re-export module
-// (Task 2). The runtime body lives in `createHeadlessContext-impl.ts`
-// (also emitted). `bundle: false` matches the index.ts path — single-
-// file esbuild for each entry, no transitive bundling — so the d.ts
-// emit (`tsc -p tsconfig.server.json`) and the JS emit stay in sync.
-// `@ts-nocheck` on the impl file keeps tsc's transitive-vendor-error
-// noise out of the build's exit code; runtime contract is locked by
-// vitest (`test/unit/server/headless-context.test.ts`).
-const HEADLESS_CONTEXT_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'createHeadlessContext.ts')
-const HEADLESS_CONTEXT_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createHeadlessContext.js')
-const HEADLESS_CONTEXT_IMPL_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'createHeadlessContext-impl.ts')
-const HEADLESS_CONTEXT_IMPL_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createHeadlessContext-impl.js')
-
-// `sessionFacade.ts` is the public-surface re-export module for
-// Task 3 (server session/transcript lifecycle). Same thin/impl split
-// as `createHeadlessContext`. The impl file (`sessionFacade-impl.ts`)
-// is bundled separately because it pulls in vendored
-// `sessionStoragePortable.ts` whose compiled .js doesn't ship as a
-// separate file in dist/ (same situation as createHeadlessContext-impl).
-const SESSION_FACADE_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'sessionFacade.ts')
-const SESSION_FACADE_IMPL_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'sessionFacade-impl.ts')
-const SESSION_FACADE_IMPL_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'sessionFacade-impl.js')
-
-await esbuild.build({
-  entryPoints: [SERVER_ENTRY, HEADLESS_CONTEXT_ENTRY, SESSION_FACADE_ENTRY],
-  bundle: false,
-  format: 'esm',
-  outdir: SERVER_DIST_DIR,
-  platform: 'node',
-  target: 'node22',
-  // Per-entry outfile naming: esbuild's `outdir` mode derives the
-  // output filename from each entry's basename. We want:
-  //   src/opencc-src/server/index.ts                    → dist/opencc-src/server/index.js
-  //   src/opencc-src/server/createHeadlessContext.ts    → dist/opencc-src/server/createHeadlessContext.js
-  // `entryNames` defaults to `[dir]/[name]-[hash]`; we override to
-  // `[name]` (no hash) so the d.ts copy logic below can match `.d.ts`
-  // files to their `.js` siblings by basename.
-  entryNames: '[name]',
-})
-
-// The impl file (`createHeadlessContext-impl.ts`) reaches into many
-// vendored opencc-src modules whose compiled .js files are NOT in
-// `dist/` (only `opencc-core.mjs` is bundled; the rest of the
-// vendored tree is consumed in-process under vitest's alias map, not
-// shipped as separate files). For the published `opencc-server`
-// subpath to resolve its imports at runtime, the impl file must be
-// a SINGLE-FILE bundle with all transitive deps inlined — same
-// pattern as `opencc-core.mjs` for the runtime.
-//
-// `bundle: true` makes esbuild walk the import graph and inline.
-// Plugins mirror the opencc-core bundle (`vendorPatchesPlugin` +
-// `optionalStubPlugin`) so the same ant-only / stripped-dir fallbacks
-// apply. Externals are kept narrow — only npm deps that are also in
-// the published package's deps (so Node resolves at runtime).
-await esbuild.build({
-  entryPoints: [HEADLESS_CONTEXT_IMPL_ENTRY],
-  bundle: true,
-  format: 'esm',
-  outfile: HEADLESS_CONTEXT_IMPL_OUT,
-  platform: 'node',
-  target: 'node22',
-  sourcemap: true,
-  minify: false,
-  logLevel: 'warning',
-  banner: {
-    js:
-      "import { createRequire as __createRequire } from 'node:module';\n" +
-      "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
-      "const require = __createRequire(import.meta.url);\n",
-  },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
-  // Keep external — Node resolves at runtime via package deps.
-  external: [
-    'sharp',
-    'google-auth-library',
-    '@vscode/ripgrep',
-    '@orama/orama',
-    '@orama/plugin-data-persistence',
-    'web-tree-shaker',
-    'tree-sitter-wasms',
-    'turndown',
-    '@ant/claude-for-chrome-mcp',
-    'zod',
-    'zod/v3',
-    'zod/v4',
-    'zod/v4-mini',
-    'fflate',
-  ],
-  treeShaking: true,
-})
-console.log(`[bundle-opencc] headless-context impl: ${HEADLESS_CONTEXT_IMPL_OUT}`)
-
-// `sessionFacade-impl.ts` reaches into vendored
-// `sessionStoragePortable.ts` (sanitizePath + readTranscriptForLoad).
-// Same situation as `createHeadlessContext-impl.ts` above — the
-// vendored tree is consumed in-process under vitest's alias map, not
-// shipped as separate files. The impl is bundled as a single file
-// for the published `opencc-server` subpath to resolve at runtime.
-await esbuild.build({
-  entryPoints: [SESSION_FACADE_IMPL_ENTRY],
-  bundle: true,
-  format: 'esm',
-  outfile: SESSION_FACADE_IMPL_OUT,
-  platform: 'node',
-  target: 'node22',
-  sourcemap: true,
-  minify: false,
-  logLevel: 'warning',
-  banner: {
-    js:
-      "import { createRequire as __createRequire } from 'node:module';\n" +
-      "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
-      "const require = __createRequire(import.meta.url);\n",
-  },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
-  external: [
-    'sharp',
-    'google-auth-library',
-    '@vscode/ripgrep',
-    '@orama/orama',
-    '@orama/plugin-data-persistence',
-    'web-tree-shaker',
-    'tree-sitter-wasms',
-    'turndown',
-    '@ant/claude-for-chrome-mcp',
-    'zod',
-    'zod/v3',
-    'zod/v4',
-    'zod/v4-mini',
-    'fflate',
-  ],
-  treeShaking: true,
-})
-console.log(`[bundle-opencc] session-facade impl: ${SESSION_FACADE_IMPL_OUT}`)
 
 // `compat/transcript/persistence.ts` does a runtime
 // `createRequire(import.meta.url)` to load
@@ -1394,6 +1250,11 @@ console.log(`[bundle-opencc] session-facade impl: ${SESSION_FACADE_IMPL_OUT}`)
 // on every /api/agent/prompt call, polluting the request log with
 // 1.8 KB of stack frames per request.
 //
+// 注意(zai patch 2026-08-18):这是 dist 里唯一被运行时加载的第二个
+// JS 文件 —— opencc-core.mjs 自包含、无相对 import,只有这一处
+// `createRequire(import.meta.url)` 指向 dist 内的独立产物,所以必须
+// 保留发射(prune-dead-dist.mjs 也以此为唯一豁免)。
+//
 // `bundle: true` because compressToolHistory.ts transitively
 // imports 4+ vendored helpers (autoCompact + microCompact +
 // toolResultStorage + config) that aren't separately emitted to
@@ -1401,10 +1262,8 @@ console.log(`[bundle-opencc] session-facade impl: ${SESSION_FACADE_IMPL_OUT}`)
 // into the full opencc-src vendor tree (bootstrap/state,
 // SessionMemory, forkedAgent, ...), and `bundle: false` would
 // require emitting every transitively-reachable file (hundreds of
-// files) before the require can resolve at runtime. The 18 MB
-// single-file bundle is the cost of keeping the full real
-// implementation. We accept the size in exchange for the dynamic
-// require resolving at runtime.
+// files) before the require can resolve at runtime. Single-file
+// bundle 保真实实现,换取 createRequire 在运行时解析成功。
 const COMPRESS_TOOL_HISTORY_ENTRY = join(ROOT, 'src', 'opencc-src', 'services', 'api', 'compressToolHistory.ts')
 const COMPRESS_TOOL_HISTORY_OUT = join(ROOT, 'dist', 'opencc-src', 'services', 'api', 'compressToolHistory.js')
 
@@ -1436,79 +1295,21 @@ await esbuild.build({
 })
 console.log(`[bundle-opencc] compress-tool-history: ${COMPRESS_TOOL_HISTORY_OUT}`)
 
-// ── Generic model capabilities (zai patch) ──────────────────────────
-// Single-file `bundle: true` emit so zai-server can import
-// `lookupGenericModelCapabilities` via the package main entry without
-// pulling in the full opencc-core.mjs bundle at every consumer.
-//
-// The module aggregates per-model capability data from three already-built
-// sources (defineModel registry, OPENAI_CONTEXT_WINDOWS /
-// OPENAI_MAX_OUTPUT_TOKENS, COPILOT_MODELS) so a `bundle: true` emit
-// inlines ~25 KB of static tables + lookup helpers. Acceptable trade-off:
-// the only consumer is zai-server's profile → ModelEntry projection
-// (agentSettings.ts:70), which runs once per request to /api/agent/settings.
-// The alternative (re-exporting through `bundle-entry.ts` into
-// opencc-core.mjs) bloats every consumer of the main bundle (CLI,
-// server runtime, etc.) for a UI-only concern.
-//
-// `bundle: true` is necessary because the module imports
-// `integrations/index.js` (which itself imports vendor descriptor
-// files); emitting without bundling would leave those imports
-// unresolvable at runtime since vendored opencc-src is not shipped as
-// separate .js files in dist.
-//
-// State isolation note: the descriptor registry
-// (`integrations/registry.ts → _models: Map`) is initialised at module
-// load via `ensureIntegrationsLoaded()`. This single-file bundle has
-// its own private registry instance, separate from the one in
-// opencc-core.mjs. That's fine here — we only READ descriptors (immutable
-// data), never mutate them. Lookup results are deterministic.
-const GENERIC_MODEL_CAPABILITIES_ENTRY = join(ROOT, 'src', 'opencc-src', 'utils', 'model', 'genericModelCapabilities.ts')
-const GENERIC_MODEL_CAPABILITIES_OUT = join(ROOT, 'dist', 'opencc-src', 'utils', 'model', 'genericModelCapabilities.js')
-
-await esbuild.build({
-  entryPoints: [GENERIC_MODEL_CAPABILITIES_ENTRY],
-  outfile: GENERIC_MODEL_CAPABILITIES_OUT,
-  bundle: true,
-  format: 'esm',
-  platform: 'node',
-  target: 'node22',
-  // `sourcemap: false` (not true): the build's final `find dist -name
-  // '*.map' -delete` removes every .map, so a generated sourceMappingURL
-  // comment would dangle — and because zai-server imports this file via
-  // the package main entry, vite/vitest transforms it and logs
-  // `[vite] Failed to load source map ... ENOENT` on every load.
-  sourcemap: false,
-  minify: false,
-  logLevel: 'warning',
-  banner: {
-    js:
-      "import { createRequire as __createRequire } from 'node:module';\n" +
-      "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
-      "const require = __createRequire(import.meta.url);\n",
-  },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
-  external: [
-    'sharp', 'google-auth-library', '@vscode/ripgrep',
-    '@orama/orama', '@orama/plugin-data-persistence',
-    'web-tree-shaker', 'tree-sitter-wasms',
-    'turndown', '@ant/claude-for-chrome-mcp',
-    'zod', 'zod/v3', 'zod/v4', 'zod/v4-mini', 'fflate',
-  ],
-  treeShaking: true,
-})
-console.log(`[bundle-opencc] generic-model-capabilities: ${GENERIC_MODEL_CAPABILITIES_OUT}`)
-
-// Hand-written .d.ts for the genericModelCapabilities subpath.
-// esbuild doesn't emit d.ts for `bundle: true`. The public surface is
-// narrow (one type alias + one function), so a hand-written d.ts stays
-// in sync without much maintenance burden. Update this block if
-// `GenericModelCapabilities` adds fields or `lookupGenericModelCapabilities`
-// changes signature.
+// ── Generic model capabilities 类型(zai patch 2026-08-18)──────────
+// standalone 的 genericModelCapabilities.js 不再发射:逻辑已经 bundle-opencc
+// 的主 bundle 打进 opencc-core.mjs(bundle-entry.ts `export * from
+// './opencc-src/utils/model/genericModelCapabilities.js'`),zai 的
+// profileProjection 从主入口消费它(见 zai/src/shared/profileProjection.ts)。
+// 这里只保留手写 d.ts —— bundle-entry.d.ts 的类型链经该 re-export 依赖它。
+// 公共表面窄(一个 interface + 一个函数),d.ts 手写即可保持同步。若
+// `GenericModelCapabilities` 加字段或 `lookupGenericModelCapabilities`
+// 改签名,记得同步下面这块。
 {
+  const { writeFileSync } = await import('node:fs')
   const GENERIC_MODEL_CAPABILITIES_DTS = join(
     ROOT, 'dist', 'opencc-src', 'utils', 'model', 'genericModelCapabilities.d.ts',
   )
+  mkdirSync(dirname(GENERIC_MODEL_CAPABILITIES_DTS), { recursive: true })
   const dts = [
     `// Type declarations for the generic model capability lookup.`,
     `// Mirror the source in src/opencc-src/utils/model/genericModelCapabilities.ts.`,
@@ -1607,50 +1408,6 @@ console.log(`[bundle-opencc] generic-model-capabilities: ${GENERIC_MODEL_CAPABIL
     }
   }
 }
-
-const RUNTIME_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'createOpenccRuntime.ts')
-const RUNTIME_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createOpenccRuntime.js')
-const RUNTIME_IMPL_ENTRY = join(ROOT, 'src', 'opencc-src', 'server', 'createOpenccRuntime-impl.ts')
-const RUNTIME_IMPL_OUT = join(ROOT, 'dist', 'opencc-src', 'server', 'createOpenccRuntime-impl.js')
-
-await esbuild.build({
-  entryPoints: [RUNTIME_ENTRY],
-  bundle: false,
-  format: 'esm',
-  outdir: SERVER_DIST_DIR,
-  platform: 'node',
-  target: 'node22',
-  entryNames: '[name]',
-})
-
-await esbuild.build({
-  entryPoints: [RUNTIME_IMPL_ENTRY],
-  bundle: true,
-  format: 'esm',
-  outfile: RUNTIME_IMPL_OUT,
-  platform: 'node',
-  target: 'node22',
-  sourcemap: true,
-  minify: false,
-  logLevel: 'warning',
-  banner: {
-    js:
-      "import { createRequire as __createRequire } from 'node:module';\n" +
-      "const require = __createRequire(import.meta.url);\n",
-  },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
-  external: [
-    'sharp',
-    'google-auth-library',
-    'zod',
-    'zod/v3',
-    'zod/v4',
-    'zod/v4-mini',
-    'fflate',
-  ],
-  treeShaking: true,
-})
-console.log(`[bundle-opencc] runtime: ${RUNTIME_OUT}`)
 
 // ── Persist input fingerprint stamp ──────────────────────────────
 // Write the input hash after all esbuild calls succeed so the next

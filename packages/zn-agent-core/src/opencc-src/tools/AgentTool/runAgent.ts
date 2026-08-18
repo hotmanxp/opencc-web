@@ -1,4 +1,5 @@
 // @ts-nocheck
+import { subagentReportOpenccTool } from '../../../compat/tools/opencc/subagentReport.js'
 import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
@@ -721,10 +722,16 @@ export async function* runAgent({
   // Merge agent MCP tools with resolved agent tools, deduplicating by name.
   // resolvedTools is already deduplicated (see resolveAgentTools), so skip
   // the spread + uniqBy overhead when there are no agent-specific MCP tools.
-  const allTools =
-    agentMcpTools.length > 0
-      ? uniqBy([...resolvedTools, ...agentMcpTools], 'name')
-      : resolvedTools
+  // zai patch: 子 agent 可主动向父 session 上报进度或结果(对齐 DSH tool-subagent-report)。
+  // 仅在子上下文中追加,避免主会话把异步 inbox 投递工具暴露给用户。
+  // 必须用 vendor 表面版本(subagentReportOpenccTool):裸 execute 形状缺
+  // vendor Tool 必需方法(prompt 等),首轮 API 请求 toolToAPISchema 会抛
+  // `tool.prompt is not a function`,子代理直接失败、任务永远 queued。
+  const allTools = [
+    ...resolvedTools,
+    subagentReportOpenccTool,
+    ...(agentMcpTools.length > 0 ? uniqBy(agentMcpTools, 'name') : []),
+  ]
 
   // Build agent-specific options
   const agentOptions: ToolUseContext['options'] = {
@@ -765,6 +772,7 @@ export async function* runAgent({
     options: agentOptions,
     agentId,
     agentType: agentDefinition.agentType,
+    parentSessionId: toolUseContext.parentSessionId ?? getSessionId(),
     messages: initialMessages,
     readFileState: agentReadFileState,
     abortController: agentAbortController,

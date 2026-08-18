@@ -64,7 +64,7 @@ export default function MobileAgent() {
     <>
       {/* zai 自升级弹窗。useAppStore 是单例,Layout 已挂一份;
           这里再挂一份确保移动端路由(不共享 Layout)也能响应。
-          UpdateNotifier 内部用 shownKeyRef 自抑制重复弹窗。 */}
+          UpdateNotifier 内部用 module 级 Set 抑制双挂载重复弹窗。 */}
       <UpdateNotifier />
       <MobileHeader onOpenSessionDrawer={() => setDrawerOpen(true)} />
       <AgentConversation />

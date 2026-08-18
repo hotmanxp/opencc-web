@@ -104,6 +104,15 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
   private readonly queue: string[] = []
   private activeCount = 0
   private shuttingDown = false
+  /**
+   * 每条任务的 pending prompt 队列(父→子 control,send_message)。
+   * zai patch (HRMSV3-ZN-WEBSITE#668 / subagent_control):subagent_control
+   * 工具的 send_message 走这里排队;runOne 在 queryInput 构造处消费,
+   * 把 pending prompts 拼到原 prompt 前缀(用 `\n\n` 拼接),让子 agent
+   * 下一轮 turn 看到新的指令。任务终态或不存在时 sendMessageToTask
+   * 返回 {ok:false},调用方按 no-op 处理。
+   */
+  private readonly taskInbox = new Map<string, string[]>()
 
   private readonly agentRuntime: BackgroundAgentRuntime
   private readonly store: TaskStore
@@ -210,6 +219,29 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
       cancelled++
     }
     return { cancelled }
+  }
+
+  /**
+   * zai patch (HRMSV3-ZN-WEBSITE#668 / subagent_control.send_message):
+   * 把父 agent 的指令投递到子 agent 的 pending prompt 队列,子 agent
+   * 下一轮 turn(`runOne` 的 queryInput 构造处)消费。多条 pending 用
+   * `\n\n` 拼到原 prompt 前缀,顺序保持入队顺序。
+   *
+   * 不存在 / 已终态的任务直接返回 {ok:false},调用方按 no-op 处理。
+   * 这是幂等的:已 enqueue 的 prompt 不会被丢;但重复调用的入队仍
+   * 追加(对齐 DSH followup queue 语义)。
+   */
+  async sendMessageToTask(
+    taskId: string,
+    prompt: string,
+  ): Promise<{ ok: boolean }> {
+    const rec = this.records.get(taskId)
+    if (!rec) return { ok: false }
+    if (isTerminal(rec.task.status)) return { ok: false }
+    const list = this.taskInbox.get(taskId) ?? []
+    list.push(prompt)
+    this.taskInbox.set(taskId, list)
+    return { ok: true }
   }
 
   /**
@@ -482,9 +514,24 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
     // background runtime 的 prompt 由用户在父 session 中发起,所以 tool
     // 黑名单不再由调用方传递。后续如果 vendor 暴露 per-query
     // disallowedTools,会在 Task 4.5 跟进。
+    //
+    // zai patch (HRMSV3-ZN-WEBSITE#668 / subagent_control):消费父 agent
+    // 经 sendMessageToTask 投递的 pending prompts。多条用 `\n\n` 拼到原
+    // prompt 前缀(顺序保持入队顺序),子 agent 下一轮 turn 把它们当成
+    // 新的用户指令。无 pending 时沿用原 prompt(行为不变)。
+    const pendingPrompts = this.taskInbox.get(id) ?? []
+    const composedPrompt =
+      pendingPrompts.length > 0
+        ? pendingPrompts.join('\n\n') + '\n\n' + rec.task.input.prompt
+        : rec.task.input.prompt
+    if (pendingPrompts.length > 0) {
+      // 一次性消费,queue 清空 — 下一轮 turn 起 pending 为空,直到父 agent
+      // 再次 sendMessageToTask。
+      this.taskInbox.delete(id)
+    }
     const queryInput = {
       sessionId: rec.task.parentSessionId ?? `bg-${id}`,
-      prompt: rec.task.input.prompt,
+      prompt: composedPrompt,
       cwd: rec.task.input.cwd ?? process.cwd(),
       model: rec.task.input.model,
       abortSignal: rec.controller.signal,

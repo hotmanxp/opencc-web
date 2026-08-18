@@ -46,6 +46,7 @@ Thumbs.db
 
 # Agent working directory (auto-generated)
 .agent_working_dir/
+.CONTEXT.md
 
 # Worktrees (git worktree isolation)
 .worktrees/
@@ -62,3 +63,5 @@ Thumbs.db
 
 # Local runtime artifacts (ego browser task outputs etc.)
 var/
+docs/superpowers/plans/screenshots
+CONTEXT.md

@@ -9,6 +9,8 @@ export interface FsSearchListProps {
   truncated: boolean;
   query: string;
   onSelect: (path: string) => void;
+  /** 行右键回调(插入对话/复制/显示等)。path 为相对 cwd 的路径。 */
+  onItemContextMenu?: (path: string, x: number, y: number) => void;
 }
 
 const TRUNCATED_TAIL = '(结果已截断,继续输入以收窄范围)';
@@ -38,7 +40,7 @@ function Highlighted({ text }: { text: string; indices: number[] }) {
 }
 
 export function FsSearchList(props: FsSearchListProps): JSX.Element {
-  const { entries, loading, error, truncated, query, onSelect } = props;
+  const { entries, loading, error, truncated, query, onSelect, onItemContextMenu } = props;
 
   if (!query.trim()) {
     return <div data-testid="fs-search-empty-query" />;
@@ -86,6 +88,10 @@ export function FsSearchList(props: FsSearchListProps): JSX.Element {
             data-testid="fs-search-row"
             data-path={e.path}
             onClick={() => onSelect(e.path)}
+            onContextMenu={(ev) => {
+              ev.preventDefault();
+              onItemContextMenu?.(e.path, ev.clientX, ev.clientY);
+            }}
             role="button"
             tabIndex={0}
             onKeyDown={(ev) => {

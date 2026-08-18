@@ -15,13 +15,61 @@ import type { ModelEntry, ModelCapabilities } from '../../../shared/settings.js'
  *   3. Recent section (only when no search query AND recentModels > 0)
  *   4. Provider groups sorted by title
  *
- * Each row shows ● marker when entry.model === currentModel, plus
- * violet-tint background when keyboard-selectedIndex matches.
+ * Each row shows ● marker when (entry.model, entry.providerId) matches
+ * the session's current (model, providerId) tuple — comparing on model
+ * alone is ambiguous when the same model name appears on multiple
+ * provider profiles. Rows also get a violet-tint background when the
+ * keyboard-selectedIndex matches.
  *
  * Keyboard: ArrowUp/Down move selectedIndex in flatList (Recent first,
  * then each group's entries in order); Enter calls patchSessionModel;
  * Esc bubbles to antd Popover default close.
  */
+/**
+ * Canonical (providerId, model) tuple key for a ModelEntry.
+ *
+ * Two ModelEntries are the same picker row only when both fields match.
+ * Alias / label / description / baseUrl are presentation, not identity.
+ * Missing providerId (legacy / user-defined entries) collapses to "" —
+ * collisions there are an existing limitation noted in ModelEntry.providerId.
+ */
+function entryTupleKey(entry: ModelEntry): string {
+  return `${entry.providerId ?? ''}::${entry.model}`
+}
+
+/**
+ * Is this row the session's currently-active selection? Compares on
+ * (providerId, model) tuple — `model` alone is ambiguous when the
+ * same model name appears on multiple provider profiles.
+ *
+ * Returns false when the session has no providerId recorded AND there
+ * are multiple providers with the same model name — we genuinely
+ * cannot know which one is "current" in that case, so rendering a
+ * marker on any row (or worse, on every row) is misleading. The user
+ * can still pick any row; once they do, the session gets a providerId
+ * and strict matching kicks in.
+ */
+function isCurrentEntry(
+  entry: ModelEntry,
+  currentModel: string | undefined,
+  currentProviderId: string | undefined,
+  hasAmbiguousName: boolean,
+): boolean {
+  if (!currentModel) return false
+  if (entry.model !== currentModel) return false
+  if (currentProviderId !== undefined) {
+    return entry.providerId === currentProviderId
+  }
+  // Legacy session without providerId.
+  if (hasAmbiguousName) {
+    // Same model name on multiple providers — we don't know which one
+    // the session is actually using, so mark none of them.
+    return false
+  }
+  // Unique model name → safe to mark by model alone.
+  return true
+}
+
 type Props = {
   /**
    * 右侧分屏是否展开. 展开时按钮只显示模型名 (隐藏括号里的 provider 描述) ,
@@ -39,8 +87,6 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
   const isMobile = useAppStore((s) => s.isMobile)
 
   const [searchQuery, setSearchQuery] = useState('')
-  const [selectedIndex, setSelectedIndex] = useState(0)
-  const selectedRowRef = useRef<HTMLDivElement | null>(null)
   const searchInputRef = useRef<any>(null)
 
   // Derived: provider label for the badge = "model-name(provider-name)".
@@ -74,17 +120,28 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
   }, [currentModel, currentProviderId, availableModels, compact, isMobile])
 
   // Derived: recent models from sessions, recency-weighted, deduped, max 5.
+  // zai patch: dedup key is (providerId, model) instead of model alone —
+  // the same model name can appear in multiple provider profiles and the
+  // picker must treat each (providerId, model) tuple as a distinct row.
   const recentModels = useMemo<ModelEntry[]>(() => {
     const seen = new Set<string>()
     const out: ModelEntry[] = []
     const sorted = [...sessions].sort((a, b) => b.updatedAt - a.updatedAt)
     for (const s of sorted) {
       if (!s.model || s.model === 'unknown') continue
-      if (seen.has(s.model)) continue
-      const entry = availableModels.find((m) => m.model === s.model)
-      if (!entry) continue
-      seen.add(s.model)
-      out.push(entry)
+      const key = `${s.providerId ?? ''}::${s.model}`
+      if (seen.has(key)) continue
+      const entry = availableModels.find(
+        (m) => m.model === s.model && m.providerId === s.providerId,
+      )
+      // Fallback: legacy sessions without providerId — match by model name
+      // only when no providerId is recorded on the session.
+      const fallback = entry ?? (s.providerId
+        ? undefined
+        : availableModels.find((m) => m.model === s.model))
+      if (!fallback) continue
+      seen.add(key)
+      out.push(fallback)
       if (out.length >= 5) break
     }
     return out
@@ -115,27 +172,50 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
     return [...m.entries()].sort(([a], [b]) => a.localeCompare(b))
   }, [filteredModels])
 
+  // True when `currentModel` exists under more than one (providerId, model)
+  // tuple in `availableModels`. Used by isCurrentEntry to decide whether to
+  // fall back to a model-only match for legacy sessions that have no
+  // providerId recorded — only safe when the model name is unique across
+  // providers.
+  const hasAmbiguousCurrentName = useMemo(() => {
+    if (!currentModel) return false
+    let count = 0
+    for (const e of availableModels) {
+      if (e.model === currentModel) {
+        count++
+        if (count > 1) return true
+      }
+    }
+    return false
+  }, [currentModel, availableModels])
+
   const showRecent = !searchQuery.trim() && recentModels.length > 0
 
-  // Set of model IDs that already appear in the Recent section. Used to
-  // gate the keyboard-selected highlight / ref on provider-group rows so
-  // that the same model rendered in both sections does NOT get the
-  // selected-row visual marker twice. The Recent row owns the canonical
-  // selected-row identity for keyboard navigation.
-  const recentModelSet = useMemo<Set<string>>(
-    () => new Set(recentModels.map((m) => m.model)),
+  // Set of (providerId, model) tuples that already appear in the Recent
+  // section. Used to gate the keyboard-selected highlight / ref on
+  // provider-group rows so that the same tuple rendered in both sections
+  // does NOT get the selected-row visual marker twice. The Recent row
+  // owns the canonical selected-row identity for keyboard navigation.
+  // zai patch: key is the (providerId, model) tuple — using model name
+  // alone would let a Recent row "consume" highlights for every other
+  // provider's copy of the same model.
+  const recentTupleSet = useMemo<Set<string>>(
+    () => new Set(recentModels.map(entryTupleKey)),
     [recentModels],
   )
 
   // Flat list: Recent first (if visible), then each group in order.
   // Deduplicate entries that already appear in Recent so that ArrowDown
   // navigation has no gaps and indexOf returns stable positions.
+  // zai patch: dedup key is (providerId, model), not model — the same
+  // model name on two provider profiles must remain two selectable rows.
   const flatList = useMemo<ModelEntry[]>(() => {
     const seen = new Set<string>()
     const out: ModelEntry[] = []
     const push = (entry: ModelEntry) => {
-      if (seen.has(entry.model)) return
-      seen.add(entry.model)
+      const key = entryTupleKey(entry)
+      if (seen.has(key)) return
+      seen.add(key)
       out.push(entry)
     }
     if (showRecent) for (const e of recentModels) push(e)
@@ -143,7 +223,43 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
     return out
   }, [recentModels, groups, showRecent])
 
-  // Clamp selectedIndex when flatList shape changes (search/Recent toggle).
+  // Pick the initial keyboard-highlight row on popover mount. The picker
+  // is rendered inside an antd Popover with destroyTooltipOnHide → the
+  // component fully unmounts on close and remounts on open, so the
+  // lazy initializer runs fresh each session and `useState(() => …)`
+  // is the natural place to compute the start index.
+  //
+  // zai patch: jump to whichever row matches the session's current
+  // (model, providerId) tuple — Enter calls patchSessionModel using
+  // selectedIndex, so mis-aligned defaults silently move the session to
+  // the wrong provider when several profiles share a model name. Falls
+  // back to flatList[0] when the current model isn't in the list (e.g.
+  // session.model='unknown' / settings not yet loaded) or when the
+  // session has no providerId and the model name is ambiguous across
+  // providers — the row's "●" marker is the source of truth for
+  // "current" in that legacy case, the keyboard highlight just needs a
+  // sensible start.
+  const [selectedIndex, setSelectedIndex] = useState<number>(() => {
+    const target = flatList.findIndex(
+      (e) =>
+        e.model === currentModel
+        && (currentProviderId === undefined
+          ? true
+          : e.providerId === currentProviderId),
+    )
+    return target >= 0 ? target : 0
+  })
+  const selectedRowRef = useRef<HTMLDivElement | null>(null)
+
+  // Auto-scroll selected row into view.
+  useEffect(() => {
+    selectedRowRef.current?.scrollIntoView({ block: 'nearest' })
+  }, [selectedIndex])
+
+  // Clamp selectedIndex when flatList shape changes (search/Recent
+  // toggle). The lazy initializer already pins the start position to
+  // the session's current row, so we only need to react to mid-life
+  // shape changes here.
   useEffect(() => {
     if (flatList.length === 0) {
       setSelectedIndex(0)
@@ -151,15 +267,6 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
       setSelectedIndex(flatList.length - 1)
     }
   }, [flatList, selectedIndex])
-
-  // Auto-scroll selected row into view.
-  useEffect(() => {
-    selectedRowRef.current?.scrollIntoView({ block: 'nearest' })
-  }, [selectedIndex])
-
-  // Reset search + selectedIndex on popover mount (covers re-open case
-  // since destroyTooltipOnHide resets component state on remount).
-  // No explicit reset needed — initial state already ('', 0).
 
   const onKeyDown = (e: React.KeyboardEvent) => {
     if (e.key === 'ArrowDown') {
@@ -265,9 +372,9 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
                 const flatIdx = flatList.indexOf(m)
                 return (
                   <Row
-                    key={`recent-${m.alias}`}
+                    key={`recent-${entryTupleKey(m)}`}
                     entry={m}
-                    isCurrent={m.model === currentModel}
+                    isCurrent={isCurrentEntry(m, currentModel, currentProviderId, hasAmbiguousCurrentName)}
                     isSelected={flatIdx === selectedIndex}
                     onClick={() => pickEntry(m)}
                     rowRef={flatIdx === selectedIndex ? selectedRowRef : undefined}
@@ -284,16 +391,18 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
               </div>
               {items.map((m) => {
                 const flatIdx = flatList.indexOf(m)
-                // If the same model already rendered in Recent, that row
-                // owns the keyboard-selected identity; suppress duplicate
-                // highlight + ref on this provider-group duplicate.
+                // If the same (providerId, model) tuple already rendered
+                // in Recent, that row owns the keyboard-selected identity;
+                // suppress duplicate highlight + ref on this duplicate.
+                // zai patch: compare on tuple key, not model name alone —
+                // same model on a different provider is a different row.
                 const ownsSelected =
-                  flatIdx === selectedIndex && !(showRecent && recentModelSet.has(m.model))
+                  flatIdx === selectedIndex && !(showRecent && recentTupleSet.has(entryTupleKey(m)))
                 return (
                   <Row
-                    key={`group-${title}-${m.alias}`}
+                    key={`group-${title}-${entryTupleKey(m)}`}
                     entry={m}
-                    isCurrent={m.model === currentModel}
+                    isCurrent={isCurrentEntry(m, currentModel, currentProviderId, hasAmbiguousCurrentName)}
                     isSelected={ownsSelected}
                     onClick={() => pickEntry(m)}
                     rowRef={ownsSelected ? selectedRowRef : undefined}

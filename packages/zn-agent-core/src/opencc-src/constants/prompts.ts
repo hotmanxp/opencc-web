@@ -1,5 +1,6 @@
 // biome-ignore-all assist/source/organizeImports: internal-only import markers must not be reordered
 import { AGENT_INSTRUCTIONS_FILE } from './product.js'
+import { SUBAGENT_DELIVERABLE_GUIDANCE } from './deliverableGuidance.js'
 import { type as osType, version as osVersion, release as osRelease } from 'os'
 import { env } from '../utils/env.js'
 import { getIsGit } from '../utils/git.js'
@@ -787,7 +788,8 @@ export async function enhanceSystemPromptWithEnvDetails(
 - Agent threads always have their cwd reset between bash calls, as a result please only use absolute file paths.
 - In your final response, share file paths (always absolute, never relative) that are relevant to the task. Include code snippets only when the exact text is load-bearing (e.g., a bug you found, a function signature the caller asked for) — do not recap code you merely read.
 - For clear communication with the user the assistant MUST avoid using emojis.
-- Do not use a colon before tool calls. Text like "Let me read the file:" followed by a read tool call should just be "Let me read the file." with a period.`
+- Do not use a colon before tool calls. Text like "Let me read the file:" followed by a read tool call should just be "Let me read the file." with a period.
+- ${SUBAGENT_DELIVERABLE_GUIDANCE}`
   // Subagents get skill_discovery attachments (prefetch.ts runs in query(),
   // no agentId guard since #22830) but don't go through getSystemPrompt —
   // surface the same DiscoverSkills framing the main session gets. Gated on

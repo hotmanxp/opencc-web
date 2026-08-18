@@ -1,31 +1,20 @@
 import { afterEach, beforeEach, describe, expect, test, vi } from 'vitest'
+
+// mock 必须早于被测模块 import 生效 —— vitest 会 hoist vi.mock 到文件顶部,
+// 但显式写在 import 前更安全。
+const followupMock = vi.fn()
+vi.mock('../../src/server/services/sessionInbox.js', () => ({
+  sessionInbox: {
+    followup: (...args: unknown[]) => followupMock(...args),
+  },
+}))
+
 import {
   SubagentNotifier,
   renderTaskNotificationMessage,
-  flushPendingSubagentNotifications,
-  __resetSubagentNotifierPendingForTests,
   __setSubagentNotifier,
 } from '../../src/server/services/subagentNotifier.js'
-import {
-  registerSessionController,
-  releaseSessionController,
-} from '../../src/server/services/agentRuntime.js'
 import type { BackgroundTask } from '@zn-ai/zn-agent-core'
-
-let lastRunOpts: any = null
-let runtimeEvents: Array<Record<string, unknown>> = [
-  { type: 'message_start' },
-  { type: 'message_stop' },
-]
-
-const mockRuntime = {
-  query: (opts: any) => {
-    lastRunOpts = opts
-    return (async function* () {
-      for (const ev of runtimeEvents) yield ev
-    })()
-  },
-}
 
 function makeTask(overrides: Partial<BackgroundTask> = {}): BackgroundTask {
   return {
@@ -42,17 +31,10 @@ function makeTask(overrides: Partial<BackgroundTask> = {}): BackgroundTask {
 }
 
 beforeEach(() => {
-  lastRunOpts = null
-  runtimeEvents = [
-    { type: 'message_start' },
-    { type: 'message_stop' },
-  ]
-  __resetSubagentNotifierPendingForTests()
+  followupMock.mockReset()
 })
 
 afterEach(() => {
-  releaseSessionController('sess-parent')
-  __resetSubagentNotifierPendingForTests()
   __setSubagentNotifier(null)
   vi.restoreAllMocks()
 })
@@ -105,88 +87,78 @@ describe('renderTaskNotificationMessage', () => {
 })
 
 describe('SubagentNotifier.handle', () => {
-  test('completed + parentSessionId → 触发 runtime.query,sessionId=parentSessionId', async () => {
-    const n = new SubagentNotifier({ getRuntime: () => mockRuntime as any })
+  test('completed + parentSessionId → sessionInbox.followup 收到正确 content + parentSessionId', async () => {
+    const n = new SubagentNotifier()
     await n.handle(makeTask({ status: 'completed', resultText: 'hi' }))
-    expect(lastRunOpts).not.toBeNull()
-    expect(lastRunOpts.sessionId).toBe('sess-parent')
-    expect(lastRunOpts.prompt).toContain('<task-notification>')
-    expect(lastRunOpts.prompt).toContain('<result>hi</result>')
+    expect(followupMock).toHaveBeenCalledTimes(1)
+    const [sessionId, msg] = followupMock.mock.calls[0] as [string, {
+      id: string
+      source: { kind: string; form: string; senderSessionId?: string; agentType?: string }
+      content: string
+      createdAt: number
+    }]
+    expect(sessionId).toBe('sess-parent')
+    expect(msg.id).toBe('bg-t1')
+    expect(msg.source.kind).toBe('subagent')
+    expect(msg.source.form).toBe('notice')
+    expect(msg.source.senderSessionId).toBe('sess-parent')
+    expect(msg.source.agentType).toBe('general-purpose')
+    expect(typeof msg.createdAt).toBe('number')
+    expect(msg.content).toContain('<task-notification>')
+    expect(msg.content).toContain('<task-id>t1</task-id>')
+    expect(msg.content).toContain('<status>completed</status>')
+    expect(msg.content).toContain('<result>hi</result>')
   })
 
-  test('failed → prompt 含 [error: ...]', async () => {
-    const n = new SubagentNotifier({ getRuntime: () => mockRuntime as any })
+  test('failed → content 含 [error: ...]', async () => {
+    const n = new SubagentNotifier()
     await n.handle(
       makeTask({
         status: 'failed',
         error: { message: 'llm_provider_overloaded', category: 'llm_provider_overloaded' },
       }),
     )
-    expect(lastRunOpts.prompt).toContain('<status>failed</status>')
-    expect(lastRunOpts.prompt).toContain('[error: llm_provider_overloaded')
+    expect(followupMock).toHaveBeenCalledTimes(1)
+    const [, msg] = followupMock.mock.calls[0] as [string, { content: string }]
+    expect(msg.content).toContain('<status>failed</status>')
+    expect(msg.content).toContain('[error: llm_provider_overloaded')
   })
 
-  test('cancelled → prompt 含 [cancelled by user]', async () => {
-    const n = new SubagentNotifier({ getRuntime: () => mockRuntime as any })
+  test('cancelled → content 含 [cancelled by user]', async () => {
+    const n = new SubagentNotifier()
     await n.handle(makeTask({ status: 'cancelled' }))
-    expect(lastRunOpts.prompt).toContain('<status>cancelled</status>')
-    expect(lastRunOpts.prompt).toContain('[cancelled by user]')
+    expect(followupMock).toHaveBeenCalledTimes(1)
+    const [, msg] = followupMock.mock.calls[0] as [string, { content: string }]
+    expect(msg.content).toContain('<status>cancelled</status>')
+    expect(msg.content).toContain('[cancelled by user]')
   })
 
-  test('无 parentSessionId → 不触发 run', async () => {
-    const n = new SubagentNotifier({ getRuntime: () => mockRuntime as any })
+  test('无 parentSessionId → 不投递 followup', async () => {
+    const n = new SubagentNotifier()
     await n.handle(makeTask({ parentSessionId: undefined }))
-    expect(lastRunOpts).toBeNull()
+    expect(followupMock).not.toHaveBeenCalled()
   })
 
-  test('parentSessionId=sess-unknown (占位) → 不触发 run', async () => {
-    const n = new SubagentNotifier({ getRuntime: () => mockRuntime as any })
+  test('parentSessionId=sess-unknown (占位) → 不投递 followup', async () => {
+    const n = new SubagentNotifier()
     await n.handle(makeTask({ parentSessionId: 'sess-unknown' }))
-    expect(lastRunOpts).toBeNull()
+    expect(followupMock).not.toHaveBeenCalled()
   })
 
-  test('status=running (非 terminal) → 不触发 run', async () => {
-    const n = new SubagentNotifier({ getRuntime: () => mockRuntime as any })
+  test('status=running (非 terminal) → 不投递 followup', async () => {
+    const n = new SubagentNotifier()
     await n.handle(makeTask({ status: 'running' }))
-    expect(lastRunOpts).toBeNull()
+    expect(followupMock).not.toHaveBeenCalled()
   })
 
-  test('runtime.query 抛错 → handle 不抛,仅 console.warn', async () => {
+  test('sessionInbox.followup 抛错 → handle 不抛,仅 console.warn', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const broken = {
-      query: () => {
-        throw new Error('runtime blew up')
-      },
-    }
-    const n = new SubagentNotifier({ getRuntime: () => broken as any })
+    followupMock.mockImplementationOnce(() => {
+      throw new Error('inbox blew up')
+    })
+    const n = new SubagentNotifier()
     // 不应 throw
     await expect(n.handle(makeTask())).resolves.toBeUndefined()
     expect(warn).toHaveBeenCalled()
-  })
-
-  test('父 session 主线活跃 (running 守卫) → 暂存通知,不注入', async () => {
-    registerSessionController('sess-parent', new AbortController())
-    const n = new SubagentNotifier({ getRuntime: () => mockRuntime as any })
-    await n.handle(makeTask({ status: 'completed', resultText: 'hi' }))
-    expect(lastRunOpts).toBeNull()
-  })
-
-  test('主线结束后 flushPendingSubagentNotifications → 补发注入', async () => {
-    // flush 走模块单例,先注册带 mock runtime 的单例
-    __setSubagentNotifier(
-      new SubagentNotifier({ getRuntime: () => mockRuntime as any }),
-    )
-    registerSessionController('sess-parent', new AbortController())
-    const n = new SubagentNotifier({ getRuntime: () => mockRuntime as any })
-    await n.handle(makeTask({ status: 'completed', resultText: 'hi' }))
-    expect(lastRunOpts).toBeNull() // 活跃时不注入
-
-    releaseSessionController('sess-parent')
-    flushPendingSubagentNotifications('sess-parent')
-    // flush 是 fire-and-forget,等微任务
-    await new Promise((r) => setTimeout(r, 10))
-    expect(lastRunOpts).not.toBeNull()
-    expect(lastRunOpts.sessionId).toBe('sess-parent')
-    expect(lastRunOpts.prompt).toContain('<result>hi</result>')
   })
 })

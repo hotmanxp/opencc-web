@@ -195,6 +195,9 @@ export function wrapWithJobStarted(
       inner.cancelByParentSession(sessionId, reason),
     events: (id, fromSeq, signal) => inner.events(id, fromSeq, signal),
     shutdown: () => inner.shutdown(),
+    // zai patch (HRMSV3-ZN-WEBSITE#668 / subagent_control.send_message):
+    // 透传 sendMessageToTask —— 不发 job.started,只看 inner 结果。
+    sendMessageToTask: (taskId, prompt) => inner.sendMessageToTask(taskId, prompt),
     // zai patch: 透传 AgentTool 子代理用的外部管理 API。attach 不入 queue
     // 不增活动计数(子代理已由 LocalAgentTask 路径管理),所以不发 job.started。
     attach: (input) => inner.attach(input),

@@ -1,5 +1,9 @@
 import { Dropdown, Menu, message, Modal } from 'antd';
 import React, { useMemo } from 'react';
+import {
+  AGENT_INPUT_INSERT_EVENT,
+  type AgentInputInsertDetail,
+} from '../../lib/agentInputEvents.js';
 
 export interface FsContextMenuProps {
   /** Path relative to cwd (sent to server verbatim). */
@@ -64,6 +68,19 @@ export function FsContextMenu(props: FsContextMenuProps): JSX.Element | null {
   };
 
   const menuItems = useMemo(() => [
+    {
+      key: 'insert',
+      'data-testid': 'fs-cm-insert',
+      label: '插入对话',
+      onClick: () => {
+        window.dispatchEvent(
+          new CustomEvent<AgentInputInsertDetail>(AGENT_INPUT_INSERT_EVENT, {
+            detail: { text: path },
+          }),
+        );
+        onClose();
+      },
+    },
     {
       key: 'copy-rel',
       'data-testid': 'fs-cm-copy-rel',

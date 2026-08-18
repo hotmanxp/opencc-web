@@ -33,6 +33,7 @@ import type { Tool, ToolCallCtx } from '../runtime/modelCaller.js'
 import type { Tool as RuntimeTool } from '../runtime/types.js'
 import { makeTool } from './makeTool.js'
 import { taskTools } from './tasks/index.js'
+import { subagentControlTool } from './opencc/subagentControl.js'
 export { makeTool }
 
 const execAsync = promisify(exec)
@@ -500,6 +501,12 @@ export function buildDefaultTools(opts?: {
     askUserQuestionTool,
     skillTool,
     ...taskTools,
+    // zai patch (HRMSV3-ZN-WEBSITE#668):挂入 subagent_control 主对话工具
+    // (对齐 DSH tool-subagent-control 三件套 send_message / interrupt_agent /
+    // list_agents),让模型可以在主对话直接控制后台子 agent。走
+    // globalThis bridge(`__zaiBackgroundRuntime`)拿 bg,无 bg 时 no-op,
+    // 单测 / vendor CLI 直跑都不会崩。
+    subagentControlTool as unknown as Tool,
   ]
 
   const skillsDirs = opts?.skillsDirs ?? []

@@ -631,6 +631,12 @@ export function FsTab({ cwd }: { cwd: string | null }) {
     setEditingPath(null);
   };
 
+  // 目录树 / 两个搜索列表共用的右键菜单打开器。path 为相对 cwd 的路径,
+  // 与「复制相对路径」同值;absPath 由 buildAbsPath 还原绝对路径。
+  const openContextMenu = (p: string, x: number, y: number) => {
+    setContextMenu({ path: p, absPath: buildAbsPath(cwd, p), x, y });
+  };
+
   // Reset on cwd change.
   useEffect(() => {
     setSelected(null);
@@ -874,6 +880,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                 truncated={contentSearch.data?.truncated ?? false}
                 query={submittedQuery}
                 onSelect={(p, l) => { setSelected(p); setPendingLine(l); }}
+                onItemContextMenu={openContextMenu}
               />
             ) : (
               <FsSearchList
@@ -883,6 +890,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                 truncated={search.data?.truncated ?? false}
                 query={submittedQuery}
                 onSelect={(p) => setSelected(p)}
+                onItemContextMenu={openContextMenu}
               />
             )
           ) : root.error && !root.data?.ok ? (
@@ -917,10 +925,8 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                 }
               }}
               onRightClick={({ node, event }) => {
-                const relPath = String(node.key);
-                const abs = buildAbsPath(cwd, relPath);
-                setContextMenu({ path: relPath, absPath: abs, x: event.clientX, y: event.clientY });
                 event.preventDefault();
+                openContextMenu(String(node.key), event.clientX, event.clientY);
               }}
             />
           )}

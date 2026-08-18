@@ -4,6 +4,7 @@ import request from 'supertest'
 import type { Server } from 'http'
 import type { AddressInfo } from 'net'
 import { eventBus } from '../services/eventBus.js'
+import { sessionInbox as realSessionInbox, type InboxMessage } from '../services/sessionInbox.js'
 
 // 队列测试只需验证 /agent/prompt 的入队判定 + /agent/queue/cancel, 不跑真实
 // queryLoop: getRuntime().query 挂起, 让第一条永远在跑, 后续 prompt 排队。
@@ -479,5 +480,224 @@ describe('LIVE: 真 HTTP 端口 + fetch + eventBus 观察 queue.changed', () => 
     await new Promise((r) => setTimeout(r, 20))
 
     expect(callIdx).toBe(2) // first 跑完 + second 已被消费 (FIFO 顺序的最小验证)
+  })
+})
+
+// ============================================================================
+// INBOX: runNextInQueue 双队列消费 + 并发守卫
+// ============================================================================
+// runNextInQueue 消费顺序 = HTTP 用户 prompt > inbox next-turn。turn 结束
+// finally 消费 next-step 合并为下一条 prompt;inbox 注册为 wake handler。
+// 复用上面真 TCP 基建 + eventBus 观察 runtime.started 事件序列。
+function inboxMsg(id: string, content: string): InboxMessage {
+  return {
+    id,
+    source: { kind: 'subagent', form: 'notice', senderSessionId: 'sess-test' },
+    content,
+    createdAt: Date.now(),
+  }
+}
+
+describe('INBOX: runNextInQueue 消费', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    hangingQuery.mockImplementation(() => hangingEvents())
+    mockTranscriptStore.read.mockResolvedValue({
+      meta: { title: '', model: null, permissionMode: 'auto', cwd: '/tmp' },
+      messages: [],
+    })
+    // 清空 inbox,防上一组测试残留
+    while (realSessionInbox.consumeNextStep('sess-test')?.length ?? 0 > 0) {
+      realSessionInbox.consumeNextStep('sess-test')
+    }
+    realSessionInbox.consumeNextTurn('sess-test')
+  })
+
+  it('inbox next-turn 在无 HTTP 队列时被消费为一条 prompt', async () => {
+    let release!: () => void
+    const releaseP = new Promise<void>((r) => {
+      release = r
+    })
+    hangingQuery.mockImplementation(() => {
+      return (async function* () {
+        yield { type: 'noop' }
+        await releaseP
+      })()
+    })
+
+    // 没有任何 HTTP prompt — 直接 inbox.followup
+    realSessionInbox.followup('sess-test', inboxMsg('inbox-1', 'inbox content'))
+
+    // waitForMicrotasks 让 wake handler → runNextInQueue → runQueryLoop 链路完成
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setTimeout(r, 20))
+
+    // 第一条 query 是 inbox 消费的内容 (而非空)
+    expect(hangingQuery.mock.calls.length).toBeGreaterThanOrEqual(1)
+    const firstArgs = hangingQuery.mock.calls[0]?.[0] as { prompt?: string }
+    expect(firstArgs.prompt).toBe('inbox content')
+
+    // 清理:释放让 query 结束
+    release()
+    await new Promise((r) => setImmediate(r))
+  })
+
+  it('HTTP prompt 优先于 inbox next-turn', async () => {
+    let release!: () => void
+    const releaseP = new Promise<void>((r) => {
+      release = r
+    })
+    hangingQuery.mockImplementation(() => {
+      return (async function* () {
+        yield { type: 'noop' }
+        await releaseP
+      })()
+    })
+
+    const app = buildApp()
+    // 1) inbox 先入 next-turn
+    realSessionInbox.followup('sess-test', inboxMsg('inbox-A', 'from inbox'))
+
+    // 2) wake handler 触发 runNextInQueue;但同时我们立刻经 HTTP 入队,
+    //    这条 HTTP 应排在 inbox-A 之后 — 因为 HTTP 入队时 inbox 已经被
+    //    consumeNextTurn 取走作为本轮 prompt,而 HTTP push 落在 sessionQueues
+    //    作为下一轮 FIFO 队首。
+    // 注意:由于 wake handler 同步触发,这里 HTTP POST 可能在 inbox-A 被消费
+    // 之前到达 — 但 HTTP 的 wasIdle 判定 `!running && queue.length===0`,
+    // 当 inbox-A 已 wake 触发 runNextInQueue 进入同步段(sessionRunning.add)
+    // 后, HTTP 入队就走 queued:true.
+    const r1 = await request(app)
+      .post('/api/agent/prompt')
+      .send({ prompt: 'from http', sessionId: 'sess-test' })
+
+    // HTTP 入队:若 inbox wake 抢了 runNextInQueue 入口,HTTP 应当 queued:true
+    // (因为本轮 prompt 是 inbox-A)。否则 wasIdle=true 且 HTTP 立即启动。
+    // 两种情况下 HTTP 都在 inbox-A 之后消费 — 我们只需要证明"HTTP 排在 inbox 之后"。
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setTimeout(r, 20))
+
+    // 第一轮一定是 inbox (HTTP 总是后入队)
+    expect(hangingQuery.mock.calls.length).toBeGreaterThanOrEqual(1)
+    const firstArgs = hangingQuery.mock.calls[0]?.[0] as { prompt?: string }
+    expect(firstArgs.prompt).toBe('from inbox')
+
+    // 释放 inbox turn, finally drain 应该消费 HTTP 那条 (queued=true 路径)
+    release()
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(hangingQuery.mock.calls.length).toBeGreaterThanOrEqual(2)
+    const secondArgs = hangingQuery.mock.calls[1]?.[0] as { prompt?: string }
+    expect(secondArgs.prompt).toBe('from http')
+
+    // cleanup
+    if (r1.status === 200) {
+      // 让第二个 query 也结束 — 第二个是 hangingEvents 不需要 release
+    }
+  })
+
+  it('turn 结束后 next-step 合并为下一条 prompt', async () => {
+    let release!: () => void
+    const releaseP = new Promise<void>((r) => {
+      release = r
+    })
+    let callIdx = 0
+    hangingQuery.mockImplementation(() => {
+      callIdx++
+      if (callIdx === 1) {
+        return (async function* () {
+          yield { type: 'noop' }
+          await releaseP
+        })()
+      }
+      return hangingEvents()
+    })
+
+    // 第一条 inbox 在 idle 状态下走 next-turn (唤醒 + 立即消费)
+    realSessionInbox.followup('sess-test', inboxMsg('inbox-step-1', 'step1 content'))
+    // 等第一条 turn 进入 setBusy 状态 (微任务跑完)
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setTimeout(r, 20))
+    expect(realSessionInbox.isBusy('sess-test')).toBe(true)
+    // 第二条 inbox 在 busy 状态下自动降级到 next-step (不唤醒)
+    realSessionInbox.followup('sess-test', inboxMsg('inbox-step-2', 'step2 content'))
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(hangingQuery.mock.calls.length).toBeGreaterThanOrEqual(1)
+    const firstArgs = hangingQuery.mock.calls[0]?.[0] as { prompt?: string }
+    expect(firstArgs.prompt).toBe('step1 content')
+
+    // 释放第一条 → finally consumeNextStep → 合并为下一条 prompt
+    release()
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(callIdx).toBe(2)
+    const secondArgs = hangingQuery.mock.calls[1]?.[0] as { prompt?: string }
+    // 合并: next-step lane 含一条 'step2 content', 应该作为第二条 prompt
+    expect(secondArgs.prompt).toBe('step2 content')
+  })
+})
+
+describe('INBOX: 并发守卫', () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    hangingQuery.mockImplementation(() => hangingEvents())
+    mockTranscriptStore.read.mockResolvedValue({
+      meta: { title: '', model: null, permissionMode: 'auto', cwd: '/tmp' },
+      messages: [],
+    })
+    while (realSessionInbox.consumeNextStep('sess-race')?.length ?? 0 > 0) {
+      realSessionInbox.consumeNextStep('sess-race')
+    }
+    realSessionInbox.consumeNextTurn('sess-race')
+  })
+
+  it('同一 tick 两次 followup 只起单 turn,第二条作为下一轮消费', async () => {
+    let release!: () => void
+    const releaseP = new Promise<void>((r) => {
+      release = r
+    })
+    let callIdx = 0
+    hangingQuery.mockImplementation(() => {
+      callIdx++
+      if (callIdx === 1) {
+        return (async function* () {
+          yield { type: 'noop' }
+          await releaseP
+        })()
+      }
+      return hangingEvents()
+    })
+
+    // 同一 tick 两次 followup — 第二条应当被 sessionRunning.has 拦截,
+    // 进入 next-turn lane,作为第二轮消费。
+    realSessionInbox.followup('sess-race', inboxMsg('msgA', 'A content'))
+    realSessionInbox.followup('sess-race', inboxMsg('msgB', 'B content'))
+
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setTimeout(r, 20))
+
+    // 关键断言:本 sid 只起了一个 query turn
+    expect(callIdx).toBe(1)
+    const firstArgs = hangingQuery.mock.calls[0]?.[0] as { prompt?: string }
+    expect(firstArgs.prompt).toBe('A content')
+
+    // 释放第一条 → finally drain 消费第二条 (next-turn lane 里)
+    release()
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setImmediate(r))
+    await new Promise((r) => setTimeout(r, 20))
+
+    expect(callIdx).toBe(2)
+    const secondArgs = hangingQuery.mock.calls[1]?.[0] as { prompt?: string }
+    expect(secondArgs.prompt).toBe('B content')
   })
 })
