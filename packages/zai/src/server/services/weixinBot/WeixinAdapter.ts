@@ -630,7 +630,6 @@ export class WeixinAdapter {
             text: args.chunk,
             context_token: effectiveToken ?? undefined,
           },
-          base_info: { ilink_app_id: 'bot', ilink_app_client_version: '0x020200' },
         }) as Record<string, unknown> | null
         if (resp && typeof resp === 'object') {
           const ret = Number(resp.ret ?? 0)
@@ -746,7 +745,6 @@ export class WeixinAdapter {
           },
           context_token: contextToken ?? undefined,
         },
-        base_info: { ilink_app_id: 'bot', ilink_app_client_version: '0x020200' },
       }) as Record<string, unknown> | null
       if (resp && typeof resp === 'object') {
         const ret = Number(resp.ret ?? 0)

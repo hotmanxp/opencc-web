@@ -137,7 +137,7 @@ export type ILinkGetUpdatesResponseT = z.infer<typeof ILinkGetUpdatesResponse>
 
 // ── 出站 payload ──────────────────────────────────────────────
 
-/** 出站文本消息 */
+/** 出站文本消息。base_info 由 iLinkClient.post() 强制注入,不在 payload 里声明 */
 export const ILinkSendTextPayload = z.object({
   from_user_id: z.literal(''),
   to_user_id: z.string(),
@@ -147,7 +147,6 @@ export const ILinkSendTextPayload = z.object({
     text: z.string(),
     context_token: z.string().optional(),
   }),
-  base_info: ILinkBaseInfo,
 })
 export type ILinkSendTextPayloadT = z.infer<typeof ILinkSendTextPayload>
 
@@ -169,7 +168,6 @@ export const ILinkSendMediaPayload = z.object({
     }),
     context_token: z.string().optional(),
   }),
-  base_info: ILinkBaseInfo,
 })
 export type ILinkSendMediaPayloadT = z.infer<typeof ILinkSendMediaPayload>
 

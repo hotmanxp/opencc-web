@@ -41,6 +41,7 @@ function makeMockManager() {
       enabled: false,
       state: 'unconfigured',
     })),
+    state: vi.fn(() => 'unconfigured'),
     start: vi.fn(async () => undefined),
     stop: vi.fn(async () => undefined),
     reload: vi.fn(async () => undefined),

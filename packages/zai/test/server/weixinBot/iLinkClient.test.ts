@@ -58,23 +58,23 @@ describe('ILinkClient', () => {
     expect(got.get_updates_buf).toBe('cur_0')
   })
 
-  it('sendMessage posts to sendmessage endpoint with base_info', async () => {
+  it('sendMessage posts to sendmessage endpoint with base_info injected by post()', async () => {
     fetchImpl.mockResolvedValueOnce(jsonResponse({ ret: 0, errcode: 0 }))
     const c = new ILinkClient({ baseUrl: 'https://test.local', token: 'tk', fetchImpl: fetchImpl as unknown as typeof fetch })
+    // B7.6:caller 不再传 base_info,iLinkClient.post() 强制注入 { channel_version: '2.2.0' }
     await c.sendMessage({
       from_user_id: '',
       to_user_id: 'user_a',
       client_id: 'cid-1',
       message_type: 2,
       content: { text: 'hello', context_token: 'tok' },
-      base_info: { ilink_app_id: 'bot', ilink_app_client_version: '0x020200' },
     })
     const [, init] = fetchImpl.mock.calls[0]
     expect((init as RequestInit).method).toBe('POST')
     expect(JSON.parse((init as RequestInit).body as string)).toMatchObject({
       to_user_id: 'user_a',
       content: { text: 'hello' },
-      base_info: { ilink_app_id: 'bot' },
+      base_info: { channel_version: '2.2.0' },
     })
   })
 
