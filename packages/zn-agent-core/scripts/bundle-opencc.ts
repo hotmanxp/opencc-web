@@ -141,8 +141,17 @@ function rewriteDtsSourcePath(line: string): string {
   return line
 }
 
-/** 校验生成文件里的每个 re-export 目标在 dist 下都可解析(.js → .d.ts)。 */
+/** 校验生成文件里的每个 re-export 目标在 dist 下都可解析(.js → .d.ts)。
+ *  冷构建(dist 尚未由 tsc -b 发射)时跳过 — 校验只服务于暖构建的人类
+ *  反馈,真正的悬挂引用由后续 typecheck:consumer / verify-server-types-
+ *  self-contained 捕获。 */
 function assertDtsTargetsResolve(bundleEntryDts: string): void {
+  if (!existsSync(OUT_DIR) || readdirSync(OUT_DIR).length === 0) {
+    console.log(
+      '[bundle-opencc] cold build (dist empty) — skipping d.ts target assertion; subsequent tsc -b + typecheck:consumer + verify-server-types-self-contained will catch real dangling refs',
+    )
+    return
+  }
   const fromRe = /from\s+['"](\.[^'"]+)['"]/g
   for (const m of bundleEntryDts.matchAll(fromRe)) {
     const target = m[1]
