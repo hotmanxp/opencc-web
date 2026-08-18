@@ -173,14 +173,20 @@ export class ILinkClient {
     return ILinkGetUploadUrlResponse.parse(raw)
   }
 
-  async getBotQrcode(): Promise<ILinkGetBotQrcodeResponseT> {
-    const raw = await this.post<unknown>('ilink/bot/get_bot_qrcode', {})
+  async getBotQrcode(botType = 3): Promise<ILinkGetBotQrcodeResponseT> {
+    // iLink server 实际 schema: bot_type 是 URL query 参数,不是 JSON body。
+    // 不传或传错位置都会返回 {"err_msg":"missing bot_type","ret":1}。
+    // 详见 hermes-agent gateway/platforms/weixin.py:1022。
+    const raw = await this.post<unknown>(
+      `ilink/bot/get_bot_qrcode?bot_type=${botType}`,
+      {},
+    )
     return ILinkGetBotQrcodeResponse.parse(raw)
   }
 
-  async getQrcodeStatus(qrcodeId: string): Promise<ILinkGetQrcodeStatusResponseT> {
+  async getQrcodeStatus(qrcodeId: string, botType = 3): Promise<ILinkGetQrcodeStatusResponseT> {
     const raw = await this.get<unknown>(
-      `ilink/bot/get_qrcode_status?qrcode_id=${encodeURIComponent(qrcodeId)}`,
+      `ilink/bot/get_qrcode_status?qrcode_id=${encodeURIComponent(qrcodeId)}&bot_type=${botType}`,
       10_000,
     )
     return ILinkGetQrcodeStatusResponse.parse(raw)

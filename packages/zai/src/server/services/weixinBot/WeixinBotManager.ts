@@ -305,16 +305,20 @@ export class WeixinBotManager {
     }
     const iLink = this.adapter.getClient()
     const result = await iLink.getBotQrcode()
-    if (!result.qrcode_id || !result.qrcode_url) return null
+    // iLink 真实 schema:`qrcode` (ID) + `qrcode_img_content` (URL);hermes 旧实现用
+    // `qrcode_id` / `qrcode_url`,都接受,normalize 到统一字段。
+    const qrcodeId = result.qrcode ?? result.qrcode_id
+    const qrcodeUrl = result.qrcode_img_content ?? result.qrcode_url ?? result.qrcode_img_url
+    if (!qrcodeId || !qrcodeUrl) return null
     this.activeSetup = {
-      qrcodeId: result.qrcode_id,
-      qrcodeUrl: result.qrcode_url,
+      qrcodeId,
+      qrcodeUrl,
       retries: 0,
     }
     return {
-      qrcodeId: result.qrcode_id,
-      qrcodeUrl: result.qrcode_url,
-      pollUrl: `/api/weixin/setup/poll?qrcodeId=${encodeURIComponent(result.qrcode_id)}`,
+      qrcodeId,
+      qrcodeUrl,
+      pollUrl: `/api/weixin/setup/poll?qrcodeId=${encodeURIComponent(qrcodeId)}`,
     }
   }
 
@@ -331,19 +335,23 @@ export class WeixinBotManager {
     const iLink = this.adapter.getClient()
     const result = await iLink.getQrcodeStatus(qrcodeId)
     const status = result.status ?? 'waiting'
-    if (status === 'confirmed' && result.account_id && result.token) {
-      await this.saveAccount(result.account_id, result.token, result.base_url)
+    // iLink confirmed 时返回 `ilink_bot_id` (非 `account_id`);normalize 兼容
+    const accountId = result.ilink_bot_id ?? result.account_id
+    if (status === 'confirmed' && accountId && result.token) {
+      await this.saveAccount(accountId, result.token, result.base_url)
       this.activeSetup = null
       await this.reload()
-      return { status: 'confirmed', accountId: result.account_id, baseUrl: result.base_url }
+      return { status: 'confirmed', accountId, baseUrl: result.base_url }
     }
     if (status === 'expired') {
       if (this.activeSetup && this.activeSetup.retries < 3) {
         const fresh = await iLink.getBotQrcode()
-        if (fresh.qrcode_id && fresh.qrcode_url) {
+        const freshId = fresh.qrcode ?? fresh.qrcode_id
+        const freshUrl = fresh.qrcode_img_content ?? fresh.qrcode_url
+        if (freshId && freshUrl) {
           this.activeSetup = {
-            qrcodeId: fresh.qrcode_id,
-            qrcodeUrl: fresh.qrcode_url,
+            qrcodeId: freshId,
+            qrcodeUrl: freshUrl,
             retries: this.activeSetup.retries + 1,
           }
           return { status: 'expired' }
@@ -352,7 +360,7 @@ export class WeixinBotManager {
       this.activeSetup = null
       return { status: 'expired' }
     }
-    return { status: status as 'waiting' | 'scanned', accountId: result.account_id, baseUrl: result.base_url }
+    return { status: status as 'waiting' | 'scanned', accountId, baseUrl: result.base_url }
   }
 
   /** 取消 QR 登录 */

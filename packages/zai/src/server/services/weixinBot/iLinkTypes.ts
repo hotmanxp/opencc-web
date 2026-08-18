@@ -179,15 +179,22 @@ export const QR_STATUS = {
 export type QrStatus = (typeof QR_STATUS)[keyof typeof QR_STATUS]
 
 export const ILinkGetBotQrcodeResponse = ILinkResponse.extend({
+  // hermes-agent 已验证:iLink 真实 server 用 `qrcode` (不是 `qrcode_id`) 作为 ID,
+  // 用 `qrcode_img_content` (不是 `qrcode_url`) 作为图片 URL。两个都接受,
+  // client 内部 normalize 到 `qrcode_id` / `qrcode_url` 统一字段,简化下游调用。
+  qrcode: z.string().optional(),
   qrcode_id: z.string().optional(),
   qrcode_url: z.string().optional(),
   qrcode_img_url: z.string().optional(),
+  qrcode_img_content: z.string().optional(),
 })
 export type ILinkGetBotQrcodeResponseT = z.infer<typeof ILinkGetBotQrcodeResponse>
 
 export const ILinkGetQrcodeStatusResponse = ILinkResponse.extend({
   status: z.enum(['waiting', 'scanned', 'confirmed', 'expired']).optional(),
   account_id: z.string().optional(),
+  // hermes 已验证:confirmed 时 server 返回 `ilink_bot_id` (不是 `account_id`)
+  ilink_bot_id: z.string().optional(),
   token: z.string().optional(),
   base_url: z.string().optional(),
 })
