@@ -34,10 +34,15 @@ export const ILinkResponse = z.object({
 })
 export type ILinkResponseT = z.infer<typeof ILinkResponse>
 
-/** iLink 请求体里的 base_info 段,所有 6 端点 POST 都带 */
+/**
+ * iLink 请求体里的 base_info 段,所有 6 端点 POST 都带。
+ * B7.6:hermes-agent gateway/platforms/weixin.py:75 + :207 实际发的是
+ * { channel_version: '2.2.0' } —— 原 schema 用的 { ilink_app_id, ilink_app_client_version }
+ * 是 iLink 早期 / 其他 iLink 风格,服务端对 getUpdates session 校验期望的是
+ * channel_version,带错会被拒返 -14。改为只接受 channel_version 字符串。
+ */
 export const ILinkBaseInfo = z.object({
-  ilink_app_id: z.literal('bot'),
-  ilink_app_client_version: z.literal('0x020200'),
+  channel_version: z.literal('2.2.0'),
 })
 export type ILinkBaseInfoT = z.infer<typeof ILinkBaseInfo>
 

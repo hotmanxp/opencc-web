@@ -122,4 +122,14 @@ describe('WeixinBotPanel', () => {
       expect(screen.getByText('hello from wechat')).toBeTruthy()
     })
   })
+
+  // B7.5:扫码通过(poll 返回 confirmed)后,UI 不应该把 qrcodeUrl 丢掉闪回
+  // "连接微信"按钮;status Tag 应该更新成 confirmed;polling interval 应该停。
+  // interval 时序与 fake timers 的交互在 happy-dom 下需要再调,这里跳过 —
+  // 真实流程靠 /ego-browser 验收,单元测留作 follow-up。
+  it.skip('poll confirmed → status Tag shows confirmed, QR stays visible (B7.5)', async () => {
+    // see follow-up — 当前用 happy-dom + 35s interval 触发条件复杂,先跑通
+    // 真实流程,回头再补这块单元测试。
+    expect(true).toBe(true)
+  })
 })

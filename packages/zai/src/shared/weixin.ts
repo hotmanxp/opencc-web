@@ -27,6 +27,9 @@ export const WeixinBotSettingsSchema = z.object({
   sendChunkRetries: z.number().int().nonnegative().default(4),
   rateLimitCircuitThreshold: z.number().int().positive().default(1),
   rateLimitCircuitOpenSeconds: z.number().nonnegative().default(30.0),
+  /** B7.6:QR confirmed 响应的 ilink_user_id,getUpdates 用它跟 bot_token
+   * 一起做 session 鉴权。重新扫码后会被 lastConfirmedCreds 刷新覆盖。 */
+  ilinkUserId: z.string().optional(),
 })
 
 export type WeixinBotSettings = z.infer<typeof WeixinBotSettingsSchema>

@@ -26,7 +26,12 @@ function getManager() {
 
 router.get('/status', async (_req: Request, res: Response) => {
   try {
-    res.json(getManager().status())
+    const s = getManager().status()
+    // B7.5 diag:前端轮询 status 时打到这里,确认 lastConfirmedCreds 是否起作用。
+    if (process.env.WEIXIN_DIAG === '1') {
+      console.warn(`[weixin.status] configured=${s.configured} state=${s.state} accountId=${s.accountId ?? '<none>'} lastError=${s.lastError ?? '<none>'}`)
+    }
+    res.json(s)
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }
@@ -72,13 +77,17 @@ router.get('/settings', async (_req: Request, res: Response) => {
 
 router.post('/setup/start', async (_req: Request, res: Response) => {
   try {
+    console.warn('[weixin-setup.start] ENTER')
     const result = await getManager().startSetup()
     if (!result) {
+      console.warn('[weixin-setup.start] startSetup returned null')
       res.status(502).json({ error: 'iLink getBotQrcode returned empty or adapter init failed' })
       return
     }
+    console.warn(`[weixin-setup.start] OK qrcodeId=${result.qrcodeId}`)
     res.json(result)
   } catch (err) {
+    console.warn(`[weixin-setup.start] err: ${(err as Error).message}`)
     res.status(500).json({ error: (err as Error).message })
   }
 })
@@ -91,8 +100,15 @@ router.get('/setup/poll', async (req: Request, res: Response) => {
       return
     }
     const result = await getManager().pollSetup(qrcodeId)
+    // B7.5 diag:把每次 poll 结果打到 stdout,扫码链路卡哪一步直接看这里。
+    // 微信那边扫码通过 → iLink.get_qrcode_status 返回 status='confirmed' →
+    // pollSetup 命中 confirmed 走 saveAccount + reload + lastConfirmedCreds
+    // fallback → state 翻 connected。状态停在 waiting/scanned 通常是 iLink
+    // 还没收到扫码;stopped 在 expired 通常是 QR 过期或被人 cancel。
+    console.warn(`[weixin-setup.poll] qrcodeId=${qrcodeId} → ${JSON.stringify(result)} manager.state=${getManager().state()} configured=${getManager().status().configured}`)
     res.json(result)
   } catch (err) {
+    console.warn(`[weixin-setup.poll] err qrcodeId=${req.query.qrcodeId}: ${(err as Error).message}`)
     res.status(500).json({ error: (err as Error).message })
   }
 })

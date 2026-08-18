@@ -13,7 +13,13 @@
  *   - JSON 序列化:ensure_ascii=false 兼容中文消息。
  *
  * iLink 端点列表 & 字段语义详见 iLinkTypes.ts。
+ *
+ * B7.6:跟 hermes-agent gateway/platforms/weixin.py 对齐 — AuthorizationType +
+ * X-WECHAT-UIN header + base_info.channel_version 是 iLink 服务端 session
+ * 校验必需字段。原实现 zai iLinkClient 漏了这三个,导致 getUpdates 返 -14
+ * SESSION_EXPIRED。
  */
+import { randomBytes } from 'node:crypto'
 import { ILINK_BASE_URL } from './constants.js'
 import type {
   ILinkGetUpdatesResponseT,
@@ -33,6 +39,8 @@ export interface ILinkClientOptions {
   fetchImpl?: typeof fetch
   /** AbortSignal 工厂;缺省 5s connect / 35s read */
   defaultTimeoutMs?: number
+  /** B7.6:QR confirmed 返的 ilink_user_id,getUpdates 用来激活/绑定 session */
+  ilinkUserId?: string
 }
 
 export class ILinkClient {
@@ -40,12 +48,35 @@ export class ILinkClient {
   private readonly token: string
   private readonly fetchImpl: typeof fetch
   private readonly defaultTimeoutMs: number
+  private readonly ilinkUserId: string | undefined
 
   constructor(opts: ILinkClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '')
     this.token = opts.token
     this.fetchImpl = opts.fetchImpl ?? fetch
     this.defaultTimeoutMs = opts.defaultTimeoutMs ?? 15_000
+    this.ilinkUserId = opts.ilinkUserId
+  }
+
+  /**
+   * B7.6:iLink 服务端对 base_info 期望的是 { channel_version: '2.2.0' },
+   * 不是 zai 之前用的 { ilink_app_id, ilink_app_client_version }。后者导致
+   * getUpdates 返 -14 session expired。
+   */
+  private _baseInfo(): Record<string, string> {
+    return { channel_version: '2.2.0' }
+  }
+
+  /**
+   * B7.6:hermes-agent gateway/platforms/weixin.py:201 用 random 4-byte b64
+   * 模拟微信 UIN,iLink 服务端 session 校验需要这个 header。
+   */
+  private _randomWechatUin(): string {
+    const buf = randomBytes(4)
+    // 转成与 hermes 等价的 str -> b64:big-endian unsigned int to ascii base64
+    // hermes: struct.unpack('>I', secrets.token_bytes(4))[0] -> str -> b64
+    const n = buf.readUInt32BE(0)
+    return Buffer.from(String(n), 'utf-8').toString('base64')
   }
 
   /** 通用 POST。所有 iLink 端点除 getQrcodeStatus 外都走 POST */
@@ -55,7 +86,7 @@ export class ILinkClient {
     timeoutMs?: number,
     signal?: AbortSignal,
   ): Promise<T> {
-    const body = JSON.stringify({ ...payload, base_info: { ilink_app_id: 'bot', ilink_app_client_version: '0x020200' } })
+    const body = JSON.stringify({ ...payload, base_info: this._baseInfo() })
     const url = `${this.baseUrl}/${endpoint}`
     const controller = new AbortController()
     const timer = setTimeout(() => controller.abort(), timeoutMs ?? this.defaultTimeoutMs)
@@ -69,9 +100,14 @@ export class ILinkClient {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
+          // B7.6:iLink 用 AuthorizationType 区分 token 类型(bot / user),
+          // 不设会直接 -14。详见 hermes-agent weixin.py:213。
+          AuthorizationType: 'ilink_bot_token',
+          Authorization: `Bearer ${this.token}`,
           'iLink-App-Id': 'bot',
           'iLink-App-ClientVersion': '0x020200',
-          Authorization: `Bearer ${this.token}`,
+          // B7.6:伪微信 UIN,iLink 服务端 session 校验需要。
+          'X-WECHAT-UIN': this._randomWechatUin(),
         },
         body,
         signal: controller.signal,
@@ -126,7 +162,14 @@ export class ILinkClient {
     try {
       const raw = await this.post<unknown>(
         'ilink/bot/getupdates',
-        { get_updates_buf: syncBuf },
+        {
+          get_updates_buf: syncBuf,
+          // B7.6:QR confirmed 响应里有 ilink_user_id 但 zai 之前没用,iLink
+          // 服务端可能用它跟 bot_token 一起做 session 鉴权 —— 不带时返 -14
+          // session expired。Hermes-agent 在原注释里有引用但具体字段用法
+          // 没记录;这里把 ilink_user_id 当成 user_id 字段带上试。
+          ...(this.ilinkUserId ? { user_id: this.ilinkUserId } : {}),
+        },
         timeoutMs,
         signal,
       )
@@ -189,9 +232,14 @@ export class ILinkClient {
     // 区分 QR 流程的 token 与 long-poll 的 sync_buf 字段。
     // 错传 `qrcode_id` 会让 iLink 返回 {"ret":1} 不带 errmsg,无从调试。
     // 详见 hermes-agent gateway/platforms/weixin.py:1061。
+    //
+    // B7.5:这个端点是 iLink 端 long-poll 行为 — 真实测量 server 会 hold 住
+    // 等待用户扫码,实测 16s 才返回 {"ret":0,"status":"wait"}。原来 10s
+    // timeout 永远 abort,前端 poll 每次都 500,链路整个断。改 35s 与
+    // getUpdates 长轮询同档,确保 wait→scanned→confirmed 状态变更都能收到。
     const raw = await this.get<unknown>(
       `ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcodeId)}&bot_type=${botType}`,
-      10_000,
+      35_000,
     )
     return ILinkGetQrcodeStatusResponse.parse(raw)
   }

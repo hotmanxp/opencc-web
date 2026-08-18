@@ -97,6 +97,9 @@ export interface WeixinAdapterOptions {
   rateLimitCircuitWindowSeconds?: number
   /** Rate limit 熔断打开时长 (s) */
   rateLimitCircuitOpenSeconds?: number
+  /** B7.6:QR confirmed 响应的 ilink_user_id,getUpdates 用它跟 bot_token
+   * 一起做 session 鉴权,不传时 iLink 返 -14 session expired */
+  ilinkUserId?: string
 }
 
 export interface InternalWeixinMessage {
@@ -125,7 +128,7 @@ export interface AdapterStatus {
 }
 
 export class WeixinAdapter {
-  private readonly opts: Required<Omit<WeixinAdapterOptions, 'fetchImpl' | 'mediaDir'>> & {
+  private readonly opts: Required<Omit<WeixinAdapterOptions, 'fetchImpl' | 'mediaDir' | 'ilinkUserId'>> & {
     fetchImpl: typeof fetch | undefined
     mediaDir: string
     sendChunkDelaySeconds: number
@@ -134,6 +137,7 @@ export class WeixinAdapter {
     rateLimitCircuitThreshold: number
     rateLimitCircuitWindowSeconds: number
     rateLimitCircuitOpenSeconds: number
+    ilinkUserId: string | undefined
   }
   private readonly client: ILinkClient
   private readonly contextStore = new ContextTokenStore()
@@ -175,12 +179,14 @@ export class WeixinAdapter {
       rateLimitCircuitThreshold: options.rateLimitCircuitThreshold ?? 1,
       rateLimitCircuitWindowSeconds: options.rateLimitCircuitWindowSeconds ?? 30.0,
       rateLimitCircuitOpenSeconds: options.rateLimitCircuitOpenSeconds ?? 30.0,
+      ilinkUserId: options.ilinkUserId,
       fetchImpl: options.fetchImpl,
     }
     const clientOpts: ILinkClientOptions = {
       baseUrl: this.opts.baseUrl,
       token: this.opts.token,
       fetchImpl: this.opts.fetchImpl,
+      ilinkUserId: this.opts.ilinkUserId,
     }
     this.client = new ILinkClient(clientOpts)
   }
@@ -282,12 +288,17 @@ export class WeixinAdapter {
   // ─── poll loop ───────────────────────────────────────────────
 
   private async _pollLoop(): Promise<void> {
+    console.warn(`[weixin.adapter] _pollLoop enter accountId=${this.opts.accountId} token=${this.opts.token.slice(0, 8)}...`)
     let syncBuf = await this.syncStore.load(this.opts.accountId)
     let timeoutMs = LONG_POLL_TIMEOUT_MS
+    let cycle = 0
     while (this.running) {
+      cycle += 1
       let response: Awaited<ReturnType<ILinkClient['getUpdates']>>
       try {
+        console.warn(`[weixin.adapter] getUpdates cycle=${cycle} syncBuf="${syncBuf}" (len=${syncBuf.length})`)
         response = await this.client.getUpdates(syncBuf, timeoutMs, this.pollAbort?.signal)
+        console.warn(`[weixin.adapter] getUpdates response: ret=${response.ret} errcode=${response.errcode} msgs=${(response.msgs ?? []).length} errmsg="${response.errmsg ?? ''}" newSyncBuf="${response.get_updates_buf ?? ''}" (len=${(response.get_updates_buf ?? '').length})`)
       } catch (err) {
         // AbortError 是 graceful shutdown
         if (err instanceof Error && (err.name === 'AbortError' || /aborted/i.test(err.message))) {

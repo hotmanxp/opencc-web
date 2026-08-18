@@ -68,6 +68,7 @@ const DEFAULT_DEPS: WeixinBotManagerDeps = {
     groupPolicy: settings.groupPolicy,
     allowFrom: settings.allowFrom,
     groupAllowFrom: settings.groupAllowFrom,
+    ilinkUserId: settings.ilinkUserId,
   }),
 }
 
@@ -81,7 +82,21 @@ export class WeixinBotManager {
   /** runtime.delta 缓冲:runtimes 流式输出按 sessionId 累积, runtime.done 触发 send */
   private outboundBuffers = new Map<string, { chatId: string; text: string }>()
   /** QR 登录当前活动状态 */
-  private activeSetup: { qrcodeId: string; qrcodeUrl: string; retries: number } | null = null
+  private activeSetup: {
+    qrcodeId: string
+    qrcodeUrl: string
+    retries: number
+    /** startSetup 时拿到的 settings(用户 settings 或 dummy),pollSetup confirmed 时用来 merge token */
+    baseSettings: WeixinBotSettings
+  } | null = null
+  /**
+   * QR 登录 confirmed 后落地的凭据 + 完整 settings 快照(merged)。
+   * settings.json 里通常没有 token(token 写到 accounts/<id>.json 0600),
+   * 所以 reload → start 时如果 deps.getSettings() 拿不到 token,从这个 cache
+   * 兜底启动 adapter。Plan 设计意图就是 QR wizard 之后 zai 自动 connect,
+   * 不依赖用户手改 settings.json。
+   */
+  private lastConfirmedCreds: WeixinBotSettings | null = null
 
   constructor(private deps: WeixinBotManagerDeps = DEFAULT_DEPS) {}
 
@@ -118,7 +133,29 @@ export class WeixinBotManager {
 
   /** 启动 weixin bot(best-effort) */
   async start(): Promise<void> {
-    const settings = this.deps.getSettings()
+    let settings = this.deps.getSettings()
+    // QR 登录 wizard 之后 deps.getSettings() 通常返回 settings.json 里的
+    // weixinBot 段(可能缺 token,因为 token 写到 accounts/<id>.json 0600
+    // 不进 settings.json),用 lastConfirmedCreds 兜底补齐。
+    if (settings && this.lastConfirmedCreds) {
+      const parsedProbe = WeixinBotSettingsSchema.safeParse(settings)
+      if (parsedProbe.success) {
+        const probe = parsedProbe.data
+        if (!probe.accountId || !probe.token) {
+          settings = {
+            ...this.lastConfirmedCreds,
+            ...settings,
+            accountId: probe.accountId || this.lastConfirmedCreds.accountId,
+            token: this.lastConfirmedCreds.token ?? probe.token,
+            baseUrl: probe.baseUrl ?? this.lastConfirmedCreds.baseUrl,
+            enabled: true,
+          }
+        }
+      }
+    } else if (!settings && this.lastConfirmedCreds) {
+      // settings.json 完全没 weixinBot 段 — 用 confirmed 凭据直接启动。
+      settings = { ...this.lastConfirmedCreds, enabled: true }
+    }
     if (!settings) {
       this.setState('unconfigured')
       return
@@ -277,29 +314,30 @@ export class WeixinBotManager {
 
   /** 启动 QR 登录流程 —— 调 iLink getBotQrcode,服务端渲染 QR PNG data URL */
   async startSetup(): Promise<{ qrcodeId: string; qrcodeUrl: string; pollUrl: string } | null> {
+    // 自动创建 adapter(不需要 connect,只是为了 iLink client)。
+    // settings 缺失时使用 dummy token,实际 QR 拿到后我们覆盖保存。
+    // baseSettings 同时缓存到 activeSetup,pollSetup confirmed 时用来 merge token。
+    const dummySettings: WeixinBotSettings = {
+      enabled: true,
+      accountId: 'pending',
+      token: 'pending',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+      cdnBaseUrl: 'https://novac2c.cdn.weixin.qq.com/c2c',
+      dmPolicy: 'pairing',
+      groupPolicy: 'disabled',
+      allowFrom: [],
+      groupAllowFrom: [],
+      textBatchDelaySeconds: 3.0,
+      textBatchSplitDelaySeconds: 5.0,
+      sendChunkDelaySeconds: 1.5,
+      sendChunkRetries: 4,
+      rateLimitCircuitThreshold: 1,
+      rateLimitCircuitOpenSeconds: 30.0,
+    }
+    const baseSettings = this.deps.getSettings() ?? dummySettings
     if (!this.adapter) {
-      // 自动创建 adapter(不需要 connect,只是为了 iLink client)。
-      // settings 缺失时使用 dummy token,实际 QR 拿到后我们覆盖保存。
-      const dummySettings: WeixinBotSettings = {
-        enabled: true,
-        accountId: 'pending',
-        token: 'pending',
-        baseUrl: 'https://ilinkai.weixin.qq.com',
-        cdnBaseUrl: 'https://novac2c.cdn.weixin.qq.com/c2c',
-        dmPolicy: 'pairing',
-        groupPolicy: 'disabled',
-        allowFrom: [],
-        groupAllowFrom: [],
-        textBatchDelaySeconds: 3.0,
-        textBatchSplitDelaySeconds: 5.0,
-        sendChunkDelaySeconds: 1.5,
-        sendChunkRetries: 4,
-        rateLimitCircuitThreshold: 1,
-        rateLimitCircuitOpenSeconds: 30.0,
-      }
-      const settings = this.deps.getSettings() ?? dummySettings
       try {
-        this.adapter = this.deps.createAdapter(settings)
+        this.adapter = this.deps.createAdapter(baseSettings)
       } catch {
         return null
       }
@@ -331,6 +369,7 @@ export class WeixinBotManager {
       qrcodeId,
       qrcodeUrl,
       retries: 0,
+      baseSettings,
     }
     return {
       qrcodeId,
@@ -358,16 +397,53 @@ export class WeixinBotManager {
       rawStatus === 'wait' ? 'waiting' :
       rawStatus === 'scaned' || rawStatus === 'scaned_but_redirect' ? 'scanned' :
       rawStatus
+    // B7.5 diag:raw iLink 响应 + normalize 后的 status,扫码链路卡哪一步
+    // (iLink 没收到扫码 vs 收到了但 zai 没收对字段)一目了然。
+    console.warn(`[weixin.pollSetup] raw=${JSON.stringify({
+      status: result.status,
+      ilink_bot_id: result.ilink_bot_id,
+      bot_token: result.bot_token ? `${result.bot_token.slice(0, 8)}...` : undefined,
+      account_id: result.account_id,
+      token: result.token ? `${result.token.slice(0, 8)}...` : undefined,
+      baseurl: result.baseurl,
+      base_url: result.base_url,
+      ilink_user_id: result.ilink_user_id,
+    })} normalized=${status}`)
     // iLink confirmed 时返回 `ilink_bot_id` + `bot_token` + `baseurl` (iLink 风格);
     // 兼容 hermes 旧 schema 的 `account_id` + `token` + `base_url`。
     const accountId = result.ilink_bot_id ?? result.account_id
     const token = result.bot_token ?? result.token
     const baseUrl = result.baseurl ?? result.base_url
+    const ilinkUserId = result.ilink_user_id
     if (status === 'confirmed' && accountId && token) {
+      console.warn(`[weixin.pollSetup] confirmed branch ENTER accountId=${accountId} token=${token.slice(0, 8)}... baseUrl=${baseUrl ?? '<none>'} ilinkUserId=${ilinkUserId ?? '<none>'}`)
       await this.saveAccount(accountId, token, baseUrl)
+      // 缓存 merged settings(token 来自 iLink,dummy 段从 startSetup 时拿到的
+      // baseSettings 继承),让 reload → start 时 settings.json 缺 token
+      // 也能正常 connect。
+      const baseSettings = this.activeSetup?.baseSettings ?? this.deps.getSettings()
+      if (baseSettings) {
+        this.lastConfirmedCreds = {
+          ...baseSettings,
+          accountId,
+          token,
+          baseUrl: baseUrl ?? baseSettings.baseUrl,
+          enabled: true,
+          // B7.6:ilink_user_id 是 QR confirmed 响应的额外字段,iLink getUpdates
+          // 可能用它跟 bot_token 一起做 session 鉴权。
+          ilinkUserId,
+        }
+        console.warn(`[weixin.pollSetup] lastConfirmedCreds set, accountId=${this.lastConfirmedCreds.accountId}`)
+      } else {
+        console.warn(`[weixin.pollSetup] WARN: no baseSettings available, lastConfirmedCreds NOT set (start() will hit accountId/token missing)`)
+      }
       this.activeSetup = null
       await this.reload()
+      console.warn(`[weixin.pollSetup] after reload, manager.state=${this._state} lastError=${this.lastError ?? '<none>'}`)
       return { status: 'confirmed', accountId, baseUrl }
+    }
+    if (status === 'confirmed') {
+      console.warn(`[weixin.pollSetup] confirmed but missing accountId/token — accountId=${accountId ?? '<none>'} token=${token ? token.slice(0, 8) + '...' : '<none>'}`)
     }
     if (status === 'expired') {
       if (this.activeSetup && this.activeSetup.retries < 3) {
@@ -386,6 +462,7 @@ export class WeixinBotManager {
               qrcodeId: freshId,
               qrcodeUrl: freshQrPng,
               retries: this.activeSetup.retries + 1,
+              baseSettings: this.activeSetup.baseSettings,
             }
             return { status: 'expired' }
           }

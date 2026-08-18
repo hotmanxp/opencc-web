@@ -71,13 +71,16 @@ function makeManager(opts: {
     qrcode: opts.qrcode,
     qrcodeStatusSequence: opts.qrcodeStatusSequence,
   })
+  // createAdapter 必须接受 manager 传入的 settings(可能来自 lastConfirmedCreds
+  // fallback,不是 opts.settings),不能用外层 opts 兜底 — 否则测试验不了
+  // QR wizard → reload → start 用 confirmed token connect 的真实路径。
   const manager = new WeixinBotManager({
     getSettings: () => opts.settings ?? null,
-    createAdapter: () => new WeixinAdapter({
-      accountId: opts.settings?.accountId ?? 'pending',
-      token: opts.settings?.token ?? 'pending',
-      baseUrl: opts.settings?.baseUrl,
-      cdnBaseUrl: opts.settings?.cdnBaseUrl,
+    createAdapter: (s) => new WeixinAdapter({
+      accountId: s.accountId ?? 'pending',
+      token: s.token ?? 'pending',
+      baseUrl: s.baseUrl,
+      cdnBaseUrl: s.cdnBaseUrl,
       fetchImpl,
       mediaDir: mkdtempSync(join(tmpdir(), 'zai-setup-')),
     }),
@@ -184,5 +187,39 @@ describe('WeixinBotManager — QR setup', () => {
     const { manager } = makeManager({})
     const a = await manager.loadAccount('nonexistent')
     expect(a).toBeNull()
+  })
+
+  // B7.5:复现"扫码通过后页面一直等待"。确认 + 自动 reload 之后,manager
+  // 状态必须变成 connected(否则前端 status 一直 unconfigured,fail 看到 QR
+  // 重置回"连接微信"按钮)。当前实现里 deps.getSettings 永远返回 null,reload
+  // → start 读到 null → unconfigured,前端就掉回"未配置"分支。
+  it('pollSetup confirmed → manager reload → state should reach connected (B7.5 regression)', async () => {
+    // 每个 case 用 unique token 避免 proper-lockfile 与同 test file 内 lock 互踩。
+    const tok = `tok-b75-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const { manager } = makeManager({
+      qrcode: { qrcode_id: 'qr-1', qrcode_url: 'https://wx.qq.com/qr/1.png' },
+      qrcodeStatusSequence: [{
+        status: 'confirmed',
+        account_id: 'a-real',
+        token: tok,
+        base_url: 'https://ilinkai.weixin.qq.com',
+      }],
+      // 注意:这是默认 settings=null —— QR 登录 wizard 应该能凭 accounts/<id>.json
+      // 启动 adapter,不应该依赖 settings.weixinBot.accountId/token。
+      settings: null,
+    })
+    await manager.startSetup()
+    const r = await manager.pollSetup('qr-1')
+    expect(r.status).toBe('confirmed')
+    // 等待 reload 内部 start 异步完成
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    const st = manager.status()
+    if (st.state !== 'connected') {
+      throw new Error(`expected connected, got state=${st.state} lastError=${st.lastError ?? '<none>'} configured=${st.configured} accountId=${st.accountId ?? '<none>'}`)
+    }
+    expect(st.state).toBe('connected')
+    expect(st.configured).toBe(true)
+    expect(st.accountId).toBe('a-real')
+    await manager.stop()
   })
 })
