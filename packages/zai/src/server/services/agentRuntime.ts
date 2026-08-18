@@ -402,6 +402,17 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       })
     }
   })
+
+  // Weixin 微信机器人后台 task — best-effort 启动,失败只 warn 不 throw。
+  // 启动顺序:在 initAgentRuntime 完成(runtime + eventBus 就绪)之后,manager
+  // 内部根据 zaiSettings.weixinBot 决定 enabled/disabled,失败仅 setState('failed')
+  // 不中断其它子系统。详见 docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md B3。
+  try {
+    const { getWeixinBotManager } = await import('./weixinBot/WeixinBotManager.js')
+    await getWeixinBotManager().start()
+  } catch (err) {
+    console.warn('[initAgentRuntime] weixinBot start failed:', err)
+  }
 }
 
 export async function getOrCreateAgentSession(): Promise<string | null> {

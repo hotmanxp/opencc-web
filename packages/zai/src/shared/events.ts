@@ -341,6 +341,30 @@ const StreamErrorEvent = z.object({
   }),
 })
 
+// weixin.inbound — 微信入站消息事件,sid-scoped (sessionId 命名约定:
+// `weixin:<accountId>:<chatType>:<chatId>`)。B3 阶段微信适配器
+// (services/weixinBot/WeixinAdapter.ts) 解析 iLink long-poll 消息后 emit,
+// 推给 SSE → Web UI InboxPreview,以及对端镜像订阅者。B3 阶段的
+// WeixinBotManager 通过订阅此事件 + eventBus 的 runtime.* 出站事件,
+// 完成双向桥。详见 docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md B3。
+const WeixinInboundEvent = z.object({
+  ...Base.shape,
+  type: z.literal('weixin.inbound'),
+  sessionId: z.string(),
+  accountId: z.string(),
+  chatType: z.enum(['dm', 'group']),
+  chatId: z.string(),
+  senderId: z.string(),
+  text: z.string(),
+  // 本地缓存路径(已下载 + AES-128-ECB 解密)
+  mediaPaths: z.array(z.string()).default([]),
+  mediaTypes: z.array(z.string()).default([]),
+  messageId: z.string(),
+  contextToken: z.string().nullable(),
+  // iLink 原始 payload,留作调试
+  raw: z.unknown().optional(),
+})
+
 // session/projection — host 算完的派生值快照按 key 整体推送（不是 diff）。
 // client 只做 higher-seq-wins 合并（seq 即投影单元的 watermark，复用全局
 // 事件 seq：emit 省略时由 eventBus 分配）。重连后 host 重算整体重发，
@@ -364,6 +388,7 @@ export const ServerEvent = z.discriminatedUnion('type', [
   ...InstanceEvent.options,
   ...QueueEvent.options,
   ...CommandEvent.options,
+  WeixinInboundEvent,
   StreamErrorEvent,
   ProjectionEvent,
 ])

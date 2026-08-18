@@ -65,6 +65,15 @@ export async function closeServer(): Promise<void> {
     console.warn('[runtimeLifecycle] shutdownBackgroundRuntime failed:', err);
   }
 
+  // Weixin 微信机器人后台 task — 关闭顺序:先停 bus 订阅(避免在 adapter
+  // 关期间又收到 mirror),再 disconnect adapter(in-flight fetch abort + 锁释放)。
+  try {
+    const { getWeixinBotManager } = await import('./weixinBot/WeixinBotManager.js');
+    await getWeixinBotManager().stop();
+  } catch (err) {
+    console.warn('[runtimeLifecycle] weixinBot stop failed:', err);
+  }
+
   if (registeredServer) {
     const { server, forceCloseAllConnections } = registeredServer;
     await new Promise<void>((resolve) => {
