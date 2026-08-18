@@ -351,14 +351,23 @@ export class WeixinBotManager {
     if (!this.adapter) return { status: 'gone' }
     const iLink = this.adapter.getClient()
     const result = await iLink.getQrcodeStatus(qrcodeId)
-    const status = result.status ?? 'waiting'
-    // iLink confirmed 时返回 `ilink_bot_id` (非 `account_id`);normalize 兼容
+    // iLink 真实 status 字段值: 'wait' / 'scaned' (少一个 n) / 'scaned_but_redirect' / 'expired' / 'confirmed'
+    // normalize 到 zai 内部统一值。
+    const rawStatus = result.status ?? 'wait'
+    const status: 'waiting' | 'scanned' | 'expired' | 'confirmed' =
+      rawStatus === 'wait' ? 'waiting' :
+      rawStatus === 'scaned' || rawStatus === 'scaned_but_redirect' ? 'scanned' :
+      rawStatus
+    // iLink confirmed 时返回 `ilink_bot_id` + `bot_token` + `baseurl` (iLink 风格);
+    // 兼容 hermes 旧 schema 的 `account_id` + `token` + `base_url`。
     const accountId = result.ilink_bot_id ?? result.account_id
-    if (status === 'confirmed' && accountId && result.token) {
-      await this.saveAccount(accountId, result.token, result.base_url)
+    const token = result.bot_token ?? result.token
+    const baseUrl = result.baseurl ?? result.base_url
+    if (status === 'confirmed' && accountId && token) {
+      await this.saveAccount(accountId, token, baseUrl)
       this.activeSetup = null
       await this.reload()
-      return { status: 'confirmed', accountId, baseUrl: result.base_url }
+      return { status: 'confirmed', accountId, baseUrl }
     }
     if (status === 'expired') {
       if (this.activeSetup && this.activeSetup.retries < 3) {
@@ -385,7 +394,7 @@ export class WeixinBotManager {
       this.activeSetup = null
       return { status: 'expired' }
     }
-    return { status: status as 'waiting' | 'scanned', accountId, baseUrl: result.base_url }
+    return { status, accountId, baseUrl }
   }
 
   /** 取消 QR 登录 */

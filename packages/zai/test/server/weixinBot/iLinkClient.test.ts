@@ -91,18 +91,21 @@ describe('ILinkClient', () => {
     expect(got.qrcode_url).toContain('qr1.png')
   })
 
-  it('getQrcodeStatus uses GET method', async () => {
+  it('getQrcodeStatus uses GET method + ?qrcode=<id> (NOT qrcode_id)', async () => {
     fetchImpl.mockResolvedValueOnce(jsonResponse({
       ret: 0,
       errcode: 0,
-      status: 'scanned',
+      status: 'wait', // iLink 真实字段值,不是 'waiting'
     }))
     const c = new ILinkClient({ baseUrl: 'https://test.local', token: 'tk', fetchImpl: fetchImpl as unknown as typeof fetch })
     const got = await c.getQrcodeStatus('qr1')
-    expect(got.status).toBe('scanned')
+    expect(got.status).toBe('wait')
     const [url, init] = fetchImpl.mock.calls[0]
     expect((init as RequestInit).method).toBe('GET')
-    expect(url).toContain('qrcode_id=qr1')
+    // iLink 真实 schema: ?qrcode=<id>(不是 qrcode_id=),错传会让 iLink 返回 ret=1
+    expect(String(url)).toContain('qrcode=qr1')
+    expect(String(url)).not.toContain('qrcode_id=qr1')
+    expect(String(url)).toContain('bot_type=3')
   })
 
   it('HTTP 500 throws with status + body preview', async () => {

@@ -185,8 +185,12 @@ export class ILinkClient {
   }
 
   async getQrcodeStatus(qrcodeId: string, botType = 3): Promise<ILinkGetQrcodeStatusResponseT> {
+    // iLink 真实 schema:query 参数是 `qrcode=<id>`(不是 `qrcode_id=`),iLink 用这个
+    // 区分 QR 流程的 token 与 long-poll 的 sync_buf 字段。
+    // 错传 `qrcode_id` 会让 iLink 返回 {"ret":1} 不带 errmsg,无从调试。
+    // 详见 hermes-agent gateway/platforms/weixin.py:1061。
     const raw = await this.get<unknown>(
-      `ilink/bot/get_qrcode_status?qrcode_id=${encodeURIComponent(qrcodeId)}&bot_type=${botType}`,
+      `ilink/bot/get_qrcode_status?qrcode=${encodeURIComponent(qrcodeId)}&bot_type=${botType}`,
       10_000,
     )
     return ILinkGetQrcodeStatusResponse.parse(raw)

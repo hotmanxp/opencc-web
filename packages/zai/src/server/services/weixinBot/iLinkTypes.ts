@@ -191,12 +191,20 @@ export const ILinkGetBotQrcodeResponse = ILinkResponse.extend({
 export type ILinkGetBotQrcodeResponseT = z.infer<typeof ILinkGetBotQrcodeResponse>
 
 export const ILinkGetQrcodeStatusResponse = ILinkResponse.extend({
-  status: z.enum(['waiting', 'scanned', 'confirmed', 'expired']).optional(),
+  // iLink 真实 schema(经 hermes-agent 验证):
+  //   status 字段: 'wait' / 'scaned' (注意拼写少一个 n) / 'scaned_but_redirect' / 'expired' / 'confirmed'
+  //   confirmed 响应: ilink_bot_id + bot_token + baseurl + ilink_user_id
+  // manager 内部 normalize 到 'waiting' / 'scanned' / 'expired' / 'confirmed',
+  // 同时兼容两端字段名(ilink_bot_id / account_id, bot_token / token 等)。
+  status: z.enum(['waiting', 'scanned', 'expired', 'confirmed', 'wait', 'scaned', 'scaned_but_redirect']).optional(),
   account_id: z.string().optional(),
-  // hermes 已验证:confirmed 时 server 返回 `ilink_bot_id` (不是 `account_id`)
   ilink_bot_id: z.string().optional(),
   token: z.string().optional(),
+  bot_token: z.string().optional(),
   base_url: z.string().optional(),
+  baseurl: z.string().optional(),
+  ilink_user_id: z.string().optional(),
+  redirect_host: z.string().optional(),
 })
 export type ILinkGetQrcodeStatusResponseT = z.infer<typeof ILinkGetQrcodeStatusResponse>
 
