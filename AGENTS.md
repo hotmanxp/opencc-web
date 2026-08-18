@@ -55,7 +55,6 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 - **MACRO stub**:`zai-server` 启动时需在 `enableOpenccConfigs` 内调 `installMacroStub()` 预填 `globalThis.MACRO`,否则 vendor 顶层 `MACRO.X` 引用 panic。
 - **CodeGraph 优先**:理解代码用 `codegraph_explore` 单调用,不要 grep + read 轮询;索引未初始化时跑 `codegraph init -i`。`codegraph_context` / `codegraph_trace` 当前 v1.4.1 不可用。
 - **端口使用(必查)**:启动 `zai dev` / `zai start` 或任何本地服务前,先 `lsof -i :<port>` 确认端口空闲再起。显式 `--port` / `--api-port` 被占用必须报错退出(EADDRINUSE,dev.ts/start.ts 已实现),**禁止**静默递增换端口——多个实例静默换端口共享同一 API key 是请求风暴根因(见 `docs/superpowers/plans/` 请求风暴修复)。只有未显式指定端口时才允许自动扫描(`ports.ts resolveServerPort`)。开发中如需多实例,用不同 `--port` 显式指定空闲端口。
-- **无远程仓库(不需推送)**:本代码库**未配置 git remote**(`git remote -v` 为空),所有 commit / tag 仅存在本地。提交代码或发布新版本后,**不需要询问推送、不需要执行任何 push**;遇到带有 `git push && git push --tags` 之类的流程说明时,按本地提交(commit + 本地 tag)处理即可。
 - **小步可逆**:实现细节见 `docs/DEVELOPMENT_REFERENCE.md`;设计/取舍见 `docs/superpowers/specs/` 与对应 `plans/`。
 - **测试粒度:功能改动后只跑相关单元测试**:`pnpm -r test` 全量跑 zai + zn-agent-core 全部 190+ 测试文件 / 1400+ 用例,冷启动 ~30s+ 解析 + 数十秒执行,日常反馈太慢。功能改动后只跑**直接受影响**的测试文件(以及它们的依赖文件若有连锁影响),用路径过滤:
   ```bash
@@ -112,7 +111,7 @@ pnpm release:major
 **已知坑点**：
 - `pnpm publish` 在 workspace 上下文中 auth 传递有问题，第二个包（`@zn-ai/zai`）会报 `ENEEDAUTH`，即使 `npm whoami` 正常。**解决方案**：脚本已内置 fallback 自动降级到 `npm publish`。
 - `npm publish` 不识别 pnpm 的 `workspace:*` 协议，如果降级到 `npm publish`，脚本会自动将 `workspace:*` 替换为实际版本号再发布，发布后恢复原始内容。
-- 本仓库**未配置远程仓库地址**(`git remote -v` 为空),发布后的 commit + tag 只留在本地,**不需要推送**。
+- 本仓库**配置了 origin**(github.com/hotmanxp/opencc-web.git),`release:*` 脚本发布后 commit + tag 默认只留本地,**不自动 push**;需要时显式 `git push origin main [--tags]`。
 
 ## 文档入口
 
@@ -132,4 +131,4 @@ pnpm release:major
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
 
-<!-- updated: 2026-08-17 -->
+<!-- updated: 2026-08-18 -->
