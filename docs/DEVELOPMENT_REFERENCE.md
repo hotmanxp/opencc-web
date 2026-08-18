@@ -336,3 +336,61 @@ if (r.type === 'cleared') { ... }   // discriminated union 自动收窄
 **限制**:
 - 当前 codegen 不支持 path 含动态参数(`:id` 等)的 route — 含 `:id` 的 entry 会被 skip 并 warn。迁移这些 route 时单独处理(e.g. 加 helper `withPathId` 拼接 `\`/sessions/${id}\``)。
 - 30 个 routes 渐进迁移的进度, 后续 plan 跟进 — 没有这条路线的统一 plan, 优先按"高频调用方"顺序迁(`agent.ts` → `cli.ts` → `plugin` → `git` → `fs`)。
+
+## 15. Weixin (微信) 个人号机器人适配器
+
+zai 通过长轮询适配 Tencent iLink Bot API 把个人微信接入 `eventBus` / SSE 通道,用户在手机微信里发消息即触发本地 zai agent,agent 回复自动推回微信。完整设计见 `docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md`,这里是关键的实现 trap。
+
+**架构**:
+- `packages/zai/src/server/services/weixinBot/WeixinAdapter.ts` — 核心适配器,实现 `connect / disconnect / _pollLoop` (long-poll) + 出站 `sendText / sendImage / sendDocument / sendVideo / sendVoice / sendTyping`,状态机 `disconnected → connecting → connected → reconnecting → failed`。
+- `packages/zai/src/server/services/weixinBot/WeixinBotManager.ts` — 单例 manager,init 读 `zaiSettings.weixinBot` 决定是否启 adapter,**启动失败仅 warn 不 throw**(不破坏 zai 主进程);双向桥:内部 emit `weixin.inbound` 到 eventBus,订阅 `runtime.delta` / `runtime.done` 把回复镜像给微信。
+- `packages/zai/src/server/services/weixinBot/iLinkClient.ts` — 7 个 iLink 端点(getUpdates / sendMessage / sendTyping / getConfig / getUploadUrl / getBotQrcode / getQrcodeStatus),所有 fetch 可注入,测试不依赖真实 iLink。
+- `packages/zai/src/shared/events.ts` — 新增 `weixin.inbound` 事件类型,sessionId 命名约定 `weixin:<accountId>:<chatType>:<chatId>`,sid-scoped(走 per-sid filter)。
+- `packages/zai/src/server/routes/weixin.ts` — REST API:`GET /api/weixin/status` / `POST /api/weixin/connect|disconnect|reload` / `POST /api/weixin/setup/start|confirm|cancel` / `GET /api/weixin/setup/poll?qrcodeId=`。
+- `packages/zai/src/web/src/components/WeixinBotPanel.tsx` — Vite + React Modal,4 section:状态 / QR 登录 / 设置 / 实时入站消息预览。在 SettingsDrawer header 按钮触发。
+
+**关键约束**:
+- iLink 协议层不依赖第三方 SDK,协议契约集中在 `services/weixinBot/iLinkTypes.ts` 和 `iLinkClient.ts`,后续升级只改这两处。
+- CDN URL 白名单硬编码(`services/weixinBot/mediaCrypto.ts` `WEIXIN_CDN_ALLOWLIST`),防 SSRF。
+- 账号锁用 `proper-lockfile` (`AccountLock.ts`),同一 token 只能单实例拉,锁文件 `~/.zai/weixin/locks/<sha256(token).hex>.lock`,**禁止**静默换端口。
+- 媒体加密 Node 内置 `crypto.createCipheriv` AES-128-ECB + PKCS#7,不引入 `crypto-js`。
+- QR 登录:B5 阶段 `Web UI` 走 `setup/start` + `setup/poll` 2s 轮询;**CLI 二维码** plan 提到的 `qrcode-terminal` 在 B7 阶段未部署,本期先 Web UI 路径。
+
+**WEIXIN_DIR 持久化 layout** (`services/paths.ts`):
+```
+~/.zai/weixin/
+├── accounts/         <accountId>.json (mode 0600, token 不进 settings.json)
+├── locks/            <sha256(token).hex>.lock
+├── sync/             <accountId>.buf (long-poll 续读游标)
+├── context-tokens/   <accountId>.json (per-peer context_token)
+└── media/            入站媒体缓存 + 出站媒体暂存
+```
+
+**iLink Bot 身份限制(已知,启动日志强制 WARN)**:
+QR 登录后拿到的是 iLink bot identity(`...@im.bot`),不是普通微信账号。最常见的落地形态是只 DM;group policy 默认 `disabled`,即使设置 `open` 也常常拿不到群事件 — 这是 iLink 端的限制,不是 Hermes/zai 的 bug。详细见 plan 文档 B7 与启动警告。
+
+**集成点**:
+- `services/agentRuntime.ts` `initAgentRuntime()` 末尾追加 `await getWeixinBotManager().start()`,best-effort 失败仅 warn。
+- `services/runtimeLifecycle.ts` `closeServer()` 末尾追加 `await getWeixinBotManager().stop()`:先 unsub eventBus,再 disconnect adapter(in-flight fetch abort + 锁释放)。
+
+**测试覆盖** (14 个 test file, 102 tests):
+- `services/weixinBot/iLinkClient.test.ts` — 7 端点 + 错误码 + AbortError
+- `MediaCrypto.test.ts` — AES round-trip + CDN 白名单 + parseKey
+- `stores/{ContextTokenStore,SyncBufStore,TypingTicketCache,MessageDeduplicator}.test.ts` — 持久化 + TTL
+- `accessPolicy.test.ts` — 4 DM + 3 group policy + chatType 推断
+- `debounce.test.ts` — 3s/5s 静默期 + 长 chunk 切长延迟
+- `WeixinAdapter.inbound.test.ts` — long-poll + dedup + access policy + session expired
+- `WeixinAdapter.outbound.test.ts` — 分块 / 重试 / 限流熔断 / 媒体上传
+- `outbound.test.ts` — splitText 文本分块
+- `WeixinBotManager.test.ts` — 启动 / 停止 / reload / 双向桥
+- `WeixinBotManager.setup.test.ts` — QR 登录状态机
+- `routes/weixin.test.ts` — supertest 全部 endpoint
+- `components/WeixinBotPanel.test.tsx` — happy-dom 组件测试
+
+**验收清单**:
+- [x] 102 tests pass, tsc 通过
+- [x] 同进程 long-poll,不破坏 zai 启动
+- [x] 启动失败 → 警告不 throw
+- [x] 事件总线双向桥(weixin.inbound in, runtime.delta/done out)
+- [x] SSR/SSRF 防护 (CDN 白名单 + token 锁 mode 0600)
+- [x] 真实浏览器验收:启动 dev 实例,打开 Settings → 微信机器人 → 显示状态 (unconfigured)
