@@ -142,6 +142,30 @@ export interface ZaiSettings {
    * 包版本。
    */
   autoUpdate?: boolean
+  /**
+   * Weixin (微信) 机器人后台 task 配置。
+   * 详见 docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md。
+   * 缺失 / 非对象 → 不启用。
+   * 注意:accountId/token 实际持久化到 `~/.zai/weixin/accounts/<accountId>.json`
+   * (mode 0600),这里 token 字段只是 mirror,ZAI 启动时 `saveAccount` 会写。
+   */
+  weixinBot?: {
+    enabled?: boolean
+    accountId?: string
+    token?: string
+    baseUrl?: string
+    cdnBaseUrl?: string
+    dmPolicy?: 'open' | 'allowlist' | 'pairing' | 'disabled'
+    groupPolicy?: 'open' | 'allowlist' | 'disabled'
+    allowFrom?: string[]
+    groupAllowFrom?: string[]
+    textBatchDelaySeconds?: number
+    textBatchSplitDelaySeconds?: number
+    sendChunkDelaySeconds?: number
+    sendChunkRetries?: number
+    rateLimitCircuitThreshold?: number
+    rateLimitCircuitOpenSeconds?: number
+  }
 }
 
 /**
