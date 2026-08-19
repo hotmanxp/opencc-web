@@ -27,7 +27,7 @@
  * onChange 由父组件 SettingsDrawer 接到 store / 写盘动作(后续阶段)。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Drawer, Modal, message } from 'antd'
+import { Button, Drawer, Modal, Select, message } from 'antd'
 import { WeixinBotPanel } from './WeixinBotPanel.js'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
@@ -291,7 +291,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
       }
       if (key === 'Enter') {
         e.preventDefault()
-        if (selectedRow?.kind === 'enum') openEnumOverlay(selectedRow)
+        if (selectedRow?.kind === 'enum' && selectedRow.key !== 'workMode') openEnumOverlay(selectedRow)
         else if (selectedRow?.kind === 'number') openNumberEdit(selectedRow)
         return
       }
@@ -386,7 +386,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
               const handleRowClick = () => {
                 setSelectedIdx(globalIdx)
                 if (row.kind === 'boolean') toggleBoolean(row)
-                else if (row.kind === 'enum') openEnumOverlay(row)
+                else if (row.kind === 'enum' && row.key !== 'workMode') openEnumOverlay(row)
                 else if (row.kind === 'number') openNumberEdit(row)
               }
               return (
@@ -477,6 +477,16 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                         +
                       </Button>
                     </span>
+                  ) : row.key === 'workMode' && row.kind === 'enum' ? (
+                    <Select
+                      size="small"
+                      value={row.value}
+                      options={row.options}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(value) => onChange?.(row.key, value)}
+                      style={{ minWidth: 82, maxWidth: 110 }}
+                      aria-label="选择工作模式"
+                    />
                   ) : (
                     <span
                       style={{
