@@ -143,4 +143,34 @@ router.post('/setup/cancel', async (_req: Request, res: Response) => {
   }
 })
 
+// diag:手动触发 sendText,绕开 inbound → agent → outbound 整条链,直接
+// 测"bot 已建 session 后 sendmessage 端点是否接受" —— curl 测过新 session
+// 会被 -1 invalid request 拒,但 bot ILinkClient 实例持续 polling 持有
+// 长寿命 session,可能 iLink 对这个 session 接受 sendmessage。
+// 仅在 WEIXIN_DIAG=1 时挂载,避免生产暴露。
+if (process.env.WEIXIN_DIAG === '1') {
+  const SendBody = z.object({
+    chatId: z.string().min(1),
+    text: z.string().min(1).max(4000),
+  })
+  router.post('/send', async (req: Request, res: Response) => {
+    try {
+      const parsed = SendBody.safeParse(req.body)
+      if (!parsed.success) {
+        res.status(400).json({ error: 'invalid body', details: parsed.error.flatten() })
+        return
+      }
+      const adapter = getManager().getAdapter()
+      if (!adapter) {
+        res.status(503).json({ error: 'adapter not initialized' })
+        return
+      }
+      const r = await adapter.sendText(parsed.data.chatId, parsed.data.text)
+      res.json(r)
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  })
+}
+
 export { router as weixinRouter }

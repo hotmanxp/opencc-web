@@ -19,7 +19,7 @@
  * 校验必需字段。原实现 zai iLinkClient 漏了这三个,导致 getUpdates 返 -14
  * SESSION_EXPIRED。
  */
-import { randomBytes } from 'node:crypto'
+import { createHash, randomBytes } from 'node:crypto'
 import { ILINK_BASE_URL } from './constants.js'
 import type {
   ILinkGetUpdatesResponseT,
@@ -49,6 +49,17 @@ export class ILinkClient {
   private readonly fetchImpl: typeof fetch
   private readonly defaultTimeoutMs: number
   private readonly ilinkUserId: string | undefined
+  /** diag:第一次 getUpdates 时打 body/headers,后续不再打 */
+  private dumpedGetUpdatesHeaders = false
+  /**
+   * 稳定 X-WECHAT-UIN:hermes-agent weixin.py:201 的 "random 4-byte b64"
+   * 注释里 zai 之前误解成每请求重 random,实际 hermes 那个 random 是模块级
+   * 单值(zai 复现后实测每请求 random → iLink 把每次长轮询当成不同 client,
+   * session 永远绑不上 user → ret=0 msgs=0,几十个 cycle 后被 iLink 主动
+   * -14 session timeout)。改成构造时 hash(token) 生成一次,跨 35s 长轮询
+   * 复用同一个 UIN,iLink 才能把同一 bot 的多次请求关联到同一个 session。
+   */
+  private readonly stableWechatUin: string
 
   constructor(opts: ILinkClientOptions) {
     this.baseUrl = opts.baseUrl.replace(/\/$/, '')
@@ -56,6 +67,10 @@ export class ILinkClient {
     this.fetchImpl = opts.fetchImpl ?? fetch
     this.defaultTimeoutMs = opts.defaultTimeoutMs ?? 15_000
     this.ilinkUserId = opts.ilinkUserId
+    // hash(token) → 4-byte → b64(ascii of uint32),与 hermes 的格式一致但跨请求稳定
+    const h = createHash('sha256').update(opts.token).digest()
+    const u32 = h.readUInt32BE(0)
+    this.stableWechatUin = Buffer.from(String(u32), 'utf-8').toString('base64')
   }
 
   /**
@@ -85,6 +100,8 @@ export class ILinkClient {
     payload: Record<string, unknown>,
     timeoutMs?: number,
     signal?: AbortSignal,
+    /** 额外 headers。getUpdates 用它传 X-WECHAT-UIN(iLink sendmessage 拒) */
+    extraHeaders?: Record<string, string>,
   ): Promise<T> {
     const body = JSON.stringify({ ...payload, base_info: this._baseInfo() })
     const url = `${this.baseUrl}/${endpoint}`
@@ -96,19 +113,28 @@ export class ILinkClient {
       else signal.addEventListener('abort', () => controller.abort(), { once: true })
     }
     try {
+      const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        // B7.6:iLink 用 AuthorizationType 区分 token 类型(bot / user),
+        // 不设会直接 -14。详见 hermes-agent weixin.py:213。
+        AuthorizationType: 'ilink_bot_token',
+        Authorization: `Bearer ${this.token}`,
+        // BUG(2026-08-19):iLink-App-Id / iLink-App-ClientVersion / X-WECHAT-UIN
+        // 这三个 header 仅 getupdates 端点合法 —— 实测 sendmessage 端点收到
+        // 任意一个都返 ret:-2 "invalid arguments",bot 出站被静默拒。提到
+        // getUpdates 专属 header(extraHeaders),其它端点不发送。
+      }
+      if (extraHeaders) Object.assign(headers, extraHeaders)
+      // diag:第一次 getUpdates 时把实际发出的 body + headers 全打出来,
+      // 排查"session 活着但 msgs=0"是哪个字段不对。
+      if (endpoint === 'ilink/bot/getupdates' && !this.dumpedGetUpdatesHeaders) {
+        this.dumpedGetUpdatesHeaders = true
+        console.warn(`[weixin.ilinkClient] first getUpdates body=${body}`)
+        console.warn(`[weixin.ilinkClient] first getUpdates headers=${JSON.stringify(headers)}`)
+      }
       const res = await this.fetchImpl(url, {
         method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          // B7.6:iLink 用 AuthorizationType 区分 token 类型(bot / user),
-          // 不设会直接 -14。详见 hermes-agent weixin.py:213。
-          AuthorizationType: 'ilink_bot_token',
-          Authorization: `Bearer ${this.token}`,
-          'iLink-App-Id': 'bot',
-          'iLink-App-ClientVersion': '0x020200',
-          // B7.6:伪微信 UIN,iLink 服务端 session 校验需要。
-          'X-WECHAT-UIN': this._randomWechatUin(),
-        },
+        headers,
         body,
         signal: controller.signal,
       })
@@ -164,14 +190,22 @@ export class ILinkClient {
         'ilink/bot/getupdates',
         {
           get_updates_buf: syncBuf,
-          // B7.6:QR confirmed 响应里有 ilink_user_id 但 zai 之前没用,iLink
-          // 服务端可能用它跟 bot_token 一起做 session 鉴权 —— 不带时返 -14
-          // session expired。Hermes-agent 在原注释里有引用但具体字段用法
-          // 没记录;这里把 ilink_user_id 当成 user_id 字段带上试。
+          // 2026-08-19:实测 iLink 路由需要 bot_id(来自 iLink 自己的 bot 身份
+          // 识别,不是 user_id)。不传 bot_id 时 iLink 把 getUpdates 视为匿名
+          // pull,绑定不到具体 bot,msgs 永远 0。user_id 仍带 —— 用来给 iLink
+          // 指明"绑定的 WeChat user",配合 bot_id 一起做 session routing。
+          bot_id: this.token.split(':')[0] ?? this.token,  // token 格式 <bot_id>:<hex>
           ...(this.ilinkUserId ? { user_id: this.ilinkUserId } : {}),
         },
         timeoutMs,
         signal,
+        // BUG(2026-08-19):这三个 header 仅 getupdates 端点合法 —— 其它端点
+        // 收到任意一个都返 ret:-2 "invalid arguments",bot 出站被静默拒。
+        {
+          'X-WECHAT-UIN': this.stableWechatUin,
+          'iLink-App-Id': 'bot',
+          'iLink-App-ClientVersion': '0x020200',
+        },
       )
       return ILinkGetUpdatesResponse.parse(raw)
     } catch (err) {

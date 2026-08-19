@@ -257,6 +257,17 @@ export class WeixinAdapter {
       this.setState('failed', this.lastError)
     })
     this.setState('connected')
+    // diag:测试 iLink 是否要求 bot 先 outbound 一次才会路由入站消息
+    // (假设 1)。WEIXIN_TEST_GREET=1 时在 connect 后 1s 给绑定 user 发
+    // "bot online (test)"。如果 WeChat 收到且后续入站消息开始流通,说明
+    // iLink 确实需要 outbound 激活 session。
+    if (process.env.WEIXIN_TEST_GREET === '1' && this.opts.ilinkUserId) {
+      setTimeout(() => {
+        this.sendText(this.opts.ilinkUserId!, 'bot online (test greet)').catch((err) => {
+          console.warn(`[weixin.adapter] greet send failed: ${(err as Error).message}`)
+        })
+      }, 1000)
+    }
     return true
   }
 
@@ -288,7 +299,7 @@ export class WeixinAdapter {
   // ─── poll loop ───────────────────────────────────────────────
 
   private async _pollLoop(): Promise<void> {
-    console.warn(`[weixin.adapter] _pollLoop enter accountId=${this.opts.accountId} token=${this.opts.token.slice(0, 8)}...`)
+    console.warn(`[weixin.adapter] _pollLoop enter accountId=${this.opts.accountId} token=${this.opts.token.slice(0, 8)}... ilinkUserId=${this.opts.ilinkUserId ?? '<none>'}`)
     let syncBuf = await this.syncStore.load(this.opts.accountId)
     let timeoutMs = LONG_POLL_TIMEOUT_MS
     let cycle = 0
@@ -296,6 +307,13 @@ export class WeixinAdapter {
       cycle += 1
       let response: Awaited<ReturnType<ILinkClient['getUpdates']>>
       try {
+        // diag:把实际发给 iLink 的 payload 完整打印,排查为什么 session
+        // 一直在但 msgs=0(可能 user_id 没带 / base_info 不对 / X-WECHAT-UIN
+        // random 每次变,导致 session 永远绑不上 user)。
+        if (cycle === 1) {
+          console.warn(`[weixin.adapter] getUpdates payload=`,
+            JSON.stringify({ get_updates_buf: syncBuf, user_id: this.opts.ilinkUserId ?? '<none>' }))
+        }
         console.warn(`[weixin.adapter] getUpdates cycle=${cycle} syncBuf="${syncBuf}" (len=${syncBuf.length})`)
         response = await this.client.getUpdates(syncBuf, timeoutMs, this.pollAbort?.signal)
         console.warn(`[weixin.adapter] getUpdates response: ret=${response.ret} errcode=${response.errcode} msgs=${(response.msgs ?? []).length} errmsg="${response.errmsg ?? ''}" newSyncBuf="${response.get_updates_buf ?? ''}" (len=${(response.get_updates_buf ?? '').length})`)
@@ -349,6 +367,11 @@ export class WeixinAdapter {
       }
 
       const msgs = response.msgs ?? []
+      // 2026-08-19 diag:前 3 个 cycle msgs=0 时 dump 完整 raw 响应,看 iLink
+      // 实际返什么字段 —— 也许 msgs 在 messages/data/events 等其它名字下。
+      if (msgs.length === 0 && cycle <= 3) {
+        console.warn(`[weixin.adapter] getUpdates empty cycle=${cycle} raw=${JSON.stringify(response).slice(0, 600)}`)
+      }
       // 并发派发,互不阻塞
       for (const m of msgs) {
         // 异步,不等待

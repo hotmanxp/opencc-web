@@ -66,6 +66,7 @@ function makeManager(opts: {
   qrcode?: { qrcode_id?: string; qrcode_url?: string }
   qrcodeStatusSequence?: Array<{ status?: string; account_id?: string; token?: string; base_url?: string }>
   settings?: WeixinBotSettings | null
+  createAdapter?: (s: WeixinBotSettings) => WeixinAdapter
 }) {
   const fetchImpl = mockFetchRouter({
     qrcode: opts.qrcode,
@@ -76,14 +77,14 @@ function makeManager(opts: {
   // QR wizard → reload → start 用 confirmed token connect 的真实路径。
   const manager = new WeixinBotManager({
     getSettings: () => opts.settings ?? null,
-    createAdapter: (s) => new WeixinAdapter({
+    createAdapter: opts.createAdapter ?? ((s) => new WeixinAdapter({
       accountId: s.accountId ?? 'pending',
       token: s.token ?? 'pending',
       baseUrl: s.baseUrl,
       cdnBaseUrl: s.cdnBaseUrl,
       fetchImpl,
       mediaDir: mkdtempSync(join(tmpdir(), 'zai-setup-')),
-    }),
+    })),
   })
   return { manager, fetchImpl }
 }
@@ -147,7 +148,7 @@ describe('WeixinBotManager — QR setup', () => {
     const s = await manager.pollSetup('qr-1')
     expect(s.status).toBe('confirmed')
     expect(s.accountId).toBe('a-real')
-    expect(saveSpy).toHaveBeenCalledWith('a-real', 'tok-real', 'https://ilinkai.weixin.qq.com')
+    expect(saveSpy).toHaveBeenCalledWith('a-real', 'tok-real', 'https://ilinkai.weixin.qq.com', undefined)
     expect(reloadSpy).toHaveBeenCalled()
     expect(manager.getActiveSetup()).toBeNull()
   })
@@ -220,6 +221,75 @@ describe('WeixinBotManager — QR setup', () => {
     expect(st.state).toBe('connected')
     expect(st.configured).toBe(true)
     expect(st.accountId).toBe('a-real')
+    await manager.stop()
+  })
+
+  // B7.5 修复:扫描通过后,即使 deps.getSettings() 返回的 settings.json 里
+  // 还有旧的 accountId+token(用户之前手动配过),iLink 给的新 bot_token +
+  // ilink_user_id 必须覆盖。否则 adapter 用旧 token 调 getUpdates,iLink 把
+  // session 当成未绑定的 user → ret=0 msgs=0,UI 一直 connected 但收不到消息。
+  it('pollSetup confirmed → new token + ilinkUserId override stale settings.json', async () => {
+    const tok = `tok-ovr-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    // 模拟生产场景:settings.json 已有 weixinBot 配置(手动配过,token 已过期)
+    const staleSettings: WeixinBotSettings = {
+      enabled: true,
+      accountId: 'old_acct@im.bot',
+      token: 'stale_old_token_xxx',
+      baseUrl: 'https://ilinkai.weixin.qq.com',
+      cdnBaseUrl: 'https://novac2c.cdn.weixin.qq.com/c2c',
+      dmPolicy: 'pairing',
+      groupPolicy: 'disabled',
+      allowFrom: [],
+      groupAllowFrom: [],
+      textBatchDelaySeconds: 3.0,
+      sendChunkDelaySeconds: 1.5,
+      rateLimitCircuitOpenSeconds: 30.0,
+    }
+    // createAdapter spy 用来捕获 reload → start 时 manager 传给 factory 的
+    // settings,确认 ilinkUserId + 新 token 真的进了 adapter。
+    // fetchImpl 必须能正确返 get_qrcode_status=confirmed,否则 reload 不会触发。
+    const spyFetch = mockFetchRouter({
+      qrcode: { qrcode_id: 'qr-1', qrcode_url: 'https://wx.qq.com/x.png' },
+      qrcodeStatusSequence: [{
+        status: 'confirmed',
+        ilink_bot_id: 'new_acct@im.bot',
+        bot_token: tok,
+        baseurl: 'https://ilinkai.weixin.qq.com',
+        ilink_user_id: 'o9cq805tXobyYY0PdSQvXYvkV1Bg@im.wechat',
+      }],
+    })
+    const createAdapterSpy = vi.fn((s: WeixinBotSettings) => new WeixinAdapter({
+      accountId: s.accountId ?? 'pending',
+      token: s.token ?? 'pending',
+      baseUrl: s.baseUrl,
+      cdnBaseUrl: s.cdnBaseUrl,
+      ilinkUserId: s.ilinkUserId,
+      fetchImpl: spyFetch,
+      mediaDir: mkdtempSync(join(tmpdir(), 'zai-stale-')),
+    }))
+    const { manager } = makeManager({
+      qrcode: { qrcode_id: 'qr-1', qrcode_url: 'https://wx.qq.com/qr/1.png' },
+      qrcodeStatusSequence: [{
+        status: 'confirmed',
+        // iLink confirmed 响应(真实 schema 是 ilink_bot_id + bot_token + ilink_user_id)
+        ilink_bot_id: 'new_acct@im.bot',
+        bot_token: tok,
+        baseurl: 'https://ilinkai.weixin.qq.com',
+        ilink_user_id: 'o9cq805tXobyYY0PdSQvXYvkV1Bg@im.wechat',
+      }],
+      settings: staleSettings,
+      createAdapter: createAdapterSpy,
+    })
+    await manager.startSetup()
+    await manager.pollSetup('qr-1')
+    await new Promise((resolve) => setTimeout(resolve, 50))
+    // reload → start 调用 createAdapter,捕获最后一次调用(应该是 reload 后的)
+    expect(createAdapterSpy).toHaveBeenCalled()
+    const passed = createAdapterSpy.mock.calls[createAdapterSpy.mock.calls.length - 1]![0]
+    expect(passed.accountId).toBe('new_acct@im.bot')     // 新 accountId 覆盖
+    expect(passed.token).toBe(tok)                       // 新 token 覆盖
+    expect(passed.ilinkUserId).toBe('o9cq805tXobyYY0PdSQvXYvkV1Bg@im.wechat') // ilinkUserId 必须传,否则 getUpdates 不带 user_id,iLink session 不绑定 user
+    expect(passed.dmPolicy).toBe('pairing')              // settings.json 里的策略保留
     await manager.stop()
   })
 })

@@ -134,22 +134,49 @@ export class WeixinBotManager {
   /** 启动 weixin bot(best-effort) */
   async start(): Promise<void> {
     let settings = this.deps.getSettings()
+    // 兜底:zai 重启后 `deps.getSettings()` 返回 null(生产 wiring 没接 zaiSettings),
+    // lastConfirmedCreds 是 in-memory 已清空,这时从 `accounts/` 挑 mtime 最新的
+    // 那个 bot 凭据补上 token / ilinkUserId,免得每次重启都重新扫码。
+    if (!settings) {
+      const persisted = await this.loadLatestAccount()
+      if (persisted && persisted.token) {
+        // 只放 token 必需字段,其它用 schema 默认值
+        const partial: Partial<WeixinBotSettings> = {
+          enabled: true,
+          accountId: persisted.accountId,
+          token: persisted.token,
+          baseUrl: persisted.baseUrl ?? 'https://ilinkai.weixin.qq.com',
+          ilinkUserId: persisted.ilinkUserId,
+        }
+        const parsedDefault = WeixinBotSettingsSchema.safeParse(partial)
+        if (parsedDefault.success) {
+          settings = parsedDefault.data
+          console.warn(`[weixin.manager] auto-restored from accounts/: accountId=${persisted.accountId} ilinkUserId=${persisted.ilinkUserId ?? '<none>'}`)
+        }
+      }
+    }
     // QR 登录 wizard 之后 deps.getSettings() 通常返回 settings.json 里的
     // weixinBot 段(可能缺 token,因为 token 写到 accounts/<id>.json 0600
     // 不进 settings.json),用 lastConfirmedCreds 兜底补齐。
+    //
+    // B7.5 fix:iLink 重新扫码后 lastConfirmedCreds 里的 accountId / token /
+    // baseUrl / ilinkUserId 是服务端最新 session 绑定凭据,**必须始终覆盖**
+    // settings.json 里同名字段。原实现要求 `!probe.accountId || !probe.token`
+    // 才合并,settings.json 里有任何(过期)token 都会让 adapter 用旧 token
+    // 调 getUpdates,iLink 把 session 当成未绑定的 user → ret=0 msgs=0,
+    // UI 一直 connected 但收不到消息(根因:iLinkClient.getUpdates 不带
+    // user_id 就不知道往哪个 WeChat user 推消息)。这里改成无条件覆盖
+    // 鉴权字段,保留 settings 里的 dmPolicy / groupPolicy / allowFrom。
     if (settings && this.lastConfirmedCreds) {
       const parsedProbe = WeixinBotSettingsSchema.safeParse(settings)
       if (parsedProbe.success) {
-        const probe = parsedProbe.data
-        if (!probe.accountId || !probe.token) {
-          settings = {
-            ...this.lastConfirmedCreds,
-            ...settings,
-            accountId: probe.accountId || this.lastConfirmedCreds.accountId,
-            token: this.lastConfirmedCreds.token ?? probe.token,
-            baseUrl: probe.baseUrl ?? this.lastConfirmedCreds.baseUrl,
-            enabled: true,
-          }
+        settings = {
+          ...parsedProbe.data,
+          accountId: this.lastConfirmedCreds.accountId,
+          token: this.lastConfirmedCreds.token,
+          baseUrl: this.lastConfirmedCreds.baseUrl ?? parsedProbe.data.baseUrl,
+          ilinkUserId: this.lastConfirmedCreds.ilinkUserId,
+          enabled: parsedProbe.data.enabled ?? true,
         }
       }
     } else if (!settings && this.lastConfirmedCreds) {
@@ -173,6 +200,17 @@ export class WeixinBotManager {
     if (!s.accountId || !s.token) {
       this.setState('failed', 'accountId/token missing')
       return
+    }
+    // 兜底:settings/lastConfirmedCreds 都缺 ilinkUserId 时,从 accounts/<id>.json
+    // 补上 — iLink getUpdates 没 ilinkUserId 不知道往哪个 WeChat user 路由,
+    // 即使 session 活着 msgs 永远 0。restart 后 in-memory 状态全丢,这是
+    // 唯一能拿回 ilinkUserId 的地方。
+    if (!s.ilinkUserId) {
+      const persisted = await this.loadAccount(s.accountId)
+      if (persisted?.ilinkUserId) {
+        s.ilinkUserId = persisted.ilinkUserId
+        console.warn(`[weixin.manager] ilinkUserId auto-restored from accounts/${s.accountId}.json`)
+      }
     }
     try {
       await ensureWeixinDirs()
@@ -218,21 +256,94 @@ export class WeixinBotManager {
   }
 
   /** 上传凭据(用于 QR 登录) */
-  async saveAccount(accountId: string, token: string, baseUrl?: string): Promise<void> {
-    await ensureWeixinDirs()
+  async saveAccount(
+    accountId: string,
+    token: string,
+    baseUrl?: string,
+    ilinkUserId?: string,
+  ): Promise<void> {
     const safe = accountId.replace(/[^a-zA-Z0-9_@.-]/g, '_')
-    const path = join(WEIXIN_ACCOUNTS_DIR, `${safe}.json`)
-    const payload = { accountId, token, baseUrl: baseUrl ?? 'https://ilinkai.weixin.qq.com', createdAt: new Date().toISOString() }
+    // 用函数版路径,跟 loadAccount 走同一份目录(测试 ZAI_DATA_DIR 覆盖)
+    const { weixinAccountsDir } = await import('../paths.js')
+    const accountsDir = weixinAccountsDir()
+    // 走前先 mkdir parent(测试 ZAI_DATA_DIR 临时目录,ensureWeixinDirs 用的是
+    // 模块顶层的 const 路径,跟函数版路径不同,这里直接兜底)
+    const { mkdir } = await import('node:fs/promises')
+    await mkdir(accountsDir, { recursive: true })
+    const path = join(accountsDir, `${safe}.json`)
+    const payload = {
+      accountId,
+      token,
+      baseUrl: baseUrl ?? 'https://ilinkai.weixin.qq.com',
+      ilinkUserId,
+      createdAt: new Date().toISOString(),
+    }
     await writeFile(path, JSON.stringify(payload, null, 2), { mode: 0o600 })
   }
 
-  async loadAccount(accountId: string): Promise<{ token: string; baseUrl?: string } | null> {
+  async loadAccount(accountId: string): Promise<{ token: string; baseUrl?: string; ilinkUserId?: string } | null> {
     const safe = accountId.replace(/[^a-zA-Z0-9_@.-]/g, '_')
-    const path = join(WEIXIN_ACCOUNTS_DIR, `${safe}.json`)
+    // 用函数版路径,每次重新读 env(测试用 ZAI_DATA_DIR 覆盖)
+    const { weixinAccountsDir } = await import('../paths.js')
+    const path = join(weixinAccountsDir(), `${safe}.json`)
     if (!existsSync(path)) return null
     try {
-      const raw = JSON.parse(await readFile(path, 'utf-8')) as { token: string; baseUrl?: string }
-      return { token: raw.token, baseUrl: raw.baseUrl }
+      const raw = JSON.parse(await readFile(path, 'utf-8')) as {
+        token: string
+        baseUrl?: string
+        ilinkUserId?: string
+      }
+      return { token: raw.token, baseUrl: raw.baseUrl, ilinkUserId: raw.ilinkUserId }
+    } catch {
+      return null
+    }
+  }
+
+  /**
+   * 启动兜底:zai 重启后 `deps.getSettings()` 拿不到 token(生产 wiring 没接
+   * zaiSettings),lastConfirmedCreds 是 in-memory 也没了,但 `accounts/<id>.json`
+   * 持久化了 QR 扫码的 accountId/token/ilinkUserId。挑 mtime 最新的那一个
+   * 恢复,免得每次重启都重新扫码。
+   *
+   * 设计取舍:不删除老 accounts(用户可能想换回老 bot),不强制覆盖 deps
+   * settings,只补 settings 缺失的 token/ilinkUserId。settings.json 真有
+   * weixinBot 段时仍以 settings 为准(用户显式配置优先)。
+   */
+  async loadLatestAccount(): Promise<{
+    accountId: string
+    token: string
+    baseUrl?: string
+    ilinkUserId?: string
+  } | null> {
+    try {
+      const { readdir, stat } = await import('node:fs/promises')
+      // 用函数版路径,每次重新读 env(测试用 ZAI_DATA_DIR 覆盖;ESM import
+      // 提升早于 env 设值,模块顶层 WEIXIN_ACCOUNTS_DIR 已被冻结)
+      const { weixinAccountsDir } = await import('../paths.js')
+      const accountsDir = weixinAccountsDir()
+      const files = (await readdir(accountsDir)).filter((f) => f.endsWith('.json'))
+      if (files.length === 0) return null
+      let latest: { file: string; mtime: number } | null = null
+      for (const f of files) {
+        const p = join(accountsDir, f)
+        const s = await stat(p)
+        if (!latest || s.mtimeMs > latest.mtime) latest = { file: f, mtime: s.mtimeMs }
+      }
+      if (!latest) return null
+      const raw = JSON.parse(
+        await readFile(join(accountsDir, latest.file), 'utf-8'),
+      ) as {
+        accountId: string
+        token: string
+        baseUrl?: string
+        ilinkUserId?: string
+      }
+      return {
+        accountId: raw.accountId,
+        token: raw.token,
+        baseUrl: raw.baseUrl,
+        ilinkUserId: raw.ilinkUserId,
+      }
     } catch {
       return null
     }
@@ -417,26 +528,40 @@ export class WeixinBotManager {
     const ilinkUserId = result.ilink_user_id
     if (status === 'confirmed' && accountId && token) {
       console.warn(`[weixin.pollSetup] confirmed branch ENTER accountId=${accountId} token=${token.slice(0, 8)}... baseUrl=${baseUrl ?? '<none>'} ilinkUserId=${ilinkUserId ?? '<none>'}`)
-      await this.saveAccount(accountId, token, baseUrl)
+      await this.saveAccount(accountId, token, baseUrl, ilinkUserId)
       // 缓存 merged settings(token 来自 iLink,dummy 段从 startSetup 时拿到的
       // baseSettings 继承),让 reload → start 时 settings.json 缺 token
       // 也能正常 connect。
-      const baseSettings = this.activeSetup?.baseSettings ?? this.deps.getSettings()
-      if (baseSettings) {
-        this.lastConfirmedCreds = {
-          ...baseSettings,
-          accountId,
-          token,
-          baseUrl: baseUrl ?? baseSettings.baseUrl,
-          enabled: true,
-          // B7.6:ilink_user_id 是 QR confirmed 响应的额外字段,iLink getUpdates
-          // 可能用它跟 bot_token 一起做 session 鉴权。
-          ilinkUserId,
-        }
-        console.warn(`[weixin.pollSetup] lastConfirmedCreds set, accountId=${this.lastConfirmedCreds.accountId}`)
-      } else {
-        console.warn(`[weixin.pollSetup] WARN: no baseSettings available, lastConfirmedCreds NOT set (start() will hit accountId/token missing)`)
+      //
+      // B7.5 fix:baseSettings 可能为 null(用户没配 settings.json.weixinBot
+      // 段、且 startSetup 拿不到 dummySettings 兜底)。iLink 给的凭据是
+      // session 绑定的唯一真值,必须无条件写入 lastConfirmedCreds,start()
+      // 后续拿这个 cache 启动 adapter,不能因 baseSettings 缺失而丢新凭据。
+      const base: Partial<WeixinBotSettings> =
+        this.activeSetup?.baseSettings ?? this.deps.getSettings() ?? {}
+      const creds: WeixinBotSettings = {
+        enabled: true,
+        accountId,
+        token,
+        baseUrl: baseUrl ?? base.baseUrl ?? 'https://ilinkai.weixin.qq.com',
+        cdnBaseUrl: base.cdnBaseUrl ?? 'https://novac2c.cdn.weixin.qq.com/c2c',
+        dmPolicy: base.dmPolicy ?? 'pairing',
+        groupPolicy: base.groupPolicy ?? 'disabled',
+        allowFrom: base.allowFrom ?? [],
+        groupAllowFrom: base.groupAllowFrom ?? [],
+        textBatchDelaySeconds: base.textBatchDelaySeconds ?? 3.0,
+        textBatchSplitDelaySeconds: base.textBatchSplitDelaySeconds ?? 5.0,
+        sendChunkDelaySeconds: base.sendChunkDelaySeconds ?? 1.5,
+        sendChunkRetries: base.sendChunkRetries ?? 4,
+        rateLimitCircuitThreshold: base.rateLimitCircuitThreshold ?? 1,
+        rateLimitCircuitOpenSeconds: base.rateLimitCircuitOpenSeconds ?? 30.0,
+        // B7.6:ilink_user_id 是 QR confirmed 响应的额外字段,iLink getUpdates
+        // 用它跟 bot_token 一起做 session 鉴权 — 不带时 session 不绑定 user,
+        // iLink 返 ret=0 msgs=0 假象成功。
+        ilinkUserId,
       }
+      this.lastConfirmedCreds = creds
+      console.warn(`[weixin.pollSetup] lastConfirmedCreds set, accountId=${creds.accountId} ilinkUserId=${creds.ilinkUserId ?? '<none>'}`)
       this.activeSetup = null
       await this.reload()
       console.warn(`[weixin.pollSetup] after reload, manager.state=${this._state} lastError=${this.lastError ?? '<none>'}`)

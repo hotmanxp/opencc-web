@@ -83,6 +83,26 @@ describe('WeixinBotManager', () => {
     expect(manager.status().enabled).toBe(false)
   })
 
+  // 兜底:zai 重启后 deps.getSettings() 拿不到 token(生产 wiring 没接
+  // zaiSettings),但 accounts/<id>.json 持久化了 QR 凭据 — start()
+  // 自动从 accounts/ 挑 mtime 最新的恢复,免得每次重启都重新扫码。
+  it('start() auto-restores from accounts/ when deps.getSettings() returns null (no re-QR needed on restart)', async () => {
+    const tok = `tok-restart-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
+    const accountId = 'restart-bot@im.bot'
+    const ilinkUserId = 'o9cq80restart_uid@im.wechat'
+    // 先存一份 account 到当前 ZAI_DATA_DIR(测试 setup 已设)
+    const { manager: m1 } = makeManager()
+    await m1.saveAccount(accountId, tok, 'https://ilinkai.weixin.qq.com', ilinkUserId)
+
+    // 新 manager,deps.getSettings() 返回 null,但 accounts/ 里有 bot
+    const { manager: m2, adapterRef } = makeManager()  // getSettings 默认 () => null
+    await m2.start()
+    expect(m2.state()).toBe('connected')
+    expect(m2.status().accountId).toBe(accountId)
+    expect(adapterRef.current).not.toBeNull()
+    await m2.stop()
+  })
+
   it('start() with enabled=false → state=disabled', async () => {
     const { manager } = makeManager({
       getSettings: () => ({ enabled: false, accountId: 'acct', token: 'tk' }),
