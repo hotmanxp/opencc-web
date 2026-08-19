@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import { Layout as AntLayout, Menu, Switch, Tag } from 'antd';
+import { Button, Layout as AntLayout, Menu, Switch, Tag } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
   ToolOutlined,
@@ -17,7 +17,7 @@ import {
 import { useAppStore } from '../store/useAppStore';
 import { useAgentStore } from '../store/useAgentStore';
 import { api } from '../lib/api';
-import type { OutputStyle, Theme } from '../../shared/settings.js';
+import type { OutputStyle, Theme, WorkMode } from '../../shared/settings.js';
 import ZnLogo from './ZnLogo';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useEffectiveTheme } from '../hooks/useEffectiveTheme.js';
@@ -42,7 +42,7 @@ const ALL_MENU_ITEMS = [
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setWorkMode, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate, openSettingsDrawer } = useAppStore();
   // 顶层 zai 实例(独立启动 / 顶层 managed supervisor)显示"实例管理"菜单;
   // instance 子实例(被 instance manager 派生的子进程)不显示 — 它不能 spawn
   // 孙实例,给它看到这个入口只会跳到 404 页面迷惑用户。
@@ -124,7 +124,7 @@ export default function Layout() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<{ outputStyle?: OutputStyle; theme?: Theme; maxVisibleMessages?: number; defaultSplitScreen?: boolean }>(
+      .get<{ outputStyle?: OutputStyle; theme?: Theme; workMode?: WorkMode; maxVisibleMessages?: number; defaultSplitScreen?: boolean }>(
         '/agent/settings',
       )
       .then((data) => {
@@ -139,6 +139,13 @@ export default function Layout() {
         }
         // hydrate 主题:服务端已在 GET handler 走 resolveTheme() 把未知值折叠为 'auto',
         // 这里 4 档白名单校验是防御层(防 cache stale / transport 异常).
+        if (
+          data.workMode === 'code' ||
+          data.workMode === 'office' ||
+          data.workMode === 'general'
+        ) {
+          setWorkMode(data.workMode)
+        }
         if (
           data.theme === 'auto' ||
           data.theme === 'dark' ||
@@ -170,7 +177,7 @@ export default function Layout() {
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setSettingsTheme, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate, setTranscriptCollapsed]);
+  }, [setOutputStyle, setWorkMode, setSettingsTheme, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate, setTranscriptCollapsed]);
 
   return (
     // 用 height: 100vh (而不是 minHeight) 把 AntLayout 锁死在视口高度,
@@ -215,6 +222,22 @@ export default function Layout() {
           items={menuItems}
           onClick={({ key }) => navigate(key)}
         />
+        <Button
+          type="text"
+          icon={<SettingOutlined />}
+          onClick={openSettingsDrawer}
+          aria-label="打开设置"
+          data-testid="global-settings-button"
+          style={{
+            position: 'absolute',
+            left: sidebarCollapsed ? 0 : 12,
+            bottom: 12,
+            width: sidebarCollapsed ? '100%' : 'auto',
+            color: effectiveTheme === 'dark' ? 'rgba(255,255,255,0.75)' : 'var(--text-secondary)',
+          }}
+        >
+          {!sidebarCollapsed && '设置'}
+        </Button>
       </Sider>
       <AntLayout>
         {/* <Header

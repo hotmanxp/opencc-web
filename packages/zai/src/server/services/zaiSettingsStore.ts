@@ -1,7 +1,7 @@
 import { writeFile, rename, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
-import type { OutputStyle, Theme, ZaiSettings } from '../../shared/settings.js'
+import type { OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import { getCachedZaiSettings, refreshCache } from './zaiSettingsCache.js'
 
 // Re-export the cache API so existing `zaiSettingsStore` importers can reach
@@ -66,6 +66,26 @@ export function resolveOutputStyle(settings: ZaiSettings): OutputStyle {
 /** Validate a candidate style value before persisting. */
 export function isValidOutputStyle(value: unknown): value is OutputStyle {
   return typeof value === 'string' && VALID_OUTPUT_STYLES.has(value as OutputStyle)
+}
+
+const VALID_WORK_MODES: ReadonlySet<WorkMode> = new Set<WorkMode>([
+  'code',
+  'office',
+  'general',
+])
+
+/** Resolve the persisted working mode, defaulting to code. */
+export function resolveWorkMode(settings: ZaiSettings): WorkMode {
+  const candidate = settings.workMode
+  if (typeof candidate === 'string' && VALID_WORK_MODES.has(candidate as WorkMode)) {
+    return candidate as WorkMode
+  }
+  return 'code'
+}
+
+/** Validate a candidate working mode before persisting. */
+export function isValidWorkMode(value: unknown): value is WorkMode {
+  return typeof value === 'string' && VALID_WORK_MODES.has(value as WorkMode)
 }
 
 const VALID_THEMES: ReadonlySet<Theme> = new Set<Theme>([

@@ -3,7 +3,7 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { resolveModel } from '../lib/resolveModel.js'
-import type { ModelEntry, OutputStyle, Theme, ZaiSettings } from '../../shared/settings.js'
+import type { ModelEntry, OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import type { ProviderProfile } from '../../shared/types.js'
 import { getDefaultMode } from '../services/permissionMode.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
@@ -14,12 +14,14 @@ import {
   isValidEnableDynamicWorkflow,
   isValidOutputStyle,
   isValidTheme,
+  isValidWorkMode,
   readZaiSettings,
   resolveAutoUpdate,
   resolveDefaultSplitScreen,
   resolveEnableDynamicWorkflow,
   resolveOutputStyle,
   resolveTheme,
+  resolveWorkMode,
   writeZaiSettings,
 } from '../services/zaiSettingsStore.js'
 
@@ -91,6 +93,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
     const models = buildAvailableModels(settings)
     const outputStyle = resolveOutputStyle(settings)
     const theme = resolveTheme(settings)
+    const workMode = resolveWorkMode(settings)
     const maxVisibleMessages =
       typeof settings.maxVisibleMessages === 'number'
         ? Math.max(1, Math.min(1000, Math.floor(settings.maxVisibleMessages)))
@@ -105,11 +108,33 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       defaultMode: getDefaultMode(),
       outputStyle,
       theme,
+      workMode,
       maxVisibleMessages,
       defaultSplitScreen,
       enableDynamicWorkflow,
       autoUpdate,
     })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+/**
+ * PUT /api/agent/settings/work-mode — persist the global working mode.
+ * Body is `{ workMode: 'code' | 'office' | 'general' }`.
+ */
+router.put('/agent/settings/work-mode', async (req: Request, res: Response) => {
+  const candidate = (req.body as { workMode?: unknown } | undefined)?.workMode
+  if (!isValidWorkMode(candidate)) {
+    return res
+      .status(400)
+      .json({ error: `invalid workMode: ${String(candidate)}` })
+  }
+  try {
+    const settings = await readZaiSettings()
+    const next: ZaiSettings = { ...settings, workMode: candidate as WorkMode }
+    await writeZaiSettings(next)
+    res.json({ workMode: next.workMode })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }

@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import type { ServerEvent } from '../../../shared/events.js';
-import type { OutputStyle } from '../../../shared/settings.js';
+import type { OutputStyle, WorkMode } from '../../../shared/settings.js';
 import type { StreamState } from '../lib/eventSource.js';
 
 export type ServiceState = {
@@ -123,6 +123,9 @@ interface AppState {
    */
   outputStyle: OutputStyle;
   setOutputStyle: (style: OutputStyle) => void;
+  /** Global working context selected in the settings drawer. */
+  workMode: WorkMode;
+  setWorkMode: (mode: WorkMode) => void;
   /**
    * 主对话区最大渲染消息条数. 超过时 UI 折叠早期消息,顶部浮按钮一键还原.
    * 默认 20. Layout mount effect 用 GET /api/agent/settings 覆写.
@@ -225,6 +228,7 @@ export const useAppStore = create<AppState>((set) => ({
   // Layout mount effect re-hydrates this from disk on first paint so
   // cold-load reflects the user's persisted choice without a flash.
   outputStyle: 'default',
+  workMode: 'code',
   maxVisibleMessages: 20,
   defaultSplitScreen: false,
   enableDynamicWorkflow: false,
@@ -361,6 +365,7 @@ export const useAppStore = create<AppState>((set) => ({
   closePluginModal: () => set({ pluginModalOpen: false }),
   setSettingsTheme: (t) => set({ settingsTheme: t }),
   setOutputStyle: (style) => set({ outputStyle: style }),
+  setWorkMode: (workMode) => set({ workMode }),
   setMaxVisibleMessages: (n) => set({ maxVisibleMessages: n }),
   setDefaultSplitScreen: (v) => set({ defaultSplitScreen: v }),
   setEnableDynamicWorkflow: (v) => set({ enableDynamicWorkflow: v }),

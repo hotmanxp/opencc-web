@@ -33,7 +33,7 @@ import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
 import { useInstanceStore } from '../store/useInstanceStore.js'
 import { requestRestart, requestStop } from '../lib/systemApi.js'
-import type { OutputStyle } from '../../../shared/settings.js'
+import type { OutputStyle, WorkMode } from '../../../shared/settings.js'
 
 export type SettingsValue = string | number | boolean
 
@@ -578,12 +578,29 @@ type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 function buildStaticSchema(
   theme: Theme,
   outputStyle: OutputStyle,
+  workMode: WorkMode,
   maxVisibleMessages: number,
   defaultSplitScreen: boolean,
   enableDynamicWorkflow: boolean,
   autoUpdate: boolean,
 ): SettingsSchema {
   return [
+    {
+      section: '工作模式',
+      rows: [
+        {
+          key: 'workMode',
+          label: '工作模式',
+          kind: 'enum',
+          value: workMode,
+          options: [
+            { value: 'code', label: '代码' },
+            { value: 'office', label: '办公' },
+            { value: 'general', label: '通用' },
+          ],
+        },
+      ],
+    },
     {
       section: 'Permission',
       rows: [
@@ -761,6 +778,8 @@ export default function SettingsDrawer() {
   const setTheme = useAppStore((s) => s.setSettingsTheme)
   const outputStyle = useAppStore((s) => s.outputStyle)
   const setOutputStyle = useAppStore((s) => s.setOutputStyle)
+  const workMode = useAppStore((s) => s.workMode)
+  const setWorkMode = useAppStore((s) => s.setWorkMode)
   const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages)
   const setMaxVisibleMessages = useAppStore((s) => s.setMaxVisibleMessages)
   const defaultSplitScreen = useAppStore((s) => s.defaultSplitScreen)
@@ -800,8 +819,22 @@ export default function SettingsDrawer() {
 
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate),
+    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate),
   )
+  // 同步 store workMode → schema.workMode 行。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'workMode' && r.kind === 'enum') {
+            return { ...r, value: workMode }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [workMode])
   // 同步 store theme → schema.theme 行(其它行的 value 内部维护)。
   useEffect(() => {
     setSchema((prev) =>
@@ -896,6 +929,17 @@ export default function SettingsDrawer() {
 
   const handleChange = useCallback(
     (key: string, value: SettingsValue) => {
+      if (key === 'workMode' && typeof value === 'string') {
+        const next = value as WorkMode
+        setWorkMode(next)
+        void fetch('/api/agent/settings/work-mode', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workMode: next }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
       // 主题行走完整持久化路径:写 store 让 useEffectiveTheme() 立即生效,
       // 同时 PUT settings.json 跨刷新保存.失败不打断 UI(下次启动仍可重写).
       if (key === 'theme' && typeof value === 'string') {
@@ -1000,7 +1044,7 @@ export default function SettingsDrawer() {
         })),
       )
     },
-    [setTheme, setOutputStyle, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate],
+    [setTheme, setOutputStyle, setWorkMode, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate],
   )
 
   // 整个"服务"section 仅在「instance 子实例」(instance manager 派生的子进程,
@@ -1030,8 +1074,8 @@ export default function SettingsDrawer() {
     <>
     <Drawer
       title="设置"
-      width={480}
-      placement="right"
+      width={400}
+      placement="left"
       open={open}
       onClose={close}
       destroyOnClose

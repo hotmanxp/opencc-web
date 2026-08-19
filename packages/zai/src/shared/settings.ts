@@ -57,6 +57,9 @@ export interface ModelEntry {
  */
 export type OutputStyle = 'default' | 'compact' | 'verbose'
 
+/** Global working context selected from the zai settings drawer. */
+export type WorkMode = 'code' | 'office' | 'general'
+
 /**
  * 用户主题偏好. 'auto' / 'high-contrast' 由 useEffectiveTheme() 解析为跟随系统
  * prefers-color-scheme,见 packages/zai/src/web/src/hooks/useEffectiveTheme.ts.
@@ -92,6 +95,8 @@ export interface ZaiSettings {
   permissions?: ZaiPermissions
   /** Web transcript output style — see OutputStyle. */
   outputStyle?: OutputStyle
+  /** Global working context used to tailor future zai behavior. */
+  workMode?: WorkMode
   /**
    * Web UI 主题偏好 — see Theme. 持久化到 ~/.zai/settings.json.
    * 缺失 / 未知值由 resolveTheme() 折叠为 'auto'.
@@ -179,6 +184,7 @@ export const BUILTIN_DEFAULT_SETTINGS: ZaiSettings = {
   env: {},
   defaultMode: 'default',
   outputStyle: 'default',
+  workMode: 'code',
   maxVisibleMessages: 20,
   // 默认开启 zai 自身版本自动升级 — 用户在 SettingsDrawer 关闭后
   // 会写入 settings.json,显式覆盖这个默认。
