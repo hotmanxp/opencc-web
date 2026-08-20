@@ -8,6 +8,7 @@ import { SessionCwdBridge } from '../components/SessionCwdBridge'
 import { TaskDrawer } from '../components/TaskDrawer'
 import ApproveDrawer from '../components/ApproveDrawer.jsx'
 import SettingsDrawer from '../components/SettingsDrawer'
+import { FilePreviewDrawer } from '../components/conversation/FilePreviewDrawer'
 import ConfigStatusBar from '../components/ConfigStatusBar'
 import MobileQuickDrawer from '../components/MobileQuickDrawer.jsx'
 import { UpdateNotifier } from '../components/UpdateNotifier'
@@ -79,6 +80,7 @@ export default function MobileAgent() {
       <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
       <ApproveDrawer />
       <SettingsDrawer />
+      <FilePreviewDrawer />
       <SessionCwdBridge />
       <MobileQuickDrawer
         open={quickDrawerOpen}
