@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom'
-import { render, screen } from '@testing-library/react'
+import { fireEvent, render, screen, waitFor } from '@testing-library/react'
 import React from 'react'
 import { FilePreviewDrawer } from '../../../../src/web/src/components/conversation/FilePreviewDrawer.js'
 import { useAgentStore } from '../../../../src/web/src/store/useAgentStore.js'
@@ -74,5 +74,25 @@ describe('FilePreviewDrawer', () => {
     useAgentStore.setState({ filePreviewPath: '/nope.txt' })
     render(<FilePreviewDrawer />)
     expect(await screen.findByText(/文件不存在/)).toBeInTheDocument()
+  })
+
+  it('renders .md via MarkdownText and toggles 展开全部', async () => {
+    // > 200 lines so the truncate path is exercised
+    const longMd = '# Title\n\n' + 'Lorem ipsum dolor sit amet.\n\n'.repeat(150) + '\n## End\n'
+    mockFetch({ kind: 'text', mime: 'text/plain', content: longMd, size: longMd.length, mtime: 0 })
+    useAgentStore.setState({ filePreviewPath: '/notes.md' })
+    render(<FilePreviewDrawer />)
+    // Wait for MarkdownText to render the title
+    await waitFor(() => {
+      expect(screen.getByRole('heading', { name: 'Title' })).toBeInTheDocument()
+    })
+    // Toggle expand
+    const expandBtn = screen.getByRole('button', { name: /展开全部/ })
+    expect(expandBtn).toBeInTheDocument()
+    fireEvent.click(expandBtn)
+    // After expand, button should disappear (or change label)
+    await waitFor(() => {
+      expect(screen.queryByRole('button', { name: /展开全部/ })).not.toBeInTheDocument()
+    })
   })
 })

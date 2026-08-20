@@ -162,11 +162,23 @@ function TextPreview({ path, content, expanded, onToggle }: { path: string; cont
   return <CodeBlock path={path} content={display} truncated={truncated && !expanded} onToggle={onToggle} />
 }
 
+// Module-scoped promise cache: same instance reused across all <CodeBlock> mounts.
+// Without this, every code file open triggers a fresh dynamic import of the
+// 610KB syntax-highlighter chunk (vite cache may help, but the import() call
+// still re-resolves the module promise).
+let syntaxHighlighterPromise: Promise<{ SyntaxHighlighter: any; oneDark: any }> | null = null
+function loadSyntaxHighlighter() {
+  if (!syntaxHighlighterPromise) {
+    syntaxHighlighterPromise = import('../markdown/syntaxHighlighter.js')
+  }
+  return syntaxHighlighterPromise
+}
+
 function CodeBlock({ path, content, truncated, onToggle }: { path: string; content: string; truncated: boolean; onToggle: () => void }) {
   const [Highlighter, setHighlighter] = useState<null | { SyntaxHighlighter: any; oneDark: any }>(null)
   useEffect(() => {
     let cancelled = false
-    import("../markdown/syntaxHighlighter.js").then((mod) => {
+    loadSyntaxHighlighter().then((mod) => {
       if (!cancelled) setHighlighter({ SyntaxHighlighter: mod.SyntaxHighlighter, oneDark: mod.oneDark })
     })
     return () => { cancelled = true }
