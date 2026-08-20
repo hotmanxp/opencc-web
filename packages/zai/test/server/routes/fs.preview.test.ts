@@ -1,12 +1,33 @@
 // Server tests for GET /api/fs/preview — FilePreviewPayload endpoint.
 
-import { afterAll, beforeAll, describe, expect, it } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import express from 'express';
 import request from 'supertest';
 import { fsRouter } from '../../../src/server/routes/fs.js';
+
+// Shared mock state for EACCES test — hoisted alongside vi.mock
+const { mockStat, shouldRejectEACCES } = vi.hoisted(() => {
+  let flag = false;
+  const mock = vi.fn(async (...args: Parameters<typeof import('node:fs/promises')['stat']>) => {
+    if (flag) {
+      throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    }
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    return actual.stat(...args);
+  });
+  return { mockStat: mock, shouldRejectEACCES: { get: () => flag, set: (v: boolean) => { flag = v; } } };
+});
+
+vi.mock('node:fs/promises', async () => {
+  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  return {
+    ...actual,
+    stat: mockStat,
+  };
+});
 
 interface AppWithLocals extends express.Express {
   locals: { instanceContext: { cwd: string; cwdName: string } };
@@ -21,6 +42,10 @@ function makeApp(cwd: string): AppWithLocals {
 
 let cwd: string;
 let app: AppWithLocals;
+
+beforeEach(() => {
+  shouldRejectEACCES.set(false);
+});
 
 beforeAll(() => {
   cwd = mkdtempSync(join(tmpdir(), 'fs-preview-'));
@@ -126,5 +151,14 @@ describe('GET /api/fs/preview', () => {
       .get('/api/fs/preview')
       .query({ path: p, maxBytes: 1 });
     expect(res.status).toBe(200); // 5 bytes < 1024
+  });
+
+  it('returns 403 for EACCES on stat', async () => {
+    shouldRejectEACCES.set(true);
+    const res = await request(app)
+      .get('/api/fs/preview')
+      .query({ path: '/forbidden/path.txt' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('EACCES');
   });
 });
