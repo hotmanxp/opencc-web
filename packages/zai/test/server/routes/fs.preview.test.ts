@@ -1,6 +1,6 @@
 // Server tests for GET /api/fs/preview — FilePreviewPayload endpoint.
 
-import { afterAll, beforeAll, afterEach, describe, expect, it, vi } from 'vitest';
+import { afterAll, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest';
 import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
@@ -8,19 +8,25 @@ import express from 'express';
 import request from 'supertest';
 import { fsRouter } from '../../../src/server/routes/fs.js';
 
-// Store reference to real stat - populated by vi.mock factory
-const mocks = vi.hoisted(() => ({
-  realStat: null as null | typeof import('node:fs/promises').stat,
-  statMock: null as ReturnType<typeof vi.fn>,
-}));
+// Shared mock state for EACCES test — hoisted alongside vi.mock
+const { mockStat, shouldRejectEACCES } = vi.hoisted(() => {
+  let flag = false;
+  const mock = vi.fn(async (...args: Parameters<typeof import('node:fs/promises')['stat']>) => {
+    if (flag) {
+      throw Object.assign(new Error('permission denied'), { code: 'EACCES' });
+    }
+    const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+    return actual.stat(...args);
+  });
+  return { mockStat: mock, shouldRejectEACCES: { get: () => flag, set: (v: boolean) => { flag = v; } } };
+});
 
-vi.mock('node:fs/promises', async (importOriginal) => {
-  const actual = await importOriginal<typeof import('node:fs/promises')>();
-  mocks.realStat = actual.stat;
-  mocks.statMock = vi.fn((...args: Parameters<typeof actual.stat>) =>
-    mocks.realStat!(...args)
-  );
-  return { ...actual, stat: mocks.statMock };
+vi.mock('node:fs/promises', async () => {
+  const actual = await vi.importActual<typeof import('node:fs/promises')>('node:fs/promises');
+  return {
+    ...actual,
+    stat: mockStat,
+  };
 });
 
 interface AppWithLocals extends express.Express {
@@ -37,6 +43,10 @@ function makeApp(cwd: string): AppWithLocals {
 let cwd: string;
 let app: AppWithLocals;
 
+beforeEach(() => {
+  shouldRejectEACCES.set(false);
+});
+
 beforeAll(() => {
   cwd = mkdtempSync(join(tmpdir(), 'fs-preview-'));
   app = makeApp(cwd);
@@ -44,10 +54,6 @@ beforeAll(() => {
 
 afterAll(() => {
   rmSync(cwd, { recursive: true, force: true });
-});
-
-afterEach(() => {
-  mocks.statMock?.mockClear();
 });
 
 describe('GET /api/fs/preview', () => {
@@ -147,16 +153,21 @@ describe('GET /api/fs/preview', () => {
     expect(res.status).toBe(200); // 5 bytes < 1024
   });
 
-  it('returns 403 with code EACCES when stat throws EACCES', async () => {
-    mocks.statMock!.mockRejectedValueOnce({
-      code: 'EACCES',
-      message: 'permission denied',
-    } as NodeJS.ErrnoException);
+  it('returns 403 for EACCES on stat', async () => {
+    shouldRejectEACCES.set(true);
     const res = await request(app)
       .get('/api/fs/preview')
-      .query({ path: '/some/restricted/path.txt' });
+      .query({ path: '/forbidden/path.txt' });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('EACCES');
-    expect(res.body.error.message).toBeTruthy();
+  });
+
+  it('returns 403 for EPERM on stat', async () => {
+    mockStat.mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
+    const res = await request(app)
+      .get('/api/fs/preview')
+      .query({ path: '/forbidden/path.txt' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('EACCES'); // normalized per mapStatError
   });
 });

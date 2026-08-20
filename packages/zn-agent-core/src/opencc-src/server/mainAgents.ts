@@ -24,6 +24,7 @@ import type { Tool } from '../Tool.js'
 import type { ScopedMcpServerConfig } from '../services/mcp/types.js'
 import { officeMainAgent } from './mainAgents-office.js'
 import { agentCreatorMainAgent } from './mainAgents-agentCreator.js'
+import { displayFilesOpenccTool } from './displayFilesOpencc.js'
 
 // agent-creator 域的公共符号(ValidateMainAgent 工具 + 校验函数)定义在
 // mainAgents-agentCreator.ts,此处 re-export 保持公共 API 稳定(core 单测
@@ -69,12 +70,24 @@ export interface MainAgentConfig {
   mcp?: MainAgentSlot<Record<string, ScopedMcpServerConfig>>
 }
 
-/** 内置 agents。default 不设任何插槽,恒等于系统默认行为。 */
+/** 内置 agents。default 不改 systemPrompt / mcp,仅通过 tools 槽挂入
+ *  displayFilesOpenccTool(把一组本地路径以卡片列表渲染进对话)。
+ *  office / agent-creator 不挂 —— 它们面向文档/agent 创作场景,
+ *  display_files 跟场景无关。 */
 export function getBuiltinMainAgents(): MainAgentConfig[] {
   return [
     {
       name: 'default',
-      description: '系统默认 —— OpenCC 通用助手(不改动任何插槽)',
+      description: '系统默认 —— OpenCC 通用助手(挂入 displayFiles 工具)',
+      tools: (origin: Tool[]) => {
+        // origin 已是 vendor 内置 + MCP + 权限过滤后的最终池。
+        // append 避免重名冲突(若 origin 已有 DisplayFiles 同名工具,
+        // 跳过;理论上 vendor 不会自带,但防御一下);即时生效。
+        if (origin.some((t) => t.name === displayFilesOpenccTool.name)) {
+          return origin
+        }
+        return [...origin, displayFilesOpenccTool]
+      },
     },
     officeMainAgent,
     agentCreatorMainAgent,

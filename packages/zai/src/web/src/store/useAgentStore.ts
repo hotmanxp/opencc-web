@@ -343,6 +343,10 @@ interface AgentState {
    */
   transcriptCollapsed: boolean
   setTranscriptCollapsed: (collapsed: boolean) => void
+  /** 当前打开预览的文件绝对路径;null = 关闭。 */
+  filePreviewPath: string | null
+  openFilePreview: (path: string) => void
+  closeFilePreview: () => void
   clearMessages: () => void
   loadSessions: () => Promise<void>
   loadTranscript: (sessionId: string) => Promise<void>
@@ -886,6 +890,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 调成 outputStyle === 'compact' 即 true). 用户点工具栏按钮 → 翻转当前
   // 视觉态,直接设值;刷新回到 settings.outputStyle 决定的值.
   transcriptCollapsed: false,
+  filePreviewPath: null,
   setStatus: (status: AgentStatus) => set({ status }),
   // queue.changed 快照覆盖排队列表 — 后端 per-session 串行队列的等待中
   // 命令 {id, text} 列表(不含正在执行的那条)。
@@ -908,6 +913,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   }),
   setTranscriptCollapsed: (collapsed: boolean) =>
     set({ transcriptCollapsed: collapsed }),
+  openFilePreview: (path) => set({ filePreviewPath: path }),
+  closeFilePreview: () => set({ filePreviewPath: null }),
 
   clearMessages: () =>
     set((s) => {

@@ -21,6 +21,7 @@ import { SessionCwdBridge } from "../components/SessionCwdBridge";
 import { TaskDrawer } from "../components/TaskDrawer";
 import ApproveDrawer from "../components/ApproveDrawer.jsx";
 import SettingsDrawer from "../components/SettingsDrawer";
+import { FilePreviewDrawer } from "../components/conversation/FilePreviewDrawer.js";
 import TodoZone from "../components/TodoZone.jsx";
 import AgentInputBox from "../components/AgentInputBox";
 import { SplitPane } from "../components/splitPane/SplitPane.js";
@@ -513,6 +514,7 @@ export default function Agent() {
       <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
       <ApproveDrawer />
       <SettingsDrawer />
+      <FilePreviewDrawer />
       <SessionCwdBridge />
     </div>
   );
