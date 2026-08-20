@@ -5,7 +5,7 @@ import { AGENTS_FILENAME } from '../utils/claudemd.js'
 import { maybeMarkProjectOnboardingComplete } from '../projectOnboardingState.js'
 import { isEnvTruthy } from '../utils/envUtils.js'
 
-const OLD_INIT_PROMPT = `Please analyze this codebase and create a ${AGENT_INSTRUCTIONS_FILE} file, which will be given to future instances of OpenCC to operate in this repository.
+const OLD_INIT_PROMPT = `Please analyze this codebase and create a ${AGENT_INSTRUCTIONS_FILE} file, which will be given to future instances of Z.Ai to operate in this repository.
 
 What to add:
 1. Commands that will be commonly used, such as how to build, lint, and run tests. Include the necessary commands to develop in this codebase, such as how to run a single test.
@@ -24,10 +24,10 @@ Usage notes:
 \`\`\`
 # ${AGENT_INSTRUCTIONS_FILE}
 
-This file provides guidance to OpenCC (claude.ai/code) when working with code in this repository.
+This file provides guidance to Z.Ai (claude.ai/code) when working with code in this repository.
 \`\`\``
 
-const NEW_INIT_PROMPT = `Set up a minimal ${AGENT_INSTRUCTIONS_FILE} (and optionally skills and hooks) for this repo. ${AGENT_INSTRUCTIONS_FILE} is loaded into every OpenCC session, so it must be concise — only include what OpenCC would get wrong without it.
+const NEW_INIT_PROMPT = `Set up a minimal ${AGENT_INSTRUCTIONS_FILE} (and optionally skills and hooks) for this repo. ${AGENT_INSTRUCTIONS_FILE} is loaded into every Z.Ai session, so it must be concise — only include what Z.Ai would get wrong without it.
 
 ## Phase 1: Ask what to set up
 
@@ -96,9 +96,9 @@ If the user chose personal ${AGENT_INSTRUCTIONS_LOCAL_FILE} or both: ask about t
 
 ## Phase 4: Write ${AGENT_INSTRUCTIONS_FILE} (if user chose project or both)
 
-Write a minimal ${AGENT_INSTRUCTIONS_FILE} at the project root. Every line must pass this test: "Would removing this cause OpenCC to make mistakes?" If no, cut it.
+Write a minimal ${AGENT_INSTRUCTIONS_FILE} at the project root. Every line must pass this test: "Would removing this cause Z.Ai to make mistakes?" If no, cut it.
 
-**Consume \`note\` entries from the Phase 3 preference queue whose target is ${AGENT_INSTRUCTIONS_FILE}** (team-level notes) — add each as a concise line in the most relevant section. These are the behaviors the user wants OpenCC to follow but didn't need guaranteed (e.g., "propose a plan before implementing", "explain the tradeoffs when refactoring"). Leave personal-targeted notes for Phase 5.
+**Consume \`note\` entries from the Phase 3 preference queue whose target is ${AGENT_INSTRUCTIONS_FILE}** (team-level notes) — add each as a concise line in the most relevant section. These are the behaviors the user wants Z.Ai to follow but didn't need guaranteed (e.g., "propose a plan before implementing", "explain the tradeoffs when refactoring"). Leave personal-targeted notes for Phase 5.
 
 Include:
 - Build/test/lint commands ${BRAND_NAME} can't guess (non-standard scripts, flags, or sequences)
@@ -127,14 +127,14 @@ Prefix the file with:
 \`\`\`
 # ${AGENT_INSTRUCTIONS_FILE}
 
-This file provides guidance to OpenCC (claude.ai/code) when working with code in this repository.
+This file provides guidance to Z.Ai (claude.ai/code) when working with code in this repository.
 \`\`\`
 
 If ${AGENT_INSTRUCTIONS_FILE} already exists: read it, propose specific changes as diffs, and explain why each change improves it. Do not silently overwrite.
 
 For projects with multiple concerns, suggest organizing instructions into \`.zai/rules/\` as separate focused files (e.g., \`code-style.md\`, \`testing.md\`, \`security.md\`). These are loaded automatically alongside ${AGENT_INSTRUCTIONS_FILE} and can be scoped to specific file paths using \`paths\` frontmatter.
 
-For projects with distinct subdirectories (monorepos, multi-module projects, etc.): mention that subdirectory ${AGENT_INSTRUCTIONS_FILE} files can be added for module-specific instructions (they're loaded automatically when OpenCC works in those directories). Offer to create them if the user wants.
+For projects with distinct subdirectories (monorepos, multi-module projects, etc.): mention that subdirectory ${AGENT_INSTRUCTIONS_FILE} files can be added for module-specific instructions (they're loaded automatically when Z.Ai works in those directories). Offer to create them if the user wants.
 
 ## Phase 5: Write ${AGENT_INSTRUCTIONS_LOCAL_FILE} (if user chose personal or both)
 
@@ -191,7 +191,7 @@ Check the environment and ask about each gap you find (use AskUserQuestion):
 
 - **GitHub CLI**: Run \`which gh\` (or \`where gh\` on Windows). If it's missing AND the project uses GitHub (check \`git remote -v\` for github.com), ask the user if they want to install it. Explain that the GitHub CLI lets ${BRAND_NAME} help with commits, pull requests, issues, and code review directly.
 
-- **Linting**: If Phase 2 found no lint config (no .eslintrc, ruff.toml, .golangci.yml, etc. for the project's language), ask the user if they want OpenCC to set up linting for this codebase. Explain that linting catches issues early and gives ${BRAND_NAME} fast feedback on its own edits.
+- **Linting**: If Phase 2 found no lint config (no .eslintrc, ruff.toml, .golangci.yml, etc. for the project's language), ask the user if they want Z.Ai to set up linting for this codebase. Explain that linting catches issues early and gives ${BRAND_NAME} fast feedback on its own edits.
 
 - **Proposal-sourced hooks** (if user chose "Skills + hooks" or "Hooks only"): Consume \`hook\` entries from the Phase 3 preference queue. If Phase 2 found a formatter and the queue has no formatting hook, offer format-on-edit as a fallback. If the user chose "Neither" or "Skills only" in Phase 1, skip this bullet entirely.
 
@@ -216,13 +216,13 @@ Act on each "yes" before moving on.
 
 Recap what was set up — which files were written and the key points included in each. Remind the user these files are a starting point: they should review and tweak them, and can run \`/init\` again anytime to re-scan.
 
-Then tell the user that you'll be introducing a few more suggestions for optimizing their codebase and OpenCC setup based on what you found. Present these as a single, well-formatted to-do list where every item is relevant to this repo. Put the most impactful items first.
+Then tell the user that you'll be introducing a few more suggestions for optimizing their codebase and Z.Ai setup based on what you found. Present these as a single, well-formatted to-do list where every item is relevant to this repo. Put the most impactful items first.
 
 When building the list, work through these checks and include only what applies:
 - If frontend code was detected (React, Vue, Svelte, etc.): \`/plugin install frontend-design@claude-plugins-official\` gives ${BRAND_NAME} design principles and component patterns so it produces polished UI; \`/plugin install playwright@claude-plugins-official\` lets ${BRAND_NAME} launch a real browser, screenshot what it built, and fix visual bugs itself.
 - If you found gaps in Phase 7 (missing GitHub CLI, missing linting) and the user said no: list them here with a one-line reason why each helps.
 - If tests are missing or sparse: suggest setting up a test framework so ${BRAND_NAME} can verify its own changes.
-- To help you create skills and optimize existing skills using evals, OpenCC has an official skill-creator plugin you can install. Install it with \`/plugin install skill-creator@claude-plugins-official\`, then run \`/skill-creator <skill-name>\` to create new skills or refine any existing skill. (Always include this one.)
+- To help you create skills and optimize existing skills using evals, Z.Ai has an official skill-creator plugin you can install. Install it with \`/plugin install skill-creator@claude-plugins-official\`, then run \`/skill-creator <skill-name>\` to create new skills or refine any existing skill. (Always include this one.)
 - Browse official plugins with \`/plugin\` — these bundle skills, agents, hooks, and MCP servers that you may find helpful. You can also create your own custom plugins to share them with others. (Always include this one.)`
 
 const command = {

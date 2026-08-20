@@ -238,7 +238,7 @@ function buildCodexWebSearchInput(input: Input): Array<Record<string, unknown>> 
 
 function buildCodexWebSearchInstructions(): string {
   return [
-    'You are the OpenCC web search tool.',
+    'You are the Z.Ai web search tool.',
     'Search the web for the user query and return a concise factual answer.',
     'Include source URLs in the response.',
   ].join(' ')
@@ -671,7 +671,7 @@ export const WebSearchTool = buildTool({
   maxResultSizeChars: 100_000,
   shouldDefer: true,
   async description(input) {
-    return `OpenCC wants to search the web for: ${input.query}`
+    return `Z.Ai wants to search the web for: ${input.query}`
   },
   userFacingName() {
     return 'Web Search'

@@ -1,6 +1,6 @@
 import type { BuiltInAgentDefinition } from '../loadAgentsDir.js'
 
-const STATUSLINE_SYSTEM_PROMPT = `You are a status line setup agent for OpenCC. Your job is to create or update the statusLine command in the user's OpenCC settings.
+const STATUSLINE_SYSTEM_PROMPT = `You are a status line setup agent for Z.Ai. Your job is to create or update the statusLine command in the user's Z.Ai settings.
 
 When asked to convert the user's shell PS1 configuration, follow these steps:
 1. Read the user's shell configuration files in this order of preference:
@@ -40,14 +40,14 @@ How to use the statusLine command:
      "cwd": "string",         // Current working directory
      "model": {
        "id": "string",           // Model ID (e.g., "claude-3-5-sonnet-20241022")
-       "display_name": "string"  // Display name (e.g., "OpenCC 3.5 Sonnet")
+       "display_name": "string"  // Display name (e.g., "Z.Ai 3.5 Sonnet")
      },
      "workspace": {
        "current_dir": "string",  // Current working directory path
        "project_dir": "string",  // Project root directory path
        "added_dirs": ["string"]  // Directories added via /add-dir
      },
-     "version": "string",        // OpenCC app version (e.g., "1.0.71")
+     "version": "string",        // Z.Ai app version (e.g., "1.0.71")
      "output_style": {
        "name": "string",         // Output style name (e.g., "default", "Explanatory", "Learning")
      },
@@ -64,7 +64,7 @@ How to use the statusLine command:
        "used_percentage": number | null,      // Pre-calculated: % of context used (0-100), null if no messages yet
        "remaining_percentage": number | null  // Pre-calculated: % of context remaining (0-100), null if no messages yet
      },
-     "rate_limits": {             // Optional: OpenCC.ai subscription usage limits. Only present for subscribers after first API response.
+     "rate_limits": {             // Optional: Z.Ai.ai subscription usage limits. Only present for subscribers after first API response.
        "five_hour": {             // Optional: 5-hour session limit (may be absent)
          "used_percentage": number,   // Percentage of limit used (0-100)
          "resets_at": number          // Unix epoch seconds when this window resets
@@ -77,7 +77,7 @@ How to use the statusLine command:
      "vim": {                     // Optional, only present when vim mode is enabled
        "mode": "INSERT" | "NORMAL"  // Current vim editor mode
      },
-     "agent": {                    // Optional, only present when OpenCC is started with --agent flag
+     "agent": {                    // Optional, only present when Z.Ai is started with --agent flag
        "name": "string",           // Agent name (e.g., "code-architect", "test-runner")
        "type": "string"            // Optional: Agent type identifier
      },
@@ -85,7 +85,7 @@ How to use the statusLine command:
        "name": "string",           // Worktree name/slug (e.g., "my-feature")
        "path": "string",           // Full path to the worktree directory
        "branch": "string",         // Optional: Git branch name for the worktree
-       "original_cwd": "string",   // The directory OpenCC was in before entering the worktree
+       "original_cwd": "string",   // The directory Z.Ai was in before entering the worktree
        "original_branch": "string" // Optional: Branch that was checked out before entering the worktree
      }
    }
@@ -132,13 +132,13 @@ Guidelines:
 - Return a summary of what was configured, including the name of the script file if used
 - If the script includes git commands, they should skip optional locks
 - IMPORTANT: At the end of your response, inform the parent agent that this "statusline-setup" agent must be used for further status line changes.
-  Also ensure that the user is informed that they can ask OpenCC to continue to make changes to the status line.
+  Also ensure that the user is informed that they can ask Z.Ai to continue to make changes to the status line.
 `
 
 export const STATUSLINE_SETUP_AGENT: BuiltInAgentDefinition = {
   agentType: 'statusline-setup',
   whenToUse:
-    "Use this agent to configure the user's OpenCC status line setting.",
+    "Use this agent to configure the user's Z.Ai status line setting.",
   tools: ['Read', 'Edit'],
   source: 'built-in',
   baseDir: 'built-in',

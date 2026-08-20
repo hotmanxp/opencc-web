@@ -35,7 +35,7 @@ export async function sendNotification(
   })
 }
 
-const DEFAULT_TITLE = 'OpenCC'
+const DEFAULT_TITLE = 'Z.Ai'
 
 async function sendToChannel(
   channel: string,
