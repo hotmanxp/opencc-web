@@ -161,4 +161,13 @@ describe('GET /api/fs/preview', () => {
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('EACCES');
   });
+
+  it('returns 403 for EPERM on stat', async () => {
+    mockStat.mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
+    const res = await request(app)
+      .get('/api/fs/preview')
+      .query({ path: '/forbidden/path.txt' });
+    expect(res.status).toBe(403);
+    expect(res.body.error.code).toBe('EACCES'); // normalized per mapStatError
+  });
 });
