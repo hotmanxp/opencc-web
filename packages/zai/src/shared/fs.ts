@@ -50,10 +50,12 @@ export interface FsFile {
 export interface FsSearchEntry {
   /** Path relative to cwd, joined with forward slashes (POSIX style). */
   path: string;
-  /** Basename of the file — used for UI rendering and <mark> highlight alignment. */
+  /** Basename of the entry — used for UI rendering and <mark> highlight alignment. */
   name: string;
-  /** Search only ever returns files (not directories). */
-  type: 'file';
+  /** Entry kind. `file` is the historical default; `dir` is added for
+   *  the @-mention popup so users can pick a directory and continue
+   *  typing the next path segment (e.g. `@src/` then `utils/`). */
+  type: 'file' | 'dir';
   /** Fuzzy match score (>= 0). Higher = better. Useful for debugging + tests. */
   score: number;
 }

@@ -449,17 +449,21 @@ describe('GET /api/fs/search', () => {
     expect(typeof res.body.durationMs).toBe('number');
   });
 
-  test('returns 400 when q is missing', async () => {
+  test('returns 200 with cwd top-level when q is missing', async () => {
+    // 空 q → 200 + cwd 顶层条目(@-mention popup 初始态);
+    // 旧行为是 400,但 @-mention 需要 q='' 时也能拿到 list。
     const res = await request(makeApp(root)).get('/api/fs/search');
-    expect(res.status).toBe(400);
-    expect(res.body.ok).toBe(false);
-    expect(res.body.error).toMatch(/q/);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(Array.isArray(res.body.entries)).toBe(true);
+    expect(res.body.entries.length).toBeGreaterThan(0);
   });
 
-  test('returns 400 when q is empty', async () => {
+  test('returns 200 with cwd top-level when q is empty', async () => {
     const res = await request(makeApp(root)).get('/api/fs/search').query({ q: '' });
-    expect(res.status).toBe(400);
-    expect(res.body.ok).toBe(false);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.entries.length).toBeGreaterThan(0);
   });
 
   test('returns 400 when q exceeds MAX_QUERY_LEN', async () => {

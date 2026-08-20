@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request } from 'express';
 import { readdir, stat, readFile, rm, rmdir, mkdir, writeFile, access } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
 import { extname, basename, join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { resolveSafePath } from '../utils/safePath.js';
@@ -123,6 +124,11 @@ interface WalkOptions {
   signal: AbortSignal;
 }
 
+interface ListDirOptions {
+  caseSensitive: boolean;
+  signal: AbortSignal;
+}
+
 interface WalkResult {
   entries: FsSearchEntry[];
   truncated: boolean;
@@ -133,10 +139,14 @@ interface WalkResult {
  * BFS workspace walk that collects fuzzy filename matches.
  *
  * Skips the same directories as `/fs/list` (the IGNORED set + hidden dirs
- * at depth >= 1). Returns up to MAX_RESULTS top-scoring files, sorted by
- * score desc then path asc. Honors an AbortSignal — when aborted, the
- * recursion is abandoned and the partial result is returned with
- * truncated:true.
+ * at depth >= 1). Returns up to MAX_RESULTS top-scoring entries (files and
+ * directories), sorted by score desc, then dir/file type, then path asc.
+ * Honors an AbortSignal — when aborted, the recursion is abandoned and the
+ * partial result is returned with truncated:true.
+ *
+ * 空 query(@-mention popup 初始态,用户只敲了 @)只列 cwd 顶层条目:
+ * 不递归展开整个工作区(否则会返回几千个文件淹没用户)。非空 query 走
+ * 完整 fuzzy BFS,目录也作为候选(让用户能继续展开下一层)。
  */
 export async function walkForSearch(
   absRoot: string,
@@ -144,7 +154,7 @@ export async function walkForSearch(
   options: WalkOptions,
 ): Promise<WalkResult> {
   const start = Date.now();
-  const collected: Array<{ path: string; name: string; score: number }> = [];
+  const collected: Array<{ path: string; name: string; type: 'file' | 'dir'; score: number }> = [];
   let truncated = false;
 
   const stack: Array<{ relDir: string; depth: number }> = [{ relDir: '', depth: 0 }];
@@ -179,23 +189,44 @@ export async function walkForSearch(
         continue;
       }
 
+      if (!info.isDirectory() && !info.isFile()) continue;
+
       if (info.isDirectory()) {
-        stack.push({ relDir: childRel, depth: depth + 1 });
+        // BFS 仅在 query 非空时继续下降 — 空 query 是 @-mention popup 初始态
+        // (用户刚敲完 @),此时只想列出 cwd 顶层条目,不应该展开整个工作区。
+        if (query) {
+          stack.push({ relDir: childRel, depth: depth + 1 });
+        }
+        const relPath = childRel.split(sep).join('/');
+        const score = query
+          ? clampScore(fuzzyMatchScore(query, relPath, options.caseSensitive))
+          : 0;
+        if (!query || score > 0) {
+          collected.push({ path: relPath, name, type: 'dir', score });
+        }
         continue;
       }
       if (!info.isFile()) continue;
 
       const relPath = childRel.split(sep).join('/');
-      const rawScore = fuzzyMatchScore(query, relPath, options.caseSensitive);
+      const rawScore = query
+        ? fuzzyMatchScore(query, relPath, options.caseSensitive)
+        : 0;
       const score = clampScore(rawScore);
-      if (score <= 0) continue;
+      if (query && score <= 0) continue;
+      // 空 query 时只收 top-level 文件(避免递归 + 文件数爆炸)
+      if (!query && depth > 0) continue;
 
-      collected.push({ path: relPath, name, score });
+      collected.push({ path: relPath, name, type: 'file', score });
     }
   }
 
   collected.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
+    // type tiebreaker: dirs first when scores tie — @-mention popup shows
+    // directory candidates above files at equal rank so users can keep
+    // typing the next path segment.
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
     return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
   });
 
@@ -208,11 +239,78 @@ export async function walkForSearch(
   const entries: FsSearchEntry[] = top.map((c) => ({
     path: c.path,
     name: c.name,
-    type: 'file',
+    type: c.type,
     score: c.score,
   }));
 
   return { entries, truncated, durationMs: Date.now() - start };
+}
+
+/**
+ * Single-directory listing fuzzy-scored against `fragment`.
+ *
+ * Used by `/fs/search` when the query contains `/` (e.g. `@src/fo` →
+ * relDir=`src`, fragment=`fo`): list `cwd/src/` once instead of walking
+ * the whole workspace. Empty fragment returns every entry at `absDir`
+ * with score=0 (capped to MAX_RESULTS). Both files and dirs are
+ * returned; dirs come first at equal score.
+ *
+ * absDir must already be validated against the instance cwd boundary
+ * by the caller (`resolveSafePath`); this function does not re-validate.
+ */
+export async function listDirectoryForSearch(
+  absDir: string,
+  relDir: string,
+  fragment: string,
+  options: ListDirOptions,
+): Promise<WalkResult> {
+  const start = Date.now();
+  let entries: Dirent[];
+  try {
+    entries = await readdir(absDir, { withFileTypes: true });
+  } catch {
+    return { entries: [], truncated: false, durationMs: Date.now() - start };
+  }
+  const depth = relDir ? relDir.split("/").filter(Boolean).length : 0;
+  const collected: Array<{
+    path: string;
+    name: string;
+    type: "file" | "dir";
+    score: number;
+  }> = [];
+  for (const e of entries) {
+    if (options.signal.aborted) break;
+    if (IGNORED.has(e.name)) continue;
+    if (depth >= 1 && e.name.startsWith(".")) continue;
+    if (!e.isDirectory() && !e.isFile()) continue;
+    const relPath = relDir ? `${relDir}/${e.name}` : e.name;
+    const type: "file" | "dir" = e.isDirectory() ? "dir" : "file";
+    // 评分用 basename(目录上下文已经由 leading path 提供,深度 penalty
+    // 不应让用户敲 "foo" 在 src/web/src/ 下找不到 App.tsx 之类)。
+    const score = fragment
+      ? clampScore(fuzzyMatchScore(fragment, e.name, options.caseSensitive))
+      : 0;
+    if (fragment && score <= 0) continue;
+    collected.push({ path: relPath, name: e.name, type, score });
+  }
+  collected.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+  });
+  let top = collected;
+  let truncated = false;
+  if (collected.length > MAX_RESULTS) {
+    top = collected.slice(0, MAX_RESULTS);
+    truncated = true;
+  }
+  const out: FsSearchEntry[] = top.map((c) => ({
+    path: c.path,
+    name: c.name,
+    type: c.type,
+    score: c.score,
+  }));
+  return { entries: out, truncated, durationMs: Date.now() - start };
 }
 
 interface InstanceContextShape { cwd: string; cwdName: string }
@@ -556,10 +654,8 @@ fsRouter.get('/fs/search', async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q : '';
   const caseSensitive = req.query.case === '1';
 
-  if (!q) {
-    res.status(400).json({ ok: false, error: '缺少 q 参数' } satisfies FsSearchResult);
-    return;
-  }
+  // 允许空 q:@-mention popup 刚弹出时(用户只敲了 @)显示 cwd 顶层条目。
+  // 仍对非空 q 应用长度上限,避免目录深层路径滥用。
   if (q.length > MAX_QUERY_LEN) {
     res.status(400).json({ ok: false, error: `q 太长 (>${MAX_QUERY_LEN})` } satisfies FsSearchResult);
     return;
@@ -578,15 +674,36 @@ fsRouter.get('/fs/search', async (req, res) => {
   const timer = setTimeout(() => ac.abort(), WALK_TIMEOUT_MS);
 
   try {
-    const { entries, truncated, durationMs } = await walkForSearch(safe.abs, q, {
-      caseSensitive,
-      signal: ac.signal,
-    });
+    let result: WalkResult;
+    if (q.includes("/")) {
+      // 目录限定模式:q = "<relDir>/<fragment>"。
+      // 与 bare BFS 模式不同 — 我们直接 readdir <cwd>/<relDir> 一次,
+      // 对 fragment 做 fuzzy 匹配,避开整个工作区扫描。
+      const slashIdx = q.lastIndexOf("/");
+      const relDir = q.slice(0, slashIdx);
+      const fragment = q.slice(slashIdx + 1);
+      // 越界守护:relDir 必须落在 cwd 内,防 `../../etc` 越权读。
+      // (注意 resolveSafePath 同时拒绝 NUL 字节,守护 prefix check 旁路。)
+      const safeDir = resolveSafePath(cwd, relDir);
+      if (!safeDir.ok) {
+        res.status(403).json({ ok: false, error: safeDir.error } satisfies FsSearchResult);
+        return;
+      }
+      result = await listDirectoryForSearch(safeDir.abs, relDir, fragment, {
+        caseSensitive,
+        signal: ac.signal,
+      });
+    } else {
+      result = await walkForSearch(safe.abs, q, {
+        caseSensitive,
+        signal: ac.signal,
+      });
+    }
     const body: FsSearchResult = {
       ok: true,
-      entries,
-      truncated: truncated || ac.signal.aborted,
-      durationMs,
+      entries: result.entries,
+      truncated: result.truncated || ac.signal.aborted,
+      durationMs: result.durationMs,
     };
     res.json(body);
   } catch (err) {

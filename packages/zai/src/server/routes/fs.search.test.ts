@@ -179,23 +179,62 @@ describe('GET /api/fs/search (HTTP)', () => {
     expect(typeof res.body.durationMs).toBe('number');
   });
 
-  test('returns 400 when q is missing', async () => {
+  test('returns 200 with cwd top-level when q is missing (empty list)', async () => {
+    // 空 q 用于 @-mention popup 初始态:展示 cwd 顶层条目作为候选。
+    // 此前的行为是 400,但 @-mention 需要 q='' 时也能拿到 list。
     const res = await request(makeApp(root)).get('/api/fs/search');
-    expect(res.status).toBe(400);
-    expect(res.body.ok).toBe(false);
-    expect(res.body.error).toMatch(/q/);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(Array.isArray(res.body.entries)).toBe(true);
+    // 顶层有 src/、README.md (node_modules/.git 被 IGNORED 过滤)
+    expect(res.body.entries.find((e: { path: string }) => e.path === 'README.md')).toBeTruthy();
+    expect(res.body.entries.find((e: { path: string; type: string }) => e.type === 'dir' && e.path === 'src')).toBeTruthy();
   });
 
-  test('returns 400 when q is empty', async () => {
+  test('returns 200 with cwd top-level when q is empty string', async () => {
     const res = await request(makeApp(root)).get('/api/fs/search').query({ q: '' });
-    expect(res.status).toBe(400);
-    expect(res.body.ok).toBe(false);
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.entries.length).toBeGreaterThan(0);
   });
 
   test('returns 400 when q exceeds MAX_QUERY_LEN', async () => {
     const long = 'a'.repeat(65);
     const res = await request(makeApp(root)).get('/api/fs/search').query({ q: long });
     expect(res.status).toBe(400);
+    expect(res.body.ok).toBe(false);
+  });
+
+  test('dir-scoped q with / → lists only that directory', async () => {
+    writeFileSync(join(root, 'src', 'fa.ts'), 'x\n');
+    writeFileSync(join(root, 'src', 'fb.ts'), 'x\n');
+    writeFileSync(join(root, 'src', 'bar.txt'), 'x\n');
+    const res = await request(makeApp(root)).get('/api/fs/search').query({ q: 'src/f' });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    const paths = (res.body.entries as Array<{ path: string }>).map((e) => e.path);
+    // 只列 src/ 下 fuzzy 匹配 'f' 的条目
+    expect(paths).toContain('src/fa.ts');
+    expect(paths).toContain('src/fb.ts');
+    expect(paths).not.toContain('src/bar.txt');
+    // 不会列出根目录的 README.md
+    expect(paths).not.toContain('README.md');
+  });
+
+  test('dir-scoped q with empty fragment → lists everything in that dir', async () => {
+    mkdirSync(join(root, 'src', 'nested'));
+    writeFileSync(join(root, 'src', 'nested', 'a.ts'), 'x\n');
+    const res = await request(makeApp(root)).get('/api/fs/search').query({ q: 'src/' });
+    expect(res.status).toBe(200);
+    const paths = (res.body.entries as Array<{ path: string }>).map((e) => e.path);
+    expect(paths).toContain('src/nested');
+    // 不会深入列出 nested/a.ts (listDirectoryForSearch 只列一层)
+    expect(paths).not.toContain('src/nested/a.ts');
+  });
+
+  test('dir-scoped q with .. path → 403 (escapes cwd)', async () => {
+    const res = await request(makeApp(root)).get('/api/fs/search').query({ q: '../etc/foo' });
+    expect(res.status).toBe(403);
     expect(res.body.ok).toBe(false);
   });
 

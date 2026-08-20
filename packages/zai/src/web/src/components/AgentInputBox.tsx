@@ -22,6 +22,7 @@ import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
 import type { V2TaskItem, QueuedPrompt } from "../store/useAgentStore.js";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import { useAppStore } from "../store/useAppStore";
+import type { FsSearchEntry } from "../../../shared/fs.js";
 import { api } from "../lib/api";
 import { AttachmentStrip } from "../components/AttachmentStrip";
 import ConversationInfoButton from "../components/ConversationInfoButton";
@@ -37,6 +38,10 @@ import {
   AGENT_INPUT_INSERT_EVENT,
   type AgentInputInsertDetail,
 } from "../lib/agentInputEvents";
+import { activeAtToken, formatFileMention } from "./mentionGrammar.js";
+import { useFsMentionSearch } from "./useFsMentionSearch.js";
+import FileMentionPopover from "./FileMentionPopover.js";
+import MentionChip, { type MentionChipData } from "./MentionChip.js";
 
 type PendingAttachment = {
   localId: string;
@@ -120,6 +125,71 @@ export function deriveCommandToken(
  * AgentInputBox 直接从 useAppStore.isMobile 读取移动端判断, 不再接受 props.
  * 由 useIsMobile() (挂在 Layout 顶部) 通过 matchMedia 同步到 store.
  */
+
+/**
+ * 把 input 文本切成三段:plain / mention (chip) / active (紫色 token mark)。
+ * 按 offset 升序遍历,plain 段用 `<span>{slice}</span>` 表达,mention/active
+ * 段分别用 MentionChip / token-mark span。重叠的 span 被跳过(极端情况:
+ * mention 的 end 落在另一个 mention 内 — 不会发生因为 mention regex 互斥,
+ * activeToken 与 mention 也互斥因为 active 不会被 mention 扫描捕获)。
+ */
+function renderMentionBackdrop(
+  input: string,
+  mentions: MentionChipData[],
+  activeToken:
+    | { prefix: string; query: string; quoted: boolean; end: number }
+    | undefined,
+) {
+  const result: React.ReactNode[] = [];
+  type Special =
+    | { kind: "mention"; data: MentionChipData }
+    | { kind: "active"; data: NonNullable<typeof activeToken> };
+  const specials: Special[] = [];
+  for (const m of mentions) {
+    specials.push({ kind: "mention", data: m });
+  }
+  if (activeToken) {
+    specials.push({ kind: "active", data: activeToken });
+  }
+  specials.sort((a, b) => {
+    const aStart =
+      a.kind === "mention" ? a.data.start : a.data.end - a.data.prefix.length;
+    const bStart =
+      b.kind === "mention" ? b.data.start : b.data.end - b.data.prefix.length;
+    return aStart - bStart;
+  });
+  let pos = 0;
+  for (const s of specials) {
+    const start =
+      s.kind === "mention" ? s.data.start : s.data.end - s.data.prefix.length;
+    const end = s.data.end;
+    if (start < pos) continue;
+    if (start > pos) {
+      result.push(
+        <span key={`t-${pos}`}>{input.slice(pos, start)}</span>,
+      );
+    }
+    if (s.kind === "mention") {
+      result.push(<MentionChip key={`m-${start}`} data={s.data} />);
+    } else {
+      result.push(
+        <span
+          key={`a-${start}`}
+          data-decoration="token-mark"
+          className="agent-input-cmd-token"
+        >
+          {s.data.prefix}
+        </span>,
+      );
+    }
+    pos = end;
+  }
+  if (pos < input.length) {
+    result.push(<span key="t-end">{input.slice(pos)}</span>);
+  }
+  return result;
+}
+
 export default React.memo(function AgentInputBox() {
   const status = useAgentStore((s) => s.status);
   const sessionId = useAgentStore((s) => s.sessionId);
@@ -160,6 +230,15 @@ export default React.memo(function AgentInputBox() {
   const doneTasks = v2Tasks.filter((t) => t.status === "completed").length;
 
   const [input, setInput] = useState("");
+  // 光标位置(activeAtToken 需要这个来定位 @-token,textarea 是受控组件,
+  // selectionStart 不在 React state 里;需要在 onChange/onKeyUp/onClick 里同步刷新。
+  // 初始值 0 + input 变化时由 onChange 重写,只为减少首挂载误判。
+  const [cursor, setCursor] = useState(0);
+  // 已选中的 @-mention 列表,用于 chip 渲染时的 type 信息(file/dir)。
+  // 用 ref 而不是 state:不参与渲染,纯用于 mention scan 时查 type。
+  // Map 不会自动清理 — input 中不再包含的 entry 通过 useEffect 维护
+  // (扫描当前 input,删除不在的 key)。
+  const selectedEntriesRef = useRef<Map<string, "file" | "dir">>(new Map());
   const [attachments, setAttachments] = useState<PendingAttachment[]>([]);
   const [shareOpen, setShareOpen] = useState(false);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -241,6 +320,9 @@ export default React.memo(function AgentInputBox() {
     [input, slashItems],
   );
 
+  // 已完成 @-mention 扫描 + 维护:见下方 "showSkillMenu 之后的 @-mention 块"
+  // (需要 atToken 互斥门控,先声明 atToken)。
+
   // 在光标处插入文本(分屏「插入对话」与拖入文件地址共用):
   // rc-textarea(antd Input.TextArea)把 ref 变成命令式句柄
   // { resizableTextArea: { textArea } },需要解码到原生 <textarea>
@@ -290,6 +372,87 @@ export default React.memo(function AgentInputBox() {
   const skillMenuRef = useRef<HTMLDivElement>(null);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
   const [skillMenuIdx, setSkillMenuIdx] = useState(0);
+
+  // @-mention 文件补全 token 检测 + 搜索 hook(必须在 showSkillMenu 声明之后):
+  // - activeAtToken(input, cursor) 给出当前光标处的 @ token(可能 undefined)
+  // - 与 `/` slash 互斥:slash 只在 leading 位置触发,@ 在 (^|\s) 之后,所以同一
+  //   input 不会同时进入两条路径;额外用 showSkillMenu 互斥门控更稳
+  // - useFsMentionSearch 仅在 token 存在时拉数据(enabled),关闭时清空
+  // - atMenuIdx 高亮位置:hook 返回 items 变化时归零
+  const atToken = useMemo(
+    () => activeAtToken(input, cursor),
+    [input, cursor],
+  );
+  const [atMenuDismissed, setAtMenuDismissed] = useState(false);
+  const showAtMenu =
+    atToken !== undefined && !showSkillMenu && !atMenuDismissed;
+  const atSearch = useFsMentionSearch(atToken?.query ?? "", {
+    enabled: showAtMenu,
+  });
+  const [atMenuIdx, setAtMenuIdx] = useState(0);
+  // 弹层"软关闭"标记:用户选中 file(完成态)或按 Escape / 点击外部,
+  // 弹层应该关掉但输入框文本保留。下次输入变化(input change / atToken
+  // prefix 变化)时重置 — 重新唤起弹层。dir 选择不触发软关闭,让
+  // 弹层继续展示子内容(用户主动连选场景)。
+  // hook items 变化时归零,避免越界;token 切换时同理。
+  useEffect(() => {
+    setAtMenuIdx(0);
+  }, [atSearch.items, atToken?.prefix]);
+  // input 或 atToken 变化 → 重置弹层软关闭(用户重新输入或换新 token)
+  useEffect(() => {
+    setAtMenuDismissed(false);
+  }, [input, atToken?.prefix]);
+
+  // 已完成 @-mention 扫描:从 input 文本里提取所有 @path / @"path" 段,
+  // 排除真正 active 的 atToken(cursor 仍在 atToken 范围内)以及非完成态
+  // (紧跟非空白字符的 = 用户还在继续敲)。每个 mention 走 MentionChip 渲染:
+  // 视觉上 icon + basename,语义上 textarea 文本仍是全路径。
+  const completedMentions = useMemo(() => {
+    const mentions: MentionChipData[] = [];
+    // 真正 active:atToken 存在且 cursor 仍在 [atToken.start, atToken.end]
+    // 范围内(用户在敲这个 token)。file 选择后 cursor > atToken.end,这时
+    // atToken 在 grammar 层仍存在但语义上是"已完成的 token",应该作为
+    // chip 渲染而不是 active mark。
+    const active = atToken;
+    const activeStart = active ? active.end - active.prefix.length : -1;
+    const activeEnd = active ? active.end : -1;
+    const cursorInActive =
+      active && cursor >= activeStart && cursor <= activeEnd;
+    // 不区分大小写匹配 @"..." 或 @<no-space>
+    const regex = /(@"([^"]*)")|(@([^\s@]+))/g;
+    let m: RegExpExecArray | null;
+    while ((m = regex.exec(input)) !== null) {
+      const start = m.index;
+      const end = start + m[0].length;
+      // 跳过真正 active 的 token(用户正在敲)
+      if (cursorInActive && start === activeStart && end === activeEnd) continue;
+      // 完成态:后面接空白/EOS/@(下个 mention 起点)
+      const nextChar = end < input.length ? input[end]! : "";
+      if (nextChar && !/[\s@]/.test(nextChar)) continue;
+      const path = (m[2] ?? m[4] ?? "") as string;
+      const quoted = !!m[2];
+      // type:从 selectedEntries 查,查不到默认 'file'(用户手动输入或
+      // 已经选中但 type 丢失)
+      const lookup = path.endsWith("/") ? path.slice(0, -1) : path;
+      const t = selectedEntriesRef.current.get(lookup);
+      mentions.push({ start, end, path, quoted, type: t ?? "file" });
+    }
+    return mentions;
+  }, [input, atToken, cursor]);
+
+  // 维护 selectedEntriesRef:input 变化后清理不再出现的 entry,避免 Map 膨胀
+  // / 显示已删除的 mention 的 type。
+  useEffect(() => {
+    const present = new Set<string>();
+    for (const m of completedMentions) {
+      const lookup = m.path.endsWith("/") ? m.path.slice(0, -1) : m.path;
+      present.add(lookup);
+    }
+    for (const k of Array.from(selectedEntriesRef.current.keys())) {
+      if (!present.has(k)) selectedEntriesRef.current.delete(k);
+    }
+  }, [completedMentions]);
+
   // 桌面端 "+" 按钮弹出的命令/技能选择层: 独立的 on/off 状态, 与 / slash
   // 自动补全下拉(showSkillMenu)互不干扰。两条路径共用 selectSlashItem 选择
   // 行为,只是触发方式不同 — 输入法触发 vs 显式按钮触发。
@@ -424,6 +587,56 @@ export default React.memo(function AgentInputBox() {
       textareaRef.current?.focus();
     }, 0);
   }, [sessionId, activeSessionId]);
+
+  // 选中一个 @-mention 候选:把 active @ token 整段(含 trailing / / 引号)
+  // 替换为 formatFileMention 产生的字符串 + 一个空格(光标移到末尾,用户继续敲)。
+  // 与 slash dropdown 的 selectSlashItem 不同:这里只改输入框文本,不触发
+  // 任何命令执行 —— 整个 @-mention 语义就是"插入文件地址给 agent 看"。
+  const selectAtEntry = useCallback(
+    (entry: FsSearchEntry) => {
+      if (!atToken) return;
+      // 记录 entry.type 供 chip 渲染使用(显示 dir 还是 file icon)
+      selectedEntriesRef.current.set(entry.path, entry.type);
+      const formatted = formatFileMention(
+        { path: entry.path, kind: entry.type },
+        atToken.quoted,
+      );
+      if (formatted === undefined) {
+        message.warning(`路径不安全: ${entry.path}`);
+        return;
+      }
+      // start 用 atToken.end - prefix.length 而不是 cursor - prefix.length:
+      // 选目录后 grammar 会把 cursor 落在末尾空格右侧,此时 cursor > end,
+      // start = cursor - prefix.length 会算错位置;end 才是 prefix 的真实
+      // 结束 offset,start = end - prefix.length 始终给出 prefix 的起始位置。
+      const start = atToken.end - atToken.prefix.length;
+      // dir 走"继续展开"路径:不加尾随空格(让 @ 保持 active,让弹层继续
+      // 展示子目录内容),也不软关闭弹层。
+      // file 走"完成"路径:加尾随空格(cursr > end → token 标记为完成
+      // → chip 渲染),并软关闭弹层,避免弹层继续显示已选条目。
+      const isDir = entry.type === "dir";
+      const next =
+        input.slice(0, start) + formatted + (isDir ? "" : " ") + input.slice(atToken.end);
+      setInput(next);
+      if (!isDir) setAtMenuDismissed(true);
+      // popover 在 useEffect([atSearch.items, atToken?.prefix]) 自动归零;
+      // cursor state 等下次 onChange 重写。textarea 仍持有焦点(combobox)。
+      const newCursor = start + formatted.length + (isDir ? 0 : 1);
+      requestAnimationFrame(() => {
+        const el = textAreaNode(textareaRef.current);
+        if (!el) return;
+        el.focus();
+        if (typeof el.setSelectionRange === "function") {
+          el.setSelectionRange(newCursor, newCursor);
+        } else {
+          el.selectionStart = newCursor;
+          el.selectionEnd = newCursor;
+        }
+        setCursor(newCursor);
+      });
+    },
+    [atToken, input],
+  );
 
   const addAttachments = async (files: File[]) => {
     const accepted = files.slice(0, MAX_ATTACHMENTS_PER_TURN);
@@ -579,6 +792,54 @@ export default React.memo(function AgentInputBox() {
   };
 
   const handleKeyDown = (e: React.KeyboardEvent) => {
+    // @-mention 文件补全菜单:优先级高于 slash,因为用户当前输入焦点就是 @
+    // (slash 与 at 由 grammar 自然互斥,但下面用 showSkillMenu 二次门控更稳)
+    if (showAtMenu) {
+      // 方向键 / Enter 走 ArrowDown/Up + Enter:即便 items 还没加载也安全
+      // (modulo 操作在 length=0 时返回 NaN/0,被后面的 in-list guard 过滤)
+      const len = atSearch.items.length;
+      if (e.key === "ArrowDown") {
+        e.preventDefault();
+        if (len > 0) setAtMenuIdx((i) => (i + 1) % len);
+        return;
+      }
+      if (e.key === "ArrowUp") {
+        e.preventDefault();
+        if (len > 0) setAtMenuIdx((i) => (i - 1 + len) % len);
+        return;
+      }
+      if (e.key === "Enter" && !e.shiftKey) {
+        e.preventDefault();
+        const entry = atSearch.items[atMenuIdx];
+        if (entry) selectAtEntry(entry);
+        return;
+      }
+      if (e.key === "Escape") {
+        // Escape 在 items 还没加载时也必须能关闭(popup 已在 mount),
+        // 否则用户没法"放弃"。删除 @ token 让 atToken 自然变 undefined。
+        e.preventDefault();
+        if (atToken) {
+          // 用 atToken.end(在 dir continuation 等 cursor > end 的场景下
+          // 仍然指向 prefix 真实结束位置)而不是 cursor 来切。
+          const start = atToken.end - atToken.prefix.length;
+          const next = input.slice(0, start) + input.slice(atToken.end);
+          setInput(next);
+          setCursor(start);
+          requestAnimationFrame(() => {
+            const el = textAreaNode(textareaRef.current);
+            if (!el) return;
+            el.focus();
+            if (typeof el.setSelectionRange === "function") {
+              el.setSelectionRange(start, start);
+            } else {
+              el.selectionStart = start;
+              el.selectionEnd = start;
+            }
+          });
+        }
+        return;
+      }
+    }
     if (showSkillMenu && filteredSlash.length > 0) {
       if (e.key === "ArrowDown") {
         e.preventDefault();
@@ -1374,6 +1635,42 @@ export default React.memo(function AgentInputBox() {
               }}
             />
           )}
+          {/* @-mention 文件补全 popup:锚定在输入框上方,与 slash 同一锚点。
+              同一 input 不会同时触发 slash 与 at(grammar 互斥),所以不冲突。
+              选中走 selectAtEntry —— 替换 token 文本,不触发任何命令执行。
+              onDismiss 关闭弹层:此处也用删 @ token 的办法,与 Escape 路径一致
+              (避免弹层关闭但 @ 还卡在输入框)。 */}
+          {showAtMenu && (
+            <FileMentionPopover
+              items={atSearch.items}
+              loading={atSearch.loading}
+              error={atSearch.error}
+              truncated={atSearch.truncated}
+              activeIndex={atMenuIdx}
+              onActiveIndexChange={setAtMenuIdx}
+              onSelect={selectAtEntry}
+              onDismiss={() => {
+                // 外部点击关闭:用删除 token 方式自然消失,保留光标。
+                if (atToken) {
+                  const start = atToken.end - atToken.prefix.length;
+                  const next = input.slice(0, start) + input.slice(atToken.end);
+                  setInput(next);
+                  setCursor(start);
+                  requestAnimationFrame(() => {
+                    const el = textAreaNode(textareaRef.current);
+                    if (!el) return;
+                    el.focus();
+                    if (typeof el.setSelectionRange === "function") {
+                      el.setSelectionRange(start, start);
+                    } else {
+                      el.selectionStart = start;
+                      el.selectionEnd = start;
+                    }
+                  });
+                }
+              }}
+            />
+          )}
           {/* Mirror-backdrop wrapper (追齐 deepseek-harness InputBar 的高亮手法):
               - 内部绝对定位的 backdrop 渲染可见文本(带命令 token 高亮 mark)
               - antd TextArea 文本透明,只保留 caret / selection
@@ -1408,21 +1705,53 @@ export default React.memo(function AgentInputBox() {
                 <span>{input.slice(commandToken.end)}</span>
               </div>
             )}
+            {/* @-mention mirror-backdrop:在 input 文本里交织渲染
+                1) 已完成的 @path 段 → MentionChip(icon + basename,占位保持对齐)
+                2) active atToken 段 → 紫色 token-mark(原有的 / slash 视觉风格)
+                3) 其余文本 → 纯文本
+                commandToken(/ 触发)与 atToken 不可能同时为真(grammar 互斥),
+                这里用 atToken + completedMentions 联合处理,commandToken 走独立 backdrop。 */}
+            {(atToken || completedMentions.length > 0) && !commandToken && (
+              <div
+                aria-hidden
+                data-input-backdrop
+                data-decoration="at-mentions"
+                className="agent-input-backdrop"
+              >
+                {renderMentionBackdrop(input, completedMentions, atToken)}
+              </div>
+            )}
             <TextArea
               ref={textareaRef}
               value={input}
-              onChange={(e) => setInput(e.target.value)}
+              // onChange:写入新值,同时把光标位置同步到 state(activeAtToken 用)
+              onChange={(e) => {
+                setInput(e.target.value);
+                const sel = e.target.selectionStart;
+                if (typeof sel === "number") setCursor(sel);
+              }}
+              // onKeyUp:方向键/Home/End 不触发 onChange,但会动光标;
+              // 这里补一刀,保证下一次 render 之前 cursor 已就位。
+              onKeyUp={(e) => {
+                const sel = (e.target as HTMLTextAreaElement).selectionStart;
+                if (typeof sel === "number") setCursor(sel);
+              }}
+              // onClick:鼠标点击定位光标;selectStart 同步刷新。
+              onClick={(e) => {
+                const sel = (e.target as HTMLTextAreaElement).selectionStart;
+                if (typeof sel === "number") setCursor(sel);
+              }}
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
-              placeholder="输入消息, 按 Enter 发送, Shift+Enter 换行. 拖入图片直接插入, 拖入其他文件自动上传并加入地址."
+              placeholder="输入消息, 按 Enter 发送, Shift+Enter 换行. 拖入图片直接插入, 拖入其他文件自动上传并加入地址. 敲 @ 触发文件补全."
               rows={3}
               disabled={pendingAsk?.status === "pending"}
-              // commandToken 存在时把 textarea 文本变透明:backdrop 接管渲染。
+              // commandToken 或 atToken 存在时把 textarea 文本变透明:backdrop 接管渲染。
               // -webkit-text-fill-color 同时设上,避免 Chromium 系列只尊重
               // fill-color 而忽略 color 让文本"漏出来"。
               // caret-color 保留:caret 必须可见,否则用户看不到光标位置。
               styles={
-                commandToken
+                commandToken || atToken || completedMentions.length > 0
                   ? {
                       textarea: {
                         color: "transparent",
