@@ -3,7 +3,7 @@ export const DESCRIPTION = 'Send a message to another agent'
 
 export function getPrompt(): string {
   const udsRow = false
-    ? `\n| \`"uds:/path/to.sock"\` | Local OpenCC session's socket (same machine; use \`ListPeers\`) |
+    ? `\n| \`"uds:/path/to.sock"\` | Local Z.Ai session's socket (same machine; use \`ListPeers\`) |
 | \`"bridge:session_..."\` | Remote Control peer session (cross-machine; use \`ListPeers\`) |`
     : ''
   const udsSection = false

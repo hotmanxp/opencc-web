@@ -288,7 +288,7 @@ function Update({ onDone, force, target }: UpdateProps): React.ReactNode {
 
       {state.type === 'updating' && (
         <Text color="claude">
-          Updating OpenCC to {state.version} via {state.via} (this may take a
+          Updating Z.Ai to {state.version} via {state.via} (this may take a
           moment)...
         </Text>
       )}
@@ -298,12 +298,12 @@ function Update({ onDone, force, target }: UpdateProps): React.ReactNode {
           <Box>
             <StatusIcon status="success" withSpace />
             <Text color="success" bold>
-              OpenCC updated to {state.version} via {state.via}!
+              Z.Ai updated to {state.version} via {state.via}!
             </Text>
           </Box>
           <Box marginLeft={2}>
             <Text dimColor>
-              Restart OpenCC for the new version to take effect.
+              Restart Z.Ai for the new version to take effect.
             </Text>
           </Box>
         </Box>
@@ -334,20 +334,20 @@ function terminalDoneMessage(state: UpdateState): {
 } {
   switch (state.type) {
     case 'success':
-      return { message: 'OpenCC updated successfully', delay: 3000 }
+      return { message: 'Z.Ai updated successfully', delay: 3000 }
     case 'up-to-date':
-      return { message: 'OpenCC is already up to date', delay: 1500 }
+      return { message: 'Z.Ai is already up to date', delay: 1500 }
     case 'blocked':
       return { message: 'Auto-update is unavailable for this build', delay: 3000 }
     case 'package-manager':
       return {
-        message: 'OpenCC is managed by a package manager',
+        message: 'Z.Ai is managed by a package manager',
         delay: 3000,
       }
     case 'no-package-manager':
       return { message: 'No supported package manager found', delay: 3000 }
     case 'error':
-      return { message: 'OpenCC update failed', delay: 4000 }
+      return { message: 'Z.Ai update failed', delay: 4000 }
     default:
       return { message: '', delay: 0 }
   }

@@ -158,20 +158,20 @@ ${AGENT_TOOL_NAME}({
   const currentExamples = `Example usage:
 
 <example_agent_descriptions>
-"claude-code-guide": use this agent when the user asks how OpenCC works or how to use its features
-"statusline-setup": use this agent to configure the user's OpenCC status line setting
+"claude-code-guide": use this agent when the user asks how Z.Ai works or how to use its features
+"statusline-setup": use this agent to configure the user's Z.Ai status line setting
 </example_agent_descriptions>
 
 <example>
-user: "How do I configure OpenCC hooks?"
+user: "How do I configure Z.Ai hooks?"
 <commentary>
-This is an OpenCC usage question, so use the claude-code-guide agent
+This is a Z.Ai usage question, so use the claude-code-guide agent
 </commentary>
 assistant: Uses the ${AGENT_TOOL_NAME} tool to launch the claude-code-guide agent
 </example>
 
 <example>
-user: "Set up my OpenCC status line"
+user: "Set up my Z.Ai status line"
 <commentary>
 This matches the statusline-setup agent, so use it to configure the setting
 </commentary>

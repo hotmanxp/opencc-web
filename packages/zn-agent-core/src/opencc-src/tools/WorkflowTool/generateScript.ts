@@ -23,7 +23,7 @@ export function buildScriptGenerationPrompt(p: PromptArgs): string {
     typeof p.args === 'string'
       ? JSON.stringify(parseCliArgs(p.args))
       : JSON.stringify(p.args ?? {})
-  return `You are writing a JavaScript workflow script for OpenCC dynamic workflows.
+  return `You are writing a JavaScript workflow script for Z.Ai dynamic workflows.
 
 # Task
 ${p.task}

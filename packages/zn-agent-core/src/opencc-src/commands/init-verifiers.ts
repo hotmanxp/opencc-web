@@ -73,7 +73,7 @@ Based on what was detected in Phase 1, help the user set up appropriate verifica
    - Options to offer:
      - **Playwright** (Recommended) - Full browser automation library, works headless, great for CI
      - **Chrome DevTools MCP** - Uses Chrome DevTools Protocol via MCP
-     - **${BRAND_NAME} Chrome Extension** - Uses the OpenCC Chrome extension for browser interaction (requires the extension installed in Chrome)
+     - **${BRAND_NAME} Chrome Extension** - Uses the Z.Ai Chrome extension for browser interaction (requires the extension installed in Chrome)
      - **None** - Skip browser automation (will use basic HTTP checks only)
 
 3. **If user chooses to install Playwright**, run the appropriate command based on package manager:

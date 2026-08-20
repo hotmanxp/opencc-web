@@ -23,7 +23,7 @@ import { makeSecondaryModelPrompt } from './prompt.js'
 // Custom error classes for domain blocking
 class DomainBlockedError extends Error {
   constructor(domain: string) {
-    super(`OpenCC is unable to fetch from ${domain}`)
+    super(`Z.Ai is unable to fetch from ${domain}`)
     this.name = 'DomainBlockedError'
   }
 }
