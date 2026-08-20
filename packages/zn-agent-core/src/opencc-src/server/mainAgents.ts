@@ -403,7 +403,9 @@ export const ValidateMainAgentTool = buildTool({
     }
   },
   async call({ filePath }) {
-    return validateMainAgentFile(filePath)
+    // 框架把 call 返回值当作 ToolResult 并取 .data 传给
+    // mapToolResultToToolResultBlockParam —— 必须包一层 data。
+    return { data: await validateMainAgentFile(filePath) }
   },
 }) satisfies ToolDef
 

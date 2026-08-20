@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it } from 'vitest'
 import {
   validateMainAgentConfig,
   validateMainAgentFile,
+  ValidateMainAgentTool,
 } from '../../../src/opencc-src/server/mainAgents.js'
 
 let dirs: string[] = []
@@ -160,5 +161,28 @@ describe('validateMainAgentFile', () => {
     expect(out.ok).toBe(true)
     expect(out.agents).toHaveLength(1)
     expect(out.agents[0]).toMatchObject({ name: 'greeter', valid: true })
+  })
+
+  it('tool call returns { data } and result mapping renders the summary', async () => {
+    // 回归:tool.call 返回值必须包 { data }(框架取 result.data 传给
+    // mapToolResultToToolResultBlockParam),否则 undefined.summary 崩溃。
+    const dir = await makeDir()
+    const file = join(dir, 'ok.js')
+    await writeFile(
+      file,
+      `module.exports = { name: 'ok', description: 'fine' }`,
+      'utf-8',
+    )
+    const result = (await ValidateMainAgentTool.call({ filePath: file }, {} as never))
+    expect(result).toBeTruthy()
+    expect((result as { data?: unknown }).data).toBeTruthy()
+    const block = ValidateMainAgentTool.mapToolResultToToolResultBlockParam(
+      (result as { data: { summary: string } }).data,
+      'tool-use-1',
+    )
+    expect(block.type).toBe('tool_result')
+    expect(block.tool_use_id).toBe('tool-use-1')
+    const content = block.content as Array<{ text?: string }>
+    expect(content[0].text).toContain('ok')
   })
 })
