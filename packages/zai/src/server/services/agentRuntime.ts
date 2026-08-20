@@ -48,6 +48,8 @@ import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
 import { PermissionRegistry } from './permissionRegistry.js'
 import { sessionInbox, type InboxMessage } from './sessionInbox.js'
+import { resolveMainAgent } from './mainAgents.js'
+import { readZaiSettings } from './zaiSettingsStore.js'
 
 let runtime: OpenccRuntime | null = null
 let currentSessionId: string | null = null
@@ -347,11 +349,21 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // `streamingToolExecutor` tool loop → vendor's
   // `queryModelWithStreaming` → upstream API.
   try {
+    // zai patch (2026-08-20): 主 Agent 插槽 —— 读 settings.mainAgent,
+    // 解析出内置/外置 agent 配置,传给 createOpenccRuntime。三个插槽
+    // (systemPrompt / tools / mcp)在 core 内替换系统默认;mainAgents 是
+    // 完整合并表,供 runtime 按会话恢复(name → 配置)。
+    const settings = await readZaiSettings()
+    const { agent: mainAgent, agents: mainAgents } = await resolveMainAgent(
+      settings.mainAgent,
+    )
     const { createOpenccRuntime: factory } = await import(
       '@zn-ai/zn-agent-core'
     )
     runtime = await factory({
       dataDir,
+      mainAgent,
+      mainAgents,
       runtimeId: 'zai-server',
       defaultCwd: cwd,
       defaultModel:

@@ -36,7 +36,8 @@
     "src/opencc-src/server/vendor-stubs.d.ts",
     "src/opencc-src/server/createHeadlessContext.ts",
     "src/opencc-src/server/sessionFacade.ts",
-    "src/opencc-src/server/createOpenccRuntime.ts"  ],
+    "src/opencc-src/server/createOpenccRuntime.ts",
+    "src/opencc-src/server/mainAgents.ts"  ],
 
   "exclude": [
     "node_modules",

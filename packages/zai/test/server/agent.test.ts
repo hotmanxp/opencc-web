@@ -27,7 +27,11 @@ let lastRunOpts: any = null
 // - patchCalls 记录所有 patch 调用, 断言 title 是否被写入
 let mockTranscriptHasTitle = false
 let mockTranscriptMetaModel: string = 'unknown'
-let patchCalls: Array<{ id: string; patch: { title?: string; tags?: string[]; model?: string; providerId?: string } }> = []
+// zai patch (2026-08-20): mock read 里带 mainAgent 记录,默认 'default'。
+// 这样 prompt 路由不会因"会话无 mainAgent"而触发落盘 patch,避免污染
+// patchCalls 统计;要验证落盘路径时把它设为 undefined 再断言。
+let mockTranscriptMainAgent: string | undefined = 'default'
+let patchCalls: Array<{ id: string; patch: { title?: string; tags?: string[]; model?: string; providerId?: string; mainAgent?: string } }> = []
 // runtimeToolEvents: 让 tool_use:error/invalid/denied 翻译测试可注入事件序列.
 let runtimeToolEvents: Array<Record<string, unknown>> = [
   { type: 'message_start' },
@@ -73,6 +77,7 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
         createdAt: 0,
         updatedAt: 0,
         ...(mockTranscriptHasTitle ? { title: 'existing-title' } : {}),
+        ...(mockTranscriptMainAgent ? { mainAgent: mockTranscriptMainAgent } : {}),
       },
       messages: [],
     }),
@@ -110,6 +115,7 @@ vi.mock('@zn-ai/zn-agent-core', async (importOriginal) => {
 beforeEach(() => {
   vi.mocked(readFileSync).mockReset()
   __resetSessionRateLimitsForTests()
+  mockTranscriptMainAgent = 'default'
 })
 
 function startApp(): Promise<{ url: string; close: () => void }> {
@@ -738,6 +744,66 @@ describe('PATCH /api/agent/sessions/:id — providerId', () => {
       })
       expect(res.status).toBe(400)
       expect(patchCalls).toHaveLength(0)
+    } finally {
+      close()
+    }
+  })
+})
+
+describe('mainAgent per-session (zai patch 2026-08-20)', () => {
+  it('forwards the session mainAgent to runtime.query', async () => {
+    lastRunOpts = null
+    mockTranscriptMainAgent = 'office'
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'sess-ma-1',
+          contentBlocks: [{ type: 'text', text: 'hi' }],
+        }),
+      })
+      expect(res.status).toBe(200)
+      const reader = res.body!.getReader()
+      while (true) {
+        const { done } = await reader.read()
+        if (done) break
+      }
+      expect(lastRunOpts).not.toBeNull()
+      // 会话有记录 → 原样透传给 runtime(engine 按它恢复插槽)
+      expect(lastRunOpts.mainAgent).toBe('office')
+    } finally {
+      close()
+    }
+  })
+
+  it('persists the global mainAgent when the session has no record', async () => {
+    lastRunOpts = null
+    patchCalls = []
+    mockTranscriptMainAgent = undefined
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/prompt`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          sessionId: 'sess-ma-2',
+          contentBlocks: [{ type: 'text', text: 'hi' }],
+        }),
+      })
+      expect(res.status).toBe(200)
+      const reader = res.body!.getReader()
+      while (true) {
+        const { done } = await reader.read()
+        if (done) break
+      }
+      expect(lastRunOpts).not.toBeNull()
+      // 无记录 → 用全局默认并落盘固定该会话
+      expect(lastRunOpts.mainAgent).toBe('default')
+      const maPatches = patchCalls.filter((c) => 'mainAgent' in c.patch)
+      expect(maPatches).toHaveLength(1)
+      expect(maPatches[0].patch.mainAgent).toBe('default')
     } finally {
       close()
     }

@@ -3,6 +3,7 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { resolveModel } from '../lib/resolveModel.js'
+import { resolveMainAgent } from '../services/mainAgents.js'
 import type { ModelEntry, OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import type { ProviderProfile } from '../../shared/types.js'
 import { getDefaultMode } from '../services/permissionMode.js'
@@ -101,6 +102,11 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
     const defaultSplitScreen = resolveDefaultSplitScreen(settings)
     const enableDynamicWorkflow = resolveEnableDynamicWorkflow(settings)
     const autoUpdate = resolveAutoUpdate(settings)
+    // zai patch (2026-08-20): 主 Agent —— 当前选择 + 可选列表(内置 + 外置
+    // ~/.zai/main-agents/*.js 合并),供 SettingsDrawer 的 Agent 选择行渲染。
+    const { agent: mainAgent, agents: mainAgents } = await resolveMainAgent(
+      settings.mainAgent,
+    )
     res.json({
       defaultModel,
       baseURL,
@@ -113,6 +119,11 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       defaultSplitScreen,
       enableDynamicWorkflow,
       autoUpdate,
+      mainAgent: mainAgent.name,
+      mainAgents: mainAgents.map((a) => ({
+        name: a.name,
+        description: a.description,
+      })),
     })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
@@ -324,6 +335,33 @@ router.put('/agent/settings/auto-update', async (req: Request, res: Response) =>
     const next: ZaiSettings = { ...settings, autoUpdate: raw }
     await writeZaiSettings(next)
     res.json({ value: next.autoUpdate })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+/**
+ * PUT /api/agent/settings/main-agent — 持久化主 Agent 选择。
+ * Body 是 `{ mainAgent: string }`(内置或 ~/.zai/main-agents/*.js 的 agent
+ * name)。值必须存在于合并后的 mainAgents 列表,否则 400。
+ *
+ * 生效时机:systemPrompt 槽对新会话生效、tools 槽即时、mcp 槽需重启
+ * (见 docs/superpowers/specs/2026-08-20-zai-main-agent-slots-design.md)。
+ */
+router.put('/agent/settings/main-agent', async (req: Request, res: Response) => {
+  const candidate = (req.body as { mainAgent?: unknown } | undefined)?.mainAgent
+  if (typeof candidate !== 'string' || candidate.length === 0) {
+    return res.status(400).json({ error: `invalid mainAgent: ${String(candidate)}` })
+  }
+  try {
+    const { agents } = await resolveMainAgent(undefined)
+    if (!agents.some((a) => a.name === candidate)) {
+      return res.status(400).json({ error: `unknown mainAgent: ${candidate}` })
+    }
+    const settings = await readZaiSettings()
+    const next: ZaiSettings = { ...settings, mainAgent: candidate }
+    await writeZaiSettings(next)
+    res.json({ mainAgent: next.mainAgent })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }

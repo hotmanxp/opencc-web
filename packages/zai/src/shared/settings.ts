@@ -98,6 +98,12 @@ export interface ZaiSettings {
   /** Global working context used to tailor future zai behavior. */
   workMode?: WorkMode
   /**
+   * 主 Agent 选择(内置或 ~/.zai/main-agents/*.js 外置 agent 的 name)。
+   * 缺失 / 未知名 → 'default'(系统默认,不改动任何插槽)。
+   * 见 docs/superpowers/specs/2026-08-20-zai-main-agent-slots-design.md。
+   */
+  mainAgent?: string
+  /**
    * Web UI 主题偏好 — see Theme. 持久化到 ~/.zai/settings.json.
    * 缺失 / 未知值由 resolveTheme() 折叠为 'auto'.
    */

@@ -9,6 +9,20 @@ export type OpenccRuntimeOptions = {
   defaultCwd?: string
   defaultModel?: string
   /**
+   * zai patch (2026-08-20): 主 Agent 插槽配置。三个插槽(systemPrompt /
+   * tools / mcp)替换系统默认,见 `mainAgents.ts` 与
+   * docs/superpowers/specs/2026-08-20-zai-main-agent-slots-design.md。
+   * systemPrompt / tools 槽按会话恢复(见 `mainAgents` 表 + OpenccQueryInput
+   * .mainAgent),mcp 槽在启动 MCP 连接前应用(全局,重启生效)。
+   */
+  mainAgent?: import('./mainAgents.js').MainAgentConfig
+  /**
+   * zai patch (2026-08-20): 合并后的完整主 Agent 表(内置 + 外置)。
+   * runtime 按会话恢复时按 name 从该表 resolve;新会话(无 meta 记录)
+   * 回退到 `mainAgent`。
+   */
+  mainAgents?: import('./mainAgents.js').MainAgentConfig[]
+  /**
    * Whether to attempt MCP server connections during headless
    * bootstrap. Defaults to `false` (zai-server's path) so the
    * server's HTTP listener binds even if the user's `~/.zai.json`
@@ -33,6 +47,13 @@ export type OpenccQueryInput = {
   cwd?: string
   model?: string
   abortSignal?: AbortSignal
+  /**
+   * zai patch (2026-08-20): 该会话生效的主 Agent name。会话首次 query 时
+   * 由 zai-server 从 transcript meta 恢复(无记录时用全局设置)后传入;
+   * runtime 用它从 `mainAgents` 表 resolve 出该会话的插槽配置
+   * (systemPrompt / tools 槽),engine 创建时固定 → 会话级恢复。
+   */
+  mainAgent?: string
   /**
    * 标记本 query 的 prompt 为 system-injected meta message(对 LLM 可见、
    * 不在 transcript UI 展示)。用于后台任务完成时触发的一轮占位 query——

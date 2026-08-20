@@ -53,6 +53,8 @@ type Meta = {
   // findProfileForModel() can disambiguate when several saved
   // providerProfiles share the same model name.
   providerId?: string
+  // zai patch (2026-08-20): 会话当时选的主 Agent name(per-session 落盘)。
+  mainAgent?: string
   permissionMode?: string
   createdAt: number
   updatedAt?: number
@@ -141,9 +143,10 @@ export class TranscriptStore {
    * (readEntries already swallows per-line JSON parse errors, but
    * defence-in-depth here).
    */
-  private static findLatestSessionMeta(entries: any[]): { model?: string; providerId?: string } | undefined {
+  private static findLatestSessionMeta(entries: any[]): { model?: string; providerId?: string; mainAgent?: string } | undefined {
     let latestModel: string | undefined
     let latestProviderId: string | undefined
+    let latestMainAgent: string | undefined
     for (let i = entries.length - 1; i >= 0; i--) {
       const e = entries[i]
       if (e?.type !== 'session-meta') continue
@@ -153,12 +156,16 @@ export class TranscriptStore {
       if (latestProviderId === undefined && typeof e.providerId === 'string' && e.providerId.length > 0) {
         latestProviderId = e.providerId
       }
-      if (latestModel !== undefined && latestProviderId !== undefined) break
+      if (latestMainAgent === undefined && typeof e.mainAgent === 'string' && e.mainAgent.length > 0) {
+        latestMainAgent = e.mainAgent
+      }
+      if (latestModel !== undefined && latestProviderId !== undefined && latestMainAgent !== undefined) break
     }
-    if (latestModel === undefined && latestProviderId === undefined) return undefined
+    if (latestModel === undefined && latestProviderId === undefined && latestMainAgent === undefined) return undefined
     return {
       ...(latestModel !== undefined ? { model: latestModel } : {}),
       ...(latestProviderId !== undefined ? { providerId: latestProviderId } : {}),
+      ...(latestMainAgent !== undefined ? { mainAgent: latestMainAgent } : {}),
     }
   }
 
@@ -330,7 +337,7 @@ export class TranscriptStore {
       // 存活(REGISTRY 进程内,重启空,resolveModel Layer-1 直接失效)。
       // 与 title 的 custom-title 同模式:append 一条 discriminator 行,
       // 重启后 read() 扫 entries 合并回 meta。
-      if (opts?.cwd && (patch.model !== undefined || patch.providerId !== undefined)) {
+      if (opts?.cwd && (patch.model !== undefined || patch.providerId !== undefined || patch.mainAgent !== undefined)) {
         try {
           await this.appendEntry(id, opts.cwd, {
             type: 'session-meta',
@@ -341,6 +348,9 @@ export class TranscriptStore {
               : {}),
             ...(typeof patch.providerId === 'string' && patch.providerId.length > 0
               ? { providerId: patch.providerId }
+              : {}),
+            ...(typeof patch.mainAgent === 'string' && patch.mainAgent.length > 0
+              ? { mainAgent: patch.mainAgent }
               : {}),
           })
         } catch {
@@ -369,7 +379,7 @@ export class TranscriptStore {
           // 走的是重建路径(磁盘文件已存在但 REGISTRY 没缓存),picker 选择
           // 也能跨重启保留。appendEntry 与上面 REGISTRY 命中分支使用相同的
           // session-meta 行格式。
-          if (patch.model !== undefined || patch.providerId !== undefined) {
+          if (patch.model !== undefined || patch.providerId !== undefined || patch.mainAgent !== undefined) {
             try {
               await this.appendEntry(id, opts.cwd, {
                 type: 'session-meta',
@@ -380,6 +390,9 @@ export class TranscriptStore {
                   : {}),
                 ...(typeof patch.providerId === 'string' && patch.providerId.length > 0
                   ? { providerId: patch.providerId }
+                  : {}),
+                ...(typeof patch.mainAgent === 'string' && patch.mainAgent.length > 0
+                  ? { mainAgent: patch.mainAgent }
                   : {}),
               })
             } catch {

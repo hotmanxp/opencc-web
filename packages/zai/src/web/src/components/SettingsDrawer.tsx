@@ -593,6 +593,8 @@ function buildStaticSchema(
   defaultSplitScreen: boolean,
   enableDynamicWorkflow: boolean,
   autoUpdate: boolean,
+  mainAgent: string,
+  agentOptions: EnumOption[],
 ): SettingsSchema {
   return [
     {
@@ -608,6 +610,16 @@ function buildStaticSchema(
             { value: 'office', label: '办公' },
             { value: 'general', label: '通用' },
           ],
+        },
+        {
+          // 主 Agent 插槽配置选择(内置 + ~/.zai/main-agents/*.js 外置)。
+          // 选项列表由 GET /api/agent/settings 的 mainAgents 动态填充;
+          // 生效时机:systemPrompt 槽对新会话生效、tools 槽即时、mcp 槽需重启。
+          key: 'mainAgent',
+          label: '主 Agent',
+          kind: 'enum',
+          value: mainAgent,
+          options: agentOptions,
         },
       ],
     },
@@ -827,10 +839,45 @@ export default function SettingsDrawer() {
     return instances.find((s) => s.isCurrent) ?? null
   })()
 
+  // 主 Agent 选择:options 与当前值来自 GET /api/agent/settings(mount 时
+  // 拉一次);持久化走 PUT /api/agent/settings/main-agent。
+  const [mainAgent, setMainAgent] = useState('default')
+  const [agentOptions, setAgentOptions] = useState<EnumOption[]>(() => [
+    { value: 'default', label: '系统默认' },
+  ])
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate),
+    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions),
   )
+  // mount 时拉一次 GET /api/agent/settings → 填充 agentOptions + 当前 mainAgent。
+  // destroyOnClose 每次打开都会重新挂载,列表保持新鲜(新增外置 agent 文件后
+  // 重开 drawer 即可看到)。
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/agent/settings')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: Record<string, unknown> | null) => {
+        if (cancelled || !data) return
+        const list = Array.isArray(data.mainAgents)
+          ? (data.mainAgents as Array<{ name: string; description?: string }>)
+          : []
+        if (list.length > 0) {
+          setAgentOptions(
+            list.map((a) => ({
+              value: a.name,
+              label: a.description || a.name,
+            })),
+          )
+        }
+        if (typeof data.mainAgent === 'string') setMainAgent(data.mainAgent)
+      })
+      .catch(() => {
+        // swallow — 保持默认 'default' 选项
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
   // 同步 store workMode → schema.workMode 行。
   useEffect(() => {
     setSchema((prev) =>
@@ -936,6 +983,34 @@ export default function SettingsDrawer() {
       })),
     )
   }, [autoUpdate])
+  // 同步 mainAgent → schema 行(本地 state,选择后 PUT 持久化)。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'mainAgent' && r.kind === 'enum') {
+            return { ...r, value: mainAgent }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [mainAgent])
+  // 同步 agentOptions → schema 行(拉取 mainAgents 列表后更新 options)。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'mainAgent' && r.kind === 'enum') {
+            return { ...r, options: agentOptions }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [agentOptions])
 
   const handleChange = useCallback(
     (key: string, value: SettingsValue) => {
@@ -946,6 +1021,18 @@ export default function SettingsDrawer() {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ workMode: next }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
+      // 主 Agent 选择走完整持久化路径。生效时机见设计 spec:systemPrompt
+      // 槽对新会话生效、tools 槽即时、mcp 槽需重启。
+      if (key === 'mainAgent' && typeof value === 'string') {
+        setMainAgent(value)
+        void fetch('/api/agent/settings/main-agent', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mainAgent: value }),
         }).catch(() => {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })

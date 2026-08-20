@@ -62,8 +62,12 @@ describe('SettingsDrawer service section', () => {
     setManagedChild(true)
     const origFetch = globalThis.fetch
     let called = 0
-    globalThis.fetch = vi.fn(() => {
-      called++
+    // 只统计重启相关调用 —— SettingsDrawer mount 时会拉一次
+    // GET /api/agent/settings(主 Agent 列表),那不算是"取消重启"语义下
+    // 的 API 调用,不应计入。
+    globalThis.fetch = vi.fn((url: unknown) => {
+      const u = String(url)
+      if (u.includes('/api/instances') || u.includes('/api/system')) called++
       return Promise.resolve({ ok: true, status: 202, json: async () => ({}) } as Response)
     })
     try {

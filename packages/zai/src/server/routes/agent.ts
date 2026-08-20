@@ -33,6 +33,7 @@ import {
   type UserFacingPermissionMode,
 } from "@zn-ai/zn-agent-core";
 import { getDefaultMode } from "../services/permissionMode.js";
+import { getCachedZaiSettingsSync } from "../services/zaiSettingsStore.js";
 import { flushPendingBashNotifications } from "../services/bashNotifier.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
@@ -1009,6 +1010,10 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // modelCaller via resolveModel + OpenccQueryInput.providerId so the
     // matcher routes the model to the exact provider the user chose.
     let sessionProviderId: string | null = null;
+    // zai patch (2026-08-20): 会话当时选的主 Agent(per-session 落盘)。
+    // 有记录 → 本会话固定用该 agent;无记录(新会话/旧会话)→ 首次 query
+    // 用全局设置并落盘,之后固定。
+    let sessionMainAgent: string | null = null;
     let transcript:
       | Awaited<ReturnType<ReturnType<typeof getTranscriptStore>["read"]>>
       | null = null;
@@ -1027,8 +1032,32 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       if (typeof metaProviderId === 'string' && metaProviderId.length > 0) {
         sessionProviderId = metaProviderId;
       }
+      const metaMainAgent = (existing.meta as { mainAgent?: string }).mainAgent;
+      if (typeof metaMainAgent === 'string' && metaMainAgent.length > 0) {
+        sessionMainAgent = metaMainAgent;
+      }
     } catch {
       // 新会话 / 无 transcript — sessionModel 保持 null, transcript 保持 null
+    }
+
+    // 会话无 mainAgent 记录:用当前全局设置,并落盘固定该会话的 agent。
+    // 已有记录的会话保持当时选的 agent,不随全局切换变化(per-session 语义)。
+    // 用同步缓存读(不 await)—— prompt 热路径不该被 settings 初始化阻塞。
+    if (sessionMainAgent === null) {
+      try {
+        sessionMainAgent = getCachedZaiSettingsSync().mainAgent ?? 'default';
+        // 仅当 transcript 已存在(消息已落盘)才写 —— 新会话首条消息由
+        // 后续 append 流程创建文件,此时写会因文件不存在而失败(无害)。
+        if (transcript) {
+          void getTranscriptStore()
+            .patch(sessionId, { mainAgent: sessionMainAgent }, { cwd })
+            .catch(() => {
+              // 落盘失败不阻断 —— 下次 query 会再次尝试
+            });
+        }
+      } catch {
+        // settings 读不到 → 保持 null,运行时回退到默认 agent
+      }
     }
 
     // resolveModel 内部 readZaiSettings 读不到 ~/.zai/settings.json 时
@@ -1115,6 +1144,9 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       // zai's createAnthropicModelCaller instead of vendor's
       // openai-shim. See plan §阶段 2 vendor 透传 chain.
       ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
+      // zai patch (2026-08-20): 会话恢复的主 Agent。首次 query 用全局设置
+      // (并已落盘),后续从 transcript meta 恢复 → 会话级固定。
+      ...(sessionMainAgent ? { mainAgent: sessionMainAgent } : {}),
     });
 
     // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,

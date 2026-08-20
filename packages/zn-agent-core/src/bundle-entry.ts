@@ -16,6 +16,13 @@
  */
 export * from './opencc-src/query.js'
 export { createOpenccRuntime } from './opencc-src/server/createOpenccRuntime.js'
+// zai patch (2026-08-20): 主 Agent 插槽配置 —— getBuiltinMainAgents 是
+// value,`export type *` 不会带出,需显式导出。路径指向 server/index.js
+// (dist 里已存在)而非 mainAgents.js —— bundle-opencc 的
+// assertDtsTargetsResolve 在 tsconfig.server.json 的 server d.ts 复制
+// 之前运行,直接指向 mainAgents.js 会撞"目标无 d.ts"校验;index.js 的
+// re-export 链由 server 项目 transitive emit 补齐。
+export { getBuiltinMainAgents } from './opencc-src/server/index.js'
 // zai patch (2026-08-09): Task 2/3 公共 API 也走 bundle — createHeadlessContext /
 // createSessionFacade 必须从同一 bundle 拿到,才能与 createOpenccRuntime
 // 共享 module 实例(STATE / commandQueue / bashTracker)。
@@ -40,6 +47,13 @@ export * from './index.js'
 // 内部直接走这条路径,统一调用语义,消除"modelCaller 未配置" 错误。
 export { queryModelWithStreaming } from './opencc-src/services/api/claude.js'
 export { asSystemPrompt } from './opencc-src/utils/systemPromptType.js'
+// zai patch (2026-08-20): buildTool + z 供外置主 agent JS(~/.zai/main-agents/*.js)
+// 在 tools 槽里创造自定义工具。外置文件运行时通过 zai-server 注入的
+// globalThis.__zaiMainAgentToolkit 获取(外置文件在 ~/.zai 下无法解析包名);
+// 这里导出保证 zai-server 侧 import 可用。Tool.d.ts 由 tsconfig.server.json
+// 的 transitive emit 生成(dist 已存在);zod/v4 是 external,zai 进程可解析。
+export { buildTool } from './opencc-src/Tool.js'
+export { z } from 'zod/v4'
 // 显式导出 vendor 的 Message,避免 `export *`(query.js / index.js 两处)同名
 // 冲突 —— TS 会把冲突符号静默丢弃或取旧手写 stub 版,导致 zai 端拿到的
 // Message(uuid 可选)与 queryModelWithStreaming 参数要求的 vendor Message

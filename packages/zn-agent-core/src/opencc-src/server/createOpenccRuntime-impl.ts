@@ -12,6 +12,7 @@ import { transitionPermissionMode } from '../utils/permissions/permissionSetup.j
 import { assembleToolPool } from '../tools.js'
 import { mergeAndFilterTools } from '../utils/toolPool.js'
 import { getMcpToolsCommandsAndResources } from '../services/mcp/client.js'
+import { getAllMcpConfigs } from '../services/mcp/config.js'
 import { assemblePluginList } from './pluginListAssembly.js'
 import {
   installPluginOp,
@@ -90,6 +91,10 @@ export async function createOpenccRuntimeImpl(options) {
   // tools from live appState, then merge/filter by permission mode. Used
   // both for the initial tool list and as `refreshTools` for mid-query
   // updates once MCP servers finish connecting.
+  //
+  // zai patch (2026-08-20): 主 Agent tools 槽不再在此全局应用 —— 改为
+  // per-engine 应用(createEngine 按会话恢复的 agent 包一个闭包),否则
+  // 不同会话各自恢复的 agent 会互相污染工具池。
   const computeTools = () => {
     const state = ctx.appState.getState()
     const permissionContext = state.toolPermissionContext
@@ -102,42 +107,53 @@ export async function createOpenccRuntimeImpl(options) {
   // still become available for the first query's later turns (and are
   // picked up by computeTools via appState.mcp.tools). Dedup by name.
   if (!ctx.config.connectMcp) {
-    void getMcpToolsCommandsAndResources(
-      ({ client, tools: mcpTools, commands: mcpCommands }) => {
-        ctx.appState.setState(prev => {
-          const mcp =
-            prev.mcp ?? {
-              clients: [],
-              tools: [],
-              commands: [],
-              resources: {},
-              pluginReconnectKey: 0,
+    void (async () => {
+      // zai patch (2026-08-20): 主 Agent mcp 插槽 —— 连接前应用。origin
+      // 为 vendor 解析的全 scope server 配置表(name → config),槽函数
+      // 增删/改写后传入连接器。MCP 连接是启动时一次性,槽切换需重启生效。
+      let mcpConfigs = undefined
+      if (options.mainAgent?.mcp) {
+        const all = await getAllMcpConfigs()
+        mcpConfigs = await options.mainAgent.mcp(all.servers)
+      }
+      await getMcpToolsCommandsAndResources(
+        ({ client, tools: mcpTools, commands: mcpCommands }) => {
+          ctx.appState.setState(prev => {
+            const mcp =
+              prev.mcp ?? {
+                clients: [],
+                tools: [],
+                commands: [],
+                resources: {},
+                pluginReconnectKey: 0,
+              }
+            const mcpToolNames = new Set(mcpTools.map(t => t.name))
+            return {
+              ...prev,
+              mcp: {
+                ...mcp,
+                clients: [
+                  ...mcp.clients.filter(c => c.name !== client.name),
+                  client,
+                ],
+                tools: [
+                  ...mcp.tools.filter(t => !mcpToolNames.has(t.name)),
+                  ...mcpTools,
+                ],
+                commands: [
+                  ...mcp.commands.filter(
+                    c => !mcpCommands.some(nc => nc.name === c.name),
+                  ),
+                  ...mcpCommands,
+                ],
+                pluginReconnectKey: (mcp.pluginReconnectKey ?? 0) + 1,
+              },
             }
-          const mcpToolNames = new Set(mcpTools.map(t => t.name))
-          return {
-            ...prev,
-            mcp: {
-              ...mcp,
-              clients: [
-                ...mcp.clients.filter(c => c.name !== client.name),
-                client,
-              ],
-              tools: [
-                ...mcp.tools.filter(t => !mcpToolNames.has(t.name)),
-                ...mcpTools,
-              ],
-              commands: [
-                ...mcp.commands.filter(
-                  c => !mcpCommands.some(nc => nc.name === c.name),
-                ),
-                ...mcpCommands,
-              ],
-              pluginReconnectKey: (mcp.pluginReconnectKey ?? 0) + 1,
-            },
-          }
-        })
-      },
-    ).catch(err => {
+          })
+        },
+        mcpConfigs,
+      )
+    })().catch(err => {
       console.warn('[openccRuntime] async MCP connect failed:', err)
     })
   }
@@ -151,10 +167,26 @@ export async function createOpenccRuntimeImpl(options) {
   // 修复: 每 session 一个独立 QueryEngine。同 session 复用 engine 使
   // mutableMessages 跨 query 保留(续传历史不丢,与旧行为一致);不同 session
   // 互不共享 mutableMessages,并发隔离。
-  const createEngine = () =>
-    new QueryEngine({
+  // zai patch (2026-08-20): 按会话恢复主 Agent。`name` 来自该会话
+  // transcript meta(首次 query 由 zai-server 恢复后经 input.mainAgent 传入);
+  // 查不到(新会话/未知名)回退到全局 options.mainAgent。
+  const resolveSessionMainAgent = (name?: string) => {
+    if (name) {
+      const found = (options.mainAgents ?? []).find(a => a.name === name)
+      if (found) return found
+    }
+    return options.mainAgent
+  }
+
+  const createEngine = (mainAgentName?: string) => {
+    const agent = resolveSessionMainAgent(mainAgentName)
+    // per-engine 工具池:在 base(内置 + MCP + 权限过滤)上应用该会话
+    // agent 的 tools 槽。agent 无槽(如 default)→ 原样返回 base。
+    const engineComputeTools = () =>
+      agent?.tools ? agent.tools(computeTools()) : computeTools()
+    return new QueryEngine({
       cwd,
-      tools: computeTools(),
+      tools: engineComputeTools(),
       commands: ctx.mcp.commands,
       mcpClients: ctx.mcp.clients,
       // zai patch (2026-08-09): includePartialMessages:true 让 vendor 把每条
@@ -165,7 +197,10 @@ export async function createOpenccRuntimeImpl(options) {
       // (compat/runtime/sdkEventAdapter.ts) 已实现 streamedBlockIndices
       // dedup,避免 assistant Message 路径重发已 stream 过的 block。
       includePartialMessages: true,
-      refreshTools: computeTools,
+      refreshTools: engineComputeTools,
+      // zai patch (2026-08-20): 主 Agent systemPrompt 插槽 —— engine 创建
+      // 时固定,按会话恢复(该会话当时选的 agent)。
+      systemPromptSlot: agent?.systemPrompt,
       // zai patch: read agents from AppState (populated by
       // createHeadlessContextImpl via getAgentDefinitionsWithOverrides).
       // QueryEngine constructs its own `options.agentDefinitions` from
@@ -190,6 +225,7 @@ export async function createOpenccRuntimeImpl(options) {
       abortController: initialAbortController,
       query: customQuery,
     })
+  }
   const engines = new Map<string, QueryEngine>()
   // sessionId → 该 session 当前 in-flight query 的 AbortController。
   // 旧实现只 track 单个 currentQueryAbortController,并发下 abort 无法精确
@@ -509,7 +545,9 @@ export async function createOpenccRuntimeImpl(options) {
       // 跨 session 共享。同 session 复用 engine 保留续传历史。
       let engine = engines.get(input.sessionId)
       if (!engine) {
-        engine = createEngine()
+        // zai patch (2026-08-20): 会话首次 query 时按恢复的 mainAgent
+        // 构建 engine —— systemPrompt / tools 槽固定为该会话当时选的 agent。
+        engine = createEngine(input.mainAgent)
         engines.set(input.sessionId, engine)
       }
       engine.replaceAbortController(queryAbortController)

@@ -129,6 +129,12 @@ export type QueryEngineConfig = {
   readFileCache: FileStateCache
   customSystemPrompt?: string
   appendSystemPrompt?: string
+  /**
+   * zai patch (2026-08-20): 主 Agent systemPrompt 插槽。以最终默认
+   * prompt 数组(customSystemPrompt ?? defaultSystemPrompt)为 origin,
+   * 返回值作为组装后的首个 prompt 块。engine 创建时固定 → 新会话生效。
+   */
+  systemPromptSlot?: (origin: string[]) => string[]
   userSpecifiedModel?: string
   fallbackModel?: string
   thinkingConfig?: ThinkingConfig
@@ -371,8 +377,17 @@ export class QueryEngine {
         ? await loadMemoryPrompt()
         : null
 
+    // zai patch (2026-08-20): 主 Agent systemPrompt 插槽。origin 为
+    // customPrompt ?? defaultSystemPrompt(与旧逻辑完全一致的默认值),
+    // 槽函数返回值替换默认作为首个 prompt 块。
+    const basePrompt =
+      customPrompt !== undefined ? [customPrompt] : defaultSystemPrompt
+    const slottedPrompt = this.config.systemPromptSlot
+      ? await this.config.systemPromptSlot(basePrompt)
+      : basePrompt
+
     const systemPrompt = asSystemPrompt([
-      ...(customPrompt !== undefined ? [customPrompt] : defaultSystemPrompt),
+      ...slottedPrompt,
       ...(memoryMechanicsPrompt ? [memoryMechanicsPrompt] : []),
       ...(appendSystemPrompt ? [appendSystemPrompt] : []),
     ])
