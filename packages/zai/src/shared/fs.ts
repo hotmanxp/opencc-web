@@ -108,3 +108,23 @@ export interface FsContentSearchResult {
   /** server 端耗时 ms。 */
   durationMs?: number;
 }
+
+/**
+ * Result of POST /api/fs/upload — drops a dragged file as a copy under
+ * `<cwd>/.zai/uploads/` and returns its absolute path (the "文件地址"
+ * that gets inserted into the chat input). The browser cannot expose the
+ * original system path of a dragged file, so the copy's path is the
+ * anchor the agent can Read from.
+ */
+export interface FsUploadResult {
+  ok: boolean;
+  error?: string;
+  /** Absolute path of the stored copy. */
+  absPath?: string;
+  /** Path relative to cwd (POSIX separators). */
+  relPath?: string;
+  /** Final on-disk basename (deduplicated: "a.txt" → "a-1.txt"). */
+  name?: string;
+  /** Stored size in bytes. */
+  size?: number;
+}

@@ -6,6 +6,13 @@ import { runWithSdkContext, getSessionId, getOriginalCwd } from '../bootstrap/st
 import { wrapTaskAwareSetState } from '../../compat/runtime/agentTaskBridge.js'
 import { translateSdkToRuntime, type SdkEventMeta } from '../../compat/runtime/sdkEventAdapter.js'
 import { QueryEngine } from '../QueryEngine.js'
+// zai patch (sess-1787121363115-0zq3bo8a): engines miss 分支需要从磁盘
+// JSONL 反序列化历史 messages 灌回 QueryEngine.mutableMessages,让模型能看到
+// 历史对话 — vendor CLI 走 REPL.resume(),headless runtime 必须自己接。
+// 复用 vendor 现成的 deserializeMessages:自带 filterUnresolvedToolUses /
+// orphaned thinking 清理 / 末尾 assistant sentinel 注入。
+import { deserializeMessages } from '../utils/conversationRecovery.js'
+import type { Message } from '../types/message.js'
 import { createAbortController } from '../utils/abortController.js'
 import { FileStateCache } from '../utils/fileStateCache.js'
 import { transitionPermissionMode } from '../utils/permissions/permissionSetup.js'
@@ -178,7 +185,16 @@ export async function createOpenccRuntimeImpl(options) {
     return options.mainAgent
   }
 
-  const createEngine = (mainAgentName?: string) => {
+  // 同时承担两个 patch 职责:
+  // 1) sess-1787121363115-0zq3bo8a hydration — server restart 后 model 看不到
+  //    历史,新建 engine 必须从磁盘 JSONL 反序列化历史 messages 灌回
+  //    mutableMessages(vendor QueryEngine.mutableMessages 默认 = [],zai server
+  //    没走 vendor CLI 的 --resume / REPL.resume(),必须手动做 vendor 风格的
+  //    hydration)。
+  // 2) 2026-08-20 主 Agent 插槽 — `mainAgentName` 决定该会话 engine 的
+  //    systemPrompt / 工具池槽,来自会话 transcript meta,未知名回退到全局
+  //    options.mainAgent。
+  const createEngine = (initialMessages?: Message[], mainAgentName?: string) => {
     const agent = resolveSessionMainAgent(mainAgentName)
     // per-engine 工具池:在 base(内置 + MCP + 权限过滤)上应用该会话
     // agent 的 tools 槽。agent 无槽(如 default)→ 原样返回 base。
@@ -224,6 +240,12 @@ export async function createOpenccRuntimeImpl(options) {
       readFileCache: new FileStateCache(100, 25 * 1024 * 1024),
       abortController: initialAbortController,
       query: customQuery,
+      // QueryEngine 接受 initialMessages 写入 mutableMessages
+      // (QueryEngine.ts:212: this.mutableMessages = config.initialMessages ?? [])。
+      // 上游 vendor CLI 走 REPL 的 useState(initialMessages) 同款路径。
+      ...(initialMessages && initialMessages.length > 0
+        ? { initialMessages }
+        : {}),
     })
   }
   const engines = new Map<string, QueryEngine>()
@@ -543,11 +565,65 @@ export async function createOpenccRuntimeImpl(options) {
       }
       // zai patch (并发多会话): 每 session 独立 engine, mutableMessages 不
       // 跨 session 共享。同 session 复用 engine 保留续传历史。
+      //
+      // zai patch (sess-1787121363115-0zq3bo8a, server restart 后 model 看不到历史):
+      // engines miss (新进程首查 + 新会话) 必须从磁盘 JSONL 反序列化历史灌
+      // 回 mutableMessages。复用 vendor 的 deserializeMessages(自带 orphan
+      // tool_use / thinking 清理 + 末尾 assistant sentinel 注入)。
+      // sessionFacade.readTranscript 返回的 JSONL 字符串就是 vendor
+      // recordTranscript 写出的 TranscriptMessage 形态(看 compat/transcript/
+      // persistence.ts baseFields + appendUserMessageV2 msg 形态,字段对齐
+      // vendor types/logs.ts SerializedMessage),直接 JSON.parse 即可。
       let engine = engines.get(input.sessionId)
       if (!engine) {
+let initialMessages: Message[] | undefined
+        try {
+          const jsonl = await sessions.readTranscript(input.sessionId)
+          if (jsonl.trim().length > 0) {
+            const entries: Message[] = []
+            for (const line of jsonl.split('\n')) {
+              const t = line.trim()
+              if (!t) continue
+              try {
+                const e = JSON.parse(t)
+                // 仅 transcript 形态参与 chain — 对齐 vendor 的
+                // isTranscriptMessage(entry) (sessionStorage.ts:149):
+                // user / assistant / attachment / system。其它条目
+                // (session-meta / custom-title / file-history-snapshot /
+                // attribution-snapshot / worktree-state 等) 是 metadata,
+                // 不能喂给 vendor Message[] — 否则 deserializeMessages
+                // 内部 filterUnresolvedToolUses 会因 type 不在 union 抛错。
+                if (
+                  e &&
+                  typeof e === 'object' &&
+                  'type' in e &&
+                  ((e as { type: unknown }).type === 'user' ||
+                    (e as { type: unknown }).type === 'assistant' ||
+                    (e as { type: unknown }).type === 'attachment' ||
+                    (e as { type: unknown }).type === 'system')
+                ) {
+                  entries.push(e as Message)
+                }
+              } catch {
+                // 跳过损坏行 — 旧 session 可能因各种原因有半行写入
+              }
+            }
+            if (entries.length > 0) {
+              initialMessages = deserializeMessages(entries)
+            }
+          }
+        } catch (err) {
+          // 新会话 / 文件不存在 / 读失败 → 当作全新对话
+          if (process.env.ZAI_DEBUG === '1') {
+            console.warn(
+              `[openccRuntime] resume hydration failed for ${input.sessionId}:`,
+              err,
+            )
+          }
+        }
         // zai patch (2026-08-20): 会话首次 query 时按恢复的 mainAgent
         // 构建 engine —— systemPrompt / tools 槽固定为该会话当时选的 agent。
-        engine = createEngine(input.mainAgent)
+        engine = createEngine(initialMessages, input.mainAgent)
         engines.set(input.sessionId, engine)
       }
       engine.replaceAbortController(queryAbortController)

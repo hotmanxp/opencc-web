@@ -169,6 +169,60 @@ function assertDtsTargetsResolve(bundleEntryDts: string): void {
   }
 }
 
+// ── Tool 类型声明(zai patch 2026-08-20)─────────────────────────────
+// standalone 的 Tool.js 不发射(运行时随 bundle-entry.ts `export { buildTool
+// } from './opencc-src/Tool.js'` 打进 opencc-core.mjs 主 bundle),主入口
+// types(dist/bundle-entry.d.ts)与 server emit(dist/opencc-src/server/
+// mainAgents.d.ts 都引用 `from '../Tool.js'`)的 d.ts 链都要 Tool.d.ts 在
+// dist 里存在 —— 唯独 vendor 头文件 src/opencc-src/Tool.ts 不在主
+// tsconfig.build.json / tsconfig.server.json 的 include 里,tsc 不会发
+// 射,所以这里手写保持与源码同步。
+//
+// emit 顺序:这一步必须在 generateBundleEntryDts() 之前 —— 后者会调用
+// assertDtsTargetsResolve,要求 dist/ 下能看到 bundle-entry.ts 每个
+// re-export 目标对应的 .d.ts。手写 d.ts 缺位时该 assertion 失败。
+//
+// 公共表面是 buildTool(def) → Tool(generic),zai 消费只在 ctx 强转后
+// 作为 `ctx.buildTool({...})` 注入外置 agent 文件,不依赖精确 return
+// 形状,minimal callable signature 已够用;若 Tool.ts 加新字段(类
+// `userFacingName` 等),zai 端不消费则不用同步。
+{
+  const { writeFileSync } = await import('node:fs')
+  const TOOL_DTS = join(ROOT, 'dist', 'opencc-src', 'Tool.d.ts')
+  mkdirSync(dirname(TOOL_DTS), { recursive: true })
+  const dts = [
+    `// Type declarations for the vendor Tool module.`,
+    `// Mirror the public surface of src/opencc-src/Tool.ts; hand-written`,
+    `// because the vendor module is excluded from both tsconfig.build.json`,
+    `// and tsconfig.server.json (the latter only covers src/opencc-src/server/*).`,
+    `// Downstream consumers (bundle-entry.ts re-export + server/mainAgents.ts`,
+    `// import of buildTool / typeof Tool) rely on this file resolving to a`,
+    `// callable signature.`,
+    `export declare function buildTool<Def extends ToolDef = ToolDef>(def: Def): Tool;`,
+    `export type Tool = {`,
+    `  name: string;`,
+    `  description: string | (() => string | Promise<string>);`,
+    `  prompt: string | (() => string | Promise<string>);`,
+    `  inputSchema: unknown;`,
+    `  outputSchema: unknown;`,
+    `  call: (input: any, context?: unknown) => Promise<any>;`,
+    `  renderToolUseMessage?: (...args: unknown[]) => unknown;`,
+    `  userFacingName?: (...args: unknown[]) => string;`,
+    `  isEnabled?: (...args: unknown[]) => boolean;`,
+    `  isConcurrencySafe?: (...args: unknown[]) => boolean;`,
+    `  isReadOnly?: (...args: unknown[]) => boolean;`,
+    `  isDestructive?: (...args: unknown[]) => boolean;`,
+    `  checkPermissions?: (...args: unknown[]) => Promise<any>;`,
+    `  toAutoClassifierInput?: (...args: unknown[]) => string;`,
+    `  [key: string]: unknown;`,
+    `};`,
+    `export type ToolDef = { name: string } & Partial<Tool>;`,
+    ``,
+  ].join('\n')
+  writeFileSync(TOOL_DTS, dts)
+  console.log(`[bundle-opencc]   → ${TOOL_DTS}`)
+}
+
 function generateBundleEntryDts(): void {
   // Ensure OUT_DIR exists — this runs before any esbuild call, so we
   // can't rely on esbuild to create the dist/ directory for us.

@@ -15,7 +15,7 @@ import {
 } from 'antd';
 import { FolderOutlined, FileOutlined, CopyOutlined, DownloadOutlined } from '@ant-design/icons';
 import { useEffect, useState, useCallback } from 'react';
-import type { DirectoryStatus, DirInfo } from '@shared/types';
+import type { DirectoryStatus, DirInfo, GlobalSkillsInfo } from '@shared/types';
 import { api } from '../lib/api';
 
 const { Text } = Typography;
@@ -64,6 +64,30 @@ function buildTree(info: DirInfo): TreeNode {
           buildSubTree('extensions', info.extensions),
         ]
       : [],
+  };
+}
+
+/**
+ * `~/.agents/skills` 本身就是一个 skills 目录,直接展示其下的一级条目
+ * (文件 / 子目录),不再嵌 agents/commands/skills/extensions。
+ */
+function buildGlobalSkillsTree(info: GlobalSkillsInfo): TreeNode {
+  return {
+    title: (
+      <span>
+        <strong>{info.path}</strong>
+        {!info.exists && <Tag color="red">不存在</Tag>}
+      </span>
+    ),
+    key: info.path,
+    icon: <FolderOutlined />,
+    isLeaf: false,
+    children: info.items.map((item) => ({
+      title: item,
+      key: `${info.path}/${item}`,
+      icon: <FileOutlined />,
+      isLeaf: true,
+    })),
   };
 }
 
@@ -157,11 +181,50 @@ export default function Directory() {
   if (loading) return <Spin size="large" className="block mx-auto my-20" />;
   if (!data) return null;
 
-  const treeData = [
-    { title: 'Nova', key: 'nova', info: data.nova },
-    { title: 'OpenCode', key: 'opencode', info: data.opencode },
-    { title: 'OpenCC', key: 'opencc', info: data.opencc },
-    { title: '全局 Skills', key: 'globalSkills', info: data.globalSkills },
+  const treeData: {
+    key: string;
+    title: string;
+    info: { path: string; exists: boolean };
+    tree: TreeNode;
+    defaultExpandedKeys: React.Key[];
+  }[] = [
+    {
+      title: 'Nova',
+      key: 'nova',
+      info: data.nova,
+      tree: buildTree(data.nova),
+      // 展开根节点,二级 agents/commands/skills/extensions 默认收起
+      defaultExpandedKeys: [data.nova.path],
+    },
+    {
+      title: 'OpenCode',
+      key: 'opencode',
+      info: data.opencode,
+      tree: buildTree(data.opencode),
+      defaultExpandedKeys: [data.opencode.path],
+    },
+    {
+      title: 'OpenCC',
+      key: 'opencc',
+      info: data.opencc,
+      tree: buildTree(data.opencc),
+      defaultExpandedKeys: [data.opencc.path],
+    },
+    {
+      title: 'Z.Ai',
+      key: 'zai',
+      info: data.zai,
+      tree: buildTree(data.zai),
+      defaultExpandedKeys: [data.zai.path],
+    },
+    {
+      title: '全局 Skills',
+      key: 'globalSkills',
+      info: data.globalSkills,
+      tree: buildGlobalSkillsTree(data.globalSkills),
+      // 根节点下直接是 skill 一级条目,展开后就是长列表,默认收起
+      defaultExpandedKeys: [],
+    },
   ];
 
   return (
@@ -182,15 +245,17 @@ export default function Directory() {
                 </span>
               }
               size="small"
+              bodyStyle={{ maxHeight: '70vh', overflow: 'auto' }}
             >
               <Text type="secondary" className="block mb-2">
                 {item.info.path}
               </Text>
               {item.info.exists ? (
-                <Tree
+                <Tree.DirectoryTree
                   showIcon
-                  defaultExpandAll
-                  treeData={[buildTree(item.info)]}
+                  expandAction="click"
+                  defaultExpandedKeys={item.defaultExpandedKeys}
+                  treeData={[item.tree]}
                   onSelect={handleSelect}
                   style={{
                     background: 'var(--bg-body)',
@@ -249,24 +314,29 @@ export default function Directory() {
         ) : viewerError ? (
           <Empty description={viewerError} />
         ) : viewerFile ? (
-          <pre
+          <div
             style={{
-              margin: 0,
-              padding: 16,
+              maxHeight: '70vh',
+              overflow: 'auto',
               background: 'var(--bg-body, #f5f5f5)',
               borderRadius: 8,
-              maxHeight: '60vh',
-              overflow: 'auto',
-              fontSize: 12,
-              lineHeight: 1.6,
-              fontFamily:
-                'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
-              whiteSpace: 'pre-wrap',
-              wordBreak: 'break-word',
+              padding: 16,
             }}
           >
-            {viewerFile.content}
-          </pre>
+            <pre
+              style={{
+                margin: 0,
+                fontSize: 12,
+                lineHeight: 1.6,
+                fontFamily:
+                  'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", "Courier New", monospace',
+                whiteSpace: 'pre-wrap',
+                wordBreak: 'break-word',
+              }}
+            >
+              {viewerFile.content}
+            </pre>
+          </div>
         ) : null}
       </Modal>
     </div>

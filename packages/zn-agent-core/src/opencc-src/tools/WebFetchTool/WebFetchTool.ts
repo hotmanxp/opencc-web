@@ -115,10 +115,10 @@ export const WebFetchTool = buildTool({
     return true
   },
   isEnabled() {
-    // 检查环境变量控制
-    if (!isEnvTruthy(process.env.CLAUDE_CODE_WEBTOOL_ENABEL)) {
-      return false
-    }
+    // 检查环境变量控制(zai patch: 修复拼写错误 ENABEL -> ENABLE)
+    // if (!isEnvTruthy(process.env.CLAUDE_CODE_WEBTOOL_ENABLE)) {
+    //   return false
+    // }
     return true
   },
   toAutoClassifierInput(input) {

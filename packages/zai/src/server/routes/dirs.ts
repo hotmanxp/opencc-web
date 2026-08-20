@@ -2,8 +2,12 @@ import { Router, type IRouter } from 'express';
 import { readdir, access, stat, readFile } from 'node:fs/promises';
 import { join, resolve, sep, extname, basename } from 'node:path';
 import { homedir } from 'node:os';
-import { expandTilde } from '../utils/expandTilde.js';
-import type { DirectoryStatus, DirInfo, FileCount } from '../../shared/types.js';
+import type {
+  DirectoryStatus,
+  DirInfo,
+  FileCount,
+  GlobalSkillsInfo,
+} from '../../shared/types.js';
 
 const router: IRouter = Router();
 
@@ -37,14 +41,32 @@ async function buildDirInfo(basePath: string): Promise<DirInfo> {
   };
 }
 
+/**
+ * `~/.agents/skills` 是 OpenCC 全局 skills 的实际加载根
+ * (`getUserAgentsDir()` → `join(.agents, 'skills')`)。它本身就是 skills
+ * 目录,里面直接是 skill 文件/子目录,不再嵌 4 个子目录,所以这里只
+ * 返回一级 `readdir` 结果。
+ */
+async function buildGlobalSkillsInfo(basePath: string): Promise<GlobalSkillsInfo> {
+  const items = await countDir(basePath);
+  return {
+    path: basePath,
+    exists: await dirExists(basePath),
+    items: items.items,
+  };
+}
+
 router.get('/dirs', async (_req, res) => {
   try {
     const home = homedir();
     const status: DirectoryStatus = {
       nova: await buildDirInfo(join(home, '.nova')),
       opencode: await buildDirInfo(join(home, '.config', 'opencode')),
-      opencc: await buildDirInfo(join(home, '.zai')),
-      globalSkills: await buildDirInfo(join(home, '.agents', 'skills')),
+      // OpenCC 实际加载根是 ~/.claude(参见 opencc-src/utils/envUtils.ts),
+      // ~/.zai 是 zai 自己的数据目录,单独成一项。
+      opencc: await buildDirInfo(join(home, '.claude')),
+      zai: await buildDirInfo(join(home, '.zai')),
+      globalSkills: await buildGlobalSkillsInfo(join(home, '.agents', 'skills')),
     };
     res.json(status);
   } catch (err) {
@@ -86,6 +108,7 @@ function platformRoots(): string[] {
   return [
     join(home, '.nova'),
     join(home, '.config', 'opencode'),
+    join(home, '.claude'),
     join(home, '.zai'),
     join(home, '.agents', 'skills'),
   ].map((p) => resolve(p));
@@ -98,15 +121,13 @@ router.get('/dirs/file', async (req, res) => {
     return;
   }
 
-  // expandTilde 处理 ~/foo 这类 shell 简写,然后 platformRoots() 的 prefix
-  // 校验会基于展开后的绝对路径比对(参见 expandTilde.ts 注释)。
-  const abs = resolve(expandTilde(raw));
+  const abs = resolve(raw);
   const roots = platformRoots();
   const matchedRoot = roots.find((root) => abs === root || abs.startsWith(root + sep));
   if (!matchedRoot) {
     res
       .status(403)
-      .json({ error: '禁止访问：仅允许预览 ~/.nova、~/.config/opencode、~/.zai、~/.agents/skills 下的文件' });
+      .json({ error: '禁止访问：仅允许预览 ~/.nova、~/.config/opencode、~/.claude、~/.zai、~/.agents/skills 下的文件' });
     return;
   }
 

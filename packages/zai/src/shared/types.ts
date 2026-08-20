@@ -25,7 +25,22 @@ export interface DirectoryStatus {
   nova: DirInfo;
   opencode: DirInfo;
   opencc: DirInfo;
-  globalSkills: DirInfo;
+  zai: DirInfo;
+  globalSkills: GlobalSkillsInfo;
+}
+
+/**
+ * `~/.agents/skills` 是 OpenCC 全局 skills 的实际加载路径
+ * (`opencc-src/utils/envUtils.ts:getUserAgentsDir()` →
+ * `opencc-src/skills/loadSkillsDir.ts:getSkillsPath('userSettings', 'skills')`)。
+ * 它本身就是一个 skills 目录,不再嵌 agents/commands/skills/extensions
+ * 四个子目录,因此用独立类型,只暴露一级条目。
+ */
+export interface GlobalSkillsInfo {
+  path: string;
+  exists: boolean;
+  /** `~/.agents/skills` 下的直接条目(文件或子目录),与 readdir 一致 */
+  items: string[];
 }
 
 export interface DirInfo {

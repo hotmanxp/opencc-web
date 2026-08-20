@@ -4,11 +4,11 @@ import { Spin, message } from 'antd';
 import Layout from './components/Layout';
 import { useAppStore } from './store/useAppStore';
 const Dashboard = lazy(() => import('./pages/Dashboard'));
-const Tools = lazy(() => import('./pages/Tools'));
-const Resources = lazy(() => import('./pages/Resources'));
+// /login 是顶层菜单(常用入口免进 tab),/resources /config /dirs /tools
+// 四个页面合并到 /manage(Manage.tsx 用 AntD Tabs 在顶部切换);老 URL 走
+// 下方 <Navigate> 重定向到 /manage?tab=<key>。
 const Login = lazy(() => import('./pages/Login'));
-const Config = lazy(() => import('./pages/Config'));
-const Directory = lazy(() => import('./pages/Directory'));
+const Manage = lazy(() => import('./pages/Manage'));
 const Agent = lazy(() => import('./pages/Agent'));
 const Instances = lazy(() => import('./pages/Instances'));
 const MobileLayout = lazy(() => import('./components/MobileLayout'));
@@ -59,10 +59,12 @@ export default function AppRouter() {
         <Route element={<Layout />}>
           <Route path="/" element={<Navigate to="/agent" replace />} />
           <Route path="/login" element={<Login />} />
-          <Route path="/tools" element={<Tools />} />
-          <Route path="/resources" element={<Resources />} />
-          <Route path="/config" element={<Config />} />
-          <Route path="/dirs" element={<Directory />} />
+          <Route path="/manage" element={<Manage />} />
+          {/* /tools 现在是 /manage 内的 tab,老 URL 重定向过去,书签不丢 */}
+          <Route path="/tools" element={<Navigate to="/manage?tab=tools" replace />} />
+          <Route path="/resources" element={<Navigate to="/manage?tab=resources" replace />} />
+          <Route path="/config" element={<Navigate to="/manage?tab=config" replace />} />
+          <Route path="/dirs" element={<Navigate to="/manage?tab=dirs" replace />} />
           <Route path="/agent" element={<Agent />} />
           <Route path="/dashboard" element={<Dashboard />} />
           <Route

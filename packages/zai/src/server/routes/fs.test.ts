@@ -486,3 +486,81 @@ describe('GET /api/fs/search', () => {
     expect(res.status).toBe(500);
   }, 10000);
 });
+
+describe('POST /api/fs/upload — 拖入文件作为副本落盘 .zai/uploads', () => {
+  let root: string;
+  const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
+  const uploads = (p: string) => join(root, '.zai', 'uploads', p);
+
+  beforeEach(() => {
+    root = mkdtempSync(join(tmpdir(), 'zai-fs-upload-'));
+  });
+
+  afterEach(() => {
+    rmSync(root, { recursive: true, force: true });
+  });
+
+  test('把 base64 内容写为副本并返回绝对路径', async () => {
+    const res = await request(makeApp(root))
+      .post('/api/fs/upload')
+      .send({ name: 'report.xlsx', data: b64('hello-xlsx') });
+    expect(res.status).toBe(200);
+    expect(res.body.ok).toBe(true);
+    expect(res.body.absPath).toBe(uploads('report.xlsx'));
+    expect(res.body.relPath).toBe('.zai/uploads/report.xlsx');
+    expect(res.body.name).toBe('report.xlsx');
+    expect(res.body.size).toBe(Buffer.byteLength('hello-xlsx'));
+    expect(readFileSync(uploads('report.xlsx'), 'utf8')).toBe('hello-xlsx');
+  });
+
+  test('文件名中的目录段被剥离, 落盘不越界', async () => {
+    const res = await request(makeApp(root))
+      .post('/api/fs/upload')
+      .send({ name: '../../escape.txt', data: b64('x') });
+    expect(res.status).toBe(200);
+    expect(res.body.absPath).toBe(uploads('escape.txt'));
+    expect(readFileSync(uploads('escape.txt'), 'utf8')).toBe('x');
+  });
+
+  test('中文文件名可正常落盘', async () => {
+    const res = await request(makeApp(root))
+      .post('/api/fs/upload')
+      .send({ name: '报告.docx', data: b64('doc') });
+    expect(res.status).toBe(200);
+    expect(res.body.name).toBe('报告.docx');
+    expect(readFileSync(uploads('报告.docx'), 'utf8')).toBe('doc');
+  });
+
+  test('重名文件追加 -1/-2 后缀, 不覆盖', async () => {
+    await request(makeApp(root)).post('/api/fs/upload').send({ name: 'dup.txt', data: b64('one') });
+    const res2 = await request(makeApp(root)).post('/api/fs/upload').send({ name: 'dup.txt', data: b64('two') });
+    const res3 = await request(makeApp(root)).post('/api/fs/upload').send({ name: 'dup.txt', data: b64('three') });
+    expect(res2.body.name).toBe('dup-1.txt');
+    expect(res3.body.name).toBe('dup-2.txt');
+    expect(readFileSync(uploads('dup.txt'), 'utf8')).toBe('one');
+    expect(readFileSync(uploads('dup-1.txt'), 'utf8')).toBe('two');
+  });
+
+  test('空 data / 缺 name / 非法文件名 → 400', async () => {
+    const noData = await request(makeApp(root)).post('/api/fs/upload').send({ name: 'a.txt' });
+    expect(noData.status).toBe(400);
+    const noName = await request(makeApp(root)).post('/api/fs/upload').send({ data: b64('x') });
+    expect(noName.status).toBe(400);
+    const badName = await request(makeApp(root)).post('/api/fs/upload').send({ name: '\x00a.txt', data: b64('x') });
+    expect(badName.status).toBe(400);
+  });
+
+  test('非法 base64 → 400', async () => {
+    const res = await request(makeApp(root)).post('/api/fs/upload').send({ name: 'a.txt', data: 'not!!base64' });
+    expect(res.status).toBe(400);
+    expect(res.body.error).toBe('data 不是合法 base64');
+  });
+
+  test('base64 超 19MB → 413', async () => {
+    const res = await request(makeApp(root))
+      .post('/api/fs/upload')
+      .send({ name: 'big.bin', data: 'a'.repeat(19 * 1024 * 1024 + 1) });
+    expect(res.status).toBe(413);
+    expect(res.body.ok).toBe(false);
+  }, 30000);
+});

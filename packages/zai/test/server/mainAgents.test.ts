@@ -193,14 +193,53 @@ describe('builtin agents (core)', () => {
     // office 有 systemPrompt 槽 + tools 槽
     expect(office.systemPrompt).toBeTypeOf('function')
     expect(office.tools).toBeTypeOf('function')
-    // office 工具槽精简:白名单外工具被过滤(值用真实工具名,见 mainAgents.ts 注释)
+    // office 工具槽精简:白名单外工具被过滤;WebSearch 与 Task v2 工具保留,
+    // WebFetch 不开放(值用真实工具名,见 mainAgents.ts 注释)
     const fakeTools = [
       { name: 'Read' },
       { name: 'Agent' },
       { name: 'Workflow' },
+      { name: 'WebFetch' },
+      { name: 'WebSearch' },
+      { name: 'TaskCreate' },
+      { name: 'TaskGet' },
+      { name: 'TaskUpdate' },
+      { name: 'TaskList' },
     ]
     const filtered = office.tools!(fakeTools as never)
-    expect(filtered.map((t) => t.name)).toEqual(['Read'])
+    expect(filtered.map((t) => t.name).sort()).toEqual([
+      'Read',
+      'TaskCreate',
+      'TaskGet',
+      'TaskList',
+      'TaskUpdate',
+      'WebSearch',
+    ])
+  })
+
+  it('office system prompt strips coding-oriented sections, keeps base mechanics', () => {
+    const office = getBuiltinMainAgents().find(
+      (a) => a.name === 'office',
+    )!
+    const origin = [
+      'You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user. Only create URLs for programming help.',
+      '# System\nTools are executed in a user-selected permission mode. If the user denies a tool you call, adjust your approach.',
+      '# Doing tasks\nThe user will primarily request you to perform software engineering tasks.\nAvoid backwards-compatibility hacks. Prefer three similar lines of code over a premature abstraction.',
+      '# Environment\nPrimary working directory: /tmp/some-office-dir',
+      '# Using your tools\nTo read files use Read instead of cat.',
+    ]
+    const slotted = office.systemPrompt!(origin)
+    const joined = slotted.join('\n')
+    // 身份/行为准则前置
+    expect(slotted[0]).toContain('Office Assistant')
+    // coding 行为规则段被剥离
+    expect(joined).not.toContain('software engineering tasks')
+    expect(joined).not.toContain('# Doing tasks')
+    expect(joined).not.toContain('backwards-compatibility hacks')
+    // 基础机制段保留
+    expect(joined).toContain('# System')
+    expect(joined).toContain('# Environment')
+    expect(joined).toContain('# Using your tools')
   })
 
   it('agent-creator carries the full external-agent spec in its system prompt', () => {

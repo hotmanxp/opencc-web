@@ -1,5 +1,5 @@
 import { Router, type IRouter, type Request } from 'express';
-import { readdir, stat, readFile, rm, rmdir } from 'node:fs/promises';
+import { readdir, stat, readFile, rm, rmdir, mkdir, writeFile, access } from 'node:fs/promises';
 import { extname, basename, join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { resolveSafePath } from '../utils/safePath.js';
@@ -7,7 +7,7 @@ import { MAX_FILE_BYTES, writeTextFile } from '../utils/fsWrite.js';
 import { resolveRgPath, runRipgrep } from '../services/ripgrep.js';
 import type {
   FsAck, FsEntry, FsFile, FsList, FsSearchEntry, FsSearchResult,
-  FsContentSearchEntry, FsContentSearchResult,
+  FsContentSearchEntry, FsContentSearchResult, FsUploadResult,
 } from '../../shared/fs.js';
 import { dirname as pathDirname, relative as pathRelative } from 'node:path';
 const MAX_QUERY_LEN = 64;
@@ -15,6 +15,16 @@ const WALK_TIMEOUT_MS = 200;
 const IGNORED = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', '.cache', '.DS_Store',
 ]);
+
+// 拖入文件的存放目录(相对 cwd 的 POSIX 路径)。浏览器的 File.path /
+// file:// URI 已被现代浏览器移除,拖入文件的系统绝对路径拿不到 ——
+// 上传副本落到这里,用副本的绝对路径作为插入对话的「文件地址」,
+// agent 拿到后可直接读文件。
+const UPLOADS_REL = '.zai/uploads';
+// base64 请求体上限:express.json 全局是 20mb,留出 JSON envelope 余量。
+const MAX_UPLOAD_BASE64_LEN = 19 * 1024 * 1024;
+// 解码后的字节上限(base64 膨胀 ~1.33x 后仍落在 20mb JSON limit 内)。
+const MAX_UPLOAD_BYTES = 14 * 1024 * 1024;
 
 const TEXT_EXTS = new Set([
   '.md', '.markdown', '.txt', '.json', '.jsonc', '.json5',
@@ -432,6 +442,106 @@ fsRouter.put('/fs/file', async (req, res) => {
     size: result.size,
     mtime: result.mtime,
   } satisfies FsFile);
+});
+
+/**
+ * Sanitize a client-supplied filename for upload: strips directory
+ * components (traversal guard — the stored copy always lives inside
+ * `<cwd>/.zai/uploads/`), rejects hidden/control-char/oversized names.
+ */
+function sanitizeUploadName(name: unknown): string | null {
+  if (typeof name !== 'string') return null;
+  const cleaned = name.split(/[\\/]/).pop()?.trim() ?? '';
+  if (!cleaned || cleaned === '.' || cleaned === '..' || cleaned.length > 200) {
+    return null;
+  }
+  // Control chars can't exist in a real filename and would be ambiguous
+  // when the absolute path is later pasted into a chat message.
+  if (/[\x00-\x1f\x7f]/.test(cleaned)) return null;
+  return cleaned;
+}
+
+/**
+ * Pick a non-colliding path inside `dir` for `name`: reuse the plain
+ * name when free, otherwise append `-1`, `-2`, … before the extension
+ * ("a.txt" → "a-1.txt") so repeated drags don't overwrite earlier copies.
+ */
+async function uniqueUploadPath(dir: string, name: string): Promise<string> {
+  const candidate = join(dir, name);
+  try {
+    await access(candidate);
+  } catch {
+    return candidate;
+  }
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  for (let i = 1; ; i++) {
+    const next = join(dir, `${stem}-${i}${ext}`);
+    try {
+      await access(next);
+    } catch {
+      return next;
+    }
+  }
+}
+
+// 拖入的非图片文件落到 `<cwd>/.zai/uploads/`,返回副本的绝对路径
+// (FsUploadResult.absPath)作为「文件地址」插入对话输入框。
+fsRouter.post('/fs/upload', async (req, res) => {
+  const { cwd } = ctx(req);
+  const body = req.body ?? {};
+  if (typeof body.data !== 'string' || !body.data) {
+    res.status(400).json({ ok: false, error: '缺少 data 字段' } satisfies FsUploadResult);
+    return;
+  }
+  const name = sanitizeUploadName(body.name);
+  if (!name) {
+    res.status(400).json({ ok: false, error: '文件名非法' } satisfies FsUploadResult);
+    return;
+  }
+  if (Buffer.byteLength(body.data, 'utf8') > MAX_UPLOAD_BASE64_LEN) {
+    res.status(413).json({ ok: false, error: '文件过大 (base64 超出 19 MB)' } satisfies FsUploadResult);
+    return;
+  }
+  // base64 合法性:标准 alphabet + 尾部 padding;非法字符 Buffer.from
+  // 会静默丢弃尾部垃圾,必须显式拒绝。
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(body.data) || body.data.length % 4 !== 0) {
+    res.status(400).json({ ok: false, error: 'data 不是合法 base64' } satisfies FsUploadResult);
+    return;
+  }
+  const buf = Buffer.from(body.data, 'base64');
+  if (buf.byteLength > MAX_UPLOAD_BYTES) {
+    const mb = (buf.byteLength / 1024 / 1024).toFixed(2);
+    res.status(413).json({ ok: false, error: `文件过大 (${mb} MB > 14 MB)` } satisfies FsUploadResult);
+    return;
+  }
+  const dir = join(cwd, ...UPLOADS_REL.split('/'));
+  try {
+    await mkdir(dir, { recursive: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: `创建上传目录失败: ${err instanceof Error ? err.message : String(err)}` } satisfies FsUploadResult);
+    return;
+  }
+  const absPath = await uniqueUploadPath(dir, name);
+  try {
+    await writeFile(absPath, buf);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOSPC') {
+      res.status(500).json({ ok: false, error: '磁盘空间不足' } satisfies FsUploadResult);
+      return;
+    }
+    res.status(500).json({ ok: false, error: `写入失败: ${err instanceof Error ? err.message : String(err)}` } satisfies FsUploadResult);
+    return;
+  }
+  res.json({
+    ok: true,
+    absPath,
+    relPath: `${UPLOADS_REL}/${basename(absPath)}`,
+    name: basename(absPath),
+    size: buf.byteLength,
+  } satisfies FsUploadResult);
 });
 
 fsRouter.get('/fs/search', async (req, res) => {

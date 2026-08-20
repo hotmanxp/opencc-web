@@ -2,17 +2,15 @@ import { useEffect, useMemo, useState } from 'react';
 import { Button, Layout as AntLayout, Menu, Switch, Tag } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  ToolOutlined,
-  AppstoreOutlined,
-  LoginOutlined,
+  DashboardOutlined,
   SettingOutlined,
-  FolderOutlined,
   RobotOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   ClusterOutlined,
   SunOutlined,
   MoonOutlined,
+  LoginOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../store/useAppStore';
 import { useAgentStore } from '../store/useAgentStore';
@@ -22,6 +20,7 @@ import ZnLogo from './ZnLogo';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useEffectiveTheme } from '../hooks/useEffectiveTheme.js';
 import { UpdateNotifier } from './UpdateNotifier';
+import SettingsDrawer from './SettingsDrawer';
 
 const { Sider, Header, Content } = AntLayout;
 
@@ -29,14 +28,16 @@ const { Sider, Header, Content } = AntLayout;
 // 下隐藏"实例管理"入口:子实例自己不能再 spawn 孙实例(由 routes/instances.ts
 // 路由层 + server/index.ts init 双重防御),给它看到这个入口只会显示 404
 // 页面,反而让用户困惑。Layout 在 useMemo 里按 isManagedChild 过滤。
+// /resources /config /dirs 合并到 /manage(Tabs 顶部切换)。登录 / 工具 对调:
+// 登录 单独留在外面(top-level 菜单,常用入口免进 tab),
+// 工具 进 /manage 当 tab(Tools 工具开关页与 /manage 内"配置"语义略近,
+// 但实际是工具检测面板;用户偏好放 tab 而不是顶菜单)。
+// 任何实例子进程仍隐藏"实例管理"(下方 Layout 里有说明)。
 const ALL_MENU_ITEMS = [
   { key: '/agent', icon: <RobotOutlined />, label: 'Agent' },
   { key: '/instances', icon: <ClusterOutlined />, label: '实例管理' },
   { key: '/login', icon: <LoginOutlined />, label: '登录' },
-  { key: '/tools', icon: <ToolOutlined />, label: '工具' },
-  { key: '/resources', icon: <AppstoreOutlined />, label: '资源' },
-  { key: '/config', icon: <SettingOutlined />, label: '配置' },
-  { key: '/dirs', icon: <FolderOutlined />, label: '目录' },
+  { key: '/manage', icon: <DashboardOutlined />, label: '管理' },
 ] as const;
 
 export default function Layout() {
@@ -188,6 +189,11 @@ export default function Layout() {
           failed 时弹 Modal,checking/installing 时顶部 notification。
           AntD Modal/notification 默认 portal 到 body,DOM 位置不影响渲染。 */}
       <UpdateNotifier />
+      {/* 全局设置面板 — 顶层 mount 让任意路由(/tools / /config / /dirs / /login /
+          /agent / 等)都能唤起 SettingsDrawer。组件自身在 settingsDrawerOpen=false
+          时 return null,默认零渲染,不重复占用资源。Agent.tsx 里也保留 mount
+          避免移动端 /m 路由外的路由被"看不到设置入口"的代码审查误读。 */}
+      <SettingsDrawer />
       <Sider
         collapsible
         collapsed={sidebarCollapsed}
@@ -224,7 +230,7 @@ export default function Layout() {
         />
         <Button
           type="text"
-          icon={<SettingOutlined />}
+          icon={<SettingOutlined style={{ fontSize: 16 }} />}
           onClick={openSettingsDrawer}
           aria-label="打开设置"
           data-testid="global-settings-button"

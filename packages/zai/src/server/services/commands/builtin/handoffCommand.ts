@@ -39,11 +39,11 @@ export function parseArgs(args: string): ParsedArgs {
     if (t === '--pick') {
       const v = tokens[++i]
       if (!v || v.startsWith('--')) {
-        throw new HandoffArgsError('用法:/handoff [--pick <​filename>]')
+        throw new HandoffArgsError('用法:/handoff [--pick <filename>]')
       }
       out.pickFile = v
     } else {
-      throw new HandoffArgsError(`未知参数:${t};用法:/handoff [--pick <​filename>]`)
+      throw new HandoffArgsError(`未知参数:${t};用法:/handoff [--pick <filename>]`)
     }
   }
   return out
@@ -96,7 +96,7 @@ export const handoffCommand: PromptCommand = {
   type: 'prompt',
   name: 'handoff',
   description: '交接当前会话:消息多时生成交接文档,消息少时恢复最近的交接',
-  argumentHint: '[--pick <​filename>]',
+  argumentHint: '[--pick <filename>]',
   source: 'builtin',
   progressMessage: 'preparing handoff',
   contentLength: 0,

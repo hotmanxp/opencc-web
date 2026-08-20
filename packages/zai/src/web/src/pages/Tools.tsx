@@ -231,7 +231,7 @@ export default function Tools() {
                       type="primary"
                       style={{ flex: 1, minWidth: 0 }}
                       icon={<SettingOutlined />}
-                      onClick={() => navigate(`/config?tool=${card.key}`)}
+                      onClick={() => navigate(`/manage?tab=config&tool=${card.key}`)}
                     >
                       配置
                     </Button>

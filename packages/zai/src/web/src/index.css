@@ -272,6 +272,15 @@ body {
 [data-testid="fs-tree"] .ant-tree-treenode {
   line-height: 22px !important;
   margin-bottom: 0 !important;
+  /* min-width:0 配合 .ant-tree-node-content-wrapper 的 min-width:0,
+     保证 treenode 行内的 title 被压缩触发省略号,而不是把整行撑出
+     fs-tree 边界导致相邻节点文字重叠. width:100% 覆盖 antd 默认的
+     align-items:flex-start (treenode 行宽度跟随内容变,fs-tree 因此出现
+     横向滚动条而不是 title 截断). */
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 [data-testid="fs-tree"] .ant-tree-treenode .ant-tree-node-content-wrapper {
@@ -281,6 +290,20 @@ body {
   line-height: 22px !important;
   padding: 0 4px !important;
   border-radius: 3px !important;
+  /* display:flex 让 .ant-tree-iconEle 与 .ant-tree-title 在同一行 flex 流里
+     并排 (默认 block 父容器里,block 子元素会纵向堆叠 → icon 一行, title 挤
+     到下一行,fs-tree 渲染时表现为"空行 + 文件名行"交替,实际是 title 被推出
+     wrapper 框). flex:1 让 wrapper 吃满 treenode 内 switcher 之后的剩余空间,
+     这是 .ant-tree-title 的 max-width:100% 能算出来的前提. 默认 flex:0 1 auto
+     会让 wrapper 缩到内容宽度,title 因此也跟着被压到 ~50px,长文件名
+     必然换行/溢出. overflow:hidden 兜底: 万一 nowrap 没生效,内容被裁而不是
+     溢出到下一行 treenode. min-width:0 让 flex 子元素可以缩到比内容更窄. */
+  display: flex !important;
+  align-items: center !important;
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  max-width: 100%;
+  overflow: hidden !important;
 }
 
 [data-testid="fs-tree"] .ant-tree-node-content-wrapper .anticon {
@@ -330,6 +353,20 @@ body {
 
 [data-testid="fs-tree"] .ant-tree-title {
   font-size: 12px !important;
+  /* 长文件名(2026-08-17-dsh-kernel-batch-...-acceptance.md 这种)在 fs-tree
+     受限宽度下默认会换行,导致相邻节点文本相互重叠. title 设为 block 占据全宽
+     (FsTab renderTree 的内层 span 用 display:inline-block + maxWidth:100% 做
+     真正省略号触发点);line-height 22px 与 wrapper 高度对齐,避免因行高差导致
+     文字偏出. white-space:nowrap + overflow:hidden + text-overflow:ellipsis
+     是 antd 推荐的 .ant-tree-title 截断三件套. */
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 22px;
+  /* flex 容器里的 flex 子项需要 min-width:0 才能缩到内容宽度以下,否则
+     内容宽度会把 flex 行撑出 fs-tree 边界. */
+  min-width: 0;
 }
 
 [data-testid="fs-tree"] .ant-tree-node-selected {

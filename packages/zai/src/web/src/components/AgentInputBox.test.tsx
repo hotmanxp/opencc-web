@@ -686,3 +686,122 @@ describe('AgentInputBox — 插入对话 (分屏文件管理 agent-input-insert 
     expect(ta.value).toBe('')
   })
 })
+
+describe('AgentInputBox — 拖拽文件: 图片入附件, 其他文件上传副本并插入地址', () => {
+  beforeAll(() => {
+    if (typeof (URL as any).createObjectURL !== 'function') {
+      ;(URL as any).createObjectURL = vi.fn(() => 'blob:mock')
+    }
+    if (typeof (URL as any).revokeObjectURL !== 'function') {
+      ;(URL as any).revokeObjectURL = vi.fn()
+    }
+  })
+
+  const uploadOk = (absPath: string) =>
+    new Response(JSON.stringify({ ok: true, absPath }), {
+      status: 200,
+      headers: { 'Content-Type': 'application/json' },
+    })
+
+  // fetch 分支: /api/fs/upload → 上传响应;其余(挂载时 /api/slash)→ 空 items。
+  const stubFetch = (onUpload: (url: string, init?: RequestInit) => Response | Promise<Response>) => {
+    vi.stubGlobal(
+      'fetch',
+      vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+        const url = String(input)
+        if (url.includes('/api/fs/upload')) return onUpload(url, init)
+        return new Response(JSON.stringify({ items: [] }), { status: 200 })
+      }),
+    )
+  }
+
+  const dropFiles = (files: File[]) => {
+    const dropZone = document.querySelector('[data-testid="agent-input-drop-zone"]')!
+    fireEvent.drop(dropZone, {
+      dataTransfer: { files, items: files, types: ['Files'] } as unknown as DataTransfer,
+    })
+  }
+
+  test('拖入非图片文件: 不触发浏览器下载, 上传副本并把绝对路径插入输入框', async () => {
+    const uploadCalls: Array<{ url: string; body: { name: string; data: string } }> = []
+    stubFetch((url, init) => {
+      uploadCalls.push({ url, body: JSON.parse(String(init?.body)) })
+      return uploadOk('/Users/u/code/proj/.zai/uploads/notes.txt')
+    })
+    try {
+      render(<AgentInputBox />)
+      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+      dropFiles([new File(['hello world'], 'notes.txt', { type: 'text/plain' })])
+      await waitFor(() => expect(uploadCalls.length).toBe(1))
+      expect(uploadCalls[0]!.body.name).toBe('notes.txt')
+      expect(uploadCalls[0]!.body.data.length).toBeGreaterThan(0) // base64 内容已附上
+      await waitFor(() =>
+        expect(ta.value).toContain('/Users/u/code/proj/.zai/uploads/notes.txt'),
+      )
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  test('拖入多个非图片文件: 路径逐行插入', async () => {
+    const absPaths = [
+      '/Users/u/code/proj/.zai/uploads/notes.txt',
+      '/Users/u/code/proj/.zai/uploads/data-1.csv',
+    ]
+    let i = 0
+    stubFetch(() => uploadOk(absPaths[i++]!))
+    try {
+      render(<AgentInputBox />)
+      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+      dropFiles([
+        new File(['a'], 'notes.txt', { type: 'text/plain' }),
+        new File(['b'], 'data.csv', { type: 'text/csv' }),
+      ])
+      await waitFor(() => expect(ta.value).toContain('data-1.csv'))
+      expect(ta.value).toBe(`${absPaths[0]}\n${absPaths[1]}`)
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+
+  test('拖入图片: 走附件插入, 不上传', async () => {
+    stubFetch(() => uploadOk('/never'))
+    const imageReader = await import('../lib/imageReader.js')
+    const spy = vi.spyOn(imageReader, 'readImageAsBase64').mockResolvedValue({
+      mime: 'image/png',
+      dataUrl: 'data:image/png;base64,AAA',
+      size: 1024,
+      filename: 'shot.png',
+    })
+    try {
+      render(<AgentInputBox />)
+      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+      dropFiles([new File(['x'], 'shot.png', { type: 'image/png' })])
+      await waitFor(() => expect(spy).toHaveBeenCalled())
+      // 图片走附件条, 输入框保持为空, 不插入路径文本
+      expect(ta.value).toBe('')
+    } finally {
+      spy.mockRestore()
+      vi.unstubAllGlobals()
+    }
+  })
+
+  test('上传失败: 报错且不往输入框插入路径', async () => {
+    stubFetch(() =>
+      new Response(JSON.stringify({ ok: false, error: '文件过大' }), {
+        status: 413,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    try {
+      render(<AgentInputBox />)
+      const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+      dropFiles([new File(['x'], 'big.bin', { type: 'application/octet-stream' })])
+      // 等上传 promise 落定:输入框不出现任何路径
+      await new Promise((r) => setTimeout(r, 20))
+      await waitFor(() => expect(ta.value).toBe(''))
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
+})

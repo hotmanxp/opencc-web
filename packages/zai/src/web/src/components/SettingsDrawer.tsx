@@ -40,11 +40,21 @@ export type SettingsValue = string | number | boolean
 export interface EnumOption {
   value: string
   label: string
+  /** 可选补充描述 — 选项浮层里以第二行小字渲染(Agent 行用)。 */
+  description?: string
 }
 
 export type SettingsRow =
   | { key: string; label: string; kind: 'boolean'; value: boolean }
-  | { key: string; label: string; kind: 'enum'; value: string; options: EnumOption[] }
+  | {
+      key: string
+      label: string
+      kind: 'enum'
+      value: string
+      options: EnumOption[]
+      /** 禁用选择(行级,如 code 工作模式下 Agent 强制 default)。 */
+      disabled?: boolean
+    }
   | {
       key: string
       label: string
@@ -291,7 +301,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
       }
       if (key === 'Enter') {
         e.preventDefault()
-        if (selectedRow?.kind === 'enum' && selectedRow.key !== 'workMode') openEnumOverlay(selectedRow)
+        if (selectedRow?.kind === 'enum' && selectedRow.key !== 'workMode' && selectedRow.key !== 'mainAgent') openEnumOverlay(selectedRow)
         else if (selectedRow?.kind === 'number') openNumberEdit(selectedRow)
         return
       }
@@ -386,7 +396,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
               const handleRowClick = () => {
                 setSelectedIdx(globalIdx)
                 if (row.kind === 'boolean') toggleBoolean(row)
-                else if (row.kind === 'enum' && row.key !== 'workMode') openEnumOverlay(row)
+                else if (row.kind === 'enum' && row.key !== 'workMode' && row.key !== 'mainAgent') openEnumOverlay(row)
                 else if (row.kind === 'number') openNumberEdit(row)
               }
               return (
@@ -487,6 +497,47 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                       style={{ minWidth: 82, maxWidth: 110 }}
                       aria-label="选择工作模式"
                     />
+                  ) : row.key === 'mainAgent' && row.kind === 'enum' ? (
+                    // Agent 用 antd 下拉:dropdown 里每项两行(名称 + 描述),
+                    // 名称用主文字色、描述用小号弱化色;trigger 只显示名称。
+                    // code 工作模式下强制使用 default,下拉禁用(联动见组件内
+                    // workMode ↔ mainAgent effect)。
+                    <Select
+                      size="small"
+                      value={row.value}
+                      options={row.options}
+                      disabled={row.disabled === true}
+                      popupMatchSelectWidth={false}
+                      dropdownStyle={{ minWidth: 280 }}
+                      optionRender={(option) => {
+                        const d = option.data
+                        return (
+                          <div style={{ lineHeight: 1.4 }}>
+                            <div style={{ color: 'var(--text-primary)', fontSize: 13 }}>
+                              {d.label}
+                            </div>
+                            {d.description && (
+                              <div
+                                style={{
+                                  color: 'var(--text-dim-40)',
+                                  fontSize: 11,
+                                  marginTop: 2,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {d.description}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(value) => onChange?.(row.key, value)}
+                      style={{ minWidth: 100, maxWidth: 140 }}
+                      aria-label="选择 Agent"
+                    />
                   ) : (
                     <span
                       style={{
@@ -555,7 +606,24 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                     setEnumOverlay(null)
                   }}
                 >
-                  {opt.label}
+                  <div style={{ lineHeight: 1.4 }}>{opt.label}</div>
+                  {opt.description && (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        lineHeight: 1.4,
+                        marginTop: 2,
+                        color: isHighlight
+                          ? 'var(--accent-start)'
+                          : 'var(--text-dim-40)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {opt.description}
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -615,11 +683,13 @@ function buildStaticSchema(
           // 主 Agent 插槽配置选择(内置 + ~/.zai/main-agents/*.js 外置)。
           // 选项列表由 GET /api/agent/settings 的 mainAgents 动态填充;
           // 生效时机:systemPrompt 槽对新会话生效、tools 槽即时、mcp 槽需重启。
+          // 与工作模式关联:code 模式只能使用默认 agent(下拉禁用)。
           key: 'mainAgent',
-          label: '主 Agent',
+          label: 'Agent',
           kind: 'enum',
           value: mainAgent,
           options: agentOptions,
+          disabled: workMode === 'code',
         },
       ],
     },
@@ -841,9 +911,10 @@ export default function SettingsDrawer() {
 
   // 主 Agent 选择:options 与当前值来自 GET /api/agent/settings(mount 时
   // 拉一次);持久化走 PUT /api/agent/settings/main-agent。
+  // label = agent name,description 单独带出 —— 选项浮层里两行展示(名称 + 描述)。
   const [mainAgent, setMainAgent] = useState('default')
   const [agentOptions, setAgentOptions] = useState<EnumOption[]>(() => [
-    { value: 'default', label: '系统默认' },
+    { value: 'default', label: 'default' },
   ])
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
@@ -865,7 +936,8 @@ export default function SettingsDrawer() {
           setAgentOptions(
             list.map((a) => ({
               value: a.name,
-              label: a.description || a.name,
+              label: a.name,
+              description: a.description,
             })),
           )
         }
@@ -878,7 +950,8 @@ export default function SettingsDrawer() {
       cancelled = true
     }
   }, [])
-  // 同步 store workMode → schema.workMode 行。
+  // 同步 store workMode → schema.workMode 行;同时联动 mainAgent 行禁用态
+  // (code 模式只能使用默认 agent,职场与 Agent 关联配置见组件内 effect)。
   useEffect(() => {
     setSchema((prev) =>
       prev.map((s) => ({
@@ -886,6 +959,9 @@ export default function SettingsDrawer() {
         rows: s.rows.map((r) => {
           if (r.key === 'workMode' && r.kind === 'enum') {
             return { ...r, value: workMode }
+          }
+          if (r.key === 'mainAgent' && r.kind === 'enum') {
+            return { ...r, disabled: workMode === 'code' }
           }
           return r
         }),
@@ -1011,6 +1087,35 @@ export default function SettingsDrawer() {
       })),
     )
   }, [agentOptions])
+
+  // 工作模式 ↔ Agent 关联配置:
+  //   - code:只能使用默认 agent —— 强制切换为 default 并持久化(Agent 下拉同时禁用)
+  //   - office:默认 Office —— 仅当 Agent 仍是 default(未显式选过)时自动切到 office,
+  //     尊重用户显式选择(agent-creator / skill-writer 等保持不动)
+  //   - general:不约束,自由选择
+  // deps 同时监听 mainAgent:用户手动改 Agent 后重算一次约束,但 code 分支在改成
+  // default 后自然终止(幂等),不会造成循环 PUT。
+  useEffect(() => {
+    if (workMode === 'code' && mainAgent !== 'default') {
+      setMainAgent('default')
+      void fetch('/api/agent/settings/main-agent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mainAgent: 'default' }),
+      }).catch(() => {
+        // swallow — 下次 GET 会重新对齐磁盘状态
+      })
+    } else if (workMode === 'office' && mainAgent === 'default') {
+      setMainAgent('office')
+      void fetch('/api/agent/settings/main-agent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mainAgent: 'office' }),
+      }).catch(() => {
+        // swallow — 下次 GET 会重新对齐磁盘状态
+      })
+    }
+  }, [workMode, mainAgent])
 
   const handleChange = useCallback(
     (key: string, value: SettingsValue) => {

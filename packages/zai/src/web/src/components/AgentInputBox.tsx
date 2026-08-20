@@ -202,6 +202,37 @@ export default React.memo(function AgentInputBox() {
       .catch(() => {});
   }, []);
 
+  // 在光标处插入文本(分屏「插入对话」与拖入文件地址共用):
+  // rc-textarea(antd Input.TextArea)把 ref 变成命令式句柄
+  // { resizableTextArea: { textArea } },需要解码到原生 <textarea>
+  // 才能读 selection / 设光标。插入后聚焦并把光标移到文本末尾。
+  // happy-dom 等环境可能不实现 textarea selection API(selectionStart 为
+  // undefined),归一化后退化为「追加到末尾」,避免 slice(0, undefined)
+  // 把整段文本重复插入。
+  const insertAtCursor = useCallback((text: string) => {
+    const ta = textAreaNode(textareaRef.current);
+    const valLen = ta?.value.length ?? 0;
+    const rawStart = ta ? ta.selectionStart : 0;
+    const rawEnd = ta ? ta.selectionEnd : rawStart;
+    const start = Number.isFinite(rawStart) ? rawStart : valLen;
+    const end = Number.isFinite(rawEnd) ? rawEnd : start;
+    setInput((prev) => prev.slice(0, start) + text + prev.slice(end));
+    requestAnimationFrame(() => {
+      const el = textAreaNode(textareaRef.current);
+      if (!el) return;
+      el.focus();
+      const pos = start + text.length;
+      // happy-dom 未实现 setSelectionRange(测试环境),退回标准 selectionStart/
+      // selectionEnd 属性赋值,两者在真实浏览器均有等价效果。
+      if (typeof el.setSelectionRange === "function") {
+        el.setSelectionRange(pos, pos);
+      } else {
+        el.selectionStart = pos;
+        el.selectionEnd = pos;
+      }
+    });
+  }, []);
+
   // 分屏文件管理「插入对话」→ 光标处插入相对路径。FsContextMenu dispatch
   // agent-input-insert 事件,detail.text 为路径;插入后聚焦输入框并把光标
   // 移到路径末尾,便于直接继续打字。输入 value 是本地 state,故用事件桥接
@@ -211,37 +242,11 @@ export default React.memo(function AgentInputBox() {
       const detail = (e as CustomEvent<AgentInputInsertDetail>).detail;
       const text = detail?.text;
       if (typeof text !== "string" || !text) return;
-      // rc-textarea(antd Input.TextArea)把 ref 变成命令式句柄
-      // { resizableTextArea: { textArea } },需要解码到原生 <textarea>
-      // 才能读 selection / 设光标。
-      const ta = textAreaNode(textareaRef.current);
-      const valLen = ta?.value.length ?? 0;
-      // happy-dom 等环境可能不实现 textarea selection API(selectionStart 为
-      // undefined),归一化后退化为「追加到末尾」,避免 slice(0, undefined)
-      // 把整段文本重复插入。
-      const rawStart = ta ? ta.selectionStart : 0;
-      const rawEnd = ta ? ta.selectionEnd : rawStart;
-      const start = Number.isFinite(rawStart) ? rawStart : valLen;
-      const end = Number.isFinite(rawEnd) ? rawEnd : start;
-      setInput((prev) => prev.slice(0, start) + text + prev.slice(end));
-      requestAnimationFrame(() => {
-        const el = textAreaNode(textareaRef.current);
-        if (!el) return;
-        el.focus();
-        const pos = start + text.length;
-        // happy-dom 未实现 setSelectionRange(测试环境),退回标准 selectionStart/
-        // selectionEnd 属性赋值,两者在真实浏览器均有等价效果。
-        if (typeof el.setSelectionRange === "function") {
-          el.setSelectionRange(pos, pos);
-        } else {
-          el.selectionStart = pos;
-          el.selectionEnd = pos;
-        }
-      });
+      insertAtCursor(text);
     };
     window.addEventListener(AGENT_INPUT_INSERT_EVENT, onInsert);
     return () => window.removeEventListener(AGENT_INPUT_INSERT_EVENT, onInsert);
-  }, []);
+  }, [insertAtCursor]);
 
   const skillMenuRef = useRef<HTMLDivElement>(null);
   const [showSkillMenu, setShowSkillMenu] = useState(false);
@@ -444,18 +449,87 @@ export default React.memo(function AgentInputBox() {
     void addAttachments(files);
   };
 
-  const handleDrop = (e: React.DragEvent) => {
+  // 拖入文件允许的最大体积:服务端 express.json 上限 20mb,base64 膨胀
+  // ~1.33x,留出 JSON envelope 余量后按 14 MB 预检,超限直接本地报错,
+  // 不发出注定失败(413)的请求。uploads 上限常量与 fs.ts MAX_UPLOAD_BYTES 对应。
+  const MAX_DROP_UPLOAD_BYTES = 14 * 1024 * 1024;
+
+  // 把拖入的非图片文件作为副本上传到 `<cwd>/.zai/uploads/`,返回副本的
+  // 绝对路径。浏览器无法暴露拖入文件的系统绝对路径(File.path / file:// URI
+  // 已被移除),所以「文件地址」= 服务端副本路径,agent 可通过该路径读取内容。
+  const uploadFileToProject = useCallback(async (file: File): Promise<string> => {
+    if (file.size > MAX_DROP_UPLOAD_BYTES) {
+      throw new Error(
+        `文件过大 (${(file.size / 1024 / 1024).toFixed(1)} MB > 14 MB)`,
+      );
+    }
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(new Error("读取文件失败"));
+      reader.readAsDataURL(file);
+    });
+    const data = dataUrl.replace(/^data:[^;]+;base64,/, "");
+    const res = await fetch("/api/fs/upload", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name: file.name || "file", data }),
+    });
+    const body = (await res.json().catch(() => ({
+      ok: false,
+      error: `HTTP ${res.status}`,
+    }))) as { ok: boolean; error?: string; absPath?: string };
+    if (!res.ok || !body.ok) {
+      throw new Error(body.error ?? `HTTP ${res.status}`);
+    }
+    if (!body.absPath) throw new Error("上传响应缺少 absPath");
+    return body.absPath;
+  }, []);
+
+  // 逐个上传拖入的非图片文件,完成后把绝对路径(多文件换行分隔)插入
+  // 输入框光标处。单个失败只报该文件错误,不阻断其余文件。
+  const insertFileAddresses = useCallback(
+    async (files: File[]) => {
+      const paths: string[] = [];
+      for (const f of files) {
+        try {
+          paths.push(await uploadFileToProject(f));
+        } catch (err) {
+          message.error(
+            `上传 ${f.name} 失败: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+      if (paths.length === 0) return;
+      insertAtCursor(paths.join("\n"));
+      message.success(`已上传 ${paths.length} 个文件, 地址已加入输入框`);
+    },
+    [insertAtCursor, uploadFileToProject],
+  );
+
+  const handleDrop = async (e: React.DragEvent) => {
+    // streaming 时同样阻止默认行为 — 否则浏览器会把文件下载下来
     if (status === "streaming") {
       e.preventDefault();
       message.warning("请等待当前回复结束");
       return;
     }
-    const files = Array.from(e.dataTransfer.files).filter((f) =>
-      f.type.startsWith("image/"),
-    );
-    if (files.length === 0) return;
+    const files = Array.from(e.dataTransfer.files);
+    if (files.length === 0) {
+      // 拖入的是文件夹等无 File 项的拖放:浏览器默认下载/打开,阻止之
+      e.preventDefault();
+      return;
+    }
+    // 所有文件型拖放都必须 preventDefault —— 不阻止的话,非图片文件会
+    // 被浏览器按默认行为下载/导航("下载成功"提示即来自此),图片则会在
+    // 新窗口打开,打断对话。
     e.preventDefault();
-    void addAttachments(files);
+    const images = files.filter((f) => f.type.startsWith("image/"));
+    const others = files.filter((f) => !f.type.startsWith("image/"));
+    if (images.length > 0) void addAttachments(images);
+    if (others.length > 0) await insertFileAddresses(others);
   };
 
   const handleFilePick = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -1053,7 +1127,11 @@ export default React.memo(function AgentInputBox() {
       </div>
 
       {/* TextArea + slash dropdown 区 */}
-      <div onDrop={handleDrop} onDragOver={(e) => e.preventDefault()}>
+      <div
+        data-testid="agent-input-drop-zone"
+        onDrop={handleDrop}
+        onDragOver={(e) => e.preventDefault()}
+      >
         {/* 排队预览区: 对话进行中提交的消息在此等待, 当前轮结束后自动执行。
             每条可单独取消(×)。渲染在输入框上方, 追齐 OPENCC 的 queued
             commands 预览。 */}
@@ -1259,7 +1337,7 @@ export default React.memo(function AgentInputBox() {
             onChange={(e) => setInput(e.target.value)}
             onKeyDown={handleKeyDown}
             onPaste={handlePaste}
-            placeholder="输入消息, 按 Enter 发送, Shift+Enter 换行. 可直接粘贴或拖拽图片."
+            placeholder="输入消息, 按 Enter 发送, Shift+Enter 换行. 拖入图片直接插入, 拖入其他文件自动上传并加入地址."
             rows={3}
             disabled={pendingAsk?.status === "pending"}
             style={{ resize: "none", flex: 1 }}

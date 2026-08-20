@@ -25,6 +25,7 @@ export default function AgentConversation() {
   const messages = useAgentStore((s) => s.messages)
   const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages)
   const outputStyle = useAppStore((s) => s.outputStyle)
+  const isMobile = useAppStore((s) => s.isMobile)
   const [showAllMessages, setShowAllMessages] = useState(false)
 
   // 消息裁剪 + compact 模式保底 — 复用 Agent.tsx 既有实现
@@ -116,6 +117,7 @@ export default function AgentConversation() {
         minWidth: 0,
         maxWidth: '100%',
         overflowX: 'hidden',
+        paddingTop: isMobile ? 0 : 20,
       }}
     >
       <div

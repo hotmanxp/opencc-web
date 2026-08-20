@@ -710,7 +710,25 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       return {
         key: e.path,
         title: (
-          <span style={{ fontFamily: MONO, fontSize: 12 }}>
+          // 长文件名(2026-08-17-dsh-kernel-batch-00-baseline-dual-track.md 这种
+          // 几十字符的 plan/spec 文件)在 fs-tree 受限宽度下默认换行,导致相邻
+          // 节点文本相互重叠. 这里把 title 内的 <span> 切成 block + 满宽 +
+          // nowrap + ellipsis;父级 .ant-tree-title 也已同步改 block + width:100%,
+          // 配合 .ant-tree-node-content-wrapper 改成 flex:1 让剩余空间撑出来,
+          // max-width:100% 在 inline-block 上的"父级由内容决定宽"循环依赖被破除.
+          // dirty dot 维持 inline-block 圆点,不影响后续文本省略计算.
+          <span
+            title={e.name}
+            style={{
+              fontFamily: MONO,
+              fontSize: 12,
+              display: 'block',
+              width: '100%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
             {isDirty && (
               <span
                 data-testid={`fs-tree-dirty-${e.name}`}

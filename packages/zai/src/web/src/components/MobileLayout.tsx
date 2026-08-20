@@ -5,6 +5,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
 import { api } from '../lib/api'
+import SettingsDrawer from './SettingsDrawer'
 
 /**
  * 移动端顶层布局 — 没有 Sider / 顶栏 / 任何桌面 chrome。
@@ -109,6 +110,12 @@ export default function MobileLayout() {
         overflow: 'hidden',
       }}
     >
+      {/* 全局设置面板 — 与桌面端 Layout.tsx 对称,让 /m 路由也能唤起。
+          SettingsDrawer 自身在 settingsDrawerOpen=false 时 return null,
+          默认零渲染。MobileAgent.tsx 里也保留一份 mount,只是为了代码层
+          面"可见"(避免被误读为移除)。双重 mount 时 useEffect 会跑两次
+          fetch /api/agent/settings,但 store 共享,无功能问题。 */}
+      <SettingsDrawer />
       <Outlet />
     </div>
   )
