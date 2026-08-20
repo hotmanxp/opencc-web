@@ -74,6 +74,7 @@ function QuestionPanel({
   onAnswer,
   onNotesChange,
   onOtherChange,
+  onAdvance,
 }: {
   q: any
   answers: Record<string, string>
@@ -81,6 +82,11 @@ function QuestionPanel({
   onAnswer: (questionText: string, label: string) => void
   onNotesChange: (questionText: string, notes: string) => void
   onOtherChange: (questionText: string, text: string) => void
+  // 单选 (Radio) 模式: 用户点完一个非 Other 选项后调用, 让父组件
+  // 把 Tabs activeKey 推进到下一题 / Review, 减少多问题卡片的手动切 tab
+  // 次数。Other 选项不调 (还要输入文本); 多选 (Checkbox) 也不调
+  // (用户可能还要勾别的或看 description)。未传时 (单问题卡片) 静默无效。
+  onAdvance?: () => void
 }) {
   const currentAnswer = answers[q.question]
   // 'Other' 选项的固定逻辑: answers 中始终保持 '__other__' 占位, 文本
@@ -109,6 +115,10 @@ function QuestionPanel({
       // 切走 Other: 清理 otherText (防止切回去时残留), 设真实答案。
       onOtherChange(q.question, '')
       onAnswer(q.question, e.target.value)
+      // Radio 选中即视为"答完此题", 多问题卡片自动推进到下一题 / Review
+      // tab, 避免每题都要手动点 tab。父组件按 idx 决定推到 questions
+      // [idx+1] 还是 'review'; 单问题模式父组件没传 onAdvance, 这里静默无效。
+      onAdvance?.()
     }
   }
 
@@ -381,7 +391,7 @@ export default function QuestionCard(props: QuestionCardProps) {
         activeKey={tabKey}
         onChange={setTabKey}
         items={[
-          ...questions.map((q) => ({
+          ...questions.map((q, idx) => ({
             key: q.question,
             label: (
               <span>
@@ -399,6 +409,16 @@ export default function QuestionCard(props: QuestionCardProps) {
                 onAnswer={onAnswer}
                 onNotesChange={onNotesChange}
                 onOtherChange={onOtherChange}
+                // 单选 Radio 选中后自动推进: 下一题 tab;最后一题则跳到
+                // Review tab (idx === questions.length - 1)。Other 选项在
+                // QuestionPanel 内部已被排除, 不会触发这个回调。
+                onAdvance={() => {
+                  if (idx < questions.length - 1) {
+                    setTabKey(questions[idx + 1].question)
+                  } else {
+                    setTabKey('review')
+                  }
+                }}
               />
             ),
           })),
