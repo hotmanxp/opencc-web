@@ -73,4 +73,17 @@ describe('displayFilesTool', () => {
     expect(payload.files[0].error).toBeUndefined()
     expect(payload.files[1].error.code).toBe('ENOENT')
   })
+
+  it('rejects empty paths array', async () => {
+    const result = await displayFilesTool.call({ paths: [] }, { cwd: '/tmp' } as any)
+    expect(result.output).toContain('paths 不能为空')
+  })
+
+  it('rejects more than 20 paths', async () => {
+    const result = await displayFilesTool.call(
+      { paths: Array(21).fill('/tmp/x') },
+      { cwd: '/tmp' } as any,
+    )
+    expect(result.output).toContain('单次最多 20 个文件')
+  })
 })
