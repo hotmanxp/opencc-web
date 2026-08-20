@@ -90,7 +90,7 @@ export interface DefaultBackgroundRuntimeOptions {
   onTaskStateChange?: (task: BackgroundTask) => void
 }
 
-const DEFAULT_MAX_CONCURRENT = 4
+const DEFAULT_MAX_CONCURRENT = 10
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5000
 
 /**

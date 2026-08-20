@@ -237,7 +237,7 @@ runNextInQueue(sid)
 
 **已知边界(现状既有,非本次引入)**:
 
-- **子 agent 后台 query 与父共享 sessionId**:`DefaultBackgroundRuntime.runOne` 的 `queryInput.sessionId = rec.task.parentSessionId ?? \`bg-…\``,`maxConcurrent=4` 时同一 sessionId 上可能并行多个 background query,它们**不经过** `runNextInQueue` 守卫。即「主对话 turn 守卫」与「后台 query 并发面」是两回事 —— 完整的根除方案是给子 agent 独立 sessionId(见「后续工作」),本次明确声明该边界。
+- **子 agent 后台 query 与父共享 sessionId**:`DefaultBackgroundRuntime.runOne` 的 `queryInput.sessionId = rec.task.parentSessionId ?? \`bg-…\``,`maxConcurrent=10` 时同一 sessionId 上可能并行多个 background query,它们**不经过** `runNextInQueue` 守卫。即「主对话 turn 守卫」与「后台 query 并发面」是两回事 —— 完整的根除方案是给子 agent 独立 sessionId(见「后续工作」),本次明确声明该边界。
 - **BashNotifier 仍直呼 query 注入父 session**:靠自身 `hasActiveQuery` 守卫,不在 inbox 守卫内;列入「后续工作」收敛。
 
 ## 错误处理
@@ -278,7 +278,7 @@ runNextInQueue(sid)
 - [x] 主对话消费入口唯一化(`runNextInQueue` 收敛 HTTP + inbox 两路)
 - [x] 不改变 `renderTaskNotificationMessage` 输出格式(LLM 可见文本稳定)
 - [x] **并发守卫**:同一 session 主对话 turn 单消费者(`sessionRunning` 入口 has + 同步段原子性 + busy 降级 + wakeBudget);通知注入统一走 inbox,取消直呼 `runtime.query()` 旁路
-- [x] **守卫边界声明**:子 agent 后台 query 与父共享 sessionId(`maxConcurrent=4` 可并行),不经过 runNextInQueue —— 现状既有,根除方案(独立子会话)列入「后续工作」
+- [x] **守卫边界声明**:子 agent 后台 query 与父共享 sessionId(`maxConcurrent=10` 可并行),不经过 runNextInQueue —— 现状既有,根除方案(独立子会话)列入「后续工作」
 - [x] 明确会话模型:多 session(per sessionId);子 agent 暂不引入独立会话
 - [x] 错误边界:后台回调异常不崩 server;无 bridge 环境 no-op 回退
 
