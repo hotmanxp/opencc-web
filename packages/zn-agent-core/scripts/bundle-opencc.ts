@@ -144,11 +144,17 @@ function rewriteDtsSourcePath(line: string): string {
 /** 校验生成文件里的每个 re-export 目标在 dist 下都可解析(.js → .d.ts)。
  *  冷构建(dist 尚未由 tsc -b 发射)时跳过 — 校验只服务于暖构建的人类
  *  反馈,真正的悬挂引用由后续 typecheck:consumer / verify-server-types-
- *  self-contained 捕获。 */
+ *  self-contained 捕获。
+ *
+ *  cold 判定用 dist/compat/cwdStore.d.ts 作为探针(只有 tsc -b 会发射它;
+ *  与 scripts/ensure-fresh-tsc.mjs 一致)。**不要**用 `readdirSync(dist)
+ *  .length === 0` 判断 — bundle-opencc 自己会写 Tool.d.ts 到 dist/opencc-
+ *  src/Tool.d.ts(zai patch 2026-08-20),让 dist 永远非空,误判 warm。 */
+const TSC_PROBE = join(ROOT, 'dist', 'compat', 'cwdStore.d.ts')
 function assertDtsTargetsResolve(bundleEntryDts: string): void {
-  if (!existsSync(OUT_DIR) || readdirSync(OUT_DIR).length === 0) {
+  if (!existsSync(TSC_PROBE)) {
     console.log(
-      '[bundle-opencc] cold build (dist empty) — skipping d.ts target assertion; subsequent tsc -b + typecheck:consumer + verify-server-types-self-contained will catch real dangling refs',
+      '[bundle-opencc] cold build (tsc -b probe missing: dist/compat/cwdStore.d.ts) — skipping d.ts target assertion; subsequent tsc -b + typecheck:consumer + verify-server-types-self-contained will catch real dangling refs',
     )
     return
   }
