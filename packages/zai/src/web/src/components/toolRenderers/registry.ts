@@ -6,11 +6,13 @@ import { grepRenderer } from "./grep.js"
 import { readRenderer } from "./read.js"
 import { agentRenderer } from "./agent.js"
 import { diffRenderer } from "./diff.js"
+import { fileDisplayRenderer } from "./fileDisplay.js"
 import { mcpRenderer, isMcpToolName } from "./mcp.js"
 
 const registry: Record<string, ToolRenderer> = {
   Agent: agentRenderer,
   Bash: bashRenderer,
+  DisplayFiles: fileDisplayRenderer,
   // Edit / Write 走 DiffBlock 一体渲染 (整接管 renderFull), 不再各自写输入/输出.
   Edit: diffRenderer,
   Glob: globRenderer,
