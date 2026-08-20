@@ -8,8 +8,10 @@ import { resolveRgPath, runRipgrep } from '../services/ripgrep.js';
 import type {
   FsAck, FsEntry, FsFile, FsList, FsSearchEntry, FsSearchResult,
   FsContentSearchEntry, FsContentSearchResult, FsUploadResult,
+  FilePreviewPayload, FilePreviewError,
 } from '../../shared/fs.js';
-import { dirname as pathDirname, relative as pathRelative } from 'node:path';
+import { classifyKind, mimeFromExt } from '../../shared/fileKind.js';
+import { dirname as pathDirname, relative as pathRelative, resolve as pathResolve } from 'node:path';
 const MAX_QUERY_LEN = 64;
 const WALK_TIMEOUT_MS = 200;
 const IGNORED = new Set([
@@ -840,6 +842,104 @@ function platformCommands(): {
 // lifetime of the process. Hoist it out of the request handlers to avoid
 // recomputing the lookup on every /fs/reveal or /fs/open-terminal call.
 const PLATFORM_COMMANDS = platformCommands();
+
+// 1 MiB hard cap; matches spec §2 '范围与约束'.
+// maxBytes query is clamped into [1024, 1 MiB] so a malicious LLM can't
+// bypass via maxBytes=0 or maxBytes=999999999.
+const PREVIEW_DEFAULT_MAX = 1_048_576
+
+function clampInt(raw: unknown, lo: number, hi: number, fallback: number): number {
+  const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN
+  if (!Number.isFinite(n)) return fallback
+  if (n < lo) return lo
+  if (n > hi) return hi
+  return n
+}
+
+function mapStatError(res: import('express').Response, err: unknown): void {
+  const code = (err as NodeJS.ErrnoException).code
+  if (code === 'ENOENT') {
+    res.status(404).json({ error: { code: 'ENOENT', message: '文件不存在' } } satisfies { error: FilePreviewError })
+    return
+  }
+  if (code === 'EACCES' || code === 'EPERM') {
+    res.status(403).json({ error: { code: 'EACCES', message: '无权限访问' } } satisfies { error: FilePreviewError })
+    return
+  }
+  res.status(500).json({
+    error: {
+      code: 'EIO',
+      message: `stat 失败:${err instanceof Error ? err.message : String(err)}`,
+    },
+  } satisfies { error: FilePreviewError })
+}
+
+fsRouter.get('/fs/preview', async (req, res) => {
+  const { cwd } = ctx(req)
+  const raw = typeof req.query.path === 'string' ? req.query.path : ''
+  if (!raw) {
+    res.status(400).json({ error: { code: 'EBADREQ', message: 'path 必填' } } satisfies { error: FilePreviewError })
+    return
+  }
+  const abs = pathResolve(raw)
+  const maxBytes = clampInt(req.query.maxBytes, 1024, PREVIEW_DEFAULT_MAX, PREVIEW_DEFAULT_MAX)
+  void cwd // 不限 cwd,但 log 一次便于排查;实际 cwd 记录在 server 日志
+
+  let info
+  try {
+    info = await stat(abs)
+  } catch (err) {
+    mapStatError(res, err)
+    return
+  }
+  if (info.isDirectory()) {
+    res.status(400).json({ error: { code: 'EISDIR', message: '路径是目录' } } satisfies { error: FilePreviewError })
+    return
+  }
+  if (info.size > maxBytes) {
+    res.status(413).json({
+      error: {
+        code: 'ETOOBIG',
+        message: `文件 ${info.size} 字节,超过 ${maxBytes}`,
+        meta: { size: info.size },
+      },
+    } satisfies { error: FilePreviewError })
+    return
+  }
+  const kind = classifyKind(abs)
+  if (kind === 'image') {
+    const buf = await readFile(abs)
+    const mime = mimeFromExt(abs) ?? 'application/octet-stream'
+    const payload: FilePreviewPayload = {
+      kind,
+      mime,
+      content: buf.toString('base64'),
+      size: info.size,
+      mtime: info.mtimeMs,
+    }
+    res.json(payload)
+    return
+  }
+  if (kind === 'html' || kind === 'text') {
+    const text = await readFile(abs, 'utf8')
+    const payload: FilePreviewPayload = {
+      kind,
+      mime: kind === 'html' ? 'text/html' : 'text/plain',
+      content: text,
+      size: info.size,
+      mtime: info.mtimeMs,
+    }
+    res.json(payload)
+    return
+  }
+  const payload: FilePreviewPayload = {
+    kind: 'binary',
+    size: info.size,
+    mtime: info.mtimeMs,
+    ext: extname(abs),
+  }
+  res.json(payload)
+})
 
 function launchPlatformTool(
   cmd: string,
