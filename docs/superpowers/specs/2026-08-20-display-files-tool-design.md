@@ -60,13 +60,28 @@ const DisplayFilesInput = z.object({
     .describe('一组待展示的本地文件绝对路径。'),
 })
 
+type FileErrorCode = 'ENOENT' | 'EACCES' | 'EISDIR' | 'EPERM' | 'EBUSY' | 'ELOOP'
 type FileMeta = {
   path: string
   name: string  // basename
   size: number
   mtime: number  // ms epoch
   kind: 'text' | 'image' | 'html' | 'binary'
-  error?: { code: 'ENOENT' | 'EACCES' | 'EISDIR' | 'EPERM'; message: string }
+  error?: { code: FileErrorCode; message: string }
+}
+
+function normalizeErrno(code: string | undefined): FileErrorCode {
+  switch (code) {
+    case 'ENOENT':
+    case 'EACCES':
+    case 'EISDIR':
+    case 'EPERM':
+    case 'EBUSY':
+    case 'ELOOP':
+      return code
+    default:
+      return 'EPERM'
+  }
 }
 
 async function statOneFile(absPath: string): Promise<FileMeta> {
@@ -91,7 +106,7 @@ async function statOneFile(absPath: string): Promise<FileMeta> {
       path: absPath, name, size: 0, mtime: 0,
       kind: 'binary',
       error: {
-        code: (err.code as FileMeta['error'] extends infer T ? T extends { code: infer C } ? C : never : never) || 'EPERM',
+        code: normalizeErrno(err.code),
         message: err.message || String(e),
       },
     }
@@ -175,7 +190,10 @@ export const fileDisplayRenderer: ToolRenderer = {
 - 渲染分支:
   - `loading` → `<Spin />`
   - `error` → `<Alert type="error" message={error} />`
-  - `payload.kind === 'text'` → `<SyntaxHighlighter language={detectLanguage(path)}>...</SyntaxHighlighter>`,文本 > 200 行截断 + "展开" 链接
+  - `payload.kind === 'text'` → 文本按扩展名分流:
+    - `.md` / `.markdown` → 用现有 `MarkdownText` 组件渲染(§5.3 复用 `packages/zai/src/web/src/components/MarkdownText.tsx`)
+    - 其它文本扩展名 → `<SyntaxHighlighter language={detectLanguage(path)}>...</SyntaxHighlighter>`
+    - 文本 > 200 行时默认截断展示前 200 行 + 底部 "展开全部" 链接,点击后切换为完整渲染(1 MiB 上限内,无虚拟化,单文件可放心展开)
   - `payload.kind === 'image'` → `<img src={\`data:${payload.mime};base64,${payload.content}\`} style={{ maxWidth: '100%' }} />`
   - `payload.kind === 'html'` → `<iframe srcDoc={payload.content} sandbox="" title={basename(path)} style={{ width: '100%', height: '100%', border: 0 }} />`(空 sandbox:禁止 scripts / forms / popups / 同源)
   - `payload.kind === 'binary'` → 显示 size / mtime + "此文件类型不支持内联预览" + [打开目录] 按钮(复用 `/api/fs/reveal`)
@@ -241,8 +259,10 @@ fsRouter.get('/fs/preview', async (req, res) => {
 ```
 
 - 错误统一 JSON:`{ error: { code, message, meta? } }`
-- `mapStatError`:ENOENT → 404 + code='ENOENT';EACCES/EPERM → 403 + code='EACCES';其它 500 + code='EIO'
-- `classifyKindFromExt`:`classifyKind` 与 §4.2 同样的逻辑,共享规则(可抽到 `packages/zai/src/shared/fs.ts` 或新文件 `packages/zai/src/shared/fileKind.ts`)
+- `mapStatError(res, err)`:`fs.promises.stat` 抛错时调用,根据 `err.code` 返回 4xx/5xx:ENOENT → 404 + code='ENOENT';EACCES/EPERM → 403 + code='EACCES';其它 → 500 + code='EIO'
+- **`classifyKind` 跨包重复实现**:扩展名分类规则在 §4.1 的 `compat/tools/displayFiles.ts`(zn-agent-core 包,会被 bundle 到 `dist/opencc-core.mjs`)和 §6.2 的 `fs.ts`(zai 包)各实现一份。两份规则必须一致,实现要点:
+  - 提取一份**纯函数**模块 `packages/zai/src/shared/fileKind.ts`(新文件,导出 `TEXT_EXTS: ReadonlySet<string>`、`IMAGE_EXTS: ReadonlySet<string>`、`HTML_EXTS: ReadonlySet<string>`、`classifyKind(absPath: string): FilePreviewKind`),zai 端 fs 路由直接 import
+  - zn-agent-core 端因 bundle 单向依赖(不 import zai),在 `compat/tools/displayFiles.ts` 同目录**复制同一份 Set 字面量**;两份代码各自有单测,§9.1 中 `displayFiles.test.ts` 与 `fs.preview.test.ts` 各覆盖一组扩展名,**关键扩展名(png/jpg/html/ts/md)两边都断言** —— 测试是规则同步的护栏,即使常量复制也不会漂移
 - 复用现有 `ctx(req)` 取 cwd(虽然不限 cwd,但 log 一下利于排查)
 
 ### 6.3 类型
@@ -334,7 +354,7 @@ zod schema 同名导出供前端 fetch 类型校验(可选,前端用 ts 类型�
 - **路径不限制 cwd**:模型可信(走 vendor Tool 协议的 LLM 调用),但用户审查 tool call 时可见 —— AGENTS.md "强制开发规则" 已要求 `/ego-browser` 走完用户路径,真实点击验证路径展示。
 - **`buildDefaultTools()` 修改**:与 §4.3 同位置,与最近 `subagentControlTool` 改动同源 —— 已有 taskTools / subagentControlTool 两次先例,模式稳定。
 - **新工具名 `DisplayFiles` 与 vendor `Read` 重名风险**:vendor 工具名是 `Read`(小写,已注册),我用 PascalCase `DisplayFiles` 区分;`getRenderer` 按字符串精确匹配,无冲突。
-- **没有专门的设计用于 sub-agent 路径**:子 Agent 调 display_files 时,工具结果通过 SSE 流回主对话 —— 现有 vendor 事件链路(transcript + renderer)自动处理,无需额外接线。
+- **sub-agent 路径语义边界**:`display_files` 仅在**主对话工具池**(`buildDefaultTools`)中注册。子 Agent(通过 `AgentTool` 派发)拿到的是它自己被配置的工具集,默认不包含 `DisplayFiles`(除非显式通过 agent 配置 `tools` 槽追加)。子 Agent 若想在主对话中展示文件,应**返回路径列表作为它对主 Agent 的输出**,由主 Agent 自己调 `display_files` —— 这是 prompt engineering 而非工具机制。如果后续需要在子 agent 内直接展示,需要额外接线(主 Agent 上下文感知 + 路径透传),不在本设计范围。
 
 ## 11. worktree 与实施起点
 
