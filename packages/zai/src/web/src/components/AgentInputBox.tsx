@@ -617,11 +617,15 @@ export default React.memo(function AgentInputBox() {
       const isDir = entry.type === "dir";
       const next =
         input.slice(0, start) + formatted + (isDir ? "" : " ") + input.slice(atToken.end);
-      setInput(next);
-      if (!isDir) setAtMenuDismissed(true);
-      // popover 在 useEffect([atSearch.items, atToken?.prefix]) 自动归零;
-      // cursor state 等下次 onChange 重写。textarea 仍持有焦点(combobox)。
+      // newCursor 必须同步写入 state —— setInput 触发的下一次 render 就要
+      // 用新 cursor 算 activeAtToken / completedMentions。若延后到 rAF,
+      // 中间那一帧 cursor 还是旧值,atToken 仍是原短 token "@",completedMentions
+      // 把 "@src/" 误判为完成态 mention 并渲染 chip(dir 路径典型 bug)。
       const newCursor = start + formatted.length + (isDir ? 0 : 1);
+      setInput(next);
+      setCursor(newCursor);
+      if (!isDir) setAtMenuDismissed(true);
+      // rAF 只保留 DOM 焦点 + selection 同步(不参与 React 状态)。
       requestAnimationFrame(() => {
         const el = textAreaNode(textareaRef.current);
         if (!el) return;
@@ -632,7 +636,6 @@ export default React.memo(function AgentInputBox() {
           el.selectionStart = newCursor;
           el.selectionEnd = newCursor;
         }
-        setCursor(newCursor);
       });
     },
     [atToken, input],
