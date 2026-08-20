@@ -128,3 +128,31 @@ export interface FsUploadResult {
   /** Stored size in bytes. */
   size?: number;
 }
+
+import type { FilePreviewKind } from './fileKind.js'
+export type { FilePreviewKind } from './fileKind.js'
+
+/**
+ * /fs/preview 路由成功响应:按 kind 决定 content 字段语义。
+ * - 'text' / 'html' → `content` 为 utf8 原文
+ * - 'image' → `content` 为 base64(配合 mime 拼 data URL)
+ * - 'binary' → 仅返回元数据 + ext
+ */
+export interface FilePreviewPayload {
+  kind: FilePreviewKind
+  mime?: string
+  content?: string
+  size: number
+  mtime: number
+  ext?: string
+}
+
+/**
+ * /fs/preview 路由失败响应:HTTP status 携带语义,body 仅供前端展示。
+ * `code` 与工具层 `display_files` 的 error.code 对齐,便于 UI 复用同一套 Tag 文案。
+ */
+export interface FilePreviewError {
+  code: 'ENOENT' | 'EACCES' | 'EISDIR' | 'ETOOBIG' | 'EBADREQ' | 'EIO'
+  message: string
+  meta?: { size?: number }
+}
