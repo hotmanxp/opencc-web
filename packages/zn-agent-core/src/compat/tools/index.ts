@@ -34,7 +34,6 @@ import type { Tool as RuntimeTool } from '../runtime/types.js'
 import { makeTool } from './makeTool.js'
 import { taskTools } from './tasks/index.js'
 import { subagentControlTool } from './opencc/subagentControl.js'
-import { displayFilesTool } from './displayFiles.js'
 export { makeTool }
 
 const execAsync = promisify(exec)
@@ -508,7 +507,6 @@ export function buildDefaultTools(opts?: {
     // globalThis bridge(`__zaiBackgroundRuntime`)拿 bg,无 bg 时 no-op,
     // 单测 / vendor CLI 直跑都不会崩。
     subagentControlTool as unknown as Tool,
-    displayFilesTool as Tool,
   ]
 
   const skillsDirs = opts?.skillsDirs ?? []

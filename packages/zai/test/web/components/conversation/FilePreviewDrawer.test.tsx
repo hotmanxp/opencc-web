@@ -95,4 +95,31 @@ describe('FilePreviewDrawer', () => {
       expect(screen.queryByRole('button', { name: /展开全部/ })).not.toBeInTheDocument()
     })
   })
+
+  it('closes on Esc keypress via Antd Drawer onClose', async () => {
+    // Spec §9.1 提到 "Esc 关闭触发 onClose" —— rc-drawer@7.3.0 把
+    // onPanelKeyDown 绑在根 div `.ant-drawer` 上,读 e.keyCode === 27
+    // (rc-util/lib/KeyCode.js::ESC) 触发 onClose。所以 keydown 必须
+    // 派发到 .ant-drawer 上,且必须带 keyCode = 27(不能只带
+    // key='Escape' — AntD 用 keyCode 不是 key)。
+    const closeSpy = vi.fn()
+    useAgentStore.setState({
+      filePreviewPath: '/a.ts',
+      closeFilePreview: closeSpy,
+    })
+    mockFetch({ kind: 'text', mime: 'text/plain', content: 'x', size: 1, mtime: 0 })
+    render(<FilePreviewDrawer />)
+    await waitFor(() => {
+      expect(document.querySelector('.ant-drawer-content')).toBeTruthy()
+    })
+    const drawerRoot = document.querySelector('.ant-drawer') as HTMLElement
+    expect(drawerRoot).toBeTruthy()
+    fireEvent.keyDown(drawerRoot, { key: 'Escape', keyCode: 27 })
+    await waitFor(
+      () => {
+        expect(closeSpy).toHaveBeenCalled()
+      },
+      { timeout: 1500 },
+    )
+  })
 })
