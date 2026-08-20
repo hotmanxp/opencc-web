@@ -74,7 +74,12 @@ function parseFiles(msg: any): FileMeta[] {
 
 function FileCard({ file }: { file: FileMeta }) {
   const openPreview = useAgentStore((s) => s.openFilePreview)
-  const previewable = !file.error && file.size > 0 && file.size <= ONE_MIB
+  // zai patch (Task 10 集成验证补):binary kind 也不可预览,跟 spec §9.2
+  // "binary [预览] disabled" 一致。原来只挡 error/size 上限,用户点 binary
+  // 预览会看到 Drawer 的"不支持内联预览"Alert(没有 preview 价值)。把
+  // kind === 'binary' 也纳入 disabled 集合,tooltip 也改成"二进制,无法预览"。
+  const previewable =
+    !file.error && file.size > 0 && file.size <= ONE_MIB && file.kind !== 'binary'
 
   const onReveal = () => {
     void fetch('/api/fs/reveal', {
@@ -86,9 +91,11 @@ function FileCard({ file }: { file: FileMeta }) {
 
   const previewTooltip = file.error
     ? errorLabel(file.error.code)
-    : previewable
-      ? '预览文件内容'
-      : '文件过大,请在文件管理器中打开'
+    : file.kind === 'binary'
+      ? '二进制文件,无法内联预览'
+      : previewable
+        ? '预览文件内容'
+        : '文件过大,请在文件管理器中打开'
 
   return (
     <Card size="small" style={{ marginBottom: 8 }}>
