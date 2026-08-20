@@ -1,0 +1,78 @@
+// @vitest-environment happy-dom
+import { describe, expect, it, vi, beforeEach } from 'vitest'
+import '@testing-library/jest-dom'
+import { render, screen } from '@testing-library/react'
+import React from 'react'
+import { FilePreviewDrawer } from '../../../../src/web/src/components/conversation/FilePreviewDrawer.js'
+import { useAgentStore } from '../../../../src/web/src/store/useAgentStore.js'
+
+function mockFetch(payload: any) {
+  return vi.spyOn(global, 'fetch').mockResolvedValue({
+    ok: true,
+    status: 200,
+    json: async () => payload,
+  } as any)
+}
+
+describe('FilePreviewDrawer', () => {
+  beforeEach(() => {
+    useAgentStore.setState({ filePreviewPath: null, closeFilePreview: () => useAgentStore.setState({ filePreviewPath: null }) })
+  })
+
+  it('renders nothing when path is null', () => {
+    const { container } = render(<FilePreviewDrawer />)
+    expect(container.querySelector('.ant-drawer')).toBeNull()
+  })
+
+  it('renders text content via SyntaxHighlighter for .ts', async () => {
+    mockFetch({ kind: 'text', mime: 'text/plain', content: 'const x = 1\n', size: 11, mtime: 0 })
+    useAgentStore.setState({ filePreviewPath: '/a.ts' })
+    render(<FilePreviewDrawer />)
+    expect(await screen.findByText(/const x = 1/)).toBeInTheDocument()
+  })
+
+  it('renders image via <img> with data URL', async () => {
+    mockFetch({ kind: 'image', mime: 'image/png', content: 'AAAA', size: 3, mtime: 0 })
+    useAgentStore.setState({ filePreviewPath: '/a.png' })
+    render(<FilePreviewDrawer />)
+    // happy-dom doesn't infer implicit `img` role for HTMLImageElement, so
+    // findByRole('img') matches the AntD close-icon span (role="img").
+    // Query by alt text instead, which is unique to the actual <img>.
+    const img = await screen.findByAltText('a.png')
+    expect(img.tagName.toLowerCase()).toBe('img')
+    expect(img.getAttribute('src') ?? '').toMatch(/^data:image\/png;base64,AAAA$/)
+  })
+
+  it('renders html via <iframe> with sandbox=""', async () => {
+    mockFetch({ kind: 'html', mime: 'text/html', content: '<h1>x</h1>', size: 8, mtime: 0 })
+    useAgentStore.setState({ filePreviewPath: '/a.html' })
+    render(<FilePreviewDrawer />)
+    const iframe = await new Promise<HTMLIFrameElement | null>((resolve) => {
+      const check = () => {
+        const element = document.querySelector('iframe')
+        if (element) resolve(element)
+        else requestAnimationFrame(check)
+      }
+      check()
+    })
+    expect(iframe).not.toBeNull()
+    expect(iframe!.getAttribute('sandbox')).toBe('')
+  })
+
+  it('renders binary metadata + open-folder button', async () => {
+    mockFetch({ kind: 'binary', size: 100, mtime: 0, ext: '.zip' })
+    useAgentStore.setState({ filePreviewPath: '/a.zip' })
+    render(<FilePreviewDrawer />)
+    expect(await screen.findByText(/不支持内联预览/)).toBeInTheDocument()
+    expect(screen.getByRole('button', { name: /打开目录/ })).toBeInTheDocument()
+  })
+
+  it('shows Alert with error message on 404', async () => {
+    vi.spyOn(global, 'fetch').mockResolvedValue({
+      ok: false, status: 404, json: async () => ({ error: { code: 'ENOENT', message: '文件不存在' } }),
+    } as any)
+    useAgentStore.setState({ filePreviewPath: '/nope.txt' })
+    render(<FilePreviewDrawer />)
+    expect(await screen.findByText(/文件不存在/)).toBeInTheDocument()
+  })
+})
