@@ -60,6 +60,11 @@
   --bg-theme-6: rgba(0,0,0,0.6);
   --bg-popup: rgba(0,0,0,0.6);
 
+  /* 命令/Skill 名称视觉 identity: 深色主题用紫色 (#a78bfa),
+     与下方 slash dropdown 的 `/name` 文字色对齐. 浅色主题在
+     :root[data-theme='light'] 里覆写为 var(--accent-start) (主题橙). */
+  --cmd-token-color: #a78bfa;
+
 }
 
 :root { color-scheme: light dark; }
@@ -128,6 +133,9 @@
   --bg-faint-08: rgba(0,0,0,0.08);
   --bg-theme-6: rgba(255,255,255,0.6);
   --bg-popup: #ffffff;
+  /* 浅色主题下命令/Skill 名称用主题橙,与全局 accent identity 一致 —
+     深色主题下仍是紫色 (见 :root --cmd-token-color 默认值). */
+  --cmd-token-color: var(--accent-start);
 }
 
 /* light 主题下, 半透明 header 需要更亮一些 */
@@ -551,15 +559,16 @@ body {
   background: var(--bg-input);
 }
 
-/* 命令 token mark: 紫色高亮 — 与下方 slash dropdown 的 `/name` 文字色
-   一致 (#a78bfa),但不加背景色 (用户要求:文字色标记,不要 block-style
-   的色块)。从 dropdown 选完 Tab/Enter 后输入框里立刻出现同样的紫色
-   文字,反馈链路视觉统一。
+/* 命令 token mark: 与下方 slash dropdown 的 `/name` 文字色一致
+   (走 var(--cmd-token-color),深色主题 #a78bfa 紫,浅色主题
+   var(--accent-start) 橙)。不加背景色 (用户要求:文字色标记,
+   不要 block-style 的色块)。从 dropdown 选完 Tab/Enter 后输入框
+   里立刻出现同色文字,反馈链路视觉统一。
    box-decoration-break: clone 让 mark 在 soft-wrap 断行时两端保持圆角,
    不会出现"半边圆角"的丑样式 (即使没有背景色,圆角仍适用于未来
    视觉扩展 — 保留这条规则)。*/
 .agent-input-cmd-token {
-  color: #a78bfa;
+  color: var(--cmd-token-color);
   border-radius: 4px;
   padding: 0 2px;
   box-decoration-break: clone;

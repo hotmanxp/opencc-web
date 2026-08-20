@@ -1299,7 +1299,11 @@ export default React.memo(function AgentInputBox() {
                     style={{
                       fontSize: 13,
                       fontWeight: 600,
-                      color: "#a78bfa",
+                      // 命令/Skill 名视觉 identity: 与输入框内 mark 共享
+                      // var(--cmd-token-color) — 深色主题 #a78bfa 紫,
+                      // 浅色主题 var(--accent-start) 橙. 输入框敲 `/name`
+                      // 时出现的 mark 与 dropdown 选条完全同色,反馈一致。
+                      color: "var(--cmd-token-color)",
                       fontFamily:
                         "ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace",
                       whiteSpace: "nowrap",
