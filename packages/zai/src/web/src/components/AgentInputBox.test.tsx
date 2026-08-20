@@ -129,6 +129,103 @@ describe('AgentInputBox — slash command UI visibility', () => {
   })
 })
 
+// Mirror-backdrop 高亮: 输入 `/<已知命令名>` 时在输入框内把 token 染紫,
+// 视觉与下方 slash dropdown 紫色块对齐。普通文本路径不渲染 backdrop
+// (避免无谓的 DOM 与样式开销)。
+describe('AgentInputBox — 已知命令输入框内 token 高亮', () => {
+  // 触发 slash items 异步加载 + 等待 dropdown 渲染出 /handoff。
+  // 不能直接测内部 state — slashItems 内部 state 加载完成才进 deriveCommandToken。
+  // 必须先用 "/" 让 fetch mock resolve 后 dropdown 显示 handoff,说明 items 已加载。
+  async function loadSlashItemsAndReset(ta: HTMLTextAreaElement) {
+    fireEvent.change(ta, { target: { value: "/" } })
+    await waitFor(() => {
+      expect(screen.getByText("/handoff")).toBeInTheDocument()
+    })
+    // 清空,避免影响下一个用例的断言
+    fireEvent.change(ta, { target: { value: "" } })
+  }
+
+  test('输入开头为已知命令名, backdrop 渲染带 mark 的 /name 紫色块', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    await loadSlashItemsAndReset(ta)
+    // 输入 "/handoff some args" 触发高亮
+    fireEvent.change(ta, { target: { value: "/handoff some args" } })
+    const backdrop = await waitFor(() => {
+      const el = document.querySelector('[data-input-backdrop]')
+      expect(el).not.toBeNull()
+      return el as HTMLElement
+    })
+    expect(backdrop.getAttribute('data-decoration')).toBe('token')
+    // mark 内文本 = "/handoff" (不含尾部空格, 贴齐 deepseek-harness 行为)
+    const mark = backdrop.querySelector('[data-decoration="token-mark"]')
+    expect(mark).not.toBeNull()
+    expect(mark!.textContent).toBe('/handoff')
+    // backdrop 整段 = 原 input (mark 文本 + 普通 span 文本),逐字对齐 antd textarea 文本
+    expect(backdrop.textContent).toBe('/handoff some args')
+  })
+
+  test('输入开头为未知命令名, 不渲染 backdrop', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    await loadSlashItemsAndReset(ta)
+    fireEvent.change(ta, { target: { value: "/totally-unknown-cmd" } })
+    // backdrop 不挂载 (装饰层对未知命令短路, 避免误染普通文本)
+    expect(document.querySelector('[data-input-backdrop]')).toBeNull()
+  })
+
+  test('输入不以 / 起首, 不渲染 backdrop', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    await loadSlashItemsAndReset(ta)
+    fireEvent.change(ta, { target: { value: "plain text no slash" } })
+    expect(document.querySelector('[data-input-backdrop]')).toBeNull()
+  })
+
+  test('输入框清空 / 输入变普通文本后, backdrop 立即卸载', async () => {
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    await loadSlashItemsAndReset(ta)
+    // 进入高亮态
+    fireEvent.change(ta, { target: { value: "/handoff " } })
+    await waitFor(() => {
+      expect(document.querySelector('[data-input-backdrop]')).not.toBeNull()
+    })
+    // 切回普通文本 → backdrop 立即消失
+    fireEvent.change(ta, { target: { value: "no longer a command" } })
+    await waitFor(() => {
+      expect(document.querySelector('[data-input-backdrop]')).toBeNull()
+    })
+  })
+
+  test('已知命令名前缀匹配 (输入 /hando 但 slashItems 没 /hando 条目), 不渲染 backdrop', async () => {
+    // handoff 是完整 name,/hando 是部分匹配 — deriveCommandToken 只在
+    // 完整 word match 时返回高亮,避免把"前缀巧合"的输入也染紫。
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    await loadSlashItemsAndReset(ta)
+    fireEvent.change(ta, { target: { value: "/hando" } })
+    expect(document.querySelector('[data-input-backdrop]')).toBeNull()
+  })
+
+  test('TextArea 文本在 high-light 模式下变为透明 (textarea fill-color: transparent)', async () => {
+    // 验证 styles.textarea 注入确实生效 — backdrop 接管可见文本,
+    // textarea 仅保留 caret / selection。
+    render(<AgentInputBox />)
+    const ta = (await screen.findByPlaceholderText(/输入消息/)) as HTMLTextAreaElement
+    await loadSlashItemsAndReset(ta)
+    fireEvent.change(ta, { target: { value: "/handoff" } })
+    await waitFor(() => {
+      expect(document.querySelector('[data-input-backdrop]')).not.toBeNull()
+    })
+    // styles.textarea.color === 'transparent' 由 antd 内联 style 应用到
+    // 原生 textarea 元素。直接读 DOM 上的 style 属性。
+    const innerTa = document.querySelector('textarea') as HTMLTextAreaElement
+    expect(innerTa.style.color).toBe('transparent')
+    expect(innerTa.style.caretColor).toBeTruthy()
+  })
+})
+
 describe('AgentInputBox — 状态行合并 v2 任务摘要', () => {
   test('空 v2 时状态行只显示 ● 就绪, 不展示任务摘要', () => {
     render(<AgentInputBox />);

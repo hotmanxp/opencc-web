@@ -484,3 +484,84 @@ body {
   background: #ff6600 !important;
   border-color: #ff6600 !important;
 }
+
+/* ─── Agent 输入框命令/Skill 高亮 (mirror-backdrop) ─────────────
+ * 模式: 一个绝对定位的 backdrop 浮在 antd TextArea 之下,渲染带 mark
+ * 的可见文本;textarea 自身 color/text-fill-color 变透明,只保留 caret
+ * 与 selection。两个图层共享 antd 默认 metrics (padding 4px/11px,
+ * fontSize 14, lineHeight 22) → 文本逐字对齐,mark 不会漂移。
+ *
+ * 触发条件: 仅当输入以 `/<已知命令名>` 起首时挂载 (见
+ * AgentInputBox.tsx `deriveCommandToken`),普通文本路径不渲染 backdrop,
+ * 性能开销为零。
+ *
+ * 与 deepseek-harness InputBar 的 hlToken / backdrop 思路一致,但只取
+ * "claim-token highlight" 这一支 (chips / textRefs / hint 不移植 —
+ * ZAI 当前没有 reference/codec/hint 这些概念)。
+ */
+.agent-input-decorator-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+}
+
+/* 透明 placeholder: backdrop 接管后,TextArea 文本变透明,但
+   placeholder 仍需可见 — 用 ::placeholder 显式恢复 fill-color。 */
+.agent-input-decorator-wrap textarea::placeholder {
+  color: var(--text-tertiary);
+  -webkit-text-fill-color: var(--text-tertiary);
+  opacity: 1;
+}
+
+/* antd TextArea 默认 `background: var(--bg-input)` 实色 + border,不透明化
+   会盖住 backdrop 的 mark + 普通文本。让 textarea 自身背景透明,
+   border 保留(否则输入框失去卡面轮廓):
+   装饰层 wrap 内,backdrop(z=0)画底色 + 高亮文本,
+   antd textarea(z=1)画透明 + caret — caret / selection 始终在最顶层
+   (不被 backdrop 盖住),选中态看得到浏览器 selection 蓝底框 + 高亮文本。*/
+.agent-input-decorator-wrap textarea.ant-input {
+  background: transparent !important;
+  /* caret-color 通过 AgentInputBox.tsx 的 styles.textarea 内联 style
+     注入 (var(--text-primary)),无需在此重复。*/
+  position: relative;
+  /* 提到 backdrop(z=0) 之上,让 caret / selection 显示在 backdrop 文本
+     之上 — 不写这个 caret 会被 backdrop 盖住看不见。*/
+  z-index: 1;
+}
+
+/* Backdrop 浮层: 填满 wrapper (inset:0),与 antd textarea 共用同一
+   padding/font metrics,所以 backdrop 文本起始位置与 antd 文本起始位置
+   完全一致 — mark 高亮就贴在正确的字符上,不会偏移。
+   background 显式填 antd 原 wrapper 的颜色,代替被透明化的 wrapper
+   底色,让用户看不出"输入框换了结构"。 */
+.agent-input-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  padding: 4px 11px;
+  font-size: 14px;
+  line-height: 22px;
+  font-family: inherit;
+  color: var(--text-primary);
+  white-space: pre-wrap;
+  word-break: break-word;
+  background: var(--bg-input);
+}
+
+/* 命令 token mark: 紫色高亮 — 与下方 slash dropdown 的 `/name` 文字色
+   一致 (#a78bfa),但不加背景色 (用户要求:文字色标记,不要 block-style
+   的色块)。从 dropdown 选完 Tab/Enter 后输入框里立刻出现同样的紫色
+   文字,反馈链路视觉统一。
+   box-decoration-break: clone 让 mark 在 soft-wrap 断行时两端保持圆角,
+   不会出现"半边圆角"的丑样式 (即使没有背景色,圆角仍适用于未来
+   视觉扩展 — 保留这条规则)。*/
+.agent-input-cmd-token {
+  color: #a78bfa;
+  border-radius: 4px;
+  padding: 0 2px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}

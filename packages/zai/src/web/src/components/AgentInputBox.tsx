@@ -92,6 +92,31 @@ function textAreaNode(
 }
 
 /**
+ * Mirror-layer 高亮的纯函数 core(参考 deepseek-harness
+ * `client/ui-conversation/src/client/input/decorations.ts` 的派生思路):
+ * 输入文本以 `/` 起首且后续 name 是已知 slashItems 之一时,返回 `/name`
+ * 的高亮范围(不含尾部空格 — 与 dsh 行为一致)。否则 null。
+ *
+ * 仅识别"输入开头"的命令 token(贴齐 claim-token 语义),中段出现的
+ * `/name` 不参与高亮 — 这是约定而非漏判,防止误把普通文本里偶然出现的
+ * "/foo" 渲染成命令样式。
+ */
+export function deriveCommandToken(
+  input: string,
+  slashItems: readonly SlashItem[],
+): { start: number; end: number; name: string } | null {
+  if (!input.startsWith("/")) return null;
+  // 提取 `/` 之后到第一个空白/换行前的连续字符作为命令名
+  const m = /^\/([A-Za-z0-9_-]+)/.exec(input);
+  if (!m) return null;
+  const name = m[1] ?? "";
+  if (name.length === 0) return null;
+  const known = slashItems.some((it) => it.name === name);
+  if (!known) return null;
+  return { start: 0, end: 1 + name.length, name };
+}
+
+/**
  * AgentInputBox 直接从 useAppStore.isMobile 读取移动端判断, 不再接受 props.
  * 由 useIsMobile() (挂在 Layout 顶部) 通过 matchMedia 同步到 store.
  */
@@ -201,6 +226,20 @@ export default React.memo(function AgentInputBox() {
       })
       .catch(() => {});
   }, []);
+
+  // 命令高亮: 输入开头 `/<已知命令>` 时在输入框内把 token 染紫底,
+  // 视觉与下方 slash 自动补全 dropdown 的 `/name` 紫色块对齐,
+  // 让用户在敲 Tab/Enter 之前就能确认"我现在用的是什么命令"。
+  // mirror-backdrop 渲染: backdrop 与 textarea 共用 antd 的 padding/font
+  // metrics,前者渲染可见文本(带 mark),后者 text-fill-color 透明
+  // 只保留 caret/selection — 见下方 <div data-input-backdrop> 与
+  // TextArea styles.textarea.color:"transparent"。
+  // 必须在 slashItems state 之后:slashItems 初始为 [],首挂载到 fetch
+  // 返回前不会有高亮;fetch 完成后 useMemo 重算,用户输入框里的高亮随之刷新。
+  const commandToken = useMemo(
+    () => deriveCommandToken(input, slashItems),
+    [input, slashItems],
+  );
 
   // 在光标处插入文本(分屏「插入对话」与拖入文件地址共用):
   // rc-textarea(antd Input.TextArea)把 ref 变成命令式句柄
@@ -1331,17 +1370,68 @@ export default React.memo(function AgentInputBox() {
               }}
             />
           )}
-          <TextArea
-            ref={textareaRef}
-            value={input}
-            onChange={(e) => setInput(e.target.value)}
-            onKeyDown={handleKeyDown}
-            onPaste={handlePaste}
-            placeholder="输入消息, 按 Enter 发送, Shift+Enter 换行. 拖入图片直接插入, 拖入其他文件自动上传并加入地址."
-            rows={3}
-            disabled={pendingAsk?.status === "pending"}
-            style={{ resize: "none", flex: 1 }}
-          />
+          {/* Mirror-backdrop wrapper (追齐 deepseek-harness InputBar 的高亮手法):
+              - 内部绝对定位的 backdrop 渲染可见文本(带命令 token 高亮 mark)
+              - antd TextArea 文本透明,只保留 caret / selection
+              - 两层共享 antd 默认 metrics (padding 4px 11px, fontSize 14, lineHeight 22)
+              让 backdrop 文本与 antd textarea 文本逐字对齐,不漂移。
+              注意: commandToken 为 null 时 backdrop 不挂载,TextArea 用默认
+              文本颜色 — 这样普通打字路径完全没有性能/视觉开销,只有敲
+              完 `/已知命令` 时才进入 highlight 模式。 */}
+          <div
+            data-testid="agent-input-decorator-wrap"
+            className="agent-input-decorator-wrap"
+            style={{
+              position: "relative",
+              flex: 1,
+              minWidth: 0,
+              display: "flex",
+            }}
+          >
+            {commandToken && (
+              <div
+                aria-hidden
+                data-input-backdrop
+                data-decoration="token"
+                className="agent-input-backdrop"
+              >
+                <span
+                  data-decoration="token-mark"
+                  className="agent-input-cmd-token"
+                >
+                  {input.slice(commandToken.start, commandToken.end)}
+                </span>
+                <span>{input.slice(commandToken.end)}</span>
+              </div>
+            )}
+            <TextArea
+              ref={textareaRef}
+              value={input}
+              onChange={(e) => setInput(e.target.value)}
+              onKeyDown={handleKeyDown}
+              onPaste={handlePaste}
+              placeholder="输入消息, 按 Enter 发送, Shift+Enter 换行. 拖入图片直接插入, 拖入其他文件自动上传并加入地址."
+              rows={3}
+              disabled={pendingAsk?.status === "pending"}
+              // commandToken 存在时把 textarea 文本变透明:backdrop 接管渲染。
+              // -webkit-text-fill-color 同时设上,避免 Chromium 系列只尊重
+              // fill-color 而忽略 color 让文本"漏出来"。
+              // caret-color 保留:caret 必须可见,否则用户看不到光标位置。
+              styles={
+                commandToken
+                  ? {
+                      textarea: {
+                        color: "transparent",
+                        WebkitTextFillColor: "transparent",
+                        caretColor: "var(--text-primary)",
+                      },
+                    }
+                  : undefined
+              }
+              style={{ resize: "none", flex: 1 }}
+              data-testid="agent-input-textarea"
+            />
+          </div>
           {/* 移动端"停止"按钮: 替代桌面端的 Esc 键 —
             物理键盘/软键盘都没有 Esc, 必须给移动用户提供一个等价入口.
             - 仅 isMobile 时挂载 (桌面端继续靠 Esc keydown, 避免按钮占位);
