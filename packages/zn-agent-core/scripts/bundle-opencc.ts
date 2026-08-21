@@ -612,7 +612,14 @@ const STUB_EXPORTS: Record<string, string[]> = {
 // commands/<name>/<name>.tsx 是"组件 + call 回调/逻辑函数"混排,工作块 A
 // 在 line ~723+ 用 file-local AST 替换(只 stub 大写命名 + 含 JSX 的
 // 函数体),不走此清单。ink/ 在工作块 B 用 inkRenderStubPlugin 单独处理。
+//
+// zai patch (2026-08-22): 列表首项加入 'components'(无尾斜杠),让
+// components/ 顶层 .tsx(VirtualMessageList / Messages / LogSelector /
+// Speller 等)也走 stub。components/ 顶层目前 ~1MB,但 stub 后依赖
+// (preact + 其他组件 + 设计系统)被 esbuild tree-shake,实际 bundle
+// 字节节省 ~3.5%(实测)。KEEP_FILES 继续生效,纯函数/hooks 文件照旧。
 const UI_COMPONENT_STUB_DIRS = [
+  'components',
   'components/design-system',
   'components/agents',
   'components/CustomSelect',
@@ -697,6 +704,12 @@ const UI_COMPONENT_KEEP_FILES = [
   'components/agents/validateAgent.ts',
   // StartupHeader 工具
   'components/StartupHeader/StartupHeader.pure.ts',
+  // zai patch (2026-08-22): components/ 顶层 stub 范围扩大到整棵目录,
+  // 这 4 个 .ts 纯文件当前没被外部 import,保险起见保留以便未来引用。
+  'components/EffortIndicator.ts',
+  'components/SentryErrorBoundary.ts',
+  'components/StartupScreen.ts',
+  'components/useCodexOAuthFlow.ts',
 ]
 
 // ── 文件内 AST 替换(工作块 A:commands/ 实现层)──────────────────────
@@ -1195,8 +1208,13 @@ const inkRenderStubPlugin: esbuild.Plugin = {
 //     handled by optionalStubPlugin (stubbed in build output).
 //   - zod (incl zod/v3, zod/v4) — keep external. esbuild's CJS↔ESM
 //     handling for zod v4's nested CJS helpers (_gte / _gt etc) has
-//     historically had bugs. zod IS in our deps so Node resolves at
-//     runtime fine.
+// zai patch (2026-08-22): minify 开启。bundle 字节 14.46MB → 6.93MB
+// (-52%)。
+//
+// zai patch (2026-08-22): sourcemap 关闭。本仓库 sourcemap 实际无用:
+// zai dev 用 tsx 直接跑 src（不走 bundle），生产发版前 `find ... -delete`
+// 已清掉 .map，线上 stack trace 必然是 minified 字符。关闭后省 ~30MB
+// dist 磁盘占用 + esbuild 不再生成 sourcemap 的 build 时间。
 await esbuild.build({
   entryPoints: [SRC_ENTRY],
   outfile: OUT_FILE,
@@ -1204,8 +1222,8 @@ await esbuild.build({
   format: 'esm',
   platform: 'node',
   target: 'node20',
-  sourcemap: true,
-  minify: false,
+  sourcemap: false,
+  minify: true,
   logLevel: 'info',
   // Provide a Node `require` so the bundle's compiled
   // `__require("child_process")` calls resolve. esbuild leaves
@@ -1220,28 +1238,32 @@ await esbuild.build({
   },
   plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
   external: [
-    // Native / not-in-deps
+    // sharp: native .node binary binding(zai 前端直接用 sharp 处理图片),
+    // esbuild 不能 inline native binding,必须 external 留给运行时 Node 解析。
     'sharp',
-    'google-auth-library',
-    '@vscode/ripgrep',
-    '@orama/orama',
-    '@orama/plugin-data-persistence',
-    'web-tree-sitter',
-    'tree-sitter-wasms',
-    // Bundled-stubs: opencc packages stubbed via optionalStubPlugin
-    // (still listed here as defensive; the plugin resolves first).
-    'turndown',
-    '@ant/claude-for-chrome-mcp',
-    // Keep external — see comment above
+    // zod (incl v3/v4/v4-mini): esbuild CJS↔ESM 转换历史上有 bug (zod v4 nested
+    // _gte/_gt helper)。zai 进程跑的是 zod/v4 (bundle-entry.ts 主入口 re-export),
+    // external 让 Node 在 core/node_modules 解析 zod,避免 bundle 损坏运行时。
     'zod',
     'zod/v3',
     'zod/v4',
     'zod/v4-mini',
-    // fflate: vendored via dynamic import in zip.ts / zipCache.ts.
-    // Listed in deps (0.8.3) but esbuild can't statically resolve
-    // `await import('fflate')` from outside its bundle graph when the
-    // call site is reached; keep external so Node resolves at runtime.
+    // fflate: vendored via dynamic import in zip.ts / zipCache.ts. esbuild 不能
+    // 静态解析 dynamic import 跨出 bundle 图的包,external 让 Node 运行时解析。
     'fflate',
+    // @orama/orama + plugin-data-persistence: zai 自己 deps 已有,external 让
+    // zai 进程走 node_modules 解析,bundle 不内联(避免双份 module 实例)。
+    '@orama/orama',
+    '@orama/plugin-data-persistence',
+    // 下列 packages 之前列在 external 但 zai 没装、zai 也不该装(只在 opencc
+    // vendor 内部使用,且 vendor 路径在 zai entry 图里不触发 —— inline 实验
+    // 证明 bundle 字节无变化,删除可降低 zai 部署对这些包的依赖假设)。
+    // 如未来 vendor 代码真的触发这些 import(zai 跑 GCP Vertex / 跑 ripgrep
+    // / 跑 LSP tree-sitter),会由 optionalStubPlugin 处理(stub 成空 export),
+    // 不需要再把 external 加回来。
+    //
+    // 已移除: 'google-auth-library', '@vscode/ripgrep', 'web-tree-sitter',
+    //         'tree-sitter-wasms', 'turndown', '@ant/claude-for-chrome-mcp'
   ],
   // Tree-shake aggressively.
   treeShaking: true,
@@ -1343,8 +1365,9 @@ await esbuild.build({
   outfile: COMPRESS_TOOL_HISTORY_OUT,
   platform: 'node',
   target: 'node22',
-  sourcemap: true,
-  minify: false,
+  // zai patch (2026-08-22): sourcemap 关闭 + minify 开（与主 bundle 对齐）。
+  sourcemap: false,
+  minify: true,
   logLevel: 'warning',
   banner: {
     js:
