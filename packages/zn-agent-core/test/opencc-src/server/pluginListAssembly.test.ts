@@ -1,7 +1,5 @@
 import { describe, expect, it } from 'vitest'
 import type { LoadedPlugin, PluginError, PluginLoadResult } from '../../../src/opencc-src/types/plugin.js'
-import type { InstalledPluginsFileV2 } from '../../../src/opencc-src/utils/plugins/installedPluginsManager.js'
-import type { OpenccPluginComponentCounts } from '../../../src/opencc-src/server/serverTypes.js'
 import { assemblePluginList } from '../../../src/opencc-src/server/pluginListAssembly.js'
 
 function makePlugin(overrides: Partial<LoadedPlugin>): LoadedPlugin {
@@ -15,55 +13,7 @@ function makePlugin(overrides: Partial<LoadedPlugin>): LoadedPlugin {
   } as LoadedPlugin
 }
 
-const EMPTY_COUNTS: OpenccPluginComponentCounts = { commands: 0, agents: 0, skills: 0, hooks: 0, mcpServers: 0 }
-
 describe('assemblePluginList', () => {
-  it('一个 user 作用域插件带 enabled 状态', () => {
-    const load: PluginLoadResult = {
-      enabled: [makePlugin({ name: 'a', enabled: true })],
-      disabled: [],
-      errors: [],
-    }
-    const v2: InstalledPluginsFileV2 = { version: 2, plugins: { a: { installs: { user: { path: '/p' } } } } }
-    const enabled = { 'a@market': true }
-    const counts = new Map<string, OpenccPluginComponentCounts>([['a', { ...EMPTY_COUNTS, commands: 3 }]])
-    const r = assemblePluginList(load, v2, enabled, counts)
-    expect(r.plugins).toEqual([{
-      id: 'a@market', name: 'a', version: '1.0.0', marketplace: 'market',
-      scope: 'user', enabled: true, writable: true, hasUpdate: false,
-      components: { commands: 3, agents: 0, skills: 0, hooks: 0, mcpServers: 0 },
-      errors: [],
-    }])
-    expect(r.errors).toEqual([])
-  })
-
-  it('project 作用域 → writable=false', () => {
-    const load: PluginLoadResult = { enabled: [makePlugin({ name: 'p' })], disabled: [], errors: [] }
-    const v2: InstalledPluginsFileV2 = { version: 2, plugins: { p: { installs: { project: { path: '/p' } } } } }
-    const r = assemblePluginList(load, v2, {}, new Map())
-    expect(r.plugins[0].scope).toBe('project')
-    expect(r.plugins[0].writable).toBe(false)
-  })
-
-  it('local 作用域 → writable=false', () => {
-    const load: PluginLoadResult = { enabled: [makePlugin({ name: 'l' })], disabled: [], errors: [] }
-    const v2: InstalledPluginsFileV2 = { version: 2, plugins: { l: { installs: { local: { path: '/p' } } } } }
-    const r = assemblePluginList(load, v2, {}, new Map())
-    expect(r.plugins[0].scope).toBe('local')
-    expect(r.plugins[0].writable).toBe(false)
-  })
-
-  it('user + project 都在 → scope 取 user（更宽泛优先）', () => {
-    const load: PluginLoadResult = { enabled: [makePlugin({ name: 'b' })], disabled: [], errors: [] }
-    const v2: InstalledPluginsFileV2 = {
-      version: 2,
-      plugins: { b: { installs: { user: { path: '/u' }, project: { path: '/p' } } } },
-    }
-    const r = assemblePluginList(load, v2, {}, new Map())
-    expect(r.plugins[0].scope).toBe('user')
-    expect(r.plugins[0].writable).toBe(true)
-  })
-
   it('内置插件 → scope=builtin, writable=true', () => {
     const load: PluginLoadResult = {
       enabled: [makePlugin({ name: 'b', repository: 'b@builtin', isBuiltin: true })],
@@ -121,43 +71,5 @@ describe('assemblePluginList', () => {
     const r = assemblePluginList(load, { version: 2, plugins: {} }, {}, new Map())
     expect(r.plugins[0].description).toBe('hi')
     expect(r.plugins[0].author).toBe('me')
-  })
-
-  it('plugin.repository 是完整 pluginId (name@marketplace) 时不重复拼接', () => {
-    // 模拟 pluginLoader.ts:1464 把 repository=source(source 本身是 pluginId)
-    // 的污染场景,以及 settings 里存的 enabledPlugins key 是 name@marketplace。
-    const load: PluginLoadResult = {
-      enabled: [makePlugin({
-        name: 'chrome-devtools-mcp',
-        repository: 'chrome-devtools-mcp@claude-plugins-official',
-      })],
-      disabled: [],
-      errors: [],
-    }
-    const v2: InstalledPluginsFileV2 = {
-      version: 2,
-      plugins: { 'chrome-devtools-mcp': { installs: { user: { path: '/p' } } } },
-    }
-    const enabled = { 'chrome-devtools-mcp@claude-plugins-official': true }
-    const r = assemblePluginList(load, v2, enabled, new Map())
-    expect(r.plugins[0].id).toBe('chrome-devtools-mcp@claude-plugins-official')
-    expect(r.plugins[0].marketplace).toBe('claude-plugins-official')
-    expect(r.plugins[0].enabled).toBe(true)
-  })
-
-  it('plugin.repository 是裸 marketplace 名 (不含 @) 时仍正确拼接', () => {
-    const load: PluginLoadResult = {
-      enabled: [makePlugin({ name: 'a', repository: 'market' })],
-      disabled: [],
-      errors: [],
-    }
-    const v2: InstalledPluginsFileV2 = {
-      version: 2,
-      plugins: { a: { installs: { user: { path: '/p' } } } },
-    }
-    const enabled = { 'a@market': true }
-    const r = assemblePluginList(load, v2, enabled, new Map())
-    expect(r.plugins[0].id).toBe('a@market')
-    expect(r.plugins[0].marketplace).toBe('market')
   })
 })

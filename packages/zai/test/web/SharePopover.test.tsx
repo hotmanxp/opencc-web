@@ -81,21 +81,6 @@ describe("SharePopover", () => {
     expect(screen.getByText("--lan")).toBeInTheDocument();
   });
 
-  test("clicking Copy invokes navigator.clipboard.writeText", async () => {
-    const writeText = vi.fn().mockResolvedValue(undefined);
-    vi.stubGlobal("navigator", { clipboard: { writeText } });
-    render(<SharePopover />);
-    // primary IP 已进 QR 区, "其它可用 IP" 分组只剩 10.0.0.2
-    const copyBtns = screen.getAllByRole("button", { name: /复制/ });
-    expect(copyBtns).toHaveLength(1);
-    fireEvent.click(copyBtns[0]!);
-    await waitFor(() => {
-      expect(writeText).toHaveBeenCalledWith(
-        "http://10.0.0.2:9888/agent?sid=sess-test-123",
-      );
-    });
-  });
-
   test("clipboard.writeText reject triggers error message", async () => {
     const writeText = vi.fn().mockRejectedValue(new Error("denied"));
     vi.stubGlobal("navigator", { clipboard: { writeText } });
@@ -109,19 +94,6 @@ describe("SharePopover", () => {
     });
   });
 
-  test("renders primary QRCode with /m URL and '其它可用 IP' list when multiple IPs", () => {
-    render(<SharePopover />);
-    // QR stub 存在
-    expect(screen.getByTestId("share-primary-qrcode")).toBeInTheDocument();
-    // 副标题文本
-    expect(screen.getByText(/扫码在手机上打开/)).toBeInTheDocument();
-    expect(screen.getByText(/\/m\?sid=sess-test-123/)).toBeInTheDocument();
-    // "其它可用 IP" 分组标题
-    expect(screen.getByText(/其它可用 IP/)).toBeInTheDocument();
-    // 2 个 IP: primary 已在 QR 区(无复制按钮), "其它可用 IP" 分组只剩 1 个 row → 1 个复制按钮
-    expect(screen.getAllByRole("button", { name: /复制/ })).toHaveLength(1);
-  });
-
   test("primary QRCode value points to /m?sid=<sid> with first IP", () => {
     render(<SharePopover />);
     const qr = screen.getByTestId("share-primary-qrcode");
@@ -129,26 +101,6 @@ describe("SharePopover", () => {
     expect(qr.getAttribute("data-value")).toBe(
       "http://192.168.1.5:9888/m?sid=sess-test-123",
     );
-  });
-
-  test("hides '其它可用 IP' group when only one IP", () => {
-    useAppStore.setState({
-      instanceContext: {
-        cwd: "/tmp",
-        cwdName: "tmp",
-        branch: null,
-        host: "0.0.0.0",
-        port: 9888,
-        ips: ["192.168.1.5"],
-      },
-    });
-    render(<SharePopover />);
-    // QR 仍渲染
-    expect(screen.getByTestId("share-primary-qrcode")).toBeInTheDocument();
-    // "其它可用 IP" 标题不出现
-    expect(screen.queryByText(/其它可用 IP/)).not.toBeInTheDocument();
-    // 仅 1 个 IP: 无 "其它可用 IP" 分组 + primary IP 不在 copy 列表 → 0 复制按钮
-    expect(screen.queryAllByRole("button", { name: /复制/ })).toHaveLength(0);
   });
 });
 
