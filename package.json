@@ -6,9 +6,13 @@
   "workspaces": [
     "packages/*"
   ],
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
   "scripts": {
-    "build": "pnpm --filter @zn-ai/zn-agent-core run build && pnpm --filter @zn-ai/zai run build",
+    "build": "pnpm --filter @zn-ai/zn-agent-core run build && pnpm --filter @zn-ai/dsh-bridge run build && pnpm --filter @zn-ai/zai run build",
     "build:core": "pnpm --filter @zn-ai/zn-agent-core run build",
+    "build:bridge": "pnpm --filter @zn-ai/dsh-bridge run build",
     "build:zai": "pnpm --filter @zn-ai/zai run build",
     "build:web": "pnpm --filter @zn-ai/zai run build:web",
     "clean": "pnpm -r run clean",

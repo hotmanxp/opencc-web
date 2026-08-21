@@ -36,8 +36,9 @@
   ],
   "author": "ZN-AI",
   "license": "MIT",
+  "// engines (B0 T0.7)": "仓库级 engines 同步升至 ^22.19.0 || >=24.0.0 — dsh 模式硬约束。opencc 内核在 Node ≥22.19 下行为兼容（与 zn-agent-core 一起验证后合入）。",
   "engines": {
-    "node": ">=20"
+    "node": "^22.19.0 || >=24.0.0"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.52.0",
@@ -63,6 +64,7 @@
     "@codemirror/state": "^6.4.0",
     "@codemirror/view": "^6.30.0",
     "@zn-ai/zn-agent-core": "workspace:*",
+    "@zn-ai/dsh-bridge": "workspace:*",
     "adm-zip": "^0.5.16",
     "commander": "^12.1.0",
     "express": "^4.21.2",

@@ -10,6 +10,7 @@
 |----|------|------|
 | 语言 | TypeScript | ^5.6 |
 | 运行时 | Node(direct, tsx + bun-protocol) / Bun 可选(`dev:bun`) | Node >=20 |
+| 运行时(B0+ dsh) | dsh 内核要求 Node >=22.19 | 仓库级 engines 已升 |
 | zai 前端 | React + Zustand + AntD + Vite | 18.3 / 4.5 / 5.22 / 8.1 |
 | zai 服务端 | Express + SSE | ^4.21 |
 | zn-agent-core vendor | opencc 0.20.0(Bun 兼容(un-stripped)) | — |
@@ -21,8 +22,76 @@
 |------|------|
 | `packages/zai/` | `src/server/` 路由 + service,`src/web/` UI + store,`src/shared/` zod schema |
 | `packages/zn-agent-core/` | `compat/`(verbatim 移植的 zai 兼容垫片)+ `opencc-src/`(opencc 0.20.0 拷贝,Bun 兼容(un-stripped));`scripts/bundle-opencc.ts` 把 `src/bundle-entry.ts` 编成单一 `dist/opencc-core.mjs`(esbuild bundle)。**运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出**(2026-08-16 起废除全部 subpath);`dist/bundle-entry.d.ts` 由 `bundle-opencc.ts` 机械生成,与 bundle 同步 |
+| `packages/dsh-bridge/` | **B0 新增** — zai → deepseek-harness 桥接 workspace。详见下方「双轨改造 (dsh 内核集成)」段落 |
 | `docs/` | 设计/参考/操作指南;`docs/superpowers/specs/` 是各特性 spec,`docs/superpowers/plans/` 是实施计划 |
 | `examples/` `scripts/` | 示例 / 仓库脚本 |
+
+## 双轨改造 (dsh 内核集成 · B 方案)
+
+> **状态**：B0（基座与双轨骨架）已合入。B1-B7 见 `docs/superpowers/plans/2026-08-17-dsh-kernel-main-plan.md` 与 `2026-08-17-dsh-kernel-batch-*.md`。
+> **目标**：zai agent 内核从 opencc vendor 迁移到 deepseek-harness（`@deepseek-ai/dsh-*`），采用双轨并行 + 配置切换。
+
+### 轨道选择
+
+zai 同时支持两条 agent 内核轨道，由 `agent.kernel` 配置切换：
+
+| 轨道 | 包 | 何时使用 |
+|------|----|-----------|
+| `opencc`（默认） | `@zn-ai/zn-agent-core`（opencc 0.20.0 vendor 拷贝） | 现状默认；任何 Node 版本；行为零变化 |
+| `dsh` | `@zn-ai/dsh-bridge` + `@deepseek-ai/dsh-*` | 显式配置；要求 **Node >=22.19**；B0 桩抛 `NotImplementedError`，B1a 起逐步落地 |
+
+**配置**：
+
+```json
+// ~/.zai/settings.json   (用户级)
+{
+  "agent": { "kernel": "opencc" }   // 或 "dsh"
+}
+
+// <cwd>/.zai/settings.json (项目级 — 优先级 > 用户级)
+{
+  "agent": { "kernel": "dsh" }
+}
+```
+
+解析顺序：项目级 > 用户级 > 默认 `'opencc'`。非法值 fail loud（不静默回落）。
+
+### 引擎要求（B-1 + B0 T0.7）
+
+仓库根 `package.json.engines` 升至 `^22.19.0 || >=24.0.0`（B0 T0.7）：
+- **dsh 模式**：`createKernel` 启动前调 `nodeSupportsDsh()`，Node < 22.19 立即 fail loud 并给修复指引。
+- **opencc 模式**：在 Node ≥22.19 下行为兼容（验证 opencc 单测全绿）。
+
+### 数据隔离（双轨不互相污染）
+
+| 数据 | opencc 轨道 | dsh 轨道 |
+|------|-------------|----------|
+| 会话 | `${dataDir}/projects/<cwd>/<sessionId>.jsonl` | `${dataDir}/projects/<cwd>/dsh-sessions/<sessionId>/` |
+| 任务 | `~/.zai/tasks/<taskId>.json` | `~/.zai/tasks-dsh/<taskId>.json`（独立子目录） |
+| 插件/技能来源 | `~/.zai/plugins/`、`~/.agents/skills/` | 复用同一来源 |
+| 模型/凭据 | env + zai settings | 通过 zai 设置 → dsh `installModelSelection` |
+
+**禁止两轨共享同一文件** — B6 迁移工具是唯一允许跨格式读写的代码，且默认 dry-run。
+
+### 关键命令
+
+```bash
+pnpm --filter @zn-ai/dsh-bridge run typecheck    # dsh-bridge 类型检查
+pnpm --filter @zn-ai/dsh-bridge run build        # 编译 dsh-bridge（合入 zai 前必跑）
+pnpm --filter @zn-ai/dsh-bridge run test         # dsh-bridge 单测
+
+# zai 侧 kernel 相关测试
+pnpm --filter @zn-ai/zai test src/server/services/kernel/
+```
+
+### KernelAdapter 抽象
+
+`packages/zai/src/server/services/kernel/kernelAdapter.ts` 定义 `KernelAdapter` 接口；zai 服务层只依赖此接口，不 import 任何 vendor/dsh 符号。两条轨道各自实现 `createKernelKernelAdapter`：
+
+- `packages/zai/src/server/services/kernel/factories/opencc.ts`（B0 已交付，stub run/abort/patchTranscript）
+- `packages/zai/src/server/services/kernel/factories/dsh.ts`（B0 桩，B1a 替换为真实 dsh 长驻装配）
+
+工厂分叉：`createKernel({ cwd, dataDir, settings })` → 解析 `agent.kernel` → 引擎检查 → 动态 `import()` 对应轨道。
 
 ## 本机数据目录 `~/.zai/`
 

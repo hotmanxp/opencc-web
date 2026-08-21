@@ -82,11 +82,36 @@ export interface ZaiPermissions {
   defaultMode?: string
 }
 
+/**
+ * 内核选择 — 双轨改造（B0）开关。
+ *
+ * - 'opencc'（默认）：现有 opencc vendor 内核，行为零变化，保留为 kill switch。
+ * - 'dsh'：deepseek-harness 内核；要求 Node >= 22.19；动态 import 仅在
+ *   `agent.kernel === 'dsh'` 时解析，默认轨道不会触发 dsh 代码执行。
+ *
+ * 配置持久化即时，但内核实际切换必须重启 zai 服务（主计划 §4.1）— SSE 长连接
+ * 活跃时切内核会泄漏 globalThis 桥与未 flush 事件。
+ *
+ * 项目级覆盖层 `<cwd>/.zai/settings.json`（B0 T0.1）优先级 > 用户级
+ * `~/.zai/settings.json` > 默认 'opencc'。
+ */
+export type AgentKernel = 'opencc' | 'dsh'
+
 /** Shape of ~/.zai/settings.json. */
 export interface ZaiSettings {
   env?: Record<string, string>
   /** Global default (resolution chain layer 4). */
   model?: string
+  /**
+   * Agent 内核选择 — 双轨改造开关。
+   *
+   * 默认 'opencc'（兼容现状）；项目级 `<cwd>/.zai/settings.json` 优先级更高。
+   * 非法值 fail loud，不静默回落（避免误配导致 dsh 代码意外加载）。
+   * 详见 services/kernel/paths.ts + docs/superpowers/plans/2026-08-17-dsh-kernel-main-plan.md。
+   */
+  agent?: {
+    kernel?: AgentKernel
+  }
   /** Alias table powering the picker UI. */
   models?: ModelEntry[]
   /** Default permission mode surfaced in the Settings drawer. */
