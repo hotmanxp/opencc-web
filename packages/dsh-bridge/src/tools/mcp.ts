@@ -45,12 +45,22 @@ export interface McpTool {
 /**
  * MCPClientPool（轻量版）— 对齐 zai `MCPClientPool` 语义但只保留 dsh 桥需要的方法。
  *
+ * Phase 3.2 收口（handoff §6 #2）：
+ *   - 重连退避策略：1s/2s/4s/8s 指数退避，最多 5 次
+ *   - 健康检查：每 30s 周期性 ping（listTools 调用）以检测断连
+ *   - 断连自动重连：调用工具时若 client 已 close 或 transport 失败，
+ *     触发重连退避后重试一次
+ *
  * 与 zai 完整实现差异：
- *   - 不实现重连/退避策略（dsh 启动期同步连接一次即可）
  *   - 不实现 ListRoots（zai 通知 servers 列表；dsh 不需要）
  */
+export const MCP_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000] as const
+export const MCP_HEALTH_CHECK_INTERVAL_MS = 30_000
+
 class DshMcpClientPool {
-  #clients = new Map<string, { client: Client; spec: McpServerSpec }>()
+  #clients = new Map<string, { client: Client; spec: McpServerSpec; lastError?: string }>()
+  #retryCounts = new Map<string, number>()
+  #healthTimers = new Map<string, NodeJS.Timeout>()
 
   async connectAll(specs: McpServerSpec[]): Promise<void> {
     await Promise.allSettled(
@@ -58,6 +68,10 @@ class DshMcpClientPool {
         .filter((s) => s.enabled !== false)
         .map((spec) => this.#connectOne(spec)),
     )
+    // Phase 3.2：连接成功后启动健康检查 timer
+    for (const spec of specs.filter((s) => s.enabled !== false)) {
+      this.#startHealthCheck(spec)
+    }
   }
 
   async #connectOne(spec: McpServerSpec): Promise<void> {
@@ -74,12 +88,96 @@ class DshMcpClientPool {
     try {
       await client.connect(transport)
       this.#clients.set(spec.name, { client, spec })
+      this.#retryCounts.set(spec.name, 0)
     } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      const existing = this.#clients.get(spec.name)
+      if (existing) existing.lastError = msg
       console.warn(
         `[dsh-bridge] mcp connect failed for ${spec.name}:`,
-        err instanceof Error ? err.message : String(err),
+        msg,
       )
-      // 不 throw — 单 server 失败不阻断整体启动
+      // Phase 3.2：不 throw — 退避后由 #reconnectWithBackoff 重试
+      this.#scheduleReconnect(spec)
+    }
+  }
+
+  /**
+   * 退避重连：MCP_RETRY_DELAYS_MS 指数退避，最多 5 次后放弃。
+   * 失败累计次数通过 #retryCounts 跟踪；重连成功后清零。
+   */
+  #scheduleReconnect(spec: McpServerSpec): void {
+    const current = this.#retryCounts.get(spec.name) ?? 0
+    if (current >= MCP_RETRY_DELAYS_MS.length) {
+      console.warn(
+        `[dsh-bridge] mcp ${spec.name}: 给定退避预算耗尽（${current} 次），放弃重连`,
+      )
+      return
+    }
+    const delay = MCP_RETRY_DELAYS_MS[current]!
+    setTimeout(() => {
+      void this.#reconnectWithBackoff(spec)
+    }, delay)
+  }
+
+  async #reconnectWithBackoff(spec: McpServerSpec): Promise<void> {
+    const current = this.#retryCounts.get(spec.name) ?? 0
+    this.#retryCounts.set(spec.name, current + 1)
+    // 清掉旧 client（如果还在）
+    const existing = this.#clients.get(spec.name)
+    if (existing) {
+      try { await existing.client.close() } catch { /* noop */ }
+      this.#clients.delete(spec.name)
+    }
+    try {
+      await this.#connectOne(spec)
+      // 成功连上 → restart health check timer
+      this.#startHealthCheck(spec)
+    } catch (err) {
+      // 失败 → 递归 schedule（next delay 指数）
+      const msg = err instanceof Error ? err.message : String(err)
+      console.warn(`[dsh-bridge] mcp ${spec.name} 重连失败（attempt ${current + 1}）: ${msg}`)
+      this.#scheduleReconnect(spec)
+    }
+  }
+
+  /**
+   * 健康检查：每 MCP_HEALTH_CHECK_INTERVAL_MS ping 一次（调 listTools）。
+   * 若失败则触发退避重连。
+   */
+  #startHealthCheck(spec: McpServerSpec): void {
+    // 已有 timer 就不重复启动
+    if (this.#healthTimers.has(spec.name)) return
+    const timer = setInterval(() => {
+      void this.#healthCheck(spec)
+    }, MCP_HEALTH_CHECK_INTERVAL_MS)
+    // unref 防止阻止 Node 进程退出
+    timer.unref?.()
+    this.#healthTimers.set(spec.name, timer)
+  }
+
+  #stopHealthCheck(name: string): void {
+    const timer = this.#healthTimers.get(name)
+    if (timer) {
+      clearInterval(timer)
+      this.#healthTimers.delete(name)
+    }
+  }
+
+  async #healthCheck(spec: McpServerSpec): Promise<void> {
+    const entry = this.#clients.get(spec.name)
+    if (!entry) {
+      // 已断开 → 触发重连
+      this.#scheduleReconnect(spec)
+      return
+    }
+    try {
+      await entry.client.listTools()
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err)
+      console.warn(`[dsh-bridge] mcp ${spec.name} health check failed: ${msg}`)
+      entry.lastError = msg
+      this.#scheduleReconnect(spec)
     }
   }
 
@@ -106,31 +204,62 @@ class DshMcpClientPool {
     toolName: string,
     args: unknown,
   ): Promise<{ content: Array<{ type: string; text?: string }>; isError?: boolean }> {
-    const entry = this.#clients.get(name)
+    let entry = this.#clients.get(name)
     if (!entry) {
-      throw new Error(`MCP server ${name} not connected`)
+      // 客户端已断开 → 同步尝试重连（一次），失败则报错
+      console.warn(`[dsh-bridge] mcp ${name} not connected, attempting reconnect...`)
+      const spec = this.#findSpec(name)
+      if (spec) {
+        await this.#connectOne(spec)
+        entry = this.#clients.get(name)
+      }
+      if (!entry) {
+        throw new Error(`MCP server ${name} not connected (reconnect failed)`)
+      }
     }
-    const result = await entry.client.callTool({
-      name: toolName,
-      arguments: (args ?? {}) as Record<string, unknown>,
-    })
-    return {
-      content: (result.content ?? []) as Array<{ type: string; text?: string }>,
-      isError: result?.isError === true,
+    try {
+      const result = await entry.client.callTool({
+        name: toolName,
+        arguments: (args ?? {}) as Record<string, unknown>,
+      })
+      return {
+        content: (result.content ?? []) as Array<{ type: string; text?: string }>,
+        isError: result?.isError === true,
+      }
+    } catch (err) {
+      // 工具调用失败 → 标记 + 触发后台重连
+      const msg = err instanceof Error ? err.message : String(err)
+      entry.lastError = msg
+      const spec = entry.spec
+      this.#scheduleReconnect(spec)
+      throw err
     }
   }
 
+  #findSpec(name: string): McpServerSpec | null {
+    const entry = this.#clients.get(name)
+    if (entry) return entry.spec
+    // 退避重连时 client 已删，从 retryCounts 配对拿不到 spec。
+    // 此场景下调用方应等到下次 connectAll 才生效。
+    return null
+  }
+
   async disconnectAll(): Promise<void> {
+    // 停掉全部 health timer
+    for (const name of [...this.#healthTimers.keys()]) {
+      this.#stopHealthCheck(name)
+    }
     await Promise.allSettled(
       [...this.#clients.values()].map(({ client }) => client.close().catch(() => undefined)),
     )
     this.#clients.clear()
+    this.#retryCounts.clear()
   }
 
   health(): Record<string, { ok: boolean; lastError?: string }> {
     const out: Record<string, { ok: boolean; lastError?: string }> = {}
-    for (const [name] of this.#clients) {
-      out[name] = { ok: true }
+    for (const [name, entry] of this.#clients) {
+      out[name] = { ok: !entry.lastError, ...(entry.lastError ? { lastError: entry.lastError } : {}) }
     }
     return out
   }

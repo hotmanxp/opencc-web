@@ -62,6 +62,8 @@ export {
   listZaiMcpTools,
   mcpToolsToDshTools,
   registerMcpTools,
+  MCP_RETRY_DELAYS_MS,
+  MCP_HEALTH_CHECK_INTERVAL_MS,
   type McpServerSpec,
   type McpTool,
 } from './tools/mcp.js'

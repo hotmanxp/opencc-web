@@ -84,6 +84,18 @@ describe('Phase 3.1: createDshSubagentScope (dsh-scope 自实现)', () => {
   });
 });
 
+describe('Phase 3.2: MCP backoff + health check constants', () => {
+  it('MCP_RETRY_DELAYS_MS 是 5 步指数退避（1s/2s/4s/8s/16s）', async () => {
+    const { MCP_RETRY_DELAYS_MS } = await import('../src/index.js')
+    expect(MCP_RETRY_DELAYS_MS).toEqual([1000, 2000, 4000, 8000, 16000])
+  });
+
+  it('MCP_HEALTH_CHECK_INTERVAL_MS 默认 30 秒', async () => {
+    const { MCP_HEALTH_CHECK_INTERVAL_MS } = await import('../src/index.js')
+    expect(MCP_HEALTH_CHECK_INTERVAL_MS).toBe(30_000)
+  });
+});
+
 describe('Phase 1.2: Win32ShellExecutor + POSIX detectCwdChange', () => {
   describe('detectCwdChangePosix', () => {
     it('识别行首 cd <path>', () => {
