@@ -277,14 +277,17 @@ export function createBashTool(opts: BashToolOptions) {
         }
       }
 
-      // dsh-tools 推断的 schema 把 exitCode 视为 number | undefined；
-      // 我们返回 number | null，转成 undefined 兼容 schema。
+      // dsh-tools 的 snapshotJsonValue 拒绝 undefined 值(undefined
+      // 会让 walkJsonValue 返回 undefined → 整个对象被判 non-lossless →
+      // 抛 ToolOutputError('Bash', ['value is not lossless JSON']))。
+      // 因此省略 null 字段而不写 `?? undefined`。schema 把 exitCode/
+      // signal/taskId 都标 optional，省略即可。
       return {
         output: result.output,
         cwd: result.cwd,
-        exitCode: result.exitCode ?? undefined,
-        signal: result.signal ?? undefined,
         durationMs: result.durationMs,
+        ...(result.exitCode !== null ? { exitCode: result.exitCode } : {}),
+        ...(result.signal !== null ? { signal: result.signal } : {}),
         ...(result.taskId ? { taskId: result.taskId } : {}),
       }
     },

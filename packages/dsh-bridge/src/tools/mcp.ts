@@ -24,6 +24,8 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import { assertSupportedJsonSchema } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 
+import { mcpInputSchemaToParameterSpec } from './mcpSchema.js'
+
 export interface McpServerSpec {
   name: string
   command: string
@@ -356,12 +358,16 @@ export function mcpToolsToDshTools(
   mcpTools: McpTool[],
 ): Array<ReturnType<typeof defineTool>> {
   return mcpTools.map((mcp) => {
-    // MCP inputSchema 是任意 JSON Schema；cast 绕过 dsh-tools 的 InferObject 深度限制。
-    // 整个 defineTool 调用结果 as never，避开 dsh-tools 的递归推断。
+    // MCP inputSchema 是任意 JSON Schema；先转 dsh-tools 的 flat property map
+    // (Record<paramName, ValueSchemaSpec>),否则 dsh-tools
+    // parameterSchemaSpecToJsonSchema 会把顶层 'type' 当参数名并抛
+    // `parameters.type must be a value schema object`(见 mcpSchema.ts)。
+    // cast 绕过 dsh-tools 的 InferObject 深度限制。
+    const parameters = mcpInputSchemaToParameterSpec(mcp.inputSchema)
     return (defineTool as unknown as (def: unknown) => ReturnType<typeof defineTool>)({
       name: mcp.name,
       description: mcp.description,
-      parameters: mcp.inputSchema,
+      parameters,
       output: {
         schema: {
           type: 'object',
