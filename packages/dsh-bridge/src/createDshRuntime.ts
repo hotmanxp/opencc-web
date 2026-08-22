@@ -76,6 +76,8 @@ export async function createDshRuntime(
     import('@deepseek-ai/dsh-agent-loop'),
     import('@deepseek-ai/dsh-agent-default-model'),
     import('@deepseek-ai/dsh-session-persistence-jsonl'),
+    import('@deepseek-ai/dsh-shell'),
+    import('@deepseek-ai/dsh-user-approval'),
     import('@deepseek-ai/dsh-headless'),
   ])
 

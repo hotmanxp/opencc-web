@@ -6,6 +6,13 @@
  *
  * zai 的 skill 实现位于 compat/runtime/skills-* 与 compat/tools/opencc/SkillTool.ts，
  * 本任务跨这两处引用。
+ *
+ * **TODO（P1-3）真实实现**：调 `zai compat/runtime/skills-loader.ts` 的
+ * `loadSkillsFromDirs(cwd, ZAI_SKILLS_DIRS)` 拿到 skill 列表，每个 skill
+ * 包装为 defineTool 注册到 ctx.tools。条件激活通过 paths: frontmatter 匹配
+ * 在 execute() 内部判定。
+ *
+ * 预计工作量 0.5-1 天。
  */
 
 export interface ZaiSkill {

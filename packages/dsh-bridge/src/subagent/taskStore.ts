@@ -8,7 +8,14 @@
  *   共享 ~/.zai/tasks/<taskId>.json — 主计划 §4.2 R4）。
  * - <task-notification> 续传父 session 的语义用 dsh `agent/...` 事件对齐。
  *
- * B5 当前为接口契约；具体 dsh-subagent seam 接线在 B5 T5.1 真实实现。
+ * **TODO（P1-5）真实实现**：
+ * 1. 装载 `@deepseek-ai/dsh-subagent` 插件（未在当前 deps 中，需添加）
+ * 2. 创建子 agent 时调 `ctx.subagents.spawn({ sessionId, prompt, cwd, parentSession })`
+ * 3. 子 agent 的 SessionEvent 通过 dsh-session-persistence-jsonl 持久化到
+ *    dsh-sessions/<child-session-id>/
+ * 4. 父 session 收到 <task-notification> 时调 agent.followup
+ *
+ * 预计工作量 1-2 天。
  */
 
 import { join } from 'node:path'

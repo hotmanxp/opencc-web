@@ -129,14 +129,22 @@ export async function createDshKernelAdapter(
       return toAgentSession(opts.sessionId, opts.cwd)
     },
 
-    async listSessions(_opts): Promise<SessionMeta[]> {
-      // B1b T1.7：dsh 会话元信息从隔离目录读取（dsh-sessions/<sid>/）。
-      // 当前由 B3 T3.1 完整对齐（读 header.createdAt + cwd）。
-      return []
+    async listSessions(opts): Promise<SessionMeta[]> {
+      // B3 T3.1（部分实现）：从隔离目录扫描读取会话列表
+      const { listDshSessions } = await import('@zn-ai/dsh-bridge')
+      const metas = await listDshSessions(cfg.dataDir, opts.cwd)
+      return metas.map((m) => ({
+        sessionId: m.sessionId,
+        title: m.sessionId, // title 由 B3 T3.2 完整对齐（读 SessionHeader + 首条 prompt 摘要）
+        cwd: m.cwd,
+        createdAt: m.createdAt,
+        firstSeq: 0,
+      }))
     },
 
     async deleteSession(_opts) {
-      // B3 T3.1：删 dsh-sessions/<sid>/ 目录。
+      // B3 T3.1：删 dsh-sessions/<sid>/ 目录。当前 stub — 由 B3 deep-dive 实现。
+      void _opts
     },
 
     async *run(opts): AsyncIterable<ServerEvent> {
@@ -163,18 +171,24 @@ export async function createDshKernelAdapter(
     },
 
     async abort(opts) {
-      // B1b T1.6：调 agent.cancel()。
-      // dsh Agent 没有直接的 abort API ——通过 ctx.dispose 让 Cordis 走 cancel 路径。
-      // 当前为 stub：B1b T1.6 真实接线。
+      // B1b T1.6：调 agent.cancel() 实现 abort。
+      // 真实路径（dsh-agent Agent API）：
+      //   const agents = handle.ctx.get('agents') as { get?(id): Agent }
+      //   const agent = agents?.get?.(SessionId(opts.session.sessionId))
+      //   agent?.cancel({ kind: 'client_disconnect' })
+      // 当前为 stub —— dsh Agent API 文档不够清晰，标记 TODO P0-4。
       void opts
     },
 
     async patchTranscript(_opts) {
       // B3 T3.3：把 transcript 条目注入 dsh session。
+      // TODO B3 deep-dive: 通过 sessions.append() 或 agent.followup() 注入。
     },
 
-    async *readTranscript(_opts): AsyncIterable<TranscriptEntry> {
+    async *readTranscript(opts): AsyncIterable<TranscriptEntry> {
       // B3 T3.3：从 dsh session.events 重建 transcript。
+      // 当前 stub — 由 B3 deep-dive 实现。
+      void opts
     },
 
     onAsk(cb) {
@@ -191,8 +205,15 @@ export async function createDshKernelAdapter(
       return () => { stateSubscribers.delete(cb) }
     },
 
-    async enqueue(_opts) {
-      // B5 阶段：把 prompt 塞入 session inbox。
+    async enqueue(opts) {
+      // B5 阶段（部分实现）：把 prompt 塞入 session inbox。
+      // 真实路径（dsh Agent inbox API）：
+      //   const sessionId = SessionId(opts.session.sessionId)
+      //   const agents = handle.ctx.get('agents') as { get?(id): Agent }
+      //   const agent = agents?.get?.(sessionId)
+      //   agent?.inbox.enqueue(createUserMessage({...}))
+      // 当前 stub —— B5 deep-dive 补齐。
+      void opts
     },
 
     metrics,

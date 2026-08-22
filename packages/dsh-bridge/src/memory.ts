@@ -8,6 +8,16 @@
  *
  * 在 dsh 侧通过 dsh-system-prompt 装配时注入 memory 内容。
  * 双轨 memory watcher 只在激活轨道启动（initAgentRuntime 按 agent.kernel 分支）。
+ *
+ * **TODO（P2-1）真实实现**：
+ * 1. 调 zai `compat/memory/memory-loader.ts` 的 `loadMemory(cwd)`
+ *    拿到 agentsMd / rules / hasExternalIncludes
+ * 2. 通过 `ctx.systemPrompt.section()` 注册 provider，把 agentsMd 注入
+ *    dsh 系统提示装配链
+ * 3. 启动文件 watcher，热重载时调用 ctx.systemPrompt.invalidate()
+ * 4. hasExternalIncludes 告警通过 ctx.emit('toast', { level: 'warn' })
+ *
+ * 预计工作量 1 天。
  */
 
 export interface ZaiMemoryState {

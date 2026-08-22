@@ -6,6 +6,16 @@
  * `listSessions` / `resumeSession` 从该目录重建 SessionMeta。
  *
  * 与 opencc 轨道不互读 — 数据隔离是 B0-B7 不变量（主计划 §4.2）。
+ *
+ * **TODO（P0-3）真实实现**：
+ * 1. 装载 `@deepseek-ai/dsh-session-persistence-jsonl` 插件到 dsh-bridge
+ *    （当前在 deps 中但未在 createDshRuntime.ts 中装载）
+ * 2. 调 `sessions.flush(agent.session)` 把事件溯源 log 写到
+ *    `${dataDir}/projects/<cwd>/dsh-sessions/<sessionId>/`
+ * 3. listSessions 真实读该目录（当前已实现文件扫描）
+ * 4. readDshSessionHeader 真实读 session.log 第一行
+ *
+ * 预计工作量 0.5-1 天。
  */
 
 import { readdir, stat } from 'node:fs/promises'

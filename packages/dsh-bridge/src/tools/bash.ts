@@ -6,6 +6,12 @@
  *
  * dsh-shell 提供 `ctx.shell` 服务；本模块在 bridge 层对齐 zai 的 bash 行为
  * （cwd 跟踪、后台任务通知）。
+ *
+ * **TODO（P0-1）真实实现**：当前为 stub — `execute()` 返回元数据而非真实执行。
+ * 真实路径需 subclass `ShellExecutor`（dsh-shell）并实现 POSIX provider。
+ * dsh 上游未发布 POSIX provider；需自实现或 port `dsh-subprocess-local`
+ * （packages/dsh-bridge/node_modules 中未安装，需评估是否引入）。
+ * 预计工作量 1-2 天。
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -43,11 +49,11 @@ export function createBashTool(opts: BashToolOptions): BashTool {
       required: ['command'],
     },
     async execute(input, _ctx) {
+      // TODO(P0-1): 替换为 dsh-shell executeCommand 真实调用。当前 stub 仅返回元数据。
       const cmd = (input as { command: string }).command
-      // 当前 stub：B2 T2.2 真实接线 dsh-shell executeCommand。
       void opts
       void _ctx
-      return { command: cmd, cwd: opts.cwd }
+      return { command: cmd, cwd: opts.cwd, _stub: true }
     },
   }
 }

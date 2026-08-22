@@ -5,6 +5,16 @@
  * 插件内的 hooks / commands / skills 定义经桥注册进 dsh ctx。
  *
  * 优先评估 dsh `hooks/` 包（wire protocol）映射 zai 插件 hooks。
+ *
+ * **TODO（P1-6）真实实现**：
+ * 1. 解析 `~/.zai/plugins/installed_plugins.json`（V2 schema）
+ * 2. 对每个 plugin 的 hooks/commands/skills：
+ *    - hooks → ctx.on('agent/...') 监听器
+ *    - commands → ctx.tools.register(defineTool) 注册
+ *    - skills → loadZaiSkills + skillsToTools（参考 B2 T2.4）
+ * 3. 插件热卸载：通过 Cordis plugin.dispose 移除监听器
+ *
+ * 预计工作量 1 天。
  */
 
 export interface ZaiPluginHook {

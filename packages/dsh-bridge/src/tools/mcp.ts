@@ -6,8 +6,13 @@
  *
  * 连接语义沿用「按需连接，不阻塞启动」(对齐 zai connectMcp:false 现状)。
  *
- * 注意：dsh MCP 包 (dsh-mcp) 存在性待 B-1 尖峰确认；当前为 zai-side MCP
- * 桥接 stub，B2 T2.3 真实实现走 zai MCPClientPool。
+ * **TODO（P0-2）真实实现**：dsh 上游未提供 dsh-mcp 包；本模块需自实现 MCP provider：
+ * 1. 子类化 ctx.tools.register 的 ToolRuntime 插件
+ * 2. 调 zai MCPClientPool.listAllTools(cwd) 拉取工具列表
+ * 3. 把每个工具包装为 defineTool 调用 ctx.tools.register
+ * 4. 实现 permission-matcher 对齐 zai approveRegistry
+ *
+ * 预计工作量 1-2 天。
  */
 
 import type { Context } from '@deepseek-ai/cordis'

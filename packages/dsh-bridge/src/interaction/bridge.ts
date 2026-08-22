@@ -13,6 +13,15 @@
  *
  * B4 T4.1 当前：定义接口 + 类型；T4.2/T4.3/T4.4 阶段分别实现 approval /
  * askUser / permissionMode。
+ *
+ * **TODO（P1-4）真实实现**：
+ * 1. 装载 `@deepseek-ai/dsh-user-approval` 插件
+ * 2. 在 dsh ctx 上订阅 `tools/pre-execute` 事件，调用 ApprovalBridge.request
+ * 3. ApprovalBridge.request 调 zai `approveRegistry.register` + emit
+ *    `prompt.approve` ServerEvent
+ * 4. zai 前端 /api/agent/approve 回调时 resolve ApprovalBridge 等待中的 Promise
+ *
+ * 预计工作量 2 天。
  */
 
 export interface ApprovalRequest {
