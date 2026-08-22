@@ -33,6 +33,7 @@ import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
 import { join } from 'node:path'
 import { JsonlSessionPersistence } from '@deepseek-ai/dsh-session-persistence-jsonl'
+import { SubagentRuntime } from '@deepseek-ai/dsh-subagent'
 
 import { DSH_KERNEL, type KernelId } from './paths.js'
 import { dshSessionsRootAbs } from './sessions/store.js'
@@ -284,6 +285,12 @@ export async function createDshRuntime(
     import('@deepseek-ai/dsh-shell'),
     import('@deepseek-ai/dsh-user-approval'),
     import('@deepseek-ai/dsh-fs'),
+    // dsh-subagent 上游 SubagentRuntime(`ctx.subagents.start('spawn', req)`) —
+    // Phase 4 改造让 spawnDshSubagent 走上游 `start()` 而不是自实现
+    // `agents.create()`,保证 `subagent/start` / `subagent/end` 生命周期事件
+    // + `run.result` Promise + `run.dispose()` 由上游托管。
+    import('@deepseek-ai/dsh-subagent'),
+    import('@deepseek-ai/dsh-subagent-spawn-in-process'),
   ])
 
   const handle: DshRuntimeHandle = {
@@ -365,6 +372,28 @@ export async function createDshRuntime(
           model: opts.defaultModel || firstModelId,
         },
       })
+
+      // 4.5 Phase 4: dsh-subagent 上游 SubagentRuntime + spawn provider。
+      //
+      // 装载 SubagentRuntime (cordis Service 形态) — `ctx.subagents` 暴露
+      // `start('spawn', req)` / `startContinuable` / `followup` / `interrupt`
+      // / `reportFrom` 等完整生命周期 API。spawnDshSubagent 改走
+      // `start('spawn', req)`,由上游托管 `subagent/start` /
+      // `subagent/end` 事件 + `run.result` Promise + `run.dispose()` —
+      // 之前自实现绕开 `SubagentRuntime` 直接调 `agents.create()`,导致
+      // 父子 turn 解耦不完整(完成事件只能通过 `<task-notification>` 注
+      // 入 idle parent session,等下次 turn 才被消费 — 用户报"subagent
+      // 一直没返回直到再次提问")。
+      //
+      // 然后调 `dsh-subagent-spawn-in-process` 的 `apply(ctx, config)`
+      // 注册名为 'spawn' 的 provider。spawn provider 是 in-process 后端:
+      // 在同 ctx 上 `ctx.agents.create()` 起 child session(自带独立
+      // scope / system prompt / 零父 context)。`inheritsParentContext:
+      // false` — 与当前 dsh-bridge 行为一致(子 agent 不继承父 prompt
+      // history,只通过 setup metadata 拿 cwd / provider / model)。
+      await ctx.plugin(SubagentRuntime)
+      const { apply: applySpawnProvider } = await import('@deepseek-ai/dsh-subagent-spawn-in-process')
+      applySpawnProvider(ctx, { providerName: 'spawn' })
 
       // 5. 等待全部 plugin 完成挂载。
       await ctx.get('loader')?.await()

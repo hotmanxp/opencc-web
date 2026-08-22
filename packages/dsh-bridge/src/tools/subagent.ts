@@ -118,10 +118,12 @@ export function createAgentTool(opts: AgentToolOptions) {
     name: 'Agent',
     description:
       'Launch a new agent to handle a complex, multi-step task autonomously. ' +
-      'The subagent always runs in the background in dsh mode — this call returns ' +
-      'a task ID immediately. You will be notified via <task-notification> in a later ' +
-      'turn when the subagent finishes. Use subagent_control to send messages or ' +
-      "interrupt this task. subagent_type defaults to 'general-purpose' in dsh mode (Phase 1).",
+      'By default (`run_in_background=true`) the subagent runs asynchronously and this ' +
+      'call returns a task ID immediately — you will be notified via <task-notification> ' +
+      'in a later turn when it finishes. If you set `run_in_background=false`, this call ' +
+      'blocks until the subagent completes (synchronous mode, used when you need the result ' +
+      'before continuing). Use subagent_control to send messages or interrupt a running ' +
+      "task. subagent_type defaults to 'general-purpose' in dsh mode (Phase 1).",
     parameters: {
       description: {
         type: 'string',
@@ -258,6 +260,9 @@ export function createAgentTool(opts: AgentToolOptions) {
       })
 
       if (a.run_in_background) {
+        // **异步模式** (Phase 4 保留):立刻返回 running,父 turn end 后
+        // 子 agent 仍继续跑;完成后通过 `<task-notification>` 注入父
+        // session inbox,等下次 turn 被消费(用户在 UI 再次提问触发)。
         return {
           output: `Subagent ${handle.taskId} spawned in background. ` +
             `You will be notified via <task-notification> when it finishes. ` +
@@ -267,27 +272,33 @@ export function createAgentTool(opts: AgentToolOptions) {
         }
       }
 
-      // dsh-017 修订：Agent 工具在 dsh 模式**强制 run_in_background=true**。
-      // 原因:
-      //   1. dsh-subagent 是独立 dsh Agent,跑独立 session + 独立 scope,
-      //      与父 agent 异步 — 等同 zai 风格的"后台任务"
-      //   2. dsh 0.1.0-rc.8 已知 dsh-scope binding bug,即使父 session
-      //      fresh 也会随机失败(同一 parentScopeKey 对象被重复 bind)。
-      //      改成后台让 LLM turn 立即结束,scope 失败只影响子 agent
-      //      启动,不影响父 agent 继续走
-      //   3. TaskDock UI 立即看到子 agent 任务(同 bash 后台任务机制)
-      //   4. 子 agent 完成时通过 `<task-notification>` 自动注入父
-      //      session 下一轮 turn(已在 spawnDshSubagent 内部实现)
+      // **同步模式** (Phase 4 新增,DSH 0.1.0-rc.8 走上游 SubagentRuntime):
+      // await handle.promise,父 turn 阻塞到子 agent 完成 → SubagentRun.result
+      // → 映射成 DshTaskState → 包装成 done/failed/cancelled 返回。
+      // 父 turn 自然 end 前拿到结果(无需重启 turn),对齐 opencc vendor
+      // TaskOutputTool 的 waitForTaskCompletion 语义。
       //
-      // LLM 传的 `run_in_background` 字段在 dsh 模式下**忽略** — 永远
-      // 走后台。Phase 2 修 dsh-scope bug 后可放开让 LLM 选。
-      return {
-        output:
-          `Subagent ${handle.taskId} spawned in background. ` +
-          `You will be notified via <task-notification> in a later turn when it finishes. ` +
-          `Use subagent_control to send messages or interrupt this task.`,
-        taskId: handle.taskId,
-        status: 'running' as const,
+      // 上游 dsh-subagent 在 0.1.0-rc.8 已经把 dsh-scope 父子隔离托管在
+      // SubagentRuntime.start() 内部,dsh-017 之前"强制 run_in_background=true
+      // 避开 dsh-scope binding bug"的根因已不存在 — LLM 现在可以自由选
+      // 同步 / 异步。
+      try {
+        const finalState = await handle.promise
+        return {
+          output: formatTaskResult(finalState),
+          taskId: handle.taskId,
+          status: finalState.status,
+        }
+      } catch (err) {
+        // handle.promise 由 spawnDshSubagent 内部包装 — promise 本身永不
+        // reject(失败时 resolve 成 status='failed'),只有基础设施故障才
+        // 走到这里。降级到 failed 让 LLM 能看到错误。
+        const message = err instanceof Error ? err.message : String(err)
+        return {
+          output: `[error] subagent ${handle.taskId} crashed: ${message}`,
+          taskId: handle.taskId,
+          status: 'failed' as const,
+        }
       }
     },
   })

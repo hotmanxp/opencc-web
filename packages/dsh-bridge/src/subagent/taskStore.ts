@@ -1,28 +1,30 @@
 /**
- * dsh 子 agent / 后台任务桥 — P1-5（真实化）+ Phase 3.1（dsh-scope 自实现）。
+ * dsh 子 agent / 后台任务桥 — Phase 4（dsh-subagent 上游 SubagentRuntime 收口）。
  *
- * 设计：把 zai BackgroundRuntime 的语义映射到 dsh 子 agent。每次 spawn 启动
- * 一个新 dsh Agent（独立 session + 独立 ScopedLayers scope），父 agent 在
- * child 完成时通过 ctx.on('session/event') 监听 child session 的 turn/end
- * 事件并通知父 agent.followup(<task-notification>)。
+ * 历史背景：
+ *   - P1-5（真实化）：直接 `ctx.agents.create()` 起独立 child session + 显式
+ *     dsh-scope 父子隔离。父 agent 通过 `parentAgent.followup(<task-notification>)`
+ *     注入续传。
+ *   - Phase 3.1：用 dsh-scope `createScope` 自实现父子 ScopedLayers 链。
+ *   - **Phase 4（本次）**：改走 dsh 上游 `SubagentRuntime.start('spawn', req)`。
+ *     上游托管 `subagent/start` / `subagent/end` 生命周期事件 + `run.result`
+ *     Promise + `run.dispose()` 释放路径,不再绕过去实现父子 turn 解耦。
  *
- * 任务持久化走**独立 namespace**：`~/.zai/tasks-dsh/<taskId>.json`（禁止与
- * opencc 共用 `~/.zai/tasks/<taskId>.json` — 主计划 §4.2 R4）。
+ * 关键差异：
+ *   - 上游 `SubagentRun.result` 是 `Promise<SubagentResult>` (永不 reject,
+ *     失败 resolve 成 `stopReason: 'error'`)。 我们 `.then()` 映射成
+ *     `DshTaskState` + 触发 zai-side `onTaskFinish` sink。
+ *   - 上游 `run.dispose()` 替代我们手写的 `agent.cancel()` + 清理逻辑。
+ *   - spawn provider (`@deepseek-ai/dsh-subagent-spawn-in-process`) 走
+ *     `inheritsParentContext: false` — 子 agent 不继承父 prompt history。
+ *     cwd / provider / model 通过 `agentOptions` 注入。
  *
- * **Phase 3.1 收口**：
- *   - dsh-subagent 包未发布（上游不存在，handoff §6 #1 确认）— 用 dsh-scope
- *     的 `createScope(key, { parent })` 建立父子 scope,内部统一调
- *     bindScopeParent 一次(避免重复 bind 报"scope key is already bound")。
- *   - 父子 agent 的 cwd/model 同步：父 ctx 的元数据通过 setup callback 注入
- *     child agentCtx（已实现）。
- *   - 子 agent 完成通知父 session 走 `<task-notification>` 续传（zai 语义）。
+ * 任务持久化仍走**独立 namespace**：`~/.zai/tasks-dsh/<taskId>.json`
+ * （与 opencc `~/.zai/tasks/<taskId>.json` 隔离,主计划 §4.2 R4）。
  *
- * **dsh-018 修复**:
- *   - 之前 `createDshSubagentScope` 显式调 bindScopeParent + createScope
- *     (内部也调 bindScopeParent) — 第二次 bind 抛
- *     "scope key is already bound to a parent" 错误。
- *   - 删掉显式 bind,只用 createScope。WeakMap 用 childKey 做弱引用,
- *     同一 taskId 不会重 bind(每次 spawn 都有新 taskId)。
+ * 工具调用历史（`toolCalls`）累积 — 通过订阅 child session 的
+ * `tool/call` + `tool/result` 事件,500ms debounce 写盘。Phase 3 P0-A
+ * 已实现,Phase 4 沿用同样机制。
  */
 
 import { join } from 'node:path'
@@ -32,22 +34,15 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { createScope } from '@deepseek-ai/dsh-scope'
+import { SubagentRuntime, type SubagentRun, type SubagentResult } from '@deepseek-ai/dsh-subagent'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 
 /**
- * 子 agent 工具调用条目 — Phase 3 P0-A。
+ * 子 agent 工具调用条目 — Phase 3 P0-A 沿用。
  *
- * 记录 subagent 自己的 session 中每个 tool/call + tool/result 事件对。
- * 写入 ~/.zai/tasks-dsh/<taskId>.json 的 `toolCalls` 字段,SubagentDetailDrawer
- * 渲染此字段给用户看(subagent 内部跑了哪些工具、各自的输入/输出)。
- *
- * 设计原则:
- *   - 用 `callId` 作为关联 key,tool/call 与 tool/result 一一对应。
- *   - tool/call 来了立即 push(running);tool/result 来了 update。
- *   - error 字段:从 SessionEvent 'tool/result' 的 `error: { name, code }` 取,
- *     透传给前端展示(错误工具 → 红色 badge)。
- *   - input/output 保留 raw 形态(模型给的 JSON 字符串 / dsh-side 工具的
- *     ToolResultMessage);前端按需 formatToolInput 渲染。
+ * spawnDshSubagent 在 `run` 拿到后通过 `ctx.on('session/event')` 订阅 child
+ * session 的 tool/call + tool/result,累积到这里,500ms debounce 写盘。
+ * SubagentDetailDrawer 渲染此字段给用户看。
  */
 export interface ToolCallEntry {
   callId: string
@@ -71,22 +66,31 @@ export interface DshTaskState {
   result?: unknown
   error?: string
   /**
-   * Phase 3 P0-A: 子 agent 自己的工具调用历史。
-   * spawnDshSubagent 在 followup 后订阅 session/event,把每个
-   * tool/call + tool/result 写到这里。writeDshTask 按 500ms debounce
-   * 落盘,避免频繁 I/O(单 turn 可能 10+ 次工具调用)。
-   */
+     * Phase 3 P0-A: 子 agent 自己的工具调用历史。
+     * spawnDshSubagent 在订阅 session/event 后累积到此字段。
+     */
   toolCalls?: ToolCallEntry[]
 }
 
 const DSH_TASKS_DIR = join(homedir(), '.zai', 'tasks-dsh')
 
+/**
+ * 延迟获取 DSH tasks 目录路径 — 让单测能通过 mock `homedir()`
+ * 在 beforeEach 里设新值后,所有 taskStore 操作仍走最新路径。
+ *
+ * 不能用模块顶层常量(import 时 frozen,后续 mock 改动不会反映)。
+ * 也不缓存函数结果 — 每次调用都重读 `homedir()`,测试 setup 改 home 立即生效。
+ */
+function dshTasksDir(): string {
+  return join(homedir(), '.zai', 'tasks-dsh')
+}
+
 export function dshTaskPath(taskId: string): string {
-  return join(DSH_TASKS_DIR, `${taskId}.json`)
+  return join(dshTasksDir(), `${taskId}.json`)
 }
 
 async function ensureDshTasksDir(): Promise<void> {
-  await mkdir(DSH_TASKS_DIR, { recursive: true })
+  await mkdir(dshTasksDir(), { recursive: true })
 }
 
 export async function readDshTask(taskId: string): Promise<DshTaskState | null> {
@@ -132,33 +136,185 @@ export interface SubagentNotification {
 }
 
 /**
- * 子 agent scope — 通过 dsh-scope `createScope` + `bindScopeParent` 建立
- * 父子 ScopedLayers 链。返回带 `dispose` 的 child ctx；调用方负责回收。
+ * `ctx.subagents` 是 cordis 模块增强 + dsh-subagent 上游注册 — zai-side
+ * 不再需要自实现父子 scope（之前 Phase 3.1 的 `createDshSubagentScope`
+ * 已被上游托管）。
  *
- * Phase 3.1 新增：此前 spawnDshSubagent 直接用父 ctx.agents.create，scope
- * 继承靠 dsh-agent 内部机制；本函数显式走 dsh-scope 原语，让 ScopedLayers
- * 链（工具层 / 权限层）在 child 维度上可被精细管理。
+ * Phase 4 兼容性：保留 export 名 `createDshSubagentScope`，但函数体改为
+ * 直接 return `{ ctx, dispose: () => {} }` —— 旧调用方拿到 stub 就够
+ * （已经走 `subagents.start()`，不再用 createScope 自己隔离）。
  */
 export function createDshSubagentScope(
-  parentCtx: Context,
-  opts: { parentScopeKey: object; childScopeKey: object },
+  _parentCtx: Context,
+  _opts: { parentScopeKey: object; childScopeKey: object },
 ): { ctx: Context; dispose: () => void } {
-  // dsh-018 修复:createScope 内部**已经**调 bindScopeParent(key, options.parent),
-  // 我们之前显式调一次会触发 "scope key is already bound" 错误(因为
-  // 第二次 bind 时 WeakMap.has(key) === true)。这里只调 createScope,
-  // 让它内部统一 bind 一次。
-  const scope = createScope(parentCtx, opts.childScopeKey, { parent: opts.parentScopeKey })
-  return { ctx: scope.ctx, dispose: scope.dispose }
+  // Phase 4 stub — dsh-subagent 上游 `SubagentRuntime.start('spawn', req)`
+  // 内部已用 dsh-scope 的 `bindScopeParent` 自动建立父子 scope 链。
+  // dsh-bridge 不再需要显式 createScope。保留 export 名以兼容旧调用方。
+  const stubCtx = _parentCtx
+  return {
+    ctx: stubCtx,
+    dispose: () => {
+      // no-op — 子 agent 由 SubagentRuntime 托管,scope 生命周期跟 `run` 绑定
+    },
+  }
 }
 
 /**
- * 子 agent spawn — 创建 child dsh Agent 并执行 prompt。
+ * Phase 4:把 `SubagentResult.stopReason` 映射到 `DshTaskState.status`。
  *
- * 子 agent 继承父 agent 的 cwd（通过 setup 注入）和 model（用 agentOptions）。
- * 任务文件写入时立即 emit taskId，父 agent 可通过 taskId 订阅进度事件。
+ * 上游 `SubagentRun.result` 永不 reject,所以这里不处理 reject 分支
+ * （reject 只在基础设施故障时发生,会直接冒泡到 spawn 调用方）。
+ */
+function mapStopReasonToStatus(
+  stopReason: SubagentResult['stopReason'],
+): DshTaskState['status'] {
+  switch (stopReason) {
+    case 'completed':
+      return 'done'
+    case 'aborted':
+      return 'cancelled'
+    case 'error':
+    case 'max-tokens':
+    case 'refusal':
+      return 'failed'
+    default:
+      // 上游 SubagentStopReasonMap 是 merge-extensible — 未知 variant 视为 failed
+      return 'failed'
+  }
+}
+
+/**
+ * Phase 4:`SubagentResult.output` 是 `ContentBlock[]`,转成 LLM 友好的纯文本。
+ * 给 `<task-notification>` 注入父 session 用。
+ */
+function formatOutputForLlm(output: ContentBlock[]): string {
+  if (output.length === 0) return ''
+  return output
+    .map((block) => {
+      if (block.type === 'text') {
+        const t = (block as { text?: unknown }).text
+        return typeof t === 'string' ? t : ''
+      }
+      return `[${String(block.type)} block]`
+    })
+    .filter((s) => s.length > 0)
+    .join('\n')
+}
+
+/**
+ * 订阅 child session 的 tool/call + tool/result 事件,累积到 toolCalls 缓冲。
+ * debounced 写盘,避免单 turn 10+ 工具调用导致频繁 I/O。
  *
- * Phase 3.1：scope 隔离走 `createDshSubagentScope`（基于 dsh-scope），
- * 不再依赖 dsh-agent 内部隐式 scoping。
+ * Phase 4 调整:上游 `SubagentRun.localAgent` 是 in-process 子 agent
+ * (远端 provider 时为 undefined),用它的 session seq 过滤事件
+ * (与 `run.ts:95-127` 同款模式)。
+ */
+function subscribeChildSessionToolCalls(
+  ctx: Context,
+  childAgent: Agent,
+  taskId: string,
+  toolCalls: ToolCallEntry[],
+): () => void {
+  // firstSeq 记在订阅后 (loader 装载阶段产生的早期事件不关心)
+  const firstSeq = childAgent.session.seq
+  let dirty = false
+  let flushTimer: NodeJS.Timeout | null = null
+
+  const flushToolCalls = async (): Promise<void> => {
+    if (!dirty) return
+    dirty = false
+    const current = await readDshTask(taskId).catch(() => null)
+    if (!current) return
+    current.toolCalls = toolCalls.slice()
+    await writeDshTask(current).catch((err) => {
+      console.warn(`[dsh-bridge] spawnDshSubagent ${taskId} flush toolCalls failed:`, err)
+    })
+  }
+  const scheduleFlush = (): void => {
+    if (flushTimer) return
+    flushTimer = setTimeout(() => {
+      flushTimer = null
+      void flushToolCalls()
+    }, 500)
+  }
+
+  const off = ctx.on(
+    'session/event',
+    (evSession: { id?: unknown }, ev: { type?: unknown; seq?: unknown; data?: unknown }) => {
+      // 过滤非子 session 事件 — 父 session 也广播,需精确匹配
+      const sessId = evSession?.id
+      if (sessId !== undefined && String(sessId) !== String(childAgent.session.id)) return
+      if (typeof ev.seq !== 'number' || ev.seq < firstSeq) return
+      const data = (ev.data ?? {}) as Record<string, unknown>
+      if (ev.type === 'tool/call') {
+        const callId = String(data.callId ?? '')
+        if (!callId) return
+        toolCalls.push({
+          callId,
+          toolName: String(data.name ?? 'tool'),
+          input: data.arguments, // 模型给的 raw JSON 字符串
+          status: 'running',
+          ts: Date.now(),
+        })
+        dirty = true
+        scheduleFlush()
+      } else if (ev.type === 'tool/result') {
+        const message = data.message as
+          | {
+              source?: { kind?: unknown; callId?: unknown }
+              content?: Array<{ toolCallId?: unknown; content?: unknown; isError?: unknown }>
+            }
+          | undefined
+        const callId = String(
+          message?.source?.callId
+          ?? message?.content?.[0]?.toolCallId
+          ?? '',
+        )
+        if (!callId) return
+        const idx = toolCalls.findIndex((t) => t.callId === callId)
+        if (idx >= 0) {
+          const entry = toolCalls[idx]!
+          const resultBlock = message?.content?.[0]
+          entry.output = resultBlock?.content
+          entry.status = data.error ? 'error' : resultBlock?.isError ? 'error' : 'done'
+          entry.durationMs = Date.now() - entry.ts
+          if (data.error) {
+            entry.error = data.error as { name: string; code: string }
+          }
+        }
+        dirty = true
+        scheduleFlush()
+      }
+    },
+  ) as unknown as () => void
+
+  return () => {
+    try { off() } catch { /* ignore */ }
+    if (flushTimer) {
+      clearTimeout(flushTimer)
+      flushTimer = null
+    }
+    void flushToolCalls()
+  }
+}
+
+/**
+ * 子 agent spawn — **Phase 4 改造**:走 dsh 上游 `SubagentRuntime.start('spawn', req)`。
+ *
+ * 关键不变量:
+ *   - 上游托管 `subagent/start` / `subagent/end` 生命周期事件,
+ *     父子 turn 解耦完整。
+ *   - 子 agent 工具调用历史累积沿用 Phase 3 P0-A 模式(订阅 session/event)。
+ *   - 子 agent 完成后通过 `parentAgent.followup(<task-notification>)` 注入
+ *     父 session inbox,等下次 turn 被消费(run_in_background=true 时,
+ *     父 turn 已 end,所以依赖用户后续提问触发新 turn)。
+ *   - 同步模式(`run_in_background=false` 调用方 await `promise`)时父 turn
+ *     立即拿到 `done` 结果,无需重启 turn。
+ *
+ * 返回 `agent: Agent | undefined`:上游远端 provider 时 localAgent 是 undefined
+ * (rare case,目前 dsh-subagent-spawn-in-process 总是 in-process,
+ * localAgent 有值)。
  */
 export async function spawnDshSubagent(
   ctx: Context,
@@ -168,39 +324,21 @@ export async function spawnDshSubagent(
     prompt: string
     cwd: string
     model?: string
-    /**
-     * Phase 3 P0-A+ B1: provider profile name — 子 agent 必须有 provider 才能
-     * 调 LLM (dsh-014 修复同样问题)。父 agent 用的 provider 应传给子
-     * agent(默认 'anthropic' — zai dsh factory 当前配置)。
-     */
     provider?: string
     taskId?: string
   },
-): Promise<{ taskId: string; agent: Agent; promise: Promise<DshTaskState> }> {
+): Promise<{
+  taskId: string
+  agent: Agent | undefined
+  promise: Promise<DshTaskState>
+  dispose: () => Promise<void>
+}> {
   const taskId = opts.taskId ?? `dsh-task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
-  const childSessionId = `${taskId}-session`
-  // Phase 3.1：显式 scope key（子 agent 维度），让 ScopedLayers 能区分父子。
-  // dsh-scope 要求 scopeKey 是 object（用作 WeakMap key），用 plain object 包装字符串。
-  const parentScopeKey = { kind: 'parent' as const, sessionId: opts.parentSessionId ?? 'root' }
-  const childScopeKey = { kind: 'subagent' as const, taskId }
 
-  const agents = ctx.get('agents') as
-    | {
-        create: (opts: {
-          sessionId: SessionId
-          meta?: { cwd?: string }
-          agentOptions?: { provider?: string; model?: string; maxTokens?: number }
-          setup?: (agentCtx: Context) => unknown
-        }) => Promise<{ agent: Agent }>
-      }
-    | undefined
-  if (!agents) {
-    throw new Error('[dsh-bridge] spawnDshSubagent: agents service unavailable')
-  }
-
+  // 1. 写盘 initial state (sessionId 暂时占位 'pending',start() 后回填)
   const initialState: DshTaskState = {
     taskId,
-    sessionId: childSessionId,
+    sessionId: 'pending',
     parentSessionId: opts.parentSessionId,
     status: 'running',
     prompt: opts.prompt,
@@ -208,228 +346,151 @@ export async function spawnDshSubagent(
   }
   await writeDshTask(initialState)
 
-  const promise = (async (): Promise<DshTaskState> => {
-    // Phase 3 P0-A: 工具调用历史累积缓冲 + debounced 写盘。
-    // 单 turn 可能 10+ 工具调用,每次都写盘太频繁。每 500ms flush 一次。
+  // 2. 拿上游 SubagentRuntime + parent agent(后者必须存在)
+  const subagentRuntime = ctx.subagents as SubagentRuntime | undefined
+  if (!subagentRuntime) {
+    const failed: DshTaskState = {
+      ...initialState,
+      status: 'failed',
+      finishedAt: Date.now(),
+      error: 'ctx.subagents unavailable — SubagentRuntime not loaded',
+    }
+    await writeDshTask(failed)
+    throw new Error('[dsh-bridge] spawnDshSubagent: ctx.subagents unavailable — SubagentRuntime not loaded')
+  }
+  if (!opts.parentAgent) {
+    const failed: DshTaskState = {
+      ...initialState,
+      status: 'failed',
+      finishedAt: Date.now(),
+      error: 'parentAgent required for dsh-subagent start()',
+    }
+    await writeDshTask(failed)
+    throw new Error('[dsh-bridge] spawnDshSubagent: parentAgent required for dsh-subagent start()')
+  }
+
+  // 3. 调上游 SubagentRuntime.start('spawn', req)
+  const abortController = new AbortController()
+  let run: SubagentRun
+  try {
+    run = await subagentRuntime.start('spawn', {
+      label: `dsh-subagent-${taskId}`,
+      prompt: [{ type: 'text', text: opts.prompt }],
+      parent: opts.parentAgent,
+      signal: abortController.signal,
+      agentOptions: {
+        ...(opts.provider ? { provider: opts.provider } : {}),
+        ...(opts.model ? { model: opts.model } : {}),
+      },
+    })
+  } catch (err) {
+    // start() 阶段失败 — 上游会清理 partial resources,我们写盘 + 抛
+    const message = err instanceof Error ? err.message : String(err)
+    const failed: DshTaskState = {
+      ...initialState,
+      sessionId: 'start-failed',
+      status: 'failed',
+      finishedAt: Date.now(),
+      error: message,
+    }
+    await writeDshTask(failed)
+    throw err
+  }
+
+  // 4. 回填 sessionId + 订阅 child session 工具调用历史(仅 in-process provider)
+  initialState.sessionId = String(run.id)
+  await writeDshTask(initialState)
+
+  let unsubTools: (() => void) | null = null
+  if (run.localAgent) {
     const toolCalls: ToolCallEntry[] = []
-    let dirty = false
-    let flushTimer: NodeJS.Timeout | null = null
-    let unsubSession: (() => void) | null = null
+    unsubTools = subscribeChildSessionToolCalls(ctx, run.localAgent, taskId, toolCalls)
+    // 把累积缓冲挂到 initialState 上,promise 收尾时同步给最终 state
+    ;(initialState as { toolCalls?: ToolCallEntry[] }).toolCalls = toolCalls
+  }
 
-    const flushToolCalls = async (): Promise<void> => {
-      if (!dirty) return
-      dirty = false
-      const current = await readDshTask(taskId).catch(() => null)
-      if (!current) return
-      current.toolCalls = toolCalls.slice()
-      await writeDshTask(current).catch((err) => {
-        console.warn(`[dsh-bridge] spawnDshSubagent ${taskId} flush toolCalls failed:`, err)
-      })
-    }
-    const scheduleFlush = (): void => {
-      if (flushTimer) return
-      flushTimer = setTimeout(() => {
-        flushTimer = null
-        void flushToolCalls()
-      }, 500)
-    }
-
+  // 5. 包装 run.result → DshTaskState + 触发 onTaskFinish + followup parent
+  const promise = (async (): Promise<DshTaskState> => {
+    let result: SubagentResult
     try {
-      // 1. Phase 3.1：建立显式父子 scope（ScopedLayers 链可工作）
-      createDshSubagentScope(ctx, { parentScopeKey, childScopeKey })
-
-      // 2. 在父子 scope 关联后创建 child agent（dsh-agent 内部会走 scope 链）
-      // dsh-019 修复:之前 setup callback 用 agentCtx.set('zaiXxx', ...) 注入
-      // 父 session id / task id / scope key — 但 cordis `set` 要求 prop
-      // 之前 `provide` 过,否则抛 "cannot set property X without provide"
-      // 错误。taskStore.ts 自己维护的 DshTaskState (已写入
-      // ~/.zai/tasks-dsh/<taskId>.json) 是 ground truth,parentSessionId
-      // 和 taskId 通过 childSessionId (我们造的 `<taskId>-session`) 隐式
-      // 关联,不需要 ctx 注入。删掉 setup callback。
-      const { agent } = await agents.create({
-        sessionId: SessionId(childSessionId),
-        meta: { cwd: opts.cwd },
-        // dsh-014 修复:必须显式传 provider + model,否则 dsh 在 agent/request
-        // waterfall 找不到 provider/model,抛 "has no provider/model" 错误。
-        // model 用 opts.model (LLM 传的覆盖) 或 opts.model (默认)。
-        agentOptions: { provider: opts.provider, model: opts.model },
-      })
-
-      await agent.whenIdle()
-
-      // Phase 3 P0-A: 订阅 child session 的 tool/call + tool/result 事件,
-      // 累积到 toolCalls 缓冲,debounced 写盘。
-      //
-      // cordis `session/event` 是**全局**事件,每个 session 都会 broadcast。
-      // 用 session 身份比对过滤:仅处理来自子 agent session 的事件。
-      // firstSeq 记在 whenIdle 后(同 run.ts:95 模式)— 保证不捕到
-      // loader 装载阶段产生的早期事件。
-      const firstSeq = agent.session.seq
-      unsubSession = ctx.on(
-        'session/event',
-        (evSession: { id?: unknown }, ev: { type?: unknown; seq?: unknown; data?: unknown }) => {
-          // 过滤非子 session 事件 — 父 session 也广播,需精确匹配
-          const sessId = evSession?.id
-          if (sessId !== undefined && String(sessId) !== String(agent.session.id)) return
-          if (typeof ev.seq !== 'number' || ev.seq < firstSeq) return
-          const data = (ev.data ?? {}) as Record<string, unknown>
-          if (ev.type === 'tool/call') {
-            const callId = String(data.callId ?? '')
-            if (!callId) return
-            toolCalls.push({
-              callId,
-              toolName: String(data.name ?? 'tool'),
-              input: data.arguments, // 模型给的 raw JSON 字符串
-              status: 'running',
-              ts: Date.now(),
-            })
-            dirty = true
-            scheduleFlush()
-          } else if (ev.type === 'tool/result') {
-            // tool/result 的 callId 来源 — SessionEvent 'tool/result' 的
-            // data.message 是 ToolResultMessage:{ source: { kind:'tool',
-            // callId }, content: [ToolResultBlock{ toolCallId, ... }] }。
-            // 三处都能拿 callId,优先 source.callId(更明确)。
-            const message = data.message as
-              | {
-                  source?: { kind?: unknown; callId?: unknown }
-                  content?: Array<{ toolCallId?: unknown; content?: unknown; isError?: unknown }>
-                }
-              | undefined
-            const callId = String(
-              message?.source?.callId
-              ?? message?.content?.[0]?.toolCallId
-              ?? '',
-            )
-            if (!callId) return
-            const idx = toolCalls.findIndex((t) => t.callId === callId)
-            if (idx >= 0) {
-              const entry = toolCalls[idx]!
-              const resultBlock = message?.content?.[0]
-              entry.output = resultBlock?.content
-              entry.status = data.error ? 'error' : resultBlock?.isError ? 'error' : 'done'
-              entry.durationMs = Date.now() - entry.ts
-              if (data.error) {
-                entry.error = data.error as { name: string; code: string }
-              }
-            }
-            dirty = true
-            scheduleFlush()
-          }
-        },
-      ) as unknown as () => void
-
-      agent.followup(
-        createUserMessage({
-          content: [{ type: 'text', text: opts.prompt }],
-          source: { kind: 'user' },
-        }),
-      )
-      await agent.whenIdle()
-
-      // Phase 3 P0-A: 收尾前确保 buffer flush + unsub
-      unsubSession?.()
-      unsubSession = null
-      if (flushTimer) {
-        clearTimeout(flushTimer)
-        flushTimer = null
-      }
-      await flushToolCalls()
-
-      const finalState: DshTaskState = {
-        ...initialState,
-        status: 'done',
-        finishedAt: Date.now(),
-        toolCalls: toolCalls.slice(),
-      }
-      await writeDshTask(finalState)
-
-      // 通知父 agent（如果有）
-      if (opts.parentAgent) {
-        await notifyParentAgent(ctx, opts.parentAgent, {
-          taskId,
-          status: 'done',
-        })
-      }
-
-      return finalState
+      result = await run.result
     } catch (err) {
-      // Phase 3 P0-A: 失败时也要保留已收集的 toolCalls(用户能看到
-      // "走到第 N 步才挂")
-      unsubSession?.()
-      unsubSession = null
-      if (flushTimer) {
-        clearTimeout(flushTimer)
-        flushTimer = null
-      }
+      // 上游 run.result 只在基础设施故障时 reject(模型/网络错误 resolve 成 stopReason='error')
+      const message = err instanceof Error ? err.message : String(err)
       const finalState: DshTaskState = {
         ...initialState,
         status: 'failed',
         finishedAt: Date.now(),
-        error: err instanceof Error ? err.message : String(err),
-        toolCalls: toolCalls.slice(),
+        error: message,
       }
       await writeDshTask(finalState)
-
-      if (opts.parentAgent) {
-        await notifyParentAgent(ctx, opts.parentAgent, {
-          taskId,
-          status: 'failed',
-          error: finalState.error,
-        })
-      }
-
+      unsubTools?.()
       return finalState
     }
-  })()
 
-  // 立即返回 taskId + agent 句柄（不等 promise 完成 — 对齐 zai dispatch 异步）
-  const { agent } = await agents.create({
-    sessionId: SessionId(childSessionId),
-    meta: { cwd: opts.cwd },
-    setup: () => undefined,
-  }).catch(() => ({ agent: undefined as unknown as Agent }))
+    // 收尾工具调用历史(确保最后一次 flush + unsub)
+    unsubTools?.()
+    unsubTools = null
+
+    const status = mapStopReasonToStatus(result.stopReason)
+    const finalState: DshTaskState = {
+      ...initialState,
+      status,
+      finishedAt: Date.now(),
+      result: formatOutputForLlm(result.output),
+      ...(result.diagnostic ? { error: result.diagnostic } : {}),
+    }
+    await writeDshTask(finalState)
+
+    // Phase 4 完成语义:
+    //   - 同步模式(run_in_background=false 调用方 await promise):这里 resolve
+    //     时调用方拿到终态,父 turn 自然 end。
+    //   - 异步模式(run_in_background=true 调用方立即 return):父 turn 已 end,
+    //     这里通过 followup 注入 `<task-notification>`,等下次 turn 被消费。
+    if (opts.parentAgent) {
+      try {
+        const text = `<task-notification>${JSON.stringify({
+          taskId,
+          status: status === 'done' ? 'done' : status === 'cancelled' ? 'cancelled' : 'failed',
+          ...(finalState.error ? { error: finalState.error } : {}),
+        } satisfies SubagentNotification)}</task-notification>`
+        opts.parentAgent.followup(
+          createUserMessage({
+            content: [{ type: 'text', text }],
+            source: { kind: 'user' },
+          }),
+        )
+        // 同步模式:调用方已经在 await,followup 会进入下一轮 turn 的 inbox
+        // (同步模式父 turn 还没 end,父 LLM 看到 task-notification 后收尾)
+        // 异步模式:父 turn 已 end,followup 进入 idle parent inbox,等下次提问
+      } catch (followupErr) {
+        console.warn(
+          `[dsh-bridge] spawnDshSubagent ${taskId} followup notification failed:`,
+          followupErr,
+        )
+      }
+    }
+
+    return finalState
+  })()
 
   return {
     taskId,
-    agent: agent ?? ({} as Agent),
+    agent: run.localAgent, // in-process provider 有值;远端 undefined
     promise,
+    dispose: () => run.dispose(),
   }
 }
 
 /**
  * 通知父 session — 把子任务完成事件注入父 agent 的下一轮。
  *
- * zai 用 `<task-notification>` 续传；dsh 侧用 agent.followup(<task-notification-message>)。
- */
-async function notifyParentAgent(
-  ctx: Context,
-  parentAgent: Agent,
-  notification: SubagentNotification,
-): Promise<void> {
-  try {
-    const sessions = ctx.get('sessions') as { flush?: (s: unknown) => Promise<unknown> } | undefined
-    const session = parentAgent.session
-    const text = `<task-notification>${JSON.stringify(notification)}</task-notification>`
-    parentAgent.followup(
-      createUserMessage({
-        content: [{ type: 'text', text }],
-        source: { kind: 'user' },
-      }),
-    )
-    if (sessions?.flush && session) {
-      await sessions.flush(session).catch(() => undefined)
-    }
-  } catch (err) {
-    console.warn('[dsh-bridge] notifyParentAgent failed:', err)
-  }
-}
-
-/**
- * 子任务完成通知父 session（stub 兼容旧 API）。
+ * Phase 4 已废弃:现在直接在 spawnDshSubagent 的 promise settle 里调
+ * parentAgent.followup,不走单独函数。保留此 export 以兼容旧调用方
+ * (zai compat `notifyParentSession`)。
  */
 export async function notifyParentSession(
-  ctx: Context,
+  _ctx: Context,
   notification: SubagentNotification,
 ): Promise<void> {
   const existing = await readDshTask(notification.taskId)
@@ -442,16 +503,49 @@ export async function notifyParentSession(
   }
 }
 
-// ====== dsh-019: dsh subagent lifecycle API (供 zai compat subagentControlTool 桥接) ======
+// ====== zai compat subagentControl 桥接 ======
 
 /**
- * 父 session id → 该 session spawn 的 subagent 任务列表。供 zai compat
- * `subagent_control.list_agents` 实现查询。
+ * Phase 4:改走上游 `ctx.subagents.listChildren(parentSessionId)`。
+ *
+ * 之前 Phase 3.1 是读 `~/.zai/tasks-dsh/<taskId>.json` 全量列表 + 过滤
+ * parentSessionId(磁盘读 + JSON parse + 排序)。上游 `listChildren` 直接
+ * 从 session store + 持久化层投影,O(N) 内存遍历,fastest path。
+ *
+ * 这里仍兼容旧磁盘格式(作为 fallback)— dsh 0.1.0-rc.7 之前的 spawn
+ * 任务可能还在磁盘上没清理。
  */
 export async function listDshSubagents(
   ctx: Context,
   parentSessionId?: string,
 ): Promise<DshTaskState[]> {
+  // 优先:上游 listChildren
+  try {
+    const subagentRuntime = ctx.subagents as SubagentRuntime | undefined
+    if (subagentRuntime && parentSessionId) {
+      const children = await subagentRuntime.listChildren(SessionId(parentSessionId))
+      // SubagentListEntry 是 union(kind: 'child' | 'diagnostic') — 仅 child 类型
+      // 有完整 status/label 信息,diagnostic 类型只有 reason(暂忽略)。
+      return children
+        .filter((c): c is Extract<typeof c, { kind: 'child' }> => c.kind === 'child')
+        .map((c) => {
+          // 映射 SubagentListEntry → DshTaskState 形态(读磁盘拿 prompt/toolCalls)
+          const sessionId = String(c.id)
+          return {
+            taskId: sessionId, // subagent 用 sessionId 当 taskId (上游标识)
+            sessionId,
+            parentSessionId,
+            // activity: running/inactive — 简化映射到 running(下游按需 readDshTask)
+            status: 'running' as const,
+            prompt: '',
+            startedAt: 0,
+          } satisfies DshTaskState
+        })
+    }
+  } catch (err) {
+    console.warn('[dsh-bridge] listDshSubagents upstream failed, falling back to disk:', err)
+  }
+  // fallback:磁盘读
   const all = await listDshTasks()
   return all
     .filter((t) => !parentSessionId || t.parentSessionId === parentSessionId)
@@ -459,8 +553,11 @@ export async function listDshSubagents(
 }
 
 /**
- * 中止一个运行中的 dsh subagent。调 dsh Agent.cancel + 写盘 mark cancelled。
- * 供 zai compat `subagent_control.interrupt_agent` 实现调用。
+ * 中止一个运行中的 dsh subagent。Phase 4 改走上游 `ctx.subagents.interrupt()`。
+ *
+ * 上游 `interrupt(targetSessionId, authority)` 要求 authority 是
+ * `{ kind: 'ancestor', agent: parentAgent }` —— 必须用 spawn 时的
+ * parentAgent 做凭证,不能只给 sessionId。
  */
 export async function interruptDshSubagent(
   ctx: Context,
@@ -469,17 +566,35 @@ export async function interruptDshSubagent(
   const existing = await readDshTask(taskId)
   if (!existing) return null
   if (existing.status !== 'running') return existing
-  // 调 dsh Agent.cancel（dsh-agent 接口）
   try {
-    const agents = ctx.get('agents') as {
-      get?: (id: unknown) => { cancel?: (cause: { kind: 'user' }) => void } | undefined
-    } | undefined
-    const handle = agents?.get?.(existing.sessionId)
-    handle?.cancel?.({ kind: 'user' })
+    const subagentRuntime = ctx.subagents as SubagentRuntime | undefined
+    if (subagentRuntime && existing.parentSessionId) {
+      // 拿 parent agent 作 authority
+      const agents = ctx.get('agents') as {
+        get?: (id: unknown) => Agent | undefined
+      } | undefined
+      const parentAgent = agents?.get?.(existing.parentSessionId)
+      if (parentAgent) {
+        subagentRuntime.interrupt(SessionId(existing.sessionId), {
+          kind: 'ancestor',
+          agent: parentAgent,
+        })
+      } else {
+        // 没 parent agent,降级用 agent.cancel
+        const handle = agents?.get?.(existing.sessionId) as { cancel?: (cause: { kind: 'user' }) => void } | undefined
+        handle?.cancel?.({ kind: 'user' })
+      }
+    } else {
+      // 上游不可用时降级到直接 cancel
+      const agents = ctx.get('agents') as {
+        get?: (id: unknown) => { cancel?: (cause: { kind: 'user' }) => void } | undefined
+      } | undefined
+      const handle = agents?.get?.(existing.sessionId)
+      handle?.cancel?.({ kind: 'user' })
+    }
   } catch (err) {
     console.warn(`[dsh-bridge] interruptDshSubagent ${taskId} cancel failed:`, err)
   }
-  // 写盘 mark cancelled
   const updated: DshTaskState = {
     ...existing,
     status: 'cancelled',
@@ -490,8 +605,10 @@ export async function interruptDshSubagent(
 }
 
 /**
- * 给运行中的 dsh subagent 投消息（DSH session-level message via agent.followup）。
- * 供 zai compat `subagent_control.send_message` 实现调用。
+ * Phase 4:用上游 `ctx.subagents.followup(parent, childId, content)` 投消息。
+ *
+ * 要求 parent 是 live ancestor agent。spawn 时的 parent 仍 live 时可直接调
+ * (会话期间)。会话已 close 时需要先 resume — 留给 zai-side compat 处理。
  */
 export async function sendMessageToDshSubagent(
   ctx: Context,
@@ -502,6 +619,27 @@ export async function sendMessageToDshSubagent(
   if (!existing) return { ok: false, error: 'task not found' }
   if (existing.status !== 'running') return { ok: false, error: `task status is ${existing.status}` }
   try {
+    const subagentRuntime = ctx.subagents as SubagentRuntime | undefined
+    const parentSessionId = existing.parentSessionId
+    if (subagentRuntime && parentSessionId) {
+      const agents = ctx.get('agents') as {
+        get?: (id: unknown) => Agent | undefined
+      } | undefined
+      const parentAgent = agents?.get?.(parentSessionId)
+      if (parentAgent) {
+        // SubagentFollowupOptions 需要 signal — 上游 API 入参要求 abort 句柄,
+        // 此处建本地 controller(本调用方 sync 控制 — 调完即返回)。
+        const abortController = new AbortController()
+        await subagentRuntime.followup(
+          parentAgent,
+          SessionId(existing.sessionId),
+          [{ type: 'text', text: prompt }],
+          { source: { kind: 'user' }, signal: abortController.signal },
+        )
+        return { ok: true }
+      }
+    }
+    // fallback:直接 agent.followup
     const agents = ctx.get('agents') as {
       get?: (id: unknown) => { followup?: (msg: unknown) => void } | undefined
     } | undefined
@@ -520,10 +658,7 @@ export async function sendMessageToDshSubagent(
 }
 
 /**
- * Phase 3 P0-A: 读子 agent 的工具调用历史。直接 readDshTask 拿 toolCalls 字段
- * (Phase 3 在 spawnDshSubagent 期间已写到 ~/.zai/tasks-dsh/<taskId>.json)。
- *
- * zai-side `__zaiDshSubagentDetail.readTask` 内部用,Detail Drawer 渲染。
+ * Phase 3 P0-A:读子 agent 的工具调用历史。直接 readDshTask 拿 toolCalls 字段。
  */
 export async function getDshSubagentToolCalls(
   _ctx: Context,
