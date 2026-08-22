@@ -33,7 +33,12 @@ import {
   ZAI_GLOBAL_BRIDGE_KEYS,
 } from '../globalThisBridge.js'
 import { DSH_KERNEL } from '../paths.js'
-import { getBashBackgroundTracker, getCommandRegistry } from '@zn-ai/zn-agent-core'
+import {
+  getBashBackgroundTracker,
+  getCommandRegistry,
+  stateChangeBus,
+  type TaskItem,
+} from '@zn-ai/zn-agent-core'
 import {
   getAskRegistry,
   getApproveRegistry,
@@ -117,6 +122,57 @@ export async function createDshKernelAdapter(
         taskId,
         status === 'done' ? 'completed' : status === 'killed' ? 'killed' : 'failed',
         {},
+      )
+    },
+    // dsh-017: 把当前 sessionId 传给 dsh-bridge,Task*/Cron* 工具用它做 session
+    // 隔离(主计划 R4)。getParentAgent 给 cron 触发时用 — 从 dsh agents
+    // service 按 sessionId 拿 agent 句柄,触发时 followup(<cron-fire>)。
+    getSessionId: () => getCurrentSessionId() ?? undefined,
+    getParentAgent: (sessionId: string) => {
+      const agents = handle.ctx.get('agents') as {
+        get?: (id: unknown) => { followup?: (msg: unknown) => void; session?: unknown; cancel?: (cause: { kind: 'user' }) => void } | undefined
+      } | undefined
+      // dsh-side Agent 接口的最小子集 — zai 不直接 import @deepseek-ai/dsh-agent
+      // (避免增加 zai 包依赖),按 dsh-bridge spawnDshSubagent 期望的 contract
+      // 暴露 followup / session / cancel 即可。
+      return agents?.get?.(sessionId) as unknown as import('@zn-ai/dsh-bridge').AgentToolParentAgent | undefined
+    },
+    onTaskStart: ({ taskId, description, prompt }) => {
+      // dsh-017: 复用 bashBackgroundTracker 显示 subagent 任务(同 tracker
+      // 但 description 是 prompt 摘要,command 字段填 taskId 方便辨识)。
+      bashTracker.register(taskId, {
+        command: `[subagent ${taskId}] ${description}`,
+        sessionId: getCurrentSessionId() ?? '',
+        description: prompt.slice(0, 200),
+        startedAt: Date.now(),
+      })
+    },
+    onTaskFinish: ({ taskId, status }) => {
+      bashTracker.markFinished(
+        taskId,
+        status === 'done' ? 'completed' : status === 'cancelled' ? 'killed' : 'failed',
+        {},
+      )
+    },
+    onTaskChange: ({ sessionId, task, action }) => {
+      // dsh-017: 转发到 stateChangeBus,让 zai-side stateBridge
+      // 把 v2_task.changed 翻成 eventBus ServerEvent,UI TodoZone 实时刷新。
+      // payload shape 与 zai compat taskListStore 对齐:整个 task object
+      // + action ('upsert' | 'delete')。
+      stateChangeBus.emit('v2_task.changed', {
+        sessionId,
+        task: task as unknown as TaskItem,
+        action: action === 'create' ? 'upsert' : 'upsert',  // Phase 1: dsh 不删,都走 upsert
+      } as never)
+    },
+    onCronChange: ({ action, task, sessionId }) => {
+      if (!task) return
+      // stateChangeBus 还没定义 'cron.changed' schema — Phase 1 不 emit
+      // (避免 zai-side stateBridge handler 强类型错位),仅 log 便于调试。
+      // Phase 2 扩展 stateChangeBus schema 加 'cron.changed' + 配套
+      // zai-side handler + UI 集成。
+      console.info(
+        `[dsh-adapter] cron.changed: ${action} ${task.id} (session=${sessionId}, cron=${task.cron})`,
       )
     },
   })

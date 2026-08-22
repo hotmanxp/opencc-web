@@ -83,6 +83,47 @@ export {
   type ZaiSkillDirsConfig,
   type ZaiSkillFrontmatter,
 } from './tools/skill.js'
+// dsh-017 新增：补齐 dsh 模式 LLM 工具集（Agent / DisplayFiles / Task* / Cron*）
+export {
+  createAgentTool,
+  registerAgentTool,
+  type AgentToolOptions,
+  type AgentToolParentAgent,
+} from './tools/subagent.js'
+export {
+  createDisplayFilesTool,
+  registerDisplayFilesTool,
+  type DisplayFilesToolOptions,
+} from './tools/displayFiles.js'
+export {
+  createTaskCreateTool,
+  createTaskGetTool,
+  createTaskListTool,
+  createTaskUpdateTool,
+  registerTaskListTools,
+  type TaskListToolOptions,
+} from './tools/taskList.js'
+export {
+  createCronCreateTool,
+  createCronDeleteTool,
+  createCronListTool,
+  registerCronTools,
+  parseCron,
+  nextFireMs,
+  scheduleCronTask,
+  cancelCronSchedule,
+  type CronTask,
+  type CronTaskStatus,
+  type CronToolOptions,
+  type CronSchedulerOptions,
+  type CronParentAgent,
+} from './tools/cron.js'
+export {
+  DshTaskListStore,
+  getDshTaskListStore,
+  type TaskItem,
+  type TaskStatus,
+} from './tools/tasks.js'
 
 // B3 — 会话与记忆 (真实化)
 export {

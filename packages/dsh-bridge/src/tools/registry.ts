@@ -18,6 +18,10 @@ import { registerFsTools } from './fs.js'
 import { registerRipgrepTool } from './ripgrep.js'
 import { registerMcpTools } from './mcp.js'
 import { registerSkillTools } from './skill.js'
+import { registerAgentTool, type AgentToolParentAgent } from './subagent.js'
+import { registerDisplayFilesTool } from './displayFiles.js'
+import { registerTaskListTools } from './taskList.js'
+import { registerCronTools, type CronParentAgent } from './cron.js'
 
 export interface ZaiTool {
   name: string
@@ -40,6 +44,36 @@ export interface RegisterZaiToolsOptions {
    * 状态用 `string` 与 BashNotifier 对齐（dsh-bridge 内部: `'done' | 'killed' | 'failed'`）。
    */
   notifyBackground?: (info: { taskId: string; status: string; cwd?: string }) => void
+  /**
+   * dsh-017 新增：当前 sessionId getter — 用于 Task* / Cron* / Agent 工具
+   * 关联到正确的 session（持久化按 sessionId 拆桶,主计划 R4 隔离）。
+   */
+  getSessionId?: () => string | undefined
+  /**
+   * dsh-017 新增：拿父 agent 回调 — Cron 触发 + Agent subagent 通知。
+   * 接受 `AgentToolParentAgent | CronParentAgent` 子集类型(只要有 followup)。
+   * zai 端不用 import 完整 dsh Agent 类型。
+   */
+  getParentAgent?: (sessionId: string) => (AgentToolParentAgent & CronParentAgent) | undefined
+  /**
+   * dsh-017 新增：subagent 任务启动 sink — 转发到 zai `subagentTracker` (类比
+   * bashBackgroundTracker),让 UI TaskDock 看到 dsh subagent 任务。
+   */
+  onTaskStart?: (info: { taskId: string; description: string; prompt: string }) => void
+  /**
+   * dsh-017 新增：subagent 任务完成 sink — 转发到 zai `subagentTracker.markFinished`。
+   */
+  onTaskFinish?: (info: { taskId: string; status: 'done' | 'failed' | 'cancelled'; error?: string }) => void
+  /**
+   * dsh-017 新增：Task 变化 sink — 转发到 zai-side stateChangeBus.emit
+   * 'v2_task.changed',让 UI TodoZone 实时刷新。
+   */
+  onTaskChange?: (info: { sessionId: string; task: { id: string; subject: string; status: string }; action: 'create' | 'update' }) => void
+  /**
+   * dsh-017 新增：Cron 变化 sink — 转发到 zai-side stateChangeBus.emit
+   * 'cron.changed',让 UI 看到 cron 任务列表变化。
+   */
+  onCronChange?: (info: { action: 'create' | 'delete' | 'list' | 'fire'; task?: { id: string; cron: string; prompt: string; nextFireAt: number }; sessionId: string }) => void
 }
 
 /**
@@ -75,6 +109,34 @@ export async function registerZaiTools(
 
   // 5. Skill 工具（异步，扫描 skills 目录）
   disposers.push(...(await registerSkillTools(ctx, { cwd: opts.cwd })))
+
+  // 6. dsh-017 新增：DisplayFiles 工具（目录列表）
+  disposers.push(registerDisplayFilesTool(ctx, { cwd: opts.cwd }))
+
+  // 7. dsh-017 新增：Agent 工具（subagent spawn）
+  disposers.push(registerAgentTool(ctx, {
+    cwd: opts.cwd,
+    getParentSessionId: opts.getSessionId ?? (() => undefined),
+    onTaskStart: opts.onTaskStart,
+    onTaskFinish: opts.onTaskFinish,
+  }))
+
+  // 8. dsh-017 新增：Task 工具集（TaskCreate/Get/List/Update — 4 个）
+  if (opts.getSessionId) {
+    disposers.push(registerTaskListTools(ctx, {
+      getSessionId: opts.getSessionId,
+      onTaskChange: opts.onTaskChange,
+    }))
+  }
+
+  // 9. dsh-017 新增：Cron 工具集（CronCreate/Delete/List — 3 个）
+  if (opts.getSessionId && opts.getParentAgent) {
+    disposers.push(registerCronTools(ctx, {
+      getSessionId: opts.getSessionId,
+      getParentAgent: opts.getParentAgent,
+      onCronChange: opts.onCronChange,
+    }))
+  }
 
   // 整体返回 disposer
   return () => {
