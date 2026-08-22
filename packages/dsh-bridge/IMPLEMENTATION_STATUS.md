@@ -129,6 +129,22 @@
 2. **kill switch 演练**：跑 `scripts/kill-switch-drill.sh` 验证 dsh → opencc 一键回退无数据损坏
 3. **G2 评审入场**：上述 ✅ 后走决策门
 4. **B7 flip-and-cleanup**（若 G2 通过）：
-   - 准备默认内核翻转代码（Phase 5.1 已准备，**不 commit**）
+   - 准备默认内核翻转代码（Phase 5.1 已准备，**不 commit** — 改动在 working tree）
    - `translateRuntimeEvents` 移出 routes/agent.ts → `opencc factory.run()` 真实接线
    - opencc vendor 退役评估 + Cordis 插件形态重构（B7.5）
+
+### Phase 5.1 已就位但未提交（working tree）
+
+- `packages/zai/src/server/services/projectSettings.ts`：
+  - `resolveAgentKernel` 默认从 `'opencc'` 改为 `'dsh'`
+  - 新增 `maybePrintDefaultFlipNotice(cwd)` — 检测用户级 + 项目级 settings 是否都没有 `agent.kernel` 字段，若是则打印一次性迁移提示
+- `packages/zai/src/server/services/projectSettings.test.ts`：
+  - 对应测试更新（默认 dsh 断言）
+  - 9/9 单测通过
+
+**为什么暂不 commit**：
+- 默认翻转是用户可见行为变更；按 G2 决策门规则需 owner 签字才能合入
+- 真实驱动 dsh 需要 KERNEL_FACTORY_INTEGRATION（dsh-009），否则 dsh 模式启动但实际仍跑 opencc（Phase 4.3 drill 验证）
+- 等 dsh-009 修复（agentRuntime.ts → createKernel）落地后，与 Phase 5.1 改动一起 commit
+
+**怎么启用**：当前 `agent.kernel = 'dsh'` 显式设置的用户仍走 dsh 路径（已工作）；仅"无显式设置 + dsh 路径未真正接线"时才安全无副作用。
