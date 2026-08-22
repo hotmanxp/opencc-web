@@ -118,6 +118,7 @@ export {
   writeDshTask,
   listDshTasks,
   spawnDshSubagent,
+  createDshSubagentScope,
   notifyParentSession,
   dshTaskPath,
   type DshTaskState,

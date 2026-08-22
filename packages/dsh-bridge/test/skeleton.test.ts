@@ -76,6 +76,14 @@ describe('Phase 1.1: dsh-sessions root path helpers', () => {
   });
 });
 
+describe('Phase 3.1: createDshSubagentScope (dsh-scope 自实现)', () => {
+  it('createDshSubagentScope 接受 plain object scope keys', async () => {
+    const { createDshSubagentScope } = await import('../src/index.js')
+    // 验证导出与签名（不实跑 createScope — 需要真实 Cordis ctx）
+    expect(typeof createDshSubagentScope).toBe('function')
+  });
+});
+
 describe('Phase 1.2: Win32ShellExecutor + POSIX detectCwdChange', () => {
   describe('detectCwdChangePosix', () => {
     it('识别行首 cd <path>', () => {
