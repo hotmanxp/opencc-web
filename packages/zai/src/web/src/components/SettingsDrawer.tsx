@@ -1339,7 +1339,7 @@ export default function SettingsDrawer() {
         })),
       )
     },
-    [setTheme, setOutputStyle, setWorkMode, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate],
+    [setTheme, setOutputStyle, setWorkMode, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate, kernel],
   )
 
   // 整个"服务"section 仅在「instance 子实例」(instance manager 派生的子进程,
