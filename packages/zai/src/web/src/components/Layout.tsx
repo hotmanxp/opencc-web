@@ -63,6 +63,19 @@ export default function Layout() {
   // 完全一致. 移动端 (isMobile===true) 不渲染, 避免挡住底部 home indicator
   // 和原本的 MobileHeader 工具栏.
   const isMobile = useAppStore((s) => s.isMobile);
+  // 视口宽度低于移动端阈值时自动跳到 /m 路由(走 MobileLayout + MobileAgent)。
+  // 这是修复 dsh 平台手机访问 192.168.101.69 看到桌面端布局 + 模型切换器
+  // 与输入框视觉粘连的问题。手机用户访问根 / → Navigate → /agent,全程走
+  // 桌面端 Layout,ConfigStatusBar 的 "opencc-web · main · MiniMax-M3" 三段
+  // 直接挤在 AgentInputBox 下方。
+  //
+  // 只在 isMobile 由 false→true 切换时跳一次,避免 useEffect 反复 fire。
+  // 已经在 /m 路由的请求不重复跳(用户可能手动切回桌面端调试)。
+  useEffect(() => {
+    if (!isMobile) return
+    if (location.pathname.startsWith('/m')) return
+    navigate('/m', { replace: true })
+  }, [isMobile, location.pathname, navigate])
   const handleToggleTheme = (checked: boolean) => {
     const next: Theme = checked ? 'light' : 'dark';
     setSettingsTheme(next);
