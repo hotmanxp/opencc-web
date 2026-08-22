@@ -177,6 +177,34 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 - **LSP/MCP 类 plugin**(typescript-lsp / pyright-lsp / context7 / chrome-devtools-mcp / ralph-loop / code-review)在 `~/.zai/plugins/cache/` 下有缓存但 zai 的 `/api/plugins` 不返回——要么缺 `.claude-plugin/plugin.json`、要么走 LSP/MCP 路径被静默排除。
 - **`~/.zai/zn-assets/`** 是 `paths.ts:7-17` 注释里描述的预期 layout,当前未部署,实际 `@zn-ai/plugin` 资源走 `~/.agents/skills`(见 `agentRuntime.ts:285`)。
 
+## dsh 相关问题优先查 vendor 源码
+
+**调查 dsh-021 等 dsh 内核集成问题时,优先去 deepseek-harness 主仓库看 vendor 源码,再回看 dsh-bridge / zai 这边的调用链**。只在本仓库里 grep `reasoning` / `thinking` 会漏掉真正的 root cause —— dsh-side 才是语义定义的源头,本仓库只是消费者。
+
+**主仓库路径**:`/Users/ethan/code/deepseek-harness/packages/`
+
+| 包 | 关键目录 | 用途 |
+|---|---|---|
+| `llm/llm-pi-ai/src/` | `stream.ts` / `adapter.ts` / `catalog.ts` / `config.ts` / `context.ts` | pi-ai ↔ dsh 适配层 — profileOptions / resolveReasoningLevel / resolveModelReasoning / PiAiProviderProfile schema |
+| `llm/llm/src/` | `assembler.ts` / `types.ts` / `message.ts` | dsh-side StreamChunk → ContentBlock 累积、ContentBlock/ReasoningBlock 类型 |
+| `session/lib/types/` | `types.d.ts` / `chunk-rows.js` | SessionEvent / AssistantMessage / packChunkRuns / decodeStorageRecord |
+| `session/session-persistence-jsonl/lib/` | `index.js` | JsonlSessionPersistence 写盘 / 读盘 / loadStored |
+| `llm/llm-pi-ai/tests/` | `adapter.spec.ts` / `catalog.spec.ts` | dsh 内部验证,看 `forwards common stream options and profile reasoning` 这类测试能确认字段语义 |
+
+**已构建 vendor 路径**(`pnpm` 实际跑的代码,确认与主仓库版本一致):
+- `node_modules/.pnpm/@deepseek-ai+dsh-llm-pi-ai@<ver>/node_modules/@deepseek-ai/dsh-llm-pi-ai/lib/`
+- `node_modules/.pnpm/@deepseek-ai+dsh-llm@<ver>/node_modules/@deepseek-ai/dsh-llm/lib/`
+- `node_modules/.pnpm/@deepseek-ai+dsh-session@<ver>/node_modules/@deepseek-ai/dsh-session/lib/`
+- `node_modules/.pnpm/@deepseek-ai+dsh-session-persistence-jsonl@<ver>/node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/`
+
+**dsh-bridge 出口对照**(本仓库 → 主仓库字段语义):
+- `DshProviderProfile.defaultReasoningEffort` → 主仓库 `PiAiProviderProfile.reasoning`(`config.ts:146`),被 `profileOptions(profile, reasoning, apiKey)`(`adapter.ts:87-104`)读,缺省时 streamSimple 不发 `thinking: { type: 'enabled' }` 给 anthropic API
+- `DshModelEntry.reasoningEfforts: string[]` → pi-ai dict `{ level: wireValue }`,经 `resolveModelReasoning`(`catalog.ts:667-721`)转 `thinkingLevelMap`
+- `DshReasoningLevel`(`'off'|'minimal'|'low'|'medium'|'high'|'xhigh'`)↔ pi-ai `ModelThinkingLevel`(多一个 `'max'`,见 `catalog.ts:74-82 THINKING_LEVEL_GATE`)
+- dsh `ReasoningBlock`(`{ type: 'reasoning', text }`)↔ pi-ai `ReasoningBlock` 同形,replay 阶段重写为 `{ type: 'thinking', thinking }`(`dsh-llm-pi-ai/src/replay.ts:193-198`)
+
+**dsh-021 教训**:`zai` 配字段 → `dsh-bridge/buildProviderEntries` 静默丢弃(没消费) → `dsh-llm-pi-ai` 拿不到默认值,streamSimple 不发 thinking 参数 → API 默认关闭 thinking → UI 无 ThinkingBlock。这种"上游字段被中游丢弃"的 bug 只能从 vendor 入口配置(`PiAiProviderProfile.reasoning`)往回追到 zai 配置,反向 grep 找不到。
+
 ## 强制开发规则
 
 - **真实浏览器验收**:任何问题修复或特性新增,完成前必须用 `/ego-browser` skill 启动真实 zai 实例并走完用户路径(页面加载、按钮点击、表单提交、截图等)。**禁止**用 Chrome DevTools MCP、Playwright、Puppeteer、`curl + WebFetch` 或单元测试替代。环境阻塞时必须显式报告。**注意**:`/ego-browser` 测试本地功能时,不要 kill 920x 端口所在的服务进程——920x 是 zai 正式服务端口, kill 后会导致真实实例不可用,应改为让 ego 使用另一个可用端口(如 8101 起)访问,或用 `pnpm --filter @zn-ai/zai dev` 启动独立开发服务。**ego-browser 在 zai dev 跑着时(SSE 长连接)实际可用**——通过 `browser-operator` skill 调真实浏览器(ego-browser)即可。早期 `feedback-ego-browser-sse-blocked` memory 已过时,不要因为旧经验跳过视觉验证。
