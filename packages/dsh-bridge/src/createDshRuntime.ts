@@ -1,24 +1,25 @@
 /**
- * createDshRuntime — dsh 长驻 Cordis ctx 装配（B1a T1.1）。
+ * createDshRuntime — dsh 长驻 Cordis ctx 装配（B1a T1.1 + dsh-013 修复）。
  *
  * 替代 headless 的"run 完 exit"语义，让 zai 进程能复用 dsh 内核做长驻 Agent。
  *
- * 装载模型（dsh-base 提供 profile patch）：
- *   1. @deepseek-ai/dsh-base (cordis.yml patch — base plugins)
- *   2. @deepseek-ai/dsh-headless (headless-runner plugin — 但 disable apply)
- *   3. @deepseek-ai/dsh-agent (agents service)
- *   4. @deepseek-ai/dsh-agent-loop (ReactLoopAgent)
- *   5. @deepseek-ai/dsh-session (sessions service + SessionEventMap)
- *   6. @deepseek-ai/dsh-session-persistence-jsonl (持久化 provider)
- *   7. @deepseek-ai/dsh-tools (tools registry)
- *   8. @deepseek-ai/dsh-scope (ScopedLayers)
- *   9. @deepseek-ai/dsh-system-prompt (system prompt assembly)
- *  10. @deepseek-ai/dsh-agent-default-model (default model selection)
+ * 装载模型（cordis-plugin-loader 统一装载，模拟 dsh 启动器）：
+ *   1. @deepseek-ai/cordis-plugin-loader (Loader — 让 ctx.loader 启用)
+ *   2. @deepseek-ai/dsh-base/cordis.patch.yml (12+ core plugin: timer/hmr/llm/session/...)
+ *   3. @deepseek-ai/dsh-llm-pi-ai (LLM provider adapter Cordis plugin)
+ *   4. @deepseek-ai/dsh-llm-retry (retry policy for LLM calls)
+ *   5. @deepseek-ai/dsh-api-gateway + dsh-typert-* (agent API surface)
+ *   6. @deepseek-ai/dsh-credentials-local (apiKeyEnv 解析)
+ *   7. @deepseek-ai/dsh-settings-file (settings.yaml 装载)
+ *   8. @deepseek-ai/dsh-jobs-local (background jobs)
+ *   9. @deepseek-ai/dsh-session-persistence-jsonl (持久化)
+ *  10. @deepseek-ai/dsh-tools / dsh-scope / dsh-system-prompt / dsh-agent / dsh-agent-default-model
  *
  * 长驻语义：
  *   - 构造空白 Cordis ctx
- *   - 逐个 import dsh-* 让它们的 side-effect plugin 注册到 globalThis/loaders
- *   - 触发 ctx 的 loader 完成（await ctx.get("loader")?.await()）
+ *   - 装载 Loader 插件
+ *   - 用 ctx.loader.create() 装载 dsh-base patch + llm-pi-ai + 各核心 service
+ *   - 触发 ctx 的 loader 完成（await ctx.loader?.await()）
  *   - shutdown() 走 drain 顺序（B-1 尖峰）：
  *     1. 拒绝新请求
  *     2. flush 当前 turn — sessions.flush(ctx 持有的所有 session)
@@ -27,16 +28,50 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import Loader from '@deepseek-ai/cordis-plugin-loader'
+import { createRequire } from 'node:module'
+import { pathToFileURL } from 'node:url'
 import { JsonlSessionPersistence } from '@deepseek-ai/dsh-session-persistence-jsonl'
 
 import { DSH_KERNEL, type KernelId } from './paths.js'
 import { dshSessionsRootAbs } from './sessions/store.js'
+
+const require = createRequire(import.meta.url)
+
+/**
+ * LLM provider profile — dsh-llm-pi-ai `Config.providers[name]` 形态子集。
+ *
+ * dsh-llm-pi-ai 支持的完整 schema 见其 `Config` 定义(dsh-settings 装载的 zod
+ * schema);zai-side 不需要全部字段,只透传 baseURL + apiKeyEnv + 模型 catalog。
+ *
+ * `apiKeyEnv` 是按请求解析的凭据**引用**(dsh-llm-pi-ai 会通过 ctx.credentials 或
+ * `launchEnvironmentOf(ctx).get(ref)` 拉取),不直接持有 key — 见
+ * `dsh-llm-pi-ai/lib/index.js:2048-2057`。
+ */
+export interface DshProviderProfile {
+  /** 适配器路由名(对应 `ctx.llm.registerAdapter([name], adapter)` 的路由 key)。 */
+  name: string
+  /** 模型显示名(给 `listModels` 用);也作为 `defaultModel` 的路由 hint。 */
+  displayName?: string
+  /** 提供方 baseURL — Anthropic 兼容网关必填,直连 anthropic.com 可省。 */
+  baseURL: string
+  /** env 变量名(里面存 API key)。dsh-llm-pi-ai 按需读,不在进程里缓存。 */
+  apiKeyEnv: string
+  /** 该路由暴露的模型 id 列表(dsh 路由接 `GenerateOptions.model` 必填其一)。 */
+  models: string[]
+}
 
 export interface CreateDshRuntimeOptions {
   dataDir: string
   runtimeId: string
   defaultCwd: string
   defaultModel: string
+  /**
+   * LLM provider profiles。loader 装载阶段 `ctx.loader.create()` llm-pi-ai
+   * 时传入,dsh-llm-pi-ai 把它注册到 `ctx.llm.registerAdapter` + 注册
+   * configurable providers 目录,agents service 后续查表走它。
+   */
+  providers: DshProviderProfile[]
 }
 
 export interface DshRuntimeHandle {
@@ -60,7 +95,14 @@ export async function createDshRuntime(
   opts: CreateDshRuntimeOptions,
 ): Promise<DshRuntimeHandle> {
   // 构造空白 Cordis ctx。Cordis 提供自反射的 Context 类。
+  // baseUrl 必须设值:cordis-plugin-loader 的 _patchContext 会把 entry.ctx
+  // 的原型链上溯到 parent.ctx(loader 的 ctx);parent.ctx 未设 baseUrl 时
+  // `this.parent.ctx === this.ctx` 会触发 `Object.setPrototypeOf(this.ctx, this.ctx)`
+  // 报 "Cyclic __proto__ value"。设 baseUrl 为 zai 包工作目录 — dsh-* 包
+  // node_modules 在 pnpm 软链结构里可由 baseUrl 解析(用于 cordis-plugin-include
+  // 的 path 解析)。
   const ctx = new Context()
+  ctx.baseUrl = pathToFileURL(opts.dataDir + '/').href
 
   activeDshHandles++
 
@@ -70,17 +112,31 @@ export async function createDshRuntime(
   // 由于 dsh-base 是 declarative bundle patch（cordis.yml），不直接 import；
   // 它通过 dsh-headless 等下游包间接被装载。
   await Promise.all([
-    import('@deepseek-ai/dsh-session'),
-    import('@deepseek-ai/dsh-tools'),
-    import('@deepseek-ai/dsh-scope'),
-    import('@deepseek-ai/dsh-system-prompt'),
+    // dsh-013 修复:cordis-plugin-loader 必须先注入,后续 ctx.loader.create()
+    // 才能装载 dsh-base patch + llm-pi-ai 等带 patch 的 plugin。
+    import('@deepseek-ai/dsh-llm'),
+    import('@deepseek-ai/dsh-llm-pi-ai'),
+    import('@deepseek-ai/dsh-llm-retry'),
+    import('@deepseek-ai/dsh-api-gateway'),
+    import('@deepseek-ai/dsh-credentials-local'),
+    import('@deepseek-ai/dsh-settings-file'),
+    import('@deepseek-ai/dsh-jobs-local'),
+    import('@deepseek-ai/dsh-typert-loader'),
+    import('@deepseek-ai/dsh-typert-registry'),
+    import('@deepseek-ai/dsh-session-title'),
+    import('@deepseek-ai/dsh-session-title-first-prompt-llm'),
+    import('@deepseek-ai/dsh-user-questions'),
     import('@deepseek-ai/dsh-agent'),
     import('@deepseek-ai/dsh-agent-loop'),
     import('@deepseek-ai/dsh-agent-default-model'),
+    import('@deepseek-ai/dsh-session'),
     import('@deepseek-ai/dsh-session-persistence-jsonl'),
+    import('@deepseek-ai/dsh-tools'),
+    import('@deepseek-ai/dsh-scope'),
+    import('@deepseek-ai/dsh-system-prompt'),
     import('@deepseek-ai/dsh-shell'),
     import('@deepseek-ai/dsh-user-approval'),
-    import('@deepseek-ai/dsh-headless'),
+    import('@deepseek-ai/dsh-fs'),
   ])
 
   const handle: DshRuntimeHandle = {
@@ -92,15 +148,64 @@ export async function createDshRuntime(
     },
 
     async start() {
-      // 0. 注入 JsonlSessionPersistence.Config.root — dsh 会话写盘根目录，
-      //    与 opencc `<sessionId>.jsonl` 隔离（主计划 §4.2）。
-      //    必须在 loader await 之前注册，让 dsh-session 的 `ctx.sessions`
-      //    能立即拿到持久化 provider。
-      ctx.plugin(JsonlSessionPersistence, {
-        root: dshSessionsRootAbs(opts.dataDir),
+      // 0. 装载 Loader — 让 ctx.loader 可用。必须 await 到 plugin
+      //    完全挂载(否则后面 ctx.loader.create 会因 loader 内部状态未就绪
+      //    报 Cyclic __proto__ 或类似)。
+      await ctx.plugin(Loader)
+
+      // 1. 装载 dsh-bridge 自带的最小 patch (只装 zai-server 必需的 plugin)。
+      //    dsh-base 的全 patch 包含 30+ mode-specific 行(web/llm-deepseek/tool-* 等),
+      //    其中不少只有 id 没有 name(placeholder 形态),cordis-plugin-loader 处理
+      //    这种 row 时报 `Cannot read properties of undefined (reading 'startsWith')`。
+      //    自写精简 patch 避开这个问题,只装 zai 真实对话路径需要的 12+ plugin:
+      //    llm / session / typert* / session-title / agent / agent-default-model /
+      //    jobs / llm-retry / settings / credentials / llm-pi-ai /
+      //    session-persistence-jsonl。
+      const dshBridgePatch = require.resolve('./dsh-bridge.patch.yml')
+      await ctx.loader.create({
+        name: '@deepseek-ai/cordis-plugin-include',
+        config: { path: dshBridgePatch },
       })
 
-      // 1. 首次 loader await — 确保全部 plugin 完成挂载（dsh-headless index.js:99 同款）
+      // 2. 注入 JsonlSessionPersistence.Config.root — dsh 会话写盘根目录,
+      //    覆盖 base patch 里的默认配置(主计划 §4.2)。
+      await ctx.loader.create({
+        name: '@deepseek-ai/dsh-session-persistence-jsonl',
+        config: { root: dshSessionsRootAbs(opts.dataDir) },
+      })
+
+      // 3. dsh-013 修复:装载 dsh-llm-pi-ai provider with provider profiles。
+      //    dsh-llm-pi-ai 在 loader.create 阶段会调 settings.inject 拿
+      //    ctx.settings(由 base patch 里的 dsh-settings-file 提供),把
+      //    Config.providers 注册到 ctx.llm.registerAdapter。
+      if (opts.providers.length > 0) {
+        const providerEntries: Record<string, unknown> = {}
+        for (const p of opts.providers) {
+          providerEntries[p.name] = {
+            baseURL: p.baseURL,
+            apiKeyEnv: p.apiKeyEnv,
+            models: p.models.map((id) => ({ id })),
+            ...(p.displayName ? { displayName: p.displayName } : {}),
+          }
+        }
+        await ctx.loader.create({
+          name: '@deepseek-ai/dsh-llm-pi-ai',
+          config: { providers: providerEntries },
+        })
+      }
+
+      // 4. 注入 dsh-agent-default-model 的 defaultModel。
+      //    base patch 默认 provider='deepseek-official',但 zai-side 用
+      //    anthropic 路由,所以覆盖一下。
+      await ctx.loader.create({
+        name: '@deepseek-ai/dsh-agent-default-model',
+        config: {
+          provider: opts.providers[0]?.name ?? 'anthropic',
+          model: opts.defaultModel || (opts.providers[0]?.models[0] ?? ''),
+        },
+      })
+
+      // 5. 等待全部 plugin 完成挂载。
       await ctx.get('loader')?.await()
     },
 

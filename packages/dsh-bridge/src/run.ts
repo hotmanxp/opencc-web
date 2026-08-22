@@ -54,17 +54,16 @@ export async function* runOnce(opts: DshRunOptions): AsyncIterable<SessionEvent>
   }
 
   // ── 1. 构造 Agent（不应用 headless-runner 的 exit 语义）────────────
+  // 注:不再在 setup 里 provide('zaiPrompt') —— dsh-scope / dsh-tools /
+  // dsh-system-prompt 在 agent scope 内已自动注册同名 service,重复 provide
+  // 报 "service zaiPrompt has been registered at <scope>"。Prompt 内容
+  // 通过下面的 agent.followup(createUserMessage(...)) 传,不依赖 zaiPrompt。
   const { agent } = await agents.create({
     sessionId: SessionId(opts.sessionId),
     meta: { cwd: opts.cwd },
     agentOptions: {
       provider: opts.provider,
       model: opts.model,
-    },
-    setup: (agentCtx) => {
-      // 桥接 zai provider/model 选择（T1.4 真实 installModelSelection 调用）
-      // 当前 stub：仅记录 ctx 引用
-      agentCtx.set('zaiPrompt', opts.prompt)
     },
   })
 

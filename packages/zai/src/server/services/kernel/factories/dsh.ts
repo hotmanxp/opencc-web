@@ -49,16 +49,38 @@ export async function createDshKernelAdapter(
 ): Promise<KernelAdapter> {
   const bridge = await import('@zn-ai/dsh-bridge')
 
-  // ── 1. 长驻 Cordis ctx 装配（B1a T1.1） ─────────────────────────
+  // ── 1. 长驻 Cordis ctx 装配（B1a T1.1 + dsh-013 修复） ─────
+  //
+  // dsh-013 修复:zai-server 不是浏览器,无法走 dsh-host-apiproxy UI 配 key
+  // 流程。直接读 env (`ANTHROPIC_BASE_URL` / `ANTHROPIC_API_KEY` /
+  // `ANTHROPIC_DEFAULT_SONNET_MODEL`)构 provider profile,显式传给
+  // createDshRuntime,dsh-bridge 内部通过 cordis-plugin-loader 装载
+  // dsh-base patch + dsh-llm-pi-ai provider,让 dsh agents service 能查表。
+  //
+  // apiKeyEnv 是**引用**而非 key 本身 —— dsh-llm-pi-ai 每次请求按引用从
+  // `launchEnvironmentOf(ctx).get(ref)` 拉取,不在 zai 进程缓存。
+  const defaultModel =
+    cfg.settings.model
+    ?? process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
+    ?? process.env.ANTHROPIC_SMALL_FAST_MODEL
+    ?? ''
+  const anthropicApiKeyEnv =
+    process.env.ANTHROPIC_API_KEY ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN'
+  const anthropicProfile: import('@zn-ai/dsh-bridge').DshProviderProfile = {
+    name: 'anthropic',
+    displayName: 'Anthropic (Anthropic-compatible)',
+    baseURL:
+      process.env.ANTHROPIC_BASE_URL
+      ?? 'https://api.anthropic.com',
+    apiKeyEnv: anthropicApiKeyEnv,
+    models: defaultModel ? [defaultModel] : ['claude-3-5-sonnet-latest'],
+  }
   const handle = await bridge.createDshRuntime({
     dataDir: cfg.dataDir,
     runtimeId: 'zai-server-dsh',
     defaultCwd: cfg.cwd,
-    defaultModel:
-      cfg.settings.model
-      ?? process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
-      ?? process.env.ANTHROPIC_SMALL_FAST_MODEL
-      ?? '',
+    defaultModel,
+    providers: [anthropicProfile],
   })
   await handle.start()
 

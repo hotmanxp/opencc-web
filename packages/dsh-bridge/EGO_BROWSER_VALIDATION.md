@@ -357,3 +357,35 @@ ZAI_DRILL_PORT=8107 ZAI_DRILL_API_PORT=7724 bash scripts/kill-switch-drill.sh
 ### Phase 1.4 修复确认
 
 `scripts/kill-switch-drill.sh:216-217` 的 `${$}` → `$$` 修复已生效（脚本能解析并跑 Phase 1，无 bash syntax error）。
+
+---
+
+## 第五轮 — dsh-013 修复途中验证（2026-08-22）
+
+> **状态**：⚠️ **部分修复** + 阻塞报告
+> **执行人**：opencc-web sub-agent
+> **执行时间**：2026-08-22 (dsh-013 修复批次)
+
+### 场景验收结果
+
+| 场景 | 状态 | 截图 | 关键观察 |
+|------|------|------|---------|
+| 1. 对话流式 | ✅ (opencc 模式) | 无 | runtime delta 增量出现，"PONG" 响应正确返回；崩于测试期间 dsh dev 改造 |
+| 2. bash | ⚠️ (opencc 模式) | 无 | Bash 工具执行成功，`ls /tmp` 输出可见；伴随 SSE 重连抖动 |
+| 3. fs 工具 (Read) | ❌ | 无 | 未能触发 Read 工具；AI 收到指令后调用了 Bash 而非 fs/Read |
+| 4. ripgrep | ❌ | 无 | AI 理解 grep 需求但仍走 Bash，未见 Ripgrep/Grep 工具调用 |
+| 5. skill 加载 | ⚠️ | 无 | `/help` 和 `/skills` 均无技能列表响应 |
+| 6. 后台任务 | ❌ | 无 | 未见 `<task-notification>` 注入；无 taskId drawer 显示 |
+| 7. 会话历史恢复 | ⚠️ | 无 | 刷新后实例内为 7 项开发任务追踪，无传统 session 历史 UI |
+
+### 阻塞 / 失败汇总
+
+测试期间 dsh-bridge 处于 dsh-013 改造中(dsh-* 升 rc.8 + cordis-plugin-loader 接入 + dsh-llm-pi-ai provider 注册)，dev server 在 8113/8713 端口在 ego-browser 启动时崩于 `[initAgentRuntime] createKernel failed: Error: failed to apply loader entry 0f394a41 (@deepseek-ai/dsh-base): invalid plugin, expect function or object with an "apply" method, received object`。ego-browser agent 误连到 8102 仍跑的 opencc 模式 zai dev(PID 88467)，故场景 1/2 实际上跑在 opencc 模式，2/7 通过 = opencc 路径生效。
+
+后续 dsh-013 完整修复后(预计 1-2 天 launcher 集成批次)重跑此轮。
+
+### 综合判定
+
+**opencc 模式 2/7 通过** —— KernelAdapter 抽象层 + vendor OpenccRuntime 路径在 dsh-009/010 修完后端到端可工作(PONG / Bash 工具)。
+
+**dsh 模式未验证** —— dsh-013 部分修复（cordis-plugin-loader + dsh-llm-pi-ai + 自写最小 patch）已落地，但 agent-loop + tools/system-prompt 同步问题 + 模型响应路径未端到端验证，需继续 launcher 集成批次。

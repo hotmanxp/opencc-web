@@ -297,3 +297,23 @@ export const KNOWN_DIFFERENCES = {
 4. opencc 工厂对齐调用方式
 
 **单测引用**：`packages/dsh-bridge/IMPLEMENTATION_STATUS.md §3.2.1` 推迟说明 + 本文件 dsh-012。
+---
+
+### dsh-013 dsh-bridge 缺 dsh-launcher 集成（dsh 真实对话阻塞）
+
+**类别**：真实对话阻塞
+**影响事件类型**：dsh 模式下任何 prompt (`/api/agent/prompt`、bashNotifier 通知路径)
+**来源批次**：2026-08-22 ego-browser 验收前置
+**影响**：`packages/dsh-bridge/src/createDshRuntime.ts` 当前实现是「bare `new Context()` + 11 个 dsh-* import」，**绕过了 dsh-base 的 cordis patch**（没有走 dsh-cmdline 启动器）。dsh-base patch 声明的 `settings / credentials / jobs / typert* / llm-pi-ai / agent-default-model` 等 12+ core plugin 都没装载 — `ctx.settings` 不存在 → dsh-llm-pi-ai 的 `installSettingsSection(ctx, NS, Config, config)`（`ctx.inject(["settings"], ...)`）永远不 fire → adapter 不 register → `ctx.llm` 在 `agents` service 装上时无可用路由 → `bridge.runOnce()` 抛 `agents / sessions service unavailable — loader not mounted?`。任何 dsh 模式 prompt 直接 500,ego-browser 7 场景全部 fail 在场景 1。
+**可接受性**：**不可接受**（dsh 模式名义上分叉但不能跑真实对话,等价于"双轨未真正生效"）
+**处置**：需要 1-2 天的 launcher 集成批次,把 dsh-base 的整个 cordis patch 加载到 zai-server 的 dsh ctx 里。**不在本次 dsh-009/010 修复范围**（handoff 已标注为独立 Phase 5.x 批次）。候选路径:
+1. **直接复用 dsh-cmdline 启动器** —— `dsh-cmdline` 接收 bundle patches + 用户 cordis.patch.yml,可以以 zai-server 身份启动 dsh。zai-side 通过 `dshCmdline.createApp({patches: [dshBasePatch, dshBridgePatch, userPatch]})` 获得 dsh launcher 的 ctx,共享给 `dsh-bridge.createDshRuntime`。
+2. **手抄 dsh-base cordis.patch.yml** —— 在 dsh-bridge 内解析该 yaml,逐行 `ctx.plugin(name, config)`。维护成本高,与上游 patch drift 风险大。
+3. **写 `$DSH_HOME/settings.yaml` + 设置 dshHome env** —— 让 dsh-settings-file 自动装载,但仍需先把 dsh-base patch 加载好(否则 llm-pi-ai apply 拿不到 ctx.settings)。
+
+**临时验证手段**（可继续推进）：
+- ego-browser 走 **opencc 模式**（默认,Phase 5.1 未 commit,默认 opencc）—— 7 场景可以跑通,验证 KernelAdapter 抽象对齐 vendor 行为。
+- 真实 dsh 7 场景必须等 dsh-013 修复后再跑,会补一个新的 Phase 5.x 批次。
+
+---
+**🟡 部分修复（2026-08-22 后续 commit）**：详见 dsh-013 后续段落（"dsh-013 后续批次"），loader 装载 + provider 注册 + agent-loop 全装，但 tools/system-prompt 同步 + zaiPrompt provide + 模型响应路径还有 1-2 天收尾工作。
