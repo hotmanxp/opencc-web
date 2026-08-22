@@ -140,10 +140,13 @@ export function translateSessionEvent(
 
     case 'tool/call': {
       // 兼容不同 dsh 版本的 callId 字段名 — 主路径是 event.data.callId，
-      // 退化到 event.data.id。空串让前端 ToolCallBlock 走"未知工具"兜底
-      // 分支(已存在,见 MessageBubble.tsx),不至于 panic;映射表也不会
-      // 记下空 id(rememberToolName 内部有 if-guard)。
-      const callId = String(event.data.callId ?? event.data.id ?? '')
+      // 退化到 event.data.id (历史字段名,旧版本 dsh 用过)。空串让前端
+      // ToolCallBlock 走"未知工具"兜底分支(已存在,见 MessageBubble.tsx),
+      // 不至于 panic;映射表也不会记下空 id(rememberToolName 内部 if-guard)。
+      // event.data.id 不在当前 SessionEventMap 类型里,但 dsh 旧版本会带,
+      // 用 unknown-cast 兜底;newer 版本永远是 callId 命中第一条。
+      const dataAny = event.data as unknown as { id?: unknown }
+      const callId = String(event.data.callId ?? dataAny.id ?? '')
       const toolName = String(event.data.name ?? '')
       // 维护 callId → toolName 映射，供后续 tool/result 拿 name。
       // dsh ToolResultMessage 不携带 toolName（B1b 已知 — 见下方注释），
