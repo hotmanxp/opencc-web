@@ -206,6 +206,11 @@ export async function createDshKernelAdapter(
         sessionId: opts.session.sessionId,
         cwd: opts.session.cwd,
         prompt: promptText,
+        // dsh AgentOptions 仅支持 provider + model — 必须显式传,否则 dsh
+        // 在 agent/request waterfall 找不到 provider/model,抛
+        // "has no provider/model" 错误(B1a T1.4 收口)。
+        provider: anthropicProfile.name,
+        model: defaultModel || anthropicProfile.models[0],
       })) {
         const translated = bridge.translateSessionEvent(dshEvent, {
           sessionId: opts.session.sessionId,
