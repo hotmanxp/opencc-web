@@ -1,68 +1,46 @@
 import type { BashTaskInfo } from '@zn-ai/zn-agent-core'
-import {
-  getCurrentSessionId,
-  getKernelAdapter,
-  setCurrentSessionId,
-  hasActiveQuery,
-} from './agentRuntime.js'
-import { resolveModel } from '../lib/resolveModel.js'
-import { eventBus } from './eventBus.js'
 
 /**
- * BashNotifier:后台 Bash 任务完成时,给父 session 开一轮 query 让 LLM 感知。
+ * BashNotifier:后台 Bash 任务完成时,**不再**给父 session 开新一轮 query。
  *
- * 为什么需要这个模块:
- *   zai 是 headless,没有 REPL 那套 idle-subscriber(enqueue → signal → 自动
- *   drain + run)。后台 Bash 完成时若父 session **没有活跃 turn**(用户没对话、
- *   父 turn 已结束),就没有 query 去处理任务完成通知,LLM 收不到——这正是
- *   HRMSV3-ZN-WEBSITE#668 观察到的现象。
+ * 为什么不自动注入通知:
+ *   zai 是 headless,没有 REPL 那套 idle-subscriber。早期实现是后台 Bash 完成时
+ *   调 `adapter.run({prompt: <task-notification>, isMeta: true})` 给父 session 开
+ *   一轮新 query。但实测中,每个完成的后台任务都会触发一次 `adapter.run()`,
+ *   一次 TURN 结束如果积压了 N 个后台任务 → flushPendingBashNotifications 顺
+ *   序补发 N 个通知 → Agent 被强制拉起 N 个新 turn,每轮 1 次 API 调用,观察
+ *   到每次 TURN 结束后消息列表里追加一连串 assistant + BASH 工具调用。
+ *   用户要求:"不要往用户消息队列插入消息"。
  *
- * zai patch (2026-08-09): **不再依赖 vendor commandQueue drain**。
- *   背景(2026-08-09 的状态):LocalShellTask 被 esbuild 打包进
- *   `dist/opencc-core.mjs`(bundle 私有,见 compat/bashTracker.ts:389 的注释),
- *   它的 enqueueShellNotification 把 <task-notification> 写进 **bundle 内**的
- *   messageQueueManager commandQueue;而当时 runtime.query() 走
- *   `@zn-ai/zn-agent-core/opencc-server`(原 subpath,`dist/opencc-src/server/*.js`,
- *   与 bundle 是独立 module 实例),QueryEngine 的 mid-turn drain(query.ts:2644)
- *   读的是 **dist 的** commandQueue。两个 commandQueue 是不同 module 实例,
- *   通知永远 drain 不到 —— "通知作为系统消息插入"的假设完全失效(请求风暴
- *   根因:agent 收不到 dev 失败通知 → 盲目反复重启 dev → 每轮 1 次 API 调用
- *   雪崩,会话 sess-1786243017001 现场 78 次/分钟)。
- *   2026-08-16:opencc-server subpath 已废除,运行时统一主入口 = 单一 bundle
- *   实例,模块状态分裂问题不存在了。但本模块仍按 zai patch 的设计:不依赖
- *   vendor drain,直接用 BashTaskInfo 自己构造 <task-notification> 作为 prompt。
+ *   UI 仍通过 `bash_task.changed` SSE 看到后台任务状态变化(TaskDock 实时刷
+ *   新),但 Agent 不再被动接收 <task-notification>。后续若需要让 Agent 感知
+ *   后台完成,改为(1)用户主动发 prompt 时把已完成 task 摘要拼进 prompt,
+ *   或(2)走 `SubagentNotifier` 同样的 inbox 路径;在此之前本模块保持 no-op。
  *
- *   修复:这里用 BashTaskInfo 自己构造 <task-notification> 文本直接作为 prompt
- *   发给模型(与 SubagentNotifier 同构),不再依赖 vendor drain。running 守卫
- *   (hasActiveQuery)保留:主线活跃时通知**暂存**,主线结束由
- *   flushPendingBashNotifications 补发 —— 通知 query 不与主线并行、通知 query
- *   之间也互斥,杜绝并行 query 请求叠加。
+ * 历史背景(2026-08-09):曾用 `enqueueShellNotification` 走 vendor commandQueue
+ *   drain,bundle/double-module 问题导致通知永远 drain 不到 → 改用 BashTaskInfo
+ *   构造 prompt 调 `runtime.query()` 直发,但同样会被多任务积压放大。
+ *   2026-08-22:收到用户反馈后,决定**移除自动注入**,只保留事件桥 UI 状态显示。
  */
 export interface BashNotifierOptions {
-  /** 测试钩子:替换为 mock adapter。 */
-  getKernelAdapter?: typeof getKernelAdapter
+  /** 保留以兼容历史调用方 —— 当前 no-op,不再消费该字段。 */
+  getKernelAdapter?: unknown
 }
 
 let notifier: BashNotifier | null = null
 
-// zai patch (2026-08-09): 父 session 主线活跃时暂存的后台 Bash 完成通知。
-// 后台任务完成时若主线 query 正在跑,直接 inject 会与主线并行(通知 query
-// 加载完整父上下文,模型可能续跑主任务 → 重复执行 → 请求叠加)。主线结束
-// (agent.ts runQueryLoop finally)由 flushPendingBashNotifications 补发,
-// 保证通知 query 不与主线并行、互相之间也不并行。
+// zai patch (2026-08-22): 自动注入通知已禁用,不再向 pendingNotifications 写入;
+// 保留 Map + 仍接受 handle() 入参只为不让 stateBridge.ts / 老测试报错(其中
+// `__resetBashNotifierPendingForTests` 仍被测试使用)。实际不会触发任何 query。
 const pendingNotifications = new Map<string, BashTaskInfo[]>()
 
-/** 补发某 session 暂存的后台 Bash 完成通知。主线 query 结束(agent.ts finally)时调用。 */
+/**
+ * 主线 query 结束(agent.ts runQueryLoop finally)时调一次,清掉该 session
+ * 任何残留的 pending 项。**不再**补发通知 — UI 状态由 `bash_task.changed`
+ * SSE 推送实时更新,Agent 不再被后台任务完成拉起新 turn。
+ */
 export function flushPendingBashNotifications(sessionId: string): void {
-  const tasks = pendingNotifications.get(sessionId)
-  if (!tasks || tasks.length === 0) return
   pendingNotifications.delete(sessionId)
-  // 主线已结束(idle),重新走 handle —— running 守卫放行,注入通知。
-  for (const task of tasks) {
-    void (notifier?.handle({ sessionId, task }) ?? Promise.resolve()).catch((err) =>
-      console.warn('[BashNotifier] flush failed:', err),
-    )
-  }
 }
 
 /** 测试 seam:清空暂存队列。 */
@@ -111,96 +89,29 @@ function escapeXml(s: string): string {
 }
 
 export class BashNotifier {
-  private readonly getKernelAdapterFn: typeof getKernelAdapter
-
-  constructor(opts: BashNotifierOptions = {}) {
-    this.getKernelAdapterFn = opts.getKernelAdapter ?? getKernelAdapter
-  }
+  // 构造器保留 opts 以兼容历史 `new BashNotifier({ getKernelAdapter: ... })`
+  // 调用方(stateBridge 之外的测试、单测 setup)。当前 no-op,不再消费字段。
+  // eslint-disable-next-line @typescript-eslint/no-unused-vars
+  constructor(_opts: BashNotifierOptions = {}) {}
 
   /**
-   * bash_task.changed 回调。仅在任务进入 terminal 且携带有效 sessionId
-   * 时触发,fire-and-forget 往父 session 开一轮 query 注入通知。
-   * 异常仅 console.warn,不让后台回调把 server 弄崩。
+   * bash_task.changed 回调。**当前为 no-op** —— 不再触发任何 query,避免
+   * 后台任务完成时把 Agent 拉起新 turn(用户要求"不要往用户消息队列插入消息")。
+   *
+   * 仅保留入参守卫(task 终态校验、isBackgrounded 过滤、sessionId 兜底),与
+   * 之前语义保持一致,这样任何仍通过 stateBridge 调 `getBashNotifier().handle()`
+   * 的代码(测试、单测 setup)都不会出错。eventBus 的 `bash_task.changed` SSE
+   * 推送由 stateBridge 单独 emit,UI TaskDock 仍能看到任务状态变化。
    */
   async handle(e: { sessionId: string; task: BashTaskInfo }): Promise<void> {
     const task = e.task
     if (task.status !== 'completed' && task.status !== 'failed' && task.status !== 'killed') {
       return
     }
-    // zai patch (2026-08-09): 只对真后台任务通知 LLM。前台命令(运行 ≥2s
-    // 触发 registerForeground 的前台任务)完成时也会 emit bash_task.changed,
-    // 但它们的执行结果已经直接回到工具循环,不该再触发通知 query —— 对齐
-    // opencc 语义:只有 isBackgrounded 任务才 enqueueShellNotification。
-    // 会话 sess-1786201578807 现场:每个 ≥2s 的前台命令完成都触发一个并行
-    // runtime.query(),30 个并行循环共享"提交代码"上下文各自重跑 → 请求风暴。
     if (!task.isBackgrounded) return
     const sessionId = e.sessionId
-    if (!sessionId || sessionId === 'sess-unknown') return // 兜底:无父 session 的占位 ID
-
-    // zai patch (2026-08-09): running 守卫 —— 主 session 有活跃 query 时不
-    // 另起 query,通知暂存,主线结束后由 flushPendingBashNotifications 补发。
-    // 通知 query 自身不注册 sessionController,若主线活跃时仍走 inject,
-    // 多个通知会同时通过守卫 → 多个通知 query 并行、各自加载完整父上下文
-    // 续跑主任务 → 请求叠加。暂存保证通知 query 之间也互斥。
-    if (hasActiveQuery(sessionId)) {
-      const list = pendingNotifications.get(sessionId) ?? []
-      list.push(task)
-      pendingNotifications.set(sessionId, list)
-      return
-    }
-
-    try {
-      await this.inject(sessionId, task)
-    } catch (err) {
-      console.warn('[BashNotifier] inject failed:', err)
-    }
-  }
-
-  private async inject(sessionId: string, task: BashTaskInfo): Promise<void> {
-    const adapter = this.getKernelAdapterFn()
-
-    // 保留并恢复 currentSessionId,避免通知注入影响后续状态(与 SubagentNotifier 一致)。
-    const previousSessionId = getCurrentSessionId()
-
-    let resolvedModel: string
-    try {
-      resolvedModel = resolveModel({ sessionModel: null, cwd: process.cwd() }).model
-    } catch {
-      resolvedModel = 'MiniMax-M3'
-    }
-
-    try {
-      // 用 BashTaskInfo 构造 <task-notification> 直接作为 prompt。不再用占位
-      // prompt 依赖 vendor commandQueue drain —— 见文件头注释:通知 enqueue 在
-      // bundle 的 commandQueue,runtime.query() 的 QueryEngine 读 dist 的队列,
-      // drain 永远取不到(请求风暴根因)。isMeta 保持 UI 隐藏(通知是系统注入,
-      // 不该显示成用户消息)。
-      //
-      // B7 flip-and-cleanup (dsh-009/010): 走 KernelAdapter 工厂分叉。adapter.run()
-      // 内部已接 vendor runtime.query() + translateRuntimeEvents(后者在 opencc factory
-      // 内部闭合);通知路径不再需要手动调 translateRuntimeEvents + runtime.query。
-      const cwd = process.cwd()
-      const session = await adapter.resumeSession({ cwd, sessionId })
-      const events = adapter.run({
-        prompt: renderBashNotificationMessage(task),
-        session,
-        model: resolvedModel,
-        isMeta: true,
-      })
-      try {
-        for await (const ev of events) {
-          eventBus.emit(ev)
-          const t = (ev as { type?: string }).type
-          if (t === 'runtime.done' || t === 'runtime.aborted' || t === 'runtime.error') break
-        }
-      } catch (streamErr) {
-        console.warn('[BashNotifier] stream iteration failed:', streamErr)
-      }
-    } finally {
-      if (previousSessionId !== null) {
-        setCurrentSessionId(previousSessionId)
-      }
-    }
+    if (!sessionId || sessionId === 'sess-unknown') return
+    // 故意 no-op:不再调 adapter.run(),不再写 pendingNotifications。
   }
 }
 

@@ -88,30 +88,25 @@ afterEach(() => {
 })
 
 describe('BashNotifier.handle', () => {
-  test('completed + 有效 sessionId → 触发通知 query,携带 <task-notification> 内容', async () => {
+  // zai patch (2026-08-22): BashNotifier 不再自动注入 <task-notification> 触发
+  // 新 turn。handle() 是 no-op,只保留入参守卫避免静默吞掉异常。
+  // UI 仍通过 stateBridge 'bash_task.changed' SSE 推送任务状态。
+  test('任何合法入参都不触发 adapter.run(已禁用自动注入)', async () => {
     const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({ sessionId: 'sess-parent', task: makeTask() })
-    expect(lastRunOpts).not.toBeNull()
-    expect(lastRunOpts.session.sessionId).toBe('sess-parent')
-    expect(lastRunOpts.prompt).toContain('<task-notification>')
-    expect(lastRunOpts.prompt).toContain('<task-id>bash-1</task-id>')
-    expect(lastRunOpts.prompt).toContain('<status>completed</status>')
-    // 不再依赖 vendor commandQueue drain:真实通知内容直接作为 prompt,
-    // 而不是占位引导(isMeta 保持 UI 隐藏)。
-    expect(lastRunOpts.isMeta).toBe(true)
+    expect(lastRunOpts).toBeNull()
+    expect(queryCalls).toBe(0)
   })
 
-  test('failed / killed → 同样触发通知 query,summary 反映失败', async () => {
+  test('failed / killed → 同样 no-op,不触发 query', async () => {
     const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({
       sessionId: 'sess-parent',
       task: makeTask({ status: 'failed', exitCode: 1 }),
     })
-    expect(lastRunOpts.prompt).toContain('<status>failed</status>')
-    expect(lastRunOpts.prompt).toContain('failed with exit code 1')
     await n.handle({ sessionId: 'sess-parent', task: makeTask({ status: 'killed' }) })
-    expect(lastRunOpts.prompt).toContain('<status>killed</status>')
-    expect(lastRunOpts.prompt).toContain('was stopped')
+    expect(lastRunOpts).toBeNull()
+    expect(queryCalls).toBe(0)
   })
 
   test('status=running (非 terminal) → 不触发 query', async () => {
@@ -141,33 +136,29 @@ describe('BashNotifier.handle', () => {
     expect(lastRunOpts).toBeNull()
   })
 
-  test('主线有活跃 query (running 守卫) → 通知暂存,不另起 query', async () => {
+  test('主线有活跃 query → 仍 no-op(已禁用,守卫随之失效)', async () => {
     registerSessionController('sess-parent', new AbortController())
     const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({ sessionId: 'sess-parent', task: makeTask() })
-    // 主线活跃时绝不并行起 query
     expect(lastRunOpts).toBeNull()
     expect(queryCalls).toBe(0)
   })
 
-  test('主线结束后 flushPendingBashNotifications → 补发注入通知', async () => {
-    // flush 走模块单例,先注册带 mock runtime 的单例
+  test('主线结束后 flushPendingBashNotifications → 仅清 pending,不补发', async () => {
     __setBashNotifier(new BashNotifier({ getKernelAdapter: () => mockAdapter as any }))
     registerSessionController('sess-parent', new AbortController())
     const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({ sessionId: 'sess-parent', task: makeTask() })
     expect(queryCalls).toBe(0)
-    // 主线结束(idle),flush 补发 → 通知 query 起来,内容完整
     releaseSessionController('sess-parent')
     flushPendingBashNotifications('sess-parent')
-    // flush 是 fire-and-forget,等微任务
     await new Promise((r) => setTimeout(r, 10))
-    expect(queryCalls).toBe(1)
-    expect(lastRunOpts.session.sessionId).toBe('sess-parent')
-    expect(lastRunOpts.prompt).toContain('<task-id>bash-1</task-id>')
+    // 关键断言:flush 后**没有**任何 query 起来。
+    expect(queryCalls).toBe(0)
+    expect(lastRunOpts).toBeNull()
   })
 
-  test('主线活跃时多个通知全部暂存,flush 后逐个补发(通知 query 之间不并行)', async () => {
+  test('主线活跃时多个通知全部被丢弃,flush 后不补发', async () => {
     __setBashNotifier(new BashNotifier({ getKernelAdapter: () => mockAdapter as any }))
     registerSessionController('sess-parent', new AbortController())
     const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
@@ -178,21 +169,8 @@ describe('BashNotifier.handle', () => {
     releaseSessionController('sess-parent')
     flushPendingBashNotifications('sess-parent')
     await new Promise((r) => setTimeout(r, 10))
-    // 3 条通知串行补发,互不并行
-    expect(queryCalls).toBe(3)
-  })
-
-  test('adapter.run() 抛错 → handle 不抛,仅 console.warn', async () => {
-    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const broken = {
-      kernel: 'opencc',
-      run: () => {
-        throw new Error('runtime blew up')
-      },
-    }
-    const n = new BashNotifier({ getKernelAdapter: () => broken as any })
-    await expect(n.handle({ sessionId: 'sess-parent', task: makeTask() })).resolves.toBeUndefined()
-    expect(warn).toHaveBeenCalled()
+    // 3 个通知全部被丢弃,无任何 query
+    expect(queryCalls).toBe(0)
   })
 })
 
