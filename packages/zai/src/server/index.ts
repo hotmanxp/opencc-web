@@ -25,6 +25,7 @@ import v2TasksRouter from './routes/v2Tasks.js';
 import sessionStateRouter from './routes/sessionState.js';
 import { slashRouter } from './routes/slash.js';
 import bashTasksRouter from './routes/bashTasks.js';
+import subagentTasksRouter from './routes/subagentTasks.js';
 import bashReplRouter from './routes/bashRepl.js';
 import replHistoryRouter from './routes/replHistory.js';
 import transcriptRouter from './routes/transcript.js';
@@ -218,6 +219,7 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   app.use('/api/weixin', weixinRouter);
   app.use('/api', tasksRouter);
   app.use('/api', bashTasksRouter);
+  app.use('/api', subagentTasksRouter);
   app.use('/api', bashReplRouter);
   app.use('/api', replHistoryRouter);
   // V2 TaskList 只读路由 — zai-web 进会话时 GET 一次把 server 端

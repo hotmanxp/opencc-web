@@ -46,6 +46,29 @@ function readCurrentSessionId(): string | undefined {
   return typeof v === 'string' && v.length > 0 ? v : undefined
 }
 
+/**
+ * dsh-019: dsh-mode subagent control 桥 — dsh factory 在 `initDshRuntime`
+ * 时把 dsh-bridge 的 subagent API 写到 `globalThis.__zaiDshSubagentControl`。
+ * zai compat `subagentControl` 检测到该桥存在 → 走 dsh 模式;否则
+ * 走原 BackgroundRuntime(opencc 模式)。
+ */
+interface DshSubagentControlBridge {
+  list: (parentSessionId?: string) => Promise<Array<{
+    id: string
+    status: string
+    description?: string
+  }>>
+  cancel: (taskId: string) => Promise<{ ok: boolean }>
+  sendMessage: (taskId: string, prompt: string) => Promise<{ ok: boolean }>
+}
+
+function tryGetDshSubagentControl(): DshSubagentControlBridge | null {
+  const fromGlobal = (globalThis as {
+    __zaiDshSubagentControl?: DshSubagentControlBridge
+  }).__zaiDshSubagentControl
+  return fromGlobal ?? null
+}
+
 export interface SubagentControlInput {
   action: 'send_message' | 'interrupt_agent' | 'list_agents'
   task_id?: string
@@ -77,6 +100,40 @@ function asError(err: unknown): string {
 async function executeImpl(
   input: SubagentControlInput,
 ): Promise<SubagentControlOutput> {
+  // dsh-019: dsh 模式优先 — zai dsh factory 在 init 时把 dsh-bridge 的
+  // subagent API 写到 globalThis.__zaiDshSubagentControl。命中即用。
+  const dsh = tryGetDshSubagentControl()
+  if (dsh) {
+    if (input.action === 'send_message') {
+      if (!input.task_id || !input.message) {
+        return { ok: false, error: 'send_message 需要 task_id 和 message' }
+      }
+      try {
+        return await dsh.sendMessage(input.task_id, input.message)
+      } catch (err) {
+        return { ok: false, error: asError(err) }
+      }
+    }
+    if (input.action === 'interrupt_agent') {
+      if (!input.task_id) {
+        return { ok: false, error: 'interrupt_agent 需要 task_id' }
+      }
+      try {
+        return await dsh.cancel(input.task_id)
+      } catch (err) {
+        return { ok: false, error: asError(err) }
+      }
+    }
+    // list_agents
+    const sessionId = readCurrentSessionId()
+    try {
+      const agents = await dsh.list(sessionId)
+      return { agents }
+    } catch (err) {
+      return { ok: false, error: asError(err) }
+    }
+  }
+
   const bg = tryGetBg()
   if (!bg) {
     return {

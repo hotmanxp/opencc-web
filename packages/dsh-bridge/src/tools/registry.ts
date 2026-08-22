@@ -62,6 +62,11 @@ export interface RegisterZaiToolsOptions {
    */
   getAgentsService?: () => unknown
   /**
+   * dsh-019 新增：传真实 cordis ctx — spawnDshSubagent 内部 createScope
+   * 需要 ctx.plugin(scope)。不传则 fallback 到 stub(会报 ctx.plugin)。
+   */
+  getDshCtx?: () => Context | undefined
+  /**
    * dsh-017 新增：subagent 任务启动 sink — 转发到 zai `subagentTracker` (类比
    * bashBackgroundTracker),让 UI TaskDock 看到 dsh subagent 任务。
    */
@@ -124,6 +129,7 @@ export async function registerZaiTools(
     cwd: opts.cwd,
     getParentSessionId: opts.getSessionId ?? (() => undefined),
     getAgentsService: opts.getAgentsService,
+    getDshCtx: opts.getDshCtx ?? (() => ctx),
     onTaskStart: opts.onTaskStart,
     onTaskFinish: opts.onTaskFinish,
   }))

@@ -175,16 +175,17 @@ export async function spawnDshSubagent(
       createDshSubagentScope(ctx, { parentScopeKey, childScopeKey })
 
       // 2. 在父子 scope 关联后创建 child agent（dsh-agent 内部会走 scope 链）
+      // dsh-019 修复:之前 setup callback 用 agentCtx.set('zaiXxx', ...) 注入
+      // 父 session id / task id / scope key — 但 cordis `set` 要求 prop
+      // 之前 `provide` 过,否则抛 "cannot set property X without provide"
+      // 错误。taskStore.ts 自己维护的 DshTaskState (已写入
+      // ~/.zai/tasks-dsh/<taskId>.json) 是 ground truth,parentSessionId
+      // 和 taskId 通过 childSessionId (我们造的 `<taskId>-session`) 隐式
+      // 关联,不需要 ctx 注入。删掉 setup callback。
       const { agent } = await agents.create({
         sessionId: SessionId(childSessionId),
         meta: { cwd: opts.cwd },
         agentOptions: opts.model ? { model: opts.model } : undefined,
-        setup: (agentCtx) => {
-          agentCtx.set('zaiParentSessionId', opts.parentSessionId ?? '')
-          agentCtx.set('zaiTaskId', taskId)
-          // Phase 3.1：把 scope key 标到 ctx，让 plugin tree 可识别子维度
-          agentCtx.set('zaiSubagentScopeKey', childScopeKey)
-        },
       })
 
       await agent.whenIdle()
@@ -289,5 +290,82 @@ export async function notifyParentSession(
     existing.result = notification.result
     existing.error = notification.error
     await writeDshTask(existing)
+  }
+}
+
+// ====== dsh-019: dsh subagent lifecycle API (供 zai compat subagentControlTool 桥接) ======
+
+/**
+ * 父 session id → 该 session spawn 的 subagent 任务列表。供 zai compat
+ * `subagent_control.list_agents` 实现查询。
+ */
+export async function listDshSubagents(
+  ctx: Context,
+  parentSessionId?: string,
+): Promise<DshTaskState[]> {
+  const all = await listDshTasks()
+  return all
+    .filter((t) => !parentSessionId || t.parentSessionId === parentSessionId)
+    .sort((a, b) => b.startedAt - a.startedAt)
+}
+
+/**
+ * 中止一个运行中的 dsh subagent。调 dsh Agent.cancel + 写盘 mark cancelled。
+ * 供 zai compat `subagent_control.interrupt_agent` 实现调用。
+ */
+export async function interruptDshSubagent(
+  ctx: Context,
+  taskId: string,
+): Promise<DshTaskState | null> {
+  const existing = await readDshTask(taskId)
+  if (!existing) return null
+  if (existing.status !== 'running') return existing
+  // 调 dsh Agent.cancel（dsh-agent 接口）
+  try {
+    const agents = ctx.get('agents') as {
+      get?: (id: unknown) => { cancel?: (cause: { kind: 'user' }) => void } | undefined
+    } | undefined
+    const handle = agents?.get?.(existing.sessionId)
+    handle?.cancel?.({ kind: 'user' })
+  } catch (err) {
+    console.warn(`[dsh-bridge] interruptDshSubagent ${taskId} cancel failed:`, err)
+  }
+  // 写盘 mark cancelled
+  const updated: DshTaskState = {
+    ...existing,
+    status: 'cancelled',
+    finishedAt: Date.now(),
+  }
+  await writeDshTask(updated)
+  return updated
+}
+
+/**
+ * 给运行中的 dsh subagent 投消息（DSH session-level message via agent.followup）。
+ * 供 zai compat `subagent_control.send_message` 实现调用。
+ */
+export async function sendMessageToDshSubagent(
+  ctx: Context,
+  taskId: string,
+  prompt: string,
+): Promise<{ ok: boolean; error?: string }> {
+  const existing = await readDshTask(taskId)
+  if (!existing) return { ok: false, error: 'task not found' }
+  if (existing.status !== 'running') return { ok: false, error: `task status is ${existing.status}` }
+  try {
+    const agents = ctx.get('agents') as {
+      get?: (id: unknown) => { followup?: (msg: unknown) => void } | undefined
+    } | undefined
+    const handle = agents?.get?.(existing.sessionId)
+    if (!handle?.followup) return { ok: false, error: 'agent unavailable' }
+    handle.followup(
+      createUserMessage({
+        content: [{ type: 'text', text: prompt }],
+        source: { kind: 'user' },
+      }),
+    )
+    return { ok: true }
+  } catch (err) {
+    return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
 }

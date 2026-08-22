@@ -239,6 +239,19 @@ const StateEvent = z.discriminatedUnion('type', [
     nextFireAt: z.number(),
     action: z.enum(['create', 'delete', 'list', 'fire']),
   }),
+  // dsh-019: dsh-mode subagent 任务生命周期变化。UI 用此事件维护
+  // TaskDrawer "Subagents" tab 实时状态。
+  z.object({
+    ...Base.shape,
+    type: z.literal('subagent.changed'),
+    sessionId: z.string(),
+    taskId: z.string(),
+    description: z.string(),
+    status: z.enum(['running', 'done', 'failed', 'cancelled']),
+    result: z.string().optional(),
+    error: z.string().optional(),
+    action: z.enum(['start', 'finish']),
+  }),
 ])
 
 // instance.* — 中央实例管理器的状态变更广播. isGlobalEvent 登记, 所有 tab 实时收到.

@@ -39,6 +39,22 @@ export interface StateChangeEventMap {
     nextFireAt: number
     action: 'create' | 'delete' | 'list' | 'fire'
   }
+  /**
+   * dsh-019 新增:dsh-mode subagent 任务生命周期变化(zai-side dsh factory
+   * 转发 dsh-bridge `onTaskStart` / `onTaskFinish` 回调)。payload 含 taskId /
+   * description / status,running 时 UI 显示 spinner,完成时自动移除。
+   * zai-side stateBridge 翻译成 ServerEvent `subagent.changed` 推到前端,
+   * 供 UI 单独的 Subagents tab 实时刷新。
+   */
+  'subagent.changed': {
+    sessionId: string
+    taskId: string
+    description: string
+    status: 'running' | 'done' | 'failed' | 'cancelled'
+    result?: string
+    error?: string
+    action: 'start' | 'finish'
+  }
 }
 
 type Listener<E, K extends keyof E> = (payload: E[K]) => void

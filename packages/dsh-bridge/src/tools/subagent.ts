@@ -58,6 +58,14 @@ export interface AgentToolOptions {
    */
   getAgentsService?: () => import('@deepseek-ai/dsh-agent').Agent | unknown | undefined
   /**
+   * dsh-019 修复:`ctx.plugin is not a function` 错误 — spawnDshSubagent 内部
+   * 用 `createScope(parentCtx, ...)` 创建子 scope,需要 parentCtx.plugin(scope)
+   * 装载 scope 内部 cordis 实例。stub ctx(只 mock get)缺 plugin 方法,
+   * 报 "ctx.plugin is not a function"。zai 端传真实 handle.ctx 走这条路,
+   * getAgentsService 仍保留(供 ctx.get('agents') fallback)。
+   */
+  getDshCtx?: () => Context | undefined
+  /**
    * 子任务启动 sink — 转发到 zai `subagentTracker` (类比 bashBackgroundTracker),
    * 让 UI TaskDock 看到 dsh subagent 任务。不传则不注册。
    */
@@ -181,24 +189,31 @@ export function createAgentTool(opts: AgentToolOptions) {
 
       let handle
       try {
-        // dsh-tools `ToolRunContext` 没有 cordis ctx — 拿不到 ctx.get('agents')。
-        // 改走 opts.getAgentsService (zai 端预解析的 dsh agents service)。
-        // 兜底:如果没传,从 ctxObj.agent.session 上找(但 session 不一定有
-        // ctx 引用);Phase 1 直接要求 zai 端必须传 getAgentsService。
+        // dsh-019 修复:用真实 cordis ctx(必须能调 ctx.plugin(scope)装载
+        // 子 scope)。getDshCtx 优先(传真实 ctx),fallback 到 stub(只
+        // mock get('agents'),够 spawnDshSubagent 跑但 createScope 会失败)。
+        const realCtx = opts.getDshCtx?.()
         const agentsService = opts.getAgentsService?.()
-        if (!agentsService) {
+        let ctx: Context
+        if (realCtx) {
+          ctx = realCtx
+        } else if (agentsService) {
+          // stub fallback — 仅 mock get('agents'),createScope 内部会失败
+          ctx = {
+            get: (key: string) => key === 'agents' ? agentsService : undefined,
+          } as unknown as Context
+          console.warn(
+            '[dsh-bridge] Agent tool: getDshCtx not provided by zai-side, ' +
+            'falling back to stub ctx — subagent spawn will fail with "ctx.plugin is not a function"',
+          )
+        } else {
           return {
-            output: '[error] dsh-bridge Agent tool: getAgentsService not provided by zai-side wiring',
+            output: '[error] dsh-bridge Agent tool: neither getDshCtx nor getAgentsService provided by zai-side wiring',
             taskId: '',
             status: 'failed' as const,
           }
         }
-        // 直接用 agents service,不走 ctx.get。spawnDshSubagent 内部我们
-        // 临时 hack: 用一个 stub ctx 满足类型,get('agents') 不会被调用。
-        const stubCtx = {
-          get: (key: string) => key === 'agents' ? agentsService : undefined,
-        } as unknown as Context
-        handle = await spawnDshSubagent(stubCtx, {
+        handle = await spawnDshSubagent(ctx, {
           parentSessionId,
           // cast 子集到完整 Agent — spawnDshSubagent 内部只用 followup /
           // session（notifications）;dsh Agent 的其他字段不需要。

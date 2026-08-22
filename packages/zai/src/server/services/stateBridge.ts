@@ -70,12 +70,30 @@ export function initStateBridge(): () => void {
   }
   stateChangeBus.on('cron.changed', onCronChanged)
 
+  // dsh-019: dsh-mode subagent 任务生命周期 — zai-side dsh factory
+  // 转发 dsh-bridge `onTaskStart` / `onTaskFinish` 回调,stateBridge
+  // 翻译成 ServerEvent 'subagent.changed' 推到前端。UI TaskDrawer
+  // Subagents tab 用此事件实时刷新(spinner / 自动移除 / interrupt)。
+  const onSubagentChanged = (e: {
+    sessionId: string
+    taskId: string
+    description: string
+    status: 'running' | 'done' | 'failed' | 'cancelled'
+    result?: string
+    error?: string
+    action: 'start' | 'finish'
+  }) => {
+    eventBus.emit({ type: 'subagent.changed', ...e })
+  }
+  stateChangeBus.on('subagent.changed', onSubagentChanged)
+
   _stateBridgeDispose = () => {
     stateChangeBus.off('cwd.changed', onCwdChanged)
     stateChangeBus.off('bash_task.changed', onBashTaskChanged)
     stateChangeBus.off('v2_task.changed', onV2TaskChanged)
     stateChangeBus.off('agent_task.changed', onAgentTaskChanged)
     stateChangeBus.off('cron.changed', onCronChanged)
+    stateChangeBus.off('subagent.changed', onSubagentChanged)
   }
   return _stateBridgeDispose
 }

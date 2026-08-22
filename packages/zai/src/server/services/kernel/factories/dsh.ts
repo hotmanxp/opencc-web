@@ -143,6 +143,11 @@ export async function createDshKernelAdapter(
     getAgentsService: () => {
       return handle.ctx.get('agents')
     },
+    // dsh-019 修复 `ctx.plugin is not a function` — 传真实 cordis ctx,
+    // 让 spawnDshSubagent 内部 createScope 能调 ctx.plugin(scope) 装载
+    // 子 scope(单传 agents service 不够,因为 createScope 走 plugin 而
+    // 不是 ctx.get)。
+    getDshCtx: () => handle.ctx,
     onTaskStart: ({ taskId, description, prompt }) => {
       // dsh-017: 复用 bashBackgroundTracker 显示 subagent 任务(同 tracker
       // 但 description 是 prompt 摘要,command 字段填 taskId 方便辨识)。
@@ -152,13 +157,33 @@ export async function createDshKernelAdapter(
         description: prompt.slice(0, 200),
         startedAt: Date.now(),
       })
+      // dsh-019: 推 subagent.changed 事件 — zai-side stateBridge
+      // 翻译成 ServerEvent 'subagent.changed' 推到前端,UI Subagents
+      // tab 用此事件实时刷新(spinner + interrupt 按钮)。
+      stateChangeBus.emit('subagent.changed', {
+        sessionId: getCurrentSessionId() ?? '',
+        taskId,
+        description,
+        status: 'running',
+        action: 'start',
+      } as never)
     },
-    onTaskFinish: ({ taskId, status }) => {
+    onTaskFinish: ({ taskId, status, error }) => {
       bashTracker.markFinished(
         taskId,
         status === 'done' ? 'completed' : status === 'cancelled' ? 'killed' : 'failed',
         {},
       )
+      // dsh-019: 推 subagent.changed 事件(action=finish),让 UI 自动
+      // 移除 spinner,显示 result/error。
+      stateChangeBus.emit('subagent.changed', {
+        sessionId: getCurrentSessionId() ?? '',
+        taskId,
+        description: '',
+        status: status === 'cancelled' ? 'cancelled' : status === 'done' ? 'done' : 'failed',
+        action: 'finish',
+        ...(error ? { error } : {}),
+      } as never)
     },
     onTaskChange: ({ sessionId, task, action }) => {
       // dsh-017: 转发到 stateChangeBus,让 zai-side stateBridge
@@ -264,6 +289,44 @@ export async function createDshKernelAdapter(
   })
   for (const key of ZAI_GLOBAL_BRIDGE_KEYS) {
     trackZaiGlobalBridge(key, (globalThis as any)[key])
+  }
+
+  // ── 2.5 dsh-019: __zaiDshSubagentControl 桥 ──────────────────────────
+  // 把 dsh-bridge 的 subagent 3 件套(list/cancel/sendMessage)通过
+  // globalThis 暴露给 zai compat `subagentControl` 工具(opencc-src/tools
+  // /opencc/subagentControl.ts 检测此桥存在则走 dsh 模式,否则走原
+  // BackgroundRuntime — opencc 模式)。这样 dsh 模式下 LLM 调
+  // subagent_control 工具时,能列/中断/给 dsh subagent 投消息。
+  ;(globalThis as {
+    __zaiDshSubagentControl?: {
+      list: (parentSessionId?: string) => Promise<Array<{ id: string; status: string; description?: string }>>
+      cancel: (taskId: string) => Promise<{ ok: boolean }>
+      sendMessage: (taskId: string, prompt: string) => Promise<{ ok: boolean }>
+    }
+  }).__zaiDshSubagentControl = {
+    list: async (parentSessionId?: string) => {
+      const tasks = await bridge.listDshSubagents(handle.ctx, parentSessionId)
+      return tasks.map((t) => ({
+        id: t.taskId,
+        status: t.status,
+        ...(t.prompt ? { description: t.prompt.slice(0, 120) } : {}),
+      }))
+    },
+    cancel: async (taskId: string) => {
+      try {
+        const updated = await bridge.interruptDshSubagent(handle.ctx, taskId)
+        return { ok: updated != null }
+      } catch (err) {
+        return { ok: false }
+      }
+    },
+    sendMessage: async (taskId: string, prompt: string) => {
+      try {
+        return await bridge.sendMessageToDshSubagent(handle.ctx, taskId, prompt)
+      } catch {
+        return { ok: false }
+      }
+    },
   }
 
   let startedAt = Date.now()
