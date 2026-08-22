@@ -75,6 +75,7 @@ export async function createOpenccKernelAdapter(
 ): Promise<KernelAdapter> {
   const { createOpenccRuntime } = await import('@zn-ai/zn-agent-core')
   const { resolveMainAgent } = await import('../../mainAgents.js')
+  const { getTranscriptStore } = await import('../../agentRuntime.js')
 
   // ─── 启动 ────────────────────────────────────────────────────────
   const settings = cfg.settings
@@ -172,24 +173,39 @@ export async function createOpenccKernelAdapter(
       return toAgentSession(opts.sessionId, opts.cwd)
     },
 
-    async listSessions(_opts): Promise<SessionMeta[]> {
-      // vendor runtime 的 listSessions 暴露在本批未对齐；后续 B3 T3.1 通过
-      // compat/transcript/persistence.ts 的目录扫描补充完整元信息。
-      return []
+    async listSessions(opts): Promise<SessionMeta[]> {
+      if (stopped) throw new Error('[opencc-adapter] shutdown, refusing list')
+      // 走 vendor TranscriptStore.list — 主计划 §3.1 listSessions 能力面对齐
+      // 与 routes/agent.ts:1586 同款调用
+      const store = getTranscriptStore()
+      const entries = await store.list({ cwd: opts.cwd, excludeSubagent: true })
+      return entries.map((entry) => ({
+        sessionId: entry.sessionId,
+        title: entry.title ?? entry.sessionId,
+        cwd: opts.cwd,
+        createdAt: entry.createdAt ?? 0,
+        firstSeq: 0,
+      }))
     },
 
-    async deleteSession(_opts) {
-      // vendor runtime 当前未提供 delete；B3 阶段接入 transcriptStore.deleteSession。
+    async deleteSession(opts) {
+      if (stopped) throw new Error('[opencc-adapter] shutdown, refusing delete')
+      const store = getTranscriptStore()
+      await store.remove(opts.sessionId, opts.cwd ? { cwd: opts.cwd } : undefined)
     },
 
     // ─── 驱动 ──────────────────────────────────────────────────
     async *run(opts): AsyncIterable<ServerEvent> {
       if (stopped) throw new Error('[opencc-adapter] shutdown, refusing run')
       totalTurns++
-      // B0 stub：返回空 stream。B1b T1.6 完整接入 routes/agent.ts 的 prompt 路径。
+      // Phase 2.2 partial real-wiring:
+      //   - run() 真实接线需 432 行 translateRuntimeEvents 移出 routes/agent.ts，
+      //     避免循环依赖。本次留 stub + TODO（B1b T1.6 + B7 完整迁移负责）。
+      //   - 当前生产路径（routes/agent.ts:1095）仍直接调 runtime.query()，
+      //     未经本 adapter — B7 flip-and-cleanup 阶段统一接入。
       void opts
       void runtime
-      // 触发 yield 类型校验，让 TS 强制 ServerEvent 形态在 stub 阶段就可识别
+      // 类型校验触发：保持 ServerEvent 类型在 stub 阶段被引用
       if (false as boolean) {
         yield {
           type: 'server.connected',
@@ -206,12 +222,30 @@ export async function createOpenccKernelAdapter(
     },
 
     // ─── transcript ────────────────────────────────────────────
-    async patchTranscript(_opts) {
-      // B0 桩：B3 T3.1 完整对接 compat/transcript/persistence.ts
+    async patchTranscript(opts) {
+      if (stopped) throw new Error('[opencc-adapter] shutdown, refusing patchTranscript')
+      const store = getTranscriptStore()
+      // TranscriptStore.patch 接受单个 patch 对象；KernelAdapter 接受 entries 数组。
+      // 逐条调用 — vendor 内部保证 idempotent 与 last-write-wins 顺序。
+      for (const entry of opts.entries) {
+        await store.patch(opts.session.sessionId, entry as unknown as Record<string, unknown>, opts.session.cwd ? { cwd: opts.session.cwd } : undefined)
+      }
     },
 
-    async *readTranscript(_opts): AsyncIterable<TranscriptEntry> {
-      // B0 占位 — 由 B3 T3.3 替换为从 vendor runtime 重建。
+    async *readTranscript(opts): AsyncIterable<TranscriptEntry> {
+      if (stopped) throw new Error('[opencc-adapter] shutdown, refusing readTranscript')
+      const store = getTranscriptStore()
+      const result = await store.read(opts.session.sessionId, { cwd: opts.session.cwd })
+      const entries = result.messages as Array<{ kind?: string; ts?: number; [k: string]: unknown }>
+      let seq = opts.sinceSeq ?? 0
+      for (const e of entries) {
+        yield {
+          seq: seq++,
+          kind: (e.kind ?? 'user') as TranscriptEntry['kind'],
+          ts: e.ts ?? Date.now(),
+          payload: e as Record<string, unknown>,
+        }
+      }
     },
 
     // ─── 回调 ──────────────────────────────────────────────────
@@ -231,8 +265,19 @@ export async function createOpenccKernelAdapter(
     },
 
     // ─── 队列 / metrics ────────────────────────────────────────
-    async enqueue(_opts) {
-      // 沿用现有 sessionInbox.followup；B0 仅占位。
+    async enqueue(opts) {
+      if (stopped) throw new Error('[opencc-adapter] shutdown, refusing enqueue')
+      const { sessionInbox } = await import('../../sessionInbox.js')
+      // KernelAdapter.enqueue 接受 QueuePayload；映射到 InboxMessage（source.kind 由 caller 决定）
+      sessionInbox.followup(opts.session.sessionId, {
+        id: `enq-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`,
+        source: {
+          kind: opts.payload.source ?? 'user',
+          form: 'text',
+        },
+        content: opts.payload.text,
+        createdAt: Date.now(),
+      })
     },
 
     metrics(): KernelMetrics {
