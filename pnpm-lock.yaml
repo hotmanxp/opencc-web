@@ -71,6 +71,9 @@ importers:
       '@deepseek-ai/dsh-user-approval':
         specifier: 0.1.0-rc.7
         version: 0.1.0-rc.7(wrrsegpdvl4bbksvjuvkzvvqjy)
+      '@modelcontextprotocol/sdk':
+        specifier: ^1.0.0
+        version: 1.30.0(zod@3.25.76)
     devDependencies:
       typescript:
         specifier: ^5.6.0
