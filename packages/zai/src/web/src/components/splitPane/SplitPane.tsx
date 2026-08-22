@@ -4,6 +4,7 @@ import { LockOutlined, UnlockOutlined } from '@ant-design/icons';
 import { GitTab } from './GitTab.js';
 import { FsTab } from './FsTab.js';
 import { BashTab } from './BashTab.js';
+import { SubagentsTab } from './SubagentsTab.js';
 import { useAgentStore } from '../../store/useAgentStore.js';
 import { useAppStore } from '../../store/useAppStore.js';
 import {
@@ -163,6 +164,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
               { key: 'fs', label: 'Files', children: <FsTab cwd={cwd} /> },
               { key: 'git', label: 'Git', children: <GitTab cwd={cwd} /> },
               { key: 'bash', label: 'Bash', children: <BashTab sessionId={activeSessionId} cwd={cwd} /> },
+              { key: 'subagents', label: 'Subagents', children: <SubagentsTab /> },
             ]}
           />
           {/* Splitter drag surface — 锚定在 panel 左边缘 (borderLeft 视觉分割线

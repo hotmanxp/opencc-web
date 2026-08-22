@@ -1,6 +1,7 @@
 # Batch 6 — 对等验收与切换
 
 > 所属主计划：[2026-08-17-dsh-kernel-main-plan.md](2026-08-17-dsh-kernel-main-plan.md)
+> **状态**：🚧 进行中（2026-08-22 B7 加注）— 11 组 ServerEvent parity harness 已具备；ego-browser / kill switch 演练预计本批次末完成；与 B7 G2 评审输入对齐
 > 目标：双轨全量对等验收——parity 测试 harness（覆盖 11 组 ServerEvent）、ego-browser 双轨全场景、**幂等/校验/回滚**的会话迁移工具、kill switch 演练。产出 G2 决策门的全部证据。
 
 ---

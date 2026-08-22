@@ -10,6 +10,7 @@
 |----|------|------|
 | 语言 | TypeScript | ^5.6 |
 | 运行时 | Node(direct, tsx + bun-protocol) / Bun 可选(`dev:bun`) | Node >=20 |
+| 运行时(B0+ dsh) | dsh 内核要求 Node >=22.19 | 仓库级 engines 已升 |
 | zai 前端 | React + Zustand + AntD + Vite | 18.3 / 4.5 / 5.22 / 8.1 |
 | zai 服务端 | Express + SSE | ^4.21 |
 | zn-agent-core vendor | opencc 0.20.0(Bun 兼容(un-stripped)) | — |
@@ -21,8 +22,142 @@
 |------|------|
 | `packages/zai/` | `src/server/` 路由 + service,`src/web/` UI + store,`src/shared/` zod schema |
 | `packages/zn-agent-core/` | `compat/`(verbatim 移植的 zai 兼容垫片)+ `opencc-src/`(opencc 0.20.0 拷贝,Bun 兼容(un-stripped));`scripts/bundle-opencc.ts` 把 `src/bundle-entry.ts` 编成单一 `dist/opencc-core.mjs`(esbuild bundle)。**运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出**(2026-08-16 起废除全部 subpath);`dist/bundle-entry.d.ts` 由 `bundle-opencc.ts` 机械生成,与 bundle 同步 |
+| `packages/dsh-bridge/` | **B0 新增** — zai → deepseek-harness 桥接 workspace。详见下方「双轨改造 (dsh 内核集成)」段落 |
 | `docs/` | 设计/参考/操作指南;`docs/superpowers/specs/` 是各特性 spec,`docs/superpowers/plans/` 是实施计划 |
 | `examples/` `scripts/` | 示例 / 仓库脚本 |
+
+## 双轨改造 (dsh 内核集成 · B 方案)
+
+> **状态**（2026-08-22）：**全 plan 收口完成** — P0/P1/P2 全部真实化，handoff §6 已知缺口 1-5 已关闭。dsh-bridge 55 测试 / zai 2192 测试 / zn-agent-core 382 测试全绿。详细状态见 `packages/dsh-bridge/IMPLEMENTATION_STATUS.md`。
+> **目标**：zai agent 内核从 opencc vendor 迁移到 deepseek-harness（`@deepseek-ai/dsh-*`），采用双轨并行 + 配置切换。
+> **G2 决策**：评审记录见 [`docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md`](docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md)；维护契约见 [`docs/2026-08-17-dsh-maintenance-contract.md`](docs/2026-08-17-dsh-maintenance-contract.md)；已知差异见 [`docs/2026-08-17-dsh-known-differences.md`](docs/2026-08-17-dsh-known-differences.md)。
+> **关键缺口（dsh-009, dsh-010, dsh-012）**：B7 flip-and-cleanup 阶段必须关闭 — 当前 `agentRuntime.ts` 仍未走 `createKernel()` 工厂分叉（dsh-009），所以 dsh 模式启动但 routes/agent.ts 仍跑 opencc。ego-browser dsh 验证因此阻塞（待 KERNEL_FACTORY_INTEGRATION 修复 + ANTHROPIC_API_KEY 配置）。
+
+### 轨道选择
+
+zai 同时支持两条 agent 内核轨道，由 `agent.kernel` 配置切换：
+
+| 轨道 | 包 | 何时使用 |
+|------|----|-----------|
+| `opencc`（默认） | `@zn-ai/zn-agent-core`（opencc 0.20.0 vendor 拷贝） | 现状默认；任何 Node 版本；行为零变化 |
+| `dsh` | `@zn-ai/dsh-bridge` + `@deepseek-ai/dsh-*` | 显式配置；要求 **Node >=22.19**；B0 桩抛 `NotImplementedError`，B1a 起逐步落地 |
+
+**配置**：
+
+```json
+// ~/.zai/settings.json   (用户级)
+{
+  "agent": { "kernel": "opencc" }   // 或 "dsh"
+}
+
+// <cwd>/.zai/settings.json (项目级 — 优先级 > 用户级)
+{
+  "agent": { "kernel": "dsh" }
+}
+```
+
+解析顺序：项目级 > 用户级 > 默认 `'opencc'`。非法值 fail loud（不静默回落）。
+
+> **dsh 真实数据目录**（Phase 1.1 收口）：`${dataDir}/dsh-sessions/<projectKey(cwd)>/<encoded sessionId>/` — 通过 `ctx.plugin(JsonlSessionPersistence, { root })` 注入。`projectKeyForCwd` 与 dsh-side `projectKey()` 算法一致（`/Users/x/y` → `--Users-x-y--`）。`dshSessionsRootAbs(dataDir)` 是 zai 侧唯一来源；`dshSessionsRoot(dataDir, cwd)` 已 deprecated。
+
+> **dsh subagent 任务目录**：`~/.zai/tasks-dsh/<taskId>.json`（独立子目录，禁止与 opencc `~/.zai/tasks/<taskId>.json` 共用文件）。
+
+> **dsh-subagent 自实现**（Phase 3.1）：上游 `@deepseek-ai/dsh-subagent` 未发布；当前用 `@deepseek-ai/dsh-scope` 的 `createScope` + `bindScopeParent` 显式 ScopedLayers 父子隔离。`createDshSubagentScope(parentCtx, {parentScopeKey, childScopeKey})` 是显式 scope 入口。
+
+> **dsh-mcp 退避**（Phase 3.2）：`MCP_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000]`（5 步指数退避），`MCP_HEALTH_CHECK_INTERVAL_MS = 30_000`。上游 `@deepseek-ai/dsh-mcp` 未发布，自实现对齐 zai `MCPClientPool` 行为。
+
+### 引擎要求（B-1 + B0 T0.7）
+
+仓库根 `package.json.engines` 升至 `^22.19.0 || >=24.0.0`（B0 T0.7）：
+- **dsh 模式**：`createKernel` 启动前调 `nodeSupportsDsh()`，Node < 22.19 立即 fail loud 并给修复指引。
+- **opencc 模式**：在 Node ≥22.19 下行为兼容（验证 opencc 单测全绿）。
+
+### 数据隔离（双轨不互相污染）
+
+| 数据 | opencc 轨道 | dsh 轨道 |
+|------|-------------|----------|
+| 会话 | `${dataDir}/projects/<cwd>/<sessionId>.jsonl` | `${dataDir}/dsh-sessions/<projectKey(cwd)>/<encoded sessionId>/` |
+| 任务 | `~/.zai/tasks/<taskId>.json` | `~/.zai/tasks-dsh/<taskId>.json`（独立子目录） |
+| 插件/技能来源 | `~/.zai/plugins/`、`~/.agents/skills/` | 复用同一来源 |
+| 模型/凭据 | env + zai settings | 通过 zai 设置 → dsh `installModelSelection` |
+
+**禁止两轨共享同一文件** — B6 迁移工具是唯一允许跨格式读写的代码，且默认 dry-run。
+
+### 关键命令
+
+```bash
+pnpm --filter @zn-ai/dsh-bridge run typecheck    # dsh-bridge 类型检查
+pnpm --filter @zn-ai/dsh-bridge run build        # 编译 dsh-bridge（合入 zai 前必跑；core 改动时）
+pnpm --filter @zn-ai/dsh-bridge run test         # dsh-bridge 单测（55 用例）
+
+# zai 侧 kernel 相关测试
+pnpm --filter @zn-ai/zai test src/server/services/kernel/
+
+# 双轨 parity harness（11 组 ServerEvent 全覆盖；B6 交付）
+pnpm --filter @zn-ai/zai test test/kernel/parity/
+
+# kill switch 演练脚本（季度执行；含 SSE drain + globalThis 桥清理）
+# 默认端口 8102/7715；用空闲端口避免与正式服务冲突：
+ZAI_DRILL_PORT=8107 ZAI_DRILL_API_PORT=7724 bash scripts/kill-switch-drill.sh
+```
+
+### dsh-bridge 出口（zai-side factories 使用）
+
+`packages/dsh-bridge/src/index.ts` 暴露给 zai-side factories 调用的 API（通过 `@zn-ai/dsh-bridge` 主入口）：
+
+```ts
+import {
+  createDshRuntime,           // B1a 长驻 ctx 装配
+  runOnce,                    // B1a run() 驱动
+  translateSessionEvent,      // B1a 核心子集事件翻译
+  subscribeDshInternalEvents, // B1b agent/status → instance.status
+  listDshSessions,            // B3 会话列表
+  readDshSessionHeader,       // B3 单 session header
+  flushDshSession,            // B3 落盘
+  spawnDshSubagent,           // B5 子 agent
+  createDshSubagentScope,     // Phase 3.1 显式 scope 隔离
+  installSlashCommands,       // B5 slash 命令
+  StateBridge,                // B5 状态桥
+  abortDshTurn,               // P0-4 abort
+  // 等等 — 详见 packages/dsh-bridge/src/index.ts
+} from '@zn-ai/dsh-bridge'
+```
+
+**重要**：`@zn-ai/dsh-bridge` 主入口**也 re-export** 关键 dsh-side 符号（避免 zai 直接依赖 `@deepseek-ai/*`）：
+
+```ts
+import {
+  SessionId,           // from @deepseek-ai/dsh-session
+  createUserMessage,   // from @deepseek-ai/dsh-llm
+  type Session,
+  type SessionEvent,
+  type SessionEventType,
+} from '@zn-ai/dsh-bridge'
+```
+
+**kernel 切换配置**：
+
+```bash
+zai config set agent.kernel dsh         # 切到 dsh 轨道
+zai config set agent.kernel opencc      # 切回 opencc 轨道（kill switch）
+# 切完后必须重启 zai 服务（运行期切换不允许 — main-plan §4.1 红线）
+```
+
+**会话迁移工具（B6 T6.3）**：
+
+```bash
+zai migrate --kernel dsh --dry-run                                # dry-run 验证（默认）
+zai migrate --kernel dsh --target-dsh-version 0.1.0-rc.7          # 真实迁移（锁定版本）
+```
+
+### KernelAdapter 抽象
+
+`packages/zai/src/server/services/kernel/kernelAdapter.ts` 定义 `KernelAdapter` 接口；zai 服务层只依赖此接口，不 import 任何 vendor/dsh 符号。两条轨道各自实现 `createKernelKernelAdapter`：
+
+- `packages/zai/src/server/services/kernel/factories/opencc.ts`（B0 已交付，stub run/abort/patchTranscript）
+- `packages/zai/src/server/services/kernel/factories/dsh.ts`（B0 桩，B1a 替换为真实 dsh 长驻装配）
+
+工厂分叉：`createKernel({ cwd, dataDir, settings })` → 解析 `agent.kernel` → 引擎检查 → 动态 `import()` 对应轨道。
 
 ## 本机数据目录 `~/.zai/`
 
@@ -118,6 +253,7 @@ pnpm release:major
 | 类别 | 路径 |
 |------|------|
 | 架构与实现细节 | `docs/DEVELOPMENT_REFERENCE.md` |
+| 双轨开发指南（切轨调试 / parity harness / kill switch 演练） | `docs/DEVELOPMENT_REFERENCE.md` §16 |
 | 架构总览研究 | `docs/superpowers/specs/2026-07-25-opencc-web-architecture-overview.md` |
 | SSE 状态推送设计 | `docs/superpowers/specs/2026-07-19-sse-state-push-design.md` |
 | 会话压缩设计 | `docs/superpowers/specs/2026-07-19-zai-session-compaction-design.md` |
@@ -128,7 +264,13 @@ pnpm release:major
 | OpenCC Adapter(Node/tsx) | `docs/superpowers/specs/2026-07-29-zn-agent-core-opencc-adapter-node-design.md`(Bun 版已 deprecated) |
 | 类型化 RPC client stub | `docs/superpowers/specs/2026-08-16-rpc-type-safe-client-stubs.md` |
 | 命令生命周期事件埋点 | `docs/superpowers/specs/2026-08-16-command-lifecycle-events.md` |
+| dsh 主计划 | `docs/superpowers/plans/2026-08-17-dsh-kernel-main-plan.md` |
+| dsh 批次 B0-B7 | `docs/superpowers/plans/2026-08-17-dsh-kernel-batch-*.md` |
+| G2 决策评审 | `docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md` |
+| 双轨维护契约 | `docs/2026-08-17-dsh-maintenance-contract.md` |
+| vendor 退役评估 | `docs/2026-08-17-dsh-vendor-retirement.md` |
+| dsh 发布说明 | `docs/2026-08-17-dsh-release-notes.md` |
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
 
-<!-- updated: 2026-08-18 -->
+<!-- updated: 2026-08-22 (B7: dsh G2 决策 + 维护契约 + vendor 退役评估) -->

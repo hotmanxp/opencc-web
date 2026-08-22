@@ -79,6 +79,37 @@ export interface RpcMethodMap {
     response: { sessionId: string } | { error: string }
   }
 
+  /**
+   * GET /api/agent/kernel — 读当前 agent.kernel（'opencc' | 'dsh'）。
+   * UI Settings 面板初始化时拉一次拿到当前值。
+   */
+  'GET /api/agent/kernel': {
+    request: undefined
+    response: { kernel: 'opencc' | 'dsh' } | { error: string }
+  }
+
+  /**
+   * POST /api/agent/kernel — 切内核(对未来 session 生效)。
+   * Session-level kernel fixity:已存在的 session 继续跑原 kernel 不变,
+   * 新 session 走新 kernel(由 session 创建时读 settings 决定)。
+   * 不做热重载,UI 提示"新会话生效"。
+   */
+  'POST /api/agent/kernel': {
+    request: { kernel: 'opencc' | 'dsh' }
+    response:
+      | {
+          ok: true
+          applied: 'opencc' | 'dsh'
+          previousKernel: 'opencc' | 'dsh'
+          /** 已存在 session 跑哪个(切换前后可能相同) */
+          currentSessionKernel: 'opencc' | 'dsh'
+          /** 新 session 跑哪个(永远是 applied) */
+          futureSessionKernel: 'opencc' | 'dsh'
+          inFlightCount: number
+        }
+      | { ok: false; error: string }
+  }
+
   /** POST /api/agent/command — 跑 slash command (/clear /compact /handoff /help) */
   'POST /api/agent/command': {
     request: { name?: string; args?: string; sessionId?: string }

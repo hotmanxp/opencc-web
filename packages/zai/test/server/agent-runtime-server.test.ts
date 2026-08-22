@@ -35,9 +35,25 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 // (~5s for module transform + disk IO on cold start). Bump the per-test
 // timeout well above that so the seam test isn't flaky on slow CI.
 const TEST_TIMEOUT_MS = 90_000
-import { mkdtempSync, rmSync } from 'node:fs'
+import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import path from 'node:path'
+
+/**
+ * B7 (dsh-009): write `<cwd>/.zai/settings.json` with explicit
+ * `agent.kernel = 'opencc'`. Phase 5.1 working tree flips the default to
+ * 'dsh'; these tests verify opencc-mode behavior (vendor runtime wiring),
+ * so they must opt in explicitly so they pass regardless of whether
+ * Phase 5.1 is committed.
+ */
+function pinOpenccKernel(cwd: string): void {
+  mkdirSync(path.join(cwd, '.zai'), { recursive: true })
+  writeFileSync(
+    path.join(cwd, '.zai', 'settings.json'),
+    JSON.stringify({ agent: { kernel: 'opencc' } }, null, 2),
+    'utf-8',
+  )
+}
 
 const RUNTIME_METHODS = [
   'query',
@@ -80,6 +96,7 @@ describe('zai agentRuntime ↔ OpenccRuntime seam (Task 5)', () => {
   it('initAgentRuntime(cwd) constructs an OpenccRuntime (no legacy DefaultAgentRuntime call path)', async () => {
     const mod = await import('../../src/server/services/agentRuntime.js')
     const cwd = path.join(tmpHome, 'work')
+    pinOpenccKernel(cwd)
     expect(() => mod.initAgentRuntime(cwd)).not.toThrow()
     // Let the fire-and-forget opencc-runtime construction resolve.
     await waitForRuntime(mod)
@@ -91,13 +108,15 @@ describe('zai agentRuntime ↔ OpenccRuntime seam (Task 5)', () => {
 
   it('getRuntime().query(input) returns an AsyncIterable', async () => {
     const mod = await import('../../src/server/services/agentRuntime.js')
-    mod.initAgentRuntime(path.join(tmpHome, 'work'))
+    const cwd = path.join(tmpHome, 'work')
+    pinOpenccKernel(cwd)
+    mod.initAgentRuntime(cwd)
     await waitForRuntime(mod)
     const runtime = mod.getRuntime()
     const stream = runtime.query({
       sessionId: 'sess-test',
       prompt: 'ping',
-      cwd: path.join(tmpHome, 'work'),
+      cwd,
     })
     expect(stream).toBeDefined()
     expect(typeof stream[Symbol.asyncIterator]).toBe('function')
@@ -112,7 +131,9 @@ describe('zai agentRuntime ↔ OpenccRuntime seam (Task 5)', () => {
 
   it('abortAllAgentPrompts() is safe when no prompts are active', async () => {
     const mod = await import('../../src/server/services/agentRuntime.js')
-    mod.initAgentRuntime(path.join(tmpHome, 'work-abort'))
+    const cwd = path.join(tmpHome, 'work-abort')
+    pinOpenccKernel(cwd)
+    mod.initAgentRuntime(cwd)
     // No registered controllers → drain completes immediately and
     // does not throw.
     expect(() => mod.abortAllAgentPrompts('test_no_prompts')).not.toThrow()

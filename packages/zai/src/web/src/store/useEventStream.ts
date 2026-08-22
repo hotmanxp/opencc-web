@@ -139,6 +139,11 @@ export function applyBatch(batch: ServerEvent[]): void {
       useAgentStore.getState().applyV2TaskChanged(event); break
     case 'agent_task.changed':
       useAgentStore.getState().applyAgentTaskChanged(event); break
+    // dsh-019 Phase 2: dsh subagent 任务生命周期(从 server 推 'subagent.changed')。
+    // payload 来自 shared/events.ts ServerEvent 'subagent.changed',reducer
+    // 写入 subagentTasksBySession[sessionId] + 5s 后自动清理已完成任务。
+    case 'subagent.changed':
+      useAgentStore.getState().applySubagentChanged(event); break
     case 'instance.changed':
       useInstanceStore.getState().applyInstanceChanged(event)
       break

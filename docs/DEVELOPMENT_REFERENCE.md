@@ -394,3 +394,139 @@ QR 登录后拿到的是 iLink bot identity(`...@im.bot`),不是普通微信账�
 - [x] 事件总线双向桥(weixin.inbound in, runtime.delta/done out)
 - [x] SSR/SSRF 防护 (CDN 白名单 + token 锁 mode 0600)
 - [x] 真实浏览器验收:启动 dev 实例,打开 Settings → 微信机器人 → 显示状态 (unconfigured)
+
+## 16. 双轨开发指南(dsh vs opencc)
+
+> 适用：开发者 / agent 调试 zai 同时支持 opencc 与 dsh 两个内核的代码路径。
+> 上游规则：`AGENTS.md` § 双轨改造段；本节展开双轨调试常用动作。
+> 关联计划：`docs/superpowers/plans/2026-08-17-dsh-kernel-main-plan.md` + `2026-08-17-dsh-kernel-batch-07-flip-cleanup.md`。
+> 决策评审：`docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md`（G2，G3）。
+
+### 16.1 切轨调试（怎么在两条内核之间来回切）
+
+```bash
+# 当前轨道查询
+node -e "console.log(JSON.parse(require('fs').readFileSync(require('os').homedir()+'/.zai/settings.json','utf-8')).agent?.kernel ?? 'opencc')"
+
+# 切换到 dsh 轨道
+zai config set agent.kernel dsh
+
+# 切换到 opencc 轨道（kill switch 路径）
+zai config set agent.kernel opencc
+
+# 切完之后必须重启 zai 服务（dev 或 start），运行期切换不允许（main-plan §4.1 红线）
+lsof -i :9200  # 注意正式服务端口；开发期用 --port 810x
+pnpm --filter @zn-ai/zai dev -- --port 8102 --api-port 7715
+```
+
+**项目级覆盖**（B0）：`<cwd>/.zai/settings.json` > 用户级 `~/.zai/settings.json` > 默认 `'opencc'`。
+
+### 16.2 Node 引擎前置
+
+```bash
+node --version    # 必须 >= v22.19.0（仓库根 engines 锁）
+# dsh 模式：< 22.19 → createKernel 启动前 fail loud + 修复指引
+# opencc 模式：≥22.19 下行为完全兼容
+```
+
+### 16.3 parity harness 用法
+
+`packages/zai/test/kernel/parity/` 下：
+
+- `harness.ts` — 同一场景脚本双轨各跑一遍的事件归一化与对比核心。
+- `scenarios/*.ts` — 对话 / 工具链 / 审批 / 后台任务 / skill 触发 / slash 命令六类场景。
+- `report.ts` — 11 组 ServerEvent（Runtime / Session / Job / Prompt / System / State / Instance / Queue / Command / StreamError / Projection）每组独立行 + 「对等 / 差异 / 已知差异清单条目」标签。
+
+```bash
+# 全场景跑
+pnpm --filter @zn-ai/zai test src/server/test/kernel/parity/
+
+# 单场景
+pnpm --filter @zn-ai/zai test src/server/test/kernel/parity/scenarios/chat.test.ts
+
+# 单 ServerEvent 类型过滤（describe / it 标题匹配）
+pnpm --filter @zn-ai/zai test -t "command.run"
+```
+
+### 16.4 数据隔离目录（不可共享）
+
+| 数据 | opencc 轨道 | dsh 轨道 |
+|------|-------------|----------|
+| 会话 | `${ZAI_DATA_DIR}/projects/<cwd>/<sessionId>.jsonl` | `${ZAI_DATA_DIR}/projects/<cwd>/dsh-sessions/<sessionId>/` |
+| 任务 | `~/.zai/tasks/<taskId>.json` | `~/.zai/tasks-dsh/<taskId>.json` |
+
+开发调试时若发现会话列表混合显示，先排查：
+- `KernelAdapter.listSessions()` 是否仍回 opencc session（Bug：跨轨道列了）。
+- 数据目录 namespace 写错（kd-01 / R8 触发场景）。
+
+### 16.5 kill switch 演练脚本
+
+```bash
+# 季度演练：含 SSE drain / dispose / globalThis 桥清理
+bash scripts/kill-switch-drill.sh
+
+# 演练结果存档
+# docs/superpowers/plans/<date>-kill-switch-drill-report.md
+```
+
+演练覆盖：
+- dsh 轨道活跃 SSE 长连接 + 进行中 turn + 后台任务存在。
+- 切换 `agent.kernel='opencc'` + 重启 zai。
+- 验证：拒绝新请求 → flush → dispose Cordis → 清 `globalThis.__zaiEventBus/__zaiBridgeCtx/__zaiSessionInbox/__zaiCurrentSessionId`。
+- 验证：数据互不可见但不损坏；无孤儿进程；`~/.zai/tasks/` 与 `~/.zai/tasks-dsh/` 各自完整。
+
+### 16.6 会话迁移工具（B6 T6.3）
+
+```bash
+# dry-run 验证（默认）
+zai migrate --kernel dsh --dry-run
+
+# 真实迁移（锁定 dsh 版本）
+zai migrate --kernel dsh --target-dsh-version 0.1.0-rc.7
+
+# 重复运行（幂等：跳过已迁移目标）
+zai migrate --kernel dsh --target-dsh-version 0.1.0-rc.7   # 第二次无副作用
+```
+
+四项守卫（[B6 T6.3 §验收](../../superpowers/plans/2026-08-17-dsh-kernel-batch-06-parity-acceptance.md#T6.3)）：
+- **幂等**：重复同一 session 不产生重复 / 损坏。
+- **校验**：迁移完成回读 log 断言 firstSeq / turn 数符合预期。
+- **回滚**：snapshot 目标目录，失败时恢复。
+- **版本锁定**：`installed('@deepseek-ai/dsh-headless') !== targetDshVersion` 报错退出。
+
+### 16.7 dsh-bridge 构建命令
+
+```bash
+# 单独构建 dsh-bridge（合入 zai 前必跑）
+pnpm --filter @zn-ai/dsh-bridge run build
+
+# dsh-bridge 类型检查
+pnpm --filter @zn-ai/dsh-bridge run typecheck
+
+# dsh-bridge 单测
+pnpm --filter @zn-ai/dsh-bridge run test
+
+# zai 服务侧 kernel 相关测试
+pnpm --filter @zn-ai/zai test src/server/services/kernel/
+```
+
+### 16.8 dsh 依赖升级（写给维护者）
+
+- `save-exact` 锁定：所有 `@deepseek-ai/dsh-*` 子包必须用 `"x.y.z"`，禁 `^/~`。
+- 每次升级独立 PR（不与 zai 主线混批）；PR 必须附 parity harness 全场景报告。
+- SESSION_FORMAT_VERSION 改变时迁移器版本号强制联动。
+- 上游 PR 优先（短期本地 patch-version 兜底）。
+
+详见 [`2026-08-17-dsh-maintenance-contract.md`](../2026-08-17-dsh-maintenance-contract.md) §4。
+
+### 16.9 vendor 退役路径参考（只评估不执行）
+
+`docs/2026-08-17-dsh-vendor-retirement.md` 已盘点影响面并列出 P1-P8 分步移除计划；执行需走 G3 决策门单独评审，本节不展开。
+
+### 16.10 常见调试陷阱
+
+- **dsh 启动 fail loud 但消息模糊**：通常是 Node 版本 < 22.19；`nodeSupportsDsh()` 抛出后会带指引文案，按其链接升级。
+- **parity harness 11 组事件某组始终对不上**：先查 `ServerEvent.seq` / `Last-Event-ID` 续读路径（dsh 端事件溯源时序与 opencc 略有偏差）。
+- **migration 工具失败**：第一步看 dsh 版本是否锁定；第二步看目标目录是否被 snapshot（回滚机制会备份原目录）。
+- **kill switch 切换后旧 turn 仍流**：检查 dsh drain/dispose 顺序是否完整；`globalThis.__zai*` 桥是否清空（main-plan R8）。
+- **设置改动后端不生效**：kernel 切换必须重启 zai — `pnpm --filter @zn-ai/zai dev` 重启即可验证。

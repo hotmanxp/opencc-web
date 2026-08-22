@@ -663,6 +663,7 @@ function buildStaticSchema(
   autoUpdate: boolean,
   mainAgent: string,
   agentOptions: EnumOption[],
+  kernel: 'opencc' | 'dsh',
 ): SettingsSchema {
   return [
     {
@@ -690,6 +691,25 @@ function buildStaticSchema(
           value: mainAgent,
           options: agentOptions,
           disabled: workMode === 'code',
+        },
+      ],
+    },
+    {
+      // Agent 内核 — 双轨改造开关(opencc 默认 / dsh 可选)。
+      // Session-level fixity: 切换只对未来 session 生效,已存在的
+      // session 继续跑原 kernel(transcript 跟 kernel 强绑定)。
+      // UI 弹"已切换,新会话生效"提示。
+      section: 'Runtime',
+      rows: [
+        {
+          key: 'kernel',
+          label: 'Agent 内核',
+          kind: 'enum',
+          value: kernel,
+          options: [
+            { value: 'opencc', label: 'opencc (默认)' },
+            { value: 'dsh', label: 'dsh' },
+          ],
         },
       ],
     },
@@ -916,9 +936,12 @@ export default function SettingsDrawer() {
   const [agentOptions, setAgentOptions] = useState<EnumOption[]>(() => [
     { value: 'default', label: 'default' },
   ])
+  // Agent 内核 — 当前 session 跑哪个(GET /api/agent/kernel 拿)。
+  // 切换只对未来 session 生效,见 handleChange 里 'kernel' 分支的注释。
+  const [kernel, setKernel] = useState<'opencc' | 'dsh'>('opencc')
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions),
+    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions, kernel),
   )
   // mount 时拉一次 GET /api/agent/settings → 填充 agentOptions + 当前 mainAgent。
   // destroyOnClose 每次打开都会重新挂载,列表保持新鲜(新增外置 agent 文件后
@@ -945,6 +968,18 @@ export default function SettingsDrawer() {
       })
       .catch(() => {
         // swallow — 保持默认 'default' 选项
+      })
+    // 同次 mount 拉一次 GET /api/agent/kernel → 当前默认内核。
+    // 旧 zai 端点不存在时 catch 后保持 'opencc' 默认(用户会看到下拉,
+    // 但切换会失败 — 升级 zai 后即恢复)。
+    fetch('/api/agent/kernel')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { kernel?: 'opencc' | 'dsh' } | null) => {
+        if (cancelled || !data || !data.kernel) return
+        setKernel(data.kernel)
+      })
+      .catch(() => {
+        // swallow — 端点不可用时保持默认
       })
     return () => {
       cancelled = true
@@ -1059,6 +1094,21 @@ export default function SettingsDrawer() {
       })),
     )
   }, [autoUpdate])
+  // 同步 kernel 状态 → schema kernel 行(kernel 切换成功后 setKernel
+  // 触发的 re-render,这里把 schema 上的 enum value 同步成新值)。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'kernel' && r.kind === 'enum') {
+            return { ...r, value: kernel }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [kernel])
   // 同步 mainAgent → schema 行(本地 state,选择后 PUT 持久化)。
   useEffect(() => {
     setSchema((prev) =>
@@ -1225,6 +1275,49 @@ export default function SettingsDrawer() {
         }).catch(() => {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })
+      }
+      // Agent 内核切换(opencc / dsh) — session-level fixity:
+      //   - 写 ~/.zai/settings.json(zaiSettingsCache 自动 refresh)
+      //   - 当前 session 继续用原 kernel(transcript 跟 kernel 强绑定,
+      //     切了会让 in-flight 任务的 transcript 对不上 runtime)
+      //   - 新 session 走新 kernel(session 创建时读 settings)
+      // UI 弹"已切换,新会话生效"提示;用户主动点"新建会话"即生效。
+      if (key === 'kernel' && typeof value === 'string') {
+        const next = value as 'opencc' | 'dsh'
+        if (next === kernel) return
+        void (async () => {
+          try {
+            const r = await fetch('/api/agent/kernel', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ kernel: next }),
+            })
+            if (!r.ok) throw new Error(`HTTP ${r.status}`)
+            // response 类型见 shared/rpc.ts
+            const data = (await r.json()) as {
+              ok: boolean
+              applied: 'opencc' | 'dsh'
+              previousKernel: 'opencc' | 'dsh'
+              currentSessionKernel: 'opencc' | 'dsh'
+              futureSessionKernel: 'opencc' | 'dsh'
+              inFlightCount: number
+            }
+            if (data.ok) {
+              setKernel(data.futureSessionKernel)
+              // 提示用户:已切换 + 当前 session 跑哪个
+              if (data.currentSessionKernel !== data.futureSessionKernel) {
+                message.info(
+                  `已切换到 ${data.futureSessionKernel},当前 session 继续用 ${data.currentSessionKernel},新建会话后生效`,
+                  5,
+                )
+              } else {
+                message.success(`已切换到 ${data.futureSessionKernel}`, 2)
+              }
+            }
+          } catch (err) {
+            message.error(`切换失败: ${(err as Error).message}`)
+          }
+        })()
       }
       // 其它行目前只更新内部 schema state(阶段 2 接真实写盘)
       setSchema((prev) =>

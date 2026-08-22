@@ -54,12 +54,46 @@ export function initStateBridge(): () => void {
   stateChangeBus.on('bash_task.changed', onBashTaskChanged)
   stateChangeBus.on('v2_task.changed', onV2TaskChanged)
   stateChangeBus.on('agent_task.changed', onAgentTaskChanged)
+  // dsh-018: dsh-mode cron 任务变化 — zai-side dsh factory 转发
+  // dsh-bridge `onCronChange` 回调,stateBridge 翻译成 ServerEvent
+  // 'cron.changed' 推到前端 SSE 通道。Phase 1 UI 端暂无 cron-specific
+  // handler,但消息已经能流到 eventBus,Phase 2 加 UI 集成。
+  const onCronChanged = (e: {
+    sessionId: string
+    cronTaskId: string
+    cron: string
+    prompt: string
+    nextFireAt: number
+    action: 'create' | 'delete' | 'list' | 'fire'
+  }) => {
+    eventBus.emit({ type: 'cron.changed', ...e })
+  }
+  stateChangeBus.on('cron.changed', onCronChanged)
+
+  // dsh-019: dsh-mode subagent 任务生命周期 — zai-side dsh factory
+  // 转发 dsh-bridge `onTaskStart` / `onTaskFinish` 回调,stateBridge
+  // 翻译成 ServerEvent 'subagent.changed' 推到前端。UI TaskDrawer
+  // Subagents tab 用此事件实时刷新(spinner / 自动移除 / interrupt)。
+  const onSubagentChanged = (e: {
+    sessionId: string
+    taskId: string
+    description: string
+    status: 'running' | 'done' | 'failed' | 'cancelled'
+    result?: string
+    error?: string
+    action: 'start' | 'finish'
+  }) => {
+    eventBus.emit({ type: 'subagent.changed', ...e })
+  }
+  stateChangeBus.on('subagent.changed', onSubagentChanged)
 
   _stateBridgeDispose = () => {
     stateChangeBus.off('cwd.changed', onCwdChanged)
     stateChangeBus.off('bash_task.changed', onBashTaskChanged)
     stateChangeBus.off('v2_task.changed', onV2TaskChanged)
     stateChangeBus.off('agent_task.changed', onAgentTaskChanged)
+    stateChangeBus.off('cron.changed', onCronChanged)
+    stateChangeBus.off('subagent.changed', onSubagentChanged)
   }
   return _stateBridgeDispose
 }

@@ -1,0 +1,77 @@
+# zai → dsh 桥接最小 patch — dsh-base 的全 patch 包含 30+ mode-specific 行
+# (web/llm-deepseek/tool-* 等),zai-server 不需要这些(走 anthropic 单一提供方)。
+# 此处只装 zai-server 长驻 Agent + 真实对话 + 工具 + 持久化 必需的最小集。
+# 减到 8 个:settings/credentials/llm/session/typert* + agent-default-model 的
+# 服务占位(后者由 createDshRuntime 单独 create() 覆盖,patch 只留 id 占位)。
+#
+# 字段说明:
+#   - id:    在 patch 内唯一,后续 cordis-plugin-loader ctx.loader.update({id, ...})
+#            可定向覆盖
+#   - name:  Cordis 插件模块路径(import);name 缺失的 row 是 placeholder
+#   - config: 透传给该 plugin apply() 的第二参
+- id: llm
+  name: '@deepseek-ai/dsh-llm'
+
+- id: session
+  name: '@deepseek-ai/dsh-session'
+
+- id: typert
+  name: '@deepseek-ai/dsh-typert-registry'
+
+- id: typert-loader
+  name: '@deepseek-ai/dsh-typert-loader'
+
+- id: typert-gateway
+  name: '@deepseek-ai/dsh-api-gateway'
+
+- id: session-title
+  name: '@deepseek-ai/dsh-session-title'
+  config:
+    fallbackMaxWords: 5
+    fallbackMaxBytes: 40
+    maxTitleBytes: 80
+
+- id: session-title-llm
+  name: '@deepseek-ai/dsh-session-title-first-prompt-llm'
+  config:
+    targetWords: 5
+    targetCjkCharacters: 10
+    maxInputBytes: 4096
+    maxOutputTokens: 64
+    timeoutMs: 60000
+
+- id: user-questions
+  name: '@deepseek-ai/dsh-user-questions'
+
+- id: agent
+  name: '@deepseek-ai/dsh-agent'
+
+- id: agent-loop
+  name: '@deepseek-ai/dsh-agent-loop'
+
+# dsh-agent-loop 依赖 services: agents / sessions / llm / tools / systemPrompt。
+# 上面已装 agents / sessions / llm;补 tools / systemPrompt 让 agent-loop
+# `ctx.inject` 全部满足。
+- id: tools
+  name: '@deepseek-ai/dsh-tools'
+
+- id: system-prompt
+  name: '@deepseek-ai/dsh-system-prompt'
+
+# dsh-scope / dsh-shell / dsh-fs / dsh-user-approval 都是内部 helper(被
+# dsh-agent 等其他 plugin import 复用),**不**是 Cordis plugin;加载会报
+# `invalid plugin, expect function or object with "apply" method`。dsh-base
+# 自己的 cordis.patch.yml 也不装载它们。省略。
+
+# Phase 3 P1: durable attachment store — 由 createDshRuntime.ts 单独
+# ctx.loader.create() 装载(不要重复登记到 patch,避免 cordis
+# "service 'attachments' has been registered" 报错)。详细见
+# createDshRuntime.ts:230-235 注入的 config。
+
+# agent-default-model / jobs / llm-retry / settings / credentials / llm-pi-ai /
+# session-persistence-jsonl 都由 createDshRuntime.start() 后续步骤单独
+# ctx.loader.create() 装载,避免重复注册触发 DUPLICATE_DIRECTORY / 已注册报错。
+
+# agent-default-model / jobs / llm-retry / settings / credentials / llm-pi-ai /
+# session-persistence-jsonl 都由 createDshRuntime.start() 后续步骤单独
+# ctx.loader.create() 装载,避免重复注册触发 DUPLICATE_DIRECTORY / 已注册报错。

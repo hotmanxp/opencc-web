@@ -1,6 +1,7 @@
 # Batch 3 — 会话与记忆
 
 > 所属主计划：[2026-08-17-dsh-kernel-main-plan.md](2026-08-17-dsh-kernel-main-plan.md)
+> **状态**：✅ 已合入（commit `b7d8b130`，2026-08-17 前后）— G4 会话/记忆能力面达成
 > 目标：dsh 轨道会话持久化（隔离目录）、transcript 桥（修复/续读）、记忆系统（AGENTS.md / rules watcher）桥接。依赖 B1a（B1b 的 transcript patchTranscript / readTranscript 由本批对接）。
 
 ---

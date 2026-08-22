@@ -1,0 +1,73 @@
+{
+  "name": "@zn-ai/dsh-bridge",
+  "version": "0.0.0",
+  "description": "zai → deepseek-harness bridge — long-running Cordis adapter for the dsh kernel track",
+  "type": "module",
+  "main": "dist/index.js",
+  "types": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "default": "./dist/index.js"
+    },
+    "./package.json": "./package.json"
+  },
+  "files": [
+    "dist/"
+  ],
+  "scripts": {
+    "build": "tsc -b --force && cp src/dsh-bridge.patch.yml dist/dsh-bridge.patch.yml",
+    "dev": "tsc -b --watch",
+    "typecheck": "tsc -b --noEmit",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+  },
+  "keywords": [
+    "dsh",
+    "deepseek-harness",
+    "zai"
+  ],
+  "author": "ZN-AI",
+  "license": "MIT",
+  "engines": {
+    "node": "^22.19.0 || >=24.0.0"
+  },
+  "dependencies": {
+    "@deepseek-ai/cordis": "4.0.1",
+    "@deepseek-ai/cordis-plugin-loader": "1.0.2",
+    "@deepseek-ai/dsh-agent": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-agent-default-model": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-agent-loop": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-api-gateway": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-base": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-code-runtime-worker-thread": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-cmdline": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-credentials-local": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-fs": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-headless": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-jobs-local": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm-pi-ai": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-llm-retry": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-scope": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-persistence-jsonl": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-title": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-session-title-first-prompt-llm": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-settings": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-settings-file": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-shell": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-system-prompt": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-tools": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-typert-loader": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-typert-registry": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-user-approval": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-user-questions": "0.1.0-rc.8",
+    "@modelcontextprotocol/sdk": "^1.0.0"
+  },
+  "devDependencies": {
+    "typescript": "^5.6.0",
+    "vitest": "^4.1.0"
+  }
+}
