@@ -28,9 +28,10 @@
 
 ## 双轨改造 (dsh 内核集成 · B 方案)
 
-> **状态**：B0-B5 已合入（commit `b7d8b130`）；B6 验收进行中；B7 收口文档落地（决策记录 `2026-08-17-dsh-kernel-decision.md`、维护契约 `2026-08-17-dsh-maintenance-contract.md`、vendor 退役评估 `2026-08-17-dsh-vendor-retirement.md`）。状态字段详见每个 `docs/superpowers/plans/2026-08-17-dsh-kernel-batch-*.md` 文件顶部。
+> **状态**（2026-08-22）：**全 plan 收口完成** — P0/P1/P2 全部真实化，handoff §6 已知缺口 1-5 已关闭。dsh-bridge 55 测试 / zai 2192 测试 / zn-agent-core 382 测试全绿。详细状态见 `packages/dsh-bridge/IMPLEMENTATION_STATUS.md`。
 > **目标**：zai agent 内核从 opencc vendor 迁移到 deepseek-harness（`@deepseek-ai/dsh-*`），采用双轨并行 + 配置切换。
-> **G2 决策**：评审记录见 [`docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md`](docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md)；维护契约见 [`docs/2026-08-17-dsh-maintenance-contract.md`](docs/2026-08-17-dsh-maintenance-contract.md)。
+> **G2 决策**：评审记录见 [`docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md`](docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md)；维护契约见 [`docs/2026-08-17-dsh-maintenance-contract.md`](docs/2026-08-17-dsh-maintenance-contract.md)；已知差异见 [`docs/2026-08-17-dsh-known-differences.md`](docs/2026-08-17-dsh-known-differences.md)。
+> **关键缺口（dsh-009, dsh-010, dsh-012）**：B7 flip-and-cleanup 阶段必须关闭 — 当前 `agentRuntime.ts` 仍未走 `createKernel()` 工厂分叉（dsh-009），所以 dsh 模式启动但 routes/agent.ts 仍跑 opencc。ego-browser dsh 验证因此阻塞（待 KERNEL_FACTORY_INTEGRATION 修复 + ANTHROPIC_API_KEY 配置）。
 
 ### 轨道选择
 
@@ -57,6 +58,14 @@ zai 同时支持两条 agent 内核轨道，由 `agent.kernel` 配置切换：
 
 解析顺序：项目级 > 用户级 > 默认 `'opencc'`。非法值 fail loud（不静默回落）。
 
+> **dsh 真实数据目录**（Phase 1.1 收口）：`${dataDir}/dsh-sessions/<projectKey(cwd)>/<encoded sessionId>/` — 通过 `ctx.plugin(JsonlSessionPersistence, { root })` 注入。`projectKeyForCwd` 与 dsh-side `projectKey()` 算法一致（`/Users/x/y` → `--Users-x-y--`）。`dshSessionsRootAbs(dataDir)` 是 zai 侧唯一来源；`dshSessionsRoot(dataDir, cwd)` 已 deprecated。
+
+> **dsh subagent 任务目录**：`~/.zai/tasks-dsh/<taskId>.json`（独立子目录，禁止与 opencc `~/.zai/tasks/<taskId>.json` 共用文件）。
+
+> **dsh-subagent 自实现**（Phase 3.1）：上游 `@deepseek-ai/dsh-subagent` 未发布；当前用 `@deepseek-ai/dsh-scope` 的 `createScope` + `bindScopeParent` 显式 ScopedLayers 父子隔离。`createDshSubagentScope(parentCtx, {parentScopeKey, childScopeKey})` 是显式 scope 入口。
+
+> **dsh-mcp 退避**（Phase 3.2）：`MCP_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000]`（5 步指数退避），`MCP_HEALTH_CHECK_INTERVAL_MS = 30_000`。上游 `@deepseek-ai/dsh-mcp` 未发布，自实现对齐 zai `MCPClientPool` 行为。
+
 ### 引擎要求（B-1 + B0 T0.7）
 
 仓库根 `package.json.engines` 升至 `^22.19.0 || >=24.0.0`（B0 T0.7）：
@@ -67,7 +76,7 @@ zai 同时支持两条 agent 内核轨道，由 `agent.kernel` 配置切换：
 
 | 数据 | opencc 轨道 | dsh 轨道 |
 |------|-------------|----------|
-| 会话 | `${dataDir}/projects/<cwd>/<sessionId>.jsonl` | `${dataDir}/projects/<cwd>/dsh-sessions/<sessionId>/` |
+| 会话 | `${dataDir}/projects/<cwd>/<sessionId>.jsonl` | `${dataDir}/dsh-sessions/<projectKey(cwd)>/<encoded sessionId>/` |
 | 任务 | `~/.zai/tasks/<taskId>.json` | `~/.zai/tasks-dsh/<taskId>.json`（独立子目录） |
 | 插件/技能来源 | `~/.zai/plugins/`、`~/.agents/skills/` | 复用同一来源 |
 | 模型/凭据 | env + zai settings | 通过 zai 设置 → dsh `installModelSelection` |
@@ -78,17 +87,52 @@ zai 同时支持两条 agent 内核轨道，由 `agent.kernel` 配置切换：
 
 ```bash
 pnpm --filter @zn-ai/dsh-bridge run typecheck    # dsh-bridge 类型检查
-pnpm --filter @zn-ai/dsh-bridge run build        # 编译 dsh-bridge（合入 zai 前必跑）
-pnpm --filter @zn-ai/dsh-bridge run test         # dsh-bridge 单测
+pnpm --filter @zn-ai/dsh-bridge run build        # 编译 dsh-bridge（合入 zai 前必跑；core 改动时）
+pnpm --filter @zn-ai/dsh-bridge run test         # dsh-bridge 单测（55 用例）
 
 # zai 侧 kernel 相关测试
 pnpm --filter @zn-ai/zai test src/server/services/kernel/
 
 # 双轨 parity harness（11 组 ServerEvent 全覆盖；B6 交付）
-pnpm --filter @zn-ai/zai test src/server/test/kernel/parity/
+pnpm --filter @zn-ai/zai test test/kernel/parity/
 
 # kill switch 演练脚本（季度执行；含 SSE drain + globalThis 桥清理）
-bash scripts/kill-switch-drill.sh
+# 默认端口 8102/7715；用空闲端口避免与正式服务冲突：
+ZAI_DRILL_PORT=8107 ZAI_DRILL_API_PORT=7724 bash scripts/kill-switch-drill.sh
+```
+
+### dsh-bridge 出口（zai-side factories 使用）
+
+`packages/dsh-bridge/src/index.ts` 暴露给 zai-side factories 调用的 API（通过 `@zn-ai/dsh-bridge` 主入口）：
+
+```ts
+import {
+  createDshRuntime,           // B1a 长驻 ctx 装配
+  runOnce,                    // B1a run() 驱动
+  translateSessionEvent,      // B1a 核心子集事件翻译
+  subscribeDshInternalEvents, // B1b agent/status → instance.status
+  listDshSessions,            // B3 会话列表
+  readDshSessionHeader,       // B3 单 session header
+  flushDshSession,            // B3 落盘
+  spawnDshSubagent,           // B5 子 agent
+  createDshSubagentScope,     // Phase 3.1 显式 scope 隔离
+  installSlashCommands,       // B5 slash 命令
+  StateBridge,                // B5 状态桥
+  abortDshTurn,               // P0-4 abort
+  // 等等 — 详见 packages/dsh-bridge/src/index.ts
+} from '@zn-ai/dsh-bridge'
+```
+
+**重要**：`@zn-ai/dsh-bridge` 主入口**也 re-export** 关键 dsh-side 符号（避免 zai 直接依赖 `@deepseek-ai/*`）：
+
+```ts
+import {
+  SessionId,           // from @deepseek-ai/dsh-session
+  createUserMessage,   // from @deepseek-ai/dsh-llm
+  type Session,
+  type SessionEvent,
+  type SessionEventType,
+} from '@zn-ai/dsh-bridge'
 ```
 
 **kernel 切换配置**：
