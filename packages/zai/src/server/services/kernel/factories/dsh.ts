@@ -148,16 +148,42 @@ export async function createDshKernelAdapter(
     },
 
     async *run(opts): AsyncIterable<ServerEvent> {
-      if (stopped) throw new Error('[dsh-adapter] shutdown, refusing run')
+      if (stopped) throw new Error('[dsh-adapter] refusing run after shutdown')
       totalTurns++
 
       // B1a T1.2 + T1.3：runOnce 产 dsh SessionEvent 序列，
       // translateSessionEvent → zai ServerEvent。
+      //
+      // dsh 0.1.0-rc.7 runOnce 仅接受 string prompt。多模态（readonly unknown[]）
+      // 走 text 提取：dsh-side 多模态由后续版本支持，目前 zai front-end 在 dsh 模式下
+      // 不传 image block，仅以文本 prompt 入栈，故 fallback 仅触发于编程错误。
+      const promptText =
+        typeof opts.prompt === 'string'
+          ? opts.prompt
+          : (() => {
+              const first = opts.prompt[0]
+              return typeof first === 'object' && first !== null && 'text' in first
+                ? String((first as { text?: unknown }).text ?? '')
+                : ''
+            })()
+
+      // 其它扩展 opts 字段（model / permissionMode / providerOverride / providerId /
+      // mainAgent / abortSignal）由 dsh session-level 配置接管,本 turn 内暂不消费:
+      // dsh AgentOptions 仅支持 provider + model,model 若与 opts.model 不同,本
+      // 次仍用 session 启动时绑定的 model（详见 createDshRuntime defaultModel）;
+      // dsh 0.1.0-rc.7 不支持 AbortSignal,abort 走 cancel seam。
+      void opts.model
+      void opts.permissionMode
+      void opts.providerOverride
+      void opts.providerId
+      void opts.mainAgent
+      void opts.abortSignal
+
       for await (const dshEvent of bridge.runOnce({
         ctx: handle.ctx,
         sessionId: opts.session.sessionId,
         cwd: opts.session.cwd,
-        prompt: opts.prompt,
+        prompt: promptText,
       })) {
         const translated = bridge.translateSessionEvent(dshEvent, {
           sessionId: opts.session.sessionId,

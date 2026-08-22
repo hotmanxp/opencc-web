@@ -1,13 +1,14 @@
 import type { BashTaskInfo } from '@zn-ai/zn-agent-core'
 import {
-  getRuntime,
   getCurrentSessionId,
+  getRuntime,
   setCurrentSessionId,
   hasActiveQuery,
 } from './agentRuntime.js'
 import { resolveModel } from '../lib/resolveModel.js'
 import { eventBus } from './eventBus.js'
-import { translateRuntimeEvents } from '../routes/agent.js'
+// B7 (dsh-010): translateRuntimeEvents 已迁出 routes/agent.ts,改从 services/translation.ts 导入。
+import { translateRuntimeEvents } from '../services/translation.js'
 
 /**
  * BashNotifier:后台 Bash 任务完成时,给父 session 开一轮 query 让 LLM 感知。
@@ -176,6 +177,8 @@ export class BashNotifier {
       // bundle 的 commandQueue,runtime.query() 的 QueryEngine 读 dist 的队列,
       // drain 永远取不到(请求风暴根因)。isMeta 保持 UI 隐藏(通知是系统注入,
       // 不该显示成用户消息)。
+      //
+      // B7 (dsh-010): 翻译层迁出到 services/translation.ts,这里只 import 即可。
       const events = runtime.query({
         prompt: renderBashNotificationMessage(task),
         cwd: process.cwd(),

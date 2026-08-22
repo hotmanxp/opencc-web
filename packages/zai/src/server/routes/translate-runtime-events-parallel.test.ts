@@ -1,5 +1,7 @@
 import { describe, expect, test } from 'vitest'
-import { translateRuntimeEvents } from './agent.js'
+// B7 (dsh-010): translateRuntimeEvents 已从 routes/agent.ts 迁出到
+// services/translation.ts,这里更新 import path。
+import { translateRuntimeEvents } from '../services/translation.js'
 
 // 平行 tool_use 块: Anthropic SDK 在单条 assistant message 里允许 N 个
 // tool_use blocks 并行(各 block 自带 index 0..N-1). 老实现 toolInputBuffer

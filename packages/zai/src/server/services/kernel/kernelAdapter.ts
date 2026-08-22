@@ -163,16 +163,55 @@ export interface KernelAdapter {
 
   // ─── 驱动 ─────────────────────────────────────────────────────────
   /**
-   * 单轮流式驱动。返回 `AsyncIterable<KernelEvent>`，由调用方负责写入 SSE。
+   * 单轮流式驱动。返回 `AsyncIterable<ServerEvent>`（已翻译成 zai 前端可消费形态），
+   * 由调用方负责写入 SSE。扩展 opts 集中 per-turn 配置（model / permissionMode /
+   * providerOverride / providerId / mainAgent / abortSignal），原来 routes/agent.ts
+   * 直调 vendor runtime.query() 的 per-call 字段在 B7 flip-and-cleanup 阶段归并进
+   * adapter 接口,后续 dsh / opencc 各轨道在内部按需消费。
+   *
    * 实现要点（dsh 侧，B1a T1.2）：
    *   - 首次 `await agent.whenIdle()`（loader 装载挂起）
    *   - 记 firstSeq
    *   - `agent.followup(createUserMessage(...))`
    *   - `await agent.whenIdle()`
    *   - `sessions.flush(agent.session)`
-   *   - 从 firstSeq 起 yield agent.session.events
+   *   - 从 firstSeq 起 yield agent.session.events（经 translateSessionEvent）
+   *
+   * 实现要点（opencc 侧，B0 T0.3 + dsh-010）：
+   *   - `runtime.query({...opts})` 拿到 vendor 事件流
+   *   - `translateRuntimeEvents(stream, sessionId)` 翻成 ServerEvent 流
    */
-  run(opts: { session: AgentSession; prompt: string }): AsyncIterable<ServerEvent>;
+  run(opts: {
+    session: AgentSession;
+    /** string 文本或 Anthropic content block 数组（zai 多模态路径透传）。 */
+    prompt: string | readonly unknown[];
+    model?: string;
+    permissionMode?:
+      | 'default'
+      | 'acceptEdits'
+      | 'bypassPermissions'
+      | 'dontAsk'
+      | 'plan';
+    /** zai 解析 model 命中的 provider profile；opencc 走 vendor getAnthropicClient。 */
+    providerOverride?: {
+      model: string;
+      baseURL: string;
+      apiKey: string;
+      format?: 'anthropic' | 'openai';
+      extraParams?: Record<string, unknown>;
+    };
+    /** 前端 picker 选中的 provider profile id;透传到 zai modelCaller。 */
+    providerId?: string;
+    /** 会话级固定主 agent 配置（首次 query 来自 settings,续传来自 transcript meta）。 */
+    mainAgent?: unknown;
+    abortSignal?: AbortSignal;
+    /**
+     * 系统注入标记 — true 时 opencc vendor 不把 prompt 当 user 消息写进 transcript,
+     * 用于 BashNotifier 等后台通知路径(对齐 SubagentNotifier 的 isMeta 语义)。
+     * dsh 侧忽略(无 transcript-写-控制语义)。
+     */
+    isMeta?: boolean;
+  }): AsyncIterable<ServerEvent>;
 
   /**
    * 中止当前 turn。SSE 中断 / 客户端 disconnect 时调用。

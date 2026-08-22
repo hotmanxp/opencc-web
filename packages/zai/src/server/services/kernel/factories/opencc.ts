@@ -48,12 +48,29 @@ import {
   ZAI_GLOBAL_BRIDGE_KEYS,
 } from '../globalThisBridge.js'
 import { OPENCC_KERNEL } from '../paths.js'
+import { translateRuntimeEvents } from '../../translation.js'
 
 // 动态 import vendor runtime，避免在 dsh 模式（不会调到此 adapter）下加载
 // opencc bundle。 vendor 是 esbuild 单文件 bundle，启动开销 ~5s。
 type OpenccRuntime = Awaited<
   ReturnType<Awaited<typeof import('@zn-ai/zn-agent-core')>['createOpenccRuntime']>
 >
+
+/**
+ * Module-level singleton: 最近一次 `createOpenccKernelAdapter` 构造时拿到的
+ * OpenccRuntime 实例。zai 服务的 `getRuntime()` accessor 在 opencc 模式下
+ * 走这里拿回 OpenccRuntime,以保留 `backgroundRuntime.ts` /
+ * `routes/command.ts` / `routes/plugins.ts` 等依赖 vendor-specific 形状的
+ * 老调用面（B7 flip-and-cleanup: 关闭 dsh-009/010 同时最小化回归面）。
+ *
+ * dsh 模式下不设该单例,getRuntime() 抛 "kernel is dsh, use getKernelAdapter()"。
+ */
+let currentOpenccRuntime: OpenccRuntime | null = null
+
+/** Test seam + agentRuntime.ts initAgentRuntime 反查用。 */
+export function getCurrentOpenccRuntime(): OpenccRuntime | null {
+  return currentOpenccRuntime
+}
 
 interface OpenccKernelConfig {
   cwd: string
@@ -92,6 +109,10 @@ export async function createOpenccKernelAdapter(
     connectMcp: false,
     interactive: true,
   })
+  // B7 flip-and-cleanup: 暴露给 zai 服务层 `getRuntime()` accessor,
+  // 让 backgroundRuntime.ts / routes/command.ts 等 vendor-aware 老调用面
+  // 在 opencc 模式下继续走原 OpenccRuntime 形状（dsh 模式下 getRuntime() 抛错）。
+  currentOpenccRuntime = runtime
 
   // 启动时一次性把 zai 句柄挂到 globalThis，opencc vendor 内的 compat 模块
   // 通过这些桥与 zai 服务层交互（主计划 §4.1 + 现有 __zaiEventBus 注释）。
@@ -157,6 +178,9 @@ export async function createOpenccKernelAdapter(
       }
       // 4. 清 globalThis 桥
       clearZaiGlobalBridges()
+      // 5. 清 module-level 单例,避免 getRuntime() 在 adapter.shutdown 后
+      // 仍返 stale runtime 引用。
+      currentOpenccRuntime = null
     },
 
     // ─── 会话 ──────────────────────────────────────────────────
@@ -198,22 +222,62 @@ export async function createOpenccKernelAdapter(
     async *run(opts): AsyncIterable<ServerEvent> {
       if (stopped) throw new Error('[opencc-adapter] shutdown, refusing run')
       totalTurns++
-      // Phase 2.2 partial real-wiring:
-      //   - run() 真实接线需 432 行 translateRuntimeEvents 移出 routes/agent.ts，
-      //     避免循环依赖。本次留 stub + TODO（B1b T1.6 + B7 完整迁移负责）。
-      //   - 当前生产路径（routes/agent.ts:1095）仍直接调 runtime.query()，
-      //     未经本 adapter — B7 flip-and-cleanup 阶段统一接入。
-      void opts
-      void runtime
-      // 类型校验触发：保持 ServerEvent 类型在 stub 阶段被引用
-      if (false as boolean) {
-        yield {
-          type: 'server.connected',
-          sessionId: null,
-          eventId: '',
-          ts: 0,
-          seq: 0,
-        }
+      // B7 flip-and-cleanup (dsh-010): 真实接线。把 vendor runtime.query() 的
+      // vendor-aware 字段（model / permissionMode / providerOverride /
+      // providerId / mainAgent / abortSignal）从 adapter opts 透传给底层 OpenccRuntime，
+      // 然后经 translateRuntimeEvents 把 vendor 事件翻译成 zai 前端 spec 形态。
+      // 翻译层（services/translation.ts）原来嵌在 routes/agent.ts,本 commit 抽出,
+      // 让 run() 在 factory 内部闭合,调用方（routes/agent.ts:prompt、
+      // bashNotifier.ts）拿到的是已翻译的 ServerEvent 流。
+      const vendorStream = runtime.query({
+        // OpenccQueryInput.prompt accepts `string | OpenccContentBlockParam[]`.
+        // For multimodal input we pass the raw `userContent` block array —
+        // createOpenccRuntime-impl submits it directly to the vendor
+        // QueryEngine.submitMessage(string | ContentBlockParam[]), which
+        // converts image blocks to Anthropic protocol before hitting the
+        // API. JSON-encoding here would leak base64 as plain text and the
+        // model can't read the image.
+        // KernelAdapter.run() opts.prompt 类型为 `string | readonly unknown[]`;
+        // vendor 接受 `string | OpenccContentBlockParam[]` (mutable array)。
+        // readonly unknown[] → mutable array 的窄化由 opencc factory 内部承担
+        // (KernelAdapter interface 故意保持 vendor-agnostic,见 kernelAdapter.ts:185 注释)。
+        prompt: opts.prompt as string | Parameters<typeof runtime.query>[0]['prompt'],
+        cwd: opts.session.cwd,
+        sessionId: opts.session.sessionId,
+        // parentSessionId 由 vendor runtime 通过其 session facade 派生,
+        // 顶层 prompt 调用方不再显式透传该字段; sub-agent 路径由 AgentTool
+        // 在 BackgroundTask metadata 里携带。
+        abortSignal: opts.abortSignal,
+        model: opts.model,
+        // 透传会话选定的 permission mode（如 plan）到 runtime AppState,让
+        // vendor 权限管线按该模式运行。未设置时缺省不传 → runtime 保持
+        // bypassPermissions 语义。
+        ...(opts.permissionMode
+          ? {
+              permissionMode: opts.permissionMode as
+                | 'default'
+                | 'acceptEdits'
+                | 'bypassPermissions'
+                | 'dontAsk'
+                | 'plan',
+            }
+          : {}),
+        // zai patch: 按所选 model 解析 provider profile,对 openai provider
+        // (e.g. zhiniao-* → wizard-ai OpenAI-Mix) 注入 providerOverride,
+        // 让 vendor `getAnthropicClient` 走 `createOpenAIShimClient`(openai-shim)。
+        ...(opts.providerOverride ? { providerOverride: opts.providerOverride } : {}),
+        // zai patch: per-query providerId (from transcript.meta.providerId)。
+        ...(opts.providerId ? { providerId: opts.providerId } : {}),
+        // zai patch (2026-08-20): 会话级主 Agent 插槽。
+        ...(opts.mainAgent ? { mainAgent: opts.mainAgent } : {}),
+        // 系统注入标记:BashNotifier 用 true 避免通知 prompt 被 vendor 当 user 消息落盘。
+        ...(opts.isMeta ? { isMeta: true } : {}),
+      })
+      for await (const ev of translateRuntimeEvents(
+        vendorStream as AsyncIterable<Record<string, unknown>>,
+        opts.session.sessionId,
+      )) {
+        yield ev as ServerEvent
       }
     },
 
