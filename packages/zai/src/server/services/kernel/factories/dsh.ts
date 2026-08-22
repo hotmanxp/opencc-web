@@ -475,21 +475,35 @@ export async function createDshKernelAdapter(
       // 才能显示任务(opencc 模式 vendor 内部自动写,dsh 模式没人写)。
       setCurrentSessionId(opts.session.sessionId)
 
-      // B1a T1.2 + T1.3：runOnce 产 dsh SessionEvent 序列，
-      // translateSessionEvent → zai ServerEvent。
+      // Phase 3 P1: dsh factory 现在完整支持 OpenccContentBlock[] 多模态。
+      // 之前版本只取首个 block 的 text 字段,丢弃图片 — 导致 dsh 模式
+      // 图片 prompt 400。修复:把整个 block 数组透传给 runOnce。
+      // OpenccContentBlock 形态: { type: 'text' | 'image', text?, source? }
+      //   - text: { type: 'text', text: string }
+      //   - image: { type: 'image', source: { type: 'base64', media_type, data } }
       //
-      // dsh 0.1.0-rc.7 runOnce 仅接受 string prompt。多模态（readonly unknown[]）
-      // 走 text 提取：dsh-side 多模态由后续版本支持，目前 zai front-end 在 dsh 模式下
-      // 不传 image block，仅以文本 prompt 入栈，故 fallback 仅触发于编程错误。
-      const promptText =
-        typeof opts.prompt === 'string'
-          ? opts.prompt
-          : (() => {
-              const first = opts.prompt[0]
-              return typeof first === 'object' && first !== null && 'text' in first
-                ? String((first as { text?: unknown }).text ?? '')
-                : ''
-            })()
+      // runOnce 内部把它们直接拼到 createUserMessage 的 content 数组,
+      // 由 dsh-session 按 Anthropic protocol 序列化发给模型。
+      let promptText = ''
+      const contentBlocks: Array<{ type: string; [k: string]: unknown }> = []
+      if (typeof opts.prompt === 'string') {
+        promptText = opts.prompt
+      } else if (Array.isArray(opts.prompt)) {
+        for (const block of opts.prompt) {
+          if (!block || typeof block !== 'object') continue
+          const b = block as { type?: unknown; text?: unknown; source?: unknown }
+          if (b.type === 'text') {
+            // text 块可以合到 promptText(避免 runOnce 重复拼接)
+            // 但为了保持原始顺序,还是放到 contentBlocks
+            contentBlocks.push({ type: 'text', text: String(b.text ?? '') })
+          } else if (b.type === 'image') {
+            contentBlocks.push({ type: 'image', source: b.source })
+          } else {
+            // 未知 block 类型 — 透传,让 dsh 端决定怎么处理
+            contentBlocks.push(b as { type: string; [k: string]: unknown })
+          }
+        }
+      }
 
       // 其它扩展 opts 字段（model / permissionMode / providerOverride / providerId /
       // mainAgent / abortSignal）由 dsh session-level 配置接管,本 turn 内暂不消费:
@@ -503,11 +517,15 @@ export async function createDshKernelAdapter(
       void opts.mainAgent
       void opts.abortSignal
 
+      // Phase 3 P1: runOnce 现在边收事件边 yield(看 run.ts)。
+      // 这里 for await 直接拿到每个 token 翻译后的 runtime.delta,前端
+      // SSE 立刻收到,实现真正的流式输出。
       for await (const dshEvent of bridge.runOnce({
         ctx: handle.ctx,
         sessionId: opts.session.sessionId,
         cwd: opts.session.cwd,
         prompt: promptText,
+        contentBlocks: contentBlocks.length > 0 ? contentBlocks : undefined,
         // dsh AgentOptions 仅支持 provider + model — 必须显式传,否则 dsh
         // 在 agent/request waterfall 找不到 provider/model,抛
         // "has no provider/model" 错误(B1a T1.4 收口)。

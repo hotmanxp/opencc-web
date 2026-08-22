@@ -25,7 +25,7 @@ export {
   type DshProviderProfile,
   getActiveDshHandleCount,
 } from './createDshRuntime.js'
-export { runOnce, awaitAgentIdle, type DshRunOptions } from './run.js'
+export { runOnce, type DshRunOptions } from './run.js'
 // Re-export dsh-session/dsh-llm 关键类型/工厂，让 zai-side factories 无需直接依赖 dsh 包
 export { SessionId, type Session, type SessionEvent, type SessionEventType } from '@deepseek-ai/dsh-session'
 export { createUserMessage } from '@deepseek-ai/dsh-llm'
