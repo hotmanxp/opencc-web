@@ -36,6 +36,27 @@ interface DshSubagentControlBridge {
   sendMessage: (taskId: string, prompt: string) => Promise<{ ok: boolean; error?: string }>
 }
 
+/**
+ * dsh-019 Phase 2: 完整 DshTaskState 类型(从 dsh-bridge DshTaskState 镜像,
+ * 用于 /:id 详情端点返回 startedAt/finishedAt/result/error/prompt 等)。
+ */
+interface DshTaskFull {
+  taskId: string
+  sessionId: string
+  parentSessionId?: string
+  status: 'running' | 'done' | 'failed' | 'cancelled'
+  prompt: string
+  startedAt: number
+  finishedAt?: number
+  result?: unknown
+  error?: string
+}
+
+interface DshSubagentDetailBridge {
+  /** 读 ~/.zai/tasks-dsh/<sid>.json — 返回完整 DshTaskState */
+  readTask: (taskId: string) => Promise<DshTaskFull | null>
+}
+
 function tryGetDshBridge(): DshSubagentControlBridge | null {
   const fromGlobal = (globalThis as {
     __zaiDshSubagentControl?: DshSubagentControlBridge
@@ -53,6 +74,13 @@ function notInitialized(res: Response): boolean {
     return true
   }
   return false
+}
+
+function tryGetDshDetailBridge(): DshSubagentDetailBridge | null {
+  const fromGlobal = (globalThis as {
+    __zaiDshSubagentDetail?: DshSubagentDetailBridge
+  }).__zaiDshSubagentDetail
+  return fromGlobal ?? null
 }
 
 /**
@@ -77,17 +105,27 @@ router.get('/subagent-tasks', async (req: Request, res: Response) => {
 
 /**
  * GET /api/subagent-tasks/:id
- *   注意:list 返回的是简略对象(只有 id/status/description);
- *   dsh-bridge 的 listDshSubagents 也只返回这 3 字段。Phase 1 不暴露
- *   prompt/startedAt 等详细字段,UI 用 description 即可;需要时扩展
- *   dsh-bridge.listDshSubagents 走 includeDetails 开关。
+ *   dsh-019 Phase 2: 优先用 dsh-bridge 完整 DshTaskState(读
+ *   ~/.zai/tasks-dsh/<taskId>.json,带 startedAt/finishedAt/result/error/prompt)，
+ *   fallback 到 list 简略对象(只 id/status/description)。
  */
 router.get('/subagent-tasks/:id', async (req: Request, res: Response) => {
   if (notInitialized(res)) return
-  const bridge = tryGetDshBridge()!
   const id = req.params.id
+  // 1. 优先读完整 DshTaskState
+  const detailBridge = tryGetDshDetailBridge()
+  if (detailBridge) {
+    try {
+      const full = await detailBridge.readTask(id)
+      if (full) return res.json(full)
+      // 找不到时 fallback 到 list(可能 id 拼写错误 / 子 agent 写盘前)
+    } catch (err) {
+      console.warn('[subagentTasks] readTask failed, falling back to list:', err)
+    }
+  }
+  // 2. fallback: list 然后 filter(只 id/status/description 字段)
+  const bridge = tryGetDshBridge()!
   try {
-    // list 当前 session 然后 filter(id 唯一),避免再增加一个 get 接口
     const tasks = await bridge.list()
     const found = tasks.find((t) => t.id === id)
     if (!found) return res.status(404).json({ error: 'subagent_task_not_found' })

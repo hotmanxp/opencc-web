@@ -329,6 +329,43 @@ export async function createDshKernelAdapter(
     },
   }
 
+  // ── 2.6 dsh-019 Phase 2: __zaiDshSubagentDetail 桥 ─────────────────────
+  // 暴露 readTask(id) — 直接读 ~/.zai/tasks-dsh/<taskId>.json 拿完整
+  // DshTaskState(带 startedAt/finishedAt/result/error/prompt),给
+  // /api/subagent-tasks/:id 详情端点用(Subagent 详情 Drawer)。
+  ;(globalThis as {
+    __zaiDshSubagentDetail?: {
+      readTask: (taskId: string) => Promise<{
+        taskId: string
+        sessionId: string
+        parentSessionId?: string
+        status: 'running' | 'done' | 'failed' | 'cancelled'
+        prompt: string
+        startedAt: number
+        finishedAt?: number
+        result?: unknown
+        error?: string
+      } | null>
+    }
+  }).__zaiDshSubagentDetail = {
+    readTask: async (taskId: string) => {
+      const t = await bridge.readDshTask(taskId)
+      if (!t) return null
+      // 截断 prompt 到 8K 防 LLM 反向读取时 token 爆;result 不截(通常小)
+      return {
+        taskId: t.taskId,
+        sessionId: t.sessionId,
+        ...(t.parentSessionId ? { parentSessionId: t.parentSessionId } : {}),
+        status: t.status,
+        prompt: t.prompt.length > 8192 ? t.prompt.slice(0, 8192) + '\n\n[...truncated...]' : t.prompt,
+        startedAt: t.startedAt,
+        ...(t.finishedAt !== undefined ? { finishedAt: t.finishedAt } : {}),
+        ...(t.result !== undefined ? { result: t.result } : {}),
+        ...(t.error !== undefined ? { error: t.error } : {}),
+      }
+    },
+  }
+
   let startedAt = Date.now()
   let totalTurns = 0
   let totalToolCalls = 0

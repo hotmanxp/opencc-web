@@ -28,6 +28,7 @@ import {
   sendMessageToSubagentTask,
   type DshSubagentTask,
 } from '../../hooks/useSubagentTasks.js'
+import { SubagentDetailDrawer } from './SubagentDetailDrawer.js'
 
 const STATUS_ICON: Record<string, JSX.Element> = {
   running: <LoadingOutlined style={{ color: 'var(--accent-start)' }} spin />,
@@ -56,12 +57,14 @@ function SubagentRow({
   busy,
   onSendMessage,
   sendingTo,
+  onSelect,
 }: {
   task: DshSubagentTask
   onInterrupt: (id: string) => void
   busy: string | null
   onSendMessage: (id: string, message: string) => void
   sendingTo: string | null
+  onSelect: (id: string) => void
 }) {
   const status = task.status
   const isRunning = status === 'running'
@@ -89,7 +92,9 @@ function SubagentRow({
         borderBottom: '1px solid var(--border-color, #eee)',
         color: 'var(--text-primary)',
         fontSize: 12,
+        cursor: 'pointer',
       }}
+      onClick={() => onSelect(task.id)}
     >
       <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
         <span style={{ display: 'flex', alignItems: 'center', minWidth: 18 }}>
@@ -127,7 +132,10 @@ function SubagentRow({
               type="text"
               icon={isSending ? <LoadingOutlined spin /> : <MessageOutlined />}
               disabled={isSending}
-              onClick={() => setShowInput((v) => !v)}
+              onClick={(e) => {
+                e.stopPropagation()
+                setShowInput((v) => !v)
+              }}
               data-testid={`subagent-sendmsg-toggle-${task.id}`}
             />
           </Tooltip>
@@ -140,14 +148,20 @@ function SubagentRow({
               danger
               icon={isBusy ? <LoadingOutlined spin /> : <StopOutlined />}
               disabled={isBusy}
-              onClick={() => onInterrupt(task.id)}
+              onClick={(e) => {
+                e.stopPropagation()
+                onInterrupt(task.id)
+              }}
               data-testid={`subagent-interrupt-${task.id}`}
             />
           </Tooltip>
         )}
       </div>
       {showInput && isRunning && (
-        <div style={{ display: 'flex', gap: 4, paddingLeft: 26 }}>
+        <div
+          style={{ display: 'flex', gap: 4, paddingLeft: 26 }}
+          onClick={(e) => e.stopPropagation()}
+        >
           <Input.TextArea
             size="small"
             rows={2}
@@ -182,13 +196,13 @@ export function SubagentsTab() {
   const { tasks, loading, error, refresh } = useSubagentTasks()
   const [busy, setBusy] = useState<string | null>(null)
   const [sendingTo, setSendingTo] = useState<string | null>(null)
+  const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
 
   async function handleInterrupt(taskId: string) {
     setBusy(taskId)
     try {
       const res = await interruptSubagentTask(taskId)
       if (!res.ok) {
-        console.warn('[SubagentsTab] interrupt failed:', res.error)
         antdMessage.warning(`中断失败: ${res.error ?? 'unknown'}`)
       } else {
         antdMessage.success('已发送 interrupt 给子 agent')
@@ -282,9 +296,16 @@ export function SubagentsTab() {
             busy={busy}
             onSendMessage={handleSendMessage}
             sendingTo={sendingTo}
+            onSelect={setSelectedTaskId}
           />
         ))}
       </div>
+      <SubagentDetailDrawer
+        taskId={selectedTaskId}
+        onClose={() => setSelectedTaskId(null)}
+        onInterrupt={handleInterrupt}
+        busy={busy}
+      />
     </div>
   )
 }
