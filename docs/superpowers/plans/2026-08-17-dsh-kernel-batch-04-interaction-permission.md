@@ -1,6 +1,7 @@
 # Batch 4 — 交互与权限
 
 > 所属主计划：[2026-08-17-dsh-kernel-main-plan.md](2026-08-17-dsh-kernel-main-plan.md)
+> **状态**：✅ 已合入（commit `b7d8b130`，2026-08-17 前后）— G5 交互/权限能力面达成
 > 目标：dsh 轨道的交互能力面对齐——权限审批（approve）、AskUserQuestion、permissionMode 语义。**依赖 B2**（审批触发点在工具执行；审查对主计划 DAG 的修正）。
 
 ---

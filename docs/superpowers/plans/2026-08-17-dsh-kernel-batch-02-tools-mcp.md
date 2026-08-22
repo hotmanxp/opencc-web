@@ -1,6 +1,7 @@
 # Batch 2 — 工具与 MCP
 
 > 所属主计划：[2026-08-17-dsh-kernel-main-plan.md](2026-08-17-dsh-kernel-main-plan.md)
+> **状态**：✅ 已合入（commit `b7d8b130`，2026-08-17 前后）— G3 工具能力面达成
 > 目标：dsh 轨道具备与 opencc 轨道对等的**工具能力面**——核心工具（bash/fs/read/edit/write）、MCP 客户端工具、Skill 动态加载。依赖 B1 的运行时闭环。
 
 ---

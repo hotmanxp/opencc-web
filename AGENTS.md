@@ -28,8 +28,9 @@
 
 ## 双轨改造 (dsh 内核集成 · B 方案)
 
-> **状态**：B0（基座与双轨骨架）已合入。B1-B7 见 `docs/superpowers/plans/2026-08-17-dsh-kernel-main-plan.md` 与 `2026-08-17-dsh-kernel-batch-*.md`。
+> **状态**：B0-B5 已合入（commit `b7d8b130`）；B6 验收进行中；B7 收口文档落地（决策记录 `2026-08-17-dsh-kernel-decision.md`、维护契约 `2026-08-17-dsh-maintenance-contract.md`、vendor 退役评估 `2026-08-17-dsh-vendor-retirement.md`）。状态字段详见每个 `docs/superpowers/plans/2026-08-17-dsh-kernel-batch-*.md` 文件顶部。
 > **目标**：zai agent 内核从 opencc vendor 迁移到 deepseek-harness（`@deepseek-ai/dsh-*`），采用双轨并行 + 配置切换。
+> **G2 决策**：评审记录见 [`docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md`](docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md)；维护契约见 [`docs/2026-08-17-dsh-maintenance-contract.md`](docs/2026-08-17-dsh-maintenance-contract.md)。
 
 ### 轨道选择
 
@@ -82,6 +83,27 @@ pnpm --filter @zn-ai/dsh-bridge run test         # dsh-bridge 单测
 
 # zai 侧 kernel 相关测试
 pnpm --filter @zn-ai/zai test src/server/services/kernel/
+
+# 双轨 parity harness（11 组 ServerEvent 全覆盖；B6 交付）
+pnpm --filter @zn-ai/zai test src/server/test/kernel/parity/
+
+# kill switch 演练脚本（季度执行；含 SSE drain + globalThis 桥清理）
+bash scripts/kill-switch-drill.sh
+```
+
+**kernel 切换配置**：
+
+```bash
+zai config set agent.kernel dsh         # 切到 dsh 轨道
+zai config set agent.kernel opencc      # 切回 opencc 轨道（kill switch）
+# 切完后必须重启 zai 服务（运行期切换不允许 — main-plan §4.1 红线）
+```
+
+**会话迁移工具（B6 T6.3）**：
+
+```bash
+zai migrate --kernel dsh --dry-run                                # dry-run 验证（默认）
+zai migrate --kernel dsh --target-dsh-version 0.1.0-rc.7          # 真实迁移（锁定版本）
 ```
 
 ### KernelAdapter 抽象
@@ -187,6 +209,7 @@ pnpm release:major
 | 类别 | 路径 |
 |------|------|
 | 架构与实现细节 | `docs/DEVELOPMENT_REFERENCE.md` |
+| 双轨开发指南（切轨调试 / parity harness / kill switch 演练） | `docs/DEVELOPMENT_REFERENCE.md` §16 |
 | 架构总览研究 | `docs/superpowers/specs/2026-07-25-opencc-web-architecture-overview.md` |
 | SSE 状态推送设计 | `docs/superpowers/specs/2026-07-19-sse-state-push-design.md` |
 | 会话压缩设计 | `docs/superpowers/specs/2026-07-19-zai-session-compaction-design.md` |
@@ -197,7 +220,13 @@ pnpm release:major
 | OpenCC Adapter(Node/tsx) | `docs/superpowers/specs/2026-07-29-zn-agent-core-opencc-adapter-node-design.md`(Bun 版已 deprecated) |
 | 类型化 RPC client stub | `docs/superpowers/specs/2026-08-16-rpc-type-safe-client-stubs.md` |
 | 命令生命周期事件埋点 | `docs/superpowers/specs/2026-08-16-command-lifecycle-events.md` |
+| dsh 主计划 | `docs/superpowers/plans/2026-08-17-dsh-kernel-main-plan.md` |
+| dsh 批次 B0-B7 | `docs/superpowers/plans/2026-08-17-dsh-kernel-batch-*.md` |
+| G2 决策评审 | `docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md` |
+| 双轨维护契约 | `docs/2026-08-17-dsh-maintenance-contract.md` |
+| vendor 退役评估 | `docs/2026-08-17-dsh-vendor-retirement.md` |
+| dsh 发布说明 | `docs/2026-08-17-dsh-release-notes.md` |
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
 
-<!-- updated: 2026-08-18 -->
+<!-- updated: 2026-08-22 (B7: dsh G2 决策 + 维护契约 + vendor 退役评估) -->
