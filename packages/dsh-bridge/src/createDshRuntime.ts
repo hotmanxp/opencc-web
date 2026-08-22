@@ -116,6 +116,21 @@ export interface DshProviderProfile {
   /** env 变量名(里面存 API key)。dsh-llm-pi-ai 按需读,不在进程里缓存。 */
   apiKeyEnv: string
   /**
+   * Provider 路由默认 reasoning effort(传给 pi-ai `PiAiProviderProfile.reasoning`)。
+   *
+   * **dsh-021 root cause 修复**:zai 早期 `DshModelEntry.defaultReasoningEffort`
+   * 字段在 `buildProviderEntries` 中被静默丢弃 — dsh-llm-pi-ai streamSimple
+   * (`adapter.ts:321` → `profileOptions(profile, reasoning, apiKey)`) 靠
+   * `profile.reasoning` 决定发给 anthropic API 的 `thinking` / `reasoning_effort`
+   * 参数。不传时 pi-ai 不发 `thinking: { type: 'enabled' }`,API 默认 thinking
+   * 关闭,dsh 收不到 `thinking_*` 事件,dsh-bridge translateSessionEvent
+   * 永远不 emit `runtime.thinking` → UI ThinkingBlock 不显示。
+   *
+   * 注意:`'off'` 与 undefined 区分 — 显式禁用时仍写出字段,让 pi-ai
+   * 发 `thinking: { type: 'disabled' }`。
+   */
+  defaultReasoningEffort?: DshReasoningLevel
+  /**
    * 该路由暴露的模型列表。形态:
    * - `string` — 只声明 id,其他用 dsh-llm-pi-ai 内置 catalog 默认
    * - `DshModelEntry` — 覆盖 input / contextWindow / maxTokens / reasoningEfforts
@@ -180,6 +195,14 @@ export function buildProviderEntries(
         return entry
       }),
       ...(p.displayName ? { displayName: p.displayName } : {}),
+      // dsh-021 root cause 修复:把 profile-level defaultReasoningEffort 透传到
+      // pi-ai `PiAiProviderProfile.reasoning`。dsh-llm-pi-ai profileOptions
+      // (`adapter.ts:87-104`) 靠这个字段决定 streamSimple 是否给 anthropic
+      // API 发 `thinking: { type: 'enabled' }` — 不传时默认 thinking 关闭,
+      // dsh 收不到 reasoning events,UI ThinkingBlock 不显示。
+      ...(p.defaultReasoningEffort !== undefined
+        ? { reasoning: p.defaultReasoningEffort }
+        : {}),
     }
   }
   return providerEntries

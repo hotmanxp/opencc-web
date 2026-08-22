@@ -121,6 +121,14 @@ export async function createDshKernelAdapter(
       process.env.ANTHROPIC_BASE_URL
       ?? 'https://api.anthropic.com',
     apiKeyEnv: anthropicApiKeyEnv,
+    // dsh-021 root cause 修复:profile-level `defaultReasoningEffort` 才是
+    // dsh-llm-pi-ai `PiAiProviderProfile.reasoning` 的真正入口 —
+    // 写到这才能让 streamSimple 给 anthropic API 发 `thinking: { type: 'enabled' }`,
+    // API 才会返 thinking 块,dsh 才会 emit `thinking_*` 事件,dsh-bridge
+    // translateSessionEvent 才会 emit `runtime.thinking`,UI ThinkingBlock
+    // 才会渲染。zai OPENCC 模式走 vendor Anthropic SDK,SDK 默认按 client
+    // 端 settings 发 thinking;DSH 模式必须**显式**写到 dsh-bridge profile。
+    defaultReasoningEffort: 'medium',
     models: [
       // 显式声明的 vision-capable model — 必须列在前面让 dsh-llm-pi-ai
       // catalog 优先匹配(否则 dsh-llm-pi-ai 找不到 model id 报

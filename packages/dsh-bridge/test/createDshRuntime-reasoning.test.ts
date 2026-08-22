@@ -164,4 +164,73 @@ describe('buildProviderEntries — reasoning transform', () => {
     const anthropic = out.anthropic as { models: Array<Record<string, unknown>> }
     expect(anthropic.models[0].reasoningEfforts).toEqual({})
   })
+
+  // ─── profile-level defaultReasoningEffort (dsh-021 root cause 修复) ───
+  //
+  // 历史 bug：zai 早期 `DshModelEntry.defaultReasoningEffort` 字段在
+  // buildProviderEntries 中被静默丢弃。dsh-llm-pi-ai streamSimple 走
+  // `profile.reasoning` 字段决定发给 anthropic API 的 thinking 参数 —
+  // 不传时 pi-ai 不发 `thinking: { type: 'enabled' }`，API 默认 thinking
+  // 关闭，dsh 永远收不到 `thinking_*` 事件，dsh-bridge translateSessionEvent
+  // 永远不 emit `runtime.thinking` → UI ThinkingBlock 不显示。
+  //
+  // 修复：在 profile-level 暴露 `defaultReasoningEffort`，buildProviderEntries
+  // 写到 provider 顶层 `reasoning` 字段，传给 dsh-llm-pi-ai 的
+  // `PiAiProviderProfile.reasoning`。
+
+  it('defaultReasoningEffort(profile-level) → provider.reasoning 字段', () => {
+    const out = buildProviderEntries([
+      {
+        ...baseProfile,
+        defaultReasoningEffort: 'medium',
+        models: [
+          {
+            id: 'MiniMax-M3',
+            reasoningEfforts: ['low', 'medium', 'high'],
+          },
+        ],
+      },
+    ])
+    const anthropic = out.anthropic as {
+      reasoning?: string
+      models: Array<Record<string, unknown>>
+    }
+    expect(anthropic.reasoning).toBe('medium')
+  })
+
+  it('缺省 defaultReasoningEffort → 不输出 provider.reasoning 字段', () => {
+    // 与 model-level 行为对齐：未设置就不写,让 pi-ai / dsh-llm-pi-ai
+    // 走内置 catalog 默认(典型是 'off' 或某 model 第一个非 off level)。
+    const out = buildProviderEntries([
+      {
+        ...baseProfile,
+        models: [
+          {
+            id: 'MiniMax-M3',
+            reasoningEfforts: ['low', 'medium', 'high'],
+          },
+        ],
+      },
+    ])
+    const anthropic = out.anthropic as { reasoning?: unknown }
+    expect(anthropic.reasoning).toBeUndefined()
+  })
+
+  it('"off" 作为 defaultReasoningEffort 仍写出 (显式禁用 thinking)', () => {
+    // 与 undefined 区分 — 用户明确要 thinking off 时不应静默忽略。
+    const out = buildProviderEntries([
+      {
+        ...baseProfile,
+        defaultReasoningEffort: 'off',
+        models: [
+          {
+            id: 'MiniMax-M2.7-highspeed',
+            reasoningEfforts: ['low', 'medium', 'high'],  // model 仍声明支持
+          },
+        ],
+      },
+    ])
+    const anthropic = out.anthropic as { reasoning?: string }
+    expect(anthropic.reasoning).toBe('off')
+  })
 })
