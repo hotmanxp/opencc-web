@@ -38,6 +38,16 @@ interface PendingAttachmentLike {
 export function useSubmitPrompt(): UseSubmitPromptResult {
   const pushUserMsg = useCallback(
     (text: string, isRenderedPrompt = false, attachments: PendingAttachmentLike[] = []) => {
+      // [diag] trace user.text push — 排查"消息内容重复显示"
+      const stack = new Error().stack?.split('\n').slice(2, 6).join(' | ') ?? ''
+      // eslint-disable-next-line no-console
+      console.log(
+        '[diag][pushUserMsg] isRendered=%s text=%j att=%d stack=%s',
+        isRenderedPrompt,
+        text,
+        attachments.length,
+        stack,
+      )
       useAgentStore.setState((s) => ({
         status: 'streaming' as const,
         messages: [
@@ -76,6 +86,9 @@ export function useSubmitPrompt(): UseSubmitPromptResult {
       // 事件在真正开始执行时由 AgentInputBox watcher pushUserMsg。
       // 仅"立即执行"才乐观写入, 保持原有即时反馈。
       if (!opts?.skipPushUserMsg && resp.queued !== true) {
+        // [diag] 乐观 push (submitPrompt 路径)
+        // eslint-disable-next-line no-console
+        console.log('[diag][submitPrompt] optimistic push text=%j queued=%s skipPush=%s', text, resp.queued, !!opts?.skipPushUserMsg)
         pushUserMsg(text)
       }
       const returnedSessionId = resp.sessionId

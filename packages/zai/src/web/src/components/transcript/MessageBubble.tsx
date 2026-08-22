@@ -12,6 +12,8 @@
 
 import React, { useState, useEffect, useMemo, useRef } from "react";
 import { Button, Card, Collapse, Modal, Space, Tag, Typography, message } from "antd";
+// [diag] duplicate-render counter — 排查"消息内容重复显示"问题
+const __diagRenderCount = new Map<string, number>()
 import {
   RobotFilled,
   UserOutlined,
@@ -755,6 +757,21 @@ export const MessageBubble = React.memo(function MessageBubble({
       (msg as { isRenderedPrompt?: unknown }).isRenderedPrompt,
     )
     const visibleText = ((msg.text as string) || (msg.prompt as string) || "")
+    // [diag] 记录每个 eventId 被 MessageBubble 渲染了几次 (排查"同一条消息显示2次")
+    const evtId = (msg as { eventId?: string }).eventId ?? "?"
+    const prev = (__diagRenderCount.get(evtId) ?? 0) + 1
+    __diagRenderCount.set(evtId, prev)
+    // eslint-disable-next-line no-console
+    console.log(
+      '[diag][MessageBubble] render type=%s eventId=%s count=%d isRendered=%s text=%j att=%d streaming=%s',
+      msg.type,
+      evtId,
+      prev,
+      isRendered,
+      visibleText,
+      msgAttachments.length,
+      Boolean(streaming),
+    )
     return (
       <div
         data-testid="user-bubble-container"
@@ -884,6 +901,19 @@ export const MessageBubble = React.memo(function MessageBubble({
 
   if (msg.type === "assistant.text") {
     const text = (msg.text as string) || "";
+    // [diag] assistant 气泡渲染计数
+    const evtId2 = (msg as { eventId?: string }).eventId ?? "?"
+    const prev2 = (__diagRenderCount.get(evtId2) ?? 0) + 1
+    __diagRenderCount.set(evtId2, prev2)
+    // eslint-disable-next-line no-console
+    console.log(
+      '[diag][MessageBubble] render type=%s eventId=%s count=%d textLen=%d streaming=%s',
+      msg.type,
+      evtId2,
+      prev2,
+      text.length,
+      Boolean(streaming),
+    )
     // 跳过完全空的 assistant.text 气泡: 模型在工具调用前偶尔会吐一两个空字符,
     // 不挡就让用户看到一张空 robot 卡片. 历史回放里若某条 assistant.text
     // 真的是空白, 也一并隐藏.
