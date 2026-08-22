@@ -4,11 +4,15 @@ import { useAgentStore } from './useAgentStore.js'
 
 beforeEach(() => {
   useAgentStore.setState({
+    sessionId: null,
     activeSessionId: null,
     messages: [],
     sendSeq: 0,
     status: 'idle',
     pendingAsk: null,
+    textSegmentRev: 0,
+    segmentedToolUseIds: {},
+    lastSeqBySession: {},
   })
 })
 
@@ -669,5 +673,80 @@ describe('useAgentStore.applyPromptApprove', () => {
     } as any)
     useAgentStore.getState().clearPendingApprove('tu-other')
     expect(useAgentStore.getState().pendingApprove).not.toBeNull()
+  })
+})
+
+/**
+ * dsh 工具名空串兼容（对应截图 "未知工具 (id:)" 修复）
+ *
+ * dsh-bridge 翻译层在以下情况下会传 toolName='':
+ *   - call/result 顺序异常（result 先到，映射表空）
+ *   - subagent 路径下 source.callId 未带 name
+ *   - toolName 字段缺失（dsh 老版本）
+ *
+ * 旧 store 用 `incomingName || prev.name` 合并：空串 falsy → 正确保留 prev。
+ * 但 `incomingName || (msg.name as string) || 'unknown'` 在 idx===-1 分支
+ * 会把空串当 falsy → 落到 'unknown'。两条路径语义不一致，已统一为
+ * !== undefined 严格判断。
+ */
+describe('useAgentStore.upsertToolCall dsh toolName 空串兼容 (Phase 2 tool/result 修复)', () => {
+  test('start 写入 name 后, done 带空 name 不会覆盖', () => {
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.tool_call',
+      eventId: 'e1', ts: 1, sessionId: 's1', turnIndex: 0,
+      toolUseId: 'tu-1', toolName: 'Bash', input: { cmd: 'ls' },
+    } as any)
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.tool_result',
+      eventId: 'e2', ts: 2, sessionId: 's1', turnIndex: 0,
+      toolUseId: 'tu-1', toolName: '', // dsh done 事件映射表未命中时传空串
+      input: null, output: 'file.txt',
+    } as any)
+    const msgs = useAgentStore.getState().messages
+    const finalTool = msgs.find((m) => m.toolUseId === 'tu-1')
+    expect(finalTool).toBeDefined()
+    expect(finalTool?.type).toBe('tool_use:done')
+    expect(finalTool?.name).toBe('Bash') // 保留 start 的 name,不被空串覆盖
+    expect(finalTool?.output).toBe('file.txt')
+  })
+
+  test('done 先于 start 到达 (out-of-order): toolName 留空,前端"未知工具"兜底', () => {
+    // 极端顺序:done 先到(对应 dsh 某些 subagent 场景)
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.tool_result',
+      eventId: 'e1', ts: 1, sessionId: 's1', turnIndex: 0,
+      toolUseId: 'tu-orphan', toolName: '',
+      input: null, output: 'result',
+    } as any)
+    // 之后 start 到达
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.tool_call',
+      eventId: 'e2', ts: 2, sessionId: 's1', turnIndex: 0,
+      toolUseId: 'tu-orphan', toolName: 'Bash', input: { cmd: 'echo' },
+    } as any)
+    const tool = useAgentStore.getState().messages.find(
+      (m) => m.toolUseId === 'tu-orphan',
+    )
+    // 防御性分支:已存在的 done 不被迟到的 start 打回 start 态
+    expect(tool?.type).toBe('tool_use:done')
+    expect(tool?.output).toBe('result')
+    // name 保留 done 时的空串(因为 start 阶段 prev 已存在,不覆盖;
+    // 但严格说 start 到来时 idx !== -1 也会保留 prev.name — 这里 prev.name=''
+    // 所以仍是空串,符合"已知为空的合法值"语义)。
+    // 前端 ToolCallBlock 的"未知工具 (id:xxxxxxxx)"兜底会显示 id。
+  })
+
+  test('start 单独到达, name 是空串: 保留空串(不替换为 unknown)', () => {
+    useAgentStore.getState().applyRuntimeEvent({
+      type: 'runtime.tool_call',
+      eventId: 'e1', ts: 1, sessionId: 's1', turnIndex: 0,
+      toolUseId: 'tu-empty', toolName: '', input: { cmd: 'x' },
+    } as any)
+    const tool = useAgentStore.getState().messages.find(
+      (m) => m.toolUseId === 'tu-empty',
+    )
+    // 旧实现: name = '' || (msg.name) || 'unknown' → 'unknown'
+    // 新实现: incomingName !== undefined → 保留 ''
+    expect(tool?.name).toBe('')
   })
 })

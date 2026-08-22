@@ -739,9 +739,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       // 归一化成 'tool_use:start' 形态, ToolCallBlock 据此识别 status / 显示字段.
       // name 优先取 incoming (start 第一次写), 之后 done/error 不会带 name,
       // 落到 prev 上保留 start 的 name; 同理 input.
+      //
+      // dsh 内核 tool/result 可能带 toolName=''(映射表为空或 out-of-order),
+      // 这种空串要当"显式空"保留,而不是被 || 当 falsy 抹掉 — 否则
+      // start 阶段写入的 'Bash' 会被 done 阶段的 '' 覆盖,触发前端
+      // ToolCallBlock 的"未知工具"兜底(详见 MessageBubble.tsx:454-456)。
+      // 用 !== undefined 区分"没传"与"传了空串"。
       const incomingName =
-        (msg.name as string) ||
-        (block?.type === 'tool_use' ? block.name : undefined)
+        msg.name !== undefined
+          ? (msg.name as string)
+          : (block?.type === 'tool_use' ? block.name : undefined)
       // 用 typeof === 'object' + 非 null 替代 `||`:
       // 关键: server 在 content_block_stop stale 状态时, 会用空字符串当 input
       // 二次 emit runtime.tool_call. `"" || {}` = `{}` (空字符串 falsy,
@@ -806,7 +813,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           // 在"调用中"的 start.
           type: (msg.type as string).startsWith('tool_use:') ? msg.type : 'tool_use:start',
           toolUseId,
-          name: incomingName || (msg.name as string) || 'unknown',
+          // name: incomingName 已严格区分 "没传" 与 "传了空串"。incomingName
+          // 是字符串(包括 '') 就用,undefined 才回退到 msg.name / 'unknown'。
+          // ToolCallBlock 的 "未知工具 (id:xxxxxxxx)" 兜底分支(详见
+          // MessageBubble.tsx:454-456)接收空字符串比 'unknown' 显示更好。
+          name:
+            incomingName !== undefined
+              ? incomingName
+              : ((msg.name as string | undefined) ?? 'unknown'),
           // input 同 incomingInput: 优先 incomingInput (已过滤空字符串/数组),
           // 否则用 msg.input (同样过滤), 避免 `||` 把空字符串当 falsy 落到
           // 下一个候选, 最后写到 store 的 input 是 `{}` / 损坏对象.
@@ -816,9 +830,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           error: msg.error,
           reason: msg.reason,
         }
-        if (!incomingName && !(msg.name as string | undefined)) {
+        if (incomingName === undefined && msg.name === undefined) {
           // 数据收集: 流式阶段 server 漏传 toolName 的次数 + 上下文 toolUseId,
           // 排查 Bug A (实时流式期间显示 "unknown") 的现场统计.
+          // 注意: incomingName === '' 视为合法 (dsh 翻译层会传空串表示
+          // "映射表未命中"),不再误报。
           if (typeof console !== 'undefined') {
             console.warn('[tool_unknown] runtime.tool_call 漏传 toolName', {
               toolUseId,
@@ -850,7 +866,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         output: msg.output !== undefined ? msg.output : prev.output,
         error: msg.error !== undefined ? msg.error : prev.error,
         reason: msg.reason !== undefined ? msg.reason : prev.reason,
-        name: incomingName || prev.name,
+        // name: 优先级 = incomingName(非空字符串) > prev.name。
+        // incomingName 是 ''(dsh done 事件映射表未命中时传空串)视为"未提供",
+        // 不覆盖 prev.name — 否则会把 start 阶段写入的 'Bash' 抹掉,
+        // 触发前端 ToolCallBlock 的 "未知工具 (id:xxx)" 兜底显示。
+        // incomingName 是 undefined (整个字段缺失) 时同样回退 prev.name。
+        name: incomingName ? incomingName : prev.name,
         // 用 `??` 而非 `||`: incomingInput 是 null/undefined 时才回退 prev,
         // 避免空字符串/空对象覆盖已有 input (与 idx===-1 分支同一漏洞).
         input: incomingInput ?? prev.input,
