@@ -94,8 +94,11 @@ router.get('/agent/sessions/:id/state', async (req: Request, res: Response) => {
         return []
       }),
 
-    getBackgroundRuntime()
-      .list()
+    // B7 (dsh-009): dsh 模式 initBackgroundRuntime 主动跳过(DefaultBackgroundRuntime
+    // 走 vendor OpenccRuntime.query,在 dsh 侧自实现子任务),getBackgroundRuntime() throw。
+    // 用 Promise.resolve().then() 把同步 throw 包成 reject,与同段其它 catch 风格一致。
+    Promise.resolve()
+      .then(() => getBackgroundRuntime().list())
       .then((all) => all.filter((t) => t.parentSessionId === sid))
       .catch((err: unknown) => {
         console.warn('[sessionState] agent failed', err)

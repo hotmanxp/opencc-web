@@ -95,7 +95,9 @@
 | B2-B5 真实实现 | ✅ | **2026-08-22 全部真实化**（Phase 1.1/1.2/1.3/1.4/2.1/2.2/2.3/2.4/3.1/3.2 共 12 commit） |
 | dsh 模式启动验证 | ✅ | dev 服务正常 listen 8104/7720，无 InvalidAgentKernelError |
 | 11 组事件映射完整性 | ✅ | Phase 1.3 收口：13/13 SessionEventMap 真实类型 pair/ignorable + 32 known-but-not-implemented 标注 forward-compat |
-| opencc factory run() 真实接线 | ⚠️ | 留 stub（432 行 translateRuntimeEvents 移出 routes/agent.ts 列为 B7 flip-and-cleanup 收口） |
+| opencc factory run() 真实接线 | ✅ | 2026-08-22 B7 flip-and-cleanup：`runtime.query({...})` + `translateRuntimeEvents` (services/translation.ts) 内部闭合；routes/agent.ts 走 `getKernelAdapter().run()` |
+| B7 flip-and-cleanup 落地 | ✅ | `agentRuntime.ts:initAgentRuntime()` 走 `createKernel({cwd, dataDir, settings})`；`routes/agent.ts:prompt` + `bashNotifier.ts` 走 `adapter.run()`；`translateRuntimeEvents` 移出到 services/translation.ts（432 行）；`getRuntime()` 在 opencc 模式返回底层 OpenccRuntime 兼容老调用点 |
+| dsh 模式 routes 接线 | ✅ | 2026-08-22 修复：`scripts/kill-switch-drill.sh` Phase 3 SSE 接入 200，8/8 phase 通过（之前 dsh-009 报 Phase 3 404 实际是 SSE 路由 `/api/events` 与真实名称 `/api/event` 不一致的 drill script bug,本次一并修） |
 | 周边 Stub 真实化（registry/dsh factory） | ✅ | Phase 2.1/2.3 全部接入 vendor API |
 | ego-browser 双轨全场景验收 | ⚠️ | 默认 opencc 4/4 通过（handoff 文档）；dsh 轨道需真实 ANTHROPIC_API_KEY 等 + ego-browser |
 | kill switch 实跑 | ⚠️ | 脚本就绪（Phase 1.4 bash syntax fix）；需真实环境演练 |

@@ -222,11 +222,11 @@ export const KNOWN_DIFFERENCES = {
 
 ### dsh-009 双轨接口未接线（KERNEL_FACTORY_INTEGRATION 缺口）
 
-**类别**：集成缺口  
-**影响事件类型**：全部 opencc 路由（`/api/agent/:id/run`、`/api/events`）  
-**来源批次**：Phase 4.3 kill switch drill 第四轮  
-**影响**：dsh 模式启动但 routes/agent.ts 仍走 opencc 的 `getRuntime().query()`；`agentRuntime.ts:initAgentRuntime()` 仍调 `createOpenccRuntime()` 而非 `createKernel(cfg)`。  
-**可接受性**：**不可接受**（双轨未真正分叉）  
+**类别**：集成缺口
+**影响事件类型**：全部 opencc 路由（`/api/agent/:id/run`、`/api/event`）
+**来源批次**：Phase 4.3 kill switch drill 第四轮
+**影响**：dsh 模式启动但 routes/agent.ts 仍走 opencc 的 `getRuntime().query()`；`agentRuntime.ts:initAgentRuntime()` 仍调 `createOpenccRuntime()` 而非 `createKernel(cfg)`。
+**可接受性**：**不可接受**（双轨未真正分叉）
 **处置**：B7 flip-and-cleanup 阶段必须关闭：
 1. `agentRuntime.ts:initAgentRuntime()` 改为 `createKernel({cwd, dataDir, settings})`
 2. `routes/agent.ts:prompt` 路径改为 `adapter.run()`
@@ -235,15 +235,26 @@ export const KNOWN_DIFFERENCES = {
 
 **单测引用**：`scripts/kill-switch-drill.sh` 跑通（Phase 1.4 修 bash syntax）后 Phase 3 SSE 仍 404 — 验证此 gap 客观存在。
 
+**✅ RESOLVED (2026-08-22)**：B7 flip-and-cleanup 完成。
+- `agentRuntime.ts:initAgentRuntime()` 改走 `createKernel({cwd, dataDir, settings})`，按 `agent.kernel` 配置分叉 opencc / dsh adapter。
+- `routes/agent.ts:prompt` 改走 `getKernelAdapter().run({session, prompt, model, permissionMode, providerOverride, providerId, mainAgent, abortSignal, isMeta})`。
+- `translateRuntimeEvents` 移出 routes/agent.ts 到 services/translation.ts,opencc factory.run() 内部闭合 vendor query() + 翻译。
+- `getRuntime()` 保留,opencc 模式返回底层 OpenccRuntime(backgroundRuntime.ts 等 vendor-aware 调用点兼容);dsh 模式 throw 引导用 `getKernelAdapter()`。
+- `backgroundRuntime.ts` dsh 模式跳过(DefaultBackgroundRuntime 走 vendor OpenccRuntime.query;dsh 子任务自实现)。
+- `routes/sessionState.ts:97` 的 `getBackgroundRuntime()` 同步 throw 包成 `Promise.resolve().then(...)` 让 .catch 捕获。
+- `scripts/kill-switch-drill.sh` 把 `/api/events` 修正为 `/api/event`(路由真实名称),Phase 3 SSE 接入从 404 改为 200。
+- 单测 mock:`agent.test.ts` / `bashNotifier.test.ts` / `agent.queue.test.ts` / `instance-supervisor-wiring.test.ts` / `agent-runtime-server.test.ts` 改用 `getKernelAdapter()` 形态。
+- typecheck 3/3 workspace 全绿;`pnpm -r test` 2629 通过 + 26 跳过(与 handoff 基线一致);kill switch drill 8/8 phase ✅ PASS。
+
 ---
 
 ### dsh-010 `opencc factory.run()` 真实接线推迟
 
-**类别**：事件翻译  
-**影响事件类型**：`ServerEvent` 11 组中由 `opencc factory.run()` 产出的子集（核心 4 组：Runtime / Session / Tool / State）  
-**来源批次**：Phase 2.2 真实接线范围调整  
-**影响**：`KernelAdapter.run()` 在 opencc 轨道仍 stub；生产代码 routes/agent.ts 走 vendor `getRuntime().query()` 直连，绕过 adapter。dsh factory.run() 已用 `bridge.runOnce()` 真实接线，但与 routes/agent.ts 的集成不在本次范围。  
-**可接受性**：**不可接受**（双轨分叉未对齐 KernelAdapter 抽象）  
+**类别**：事件翻译
+**影响事件类型**：`ServerEvent` 11 组中由 `opencc factory.run()` 产出的子集（核心 4 组：Runtime / Session / Tool / State）
+**来源批次**：Phase 2.2 真实接线范围调整
+**影响**：`KernelAdapter.run()` 在 opencc 轨道仍 stub；生产代码 routes/agent.ts 走 vendor `getRuntime().query()` 直连，绕过 adapter。dsh factory.run() 已用 `bridge.runOnce()` 真实接线，但与 routes/agent.ts 的集成不在本次范围。
+**可接受性**：**不可接受**（双轨分叉未对齐 KernelAdapter 抽象）
 **处置**：B7 flip-and-cleanup 阶段执行：
 1. 把 `translateRuntimeEvents` (432 行) 移出 `routes/agent.ts` 到 `services/translation.ts`
 2. `opencc factory.run()` 改为 `runtime.query({...})` + 复用 services/translation.ts
@@ -251,6 +262,12 @@ export const KNOWN_DIFFERENCES = {
 4. 双轨 prompt 路径才真正经 KernelAdapter 抽象
 
 **单测引用**：`packages/zai/src/server/services/kernel/factories/opencc.test.ts` smoke 已就位；run() 真实接线需 flip-and-cleanup。
+
+**✅ RESOLVED (2026-08-22)**：与 dsh-009 同步关闭,见上文 commit。
+- `opencc factory.run()` 实现:`runtime.query({prompt, cwd, sessionId, abortSignal, model, permissionMode, providerOverride, providerId, mainAgent, isMeta})` → `translateRuntimeEvents()` → yield ServerEvent。
+- `KernelAdapter.run()` 扩展 opts 涵盖原 vendor-aware 字段 + `isMeta`(BashNotifier 用)。
+- dsh factory.run() 接受扩展 opts 但不消费(0.1.0-rc.7 仅支持 string prompt;abortSignal / permissionMode / mainAgent 留 stub)。
+- routes/agent.ts 与 bashNotifier 统一走 adapter.run(),双轨 prompt 路径完全经 KernelAdapter 抽象。
 
 ---
 

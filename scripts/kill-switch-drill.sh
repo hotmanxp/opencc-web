@@ -126,7 +126,7 @@ TURN_LOG="${LOG_DIR}/turn-${DATE_TAG}.log"
 echo "==> Phase 3: SSE 长连接接入"
 SSE_LOG="${LOG_DIR}/sse-${DATE_TAG}.log"
 SSE_PID_FILE="${DRILL_TMP}/sse.pid"
-curl -sf -N "http://localhost:${API_PORT}/api/events?sessionId=${SESSION_ID}" \
+curl -sf -N "http://localhost:${API_PORT}/api/event?sessionId=${SESSION_ID}" \
   > "${SSE_LOG}" 2>&1 &
 echo $! > "${SSE_PID_FILE}"
 sleep 2

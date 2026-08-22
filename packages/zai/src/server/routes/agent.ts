@@ -11,16 +11,13 @@ import {
   getAskRegistry,
   getApproveRegistry,
   getPermissionRegistry,
-  getRuntime,
+  getKernelAdapter,
   getTranscriptStore,
   registerSessionController,
   releaseSessionController,
   setCurrentSessionId,
   listSkills,
 } from "../services/agentRuntime.js";
-// B7 (dsh-010): translateRuntimeEvents 从 routes/agent.ts 抽出到 services/translation.ts,
-// 跨模块依赖以免循环 import(routes/agent.ts 是本文件本身)。
-import { translateRuntimeEvents } from "../services/translation.js";
 import {
   EXTERNAL_PERMISSION_MODES,
   getApiCallCount,
@@ -611,15 +608,20 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       'debug',
     );
 
-    // B7 (dsh-010): 翻译层抽出到 services/translation.ts 后,prompt handler 仍走
-    // `getRuntime().query(...)` → `translateRuntimeEvents(events, sessionId)` 路径
-    // (后续 dsh-009 阶段切到 `getKernelAdapter().run()`)。本次只调整 import 来源,
-    // 行为零变化。
+    // B7 flip-and-cleanup (dsh-009): 走 KernelAdapter 工厂分叉。
+    //   - `getKernelAdapter()` 返回 opencc 或 dsh KernelAdapter(按 settings.agent.kernel)
+    //   - `adapter.resumeSession()` 拿 AgentSession token(opencc adapter 内部仍是 no-op,
+    //     实际 session 生命周期由 vendor OpenccRuntime.query() 内的 sessionId 派生)
+    //   - `adapter.run()` 内部已经接 vendor query() + translateRuntimeEvents,返回
+    //     已翻译的 ServerEvent 流(dsh-010 翻译层已迁出到 services/translation.ts)。
     //
     // prompt / model / providerOverride / providerId / mainAgent / permissionMode /
-    // abortSignal 全部作为 per-call 字段透传 vendor OpenccRuntime.query();
-    // 行为与 B7 前一致。
-    const events = getRuntime().query({
+    // abortSignal 全部作为 per-turn opts 透传,dsh 侧目前仅 abortSignal 占位(0.1.0-rc.7
+    // 不支持 AbortSignal),其它字段被 session-level 配置吸收;opencc 侧全字段透传到
+    // vendor OpenccRuntime.query(),行为与 B7 前一致。
+    const adapter = getKernelAdapter()
+    const session = await adapter.resumeSession({ cwd, sessionId })
+    const events = adapter.run({
       // OpenccQueryInput.prompt accepts `string | OpenccContentBlockParam[]`.
       // For multimodal input we pass the raw `userContent` block array —
       // createOpenccRuntime-impl submits it directly to the vendor
@@ -628,16 +630,15 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       // API. JSON-encoding here would leak base64 as plain text and the
       // model can't read the image.
       prompt: userContent,
-      cwd,
       // sessionId: 显式指定 ID. 不管新建还是续传, vendor runtime 都用这个
       // ID 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
       // 切换到 OpenccRuntime 后, 老 `transcriptId` 字段已合并到 `sessionId`.
       // (旧 API resumeFromTranscriptId 在文件不存在时会抛 ENOENT, 不适用.)
-      sessionId,
       // parentSessionId 由 vendor runtime 通过其 session facade 派生,
       // 顶层 prompt 调用方不再显式透传该字段; sub-agent 路径由 AgentTool
       // 在 BackgroundTask metadata 里携带, 通过 background runtime 进入
       // 新 runtime 的 query (见 DefaultBackgroundRuntime.runOne 的 queryInput).
+      session,
       abortSignal: abortController.signal,
       model: resolvedModel,
       // 透传会话选定的 permission mode（如 plan）到 runtime AppState，让
@@ -675,13 +676,6 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       // (并已落盘),后续从 transcript meta 恢复 → 会话级固定。
       ...(sessionMainAgent ? { mainAgent: sessionMainAgent } : {}),
     });
-
-    // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,
-    // 否则 ServerEvent.parse 会把上游所有事件当作非法 variant 直接丢弃.
-    const translated = translateRuntimeEvents(
-      events as AsyncIterable<Record<string, unknown>>,
-      sessionId,
-    );
 
     // 用 transcript.meta.title 判断"是否需要写入标题":
     // - 文件不存在 / meta.title 为空 → 首次消息, 应当写入
@@ -744,9 +738,8 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       }
     }
 
-    // B7 (dsh-010): 翻译层在 services/translation.ts;`translated` 流已
-    // ServerEvent 形态,直接消费。
-    for await (const event of translated) {
+    // B7 (dsh-010): adapter.run() 已返回翻译后的 ServerEvent 流,直接消费。
+    for await (const event of events) {
       // zai patch: persist per-event transcript before forwarding.
       if (event.type === 'runtime.tool_call') {
         const ev = event as {

@@ -52,6 +52,7 @@ import { resolveMainAgent } from './mainAgents.js'
 import { readZaiSettings } from './zaiSettingsStore.js'
 
 let runtime: OpenccRuntime | null = null
+let kernelAdapter: import('./kernel/kernelAdapter.js').KernelAdapter | null = null
 let currentSessionId: string | null = null
 /**
  * Legacy transcript accessor. Task 5 keeps a working `TranscriptStore`
@@ -270,6 +271,7 @@ export function __resetSessionControllersForTests(): void {
  */
 export function __resetAgentRuntimeForTests(): void {
   runtime = null
+  kernelAdapter = null
   transcriptStore = null
   serverCwd = null
   sessionControllers.clear()
@@ -331,14 +333,17 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     console.error('[initAgentRuntime] enableOpenccConfigs failed:', err)
   })
 
-  // Build the new OpenccRuntime. The runtime is awaited so the
-  // synchronous `initBackgroundRuntime()` call in `createApp` (the
-  // very next line) sees a non-null `runtime` and can read it via
-  // `getRuntime()`. The previous Task 5 implementation fired the
-  // construction off as a fire-and-forget IIFE; that worked for the
-  // vitest test surface (tests only read `getRuntime()` after the
-  // boot promise chain had advanced) but broke the dev server's
-  // `pnpm dev` boot.
+  // B7 flip-and-cleanup (dsh-009): 走 `createKernel({cwd, dataDir, settings})`
+  // 工厂分叉。按 `agent.kernel` 配置决定返回 opencc / dsh adapter;
+  // opencc adapter 内部继续拼装 vendor OpenccRuntime（mainAgent 插槽 +
+  // MCP 跳过 + interactive 模式 + defaultModel 全部迁入 factory）。
+  //
+  // The runtime is awaited so the synchronous `initBackgroundRuntime()`
+  // call in `createApp` (the very next line) sees a non-null adapter and
+  // can read it via `getKernelAdapter()`. The previous Task 5 implementation
+  // fired the construction off as a fire-and-forget IIFE; that worked for
+  // the vitest test surface (tests only read `getRuntime()` after the boot
+  // promise chain had advanced) but broke the dev server's `pnpm dev` boot.
   //
   // The runtime now runs vendor's built-in `queryModelWithStreaming`
   // as its `deps.callModel` (reads `process.env.ANTHROPIC_AUTH_TOKEN`
@@ -349,45 +354,30 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // `streamingToolExecutor` tool loop → vendor's
   // `queryModelWithStreaming` → upstream API.
   try {
-    // zai patch (2026-08-20): 主 Agent 插槽 —— 读 settings.mainAgent,
-    // 解析出内置/外置 agent 配置,传给 createOpenccRuntime。三个插槽
-    // (systemPrompt / tools / mcp)在 core 内替换系统默认;mainAgents 是
-    // 完整合并表,供 runtime 按会话恢复(name → 配置)。
     const settings = await readZaiSettings()
-    const { agent: mainAgent, agents: mainAgents } = await resolveMainAgent(
-      settings.mainAgent,
-    )
-    const { createOpenccRuntime: factory } = await import(
-      '@zn-ai/zn-agent-core'
-    )
-    runtime = await factory({
+    const { createKernel } = await import('./kernel/factories/index.js')
+    kernelAdapter = await createKernel({
+      cwd,
       dataDir,
-      mainAgent,
-      mainAgents,
-      runtimeId: 'zai-server',
-      defaultCwd: cwd,
-      defaultModel:
-        process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
-        ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
-      // zai-server: skip MCP bootstrap so the headless runtime comes
-      // up even if the user's `~/.zai.json` lists MCP servers that
-      // block the connect call. The QueryEngine's per-query MCP
-      // refresh + the `/mcp` slash command reconnect on demand.
-      connectMcp: false,
-      // Default is interactive (STATE.isInteractive = true, vendor
-      // branches run as an interactive OpenCC CLI — verified against
-      // the real Web UI: permission asks and AskUserQuestion still
-      // bridge to the web). `zai dev --sdk` / `zai start --sdk` opts
-      // into SDK/headless mode instead.
-      interactive: !(isSdk ?? false),
+      settings,
     })
+    await kernelAdapter.start()
+    // Backward-compat: opencc adapter 暴露 underlying OpenccRuntime 给
+    // backgroundRuntime.ts / routes/command.ts 等 vendor-aware 老调用面;
+    // dsh 模式下 runtime 保持 null,getRuntime() 抛错。
+    if (kernelAdapter.kernel === 'opencc') {
+      const { getCurrentOpenccRuntime } = await import(
+        './kernel/factories/opencc.js'
+      )
+      runtime = getCurrentOpenccRuntime()
+    }
     const cleanup = () => {
-      if (runtime) void runtime.shutdown()
+      if (kernelAdapter) void kernelAdapter.shutdown()
     }
     process.once('SIGTERM', cleanup)
     process.once('SIGINT', cleanup)
   } catch (err) {
-    console.error('[initAgentRuntime] createOpenccRuntime failed:', err)
+    console.error('[initAgentRuntime] createKernel failed:', err)
     throw err
   }
 
@@ -448,8 +438,28 @@ export function getCurrentSessionId(): string | null {
 }
 
 export function getRuntime(): OpenccRuntime {
-  if (!runtime) throw new Error('Agent runtime not initialized')
+  if (!runtime) {
+    if (kernelAdapter && kernelAdapter.kernel !== 'opencc') {
+      throw new Error(
+        `Agent runtime is kernel='${kernelAdapter.kernel}'; use getKernelAdapter() instead of getRuntime()`,
+      )
+    }
+    throw new Error('Agent runtime not initialized')
+  }
   return runtime
+}
+
+/**
+ * B7 flip-and-cleanup: zai 服务层与具体内核之间的统一抽象。`createKernel`
+ * 工厂在 initAgentRuntime 阶段按 `agent.kernel` 配置决定返回 opencc / dsh
+ * adapter;调用方按本 accessor 取回(B0 T0.4 + dsh-009 修复)。
+ *
+ * 优先使用本 accessor;仅当需要 OpenccRuntime 私有形状(如 DefaultBackgroundRuntime
+ * 的 vendor-aware 调用面)时才回退 `getRuntime()`,后者在 dsh 模式下 throw。
+ */
+export function getKernelAdapter(): import('./kernel/kernelAdapter.js').KernelAdapter {
+  if (!kernelAdapter) throw new Error('Kernel adapter not initialized')
+  return kernelAdapter
 }
 
 /**

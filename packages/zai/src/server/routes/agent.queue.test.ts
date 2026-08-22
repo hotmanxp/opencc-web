@@ -24,6 +24,47 @@ vi.mock('../services/agentRuntime.js', async (importOriginal) => {
   return {
     ...actual,
     getRuntime: () => ({ query: hangingQuery }),
+    // B7 (dsh-009): routes/agent.ts 现在走 KernelAdapter.run(),mock 提供
+    // 一个把 hangingQuery 包成 run() 的 adapter。resumeSession 返回 AgentSession。
+    getKernelAdapter: () => ({
+      kernel: 'opencc',
+      start: async () => {},
+      shutdown: async () => {},
+      createSession: async (opts: { cwd: string; sessionId?: string }) => ({
+        kernel: 'opencc',
+        sessionId: opts.sessionId ?? 'sess-mock',
+        cwd: opts.cwd,
+      }),
+      resumeSession: async (opts: { cwd: string; sessionId: string }) => ({
+        kernel: 'opencc',
+        sessionId: opts.sessionId,
+        cwd: opts.cwd,
+      }),
+      listSessions: async () => [],
+      deleteSession: async () => {},
+      run: (opts: { session: { sessionId: string; cwd: string }; prompt: string | readonly unknown[] }) => {
+        // B7 (dsh-010): adapter.run() 真实返回的 stream 是 mock 提供的 generator,
+        // 不是 hangingEvents()。原 hangingQuery.mockImplementation(callIdx===1) 在第一次
+        // 返回 yield+await generator,后续返回 hangingEvents() — 必须透传 mock 调用结果,
+        // 否则 for-await 拿到的是 hangingEvents() 而不是按 callIdx 切换的 generator,
+        // 导致 releaseFirst() 后 runQueryLoop 无法感知 turn 结束。
+        return hangingQuery({ prompt: opts.prompt, cwd: opts.session.cwd, sessionId: opts.session.sessionId })
+      },
+      abort: async () => {},
+      patchTranscript: async () => {},
+      readTranscript: async function* () {},
+      onAsk: () => () => {},
+      onApprove: () => () => {},
+      subscribeState: () => () => {},
+      enqueue: async () => {},
+      metrics: () => ({
+        activeSessions: 0,
+        totalTurns: 0,
+        totalToolCalls: 0,
+        totalApiRequests: 0,
+        startedAt: Date.now(),
+      }),
+    }),
     getTranscriptStore: () => mockTranscriptStore,
     registerSessionController: vi.fn(),
     releaseSessionController: vi.fn(),

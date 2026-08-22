@@ -6,7 +6,7 @@ import {
   type BackgroundTask,
 } from '@zn-ai/zn-agent-core'
 import { BACKGROUND_DIR } from './paths.js'
-import { getRuntime } from './agentRuntime.js'
+import { getKernelAdapter, getRuntime } from './agentRuntime.js'
 import { eventBus } from './eventBus.js'
 import {
   initSubagentNotifier,
@@ -79,6 +79,24 @@ export function initBackgroundRuntime(): RestartAwareBackgroundRuntime {
   const store = new JsonTaskStore(BACKGROUND_DIR)
   void store.ensureDirs()
 
+  // B7 (dsh-009): dsh 模式跑在 kernelAdapter.kernel='dsh',子任务通过 dsh-side
+  // Agent.followup + createDshSubagentScope (见 packages/dsh-bridge/src/subagent/taskStore.ts)
+  // 自实现,不依赖 vendor DefaultBackgroundRuntime.query()。initBackgroundRuntime 拿到
+  // null 时直接返回 null 占位 — routes/background*.ts 的 fallback "no notifier"
+  // 路径会吞掉 dsh 任务,不阻塞主对话。
+  const adapter = (() => {
+    try {
+      return getKernelAdapter()
+    } catch {
+      return null
+    }
+  })()
+  if (adapter && adapter.kernel !== 'opencc') {
+    // dsh / 其它轨道:B5 子任务迁移前不构造 DefaultBackgroundRuntime,
+    // 子任务通过 dsh-bridge 自实现路径处理(详见 dsh-011 登记)。
+    backgroundRuntime = null
+    return null as unknown as RestartAwareBackgroundRuntime
+  }
   const agentRuntime = getRuntime()
   // notifier 可能在 initBackgroundRuntime 之前或之后初始化;这里
   // 都通过 tryGetSubagentNotifier() 兜底,onTaskStateChange 触发时

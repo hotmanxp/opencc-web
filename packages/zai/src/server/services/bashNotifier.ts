@@ -1,14 +1,12 @@
 import type { BashTaskInfo } from '@zn-ai/zn-agent-core'
 import {
   getCurrentSessionId,
-  getRuntime,
+  getKernelAdapter,
   setCurrentSessionId,
   hasActiveQuery,
 } from './agentRuntime.js'
 import { resolveModel } from '../lib/resolveModel.js'
 import { eventBus } from './eventBus.js'
-// B7 (dsh-010): translateRuntimeEvents 已迁出 routes/agent.ts,改从 services/translation.ts 导入。
-import { translateRuntimeEvents } from '../services/translation.js'
 
 /**
  * BashNotifier:后台 Bash 任务完成时,给父 session 开一轮 query 让 LLM 感知。
@@ -41,8 +39,8 @@ import { translateRuntimeEvents } from '../services/translation.js'
  *   之间也互斥,杜绝并行 query 请求叠加。
  */
 export interface BashNotifierOptions {
-  /** 测试钩子:替换为 mock runtime。 */
-  getRuntime?: typeof getRuntime
+  /** 测试钩子:替换为 mock adapter。 */
+  getKernelAdapter?: typeof getKernelAdapter
 }
 
 let notifier: BashNotifier | null = null
@@ -113,10 +111,10 @@ function escapeXml(s: string): string {
 }
 
 export class BashNotifier {
-  private readonly getRuntimeFn: typeof getRuntime
+  private readonly getKernelAdapterFn: typeof getKernelAdapter
 
   constructor(opts: BashNotifierOptions = {}) {
-    this.getRuntimeFn = opts.getRuntime ?? getRuntime
+    this.getKernelAdapterFn = opts.getKernelAdapter ?? getKernelAdapter
   }
 
   /**
@@ -159,7 +157,7 @@ export class BashNotifier {
   }
 
   private async inject(sessionId: string, task: BashTaskInfo): Promise<void> {
-    const runtime = this.getRuntimeFn()
+    const adapter = this.getKernelAdapterFn()
 
     // 保留并恢复 currentSessionId,避免通知注入影响后续状态(与 SubagentNotifier 一致)。
     const previousSessionId = getCurrentSessionId()
@@ -178,22 +176,19 @@ export class BashNotifier {
       // drain 永远取不到(请求风暴根因)。isMeta 保持 UI 隐藏(通知是系统注入,
       // 不该显示成用户消息)。
       //
-      // B7 (dsh-010): 翻译层迁出到 services/translation.ts,这里只 import 即可。
-      const events = runtime.query({
+      // B7 flip-and-cleanup (dsh-009/010): 走 KernelAdapter 工厂分叉。adapter.run()
+      // 内部已接 vendor runtime.query() + translateRuntimeEvents(后者在 opencc factory
+      // 内部闭合);通知路径不再需要手动调 translateRuntimeEvents + runtime.query。
+      const cwd = process.cwd()
+      const session = await adapter.resumeSession({ cwd, sessionId })
+      const events = adapter.run({
         prompt: renderBashNotificationMessage(task),
-        cwd: process.cwd(),
-        sessionId,
+        session,
         model: resolvedModel,
         isMeta: true,
       })
-      // 把 queryEngine 的 runtime 事件翻译成 ServerEvent 并 emit 到 eventBus,
-      // 让前端 SSE 渠道拿到 assistant 续写的 token / done 等事件。
-      const translated = translateRuntimeEvents(
-        events as AsyncIterable<Record<string, unknown>>,
-        sessionId,
-      )
       try {
-        for await (const ev of translated) {
+        for await (const ev of events) {
           eventBus.emit(ev)
           const t = (ev as { type?: string }).type
           if (t === 'runtime.done' || t === 'runtime.aborted' || t === 'runtime.error') break

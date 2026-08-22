@@ -19,14 +19,40 @@ let runtimeEvents: Array<Record<string, unknown>> = [
   { type: 'message_stop' },
 ]
 
-const mockRuntime = {
-  query: (opts: any) => {
+// B7 (dsh-009/010): mock 从 getRuntime().query 改为 getKernelAdapter().run;
+// run() 内部走真实 translateRuntimeEvents (factory 行为同步)。
+const { translateRuntimeEvents } = await import('../../src/server/services/translation.js')
+
+const mockAdapter = {
+  kernel: 'opencc',
+  start: async () => {},
+  shutdown: async () => {},
+  createSession: async (opts: any) => ({ kernel: 'opencc', sessionId: opts.sessionId ?? 'sess-parent', cwd: opts.cwd ?? '/tmp' }),
+  resumeSession: async (opts: any) => ({ kernel: 'opencc', sessionId: opts.sessionId, cwd: opts.cwd ?? '/tmp' }),
+  listSessions: async () => [],
+  deleteSession: async () => {},
+  run: (opts: any) => {
     lastRunOpts = opts
     queryCalls += 1
-    return (async function* () {
+    const rawStream = (async function* () {
       for (const ev of runtimeEvents) yield ev
     })()
+    return translateRuntimeEvents(rawStream, opts.session?.sessionId ?? 'sess-parent')
   },
+  abort: async () => {},
+  patchTranscript: async () => {},
+  readTranscript: async function* () {},
+  onAsk: () => () => {},
+  onApprove: () => () => {},
+  subscribeState: () => () => {},
+  enqueue: async () => {},
+  metrics: () => ({
+    activeSessions: 0,
+    totalTurns: 0,
+    totalToolCalls: 0,
+    totalApiRequests: 0,
+    startedAt: Date.now(),
+  }),
 }
 
 function makeTask(overrides: Partial<BashTaskInfo> = {}): BashTaskInfo {
@@ -63,10 +89,10 @@ afterEach(() => {
 
 describe('BashNotifier.handle', () => {
   test('completed + 有效 sessionId → 触发通知 query,携带 <task-notification> 内容', async () => {
-    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({ sessionId: 'sess-parent', task: makeTask() })
     expect(lastRunOpts).not.toBeNull()
-    expect(lastRunOpts.sessionId).toBe('sess-parent')
+    expect(lastRunOpts.session.sessionId).toBe('sess-parent')
     expect(lastRunOpts.prompt).toContain('<task-notification>')
     expect(lastRunOpts.prompt).toContain('<task-id>bash-1</task-id>')
     expect(lastRunOpts.prompt).toContain('<status>completed</status>')
@@ -76,7 +102,7 @@ describe('BashNotifier.handle', () => {
   })
 
   test('failed / killed → 同样触发通知 query,summary 反映失败', async () => {
-    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({
       sessionId: 'sess-parent',
       task: makeTask({ status: 'failed', exitCode: 1 }),
@@ -89,25 +115,25 @@ describe('BashNotifier.handle', () => {
   })
 
   test('status=running (非 terminal) → 不触发 query', async () => {
-    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({ sessionId: 'sess-parent', task: makeTask({ status: 'running' }) })
     expect(lastRunOpts).toBeNull()
   })
 
   test('sessionId 为空字符串 → 不触发 query', async () => {
-    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({ sessionId: '', task: makeTask() })
     expect(lastRunOpts).toBeNull()
   })
 
   test('sessionId=sess-unknown (父 session 占位) → 不触发 query', async () => {
-    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({ sessionId: 'sess-unknown', task: makeTask() })
     expect(lastRunOpts).toBeNull()
   })
 
   test('isBackgrounded=false (前台命令完成) → 不触发 query', async () => {
-    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({
       sessionId: 'sess-parent',
       task: makeTask({ isBackgrounded: false }),
@@ -117,7 +143,7 @@ describe('BashNotifier.handle', () => {
 
   test('主线有活跃 query (running 守卫) → 通知暂存,不另起 query', async () => {
     registerSessionController('sess-parent', new AbortController())
-    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({ sessionId: 'sess-parent', task: makeTask() })
     // 主线活跃时绝不并行起 query
     expect(lastRunOpts).toBeNull()
@@ -126,9 +152,9 @@ describe('BashNotifier.handle', () => {
 
   test('主线结束后 flushPendingBashNotifications → 补发注入通知', async () => {
     // flush 走模块单例,先注册带 mock runtime 的单例
-    __setBashNotifier(new BashNotifier({ getRuntime: () => mockRuntime as any }))
+    __setBashNotifier(new BashNotifier({ getKernelAdapter: () => mockAdapter as any }))
     registerSessionController('sess-parent', new AbortController())
-    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({ sessionId: 'sess-parent', task: makeTask() })
     expect(queryCalls).toBe(0)
     // 主线结束(idle),flush 补发 → 通知 query 起来,内容完整
@@ -137,14 +163,14 @@ describe('BashNotifier.handle', () => {
     // flush 是 fire-and-forget,等微任务
     await new Promise((r) => setTimeout(r, 10))
     expect(queryCalls).toBe(1)
-    expect(lastRunOpts.sessionId).toBe('sess-parent')
+    expect(lastRunOpts.session.sessionId).toBe('sess-parent')
     expect(lastRunOpts.prompt).toContain('<task-id>bash-1</task-id>')
   })
 
   test('主线活跃时多个通知全部暂存,flush 后逐个补发(通知 query 之间不并行)', async () => {
-    __setBashNotifier(new BashNotifier({ getRuntime: () => mockRuntime as any }))
+    __setBashNotifier(new BashNotifier({ getKernelAdapter: () => mockAdapter as any }))
     registerSessionController('sess-parent', new AbortController())
-    const n = new BashNotifier({ getRuntime: () => mockRuntime as any })
+    const n = new BashNotifier({ getKernelAdapter: () => mockAdapter as any })
     await n.handle({ sessionId: 'sess-parent', task: makeTask({ taskId: 't1' }) })
     await n.handle({ sessionId: 'sess-parent', task: makeTask({ taskId: 't2' }) })
     await n.handle({ sessionId: 'sess-parent', task: makeTask({ taskId: 't3' }) })
@@ -156,14 +182,15 @@ describe('BashNotifier.handle', () => {
     expect(queryCalls).toBe(3)
   })
 
-  test('runtime.query 抛错 → handle 不抛,仅 console.warn', async () => {
+  test('adapter.run() 抛错 → handle 不抛,仅 console.warn', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const broken = {
-      query: () => {
+      kernel: 'opencc',
+      run: () => {
         throw new Error('runtime blew up')
       },
     }
-    const n = new BashNotifier({ getRuntime: () => broken as any })
+    const n = new BashNotifier({ getKernelAdapter: () => broken as any })
     await expect(n.handle({ sessionId: 'sess-parent', task: makeTask() })).resolves.toBeUndefined()
     expect(warn).toHaveBeenCalled()
   })

@@ -9,6 +9,8 @@ import agentRouter, {
   __resetSessionRateLimitsForTests,
 } from '../../src/server/routes/agent.js'
 import { __resetCacheForTests as __resetSettingsCacheForTests } from '../../src/server/services/zaiSettingsStore.js'
+// B7 (dsh-010): mock adapter.run() 调用真实 translation 层,模拟 opencc factory 行为。
+import { translateRuntimeEvents } from '../../src/server/services/translation.js'
 
 // Mock node:fs so resolveModel's readZaiSettings() can be controlled.
 // Mirrors the pattern in test/server/agentSettings.test.ts:7-13.
@@ -59,6 +61,41 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
     patchSession: async () => {},
     removeSession: async () => {},
     shutdown: async () => {},
+  }),
+  // B7 (dsh-009): routes/agent.ts 现在走 KernelAdapter.run(),不是 OpenccRuntime.query()。
+  // mock 提供 getKernelAdapter() 返回一个 capture opts 的 adapter,让 lastRunOpts 仍可断言
+  // model / mainAgent / permissionMode / providerId 等 per-turn 字段透传。
+  // run() 内部走 services/translation.ts.translateRuntimeEvents,与 opencc factory 行为对齐。
+  getKernelAdapter: () => ({
+    kernel: 'opencc',
+    start: async () => {},
+    shutdown: async () => {},
+    createSession: async (opts: any) => ({ kernel: 'opencc', sessionId: opts.sessionId ?? 'sess-1', cwd: opts.cwd }),
+    resumeSession: async (opts: any) => ({ kernel: 'opencc', sessionId: opts.sessionId, cwd: opts.cwd }),
+    listSessions: async () => [],
+    deleteSession: async () => {},
+    run: (opts: any) => {
+      lastRunOpts = opts
+      const rawStream = (async function* () {
+        for (const ev of runtimeToolEvents) yield ev
+      })()
+      // B7 (dsh-010): adapter.run() 内部已翻译;mock 同步真实 factory 行为。
+      return translateRuntimeEvents(rawStream, opts.session?.sessionId ?? 'sess-1')
+    },
+    abort: async () => {},
+    patchTranscript: async () => {},
+    readTranscript: async function* () {},
+    onAsk: () => () => {},
+    onApprove: () => () => {},
+    subscribeState: () => () => {},
+    enqueue: async () => {},
+    metrics: () => ({
+      activeSessions: 0,
+      totalTurns: 0,
+      totalToolCalls: 0,
+      totalApiRequests: 0,
+      startedAt: Date.now(),
+    }),
   }),
   getAskRegistry: () => ({ abortAll: () => {} }),
   getCurrentSessionId: () => 'sess-1',
