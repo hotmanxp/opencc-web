@@ -36,6 +36,8 @@ import { DSH_KERNEL } from '../paths.js'
 import {
   getBashBackgroundTracker,
   getCommandRegistry,
+  getLastContextTokens,
+  setLastContextUsage,
   stateChangeBus,
   type TaskItem,
 } from '@zn-ai/zn-agent-core'
@@ -770,6 +772,22 @@ export async function createDshKernelAdapter(
       // Phase 3 P1: runOnce 现在边收事件边 yield(看 run.ts)。
       // 这里 for await 直接拿到每个 token 翻译后的 runtime.delta,前端
       // SSE 立刻收到,实现真正的流式输出。
+      //
+      // dsh usage 提取:每个 step 结束的 `assistant/chunk(usage)` 与
+      // 结构化收尾的 `assistant/message.usage` 都携带 provider 报的
+      // TokenUsage(inputTokens / outputTokens / cacheReadTokens /
+      // cacheWriteTokens)。把它们转成 opencc 风格的
+      // `{ input, cache_creation, cache_read, output }` 写到 globalThis
+      // 单 slot (`setLastContextUsage` 来自 opencc vendor 的
+      // sessionApiCounter.ts),然后 `getLastContextTokens()` 读出,
+      // 注入到 translateSessionEvent 的 ctx.lastContextTokens ——
+      // turn/end(completed) case 会把它附给 runtime.done ServerEvent,
+      // zai routes/agent.ts:921-930 命中后 emit session/projection 帧,
+      // 前端 useProjection(sid, 'context.tokens') 实时显示当前上下文大小。
+      //
+      // 注:`assistant/message` 整体仍走 translateSessionEvent 的
+      // "ignorable,文本由 chunk 流累积" 路径(避免重复气泡),但 usage
+      // 字段是独立数据,先在这里抽取一次,再交给 translate。
       for await (const dshEvent of bridge.runOnce({
         ctx: handle.ctx,
         sessionId: opts.session.sessionId,
@@ -788,10 +806,19 @@ export async function createDshKernelAdapter(
             ? anthropicProfile.models[0]
             : anthropicProfile.models[0]?.id),
       })) {
+        // (1) 抽取 dsh TokenUsage → opencc-style globalThis slot
+        const usage = extractDshUsage(dshEvent)
+        if (usage !== null) {
+          setLastContextUsage(usage)
+        }
+
+        // (2) 翻译 SessionEvent → zai ServerEvent(turn/end 会读
+        //     globalThis slot 把 contextTokens 附给 runtime.done)
         const translated = bridge.translateSessionEvent(dshEvent, {
           sessionId: opts.session.sessionId,
           turnIndex: 0,
           seqBase: 0,
+          lastContextTokens: getLastContextTokens() ?? undefined,
         })
         if (translated !== null) {
           yield translated as ServerEvent
@@ -884,4 +911,70 @@ export async function createDshKernelAdapter(
   }
 
   return adapter
+}
+
+// ────────────────────────────────────────────────────────────────────────
+// dsh usage 提取 helper
+// ────────────────────────────────────────────────────────────────────────
+
+/**
+ * dsh SessionEvent 中携带的 TokenUsage 形态来源有两处:
+ *
+ *   1. `assistant/chunk` — 每个 LLM step 结束时 `chunk.type === 'usage'`
+ *      (由 `dsh-llm-pi-ai` 的 `toStreamChunks` 在 `done` / `error` 事件
+ *      时 yield 出来),内容是 provider 报的累计 step usage。dsh-token-meter
+ *      内部也是 last-wins 替换,所以同一 `(turn, step)` 多次 sample 不
+ *      重复累加。
+ *
+ *   2. `assistant/message.usage` — 结构化收尾事件,与 message 同 seq,
+ *      携带 provider 报的同 step 最终 usage。`usage` 字段在 adapter
+ *      没上报时为 undefined。
+ *
+ * 两处的 `TokenUsage` 形态:
+ *   { inputTokens, outputTokens, cacheReadTokens?, cacheWriteTokens? }
+ *
+ * 翻译成 opencc vendor `sessionApiCounter.ts` 的
+ * `setLastContextUsage` 入参 `{ input, cache_creation, cache_read, output }`,
+ * 让 zai 端的 `getLastContextTokens()` / `getContextTokensForSession()`
+ * 能拿到 — 与 opencc 模式完全对称,无需新增 globalThis 桥。
+ */
+type DshSessionEventForUsage = {
+  type: string
+  data: unknown
+}
+
+/**
+ * 公开导出仅供 `extractDshUsage.test.ts` 单测使用(测试 seam)。
+ * zai 服务层不依赖此 helper,只 dsh factory 内部 `run()` 调用。
+ */
+export function extractDshUsage(event: DshSessionEventForUsage): {
+  input: number
+  cache_creation: number
+  cache_read: number
+  output: number
+} | null {
+  const data = event.data as
+    | {
+        chunk?: { type?: string; usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } }
+        usage?: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number }
+      }
+    | undefined
+  if (!data) return null
+
+  let u: { inputTokens?: number; outputTokens?: number; cacheReadTokens?: number; cacheWriteTokens?: number } | undefined
+
+  if (event.type === 'assistant/chunk') {
+    const chunk = data.chunk
+    if (chunk?.type === 'usage' && chunk.usage) u = chunk.usage
+  } else if (event.type === 'assistant/message') {
+    if (data.usage) u = data.usage
+  }
+
+  if (!u) return null
+  return {
+    input: u.inputTokens ?? 0,
+    cache_creation: u.cacheWriteTokens ?? 0,
+    cache_read: u.cacheReadTokens ?? 0,
+    output: u.outputTokens ?? 0,
+  }
 }

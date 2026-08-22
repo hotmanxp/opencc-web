@@ -38,10 +38,28 @@ type ZaiServerEvent = {
 /**
  * 翻译单个 dsh SessionEvent → ServerEvent（或 null 表示 ignorable）。
  * 关键约束：未映射事件必须显式记录到 ignorable 清单，不静默吞掉（T1.3 验收）。
+ *
+ * `ctx.lastContextTokens` 可选：调用方在每次 yield 之前把当前 session
+ * 的最近一次 LLM 调用 total context tokens（input + cache_creation +
+ * cache_read,不含 output）注入到这里。turn/end(completed) case 会把
+ * 它附给 runtime.done ServerEvent — zai 侧 routes/agent.ts:921-930 的
+ * session/projection 帧推送依赖这个字段。
+ *
+ * 调用方在每次 dsh `assistant/chunk(usage)` / `assistant/message.usage`
+ * 之后需要把 dsh TokenUsage 转成 opencc 风格的
+ * `{ input, cache_creation, cache_read, output }` 写
+ * `setLastContextUsage(...)` (globalThis.__zaiApiCountLastUsage)，
+ * 然后调 `getLastContextTokens()` 拿到这里的 `lastContextTokens`。
  */
 export function translateSessionEvent(
   event: SessionEvent,
-  ctx: { sessionId: string; turnIndex: number; seqBase: number },
+  ctx: {
+    sessionId: string
+    turnIndex: number
+    seqBase: number
+    /** 最近一次 LLM 调用的 total context tokens(input + cache_creation + cache_read)。 */
+    lastContextTokens?: number
+  },
 ): ZaiServerEvent | null {
   const seq = ctx.seqBase + (event.seq ?? 0)
   const baseFields = {
@@ -57,6 +75,7 @@ export function translateSessionEvent(
         type: 'runtime.started',
         sessionId: ctx.sessionId,
         turnIndex: ctx.turnIndex,
+        ...(ctx.lastContextTokens !== undefined ? { contextTokens: ctx.lastContextTokens } : {}),
       }
     }
 
@@ -114,6 +133,11 @@ export function translateSessionEvent(
           type: 'runtime.done',
           sessionId: ctx.sessionId,
           turnIndex: ctx.turnIndex,
+          // runtime.done 携带 contextTokens — zai 侧 routes/agent.ts
+          // 收到时如命中 `typeof ev.contextTokens === "number"` 就 emit
+          // session/projection 帧,前端 useProjection(sid, 'context.tokens')
+          // 实时显示"当前上下文大小"。
+          ...(ctx.lastContextTokens !== undefined ? { contextTokens: ctx.lastContextTokens } : {}),
         }
       }
       if (reason.kind === 'error') {

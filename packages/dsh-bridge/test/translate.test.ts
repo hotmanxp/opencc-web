@@ -89,6 +89,51 @@ describe('translateSessionEvent 核心子集', () => {
     expect(out!.type).toBe('runtime.done')
   })
 
+  it('turn/end (completed) 携带 ctx.lastContextTokens → runtime.done.contextTokens', () => {
+    // dsh factory 在每次 yield 前调 setLastContextUsage() 写 globalThis,
+    // 然后 getLastContextTokens() 拿到这里的 ctx.lastContextTokens。
+    // turn/end(completed) case 把它附给 runtime.done ServerEvent,
+    // zai routes/agent.ts:921-930 命中后 emit session/projection 帧。
+    const event = {
+      type: 'turn/end',
+      seq: 4,
+      data: { turn: 1, reason: { kind: 'completed' } },
+    } as any
+    const out = translateSessionEvent(event, {
+      sessionId: 'sess-1',
+      turnIndex: 0,
+      seqBase: 0,
+      lastContextTokens: 12345,
+    })
+    expect(out!.type).toBe('runtime.done')
+    expect((out as any).contextTokens).toBe(12345)
+  })
+
+  it('turn/end (completed) 未传 lastContextTokens → runtime.done 不附 contextTokens 字段', () => {
+    const event = {
+      type: 'turn/end',
+      seq: 4,
+      data: { turn: 1, reason: { kind: 'completed' } },
+    } as any
+    const out = translateSessionEvent(event, { sessionId: 'sess-1', turnIndex: 0, seqBase: 0 })
+    expect(out!.type).toBe('runtime.done')
+    expect((out as any).contextTokens).toBeUndefined()
+  })
+
+  it('turn/start 携带 ctx.lastContextTokens → runtime.started.contextTokens', () => {
+    // turn/start 也可能带 ctx.lastContextTokens — 用于首次 prompt 时
+    // 显示"上一轮入站 context"基线。
+    const event = { type: 'turn/start', seq: 1, data: { turn: 1 } } as any
+    const out = translateSessionEvent(event, {
+      sessionId: 'sess-1',
+      turnIndex: 0,
+      seqBase: 0,
+      lastContextTokens: 6789,
+    })
+    expect(out!.type).toBe('runtime.started')
+    expect((out as any).contextTokens).toBe(6789)
+  })
+
   it('turn/end (error) → runtime.error', () => {
     const event = {
       type: 'turn/end',
