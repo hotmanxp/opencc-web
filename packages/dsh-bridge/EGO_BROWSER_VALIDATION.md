@@ -232,3 +232,64 @@ EOF
 1. owner 配置 ANTHROPIC_API_KEY + dsh model router
 2. 跑 dsh 轨道 ego-browser 验收
 3. 召集 G2 评审会议（决策文档已就绪，技术前置 ✅）
+
+---
+
+## 第三轮 — dsh 轨道 7 场景验收脚本（B6 T6.2 待 owner 跑通）
+
+> **状态**：⚠️ 需 `ANTHROPIC_API_KEY` + dsh 模型 router 配置。脚本与场景清单已就绪，owner 侧在有 key 后可直接执行。
+
+### 启动准备
+
+```bash
+# 1. 启动 dsh 模式 dev（避开 920x 正式服务）
+cd /Users/ethan/code/opencc-web-dsh-kernel
+mkdir -p /tmp/dsh-final
+echo '{"agent":{"kernel":"dsh"}}' > /tmp/dsh-final/.zai/settings.json
+export ANTHROPIC_API_KEY=sk-...
+pnpm --filter @zn-ai/zai dev -- --port 8105 --api-port 7721
+```
+
+### 7 场景验收脚本
+
+每个场景独立 ego-browser task space，便于分别截图与回看。
+
+| 场景 | 路径 | 验证点 | 截图 |
+|------|------|--------|------|
+| 1. 对话流式输出 | `http://localhost:8105/agent` | 输入 prompt → 看到 runtime.started → delta 流式增量 → runtime.done | `dsh-1-chat.png` |
+| 2. bash 工具调用 | 同上 | prompt 要求 ls /tmp → 看到 runtime.tool_call(name=Bash) → runtime.tool_result → cwd 跟踪更新 | `dsh-2-bash.png` |
+| 3. fs 工具调用 | 同上 | prompt 要求 Read 某文件 → 看到 runtime.tool_call(name=Read) → 工具结果 | `dsh-3-fs.png` |
+| 4. ripgrep 工具 | 同上 | prompt 要求 Grep → 看到 runtime.tool_call(name=Ripgrep) | `dsh-4-rg.png` |
+| 5. skill 加载 | `~/.agents/skills/` 放测试 skill | prompt 触发 → skill 内容进 system prompt | `dsh-5-skill.png` |
+| 6. 后台任务 | prompt 要求派发后台任务 | Drawer 显示 taskId → 完成后 <task-notification> 注入父会话 | `dsh-6-task.png` |
+| 7. 会话历史恢复 | 场景 1 后刷新页面 | 侧边栏显示历史 session → 点击恢复 → 续传 | `dsh-7-history.png` |
+
+### 验收脚本模板（场景 1 示例）
+
+```javascript
+// ego-browser nodejs
+const task = await useOrCreateTaskSpace('dsh scenario 1: chat')
+await openOrReuseTab('http://localhost:8105/agent', { wait: true })
+await waitFor('.chat-input', { timeout: 10000 })
+await type('.chat-input', 'Say hello and explain what you can do')
+await click('.chat-send')
+// 等待 runtime.started → delta → done
+await waitFor('.runtime-status[data-status="done"]', { timeout: 60000 })
+cliLog(await snapshotText())
+await screenshot('dsh-1-chat.png')
+```
+
+### 对照（opencc 轨道基线）
+
+7 个场景在 opencc 轨道（默认）下的截图存放于第一轮报告，每场景应有相同 UI 行为；事件流（zai 服务端）经 parity harness 归一化后应无显著差异。
+
+### 通过条件
+
+- 全部 7 场景截图存证（`dsh-1-*.png` 到 `dsh-7-*.png`）
+- 各场景 runtime 流式输出与 opencc 轨道视觉一致
+- 工具调用/审批/后台任务/Drawer 行为符合 handoff EGO_BROWSER_VALIDATION 第一轮描述
+- 无 JS error，无 dsh-side error log
+
+### 阻塞上报
+
+任一场景失败 → 在本节追加"阻塞报告"段（含现象、错误信息、相关 log 文件、可能 dsh-side root cause），并同步到 `docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md` G2 评审章节。
