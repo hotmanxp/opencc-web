@@ -293,3 +293,67 @@ await screenshot('dsh-1-chat.png')
 ### 阻塞上报
 
 任一场景失败 → 在本节追加"阻塞报告"段（含现象、错误信息、相关 log 文件、可能 dsh-side root cause），并同步到 `docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md` G2 评审章节。
+
+---
+
+## 第四轮 — kill switch drill 实跑（Phase 4.3）
+
+> **执行人**：opencc-web sub-agent
+> **执行时间**：2026-08-22
+> **状态**：⚠️ **未通过** — 发现真实集成缺口（dsh 模式未真正生效）
+
+### 演练流程
+
+```bash
+# 用空闲端口避免与正式服务冲突
+ZAI_DRILL_PORT=8107 ZAI_DRILL_API_PORT=7724 bash scripts/kill-switch-drill.sh
+```
+
+### 演练结果
+
+| Phase | 状态 | 备注 |
+|-------|------|------|
+| 1. 启动 dsh 轨道 | ✅ | zai dev 在 8107/7724 启动成功（attempt 4） |
+| 2. 发起对话 + 后台任务 | ✅ | sessionId 分配成功（`sess-1787365736180-9frbney3`） |
+| 3. SSE 长连接接入 | ❌ FAIL | `GET /api/events?sessionId=...` → **404** |
+| 4. 触发 kill switch | (未执行) | SSE 失败导致 |
+| 5-8. graceful shutdown / opencc 重启 / 数据隔离 / 清理 | (未执行) | |
+
+### 阻塞报告
+
+**现象**：`/api/events` 与 `/api/agent/:id/run` 在 `agent.kernel = 'dsh'` 模式下返回 404。
+
+**log 关键行**（`.zai/drill-logs/dsh-20260822-102853.log`）：
+```
+[zai] Interactive mode — runtime treated as interactive OpenCC CLI
+[zai-http] :7724 GET  /api/events?sessionId=sess-1787365736180-9frbney3 → 404 (2ms)
+[zai-http] :7724 POST /api/agent/sess-1787365736180-9frbney3/run → 404 (1ms)
+```
+
+**root cause**：`packages/zai/src/server/services/agentRuntime.ts` 仍直接调用 `createOpenccRuntime()` (line 360)，**未走 `createKernel(cfg)` 工厂分叉**。即使 settings.json 写 `agent.kernel = 'dsh'`，生产代码仍按 opencc 路径启动（log 中"Interactive mode"标记），但 `/api/agent/*/run` 与 `/api/events` 是 opencc 路由专属，dsh 模式未注册。
+
+**KERNEL_FACTORY_INTEGRATION 缺口**：
+- `KernelAdapter` 接口（B0）+ `createDshRuntime`（B1a）+ `createKernel`（B0 T0.4）全部已实现并单测通过
+- **但 `agentRuntime.ts` 实际未调用 `createKernel`** — 它继续走 `createOpenccRuntime` 直连
+- 这次 drill 暴露了 B7 flip-and-cleanup 必须修复的最后一公里：把 agentRuntime.ts 的 vendor 启动路径改为 `createKernel({...})` 分叉
+
+**影响**：
+- dsh 模式虽然能启动、adapter 能构造，但 routes/agent.ts 仍走 opencc 的 `getRuntime().query()`
+- 因此 `/api/agent/*/run` 等 opencc 路径在 dsh 模式下 404，dsh 真实对话验证阻塞
+- B6 T6.2 ego-browser 7 场景无法跑（依赖 `/api/agent/:id/run` 与 `/api/events`）
+
+**修复路径**（B7 flip-and-cleanup 阶段）：
+1. `agentRuntime.ts:initAgentRuntime()` 改为 `const adapter = await createKernel({cwd, dataDir, settings})`
+2. 保留 `getRuntime()` 作为 opencc adapter 的 alias（不影响 opencc 行为）
+3. `routes/agent.ts:prompt` 路径改为 `adapter.run()` 替代 `getRuntime().query()`
+4. 把 `translateRuntimeEvents` 移出 routes/agent.ts 到 services/translation.ts（解决 432 行循环依赖）
+5. 重跑 drill 验证 8 个 Phase 全过
+
+**本次 session 不修复**：
+- 修复需重写 routes/agent.ts 主 prompt 路径（约 200 行）— 风险高，需要全量测试
+- 属于 B7 flip-and-cleanup 主任务，本次 full-plan-realization 仅做实现收口
+- EGO_BROWSER_VALIDATION 4.2 节 7 场景脚本已就绪，等 KERNEL_FACTORY_INTEGRATION 完成后再跑
+
+### Phase 1.4 修复确认
+
+`scripts/kill-switch-drill.sh:216-217` 的 `${$}` → `$$` 修复已生效（脚本能解析并跑 Phase 1，无 bash syntax error）。
