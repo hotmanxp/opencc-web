@@ -170,3 +170,30 @@ export function resolveAutoUpdate(settings: ZaiSettings): boolean {
 export function isValidAutoUpdate(value: unknown): value is boolean {
   return typeof value === 'boolean'
 }
+
+/**
+ * 读当前生效的 agent.kernel(用缓存的 settings)。
+ *
+ * 不合法值由 resolveProjectAwareSettings 在 boot 阶段 fail loud,
+ * 所以运行时读到的值只会是 'opencc' | 'dsh' | undefined(undefined
+ * 等同默认 'opencc')。
+ */
+export async function readAgentKernel(): Promise<'opencc' | 'dsh'> {
+  const settings = await readZaiSettings()
+  return settings.agent?.kernel ?? 'opencc'
+}
+
+/**
+ * 写 agent.kernel 到 ~/.zai/settings.json。
+ *
+ * 与 readAgentKernel 对称 — 改完 settings 后,调用方调
+ * reloadKernelAdapter() (agentRuntime.ts) 让 adapter 实际切换;否则
+ * 现有 session 仍走老 kernel,新 session 走新 kernel。
+ */
+export async function writeAgentKernel(kernel: 'opencc' | 'dsh'): Promise<void> {
+  const settings = await readZaiSettings()
+  await writeZaiSettings({
+    ...settings,
+    agent: { ...settings.agent, kernel },
+  })
+}

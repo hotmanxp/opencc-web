@@ -16,6 +16,7 @@ import {
   isValidOutputStyle,
   isValidTheme,
   isValidWorkMode,
+  readAgentKernel,
   readZaiSettings,
   resolveAutoUpdate,
   resolveDefaultSplitScreen,
@@ -23,8 +24,10 @@ import {
   resolveOutputStyle,
   resolveTheme,
   resolveWorkMode,
+  writeAgentKernel,
   writeZaiSettings,
 } from '../services/zaiSettingsStore.js'
+import { noteKernelChangeForFutureSessions } from '../services/agentRuntime.js'
 
 /**
  * Read ~/.zai.json → providerProfiles. Returns empty array when the
@@ -362,6 +365,62 @@ router.put('/agent/settings/main-agent', async (req: Request, res: Response) => 
     const next: ZaiSettings = { ...settings, mainAgent: candidate }
     await writeZaiSettings(next)
     res.json({ mainAgent: next.mainAgent })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+/**
+ * GET /api/agent/kernel — 读当前生效的 agent.kernel。SettingsDrawer
+ * 初始化时拉一次,默认 Segmented 选中当前值。
+ */
+router.get('/agent/kernel', async (_req: Request, res: Response) => {
+  try {
+    const kernel = await readAgentKernel()
+    res.json({ kernel })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+/**
+ * POST /api/agent/kernel — 切内核(对未来 session 生效)。
+ *
+ * Body: `{ kernel: 'opencc' | 'dsh' }`。
+ *
+ * Session-level kernel fixity: kernel 在 session 创建时绑定,**已存在的
+ * session 继续跑原 kernel 不变**。本端点只:
+ *   1. 写 ~/.zai/settings.json(zaiSettingsCache 自动 refresh)
+ *   2. 返回 `applied: true, currentSessionKernel, futureSessionKernel`,
+ *      UI 提示用户"已切换,新建/刷新页面后生效"。
+ *
+ * 不做热重载,因为:
+ *   - session 创建时拿 `agent.kernel` 决定走 opencc / dsh adapter,
+ *     session 内部的 transcript / 工具调用上下文跟 kernel 强绑定
+ *   - 同一个 session 跑一半切换 kernel 会让前一半 transcript 跟后一半
+ *     runtime 对不上(transcript 写入路径不同)
+ *   - 用户的最直接操作是"开新对话"或刷新页面触发新 session
+ */
+router.post('/agent/kernel', async (req: Request, res: Response) => {
+  const body = (req.body ?? {}) as { kernel?: unknown }
+  const kernel = body.kernel
+  if (kernel !== 'opencc' && kernel !== 'dsh') {
+    return res
+      .status(400)
+      .json({ error: `invalid kernel: ${String(kernel)} (must be 'opencc' or 'dsh')` })
+  }
+  try {
+    const before = await readAgentKernel()
+    await writeAgentKernel(kernel)
+    const { currentKernel, inFlightCount } = noteKernelChangeForFutureSessions()
+    res.json({
+      ok: true,
+      applied: kernel,
+      previousKernel: before,
+      currentSessionKernel: currentKernel, // 已存在 session 跑哪个
+      futureSessionKernel: kernel, // 新 session 跑哪个
+      inFlightCount,
+    })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
   }

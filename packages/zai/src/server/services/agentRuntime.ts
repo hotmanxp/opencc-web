@@ -463,6 +463,29 @@ export function getKernelAdapter(): import('./kernel/kernelAdapter.js').KernelAd
 }
 
 /**
+ * Session-level kernel fixity: kernel 在 session 创建时绑定,**当前 session
+ * 切换 kernel 不影响已存在的 session**。已存在的 session 继续跑原 kernel
+ * 直到该 session 结束;新创建的 session 走新的默认 kernel。
+ *
+ * 因此不需要"热重载" adapter — SettingsDrawer 切换 kernel 时:
+ *   1. 写 ~/.zai/settings.json(zaiSettingsCache 自动 refresh)
+ *   2. 返回 `{ ok: true, requiresNewSession: true }` 告诉前端
+ *   3. UI 提示"新会话生效,当前会话继续用原内核"
+ *
+ * 用户要彻底切换(放弃当前会话),可以新建 session 或刷新页面 — 前者
+ * 由前端控制,后者不需要后端参与。
+ */
+export function noteKernelChangeForFutureSessions(): {
+  currentKernel: 'opencc' | 'dsh'
+  inFlightCount: number
+} {
+  return {
+    currentKernel: (kernelAdapter?.kernel as 'opencc' | 'dsh') ?? 'opencc',
+    inFlightCount: sessionControllers.size,
+  }
+}
+
+/**
  * Legacy transcript accessor. Kept for the existing reader call sites
  * in `routes/agent.ts`, `routes/transcript.ts`, `routes/approve.ts`, and
  * the builtin commands `clear` / `compact`. Task 6 deletes this accessor
