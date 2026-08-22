@@ -9,12 +9,12 @@
 | 层 | 技术 | 版本 |
 |----|------|------|
 | 语言 | TypeScript | ^5.6 |
-| 运行时 | Node(direct, tsx + bun-protocol) / Bun 可选(`dev:bun`) | Node >=20 |
-| 运行时(B0+ dsh) | dsh 内核要求 Node >=22.19 | 仓库级 engines 已升 |
-| zai 前端 | React + Zustand + AntD + Vite | 18.3 / 4.5 / 5.22 / 8.1 |
-| zai 服务端 | Express + SSE | ^4.21 |
-| zn-agent-core vendor | opencc 0.20.0(Bun 兼容(un-stripped)) | — |
-| 测试 | Vitest | ^4.1 |
+| 运行时 | Node-direct(tsx + bun-protocol) / Bun 可选(`dev:bun`) | `^22.19.0 \|\| >=24.0.0`(仓库级 engines;`.nvmrc` 写 20 已过期 — 以 engines 为准) |
+| zai 前端 | React + Zustand + AntD + Vite + React Router + Tailwind + CodeMirror + react-markdown | 18.3 / 4.5 / 5.22 / 8.1.5 / 6.28 / 3.4 / 14 langs / 10.1 |
+| zai 服务端 | Express + SSE + Zod + ws + sharp + commander + `@anthropic-ai/sdk` | ^4.21 / ^3.23 / ^8.18 / ^0.33.5 / ^12.1 / ^0.52 |
+| dsh-bridge | `@deepseek-ai/cordis` + 24 个 `@deepseek-ai/dsh-*` + `@modelcontextprotocol/sdk` | 4.0.1 / 0.1.0-rc.8 / ^1.0 |
+| zn-agent-core vendor | opencc 0.20.0(Bun 兼容(un-stripped))+ ripgrep vendor 二进制(darwin-arm64/x64、win32-x64) | — |
+| 测试 | Vitest | zai/dsh-bridge/根 `^4.1`;zn-agent-core `^2.1`(子包隔离,跨包勿混引) |
 
 ## 目录
 
@@ -23,8 +23,10 @@
 | `packages/zai/` | `src/server/` 路由 + service,`src/web/` UI + store,`src/shared/` zod schema |
 | `packages/zn-agent-core/` | `compat/`(verbatim 移植的 zai 兼容垫片)+ `opencc-src/`(opencc 0.20.0 拷贝,Bun 兼容(un-stripped));`scripts/bundle-opencc.ts` 把 `src/bundle-entry.ts` 编成单一 `dist/opencc-core.mjs`(esbuild bundle)。**运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出**(2026-08-16 起废除全部 subpath);`dist/bundle-entry.d.ts` 由 `bundle-opencc.ts` 机械生成,与 bundle 同步 |
 | `packages/dsh-bridge/` | **B0 新增** — zai → deepseek-harness 桥接 workspace。详见下方「双轨改造 (dsh 内核集成)」段落 |
-| `docs/` | 设计/参考/操作指南;`docs/superpowers/specs/` 是各特性 spec,`docs/superpowers/plans/` 是实施计划 |
-| `examples/` `scripts/` | 示例 / 仓库脚本 |
+| `docs/` | 设计/参考/操作指南;`docs/superpowers/specs/` 是各特性 spec,`docs/superpowers/plans/` 是实施计划;`docs/2026-08-17-dsh-*.md` 是 dsh 主线文档(已知差异 / 维护契约 / vendor 退役 / 发布说明) |
+| `scripts/` | `release.mjs`(`pnpm release:*` 主入口)+ `generate-rpc-client.ts`(Zod → `api.generated.ts` codegen)+ `kill-switch-drill.sh`(季度演练,见下方「关键命令」段)+ `zn-ai` / `zn-ai.bat`(zn-env 环境检测脚本) |
+| `examples/` | `mcp-smoke/` — MCP 冒烟测试(stdio server + `MCPClientPool` 接入验证) |
+| 根 `.zai/` | ⚠️ **本仓库用户态数据影子目录**(与运行时 `~/.zai/` 同布局)— 仅用于本地 dev 与 IDE 感知,生产读写都走真实 `~/.zai/`,不要把根 `.zai/` 路径写进代码 |
 
 ## 双轨改造 (dsh 内核集成 · B 方案)
 
@@ -219,7 +221,7 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 - **CodeGraph 优先**:理解代码用 `codegraph_explore` 单调用,不要 grep + read 轮询;索引未初始化时跑 `codegraph init -i`。`codegraph_context` / `codegraph_trace` 当前 v1.4.1 不可用。
 - **端口使用(必查)**:启动 `zai dev` / `zai start` 或任何本地服务前,先 `lsof -i :<port>` 确认端口空闲再起。显式 `--port` / `--api-port` 被占用必须报错退出(EADDRINUSE,dev.ts/start.ts 已实现),**禁止**静默递增换端口——多个实例静默换端口共享同一 API key 是请求风暴根因(见 `docs/superpowers/plans/` 请求风暴修复)。只有未显式指定端口时才允许自动扫描(`ports.ts resolveServerPort`)。开发中如需多实例,用不同 `--port` 显式指定空闲端口。
 - **小步可逆**:实现细节见 `docs/DEVELOPMENT_REFERENCE.md`;设计/取舍见 `docs/superpowers/specs/` 与对应 `plans/`。
-- **测试粒度:功能改动后只跑相关单元测试**:`pnpm -r test` 全量跑 zai + zn-agent-core 全部 190+ 测试文件 / 1400+ 用例,冷启动 ~30s+ 解析 + 数十秒执行,日常反馈太慢。功能改动后只跑**直接受影响**的测试文件(以及它们的依赖文件若有连锁影响),用路径过滤:
+- **测试粒度:功能改动后只跑相关单元测试**:`pnpm -r test` 全量跑 zai + zn-agent-core + dsh-bridge 全部 **600+ 测试文件**(zai 单测 2192 用例、zn-agent-core 382、dsh-bridge 55 — 见 §双轨改造 状态行),冷启动 ~30s+ 解析 + 数十秒执行,日常反馈太慢。功能改动后只跑**直接受影响**的测试文件(以及它们的依赖文件若有连锁影响),用路径过滤:
   ```bash
   # 改了 packages/zai/src/web/src/components/SettingsDrawer.tsx
   pnpm --filter @zn-ai/zai test src/web/src/components/SettingsDrawer.test.tsx \
@@ -232,8 +234,13 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 ## 常用验证命令
 
 ```bash
-# TypeScript 类型检查(顶层 + 各 workspace)
-pnpm -r exec tsc --noEmit
+# TypeScript 类型检查(顶层 + 各 workspace) — 用子包 typecheck 脚本
+# `pnpm -r exec tsc --noEmit` 不充分:zai 是 composite project (需 -b),
+# zn-agent-core 还需跑 contract/consumer tsconfig + verify-server-types 守护脚本
+pnpm -r run typecheck              # 推荐:走子包完整链路
+pnpm --filter @zn-ai/zai typecheck # 仅 zai
+pnpm --filter @zn-ai/zn-agent-core typecheck # 仅 core(含 d.ts 自包含校验)
+```
 
 # 单 workspace 构建(开发期加速反馈,只编自己改过的部分)
 pnpm run build:core           # 只构建 @zn-ai/zn-agent-core(loader / opencc-core.mjs bundle / bundle-entry.d.ts / opencc-src/server/*.d.ts)
@@ -302,3 +309,4 @@ pnpm release:major
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
 
 <!-- updated: 2026-08-22 (B7: dsh G2 决策 + 维护契约 + vendor 退役评估) -->
+<!-- updated: 2026-08-22 (pass-2: 技术栈表 — Node 22.19/Vitest 子包隔离/dsh-bridge 行/补充 zai 服务端依赖;目录表 — scripts 拆分 + 根 .zai 说明;typecheck 改用子包脚本;测试规模 190+ → 600+ 文件) -->
