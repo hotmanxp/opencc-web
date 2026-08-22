@@ -11,11 +11,18 @@
  *
  * **Phase 3.1 收口**：
  *   - dsh-subagent 包未发布（上游不存在，handoff §6 #1 确认）— 用 dsh-scope
- *     的 `createScope` + `bindScopeParent` 显式建立父子 scope，原生 ScopedLayers
- *     链可工作。
+ *     的 `createScope(key, { parent })` 建立父子 scope,内部统一调
+ *     bindScopeParent 一次(避免重复 bind 报"scope key is already bound")。
  *   - 父子 agent 的 cwd/model 同步：父 ctx 的元数据通过 setup callback 注入
  *     child agentCtx（已实现）。
  *   - 子 agent 完成通知父 session 走 `<task-notification>` 续传（zai 语义）。
+ *
+ * **dsh-018 修复**:
+ *   - 之前 `createDshSubagentScope` 显式调 bindScopeParent + createScope
+ *     (内部也调 bindScopeParent) — 第二次 bind 抛
+ *     "scope key is already bound to a parent" 错误。
+ *   - 删掉显式 bind,只用 createScope。WeakMap 用 childKey 做弱引用,
+ *     同一 taskId 不会重 bind(每次 spawn 都有新 taskId)。
  */
 
 import { join } from 'node:path'
@@ -25,7 +32,7 @@ import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
-import { createScope, bindScopeParent } from '@deepseek-ai/dsh-scope'
+import { createScope } from '@deepseek-ai/dsh-scope'
 
 export interface DshTaskState {
   taskId: string
@@ -103,9 +110,10 @@ export function createDshSubagentScope(
   parentCtx: Context,
   opts: { parentScopeKey: object; childScopeKey: object },
 ): { ctx: Context; dispose: () => void } {
-  // 1. 显式建立父子 scope 关系（ScopedLayers chain）
-  bindScopeParent(opts.childScopeKey, opts.parentScopeKey)
-  // 2. 在父 ctx 上 createScope — 返回独立 fiber + scoped ctx
+  // dsh-018 修复:createScope 内部**已经**调 bindScopeParent(key, options.parent),
+  // 我们之前显式调一次会触发 "scope key is already bound" 错误(因为
+  // 第二次 bind 时 WeakMap.has(key) === true)。这里只调 createScope,
+  // 让它内部统一 bind 一次。
   const scope = createScope(parentCtx, opts.childScopeKey, { parent: opts.parentScopeKey })
   return { ctx: scope.ctx, dispose: scope.dispose }
 }

@@ -226,6 +226,19 @@ const StateEvent = z.discriminatedUnion('type', [
     sessionId: z.string().nullable(),
     task: z.unknown(),
   }),
+  // dsh-018: dsh-mode cron 任务变化(从 dsh-bridge 透传)。
+  // payload 用 z.unknown() — zai-side dsh factory 写入的 cron 任务有
+  // 自己的 schema(dsh-bridge cron.ts 的 CronTask),UI 端按需 cast。
+  z.object({
+    ...Base.shape,
+    type: z.literal('cron.changed'),
+    sessionId: z.string(),
+    cronTaskId: z.string(),
+    cron: z.string(),
+    prompt: z.string(),
+    nextFireAt: z.number(),
+    action: z.enum(['create', 'delete', 'list', 'fire']),
+  }),
 ])
 
 // instance.* — 中央实例管理器的状态变更广播. isGlobalEvent 登记, 所有 tab 实时收到.

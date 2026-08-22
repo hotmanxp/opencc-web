@@ -173,13 +173,18 @@ export async function createDshKernelAdapter(
     },
     onCronChange: ({ action, task, sessionId }) => {
       if (!task) return
-      // stateChangeBus 还没定义 'cron.changed' schema — Phase 1 不 emit
-      // (避免 zai-side stateBridge handler 强类型错位),仅 log 便于调试。
-      // Phase 2 扩展 stateChangeBus schema 加 'cron.changed' + 配套
-      // zai-side handler + UI 集成。
-      console.info(
-        `[dsh-adapter] cron.changed: ${action} ${task.id} (session=${sessionId}, cron=${task.cron})`,
-      )
+      // dsh-018: emit stateChangeBus 'cron.changed' — stateBridge handler
+      // 翻译成 ServerEvent 'cron.changed' 推到前端 SSE 通道。Phase 1
+      // UI 端暂无 cron-specific handler(消息只流到 eventBus),Phase 2
+      // 加 UI 集成(类似 TodoZone 的 CronZone)。
+      stateChangeBus.emit('cron.changed', {
+        sessionId,
+        cronTaskId: task.id,
+        cron: task.cron,
+        prompt: task.prompt,
+        nextFireAt: task.nextFireAt,
+        action,
+      } as never)
     },
   })
 

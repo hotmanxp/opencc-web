@@ -44,6 +44,7 @@ export async function* runOnce(opts: DshRunOptions): AsyncIterable<SessionEvent>
       agentOptions?: { provider?: string; model?: string; maxTokens?: number }
       setup?: (agentCtx: Context) => unknown
     }): Promise<{ agent: Agent }>
+    get?(id: SessionId | string): { agent?: Agent } | Agent | undefined
   }
   const sessions = ctx.get('sessions') as {
     flush(session: Session): Promise<unknown>
@@ -53,19 +54,39 @@ export async function* runOnce(opts: DshRunOptions): AsyncIterable<SessionEvent>
     throw new Error('[dsh-run] agents / sessions service unavailable — loader not mounted?')
   }
 
-  // ── 1. 构造 Agent（不应用 headless-runner 的 exit 语义）────────────
+  // ── 1. 构造或恢复 Agent（dsh-018 修复：多 turn session 复用）────────
+  // dsh-agent 的 agents service 在 sessionId 已存在时调 `create` 会
+  // 抛 "session already exists" 错误。先尝试 `get` 拿已存在的 agent；
+  // 找不到再 `create`。这样多 turn 走同一 session 时复用同一个 dsh
+  // Agent 实例（持续 history + 已 mount 的 dsh-scope），不会因为
+  // dsh-009 修复后 routes/agent.ts 改走 adapter.run() 而产生冲突。
+  //
   // 注:不再在 setup 里 provide('zaiPrompt') —— dsh-scope / dsh-tools /
   // dsh-system-prompt 在 agent scope 内已自动注册同名 service,重复 provide
   // 报 "service zaiPrompt has been registered at <scope>"。Prompt 内容
   // 通过下面的 agent.followup(createUserMessage(...)) 传,不依赖 zaiPrompt。
-  const { agent } = await agents.create({
-    sessionId: SessionId(opts.sessionId),
-    meta: { cwd: opts.cwd },
-    agentOptions: {
-      provider: opts.provider,
-      model: opts.model,
-    },
-  })
+  let agent: Agent | undefined
+  const sessionId = SessionId(opts.sessionId)
+  if (typeof agents.get === 'function') {
+    const handle = agents.get(sessionId) as
+      | { agent?: Agent }
+      | Agent
+      | undefined
+    if (handle) {
+      agent = 'agent' in handle ? handle.agent : (handle as Agent)
+    }
+  }
+  if (!agent) {
+    const created = await agents.create({
+      sessionId,
+      meta: { cwd: opts.cwd },
+      agentOptions: {
+        provider: opts.provider,
+        model: opts.model,
+      },
+    })
+    agent = created.agent
+  }
 
   // ── 2. 首次 await whenIdle — 等 loader 装载（dsh-headless index.js:99 同款） ──
   await agent.whenIdle()

@@ -26,6 +26,19 @@ export interface StateChangeEventMap {
   'bash_task.changed': { sessionId: string; task: BashTaskInfo }
   'v2_task.changed': { sessionId: string; task: TaskItem; action: 'upsert' | 'delete' }
   'agent_task.changed': { sessionId: string | null; task: unknown }
+  /**
+   * dsh-018 新增:dsh-mode cron 任务变化(zai-side dsh factory 转发 dsh-bridge
+   * `onCronChange` 回调)。payload 含 taskId / cron 表达式 / prompt / nextFireAt,
+   * zai-side stateBridge 翻译成 ServerEvent `cron.changed` 推到前端 SSE 通道。
+   */
+  'cron.changed': {
+    sessionId: string
+    cronTaskId: string
+    cron: string
+    prompt: string
+    nextFireAt: number
+    action: 'create' | 'delete' | 'list' | 'fire'
+  }
 }
 
 type Listener<E, K extends keyof E> = (payload: E[K]) => void
