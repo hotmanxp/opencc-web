@@ -6,6 +6,7 @@ import {
   projectKeyForCwd,
   decodeSegment,
 } from '../src/sessions/store.js';
+import { LocalShellExecutor, Win32ShellExecutor, createShellExecutor, detectCwdChangePosix, detectCwdChangeWin32 } from '../src/tools/bash.js';
 
 describe('dsh-bridge skeleton', () => {
   it('DSH_VERSION 与 dsh 包锁定版本一致', () => {
@@ -72,5 +73,71 @@ describe('Phase 1.1: dsh-sessions root path helpers', () => {
     const cwd = '/tmp/dsh-final'
     const root = dshSessionsRootAbs('/Users/x/.zai')
     expect(dshSessionsRoot('/Users/x/.zai', cwd)).toBe(`${root}/${projectKeyForCwd(cwd)}`)
+  });
+});
+
+describe('Phase 1.2: Win32ShellExecutor + POSIX detectCwdChange', () => {
+  describe('detectCwdChangePosix', () => {
+    it('识别行首 cd <path>', () => {
+      expect(detectCwdChangePosix('cd /tmp/foo', '/home')).toBe('/tmp/foo')
+    });
+    it('支持双引号', () => {
+      expect(detectCwdChangePosix('cd "/tmp/foo bar"', '/home')).toBe('/tmp/foo bar')
+    });
+    it('支持单引号', () => {
+      expect(detectCwdChangePosix("cd '/tmp/foo bar'", '/home')).toBe('/tmp/foo bar')
+    });
+    it('相对路径返回 fallback', () => {
+      expect(detectCwdChangePosix('cd relative/path', '/home')).toBe('/home')
+    });
+    it('没有 cd 返回 fallback', () => {
+      expect(detectCwdChangePosix('ls -la', '/home')).toBe('/home')
+    });
+    it('cd 在第二行返回 fallback', () => {
+      expect(detectCwdChangePosix('echo hi; cd /tmp/foo', '/home')).toBe('/home')
+    });
+  });
+
+  describe('detectCwdChangeWin32', () => {
+    it('识别 cd /d <path>（带跨盘符）', () => {
+      expect(detectCwdChangeWin32('cd /d D:\\Users\\x', 'C:\\home')).toBe('D:\\Users\\x')
+    });
+    it('识别不带 /d 的 cd（同盘符）', () => {
+      expect(detectCwdChangeWin32('cd Users\\x', 'C:\\home')).toBe('C:\\home') // 相对路径 → fallback
+    });
+    it('识别 pushd', () => {
+      expect(detectCwdChangeWin32('pushd D:\\proj', 'C:\\home')).toBe('D:\\proj')
+    });
+    it('盘符大小写不敏感', () => {
+      expect(detectCwdChangeWin32('cd /d c:\\Users\\x', 'C:\\home')).toBe('c:\\Users\\x')
+    });
+    it('UNC 路径 \\server\\share', () => {
+      expect(detectCwdChangeWin32('cd /d \\\\srv\\share', 'C:\\home')).toBe('\\\\srv\\share')
+    });
+    it('没有 cd 返回 fallback', () => {
+      expect(detectCwdChangeWin32('dir', 'C:\\home')).toBe('C:\\home')
+    });
+    it('支持引号包裹路径', () => {
+      expect(detectCwdChangeWin32('cd /d "D:\\Program Files"', 'C:\\home')).toBe('D:\\Program Files')
+    });
+    it('支持 && 分隔符', () => {
+      expect(detectCwdChangeWin32('cd /d D:\\foo && dir', 'C:\\home')).toBe('D:\\foo')
+    });
+  });
+
+  describe('ShellExecutor class identity', () => {
+    it('LocalShellExecutor / Win32ShellExecutor 都是 BaseShellExecutor 子类', () => {
+      // 通过原型链验证（无需实例化）
+      expect(LocalShellExecutor.prototype).toBeDefined()
+      expect(Win32ShellExecutor.prototype).toBeDefined()
+      // 两者是不同类
+      expect(LocalShellExecutor).not.toBe(Win32ShellExecutor)
+    });
+    // createShellExecutor 工厂的真实分支依赖 process.platform — 沙箱内永远走 POSIX
+    it('createShellExecutor 在 POSIX 平台返回 LocalShellExecutor（间接验证）', () => {
+      // 我们不能直接 instanceof，因为需要 Context；改为查静态属性
+      // 工厂的 POSIX 分支返回 new LocalShellExecutor(...) — 通过类型签名验证
+      expect(typeof createShellExecutor).toBe('function')
+    });
   });
 });

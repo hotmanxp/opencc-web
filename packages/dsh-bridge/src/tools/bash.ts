@@ -73,14 +73,41 @@ function resolveSandbox(cwd: string): {
  *
  * 简化实现：识别行首 `cd <path>`、`cd "<path>"`、`cd '<path>'`。
  * 相对路径不支持（避免引入 path.resolve 复杂度），调用方注入 cwd 跟踪。
+ *
+ * **POSIX only**。Win32 平台请用 `detectCwdChangeWin32`（`cd /d <path>` 语义）。
+ *
+ * @internal 暴露给测试用；调用方应通过 `LocalShellExecutor` 实例方法。
  */
-function detectCwdChange(command: string, fallbackCwd: string): string {
+export function detectCwdChangePosix(command: string, fallbackCwd: string): string {
   const firstLine = command.split(/[;\n]/)[0]?.trim() ?? ''
   const cdMatch = firstLine.match(/^cd\s+(?:"([^"]+)"|'([^']+)'|(\S+))/)
   if (!cdMatch) return fallbackCwd
   const target = cdMatch[1] ?? cdMatch[2] ?? cdMatch[3] ?? ''
   if (!target) return fallbackCwd
   return target.startsWith('/') ? target : fallbackCwd
+}
+
+/**
+ * 推断命令是否含 `cd /d <path>`（Win32）前缀并提取新 cwd。
+ *
+ * 识别行首：
+ *   - `cd /d <path>` — Windows 内置 cd，支持跨盘符
+ *   - `cd <path>` — 不带 /d，仅在同一盘符内有效（仍接受）
+ *   - `pushd <path>` — 切换并压栈
+ *
+ * Win32 路径可能是 `C:\...` 或带引号；这里只返回原样字符串，由调用方解析绝对性。
+ *
+ * @internal 暴露给测试用；调用方应通过 `Win32ShellExecutor` 实例方法。
+ */
+export function detectCwdChangeWin32(command: string, fallbackCwd: string): string {
+  const firstLine = command.split(/[;&\n]/)[0]?.trim() ?? ''
+  const cdMatch = firstLine.match(/^(?:cd|pushd)\s+(?:\/d\s+)?(?:"([^"]+)"|'([^']+)'|(\S+))/i)
+  if (!cdMatch) return fallbackCwd
+  const target = cdMatch[1] ?? cdMatch[2] ?? cdMatch[3] ?? ''
+  if (!target) return fallbackCwd
+  // Win32 绝对路径：盘符 `C:\` 或 UNC `\\server\share`
+  if (/^[A-Za-z]:[\\/]/.test(target) || /^\\\\/.test(target)) return target
+  return fallbackCwd
 }
 
 /**
@@ -236,7 +263,7 @@ export function createBashTool(opts: BashToolOptions) {
         : await runBashCommand(a.command, { cwd: opts.cwd, timeoutMs: a.timeout })
 
       if (!a.run_in_background) {
-        const newCwd = detectCwdChange(a.command, opts.cwd)
+        const newCwd = detectCwdChangePosix(a.command, opts.cwd)
         if (newCwd !== opts.cwd) {
           opts.cwdTracker?.(newCwd)
         }
@@ -257,15 +284,17 @@ export function createBashTool(opts: BashToolOptions) {
 }
 
 /**
- * 本地 POSIX ShellExecutor provider（注册到 ctx.shell 服务）。
+ * ShellExecutor 平台无关基类 — 抽 cwd/cwdTracker 状态 + resolve/run/start 共享骨架。
  *
- * dsh 上游未发布 POSIX provider；本类提供最小可工作实现。
+ * 子类（`LocalShellExecutor` POSIX / `Win32ShellExecutor` Win32）只需实现
+ * `detectCwdChange(command, fallbackCwd)` 抽象方法，覆盖平台特定的 `cd` 语义。
+ *
+ * dsh 上游未发布内置 POSIX provider；本类提供最小可工作实现。
  * 已知缺口（与 zai compat/tools 差异，记录在 B6 known-differences）：
  *   - `ShellProcess.readOutput` 当前简化为返回完整 buffer + lossy=false（不流式增量）
  *   - sandbox 未对接 dsh-sandbox（未安装）
- *   - win32 路径不支持（POSIX only）
  */
-export class LocalShellExecutor extends ShellExecutor {
+abstract class BaseShellExecutor extends ShellExecutor {
   #cwd: string
   #cwdTracker?: CwdTracker
 
@@ -274,6 +303,9 @@ export class LocalShellExecutor extends ShellExecutor {
     this.#cwd = cwd
     this.#cwdTracker = cwdTracker
   }
+
+  /** 子类按平台实现 cd 语义（POSIX: `cd <path>`；Win32: `cd /d <path>`）。 */
+  protected abstract detectCwdChange(command: string, fallbackCwd: string): string
 
   /** 不沙箱化（与 zai compat/tools/index.ts 默认对齐）。 */
   get sandboxMode(): undefined {
@@ -301,13 +333,12 @@ export class LocalShellExecutor extends ShellExecutor {
   }
 
   async run(spec: ShellExecSpec): Promise<ShellRunResult> {
-    const startedAt = Date.now()
     const result = await runBashCommand(spec.command, {
       cwd: spec.workdir,
       timeoutMs: spec.timeoutMs,
     })
 
-    const newCwd = detectCwdChange(spec.command, spec.workdir)
+    const newCwd = this.detectCwdChange(spec.command, spec.workdir)
     if (newCwd !== this.#cwd) {
       this.#cwd = newCwd
       this.#cwdTracker?.(newCwd)
@@ -352,7 +383,7 @@ export class LocalShellExecutor extends ShellExecutor {
         return resolved ? 'completed' : 'running'
       },
       get exitCode() {
-        return null // 简化：调用方读 done 后用 .status 判断
+        return null
       },
       get signal() {
         return null
@@ -365,7 +396,6 @@ export class LocalShellExecutor extends ShellExecutor {
         const stderrDelta = curStderr.slice(lastStderrLen)
         lastStdoutLen = curStdout.length
         lastStderrLen = curStderr.length
-        // 简化合并：stdout delta + stderr 标记 section
         const combined = stderrDelta
           ? `${stdoutDelta}\n[stderr]\n${stderrDelta}`
           : stdoutDelta
@@ -388,6 +418,53 @@ export class LocalShellExecutor extends ShellExecutor {
   getCwd(): string {
     return this.#cwd
   }
+}
+
+/**
+ * POSIX ShellExecutor provider（默认） — 注册到 ctx.shell 服务。
+ *
+ * `cd <path>` 语义；child_process.exec 在 POSIX 走 `/bin/sh -c`。
+ */
+export class LocalShellExecutor extends BaseShellExecutor {
+  protected detectCwdChange(command: string, fallbackCwd: string): string {
+    // 模块级 helper（暴露给测试用）— 同名不冲突因 class method 在 instance 上下文调用
+    return detectCwdChangePosix(command, fallbackCwd)
+  }
+}
+
+/**
+ * Win32 ShellExecutor provider — 注册到 ctx.shell 服务（仅 `process.platform === 'win32'`）。
+ *
+ * `cd /d <path>` 语义（带跨盘符支持），也接受 `pushd` 与不带 `/d` 的 `cd`。
+ * child_process.exec 在 Win32 走 `cmd.exe /d /s /c`。
+ *
+ * 已知缺口（Win32 平台特有，记录在 B6 known-differences）：
+ *   - PowerShell 句柄（`-Command` / `-File`）未实现 — 当前仅走 cmd.exe；
+ *     若需要 PS 集成，请子类化本类并 override `resolve` + `run` + `start`。
+ */
+export class Win32ShellExecutor extends BaseShellExecutor {
+  protected detectCwdChange(command: string, fallbackCwd: string): string {
+    return detectCwdChangeWin32(command, fallbackCwd)
+  }
+}
+
+/**
+ * 工厂：按 `process.platform` 选择 ShellExecutor 子类。
+ *
+ * 默认 opencc dsh 模式注册 `LocalShellExecutor`；
+ * Win32 平台自动注册 `Win32ShellExecutor`。
+ *
+ * 返回类型为 `BaseShellExecutor`（共同基类），调用方可通过 `instanceof` 区分。
+ */
+export function createShellExecutor(
+  ctx: Context,
+  cwd: string,
+  cwdTracker?: CwdTracker,
+): BaseShellExecutor {
+  if (process.platform === 'win32') {
+    return new Win32ShellExecutor(ctx, cwd, cwdTracker)
+  }
+  return new LocalShellExecutor(ctx, cwd, cwdTracker)
 }
 
 /**
@@ -420,14 +497,19 @@ export function registerBashTool(ctx: Context, opts: BashToolOptions): () => voi
 }
 
 /**
- * 注册 LocalShellExecutor 到 ctx.shell service。
+ * 注册 ShellExecutor 到 ctx.shell service（按平台分派）。
+ *
+ * - POSIX 平台 → `LocalShellExecutor`（POSIX `cd` 语义）
+ * - Win32 平台 → `Win32ShellExecutor`（`cd /d` 语义）
+ *
+ * 返回具体子类实例 — 调用方可用 `instanceof` 区分。
  */
 export function registerLocalShellExecutor(
   ctx: Context,
   cwd: string,
   cwdTracker?: CwdTracker,
-): LocalShellExecutor {
-  const exec = new LocalShellExecutor(ctx, cwd, cwdTracker)
+): BaseShellExecutor {
+  const exec = createShellExecutor(ctx, cwd, cwdTracker)
   ctx.provide('shell', exec as unknown as never)
   return exec
 }
