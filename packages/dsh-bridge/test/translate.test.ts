@@ -59,7 +59,11 @@ describe('translateSessionEvent 核心子集', () => {
     expect((out as any).thinking).toBe('thinking...')
   })
 
-  it('assistant/message → runtime.delta (累积文本)', () => {
+  it('assistant/message → 不 emit runtime.delta (避免与 chunk(text-delta) 重复累加)', () => {
+    // dsh 上游已经在 assistant/chunk(text-delta) 阶段把同一段文本增量
+    // 推送过,前端 upsertStreamBlock 按 eventId 累加 delta。如果这里再 emit
+    // 一条带"完整文本"的 runtime.delta,前端会把同一段文本拼接第二遍,
+    // UI 上看到 "xxx.xxx" 的重复气泡 (B1 修复回归)。
     const event = {
       type: 'assistant/message',
       seq: 3,
@@ -70,8 +74,9 @@ describe('translateSessionEvent 核心子集', () => {
       },
     } as any
     const out = translateSessionEvent(event, ctx)
-    expect(out!.type).toBe('runtime.delta')
-    expect((out as any).delta).toBe('final answer')
+    // 修复后: assistant/message 不再产生 runtime.delta,文本完整性由
+    // assistant/chunk(text-delta) 流负责;turn 收尾由 turn/end 触发 runtime.done。
+    expect(out).toBeNull()
   })
 
   it('turn/end (completed) → runtime.done', () => {

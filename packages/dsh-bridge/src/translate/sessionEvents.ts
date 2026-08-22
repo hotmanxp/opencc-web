@@ -84,21 +84,22 @@ export function translateSessionEvent(
     }
 
     case 'assistant/message': {
-      // assistant/message 是 assembled message — 文本已落定，由 turn/end 触发
-      // runtime.done 输出。 这里只 emit 一个透明 delta 表示消息完成。
+      // assistant/message 是 assembled message — 整段 text 一次性 emit。
+      // 关键：上游 dsh 已经在 assistant/chunk(text-delta) 阶段把同一段 text
+      // 增量推送过,前端 upsertStreamBlock 按 eventId 累加 delta。如果这里
+      // 再 emit 一条带"完整 text"的 runtime.delta,前端会把同一段文本
+      // 拼接第二遍,UI 上看到 "xxx.xxx" 的重复气泡。
+      // 修复: assistant/message 不再 emit runtime.delta,文本完整性由
+      // assistant/chunk(text-delta) 流负责;这里只作为占位让 sourceEventSeqs
+      // 路径仍走通 — 真正的 turn 收尾由 turn/end 触发 runtime.done。
       const content = event.data.message.content as Array<{ type: string; text?: string }>
       const text = content
         .filter((b) => b.type === 'text')
         .map((b) => b.text ?? '')
         .join('')
       if (text === '') return null
-      return {
-        ...baseFields,
-        type: 'runtime.delta',
-        sessionId: ctx.sessionId,
-        turnIndex: ctx.turnIndex,
-        delta: text,
-      }
+      // 不返回 runtime.delta — 让 chunk 流负责文本累积
+      return null
     }
 
     case 'turn/end': {
