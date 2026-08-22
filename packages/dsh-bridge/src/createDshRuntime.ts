@@ -373,6 +373,22 @@ export async function createDshRuntime(
         },
       })
 
+      // 4.4 Phase 4.1: dsh-session-projection 注册表 + dsh-subagent
+      // projection units。
+      //
+      // dsh-subagent 的 `listChildren()` 调 `prepareListing(ctx)` 拿
+      // `ctx.sessionProjections` 服务。ProjectionRegistry (Service 形态)
+      // 没装时抛 `SUBAGENT_CONTROL_PROJECTIONS_UNAVAILABLE` — listDshSubagents
+      // 之前 fallback 到磁盘读,现在通过 ctx.plugin(SessionProjectionRegistry)
+      // 装载,让 SubagentRuntime 内部的 `ctx.inject(['sessionProjections'])`
+      // 注入 timing/identity projection units(自动注册 SubagentRunInfo +
+      // SubagentRunEndInfo 的投影)。
+      //
+      // 不需要显式 loader.create('dsh-session-projection') — Service 形态
+      // 用 ctx.plugin 即可。
+      const { SessionProjectionRegistry } = await import('@deepseek-ai/dsh-session-projection')
+      await ctx.plugin(SessionProjectionRegistry)
+
       // 4.5 Phase 4: dsh-subagent 上游 SubagentRuntime + spawn provider。
       //
       // 装载 SubagentRuntime (cordis Service 形态) — `ctx.subagents` 暴露
