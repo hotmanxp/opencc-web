@@ -28,27 +28,63 @@ import type { DshSubagentTaskItem } from '../store/useAgentStore.js'
 // 兼容老代码:hook 导出 DshSubagentTask 类型同 DshSubagentTaskItem shape
 export type DshSubagentTask = DshSubagentTaskItem
 
-export function useSubagentTasks(): {
+/** Phase 3 P0-B: mode 选项 — 'current'(默认)只显示当前 session,'all' 跨 session。 */
+export type SubagentTasksMode = 'current' | 'all'
+
+export function useSubagentTasks(opts?: { mode?: SubagentTasksMode }): {
   tasks: DshSubagentTaskItem[]
   loading: boolean
   error: string | null
   refresh: () => void
 } {
+  const mode = opts?.mode ?? 'current'
   const sessionId = useAgentStore((s) => s.sessionId)
   // 100% SSE 推送: 从 store 读,useAgentStore 已经在 useEventStream
   // 收到 'subagent.changed' 时更新 subagentTasksBySession[sessionId]。
   // zustand selector 自动订阅,subagent 状态变化时组件 re-render。
-  const tasks = useAgentStore((s) =>
+  //
+  // Phase 3 P0-B: 'all' 模式时,SSE 只推当前 session;跨 session 视图
+  // 走另一条 path(allCache)— 见 useEffect fallback。
+  const currentSessionTasks = useAgentStore((s) =>
     sessionId ? s.subagentTasksBySession[sessionId] ?? EMPTY : EMPTY
   )
+
+  // Phase 3 P0-B: 'all' 模式的跨 session 任务缓存。
+  const [allCache, setAllCache] = useState<DshSubagentTaskItem[]>(EMPTY)
+  const [allLoading, setAllLoading] = useState(false)
+  const [allError, setAllError] = useState<string | null>(null)
+  const [, setRefreshTick] = useState(0)
 
   // Cold-start fallback: 切到全新 session(无 SSE 推送过的历史)时,拉一次
   // REST 兜底。useEffect 只在 sessionId 变化时跑一次,后续 SSE 持续更新。
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState<string | null>(null)
   useEffect(() => {
+    if (mode === 'all') {
+      // 'all' 模式 — 拉全 session 任务,不带 sessionId。
+      let cancelled = false
+      setAllLoading(true)
+      fetch('/api/subagent-tasks?allSessions=true')
+        .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
+        .then((data: { tasks: DshSubagentTaskItem[] }) => {
+          if (cancelled) return
+          setAllCache(data.tasks ?? EMPTY)
+          setAllError(null)
+        })
+        .catch((err: unknown) => {
+          if (cancelled) return
+          setAllError(err instanceof Error ? err.message : String(err))
+        })
+        .finally(() => {
+          if (!cancelled) setAllLoading(false)
+        })
+      return () => {
+        cancelled = true
+      }
+    }
     if (!sessionId) return
-    // 仅在 store 已空(还没 SSE 推送过)时拉一次,避免重复打 server
+    // 'current' 模式 — 仅在 store 已空(还没 SSE 推送过)时拉一次,
+    // 避免重复打 server
     const list = useAgentStore.getState().subagentTasksBySession[sessionId]
     if (list !== undefined) return
     let cancelled = false
@@ -75,14 +111,14 @@ export function useSubagentTasks(): {
     return () => {
       cancelled = true
     }
-  }, [sessionId])
+  }, [sessionId, mode])
 
-  // refresh() — 强制重拉 cold-start fallback(开发期调试用)。
-  const [, setRefreshTick] = useState(0)
+  // refresh() — 强制重拉。'all' 模式重新触发 fetch;'current' 模式
+  // 仅递增 tick 触发 useEffect 重跑(useEffect 已依赖 sessionId)。
   return {
-    tasks,
-    loading,
-    error,
+    tasks: mode === 'all' ? allCache : currentSessionTasks,
+    loading: mode === 'all' ? allLoading : loading,
+    error: mode === 'all' ? allError : error,
     refresh: () => setRefreshTick((n) => n + 1),
   }
 }

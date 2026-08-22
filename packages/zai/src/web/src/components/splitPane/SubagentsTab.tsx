@@ -1,8 +1,10 @@
 /**
  * dsh-019: dsh-mode subagent 任务 Tab(对齐 FsTab/GitTab/BashTab)。
  *
- * 极简实现:直接复用 useSubagentTasks hook + SubagentRow 渲染。
- * 不进 Drawer 套娃(简化 + 跟其他 tab 一致),用户开/关 tab 即看/不看。
+ * Phase 3 P0-B 新增:
+ *   - 顶部 toggle: "当前 session" / "全部 session" — 切换 mode。
+ *   - 'all' 模式下按 parentSessionId 分组显示,每组 header 标注 session。
+ *   - mode 状态本地组件 useState(不持久化,刷新后回到 'current')。
  *
  * Phase 1 限制:
  *   - 5s 轮询(Phase 2 改 SSE 推送)
@@ -12,7 +14,7 @@
  */
 
 import { useState } from 'react'
-import { Button, Empty, Input, Space, Spin, Tag, Tooltip, message as antdMessage } from 'antd'
+import { Button, Empty, Input, Segmented, Space, Spin, Tag, Tooltip, message as antdMessage } from 'antd'
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -27,6 +29,7 @@ import {
   interruptSubagentTask,
   sendMessageToSubagentTask,
   type DshSubagentTask,
+  type SubagentTasksMode,
 } from '../../hooks/useSubagentTasks.js'
 import { SubagentDetailDrawer } from './SubagentDetailDrawer.js'
 
@@ -66,6 +69,10 @@ function SubagentRow({
   sendingTo: string | null
   onSelect: (id: string) => void
 }) {
+  // Phase 3 P0-B 防御:cold-start / SSE 与 fetch 切换瞬间 task 可能没 id
+  // (zustand selector 在 cold-start 返回 EMPTY,但 React render 已
+  //  入栈) — 直接不 render row,避免 `task.id.slice` 抛 TypeError。
+  if (!task?.id) return null
   const status = task.status
   const isRunning = status === 'running'
   const isBusy = busy === task.id
@@ -193,7 +200,9 @@ function SubagentRow({
 }
 
 export function SubagentsTab() {
-  const { tasks, loading, error, refresh } = useSubagentTasks()
+  // Phase 3 P0-B: mode 状态 — 'current' 默认,'all' 跨 session 视图
+  const [mode, setMode] = useState<SubagentTasksMode>('current')
+  const { tasks, loading, error, refresh } = useSubagentTasks({ mode })
   const [busy, setBusy] = useState<string | null>(null)
   const [sendingTo, setSendingTo] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -229,6 +238,19 @@ export function SubagentsTab() {
   const running = tasks.filter((t) => t.status === 'running').length
   const total = tasks.length
 
+  // Phase 3 P0-B: 'all' 模式按 parentSessionId 分组
+  const grouped = mode === 'all' && tasks.length > 0
+    ? (() => {
+        const map = new Map<string, DshSubagentTask[]>()
+        for (const t of tasks) {
+          const key = (t as DshSubagentTask & { parentSessionId?: string }).parentSessionId ?? '(unknown)'
+          if (!map.has(key)) map.set(key, [])
+          map.get(key)!.push(t)
+        }
+        return Array.from(map.entries())
+      })()
+    : null
+
   return (
     <div
       data-testid="subagents-tab"
@@ -242,6 +264,7 @@ export function SubagentsTab() {
           padding: '6px 12px',
           borderBottom: '1px solid var(--border-color, #eee)',
           background: 'var(--bg-tab, transparent)',
+          gap: 8,
         }}
       >
         <Space size="small">
@@ -255,16 +278,28 @@ export function SubagentsTab() {
             <Tag style={{ fontSize: 10 }}>{total} 全部</Tag>
           )}
         </Space>
-        <Tooltip title="立即刷新">
-          <Button
+        <Space size={4}>
+          <Segmented
             size="small"
-            type="text"
-            icon={<ReloadOutlined spin={loading} />}
-            onClick={refresh}
-            disabled={loading}
-            data-testid="subagents-refresh"
+            value={mode}
+            onChange={(v) => setMode(v as SubagentTasksMode)}
+            options={[
+              { label: '当前', value: 'current' },
+              { label: '全部', value: 'all' },
+            ]}
+            data-testid="subagents-mode-toggle"
           />
-        </Tooltip>
+          <Tooltip title="立即刷新">
+            <Button
+              size="small"
+              type="text"
+              icon={<ReloadOutlined spin={loading} />}
+              onClick={refresh}
+              disabled={loading}
+              data-testid="subagents-refresh"
+            />
+          </Tooltip>
+        </Space>
       </div>
       <div style={{ flex: 1, overflowY: 'auto' }}>
         {error && (
@@ -276,8 +311,9 @@ export function SubagentsTab() {
           <Empty
             description={
               <span style={{ color: 'var(--ui-text-color)', fontSize: 12 }}>
-                当前 session 没有 dsh subagent 任务。<br />
-                让 LLM 调 Agent 工具即可在此查看 + 中止 + 投消息。
+                {mode === 'current'
+                  ? '当前 session 没有 dsh subagent 任务。让 LLM 调 Agent 工具即可在此查看 + 中止 + 投消息。'
+                  : '所有 session 都没有 dsh subagent 任务。'}
               </span>
             }
             imageStyle={{ height: 80 }}
@@ -288,17 +324,52 @@ export function SubagentsTab() {
             <Spin />
           </div>
         )}
-        {tasks.map((t) => (
-          <SubagentRow
-            key={t.id}
-            task={t}
-            onInterrupt={handleInterrupt}
-            busy={busy}
-            onSendMessage={handleSendMessage}
-            sendingTo={sendingTo}
-            onSelect={setSelectedTaskId}
-          />
-        ))}
+        {/* 'all' 模式按 parentSessionId 分组 */}
+        {grouped
+          ? grouped.map(([sessionId, groupTasks]) => (
+              <div key={sessionId} data-testid={`subagents-group-${sessionId}`}>
+                <div
+                  style={{
+                    padding: '6px 12px',
+                    fontSize: 11,
+                    fontWeight: 600,
+                    color: 'var(--ui-text-color)',
+                    background: 'var(--bg-card, #f5f5f5)',
+                    borderBottom: '1px solid var(--border-color, #eee)',
+                    fontFamily: 'monospace',
+                  }}
+                  title={sessionId}
+                >
+                  {sessionId}
+                  <span style={{ marginLeft: 8, fontWeight: 400, color: 'var(--text-secondary)' }}>
+                    ({groupTasks.length})
+                  </span>
+                </div>
+                {groupTasks.map((t) => (
+                  <SubagentRow
+                    key={t.id}
+                    task={t}
+                    onInterrupt={handleInterrupt}
+                    busy={busy}
+                    onSendMessage={handleSendMessage}
+                    sendingTo={sendingTo}
+                    onSelect={setSelectedTaskId}
+                  />
+                ))}
+              </div>
+            ))
+          : /* 'current' 模式直接渲染 */
+          tasks.map((t) => (
+            <SubagentRow
+              key={t.id}
+              task={t}
+              onInterrupt={handleInterrupt}
+              busy={busy}
+              onSendMessage={handleSendMessage}
+              sendingTo={sendingTo}
+              onSelect={setSelectedTaskId}
+            />
+          ))}
       </div>
       <SubagentDetailDrawer
         taskId={selectedTaskId}

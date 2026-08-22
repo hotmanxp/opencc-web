@@ -102,15 +102,45 @@ function tryGetDshDetailBridge(): DshSubagentDetailBridge | null {
 
 /**
  * GET /api/subagent-tasks
- *   ?sessionId=xxx  过滤 parent session
- *   返回 { tasks: [{ id, status, description, prompt? }] }
+ *   ?sessionId=xxx     过滤 parent session
+ *   ?allSessions=true  跨 session 列(忽略 sessionId)— Phase 3 P0-B
+ *   返回 { tasks: [{ id, status, description, parentSessionId? }] }
  */
 router.get('/subagent-tasks', async (req: Request, res: Response) => {
   if (notInitialized(res)) return
   const bridge = tryGetDshBridge()!
   const sessionId = req.query.sessionId as string | undefined
+  const allSessions = req.query.allSessions === 'true' || req.query.allSessions === '1'
   try {
-    const tasks = await bridge.list(sessionId || undefined)
+    // Phase 3 P0-B: allSessions=true 时,直接列全 session 的任务,
+    // 每条带 parentSessionId 字段供 UI 分组。sessionId 与 allSessions
+    // 互斥(后者优先)。
+    const tasks = allSessions
+      ? await bridge.list(undefined)
+      : await bridge.list(sessionId || undefined)
+    if (allSessions) {
+      // 从全 taskStore 读 parentSessionId(bridge.list 返回简略对象不
+      // 带这字段),用 readDshTask 补全 — 不补只显示分组也能工作
+      // (UI 可从 taskId 前缀推断),但显式更清晰。
+      // 注:N=小(本机活动 session 数通常 < 50),可接受 N+1 IO。
+      const fullBridge = tryGetDshDetailBridge()
+      if (fullBridge) {
+        const enriched = await Promise.all(
+          tasks.map(async (t) => {
+            try {
+              const full = await fullBridge.readTask(t.id)
+              return {
+                ...t,
+                ...(full?.parentSessionId ? { parentSessionId: full.parentSessionId } : {}),
+              }
+            } catch {
+              return t
+            }
+          }),
+        )
+        return res.json({ tasks: enriched })
+      }
+    }
     return res.json({ tasks })
   } catch (err) {
     return res.status(500).json({
