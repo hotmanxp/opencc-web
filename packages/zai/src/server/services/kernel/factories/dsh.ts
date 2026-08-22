@@ -171,24 +171,51 @@ export async function createDshKernelAdapter(
     },
 
     async abort(opts) {
-      // B1b T1.6：调 agent.cancel() 实现 abort。
-      // 真实路径（dsh-agent Agent API）：
-      //   const agents = handle.ctx.get('agents') as { get?(id): Agent }
-      //   const agent = agents?.get?.(SessionId(opts.session.sessionId))
-      //   agent?.cancel({ kind: 'client_disconnect' })
-      // 当前为 stub —— dsh Agent API 文档不够清晰，标记 TODO P0-4。
-      void opts
+      if (stopped) throw new Error('[dsh-adapter] shutdown, refusing abort')
+      const agents = handle.ctx.get('agents') as {
+        get?(id: unknown): { cancel?: (cause: { kind: 'user' | 'parent' | 'hook' | 'disposed' }, opts?: { keepInbox?: boolean }) => void } | undefined
+      } | undefined
+      const agent = agents?.get?.(opts.session.sessionId)
+      agent?.cancel?.({ kind: 'user' })
     },
 
-    async patchTranscript(_opts) {
-      // B3 T3.3：把 transcript 条目注入 dsh session。
-      // TODO B3 deep-dive: 通过 sessions.append() 或 agent.followup() 注入。
+    async patchTranscript(opts) {
+      if (stopped) throw new Error('[dsh-adapter] shutdown, refusing patchTranscript')
+      const agents = handle.ctx.get('agents') as {
+        get?(id: unknown): { session?: { append: (type: string, data: unknown) => unknown } } | undefined
+      } | undefined
+      const agent = agents?.get?.(opts.session.sessionId)
+      if (!agent?.session) {
+        console.warn(`[dsh-adapter] patchTranscript: agent ${opts.session.sessionId} not found`)
+        return
+      }
+      // 逐条 append — Session.append 接 (type, data)；TranscriptPatch.kind 映射到 type。
+      for (const entry of opts.entries) {
+        agent.session.append(entry.kind, entry.payload)
+      }
     },
 
     async *readTranscript(opts): AsyncIterable<TranscriptEntry> {
-      // B3 T3.3：从 dsh session.events 重建 transcript。
-      // 当前 stub — 由 B3 deep-dive 实现。
-      void opts
+      if (stopped) throw new Error('[dsh-adapter] shutdown, refusing readTranscript')
+      const persistence = handle.ctx.get('sessionPersistence') as {
+        loadStored?: (id: unknown, signal?: AbortSignal) => Promise<{ events?: unknown[] } | undefined>
+      } | undefined
+      const { SessionId } = await import('@zn-ai/dsh-bridge')
+      if (!persistence?.loadStored) {
+        console.warn('[dsh-adapter] readTranscript: sessionPersistence unavailable')
+        return
+      }
+      const loaded = await persistence.loadStored(SessionId(opts.session.sessionId))
+      const rawEvents = loaded?.events ?? []
+      let seq = opts.sinceSeq ?? 0
+      for (const e of rawEvents as Array<{ type?: string; ts?: number; data?: unknown }>) {
+        yield {
+          seq: seq++,
+          kind: (e.type ?? 'user') as TranscriptEntry['kind'],
+          ts: e.ts ?? Date.now(),
+          payload: (e.data ?? {}) as Record<string, unknown>,
+        }
+      }
     },
 
     onAsk(cb) {
@@ -206,14 +233,22 @@ export async function createDshKernelAdapter(
     },
 
     async enqueue(opts) {
-      // B5 阶段（部分实现）：把 prompt 塞入 session inbox。
-      // 真实路径（dsh Agent inbox API）：
-      //   const sessionId = SessionId(opts.session.sessionId)
-      //   const agents = handle.ctx.get('agents') as { get?(id): Agent }
-      //   const agent = agents?.get?.(sessionId)
-      //   agent?.inbox.enqueue(createUserMessage({...}))
-      // 当前 stub —— B5 deep-dive 补齐。
-      void opts
+      if (stopped) throw new Error('[dsh-adapter] shutdown, refusing enqueue')
+      const agents = handle.ctx.get('agents') as {
+        get?(id: unknown): { followup?: (msg: unknown) => void } | undefined
+      } | undefined
+      const agent = agents?.get?.(opts.session.sessionId)
+      if (!agent?.followup) {
+        console.warn(`[dsh-adapter] enqueue: agent ${opts.session.sessionId} not found`)
+        return
+      }
+      const { createUserMessage } = await import('@zn-ai/dsh-bridge')
+      agent.followup(
+        createUserMessage({
+          content: [{ type: 'text', text: opts.payload.text }],
+          source: { kind: 'user' },
+        }),
+      )
     },
 
     metrics,
