@@ -172,8 +172,10 @@ export {
   listDshSubagents,
   interruptDshSubagent,
   sendMessageToDshSubagent,
+  getDshSubagentToolCalls,
   dshTaskPath,
   type DshTaskState,
+  type ToolCallEntry,
   type SubagentNotification,
 } from './subagent/taskStore.js'
 export {

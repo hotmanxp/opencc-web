@@ -67,6 +67,18 @@ export interface RegisterZaiToolsOptions {
    */
   getDshCtx?: () => Context | undefined
   /**
+   * Phase 3 P0-A+ B1: provider profile name getter — Agent 工具 spawn
+   * 子 agent 时需继承父 agent 的 provider,否则 dsh 抛 "has no provider/model"
+   * (dsh-014 修复同样问题)。不传则 Agent 工具降级到 undefined,可能
+   * 因 provider 缺失导致子 agent 立即 fail。
+   */
+  getProvider?: () => string | undefined
+  /**
+   * Phase 3 P0-A+ B1: 默认 model name getter — LLM 不传 model 时子 agent
+   * 用 zai 配置的 defaultModel,避免 dsh 抛 "has no provider/model"。
+   */
+  getDefaultModel?: () => string | undefined
+  /**
    * dsh-017 新增：subagent 任务启动 sink — 转发到 zai `subagentTracker` (类比
    * bashBackgroundTracker),让 UI TaskDock 看到 dsh subagent 任务。
    */
@@ -130,6 +142,10 @@ export async function registerZaiTools(
     getParentSessionId: opts.getSessionId ?? (() => undefined),
     getAgentsService: opts.getAgentsService,
     getDshCtx: opts.getDshCtx ?? (() => ctx),
+    // Phase 3 P0-A+ B1: 子 agent 继承父 provider + model(避免
+    // "has no provider/model" 错)。
+    getProvider: opts.getProvider,
+    getDefaultModel: opts.getDefaultModel,
     onTaskStart: opts.onTaskStart,
     onTaskFinish: opts.onTaskFinish,
   }))

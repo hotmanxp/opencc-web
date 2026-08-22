@@ -34,6 +34,32 @@ import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { createScope } from '@deepseek-ai/dsh-scope'
 
+/**
+ * 子 agent 工具调用条目 — Phase 3 P0-A。
+ *
+ * 记录 subagent 自己的 session 中每个 tool/call + tool/result 事件对。
+ * 写入 ~/.zai/tasks-dsh/<taskId>.json 的 `toolCalls` 字段,SubagentDetailDrawer
+ * 渲染此字段给用户看(subagent 内部跑了哪些工具、各自的输入/输出)。
+ *
+ * 设计原则:
+ *   - 用 `callId` 作为关联 key,tool/call 与 tool/result 一一对应。
+ *   - tool/call 来了立即 push(running);tool/result 来了 update。
+ *   - error 字段:从 SessionEvent 'tool/result' 的 `error: { name, code }` 取,
+ *     透传给前端展示(错误工具 → 红色 badge)。
+ *   - input/output 保留 raw 形态(模型给的 JSON 字符串 / dsh-side 工具的
+ *     ToolResultMessage);前端按需 formatToolInput 渲染。
+ */
+export interface ToolCallEntry {
+  callId: string
+  toolName: string
+  input: unknown
+  output?: unknown
+  status: 'running' | 'done' | 'error'
+  ts: number
+  durationMs?: number
+  error?: { name: string; code: string }
+}
+
 export interface DshTaskState {
   taskId: string
   sessionId: string
@@ -44,6 +70,13 @@ export interface DshTaskState {
   finishedAt?: number
   result?: unknown
   error?: string
+  /**
+   * Phase 3 P0-A: 子 agent 自己的工具调用历史。
+   * spawnDshSubagent 在 followup 后订阅 session/event,把每个
+   * tool/call + tool/result 写到这里。writeDshTask 按 500ms debounce
+   * 落盘,避免频繁 I/O(单 turn 可能 10+ 次工具调用)。
+   */
+  toolCalls?: ToolCallEntry[]
 }
 
 const DSH_TASKS_DIR = join(homedir(), '.zai', 'tasks-dsh')
@@ -135,6 +168,12 @@ export async function spawnDshSubagent(
     prompt: string
     cwd: string
     model?: string
+    /**
+     * Phase 3 P0-A+ B1: provider profile name — 子 agent 必须有 provider 才能
+     * 调 LLM (dsh-014 修复同样问题)。父 agent 用的 provider 应传给子
+     * agent(默认 'anthropic' — zai dsh factory 当前配置)。
+     */
+    provider?: string
     taskId?: string
   },
 ): Promise<{ taskId: string; agent: Agent; promise: Promise<DshTaskState> }> {
@@ -170,6 +209,31 @@ export async function spawnDshSubagent(
   await writeDshTask(initialState)
 
   const promise = (async (): Promise<DshTaskState> => {
+    // Phase 3 P0-A: 工具调用历史累积缓冲 + debounced 写盘。
+    // 单 turn 可能 10+ 工具调用,每次都写盘太频繁。每 500ms flush 一次。
+    const toolCalls: ToolCallEntry[] = []
+    let dirty = false
+    let flushTimer: NodeJS.Timeout | null = null
+    let unsubSession: (() => void) | null = null
+
+    const flushToolCalls = async (): Promise<void> => {
+      if (!dirty) return
+      dirty = false
+      const current = await readDshTask(taskId).catch(() => null)
+      if (!current) return
+      current.toolCalls = toolCalls.slice()
+      await writeDshTask(current).catch((err) => {
+        console.warn(`[dsh-bridge] spawnDshSubagent ${taskId} flush toolCalls failed:`, err)
+      })
+    }
+    const scheduleFlush = (): void => {
+      if (flushTimer) return
+      flushTimer = setTimeout(() => {
+        flushTimer = null
+        void flushToolCalls()
+      }, 500)
+    }
+
     try {
       // 1. Phase 3.1：建立显式父子 scope（ScopedLayers 链可工作）
       createDshSubagentScope(ctx, { parentScopeKey, childScopeKey })
@@ -185,10 +249,76 @@ export async function spawnDshSubagent(
       const { agent } = await agents.create({
         sessionId: SessionId(childSessionId),
         meta: { cwd: opts.cwd },
-        agentOptions: opts.model ? { model: opts.model } : undefined,
+        // dsh-014 修复:必须显式传 provider + model,否则 dsh 在 agent/request
+        // waterfall 找不到 provider/model,抛 "has no provider/model" 错误。
+        // model 用 opts.model (LLM 传的覆盖) 或 opts.model (默认)。
+        agentOptions: { provider: opts.provider, model: opts.model },
       })
 
       await agent.whenIdle()
+
+      // Phase 3 P0-A: 订阅 child session 的 tool/call + tool/result 事件,
+      // 累积到 toolCalls 缓冲,debounced 写盘。
+      //
+      // cordis `session/event` 是**全局**事件,每个 session 都会 broadcast。
+      // 用 session 身份比对过滤:仅处理来自子 agent session 的事件。
+      // firstSeq 记在 whenIdle 后(同 run.ts:95 模式)— 保证不捕到
+      // loader 装载阶段产生的早期事件。
+      const firstSeq = agent.session.seq
+      unsubSession = ctx.on(
+        'session/event',
+        (evSession: { id?: unknown }, ev: { type?: unknown; seq?: unknown; data?: unknown }) => {
+          // 过滤非子 session 事件 — 父 session 也广播,需精确匹配
+          const sessId = evSession?.id
+          if (sessId !== undefined && String(sessId) !== String(agent.session.id)) return
+          if (typeof ev.seq !== 'number' || ev.seq < firstSeq) return
+          const data = (ev.data ?? {}) as Record<string, unknown>
+          if (ev.type === 'tool/call') {
+            const callId = String(data.callId ?? '')
+            if (!callId) return
+            toolCalls.push({
+              callId,
+              toolName: String(data.name ?? 'tool'),
+              input: data.arguments, // 模型给的 raw JSON 字符串
+              status: 'running',
+              ts: Date.now(),
+            })
+            dirty = true
+            scheduleFlush()
+          } else if (ev.type === 'tool/result') {
+            // tool/result 的 callId 来源 — SessionEvent 'tool/result' 的
+            // data.message 是 ToolResultMessage:{ source: { kind:'tool',
+            // callId }, content: [ToolResultBlock{ toolCallId, ... }] }。
+            // 三处都能拿 callId,优先 source.callId(更明确)。
+            const message = data.message as
+              | {
+                  source?: { kind?: unknown; callId?: unknown }
+                  content?: Array<{ toolCallId?: unknown; content?: unknown; isError?: unknown }>
+                }
+              | undefined
+            const callId = String(
+              message?.source?.callId
+              ?? message?.content?.[0]?.toolCallId
+              ?? '',
+            )
+            if (!callId) return
+            const idx = toolCalls.findIndex((t) => t.callId === callId)
+            if (idx >= 0) {
+              const entry = toolCalls[idx]!
+              const resultBlock = message?.content?.[0]
+              entry.output = resultBlock?.content
+              entry.status = data.error ? 'error' : resultBlock?.isError ? 'error' : 'done'
+              entry.durationMs = Date.now() - entry.ts
+              if (data.error) {
+                entry.error = data.error as { name: string; code: string }
+              }
+            }
+            dirty = true
+            scheduleFlush()
+          }
+        },
+      ) as unknown as () => void
+
       agent.followup(
         createUserMessage({
           content: [{ type: 'text', text: opts.prompt }],
@@ -197,10 +327,20 @@ export async function spawnDshSubagent(
       )
       await agent.whenIdle()
 
+      // Phase 3 P0-A: 收尾前确保 buffer flush + unsub
+      unsubSession?.()
+      unsubSession = null
+      if (flushTimer) {
+        clearTimeout(flushTimer)
+        flushTimer = null
+      }
+      await flushToolCalls()
+
       const finalState: DshTaskState = {
         ...initialState,
         status: 'done',
         finishedAt: Date.now(),
+        toolCalls: toolCalls.slice(),
       }
       await writeDshTask(finalState)
 
@@ -214,11 +354,20 @@ export async function spawnDshSubagent(
 
       return finalState
     } catch (err) {
+      // Phase 3 P0-A: 失败时也要保留已收集的 toolCalls(用户能看到
+      // "走到第 N 步才挂")
+      unsubSession?.()
+      unsubSession = null
+      if (flushTimer) {
+        clearTimeout(flushTimer)
+        flushTimer = null
+      }
       const finalState: DshTaskState = {
         ...initialState,
         status: 'failed',
         finishedAt: Date.now(),
         error: err instanceof Error ? err.message : String(err),
+        toolCalls: toolCalls.slice(),
       }
       await writeDshTask(finalState)
 
@@ -368,4 +517,18 @@ export async function sendMessageToDshSubagent(
   } catch (err) {
     return { ok: false, error: err instanceof Error ? err.message : String(err) }
   }
+}
+
+/**
+ * Phase 3 P0-A: 读子 agent 的工具调用历史。直接 readDshTask 拿 toolCalls 字段
+ * (Phase 3 在 spawnDshSubagent 期间已写到 ~/.zai/tasks-dsh/<taskId>.json)。
+ *
+ * zai-side `__zaiDshSubagentDetail.readTask` 内部用,Detail Drawer 渲染。
+ */
+export async function getDshSubagentToolCalls(
+  _ctx: Context,
+  taskId: string,
+): Promise<ToolCallEntry[]> {
+  const task = await readDshTask(taskId)
+  return task?.toolCalls ?? []
 }

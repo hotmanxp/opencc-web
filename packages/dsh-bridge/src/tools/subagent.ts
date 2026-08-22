@@ -46,6 +46,19 @@ export interface AgentToolOptions {
   /** 父 session id — 通知父 agent 时需要。 */
   getParentSessionId: () => string | undefined
   /**
+   * 当前 dsh provider profile name — 子 agent 需继承(否则 dsh 在
+   * agent/request waterfall 找不到 provider/model,抛 "has no provider/model"
+   * 错误)。dsh-014 修复同样问题。zai dsh factory 注入 'anthropic' (B1a
+   * T1.4 收口的 default profile)。
+   */
+  getProvider?: () => string | undefined
+  /**
+   * Phase 3 P0-A+ B1: 默认 model name — LLM 没显式传 model 时,子 agent
+   * 用 zai 配置的 defaultModel (settings.json model 或 ANTHROPIC_DEFAULT_SONNET_MODEL)。
+   * 不传则用 LLM 输入的 `model` 字段(undefined 时 dsh 抛 "has no provider/model")。
+   */
+  getDefaultModel?: () => string | undefined
+  /**
    * 拿父 agent 回调 — Cron 触发时用 + Agent 工具 spawn 后通知父 agent 用。
    * 接受 `AgentToolParentAgent` 子集类型(只要有 followup / session / cancel
    * 字段即可),zai 端不用 import 完整 dsh Agent 类型。
@@ -220,7 +233,13 @@ export function createAgentTool(opts: AgentToolOptions) {
           parentAgent: parentAgent as unknown as import('@deepseek-ai/dsh-agent').Agent,
           prompt: a.prompt,
           cwd: opts.cwd,
-          model: a.model,
+          // Phase 3 P0-A+ B1: model 优先级 = LLM 传的 `model` 参数 >
+          // zai 配置的 defaultModel (getDefaultModel)。LLM 不传时 fallback
+          // 到 defaultModel,避免 dsh "has no provider/model" 错。
+          model: a.model ?? opts.getDefaultModel?.(),
+          // Phase 3 P0-A+ B1: 传 provider 让子 agent 能找到 LLM profile
+          // (否则 dsh 抛 "has no provider/model" — dsh-014 修复同样问题)。
+          provider: opts.getProvider?.(),
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)

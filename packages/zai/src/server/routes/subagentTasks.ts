@@ -39,7 +39,23 @@ interface DshSubagentControlBridge {
 /**
  * dsh-019 Phase 2: 完整 DshTaskState 类型(从 dsh-bridge DshTaskState 镜像,
  * 用于 /:id 详情端点返回 startedAt/finishedAt/result/error/prompt 等)。
+ *
+ * Phase 3 P0-A: 加 toolCalls 字段 — spawnDshSubagent 期间累积的子 agent
+ * 工具调用历史(callId/toolName/input/output/status/ts/durationMs/error)。
+ * 子 agent 内部跑了哪些工具、各自的输入/输出,Subagent 详情 Drawer
+ * 完整渲染此字段。
  */
+interface ToolCallEntryView {
+  callId: string
+  toolName: string
+  input: unknown
+  output?: unknown
+  status: 'running' | 'done' | 'error'
+  ts: number
+  durationMs?: number
+  error?: { name: string; code: string }
+}
+
 interface DshTaskFull {
   taskId: string
   sessionId: string
@@ -50,6 +66,7 @@ interface DshTaskFull {
   finishedAt?: number
   result?: unknown
   error?: string
+  toolCalls?: ToolCallEntryView[]
 }
 
 interface DshSubagentDetailBridge {

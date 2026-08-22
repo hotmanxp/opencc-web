@@ -109,6 +109,11 @@ export async function createDshKernelAdapter(
   const bashTracker = getBashBackgroundTracker()
   toolsDisposer = await bridge.registerZaiTools(handle.ctx, {
     cwd: cfg.cwd,
+    // Phase 3 P0-A+ B1: 子 agent 需 provider + model 才能调 LLM(否则
+    // dsh 抛 "has no provider/model")。注入 anthropic profile 名 +
+    // defaultModel 给所有工具(Agent 工具 spawn 时传给子 agent)。
+    getProvider: () => anthropicProfile.name,
+    getDefaultModel: () => defaultModel || undefined,
     onBackgroundStart: ({ taskId, command, cwd: _cwd }) => {
       bashTracker.register(taskId, {
         command,
@@ -331,8 +336,10 @@ export async function createDshKernelAdapter(
 
   // ── 2.6 dsh-019 Phase 2: __zaiDshSubagentDetail 桥 ─────────────────────
   // 暴露 readTask(id) — 直接读 ~/.zai/tasks-dsh/<taskId>.json 拿完整
-  // DshTaskState(带 startedAt/finishedAt/result/error/prompt),给
-  // /api/subagent-tasks/:id 详情端点用(Subagent 详情 Drawer)。
+  // DshTaskState(带 startedAt/finishedAt/result/error/prompt/toolCalls),
+  // 给 /api/subagent-tasks/:id 详情端点用(Subagent 详情 Drawer)。
+  // Phase 3 P0-A 新增 toolCalls 字段 — spawnDshSubagent 期间累积,详情
+  // Drawer 渲染子 agent 的工具调用历史。
   ;(globalThis as {
     __zaiDshSubagentDetail?: {
       readTask: (taskId: string) => Promise<{
@@ -345,6 +352,16 @@ export async function createDshKernelAdapter(
         finishedAt?: number
         result?: unknown
         error?: string
+        toolCalls?: Array<{
+          callId: string
+          toolName: string
+          input: unknown
+          output?: unknown
+          status: 'running' | 'done' | 'error'
+          ts: number
+          durationMs?: number
+          error?: { name: string; code: string }
+        }>
       } | null>
     }
   }).__zaiDshSubagentDetail = {
@@ -362,6 +379,7 @@ export async function createDshKernelAdapter(
         ...(t.finishedAt !== undefined ? { finishedAt: t.finishedAt } : {}),
         ...(t.result !== undefined ? { result: t.result } : {}),
         ...(t.error !== undefined ? { error: t.error } : {}),
+        ...(t.toolCalls && t.toolCalls.length > 0 ? { toolCalls: t.toolCalls } : {}),
       }
     },
   }
