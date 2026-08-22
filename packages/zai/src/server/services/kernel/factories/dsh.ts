@@ -33,6 +33,13 @@ import {
   ZAI_GLOBAL_BRIDGE_KEYS,
 } from '../globalThisBridge.js'
 import { DSH_KERNEL } from '../paths.js'
+import { getBashBackgroundTracker, getCommandRegistry } from '@zn-ai/zn-agent-core'
+import {
+  getAskRegistry,
+  getApproveRegistry,
+  getCurrentSessionId,
+  setCurrentSessionId,
+} from '../../agentRuntime.js'
 
 interface DshKernelConfig {
   cwd: string
@@ -83,6 +90,104 @@ export async function createDshKernelAdapter(
     providers: [anthropicProfile],
   })
   await handle.start()
+
+  // ── 1.5 dsh-bridge bridges（B2/B4/B5/B7 真实化 — dsh-016） ───────
+  // 装载 zai 增强工具（bash/fs/ripgrep/mcp/skill）+ 把后台 bash 任务接到
+  // zai `bashBackgroundTracker`（让 UI TaskDock 可见）+ 装审批/AskUser 桥
+  // + slash 命令桥 + 插件 hooks/commands。
+  let toolsDisposer: (() => void) | null = null
+  let interactionDisposer: (() => void) | null = null
+  let slashDisposer: (() => void) | null = null
+  let pluginDisposer: (() => void) | null = null
+
+  // (a) zai 增强工具 + 后台 bash tracker 接线
+  const bashTracker = getBashBackgroundTracker()
+  toolsDisposer = await bridge.registerZaiTools(handle.ctx, {
+    cwd: cfg.cwd,
+    onBackgroundStart: ({ taskId, command, cwd: _cwd }) => {
+      bashTracker.register(taskId, {
+        command,
+        sessionId: getCurrentSessionId() ?? '',
+        description: command,
+        startedAt: Date.now(),
+      })
+    },
+    notifyBackground: ({ taskId, status }) => {
+      bashTracker.markFinished(
+        taskId,
+        status === 'done' ? 'completed' : status === 'killed' ? 'killed' : 'failed',
+        {},
+      )
+    },
+  })
+
+  // (b) 审批 + AskUser 桥 → zai 现有 registry
+  const interactionBridges = bridge.installInteractionBridges(handle.ctx)
+  interactionBridges.setSink({
+    requestApprove: async (req) => {
+      const { decision, comment } = await getApproveRegistry().register(
+        req.toolUseId,
+        req.sessionId,
+        req.filePath,
+        req.abortSignal,
+      )
+      if (decision === 'approved') return { kind: 'allow' }
+      return { kind: 'deny', reason: comment }
+    },
+    requestAskUser: async (req) => {
+      const answers = await getAskRegistry().register(
+        req.toolUseId,
+        req.sessionId,
+        req.abortSignal,
+      )
+      // dsh `AskUserAnswer.answers: Record<string, string>`；zai 返回的
+      // answers.answers 是数组形态,转成 {question.text: answer.text} 字典。
+      const map: Record<string, string> = {}
+      const arr = (answers as { answers?: Array<{ answer: { text?: string } | string }> })?.answers
+      if (Array.isArray(arr)) {
+        for (let i = 0; i < arr.length; i++) {
+          const raw = arr[i]?.answer
+          const text = typeof raw === 'string' ? raw : raw?.text ?? ''
+          const key = req.questions[i]?.question ?? String(i)
+          map[key] = text
+        }
+      }
+      return { answers: map }
+    },
+    getSessionId: () => getCurrentSessionId() ?? undefined,
+  })
+  interactionDisposer = () => interactionBridges.dispose()
+
+  // (c) slash 命令桥 → zai command registry
+  const cmdReg = getCommandRegistry()
+  slashDisposer = bridge.installSlashCommands(handle.ctx, {
+    listCommands: async () =>
+      cmdReg.all().map((c) => ({
+        name: c.name,
+        description: c.description,
+        source: c.source === 'user' ? 'user' : 'builtin',
+      })),
+    executeCommand: async (input, { sessionId, cwd }) => {
+      const resolved = cmdReg.resolve(input)
+      if (!resolved) return { output: `Unknown command: ${input}`, isError: true }
+      // Command 联合类型: LocalCommand 有 execute,PromptCommand 没有。
+      const cmd = resolved.command
+      if (cmd.type !== 'local') {
+        return { output: `Command "${cmd.name}" cannot be executed directly (type=${cmd.type})`, isError: true }
+      }
+      const result = await cmd.call(resolved.args, {
+        cwd,
+        sessionId,
+        dataDir: cfg.dataDir,
+      })
+      return {
+        output: typeof result === 'string' ? result : JSON.stringify(result),
+      }
+    },
+  })
+
+  // (d) 插件 hooks/commands
+  pluginDisposer = await bridge.installZaiPlugins(handle.ctx)
 
   // ── 2. globalThis 桥安装（B0 T0.8） ──────────────────────────────
   installZaiGlobalBridges({
@@ -136,6 +241,12 @@ export async function createDshKernelAdapter(
 
       // 4. 清 globalThis 桥
       clearZaiGlobalBridges()
+
+      // 5. dsh-016:拆 dsh-bridge bridges(slash/plugins/tools/interaction)
+      try { slashDisposer?.() } catch (err) { console.warn('[dsh-adapter] slash dispose failed:', err) }
+      try { pluginDisposer?.() } catch (err) { console.warn('[dsh-adapter] plugin dispose failed:', err) }
+      try { toolsDisposer?.() } catch (err) { console.warn('[dsh-adapter] tools dispose failed:', err) }
+      try { interactionDisposer?.() } catch (err) { console.warn('[dsh-adapter] interaction dispose failed:', err) }
     },
 
     async createSession(opts) {
@@ -172,6 +283,12 @@ export async function createDshKernelAdapter(
     async *run(opts): AsyncIterable<ServerEvent> {
       if (stopped) throw new Error('[dsh-adapter] refusing run after shutdown')
       totalTurns++
+
+      // dsh-016 修复:把当前 sessionId 写入 zai 单例 + globalThis 桥,
+      // 让 bashBackgroundTracker.register / bashNotifier.handle 知道
+      // 把 bash_task.changed 事件挂到正确的 session 下,UI TaskDock
+      // 才能显示任务(opencc 模式 vendor 内部自动写,dsh 模式没人写)。
+      setCurrentSessionId(opts.session.sessionId)
 
       // B1a T1.2 + T1.3：runOnce 产 dsh SessionEvent 序列，
       // translateSessionEvent → zai ServerEvent。

@@ -30,6 +30,16 @@ export interface RegisterZaiToolsOptions {
   cwd: string
   /** 工具数据目录（用于 skill 解析、ripgrep 跳过等）。 */
   dataDir?: string
+  /**
+   * dsh-015 修复：后台 bash task 启动 sink — 转发到 zai `bashBackgroundTracker`,
+   * 让 UI TaskDock 看到 dsh 后台任务。不传则不注册,UI 显示"暂无后台任务"。
+   */
+  onBackgroundStart?: (info: { taskId: string; command: string; cwd: string }) => void
+  /**
+   * dsh-016 修复：后台 bash task 完成/失败 sink — 转发到 zai `bashBackgroundTracker.markFinished`。
+   * 状态用 `string` 与 BashNotifier 对齐（dsh-bridge 内部: `'done' | 'killed' | 'failed'`）。
+   */
+  notifyBackground?: (info: { taskId: string; status: string; cwd?: string }) => void
 }
 
 /**
@@ -45,7 +55,13 @@ export async function registerZaiTools(
   const disposers: Array<() => void> = []
 
   // 1. Bash 工具（含 cwd 跟踪 + 后台任务 + cwd tracker）
-  disposers.push(registerBashTool(ctx, { cwd: opts.cwd }))
+  disposers.push(
+    registerBashTool(ctx, {
+      cwd: opts.cwd,
+      onBackgroundStart: opts.onBackgroundStart,
+      notifyBackground: opts.notifyBackground,
+    }),
+  )
 
   // 2. fs 工具（FileRead/Edit/Write/Stat — 4 个工具）
   disposers.push(...registerFsTools(ctx, { cwd: opts.cwd }))

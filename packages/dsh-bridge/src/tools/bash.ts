@@ -39,6 +39,12 @@ export interface BashToolOptions {
   cwdTracker?: CwdTracker
   /** 后台任务通知 callback（zai 端 bashNotifier）。 */
   notifyBackground?: BashNotifier
+  /**
+   * dsh-015 修复：后台 bash 任务启动 sink。
+   * zai 端 registerBashTool 时注入,把 taskId 注册到 zai `bashBackgroundTracker`,
+   * 让 UI TaskDock 能看到 dsh 后台任务。**不传则不注册,TaskDock 显示"暂无后台任务"**。
+   */
+  onBackgroundStart?: (info: { taskId: string; command: string; cwd: string }) => void
 }
 
 export interface BashToolResult {
@@ -175,6 +181,8 @@ export async function runBashCommand(
  */
 function runBackground(command: string, opts: BashToolOptions): BashToolResult {
   const taskId = `bash-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  // dsh-015:把 taskId 注册到 zai bashBackgroundTracker,让 UI TaskDock 可见。
+  opts.onBackgroundStart?.({ taskId, command, cwd: opts.cwd })
   const child = exec(command, {
     cwd: opts.cwd,
     env: process.env,
