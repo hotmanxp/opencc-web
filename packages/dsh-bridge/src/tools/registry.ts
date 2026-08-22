@@ -13,6 +13,11 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
+import { registerBashTool } from './bash.js'
+import { registerFsTools } from './fs.js'
+import { registerRipgrepTool } from './ripgrep.js'
+import { registerMcpTools } from './mcp.js'
+import { registerSkillTools } from './skill.js'
 
 export interface ZaiTool {
   name: string
@@ -21,18 +26,50 @@ export interface ZaiTool {
   execute: (input: unknown, ctx: unknown) => Promise<unknown>
 }
 
+export interface RegisterZaiToolsOptions {
+  cwd: string
+  /** 工具数据目录（用于 skill 解析、ripgrep 跳过等）。 */
+  dataDir?: string
+}
+
 /**
  * 注册 zai 工具到 dsh ctx.tools。
  *
- * 真实实现需要 ctx.tools.register() 签名（dsh-tools API）；
- * B2 当前为接口契约，后续按 dsh-tools 实际 API 对接。
+ * 串行装配：bash → fs → ripgrep → MCP → Skill，并把各工具的 disposer
+ * 聚合为一个统一 disposer 返回（用于 zai-side 卸载场景）。
  */
 export async function registerZaiTools(
-  _ctx: Context,
-  _tools: ZaiTool[],
-): Promise<void> {
-  // B2 T2.1 stub — 按 dsh-tools 的 defineTool / ctx.tools.register 签名实现。
-  // 当前：先 import zai-side tools 让上层能验证依赖；register 调用留 B2 T2.2-T2.5。
+  ctx: Context,
+  opts: RegisterZaiToolsOptions,
+): Promise<() => void> {
+  const disposers: Array<() => void> = []
+
+  // 1. Bash 工具（含 cwd 跟踪 + 后台任务 + cwd tracker）
+  disposers.push(registerBashTool(ctx, { cwd: opts.cwd }))
+
+  // 2. fs 工具（FileRead/Edit/Write/Stat — 4 个工具）
+  disposers.push(...registerFsTools(ctx, { cwd: opts.cwd }))
+
+  // 3. ripgrep 工具（PATH rg 优先 + 内置 fallback）
+  disposers.push(registerRipgrepTool(ctx, { cwd: opts.cwd }))
+
+  // 4. MCP 工具（异步，async connect）
+  const { disposers: mcpDisposers } = await registerMcpTools(ctx, { cwd: opts.cwd })
+  disposers.push(...mcpDisposers)
+
+  // 5. Skill 工具（异步，扫描 skills 目录）
+  disposers.push(...(await registerSkillTools(ctx, { cwd: opts.cwd })))
+
+  // 整体返回 disposer
+  return () => {
+    for (const d of disposers) {
+      try {
+        d()
+      } catch (err) {
+        console.warn('[dsh-bridge] registerZaiTools dispose error:', err)
+      }
+    }
+  }
 }
 
 /**
