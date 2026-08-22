@@ -1,8 +1,11 @@
 import { describe, it, expect } from 'vitest'
 import {
   translateSessionEvent,
+  subscribeDshInternalEvents,
   ALL_SERVER_EVENT_GROUPS,
   listUnmappedEvents,
+  summarizeMapping,
+  SESSION_EVENT_TO_SERVER_GROUP_MAP,
 } from '../src/translate/sessionEvents.js'
 
 /**
@@ -160,7 +163,8 @@ describe('translateSessionEvent 核心子集', () => {
     expect(unmapped.length).toBeGreaterThan(0)
     // 一些已知的未映射项
     expect(unmapped).toContain('step/start')
-    expect(unmapped).toContain('todo/write')
+    // todo/write 现在是 pair（Phase 1.3 新增 state.v2_task.changed 翻译）
+    expect(unmapped).not.toContain('todo/write')
   })
 
   it('11 组映射表存在且每组至少 1 个 pair', () => {
@@ -177,5 +181,139 @@ describe('translateSessionEvent 核心子集', () => {
     expect(ALL_SERVER_EVENT_GROUPS).toContain('Command')
     expect(ALL_SERVER_EVENT_GROUPS).toContain('StreamError')
     expect(ALL_SERVER_EVENT_GROUPS).toContain('Projection')
+  })
+})
+
+describe('translateSessionEvent Phase 1.3: 完整 13 SessionEventMap 类型', () => {
+  it('todo/write → state.v2_task.changed', () => {
+    const event = {
+      type: 'todo/write',
+      seq: 9,
+      data: {
+        todos: [
+          { id: 't1', status: 'in_progress', content: 'fix bug' },
+          { id: 't2', status: 'pending', content: 'add test' },
+        ],
+      },
+    } as any
+    const out = translateSessionEvent(event, ctx)
+    expect(out).not.toBeNull()
+    expect(out!.type).toBe('state.v2_task.changed')
+    expect((out as any).action).toBe('upsert')
+    expect((out as any).task.todos).toHaveLength(2)
+  })
+
+  it('todo/write 空数组也正常翻译（边界）', () => {
+    const event = { type: 'todo/write', seq: 10, data: { todos: [] } } as any
+    const out = translateSessionEvent(event, ctx)
+    expect(out).not.toBeNull()
+    expect(out!.type).toBe('state.v2_task.changed')
+    expect((out as any).task.todos).toEqual([])
+  })
+
+  it('session/end-seed → ignorable', () => {
+    const event = { type: 'session/end-seed', seq: 11, data: {} } as any
+    expect(translateSessionEvent(event, ctx)).toBeNull()
+  })
+
+  it('request/header → ignorable', () => {
+    const event = { type: 'request/header', seq: 12, data: { header: {}, reason: 'begin' } } as any
+    expect(translateSessionEvent(event, ctx)).toBeNull()
+  })
+
+  it('request/context → ignorable', () => {
+    const event = { type: 'request/context', seq: 13, data: {} } as any
+    expect(translateSessionEvent(event, ctx)).toBeNull()
+  })
+})
+
+describe('translateSessionEvent Phase 1.3: 11 组映射表完整性', () => {
+  it('summarizeMapping 返回 11 组的 pair/ignorable 计数', () => {
+    const summary = summarizeMapping()
+    expect(Object.keys(summary)).toHaveLength(11)
+    expect(summary.Runtime.pair).toBeGreaterThan(0)
+    // 一些组当前只有 ignorable（forward-compat 占位）
+    expect(summary.State.pair + summary.State.ignorable).toBe(0)
+    expect(summary.Instance.pair + summary.Instance.ignorable).toBe(0)
+  })
+
+  it('SESSION_EVENT_TO_SERVER_GROUP_MAP 包含 Runtime 的 13 个 SessionEventMap 类型', () => {
+    const runtime = SESSION_EVENT_TO_SERVER_GROUP_MAP.Runtime
+    // SessionEventMap 实际有的 13 个
+    const expected = [
+      'turn/start', 'turn/end', 'step/start', 'step/end', 'user/message',
+      'assistant/chunk', 'assistant/message', 'tool/call', 'tool/result',
+      'todo/write', 'request/header', 'request/context', 'session/end-seed',
+    ]
+    for (const t of expected) {
+      expect(runtime[t]).toBeDefined()
+    }
+  })
+
+  it('listUnmappedEvents 只返回 ignorable 项（无 pair）', () => {
+    const unmapped = listUnmappedEvents()
+    // 不含 todo/write（已升为 pair）
+    expect(unmapped).not.toContain('todo/write')
+    // 不含 Runtime 核心子集
+    expect(unmapped).not.toContain('turn/start')
+    expect(unmapped).not.toContain('tool/call')
+    // 包含一些边界 marker
+    expect(unmapped).toContain('step/start')
+  })
+})
+
+describe('subscribeDshInternalEvents (Phase 1.3)', () => {
+  // 简单 mock ctx，提供 on() 注册并保留 callback
+  function mockCtx() {
+    const handlers: Record<string, Array<(payload: unknown) => void>> = {}
+    return {
+      handlers,
+      on(event: string, cb: (payload: unknown) => void) {
+        if (!handlers[event]) handlers[event] = []
+        handlers[event].push(cb)
+        return () => {
+          handlers[event] = handlers[event].filter((h) => h !== cb)
+        }
+      },
+    }
+  }
+
+  it('订阅 agent/status → emit instance.status', () => {
+    const ctxMock = mockCtx()
+    const events: Array<{ type: string; status?: string; agentId?: string }> = []
+    const dispose = subscribeDshInternalEvents(ctxMock as any, (e) => events.push(e as any))
+    // 触发 agent/status
+    ctxMock.handlers['agent/status']?.[0]({ agent: {}, status: 'running', id: 'agent-1' })
+    expect(events).toHaveLength(1)
+    expect(events[0].type).toBe('instance.status')
+    expect(events[0].agentId).toBe('agent-1')
+    expect(events[0].status).toBe('running')
+    dispose()
+  })
+
+  it('订阅 internal/status → emit instance.internal_status', () => {
+    const ctxMock = mockCtx()
+    const events: Array<{ type: string; mode?: string }> = []
+    const dispose = subscribeDshInternalEvents(ctxMock as any, (e) => events.push(e as any))
+    ctxMock.handlers['internal/status']?.[0]({ mode: 'maintenance', agentId: 'agent-2' })
+    expect(events).toHaveLength(1)
+    expect(events[0].type).toBe('instance.internal_status')
+    expect(events[0].mode).toBe('maintenance')
+    dispose()
+  })
+
+  it('dispose 移除全部 hook', () => {
+    const ctxMock = mockCtx()
+    const events: unknown[] = []
+    const dispose = subscribeDshInternalEvents(ctxMock as any, (e) => events.push(e as any))
+    const initialCount = ctxMock.handlers['agent/status']?.length ?? 0
+    expect(initialCount).toBeGreaterThan(0)
+    dispose()
+    // dispose 后 handlers 应为空数组（mock 行为）
+    expect(ctxMock.handlers['agent/status']?.length ?? 0).toBe(0)
+    // 触发已移除的 handler 不应 emit
+    const remaining = ctxMock.handlers['agent/status'] ?? []
+    for (const h of remaining) h({ status: 'x' })
+    expect(events).toHaveLength(0)
   })
 })

@@ -20,7 +20,7 @@
 
 export { createDshRuntime, type DshRuntimeHandle, type CreateDshRuntimeOptions, getActiveDshHandleCount } from './createDshRuntime.js'
 export { runOnce, awaitAgentIdle, type DshRunOptions } from './run.js'
-export { translateSessionEvent, SESSION_EVENT_TO_SERVER_GROUP_MAP, ALL_SERVER_EVENT_GROUPS, listUnmappedEvents, type ServerEventGroup } from './translate/sessionEvents.js'
+export { translateSessionEvent, subscribeDshInternalEvents, SESSION_EVENT_TO_SERVER_GROUP_MAP, ALL_SERVER_EVENT_GROUPS, listUnmappedEvents, summarizeMapping, type ServerEventGroup } from './translate/sessionEvents.js'
 export { installModelSelection, resolveModelSelection, type ModelSelection } from './model.js'
 export { DSH_KERNEL, OPENCC_KERNEL, type KernelId } from './paths.js'
 

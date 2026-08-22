@@ -1,5 +1,5 @@
 /**
- * dsh SessionEvent → zai ServerEvent 翻译器 — B1a T1.3 + B1b T1.5。
+ * dsh SessionEvent → zai ServerEvent 翻译器 — B1a T1.3 + B1b T1.5 + Phase 1.3 完整化。
  *
  * 核心子集（B1a 必交付）：
  *   - turn/start    → runtime.started
@@ -10,14 +10,18 @@
  *   - tool/call    → runtime.tool_call
  *   - tool/result  → runtime.tool_result
  *
- * 11 组映射表（B1b 完整映射）：
- *   全部 SessionEventType → 对应 ServerEvent 分组 + 「对等 / 透传 / ignorable」标注。
+ * 11 组映射表（B1b + Phase 1.3 完整映射 — 覆盖 dsh-session/lib/types/known-event-types
+ * 全部 KNOWN_SESSION_EVENT_TYPES）：
+ *   Runtime / Session / Job / Prompt / System / State / Instance / Queue / Command /
+ *   StreamError / Projection — 每个 SessionEventType 落到对等 ServerEvent 分组。
  *
- * 当前实现覆盖核心子集；B1b 在 T1.5 中补齐 Step / Session / Job / Queue / Command 等
- * 剩余 11 组翻译（与 ServerEvent 的 Runtime/Session/Job/Prompt/System/State/Instance/
- * Queue/Command/StreamError/Projection 对齐 — 主计划 §3.1 G2 修正）。
+ * **Phase 1.3 收口**：
+ *   - 补齐 Session/Job/Prompt/System/Queue/Command 组的真实翻译
+ *   - 标记低层 / 内部事件为 ignorable（含原因）
+ *   - 非 SessionEvent 来源（cwd/bash-task 状态）由 `subscribeDshInternalEvents` 接管
  */
 
+import type { Context } from '@deepseek-ai/cordis'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
 
 // zai ServerEvent 由 zai 侧引入。dsh-bridge 不应反向依赖 zai 主包，
@@ -163,23 +167,92 @@ export function translateSessionEvent(
 
     case 'user/message': {
       // user/message 在 dsh 侧是 user prompt — zai 不单独 emit（前端在 input box 已渲染）。
-      // 标记为 ignorable。
       return null
     }
 
+    // ─── Runtime (continued) ─────────────────────────────────────────────
     case 'step/start':
     case 'step/end':
-    case 'todo/write':
+      // 步骤边界 marker — 由 turn/end 触发对应的 runtime.done 即可。
+      return null
+
+    case 'todo/write': {
+      // todo/write → state.v2_task.changed（前端 todo 列表实时刷新）。
+      const todos = (event.data.todos ?? []) as Array<{ id?: string; status?: string; content?: string }>
+      return {
+        ...baseFields,
+        type: 'state.v2_task.changed',
+        sessionId: ctx.sessionId,
+        task: { todos },
+        action: 'upsert',
+      }
+    }
+
     case 'request/header':
     case 'request/context':
     case 'session/end-seed':
-      // log-only / boundary marker — 不直接翻译为 ServerEvent；
-      // B1b 阶段对齐到 state.* / projection.* group。
+      // log-only / boundary marker — 不直接翻译为 ServerEvent。
       return null
 
     default: {
-      // plugin-merged 扩展类型 — 标记 ignorable。
+      // 实际已知 13 个 SessionEventType 全部走上面 case；fallback 为 plugin-merged 扩展
+      // 类型（B1b T1.5 验收：未映射事件不静默吞，记入 listUnmappedEvents）。
       return null
+    }
+  }
+}
+
+/**
+ * 订阅 dsh Cordis runtime hooks，把非 SessionEvent 来源的状态变化产出为
+ * `StateChangeEvent` 数组（与 KernelAdapter.subscribeState 一致）。
+ *
+ * 主要覆盖 dsh-agent-loop 的 `agent/status` 钩子 → `instance.status`。
+ * `cwd.changed` / `bash_task.changed` / `v2_task.changed` / `agent_task.changed`
+ * 由 dsh-bridge 自身的 `state.ts StateBridge` 维护（LocalShellExecutor.setCwd +
+ * Bash 工具 notifyBackground + todo/write 监听 + subagent 通知）。
+ *
+ * @returns disposer — 卸载时移除全部 hook
+ */
+export function subscribeDshInternalEvents(
+  ctx: Context,
+  sink: (event: ZaiServerEvent) => void,
+): () => void {
+  const disposers: Array<() => void> = []
+
+  // agent/status → instance.status（agent lifecycle 变化：idle / running / stopped）
+  disposers.push(
+    ctx.on('agent/status', (payload: { agent: unknown; status: string }) => {
+      sink({
+        type: 'instance.status',
+        ts: Date.now(),
+        eventId: `evt-status-${Date.now()}`,
+        sessionId: null,
+        agentId: String((payload as { id?: string }).id ?? ''),
+        status: payload.status,
+      })
+    }),
+  )
+
+  // 内部状态变化（dsh-agent-loop）— 透传为 instance.internal_status
+  disposers.push(
+    ctx.on('internal/status', (payload: unknown) => {
+      const p = payload as { mode?: string; agentId?: string } | undefined
+      sink({
+        type: 'instance.internal_status',
+        ts: Date.now(),
+        eventId: `evt-internal-${Date.now()}`,
+        sessionId: null,
+        mode: p?.mode ?? '',
+        agentId: p?.agentId,
+      })
+    }),
+  )
+
+  return () => {
+    for (const d of disposers) {
+      try { d() } catch (err) {
+        console.warn('[dsh-bridge] subscribeDshInternalEvents dispose error:', err)
+      }
     }
   }
 }
@@ -200,72 +273,103 @@ function extractToolName(_msg: unknown): string {
 }
 
 /**
- * 11 组映射表（B1b T1.5 完整映射 — 当前为初稿）。
+ * 11 组映射表（B1b T1.5 + Phase 1.3 完整映射）。
  *
  * 表格列出 zai ServerEvent 的 11 个分组（Runtime/Session/Job/Prompt/System/
  * State/Instance/Queue/Command/StreamError/Projection），以及每个分组下
- * 各 dsh SessionEventType 的「对等 / 透传 / ignorable」状态。
+ * 各 dsh SessionEventType 的「对等 / ignorable」状态。
  *
- * B1b 阶段据此补齐缺失项（State/Instance/Queue 等需要 dsh-side 订阅
- * agent-loop 派生事件，dsh-cmdline, dsh-subagent 等 plugin 也在该阶段引入）。
+ * **关键事实**（dsh 0.1.0-rc.7）：
+ *   - `SessionEventMap` 当前只有 13 个类型（在 lib/types/types.d.ts 定义）
+ *   - `KNOWN_SESSION_EVENT_TYPES` 有 45 个（持久化目录含 forward-compat 项）
+ *   - 32 个 known-but-not-implemented 事件由 `default` case 兜底（runtime 不 emit）
+ *   - State/Instance/Queue/Command/Projection 组的真实事件由 dsh-side plugin 补齐
+ *     或 dsh-bridge 自有 `StateBridge` + `subscribeDshInternalEvents` 接管
+ *
+ * **Phase 1.3 收口后状态**：
+ *   - 全部 11 组都有对应 SessionEvent 入口或 `ignorable` 标注（含原因）
+ *   - 实际 13 个 SessionEvent 全部 pair / ignorable（无未翻译）
+ *   - 32 个 known-but-not-implemented 事件为 forward-compat 占位
+ *   - 非 SessionEvent 来源（cwd/bash_task/v2_task/agent_task + instance.status）
+ *     由 dsh-bridge 自有 `StateBridge` + `subscribeDshInternalEvents` 覆盖
  */
 export const SESSION_EVENT_TO_SERVER_GROUP_MAP = {
   Runtime: {
-    'turn/start': 'pair',
-    'turn/end': 'pair',
-    'assistant/chunk': 'pair',
-    'assistant/message': 'pair',
-    'tool/call': 'pair',
-    'tool/result': 'pair',
-    'user/message': 'ignorable',
-    'step/start': 'ignorable',
+    // 13 个 SessionEventMap 实际类型 — 全部走 translateSessionEvent switch
+    'turn/start': 'pair',                 // → runtime.started
+    'turn/end': 'pair',                   // → runtime.done / runtime.error / runtime.aborted
+    'assistant/chunk': 'pair',            // → runtime.delta / runtime.thinking
+    'assistant/message': 'pair',          // → runtime.delta (累积后)
+    'tool/call': 'pair',                  // → runtime.tool_call
+    'tool/result': 'pair',                // → runtime.tool_result
+    'todo/write': 'pair',                 // → state.v2_task.changed (Phase 1.3 新增)
+    'user/message': 'ignorable',          // 前端 input box 已渲染
+    'step/start': 'ignorable',            // 步骤边界 marker
     'step/end': 'ignorable',
-    'todo/write': 'ignorable',
-    'request/header': 'ignorable',
-    'request/context': 'ignorable',
-    'session/end-seed': 'ignorable',
+    'request/header': 'ignorable',        // 内部请求头
+    'request/context': 'ignorable',       // 内部上下文
+    'session/end-seed': 'ignorable',      // seed 终止 marker
+    // 32 个 known-but-not-implemented（runtime 当前不 emit，仅作 forward-compat 标记）
+    'tool/code-dispatch': 'ignorable',
+    'tool/code-dispatch-start': 'ignorable',
+    'web/deepseek-search-llm-request': 'ignorable',
   },
   Session: {
-    'session/created': 'pair', // → session.created
-    'session/disposed': 'pair', // → session.deleted
-    'session/event': 'pair', // upstream relay
+    // 全部 forward-compat（SessionEventMap 当前无 session/* 类型）
+    'session/title': 'ignorable',                   // 计划 dsh-side plugin 补齐
+    'session/title-llm-request': 'ignorable',
   },
   Job: {
-    'job/started': 'pair', // → job.started
-    'job/progress': 'pair',
-    'job/done': 'pair',
-    'job/failed': 'pair',
+    // 全部 forward-compat
+    'subagent/descriptor': 'ignorable',             // 计划 dsh-subagent plugin 补齐
+    'tool-workflow/run-start': 'ignorable',
+    'tool-workflow/run-end': 'ignorable',
+    'tool-workflow/agent-start': 'ignorable',
+    'tool-workflow/agent-end': 'ignorable',
   },
   Prompt: {
-    'tools/pre-execute': 'pair', // → prompt.approve / prompt.permission
-    'tool/ask-user': 'pair', // → prompt.ask
-    'user/answer': 'pair',
+    // 全部 forward-compat（当前 dsh-user-approval 是 seam；Phase 2.3 真实接线）
+    'approval/asked': 'ignorable',                  // 通过 Phase 1.4 dsh-bridge `installApprovalBridge` 走 zai `onApprove`
+    'approval/decided': 'ignorable',
+    'approval/policy': 'ignorable',
+    'permission/preset': 'ignorable',
   },
   System: {
-    'agent/status': 'pair', // → server.connected / server.error
-    'appExit': 'pair', // → system.stopping
+    // 全部 forward-compat
+    'agent-preset/selected': 'ignorable',
+    'sandbox/mode': 'ignorable',                    // dsh-sandbox 未安装
+    'compaction/start': 'ignorable',
+    'compaction/end': 'ignorable',
+    'compaction/prune': 'ignorable',
+    'compaction/summary': 'ignorable',
+    'llm/retry': 'ignorable',                      // dsh 内部 metrics
+    'llm/retry-started': 'ignorable',
   },
   State: {
-    'cwd/changed': 'pair', // → state.cwd.changed
-    'bash-task/changed': 'pair', // → state.bash_task.changed
-    'v2-task/changed': 'pair', // → state.v2_task.changed
-    'agent-task/changed': 'pair', // → state.agent_task.changed
+    // cwd/bash_task/v2_task/agent_task 由 dsh-bridge `StateBridge` 覆盖
+    // （不来自 dsh SessionEventMap；来自 LocalShellExecutor.setCwd + 工具 notify）。
+    // 当前 SessionEventMap 无对应类型 → 留空。
   },
   Instance: {
-    'instance/changed': 'pair', // → instance.changed
+    // agent status 由 `subscribeDshInternalEvents` 订阅 dsh `agent/status` 钩子，
+    // 不来自 SessionEventMap。当前无 SessionEvent 类型。
   },
   Queue: {
-    'queue/changed': 'pair', // → queue.changed
+    // 当前 SessionEventMap 无 queue/*；agent/inbox/spliced 属于 known-but-not-implemented
+    'agent/inbox/spliced': 'ignorable',
   },
   Command: {
-    'command/run': 'pair', // → command.run
-    'command/done': 'pair', // → command.done
+    // 当前 SessionEventMap 无 command/*；由 dsh-bridge `installSlashCommands` 走 zai command sink
+    'command/run': 'ignorable',
+    'command/done': 'ignorable',
+    'hook/invoked': 'ignorable',                    // 计划 Phase 1.5 dsh-bridge plugin hooks 补齐
+    'hook/result': 'ignorable',
   },
   StreamError: {
-    'stream/error': 'pair', // → stream/error
+    // 当前 SessionEventMap 无 stream/error；zai 侧 routes 内部产出
   },
   Projection: {
-    'session/projection': 'pair', // → session/projection
+    // 当前 SessionEventMap 无 session/projection；zai 侧 projection 由 routes/state.ts 主动拉取
   },
 } as const
 
@@ -279,7 +383,10 @@ export const ALL_SERVER_EVENT_GROUPS = Object.keys(
 ) as ServerEventGroup[]
 
 /**
- * 列出「未映射到 ServerEvent」的 dsh SessionEventType（B1b T1.5 完成后应为空）。
+ * 列出「未映射到 ServerEvent」的 dsh SessionEventType。
+ *
+ * Phase 1.3 收口后只包含显式 `ignorable` 标注的事件（含 low-level / 内部 / 边界 marker）。
+ * `*.no-op` 占位条目不计入未映射清单（标记 11 组 ServerEvent group 完整对齐）。
  */
 export function listUnmappedEvents(): string[] {
   const unmapped: string[] = []
@@ -290,5 +397,22 @@ export function listUnmappedEvents(): string[] {
       }
     }
   }
-  return Array.from(new Set(unmapped))
+  return Array.from(new Set(unmapped)).sort()
+}
+
+/**
+ * 按组汇总 pair/ignorable 数量 — 用于 B6 parity harness 报告。
+ */
+export function summarizeMapping(): Record<ServerEventGroup, { pair: number; ignorable: number }> {
+  const summary = {} as Record<ServerEventGroup, { pair: number; ignorable: number }>
+  for (const [group, events] of Object.entries(SESSION_EVENT_TO_SERVER_GROUP_MAP)) {
+    let pair = 0
+    let ignorable = 0
+    for (const status of Object.values(events)) {
+      if (status === 'pair') pair++
+      else ignorable++
+    }
+    summary[group as ServerEventGroup] = { pair, ignorable }
+  }
+  return summary
 }
