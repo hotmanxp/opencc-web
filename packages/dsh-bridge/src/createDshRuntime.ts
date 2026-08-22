@@ -27,8 +27,10 @@
  */
 
 import { Context } from '@deepseek-ai/cordis'
+import { JsonlSessionPersistence } from '@deepseek-ai/dsh-session-persistence-jsonl'
 
 import { DSH_KERNEL, type KernelId } from './paths.js'
+import { dshSessionsRootAbs } from './sessions/store.js'
 
 export interface CreateDshRuntimeOptions {
   dataDir: string
@@ -90,11 +92,20 @@ export async function createDshRuntime(
     },
 
     async start() {
-      // 首次 loader await — 确保全部 plugin 完成挂载（dsh-headless index.js:99 同款）
+      // 0. 注入 JsonlSessionPersistence.Config.root — dsh 会话写盘根目录，
+      //    与 opencc `<sessionId>.jsonl` 隔离（主计划 §4.2）。
+      //    必须在 loader await 之前注册，让 dsh-session 的 `ctx.sessions`
+      //    能立即拿到持久化 provider。
+      ctx.plugin(JsonlSessionPersistence, {
+        root: dshSessionsRootAbs(opts.dataDir),
+      })
+
+      // 1. 首次 loader await — 确保全部 plugin 完成挂载（dsh-headless index.js:99 同款）
       await ctx.get('loader')?.await()
-      // Cordis 4.x 的 ctx.set() 要求提供 config schema；当前 schema-less 设置
-      // 用 setSelf 或 isolate 走 local scope 方式。当前简化：把 defaults 存到
-      // globalThis 桥，由后续 createAgent 读取。
+
+      // 2. 把 defaults 存到 globalThis 临时桥（Phase 2.4 移除）。
+      //    历史背景：B0 时期 dsh Cordis config schema 缺失用 globalThis 兜底。
+      //    dsh-base/dsh-agent 已提供标准 Config schema，本桥会在 Phase 2.4 替换。
       ;(globalThis as Record<string, unknown>).__zaiDshDefaults = {
         defaultCwd: opts.defaultCwd,
         runtimeId: opts.runtimeId,

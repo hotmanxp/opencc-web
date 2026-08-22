@@ -18,7 +18,7 @@
  */
 
 import { readdir, stat } from 'node:fs/promises'
-import { join } from 'node:path'
+import { join, resolve } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
@@ -34,15 +34,102 @@ export interface DshSessionMeta {
 }
 
 /**
+ * dsh 轨道持久化的绝对根目录（注入 `JsonlSessionPersistence.Config.root`）。
+ *
+ * 与 opencc `<sessionId>.jsonl` 隔离：所有 dsh session 都在 `${dataDir}/dsh-sessions/`
+ * 下，dsh-side 用 `projectKey(cwd)` 把 cwd 编码成路径安全片段。
+ *
+ * 真实写盘路径由 dsh-side 计算：`${root}/${projectKey(cwd)}/${encodeSegment(sessionId)}/session.log[.zstd]`。
+ */
+export function dshSessionsRootAbs(dataDir: string): string {
+  return resolve(join(dataDir, 'dsh-sessions'))
+}
+
+/**
  * 解析 dsh-sessions 目录路径 — 与 opencc `<sessionId>.jsonl` 隔离。
  *
  * 不写 `${dataDir}/projects/<cwd>/`（zai 既有数据），而是用 `dsh-sessions/<cwd>/`
  * 子目录作为 dsh 隔离 namespace（避免与 opencc jsonl 命名冲突）。
+ *
+ * **已废弃**：用 `dshSessionsRootAbs(dataDir)` + `projectKeyForCwd(cwd)` 替代，
+ * 与 dsh-side `sessionDir(root, cwd, id)` 完全对齐。本函数保留仅供迁移期兼容。
+ *
+ * @deprecated use `dshSessionsRootAbs(dataDir)` + `projectKeyForCwd(cwd)` 替代
  */
 export function dshSessionsRoot(dataDir: string, cwd: string): string {
-  return join(dataDir, 'dsh-sessions', sanitizePath(cwd))
+  return join(dshSessionsRootAbs(dataDir), projectKeyForCwd(cwd))
 }
 
+/**
+ * 镜像 dsh-session-persistence-jsonl 的 `projectKey(cwd)` 算法。
+ *
+ * 与 `node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js:106-125` 一致。
+ * **dsh 升级时需同步审计**——若 dsh-side 改算法，本函数必须同步更新。
+ *
+ * 把 cwd 编码为 path-safe 形式：
+ *   - `/`、`\`、`:` → `-`（连续分隔符合并为单个）
+ *   - 非 `~` + `[A-Za-z0-9._-]` → `~XXXX` 16 进制转义
+ *   - 头尾加 `--`，剥离前导 `-`，截断到 251 字符
+ *
+ * 例子：
+ *   - `/tmp/dsh-final`     → `--tmp-dsh-final--`
+ *   - `/Users/x/y`         → `--Users-x-y--`
+ *   - ``                   → 抛错
+ */
+export function projectKeyForCwd(cwd: string): string {
+  if (cwd.length === 0) throw new Error('cannot encode an empty project path')
+  let readable = ''
+  let separatorRun = false
+  for (let i = 0; i < cwd.length; i++) {
+    const code = cwd.charCodeAt(i)
+    const ch = String.fromCharCode(code)
+    if (ch === '/' || ch === '\\' || ch === ':') {
+      if (!separatorRun) readable += '-'
+      separatorRun = true
+    } else if (ch !== '~' && /^[A-Za-z0-9._-]$/.test(ch)) {
+      readable += ch
+      separatorRun = false
+    } else {
+      readable += '~' + code.toString(16).toUpperCase().padStart(4, '0')
+      separatorRun = false
+    }
+  }
+  return `--${(readable.replace(/^-+/, '') || 'root').slice(0, 251)}--`
+}
+
+/**
+ * 反向解码 `encodeSegment(sessionId)` 编码的路径片段。
+ *
+ * 镜像 dsh-side `encodeSegment` 的可逆操作（lib/index.js:84-96）：
+ *   - `~XXXX` (4 位大写 16 进制) → 原始 code unit
+ *   - 其他字符保持原样
+ *   - 特殊 `.` 和 `..` → `~002E` / `~002E~002E`
+ *
+ * 用于从文件系统扫描出的目录名反推真实 sessionId。
+ */
+export function decodeSegment(encoded: string): string {
+  if (encoded.length === 0) return ''
+  if (encoded === '~002E') return '.'
+  if (encoded === '~002E~002E') return '..'
+  let out = ''
+  let i = 0
+  while (i < encoded.length) {
+    const ch = encoded[i]
+    if (ch === '~' && i + 5 <= encoded.length) {
+      const hex = encoded.slice(i + 1, i + 5)
+      if (/^[0-9A-F]{4}$/.test(hex)) {
+        out += String.fromCharCode(parseInt(hex, 16))
+        i += 5
+        continue
+      }
+    }
+    out += ch
+    i++
+  }
+  return out
+}
+
+/** @deprecated 已被 `dshSessionsRootAbs` + `projectKeyForCwd` 替代 */
 function sanitizePath(cwd: string): string {
   // 把 / 替换为 __，避免与 dsh-sessions 子目录结构冲突
   return cwd.replace(/[/\\]/g, '__').replace(/^_+|_+$/g, '') || 'root'
@@ -51,17 +138,20 @@ function sanitizePath(cwd: string): string {
 /**
  * 列出 dsh 轨道某 cwd 下的所有会话。
  *
- * 路径约定：${dataDir}/dsh-sessions/<sanitized-cwd>/<sessionId>/。
- * JsonlSessionPersistence 的 `locate()` 计算的路径正是这个形态：
- * `${root}/<sanitized-cwd>/<sessionId>/session.log`（zstd 默认压缩）。
+ * 路径约定（与 dsh-side `sessionDir(root, cwd, id)` 对齐）：
+ *   `${dataDir}/dsh-sessions/${projectKeyForCwd(cwd)}/${encodeSegment(sessionId)}/session.log[.zstd]`
  *
- * 我们直接扫描父目录以获取 sessionId 列表（不解析 log 头部以避免开销）。
+ * 我们扫描 `${root}/${projectKeyForCwd(cwd)}/*`，每个子目录是一个 session。
+ * 子目录名是 `encodeSegment(sessionId)` 形态，用 `decodeSegment` 反解。
+ *
+ * 不解析 log 头部以避免开销；元信息（turnCount 等）由调用方用
+ * `readDshSessionHeader(ctx, sessionId)` 按需补充。
  */
 export async function listDshSessions(
   dataDir: string,
   cwd: string,
 ): Promise<DshSessionMeta[]> {
-  const dir = dshSessionsRoot(dataDir, cwd)
+  const dir = join(dshSessionsRootAbs(dataDir), projectKeyForCwd(cwd))
   let entries: string[]
   try {
     entries = await readdir(dir)
@@ -77,7 +167,7 @@ export async function listDshSessions(
       const s = await stat(sessionDir)
       if (!s.isDirectory()) continue
       metas.push({
-        sessionId: entry,
+        sessionId: decodeSegment(entry),
         cwd,
         createdAt: s.birthtimeMs,
         turnCount: 0, // 由 readDshSessionHeader 填充

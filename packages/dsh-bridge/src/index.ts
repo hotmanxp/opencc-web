@@ -77,6 +77,9 @@ export {
   flushDshSession,
   resumeDshSession,
   dshSessionsRoot,
+  dshSessionsRootAbs,
+  projectKeyForCwd,
+  decodeSegment,
   type DshSessionMeta,
 } from './sessions/store.js'
 export {
