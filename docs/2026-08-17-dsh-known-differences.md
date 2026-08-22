@@ -20,6 +20,10 @@
 | [dsh-006](#dsh-006-dsh-版本兼容性差异) | dsh 版本 | `server.connected` | B0 | 版本绑定 |
 | [dsh-007](#dsh-007-stream-error-差异) | 流错误 | `stream/error` | B1b | 文档化 |
 | [dsh-008](#dsh-008-projection-watermark-差异) | 派生投影 | `session/projection` | B3 | 文档化 |
+| [dsh-009](#dsh-009-双轨接口未接线) | 集成缺口 | 全部 opencc 路由 | Phase 4.3 drill | B7 flip-and-cleanup |
+| [dsh-010](#dsh-010-事件翻译-run-未真实) | 事件翻译 | `ServerEvent` 全 11 组 | Phase 2.2 | B7 flip-and-cleanup |
+| [dsh-011](#dsh-011-子代理能力接缝替代) | 子 agent | subagent 行为 | Phase 3.1 | dsh-subagent 上游发布后切换 |
+| [dsh-012](#dsh-012-cordis-插件形态未重构) | 架构 | 全部 | 主计划 §3.2.1 | 推迟到 B7.5 |
 
 ---
 
@@ -216,4 +220,63 @@ export const KNOWN_DIFFERENCES = {
 
 > 待评估 / 待上游反馈的差异。
 
-（暂无）
+### dsh-009 双轨接口未接线（KERNEL_FACTORY_INTEGRATION 缺口）
+
+**类别**：集成缺口  
+**影响事件类型**：全部 opencc 路由（`/api/agent/:id/run`、`/api/events`）  
+**来源批次**：Phase 4.3 kill switch drill 第四轮  
+**影响**：dsh 模式启动但 routes/agent.ts 仍走 opencc 的 `getRuntime().query()`；`agentRuntime.ts:initAgentRuntime()` 仍调 `createOpenccRuntime()` 而非 `createKernel(cfg)`。  
+**可接受性**：**不可接受**（双轨未真正分叉）  
+**处置**：B7 flip-and-cleanup 阶段必须关闭：
+1. `agentRuntime.ts:initAgentRuntime()` 改为 `createKernel({cwd, dataDir, settings})`
+2. `routes/agent.ts:prompt` 路径改为 `adapter.run()`
+3. `translateRuntimeEvents` 移出 routes/agent.ts 到 services/translation.ts
+4. 保留 `getRuntime()` 作为 opencc adapter 的 alias（兼容既有调用点）
+
+**单测引用**：`scripts/kill-switch-drill.sh` 跑通（Phase 1.4 修 bash syntax）后 Phase 3 SSE 仍 404 — 验证此 gap 客观存在。
+
+---
+
+### dsh-010 `opencc factory.run()` 真实接线推迟
+
+**类别**：事件翻译  
+**影响事件类型**：`ServerEvent` 11 组中由 `opencc factory.run()` 产出的子集（核心 4 组：Runtime / Session / Tool / State）  
+**来源批次**：Phase 2.2 真实接线范围调整  
+**影响**：`KernelAdapter.run()` 在 opencc 轨道仍 stub；生产代码 routes/agent.ts 走 vendor `getRuntime().query()` 直连，绕过 adapter。dsh factory.run() 已用 `bridge.runOnce()` 真实接线，但与 routes/agent.ts 的集成不在本次范围。  
+**可接受性**：**不可接受**（双轨分叉未对齐 KernelAdapter 抽象）  
+**处置**：B7 flip-and-cleanup 阶段执行：
+1. 把 `translateRuntimeEvents` (432 行) 移出 `routes/agent.ts` 到 `services/translation.ts`
+2. `opencc factory.run()` 改为 `runtime.query({...})` + 复用 services/translation.ts
+3. routes/agent.ts 改用 `adapter.run()` 统一接口
+4. 双轨 prompt 路径才真正经 KernelAdapter 抽象
+
+**单测引用**：`packages/zai/src/server/services/kernel/factories/opencc.test.ts` smoke 已就位；run() 真实接线需 flip-and-cleanup。
+
+---
+
+### dsh-011 子代理能力接缝替代
+
+**类别**：子 agent / 多 agent  
+**影响事件类型**：`subagent/descriptor`、`tool-workflow/*` 派生事件  
+**来源批次**：Phase 3.1 dsh-subagent 自实现  
+**影响**：上游 `@deepseek-ai/dsh-subagent` 包未发布（verified via `node_modules/@deepseek-ai/`，仅 dsh-scope 可用）。当前用 `dsh-scope` 的 `createScope` + `bindScopeParent` + `ScopedLayers.effect` 自实现父子 ScopedLayers 隔离。  
+**可接受性**：**有条件可接受**（行为对齐 zai BackgroundRuntime + ScopedLayers 父子继承）  
+**处置**：保持自实现。dsh-subagent 上游发布后切换（独立批次），届时 `spawnDshSubagent` 改为直接调 upstream capability seam。  
+**单测引用**：`packages/dsh-bridge/test/skeleton.test.ts` Phase 3.1 段覆盖 `createDshSubagentScope` 签名与 scopeKey 形态。
+
+---
+
+### dsh-012 Cordis 插件形态重构推迟
+
+**类别**：架构  
+**影响事件类型**：全部（plugin tree 拓扑）  
+**来源批次**：主计划 §3.2.1 — 推迟到 B7.5（full-plan-realization 不执行）  
+**影响**：当前 `packages/dsh-bridge/src/` 扁平结构（`tools/`、`state.ts`、`abort.ts` 等直接导出函数 + 类），与主计划 §3.2.1 描述的 `src/plugins/zai-*` Cordis 插件形态不一致。可工作但**插件隔离/扩展性弱**：所有 dsh-bridge 能力都是模块级 export，调用方显式 import；不是 Cordis `ctx.plugin(Plugin, Config)` 形态。  
+**可接受性**：**可接受**（双轨真实化优先已交付，结构对齐可后续）  
+**处置**：G2 通过、默认内核翻转稳定后另立 **B7.5 独立批次**：
+1. 把 `src/tools/bash.ts` 的 `LocalShellExecutor`/`Win32ShellExecutor` 重构为 `zai-tools-core` Cordis plugin
+2. 类似地拆 `state.ts` → `zai-state-bridge`、`abort.ts` → `zai-abort`、`commands/index.ts` → `zai-slash-commands` 等
+3. 改造 createDshRuntime 走 `ctx.plugin(zaiXxx, {config})` 装载而非 import
+4. opencc 工厂对齐调用方式
+
+**单测引用**：`packages/dsh-bridge/IMPLEMENTATION_STATUS.md §3.2.1` 推迟说明 + 本文件 dsh-012。
