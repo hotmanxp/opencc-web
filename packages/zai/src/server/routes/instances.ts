@@ -1,6 +1,7 @@
 import { Router, type IRouter } from 'express'
 import { existsSync, statSync } from 'node:fs'
 import { getInstanceSupervisor, CURRENT_INSTANCE_ID } from '../services/instanceSupervisor.js'
+import { INSTANCE_KERNELS, type InstanceKernel } from '../../shared/instances.js'
 
 const router: IRouter = Router()
 
@@ -89,6 +90,33 @@ function parsePortField(
   return { ok: true, value: v }
 }
 
+/**
+ * Parse an optional kernel body field. Tri-state contract mirrors
+ * `parsePortField`:
+ * - `undefined` (absent) → `{ value: undefined }` so callers can forward
+ *   "no override" through to the supervisor (used by /start, /restart);
+ * - `null` → `{ value: null }` only meaningful for PATCH, where it
+ *   explicitly clears the per-instance kernel back to "inherit global".
+ *   POST /instances rejects `null` at the call-site because a brand-new
+ *   definition has nothing to clear;
+ * - `'opencc' | 'dsh'` → `{ value: InstanceKernel }`;
+ * - everything else → 400.
+ *
+ * 与 CLI `--kernel` 保持同套合法值集合(INSTANCE_KERNELS);若日后加
+ * 'auto' 之类三态语义,直接扩 INSTANCE_KERNELS。
+ */
+function parseKernelField(
+  v: unknown,
+  field: string,
+): { ok: true; value: InstanceKernel | null | undefined } | { ok: false; error: string } {
+  if (v === undefined) return { ok: true, value: undefined }
+  if (v === null) return { ok: true, value: null }
+  if (typeof v !== 'string' || !(INSTANCE_KERNELS as readonly string[]).includes(v)) {
+    return { ok: false, error: `${field} must be one of: ${INSTANCE_KERNELS.join(', ')}` }
+  }
+  return { ok: true, value: v as InstanceKernel }
+}
+
 router.get('/instances', (_req, res) => {
   if (!ensureNotInstanceChild(res)) return
   res.json({ instances: getInstanceSupervisor().getSnapshots() })
@@ -118,12 +146,20 @@ router.post('/instances', async (req, res) => {
   if (rawPort === null) return badRequest(res, 'port must be an integer between 1 and 65535')
   const port = parsePortField(rawPort, 'port')
   if (!port.ok) return badRequest(res, port.error)
+  // 与 port 同套约束:POST 不接受 `null`(无旧值可清)。
+  const rawKernel = (req.body ?? {}).kernel
+  if (rawKernel === null) {
+    return badRequest(res, `kernel must be one of: ${INSTANCE_KERNELS.join(', ')}`)
+  }
+  const kernel = parseKernelField(rawKernel, 'kernel')
+  if (!kernel.ok) return badRequest(res, kernel.error)
   try {
     const instance = await getInstanceSupervisor().createInstance({
       name: name.trim(),
       cwd,
       lan: lan.value === true,
       port: port.value as number | undefined,
+      kernel: kernel.value as InstanceKernel | undefined,
     })
     res.status(201).json({ instance })
   } catch (err) {
@@ -138,14 +174,17 @@ router.post('/instances/:id/start', async (req, res) => {
   if (!lan.ok) return badRequest(res, lan.error)
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
+  const kernel = parseKernelField((req.body ?? {}).kernel, 'kernel')
+  if (!kernel.ok) return badRequest(res, kernel.error)
   try {
-    // Per-call `lan` / `port` override the persisted definition so the
-    // UI can "start this one with --lan / on port X just this once"
-    // without rewriting the definition. `value === undefined` means
-    // "use the persisted value".
-    const overrides: { lan?: boolean; port?: number | null } = {}
+    // Per-call `lan` / `port` / `kernel` override the persisted definition
+    // so the UI can "start this one with --lan / on port X / --kernel=dsh
+    // just this once" without rewriting the definition.
+    // `value === undefined` means "use the persisted value".
+    const overrides: { lan?: boolean; port?: number | null; kernel?: InstanceKernel | null } = {}
     if (lan.value !== undefined) overrides.lan = lan.value
     if (port.value !== undefined) overrides.port = port.value
+    if (kernel.value !== undefined) overrides.kernel = kernel.value
     const instance = await getInstanceSupervisor().startInstance(
       req.params.id,
       Object.keys(overrides).length > 0 ? overrides : undefined,
@@ -174,10 +213,13 @@ router.post('/instances/:id/restart', async (req, res) => {
   if (!lan.ok) return badRequest(res, lan.error)
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
+  const kernel = parseKernelField((req.body ?? {}).kernel, 'kernel')
+  if (!kernel.ok) return badRequest(res, kernel.error)
   try {
-    const overrides: { lan?: boolean; port?: number | null } = {}
+    const overrides: { lan?: boolean; port?: number | null; kernel?: InstanceKernel | null } = {}
     if (lan.value !== undefined) overrides.lan = lan.value
     if (port.value !== undefined) overrides.port = port.value
+    if (kernel.value !== undefined) overrides.kernel = kernel.value
     const instance = await getInstanceSupervisor().restartInstance(
       req.params.id,
       Object.keys(overrides).length > 0 ? overrides : undefined,
@@ -195,10 +237,13 @@ router.patch('/instances/:id', async (req, res) => {
   if (!lan.ok) return badRequest(res, lan.error)
   const port = parsePortField((req.body ?? {}).port, 'port')
   if (!port.ok) return badRequest(res, port.error)
+  const kernel = parseKernelField((req.body ?? {}).kernel, 'kernel')
+  if (!kernel.ok) return badRequest(res, kernel.error)
   try {
-    const patch: { lan?: boolean; port?: number | null } = {}
+    const patch: { lan?: boolean; port?: number | null; kernel?: InstanceKernel | null } = {}
     if (lan.value !== undefined) patch.lan = lan.value
     if (port.value !== undefined) patch.port = port.value
+    if (kernel.value !== undefined) patch.kernel = kernel.value
     const instance = await getInstanceSupervisor().updateInstance(req.params.id, patch)
     res.json({ instance })
   } catch (err) {

@@ -172,15 +172,27 @@ export function isValidAutoUpdate(value: unknown): value is boolean {
 }
 
 /**
- * 读当前生效的 agent.kernel(用缓存的 settings)。
+ * 读当前生效的 agent.kernel。
  *
- * 不合法值由 resolveProjectAwareSettings 在 boot 阶段 fail loud,
- * 所以运行时读到的值只会是 'opencc' | 'dsh' | undefined(undefined
- * 等同默认 'opencc')。
+ * 优先级(与 resolveAgentKernel 对齐 — 见 projectSettings.ts):
+ *   1. CLI `--kernel` 覆盖 (process.env.ZAI_KERNEL_OVERRIDE) — boot 期由
+ *      createApp 写入,运行期不切换
+ *   2. settings.agent.kernel (用户级 → 项目级合并)
+ *   3. 默认 'opencc'
+ *
+ * 直接调 resolveAgentKernel 而非只读 settings,因为 boot 阶段 CLI 覆盖
+ * 写在 env 不写 settings — 只读 settings 会让 `/api/agent/kernel` 在
+ * `--kernel=dsh` 启动后仍然返回 'opencc',误导用户以为没切换。
+ *
+ * 不合法值由 resolveAgentKernel → readKernelOverride 抛 InvalidAgentKernelError,
+ * 与 boot 阶段同一条 fail loud 路径。
+ *
+ * cwd 取 agentRuntime 的 serverCwd(createApp 注入);env override 命中时
+ * cwd 不被读(早返回),所以 fallback 到 process.cwd() 是安全的。
  */
 export async function readAgentKernel(): Promise<'opencc' | 'dsh'> {
-  const settings = await readZaiSettings()
-  return settings.agent?.kernel ?? 'opencc'
+  const { resolveAgentKernel } = await import('./projectSettings.js')
+  return resolveAgentKernel(process.cwd())
 }
 
 /**

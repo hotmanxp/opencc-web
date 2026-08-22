@@ -48,6 +48,7 @@ program
   .option('--no-open', 'Do not auto-open browser')
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
   .option('--sdk', 'SDK/headless mode: treat the runtime as non-interactive (default is interactive OpenCC CLI)')
+  .option('--kernel <id>', "Override agent.kernel at boot (opencc|dsh). Does not persist to settings.json. Project-level > user-level > default; --kernel wins over both.")
   .action(runDev);
 
 program
@@ -57,6 +58,7 @@ program
   .option('--no-open', 'Do not auto-open browser')
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
   .option('--sdk', 'SDK/headless mode: treat the runtime as non-interactive (default is interactive OpenCC CLI)')
+  .option('--kernel <id>', "Override agent.kernel at boot (opencc|dsh). Does not persist to settings.json. Project-level > user-level > default; --kernel wins over both.")
   // Internal marker: when the supervisor spawns a managed child it
   // re-invokes `zai start --managed-child ...` so the child recognises
   // it is already inside a managed session and skips the supervisor

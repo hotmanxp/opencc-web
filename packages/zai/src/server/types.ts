@@ -14,4 +14,12 @@ export interface AppOptions {
    * 继承 shell 的 env,无法保证干净。
    */
   forceInitInstanceSupervisor?: boolean;
+  /**
+   * 启动期覆盖 `settings.agent.kernel` — 来自 CLI 的 `--kernel <id>`。
+   * 覆盖值在 boot 阶段立即生效(传给 resolveAgentKernel → createKernel);
+   * **不写入任何 settings.json**,运行期不允许热切换(主计划 §4.1 红线)。
+   * 合法值 'opencc' | 'dsh';非法值由 resolveAgentKernel 抛
+   * InvalidAgentKernelError,启动 fail loud。
+   */
+  kernelOverride?: 'opencc' | 'dsh';
 }

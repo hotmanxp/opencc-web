@@ -20,6 +20,8 @@ interface DevOptions {
   open: boolean;
   lan?: boolean;
   sdk?: boolean;
+  /** CLI `--kernel <id>` 启动期覆盖,不写 settings.json。 */
+  kernel?: 'opencc' | 'dsh';
 }
 
 export async function runDev(options: DevOptions) {
@@ -34,7 +36,7 @@ export async function runDev(options: DevOptions) {
   // hand an un-resolved promise to Express; the API server bound
   // 7715 but every request (including SSE) hung because the
   // pending Promise was registered as the request handler.
-  const app = await createApp({ token, cwd, cwdName, host, sdk: options.sdk });
+  const app = await createApp({ token, cwd, cwdName, host, sdk: options.sdk, kernelOverride: options.kernel });
 
   console.log(`[zai] dev token: ${token}`);
   console.log(`[zai] cwd: ${cwd}`);

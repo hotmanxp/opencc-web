@@ -11,6 +11,10 @@ export const INSTANCE_STATES: readonly InstanceState[] = [
   'down',
 ]
 
+export type InstanceKernel = 'opencc' | 'dsh'
+
+export const INSTANCE_KERNELS: readonly InstanceKernel[] = ['opencc', 'dsh']
+
 export interface InstanceDefinition {
   id: string
   name: string
@@ -38,6 +42,20 @@ export interface InstanceDefinition {
    * fields cannot share a name without one of them losing precision.
    */
   startPort?: number | null
+  /**
+   * 启动期覆盖 agent.kernel — 实例级别独立配置,与全局 settings.agent.kernel
+   * 解耦:
+   *
+   *   - 缺省 / `undefined`:不写 `--kernel`,子进程走 resolveAgentKernel
+   *     自身优先级(子进程项目级 → 用户级 → 'opencc')。**这是 "继承全局" 语义**。
+   *   - `'opencc' | 'dsh'`:子进程 spawn args 加 `--kernel <id>`,启动时
+   *     走 CLI 覆盖路径(优先级最高),与 `~/.zai/settings.json` 解耦。
+   *   - `null`(仅 PATCH):清回 "继承全局",等价于缺省。POST 不接受 `null`,
+   *     镜像 `startPort: null` 的现有约束。
+   *
+   * 运行期不允许切换 — 重启 instance 后生效(主计划 §4.1 红线)。
+   */
+  kernel?: InstanceKernel | null
 }
 
 export interface InstanceStatus {

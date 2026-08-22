@@ -61,6 +61,15 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
     host: opts.host ?? '127.0.0.1',
   };
 
+  // CLI `--kernel` 覆盖值写入 env 供 resolveAgentKernel 读取。必须在
+  // initZaiSettingsCache / initAgentRuntime 之前 — 后者会在 boot 阶段
+  // 调 resolveAgentKernel,env 已就位才能命中覆盖路径。
+  // 非法值留给 resolveAgentKernel → readKernelOverride 抛错(同一 fail loud
+  // 路径),不在这里预校验以避免错误信息双发。
+  if (opts.kernelOverride) {
+    process.env.ZAI_KERNEL_OVERRIDE = opts.kernelOverride
+  }
+
   // Initialize the agent runtime singleton at boot. Idempotent — safe to call
   // if createApp is invoked multiple times in tests. `await`ed so
   // `initBackgroundRuntime` (next line) sees a non-null runtime.

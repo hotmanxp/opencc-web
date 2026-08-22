@@ -197,6 +197,112 @@ describe('routes/instances', () => {
     expect(res.body.error).toMatch(/port/)
   })
 
+  // ---- kernel 字段 ----
+  // POST 接受合法 kernel 值('opencc' | 'dsh')并持久化;缺省 = 继承全局;
+  // 拒绝 null(无旧值可清)、非法字符串。
+  it('POST /api/instances accepts kernel=dsh and persists it on the snapshot', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', kernel: 'dsh' })
+    expect(res.status).toBe(201)
+    expect(res.body.instance.kernel).toBe('dsh')
+  })
+
+  it('POST /api/instances accepts kernel=opencc and persists it', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', kernel: 'opencc' })
+    expect(res.status).toBe(201)
+    expect(res.body.instance.kernel).toBe('opencc')
+  })
+
+  it('POST /api/instances omits kernel (defaults to inherit) when absent', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp' })
+    expect(res.status).toBe(201)
+    expect(res.body.instance.kernel).toBeUndefined()
+  })
+
+  it('POST /api/instances rejects kernel=null with 400 (no pin to clear on creation)', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', kernel: null })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/kernel/)
+  })
+
+  it('POST /api/instances rejects kernel=bogus with 400', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', kernel: 'bogus' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/kernel/)
+  })
+
+  // PATCH 切换 kernel:合法值持久化;null 清回继承;缺省 no-op;
+  // 非法值 400。empty body 不再因 kernel 字段误判为 no-op。
+  it('PATCH /api/instances/:id sets kernel=dsh', async () => {
+    const { app } = await bootstrap()
+    const created = await request(app).post('/api/instances').send({ name: 'demo', cwd: '/tmp' })
+    const id = created.body.instance.id
+    const res = await request(app).patch(`/api/instances/${id}`).send({ kernel: 'dsh' })
+    expect(res.status).toBe(200)
+    expect(res.body.instance.kernel).toBe('dsh')
+  })
+
+  it('PATCH /api/instances/:id with kernel=null clears back to inherit', async () => {
+    const { app } = await bootstrap()
+    const created = await request(app).post('/api/instances').send({ name: 'demo', cwd: '/tmp', kernel: 'dsh' })
+    const id = created.body.instance.id
+    expect(created.body.instance.kernel).toBe('dsh')
+    const res = await request(app).patch(`/api/instances/${id}`).send({ kernel: null })
+    expect(res.status).toBe(200)
+    expect(res.body.instance.kernel).toBeUndefined()
+  })
+
+  it('PATCH /api/instances/:id with kernel absent is a no-op (lan still patchable)', async () => {
+    const { app } = await bootstrap()
+    const created = await request(app).post('/api/instances').send({ name: 'demo', cwd: '/tmp' })
+    const id = created.body.instance.id
+    const res = await request(app).patch(`/api/instances/${id}`).send({ lan: true })
+    expect(res.status).toBe(200)
+    expect(res.body.instance.lan).toBe(true)
+  })
+
+  it('PATCH /api/instances/:id rejects kernel=bogus with 400', async () => {
+    const { app } = await bootstrap()
+    const created = await request(app).post('/api/instances').send({ name: 'demo', cwd: '/tmp' })
+    const id = created.body.instance.id
+    const res = await request(app).patch(`/api/instances/${id}`).send({ kernel: 'bogus' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/kernel/)
+  })
+
+  // /start per-call 覆盖语义镜像 port:undefined → 用持久化值,合法值透传
+  it('POST /api/instances/:id/start accepts kernel per-call override', async () => {
+    const { app } = await bootstrap()
+    const created = await request(app).post('/api/instances').send({ name: 'demo', cwd: '/tmp' })
+    const id = created.body.instance.id
+    const res = await request(app).post(`/api/instances/${id}/start`).send({ kernel: 'dsh' })
+    expect(res.status).toBe(200)
+    // per-call override 不写持久化 def — 该字段保持缺省
+    expect(res.body.instance.kernel).toBeUndefined()
+  })
+
+  it('POST /api/instances/:id/start rejects kernel=bogus with 400', async () => {
+    const { app } = await bootstrap()
+    const created = await request(app).post('/api/instances').send({ name: 'demo', cwd: '/tmp' })
+    const id = created.body.instance.id
+    const res = await request(app).post(`/api/instances/${id}/start`).send({ kernel: 'bogus' })
+    expect(res.status).toBe(400)
+  })
+
   it.each([
     ['non-integer string', '9201'],
     ['out-of-range high', 99999],

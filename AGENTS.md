@@ -174,6 +174,41 @@ zai migrate --kernel dsh --dry-run                                # dry-run 验�
 zai migrate --kernel dsh --target-dsh-version 0.1.0-rc.7          # 真实迁移（锁定版本）
 ```
 
+### 实例级 kernel 选择
+
+除了 CLI 启动期覆盖 + 全局 settings，每个 zai 实例（`/instances` 管理的 supervisor-spawned child）也可以独立锁定 kernel。三态语义镜像 `startPort`：
+
+| 值 | 含义 |
+|----|------|
+| `undefined`（POST 缺省 / PATCH 缺省） | 继承全局：实例 supervisor spawn child 时**不**加 `--kernel`，子进程自己走 `resolveAgentKernel` 优先级 |
+| `'opencc' \| 'dsh'` | supervisor spawn child 时加 `--kernel <id>`，与全局 settings 解耦 |
+| `null`（仅 PATCH） | 清回"继承全局"，等价于 `undefined` |
+
+UI（`packages/zai/src/web/src/pages/Instances.tsx`）：创建 Modal 有"实例内核"Select（默认"继承全局"）；卡片 Descriptions 第一行显示 kernel Tag（`opencc`=default、`dsh`=purple、"继承全局"=default）。
+
+API（`packages/zai/src/server/routes/instances.ts`）：
+
+```bash
+# 创建：选 dsh
+curl -X POST http://localhost:9200/api/instances \
+  -H "Content-Type: application/json" \
+  -d '{"name":"demo","cwd":"/path","kernel":"dsh"}'
+
+# PATCH：清回继承
+curl -X PATCH http://localhost:9200/api/instances/inst_xxx \
+  -H "Content-Type: application/json" \
+  -d '{"kernel":null}'
+
+# /start per-call 覆盖（仅本次启动，不写 def）
+curl -X POST http://localhost:9200/api/instances/inst_xxx/start \
+  -H "Content-Type: application/json" \
+  -d '{"kernel":"opencc"}'
+```
+
+实现：`shared/instances.ts` `InstanceDefinition.kernel?: InstanceKernel | null` → `instanceSupervisor.ts` `doStart` spawn args 拼 `if (effectiveKernel) args.push('--kernel', effectiveKernel)` → 子进程 `cli/start.ts` 接收 → `createApp({ kernelOverride })` → 上面"启动期 CLI 覆盖"段链路。
+
+数据隔离：双轨 instance 各自走 cwd 的项目级 `settings.json` + `~/.zai/settings.json`；dsh 实例的 sessions/tasks 自动落到 `${dataDir}/dsh-sessions/<projectKey(cwd)>/` 与 `~/.zai/tasks-dsh/`。共享同 `instances.json`（仅持久化 instance 定义，不含 session 数据）。
+
 ### KernelAdapter 抽象
 
 `packages/zai/src/server/services/kernel/kernelAdapter.ts` 定义 `KernelAdapter` 接口；zai 服务层只依赖此接口，不 import 任何 vendor/dsh 符号。两条轨道各自实现 `createKernelKernelAdapter`：

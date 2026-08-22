@@ -9,7 +9,7 @@ import {
   type InstancesFile,
 } from './instanceStore.js'
 import { assertPortAvailable, listen } from '../../cli/ports.js'
-import type { InstanceDefinition, InstanceSnapshot, InstanceStatus } from '../../shared/instances.js'
+import type { InstanceDefinition, InstanceKernel, InstanceSnapshot, InstanceStatus } from '../../shared/instances.js'
 
 export const INSTANCE_BASE_PORT = 9201
 export const HEARTBEAT_TIMEOUT_MS = 20_000
@@ -63,20 +63,21 @@ type Entry = { def: InstanceDefinition; status: InstanceStatus; child: ChildProc
 
 export interface InstanceSupervisor {
   getSnapshots: () => InstanceSnapshot[]
-  createInstance: (input: { name: string; cwd: string; lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
-  startInstance: (id: string, opts?: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
+  createInstance: (input: { name: string; cwd: string; lan?: boolean; port?: number | null; kernel?: InstanceKernel | null }) => Promise<InstanceSnapshot>
+  startInstance: (id: string, opts?: { lan?: boolean; port?: number | null; kernel?: InstanceKernel | null }) => Promise<InstanceSnapshot>
   stopInstance: (id: string) => Promise<InstanceSnapshot>
-  restartInstance: (id: string, opts?: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
+  restartInstance: (id: string, opts?: { lan?: boolean; port?: number | null; kernel?: InstanceKernel | null }) => Promise<InstanceSnapshot>
   removeInstance: (id: string) => Promise<void>
   /**
-   * Patch definition fields exposed in the UI. Today: `lan` and `port`.
-   * `lan` is a boolean toggle; `port` follows the same tri-state contract
-   * as the request body — `number` persists, `null` clears back to
-   * auto, `undefined` is a no-op. Other definition fields (cwd/name)
-   * are intentionally not patchable — they require a remove + recreate
-   * so we don't surprise the user with silent rewrites.
+   * Patch definition fields exposed in the UI. Today: `lan`, `port`,
+   * `kernel`. `lan` is a boolean toggle; `port` and `kernel` follow
+   * the same tri-state contract as the request body — `number` /
+   * InstanceKernel persists, `null` clears back to inherit, `undefined`
+   * is a no-op. Other definition fields (cwd/name) are intentionally
+   * not patchable — they require a remove + recreate so we don't
+   * surprise the user with silent rewrites.
    */
-  updateInstance: (id: string, patch: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
+  updateInstance: (id: string, patch: { lan?: boolean; port?: number | null; kernel?: InstanceKernel | null }) => Promise<InstanceSnapshot>
   shutdown: () => Promise<void>
 }
 
@@ -219,7 +220,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       })
     }
 
-    const doStart = async (id: string, opts?: { lan?: boolean; port?: number | null }) => {
+    const doStart = async (id: string, opts?: { lan?: boolean; port?: number | null; kernel?: InstanceKernel | null }) => {
       const entry = getEntry(id)
       if (entry.status.state === 'starting' || entry.status.state === 'running') return snapshotOf(entry)
       setStatus(entry, { state: 'starting', lastError: null })
@@ -249,8 +250,24 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         // exposure must be deliberate so a dev's machine doesn't leak
         // workspaces they didn't intend to share.
         const useLan = opts?.lan ?? entry.def.lan ?? false
+        // `opts.kernel` (per-call override from /start) wins over the
+        // persisted `def.kernel`. 三态语义镜像 `port`:
+        //   - `undefined` → 继承 entry.def.kernel(可能也是 undefined,
+        //     走全局 settings.agent.kernel)
+        //   - `null` → 显式清回"继承全局"(等价于缺省,与 PATCH 一致)
+        //   - `'opencc' | 'dsh'` → 子进程 spawn 加 `--kernel <id>`,覆盖
+        //     resolveAgentKernel 优先级链(CLI > settings > 'opencc')
+        // 缺省 + undefined 不写 `--kernel`,让子进程走自己的优先级解析
+        // —— instance 子进程也是 zai,自己有 resolveAgentKernel。
+        const effectiveKernel: InstanceKernel | undefined =
+          opts?.kernel === undefined
+            ? entry.def.kernel ?? undefined
+            : opts.kernel === null
+              ? undefined
+              : opts.kernel
         const args: string[] = [cliEntry, 'start', '--managed-child', '--port', String(port), '--no-open']
         if (useLan) args.push('--lan')
+        if (effectiveKernel) args.push('--kernel', effectiveKernel)
         // 进程标题:让 ps / top / macOS Activity Monitor 在 spawn 后立即
         // 显示 `zai[name]:port` 而不是 `node .../bin/zai.js`。`argv0` 改
         // `argv[0]`(Linux ps/macOS ps 列都从 argv[0] 起始读);`ZAI_PROCESS_TITLE`
@@ -351,7 +368,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       // assertions can observe the latest persisted snapshot deterministically.
       // Production callers should never invoke this.
       __flushPendingWrites: async () => { await writeChain },
-      async createInstance({ name, cwd, lan, port }: { name: string; cwd: string; lan?: boolean; port?: number | null }) {
+      async createInstance({ name, cwd, lan, port, kernel }: { name: string; cwd: string; lan?: boolean; port?: number | null; kernel?: InstanceKernel | null }) {
         const trimmed = name.trim(); for (const entry of entries.values()) if (entry.def.name === trimmed) throw new InstanceSupervisorError('DUPLICATE_NAME', `duplicate name: ${trimmed}`)
         const def: InstanceDefinition = {
           id: `inst_${randomUUID().slice(0, 8)}`,
@@ -363,6 +380,10 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
           // round-trip to `undefined` on disk so older readers continue
           // to treat it as "no pin set" — same shape as `lan`.
           startPort: typeof port === 'number' && Number.isInteger(port) ? port : undefined,
+          // kernel 持久化:'opencc' | 'dsh' 写盘;`null` / `undefined` 也
+          // round-trip 到 `undefined`(缺省走"继承全局"语义,见共享类型注释)。
+          // POST 路由拒绝 `null`,所以这里 `null` 实际不会发生。
+          kernel: kernel === 'opencc' || kernel === 'dsh' ? kernel : undefined,
         }
         const entry: Entry = { def, status: { ...EMPTY_INSTANCE_STATUS }, child: null, childState: null }
         entries.set(def.id, entry)
@@ -370,11 +391,11 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         emit(def.id, entry.status)
         return doStart(def.id)
       },
-      startInstance: async (id: string, opts?: { lan?: boolean; port?: number | null }) => { ensureNotCurrent(id); return doStart(id, opts) },
+      startInstance: async (id: string, opts?: { lan?: boolean; port?: number | null; kernel?: InstanceKernel | null }) => { ensureNotCurrent(id); return doStart(id, opts) },
       stopInstance: async (id: string) => { ensureNotCurrent(id); return doStop(id) },
-      restartInstance: async (id: string, opts?: { lan?: boolean; port?: number | null }) => { ensureNotCurrent(id); await doStop(id); return doStart(id, opts) },
+      restartInstance: async (id: string, opts?: { lan?: boolean; port?: number | null; kernel?: InstanceKernel | null }) => { ensureNotCurrent(id); await doStop(id); return doStart(id, opts) },
       removeInstance: async (id: string) => doRemove(id),
-      async updateInstance(id: string, patch: { lan?: boolean; port?: number | null }) {
+      async updateInstance(id: string, patch: { lan?: boolean; port?: number | null; kernel?: InstanceKernel | null }) {
         ensureNotCurrent(id)
         const entry = getEntry(id)
         // Refuse unknown / no-op patches explicitly so a typo in the
@@ -387,6 +408,11 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
           // `null` clears the pin back to auto (so the next start scans);
           // `number` sets a new pin (route already validated 1..65535).
           next.startPort = patch.port === null ? null : patch.port
+        }
+        if (patch.kernel !== undefined) {
+          // `null` 清回 "继承全局"(等价于缺省);合法 InstanceKernel 持久化。
+          // 校验已在 route 入口的 parseKernelField 完成,这里不再校验。
+          next.kernel = patch.kernel === null ? undefined : patch.kernel
         }
         if (Object.keys(next).length === 0) throw new InstanceSupervisorError('INVALID_STATE', 'no patchable fields supplied')
         entry.def = { ...entry.def, ...next }

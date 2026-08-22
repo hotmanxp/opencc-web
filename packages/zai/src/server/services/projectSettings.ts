@@ -28,13 +28,40 @@ import { writeZaiSettings, zaiSettingsPath } from './zaiSettingsStore.js'
 const PROJECT_ZAI_DIRNAME = '.zai'
 const PROJECT_SETTINGS_FILENAME = 'settings.json'
 
+/**
+ * CLI `--kernel` 覆盖值在 boot 阶段被写入此 env,后续 resolveAgentKernel
+ * 读 env 优先于 settings.json。这条路径**不**写持久化配置 —— 用户改
+ * `settings.json` 或下次不带 `--kernel` 启动都自然回到 settings 解析。
+ *
+ * env 来源:cli/index.ts → runDev/runStart → createApp(...)
+ * → createApp 顶部 `process.env.ZAI_KERNEL_OVERRIDE = opts.kernelOverride`
+ * → resolveAgentKernel 顶部 readKernelOverride() 命中。
+ *
+ * 非法值(env 设了 'foo')由 readKernelOverride 抛 InvalidAgentKernelError,
+ * 与 settings 非法值走同一条 fail loud 路径 — 避免 CLI 误拼写(如
+ * `--kernel=DSH`)被静默忽略导致 dsh 路径意外加载。
+ */
+export const KERNEL_OVERRIDE_ENV = 'ZAI_KERNEL_OVERRIDE'
+
+const VALID_AGENT_KERNELS: ReadonlySet<AgentKernel> = new Set<AgentKernel>(['opencc', 'dsh'])
+
+/**
+ * 读取 CLI --kernel 覆盖值。返回 undefined 表示无覆盖(走 settings)。
+ * 非法值抛 InvalidAgentKernelError。
+ */
+export function readKernelOverride(): AgentKernel | undefined {
+  const raw = process.env[KERNEL_OVERRIDE_ENV]
+  if (raw === undefined || raw === '') return undefined
+  if (VALID_AGENT_KERNELS.has(raw as AgentKernel)) {
+    return raw as AgentKernel
+  }
+  throw new InvalidAgentKernelError(raw)
+}
+
 /** 项目级 settings.json 路径 — 跟 cwd 拼装，不依赖 ENV。 */
 export function projectSettingsPath(cwd: string): string {
   return join(cwd, PROJECT_ZAI_DIRNAME, PROJECT_SETTINGS_FILENAME)
 }
-
-/** 已知合法 kernel 值集合 — 与 shared/settings.ts 的 AgentKernel 同步。 */
-const VALID_AGENT_KERNELS: ReadonlySet<AgentKernel> = new Set<AgentKernel>(['opencc', 'dsh'])
 
 /**
  * 读取项目级 settings.json（若存在）。文件缺失 / 非法 JSON → undefined，调用方
@@ -116,8 +143,18 @@ export async function resolveProjectAwareSettings(cwd: string): Promise<ZaiSetti
 /**
  * 解析当前 cwd 下生效的 `agent.kernel` — createKernel 入口用。
  * 非法值由 resolveProjectAwareSettings 抛错，这里不重复校验。
+ *
+ * 解析优先级 (主计划 §4.1):
+ *   1. CLI `--kernel` 覆盖 (process.env.ZAI_KERNEL_OVERRIDE)
+ *   2. settings.agent.kernel (用户级 → 项目级合并)
+ *   3. 默认 'opencc'
+ *
+ * 覆盖值若非法(readKernelOverride 抛 InvalidAgentKernelError)同样 fail loud,
+ * 与 settings 非法值同等待遇。
  */
 export async function resolveAgentKernel(cwd: string): Promise<AgentKernel> {
+  const override = readKernelOverride()
+  if (override !== undefined) return override
   const settings = await resolveProjectAwareSettings(cwd)
   return settings.agent?.kernel ?? 'opencc'
 }

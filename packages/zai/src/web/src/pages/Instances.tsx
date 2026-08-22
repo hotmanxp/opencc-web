@@ -13,6 +13,7 @@ import {
   Modal,
   Popconfirm,
   Row,
+  Select,
   Space,
   Spin,
   Switch,
@@ -34,8 +35,14 @@ import {
   FolderOutlined,
 } from '@ant-design/icons'
 import { useInstanceStore } from '../store/useInstanceStore.js'
-import type { InstanceSnapshot, InstanceState } from '../../../shared/instances.js'
+import { INSTANCE_KERNELS, type InstanceKernel, type InstanceSnapshot, type InstanceState } from '../../../shared/instances.js'
 import type { FsPickerEntry, FsPickerList } from '../../../shared/fsPicker.js'
+
+// 列表 kernel Tag 颜色 — opencc 默认蓝灰;dsh 用品牌色突出双轨状态。
+const KERNEL_TAG_COLOR: Record<InstanceKernel, string> = {
+  opencc: 'default',
+  dsh: 'purple',
+}
 
 const STATE_TAG_COLOR: Record<InstanceState, string> = {
   stopped: 'default',
@@ -472,10 +479,23 @@ export default function Instances(): JSX.Element {
       const port = values.portEnabled === true && typeof values.portNumber === 'number'
         ? values.portNumber
         : undefined
+      // kernel:'inherit' / 'opencc' / 'dsh'。POST 不接受 `null`(无旧值可清),
+      // 缺省走 `undefined`(等价于 JSON.stringify 后整段 key 消失)→ 服务器
+      // 走"继承全局"语义。
+      const kernelBody: Record<string, unknown> = {}
+      if (values.kernel === 'opencc' || values.kernel === 'dsh') {
+        kernelBody.kernel = values.kernel
+      }
       const res = await fetch('/api/instances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: values.name, cwd: values.cwd, lan: values.lan === true, port }),
+        body: JSON.stringify({
+          name: values.name,
+          cwd: values.cwd,
+          lan: values.lan === true,
+          port,
+          ...kernelBody,
+        }),
       })
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -617,6 +637,15 @@ export default function Instances(): JSX.Element {
               }
             >
               <Descriptions size="small" column={1}>
+                <Descriptions.Item label="内核">
+                  {inst.kernel === 'opencc' || inst.kernel === 'dsh' ? (
+                    <Tag color={KERNEL_TAG_COLOR[inst.kernel]} style={{ marginInlineEnd: 0 }}>
+                      {inst.kernel}
+                    </Tag>
+                  ) : (
+                    <Tag color="default" style={{ marginInlineEnd: 0 }}>继承全局</Tag>
+                  )}
+                </Descriptions.Item>
                 <Descriptions.Item label="启动端口">
                   <Space size={4} align="center">
                     {inst.startPort == null ? (
@@ -669,7 +698,7 @@ export default function Instances(): JSX.Element {
         okText="创建"
         cancelText="取消"
       >
-        <Form form={form} layout="vertical" initialValues={{ cwd: currentCwd, lan: false, portEnabled: false }}>
+        <Form form={form} layout="vertical" initialValues={{ cwd: currentCwd, lan: false, portEnabled: false, kernel: 'inherit' }}>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
             <Input placeholder="例如 demo" />
           </Form.Item>
@@ -715,6 +744,27 @@ export default function Instances(): JSX.Element {
             data-testid="lan-checkbox"
           >
             <Checkbox>LAN 模式启动 (--lan)</Checkbox>
+          </Form.Item>
+          {/*
+            实例级内核:缺省 'inherit' → 不写 kernel 字段 → 子进程走
+            resolveAgentKernel 自身优先级(全局 settings)。显式选
+            'opencc' / 'dsh' → 子进程 spawn args 加 `--kernel <id>`,
+            启动时走 CLI 覆盖路径(优先级最高,与 ~/.zai/settings.json
+            解耦)。运行期不允许热切换,需重启实例生效(主计划 §4.1)。
+          */}
+          <Form.Item
+            name="kernel"
+            label="实例内核"
+            tooltip="缺省走全局 agent.kernel(用户级 + 项目级合并)。显式选择时,实例启动加 --kernel <id>,优先级最高,与全局 settings 解耦。"
+            data-testid="kernel-select-form-item"
+          >
+            <Select
+              data-testid="kernel-select"
+              options={[
+                { value: 'inherit', label: '继承全局设置 (默认)' },
+                ...INSTANCE_KERNELS.map((k) => ({ value: k, label: k })),
+              ]}
+            />
           </Form.Item>
           {/*
             端口配置:Switch 切 auto / 手动;手动时 InputNumber 必填。

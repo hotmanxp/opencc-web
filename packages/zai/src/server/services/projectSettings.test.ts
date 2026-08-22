@@ -134,3 +134,61 @@ describe('projectSettings', () => {
     expect(JSON.parse(raw)).toEqual({ agent: { kernel: 'dsh' } })
   })
 })
+
+describe('CLI --kernel override (ZAI_KERNEL_OVERRIDE env)', () => {
+  // env 是进程级单例,所有测试共享同一份 process.env。每个用例前后清理避免互相污染。
+  const ORIGINAL_ENV = process.env.ZAI_KERNEL_OVERRIDE
+
+  beforeEach(() => {
+    delete process.env.ZAI_KERNEL_OVERRIDE
+  })
+  afterEach(() => {
+    if (ORIGINAL_ENV === undefined) {
+      delete process.env.ZAI_KERNEL_OVERRIDE
+    } else {
+      process.env.ZAI_KERNEL_OVERRIDE = ORIGINAL_ENV
+    }
+  })
+
+  it('readKernelOverride: env 未设 → undefined', async () => {
+    const { readKernelOverride } = await import('./projectSettings.js')
+    expect(readKernelOverride()).toBeUndefined()
+  })
+
+  it('readKernelOverride: env="opencc" → "opencc"', async () => {
+    process.env.ZAI_KERNEL_OVERRIDE = 'opencc'
+    const { readKernelOverride } = await import('./projectSettings.js')
+    expect(readKernelOverride()).toBe('opencc')
+  })
+
+  it('readKernelOverride: env="dsh" → "dsh"', async () => {
+    process.env.ZAI_KERNEL_OVERRIDE = 'dsh'
+    const { readKernelOverride } = await import('./projectSettings.js')
+    expect(readKernelOverride()).toBe('dsh')
+  })
+
+  it('readKernelOverride: env="DSH" 大小写敏感 → 抛 InvalidAgentKernelError', async () => {
+    process.env.ZAI_KERNEL_OVERRIDE = 'DSH'
+    const { readKernelOverride, InvalidAgentKernelError } = await import('./projectSettings.js')
+    expect(() => readKernelOverride()).toThrow(InvalidAgentKernelError)
+  })
+
+  it('resolveAgentKernel: --kernel=dsh 覆盖 settings.agent.kernel=opencc', async () => {
+    // 用户级写 opencc,env 写 dsh,env 胜
+    const { writeZaiSettings } = await import('./zaiSettingsStore.js')
+    await writeZaiSettings({ agent: { kernel: 'opencc' } })
+
+    process.env.ZAI_KERNEL_OVERRIDE = 'dsh'
+    const { resolveAgentKernel } = await import('./projectSettings.js')
+    expect(await resolveAgentKernel('/any/cwd')).toBe('dsh')
+  })
+
+  it('resolveAgentKernel: 无 env 时仍按 settings 解析', async () => {
+    // 用户级写 dsh,env 无 → settings 胜
+    const { writeZaiSettings } = await import('./zaiSettingsStore.js')
+    await writeZaiSettings({ agent: { kernel: 'dsh' } })
+
+    const { resolveAgentKernel } = await import('./projectSettings.js')
+    expect(await resolveAgentKernel('/any/cwd')).toBe('dsh')
+  })
+})

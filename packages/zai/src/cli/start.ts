@@ -20,6 +20,8 @@ interface StartOptions {
   open: boolean;
   lan?: boolean;
   sdk?: boolean;
+  /** CLI `--kernel <id>` 启动期覆盖,不写 settings.json。 */
+  kernel?: 'opencc' | 'dsh';
   /**
    * Force the managed/supervisor code path. When `undefined`, the decision
    * is taken from `process.env.ZAI_NO_MANAGED` (managed by default; set
@@ -93,7 +95,7 @@ async function runDirectServer(options: StartOptions): Promise<void> {
   const webDir = join(__dirname, '..', 'web');
 
   const host = options.lan ? '0.0.0.0' : '127.0.0.1';
-  const app = await createApp({ token, cwd, cwdName, host, sdk: options.sdk });
+  const app = await createApp({ token, cwd, cwdName, host, sdk: options.sdk, kernelOverride: options.kernel });
   app.use(express.static(webDir));
 
   app.get('*', (_req, res) => {

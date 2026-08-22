@@ -320,6 +320,115 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(spawnArgs[1]).toContain('--lan')
   })
 
+  // ---- kernel spawn args ----
+  // 实例级 kernel 三态:
+  //   undefined → 不写 --kernel,子进程走自身 resolveAgentKernel 优先级
+  //   'opencc' | 'dsh' → spawn args 加 '--kernel <id>'
+  //   'inherit'(即 PATCH 后清回 undefined)→ 同 undefined
+  it('createInstance without kernel omits --kernel from spawn args (inherit global)', async () => {
+    const { deps, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    expect(spawnArgs[0]).not.toContain('--kernel')
+  })
+
+  it('createInstance with kernel=dsh passes --kernel dsh to the spawned child', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', kernel: 'dsh' })
+    expect(snap.kernel).toBe('dsh')
+    expect(fakeChildren).toHaveLength(1)
+    const args = spawnArgs[0]!
+    const kIdx = args.indexOf('--kernel')
+    expect(kIdx).toBeGreaterThanOrEqual(0)
+    expect(args[kIdx + 1]).toBe('dsh')
+  })
+
+  it('createInstance with kernel=opencc passes --kernel opencc', async () => {
+    const { deps, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', kernel: 'opencc' })
+    const args = spawnArgs[0]!
+    const kIdx = args.indexOf('--kernel')
+    expect(kIdx).toBeGreaterThanOrEqual(0)
+    expect(args[kIdx + 1]).toBe('opencc')
+  })
+
+  it('updateInstance({kernel:dsh}) persists, restartInstance uses it without an override', async () => {
+    // 与 lan PATCH 模式镜像:UI PATCH kernel=dsh → 持久化 → 下次 restart
+    // 直接用 def.kernel,不需 per-call override。
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    await getInstanceSupervisor().updateInstance(snap.id, { kernel: 'dsh' })
+    expect(snap.kernel).toBeUndefined()  // 旧 snapshot 还是旧值;要看新 snapshot
+    const after = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
+    expect(after.kernel).toBe('dsh')
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(fakeChildren).toHaveLength(2)
+    // 第一次 spawn 没 --kernel;第二次按 def.kernel=dsh spawn。
+    expect(spawnArgs[0]).not.toContain('--kernel')
+    const args2 = spawnArgs[1]!
+    expect(args2.indexOf('--kernel')).toBeGreaterThanOrEqual(0)
+    expect(args2[args2.indexOf('--kernel') + 1]).toBe('dsh')
+  })
+
+  it('updateInstance({kernel:null}) clears back to inherit (no --kernel on next restart)', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', kernel: 'dsh' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    await getInstanceSupervisor().updateInstance(snap.id, { kernel: null })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(fakeChildren).toHaveLength(2)
+    // 第一次 spawn 有 --kernel dsh;第二次清回 → 没有。
+    expect(spawnArgs[0]).toContain('--kernel')
+    expect(spawnArgs[1]).not.toContain('--kernel')
+  })
+
+  it('startInstance per-call kernel=opencc override beats def.kernel=dsh', async () => {
+    // per-call override 优先级最高(与 port/lan 一致)。
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', kernel: 'dsh' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().startInstance(snap.id, { kernel: 'opencc' })
+    expect(fakeChildren).toHaveLength(2)
+    // 第二次 spawn 用 per-call override opencc(不是 def.kernel=dsh)
+    const args2 = spawnArgs[1]!
+    expect(args2.indexOf('--kernel')).toBeGreaterThanOrEqual(0)
+    expect(args2[args2.indexOf('--kernel') + 1]).toBe('opencc')
+    // 持久化 def 不被 per-call 覆盖修改
+    const after = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
+    expect(after.kernel).toBe('dsh')
+  })
+
+  it('startInstance per-call kernel=null clears def.kernel for that spawn only', async () => {
+    // null 表示"清回继承全局"用于本次启动;def.kernel 不被修改。
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', kernel: 'dsh' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().startInstance(snap.id, { kernel: null })
+    expect(fakeChildren).toHaveLength(2)
+    expect(spawnArgs[1]).not.toContain('--kernel')
+    const after = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
+    expect(after.kernel).toBe('dsh')  // def 未被修改
+  })
+
   it('updateInstance toggles lan on the snapshot and is observable via getSnapshots', async () => {
     const { deps } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)
