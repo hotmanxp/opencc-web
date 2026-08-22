@@ -1,6 +1,7 @@
 # Batch 0 — 基座与双轨骨架
 
 > 所属主计划：[2026-08-17-dsh-kernel-main-plan.md](2026-08-17-dsh-kernel-main-plan.md)
+> **状态**：✅ 已合入（commit `0f2445dd`，2026-08-15）— G0 决策门验证通过
 > 前置：**B-1 可行性尖峰**（主计划 §5）必须通过——节点引擎要求、packed install、headless peers、长驻 Cordis teardown、globalThis 清理协议验证。尖峰失败 → 本批阻塞。
 > 目标：搭建双轨骨架——配置开关、KernelAdapter 接口、工厂分叉、opencc 轨道原样封装、dsh-bridge workspace 空骨架。**本批不改任何内核行为。**
 

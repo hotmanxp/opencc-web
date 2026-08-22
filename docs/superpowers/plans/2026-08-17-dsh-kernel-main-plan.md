@@ -1,7 +1,8 @@
 # opencc-web 内核双轨改造主计划（deepseek-harness 内核集成 · B 方案）
 
 > 日期：2026-08-17
-> 状态：草稿，待评审
+> 状态：**B6-B7 收口完成，待 G2/G3 决策**（2026-08-22 更新）
+> 关联文档：G2 决策 [`2026-08-17-dsh-kernel-decision.md`](2026-08-17-dsh-kernel-decision.md) / 维护契约 [`../2026-08-17-dsh-maintenance-contract.md`](../2026-08-17-dsh-maintenance-contract.md) / vendor 退役评估 [`../2026-08-17-dsh-vendor-retirement.md`](../2026-08-17-dsh-vendor-retirement.md) / 发布说明 [`../2026-08-17-dsh-release-notes.md`](../2026-08-17-dsh-release-notes.md)
 > 相关调研：`docs/zn-harness-transformation.md`（历史工作文档）、本仓库 `AGENTS.md`
 > 目标内核：`deepseek-harness`（`@deepseek-ai/dsh-*`，rc.7，下称 **dsh**）
 > 现有内核：opencc 0.20.0 vendor 拷贝（`packages/zn-agent-core/src/opencc-src/`，下称 **opencc 内核**）

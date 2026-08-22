@@ -1,6 +1,7 @@
 # Batch 5 — 多 Agent 与插件
 
 > 所属主计划：[2026-08-17-dsh-kernel-main-plan.md](2026-08-17-dsh-kernel-main-plan.md)
+> **状态**：✅ 已合入（commit `b7d8b130`，2026-08-17 前后）— G6 多 Agent / 插件 / Slash 命令能力面达成
 > 目标：dsh 轨道的多 Agent / 后台任务、插件市场、Slash 命令能力面对齐。依赖 B2（工具）+ B3（会话）+ B4（交互）。
 
 ---
