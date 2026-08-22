@@ -5,6 +5,28 @@ import {
   bashBackgroundTracker,
 } from '@zn-ai/zn-agent-core'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
+import { getKernelAdapter } from '../services/agentRuntime.js'
+
+/**
+ * B7 (dsh-009): dsh 模式 `initBackgroundRuntime` 主动跳过 — 子任务走
+ * dsh-bridge 自实现,不依赖 vendor `DefaultBackgroundRuntime`。这导致
+ * `getBackgroundRuntime()` 抛 'Background runtime not initialized' 是
+ * **设计预期**而非真错,production stdout 不该被此噪音污染。opencc 模式
+ * 与 adapter 不可用(默认)则保持原 warn 行为。模块级 lazy 探测一次 —
+ * 不每请求拉 getKernelAdapter,避免重复 throw + 影响延迟。
+ */
+let dshModeSilenced: boolean | null = null
+function shouldSilenceAgentFailure(): boolean {
+  if (dshModeSilenced !== null) return dshModeSilenced
+  try {
+    const adapter = getKernelAdapter()
+    dshModeSilenced =
+      adapter != null && (adapter as { kernel?: string }).kernel !== 'opencc'
+  } catch {
+    dshModeSilenced = false
+  }
+  return dshModeSilenced
+}
 
 const router: IRouter = Router()
 
@@ -101,6 +123,8 @@ router.get('/agent/sessions/:id/state', async (req: Request, res: Response) => {
       .then(() => getBackgroundRuntime().list())
       .then((all) => all.filter((t) => t.parentSessionId === sid))
       .catch((err: unknown) => {
+        // B7 设计预期 → 静默;否则保留 warn 让运维看见真异常
+        if (shouldSilenceAgentFailure()) return []
         console.warn('[sessionState] agent failed', err)
         return []
       }),

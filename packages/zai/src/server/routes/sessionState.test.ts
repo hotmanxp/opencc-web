@@ -30,6 +30,112 @@ import sessionStateRouter from './sessionState.js'
 import { CwdStore, bashBackgroundTracker } from '@zn-ai/zn-agent-core'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
 
+/**
+ * dsh-mode silent skip — B7:
+ *   dsh 模式下 initBackgroundRuntime 主动返回 null(子任务走 dsh-bridge
+ *   自实现,不再依赖 vendor DefaultBackgroundRuntime)。sessionState
+ *   路由因此 catch 到 throw,目标是在 dsh kernel 下静默吞掉(不污染
+ *   production stdout);非 dsh 模式仍然 warn(真异常要让运维看到)。
+ *
+ * kernel 探测从 '../services/agentRuntime.js' 的 getKernelAdapter() 读;
+ * sessionState.ts 内部 lazy 缓存探测结果到模块级 let,跨 case 会粘连;
+ * 每个 case 用 vi.resetModules + dynamic import 拿 fresh sessionState module。
+ */
+vi.mock('@zn-ai/zn-agent-core', () => ({
+  CwdStore: {
+    clear: vi.fn(),
+    has: vi.fn(() => false),
+    get: vi.fn(() => undefined as string | undefined),
+    set: vi.fn(),
+  },
+  getTaskListStore: vi.fn(() => ({
+    list: vi.fn(async (_sid: string) => []),
+  })),
+  bashBackgroundTracker: {
+    list: vi.fn(() => []),
+  },
+}))
+vi.mock('../services/backgroundRuntime.js', () => ({
+  getBackgroundRuntime: vi.fn(),
+}))
+vi.mock('../services/agentRuntime.js', () => ({
+  getKernelAdapter: vi.fn(),
+}))
+
+describe('GET /api/agent/sessions/:id/state — dsh-mode silent skip', () => {
+  let app: express.Express
+  let warnSpy: ReturnType<typeof vi.spyOn>
+
+  beforeEach(async () => {
+    vi.resetModules()
+    const { default: router } = await import('./sessionState.js')
+    app = express()
+    app.use('/api', router)
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => undefined)
+  })
+
+  afterEach(() => {
+    warnSpy.mockRestore()
+  })
+
+  it('dsh kernel: silently returns agentTasks=[], no console.warn', async () => {
+    const { getKernelAdapter } = await import('../services/agentRuntime.js')
+    const { getBackgroundRuntime } = await import(
+      '../services/backgroundRuntime.js'
+    )
+    vi.mocked(getKernelAdapter).mockReturnValue({ kernel: 'dsh' } as never)
+    vi.mocked(getBackgroundRuntime).mockImplementation(() => {
+      throw new Error('Background runtime not initialized')
+    })
+    const res = await request(app).get('/api/agent/sessions/sess-1/state')
+    expect(res.status).toBe(200)
+    expect(res.body.agentTasks).toEqual([])
+    expect(warnSpy).not.toHaveBeenCalledWith(
+      '[sessionState] agent failed',
+      expect.any(Error),
+    )
+  })
+
+  it('opencc kernel: still warns on BackgroundRuntime throw', async () => {
+    const { getKernelAdapter } = await import('../services/agentRuntime.js')
+    const { getBackgroundRuntime } = await import(
+      '../services/backgroundRuntime.js'
+    )
+    vi.mocked(getKernelAdapter).mockReturnValue({ kernel: 'opencc' } as never)
+    vi.mocked(getBackgroundRuntime).mockImplementation(() => {
+      throw new Error('Background runtime not initialized')
+    })
+    const res = await request(app).get('/api/agent/sessions/sess-1/state')
+    expect(res.status).toBe(200)
+    expect(res.body.agentTasks).toEqual([])
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[sessionState] agent failed',
+      expect.any(Error),
+    )
+  })
+
+  it('kernel adapter unavailable (opencc default): still warns', async () => {
+    const { getKernelAdapter } = await import('../services/agentRuntime.js')
+    const { getBackgroundRuntime } = await import(
+      '../services/backgroundRuntime.js'
+    )
+    // getKernelAdapter 抛 → 视作非 dsh(默认保守 warn)。
+    vi.mocked(getKernelAdapter).mockImplementation(() => {
+      throw new Error('adapter not initialized')
+    })
+    vi.mocked(getBackgroundRuntime).mockImplementation(() => {
+      throw new Error('Background runtime not initialized')
+    })
+    const res = await request(app).get('/api/agent/sessions/sess-1/state')
+    expect(res.status).toBe(200)
+    expect(res.body.agentTasks).toEqual([])
+    expect(warnSpy).toHaveBeenCalledWith(
+      '[sessionState] agent failed',
+      expect.any(Error),
+    )
+  })
+})
+
 describe('GET /api/agent/sessions/:id/state', () => {
   let app: express.Express
   let warnSpy: ReturnType<typeof vi.spyOn>
