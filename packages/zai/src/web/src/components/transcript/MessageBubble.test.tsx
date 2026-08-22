@@ -282,6 +282,29 @@ describe("MessageBubble — Skill tool pill", () => {
     expect(matches.length).toBeGreaterThan(0)
     expect(screen.getByText("已完成")).toBeInTheDocument()
   })
+
+  // dsh 内核把 skill 名字编入 rawName "Skill:<name>"
+  // (packages/dsh-bridge/src/tools/skill.ts),input 没有 name 字段。
+  // ToolCallBlock 必须从 rawName 切片取名,否则 pill 上只显示泛化的 "Skill"
+  // 标签。
+  test("dsh Skill:<name> pill surfaces the full skill name from rawName", () => {
+    render(
+      <MessageBubble
+        msg={{
+          eventId: "tool-skill-dsh-1",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "tool_use:start",
+          toolUseId: "call-skill-dsh-1",
+          name: "Skill:plugin:superpowers:writing-plans",
+          input: { args: "some args" },
+        }}
+      />,
+    )
+    const matches = screen.getAllByText("plugin:superpowers:writing-plans")
+    expect(matches.length).toBeGreaterThan(0)
+  })
 })
 
 describe("MessageBubble — thinking_delta streaming 透传", () => {

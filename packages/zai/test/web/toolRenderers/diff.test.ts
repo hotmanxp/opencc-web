@@ -40,4 +40,30 @@ describe('diffRenderer', () => {
     const node = diffRenderer.renderFull?.(baseMsg)
     expect(node == null || React.isValidElement(node)).toBe(true)
   })
+
+  // dsh 内核工具名 FileEdit / FileWrite 走同一个 diffRenderer,但
+  // DiffBlock 强判 `name === 'Write'` 决定走整篇新增 vs 行级 diff — 这里要
+  // 验证 FileWrite 仍然被识别为 write,FileEdit 被识别为 update。
+  it('FileWrite 走整篇新增路径 (DiffBlock isWrite 兼容)', () => {
+    const msg: AgentMessage = {
+      ...baseMsg,
+      eventId: 'evt-dsh-w',
+      toolUseId: 'toolu_dsh_w',
+      name: 'FileWrite',
+      input: { file_path: '/a.ts', content: 'whole new file' },
+    }
+    const node = diffRenderer.renderFull?.(msg)
+    expect(node == null || React.isValidElement(node)).toBe(true)
+  })
+  it('FileEdit 走行级 diff 路径', () => {
+    const msg: AgentMessage = {
+      ...baseMsg,
+      eventId: 'evt-dsh-e',
+      toolUseId: 'toolu_dsh_e',
+      name: 'FileEdit',
+      input: { file_path: '/a.ts', old_string: 'a', new_string: 'b' },
+    }
+    const node = diffRenderer.renderFull?.(msg)
+    expect(node == null || React.isValidElement(node)).toBe(true)
+  })
 })

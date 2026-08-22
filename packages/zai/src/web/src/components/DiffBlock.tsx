@@ -69,7 +69,10 @@ export default function DiffBlock({ msg }: { msg: AgentMessage }) {
   const status = statusOf(type)
 
   const filePath = (input.file_path as string) || ''
-  const isWrite = name === 'Write'
+  // dsh FileWrite (packages/dsh-bridge/src/tools/fs.ts:119) 与 opencc Write
+  // 走同一个 diffRenderer, 但 dsh 工具名是 FileWrite — 这里要兼容两种命名,
+  // 否则 FileWrite 会被当作 Edit 走 old_string/new_string 路径, 整个 diff 渲染坏掉.
+  const isWrite = name === 'Write' || name === 'FileWrite'
   const oldString = isWrite ? '' : (input.old_string as string) || ''
   const newString = isWrite ? (input.content as string) || '' : (input.new_string as string) || ''
 

@@ -485,19 +485,24 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
   // Skill 工具走 genericRenderer (registry 里没注册 Skill), 但 genericRenderer
   // 只把 Object.values(input)[0] 截到 80 字符——等于把 "plugin:superpowers:..." 这种
   // 长 skill 名截断,pill 标签只是泛化的 "Skill",用户看不出调的是哪个 skill。
-  // 特判: rawName === "Skill" 时直接展示 input.name 完整路径作为 displayName +
-  // preview,折叠态就一眼能看见 skill 名。展开后的 params/output 仍走 generic 路径。
-  const isSkillTool = rawName === "Skill"
+  // 特判: opencc Skill 把名字放在 input.name;dsh 内核把名字编入 rawName "Skill:<name>"
+  // (packages/dsh-bridge/src/tools/skill.ts),所以同时识别两种形式, 折叠态一眼能看见
+  // skill 名。展开后的 params/output 仍走 generic 路径。
+  const isSkillTool = rawName === "Skill" || rawName.startsWith("Skill:")
   const skillNameFromInput =
     typeof input.name === "string" && input.name.trim()
       ? input.name.trim()
       : undefined
-  const displayName = isSkillTool && skillNameFromInput
-    ? skillNameFromInput
+  const skillNameFromRaw = rawName.startsWith("Skill:")
+    ? rawName.slice("Skill:".length).trim() || undefined
+    : undefined
+  const skillName = skillNameFromInput ?? skillNameFromRaw
+  const displayName = isSkillTool && skillName
+    ? skillName
     : renderer.displayName?.(input) ?? name
-  // preview override: skill 走 skillNameFromInput 完整,其他工具照旧走 renderer.preview
-  const preview = isSkillTool && skillNameFromInput
-    ? skillNameFromInput
+  // preview override: skill 走 skillName 完整,其他工具照旧走 renderer.preview
+  const preview = isSkillTool && skillName
+    ? skillName
     : renderer.preview(input)
   // 整块接管: Edit/Write 等需要整段渲染 (DiffBlock 自带 header + diff + error)
   // 的工具, 跳过 ToolCallBlock 自己的折叠面板/参数/结果分块, 直接挂 mount.

@@ -16,15 +16,32 @@ describe('isMcpToolName / shortName / actionSegment', () => {
     expect(isMcpToolName('mcpfoo')).toBe(false) // 没下划线
     expect(isMcpToolName('')).toBe(false)
   })
+  // dsh 内核在 packages/dsh-bridge/src/tools/mcp.ts 用冒号命名
+  // `mcp:<server>:<tool>`,与 opencc `mcp_<server>_<action>` 不同。
+  it('isMcpToolName matches mcp: prefix (dsh)', () => {
+    expect(isMcpToolName('mcp:zinai:browser_navigate')).toBe(true)
+    expect(isMcpToolName('mcp:foo')).toBe(true)
+    expect(isMcpToolName('mcp:foo:bar:baz')).toBe(true)
+  })
   it('shortName strips mcp_ prefix', () => {
     expect(shortName('mcp_zinai_browser_navigate')).toBe('zinai_browser_navigate')
     expect(shortName('mcp_foo')).toBe('foo')
     expect(shortName('Bash')).toBe('Bash') // non-mcp keeps full
   })
+  it('shortName strips mcp: prefix (dsh)', () => {
+    expect(shortName('mcp:zinai:browser_navigate')).toBe('zinai:browser_navigate')
+    expect(shortName('mcp:foo')).toBe('foo')
+  })
   it('actionSegment returns last underscore-separated segment', () => {
     expect(actionSegment('mcp_zinai_browser_navigate')).toBe('navigate')
     expect(actionSegment('mcp_foo')).toBe('foo')
     expect(actionSegment('mcp_a_b_c_d_e')).toBe('e')
+  })
+  it('actionSegment returns last colon-separated segment for dsh names', () => {
+    // dsh 命名 `mcp:<server>:<tool>`,最后一段就是 tool 名。
+    expect(actionSegment('mcp:zinai:browser_navigate')).toBe('browser_navigate')
+    expect(actionSegment('mcp:foo')).toBe('foo')
+    expect(actionSegment('mcp:a:b:c:d:e')).toBe('e')
   })
 })
 
