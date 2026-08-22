@@ -262,6 +262,225 @@ describe('translateSessionEvent Phase 1.3: 11 组映射表完整性', () => {
   })
 })
 
+/**
+ * tool/call → tool/result 配对 + dsh 不同字段名兼容 + output 规范化
+ * （对应截图"未知工具 (id:)" 修复）。
+ *
+ * 已知 dsh tool/result 事件不携带 toolName — 必须依赖 tool/call 时建立的
+ * callId → name 映射。Phase 1.3 之前 extractToolName 是 stub，前端 ToolCallBlock
+ * 因此显示 "未知工具 (id:xxxxxxxx)"。这套测试钉住映射表行为 + output 规范化。
+ */
+describe('translateSessionEvent dsh tool 兼容性 (Phase 2 tool/result 修复)', () => {
+  // 用独立 sid 隔离状态，避免用例互相污染
+  const toolCtx = (sid = 'sess-tool-fix') => ({ sessionId: sid, turnIndex: 0, seqBase: 0 })
+
+  it('tool/call 后 tool/result: toolName 通过映射表回填', () => {
+    const sid = 'sess-fix-1'
+    const callEvent = {
+      type: 'tool/call',
+      seq: 1,
+      data: { turn: 1, step: 1, callId: 'call-A', name: 'Bash', arguments: '{"cmd":"ls"}' },
+    } as any
+    const resultEvent = {
+      type: 'tool/result',
+      seq: 2,
+      data: {
+        turn: 1, step: 1,
+        message: { content: [{ tool_use_id: 'call-A', content: 'file.txt\n' }] },
+      },
+    } as any
+
+    const call = translateSessionEvent(callEvent, toolCtx(sid)) as any
+    expect(call.toolName).toBe('Bash')
+
+    const result = translateSessionEvent(resultEvent, toolCtx(sid)) as any
+    expect(result.toolUseId).toBe('call-A')
+    expect(result.toolName).toBe('Bash') // 从映射表回填,而不是空串
+    expect(result.output).toBe('file.txt\n') // 字符串 content 直接透传
+  })
+
+  it('tool/result 兼容 toolCallId 字段名（dsh 旧版本）', () => {
+    const sid = 'sess-fix-2'
+    translateSessionEvent(
+      { type: 'tool/call', seq: 1, data: { callId: 'cb-1', name: 'Read', arguments: '{}' } } as any,
+      toolCtx(sid),
+    )
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 2,
+        data: { message: { content: [{ toolCallId: 'cb-1', content: 'contents' }] } },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    expect(result.toolUseId).toBe('cb-1')
+    expect(result.toolName).toBe('Read')
+  })
+
+  it('tool/result 兼容 message.source.callId 字段名（subagent 路径）', () => {
+    const sid = 'sess-fix-3'
+    translateSessionEvent(
+      { type: 'tool/call', seq: 1, data: { callId: 'sa-1', name: 'Agent', arguments: '{}' } } as any,
+      toolCtx(sid),
+    )
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 2,
+        data: {
+          message: {
+            source: { callId: 'sa-1' },
+            content: [{ content: 'subagent result' }],
+          },
+        },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    expect(result.toolUseId).toBe('sa-1')
+    expect(result.toolName).toBe('Agent')
+  })
+
+  it('tool/result content 是 ContentBlock[] 时,只提取 text 块', () => {
+    const sid = 'sess-fix-4'
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 1,
+        data: {
+          message: {
+            content: [
+              { type: 'text', text: 'first line\n' },
+              { type: 'text', text: 'second line' },
+              { type: 'image', source: 's3://bucket/img.png' }, // 非 text 块,留占位符
+            ],
+          },
+        },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    // 不再是一坨 JSON.stringify,渲染层能正常显示
+    expect(result.output).toContain('first line')
+    expect(result.output).toContain('second line')
+    expect(result.output).not.toContain('"type":"image"')
+  })
+
+  it('tool/result content 是单个对象时,提取 text 字段', () => {
+    const sid = 'sess-fix-5'
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 1,
+        data: {
+          message: {
+            content: [{ text: 'just text' }],
+          },
+        },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    expect(result.output).toBe('just text')
+  })
+
+  it('tool/result content 是非文本对象时,JSON.stringify 兜底', () => {
+    const sid = 'sess-fix-6'
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 1,
+        data: {
+          message: {
+            content: [{ json_field: { nested: 'value' } }],
+          },
+        },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    // 单个对象无 text 字段 → JSON.stringify
+    expect(typeof result.output).toBe('string')
+    expect(result.output).toContain('json_field')
+  })
+
+  it('tool/call 在 tool/result 之前未到:toolName 兜底为空串(前端"未知工具"分支触发)', () => {
+    // 极端顺序异常(out-of-order):result 先到,call 后到。
+    // 此时映射表为空,toolName 必须是非 undefined 的字符串(zod schema 要求)。
+    const sid = 'sess-fix-7'
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 1,
+        data: {
+          message: { content: [{ tool_use_id: 'orphan-1', content: 'data' }] },
+        },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    expect(result.toolUseId).toBe('orphan-1')
+    expect(result.toolName).toBe('') // 空串是合法 fallback,前端有兜底 UI
+
+    // 之后 call 到达:映射表不会回填之前的 result(已经发出),只供后续 result 用
+    const call = translateSessionEvent(
+      { type: 'tool/call', seq: 2, data: { callId: 'orphan-1', name: 'LateArriving', arguments: '{}' } } as any,
+      toolCtx(sid),
+    ) as any
+    expect(call.toolName).toBe('LateArriving')
+  })
+
+  it('turn/end 清空该 session 的 callId → name 映射,避免跨 turn stale 命中', () => {
+    const sid = 'sess-fix-8'
+    // turn 1: 建立映射
+    translateSessionEvent(
+      { type: 'tool/call', seq: 1, data: { callId: 'turn1-1', name: 'Bash', arguments: '{}' } } as any,
+      toolCtx(sid),
+    )
+    let result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 2,
+        data: { message: { content: [{ tool_use_id: 'turn1-1', content: 'r1' }] } },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    expect(result.toolName).toBe('Bash')
+
+    // turn 结束 → 清空
+    translateSessionEvent(
+      { type: 'turn/end', seq: 3, data: { turn: 1, reason: { kind: 'completed' } } } as any,
+      toolCtx(sid),
+    )
+
+    // turn 2: 同 callId 重复用,映射应为空 → toolName 是空串(不会 stale 命中)
+    // (实际生产中 dsh 不会同 sid 复用 callId;但保险起见,验证清理行为)
+    result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 4,
+        data: { message: { content: [{ tool_use_id: 'turn1-1', content: 'r2' }] } },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    expect(result.toolName).toBe('') // 已清理,不会误命中上 turn 的 'Bash'
+  })
+
+  it('不同 session 的映射互相隔离', () => {
+    const sidA = 'sess-fix-iso-A'
+    const sidB = 'sess-fix-iso-B'
+    translateSessionEvent(
+      { type: 'tool/call', seq: 1, data: { callId: 'shared-1', name: 'Bash', arguments: '{}' } } as any,
+      toolCtx(sidA),
+    )
+    // sidB 用同样的 callId,但没在 sidB 记映射 → toolName 应当是空串
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 2,
+        data: { message: { content: [{ tool_use_id: 'shared-1', content: 'x' }] } },
+      } as any,
+      toolCtx(sidB),
+    ) as any
+    expect(result.toolName).toBe('')
+  })
+})
+
 describe('subscribeDshInternalEvents (Phase 1.3)', () => {
   // 简单 mock ctx，提供 on() 注册并保留 callback
   function mockCtx() {

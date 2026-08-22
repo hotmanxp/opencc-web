@@ -103,6 +103,10 @@ export function translateSessionEvent(
 
     case 'turn/end': {
       const reason = event.data.reason
+      // turn/end 是清理 callId → name 映射的最自然时机:本 turn 内
+      // 所有 tool 调用都该完成,之后到来的 tool/result 也不会再消费这些
+      // 映射。统一在 case 入口清理,而不是塞进每个子分支。
+      clearToolNameCache(ctx.sessionId)
       if (reason.kind === 'completed') {
         return {
           ...baseFields,
@@ -135,31 +139,77 @@ export function translateSessionEvent(
     }
 
     case 'tool/call': {
+      // 兼容不同 dsh 版本的 callId 字段名 — 主路径是 event.data.callId，
+      // 退化到 event.data.id。空串让前端 ToolCallBlock 走"未知工具"兜底
+      // 分支(已存在,见 MessageBubble.tsx),不至于 panic;映射表也不会
+      // 记下空 id(rememberToolName 内部有 if-guard)。
+      const callId = String(event.data.callId ?? event.data.id ?? '')
+      const toolName = String(event.data.name ?? '')
+      // 维护 callId → toolName 映射，供后续 tool/result 拿 name。
+      // dsh ToolResultMessage 不携带 toolName（B1b 已知 — 见下方注释），
+      // 必须依赖此映射。
+      rememberToolName(ctx.sessionId, callId, toolName)
       return {
         ...baseFields,
         type: 'runtime.tool_call',
         sessionId: ctx.sessionId,
         turnIndex: ctx.turnIndex,
-        toolUseId: String(event.data.callId),
-        toolName: event.data.name,
+        toolUseId: callId,
+        toolName,
         input: safeJsonParse(event.data.arguments),
       }
     }
 
     case 'tool/result': {
-      // dsh 的 tool/result 内容是 [ToolResultBlock]，tool_use_id + content 在 block 上。
-      const content = event.data.message.content as unknown as Array<{ tool_use_id?: string; content?: unknown }>
+      // dsh tool/result 内容是 [ToolResultBlock]（content[]），tool_use_id +
+      // content 在 block 上。dsh 不同版本的字段名有差异：
+      //   - tool_use_id  （主流）
+      //   - toolCallId   （部分版本）
+      //   - callId       （subagent taskStore 用的别名）
+      // 加上 event.data.message 上可能也有 source.callId / message.callId。
+      // 全部 fallback 一次，避免 toolUseId='' 导致前端 upsert 失败。
+      const message = event.data.message as unknown as {
+        content?: Array<{
+          tool_use_id?: string
+          toolCallId?: string
+          callId?: string
+          content?: unknown
+          name?: string
+        }>
+        source?: { callId?: string }
+        callId?: string
+        name?: string
+      }
+      const content = message?.content ?? []
       const block = content[0]
-      // callId 与 tool_use_id 配对（B1b 维护 callId → name 映射）
-      const toolUseId = block?.tool_use_id ?? ''
-      const output = block?.content ?? content
+      const toolUseId = String(
+        block?.tool_use_id ??
+        block?.toolCallId ??
+        block?.callId ??
+        message?.source?.callId ??
+        message?.callId ??
+        '',
+      )
+
+      // toolName 优先级：映射表（tool/call 时记住）> block.name > message.name > ''
+      const toolName =
+        lookupToolName(ctx.sessionId, toolUseId) ||
+        String(block?.name ?? message?.name ?? '')
+
+      // output 规范化：dsh 的 content 可能是
+      //   - string                        → 直接透传
+      //   - ContentBlock[] (text/image)   → 提取 text 拼成字符串
+      //   - 其他对象/数组                  → JSON.stringify
+      // 前端 ToolCallBlock 的 renderer（bash / generic 等）都期望字符串形态，
+      // 否则渲染时 JSON.stringify 整个数组，output 区会变成一坨转储文本。
+      const output = normalizeToolOutput(block?.content ?? content)
       return {
         ...baseFields,
         type: 'runtime.tool_result',
         sessionId: ctx.sessionId,
         turnIndex: ctx.turnIndex,
         toolUseId,
-        toolName: extractToolName(event.data.message),
+        toolName,
         input: null,
         output,
       }
@@ -265,11 +315,99 @@ function safeJsonParse(s: string): unknown {
   }
 }
 
-function extractToolName(_msg: unknown): string {
-  // dsh ToolResultMessage 不携带 toolName — 与 tool/call 的 callId 配对需要
-  // 维护本地表（callId → name）。当前为 stub：返回空字符串，由 adapter 层
-  // B1b T1.5 阶段补 callId→name 映射。
-  return ''
+// ─── callId → toolName 映射（dsh ToolResultMessage 不携带 name）──────────
+//
+// dsh tool/call 事件带 { callId, name, arguments },但 tool/result 事件只带
+// { message: { content: [{ tool_use_id, content }] } },没有 toolName。前端
+// upsertToolCall 用 toolUseId 找到 start 条目时,需要 prev.name 还保留着
+// — start 阶段写入的 name 不会被 done 阶段覆盖(只要 done 不传空串)。
+//
+// 但 dsh 1.x 偶发 done 事件会把 name 重置为空串、或 tool/result 在 tool/call
+// 之前到达(out-of-order),这时 prev 不存在。映射表兜底:tool/call 时记
+// (callId → name),tool/result 时查回。
+//
+// 清理:turn/end 时清空该 session 的映射,避免跨 turn stale 命中 + 泄漏。
+//
+// 进程级 module state — dsh-bridge 单进程常驻一个 map,跨 session 用 sid 区分。
+// 极端情况(同 sid 多并发 turn)下并发安全依赖 Map 的 atomic set/get;djs 引擎
+// 单线程事件循环,不真并发。
+const toolNameByCallIdBySession = new Map<string, Map<string, string>>()
+
+function rememberToolName(sessionId: string, callId: string, name: string): void {
+  if (!sessionId || !callId || !name) return
+  let inner = toolNameByCallIdBySession.get(sessionId)
+  if (!inner) {
+    inner = new Map()
+    toolNameByCallIdBySession.set(sessionId, inner)
+  }
+  inner.set(callId, name)
+}
+
+function lookupToolName(sessionId: string, callId: string): string {
+  if (!sessionId || !callId) return ''
+  return toolNameByCallIdBySession.get(sessionId)?.get(callId) ?? ''
+}
+
+function clearToolNameCache(sessionId: string): void {
+  if (!sessionId) return
+  toolNameByCallIdBySession.delete(sessionId)
+}
+
+/**
+ * 把 dsh tool/result 的 content 字段规范化为字符串,供前端 renderer 直接渲染。
+ *
+ * dsh 的 content 形态(随版本变化):
+ *   - string                       → 直接透传
+ *   - ContentBlock[] (text/image)  → 提取 text 块拼成多行字符串
+ *   - 单个对象 (含 text 字段)       → 提取 text
+ *   - 其他对象/数组                 → JSON.stringify 兜底
+ *
+ * 前端 bash / read / generic 等所有 renderer 都通过 stringFromOutput 拿到字符串,
+ * 直接传 ContentBlock[] 会让渲染层走 JSON.stringify 整块,output 区变成一坨
+ * 转储文本而不是用户期待的格式化输出。
+ */
+function normalizeToolOutput(content: unknown): string {
+  if (content === undefined || content === null) return ''
+  if (typeof content === 'string') return content
+  if (typeof content === 'number' || typeof content === 'boolean') {
+    return String(content)
+  }
+  if (Array.isArray(content)) {
+    // ContentBlock[]: 提取 text 块,多模态块(image/pdf)留占位符说明,
+    // 其它未知对象 JSON.stringify 进 parts,避免 silently 丢数据
+    // (旧实现对裸对象数组返回 '' → 前端拿不到任何东西,体验更糟).
+    const parts: string[] = []
+    for (const block of content) {
+      if (block === null || block === undefined) continue
+      if (typeof block === 'string') {
+        parts.push(block)
+        continue
+      }
+      if (typeof block !== 'object') {
+        parts.push(String(block))
+        continue
+      }
+      const b = block as { type?: string; text?: string }
+      if (typeof b.text === 'string') {
+        parts.push(b.text)
+        continue
+      }
+      // 非 text 块(image / file / tool_use 嵌套等):保留类型提示便于排查
+      if (b.type && b.type !== 'text') {
+        parts.push(`[${b.type}]`)
+        continue
+      }
+      // 兜底:既没 text 也没 type 字段的对象 → JSON.stringify
+      parts.push(JSON.stringify(block))
+    }
+    return parts.length > 0 ? parts.join('\n') : ''
+  }
+  if (typeof content === 'object') {
+    const obj = content as { text?: unknown }
+    if (typeof obj.text === 'string') return obj.text
+    return JSON.stringify(content, null, 2)
+  }
+  return String(content)
 }
 
 /**
