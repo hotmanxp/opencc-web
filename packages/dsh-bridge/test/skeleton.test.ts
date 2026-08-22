@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { DSH_VERSION, DSH_BRIDGE_VERSION, createDshRuntime, NotImplementedError } from '../src/index.js';
+import { DSH_VERSION, DSH_BRIDGE_VERSION, DSH_KERNEL, OPENCC_KERNEL } from '../src/index.js';
 
 describe('dsh-bridge skeleton', () => {
   it('DSH_VERSION 与 dsh 包锁定版本一致', () => {
@@ -7,20 +7,8 @@ describe('dsh-bridge skeleton', () => {
     expect(DSH_BRIDGE_VERSION).toMatch(/^0\./);
   });
 
-  it('createDshRuntime 抛 NotImplementedError（B0 预期失败）', async () => {
-    await expect(
-      createDshRuntime({
-        dataDir: '/tmp/x',
-        runtimeId: 'rt-1',
-        defaultCwd: '/tmp',
-        defaultModel: 'MiniMax-M3',
-      }),
-    ).rejects.toBeInstanceOf(NotImplementedError);
-  });
-
-  it('NotImplementedError 含修复指引文本', () => {
-    const err = new NotImplementedError('foo');
-    expect(err.message).toMatch(/未实现|B0/);
-    expect(err.message).toMatch(/dsh-kernel-main-plan|kernel/);
+  it('kernel id 常量与计划 §4.1 一致', () => {
+    expect(DSH_KERNEL).toBe('dsh');
+    expect(OPENCC_KERNEL).toBe('opencc');
   });
 });

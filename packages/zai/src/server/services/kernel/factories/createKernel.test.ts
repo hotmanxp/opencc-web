@@ -67,7 +67,7 @@ describe('createKernel 分叉', () => {
     }
   })
 
-  it('agent.kernel="dsh" + Node >= 22.19 → 到达 dsh-bridge 桩并 NotImplementedError', async () => {
+  it('agent.kernel="dsh" + Node >= 22.19 → 到达 dsh-bridge 桩并返回 adapter（kernel="dsh"）', async () => {
     const cwd = currentHome
     mkdirSync(join(cwd, '.zai'), { recursive: true })
     writeFileSync(
@@ -77,9 +77,9 @@ describe('createKernel 分叉', () => {
     )
 
     const { createKernel } = await import('./index.js')
-    await expect(
-      createKernel({ cwd, dataDir: currentHome, settings: {} as any }),
-    ).rejects.toThrow(/未实现|B0|NotImplementedError/)
+    const adapter = await createKernel({ cwd, dataDir: currentHome, settings: {} as any })
+    expect(adapter.kernel).toBe('dsh')
+    await adapter.shutdown().catch(() => {})
   })
 
   it('agent.kernel 非法值 → fail loud (启动不到达 createKernel)', async () => {
