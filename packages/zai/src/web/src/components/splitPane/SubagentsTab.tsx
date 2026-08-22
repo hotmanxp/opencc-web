@@ -12,17 +12,20 @@
  */
 
 import { useState } from 'react'
-import { Button, Empty, Space, Spin, Tag, Tooltip } from 'antd'
+import { Button, Empty, Input, Space, Spin, Tag, Tooltip, message as antdMessage } from 'antd'
 import {
   CheckCircleFilled,
   CloseCircleFilled,
   LoadingOutlined,
+  MessageOutlined,
   ReloadOutlined,
+  SendOutlined,
   StopOutlined,
 } from '@ant-design/icons'
 import {
   useSubagentTasks,
   interruptSubagentTask,
+  sendMessageToSubagentTask,
   type DshSubagentTask,
 } from '../../hooks/useSubagentTasks.js'
 
@@ -51,67 +54,125 @@ function SubagentRow({
   task,
   onInterrupt,
   busy,
+  onSendMessage,
+  sendingTo,
 }: {
   task: DshSubagentTask
   onInterrupt: (id: string) => void
   busy: string | null
+  onSendMessage: (id: string, message: string) => void
+  sendingTo: string | null
 }) {
   const status = task.status
   const isRunning = status === 'running'
   const isBusy = busy === task.id
+  const isSending = sendingTo === task.id
+  const [showInput, setShowInput] = useState(false)
+  const [message, setMessage] = useState('')
+
+  function handleSend() {
+    const trimmed = message.trim()
+    if (!trimmed) return
+    onSendMessage(task.id, trimmed)
+    setMessage('')
+    setShowInput(false)
+  }
+
   return (
     <div
       data-testid={`subagent-row-${task.id}`}
       style={{
         display: 'flex',
-        alignItems: 'center',
-        gap: 8,
+        flexDirection: 'column',
+        gap: 4,
         padding: '8px 12px',
         borderBottom: '1px solid var(--border-color, #eee)',
         color: 'var(--text-primary)',
         fontSize: 12,
       }}
     >
-      <span style={{ display: 'flex', alignItems: 'center', minWidth: 18 }}>
-        {STATUS_ICON[status] ?? <CloseCircleFilled />}
-      </span>
-      <Tag color={STATUS_COLOR[status]} style={{ margin: 0, fontSize: 10 }}>
-        {STATUS_LABEL[status] ?? status}
-      </Tag>
-      <span
-        style={{
-          flex: 1,
-          minWidth: 0,
-          overflow: 'hidden',
-          textOverflow: 'ellipsis',
-          whiteSpace: 'nowrap',
-        }}
-        title={task.description ?? task.id}
-      >
-        {task.description || '(no description)'}
-      </span>
-      <code
-        style={{
-          fontSize: 10,
-          color: 'var(--ui-text-color)',
-          fontFamily: 'monospace',
-        }}
-        title={task.id}
-      >
-        {task.id.slice(-12)}
-      </code>
-      {isRunning && (
-        <Tooltip title="中断这个子 agent 任务">
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
+        <span style={{ display: 'flex', alignItems: 'center', minWidth: 18 }}>
+          {STATUS_ICON[status] ?? <CloseCircleFilled />}
+        </span>
+        <Tag color={STATUS_COLOR[status]} style={{ margin: 0, fontSize: 10 }}>
+          {STATUS_LABEL[status] ?? status}
+        </Tag>
+        <span
+          style={{
+            flex: 1,
+            minWidth: 0,
+            overflow: 'hidden',
+            textOverflow: 'ellipsis',
+            whiteSpace: 'nowrap',
+          }}
+          title={task.description ?? task.id}
+        >
+          {task.description || '(no description)'}
+        </span>
+        <code
+          style={{
+            fontSize: 10,
+            color: 'var(--ui-text-color)',
+            fontFamily: 'monospace',
+          }}
+          title={task.id}
+        >
+          {task.id.slice(-12)}
+        </code>
+        {isRunning && (
+          <Tooltip title="给这个子 agent 发消息">
+            <Button
+              size="small"
+              type="text"
+              icon={isSending ? <LoadingOutlined spin /> : <MessageOutlined />}
+              disabled={isSending}
+              onClick={() => setShowInput((v) => !v)}
+              data-testid={`subagent-sendmsg-toggle-${task.id}`}
+            />
+          </Tooltip>
+        )}
+        {isRunning && (
+          <Tooltip title="中断这个子 agent 任务">
+            <Button
+              size="small"
+              type="text"
+              danger
+              icon={isBusy ? <LoadingOutlined spin /> : <StopOutlined />}
+              disabled={isBusy}
+              onClick={() => onInterrupt(task.id)}
+              data-testid={`subagent-interrupt-${task.id}`}
+            />
+          </Tooltip>
+        )}
+      </div>
+      {showInput && isRunning && (
+        <div style={{ display: 'flex', gap: 4, paddingLeft: 26 }}>
+          <Input.TextArea
+            size="small"
+            rows={2}
+            value={message}
+            onChange={(e) => setMessage(e.target.value)}
+            placeholder="给子 agent 投消息(下轮 turn 消费)…"
+            disabled={isSending}
+            onPressEnter={(e) => {
+              if (!e.shiftKey) {
+                e.preventDefault()
+                handleSend()
+              }
+            }}
+            data-testid={`subagent-sendmsg-input-${task.id}`}
+            style={{ flex: 1, fontSize: 12 }}
+          />
           <Button
             size="small"
-            type="text"
-            danger
-            icon={isBusy ? <LoadingOutlined spin /> : <StopOutlined />}
-            disabled={isBusy}
-            onClick={() => onInterrupt(task.id)}
-            data-testid={`subagent-interrupt-${task.id}`}
+            type="primary"
+            icon={isSending ? <LoadingOutlined spin /> : <SendOutlined />}
+            disabled={isSending || !message.trim()}
+            onClick={handleSend}
+            data-testid={`subagent-sendmsg-send-${task.id}`}
           />
-        </Tooltip>
+        </div>
       )}
     </div>
   )
@@ -120,6 +181,7 @@ function SubagentRow({
 export function SubagentsTab() {
   const { tasks, loading, error, refresh } = useSubagentTasks()
   const [busy, setBusy] = useState<string | null>(null)
+  const [sendingTo, setSendingTo] = useState<string | null>(null)
 
   async function handleInterrupt(taskId: string) {
     setBusy(taskId)
@@ -127,11 +189,26 @@ export function SubagentsTab() {
       const res = await interruptSubagentTask(taskId)
       if (!res.ok) {
         console.warn('[SubagentsTab] interrupt failed:', res.error)
+        antdMessage.warning(`中断失败: ${res.error ?? 'unknown'}`)
+      } else {
+        antdMessage.success('已发送 interrupt 给子 agent')
       }
-      // 立即 refresh — 不用等 5s 轮询
-      refresh()
     } finally {
       setBusy(null)
+    }
+  }
+
+  async function handleSendMessage(taskId: string, message: string) {
+    setSendingTo(taskId)
+    try {
+      const res = await sendMessageToSubagentTask(taskId, message)
+      if (!res.ok) {
+        antdMessage.warning(`投消息失败: ${res.error ?? 'unknown'}`)
+      } else {
+        antdMessage.success('已投消息到子 agent 下一轮 turn')
+      }
+    } finally {
+      setSendingTo(null)
     }
   }
 
@@ -186,7 +263,7 @@ export function SubagentsTab() {
             description={
               <span style={{ color: 'var(--ui-text-color)', fontSize: 12 }}>
                 当前 session 没有 dsh subagent 任务。<br />
-                让 LLM 调 Agent 工具即可在此查看 + 中止。
+                让 LLM 调 Agent 工具即可在此查看 + 中止 + 投消息。
               </span>
             }
             imageStyle={{ height: 80 }}
@@ -198,7 +275,14 @@ export function SubagentsTab() {
           </div>
         )}
         {tasks.map((t) => (
-          <SubagentRow key={t.id} task={t} onInterrupt={handleInterrupt} busy={busy} />
+          <SubagentRow
+            key={t.id}
+            task={t}
+            onInterrupt={handleInterrupt}
+            busy={busy}
+            onSendMessage={handleSendMessage}
+            sendingTo={sendingTo}
+          />
         ))}
       </div>
     </div>

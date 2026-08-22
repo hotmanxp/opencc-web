@@ -53,6 +53,19 @@ export type V2TaskItem = {
   updatedAt: number
 }
 
+/**
+ * dsh-019 Phase 2: dsh subagent 任务项(SSE 推送的 subagent.changed
+ * 事件累积到 subagentTasksBySession[sessionId])。schema 跟 dsh-bridge
+ * 的 DshTaskState + zai compat subagent_list 输出对齐(只有 id/status/
+ * description 三个核心字段,详细 prompt/startedAt 等在 Phase 2 详情
+ * drawer 用 fetch /api/subagent-tasks/:id 拿)。
+ */
+export type DshSubagentTaskItem = {
+  id: string
+  status: 'running' | 'done' | 'failed' | 'cancelled'
+  description?: string
+}
+
 // 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob. 仅用于 v2 协议里把
 // 历史图片消息里的 base64 还原成浏览器可显示的 objectURL. 解析失败时
 // 返回 null, 调用方回退到 raw dataURL 并把 status 标为 error.
@@ -264,6 +277,10 @@ interface AgentState {
   cwdBySession: Record<string, string>
   bashTasksBySession: Record<string, BashTaskInfo[]>
   agentTasksBySession: Record<string, BackgroundTaskSummary[]>
+  // dsh-019 Phase 2: dsh subagent 任务(由 server SSE 'subagent.changed' 推,
+  // 不轮询 /api/subagent-tasks). useSubagentTasks hook 读这里 — 与 bashTasks
+  // / agentTasks / v2Tasks 平级, per-session 隔离。
+  subagentTasksBySession: Record<string, DshSubagentTaskItem[]>
   // zai patch (2026-08-09): 后端 vendor sessionApiCounter 推过来的
   // 累计 API 请求数(每次 runtime.done 带 total,monotonic 增)。
   // UI 会话信息面板"API 请求次数"行读这里。
@@ -316,6 +333,19 @@ interface AgentState {
   applyAgentTaskChanged: (event: {
     sessionId: string | null
     task: BackgroundTask
+  }) => void
+  // dsh-019 Phase 2: SSE 'subagent.changed' 推送 reducer。
+  // payload shape: { sessionId, taskId, status, action: 'start'|'finish',
+  // description?, error? }。action=start 时插/更新,status=running;action=finish
+  // 时 status=done/failed/cancelled,自动从列表过滤掉（跟 bashTask 一致
+  // 行为 — UI 一次 SSE 推送后立刻显示终态,不再轮询）。
+  applySubagentChanged: (event: {
+    sessionId: string
+    taskId: string
+    status: 'running' | 'done' | 'failed' | 'cancelled'
+    description?: string
+    error?: string
+    action: 'start' | 'finish'
   }) => void
 
   // Compaction toast: 收到 server 推的 runtime.compacted 时, 往 toasts
@@ -553,6 +583,8 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   cwdBySession: {},
   bashTasksBySession: {},
   agentTasksBySession: {},
+  // dsh-019 Phase 2: dsh subagent 任务初始空 map,applySubagentChanged 写入。
+  subagentTasksBySession: {},
   // Compaction toast 队列 (Task 14): 收到 server runtime.compacted 时由
   // applyCompactionEvent 推入. UI 端 (未来的 dedupe component) 用 expiresAt
   // (event.timestamp + 5000ms) 自动回收, 而不用 reducer 内部起 setTimeout.
@@ -562,6 +594,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 待清空定时器: 每 sessionId 一份, "全部任务完成" 后 5s 自动从 store 移除
   // (避免"全部完成还一直挂着"的 UI 噪音). 重新写入含未完成任务时取消.
   _taskClearTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
+  // dsh-019 Phase 2: dsh subagent 任务完成后 5s 自动清理的 timer
+  // 池(per-session 隔离,与 v2 task 清理机制独立)。
+  _subagentClearTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
   apiRequestCountBySession: {},
   contextTokensBySession: {},
   // seq 守卫 / 投影存储 (T5): 初始为空, 事件到达时惰性写入。
@@ -1063,6 +1098,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         sendSeq: 0,
         v2TasksBySession: nextV2,
         _taskClearTimers: nextTimers,
+        // dsh-019 Phase 2: clear session 时同步清 dsh subagent 任务 + timers
+        ...(sid
+          ? {
+              subagentTasksBySession: Object.fromEntries(
+                Object.entries(state.subagentTasksBySession).filter(([k]) => k !== sid),
+              ),
+              _subagentClearTimers: Object.fromEntries(
+                Object.entries(state._subagentClearTimers).filter(([k]) => k !== sid),
+              ),
+            }
+          : {}),
       }
     })
     // 提取"用户最近手动选过的模型" — 按 sessions.updatedAt 倒序扫描, 第一个
@@ -1982,6 +2028,46 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         agentTasksBySession: { ...s.agentTasksBySession, [sid]: next },
       }
     })
+  },
+
+  // dsh-019 Phase 2: SSE 'subagent.changed' 推送 reducer。
+  // 行为对齐 bash_task.changed: action=start 插/更新(status=running),
+  // action=finish 改 status(done/failed/cancelled)。完成后 5s 自动从列表
+  // 移除(避免 UI 噪音) — 用 _subagentClearTimers per-session 调度。
+  applySubagentChanged: (event) => {
+    if (!event.sessionId) return
+    const sid = event.sessionId
+    set((s) => {
+      const list = s.subagentTasksBySession[sid] ?? []
+      const idx = list.findIndex((t) => t.id === event.taskId)
+      const item = {
+        id: event.taskId,
+        status: event.status,
+        description: event.description ?? list[idx]?.description,
+      }
+      const next =
+        idx >= 0
+          ? list.map((t) => (t.id === event.taskId ? item : t))
+          : [item, ...list]
+      return {
+        subagentTasksBySession: { ...s.subagentTasksBySession, [sid]: next },
+      }
+    })
+    // 完成后 5s 自动从列表移除(已完成的任务不长期占位)
+    if (event.action === 'finish') {
+      const timers = (get() as { _subagentClearTimers?: Record<string, ReturnType<typeof setTimeout>> })._subagentClearTimers ?? {}
+      const prev = timers[sid]
+      if (prev) clearTimeout(prev)
+      timers[sid] = setTimeout(() => {
+        set((s) => {
+          const cur = s.subagentTasksBySession[sid] ?? []
+          // 只清掉已完成/失败/已取消的,running 不动
+          const remaining = cur.filter((t) => t.status === 'running')
+          return { subagentTasksBySession: { ...s.subagentTasksBySession, [sid]: remaining } }
+        })
+      }, 5000)
+      ;(get() as { _subagentClearTimers?: Record<string, ReturnType<typeof setTimeout>> })._subagentClearTimers = timers
+    }
   },
 }))
 

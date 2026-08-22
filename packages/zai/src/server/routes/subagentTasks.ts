@@ -33,7 +33,7 @@ interface DshSubagentControlBridge {
     description?: string
   }>>
   cancel: (taskId: string) => Promise<{ ok: boolean }>
-  sendMessage: (taskId: string, prompt: string) => Promise<{ ok: boolean }>
+  sendMessage: (taskId: string, prompt: string) => Promise<{ ok: boolean; error?: string }>
 }
 
 function tryGetDshBridge(): DshSubagentControlBridge | null {
@@ -128,6 +128,55 @@ router.post('/subagent-tasks/:id/interrupt', async (req: Request, res: Response)
   } catch (err) {
     return res.status(500).json({
       error: 'interrupt_failed',
+      message: err instanceof Error ? err.message : String(err),
+    })
+  }
+})
+
+/**
+ * POST /api/subagent-tasks/:id/send-message
+ *   dsh-019 Phase 2: 给运行中的子 agent 投消息(走 dsh-bridge.sendMessageToDshSubagent,
+ *   调 ctx.agents.get(sid).followup(createUserMessage))。
+ *   已结束的任务返回 409;消息太长(>8K 字符)返回 400。
+ */
+router.post('/subagent-tasks/:id/send-message', async (req: Request, res: Response) => {
+  if (notInitialized(res)) return
+  const bridge = tryGetDshBridge()!
+  const id = req.params.id
+  const body = (req.body ?? {}) as { message?: string }
+  const message = typeof body.message === 'string' ? body.message : ''
+  const messageLen = message.length
+  if (messageLen === 0) {
+    return res.status(400).json({ error: 'empty_message', message: 'message 不能为空' })
+  }
+  if (messageLen > 8000) {
+    return res.status(400).json({
+      error: 'message_too_long',
+      message: `message 超过 8000 字符 (实际 ${messageLen})`,
+    })
+  }
+  try {
+    // 先检查状态
+    const all = await bridge.list()
+    const found = all.find((t) => t.id === id)
+    if (!found) return res.status(404).json({ error: 'subagent_task_not_found' })
+    if (found.status !== 'running') {
+      return res.status(409).json({
+        error: `cannot_message_${found.status}`,
+        message: `subagent 任务已 ${found.status}, 无法投消息`,
+      })
+    }
+    const result = await bridge.sendMessage(id, message)
+    if (!result.ok) {
+      return res.status(500).json({
+        error: 'send_message_failed',
+        message: result.error ?? 'unknown',
+      })
+    }
+    return res.json({ ok: true, taskId: id, messageLen })
+  } catch (err) {
+    return res.status(500).json({
+      error: 'send_message_failed',
       message: err instanceof Error ? err.message : String(err),
     })
   }
