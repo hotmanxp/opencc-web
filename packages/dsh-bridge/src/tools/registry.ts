@@ -56,6 +56,12 @@ export interface RegisterZaiToolsOptions {
    */
   getParentAgent?: (sessionId: string) => (AgentToolParentAgent & CronParentAgent) | undefined
   /**
+   * dsh-017 新增：dsh agents service getter — Agent 工具 spawn 子 agent 需要。
+   * 接受 dsh Agent 类型的最小子集(只要有 `create` 方法)。
+   * zai 端把 `handle.ctx.get('agents')` 预解析后通过这个回调注入。
+   */
+  getAgentsService?: () => unknown
+  /**
    * dsh-017 新增：subagent 任务启动 sink — 转发到 zai `subagentTracker` (类比
    * bashBackgroundTracker),让 UI TaskDock 看到 dsh subagent 任务。
    */
@@ -117,6 +123,7 @@ export async function registerZaiTools(
   disposers.push(registerAgentTool(ctx, {
     cwd: opts.cwd,
     getParentSessionId: opts.getSessionId ?? (() => undefined),
+    getAgentsService: opts.getAgentsService,
     onTaskStart: opts.onTaskStart,
     onTaskFinish: opts.onTaskFinish,
   }))

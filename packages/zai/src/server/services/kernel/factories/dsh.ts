@@ -137,6 +137,12 @@ export async function createDshKernelAdapter(
       // 暴露 followup / session / cancel 即可。
       return agents?.get?.(sessionId) as unknown as import('@zn-ai/dsh-bridge').AgentToolParentAgent | undefined
     },
+    // dsh-017: Agent 工具 spawn 子 agent 时需要 dsh `agents` service。
+    // zai 端预解析 ctx.get('agents') 后通过 callback 注入(因为 dsh-tools
+    // ToolRunContext 不暴露 cordis ctx)。
+    getAgentsService: () => {
+      return handle.ctx.get('agents')
+    },
     onTaskStart: ({ taskId, description, prompt }) => {
       // dsh-017: 复用 bashBackgroundTracker 显示 subagent 任务(同 tracker
       // 但 description 是 prompt 摘要,command 字段填 taskId 方便辨识)。

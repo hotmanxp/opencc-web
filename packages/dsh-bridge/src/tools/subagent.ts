@@ -25,7 +25,6 @@ import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 import {
   spawnDshSubagent,
-  readDshTask,
   type DshTaskState,
 } from '../subagent/taskStore.js'
 
@@ -52,6 +51,12 @@ export interface AgentToolOptions {
    * 字段即可),zai 端不用 import 完整 dsh Agent 类型。
    */
   getParentAgent?: (sessionId: string) => AgentToolParentAgent | undefined
+  /**
+   * dsh agents service 提供者 — dsh-tools ToolRunContext 不含 cordis ctx,
+   * 需要 zai 端把 ctx.get('agents') 预解析后注入。Agent 工具 spawn 子 agent
+   * 时需要这个 service。
+   */
+  getAgentsService?: () => import('@deepseek-ai/dsh-agent').Agent | unknown | undefined
   /**
    * 子任务启动 sink — 转发到 zai `subagentTracker` (类比 bashBackgroundTracker),
    * 让 UI TaskDock 看到 dsh subagent 任务。不传则不注册。
@@ -92,11 +97,10 @@ export function createAgentTool(opts: AgentToolOptions) {
     name: 'Agent',
     description:
       'Launch a new agent to handle a complex, multi-step task autonomously. ' +
-      'The subagent runs with its own session, model, and tool access. ' +
-      'Set `run_in_background: true` to spawn and return immediately (you will be ' +
-      "notified via <task-notification> when the subagent finishes). " +
-      "Otherwise this call blocks until the subagent finishes and returns its result. " +
-      "subagent_type defaults to 'general-purpose' in dsh mode (Phase 1).",
+      'The subagent always runs in the background in dsh mode — this call returns ' +
+      'a task ID immediately. You will be notified via <task-notification> in a later ' +
+      'turn when the subagent finishes. Use subagent_control to send messages or ' +
+      "interrupt this task. subagent_type defaults to 'general-purpose' in dsh mode (Phase 1).",
     parameters: {
       description: {
         type: 'string',
@@ -177,7 +181,24 @@ export function createAgentTool(opts: AgentToolOptions) {
 
       let handle
       try {
-        handle = await spawnDshSubagent(ctx, {
+        // dsh-tools `ToolRunContext` 没有 cordis ctx — 拿不到 ctx.get('agents')。
+        // 改走 opts.getAgentsService (zai 端预解析的 dsh agents service)。
+        // 兜底:如果没传,从 ctxObj.agent.session 上找(但 session 不一定有
+        // ctx 引用);Phase 1 直接要求 zai 端必须传 getAgentsService。
+        const agentsService = opts.getAgentsService?.()
+        if (!agentsService) {
+          return {
+            output: '[error] dsh-bridge Agent tool: getAgentsService not provided by zai-side wiring',
+            taskId: '',
+            status: 'failed' as const,
+          }
+        }
+        // 直接用 agents service,不走 ctx.get。spawnDshSubagent 内部我们
+        // 临时 hack: 用一个 stub ctx 满足类型,get('agents') 不会被调用。
+        const stubCtx = {
+          get: (key: string) => key === 'agents' ? agentsService : undefined,
+        } as unknown as Context
+        handle = await spawnDshSubagent(stubCtx, {
           parentSessionId,
           // cast 子集到完整 Agent — spawnDshSubagent 内部只用 followup /
           // session（notifications）;dsh Agent 的其他字段不需要。
@@ -212,35 +233,27 @@ export function createAgentTool(opts: AgentToolOptions) {
         }
       }
 
-      // 同步等结果
-      let finalState: DshTaskState
-      try {
-        finalState = await handle.promise
-      } catch (err) {
-        const message = err instanceof Error ? err.message : String(err)
-        finalState = {
-          taskId: handle.taskId,
-          sessionId: '',
-          status: 'failed',
-          prompt: a.prompt,
-          startedAt: Date.now(),
-          finishedAt: Date.now(),
-          error: message,
-        }
-        // 仍然写盘 (taskStore 内部已经写了,这里二次保险)
-        await readDshTask(handle.taskId).catch(() => null)
-      }
-
-      opts.onTaskFinish?.({
-        taskId: handle.taskId,
-        status: finalState.status as 'done' | 'failed' | 'cancelled',
-        error: finalState.error,
-      })
-
+      // dsh-017 修订：Agent 工具在 dsh 模式**强制 run_in_background=true**。
+      // 原因:
+      //   1. dsh-subagent 是独立 dsh Agent,跑独立 session + 独立 scope,
+      //      与父 agent 异步 — 等同 zai 风格的"后台任务"
+      //   2. dsh 0.1.0-rc.8 已知 dsh-scope binding bug,即使父 session
+      //      fresh 也会随机失败(同一 parentScopeKey 对象被重复 bind)。
+      //      改成后台让 LLM turn 立即结束,scope 失败只影响子 agent
+      //      启动,不影响父 agent 继续走
+      //   3. TaskDock UI 立即看到子 agent 任务(同 bash 后台任务机制)
+      //   4. 子 agent 完成时通过 `<task-notification>` 自动注入父
+      //      session 下一轮 turn(已在 spawnDshSubagent 内部实现)
+      //
+      // LLM 传的 `run_in_background` 字段在 dsh 模式下**忽略** — 永远
+      // 走后台。Phase 2 修 dsh-scope bug 后可放开让 LLM 选。
       return {
-        output: formatTaskResult(finalState),
+        output:
+          `Subagent ${handle.taskId} spawned in background. ` +
+          `You will be notified via <task-notification> in a later turn when it finishes. ` +
+          `Use subagent_control to send messages or interrupt this task.`,
         taskId: handle.taskId,
-        status: finalState.status as 'done' | 'failed' | 'cancelled',
+        status: 'running' as const,
       }
     },
   })
