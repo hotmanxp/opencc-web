@@ -12,7 +12,7 @@
 | 运行时 | Node-direct(tsx + bun-protocol) / Bun 可选(`dev:bun`) | `^22.19.0 \|\| >=24.0.0`(仓库级 engines;`.nvmrc` 写 20 已过期 — 以 engines 为准) |
 | zai 前端 | React + Zustand + AntD + Vite + React Router + Tailwind + CodeMirror + react-markdown | 18.3 / 4.5 / 5.22 / 8.1.5 / 6.28 / 3.4 / 14 langs / 10.1 |
 | zai 服务端 | Express + SSE + Zod + ws + sharp + commander + `@anthropic-ai/sdk` | ^4.21 / ^3.23 / ^8.18 / ^0.33.5 / ^12.1 / ^0.52 |
-| dsh-bridge | `@deepseek-ai/cordis` + 24 个 `@deepseek-ai/dsh-*` + `@modelcontextprotocol/sdk` | 4.0.1 / 0.1.0-rc.8 / ^1.0 |
+| dsh-bridge | `@deepseek-ai/cordis` + 35 个 `@deepseek-ai/dsh-*`(Phase 4 新增 `dsh-subagent` / `dsh-subagent-spawn-in-process` / `dsh-subagent-in-process-driver` / `dsh-agent-presets` / `dsh-brand` / `dsh-invariants` / `dsh-session-persistence` / `dsh-user-questions`) + `@modelcontextprotocol/sdk` | 4.0.1 / 0.1.0-rc.8 / ^1.0 |
 | zn-agent-core vendor | opencc 0.20.0(Bun 兼容(un-stripped))+ ripgrep vendor 二进制(darwin-arm64/x64、win32-x64) | — |
 | 测试 | Vitest | zai/dsh-bridge/根 `^4.1`;zn-agent-core `^2.1`(子包隔离,跨包勿混引) |
 
@@ -30,7 +30,7 @@
 
 ## 双轨改造 (dsh 内核集成 · B 方案)
 
-> **状态**（2026-08-22）：**全 plan 收口完成** — P0/P1/P2 全部真实化，handoff §6 已知缺口 1-5 已关闭。dsh-bridge 55 测试 / zai 2192 测试 / zn-agent-core 382 测试全绿。详细状态见 `packages/dsh-bridge/IMPLEMENTATION_STATUS.md`。
+> **状态**（2026-08-22）：**全 plan 收口完成 + Phase 4 收口** — P0/P1/P2 全部真实化，Phase 4(dsh-subagent 上游 `SubagentRuntime.start`)完成，handoff §6 已知缺口 1-5 已关闭。dsh-bridge **135 测试** / zai 2192 测试 / zn-agent-core 382 测试全绿。详细状态见 `packages/dsh-bridge/IMPLEMENTATION_STATUS.md`。
 > **目标**：zai agent 内核从 opencc vendor 迁移到 deepseek-harness（`@deepseek-ai/dsh-*`），采用双轨并行 + 配置切换。
 > **G2 决策**：评审记录见 [`docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md`](docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md)；维护契约见 [`docs/2026-08-17-dsh-maintenance-contract.md`](docs/2026-08-17-dsh-maintenance-contract.md)；已知差异见 [`docs/2026-08-17-dsh-known-differences.md`](docs/2026-08-17-dsh-known-differences.md)。
 > **关键缺口（dsh-009, dsh-010, dsh-012）**：B7 flip-and-cleanup 阶段必须关闭 — 当前 `agentRuntime.ts` 仍未走 `createKernel()` 工厂分叉（dsh-009），所以 dsh 模式启动但 routes/agent.ts 仍跑 opencc。ego-browser dsh 验证因此阻塞（待 KERNEL_FACTORY_INTEGRATION 修复 + ANTHROPIC_API_KEY 配置）。
@@ -64,7 +64,7 @@ zai 同时支持两条 agent 内核轨道，由 `agent.kernel` 配置切换：
 
 > **dsh subagent 任务目录**：`~/.zai/tasks-dsh/<taskId>.json`（独立子目录，禁止与 opencc `~/.zai/tasks/<taskId>.json` 共用文件）。
 
-> **dsh-subagent 自实现**（Phase 3.1）：上游 `@deepseek-ai/dsh-subagent` 未发布；当前用 `@deepseek-ai/dsh-scope` 的 `createScope` + `bindScopeParent` 显式 ScopedLayers 父子隔离。`createDshSubagentScope(parentCtx, {parentScopeKey, childScopeKey})` 是显式 scope 入口。
+> **dsh-subagent 上游化**（Phase 4，2026-08-22 收口）：改走 dsh 上游 `@deepseek-ai/dsh-subagent` 的 `SubagentRuntime.start('spawn', req)` —— 上游托管父子 scope / `subagent/start` / `subagent/end` 生命周期 / `run.result` Promise / `run.dispose()` 释放。**不再绕过去实现父子 turn 解耦**（之前自实现的 `<task-notification>` followup 注入会等下次提问才被消费 — 用户报 sess-1787409759412-aoh5xpnw sub-agent 一直没返回直到再次提问）。Phase 4 配套：`createDshRuntime` 装载 `SubagentRuntime` + spawn-in-process provider (`inheritsParentContext: false`,子 agent 不继承父 prompt history,cwd/provider/model 经 `agentOptions` 注入);`createDshSubagentScope` 保留 export 名做向后兼容,但函数体已退化为 `{ ctx, dispose: () => {} }` stub —— 子 scope 由 `SubagentRuntime` 内部 `bindScopeParent` 自动建立,dsh-bridge 不再显式 createScope。
 
 > **dsh-mcp 退避**（Phase 3.2）：`MCP_RETRY_DELAYS_MS = [1000, 2000, 4000, 8000, 16000]`（5 步指数退避），`MCP_HEALTH_CHECK_INTERVAL_MS = 30_000`。上游 `@deepseek-ai/dsh-mcp` 未发布，自实现对齐 zai `MCPClientPool` 行为。
 
@@ -90,7 +90,7 @@ zai 同时支持两条 agent 内核轨道，由 `agent.kernel` 配置切换：
 ```bash
 pnpm --filter @zn-ai/dsh-bridge run typecheck    # dsh-bridge 类型检查
 pnpm --filter @zn-ai/dsh-bridge run build        # 编译 dsh-bridge（合入 zai 前必跑；core 改动时）
-pnpm --filter @zn-ai/dsh-bridge run test         # dsh-bridge 单测（55 用例）
+pnpm --filter @zn-ai/dsh-bridge run test         # dsh-bridge 单测（135 用例 — Phase 4 taskStore.test.ts 新增 11）
 
 # zai 侧 kernel 相关测试
 pnpm --filter @zn-ai/zai test src/server/services/kernel/
@@ -116,8 +116,8 @@ import {
   listDshSessions,            // B3 会话列表
   readDshSessionHeader,       // B3 单 session header
   flushDshSession,            // B3 落盘
-  spawnDshSubagent,           // B5 子 agent
-  createDshSubagentScope,     // Phase 3.1 显式 scope 隔离
+  spawnDshSubagent,           // B5 子 agent(Phase 4: 走 dsh-subagent 上游 SubagentRuntime.start)
+  createDshSubagentScope,     // Phase 4 stub: 子 scope 由上游 SubagentRuntime 托管,保留 export 仅为向后兼容
   installSlashCommands,       // B5 slash 命令
   StateBridge,                // B5 状态桥
   abortDshTurn,               // P0-4 abort
@@ -144,6 +144,28 @@ zai config set agent.kernel dsh         # 切到 dsh 轨道
 zai config set agent.kernel opencc      # 切回 opencc 轨道（kill switch）
 # 切完后必须重启 zai 服务（运行期切换不允许 — main-plan §4.1 红线）
 ```
+
+**启动期 CLI 覆盖 — `--kernel <id>`**：
+
+```bash
+zai dev --kernel=dsh                    # 不改 settings.json,本次启动强制 dsh
+zai start --kernel=dsh                  # 同上,生产模式
+zai dev --kernel=opencc                 # 临时回退到 opencc(无论 settings 写什么)
+```
+
+适用场景：
+
+- 临时切轨验证(ego-browser 跑 dsh 模式工具渲染,不用动 `~/.zai/settings.json`)
+- 排查"切了 dsh 后出问题"——单次启动回 opencc,不动配置
+- 多 cwd 工作流(同一个 zai 二进制,不同项目目录不同默认 kernel)
+
+行为细节：
+
+- 优先级：`--kernel` > 项目级 `settings.json` > 用户级 `settings.json` > 默认 `'opencc'`
+- **不写持久化配置** — env `ZAI_KERNEL_OVERRIDE` 仅本进程生效,关掉 zai 自然消失
+- **运行期不允许切换** — 启动后改 env 不会让已加载的 adapter 换轨(主计划 §4.1 红线)
+- 非法值(`--kernel=bogus`)在 boot 阶段 fail loud,抛 `InvalidAgentKernelError` 退出码 1
+- 实现：`cli/index.ts` 选项 → `runDev/runStart` → `createApp({ kernelOverride })` → `process.env.ZAI_KERNEL_OVERRIDE` → `projectSettings.ts:resolveAgentKernel` 顶部 `readKernelOverride()` 命中
 
 **会话迁移工具（B6 T6.3）**：
 
@@ -221,7 +243,7 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 - **CodeGraph 优先**:理解代码用 `codegraph_explore` 单调用,不要 grep + read 轮询;索引未初始化时跑 `codegraph init -i`。`codegraph_context` / `codegraph_trace` 当前 v1.4.1 不可用。
 - **端口使用(必查)**:启动 `zai dev` / `zai start` 或任何本地服务前,先 `lsof -i :<port>` 确认端口空闲再起。显式 `--port` / `--api-port` 被占用必须报错退出(EADDRINUSE,dev.ts/start.ts 已实现),**禁止**静默递增换端口——多个实例静默换端口共享同一 API key 是请求风暴根因(见 `docs/superpowers/plans/` 请求风暴修复)。只有未显式指定端口时才允许自动扫描(`ports.ts resolveServerPort`)。开发中如需多实例,用不同 `--port` 显式指定空闲端口。
 - **小步可逆**:实现细节见 `docs/DEVELOPMENT_REFERENCE.md`;设计/取舍见 `docs/superpowers/specs/` 与对应 `plans/`。
-- **测试粒度:功能改动后只跑相关单元测试**:`pnpm -r test` 全量跑 zai + zn-agent-core + dsh-bridge 全部 **600+ 测试文件**(zai 单测 2192 用例、zn-agent-core 382、dsh-bridge 55 — 见 §双轨改造 状态行),冷启动 ~30s+ 解析 + 数十秒执行,日常反馈太慢。功能改动后只跑**直接受影响**的测试文件(以及它们的依赖文件若有连锁影响),用路径过滤:
+- **测试粒度:功能改动后只跑相关单元测试**:`pnpm -r test` 全量跑 zai + zn-agent-core + dsh-bridge 全部 **600+ 测试文件**(zai 单测 2192 用例、zn-agent-core 382、dsh-bridge 135 — 见 §双轨改造 状态行),冷启动 ~30s+ 解析 + 数十秒执行,日常反馈太慢。功能改动后只跑**直接受影响**的测试文件(以及它们的依赖文件若有连锁影响),用路径过滤:
   ```bash
   # 改了 packages/zai/src/web/src/components/SettingsDrawer.tsx
   pnpm --filter @zn-ai/zai test src/web/src/components/SettingsDrawer.test.tsx \
@@ -310,3 +332,4 @@ pnpm release:major
 
 <!-- updated: 2026-08-22 (B7: dsh G2 决策 + 维护契约 + vendor 退役评估) -->
 <!-- updated: 2026-08-22 (pass-2: 技术栈表 — Node 22.19/Vitest 子包隔离/dsh-bridge 行/补充 zai 服务端依赖;目录表 — scripts 拆分 + 根 .zai 说明;typecheck 改用子包脚本;测试规模 190+ → 600+ 文件) -->
+<!-- updated: 2026-08-22 (Phase 4: dsh-subagent 改走上游 SubagentRuntime.start — 状态行补 Phase 4 收口;技术栈 dsh-* 24 → 35;测试 55 → 135;Phase 3.1 自实现 section 替换为 Phase 4 上游化说明;createDshSubagentScope 注释更新为 stub) -->
