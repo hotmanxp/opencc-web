@@ -213,8 +213,8 @@ done
 # ─── Phase 7: 验证会话数据隔离 ─────────────────────────────────────
 echo "==> Phase 7: 验证 dsh / opencc 会话数据各自完整"
 
-DSH_SESSION_DIR="${ZAI_DATA_DIR}/projects/-tmp-kill-switch-drill-${$}/dsh-sessions/${SESSION_ID}"
-OPENCC_SESSION_FILE="${ZAI_DATA_DIR}/projects/-tmp-kill-switch-drill-${$}/${SESSION_ID}.jsonl"
+DSH_SESSION_DIR="${ZAI_DATA_DIR}/projects/-tmp-kill-switch-drill-$$/dsh-sessions/${SESSION_ID}"
+OPENCC_SESSION_FILE="${ZAI_DATA_DIR}/projects/-tmp-kill-switch-drill-$$/${SESSION_ID}.jsonl"
 
 if [ -d "${DSH_SESSION_DIR}" ]; then
   echo "    dsh session dir: ${DSH_SESSION_DIR}"
