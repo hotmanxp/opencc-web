@@ -61,6 +61,19 @@ const require = createRequire(import.meta.url)
  * 见 dsh-llm-pi-ai/lib/types/catalog.d.ts PiAiModelProfile.input 注释:
  *   "Declaring images is what makes a hand-declared vision model usable"
  */
+/** THINKING_LEVELS 与 dsh-llm-pi-ai `lib/index.js:960-966` 对齐:
+ * `off | minimal | low | medium | high | xhigh`(esclation order)。
+ * zai-side 暴露前 6 个以匹配 pi-ai catalog 内置 schema,后续 level
+ * 上游追加时只需扩展 union。
+ */
+export type DshReasoningLevel =
+  | 'off'
+  | 'minimal'
+  | 'low'
+  | 'medium'
+  | 'high'
+  | 'xhigh'
+
 export interface DshModelEntry {
   id: string
   /**
@@ -72,6 +85,25 @@ export interface DshModelEntry {
   input?: Array<'text' | 'image' | 'pdf' | 'audio'>
   contextWindow?: number
   maxTokens?: number
+  /**
+   * 该 model 支持的 reasoning level 列表。dsh-llm-pi-ai 用此构造 profile
+   * 的 reasoning.efforts;model 仅声明此列表中存在的 level 才能在
+   * stream 时 emit `thinking_start/thinking_delta/thinking_end` chunks
+   * (进而 dsh-bridge translateSessionEvent 才能产出 runtime.thinking)。
+   *
+   * 特殊值:
+   * - `false` — 显式声明该 model 不支持 reasoning(dsh-llm-pi-ai schema
+   *   允许的 z.union([z.const(false), ...]) 形态,见
+   *   `dsh-llm-pi-ai/lib/index.js:1608`)。
+   * - 缺省 — dsh-llm-pi-ai catalog 视该 model 为 non-reasoning,stream
+   *   时不产 thinking chunk → dsh-bridge 收不到 reasoning-delta。
+   */
+  reasoningEfforts?: false | Array<DshReasoningLevel>
+  /**
+   * 默认 reasoning level。必须是 reasoningEfforts 列表中的某一项。
+   * 缺省时 dsh-llm-pi-ai 选 catalog 第一个非 'off' level。
+   */
+  defaultReasoningEffort?: DshReasoningLevel
 }
 
 export interface DshProviderProfile {
@@ -86,12 +118,71 @@ export interface DshProviderProfile {
   /**
    * 该路由暴露的模型列表。形态:
    * - `string` — 只声明 id,其他用 dsh-llm-pi-ai 内置 catalog 默认
-   * - `DshModelEntry` — 覆盖 input / contextWindow / maxTokens
+   * - `DshModelEntry` — 覆盖 input / contextWindow / maxTokens / reasoningEfforts
    *
    * Phase 3 P1 起推荐用 DshModelEntry 给 vision model 显式声明
    * `input: ['text', 'image']`,否则 dsh-llm-pi-ai 不知道 model 支持 image。
+   *
+   * Phase 3 P1 follow-up: 显式声明 `reasoningEfforts` 让 model 支持
+   * extended thinking — 否则 dsh-llm-pi-ai 视为 non-reasoning,stream
+   * 时不产 thinking_delta,下游翻译层收不到 reasoning-delta。
    */
   models: Array<string | DshModelEntry>
+}
+
+/**
+ * 把 zai-side `DshProviderProfile[]` 转换成 dsh-llm-pi-ai loader.create
+ * 接受的 provider config 形态。
+ *
+ * Phase 3 P1 follow-up 关键 transform:
+ * - `DshModelEntry.reasoningEfforts: string[]` → pi-ai schema 的 dict
+ *   `{ level: wireValue }`(zai 不映射 wireValue,故 key===value);`false`
+ *   显式声明 model 不支持 reasoning。
+ * - 给 model 补 `name` 字段(pi-ai modelFields 必填,line 1604)。
+ * - `string` 形态也补 name(用 id 兜底)。
+ *
+ * 独立 export 出来供单元测试验证,避免每次为测 transform 启整条
+ * cordis loader + 20+ dsh-* plugin。
+ */
+export function buildProviderEntries(
+  providers: DshProviderProfile[],
+): Record<string, unknown> {
+  const providerEntries: Record<string, unknown> = {}
+  for (const p of providers) {
+    providerEntries[p.name] = {
+      baseURL: p.baseURL,
+      apiKeyEnv: p.apiKeyEnv,
+      models: p.models.map((m) => {
+        if (typeof m === 'string') return { id: m, name: m }
+        const entry: {
+          id: string
+          name: string
+          input?: unknown
+          contextWindow?: number
+          maxTokens?: number
+          reasoningEfforts?: unknown
+        } = {
+          id: m.id,
+          name: m.id,
+        }
+        if (m.input !== undefined) entry.input = m.input
+        if (m.contextWindow !== undefined) entry.contextWindow = m.contextWindow
+        if (m.maxTokens !== undefined) entry.maxTokens = m.maxTokens
+        if (m.reasoningEfforts !== undefined) {
+          if (m.reasoningEfforts === false) {
+            entry.reasoningEfforts = false
+          } else {
+            const dict: Record<string, string> = {}
+            for (const level of m.reasoningEfforts) dict[level] = level
+            entry.reasoningEfforts = dict
+          }
+        }
+        return entry
+      }),
+      ...(p.displayName ? { displayName: p.displayName } : {}),
+    }
+  }
+  return providerEntries
 }
 
 export interface CreateDshRuntimeOptions {
@@ -226,27 +317,9 @@ export async function createDshRuntime(
       // maxTokens 给 dsh-llm-pi-ai — 否则 vision model 报
       // `does not support image input (UNSUPPORTED_CONTENT)`。
       if (opts.providers.length > 0) {
-        const providerEntries: Record<string, unknown> = {}
-        for (const p of opts.providers) {
-          providerEntries[p.name] = {
-            baseURL: p.baseURL,
-            apiKeyEnv: p.apiKeyEnv,
-            // models 形态: string → { id }; DshModelEntry → 直接传(只
-            // 保留 dsh-llm-pi-ai 认识的字段:id / input / contextWindow /
-            // maxTokens)。
-            models: p.models.map((m) => {
-              if (typeof m === 'string') return { id: m }
-              const entry: { id: string; input?: unknown; contextWindow?: number; maxTokens?: number } = {
-                id: m.id,
-              }
-              if (m.input !== undefined) entry.input = m.input
-              if (m.contextWindow !== undefined) entry.contextWindow = m.contextWindow
-              if (m.maxTokens !== undefined) entry.maxTokens = m.maxTokens
-              return entry
-            }),
-            ...(p.displayName ? { displayName: p.displayName } : {}),
-          }
-        }
+        // transform 函数导出在文件顶部 (buildProviderEntries),便于单测。
+        // 负责 reasoningEfforts array→dict 转换、补 name 必填字段。
+        const providerEntries = buildProviderEntries(opts.providers)
         await ctx.loader.create({
           name: '@deepseek-ai/dsh-llm-pi-ai',
           config: { providers: providerEntries },

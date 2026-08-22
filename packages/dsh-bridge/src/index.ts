@@ -138,6 +138,11 @@ export {
   decodeSegment,
   type DshSessionMeta,
 } from './sessions/store.js'
+// dsh-020 / transcript 恢复修复:zai 服务层在 dsh 模式下用此 adapter
+// 替代 opencc TranscriptStore,实现 read/list/patch/remove 完整路径。
+// 数据来源:`ctx.sessionPersistence` (events + dsh header) +
+// `<dataDir>/dsh-session-meta/<cwd>/<sid>.meta.json` (zai 专属 meta)。
+export { DshTranscriptAdapter } from './sessions/transcriptAdapter.js'
 export {
   loadZaiMemory,
   injectMemoryToDsh,
@@ -226,6 +231,10 @@ export class NotImplementedError extends Error {
     this.name = 'NotImplementedError'
   }
 }
+
+// zai-side re-export cordis `Context` 类型,让 dsh factory / agentRuntime
+// 等调用方不需要把 `@deepseek-ai/cordis` 加为直接依赖。
+export type { Context } from '@deepseek-ai/cordis'
 
 export const DSH_VERSION = '0.1.0-rc.7' as const
 export const DSH_BRIDGE_VERSION = '0.1.0' as const

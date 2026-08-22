@@ -321,6 +321,9 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // async runtime construction.
   const { resolved: dataDir } = resolveDataDir()
   serverCwd = cwd
+  // 默认先建 opencc store(同步部分,旧测试 + opencc 模式不依赖异步
+  // createKernel 结果)。kernel 是 dsh 时,在 createKernel 完成后替换为
+  // `DshTranscriptAdapter`(读 dsh session.log[.zstd] + zai meta cache)。
   transcriptStore = new TranscriptStore(dataDir)
 
   // OpenCC vendor's config system has a `configReadingAllowed` flag
@@ -370,6 +373,30 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
         './kernel/factories/opencc.js'
       )
       runtime = getCurrentOpenccRuntime()
+    } else {
+      // dsh-020 / transcript 恢复修复:dsh 模式下,把默认占位的 opencc
+      // `TranscriptStore` 替换为 `DshTranscriptAdapter`,让 zai 服务层
+      // (routes/agent.ts / routes/transcript.ts / routes/approve.ts /
+      // routes/command.ts / builtin commands) 走 dsh 路径读 dsh
+      // session.log + zai meta cache,而不是读不存在 dsh 数据的
+      // opencc jsonl 目录。同步 init 占位的 opencc store 在调用方
+      // `getTranscriptStore()` 之前已被替换,所有路由无差别读 dsh。
+      const { DshTranscriptAdapter } = await import('@zn-ai/dsh-bridge')
+      const { getDshHandleForTranscript } = await import(
+        './kernel/factories/dsh.js'
+      )
+      const dshCtx = getDshHandleForTranscript()
+      if (dshCtx) {
+        transcriptStore = new DshTranscriptAdapter(
+          dshCtx,
+          dataDir,
+        ) as unknown as TranscriptStore
+      } else {
+        // ctx 还没就绪 — 通常发生在 `getCurrentDshRuntime` 还没导出时;
+        // 暂时保留 opencc store,后续 `getTranscriptStore()` 抛错。理想
+        // 路径下 createKernel 内部已经把 ctx 装好。
+        console.warn('[agentRuntime] dsh kernel but ctx unavailable — transcript store will not work for dsh sessions')
+      }
     }
     const cleanup = () => {
       if (kernelAdapter) void kernelAdapter.shutdown()

@@ -45,11 +45,37 @@ import {
   getCurrentSessionId,
   setCurrentSessionId,
 } from '../../agentRuntime.js'
+import type { Context as DshContext } from '@zn-ai/dsh-bridge'
+
+/** dsh Cordis ctx 本地别名 — 避免 import 实体与未来 Context 类型冲突。 */
+type Context = DshContext
 
 interface DshKernelConfig {
   cwd: string
   dataDir: string
   settings: ZaiSettings
+}
+
+/**
+ * dsh 长驻 ctx 的 module-level singleton — 在 `createDshKernelAdapter`
+ * 完成 `handle.start()` 后设置。zai 服务层 `agentRuntime.ts` 在
+ * 初始化完成时拉这个 ctx 给 `DshTranscriptAdapter` 读 dsh
+ * `sessionPersistence` 服务。返回 `Context | null` — adapter 还没
+ * 装载时为 null（init 早期 / dsh 模式未启动）。
+ *
+ * dsh-020 / transcript 恢复修复:d sh 模式下 `getTranscriptStore()` 必须
+ * 拿到 dsh-side `JsonlSessionPersistence` 才能读 session.log,否则 routes
+ * 列表 / 详情 / patch 全部返回 opencc 占位数据,用户看不到 dsh 会话。
+ */
+let activeDshContext: Context | null = null
+
+export function getDshHandleForTranscript(): Context | null {
+  return activeDshContext
+}
+
+/** Test seam — 单元测试可重置 module-level 状态。 */
+export function __resetDshContextForTests(): void {
+  activeDshContext = null
 }
 
 function toAgentSession(sessionId: string, cwd: string): AgentSession {
@@ -99,23 +125,39 @@ export async function createDshKernelAdapter(
       // 显式声明的 vision-capable model — 必须列在前面让 dsh-llm-pi-ai
       // catalog 优先匹配(否则 dsh-llm-pi-ai 找不到 model id 报
       // UNKNOWN_MODEL)。
+      //
+      // reasoningEfforts: zai OPENCC 模式走 vendor Anthropic SDK,
+      // SDK 默认按 client 端 settings 发 thinking。DSH 模式必须显式
+      // 声明 reasoningEfforts — 否则 dsh-llm-pi-ai profile.reasoning
+      // 是空,stream 时 resolveReasoningLevel 返回 'off',不 emit
+      // thinking_delta → dsh-bridge translateSessionEvent 永远不收
+      // 到 reasoning-delta → runtime.thinking SSE 永远不发 → UI
+      // ThinkingBlock 不渲染。
+      //
+      // 高speed variant 不一定支持 extended thinking,设 false 显式
+      // 声明不支持(dsh-llm-pi-ai schema 允许 z.const(false))。
       {
         id: 'MiniMax-M3',
         input: ['text', 'image'],
         contextWindow: 1_000_000,
         maxTokens: 128_000,
+        reasoningEfforts: ['low', 'medium', 'high'],
+        defaultReasoningEffort: 'medium',
       },
       {
         id: 'MiniMax-M2.7',
         input: ['text', 'image'],
         contextWindow: 204_800,
         maxTokens: 131_072,
+        reasoningEfforts: ['low', 'medium', 'high'],
+        defaultReasoningEffort: 'medium',
       },
       {
         id: 'MiniMax-M2.7-highspeed',
         input: ['text'],  // highspeed 不支持 image
         contextWindow: 204_800,
         maxTokens: 131_072,
+        reasoningEfforts: false,
       },
     ],
   }
@@ -127,6 +169,10 @@ export async function createDshKernelAdapter(
     providers: [anthropicProfile],
   })
   await handle.start()
+  // dsh-020:暴露 ctx 给 DshTranscriptAdapter,让 routes 读 dsh session.log。
+  // 必须在 start() 之后 — `JsonlSessionPersistence` 是 plugin,需 plugin 装载
+  // 完成才能 `ctx.get('sessionPersistence')` 拿到实例。
+  activeDshContext = handle.ctx
 
   // ── 1.5 dsh-bridge bridges（B2/B4/B5/B7 真实化 — dsh-016） ───────
   // 装载 zai 增强工具（bash/fs/ripgrep/mcp/skill）+ 把后台 bash 任务接到
@@ -456,6 +502,12 @@ export async function createDshKernelAdapter(
         console.warn('[dsh-adapter] handle.shutdown failed:', err)
       }
 
+      // dsh-020: 清 module-level ctx,避免 shutdown 后路由仍指向已
+      // dispose 的 ctx(read 会拿到 stale service,抛 'ctx disposed')。
+      if (activeDshContext === handle.ctx) {
+        activeDshContext = null
+      }
+
       // 4. 清 globalThis 桥
       clearZaiGlobalBridges()
 
@@ -470,31 +522,104 @@ export async function createDshKernelAdapter(
       if (stopped) throw new Error('[dsh-adapter] shutdown, refusing new session')
       const sessionId = opts.sessionId ?? `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       activeSessions++
+      // dsh-020 / transcript 恢复修复:之前 createSession 是 stub,只生成
+      // sessionId,没有真的在 dsh ctx 里建立 agent。导致 dsh-side agent
+      // 第一次 followup 时 `agents.create` 跑全量初始化(plugin 装载 +
+      // session/created 事件 + agent loop 启动),首 token 延迟高且
+      // 中间出错概率上升。
+      //
+      // 现在调 `agents.create({ sessionId, meta: { cwd } })` 提前把 agent
+      // 装载好(后续 `run()` 直接 `agents.get()` 取到,免去 whenIdle 等待);
+      // 若 dsh-side 抛错(sessions.create 已存在等情况),降级返回 token,
+      // 让后续 runOnce 处理 — 与旧行为兼容。
+      try {
+        const agents = handle.ctx.get('agents') as {
+          create?: (opts: {
+            sessionId: { toString(): string } & string
+            meta?: { cwd?: string }
+          }) => Promise<unknown>
+        } | undefined
+        if (agents?.create) {
+          await agents.create({
+            sessionId: sessionId as unknown as { toString(): string } & string,
+            meta: { cwd: opts.cwd },
+          })
+        }
+      } catch (err) {
+        // 创建失败不阻断 — 用户拿到的 sessionId 仍然有效,后续 runOnce
+        // 内部会重试 agents.create()。常见失败原因:sessionId 已存在
+        // (runOnce 先 get 找不到再 create 的两阶段防护已足够,但在两个
+        // 并发 prompt 同一 sid 时会失败 — 让 dsh 抛错比 zai 重复创建安全)。
+        if (process.env.ZAI_DEBUG === '1') {
+          console.warn(`[dsh-adapter] createSession(${sessionId}) pre-create failed:`, err)
+        }
+      }
       return toAgentSession(sessionId, opts.cwd)
     },
 
     async resumeSession(opts) {
       if (stopped) throw new Error('[dsh-adapter] shutdown, refusing resume')
       activeSessions++
+      // dsh-020 / transcript 恢复修复:resume 时尝试 `agents.resume(...)`
+      // 从持久化恢复 session + agent —— 用户重启 zai 后点 sidebar 的
+      // 历史会话,立即触发"恢复"。失败(ENOENT / 文件损坏)降级返回
+      // token,后续 runOnce 会从 disk 重新加载。
+      //
+      // 注意:不强制成功 — 旧的 dsh session(没存到 ctx 但磁盘上有)
+      // 也能正常 resume,只需 runOnce 阶段再次尝试。
+      try {
+        const agents = handle.ctx.get('agents') as {
+          resume?: (opts: { resumeSessionId: string }) => Promise<unknown>
+          get?: (id: unknown) => unknown
+        } | undefined
+        // 优先复用 ctx 里已存在的 agent(同进程多 turn 续传)。
+        if (agents?.get?.(opts.sessionId)) {
+          return toAgentSession(opts.sessionId, opts.cwd)
+        }
+        if (agents?.resume) {
+          await agents.resume({ resumeSessionId: opts.sessionId })
+          return toAgentSession(opts.sessionId, opts.cwd)
+        }
+      } catch (err) {
+        if (process.env.ZAI_DEBUG === '1') {
+          console.warn(`[dsh-adapter] resumeSession(${opts.sessionId}) pre-resume failed:`, err)
+        }
+      }
       return toAgentSession(opts.sessionId, opts.cwd)
     },
 
     async listSessions(opts): Promise<SessionMeta[]> {
-      // B3 T3.1（部分实现）：从隔离目录扫描读取会话列表
-      const { listDshSessions } = await import('@zn-ai/dsh-bridge')
-      const metas = await listDshSessions(cfg.dataDir, opts.cwd)
+      // dsh-020 / transcript 恢复修复:之前 listSessions 只读 dsh 磁盘目录
+      // 拿 SessionHeader,看不到 zai-side meta(model/title/mainAgent 等)。
+      // 现在通过 DshTranscriptAdapter 拿完整 meta — 与 sidebar 期望对齐
+      // (picker 选中行的 model 状态 / title 摘要都从这拿)。
+      const { DshTranscriptAdapter } = await import('@zn-ai/dsh-bridge')
+      const adapter = new DshTranscriptAdapter(handle.ctx, cfg.dataDir)
+      const metas = await adapter.list({ cwd: opts.cwd })
       return metas.map((m) => ({
         sessionId: m.sessionId,
-        title: m.sessionId, // title 由 B3 T3.2 完整对齐（读 SessionHeader + 首条 prompt 摘要）
+        title: m.title || m.sessionId,
         cwd: m.cwd,
         createdAt: m.createdAt,
         firstSeq: 0,
+        ...(m.model ? { model: m.model } : {}),
       }))
     },
 
-    async deleteSession(_opts) {
-      // B3 T3.1：删 dsh-sessions/<sid>/ 目录。当前 stub — 由 B3 deep-dive 实现。
-      void _opts
+    async deleteSession(opts) {
+      // dsh-020 / transcript 恢复修复:之前 deleteSession 是 no-op,sidebar
+      // 删除会话只清掉了前端 store,后端 dsh-sessions/<sid>/ 目录 + zai
+      // meta 一直留着,磁盘持续泄漏。现在调 DshTranscriptAdapter.remove
+      // 同时删 dsh session 目录 + zai meta 文件,与 GET list 互相对齐。
+      if (stopped) throw new Error('[dsh-adapter] shutdown, refusing delete')
+      try {
+        const { DshTranscriptAdapter } = await import('@zn-ai/dsh-bridge')
+        const adapter = new DshTranscriptAdapter(handle.ctx, cfg.dataDir)
+        await adapter.remove(opts.sessionId, { cwd: opts.cwd })
+      } catch (err) {
+        console.warn(`[dsh-adapter] deleteSession(${opts.sessionId}) failed:`, err)
+        throw err
+      }
     },
 
     async *run(opts): AsyncIterable<ServerEvent> {
