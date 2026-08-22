@@ -63,6 +63,11 @@
 # `invalid plugin, expect function or object with "apply" method`。dsh-base
 # 自己的 cordis.patch.yml 也不装载它们。省略。
 
+# Phase 3 P1: durable attachment store — 由 createDshRuntime.ts 单独
+# ctx.loader.create() 装载(不要重复登记到 patch,避免 cordis
+# "service 'attachments' has been registered" 报错)。详细见
+# createDshRuntime.ts:230-235 注入的 config。
+
 # agent-default-model / jobs / llm-retry / settings / credentials / llm-pi-ai /
 # session-persistence-jsonl 都由 createDshRuntime.start() 后续步骤单独
 # ctx.loader.create() 装载,避免重复注册触发 DUPLICATE_DIRECTORY / 已注册报错。

@@ -78,6 +78,16 @@ export async function createDshKernelAdapter(
     ?? ''
   const anthropicApiKeyEnv =
     process.env.ANTHROPIC_API_KEY ? 'ANTHROPIC_API_KEY' : 'ANTHROPIC_AUTH_TOKEN'
+  // Phase 3 P1: minimaxi 提供 MiniMax-M3 + MiniMax-M2.7 + M2.7-highspeed
+  // 三个 model;MiniMax-M3 / M2.7 支持 image input(per pi-ai 内置
+  // minimax-cn.json registry)。给 anthropic profile 注册完整 catalog
+  // + 显式声明 `input: ['text', 'image']`,dsh-llm-pi-ai 才能识别
+  // vision-capable model(否则 streamSimple 抛 `does not support image
+  // input (UNSUPPORTED_CONTENT)`)。
+  //
+  // 用户切换 model 时(zai front-end ModelStatusButton 选 MiniMax-M3),
+  // dsh-llm-pi-ai 在 streamSimple 时按 `model.input` 校验,声明过 image
+  // 的 model 才能接 image block。
   const anthropicProfile: import('@zn-ai/dsh-bridge').DshProviderProfile = {
     name: 'anthropic',
     displayName: 'Anthropic (Anthropic-compatible)',
@@ -85,7 +95,29 @@ export async function createDshKernelAdapter(
       process.env.ANTHROPIC_BASE_URL
       ?? 'https://api.anthropic.com',
     apiKeyEnv: anthropicApiKeyEnv,
-    models: defaultModel ? [defaultModel] : ['claude-3-5-sonnet-latest'],
+    models: [
+      // 显式声明的 vision-capable model — 必须列在前面让 dsh-llm-pi-ai
+      // catalog 优先匹配(否则 dsh-llm-pi-ai 找不到 model id 报
+      // UNKNOWN_MODEL)。
+      {
+        id: 'MiniMax-M3',
+        input: ['text', 'image'],
+        contextWindow: 1_000_000,
+        maxTokens: 128_000,
+      },
+      {
+        id: 'MiniMax-M2.7',
+        input: ['text', 'image'],
+        contextWindow: 204_800,
+        maxTokens: 131_072,
+      },
+      {
+        id: 'MiniMax-M2.7-highspeed',
+        input: ['text'],  // highspeed 不支持 image
+        contextWindow: 204_800,
+        maxTokens: 131_072,
+      },
+    ],
   }
   const handle = await bridge.createDshRuntime({
     dataDir: cfg.dataDir,
@@ -476,14 +508,15 @@ export async function createDshKernelAdapter(
       setCurrentSessionId(opts.session.sessionId)
 
       // Phase 3 P1: dsh factory 现在完整支持 OpenccContentBlock[] 多模态。
-      // 之前版本只取首个 block 的 text 字段,丢弃图片 — 导致 dsh 模式
-      // 图片 prompt 400。修复:把整个 block 数组透传给 runOnce。
-      // OpenccContentBlock 形态: { type: 'text' | 'image', text?, source? }
+      // OpenccContentBlock 形态:
       //   - text: { type: 'text', text: string }
       //   - image: { type: 'image', source: { type: 'base64', media_type, data } }
       //
-      // runOnce 内部把它们直接拼到 createUserMessage 的 content 数组,
-      // 由 dsh-session 按 Anthropic protocol 序列化发给模型。
+      // dsh-side 的 ImageBlock 用的是 dsh-attachment 引用(不是 raw base64):
+      //   ImageBlock { type: 'image', attachment: ImageAttachmentRef }
+      // 所以 image block 必须先存到 dsh-attachment service 拿 ref,再传
+      // ref 过去。zai 进程里 `handle.ctx.attachments` 就是 dsh 启动时
+      // 注入的 LocalAttachmentStore。
       let promptText = ''
       const contentBlocks: Array<{ type: string; [k: string]: unknown }> = []
       if (typeof opts.prompt === 'string') {
@@ -493,11 +526,40 @@ export async function createDshKernelAdapter(
           if (!block || typeof block !== 'object') continue
           const b = block as { type?: unknown; text?: unknown; source?: unknown }
           if (b.type === 'text') {
-            // text 块可以合到 promptText(避免 runOnce 重复拼接)
-            // 但为了保持原始顺序,还是放到 contentBlocks
             contentBlocks.push({ type: 'text', text: String(b.text ?? '') })
           } else if (b.type === 'image') {
-            contentBlocks.push({ type: 'image', source: b.source })
+            // image block → 存到 dsh-attachment store 拿 ref
+            const source = b.source as
+              | { type?: unknown; media_type?: unknown; data?: unknown }
+              | undefined
+            if (!source || typeof source.data !== 'string') {
+              throw new Error('invalid image block: missing source.data')
+            }
+            const mediaType = String(source.media_type ?? 'image/png')
+            const data = new Uint8Array(Buffer.from(source.data, 'base64'))
+            // attachments store 在 cordis ctx 上 — 直接 ctx.plugin 已经
+            // 注册过 LocalAttachmentStore 到 ctx.attachments
+            const store = handle.ctx.get('attachments') as
+              | {
+                  saveImage: (input: {
+                    data: Uint8Array
+                    mediaType: string
+                  }) => Promise<{
+                    attachmentId: string
+                    mediaType: string
+                    bytes: number
+                    width: number
+                    height: number
+                  }>
+                }
+              | undefined
+            if (!store) {
+              throw new Error(
+                '[dsh-adapter] attachment store unavailable — dsh-attachment-local 未装载?',
+              )
+            }
+            const ref = await store.saveImage({ data, mediaType })
+            contentBlocks.push({ type: 'image', attachment: ref })
           } else {
             // 未知 block 类型 — 透传,让 dsh 端决定怎么处理
             contentBlocks.push(b as { type: string; [k: string]: unknown })
@@ -530,7 +592,13 @@ export async function createDshKernelAdapter(
         // 在 agent/request waterfall 找不到 provider/model,抛
         // "has no provider/model" 错误(B1a T1.4 收口)。
         provider: anthropicProfile.name,
-        model: defaultModel || anthropicProfile.models[0],
+        // models 形态: string | DshModelEntry — 只接受 string id。
+        // defaultModel 也是 string,所以取首个 entry 的 id。
+        model:
+          defaultModel
+          || (typeof anthropicProfile.models[0] === 'string'
+            ? anthropicProfile.models[0]
+            : anthropicProfile.models[0]?.id),
       })) {
         const translated = bridge.translateSessionEvent(dshEvent, {
           sessionId: opts.session.sessionId,

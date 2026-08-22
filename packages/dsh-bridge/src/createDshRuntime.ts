@@ -31,6 +31,7 @@ import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { createRequire } from 'node:module'
 import { pathToFileURL } from 'node:url'
+import { join } from 'node:path'
 import { JsonlSessionPersistence } from '@deepseek-ai/dsh-session-persistence-jsonl'
 
 import { DSH_KERNEL, type KernelId } from './paths.js'
@@ -48,6 +49,31 @@ const require = createRequire(import.meta.url)
  * `launchEnvironmentOf(ctx).get(ref)` 拉取),不直接持有 key — 见
  * `dsh-llm-pi-ai/lib/index.js:2048-2057`。
  */
+
+/**
+ * Phase 3 P1: 模型声明。`string` 形态只声明 id(用内置 catalog 的默认 input);
+ * `DshModelEntry` 形态可以覆盖 `input`(`text` / `image` 等 modality),
+ * `contextWindow`, `maxTokens`。
+ *
+ * 重要:声明 `input: ['text', 'image']` 是让 dsh-llm-pi-ai 知道这个 model
+ * 接受图片输入的唯一方式。否则 dsh-llm-pi-ai streamSimple 时会
+ * 抛 `pi-ai model "X" does not support image input (UNSUPPORTED_CONTENT)`。
+ * 见 dsh-llm-pi-ai/lib/types/catalog.d.ts PiAiModelProfile.input 注释:
+ *   "Declaring images is what makes a hand-declared vision model usable"
+ */
+export interface DshModelEntry {
+  id: string
+  /**
+   * Request modalities model 接受。例如:
+   * - `['text']` — 纯文本(默认)
+   * - `['text', 'image']` — vision-capable
+   * - `['text', 'image', 'pdf']` — 文档理解
+   */
+  input?: Array<'text' | 'image' | 'pdf' | 'audio'>
+  contextWindow?: number
+  maxTokens?: number
+}
+
 export interface DshProviderProfile {
   /** 适配器路由名(对应 `ctx.llm.registerAdapter([name], adapter)` 的路由 key)。 */
   name: string
@@ -57,8 +83,15 @@ export interface DshProviderProfile {
   baseURL: string
   /** env 变量名(里面存 API key)。dsh-llm-pi-ai 按需读,不在进程里缓存。 */
   apiKeyEnv: string
-  /** 该路由暴露的模型 id 列表(dsh 路由接 `GenerateOptions.model` 必填其一)。 */
-  models: string[]
+  /**
+   * 该路由暴露的模型列表。形态:
+   * - `string` — 只声明 id,其他用 dsh-llm-pi-ai 内置 catalog 默认
+   * - `DshModelEntry` — 覆盖 input / contextWindow / maxTokens
+   *
+   * Phase 3 P1 起推荐用 DshModelEntry 给 vision model 显式声明
+   * `input: ['text', 'image']`,否则 dsh-llm-pi-ai 不知道 model 支持 image。
+   */
+  models: Array<string | DshModelEntry>
 }
 
 export interface CreateDshRuntimeOptions {
@@ -174,17 +207,43 @@ export async function createDshRuntime(
         config: { root: dshSessionsRootAbs(opts.dataDir) },
       })
 
+      // 2.5 Phase 3 P1: 注入 LocalAttachmentStore 的 dshHome — dsh-llm-pi-ai
+      //     streamSimple 在 image input 时通过 `ctx.get("attachments")` 拿
+      //     AttachmentStore 实例,没它会抛 `pi-ai image input requires the
+      //     durable attachment service`。用 zai dataDir 下的 `attachments/`
+      //     子目录,避免污染用户 ~/.dsh/。
+      await ctx.loader.create({
+        name: '@deepseek-ai/dsh-attachment-local',
+        config: { dshHome: join(opts.dataDir, 'attachments') },
+      })
+
       // 3. dsh-013 修复:装载 dsh-llm-pi-ai provider with provider profiles。
       //    dsh-llm-pi-ai 在 loader.create 阶段会调 settings.inject 拿
       //    ctx.settings(由 base patch 里的 dsh-settings-file 提供),把
       //    Config.providers 注册到 ctx.llm.registerAdapter。
+      //
+      // Phase 3 P1: 支持 DshModelEntry 形态,透传 input / contextWindow /
+      // maxTokens 给 dsh-llm-pi-ai — 否则 vision model 报
+      // `does not support image input (UNSUPPORTED_CONTENT)`。
       if (opts.providers.length > 0) {
         const providerEntries: Record<string, unknown> = {}
         for (const p of opts.providers) {
           providerEntries[p.name] = {
             baseURL: p.baseURL,
             apiKeyEnv: p.apiKeyEnv,
-            models: p.models.map((id) => ({ id })),
+            // models 形态: string → { id }; DshModelEntry → 直接传(只
+            // 保留 dsh-llm-pi-ai 认识的字段:id / input / contextWindow /
+            // maxTokens)。
+            models: p.models.map((m) => {
+              if (typeof m === 'string') return { id: m }
+              const entry: { id: string; input?: unknown; contextWindow?: number; maxTokens?: number } = {
+                id: m.id,
+              }
+              if (m.input !== undefined) entry.input = m.input
+              if (m.contextWindow !== undefined) entry.contextWindow = m.contextWindow
+              if (m.maxTokens !== undefined) entry.maxTokens = m.maxTokens
+              return entry
+            }),
             ...(p.displayName ? { displayName: p.displayName } : {}),
           }
         }
@@ -197,11 +256,17 @@ export async function createDshRuntime(
       // 4. 注入 dsh-agent-default-model 的 defaultModel。
       //    base patch 默认 provider='deepseek-official',但 zai-side 用
       //    anthropic 路由,所以覆盖一下。
+      //
+      // Phase 3 P1: defaultModel 字段提取 — models 可能是 string 或
+      // DshModelEntry。
+      const firstModel = opts.providers[0]?.models[0]
+      const firstModelId =
+        typeof firstModel === 'string' ? firstModel : (firstModel?.id ?? '')
       await ctx.loader.create({
         name: '@deepseek-ai/dsh-agent-default-model',
         config: {
           provider: opts.providers[0]?.name ?? 'anthropic',
-          model: opts.defaultModel || (opts.providers[0]?.models[0] ?? ''),
+          model: opts.defaultModel || firstModelId,
         },
       })
 
