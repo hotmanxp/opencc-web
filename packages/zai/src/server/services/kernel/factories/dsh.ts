@@ -536,7 +536,62 @@ export async function createDshKernelAdapter(
               throw new Error('invalid image block: missing source.data')
             }
             const mediaType = String(source.media_type ?? 'image/png')
-            const data = new Uint8Array(Buffer.from(source.data, 'base64'))
+            let data = new Uint8Array(Buffer.from(source.data, 'base64'))
+
+            // Phase 3 P1 follow-up: 大图压缩。
+            // dsh-attachment-local 默认 maxImageDimension=2000,超过抛
+            // `Image exceeds the configured per-side pixel limit`。
+            // 用户场景常见上传手机/电脑截图(3072x4096 起),必须压缩。
+            // 用 sharp (zai 已有依赖) resize 到 max 2048 保持比例,长边
+            // 优先压缩。压缩后保持原 mediaType(PNG → PNG,JPEG → JPEG)。
+            // 失败 fallback:原图上报,让 dsh-attachment 走自己的错误路径。
+            try {
+              const sharp = (await import('sharp')).default
+              const image = sharp(Buffer.from(data))
+              const meta = await image.metadata()
+              // dsh-attachment-local 默认 maxImageDimension=2000(超过抛
+              // "Image exceeds the configured per-side pixel limit")。我们
+              // 留 1px 余量到 1999,留 sharp 的 fit:'inside' + 等比缩放空间。
+              const MAX_DIM = 1999
+              if (meta.width && meta.height && (meta.width > MAX_DIM || meta.height > MAX_DIM)) {
+                if (process.env.ZAI_DEBUG === '1') {
+                  console.log(
+                    `[dsh-adapter] resizing ${meta.width}x${meta.height} image to max ${MAX_DIM}`,
+                  )
+                }
+                // 用 .resize 保持原 mediaType,fit:'inside' + withoutEnlargement
+                // 保证长边 ≤ MAX_DIM,等比缩放。转回 Buffer 再 new Uint8Array,
+                // dsh-attachment 校验用 raw bytes (sha256 + 头部探测)。
+                const resized = await image
+                  .resize({
+                    width: meta.width >= meta.height ? MAX_DIM : undefined,
+                    height: meta.height > meta.width ? MAX_DIM : undefined,
+                    fit: 'inside',
+                    withoutEnlargement: true,
+                  })
+                  .toBuffer()
+                if (process.env.ZAI_DEBUG === '1') {
+                  const newMeta = await sharp(resized).metadata()
+                  console.log(
+                    `[dsh-adapter] resized to ${newMeta.width}x${newMeta.height} (${resized.length} bytes)`,
+                  )
+                }
+                // Buffer.from(buffer) 在 Node.js 类型下让 Uint8Array<ArrayBufferLike>
+                // 转成 Uint8Array<ArrayBuffer>(拷贝语义,符合 dsh-attachment
+                // saveImage 的 input.data: Uint8Array 约束)。
+                data = new Uint8Array(Buffer.from(resized))
+              } else if (process.env.ZAI_DEBUG === '1') {
+                console.log(
+                  `[dsh-adapter] image ${meta.width}x${meta.height} under limit, no resize`,
+                )
+              }
+            } catch (resizeErr) {
+              if (process.env.ZAI_DEBUG === '1') {
+                console.warn('[dsh-adapter] sharp resize failed, using original:', resizeErr)
+              }
+              // 继续用原图,让 dsh-attachment 校验失败时给清晰错误
+            }
+
             // attachments store 在 cordis ctx 上 — 直接 ctx.plugin 已经
             // 注册过 LocalAttachmentStore 到 ctx.attachments
             const store = handle.ctx.get('attachments') as
