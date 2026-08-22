@@ -102,16 +102,6 @@ export async function createDshRuntime(
 
       // 1. 首次 loader await — 确保全部 plugin 完成挂载（dsh-headless index.js:99 同款）
       await ctx.get('loader')?.await()
-
-      // 2. 把 defaults 存到 globalThis 临时桥（Phase 2.4 移除）。
-      //    历史背景：B0 时期 dsh Cordis config schema 缺失用 globalThis 兜底。
-      //    dsh-base/dsh-agent 已提供标准 Config schema，本桥会在 Phase 2.4 替换。
-      ;(globalThis as Record<string, unknown>).__zaiDshDefaults = {
-        defaultCwd: opts.defaultCwd,
-        runtimeId: opts.runtimeId,
-        dataDir: opts.dataDir,
-        defaultModel: opts.defaultModel,
-      }
     },
 
     async shutdown() {
@@ -153,12 +143,8 @@ export async function createDshRuntime(
       }
 
       // 4. 清 globalThis 桥 — 由调用方 (KernelAdapter.shutdown) 负责。
-      // 5. 清 globalThis dsh defaults
-      if ((globalThis as Record<string, unknown>).__zaiDshDefaults) {
-        delete (globalThis as Record<string, unknown>).__zaiDshDefaults
-      }
 
-      // 6. 减计数
+      // 5. 减计数
       activeDshHandles--
     },
   }
