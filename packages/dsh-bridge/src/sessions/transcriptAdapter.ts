@@ -228,21 +228,248 @@ export class DshTranscriptAdapter {
 
   // ─── messages 形态对齐 opencc ────────────────────────────────────
 
+  /**
+   * dsh SessionEvent → zai 前端期望的 opencc Anthropic 形态。
+   *
+   * zai 前端 `loadTranscriptMessages` (useAgentStore.ts:431) 期望每个 msg:
+   *   { type: 'user' | 'assistant' | 'tool_use' | 'tool_result',
+   *     message: { role: 'user' | 'assistant', content: string | ContentBlock[] },
+   *     uuid, timestamp, isMeta?, runtime?: { turnIndex } }
+   *
+   * dsh SessionEvent 形态(`dsh-session/lib/types/types.d.ts`):
+   *   - 'user/message'      data: UserMessage = { content, source }
+   *   - 'assistant/message' data: { message: AssistantMessage, usage?, index? }
+   *   - 'assistant/chunk'   data: { turn, step, chunk: StreamChunk } — 流式增量
+   *   - 'tool/call'         data: { call: { id, name, input, ... } }
+   *   - 'tool/result'       data: { callId, output, isError }
+   *   - 'turn/start' / 'turn/end' / 'step/start' / 'step/end' — 仅 meta
+   *   - 'session/title'     data: { title } — meta 字段,不渲染
+   *
+   * 转换策略:
+   *   - user/message       → type:'user', message:{role:'user', content}
+   *   - assistant/message  → type:'assistant', message:{role:'assistant', content}
+   *   - assistant/chunk    → reasoning-delta / text-delta 累积到 per-turn buffer,
+   *                          在 assistant/message 到达时合并到 content 数组
+   *                          (thinking 块排在 text 块之前)
+   *   - tool/call          → type:'tool_use', message:{role:'assistant', content:[{type:'tool_use',id,name,input}]}
+   *   - tool/result        → type:'tool_result', message:{role:'user', content:[{type:'tool_result',tool_use_id,content,is_error}]}
+   *   - turn/step/*        → 跳过(只 update 内部 turnIndex 计数)
+   *   - session/title      → 跳过(meta 走 zai-side .meta.json,不在 transcript 里)
+   *   - 其他               → 跳过(ignorable,前端不消费)
+   *
+   * **thinking / reasoning 形态差异**(必须重写,见 dsh-021):
+   *   - dsh ReasoningBlock (`dsh-llm/lib/types/message.d.ts`):
+   *       { type: 'reasoning', text: string }
+   *   - zai 前端期望:
+   *       { type: 'thinking', thinking: string }
+   *   适配器在 assistant/message 阶段把 content 数组里 dsh 的 `reasoning` 块
+   *   改写为 zai `thinking` 块(类型 + 字段名都改)。
+   *
+   * `uuid` 用 dsh `seq`(同 session 内单调递增,稳定标识)
+   * `timestamp` 用 dsh `time`(Unix ms)
+   * `isMeta` 透传 dsh `surfaceOp === 'append' && source.kind !== 'user'` 时设 true
+   *   (对齐 opencc isMeta:SubagentNotifier 注入的 <task-notification> 等
+   *   系统 user 消息带 isMeta:true,前端不渲染但 LLM 可见 — 主计划 §6)
+   */
   private static eventsToMessages(events: RawSessionEvent[]): any[] {
-    // dsh event {type, seq, time, data} → opencc {type, ts, seq, ...data}
-    // (data 平铺到 message 对象内,顶层 type 与 ts 由 zai 渲染层消费)。
     const out: any[] = []
+    let currentTurn = 0
+    // per-turn buffer for assistant/chunk 累积(reasoning-delta / text-delta),
+    // 在同 turn 的 assistant/message 到达时 flush 合并到 content 数组。
+    // key = turn 序号(dsh-side 数据)。多 turn 并存时按 turn 隔离。
+    const chunkPending = new Map<number, { reasoning: string; text: string }>()
+
+    const flushChunkPending = (turn: number) => chunkPending.get(turn)
+
     for (const e of events) {
       const data = (e.data ?? {}) as Record<string, unknown>
-      const message: Record<string, unknown> = {
-        type: e.type,
-        ts: e.time,
-        seq: e.seq,
-        ...data,
+
+      switch (e.type) {
+        case 'turn/start':
+          currentTurn = (data.turn as number) ?? currentTurn
+          continue
+        case 'turn/end':
+          currentTurn = (data.turn as number) ?? currentTurn
+          continue
+        case 'step/start':
+        case 'step/end':
+          continue
+        case 'session/title':
+        case 'session/end-seed':
+        case 'compaction/start':
+        case 'compaction/end':
+        case 'compaction/prune':
+        case 'compaction/summary':
+        case 'agent-preset/selected':
+        case 'agent/inbox/spliced':
+        case 'approval/asked':
+        case 'approval/decided':
+        case 'approval/policy':
+        case 'command/run':
+        case 'command/done':
+        case 'feedback/record':
+        case 'goal/change':
+        case 'hook/invoked':
+        case 'hook/result':
+        case 'llm/retry':
+        case 'llm/retry-started':
+        case 'permission/preset':
+        case 'plan/mode':
+        case 'request/context':
+        case 'request/header':
+        case 'sandbox/mode':
+        case 'schedule/change':
+        case 'subagent/descriptor':
+        case 'team/member':
+        case 'team/message/delivered':
+        case 'team/message/queued':
+        case 'team/task':
+        case 'todo/write':
+        case 'tool-workflow/agent-end':
+        case 'tool-workflow/agent-start':
+        case 'tool-workflow/run-end':
+        case 'tool-workflow/run-start':
+        case 'tool/code-dispatch':
+        case 'tool/code-dispatch-start':
+        case 'web/deepseek-search-llm-request':
+        case 'session/title-llm-request':
+          continue
+
+        case 'user/message': {
+          const um = data as { content?: unknown; source?: { kind?: string } }
+          const isMeta = um.source?.kind !== 'user'
+          out.push({
+            type: 'user',
+            uuid: `e-${e.seq}`,
+            timestamp: e.time,
+            runtime: { turnIndex: currentTurn },
+            ...(isMeta ? { isMeta: true } : {}),
+            message: { role: 'user', content: um.content ?? '' },
+          })
+          break
+        }
+
+        case 'assistant/chunk': {
+          // dsh 流式累积(`StreamChunk` from dsh-llm/lib/types/message.d.ts):
+          //   - 'reasoning-delta' { text }  → thinking 来源
+          //   - 'text-delta'       { text }  → text 来源(完整 text 也会在
+          //                                       assistant/message.content 出现,
+          //                                       此处累积用于 chunk-only 路径)
+          //   - 'block-start' / 'tool-call-delta' / 其他 → 跳过(text/reasoning
+          //     之外的 block 由 assistant/message content 数组承载)
+          // 按 turn 隔离 — 后续 assistant/message 到达时按当前 turn flush。
+          const cd = data as {
+            turn?: number
+            chunk?: { type?: string; text?: string }
+          }
+          const turn = (cd.turn ?? currentTurn) as number
+          const chunk = cd.chunk
+          if (!chunk) continue
+          let p = chunkPending.get(turn)
+          if (!p) {
+            p = { reasoning: '', text: '' }
+            chunkPending.set(turn, p)
+          }
+          if (chunk.type === 'reasoning-delta' && typeof chunk.text === 'string') {
+            p.reasoning += chunk.text
+          } else if (chunk.type === 'text-delta' && typeof chunk.text === 'string') {
+            p.text += chunk.text
+          }
+          // 其他 chunk type 跳过 — 同 dsh-side runtime 约定。
+          continue
+        }
+
+        case 'assistant/message': {
+          const am = data as { message?: { role?: string; content?: unknown } }
+          const rawContent = Array.isArray(am.message?.content)
+            ? (am.message!.content as Array<{ type?: string; text?: string; thinking?: string }>)
+            : []
+
+          // 1) dsh reasoning block ({type:'reasoning', text}) → zai thinking block
+          //    形态重写:type 改名 + 字段 text → thinking。
+          const rewrittenContent = rawContent.map((b): Record<string, unknown> => {
+            if (b && b.type === 'reasoning' && typeof b.text === 'string') {
+              return { type: 'thinking', thinking: b.text }
+            }
+            return b as Record<string, unknown>
+          })
+
+          // 2) 把 per-turn chunk 累积的 reasoning 注入为 thinking 块(排在最前)。
+          //    仅当 message.content 里没有 reasoning 块时才注入 chunk 累积值 —
+          //    若 message.content 已有(权威源),以它为准,避免重复。
+          //    简化策略:看到 reasoning block 已存在就跳过 chunk 累积(测试 path A+B 验证)。
+          const pending = flushChunkPending(currentTurn)
+          const hasReasoning = rewrittenContent.some((b) => b.type === 'thinking')
+          const finalContent: Record<string, unknown>[] = []
+          if (pending?.reasoning && !hasReasoning) {
+            finalContent.push({ type: 'thinking', thinking: pending.reasoning })
+          }
+          for (const b of rewrittenContent) finalContent.push(b)
+
+          // 3) flush 后清理(无论是否注入都清,避免下次复用)
+          if (pending) chunkPending.delete(currentTurn)
+
+          out.push({
+            type: 'assistant',
+            uuid: `e-${e.seq}`,
+            timestamp: e.time,
+            runtime: { turnIndex: currentTurn },
+            message: { role: 'assistant', content: finalContent },
+          })
+          break
+        }
+
+        case 'tool/call': {
+          const tc = (data as { call?: { id?: string; name?: string; input?: unknown } })
+          const call = tc.call ?? {}
+          out.push({
+            type: 'tool_use',
+            uuid: `e-${e.seq}`,
+            timestamp: e.time,
+            runtime: { turnIndex: currentTurn },
+            message: {
+              role: 'assistant',
+              content: [
+                {
+                  type: 'tool_use',
+                  id: call.id ?? '',
+                  name: call.name ?? '',
+                  input: call.input ?? {},
+                },
+              ],
+            },
+          })
+          break
+        }
+
+        case 'tool/result': {
+          const tr = (data as { callId?: string; output?: unknown; isError?: boolean })
+          out.push({
+            type: 'tool_result',
+            uuid: `e-${e.seq}`,
+            timestamp: e.time,
+            runtime: { turnIndex: currentTurn },
+            message: {
+              role: 'user',
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: tr.callId ?? '',
+                  content: tr.output ?? '',
+                  is_error: tr.isError === true,
+                },
+              ],
+            },
+          })
+          break
+        }
+
+        default:
+          // 未知 type — 跳过。dsh 协议要求写入端用 KNOWN_SESSION_EVENT_TYPES 集合里的 key;
+          // 任何 unknown 都会被 dsh-side SessionLogScanner 拒绝加载,不会真的进入持久化。
+          // 兜底分支保险用。
+          continue
       }
-      if (e.surfaceOp) message.surfaceOp = e.surfaceOp
-      if (e.sourceEventSeqs) message.sourceEventSeqs = e.sourceEventSeqs
-      out.push(message)
     }
     return out
   }

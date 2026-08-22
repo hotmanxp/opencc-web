@@ -113,12 +113,20 @@ describe('DshTranscriptAdapter (dsh-020)', () => {
     }))
 
     const read = await adapter.read(sid, { cwd })
-    expect(read.messages.length).toBe(5)
-    expect(read.messages[0].type).toBe('turn/start')
-    expect(read.messages[0].ts).toBe(1700000000001)
-    expect(read.messages[0].seq).toBe(0)
-    expect(read.messages[0].turn).toBe(1) // data 平铺
-    expect(read.messages[1].type).toBe('user/message')
+    // dsh 5 个 events 经转换只剩 2 个可渲染 msg:
+    //   - turn/start, turn/end, assistant/chunk → 跳过
+    //   - user/message, assistant/message → 产出
+    expect(read.messages.length).toBe(2)
+    expect(read.messages[0].type).toBe('user')
+    expect(read.messages[0].uuid).toBe('e-1')
+    expect(read.messages[0].timestamp).toBe(1700000000002)
+    expect(read.messages[0].message.role).toBe('user')
+    expect(read.messages[0].message.content).toBe('hello world')
+    expect(read.messages[1].type).toBe('assistant')
+    expect(read.messages[1].uuid).toBe('e-3')
+    expect(read.messages[1].timestamp).toBe(1700000000004)
+    expect(read.messages[1].message.role).toBe('assistant')
+    expect(read.messages[1].message.content).toEqual([{ type: 'text', text: 'hi' }])
     expect(read.meta.cwd).toBe('/Users/x/y')
     expect(read.meta.createdAt).toBe(1700000000000)
     expect(read.meta.model).toBe('MiniMax-M3')
@@ -150,6 +158,208 @@ describe('DshTranscriptAdapter (dsh-020)', () => {
     })
     const read2 = await adapter.read(sid, { cwd })
     expect(read2.meta.title).toBe('fallback title here')
+  })
+
+  it('read 转 dsh events → opencc Anthropic 形态(对齐 useAgentStore.loadTranscriptMessages)', async () => {
+    const sid = 'sess-shape'
+    ctx.storage.set(sid, {
+      meta: { cwd: '/Users/x/y', createdAt: 0, id: sid },
+      events: [
+        // turn start 计数但不渲染
+        { type: 'turn/start', seq: 0, time: 100, data: { turn: 1 } },
+        // user/message with text content
+        { type: 'user/message', seq: 1, time: 101, data: { content: 'hi there', source: { kind: 'user' } } },
+        // assistant/text
+        { type: 'assistant/message', seq: 2, time: 102, data: { message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] } } },
+        // tool call
+        { type: 'tool/call', seq: 3, time: 103, data: { call: { id: 'call-1', name: 'Bash', input: { cmd: 'ls' } } } },
+        // tool result
+        { type: 'tool/result', seq: 4, time: 104, data: { callId: 'call-1', output: 'file.txt', isError: false } },
+        // system user message (subagent notification etc.) — isMeta true,前端跳过
+        { type: 'user/message', seq: 5, time: 105, data: { content: '<task-notification>foo</task-notification>', source: { kind: 'subagent_notification' } } },
+        // turn end
+        { type: 'turn/end', seq: 6, time: 106, data: { turn: 1, reason: 'completed' } },
+      ],
+    })
+    mkdirSync(join(tmpDir, 'dsh-session-meta', '--Users-x-y--'), { recursive: true })
+    writeFileSync(join(tmpDir, 'dsh-session-meta', '--Users-x-y--', `${sid}.meta.json`), JSON.stringify({
+      cwd: '/Users/x/y', model: '', sessionId: sid, createdAt: 0,
+    }))
+    const read = await adapter.read(sid, { cwd: '/Users/x/y' })
+    // 7 events:turn/start + turn/end 跳过,5 产出(system user isMeta=true
+    // 但 zai adapter 仍产出形态,前端 loadTranscriptMessages 按 isMeta 过滤)
+    expect(read.messages.length).toBe(5)
+    // 1. user text
+    expect(read.messages[0]).toMatchObject({
+      type: 'user',
+      uuid: 'e-1',
+      timestamp: 101,
+      runtime: { turnIndex: 1 },
+      message: { role: 'user', content: 'hi there' },
+    })
+    expect(read.messages[0].isMeta).toBeUndefined()
+    // 2. assistant text
+    expect(read.messages[1]).toMatchObject({
+      type: 'assistant',
+      uuid: 'e-2',
+      timestamp: 102,
+      runtime: { turnIndex: 1 },
+      message: { role: 'assistant', content: [{ type: 'text', text: 'hello' }] },
+    })
+    // 3. tool_use
+    expect(read.messages[2]).toMatchObject({
+      type: 'tool_use',
+      uuid: 'e-3',
+      timestamp: 103,
+      runtime: { turnIndex: 1 },
+      message: {
+        role: 'assistant',
+        content: [{ type: 'tool_use', id: 'call-1', name: 'Bash', input: { cmd: 'ls' } }],
+      },
+    })
+    // 4. tool_result
+    expect(read.messages[3]).toMatchObject({
+      type: 'tool_result',
+      uuid: 'e-4',
+      timestamp: 104,
+      runtime: { turnIndex: 1 },
+      message: {
+        role: 'user',
+        content: [{ type: 'tool_result', tool_use_id: 'call-1', content: 'file.txt', is_error: false }],
+      },
+    })
+    // 5. system user (subagent notification) — isMeta true,前端跳过
+    expect(read.messages[4]).toMatchObject({
+      type: 'user',
+      uuid: 'e-5',
+      timestamp: 105,
+      isMeta: true,
+      message: { role: 'user', content: '<task-notification>foo</task-notification>' },
+    })
+  })
+
+  // ─── thinking / reasoning 翻译 ────────────────────────────────────
+  //
+  // dsh ↔ zai 形态差异:
+  //   - dsh ReasoningBlock = { type: 'reasoning', text: string }
+  //   - zai 前端期望 block  = { type: 'thinking', thinking: string }
+  //
+  // reasoning 数据来源(任一):
+  //   A. assistant/message.content 数组里直接含 reasoning block(dsh 端装配完成)
+  //   B. assistant/chunk.reasoning-delta 流式累积(dsh-side 落到 session.log)
+  //
+  // 这两个测试覆盖两条路径 → eventsToMessages 必须把两种来源都还原为 zai thinking 块。
+
+  it('thinking 翻译 path A: message.content 里的 dsh reasoning block 重写为 zai thinking block', async () => {
+    const sid = 'sess-think-a'
+    ctx.storage.set(sid, {
+      meta: { cwd: '/Users/x/y', createdAt: 0, id: sid },
+      events: [
+        { type: 'turn/start', seq: 0, time: 100, data: { turn: 1 } },
+        { type: 'user/message', seq: 1, time: 101, data: { content: 'ping', source: { kind: 'user' } } },
+        {
+          type: 'assistant/message', seq: 2, time: 102,
+          data: {
+            message: {
+              role: 'assistant',
+              content: [
+                // dsh reasoning block(type='reasoning' + text)— 必须重写为 zai 形态
+                { type: 'reasoning', text: 'let me think about this carefully' },
+                { type: 'text', text: 'pong' },
+              ],
+            },
+          },
+        },
+        { type: 'turn/end', seq: 3, time: 103, data: { turn: 1, reason: 'completed' } },
+      ],
+    })
+    const cwd = '/Users/x/y'
+    mkdirSync(join(tmpDir, 'dsh-session-meta', '--Users-x-y--'), { recursive: true })
+    writeFileSync(join(tmpDir, 'dsh-session-meta', '--Users-x-y--', `${sid}.meta.json`), JSON.stringify({
+      cwd, model: '', sessionId: sid, createdAt: 0,
+    }))
+    const read = await adapter.read(sid, { cwd })
+    // 期望:content 数组里 reasoning 块被改写为 {type:'thinking', thinking:'...'},
+    // text 块保持不变,顺序保留(reasoning 在前)
+    const assistantMsg = read.messages.find((m) => m.type === 'assistant')
+    expect(assistantMsg).toBeDefined()
+    expect(assistantMsg!.message.content).toEqual([
+      { type: 'thinking', thinking: 'let me think about this carefully' },
+      { type: 'text', text: 'pong' },
+    ])
+  })
+
+  it('thinking 翻译 path B: assistant/chunk 累积 reasoning-delta → assistant/message 注入为 thinking 块', async () => {
+    const sid = 'sess-think-b'
+    ctx.storage.set(sid, {
+      meta: { cwd: '/Users/x/y', createdAt: 0, id: sid },
+      events: [
+        { type: 'turn/start', seq: 0, time: 100, data: { turn: 1 } },
+        { type: 'user/message', seq: 1, time: 101, data: { content: 'q', source: { kind: 'user' } } },
+        // dsh 流式:多个 reasoning-delta + text-delta 累积
+        { type: 'assistant/chunk', seq: 2, time: 102, data: { turn: 1, step: 1, chunk: { type: 'reasoning-delta', text: 'thinking part 1. ' } } },
+        { type: 'assistant/chunk', seq: 3, time: 103, data: { turn: 1, step: 1, chunk: { type: 'text-delta', text: 'answer part 1. ' } } },
+        { type: 'assistant/chunk', seq: 4, time: 104, data: { turn: 1, step: 1, chunk: { type: 'reasoning-delta', text: 'thinking part 2.' } } },
+        { type: 'assistant/chunk', seq: 5, time: 105, data: { turn: 1, step: 1, chunk: { type: 'text-delta', text: 'answer part 2.' } } },
+        // 装配后的 message — content 里可能只有 text(reasoning 由 chunk 累积负责)
+        { type: 'assistant/message', seq: 6, time: 106, data: { message: { role: 'assistant', content: [{ type: 'text', text: 'answer part 1. answer part 2.' }] } } },
+        { type: 'turn/end', seq: 7, time: 107, data: { turn: 1, reason: 'completed' } },
+      ],
+    })
+    const cwd = '/Users/x/y'
+    mkdirSync(join(tmpDir, 'dsh-session-meta', '--Users-x-y--'), { recursive: true })
+    writeFileSync(join(tmpDir, 'dsh-session-meta', '--Users-x-y--', `${sid}.meta.json`), JSON.stringify({
+      cwd, model: '', sessionId: sid, createdAt: 0,
+    }))
+    const read = await adapter.read(sid, { cwd })
+    const assistantMsg = read.messages.find((m) => m.type === 'assistant')
+    expect(assistantMsg).toBeDefined()
+    // 期望:reasoning-delta 累积成单个 thinking 块,排在 text 块之前
+    expect(assistantMsg!.message.content).toEqual([
+      { type: 'thinking', thinking: 'thinking part 1. thinking part 2.' },
+      { type: 'text', text: 'answer part 1. answer part 2.' },
+    ])
+  })
+
+  it('thinking 翻译 path A+B 双源并存:message.content 已有 reasoning + chunk 也累积时,两者合并(不重复)', async () => {
+    const sid = 'sess-think-ab'
+    ctx.storage.set(sid, {
+      meta: { cwd: '/Users/x/y', createdAt: 0, id: sid },
+      events: [
+        { type: 'turn/start', seq: 0, time: 100, data: { turn: 1 } },
+        { type: 'user/message', seq: 1, time: 101, data: { content: 'q', source: { kind: 'user' } } },
+        // chunk 也累积了 reasoning(罕见 — 但如果 dsh 写了,我们要正确处理)
+        { type: 'assistant/chunk', seq: 2, time: 102, data: { turn: 1, step: 1, chunk: { type: 'reasoning-delta', text: 'from chunk' } } },
+        // message.content 里同时有 reasoning block(权威源,优先于 chunk)
+        {
+          type: 'assistant/message', seq: 3, time: 103,
+          data: {
+            message: {
+              role: 'assistant',
+              content: [
+                { type: 'reasoning', text: 'from message.content' },
+                { type: 'text', text: 'answer' },
+              ],
+            },
+          },
+        },
+        { type: 'turn/end', seq: 4, time: 104, data: { turn: 1, reason: 'completed' } },
+      ],
+    })
+    const cwd = '/Users/x/y'
+    mkdirSync(join(tmpDir, 'dsh-session-meta', '--Users-x-y--'), { recursive: true })
+    writeFileSync(join(tmpDir, 'dsh-session-meta', '--Users-x-y--', `${sid}.meta.json`), JSON.stringify({
+      cwd, model: '', sessionId: sid, createdAt: 0,
+    }))
+    const read = await adapter.read(sid, { cwd })
+    const assistantMsg = read.messages.find((m) => m.type === 'assistant')
+    expect(assistantMsg).toBeDefined()
+    // 期望:message.content 里的 reasoning 已改写为 thinking;chunk 累积的
+    // 在 message 来时已 flush(per-turn buffer),不重复出现。
+    expect(assistantMsg!.message.content).toEqual([
+      { type: 'thinking', thinking: 'from message.content' },
+      { type: 'text', text: 'answer' },
+    ])
   })
 
   // ─── list ──────────────────────────────────────────────────────────
