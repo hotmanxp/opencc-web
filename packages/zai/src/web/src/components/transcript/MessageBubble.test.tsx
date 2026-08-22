@@ -436,3 +436,79 @@ describe("MessageBubble — user bubble maxWidth", () => {
     expect(userBubbleMaxWidth(container)).toBe("70%")
   })
 })
+
+/**
+ * ToolCallBlock 兜底分支 — 缺失 toolName 时三层降级
+ * （对应截图 "未知工具 (id:)" 修复，详见 MessageBubble.tsx:450-477）
+ *
+ * 优先级：
+ *   1. msg.name 有非空值 → 真实工具名
+ *   2. input 第一字段是字符串 → "字段值…"（MCP 工具、Skill 等）
+ *   3. 什么都没有 → "未知工具 (id:xxxxxxxx)"
+ */
+describe("MessageBubble — ToolCallBlock name 兜底 (Phase 2 截图症状 A 修复)", () => {
+  function renderToolCall(name: string | undefined, input: Record<string, unknown> | undefined, toolUseId = "toolu_abc123def") {
+    return render(
+      <MessageBubble
+        msg={{
+          eventId: `tool-${toolUseId}`,
+          sessionId: "s1",
+          ts: 1,
+          turnIndex: 0,
+          type: "tool_use:start",
+          toolUseId,
+          name,
+          input,
+        }}
+      />,
+    )
+  }
+
+  test("name 真实有值: 直接展示", () => {
+    const { container } = renderToolCall("Bash", { command: "ls" })
+    // ToolUsePill 里包含 ToolOutlined + name + status tag
+    expect(container.textContent).toContain("Bash")
+    expect(container.textContent).not.toContain("未知工具")
+  })
+
+  test("name 是空字符串: input 第一字段字符串降级显示", () => {
+    // dsh 内核 toolName='' 的常见场景: input 是 { name: "plugin:foo:bar" }
+    // 或 { path: "/etc/hosts" } — 用第一字段值代替 id 兜底,可读性更好
+    const { container } = renderToolCall("", { name: "plugin:foo:bar" })
+    expect(container.textContent).toContain("plugin:foo:bar")
+    expect(container.textContent).not.toContain("未知工具")
+  })
+
+  test("name 是 undefined + input 第一字段是字符串: 走 input 降级", () => {
+    const { container } = renderToolCall(undefined, { path: "/etc/hosts" })
+    expect(container.textContent).toContain("/etc/hosts")
+    expect(container.textContent).not.toContain("未知工具")
+  })
+
+  test("name 是空 + input 第一字段是非字符串: JSON.stringify 降级", () => {
+    const { container } = renderToolCall("", { config: { foo: "bar" } })
+    // 非字符串字段会 JSON.stringify,然后取前 40 字 + …
+    expect(container.textContent).toMatch(/\{.*foo.*\}/)
+    expect(container.textContent).not.toContain("未知工具")
+  })
+
+  test("name 是空 + input 第一字段值太长: 截到 40 字 + …", () => {
+    const longName = "x".repeat(100)
+    const { container } = renderToolCall("", { name: longName })
+    // 截断标记 "…" 出现;不出现完整 100 字
+    expect(container.textContent).toContain("…")
+    expect(container.textContent).not.toContain(longName)
+  })
+
+  test("name 是空 + input 完全为空: 退到 '未知工具 (id:xxxxxxxx)' 兜底", () => {
+    const { container } = renderToolCall("", {}, "toolu_abc123def")
+    expect(container.textContent).toContain("未知工具")
+    // toolUseId 后 8 位是 'bc123def'(slice(-8) 从倒数第 8 个起取)
+    expect(container.textContent).toContain("bc123def")
+  })
+
+  test("name 是空 + input 是 null/undefined 字段: 不崩,退到兜底", () => {
+    const { container } = renderToolCall("", { foo: null })
+    expect(container.textContent).toContain("未知工具")
+  })
+})

@@ -450,11 +450,31 @@ function ToolUsePill({ name, status }: { name: string; status: ToolStatus }) {
 const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMessage }) {
   const rawName = (msg.name as string | undefined)?.trim() || ''
   const shortId = (msg.toolUseId as string | undefined)?.slice(-8) ?? '????????'
-  // 兜底: 模型 SSE 流里有个别时刻 toolName 没带过来(已知 race condition,
-  // tool_use:start 与 content_block_start 都在抢),显示 "未知工具 (id:xxxxxxxx)"
-  // 比 "unknown" 强,user 至少能根据 id 复制去后端日志 grep.
-  const name = rawName || `未知工具 (id:${shortId})`
   const input = (msg.input as Record<string, unknown>) || {}
+  // 兜底: 模型 SSE 流里有个别时刻 toolName 没带过来(已知 race condition,
+  // tool_use:start 与 content_block_start 都在抢)。三层兜底:
+  //   1. 真实 toolName(rawName)
+  //   2. input 第一个字段的值(如 { name: "plugin:foo:bar" } → "plugin:foo:bar",
+  //      { path: "/etc/hosts" } → "/etc/hosts") — 大部分工具 input 都能说出
+  //      自己是谁,比单纯显示 id 更可读。
+  //   3. 真的什么都没有 → "未知工具 (id:xxxxxxxx)",user 至少能根据 id 复制
+  //      去后端日志 grep。
+  const firstInputValue = (() => {
+    const firstKey = Object.keys(input)[0]
+    if (!firstKey) return ''
+    const v = input[firstKey]
+    if (v == null) return ''
+    if (typeof v === 'string') return v.trim()
+    try {
+      return JSON.stringify(v)
+    } catch {
+      return ''
+    }
+  })()
+  const name =
+    rawName ||
+    (firstInputValue ? `${firstInputValue.slice(0, 40)}…` : '') ||
+    `未知工具 (id:${shortId})`
   // Agent 工具的 pill 不显示泛化的 "Agent" — 展示实际派发的 subagent_type
   // (Explore / Plan / general-purpose / 用户自定义), 让用户一眼看出当前是
   // 哪种 subagent 在跑. 格式 `<type> (agent)` 与 opencc AssistantToolUseMessage
