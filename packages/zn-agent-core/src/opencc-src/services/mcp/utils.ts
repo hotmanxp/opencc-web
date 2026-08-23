@@ -403,7 +403,13 @@ export function getProjectMcpServerStatus(
     return 'approved'
   }
 
-  return 'pending'
+  // ZAI PATCH: removed project .mcp.json approval gate.
+  // Upstream returns 'pending' here, which causes config.ts:1166 to silently
+  // drop every project MCP server unless the user explicitly approves via the
+  // approval UI. We trust the project .mcp.json (already gated by
+  // hasTrustDialogAccepted + enterprise policy) and auto-approve all servers.
+  // To revert: change back to `return 'pending'`.
+  return 'approved'
 }
 
 /**

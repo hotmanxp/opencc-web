@@ -106,7 +106,7 @@ export async function createOpenccKernelAdapter(
     defaultModel:
       process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
       ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
-    connectMcp: false,
+    connectMcp: true,
     interactive: true,
   })
   // B7 flip-and-cleanup: 暴露给 zai 服务层 `getRuntime()` accessor,
