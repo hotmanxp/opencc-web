@@ -222,10 +222,11 @@ function ProviderForm({
                       size="small"
                       icon={<EditOutlined />}
                       disabled={!item.id}
+                      aria-label="编辑 Provider"
                       onClick={() => openEditModal(item)}
                     />
-                    <Popconfirm title="确定删除？" onConfirm={() => item.id && handleDelete(item.id)}>
-                      <Button type="text" danger size="small" icon={<DeleteOutlined />} loading={saving} />
+                    <Popconfirm title="确定删除？" aria-label="删除 Provider" onConfirm={() => item.id && handleDelete(item.id)}>
+                      <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label="删除 Provider" loading={saving} />
                     </Popconfirm>
                   </Space>
                 }
@@ -254,6 +255,7 @@ function ProviderForm({
 
       <Modal
         title={editingId ? '编辑 Provider' : '添加 Provider'}
+        aria-label={editingId ? '编辑 Provider' : '添加 Provider'}
         open={modalOpen}
         onCancel={() => {
           setModalOpen(false);
@@ -437,8 +439,8 @@ function PluginForm() {
         renderItem={(item) => (
           <List.Item
             actions={[
-              <Popconfirm key="del" title="确定删除？" onConfirm={() => handleDelete(item)}>
-                <Button type="text" danger size="small" icon={<DeleteOutlined />} loading={saving} />
+              <Popconfirm key="del" title="确定删除？" aria-label="删除插件" onConfirm={() => handleDelete(item)}>
+                <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label="删除插件" loading={saving} />
               </Popconfirm>,
             ]}
           >
@@ -572,7 +574,7 @@ function JsonFileEditor({
       title={title}
       size="small"
       extra={
-        <Button type="primary" icon={<EditOutlined />} onClick={openEditor}>
+        <Button type="primary" icon={<EditOutlined />} aria-label={missing ? '新增' : '编辑'} onClick={openEditor}>
           {missing ? '新增' : '编辑'}
         </Button>
       }
@@ -708,7 +710,7 @@ function AgentsMdEditor({
       title={`${label} AGENTS.md`}
       size="small"
       extra={
-        <Button type="primary" icon={<EditOutlined />} onClick={openEditor}>
+        <Button type="primary" icon={<EditOutlined />} aria-label={missing ? '新增' : '编辑'} onClick={openEditor}>
           {missing ? '新增' : '编辑'}
         </Button>
       }

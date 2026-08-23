@@ -95,6 +95,7 @@ export default function Login() {
                       loading={running === item.longAction.key}
                       disabled={running !== null && running !== item.longAction.key}
                       onClick={() => startLogin(item.longAction!.key)}
+                      aria-label={item.longAction.label}
                     >
                       {item.longAction.label}
                     </Button>

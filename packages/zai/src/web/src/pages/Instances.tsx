@@ -816,6 +816,7 @@ export default function Instances(): JSX.Element {
       */}
       <Modal
         title={portEditRow ? `编辑「${portEditRow.name}」启动端口` : '编辑启动端口'}
+        aria-label={portEditRow ? `编辑「${portEditRow.name}」启动端口` : '编辑启动端口'}
         open={portEditRow != null}
         onCancel={() => setPortEditRow(null)}
         onOk={async () => {

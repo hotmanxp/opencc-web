@@ -213,6 +213,7 @@ export default function Tools() {
                     icon={status.installed ? <ReloadOutlined /> : <DownloadOutlined />}
                     loading={installPkg === cli?.pkg}
                     disabled={status.upToDate}
+                    aria-label={status.upToDate ? '已是最新' : (status.installed ? '更新' : '安装')}
                     onClick={() => cli && handleInstall(cli.pkg, status.installed ? '更新' : '安装')}
                   >
                     {status.upToDate ? '已是最新' : (status.installed ? '更新' : '安装')}
@@ -246,6 +247,7 @@ export default function Tools() {
 
       <Modal
         title={`${installLabel}日志: ${installPkg}`}
+        aria-label={`${installLabel}日志: ${installPkg}`}
         open={!!installPkg}
         onCancel={() => setInstallPkg(null)}
         footer={null}

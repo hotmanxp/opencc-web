@@ -216,6 +216,7 @@ export default function Agent() {
                 icon={<PlusOutlined />}
                 onClick={createNewSession}
                 disabled={isBusy}
+                aria-label="创建新会话"
                 title={
                   isBusy
                     ? "对话进行中,请等待当前回复结束"
@@ -273,6 +274,7 @@ export default function Agent() {
                 size="small"
                 icon={<MenuUnfoldOutlined />}
                 onClick={sessionPanel.expand}
+                aria-label="展开会话历史"
                 title="展开会话历史"
                 style={{
                   position: "absolute",
@@ -301,6 +303,7 @@ export default function Agent() {
                   icon={<PlusOutlined />}
                   onClick={createNewSession}
                   disabled={isBusy}
+                  aria-label="创建新会话"
                   title={
                     isBusy
                       ? "对话进行中,请等待当前回复结束"
@@ -334,6 +337,7 @@ export default function Agent() {
                   size="small"
                   icon={<MenuFoldOutlined />}
                   onClick={sessionPanel.collapse}
+                  aria-label="收起会话历史"
                   title="收起会话历史"
                 />
               </Space>
@@ -419,6 +423,7 @@ export default function Agent() {
                           okText="删除"
                           cancelText="取消"
                           okButtonProps={{ danger: true }}
+                          aria-label="删除会话"
                           onConfirm={() => void deleteSession(s.sessionId)}
                         >
                           <Button
@@ -428,6 +433,7 @@ export default function Agent() {
                             icon={<DeleteOutlined />}
                             disabled={isBusy}
                             onClick={(e) => e.stopPropagation()}
+                            aria-label="删除会话"
                             title={
                               isBusy
                                 ? "对话进行中,请等待当前回复结束"
@@ -466,6 +472,7 @@ export default function Agent() {
                       color: '#ff6600',
                     }}
                     onClick={() => setShowAllSessions((v) => !v)}
+                    aria-label={showAllSessions ? "收起更多会话" : "展开更多会话"}
                   >
                     {showAllSessions
                       ? "收起"

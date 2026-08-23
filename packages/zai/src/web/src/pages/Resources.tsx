@@ -307,6 +307,7 @@ function renderNodeTitle(
           type={isInstalled ? 'default' : 'primary'}
           icon={isInstalled ? <SyncOutlined /> : isFolder ? <FolderOutlined /> : <DownloadOutlined />}
           loading={isInstalling}
+          aria-label={installLabel}
           onClick={() => handlers.onInstall(item)}
         >
           {installLabel}
