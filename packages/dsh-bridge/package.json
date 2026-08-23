@@ -16,7 +16,7 @@
     "dist/"
   ],
   "scripts": {
-    "build": "tsc -b --force && cp src/dsh-bridge.patch.yml dist/dsh-bridge.patch.yml",
+    "build": "tsc -b --force && cp src/dsh-bridge.patch.yml dist/dsh-bridge.patch.yml && node -e \"import('node:fs').then(({cpSync}) => cpSync('agent-presets','dist/agent-presets',{recursive:true}))\"",
     "dev": "tsc -b --watch",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",

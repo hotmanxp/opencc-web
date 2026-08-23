@@ -106,6 +106,30 @@ export async function* runOnce(opts: DshRunOptions): AsyncIterable<SessionEvent>
         provider: opts.provider,
         model: opts.model,
       },
+      // dsh-agent-presets session composition — 把当前 session 挂到默认
+      // preset (general-purpose) 的 standing mount 上,确保这个 session 的
+      // ctx.tools / ctx.systemPrompt / ctx.subagents 等 service 都能在
+      // preset 自己的 scope chain 里被解析到。
+      //
+      // AgentFactory 在 session/created + agent/created 之前 await setup,
+      // rejection 整段回滚(参见 @deepseek-ai/dsh-agent AgentSetup 注释),
+      // 坏 preset 永远不会产生半个发布的 session。
+      //
+      // mount() 返回 resolved AgentPreset(用于记录),不需要 session 这边
+      // 主动消费 — dsh-agent-presets 内部已经 parent 了 agentCtx 的
+      // scope key 到 mount 的 standing key。
+      setup: (agentCtx) => {
+        const agentPresets = ctx.get('agentPresets') as
+          | { mount: (agentCtx: Context, id?: string) => Promise<unknown> }
+          | undefined
+        if (!agentPresets) {
+          // 未装载 — 走空 composition,不报错(graceful degradation):
+          // dsh 模式最早版本(v0.1.0-rc.7)没有 dsh-agent-presets,某些
+          // 老 ctx 可能仍能跑;不阻塞新 session 创建。
+          return
+        }
+        return agentPresets.mount(agentCtx)
+      },
     })
     agent = created.agent
   }

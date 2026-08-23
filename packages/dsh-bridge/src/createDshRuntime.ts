@@ -30,15 +30,34 @@
 import { Context } from '@deepseek-ai/cordis'
 import Loader from '@deepseek-ai/cordis-plugin-loader'
 import { createRequire } from 'node:module'
-import { pathToFileURL } from 'node:url'
-import { join } from 'node:path'
+import { pathToFileURL, fileURLToPath } from 'node:url'
+import { join, resolve, dirname } from 'node:path'
 import { JsonlSessionPersistence } from '@deepseek-ai/dsh-session-persistence-jsonl'
 import { SubagentRuntime } from '@deepseek-ai/dsh-subagent'
+import { AgentPresets } from '@deepseek-ai/dsh-agent-presets'
 
 import { DSH_KERNEL, type KernelId } from './paths.js'
 import { dshSessionsRootAbs } from './sessions/store.js'
 
 const require = createRequire(import.meta.url)
+
+/**
+ * dsh-agent-presets system preset root — zai-shipped presets。
+ *
+ * 路径解析:createDshRuntime.ts 在 src/,preset 目录在 ../agent-presets/;
+ * build 后到 dist/,相对路径仍然解析到 package root 的 agent-presets/
+ * (build script 同步复制 dist/agent-presets/ 与 src/agent-presets/ 等价)。
+ *
+ * 写绝对路径而不是 require.resolve,因为 dsh-agent-presets 的 PresetRoot.path
+ * 期待文件系统路径而不是 resolved module 路径。
+ */
+function resolveSystemPresetsRoot(): string {
+  // import.meta.url 形态 file:///path/to/dist/createDshRuntime.js (build 后)
+  // 或 file:///path/to/src/createDshRuntime.ts (dev/tsx)。fileURLToPath 转
+  // 成普通路径,再上溯一级到 package root,再 join agent-presets/。
+  const here = dirname(fileURLToPath(import.meta.url))
+  return resolve(here, '..', 'agent-presets')
+}
 
 /**
  * LLM provider profile — dsh-llm-pi-ai `Config.providers[name]` 形态子集。
@@ -565,6 +584,36 @@ export async function createDshRuntime(
       await ctx.plugin(SubagentRuntime)
       const { apply: applySpawnProvider } = await import('@deepseek-ai/dsh-subagent-spawn-in-process')
       applySpawnProvider(ctx, { providerName: 'spawn' })
+
+      // 4.7 Phase 5P6+: dsh-agent-presets — session-level composition from
+      //    preset `agent.cordis.yml` files。**dsh 模式扩展 sub-agent 类型的
+      //    正确路径**(替代 zai 自实现 `Agent` 工具的 subagent_type 白名单),
+      //    做法:
+      //
+      //    a) 装 AgentPresets Service(`ctx.agentPresets`),配:
+      //       - default: 'general-purpose' — 每个新 session 的默认 preset
+      //       - roots:  [zai-shipped agent-presets/] (trust: 'system')
+      //       - includeUserRoot: true — 追加 `<dshHome>/.agent-presets/`
+      //         (USER_PRESET_DIR),trust: 'user'。dshHome 走默认
+      //         `$DSH_HOME` / `~/.dsh`(`dsh-home-paths` 解析)。
+      //    b) 在 `run.ts` 的 `agents.create({ setup })` 回调里调
+      //       `ctx.agentPresets.mount(agentCtx)` —— AgentFactory 在
+      //       `session/created` 之前 await setup,rejection 整段回滚,坏
+      //       preset 永远不会产生半个发布的 session。
+      //    c) subagent 由上游 `SubagentRuntime.start('spawn', req)` 内部
+      //       `composeFrom(parentCtx)` 复用父 preset,无需每个 type 一个
+      //       preset(差异通过 `dsh-tool-subagent.config.toolFilter` /
+      //       `persona` 注入)。
+      //
+      //    装载顺序:`AgentPresets` 自身不 inject dsh-* services,但 mount
+      //    阶段会读 dsh-home-paths 解析 user root,所以 `dsh-home-paths`
+      //    必须在此前可用 — dsh-base patch 已经装上,这里不重复 create。
+      const systemPresetsRoot = resolveSystemPresetsRoot()
+      await ctx.plugin(AgentPresets, {
+        default: 'general-purpose',
+        roots: [{ path: systemPresetsRoot, trust: 'system' }],
+        includeUserRoot: true,
+      })
 
       // 4.6 Phase 4 P1: harness 原生 fs-search 工具 (`grep` + `glob`) — 已在
       //     dsh-bridge.patch.yml 第 91 行的 `tool-fs-search` row 注册。
