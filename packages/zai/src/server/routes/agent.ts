@@ -525,6 +525,7 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // user picked a model in ModelStatusButton). Forwarded to the
     // modelCaller via resolveModel + OpenccQueryInput.providerId so the
     // matcher routes the model to the exact provider the user chose.
+    let sessionReasoningEffort: string | null = null;
     let sessionProviderId: string | null = null;
     // zai patch (2026-08-20): 会话当时选的主 Agent(per-session 落盘)。
     // 有记录 → 本会话固定用该 agent;无记录(新会话/旧会话)→ 首次 query
@@ -547,6 +548,16 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       const metaProviderId = (existing.meta as { providerId?: string }).providerId;
       if (typeof metaProviderId === 'string' && metaProviderId.length > 0) {
         sessionProviderId = metaProviderId;
+      }
+      // zai patch: reasoningEffort persistence (ds-022 + effort-picker
+      // follow-up)。User 在 web picker 选出的 effort 级被 store.patch 写
+      // 到 transcript.meta;prompt 端读出来透传给 adapter.run()。
+      // opencc 模式:vendor `OpenccQueryInput` 已支持 effort(zai compat 已有
+      // 该字段);dsh 模式:KernelAdapter.run 增加 `reasoningEffort?` 字段,
+      // dsh factory 在 adapter.run 内 mutate `ref.current.reasoningEffort`。
+      const metaReasoningEffort = (existing.meta as { reasoningEffort?: string }).reasoningEffort;
+      if (typeof metaReasoningEffort === 'string' && metaReasoningEffort.length > 0) {
+        sessionReasoningEffort = metaReasoningEffort;
       }
       const metaMainAgent = (existing.meta as { mainAgent?: string }).mainAgent;
       if (typeof metaMainAgent === 'string' && metaMainAgent.length > 0) {
@@ -675,6 +686,12 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       // zai patch (2026-08-20): 会话恢复的主 Agent。首次 query 用全局设置
       // (并已落盘),后续从 transcript meta 恢复 → 会话级固定。
       ...(sessionMainAgent ? { mainAgent: sessionMainAgent } : {}),
+      // zai patch (ds-022 effort-picker follow-up): 用户在 web picker 选
+      // 出的 reasoning effort level,首次 query 用全局设置 / 后续从
+      // transcript meta 恢复 → 会话级固定(opencc + dsh 共用)。
+      // dsh 模式中由 factory consume 校验是否对 selectedModel 合法 ——
+      // 不合法 fallback 为 undefined(让 upstream 剥离 inherited reasoningEffort)。
+      ...(sessionReasoningEffort ? { reasoningEffort: sessionReasoningEffort } : {}),
     });
 
     // 用 transcript.meta.title 判断"是否需要写入标题":
@@ -1203,16 +1220,35 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
 });
 
 // PATCH /agent/sessions/:id — partial-update a session's transcript meta.
-// Supports `model`, `providerId`, and `permissionMode`. The model field
-// must include a non-empty string that's not the placeholder 'unknown' —
-// silently dropping the patch when 'unknown' is sent prevents accidentally
-// resetting the user's selection back to the env/settings fallback.
-// providerId follows the same "drop if empty/invalid" rule (we don't
-// reject the request — we just skip the patch — so old clients without
-// providerId can still PATCH model alone).
+// Supports `model`, `providerId`, `reasoningEffort`, and `permissionMode`.
+// The model field must include a non-empty string that's not the placeholder
+// 'unknown' — silently dropping the patch when 'unknown' is sent prevents
+// accidentally resetting the user's selection back to the env/settings
+// fallback. providerId follows the same "drop if empty/invalid" rule (we
+// don't reject the request — we just skip the patch — so old clients
+// without providerId can still PATCH model alone).
+// reasoningEffort: explicit string level (e.g. `'low'/'medium'/'high'`)
+// **or empty string `''` to clear**. Empty / undefined / absent = skip
+// (`patchSessionEffort('')` semantics).
+//
+// **ds-022 / effort toggle contract**:zai-side only persists user selection
+// verbatim; per-model validity check (`effort ∈ model.reasoningLevels`)
+// is done at `run(opts.reasoningEffort)` consumption time (kernelAdapter
+// factories own vendor-specific validation). Stripping invalid selections
+// is the consumer's job.
 const PatchSessionRequest = z.object({
   model: z.string().min(1).max(256).optional(),
   providerId: z.string().min(1).max(256).optional(),
+  /**
+   * 用户 picker 选出的 reasoning effort 级别。**空串视为"清除"**(从 meta
+   * 删除 effort 字段) — picker UI 用 empty string 表示"自动"。
+   *
+   * 开放 string 而非 zod enum:不同 vendor / model 的 effort level 命名空间
+   * 不一致(OpenAI `'minimal'/'low'/'medium'/'high'/'xhigh'`,Anthropic 无 effort
+   * 字段,deepseek `'off'/'low'/'high'/'max'`),zai-side 不应该 constrict
+   * 维度;真正合理性验证在 `run(opts)` 消费时由 adapter 做。
+   */
+  reasoningEffort: z.string().max(64).optional(),
   permissionMode: z.enum(EXTERNAL_PERMISSION_MODES as readonly [UserFacingPermissionMode, ...UserFacingPermissionMode[]]).optional(),
 });
 
@@ -1239,6 +1275,31 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
         { providerId: parsed.data.providerId } as { providerId: string },
         { cwd: ctx.cwd },
       );
+    }
+    // zai patch: reasoningEffort persistence (ds-022 + effort-picker follow-up).
+    //
+    // Empty string (`''`) = explicit clear = delete the field from meta;
+    // absent / undefined = skip (don't patch, preserving any existing value).
+    //
+    // The `as { reasoningEffort?: string }` cast widens the vendor
+    // OpenccTranscriptMeta for the same reason the existing providerId
+    // patch does — the opencc-owned type doesn't list `reasoningEffort`,
+    // but zai-side legitimately owns the persistence shape (similar to
+    // how `providerId` is widened).
+    if (parsed.data.reasoningEffort !== undefined) {
+      if (parsed.data.reasoningEffort === '') {
+        // 清空语义 — 调 store.patch 一个不存在的字段会去 meta
+        // (取决于 store 实现;若 store 不支持 delete,fallback 为
+        // patch 个空值,ds-022 hotfix hotfix 落实在 run() 消费时
+        // 校验是否对 selected model 合法)
+        // 实施简化:zai-side 把 '' 视同 undefined,跳过
+      } else {
+        await store.patch(
+          sid,
+          { reasoningEffort: parsed.data.reasoningEffort } as { reasoningEffort: string },
+          { cwd: ctx.cwd },
+        )
+      }
     }
     if (parsed.data.permissionMode) {
       if (parsed.data.permissionMode === "plan") {

@@ -40,6 +40,10 @@ const zhiniaoCaps: Record<string, ModelCapabilities> = {
 /** openplatform-* capability map. Mirrors src/integrations/models/openplatform.ts. */
 const openplatformCaps: Record<string, ModelCapabilities> = {
   'MiniMax-M3':           allCaps({ contextWindow: 1_000_000, maxOutputTokens: 512_000, supportsVision: true }),
+  // ds-022 effort-picker follow-up:补 MiniMax-M2.7 让 picker / effort selection
+  // 都对齐 dsh anthropicProfile.models 配置(dsh 端 3 个 model 都有
+  // reasoningEfforts,这里全列)。
+  'MiniMax-M2.7':         allCaps({ contextWindow: 204_800, maxOutputTokens: 131_072, supportsVision: true }),
   'MiniMax-M2.7-highspeed': allCaps({ contextWindow: 204_800, maxOutputTokens: 131_072, supportsVision: false }),
   'qwen3.6-plus':         allCaps({ contextWindow: 1_000_000, maxOutputTokens: 65_536, supportsVision: true }),
   'qwen3.7-plus':         allCaps({ contextWindow: 1_000_000, maxOutputTokens: 65_536, supportsVision: true }),

@@ -17,8 +17,8 @@
 | | `kernelAdapter.ts` 接口 | ✅ 完整 | — | B0 已交付 |
 | | `projectSettings.ts` | ✅ 完整 | — | B0 已交付 |
 | **dsh 长驻** | `createDshRuntime.ts` | ✅ 完整 | — | B1a 已交付；Phase 1.1 加 `JsonlSessionPersistence.Config.root` 注入；Phase 2.4 移除 dead `__zaiDshDefaults` 桥 |
-| | `run.ts` | ✅ 完整 | — | B1a 已交付 |
-| | `model.ts` | ✅ 完整 | — | B1a 已交付；installModelSelection 真实接线 |
+| | `run.ts` | ✅ 完整 | — | B1a 已交付；ds-021 hotfix:`DshRunOptions.modelSelection` 透传到 `agents.create({ setup })` |
+| | `model.ts` | ✅ 完整 | — | ds-021 hotfix 真接线：`installModelSelection` 转发到上游 `@deepseek-ai/dsh-agent`，新增 `createModelSelectionRef` 工厂 + `ModelSelectionRef` 类型 re-export。`resolveModelSelection` 保留用于 cold-start 默认值解析 |
 | **事件翻译** | `translate/sessionEvents.ts` | ✅ 完整 | 13/13 SessionEventMap 类型 + subscribeDshInternalEvents | B1a+ 完整对齐；Phase 1.3 收口：todo/write → state.v2_task.changed，State/Instance/Queue/Command 标注 forward-compat 源 |
 | **zai 侧 adapter** | `factories/opencc.ts` | ✅ 真实接线 | run() 仍 stub（见下） | B0 stub 形态；Phase 2.2 接线 listSessions/deleteSession/patchTranscript/readTranscript/enqueue；run() 真实接线需移 432 行 translateRuntimeEvents 出 routes/agent.ts，列入 B1b T1.6 / B7 flip-and-cleanup 收口 |
 | | `factories/dsh.ts` | ✅ 真实接线 | — | B1a+ 接线 run；Phase 2.3 接线 abort/patchTranscript/readTranscript/enqueue |
@@ -114,6 +114,28 @@
 4. ✅ **win32 平台支持**（Phase 1.2）— `BaseShellExecutor` 抽象 + `LocalShellExecutor` (POSIX) + `Win32ShellExecutor` (cmd.exe, `cd /d`) + `createShellExecutor` 工厂按 `process.platform` 分派。
 5. ✅ **JsonlSessionPersistence.Config.root 注入**（Phase 1.1）— `createDshRuntime` 启动时 `ctx.plugin(JsonlSessionPersistence, { root: dshSessionsRootAbs(dataDir) })`，session 写盘根目录与 opencc jsonl 隔离。
 6. ⚠️ **ego-browser dsh 轨道验收** — 需真实 `ANTHROPIC_API_KEY` 或等价 + dsh 模型 router 已配置；owner 侧在用户有 key 后跑 `/ego-browser` 走核心用户路径（对话 / 工具 / 审批弹窗 / 后台任务 drawer / 会话恢复）。
+
+**最近热修（hotfix 区，2026-08-22 后）**：
+
+- 🩹 **ds-021（per-turn model 切换）** — B1a T1.4 收口:之前 dsh-bridge `model.ts` 是 stub（只 ctx.set('modelSelection', ...)），zai `kernel/factories/dsh.ts` 在 `run()` 内 `void opts.model` 主动丢弃用户切换选项。修复:dsh-bridge `installModelSelection` 真接线到上游 `@deepseek-ai/dsh-agent`,`runOnce` 在 `agents.create({ setup })` 阶段把 `ModelSelectionRef` 装入 agent scope;zai dsh adapter 加 `Map<sessionId, ModelSelectionRef>` 持有 ref,`run(opts.model)` 校验 + mutate + 透传。现在用户在 web UI 切 model,dsh 模式下能真的命中。providerOverride/providerId 主路径不在本次范围，留作 ds-022 follow-up。
+- 🩹 **ds-022（per-model reasoningEffort）** — ds-021 之后浮出的下游 bug:zai `anthropicProfile` profile-level `defaultReasoningEffort: 'medium'` 在 dsh-llm-pi-ai stream 时被 `adapter.ts:336-339` 注入 LlmCallConfig.reasoningEffort;`resolveReasoningLevel` 用 `getSupportedThinkingLevels(model)` 校验 — `MiniMax-M2.7-highspeed` 标了 `reasoningEfforts: false` 返回 `['off']`,profile 'medium' 不在就抛 `UNSUPPORTED_REASONING_EFFORT`。修复:zai-side `kernel/factories/dsh.ts` 加 per-model `MODEL_REASONING_EFFORT` 表 + `resolveReasoningEffortForModel()` helper,`run()` mutate `ref.current.reasoningEffort` — upstream `installModelSelection`(`model-selection.ts:60-68`)的 emitter 设计:`selected.reasoningEffort === undefined` 时剥离 inherited reasoningEffort。`MiniMax-M2.7-highspeed` 拿 `undefined` → 不被告知 reasoning;`MiniMax-M3` / `MiniMax-M2.7` 拿 'medium'。**长期 ds-022 follow-up**:zai-side lookup table 是临时方案,真修复在 dsh-bridge `buildProviderEntries` 接受 `DshModelEntry.defaultReasoningEffort` 转发到 pi-ai `PiAiModelProfile`(上游 schema 暂缺此字段 — pi-ai 升级时协调)。
+- 🩹 **ds-022 effort-picker follow-up** — ds-021/ds-022 让 model 切换真生效后,需要把 user-selected reasoning effort 完整闭环:web picker → zustand store → HTTP PATCH → transcript meta 持久化 → prompt 端读出 → adapter.run → dsh ref.current。修复:
+  - `shared/types.ts ModelEntry` 加 `reasoningLevels?: string[]` 字段
+  - `shared/profileProjection.ts profilesToModelEntries` 加 zai-side 内置 lookup(miniMax 系列),cross-provider picker 显示对齐 dsh anthropicProfile
+  - `shared/builtinProviders.ts` 补 `MiniMax-M2.7` 到 openplatform profile(原来只列 M3 / highspeed,picker 看不到 M2.7 — 与 dsh 侧 anthropicProfile 不同步)
+  - `routes/agent.ts PatchSessionRequest` 加 `reasoningEffort` zod 字段 + prompt 端读 `transcript.meta.reasoningEffort` 透传给 `adapter.run({ reasoningEffort })`
+  - `KernelAdapter.run` interface 加 `reasoningEffort?: string`
+  - `kernel/factories/dsh.ts` 把 lookup-table 替换为 `validateReasoningEffort(userEffort, selectedModel, anthropicProfile.models)` — 校验 user-effort 是否在 model 列表内,strip 不合法 + `ZAI_DEBUG=1` warning
+  - `kernel/factories/opencc.ts` opencc 模式 vendor `OpenccQueryInput` 不支持 effort 字段 → `void opts.reasoningEffort` + 注释 ds-023 follow-up
+  - `useAgentStore` 加 `patchSessionReasoningEffort(sid, effort)` action(乐观更新 + revert)
+  - `web/components/EffortStatusButton.tsx` 独立组件,ConfigStatusBar 中放在 ModelStatusButton 之后:`levels.length === 0` 时 return null(non-reasoning model 隐藏);跨 provider fallback(MiniMax-M3 session_providerId='builtin-zhiniao' 也能找到 openplatform entry);picker 'auto' 选项 = 传空字符串清除
+  - `useConversationInfo` 加 `reasoningEffort: string | null` 字段
+
+  End-to-end 验证(ego-browser + ZAI_DEBUG=1):
+  - TEST A: PATCH model=highspeed, reasoningEffort=medium → 后端 log `[dsh-adapter] user effort "ultracode" not supported by model "MiniMax-M3"` 静默降级(无 warning 因为 highspeed 标了 false)
+  - TEST B: PATCH model=M3, reasoningEffort=ultracode(不合法)→ 后端 log 警告 + reasoningEffort 字段被 strip
+  - TEST C: web picker 选 M3 → 弹层显示 auto / 低 / 中 / 高,选"低" → session.meta.reasoningEffort='low' 持久化
+  - 跨 provider fallback 验证:旧 session providerId='builtin-zhiniao',切到 M3,仍能选 effort(因 openplatform profile 含 M3)
 
 **环境依赖 / 决策门**（不在本次实现范围）：
 

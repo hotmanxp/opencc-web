@@ -40,6 +40,15 @@ export interface ConversationInfo {
   contextTokens: number | null
   /** zai patch (2026-08-09): 当前 sid 用的模型支持的上下文大小(从 settings.models 查 sid.model → capabilities.contextWindow)。null 表示无数据。 */
   contextWindow: number | null
+  /**
+   * ds-022 effort-picker follow-up: 用户 picker 选定的 reasoning effort
+   * (从 `transcript.meta.reasoningEffort` / zustand 拿)。`null` =
+   * 还没选定 / 选了"自动"。
+   *
+   * opencc 模式下 vendor `OpenccQueryInput.effort` 不存在,这条路径由
+   * compat global state 维护;本字段始终反映 web picker 状态。
+   */
+  reasoningEffort: string | null
 }
 
 interface RuntimeSettings {
@@ -190,6 +199,10 @@ export function useConversationInfo(): ConversationInfo {
         ? (projectedCtxTokens ?? contextTokensBySession[effectiveSessionId] ?? null)
         : null,
       contextWindow,
+      reasoningEffort:
+        (sess as { reasoningEffort?: string } | undefined)
+          ?.reasoningEffort
+          ?.trim() ?? null,
     }
   }, [effectiveSessionId, projectedCtxTokens, sessions, messages, status, cwd, runtime, settingsLoaded, apiRequestCountBySession, contextTokensBySession])
 }

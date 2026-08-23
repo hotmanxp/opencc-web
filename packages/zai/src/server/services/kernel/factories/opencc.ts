@@ -272,6 +272,20 @@ export async function createOpenccKernelAdapter(
         ...(opts.mainAgent ? { mainAgent: opts.mainAgent } : {}),
         // 系统注入标记:BashNotifier 用 true 避免通知 prompt 被 vendor 当 user 消息落盘。
         ...(opts.isMeta ? { isMeta: true } : {}),
+        // ds-022 effort-picker follow-up:opencc 模式下不接 reasoningEffort(
+        // 注释挪到这里因为前一段是 query() args 对象 literal,任何 statement
+        // expression 都不合法)。
+        //
+        // vendor `OpenccQueryInput` 没有 `effort` 字段;opencc compat hooks
+        // 从 `useAppState(s => s.effortValue)` 读(persistent global state),
+        // zai-side 当前不把 session 级 effort 写到 compat global state
+        // (避免污染)。这条路径由用户用 `/effort` CLI 命令设置。
+        //
+        // Session 级 effort 落地 ds-023 follow-up 需要在 vendor `compat` 类型
+        // 加 effort 字段,本工厂把 `opts.reasoningEffort` 写到
+        // `useAppState.setState({ effortValue })` 才完成。当前**显式不消费**,
+        // 避免误传 unknown field 触发 vendor 运行时错误。
+
       })
       for await (const ev of translateRuntimeEvents(
         vendorStream as AsyncIterable<Record<string, unknown>>,

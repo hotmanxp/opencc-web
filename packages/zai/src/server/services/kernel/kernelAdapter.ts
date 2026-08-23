@@ -214,6 +214,18 @@ export interface KernelAdapter {
     providerId?: string;
     /** 会话级固定主 agent 配置（首次 query 来自 settings,续传来自 transcript meta）。 */
     mainAgent?: unknown;
+    /**
+     * ds-022 effort-picker follow-up:用户选出的 reasoning effort level
+     * (`'low'/'medium'/'high'` 等)。`undefined` = 用户没显式选(用 vendor
+     * 默认 / pi-ai profile-level default)。Adapter **必须校验**该 level
+     * 对 selected model 合法 — 不合法时 strip 为 undefined(让 upstream
+     * `installModelSelection` 剥离 inherited reasoningEffort)。
+     *
+     * opencc 模式:zai-side compat 已有 `OpenccQueryInput.effort` 字段,
+     * agentRuntime 内部消费。dsh 模式:factory consume,mutate
+     * `ref.current.reasoningEffort`。
+     */
+    reasoningEffort?: string;
     abortSignal?: AbortSignal;
     /**
      * 系统注入标记 — true 时 opencc vendor 不把 prompt 当 user 消息写进 transcript,

@@ -49,6 +49,7 @@ import {
 } from '../../agentRuntime.js'
 import { loadMcpServers } from '../../mcpConfig.js'
 import type { Context as DshContext } from '@zn-ai/dsh-bridge'
+import { ReasoningEffortId } from '@zn-ai/dsh-bridge'
 import { createAskUserSink } from './askUserSink.js'
 
 /** dsh Cordis ctx 本地别名 — 避免 import 实体与未来 Context 类型冲突。 */
@@ -168,6 +169,165 @@ export function getDshHandleForTranscript(): Context | null {
 /** Test seam — 单元测试可重置 module-level 状态。 */
 export function __resetDshContextForTests(): void {
   activeDshContext = null
+}
+
+/**
+ * ds-021 hotfix:per-session model selection ref 持有。
+ *
+ * zai-side 给每个 session 持一份 `ModelSelectionRef`,在 `run()` 内 mutate
+ * `ref.current = { provider, model }`,把 ref 透传给 `bridge.runOnce`,
+ * 由 dsh-bridge 内部 `installModelSelection(agentCtx, ref)` 装到 agent
+ * scope(scope-local,天然并发安全)。
+ *
+ * **生命周期**:
+ *   - `createSession` / `resumeSession` 时 seed(zai 提供默认 model 给 cold-start)
+ *   - `run()` 内 mutate ref.current 推到下次 Llm 请求
+ *   - `shutdown` 时整表清空
+ *
+ * 注意:Map 必须 module-level(sessionId 是 single source of truth)— 但
+ * 必须在 adapter 单一实例下有效。当前 dsh 模式每个 zai instance 一个
+ * adapter(由 `services/kernel/index.ts` 单例持有),keyed by sessionId
+ * 不会跨实例串扰。
+ */
+const modelSelectionRefs = new Map<string, import('@zn-ai/dsh-bridge').ModelSelectionRef>()
+
+/** Test seam:清 modelSelectionRefs。 */
+function resetModelSelectionRefsForTests(): void {
+  modelSelectionRefs.clear()
+}
+
+/**
+ * ds-021 hotfix 纯函数(可独立 unit test):
+ *   给定请求的 model(zai 前端 picker 选项)+ anthropic profile models +
+ *   defaultModel(zai-side 启动期冻的),返回 `selectedModel`(实际传给
+ *   dsh-llm-pi-ai 的 model id)。
+ *
+ * 规则:
+ *   - requestedModel 非空且在 `profileModels` 里 → 选它
+ *   - 否则 → fallback 到 `defaultModel`
+ *   - defaultModel 也空 → 用 profile 第一个 model
+ *   - 全空 → 返回空串(让上游 dsh-llm 报错,异常路径)
+ *
+ * 不返回 null/undefined,保证下游一定能拿到 string(虽可能是空)。
+ *
+ * **不**做 dsh-llm-pi-ai 的运行时校验(那是 provider profile 装载阶段
+ * 的事);此处校验是 zai-side 友好降级,目的是不让 dsh-llm 把
+ * UNKNOWN_MODEL 异常反射给 web UI 直接炸错。
+ */
+export function resolveSelectedModel(
+  requestedModel: string | undefined,
+  profileModels: ReadonlyArray<string | { id: string }>,
+  defaultModel: string,
+): string {
+  const knownModelIds = profileModels.map((m) => typeof m === 'string' ? m : m.id)
+  if (typeof requestedModel === 'string'
+    && requestedModel.length > 0
+    && knownModelIds.includes(requestedModel)) {
+    return requestedModel
+  }
+  if (defaultModel.length > 0) return defaultModel
+  const first = profileModels[0]
+  if (typeof first === 'string') return first
+  return first?.id ?? ''
+}
+
+/**
+ * ds-021 hotfix:test seam — 单测可在不 spin dsh runtime 的情况下检查
+ * modelSelectionRefs map 状态。生产代码不调,仅单测断言。
+ */
+export function __getModelSelectionRefForTests(
+  sessionId: string,
+): import('@zn-ai/dsh-bridge').ModelSelectionRef | undefined {
+  return modelSelectionRefs.get(sessionId)
+}
+
+/**
+ * Per-model `reasoningEffort` 决策表(ds-022 follow-up 之前用 zai-side 表
+ * 决)。
+ *
+ * 根因:anthropicProfile 的 **profile-level** `defaultReasoningEffort: 'medium'`
+ * 会在 stream 时被 dsh-llm-pi-ai 的 `adapter.ts:336-339` 注入到
+ * LlmCallConfig.reasoningEffort;随后 `resolveReasoningLevel`
+ * (`adapter.ts:155-166`) 用 `getSupportedThinkingLevels(model)` 校验 —
+ * model 的 `reasoningEfforts: false` 时返回 `['off']`,profile 'medium' 直接
+ * 抛 `UNSUPPORTED_REASONING_EFFORT`,让用户切到 highspeed 模型就炸。
+ *
+ * 修复路径:zai-side adapter 的 `run(opts.model)` 在 mutate ref.current 时
+ * 同步注入 `reasoningEffort` 字段。upstream `installModelSelection`
+ * (`model-selection.ts:60-68`)的 design 决定:
+ *   - selected.reasoningEffort === undefined → emitter **剥离** inherited
+ *     reasoningEffort(upstream `profile.reasoning` 之类)
+ *   - selected.reasoningEffort !== undefined → emitter 写这个字段覆盖
+ * 因此我们选 `undefined` 让 highspeed 模型不被告知 reasoning(让它跑 plain text
+ * model);选具体 level 让 reasoning-capable 模型注入 thinking 给 anthropic。
+ *
+ * 长期:dsh-llm-pi-ai 缺 `PiAiModelProfile.reasoning`(per-model default)。
+ * 真修复要么改 pi-ai schema + resolvers,要么让 dsh-bridge 的
+ * `buildProviderEntries` 接受 `DshModelEntry.defaultReasoningEffort` 并
+ * 把 model 不支持 reasoningEffort 的 model 显式标 `reasoning: undefined`。
+ * 当前范围:zai 端这一层用 lookup table 把模型差异遮住,避免 dsh-bridge /
+ * pi-ai 反复摩擦。
+ */
+/**
+ * **ds-022 / per-model reasoning decision** — effort-picker follow-up 升级。
+ *
+ * 角色:
+ *   校验 user-selected reasoningEffort 是否对 selected model 合法,brand
+ *   一下返回 branded value 给 upstream emitter 透传给 dsh-llm-pi-ai。
+ *   不合法一律 strip 为 `undefined` —— upstream `installModelSelection`
+ *   (`model-selection.ts:60-68`)的设计是 `selected.reasoningEffort ===
+ *   undefined` 时把 inherited reasoningEffort 从 LlmCallConfig 中
+ *   剥离,等价于"该 model 不接受 reasoning effort"语义。
+ *
+ * 根因:anthropicProfile 的 **profile-level** `defaultReasoningEffort:
+ * 'medium'` 会在 stream 时被 dsh-llm-pi-ai 的 `adapter.ts:336-339` 注入到
+ * LlmCallConfig.reasoningEffort;随后 `resolveReasoningLevel`
+ * (`adapter.ts:155-166`) 用 `getSupportedThinkingLevels(model)` 校验 —
+ * model 的 `reasoningEfforts: false` 时返回 `['off']`,profile 'medium' 直接
+ * 抛 `UNSUPPORTED_REASONING_EFFORT`。
+ */
+export function validateReasoningEffort(
+  userEffort: string | undefined,
+  selectedModel: string,
+  anthropicProfileModels: ReadonlyArray<string | { id: string; reasoningEfforts?: false | string[] }>,
+): ReasoningEffortId | undefined {
+  // 没传 → undefined → upstream 剥离 inherited reasoningEffort
+  if (userEffort === undefined || userEffort.length === 0) {
+    return undefined
+  }
+  // 找 selectedModel 在 profile 里的 entry
+  const entry = anthropicProfileModels.find((m) => {
+    if (typeof m === 'string') return m === selectedModel
+    return m.id === selectedModel
+  })
+  if (entry === undefined) {
+    // model 不在 profile 里(调用方已 fallback,belt-and-suspenders)
+    return undefined
+  }
+  if (typeof entry !== 'string') {
+    if (entry.reasoningEfforts === false) {
+      // non-reasoning model — 任何 effort 都无视
+      return undefined
+    }
+    if (
+      Array.isArray(entry.reasoningEfforts)
+      && entry.reasoningEfforts.length > 0
+      && !entry.reasoningEfforts.includes(userEffort)
+    ) {
+      // model 支持 reasoningEffort 列表但 user-effort 不在其中 → 静默降级
+      if (process.env.ZAI_DEBUG === '1') {
+        console.warn(
+          `[dsh-adapter] user effort "${userEffort}" not supported by model "${selectedModel}" ` +
+            `(valid: ${JSON.stringify(entry.reasoningEfforts)}); stripping`,
+        )
+      }
+      return undefined
+    }
+  }
+  // 校验通过 — ReasoningEffortId 是 upstream `ReasoningEffortId =
+  // Branded<'ReasoningEffortId'>` (compile-time only),cas t 不影响
+  // runtime(brand 是 pure type)。
+  return userEffort as unknown as ReasoningEffortId
 }
 
 function toAgentSession(sessionId: string, cwd: string): AgentSession {
@@ -639,6 +799,12 @@ export async function createDshKernelAdapter(
         activeDshContext = null
       }
 
+      // ds-021 hotfix:清 model selection refs,避免 dsh ctx dispose 后
+      // 残留 process-wide 弱引用(ref 的 ref.current 在 dsh agent scope
+      // dispose 后已经失效,但 zai 端 Map 还是留着 → 下次新 session 重用
+      // 同 id 时会拿到陈旧 ref.current)。
+      modelSelectionRefs.clear()
+
       // 4. 清 globalThis 桥
       clearZaiGlobalBridges()
 
@@ -657,6 +823,27 @@ export async function createDshKernelAdapter(
       if (stopped) throw new Error('[dsh-adapter] shutdown, refusing new session')
       const sessionId = opts.sessionId ?? `sess-${Date.now()}-${Math.random().toString(36).slice(2, 8)}`
       activeSessions++
+      // ds-021 hotfix:seed ref holder。后续 `run()` mutate ref.current
+      // 推到 dsh LLM request。seed 用 anthropic profile 第一 model 作
+      // initial 兜底(dsh agent 冷启动时 ref.current 已经设好,否则
+      // upstream installModelSelection 走 no-op 分支,ref.assembled 写
+      // undefined,后续 LlmCallConfig 缺 provider/model 字段会让 dsh
+      // agent-loop 抛"has no provider/model"。
+      //
+      // Seed 选 `defaultModel`(已经过 zai 解析链)而非 profile 第一个,
+      // 因为 zai-settings 优先级 > provider catalog 第一个。
+      if (!modelSelectionRefs.has(sessionId)) {
+        const { createModelSelectionRef } = await import('@zn-ai/dsh-bridge')
+        modelSelectionRefs.set(
+          sessionId,
+          createModelSelectionRef({
+            provider: anthropicProfile.name,
+            model: defaultModel || (typeof anthropicProfile.models[0] === 'string'
+              ? anthropicProfile.models[0]
+              : anthropicProfile.models[0]?.id ?? ''),
+          }),
+        )
+      }
       // dsh-020 / transcript 恢复修复:之前 createSession 是 stub,只生成
       // sessionId,没有真的在 dsh ctx 里建立 agent。导致 dsh-side agent
       // 第一次 followup 时 `agents.create` 跑全量初始化(plugin 装载 +
@@ -882,17 +1069,85 @@ export async function createDshKernelAdapter(
         }
       }
 
-      // 其它扩展 opts 字段（model / permissionMode / providerOverride / providerId /
-      // mainAgent / abortSignal）由 dsh session-level 配置接管,本 turn 内暂不消费:
-      // dsh AgentOptions 仅支持 provider + model,model 若与 opts.model 不同,本
-      // 次仍用 session 启动时绑定的 model（详见 createDshRuntime defaultModel）;
-      // dsh 0.1.0-rc.7 不支持 AbortSignal,abort 走 cancel seam。
-      void opts.model
+      // 其它扩展 opts 字段（permissionMode / providerOverride / providerId /
+      // mainAgent / abortSignal）由 dsh session-level 配置接管,本 turn 内
+      // 暂不消费(同 dsh 0.1.0-rc.8 已知缺口 §6 #4/#5):
+      //   - dsh AgentOptions 仅支持 provider + model(本 turn 内 model 已通过
+      //     modelSelection ref 装入 scope,见下)
+      //   - permissionMode 走 dsh 系统 prompt / approval seam(zai-side 只在
+      //     transcript meta 透传,见 routes/agent.ts:648-658)
+      //   - providerOverride / providerId:zai-side 当前硬编码 anthropic profile,
+      //     multi-provider 路由在 Phase 4 后续 (settings.model => 不同
+      //     provider profile 的 provider entry) 阶段再接(见 ds-022 follow-up)
+      //   - mainAgent 同上,transcript meta 走 zai compat 已是 source of truth
+      //   - abortSignal:dsh 0.1.0-rc.8 不支持,abort 走 cancel seam(KernelAdapter.abort)
       void opts.permissionMode
       void opts.providerOverride
       void opts.providerId
       void opts.mainAgent
       void opts.abortSignal
+
+      // ── ds-021 hotfix:per-turn model selection ──────────────────────
+      // 真正消费 opts.model(zai 前端 ModelStatusButton 的 picker 选择):
+      //   1. 校验 model 是否在 anthropic profile 的 models 注册表里
+      //      (否则 dsh-llm-pi-ai 会抛 `UNKNOWN_MODEL` 让用户炸错)
+      //   2. 若校验失败 → fallback 到 defaultModel + ZAI_DEBUG warning
+      //   3. mutate 本 session 的 ModelSelectionRef.current
+      //   4. 把 ref holder 透传给 bridge.runOnce — dsh-bridge 在
+      //      agents.create({ setup }) 阶段 installModelSelection 把它
+      //      装到 agent scope(scope-local,下次 agent/request 命中)
+      //
+      // **contract**:zai session.meta.model 是 web UI 的真相,持久化在
+      // useAgentStore.patchSessionModel → transcript.meta.model → routes
+      // /agent.ts:643 把它写到 adapter.run({ model })。到这里 adapter
+      // 必须履行,不再丢弃。
+      const knownModelIds = anthropicProfile.models.map((m) =>
+        typeof m === 'string' ? m : m.id,
+      )
+      const selectedModel = resolveSelectedModel(opts.model, anthropicProfile.models, defaultModel)
+      if (opts.model !== undefined && opts.model.length > 0 && !knownModelIds.includes(opts.model)) {
+        if (process.env.ZAI_DEBUG === '1') {
+          console.warn(
+            `[dsh-adapter] request model "${opts.model}" not in anthropic profile ` +
+              `(${knownModelIds.join(', ')}), falling back to "${selectedModel}"`,
+          )
+        }
+      }
+
+      // seed ref(若 createSession 没跑过,如 resume 路径)— 拿后再 mutate
+      const ref = modelSelectionRefs.get(opts.session.sessionId) ?? (() => {
+        const newRef = bridge.createModelSelectionRef({
+          provider: anthropicProfile.name,
+          model: selectedModel,
+        })
+        modelSelectionRefs.set(opts.session.sessionId, newRef)
+        return newRef
+      })()
+      // **ds-022 hotfix**:per-model reasoningEffort 注入。
+      //
+      // upstream installModelSelection 在 emit `agent/request` LlmCallConfig
+      // 时(`model-selection.ts:60-68`):
+      //   - `selected.reasoningEffort === undefined` → **剥离** inherited
+      //     reasoningEffort(从 resolved config 中解构 discard)
+      //   - `selected.reasoningEffort !== undefined` → 写这个字段
+      //
+      // 因此 `validateReasoningEffort` 对 non-reasoning 模型或 user-effort
+      // 不在 model 列表里时返回 `undefined`,让 upstream emitter 剥离
+      // profile-level `reasoning: 'medium'`,避免 `UNSUPPORTED_REASONING_EFFORT`。
+      //
+      // 数据来源:
+      //   - `opts.reasoningEffort` 是 routes/agent.ts prompt 从 transcript
+      //     meta 读出来(user picker 选定);空 / undefined 不预设
+      //   - model 是否支持 reasoning 在 anthropicProfile.models[*]
+      //     里用 `reasoningEfforts: false | string[]` 声明
+      const reasoningEffort = validateReasoningEffort(
+        opts.reasoningEffort,
+        selectedModel,
+        anthropicProfile.models,
+      )
+      ref.current = reasoningEffort !== undefined
+        ? { provider: anthropicProfile.name, model: selectedModel, reasoningEffort }
+        : { provider: anthropicProfile.name, model: selectedModel }
 
       // Phase 3 P1: runOnce 现在边收事件边 yield(看 run.ts)。
       // 这里 for await 直接拿到每个 token 翻译后的 runtime.delta,前端
@@ -922,14 +1177,13 @@ export async function createDshKernelAdapter(
         // dsh AgentOptions 仅支持 provider + model — 必须显式传,否则 dsh
         // 在 agent/request waterfall 找不到 provider/model,抛
         // "has no provider/model" 错误(B1a T1.4 收口)。
+        // ds-021 hotfix:用本次 run 选定的 `selectedModel`,而不是启动期
+        // 冻结的 defaultModel。
         provider: anthropicProfile.name,
-        // models 形态: string | DshModelEntry — 只接受 string id。
-        // defaultModel 也是 string,所以取首个 entry 的 id。
-        model:
-          defaultModel
-          || (typeof anthropicProfile.models[0] === 'string'
-            ? anthropicProfile.models[0]
-            : anthropicProfile.models[0]?.id),
+        model: selectedModel,
+        // 让 bridge.runOnce 在 agents.create({ setup }) 阶段把 ref 装到
+        // agent scope。详见 run.ts runOnce() 注释。
+        modelSelection: ref,
       })) {
         // (1) 抽取 dsh TokenUsage → opencc-style globalThis slot
         const usage = extractDshUsage(dshEvent)

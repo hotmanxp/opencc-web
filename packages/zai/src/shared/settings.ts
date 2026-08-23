@@ -44,6 +44,14 @@ export interface ModelEntry {
    * (which the server treats as "no preference, pick first match").
    */
   providerId?: string
+  /**
+   * Reasoning-effort levels (e.g. `["low","medium","high"]`) the model
+   * supports. Sourced from the dsh anthropicProfile `models[].reasoningEfforts`
+   * (or per-vendor equivalent). When absent the picker hides the
+   * effort affordance. When the array is empty, the server treats the
+   * entry as "no reasoning at all" — dsh-022 hotfix contract.
+   */
+  reasoningLevels?: string[]
 }
 
 /**

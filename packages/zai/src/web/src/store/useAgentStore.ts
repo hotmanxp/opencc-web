@@ -419,6 +419,17 @@ interface AgentState {
   patchSessionModel: (sid: string, payload: string | { model: string; providerId?: string }) => Promise<void>
   /** Optimistic PATCH /api/agent/sessions/:id + local session mode update. */
   patchSessionMode: (sid: string, mode: PermissionMode) => Promise<void>
+  /**
+   * Optimistic PATCH + local session effort update (ds-022 effort-picker
+   * follow-up)。`effort` 为非空字符串表示 picker 选定的 reasoning
+   * effort level;空字符串视为"清除"(传 `''` 给后端,后端 ds-023
+   * follow-up 会 delete meta.reasoningEffort)。
+   *
+   * 协商:**不**校验 effort 是否对当前 selected model 合法 — UI picker
+   * 只列出该 model 支持的 levels,且 server adapter (`validateReasoningEffort`)
+   * 是最后兜底;客户端校验是 UX 优化,不是契约必需。
+   */
+  patchSessionReasoningEffort: (sid: string, effort: string) => Promise<void>
   sendMessage: (prompt: string) => Promise<void>
   stop: () => Promise<void>
   setAskAnswer: (questionText: string, label: string) => void
@@ -1284,6 +1295,46 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
         body: JSON.stringify({ permissionMode: mode }),
+      })
+      if (!res.ok) throw new Error(`HTTP ${res.status}`)
+    } catch {
+      // Revert the optimistic update.
+      set({ sessions: prev })
+    }
+  },
+
+  /**
+   * ds-022 effort-picker follow-up:用户从 picker 选出 reasoning effort 后,
+   * PATCH /api/agent/sessions/:id { reasoningEffort } + 同步更新本地 store。
+   * 空串 `''` 表示"清除"(picker 上的"自动"选项);非空即覆盖。
+   *
+   * 与 `patchSessionMode` 同样的乐观更新 + revert 模式;主要区别是
+   * 这里 `effort` 是 string 而不是 enum — 不同 vendor / model 命名空间不同,
+   * zai-side 不 constrict 维度,真正合理性验证在 server adapter 的
+   * `validateReasoningEffort`(agentRuntime 消费时)。
+   */
+  patchSessionReasoningEffort: async (sid, effort) => {
+    const prev = get().sessions
+    // Optimistic local update — 老 sessions 不带 reasoningEffort 字段,
+    // 这里 spread 进 {} 即可;后续 set 的 spread 给空 reasoningEffort
+    // 等价于不写字段(与 empty-string 选择"自动"语义对齐)。
+    set({
+      sessions: prev.map((x) =>
+        x.sessionId === sid
+          ? {
+              ...x,
+              // '' → 不写字段(等价 patchSessionReasoningEffort(sid,'') = clear)
+              ...(effort.length > 0 ? { reasoningEffort: effort } : {}),
+            }
+          : x,
+      ),
+    })
+    try {
+      const token = localStorage.getItem('zai-token') || ''
+      const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sid)}`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
+        body: JSON.stringify({ reasoningEffort: effort }),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
     } catch {

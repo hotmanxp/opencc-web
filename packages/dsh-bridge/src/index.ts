@@ -28,9 +28,18 @@ export {
 export { runOnce, type DshRunOptions } from './run.js'
 // Re-export dsh-session/dsh-llm 关键类型/工厂，让 zai-side factories 无需直接依赖 dsh 包
 export { SessionId, type Session, type SessionEvent, type SessionEventType } from '@deepseek-ai/dsh-session'
-export { createUserMessage } from '@deepseek-ai/dsh-llm'
+export { createUserMessage, ReasoningEffortId, type ReasoningEffortId as ReasoningEffortIdType } from '@deepseek-ai/dsh-llm'
 export { translateSessionEvent, subscribeDshInternalEvents, SESSION_EVENT_TO_SERVER_GROUP_MAP, ALL_SERVER_EVENT_GROUPS, listUnmappedEvents, summarizeMapping, type ServerEventGroup } from './translate/sessionEvents.js'
-export { installModelSelection, resolveModelSelection, type ModelSelection } from './model.js'
+// ds-021 hotfix:installModelSelection 真接线 + 新增 createModelSelectionRef。
+// `ModelSelectionRef` 类型从 dsh-agent 透传,避免 zai-side 直接 import
+// @deepseek-ai/dsh-agent 增加依赖面。
+export {
+  installModelSelection,
+  createModelSelectionRef,
+  resolveModelSelection,
+  type ModelSelection,
+  type ModelSelectionRef,
+} from './model.js'
 export { DSH_KERNEL, OPENCC_KERNEL, type KernelId } from './paths.js'
 
 // B2 — 工具与 MCP (真实化)

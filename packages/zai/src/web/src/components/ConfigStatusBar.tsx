@@ -1,6 +1,7 @@
 import { useAppStore } from "../store/useAppStore";
 import ModelStatusButton from "./ModelStatusButton";
 import ModeStatusButton from "./ModeStatusButton";
+import EffortStatusButton from "./EffortStatusButton";
 import { TaskDock } from "./TaskDock";
 import BranchSelector from "./BranchSelector";
 
@@ -93,6 +94,9 @@ export default function ConfigStatusBar({
       <span style={{ color: "var(--accent-start)" }}>
         <ModelStatusButton compact={splitPaneOpen} />
       </span>
+      {/* EffortStatusButton 自己根据 selected model 是否有 reasoningLevels
+          列表决定是否渲染 — non-reasoning model 自动 hide,避免 picker 干扰。 */}
+      <EffortStatusButton compact={splitPaneOpen} />
       <span style={{ color: "var(--text-tertiary)" }}>·</span>
       <TaskDock onSelect={onTaskSelect} compact={splitPaneOpen} />
     </div>

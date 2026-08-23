@@ -27,6 +27,10 @@
 
 import type { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import {
+  installModelSelection as upstreamInstallModelSelection,
+  type ModelSelectionRef,
+} from '@deepseek-ai/dsh-agent'
 import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
@@ -37,7 +41,31 @@ export interface DshRunOptions {
   cwd: string
   prompt: string
   provider?: string
+  /**
+   * 默认/冷启动 model id — 仅在 `modelSelection` 未提供时用作 seed 写
+   * 到 `agentOptions.model`,首次 `agents.create` 生效(之后 turn 由
+   * `modelSelection.ref.current` 主导,详见下文)。
+   *
+   * 该值会传给上游 `agents.create({ agentOptions.model })`,但 dsh
+   * agent-loop 在每次 `agent/request` 时实际读 ref.current —
+   * 启动期 model 仅在 agent 没装 `installModelSelection` 时 fallback。
+   */
   model?: string
+  /**
+   * ds-021 hotfix:per-turn model 切换的 ref holder。
+   *
+   * 必须在 `agents.create({ setup })` 阶段装入 agentCtx(scope-local),
+   * 之后 zai-side 通过 mutate `ref.current = { provider, model }` 即可
+   * 影响下一次 LLM 请求 — 上游实现监听 `'system-prompt/assemble'` 与
+   * `'agent/request'` 把 ref 写到 LlmCallConfig。
+   *
+   * 不传 → 行为与修复前相同(只用 `opts.model` 作为 cold-start seed,
+   * 后续 turn 无法切换)。
+   *
+   * zai-side 端按 `Map<sessionId, ModelSelectionRef>` 维护 holder,保证
+   * ref 在整个 session 生命周期内持续存在。
+   */
+  modelSelection?: ModelSelectionRef
   /**
    * Phase 3 P1: 多模态 content blocks(图片/文档)。若提供,会拼到
    * createUserMessage 的 content 数组里(代替纯 text)。fallback:
@@ -119,13 +147,41 @@ export async function* runOnce(opts: DshRunOptions): AsyncIterable<SessionEvent>
       // 主动消费 — dsh-agent-presets 内部已经 parent 了 agentCtx 的
       // scope key 到 mount 的 standing key。
       //
-      // **AgentSetupCommit 契约**(dsh-agent-loop@0.1.0-rc.8 index.js:1260):
+      // **AgentSetupCommit 契约**(dsh-agent-loop@0.1.0-rc.8 index.ts:1220+):
       //   (await raceAbort(setup?.(agentCtx), signal, id))?.commit();
       // 上游假设 setup 回调 resolve 成 `{ commit(): void }` 形态,缺则抛
       // `commit is not a function`。mount() 直接返回 AgentPreset 对象,
       // **不是** AgentSetupCommit 形态,所以 await 后 .commit() 会炸。
       // 我们没有 post-mount 重校验步骤,返回 no-op commit shape 即可。
-      setup: (agentCtx) => {
+      // 但 AgentSetup 类型 `core/agent/index.ts:69-71` 也允许返 `void`,
+      // 所以这个 {commit:()=>{}} 是对称 + 冗余 — 保留为可读性占位。
+      //
+      // **ds-021 hotfix — per-turn model 切换的双轨设计**:
+      // 1. 下面 `agentOptions.model` 给 agent-loop 提供 fallback default:
+      //    agent-loop 的 `core/agent-loop/src/index.ts:351-353` 把
+      //    `provider/model/cwd` 注册为 systemPrompt variables,值从
+      //    `context.agent?.options` 派生(即 agentOptions)。
+      // 2. 这里 `upstreamInstallModelSelection(agentCtx, ref)` 装入 zai-side
+      //    持有的 ModelSelectionRef holder。ref 是 mutable,scope-local,
+      //    zai-side 每次 `run()` mutate `ref.current` 即时生效 — 上游
+      //    installModelSelection 在 `system-prompt/assemble` 把 ref.current
+      //    写入 assembly.variables(provider/model),在 `agent/request` 把
+      //    ref.assembled(由 assemble snapshot) 注入 LlmCallConfig,
+      //    override agent-loop default。
+      // 3. 两轨并存:model 作为 cold-start freeze,ref 作为 per-turn mutate。
+      //    配合 agents.get 复用 agent 实例,跨 turn 切 model 不需要重建
+      //    agent(cordis listener 跟 agentCtx 生命周期绑定,scope 卸载
+      //    才 dispose)。
+      // 4. **scope 卸载时 listener 自动清理** — 上游 `agentCtx.on(...)` 是
+      //    cordis scope-local listener,scope dispose 自动解绑,不需在
+      //    这里返回 disposer。zi 端 Map<sessionId, ref> 由 zai 的
+      //    kernel/factories/dsh.ts 在 shutdown 路径整表清空。
+      setup: async (agentCtx) => {
+        // 1) model selection — 让 per-turn model 切换生效(ds-021 修复点)。
+        if (opts.modelSelection) {
+          upstreamInstallModelSelection(agentCtx, opts.modelSelection)
+        }
+        // 2) agent-presets mount(保留原行为)
         const agentPresets = ctx.get('agentPresets') as
           | { mount: (agentCtx: Context, id?: string) => Promise<unknown> }
           | undefined
@@ -136,11 +192,12 @@ export async function* runOnce(opts: DshRunOptions): AsyncIterable<SessionEvent>
           // 上游 ?.commit() 链对此短路(safe no-op)。
           return
         }
-        // 把 mount resolve 值改成 AgentSetupCommit 形态(commit 是
-        // no-op,因为我们没有 post-mount 重校验)。mount() 失败时
-        // setup 抛错,外层 `try { ... } catch (error) { dispose() }`
-        // 走回滚路径(`dsh-agent-loop/lib/index.js:1262-1264`)。
-        return agentPresets.mount(agentCtx).then(() => ({ commit: () => {} }))
+        // mount 失败时 setup 抛错,外层 `try { ... } catch (error) { dispose() }`
+        // 走回滚路径。
+        await agentPresets.mount(agentCtx)
+        // 返回 AgentSetupCommit 形态 — commit 是 no-op,因为我们没有
+        // post-mount 重校验。
+        return { commit: () => {} }
       },
     })
     agent = created.agent

@@ -56,10 +56,45 @@ export function profilesToModelEntries(profiles: ProviderProfile[]): ModelEntry[
         // — findProfileForModel falls back to legacy first-match
         // behavior when no preferred id is set.
         providerId: p.id,
+        // ds-022 effort-picker follow-up:reasoning effort levels the
+        // model supports. zai-side 内置 miniMax 系列 lookup;其它
+        // 模型留空 → picker 不渲染(保守,等 vendor 接 explicit
+        // 支持后再扩)。
+        reasoningLevels: lookupReasoningLevels(model),
       })
     }
   }
   return out
+}
+
+/**
+ * 内置 per-model `reasoningEffort` levels — ds-022 effort-picker 用。
+ *
+ * 单一事实源:zai-side web picker 渲染 + dsh adapter `validateReasoningEffort`
+ * 双边一致。如果 dsh-bridge 后面提供 vendor-level source(类似
+ * `loadAvailableModels`),这里改成 thin wrapper 即可。
+ *
+ * 已知 vendor naming 不一致:
+ *   - DeepSeek / Anthropic: 'low' / 'medium' / 'high'
+ *   - OpenAI Codex: 'minimal' / 'low' / 'medium' / 'high' / 'xhigh' (含 'max' 别名)
+ *   - zai-side Anthropic 走 minimax 网关,与 dsh adapter 同一组,
+ *     所以本页只列 `'low'/'medium'/'high'`,OpenAI-via-zai 走 OpenCC
+ *     vendor `OpenccQueryInput.effort` 本工厂不接(ds-023 follow-up)。
+ */
+const MODEL_REASONING_LEVELS: Record<string, string[]> = {
+  // reasoning-capable miniMax 系列 — 与 dsh.ts `anthropicProfile.models[]`
+  // 的 `reasoningEfforts` 字段对齐。dsh 模式的真源是 anthropicProfile;
+  // 这里只走 web picker 渲染,server adapter 的 `validateReasoningEffort`
+  // 仍会校验 user-effort 是否在 anthropicProfile 列表内 — 一处错会
+  // 双重防护(分别是 picker 不显示 / runtime 静默降级)。
+  'MiniMax-M3': ['low', 'medium', 'high'],
+  'MiniMax-M2.7': ['low', 'medium', 'high'],
+  // non-reasoning model:`reasoningEfforts: false` 显式 — zai 不暴露
+  // levels,picker 隐藏按钮。
+}
+
+function lookupReasoningLevels(model: string): string[] | undefined {
+  return MODEL_REASONING_LEVELS[model]
 }
 
 /**

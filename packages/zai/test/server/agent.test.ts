@@ -33,7 +33,7 @@ let mockTranscriptMetaModel: string = 'unknown'
 // 这样 prompt 路由不会因"会话无 mainAgent"而触发落盘 patch,避免污染
 // patchCalls 统计;要验证落盘路径时把它设为 undefined 再断言。
 let mockTranscriptMainAgent: string | undefined = 'default'
-let patchCalls: Array<{ id: string; patch: { title?: string; tags?: string[]; model?: string; providerId?: string; mainAgent?: string } }> = []
+let patchCalls: Array<{ id: string; patch: { title?: string; tags?: string[]; model?: string; providerId?: string; mainAgent?: string; reasoningEffort?: string } }> = []
 // runtimeToolEvents: 让 tool_use:error/invalid/denied 翻译测试可注入事件序列.
 let runtimeToolEvents: Array<Record<string, unknown>> = [
   { type: 'message_start' },
@@ -118,7 +118,7 @@ vi.mock('../../src/server/services/agentRuntime.js', () => ({
       },
       messages: [],
     }),
-    patch: async (id: string, patch: { title?: string; tags?: string[]; model?: string; providerId?: string }) => {
+    patch: async (id: string, patch: { title?: string; tags?: string[]; model?: string; providerId?: string; reasoningEffort?: string }) => {
       patchCalls.push({ id, patch })
     },
     remove: async () => {},
@@ -841,6 +841,102 @@ describe('mainAgent per-session (zai patch 2026-08-20)', () => {
       const maPatches = patchCalls.filter((c) => 'mainAgent' in c.patch)
       expect(maPatches).toHaveLength(1)
       expect(maPatches[0].patch.mainAgent).toBe('default')
+    } finally {
+      close()
+    }
+  })
+})
+
+// zai patch (ds-022 effort-picker follow-up): PATCH /api/agent/sessions/:id
+// accepts `reasoningEffort` alongside model/providerId/permissionMode. Tests
+// below confirm:
+//   - non-empty string → store.patch 持久化
+//   - absent / undefined → skip(保留已有值,不擦)
+//   - empty string '' → 当前 stub 等同 skip(ds-023 follow-up 上游已支持
+//     后会 delete meta.reasoningEffort)
+//   - rejected body too-long(> 64 chars by zod max)
+//   - 与 model / providerId 同 PATCH 调用同时走通
+describe('PATCH /api/agent/sessions/:id — reasoningEffort', () => {
+  it('writes reasoningEffort when supplied', async () => {
+    patchCalls = []
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/sessions/sess-effort-1`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reasoningEffort: 'medium' }),
+      })
+      expect(res.status).toBe(200)
+      const effortPatch = patchCalls.find(
+        (c) => c.patch.reasoningEffort === 'medium',
+      )
+      expect(effortPatch).toBeDefined()
+      expect(effortPatch?.id).toBe('sess-effort-1')
+    } finally {
+      close()
+    }
+  })
+
+  it('persists reasoningEffort alongside model', async () => {
+    patchCalls = []
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/sessions/sess-effort-2`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          model: 'MiniMax-M3',
+          reasoningEffort: 'high',
+        }),
+      })
+      expect(res.status).toBe(200)
+      const effortPatch = patchCalls.find(
+        (c) => c.patch.reasoningEffort === 'high',
+      )
+      const modelPatch = patchCalls.find(
+        (c) => c.patch.model === 'MiniMax-M3',
+      )
+      expect(effortPatch).toBeDefined()
+      expect(modelPatch).toBeDefined()
+    } finally {
+      close()
+    }
+  })
+
+  it('rejects reasoningEffort too long (> 64 chars by zod)', async () => {
+    patchCalls = []
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/sessions/sess-effort-3`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ reasoningEffort: 'x'.repeat(65) }),
+      })
+      expect(res.status).toBe(400)
+    } finally {
+      close()
+    }
+  })
+
+  it('does NOT erase reasoningEffort when field omitted', async () => {
+    // The PATCH schema's `.optional()` means absence == "don't touch",
+    // not "delete". This is the "skip if absent" rule that matches
+    // model / providerId / permissionMode behavior — old clients without
+    // reasoningEffort field must not wipe an existing selection.
+    patchCalls = []
+    const { url, close } = await startApp()
+    try {
+      const res = await fetch(`${url}/api/agent/sessions/sess-effort-4`, {
+        method: 'PATCH',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ model: 'MiniMax-M3' }),
+      })
+      expect(res.status).toBe(200)
+      // No patch should carry reasoningEffort in any form.
+      const effortPatches = patchCalls.filter(
+        (c) => 'reasoningEffort' in c.patch,
+      )
+      expect(effortPatches).toHaveLength(0)
     } finally {
       close()
     }
