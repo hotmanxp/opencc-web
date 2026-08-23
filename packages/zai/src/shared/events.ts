@@ -44,7 +44,12 @@ const RuntimeEvent = z.discriminatedUnion('type', [
              sessionId: z.string(), turnIndex: z.number(),
              toolUseId: z.string(),
              toolName: z.string(), input: z.unknown(),
-             output: z.unknown() }),
+             output: z.unknown(),
+             // Phase 4 P1: 透传 dsh `tool/result` 事件顶层 `meta`
+             // (presentationMeta — SearchResultView / ReadResultView 等
+             // opaque 渲染元数据)。当前仅 `grep` / `glob` 等结构化工具
+             // 会携带;其他工具 absent → 前端 renderer 走默认文本路径。
+             meta: z.unknown().optional() }),
   z.object({ ...Base.shape, type: z.literal('runtime.done'),
              sessionId: z.string(), turnIndex: z.number(),
              usage: z.object({ input: z.number(), output: z.number() }).optional(),

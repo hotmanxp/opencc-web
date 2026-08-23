@@ -8,6 +8,7 @@ import { agentRenderer } from "./agent.js"
 import { diffRenderer } from "./diff.js"
 import { fileDisplayRenderer } from "./fileDisplay.js"
 import { mcpRenderer, isMcpToolName } from "./mcp.js"
+import { structuredGrepRenderer, structuredGlobRenderer } from "./search.js"
 
 const registry: Record<string, ToolRenderer> = {
   Agent: agentRenderer,
@@ -22,6 +23,14 @@ const registry: Record<string, ToolRenderer> = {
   FileEdit: diffRenderer,
   FileRead: readRenderer,
   FileWrite: diffRenderer,
+  // Phase 4 P1: harness `@deepseek-ai/dsh-tool-fs-search` 注册的小写
+  // `grep` / `glob` 工具名 — 走结构化 renderer, 读 dsh `tool/result.meta`
+  // 渲染按文件分组的 matches 卡片 / 路径列表 + 截断提示。meta 缺失时降级到
+  // stringFromOutput 文本路径（renderer 内部 fallback）。
+  grep: structuredGrepRenderer,
+  glob: structuredGlobRenderer,
+  // 旧 opencc-cli / dsh-bridge 自实现工具名 — 保留 grepRenderer (文本路径)
+  // 不破坏既有 transcript 历史与回归测试。
   Glob: globRenderer,
   Grep: grepRenderer,
   Read: readRenderer,

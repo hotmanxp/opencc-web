@@ -5,6 +5,17 @@ export type ToolRenderer = {
   preview(input: Record<string, unknown>): string
   displayName?(input: Record<string, unknown>): string
   renderInput?(input: Record<string, unknown>): ReactNode
+  /**
+   * renderOutput 接受 (output, isError) 两个参数 — 与原有 11 个 renderer
+   * (bash / read / edit / write / glob / grep / agent / mcp / generic) 签名
+   * 完全一致. 不引入新参数, 不破坏 opencc 路径.
+   *
+   * 需要 AgentMessage 上下文的 renderer (例如 harness tool-fs-search 的
+   * structuredGrepRenderer / structuredGlobRenderer 读 presentationMeta) 应
+   * 实现 `renderFull(msg)`, 该方法接收完整 AgentMessage, 优先级高于
+   * renderOutput. MessageBubble 检测到 renderFull 时直接挂载其结果,
+   * 完全不走 renderOutput 路径. 这样不修改旧 API 即可接入新工具.
+   */
   renderOutput?(output: unknown, isError: boolean): ReactNode
   /**
    * 整块接管渲染: 当 ToolCallBlock 检测到 renderFull 存在, 它会跳过默认

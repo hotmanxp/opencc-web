@@ -875,6 +875,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // 用 `??` 而非 `||`: incomingInput 是 null/undefined 时才回退 prev,
         // 避免空字符串/空对象覆盖已有 input (与 idx===-1 分支同一漏洞).
         input: incomingInput ?? prev.input,
+        // Phase 4 P1: 透传 presentationMeta (grep / glob 结构化结果).
+        // done 阶段才携带 meta, start 阶段 prev.meta 必定 undefined.
+        // 防御 incoming.meta = null 覆盖 prev.meta: 只在 meta 真实存在
+        // 时覆盖, 缺失回退 prev.meta (如未来允许 start 携带预投影).
+        ...((msg as { meta?: unknown }).meta !== undefined &&
+         (msg as { meta?: unknown }).meta !== null
+            ? { meta: (msg as { meta?: unknown }).meta }
+            : {}),
       } as unknown as AgentMessage
       const updates: Partial<AgentState> = { messages: next }
       if (shouldClearPending) updates.pendingAsk = null
@@ -1607,6 +1615,17 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           name: event.toolName,
           input: event.input as Record<string, unknown>,
           output: event.output,
+          // Phase 4 P1: 透传 dsh `tool/result.meta` (presentationMeta) 到
+          // AgentMessage. AgentMessage = RuntimeEvent 有 [key: string]: unknown
+          // 开索引, 但 React 渲染时仍需 explicit 字段避免类型擦除;
+          // 这里显式带 meta 字段, ToolCallBlock 渲染 grep / glob 结果时
+          // 优先读 meta 渲染结构化卡片, fallback 走 output 文本.
+          // ...(event as { meta?: unknown }).meta !== undefined
+          //   ? { meta: (event as { meta?: unknown }).meta }
+          //   : {},
+          ...(((event as { meta?: unknown }).meta !== undefined)
+            ? { meta: (event as { meta?: unknown }).meta }
+            : {}),
         }
         useAgentStore.getState().upsertToolCall(resultMsg)
         return
