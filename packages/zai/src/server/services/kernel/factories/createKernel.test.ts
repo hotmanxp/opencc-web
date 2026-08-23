@@ -1,8 +1,7 @@
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest'
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'node:fs'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { vi } from 'vitest'
 
 const tempDirs: string[] = []
 function makeTempHome(): string {
@@ -17,10 +16,30 @@ vi.mock('node:os', async () => {
   return { ...actual, homedir: () => currentHome }
 })
 
+// 保存宿主 shell 的 ZAI_KERNEL_OVERRIDE(createApp 启动期会写这个 env;
+// resolveAgentKernel 的 readKernelOverride 会优先命中它)。如果测试环境
+// 继承了这个 env(例如开发者同时在跑 zai 实例),不走 validate 慢路径,
+// 非法值测试就会"假阳性"通过。这是预先存在的 env 污染 bug。
+const ORIGINAL_KERNEL_OVERRIDE = process.env.ZAI_KERNEL_OVERRIDE
+
 beforeEach(async () => {
   currentHome = makeTempHome()
+  delete process.env.ZAI_KERNEL_OVERRIDE
   const { __resetCacheForTests } = await import('../../zaiSettingsCache.js')
   __resetCacheForTests()
+})
+
+afterEach(() => {
+  // 恢复 shell 原值,不影响开发者并行跑的 zai 实例
+  if (ORIGINAL_KERNEL_OVERRIDE === undefined) {
+    delete process.env.ZAI_KERNEL_OVERRIDE
+  } else {
+    process.env.ZAI_KERNEL_OVERRIDE = ORIGINAL_KERNEL_OVERRIDE
+  }
+  while (tempDirs.length > 0) {
+    const dir = tempDirs.pop()
+    if (dir) rmSync(dir, { recursive: true, force: true })
+  }
 })
 
 describe('createKernel 分叉', () => {

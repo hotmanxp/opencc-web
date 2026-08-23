@@ -21,13 +21,26 @@ vi.mock('node:os', async () => {
   }
 })
 
+// 保存宿主 shell 的 ZAI_KERNEL_OVERRIDE(createApp 启动期会写这个 env;
+// resolveAgentKernel 的 readKernelOverride 会优先命中它)。如果测试环境
+// 继承了这个 env(例如开发者同时在跑 zai 实例),第一个 describe 块的
+// resolveAgentKernel 走快路径直接返回 env 值,跳过 validate 慢路径。
+const ORIGINAL_KERNEL_OVERRIDE = process.env.ZAI_KERNEL_OVERRIDE
+
 beforeEach(async () => {
   currentHome = makeTempHome()
+  delete process.env.ZAI_KERNEL_OVERRIDE
   const { __resetCacheForTests } = await import('./zaiSettingsCache.js')
   __resetCacheForTests()
 })
 
 afterEach(() => {
+  // 恢复 shell 原值,不影响开发者并行跑的 zai 实例
+  if (ORIGINAL_KERNEL_OVERRIDE === undefined) {
+    delete process.env.ZAI_KERNEL_OVERRIDE
+  } else {
+    process.env.ZAI_KERNEL_OVERRIDE = ORIGINAL_KERNEL_OVERRIDE
+  }
   while (tempDirs.length > 0) {
     const dir = tempDirs.pop()
     if (dir) rmSync(dir, { recursive: true, force: true })
@@ -136,19 +149,8 @@ describe('projectSettings', () => {
 })
 
 describe('CLI --kernel override (ZAI_KERNEL_OVERRIDE env)', () => {
-  // env 是进程级单例,所有测试共享同一份 process.env。每个用例前后清理避免互相污染。
-  const ORIGINAL_ENV = process.env.ZAI_KERNEL_OVERRIDE
-
-  beforeEach(() => {
-    delete process.env.ZAI_KERNEL_OVERRIDE
-  })
-  afterEach(() => {
-    if (ORIGINAL_ENV === undefined) {
-      delete process.env.ZAI_KERNEL_OVERRIDE
-    } else {
-      process.env.ZAI_KERNEL_OVERRIDE = ORIGINAL_ENV
-    }
-  })
+  // env 是进程级单例,顶层 beforeEach 已统一 delete + afterEach 恢复,
+  // 这里只设测试场景需要的值,不再单独套 beforeEach/afterEach。
 
   it('readKernelOverride: env 未设 → undefined', async () => {
     const { readKernelOverride } = await import('./projectSettings.js')
