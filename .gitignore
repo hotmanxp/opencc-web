@@ -62,6 +62,11 @@ Thumbs.db
 .verify
 .zai-screenshots
 
+# Package-local .zai runtime caches (e.g. dsh subagent task store
+# written under packages/<pkg>/.zai/tasks-dsh/ when tests mock
+# homedir() to empty before beforeEach runs).
+**/.zai/
+
 # Local runtime artifacts (ego browser task outputs etc.)
 var/
 docs/superpowers/plans/screenshots
