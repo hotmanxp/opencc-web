@@ -165,6 +165,7 @@ export default function BranchSelector({
     >
       <Tooltip
         title="点击查看/切换分支(可搜索过滤)"
+        aria-label="查看/切换分支提示"
         placement="top"
         destroyOnHidden
       >

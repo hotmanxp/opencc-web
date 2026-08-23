@@ -90,6 +90,7 @@ export default function PermissionConfirmCard(): JSX.Element | null {
 
       <div style={{ marginTop: 4 }}>
         <textarea
+          aria-label="拒绝理由"
           value={localReason}
           onChange={(e) => setLocalReason(e.target.value.slice(0, 2000))}
           placeholder="拒绝理由（可选）"

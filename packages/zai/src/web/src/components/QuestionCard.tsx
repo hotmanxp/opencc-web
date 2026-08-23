@@ -46,7 +46,7 @@ function PreviewText({ text }: { text: string }) {
       <pre style={{ fontSize: 11, margin: '4px 0 0 0', padding: '6px 8px', background: 'var(--bg-faint-04)', borderRadius: 4, whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, monospace' }}>
         {expanded ? text : text.slice(0, PREVIEW_LIMIT) + '…'}
       </pre>
-      <Button type="link" size="small" style={{ padding: 0, fontSize: 11 }} onClick={() => setExpanded((v) => !v)}>
+      <Button type="link" size="small" aria-label={expanded ? '收起详情' : '展开更多详情'} style={{ padding: 0, fontSize: 11 }} onClick={() => setExpanded((v) => !v)}>
         {expanded ? 'Show less' : 'Show more'}
       </Button>
     </div>
@@ -134,6 +134,7 @@ function QuestionPanel({
         {q.multiSelect ? (
           <>
             <Checkbox.Group
+              aria-label={q.question}
               value={selectedList}
               onChange={(vals) => {
                 const list = vals as string[]
@@ -142,7 +143,7 @@ function QuestionPanel({
               style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
             >
               {q.options.map((opt: any) => (
-                <Checkbox key={opt.label} value={opt.label}>
+                <Checkbox key={opt.label} value={opt.label} aria-label={opt.label}>
                   <div>
                     <div style={{ fontWeight: 500 }}>{opt.label}</div>
                     {opt.description && (
@@ -154,7 +155,7 @@ function QuestionPanel({
                   </div>
                 </Checkbox>
               ))}
-              <Checkbox key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE}>
+              <Checkbox key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE} aria-label={OTHER_OPTION_LABEL}>
                 <div style={{ fontWeight: 500 }}>{OTHER_OPTION_LABEL}</div>
               </Checkbox>
             </Checkbox.Group>
@@ -172,12 +173,13 @@ function QuestionPanel({
         ) : (
           <>
             <Radio.Group
+              aria-label={q.question}
               value={currentAnswer}
               onChange={handleRadioChange}
               style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
             >
               {q.options.map((opt: any) => (
-                <Radio key={opt.label} value={opt.label}>
+                <Radio key={opt.label} value={opt.label} aria-label={opt.label}>
                   <div>
                     <div style={{ fontWeight: 500 }}>{opt.label}</div>
                     {opt.description && (
@@ -189,7 +191,7 @@ function QuestionPanel({
                   </div>
                 </Radio>
               ))}
-              <Radio key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE}>
+              <Radio key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE} aria-label={OTHER_OPTION_LABEL}>
                 <div style={{ fontWeight: 500 }}>{OTHER_OPTION_LABEL}</div>
               </Radio>
             </Radio.Group>

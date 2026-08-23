@@ -1224,7 +1224,7 @@ export default React.memo(function AgentInputBox() {
             位置: spacer 后第一个,作为工具栏右端第一入口 — 命令面板是用户最
             常用的辅助操作之一,放在最左能让拇指/鼠标最快够到. aria-pressed
             传达开关态, 红色高亮 active 状态. */}
-        <Tooltip title="命令/技能" placement="top">
+        <Tooltip title="命令/技能" aria-label="打开命令/技能面板" placement="top">
           <Button
             icon={<PlusOutlined />}
             onClick={() => {
@@ -1257,6 +1257,7 @@ export default React.memo(function AgentInputBox() {
               ? "分享到 LAN — 点开后选择 IP 复制链接发给同事"
               : "先开一个会话再分享"
           }
+          aria-label={sessionId ? "分享会话到 LAN" : "分享(需要会话)"}
           placement="top"
         >
           <Popover
@@ -1272,6 +1273,7 @@ export default React.memo(function AgentInputBox() {
               icon={<ShareAltOutlined />}
               data-testid="share-button"
               disabled={!sessionId}
+              aria-label={sessionId ? "分享会话到 LAN" : "分享(需要会话)"}
               aria-pressed={shareOpen}
               style={{
                 ...toolbarIconButtonStyle,
@@ -1303,12 +1305,14 @@ export default React.memo(function AgentInputBox() {
                   : "临时收起 transcript(刷新后回到 compact)"
                 : transcriptCollapsed
                   ? "展开 transcript"
-                  : "折叠 transcript"
+                  : "收起 transcript"
             }
+            aria-label={transcriptCollapsed ? "展开 transcript" : "收起 transcript"}
             placement="top"
           >
             <Button
               icon={transcriptCollapsed ? <CompressOutlined /> : <ExpandOutlined />}
+              aria-label={transcriptCollapsed ? "展开 transcript" : "收起 transcript"}
               data-testid="transcript-collapse-button"
               onClick={() => setTranscriptCollapsed(!transcriptCollapsed)}
               style={toolbarIconButtonStyle}
@@ -1328,10 +1332,12 @@ export default React.memo(function AgentInputBox() {
               ? "修复 transcript:补齐漏写的 tool_result,然后才能正常恢复会话"
               : "当前没有会话"
           }
+          aria-label={sessionId ? "修复 transcript" : "修复 transcript(需要会话)"}
           placement="top"
         >
           <Button
             icon={<ToolOutlined />}
+            aria-label={sessionId ? "修复 transcript" : "修复 transcript(需要会话)"}
             data-testid="transcript-repair-button"
             disabled={!sessionId || status === "streaming"}
             loading={repairing}
@@ -1382,6 +1388,7 @@ export default React.memo(function AgentInputBox() {
         <Button
           icon={<PictureOutlined />}
           onClick={() => fileInputRef.current?.click()}
+          aria-label="上传图片"
           title="上传图片"
           disabled={status === "streaming" || pendingAsk?.status === "pending"}
           style={toolbarIconButtonStyle}
@@ -1393,7 +1400,7 @@ export default React.memo(function AgentInputBox() {
             是行尾最右一个按钮.
             行为: 调 useAppStore.setQuickDrawerOpen(true) 打开右侧 Drawer. */}
         {isMobile && (
-          <Tooltip title="常用指令" placement="top">
+          <Tooltip title="常用指令" aria-label="常用指令提示" placement="top">
             <Button
               icon={<AppstoreAddOutlined />}
               onClick={() => useAppStore.getState().setQuickDrawerOpen(true)}
@@ -1410,10 +1417,11 @@ export default React.memo(function AgentInputBox() {
             一处写 → 全局同步 (useLocalStorageState 自带 same-tab storage event).
             open 时用品牌色 #ff6600 高亮, 关闭时与同行其他按钮颜色一致. */}
         {!isMobile && (
-        <Tooltip title="切换右侧分屏" placement="top">
+        <Tooltip title="切换右侧分屏" aria-label="切换右侧分屏提示" placement="top">
           <Button
             icon={<MenuUnfoldOutlined />}
             data-testid="split-pane-toggle-inputbox"
+            aria-label={splitPaneOpen ? "收起右侧分屏" : "展开右侧分屏"}
             aria-pressed={splitPaneOpen}
             onClick={() => setSplitPaneOpen(!splitPaneOpen)}
             style={{
@@ -1813,6 +1821,7 @@ export default React.memo(function AgentInputBox() {
         type="file"
         accept="image/*"
         multiple
+        aria-label="上传图片文件"
         style={{ display: "none" }}
         onChange={handleFilePick}
       />

@@ -268,6 +268,7 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
             <div style={{ marginBottom: 8 }}>
               <label>DM policy:&nbsp;</label>
               <Select
+                aria-label="DM policy"
                 value={dmPolicy}
                 onChange={setDmPolicy}
                 style={{ width: 180 }}
@@ -282,6 +283,7 @@ export function WeixinBotPanel({ open, onClose, inboxStream = [] }: WeixinBotPan
             <div style={{ marginBottom: 8 }}>
               <label>Group policy:&nbsp;</label>
               <Select
+                aria-label="Group policy"
                 value={groupPolicy}
                 onChange={setGroupPolicy}
                 style={{ width: 180 }}

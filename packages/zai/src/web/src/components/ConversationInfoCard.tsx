@@ -72,6 +72,7 @@ export default function ConversationInfoCard({ info }: Props) {
             type="text"
             size="small"
             icon={<CopyOutlined />}
+            aria-label="复制 sessionId"
             onClick={handleCopy}
             title="复制 sessionId"
           />

@@ -159,6 +159,7 @@ export function AttachmentStrip({
                 size="small"
                 type="text"
                 icon={<CloseOutlined />}
+                aria-label="移除附件"
                 onClick={(e) => {
                   // 阻止冒泡到外层 onClick, 避免点 X 同时触发放大.
                   e.stopPropagation()
@@ -189,6 +190,7 @@ export function AttachmentStrip({
               key={a.localId}
               type="button"
               onClick={handleClick}
+              aria-label={`查看 ${a.filename} 大图`}
               title={`${a.filename} — 点击查看大图`}
               style={{
                 ...containerStyle,
