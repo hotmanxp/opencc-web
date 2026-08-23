@@ -33,6 +33,8 @@ import {
   type SseFrame,
 } from '../lib/taskApi.js'
 import { useAgentStore } from '../store/useAgentStore.js'
+import { interruptSubagentTask } from '../hooks/useSubagentTasks.js'
+import { SubagentDetailBody } from './splitPane/SubagentDetailBody.js'
 
 interface ToolCallEntry {
   toolUseId: string
@@ -676,6 +678,20 @@ export function TaskDrawer({
     }
     return null
   })
+  // dsh-019 / dsh-024: dsh subagent 任务 — 由 SSE 'subagent.changed' 推到
+  // store (applySubagentChanged reducer),taskId 是 dsh-bridge 生成的
+  // 'dsh-task-<...>'。优先级高于 bashTask(改动 1 后 dsh subagent 不再进
+  // bashTasksBySession,这里保险起见用 `&& !bashTask` 兜底 — 若历史磁盘
+  // 遗留旧 bashTracker entry,优先认 subagent,因为 bashTracker 不再被
+  // 任何路径更新)。
+  const subagentTask = useAgentStore((s) => {
+    if (!taskId) return null
+    for (const sid of Object.keys(s.subagentTasksBySession)) {
+      const t = s.subagentTasksBySession[sid]?.find((task) => task.id === taskId)
+      if (t) return t
+    }
+    return null
+  })
   const [events, setEvents] = useState<StreamedEvent[]>([])
   const [loading, setLoading] = useState(false)
   // B7 (dsh-009) 降级:订阅事件流失败(常见是 503 background_runtime_unavailable)
@@ -688,6 +704,8 @@ export function TaskDrawer({
 
   // 数据驱动判定: 在 bashTasksBySession 找到了就是 bash 任务.
   const isBashTask = !!bashTask
+  // dsh subagent 任务 — 见 selector 注释。`!bashTask` 兜底防御历史残留。
+  const isSubagentTask = !!subagentTask && !bashTask
 
   // taskId 变化时清 events;detail/bashTask 由下面 selector 实时算。
   useEffect(() => {
@@ -713,7 +731,7 @@ export function TaskDrawer({
   // 而后端只发 seq>eventCount 的尾包,UI 看起来像"事件: 0 / 等待事件..."。
   // 服务端在读完历史后对运行中任务会自动转 live tail,对已完成任务直接结束 SSE 流。
   useEffect(() => {
-    if (!taskId || isBashTask) return
+    if (!taskId || isBashTask || isSubagentTask) return
     const ac = new AbortController()
     aborterRef.current = ac
     let cancelled = false
@@ -794,13 +812,19 @@ export function TaskDrawer({
     <Drawer
       title={
         <div style={{ display: 'flex', alignItems: 'center', gap: 8 }}>
-          <span>{isBashTask ? 'Shell' : '后台 Agent'}</span>
-          {detail && !isBashTask && (
+          <span>
+            {isBashTask
+              ? 'Shell'
+              : isSubagentTask
+                ? 'Agent'
+                : '后台 Agent'}
+          </span>
+          {detail && !isBashTask && !isSubagentTask && (
             <Tag color={meta?.color} style={{ margin: 0 }}>
               {meta?.icon} {meta?.label}
             </Tag>
           )}
-          {detail && !isBashTask && duration && (
+          {detail && !isBashTask && !isSubagentTask && duration && (
             <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{duration}</span>
           )}
           {bashTask && (
@@ -817,6 +841,38 @@ export function TaskDrawer({
           )}
           {bashTask && (
             <span style={{ color: 'var(--text-secondary)', fontSize: 12 }}>{formatDuration((bashTask.finishedAt ?? Date.now()) - bashTask.startedAt)}</span>
+          )}
+          {/* dsh subagent 实时 status(从 store 读,SSE 100% 推送)+ Interrupt 按钮 */}
+          {subagentTask && isSubagentTask && (
+            <>
+              <Tag
+                color={
+                  subagentTask.status === 'running' ? 'processing'
+                    : subagentTask.status === 'done' ? 'success'
+                      : subagentTask.status === 'failed' ? 'error'
+                        : 'default'
+                }
+                style={{ margin: 0 }}
+              >
+                {subagentTask.status === 'running' ? '⏳ 运行中'
+                  : subagentTask.status === 'done' ? '✅ 完成'
+                    : subagentTask.status === 'failed' ? '❌ 失败'
+                      : '已取消'}
+              </Tag>
+              {subagentTask.status === 'running' && (
+                <Button
+                  size="small"
+                  danger
+                  icon={<StopOutlined />}
+                  onClick={async () => {
+                    const r = await interruptSubagentTask(subagentTask.id)
+                    if (!r.ok) console.warn('[TaskDrawer] subagent interrupt failed:', r.error)
+                  }}
+                >
+                  Interrupt
+                </Button>
+              )}
+            </>
           )}
         </div>
       }
@@ -878,10 +934,20 @@ export function TaskDrawer({
           </div>
         </div>
       )}
-      {bashTask && (
+      {bashTask && !isSubagentTask && (
         <BashTaskView task={bashTask} />
       )}
-      {detail && !isBashTask && (
+      {isSubagentTask && taskId && (
+        // dsh subagent 详情 — 与 SubagentDetailDrawer 共用 Body,
+        // 不嵌 Drawer(避免两层 Drawer 视觉问题,见 plan
+        // squishy-cuddling-allen.md 改动 2)。Body 内 fetch
+        // /api/subagent-tasks/:id 拉 prompt / toolCalls / result,
+        // status 实时性靠 SSE 推 store (subagentTask selector)。
+        <div style={{ padding: '12px 20px' }}>
+          <SubagentDetailBody taskId={taskId} />
+        </div>
+      )}
+      {detail && !isBashTask && !isSubagentTask && (
         <>
           {/* 头部信息 */}
           <div

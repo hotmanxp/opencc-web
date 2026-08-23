@@ -371,32 +371,23 @@ export async function createDshKernelAdapter(
     // 子 scope(单传 agents service 不够,因为 createScope 走 plugin 而
     // 不是 ctx.get)。
     getDshCtx: () => handle.ctx,
-    onTaskStart: ({ taskId, description, prompt }) => {
-      // dsh-017: 复用 bashBackgroundTracker 显示 subagent 任务(同 tracker
-      // 但 description 是 prompt 摘要,command 字段填 taskId 方便辨识)。
-      bashTracker.register(taskId, {
-        command: `[subagent ${taskId}] ${description}`,
-        sessionId: getCurrentSessionId() ?? '',
-        description: prompt.slice(0, 200),
-        startedAt: Date.now(),
-      })
+    onTaskStart: ({ taskId, prompt }) => {
+      // dsh-017 原本"复用 bashBackgroundTracker 显示 subagent 任务" — 已删除
+      // (2026-08-22 修复):dsh subagent 走 bashTracker 会让 TaskDrawer 把
+      // 它判定为 Bash 任务、TaskDock 把它在 "Bash" 段展示;正确路径是只
+      // 推 subagent.changed,让 SubagentsDrawer / SubagentsTab 接管。
       // dsh-019: 推 subagent.changed 事件 — zai-side stateBridge
       // 翻译成 ServerEvent 'subagent.changed' 推到前端,UI Subagents
       // tab 用此事件实时刷新(spinner + interrupt 按钮)。
       stateChangeBus.emit('subagent.changed', {
         sessionId: getCurrentSessionId() ?? '',
         taskId,
-        description,
+        description: prompt.slice(0, 200),
         status: 'running',
         action: 'start',
       } as never)
     },
     onTaskFinish: ({ taskId, status, error }) => {
-      bashTracker.markFinished(
-        taskId,
-        status === 'done' ? 'completed' : status === 'cancelled' ? 'killed' : 'failed',
-        {},
-      )
       // dsh-019: 推 subagent.changed 事件(action=finish),让 UI 自动
       // 移除 spinner,显示 result/error。
       stateChangeBus.emit('subagent.changed', {

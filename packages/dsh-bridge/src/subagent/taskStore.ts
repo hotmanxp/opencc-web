@@ -506,46 +506,31 @@ export async function notifyParentSession(
 // ====== zai compat subagentControl 桥接 ======
 
 /**
- * Phase 4:改走上游 `ctx.subagents.listChildren(parentSessionId)`。
+ * Phase 4.1 (2026-08-22 修复 dsh-024):放弃上游 `ctx.subagents.listChildren()`
+ * fast path,改走纯磁盘 `listDshTasks()` + parentSessionId 过滤。
  *
- * 之前 Phase 3.1 是读 `~/.zai/tasks-dsh/<taskId>.json` 全量列表 + 过滤
- * parentSessionId(磁盘读 + JSON parse + 排序)。上游 `listChildren` 直接
- * 从 session store + 持久化层投影,O(N) 内存遍历,fastest path。
+ * **为什么改**:
+ * 上游 `listChildren(parentSessionId)` 返回的 child 用 sessionId(上游
+ * SubagentRun.id,UUID)标识;而 spawn 写盘用 taskId (`dsh-task-<timestamp>-...`)。
+ * 两套 id 体系:
+ *   - spawn taskId:`~/.zai/tasks-dsh/<taskId>.json` 文件名 + onTaskStart
+ *     emit payload.taskId + 父 LLM 收到的 subagent_control task_id
+ *   - 上游 sessionId:listChildren 返回 / subagents.interrupt 接受
  *
- * 这里仍兼容旧磁盘格式(作为 fallback)— dsh 0.1.0-rc.7 之前的 spawn
- * 任务可能还在磁盘上没清理。
+ * 旧实现把 sessionId 当 taskId 返回 → 跟 onTaskStart / interruptDshSubagent
+ * / 磁盘文件名 全不匹配,导致前端 store 永远空(TaskDock 不显示),父 LLM
+ * 拿 task_id 调 interrupt 也找不到磁盘文件。
+ *
+ * 改走磁盘后,list 返回的 taskId 跟 spawn 时一致(都是 spawn taskId),
+ * onTaskStart / interrupt / sendMessage / readTask 全部 id 对齐。
+ *
+ * 性能:listDshTasks 是 readdir + JSON.parse,N=小(本机活跃 subagent
+ * 数 < 100),Phase 4 性能优化(注释里说的 "fastest path")收益不抵 bug。
  */
 export async function listDshSubagents(
   ctx: Context,
   parentSessionId?: string,
 ): Promise<DshTaskState[]> {
-  // 优先:上游 listChildren
-  try {
-    const subagentRuntime = ctx.subagents as SubagentRuntime | undefined
-    if (subagentRuntime && parentSessionId) {
-      const children = await subagentRuntime.listChildren(SessionId(parentSessionId))
-      // SubagentListEntry 是 union(kind: 'child' | 'diagnostic') — 仅 child 类型
-      // 有完整 status/label 信息,diagnostic 类型只有 reason(暂忽略)。
-      return children
-        .filter((c): c is Extract<typeof c, { kind: 'child' }> => c.kind === 'child')
-        .map((c) => {
-          // 映射 SubagentListEntry → DshTaskState 形态(读磁盘拿 prompt/toolCalls)
-          const sessionId = String(c.id)
-          return {
-            taskId: sessionId, // subagent 用 sessionId 当 taskId (上游标识)
-            sessionId,
-            parentSessionId,
-            // activity: running/inactive — 简化映射到 running(下游按需 readDshTask)
-            status: 'running' as const,
-            prompt: '',
-            startedAt: 0,
-          } satisfies DshTaskState
-        })
-    }
-  } catch (err) {
-    console.warn('[dsh-bridge] listDshSubagents upstream failed, falling back to disk:', err)
-  }
-  // fallback:磁盘读
   const all = await listDshTasks()
   return all
     .filter((t) => !parentSessionId || t.parentSessionId === parentSessionId)
