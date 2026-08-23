@@ -23,7 +23,7 @@
     "test:watch": "vitest",
     "test:coverage": "vitest run --coverage",
     "clean": "rm -rf dist tsconfig.tsbuildinfo",
-    "typecheck": "tsc -b --noEmit",
+    "typecheck": "tsc -b --noEmit && node ../../scripts/verify-web-aria-labels.mjs",
     "codegen:rpc": "tsx ../../scripts/generate-rpc-client.ts"
   },
   "keywords": [
