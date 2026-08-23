@@ -9,13 +9,21 @@
  *   2. 上游 service 路由到 zai-side `registerAskUserProvider(ctx, sink)` 注册的 provider
  *   3. provider(本模块导出)emit `prompt.ask` SSE → 前端 QuestionCard 渲染
  *   4. zai askRegistry.register(toolUseId, sessionId, signal) 等用户答复
- *   5. 用户提交后,前端 /api/agent/answer → askRegistry.answer → Promise resolve
- *   6. 把 `Record<questionText, answerText>` 转回 dsh upstream 契约
- *      `{answers: [{id, selected: [label], custom?}]}`,按 questionText 索引
+ *   5. 用户提交后,前端 /api/agent/answer → askRegistry.answer(payload) → Promise resolve
+ *      payload 形状 = `{answers: Record<questionText, answerText>, annotations?: {...}}`
+ *      (对齐 `routes/answer.ts` 的 zod schema)
+ *   6. 剥 `payload.answers` 后按 questionText 索引 → dsh upstream 契约
+ *      `{answers: [{id, selected: [label]}]}`,每题用 dsh-side `q-{callId}-{i}` id 回索引
  *
  * **为什么不直接 import `__zaiEventBus` 与 `getAskRegistry`****:**
    工厂模式注入,让本模块可以独立 typecheck + 单测。dsh.ts 在 createSession
    时把已初始化的 eventBus / askRegistry / sessionId getter 传进来。
+ *
+ * **payload 解包与 opencc-mode 同步**: opencc-mode askUserQuestionCall
+ * (`compat/tools/index.ts:344-351`) 早已写了 `(raw.answers ?? raw)` 兼容
+ * 解包。dsh-mode 早期实现漏了这步,直接当 flat map 取 — 后果: `answersRecord[item.question]`
+ * 永远是 undefined,selected 退化为空数组,工具结果输出 `(skipped)`,AI
+ * 把这次提交误判为"用户跳过了问题"。修这里解包后,双轨走的同一个解包公式。
  */
 
 import type {
@@ -27,8 +35,12 @@ import type {
   UserQuestionProvider,
 } from '@zn-ai/dsh-bridge'
 
-/** zai askRegistry.register 返回的 `AskUserAnswers = Record<string, unknown>`。 */
-type ZaiAskUserAnswers = Record<string, unknown>
+/**
+ * `routes/answer.ts:7-14` zod schema 决定 askRegistry.resolve 的 payload 形状:
+ *   `{answers: Record<questionText, answerText>, annotations?: Record<questionText, {preview?, notes?}>}`
+ * (zai src/shared 里 AskUserAnswers 类型 alias 是 `Record<string, unknown>`,
+ * 但实际值是上面这个嵌套形式 — 与 opencc-mode 同形)
+ */
 
 export interface CreateAskUserSinkOptions {
   /** 读当前 sessionId — 用于 prompt.ask SSE 与 askRegistry 路由。 */
@@ -90,17 +102,31 @@ export function createAskUserSink(opts: CreateAskUserSinkOptions): AskUserSink {
         console.warn('[askUserSink] eventBus 未注入,前端可能看不到 QuestionCard')
       }
 
-      // 2. 等用户答复。zai askRegistry 返回 `Record<questionText, answerText>`。
+      // 2. 等用户答复。zai askRegistry(由 routes/answer.ts:50-53 经
+      //    registry.answer(toolUseId, payload) 写入)resolve 的 payload
+      //    形状是 `{answers: Record<questionText, answerText>, annotations?: ...}`
+      //    — 与 opencc-mode askUserQuestionCall(compat/tools/index.ts:344-351)
+      //    收到的同形,所以两边都要先剥 `raw.answers`,再 fallback 到 raw 本体
+      //    (兼容直接发 flat map 的旧 schema)。
+      //
+      //    **关键**: dsh-mode 早期实现漏了这个解包 — 把整个 payload
+      //    当 flat map 取, `answersRecord[item.question]` 永远拿到
+      //    undefined (对象顶层键是 `answers` 而非 question text),
+      //    selected 退化为空数组, renderResult 输出 `(skipped)` —
+      //    AI 看到 "问题已显示但你跳过了选择"。
       const abortSignal = req.signal ?? new AbortController().signal
-      const zaiAnswers =
-        (await askRegistry.register(toolUseId, sessionId, abortSignal)) ?? {}
+      const raw =
+        ((await askRegistry.register(toolUseId, sessionId, abortSignal)) as
+          | Record<string, unknown>
+          | null) ?? {}
 
       // 3. 转回 dsh upstream 契约 `{answers: [{id, selected: [label]}]}`
-      const answersRecord = zaiAnswers as ZaiAskUserAnswers
+      const answersRecord =
+        (raw.answers as Record<string, unknown> | undefined) ?? raw
       const answers: AskUserQuestionAnswerItem[] = req.questions.map(
         (item: AskUserQuestionItem): AskUserQuestionAnswerItem => {
-          const raw = answersRecord[item.question]
-          const text = typeof raw === 'string' && raw.length > 0 ? raw : ''
+          const val = answersRecord[item.question]
+          const text = typeof val === 'string' && val.length > 0 ? val : ''
           const selected: string[] = text ? [text] : []
           return {
             id: item.id,

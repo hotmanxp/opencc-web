@@ -16,6 +16,7 @@
  * 不依赖 dsh 真实 runtime — 用 fake ctx + fake userQuestions service。
  */
 import { describe, it, expect, vi } from 'vitest'
+import { parameterSchemaSpecToJsonSchema, validateArgs, ToolArgsError } from '@deepseek-ai/dsh-tools'
 import {
   registerAskUserProvider,
   registerAskUserTool,
@@ -260,5 +261,165 @@ describe('P-AskUserQuestion: tool.execute 契约', () => {
     )
     const askArg = ctx._userQuestions.ask.mock.calls[0]?.[0] as { signal: AbortSignal }
     expect(askArg.signal).toBe(ctrl.signal)
+  })
+})
+
+/**
+ * Schema 契约 - 给 LLM 看的 input contract 验证
+ *
+ * bug 背景: 原 askUser.ts 的 parameters schema 只有
+ *   { questions: { type: 'array', required: true } }
+ * 缺 items 描述,LLM 看不到 question/header/options/multiSelect 字段约束,
+ * 经常发 [{question, header}] 但缺 options — 而 dsh-tools validate
+ * 不深入校验 array elements(无 items 约束),"通过" 验证后到前端
+ * QuestionCard 找不到 options,只渲染 "Other" radio。
+ *
+ * 修复: 加完整 items schema,questions[].options 强制 required。
+ * 锁住工具 schema 经 dsh-tools 编译后:
+ *   - questions.items 存在 + items.required 包含 [question, header, options]
+ *   - items.properties.options.items.required 包含 ['label']
+ *
+ * 这是契约级 guard — 任何把 schema 改回"无 items"的尝试都会让这些
+ * case 立即 fail,避免 bug 重现。
+ *
+ * 注意 dsh-tools DSL quirk:
+ *   - `required` 不是顶层数组,而是标在每个 property spec 里(如
+ *     `{type: 'string', required: true}`) — compile 时收进 property-map 的
+ *     required 数组,最终以顶层 required 数组形式落到编译后 schema。
+ *   - array spec 不允许顶层 `required`,只能通过 items 嵌套强制必填。
+ *   - object items 内部也无 `required`,必须每个 property 标 `required: true`。
+ */
+describe('P-AskUserQuestion: tool input schema (LLM contract)', () => {
+  /** 拿到 AskUserQuestion 工具经 dsh-tools 编译过的 parameters JSON schema。 */
+  function getCompiledSchema(ctx: ReturnType<typeof makeFakeCtx>) {
+    registerAskUserTool(ctx)
+    const def = ctx._toolDefs[0] as { parameters: unknown }
+    return def.parameters as {
+      type: 'object'
+      properties: { questions: JsonSchemaArray }
+      required: string[]
+    }
+  }
+  type JsonSchemaArray = { type: 'array'; items: JsonSchemaObject }
+  type JsonSchemaObject = {
+    type: 'object'
+    additionalProperties?: boolean
+    properties: Record<string, JsonSchemaNode>
+    required?: string[]
+  }
+  type JsonSchemaNode =
+    | { type: 'string' }
+    | { type: 'boolean' }
+    | { type: 'array'; items?: JsonSchemaObject | JsonSchemaNode }
+    | JsonSchemaObject
+
+  it('顶层 parameters schema 含 properties.questions + required=["questions"]', () => {
+    const ctx = makeFakeCtx()
+    const compiled = getCompiledSchema(ctx)
+    expect(compiled.type).toBe('object')
+    expect(compiled.required).toEqual(['questions'])
+    expect(compiled.properties.questions?.type).toBe('array')
+  })
+
+  it('questions.items 是 object + items.required = [question, header, options]', () => {
+    const ctx = makeFakeCtx()
+    const compiled = getCompiledSchema(ctx)
+    const items = compiled.properties.questions.items as JsonSchemaObject
+    expect(items.type).toBe('object')
+    expect(items.required).toEqual(['question', 'header', 'options'])
+    expect(items.additionalProperties).toBe(false)
+    expect(items.properties).toHaveProperty('question')
+    expect(items.properties).toHaveProperty('header')
+    expect(items.properties).toHaveProperty('options')
+    expect(items.properties).toHaveProperty('multiSelect')
+  })
+
+  it('questions[].options 是 array + items 是 object + required=[label]', () => {
+    const ctx = makeFakeCtx()
+    const compiled = getCompiledSchema(ctx)
+    const options = (compiled.properties.questions.items as JsonSchemaObject).properties
+      .options as { type: 'array'; items: JsonSchemaObject }
+    expect(options.type).toBe('array')
+    expect(options.items.type).toBe('object')
+    expect(options.items.required).toEqual(['label'])
+    expect(options.items.additionalProperties).toBe(false)
+    expect(options.items.properties).toHaveProperty('label')
+    expect(options.items.properties).toHaveProperty('description')
+  })
+
+  it('REGRESSION (本 fix 加固): LLM 只发 question/header 不发 options → execute.args 触发 ToolArgsError,弹到工具层', async () => {
+    // 直接调 tool.execute,让 dsh-tools validate 跑一遍。LLM args 只有
+    // `{questions: [{question, header}]}` — 老 schema 会放行,新 schema
+    // 必须拒绝。ToolArgsError 在 defineTool execute line 313-315 抛出。
+    const ctx = makeFakeCtx()
+    registerAskUserTool(ctx)
+    const def = ctx._toolDefs[0] as {
+      execute: (args: unknown, exec: unknown) => Promise<unknown>
+    }
+    await expect(
+      def.execute(
+        { questions: [{ question: 'Q', header: 'H' /* 缺 options */ }] },
+        { callId: { toString: () => 'c1' }, signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow(/missing required property "questions\[0\]\.options"/)
+  })
+
+  it('REGRESSION: LLM 传 options 但每个 option 缺 label → execute 抛 ToolArgsError', async () => {
+    const ctx = makeFakeCtx()
+    registerAskUserTool(ctx)
+    const def = ctx._toolDefs[0] as {
+      execute: (args: unknown, exec: unknown) => Promise<unknown>
+    }
+    await expect(
+      def.execute(
+        {
+          questions: [
+            {
+              question: 'Q',
+              header: 'H',
+              options: [{ description: 'no label' }], // 缺 label
+            },
+          ],
+        },
+        { callId: { toString: () => 'c1' }, signal: new AbortController().signal },
+      ),
+    ).rejects.toThrow(/missing required property "questions\[0\]\.options\[0\]\.label"/)
+  })
+
+  it('PROPER: LLM 完整传 question/header/options[{label}] → execute 通过(到达 ctx.userQuestions.ask)', async () => {
+    const ctx = makeFakeCtx()
+    registerAskUserTool(ctx)
+    const def = ctx._toolDefs[0] as {
+      execute: (args: unknown, exec: unknown) => Promise<unknown>
+    }
+    ctx._userQuestions.ask.mockResolvedValueOnce({
+      answers: [{ id: 'q-c1-0', selected: ['4'], custom: undefined }],
+    })
+    await expect(
+      def.execute(
+        {
+          questions: [
+            {
+              question: '2+2=?',
+              header: 'Math',
+              options: [
+                { label: '4' },
+                { label: '3', description: '不是正确答案' },
+              ],
+            },
+          ],
+        },
+        { callId: { toString: () => 'c1' }, signal: new AbortController().signal },
+      ),
+    ).resolves.toBeDefined()
+    expect(ctx._userQuestions.ask).toHaveBeenCalledTimes(1)
+  })
+
+  it('工具 description 注明 "2-4 options" + 提示 UI 自动加 Other,提示 LLM 不要写 Other', () => {
+    const ctx = makeFakeCtx()
+    registerAskUserTool(ctx)
+    const def = ctx._toolDefs[0] as { description: string }
+    expect(def.description).toMatch(/2-4 options/i)
+    expect(def.description).toMatch(/Other/i)
   })
 })

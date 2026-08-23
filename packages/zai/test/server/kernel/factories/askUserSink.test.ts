@@ -7,10 +7,14 @@
  *   2. toolUseId 通过 generateToolUseId 工厂生成(默认 `q-` 前缀)。
  *   3. askRegistry.register 用生成的 toolUseId + 当前 sessionId 调用。
  *   4. signal 透传到 askRegistry.register(若上游有 abort signal)。
- *   5. askRegistry 返回 `Record<questionText, answerText>` →
- *      转回 dsh upstream `{answers: [{id, selected: [label]}]}`,
- *      按 questionText 找回每个 item 的 id。
- *   6. eventBus 未注入时 warn 不抛错,正常完成翻译(便于单测)。
+ *   5. askRegistry.resolve 出的 payload 形状对齐 `routes/answer.ts:7-14` zod schema:
+ *      `{answers: Record<questionText, answerText>, annotations?: {...}}`。
+ *      sink 必须先剥 `payload.answers` 再按 questionText 索引,否则
+ *      `answersRecord[item.question]` 拿到 undefined,selected 退化为 [],
+ *      dsh-side `askUser.renderResult` 输出 `(skipped)`,AI 把这次提交
+ *      误判为"用户跳过了问题"——见 regression 用例。
+ *   6. 向后兼容: 旧 schema(整个对象顶层就是 flat map)→ 走 fallback 当 flat map 处理。
+ *   7. eventBus 未注入时 warn 不抛错,正常完成翻译(便于单测)。
  *
  * 不依赖 dsh 真实 runtime — 用 fake askRegistry + fake eventBus。
  */
@@ -18,11 +22,26 @@ import { describe, it, expect, vi } from 'vitest'
 import { createAskUserSink } from '../../../../src/server/services/kernel/factories/askUserSink.js'
 import type { AskUserQuestionItem } from '@zn-ai/dsh-bridge'
 
+/**
+ * askRegistry.resolve 给出的真实 payload 形状 — 来自
+ * `routes/answer.ts:7-14` 的 zod schema 与 `routes/answer.ts:50-53` 的
+ * `registry.answer(toolUseId, payload)` 调用:
+ *   `{answers: Record<questionText, answerText>, annotations?: ...}`。
+ *
+ * 旧实现曾 mock 整个对象顶层就是 flat map(`{'Q1 text': 'opt1'}`),
+ * 这与生产不符 —— 漏掉 `answers.` 前缀曾经让所有 dsh-mode 答复被
+ * 误判为 skipped。本测试默认走真实形状,旧扁平 map 形状作为
+ * fallback 兼容 case 单测。
+ */
+type AskRegistryAnswer =
+  | { answers: Record<string, unknown>; annotations?: Record<string, unknown> }
+  | Record<string, unknown>
+
 describe('P-AskUserQuestion: createAskUserSink', () => {
   function makeDeps(
     overrides: Partial<{
       getSessionId: () => string | undefined
-      askRegistryAnswer: Record<string, unknown>
+      askRegistryAnswer: AskRegistryAnswer
     }> = {},
   ) {
     const sessionId = overrides.getSessionId?.() ?? 'sess-test'
@@ -41,7 +60,9 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
   }
 
   it('emit prompt.ask SSE,questions 字段对齐 zai QuestionCard 期望(不含 id)', async () => {
-    const deps = makeDeps({ askRegistryAnswer: { 'Q1 text': 'opt1' } })
+    const deps = makeDeps({
+      askRegistryAnswer: { answers: { 'Q1 text': 'opt1' } },
+    })
     const sink = createAskUserSink({
       getSessionId: deps.getSessionId,
       askRegistry: deps.askRegistry,
@@ -49,7 +70,7 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
       generateToolUseId: () => 'q-fixed',
     })
 
-    await sink({
+    await sink.ask({
       questions: [
         {
           id: 'q-fixed-0',
@@ -89,7 +110,7 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
       eventBus: deps.eventBus,
       generateToolUseId: () => 'q-fixed',
     })
-    await sink({
+    await sink.ask({
       // 不传 header / options / multiSelect(让 dsh 上游这些字段都是 undefined)
       questions: [
         { id: 'q-fixed-0', question: 'Q' } as unknown as AskUserQuestionItem,
@@ -112,7 +133,7 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
       eventBus: deps.eventBus,
       generateToolUseId: () => 'q-ABC',
     })
-    await sink({
+    await sink.ask({
       questions: [
         { id: 'q-ABC-0', question: 'Q', header: 'H', options: [] } as AskUserQuestionItem,
       ],
@@ -130,7 +151,7 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
       eventBus: deps.eventBus,
       generateToolUseId: () => 'q-ABC',
     })
-    await sink({
+    await sink.ask({
       questions: [
         { id: 'q-ABC-0', question: 'Q', header: 'H', options: [] } as AskUserQuestionItem,
       ],
@@ -151,7 +172,7 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
       eventBus: deps.eventBus,
       // 不传 generateToolUseId → 走默认实现
     })
-    await sink({
+    await sink.ask({
       questions: [
         { id: 'q-0', question: 'Q', header: 'H', options: [] } as AskUserQuestionItem,
       ],
@@ -161,11 +182,13 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
     expect(emitted.toolUseId).toMatch(/^q-[a-z0-9]+-[a-z0-9]+$/)
   })
 
-  it('askRegistry 返回 Record<questionText, text> → 转回 dsh upstream {id, selected}', async () => {
+  it('askRegistry 返回 routes/answer.ts 真实 payload 形状 {answers:{...}} → 解包后按 questionText 索引', async () => {
     const deps = makeDeps({
       askRegistryAnswer: {
-        'Q1 text': 'opt1',
-        'Q2 text': 'optA, optB',
+        answers: {
+          'Q1 text': 'opt1',
+          'Q2 text': 'optA, optB',
+        },
       },
     })
     const sink = createAskUserSink({
@@ -175,7 +198,7 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
       generateToolUseId: () => 'q-fixed',
     })
 
-    const result = await sink({
+    const result = await sink.ask({
       questions: [
         { id: 'q-fixed-0', question: 'Q1 text', header: 'H1', options: [] } as AskUserQuestionItem,
         { id: 'q-fixed-1', question: 'Q2 text', header: 'H2', options: [] } as AskUserQuestionItem,
@@ -189,15 +212,45 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
     ])
   })
 
-  it('zaiAnswers 里某题缺失 → selected 兜底空数组(不抛)', async () => {
-    const deps = makeDeps({ askRegistryAnswer: { 'Q1 text': 'opt1' } })
+  it('REGRESSION: 顶层 flat map(老 schema fallback)→ 仍按 questionText 索引', async () => {
+    // 兜底兼容: 早期某些内部调用可能直接发 flat map(没有 .answers 包装层)。
+    // 解包公式 `(raw.answers ?? raw)` 保证这种情况下也能找回答案。
+    const deps = makeDeps({
+      askRegistryAnswer: {
+        'Q1 text': 'opt1',
+        'Q2 text': 'opt2',
+      } as unknown as AskRegistryAnswer,
+    })
     const sink = createAskUserSink({
       getSessionId: deps.getSessionId,
       askRegistry: deps.askRegistry,
       eventBus: deps.eventBus,
       generateToolUseId: () => 'q-fixed',
     })
-    const result = await sink({
+    const result = await sink.ask({
+      questions: [
+        { id: 'q-fixed-0', question: 'Q1 text', header: 'H', options: [] } as AskUserQuestionItem,
+        { id: 'q-fixed-1', question: 'Q2 text', header: 'H', options: [] } as AskUserQuestionItem,
+      ],
+      signal: new AbortController().signal,
+    })
+    expect(result.answers).toEqual([
+      { id: 'q-fixed-0', selected: ['opt1'] },
+      { id: 'q-fixed-1', selected: ['opt2'] },
+    ])
+  })
+
+  it('payload.answers 里某题缺失 → 该题 selected 兜底空数组 (renderResult 走 skipped 路径)', async () => {
+    const deps = makeDeps({
+      askRegistryAnswer: { answers: { 'Q1 text': 'opt1' } },
+    })
+    const sink = createAskUserSink({
+      getSessionId: deps.getSessionId,
+      askRegistry: deps.askRegistry,
+      eventBus: deps.eventBus,
+      generateToolUseId: () => 'q-fixed',
+    })
+    const result = await sink.ask({
       questions: [
         { id: 'q-fixed-0', question: 'Q1 text', header: 'H', options: [] } as AskUserQuestionItem,
         { id: 'q-fixed-1', question: 'Q2 text', header: 'H', options: [] } as AskUserQuestionItem,
@@ -210,15 +263,17 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
     ])
   })
 
-  it('zaiAnswers value 不是字符串(数字/null)→ 当作空字符串兜底', async () => {
-    const deps = makeDeps({ askRegistryAnswer: { Q1: 42, Q2: null } })
+  it('payload.answers value 不是字符串(数字/null)→ 当作空字符串兜底(整题 selected=[])', async () => {
+    const deps = makeDeps({
+      askRegistryAnswer: { answers: { Q1: 42, Q2: null } },
+    })
     const sink = createAskUserSink({
       getSessionId: deps.getSessionId,
       askRegistry: deps.askRegistry,
       eventBus: deps.eventBus,
       generateToolUseId: () => 'q-fixed',
     })
-    const result = await sink({
+    const result = await sink.ask({
       questions: [
         { id: 'q-fixed-0', question: 'Q1', header: 'H', options: [] } as AskUserQuestionItem,
         { id: 'q-fixed-1', question: 'Q2', header: 'H', options: [] } as AskUserQuestionItem,
@@ -230,7 +285,9 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
   })
 
   it('eventBus 未注入时 warn 不抛错,正常返回答案', async () => {
-    const deps = makeDeps({ askRegistryAnswer: { Q1: 'a' } })
+    const deps = makeDeps({
+      askRegistryAnswer: { answers: { Q1: 'a' } },
+    })
     const sink = createAskUserSink({
       getSessionId: deps.getSessionId,
       askRegistry: deps.askRegistry,
@@ -238,7 +295,7 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
       generateToolUseId: () => 'q-fixed',
     })
     const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
-    const result = await sink({
+    const result = await sink.ask({
       questions: [
         { id: 'q-fixed-0', question: 'Q1', header: 'H', options: [] } as AskUserQuestionItem,
       ],
@@ -247,5 +304,37 @@ describe('P-AskUserQuestion: createAskUserSink', () => {
     expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('eventBus 未注入'))
     expect(result.answers).toEqual([{ id: 'q-fixed-0', selected: ['a'] }])
     warnSpy.mockRestore()
+  })
+
+  it('REGRESSION (核心 bug): askRegistry 返回真实 {answers:{...}} 包装 → 每题 selected 都拿到值(不是 [] 跳过)', async () => {
+    // 这是用户报告的"AI 收到问题已显示但你跳过了选择"的直接回归。
+    // 旧实现把 `{answers: {q1: a1}}` 当 flat map 取 → answersRecord[item.question]
+    // = undefined → selected=[] → renderResult → "(skipped)"。
+    // 正确实现必须先剥 `.answers`,再按 questionText 索引。
+    const deps = makeDeps({
+      askRegistryAnswer: {
+        answers: { '请选择颜色': '蓝色' },
+        annotations: { '请选择颜色': {} },
+      },
+    })
+    const sink = createAskUserSink({
+      getSessionId: deps.getSessionId,
+      askRegistry: deps.askRegistry,
+      eventBus: deps.eventBus,
+      generateToolUseId: () => 'q-fixed',
+    })
+    const result = await sink.ask({
+      questions: [
+        {
+          id: 'q-fixed-0',
+          question: '请选择颜色',
+          header: '颜色',
+          options: [{ label: '蓝色' }, { label: '红色' }],
+        } as AskUserQuestionItem,
+      ],
+      signal: new AbortController().signal,
+    })
+    // 关键 assertion: 不应该是 [], 应该是 ['蓝色']
+    expect(result.answers).toEqual([{ id: 'q-fixed-0', selected: ['蓝色'] }])
   })
 })

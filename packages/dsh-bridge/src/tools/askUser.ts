@@ -162,8 +162,84 @@ export function createAskUserTool(ctx: Context) {
     parameters: {
       questions: {
         type: 'array',
-        description: 'Questions to present to the user.',
+        description:
+          'Questions to present to the user. Each entry MUST include ' +
+          '`question` (the prompt text), `header` (a short chip label, ' +
+          '≤ 32 chars), `options` (Array<{label, description?}>, 2–4 ' +
+          'entries — do NOT add an "Other" option, the UI injects that), ' +
+          'and `multiSelect` (boolean, optional; defaults to single-select).',
         required: true,
+        // items 描述让 dsh-tools validateJsonSchemaValue 深入校验每个
+        // 元素 — 老 schema 缺 items 时 LLM 看不到 question/header/options
+        // 字段要求,常发没有 options 的 `[{question: '...', header: '...'}]`,
+        // dsh-tools 仍然"通过" validate,前端 QuestionCard 只看到 "Other"
+        // (因为 q.options 是空数组)。
+        //
+        // 对齐 opencc-mode `compat/tools/index.ts:98-117` 给 LLM 看的
+        // AskUserQuestionItemSchema — 两边 .describe() 文案一致。
+        //
+        // **dsh-tools value schema DSL**:`required` 是 property-map 概念,
+        // 标在每个 property spec 内(如 `label: {required: true}`),不像
+        // 标准 JSON Schema 那样用顶层 `required` 数组。dsh-tool-fs
+        // (`node_modules/.../dsh-tool-fs/lib/index.js` items usage) 就是
+        // 这个写法 — items.properties 里的每个属性用 `required: true` 标必填。
+        items: {
+          type: 'object',
+          additionalProperties: false,
+          properties: {
+            question: {
+              type: 'string',
+              required: true,
+              description:
+                'The complete question to ask the user. Should be clear, ' +
+                'specific, and end with a question mark.',
+            },
+            header: {
+              type: 'string',
+              required: true,
+              description:
+                'Very short label displayed as a chip/tag ' +
+                '(max 32 chars). Examples: "Auth method", "Library", ' +
+                '"Approach".',
+            },
+            options: {
+              type: 'array',
+              required: true,
+              description:
+                'The available choices for this question. Must have 2–4 ' +
+                'options. Each option must be a distinct, mutually ' +
+                'exclusive choice. There should be no "Other" option — ' +
+                'that is provided automatically.',
+              items: {
+                type: 'object',
+                additionalProperties: false,
+                properties: {
+                  label: {
+                    type: 'string',
+                    required: true,
+                    description:
+                      'The display text for this option that the user ' +
+                      'will see and select. Should be concise ' +
+                      '(1-5 words) and clearly describe the choice.',
+                  },
+                  description: {
+                    type: 'string',
+                    description:
+                      'Explanation of what this option means or what ' +
+                      'will happen if chosen. Useful for providing ' +
+                      'context about trade-offs or implications.',
+                  },
+                },
+              },
+            },
+            multiSelect: {
+              type: 'boolean',
+              description:
+                'Set to true to allow the user to select multiple ' +
+                'options instead of just one.',
+            },
+          },
+        },
       },
     },
     output: {
