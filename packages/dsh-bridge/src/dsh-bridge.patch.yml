@@ -196,6 +196,10 @@
 - id: tool-subagent
   name: '@deepseek-ai/dsh-tool-subagent'
   config:
+    # Phase 5P6 必填:delegates to `ctx.subagents` provider named 'spawn'
+    # (由 createDshRuntime.ts 单独 ctx.plugin(SubagentRuntime) + spawn
+    # provider 装载 — patch.yml 里没有显式 row,工具调用时通过 ctx 取)。
+    provider: 'spawn'
     enableRunInBackground: true
     backgroundMode: 'continuable'
 

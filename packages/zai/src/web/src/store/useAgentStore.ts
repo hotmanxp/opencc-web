@@ -2018,6 +2018,23 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   applyV2TaskChanged: (event) => {
     set((s) => {
+      // Phase 5P5 适配:dsh-tool-todo 上游 whole-list snapshot 语义 —
+      // action='snapshot' 携带 `tasks: V2TaskItem[]`(已由 zai-side factories
+      // 把 TodoItem[] 映射成 V2TaskItem[]),整 list 替换 v2TasksBySession[sid]。
+      // opencc 模式仍走 upsert/delete 单 task CRUD,事件 type 同名但
+      // action 互斥 — union by action 区分。
+      if (event.action === 'snapshot') {
+        // lenient cast:zod schema 已保证 `tasks` 是 V2TaskItem[],这里 cast
+        // 是为了让 useAgentStore 内部类型与 V2TaskItem 对齐(zod parse 失败
+        // 的话 SSE 在 eventSource.ts:106 ServerEvent.parse 会先抛错,不会到
+        // 这里)。
+        return {
+          v2TasksBySession: {
+            ...s.v2TasksBySession,
+            [event.sessionId]: event.tasks as V2TaskItem[],
+          },
+        }
+      }
       const list = s.v2TasksBySession[event.sessionId] ?? []
       // action='delete' → 按 task.id 过滤掉; action='upsert' →
       // 已存在则替换, 不存在则 append. V2 task 与 BashTask 不同,

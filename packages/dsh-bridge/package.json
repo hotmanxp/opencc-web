@@ -61,6 +61,7 @@
     "@deepseek-ai/dsh-subprocess-local": "0.1.0-rc.8",
     "@deepseek-ai/dsh-timeout": "0.1.0-rc.8",
     "@deepseek-ai/dsh-tool-fs-search": "0.1.0-rc.8",
+    "@deepseek-ai/dsh-mcp-client": "0.1.0-rc.8",
     "@deepseek-ai/dsh-session-projection": "0.1.0-rc.8",
     "@deepseek-ai/dsh-session-projection-cache": "0.1.0-rc.8",
     "@deepseek-ai/dsh-session-title": "0.1.0-rc.8",

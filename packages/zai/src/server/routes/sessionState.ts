@@ -6,6 +6,8 @@ import {
 } from '@zn-ai/zn-agent-core'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
 import { getKernelAdapter } from '../services/agentRuntime.js'
+import { getDshHandleForTranscript } from '../services/kernel/factories/dsh.js'
+import { snapshotDshTodo } from '@zn-ai/dsh-bridge'
 
 /**
  * B7 (dsh-009): dsh 模式 `initBackgroundRuntime` 主动跳过 — 子任务走
@@ -81,6 +83,41 @@ function trimV2Task(t: {
 router.get('/agent/sessions/:id/state', async (req: Request, res: Response) => {
   const sid = req.params.id
 
+  // v2 tasks 分支:按 kernel 分发
+  //   - dsh kernel:从 dsh `ctx.sessionProjections.snapshot(session)` 读 `todos`
+  //     投影值(whole-list snapshot,Phase 5P5 起由 dsh-tool-todo 上游维护),
+  //     把 TodoItem[] 转成 V2TaskItemWire[]。opencc 路径完全不走。
+  //   - opencc / 未初始化:走 compat TaskListStore + vendor fallback(原行为)。
+  const isDshKernel = (() => {
+    try {
+      return getKernelAdapter()?.kernel === 'dsh'
+    } catch {
+      return false
+    }
+  })()
+
+  const v2Promise: Promise<V2TaskItemWire[]> = isDshKernel
+    ? Promise.resolve()
+        .then(() => loadDshV2Tasks(sid))
+        .catch((err: unknown) => {
+          console.warn('[sessionState] dsh v2 snapshot failed', err)
+          return loadVendorV2Tasks(sid)
+        })
+    : getTaskListStore()
+        .list(sid)
+        .then((tasks) => {
+          if (tasks.length > 0) return tasks.map(trimV2Task)
+          // Fallback: read from vendor's task storage (~/.zai/tasks/<sid>/<id>.json)
+          // when the compat TaskListStore file (~/.zai/tasks/<sid>.json) is empty.
+          // This happens when tasks were created by the vendor's TaskCreate tool
+          // (opencc-src) and the page hasn't received SSE v2_task.changed yet.
+          return loadVendorV2Tasks(sid)
+        })
+        .catch((err: unknown) => {
+          console.warn('[sessionState] v2 failed', err)
+          return loadVendorV2Tasks(sid)
+        })
+
   const [cwdResult, v2Result, bashResult, agentResult] = await Promise.all([
     Promise.resolve()
       .then(() => {
@@ -94,20 +131,7 @@ router.get('/agent/sessions/:id/state', async (req: Request, res: Response) => {
         return null
       }),
 
-    getTaskListStore()
-      .list(sid)
-      .then((tasks) => {
-        if (tasks.length > 0) return tasks.map(trimV2Task)
-        // Fallback: read from vendor's task storage (~/.zai/tasks/<sid>/<id>.json)
-        // when the compat TaskListStore file (~/.zai/tasks/<sid>.json) is empty.
-        // This happens when tasks were created by the vendor's TaskCreate tool
-        // (opencc-src) and the page hasn't received SSE v2_task.changed yet.
-        return loadVendorV2Tasks(sid)
-      })
-      .catch((err: unknown) => {
-        console.warn('[sessionState] v2 failed', err)
-        return loadVendorV2Tasks(sid)
-      }),
+    v2Promise,
 
     Promise.resolve()
       .then(() => bashBackgroundTracker.list({ sessionId: sid }))
@@ -173,4 +197,33 @@ async function loadVendorV2Tasks(sid: string): Promise<V2TaskItemWire[]> {
     console.warn('[sessionState] vendor v2 task fallback failed', err)
     return []
   }
+}
+
+/**
+ * Phase 5P5 适配:dsh 模式从 `ctx.sessionProjections.snapshot(session)` 读
+ * `todos` 投影值(whole-list snapshot,由上游 dsh-tool-todo 维护)。
+ *
+ * - ctx 还没装载(handle.shutdown / 早期 init)/ snapshotDshTodo 内部 null
+ *   (没 first todo/write)→ 返回空数组,前端 TodoZone 过滤 length===0
+ *   不渲染,与 opencc 模式空 list 行为对齐。
+ * - TodoItem.content 作 id(subject 也是 content,与 opencc 模式 subject 字段
+ *   对齐 — TodoZone / TodoDropdown 都读 t.subject)。
+ *
+ * 失败(罕见,例如 dsh-side ctx 已 dispose)→ 回退到 loadVendorV2Tasks,与
+ * opencc 路径最终 fallback 一致,避免空 list 造成 UI 异常。
+ */
+async function loadDshV2Tasks(sid: string): Promise<V2TaskItemWire[]> {
+  const ctx = getDshHandleForTranscript()
+  if (!ctx) return []
+  const todos = snapshotDshTodo(ctx, sid)
+  if (!todos) return []
+  const now = Date.now()
+  return todos.map((t) => ({
+    id: t.content,
+    subject: t.content,
+    status: t.status,
+    blocks: [],
+    blockedBy: [],
+    updatedAt: now,
+  }))
 }

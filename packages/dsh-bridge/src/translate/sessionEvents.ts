@@ -272,14 +272,33 @@ export function translateSessionEvent(
       return null
 
     case 'todo/write': {
-      // todo/write → state.v2_task.changed（前端 todo 列表实时刷新）。
-      const todos = (event.data.todos ?? []) as Array<{ id?: string; status?: string; content?: string }>
+      // dsh-tool-todo 上游是 whole-list snapshot replace 语义(`TodoItem[]`,
+      // 通过 content 唯一去重,无 id 字段)。zai V2TaskItem schema 是单 task
+      // CRUD(必需 id/subject/blocks/blockedBy/updatedAt),不能直接复用
+      // upsert/delete 形态 — 改用新增的 `action='snapshot'` 分支,
+      // `tasks: TodoItem[]` 整 list 透传,前端 reducer 走"整 list 替换"语义。
+      //
+      // 事件 type 用 zai 标准的 `'v2_task.changed'`(不带 `state.` 前缀,
+      // 与 packages/zai/src/server/services/eventBus.ts:87 STATE_EVENT_TYPES
+      // 一致)。之前错用 `'state.v2_task.changed'` 导致前端 reducer 永不触发
+      // (useEventStream 的 case 是 `'v2_task.changed'`)。
+      //
+      // id 生成在 zai-side `mapDshTodoToV2Task` helper 完成(content 作 id)。
+      // initial 冷启动由 sessionState.ts 走 `ctx.sessionProjections.snapshot`
+      // 独立路径拿,不走 translate。
+      //
+      // Phase 5P5 之前的旧实现:`task: {todos}, action: 'upsert'` 把整个 list
+      // 塞进 task 字段,导致 reducer `event.task.id` 永远 undefined,UI 显示空白。
+      const todos = (event.data.todos ?? []) as Array<{
+        content: string
+        status: 'pending' | 'in_progress' | 'completed'
+      }>
       return {
         ...baseFields,
-        type: 'state.v2_task.changed',
+        type: 'v2_task.changed',
         sessionId: ctx.sessionId,
-        task: { todos },
-        action: 'upsert',
+        tasks: todos,
+        action: 'snapshot',
       }
     }
 

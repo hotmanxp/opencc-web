@@ -234,31 +234,47 @@ describe('translateSessionEvent 核心子集', () => {
   })
 })
 
-describe('translateSessionEvent Phase 1.3: 完整 13 SessionEventMap 类型', () => {
-  it('todo/write → state.v2_task.changed', () => {
+describe('translateSessionEvent Phase 5P5: todo/write whole-list snapshot', () => {
+  it('todo/write → v2_task.changed (action=snapshot, tasks 整 list)', () => {
     const event = {
       type: 'todo/write',
       seq: 9,
       data: {
         todos: [
-          { id: 't1', status: 'in_progress', content: 'fix bug' },
-          { id: 't2', status: 'pending', content: 'add test' },
+          { content: 'fix bug', status: 'in_progress' },
+          { content: 'add test', status: 'pending' },
         ],
       },
     } as any
     const out = translateSessionEvent(event, ctx)
     expect(out).not.toBeNull()
-    expect(out!.type).toBe('state.v2_task.changed')
-    expect((out as any).action).toBe('upsert')
-    expect((out as any).task.todos).toHaveLength(2)
+    expect(out!.type).toBe('v2_task.changed')
+    expect((out as any).action).toBe('snapshot')
+    expect((out as any).tasks).toHaveLength(2)
+    expect((out as any).tasks[0]).toEqual({ content: 'fix bug', status: 'in_progress' })
+    expect((out as any).tasks[1]).toEqual({ content: 'add test', status: 'pending' })
+    // 整 list 透传,不再包成 {todos} (Phase 5P5 前的旧实现)
+    expect((out as any).task).toBeUndefined()
   })
 
   it('todo/write 空数组也正常翻译（边界）', () => {
     const event = { type: 'todo/write', seq: 10, data: { todos: [] } } as any
     const out = translateSessionEvent(event, ctx)
     expect(out).not.toBeNull()
-    expect(out!.type).toBe('state.v2_task.changed')
-    expect((out as any).task.todos).toEqual([])
+    expect(out!.type).toBe('v2_task.changed')
+    expect((out as any).action).toBe('snapshot')
+    expect((out as any).tasks).toEqual([])
+  })
+
+  it('todo/write 单元素 status=completed 也走 snapshot 路径', () => {
+    const event = {
+      type: 'todo/write',
+      seq: 11,
+      data: { todos: [{ content: 'done', status: 'completed' }] },
+    } as any
+    const out = translateSessionEvent(event, ctx)
+    expect((out as any).action).toBe('snapshot')
+    expect((out as any).tasks[0].status).toBe('completed')
   })
 
   it('session/end-seed → ignorable', () => {

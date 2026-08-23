@@ -61,6 +61,12 @@ vi.mock('../services/backgroundRuntime.js', () => ({
 vi.mock('../services/agentRuntime.js', () => ({
   getKernelAdapter: vi.fn(),
 }))
+vi.mock('../services/kernel/factories/dsh.js', () => ({
+  getDshHandleForTranscript: vi.fn(),
+}))
+vi.mock('@zn-ai/dsh-bridge', () => ({
+  snapshotDshTodo: vi.fn(),
+}))
 
 describe('GET /api/agent/sessions/:id/state — dsh-mode silent skip', () => {
   let app: express.Express
@@ -133,6 +139,96 @@ describe('GET /api/agent/sessions/:id/state — dsh-mode silent skip', () => {
       '[sessionState] agent failed',
       expect.any(Error),
     )
+  })
+})
+
+/**
+ * Phase 5P5 适配:dsh kernel 时 sessionState 路由读 dsh sessionProjections
+ * 投影的 `todos` 整 list,转成 V2TaskItemWire[]。opencc 模式仍走 compat
+ * TaskListStore(由原 sessionState 测试覆盖,本 describe 仅新增 dsh 路径)。
+ */
+describe('GET /api/agent/sessions/:id/state — dsh v2Tasks (Phase 5P5)', () => {
+  let app: express.Express
+
+  beforeEach(async () => {
+    vi.resetModules()
+    const { default: router } = await import('./sessionState.js')
+    app = express()
+    app.use('/api', router)
+    // 清 mock 调用历史 — vi.resetModules 重置模块状态,但 mock spy 的
+    // call 记录是跨模块的,需要显式清,避免之前 case 的调用残留影响断言。
+    vi.clearAllMocks()
+  })
+
+  it('dsh kernel + snapshot 有数据:返回 TodoItem[] 映射成的 V2TaskItemWire[]', async () => {
+    const { getKernelAdapter } = await import('../services/agentRuntime.js')
+    const { getDshHandleForTranscript } = await import(
+      '../services/kernel/factories/dsh.js'
+    )
+    const { snapshotDshTodo } = await import('@zn-ai/dsh-bridge')
+    vi.mocked(getKernelAdapter).mockReturnValue({ kernel: 'dsh' } as never)
+    vi.mocked(getDshHandleForTranscript).mockReturnValue({} as never)
+    vi.mocked(snapshotDshTodo).mockReturnValue([
+      { content: 'fix bug', status: 'in_progress' },
+      { content: 'add test', status: 'pending' },
+    ] as never)
+    const res = await request(app).get('/api/agent/sessions/sess-dsh/state')
+    expect(res.status).toBe(200)
+    expect(res.body.v2Tasks).toEqual([
+      expect.objectContaining({
+        id: 'fix bug',
+        subject: 'fix bug',
+        status: 'in_progress',
+        blocks: [],
+        blockedBy: [],
+      }),
+      expect.objectContaining({
+        id: 'add test',
+        subject: 'add test',
+        status: 'pending',
+      }),
+    ])
+  })
+
+  it('dsh kernel + snapshot 返回 null(还没 first write):v2Tasks=[]', async () => {
+    const { getKernelAdapter } = await import('../services/agentRuntime.js')
+    const { getDshHandleForTranscript } = await import(
+      '../services/kernel/factories/dsh.js'
+    )
+    const { snapshotDshTodo } = await import('@zn-ai/dsh-bridge')
+    vi.mocked(getKernelAdapter).mockReturnValue({ kernel: 'dsh' } as never)
+    vi.mocked(getDshHandleForTranscript).mockReturnValue({} as never)
+    vi.mocked(snapshotDshTodo).mockReturnValue(null)
+    const res = await request(app).get('/api/agent/sessions/sess-empty/state')
+    expect(res.status).toBe(200)
+    expect(res.body.v2Tasks).toEqual([])
+  })
+
+  it('dsh kernel + ctx 还没装载(getDshHandleForTranscript 返回 null):v2Tasks=[]', async () => {
+    const { getKernelAdapter } = await import('../services/agentRuntime.js')
+    const { getDshHandleForTranscript } = await import(
+      '../services/kernel/factories/dsh.js'
+    )
+    const { snapshotDshTodo } = await import('@zn-ai/dsh-bridge')
+    vi.mocked(getKernelAdapter).mockReturnValue({ kernel: 'dsh' } as never)
+    vi.mocked(getDshHandleForTranscript).mockReturnValue(null)
+    // snapshotDshTodo 不应被调,即使被调也无害(mock 默认返回 undefined → loadDshV2Tasks 内
+    // 有 ctx 短路,进不去)
+    vi.mocked(snapshotDshTodo).mockReturnValue([])
+    const res = await request(app).get('/api/agent/sessions/sess-nocontext/state')
+    expect(res.status).toBe(200)
+    expect(res.body.v2Tasks).toEqual([])
+    expect(snapshotDshTodo).not.toHaveBeenCalled()
+  })
+
+  it('opencc kernel:不走 dsh 路径(不调 snapshotDshTodo)', async () => {
+    const { getKernelAdapter } = await import('../services/agentRuntime.js')
+    const { snapshotDshTodo } = await import('@zn-ai/dsh-bridge')
+    vi.mocked(getKernelAdapter).mockReturnValue({ kernel: 'opencc' } as never)
+    vi.mocked(snapshotDshTodo).mockClear()
+    const res = await request(app).get('/api/agent/sessions/sess-opencc/state')
+    expect(res.status).toBe(200)
+    expect(snapshotDshTodo).not.toHaveBeenCalled()
   })
 })
 

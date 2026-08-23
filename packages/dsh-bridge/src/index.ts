@@ -218,6 +218,17 @@ export {
   type ZaiCommandSink,
 } from './commands/index.js'
 
+// B6.5 — dsh session projection seam (Phase 5P5 todo 整 list 适配)
+// zai-side 用 `snapshotDshTodo` 拉冷启动 todos,`subscribeDshTodoProjection`
+// 监听 todos 投影实时推送。返回 TodoItem[] 形态 (上游 dsh-tool-todo schema),
+// 跟 zai V2TaskItem 不直接兼容 — zai-side `mapDshTodoToV2Task` helper 做映射。
+export {
+  snapshotDshTodo,
+  subscribeDshTodoProjection,
+  type DshTodoItem,
+  type DshProjectionChangeListener,
+} from './sessionProjections.js'
+
 /** NotImplementedError — 仅在 B0 stub 期使用，B1a+ 不再抛此错。 */
 export class NotImplementedError extends Error {
   constructor(feature: string) {

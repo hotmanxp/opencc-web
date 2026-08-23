@@ -53,6 +53,107 @@ import type { Context as DshContext } from '@zn-ai/dsh-bridge'
 /** dsh Cordis ctx 本地别名 — 避免 import 实体与未来 Context 类型冲突。 */
 type Context = DshContext
 
+/**
+ * V2TaskItem 的本地最小子集 — 与 packages/zai/src/shared/events.ts 的
+ * `V2TaskItemWireSchema` 形态对齐,但只用到 dsh-tool-todo 上下文必填字段。
+ * 不直接 import V2TaskItemWire 是为了避免 zai kernel 包反向依赖
+ * packages/zai/src/web 类型 — web 渲染层在 useAgentStore.ts 维护。
+ */
+interface V2TaskLike {
+  id: string
+  subject: string
+  description?: string
+  activeForm?: string
+  status: string
+  blocks: string[]
+  blockedBy: string[]
+  owner?: string
+  updatedAt: number
+}
+
+/**
+ * 上游 `dsh-tool-todo` TodoItem → zai V2TaskItem 映射。
+ *
+ * - **id = content**:上游 schema 通过 `if (seen.has(content)) throw ...`
+ *   强制 content 唯一(content 重重复抛 invalid todos),所以 content 是
+ *   上游唯一稳定标识。用作 zai V2TaskItem.id,前端 React key 与 opencc
+ *   模式 task.id 同形状(`t.id` 字符串)。
+ * - **subject = content**:zai 渲染层 (TodoZone / TodoDropdown) 都读 `t.subject`,
+ *   subject = content 让用户看到 todo 描述。
+ * - **blocks/blockedBy = []**:上游 todo 没有依赖图(独立任务),留空数组 —
+ *   TodoZone / TodoDropdown 已对 length===0 不渲染"依赖 N"小角标。
+ * - **updatedAt = Date.now()**:无上游时间戳,用 emit 时刻占位。
+ *   dsh 上游本身没暴露 lastWriteAt,前端不需要精确戳(只用于更新排序与 debug)。
+ *
+ * `null`(还没 first write 或 `turn/start` 重置)→ 返回空数组,前端 TodoZone
+ * 过滤 length===0 不渲染。
+ */
+function mapDshTodoListToV2Task(
+  todos: ReadonlyArray<{ content: string; status: string }> | null,
+): V2TaskLike[] {
+  if (!todos || todos.length === 0) return []
+  const now = Date.now()
+  return todos.map((t) => ({
+    id: t.content,
+    subject: t.content,
+    status: t.status,
+    blocks: [],
+    blockedBy: [],
+    updatedAt: now,
+  }))
+}
+
+/**
+ * 订阅 dsh `ctx.sessionProjections` 的 `todos` 投影,把每次变更 whole-list
+ * 推给 zai `stateChangeBus.emit('v2_task.changed', { tasks, action: 'snapshot' })`。
+ *
+ * zai stateChangeBus → stateBridge.ts(已存在):onV2TaskChanged 转发到
+ * eventBus.emit → SSE 推前端 → useEventStream dispatch 'v2_task.changed' case
+ * → useAgentStore.applyV2TaskChanged(action='snapshot' 分支)→ TodoZone 实时刷新。
+ *
+ * **为何不直接 emit 到 SSE 而走 stateChangeBus**:为与 opencc 自实现 TaskCreate/
+ * Update 事件保持单一 sink,所有 v2_task 事件都在 stateBridge 统一转发 —
+ * 后续若要加 SSR / metrics 收集,在 stateBridge 改一处即可。
+ *
+ * **fallback**:ctx.sessionProjections service 不存在(理论上不应该 — Phase 5P1-B
+ * 已自动装载 dsh-session-projection,但冷启动 race 可能未注册完成)→ 返回
+ * no-op disposer,主流程不阻断。
+ */
+function subscribeDshSessionProjections(
+  ctx: Context,
+): () => void {
+  const projections = ctx.get('sessionProjections') as
+    | {
+        onChanged: (
+          cb: (
+            session: { id: { toString(): string } },
+            key: string,
+            value: unknown,
+            seq: number,
+          ) => void,
+        ) => () => void
+      }
+    | undefined
+  if (!projections) {
+    console.warn(
+      '[dsh-adapter] ctx.sessionProjections missing — todo 投影不监听,' +
+        '前端 TodoZone 看不到 dsh-tool-todo 实时更新',
+    )
+    return () => undefined
+  }
+  return projections.onChanged((session, key, value, _seq) => {
+    if (key !== 'todos') return
+    const tasks = mapDshTodoListToV2Task(
+      value as ReadonlyArray<{ content: string; status: string }> | null,
+    )
+    stateChangeBus.emit('v2_task.changed', {
+      sessionId: session.id.toString(),
+      tasks,
+      action: 'snapshot',
+    } as never)
+  })
+}
+
 interface DshKernelConfig {
   cwd: string
   dataDir: string
@@ -222,6 +323,10 @@ export async function createDshKernelAdapter(
   let interactionDisposer: (() => void) | null = null
   let slashDisposer: (() => void) | null = null
   let pluginDisposer: (() => void) | null = null
+  // Phase 5P5 适配:监听 dsh sessionProjections 的 todos 投影,把上游
+  // whole-list snapshot 推成 zai stateChangeBus 'v2_task.changed' with
+  // action='snapshot'。卸载时 dispose。
+  let projectionDisposer: (() => void) | null = null
 
   // (a) zai 增强工具 + 后台 bash tracker 接线
   const bashTracker = getBashBackgroundTracker()
@@ -372,6 +477,11 @@ export async function createDshKernelAdapter(
     getSessionId: () => getCurrentSessionId() ?? undefined,
   })
   interactionDisposer = () => interactionBridges.dispose()
+
+  // Phase 5P5 适配:订阅 dsh 上游 todos 投影,把每次变更 whole-list 推
+  // stateChangeBus 'v2_task.changed' with action='snapshot'。stateBridge.ts
+  // 已有 onV2TaskChanged 转发到 eventBus,SSE 推前端 → useAgentStore reducer。
+  projectionDisposer = subscribeDshSessionProjections(handle.ctx)
 
   // (c) slash 命令桥 → zai command registry
   const cmdReg = getCommandRegistry()
@@ -556,6 +666,7 @@ export async function createDshKernelAdapter(
       try { pluginDisposer?.() } catch (err) { console.warn('[dsh-adapter] plugin dispose failed:', err) }
       try { toolsDisposer?.() } catch (err) { console.warn('[dsh-adapter] tools dispose failed:', err) }
       try { interactionDisposer?.() } catch (err) { console.warn('[dsh-adapter] interaction dispose failed:', err) }
+      try { projectionDisposer?.() } catch (err) { console.warn('[dsh-adapter] projection dispose failed:', err) }
     },
 
     async createSession(opts) {

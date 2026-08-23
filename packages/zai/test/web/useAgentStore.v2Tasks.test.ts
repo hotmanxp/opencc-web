@@ -126,3 +126,88 @@ describe('useAgentStore — v2TasksBySession session 隔离', () => {
     expect(useAgentStore.getState().v2TasksBySession['sess-A']).toBeUndefined()
   })
 })
+
+/**
+ * Phase 5P5 适配:dsh-tool-todo 上游走 whole-list snapshot 语义,
+ * `action: 'snapshot'` 携带 `tasks: V2TaskItem[]`(已由 zai-side factories
+ * 把 TodoItem[] 映射成 V2TaskItem[]),整 list 替换 v2TasksBySession[sid]。
+ * opencc 模式仍走 upsert/delete 单 task CRUD,本 describe 只覆盖新分支。
+ */
+describe('useAgentStore — v2_task.changed action="snapshot" 整 list 替换', () => {
+  it('snapshot:整 list 替换 v2TasksBySession[sid](空 → 2 个)', () => {
+    const tasks: V2TaskItem[] = [
+      {
+        id: 'fix bug',
+        subject: 'fix bug',
+        status: 'in_progress',
+        blocks: [],
+        blockedBy: [],
+        updatedAt: 100,
+      },
+      {
+        id: 'add test',
+        subject: 'add test',
+        status: 'pending',
+        blocks: [],
+        blockedBy: [],
+        updatedAt: 100,
+      },
+    ]
+    useAgentStore.getState().applyV2TaskChanged({
+      type: 'v2_task.changed',
+      sessionId: 'sess-dsh',
+      tasks,
+      action: 'snapshot',
+    } as never)
+    expect(useAgentStore.getState().v2TasksBySession['sess-dsh']).toEqual(tasks)
+  })
+
+  it('snapshot:整 list 替换(N 个 → M 个,先清空再加)', () => {
+    // 先有 3 个
+    useAgentStore.getState().setV2Tasks('sess-dsh', [
+      { id: 'old1', subject: 'o1', status: 'completed', blocks: [], blockedBy: [], updatedAt: 1 },
+      { id: 'old2', subject: 'o2', status: 'completed', blocks: [], blockedBy: [], updatedAt: 1 },
+      { id: 'old3', subject: 'o3', status: 'pending', blocks: [], blockedBy: [], updatedAt: 1 },
+    ])
+    // model 调 todo_write 新 list 2 个
+    useAgentStore.getState().applyV2TaskChanged({
+      type: 'v2_task.changed',
+      sessionId: 'sess-dsh',
+      tasks: [
+        { id: 'new1', subject: 'n1', status: 'in_progress', blocks: [], blockedBy: [], updatedAt: 2 },
+        { id: 'new2', subject: 'n2', status: 'pending', blocks: [], blockedBy: [], updatedAt: 2 },
+      ],
+      action: 'snapshot',
+    } as never)
+    const final = useAgentStore.getState().v2TasksBySession['sess-dsh']
+    expect(final).toHaveLength(2)
+    expect(final?.map((t) => t.id)).toEqual(['new1', 'new2'])
+    expect(final?.find((t) => t.id === 'old1')).toBeUndefined()
+  })
+
+  it('snapshot:tasks=[] 表示整 list 被清空', () => {
+    useAgentStore.getState().setV2Tasks('sess-dsh', sampleV2)
+    expect(useAgentStore.getState().v2TasksBySession['sess-dsh']).toHaveLength(2)
+    useAgentStore.getState().applyV2TaskChanged({
+      type: 'v2_task.changed',
+      sessionId: 'sess-dsh',
+      tasks: [],
+      action: 'snapshot',
+    } as never)
+    expect(useAgentStore.getState().v2TasksBySession['sess-dsh']).toEqual([])
+  })
+
+  it('snapshot 不影响其它 sid(per-session 隔离)', () => {
+    useAgentStore.getState().setV2Tasks('sess-other', sampleV2)
+    useAgentStore.getState().applyV2TaskChanged({
+      type: 'v2_task.changed',
+      sessionId: 'sess-dsh',
+      tasks: [{ id: 'only', subject: 'only', status: 'pending', blocks: [], blockedBy: [], updatedAt: 1 }],
+      action: 'snapshot',
+    } as never)
+    // sess-dsh 整 list 替换
+    expect(useAgentStore.getState().v2TasksBySession['sess-dsh']).toHaveLength(1)
+    // sess-other 不动
+    expect(useAgentStore.getState().v2TasksBySession['sess-other']).toEqual(sampleV2)
+  })
+})
