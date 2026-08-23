@@ -1,0 +1,3 @@
+name: General Purpose
+description: dsh mode default preset. All model-facing tools come from the zai base dsh-bridge.patch.yml. Use as the default or as the source for `agentPresets.copy()`.
+order: 0

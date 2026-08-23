@@ -1,0 +1,28 @@
+# general-purpose — zai dsh 模式默认 agent preset。
+#
+# 空 composition(无 plugin row):zai 的 base dsh-bridge.patch.yml 已经提供
+# 全部 model-facing 工具(Bash / FileRead / FileWrite / FileEdit / subagent /
+# todo_write / jobs / goal / workflow / ralph / search / pwsh 等)。这个 preset
+# 只作为默认挂载点存在,作用是:
+#
+#   1. 提供稳定 default id — `AgentPresets.Config.default = 'general-purpose'`,
+#      zai-side `run.ts` 创建每个 session 时 `setup(agentCtx)` 调
+#      `ctx.agentPresets.mount(agentCtx)`,新 session 都挂这个 preset。
+#   2. 提供 discoverable 起点 — 用户列预设(`.agentPresets.list()`)看得到
+#      默认选项,可以基于它 copy 出自己的 preset
+#      (`.agentPresets.copy('general-purpose', 'my-preset')`)。
+#   3. 提供 system trust 锚 — system root 下的 preset 跟 user root 下的
+#      preset 区分 trust,前者不可被 user 写覆盖(dsh-agent-presets 守护)。
+#
+# 未来要扩展 dsh 模式的内置 sub-agent 类型(对齐 opencc 的 Explore / Plan
+# / verification 等),**正确路径**是新增同级的 preset 目录(如
+# `agent-presets/explore/`),而不是去 zai 自实现 Agent 工具里硬编码白
+# 名单。每个 preset 的 agent.cordis.yml 通过 `toolFilter` / `persona` /
+# 自带 system prompt section 来实现能力差异化。
+#
+# 注意:此文件**不是**空的 YAML。cordis-plugin-loader 期待 top-level 是
+# plugin row 列表(即使空也必须是 list,不是 scalar 也不是 map)。
+[]
+
+# 备用写法(如果 loader 拒绝空 list 形式,改成下面这个):
+# plugins: []
