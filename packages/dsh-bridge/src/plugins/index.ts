@@ -22,7 +22,7 @@ import { readFile, readdir } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { defineTool } from '@zn-ai/dsh-bridge/dsh-core'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 
 export interface ZaiPluginHook {

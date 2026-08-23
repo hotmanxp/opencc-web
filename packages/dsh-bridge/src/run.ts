@@ -26,10 +26,10 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@zn-ai/dsh-bridge/dsh-core'
-import type { Session, SessionEvent } from '@zn-ai/dsh-bridge/dsh-core'
-import { SessionId } from '@zn-ai/dsh-bridge/dsh-core'
-import { createUserMessage } from '@zn-ai/dsh-bridge/dsh-core'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import type { Session, SessionEvent } from '@deepseek-ai/dsh-session'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 export interface DshRunOptions {
   ctx: Context

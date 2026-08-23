@@ -27,8 +27,8 @@ export {
 } from './createDshRuntime.js'
 export { runOnce, type DshRunOptions } from './run.js'
 // Re-export dsh-session/dsh-llm 关键类型/工厂，让 zai-side factories 无需直接依赖 dsh 包
-export { SessionId, type Session, type SessionEvent, type SessionEventType } from '@zn-ai/dsh-bridge/dsh-core'
-export { createUserMessage } from '@zn-ai/dsh-bridge/dsh-core'
+export { SessionId, type Session, type SessionEvent, type SessionEventType } from '@deepseek-ai/dsh-session'
+export { createUserMessage } from '@deepseek-ai/dsh-llm'
 export { translateSessionEvent, subscribeDshInternalEvents, SESSION_EVENT_TO_SERVER_GROUP_MAP, ALL_SERVER_EVENT_GROUPS, listUnmappedEvents, summarizeMapping, type ServerEventGroup } from './translate/sessionEvents.js'
 export { installModelSelection, resolveModelSelection, type ModelSelection } from './model.js'
 export { DSH_KERNEL, OPENCC_KERNEL, type KernelId } from './paths.js'

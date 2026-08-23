@@ -26,7 +26,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { defineTool } from '@zn-ai/dsh-bridge/dsh-core'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { TaskItem } from './tasks.js'
 
 /** @deprecated Use upstream `todo_write` from `@deepseek-ai/dsh-tool-todo`。 */

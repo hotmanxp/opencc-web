@@ -31,11 +31,11 @@ import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { mkdir, readFile, writeFile, rename, readdir } from 'node:fs/promises'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@zn-ai/dsh-bridge/dsh-core'
-import { SessionId } from '@zn-ai/dsh-bridge/dsh-core'
-import { createUserMessage } from '@zn-ai/dsh-bridge/dsh-core'
-import { SubagentRuntime, type SubagentRun, type SubagentResult } from '@zn-ai/dsh-bridge/dsh-core'
-import type { ContentBlock } from '@zn-ai/dsh-bridge/dsh-core'
+import type { Agent } from '@deepseek-ai/dsh-agent'
+import { SessionId } from '@deepseek-ai/dsh-session'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
+import { SubagentRuntime, type SubagentRun, type SubagentResult } from '@deepseek-ai/dsh-subagent'
+import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 
 /**
  * 子 agent 工具调用条目 — Phase 3 P0-A 沿用。

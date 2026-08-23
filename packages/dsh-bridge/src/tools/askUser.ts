@@ -33,7 +33,7 @@
  * 上游包(只需替换 registerAskUserTool 即可,provider 仍由 zai 注入)。
  */
 
-import { defineTool } from '@zn-ai/dsh-bridge/dsh-core'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 import type {
   AskUserQuestionItem,
@@ -41,7 +41,7 @@ import type {
   AskUserQuestionAnswerItem,
   AskUserQuestionRequest,
   UserQuestionProvider,
-} from '@zn-ai/dsh-bridge/dsh-core'
+} from '@deepseek-ai/dsh-user-questions'
 
 // Re-export 关键契约类型,让 zai-side factories 不需要把 dsh-user-questions 加
 // 为直接依赖(同 index.ts 顶部 SessionId / Session 等 re-export 模式)。

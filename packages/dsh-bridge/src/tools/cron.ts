@@ -22,9 +22,9 @@ import { mkdir, readFile, writeFile, rename } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
 import { randomBytes } from 'node:crypto'
-import { defineTool } from '@zn-ai/dsh-bridge/dsh-core'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
-import { createUserMessage } from '@zn-ai/dsh-bridge/dsh-core'
+import { createUserMessage } from '@deepseek-ai/dsh-llm'
 
 const CRON_FILE = join(homedir(), '.zai', 'tasks-dsh', 'cron.json')
 

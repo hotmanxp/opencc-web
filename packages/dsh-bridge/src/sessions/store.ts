@@ -24,7 +24,7 @@ import { mkdir, readFile, readdir } from 'node:fs/promises'
 import { join, resolve as pathResolve } from 'node:path'
 import { homedir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
-import type { Session } from '@zn-ai/dsh-bridge/dsh-core'
+import type { Session } from '@deepseek-ai/dsh-session'
 
 // ============================================================
 // Section 1 — Path 工具

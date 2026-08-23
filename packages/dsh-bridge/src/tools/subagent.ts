@@ -21,7 +21,7 @@
  *   - worktree 隔离: dsh 0.1.0-rc.7 不支持
  */
 
-import { defineTool } from '@zn-ai/dsh-bridge/dsh-core'
+import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { Context } from '@deepseek-ai/cordis'
 import {
   spawnDshSubagent,

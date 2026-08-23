@@ -22,7 +22,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { ApprovalOutcome, ApprovalRequest as DshApprovalRequest } from '@zn-ai/dsh-bridge/dsh-core'
+import type { ApprovalOutcome, ApprovalRequest as DshApprovalRequest } from '@deepseek-ai/dsh-user-approval'
 
 export interface ApprovalRequest {
   callId: string
