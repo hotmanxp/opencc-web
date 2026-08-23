@@ -287,6 +287,52 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
   ```
   仅在以下情况才跑 `pnpm -r test`:跨 workspace 重构、合并前 sanity check、CI 镜像。**禁止**把全量测试当成"完成前必跑"——这是浪费 token 和时间,反馈回路越长越容易错过真实问题。
 
+## UI 页面规范(可访问性 · 强制)
+
+**适用范围**:所有 `packages/zai/src/web/src/pages/**` 与 `components/**` 下的 `.tsx`。
+
+### 强制规则
+
+所有交互元素必须提供可访问名(accessible name),优先级:
+
+1. `aria-label="..."`(中文硬编码,与现有文案保持一致)
+2. `aria-labelledby="..."`(引用现有可见文字的 id)
+3. 可见文本 children(豁免条件,见下)
+
+### 豁免条件(满足其一即可)
+
+- 元素含可见文本 children(例:`<Button>提交</Button>` / `<a>删除</a>`)
+- `<Form.Item label="...">` 包裹的 input / select / textarea(AntD 自动 `htmlFor` 关联)
+- `<Modal title="...">` / `<Drawer title="...">` 含非空 title(AntD 自动 aria-labelledby)
+- `<Tabs.TabPane tab="...">` / `<Tabs items=[{ label }]>`(`tab` / `item.label` 已是可访问名)
+- 纯装饰 `<Icon />` / `<span>`(父元素已含 aria-label 时 AntD Icon 自动 aria-hidden;独立使用建议 `aria-hidden="true"`)
+
+### 必须 aria-label 的元素清单
+
+- 纯图标 `<Button icon={X}>`(无文字 children)
+- 原生 `<a>` / `<button>`
+- 裸 `<input type="text|number|...">`(未包 Form.Item)
+- 裸 `<Select>` / `<Switch>` / `<Input.TextArea>` / `<Slider>` / `<Checkbox>` / `<Radio>`
+- `<Tooltip>` / `<Popconfirm>` 包裹的触发元素(`title` 不算可访问名)
+- `<Modal>` / `<Drawer>` `title` 为空或缺省时(有 title 时 AntD 自动 aria-labelledby,豁免)
+- 容器组件(`Tabs` / `Upload` / `Form`)**不**入审计白名单,只审计其 children
+
+### 文案约定
+
+- 中文为主,与页面现有文案语气一致
+- 动词 + 名词(如「删除会话」、「新建草稿」)优于模糊词(如「按钮」、「操作」)
+- 禁止「点击这里」、「更多」这类无意义标签
+
+### 验证
+
+```bash
+node scripts/verify-web-aria-labels.mjs            # 单跑(默认扫 pages + components)
+node scripts/verify-web-aria-labels.mjs <dir>      # 扫指定目录
+pnpm --filter @zn-ai/zai typecheck                  # 自动含此检查(typecheck 末尾追加)
+```
+
+新组件提交前必须跑过 audit,违规会 fail loud(退出码 1)。详细豁免算法与元素白名单见 `docs/superpowers/specs/2026-08-23-zai-web-aria-label-enforcement-design.md`。
+
 ## 常用验证命令
 
 ```bash
