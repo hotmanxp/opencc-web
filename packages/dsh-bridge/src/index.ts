@@ -98,6 +98,40 @@ export {
   type AgentToolOptions,
   type AgentToolParentAgent,
 } from './tools/subagent.js'
+
+// ========== vendorSeam (Stage 0) — dsh 模式的厂商中立 seam 抽象 ==========
+// zai 端从 `@zn-ai/dsh-bridge` 导入本目录符号,避免 zai 直接 import
+// `@deepseek-ai/dsh-*` 包。详见 src/vendorSeam/README.md / plan
+// `optimized-twirling-pine.md` Stage 0。
+//   - SubagentControlSeam / JobsControlSeam:zai-side factory 调唯一入口
+//   - createDshSubagentControlBridge / createDshJobsControlBridge:dsh adapter 工厂
+//   - 类型别名:SeamSubagentStopReason / SeamJobStatus / SeamSubagentHandle 等
+export type {
+  SubagentControlSeam,
+  JobsControlSeam,
+  SeamSubagentDispatchInput,
+  SeamSubagentHandle,
+  SeamSubagentTerminalState,
+  SeamSubagentSummary,
+  SeamSubagentStopReason,
+  SeamJobKind,
+  SeamJobStartInput,
+  SeamJobSummary,
+  SeamJobStatus,
+  SeamBashJobInput,
+  SeamSubagentChangeListener,
+  SeamJobChangeListener,
+  SeamInvalidArgumentError,
+  SeamConcurrentJobsExceededError,
+  SeamRuntimeError,
+} from './vendorSeam/index.js'
+
+export {
+  createDshSubagentControlBridge,
+  createDshJobsControlBridge,
+  DshSubagentControlAdapter,
+  DshJobsControlAdapter,
+} from './vendorSeam/index.js'
 export {
   createTaskCreateTool,
   createTaskGetTool,
