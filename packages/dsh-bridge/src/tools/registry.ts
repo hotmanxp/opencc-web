@@ -45,7 +45,6 @@ import { registerRipgrepTool } from './ripgrep.js'
 import { registerMcpTools } from './mcp.js'
 import { registerSkillTools } from './skill.js'
 import type { AgentToolParentAgent } from './subagent.js'
-import { registerDisplayFilesTool } from './displayFiles.js'
 import { registerTaskListTools } from './taskList.js' // @deprecated stub — no-op dispose
 import { registerCronTools, type CronParentAgent } from './cron.js'
 
@@ -143,7 +142,7 @@ export interface RegisterZaiToolsOptions {
 /**
  * 注册 zai 工具到 dsh ctx.tools。
  *
- * 串行装配：bash 事件转发 → fs-search → MCP → Skill → DisplayFiles →
+ * 串行装配：bash 事件转发 → fs-search → MCP → Skill →
  * subagent 事件转发 → Task*(stub) → Cron，并把各工具的 disposer
  * 聚合为一个统一 disposer 返回（用于 zai-side 卸载场景）。
  *
@@ -187,14 +186,11 @@ export async function registerZaiTools(
   // 5. Skill 工具（异步，扫描 skills 目录）
   disposers.push(...(await registerSkillTools(ctx, { cwd: opts.cwd })))
 
-  // 6. dsh-017 新增：DisplayFiles 工具（目录列表）
-  disposers.push(registerDisplayFilesTool(ctx, { cwd: opts.cwd }))
-
-  // 7. Subagent 生命周期事件转发 — Phase 5P6 收口后,改订阅上游
+  // 6. Subagent 生命周期事件转发 — Phase 5P6 收口后,改订阅上游
   //    `subagent/start` / `subagent/end` 替代旧的自实现 `registerAgentTool`。
   disposers.push(subscribeSubagentEvents(ctx, opts))
 
-  // 8. Phase 5P5: Task* 工具集已由上游 `dsh-tool-todo`(在 dsh-bridge.patch.yml 的
+  // 7. Phase 5P5: Task* 工具集已由上游 `dsh-tool-todo`(在 dsh-bridge.patch.yml 的
   //    `tool-todo` row 自动装载,Phase 1P1-B)接管。注册 model-facing 单工具
   //    `todo_write`(whole-list snapshot replace)。`opts.onTaskChange` 不再被
   //    消费 — 替换后 todo 状态变更通过 `ctx.sessionProjections.onChanged`
@@ -202,7 +198,7 @@ export async function registerZaiTools(
   //    `state.v2_task.changed` 事件给 zai-side TodoZone 渲染。
   //    `registerTaskListTools` 仍是 no-op compat stub,不实际注册工具。
 
-  // 9. dsh-017 新增：Cron 工具集（CronCreate/Delete/List — 3 个）
+  // 8. dsh-017 新增：Cron 工具集（CronCreate/Delete/List — 3 个）
   if (opts.getSessionId && opts.getParentAgent) {
     disposers.push(registerCronTools(ctx, {
       getSessionId: opts.getSessionId,

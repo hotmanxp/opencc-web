@@ -80,18 +80,15 @@ export {
   type ZaiSkillDirsConfig,
   type ZaiSkillFrontmatter,
 } from './tools/skill.js'
-// dsh-017 新增：补齐 dsh 模式 LLM 工具集（Agent / DisplayFiles / Task* / Cron*）
+// dsh-017 新增：补齐 dsh 模式 LLM 工具集（Agent / Task* / Cron*）。
+// 注意：DisplayFiles 工具（目录列表）已于 2026-08-22 移除 — 上游 dsh-tool-fs-search
+// (grep + glob) 已覆盖目录浏览语义，无需自实现。
 export {
   createAgentTool,
   registerAgentTool,
   type AgentToolOptions,
   type AgentToolParentAgent,
 } from './tools/subagent.js'
-export {
-  createDisplayFilesTool,
-  registerDisplayFilesTool,
-  type DisplayFilesToolOptions,
-} from './tools/displayFiles.js'
 export {
   createTaskCreateTool,
   createTaskGetTool,

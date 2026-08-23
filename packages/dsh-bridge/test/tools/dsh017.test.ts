@@ -1,11 +1,13 @@
 /**
- * dsh-017 新工具单测 — Agent / DisplayFiles / Task* / Cron* 关键路径覆盖。
+ * dsh-017 新工具单测 — Agent / Task* / Cron* 关键路径覆盖。
  *
  * 注意:不依赖真实 dsh ctx(用 mock),只测 tool.execute 内部逻辑:
- *   - DisplayFiles: readdir 输出 / 隐藏文件 / 排序
  *   - Task*: 自有 store CRUD / 校验长度
  *   - Cron*: parseCron / nextFireMs / 表达式校验
  *   - Agent: 不跑真实 spawn(集成测试),只测 schema 暴露
+ *
+ * 历史:DisplayFiles 工具(目录列表)测试曾在此文件,已于 2026-08-22 移除
+ * (该工具本身已移除 — 上游 dsh-tool-fs-search 提供 grep/glob 覆盖目录浏览)。
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest'
@@ -22,9 +24,6 @@ import {
   nextFireMs,
 } from '../../src/tools/cron.js'
 import {
-  createDisplayFilesTool,
-} from '../../src/tools/displayFiles.js'
-import {
   createAgentTool,
 } from '../../src/tools/subagent.js'
 import {
@@ -38,49 +37,6 @@ import {
   createCronDeleteTool,
   createCronListTool,
 } from '../../src/tools/cron.js'
-
-describe('dsh-017: DisplayFiles tool', () => {
-  let tmpDir: string
-  beforeEach(async () => {
-    tmpDir = await mkdtemp(join(tmpdir(), 'dsh-017-df-'))
-  })
-  afterEach(async () => {
-    await rm(tmpDir, { recursive: true, force: true })
-  })
-
-  it('lists directory contents with type/size', async () => {
-    await writeFile(join(tmpDir, 'a.txt'), 'hello')
-    await writeFile(join(tmpDir, 'b.txt'), 'world!!')
-    await mkdir(join(tmpDir, 'subdir'))
-    const tool = createDisplayFilesTool({ cwd: tmpDir })
-    const result = await tool.execute(
-      { file_path: tmpDir },
-      {} as never,
-    ) as { output: string; entryCount: number; truncated: boolean }
-    expect(result.entryCount).toBe(3) // a.txt, b.txt, subdir
-    expect(result.output).toContain('dir  subdir/')
-    expect(result.output).toContain('file a.txt  (5 bytes)')
-    expect(result.output).toContain('file b.txt  (7 bytes)')
-  })
-
-  it('hides dotfiles by default', async () => {
-    await writeFile(join(tmpDir, '.hidden'), 'x')
-    await writeFile(join(tmpDir, 'visible.txt'), 'y')
-    const tool = createDisplayFilesTool({ cwd: tmpDir })
-    const r1 = await tool.execute({ file_path: tmpDir }, {} as never) as { output: string }
-    expect(r1.output).not.toContain('.hidden')
-    expect(r1.output).toContain('visible.txt')
-    const r2 = await tool.execute({ file_path: tmpDir, include_hidden: true }, {} as never) as { output: string }
-    expect(r2.output).toContain('.hidden')
-  })
-
-  it('errors when path is a file', async () => {
-    await writeFile(join(tmpDir, 'afile'), 'x')
-    const tool = createDisplayFilesTool({ cwd: tmpDir })
-    const r = await tool.execute({ file_path: join(tmpDir, 'afile') }, {} as never) as { output: string }
-    expect(r.output).toContain('not a directory')
-  })
-})
 
 describe('dsh-017: TaskListStore — Phase 5P5 stub', () => {
   // Phase 5P5: DshTaskListStore 改由上游 `@deepseek-ai/dsh-tool-todo` 接管,
