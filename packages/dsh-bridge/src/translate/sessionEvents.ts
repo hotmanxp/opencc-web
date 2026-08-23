@@ -275,27 +275,31 @@ export function translateSessionEvent(
       // dsh-tool-todo 上游是 whole-list snapshot replace 语义(`TodoItem[]`,
       // 通过 content 唯一去重,无 id 字段)。zai V2TaskItem schema 是单 task
       // CRUD(必需 id/subject/blocks/blockedBy/updatedAt),不能直接复用
-      // upsert/delete 形态 — 改用新增的 `action='snapshot'` 分支,
-      // `tasks: TodoItem[]` 整 list 透传,前端 reducer 走"整 list 替换"语义。
+      // upsert/delete 形态 — 走独立的 `v2_task.snapshot` event type,
+      // `tasks: TodoItem[]` 整 list 透传,前端 reducer
+      // `useAgentStore.applyV2TaskSnapshot` 走"整 list 替换"语义。
       //
-      // 事件 type 用 zai 标准的 `'v2_task.changed'`(不带 `state.` 前缀,
-      // 与 packages/zai/src/server/services/eventBus.ts:87 STATE_EVENT_TYPES
+      // 事件 type 用 zai 标准的 `'v2_task.snapshot'`(不带 `state.` 前缀,
+      // 与 packages/zai/src/server/services/eventBus.ts STATE_EVENT_TYPES
+      // 与 packages/zai/src/web/src/lib/eventSource.ts NAMED_EVENT_TYPES
       // 一致)。之前错用 `'state.v2_task.changed'` 导致前端 reducer 永不触发
-      // (useEventStream 的 case 是 `'v2_task.changed'`)。
+      // (useEventStream 的 case 找不到对应 type),也错用同 type literal
+      // 跨 action 联合 → zod discriminatedUnion duplicate-discriminator
+      // 把整个 SSE 通道打死。
       //
-      // id 生成在 zai-side `mapDshTodoToV2Task` helper 完成(content 作 id)。
+      // id 生成在 zai-side `applyV2TaskSnapshot` reducer 完成(content 作 id)。
       // initial 冷启动由 sessionState.ts 走 `ctx.sessionProjections.snapshot`
       // 独立路径拿,不走 translate。
       //
-      // Phase 5P5 之前的旧实现:`task: {todos}, action: 'upsert'` 把整个 list
-      // 塞进 task 字段,导致 reducer `event.task.id` 永远 undefined,UI 显示空白。
+      // 之前旧实现 `task: {todos}, action: 'upsert'` 把整个 list 塞进 task
+      // 字段,导致 reducer `event.task.id` 永远 undefined,UI 显示空白。
       const todos = (event.data.todos ?? []) as Array<{
         content: string
         status: 'pending' | 'in_progress' | 'completed'
       }>
       return {
         ...baseFields,
-        type: 'v2_task.changed',
+        type: 'v2_task.snapshot',
         sessionId: ctx.sessionId,
         tasks: todos,
         action: 'snapshot',
@@ -321,9 +325,10 @@ export function translateSessionEvent(
  * `StateChangeEvent` 数组（与 KernelAdapter.subscribeState 一致）。
  *
  * 主要覆盖 dsh-agent-loop 的 `agent/status` 钩子 → `instance.status`。
- * `cwd.changed` / `bash_task.changed` / `v2_task.changed` / `agent_task.changed`
- * 由 dsh-bridge 自身的 `state.ts StateBridge` 维护（LocalShellExecutor.setCwd +
- * Bash 工具 notifyBackground + todo/write 监听 + subagent 通知）。
+ * `cwd.changed` / `bash_task.changed` / `v2_task.changed` / `v2_task.snapshot`
+ * / `agent_task.changed` 由 dsh-bridge 自身的 `state.ts StateBridge` 维护
+ * （LocalShellExecutor.setCwd + Bash 工具 notifyBackground + todo/write
+ * 监听 + subagent 通知）。
  *
  * @returns disposer — 卸载时移除全部 hook
  */

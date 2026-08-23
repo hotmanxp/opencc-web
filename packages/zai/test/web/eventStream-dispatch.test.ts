@@ -3,11 +3,12 @@
 // Task 11 — SSE state push plan. (T4 改造: 不再复制 switch, 直接调
 // useEventStream 导出的 applyBatch 批量 dispatcher.)
 //
-// 验证 applyBatch 把 4 个 state.* ServerEvent + queue.changed 路由到
+// 验证 applyBatch 把 state.* ServerEvent + queue.changed 路由到
 // useAgentStore 上对应的 reducer:
 //   cwd.changed           → applyCwdChanged
 //   bash_task.changed     → applyBashTaskChanged
-//   v2_task.changed       → applyV2TaskChanged
+//   v2_task.changed       → applyV2TaskChanged (opencc-mode 单 task CRUD)
+//   v2_task.snapshot      → applyV2TaskSnapshot (dsh-mode 整 list 替换)
 //   agent_task.changed    → applyAgentTaskChanged
 //
 // 注: useAgentStore-state-events.test.ts 已覆盖 reducer 本身的行为, 本文件
@@ -48,6 +49,24 @@ describe('eventStream dispatch routing', () => {
     const task = { id: 't1' }
     await dispatch({ type: 'v2_task.changed', sessionId: 's1', task, action: 'upsert' })
     expect(useAgentStore.getState().v2TasksBySession['s1']).toHaveLength(1)
+  })
+
+  // Phase 5P5:dsh-tool-todo whole-list snapshot 走单独 type literal,
+  // 路由到独立的 applyV2TaskSnapshot reducer(action=snapshot 整 list 替换)。
+  it('routes v2_task.snapshot to applyV2TaskSnapshot', async () => {
+    await dispatch({
+      type: 'v2_task.snapshot',
+      sessionId: 's-dsh',
+      tasks: [
+        { content: 'fix bug', status: 'in_progress' },
+        { content: 'add test', status: 'pending' },
+      ],
+      action: 'snapshot',
+    })
+    const stored = useAgentStore.getState().v2TasksBySession['s-dsh']
+    expect(stored).toHaveLength(2)
+    expect(stored?.[0]).toMatchObject({ id: 'fix bug', subject: 'fix bug', status: 'in_progress' })
+    expect(stored?.[1]).toMatchObject({ id: 'add test', status: 'pending' })
   })
 
   it('routes agent_task.changed to applyAgentTaskChanged', async () => {

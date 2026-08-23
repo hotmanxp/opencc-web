@@ -330,6 +330,15 @@ interface AgentState {
     task: V2TaskItem
     action: 'upsert' | 'delete'
   }) => void
+  // Phase 5P5:dsh-mode whole-list snapshot 通道 reducer (与
+  // applyV2TaskChanged 互斥,通过独立 SSE event type 'v2_task.snapshot'
+  // 区分)。`tasks` 是上游 TodoItem[] (`{content, status}[]`),reducer
+  // 内部做 TodoItem → V2TaskItem 映射。
+  applyV2TaskSnapshot: (event: {
+    sessionId: string
+    tasks: Array<{ content: string; status: string }>
+    action: 'snapshot'
+  }) => void
   applyAgentTaskChanged: (event: {
     sessionId: string | null
     task: BackgroundTask
@@ -2018,23 +2027,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
 
   applyV2TaskChanged: (event) => {
     set((s) => {
-      // Phase 5P5 适配:dsh-tool-todo 上游 whole-list snapshot 语义 —
-      // action='snapshot' 携带 `tasks: V2TaskItem[]`(已由 zai-side factories
-      // 把 TodoItem[] 映射成 V2TaskItem[]),整 list 替换 v2TasksBySession[sid]。
-      // opencc 模式仍走 upsert/delete 单 task CRUD,事件 type 同名但
-      // action 互斥 — union by action 区分。
-      if (event.action === 'snapshot') {
-        // lenient cast:zod schema 已保证 `tasks` 是 V2TaskItem[],这里 cast
-        // 是为了让 useAgentStore 内部类型与 V2TaskItem 对齐(zod parse 失败
-        // 的话 SSE 在 eventSource.ts:106 ServerEvent.parse 会先抛错,不会到
-        // 这里)。
-        return {
-          v2TasksBySession: {
-            ...s.v2TasksBySession,
-            [event.sessionId]: event.tasks as V2TaskItem[],
-          },
-        }
-      }
+      // opencc-mode 单 task CRUD。reducer 只接 v2_task.changed (action=upsert|delete),
+      // snapshot 通过单独的 applyV2TaskSnapshot reducer 处理(独立 type literal
+      // 'v2_task.snapshot',走 zod 另一条通道,见 shared/events.ts)。
       const list = s.v2TasksBySession[event.sessionId] ?? []
       // action='delete' → 按 task.id 过滤掉; action='upsert' →
       // 已存在则替换, 不存在则 append. V2 task 与 BashTask 不同,
@@ -2052,6 +2047,35 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         v2TasksBySession: { ...s.v2TasksBySession, [event.sessionId]: next },
       }
     })
+  },
+
+  applyV2TaskSnapshot: (event) => {
+    // Phase 5P5:dsh-tool-todo 上游 whole-list snapshot 适配。事件 type
+    // 是单独的 `'v2_task.snapshot'` literal (独立于 opencc-mode
+    // `v2_task.changed` upsert/delete),由 server stateBridge 翻译自
+    // stateChangeBus 'v2_task.snapshot' emit(对应 dsh-side `todo/write`
+    // 与 `sessionProjections` `todos` 投影两条通道)。
+    //
+    // payload 是 `{content, status}[]`(上游 TodoItem schema,无 id / blocks /
+    // blockedBy / updatedAt 字段)。reducer 做 TodoItem → V2TaskItem 映射,
+    // id=content(上游 `if (seen.has(content)) throw ...` 强制 content 唯一,
+    // 作为前端 React key 与 opencc-mode `t.id` 同形状),subject=content,
+    // updatedAt=now 占位。
+    const now = Date.now()
+    const tasks: V2TaskItem[] = event.tasks.map((t) => ({
+      id: t.content,
+      subject: t.content,
+      status: t.status,
+      blocks: [],
+      blockedBy: [],
+      updatedAt: now,
+    }))
+    set((s) => ({
+      v2TasksBySession: {
+        ...s.v2TasksBySession,
+        [event.sessionId]: tasks,
+      },
+    }))
   },
 
   applyAgentTaskChanged: (event) => {

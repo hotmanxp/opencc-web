@@ -55,6 +55,25 @@ describe('stateBridge', () => {
     })
   })
 
+  // Phase 5P5:dsh-tool-todo whole-list snapshot 通过单独的 'v2_task.snapshot'
+  // 通道(独立于单 task CRUD 的 'v2_task.changed',避免 zod
+  // discriminatedUnion duplicate-discriminator)。
+  it('bridges v2_task.snapshot with whole-list tasks array', () => {
+    initStateBridge()
+    const tasks = [{ content: 'fix bug', status: 'in_progress' }]
+    stateChangeBus.emit('v2_task.snapshot', {
+      sessionId: 's-dsh',
+      tasks,
+      action: 'snapshot',
+    })
+    expect(eventBus.emit).toHaveBeenCalledWith({
+      type: 'v2_task.snapshot',
+      sessionId: 's-dsh',
+      tasks,
+      action: 'snapshot',
+    })
+  })
+
   it('bridges agent_task.changed with nullable sessionId', () => {
     initStateBridge()
     const task = { id: 'a1' }

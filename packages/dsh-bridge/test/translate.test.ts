@@ -235,7 +235,7 @@ describe('translateSessionEvent 核心子集', () => {
 })
 
 describe('translateSessionEvent Phase 5P5: todo/write whole-list snapshot', () => {
-  it('todo/write → v2_task.changed (action=snapshot, tasks 整 list)', () => {
+  it('todo/write → v2_task.snapshot (action=snapshot, tasks 整 list)', () => {
     const event = {
       type: 'todo/write',
       seq: 9,
@@ -248,7 +248,10 @@ describe('translateSessionEvent Phase 5P5: todo/write whole-list snapshot', () =
     } as any
     const out = translateSessionEvent(event, ctx)
     expect(out).not.toBeNull()
-    expect(out!.type).toBe('v2_task.changed')
+    // Phase 5P5 收口:整 list snapshot 走独立 `'v2_task.snapshot'` event type,
+    // 不再与单 task CRUD 的 `'v2_task.changed'` 共享 type literal
+    // (共享会被 zod discriminatedUnion duplicate-discriminator 拒绝)。
+    expect(out!.type).toBe('v2_task.snapshot')
     expect((out as any).action).toBe('snapshot')
     expect((out as any).tasks).toHaveLength(2)
     expect((out as any).tasks[0]).toEqual({ content: 'fix bug', status: 'in_progress' })
@@ -261,7 +264,7 @@ describe('translateSessionEvent Phase 5P5: todo/write whole-list snapshot', () =
     const event = { type: 'todo/write', seq: 10, data: { todos: [] } } as any
     const out = translateSessionEvent(event, ctx)
     expect(out).not.toBeNull()
-    expect(out!.type).toBe('v2_task.changed')
+    expect(out!.type).toBe('v2_task.snapshot')
     expect((out as any).action).toBe('snapshot')
     expect((out as any).tasks).toEqual([])
   })

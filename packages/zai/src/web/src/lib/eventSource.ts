@@ -52,6 +52,9 @@ const NAMED_EVENT_TYPES = [
   'bash_task.changed',
   'cwd.changed',
   'v2_task.changed',
+  // Phase 5P5:dsh-mode whole-list snapshot 通道,ServerEvent type literal
+  // 必须加进 NAMED_EVENT_TYPES 否则 EventSource 静默丢事件。
+  'v2_task.snapshot',
   // instance.*
   'instance.changed',
   // queue.* — 消息排队状态快照 (追齐 OPENCC 排队交互)

@@ -42,6 +42,11 @@ describe('createDshRuntime 装载 smoke (Phase 5P1)', () => {
     expect(handle.activeCount()).toBe(1)
 
     await handle.start()
+    // dsh-bridge 修复回归:验证 ctx.jobs 不为 undefined。
+    // 修复前:createDshRuntime start() 内只 import('@deepseek-ai/dsh-jobs-local')
+    // 没 ctx.plugin(LocalJobRegistry) → dsh-tool-bash 跑 run_in_background
+    // 时 ctx.get('jobs') === undefined,抛 "background jobs unavailable"。
+    expect(handle.ctx.get('jobs')).toBeDefined()
     await handle.shutdown()
     expect(handle.activeCount()).toBe(0)
   }, 60_000)

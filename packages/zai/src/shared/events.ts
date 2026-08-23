@@ -9,6 +9,22 @@ const Base = z.object({
   seq: z.number(),
 })
 
+/**
+ * DshToolTodo upstream 产出的 TodoItem schema(whole-list snapshot,无 id 字段,
+ * content 是唯一标识)。dsh-bridge translate/sessionEvents.ts 直接透传到
+ * v2_task.changed event 的 `tasks` 字段。客户端 reducer (useAgentStore
+ * applyV2TaskChanged action='snapshot' 分支) cast 成 V2TaskItem 后做映射
+ * (id=content, subject=content, blocks=[], blockedBy=[], updatedAt=now)。
+ *
+ * 故意不引 V2TaskItemWire 的 zod schema 在此处 — translate 路径 payload 与
+ * 客户端 V2TaskItem 不在同一形态,前端做映射更干净(snapshot 是 opaque
+ * 投影,客户端知道怎么转)。
+ */
+const DshTodoItemSchema = z.object({
+  content: z.string(),
+  status: z.string(),
+})
+
 const RuntimeEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('runtime.started'),
              sessionId: z.string(), turnIndex: z.number(),
@@ -224,6 +240,29 @@ const StateEvent = z.discriminatedUnion('type', [
     sessionId: z.string(),
     task: z.unknown(),
     action: z.enum(['upsert', 'delete']),
+  }),
+  // Phase 5P5 适配:dsh-tool-todo 上游是 whole-list snapshot 语义(每次
+  // `todo/write` 携带 `tasks: TodoItem[]` 整 list 替换,无 id 字段),与
+  // opencc-mode 单 task CRUD 的 upsert/delete 语义不兼容。
+  //
+  // 之前的错尝试(已修):把 snapshot 分支塞进同一个 `v2_task.changed`
+  // discriminator 同名 slot,期望 zod 跨 action 联合。但 zod
+  // discriminatedUnion 只看单一字段('type'),同 type literal 重复立即抛
+  // `Discriminator property type has duplicate value v2_task.changed`,
+  // 模块 load 阶段就崩,React <div id="root"> 永远空(SSE 连接都建不起来)。
+  //
+  // 正确做法:开新 event type 'v2_task.snapshot'。reducer
+  // (useAgentStore.applyV2TaskSnapshot) 整 list 替换 v2TasksBySession[sid],
+  // 把 TodoItem[] 映射成 V2TaskItem[] (id=content, subject=content,
+  // blocks=[], blockedBy=[], updatedAt=now)。opencc 模式仍走 v2_task.changed
+  // upsert/delete 单 task CRUD,两条通道互不干扰,topics['v2'] 在
+  // services/eventBus.ts:topicMatches 同时匹配两个 type。
+  z.object({
+    ...Base.shape,
+    type: z.literal('v2_task.snapshot'),
+    sessionId: z.string(),
+    tasks: z.array(DshTodoItemSchema),
+    action: z.literal('snapshot'),
   }),
   z.object({
     ...Base.shape,

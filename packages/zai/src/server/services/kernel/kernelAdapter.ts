@@ -103,9 +103,15 @@ export type StateChangeEvent =
   | { type: 'bash_task.changed'; sessionId: string; task: unknown }
   | { type: 'v2_task.changed'; sessionId: string; task: unknown; action: 'upsert' | 'delete' }
   // Phase 5P5 适配:dsh-tool-todo 上游 whole-list snapshot 语义。
-  // 与单 task CRUD 的 upsert/delete 不共存 — `action: 'snapshot'` 走 `tasks`
-  // 数组,前端 reducer 整 list 替换(opencc 模式仍走 upsert/delete 单 task)。
-  | { type: 'v2_task.changed'; sessionId: string; tasks: unknown[]; action: 'snapshot' }
+  // 与单 task CRUD 的 upsert/delete 是不同通道 —— 单独 type literal
+  // (避免 zod discriminatedUnion duplicate-discriminator 报错)。
+  // UI reducer `applyV2TaskSnapshot` 整 list 替换 v2TasksBySession[sid]。
+  | {
+      type: 'v2_task.snapshot'
+      sessionId: string
+      tasks: Array<{ content: string; status: string }>
+      action: 'snapshot'
+    }
   | { type: 'agent_task.changed'; sessionId: string | null; task: unknown };
 
 /** 队列 payload — 给单 session 的消息排队。 */

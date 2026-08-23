@@ -85,6 +85,9 @@ const STATE_EVENT_TYPES = new Set<string>([
   'cwd.changed',
   'bash_task.changed',
   'v2_task.changed',
+  // Phase 5P5:dsh-tool-todo whole-list snapshot 通道,与单 task CRUD 的
+  // v2_task.changed 互补但语义不同。订阅 'state' 或 'v2' group 都应看到。
+  'v2_task.snapshot',
   'agent_task.changed',
 ])
 
@@ -178,7 +181,9 @@ export class ServerEventBus {
       if (t === 'state' && STATE_EVENT_TYPES.has(type)) return true
       if (t === 'cwd' && type === 'cwd.changed') return true
       if (t === 'bash' && type === 'bash_task.changed') return true
-      if (t === 'v2' && type === 'v2_task.changed') return true
+      // 'v2' group 同时匹配 v2_task.changed (opencc-mode 单 task CRUD)
+      // 与 v2_task.snapshot (dsh-mode whole-list snapshot)。
+      if (t === 'v2' && (type === 'v2_task.changed' || type === 'v2_task.snapshot')) return true
       if (t === 'agent_task' && type === 'agent_task.changed') return true
       if (t === 'runtime' && type.startsWith('runtime.')) return true
       if (t === 'session' && type.startsWith('session.')) return true

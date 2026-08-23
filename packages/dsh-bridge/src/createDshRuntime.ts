@@ -403,6 +403,19 @@ export async function createDshRuntime(
       //    报 Cyclic __proto__ 或类似)。
       await ctx.plugin(Loader)
 
+      // 0.5 dsh-bridge 修复:注入 LocalJobRegistry 让 ctx.jobs 可用。
+      //    修复前:start() 的 Service class 注入列表漏了 LocalJobRegistry,
+      //    只在 line 313 做了 side-effect import — dsh-tool-bash 跑
+      //    run_in_background 时 ctx.get('jobs') === undefined,抛
+      //    "background jobs unavailable: load @deepseek-ai/dsh-jobs and
+      //    @deepseek-ai/dsh-tool-jobs"。LocalJobRegistry 必须在 dsh-tool-bash
+      //    (走 patch.yml 装载,inject=['jobs'])之前就位,否则 cordis-plugin-loader
+      //    装载 tool-bash 时 inject 解析会一直等不到 jobs service。
+      {
+        const { LocalJobRegistry } = await import('@deepseek-ai/dsh-jobs-local')
+        await ctx.plugin(LocalJobRegistry)
+      }
+
       // 1. 装载 dsh-bridge 自带的最小 patch (只装 zai-server 必需的 plugin)。
       //    dsh-base 的全 patch 包含 30+ mode-specific 行(web/llm-deepseek/tool-* 等),
       //    其中不少只有 id 没有 name(placeholder 形态),cordis-plugin-loader 处理

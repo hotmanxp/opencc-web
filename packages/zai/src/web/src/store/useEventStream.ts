@@ -136,7 +136,13 @@ export function applyBatch(batch: ServerEvent[]): void {
     case 'bash_task.changed':
       useAgentStore.getState().applyBashTaskChanged(event); break
     case 'v2_task.changed':
+      // opencc-mode 单 task CRUD (action='upsert' | 'delete')
       useAgentStore.getState().applyV2TaskChanged(event); break
+    // Phase 5P5:dsh-mode whole-list snapshot (dsh-tool-todo 整 list 替换)
+    // 单独走 'v2_task.snapshot' type literal,reducer 整 list 写
+    // v2TasksBySession[sid]。
+    case 'v2_task.snapshot':
+      useAgentStore.getState().applyV2TaskSnapshot(event); break
     case 'agent_task.changed':
       useAgentStore.getState().applyAgentTaskChanged(event); break
     // dsh-019 Phase 2: dsh subagent 任务生命周期(从 server 推 'subagent.changed')。

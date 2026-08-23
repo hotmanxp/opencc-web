@@ -46,6 +46,18 @@ export function initStateBridge(): () => void {
   const onV2TaskChanged = (e: { sessionId: string; task: unknown; action: 'upsert' | 'delete' }) => {
     eventBus.emit({ type: 'v2_task.changed', ...e })
   }
+  // Phase 5P5:dsh-tool-todo whole-list snapshot 通道,与单 task CRUD 的
+  // v2_task.changed 区分。stateChangeBus.emit('v2_task.snapshot', ...)
+  // 由 zai-side factories/dsh.ts 在 subscribe sessionProjections 与
+  // dsh-bridge translate/sessionEvents.ts 'todo/write' case 同步 emit,
+  // 共同走这条通道推到前端。
+  const onV2TaskSnapshot = (e: {
+    sessionId: string
+    tasks: Array<{ content: string; status: string }>
+    action: 'snapshot'
+  }) => {
+    eventBus.emit({ type: 'v2_task.snapshot', ...e })
+  }
   const onAgentTaskChanged = (e: { sessionId: string | null; task: unknown }) => {
     eventBus.emit({ type: 'agent_task.changed', ...e })
   }
@@ -53,6 +65,7 @@ export function initStateBridge(): () => void {
   stateChangeBus.on('cwd.changed', onCwdChanged)
   stateChangeBus.on('bash_task.changed', onBashTaskChanged)
   stateChangeBus.on('v2_task.changed', onV2TaskChanged)
+  stateChangeBus.on('v2_task.snapshot', onV2TaskSnapshot)
   stateChangeBus.on('agent_task.changed', onAgentTaskChanged)
   // dsh-018: dsh-mode cron 任务变化 — zai-side dsh factory 转发
   // dsh-bridge `onCronChange` 回调,stateBridge 翻译成 ServerEvent
@@ -91,6 +104,7 @@ export function initStateBridge(): () => void {
     stateChangeBus.off('cwd.changed', onCwdChanged)
     stateChangeBus.off('bash_task.changed', onBashTaskChanged)
     stateChangeBus.off('v2_task.changed', onV2TaskChanged)
+    stateChangeBus.off('v2_task.snapshot', onV2TaskSnapshot)
     stateChangeBus.off('agent_task.changed', onAgentTaskChanged)
     stateChangeBus.off('cron.changed', onCronChanged)
     stateChangeBus.off('subagent.changed', onSubagentChanged)

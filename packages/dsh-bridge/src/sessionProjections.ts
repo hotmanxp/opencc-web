@@ -9,12 +9,14 @@
  * zai-side 需要两种访问:
  *   1. **冷启动快照**:sessionState.ts 路由拉初始 todos 时调
  *      `snapshotDshTodo(ctx, sessionId)` 同步读 watermark cache。
- *   2. **实时变更**:zai factories/dsh.ts 订阅 `onChanged`,
- *      filter key='todos' → emit `state.v2_task.changed` with action='snapshot'。
+ *   2. **实时变更**:zai factories/dsh.ts 订阅 `onChanged`,filter key='todos'
+ *      → emit `state.v2_task.snapshot`(Phase 5P5 独立 type literal,与
+ *      opencc-mode 单 task CRUD `v2_task.changed` 互不兼容)。
  *
  * 不直接 emit 单 task upsert/delete:上游 `TodoItem` 没有 id 字段,跟 zai
  * V2TaskItem 的 CRUD schema 语义不兼容。整 list 替换 (`tasks: TodoItem[]`,
- * action='snapshot') 是干净的语义映射,前端 reducer 走"整 list 替换"分支。
+ * action='snapshot') 是干净的语义映射,前端 reducer `applyV2TaskSnapshot`
+ * 走"整 list 替换"分支。
  */
 
 import type { Context } from '@deepseek-ai/cordis'

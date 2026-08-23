@@ -25,6 +25,21 @@ export interface StateChangeEventMap {
   'cwd.changed': { sessionId: string; cwd: string; updatedAt: number }
   'bash_task.changed': { sessionId: string; task: BashTaskInfo }
   'v2_task.changed': { sessionId: string; task: TaskItem; action: 'upsert' | 'delete' }
+  /**
+   * Phase 5P5:dsh-tool-todo 上游 whole-list snapshot 通道 —— 与
+   * `v2_task.changed` (单 task 增量 upsert/delete) 区分。stateBridge 把
+   * in-process event 转成 ServerEvent `v2_task.snapshot` 推到 SSE,UI
+   * reducer `applyV2TaskSnapshot` 整 list 替换 v2TasksBySession[sid]。
+   *
+   * 之前错把整个 snapshot 塞进 `v2_task.changed` 同 type literal —
+   * zod discriminatedUnion 不允许同 type 跨 action 联合而抛
+   * duplicate-discriminator,事件流整体瘫痪。
+   */
+  'v2_task.snapshot': {
+    sessionId: string
+    tasks: Array<{ content: string; status: string }>
+    action: 'snapshot'
+  }
   'agent_task.changed': { sessionId: string | null; task: unknown }
   /**
    * dsh-018 新增:dsh-mode cron 任务变化(zai-side dsh factory 转发 dsh-bridge
