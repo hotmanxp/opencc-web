@@ -875,6 +875,7 @@ export const MessageBubble = React.memo(function MessageBubble({
           width="auto"
           centered
           destroyOnClose
+          aria-label="附件大图预览"
           title={previewingAttachment?.filename}
           styles={{
             body: {

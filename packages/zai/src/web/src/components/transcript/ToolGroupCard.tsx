@@ -77,6 +77,7 @@ export function ToolGroupCard({ entries }: { entries: ToolGroupEntry[] }) {
         <Button
           size="small"
           type="text"
+          aria-label={expanded ? '收起工具调用列表' : `展开 ${entries.length} 个工具调用`}
           onClick={() => setExpanded((x) => !x)}
         >
           {expanded ? '收起' : `展开 ${entries.length} 个工具`}

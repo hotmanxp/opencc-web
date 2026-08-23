@@ -284,6 +284,7 @@ function AssistantTextBody({
         <Button
           type="link"
           size="small"
+          aria-label={expanded ? '收起内容' : '显示更多'}
           onClick={() => setExpanded((x) => !x)}
           style={{ padding: 0, marginTop: 4 }}
         >
