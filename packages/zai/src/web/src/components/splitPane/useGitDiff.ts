@@ -11,6 +11,7 @@ export interface UseGitDiffResult {
 export function useGitDiff(
   cwd: string | null | undefined,
   path: string | null,
+  refreshKey?: unknown,
 ): UseGitDiffResult {
   const [data, setData] = useState<GitDiff | null>(null);
   const [loading, setLoading] = useState(false);
@@ -41,7 +42,7 @@ export function useGitDiff(
       .finally(() => {
         if (seqRef.current === seq) setLoading(false);
       });
-  }, [cwd, path]);
+  }, [cwd, path, refreshKey]);
 
   return { data, loading, error };
 }

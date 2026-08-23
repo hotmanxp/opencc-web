@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { Button, Empty, Modal, Spin, Tag, message } from 'antd';
 import { ReloadOutlined, UndoOutlined } from '@ant-design/icons';
 import { useGitStatus } from './useGitStatus.js';
@@ -19,7 +19,10 @@ export function GitTab({ cwd }: { cwd: string | null }) {
   const status = useGitStatus(cwd);
   const [selected, setSelected] = useState<string | null>(null);
   const [reverting, setReverting] = useState<string | null>(null);
-  const diff = useGitDiff(cwd, selected);
+  // Pass `status.data` as a refresh key so the diff follows status polls
+  // (5s interval) — otherwise editing the same file twice leaves the
+  // previously-rendered diff pinned in place because `path` never changes.
+  const diff = useGitDiff(cwd, selected, status.data);
 
   const handleRevert = async (path: string) => {
     setReverting(path);
@@ -39,9 +42,17 @@ export function GitTab({ cwd }: { cwd: string | null }) {
     }
   };
 
-  // When cwd changes, drop the selection — old paths no longer apply.
+  // When cwd truly changes, drop the selection — old paths no longer apply.
+  // Compare by string value, not reference: Agent.tsx derives cwd from
+  // useMemo([instanceContext?.cwd, cwdBySessionForSid]) — a `branch.changed`
+  // SSE event re-spreads instanceContext even when cwd itself is unchanged,
+  // which would otherwise wipe the user's selection on every branch update.
+  const prevCwdRef = useRef<string | null>(cwd);
   useEffect(() => {
-    setSelected(null);
+    if (prevCwdRef.current !== cwd) {
+      prevCwdRef.current = cwd;
+      setSelected(null);
+    }
   }, [cwd]);
 
   // When the status refreshes and the previously-selected file is no longer in

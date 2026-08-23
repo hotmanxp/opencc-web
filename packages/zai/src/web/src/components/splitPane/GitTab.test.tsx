@@ -98,4 +98,47 @@ describe('GitTab', () => {
     expect(screen.queryByText('diff --git a b')).toBeNull();
     expect(screen.queryByText('new diff')).toBeNull();
   });
+
+  it('keeps the selection when cwd re-renders with the same string value', () => {
+    // The fix for the multi-edit "diff stops refreshing" bug: Agent.tsx derives
+    // cwd via useMemo([instanceContext?.cwd, cwdBySessionForSid]) — a
+    // `branch.changed` SSE event re-spreads instanceContext even when cwd
+    // itself is unchanged, which would previously wipe the user's selection.
+    mockStatus.mockReturnValue({
+      data: { ok: true, branch: 'main', files: [{ path: 'a.ts', status: 'M', staged: false }] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockDiff.mockReturnValue({ data: { ok: true, diff: 'diff --git a b' }, loading: false, error: null });
+
+    const { rerender } = render(<GitTab cwd="/repo" />);
+    fireEvent.click(screen.getByText('a.ts'));
+
+    // Same cwd string value but a fresh reference (simulates parent
+    // re-render after a `branch.changed` SSE event).
+    rerender(<GitTab cwd={'/repo'} />);
+
+    // Selection must persist — diff panel must still show the diff text.
+    expect(screen.queryByText(/选择左侧文件/i)).toBeNull();
+    expect(screen.getByText('diff --git a b')).toBeTruthy();
+  });
+
+  it('clears the selection when cwd string value truly changes', () => {
+    mockStatus.mockReturnValue({
+      data: { ok: true, branch: 'main', files: [{ path: 'a.ts', status: 'M', staged: false }] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockDiff.mockReturnValue({ data: { ok: true, diff: 'diff --git a b' }, loading: false, error: null });
+
+    const { rerender } = render(<GitTab cwd="/repoA" />);
+    fireEvent.click(screen.getByText('a.ts'));
+
+    rerender(<GitTab cwd="/repoB" />);
+
+    // New cwd → old path no longer applies → selection cleared.
+    expect(screen.getByText(/选择左侧文件/i)).toBeTruthy();
+  });
 });

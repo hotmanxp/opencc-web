@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { Drawer, Segmented, Button, Input, App as AntApp, Modal, Empty, Spin } from 'antd'
 import {
   ReloadOutlined,
@@ -36,11 +36,21 @@ function GitTab({ cwd }: GitTabProps) {
   const status = useGitStatus(cwd)
   const [selected, setSelected] = useState<string | null>(null)
   const [reverting, setReverting] = useState<string | null>(null)
-  const diff = useGitDiff(cwd, selected)
+  // 把 status.data 当作 refreshKey 传入,这样 useGitStatus 5 秒轮询拿到
+  // 新对象时, useGitDiff 会跟着重拉 — 否则同一文件多次修改, diff
+  // 会一直停在第一次选中时拉到的内容.
+  const diff = useGitDiff(cwd, selected, status.data)
 
-  // cwd 变化时丢弃选中 — 旧路径不再适用.
+  // cwd 字符串值真变化时才丢弃选中 — 旧路径不再适用. 引用比较不安全:
+  // 上游 Agent.tsx 把 cwd 走 useMemo([instanceContext?.cwd, cwdBySessionForSid]),
+  // `branch.changed` SSE 会 re-spread instanceContext 让 cwd 引用变, 但字符串
+  // 值不变 — 这种情况下选中不该被清空, 否则用户改文件后 diff 看起来"消失".
+  const prevCwdRef = useRef<string | null>(cwd)
   useEffect(() => {
-    setSelected(null)
+    if (prevCwdRef.current !== cwd) {
+      prevCwdRef.current = cwd
+      setSelected(null)
+    }
   }, [cwd])
 
   // status 刷新后若 selected 已不在列表里 (撤销/提交),清掉选中让
