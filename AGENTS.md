@@ -311,11 +311,15 @@ pnpm -r test -t "<describe-block-name>"                  # 按 describe 名匹�
 # 启动 dev(zai + 前端)
 pnpm --filter @zn-ai/zai dev
 # 指定独立端口(避免与 920x 正式服务 / 8101 已占用实例冲突)
-# 注意: `--` 是必需的 — `--port` / `--api-port` 是 zai CLI 的参数,
+# 注意: `--` 是必需的 — `--port` / `--api-port` / `--kernel` 是 zai CLI 的参数,
 # 要靠 pnpm 的 `--` 透传,否则被 pnpm 自身吞掉或传给上一层。
 # 默认 Vite 8101 / Express 7715;未显式指定时这两个端口被占用会自动扫描;
 # 显式指定时若被占用会 EADDRINUSE 报错退出,不会静默换端口。
 pnpm --filter @zn-ai/zai dev -- --port 8102 --api-port 7715
+# 同时可加 `--kernel=dsh|opencc` 临时覆盖本次启动的 agent 内核轨道(不写持久化配置)
+# 优先级: --kernel > 项目级 settings.json > 用户级 settings.json > 默认 'opencc'
+# 适用场景: 临时切轨验证 / 排查「切 dsh 后出问题」单次回退 / 多 cwd 不同默认 kernel
+pnpm --filter @zn-ai/zai dev -- --port 8102 --api-port 7715 --kernel=dsh
 # 禁止: 顶层 `pnpm dev` 会同时跑所有 workspace 的 dev — zai 之外,
 # zn-agent-core 的 dev 是 `tsc -b --watch`,会拒绝 `--port` 参数(TS5072),
 # 整条 dev 链路失败。需要 core tsc watch 时单独跑:
