@@ -411,6 +411,26 @@ export async function createDshRuntime(
       const { apply: applySpawnProvider } = await import('@deepseek-ai/dsh-subagent-spawn-in-process')
       applySpawnProvider(ctx, { providerName: 'spawn' })
 
+      // 4.6 Phase 4 P1: harness 原生 fs-search 工具 (`grep` + `glob`).
+      //
+      // 替换 dsh-bridge 手写 ripgrep.ts (B2 时为 P1-2). tool-fs-search 是
+      // Cordis plugin 形态, 必须在 ctx.start 阶段通过 ctx.loader.create() 装载,
+      // 它会自调 ctx.tools.register 把 grep / glob 两个工具挂到 dsh 模型面.
+      //
+      // inject=['tools','systemPrompt','subprocess'] — 上面 patch 已经装
+      // 了 tools/systemPrompt/subprocess (即 subprocess-local 单 row)/spill* /
+      // timeout-policy, inject 全部满足. 注意 subprocess-local 是 dsh-subprocess
+      // 的子类, 加载时 dsh-subprocess 接口由 subprocess-local 副作用 import,
+      // patch 不能再单独写一行 - 会重复注册 'subprocess' service 报错.
+      //
+      // sampleOverCapGlobResults: false — 保留 modification-time-ordered head,
+      // 与 zai-side FsTab 的"按修改时间排序"心智模型一致 (用户选 true 会
+      // 跨 top-level entries 采样, 对 zai 工作流收益小, 反而让列表行为难解释).
+      await ctx.loader.create({
+        name: '@deepseek-ai/dsh-tool-fs-search',
+        config: { sampleOverCapGlobResults: false },
+      })
+
       // 5. 等待全部 plugin 完成挂载。
       await ctx.get('loader')?.await()
     },

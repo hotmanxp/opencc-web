@@ -58,6 +58,32 @@
 - id: system-prompt
   name: '@deepseek-ai/dsh-system-prompt'
 
+# Phase 4 P1: harness 原生 fs-search 工具 (`grep` + `glob`) — 替换 dsh-bridge
+# 手写 ripgrep.ts。tool-fs-search inject=['tools','systemPrompt','subprocess'],
+# 需要先装 subprocess seam;subprocess seam 又需要 timeout-policy 守门
+# (subprocess-local 默认按 timeoutMs 行为, 无 timeout-policy 时仍工作但
+# 配置缺失)。spill 给 tool-fs-search 落盘超额结果(>grepMaxMatches),
+# 不装 spill → tool-fs-search 直接报错 ctx.spillStore undefined。
+#
+# 关键陷阱 (Phase 4 P1 ego 验收发现):subprocess-local 是 dsh-subprocess 的扩展
+# (`extends SubprocessRuntime`),加载时会**重复注册**同一个 'subprocess' service。
+# 错误: `service "subprocess" has been registered at <SubprocessRuntime>`。
+# 解法:只装 subprocess-local 一个 row,id='subprocess'(与 dsh-base bundle 一致)。
+# dsh-subprocess 接口被 subprocess-local 副作用 import,无需单独装载。
+- id: timeout-policy
+  name: '@deepseek-ai/dsh-tool-call-timeout-policy'
+
+- id: subprocess
+  name: '@deepseek-ai/dsh-subprocess-local'
+
+- id: spill-local
+  name: '@deepseek-ai/dsh-spill-local'
+
+- id: spill-policy
+  name: '@deepseek-ai/dsh-spill-policy'
+  config:
+    maxInlineBytes: 50000
+
 # dsh-scope / dsh-shell / dsh-fs / dsh-user-approval 都是内部 helper(被
 # dsh-agent 等其他 plugin import 复用),**不**是 Cordis plugin;加载会报
 # `invalid plugin, expect function or object with "apply" method`。dsh-base
