@@ -22,7 +22,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@zn-ai/dsh-bridge/dsh-core'
 
 // zai ServerEvent 由 zai 侧引入。dsh-bridge 不应反向依赖 zai 主包，
 // 改为由调用方在 dsh-adapter 中做 union 适配。当前导出 ServerEvent 类型

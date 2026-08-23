@@ -10,18 +10,24 @@
       "types": "./dist/index.d.ts",
       "default": "./dist/index.js"
     },
+    "./dsh-core": {
+      "types": "./dist/dsh-core-entry.d.ts",
+      "default": "./dist/dsh-core.mjs"
+    },
     "./package.json": "./package.json"
   },
   "files": [
     "dist/"
   ],
   "scripts": {
-    "build": "tsc -b --force && cp src/dsh-bridge.patch.yml dist/dsh-bridge.patch.yml && node -e \"import('node:fs').then(({cpSync}) => cpSync('agent-presets','dist/agent-presets',{recursive:true}))\"",
+    "build": "tsc -b --force && node --experimental-strip-types scripts/bundle-dsh.ts && cp src/dsh-bridge.patch.yml dist/dsh-bridge.patch.yml && node -e \"import('node:fs').then(({cpSync}) => cpSync('agent-presets','dist/agent-presets',{recursive:true}))\"",
+    "build:dsh": "node --experimental-strip-types scripts/bundle-dsh.ts",
+    "bundle": "node --experimental-strip-types scripts/bundle-dsh.ts",
     "dev": "tsc -b --watch",
     "typecheck": "tsc -b --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "clean": "rm -rf dist tsconfig.tsbuildinfo"
+    "clean": "rm -rf dist tsconfig.tsbuildinfo .bundle-dsh.stamp"
   },
   "keywords": [
     "dsh",
@@ -134,6 +140,7 @@
     "@modelcontextprotocol/sdk": "^1.0.0"
   },
   "devDependencies": {
+    "esbuild": "0.28.1",
     "typescript": "^5.6.0",
     "vitest": "^4.1.0"
   }

@@ -37,7 +37,7 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { JobId, JobRegistry, JobStatus } from '@deepseek-ai/dsh-jobs'
+import type { JobId, JobRegistry, JobStatus } from '@zn-ai/dsh-bridge/dsh-core'
 // `registerBashTool` / `registerAgentTool` 改成 @deprecated no-op;此处不再 import。
 // 保留 ./bash.js 的 LocalShellExecutor export 供 createDshRuntime 用(虽然 dsh 0.1.0-rc.8
 // 还未做 stateful shell,LocalShellExecutor 暂未挂到 ctx.shell — 见 Phase 5P3 注释)。

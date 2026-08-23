@@ -16,14 +16,14 @@
  */
 
 import { exec, type ChildProcess } from 'node:child_process'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool } from '@zn-ai/dsh-bridge/dsh-core'
 import {
   ShellExecutor,
   type ShellExecRequest,
   type ShellExecSpec,
   type ShellProcess,
   type ShellRunResult,
-} from '@deepseek-ai/dsh-shell'
+} from '@zn-ai/dsh-bridge/dsh-core'
 import type { Context } from '@deepseek-ai/cordis'
 
 /** cwd 跟踪 — 由调用方注入；调用后告知调用方最新 cwd（zai cwdTracker）。 */

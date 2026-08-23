@@ -20,8 +20,8 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { Session } from '@deepseek-ai/dsh-session'
-import { SessionId } from '@deepseek-ai/dsh-session'
+import type { Session } from '@zn-ai/dsh-bridge/dsh-core'
+import { SessionId } from '@zn-ai/dsh-bridge/dsh-core'
 
 /**
  * 上游 dsh-tool-todo 的 TodoItem schema(从 dsh-tool-todo 的 output schema

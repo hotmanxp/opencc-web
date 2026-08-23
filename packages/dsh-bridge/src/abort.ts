@@ -16,8 +16,8 @@
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import type { Agent } from '@deepseek-ai/dsh-agent'
-import { type AgentCancelCause } from '@deepseek-ai/dsh-session'
+import type { Agent } from '@zn-ai/dsh-bridge/dsh-core'
+import { type AgentCancelCause } from '@zn-ai/dsh-bridge/dsh-core'
 import { flushDshSession } from './sessions/store.js'
 
 export interface AgentMap {

@@ -15,7 +15,7 @@
 import { readdir, readFile, realpath } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { basename, dirname, isAbsolute, join, relative } from 'node:path'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool } from '@zn-ai/dsh-bridge/dsh-core'
 import type { Context } from '@deepseek-ai/cordis'
 
 /** 极简 frontmatter — 仅 key: value / key: [array]。 */

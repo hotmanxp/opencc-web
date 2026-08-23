@@ -21,7 +21,7 @@
  */
 
 import { readdir, stat } from 'node:fs/promises'
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool } from '@zn-ai/dsh-bridge/dsh-core'
 import type { Context } from '@deepseek-ai/cordis'
 import { resolve } from 'node:path'
 

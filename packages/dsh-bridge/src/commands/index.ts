@@ -13,7 +13,7 @@
  * 前缀并通过 zai 端执行。
  */
 
-import { defineTool } from '@deepseek-ai/dsh-tools'
+import { defineTool } from '@zn-ai/dsh-bridge/dsh-core'
 import type { Context } from '@deepseek-ai/cordis'
 
 export interface ZaiCommandDescriptor {
