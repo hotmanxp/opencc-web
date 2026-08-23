@@ -11,6 +11,10 @@ export const api = {
     command: {
       post: (body: _Map["POST /api/agent/command"]['request']) => request<_Map["POST /api/agent/command"]['response']>("POST", "/api/agent/command", body),
     },
+    kernel: {
+      get: () => request<_Map["GET /api/agent/kernel"]['response']>("GET", "/api/agent/kernel"),
+      post: (body: _Map["POST /api/agent/kernel"]['request']) => request<_Map["POST /api/agent/kernel"]['response']>("POST", "/api/agent/kernel", body),
+    },
     prompt: {
       post: (body: _Map["POST /api/agent/prompt"]['request']) => request<_Map["POST /api/agent/prompt"]['response']>("POST", "/api/agent/prompt", body),
     },
