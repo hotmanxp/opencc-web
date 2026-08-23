@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Modal, Spin, Tag, message } from 'antd';
 import { ReloadOutlined, UndoOutlined } from '@ant-design/icons';
 import { useGitStatus } from './useGitStatus.js';
@@ -15,14 +15,42 @@ function getFileName(filePath: string): string {
   return filePath.slice(separatorIndex + 1);
 }
 
+/**
+ * Derive a content-based refresh key from `status.data`. We do NOT pass the
+ * object reference itself: useGitStatus polls every 5s and always returns a
+ * fresh reference even when content is identical, so using the reference as
+ * a refresh key would force useGitDiff to refetch on every poll — which
+ * flashes the loading spinner, unmounts <DiffView/>, and resets the user's
+ * scroll position. Only refetch when something actually changed (branch or
+ * file list). For "same file edited multiple times" cases (status doesn't
+ * change), the user can hit the manual refresh button to bump the counter.
+ */
+function buildStatusKey(data: unknown): string {
+  if (!data || typeof data !== 'object') return '';
+  const d = data as { ok?: boolean; branch?: string | null; files?: { path: string; status: string; staged: boolean }[] };
+  if (!d.ok || !d.files) return '';
+  const branch = d.branch ?? '';
+  // Use \0 as inner delimiter so file paths containing "|" don't collide.
+  const fileKey = d.files
+    .map((f) => `${f.path}\0${f.status}\0${f.staged ? '1' : '0'}`)
+    .join('\n');
+  return `${branch}\n${fileKey}`;
+}
+
 export function GitTab({ cwd }: { cwd: string | null }) {
   const status = useGitStatus(cwd);
   const [selected, setSelected] = useState<string | null>(null);
   const [reverting, setReverting] = useState<string | null>(null);
-  // Pass `status.data` as a refresh key so the diff follows status polls
-  // (5s interval) — otherwise editing the same file twice leaves the
-  // previously-rendered diff pinned in place because `path` never changes.
-  const diff = useGitDiff(cwd, selected, status.data);
+  // Bump on manual "刷新" click so the diff refreshes even when status didn't
+  // change (e.g. user re-edited an already-modified file — git status still
+  // reports the same "M" entry, so the status-derived key wouldn't bump).
+  const [manualRefresh, setManualRefresh] = useState(0);
+  const statusKey = useMemo(() => buildStatusKey(status.data), [status.data]);
+  const refreshKey = useMemo(
+    () => `${statusKey}\nm:${manualRefresh}`,
+    [statusKey, manualRefresh],
+  );
+  const diff = useGitDiff(cwd, selected, refreshKey);
 
   const handleRevert = async (path: string) => {
     setReverting(path);
@@ -79,8 +107,11 @@ export function GitTab({ cwd }: { cwd: string | null }) {
       size="small"
       icon={<ReloadOutlined />}
       loading={status.loading}
-      onClick={() => status.refetch()}
-      title="刷新 git 状态"
+      onClick={() => {
+        status.refetch();
+        setManualRefresh((c) => c + 1);
+      }}
+      title="刷新 git 状态与 diff"
     >
       刷新
     </Button>

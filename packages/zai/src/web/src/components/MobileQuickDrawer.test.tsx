@@ -25,6 +25,11 @@ const mocks = vi.hoisted(() => {
       error: null,
       refetch: vi.fn(),
     })),
+    useGitDiffMock: vi.fn(() => ({
+      data: null,
+      loading: false,
+      error: null,
+    })),
     revertFileMock: vi.fn(async () => ({ ok: true as const })),
     messageWarningMock: vi.fn(),
     messageSuccessMock: vi.fn(),
@@ -76,6 +81,10 @@ vi.mock('../hooks/useQuickPrompts.js', () => ({
 
 vi.mock('./splitPane/useGitStatus.js', () => ({
   useGitStatus: mocks.useGitStatusMock,
+}))
+
+vi.mock('./splitPane/useGitDiff.js', () => ({
+  useGitDiff: mocks.useGitDiffMock,
 }))
 
 vi.mock('../lib/gitApi.js', () => ({
@@ -137,6 +146,12 @@ beforeEach(() => {
     loading: false,
     error: null,
     refetch: vi.fn(),
+  })
+  mocks.useGitDiffMock.mockClear()
+  mocks.useGitDiffMock.mockReturnValue({
+    data: null,
+    loading: false,
+    error: null,
   })
   useAgentStore.setState({
     sessionId: 'sess-1',
@@ -466,5 +481,48 @@ describe('MobileQuickDrawer — Git tab', () => {
       const after = screen.getByLabelText('撤销此文件的更改')
       expect(after.className).not.toMatch(/ant-btn-loading/)
     })
+  })
+
+  it('刷新按钮同时调 status.refetch 并 bump diff refresh key (覆盖 status 不变但内容已变场景)', () => {
+    // git status 不会因为"同一文件再次编辑"而变化, 5 秒轮询每次也返回
+    // 新引用但内容可能一样. 上次提交用 status.data 当 refreshKey 会导致
+    // DiffView 每 5 秒卸载 → 滚动条回到顶部. 修复后必须靠手动"刷新"按钮
+    // 触发 diff 重拉 — 这里验证按钮 onClick 既调 refetch 又 bump counter.
+    const refetch = vi.fn()
+    setGitStatusMock({
+      data: { ok: true, branch: 'main', files: [{ path: 'src/a.ts', status: 'M', staged: false }] },
+      refetch,
+    })
+    useAgentStore.setState({ cwdBySession: { 'sess-1': '/repo' } })
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    switchToGitTab()
+
+    const firstRefreshKey = mocks.useGitDiffMock.mock.calls[0]![2]
+
+    fireEvent.click(screen.getByTestId('mobile-quick-drawer-git-refresh'))
+
+    expect(refetch).toHaveBeenCalledTimes(1)
+    const secondRefreshKey = mocks.useGitDiffMock.mock.calls.at(-1)![2]
+    expect(secondRefreshKey).not.toBe(firstRefreshKey)
+  })
+
+  it('status.data 引用变但内容相同时, useGitDiff 的 refreshKey 不变 (避免 5 秒轮询触发 diff 重拉)', () => {
+    setGitStatusMock({
+      data: { ok: true, branch: 'main', files: [{ path: 'src/a.ts', status: 'M', staged: false }] },
+    })
+    useAgentStore.setState({ cwdBySession: { 'sess-1': '/repo' } })
+    const { rerender } = render(<MobileQuickDrawer open onClose={() => {}} />)
+    switchToGitTab()
+    const firstRefreshKey = mocks.useGitDiffMock.mock.calls[0]![2]
+
+    // 模拟 5 秒轮询: 新 status.data 引用, 内容相同.
+    setGitStatusMock({
+      data: { ok: true, branch: 'main', files: [{ path: 'src/a.ts', status: 'M', staged: false }] },
+    })
+    rerender(<MobileQuickDrawer open onClose={() => {}} />)
+    switchToGitTab()
+
+    const secondRefreshKey = mocks.useGitDiffMock.mock.calls.at(-1)![2]
+    expect(secondRefreshKey).toBe(firstRefreshKey)
   })
 })

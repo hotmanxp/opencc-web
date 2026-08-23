@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { Drawer, Segmented, Button, Input, App as AntApp, Modal, Empty, Spin } from 'antd'
 import {
   ReloadOutlined,
@@ -32,14 +32,36 @@ interface GitTabProps {
   cwd: string | null
 }
 
+// 内容敏感的 refresh key: useGitStatus 5 秒轮询每次都返回新对象引用,
+// 但内容经常没变 (文件列表/分支一致). 直接传 status.data 引用会让
+// useGitDiff 每 5 秒重拉一次 → DiffView 卸载 → 滚动条回到顶部, 无法阅读.
+// 这里从 status.data 派生一个内容哈希 (branch + 每条文件的 path/status/staged),
+// 只有真正变更 (新文件/删除/状态变化/分支切换) 时才换 key, 触发 diff 重拉.
+// 对于"同一文件多次修改"(status 不变, 因为 git 只看 M/?/A 等) 提供
+// manualRefresh 计数器, 配合"刷新"按钮 bump 强制 diff 重拉.
+function buildStatusKey(data: unknown): string {
+  if (!data || typeof data !== 'object') return ''
+  const d = data as { ok?: boolean; branch?: string | null; files?: { path: string; status: string; staged: boolean }[] }
+  if (!d.ok || !d.files) return ''
+  const branch = d.branch ?? ''
+  const fileKey = d.files
+    .map((f) => `${f.path}\0${f.status}\0${f.staged ? '1' : '0'}`)
+    .join('\n')
+  return `${branch}\n${fileKey}`
+}
+
 function GitTab({ cwd }: GitTabProps) {
   const status = useGitStatus(cwd)
   const [selected, setSelected] = useState<string | null>(null)
   const [reverting, setReverting] = useState<string | null>(null)
-  // 把 status.data 当作 refreshKey 传入,这样 useGitStatus 5 秒轮询拿到
-  // 新对象时, useGitDiff 会跟着重拉 — 否则同一文件多次修改, diff
-  // 会一直停在第一次选中时拉到的内容.
-  const diff = useGitDiff(cwd, selected, status.data)
+  // 手动"刷新"点击时 bump, 强制 diff 重拉 (覆盖 status 没变但文件内容已变的场景).
+  const [manualRefresh, setManualRefresh] = useState(0)
+  const statusKey = useMemo(() => buildStatusKey(status.data), [status.data])
+  const refreshKey = useMemo(
+    () => `${statusKey}\nm:${manualRefresh}`,
+    [statusKey, manualRefresh],
+  )
+  const diff = useGitDiff(cwd, selected, refreshKey)
 
   // cwd 字符串值真变化时才丢弃选中 — 旧路径不再适用. 引用比较不安全:
   // 上游 Agent.tsx 把 cwd 走 useMemo([instanceContext?.cwd, cwdBySessionForSid]),
@@ -129,7 +151,10 @@ function GitTab({ cwd }: GitTabProps) {
           size="small"
           icon={<ReloadOutlined />}
           loading={status.loading}
-          onClick={() => status.refetch()}
+          onClick={() => {
+            status.refetch()
+            setManualRefresh((c) => c + 1)
+          }}
           data-testid="mobile-quick-drawer-git-refresh"
         >
           刷新

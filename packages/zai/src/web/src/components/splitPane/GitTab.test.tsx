@@ -141,4 +141,95 @@ describe('GitTab', () => {
     // New cwd → old path no longer applies → selection cleared.
     expect(screen.getByText(/选择左侧文件/i)).toBeTruthy();
   });
+
+  it('passes a stable refresh key to useGitDiff when status.data reference changes but content is identical', () => {
+    // useGitStatus polls every 5s and always returns a fresh data object
+    // reference. We must NOT use the reference as the diff's refresh key —
+    // otherwise every poll would force a diff refetch, flash the loading
+    // spinner, unmount <DiffView/>, and reset the user's scroll position.
+    // Capture the third argument (refreshKey) on each render and assert it
+    // stays the same across two renders where status.data is a new object
+    // with the same content.
+    mockStatus.mockReturnValue({
+      data: { ok: true, branch: 'main', files: [{ path: 'a.ts', status: 'M', staged: false }] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockDiff.mockReturnValue({ data: { ok: true, diff: 'diff --git a b' }, loading: false, error: null });
+
+    const callsBefore = mockDiff.mock.calls.length;
+    const { rerender } = render(<GitTab cwd="/repo" />);
+    const firstRefreshKey = mockDiff.mock.calls[callsBefore]![2];
+
+    // New status.data object reference, identical content (same as a poll
+    // returning the same git status).
+    mockStatus.mockReturnValue({
+      data: { ok: true, branch: 'main', files: [{ path: 'a.ts', status: 'M', staged: false }] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    rerender(<GitTab cwd="/repo" />);
+
+    const secondRefreshKey = mockDiff.mock.calls.at(-1)![2];
+    expect(secondRefreshKey).toBe(firstRefreshKey);
+  });
+
+  it('changes the diff refresh key when status content changes (file added)', () => {
+    mockStatus.mockReturnValue({
+      data: { ok: true, branch: 'main', files: [{ path: 'a.ts', status: 'M', staged: false }] },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    mockDiff.mockReturnValue({ data: { ok: true, diff: 'diff --git a b' }, loading: false, error: null });
+
+    const callsBefore = mockDiff.mock.calls.length;
+    const { rerender } = render(<GitTab cwd="/repo" />);
+    const firstRefreshKey = mockDiff.mock.calls[callsBefore]![2];
+
+    // New file added → key must change so the diff refetches.
+    mockStatus.mockReturnValue({
+      data: {
+        ok: true,
+        branch: 'main',
+        files: [
+          { path: 'a.ts', status: 'M', staged: false },
+          { path: 'b.ts', status: 'M', staged: false },
+        ],
+      },
+      loading: false,
+      error: null,
+      refetch: vi.fn(),
+    });
+    rerender(<GitTab cwd="/repo" />);
+
+    const secondRefreshKey = mockDiff.mock.calls.at(-1)![2];
+    expect(secondRefreshKey).not.toBe(firstRefreshKey);
+  });
+
+  it('manual refresh button bumps the diff refresh key (covers re-edits of already-modified files)', () => {
+    // git status reports the same "M" entry before and after the user re-edits
+    // a file, so the status-derived key wouldn't change. The manual refresh
+    // button must bump the counter to force a diff refetch.
+    const refetch = vi.fn();
+    mockStatus.mockReturnValue({
+      data: { ok: true, branch: 'main', files: [{ path: 'a.ts', status: 'M', staged: false }] },
+      loading: false,
+      error: null,
+      refetch,
+    });
+    mockDiff.mockReturnValue({ data: { ok: true, diff: 'diff --git a b' }, loading: false, error: null });
+
+    const callsBefore = mockDiff.mock.calls.length;
+    render(<GitTab cwd="/repo" />);
+    const firstRefreshKey = mockDiff.mock.calls[callsBefore]![2];
+
+    fireEvent.click(screen.getByTitle(/刷新/i));
+
+    expect(refetch).toHaveBeenCalledTimes(1);
+    const secondRefreshKey = mockDiff.mock.calls.at(-1)![2];
+    expect(secondRefreshKey).not.toBe(firstRefreshKey);
+  });
 });
