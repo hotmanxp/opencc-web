@@ -47,6 +47,7 @@ import {
   getCurrentSessionId,
   setCurrentSessionId,
 } from '../../agentRuntime.js'
+import { loadMcpServers } from '../../mcpConfig.js'
 import type { Context as DshContext } from '@zn-ai/dsh-bridge'
 
 /** dsh Cordis ctx 本地别名 — 避免 import 实体与未来 Context 类型冲突。 */
@@ -171,12 +172,41 @@ export async function createDshKernelAdapter(
       },
     ],
   }
+  // Phase 5P-MCP: zai 端提前调 `loadMcpServers(cwd)` 解析 4 scope .mcp.json
+  // (enterprise > user > local > project),把结果传给 `createDshRuntime({
+  // mcpServers })`。由 createDshRuntime 装载阶段 spawn N 个 dsh-mcp-client plugin。
+  // 取代之前 dsh-bridge 内部 `registerMcpTools(ctx, {cwd})` 自实现 MCPClientPool
+  // (577 行代码删除)。
+  //
+  // 字段适配:zai 的 `McpServerSpec.transport` 是 discriminated union
+  // (stdio / sse / http);dsh-bridge 期望扁平 (command / url / headers)。
+  // `transport.kind` 决定 command-or-url,扁平化后再传。
+  const mcpServers = loadMcpServers(cfg.cwd).map((s) => {
+    const t = s.transport
+    if (t.kind === 'stdio') {
+      return {
+        name: s.name,
+        command: t.command,
+        args: t.args,
+        env: t.env,
+        cwd: cfg.cwd,
+      }
+    }
+    // sse / http 都用 url + headers
+    return {
+      name: s.name,
+      url: t.url,
+      headers: t.headers,
+      cwd: cfg.cwd,
+    }
+  })
   const handle = await bridge.createDshRuntime({
     dataDir: cfg.dataDir,
     runtimeId: 'zai-server-dsh',
     defaultCwd: cfg.cwd,
     defaultModel,
     providers: [anthropicProfile],
+    mcpServers,
   })
   await handle.start()
   // dsh-020:暴露 ctx 给 DshTranscriptAdapter,让 routes 读 dsh session.log。

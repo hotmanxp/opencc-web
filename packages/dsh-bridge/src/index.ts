@@ -64,10 +64,7 @@ export {
   type RipgrepToolOptions,
 } from './tools/ripgrep.js'
 export {
-  loadMcpConfig,
-  listZaiMcpTools,
-  mcpToolsToDshTools,
-  registerMcpTools,
+  registerMcpTools, // @deprecated stub (Phase 5P-MCP) — no-op dispose
   MCP_RETRY_DELAYS_MS,
   MCP_HEALTH_CHECK_INTERVAL_MS,
   type McpServerSpec,

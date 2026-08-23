@@ -82,59 +82,64 @@ describe('dsh-017: DisplayFiles tool', () => {
   })
 })
 
-describe('dsh-017: TaskListStore', () => {
-  // 隔离到临时目录 — 改写 homedir() 不可能,改为测试时写实际 ~/.zai/tasks-dsh/<sid>.json,
-  // 然后 cleanup。
+describe('dsh-017: TaskListStore — Phase 5P5 stub', () => {
+  // Phase 5P5: DshTaskListStore 改由上游 `@deepseek-ai/dsh-tool-todo` 接管,
+  // 本 stub 仅保留方法签名兼容 + 调用即抛"已迁移"错误。
   const sessionId = `test-sess-${Date.now()}`
   let store: DshTaskListStore
 
   beforeEach(() => {
     store = new DshTaskListStore()
   })
-  afterEach(async () => {
-    const path = join(homedir(), '.zai', 'tasks-dsh', `${sessionId}.json`)
-    await rm(path, { force: true })
+
+  it('create() 抛 deprecated 错提示走上游 todo_write', async () => {
+    await expect(
+      store.create(sessionId, { subject: 'Test task', description: 'A test' }),
+    ).rejects.toThrow(/已迁移到上游|dsh-tool-todo/)
   })
 
-  it('creates and lists tasks', async () => {
-    const t = await store.create(sessionId, { subject: 'Test task', description: 'A test' })
-    expect(t.id).toBeTruthy()
-    expect(t.subject).toBe('Test task')
-    expect(t.status).toBe('pending')
-    const list = await store.list(sessionId)
-    expect(list.length).toBe(1)
+  it('update() 抛 deprecated 错', async () => {
+    await expect(
+      store.update(sessionId, 'fake-id', { status: 'in_progress' }),
+    ).rejects.toThrow(/已迁移到上游|dsh-tool-todo/)
   })
 
-  it('updates task status', async () => {
-    const t = await store.create(sessionId, { subject: 'Update me' })
-    const updated = await store.update(sessionId, t.id, { status: 'in_progress' })
-    expect(updated?.status).toBe('in_progress')
-    const fetched = await store.get(sessionId, t.id)
-    expect(fetched?.status).toBe('in_progress')
+  it('get() 抛 deprecated 错', async () => {
+    await expect(store.get(sessionId, 'nonexistent')).rejects.toThrow(
+      /已迁移到上游|dsh-tool-todo/,
+    )
   })
 
-  it('returns null for missing task', async () => {
-    const r = await store.get(sessionId, 'nonexistent')
-    expect(r).toBeNull()
+  it('list() 抛 deprecated 错', async () => {
+    await expect(store.list(sessionId)).rejects.toThrow(/已迁移到上游|dsh-tool-todo/)
   })
 })
 
-describe('dsh-017: Task tools schema', () => {
-  it('TaskCreate requires subject', () => {
+describe('dsh-017: Task tools schema — Phase 5P5 stub', () => {
+  // Phase 5P5: 4 个 TaskCreate/Get/List/Update 工具已全部迁移到上游
+  // todo_write(stub 现在抛"HarnessError: 已迁移"提示)。
+  it('TaskCreate stub 暴露 + 调用抛 deprecated', async () => {
     const t = createTaskCreateTool({ getSessionId: () => 'sid' })
     expect(t.name).toBe('TaskCreate')
+    await expect(t.execute({}, {} as never)).rejects.toThrow(/已迁移|已废弃/)
   })
-  it('TaskGet requires id', () => {
+
+  it('TaskGet stub 暴露 + 调用抛 deprecated', async () => {
     const t = createTaskGetTool({ getSessionId: () => 'sid' })
     expect(t.name).toBe('TaskGet')
+    await expect(t.execute({}, {} as never)).rejects.toThrow(/已迁移|已废弃/)
   })
-  it('TaskList no params', () => {
+
+  it('TaskList stub 暴露 + 调用抛 deprecated', async () => {
     const t = createTaskListTool({ getSessionId: () => 'sid' })
     expect(t.name).toBe('TaskList')
+    await expect(t.execute({}, {} as never)).rejects.toThrow(/已迁移|已废弃/)
   })
-  it('TaskUpdate requires id', () => {
+
+  it('TaskUpdate stub 暴露 + 调用抛 deprecated', async () => {
     const t = createTaskUpdateTool({ getSessionId: () => 'sid' })
     expect(t.name).toBe('TaskUpdate')
+    await expect(t.execute({}, {} as never)).rejects.toThrow(/已迁移|已废弃/)
   })
 })
 

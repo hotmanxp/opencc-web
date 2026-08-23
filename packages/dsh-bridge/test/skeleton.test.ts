@@ -84,15 +84,18 @@ describe('Phase 3.1: createDshSubagentScope (dsh-scope 自实现)', () => {
   });
 });
 
-describe('Phase 3.2: MCP backoff + health check constants', () => {
-  it('MCP_RETRY_DELAYS_MS 是 5 步指数退避（1s/2s/4s/8s/16s）', async () => {
+describe('Phase 5P-MCP stub: MCP_RETRY/HEALTH constants 已 deprecated', () => {
+  // dsh-bridge 自实现的 5 步指数退避 + 30s health check 已删除:
+  // 上游 `@deepseek-ai/dsh-mcp-client` 自带 reconnect(1s 初始,16s max,5 attempts)
+  // 和 per-instance lifecycle 管理。
+  it('MCP_RETRY_DELAYS_MS 现在是空数组(上游接管)', async () => {
     const { MCP_RETRY_DELAYS_MS } = await import('../src/index.js')
-    expect(MCP_RETRY_DELAYS_MS).toEqual([1000, 2000, 4000, 8000, 16000])
+    expect(MCP_RETRY_DELAYS_MS).toEqual([])
   });
 
-  it('MCP_HEALTH_CHECK_INTERVAL_MS 默认 30 秒', async () => {
+  it('MCP_HEALTH_CHECK_INTERVAL_MS 现在是 0(上游接管)', async () => {
     const { MCP_HEALTH_CHECK_INTERVAL_MS } = await import('../src/index.js')
-    expect(MCP_HEALTH_CHECK_INTERVAL_MS).toBe(30_000)
+    expect(MCP_HEALTH_CHECK_INTERVAL_MS).toBe(0)
   });
 });
 

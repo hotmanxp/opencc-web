@@ -4,24 +4,65 @@
  * 把 zai 的 compat/tools (buildDefaultTools 产物) 通过 `ctx.tools.register()`
  * 暴露给 dsh 模型。注册按 dsh Tools API (defineTool) 包装。
  *
- * 工具能力面（B2 §4）：
- * - bash (cwd 跟踪 + 后台任务通知) — zai compat/tools/BashTool
- * - Read/Edit/Write (fs) — zai compat/tools/fs/*
- * - ripgrep — zai compat/vendor/ripgrep
- * - MCP 客户端工具 — MCPClientPool
- * - Skill — loadSkillsFromDirs() + SkillTool
+ * **Phase 5P3 / 5P6 收口（2026-08-22）**:`bash` / `subagent` 工具已由上游
+ * `@deepseek-ai/dsh-tool-bash` / `@deepseek-ai/dsh-tool-subagent` 通过
+ * `dsh-bridge.patch.yml` 自动装载,模型可见名字也变成小写 `bash` /
+ * `subagent`(对齐 dsh 官方)。zai-side 的 PascalCase 自实现
+ * (`./bash.ts` createBashTool + `./subagent.ts` createAgentTool) 改
+ * 成 deprecated no-op stub,本 registry 不再调用它们 — 但保留 export
+ * 给现有单测(skeleton.test.ts 等)继续验证 cwd 检测 / 平台分发逻辑。
+ *
+ * **Bash 后台任务转发**(替代旧的 onBackgroundStart / notifyBackground 回调):
+ *   - 订阅 `ctx.jobs.onJobsChanged`(上游 JobRegistry seam),
+ *   - diff `jobs.list()` 与本地缓存的 JobSnapshot,
+ *   - 新出现的 `kind === 'bash'` 任务 → 调 `opts.onBackgroundStart`,
+ *   - 状态切到 terminal (completed/killed/failed) 的 bash 任务 → 调
+ *     `opts.notifyBackground`。
+ *   标签(label)直接用上游 `JobSnapshot.label`(bash tool 填的是 args.command)。
+ *
+ * **Subagent 任务转发**(替代旧的 onTaskStart / onTaskFinish 回调):
+ *   - 订阅 `subagent/start` / `subagent/end`(上游 SubagentRuntime seam),
+ *   - start 事件 → `opts.onTaskStart`,description/prompt 暂时空字符串
+ *     (上游 SubagentRunInfo 不携带输入 prompt;要 capture 需订阅
+ *     `tools/pre-execute` + 通过 child session id 反查,Phase 5P6+ 跟进)。
+ *   - end 事件 → `opts.onTaskFinish`,stopReason 映射成 done/failed/cancelled。
+ *
+ * 工具能力面（B2 §4,Phase 5P3+ 收口后）：
+ * - bash — **上游 @deepseek-ai/dsh-tool-bash**(小写 `bash`,见 dsh-bridge.patch.yml tool-bash row)
+ * - Read/Edit/Write — 上游 @deepseek-ai/dsh-tool-fs(`read`/`write`/`edit`,Phase 5P2 收口)
+ * - grep/glob — 上游 @deepseek-ai/dsh-tool-fs-search(`grep`/`glob`,Phase 4 P1 收口)
+ * - MCP 客户端工具 — 上游 @deepseek-ai/dsh-mcp-client(每个 server 一个 plugin instance,Phase 5P-MCP)
+ * - Skill — 上游 @deepseek-ai/dsh-tool-skill + dsh-skill-filesystem loader(本仓库尚未迁,Phase 5P4)
+ * - subagent — **上游 @deepseek-ai/dsh-tool-subagent**(小写 `subagent`,Phase 5P6 收口)
  */
 
 import type { Context } from '@deepseek-ai/cordis'
-import { registerBashTool } from './bash.js'
-import { registerFsTools } from './fs.js'
+import type { JobId, JobRegistry, JobSnapshot } from '@deepseek-ai/dsh-jobs'
+// `registerBashTool` / `registerAgentTool` 改成 @deprecated no-op;此处不再 import。
+// 保留 ./bash.js 的 LocalShellExecutor export 供 createDshRuntime 用(虽然 dsh 0.1.0-rc.8
+// 还未做 stateful shell,LocalShellExecutor 暂未挂到 ctx.shell — 见 Phase 5P3 注释)。
 import { registerRipgrepTool } from './ripgrep.js'
 import { registerMcpTools } from './mcp.js'
 import { registerSkillTools } from './skill.js'
-import { registerAgentTool, type AgentToolParentAgent } from './subagent.js'
+import type { AgentToolParentAgent } from './subagent.js'
 import { registerDisplayFilesTool } from './displayFiles.js'
-import { registerTaskListTools } from './taskList.js'
+import { registerTaskListTools } from './taskList.js' // @deprecated stub — no-op dispose
 import { registerCronTools, type CronParentAgent } from './cron.js'
+
+/**
+ * Subagent 生命周期事件 payload 形态(对应上游 dsh-subagent/src/types.ts)。
+ * dsh-bridge 不直接 import 上游类型,这里 local copy 避免 zai 端依赖收紧。
+ */
+interface SubagentRunInfoLike {
+  readonly runId: { toString(): string }
+  readonly provider: string
+  readonly id: { toString(): string }
+  readonly local: boolean
+}
+interface SubagentRunEndInfoLike extends SubagentRunInfoLike {
+  readonly stopReason: 'completed' | 'cancelled' | 'error' | string
+  readonly lastAssistantMessage?: unknown
+}
 
 export interface ZaiTool {
   name: string
@@ -120,8 +161,13 @@ export async function registerZaiTools(
     }),
   )
 
-  // 2. fs 工具（FileRead/Edit/Write/Stat — 4 个工具）
-  disposers.push(...registerFsTools(ctx, { cwd: opts.cwd }))
+  // 2. fs 工具 — Phase 5P2: 改由 harness `@deepseek-ai/dsh-tool-fs` 提供,
+  //    该插件已在 dsh-bridge.patch.yml 的 `tool-fs` row 装载,自动注册
+  //    `read` / `write` / `edit` / (若 ctx.attachments 在场) `read_image`。
+  //    zai-side UI renderer 在 toolRenderers/registry.ts 已同步加
+  //    `read/write/edit` 映射 (Phase 3A)。FileStat 工具不再暴露 — 上游
+  //    dsh-tool-fs 不带 stat;模型 stat 需求用 `read` + 一段 metadata 替代。
+  //    旧的 `registerFsTools` 仍 export(标 @deprecated)但不再被本 registry 调用。
 
   // 3. fs-search 工具（`grep` + `glob`）— Phase 4 P1 起由 harness
   //    `@deepseek-ai/dsh-tool-fs-search` 提供（已通过 createDshRuntime
@@ -129,9 +175,11 @@ export async function registerZaiTools(
   //    返回 no-op dispose，仅保留 zai-side 历史 import 通路。
   disposers.push(registerRipgrepTool(ctx, { cwd: opts.cwd }))
 
-  // 4. MCP 工具（异步，async connect）
-  const { disposers: mcpDisposers } = await registerMcpTools(ctx, { cwd: opts.cwd })
-  disposers.push(...mcpDisposers)
+  // 4. Phase 5P-MCP: MCP 工具已由上游 `@deepseek-ai/dsh-mcp-client` 在
+  //    `createDshRuntime({mcpServers})` 装载阶段注册(`opts.mcpServers`
+  //    由 zai factory 经 `loadMcpServers(cwd)` 提供)。本行 no-op dispose,
+  //    保留 forward-compat dispose 链路。
+  await registerMcpTools(ctx, { cwd: opts.cwd })
 
   // 5. Skill 工具（异步，扫描 skills 目录）
   disposers.push(...(await registerSkillTools(ctx, { cwd: opts.cwd })))
@@ -153,13 +201,13 @@ export async function registerZaiTools(
     onTaskFinish: opts.onTaskFinish,
   }))
 
-  // 8. dsh-017 新增：Task 工具集（TaskCreate/Get/List/Update — 4 个）
-  if (opts.getSessionId) {
-    disposers.push(registerTaskListTools(ctx, {
-      getSessionId: opts.getSessionId,
-      onTaskChange: opts.onTaskChange,
-    }))
-  }
+  // 8. Phase 5P5: Task* 工具集已由上游 `dsh-tool-todo`(在 dsh-bridge.patch.yml 的
+  //    `tool-todo` row 自动装载,Phase 1P1-B)接管。注册 model-facing 单工具
+  //    `todo_write`(whole-list snapshot replace)。`opts.onTaskChange` 不再被
+  //    消费 — 替换后 todo 状态变更通过 `ctx.sessionProjections.onChanged`
+  //    filter key='todos' → translate/sessionEvents.ts 翻译成
+  //    `state.v2_task.changed` 事件给 zai-side TodoZone 渲染。
+  //    `registerTaskListTools` 仍是 no-op compat stub,不实际注册工具。
 
   // 9. dsh-017 新增：Cron 工具集（CronCreate/Delete/List — 3 个）
   if (opts.getSessionId && opts.getParentAgent) {

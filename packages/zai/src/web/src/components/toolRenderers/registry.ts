@@ -23,6 +23,28 @@ const registry: Record<string, ToolRenderer> = {
   FileEdit: diffRenderer,
   FileRead: readRenderer,
   FileWrite: diffRenderer,
+  // Phase 5P2 (上游 dsh-tool-fs):model-facing 工具名是小写 `read` / `write`
+  // / `edit`(见 packages/fs/tool-fs/src/index.ts)。字段 schema 与 zai 自实现
+  // FileRead/FileWrite/FileEdit + opencc Read/Write/Edit 等价,渲染直接复用
+  // 现有 readRenderer / diffRenderer (Phase 3A 零破坏)。
+  read: readRenderer,
+  write: diffRenderer,
+  edit: diffRenderer,
+  // Phase 5P3 (上游 dsh-tool-bash):model-facing 工具名是小写 `bash`
+  // (见 packages/shell/tool-bash/src/index.ts)。input 字段是
+  // { command, description, timeoutMs, workdir, run_in_background,
+  //   sandbox_permissions?, justification? } — 与 zai-side 自实现的
+  // `Bash` { command, description, timeout, run_in_background } 子集
+  // (上游多了 workdir/sandbox_permissions/justification,zai 接受未知字段),
+  // 渲染直接复用现有 bashRenderer。output 是上游 render() 产出的文本
+  // (stdout + [stderr] + [exit code: N]),stringFromOutput 拍平后 parseBashOutput
+  // 走 plain 路径 — 不区分 stdout/stderr 颜色,但可读性 OK (上游格式).
+  bash: bashRenderer,
+  // Phase 5P6 (上游 dsh-tool-subagent):model-facing 工具名是小写 `subagent`
+  // (见 packages/subagent/tool-subagent/src/index.ts,toolName 配置默认 'subagent')。
+  // input 字段 { description, prompt, subagent_type?, model?, run_in_background?, isolation? }
+  // 与 zai-side `Agent` 几乎一致 — 渲染复用 agentRenderer。
+  subagent: agentRenderer,
   // Phase 4 P1: harness `@deepseek-ai/dsh-tool-fs-search` 注册的小写
   // `grep` / `glob` 工具名 — 走结构化 renderer, 读 dsh `tool/result.meta`
   // 渲染按文件分组的 matches 卡片 / 路径列表 + 截断提示。meta 缺失时降级到

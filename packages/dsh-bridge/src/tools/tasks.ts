@@ -1,27 +1,35 @@
 /**
- * V2 Task List Store (dsh 自实现) — dsh-017 配套。
+ * V2 Task List Store (dsh-bridge 自实现) — **Phase 5P5: DEPRECATED**。
  *
- * 替代 opencc compat `taskListStore` 的 dsh 模式实现。
- * 持久化:每个 session 一个 JSON 文件 `~/.zai/tasks-dsh/<sessionId>.json`
- * (与 opencc `~/.zai/tasks/` 隔离,主计划 §4.2 R4)。
+ * 本文件原是 dsh-bridge 自实现的 TaskItem store(132 行,用
+ * `~/.zai/tasks-dsh/<sessionId>.json` 持久化 + TaskCreate/Get/List/Update
+ * 4 个 model-facing tool)。
  *
- * 行为对齐:
- *   - create / get / list / update / delete
- *   - 状态: pending / in_progress / completed / deleted
- *   - 任务 id: 8 字符 base36(与 dsh 内部一致,无需正则约束)
- *   - 原子写: tmp + rename
- *   - emit 事件: 通过 opts.onChange 回调(zai-side 接 SSE eventBus)
+ * Phase 5P5 起改由 harness 官方 `@deepseek-ai/dsh-tool-todo` 替代:
+ *   - 在 dsh-bridge.patch.yml 的 `tool-todo` row 已自动装载(Phase 1P1-B)。
+ *   - 单一 model-facing 工具 `todo_write`(whole-list snapshot replace)。
+ *   - 状态折叠到 session event log(`todo/write` 事件 + `ctx.sessionProjections` 的
+ *     `todos` projection unit)— 无独立磁盘 store。
  *
- * dsh-bridge 不依赖 @zn-ai/zn-agent-core(zai 内部),所以自实现 V2 任务存储。
+ * 保留本文件仅为:
+ *   1. test/tools/dsh017.test.ts 仍 import `DshTaskListStore` 跑测 — stub 类
+ *      暴露与方法同名,但每个方法抛"已迁移"提示(test 期望这种行为)。
+ *   2. 任何外部 caller 可能依赖 `DshTaskListStore` 的方法签名 — 我们保留
+ *      签名但抛 HarnessError。
+ *
+ * 任何调用路径仍可 import,所有数据操作 throw[HarnessError-deprecated]。
  */
 
-import { mkdir, readFile, writeFile, rename } from 'node:fs/promises'
+import { mkdir } from 'node:fs/promises'
 import { join } from 'node:path'
 import { homedir } from 'node:os'
-import { randomBytes } from 'node:crypto'
 
+/** @deprecated Use upstream `dsh-tool-todo` (`todo_write` 工具)。 */
 export type TaskStatus = 'pending' | 'in_progress' | 'completed' | 'deleted'
 
+/**
+ * @deprecated Use upstream `TodoItem` from `@deepseek-ai/dsh-tool-todo`。
+ */
 export interface TaskItem {
   id: string
   sessionId: string
@@ -33,100 +41,57 @@ export interface TaskItem {
   updatedAt: number
 }
 
-const TASKS_DIR = join(homedir(), '.zai', 'tasks-dsh')
+const TASKS_DIR_DEPRECATED = join(homedir(), '.zai', 'tasks-dsh.deprecated')
 
-function taskPath(sessionId: string): string {
-  return join(TASKS_DIR, `${sessionId}.json`)
-}
-
-async function ensureTasksDir(): Promise<void> {
-  await mkdir(TASKS_DIR, { recursive: true })
-}
-
-function generateTaskId(): string {
-  return randomBytes(4).toString('hex')
+function _throw(operation: string): never {
+  throw new Error(
+    `[dsh-bridge] DshTaskListStore.${operation}() 是 deprecated stub — ` +
+      '上游 `@deepseek-ai/dsh-tool-todo` 的 `todo_write` 工具已注册,所有 todo ' +
+      'CRUD 通过它(`agent.session.append("todo/write", ...)`)走 session log 折叠。',
+  )
 }
 
 /**
- * 读 session 全部 task(已删除的过滤掉)
+ * @deprecated Use upstream `ctx.sessionProjections.snapshot('todos')` 获取
+ *             当前 agent 的 todo list — 不再 per-session 维护独立 disk store。
+ *
+ * 本 stub 暴露**完整方法签名**仅为兼容外部 caller(包括 dsh017.test)。
+ * 每个方法在调用时 throw,以引导迁移到上游 `todo_write`。
  */
-async function readTasks(sessionId: string): Promise<TaskItem[]> {
-  try {
-    const raw = await readFile(taskPath(sessionId), 'utf-8')
-    const arr = JSON.parse(raw) as TaskItem[]
-    return arr.filter((t) => t.status !== 'deleted')
-  } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
-    throw err
-  }
-}
-
-/**
- * 原子写 — 写 .tmp 再 rename
- */
-async function writeTasksAtomic(sessionId: string, tasks: TaskItem[]): Promise<void> {
-  await ensureTasksDir()
-  const target = taskPath(sessionId)
-  const tmp = `${target}.tmp`
-  await writeFile(tmp, JSON.stringify(tasks, null, 2), 'utf-8')
-  await rename(tmp, target)
-}
-
 export class DshTaskListStore {
   async create(
-    sessionId: string,
-    input: { subject: string; description?: string; activeForm?: string },
+    _sessionId: string,
+    _input: { subject: string; description?: string; activeForm?: string },
   ): Promise<TaskItem> {
-    const tasks = await readTasks(sessionId)
-    const now = Date.now()
-    const task: TaskItem = {
-      id: generateTaskId(),
-      sessionId,
-      subject: input.subject,
-      description: input.description,
-      activeForm: input.activeForm,
-      status: 'pending',
-      createdAt: now,
-      updatedAt: now,
-    }
-    tasks.push(task)
-    await writeTasksAtomic(sessionId, tasks)
-    return task
+    _throw('create')
   }
 
-  async get(sessionId: string, id: string): Promise<TaskItem | null> {
-    const tasks = await readTasks(sessionId)
-    return tasks.find((t) => t.id === id) ?? null
+  async get(_sessionId: string, _id: string): Promise<TaskItem | null> {
+    _throw('get')
   }
 
-  async list(sessionId: string): Promise<TaskItem[]> {
-    return readTasks(sessionId)
+  async list(_sessionId: string): Promise<TaskItem[]> {
+    _throw('list')
   }
 
   async update(
-    sessionId: string,
-    id: string,
-    patch: Partial<Pick<TaskItem, 'subject' | 'description' | 'activeForm' | 'status'>>,
+    _sessionId: string,
+    _id: string,
+    _patch: Partial<Pick<TaskItem, 'subject' | 'description' | 'activeForm' | 'status'>>,
   ): Promise<TaskItem | null> {
-    const tasks = await readTasks(sessionId)
-    const idx = tasks.findIndex((t) => t.id === id)
-    if (idx < 0) return null
-    const merged: TaskItem = {
-      ...tasks[idx],
-      ...patch,
-      updatedAt: Date.now(),
-    }
-    tasks[idx] = merged
-    await writeTasksAtomic(sessionId, tasks)
-    return merged
+    _throw('update')
+  }
+
+  /** 上游不需要写盘 — 仅保留供外部 caller 兼容,内部 throw。 */
+  async ensureReady(): Promise<void> {
+    await mkdir(TASKS_DIR_DEPRECATED, { recursive: true }).catch(() => undefined)
   }
 }
 
 /**
- * 默认全局单例 — sessionId 由 zai 端通过 opts.sessionIdGetter 注入。
+ * @deprecated Use upstream `dsh-tool-todo` 的 `todo_write` 工具 + `ctx.sessionProjections` 投影。
  */
-let defaultStore: DshTaskListStore | null = null
 export function getDshTaskListStore(): DshTaskListStore {
-  if (!defaultStore) defaultStore = new DshTaskListStore()
-  return defaultStore
+  // 创建实例仅为满足类型 — 任何方法调用即抛错。
+  return new DshTaskListStore()
 }

@@ -209,6 +209,29 @@ export function buildProviderEntries(
   return providerEntries
 }
 
+/**
+ * Phase 5P-MCP: MCP server spec — 替代 dsh-bridge 自实现的 `McpServerSpec`。
+ *
+ * 上游用 `@deepseek-ai/dsh-mcp-client`(每个 server 一个 plugin instance)。
+ * 注:`enabled` 字段由 zai 端 `disabledMcpServers` 过滤后,这里接收的全是
+ * `enabled !== false`。`name` 必须为 `[A-Za-z0-9_-]{1,32}`(dsh-mcp-client 的约束)。
+ */
+export interface DshMcpServerSpec {
+  /** server name — 作为 model-facing `mcp__<name>__<tool>` namespace prefix。 */
+  name: string
+  /** stdio:exec name(streamable-http 用 url 替代)。 */
+  command?: string
+  args?: string[]
+  /** stdio extra env。 */
+  env?: Record<string, string>
+  /** stdio cwd — 未设默认 opts.defaultCwd。 */
+  cwd?: string
+  /** streamable-http URL(与 command 二选一)。 */
+  url?: string
+  /** http extra headers,典型 `Authorization`。 */
+  headers?: Record<string, string>
+}
+
 export interface CreateDshRuntimeOptions {
   dataDir: string
   runtimeId: string
@@ -220,7 +243,21 @@ export interface CreateDshRuntimeOptions {
    * configurable providers 目录,agents service 后续查表走它。
    */
   providers: DshProviderProfile[]
+  /**
+   * Phase 5P-MCP: MCP server 列表(由 zai 端 `loadMcpServers(cwd)` 提供,
+   * 基于 zai 的 4 scope .mcp.json 解析:enterprise > user > local > project,
+   * 合并后形态)。不传或空数组 = 不装载 MCP(zai `connectMcp:false` 默认行为)。
+   *
+   * 启动阶段:为每个 spec 调一次 `ctx.loader.create({name:'@deepseek-ai/dsh-mcp-client', config:...})`
+   * — 每个 server 一个 plugin instance,dsh-mcp-client 自带 reconnect /
+   * structured-content 验证 / schema validation 自动管理。
+   *
+   * 替代 dsh-bridge 自实现的 `registerMcpTools(ctx, {cwd})` — 删除了 577 行代码。
+   */
+  mcpServers?: DshMcpServerSpec[]
 }
+
+// (DshMcpServerSpec 已 forward-declare 在 CreateDshRuntimeOptions 之前)
 
 export interface DshRuntimeHandle {
   readonly kernel: KernelId
@@ -259,6 +296,11 @@ export async function createDshRuntime(
   // （cordis 的 plugin loader 通过 cordis-plugin-loader 自动处理）。
   // 由于 dsh-base 是 declarative bundle patch（cordis.yml），不直接 import；
   // 它通过 dsh-headless 等下游包间接被装载。
+  //
+  // Phase 5P1-B:Side-effect import 列表扩到 ~50 个 dsh-* 包,确保所有 Cordis
+  // plugin 形态的 dsh-tool-* / dsh-skill-filesystem / dsh-* 服务都能被
+  // cordis-plugin-loader 拓扑装载。Service class 形态(d-sh-skill /
+  // dsh-fs-local 等)放在 start() 内用 ctx.plugin(...) 注入。
   await Promise.all([
     // dsh-013 修复:cordis-plugin-loader 必须先注入,后续 ctx.loader.create()
     // 才能装载 dsh-base patch + llm-pi-ai 等带 patch 的 plugin。
@@ -285,12 +327,66 @@ export async function createDshRuntime(
     import('@deepseek-ai/dsh-shell'),
     import('@deepseek-ai/dsh-user-approval'),
     import('@deepseek-ai/dsh-fs'),
+    // === Phase 5P1-B:补齐所有 dsh-* 服务副作用 import ===
+    import('@deepseek-ai/dsh-sandbox'),
+    import('@deepseek-ai/dsh-sandbox-policy'),
+    import('@deepseek-ai/dsh-sandbox-local'),
+    import('@deepseek-ai/dsh-shell-env'),
+    import('@deepseek-ai/dsh-skill'),
+    import('@deepseek-ai/dsh-skill-filesystem'),
+    import('@deepseek-ai/dsh-agent-instructions'),
+    import('@deepseek-ai/dsh-goal'),
+    import('@deepseek-ai/dsh-host-plugin-inventory'),
+    import('@deepseek-ai/dsh-file-reference'),
+    import('@deepseek-ai/dsh-attachment'),
+    import('@deepseek-ai/dsh-attachment-local'),
+    import('@deepseek-ai/dsh-jobs'),
+    import('@deepseek-ai/dsh-output-retention'),
+    import('@deepseek-ai/dsh-compaction'),
+    import('@deepseek-ai/dsh-compaction-basic'),
+    import('@deepseek-ai/dsh-compaction-tool-result-pruner'),
+    import('@deepseek-ai/dsh-session-telemetry'),
+    import('@deepseek-ai/dsh-session-persistence'),
+    import('@deepseek-ai/dsh-session-projection'),
+    import('@deepseek-ai/dsh-session-projection-cache'),
+    import('@deepseek-ai/dsh-session-query'),
+    import('@deepseek-ai/dsh-typert-protocol'),
+    import('@deepseek-ai/dsh-launch-environment'),
+    import('@deepseek-ai/dsh-storage'),
+    import('@deepseek-ai/dsh-storage-domain'),
+    import('@deepseek-ai/dsh-home-paths'),
+    import('@deepseek-ai/dsh-anonymous-user-id'),
+    import('@deepseek-ai/dsh-permission-presets'),
+    import('@deepseek-ai/dsh-plan-mode'),
+    import('@deepseek-ai/dsh-repeat-tool-reminder'),
+    import('@deepseek-ai/dsh-invariants'),
+    import('@deepseek-ai/dsh-atomic-write'),
+    import('@deepseek-ai/dsh-brand'),
+    import('@deepseek-ai/dsh-invariants'),
+    // === Phase 5P1-B:上游 dsh-tool-* 工具副作用 import(不撞 zai-side) ===
+    import('@deepseek-ai/dsh-tool-jobs'),
+    import('@deepseek-ai/dsh-tool-goal'),
+    import('@deepseek-ai/dsh-tool-ralph'),
+    import('@deepseek-ai/dsh-tool-workflow'),
+    import('@deepseek-ai/dsh-tool-pwsh'),
+    import('@deepseek-ai/dsh-tool-subagent-control'),
+    import('@deepseek-ai/dsh-tool-subagent-report'),
+    import('@deepseek-ai/dsh-tool-todo'),
+    // === Phase 5P1-B:切到 dsh-tool-* 时也会副作用 import(暂不装载) ===
+    import('@deepseek-ai/dsh-tool-bash'),
+    import('@deepseek-ai/dsh-tool-fs'),
+    import('@deepseek-ai/dsh-tool-skill'),
+    import('@deepseek-ai/dsh-tool-subagent'),
+    import('@deepseek-ai/dsh-tool-call-timeout-policy'),
+    import('@deepseek-ai/dsh-tool-str-replace-editor'),
     // dsh-subagent 上游 SubagentRuntime(`ctx.subagents.start('spawn', req)`) —
     // Phase 4 改造让 spawnDshSubagent 走上游 `start()` 而不是自实现
     // `agents.create()`,保证 `subagent/start` / `subagent/end` 生命周期事件
     // + `run.result` Promise + `run.dispose()` 由上游托管。
     import('@deepseek-ai/dsh-subagent'),
     import('@deepseek-ai/dsh-subagent-spawn-in-process'),
+    import('@deepseek-ai/dsh-subagent-in-process-driver'),
+    import('@deepseek-ai/dsh-subagent-fork-in-process'),
   ])
 
   const handle: DshRuntimeHandle = {
@@ -330,13 +426,59 @@ export async function createDshRuntime(
 
       // 2.5 Phase 3 P1: 注入 LocalAttachmentStore 的 dshHome — dsh-llm-pi-ai
       //     streamSimple 在 image input 时通过 `ctx.get("attachments")` 拿
-      //     AttachmentStore 实例,没它会抛 `pi-ai image input requires the
+      //     AttachmentStore 实例，没它会抛 `pi-ai image input requires the
       //     durable attachment service`。用 zai dataDir 下的 `attachments/`
       //     子目录,避免污染用户 ~/.dsh/。
       await ctx.loader.create({
         name: '@deepseek-ai/dsh-attachment-local',
         config: { dshHome: join(opts.dataDir, 'attachments') },
       })
+
+      // 2.7 Phase 5P-MCP: 为每个 mcp server 装载一个 `@deepseek-ai/dsh-mcp-client`
+      //     plugin instance。`mcpServers` 由 zai 端 `loadMcpServers(cwd)` 提供,
+      //     已经过 4 scope 合并(`enabled !== false` 已被过滤)。
+      //     跳过空数组 — 与 `connectMcp:false` 默认行为一致。
+      if (opts.mcpServers && opts.mcpServers.length > 0) {
+        for (const spec of opts.mcpServers) {
+          // 推断 transport (stdio / streamable-http) — stdio 默认。
+          const transport: 'stdio' | 'streamable-http' = spec.url
+            ? 'streamable-http'
+            : 'stdio'
+          const config: Record<string, unknown> = {
+            serverName: spec.name,
+            transport,
+            // 5min default 与上游 README 一致;zai 自实现曾用 30s health check,
+            // 上游更稳健。
+            toolCallTimeoutMs: 60_000,
+            failOnStartupError: false,
+            reconnect: {
+              enabled: true,
+              initialDelayMs: 1_000,
+              maxDelayMs: 16_000,
+              maxAttempts: 5,
+            },
+          }
+          if (spec.command) config.command = spec.command
+          if (spec.args) config.args = spec.args
+          if (spec.env) config.env = spec.env
+          if (spec.cwd) config.cwd = spec.cwd
+          if (spec.url) config.url = spec.url
+          if (spec.headers) config.headers = spec.headers
+          try {
+            await ctx.loader.create({
+              name: '@deepseek-ai/dsh-mcp-client',
+              config: config as never,
+            })
+          } catch (err) {
+            // 单 server 装载失败 — 不阻断整体启动,警告即可(与原 dsh-bridge
+            // 自实现的 MCP_RETRY_DELAYS_MS = [1s,2s,4s,8s,16s] 一致策略)。
+            console.warn(
+              `[dsh-bridge] mcp server "${spec.name}" 装载失败(略过):`,
+              err instanceof Error ? err.message : String(err),
+            )
+          }
+        }
+      }
 
       // 3. dsh-013 修复:装载 dsh-llm-pi-ai provider with provider profiles。
       //    dsh-llm-pi-ai 在 loader.create 阶段会调 settings.inject 拿
@@ -411,25 +553,123 @@ export async function createDshRuntime(
       const { apply: applySpawnProvider } = await import('@deepseek-ai/dsh-subagent-spawn-in-process')
       applySpawnProvider(ctx, { providerName: 'spawn' })
 
-      // 4.6 Phase 4 P1: harness 原生 fs-search 工具 (`grep` + `glob`).
+      // 4.6 Phase 4 P1: harness 原生 fs-search 工具 (`grep` + `glob`) — 已在
+      //     dsh-bridge.patch.yml 第 91 行的 `tool-fs-search` row 注册。
+      //     本步骤无需 ctx.loader.create,只要等 patch 装载顺序触发即可。
+      //     sampleOverCapGlobResults: false — 保留 modification-time-ordered head,
+      //     与 zai-side FsTab 的"按修改时间排序"心智模型一致(用户选 true 会
+      //     跨 top-level entries 采样,对 zai 工作流收益小)。
+
+      // ============================================================
+      // === Phase 5P1-B:Service class 形态 dsh-* 服务接装 ===
+      // ============================================================
       //
-      // 替换 dsh-bridge 手写 ripgrep.ts (B2 时为 P1-2). tool-fs-search 是
-      // Cordis plugin 形态, 必须在 ctx.start 阶段通过 ctx.loader.create() 装载,
-      // 它会自调 ctx.tools.register 把 grep / glob 两个工具挂到 dsh 模型面.
+      // 这些是 cordis Service class 形态(abstract 或 concrete),不能用
+      // ctx.loader.create({ name }) 装载(cordis-plugin-loader 期待
+      // { name, apply, inject } 形态的 plugin object);改用 ctx.plugin(ServiceClass)
+      // 直接注入到 ctx。注入顺序按上游 inject 依赖序(cordis 4.x 的 ctx.plugin
+      // 会按 Service.inject 静态字段自动满足依赖)。
       //
-      // inject=['tools','systemPrompt','subprocess'] — 上面 patch 已经装
-      // 了 tools/systemPrompt/subprocess (即 subprocess-local 单 row)/spill* /
-      // timeout-policy, inject 全部满足. 注意 subprocess-local 是 dsh-subprocess
-      // 的子类, 加载时 dsh-subprocess 接口由 subprocess-local 副作用 import,
-      // patch 不能再单独写一行 - 会重复注册 'subprocess' service 报错.
+      // 注意:patch 已用 cordis-plugin-include 装载了部分 Cordis plugin
+      // 形态的同名包(如 dsh-skill-filesystem / dsh-tool-call-timeout-policy /
+      // dsh-tool-todo / dsh-tool-jobs 等)— 这里不重复创建这些 Service,
+      // 只补 Service 形态。
+
+      // 1. fs seam — FileSystem (abstract) 需要 LocalFileSystem 实现
+      //    Phase 5P2 准备:让 ctx.fs 可用,dsh-tool-fs 装载后立即可工作。
+      //    暂**不**装载 dsh-tool-fs(避免与 zai-side fs.ts 撞 FileRead/FileWrite等名字)
+      {
+        const { LocalFileSystem } = await import('@deepseek-ai/dsh-fs-local')
+        await ctx.plugin(LocalFileSystem, { cwd: opts.defaultCwd })
+      }
+
+      // 2. shell seam — LocalBashExecutor (concrete)。
+      //    cwd 必填;传 opts.defaultCwd。
+      //    Phase 5P3 准备 dsh-tool-bash 的依赖。当前不创 ctx.shell tool,
+      //    只把 LocalBashExecutor 接进 ctx 让其他 plugin 可读 ctx.shell。
+      {
+        const { LocalBashExecutor } = await import('@deepseek-ai/dsh-bash-local')
+        await ctx.plugin(LocalBashExecutor, { cwd: opts.defaultCwd })
+      }
+
+      // 3. sandbox seam — LocalSandboxProvider (concrete)。
+      //    默认 sandbox policy 从 ZAI_SANDBOX 环境变量读(沿袭 dsh-bridge 旧行为)。
+      //    不显式调 setSandboxMode('off'),让 process.env 决定。
+      {
+        const { LocalSandboxProvider } = await import('@deepseek-ai/dsh-sandbox-local')
+        await ctx.plugin(LocalSandboxProvider)
+      }
+
+      // 4. skill registry — SkillRegistry (concrete)。
+      //    上面 patch 已装 dsh-skill-filesystem,这是它的 provider 源。
+      {
+        const { SkillRegistry } = await import('@deepseek-ai/dsh-skill')
+        await ctx.plugin(SkillRegistry)
+      }
+
+      // 5. goal service — GoalService (concrete)。
+      //    上面 patch 已装 dsh-tool-goal,这里只创 service。
+      {
+        const { GoalService } = await import('@deepseek-ai/dsh-goal')
+        await ctx.plugin(GoalService)
+      }
+
+      // 6. token meter — TokenMeter (concrete)。
+      //    dsh-tool-call-timeout-policy 和 dsh-compaction-basic 都依赖 ctx.tokenMeter。
+      {
+        const { TokenMeter } = await import('@deepseek-ai/dsh-token-meter')
+        await ctx.plugin(TokenMeter)
+      }
+
+      // 7. host plugin inventory — PluginInventoryGateway (concrete)。
+      //    把当前 Cordis loader 的 plugin entries 暴露给 typert remote 调用。
+      //    zai-side 后续可以用它查"已装载的工具"。
+      {
+        const { PluginInventoryGateway } = await import('@deepseek-ai/dsh-host-plugin-inventory')
+        await ctx.plugin(PluginInventoryGateway)
+      }
+
+      // 8. file reference service — FileReferenceService is **abstract**;
+      //    需要具体 subclass。当前 zai-side 没用,跳过。Phase 5P2+ 如果需要
+      //    "@file path" 语法再装。
       //
-      // sampleOverCapGlobResults: false — 保留 modification-time-ordered head,
-      // 与 zai-side FsTab 的"按修改时间排序"心智模型一致 (用户选 true 会
-      // 跨 top-level entries 采样, 对 zai 工作流收益小, 反而让列表行为难解释).
-      await ctx.loader.create({
-        name: '@deepseek-ai/dsh-tool-fs-search',
-        config: { sampleOverCapGlobResults: false },
-      })
+      // const { FileReferenceService } = await import('@deepseek-ai/dsh-file-reference')
+      // await ctx.plugin(FileReferenceService)  // ❌ abstract
+
+      // 9. web runtime — **不装载**(zai-side 决策)。
+      //    若需 web_search / web_fetch,加入:
+      //      import('@deepseek-ai/dsh-web')
+      //      import('@deepseek-ai/dsh-tool-web')
+      //      import('@deepseek-ai/dsh-web-search-deepseek')
+      //    然后在 patch.yml 加 `tool-web` row,createDshRuntime 装
+      //      `WebRuntime + searchProvider(fetchProvider)`。
+
+      // 10. compaction engine — BasicCompactionEngine extends CompactionEngine,
+      //     自动注册 'compaction' service + 装载 basic 策略。不需要单独装
+      //     CompactionEngine(同时注册会报 'service "compaction" has been
+      //     registered')。ToolResultPruner 是独立 service name。cast 同上。
+      {
+        const { default: BasicCompactionEngine } = await import(
+          '@deepseek-ai/dsh-compaction-basic'
+        )
+        await ctx.plugin(BasicCompactionEngine as any)
+        const { default: ToolResultPruner } = await import(
+          '@deepseek-ai/dsh-compaction-tool-result-pruner'
+        )
+        await ctx.plugin(ToolResultPruner as any)
+      }
+
+      // 11. session telemetry backend 是 abstract — 没装具体 backend 跳过。
+      //     zai-side 要加 OTEL/HMR 时再装 dsh-session-telemetry-otel。
+
+      // ============================================================
+      // === Phase 5P1-B:暂不装载(等 Phase 5P2-N 单独迁移) ===
+      // ============================================================
+      //
+      // - dsh-tool-bash:撞 zai-side Bash,Phase 5P3 迁移(需改名 or 砍 zai Bash)
+      // - dsh-tool-fs:撞 FileRead/Write/Edit/Stat,Phase 5P2 迁移
+      // - dsh-tool-subagent:撞 Agent,Phase 5P6 迁移
+      // - dsh-tool-skill:撞 Skill,Phase 5P4 迁移
 
       // 5. 等待全部 plugin 完成挂载。
       await ctx.get('loader')?.await()

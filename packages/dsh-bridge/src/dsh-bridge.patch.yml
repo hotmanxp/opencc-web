@@ -1,14 +1,25 @@
 # zai → dsh 桥接最小 patch — dsh-base 的全 patch 包含 30+ mode-specific 行
 # (web/llm-deepseek/tool-* 等),zai-server 不需要这些(走 anthropic 单一提供方)。
-# 此处只装 zai-server 长驻 Agent + 真实对话 + 工具 + 持久化 必需的最小集。
-# 减到 8 个:settings/credentials/llm/session/typert* + agent-default-model 的
-# 服务占位(后者由 createDshRuntime 单独 create() 覆盖,patch 只留 id 占位)。
+# 此处只装 zai-server 长驻 Agent + 真实对话 + 工具 + 持久化 必需的最小集 +
+# Phase 5 装载面扩展(把所有 harness 原生 dsh-* 服务接上)。
 #
 # 字段说明:
 #   - id:    在 patch 内唯一,后续 cordis-plugin-loader ctx.loader.update({id, ...})
 #            可定向覆盖
 #   - name:  Cordis 插件模块路径(import);name 缺失的 row 是 placeholder
 #   - config: 透传给该 plugin apply() 的第二参
+#
+# Phase 5 补加(扩装载):
+#   - dsh-tool-fs-search + tools/systemPrompt + subprocess + spill* (保留旧 patch)
+#   - 服务层 (Phase 5P1-B): dsh-skill-filesystem / dsh-shell-env / dsh-agent-instructions
+#     是 Cordis plugin 形态,这里用 row 直接装
+#   - 部分 Service (Phase 5P1-B): dsh-tool-call-timeout-policy / dsh-tool-jobs /
+#     dsh-tool-goal / dsh-tool-ralph / dsh-tool-workflow /
+#     dsh-tool-subagent-control — 这些是 model-facing 工具,用具名装载确保
+#     cordis-plugin-loader 按 inject 顺序解;不撞 zai-side 自实现的工具
+#     (Bash / FileRead* / Task* / Skill / Agent) 留到 Phase 5P2-N 单独迁移。
+
+# === 服务基础面(已经长期加载) ===
 - id: llm
   name: '@deepseek-ai/dsh-llm'
 
@@ -43,6 +54,7 @@
 - id: user-questions
   name: '@deepseek-ai/dsh-user-questions'
 
+# === Agent core ===
 - id: agent
   name: '@deepseek-ai/dsh-agent'
 
@@ -50,19 +62,16 @@
   name: '@deepseek-ai/dsh-agent-loop'
 
 # dsh-agent-loop 依赖 services: agents / sessions / llm / tools / systemPrompt。
-# 上面已装 agents / sessions / llm;补 tools / systemPrompt 让 agent-loop
-# `ctx.inject` 全部满足。
 - id: tools
   name: '@deepseek-ai/dsh-tools'
 
 - id: system-prompt
   name: '@deepseek-ai/dsh-system-prompt'
 
-# Phase 4 P1: harness 原生 fs-search 工具 (`grep` + `glob`) — 替换 dsh-bridge
+# === Phase 4 P1: harness 原生 fs-search 工具(`grep` + `glob`) — 替换 dsh-bridge
 # 手写 ripgrep.ts。tool-fs-search inject=['tools','systemPrompt','subprocess'],
-# 需要先装 subprocess seam;subprocess seam 又需要 timeout-policy 守门
-# (subprocess-local 默认按 timeoutMs 行为, 无 timeout-policy 时仍工作但
-# 配置缺失)。spill 给 tool-fs-search 落盘超额结果(>grepMaxMatches),
+# 需要先装 subprocess seam;subprocess seam 又需要 timeout-policy 守门。
+# spill 给 tool-fs-search 落盘超额结果(>grepMaxMatches),
 # 不装 spill → tool-fs-search 直接报错 ctx.spillStore undefined。
 #
 # 关键陷阱 (Phase 4 P1 ego 验收发现):subprocess-local 是 dsh-subprocess 的扩展
@@ -84,20 +93,150 @@
   config:
     maxInlineBytes: 50000
 
-# dsh-scope / dsh-shell / dsh-fs / dsh-user-approval 都是内部 helper(被
-# dsh-agent 等其他 plugin import 复用),**不**是 Cordis plugin;加载会报
-# `invalid plugin, expect function or object with "apply" method`。dsh-base
-# 自己的 cordis.patch.yml 也不装载它们。省略。
+# === Phase 5P1-B: 上游服务 / 多 agent / shell / fs / skills ===
+# 这些是 Cordis plugin 形态(export { name, apply, inject }),需要在 cordis
+# 启动早期装载 — cordis-plugin-loader 按 inject 顺序自动拓扑排序。
+# 注意:不装 dsh-shell / dsh-fs / dsh-sandbox / dsh-jobs / dsh-skills 的 service
+# class 形态,改由 createDshRuntime.ts 用 ctx.plugin(ServiceClass) 注入,
+# 避免 patch.yml 内 "service 'fs' has been registered" 之类的重复装载。
+# 用户询问交互(approval/ask)由 dsh-user-approval 提供,已 Phase 0 装在 start()。
 
-# Phase 3 P1: durable attachment store — 由 createDshRuntime.ts 单独
-# ctx.loader.create() 装载(不要重复登记到 patch,避免 cordis
-# "service 'attachments' has been registered" 报错)。详细见
-# createDshRuntime.ts:230-235 注入的 config。
+# 1. AGENTS.md / CLAUDE.md 载入 — 替代 dsh-bridge 自实现 memory.ts
+#    maxBytes required;用 dsh-base 默认 65536 (64 KiB per baseline)。
+#    dshHome 默认用 $DSH_HOME / ~/.dsh(zai-side 不需要覆盖,zai cwd 不依赖它)。
+- id: agent-instructions
+  name: '@deepseek-ai/dsh-agent-instructions'
+  config:
+    maxBytes: 65536
 
-# agent-default-model / jobs / llm-retry / settings / credentials / llm-pi-ai /
-# session-persistence-jsonl 都由 createDshRuntime.start() 后续步骤单独
-# ctx.loader.create() 装载,避免重复注册触发 DUPLICATE_DIRECTORY / 已注册报错。
+# 2. Skill 加载器 — 替代 dsh-bridge 自实现 tools/skill.ts
+#    dsh-skill-filesystem inject=['skills'],需要先 ctx.plugin(SkillRegistry)。
+- id: skill-filesystem
+  name: '@deepseek-ai/dsh-skill-filesystem'
 
-# agent-default-model / jobs / llm-retry / settings / credentials / llm-pi-ai /
-# session-persistence-jsonl 都由 createDshRuntime.start() 后续步骤单独
-# ctx.loader.create() 装载,避免重复注册触发 DUPLICATE_DIRECTORY / 已注册报错。
+# 3. Shell env registry — 让 dsh-tool-bash 在切到 Phase 5P3 时有个 ctx.shellEnv。
+#    不装不影响 Phase 5P1-B,装只是为 Phase 5P3 提前准备好基础设施。
+- id: shell-env
+  name: '@deepseek-ai/dsh-shell-env'
+
+# === Phase 5P1-B: 不撞 zai-side 自实现的上游工具 ===
+# 这些工具的 model-facing name 与 zai-side 自实现不冲突,可以现在就装,
+# 给 zai 用户立即可用。撞的(Bash / FileRead-Stat / TaskCreate / Skill / Agent)
+# 留 Phase 5P2-N 单独迁移。
+
+# todo_write (单工具, model-facing name = `todo_write`)。**不**撞 zai-side
+# 自实现的 TaskCreate/Get/List/Update(那些叫 `TaskCreate` 等独立名)。Phase 5P5
+# 迁移时把 Task 全砍换 todo_write。
+- id: tool-todo
+  name: '@deepseek-ai/dsh-tool-todo'
+  config:
+    allowParallelInProgress: true
+
+# job_output + job_list + job_kill — model-facing name 是 job_output /
+# job_list / job_kill,不撞 zai-side 自实现。
+- id: tool-jobs
+  name: '@deepseek-ai/dsh-tool-jobs'
+
+# get_goal + create_goal + update_goal — 新工具,可加可不加。先装上,后续若
+# zai 主流程不用可以删。
+- id: tool-goal
+  name: '@deepseek-ai/dsh-tool-goal'
+
+# workflow + workflow 引擎(runs JS orchestrator scripts)。
+- id: workflow
+  name: '@deepseek-ai/dsh-workflow'
+
+- id: tool-workflow
+  name: '@deepseek-ai/dsh-tool-workflow'
+
+- id: tool-ralph
+  name: '@deepseek-ai/dsh-tool-ralph'
+
+# PowerShell — Windows only。zai 多数部署是 *nix,装上不挂后端;
+# dsh-pwsh-local 不装 → ctx.shell backend 仍未 pwsh,tool 自身 `apply` 时
+# 调 `ctx.shell.resolve(...)`,不存在时启用工具但执行会报清晰错误。
+- id: tool-pwsh
+  name: '@deepseek-ai/dsh-tool-pwsh'
+
+# subagent-control 暴露 `send_message` + `interrupt_agent` 全局工具 —
+# 不撞 zai-side 自实现(`Agent` 一个工具)。
+- id: tool-subagent-control
+  name: '@deepseek-ai/dsh-tool-subagent-control'
+
+# Phase 5P2 (fs):上游 dsh-tool-fs 暴露 `read` / `write` / `edit` / `read_image` —
+# **不**撞 zai-side 自实现 `FileRead` / `FileWrite` / `FileEdit`(大小写 + 字符串
+# 都不同)。两侧**同时**装载,等于模型可见工具列表会同时含两套等价 fs 工具
+# (zai-FileRead 和 read)。zai-side 通过切断 registerFsTools(不再调 registerFsTools,
+# 自动 stop zai 自实现工具注册)恢复单轨 — 参见 createDshRuntime.ts Phase 5P2 段。
+# inject=['tools','fs','systemPrompt'] — fs 已通过 ctx.plugin(LocalFileSystem) 装。
+- id: tool-fs
+  name: '@deepseek-ai/dsh-tool-fs'
+
+# Phase 5P3 (bash):上游 dsh-tool-bash 暴露小写 `bash` 工具 — 替代 zai-side
+# 自实现的 PascalCase `Bash`(packages/dsh-bridge/src/tools/bash.ts)。
+# 依赖: ctx.shell(LOCALBashExecutor 已在 createDshRuntime 装) + ctx.jobs
+# (tool-jobs row) + ctx.sandboxPolicy (sandbox-policy row) — 全部已就位。
+# cwd 跟踪暂时缺失(zai-side 之前通过命令字符串 regex 解析 cd;upstream
+# dsh-bash-local 暂未实现 stateful shell,见 dsh-bash-local/src/index.ts:174
+# XXX(stateful-shell) 注释)。模型可通过 `workdir` 参数显式切换 cwd。
+# 后台任务靠 ctx.jobs 自动管理,bash_tracker 转发走
+# tools/registry.ts 的 onJobsChanged 订阅(见 BashTracker 桥段)。
+- id: tool-bash
+  name: '@deepseek-ai/dsh-tool-bash'
+  config:
+    enableRunInBackground: true
+
+# Phase 5P6 (subagent):上游 dsh-tool-subagent 暴露默认小写 `subagent` 工具 —
+# 替代 zai-side 自实现的 PascalCase `Agent`(packages/dsh-bridge/src/tools/subagent.ts)。
+# 依赖: ctx.subagents(SubagentRuntime + spawn provider 已在 createDshRuntime
+# 装) + ctx.systemPrompt(system-prompt row) — 全部已就位。
+# 父子 turn 解耦由上游 SubagentRuntime.start('spawn', req) 托管,
+# subagent/start / subagent/end 生命周期事件 + run.result Promise + dispose()
+# 都走上游(Phase 4 改造收口)。
+- id: tool-subagent
+  name: '@deepseek-ai/dsh-tool-subagent'
+  config:
+    enableRunInBackground: true
+    backgroundMode: 'continuable'
+
+# dsh-tool-fs-search — 上游 grep + glob 双工具,跑 @vscode/ripgrep 子进程;
+# Phase 4 P1 替代 dsh-bridge 自实现的 ripgrep.ts(已为 shim,51 行)。
+# inject=['tools','systemPrompt','subprocess']。
+- id: tool-fs-search
+  name: '@deepseek-ai/dsh-tool-fs-search'
+  config:
+    sampleOverCapGlobResults: false
+
+# === 备注:不装的部分 ===
+#
+# 1. dsh-scope / dsh-shell / dsh-fs / dsh-user-approval 都是内部 helper(被
+#    dsh-agent 等其他 plugin import 复用),**不**是 Cordis plugin;加载会报
+#    `invalid plugin, expect function or object with "apply" method`。改由
+#    createDshRuntime.ts 用 ctx.plugin(ServiceClass) 装载它们的具体后端。
+#
+# 2. Phase 3 P1: durable attachment store — 由 createDshRuntime.ts 单独
+#    ctx.loader.create() 装载。详细见 createDshRuntime.ts 注入的 config。
+#
+# 3. agent-default-model / jobs / llm-retry / settings / credentials / llm-pi-ai /
+#    session-persistence-jsonl 都由 createDshRuntime.start() 后续步骤单独
+#    ctx.loader.create() 装载,避免重复注册触发 DUPLICATE_DIRECTORY / 已注册报错。
+#
+# 4. ~~dsh-tool-bash / dsh-tool-fs / dsh-tool-subagent / dsh-tool-subagent-report
+#    撞 zai-side 自实现的 Bash / FileRead* / Agent;Phase 5P2-N 单独迁移(届时
+#    zai-side 自实现的同名工具要么改名为 `zai-*` 前缀,要么从 registry 摘掉)。~~
+#    **2026-08-22 收口**:`tool-bash` / `tool-fs` / `tool-subagent` 已在本文件
+#    上方装载,不再撞 zai-side 自实现 — 后者改成 deprecated no-op stub
+#    (见 packages/dsh-bridge/src/tools/{bash,subagent}.ts 的 @deprecated 注释,
+#    tools/registry.ts 已不再调用)。
+#
+# 5. dsh-tool-skill 撞 zai-side Skill;同 Phase 5P4 单独迁移。
+#
+# 6. dsh-skill service + dsh-fs / dsh-shell / dsh-jobs / dsh-sandbox /
+#    dsh-goal / dsh-host-plugin-inventory Service 是 abstract 或 concrete
+#    Service class;由 createDshRuntime.ts 用 ctx.plugin() 注入到 ctx。
+#
+# 7. **web 工具族(`dsh-web` / `dsh-tool-web` / `dsh-web-search-deepseek`)
+#    不装载**(zai-side 决策)。如果将来开启,在 createDshRuntime.ts:
+#   - 加 `import('@deepseek-ai/dsh-web')`
+#   - 加 `ctx.plugin(WebRuntime, {searchProvider: 'deepseek', fetchProvider: 'none'})`
+#   - 在 patch.yml 加 `tool-web` row

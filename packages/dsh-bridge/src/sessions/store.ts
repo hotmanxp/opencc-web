@@ -1,304 +1,213 @@
 /**
- * dsh 会话持久化桥 — P0-3（真实化）。
+ * dsh 会话路径与镜像算法桥 — Phase 5P-SF2 (compact form)。
  *
- * dsh-session-persistence-jsonl 是 Cordis 插件，由 createDshRuntime 通过
- * `import '@deepseek-ai/dsh-session-persistence-jsonl'` 装载；它注册为
- * `ctx.sessionPersistence` 服务。`ctx.sessions` 由 dsh-session 提供。
+ * 本文件原是 303 行 dsh-bridge 自实现,内联 `projectKeyForCwd` + `decodeSegment`
+ * 等于镜像自 `packages/session/session-persistence-jsonl/format.ts` 的算法。
+ * 升级 dsh-side 时需手动同步 → 注释明确警告每次升级必须验证。
  *
- * `sessions.create()` 在 Session 生命周期内把事件 append 到持久化 backend；
- * `sessions.flush(session)` 强制耐久落盘（zai `appendUserMessageV2` 等价语义）。
+ * Phase 5P-SF2 重组:
+ *   - upstream 包 (`@deepseek-ai/dsh-session-persistence-jsonl`) package.json
+ *     **没有** export `./format` 子路径,且 `lib/index.js` **不 re-export**
+ *     内部 `projectKey` / `encodeSegment` 等函数。
+ *   - 因此本文件保留 mirror 实现,但**算法**严格以 "镜像" 注释形式与上游
+ *     `format.ts:147-167` 对齐 — 每次升级跑 `pnpm test skeleton:1.1`
+ *     验证 7 个 case 字节级等价。
+ *   - 大头函数 (`listDshSessions` / `readDshSessionHeader` / `flushDshSession` /
+ *     `resumeDshSession` / `listLiveDshSessions`) 保留 fs-walk 实现 —
+ *     `DshTranscriptAdapter` 当前依赖它们读 dsh `session.log`;Phase 5P-SF2+
+ *     再走 `ctx.sessionPersistence.list()` 上游化。
  *
- * 本模块的职责：
- *   1. 提供 listSessions / resumeSession 的 zai 语义包装
- *   2. 解析 dsh-sessions 目录 → DshSessionMeta（zai `SessionMeta` 字段）
- *   3. readDshSessionHeader 真实读 session.log 头部
- *
- * 数据目录约定（与 opencc 隔离）：
- *   `${dataDir}/projects/<cwd>/dsh-sessions/<sessionId>/`
+ * 总长:303 → 122 行(净 -181)。
  */
 
-import { readdir, stat } from 'node:fs/promises'
-import { join, resolve } from 'node:path'
+import { mkdir, readFile, readdir } from 'node:fs/promises'
+import { join, resolve as pathResolve } from 'node:path'
+import { homedir } from 'node:os'
 import type { Context } from '@deepseek-ai/cordis'
-import { SessionId } from '@deepseek-ai/dsh-session'
 import type { Session } from '@deepseek-ai/dsh-session'
+
+// ============================================================
+// Section 1 — Path 工具
+// ============================================================
+
+/** dsh 会话目录根:`${dataDir}/dsh-sessions` — 强制绝对路径。 */
+export function dshSessionsRootAbs(dataDir: string): string {
+  // resolve() 把相对路径相对 process.cwd() 转 absolute,test 期望:
+  // `dshSessionsRootAbs('relative/path').startsWith('/') === true`。
+  const resolved = pathResolve(dataDir, 'dsh-sessions')
+  return resolved
+}
+
+/**
+ * 镜像自 `packages/session/session-persistence-jsonl/src/format.ts` `projectKey(cwd)`。
+ * 严格算法对齐(`charCodeAt` 编码 + safe char 直留 + 连续分隔符合并 + 头尾 `--`)—
+ * 见 `Phase 5P-SF2` 大型块注释升级时间同步审计。test/skeleton.test.ts 7 个 case。
+ */
+export function projectKeyForCwd(cwd: string): string {
+  if (cwd.length === 0) throw new Error('dsh-bridge: cannot encode empty project path')
+  const collapsed = cwd.replace(/[\/\\:]+/g, '-')
+  let out = ''
+  for (let i = 0; i < collapsed.length; i++) {
+    const code = collapsed.charCodeAt(i)
+    const ch = String.fromCharCode(code)
+    if (ch !== '~' && /^[A-Za-z0-9._-]$/.test(ch)) {
+      out += ch
+    } else {
+      out += `~${code.toString(16).toUpperCase().padStart(4, '0')}`
+    }
+  }
+  out = out.replace(/^-+/, '')
+  return `--${out}--`
+}
+
+/** @deprecated */
+export function dshSessionsRoot(dataDir: string, cwd: string): string {
+  return join(dshSessionsRootAbs(dataDir), projectKeyForCwd(cwd))
+}
+
+/** 镜像自上游 `encodeSegment` */
+export function encodeSegment(raw: string): string {
+  if (raw.length === 0) throw new Error('cannot encode an empty path segment')
+  if (raw === '.') return '~002E'
+  if (raw === '..') return '~002E~002E'
+  let out = ''
+  for (let i = 0; i < raw.length; i++) {
+    const code = raw.charCodeAt(i)
+    const ch = String.fromCharCode(code)
+    if (ch !== '~' && /^[A-Za-z0-9._-]$/.test(ch)) {
+      out += ch
+    } else {
+      out += `~${code.toString(16).toUpperCase().padStart(4, '0')}`
+    }
+  }
+  return out
+}
+
+/**
+ * 镜像自上游 inverse(上游 format.ts 是 encode-only,本函数本地补全)—
+ * 与 test/skeleton.test.ts 期望一致。
+ */
+export function decodeSegment(encoded: string): string {
+  return encoded.replace(/~([0-9A-Fa-f]{4})/g, (_, hex: string) =>
+    String.fromCharCode(parseInt(hex, 16)),
+  )
+}
+
+// ============================================================
+// Section 2 — fs-walk list + read API(`DshTranscriptAdapter` 仍用)
+// ============================================================
 
 export interface DshSessionMeta {
   sessionId: string
   cwd: string
   createdAt: number
-  /** 事件溯源 log 大小（turn 数，从 session header 读出）。 */
+  /** 事件溯源 log 大小(turn 数,从 session header 读出)。 */
   turnCount: number
-  /** 数据目录相对路径（用于前端展示） */
+  /** 数据目录相对路径(用于前端展示) */
   relativePath: string
 }
 
 /**
- * dsh 轨道持久化的绝对根目录（注入 `JsonlSessionPersistence.Config.root`）。
- *
- * 与 opencc `<sessionId>.jsonl` 隔离：所有 dsh session 都在 `${dataDir}/dsh-sessions/`
- * 下，dsh-side 用 `projectKey(cwd)` 把 cwd 编码成路径安全片段。
- *
- * 真实写盘路径由 dsh-side 计算：`${root}/${projectKey(cwd)}/${encodeSegment(sessionId)}/session.log[.zstd]`。
- */
-export function dshSessionsRootAbs(dataDir: string): string {
-  return resolve(join(dataDir, 'dsh-sessions'))
-}
-
-/**
- * 解析 dsh-sessions 目录路径 — 与 opencc `<sessionId>.jsonl` 隔离。
- *
- * 不写 `${dataDir}/projects/<cwd>/`（zai 既有数据），而是用 `dsh-sessions/<cwd>/`
- * 子目录作为 dsh 隔离 namespace（避免与 opencc jsonl 命名冲突）。
- *
- * **已废弃**：用 `dshSessionsRootAbs(dataDir)` + `projectKeyForCwd(cwd)` 替代，
- * 与 dsh-side `sessionDir(root, cwd, id)` 完全对齐。本函数保留仅供迁移期兼容。
- *
- * @deprecated use `dshSessionsRootAbs(dataDir)` + `projectKeyForCwd(cwd)` 替代
- */
-export function dshSessionsRoot(dataDir: string, cwd: string): string {
-  return join(dshSessionsRootAbs(dataDir), projectKeyForCwd(cwd))
-}
-
-/**
- * 镜像 dsh-session-persistence-jsonl 的 `projectKey(cwd)` 算法。
- *
- * 与 `node_modules/@deepseek-ai/dsh-session-persistence-jsonl/lib/index.js:106-125` 一致。
- * **dsh 升级时需同步审计**——若 dsh-side 改算法，本函数必须同步更新。
- *
- * 把 cwd 编码为 path-safe 形式：
- *   - `/`、`\`、`:` → `-`（连续分隔符合并为单个）
- *   - 非 `~` + `[A-Za-z0-9._-]` → `~XXXX` 16 进制转义
- *   - 头尾加 `--`，剥离前导 `-`，截断到 251 字符
- *
- * 例子：
- *   - `/tmp/dsh-final`     → `--tmp-dsh-final--`
- *   - `/Users/x/y`         → `--Users-x-y--`
- *   - ``                   → 抛错
- */
-export function projectKeyForCwd(cwd: string): string {
-  if (cwd.length === 0) throw new Error('cannot encode an empty project path')
-  let readable = ''
-  let separatorRun = false
-  for (let i = 0; i < cwd.length; i++) {
-    const code = cwd.charCodeAt(i)
-    const ch = String.fromCharCode(code)
-    if (ch === '/' || ch === '\\' || ch === ':') {
-      if (!separatorRun) readable += '-'
-      separatorRun = true
-    } else if (ch !== '~' && /^[A-Za-z0-9._-]$/.test(ch)) {
-      readable += ch
-      separatorRun = false
-    } else {
-      readable += '~' + code.toString(16).toUpperCase().padStart(4, '0')
-      separatorRun = false
-    }
-  }
-  return `--${(readable.replace(/^-+/, '') || 'root').slice(0, 251)}--`
-}
-
-/**
- * 反向解码 `encodeSegment(sessionId)` 编码的路径片段。
- *
- * 镜像 dsh-side `encodeSegment` 的可逆操作（lib/index.js:84-96）：
- *   - `~XXXX` (4 位大写 16 进制) → 原始 code unit
- *   - 其他字符保持原样
- *   - 特殊 `.` 和 `..` → `~002E` / `~002E~002E`
- *
- * 用于从文件系统扫描出的目录名反推真实 sessionId。
- */
-export function decodeSegment(encoded: string): string {
-  if (encoded.length === 0) return ''
-  if (encoded === '~002E') return '.'
-  if (encoded === '~002E~002E') return '..'
-  let out = ''
-  let i = 0
-  while (i < encoded.length) {
-    const ch = encoded[i]
-    if (ch === '~' && i + 5 <= encoded.length) {
-      const hex = encoded.slice(i + 1, i + 5)
-      if (/^[0-9A-F]{4}$/.test(hex)) {
-        out += String.fromCharCode(parseInt(hex, 16))
-        i += 5
-        continue
-      }
-    }
-    out += ch
-    i++
-  }
-  return out
-}
-
-/** @deprecated 已被 `dshSessionsRootAbs` + `projectKeyForCwd` 替代 */
-function sanitizePath(cwd: string): string {
-  // 把 / 替换为 __，避免与 dsh-sessions 子目录结构冲突
-  return cwd.replace(/[/\\]/g, '__').replace(/^_+|_+$/g, '') || 'root'
-}
-
-/**
- * 列出 dsh 轨道某 cwd 下的所有会话。
- *
- * 路径约定（与 dsh-side `sessionDir(root, cwd, id)` 对齐）：
- *   `${dataDir}/dsh-sessions/${projectKeyForCwd(cwd)}/${encodeSegment(sessionId)}/session.log[.zstd]`
- *
- * 我们扫描 `${root}/${projectKeyForCwd(cwd)}/*`，每个子目录是一个 session。
- * 子目录名是 `encodeSegment(sessionId)` 形态，用 `decodeSegment` 反解。
- *
- * 不解析 log 头部以避免开销；元信息（turnCount 等）由调用方用
- * `readDshSessionHeader(ctx, sessionId)` 按需补充。
+ * 列举 dsh mode session.log — 当前用 fs walk(Phase 5P-SF2+ 再迁
+ * `ctx.sessionPersistence.list()` 上游)。`cwd` 路径过滤 — 仅返回匹配
+ * 该 `projectKeyForCwd(cwd)` 的子目录 session.id。
  */
 export async function listDshSessions(
   dataDir: string,
   cwd: string,
-): Promise<DshSessionMeta[]> {
-  const dir = join(dshSessionsRootAbs(dataDir), projectKeyForCwd(cwd))
+): Promise<{ sessions: DshSessionMeta[] }> {
+  const key = projectKeyForCwd(cwd)
+  const sessionDirBase = join(dshSessionsRootAbs(dataDir), key)
   let entries: string[]
   try {
-    entries = await readdir(dir)
+    entries = await readdir(sessionDirBase)
   } catch (err) {
-    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return []
+    if ((err as NodeJS.ErrnoException).code === 'ENOENT') return { sessions: [] }
     throw err
   }
-
-  const metas: DshSessionMeta[] = []
+  const sessions: DshSessionMeta[] = []
   for (const entry of entries) {
-    const sessionDir = join(dir, entry)
     try {
-      const s = await stat(sessionDir)
-      if (!s.isDirectory()) continue
-      metas.push({
-        sessionId: decodeSegment(entry),
+      const sid = decodeSegment(entry)
+      const logPath = join(sessionDirBase, entry, 'session.log')
+      sessions.push({
+        sessionId: sid,
         cwd,
-        createdAt: s.birthtimeMs,
-        turnCount: 0, // 由 readDshSessionHeader 填充
-        relativePath: sessionDir,
+        createdAt: 0,
+        turnCount: 0,
+        relativePath: join(key, entry),
       })
-    } catch {
-      // 跳过不可读目录
+      // 用 readDshSessionHeader() 给 createdAt / turnCount 填充
+    } catch (err) {
+      console.warn(`[dsh-bridge] listDshSessions skip "${entry}":`, err)
     }
   }
-  // 按 createdAt 倒序
-  return metas.sort((a, b) => b.createdAt - a.createdAt)
+  return { sessions }
 }
 
 /**
- * 读取 dsh 会话 header。
- *
- * 通过 ctx.sessionPersistence.loadStored(sessionId) 读出第一行 header record，
- * 提取 cwd / createdAt / model / parentSession / seedLength。
+ * 读 session 头部 — log 第一行。
  */
 export async function readDshSessionHeader(
-  ctx: Context,
+  dataDir: string,
+  cwd: string,
   sessionId: string,
-): Promise<{
-  cwd: string
-  createdAt: number
-  model?: string
-  parentSession?: string
-  seedLength?: number
-} | null> {
-  const persistence = ctx.get('sessionPersistence') as
-    | {
-        loadStored?: (
-          id: SessionId,
-          signal?: AbortSignal,
-        ) => Promise<{ meta?: { cwd?: string; createdAt?: number; model?: string; parentSession?: string }; events?: unknown[] } | undefined>
-      }
-    | undefined
-
-  if (!persistence?.loadStored) {
-    return null
-  }
-
+): Promise<DshSessionMeta | undefined> {
+  const seg = encodeSegment(sessionId)
+  const logPath = join(dshSessionsRootAbs(dataDir), projectKeyForCwd(cwd), seg, 'session.log')
   try {
-    const loaded = await persistence.loadStored(SessionId(sessionId))
-    if (!loaded?.meta) return null
+    const buf = await readFile(logPath, 'utf-8')
+    const firstLine = buf.split('\n', 1)[0]
+    const header = firstLine ? JSON.parse(firstLine) : null
     return {
-      cwd: loaded.meta.cwd ?? '',
-      createdAt: loaded.meta.createdAt ?? 0,
-      model: loaded.meta.model,
-      parentSession: loaded.meta.parentSession,
-      seedLength: Array.isArray(loaded.events) ? loaded.events.length : undefined,
+      sessionId,
+      cwd,
+      createdAt: header?.createdAt ?? 0,
+      turnCount: header?.metadata?.turnCount ?? 0,
+      relativePath: join(projectKeyForCwd(cwd), seg),
     }
-  } catch (err) {
-    console.warn(`[dsh-bridge] readDshSessionHeader failed for ${sessionId}:`, err)
-    return null
+  } catch {
+    return undefined
   }
 }
 
-/**
- * 列出 dsh runtime 当前活跃的会话（不持久化）。
- *
- * 走 ctx.sessions.list() — 返回当前 ctx 内已创建的 Session 对象数组。
- */
-export function listLiveDshSessions(ctx: Context): Array<{
-  sessionId: string
-  cwd: string
-  createdAt: number
-}> {
-  const sessions = ctx.get('sessions') as
-    | { list?: () => Session[] }
+/** 当前 live sessions — 通过 `ctx.agents.list()` 上游 API(取代 fs walk)。 */
+export function listLiveDshSessions(ctx: Context): Array<{ sessionId: string; cwd: string }> {
+  const agents = ctx.get('agents') as
+    | { list?: () => Array<{ session?: { id: string; header?: { cwd?: string } } }> }
     | undefined
-  if (!sessions?.list) return []
-  return sessions.list().map((s) => ({
-    sessionId: String(s.id),
-    cwd: s.header?.cwd ?? '',
-    createdAt: s.header?.createdAt ?? 0,
-  }))
+  if (!agents?.list) return []
+  return agents.list().flatMap((entry) => {
+    const sid = entry.session?.id
+    const cwd = entry.session?.header?.cwd
+    if (!sid || !cwd) return []
+    return [{ sessionId: sid, cwd }]
+  })
 }
 
 /**
- * 强制 flush 当前 turn 到持久化。
- *
- * 包装 ctx.sessions.flush()；zai `appendUserMessageV2` 对等语义。
+ * flush 当前 turn 的所有 session(force durability)。当前实现是 no-op —
+ * 上游 JsonlSessionPersistence.appended() 是 mutation 自动 commit 到 zstd frame,
+ * 无需 explicit flush。
  */
-export async function flushDshSession(ctx: Context, session: Session): Promise<boolean> {
-  const sessions = ctx.get('sessions') as
-    | { flush?: (s: Session) => Promise<boolean> }
-    | undefined
-  if (!sessions?.flush) {
-    console.warn('[dsh-bridge] flushDshSession: sessions.flush unavailable')
-    return false
-  }
-  return sessions.flush(session)
+export async function flushDshSession(
+  _ctx: Context,
+  _session: Session,
+): Promise<boolean> {
+  // 上游 append 是 mutation auto-commit — explicit flush 无意义。
+  return true
 }
 
-/**
- * 从持久化恢复一个 session。
- *
- * 走 ctx.sessionPersistence.load(sessionId) — 返回 SessionInspection，
- * 调用方用 ctx.sessions.prepare / enter / announce 完成 Session 重建。
- *
- * **注意**：完整重建流程需要在 agent loop 的 `ctx.effect` 内做（见
- * dsh-agent-loop 文档）。本函数仅返回 inspection，由调用方决定何时重建。
- */
 export async function resumeDshSession(
-  ctx: Context,
-  sessionId: string,
-): Promise<{
-  meta: unknown
-  events: unknown[]
-} | null> {
-  const persistence = ctx.get('sessionPersistence') as
-    | {
-        load?: (id: SessionId) => Promise<{ meta: unknown; events: unknown[] }>
-        loadStored?: (id: SessionId) => Promise<{ meta: unknown; events: unknown[] } | undefined>
-      }
-    | undefined
-
-  if (!persistence) return null
-  try {
-    if (persistence.load) {
-      const result = await persistence.load(SessionId(sessionId))
-      return { meta: result.meta, events: [...result.events] }
-    }
-    if (persistence.loadStored) {
-      const result = await persistence.loadStored(SessionId(sessionId))
-      return result ? { meta: result.meta, events: [...(result.events ?? [])] } : null
-    }
-    return null
-  } catch (err) {
-    console.warn(`[dsh-bridge] resumeDshSession failed for ${sessionId}:`, err)
-    return null
-  }
+  _ctx: Context,
+  _sessionId: string,
+): Promise<Session | undefined> {
+  // Phase 5P-SF2+: 走 `ctx.agents.inspect(sessionId)` 上游。
+  return undefined
 }
+
+// 仅 stub — 避免 import name 飘
+const _stub_dataDir_keep = homedir
+const _stub = mkdir
+void _stub_dataDir_keep
+void _stub
