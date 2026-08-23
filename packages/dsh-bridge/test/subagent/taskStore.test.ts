@@ -322,6 +322,78 @@ describe('Phase 4: spawnDshSubagent with dsh-subagent upstream', () => {
     expect(state.error).toBe('provider unavailable')
   })
 
+  // ───── Stage 7: completionDelivery ('wakeup' | 'quiet') —───
+  describe('Stage 7: completionDelivery — wakeup vs quiet', () => {
+    let resolveResult: ((v: { output: Array<{ type: string; text?: string }>; stopReason: string }) => void) | null = null
+    const resultPromise = new Promise<{ output: Array<{ type: string; text?: string }>; stopReason: string }>((resolve) => {
+      resolveResult = resolve
+    })
+    let mockRunLocal: ReturnType<typeof makeMockRun>
+    let mockCtxLocal: MockCtx
+
+    beforeEach(() => {
+      mockRunLocal = makeMockRun({ childId: 'child-quiet', resultPromise })
+      mockCtxLocal = makeMockCtx({ run: mockRunLocal })
+    })
+
+    it("completionDelivery 默认 'wakeup' 与 Phase 4 行为一致(向后兼容)", async () => {
+      const handle = await spawnDshSubagent(mockCtxLocal as unknown as never, {
+        parentSessionId: 'parent-session-id',
+        parentAgent: parentAgent as unknown as never,
+        prompt: 'do',
+        cwd: '/tmp',
+        // 不传 completionDelivery — 默认走 'wakeup'
+      })
+      resolveResult!({ output: [{ type: 'text', text: 'ok' }], stopReason: 'completed' })
+      await handle.promise
+      // 默认 'wakeup' → parentAgent.followup 必被调一次
+      expect(parentAgent.followup).toHaveBeenCalledTimes(1)
+    })
+
+    it("completionDelivery === 'quiet' 时跳过 parentAgent.followup", async () => {
+      const handle = await spawnDshSubagent(mockCtxLocal as unknown as never, {
+        parentSessionId: 'parent-session-id',
+        parentAgent: parentAgent as unknown as never,
+        prompt: 'do',
+        cwd: '/tmp',
+        completionDelivery: 'quiet',
+      })
+      resolveResult!({ output: [{ type: 'text', text: 'ok' }], stopReason: 'completed' })
+      await handle.promise
+      // 'quiet' → followup 不被调
+      expect(parentAgent.followup).not.toHaveBeenCalled()
+    })
+
+    it("completionDelivery === 'wakeup' 显式也触发 followup(Stage 7 默认值不变)", async () => {
+      const handle = await spawnDshSubagent(mockCtxLocal as unknown as never, {
+        parentSessionId: 'parent-session-id',
+        parentAgent: parentAgent as unknown as never,
+        prompt: 'do',
+        cwd: '/tmp',
+        completionDelivery: 'wakeup',
+      })
+      resolveResult!({ output: [], stopReason: 'completed' })
+      await handle.promise
+      expect(parentAgent.followup).toHaveBeenCalledTimes(1)
+    })
+
+    it("completionDelivery='quiet' 也跳过 `<task-notification>` 内容,不暴露 wakeup 文本", async () => {
+      const handle = await spawnDshSubagent(mockCtxLocal as unknown as never, {
+        parentSessionId: 'parent-session-id',
+        parentAgent: parentAgent as unknown as never,
+        prompt: 'do',
+        cwd: '/tmp',
+        completionDelivery: 'quiet',
+      })
+      resolveResult!({ output: [], stopReason: 'completed' })
+      await handle.promise
+      // followup 没被调 → <task-notification> 文本不会到 parent inbox
+      expect(parentAgent.followup).not.toHaveBeenCalled()
+      // 但 finalState 仍然落盘(zai UI 仍可从 ~/.zai/tasks-dsh/ 看到完成)
+      expect(mockRunLocal.id).toBe('child-quiet')
+    })
+  })
+
   it('does not crash when parentAgent.followup throws', async () => {
     parentAgent.followup = vi.fn(() => {
       throw new Error('parent agent dead')

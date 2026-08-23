@@ -337,6 +337,22 @@ export async function spawnDshSubagent(
     providerName?: 'spawn' | 'fork'
     provider?: string
     taskId?: string
+    /**
+     * 完成时通知策略(Stage 7):
+     *   - 'wakeup' (默认,向后兼容):完成后通过 `parentAgent.followup`
+     *     注入 `<task-notification>` 到父 session inbox,idle 时等下次
+     *     turn 被消费(用户继续提问触发);idle → 等同 'wakeup' 但
+     *     上一轮还在执行,followup 入下一轮 turn inbox。
+     *   - 'quiet':完成时跳过 followup,只走 onTaskFinish/zai SSE 通知。
+     *     zai 端 UI 仍能看到 task 状态变化(TaskDock),但 LLM 不会因
+     *     子代理完成被打扰。
+     *
+     * vendor 真相:dsh-tool-jobs `Config.completionDelivery` 默认 'wakeup',
+     * `maxConsecutiveWakes` 默认 3(连续 N 次 wakeup 后自动转 quiet 防止自循环)。
+     * dsh-bridge subagent 不暴露完整 listener 自循环检测,本 stage 实现
+     * 二选一;counter 由 zai-side factory 维护。
+     */
+    completionDelivery?: 'wakeup' | 'quiet'
   },
 ): Promise<{
   taskId: string
@@ -348,6 +364,9 @@ export async function spawnDshSubagent(
   // 归一 providerName;不存在时 vendor start() 找不到 provider 会抛 'NO_PROVIDER'
   // 但 fallback 'spawn' 让 Stage 0 路径不变。
   const providerName = opts.providerName ?? 'spawn'
+  // Stage 7:completionDelivery 默认 'wakeup',与未传 opts 的所有现有 caller
+  // (Phase 4 起所有调用方)行为 100% 兼容。'quiet' 跳过下面的 followup。
+  const completionDelivery = opts.completionDelivery ?? 'wakeup'
 
   // 1. 写盘 initial state (sessionId 暂时占位 'pending',start() 后回填)
   const initialState: DshTaskState = {
@@ -465,7 +484,11 @@ export async function spawnDshSubagent(
     //     时调用方拿到终态,父 turn 自然 end。
     //   - 异步模式(run_in_background=true 调用方立即 return):父 turn 已 end,
     //     这里通过 followup 注入 `<task-notification>`,等下次 turn 被消费。
-    if (opts.parentAgent) {
+    //
+    // Stage 7 调整:`completionDelivery === 'quiet'` 时跳过 followup,只走
+    // onTaskFinish / zai SSE 通知。Vendor 场景:zai 端 factory 通过
+    // `maxConsecutiveWakes` 计数防止反复 wakeup 把 LLM 自循环拖死。
+    if (opts.parentAgent && completionDelivery !== 'quiet') {
       try {
         const text = `<task-notification>${JSON.stringify({
           taskId,

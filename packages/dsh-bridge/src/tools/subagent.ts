@@ -92,6 +92,21 @@ export interface AgentToolOptions {
     status: 'done' | 'failed' | 'cancelled'
     error?: string
   }) => void
+  /**
+   * Stage 7: 子代理完成时是否 wakeup 父 agent。
+   *   - 'wakeup'(默认):完成后通过 `parentAgent.followup(<task-notification>)`
+   *     注入父 session inbox(等价 vendor `completionDelivery='wakeup'`)。
+   *   - 'quiet':跳过 followup,只走 onTaskFinish / zai SSE(等价 vendor
+   *     `completionDelivery='quiet'`)。
+   */
+  completionDelivery?: 'wakeup' | 'quiet'
+  /**
+   * Stage 7: zai 端在多少连续 wakeup 后自动转 quiet,防 LLM 自循环。
+   * 缺省 3(对齐 vendor `tool-jobs/Config.maxConsecutiveWakes` 默认)。
+   * 注意:本 stage 不在 tool 内自动切换 — zai factory 在调用工具前根据
+   * counter(parentSessionId) 决策;若 zai 端省略,工具一律 wakeup。
+   */
+  maxConsecutiveWakes?: number
 }
 
 /**
@@ -242,6 +257,8 @@ export function createAgentTool(opts: AgentToolOptions) {
           // Phase 3 P0-A+ B1: 传 provider 让子 agent 能找到 LLM profile
           // (否则 dsh 抛 "has no provider/model" — dsh-014 修复同样问题)。
           provider: opts.getProvider?.(),
+          // Stage 7:completionDelivery 透传 — 'quiet' 跳过 parentAgent.followup。
+          completionDelivery: opts.completionDelivery,
         })
       } catch (err) {
         const message = err instanceof Error ? err.message : String(err)
