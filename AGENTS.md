@@ -33,7 +33,6 @@
 > **状态**（2026-08-22）：**全 plan 收口完成 + Phase 4 收口** — P0/P1/P2 全部真实化，Phase 4(dsh-subagent 上游 `SubagentRuntime.start`)完成，handoff §6 已知缺口 1-5 已关闭。dsh-bridge **135 测试** / zai 2192 测试 / zn-agent-core 382 测试全绿。详细状态见 `packages/dsh-bridge/IMPLEMENTATION_STATUS.md`。
 > **目标**：zai agent 内核从 opencc vendor 迁移到 deepseek-harness（`@deepseek-ai/dsh-*`），采用双轨并行 + 配置切换。
 > **G2 决策**：评审记录见 [`docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md`](docs/superpowers/plans/2026-08-17-dsh-kernel-decision.md)；维护契约见 [`docs/2026-08-17-dsh-maintenance-contract.md`](docs/2026-08-17-dsh-maintenance-contract.md)；已知差异见 [`docs/2026-08-17-dsh-known-differences.md`](docs/2026-08-17-dsh-known-differences.md)。
-> **关键缺口（dsh-009, dsh-010, dsh-012）**：B7 flip-and-cleanup 阶段必须关闭 — 当前 `agentRuntime.ts` 仍未走 `createKernel()` 工厂分叉（dsh-009），所以 dsh 模式启动但 routes/agent.ts 仍跑 opencc。ego-browser dsh 验证因此阻塞（待 KERNEL_FACTORY_INTEGRATION 修复 + ANTHROPIC_API_KEY 配置）。
 
 ### 轨道选择
 
