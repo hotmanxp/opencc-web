@@ -278,3 +278,61 @@ describe('GET /api/tasks/:id/events', () => {
     expect(res.body.error).toBe('task_not_found')
   })
 })
+
+// B7 (dsh-009) 回归测试:dsh 模式下 initBackgroundRuntime 主动跳过,所有
+// /api/tasks/* 端点必须返回 503 + 明确错误码,而不是让 runtime() throw
+// 触发 Express 默认 500 HTML(前端 fetch 看到 500 之后 console.warn 持续
+// 刷屏,体感"页面挂")。
+describe('GET/POST/DELETE /api/tasks when background runtime is uninitialized (dsh mode)', () => {
+  let savedRuntime: typeof mockRuntime | null = null
+
+  beforeEach(() => {
+    savedRuntime = mockRuntime
+    __setBackgroundRuntime(null)
+  })
+
+  afterEach(() => {
+    __setBackgroundRuntime(savedRuntime as unknown as ReturnType<typeof wrapWithJobStarted>)
+    savedRuntime = null
+  })
+
+  test('GET /api/tasks returns 503 with background_runtime_unavailable', async () => {
+    const res = await request(makeApp()).get('/api/tasks')
+    expect(res.status).toBe(503)
+    expect(res.body.error).toBe('background_runtime_unavailable')
+    expect(typeof res.body.message).toBe('string')
+    expect(typeof res.body.kernel).toBe('string')
+  })
+
+  test('POST /api/tasks returns 503 without validating body', async () => {
+    // dsh 短路必须在 zod 校验之前命中,否则无效 body 也被当成"kernel 问题"
+    // 返回 503,反而隐藏了用户的真实输入错误。验证短路优先 + 状态码即可。
+    const res = await request(makeApp())
+      .post('/api/tasks')
+      .send({ prompt: '' }) // 故意非法 body
+    expect(res.status).toBe(503)
+    expect(res.body.error).toBe('background_runtime_unavailable')
+  })
+
+  test('GET /api/tasks/:id returns 503', async () => {
+    const res = await request(makeApp()).get('/api/tasks/anything')
+    expect(res.status).toBe(503)
+    expect(res.body.error).toBe('background_runtime_unavailable')
+  })
+
+  test('DELETE /api/tasks/:id returns 503', async () => {
+    const res = await request(makeApp()).delete('/api/tasks/anything')
+    expect(res.status).toBe(503)
+    expect(res.body.error).toBe('background_runtime_unavailable')
+  })
+
+  test('GET /api/tasks/:id/events returns 503 (NOT a SSE stream, must be JSON)', async () => {
+    // SSE 端点的关键回归:dash 模式必须返回 JSON 503 而不是空 SSE 流或 500。
+    // 如果服务端误发了 SSE headers + 空 body,fetch 在 res.ok 判断会通过,
+    // TaskDrawer 进 reader.read() 死循环 — 比 500 更糟糕。
+    const res = await request(makeApp()).get('/api/tasks/anything/events')
+    expect(res.status).toBe(503)
+    expect(res.headers['content-type']).toMatch(/application\/json/)
+    expect(res.body.error).toBe('background_runtime_unavailable')
+  })
+})

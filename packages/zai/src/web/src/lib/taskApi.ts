@@ -90,6 +90,23 @@ export interface SseFrame {
 }
 
 /**
+ * `subscribeTaskEvents` 失败时抛出的错误。带 `status` 字段,让上层
+ * (TaskDrawer) 可以识别 HTTP 503 background_runtime_unavailable — 这是
+ * dsh 模式下设计预期的"任务不归 opencc vendor 管理"语义,UI 应走降级
+ * 路径而不是只 console.warn。
+ */
+export class TaskSubscribeError extends Error {
+  readonly status: number
+  readonly body?: unknown
+  constructor(status: number, message: string, body?: unknown) {
+    super(message)
+    this.name = 'TaskSubscribeError'
+    this.status = status
+    this.body = body
+  }
+}
+
+/**
  * 订阅任务事件流。支持 Last-Event-ID 续读。
  * 返回的 AsyncIterable 会在 SSE 流关闭时结束。
  */
@@ -105,7 +122,15 @@ export async function* subscribeTaskEvents(
     signal,
   })
   if (!res.ok || !res.body) {
-    throw new Error(`subscribe events failed: ${res.status}`)
+    // 优先解析 JSON body (e.g. { error: 'background_runtime_unavailable', kernel })
+    // 让上层可以拿到结构化错误码。
+    let body: unknown
+    try {
+      body = await res.json()
+    } catch {
+      body = undefined
+    }
+    throw new TaskSubscribeError(res.status, `subscribe events failed: ${res.status}`, body)
   }
 
   const reader = res.body.getReader()

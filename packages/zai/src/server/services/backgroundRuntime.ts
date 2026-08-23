@@ -269,6 +269,27 @@ export function getBackgroundRuntime(): RestartAwareBackgroundRuntime {
 }
 
 /**
+ * Non-throwing variant of `getBackgroundRuntime()`. Returns `null` when
+ * the singleton has not been initialized — which is the **designed**
+ * state under dsh / non-opencc kernels (see `initBackgroundRuntime`,
+ * B7 dsh-009), where subagent tasks go through `dsh-bridge`'s own store
+ * rather than vendor `DefaultBackgroundRuntime`.
+ *
+ * 路由层用这个 helper 把"runtime 没初始化"从异常转成 503 + 明确错误码,
+ * 而不是让 Express 默认错误处理器吐 500 HTML 给前端(让 TaskDrawer 误以为
+ * 是个真异常,console.warn 持续刷屏)。
+ */
+export function tryGetBackgroundRuntime(): RestartAwareBackgroundRuntime | null {
+  if (backgroundRuntime) return backgroundRuntime
+  // Re-check init flag without throwing to confirm it's truly uninitialized.
+  try {
+    return getBackgroundRuntime()
+  } catch {
+    return null
+  }
+}
+
+/**
  * Test seam: replace the singleton. Used by routes/tasks.test.ts to
  * inject a fixture backed by tmpdir.
  */

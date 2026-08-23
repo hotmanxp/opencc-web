@@ -28,6 +28,7 @@ import {
   cancelTask,
   killBashTask,
   subscribeTaskEvents,
+  TaskSubscribeError,
   type BashTaskInfo,
   type SseFrame,
 } from '../lib/taskApi.js'
@@ -677,18 +678,26 @@ export function TaskDrawer({
   })
   const [events, setEvents] = useState<StreamedEvent[]>([])
   const [loading, setLoading] = useState(false)
+  // B7 (dsh-009) 降级:订阅事件流失败(常见是 503 background_runtime_unavailable)
+  // 时不再只是 console.warn,显示明确提示。空抽屉会让用户以为页面挂了。
+  const [subscribeError, setSubscribeError] = useState<{
+    message: string
+    kernel?: string
+  } | null>(null)
   const aborterRef = useRef<AbortController | null>(null)
 
   // 数据驱动判定: 在 bashTasksBySession 找到了就是 bash 任务.
   const isBashTask = !!bashTask
 
-  // taskId 变化时清 events;detail/bashTask 由上面 selector 实时算。
+  // taskId 变化时清 events;detail/bashTask 由下面 selector 实时算。
   useEffect(() => {
     if (!taskId) {
       setEvents([])
+      setSubscribeError(null)
       return
     }
     setLoading(true)
+    setSubscribeError(null)
     // SSE agent_task.changed / bash_task.changed 已保证 store 里有最新 task;
     // 200ms 后若 store 仍没 entry(detail/bashTask 都 null),显示 "not found"。
     // 这是 SSE 还没推到的窗口(冷启动),非真错误 — 见 useBackgroundTasks 设计。
@@ -716,7 +725,28 @@ export function TaskDrawer({
         }
       } catch (err) {
         if ((err as { name?: string }).name === 'AbortError') return
+        if (err instanceof TaskSubscribeError) {
+          // 503 background_runtime_unavailable (dsh 模式) 或 404 —
+          // 设计预期的降级,显示明确提示而不是空白抽屉。
+          const body = err.body as
+            | { error?: string; message?: string; kernel?: string }
+            | undefined
+          setSubscribeError({
+            message:
+              body?.message ??
+              (err.status === 503
+                ? '事件流在当前内核下不可用(任务由 dsh-bridge 自管理)'
+                : err.status === 404
+                  ? '任务不存在或已被清理'
+                  : `事件流订阅失败 (HTTP ${err.status})`),
+            kernel: body?.kernel,
+          })
+          return
+        }
         console.warn('[TaskDrawer] subscribe events failed:', err)
+        setSubscribeError({
+          message: `事件流订阅失败: ${(err as Error).message ?? 'unknown error'}`,
+        })
       }
     })()
     return () => {
@@ -818,6 +848,34 @@ export function TaskDrawer({
       {loading && !detail && !bashTask && (
         <div style={{ padding: 24, textAlign: 'center', color: 'var(--text-secondary)' }}>
           <LoadingOutlined /> 加载中...
+        </div>
+      )}
+      {/* B7 (dsh-009) 降级 UI: 订阅事件流失败时 (常见 dsh 模式下点击
+          opencc 历史任务) 显示明确提示,而不是只让抽屉 body 空白
+          让用户以为页面挂了。kernel 字段来自后端 503 body.kernel。 */}
+      {!loading && subscribeError && !detail && !bashTask && (
+        <div
+          style={{
+            padding: '40px 24px',
+            textAlign: 'center',
+            color: 'var(--text-secondary)',
+          }}
+        >
+          <CloseCircleFilled style={{ fontSize: 28, color: 'var(--text-tertiary)' }} />
+          <div style={{ marginTop: 12, fontSize: 14, color: 'var(--text-primary)' }}>
+            任务详情不可用
+          </div>
+          <div style={{ marginTop: 6, fontSize: 12, lineHeight: 1.6, maxWidth: 360, margin: '6px auto 0' }}>
+            {subscribeError.message}
+          </div>
+          {subscribeError.kernel && (
+            <div style={{ marginTop: 8, fontSize: 11, color: 'var(--text-tertiary)' }}>
+              当前内核: <code>{subscribeError.kernel}</code>
+            </div>
+          )}
+          <div style={{ marginTop: 12, fontSize: 11, color: 'var(--text-tertiary)' }}>
+            (此任务是 opencc 模式的历史任务,在 dsh 内核下不归 zai 后台任务系统管理)
+          </div>
         </div>
       )}
       {bashTask && (

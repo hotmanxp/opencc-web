@@ -362,4 +362,94 @@ describe('TaskDrawer', () => {
       warnSpy.mockRestore()
     }
   })
+
+  // B7 (dsh-009) 回归: dsh 模式下 backgroundRuntime 为 null, 后端
+  // /api/tasks/:id/events 返回 503 + { error: 'background_runtime_unavailable',
+  // kernel: 'dsh' }。前端 TaskDrawer 必须显示降级 UI, 不能只 console.warn
+  // 让抽屉空白(用户体感"页面挂")。
+  test('SSE 503 background_runtime_unavailable 时显示降级 UI (dsh 模式)', async () => {
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({
+        error: 'background_runtime_unavailable',
+        message: 'opencc vendor BackgroundRuntime 在当前内核下未启用',
+        kernel: 'dsh',
+      }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } },
+    ))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal('fetch', fetchMock)
+    useAgentStore.setState({
+      bashTasksBySession: {},
+      agentTasksBySession: {
+        // store 里有 opencc 历史任务的 detail (用户在 opencc 切到 dsh
+        // 之前的残留), TaskDrawer 会渲染 detail 头部 — 这是预期的,
+        // SSE 503 不会抹掉已有详情, 只阻断 events 流。
+        'session-1': [
+          {
+            taskId: 'opencc-task-1',
+            status: 'completed',
+            prompt: 'Legacy task from opencc mode',
+            detail: {
+              id: 'opencc-task-1',
+              status: 'completed',
+              input: { prompt: 'Legacy task from opencc mode' },
+              createdAt: Date.now(),
+              startedAt: Date.now(),
+              finishedAt: Date.now(),
+              eventCount: 0,
+            },
+          },
+        ],
+      },
+    })
+
+    try {
+      const { findByText, baseElement } = render(
+        <TaskDrawer taskId="opencc-task-1" onClose={() => {}} />,
+      )
+      // 头部信息渲染 (来自 store 残留 detail)
+      expect(baseElement.textContent).toContain('Legacy task from opencc mode')
+      // events 为空 + 503 错误 → 时间线显示 "等待事件..."
+      // (这与原行为一致; 关键是 warn 没被调用)
+      await waitFor(() => {
+        expect(warnSpy).not.toHaveBeenCalled()
+      })
+    } finally {
+      vi.unstubAllGlobals()
+      warnSpy.mockRestore()
+    }
+  })
+
+  test('SSE 503 且 store 无 detail 时显示明确降级提示, 不留空白抽屉', async () => {
+    // store 里没有对应 taskId 的 entry (例如 SSE 还没推过来或者
+    // task 已被清理), 同时 events 流又 503 — 必须显示降级 UI 而不是
+    // 空白 body 让用户以为页面挂了。
+    const fetchMock = vi.fn(async () => new Response(
+      JSON.stringify({
+        error: 'background_runtime_unavailable',
+        message: 'opencc vendor BackgroundRuntime 在当前内核下未启用(子任务走 dsh-bridge 自实现路径)',
+        kernel: 'dsh',
+      }),
+      { status: 503, headers: { 'Content-Type': 'application/json' } },
+    ))
+    const warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    vi.stubGlobal('fetch', fetchMock)
+    useAgentStore.setState({
+      bashTasksBySession: {},
+      agentTasksBySession: {},
+    })
+
+    try {
+      const { findByText } = render(<TaskDrawer taskId="orphan-task" onClose={() => {}} />)
+      expect(await findByText('任务详情不可用')).toBeTruthy()
+      expect(
+        await findByText(/子任务走 dsh-bridge 自实现路径/),
+      ).toBeTruthy()
+      expect(await findByText(/当前内核:/)).toBeTruthy()
+      expect(warnSpy).not.toHaveBeenCalled()
+    } finally {
+      vi.unstubAllGlobals()
+      warnSpy.mockRestore()
+    }
+  })
 })
