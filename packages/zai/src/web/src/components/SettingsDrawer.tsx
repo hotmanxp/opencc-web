@@ -347,6 +347,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
           <span style={{ color: 'var(--text-dim-45)' }}>搜索:</span>
           <input
             data-testid="settings-search-input"
+            aria-label="搜索设置项"
             autoFocus
             value={searchQuery}
             onChange={(e) => setSearchQuery(e.target.value)}
@@ -448,6 +449,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                       {numberEdit === row.key ? (
                         <input
                           autoFocus
+                          aria-label={`编辑 ${row.key} 数值`}
                           data-testid={`number-row-input-${row.key}`}
                           type="text"
                           inputMode="numeric"

@@ -250,6 +250,7 @@ function GitTab({ cwd }: GitTabProps) {
       <Modal
         open={selected !== null}
         title={selected ?? ''}
+        aria-label={selected ?? '快捷命令详情'}
         onCancel={() => setSelected(null)}
         footer={null}
         width="90%"

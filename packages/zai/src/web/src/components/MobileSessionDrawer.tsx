@@ -96,6 +96,7 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
               </div>
               <Popconfirm
                 title="删除该会话?"
+                aria-label="删除会话"
                 okText="删除"
                 cancelText="取消"
                 okButtonProps={{ danger: true }}

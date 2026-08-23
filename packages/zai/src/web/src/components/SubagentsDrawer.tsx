@@ -82,11 +82,12 @@ function SubagentRow({
       </span>
       <code style={{ fontSize: 10, color: 'var(--ui-text-color)' }}>{task.id.slice(-12)}</code>
       {isRunning && (
-        <Tooltip title="中断这个子 agent 任务">
+        <Tooltip title="中断这个子 agent 任务" aria-label="中断子 agent 任务提示">
           <Button
             size="small"
             type="text"
             icon={<StopOutlined />}
+            aria-label="中断子 agent 任务"
             onClick={() => onInterrupt(task.id)}
             data-testid={`subagent-interrupt-${task.id}`}
           />
@@ -134,16 +135,18 @@ export function SubagentsDrawer({
           )}
         </Space>
       }
+      aria-label="Subagents 任务面板"
       placement="right"
       width={420}
       open={open}
       onClose={onClose}
       extra={
-        <Tooltip title="立即刷新">
+        <Tooltip title="立即刷新" aria-label="刷新提示">
           <Button
             size="small"
             type="text"
             icon={<ReloadOutlined spin={loading} />}
+            aria-label="刷新 Subagents 列表"
             onClick={refresh}
             data-testid="subagents-refresh"
           />

@@ -98,7 +98,7 @@ const markdownComponents = {
   th: ({ children }: any) => <th style={{ padding: '6px 10px', textAlign: 'left', fontWeight: 600, border: '1px solid var(--border-subtle)' }}>{children}</th>,
   td: ({ children }: any) => <td style={{ padding: '6px 10px', border: '1px solid var(--border-subtle)' }}>{children}</td>,
   blockquote: ({ children }: any) => <blockquote style={{ borderLeft: '3px solid var(--border-subtle)', paddingLeft: 12, margin: '4px 0 8px 0', color: 'var(--text-secondary)' }}>{children}</blockquote>,
-  a: ({ href, children }: any) => <a href={href} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-start)', textDecoration: 'underline' }}>{children}</a>,
+  a: ({ href, children }: any) => <a href={href} aria-label={`外部链接 ${typeof children === 'string' ? children : ''}`} target="_blank" rel="noopener noreferrer" style={{ color: 'var(--accent-start)', textDecoration: 'underline' }}>{children}</a>,
   hr: () => <hr style={{ border: 'none', borderTop: '1px solid var(--border-subtle)', margin: '12px 0' }} />,
 }
 
@@ -243,6 +243,7 @@ export function PromptBlock({ text }: { text: string }) {
         <Button
           type="link"
           size="small"
+          aria-label={expanded ? '收起思考内容' : '展开思考内容'}
           onClick={() => setExpanded((e) => !e)}
           style={{ padding: 0, marginTop: 2, fontSize: 11, height: 'auto' }}
         >
@@ -306,6 +307,7 @@ export function BashTaskView({
           <Button
             danger
             size="small"
+            aria-label={killing ? '终止中' : '终止任务'}
             loading={killing}
             onClick={handleKill}
             style={{ fontSize: 11 }}
@@ -366,6 +368,7 @@ export function BashTaskView({
           <Button
             type="link"
             size="small"
+            aria-label={expanded ? '收起完整输出' : `展开完整输出 (${outputLines.length} 行)`}
             onClick={() => setExpanded((e) => !e)}
             style={{ padding: 0, marginTop: 2, fontSize: 11, height: 'auto', color: 'var(--accent-start)' }}
           >
@@ -876,6 +879,7 @@ export function TaskDrawer({
           )}
         </div>
       }
+      aria-label={isBashTask ? 'Shell 任务详情' : isSubagentTask ? 'Agent 任务详情' : '后台 Agent 任务详情'}
       placement="right"
       width={isMobile ? '100%' : 560}
       open={!!taskId}

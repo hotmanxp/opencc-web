@@ -93,6 +93,7 @@ export function FilePreviewDrawer() {
   return (
     <Drawer
       title={path ? `${basename(path)} (${humanSize(payload?.size ?? 0)})` : ''}
+      aria-label={path ? `${basename(path)} (${humanSize(payload?.size ?? 0)})` : '文件预览'}
       placement="right"
       width={720}
       open={open}
