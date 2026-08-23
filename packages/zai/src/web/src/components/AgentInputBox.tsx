@@ -1755,6 +1755,7 @@ export default React.memo(function AgentInputBox() {
               onKeyDown={handleKeyDown}
               onPaste={handlePaste}
               placeholder="输入消息, 按 Enter 发送, Shift+Enter 换行. 拖入图片直接插入, 拖入其他文件自动上传并加入地址. 敲 @ 触发文件补全."
+              aria-label="消息输入框"
               rows={3}
               disabled={pendingAsk?.status === "pending"}
               // commandToken 或 atToken 存在时把 textarea 文本变透明:backdrop 接管渲染。
