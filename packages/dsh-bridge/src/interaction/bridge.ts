@@ -1,17 +1,22 @@
 /**
  * dsh 交互桥 — P1-4（真实化）。
  *
- * 设计目标：把 dsh 的 user-approval / tool-ask-user / user-questions seam
- * 桥接到 zai 的 approveRegistry / askRegistry。
+ * 设计目标：把 dsh 的 user-approval seam 桥接到 zai 的 approveRegistry。
+ *
+ * **AskUserQuestion 桥不在本文件** — 见 `tools/askUser.ts` 的
+ * `registerAskUserProvider(ctx, sink)` 与 `registerAskUserTool(ctx)`:
+ * - AskUserQuestion 的模型可调工具是 zai-side **自实现**的(`defineTool`),
+ *   因为上游 `@deepseek-ai/dsh-tool-ask-user` 在 rc.8 阶段**未发布**
+ *   (节点 modules 中无此包;只有 service definition `dsh-user-questions`)。
+ * - 自实现 tool 的 execute 内部走 `ctx.userQuestions.ask` 上游 seam,
+ *   provider 由 zai-side `registerAskUserProvider` 注入 zai askRegistry。
  *
  * 架构：
  *   1. dsh 侧 Consumer 在 tools/pre-execute 时通过 ctx.approval.request(req)
- *      或 ctx.toolAskUser.request(req) 发起询问；这些请求 emit 'approval/request'
- *      事件给 answerer chain。
- *   2. bridge 注册一个 answerer，把请求翻译为 zai registry 调用
- *      （approveRegistry.register / askRegistry.register）；
- *   3. zai 前端 /api/agent/approve + /api/agent/answer 触发 registry.resolve；
- *   4. bridge 把 zai 的结果转回 ApprovalOutcome / AskUserAnswer。
+ *      发起询问；这些请求 emit 'approval/request' 事件给 answerer chain。
+ *   2. bridge 注册一个 answerer，把请求翻译为 zai approveRegistry 调用；
+ *   3. zai 前端 /api/agent/approve 触发 registry.resolve；
+ *   4. bridge 把 zai 的结果转回 ApprovalOutcome。
  *
  * 与 zai 的连接通过回调注入（不直接 import zai 服务 — 避免反向依赖）。
  */
@@ -31,20 +36,6 @@ export type ApprovalDecision =
   | { kind: 'allow' }
   | { kind: 'deny'; reason?: string }
   | { kind: 'allow_remember'; pattern: string }
-
-export interface AskUserRequest {
-  toolUseId: string
-  questions: Array<{
-    question: string
-    header: string
-    options: Array<{ label: string; description?: string }>
-    multiSelect?: boolean
-  }>
-}
-
-export type AskUserAnswer = {
-  answers: Record<string, string>
-}
 
 /**
  * permissionMode 映射 — P1-4 T4.4。
@@ -72,6 +63,10 @@ export function mapPermissionMode(
  *
  * 桥不直接 import zai 服务；通过 callback 解耦。这样 dsh-bridge
  * 可以独立 typecheck / 单测。
+ *
+ * **AskUserQuestion 不走本 sink** — AskUserQuestion sink 由 zai-side
+ * 通过 `registerAskUserProvider(ctx, sink)` 注入到 `ctx.userQuestions`
+ * 上游 seam,见 `tools/askUser.ts`。本 sink 只覆盖 approval。
  */
 export interface ZaiInteractionSink {
   /**
@@ -87,19 +82,6 @@ export interface ZaiInteractionSink {
     description: string
     abortSignal: AbortSignal
   }): Promise<ApprovalDecision>
-
-  /**
-   * 发起一次 AskUserQuestion 请求。返回 Promise，在用户答复后 resolve。
-   *
-   * 内部应调 zai askRegistry.register(toolUseId, sessionId, signal) 并 emit
-   * `prompt.ask` SSE。
-   */
-  requestAskUser(req: {
-    toolUseId: string
-    sessionId: string
-    questions: AskUserRequest['questions']
-    abortSignal: AbortSignal
-  }): Promise<AskUserAnswer>
 
   /** 当前 sessionId — 由 zai 侧注入（用于 registry 路由）。 */
   getSessionId(): string | undefined
@@ -163,54 +145,11 @@ export function installApprovalBridge(ctx: Context): ApprovalBridge {
 }
 
 /**
- * AskUser Bridge — dsh tool-ask-user 事件桥接到 zai askRegistry。
+ * 一次性安装 approval bridge。
  *
- * dsh 上游通过 ctx.toolAskUser（或类似）发起请求；本桥监听这些事件。
- */
-export interface AskUserBridge {
-  setSink(sink: ZaiInteractionSink): void
-  dispose(): void
-}
-
-export function installAskUserBridge(ctx: Context): AskUserBridge {
-  let sink: ZaiInteractionSink | undefined
-
-  // dsh tool-ask-user 通过 ctx.emit('ask-user/request', payload) 触发（暂用 cast）；
-  // 我们用 ctx.on 监听同名事件并转发给 zai sink。
-  const off = (ctx.on as unknown as (
-    event: string,
-    fn: (payload: AskUserRequest) => Promise<AskUserAnswer>,
-  ) => () => void)('ask-user/request', async (payload: AskUserRequest) => {
-    if (!sink) {
-      console.warn('[dsh-bridge] ask-user/request but no zai sink — falling back to default')
-      return { answers: {} }
-    }
-    return sink
-      .requestAskUser({
-        toolUseId: payload.toolUseId,
-        sessionId: sink.getSessionId() ?? '',
-        questions: payload.questions,
-        abortSignal: new AbortController().signal,
-      })
-      .catch((err) => {
-        console.warn('[dsh-bridge] askUser bridge error:', err)
-        return { answers: {} }
-      })
-  })
-
-  return {
-    setSink(s: ZaiInteractionSink) {
-      sink = s
-    },
-    dispose() {
-      off?.()
-      sink = undefined
-    },
-  }
-}
-
-/**
- * 一次性安装 approval + askUser bridge。
+ * **AskUserQuestion 不在本文件** — 由 zai-side 显式调用 `tools/askUser.ts`
+ * 的 `registerAskUserProvider(ctx, sink)` + `registerAskUserTool(ctx)`
+ * 装载(zai-side factories 不需要 interactionBridges 这层间接)。
  *
  * 返回 setSink / dispose 控制器。
  */
@@ -219,15 +158,12 @@ export function installInteractionBridges(ctx: Context): {
   dispose: () => void
 } {
   const approval = installApprovalBridge(ctx)
-  const askUser = installAskUserBridge(ctx)
   return {
     setSink(sink: ZaiInteractionSink) {
       approval.setSink(sink)
-      askUser.setSink(sink)
     },
     dispose() {
       approval.dispose()
-      askUser.dispose()
     },
   }
 }

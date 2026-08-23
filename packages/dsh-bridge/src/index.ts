@@ -150,18 +150,31 @@ export {
 // B4 — 交互与权限 (真实化)
 export {
   installApprovalBridge,
-  installAskUserBridge,
   installInteractionBridges,
   type ApprovalRequest,
   type ApprovalDecision,
-  type AskUserRequest,
-  type AskUserAnswer,
   type ApprovalBridge,
-  type AskUserBridge,
   type PermissionMode,
   type ZaiInteractionSink,
   mapPermissionMode,
 } from './interaction/bridge.js'
+
+// P-AskUserQuestion：自实现 AskUserQuestion 模型可调工具(上游 dsh-tool-ask-user 未发布)。
+// tool.execute 走 ctx.userQuestions 上游 seam;provider 由 zai-side 注入 zai askRegistry。
+export {
+  createAskUserTool,
+  registerAskUserTool,
+  registerAskUserProvider,
+  type AskUserSink,
+  type AskUserToolInput,
+  type AskUserToolResult,
+  // Re-export 关键 dsh upstream 契约类型,让 zai-side factories 不用把
+  // dsh-user-questions 加为直接依赖(同顶部 SessionId re-export 模式)。
+  type AskUserQuestionItem,
+  type AskUserQuestionAnswer,
+  type AskUserQuestionAnswerItem,
+  type AskUserQuestionRequest,
+} from './tools/askUser.js'
 
 // B5 — 多 Agent 与插件 (真实化)
 export {

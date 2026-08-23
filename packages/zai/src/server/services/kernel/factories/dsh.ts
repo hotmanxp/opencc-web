@@ -49,6 +49,7 @@ import {
 } from '../../agentRuntime.js'
 import { loadMcpServers } from '../../mcpConfig.js'
 import type { Context as DshContext } from '@zn-ai/dsh-bridge'
+import { createAskUserSink } from './askUserSink.js'
 
 /** dsh Cordis ctx 本地别名 — 避免 import 实体与未来 Context 类型冲突。 */
 type Context = DshContext
@@ -310,6 +311,13 @@ export async function createDshKernelAdapter(
   let interactionDisposer: (() => void) | null = null
   let slashDisposer: (() => void) | null = null
   let pluginDisposer: (() => void) | null = null
+  // P-AskUserQuestion：askUser tool + provider disposer(独立于 interactionBridges,
+  // 因走的是 tools/askUser.ts 的 registerAskUserProvider/registerAskUserTool,
+  // 不在 installInteractionBridges 范围内)。dispose 顺序:tool 先(provider
+  // 卸载后上游 userQuestions service 还可能 emit 残留,但 tool 已 dispose 不会
+  // 再被 execute → 安全)。
+  let askUserToolDisposer: (() => void) | null = null
+  let askUserProviderDisposer: (() => void) | null = null
   // Phase 5P5 适配:监听 dsh sessionProjections 的 todos 投影,把上游
   // whole-list snapshot 推成 zai stateChangeBus 'v2_task.snapshot'。
   // 卸载时 dispose。
@@ -428,7 +436,7 @@ export async function createDshKernelAdapter(
     },
   })
 
-  // (b) 审批 + AskUser 桥 → zai 现有 registry
+  // (b) 审批桥 → zai approveRegistry;AskUser 走 dsh upstream userQuestions seam
   const interactionBridges = bridge.installInteractionBridges(handle.ctx)
   interactionBridges.setSink({
     requestApprove: async (req) => {
@@ -441,29 +449,24 @@ export async function createDshKernelAdapter(
       if (decision === 'approved') return { kind: 'allow' }
       return { kind: 'deny', reason: comment }
     },
-    requestAskUser: async (req) => {
-      const answers = await getAskRegistry().register(
-        req.toolUseId,
-        req.sessionId,
-        req.abortSignal,
-      )
-      // dsh `AskUserAnswer.answers: Record<string, string>`；zai 返回的
-      // answers.answers 是数组形态,转成 {question.text: answer.text} 字典。
-      const map: Record<string, string> = {}
-      const arr = (answers as { answers?: Array<{ answer: { text?: string } | string }> })?.answers
-      if (Array.isArray(arr)) {
-        for (let i = 0; i < arr.length; i++) {
-          const raw = arr[i]?.answer
-          const text = typeof raw === 'string' ? raw : raw?.text ?? ''
-          const key = req.questions[i]?.question ?? String(i)
-          map[key] = text
-        }
-      }
-      return { answers: map }
-    },
     getSessionId: () => getCurrentSessionId() ?? undefined,
   })
   interactionDisposer = () => interactionBridges.dispose()
+
+  // P-AskUserQuestion：自实现 AskUserQuestion model-facing tool(zai-side 自实现,
+  // 上游 @deepseek-ai/dsh-tool-ask-user 在 rc.8 未发布)。走 dsh upstream
+  // ctx.userQuestions seam:provider 是 zai 注入的 askUserSink,内部调
+  // zai askRegistry.register + emit `prompt.ask` SSE 让 QuestionCard 渲染。
+  // tool 注册**必须在** provider 注册之后 — tool.execute 走 ctx.userQuestions.ask
+  // 找到已注册的 provider,否则上游抛 UserQuestionError(NO_PROVIDER)。
+  // sink 工厂抽取到 `./askUserSink.ts`,单测独立验证字段翻译/dispose 顺序。
+  const askUserSink = createAskUserSink({
+    getSessionId: () => getCurrentSessionId() ?? undefined,
+    askRegistry: { register: (toolUseId, sessionId, signal) => getAskRegistry().register(toolUseId, sessionId, signal) },
+    eventBus: (globalThis as { __zaiEventBus?: { emit: (e: unknown) => void } }).__zaiEventBus,
+  })
+  askUserProviderDisposer = bridge.registerAskUserProvider(handle.ctx, askUserSink)
+  askUserToolDisposer = bridge.registerAskUserTool(handle.ctx)
 
   // Phase 5P5 适配:订阅 dsh 上游 todos 投影,把每次变更 whole-list 推
   // stateChangeBus 'v2_task.snapshot'。stateBridge.ts 已有 onV2TaskSnapshot
@@ -654,6 +657,9 @@ export async function createDshKernelAdapter(
       try { toolsDisposer?.() } catch (err) { console.warn('[dsh-adapter] tools dispose failed:', err) }
       try { interactionDisposer?.() } catch (err) { console.warn('[dsh-adapter] interaction dispose failed:', err) }
       try { projectionDisposer?.() } catch (err) { console.warn('[dsh-adapter] projection dispose failed:', err) }
+      // P-AskUserQuestion：拆 AskUser tool + provider(独立于 interactionBridges)。
+      try { askUserToolDisposer?.() } catch (err) { console.warn('[dsh-adapter] askUser tool dispose failed:', err) }
+      try { askUserProviderDisposer?.() } catch (err) { console.warn('[dsh-adapter] askUser provider dispose failed:', err) }
     },
 
     async createSession(opts) {
