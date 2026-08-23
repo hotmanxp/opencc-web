@@ -118,6 +118,13 @@ export async function* runOnce(opts: DshRunOptions): AsyncIterable<SessionEvent>
       // mount() 返回 resolved AgentPreset(用于记录),不需要 session 这边
       // 主动消费 — dsh-agent-presets 内部已经 parent 了 agentCtx 的
       // scope key 到 mount 的 standing key。
+      //
+      // **AgentSetupCommit 契约**(dsh-agent-loop@0.1.0-rc.8 index.js:1260):
+      //   (await raceAbort(setup?.(agentCtx), signal, id))?.commit();
+      // 上游假设 setup 回调 resolve 成 `{ commit(): void }` 形态,缺则抛
+      // `commit is not a function`。mount() 直接返回 AgentPreset 对象,
+      // **不是** AgentSetupCommit 形态,所以 await 后 .commit() 会炸。
+      // 我们没有 post-mount 重校验步骤,返回 no-op commit shape 即可。
       setup: (agentCtx) => {
         const agentPresets = ctx.get('agentPresets') as
           | { mount: (agentCtx: Context, id?: string) => Promise<unknown> }
@@ -125,10 +132,15 @@ export async function* runOnce(opts: DshRunOptions): AsyncIterable<SessionEvent>
         if (!agentPresets) {
           // 未装载 — 走空 composition,不报错(graceful degradation):
           // dsh 模式最早版本(v0.1.0-rc.7)没有 dsh-agent-presets,某些
-          // 老 ctx 可能仍能跑;不阻塞新 session 创建。
+          // 老 ctx 可能仍能跑;不阻塞新 session 创建。返回 undefined,
+          // 上游 ?.commit() 链对此短路(safe no-op)。
           return
         }
-        return agentPresets.mount(agentCtx)
+        // 把 mount resolve 值改成 AgentSetupCommit 形态(commit 是
+        // no-op,因为我们没有 post-mount 重校验)。mount() 失败时
+        // setup 抛错,外层 `try { ... } catch (error) { dispose() }`
+        // 走回滚路径(`dsh-agent-loop/lib/index.js:1262-1264`)。
+        return agentPresets.mount(agentCtx).then(() => ({ commit: () => {} }))
       },
     })
     agent = created.agent
