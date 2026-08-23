@@ -174,6 +174,7 @@ export {
   type AskUserQuestionAnswer,
   type AskUserQuestionAnswerItem,
   type AskUserQuestionRequest,
+  type UserQuestionProvider,
 } from './tools/askUser.js'
 
 // B5 — 多 Agent 与插件 (真实化)

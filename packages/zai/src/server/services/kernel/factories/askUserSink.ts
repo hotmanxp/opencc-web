@@ -24,6 +24,7 @@ import type {
   AskUserQuestionAnswer,
   AskUserQuestionAnswerItem,
   AskUserQuestionRequest,
+  UserQuestionProvider,
 } from '@zn-ai/dsh-bridge'
 
 /** zai askRegistry.register 返回的 `AskUserAnswers = Record<string, unknown>`。 */
@@ -64,46 +65,51 @@ export function createAskUserSink(opts: CreateAskUserSinkOptions): AskUserSink {
     eventBus,
     generateToolUseId = defaultGenerateToolUseId,
   } = opts
-  return async (req: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> => {
-    const sessionId = getSessionId() ?? ''
-    const toolUseId = generateToolUseId()
+  const provider: UserQuestionProvider = {
+    async ask(req: AskUserQuestionRequest): Promise<AskUserQuestionAnswer> {
+      const sessionId = getSessionId() ?? ''
+      const toolUseId = generateToolUseId()
 
-    // 1. emit `prompt.ask` SSE → 前端 QuestionCard 渲染
-    //    questions 字段对齐 zai QuestionCard 期望:`{question, header, options, multiSelect}`
-    //    dsh upstream 的 `id` 字段不发给前端(前端按 questionText 索引 answers);
-    //    sink 内部按 questionText 索引回 id。
-    if (eventBus) {
-      eventBus.emit({
-        type: 'prompt.ask',
-        sessionId,
-        toolUseId,
-        questions: req.questions.map((q: AskUserQuestionItem) => ({
-          question: q.question,
-          header: q.header ?? '',
-          options: q.options ?? [],
-          ...(q.multiSelect !== undefined ? { multiSelect: q.multiSelect } : {}),
-        })),
-      })
-    } else {
-      console.warn('[askUserSink] eventBus 未注入,前端可能看不到 QuestionCard')
-    }
+      // 1. emit `prompt.ask` SSE → 前端 QuestionCard 渲染
+      //    questions 字段对齐 zai QuestionCard 期望:`{question, header, options, multiSelect}`
+      //    dsh upstream 的 `id` 字段不发给前端(前端按 questionText 索引 answers);
+      //    sink 内部按 questionText 索引回 id。
+      if (eventBus) {
+        eventBus.emit({
+          type: 'prompt.ask',
+          sessionId,
+          toolUseId,
+          questions: req.questions.map((q: AskUserQuestionItem) => ({
+            question: q.question,
+            header: q.header ?? '',
+            options: q.options ?? [],
+            ...(q.multiSelect !== undefined ? { multiSelect: q.multiSelect } : {}),
+          })),
+        })
+      } else {
+        console.warn('[askUserSink] eventBus 未注入,前端可能看不到 QuestionCard')
+      }
 
-    // 2. 等用户答复。zai askRegistry 返回 `Record<questionText, answerText>`。
-    const abortSignal = req.signal ?? new AbortController().signal
-    const zaiAnswers = (await askRegistry.register(toolUseId, sessionId, abortSignal)) ?? {}
+      // 2. 等用户答复。zai askRegistry 返回 `Record<questionText, answerText>`。
+      const abortSignal = req.signal ?? new AbortController().signal
+      const zaiAnswers =
+        (await askRegistry.register(toolUseId, sessionId, abortSignal)) ?? {}
 
-    // 3. 转回 dsh upstream 契约 `{answers: [{id, selected: [label]}]}`
-    const answersRecord = zaiAnswers as ZaiAskUserAnswers
-    const answers: AskUserQuestionAnswerItem[] = req.questions.map(
-      (item: AskUserQuestionItem) => {
-        const raw = answersRecord[item.question]
-        const text = typeof raw === 'string' && raw.length > 0 ? raw : ''
-        return {
-          id: item.id,
-          selected: text ? [text] : [],
-        }
-      },
-    )
-    return { answers }
+      // 3. 转回 dsh upstream 契约 `{answers: [{id, selected: [label]}]}`
+      const answersRecord = zaiAnswers as ZaiAskUserAnswers
+      const answers: AskUserQuestionAnswerItem[] = req.questions.map(
+        (item: AskUserQuestionItem): AskUserQuestionAnswerItem => {
+          const raw = answersRecord[item.question]
+          const text = typeof raw === 'string' && raw.length > 0 ? raw : ''
+          const selected: string[] = text ? [text] : []
+          return {
+            id: item.id,
+            selected,
+          }
+        },
+      )
+      return { answers }
+    },
   }
+  return provider
 }
