@@ -432,16 +432,12 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     }
   })
 
-  // Weixin 微信机器人后台 task — best-effort 启动,失败只 warn 不 throw。
-  // 启动顺序:在 initAgentRuntime 完成(runtime + eventBus 就绪)之后,manager
-  // 内部根据 zaiSettings.weixinBot 决定 enabled/disabled,失败仅 setState('failed')
-  // 不中断其它子系统。详见 docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md B3。
-  try {
-    const { getWeixinBotManager } = await import('./weixinBot/WeixinBotManager.js')
-    await getWeixinBotManager().start()
-  } catch (err) {
-    console.warn('[initAgentRuntime] weixinBot start failed:', err)
-  }
+  // Weixin 微信机器人不再随 zai 启动期自动 connect —— 之前在 initAgentRuntime
+  // 末尾 best-effort 调 `getWeixinBotManager().start()` 让 bot 自动接 iLink。
+  // 现在关闭自动启动:routes/weixin.ts 的 /connect、/disconnect、/reload、
+  // /setup 手动入口仍保留,用户通过 UI 显式触发;runtimeLifecycle 的 stop()
+  // 也仍跑(无 adapter 时是 no-op)。彻底关掉后台轮询 / 自动重连,
+  // 直到后续重新打开(届时把这段 try/catch 加回来即可)。
 }
 
 export async function getOrCreateAgentSession(): Promise<string | null> {
