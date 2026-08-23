@@ -324,6 +324,17 @@ export async function spawnDshSubagent(
     prompt: string
     cwd: string
     model?: string
+    /**
+     * Provider name — dsh 模式下两种合法值:
+     *   - 'spawn' (默认,Stage 0 起的唯一选项):子代理不继承父 prompt history
+     *     (`inheritsParentContext: false`)。vendor 子代理 provider `SpawnInProcessProvider`。
+     *   - 'fork'  (Stage 4 实装):子代理继承父完成 turn 前缀
+     *     (`inheritsParentContext: true`,vendor `ForkInProcessProvider`)。
+     *     通过 `ctx.subagents.start('fork', req)` 调,要 vendor 注册了
+     *     ForkInProcessProvider(在 `createDshRuntime.start()` 经 applyForkProvider)。
+     *     缺省 'spawn' 是给向后兼容的现有 caller。
+     */
+    providerName?: 'spawn' | 'fork'
     provider?: string
     taskId?: string
   },
@@ -334,6 +345,9 @@ export async function spawnDshSubagent(
   dispose: () => Promise<void>
 }> {
   const taskId = opts.taskId ?? `dsh-task-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 8)}`
+  // 归一 providerName;不存在时 vendor start() 找不到 provider 会抛 'NO_PROVIDER'
+  // 但 fallback 'spawn' 让 Stage 0 路径不变。
+  const providerName = opts.providerName ?? 'spawn'
 
   // 1. 写盘 initial state (sessionId 暂时占位 'pending',start() 后回填)
   const initialState: DshTaskState = {
@@ -369,11 +383,15 @@ export async function spawnDshSubagent(
     throw new Error('[dsh-bridge] spawnDshSubagent: parentAgent required for dsh-subagent start()')
   }
 
-  // 3. 调上游 SubagentRuntime.start('spawn', req)
+  // 3. 调上游 SubagentRuntime.start(providerName, req)
+  //    Stage 4:`providerName === 'fork'` 走 vendor ForkInProcessProvider
+  //    (inheritsParentContext: true);其他(= 'spawn')走原 spawn 路径。
+  //    上游 assertCapabilities 校验,fork provider caps ⊇ spawn provider caps
+  //    (ForkInProcessProvider 同一组 capabilities),所以基本参数不会冲突。
   const abortController = new AbortController()
   let run: SubagentRun
   try {
-    run = await subagentRuntime.start('spawn', {
+    run = await subagentRuntime.start(providerName, {
       label: `dsh-subagent-${taskId}`,
       prompt: [{ type: 'text', text: opts.prompt }],
       parent: opts.parentAgent,

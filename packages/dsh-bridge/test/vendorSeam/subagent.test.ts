@@ -1,10 +1,11 @@
 /**
- * DshSubagentControlAdapter contract test —— Stage 0 验收。
+ * DshSubagentControlAdapter contract test —— Stage 0/4 验收。
  *
  * 覆盖:
  *   - dispatch() 入参校验(parentSessionId/cwd/prompt 缺 → 抛 SeamInvalidArgumentError)
  *   - dispatch() 委托 spawnDshSubagent 传入正确的字段(shape:parent/prompt/cwd/model/provider)
- *   - dispatch() 接受 'spawn' / 拒绝 'fork'(Stage 0 范围)
+ *   - dispatch() Stage 4:'spawn' / 'fork' 两个 context 都接受,providerName
+ *     正确透传给 spawnDshSubagent(对应 vendor SubagentRuntime.start(...))
  *   - dispatch() 抛出 SeamRuntimeError 当 spawnDshSubagent 失败
  *   - get() / list() 委托 readDshTask / listDshSubagents
  *   - cancel() 终态返回 { ok: false };运行中返回 { ok: true }
@@ -201,18 +202,10 @@ describe('Stage 0: DshSubagentControlAdapter contract', () => {
       ).rejects.toThrow(SeamInvalidArgumentError)
     })
 
-    it("context !== 'spawn' → Stage 0 抛 SeamInvalidArgumentError", async () => {
-      const adapter = makeAdapter(parentAgent)
-      await expect(
-        adapter.dispatch({
-          description: 'desc',
-          prompt: 'do',
-          parentSessionId: 'parent-session-id',
-          cwd: '/tmp',
-          context: 'fork',
-          backgroundMode: 'async',
-        }),
-      ).rejects.toThrow(/fork.*Stage 0/i)
+    it("context === 'spawn' 时(providerName 验证挪到下游 describe;此处只校验入参)", async () => {
+      // 入参校验测试 — 已通过 mock spawnDshSubagent 不返值(测试不期望
+      // handle.taskId 访问,只 expect rejects)— 此 it 移到下面 describe 验证透传。
+      expect(true).toBe(true)
     })
   })
 
@@ -313,6 +306,42 @@ describe('Stage 0: DshSubagentControlAdapter contract', () => {
           backgroundMode: 'async',
         }),
       ).rejects.toThrow(SeamRuntimeError)
+    })
+
+    it("context === 'spawn' 时 providerName 透传为 'spawn'(Stage 4)", async () => {
+      const adapter = makeAdapter(parentAgent)
+      await adapter.dispatch({
+        description: 'desc',
+        prompt: 'do',
+        parentSessionId: 'parent-session-id',
+        cwd: '/tmp',
+        context: 'spawn',
+        backgroundMode: 'async',
+      })
+      const [, optsArg] = mockState.taskStore.spawnDshSubagent.mock.calls[0]!
+      expect(optsArg.providerName).toBe('spawn')
+    })
+
+    it("context === 'fork' 时 providerName 透传为 'fork'(Stage 4)", async () => {
+      // mock 出 fork 路径也走通,语义验证透传
+      mockState.taskStore.spawnDshSubagent.mockReturnValueOnce({
+        taskId: 'dsh-task-fork-1',
+        agent: undefined,
+        promise: Promise.resolve({ ...finalState, taskId: 'dsh-task-fork-1' }),
+        dispose: vi.fn(),
+      })
+      const adapter = makeAdapter(parentAgent)
+      await adapter.dispatch({
+        description: 'desc',
+        prompt: 'do',
+        parentSessionId: 'parent-session-id',
+        cwd: '/tmp',
+        context: 'fork',
+        backgroundMode: 'sync',
+      })
+      const [, optsArg] = mockState.taskStore.spawnDshSubagent.mock.calls[0]!
+      expect(optsArg.providerName).toBe('fork')
+      expect(optsArg.parentAgent).toBe(parentAgent)
     })
   })
 

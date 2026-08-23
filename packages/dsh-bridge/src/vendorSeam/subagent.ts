@@ -143,14 +143,26 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
       )
     }
 
-    // Stage 0/1/2/3:context 一律 'spawn'。Stage 4 起 'fork' 走 ForkInProcessProvider。
-    if (input.context !== 'spawn') {
+    // Stage 4(2026-08-23 起):`context === 'fork'` 也实装,委派 spawnDshSubagent
+    // 传 `providerName: 'fork'` → vendor `SubagentRuntime.start('fork', req)` →
+    // `ForkInProcessProvider`(`inheritsParentContext: true`,把 parent 完成的
+    // turn 前缀作为 child session seed)。Stage 0/1/2/3 期间 'fork' 抛错
+    // 已被 Stage 4 实装移除。
+    let providerName: 'spawn' | 'fork'
+    if (input.context === 'spawn') {
+      providerName = 'spawn'
+    } else if (input.context === 'fork') {
+      providerName = 'fork'
+    } else {
+      // exhaustiveness — future Stage 5+ 加 'continuable' 等新 context 时编译报错
+      const _exhaustive: never = input.context
+      void _exhaustive
       throw new SeamInvalidArgumentErrorImpl(
-        `SubagentControlSeam.dispatch: context="${input.context}" not implemented in Stage 0; only 'spawn' supported`,
+        `SubagentControlSeam.dispatch: unsupported context="${String(input.context)}"`,
       )
     }
 
-    // 委托给现有 spawnDshSubagent —— 已经走 vendor `SubagentRuntime.start('spawn', req)`。
+    // 委托给现有 spawnDshSubagent —— 已经走 vendor `SubagentRuntime.start(...)`。
     let handle: Awaited<ReturnType<typeof spawnDshSubagent>>
     try {
       handle = await spawnDshSubagent(this.ctx, {
@@ -158,6 +170,7 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
         parentAgent,
         prompt: input.prompt,
         cwd: input.cwd,
+        providerName,
         ...(input.model !== undefined ? { model: input.model } : {}),
         ...(input.provider !== undefined ? { provider: input.provider } : {}),
       })

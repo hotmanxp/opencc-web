@@ -585,6 +585,21 @@ export async function createDshRuntime(
       const { apply: applySpawnProvider } = await import('@deepseek-ai/dsh-subagent-spawn-in-process')
       applySpawnProvider(ctx, { providerName: 'spawn' })
 
+      // Stage 4:`dsh-subagent-fork-in-process` 的 `apply(ctx, config)`
+      // 注册名为 'fork' 的 provider。fork provider(`inheritsParentContext:
+      // true`) — 子代理继承父完成 turn 前缀(prompt history)。
+      //
+      // vendor 行为:
+      //   - fork provider 把 parent.session.events 切片到 last turn/end,
+      //     序列化作为 child session 的 seed 写到 child transcript
+      //     (`startInProcessRun(request, { seed })`)。
+      //   - 没 turn/end 时等价 fresh spawn — 自动空 seed 等同 spawn。
+      //
+      // 装载顺序:必须在 SubagentRuntime(ctx.subagents)装载之后;
+      // 不能与 spawn provider 同名(防误用)。
+      const { apply: applyForkProvider } = await import('@deepseek-ai/dsh-subagent-fork-in-process')
+      applyForkProvider(ctx, { providerName: 'fork' })
+
       // 4.7 Phase 5P6+: dsh-agent-presets — session-level composition from
       //    preset `agent.cordis.yml` files。**dsh 模式扩展 sub-agent 类型的
       //    正确路径**(替代 zai 自实现 `Agent` 工具的 subagent_type 白名单),
