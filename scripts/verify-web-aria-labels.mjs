@@ -140,7 +140,7 @@ function checkElement(node, filePath) {
   if (tagName === 'Form.Item' || (opening.name.type === 'JSXMemberExpression' && tagName === 'Item')) {
     // 仅当父 Form 包裹时(label 由 Form.Item 提供)
     // 简化: 假设 Form.Item 一律豁免(因其语义就是包裹 label)
-    // 但 children 必须是 input/select/textarea(可嵌套 — 例如 Form > Form.Item > Form.Item > Input)
+    // 但 children 必须是 input/select/textarea(可嵌套 — 例如 Form > Form.Item > div > Form.Item > Switch)
     const INPUT_NAMES = new Set(['Input', 'Select', 'TextArea', 'Switch', 'Slider', 'Checkbox', 'Radio'])
     function hasInputDescendant(children) {
       for (const c of children || []) {
@@ -149,16 +149,10 @@ function checkElement(node, filePath) {
         if (childName.type === 'JSXIdentifier' && INPUT_NAMES.has(childName.name)) {
           return true
         }
-        // Nested Form.Item wrapping an input — recurse
-        if (
-          childName.type === 'JSXMemberExpression' &&
-          childName.object?.type === 'JSXIdentifier' &&
-          childName.object.name === 'Form' &&
-          childName.property?.type === 'JSXIdentifier' &&
-          childName.property.name === 'Item'
-        ) {
-          if (hasInputDescendant(c.children || [])) return true
-        }
+        // Recurse into ANY JSXElement wrapper (div / Space / Form.Item / fragment)
+        // to find nested form controls. Spec豁免条件 says "包裹" — wraps
+        // can be any JSX, not just Form.Item.
+        if (hasInputDescendant(c.children || [])) return true
       }
       return false
     }
