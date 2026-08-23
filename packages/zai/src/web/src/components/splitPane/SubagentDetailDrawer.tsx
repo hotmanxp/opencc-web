@@ -85,6 +85,7 @@ export function SubagentDetailDrawer({
           )}
         </span>
       }
+      aria-label="Agent 任务详情"
       placement="right"
       width={520}
       open={!!taskId}
@@ -92,11 +93,12 @@ export function SubagentDetailDrawer({
       destroyOnClose
       extra={
         <Space>
-          <Tooltip title="重新拉取">
+          <Tooltip title="重新拉取" aria-label="重新拉取提示">
             <Button
               size="small"
               type="text"
               icon={<ReloadOutlined />}
+              aria-label="重新拉取详情"
               onClick={() => setReloadSignal((n) => n + 1)}
             />
           </Tooltip>

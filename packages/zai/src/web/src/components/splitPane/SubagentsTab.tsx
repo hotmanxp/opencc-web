@@ -133,11 +133,12 @@ function SubagentRow({
           {task.id.slice(-12)}
         </code>
         {isRunning && (
-          <Tooltip title="给这个子 agent 发消息">
+          <Tooltip title="给这个子 agent 发消息" aria-label="给子 agent 发消息提示">
             <Button
               size="small"
               type="text"
               icon={isSending ? <LoadingOutlined spin /> : <MessageOutlined />}
+              aria-label="给子 agent 发消息"
               disabled={isSending}
               onClick={(e) => {
                 e.stopPropagation()
@@ -148,12 +149,13 @@ function SubagentRow({
           </Tooltip>
         )}
         {isRunning && (
-          <Tooltip title="中断这个子 agent 任务">
+          <Tooltip title="中断这个子 agent 任务" aria-label="中断子 agent 提示">
             <Button
               size="small"
               type="text"
               danger
               icon={isBusy ? <LoadingOutlined spin /> : <StopOutlined />}
+              aria-label="中断子 agent 任务"
               disabled={isBusy}
               onClick={(e) => {
                 e.stopPropagation()
@@ -189,6 +191,7 @@ function SubagentRow({
             size="small"
             type="primary"
             icon={isSending ? <LoadingOutlined spin /> : <SendOutlined />}
+            aria-label="发送消息给子 agent"
             disabled={isSending || !message.trim()}
             onClick={handleSend}
             data-testid={`subagent-sendmsg-send-${task.id}`}
@@ -289,11 +292,12 @@ export function SubagentsTab() {
             ]}
             data-testid="subagents-mode-toggle"
           />
-          <Tooltip title="立即刷新">
+          <Tooltip title="立即刷新" aria-label="刷新提示">
             <Button
               size="small"
               type="text"
               icon={<ReloadOutlined spin={loading} />}
+              aria-label="刷新 Subagents 列表"
               onClick={refresh}
               disabled={loading}
               data-testid="subagents-refresh"

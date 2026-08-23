@@ -82,6 +82,7 @@ export function BottomStatusBar({ todos, v2Tasks, label = "任务" }: Props) {
     >
       <Tooltip
         title={`点击查看${label}详情`}
+        aria-label={`查看${label}详情提示`}
         placement="top"
       >
         {trigger}

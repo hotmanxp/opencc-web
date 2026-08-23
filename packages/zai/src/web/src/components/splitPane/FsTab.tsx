@@ -812,6 +812,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         <Switch
           size="small"
           data-testid="fs-search-mode"
+          aria-label="切换文件名/内容搜索"
           checked={mode === 'content'}
           onChange={(v) => setMode(v ? 'content' : 'name')}
           checkedChildren="内容"

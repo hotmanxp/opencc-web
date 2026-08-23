@@ -410,6 +410,7 @@ export function TaskDock({
               ? '暂无后台任务'
               : `${total} 个后台 Agent 运行中,点击查看`
           }
+          aria-label="查看后台任务"
         >
           <span onClick={() => setOpen((o) => !o)}>{trigger}</span>
         </Tooltip>
@@ -447,6 +448,7 @@ export function TaskDock({
             ? '暂无后台任务'
             : `${total} 个后台 Agent 运行中,点击查看`
         }
+        aria-label="查看后台任务"
       >
         {trigger}
       </Tooltip>

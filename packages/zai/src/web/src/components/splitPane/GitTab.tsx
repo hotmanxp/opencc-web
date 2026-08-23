@@ -222,6 +222,7 @@ export function GitTab({ cwd }: { cwd: string | null }) {
                     type="text"
                     size="small"
                     icon={<UndoOutlined />}
+                    aria-label={f.status === '??' ? '删除新文件' : '撤销文件修改'}
                     loading={reverting === f.path}
                     onClick={(e) => {
                       e.stopPropagation();
