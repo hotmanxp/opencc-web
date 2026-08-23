@@ -305,6 +305,7 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
         type="text"
         size="small"
         data-testid="mode-status-button"
+        aria-label={isMobile ? `当前 mode: ${meta.label}` : `切换 mode,当前 ${meta.label}`}
         title={isMobile ? undefined : `当前 mode: ${meta.label}\n点击切换`}
         style={{
           color: meta.color,

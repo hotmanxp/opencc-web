@@ -442,6 +442,7 @@ export default function ModelStatusButton({ compact = false }: Props = {}) {
       <Button
         type="text"
         size="small"
+        aria-label={`切换模型,当前 ${badgeText ?? '未知'}`}
         title={`当前模型: ${badgeText ?? '未知'}\n点击切换`}
         style={{
           color: 'inherit',

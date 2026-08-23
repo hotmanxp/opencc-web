@@ -22,9 +22,10 @@ export default function SettingsButton() {
   // 一起卸载,避免遗留的 hidden DOM 节点。
   if (!isMobile) return null
   return (
-    <Tooltip title="设置" placement="top">
+    <Tooltip title="设置" aria-label="设置提示" placement="top">
       <Button
         icon={<SettingOutlined />}
+        aria-label="设置"
         onClick={open}
         data-testid="agent-settings-button"
         style={toolbarIconButtonStyle}
