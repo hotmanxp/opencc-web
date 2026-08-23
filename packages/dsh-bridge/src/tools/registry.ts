@@ -123,7 +123,10 @@ export async function registerZaiTools(
   // 2. fs 工具（FileRead/Edit/Write/Stat — 4 个工具）
   disposers.push(...registerFsTools(ctx, { cwd: opts.cwd }))
 
-  // 3. ripgrep 工具（PATH rg 优先 + 内置 fallback）
+  // 3. fs-search 工具（`grep` + `glob`）— Phase 4 P1 起由 harness
+  //    `@deepseek-ai/dsh-tool-fs-search` 提供（已通过 createDshRuntime
+  //    的 ctx.loader.create 装载）。registerRipgrepTool 现在是兼容 shim
+  //    返回 no-op dispose，仅保留 zai-side 历史 import 通路。
   disposers.push(registerRipgrepTool(ctx, { cwd: opts.cwd }))
 
   // 4. MCP 工具（异步，async connect）

@@ -529,6 +529,153 @@ describe('translateSessionEvent dsh tool 兼容性 (Phase 2 tool/result 修复)'
     ) as any
     expect(result.toolName).toBe('')
   })
+
+  // Phase 4 P1: tool/result 顶层 `meta` (presentationMeta) 透传。
+  //
+  // harness `@deepseek-ai/dsh-tool-fs-search` 在 `tool/result` 事件
+  // data 顶层携带 `meta?: JsonValue`（SearchResultView），zai-side renderer
+  // 依赖该字段渲染结构化卡片（按文件分组的 matches / 路径列表）。
+  // translate 必须把 meta 挂到 runtime.tool_result 上供 SSE 透传。
+  it('grep 工具携带合法 meta 时, runtime.tool_result 透传 meta', () => {
+    const sid = 'sess-meta-grep-1'
+    translateSessionEvent(
+      { type: 'tool/call', seq: 1, data: { callId: 'call-grep-1', name: 'grep', arguments: '{"pattern":"foo"}' } } as any,
+      toolCtx(sid),
+    )
+    const meta = {
+      shape: 'matches',
+      files: [
+        { path: 'src/a.ts', matches: [{ lineNumber: 10, line: 'foo' }] },
+      ],
+      truncated: false,
+      total: 1,
+    }
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 2,
+        data: {
+          message: { content: [{ tool_use_id: 'call-grep-1', content: 'src/a.ts:10:foo' }] },
+          meta,
+        },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    expect(result.toolName).toBe('grep')
+    expect(result.meta).toEqual(meta)
+  })
+
+  it('glob 工具携带合法 meta (shape=paths) 时, 透传', () => {
+    const sid = 'sess-meta-glob-1'
+    translateSessionEvent(
+      { type: 'tool/call', seq: 1, data: { callId: 'call-glob-1', name: 'glob', arguments: '{"pattern":"**/*.ts"}' } } as any,
+      toolCtx(sid),
+    )
+    const meta = {
+      shape: 'paths',
+      paths: ['src/a.ts', 'src/b.ts'],
+      truncated: false,
+      total: 2,
+    }
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 2,
+        data: {
+          message: { content: [{ tool_use_id: 'call-glob-1', content: 'src/a.ts\nsrc/b.ts' }] },
+          meta,
+        },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    expect(result.toolName).toBe('glob')
+    expect(result.meta).toEqual(meta)
+  })
+
+  it('非结构化工具 (Bash) 携带 meta 时, 不透传 (避免误渲染)', () => {
+    // Bash 等通用工具理论上不会携带 SearchMeta meta, 但万一有任意 JSON,
+    // 我们不能让前端误把 Bash 的 meta 当 grep 结果渲染。
+    const sid = 'sess-meta-bash-1'
+    translateSessionEvent(
+      { type: 'tool/call', seq: 1, data: { callId: 'call-bash-1', name: 'Bash', arguments: '{}' } } as any,
+      toolCtx(sid),
+    )
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 2,
+        data: {
+          message: { content: [{ tool_use_id: 'call-bash-1', content: 'ls output' }] },
+          meta: { shape: 'matches', files: [], truncated: false, total: 0 },
+        },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    expect(result.toolName).toBe('Bash')
+    expect(result.meta).toBeUndefined()
+  })
+
+  it('meta 是非法形态 (shape 缺失) 时, 不透传', () => {
+    const sid = 'sess-meta-grep-bad'
+    translateSessionEvent(
+      { type: 'tool/call', seq: 1, data: { callId: 'call-grep-bad', name: 'grep', arguments: '{}' } } as any,
+      toolCtx(sid),
+    )
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 2,
+        data: {
+          message: { content: [{ tool_use_id: 'call-grep-bad', content: 'fallback' }] },
+          meta: { files: [], truncated: false, total: 0 }, // 缺 shape
+        },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    expect(result.meta).toBeUndefined()
+  })
+
+  it('meta 是 null / string / array 时, 不透传', () => {
+    const sid = 'sess-meta-grep-types'
+    translateSessionEvent(
+      { type: 'tool/call', seq: 1, data: { callId: 'call-grep-types', name: 'grep', arguments: '{}' } } as any,
+      toolCtx(sid),
+    )
+    for (const badMeta of [null, 'string-meta', [{ shape: 'matches' }]]) {
+      const result = translateSessionEvent(
+        {
+          type: 'tool/result',
+          seq: 2,
+          data: {
+            message: { content: [{ tool_use_id: 'call-grep-types', content: 'x' }] },
+            meta: badMeta,
+          },
+        } as any,
+        toolCtx(sid),
+      ) as any
+      expect(result.meta).toBeUndefined()
+    }
+  })
+
+  it('meta 缺失时 (dsh 旧版本), runtime.tool_result 不带 meta 字段', () => {
+    const sid = 'sess-meta-grep-missing'
+    translateSessionEvent(
+      { type: 'tool/call', seq: 1, data: { callId: 'call-grep-missing', name: 'grep', arguments: '{}' } } as any,
+      toolCtx(sid),
+    )
+    const result = translateSessionEvent(
+      {
+        type: 'tool/result',
+        seq: 2,
+        data: {
+          message: { content: [{ tool_use_id: 'call-grep-missing', content: 'old-style output' }] },
+        },
+      } as any,
+      toolCtx(sid),
+    ) as any
+    expect(result.meta).toBeUndefined()
+    expect(result.output).toBe('old-style output')
+  })
 })
 
 describe('subscribeDshInternalEvents (Phase 1.3)', () => {

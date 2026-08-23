@@ -231,6 +231,22 @@ export function translateSessionEvent(
       // 前端 ToolCallBlock 的 renderer（bash / generic 等）都期望字符串形态，
       // 否则渲染时 JSON.stringify 整个数组，output 区会变成一坨转储文本。
       const output = normalizeToolOutput(block?.content ?? content)
+      // Phase 4 P1: presentationMeta 透传。
+      //
+      // dsh `tool/result` 事件在 data 顶层携带 `meta?: JsonValue`（见
+      // packages/core/session/src/types.ts tool/result 事件类型注释）,
+      // 这是 harness tool-fs-search (`grep` / `glob`) 等结构化工具产出的
+      // SearchResultView / ReadResultView 等 opaque 渲染元数据。
+      // zai-side renderer（如新的 GrepRenderer / GlobRenderer）需要它来
+      // 渲染结构化卡片（按文件分组的 matches / paths 列表）,
+      // 而不是把 output 拍扁成 PreBlock 文本。
+      //
+      // 透传条件：meta 必须是 JSON-serializable（dsh Session.append 已
+      // 通过 isJsonValue 校验), 且 toolName 命中 dsh-bridge 已知的
+      // 结构化工具集（grep / glob）。其他工具 meta 为 undefined, 走旧的
+      // 纯文本渲染路径.
+      const rawMeta = (event.data as { meta?: unknown }).meta
+      const meta = isStructuredToolMeta(toolName, rawMeta) ? rawMeta : undefined
       return {
         ...baseFields,
         type: 'runtime.tool_result',
@@ -240,6 +256,7 @@ export function translateSessionEvent(
         toolName,
         input: null,
         output,
+        ...meta !== undefined ? { meta } : {},
       }
     }
 
@@ -436,6 +453,43 @@ function normalizeToolOutput(content: unknown): string {
     return JSON.stringify(content, null, 2)
   }
   return String(content)
+}
+
+/**
+ * Phase 4 P1: 结构化 tool result meta 守卫。
+ *
+ * dsh `tool/result` 事件顶层 `meta?: JsonValue` 是 tool-private opaque 渲染
+ * 元数据，对通用工具而言是 undefined；对结构化工具（如
+ * `@deepseek-ai/dsh-tool-fs-search` 的 `grep` / `glob`）是 SearchResultView
+ * 的 JSON 投影（`{ shape: 'matches' | 'paths', files | paths, truncated, total }`）。
+ *
+ * 该守卫决定是否把 meta 透传到 zai-side runtime.tool_result 事件上:
+ *   - toolName 在白名单（grep / glob）且
+ *   - meta 是合法 SearchMeta 形态（带 card discriminator 或 shape 字段）
+ *
+ * 不在白名单的 tool 一律 meta=undefined，让前端 renderer 走默认文本路径
+ * （保持与现有 dsh-013 前的旧 ripgrep 行为一致，避免误把任意 JSON 当成
+ * 搜索结果卡片渲染）。
+ *
+ * 白名单来源：harness `packages/fs/tool-fs-search/src/presentation.ts` 的
+ * SearchMeta 类型 + presentationMeta projector 的输出形态。toolName 列表
+ * 与 `createDshRuntime.ts` 装载的 `@deepseek-ai/dsh-tool-fs-search` 注册的
+ * 工具名（grep / glob）保持一致。
+ */
+const STRUCTURED_TOOL_NAMES = new Set(['grep', 'glob'])
+
+export function isStructuredToolMeta(toolName: string, meta: unknown): meta is unknown {
+  if (!STRUCTURED_TOOL_NAMES.has(toolName)) return false
+  if (meta === null || typeof meta !== 'object' || Array.isArray(meta)) return false
+  const record = meta as Record<string, unknown>
+  // SearchMeta 形态：{ shape: 'matches' | 'paths', files|paths, truncated, total }
+  if (record.shape !== 'matches' && record.shape !== 'paths') return false
+  if (typeof record.truncated !== 'boolean') return false
+  if (typeof record.total !== 'number') return false
+  if (record.shape === 'matches') {
+    return Array.isArray(record.files)
+  }
+  return Array.isArray(record.paths)
 }
 
 /**
