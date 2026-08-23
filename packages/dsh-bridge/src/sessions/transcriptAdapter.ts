@@ -86,6 +86,14 @@ interface DshSessionMeta {
   permissionMode?: string
   createdAt: number
   updatedAt?: number
+  /**
+   * 父 sessionId(非空时表示这是上游 dsh `SubagentRuntime.start('spawn', ...)`
+   * 创建的子会话;sidebar / 列表 API 默认隐藏,需 `excludeSubagent:false` 才显示)。
+   *
+   * 数据来源:仅 dsh session header(`persistence.loadStored().meta.parentSession`),
+   * zai 不写此字段 — 由上游 dsh spawn 时落盘。zai 透传到前端是只读,patch 不修改。
+   */
+  parentSession?: string
 }
 
 const JSONL_EXT = '.jsonl'
@@ -168,7 +176,7 @@ export class DshTranscriptAdapter {
   // ─── dsh-side persistence ─────────────────────────────────────────
 
   private persistence(): {
-    loadStored?: (id: unknown, signal?: AbortSignal) => Promise<{ meta?: { cwd?: string; createdAt?: number; id?: string }; events?: RawSessionEvent[] } | undefined>
+    loadStored?: (id: unknown, signal?: AbortSignal) => Promise<{ meta?: { cwd?: string; createdAt?: number; id?: string; parentSession?: string }; events?: RawSessionEvent[] } | undefined>
   } | null {
     return (this.ctx.get('sessionPersistence') as any) ?? null
   }
@@ -177,6 +185,7 @@ export class DshTranscriptAdapter {
     cwd: string
     createdAt: number
     events: RawSessionEvent[]
+    parentSession?: string
   } | null> {
     const p = this.persistence()
     if (!p?.loadStored) return null
@@ -187,6 +196,7 @@ export class DshTranscriptAdapter {
         cwd: loaded.meta?.cwd ?? '',
         createdAt: loaded.meta?.createdAt ?? 0,
         events: Array.isArray(loaded.events) ? (loaded.events as RawSessionEvent[]) : [],
+        parentSession: loaded.meta?.parentSession,
       }
     } catch (err) {
       // ENOENT or corrupt session log — treat as no stored session.
@@ -506,11 +516,12 @@ export class DshTranscriptAdapter {
     const messages = DshTranscriptAdapter.eventsToMessages(events)
 
     if (zaiMeta) {
-      // 刷新 createdAt 来自 dsh header(更权威)
+      // 刷新 createdAt 来自 dsh header(更权威);parentSession 同样从上游 dsh header 透传
       const meta: DshSessionMeta = {
         ...zaiMeta,
         cwd: stored?.cwd || zaiMeta.cwd,
         createdAt: stored?.createdAt || zaiMeta.createdAt,
+        ...(stored?.parentSession ? { parentSession: stored.parentSession } : {}),
       }
       if (!meta.title) {
         const inferred = DshTranscriptAdapter.inferTitle(events)
@@ -528,6 +539,7 @@ export class DshTranscriptAdapter {
         model: '',
         sessionId,
         ...(inferred ? { title: inferred } : { title: '' }),
+        ...(stored?.parentSession ? { parentSession: stored.parentSession } : {}),
         createdAt: stored?.createdAt ?? Date.now(),
       },
     }
@@ -539,6 +551,11 @@ export class DshTranscriptAdapter {
     //    有 dsh session log 的 session。
     // 2) 扫 dsh-session-meta/<sanitizedCwd>/*.meta.json — 这些是 zai 已知
     //    meta 但 dsh session 可能已被外部删除(罕见)。两边合并去重。
+    //
+    // **sub-agent 过滤**:上游 dsh `SubagentRuntime.start('spawn', ...)` 创建的子
+    // session 在 header `meta.parentSession` 写入父 sessionId;默认 (excludeSubagent
+    // =true) 隐藏,避免主 session sidebar 出现一堆 spawn 出来的子任务。仅 zai meta
+    // 残留路径(无 dsh session log)无法读到 parentSession,保守地不过滤。
     const seen = new Map<string, DshSessionMeta>()
 
     const dshDir = this.dshSessionsDirFor(cwd)
@@ -548,10 +565,15 @@ export class DshTranscriptAdapter {
         if (!ent.isDirectory()) continue
         const sessionId = decodeDshSessionSegment(ent.name)
         if (!sessionId) continue
+        const stored = await this.loadStored(sessionId)
+        // 默认排除子 session(header.parentSession 非空)— 主 session sidebar
+        // 不应该被 sub-agent 任务污染。调用方传 excludeSubagent:false 可解除。
+        if (opts.excludeSubagent !== false && stored?.parentSession) {
+          continue
+        }
+        const events = stored?.events ?? []
         // 优先拿 zai meta,否则从 dsh header 推导
         const zaiMeta = await this.readZaiMeta(sessionId, cwd)
-        const stored = await this.loadStored(sessionId)
-        const events = stored?.events ?? []
         const meta: DshSessionMeta = zaiMeta ?? {
           cwd,
           model: '',
@@ -565,6 +587,7 @@ export class DshTranscriptAdapter {
         meta.cwd = stored?.cwd || meta.cwd
         meta.createdAt = stored?.createdAt || meta.createdAt
         meta.updatedAt = meta.updatedAt ?? Date.now()
+        if (stored?.parentSession) meta.parentSession = stored.parentSession
         seen.set(sessionId, meta)
       }
     } catch (err) {
@@ -573,7 +596,8 @@ export class DshTranscriptAdapter {
 
     // 2) zai meta 残留(无 dsh session log) — 保守策略:也加入,避免 picker
     //    看不到用户专门改了 model 的 session(罕见,但旧 session 重启时
-    //    meta 缓存可能先落盘)。
+    //    meta 缓存可能先落盘)。这些条目无 dsh session.log 可读,无法判断
+    //    是否 sub-agent,统一保留。
     try {
       const metaEntries = await readdir(this.metaDirFor(cwd))
       for (const name of metaEntries) {

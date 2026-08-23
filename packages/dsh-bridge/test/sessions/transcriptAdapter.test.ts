@@ -21,13 +21,13 @@ import { tmpdir } from 'node:os'
 import { DshTranscriptAdapter, _internal as transcriptAdapterInternal } from '../../src/sessions/transcriptAdapter'
 
 interface FakeCtx {
-  storage: Map<string, { meta: { cwd: string; createdAt: number; id: string }; events: any[] }>
+  storage: Map<string, { meta: { cwd: string; createdAt: number; id: string; parentSession?: string }; events: any[] }>
   sessions: Map<string, any> // live agent sessions
   get(key: string): any
 }
 
 function makeFakeCtx(): FakeCtx {
-  const storage = new Map<string, { meta: { cwd: string; createdAt: number; id: string }; events: any[] }>()
+  const storage = new Map<string, { meta: { cwd: string; createdAt: number; id: string; parentSession?: string }; events: any[] }>()
   const sessions = new Map<string, any>()
   return {
     storage,
@@ -420,6 +420,84 @@ describe('DshTranscriptAdapter (dsh-020)', () => {
     const list = await adapter.list({ cwd })
     expect(list[0].sessionId).toBe('sess-new')
     expect(list[1].sessionId).toBe('sess-old')
+  })
+
+  // ─── sub-agent 过滤(默认隐藏 spawn 出来的子 session)────────────────
+
+  it('list 默认排除上游 dsh spawn 出来的 sub-agent session(header.parentSession 非空)', async () => {
+    // 上游 dsh SubagentRuntime.start('spawn', ...) 给子 session header 写
+    // parentSession;zai compat 不写这字段,仅从 dsh header 读取。默认
+    // (excludeSubagent 未传 / true) 应当从 sidebar / 列表 API 里隐藏子 session,
+    // 避免用户主 session 列表里看到一堆 spawn 任务。
+    const cwd = '/Users/x/y'
+    ctx.storage.set('sess-main', {
+      meta: { cwd, createdAt: 1000, id: 'sess-main' }, // 无 parentSession = 主 session
+      events: [],
+    })
+    ctx.storage.set('sess-child-a', {
+      meta: { cwd, createdAt: 1100, id: 'sess-child-a', parentSession: 'sess-main' },
+      events: [{ type: 'user/message', seq: 0, time: 1, data: { content: 'child task a' } }],
+    })
+    ctx.storage.set('sess-child-b', {
+      meta: { cwd, createdAt: 1200, id: 'sess-child-b', parentSession: 'sess-main' },
+      events: [],
+    })
+    const dshDir = join(tmpDir, 'dsh-sessions', '--Users-x-y--')
+    mkdirSync(join(dshDir, 'sess-main'), { recursive: true })
+    mkdirSync(join(dshDir, 'sess-child-a'), { recursive: true })
+    mkdirSync(join(dshDir, 'sess-child-b'), { recursive: true })
+
+    // 默认:不传 excludeSubagent → 应排除 sub-agent
+    const listDefault = await adapter.list({ cwd })
+    expect(listDefault.map((m) => m.sessionId)).toEqual(['sess-main'])
+
+    // 显式 excludeSubagent:true → 同样排除
+    const listExcluded = await adapter.list({ cwd, excludeSubagent: true })
+    expect(listExcluded.map((m) => m.sessionId)).toEqual(['sess-main'])
+  })
+
+  it('list excludeSubagent:false 保留 sub-agent session(并透传 parentSession 字段)', async () => {
+    // 上游 dsh 有 listLiveDshSessions / debug 视图需要看到所有 session;
+    // 显式传 excludeSubagent:false 时应该全部返回,meta.parentSession 透传。
+    const cwd = '/Users/x/y'
+    ctx.storage.set('sess-main', {
+      meta: { cwd, createdAt: 1000, id: 'sess-main' },
+      events: [],
+    })
+    ctx.storage.set('sess-child-a', {
+      meta: { cwd, createdAt: 1100, id: 'sess-child-a', parentSession: 'sess-main' },
+      events: [{ type: 'user/message', seq: 0, time: 1, data: { content: 'child a' } }],
+    })
+    const dshDir = join(tmpDir, 'dsh-sessions', '--Users-x-y--')
+    mkdirSync(join(dshDir, 'sess-main'), { recursive: true })
+    mkdirSync(join(dshDir, 'sess-child-a'), { recursive: true })
+
+    const list = await adapter.list({ cwd, excludeSubagent: false })
+    expect(list.length).toBe(2)
+    const byId = Object.fromEntries(list.map((m) => [m.sessionId, m]))
+    expect(byId['sess-main'].parentSession).toBeUndefined()
+    expect(byId['sess-child-a'].parentSession).toBe('sess-main')
+  })
+
+  it('read 透传上游 dsh header 的 parentSession 字段', async () => {
+    // 单独 read 一个 sub-agent session 时,即便 caller 走 read() 而不是 list(),
+    // meta 也应当携带 parentSession — 让前端能区分(例如 SubagentsTab
+    // / SubagentDetailDrawer 等可能用 read() 直接拿 meta)。
+    const cwd = '/Users/x/y'
+    const sid = 'sess-child-read'
+    ctx.storage.set(sid, {
+      meta: { cwd, createdAt: 1100, id: sid, parentSession: 'sess-parent-xyz' },
+      events: [
+        { type: 'user/message', seq: 0, time: 1, data: { content: 'child content' } },
+      ],
+    })
+    mkdirSync(join(tmpDir, 'dsh-session-meta', '--Users-x-y--'), { recursive: true })
+    writeFileSync(join(tmpDir, 'dsh-session-meta', '--Users-x-y--', `${sid}.meta.json`), JSON.stringify({
+      cwd, model: 'MiniMax-M3', sessionId: sid, createdAt: 1100,
+    }))
+
+    const read = await adapter.read(sid, { cwd })
+    expect(read.meta.parentSession).toBe('sess-parent-xyz')
   })
 
   // ─── patch ─────────────────────────────────────────────────────────
