@@ -35,6 +35,7 @@ import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SessionId } from '@deepseek-ai/dsh-session'
 import { createUserMessage } from '@deepseek-ai/dsh-llm'
 import { SubagentRuntime, type SubagentRun, type SubagentResult } from '@deepseek-ai/dsh-subagent'
+import type { ObjectJsonSchema, ToolRestriction } from '@deepseek-ai/dsh-tools'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 
 /**
@@ -425,14 +426,13 @@ export async function spawnDshSubagent(
       label: `dsh-subagent-${taskId}`,
       prompt: [{ type: 'text', text: opts.prompt }],
       parent: opts.parentAgent,
-      cwd: opts.cwd,
       signal: abortController.signal,
       agentOptions: {
         ...(opts.provider ? { provider: opts.provider } : {}),
         ...(opts.model ? { model: opts.model } : {}),
       },
-      ...(opts.outputSchema !== undefined ? { outputSchema: opts.outputSchema } : {}),
-      ...(opts.toolFilter !== undefined ? { toolFilter: opts.toolFilter } : {}),
+      ...(opts.outputSchema !== undefined ? { outputSchema: opts.outputSchema as unknown as ObjectJsonSchema } : {}),
+      ...(opts.toolFilter !== undefined ? { toolFilter: opts.toolFilter as unknown as ToolRestriction } : {}),
       ...(opts.persona !== undefined ? { persona: opts.persona } : {}),
       ...(opts.maxDepth !== undefined ? { maxDepth: opts.maxDepth } : {}),
     })
