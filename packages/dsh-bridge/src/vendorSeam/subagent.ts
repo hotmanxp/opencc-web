@@ -17,6 +17,10 @@
  * Stage 5 起:SeamSubagentDispatchInput 加 capability 字段(`outputSchema` /
  * `toolFilter` / `persona` / `maxDepth` / `backgroundMode:'continuable'`),
  * adapter 直接 mirror 到 vendor `SubagentStartRequest`。
+ *
+ * Task 7 起:多事件订阅(`subagent/start`/`end`/`descriptor`/`state`/`message`)
+ * 通过 eventBus 透传到 zai,capability 四件套透传到 spawnDshSubagent,
+ * startContinuable 转发到 vendor continuation。
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -31,6 +35,17 @@ import {
   readDshTask,
   type DshTaskState,
 } from '../subagent/taskStore.js'
+
+import type { SubagentContentBlock } from '../subagent/contentBlock.js'
+
+import {
+  translateSubagentStart,
+  translateSubagentEnd,
+  translateSubagentDescriptor,
+  translateSubagentState,
+  translateSubagentMessage,
+  emitLegacyShim,
+} from './eventTranslation.js'
 
 import type {
   SubagentControlSeam,
@@ -65,6 +80,11 @@ export interface DshSubagentAdapterOptions {
    * 或从 zai 内部 session registry 拿兼容。
    */
   getParentAgent: (sessionId: string) => Agent | undefined
+  /**
+   * zai eventBus — Task 7 起用于多事件订阅透传。
+   * 不传时 fallback 到 `globalThis.__zaiEventBus`(兼容旧调用方)。
+   */
+  eventBus?: { emit: (e: unknown) => void }
 }
 
 /**
@@ -76,6 +96,7 @@ export interface DshSubagentAdapterOptions {
 export class DshSubagentControlAdapter implements SubagentControlSeam {
   private readonly ctx: Context
   private readonly getParentAgent: (sessionId: string) => Agent | undefined
+  private readonly eventBus: { emit: (e: unknown) => void }
   /** 已注册的 change listener 列表 — 用于 destroy() 统一 unsubscribe。 */
   private readonly changeListeners: SeamSubagentChangeListener[] = []
   /** cordis `ctx.on('subagent/start' | 'subagent/end')` 返回的 disposer。 */
@@ -84,15 +105,16 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
   constructor(opts: DshSubagentAdapterOptions) {
     this.ctx = opts.ctx
     this.getParentAgent = opts.getParentAgent
+    this.eventBus = opts.eventBus ?? (globalThis as { __zaiEventBus?: { emit: (e: unknown) => void } }).__zaiEventBus ?? { emit: () => {} }
     this.installCordisListeners()
   }
 
   /**
-   * 内部:订阅 vendor `'subagent/start'` + `'subagent/end'` 事件。
+   * 内部:订阅 vendor 5 个 subagent 事件。
    *
    * 事件 names 在 `@deepseek-ai/dsh-subagent/src/index.ts:140-167` 声明。
-   * cordis `ctx.on` 返回 disposer — Stage 5+ 也可订阅 `'subagent/provider-*'`
-   * 监视 provider register/remove。
+   * cordis `ctx.on` 返回 disposer — Task 7 起订阅 5 个事件并通过
+   * eventBus 透传到 zai。
    */
   private installCordisListeners(): void {
     const trigger = (): void => {
@@ -109,17 +131,60 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
     }
 
     try {
-      const offStart = this.ctx.on('subagent/start', () => trigger())
-      const offEnd = this.ctx.on('subagent/end', () => trigger())
-      if (typeof offStart === 'function') this.cordisDisposers.push(offStart)
-      if (typeof offEnd === 'function') this.cordisDisposers.push(offEnd)
+      const handlers: Array<[name: 'subagent/start' | 'subagent/end' | 'subagent/descriptor' | 'subagent/state' | 'subagent/message', cb: (info: unknown) => void]> = [
+        ['subagent/start', (info) => {
+          const startEvt = translateSubagentStart(this.getCurrentSessionId(), info as never)
+          this.eventBus.emit(startEvt)
+          emitLegacyShim(this.eventBus, startEvt)
+          trigger()
+        }],
+        ['subagent/end', (info) => {
+          const endEvt = translateSubagentEnd(this.getCurrentSessionId(), info as never)
+          this.eventBus.emit(endEvt)
+          emitLegacyShim(this.eventBus, endEvt)
+          trigger()
+        }],
+        ['subagent/descriptor', (info) => {
+          const descEvt = translateSubagentDescriptor(
+            this.getCurrentSessionId(),
+            (info as { runId: string }).runId,
+            info as never,
+          )
+          this.eventBus.emit(descEvt)
+        }],
+        ['subagent/state', (info) => {
+          const stateEvt = translateSubagentState(
+            this.getCurrentSessionId(),
+            (info as { runId: string }).runId,
+            (info as { state: 'running' | 'waiting' | 'settled' }).state,
+          )
+          this.eventBus.emit(stateEvt)
+        }],
+        ['subagent/message', (info) => {
+          const msgEvt = translateSubagentMessage(
+            this.getCurrentSessionId(),
+            (info as { runId: string }).runId,
+            (info as { blocks: SubagentContentBlock[] }).blocks,
+          )
+          this.eventBus.emit(msgEvt)
+        }],
+      ]
+      for (const [name, cb] of handlers) {
+        const off = (this.ctx.on as (name: string, cb: (info: unknown) => void) => () => void)(name, cb as never)
+        if (typeof off === 'function') this.cordisDisposers.push(off)
+      }
     } catch (err) {
-      // ctx.on 不可用(例如 ctx stub)— listener 仍可手动 emit,降级可工作
       console.warn(
         '[dsh-bridge] SubagentControlSeam: ctx.on subagent/* 不支持,降级到磁盘 polling — 变更感知延迟 < 500ms',
         err,
       )
     }
+  }
+
+  private getCurrentSessionId(): string {
+    // 优先从 ctx.agents 拿当前 sessionId;fallback 走 globalThis
+    const agents = this.ctx.get('agents') as { getCurrentSessionId?: () => string | undefined } | undefined
+    return agents?.getCurrentSessionId?.() ?? ''
   }
 
   async dispatch(input: SeamSubagentDispatchInput): Promise<SeamSubagentHandle> {
@@ -173,6 +238,10 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
         providerName,
         ...(input.model !== undefined ? { model: input.model } : {}),
         ...(input.provider !== undefined ? { provider: input.provider } : {}),
+        ...(input.outputSchema !== undefined ? { outputSchema: input.outputSchema } : {}),
+        ...(input.toolFilter !== undefined ? { toolFilter: input.toolFilter } : {}),
+        ...(input.persona !== undefined ? { persona: input.persona } : {}),
+        ...(input.maxDepth !== undefined ? { maxDepth: input.maxDepth } : {}),
       })
     } catch (err) {
       // spawnDshSubagent 只在基础设施故障 reject(provider/parentAgent 缺失已
@@ -218,6 +287,16 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
 
   async sendMessage(taskId: string, content: string): Promise<{ ok: boolean }> {
     return sendMessageToDshSubagent(this.ctx, taskId, content)
+  }
+
+  async startContinuable(opts: {
+    parentSessionId: string
+    childId?: string
+    prompt: string
+    messageId?: string
+  }): Promise<{ childId: string; messageId: string }> {
+    const { startContinuable: vendorStart } = await import('../subagent/continuation.js')
+    return vendorStart(this.ctx, opts)
   }
 
   onChange(listener: SeamSubagentChangeListener): () => void {

@@ -110,6 +110,14 @@ export interface SeamSubagentDispatchInput {
    * Stage 4 加载 'fork' provider + UI 暴露 context 选项后再实装 fork 分支。
    */
   context: 'spawn' | 'fork'
+  /** 输出 JSON Schema — 透传到 vendor SubagentStartRequest.outputSchema。 */
+  outputSchema?: Record<string, unknown>
+  /** 工具过滤白名单 — 透传到 vendor SubagentStartRequest.toolFilter。 */
+  toolFilter?: string[]
+  /** Persona 名称 — 透传到 vendor SubagentStartRequest.persona。 */
+  persona?: string
+  /** 最大调用深度 — 透传到 vendor SubagentStartRequest.maxDepth。 */
+  maxDepth?: number
 }
 
 /**

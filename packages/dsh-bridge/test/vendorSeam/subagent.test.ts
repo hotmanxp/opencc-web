@@ -482,6 +482,7 @@ describe('Stage 0: DshSubagentControlAdapter contract', () => {
       const adapter = createDshSubagentControlBridge({
         ctx: makeMockCtx(parentAgent) as never,
         getParentAgent: () => parentAgent,
+        eventBus: { emit: () => {} } as never,
       })
       expect(adapter).toBeDefined()
       expect(typeof adapter.dispatch).toBe('function')
@@ -491,5 +492,78 @@ describe('Stage 0: DshSubagentControlAdapter contract', () => {
       expect(typeof adapter.sendMessage).toBe('function')
       expect(typeof adapter.onChange).toBe('function')
     })
+  })
+})
+
+describe('DshSubagentControlAdapter 多事件订阅 (Task 7)', () => {
+  it('订阅 5 个 vendor 事件并在 start 时 emit subagent.start', () => {
+    const subs: Record<string, (info: unknown) => void> = {}
+    const ctx = {
+      on: (name: string, cb: (i: unknown) => void) => {
+        subs[name] = cb
+        return () => { delete subs[name] }
+      },
+      get: (key: string) => {
+        if (key === 'agents') return { getCurrentSessionId: () => 'p1', get: (id: string) => id === 'p1' ? { id: 'p1' } : undefined }
+        return undefined
+      },
+      subagents: { start: async () => ({ id: 'r1', localAgent: undefined, result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => {} }) },
+      agents: { get: () => ({ id: 'p1' }) },
+    } as never
+    const eventBus = { emit: vi.fn() }
+    new DshSubagentControlAdapter({ ctx, getParentAgent: () => ({ id: 'p1' } as never), eventBus: eventBus as never })
+    expect(subs['subagent/start']).toBeDefined()
+    expect(subs['subagent/end']).toBeDefined()
+    expect(subs['subagent/state']).toBeDefined()
+    expect(subs['subagent/descriptor']).toBeDefined()
+    expect(subs['subagent/message']).toBeDefined()
+    subs['subagent/start']!({ runId: 'r1', provider: 'spawn', id: 'd1', local: true })
+    expect(eventBus.emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'subagent.start' }))
+  })
+
+  it('dispatch 透传 capability 到 spawnDshSubagent', async () => {
+    // spawnDshSubagent is mocked — capture opts passed to it directly
+    let capturedOpts: unknown
+    mockState.taskStore.spawnDshSubagent.mockImplementation(async (_ctx: unknown, opts: unknown) => {
+      capturedOpts = opts
+      return { id: 'r1', localAgent: undefined, result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => {} }
+    })
+    const ctx = {
+      on: () => () => {},
+      get: (key: string) => {
+        if (key === 'agents') return { get: (id: string) => id === 'p1' ? { id: 'p1' } : undefined }
+        return undefined
+      },
+      subagents: { start: async () => ({ id: 'r1', localAgent: undefined, result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => {} }) },
+      agents: { get: () => ({ id: 'p1' }) },
+    } as never
+    const a = new DshSubagentControlAdapter({ ctx, getParentAgent: () => ({ id: 'p1' } as never), eventBus: { emit: () => {} } as never })
+    await a.dispatch({
+      parentSessionId: 'p1', cwd: '/tmp', prompt: 'x',
+      backgroundMode: 'async',
+      context: 'spawn',
+      outputSchema: { type: 'object' },
+      toolFilter: ['Read'],
+      persona: 'p', maxDepth: 1,
+    })
+    expect(capturedOpts).toMatchObject({ outputSchema: { type: 'object' }, toolFilter: ['Read'], persona: 'p', maxDepth: 1 })
+  })
+
+  it('startContinuable 转发到 vendor continuation', async () => {
+    const ctx = {
+      on: () => () => {},
+      get: (key: string) => {
+        if (key === 'agents') return { get: (id: string) => id === 'p1' ? { id: 'p1' } : undefined }
+        return undefined
+      },
+      subagents: {
+        startContinuable: vi.fn().mockResolvedValue({ childId: 'c1', messageId: 'm1' }),
+      } as never,
+      agents: { get: () => ({ id: 'p1' }) },
+    } as never
+    const a = new DshSubagentControlAdapter({ ctx, getParentAgent: () => ({ id: 'p1' } as never), eventBus: { emit: () => {} } as never })
+    const r = await a.startContinuable({ parentSessionId: 'p1', prompt: 'hi' })
+    expect(r).toEqual({ childId: 'c1', messageId: 'm1' })
+    expect((ctx.subagents as { startContinuable: unknown }).startContinuable).toHaveBeenCalled()
   })
 })
