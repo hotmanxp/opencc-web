@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { Collapse } from 'antd'
 import { useAgentStore } from '../store/useAgentStore'
 import { useAppStore } from '../store/useAppStore'
 import AgentConversation from './AgentConversation'
@@ -12,6 +13,34 @@ import { FilePreviewDrawer } from '../components/conversation/FilePreviewDrawer'
 import ConfigStatusBar from '../components/ConfigStatusBar'
 import MobileQuickDrawer from '../components/MobileQuickDrawer.jsx'
 import { UpdateNotifier } from '../components/UpdateNotifier'
+import { SubagentDetailBody } from '../components/splitPane/SubagentDetailBody'
+
+function SubagentList({ sessionId }: { sessionId: string }) {
+  const tasks = useAgentStore((s) => s.subagentTasksBySession[sessionId] ?? [])
+  if (tasks.length === 0) return null
+  return (
+    <Collapse>
+      <Collapse.Panel
+        header={`Subagents (${tasks.length})`}
+        key="subagents"
+      >
+        {tasks.map((task) => (
+          <div key={task.taskId} className="py-2 border-b">
+            <div className="font-medium">{task.taskId.slice(0, 16)}...</div>
+            <div className="text-xs text-gray-500">
+              {task.state === 'running' && '运行中'}
+              {task.state === 'waiting' && '等待'}
+              {task.state === 'settled' && '已结束'}
+              {' · '}
+              {task.status}
+            </div>
+            <SubagentDetailBody taskId={task.taskId} />
+          </div>
+        ))}
+      </Collapse.Panel>
+    </Collapse>
+  )
+}
 
 /**
  * 移动端 /agent 页面:
@@ -30,6 +59,7 @@ export default function MobileAgent() {
   const loadSessions = useAgentStore((s) => s.loadSessions)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
   const quickDrawerOpen = useAppStore((s) => s.quickDrawerOpen)
+  const sessionId = useAgentStore((s) => s.sessionId)
   const setQuickDrawerOpen = useAppStore((s) => s.setQuickDrawerOpen)
   const { instanceContext } = useAppStore()
   const cwdBySessionForSid = useAgentStore((s) =>
@@ -69,6 +99,7 @@ export default function MobileAgent() {
       <UpdateNotifier />
       <MobileHeader onOpenSessionDrawer={() => setDrawerOpen(true)} />
       <AgentConversation />
+      {sessionId && <SubagentList sessionId={sessionId} />}
       <ConfigStatusBar
         cwdName={cwdName}
         sessionCwd={cwdBySessionForSid}

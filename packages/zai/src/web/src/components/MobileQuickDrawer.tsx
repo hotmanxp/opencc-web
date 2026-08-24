@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
-import { Drawer, Segmented, Button, Input, App as AntApp, Modal, Empty, Spin } from 'antd'
+import { Drawer, Segmented, Button, Input, App as AntApp, Modal, Empty, Spin, Collapse } from 'antd'
 import {
   ReloadOutlined,
   PlusOutlined,
@@ -19,6 +19,7 @@ import { STATUS_COLORS } from './splitPane/shared.js'
 import { DiffView } from './splitPane/DiffView.js'
 import BranchSelector from './BranchSelector'
 import { message } from 'antd'
+import { SubagentDetailBody } from './splitPane/SubagentDetailBody.js'
 import type { GitStatusChar } from '../../../shared/git.js'
 
 type TabKey = 'bash' | 'prompt' | 'git'
@@ -323,6 +324,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
   const [tab, setTab] = useState<TabKey>('bash')
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
+  const [showSubagents, setShowSubagents] = useState(false)
 
   const effectiveSid = sessionId ?? activeSessionId
 
@@ -385,6 +387,30 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
     setDraft('')
     setAdding(false)
     message.success('已保存为常用指令')
+  }
+
+  function SubagentList({ sid }: { sid: string }) {
+    const tasks = useAgentStore((s) => s.subagentTasksBySession[sid] ?? [])
+    if (tasks.length === 0) return <Empty description="暂无子代理任务" image={Empty.PRESENTED_IMAGE_SIMPLE} />
+    return (
+      <Collapse>
+        <Collapse.Panel header={`Subagents (${tasks.length})`} key="subagents">
+          {tasks.map((task) => (
+            <div key={task.taskId} className="py-2 border-b">
+              <div className="font-medium">{task.taskId.slice(0, 16)}...</div>
+              <div className="text-xs text-gray-500">
+                {task.state === 'running' && '运行中'}
+                {task.state === 'waiting' && '等待'}
+                {task.state === 'settled' && '已结束'}
+                {' · '}
+                {task.status}
+              </div>
+              <SubagentDetailBody taskId={task.taskId} />
+            </div>
+          ))}
+        </Collapse.Panel>
+      </Collapse>
+    )
   }
 
   return (
@@ -591,6 +617,26 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
 
       {tab === 'git' && (
         <GitTab cwd={cwd} />
+      )}
+
+      <Button
+        block
+        onClick={() => setShowSubagents(true)}
+        aria-label="Subagents"
+        style={{ marginTop: 12 }}
+      >
+        Subagents
+      </Button>
+      {showSubagents && effectiveSid && (
+        <Drawer
+          open
+          onClose={() => setShowSubagents(false)}
+          title="Subagents"
+          width="85%"
+          placement="right"
+        >
+          <SubagentList sid={effectiveSid} />
+        </Drawer>
       )}
     </Drawer>
   )
