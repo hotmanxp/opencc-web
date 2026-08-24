@@ -47,10 +47,10 @@ function readCurrentSessionId(): string | undefined {
 }
 
 /**
- * dsh-019: dsh-mode subagent control 桥 — dsh factory 在 `initDshRuntime`
- * 时把 dsh-bridge 的 subagent API 写到 `globalThis.__zaiDshSubagentControl`。
- * zai compat `subagentControl` 检测到该桥存在 → 走 dsh 模式;否则
- * 走原 BackgroundRuntime(opencc 模式)。
+ * zai-side 通过 seamRegistry 访问 subagent seam,不再走 globalThis 桥。
+ * dsh factory 在 initDshRuntime 时把 subagent seam 注册进 kernel;
+ * 本 compat 工具在 dsh 模式下通过 `kernel.getSeam('subagent')` 获取,
+ * opencc 模式下 fallback 到 BackgroundRuntime。
  */
 interface DshSubagentControlBridge {
   list: (parentSessionId?: string) => Promise<Array<{
@@ -62,11 +62,17 @@ interface DshSubagentControlBridge {
   sendMessage: (taskId: string, prompt: string) => Promise<{ ok: boolean }>
 }
 
-function tryGetDshSubagentControl(): DshSubagentControlBridge | null {
-  const fromGlobal = (globalThis as {
-    __zaiDshSubagentControl?: DshSubagentControlBridge
-  }).__zaiDshSubagentControl
-  return fromGlobal ?? null
+/** Dynamic import of getKernelAdapter from zai's agentRuntime (same process at runtime). */
+async function getDshSubagentControl(): Promise<DshSubagentControlBridge | null> {
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const { getKernelAdapter } = require('../../../../zai/src/server/services/agentRuntime.js')
+    const adapter = getKernelAdapter()
+    if (!adapter.getSeam) return null
+    return adapter.getSeam('subagent') as unknown as DshSubagentControlBridge
+  } catch {
+    return null
+  }
 }
 
 export interface SubagentControlInput {
@@ -100,9 +106,9 @@ function asError(err: unknown): string {
 async function executeImpl(
   input: SubagentControlInput,
 ): Promise<SubagentControlOutput> {
-  // dsh-019: dsh 模式优先 — zai dsh factory 在 init 时把 dsh-bridge 的
-  // subagent API 写到 globalThis.__zaiDshSubagentControl。命中即用。
-  const dsh = tryGetDshSubagentControl()
+  // dsh-019→Task 19: 通过 kernel.getSeam('subagent') 拿 dsh subagent seam;
+  // seam 未注册(opencc 模式)时 fallback 到 BackgroundRuntime。
+  const dsh = await getDshSubagentControl()
   if (dsh) {
     if (input.action === 'send_message') {
       if (!input.task_id || !input.message) {
