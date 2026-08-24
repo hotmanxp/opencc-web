@@ -7,6 +7,7 @@ import {
 } from '@ant-design/icons'
 
 import { useAgentStore } from '../store/useAgentStore.js'
+import { useAppStore } from '../store/useAppStore.js'
 
 /**
  * Reasoning effort 选择按钮(ds-022 effort-picker follow-up)。
@@ -55,6 +56,9 @@ export default function EffortStatusButton({ compact = false }: Props = {}) {
   // useConversationInfo 的 useState 本地 runtime 因 v3 vite HMR 偶尔
   // 不重 mount 引发的 stale state bug。
   const sessionId = useAgentStore((s) => s.sessionId)
+  // 移动端直接从 useAppStore.isMobile 读, 与 ModelStatusButton/TaskDock 同模式.
+  // 窄屏状态栏只显示 effort 缩写, 去掉 "effort: " 前缀给 model / cwd 留横向空间.
+  const isMobile = useAppStore((s) => s.isMobile)
   const activeSessionId = useAgentStore((s) => s.activeSessionId)
   const effectiveSessionId = sessionId ?? activeSessionId ?? null
   const availableModels = useAgentStore((s) => s.availableModels)
@@ -140,7 +144,7 @@ export default function EffortStatusButton({ compact = false }: Props = {}) {
     await patchSessionReasoningEffort(sessionId, level)
   }
 
-  const buttonLabel = compact ? displayLabel : `effort: ${displayLabel}`
+  const buttonLabel = (compact || isMobile) ? displayLabel : `effort: ${displayLabel}`
 
   return (
     <Popover
