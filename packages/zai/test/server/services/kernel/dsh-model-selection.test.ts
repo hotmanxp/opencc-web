@@ -130,13 +130,31 @@ describe('zai import — dsh-bridge 透传的 ModelSelectionRef 可见性', () =
  * - selected.reasoningEffort === undefined → 剥离 inherited reasoningEffort
  * - selected.reasoningEffort !== undefined → 覆盖
  *
- * 这个测试覆盖 user-effort × model 的几条关键决策路径。
+ * **ds-022 hotfix follow-up(2026-08-24, round 3)**:
+ *   - round 1:non-reasoning 返回 `'off'` — 触发上游 dsh-llm 校验抛错
+ *   - round 2:non-reasoning 返回 undefined + 去掉 highspeed `reasoningEfforts: false` —
+ *     pi-ai catalog 不在 anthropic provider 下,`base?.reasoning ?? false` 推断
+ *     `reasoning: false`,仍然触发上游校验
+ *   - **round 3 真正解法**:highspeed 显式声明 `reasoningEfforts: ['low','medium','high']`,
+ *     让 resolveModelReasoning 走 `efforts !== undefined` 分支返回
+ *     `{ reasoning: true, thinkingLevelMap }`,绕过 catalog lookup fallback
+ *
+ * zai-side `validateReasoningEffort` 行为:
+ *   - `reasoningEfforts: false` (legacy/non-reasoning 模型) → undefined
+ *     (避免上游 dsh-llm `info.reasoning === undefined && requested !== undefined`
+ *      抛 UNSUPPORTED_REASONING_EFFORT)
+ *   - `reasoningEfforts: string[]` (reasoning-capable) → user-effort 在列表内返回
+ *     user-effort;不在返回 undefined
+ *   - `reasoningEfforts` undefined (model 声明) → user-effort 透传
  */
 describe('validateReasoningEffort() — ds-022 per-model effort', () => {
   const PROFILE = [
     { id: 'MiniMax-M3',          reasoningEfforts: ['low', 'medium', 'high'] },
     { id: 'MiniMax-M2.7',        reasoningEfforts: ['low', 'medium', 'high'] },
-    { id: 'MiniMax-M2.7-highspeed', reasoningEfforts: false },
+    // round 3 起,highspeed 显式 reasoning-capable(同 M3 列表)
+    { id: 'MiniMax-M2.7-highspeed', reasoningEfforts: ['low', 'medium', 'high'] },
+    // legacy non-reasoning(防御性回归 — zai 当前 profile 不再放)
+    { id: 'legacy-non-reasoning', reasoningEfforts: false },
   ]
 
   it('user-effort undefined → undefined(让 upstream 剥离 inherited)', () => {
@@ -156,13 +174,18 @@ describe('validateReasoningEffort() — ds-022 per-model effort', () => {
     expect(validateReasoningEffort('ultracode', 'MiniMax-M3', PROFILE)).toBeUndefined()
   })
 
-  it('non-reasoning model(标 reasoningEfforts: false)+ 任意 effort → undefined', () => {
-    expect(validateReasoningEffort('medium', 'MiniMax-M2.7-highspeed', PROFILE)).toBeUndefined()
-    expect(validateReasoningEffort('off',    'MiniMax-M2.7-highspeed', PROFILE)).toBeUndefined()
+  it('highspeed + user-effort=medium → medium(同 M3,显式 reasoningEfforts 覆盖 catalog 推断)', () => {
+    expect(validateReasoningEffort('medium', 'MiniMax-M2.7-highspeed', PROFILE)).toBe('medium')
   })
 
-  it('model 不在 profile 里 → undefined(防御性)', () => {
-    expect(validateReasoningEffort('medium', 'some-unknown-model', PROFILE)).toBeUndefined()
+  it('non-reasoning model(标 reasoningEfforts: false)+ 任意 user-effort → undefined(避免 dsh-llm 上游校验抛错)', () => {
+    expect(validateReasoningEffort('medium', 'legacy-non-reasoning', PROFILE)).toBeUndefined()
+    expect(validateReasoningEffort('off',    'legacy-non-reasoning', PROFILE)).toBeUndefined()
+  })
+
+  it('model 不在 profile 里 + user-effort 任意 → user-effort 透传(让 dsh-llm 校验)', () => {
+    expect(validateReasoningEffort('medium', 'some-unknown-model', PROFILE)).toBe('medium')
+    expect(validateReasoningEffort('medium', 'some-unknown-model', [])).toBe('medium')
   })
 
   it('profile 仅含 string 形态 model id → 仍能匹配', () => {

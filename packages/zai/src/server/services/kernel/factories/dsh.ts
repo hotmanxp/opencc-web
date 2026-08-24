@@ -269,29 +269,41 @@ export function __getModelSelectionRefForTests(
  * pi-ai 反复摩擦。
  */
 /**
- * **ds-022 / per-model reasoning decision** — effort-picker follow-up 升级。
+ * **ds-022 / per-model reasoning decision** — effort-picker follow-up。
  *
  * 角色:
  *   校验 user-selected reasoningEffort 是否对 selected model 合法,brand
  *   一下返回 branded value 给 upstream emitter 透传给 dsh-llm-pi-ai。
- *   不合法一律 strip 为 `undefined` —— upstream `installModelSelection`
- *   (`model-selection.ts:60-68`)的设计是 `selected.reasoningEffort ===
- *   undefined` 时把 inherited reasoningEffort 从 LlmCallConfig 中
- *   剥离,等价于"该 model 不接受 reasoning effort"语义。
  *
- * 根因:anthropicProfile 的 **profile-level** `defaultReasoningEffort:
- * 'medium'` 会在 stream 时被 dsh-llm-pi-ai 的 `adapter.ts:336-339` 注入到
- * LlmCallConfig.reasoningEffort;随后 `resolveReasoningLevel`
- * (`adapter.ts:155-166`) 用 `getSupportedThinkingLevels(model)` 校验 —
- * model 的 `reasoningEfforts: false` 时返回 `['off']`,profile 'medium' 直接
- * 抛 `UNSUPPORTED_REASONING_EFFORT`。
+ * **为什么 non-reasoning model 返回 `undefined` 而不是 `'off'`**:
+ *   upstream dsh-llm `@deepseek-ai/dsh-llm/lib/index.js:1356-1366` 的
+ *   `resolveCallFor` 校验:
+ *     if (reasoning === undefined && requested !== undefined)
+ *       throw UNSUPPORTED_REASONING_EFFORT
+ *   任何 `requested !== undefined` 都会让 non-reasoning model 抛错。
+ *   所以我们返回 `undefined` 让 upstream 剥离 inherited reasoningEffort,
+ *   然后让 pi-ai 自己处理。
+ *
+ *   pi-ai `dsh-llm-pi-ai/lib/index.js:854` 写法:
+ *     resolveReasoningLevel(model, options.reasoningEffort ?? profile.reasoning)
+ *   `??` 在 undefined 时回退到 profile.reasoning —— 这对 `reasoningEfforts: false`
+ *   模型仍会抛错(`'medium'` 不在 `['off']` 里),所以 zai-side **不能**
+ *   把 `reasoningEfforts: false` 模型放进有 `defaultReasoningEffort` 的 route。
+ *   修复:anthropicProfile 里 non-reasoning 模型不再声明 `reasoningEfforts: false`,
+ *   让 pi-ai 内置 catalog 的 `reasoning: true` 接管(详见 models 列表注释)。
+ *
+ * 根因:`reasoningEfforts: false` 模型 + profile-level `defaultReasoningEffort`
+ *   联合触发 dsh-llm 上游 + pi-ai 双层 `UNSUPPORTED_REASONING_EFFORT` —
+ *   chicken-and-egg,唯一解法是让 catalog 接管。详细见 ds-022 follow-up commit
+ *   message / `packages/dsh-bridge/IMPLEMENTATION_STATUS.md`。
  */
 export function validateReasoningEffort(
   userEffort: string | undefined,
   selectedModel: string,
   anthropicProfileModels: ReadonlyArray<string | { id: string; reasoningEfforts?: false | string[] }>,
 ): ReasoningEffortId | undefined {
-  // 没传 → undefined → upstream 剥离 inherited reasoningEffort
+  // 没传 userEffort → undefined → upstream 剥离 inherited;让 pi-ai / dsh-llm
+  // 按各自 catalog / profile default 决定。
   if (userEffort === undefined || userEffort.length === 0) {
     return undefined
   }
@@ -301,12 +313,23 @@ export function validateReasoningEffort(
     return m.id === selectedModel
   })
   if (entry === undefined) {
-    // model 不在 profile 里(调用方已 fallback,belt-and-suspenders)
-    return undefined
+    // model 不在 profile 里(调用方已 fallback,belt-and-suspenders)—— 透传给
+    // dsh-llm 让它自己校验(可能抛 UNSUPPORTED_REASONING_EFFORT,这是预期行为)。
+    return userEffort as unknown as ReasoningEffortId
   }
   if (typeof entry !== 'string') {
     if (entry.reasoningEfforts === false) {
-      // non-reasoning model — 任何 effort 都无视
+      // non-reasoning model(显式 `reasoningEfforts: false`):任何 user-effort 都剥离,
+      // 避免上游 dsh-llm `info.reasoning === undefined && requested !== undefined`
+      // 抛 UNSUPPORTED_REASONING_EFFORT。zai 实际当前 profile 不再使用
+      // `reasoningEfforts: false`(高speed 让 catalog 接管),但保留分支以备
+      // 未来 non-reasoning 模型声明。
+      if (process.env.ZAI_DEBUG === '1') {
+        console.warn(
+          `[dsh-adapter] model "${selectedModel}" declares reasoningEfforts: false; ` +
+            `stripping user-selected effort "${userEffort}"`,
+        )
+      }
       return undefined
     }
     if (
@@ -315,6 +338,7 @@ export function validateReasoningEffort(
       && !entry.reasoningEfforts.includes(userEffort)
     ) {
       // model 支持 reasoningEffort 列表但 user-effort 不在其中 → 静默降级
+      // (返回 undefined,让 pi-ai 走 profile.reasoning 默认值)
       if (process.env.ZAI_DEBUG === '1') {
         console.warn(
           `[dsh-adapter] user effort "${userEffort}" not supported by model "${selectedModel}" ` +
@@ -325,7 +349,7 @@ export function validateReasoningEffort(
     }
   }
   // 校验通过 — ReasoningEffortId 是 upstream `ReasoningEffortId =
-  // Branded<'ReasoningEffortId'>` (compile-time only),cas t 不影响
+  // Branded<'ReasoningEffortId'>` (compile-time only),cast 不影响
   // runtime(brand 是 pure type)。
   return userEffort as unknown as ReasoningEffortId
 }
@@ -417,7 +441,19 @@ export async function createDshKernelAdapter(
         input: ['text'],  // highspeed 不支持 image
         contextWindow: 204_800,
         maxTokens: 131_072,
-        reasoningEfforts: false,
+        // 显式声明 reasoningEfforts + 同 list level,覆盖 pi-ai catalog lookup 的
+        // `base?.reasoning ?? false` 推断(zai 端 anthropicProfile.name='anthropic'
+        // 不在 minimax catalog 里,`defaults.get('MiniMax-M2.7-highspeed')` 是
+        // undefined → resolveModelReasoning 推断为 `reasoning: false` → 触发上游
+        // dsh-llm `resolveCallFor` 校验抛 UNSUPPORTED_REASONING_EFFORT)。
+        //
+        // 与 M3 / M2.7 同 list ('low'/'medium'/'high') — 假设 MiniMax 网关对
+        // highspeed 也支持 extended thinking 参数(同 baseURL、同 api
+        // `anthropic-messages`、同 minimax vendor)。若 API 实测拒绝,需拆
+        // provider route,把 highspeed 放到独立 provider(无
+        // defaultReasoningEffort)。详细见
+        // docs/2026-08-17-dsh-*.md long-term follow-up。
+        reasoningEfforts: ['low', 'medium', 'high'],
       },
     ],
   }
