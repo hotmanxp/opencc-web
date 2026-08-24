@@ -6,6 +6,18 @@
  *   - 'all' 模式下按 parentSessionId 分组显示,每组 header 标注 session。
  *   - mode 状态本地组件 useState(不持久化,刷新后回到 'current')。
  *
+ * Task 14(2026-08-24):增加:
+ *   - state 渲染:基于 task.state(running / waiting / settled)显示不同 UI。
+ *     注:per Task 7 vendor-reality fix,vendor 只有 start/end 两个事件,
+ *     state='waiting' 仅在跨 turn boundary 短暂出现(目前基本不出现)。
+ *   - Continue 按钮:done 状态下显示,调 POST /api/subagent-tasks/:id/continuable
+ *     启动一个 continuable 子代理(持久多轮对话)。
+ *
+ * Task 14 未实施(对齐 brief Concerns):
+ *   - Fork toggle / "新建子代理" Modal:SubagentsTab 当前是只读 view,
+ *     子代理由 LLM Agent 工具调用创建,UI 无「新建子代理」入口;
+ *     POST /api/subagent-tasks 创建端点不存在。
+ *
  * Phase 1 限制:
  *   - 5s 轮询(Phase 2 改 SSE 推送)
  *   - 不带详情 Drawer — 点 row 直接调 interrupt API
@@ -54,6 +66,18 @@ const STATUS_COLOR: Record<string, string> = {
   cancelled: 'default',
 }
 
+/**
+ * Task 14: state → Tag 映射。
+ * per Task 7 vendor-reality fix:vendor 只推 start/end 事件,state 由
+ * reducer 派生;'running' on start,'settled' on end。'waiting' 仅在
+ * 跨 turn boundary 短暂出现(vendor 不发 state 事件,目前 UI 几乎看不到)。
+ */
+const STATE_TAG: Record<string, { color: string; text: string }> = {
+  running: { color: 'processing', text: '运行中' },
+  waiting: { color: 'orange', text: '等待子代理回复' },
+  settled: { color: 'default', text: '已结束' },
+}
+
 function SubagentRow({
   task,
   onInterrupt,
@@ -61,6 +85,7 @@ function SubagentRow({
   onSendMessage,
   sendingTo,
   onSelect,
+  onContinue,
 }: {
   task: DshSubagentTask
   onInterrupt: (id: string) => void
@@ -68,6 +93,7 @@ function SubagentRow({
   onSendMessage: (id: string, message: string) => void
   sendingTo: string | null
   onSelect: (id: string) => void
+  onContinue?: (id: string) => void
 }) {
   // Phase 3 P0-B 防御:cold-start / SSE 与 fetch 切换瞬间 task 可能没 id
   // (zustand selector 在 cold-start 返回 EMPTY,但 React render 已
@@ -110,6 +136,18 @@ function SubagentRow({
         <Tag color={STATUS_COLOR[status]} style={{ margin: 0, fontSize: 10 }}>
           {STATUS_LABEL[status] ?? status}
         </Tag>
+        {/* Task 14: 基于 task.state(running/waiting/settled)显示附加 Tag。
+            vendor 只推 start/end,state 由 reducer 派生;'waiting' 实际
+            很少出现(per Task 7 vendor-reality fix)。 */}
+        {task.state && STATE_TAG[task.state] && (
+          <Tag
+            color={STATE_TAG[task.state].color}
+            style={{ margin: 0, fontSize: 10 }}
+            data-testid={`subagent-state-${task.id}`}
+          >
+            {STATE_TAG[task.state].text}
+          </Tag>
+        )}
         <span
           style={{
             flex: 1,
@@ -163,6 +201,25 @@ function SubagentRow({
               }}
               data-testid={`subagent-interrupt-${task.id}`}
             />
+          </Tooltip>
+        )}
+        {/* Task 14:Continue 按钮 — 仅 done 状态显示,启动一个
+            continuable 子代理(持久多轮会话)。由后端 /continuable
+            端点处理;子代理新 sessionId 会通过 SSE 推到 store。 */}
+        {status === 'done' && onContinue && (
+          <Tooltip title="继续与该子代理对话" aria-label="继续子代理对话提示">
+            <Button
+              size="small"
+              type="text"
+              aria-label="继续子代理对话"
+              onClick={(e) => {
+                e.stopPropagation()
+                onContinue(task.id)
+              }}
+              data-testid={`subagent-continue-${task.id}`}
+            >
+              Continue
+            </Button>
           </Tooltip>
         )}
       </div>
@@ -235,6 +292,36 @@ export function SubagentsTab() {
       }
     } finally {
       setSendingTo(null)
+    }
+  }
+
+  /**
+   * Task 14: Continue 子代理对话。
+   * POST /api/subagent-tasks/:id/continuable(后端:subagentTasks.ts:246)。
+   * 后端从 parentSessionId 启动一个新的 continuable 子代理,新 childId
+   * 通过 SSE 'subagent.start' 事件推到 store,UI 自动看到新行。
+   * 首次续聊 prompt 可空(由用户在下游子代理对话框输入)。
+   */
+  async function handleContinue(taskId: string) {
+    try {
+      const r = await fetch(
+        `/api/subagent-tasks/${encodeURIComponent(taskId)}/continuable`,
+        {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ prompt: '' }),
+        },
+      )
+      if (!r.ok) {
+        const body = await r.text()
+        antdMessage.warning(`续聊失败: HTTP ${r.status}: ${body.slice(0, 200)}`)
+      } else {
+        antdMessage.success('已启动新的子代理续聊会话')
+      }
+    } catch (err) {
+      antdMessage.warning(
+        `续聊失败: ${err instanceof Error ? err.message : String(err)}`,
+      )
     }
   }
 
@@ -358,6 +445,7 @@ export function SubagentsTab() {
                     onSendMessage={handleSendMessage}
                     sendingTo={sendingTo}
                     onSelect={setSelectedTaskId}
+                    onContinue={handleContinue}
                   />
                 ))}
               </div>
@@ -372,6 +460,7 @@ export function SubagentsTab() {
               onSendMessage={handleSendMessage}
               sendingTo={sendingTo}
               onSelect={setSelectedTaskId}
+              onContinue={handleContinue}
             />
           ))}
       </div>
