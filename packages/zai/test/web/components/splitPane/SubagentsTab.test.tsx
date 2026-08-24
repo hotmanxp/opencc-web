@@ -12,6 +12,7 @@ afterEach(() => {
     agentTasksBySession: {},
     bashTasksBySession: {},
     sessionId: null,
+    currentKernel: 'opencc',
   })
   vi.unstubAllGlobals()
 })
@@ -298,5 +299,42 @@ describe('SubagentsTab Continue 按钮 + state 渲染 (Task 14)', () => {
     await waitFor(() => {
       expect(screen.getByText('已结束')).toBeInTheDocument()
     })
+  })
+})
+
+/**
+ * Task 17: OpenCC 模式空态显示 DSH 模式专享提示
+ */
+describe('SubagentsTab DSH 模式专享空态 (Task 17)', () => {
+  test('OpenCC 模式空态显示 DSH 模式专享提示', async () => {
+    // Stub fetch to prevent any real network requests
+    const fetchMock = vi.fn().mockResolvedValue(
+      new Response(JSON.stringify({ tasks: [] }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    // Set store state: session with empty tasks, currentKernel = 'opencc'
+    useAgentStore.setState({
+      sessionId: 'session-1',
+      subagentTasksBySession: { 'session-1': [] },
+      currentKernel: 'opencc',
+    })
+
+    render(<SubagentsTab />)
+
+    // The DSH message should show: "当前 kernel = opencc 不支持 subagent。请切换到 dsh 模式(配置页)。"
+    const emptyDesc = document.querySelector('.ant-empty-description')
+    expect(emptyDesc?.textContent).toContain('opencc')
+    expect(emptyDesc?.textContent).toContain('不支持 subagent')
+    expect(emptyDesc?.textContent).toContain('dsh')
+    // The aria-label should say DSH 模式专享提示
+    const emptyComponent = document.querySelector('.ant-empty')
+    expect(emptyComponent?.getAttribute('aria-label')).toBe('DSH 模式专享提示')
+    // The link should point to /config
+    const link = document.querySelector('.ant-empty-description a')
+    expect(link?.getAttribute('href')).toBe('/config')
   })
 })

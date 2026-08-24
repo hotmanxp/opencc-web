@@ -21,6 +21,7 @@ import {
   ReloadOutlined,
 } from '@ant-design/icons'
 import { useSubagentTasks, interruptSubagentTask, type DshSubagentTask } from '../hooks/useSubagentTasks.js'
+import { useAgentStore } from '../store/useAgentStore.js'
 
 const STATUS_ICON: Record<string, JSX.Element> = {
   running: <LoadingOutlined style={{ color: 'var(--accent-start)' }} spin />,
@@ -105,6 +106,7 @@ export function SubagentsDrawer({
   onClose: () => void
 }) {
   const { tasks, loading, error, refresh } = useSubagentTasks()
+  const currentKernel = useAgentStore((s) => s.currentKernel)
 
   async function handleInterrupt(taskId: string) {
     const res = await interruptSubagentTask(taskId)
@@ -160,11 +162,20 @@ export function SubagentsDrawer({
       )}
       {tasks.length === 0 && !loading && !error && (
         <Empty
+          aria-label="DSH 模式专享提示"
           description={
-            <span style={{ color: 'var(--ui-text-color)', fontSize: 12 }}>
-              当前 session 没有 dsh subagent 任务。<br />
-              让 LLM 调 Agent 工具(描述简短)即可在此查看。
-            </span>
+            currentKernel !== 'dsh' ? (
+              <span style={{ color: 'var(--ui-text-color)', fontSize: 12 }}>
+                当前 kernel = <code>{currentKernel}</code> 不支持 subagent。
+                请切换到 <strong>dsh</strong> 模式(
+                <a href="/config">配置页</a>)。
+              </span>
+            ) : (
+              <span style={{ color: 'var(--ui-text-color)', fontSize: 12 }}>
+                当前 session 没有 dsh subagent 任务。<br />
+                让 LLM 调 Agent 工具(描述简短)即可在此查看。
+              </span>
+            )
           }
           imageStyle={{ height: 80 }}
         />

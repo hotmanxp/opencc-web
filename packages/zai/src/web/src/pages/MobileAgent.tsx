@@ -17,7 +17,19 @@ import { SubagentDetailBody } from '../components/splitPane/SubagentDetailBody'
 
 function SubagentList({ sessionId }: { sessionId: string }) {
   const tasks = useAgentStore((s) => s.subagentTasksBySession[sessionId] ?? [])
-  if (tasks.length === 0) return null
+  const currentKernel = useAgentStore((s) => s.currentKernel)
+  if (tasks.length === 0) {
+    if (currentKernel !== 'dsh') {
+      return (
+        <div className="px-4 py-3 text-xs text-gray-500" aria-label="DSH 模式专享提示">
+          当前 kernel = <code>{currentKernel}</code> 不支持 subagent。
+          请切换到 <strong>dsh</strong> 模式(
+          <a href="/config" className="underline">配置页</a>)。
+        </div>
+      )
+    }
+    return null
+  }
   return (
     <Collapse>
       <Collapse.Panel

@@ -44,6 +44,7 @@ import {
   type SubagentTasksMode,
 } from '../../hooks/useSubagentTasks.js'
 import { SubagentDetailDrawer } from './SubagentDetailDrawer.js'
+import { useAgentStore } from '../../store/useAgentStore.js'
 
 const STATUS_ICON: Record<string, JSX.Element> = {
   running: <LoadingOutlined style={{ color: 'var(--accent-start)' }} spin />,
@@ -263,6 +264,7 @@ export function SubagentsTab() {
   // Phase 3 P0-B: mode 状态 — 'current' 默认,'all' 跨 session 视图
   const [mode, setMode] = useState<SubagentTasksMode>('current')
   const { tasks, loading, error, refresh } = useSubagentTasks({ mode })
+  const currentKernel = useAgentStore((s) => s.currentKernel)
   const [busy, setBusy] = useState<string | null>(null)
   const [sendingTo, setSendingTo] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
@@ -419,12 +421,21 @@ export function SubagentsTab() {
         )}
         {tasks.length === 0 && !loading && !error && (
           <Empty
+            aria-label="DSH 模式专享提示"
             description={
-              <span style={{ color: 'var(--ui-text-color)', fontSize: 12 }}>
-                {mode === 'current'
-                  ? '当前 session 没有 dsh subagent 任务。让 LLM 调 Agent 工具即可在此查看 + 中止 + 投消息。'
-                  : '所有 session 都没有 dsh subagent 任务。'}
-              </span>
+              currentKernel !== 'dsh' ? (
+                <span style={{ color: 'var(--ui-text-color)', fontSize: 12 }}>
+                  当前 kernel = <code>{currentKernel}</code> 不支持 subagent。
+                  请切换到 <strong>dsh</strong> 模式(
+                  <a href="/config">配置页</a>)。
+                </span>
+              ) : (
+                <span style={{ color: 'var(--ui-text-color)', fontSize: 12 }}>
+                  {mode === 'current'
+                    ? '当前 session 没有 dsh subagent 任务。让 LLM 调 Agent 工具即可在此查看 + 中止 + 投消息。'
+                    : '所有 session 都没有 dsh subagent 任务。'}
+                </span>
+              )
             }
             imageStyle={{ height: 80 }}
           />
