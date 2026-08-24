@@ -1,11 +1,11 @@
 import { z } from 'zod'
 
 /**
- * SubagentResult.output 元素 — vendor `@deepseek-ai/dsh-subagent/src/types.ts:219`
- * ContentBlock 类型的 zod 校验版。
- *
- * 与 zai `shared/subagentEvents.ts:SubagentContentBlockSchema` 同构(本文件
- * 早期定义,Task 1 是消费侧镜像)。
+ * SubagentResult.output 元素 — Anthropic-shaped mirror of zai
+ * `SubagentContentBlockSchema` (packages/zai/src/shared/subagentEvents.ts:23-44);
+ * vendor `@deepseek-ai/dsh-subagent` uses different tag names
+ * (`reasoning`/`text`/`image`/`tool-call`/`tool-result`) — see spec §9.3
+ * mapping layer for vendor → zai translation.
  */
 
 export const SubagentContentBlockSchema = z.discriminatedUnion('type', [
