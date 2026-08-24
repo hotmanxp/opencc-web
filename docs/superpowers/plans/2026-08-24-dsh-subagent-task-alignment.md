@@ -924,12 +924,16 @@ git commit -m "feat(dsh-bridge): 真实现 startContinuable(vendor SubagentConti
 **Interfaces:**
 - Consumes: vendor 原生 event payload(`subagent/start` / `subagent/end` / `subagent/descriptor` / 子 agent publish message / continuation ActivationState);zai `shared/subagentEvents.ts` schema
 - Produces:
-  - `translateSubagentStart(ctx, info): SubagentStartEvent`
-  - `translateSubagentEnd(ctx, info): SubagentEndEvent`
-  - `translateSubagentDescriptor(ctx, info): SubagentDescriptorEvent`
-  - `translateSubagentState(ctx, runId, state): SubagentStateEvent`
-  - `translateSubagentMessage(ctx, runId, blocks): SubagentMessageEvent`
+  - `translateSubagentStart(ctx, info): Record<string, unknown>` — emit zai 同构对象,让 zai-side zod 校验
+  - `translateSubagentEnd(ctx, info): Record<string, unknown>`
+  - `translateSubagentDescriptor(ctx, info): Record<string, unknown>`
+  - `translateSubagentState(ctx, runId, state): Record<string, unknown>`
+  - `translateSubagentMessage(ctx, runId, blocks): Record<string, unknown>`
   - `emitLegacyShim(eventBus, newEvent): void`(同步发 `subagent.changed` + console.warn deprecation)
+
+> **重要**:不 import zai 类型(dsh-bridge 不依赖 zai,反向依赖会构建报错)。所有
+> translate 函数返回 `Record<string, unknown>`,zai-side `useEventStream` 用
+> `SubagentEvent` zod 在收到时校验。
 
 - [ ] **Step 1: 写失败测试**
 
@@ -1035,17 +1039,14 @@ pnpm --filter @zn-ai/dsh-bridge test src/vendorSeam/eventTranslation.test.ts
 
 在 `packages/dsh-bridge/src/vendorSeam/eventTranslation.ts`:
 
+> **重要**:dsh-bridge 不依赖 zai(反向依赖会构建报错)。此文件不 import zai 类型,
+> 改 emit **无类型对象**(`Record<string, unknown>`),zai-side zod 在收到时校验。
+> 与 Task 3 `subagent/contentBlock.ts` 的 `SubagentContentBlock` 同构(zai 侧
+> `shared/subagentEvents.ts` 的 `SubagentContentBlockSchema` 是消费侧镜像)。
+
 ```ts
-import type {
-  SubagentContentBlock,
-  SubagentStartEvent,
-  SubagentEndEvent,
-  SubagentDescriptorEvent,
-  SubagentStateEvent,
-  SubagentMessageEvent,
-  SubagentEventT,
-} from '../../zai/src/shared/subagentEvents.js'
 import type { SubagentRunInfo, SubagentRunEndInfo } from '@deepseek-ai/dsh-subagent'
+import type { SubagentContentBlock } from '../subagent/contentBlock.js'
 
 /**
  * vendor 原生事件 → zai SSE 事件翻译层。
@@ -1058,7 +1059,7 @@ import type { SubagentRunInfo, SubagentRunEndInfo } from '@deepseek-ai/dsh-subag
 export function translateSubagentStart(
   sessionId: string,
   info: SubagentRunInfo & { parentSessionId?: string },
-): SubagentStartEvent {
+): Record<string, unknown> {
   return {
     type: 'subagent.start',
     ts: Date.now(),
@@ -1082,7 +1083,7 @@ const STOP_REASON_TO_LEGACY_STATUS: Record<string, string> = {
 export function translateSubagentEnd(
   sessionId: string,
   info: SubagentRunEndInfo,
-): SubagentEndEvent {
+): Record<string, unknown> {
   return {
     type: 'subagent.end',
     ts: Date.now(),
@@ -1109,7 +1110,7 @@ export function translateSubagentDescriptor(
     agentProvider?: string
     agentModel?: string
   },
-): SubagentDescriptorEvent {
+): Record<string, unknown> {
   return {
     type: 'subagent.descriptor',
     ts: Date.now(),
@@ -1130,7 +1131,7 @@ export function translateSubagentState(
   sessionId: string,
   runId: string,
   state: 'running' | 'waiting' | 'settled',
-): SubagentStateEvent {
+): Record<string, unknown> {
   return { type: 'subagent.state', ts: Date.now(), sessionId, runId, state }
 }
 
@@ -1138,7 +1139,7 @@ export function translateSubagentMessage(
   sessionId: string,
   runId: string,
   blocks: SubagentContentBlock[],
-): SubagentMessageEvent {
+): Record<string, unknown> {
   return { type: 'subagent.message', ts: Date.now(), sessionId, runId, blocks }
 }
 
@@ -1148,7 +1149,7 @@ export function translateSubagentMessage(
  */
 export function emitLegacyShim(
   eventBus: { emit: (e: unknown) => void },
-  newEvent: SubagentEventT,
+  newEvent: Record<string, unknown>,
 ): void {
   if (!process.env.ZAI_SUBAGENT_EVENT_V2_ONLY) {
     console.warn(
@@ -1450,10 +1451,13 @@ git commit -m "feat(dsh-bridge): DshSubagentControlAdapter 多事件订阅 + cap
 ## Task 8: zai 新增 SeamRegistry + seamBinding(kernel.getSeam 接口)
 
 **Files:**
+- Modify: `packages/zai/src/server/services/kernel/kernelAdapter.ts:153-...`(扩展 `KernelAdapter` interface 加 `seamRegistry` + `getSeam`)
 - Create: `packages/zai/src/server/services/kernel/seamRegistry.ts`
 - Create: `packages/zai/src/server/services/kernel/seamBinding.ts`
 - Test: `packages/zai/test/server/services/kernel/seamRegistry.test.ts`
 - Test: `packages/zai/test/server/services/kernel/seamBinding.test.ts`
+
+> **前置**:现有 `KernelAdapter` interface(`packages/zai/src/server/services/kernel/kernelAdapter.ts:153`)不含 `getSeam` / `seamRegistry` 字段。本 Task 在 interface 上**新增这两个字段**(`seamRegistry?: SeamRegistry` + `getSeam<T>(name): T`),DSH 工厂实现时填,OpenCC 工厂不填(调用时抛 `MissingVendorSeamError`)。
 
 **Interfaces:**
 - Consumes: dsh-bridge `DshSubagentControlAdapter` / `DshJobsControlAdapter`(`@zn-ai/dsh-bridge/vendorSeam`)
