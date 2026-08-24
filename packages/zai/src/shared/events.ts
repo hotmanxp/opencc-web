@@ -1,5 +1,15 @@
 import { z } from 'zod'
 
+import {
+  SubagentEvent,
+  SubagentStartEvent,
+  SubagentEndEvent,
+  SubagentDescriptorEvent,
+  SubagentStateEvent,
+  SubagentMessageEvent,
+  SubagentErrorEvent,
+} from './subagentEvents.js'
+
 const Base = z.object({
   eventId: z.string(),
   ts: z.number(),
@@ -25,7 +35,7 @@ const DshTodoItemSchema = z.object({
   status: z.string(),
 })
 
-const RuntimeEvent = z.discriminatedUnion('type', [
+export const RuntimeEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('runtime.started'),
              sessionId: z.string(), turnIndex: z.number(),
              // zai patch (2026-08-09): 把 metrics 提升到 runtime.started
@@ -114,6 +124,13 @@ const RuntimeEvent = z.discriminatedUnion('type', [
              delayMs: z.number(),
              nextAttemptAtMs: z.number(),
              category: z.enum(['llm_provider_overloaded', 'llm_provider_server', 'llm_provider_rate_limit']) }),
+  // DSH subagent 生命周期事件 (Task 2 aligned with vendor schema)
+  SubagentStartEvent,
+  SubagentEndEvent,
+  SubagentDescriptorEvent,
+  SubagentStateEvent,
+  SubagentMessageEvent,
+  SubagentErrorEvent,
 ])
 
 const SessionEvent = z.discriminatedUnion('type', [
@@ -283,8 +300,11 @@ const StateEvent = z.discriminatedUnion('type', [
     nextFireAt: z.number(),
     action: z.enum(['create', 'delete', 'list', 'fire']),
   }),
-  // dsh-019: dsh-mode subagent 任务生命周期变化。UI 用此事件维护
-  // TaskDrawer "Subagents" tab 实时状态。
+  /**
+   * @deprecated 自 2026-08-24 起使用 `subagent.start` / `subagent.end` 替代;
+   * 旧事件运行期同步发(deprecation shim),2026-09-30 通过 feature flag
+   * `agent.subagent.eventV2.enabled` 关闭。详见 spec §4 事件 Schema 对齐。
+   */
   z.object({
     ...Base.shape,
     type: z.literal('subagent.changed'),
