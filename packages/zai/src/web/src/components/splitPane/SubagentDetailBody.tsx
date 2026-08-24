@@ -10,15 +10,23 @@
  *   `squishy-cuddling-allen.md` 改动 2 第 6 步)
  *
  * 数据源:`GET /api/subagent-tasks/:id` 拉完整 DshTaskState(prompt /
- * startedAt / finishedAt / result / error / toolCalls)。父组件通过
- * SSE `subagent.changed` 推 store 拿到 status 实时更新,本组件 fetch
- * 只在 taskId 变化时跑一次。
+ * startedAt / finishedAt / result / error / toolCalls / blocks /
+ * lastAssistantMessage)。父组件通过 SSE `subagent.changed` 推 store 拿
+ * 到 status 实时更新,本组件 fetch 只在 taskId 变化时跑一次。
+ *
+ * Task 15 (dsh-subagent-task-alignment): 新增 ContentBlockRenderer —
+ * server 返回 `blocks: SubagentContentBlock[]` 时,按 block.type
+ * 分支渲染(thinking/text/tool_use/tool_result/image),未知 type
+ * 降级为 JSON 预格式块。
  */
 
 import { useEffect, useState } from 'react'
 import { Collapse, Descriptions, Spin, Typography } from 'antd'
 import { CodeOutlined } from '@ant-design/icons'
 import { useAgentStore } from '../../store/useAgentStore.js'
+import type { SubagentContentBlock } from '../../shared/subagentEvents.js'
+import { ThinkingBlock } from '../transcript/MessageBubble.js'
+import { MarkdownText } from '../markdown/MarkdownText.js'
 
 const { Paragraph } = Typography
 
@@ -44,6 +52,23 @@ export interface SubagentDetail {
   result?: unknown
   error?: string
   toolCalls?: ToolCallView[]
+  /**
+   * Task 15: vendor `@deepseek-ai/dsh-subagent` 输出 ContentBlock 流,
+   * server 落盘后通过 `/api/subagent-tasks/:id` 一并下发。 UI 优先按
+   * `blocks` 逐块渲染(thinking/text/tool_use/tool_result/image);若
+   * blocks 缺失, 回退到原 toolCalls Collapse 视图, 不破坏 dsh-024
+   * `running → terminal` 触发 refetch 的回归路径。
+   *
+   * 来源:`getDshSubagentToolCalls` 读 `~/.zai/tasks-dsh/<taskId>.json`
+   * (cordis `subagent/message` 事件在 vendor 端不存在, 见 Task 7
+   * vendor-reality fix,改读落盘 JSON)。
+   */
+  blocks?: SubagentContentBlock[]
+  /**
+   * `subagent.end` event 的 `lastAssistantMessage` 字段(数组形式),
+   * 在 blocks 末尾追加(若有),并不重复渲染已有 block。
+   */
+  lastAssistantMessage?: SubagentContentBlock[]
 }
 
 const TOOL_STATUS_COLOR: Record<ToolCallView['status'], string> = {
@@ -102,6 +127,179 @@ function formatToolInputSummary(toolName: string, input: unknown): string {
   } catch {
     return `${toolName}(?)`
   }
+}
+
+/**
+ * Task 15: ContentBlockRenderer — 按 Anthropic-shaped
+ * `SubagentContentBlock.type` 分支渲染 5 种内建类型(thinking /
+ * text / tool_use / tool_result / image),未知 type 降级为 raw JSON
+ * pre 块,确保新增 vendor block 类型时不会让 UI 静默丢失内容。
+ *
+ * 与原 `toolCalls` Collapse 路径互斥:`SubagentDetailBody` 仅在
+ * `detail.blocks` 非空时走 ContentBlockRenderer 链路,否则继续用
+ * Collapse 渲染 `detail.toolCalls`(保留 dsh-024 回归与现状)。
+ *
+ * aria-label: 整组渲染对屏幕阅读器使用 `role="group"` + 中文
+ * aria-label "子代理输出块",符合 AGENTS.md UI 规范 — ContentBlock
+ * 内容本身由组件语义表达(strong/list/table 等),不再单独给每个
+ * block 加 label,避免噪声。
+ */
+function ContentBlockRenderer({ block }: { block: SubagentContentBlock }) {
+  if (block.type === 'thinking') {
+    return <ThinkingBlock text={block.thinking} />
+  }
+  if (block.type === 'text') {
+    return <MarkdownText text={block.text} />
+  }
+  if (block.type === 'tool_use') {
+    return (
+      <div
+        style={{
+          border: '1px solid var(--border-light)',
+          borderRadius: 4,
+          padding: 8,
+          margin: '4px 0',
+          background: 'var(--bg-faint-02)',
+        }}
+      >
+        <div
+          style={{
+            fontSize: 11,
+            fontFamily: 'ui-monospace, monospace',
+            color: 'var(--ui-text-color)',
+            marginBottom: 4,
+          }}
+        >
+          工具调用 · {block.name}
+        </div>
+        <pre
+          style={{
+            fontSize: 11,
+            margin: 0,
+            padding: 6,
+            background: 'var(--bg-card, #fafafa)',
+            borderRadius: 3,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontFamily: 'ui-monospace, monospace',
+            maxHeight: 240,
+            overflow: 'auto',
+          }}
+        >
+          {JSON.stringify(block.input, null, 2)}
+        </pre>
+      </div>
+    )
+  }
+  if (block.type === 'tool_result') {
+    const isError = !!block.is_error
+    const body =
+      typeof block.content === 'string'
+        ? block.content
+        : JSON.stringify(block.content, null, 2)
+    return (
+      <div
+        style={{
+          borderLeft: `2px solid ${isError ? 'var(--error)' : 'var(--accent-start)'}`,
+          paddingLeft: 8,
+          margin: '4px 0',
+          fontSize: 12,
+        }}
+      >
+        <span style={{ marginRight: 4 }}>{isError ? '❌' : '✅'}</span>
+        <pre
+          style={{
+            display: 'inline',
+            margin: 0,
+            whiteSpace: 'pre-wrap',
+            wordBreak: 'break-word',
+            fontFamily: 'ui-monospace, monospace',
+            color: isError ? 'var(--error)' : undefined,
+          }}
+        >
+          {body}
+        </pre>
+      </div>
+    )
+  }
+  if (block.type === 'image') {
+    return (
+      <img
+        src={`data:${block.source.media_type};base64,${block.source.data}`}
+        alt="子代理图片"
+        style={{ maxWidth: '100%', display: 'block', margin: '4px 0' }}
+      />
+    )
+  }
+  // 未知 type — 降级为 raw JSON pre 块,保证新 vendor 类型不会静默丢内容
+  return (
+    <pre
+      style={{
+        background: 'var(--bg-faint-04, #fffbe6)',
+        padding: 8,
+        fontSize: 11,
+        borderRadius: 4,
+        whiteSpace: 'pre-wrap',
+        wordBreak: 'break-word',
+        fontFamily: 'ui-monospace, monospace',
+        margin: '4px 0',
+      }}
+    >
+      {JSON.stringify(block, null, 2)}
+    </pre>
+  )
+}
+
+/**
+ * 把 `detail.blocks` 与 `detail.lastAssistantMessage` 拼成一条渲染流:
+ * - blocks 优先(主路径)
+ * - lastAssistantMessage 中与 blocks 已渲染重复的 element 跳过
+ *   (Zod discriminated union 字段相同即视为重复,简化为字符串 hash)
+ * - 用 <ol> 顺序输出,方便屏幕阅读器朗读顺序
+ */
+function ContentBlocksList({
+  blocks,
+  lastAssistantMessage,
+}: {
+  blocks?: SubagentContentBlock[]
+  lastAssistantMessage?: SubagentContentBlock[]
+}) {
+  if (!blocks || blocks.length === 0) {
+    if (!lastAssistantMessage || lastAssistantMessage.length === 0) return null
+    return (
+      <ol
+        aria-label="子代理输出块"
+        style={{ listStyle: 'none', padding: 0, margin: 0 }}
+      >
+        {lastAssistantMessage.map((block, i) => (
+          <li key={i} role="presentation">
+            <ContentBlockRenderer block={block} />
+          </li>
+        ))}
+      </ol>
+    )
+  }
+  const seen = new Set<string>()
+  for (const b of blocks) seen.add(JSON.stringify(b))
+  const trailing =
+    lastAssistantMessage?.filter((b) => !seen.has(JSON.stringify(b))) ?? []
+  return (
+    <ol
+      aria-label="子代理输出块"
+      style={{ listStyle: 'none', padding: 0, margin: 0 }}
+    >
+      {blocks.map((block, i) => (
+        <li key={i} role="presentation">
+          <ContentBlockRenderer block={block} />
+        </li>
+      ))}
+      {trailing.map((block, i) => (
+        <li key={`trailing-${i}`} role="presentation">
+          <ContentBlockRenderer block={block} />
+        </li>
+      ))}
+    </ol>
+  )
 }
 
 export function SubagentDetailBody({
@@ -254,6 +452,28 @@ export function SubagentDetailBody({
           >
             {detail.error}
           </Paragraph>
+        </div>
+      )}
+
+      {/* Task 15: ContentBlock[] 主渲染路径 (vendor dsh-subagent output).
+          仅在 detail.blocks / detail.lastAssistantMessage 至少有一个
+          非空时启用,作为 toolCalls Collapse 之外的并行视图。 */}
+      {(detail.blocks?.length || detail.lastAssistantMessage?.length) && (
+        <div style={{ marginTop: 16 }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              marginBottom: 4,
+              color: 'var(--ui-text-color)',
+            }}
+          >
+            Content Blocks
+          </div>
+          <ContentBlocksList
+            blocks={detail.blocks}
+            lastAssistantMessage={detail.lastAssistantMessage}
+          />
         </div>
       )}
 
