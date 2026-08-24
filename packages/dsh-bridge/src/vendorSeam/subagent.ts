@@ -18,9 +18,10 @@
  * `toolFilter` / `persona` / `maxDepth` / `backgroundMode:'continuable'`),
  * adapter 直接 mirror 到 vendor `SubagentStartRequest`。
  *
- * Task 7 起:多事件订阅(`subagent/start`/`end`/`descriptor`/`state`/`message`)
- * 通过 eventBus 透传到 zai,capability 四件套透传到 spawnDshSubagent,
- * startContinuable 转发到 vendor continuation。
+ * Task 7 起(vendor 适配版):只订阅真实 cordis 事件 `subagent/start` 和
+ * `subagent/end`;`subagent/state` 通过这两个事件派生(start→running,end→settled);
+ * `subagent/descriptor`(session log 事件,非 cordis)和 `subagent/message`(vendor 不存在)
+ * 不再订阅,UI 走 task.blocks 磁盘路径。
  */
 
 import type { Context } from '@deepseek-ai/cordis'
@@ -36,14 +37,10 @@ import {
   type DshTaskState,
 } from '../subagent/taskStore.js'
 
-import type { SubagentContentBlock } from '../subagent/contentBlock.js'
-
 import {
   translateSubagentStart,
   translateSubagentEnd,
-  translateSubagentDescriptor,
   translateSubagentState,
-  translateSubagentMessage,
   emitLegacyShim,
 } from './eventTranslation.js'
 
@@ -110,11 +107,23 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
   }
 
   /**
-   * 内部:订阅 vendor 5 个 subagent 事件。
+   * 内部:订阅 vendor 真实 cordis 事件。
    *
-   * 事件 names 在 `@deepseek-ai/dsh-subagent/src/index.ts:140-167` 声明。
-   * cordis `ctx.on` 返回 disposer — Task 7 起订阅 5 个事件并通过
-   * eventBus 透传到 zai。
+   * 只订阅真实存在于 vendor 的 2 个事件:
+   * - `subagent/start` — cordis Events 声明
+   * - `subagent/end`   — cordis Events 声明
+   *
+   * 以下是 spec 虚拟的事件(vendor 不存在):
+   * - `subagent/descriptor` — vendor 写 session.append('subagent/descriptor'),不是 cordis 事件
+   * - `subagent/state`     — vendor 源码中不存在
+   * - `subagent/message`   — vendor 源码中不存在
+   *
+   * `subagent/state` 通过 start/end 派生:
+   *   start → emit state='running', end → emit state='settled'
+   *
+   * `subagent/descriptor` 不通过 cordis 订阅获取(是 session log 事件,
+   * 通过 session.events 或 'session/event' cordis 事件观察,但 dsh-bridge
+   * 不持有 child agent session 引用,故不实现;UI 走 task.blocks 磁盘路径)。
    */
   private installCordisListeners(): void {
     const trigger = (): void => {
@@ -131,42 +140,33 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
     }
 
     try {
-      const handlers: Array<[name: 'subagent/start' | 'subagent/end' | 'subagent/descriptor' | 'subagent/state' | 'subagent/message', cb: (info: unknown) => void]> = [
+      // 真实存在于 vendor 的 2 个 cordis 事件
+      const handlers: Array<[name: 'subagent/start' | 'subagent/end', cb: (info: unknown) => void]> = [
         ['subagent/start', (info) => {
           const startEvt = translateSubagentStart(this.getCurrentSessionId(), info as never)
           this.eventBus.emit(startEvt)
           emitLegacyShim(this.eventBus, startEvt)
+          // 派生 subagent/state = 'running'
+          const stateEvt = translateSubagentState(
+            this.getCurrentSessionId(),
+            (info as { runId: string }).runId,
+            'running',
+          )
+          this.eventBus.emit(stateEvt)
           trigger()
         }],
         ['subagent/end', (info) => {
           const endEvt = translateSubagentEnd(this.getCurrentSessionId(), info as never)
           this.eventBus.emit(endEvt)
           emitLegacyShim(this.eventBus, endEvt)
-          trigger()
-        }],
-        ['subagent/descriptor', (info) => {
-          const descEvt = translateSubagentDescriptor(
-            this.getCurrentSessionId(),
-            (info as { runId: string }).runId,
-            info as never,
-          )
-          this.eventBus.emit(descEvt)
-        }],
-        ['subagent/state', (info) => {
+          // 派生 subagent/state = 'settled'
           const stateEvt = translateSubagentState(
             this.getCurrentSessionId(),
             (info as { runId: string }).runId,
-            (info as { state: 'running' | 'waiting' | 'settled' }).state,
+            'settled',
           )
           this.eventBus.emit(stateEvt)
-        }],
-        ['subagent/message', (info) => {
-          const msgEvt = translateSubagentMessage(
-            this.getCurrentSessionId(),
-            (info as { runId: string }).runId,
-            (info as { blocks: SubagentContentBlock[] }).blocks,
-          )
-          this.eventBus.emit(msgEvt)
+          trigger()
         }],
       ]
       for (const [name, cb] of handlers) {
@@ -181,10 +181,18 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
     }
   }
 
+  /**
+   * 从 vendor AgentRegistry 的 AsyncLocalStorage-backed `currentInitiator()` 获取
+   * 当前 initiator sessionId。
+   *
+   * vendor `AgentRegistry.currentInitiator()` 定义于
+   * `packages/core/agent/src/index.ts:309-312`。
+   * 返回 `Agent | undefined`,Agent.id 即 sessionId(SessionId branded string)。
+   */
   private getCurrentSessionId(): string {
-    // 优先从 ctx.agents 拿当前 sessionId;fallback 走 globalThis
-    const agents = this.ctx.get('agents') as { getCurrentSessionId?: () => string | undefined } | undefined
-    return agents?.getCurrentSessionId?.() ?? ''
+    // ctx.agents 是 cordis declaration 注入的 AgentRegistry 实例
+    const agents = this.ctx.agents as { currentInitiator?: () => { id: string } | undefined } | undefined
+    return agents?.currentInitiator?.()?.id ?? ''
   }
 
   async dispatch(input: SeamSubagentDispatchInput): Promise<SeamSubagentHandle> {

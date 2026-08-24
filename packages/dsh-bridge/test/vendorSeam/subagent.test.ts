@@ -99,6 +99,7 @@ function makeMockParentAgent(id = 'parent-session-id'): MockAgent {
 interface MockCtx {
   on: ReturnType<typeof vi.fn>
   get: ReturnType<typeof vi.fn>
+  agents: { currentInitiator: () => { id: string } | undefined; get: (id: string) => MockAgent | undefined }
   subagents?: unknown
 }
 
@@ -111,6 +112,10 @@ function makeMockCtx(parentAgent: MockAgent | undefined): MockCtx {
       }
       return undefined
     }),
+    agents: {
+      currentInitiator: () => (parentAgent ? { id: parentAgent.id } : undefined),
+      get: (id: string) => (id === parentAgent?.id ? parentAgent : undefined),
+    },
     subagents: undefined, // 不用真实 SubagentRuntime,改走 spawnDshSubagent mocked
   }
 }
@@ -496,29 +501,54 @@ describe('Stage 0: DshSubagentControlAdapter contract', () => {
 })
 
 describe('DshSubagentControlAdapter 多事件订阅 (Task 7)', () => {
-  it('订阅 5 个 vendor 事件并在 start 时 emit subagent.start', () => {
+  it('只订阅 2 个真实 vendor cordis 事件(subagent/start, subagent/end)', () => {
     const subs: Record<string, (info: unknown) => void> = {}
     const ctx = {
       on: (name: string, cb: (i: unknown) => void) => {
         subs[name] = cb
         return () => { delete subs[name] }
       },
-      get: (key: string) => {
-        if (key === 'agents') return { getCurrentSessionId: () => 'p1', get: (id: string) => id === 'p1' ? { id: 'p1' } : undefined }
-        return undefined
-      },
-      subagents: { start: async () => ({ id: 'r1', localAgent: undefined, result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => {} }) },
-      agents: { get: () => ({ id: 'p1' }) },
+      agents: { currentInitiator: () => ({ id: 'p1' }), get: (id: string) => id === 'p1' ? { id: 'p1' } : undefined },
     } as never
-    const eventBus = { emit: vi.fn() }
-    new DshSubagentControlAdapter({ ctx, getParentAgent: () => ({ id: 'p1' } as never), eventBus: eventBus as never })
+    new DshSubagentControlAdapter({ ctx, getParentAgent: () => ({ id: 'p1' } as never), eventBus: { emit: () => {} } as never })
     expect(subs['subagent/start']).toBeDefined()
     expect(subs['subagent/end']).toBeDefined()
-    expect(subs['subagent/state']).toBeDefined()
-    expect(subs['subagent/descriptor']).toBeDefined()
-    expect(subs['subagent/message']).toBeDefined()
+    // 以下 3 个不是 vendor cordis 事件,不再订阅
+    expect(subs['subagent/state']).toBeUndefined()
+    expect(subs['subagent/descriptor']).toBeUndefined()
+    expect(subs['subagent/message']).toBeUndefined()
+  })
+
+  it('subagent/start 触发 subagent.start + 派生的 subagent.state(running)', () => {
+    const subs: Record<string, (info: unknown) => void> = {}
+    const ctx = {
+      on: (name: string, cb: (i: unknown) => void) => {
+        subs[name] = cb
+        return () => { delete subs[name] }
+      },
+      agents: { currentInitiator: () => ({ id: 'real-session-123' }), get: () => undefined },
+    } as never
+    const eventBus = { emit: vi.fn() }
+    new DshSubagentControlAdapter({ ctx, getParentAgent: () => undefined as never, eventBus: eventBus as never })
     subs['subagent/start']!({ runId: 'r1', provider: 'spawn', id: 'd1', local: true })
-    expect(eventBus.emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'subagent.start' }))
+    expect(eventBus.emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'subagent.start', sessionId: 'real-session-123' }))
+    expect(eventBus.emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'subagent.state', state: 'running' }))
+  })
+
+  it('subagent/end 触发 subagent.end + 派生的 subagent.state(settled)', () => {
+    const subs: Record<string, (info: unknown) => void> = {}
+    const ctx = {
+      on: (name: string, cb: (i: unknown) => void) => {
+        subs[name] = cb
+        return () => { delete subs[name] }
+      },
+      agents: { currentInitiator: () => ({ id: 'real-session-456' }), get: () => undefined },
+    } as never
+    const eventBus = { emit: vi.fn() }
+    new DshSubagentControlAdapter({ ctx, getParentAgent: () => undefined as never, eventBus: eventBus as never })
+    subs['subagent/end']!({ runId: 'r1', provider: 'spawn', id: 'd1', local: true, stopReason: 'completed' })
+    expect(eventBus.emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'subagent.end', sessionId: 'real-session-456' }))
+    expect(eventBus.emit).toHaveBeenCalledWith(expect.objectContaining({ type: 'subagent.state', state: 'settled' }))
   })
 
   it('dispatch 透传 capability 到 spawnDshSubagent', async () => {
