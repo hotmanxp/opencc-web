@@ -5,45 +5,26 @@
  * 供 UI 单独的 Subagents tab 直接 fetch(无需走 subagent_control 工具
  * round-trip)。
  *
- * 实现走 globalThis.__zaiDshSubagentControl 桥(zai dsh factory 在
- * initDshRuntime 时注入) — 与 zai compat `subagent_control` 工具共用
+ * 实现走 kernel.getSeam('subagent') — 与 zai compat `subagent_control` 工具共用
  * 同一份 dsh-bridge subagent API,语义一致。
  *
  * 端点(对齐 bash-tasks 命名):
  *   GET    /api/subagent-tasks         列出 subagent 任务(可按 sessionId 过滤)
  *   GET    /api/subagent-tasks/:id     取单个任务详情
  *   POST   /api/subagent-tasks/:id/interrupt  中止运行中的任务
- *
- * Phase 1 only list/interrupt 端点(最常用);send_message 端点 UI 暂未消费,
- * 留到 Phase 2(可在 dialog 里给 LLM 续传 prompt)。
+ *   POST   /api/subagent-tasks/:id/send-message  给运行中的子 agent 投消息
+ *   POST   /api/subagent-tasks/:id/continuable   启动一个 continuable 子代理
  */
 
-import { Router, type IRouter, type Request, type Response } from 'express'
+import { Router, type Request, type Response } from 'express'
+import { getKernelAdapter } from '../services/agentRuntime.js'
+import { MissingVendorSeamError } from '../services/kernel/seamRegistry.js'
+import type { SubagentControlSeam } from '@zn-ai/dsh-bridge'
 
-const router: IRouter = Router()
-
-/**
- * dsh-bridge 通过 globalThis 暴露的 3 件套。
- * zai dsh factory 注入(见 factories/dsh.ts);opencc 模式不存在。
- */
-interface DshSubagentControlBridge {
-  list: (parentSessionId?: string) => Promise<Array<{
-    id: string
-    status: string
-    description?: string
-  }>>
-  cancel: (taskId: string) => Promise<{ ok: boolean }>
-  sendMessage: (taskId: string, prompt: string) => Promise<{ ok: boolean; error?: string }>
-}
+const router = Router()
 
 /**
- * dsh-019 Phase 2: 完整 DshTaskState 类型(从 dsh-bridge DshTaskState 镜像,
- * 用于 /:id 详情端点返回 startedAt/finishedAt/result/error/prompt 等)。
- *
- * Phase 3 P0-A: 加 toolCalls 字段 — spawnDshSubagent 期间累积的子 agent
- * 工具调用历史(callId/toolName/input/output/status/ts/durationMs/error)。
- * 子 agent 内部跑了哪些工具、各自的输入/输出,Subagent 详情 Drawer
- * 完整渲染此字段。
+ * Phase 3 P0-A: 子 agent 工具调用历史。
  */
 interface ToolCallEntryView {
   callId: string
@@ -56,6 +37,10 @@ interface ToolCallEntryView {
   error?: { name: string; code: string }
 }
 
+/**
+ * Phase 2: 完整 DshTaskState 类型(从 dsh-bridge DshTaskState 镜像,
+ * 用于 /:id 详情端点返回 startedAt/finishedAt/result/error/prompt 等)。
+ */
 interface DshTaskFull {
   taskId: string
   sessionId: string
@@ -69,35 +54,34 @@ interface DshTaskFull {
   toolCalls?: ToolCallEntryView[]
 }
 
-interface DshSubagentDetailBridge {
-  /** 读 ~/.zai/tasks-dsh/<sid>.json — 返回完整 DshTaskState */
-  readTask: (taskId: string) => Promise<DshTaskFull | null>
-}
-
-function tryGetDshBridge(): DshSubagentControlBridge | null {
-  const fromGlobal = (globalThis as {
-    __zaiDshSubagentControl?: DshSubagentControlBridge
-  }).__zaiDshSubagentControl
-  return fromGlobal ?? null
-}
-
-function notInitialized(res: Response): boolean {
-  const bridge = tryGetDshBridge()
-  if (!bridge) {
-    res.status(503).json({
-      error: 'dsh_subagent_unavailable',
-      message: 'dsh 模式 subagent API 未初始化 — 可能在 opencc 模式访问',
-    })
-    return true
+/**
+ * 获取 subagent seam,不存在(opencc 模式)时返回 503。
+ */
+function getSeam(res: Response): SubagentControlSeam | null {
+  try {
+    const adapter = getKernelAdapter()
+    if (!adapter.getSeam) {
+      res.status(503).json({
+        error: 'dsh_subagent_unavailable',
+        message: 'dsh 模式 subagent API 未初始化 — 可能在 opencc 模式访问',
+      })
+      return null
+    }
+    return adapter.getSeam<SubagentControlSeam>('subagent')
+  } catch (err) {
+    if (err instanceof MissingVendorSeamError) {
+      res.status(503).json({
+        error: 'dsh_subagent_unavailable',
+        message: err.message,
+      })
+    } else {
+      res.status(500).json({
+        error: 'seam_error',
+        message: err instanceof Error ? err.message : String(err),
+      })
+    }
+    return null
   }
-  return false
-}
-
-function tryGetDshDetailBridge(): DshSubagentDetailBridge | null {
-  const fromGlobal = (globalThis as {
-    __zaiDshSubagentDetail?: DshSubagentDetailBridge
-  }).__zaiDshSubagentDetail
-  return fromGlobal ?? null
 }
 
 /**
@@ -107,39 +91,37 @@ function tryGetDshDetailBridge(): DshSubagentDetailBridge | null {
  *   返回 { tasks: [{ id, status, description, parentSessionId? }] }
  */
 router.get('/subagent-tasks', async (req: Request, res: Response) => {
-  if (notInitialized(res)) return
-  const bridge = tryGetDshBridge()!
+  const seam = getSeam(res)
+  if (!seam) return
+
   const sessionId = req.query.sessionId as string | undefined
   const allSessions = req.query.allSessions === 'true' || req.query.allSessions === '1'
   try {
-    // Phase 3 P0-B: allSessions=true 时,直接列全 session 的任务,
-    // 每条带 parentSessionId 字段供 UI 分组。sessionId 与 allSessions
-    // 互斥(后者优先)。
     const tasks = allSessions
-      ? await bridge.list(undefined)
-      : await bridge.list(sessionId || undefined)
+      ? await seam.list(undefined)
+      : await seam.list(sessionId || undefined)
+
+    // Phase 3 P0-B: allSessions=true 时,每条带 parentSessionId 字段供 UI 分组。
+    // 用 seam.get 补全(只在 allSessions 时做 N+1 读)。
     if (allSessions) {
-      // 从全 taskStore 读 parentSessionId(bridge.list 返回简略对象不
-      // 带这字段),用 readDshTask 补全 — 不补只显示分组也能工作
-      // (UI 可从 taskId 前缀推断),但显式更清晰。
-      // 注:N=小(本机活动 session 数通常 < 50),可接受 N+1 IO。
-      const fullBridge = tryGetDshDetailBridge()
-      if (fullBridge) {
-        const enriched = await Promise.all(
-          tasks.map(async (t) => {
-            try {
-              const full = await fullBridge.readTask(t.id)
-              return {
-                ...t,
-                ...(full?.parentSessionId ? { parentSessionId: full.parentSessionId } : {}),
-              }
-            } catch {
-              return t
+      const enriched = await Promise.all(
+        tasks.map(async (t) => {
+          try {
+            const full = await seam.get(t.taskId)
+            return {
+              taskId: t.taskId,
+              sessionId: t.sessionId,
+              status: t.status,
+              description: t.description,
+              startedAt: t.startedAt,
+              ...(full?.parentSessionId ? { parentSessionId: full.parentSessionId } : {}),
             }
-          }),
-        )
-        return res.json({ tasks: enriched })
-      }
+          } catch {
+            return t
+          }
+        }),
+      )
+      return res.json({ tasks: enriched })
     }
     return res.json({ tasks })
   } catch (err) {
@@ -152,31 +134,18 @@ router.get('/subagent-tasks', async (req: Request, res: Response) => {
 
 /**
  * GET /api/subagent-tasks/:id
- *   dsh-019 Phase 2: 优先用 dsh-bridge 完整 DshTaskState(读
- *   ~/.zai/tasks-dsh/<taskId>.json,带 startedAt/finishedAt/result/error/prompt)，
- *   fallback 到 list 简略对象(只 id/status/description)。
+ *   dsh-019 Phase 2: 用 seam.get 读完整 DshTaskState(带
+ *   startedAt/finishedAt/result/error/prompt),找不到时返回 404。
  */
 router.get('/subagent-tasks/:id', async (req: Request, res: Response) => {
-  if (notInitialized(res)) return
+  const seam = getSeam(res)
+  if (!seam) return
+
   const id = req.params.id
-  // 1. 优先读完整 DshTaskState
-  const detailBridge = tryGetDshDetailBridge()
-  if (detailBridge) {
-    try {
-      const full = await detailBridge.readTask(id)
-      if (full) return res.json(full)
-      // 找不到时 fallback 到 list(可能 id 拼写错误 / 子 agent 写盘前)
-    } catch (err) {
-      console.warn('[subagentTasks] readTask failed, falling back to list:', err)
-    }
-  }
-  // 2. fallback: list 然后 filter(只 id/status/description 字段)
-  const bridge = tryGetDshBridge()!
   try {
-    const tasks = await bridge.list()
-    const found = tasks.find((t) => t.id === id)
-    if (!found) return res.status(404).json({ error: 'subagent_task_not_found' })
-    return res.json(found)
+    const full = await seam.get(id)
+    if (!full) return res.status(404).json({ error: 'subagent_task_not_found' })
+    return res.json(full)
   } catch (err) {
     return res.status(500).json({
       error: 'get_failed',
@@ -187,17 +156,18 @@ router.get('/subagent-tasks/:id', async (req: Request, res: Response) => {
 
 /**
  * POST /api/subagent-tasks/:id/interrupt
- *   调 dsh-bridge.interruptDshSubagent — 调 dsh Agent.cancel + 写盘 mark cancelled
+ *   调 seam.cancel — 调 dsh Agent.cancel + 写盘 mark cancelled
  *   已结束的任务(cancelled/done/failed)返回 409。
  */
 router.post('/subagent-tasks/:id/interrupt', async (req: Request, res: Response) => {
-  if (notInitialized(res)) return
-  const bridge = tryGetDshBridge()!
+  const seam = getSeam(res)
+  if (!seam) return
+
   const id = req.params.id
   try {
     // 先检查状态
-    const all = await bridge.list()
-    const found = all.find((t) => t.id === id)
+    const all = await seam.list()
+    const found = all.find((t) => t.taskId === id)
     if (!found) return res.status(404).json({ error: 'subagent_task_not_found' })
     if (found.status !== 'running') {
       return res.status(409).json({
@@ -205,7 +175,7 @@ router.post('/subagent-tasks/:id/interrupt', async (req: Request, res: Response)
         message: `subagent 任务已 ${found.status}, 无法中断`,
       })
     }
-    const result = await bridge.cancel(id)
+    const result = await seam.cancel(id)
     if (!result.ok) {
       return res.status(500).json({ error: 'interrupt_failed' })
     }
@@ -220,13 +190,13 @@ router.post('/subagent-tasks/:id/interrupt', async (req: Request, res: Response)
 
 /**
  * POST /api/subagent-tasks/:id/send-message
- *   dsh-019 Phase 2: 给运行中的子 agent 投消息(走 dsh-bridge.sendMessageToDshSubagent,
- *   调 ctx.agents.get(sid).followup(createUserMessage))。
+ *   dsh-019 Phase 2: 给运行中的子 agent 投消息(调 seam.sendMessage)。
  *   已结束的任务返回 409;消息太长(>8K 字符)返回 400。
  */
 router.post('/subagent-tasks/:id/send-message', async (req: Request, res: Response) => {
-  if (notInitialized(res)) return
-  const bridge = tryGetDshBridge()!
+  const seam = getSeam(res)
+  if (!seam) return
+
   const id = req.params.id
   const body = (req.body ?? {}) as { message?: string }
   const message = typeof body.message === 'string' ? body.message : ''
@@ -242,8 +212,8 @@ router.post('/subagent-tasks/:id/send-message', async (req: Request, res: Respon
   }
   try {
     // 先检查状态
-    const all = await bridge.list()
-    const found = all.find((t) => t.id === id)
+    const all = await seam.list()
+    const found = all.find((t) => t.taskId === id)
     if (!found) return res.status(404).json({ error: 'subagent_task_not_found' })
     if (found.status !== 'running') {
       return res.status(409).json({
@@ -251,11 +221,11 @@ router.post('/subagent-tasks/:id/send-message', async (req: Request, res: Respon
         message: `subagent 任务已 ${found.status}, 无法投消息`,
       })
     }
-    const result = await bridge.sendMessage(id, message)
+    const result = await seam.sendMessage(id, message)
     if (!result.ok) {
       return res.status(500).json({
         error: 'send_message_failed',
-        message: result.error ?? 'unknown',
+        message: 'unknown',
       })
     }
     return res.json({ ok: true, taskId: id, messageLen })
@@ -264,6 +234,46 @@ router.post('/subagent-tasks/:id/send-message', async (req: Request, res: Respon
       error: 'send_message_failed',
       message: err instanceof Error ? err.message : String(err),
     })
+  }
+})
+
+/**
+ * POST /api/subagent-tasks/:id/continuable
+ *   启动一个 continuable 子代理(持久多轮会话)。
+ *   body: { prompt: string, childId?: string, messageId?: string }
+ *   返回 { childId, messageId }
+ */
+router.post('/subagent-tasks/:id/continuable', async (req: Request, res: Response) => {
+  const seam = getSeam(res)
+  if (!seam) return
+
+  const parentSessionId = req.params.id
+  const { prompt, childId, messageId } = req.body as { prompt?: string; childId?: string; messageId?: string }
+  if (!prompt) {
+    return res.status(400).json({ error: 'prompt_required' })
+  }
+  try {
+    // startContinuable is on the adapter but not in the SubagentControlSeam interface.
+    // Cast to any to access it, or use a type assertion.
+    const result = await (seam as unknown as {
+      startContinuable(opts: {
+        parentSessionId: string
+        prompt: string
+        childId?: string
+        messageId?: string
+      }): Promise<{ childId: string; messageId: string }>
+    }).startContinuable({
+      parentSessionId,
+      prompt,
+      ...(childId !== undefined ? { childId } : {}),
+      ...(messageId !== undefined ? { messageId } : {}),
+    })
+    return res.json(result)
+  } catch (err) {
+    if (err instanceof MissingVendorSeamError) {
+      return res.status(503).json({ error: 'dsh_subagent_unavailable', message: err.message })
+    }
+    return res.status(500).json({ error: 'continuable_failed', message: err instanceof Error ? err.message : String(err) })
   }
 })
 
