@@ -59,11 +59,62 @@ export type V2TaskItem = {
  * 的 DshTaskState + zai compat subagent_list 输出对齐(只有 id/status/
  * description 三个核心字段,详细 prompt/startedAt 等在 Phase 2 详情
  * drawer 用 fetch /api/subagent-tasks/:id 拿)。
+ *
+ * 2026-08-24: 扩展为支持 Task 12 vendor 原生 6 事件 reducer
+ * (subagent.start/end/descriptor/state/message/error)。新增字段:
+ * taskId / state / descriptor / blocks / lastAssistantMessage /
+ * stopReason / parentSessionId / provider / startedAt / finishedAt / error。
+ * 旧字段(id/description)保留以兼容 applySubagentChanged deprecated shim。
  */
 export type DshSubagentTaskItem = {
+  // 旧字段(applySubagentChanged deprecated shim 仍在写)
   id: string
   status: 'running' | 'done' | 'failed' | 'cancelled'
   description?: string
+  // 新字段(Task 12 vendor 事件 reducer)
+  taskId: string
+  sessionId: string
+  parentSessionId?: string
+  provider?: string
+  state: 'running' | 'waiting' | 'settled'
+  startedAt?: number
+  finishedAt?: number
+  stopReason?: string
+  error?: string
+  descriptor?: {
+    version: number
+    mode: string
+    provider: string
+    label?: string
+    persona?: string
+    toolFilter?: string[]
+    agentProvider?: string
+    agentModel?: string
+  }
+  blocks?: Array<{
+    type: 'thinking' | 'text' | 'tool_use' | 'tool_result' | 'image'
+    thinking?: string
+    text?: string
+    id?: string
+    name?: string
+    input?: unknown
+    tool_use_id?: string
+    content?: unknown
+    is_error?: boolean
+    source?: { type: 'base64'; media_type: string; data: string }
+  }>
+  lastAssistantMessage?: Array<{
+    type: 'thinking' | 'text' | 'tool_use' | 'tool_result' | 'image'
+    thinking?: string
+    text?: string
+    id?: string
+    name?: string
+    input?: unknown
+    tool_use_id?: string
+    content?: unknown
+    is_error?: boolean
+    source?: { type: 'base64'; media_type: string; data: string }
+  }>
 }
 
 // 把 dataURL (data:<mime>;base64,<...>) 解码成 Blob. 仅用于 v2 协议里把
@@ -2166,6 +2217,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 行为对齐 bash_task.changed: action=start 插/更新(status=running),
   // action=finish 改 status(done/failed/cancelled)。完成后 5s 自动从列表
   // 移除(避免 UI 噪音) — 用 _subagentClearTimers per-session 调度。
+  /**
+   * @deprecated 自 2026-08-24 起使用 6 个 vendor 原生事件 reducer;
+   * 旧 subagent.changed handler 保留至 2026-09-30(由 useEventStream 自动转发)。
+   */
   applySubagentChanged: (event) => {
     if (!event.sessionId) return
     const sid = event.sessionId
@@ -2200,6 +2255,120 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       }, 5000)
       ;(get() as { _subagentClearTimers?: Record<string, ReturnType<typeof setTimeout>> })._subagentClearTimers = timers
     }
+  },
+
+  // Task 12: 6 个 vendor 原生 subagent 事件 reducer (2026-08-24)
+  applySubagentStart: (event) => {
+    set((state) => {
+      const sid = event.sessionId
+      const list = state.subagentTasksBySession[sid] ?? []
+      const existing = list.find(t => t.taskId === event.runId)
+      if (existing) {
+        return {
+          subagentTasksBySession: {
+            ...state.subagentTasksBySession,
+            [sid]: list.map(t => t.taskId === event.runId
+              ? { ...t, status: 'running' as const, provider: event.provider, parentSessionId: event.parentSessionId ?? t.parentSessionId }
+              : t),
+          },
+        }
+      }
+      return {
+        subagentTasksBySession: {
+          ...state.subagentTasksBySession,
+          [sid]: [...list, {
+            taskId: event.runId,
+            id: event.id,
+            sessionId: event.sessionId,
+            parentSessionId: event.parentSessionId,
+            status: 'running' as const,
+            provider: event.provider,
+            state: 'running' as const,
+            startedAt: event.ts,
+            blocks: [],
+          }],
+        },
+      }
+    })
+  },
+
+  applySubagentEnd: (event) => {
+    set((state) => {
+      const sid = event.sessionId
+      const list = state.subagentTasksBySession[sid] ?? []
+      return {
+        subagentTasksBySession: {
+          ...state.subagentTasksBySession,
+          [sid]: list.map(t => t.taskId === event.runId
+            ? {
+                ...t,
+                status: (event.stopReason === 'completed' ? 'done' :
+                         event.stopReason === 'aborted' ? 'cancelled' :
+                         'failed') as 'done' | 'cancelled' | 'failed',
+                stopReason: event.stopReason,
+                ...(event.lastAssistantMessage ? { lastAssistantMessage: event.lastAssistantMessage } : {}),
+                finishedAt: event.ts,
+              }
+            : t),
+        },
+      }
+    })
+  },
+
+  applySubagentDescriptor: (event) => {
+    set((state) => {
+      const sid = event.sessionId
+      const list = state.subagentTasksBySession[sid] ?? []
+      return {
+        subagentTasksBySession: {
+          ...state.subagentTasksBySession,
+          [sid]: list.map(t => t.taskId === event.runId ? { ...t, descriptor: event } : t),
+        },
+      }
+    })
+  },
+
+  applySubagentState: (event) => {
+    set((state) => {
+      const sid = event.sessionId
+      const list = state.subagentTasksBySession[sid] ?? []
+      return {
+        subagentTasksBySession: {
+          ...state.subagentTasksBySession,
+          [sid]: list.map(t => t.taskId === event.runId ? { ...t, state: event.state } : t),
+        },
+      }
+    })
+  },
+
+  applySubagentMessage: (event) => {
+    set((state) => {
+      const sid = event.sessionId
+      const list = state.subagentTasksBySession[sid] ?? []
+      return {
+        subagentTasksBySession: {
+          ...state.subagentTasksBySession,
+          [sid]: list.map(t => t.taskId === event.runId
+            ? { ...t, blocks: [...(t.blocks ?? []), ...event.blocks] }
+            : t),
+        },
+      }
+    })
+  },
+
+  applySubagentError: (event) => {
+    set((state) => {
+      const sid = event.sessionId
+      const list = state.subagentTasksBySession[sid] ?? []
+      return {
+        subagentTasksBySession: {
+          ...state.subagentTasksBySession,
+          [sid]: list.map(t => t.taskId === event.runId
+            ? { ...t, status: 'failed' as const, error: event.message }
+            : t),
+        },
+      }
+    })
   },
 }))
 
