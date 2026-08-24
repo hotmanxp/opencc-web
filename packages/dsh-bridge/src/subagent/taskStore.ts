@@ -353,6 +353,17 @@ export async function spawnDshSubagent(
      * 二选一;counter 由 zai-side factory 维护。
      */
     completionDelivery?: 'wakeup' | 'quiet'
+    /**
+     * 子代理输出 JSON Schema(对齐 vendor `SubagentStartRequest.outputSchema`)。
+     * 指定后,子代理 output 经结构化校验,`SubagentResult.structured` 字段填值。
+     */
+    outputSchema?: Record<string, unknown>
+    /** 子代理允许的工具名白名单(对齐 vendor `toolFilter`)。不传 = 全开。 */
+    toolFilter?: string[]
+    /** 子代理 persona prompt — 注入到子 agent system prompt 前缀(对齐 vendor `persona`)。 */
+    persona?: string
+    /** 嵌套层数上限(对齐 vendor `maxDepth`)。缺省 vendor 默认(2)。 */
+    maxDepth?: number
   },
 ): Promise<{
   taskId: string
@@ -414,11 +425,16 @@ export async function spawnDshSubagent(
       label: `dsh-subagent-${taskId}`,
       prompt: [{ type: 'text', text: opts.prompt }],
       parent: opts.parentAgent,
+      cwd: opts.cwd,
       signal: abortController.signal,
       agentOptions: {
         ...(opts.provider ? { provider: opts.provider } : {}),
         ...(opts.model ? { model: opts.model } : {}),
       },
+      ...(opts.outputSchema !== undefined ? { outputSchema: opts.outputSchema } : {}),
+      ...(opts.toolFilter !== undefined ? { toolFilter: opts.toolFilter } : {}),
+      ...(opts.persona !== undefined ? { persona: opts.persona } : {}),
+      ...(opts.maxDepth !== undefined ? { maxDepth: opts.maxDepth } : {}),
     })
   } catch (err) {
     // start() 阶段失败 — 上游会清理 partial resources,我们写盘 + 抛

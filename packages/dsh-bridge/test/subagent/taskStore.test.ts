@@ -553,3 +553,50 @@ describe('Phase 4: createAgentTool run_in_background branches', () => {
     expect(r.output).toContain('model 503')
   })
 })
+
+describe('spawnDshSubagent capability 字段', () => {
+  it('透传 outputSchema 到 vendor request', async () => {
+    // mock ctx.subagents.start,验证 request.outputSchema === input.outputSchema
+    const captured: unknown[] = []
+    const ctx = {
+      subagents: {
+        start: async (_name: string, req: unknown) => {
+          captured.push(req)
+          return { id: 'r1', localAgent: undefined, result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => {} }
+        },
+      },
+      agents: { get: () => undefined },
+      on: () => () => {},
+    } as never
+    await spawnDshSubagent(ctx, {
+      parentSessionId: 'p1', parentAgent: { id: 'p1' } as never,
+      prompt: 'x', cwd: '/tmp',
+      outputSchema: { type: 'object', properties: { x: { type: 'string' } } },
+    })
+    const req = captured[0] as { outputSchema?: unknown }
+    expect(req.outputSchema).toEqual({ type: 'object', properties: { x: { type: 'string' } } })
+  })
+
+  it('透传 toolFilter / persona / maxDepth', async () => {
+    const captured: unknown[] = []
+    const ctx = {
+      subagents: {
+        start: async (_n: string, req: unknown) => {
+          captured.push(req)
+          return { id: 'r1', localAgent: undefined, result: Promise.resolve({ output: [], stopReason: 'completed' }), dispose: async () => {} }
+        },
+      },
+      agents: { get: () => undefined },
+      on: () => () => {},
+    } as never
+    await spawnDshSubagent(ctx, {
+      parentSessionId: 'p1', parentAgent: { id: 'p1' } as never,
+      prompt: 'x', cwd: '/tmp',
+      toolFilter: ['Read'], persona: 'you are X', maxDepth: 2,
+    })
+    const req = captured[0] as { toolFilter?: string[]; persona?: string; maxDepth?: number }
+    expect(req.toolFilter).toEqual(['Read'])
+    expect(req.persona).toBe('you are X')
+    expect(req.maxDepth).toBe(2)
+  })
+})
