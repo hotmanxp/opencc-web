@@ -85,6 +85,103 @@ describe('stateBridge', () => {
     })
   })
 
+  it('bridges subagent.start to eventBus.emit', () => {
+    initStateBridge()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).emit('subagent.start', {
+      type: 'subagent.start',
+      ts: 0,
+      sessionId: 's1',
+      runId: 'r1',
+      provider: 'spawn',
+      id: 'x',
+      local: true,
+    })
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'subagent.start', sessionId: 's1', runId: 'r1' }),
+    )
+  })
+
+  it('bridges subagent.end to eventBus.emit', () => {
+    initStateBridge()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).emit('subagent.end', {
+      type: 'subagent.end',
+      ts: 0,
+      sessionId: 's1',
+      runId: 'r1',
+      provider: 'spawn',
+      id: 'x',
+      local: true,
+      stopReason: 'completed',
+    })
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'subagent.end', sessionId: 's1', runId: 'r1' }),
+    )
+  })
+
+  it('bridges subagent.descriptor to eventBus.emit', () => {
+    initStateBridge()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).emit('subagent.descriptor', {
+      type: 'subagent.descriptor',
+      ts: 0,
+      sessionId: 's1',
+      runId: 'r1',
+      version: 2,
+      mode: 'one-shot',
+      provider: 'spawn',
+    })
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'subagent.descriptor', sessionId: 's1', runId: 'r1' }),
+    )
+  })
+
+  it('bridges subagent.state to eventBus.emit', () => {
+    initStateBridge()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).emit('subagent.state', {
+      type: 'subagent.state',
+      ts: 0,
+      sessionId: 's1',
+      runId: 'r1',
+      state: 'running',
+    })
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'subagent.state', sessionId: 's1', runId: 'r1' }),
+    )
+  })
+
+  it('bridges subagent.message to eventBus.emit', () => {
+    initStateBridge()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).emit('subagent.message', {
+      type: 'subagent.message',
+      ts: 0,
+      sessionId: 's1',
+      runId: 'r1',
+      blocks: [],
+    })
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'subagent.message', sessionId: 's1', runId: 'r1' }),
+    )
+  })
+
+  it('bridges subagent.error to eventBus.emit', () => {
+    initStateBridge()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).emit('subagent.error', {
+      type: 'subagent.error',
+      ts: 0,
+      sessionId: 's1',
+      runId: 'r1',
+      message: 'boom',
+    })
+    expect(eventBus.emit).toHaveBeenCalledWith(
+      expect.objectContaining({ type: 'subagent.error', sessionId: 's1', runId: 'r1' }),
+    )
+  })
+
   it('dispose stops forwarding', () => {
     const dispose = initStateBridge()
     dispose()

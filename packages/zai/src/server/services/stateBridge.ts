@@ -13,6 +13,15 @@
 import { stateChangeBus, type BashTaskInfo } from '@zn-ai/zn-agent-core'
 import { eventBus } from './eventBus.js'
 import { getBashNotifier } from './bashNotifier.js'
+import { z } from 'zod'
+import {
+  SubagentStartEvent,
+  SubagentEndEvent,
+  SubagentDescriptorEvent,
+  SubagentStateEvent,
+  SubagentMessageEvent,
+  SubagentErrorEvent,
+} from '../../shared/subagentEvents.js'
 
 let _stateBridgeDispose: (() => void) | null = null
 
@@ -83,22 +92,28 @@ export function initStateBridge(): () => void {
   }
   stateChangeBus.on('cron.changed', onCronChanged)
 
-  // dsh-019: dsh-mode subagent 任务生命周期 — zai-side dsh factory
-  // 转发 dsh-bridge `onTaskStart` / `onTaskFinish` 回调,stateBridge
-  // 翻译成 ServerEvent 'subagent.changed' 推到前端。UI TaskDrawer
-  // Subagents tab 用此事件实时刷新(spinner / 自动移除 / interrupt)。
-  const onSubagentChanged = (e: {
-    sessionId: string
-    taskId: string
-    description: string
-    status: 'running' | 'done' | 'failed' | 'cancelled'
-    result?: string
-    error?: string
-    action: 'start' | 'finish'
-  }) => {
-    eventBus.emit({ type: 'subagent.changed', ...e })
-  }
-  stateChangeBus.on('subagent.changed', onSubagentChanged)
+  // dsh-019 / Task 11: dsh-mode subagent 任务生命周期 — zai-side dsh factory
+  // 转发 dsh-bridge subagent/* 回调,stateBridge 翻译成 6 个 ServerEvent
+  // 推到前端 SSE。旧 'subagent.changed' 已 deprecated;deprecation shim 由
+  // vendorSeam/eventTranslation.ts 处理。
+  const onSubagentStart = (e: z.infer<typeof SubagentStartEvent>) => eventBus.emit(e)
+  const onSubagentEnd = (e: z.infer<typeof SubagentEndEvent>) => eventBus.emit(e)
+  const onSubagentDescriptor = (e: z.infer<typeof SubagentDescriptorEvent>) => eventBus.emit(e)
+  const onSubagentState = (e: z.infer<typeof SubagentStateEvent>) => eventBus.emit(e)
+  const onSubagentMessage = (e: z.infer<typeof SubagentMessageEvent>) => eventBus.emit(e)
+  const onSubagentError = (e: z.infer<typeof SubagentErrorEvent>) => eventBus.emit(e)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(stateChangeBus as any).on('subagent.start', onSubagentStart)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(stateChangeBus as any).on('subagent.end', onSubagentEnd)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(stateChangeBus as any).on('subagent.descriptor', onSubagentDescriptor)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(stateChangeBus as any).on('subagent.state', onSubagentState)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(stateChangeBus as any).on('subagent.message', onSubagentMessage)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  ;(stateChangeBus as any).on('subagent.error', onSubagentError)
 
   _stateBridgeDispose = () => {
     stateChangeBus.off('cwd.changed', onCwdChanged)
@@ -107,7 +122,18 @@ export function initStateBridge(): () => void {
     stateChangeBus.off('v2_task.snapshot', onV2TaskSnapshot)
     stateChangeBus.off('agent_task.changed', onAgentTaskChanged)
     stateChangeBus.off('cron.changed', onCronChanged)
-    stateChangeBus.off('subagent.changed', onSubagentChanged)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).off('subagent.start', onSubagentStart)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).off('subagent.end', onSubagentEnd)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).off('subagent.descriptor', onSubagentDescriptor)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).off('subagent.state', onSubagentState)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).off('subagent.message', onSubagentMessage)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ;(stateChangeBus as any).off('subagent.error', onSubagentError)
   }
   return _stateBridgeDispose
 }
