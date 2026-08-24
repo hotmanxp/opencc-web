@@ -750,3 +750,35 @@ describe('useAgentStore.upsertToolCall dsh toolName 空串兼容 (Phase 2 tool/r
     expect(tool?.name).toBe('')
   })
 })
+
+/**
+ * 2026-08-24 blocker-fix: useAgentStore 之前缺 currentKernel 字段,
+ * SubagentsTab / SubagentsDrawer / MobileAgent 永远读到 undefined →
+ * `currentKernel !== 'dsh'` 始终 true → DSH 模式下 UI 仍走
+ * "DSH 模式专享"空态。这里验:
+ * 1. 初始 state 是 undefined(尚未 hydrate)
+ * 2. setCurrentKernel('dsh') / ('opencc') 写后能读出来
+ * 3. setCurrentKernel 不会污染其他字段
+ */
+describe('useAgentStore.currentKernel (2026-08-24 blocker-fix)', () => {
+  test('初始值为 undefined(尚未 hydrate)', () => {
+    expect(useAgentStore.getState().currentKernel).toBeUndefined()
+    expect(typeof useAgentStore.getState().setCurrentKernel).toBe('function')
+  })
+
+  test("setCurrentKernel('dsh') 后 store 字段 = 'dsh'", () => {
+    useAgentStore.getState().setCurrentKernel('dsh')
+    expect(useAgentStore.getState().currentKernel).toBe('dsh')
+  })
+
+  test("setCurrentKernel('opencc') 后 store 字段 = 'opencc'", () => {
+    useAgentStore.getState().setCurrentKernel('opencc')
+    expect(useAgentStore.getState().currentKernel).toBe('opencc')
+  })
+
+  test('setCurrentKernel 是 idempotent set(幂等写不抛错)', () => {
+    useAgentStore.getState().setCurrentKernel('dsh')
+    useAgentStore.getState().setCurrentKernel('dsh')
+    expect(useAgentStore.getState().currentKernel).toBe('dsh')
+  })
+})

@@ -98,6 +98,26 @@ export default function MobileLayout() {
     }
   }, [setOutputStyle, setMaxVisibleMessages, setEnableDynamicWorkflow, setTranscriptCollapsed])
 
+  // 2026-08-24 blocker-fix: /m 路由独立 hydrate useAgentStore.currentKernel。
+  // 桌面端 Layout.tsx 也会拉一次,MobileLayout 再拉一次(后写覆盖,同 endpoint
+  // 幂等)以保证从桌面端跳 /m 后 store 已被填充。
+  const setCurrentKernel = useAgentStore((s) => s.setCurrentKernel)
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/agent/kernel')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { kernel?: 'opencc' | 'dsh' } | null) => {
+        if (cancelled || !data || !data.kernel) return
+        setCurrentKernel(data.kernel)
+      })
+      .catch(() => {
+        // swallow — keep undefined
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [setCurrentKernel])
+
   return (
     <div
       style={{

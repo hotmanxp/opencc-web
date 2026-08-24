@@ -193,6 +193,29 @@ export default function Layout() {
     }
   }, [setOutputStyle, setWorkMode, setSettingsTheme, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate, setTranscriptCollapsed]);
 
+  // 2026-08-24 blocker-fix: 启动时拉一次 /api/agent/kernel → 写入
+  // useAgentStore.currentKernel。SubagentsTab / SubagentsDrawer /
+  // MobileAgent 三个 UI 组件读 store 判断要不要显示"DSH 模式专享"空态。
+  // SettingsDrawer 之前自己 fetch,现在统一从 store 读 — 避免重复请求,
+  // 且 /m 路由(走 MobileLayout)独立 mount 时也能 hydrate。
+  const setCurrentKernel = useAgentStore((s) => s.setCurrentKernel)
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/agent/kernel')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: { kernel?: 'opencc' | 'dsh' } | null) => {
+        if (cancelled || !data || !data.kernel) return
+        setCurrentKernel(data.kernel)
+      })
+      .catch(() => {
+        // swallow — kernel 字段保持 undefined,UI 默认走"DSH 模式专享"
+        // 空态(known trade-off;用户后续在 SettingsDrawer 切完 kernel 即恢复)
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [setCurrentKernel])
+
   return (
     // 用 height: 100vh (而不是 minHeight) 把 AntLayout 锁死在视口高度,
     // 这样内部 flex: 1 (Content / 子页面 wrapper) 才有确定的剩余空间可分配,

@@ -342,6 +342,18 @@ interface AgentState {
   // UI 会话信息面板"当前上下文大小"行读这里。
   contextTokensBySession: Record<string, number>
 
+  // 2026-08-24 blocker-fix: 当前生效的 agent kernel。undefined 表示尚未
+  // hydrate(server-side /api/agent/kernel 还没回)。三个 UI 组件读这个
+  // 字段判断要不要显示"DSH 模式专享"空态:
+  //   - SubagentsTab.tsx (splitPane / SubagentsTab.tsx:267)
+  //   - SubagentsDrawer.tsx (SubagentsDrawer.tsx:109)
+  //   - MobileAgent.tsx (pages/MobileAgent.tsx:20)
+  // Layout.tsx 在 mount 时拉一次 /api/agent/kernel 写入这里(同时 MobileLayout
+  // 在 /m 路由挂载时也拉,后写覆盖前者 — 同一 endpoint,幂等)。
+  // SettingsDrawer 重复拉的问题已修:它现在直接读 store,不再独立发请求。
+  currentKernel: 'opencc' | 'dsh' | undefined
+  setCurrentKernel: (kernel: 'opencc' | 'dsh') => void
+
   // 每次 sendMessage 递增的发送序号. 拼进 stream block key 作为"本轮命名空间",
   // 保证跨轮次的文本块 key 永不碰撞. 后端 turnIndex 恒为 0 (wrapWithZaiMeta 被
   // 逐事件调用导致其内部计数器每次归零), textSegmentRev 只在工具调用时 bump,
@@ -670,6 +682,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   _subagentClearTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
   apiRequestCountBySession: {},
   contextTokensBySession: {},
+  // 2026-08-24 blocker-fix: 当前生效的 agent kernel — 未 hydrate 时为
+  // undefined,Layout 启动时 fetch /api/agent/kernel 后写入。
+  currentKernel: undefined,
   // seq 守卫 / 投影存储 (T5): 初始为空, 事件到达时惰性写入。
   lastSeqBySession: {},
   projectionsBySession: {},
@@ -1027,6 +1042,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   transcriptCollapsed: false,
   filePreviewPath: null,
   setStatus: (status: AgentStatus) => set({ status }),
+  // 2026-08-24 blocker-fix: 写入当前生效的 agent kernel。Layout /
+  // MobileLayout 在 mount 时拉 /api/agent/kernel 后 dispatch;
+  // SettingsDrawer 也读这个字段(替代重复 fetch)。
+  setCurrentKernel: (kernel) => set({ currentKernel: kernel }),
   // queue.changed 快照覆盖排队列表 — 后端 per-session 串行队列的等待中
   // 命令 {id, text} 列表(不含正在执行的那条)。
   applyQueueChanged: (event) => set({ queuedPrompts: event.pending }),

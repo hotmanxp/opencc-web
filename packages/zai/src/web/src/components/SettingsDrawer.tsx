@@ -938,9 +938,16 @@ export default function SettingsDrawer() {
   const [agentOptions, setAgentOptions] = useState<EnumOption[]>(() => [
     { value: 'default', label: 'default' },
   ])
-  // Agent 内核 — 当前 session 跑哪个(GET /api/agent/kernel 拿)。
-  // 切换只对未来 session 生效,见 handleChange 里 'kernel' 分支的注释。
-  const [kernel, setKernel] = useState<'opencc' | 'dsh'>('opencc')
+  // Agent 内核 — 当前 session 跑哪个(读 useAgentStore.currentKernel,
+  // 由 Layout.tsx / MobileLayout.tsx 在 mount 时统一拉一次 /api/agent/kernel
+  // 写入。2026-08-24 blocker-fix:之前这里自己 fetch,与 Layout 重复;
+  // 现在直接读 store,避免双请求 + 单一 source of truth。
+  const storeKernel = useAgentStore((s) => s.currentKernel)
+  const setStoreKernel = useAgentStore((s) => s.setCurrentKernel)
+  // 本地 state 仅作为 schema 渲染用,初值从 store 投影。store 更新
+  // (e.g. Layout 拉完回写 / SettingsDrawer POST 成功后) 通过 useEffect
+  // 同步到这里。
+  const [kernel, setKernel] = useState<'opencc' | 'dsh'>(storeKernel ?? 'opencc')
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
     buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions, kernel),
@@ -971,22 +978,19 @@ export default function SettingsDrawer() {
       .catch(() => {
         // swallow — 保持默认 'default' 选项
       })
-    // 同次 mount 拉一次 GET /api/agent/kernel → 当前默认内核。
-    // 旧 zai 端点不存在时 catch 后保持 'opencc' 默认(用户会看到下拉,
-    // 但切换会失败 — 升级 zai 后即恢复)。
-    fetch('/api/agent/kernel')
-      .then((r) => (r.ok ? r.json() : null))
-      .then((data: { kernel?: 'opencc' | 'dsh' } | null) => {
-        if (cancelled || !data || !data.kernel) return
-        setKernel(data.kernel)
-      })
-      .catch(() => {
-        // swallow — 端点不可用时保持默认
-      })
+    // 2026-08-24 blocker-fix: 不再在这里拉 /api/agent/kernel — 由
+    // Layout.tsx / MobileLayout.tsx 在 mount 时统一拉一次写 store。
+    // 本地 kernel state 用 useEffect 从 store 同步,见下面 effect。
     return () => {
       cancelled = true
     }
   }, [])
+  // 同步 store.currentKernel → 本地 schema 渲染态;Layout / MobileLayout
+  // fetch 完后 dispatch setCurrentKernel,这里用 useEffect 跟随。这样
+  // SettingsDrawer 打开时 kernel 行总是反映当前 disk 真值。
+  useEffect(() => {
+    if (storeKernel !== undefined) setKernel(storeKernel)
+  }, [storeKernel])
   // 同步 store workMode → schema.workMode 行;同时联动 mainAgent 行禁用态
   // (code 模式只能使用默认 agent,职场与 Agent 关联配置见组件内 effect)。
   useEffect(() => {
@@ -1306,6 +1310,12 @@ export default function SettingsDrawer() {
             }
             if (data.ok) {
               setKernel(data.futureSessionKernel)
+              // 2026-08-24 blocker-fix: 把 future kernel 也写回 store —
+              // Layout 拉一次后用户切 kernel,新值要立刻反映到 SubagentsTab
+              // / SubagentsDrawer / MobileAgent 的 currentKernel 读取上。
+              // futureSessionKernel 是用户已确认的目标值(写到 ~/.zai/settings.json
+              // 后由 Layout 下一次 mount 重新拉),此处立即同步覆盖即可。
+              setStoreKernel(data.futureSessionKernel)
               // 提示用户:已切换 + 当前 session 跑哪个
               if (data.currentSessionKernel !== data.futureSessionKernel) {
                 message.info(
