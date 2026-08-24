@@ -25,6 +25,8 @@
 
 import type { ServerEvent } from '../../../shared/events.js';
 import type { KernelId } from './paths.js';
+import type { SeamRegistry } from './seamRegistry.js';
+import type { SeamName } from './seamRegistry.js';
 
 /**
  * 单 session 的运行时句柄（zai 侧已持有）。
@@ -281,6 +283,19 @@ export interface KernelAdapter {
 
   /** B5 阶段实现：子任务完成通知父 session 续传。 */
   notifySubagentDone?(opts: { session: AgentSession; taskId: string; result: unknown }): void;
+
+  // ─── vendorSeam 注册表 ─────────────────────────────────────────────
+  /**
+   * B7 阶段新增：vendorSeam 注册表（仅 dsh 轨道有值，opencc 轨道为 undefined）。
+   * 通过 `bindSeams()` 填充，替代 globalThis 桥。
+   */
+  seamRegistry?: SeamRegistry
+
+  /**
+   * B7 阶段新增：按名读取已注册的 vendor seam。
+   * opencc 轨道调用时抛 `MissingVendorSeamError`。
+   */
+  getSeam?<T>(name: SeamName): T
 }
 
 /**
