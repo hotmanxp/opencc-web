@@ -52,6 +52,46 @@ describe('subagentTasks routes 走 seamRegistry', () => {
       expect(res.status).toBe(503)
       expect(res.body.error).toBe('dsh_subagent_unavailable')
     })
+
+    // 2026-08-24 blocker-fix: seam.list() 因废 snapshot 文件触发 TypeError
+    // 时,route 不再 500 — 降级到空 tasks 列表 + warning,UI 走空态。
+    it('seam.list 抛 TypeError 时降级到空 tasks (不再 500)', async () => {
+      const { getKernelAdapter } = await import('../../../src/server/services/agentRuntime.js')
+      const mockSeam = {
+        list: vi.fn().mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'slice')")),
+        get: vi.fn(),
+        cancel: vi.fn(),
+        sendMessage: vi.fn(),
+        startContinuable: vi.fn(),
+      }
+      vi.mocked(getKernelAdapter).mockReturnValue({ kernel: 'dsh', getSeam: () => mockSeam } as never)
+
+      const app = makeApp()
+      const res = await request(app).get('/api/subagent-tasks?allSessions=true')
+
+      expect(res.status).toBe(200)
+      expect(res.body.tasks).toEqual([])
+      expect(res.body.warning).toBe('list_partial_failure')
+    })
+
+    // 2026-08-24 blocker-fix: 单条 seam.get 在文件不可读时返回 404 而非 500
+    it('seam.get 抛 TypeError 时返回 404 (单条废文件)', async () => {
+      const { getKernelAdapter } = await import('../../../src/server/services/agentRuntime.js')
+      const mockSeam = {
+        list: vi.fn().mockResolvedValue([]),
+        get: vi.fn().mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'slice')")),
+        cancel: vi.fn(),
+        sendMessage: vi.fn(),
+        startContinuable: vi.fn(),
+      }
+      vi.mocked(getKernelAdapter).mockReturnValue({ kernel: 'dsh', getSeam: () => mockSeam } as never)
+
+      const app = makeApp()
+      const res = await request(app).get('/api/subagent-tasks/bad-task-id')
+
+      expect(res.status).toBe(404)
+      expect(res.body.error).toBe('subagent_task_unreadable')
+    })
   })
 
   describe('GET /api/subagent-tasks/:id', () => {
@@ -95,6 +135,26 @@ describe('subagentTasks routes 走 seamRegistry', () => {
 
       expect(res.status).toBe(200)
       expect(mockSeam.cancel).toHaveBeenCalledWith('t1')
+    })
+
+    // 2026-08-24 blocker-fix: seam.list() 因废 snapshot 文件 TypeError
+    // 时降级到 404,不再 500。
+    it('seam.list 抛 TypeError 时返回 404 (不再 500)', async () => {
+      const { getKernelAdapter } = await import('../../../src/server/services/agentRuntime.js')
+      const mockSeam = {
+        list: vi.fn().mockRejectedValue(new TypeError("Cannot read properties of undefined (reading 'slice')")),
+        get: vi.fn(),
+        cancel: vi.fn(),
+        sendMessage: vi.fn(),
+        startContinuable: vi.fn(),
+      }
+      vi.mocked(getKernelAdapter).mockReturnValue({ kernel: 'dsh', getSeam: () => mockSeam } as never)
+
+      const app = makeApp()
+      const res = await request(app).post('/api/subagent-tasks/some-task/interrupt')
+
+      expect(res.status).toBe(404)
+      expect(res.body.error).toBe('subagent_task_unreadable')
     })
   })
 

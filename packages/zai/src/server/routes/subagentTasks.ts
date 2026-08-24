@@ -97,9 +97,21 @@ router.get('/subagent-tasks', async (req: Request, res: Response) => {
   const sessionId = req.query.sessionId as string | undefined
   const allSessions = req.query.allSessions === 'true' || req.query.allSessions === '1'
   try {
-    const tasks = allSessions
-      ? await seam.list(undefined)
-      : await seam.list(sessionId || undefined)
+    // 2026-08-24 blocker-fix: seam.list 可能因为 state.prompt 缺失的废
+    // 文件触发 TypeError 在 adapter stateToSummary 处抛错;虽然
+    // dsh-bridge listDshTasks 已加 shape 过滤,但为了双保险 + 单条 get
+    // 路径(GET /api/subagent-tasks/:id 也可能命中同样废文件),把 list
+    // 内部的 TypeError 也吞掉。
+    let tasks: Awaited<ReturnType<typeof seam.list>>
+    try {
+      tasks = await (allSessions
+        ? seam.list(undefined)
+        : seam.list(sessionId || undefined))
+    } catch (innerErr) {
+      // 单条废文件导致整个 list 失败 → 返回空 list 而非 500,UI 走空态。
+      console.warn('[subagentTasks] seam.list rejected:', innerErr)
+      return res.json({ tasks: [], warning: 'list_partial_failure' })
+    }
 
     // Phase 3 P0-B: allSessions=true 时,每条带 parentSessionId 字段供 UI 分组。
     // 用 seam.get 补全(只在 allSessions 时做 N+1 读)。
@@ -143,7 +155,17 @@ router.get('/subagent-tasks/:id', async (req: Request, res: Response) => {
 
   const id = req.params.id
   try {
-    const full = await seam.get(id)
+    // 2026-08-24 blocker-fix: seam.get 可能抛 TypeError 当磁盘上对应
+    // 文件是废 snapshot(整 JSON 数组而非 DshTaskState shape)。
+    // dsh-bridge readDshTask 不验证 shape;这里加 try/catch 降级到 404
+    // 而非 500,避免单条废文件炸掉整个端点。
+    let full: Awaited<ReturnType<typeof seam.get>>
+    try {
+      full = await seam.get(id)
+    } catch (innerErr) {
+      console.warn('[subagentTasks] seam.get rejected:', innerErr)
+      return res.status(404).json({ error: 'subagent_task_unreadable' })
+    }
     if (!full) return res.status(404).json({ error: 'subagent_task_not_found' })
     return res.json(full)
   } catch (err) {
@@ -165,8 +187,15 @@ router.post('/subagent-tasks/:id/interrupt', async (req: Request, res: Response)
 
   const id = req.params.id
   try {
-    // 先检查状态
-    const all = await seam.list()
+    // 先检查状态 — 2026-08-24 blocker-fix: seam.list() 可能因废 snapshot
+    // 文件 TypeError,这里加 try/catch 降级到 404(找不到任务)。
+    let all: Awaited<ReturnType<typeof seam.list>>
+    try {
+      all = await seam.list()
+    } catch (innerErr) {
+      console.warn('[subagentTasks] seam.list rejected:', innerErr)
+      return res.status(404).json({ error: 'subagent_task_unreadable' })
+    }
     const found = all.find((t) => t.taskId === id)
     if (!found) return res.status(404).json({ error: 'subagent_task_not_found' })
     if (found.status !== 'running') {
@@ -211,8 +240,14 @@ router.post('/subagent-tasks/:id/send-message', async (req: Request, res: Respon
     })
   }
   try {
-    // 先检查状态
-    const all = await seam.list()
+    // 先检查状态 — 2026-08-24 blocker-fix: seam.list() 防御,同 interrupt 路径。
+    let all: Awaited<ReturnType<typeof seam.list>>
+    try {
+      all = await seam.list()
+    } catch (innerErr) {
+      console.warn('[subagentTasks] seam.list rejected:', innerErr)
+      return res.status(404).json({ error: 'subagent_task_unreadable' })
+    }
     const found = all.find((t) => t.taskId === id)
     if (!found) return res.status(404).json({ error: 'subagent_task_not_found' })
     if (found.status !== 'running') {

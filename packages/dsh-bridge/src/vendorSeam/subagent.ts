@@ -339,6 +339,12 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
    * 转换器可统一成 `mapSeamSubagentStatus`。
    */
   private stateToSummary(state: DshTaskState): SeamSubagentSummary {
+    // 2026-08-24 blocker-fix: prompt 不是 DshTaskState 必填(旧 stub 或
+    // 异常路径写入的废文件可能没有);之前 `state.prompt.slice(0, 80)`
+    // 在 prompt 缺失时 TypeError,导致 /api/subagent-tasks 全量 500。
+    // 这里降级为 taskId 前 80 字符作为 description,确保不抛错。
+    const descriptionSource =
+      typeof state.prompt === 'string' ? state.prompt : state.taskId
     return {
       taskId: state.taskId,
       sessionId: state.sessionId,
@@ -346,7 +352,7 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
         ? { parentSessionId: state.parentSessionId }
         : {}),
       status: state.status,
-      description: state.prompt.slice(0, 80),
+      description: descriptionSource.slice(0, 80),
       startedAt: state.startedAt,
       ...(state.finishedAt !== undefined ? { finishedAt: state.finishedAt } : {}),
       ...(this.mapDshStatusToStopReason(state.status)

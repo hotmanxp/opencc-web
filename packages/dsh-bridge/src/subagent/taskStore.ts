@@ -120,7 +120,17 @@ export async function listDshTasks(): Promise<DshTaskState[]> {
       if (!entry.endsWith('.json')) continue
       const taskId = entry.slice(0, -'.json'.length)
       const t = await readDshTask(taskId)
-      if (t) tasks.push(t)
+      // 2026-08-24 blocker-fix: tasks-dsh/ 目录里既有 DshTaskState 文件,
+      // 也可能存在遗留的 v2 todo list snapshot(整文件是个 JSON 数组,无
+      // taskId / prompt / startedAt 字段)。readDshTask 之前的实现不验证
+      // shape,会把这种数组原样返回,下游 stateToSummary 在
+      // `state.prompt.slice(0, 80)` 处 TypeError → /api/subagent-tasks
+      // 返回 500。这里加一道 shape 防御:缺 taskId 或非 object 视为废文件,
+      // 跳过。
+      if (!t || typeof t !== 'object' || Array.isArray(t) || typeof t.taskId !== 'string') {
+        continue
+      }
+      tasks.push(t)
     }
     return tasks.sort((a, b) => b.startedAt - a.startedAt)
   } catch (err) {
