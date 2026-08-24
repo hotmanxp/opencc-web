@@ -24,9 +24,6 @@ import {
   nextFireMs,
 } from '../../src/tools/cron.js'
 import {
-  createAgentTool,
-} from '../../src/tools/subagent.js'
-import {
   createTaskCreateTool,
   createTaskGetTool,
   createTaskListTool,
@@ -166,22 +163,5 @@ describe('dsh-017: Cron tools schema', () => {
     })
     const r = await t.execute({}, {} as never) as { output: string }
     expect(r.output).toContain('requires an active session')
-  })
-})
-
-describe('dsh-017: Agent tool schema', () => {
-  it('exposes Agent tool with dsh-style name', () => {
-    const t = createAgentTool({ cwd: '/tmp', getParentSessionId: () => 'sid' })
-    expect(t.name).toBe('Agent')
-  })
-
-  it('rejects non-general-purpose subagent_type in Phase 1', async () => {
-    const t = createAgentTool({ cwd: '/tmp', getParentSessionId: () => 'sid' })
-    const r = await t.execute(
-      { description: 'test', prompt: 'do', subagent_type: 'custom-agent' },
-      { agent: undefined } as never,
-    ) as { output: string; status: string }
-    expect(r.status).toBe('failed')
-    expect(r.output).toContain('not supported in dsh Phase 1')
   })
 })

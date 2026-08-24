@@ -539,26 +539,7 @@ export async function spawnDshSubagent(
   }
 }
 
-/**
- * 通知父 session — 把子任务完成事件注入父 agent 的下一轮。
- *
- * Phase 4 已废弃:现在直接在 spawnDshSubagent 的 promise settle 里调
- * parentAgent.followup,不走单独函数。保留此 export 以兼容旧调用方
- * (zai compat `notifyParentSession`)。
- */
-export async function notifyParentSession(
-  _ctx: Context,
-  notification: SubagentNotification,
-): Promise<void> {
-  const existing = await readDshTask(notification.taskId)
-  if (existing) {
-    existing.status = notification.status
-    existing.finishedAt = Date.now()
-    existing.result = notification.result
-    existing.error = notification.error
-    await writeDshTask(existing)
-  }
-}
+// NOTE: notifyParentSession removed — deprecated (2026-08-22).
 
 // ====== zai compat subagentControl 桥接 ======
 

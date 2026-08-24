@@ -36,7 +36,6 @@ const mockState = vi.hoisted(() => ({
     readDshTask: vi.fn(),
     dshTaskPath: vi.fn(),
     writeDshTask: vi.fn(),
-    notifyParentSession: vi.fn(),
     getDshSubagentToolCalls: vi.fn(),
     createDshSubagentScope: vi.fn(),
   },

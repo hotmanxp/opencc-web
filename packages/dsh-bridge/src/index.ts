@@ -92,12 +92,7 @@ export {
 // dsh-017 新增：补齐 dsh 模式 LLM 工具集（Agent / Task* / Cron*）。
 // 注意：DisplayFiles 工具（目录列表）已于 2026-08-22 移除 — 上游 dsh-tool-fs-search
 // (grep + glob) 已覆盖目录浏览语义，无需自实现。
-export {
-  createAgentTool,
-  registerAgentTool,
-  type AgentToolOptions,
-  type AgentToolParentAgent,
-} from './tools/subagent.js'
+export { type AgentToolParentAgent } from './tools/subagent.js'
 
 // ========== vendorSeam (Stage 0) — dsh 模式的厂商中立 seam 抽象 ==========
 // zai 端从 `@zn-ai/dsh-bridge` 导入本目录符号,避免 zai 直接 import
@@ -224,7 +219,6 @@ export {
   listDshTasks,
   spawnDshSubagent,
   createDshSubagentScope,
-  notifyParentSession,
   listDshSubagents,
   interruptDshSubagent,
   sendMessageToDshSubagent,
