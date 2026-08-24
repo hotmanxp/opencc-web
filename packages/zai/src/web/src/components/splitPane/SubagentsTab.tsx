@@ -26,7 +26,7 @@
  */
 
 import { useState } from 'react'
-import { Button, Empty, Input, Segmented, Space, Spin, Tag, Tooltip, message as antdMessage } from 'antd'
+import { Button, Empty, Input, Modal, Segmented, Space, Spin, Tag, Tooltip, message as antdMessage } from 'antd'
 import {
   CheckCircleFilled,
   CloseCircleFilled,
@@ -266,6 +266,10 @@ export function SubagentsTab() {
   const [busy, setBusy] = useState<string | null>(null)
   const [sendingTo, setSendingTo] = useState<string | null>(null)
   const [selectedTaskId, setSelectedTaskId] = useState<string | null>(null)
+  // Task 14 Fix: Continue 按钮 prompt 收集 Modal
+  const [continueModalOpen, setContinueModalOpen] = useState(false)
+  const [continueTaskId, setContinueTaskId] = useState<string | null>(null)
+  const [continuePrompt, setContinuePrompt] = useState('')
 
   async function handleInterrupt(taskId: string) {
     setBusy(taskId)
@@ -300,16 +304,16 @@ export function SubagentsTab() {
    * POST /api/subagent-tasks/:id/continuable(后端:subagentTasks.ts:246)。
    * 后端从 parentSessionId 启动一个新的 continuable 子代理,新 childId
    * 通过 SSE 'subagent.start' 事件推到 store,UI 自动看到新行。
-   * 首次续聊 prompt 可空(由用户在下游子代理对话框输入)。
+   * prompt 由用户在 Modal 中输入,不可为空(后端校验 prompt_required)。
    */
-  async function handleContinue(taskId: string) {
+  async function handleContinue(taskId: string, prompt: string) {
     try {
       const r = await fetch(
         `/api/subagent-tasks/${encodeURIComponent(taskId)}/continuable`,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ prompt: '' }),
+          body: JSON.stringify({ prompt }),
         },
       )
       if (!r.ok) {
@@ -322,7 +326,22 @@ export function SubagentsTab() {
       antdMessage.warning(
         `续聊失败: ${err instanceof Error ? err.message : String(err)}`,
       )
+    } finally {
+      setContinueModalOpen(false)
+      setContinueTaskId(null)
+      setContinuePrompt('')
     }
+  }
+
+  function openContinueModal(taskId: string) {
+    setContinueTaskId(taskId)
+    setContinuePrompt('')
+    setContinueModalOpen(true)
+  }
+
+  function confirmContinue() {
+    if (!continueTaskId || !continuePrompt.trim()) return
+    handleContinue(continueTaskId, continuePrompt.trim())
   }
 
   const running = tasks.filter((t) => t.status === 'running').length
@@ -445,7 +464,7 @@ export function SubagentsTab() {
                     onSendMessage={handleSendMessage}
                     sendingTo={sendingTo}
                     onSelect={setSelectedTaskId}
-                    onContinue={handleContinue}
+                    onContinue={openContinueModal}
                   />
                 ))}
               </div>
@@ -460,7 +479,7 @@ export function SubagentsTab() {
               onSendMessage={handleSendMessage}
               sendingTo={sendingTo}
               onSelect={setSelectedTaskId}
-              onContinue={handleContinue}
+              onContinue={openContinueModal}
             />
           ))}
       </div>
@@ -470,6 +489,30 @@ export function SubagentsTab() {
         onInterrupt={handleInterrupt}
         busy={busy}
       />
+      {/* Task 14 Fix: Continue 按钮 prompt 收集 Modal */}
+      <Modal
+        title="继续子代理对话"
+        open={continueModalOpen}
+        onOk={confirmContinue}
+        onCancel={() => {
+          setContinueModalOpen(false)
+          setContinueTaskId(null)
+          setContinuePrompt('')
+        }}
+        okText="确定"
+        cancelText="取消"
+        okButtonProps={{ disabled: !continuePrompt.trim() }}
+        data-testid="continue-modal"
+      >
+        <Input.TextArea
+          rows={4}
+          value={continuePrompt}
+          onChange={(e) => setContinuePrompt(e.target.value)}
+          placeholder="输入你想让子代理继续做什么…"
+          aria-label="续聊 prompt 输入框"
+          data-testid="continue-prompt-input"
+        />
+      </Modal>
     </div>
   )
 }

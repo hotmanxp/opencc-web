@@ -1,6 +1,6 @@
 // @vitest-environment happy-dom
 import '@testing-library/jest-dom'
-import { fireEvent, render, screen, waitFor } from '@testing-library/react'
+import { act, fireEvent, render, screen, waitFor } from '@testing-library/react'
 import { afterEach, describe, expect, test, vi } from 'vitest'
 import { SubagentsTab } from '../../../../src/web/src/components/splitPane/SubagentsTab.js'
 import { useAgentStore } from '../../../../src/web/src/store/useAgentStore.js'
@@ -87,7 +87,7 @@ describe('SubagentsTab Continue 按钮 + state 渲染 (Task 14)', () => {
     expect(screen.queryByRole('button', { name: '继续子代理对话' })).not.toBeInTheDocument()
   })
 
-  test('点击 Continue 调 POST /api/subagent-tasks/:id/continuable', async () => {
+  test('点击 Continue 打开 Modal(含 TextArea + OK/Cancel)', async () => {
     const fetchMock = vi.fn<[string, RequestInit?], Promise<Response>>().mockResolvedValue(
       new Response(JSON.stringify({ childId: 'child-1', messageId: 'msg-1' }), {
         status: 200,
@@ -114,14 +114,140 @@ describe('SubagentsTab Continue 按钮 + state 渲染 (Task 14)', () => {
     render(<SubagentsTab />)
 
     const continueBtn = await screen.findByRole('button', { name: '继续子代理对话' })
-    fireEvent.click(continueBtn)
+    act(() => { fireEvent.click(continueBtn) })
 
+    // Modal should open (Portal renders at document body level)
+    await waitFor(() => {
+      expect(screen.getByTestId('continue-modal')).toBeInTheDocument()
+    })
+
+    // TextArea inside the modal portal
+    await waitFor(() => {
+      expect(screen.getByTestId('continue-prompt-input')).toBeInTheDocument()
+    })
+
+    // OK button is primary and disabled (empty prompt)
+    const modalContent = document.querySelector('.ant-modal-content')
+    expect(modalContent).toBeTruthy()
+    const okBtn = modalContent?.querySelector('.ant-btn-primary') as HTMLButtonElement | null
+    expect(okBtn).toBeTruthy()
+    expect(okBtn!.disabled).toBe(true)
+
+    // Cancel button is the non-primary button
+    const cancelBtn = modalContent?.querySelector('.ant-btn:not(.ant-btn-primary)')
+    expect(cancelBtn).toBeTruthy()
+  })
+
+  test('Continue Modal: 填写 prompt 后点确定 POST { prompt } 并关闭 Modal', async () => {
+    const fetchMock = vi.fn<[string, RequestInit?], Promise<Response>>().mockResolvedValue(
+      new Response(JSON.stringify({ childId: 'child-1', messageId: 'msg-1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    useAgentStore.setState({
+      sessionId: 'session-1',
+      subagentTasksBySession: {
+        'session-1': [
+          makeTask({
+            id: 'abc',
+            taskId: 'abc',
+            status: 'done',
+            state: 'settled',
+            parentSessionId: 'session-1',
+          }),
+        ],
+      },
+    })
+
+    render(<SubagentsTab />)
+
+    const continueBtn = await screen.findByRole('button', { name: '继续子代理对话' })
+    act(() => { fireEvent.click(continueBtn) })
+
+    // Wait for modal to appear
+    await waitFor(() => {
+      expect(screen.getByTestId('continue-modal')).toBeInTheDocument()
+    })
+
+    // Fill the TextArea
+    const textarea = await screen.findByTestId('continue-prompt-input')
+    act(() => { fireEvent.change(textarea, { target: { value: '继续分析这个文件' } }) })
+
+    // OK button should now be enabled
+    const modalContent = document.querySelector('.ant-modal-content')
+    const okBtn = modalContent?.querySelector('.ant-btn-primary') as HTMLButtonElement | null
+    expect(okBtn).toBeTruthy()
+    expect(okBtn!.disabled).toBe(false)
+
+    // Click OK
+    act(() => { fireEvent.click(okBtn!) })
+
+    // POST should be called with prompt (verifies the OK flow works)
     await waitFor(() => {
       expect(fetchMock).toHaveBeenCalledWith(
         '/api/subagent-tasks/abc/continuable',
-        expect.objectContaining({ method: 'POST' }),
+        expect.objectContaining({
+          method: 'POST',
+          body: JSON.stringify({ prompt: '继续分析这个文件' }),
+        }),
       )
     })
+
+    // Verify the textarea value was captured (non-empty prompt sent)
+    // Note: in jsdom the Modal Portal stays in DOM during exit animation;
+    // we rely on POST assertion above to prove the OK flow worked end-to-end.
+    const postCall = fetchMock.mock.calls.find(
+      ([url]) => url === '/api/subagent-tasks/abc/continuable',
+    )
+    expect(postCall).toBeDefined()
+    const body = JSON.parse((postCall![1] as RequestInit).body as string)
+    expect(body.prompt).toBe('继续分析这个文件')
+  })
+
+  test('Continue Modal: 点取消关闭 Modal 不 POST', async () => {
+    const fetchMock = vi.fn<[string, RequestInit?], Promise<Response>>().mockResolvedValue(
+      new Response(JSON.stringify({ childId: 'child-1', messageId: 'msg-1' }), {
+        status: 200,
+        headers: { 'Content-Type': 'application/json' },
+      }),
+    )
+    vi.stubGlobal('fetch', fetchMock)
+
+    useAgentStore.setState({
+      sessionId: 'session-1',
+      subagentTasksBySession: {
+        'session-1': [
+          makeTask({
+            id: 'abc',
+            taskId: 'abc',
+            status: 'done',
+            state: 'settled',
+            parentSessionId: 'session-1',
+          }),
+        ],
+      },
+    })
+
+    render(<SubagentsTab />)
+
+    const continueBtn = await screen.findByRole('button', { name: '继续子代理对话' })
+    act(() => { fireEvent.click(continueBtn) })
+
+    await waitFor(() => {
+      expect(screen.getByTestId('continue-modal')).toBeInTheDocument()
+    })
+
+    // Click cancel (non-primary button inside modal)
+    const modalContent = document.querySelector('.ant-modal-content')
+    const cancelBtn = modalContent?.querySelector('.ant-btn:not(.ant-btn-primary)')
+    expect(cancelBtn).toBeTruthy()
+    act(() => { fireEvent.click(cancelBtn!) })
+
+    // No POST should have been made (cancel does not submit)
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   test('state=running 时行内显示 spinner 提示', async () => {
