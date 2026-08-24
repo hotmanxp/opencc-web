@@ -168,6 +168,17 @@ export interface SeamSubagentSummary {
   error?: string
 }
 
+/**
+ * 2026-08-24 Blocker E: 子代理详情 — 在 `SeamSubagentSummary` 之上额外带
+ * `blocks` (ContentBlock[]) 与 `toolCalls` (ToolCallEntry[]),供 zai UI
+ * `SubagentDetailBody` 的 ContentBlockRenderer 渲染。文件缺失 / 解析失败
+ * 返回空数组(不阻塞其他字段)。
+ */
+export interface SeamSubagentDetail extends SeamSubagentSummary {
+  blocks?: import('../subagent/contentBlock.js').SubagentContentBlock[]
+  toolCalls?: import('../subagent/taskStore.js').ToolCallEntry[]
+}
+
 // ─────────────────────────────────────────────────────────────────────
 // Jobs 输入/输出 — mirror vendor JobStart/JobRead,加 zai 关心的子集
 // ─────────────────────────────────────────────────────────────────────
@@ -287,6 +298,13 @@ export interface SubagentControlSeam {
 
   /** 读单个子代理最新状态(磁盘 lookup)— `null` 表示不存在。 */
   get(taskId: string): Promise<SeamSubagentSummary | null>
+
+  /**
+   * 读单个子代理详情 — 在 `get()` 之上额外拼 `blocks` (ContentBlock[]) 与
+   * `toolCalls` (ToolCallEntry[])。`null` 表示不存在。blocks / toolCalls
+   * 任一读失败降级到空数组,其它字段不受影响(2026-08-24 Blocker E)。
+   */
+  getDetail(taskId: string): Promise<SeamSubagentDetail | null>
 
   /** 列父会话派生的子代理 — 缺省不过滤(返回所有,ztai 端可二次过滤)。 */
   list(parentSessionId?: string): Promise<SeamSubagentSummary[]>

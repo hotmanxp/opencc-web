@@ -95,12 +95,13 @@ describe('subagentTasks routes 走 seamRegistry', () => {
   })
 
   describe('GET /api/subagent-tasks/:id', () => {
-    it('调 seam.get', async () => {
+    it('调 seam.getDetail', async () => {
       const { getKernelAdapter } = await import('../../../src/server/services/agentRuntime.js')
       const mockTask = { taskId: 't1', sessionId: 's1', status: 'done', description: 'test', startedAt: Date.now() }
       const mockSeam = {
         list: vi.fn().mockResolvedValue([]),
-        get: vi.fn().mockResolvedValue(mockTask),
+        get: vi.fn(),
+        getDetail: vi.fn().mockResolvedValue({ ...mockTask, blocks: [], toolCalls: [] }),
         cancel: vi.fn(),
         sendMessage: vi.fn(),
         startContinuable: vi.fn(),
@@ -111,8 +112,66 @@ describe('subagentTasks routes 走 seamRegistry', () => {
       const res = await request(app).get('/api/subagent-tasks/t1')
 
       expect(res.status).toBe(200)
-      expect(mockSeam.get).toHaveBeenCalledWith('t1')
+      expect(mockSeam.getDetail).toHaveBeenCalledWith('t1')
       expect(res.body.taskId).toBe('t1')
+      expect(res.body.blocks).toEqual([])
+      expect(res.body.toolCalls).toEqual([])
+    })
+
+    // 2026-08-24 Blocker E: detail 返回带 ContentBlock[] 时直接透传。
+    it('detail 含 blocks / toolCalls 时一并返回', async () => {
+      const { getKernelAdapter } = await import('../../../src/server/services/agentRuntime.js')
+      const mockSeam = {
+        list: vi.fn().mockResolvedValue([]),
+        get: vi.fn(),
+        getDetail: vi.fn().mockResolvedValue({
+          taskId: 't2',
+          sessionId: 's2',
+          status: 'done',
+          description: 'agent work',
+          startedAt: 100,
+          blocks: [
+            { type: 'thinking', thinking: 'reasoning...' },
+            { type: 'text', text: '**hello**' },
+          ],
+          toolCalls: [
+            { callId: 'c1', toolName: 'Read', input: { path: '/x' }, status: 'done', ts: 100 },
+          ],
+        }),
+        cancel: vi.fn(),
+        sendMessage: vi.fn(),
+        startContinuable: vi.fn(),
+      }
+      vi.mocked(getKernelAdapter).mockReturnValue({ kernel: 'dsh', getSeam: () => mockSeam } as never)
+
+      const app = makeApp()
+      const res = await request(app).get('/api/subagent-tasks/t2')
+
+      expect(res.status).toBe(200)
+      expect(res.body.blocks).toHaveLength(2)
+      expect(res.body.blocks[0]).toEqual({ type: 'thinking', thinking: 'reasoning...' })
+      expect(res.body.toolCalls).toHaveLength(1)
+      expect(res.body.toolCalls[0].toolName).toBe('Read')
+    })
+
+    // 2026-08-24 Blocker E: seam.getDetail 抛错时降级到 404
+    it('seam.getDetail 抛错时返回 404', async () => {
+      const { getKernelAdapter } = await import('../../../src/server/services/agentRuntime.js')
+      const mockSeam = {
+        list: vi.fn().mockResolvedValue([]),
+        get: vi.fn(),
+        getDetail: vi.fn().mockRejectedValue(new TypeError('shape invalid')),
+        cancel: vi.fn(),
+        sendMessage: vi.fn(),
+        startContinuable: vi.fn(),
+      }
+      vi.mocked(getKernelAdapter).mockReturnValue({ kernel: 'dsh', getSeam: () => mockSeam } as never)
+
+      const app = makeApp()
+      const res = await request(app).get('/api/subagent-tasks/bad-id')
+
+      expect(res.status).toBe(404)
+      expect(res.body.error).toBe('subagent_task_unreadable')
     })
   })
 

@@ -31,6 +31,57 @@ export type DshSubagentTask = DshSubagentTaskItem
 /** Phase 3 P0-B: mode 选项 — 'current'(默认)只显示当前 session,'all' 跨 session。 */
 export type SubagentTasksMode = 'current' | 'all'
 
+/**
+ * 2026-08-24 Blocker D: server `/api/subagent-tasks` 返回的 shape 用
+ * `taskId` 字段,而 client `DshSubagentTaskItem` 期望 `id` + `taskId`
+ * 双字段(`useAgentStore.ts:69-87`)。`SubagentsTab.tsx:102` 与
+ * `SubagentDetailBody.tsx:330` 都用 `task.id` 找 row / 找 task — 不归一
+ * 化的话,server response 一进 store 就 `id === undefined`,row 不渲染。
+ *
+ * 同时归一化 `description` ↔ `prompt`(server 返回 `description`,但 DSH
+ * 落盘原始字段是 `prompt`)。
+ *
+ * 暴露为 named export 是为了让单测能直接 import 验证。
+ */
+export function normalizeTask(raw: unknown): DshSubagentTaskItem | null {
+  if (!raw || typeof raw !== 'object') return null
+  const r = raw as Record<string, unknown>
+  const id = typeof r.taskId === 'string' ? r.taskId
+    : typeof r.id === 'string' ? r.id
+    : undefined
+  if (!id) return null
+  const taskId = typeof r.taskId === 'string' ? r.taskId : id
+  const description = typeof r.description === 'string'
+    ? r.description
+    : typeof r.prompt === 'string'
+      ? r.prompt.slice(0, 80)
+      : undefined
+  const status = (typeof r.status === 'string'
+    ? r.status
+    : 'running') as DshSubagentTaskItem['status']
+  const state = (typeof r.state === 'string'
+    ? r.state
+    : status === 'running'
+      ? 'running'
+      : 'settled') as DshSubagentTaskItem['state']
+  return {
+    id,
+    taskId,
+    status,
+    description,
+    sessionId: typeof r.sessionId === 'string' ? r.sessionId : '',
+    ...(typeof r.parentSessionId === 'string'
+      ? { parentSessionId: r.parentSessionId }
+      : {}),
+    ...(typeof r.provider === 'string' ? { provider: r.provider } : {}),
+    state,
+    ...(typeof r.startedAt === 'number' ? { startedAt: r.startedAt } : {}),
+    ...(typeof r.finishedAt === 'number' ? { finishedAt: r.finishedAt } : {}),
+    ...(typeof r.stopReason === 'string' ? { stopReason: r.stopReason } : {}),
+    ...(typeof r.error === 'string' ? { error: r.error } : {}),
+  }
+}
+
 export function useSubagentTasks(opts?: { mode?: SubagentTasksMode }): {
   tasks: DshSubagentTaskItem[]
   loading: boolean
@@ -66,9 +117,13 @@ export function useSubagentTasks(opts?: { mode?: SubagentTasksMode }): {
       setAllLoading(true)
       fetch('/api/subagent-tasks?allSessions=true')
         .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-        .then((data: { tasks: DshSubagentTaskItem[] }) => {
+        .then((data: { tasks: unknown[] }) => {
           if (cancelled) return
-          setAllCache(data.tasks ?? EMPTY)
+          // 2026-08-24 Blocker D: server response 用 taskId 字段 — 归一化为 client 期望的 id + taskId。
+          const normalized = (data.tasks ?? [])
+            .map((t) => normalizeTask(t))
+            .filter((t): t is DshSubagentTaskItem => t !== null)
+          setAllCache(normalized)
           setAllError(null)
         })
         .catch((err: unknown) => {
@@ -91,12 +146,16 @@ export function useSubagentTasks(opts?: { mode?: SubagentTasksMode }): {
     setLoading(true)
     fetch(`/api/subagent-tasks?sessionId=${encodeURIComponent(sessionId)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
-      .then((data: { tasks: DshSubagentTaskItem[] }) => {
+      .then((data: { tasks: unknown[] }) => {
         if (cancelled) return
+        // 2026-08-24 Blocker D: 同 'all' 模式归一化。
+        const normalized = (data.tasks ?? [])
+          .map((t) => normalizeTask(t))
+          .filter((t): t is DshSubagentTaskItem => t !== null)
         // 直接 set store(对齐 cold-state hydrate 模式)— 后续 SSE 推送会
         // 通过 applySubagentChanged reducer 继续合并,不会覆盖。
         useAgentStore.setState((s) => ({
-          subagentTasksBySession: { ...s.subagentTasksBySession, [sessionId]: data.tasks ?? [] },
+          subagentTasksBySession: { ...s.subagentTasksBySession, [sessionId]: normalized },
         }))
         setError(null)
       })

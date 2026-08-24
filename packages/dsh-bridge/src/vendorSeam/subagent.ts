@@ -34,6 +34,8 @@ import {
   sendMessageToDshSubagent,
   listDshSubagents,
   readDshTask,
+  getDshSubagentToolCalls,
+  getDshSubagentBlocks,
   type DshTaskState,
 } from '../subagent/taskStore.js'
 
@@ -270,6 +272,30 @@ export class DshSubagentControlAdapter implements SubagentControlSeam {
   async get(taskId: string): Promise<SeamSubagentSummary | null> {
     const state = await readDshTask(taskId)
     return state ? this.stateToSummary(state) : null
+  }
+
+  /**
+   * 2026-08-24 Blocker E: 详情读 — 在 `get()` 之上额外拼 `blocks` /
+   * `toolCalls`。两个读路径各自独立 try/catch,任何一个失败不影响另一个,
+   * 保证 detail 至少包含 summary 字段。
+   */
+  async getDetail(taskId: string): Promise<import('./types.js').SeamSubagentDetail | null> {
+    const state = await readDshTask(taskId)
+    if (!state) return null
+    const summary = this.stateToSummary(state)
+    let blocks: import('../subagent/contentBlock.js').SubagentContentBlock[] = []
+    let toolCalls: import('../subagent/taskStore.js').ToolCallEntry[] = []
+    try {
+      blocks = await getDshSubagentBlocks(this.ctx, taskId)
+    } catch (err) {
+      console.warn(`[dsh-bridge] getDetail ${taskId} blocks read failed:`, err)
+    }
+    try {
+      toolCalls = await getDshSubagentToolCalls(this.ctx, taskId)
+    } catch (err) {
+      console.warn(`[dsh-bridge] getDetail ${taskId} toolCalls read failed:`, err)
+    }
+    return { ...summary, blocks, toolCalls }
   }
 
   async list(parentSessionId?: string): Promise<SeamSubagentSummary[]> {

@@ -71,6 +71,12 @@ export interface DshTaskState {
      * spawnDshSubagent 在订阅 session/event 后累积到此字段。
      */
   toolCalls?: ToolCallEntry[]
+  /**
+     * 2026-08-24 Blocker E: vendor `SubagentResult.output` 元素 — 经
+     * `parseContentBlocks` 校验后落盘。`getDshSubagentBlocks` 读此字段。
+     * 与 toolCalls 同位置落盘,无新文件。
+     */
+  blocks?: import('./contentBlock.js').SubagentContentBlock[]
 }
 
 const DSH_TASKS_DIR = join(homedir(), '.zai', 'tasks-dsh')
@@ -699,6 +705,30 @@ export async function getDshSubagentToolCalls(
 ): Promise<ToolCallEntry[]> {
   const task = await readDshTask(taskId)
   return task?.toolCalls ?? []
+}
+
+/**
+ * 2026-08-24 Blocker E:读子 agent 的 ContentBlock 流(对应 vendor
+ * `@deepseek-ai/dsh-subagent` `SubagentResult.output`)。返回的数组通过
+ * `parseContentBlocks` 解析,未知 type 元素会被跳过(已 warn)。文件不
+ * 存在或解析失败返回空数组 — UI 降级到 toolCalls 视图,不会炸。
+ *
+ * 数据源:`~/.zai/tasks-dsh/<taskId>.json` 内的 `blocks` 字段(DshTaskState)
+ * — 已有 `toolCalls` 字段同位置,落盘路径不变;此函数只是读端 helper。
+ *
+ * spec: docs/superpowers/specs/2026-08-24-dsh-subagent-task-alignment-design.md
+ */
+export async function getDshSubagentBlocks(
+  _ctx: Context,
+  taskId: string,
+): Promise<import('./contentBlock.js').SubagentContentBlock[]> {
+  const task = await readDshTask(taskId)
+  if (!task) return []
+  const rawBlocks = (task as { blocks?: unknown }).blocks
+  if (!Array.isArray(rawBlocks)) return []
+  // 延迟导入避免循环依赖(contentBlock.ts 不依赖 taskStore)。
+  const { parseContentBlocks } = await import('./contentBlock.js')
+  return parseContentBlocks(rawBlocks)
 }
 
 // 替换原 mock 实现为 re-export continuation 真函数

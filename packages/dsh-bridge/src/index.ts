@@ -223,6 +223,7 @@ export {
   interruptDshSubagent,
   sendMessageToDshSubagent,
   getDshSubagentToolCalls,
+  getDshSubagentBlocks,
   dshTaskPath,
   type DshTaskState,
   type ToolCallEntry,

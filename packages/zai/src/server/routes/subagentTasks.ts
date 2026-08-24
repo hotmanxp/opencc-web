@@ -146,8 +146,9 @@ router.get('/subagent-tasks', async (req: Request, res: Response) => {
 
 /**
  * GET /api/subagent-tasks/:id
- *   dsh-019 Phase 2: 用 seam.get 读完整 DshTaskState(带
- *   startedAt/finishedAt/result/error/prompt),找不到时返回 404。
+ *   dsh-019 Phase 2: 用 seam.getDetail 读完整 DshTaskState(带
+ *   startedAt/finishedAt/result/error/prompt + 2026-08-24 Blocker E
+ *   拼入 blocks / toolCalls),找不到时返回 404。
  */
 router.get('/subagent-tasks/:id', async (req: Request, res: Response) => {
   const seam = getSeam(res)
@@ -155,15 +156,14 @@ router.get('/subagent-tasks/:id', async (req: Request, res: Response) => {
 
   const id = req.params.id
   try {
-    // 2026-08-24 blocker-fix: seam.get 可能抛 TypeError 当磁盘上对应
-    // 文件是废 snapshot(整 JSON 数组而非 DshTaskState shape)。
-    // dsh-bridge readDshTask 不验证 shape;这里加 try/catch 降级到 404
-    // 而非 500,避免单条废文件炸掉整个端点。
-    let full: Awaited<ReturnType<typeof seam.get>>
+    // 2026-08-24 Blocker E: seam.getDetail 是 seam.get 的超集 — 同样在
+    // 废 snapshot 文件处可能抛 TypeError;加 try/catch 降级到 404 而非 500,
+    // 避免单条废文件炸掉整个端点。
+    let full: Awaited<ReturnType<typeof seam.getDetail>>
     try {
-      full = await seam.get(id)
+      full = await seam.getDetail(id)
     } catch (innerErr) {
-      console.warn('[subagentTasks] seam.get rejected:', innerErr)
+      console.warn('[subagentTasks] seam.getDetail rejected:', innerErr)
       return res.status(404).json({ error: 'subagent_task_unreadable' })
     }
     if (!full) return res.status(404).json({ error: 'subagent_task_not_found' })
