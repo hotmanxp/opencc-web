@@ -33,6 +33,8 @@ import {
   ZAI_GLOBAL_BRIDGE_KEYS,
 } from '../globalThisBridge.js'
 import { DSH_KERNEL } from '../paths.js'
+import { SeamRegistry, type SeamName } from '../seamRegistry.js'
+import { bindSeams } from '../seamBinding.js'
 import {
   getBashBackgroundTracker,
   getCommandRegistry,
@@ -567,33 +569,28 @@ export async function createDshKernelAdapter(
     // 子 scope(单传 agents service 不够,因为 createScope 走 plugin 而
     // 不是 ctx.get)。
     getDshCtx: () => handle.ctx,
-    onTaskStart: ({ taskId, prompt }) => {
-      // dsh-017 原本"复用 bashBackgroundTracker 显示 subagent 任务" — 已删除
-      // (2026-08-22 修复):dsh subagent 走 bashTracker 会让 TaskDrawer 把
-      // 它判定为 Bash 任务、TaskDock 把它在 "Bash" 段展示;正确路径是只
-      // 推 subagent.changed,让 SubagentsDrawer / SubagentsTab 接管。
-      // dsh-019: 推 subagent.changed 事件 — zai-side stateBridge
-      // 翻译成 ServerEvent 'subagent.changed' 推到前端,UI Subagents
-      // tab 用此事件实时刷新(spinner + interrupt 按钮)。
-      stateChangeBus.emit('subagent.changed', {
-        sessionId: getCurrentSessionId() ?? '',
-        taskId,
-        description: prompt.slice(0, 200),
-        status: 'running',
-        action: 'start',
-      } as never)
+    onTaskStart: ({ taskId, prompt: _prompt }) => {
+      // Task 9 (2026-08-24): deprecated no-op。`vendorSeam`
+      // DshSubagentControlAdapter 已订阅 `subagent/start` 并通过
+      // `eventBus.emit(...)` 推送 vendor 原生事件 + 自动 emit 旧
+      // `subagent.changed` deprecation shim(zai-side eventTranslation
+      // 层负责)。factory 端不再主动推,避免双发。
+      if (process.env.ZAI_DEBUG === '1') {
+        console.debug(
+          `[dsh-adapter] onTaskStart deprecated no-op (taskId=${taskId}) — ` +
+            `vendorSeam DshSubagentControlAdapter 已接管`,
+        )
+      }
     },
-    onTaskFinish: ({ taskId, status, error }) => {
-      // dsh-019: 推 subagent.changed 事件(action=finish),让 UI 自动
-      // 移除 spinner,显示 result/error。
-      stateChangeBus.emit('subagent.changed', {
-        sessionId: getCurrentSessionId() ?? '',
-        taskId,
-        description: '',
-        status: status === 'cancelled' ? 'cancelled' : status === 'done' ? 'done' : 'failed',
-        action: 'finish',
-        ...(error ? { error } : {}),
-      } as never)
+    onTaskFinish: ({ taskId, status, error: _error }) => {
+      // Task 9 (2026-08-24): deprecated no-op。同上,vendorSeam
+      // 订阅 `subagent/end` 后已发 `subagent.changed` shim + 新 vendor 事件。
+      if (process.env.ZAI_DEBUG === '1') {
+        console.debug(
+          `[dsh-adapter] onTaskFinish deprecated no-op (taskId=${taskId}, status=${status}) — ` +
+            `vendorSeam DshSubagentControlAdapter 已接管`,
+        )
+      }
     },
     onTaskChange: ({ sessionId, task, action }) => {
       // dsh-017: 转发到 stateChangeBus,让 zai-side stateBridge
@@ -701,93 +698,34 @@ export async function createDshKernelAdapter(
     trackZaiGlobalBridge(key, (globalThis as any)[key])
   }
 
-  // ── 2.5 dsh-019: __zaiDshSubagentControl 桥 ──────────────────────────
-  // 把 dsh-bridge 的 subagent 3 件套(list/cancel/sendMessage)通过
-  // globalThis 暴露给 zai compat `subagentControl` 工具(opencc-src/tools
-  // /opencc/subagentControl.ts 检测此桥存在则走 dsh 模式,否则走原
-  // BackgroundRuntime — opencc 模式)。这样 dsh 模式下 LLM 调
-  // subagent_control 工具时,能列/中断/给 dsh subagent 投消息。
-  ;(globalThis as {
-    __zaiDshSubagentControl?: {
-      list: (parentSessionId?: string) => Promise<Array<{ id: string; status: string; description?: string }>>
-      cancel: (taskId: string) => Promise<{ ok: boolean }>
-      sendMessage: (taskId: string, prompt: string) => Promise<{ ok: boolean }>
-    }
-  }).__zaiDshSubagentControl = {
-    list: async (parentSessionId?: string) => {
-      const tasks = await bridge.listDshSubagents(handle.ctx, parentSessionId)
-      return tasks.map((t) => ({
-        id: t.taskId,
-        status: t.status,
-        ...(t.prompt ? { description: t.prompt.slice(0, 120) } : {}),
-      }))
+  // ── 2.5 Task 9 (2026-08-24): seamRegistry + bindSeams 注入 ─────────
+  //
+  // 替代原 dsh-019 Phase 1+2 的 globalThis 桥(`__zaiDshSubagentControl` /
+  // `__zaiDshSubagentDetail`)。新模型:zai-side 不读 globalThis,直接通过
+  // `kernel.getSeam(name)` 拿到 vendorSeam adapter 实例(subagent / jobs)。
+  //
+  // `bindSeams` 内部:
+  //   - `new DshSubagentControlAdapter({ ctx, getParentAgent, eventBus })`
+  //     — 订阅 vendor `ctx.on('subagent/start' | 'subagent/end')` 并通过
+  //     `eventBus.emit` 推 vendor 原生事件 + 旧 `subagent.changed` deprecation
+  //     shim(由 `eventTranslation` 层负责)。
+  //   - `new DshJobsControlAdapter({ ctx })` — jobs(后台 bash 任务)seam。
+  //
+  // `eventBus` 走 zai `eventBus`(与 `__zaiEventBus` 一致 — 优先读 globalThis,
+  // fallback 到 `{ emit: () => {} }` 防 factory 装配期 timing 偏差)。
+  const seamRegistry = new SeamRegistry()
+  bindSeams({
+    registry: seamRegistry,
+    ctx: handle.ctx,
+    eventBus: (globalThis as { __zaiEventBus?: { emit: (e: unknown) => void } }).__zaiEventBus
+      ?? { emit: () => undefined },
+    getParentAgent: (sessionId: string) => {
+      const agents = handle.ctx.get('agents') as {
+        get?: (id: unknown) => import('@zn-ai/dsh-bridge').AgentToolParentAgent | undefined
+      } | undefined
+      return agents?.get?.(sessionId)
     },
-    cancel: async (taskId: string) => {
-      try {
-        const updated = await bridge.interruptDshSubagent(handle.ctx, taskId)
-        return { ok: updated != null }
-      } catch (err) {
-        return { ok: false }
-      }
-    },
-    sendMessage: async (taskId: string, prompt: string) => {
-      try {
-        return await bridge.sendMessageToDshSubagent(handle.ctx, taskId, prompt)
-      } catch {
-        return { ok: false }
-      }
-    },
-  }
-
-  // ── 2.6 dsh-019 Phase 2: __zaiDshSubagentDetail 桥 ─────────────────────
-  // 暴露 readTask(id) — 直接读 ~/.zai/tasks-dsh/<taskId>.json 拿完整
-  // DshTaskState(带 startedAt/finishedAt/result/error/prompt/toolCalls),
-  // 给 /api/subagent-tasks/:id 详情端点用(Subagent 详情 Drawer)。
-  // Phase 3 P0-A 新增 toolCalls 字段 — spawnDshSubagent 期间累积,详情
-  // Drawer 渲染子 agent 的工具调用历史。
-  ;(globalThis as {
-    __zaiDshSubagentDetail?: {
-      readTask: (taskId: string) => Promise<{
-        taskId: string
-        sessionId: string
-        parentSessionId?: string
-        status: 'running' | 'done' | 'failed' | 'cancelled'
-        prompt: string
-        startedAt: number
-        finishedAt?: number
-        result?: unknown
-        error?: string
-        toolCalls?: Array<{
-          callId: string
-          toolName: string
-          input: unknown
-          output?: unknown
-          status: 'running' | 'done' | 'error'
-          ts: number
-          durationMs?: number
-          error?: { name: string; code: string }
-        }>
-      } | null>
-    }
-  }).__zaiDshSubagentDetail = {
-    readTask: async (taskId: string) => {
-      const t = await bridge.readDshTask(taskId)
-      if (!t) return null
-      // 截断 prompt 到 8K 防 LLM 反向读取时 token 爆;result 不截(通常小)
-      return {
-        taskId: t.taskId,
-        sessionId: t.sessionId,
-        ...(t.parentSessionId ? { parentSessionId: t.parentSessionId } : {}),
-        status: t.status,
-        prompt: t.prompt.length > 8192 ? t.prompt.slice(0, 8192) + '\n\n[...truncated...]' : t.prompt,
-        startedAt: t.startedAt,
-        ...(t.finishedAt !== undefined ? { finishedAt: t.finishedAt } : {}),
-        ...(t.result !== undefined ? { result: t.result } : {}),
-        ...(t.error !== undefined ? { error: t.error } : {}),
-        ...(t.toolCalls && t.toolCalls.length > 0 ? { toolCalls: t.toolCalls } : {}),
-      }
-    },
-  }
+  })
 
   let startedAt = Date.now()
   let totalTurns = 0
@@ -1323,6 +1261,20 @@ export async function createDshKernelAdapter(
     },
 
     metrics,
+
+    // ── Task 9 (2026-08-24): vendorSeam 注册表 ──────────────────────
+    // 替代原 dsh-019 `__zaiDshSubagentControl` / `__zaiDshSubagentDetail`
+    // globalThis 桥。zai-side 服务层不再 import dsh-bridge 内部函数,
+    // 只通过 `adapter.getSeam(name)` 拿到 typed adapter 实例。
+    seamRegistry,
+
+    /**
+     * 按名读取已注册的 vendor seam。opencc 轨道 adapter 没有此方法
+     * (KernelAdapter.getSeam 是可选字段)。
+     */
+    getSeam<T>(name: SeamName): T {
+      return seamRegistry.get<T>(name)
+    },
   }
 
   return adapter
