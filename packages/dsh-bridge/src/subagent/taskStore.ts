@@ -709,3 +709,6 @@ export async function getDshSubagentToolCalls(
   const task = await readDshTask(taskId)
   return task?.toolCalls ?? []
 }
+
+// 替换原 mock 实现为 re-export continuation 真函数
+export { startContinuable } from './continuation.js'
