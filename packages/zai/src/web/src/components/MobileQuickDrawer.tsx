@@ -237,14 +237,25 @@ function GitTab({ cwd }: GitTabProps) {
           )
         })}
 
-      <Modal
+      {/* 用 Drawer 而不是 Modal 弹 diff 详情:
+          Modal portal 到 body 后,在 Android WebView 上跟外层 Drawer 的
+          z-stack/iframe-compositing 容易 race(标题能渲染但 body 看不到,
+          外层 Drawer 内容透出来)。Drawer 嵌 Drawer 同 portal 层级、AntD 5
+          原生支持,zIndex 由 zIndexManager 自动排,mobile WebView 兼容。
+          placement=bottom / height=90% 让 diff 占满下半屏,长 diff 走内部
+          滚动(DiffView 自身 overflow:auto,height:100%),顶上还能看到外层
+          文件列表用户知道点了哪个文件。 */}
+      <Drawer
         open={selected !== null}
         title={selected ?? ''}
         onCancel={() => setSelected(null)}
         footer={null}
-        width="90%"
+        placement="bottom"
+        height="90%"
         destroyOnClose
-        data-testid="mobile-quick-drawer-git-diff-modal"
+        onClose={() => setSelected(null)}
+        data-testid="mobile-quick-drawer-git-diff-drawer"
+        styles={{ body: { padding: 12 } }}
       >
         {diff.loading ? (
           <div style={{ textAlign: 'center', padding: 24 }}>
@@ -253,13 +264,11 @@ function GitTab({ cwd }: GitTabProps) {
         ) : diff.error ? (
           <Empty description={diff.error} />
         ) : diff.data?.diff !== undefined ? (
-          <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
-            <DiffView diff={diff.data.diff} />
-          </div>
+          <DiffView diff={diff.data.diff} />
         ) : (
           <Empty description="没有差异" />
         )}
-      </Modal>
+      </Drawer>
     </div>
   )
 }
