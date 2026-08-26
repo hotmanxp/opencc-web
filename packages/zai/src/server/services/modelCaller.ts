@@ -16,9 +16,10 @@ import { readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { zodToJsonSchema } from 'zod-to-json-schema'
-import type { ModelCaller } from '@zn-ai/zn-agent-core/runtime'
+import type { ModelCaller } from '@zn-ai/zn-agent-core'
 import { getCachedZaiSettingsSync } from './zaiSettingsStore.js'
 import { applyModelMapping, resolveCurrentProvider } from '../lib/resolveModel.js'
+import { logHttp } from './accessLog.js'
 import {
   getModelMaxOutputTokens,
   getThinkingBudgetTokens,
@@ -49,7 +50,7 @@ function buildAnthropicInputSchema(zodSchema: Parameters<typeof zodToJsonSchema>
   return zodToJsonSchema(zodSchema, { target: 'jsonSchema7', $refStrategy: 'none' }) as unknown as Anthropic.Messages.Tool.InputSchema
 }
 
-interface ClaudeProviderProfile {
+export interface ClaudeProviderProfile {
   id: string
   name: string
   provider: 'anthropic' | 'openai' | string
@@ -57,12 +58,23 @@ interface ClaudeProviderProfile {
   model: string
   apiKey?: string
   apiFormat?: string
+  /**
+   * zai patch: name of the env var to use as the API key for this
+   * profile (overrides the global OPENAI_API_KEY / ANTHROPIC_AUTH_TOKEN
+   * fallback for profiles that need their own key). Optional.
+   */
+  apiKeyEnv?: string
+  /**
+   * zai patch: free-form request-body fields merged into every LLM call
+   * routed through this profile. Optional.
+   */
+  extraParams?: Record<string, unknown>
 }
 
-/** Read ~/.claude.json and return providerProfiles (or empty). */
+/** Read ~/.zai.json and return providerProfiles (or empty). */
 function readClaudeProviderProfiles(): ClaudeProviderProfile[] {
   try {
-    const path = join(homedir(), '.claude.json')
+    const path = join(homedir(), '.zai.json')
     const raw = JSON.parse(readFileSync(path, 'utf-8'))
     return Array.isArray(raw?.providerProfiles) ? raw.providerProfiles : []
   } catch {
@@ -77,20 +89,43 @@ function parseModelList(modelField: string): string[] {
 
 /**
  * Find the provider profile that contains the given model name.
- * Returns null when not found or no providerProfiles are configured.
+ *
+ * When `preferredProfileId` is supplied AND a profile in the user's
+ * `~/.zai.json → providerProfiles` matches both that id and the model
+ * name, return that profile (the user explicitly picked it in the
+ * model picker). Otherwise return the first profile whose model list
+ * contains the model name — legacy behavior preserved for callers
+ * without an explicit preference.
+ *
+ * Returns null when no providerProfiles are configured or no profile
+ * lists this model.
  */
-function findProfileForModel(modelName: string): ClaudeProviderProfile | null {
+export function findProfileForModel(
+  modelName: string,
+  preferredProfileId?: string | null,
+): ClaudeProviderProfile | null {
   const profiles = readClaudeProviderProfiles()
   const trimmedModel = modelName.trim()
 
+  // Collect every profile that hosts the requested model name, in the
+  // order they appear in the user's config. We need the full list (not
+  // just the first match) when preferredProfileId is set so we can
+  // prefer an explicit pick without losing the legacy fallback.
+  const byModel: ClaudeProviderProfile[] = []
   for (const profile of profiles) {
     if (!profile.model) continue
     const models = parseModelList(profile.model)
     if (models.includes(trimmedModel)) {
-      return profile
+      byModel.push(profile)
     }
   }
-  return null
+  if (byModel.length === 0) return null
+
+  if (preferredProfileId) {
+    const preferred = byModel.find((p) => p.id === preferredProfileId)
+    if (preferred) return preferred
+  }
+  return byModel[0]
 }
 
 let _client: Anthropic | null = null
@@ -98,11 +133,26 @@ let _clientKey: string | null = null
 
 /**
  * Pick the right provider profile (if any) for the requested model.
- * Returns { baseURL, apiKey } from ~/.claude.json's providerProfiles when the
+ * Returns { baseURL, apiKey } from ~/.zai.json's providerProfiles when the
  * model is hosted by a non-Anthropic profile (e.g. zhiniao-* on the Wizard AI
  * OpenAI-compatible gateway). Falls back to the global Anthropic env config.
+ *
+ * `preferredProfileId` is the id the user picked in the model picker
+ * (persisted in transcript.meta.providerId). When supplied, the
+ * matcher prefers that exact provider even when several profiles
+ * share the same model name. Optional — when absent, the matcher
+ * uses legacy first-match-by-name.
+ *
+ * API key resolution order (matches shared/types.ts:ProviderProfile.apiKeyEnv
+ * docstring):
+ *   1. profile.apiKey (inline)
+ *   2. zaiEnv[profile.apiKeyEnv]
+ *   3. OPENAI_API_KEY / ANTHROPIC_AUTH_TOKEN (provider-family global)
  */
-function resolveProviderForModel(model: string | undefined): {
+export function resolveProviderForModel(
+  model: string | undefined,
+  preferredProfileId?: string | null,
+): {
   baseURL: string
   apiKey: string
   profile?: ClaudeProviderProfile
@@ -110,17 +160,22 @@ function resolveProviderForModel(model: string | undefined): {
   const zaiEnv = getCachedZaiSettingsSync().env ?? {}
 
   if (model) {
-    const profile = findProfileForModel(model)
+    const profile = findProfileForModel(model, preferredProfileId)
     if (profile) {
-      // Use the profile's apiKey when set, otherwise fall back to the global env
-      // (OPENAI_API_KEY for OpenAI providers, ANTHROPIC_AUTH_TOKEN for Anthropic)
+      // envKey stays `undefined` (not '') when the env var is missing
+      // or unset — `??` only catches null/undefined, so a literal '' here
+      // would mask the fallback chain (an empty apiKeyEnv would otherwise
+      // beat the provider-family global env). The chained `??` below
+      // collapses to fallbackKey whenever envKey is undefined.
+      const envKey = profile.apiKeyEnv ? zaiEnv[profile.apiKeyEnv] : undefined
       const fallbackKey =
         profile.provider === 'openai'
-          ? (zaiEnv.OPENAI_API_KEY ?? '')
-          : (zaiEnv.ANTHROPIC_AUTH_TOKEN ?? '')
+          ? zaiEnv.OPENAI_API_KEY
+          : zaiEnv.ANTHROPIC_AUTH_TOKEN
       return {
         baseURL: profile.baseUrl,
-        apiKey: profile.apiKey ?? fallbackKey,
+        // profile.apiKey > env[apiKeyEnv] > provider-family global env
+        apiKey: profile.apiKey ?? envKey ?? fallbackKey,
         profile,
       }
     }
@@ -132,12 +187,20 @@ function resolveProviderForModel(model: string | undefined): {
   }
 }
 
-async function getAnthropicClientForModel(model?: string): Promise<Anthropic> {
+async function getAnthropicClientForModel(
+  model?: string,
+  preferredProfileId?: string | null,
+): Promise<{ client: Anthropic; profile?: ClaudeProviderProfile }> {
   // Reuse cached client when the model resolves to the same provider.
-  const cacheKey = model ?? '__default__'
-  if (_client && _clientKey === cacheKey) return _client
+  // Cache key includes providerId so two profiles hosting the same
+  // model name (different baseURL / apiKey / extraParams) don't share
+  // the cached client — calling getAnthropicClientForModel(M3, 'a')
+  // then getAnthropicClientForModel(M3, 'b') correctly produces two
+  // distinct clients, instead of reusing the first one.
+  const cacheKey = `${preferredProfileId ?? '_'}::${model ?? '__default__'}`
+  if (_client && _clientKey === cacheKey) return { client: _client }
 
-  const { baseURL, apiKey, profile } = resolveProviderForModel(model)
+  const { baseURL, apiKey, profile } = resolveProviderForModel(model, preferredProfileId)
 
   if (!apiKey) throw new Error('API key not found for selected model')
   if (!baseURL) throw new Error('Base URL not found for selected model')
@@ -153,22 +216,35 @@ async function getAnthropicClientForModel(model?: string): Promise<Anthropic> {
     // dynamic imports too, so this is mockable in tests.
     console.error('[zai.modelCaller] client.new (openai-compat)', {
       model,
+      providerId: preferredProfileId ?? null,
       baseURL,
       profileId: profile.id,
       profileName: profile.name,
       apiFormat: profile.apiFormat,
+      extraParamsKeys: profile.extraParams ? Object.keys(profile.extraParams) : [],
       transport: 'fetch → POST {baseURL}/chat/completions (NOT Anthropic SDK)',
     })
     const mod = await import('./openaiClient.js')
-    _client = new mod.OpenAIClient({ baseURL, apiKey, model: model ?? '' }) as unknown as Anthropic
+    logHttp(
+      `[zai.modelCaller] client.openai profile=${profile.id} baseURL=${profile.baseUrl} model=${model ?? ''}`,
+      'debug',
+    )
+    _client = new mod.OpenAIClient({
+      baseURL,
+      apiKey,
+      model: model ?? '',
+      extraParams: profile.extraParams,
+    }) as unknown as Anthropic
     _clientKey = cacheKey
-    return _client
+    return { client: _client, profile }
   }
 
   _client = new Anthropic({
     authToken: apiKey,
     baseURL,
-    maxRetries: 2,
+    // maxRetries: 0 — 重试统一由 zn-agent-core withRetry 层负责(含 429
+    // 冷却门),SDK 自重试会与 withRetry 叠加重试放大请求风暴。
+    maxRetries: 0,
     // anthropic-beta header: comma-separated list of beta features.
     // - anthropic-tot-control: tool orchestration extras (legacy from upstream proxy)
     // - interleaved-thinking-2025-05-14: keeps extended thinking active across
@@ -179,8 +255,12 @@ async function getAnthropicClientForModel(model?: string): Promise<Anthropic> {
       'anthropic-beta': 'anthropic-tot-control,interleaved-thinking-2025-05-14',
     },
   })
+  logHttp(
+    `[zai.modelCaller] client.anthropic profile=${profile?.id ?? '(none)'} kind=${profile?.provider ?? '(default)'} baseURL=${baseURL}`,
+    'debug',
+  )
   _clientKey = cacheKey
-  return _client
+  return { client: _client, profile }
 }
 
 function getAnthropicClient(): Anthropic {
@@ -200,7 +280,9 @@ function getAnthropicClient(): Anthropic {
   _client = new Anthropic({
     authToken,
     baseURL,
-    maxRetries: 2,
+    // maxRetries: 0 — 重试统一由 zn-agent-core withRetry 层负责(含 429
+    // 冷却门),SDK 自重试会与 withRetry 叠加重试放大请求风暴。
+    maxRetries: 0,
     // anthropic-beta header: comma-separated list of beta features.
     // - anthropic-tot-control: tool orchestration extras (legacy from upstream proxy)
     // - interleaved-thinking-2025-05-14: keeps extended thinking active across
@@ -244,6 +326,16 @@ export function createAnthropicModelCaller(): ModelCaller {
       tools: Array<{ name: string; description?: string; inputSchema: Parameters<typeof zodToJsonSchema>[0] }>
       signal: AbortSignal
     } = req
+    // zai patch: per-call providerId arrives nested in req.options
+    // (mirrors the providerOverride plumbing — vendor query.ts:1312
+    // forwards `options.providerId` from ToolUseContext.options, which
+    // QueryEngine.submitMessage populated from createOpenccRuntime
+    // input.providerId). Treat absent / non-string as "no preference"
+    // so legacy callers without providerId fall through to first-match.
+    const providerId: string | null =
+      typeof (req as { options?: { providerId?: unknown } })?.options?.providerId === 'string'
+        ? ((req as { options: { providerId: string } }).options.providerId as string)
+        : null
     const zaiSettings = getCachedZaiSettingsSync()
     const env = zaiSettings.env ?? {}
 
@@ -265,7 +357,23 @@ export function createAnthropicModelCaller(): ModelCaller {
     // Per-model client: pick the right provider from providerProfiles when the
     // model belongs to a non-Anthropic profile (e.g. zhiniao-* on Wizard AI).
     // Async because OpenAI profiles lazy-load the openaiClient module.
-    const client = await getAnthropicClientForModel(resolvedModel)
+    // preferredProfileId is forwarded so the matcher prefers the user-
+    // picked provider when several profiles share the same model name
+    // (see plan §阶段 3 modelCaller).
+    // profile is captured here so we can merge its `extraParams` into the
+    // anthropic-side request body below (the openai-compat branch already
+    // receives extraParams via OpenAIClientOptions and handles it inside
+    // openaiClient.ts; anthropic SDK has no equivalent hook).
+    const { client, profile: resolvedProfile } = await getAnthropicClientForModel(resolvedModel, providerId)
+
+    // 诊断: 记录本轮实际匹配到的 provider/profile — 用户选了 openai
+    // provider 却看不到 openaiClient 请求日志时, 这一行直接告诉我们是
+    // 匹配到了别的 profile 还是 providerId 没透传进来。
+    logHttp(
+      `[zai.modelCaller] call model=${resolvedModel} providerId=${providerId ?? '(none)'}` +
+        ` profile=${resolvedProfile?.id ?? '(none)'} kind=${resolvedProfile?.provider ?? '(default anthropic)'}`,
+      'debug',
+    )
 
     // New normalization. Handles three shapes:
     // 1. string             → use as-is
@@ -364,7 +472,18 @@ export function createAnthropicModelCaller(): ModelCaller {
             })) as Anthropic.Messages.ToolUnion[])
           : undefined,
         stream: true,
-      },
+        // zai patch: per-provider extraParams merged on the anthropic side.
+        // The Anthropic SDK accepts arbitrary body fields and forwards them
+        // upstream; the openai-compat branch (OpenAIClient) handles its own
+        // extraParams merge inside openaiClient.ts:create (it ignores the
+        // fields here since OpenAIClient's body builder reads from
+        // `this.extraParams`, not from messages.create params).
+        ...(resolvedProfile?.extraParams ?? {}),
+        // Cast to the streaming variant (not the wide MessageCreateParams
+        // union) so TS resolves the create() overload that returns a
+        // Stream<RawMessageStreamEvent>; the union would make `for await`
+        // over `stream` fail with TS2504.
+      } as Anthropic.Messages.MessageCreateParamsStreaming,
       { signal },
     )
 
@@ -402,7 +521,10 @@ export function createAnthropicModelCaller(): ModelCaller {
         name?: string
         headers?: Headers
       }
-      console.error('[zai.modelCaller] ← error', JSON.stringify({
+      // logHttp: console + /tmp/zai-http.log 双写 — 上游 500/4xx 是用户能
+      // 看到的 "API Error: 500" 的直接来源, 只打 console 的话没人盯终端
+      // 就丢了。requestID 是关键, 可拿去上游网关侧查对应请求。
+      logHttp(`[zai.modelCaller] ← error ${JSON.stringify({
         model: resolvedModel,
         stage: eventCount === 0 ? 'create' : 'stream',
         eventCount,
@@ -417,7 +539,7 @@ export function createAnthropicModelCaller(): ModelCaller {
               : undefined,
           stack: (err as Error).stack?.split('\n').slice(0, 5).join('\n'),
         }),
-      }))
+      })}`, 'error')
       throw err
     }
   })

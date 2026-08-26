@@ -5,6 +5,7 @@ import { useIsMobile } from '../hooks/useIsMobile'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
 import { api } from '../lib/api'
+import SettingsDrawer from './SettingsDrawer'
 
 /**
  * 移动端顶层布局 — 没有 Sider / 顶栏 / 任何桌面 chrome。
@@ -23,19 +24,39 @@ export default function MobileLayout() {
   const setInstanceContext = useAppStore((s) => s.setInstanceContext)
   const setOutputStyle = useAppStore((s) => s.setOutputStyle)
   const setMaxVisibleMessages = useAppStore((s) => s.setMaxVisibleMessages)
+  const setEnableDynamicWorkflow = useAppStore((s) => s.setEnableDynamicWorkflow)
   const setTranscriptCollapsed = useAgentStore((s) => s.setTranscriptCollapsed)
 
   useEffect(() => {
     api
-      .get<{ ok: boolean; cwd: string; cwdName: string; branch?: string | null }>('/system')
+      .get<{
+        ok: boolean
+        cwd: string
+        cwdName: string
+        branch: string | null
+        host: string
+        port: number
+        ips: string[]
+        // 与桌面端 Layout.tsx 对齐:MobileLayout 必须把 supervisor 关系字段
+        // 一起灌进 store,否则 SettingsDrawer 的 isManagedChild 判断永远
+        // false,「重启/关闭服务」section 在 /m 路由下整体不渲染。
+        isManagedChild?: boolean
+        supervisorPid?: number | null
+        instanceId?: string | null
+      }>('/system')
       .then((data) => {
         setInstanceContext({
           cwd: data.cwd,
           cwdName: data.cwdName,
           branch: data.branch ?? null,
-          host: '',
-          port: 0,
-          ips: [],
+          host: data.host,
+          port: data.port,
+          ips: data.ips ?? [],
+          isManagedChild: data.isManagedChild === true,
+          supervisorPid:
+            typeof data.supervisorPid === 'number' ? data.supervisorPid : null,
+          instanceId:
+            typeof data.instanceId === 'string' ? data.instanceId : null,
         })
         document.title = `${data.cwdName}-Z.AI`
       })
@@ -47,7 +68,11 @@ export default function MobileLayout() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<{ outputStyle?: 'default' | 'compact' | 'verbose'; maxVisibleMessages?: number }>(
+      .get<{
+        outputStyle?: 'default' | 'compact' | 'verbose'
+        maxVisibleMessages?: number
+        enableDynamicWorkflow?: boolean
+      }>(
         '/agent/settings',
       )
       .then((data) => {
@@ -63,12 +88,15 @@ export default function MobileLayout() {
         if (typeof data.maxVisibleMessages === 'number') {
           setMaxVisibleMessages(Math.max(1, Math.min(1000, Math.floor(data.maxVisibleMessages))))
         }
+        if (typeof data.enableDynamicWorkflow === 'boolean') {
+          setEnableDynamicWorkflow(data.enableDynamicWorkflow)
+        }
       })
       .catch(() => {})
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setMaxVisibleMessages, setTranscriptCollapsed])
+  }, [setOutputStyle, setMaxVisibleMessages, setEnableDynamicWorkflow, setTranscriptCollapsed])
 
   return (
     <div
@@ -82,6 +110,12 @@ export default function MobileLayout() {
         overflow: 'hidden',
       }}
     >
+      {/* 全局设置面板 — 与桌面端 Layout.tsx 对称,让 /m 路由也能唤起。
+          SettingsDrawer 自身在 settingsDrawerOpen=false 时 return null,
+          默认零渲染。MobileAgent.tsx 里也保留一份 mount,只是为了代码层
+          面"可见"(避免被误读为移除)。双重 mount 时 useEffect 会跑两次
+          fetch /api/agent/settings,但 store 共享,无功能问题。 */}
+      <SettingsDrawer />
       <Outlet />
     </div>
   )

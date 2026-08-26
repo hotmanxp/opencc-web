@@ -2,7 +2,7 @@ import { create } from 'zustand'
 import { flushSync } from 'react-dom'
 import type { ServerEvent } from '../../../shared/events.js'
 import type { ModelEntry } from '../../../shared/settings.js'
-import type { PermissionMode } from '@zn-ai/zn-agent-core/runtime'
+import type { PermissionMode } from '@zn-ai/zn-agent-core'
 import type { BashTaskInfo, BackgroundTask, TaskStatus } from '../lib/taskApi.js'
 
 // ========== URL <-> sessionId 双向同步 ==========
@@ -188,6 +188,14 @@ export type CompactionToast = {
   expiresAt: number
 }
 
+// 排队中的 prompt(对话进行中提交, 后端 per-session 串行队列等待执行)。
+// 由 queue.changed SSE 事件驱动; AgentInputBox 排队预览区渲染 + 开始执行时
+// 移入 transcript。
+export type QueuedPrompt = {
+  id: string
+  text: string
+}
+
 interface AgentState {
   sessionId: string | null
   sessions: Array<{
@@ -196,6 +204,16 @@ interface AgentState {
     updatedAt: number
     /** Resolved model name (from transcript.meta.model). 'unknown' or absent = not set. */
     model?: string
+    /**
+     * zai patch: id of the provider profile the user picked in the
+     * model picker for this session (from transcript.meta.providerId).
+     * Carried alongside `model` so the server-side matcher can route
+     * the request to the exact provider the user chose when several
+     * provider profiles share the same model name. Sessions persisted
+     * before this field existed simply omit it — the server treats the
+     * absence as "no preference" and uses the legacy first-match path.
+     */
+    providerId?: string
     /** Per-session permission mode (default/acceptEdits/plan/bypassPermissions/dontAsk). */
     permissionMode?: PermissionMode
     cwd?: string
@@ -205,6 +223,10 @@ interface AgentState {
   cwd: string
   messages: AgentMessage[]
   status: AgentStatus
+  // 排队中的 prompt(对话进行中提交, 后端 per-session 串行队列等待执行)。
+  // queue.changed SSE 事件写入; AgentInputBox 排队预览区渲染, 某条开始
+  // 执行(从 pending 消失)时移入 transcript。
+  queuedPrompts: QueuedPrompt[]
   abortController: AbortController | null
   pendingAsk: AskState | null
   pendingApprove: ApproveState | null
@@ -242,6 +264,15 @@ interface AgentState {
   cwdBySession: Record<string, string>
   bashTasksBySession: Record<string, BashTaskInfo[]>
   agentTasksBySession: Record<string, BackgroundTaskSummary[]>
+  // zai patch (2026-08-09): 后端 vendor sessionApiCounter 推过来的
+  // 累计 API 请求数(每次 runtime.done 带 total,monotonic 增)。
+  // UI 会话信息面板"API 请求次数"行读这里。
+  apiRequestCountBySession: Record<string, number>
+  // zai patch (2026-08-09): 后端 translateRuntimeEvents 从 Anthropic SDK
+  // message_delta.usage 捕获的最近一次 API 调用的 total context tokens。
+  // 每次 runtime.done 覆盖(取最新值,非累加 — usage 字段已是 cumulative)。
+  // UI 会话信息面板"当前上下文大小"行读这里。
+  contextTokensBySession: Record<string, number>
 
   // 每次 sendMessage 递增的发送序号. 拼进 stream block key 作为"本轮命名空间",
   // 保证跨轮次的文本块 key 永不碰撞. 后端 turnIndex 恒为 0 (wrapWithZaiMeta 被
@@ -251,11 +282,23 @@ interface AgentState {
   // 气泡. sendSeq 提供跨轮唯一性, 根治该归并 bug.
   sendSeq: number
 
+  // dsh 借鉴 (2026-08-15): seq 守卫 + 投影存储。
+  // 每 session 已应用的最大事件 seq (只升不降) — 重放/乱序事件被丢弃,
+  // 替代部分手工 key 拼接防御 (手工 key 仍负责 React 渲染分组, 渐进式)。
+  lastSeqBySession: Record<string, number>
+  // 投影值存储: sessionId → key → { value, seq }, higher-seq-wins 合并。
+  // host 算完的派生值快照 (title / context.tokens), 重连后整体重发。
+  projectionsBySession: Record<string, Record<string, { value: unknown; seq: number }>>
+
   // SSE reducers (Task 6)
   activeSessionId: string | null
   applyRuntimeEvent: (event: ServerEvent) => void
   applySessionEvent: (event: ServerEvent) => void
   applyPromptAsk: (event: ServerEvent) => void
+  // queue.changed 事件 reducer: 用后端队列快照覆盖 queuedPrompts。
+  applyQueueChanged: (event: { pending: QueuedPrompt[] }) => void
+  // session/projection 帧 reducer: higher-seq-wins 写入投影存储 (T5)。
+  applyProjection: (event: Extract<ServerEvent, { type: 'session/projection' }>) => void
 
   // SSE state.* event reducers (Task 10) — 由 useEventStream (Task 11) 在
   // 收到 cwd.changed / bash_task.changed / v2_task.changed /
@@ -300,6 +343,10 @@ interface AgentState {
    */
   transcriptCollapsed: boolean
   setTranscriptCollapsed: (collapsed: boolean) => void
+  /** 当前打开预览的文件绝对路径;null = 关闭。 */
+  filePreviewPath: string | null
+  openFilePreview: (path: string) => void
+  closeFilePreview: () => void
   clearMessages: () => void
   loadSessions: () => Promise<void>
   loadTranscript: (sessionId: string) => Promise<void>
@@ -323,7 +370,14 @@ interface AgentState {
   /** Models list synced from /api/agent/settings → models[]. */
   availableModels: ModelEntry[]
   /** Optimistic PATCH /api/agent/sessions/:id + local session model update. */
-  patchSessionModel: (sid: string, model: string) => Promise<void>
+  /**
+   * zai patch: payload now carries { model, providerId } instead of a
+   * bare model string. Backward-compatible: callers passing a plain
+   * string (legacy behavior) still work — see the runtime check below
+   * that normalizes string-or-object to the object form before
+   * reaching the PATCH body.
+   */
+  patchSessionModel: (sid: string, payload: string | { model: string; providerId?: string }) => Promise<void>
   /** Optimistic PATCH /api/agent/sessions/:id + local session mode update. */
   patchSessionMode: (sid: string, mode: PermissionMode) => Promise<void>
   sendMessage: (prompt: string) => Promise<void>
@@ -482,6 +536,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   cwd: '',
   messages: [],
   status: 'idle',
+  queuedPrompts: [],
   abortController: null,
   pendingAsk: null,
   pendingApprove: null,
@@ -507,6 +562,11 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 待清空定时器: 每 sessionId 一份, "全部任务完成" 后 5s 自动从 store 移除
   // (避免"全部完成还一直挂着"的 UI 噪音). 重新写入含未完成任务时取消.
   _taskClearTimers: {} as Record<string, ReturnType<typeof setTimeout>>,
+  apiRequestCountBySession: {},
+  contextTokensBySession: {},
+  // seq 守卫 / 投影存储 (T5): 初始为空, 事件到达时惰性写入。
+  lastSeqBySession: {},
+  projectionsBySession: {},
 
   setV2Tasks: (sessionId, tasks) => {
     set((s) => ({
@@ -590,6 +650,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   //
   upsertToolCall: (msg: AgentMessage) =>
     set((s) => {
+      // seq 守卫 (T5): 与 upsertStreamBlock 同款 — 读 msg.seq (applyRuntimeEvent
+      // 构造 startMsg/resultMsg 时从事件带入), 重放/乱序直接丢弃。
+      const guardSid = msg.sessionId as string | undefined
+      const guardSeq = guardSid ? (msg as { seq?: number }).seq : undefined
+      if (guardSid && typeof guardSeq === 'number') {
+        const prev = s.lastSeqBySession[guardSid] ?? 0
+        // 严格递增才合并: <= prev 的 (乱序 / 重放 / 同 seq 重复投递) 直接丢弃。
+        if (guardSeq <= prev) return s
+        s.lastSeqBySession[guardSid] = guardSeq
+      }
       const t = msg.type as string
       // tool_use:ask_pending → 设置 pendingAsk 状态 (不进入 messages, 由 QuestionCard 独立渲染)
       if (t === 'tool_use:ask_pending') {
@@ -775,6 +845,18 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // - kind=text 和 thinking 也互斥, 不会串到同一 entry.
   upsertStreamBlock: (kind, base, delta) =>
     set((s) => {
+      // seq 守卫 (T5): 读 base.seq (applyRuntimeEvent 构造 base 时从事件带
+      // 入)。重放/乱序的 delta (seq <= lastSeqBySession[sid]) 直接丢弃;
+      // 通过则把 lastSeq 只升不降地推进 (mutate 共享对象, 随下方 return
+      // 的对象一并落进新 state)。
+      const guardSid = base.sessionId as string | undefined
+      const guardSeq = guardSid ? (base as { seq?: number }).seq : undefined
+      if (guardSid && typeof guardSeq === 'number') {
+        const prev = s.lastSeqBySession[guardSid] ?? 0
+        // 严格递增才合并: <= prev 的 (乱序 / 重放 / 同 seq 重复投递) 直接丢弃。
+        if (guardSeq <= prev) return s
+        s.lastSeqBySession[guardSid] = guardSeq
+      }
       const textField = kind === 'thinking' ? 'thinking' : 'text'
       const type = kind === 'thinking' ? 'assistant.thinking' : 'assistant.text'
       const blockIndex = (base as { index?: number }).index ?? 0
@@ -808,9 +890,31 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   // 调成 outputStyle === 'compact' 即 true). 用户点工具栏按钮 → 翻转当前
   // 视觉态,直接设值;刷新回到 settings.outputStyle 决定的值.
   transcriptCollapsed: false,
+  filePreviewPath: null,
   setStatus: (status: AgentStatus) => set({ status }),
+  // queue.changed 快照覆盖排队列表 — 后端 per-session 串行队列的等待中
+  // 命令 {id, text} 列表(不含正在执行的那条)。
+  applyQueueChanged: (event) => set({ queuedPrompts: event.pending }),
+  // session/projection 帧 — host 算完的派生值快照, higher-seq-wins 合并。
+  // value 是完整快照(不是 diff); 重放/低 seq 直接丢弃, 高 seq 覆盖。
+  applyProjection: (event) => set((s) => {
+    const sid = event.sessionId
+    const cur = s.projectionsBySession[sid]?.[event.key]
+    if (cur !== undefined && event.seq < cur.seq) return s
+    return {
+      projectionsBySession: {
+        ...s.projectionsBySession,
+        [sid]: {
+          ...(s.projectionsBySession[sid] ?? {}),
+          [event.key]: { value: event.value, seq: event.seq },
+        },
+      },
+    }
+  }),
   setTranscriptCollapsed: (collapsed: boolean) =>
     set({ transcriptCollapsed: collapsed }),
+  openFilePreview: (path) => set({ filePreviewPath: path }),
+  closeFilePreview: () => set({ filePreviewPath: null }),
 
   clearMessages: () =>
     set((s) => {
@@ -966,14 +1070,19 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // 模型的最近一次 (pickEntry → patchSessionModel 写入 meta.model 并刷新
     // updatedAt). 找不到时 (用户从未手动选过) 返回 null, body 不带 model,
     // server 端维持 'unknown', useConversationInfo 走 runtime.defaultModel 回退.
+    // zai patch: also carry the providerId the user picked alongside the
+    // model so the new session's first prompt routes to the same
+    // provider (instead of falling back to the first-match-by-name).
     const previousSessions = get().sessions
     let lastSelectedModel: string | null = null
+    let lastSelectedProviderId: string | null = null
     const sortedSessions = [...previousSessions].sort(
       (a, b) => b.updatedAt - a.updatedAt,
     )
     for (const s of sortedSessions) {
       if (s.model && s.model !== 'unknown') {
         lastSelectedModel = s.model
+        if (s.providerId) lastSelectedProviderId = s.providerId
         break
       }
     }
@@ -985,7 +1094,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         method: 'POST',
         headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
         body: JSON.stringify(
-          lastSelectedModel ? { model: lastSelectedModel } : {},
+          lastSelectedModel
+            ? {
+                model: lastSelectedModel,
+                ...(lastSelectedProviderId ? { providerId: lastSelectedProviderId } : {}),
+              }
+            : {},
         ),
       })
       if (!res.ok) return
@@ -1028,13 +1142,24 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     }
   },
 
-  patchSessionModel: async (sid, model) => {
+  patchSessionModel: async (sid, payload) => {
+    // zai patch: accept legacy bare-string callers by normalizing the
+    // payload to the object form. ModelStatusButton always passes the
+    // new shape; older callers (none in-tree today, but the type
+    // signature keeps the option open) would pass a string.
+    const next =
+      typeof payload === 'string' ? { model: payload } : payload
     // Snapshot for revert on failure.
     const prev = get().sessions
     // Optimistic local update so the badge switches immediately.
+    // providerId is written alongside model so the badgeText lookup in
+    // ModelStatusButton keeps showing the right provider's description
+    // after a switch.
     set({
       sessions: prev.map((x) =>
-        x.sessionId === sid ? { ...x, model } : x,
+        x.sessionId === sid
+          ? { ...x, model: next.model, ...(next.providerId ? { providerId: next.providerId } : {}) }
+          : x,
       ),
     })
     try {
@@ -1042,7 +1167,16 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       const res = await fetch(`/api/agent/sessions/${encodeURIComponent(sid)}`, {
         method: 'PATCH',
         headers: { 'Content-Type': 'application/json', 'X-Zai-Token': token },
-        body: JSON.stringify({ model }),
+        // Only include providerId in the body when present, so callers
+        // that pass `{model}` without providerId don't accidentally
+        // wipe the persisted providerId server-side (the PATCH handler
+        // would otherwise treat the field as "explicitly set to this
+        // string"). See plan §阶段 4 patchSessionModel note.
+        body: JSON.stringify(
+          next.providerId
+            ? { model: next.model, providerId: next.providerId }
+            : { model: next.model },
+        ),
       })
       if (!res.ok) throw new Error(`HTTP ${res.status}`)
     } catch {
@@ -1300,6 +1434,38 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             textSegmentRev: s.textSegmentRev + 1,
           }))
         }
+        // zai patch (2026-08-09): 把 metrics 更新挂在 runtime.started 上。
+        // server 在每次 LLM 调用起点就推这两个字段(claude.ts:1877
+        // recordApiCall 已早于 message_start 触发,getContextTokensForSession
+        // 在 message_start 路径拿到上一轮 message_delta 的最终值) —
+        // 中间轮次的 message_stop 被 sdkEventAdapter 抑制导致 runtime.done
+        // 频率太低,挂在 started 上就能逐 turn 推送。与下方 runtime.done
+        // 用同一 Math.max 防御保证单调增。
+        const startedApi = (event as { apiRequestCount?: unknown }).apiRequestCount
+        const startedCtx = (event as { contextTokens?: unknown }).contextTokens
+        if (typeof startedApi === 'number' || typeof startedCtx === 'number') {
+          useAgentStore.setState((s) => {
+            const next: {
+              apiRequestCountBySession?: Record<string, number>
+              contextTokensBySession?: Record<string, number>
+            } = {}
+            if (typeof startedApi === 'number') {
+              const prev = s.apiRequestCountBySession[sid] ?? 0
+              next.apiRequestCountBySession = {
+                ...s.apiRequestCountBySession,
+                [sid]: Math.max(prev, startedApi),
+              }
+            }
+            if (typeof startedCtx === 'number') {
+              const prev = s.contextTokensBySession[sid] ?? 0
+              next.contextTokensBySession = {
+                ...s.contextTokensBySession,
+                [sid]: Math.max(prev, startedCtx),
+              }
+            }
+            return next
+          })
+        }
         return
       }
       case 'runtime.delta': {
@@ -1311,6 +1477,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           eventId: '',
           sessionId: sid,
           ts: event.ts,
+          seq: event.seq,
           turnIndex: event.turnIndex,
           type: 'assistant.text',
           index: sendSeq,
@@ -1326,6 +1493,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           eventId: '',
           sessionId: sid,
           ts: event.ts,
+          seq: event.seq,
           turnIndex: event.turnIndex,
           type: 'assistant.thinking',
           index: sendSeq,
@@ -1344,6 +1512,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           eventId: `tool-${tuId}`,
           sessionId: sid,
           ts: event.ts,
+          seq: event.seq,
           turnIndex: event.turnIndex,
           type: 'tool_use:start',
           toolUseId: tuId,
@@ -1364,6 +1533,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           eventId: `tool-${event.toolUseId}`,
           sessionId: sid,
           ts: event.ts,
+          seq: event.seq,
           turnIndex: event.turnIndex,
           type: 'tool_use:done',
           toolUseId: event.toolUseId,
@@ -1407,12 +1577,59 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           }
         })
         return
-      case 'runtime.done':
+      case 'runtime.done': {
+        // zai patch (2026-08-09): 累加 API 请求次数 + 当前上下文大小。
+        // server 端 vendor sessionApiCounter 单调增,apiRequestCount 直接
+        // 覆盖 sid→total;用 max 防御 SSE snapshot replay 出现 stale total
+        // > current 的极端场景。contextTokens 也直接覆盖(usage 字段本身
+        // 就是 cumulative,新值总是 ≥ 旧值,但仍走 max 防御)。
+        //
+        // 关键: metric 更新必须在 queuedPrompts 早退守卫之前执行 —
+        // 用户连发 A/B/C 三条 prompt,A 的 runtime.done 触发时
+        // queuedPrompts 已有 B/C,旧逻辑整个 case 早退,A 的 metrics 永远
+        // 推不到前端,直到 C 跑完才一次性更新。拆开后:metric 每次
+        // runtime.done 必推,status 才受排队守卫影响。
+        const incoming = (event as { apiRequestCount?: unknown }).apiRequestCount
+        const incomingContext = (event as { contextTokens?: unknown }).contextTokens
+        if (typeof incoming === 'number' || typeof incomingContext === 'number') {
+          useAgentStore.setState((s) => {
+            const next: {
+              apiRequestCountBySession?: Record<string, number>
+              contextTokensBySession?: Record<string, number>
+            } = {}
+            if (typeof incoming === 'number') {
+              const prev = s.apiRequestCountBySession[sid] ?? 0
+              next.apiRequestCountBySession = {
+                ...s.apiRequestCountBySession,
+                [sid]: Math.max(prev, incoming),
+              }
+            }
+            if (typeof incomingContext === 'number') {
+              const prev = s.contextTokensBySession[sid] ?? 0
+              next.contextTokensBySession = {
+                ...s.contextTokensBySession,
+                [sid]: Math.max(prev, incomingContext),
+              }
+            }
+            return next
+          })
+        }
+        // 还有排队任务时保持 streaming, 等 queue.changed + 下一条
+        // runtime.started 自然流转; 队列清空才回 idle。
+        if (useAgentStore.getState().queuedPrompts.length > 0) return
         useAgentStore.getState().setStatus('idle')
         return
-      case 'runtime.aborted':
+      }
+      case 'runtime.aborted': {
+        // Esc 中断当前轮: 若队列里还有排队任务, 后端 runNextInQueue 会立刻
+        // 消费下一条, 前端置回 streaming 让它自然流转; 队列空则显示 aborted。
+        if (useAgentStore.getState().queuedPrompts.length > 0) {
+          useAgentStore.getState().setStatus('streaming')
+          return
+        }
         useAgentStore.getState().setStatus('aborted')
         return
+      }
       case 'runtime.error': {
         // 携带 toolUseId 的 runtime.error 来自 server 把 runtime 的
         // tool_use:error/invalid/denied 翻译过来的事件 — 指向一个具体的
@@ -1429,6 +1646,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             eventId: `err-${toolUseId}`,
             sessionId: sid,
             ts: event.ts,
+            seq: event.seq,
             turnIndex: event.turnIndex,
             type: 'tool_use:error',
             toolUseId,

@@ -1,5 +1,6 @@
 import { describe, expect, test, vi } from 'vitest'
 import type { ServerEvent } from '../../../shared/events.js'
+import type { StreamState } from './eventSource.js'
 
 const notifMock = vi.hoisted(() => ({ error: vi.fn() }))
 vi.mock('antd', () => ({ notification: notifMock }))
@@ -13,6 +14,7 @@ class MockEventSource {
   static instances: MockEventSource[] = []
   url: string
   onmessage: ((e: { data: string }) => void) | null = null
+  onopen: ((e: Event) => void) | null = null
   onerror: ((e: Event) => void) | null = null
   close = vi.fn()
   private listeners: Record<string, Array<(e: { data: string }) => void>> = {}
@@ -22,6 +24,9 @@ class MockEventSource {
   }
   addEventListener(name: string, handler: (e: { data: string }) => void) {
     ;(this.listeners[name] ??= []).push(handler)
+  }
+  emitOpen() {
+    this.onopen?.(new Event('open'))
   }
   // Simulate the server-side writeSse producing `event: <name>\ndata: <json>`.
   dispatchNamed(name: string, payload: ServerEvent) {
@@ -59,7 +64,7 @@ describe('subscribeServerEvents', () => {
     const es = MockEventSource.instances[0]
     es.dispatchNamed('runtime.delta', {
       type: 'runtime.delta',
-      eventId: 'e1', ts: 1, sessionId: 's1', turnIndex: 0, delta: 'hi',
+      eventId: 'e1', ts: 1, seq: 1, sessionId: 's1', turnIndex: 0, delta: 'hi',
     })
     expect(onEvent).toHaveBeenCalledWith(
       expect.objectContaining({ type: 'runtime.delta', delta: 'hi' }),
@@ -73,11 +78,11 @@ describe('subscribeServerEvents', () => {
     const es = MockEventSource.instances[0]
     es.dispatchNamed('runtime.started', {
       type: 'runtime.started',
-      eventId: 'e1', ts: 1, sessionId: 's1', turnIndex: 0,
+      eventId: 'e1', ts: 1, seq: 2, sessionId: 's1', turnIndex: 0,
     })
     es.dispatchNamed('runtime.done', {
       type: 'runtime.done',
-      eventId: 'e2', ts: 2, sessionId: 's1', turnIndex: 0,
+      eventId: 'e2', ts: 2, seq: 3, sessionId: 's1', turnIndex: 0,
     })
     const types = onEvent.mock.calls.map((c) => (c[0] as { type: string }).type)
     expect(types).toContain('runtime.started')
@@ -94,6 +99,7 @@ describe('subscribeServerEvents', () => {
       type: 'instance.changed',
       eventId: 'e-instance',
       ts: 1,
+      seq: 4,
       instanceId: 'inst_1',
       state: 'running',
       port: 9202,
@@ -126,16 +132,57 @@ describe('subscribeServerEvents', () => {
     expect(es.close).toHaveBeenCalled()
   })
 
-  test('onerror 触发 notifySseError(/event) 并调原 onError', () => {
+  test('onerror 触发 notifySseError(/event) 并报 reconnecting', () => {
     notifMock.error.mockReset()
     notifMock.error.mockImplementation(() => undefined)
     MockEventSource.instances = []
-    const onError = vi.fn()
-    subscribeServerEvents('s1', () => {}, onError)
+    const states: StreamState[] = []
+    subscribeServerEvents('s1', () => {}, (s) => states.push(s))
     const es = MockEventSource.instances[0]
     es.onerror?.(new Event('error'))
     expect(notifMock.error).toHaveBeenCalledTimes(1)
     expect(notifMock.error.mock.calls[0][0].description).toContain('/event')
-    expect(onError).toHaveBeenCalledTimes(1)
+    expect(states.at(-1)).toBe('reconnecting')
+  })
+
+  // ========== 连接状态机 (onState 回调) ==========
+
+  test('reports connecting on subscribe then connected on first open', () => {
+    MockEventSource.instances = []
+    const states: StreamState[] = []
+    subscribeServerEvents('s1', () => {}, (s) => states.push(s))
+    // 首次连接: 尚未 onopen, 先报 connecting
+    expect(states[0]).toBe('connecting')
+    const es = MockEventSource.instances[0]
+    es.emitOpen()
+    expect(states.at(-1)).toBe('connected')
+  })
+
+  test('reports reconnecting on first error then connected on reopen', () => {
+    MockEventSource.instances = []
+    const states: StreamState[] = []
+    subscribeServerEvents('s1', () => {}, (s) => states.push(s))
+    const es = MockEventSource.instances[0]
+    es.emitOpen()
+    es.onerror?.(new Event('error'))
+    expect(states.at(-1)).toBe('reconnecting')
+    es.emitOpen()
+    expect(states.at(-1)).toBe('connected')
+  })
+
+  test('reports reconnecting up to 3 failures then error on the 4th', () => {
+    MockEventSource.instances = []
+    const states: StreamState[] = []
+    subscribeServerEvents('s1', () => {}, (s) => states.push(s))
+    const es = MockEventSource.instances[0]
+    es.emitOpen()
+    es.onerror?.(new Event('error'))
+    es.onerror?.(new Event('error'))
+    es.onerror?.(new Event('error'))
+    // 连续失败 <= 3 次仍是 reconnecting (EventSource 自动重连中)
+    expect(states.at(-1)).toBe('reconnecting')
+    // 第 4 次失败 → error (UI 显示错误 + 手动重连)
+    es.onerror?.(new Event('error'))
+    expect(states.at(-1)).toBe('error')
   })
 })

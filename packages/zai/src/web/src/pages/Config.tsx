@@ -1,8 +1,8 @@
-import { Card, Form, Input, Button, message, Spin, Row, Col, Typography, Menu, List, Popconfirm, Select, Space, Modal, Tooltip, Tag } from 'antd';
+import { Card, Form, Input, Button, message, Spin, Row, Col, Typography, Menu, Popconfirm, Select, Space, Modal, Tooltip, Tag } from 'antd';
 import { PlusOutlined, DeleteOutlined, EditOutlined } from '@ant-design/icons';
 import { useEffect, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
-import type { ConfigTool, ProviderProfile, SystemInfo, ModelCapabilities } from '@shared/types';
+import type { ConfigTool, ProviderProfile, SystemInfo, ModelCapabilities, AgentsMdFile } from '@shared/types';
 import { BUILTIN_PROVIDERS } from '@shared/builtinProviders';
 import { api } from '../lib/api';
 
@@ -28,58 +28,35 @@ const KNOWN_PROVIDERS = [
 // (which seeds the Add form) keeps working without churn.
 const BUILTIN_PROFILES: ProviderProfile[] = BUILTIN_PROVIDERS;
 
-const OPENCC_DEFAULT_CONTENT: Record<string, unknown> = {
-  permissions: {
-    allow: [
-      'Bash(*)',
-      'Read',
-      'Write',
-      'Edit',
-      'Monitor(*)',
-      'mcp__chrome-devtools-mcp__*',
-      'mcp__codegraph__codegraph_search',
-      'mcp__codegraph__codegraph_context',
-      'mcp__codegraph__codegraph_callers',
-      'mcp__codegraph__codegraph_callees',
-      'mcp__codegraph__codegraph_impact',
-      'mcp__codegraph__codegraph_node',
-      'mcp__codegraph__codegraph_status',
-    ],
-    defaultMode: 'bypassPermissions',
-  },
-  attribution: {
-    commit: '',
-  },
-  env: {
-    ANTHROPIC_BASE_URL: 'https://zn-nova.paic.com.cn/novai',
-    OPENAI_BASE_URL: 'https://wizard-ai.paic.com.cn/code_pilot/api/v1',
-  },
-  extraKnownMarketplaces: {
-    'zn-plugins-market': {
-      source: {
-        source: 'git',
-        url: 'git@code.paic.com.cn:git/zn-agent-assets.git',
-      },
-    },
-  },
-};
-
-function ProviderForm() {
+/**
+ * Provider 一键配置 — opencc / zai tab 共用。endpoint 决定读写哪个文件:
+ * opencc → ~/.claude.json（/config/opencc/provider）,
+ * zai → ~/.zai.json（/config/zai/provider）。
+ */
+function ProviderForm({
+  endpoint = '/config/opencc/provider',
+  title = 'Provider 一键配置',
+}: {
+  endpoint?: string;
+  title?: string;
+}) {
   const [profiles, setProfiles] = useState<ProviderProfile[]>([]);
   const [loading, setLoading] = useState(true);
   const [saving, setSaving] = useState(false);
   const [modalOpen, setModalOpen] = useState(false);
+  // id of the profile being edited; null means the modal is in "add" mode.
+  const [editingId, setEditingId] = useState<string | null>(null);
   // Tracks the builtin seed chosen when the modal was opened so we can
   // copy its capabilities map onto the new profile on save. The form
   // itself does not expose per-model capability edits — those come from
-  // the builtin catalog (or hand-edited ~/.claude.json).
+  // the builtin catalog (or hand-edited json).
   const [pendingCapabilities, setPendingCapabilities] = useState<ProviderProfile['capabilities']>(undefined);
   const [form] = Form.useForm();
 
   const fetchProfiles = async () => {
     setLoading(true);
     try {
-      const data = await api.get<{ profiles: ProviderProfile[] }>('/config/opencc/provider');
+      const data = await api.get<{ profiles: ProviderProfile[] }>(endpoint);
       setProfiles(data.profiles || []);
     } catch (err) {
       console.error(err);
@@ -90,18 +67,22 @@ function ProviderForm() {
 
   useEffect(() => {
     fetchProfiles();
-  }, []);
+  }, [endpoint]);
 
   const openAddModal = () => {
     // Pre-fill with the first existing profile, or the first builtin as a starting point.
     // The user said "以我的当前的配置未初始值（默认值）" — current config first, then builtin fallback.
     const seed = profiles[0] ?? BUILTIN_PROFILES[0];
+    setEditingId(null);
     form.setFieldsValue({
       provider: seed.provider,
       name: seed.name,
       baseUrl: seed.baseUrl,
       model: seed.model,
       apiFormat: seed.apiFormat,
+      // zai patch: seed apiKeyEnv too so adding a provider built on top
+      // of an existing one preserves the per-provider key config.
+      apiKeyEnv: seed.apiKeyEnv,
     });
     // Carry the seed's capabilities map so newly-added builtin presets
     // ship with per-model context window / vision metadata.
@@ -109,43 +90,77 @@ function ProviderForm() {
     setModalOpen(true);
   };
 
-  // Watch the Provider select so switching anthropic ↔ openai auto-refills
-  // the rest of the form with the matching builtin defaults. This makes the
-  // modal behave as a "one-click preset" for both protocol flavours.
-  const watchedProvider = Form.useWatch('provider', form);
-  useEffect(() => {
-    if (!modalOpen) return;
-    if (watchedProvider !== 'anthropic' && watchedProvider !== 'openai') return;
-    const preset = BUILTIN_PROFILES.find((p) => p.provider === watchedProvider);
+  const openEditModal = (item: ProviderProfile) => {
+    setEditingId(item.id ?? null);
+    form.setFieldsValue({
+      provider: item.provider,
+      name: item.name,
+      baseUrl: item.baseUrl,
+      model: item.model,
+      apiFormat: item.apiFormat,
+      apiKeyEnv: item.apiKeyEnv,
+    });
+    // Keep the saved capabilities map so per-model metadata survives
+    // the round-trip untouched (the form has no capability fields).
+    setPendingCapabilities(item.capabilities);
+    setModalOpen(true);
+  };
+
+  // Fill the rest of the form with the matching builtin preset when the
+  // user manually switches the Provider select. Wired to the Select's
+  // onChange (not a Form.useWatch effect) so the modal-opening
+  // setFieldsValue in openAddModal/openEditModal never clobbers the
+  // seeded values with builtin defaults — the "one-click preset" only
+  // kicks in on an explicit user switch.
+  const fillFromBuiltin = (value: string) => {
+    if (value !== 'anthropic' && value !== 'openai') return;
+    const preset = BUILTIN_PROFILES.find((p) => p.provider === value);
     if (!preset) return;
     form.setFieldsValue({
       name: preset.name,
       baseUrl: preset.baseUrl,
       model: preset.model,
       apiFormat: preset.apiFormat,
+      apiKeyEnv: preset.apiKeyEnv,
     });
     setPendingCapabilities(preset.capabilities);
-  }, [watchedProvider, modalOpen, form]);
+  };
 
   const handleModalOk = async () => {
     try {
       const values = await form.validateFields();
-      const newProfile: ProviderProfile = {
-        id: `provider_${Date.now()}`,
+      // Editing reuses the existing profile id; adding mints a fresh one.
+      const existing = editingId ? profiles.find((p) => p.id === editingId) : undefined;
+      const nextProfile: ProviderProfile = {
+        id: editingId ?? `provider_${Date.now()}`,
         name: values.name,
         provider: values.provider,
         baseUrl: values.baseUrl,
         model: values.model,
         apiFormat: values.apiFormat,
         capabilities: pendingCapabilities,
+        // zai patch: persist per-provider API key env var so this
+        // profile routes to its own key (instead of the global
+        // OPENAI_API_KEY / ANTHROPIC_AUTH_TOKEN fallback). Empty
+        // string is normalized to undefined so the persisted profile
+        // doesn't carry a meaningless empty env name.
+        ...(values.apiKeyEnv && String(values.apiKeyEnv).trim()
+          ? { apiKeyEnv: String(values.apiKeyEnv).trim() }
+          : {}),
+        // The form has no extraParams field — keep whatever the profile
+        // already carried (e.g. hand-edited temperature/reasoning pins).
+        ...(existing?.extraParams ? { extraParams: existing.extraParams } : {}),
       };
-      const updated = [...profiles, newProfile];
+      const updated = editingId
+        ? profiles.map((p) => (p.id === editingId ? nextProfile : p))
+        : [...profiles, nextProfile];
       setSaving(true);
-      await api.put('/config/opencc/provider', { profiles: updated });
+      await api.put(endpoint, { profiles: updated });
       setProfiles(updated);
-      message.success('Provider 已添加');
+      message.success(editingId ? 'Provider 已更新' : 'Provider 已添加');
       setModalOpen(false);
       setPendingCapabilities(undefined);
+      setEditingId(null);
     } catch (err) {
       console.error(err);
     } finally {
@@ -157,7 +172,7 @@ function ProviderForm() {
     const updated = profiles.filter((p) => p.id !== id);
     setSaving(true);
     try {
-      await api.put('/config/opencc/provider', { profiles: updated });
+      await api.put(endpoint, { profiles: updated });
       setProfiles(updated);
       message.success('已删除');
     } catch (err) {
@@ -171,7 +186,7 @@ function ProviderForm() {
 
   return (
     <Card
-      title="Provider 一键配置"
+      title={title}
       size="small"
       extra={
         <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
@@ -183,38 +198,69 @@ function ProviderForm() {
         已配置 {profiles.length} 个 Provider
       </Text>
 
-      <List
-        dataSource={profiles}
-        locale={{ emptyText: '暂无配置的 Provider，点击右上角"添加"创建' }}
-        renderItem={(item) => (
-          <List.Item
-            actions={[
-              <Popconfirm key="del" title="确定删除？" onConfirm={() => item.id && handleDelete(item.id)}>
-                <Button type="text" danger size="small" icon={<DeleteOutlined />} loading={saving} />
-              </Popconfirm>,
-            ]}
-          >
-            <List.Item.Meta
-              title={item.name || item.provider}
-              description={
-                <Space direction="vertical" size={4} style={{ width: '100%' }}>
+      {profiles.length === 0 ? (
+        <Text type="secondary" style={{ fontSize: 12 }}>
+          暂无配置的 Provider，点击右上角“添加”创建
+        </Text>
+      ) : (
+        <Row gutter={[12, 12]}>
+          {profiles.map((item) => (
+            <Col key={item.id ?? item.name} xs={24} sm={12} md={8} lg={8} xl={6}>
+              <Card
+                size="small"
+                hoverable
+                styles={{ body: { padding: 12 } }}
+                title={
+                    <Text ellipsis style={{ width: '100%' }} title={item.name || item.provider}>
+                      {item.name || item.provider}
+                    </Text>
+                  }
+                extra={
+                  <Space size={0} onClick={(e) => e.stopPropagation()}>
+                    <Button
+                      type="text"
+                      size="small"
+                      icon={<EditOutlined />}
+                      disabled={!item.id}
+                      aria-label="编辑 Provider"
+                      onClick={() => openEditModal(item)}
+                    />
+                    <Popconfirm title="确定删除？" aria-label="删除 Provider" onConfirm={() => item.id && handleDelete(item.id)}>
+                      <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label="删除 Provider" loading={saving} />
+                    </Popconfirm>
+                  </Space>
+                }
+              >
+                <Space direction="vertical" size={6} style={{ width: '100%' }}>
                   <Text type="secondary" style={{ fontSize: 12 }}>Provider: {item.provider}</Text>
-                  {item.baseUrl && <Text type="secondary" style={{ fontSize: 12 }}>BaseURL: {item.baseUrl}</Text>}
-                  {item.model && <Text type="secondary" style={{ fontSize: 12 }}>模型: {item.model}</Text>}
+                  {item.baseUrl && (
+                    <Tooltip title={item.baseUrl}>
+                      <Text type="secondary" style={{ fontSize: 12 }} ellipsis>
+                        BaseURL: {item.baseUrl}
+                      </Text>
+                    </Tooltip>
+                  )}
+                  {item.apiKeyEnv && (
+                    <Text type="secondary" style={{ fontSize: 12 }}>API Key: {item.apiKeyEnv}</Text>
+                  )}
                   {item.capabilities && Object.keys(item.capabilities).length > 0 && (
                     <ProviderCapabilitySummary capabilities={item.capabilities} />
                   )}
                 </Space>
-              }
-            />
-          </List.Item>
-        )}
-      />
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      )}
 
       <Modal
-        title="添加 Provider"
+        title={editingId ? '编辑 Provider' : '添加 Provider'}
+        aria-label={editingId ? '编辑 Provider' : '添加 Provider'}
         open={modalOpen}
-        onCancel={() => setModalOpen(false)}
+        onCancel={() => {
+          setModalOpen(false);
+          setEditingId(null);
+        }}
         onOk={handleModalOk}
         confirmLoading={saving}
         okText="确定"
@@ -224,7 +270,7 @@ function ProviderForm() {
       >
         <Form form={form} layout="vertical" style={{ marginTop: 16 }}>
           <Form.Item name="provider" label="Provider" rules={[{ required: true, message: '请选择 Provider' }]}>
-            <Select placeholder="选择 Provider" options={KNOWN_PROVIDERS} />
+            <Select placeholder="选择 Provider" options={KNOWN_PROVIDERS} onChange={fillFromBuiltin} />
           </Form.Item>
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
             <Input placeholder="如 Anthropic-MIX" />
@@ -244,6 +290,19 @@ function ProviderForm() {
                 { value: 'responses', label: 'responses' },
               ]}
             />
+          </Form.Item>
+          {/* zai patch: per-provider API key env var. Lets two providers
+              share the same provider-family (e.g. two anthropic ones)
+              while each uses its own key. Resolution order at runtime:
+              inline apiKey (none in UI yet) → env[apiKeyEnv] →
+              provider-family global env (OPENAI_API_KEY /
+              ANTHROPIC_AUTH_TOKEN). Leave blank to use the global env. */}
+          <Form.Item
+            name="apiKeyEnv"
+            label="API Key 环境变量名(可选)"
+            extra="如 DEEPSEEK_API_KEY。留空则使用全局 OPENAI_API_KEY / ANTHROPIC_AUTH_TOKEN。高级参数(如 temperature)可在 ~/.zai.json 中编辑 extraParams。"
+          >
+            <Input placeholder="如 DEEPSEEK_API_KEY" allowClear />
           </Form.Item>
         </Form>
       </Modal>
@@ -380,8 +439,8 @@ function PluginForm() {
         renderItem={(item) => (
           <List.Item
             actions={[
-              <Popconfirm key="del" title="确定删除？" onConfirm={() => handleDelete(item)}>
-                <Button type="text" danger size="small" icon={<DeleteOutlined />} loading={saving} />
+              <Popconfirm key="del" title="确定删除？" aria-label="删除插件" onConfirm={() => handleDelete(item)}>
+                <Button type="text" danger size="small" icon={<DeleteOutlined />} aria-label="删除插件" loading={saving} />
               </Popconfirm>,
             ]}
           >
@@ -416,7 +475,47 @@ function PluginForm() {
   );
 }
 
-function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; label: string; defaultContent?: Record<string, unknown> }) {
+function SettingsEditor({
+  tool,
+  label,
+  title,
+  modalTitle,
+  defaultContent,
+}: {
+  tool: ConfigTool;
+  label?: string;
+  title?: string;
+  modalTitle?: string;
+  defaultContent?: Record<string, unknown>;
+}) {
+  return (
+    <JsonFileEditor
+      endpoint={`/config/${tool}`}
+      title={title ?? `${label} settings`}
+      modalTitle={modalTitle ?? `编辑 ${label} settings`}
+      defaultContent={defaultContent}
+    />
+  );
+}
+
+/**
+ * 通用 JSON 配置文件编辑器 — 走显式 endpoint(不再拼 `tool`),给
+ * 现有 SettingsEditor 以及新增的"顶层 JSON 配置文件"小节共用。
+ * 行为与原 SettingsEditor 完全一致:GET 拉内容,客户端 JSON 校验,
+ * PUT 保存后重读刷新。title/modalTitle 让 caller 决定卡片标题文案,
+ * 不在组件里硬拼 `${label} settings` 之类的后缀,以兼容中文标签。
+ */
+function JsonFileEditor({
+  endpoint,
+  title,
+  modalTitle,
+  defaultContent,
+}: {
+  endpoint: string;
+  title: string;
+  modalTitle: string;
+  defaultContent?: Record<string, unknown>;
+}) {
   const [content, setContent] = useState<Record<string, unknown> | null>(null);
   const [filePath, setFilePath] = useState<string>('');
   const [loading, setLoading] = useState(true);
@@ -428,7 +527,7 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
   const fetchContent = async () => {
     setLoading(true);
     try {
-      const data = await api.get<{ path: string; exists: boolean; content: Record<string, unknown>; missing?: boolean }>(`/config/${tool}`);
+      const data = await api.get<{ path: string; exists: boolean; content: Record<string, unknown>; missing?: boolean }>(endpoint);
       setFilePath(data.path);
       setContent(data.content);
       setMissing(!!data.missing);
@@ -441,7 +540,8 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
 
   useEffect(() => {
     fetchContent();
-  }, [tool]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpoint]);
 
   const openEditor = () => {
     // When the file is missing, seed the editor with `defaultContent` (or {})
@@ -468,7 +568,7 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
     }
     setSaving(true);
     try {
-      await api.put(`/config/${tool}`, parsed as Record<string, unknown>);
+      await api.put(endpoint, parsed as Record<string, unknown>);
       message.success('配置已保存');
       setModalOpen(false);
       await fetchContent();
@@ -483,15 +583,15 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
 
   return (
     <Card
-      title={`${label} settings`}
+      title={title}
       size="small"
       extra={
-        <Button type="primary" icon={<EditOutlined />} onClick={openEditor}>
+        <Button type="primary" icon={<EditOutlined />} aria-label={missing ? '新增' : '编辑'} onClick={openEditor}>
           {missing ? '新增' : '编辑'}
         </Button>
       }
-      style={{ marginTop: 16, flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}
-      styles={{ body: { flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 12 } }}
+      style={{ marginTop: 16, flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+      styles={{ body: { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 12 } }}
     >
       <Tooltip title={filePath}>
         <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
@@ -517,7 +617,7 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
       </pre>
 
       <Modal
-        title={`编辑 ${label} settings`}
+        title={modalTitle}
         open={modalOpen}
         onCancel={() => setModalOpen(false)}
         onOk={handleSave}
@@ -536,6 +636,145 @@ function SettingsEditor({ tool, label, defaultContent }: { tool: ConfigTool; lab
         />
         <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
           必须是合法 JSON 对象。保存时自动校验。
+        </Text>
+      </Modal>
+    </Card>
+  );
+}
+
+/**
+ * AGENTS.md 编辑卡 — 骨架对齐 JsonFileEditor,差异:
+ * - content 是 string(Markdown),不做 JSON.parse 校验;
+ * - PUT body 是 {content: draft} 字符串透传;
+ * - <pre> 加 whiteSpace:pre-wrap + wordBreak:break-word,避免单行超长撑破布局;
+ * - missing 时 Modal placeholder 提示用户如何起步,空字符串保存合法。
+ *
+ * 每个 tool tab 都嵌入一份,4 个工具互不共享:
+ * opencc → ~/.claude/AGENTS.md,
+ * zai → ~/.zai/AGENTS.md,
+ * opencode → ~/.config/opencode/AGENTS.md,
+ * nova → ~/.nova/AGENTS.md。
+ */
+function AgentsMdEditor({
+  tool,
+  label,
+  defaultContent = '',
+}: {
+  tool: ConfigTool;
+  label: string;
+  defaultContent?: string;
+}) {
+  const [content, setContent] = useState<string>('');
+  const [filePath, setFilePath] = useState<string>('');
+  const [loading, setLoading] = useState(true);
+  const [missing, setMissing] = useState(false);
+  const [modalOpen, setModalOpen] = useState(false);
+  const [draft, setDraft] = useState('');
+  const [saving, setSaving] = useState(false);
+
+  const endpoint = `/config/${tool}/agents-md`;
+
+  const fetchContent = async () => {
+    setLoading(true);
+    try {
+      const data = await api.get<AgentsMdFile>(endpoint);
+      setFilePath(data.path);
+      setContent(data.content);
+      setMissing(!!data.missing);
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  useEffect(() => {
+    fetchContent();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [endpoint]);
+
+  const openEditor = () => {
+    // missing 时给 defaultContent 让用户有起步内容;已有文件则直接编辑现有内容。
+    const seed = missing ? defaultContent : content;
+    setDraft(seed);
+    setModalOpen(true);
+  };
+
+  const handleSave = async () => {
+    setSaving(true);
+    try {
+      // 纯文本:不做 JSON/语法校验,服务端只校验 content 字段是 string。
+      await api.put(endpoint, { content: draft });
+      message.success(missing ? 'AGENTS.md 已创建' : 'AGENTS.md 已保存');
+      setModalOpen(false);
+      await fetchContent();
+    } catch (err) {
+      console.error(err);
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  if (loading) return <Spin />;
+
+  return (
+    <Card
+      title={`${label} AGENTS.md`}
+      size="small"
+      extra={
+        <Button type="primary" icon={<EditOutlined />} aria-label={missing ? '新增' : '编辑'} onClick={openEditor}>
+          {missing ? '新增' : '编辑'}
+        </Button>
+      }
+      style={{ marginTop: 16, flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column' }}
+      styles={{ body: { flex: 1, minWidth: 0, minHeight: 0, display: 'flex', flexDirection: 'column', padding: 12 } }}
+    >
+      <Tooltip title={filePath}>
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginBottom: 8 }}>
+          路径: {filePath}{missing && ' (文件不存在，保存后将创建)'}
+        </Text>
+      </Tooltip>
+      <pre
+        style={{
+          background: 'var(--bg-body)',
+          color: 'var(--text-primary)',
+          padding: 12,
+          borderRadius: 8,
+          fontSize: 12,
+          lineHeight: 1.6,
+          overflow: 'auto',
+          flex: 1,
+          minHeight: 0,
+          margin: 0,
+          fontFamily: 'JetBrains Mono, Fira Code, monospace',
+          whiteSpace: 'pre-wrap',
+          wordBreak: 'break-word',
+        }}
+      >
+        {content || (missing ? '(空文件)' : '')}
+      </pre>
+
+      <Modal
+        title={`编辑 ${label} AGENTS.md`}
+        open={modalOpen}
+        onCancel={() => setModalOpen(false)}
+        onOk={handleSave}
+        confirmLoading={saving}
+        okText="保存"
+        cancelText="取消"
+        width={760}
+        destroyOnClose
+      >
+        <Input.TextArea
+          value={draft}
+          onChange={(e) => setDraft(e.target.value)}
+          autoSize={{ minRows: 16, maxRows: 30 }}
+          spellCheck={false}
+          placeholder={missing ? '# AGENTS.md\n\n在此编写工具说明...' : undefined}
+          style={{ fontFamily: 'JetBrains Mono, Fira Code, monospace', fontSize: 12 }}
+        />
+        <Text type="secondary" style={{ fontSize: 12, display: 'block', marginTop: 8 }}>
+          纯文本 (Markdown)。保存时使用原子写 (tmp + rename)。
         </Text>
       </Modal>
     </Card>
@@ -568,39 +807,97 @@ export default function Config() {
   };
 
   return (
-    <Row gutter={24}>
-      <Col xs={24} md={6}>
-        <Card size="small">
-          <Menu
-            mode="inline"
-            selectedKeys={[activeTool]}
-            onClick={handleMenuClick}
-            items={tools.map((t) => ({
-              key: t.key,
-              label: t.label,
-            }))}
-          />
-        </Card>
-      </Col>
-      <Col
-        xs={24}
-        md={18}
-        style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)' }}
-      >
-        {activeTool === 'opencc' ? (
-          <>
-            <ProviderForm />
-            <SettingsEditor tool="opencc" label="OpenCC" defaultContent={OPENCC_DEFAULT_CONTENT} />
-          </>
-        ) : activeTool === 'opencode' ? (
-          <>
-            <PluginForm />
-            <SettingsEditor tool="opencode" label="OpenCode" defaultContent={opencodeDefaultContent} />
-          </>
-        ) : (
-          <SettingsEditor tool={activeTool} label={tools.find((t) => t.key === activeTool)?.label || activeTool} />
-        )}
-      </Col>
-    </Row>
+    <div style={{ padding: 24 }}>
+      <Row gutter={24}>
+        <Col xs={24} md={6}>
+          <Card size="small">
+            <Menu
+              mode="inline"
+              selectedKeys={[activeTool]}
+              onClick={handleMenuClick}
+              items={tools.map((t) => ({
+                key: t.key,
+                label: t.label,
+              }))}
+            />
+          </Card>
+        </Col>
+        <Col
+          xs={24}
+          md={18}
+          style={{ display: 'flex', flexDirection: 'column', height: 'calc(100vh - 112px)', overflow: 'auto' }}
+        >
+          {activeTool === 'opencc' ? (
+            <>
+              {/* 顶部并排两张 JSON 配置卡 — 只在 opencc tab 显示。
+                  opencode / nova / zai tab 完全不出现。 */}
+              <Card
+                title="JSON 配置文件"
+                size="small"
+                style={{ marginTop: 16 }}
+                styles={{ body: { display: 'flex', flexDirection: 'row', gap: 12, padding: 12 } }}
+              >
+                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                  <JsonFileEditor
+                    endpoint="/config/claude-json"
+                    title="Configs"
+                    modalTitle="编辑 OpenCC 配置"
+                  />
+                </div>
+                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                  <JsonFileEditor
+                    endpoint="/config/claude-settings"
+                    title="Settings"
+                    modalTitle="编辑 Settings"
+                  />
+                </div>
+              </Card>
+              {/* 下方 Provider 配置 */}
+              <ProviderForm />
+              {/* AGENTS.md 编辑卡 — opencc 走 ~/.claude/AGENTS.md,与 zai 互不共享 */}
+              <AgentsMdEditor tool="opencc" label="OpenCC" />
+            </>
+          ) : activeTool === 'opencode' ? (
+            <>
+              <PluginForm />
+              <SettingsEditor tool="opencode" label="OpenCode" defaultContent={opencodeDefaultContent} />
+              {/* AGENTS.md 编辑卡 — opencode 走 ~/.config/opencode/AGENTS.md */}
+              <AgentsMdEditor tool="opencode" label="OpenCode" />
+            </>
+          ) : activeTool === 'zai' ? (
+            <>
+              {/* 顶部并排两张 JSON 配置卡 — 与 opencc tab 一致 */}
+              <Card
+                title="JSON 配置文件"
+                size="small"
+                style={{ marginTop: 16 }}
+                styles={{ body: { display: 'flex', flexDirection: 'row', gap: 12, padding: 12 } }}
+              >
+                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                  <SettingsEditor tool="zai" title="Settings" modalTitle="编辑 Settings" />
+                </div>
+                <div style={{ flex: 1, height: 280, minWidth: 0, display: 'flex', flexDirection: 'column', minHeight: 0 }}>
+                  <JsonFileEditor
+                    endpoint="/config/zai-json"
+                    title="Config"
+                    modalTitle="编辑 Config"
+                  />
+                </div>
+              </Card>
+              {/* 下方 Provider 配置 — 读写 ~/.zai.json 的 providerProfiles */}
+              <ProviderForm endpoint="/config/zai/provider" title="Provider 配置" />
+              {/* AGENTS.md 编辑卡 — zai 走 ~/.zai/AGENTS.md */}
+              <AgentsMdEditor tool="zai" label="Zai" />
+            </>
+          ) : (
+            <>
+              <SettingsEditor tool={activeTool} label={tools.find((t) => t.key === activeTool)?.label || activeTool} />
+              {/* AGENTS.md 编辑卡 — nova 走 ~/.nova/AGENTS.md */}
+              <AgentsMdEditor tool="nova" label="Nova" />
+            </>
+          )}
+        </Col>
+      </Row>
+    </div>
   );
 }

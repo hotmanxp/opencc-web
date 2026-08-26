@@ -111,7 +111,175 @@ describe('install + isInstalled parity on a Nova-only box', () => {
     const dirs = targetDirsForType('skills').map((p) => p.target);
     expect(dirs).toContain(join(work, '.nova', 'skills'));
     // And on a Nova-only box, ~/.agents/skills must NOT be in the list —
-    // it would only get added when opencode OR opencc is detected.
+    // it would only get added when opencode, opencc, OR zai is detected.
     expect(dirs).not.toContain(join(work, '.agents', 'skills'));
+  });
+});
+
+/**
+ * Regression: a `zai/<name>` agent must land under `~/.zai/agents/`,
+ * not under any other platform's tree. Mirrors the same name-prefix
+ * filter the rest of the matrix already uses for nova/opencode/opencc.
+ */
+describe('install + targetDirsForType parity on a zai-only box', () => {
+  let work: string;
+  let fakeCache: string;
+  const origHome = process.env.HOME;
+
+  beforeEach(() => {
+    work = mkdtempSync(join(tmpdir(), 'zai-zaionly-'));
+    fakeCache = join(work, 'cache', 'v1.2.3');
+    // Cache a `zai/foo` agent so installFromCache has something to copy.
+    mkdirSync(join(fakeCache, 'agents', 'zai'), { recursive: true });
+    writeFileSync(join(fakeCache, 'agents', 'zai', 'foo.md'), '# foo', 'utf-8');
+    // Also stash a top-level skill so the skills branch is covered.
+    mkdirSync(join(fakeCache, 'skills', 'bar'), { recursive: true });
+    writeFileSync(join(fakeCache, 'skills', 'bar', 'SKILL.md'), '# bar', 'utf-8');
+
+    // Only `~/.zai` exists on this fake HOME — no nova/opencode/claude.
+    // targetDirsForType gates each platform on existsSync on those dirs,
+    // so this isolates the zai branch.
+    mkdirSync(join(work, '.zai'), { recursive: true });
+
+    vi.doMock('../../src/server/services/extractor.js', () => ({
+      resolveResourcePath: (_v: string, type: string, name: string) => {
+        // Mirror the real extractor: nested names like "zai/foo" live at
+        // <type>/<platform>/<name-without-platform-prefix>.
+        const slash = name.indexOf('/');
+        if (slash >= 0) {
+          const col = name.slice(0, slash);
+          const leaf = name.slice(slash + 1);
+          return join(fakeCache, type, col, `${leaf}.md`);
+        }
+        return join(fakeCache, type, name);
+      },
+      listCollectionResourcePaths: () => [],
+    }));
+
+    // HOME must be set before the dynamic import — install.ts computes
+    // its path constants from homedir() at module load.
+    process.env.HOME = work;
+  });
+
+  afterEach(() => {
+    rmSync(work, { recursive: true, force: true });
+    vi.doUnmock('../../src/server/services/extractor.js');
+    vi.resetModules();
+    process.env.HOME = origHome;
+  });
+
+  it('zai/<name> agent lands at ~/.zai/agents/foo.md and nowhere else', async () => {
+    const { installFromCache, targetDirsForType } = await import(
+      '../../src/server/services/install.js'
+    );
+
+    const result = installFromCache({
+      type: 'agents',
+      name: 'zai/foo',
+      version: 'v1.2.3',
+    });
+
+    // Written under zai's own tree.
+    expect(existsSync(join(work, '.zai', 'agents', 'foo.md'))).toBe(true);
+
+    // And NOT under any other platform — `zai/foo` is a platform-prefixed
+    // name, so filterTargetsForResource keeps only platform==='zai'.
+    expect(result.platforms).toEqual(['zai']);
+    expect(result.targetPaths).toEqual([
+      join(work, '.zai', 'agents', 'foo.md'),
+    ]);
+  });
+
+  it('zai is present in targetDirsForType(agents) and lives at ~/.zai/', async () => {
+    const { targetDirsForType } = await import(
+      '../../src/server/services/install.js'
+    );
+
+    const dirs = targetDirsForType('agents').map((p) => p.target);
+    expect(dirs).toContain(join(work, '.zai', 'agents'));
+    // On a zai-only box, none of the other platforms should sneak in.
+    expect(dirs).not.toContain(join(work, '.nova', 'agents'));
+    expect(dirs).not.toContain(join(work, '.config', 'opencode', 'agents'));
+    expect(dirs).not.toContain(join(work, '.claude', 'agents'));
+  });
+
+  it('skill on a zai-only box lands at ~/.agents/skills/', async () => {
+    const { installFromCache, targetDirsForType } = await import(
+      '../../src/server/services/install.js'
+    );
+
+    installFromCache({ type: 'skills', name: 'bar', version: 'v1.2.3' });
+
+    expect(
+      existsSync(join(work, '.agents', 'skills', 'bar')),
+      'skill merged into ~/.agents/skills/bar',
+    ).toBe(true);
+
+    // The shared skills dir appears in the platform list as 'opencode'
+    // (the designated platform key for the shared tree), even when the
+    // only detected trigger is ZAI_DIR — matching the OPENCC/OpenCode
+    // parity rule.
+    const dirs = targetDirsForType('skills').map((p) => p.target);
+    expect(dirs).toContain(join(work, '.agents', 'skills'));
+  });
+});
+
+/**
+ * Regression: OPENCC platform now writes to ~/.claude/, distinct from
+ * zai's ~/.zai/. Make sure an opencc/<name> agent lands under ~/.claude
+ * on an OpenCC-only box so neither tree pollutes the other.
+ */
+describe('install + targetDirsForType parity on an opencc-only box', () => {
+  let work: string;
+  let fakeCache: string;
+  const origHome = process.env.HOME;
+
+  beforeEach(() => {
+    work = mkdtempSync(join(tmpdir(), 'zai-openconly-'));
+    fakeCache = join(work, 'cache', 'v1.2.3');
+    mkdirSync(join(fakeCache, 'agents', 'opencc'), { recursive: true });
+    writeFileSync(join(fakeCache, 'agents', 'opencc', 'bar.md'), '# bar', 'utf-8');
+
+    mkdirSync(join(work, '.claude'), { recursive: true });
+
+    vi.doMock('../../src/server/services/extractor.js', () => ({
+      resolveResourcePath: (_v: string, type: string, name: string) => {
+        const slash = name.indexOf('/');
+        if (slash >= 0) {
+          const col = name.slice(0, slash);
+          const leaf = name.slice(slash + 1);
+          return join(fakeCache, type, col, `${leaf}.md`);
+        }
+        return join(fakeCache, type, name);
+      },
+      listCollectionResourcePaths: () => [],
+    }));
+
+    process.env.HOME = work;
+  });
+
+  afterEach(() => {
+    rmSync(work, { recursive: true, force: true });
+    vi.doUnmock('../../src/server/services/extractor.js');
+    vi.resetModules();
+    process.env.HOME = origHome;
+  });
+
+  it('opencc/<name> agent lands at ~/.claude/agents/bar.md', async () => {
+    const { installFromCache } = await import(
+      '../../src/server/services/install.js'
+    );
+
+    const result = installFromCache({
+      type: 'agents',
+      name: 'opencc/bar',
+      version: 'v1.2.3',
+    });
+
+    expect(existsSync(join(work, '.claude', 'agents', 'bar.md'))).toBe(true);
+    // Must NOT have crossed over into the zai tree.
+    expect(existsSync(join(work, '.zai', 'agents', 'bar.md'))).toBe(false);
+
+    expect(result.platforms).toEqual(['opencc']);
   });
 });

@@ -1,40 +1,26 @@
 // packages/zai/test/web/eventStream-dispatch.test.ts
 //
-// Task 11 — SSE state push plan.
+// Task 11 — SSE state push plan. (T4 改造: 不再复制 switch, 直接调
+// useEventStream 导出的 applyBatch 批量 dispatcher.)
 //
-// 验证 useEventStream 的 dispatch switch 把 4 个 state.* ServerEvent (Task 6)
-// 路由到 useAgentStore 上对应的 reducer (Task 10):
+// 验证 applyBatch 把 4 个 state.* ServerEvent + queue.changed 路由到
+// useAgentStore 上对应的 reducer:
 //   cwd.changed           → applyCwdChanged
 //   bash_task.changed     → applyBashTaskChanged
 //   v2_task.changed       → applyV2TaskChanged
 //   agent_task.changed    → applyAgentTaskChanged
 //
-// 测试策略: 用一个本地 dispatch 函数模拟 useEventStream.ts 里的 switch, 然后
-// 直接调它. 这是因为 useEventStream.ts 是 React hook, 直接跑它需要 EventSource
-// + DOM mock,得不偿失; 而 dispatch switch 是纯函数, 复制一份比模拟 SSE 链路
-// 更可靠. switch 内容必须与 useEventStream.ts 保持一致 — 修改 useEventStream
-// 的 case 时, 这个文件也要同步改.
-//
-// 注: Task 10 (useAgentStore-state-events.test.ts) 已经覆盖了 reducer 本身的
-// 行为 (insert / replace / delete / terminal / null-sid), 本文件只验证 dispatch
-// 路由 — 即 4 个 case 各自走对了 reducer.
+// 注: useAgentStore-state-events.test.ts 已覆盖 reducer 本身的行为, 本文件
+// 只验证 dispatch 路由 — 即各 case 走对了 reducer。
 
 import { describe, it, expect, beforeEach } from 'vitest'
 import { useAgentStore } from '../../src/web/src/store/useAgentStore.js'
+import { applyBatch } from '../../src/web/src/store/useEventStream.js'
 
-// 模拟 useEventStream.ts 的 dispatch switch — 4 个 state.* case 各自路由到
-// 对应的 reducer. 与 useEventStream.ts:31-67 的 switch 一一对应.
+// 直接把单事件喂给导出的 applyBatch — 与 useEventStream 的批量 dispatcher
+// 完全一致, 不再维护一份复制的 switch.
 async function dispatch(event: any) {
-  switch (event.type) {
-    case 'cwd.changed':
-      useAgentStore.getState().applyCwdChanged(event); break
-    case 'bash_task.changed':
-      useAgentStore.getState().applyBashTaskChanged(event); break
-    case 'v2_task.changed':
-      useAgentStore.getState().applyV2TaskChanged(event); break
-    case 'agent_task.changed':
-      useAgentStore.getState().applyAgentTaskChanged(event); break
-  }
+  applyBatch([event])
 }
 
 describe('eventStream dispatch routing', () => {
@@ -68,5 +54,19 @@ describe('eventStream dispatch routing', () => {
     const task = { id: 'a1', status: 'running', input: { prompt: 'p' } }
     await dispatch({ type: 'agent_task.changed', sessionId: 's1', task })
     expect(useAgentStore.getState().agentTasksBySession['s1']).toHaveLength(1)
+  })
+
+  it('routes queue.changed to applyQueueChanged', async () => {
+    await dispatch({
+      type: 'queue.changed',
+      sessionId: 's1',
+      running: true,
+      queueLength: 2,
+      pending: [{ id: 'q1', text: 'first' }, { id: 'q2', text: 'second' }],
+    })
+    expect(useAgentStore.getState().queuedPrompts).toEqual([
+      { id: 'q1', text: 'first' },
+      { id: 'q2', text: 'second' },
+    ])
   })
 })

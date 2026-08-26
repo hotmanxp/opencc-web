@@ -1,7 +1,9 @@
 import { Router, type IRouter, type Request, type Response } from 'express'
-import { CwdStore } from '@zn-ai/zn-agent-core/runtime'
-import { getTaskListStore } from '@zn-ai/zn-agent-core/taskListStore'
-import { bashBackgroundTracker } from '@zn-ai/zn-agent-core/bashTracker'
+import {
+  CwdStore,
+  getTaskListStore,
+  bashBackgroundTracker,
+} from '@zn-ai/zn-agent-core'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
 
 const router: IRouter = Router()
@@ -121,8 +123,7 @@ export default router
  */
 async function loadVendorV2Tasks(sid: string): Promise<V2TaskItemWire[]> {
   try {
-    // @ts-expect-error — opencc-core.mjs has no d.ts, but IS available at runtime
-    const bundle = (await import('@zn-ai/zn-agent-core/opencc-core')) as {
+    const bundle = (await import('@zn-ai/zn-agent-core')) as {
       listTasks?: (taskListId: string) => Promise<Array<{
         id: string; subject: string; description?: string; activeForm?: string;
         status: string; blocks?: string[]; blockedBy?: string[]; owner?: string

@@ -2,15 +2,17 @@
 /**
  * verify-server-types-self-contained
  *
- * Post-build guard for the `@zn-ai/zn-agent-core/opencc-server` subpath.
+ * Post-build guard for the `dist/opencc-src/server/*.d.ts` files.
  *
  * The public type surface for the server runtime MUST be self-contained —
  * `dist/opencc-src/server/{index,serverTypes}.d.ts` may not import from
  * any module outside the `dist/opencc-src/server/` directory. The compat
- * tree (`dist/compat/`) is not part of the published package's
- * `./opencc-server` subpath, so any cross-module import in those d.ts
- * files would fail to resolve when a downstream consumer does
- * `import { ... } from '@zn-ai/zn-agent-core/opencc-server'`.
+ * tree (`dist/compat/`) is not reachable from those d.ts files when a
+ * downstream consumer imports the package main entry
+ * (`dist/bundle-entry.d.ts`, which re-exports `./opencc-src/server/index.js`),
+ * so any cross-module import in those d.ts files would fail to resolve.
+ * The guard survived the subpath removal — the main entry now references
+ * these d.ts files directly.
  *
  * Why a custom script and not just `tsc --noEmit`:
  *   - `tsc --noEmit` with `--noResolve` would flag the missing

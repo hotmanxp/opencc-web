@@ -1,5 +1,6 @@
 import { Router, type IRouter, type Request } from 'express';
-import { readdir, stat, readFile, rm, rmdir } from 'node:fs/promises';
+import { readdir, stat, readFile, rm, rmdir, mkdir, writeFile, access } from 'node:fs/promises';
+import type { Dirent } from 'node:fs';
 import { extname, basename, join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import { resolveSafePath } from '../utils/safePath.js';
@@ -7,14 +8,26 @@ import { MAX_FILE_BYTES, writeTextFile } from '../utils/fsWrite.js';
 import { resolveRgPath, runRipgrep } from '../services/ripgrep.js';
 import type {
   FsAck, FsEntry, FsFile, FsList, FsSearchEntry, FsSearchResult,
-  FsContentSearchEntry, FsContentSearchResult,
+  FsContentSearchEntry, FsContentSearchResult, FsUploadResult,
+  FilePreviewPayload, FilePreviewError,
 } from '../../shared/fs.js';
-import { dirname as pathDirname, relative as pathRelative } from 'node:path';
+import { classifyKind, mimeFromExt } from '../../shared/fileKind.js';
+import { dirname as pathDirname, relative as pathRelative, resolve as pathResolve } from 'node:path';
 const MAX_QUERY_LEN = 64;
 const WALK_TIMEOUT_MS = 200;
 const IGNORED = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', '.cache', '.DS_Store',
 ]);
+
+// 拖入文件的存放目录(相对 cwd 的 POSIX 路径)。浏览器的 File.path /
+// file:// URI 已被现代浏览器移除,拖入文件的系统绝对路径拿不到 ——
+// 上传副本落到这里,用副本的绝对路径作为插入对话的「文件地址」,
+// agent 拿到后可直接读文件。
+const UPLOADS_REL = '.zai/uploads';
+// base64 请求体上限:express.json 全局是 20mb,留出 JSON envelope 余量。
+const MAX_UPLOAD_BASE64_LEN = 19 * 1024 * 1024;
+// 解码后的字节上限(base64 膨胀 ~1.33x 后仍落在 20mb JSON limit 内)。
+const MAX_UPLOAD_BYTES = 14 * 1024 * 1024;
 
 const TEXT_EXTS = new Set([
   '.md', '.markdown', '.txt', '.json', '.jsonc', '.json5',
@@ -111,6 +124,11 @@ interface WalkOptions {
   signal: AbortSignal;
 }
 
+interface ListDirOptions {
+  caseSensitive: boolean;
+  signal: AbortSignal;
+}
+
 interface WalkResult {
   entries: FsSearchEntry[];
   truncated: boolean;
@@ -121,10 +139,14 @@ interface WalkResult {
  * BFS workspace walk that collects fuzzy filename matches.
  *
  * Skips the same directories as `/fs/list` (the IGNORED set + hidden dirs
- * at depth >= 1). Returns up to MAX_RESULTS top-scoring files, sorted by
- * score desc then path asc. Honors an AbortSignal — when aborted, the
- * recursion is abandoned and the partial result is returned with
- * truncated:true.
+ * at depth >= 1). Returns up to MAX_RESULTS top-scoring entries (files and
+ * directories), sorted by score desc, then dir/file type, then path asc.
+ * Honors an AbortSignal — when aborted, the recursion is abandoned and the
+ * partial result is returned with truncated:true.
+ *
+ * 空 query(@-mention popup 初始态,用户只敲了 @)只列 cwd 顶层条目:
+ * 不递归展开整个工作区(否则会返回几千个文件淹没用户)。非空 query 走
+ * 完整 fuzzy BFS,目录也作为候选(让用户能继续展开下一层)。
  */
 export async function walkForSearch(
   absRoot: string,
@@ -132,7 +154,7 @@ export async function walkForSearch(
   options: WalkOptions,
 ): Promise<WalkResult> {
   const start = Date.now();
-  const collected: Array<{ path: string; name: string; score: number }> = [];
+  const collected: Array<{ path: string; name: string; type: 'file' | 'dir'; score: number }> = [];
   let truncated = false;
 
   const stack: Array<{ relDir: string; depth: number }> = [{ relDir: '', depth: 0 }];
@@ -167,23 +189,44 @@ export async function walkForSearch(
         continue;
       }
 
+      if (!info.isDirectory() && !info.isFile()) continue;
+
       if (info.isDirectory()) {
-        stack.push({ relDir: childRel, depth: depth + 1 });
+        // BFS 仅在 query 非空时继续下降 — 空 query 是 @-mention popup 初始态
+        // (用户刚敲完 @),此时只想列出 cwd 顶层条目,不应该展开整个工作区。
+        if (query) {
+          stack.push({ relDir: childRel, depth: depth + 1 });
+        }
+        const relPath = childRel.split(sep).join('/');
+        const score = query
+          ? clampScore(fuzzyMatchScore(query, relPath, options.caseSensitive))
+          : 0;
+        if (!query || score > 0) {
+          collected.push({ path: relPath, name, type: 'dir', score });
+        }
         continue;
       }
       if (!info.isFile()) continue;
 
       const relPath = childRel.split(sep).join('/');
-      const rawScore = fuzzyMatchScore(query, relPath, options.caseSensitive);
+      const rawScore = query
+        ? fuzzyMatchScore(query, relPath, options.caseSensitive)
+        : 0;
       const score = clampScore(rawScore);
-      if (score <= 0) continue;
+      if (query && score <= 0) continue;
+      // 空 query 时只收 top-level 文件(避免递归 + 文件数爆炸)
+      if (!query && depth > 0) continue;
 
-      collected.push({ path: relPath, name, score });
+      collected.push({ path: relPath, name, type: 'file', score });
     }
   }
 
   collected.sort((a, b) => {
     if (b.score !== a.score) return b.score - a.score;
+    // type tiebreaker: dirs first when scores tie — @-mention popup shows
+    // directory candidates above files at equal rank so users can keep
+    // typing the next path segment.
+    if (a.type !== b.type) return a.type === 'dir' ? -1 : 1;
     return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
   });
 
@@ -196,11 +239,78 @@ export async function walkForSearch(
   const entries: FsSearchEntry[] = top.map((c) => ({
     path: c.path,
     name: c.name,
-    type: 'file',
+    type: c.type,
     score: c.score,
   }));
 
   return { entries, truncated, durationMs: Date.now() - start };
+}
+
+/**
+ * Single-directory listing fuzzy-scored against `fragment`.
+ *
+ * Used by `/fs/search` when the query contains `/` (e.g. `@src/fo` →
+ * relDir=`src`, fragment=`fo`): list `cwd/src/` once instead of walking
+ * the whole workspace. Empty fragment returns every entry at `absDir`
+ * with score=0 (capped to MAX_RESULTS). Both files and dirs are
+ * returned; dirs come first at equal score.
+ *
+ * absDir must already be validated against the instance cwd boundary
+ * by the caller (`resolveSafePath`); this function does not re-validate.
+ */
+export async function listDirectoryForSearch(
+  absDir: string,
+  relDir: string,
+  fragment: string,
+  options: ListDirOptions,
+): Promise<WalkResult> {
+  const start = Date.now();
+  let entries: Dirent[];
+  try {
+    entries = await readdir(absDir, { withFileTypes: true });
+  } catch {
+    return { entries: [], truncated: false, durationMs: Date.now() - start };
+  }
+  const depth = relDir ? relDir.split("/").filter(Boolean).length : 0;
+  const collected: Array<{
+    path: string;
+    name: string;
+    type: "file" | "dir";
+    score: number;
+  }> = [];
+  for (const e of entries) {
+    if (options.signal.aborted) break;
+    if (IGNORED.has(e.name)) continue;
+    if (depth >= 1 && e.name.startsWith(".")) continue;
+    if (!e.isDirectory() && !e.isFile()) continue;
+    const relPath = relDir ? `${relDir}/${e.name}` : e.name;
+    const type: "file" | "dir" = e.isDirectory() ? "dir" : "file";
+    // 评分用 basename(目录上下文已经由 leading path 提供,深度 penalty
+    // 不应让用户敲 "foo" 在 src/web/src/ 下找不到 App.tsx 之类)。
+    const score = fragment
+      ? clampScore(fuzzyMatchScore(fragment, e.name, options.caseSensitive))
+      : 0;
+    if (fragment && score <= 0) continue;
+    collected.push({ path: relPath, name: e.name, type, score });
+  }
+  collected.sort((a, b) => {
+    if (b.score !== a.score) return b.score - a.score;
+    if (a.type !== b.type) return a.type === "dir" ? -1 : 1;
+    return a.path < b.path ? -1 : a.path > b.path ? 1 : 0;
+  });
+  let top = collected;
+  let truncated = false;
+  if (collected.length > MAX_RESULTS) {
+    top = collected.slice(0, MAX_RESULTS);
+    truncated = true;
+  }
+  const out: FsSearchEntry[] = top.map((c) => ({
+    path: c.path,
+    name: c.name,
+    type: c.type,
+    score: c.score,
+  }));
+  return { entries: out, truncated, durationMs: Date.now() - start };
 }
 
 interface InstanceContextShape { cwd: string; cwdName: string }
@@ -242,7 +352,7 @@ fsRouter.get('/fs/list', async (req, res) => {
   const entries: FsEntry[] = [];
   for (const name of names) {
     if (IGNORED.has(name)) continue;
-    // Hide hidden entries below top level so .claude/.config remain
+    // Hide hidden entries below top level so .zai/.config remain
     // visible at dir="" but not deeper.
     if (depthOf(dir) >= 1 && name.startsWith('.')) continue;
     const abs = `${safe.abs}${sep}${name}`;
@@ -434,6 +544,106 @@ fsRouter.put('/fs/file', async (req, res) => {
   } satisfies FsFile);
 });
 
+/**
+ * Sanitize a client-supplied filename for upload: strips directory
+ * components (traversal guard — the stored copy always lives inside
+ * `<cwd>/.zai/uploads/`), rejects hidden/control-char/oversized names.
+ */
+function sanitizeUploadName(name: unknown): string | null {
+  if (typeof name !== 'string') return null;
+  const cleaned = name.split(/[\\/]/).pop()?.trim() ?? '';
+  if (!cleaned || cleaned === '.' || cleaned === '..' || cleaned.length > 200) {
+    return null;
+  }
+  // Control chars can't exist in a real filename and would be ambiguous
+  // when the absolute path is later pasted into a chat message.
+  if (/[\x00-\x1f\x7f]/.test(cleaned)) return null;
+  return cleaned;
+}
+
+/**
+ * Pick a non-colliding path inside `dir` for `name`: reuse the plain
+ * name when free, otherwise append `-1`, `-2`, … before the extension
+ * ("a.txt" → "a-1.txt") so repeated drags don't overwrite earlier copies.
+ */
+async function uniqueUploadPath(dir: string, name: string): Promise<string> {
+  const candidate = join(dir, name);
+  try {
+    await access(candidate);
+  } catch {
+    return candidate;
+  }
+  const dot = name.lastIndexOf('.');
+  const stem = dot > 0 ? name.slice(0, dot) : name;
+  const ext = dot > 0 ? name.slice(dot) : '';
+  for (let i = 1; ; i++) {
+    const next = join(dir, `${stem}-${i}${ext}`);
+    try {
+      await access(next);
+    } catch {
+      return next;
+    }
+  }
+}
+
+// 拖入的非图片文件落到 `<cwd>/.zai/uploads/`,返回副本的绝对路径
+// (FsUploadResult.absPath)作为「文件地址」插入对话输入框。
+fsRouter.post('/fs/upload', async (req, res) => {
+  const { cwd } = ctx(req);
+  const body = req.body ?? {};
+  if (typeof body.data !== 'string' || !body.data) {
+    res.status(400).json({ ok: false, error: '缺少 data 字段' } satisfies FsUploadResult);
+    return;
+  }
+  const name = sanitizeUploadName(body.name);
+  if (!name) {
+    res.status(400).json({ ok: false, error: '文件名非法' } satisfies FsUploadResult);
+    return;
+  }
+  if (Buffer.byteLength(body.data, 'utf8') > MAX_UPLOAD_BASE64_LEN) {
+    res.status(413).json({ ok: false, error: '文件过大 (base64 超出 19 MB)' } satisfies FsUploadResult);
+    return;
+  }
+  // base64 合法性:标准 alphabet + 尾部 padding;非法字符 Buffer.from
+  // 会静默丢弃尾部垃圾,必须显式拒绝。
+  if (!/^[A-Za-z0-9+/]*={0,2}$/.test(body.data) || body.data.length % 4 !== 0) {
+    res.status(400).json({ ok: false, error: 'data 不是合法 base64' } satisfies FsUploadResult);
+    return;
+  }
+  const buf = Buffer.from(body.data, 'base64');
+  if (buf.byteLength > MAX_UPLOAD_BYTES) {
+    const mb = (buf.byteLength / 1024 / 1024).toFixed(2);
+    res.status(413).json({ ok: false, error: `文件过大 (${mb} MB > 14 MB)` } satisfies FsUploadResult);
+    return;
+  }
+  const dir = join(cwd, ...UPLOADS_REL.split('/'));
+  try {
+    await mkdir(dir, { recursive: true });
+  } catch (err) {
+    res.status(500).json({ ok: false, error: `创建上传目录失败: ${err instanceof Error ? err.message : String(err)}` } satisfies FsUploadResult);
+    return;
+  }
+  const absPath = await uniqueUploadPath(dir, name);
+  try {
+    await writeFile(absPath, buf);
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOSPC') {
+      res.status(500).json({ ok: false, error: '磁盘空间不足' } satisfies FsUploadResult);
+      return;
+    }
+    res.status(500).json({ ok: false, error: `写入失败: ${err instanceof Error ? err.message : String(err)}` } satisfies FsUploadResult);
+    return;
+  }
+  res.json({
+    ok: true,
+    absPath,
+    relPath: `${UPLOADS_REL}/${basename(absPath)}`,
+    name: basename(absPath),
+    size: buf.byteLength,
+  } satisfies FsUploadResult);
+});
+
 fsRouter.get('/fs/search', async (req, res) => {
   const ctxVal = ctx(req);
   if (!ctxVal || typeof ctxVal.cwd !== 'string') {
@@ -444,10 +654,8 @@ fsRouter.get('/fs/search', async (req, res) => {
   const q = typeof req.query.q === 'string' ? req.query.q : '';
   const caseSensitive = req.query.case === '1';
 
-  if (!q) {
-    res.status(400).json({ ok: false, error: '缺少 q 参数' } satisfies FsSearchResult);
-    return;
-  }
+  // 允许空 q:@-mention popup 刚弹出时(用户只敲了 @)显示 cwd 顶层条目。
+  // 仍对非空 q 应用长度上限,避免目录深层路径滥用。
   if (q.length > MAX_QUERY_LEN) {
     res.status(400).json({ ok: false, error: `q 太长 (>${MAX_QUERY_LEN})` } satisfies FsSearchResult);
     return;
@@ -466,15 +674,36 @@ fsRouter.get('/fs/search', async (req, res) => {
   const timer = setTimeout(() => ac.abort(), WALK_TIMEOUT_MS);
 
   try {
-    const { entries, truncated, durationMs } = await walkForSearch(safe.abs, q, {
-      caseSensitive,
-      signal: ac.signal,
-    });
+    let result: WalkResult;
+    if (q.includes("/")) {
+      // 目录限定模式:q = "<relDir>/<fragment>"。
+      // 与 bare BFS 模式不同 — 我们直接 readdir <cwd>/<relDir> 一次,
+      // 对 fragment 做 fuzzy 匹配,避开整个工作区扫描。
+      const slashIdx = q.lastIndexOf("/");
+      const relDir = q.slice(0, slashIdx);
+      const fragment = q.slice(slashIdx + 1);
+      // 越界守护:relDir 必须落在 cwd 内,防 `../../etc` 越权读。
+      // (注意 resolveSafePath 同时拒绝 NUL 字节,守护 prefix check 旁路。)
+      const safeDir = resolveSafePath(cwd, relDir);
+      if (!safeDir.ok) {
+        res.status(403).json({ ok: false, error: safeDir.error } satisfies FsSearchResult);
+        return;
+      }
+      result = await listDirectoryForSearch(safeDir.abs, relDir, fragment, {
+        caseSensitive,
+        signal: ac.signal,
+      });
+    } else {
+      result = await walkForSearch(safe.abs, q, {
+        caseSensitive,
+        signal: ac.signal,
+      });
+    }
     const body: FsSearchResult = {
       ok: true,
-      entries,
-      truncated: truncated || ac.signal.aborted,
-      durationMs,
+      entries: result.entries,
+      truncated: result.truncated || ac.signal.aborted,
+      durationMs: result.durationMs,
     };
     res.json(body);
   } catch (err) {
@@ -730,6 +959,104 @@ function platformCommands(): {
 // lifetime of the process. Hoist it out of the request handlers to avoid
 // recomputing the lookup on every /fs/reveal or /fs/open-terminal call.
 const PLATFORM_COMMANDS = platformCommands();
+
+// 1 MiB hard cap; matches spec §2 '范围与约束'.
+// maxBytes query is clamped into [1024, 1 MiB] so a malicious LLM can't
+// bypass via maxBytes=0 or maxBytes=999999999.
+const PREVIEW_DEFAULT_MAX = 1_048_576
+
+function clampInt(raw: unknown, lo: number, hi: number, fallback: number): number {
+  const n = typeof raw === 'string' ? Number.parseInt(raw, 10) : NaN
+  if (!Number.isFinite(n)) return fallback
+  if (n < lo) return lo
+  if (n > hi) return hi
+  return n
+}
+
+function mapStatError(res: import('express').Response, err: unknown): void {
+  const code = (err as NodeJS.ErrnoException).code
+  if (code === 'ENOENT') {
+    res.status(404).json({ error: { code: 'ENOENT', message: '文件不存在' } } satisfies { error: FilePreviewError })
+    return
+  }
+  if (code === 'EACCES' || code === 'EPERM') {
+    res.status(403).json({ error: { code: 'EACCES', message: '无权限访问' } } satisfies { error: FilePreviewError })
+    return
+  }
+  res.status(500).json({
+    error: {
+      code: 'EIO',
+      message: `stat 失败:${err instanceof Error ? err.message : String(err)}`,
+    },
+  } satisfies { error: FilePreviewError })
+}
+
+fsRouter.get('/fs/preview', async (req, res) => {
+  const { cwd } = ctx(req)
+  const raw = typeof req.query.path === 'string' ? req.query.path : ''
+  if (!raw) {
+    res.status(400).json({ error: { code: 'EBADREQ', message: 'path 必填' } } satisfies { error: FilePreviewError })
+    return
+  }
+  const abs = pathResolve(raw)
+  const maxBytes = clampInt(req.query.maxBytes, 1024, PREVIEW_DEFAULT_MAX, PREVIEW_DEFAULT_MAX)
+  void cwd // 不限 cwd,但 log 一次便于排查;实际 cwd 记录在 server 日志
+
+  let info
+  try {
+    info = await stat(abs)
+  } catch (err) {
+    mapStatError(res, err)
+    return
+  }
+  if (info.isDirectory()) {
+    res.status(400).json({ error: { code: 'EISDIR', message: '路径是目录' } } satisfies { error: FilePreviewError })
+    return
+  }
+  if (info.size > maxBytes) {
+    res.status(413).json({
+      error: {
+        code: 'ETOOBIG',
+        message: `文件 ${info.size} 字节,超过 ${maxBytes}`,
+        meta: { size: info.size },
+      },
+    } satisfies { error: FilePreviewError })
+    return
+  }
+  const kind = classifyKind(abs)
+  if (kind === 'image') {
+    const buf = await readFile(abs)
+    const mime = mimeFromExt(abs) ?? 'application/octet-stream'
+    const payload: FilePreviewPayload = {
+      kind,
+      mime,
+      content: buf.toString('base64'),
+      size: info.size,
+      mtime: info.mtimeMs,
+    }
+    res.json(payload)
+    return
+  }
+  if (kind === 'html' || kind === 'text') {
+    const text = await readFile(abs, 'utf8')
+    const payload: FilePreviewPayload = {
+      kind,
+      mime: kind === 'html' ? 'text/html' : 'text/plain',
+      content: text,
+      size: info.size,
+      mtime: info.mtimeMs,
+    }
+    res.json(payload)
+    return
+  }
+  const payload: FilePreviewPayload = {
+    kind: 'binary',
+    size: info.size,
+    mtime: info.mtimeMs,
+    ext: extname(abs),
+  }
+  res.json(payload)
+})
 
 function launchPlatformTool(
   cmd: string,

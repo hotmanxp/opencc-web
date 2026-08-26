@@ -1,4 +1,5 @@
 import { resolve, sep } from 'node:path';
+import { expandTilde } from './expandTilde.js';
 
 /**
  * Resolve `rel` under `root` and ensure the result stays inside root.
@@ -30,7 +31,9 @@ export function resolveSafePath(
     return { ok: false, error: 'path 含 NUL 字符' };
   }
   // Empty rel means "the root itself" — useful for /fs/list?dir=
-  const abs = resolve(root, rel);
+  // expandTilde 先把 ~/foo 这类 shell 简写展开成绝对路径,resolve 再决定
+  // 是落在 root 内还是被 prefix 拦截(参见该文件 README 与 expandTilde 注释)。
+  const abs = resolve(root, expandTilde(rel));
   // Resolve removes trailing slash on root; compare exactly + the
   // separator-aware prefix check.
   if (abs === root || abs.startsWith(root + sep)) {

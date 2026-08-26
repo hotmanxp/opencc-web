@@ -77,4 +77,29 @@ describe('AskRegistry', () => {
     expect(reg.answer('t1', { answers: { q1: 'a' } })).toBe(true)
     await expect(p).resolves.toEqual({ answers: { q1: 'a' } })
   })
+
+  test('重复 register 同 toolUseId 不堆 abort listener,只留一份 entry', async () => {
+    const reg = new AskRegistry()
+    const ctrl = new AbortController()
+    const warnings: string[] = []
+    const onWarn = (w: Error) => warnings.push(w.name)
+    process.on('warning', onWarn)
+    try {
+      // 60 次同 toolUseId — 修复前会让 AbortSignal 累计 60 个 listener,
+      // 触发 MaxListenersExceededWarning;修复后每次覆盖都先 removeEventListener,
+      // 最终 signal 上只有 1 个 listener,无告警。
+      let last!: ReturnType<AskRegistry['register']>
+      for (let i = 0; i < 60; i++) {
+        last = reg.register('t1', 's1', ctrl.signal)
+      }
+      await new Promise((r) => setImmediate(r))
+      expect(warnings).not.toContain('MaxListenersExceededWarning')
+      // pending Map 只留最后一个 entry
+      expect(reg.peek('t1')).toBeDefined()
+      expect(reg.answer('t1', { answers: { q1: 'a' } })).toBe(true)
+      await expect(last).resolves.toEqual({ answers: { q1: 'a' } })
+    } finally {
+      process.off('warning', onWarn)
+    }
+  })
 })

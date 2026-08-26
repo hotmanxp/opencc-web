@@ -1,43 +1,59 @@
-import { useEffect, useState } from 'react';
-import { Layout as AntLayout, Menu, Switch, Tag } from 'antd';
+import { useEffect, useMemo, useState } from 'react';
+import { Button, Layout as AntLayout, Menu, Switch, Tag } from 'antd';
 import { Outlet, useNavigate, useLocation } from 'react-router-dom';
 import {
-  ToolOutlined,
-  AppstoreOutlined,
-  LoginOutlined,
+  DashboardOutlined,
   SettingOutlined,
-  FolderOutlined,
   RobotOutlined,
   MenuFoldOutlined,
   MenuUnfoldOutlined,
   ClusterOutlined,
   SunOutlined,
   MoonOutlined,
+  LoginOutlined,
+  DesktopOutlined,
 } from '@ant-design/icons';
 import { useAppStore } from '../store/useAppStore';
 import { useAgentStore } from '../store/useAgentStore';
 import { api } from '../lib/api';
-import type { OutputStyle, Theme } from '../../shared/settings.js';
+import type { OutputStyle, Theme, WorkMode } from '../../shared/settings.js';
 import ZnLogo from './ZnLogo';
 import { useIsMobile } from '../hooks/useIsMobile';
 import { useEffectiveTheme } from '../hooks/useEffectiveTheme.js';
+import { UpdateNotifier } from './UpdateNotifier';
+import SettingsDrawer from './SettingsDrawer';
 
 const { Sider, Header, Content } = AntLayout;
 
-const menuItems = [
+// 完整菜单列表,instance 子实例(instance manager 派生的子进程)模式
+// 下隐藏"实例管理"入口:子实例自己不能再 spawn 孙实例(由 routes/instances.ts
+// 路由层 + server/index.ts init 双重防御),给它看到这个入口只会显示 404
+// 页面,反而让用户困惑。Layout 在 useMemo 里按 isManagedChild 过滤。
+// /resources /config /dirs 合并到 /manage(Tabs 顶部切换)。登录 / 工具 对调:
+// 登录 单独留在外面(top-level 菜单,常用入口免进 tab),
+// 工具 进 /manage 当 tab(Tools 工具开关页与 /manage 内"配置"语义略近,
+// 但实际是工具检测面板;用户偏好放 tab 而不是顶菜单)。
+// 任何实例子进程仍隐藏"实例管理"(下方 Layout 里有说明)。
+const ALL_MENU_ITEMS = [
   { key: '/agent', icon: <RobotOutlined />, label: 'Agent' },
+  { key: '/desktop', icon: <DesktopOutlined />, label: '桌面' },
   { key: '/instances', icon: <ClusterOutlined />, label: '实例管理' },
   { key: '/login', icon: <LoginOutlined />, label: '登录' },
-  { key: '/tools', icon: <ToolOutlined />, label: '工具' },
-  { key: '/resources', icon: <AppstoreOutlined />, label: '资源' },
-  { key: '/config', icon: <SettingOutlined />, label: '配置' },
-  { key: '/dirs', icon: <FolderOutlined />, label: '目录' },
-];
+  { key: '/manage', icon: <DashboardOutlined />, label: '管理' },
+] as const;
 
 export default function Layout() {
   const navigate = useNavigate();
   const location = useLocation();
-  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setMaxVisibleMessages, setDefaultSplitScreen } = useAppStore();
+  const { sidebarCollapsed, toggleSidebar, setInstanceContext, setSettingsTheme, setOutputStyle, setWorkMode, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate, openSettingsDrawer } = useAppStore();
+  // 顶层 zai 实例(独立启动 / 顶层 managed supervisor)显示"实例管理"菜单;
+  // instance 子实例(被 instance manager 派生的子进程)不显示 — 它不能 spawn
+  // 孙实例,给它看到这个入口只会跳到 404 页面迷惑用户。
+  const isInstanceChild = useAppStore((s) => s.instanceContext?.isManagedChild === true && (s.instanceContext?.instanceId ?? null) != null);
+  const menuItems = useMemo(
+    () => (isInstanceChild ? ALL_MENU_ITEMS.filter((m) => m.key !== '/instances') : [...ALL_MENU_ITEMS]),
+    [isInstanceChild],
+  );
   // Menu 跟随 effective theme: 之前硬编码 theme="dark" 让 AntD 在 light 主题下
   // 仍按暗色算法把 menu-item 文字渲成 rgba(255,255,255,0.65), 但 sider 背景
   // 被全局 CSS 强制为浅色 --bg-sidebar, 白字 + 浅底 = 几乎不可见。
@@ -76,6 +92,9 @@ export default function Layout() {
         host: string;
         port: number;
         ips: string[];
+        isManagedChild?: boolean;
+        supervisorPid?: number | null;
+        instanceId?: string | null;
       }>('/system')
       .then((data) => {
         setVersion(data.version);
@@ -86,6 +105,9 @@ export default function Layout() {
           host: data.host,
           port: data.port,
           ips: data.ips ?? [],
+          isManagedChild: data.isManagedChild === true,
+          supervisorPid: typeof data.supervisorPid === 'number' ? data.supervisorPid : null,
+          instanceId: typeof data.instanceId === 'string' ? data.instanceId : null,
         });
         document.title = `${data.cwdName}-Z.AI`;
       })
@@ -105,7 +127,7 @@ export default function Layout() {
   useEffect(() => {
     let cancelled = false
     api
-      .get<{ outputStyle?: OutputStyle; theme?: Theme; maxVisibleMessages?: number; defaultSplitScreen?: boolean }>(
+      .get<{ outputStyle?: OutputStyle; theme?: Theme; workMode?: WorkMode; maxVisibleMessages?: number; defaultSplitScreen?: boolean }>(
         '/agent/settings',
       )
       .then((data) => {
@@ -120,6 +142,13 @@ export default function Layout() {
         }
         // hydrate 主题:服务端已在 GET handler 走 resolveTheme() 把未知值折叠为 'auto',
         // 这里 4 档白名单校验是防御层(防 cache stale / transport 异常).
+        if (
+          data.workMode === 'code' ||
+          data.workMode === 'office' ||
+          data.workMode === 'general'
+        ) {
+          setWorkMode(data.workMode)
+        }
         if (
           data.theme === 'auto' ||
           data.theme === 'dark' ||
@@ -138,6 +167,12 @@ export default function Layout() {
         if (typeof data.defaultSplitScreen === 'boolean') {
           setDefaultSplitScreen(data.defaultSplitScreen)
         }
+        if (typeof data.enableDynamicWorkflow === 'boolean') {
+          setEnableDynamicWorkflow(data.enableDynamicWorkflow)
+        }
+        if (typeof data.autoUpdate === 'boolean') {
+          setAutoUpdate(data.autoUpdate)
+        }
       })
       .catch(() => {
         // swallow — keep default
@@ -145,13 +180,22 @@ export default function Layout() {
     return () => {
       cancelled = true
     }
-  }, [setOutputStyle, setSettingsTheme, setMaxVisibleMessages, setDefaultSplitScreen, setTranscriptCollapsed]);
+  }, [setOutputStyle, setWorkMode, setSettingsTheme, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate, setTranscriptCollapsed]);
 
   return (
     // 用 height: 100vh (而不是 minHeight) 把 AntLayout 锁死在视口高度,
     // 这样内部 flex: 1 (Content / 子页面 wrapper) 才有确定的剩余空间可分配,
     // 否则内容一长 AntLayout 会跟着拉高, 整页出现滚动条, 把底部输入框推出视口.
     <AntLayout style={{ height: '100vh' }}>
+      {/* zai 自升级弹窗组件。监听 useAppStore.appUpdate 状态,complete/
+          failed 时弹 Modal,checking/installing 时顶部 notification。
+          AntD Modal/notification 默认 portal 到 body,DOM 位置不影响渲染。 */}
+      <UpdateNotifier />
+      {/* 全局设置面板 — 顶层 mount 让任意路由(/tools / /config / /dirs / /login /
+          /agent / 等)都能唤起 SettingsDrawer。组件自身在 settingsDrawerOpen=false
+          时 return null,默认零渲染,不重复占用资源。Agent.tsx 里也保留 mount
+          避免移动端 /m 路由外的路由被"看不到设置入口"的代码审查误读。 */}
+      <SettingsDrawer />
       <Sider
         collapsible
         collapsed={sidebarCollapsed}
@@ -186,6 +230,22 @@ export default function Layout() {
           items={menuItems}
           onClick={({ key }) => navigate(key)}
         />
+        <Button
+          type="text"
+          icon={<SettingOutlined style={{ fontSize: 16 }} />}
+          onClick={openSettingsDrawer}
+          aria-label="打开设置"
+          data-testid="global-settings-button"
+          style={{
+            position: 'absolute',
+            left: sidebarCollapsed ? 0 : 12,
+            bottom: 12,
+            width: sidebarCollapsed ? '100%' : 'auto',
+            color: effectiveTheme === 'dark' ? 'rgba(255,255,255,0.75)' : 'var(--text-secondary)',
+          }}
+        >
+          {!sidebarCollapsed && '设置'}
+        </Button>
       </Sider>
       <AntLayout>
         {/* <Header

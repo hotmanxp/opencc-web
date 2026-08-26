@@ -395,6 +395,20 @@ export function getImageTooLargeErrorMessage(): string {
     ? 'Image was too large. Try resizing the image or using a different approach.'
     : 'Image was too large. Double press esc to go back and try again with a smaller image.'
 }
+
+// zai patch (2026-08-09): 工具结果里含坏图(典型: Read 工具读到 0 字节/截断/伪 PNG)
+// 时 API 返 400 "invalid image content: decode image config: image: unknown
+// format (2013)"。canonical 消息含 "invalid image content" + "unknown format"
+// 关键词,供 normalizeMessagesForAPI 的 errorToBlockTypes 唯一匹配,自动
+// strip 前导 tool_result user 消息的 image block — 否则坏图在 transcript
+// 里持续存在,每次重试 defaultQuery 都会把整段历史(含坏图)重发,API 再
+// 次 400,形成死循环(实证: sess-1786233030871-l455dror 4 次重试全部 400)。
+// 文案直接引用上游错误码 "2013",便于在 log 检索时和上游日志对齐。
+export const IMAGE_FORMAT_INVALID_CANONICAL_ERROR =
+  'invalid image content: decode image config: image: unknown format (2013)'
+export function getImageFormatInvalidErrorMessage(): string {
+  return `API Error: 400 ${IMAGE_FORMAT_INVALID_CANONICAL_ERROR}. The most recent tool result contained a malformed image; the image block will be stripped on the next turn so the conversation can continue.`
+}
 export function getRequestTooLargeErrorMessage(): string {
   const limits = `max ${formatFileSize(PDF_TARGET_RAW_SIZE)}`
   return getIsNonInteractiveSession()
@@ -402,17 +416,17 @@ export function getRequestTooLargeErrorMessage(): string {
     : `Request too large (${limits}). Double press esc to go back and try with a smaller file.`
 }
 export const OAUTH_ORG_NOT_ALLOWED_ERROR_MESSAGE =
-  'Your account does not have access to OpenCC. Please run /login.'
+  'Your account does not have access to Z.Ai. Please run /login.'
 
 export function getTokenRevokedErrorMessage(): string {
   return getIsNonInteractiveSession()
-    ? 'Your account does not have access to OpenCC. Please login again or contact your administrator.'
+    ? 'Your account does not have access to Z.Ai. Please login again or contact your administrator.'
     : TOKEN_REVOKED_ERROR_MESSAGE
 }
 
 export function getOauthOrgNotAllowedErrorMessage(): string {
   return getIsNonInteractiveSession()
-    ? 'Your organization does not have access to OpenCC. Please login again or contact your administrator.'
+    ? 'Your organization does not have access to Z.Ai. Please login again or contact your administrator.'
     : OAUTH_ORG_NOT_ALLOWED_ERROR_MESSAGE
 }
 
@@ -866,6 +880,25 @@ export function getAssistantMessageFromError(
     })
   }
 
+  // zai patch (2026-08-09): tool_result 含坏图(image format unknown 2013)。
+  // 严格用 "invalid image content" + "unknown format" 双关键词匹配,避免
+  // 误伤"image is required"(老 Mimo 模型那种 "text is not set" 走的是
+  // getVisionNotSupportedErrorMessages 路径,不是这里)。canonical 消息含
+  // IMAGE_FORMAT_INVALID_CANONICAL_ERROR,供 normalizeMessagesForAPI
+  // 唯一匹配并 strip 前导 tool_result user 消息的 image block。
+  if (
+    error instanceof APIError &&
+    error.status === 400 &&
+    error.message.includes('invalid image content') &&
+    error.message.includes('unknown format')
+  ) {
+    return createAssistantAPIErrorMessage({
+      content: getImageFormatInvalidErrorMessage(),
+      error: 'invalid_request',
+      errorDetails: error.message,
+    })
+  }
+
   // Server rejected the afk-mode beta header (plan does not include auto
   // mode). AFK_MODE_BETA_HEADER is '' in non-TRANSCRIPT_CLASSIFIER builds,
   // so the truthy guard keeps this inert there.
@@ -1289,6 +1322,17 @@ export function classifyAPIError(error: unknown): string {
     return 'image_too_large'
   }
 
+  // zai patch (2026-08-09): tool_result 含坏图(image format unknown 2013)。
+  // 双关键词匹配 — 同 getAssistantMessageFromError 的对应分支。
+  if (
+    error instanceof APIError &&
+    error.status === 400 &&
+    error.message.includes('invalid image content') &&
+    error.message.includes('unknown format')
+  ) {
+    return 'image_format_invalid'
+  }
+
   // Tool use errors (400)
   if (
     error instanceof APIError &&
@@ -1426,8 +1470,8 @@ export function getErrorMessageIfRefusal(
       : "your provider's acceptable use policy"
 
   const baseMessage = getIsNonInteractiveSession()
-    ? `${API_ERROR_MESSAGE_PREFIX}: OpenCC is unable to respond to this request, which appears to violate our Usage Policy (${usagePolicyUrl}). Try rephrasing the request or attempting a different approach.`
-    : `${API_ERROR_MESSAGE_PREFIX}: OpenCC is unable to respond to this request, which appears to violate our Usage Policy (${usagePolicyUrl}). Please double press esc to edit your last message or start a new session for OpenCC to assist with a different task.`
+    ? `${API_ERROR_MESSAGE_PREFIX}: Z.Ai is unable to respond to this request, which appears to violate our Usage Policy (${usagePolicyUrl}). Try rephrasing the request or attempting a different approach.`
+    : `${API_ERROR_MESSAGE_PREFIX}: Z.Ai is unable to respond to this request, which appears to violate our Usage Policy (${usagePolicyUrl}). Please double press esc to edit your last message or start a new session for Z.Ai to assist with a different task.`
 
   const defaultModel = getDefaultMainLoopModel()
   const modelSuggestion =

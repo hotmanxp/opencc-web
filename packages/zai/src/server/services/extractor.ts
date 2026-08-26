@@ -5,6 +5,7 @@ import { existsSync, readdirSync, statSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import AdmZip from 'adm-zip';
+import { resolveSpawnCommand } from './spawner.js';
 import {
   PLUGIN_PKG,
   ZN_ASSETS_DIR,
@@ -37,15 +38,18 @@ const execFileAsync = promisify(execFile);
 /** npm pack 在普通 registry 下需要带 registry，否则走用户 npm config */
 async function getNpmRegistry(): Promise<string> {
   try {
-    const { stdout } = await execFileAsync(
-      'npm',
-      ['config', 'get', 'registry', '--workspaces=false'],
-      { timeout: 5000 },
-    );
+    const { stdout } = await runNpm(['config', 'get', 'registry', '--workspaces=false'], 5000);
     return stdout.trim();
   } catch {
     return '';
   }
+}
+
+// npm 在 Windows 上是 .cmd shim,execFile 不能直接执行(ENOENT)——
+// resolveSpawnCommand 在 win32 下改写为 cmd /c。
+function runNpm(args: string[], timeout: number): Promise<{ stdout: string }> {
+  const { command, args: resolvedArgs } = resolveSpawnCommand('npm', args);
+  return execFileAsync(command, resolvedArgs, { timeout });
 }
 
 /**
@@ -66,7 +70,7 @@ export async function extractPluginVersion(version: string): Promise<ExtractionE
   packArgs.push(`--pack-destination=${stageDir}`);
 
   try {
-    await execFileAsync('npm', packArgs, { timeout: 60_000 });
+    await runNpm(packArgs, 60_000);
   } catch (err) {
     await rm(stageDir, { recursive: true, force: true });
     throw new Error(
@@ -386,7 +390,7 @@ export async function fetchLatestVersion(pkg = PLUGIN_PKG): Promise<string | nul
   if (registry) args.push(`--registry=${registry}`);
   args.push('--workspaces=false', '--no-progress');
   try {
-    const { stdout } = await execFileAsync('npm', args, { timeout: 30_000 });
+    const { stdout } = await runNpm(args, 30_000);
     const v = stdout.trim();
     return v || null;
   } catch {

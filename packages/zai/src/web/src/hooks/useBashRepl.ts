@@ -17,7 +17,12 @@ export interface UseBashReplResult {
   topCommands: TopCommandEntry[]
   /** 手动刷新 topCommands(供 BashTab 选中/执行后调用)。 */
   refreshTopCommands: () => Promise<void>
-  exec: (command: string) => Promise<ExecResult>
+  /**
+   * 触发一次命令执行。opts.wait:true 时 await 服务端真实终态,返回值包含
+   * code/signal/durationMs(MobileQuickDrawer 决定 success/error toast 用);
+   * 默认 false (fire-and-forget),返回值只有 execId。
+   */
+  exec: (command: string, opts?: { wait?: boolean }) => Promise<ExecResult>
   abort: () => Promise<void>
   clear: () => void
 }
@@ -102,10 +107,10 @@ export function useBashRepl(
   }, [])
 
   const exec = useCallback(
-    async (command: string): Promise<ExecResult> => {
+    async (command: string, opts: { wait?: boolean } = {}): Promise<ExecResult> => {
       if (!sessionId) return { ok: false, busy: true, currentExecId: 'no-session' }
       const body: ExecRequest = { command, cwd: defaultCwd ?? undefined }
-      const result = await execRepl(sessionId, body)
+      const result = await execRepl(sessionId, body, opts)
       if (result.ok) {
         setBusy(true)
         setCurrentExecId(result.execId)

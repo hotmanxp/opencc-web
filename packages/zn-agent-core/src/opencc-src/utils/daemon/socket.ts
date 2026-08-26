@@ -57,7 +57,7 @@ export class DaemonError extends Error {
 /**
  * Absolute path to the bg daemon's loopback Unix socket.
  *
- * Layout: `~/.claude/sock/cc-daemon-<uid>`. The `<uid>` discriminator
+ * Layout: `~/.zai/sock/cc-daemon-<uid>`. The `<uid>` discriminator
  * lets multiple Unix users share the same home dir without colliding.
  *
  * Darwin-only: AGENTS.md scopes the bg agent view to macOS. Linux/
@@ -81,7 +81,7 @@ export function getSockPath(): string {
   if (!Number.isInteger(uidNum)) {
     throw new Error(`getSockPath: unable to determine uid (got ${uidNum})`)
   }
-  return join(homedir(), '.claude', 'sock', `cc-daemon-${uidNum}`)
+  return join(homedir(), '.zai', 'sock', `cc-daemon-${uidNum}`)
 }
 
 // ---------- Connect ----------

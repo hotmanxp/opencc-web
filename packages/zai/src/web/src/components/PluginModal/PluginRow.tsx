@@ -46,6 +46,7 @@ export function PluginRow({ plugin, writing, onToggle, onUpdate, onUninstall }: 
       checked={plugin.enabled}
       disabled={!plugin.writable || writing === 'writing'}
       loading={writing === 'writing'}
+      aria-label={`启用 ${plugin.name ?? plugin.id}`}
       onChange={onToggle}
     />
   )
@@ -95,7 +96,7 @@ export function PluginRow({ plugin, writing, onToggle, onUpdate, onUninstall }: 
         {plugin.writable ? (
           switchEl
         ) : (
-          <Tooltip title="由项目配置管理，请用 CLI 修改">
+          <Tooltip title="由项目配置管理，请用 CLI 修改" aria-label="由项目配置管理">
             <span>{switchEl}</span>
           </Tooltip>
         )}

@@ -27,22 +27,34 @@
  * onChange 由父组件 SettingsDrawer 接到 store / 写盘动作(后续阶段)。
  */
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import { Button, Drawer, Modal } from 'antd'
+import { Button, Drawer, Modal, Select, message } from 'antd'
+import { WeixinBotPanel } from './WeixinBotPanel.js'
 import { useAppStore } from '../store/useAppStore'
 import { useAgentStore } from '../store/useAgentStore'
-import { requestRestart } from '../lib/systemApi.js'
-import type { OutputStyle } from '../../../shared/settings.js'
+import { useInstanceStore } from '../store/useInstanceStore.js'
+import { requestRestart, requestStop } from '../lib/systemApi.js'
+import type { OutputStyle, WorkMode } from '../../../shared/settings.js'
 
 export type SettingsValue = string | number | boolean
 
 export interface EnumOption {
   value: string
   label: string
+  /** 可选补充描述 — 选项浮层里以第二行小字渲染(Agent 行用)。 */
+  description?: string
 }
 
 export type SettingsRow =
   | { key: string; label: string; kind: 'boolean'; value: boolean }
-  | { key: string; label: string; kind: 'enum'; value: string; options: EnumOption[] }
+  | {
+      key: string
+      label: string
+      kind: 'enum'
+      value: string
+      options: EnumOption[]
+      /** 禁用选择(行级,如 code 工作模式下 Agent 强制 default)。 */
+      disabled?: boolean
+    }
   | {
       key: string
       label: string
@@ -289,7 +301,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
       }
       if (key === 'Enter') {
         e.preventDefault()
-        if (selectedRow?.kind === 'enum') openEnumOverlay(selectedRow)
+        if (selectedRow?.kind === 'enum' && selectedRow.key !== 'workMode' && selectedRow.key !== 'mainAgent') openEnumOverlay(selectedRow)
         else if (selectedRow?.kind === 'number') openNumberEdit(selectedRow)
         return
       }
@@ -384,7 +396,7 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
               const handleRowClick = () => {
                 setSelectedIdx(globalIdx)
                 if (row.kind === 'boolean') toggleBoolean(row)
-                else if (row.kind === 'enum') openEnumOverlay(row)
+                else if (row.kind === 'enum' && row.key !== 'workMode' && row.key !== 'mainAgent') openEnumOverlay(row)
                 else if (row.kind === 'number') openNumberEdit(row)
               }
               return (
@@ -475,6 +487,57 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                         +
                       </Button>
                     </span>
+                  ) : row.key === 'workMode' && row.kind === 'enum' ? (
+                    <Select
+                      size="small"
+                      value={row.value}
+                      options={row.options}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(value) => onChange?.(row.key, value)}
+                      style={{ minWidth: 82, maxWidth: 110 }}
+                      aria-label="选择工作模式"
+                    />
+                  ) : row.key === 'mainAgent' && row.kind === 'enum' ? (
+                    // Agent 用 antd 下拉:dropdown 里每项两行(名称 + 描述),
+                    // 名称用主文字色、描述用小号弱化色;trigger 只显示名称。
+                    // code 工作模式下强制使用 default,下拉禁用(联动见组件内
+                    // workMode ↔ mainAgent effect)。
+                    <Select
+                      size="small"
+                      value={row.value}
+                      options={row.options}
+                      disabled={row.disabled === true}
+                      popupMatchSelectWidth={false}
+                      dropdownStyle={{ minWidth: 280 }}
+                      optionRender={(option) => {
+                        const d = option.data
+                        return (
+                          <div style={{ lineHeight: 1.4 }}>
+                            <div style={{ color: 'var(--text-primary)', fontSize: 13 }}>
+                              {d.label}
+                            </div>
+                            {d.description && (
+                              <div
+                                style={{
+                                  color: 'var(--text-dim-40)',
+                                  fontSize: 11,
+                                  marginTop: 2,
+                                  overflow: 'hidden',
+                                  textOverflow: 'ellipsis',
+                                  whiteSpace: 'nowrap',
+                                }}
+                              >
+                                {d.description}
+                              </div>
+                            )}
+                          </div>
+                        )
+                      }}
+                      onClick={(event) => event.stopPropagation()}
+                      onChange={(value) => onChange?.(row.key, value)}
+                      style={{ minWidth: 100, maxWidth: 140 }}
+                      aria-label="选择 Agent"
+                    />
                   ) : (
                     <span
                       style={{
@@ -543,7 +606,24 @@ export function SettingsList({ schema, onClose, onChange }: SettingsListProps) {
                     setEnumOverlay(null)
                   }}
                 >
-                  {opt.label}
+                  <div style={{ lineHeight: 1.4 }}>{opt.label}</div>
+                  {opt.description && (
+                    <div
+                      style={{
+                        fontSize: 11,
+                        lineHeight: 1.4,
+                        marginTop: 2,
+                        color: isHighlight
+                          ? 'var(--accent-start)'
+                          : 'var(--text-dim-40)',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                        whiteSpace: 'nowrap',
+                      }}
+                    >
+                      {opt.description}
+                    </div>
+                  )}
                 </div>
               )
             })}
@@ -576,12 +656,45 @@ type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 function buildStaticSchema(
   theme: Theme,
   outputStyle: OutputStyle,
+  workMode: WorkMode,
   maxVisibleMessages: number,
   defaultSplitScreen: boolean,
+  enableDynamicWorkflow: boolean,
+  autoUpdate: boolean,
+  mainAgent: string,
+  agentOptions: EnumOption[],
 ): SettingsSchema {
   return [
     {
-      section: 'Permission',
+      section: '工作模式',
+      rows: [
+        {
+          key: 'workMode',
+          label: '工作模式',
+          kind: 'enum',
+          value: workMode,
+          options: [
+            { value: 'code', label: '代码' },
+            { value: 'office', label: '办公' },
+            { value: 'general', label: '通用' },
+          ],
+        },
+        {
+          // 主 Agent 插槽配置选择(内置 + ~/.zai/main-agents/*.js 外置)。
+          // 选项列表由 GET /api/agent/settings 的 mainAgents 动态填充;
+          // 生效时机:systemPrompt 槽对新会话生效、tools 槽即时、mcp 槽需重启。
+          // 与工作模式关联:code 模式只能使用默认 agent(下拉禁用)。
+          key: 'mainAgent',
+          label: 'Agent',
+          kind: 'enum',
+          value: mainAgent,
+          options: agentOptions,
+          disabled: workMode === 'code',
+        },
+      ],
+    },
+    {
+      section: '权限',
       rows: [
         { key: 'autoCompact', label: '自动压缩', kind: 'boolean', value: true },
         { key: 'toolCompact', label: '工具历史压缩', kind: 'boolean', value: true },
@@ -621,7 +734,7 @@ function buildStaticSchema(
       ],
     },
     {
-      section: 'Display',
+      section: '显示',
       rows: [
         {
           key: 'maxVisibleMessages',
@@ -645,7 +758,7 @@ function buildStaticSchema(
       ],
     },
     {
-      section: 'Theme',
+      section: '主题',
       rows: [
         {
           key: 'theme',
@@ -686,7 +799,7 @@ function buildStaticSchema(
       ],
     },
     {
-      section: 'Language',
+      section: '语言',
       rows: [
         {
           key: 'language',
@@ -713,29 +826,148 @@ function buildStaticSchema(
         },
       ],
     },
+    {
+      // 动态工作流 toggle — 默认 OFF (workflow 一次会起几十个 sub-agent,
+      // 烧大量 token,必须由用户主动打开)。
+      // 关闭时 server 端不设 OPENCC_ENABLE_WORKFLOWS → vendor 的
+      // isWorkflowsDisabled() 返回 true → WorkflowTool 从工具池里
+      // 被过滤掉,LLM 完全看不到这个工具(不是"调用被拒",而是 schema
+      // 都不发)。开启时 server 端同步写 process.env,下次 query() 自然生效。
+      section: '工作流',
+      rows: [
+        {
+          key: 'enableDynamicWorkflow',
+          label: '启用动态工作流',
+          kind: 'boolean',
+          value: enableDynamicWorkflow,
+        },
+      ],
+    },
+    {
+      // zai 自身版本自动升级。默认 ON — dev 模式 (ZAI_FROM_GLOBAL_INSTALL
+      // 未设) server 端直接 skip,不影响开发体验。关闭后启动时不再跑
+      // `npm view @zn-ai/zai version` 也不会 spawn npm install -g。
+      // 升级完成后 SSE 推 `app.update.complete` 事件,UpdateNotifier 弹窗
+      // 提示「请重启 zai 以生效」— 仅通知,不自动重启(用户决策)。
+      section: '更新',
+      rows: [
+        {
+          key: 'autoUpdate',
+          label: '自动检测并升级 zai',
+          kind: 'boolean',
+          value: autoUpdate,
+        },
+      ],
+    },
   ]
 }
 
 export default function SettingsDrawer() {
   const open = useAppStore((s) => s.settingsDrawerOpen)
   const close = useAppStore((s) => s.closeSettingsDrawer)
+  const [weixinOpen, setWeixinOpen] = useState(false)
   const theme = useAppStore((s) => s.settingsTheme)
   const setTheme = useAppStore((s) => s.setSettingsTheme)
   const outputStyle = useAppStore((s) => s.outputStyle)
   const setOutputStyle = useAppStore((s) => s.setOutputStyle)
+  const workMode = useAppStore((s) => s.workMode)
+  const setWorkMode = useAppStore((s) => s.setWorkMode)
   const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages)
   const setMaxVisibleMessages = useAppStore((s) => s.setMaxVisibleMessages)
   const defaultSplitScreen = useAppStore((s) => s.defaultSplitScreen)
   const setDefaultSplitScreen = useAppStore((s) => s.setDefaultSplitScreen)
+  const enableDynamicWorkflow = useAppStore((s) => s.enableDynamicWorkflow)
+  const setEnableDynamicWorkflow = useAppStore((s) => s.setEnableDynamicWorkflow)
+  const autoUpdate = useAppStore((s) => s.autoUpdate)
+  const setAutoUpdate = useAppStore((s) => s.setAutoUpdate)
   // 切换 outputStyle 时同步把 transcriptCollapsed 重置为新默认 — 'compact' 切换到
   // 'default' 时立即展开,'default' 切到 'compact' 时立即折叠;避免用户得再点
   // 一次工具栏按钮才生效.
   const setTranscriptCollapsed = useAgentStore((s) => s.setTranscriptCollapsed)
+  // 重启按钮"对接到实例管理的重启":用 instanceContext.port 匹配当前正在
+  // 访问的 instance(而非 supervisor 的 __current__ 占位),调
+  // /api/instances/{id}/restart 走 supervisor 的 stop+start 路径。失败
+  // 时回退到 service restart(/api/system/restart → managed-child IPC →
+  // supervisor respawn),所以即便当前访问的是 __current__ 也能 fall
+  // through 到原始的 system.restarting 链路。详见 useInstanceStore。
+  //
+  // 拉取 instance 列表刻意延迟到 onOk 时触发(modal 确认后),而不是
+  // drawer 打开就拉——这样不会污染"cancel 后 fetch 没被调用"这类测试,
+  // 也避免 drawer 在用户浏览其他设置时就触发一次额外请求。
+  const instances = useInstanceStore((s) => s.instances)
+  const loadInstances = useInstanceStore((s) => s.loadInstances)
+  const currentPort = useAppStore((s) => s.instanceContext?.port ?? null)
+  // 当前正在访问的 instance:用当前 zai 进程的 port 去 instance 列表里
+  // 匹配,匹配上的那一条就是用户浏览器实际访问的 instance(可能是 supervisor
+  // 启动的某个 child,也可能就是 supervisor 自己的 __current__ 条目)。
+  // 匹配不到说明 instanceSupervisor 还没初始化(比如 zai dev),退回到
+  // __current__ 标志位那条。
+  const currentInstance = (() => {
+    if (currentPort == null) return null
+    const byPort = instances.find((s) => s.port === currentPort)
+    if (byPort) return byPort
+    return instances.find((s) => s.isCurrent) ?? null
+  })()
 
+  // 主 Agent 选择:options 与当前值来自 GET /api/agent/settings(mount 时
+  // 拉一次);持久化走 PUT /api/agent/settings/main-agent。
+  // label = agent name,description 单独带出 —— 选项浮层里两行展示(名称 + 描述)。
+  const [mainAgent, setMainAgent] = useState('default')
+  const [agentOptions, setAgentOptions] = useState<EnumOption[]>(() => [
+    { value: 'default', label: 'default' },
+  ])
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, maxVisibleMessages, defaultSplitScreen),
+    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions),
   )
+  // mount 时拉一次 GET /api/agent/settings → 填充 agentOptions + 当前 mainAgent。
+  // destroyOnClose 每次打开都会重新挂载,列表保持新鲜(新增外置 agent 文件后
+  // 重开 drawer 即可看到)。
+  useEffect(() => {
+    let cancelled = false
+    fetch('/api/agent/settings')
+      .then((r) => (r.ok ? r.json() : null))
+      .then((data: Record<string, unknown> | null) => {
+        if (cancelled || !data) return
+        const list = Array.isArray(data.mainAgents)
+          ? (data.mainAgents as Array<{ name: string; description?: string }>)
+          : []
+        if (list.length > 0) {
+          setAgentOptions(
+            list.map((a) => ({
+              value: a.name,
+              label: a.name,
+              description: a.description,
+            })),
+          )
+        }
+        if (typeof data.mainAgent === 'string') setMainAgent(data.mainAgent)
+      })
+      .catch(() => {
+        // swallow — 保持默认 'default' 选项
+      })
+    return () => {
+      cancelled = true
+    }
+  }, [])
+  // 同步 store workMode → schema.workMode 行;同时联动 mainAgent 行禁用态
+  // (code 模式只能使用默认 agent,职场与 Agent 关联配置见组件内 effect)。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'workMode' && r.kind === 'enum') {
+            return { ...r, value: workMode }
+          }
+          if (r.key === 'mainAgent' && r.kind === 'enum') {
+            return { ...r, disabled: workMode === 'code' }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [workMode])
   // 同步 store theme → schema.theme 行(其它行的 value 内部维护)。
   useEffect(() => {
     setSchema((prev) =>
@@ -797,9 +1029,119 @@ export default function SettingsDrawer() {
       })),
     )
   }, [defaultSplitScreen])
+  // 同步 store enableDynamicWorkflow → schema 行。store 是持久化真源,
+  // 这里单向投影,跟 defaultSplitScreen 策略一致。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'enableDynamicWorkflow' && r.kind === 'boolean') {
+            return { ...r, value: enableDynamicWorkflow }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [enableDynamicWorkflow])
+  // 同步 store autoUpdate → schema 行。跟 enableDynamicWorkflow 完全对称:
+  // store 是 settings.json 持久化的真源,单向投影,不改用户输入。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'autoUpdate' && r.kind === 'boolean') {
+            return { ...r, value: autoUpdate }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [autoUpdate])
+  // 同步 mainAgent → schema 行(本地 state,选择后 PUT 持久化)。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'mainAgent' && r.kind === 'enum') {
+            return { ...r, value: mainAgent }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [mainAgent])
+  // 同步 agentOptions → schema 行(拉取 mainAgents 列表后更新 options)。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'mainAgent' && r.kind === 'enum') {
+            return { ...r, options: agentOptions }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [agentOptions])
+
+  // 工作模式 ↔ Agent 关联配置:
+  //   - code:只能使用默认 agent —— 强制切换为 default 并持久化(Agent 下拉同时禁用)
+  //   - office:默认 Office —— 仅当 Agent 仍是 default(未显式选过)时自动切到 office,
+  //     尊重用户显式选择(agent-creator / skill-writer 等保持不动)
+  //   - general:不约束,自由选择
+  // deps 同时监听 mainAgent:用户手动改 Agent 后重算一次约束,但 code 分支在改成
+  // default 后自然终止(幂等),不会造成循环 PUT。
+  useEffect(() => {
+    if (workMode === 'code' && mainAgent !== 'default') {
+      setMainAgent('default')
+      void fetch('/api/agent/settings/main-agent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mainAgent: 'default' }),
+      }).catch(() => {
+        // swallow — 下次 GET 会重新对齐磁盘状态
+      })
+    } else if (workMode === 'office' && mainAgent === 'default') {
+      setMainAgent('office')
+      void fetch('/api/agent/settings/main-agent', {
+        method: 'PUT',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ mainAgent: 'office' }),
+      }).catch(() => {
+        // swallow — 下次 GET 会重新对齐磁盘状态
+      })
+    }
+  }, [workMode, mainAgent])
 
   const handleChange = useCallback(
     (key: string, value: SettingsValue) => {
+      if (key === 'workMode' && typeof value === 'string') {
+        const next = value as WorkMode
+        setWorkMode(next)
+        void fetch('/api/agent/settings/work-mode', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ workMode: next }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
+      // 主 Agent 选择走完整持久化路径。生效时机见设计 spec:systemPrompt
+      // 槽对新会话生效、tools 槽即时、mcp 槽需重启。
+      if (key === 'mainAgent' && typeof value === 'string') {
+        setMainAgent(value)
+        void fetch('/api/agent/settings/main-agent', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ mainAgent: value }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
       // 主题行走完整持久化路径:写 store 让 useEffectiveTheme() 立即生效,
       // 同时 PUT settings.json 跨刷新保存.失败不打断 UI(下次启动仍可重写).
       if (key === 'theme' && typeof value === 'string') {
@@ -856,6 +1198,34 @@ export default function SettingsDrawer() {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })
       }
+      // "启用动态工作流" 走 store + PUT settings.json 持久化路径。
+      // server PUT handler 同步写 process.env.OPENCC_ENABLE_WORKFLOWS,
+      // 下次 query() 触发的 getAllBaseTools() 会把 WorkflowTool 加进
+      // 工具池(或从中过滤掉)。关闭时 WorkflowTool 直接消失 — LLM
+      // 看不到这个工具的 schema,不只是"调用被拒"。
+      if (key === 'enableDynamicWorkflow' && typeof value === 'boolean') {
+        setEnableDynamicWorkflow(value)
+        void fetch('/api/agent/settings/enable-dynamic-workflow', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
+      // zai 自升级 toggle — 写 store 让 settings UI 立即翻牌,PUT
+      // settings.json 让下次启动生效。运行中的 install 不会被中途
+      // 取消,这是 PUT route 注释里说明的 by-design。
+      if (key === 'autoUpdate' && typeof value === 'boolean') {
+        setAutoUpdate(value)
+        void fetch('/api/agent/settings/auto-update', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ value }),
+        }).catch(() => {
+          // swallow — 下次 GET 会重新对齐磁盘状态
+        })
+      }
       // 其它行目前只更新内部 schema state(阶段 2 接真实写盘)
       setSchema((prev) =>
         prev.map((s) => ({
@@ -876,20 +1246,51 @@ export default function SettingsDrawer() {
         })),
       )
     },
-    [setTheme, setOutputStyle, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen],
+    [setTheme, setOutputStyle, setWorkMode, setTranscriptCollapsed, setMaxVisibleMessages, setDefaultSplitScreen, setEnableDynamicWorkflow, setAutoUpdate],
   )
+
+  // 整个"服务"section 仅在「instance 子实例」(instance manager 派生的子进程,
+  // 带 ZAI_INSTANCE_ID)时显示:
+  //   - instance 子实例的「重启」走 /api/system/restart → IPC 'restart' 发给
+  //     instanceSupervisor 所在进程,instanceSupervisor 收到后 stop+start
+  //     重新拉起该实例(见 instanceSupervisor.ts child.on('message') 的 restart
+  //     分支);「关闭」走 /api/system/stop → cleanupAndExit,进程退出后由
+  //     exit handler 收尾。两条按钮只影响当前这一个子实例。
+  //   - 顶层受管服务(supervisor 直接派生的 child,无 ZAI_INSTANCE_ID)是
+  //     supervisor 的管理入口:重启它相当于重启整个实例群(supervisor 拒绝
+  //     重启自己,fallback 走 system restart 会连带其他实例),关闭它等于关闭
+  //     所有实例,单实例的"重启/关闭"控制不该暴露在管理入口上。
+  //   - 独立 zai-server(ZAI_SUPERVISOR_PID 未设)没有 supervisor 可以委托,
+  //     调 /api/system/stop / restart 会直接 409 'not_managed',按钮没用。
+  //
+  // isManagedChild 由 Layout 在 GET /api/system hydrate 时灌进 instanceContext,
+  // 详见 useAppStore + Layout.tsx。initState 时(instanceContext 还没 hydrate)
+  // 这里取 undefined → 不显示,这是预期:用户冷启动首屏不应有按钮。
+  const isManagedChild = useAppStore((s) => s.instanceContext?.isManagedChild === true)
+  const instanceId = useAppStore((s) => s.instanceContext?.instanceId ?? null)
+  const showServiceSection = isManagedChild && instanceId != null
 
   if (!open) return null
 
   return (
+    <>
     <Drawer
       title="设置"
-      width={480}
-      placement="right"
+      width={400}
+      placement="left"
       open={open}
       onClose={close}
       destroyOnClose
       data-testid="settings-drawer"
+      extra={
+        <Button
+          size="small"
+          onClick={() => setWeixinOpen(true)}
+          data-testid="open-weixin-bot"
+        >
+          微信机器人
+        </Button>
+      }
       styles={{ body: { padding: '12px 16px' } }}
       footer={
         <div style={{ fontSize: 11, color: 'var(--text-dim-45)' }}>
@@ -897,7 +1298,7 @@ export default function SettingsDrawer() {
         </div>
       }
     >
-      {open && (
+      {open && showServiceSection && (
         <div
           data-testid="settings-service-section"
           style={{
@@ -908,25 +1309,100 @@ export default function SettingsDrawer() {
           }}
         >
           <div style={{ fontWeight: 600, marginBottom: 8 }}>服务</div>
-          <Button
-            danger
-            onClick={() => {
-              Modal.confirm({
-                title: '重启服务?',
-                content: '将会中断当前对话与后台任务,确定?',
-                okText: '重启',
-                cancelText: '取消',
-                onOk: async () => {
-                  await requestRestart('user_action')
-                },
-              })
-            }}
-          >
-            重启服务
-          </Button>
+          <div style={{ display: 'flex', gap: 8, flexWrap: 'wrap' }}>
+            <Button
+              danger
+              onClick={() => {
+                Modal.confirm({
+                  title: '重启服务?',
+                  content: '将会中断当前对话与后台任务,确定?',
+                  okText: '重启',
+                  cancelText: '取消',
+                  onOk: async () => {
+                    // 优先走实例管理重启:从 useInstanceStore 拿当前正在
+                    // 访问的 instance,调 /api/instances/{id}/restart(走
+                    // supervisor 的 stop+start 路径,与实例管理页面"重启"
+                    // 按钮完全一致的逻辑)。这条路径在 zai start --managed
+                    // 下可用,且对 supervisor 启动的其他 instance 也成立。
+                    //
+                    // Fallback 触发条件:
+                    //   - 当前 instance 是 supervisor 自己的 __current__,
+                    //     supervisor 拒绝重启自己(避免自杀循环)
+                    //   - store 里没找到匹配 port 的 instance
+                    //   - 实例 API 返回 4xx/5xx
+                    // 全部走 /api/system/restart(managed-child IPC →
+                    // supervisor respawn),与原先"重启服务"按钮语义一致。
+                    //
+                    // store 空时按需触发一次拉取——日常 layout hydrate 已
+                    // 拉过,这里只兜底冷启动/缓存失败的边角场景。
+                    let target = currentInstance
+                    if (!target) {
+                      await loadInstances().catch(() => {})
+                      const fresh = useInstanceStore.getState().instances
+                      const port = useAppStore.getState().instanceContext?.port ?? null
+                      target = port != null ? fresh.find((s) => s.port === port) ?? null : null
+                      if (!target) target = fresh.find((s) => s.isCurrent) ?? null
+                    }
+                    if (target && target.id !== '__current__') {
+                      try {
+                        const res = await fetch(
+                          `/api/instances/${encodeURIComponent(target.id)}/restart`,
+                          { method: 'POST' },
+                        )
+                        if (res.ok) return
+                        // 4xx/5xx → fallback 到 service restart
+                        const errBody = (await res.json().catch(() => ({}))) as {
+                          error?: string
+                        }
+                        message.warning(
+                          errBody.error
+                            ? `实例重启失败,回退到服务重启: ${errBody.error}`
+                            : '实例重启失败,回退到服务重启',
+                        )
+                      } catch (err) {
+                        message.warning(
+                          `实例重启请求失败,回退到服务重启: ${
+                            err instanceof Error ? err.message : String(err)
+                          }`,
+                        )
+                      }
+                    }
+                    await requestRestart('user_action')
+                  },
+                })
+              }}
+            >
+              重启服务
+            </Button>
+            <Button
+              danger
+              data-testid="settings-shutdown-service"
+              onClick={() => {
+                Modal.confirm({
+                  title: '关闭服务?',
+                  content: '将停止整个 zai 进程,需要手动重启才能恢复访问。',
+                  okText: '关闭',
+                  cancelText: '取消',
+                  okButtonProps: { danger: true },
+                  onOk: async () => {
+                    // 与"重启服务"不同:关闭服务没有实例级别 fallback,
+                    // 没有 fallback 路径——浏览器本身就在这个被关闭的 instance 上,
+                    // 无法在它自己请求到达后还路由回 supervisor。直接走
+                    // /api/system/stop,服务端 drain in-flight → exit →
+                    // supervisor 看到无 pendingRestart → 正常退出。
+                    await requestStop()
+                  },
+                })
+              }}
+            >
+              关闭服务
+            </Button>
+          </div>
         </div>
       )}
       <SettingsList schema={schema} onClose={close} onChange={handleChange} />
     </Drawer>
+    <WeixinBotPanel open={weixinOpen} onClose={() => setWeixinOpen(false)} />
+    </>
   )
 }

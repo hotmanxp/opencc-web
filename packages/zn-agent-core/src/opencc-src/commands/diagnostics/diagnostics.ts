@@ -53,7 +53,7 @@ export async function runDiagnosticsCommand(
 
   if (status.status === 'not-started') {
     return text(
-      'LSP diagnostics unavailable: LSP is not initialized. OpenCC initializes LSP only after workspace trust is established.',
+      'LSP diagnostics unavailable: LSP is not initialized. Z.Ai initializes LSP only after workspace trust is established.',
     )
   }
   if (status.status === 'pending') {

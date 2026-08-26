@@ -40,7 +40,7 @@ import { getCachedPowerShellPath } from './shell/powershellDetection.js'
 import { createPowerShellProvider } from './shell/powershellProvider.js'
 import type { ShellProvider, ShellType } from './shell/shellProvider.js'
 import { subprocessEnv } from './subprocessEnv.js'
-import { posixPathToWindowsPath } from './windowsPaths.js'
+import { posixPathToWindowsPath, resolveGitBashPath } from './windowsPaths.js'
 
 const DEFAULT_TIMEOUT = 30 * 60 * 1000 // 30 minutes
 
@@ -98,6 +98,21 @@ export async function findSuitableShell(): Promise<string> {
 
   // Try to locate shells using which (uses Bun.which when available)
   const [zshPath, bashPath] = await Promise.all([which('zsh'), which('bash')])
+
+  // On Windows, auto-discover Git Bash instead of relying on SHELL being
+  // pre-set by init.ts (setShellIfWindows) or bash being on PATH. The POSIX
+  // fallback paths below don't exist on Windows, so without this a Git Bash
+  // install at the default location is never found and shell resolution
+  // fails with "No suitable shell found". resolveGitBashPath() returns null
+  // (instead of findGitBashPath()'s hard process.exit) when Git is missing,
+  // so this gracefully falls through to the shared search below.
+  if (getPlatform() === 'windows') {
+    const gitBashPath = resolveGitBashPath()
+    if (gitBashPath && isExecutable(gitBashPath)) {
+      logForDebugging(`Using Git Bash: ${gitBashPath}`)
+      return gitBashPath
+    }
+  }
 
   // Populate shell paths from which results and fallback locations
   const shellPaths = ['/bin', '/usr/bin', '/usr/local/bin', '/opt/homebrew/bin']

@@ -1,30 +1,15 @@
 {
   "name": "@zn-ai/zn-agent-core",
-  "version": "0.2.23",
+  "version": "0.4.9",
   "description": "zai agent runtime core",
   "type": "module",
-  "main": "dist/index.js",
-  "types": "dist/index.d.ts",
+  "main": "dist/opencc-core.mjs",
+  "types": "dist/bundle-entry.d.ts",
   "exports": {
     ".": {
-      "types": "./dist/index.d.ts",
-      "default": "./dist/index.js"
+      "types": "./dist/bundle-entry.d.ts",
+      "default": "./dist/opencc-core.mjs"
     },
-    "./runtime": "./dist/runtime/index.js",
-    "./commands": "./dist/commands/index.js",
-    "./bashTracker": "./dist/tools/BashTool/bashTracker.js",
-    "./taskListStore": "./dist/tools/Tasks/TaskListStore.js",
-    "./agents/memoryLoader": "./dist/agents/memoryLoader.js",
-    "./agents/memoryWatcher": "./dist/agents/memoryWatcher.js",
-    "./compat/vendor/ripgrep": "./dist/compat/vendor/ripgrep.js",
-    "./opencc-core": "./dist/opencc-core.mjs",
-    "./opencc-src/permissions": "./dist/opencc-src/types/permissions.js",
-    "./opencc-src/server": "./dist/opencc-src/server/index.js",
-    "./opencc-server": {
-      "types": "./dist/opencc-src/server/index.d.ts",
-      "default": "./dist/opencc-src/server/index.js"
-    },
-    "./compat/permissions": "./dist/compat/permissions.js",
     "./package.json": "./package.json"
   },
   "files": [
@@ -38,7 +23,7 @@
     "rg-win32-x64": "vendor/ripgrep/rg-win32-x64.exe"
   },
   "scripts": {
-    "build": "node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && node scripts/tsc-with-cache.mjs tsconfig.contract-tests.json && node scripts/tsc-with-cache.mjs tsconfig.consumer.json && node scripts/copy-runtime-assets.mjs && node scripts/verify-server-types-self-contained.mjs && find dist -name '*.map' -delete",
+    "build": "node scripts/ensure-fresh-tsc.mjs && node --experimental-strip-types scripts/bundle-opencc.ts && tsc -b && node scripts/tsc-with-cache.mjs tsconfig.contract-tests.json && node scripts/tsc-with-cache.mjs tsconfig.consumer.json && node scripts/copy-runtime-assets.mjs && node scripts/prune-dead-dist.mjs && node scripts/verify-server-types-self-contained.mjs",
     "dev": "tsc -b --watch",
     "typecheck": "tsc -b --noEmit && tsc --noEmit -p tsconfig.contract-tests.json && tsc --noEmit -p tsconfig.consumer.json && node scripts/verify-server-types-self-contained.mjs",
     "typecheck:contract-tests": "tsc --noEmit -p tsconfig.contract-tests.json",
@@ -50,6 +35,13 @@
     "bundle": "node --experimental-strip-types scripts/bundle-opencc.ts"
   },
   "dependencies": {
+    "@orama/orama": "^3.1.18",
+    "@orama/plugin-data-persistence": "^3.1.18",
+    "fflate": "0.8.3",
+    "sharp": "^0.33.5",
+    "zod": "^3.25.76"
+  },
+  "devDependencies": {
     "@alcalzone/ansi-tokenize": "^0.1.3",
     "@anthropic-ai/mcpb": "^2.1.2",
     "@anthropic-ai/sandbox-runtime": "^0.0.67",
@@ -63,8 +55,12 @@
     "@opentelemetry/sdk-metrics": "^2.9.0",
     "@opentelemetry/sdk-trace-base": "^2.9.0",
     "@opentelemetry/semantic-conventions": "^1.28.0",
-    "@orama/orama": "^3.1.18",
-    "@orama/plugin-data-persistence": "^3.1.18",
+    "@types/bun": "^1.1.13",
+    "@types/js-yaml": "^4.0.9",
+    "@types/lodash": "^4.17.24",
+    "@types/lodash-es": "^4.17.12",
+    "@types/node": "22.10.0",
+    "@types/react": "^18.3.0",
     "acorn": "^8.18.0",
     "ajv": "^8.18.0",
     "asciichart": "^1.5.25",
@@ -78,9 +74,9 @@
     "diff": "^9.0.0",
     "emoji-regex": "^10.6.0",
     "env-paths": "^4.0.0",
+    "esbuild": "0.28.1",
     "eventsource-parser": "^1.1.2",
     "execa": "^9.5.1",
-    "fflate": "0.8.3",
     "figures": "^6.1.0",
     "fuse.js": "^7.5.0",
     "get-east-asian-width": "^1.6.0",
@@ -97,37 +93,26 @@
     "marked": "^14.1.3",
     "p-map": "^7.0.6",
     "picomatch": "^4.0.5",
+    "preact": "^10.29.8",
     "proper-lockfile": "^4.1.2",
     "qrcode": "^1.5.4",
     "react": "^19.2.8",
     "react-compiler-runtime": "^1.0.0",
-    "react-dom": "^19.2.8",
     "react-reconciler": "^0.33.0",
     "semver": "^7.8.5",
-    "sharp": "^0.33.5",
     "shell-quote": "^1.10.0",
     "signal-exit": "^4.1.0",
     "strip-ansi": "^7.2.0",
     "supports-hyperlinks": "^4.5.0",
     "tree-kill": "^1.2.2",
     "type-fest": "^5.8.0",
+    "typescript": "5.6.3",
     "undici": "^8.9.0",
     "usehooks-ts": "^3.1.1",
-    "vscode-languageserver-protocol": "^3.18.2",
+    "vitest": "^2.1.0",
     "wrap-ansi": "^10.0.0",
     "ws": "^8.21.1",
     "xss": "^1.0.15",
-    "yaml": "^2.6.0",
-    "zod": "^3.25.76"
-  },
-  "devDependencies": {
-    "@types/bun": "^1.1.13",
-    "@types/js-yaml": "^4.0.9",
-    "@types/lodash-es": "^4.17.12",
-    "@types/node": "22.10.0",
-    "@types/react": "^18.3.0",
-    "esbuild": "0.28.1",
-    "typescript": "5.6.3",
-    "vitest": "^2.1.0"
+    "yaml": "^2.6.0"
   }
 }

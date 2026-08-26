@@ -83,7 +83,7 @@ describe('AgentTool description rendering — zai compat inline agent list', () 
     process.env.OPENCC_CONFIG_DIR = fixtureConfigDir
 
     installMacroStub()
-    const bundle = await import('@zn-ai/zn-agent-core/opencc-core')
+    const bundle = await import('@zn-ai/zn-agent-core')
     AgentTool = bundle.AgentTool
     getAgentDefinitionsWithOverrides = bundle.getAgentDefinitionsWithOverrides
   }, TIMEOUT)
@@ -115,7 +115,7 @@ describe('AgentTool description rendering — zai compat inline agent list', () 
       const types = agents.map((a: any) => a.agentType)
       expect(types).toContain('Explore')
       expect(types).toContain('general-purpose')
-      // User-defined agents from ~/.claude/agents should also surface.
+      // User-defined agents from ~/.zai/agents should also surface.
       // (Don't pin a specific name — just confirm at least one custom agent.)
       const hasCustom = agents.some((a: any) => a.source !== 'built-in')
       expect(hasCustom).toBe(true)

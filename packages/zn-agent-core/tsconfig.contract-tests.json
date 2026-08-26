@@ -1,5 +1,5 @@
 {
-  "//": "Typecheck seam for compile-time contract assertions in test/. The main tsconfig.json excludes `test/` and `**/*.test.ts` (line 22-23) — so the `satisfies`, assignability probes, and literal OpenccServerEvent bindings in openccRuntime-contract.test.ts never reach tsc. This dedicated config typechecks ONLY the contract test files (plus their imports), so the assignability probes in those tests actually fail the build when the contract drifts. Driven by the `typecheck:contract-tests` npm script in package.json — run via `pnpm --filter @zn-ai/zn-agent-core typecheck:contract-tests` (also invoked as a pre-commit step in CI). The server module (`src/opencc-src/server/*`) is SELF-CONTAINED — it does not import from `compat/runtime/events.ts` or `compat/transcript/types.ts` anymore, so those compat modules are not in this include list. The `bun:bundle` and `src/*` path mappings are kept here only because the test file imports from `@zn-ai/zn-agent-core/opencc-server` and the package's underlying tsconfig.json uses those paths for the opencc vendor tree.",
+  "//": "Typecheck seam for compile-time contract assertions in test/. The main tsconfig.json excludes `test/` and `**/*.test.ts` (line 22-23) — so the `satisfies`, assignability probes, and literal OpenccServerEvent bindings in openccRuntime-contract.test.ts never reach tsc. This dedicated config typechecks ONLY the contract test files (plus their imports), so the assignability probes in those tests actually fail the build when the contract drifts. Driven by the `typecheck:contract-tests` npm script in package.json — run via `pnpm --filter @zn-ai/zn-agent-core typecheck:contract-tests` (also invoked as a pre-commit step in CI). The `@zn-ai/zn-agent-core` main entry resolves to the BUILT `dist/bundle-entry.d.ts` (same mapping as tsconfig.consumer.json) so the probes check the published d.ts — which bundle-opencc produces from the source serverTypes.ts — without pulling the vendor `src/opencc-src` tree into tsc (its `MACRO.*` globals and stripped optional deps only exist at runtime/bundle time, not under tsc). The `bun:bundle` mapping is kept for the vendor tree's `bun:feature` references that surface in `openccRuntime-contract.test.ts`'s imports; `src/*` is dropped because nothing here resolves source-vendor paths anymore.",
 
   "compilerOptions": {
     "target": "ES2023",
@@ -17,20 +17,18 @@
     "baseUrl": ".",
     "paths": {
       "bun:bundle": ["./src/compat/runtime/bun-shim.ts"],
-      "src/*": ["./src/opencc-src/*"]
+      "@zn-ai/zn-agent-core": ["./dist/bundle-entry.d.ts"]
     }
   },
 
   "include": [
     "test/unit/server/openccRuntime-contract.test.ts",
-    "src/opencc-src/server/serverTypes.ts",
-    "src/opencc-src/server/index.ts",
     "src/compat/runtime/bun-shim.ts"
   ],
 
   "exclude": [
     "node_modules",
     "dist",
-    "src/opencc-src"
+    "test/smoke.test.ts"
   ]
 }

@@ -3,11 +3,20 @@ import { z } from 'zod'
 const Base = z.object({
   eventId: z.string(),
   ts: z.number(),
+  // 服务端全局单调递增顺序号 — 消息合并 / 重连补发 / 投影合并的唯一基准。
+  // 由 eventBus.emit 分配（emit 时省略则自动填充）。只保证单进程内单调，
+  // 跨重启由 eventId + history replay 兜底，不得当持久化 ID 用。
+  seq: z.number(),
 })
 
 const RuntimeEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('runtime.started'),
-             sessionId: z.string(), turnIndex: z.number() }),
+             sessionId: z.string(), turnIndex: z.number(),
+             // zai patch (2026-08-09): 把 metrics 提升到 runtime.started
+             // 上推送,每次 LLM 调用起点就刷新一次,不再等 runtime.done
+             // (整条 prompt 跑完才发一次)。详见 routes/agent.ts 注释。
+             apiRequestCount: z.number().optional(),
+             contextTokens: z.number().optional() }),
   z.object({ ...Base.shape, type: z.literal('runtime.delta'),
              sessionId: z.string(), turnIndex: z.number(),
              delta: z.string() }),
@@ -38,7 +47,17 @@ const RuntimeEvent = z.discriminatedUnion('type', [
              output: z.unknown() }),
   z.object({ ...Base.shape, type: z.literal('runtime.done'),
              sessionId: z.string(), turnIndex: z.number(),
-             usage: z.object({ input: z.number(), output: z.number() }).optional() }),
+             usage: z.object({ input: z.number(), output: z.number() }).optional(),
+             // zai patch (2026-08-09): 该 session 截至本次 runtime.done 为止
+             // 累计打给 AI provider 的请求次数(包含子代理/通知 query/非流式
+             // fallback;不含 retry,详见 vendor sessionApiCounter.ts 注释)。
+             // 前端 useAgentStore 用来显示"API 请求次数"行。
+             apiRequestCount: z.number().optional(),
+             // zai patch (2026-08-09): 最近一次 API 调用的 total context
+             // tokens(input + cache_creation + cache_read,不含 output)。
+             // session 首次 runtime.done 之前为 undefined,前端用 "—" 显示。
+             // 用于会话信息面板"当前上下文大小"行。
+             contextTokens: z.number().optional() }),
   z.object({ ...Base.shape, type: z.literal('runtime.aborted'),
              sessionId: z.string(), turnIndex: z.number(),
              reason: z.string() }),
@@ -159,7 +178,22 @@ const SystemEvent = z.discriminatedUnion('type', [
   z.object({ ...Base.shape, type: z.literal('system.restarting'),
              reason: z.enum(['user_action','auto_recovery','update']),
              deadlineMs: z.number() }),
+  z.object({ ...Base.shape, type: z.literal('system.stopping'),
+             deadlineMs: z.number() }),
   z.object({ ...Base.shape, type: z.literal('system.restart.canceled') }),
+  // app.update.* — zai 自身版本自动升级通道。启动时 `maybeAutoUpdate`
+  // (services/updater.ts) 在后台跑 `npm view @zn-ai/zai version` →
+  // 比较 → 必要时 `npm install -g`,全程异步,通过这些事件把阶段
+  // 同步给前端。payload 故意不带 sessionId(纯 system 级事件),
+  // eventBus.isGlobalEvent() 必须显式登记才能跨 sid 广播。
+  z.object({ ...Base.shape, type: z.literal('app.update.checking') }),
+  z.object({ ...Base.shape, type: z.literal('app.update.installing'),
+             from: z.string(), to: z.string() }),
+  z.object({ ...Base.shape, type: z.literal('app.update.complete'),
+             from: z.string(), to: z.string() }),
+  z.object({ ...Base.shape, type: z.literal('app.update.failed'),
+             from: z.string().optional(), to: z.string().optional(),
+             error: z.string() }),
 ])
 
 // state.* — 服务端 in-process StateChangeBus 经 zai server bridge 翻译后 emit。
@@ -207,6 +241,143 @@ const InstanceEvent = z.discriminatedUnion('type', [
   }),
 ])
 
+// queue.* — 每 session 的消息排队状态快照（对话进行中提交的 prompt 进入后端
+// per-session 串行队列, 排队预览 + 状态机依赖此事件）。sid-scoped: 带
+// sessionId, eventBus 按 sid 过滤 + historyBySid replay, 刷新后前端可恢复
+// 排队状态。pending 为等待中命令的 {id, text} 列表（不含正在执行的那条）。
+const QueueEvent = z.discriminatedUnion('type', [
+  z.object({
+    ...Base.shape,
+    type: z.literal('queue.changed'),
+    sessionId: z.string(),
+    running: z.boolean(),
+    queueLength: z.number(),
+    pending: z.array(z.object({ id: z.string(), text: z.string() })),
+  }),
+])
+
+// command.* — 命令生命周期埋点。/api/agent/command 入口发 command.run,
+// 三处出口(local call / prompt branch / skill fallthrough / exception)各自
+// 发 command.done,共享同一 commandId 配对。设计借鉴 dsh `command/run` +
+// `command/done` 模式,用于会话日志、调试、慢命令分析。
+//
+// 决策(2026-08-16):
+// - 归 `command.*` group,与 session.* / job.* / prompt.* 同级(语义集中,避免
+//   堆到 system.* 里变成杂项)。isGlobalEvent 同步登记,跨 sid 广播;前端
+//   NAMED_EVENT_TYPES 同步加,否则 EventSource 静默丢。
+// - `ts` 字段手动填 Date.now():run.ts = 触发瞬间,done.ts = 结束瞬间;
+//   durationMs = done.ts - run.ts,精确测量而非依赖 eventBus 自动填充。
+// - args 1KB 截断:超过 MAX_ARGS_LENGTH 时 args 截断到 1024 bytes,加
+//   argsTruncated:true 标记,防止 1MB 文本注入把 history/context 撑爆。
+// - trigger: 'user' = /cmd 直接调用, 'skill' = skill fallthrough;
+//   后续 AI 内部主动跑命令再加 'agent'。
+const CommandEvent = z.discriminatedUnion('type', [
+  z.object({
+    ...Base.shape,
+    type: z.literal('command.run'),
+    sessionId: z.string(),
+    // uuid, run/done 配对 (crypto.randomUUID() 生成,单进程全局唯一)
+    commandId: z.string(),
+    // 命令名, e.g. 'compact' / 'handoff' / 'unknown' (cmd.get 没找到时空字串)
+    name: z.string(),
+    // 原始 args 字符串(已 1KB 截断, 截断时同时设 argsTruncated:true)
+    args: z.string(),
+    argsTruncated: z.boolean().optional(),
+    trigger: z.enum(['user', 'skill']),
+    // 触发瞬间, 命令进入路由时手动填 Date.now()
+    ts: z.number(),
+  }),
+  z.object({
+    ...Base.shape,
+    type: z.literal('command.done'),
+    sessionId: z.string(),
+    commandId: z.string(),
+    name: z.string(),
+    // 出口类型: 'cleared' / 'compacted' / 'status' / 'message' / 'prompt' /
+    // 'error' / 'unknown'。union 与 routes/command.ts 的 res.json 类型严格
+    // 对齐,新增 kind 时必须同步这里(以及 routes/command.ts 的 res.json),
+    // zod 编译期拦截飘移。
+    result: z.enum([
+      'cleared',
+      'compacted',
+      'status',
+      'message',
+      'prompt',
+      'error',
+      'unknown',
+    ]),
+    durationMs: z.number(),
+    // 异常时填充,result='error' 时必填
+    error: z.string().optional(),
+    // 结束瞬间, 手动填 Date.now()
+    ts: z.number(),
+  }),
+])
+
+// stream/error — 结构化帧级错误。server 在 SSE 写入中途崩溃 / 业务侧捕获
+// 未预期异常且无法继续推送时，发一个闭合 code 的错误帧再关闭连接。
+// code 为闭合 union，前端按 code 路由，新错误类型无需字符串匹配。
+// 纯 server→client 推送，无 sid（可选 sessionId），isGlobalEvent 登记为全局。
+const RpcErrorCode = z.enum([
+  'internal',
+  'bad-request',
+  'session-not-found',
+  'session-conflict',
+  'model-unavailable',
+  'timeout',
+  'cancelled',
+  'agent-busy',
+  'stream-write-failed',
+  'invalid-response',
+])
+
+const StreamErrorEvent = z.object({
+  ...Base.shape,
+  type: z.literal('stream/error'),
+  error: z.object({
+    code: RpcErrorCode,
+    message: z.string(),
+    details: z.record(z.unknown()).default({}),
+  }),
+})
+
+// weixin.inbound — 微信入站消息事件,sid-scoped (sessionId 命名约定:
+// `weixin:<accountId>:<chatType>:<chatId>`)。B3 阶段微信适配器
+// (services/weixinBot/WeixinAdapter.ts) 解析 iLink long-poll 消息后 emit,
+// 推给 SSE → Web UI InboxPreview,以及对端镜像订阅者。B3 阶段的
+// WeixinBotManager 通过订阅此事件 + eventBus 的 runtime.* 出站事件,
+// 完成双向桥。详见 docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md B3。
+const WeixinInboundEvent = z.object({
+  ...Base.shape,
+  type: z.literal('weixin.inbound'),
+  sessionId: z.string(),
+  accountId: z.string(),
+  chatType: z.enum(['dm', 'group']),
+  chatId: z.string(),
+  senderId: z.string(),
+  text: z.string(),
+  // 本地缓存路径(已下载 + AES-128-ECB 解密)
+  mediaPaths: z.array(z.string()).default([]),
+  mediaTypes: z.array(z.string()).default([]),
+  messageId: z.string(),
+  contextToken: z.string().nullable(),
+  // iLink 原始 payload,留作调试
+  raw: z.unknown().optional(),
+})
+
+// session/projection — host 算完的派生值快照按 key 整体推送（不是 diff）。
+// client 只做 higher-seq-wins 合并（seq 即投影单元的 watermark，复用全局
+// 事件 seq：emit 省略时由 eventBus 分配）。重连后 host 重算整体重发，
+// client 无需关心合并。
+const ProjectionEvent = z.object({
+  ...Base.shape,
+  type: z.literal('session/projection'),
+  sessionId: z.string(),
+  key: z.string().min(1),
+  value: z.unknown(), // host 侧 schema 已校验；此处保持 wide
+  seq: z.number().int().nonnegative(), // 投影单元的 watermark，higher-seq-wins
+})
+
 export const ServerEvent = z.discriminatedUnion('type', [
   ...RuntimeEvent.options,
   ...SessionEvent.options,
@@ -215,5 +386,10 @@ export const ServerEvent = z.discriminatedUnion('type', [
   ...SystemEvent.options,
   ...StateEvent.options,
   ...InstanceEvent.options,
+  ...QueueEvent.options,
+  ...CommandEvent.options,
+  WeixinInboundEvent,
+  StreamErrorEvent,
+  ProjectionEvent,
 ])
 export type ServerEvent = z.infer<typeof ServerEvent>

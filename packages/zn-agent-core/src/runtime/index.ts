@@ -1,4 +1,6 @@
-// @zn-ai/zn-agent-core/runtime — public subpath entry.
+// Runtime compat entry — aggregated into the package main entry via
+// bundle-entry.ts (the old `@zn-ai/zn-agent-core/runtime` subpath is
+// gone; consumers import from `@zn-ai/zn-agent-core`).
 //
 // The original implementation re-exported `query`, `QueryEngine`, and
 // `registerProcessOutputErrorHandlers` from `opencc-src/`. That pulled in the

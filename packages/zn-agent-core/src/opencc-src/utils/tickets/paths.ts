@@ -4,7 +4,7 @@ import path from 'node:path'
 
 export const TICKET_LIST_PATH: string = path.join(
   os.homedir(),
-  '.claude',
+  '.zai',
   'git-flow',
   'ticket-list.json',
 )

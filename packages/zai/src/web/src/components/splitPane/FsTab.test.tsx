@@ -1,6 +1,11 @@
 // @vitest-environment happy-dom
-import { describe, it, expect, vi } from 'vitest';
-import { render, screen, fireEvent, waitFor } from '@testing-library/react';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { render, screen, fireEvent, waitFor, act } from '@testing-library/react';
+
+beforeEach(() => {
+  // 清掉拖动宽度 / lock 状态, 避免测试间 localStorage 泄漏导致初始值非默认.
+  localStorage.clear();
+});
 
 vi.mock('./useFsList.js', () => ({ useFsList: vi.fn() }));
 vi.mock('./useFsFile.js', () => ({ useFsFile: vi.fn() }));
@@ -1289,5 +1294,233 @@ it('刷新会重拉根目录及已展开的子目录,而不是只刷新根节点
     });
   } finally {
     vi.unstubAllGlobals();
+  }
+});
+
+// --- Task N: file-tree ↔ preview 拖动分隔条 (与 SplitPane 一致) ---
+
+// happy-dom 不实现 layout, clientWidth 默认 0. 拖动逻辑用 clientWidth 折算
+// px → pct, 必须 mock 一个非零值才能让 delta 计算有数值.
+//
+// 关键 (修复的核心): 拖动换算的分母是「父容器宽度」(parentElement.clientWidth),
+// 不是 fs-tree 自身宽度. 所以这里要区分两个元素:
+//   - fs-tree 自身 (data-testid="fs-tree"): 返回 tree (40% @ 800 容器 = 320)
+//   - 其余元素 (父 flex 容器): 返回 container (800)
+// 旧实现把 fs-tree 自身的 clientWidth (320) 当分母 → 80px 会算出 25pct →
+// 65% (放大 2.5 倍, 鼠标对不上); 修复后读容器 800 → 80px = 10pct → 50%,
+// 才 1:1. mock 区分两者, 才让"分母取错"的回归能被测试抓住.
+function mockFsTreeClientWidth(opts: { tree?: number; container?: number } = {}): () => void {
+  const tree = opts.tree ?? 320;        // fs-tree 自身宽度 (40% @ 800 容器)
+  const container = opts.container ?? 800; // 父 flex 容器宽度
+  const original = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientWidth');
+  Object.defineProperty(HTMLElement.prototype, 'clientWidth', {
+    configurable: true,
+    get(this: HTMLElement) {
+      if (this.getAttribute('data-testid') === 'fs-tree') return tree;
+      return container;
+    },
+  });
+  return () => {
+    if (original) {
+      Object.defineProperty(HTMLElement.prototype, 'clientWidth', original);
+    } else {
+      // @ts-expect-error cleanup when there was no original descriptor
+      delete HTMLElement.prototype.clientWidth;
+    }
+  };
+}
+
+// onFsHandleMouseDown 在 window 上注册原生 mousemove/mouseup listener (不是
+// React 合成事件), fireEvent.mouseMove(window, ...) 走 React 合成事件路径不会
+// 触发原生 listener. 用 dispatchEvent + new MouseEvent 直接派发原生事件.
+function dispatchNativeMouse(target: EventTarget, type: 'mousemove' | 'mouseup', clientX = 0): void {
+  target.dispatchEvent(new MouseEvent(type, { bubbles: true, clientX }));
+}
+
+it('fs-tree 默认宽度 40% (空 localStorage)', () => {
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [] },
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  render(<FsTab cwd="/repo" />);
+  const tree = screen.getByTestId('fs-tree') as HTMLElement;
+  expect(tree.style.width).toBe('40%');
+});
+
+it('fs-tree 宽度从 localStorage 恢复', () => {
+  localStorage.setItem('zai.fsTab.treeWidthPct', '65');
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [] },
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  render(<FsTab cwd="/repo" />);
+  const tree = screen.getByTestId('fs-tree') as HTMLElement;
+  expect(tree.style.width).toBe('65%');
+});
+
+it('fs-tree 宽度 clamp 在 [15, 85] 范围 (localStorage 越界值被 clamp)', () => {
+  // 5 < MIN(15) → 15; 99 > MAX(85) → 85
+  localStorage.setItem('zai.fsTab.treeWidthPct', '5');
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [] },
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  const { unmount } = render(<FsTab cwd="/repo" />);
+  expect((screen.getByTestId('fs-tree') as HTMLElement).style.width).toBe('15%');
+  unmount();
+
+  localStorage.setItem('zai.fsTab.treeWidthPct', '99');
+  render(<FsTab cwd="/repo" />);
+  expect((screen.getByTestId('fs-tree') as HTMLElement).style.width).toBe('85%');
+});
+
+it('fs-preview 默认 flex: 1 (填满剩余空间, 不再硬编码 60%)', () => {
+  // Regression: fs-preview 之前是 `flex: '0 0 60%'`. 改成 flex:1 让它跟随
+  // fs-tree 的动态宽度; 视觉上 fs-tree + fs-preview 总和仍是 100%.
+  // 注: React 把 `flex: 1` 序列化为 "1 1 0%" (浏览器默认 flex-shrink=1,
+  // flex-basis=0%). 断言 *starts with* "1" 即可, 不必严格相等.
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [] },
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  render(<FsTab cwd="/repo" />);
+  const preview = screen.getByTestId('fs-preview') as HTMLElement;
+  expect(preview.style.flex.startsWith('1')).toBe(true);
+  expect(preview.style.flex).not.toContain('60%');
+});
+
+it('lock toggle 默认锁定, drag handle 是 default cursor + pointer-events: none', () => {
+  // 默认锁定的视觉契约: drag handle 的 cursor 是 default, pointer-events
+  // 是 none (误触不会触发拖动). 解锁后才变 ew-resize + auto.
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [] },
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  render(<FsTab cwd="/repo" />);
+  const handle = screen.getByTestId('fs-tree-drag-handle') as HTMLElement;
+  expect(handle.style.cursor).toBe('default');
+  expect(handle.style.pointerEvents).toBe('none');
+  const lockBtn = screen.getByTestId('fs-tree-lock-toggle');
+  expect(lockBtn.getAttribute('aria-label')).toBe('解锁文件树宽度拖动');
+});
+
+it('click lock toggle 解锁后, drag handle 变 ew-resize + pointer-events: auto', () => {
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [] },
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  render(<FsTab cwd="/repo" />);
+  fireEvent.click(screen.getByTestId('fs-tree-lock-toggle'));
+  const handle = screen.getByTestId('fs-tree-drag-handle') as HTMLElement;
+  expect(handle.style.cursor).toBe('ew-resize');
+  expect(handle.style.pointerEvents).toBe('auto');
+  expect(screen.getByTestId('fs-tree-lock-toggle').getAttribute('aria-label')).toBe(
+    '锁定文件树宽度拖动',
+  );
+});
+
+it('drag handle 的 mousedown 在锁定时被短路 (不会写入 localStorage)', () => {
+  // 防御性 bail: 即使有人手动调 onMouseDown, 锁定时也不应该写 width.
+  // UI 上 pointer-events: none 通常会阻止事件, 但 hook 也应自己短路.
+  mockList.mockReturnValue({
+    data: { ok: true, entries: [] },
+    loading: false, error: null, refetch: vi.fn(),
+  });
+  mockFile.mockReturnValue({ data: null, loading: false, error: null });
+  render(<FsTab cwd="/repo" />);
+  const handle = screen.getByTestId('fs-tree-drag-handle');
+  // 锁定态 — act() 包裹确保 mousemove handler 注册 / 清理都被 React 跟踪.
+  act(() => {
+    fireEvent.mouseDown(handle, { clientX: 100 });
+    dispatchNativeMouse(window, 'mousemove', 200);
+    dispatchNativeMouse(window, 'mouseup');
+  });
+  expect(localStorage.getItem('zai.fsTab.treeWidthPct')).toBeNull();
+});
+
+it('解锁后 mousedown → mousemove → mouseup 完整路径调整宽度并持久化', () => {
+  const restore = mockFsTreeClientWidth();
+  try {
+    mockList.mockReturnValue({
+      data: { ok: true, entries: [] },
+      loading: false, error: null, refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({ data: null, loading: false, error: null });
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByTestId('fs-tree-lock-toggle'));
+    const handle = screen.getByTestId('fs-tree-drag-handle');
+    // 起点 x=100, 起点宽度 40%. fs-tree 自身 320px, 父容器 800px. 方向:
+    // fs-tree 跟随鼠标, 右拖 fs-tree 变大 (handle 跟着 fs-tree 右边缘走).
+    // 修复后分母是父容器 800 → 80px = 10pct → 50%; 若分母误用 fs-tree 自身
+    // 320 → 80px = 25pct → 65% (放大), 这里断言 50% 即锁死 1:1 行为.
+    act(() => {
+      fireEvent.mouseDown(handle, { clientX: 100 });
+      // 右拖 80px → 80 / 800 * 100 = 10pct → 50%
+      dispatchNativeMouse(window, 'mousemove', 180);
+      dispatchNativeMouse(window, 'mouseup');
+    });
+    expect(localStorage.getItem('zai.fsTab.treeWidthPct')).toBe('50');
+    expect((screen.getByTestId('fs-tree') as HTMLElement).style.width).toBe('50%');
+  } finally {
+    restore();
+  }
+});
+
+it('drag 超过 [15, 85] 边界时被 clampFsTreeWidth 限制', () => {
+  const restore = mockFsTreeClientWidth();
+  try {
+    mockList.mockReturnValue({
+      data: { ok: true, entries: [] },
+      loading: false, error: null, refetch: vi.fn(),
+  });
+    mockFile.mockReturnValue({ data: null, loading: false, error: null });
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByTestId('fs-tree-lock-toggle'));
+    const handle = screen.getByTestId('fs-tree-drag-handle');
+    // 起点 40%, 右拖 800px → +100pct → 应该 clamp 到 MAX(85)
+    act(() => {
+      fireEvent.mouseDown(handle, { clientX: 100 });
+      dispatchNativeMouse(window, 'mousemove', 900);
+      dispatchNativeMouse(window, 'mouseup');
+    });
+    expect(localStorage.getItem('zai.fsTab.treeWidthPct')).toBe('85');
+    expect((screen.getByTestId('fs-tree') as HTMLElement).style.width).toBe('85%');
+  } finally {
+    restore();
+  }
+});
+
+it('drag mouseup 后 mousemove 不再触发更新 (handle 已清理)', () => {
+  // 防御性验证: dragRef 在 mouseup 时清空, 后续 mousemove 是 no-op.
+  const restore = mockFsTreeClientWidth();
+  try {
+    mockList.mockReturnValue({
+      data: { ok: true, entries: [] },
+      loading: false, error: null, refetch: vi.fn(),
+    });
+    mockFile.mockReturnValue({ data: null, loading: false, error: null });
+    render(<FsTab cwd="/repo" />);
+    fireEvent.click(screen.getByTestId('fs-tree-lock-toggle'));
+    const handle = screen.getByTestId('fs-tree-drag-handle');
+    act(() => {
+      fireEvent.mouseDown(handle, { clientX: 100 });
+      // 右拖 50px → 50/800*100 = 6.25pct → 40 + 6 = 46
+      dispatchNativeMouse(window, 'mousemove', 150);
+      dispatchNativeMouse(window, 'mouseup');
+    });
+    expect(localStorage.getItem('zai.fsTab.treeWidthPct')).toBe('46');
+    // mouseup 之后再 move, 不应该影响 localStorage.
+    act(() => {
+      dispatchNativeMouse(window, 'mousemove', 1000);
+    });
+    expect(localStorage.getItem('zai.fsTab.treeWidthPct')).toBe('46');
+  } finally {
+    restore();
   }
 });

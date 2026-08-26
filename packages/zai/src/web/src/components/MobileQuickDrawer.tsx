@@ -1,5 +1,5 @@
-import { useState } from 'react'
-import { Drawer, Segmented, Button, Input, App as AntApp, Tag, Modal, Empty } from 'antd'
+import { useEffect, useState } from 'react'
+import { Drawer, Segmented, Button, Input, App as AntApp, Modal, Empty, Spin } from 'antd'
 import {
   ReloadOutlined,
   PlusOutlined,
@@ -8,132 +8,258 @@ import {
   UndoOutlined,
 } from '@ant-design/icons'
 import { useAgentStore } from '../store/useAgentStore.js'
+import { useAppStore } from '../store/useAppStore.js'
 import { useQuickPrompts, MAX_TEXT } from '../hooks/useQuickPrompts.js'
 import { useSubmitPrompt } from '../hooks/useSubmitPrompt.js'
 import { useBashRepl } from '../hooks/useBashRepl.js'
 import { useGitStatus } from './splitPane/useGitStatus.js'
+import { useGitDiff } from './splitPane/useGitDiff.js'
 import { gitApi } from '../lib/gitApi.js'
-import { STATUS_COLORS, STATUS_LABELS } from './splitPane/shared.js'
+import { STATUS_COLORS, useIsGitRepo } from './splitPane/shared.js'
+import { DiffView } from './splitPane/DiffView.js'
+import BranchSelector from './BranchSelector'
 import { message } from 'antd'
+import type { GitStatusChar } from '../../../shared/git.js'
 
-type TabKey = 'bash' | 'prompt' | 'diff'
+type TabKey = 'bash' | 'prompt' | 'git'
 
 export interface MobileQuickDrawerProps {
   open: boolean
   onClose: () => void
 }
 
-interface DiffTabProps {
+interface GitTabProps {
   cwd: string | null
 }
 
-function DiffTab({ cwd }: DiffTabProps) {
-  const { data, error, refetch } = useGitStatus(cwd)
-  const [loadingPath, setLoadingPath] = useState<string | null>(null)
+function GitTab({ cwd }: GitTabProps) {
+  const status = useGitStatus(cwd)
+  const [selected, setSelected] = useState<string | null>(null)
+  const [reverting, setReverting] = useState<string | null>(null)
+  const diff = useGitDiff(cwd, selected)
 
-  const files = data?.ok && data.files ? data.files : []
-  const showEmpty =
-    !cwd ||
-    error != null ||
-    (data?.ok === false) ||
-    (data?.ok === true && files.length === 0)
+  // cwd 变化时丢弃选中 — 旧路径不再适用.
+  useEffect(() => {
+    setSelected(null)
+  }, [cwd])
 
-  function emptyDescription(): string {
-    if (!cwd) return '请先开启会话'
-    if (error) return error
-    if (data?.ok === false) return data.error ?? '当前目录不是 git 仓库'
-    if (data?.ok === true && files.length === 0) return '无变更'
-    return ''
+  // status 刷新后若 selected 已不在列表里 (撤销/提交),清掉选中让
+  // Modal 也跟着关闭.
+  const filePaths = status.data?.ok
+    ? status.data.files.map((f) => f.path)
+    : null
+  useEffect(() => {
+    if (!selected) return
+    if (filePaths && !filePaths.includes(selected)) {
+      setSelected(null)
+    }
+  }, [filePaths, selected])
+
+  const files = status.data?.files ?? []
+  const branch = status.data?.branch ?? null
+
+  async function handleRevert(path: string) {
+    setReverting(path)
+    try {
+      const result = await gitApi.revertFile(path)
+      if (result.ok) {
+        message.success('已撤销')
+        status.refetch()
+        if (selected === path) setSelected(null)
+      } else {
+        message.error(result.error ?? '撤销失败')
+      }
+    } catch (err) {
+      message.error(
+        `撤销失败: ${err instanceof Error ? err.message : String(err)}`,
+      )
+    } finally {
+      setReverting(null)
+    }
   }
 
-  function handleRevert(path: string, isUntracked: boolean) {
-    const content = isUntracked
-      ? '该文件未跟踪,撤销将永久删除该文件'
-      : '将丢弃该文件的本地改动'
+  function revertWithConfirm(path: string, isNew: boolean) {
     Modal.confirm({
-      title: `撤销 ${path}?`,
-      content,
-      okText: '撤销',
-      okType: 'danger',
+      title: isNew ? '确认删除' : '确认撤销',
+      content: isNew
+        ? `确定要删除新文件 ${path} 吗?此操作不可恢复。`
+        : `确定要撤销对 ${path} 的更改吗?此操作不可恢复。`,
+      okText: isNew ? '确认删除' : '确认撤销',
       cancelText: '取消',
-      onOk: async () => {
-        setLoadingPath(path)
-        try {
-          const result = await gitApi.revertFile(path)
-          if (result.ok) {
-            message.success('已撤销')
-            refetch()
-          } else {
-            message.error(result.error ?? '撤销失败')
-          }
-        } catch (err) {
-          message.error(`撤销失败: ${err instanceof Error ? err.message : String(err)}`)
-        } finally {
-          setLoadingPath(null)
-        }
-      },
+      okType: 'danger',
+      onOk: () => handleRevert(path),
     })
   }
 
   return (
-    <div data-testid="mobile-quick-drawer-diff">
-      <div style={{ display: 'flex', justifyContent: 'flex-end', marginBottom: 8 }}>
+    <div data-testid="mobile-quick-drawer-git">
+      <div
+        style={{
+          display: 'flex',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          marginBottom: 8,
+        }}
+      >
+        <span style={{ fontSize: 12, color: 'var(--text-dim-55)' }}>
+          Git
+          {/* BranchSelector 内部处理 store 兜底 + 移动端 Popover placement='bottom'.
+              cwd 不传(未开启会话)时它退化为只读 span, 跟旧 Tag 行为一致. */}
+          <BranchSelector
+            cwd={cwd}
+            branch={branch ?? '(无)'}
+            triggerStyle={{ marginLeft: 6 }}
+            testIdPrefix="mobile-branch-"
+          />
+          <span style={{ marginLeft: 8, color: 'var(--text-dim-35)' }}>
+            {files.length} 项变更
+          </span>
+        </span>
         <Button
           size="small"
           icon={<ReloadOutlined />}
-          onClick={() => refetch()}
-          data-testid="mobile-quick-drawer-diff-refresh"
+          loading={status.loading}
+          onClick={() => status.refetch()}
+          data-testid="mobile-quick-drawer-git-refresh"
         >
           刷新
         </Button>
       </div>
-      {showEmpty ? (
-        <div data-testid="mobile-quick-drawer-diff-empty" style={{ padding: 16 }}>
-          <Empty description={emptyDescription()} />
+
+      {!cwd && (
+        <div style={{ padding: 16 }}>
+          <Empty description="请先开启会话" />
         </div>
-      ) : (
-        files.map((file) => (
-          <div
-            key={file.path}
-            data-testid={`mobile-quick-drawer-diff-row-${file.path}`}
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 12px',
-              borderBottom: '1px solid var(--border-faint)',
-            }}
-          >
-            <Tag color={STATUS_COLORS[file.status]} style={{ flexShrink: 0 }}>
-              {STATUS_LABELS[file.status]}
-            </Tag>
-            <span
-              title={file.path}
+      )}
+
+      {cwd && status.error && !status.data?.ok && (
+        <div style={{ padding: 16 }}>
+          <Empty description={status.error} />
+        </div>
+      )}
+
+      {cwd && !status.error && status.loading && files.length === 0 && (
+        <div style={{ padding: 16, textAlign: 'center' }}>
+          <Spin />
+        </div>
+      )}
+
+      {cwd && !status.error && files.length === 0 && !status.loading && (
+        <div style={{ color: 'var(--text-dim-45)', padding: 16 }}>
+          没有变更
+        </div>
+      )}
+
+      {cwd &&
+        files.map((file) => {
+          const isSel = selected === file.path
+          return (
+            <div
+              key={file.path}
+              role="button"
+              tabIndex={0}
+              onClick={() => setSelected(file.path)}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter' || e.key === ' ') {
+                  e.preventDefault()
+                  setSelected(file.path)
+                }
+              }}
+              data-testid={`mobile-quick-drawer-git-row-${file.path}`}
               style={{
-                flex: 1,
-                minWidth: 0,
-                overflow: 'hidden',
-                textOverflow: 'ellipsis',
-                whiteSpace: 'nowrap',
-                fontFamily: 'ui-monospace, Menlo, monospace',
-                fontSize: 13,
+                display: 'flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '10px 12px',
+                borderBottom: '1px solid var(--border-faint)',
+                cursor: 'pointer',
+                background: isSel ? 'rgba(255,102,0,0.12)' : 'transparent',
               }}
             >
-              {file.path}
-            </span>
-            <Button
-              type="text"
-              size="small"
-              danger
-              icon={<UndoOutlined />}
-              loading={loadingPath === file.path}
-              onClick={() => handleRevert(file.path, file.status === '??')}
-              data-testid={`mobile-quick-drawer-diff-revert-${file.path}`}
-              aria-label={`撤销 ${file.path}`}
-            />
+              <span
+                style={{
+                  display: 'inline-block',
+                  width: 20,
+                  textAlign: 'center',
+                  color: STATUS_COLORS[file.status as GitStatusChar],
+                  fontWeight: 700,
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  flexShrink: 0,
+                }}
+              >
+                {file.status === '??' ? '?' : file.status}
+              </span>
+              <span
+                style={{
+                  flex: 1,
+                  minWidth: 0,
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                  whiteSpace: 'nowrap',
+                  fontFamily:
+                    'ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, monospace',
+                  fontSize: 13,
+                }}
+                title={file.path}
+              >
+                {file.path}
+              </span>
+              {file.staged && (
+                <span
+                  style={{
+                    fontSize: 10,
+                    color: 'rgba(167,139,250,0.85)',
+                    border: '1px solid rgba(167,139,250,0.35)',
+                    borderRadius: 3,
+                    padding: '0 4px',
+                    flexShrink: 0,
+                  }}
+                >
+                  staged
+                </span>
+              )}
+              <Button
+                type="text"
+                size="small"
+                danger
+                icon={<UndoOutlined />}
+                loading={reverting === file.path}
+                onClick={(e) => {
+                  e.stopPropagation()
+                  revertWithConfirm(file.path, file.status === '??')
+                }}
+                aria-label={
+                  file.status === '??' ? '删除此新文件' : '撤销此文件的更改'
+                }
+              />
+            </div>
+          )
+        })}
+
+      <Modal
+        open={selected !== null}
+        title={selected ?? ''}
+        onCancel={() => setSelected(null)}
+        footer={null}
+        width="90%"
+        destroyOnClose
+        data-testid="mobile-quick-drawer-git-diff-modal"
+      >
+        {diff.loading ? (
+          <div style={{ textAlign: 'center', padding: 24 }}>
+            <Spin />
           </div>
-        ))
-      )}
+        ) : diff.error ? (
+          <Empty description={diff.error} />
+        ) : diff.data?.diff !== undefined ? (
+          <div style={{ maxHeight: '70vh', overflow: 'auto' }}>
+            <DiffView diff={diff.data.diff} />
+          </div>
+        ) : (
+          <Empty description="没有差异" />
+        )}
+      </Modal>
     </div>
   )
 }
@@ -143,7 +269,15 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
   const activeSessionId = useAgentStore((s) => s.activeSessionId)
   const status = useAgentStore((s) => s.status)
   const cwdBySession = useAgentStore((s) => s.cwdBySession)
-  const cwd = sessionId ? cwdBySession[sessionId] ?? null : null
+  const instanceContext = useAppStore((s) => s.instanceContext)
+  // 对齐 Agent.tsx 的 cwd 计算: instanceContext.cwd 是 server 注入的进程
+  // cwd, 冷启动立即可用; cwdBySession[sessionId] 由 SSE cwd.changed 维护,
+  // 仅在用户跑过 bash 后才有. 优先取前者.
+  const cwd = instanceContext?.cwd
+    ? instanceContext.cwd
+    : sessionId
+      ? cwdBySession[sessionId] ?? null
+      : null
   const { topCommands, refreshTopCommands, exec } = useBashRepl(
     sessionId ?? activeSessionId ?? null,
     cwd,
@@ -151,6 +285,10 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
   const { prompts, add, remove, clear } = useQuickPrompts()
   const { submitPrompt } = useSubmitPrompt()
   const [tab, setTab] = useState<TabKey>('bash')
+  // 非 git 项目 (instanceContext.branch === null) 时过滤 Git segment (见
+  // shared.ts useIsGitRepo). 旧 State 若停在 git,fallback 到 bash 默认项.
+  const isGit = useIsGitRepo()
+  const effectiveTab: TabKey = tab === 'git' && !isGit ? 'bash' : tab
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
 
@@ -159,11 +297,25 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
   async function handleBashClick(command: string) {
     if (!effectiveSid) return
     try {
-      const result = await exec(command)
-      if (result.ok) {
+      // wait=true:等服务端真实终态,根据 code/signal 决定 success/error toast。
+      // fire-and-forget 模式 (默认) 拿到的是 {ok, execId},无法区分"执行中"和"已失败",
+      // 会让用户看到虚假 "已执行" 提示 — 实际命令可能 exit code 非 0 或被信号杀。
+      const result = await exec(command, { wait: true })
+      if (!result.ok) {
+        if ('busy' in result && result.busy) {
+          message.warning('已有命令在执行')
+        }
+        return
+      }
+      // ok:true + wait=true:result 含 {code, signal, durationMs}
+      // - code === 0 && !signal → 成功
+      // - 其他 (非 0 退出码 / 被信号终止) → 失败,提示 code 让用户知道为什么失败
+      const { code, signal } = result
+      if (code === 0 && !signal) {
         message.success(`已执行: ${command}`)
-      } else if ('busy' in result && result.busy) {
-        message.warning('已有命令在执行')
+      } else {
+        const reason = signal ? `signal ${signal}` : `exit ${code ?? '?'}`
+        message.error(`执行失败 (${reason}): ${command}`)
       }
     } catch (err) {
       message.error(`执行失败: ${err instanceof Error ? err.message : String(err)}`)
@@ -225,14 +377,14 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
       }
     >
       <div style={{ marginBottom: 12 }}>
-        <Segmented<'bash' | 'prompt' | 'diff'>
+        <Segmented<'bash' | 'prompt' | 'git'>
           block
-          value={tab}
+          value={effectiveTab}
           onChange={(v) => setTab(v as TabKey)}
           options={[
             { label: '快捷 Bash', value: 'bash' },
             { label: '常用指令', value: 'prompt' },
-            { label: 'Diff', value: 'diff' },
+            ...(isGit ? [{ label: 'Git', value: 'git' }] : []),
           ]}
         />
       </div>
@@ -405,8 +557,8 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
         </div>
       )}
 
-      {tab === 'diff' && (
-        <DiffTab cwd={cwd} />
+      {effectiveTab === 'git' && (
+        <GitTab cwd={cwd} />
       )}
     </Drawer>
   )

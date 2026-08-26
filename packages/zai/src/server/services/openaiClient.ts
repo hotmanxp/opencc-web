@@ -300,6 +300,7 @@ import {
   hasToolFieldMapping,
   normalizeToolArguments,
 } from './toolArgumentNormalization.js'
+import { logHttp } from './accessLog.js'
 
 interface OpenAIChunk {
   id?: string
@@ -622,17 +623,26 @@ export interface OpenAIClientOptions {
   baseURL: string
   apiKey: string
   model: string
+  /**
+   * zai patch: per-provider request-body fields merged into every
+   * POST `/chat/completions`. Sourced from
+   * `ProviderProfile.extraParams` in the user's `~/.zai.json`.
+   * Optional.
+   */
+  extraParams?: Record<string, unknown>
 }
 
 export class OpenAIClient {
   private baseURL: string
   private apiKey: string
   private model: string
+  private extraParams: Record<string, unknown> | undefined
 
   constructor(opts: OpenAIClientOptions) {
     this.baseURL = opts.baseURL.replace(/\/$/, '')
     this.apiKey = opts.apiKey
     this.model = opts.model
+    this.extraParams = opts.extraParams
   }
 
   messages = {
@@ -656,6 +666,11 @@ export class OpenAIClient {
         ? { max_completion_tokens: params.max_tokens }
         : {}),
       ...(typeof params.temperature === 'number' ? { temperature: params.temperature } : {}),
+      // zai patch: per-provider extraParams (e.g. temperature / top_p /
+      // reasoning_effort). Spread last so identical keys in extraParams
+      // win over the modelCaller's built-in defaults — users opt in
+      // to overriding the defaults by setting extraParams.
+      ...(this.extraParams ?? {}),
     }
     if (params.tools && params.tools.length > 0) {
       body.tools = convertTools(params.tools)
@@ -687,20 +702,43 @@ export class OpenAIClient {
 
     let response: Response
     try {
+      // 请求体摘要 — 验证 provider/extraParams 合并是否生效的关键日志。
+      // messages/tools 占体积且不含配置信息, 摘要成计数; 其余字段原样
+      // 保留(含 extraParams 展开后覆盖默认值的部分, 例如 temperature /
+      // top_p / reasoning_effort)。body 不含 apiKey(在 Authorization
+      // header), 可安全打日志。
+      const bodySummary: Record<string, unknown> = { ...body }
+      if (Array.isArray(body.messages)) {
+        bodySummary.messages = `[${(body.messages as unknown[]).length} messages]`
+      }
+      if (Array.isArray(body.tools)) {
+        bodySummary.tools = `[${(body.tools as unknown[]).length} tools]`
+      }
+      logHttp(`[zai.openaiClient] → POST ${url} body ${JSON.stringify(bodySummary)}`, 'debug')
       response = await fetch(url, {
         method: 'POST',
         headers,
         body: JSON.stringify(body),
         signal,
       })
+      // 上游 4xx/5xx 是生产里最常见的 500 来源 — 这里无条件打一行,
+      // 成功路径只在 ZAI_DEBUG=1 时打,避免每次对话都刷屏。
+      if (!response.ok) {
+        logHttp(`[zai.openaiClient] ← POST ${url} → HTTP ${response.status} ${response.statusText}`, 'error')
+      } else {
+        logHttp(`[zai.openaiClient] ← POST ${url} → HTTP ${response.status} (ok)`, 'debug')
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err)
+      logHttp(`[zai.openaiClient] fetch failed POST ${url}: ${message}`, 'error')
       yield { type: 'error', message: `OpenAI request failed: ${message}` }
       return
     }
 
     if (!response.ok || !response.body) {
       const text = await response.text().catch(() => '')
+      // 错误体摘要是定位 500 的关键 — 上游网关一般会把具体原因放这里。
+      logHttp(`[zai.openaiClient] error body (${text.length}B): ${text.slice(0, 500)}`, 'error')
       yield {
         type: 'error',
         message: `OpenAI HTTP ${response.status}: ${text.slice(0, 500)}`,

@@ -4,7 +4,7 @@ import { USER_SETTINGS_PATH } from '../constants.js';
 import { AGENT_TOOL_NAME } from '../tools/AgentTool/constants.js';
 const statusline = {
   type: 'prompt',
-  description: "配置 OpenCC 的状态行 UI",
+  description: "配置 Z.Ai 的状态行 UI",
   contentLength: 0,
   // Dynamic content
   aliases: [],

@@ -3,7 +3,7 @@ import { join } from 'path'
 import { clearMemoryCache } from './loader.js'
 
 /**
- * Watches AGENTS.md, AGENTS.local.md, and .claude/rules in a cwd
+ * Watches AGENTS.md, AGENTS.local.md, and .zai/rules in a cwd
  * for mtime changes. On change, calls clearMemoryCache() so the next
  * loadMemoryForPrompt() re-reads from disk.
  *
@@ -39,7 +39,7 @@ function watcherCallback(path: string): (curr: { mtime?: Date }) => void {
 
 function watchOne(path: string): void {
   // Skip registering a poller for paths that don't exist. The 1s poll cost
-  // only matters if we later scale to recursive .claude/rules/**/*.md
+  // only matters if we later scale to recursive .zai/rules/**/*.md
   // enumeration; for the 3 hardcoded Phase 3 paths it's negligible, but
   // the guard keeps behaviour predictable: nonexistent → no watcher.
   if (!existsSync(path)) return
@@ -70,11 +70,11 @@ export function startMemoryWatcher(opts: {
   unwatchAll()
   onChangeCallback = opts.onChange ?? null
   // Phase 3 minimal: watch the 3 most common paths. Future: enumerate
-  // .claude/rules/**/*.md via dynamic import of vendored isMemoryFilePath.
+  // .zai/rules/**/*.md via dynamic import of vendored isMemoryFilePath.
   const candidates = [
     join(opts.cwd, 'AGENTS.md'),
     join(opts.cwd, 'AGENTS.local.md'),
-    join(opts.cwd, '.claude', 'AGENTS.md'),
+    join(opts.cwd, '.zai', 'AGENTS.md'),
   ]
   for (const p of candidates) watchOne(p)
   return {

@@ -15,7 +15,7 @@ import { existsSync } from 'fs'
  * - MAX_MEMORY_CHARACTER_COUNT truncation
  * - contentDiffersFromDisk tracking
  * - Symlink resolution, auto-memory, settings filters
- * - `.claude/rules` recursive load (intentionally not implemented —
+ * - `.zai/rules` recursive load (intentionally not implemented —
  *   loading the whole cwd subtree produced 100+ MB system prompts when
  *   cwd contained node_modules / .worktrees / .git. Add it back via a
  *   separate path with an explicit allowlist if needed.)
@@ -87,7 +87,7 @@ export async function loadMemoryForPrompt(cwd: string): Promise<MemoryFile[]> {
       }
     }
 
-    // (Step 3 — .claude/rules/**/*.md recursive load — intentionally not
+    // (Step 3 — .zai/rules/**/*.md recursive load — intentionally not
     // implemented. See file-header comment for why.)
 
     cache.set(cwd, files)

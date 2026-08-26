@@ -122,7 +122,7 @@ export async function createHeadlessContextImpl(
   // - content-specific ask rules from `tool.checkPermissions`
   //   (e.g. an explicit `Bash(npm publish:*)` ask rule is
   //   respected even in bypass mode, per permissions.ts:1240-1252)
-  // - path safety checks (.git/, .claude/, .vscode/, shell
+  // - path safety checks (.git/, .zai/, .vscode/, shell
   //   configs — these still prompt, per permissions.ts:1254-1262)
   // Callers that need stricter per-tool rules can pass
   // `permissionMode: 'default'` and write `allow` / `deny` rules
@@ -222,7 +222,7 @@ export async function createHeadlessContextImpl(
   // any `Agent(subagent_type: 'general-purpose', ...)` call throws
   // "Agent type 'general-purpose' not found. Available agents: " (the
   // available list is empty so the error is unreadable). The loader
-  // is memoized (first call may read disk for `.claude/agents/*.md`;
+  // is memoized (first call may read disk for `.zai/agents/*.md`;
   // subsequent calls hit the cache) and has its own try/catch that
   // returns built-in agents on error (loadAgentsDir.ts:372-384), so
   // a broken user/project agent markdown can't take down the runtime.
@@ -260,9 +260,9 @@ export async function createHeadlessContextImpl(
   // headless context still boots without MCP servers. When
   // `connectMcp` is `false` (zai-server's default) we skip the
   // synchronous `getMcpToolsCommandsAndResources` call entirely;
-  // the function can block indefinitely on the user's `~/.claude/`
+  // the function can block indefinitely on the user's `~/.zai/`
   // MCP server config (a known issue when the user has live MCP
-  // servers listed in `~/.claude.json` from interactive Claude
+  // servers listed in `~/.zai.json` from interactive Claude
   // Code). zai-server refreshes MCP lazily via the QueryEngine's
   // own per-query refresh path (and via the `/mcp` slash command),
   // so an empty `mcp` surface at boot is acceptable.

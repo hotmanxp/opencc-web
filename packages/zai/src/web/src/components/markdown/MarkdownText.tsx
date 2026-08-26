@@ -253,6 +253,7 @@ const markdownComponents = {
   a: ({ href, children }: any) => (
     <a
       href={href}
+      aria-label={`外部链接 ${typeof children === 'string' ? children : ''}`}
       target="_blank"
       rel="noopener noreferrer"
       style={{ color: "#1677ff", textDecoration: "underline" }}

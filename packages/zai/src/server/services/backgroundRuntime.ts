@@ -191,8 +191,13 @@ export function wrapWithJobStarted(
     get: (id) => inner.get(id),
     list: (filter) => inner.list(filter),
     cancel: (id, reason) => inner.cancel(id, reason),
+    cancelByParentSession: (sessionId, reason) =>
+      inner.cancelByParentSession(sessionId, reason),
     events: (id, fromSeq, signal) => inner.events(id, fromSeq, signal),
     shutdown: () => inner.shutdown(),
+    // zai patch (HRMSV3-ZN-WEBSITE#668 / subagent_control.send_message):
+    // 透传 sendMessageToTask —— 不发 job.started,只看 inner 结果。
+    sendMessageToTask: (taskId, prompt) => inner.sendMessageToTask(taskId, prompt),
     // zai patch: 透传 AgentTool 子代理用的外部管理 API。attach 不入 queue
     // 不增活动计数(子代理已由 LocalAgentTask 路径管理),所以不发 job.started。
     attach: (input) => inner.attach(input),
@@ -286,4 +291,22 @@ export function __resetBackgroundRuntimeForTests(): void {
 export function abortAllBackgroundTasks(reason?: string): number {
   if (!backgroundRuntime) return 0
   return backgroundRuntime.abortAll(reason ?? 'restart_drain_timeout')
+}
+
+/**
+ * 取消某个父会话派生的全部未结束后台任务。Safe to call before
+ * initBackgroundRuntime has run (resolve {cancelled:0} and no-ops)。
+ * 供 /api/agent/abort(ESC)与 abortAgentSession 调用,终止当前会话
+ * 关联的后台 agent —— 否则 ESC 只停主循环,后台任务继续向共享 API key
+ * 发请求,消息继续刷屏。
+ */
+export async function cancelBackgroundTasksByParentSession(
+  sessionId: string,
+  reason?: string,
+): Promise<{ cancelled: number }> {
+  if (!backgroundRuntime) return { cancelled: 0 }
+  return backgroundRuntime.cancelByParentSession(
+    sessionId,
+    reason ?? 'user_abort',
+  )
 }

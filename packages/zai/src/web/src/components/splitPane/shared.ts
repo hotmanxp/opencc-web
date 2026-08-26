@@ -1,5 +1,6 @@
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useEffect, useRef, useState } from 'react';
 import type { GitStatusChar } from '../../../../shared/git.js';
+import { useAppStore } from '../../store/useAppStore.js';
 
 export const STORAGE_KEYS = {
   open: 'zai.splitPane.open',
@@ -11,6 +12,12 @@ export const STORAGE_KEYS = {
   // 2026-07-26+: 移动端常用指令 Drawer 的本地 prompt 片段持久化。
   // 独立命名空间避开既有 zai.splitPane.* / zai.app.* 前缀。
   quickPrompts: 'zai.quickPrompts.v1',
+  // 2026-08-10+: FsTab 文件树 ↔ 预览区 之间的宽度 (相对 FsTab 自身 %).
+  // 单位是百分比 (不是 vw), 因为文件树在 SplitPane 内部, 宽度是相对 FsTab
+  // 容器, 跟 SplitPane 自己的 vw 单位正交. 同时持久化一个 lock 标志 —
+  // 跟 SplitPane 一致默认锁定, 防误触.
+  fsTreeWidth: 'zai.fsTab.treeWidthPct',
+  fsTreeLocked: 'zai.fsTab.treeWidthLocked',
 } as const;
 
 // 宽度单位从 px 改成 vw (viewport width 百分比), 跟随窗口宽度变化, 窄屏
@@ -28,6 +35,25 @@ export const COLLAPSED_WIDTH = 0;
 export function clampWidth(value: number): number {
   if (!Number.isFinite(value)) return DEFAULT_WIDTH_VW;
   return Math.min(MAX_WIDTH, Math.max(MIN_WIDTH, Math.round(value)));
+}
+
+// FsTab 文件树宽度 — 单位是百分比 (相对 FsTab 自身), 不是 vw.
+// 文件树在 SplitPane 内部, 它的宽度是相对 FsTab 容器, 跟 SplitPane 自己的
+// vw 单位正交 (SplitPane 缩放时 FsTab 跟着缩, 但 fs-tree/preview 之间的
+// 比例不变). 范围 15-85% 给两边都留有最低展示空间:
+//   15% @ 1920 ≈ 115px  — 文件名勉强能看清
+//   85% @ 1920 ≈ 653px  — 预览区有 ~135px 也够看基础内容
+// 默认 40% 跟硬编码的旧值一致, 升级时不会跳变.
+export const FS_TREE_MIN_WIDTH = 15;
+export const FS_TREE_MAX_WIDTH = 85;
+export const DEFAULT_FS_TREE_WIDTH = 40;
+
+export function clampFsTreeWidth(value: number): number {
+  if (!Number.isFinite(value)) return DEFAULT_FS_TREE_WIDTH;
+  return Math.min(
+    FS_TREE_MAX_WIDTH,
+    Math.max(FS_TREE_MIN_WIDTH, Math.round(value)),
+  );
 }
 
 /**
@@ -50,6 +76,16 @@ export function useLocalStorageState<T>(
       return defaultValue;
     }
   });
+
+  // 2026-08-26: Desktop calls setter with functional updaters
+  // (e.g. `setWindows((ws) => ws.map(...))`). React treats those as updater
+  // functions, but JSON.stringify(fn) returns undefined — so we used to
+  // persist the literal string "undefined" and lose state on reload. Hold a
+  // ref of the last-rendered value so the setter can resolve the updater to
+  // its concrete result before serializing. Single-tick staleness is
+  // acceptable: Desktop performs one window/shortcut mutation per user action.
+  const valueRef = useRef(value);
+  valueRef.current = value;
 
   // Sync from a different component instance (e.g. tab change from a
   // sibling). Two sources:
@@ -98,7 +134,15 @@ export function useLocalStorageState<T>(
     (next: T) => {
       setValue(next);
       try {
-        const serialized = JSON.stringify(next);
+        // Resolve functional updaters to their concrete value BEFORE
+        // serialization. React still applies `next` as an updater above, so
+        // in-memory semantics are unchanged. Single-tick staleness of
+        // valueRef.current is acceptable (see comment above).
+        const resolved =
+          typeof next === 'function'
+            ? (next as (prev: T) => T)(valueRef.current)
+            : next;
+        const serialized = JSON.stringify(resolved);
         localStorage.setItem(key, serialized);
         // Notify same-tab siblings — the browser's `storage` event won't fire
         // for the writer itself.
@@ -123,6 +167,17 @@ export const STATUS_COLORS: Record<GitStatusChar, string> = {
   D: '#f5222d', // deleted
   '??': '#a78bfa', // untracked
 };
+
+/**
+ * 当前打开的实例 cwd 是否是 git 仓库。判定依据是
+ * instanceContext.branch — Layout mount 时通过 GET /api/system hydrate,
+ * 服务端在非 git 仓库下 branch 返回 null(`git rev-parse --abbrev-ref HEAD`
+ * 失败)。SplitPane / MobileQuickDrawer 用它决定是否显示 Git tab:
+ * 非 git 项目时过滤掉 Git tab。
+ */
+export function useIsGitRepo(): boolean {
+  return useAppStore((s) => s.instanceContext?.branch != null);
+}
 
 export const STATUS_LABELS: Record<GitStatusChar, string> = {
   M: '已修改',

@@ -82,7 +82,13 @@ describe('ModelStatusButton', () => {
     fireEvent.click(screen.getByText('MiniMax-M3 (最强)')) // open popover
     // M3 row 在 Recent + Provider group 都出现, haiku row 只在 group 出现一次. 直接选 haiku.
     fireEvent.click(screen.getByText('M2.7 · 快速'))        // pick the other model
-    expect(patchSpy).toHaveBeenCalledWith('sess-1', 'MiniMax-M2.7-highspeed')
+    // patchSessionModel receives { model, providerId } so the server-side
+    // matcher routes to the exact provider the user picked. Same-name
+    // models on different providers stay distinguishable here.
+    expect(patchSpy).toHaveBeenCalledWith('sess-1', {
+      model: 'MiniMax-M2.7-highspeed',
+      providerId: undefined,
+    })
   })
 
   it('does not call patchSessionModel when the current model is clicked', async () => {
@@ -204,7 +210,12 @@ describe('ModelStatusButton TUI picker (extended)', () => {
     fireEvent.keyDown(content, { key: 'ArrowDown' })
     // Now selectedIndex = 1, the haiku entry.
     fireEvent.keyDown(content, { key: 'Enter' })
-    expect(patchSpy).toHaveBeenCalledWith('sess-1', 'MiniMax-M2.7-highspeed')
+    // Provider-less legacy entries pass providerId: undefined — the
+    // server-side matcher falls back to first-match-by-model for that case.
+    expect(patchSpy).toHaveBeenCalledWith('sess-1', {
+      model: 'MiniMax-M2.7-highspeed',
+      providerId: undefined,
+    })
   })
 
   it('handles ArrowDown to move selection', async () => {
@@ -233,8 +244,156 @@ describe('ModelStatusButton TUI picker (extended)', () => {
     // haiku row must still render data-selected="true".
     const search = screen.getByPlaceholderText(/Search/i) as HTMLInputElement
     fireEvent.change(search, { target: { value: 'haiku' } })
+    // Two macrotasks: one for the controlled-input change handler to
+    // commit, one for the resulting flatList clamp effect to settle.
+    await new Promise((r) => setTimeout(r, 0))
+    await new Promise((r) => setTimeout(r, 0))
     const selected = content.querySelectorAll('[data-selected="true"]')
     expect(selected.length).toBeGreaterThanOrEqual(1)
     expect(selected[0]?.getAttribute('data-testid')).toBe('model-row-haiku')
+  })
+})
+
+describe('ModelStatusButton same-model multiple providers', () => {
+  // Regression for the user-reported bug: the same model name appearing
+  // on multiple provider profiles was collapsed to a single row in the
+  // picker and could only be selected from the first provider rendered.
+  // Three MiniMax-M3 entries below model the reproduction.
+  const multiProviderModels: ModelEntry[] = [
+    {
+      alias: 'm3-anthropic',
+      model: 'MiniMax-M3',
+      label: 'MiniMax-M3',
+      description: 'Anthropic-MIX',
+      providerId: 'anthropic-mix',
+    },
+    {
+      alias: 'm3-nova',
+      model: 'MiniMax-M3',
+      label: 'MiniMax-M3',
+      description: 'Open Platform (Nova)',
+      providerId: 'open-platform',
+    },
+    {
+      alias: 'm3-test',
+      model: 'MiniMax-M3',
+      label: 'MiniMax-M3',
+      description: 'Open-Platform-test',
+      providerId: 'open-platform-test',
+    },
+  ]
+
+  beforeEach(() => {
+    // Switch to 3 different providers of the same model. Session
+    // pre-selects the anthropic-mix provider so the alphabetical first
+    // provider happens to coincide with the session — the highlighter
+    // should land on m3-anthropic by default, and after ArrowDown the
+    // patch should route to open-platform-test (the next row), NOT
+    // silently re-confirm anthropic-mix as it would with the old code
+    // that keyed selectedIndex only off flatList[0].
+    useAgentStore.setState({
+      sessionId: 'sess-1',
+      activeSessionId: 'sess-1',
+      sessions: [{
+        sessionId: 'sess-1',
+        title: 'test',
+        updatedAt: 1,
+        cwd: '/x',
+        model: 'MiniMax-M3',
+        providerId: 'anthropic-mix',
+      }],
+      availableModels: multiProviderModels,
+    })
+    globalThis.fetch = vi.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        defaultModel: 'MiniMax-M3',
+        baseURL: null,
+        models: multiProviderModels,
+      }),
+    } as Response)
+  })
+
+  it('renders all 3 provider rows for the same model name', async () => {
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText(/Anthropic-MIX/)) // open popover
+    // Each provider's MiniMax-M3 row must be reachable as its own entry.
+    // Recent (anthropic-mix) + 3 provider groups → 2 anthropic rows
+    // (Recent + group) + 1 nova + 1 test = 4 total MiniMax-M3 entries.
+    expect(screen.getAllByTestId('model-row-m3-anthropic')).toHaveLength(2)
+    expect(screen.getByTestId('model-row-m3-nova')).toBeDefined()
+    expect(screen.getByTestId('model-row-m3-test')).toBeDefined()
+  })
+
+  it('clicking a different provider for the same model routes through patchSessionModel with that providerId', async () => {
+    const patchSpy = vi.spyOn(useAgentStore.getState(), 'patchSessionModel')
+      .mockResolvedValue(undefined)
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText(/Anthropic-MIX/)) // open popover
+    // Pick the open-platform provider's MiniMax-M3 — a different row than
+    // the current selection.
+    fireEvent.click(screen.getByTestId('model-row-m3-nova'))
+    expect(patchSpy).toHaveBeenCalledWith('sess-1', {
+      model: 'MiniMax-M3',
+      providerId: 'open-platform',
+    })
+  })
+
+  it('marks only the current (model, providerId) tuple as the active row, not every same-name row', async () => {
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText(/Anthropic-MIX/)) // open popover
+    // Only anthropic-mix's MiniMax-M3 carries the current marker — both
+    // in Recent and in its provider group (the row is rendered twice but
+    // each render gets the same marker, by design). The other two
+    // providers' MiniMax-M3 rows do NOT carry the marker.
+    // Pre-fix bug: all 3 provider rows showed the marker because the
+    // check was entry.model === currentModel alone.
+    const content = screen.getByTestId('model-picker-content')
+    const current = content.querySelectorAll('[data-current="true"]')
+    expect(current.length).toBe(2) // 1 Recent + 1 group row, same model+provider
+    expect(current[0]?.getAttribute('data-testid')).toBe('model-row-m3-anthropic')
+    expect(current[1]?.getAttribute('data-testid')).toBe('model-row-m3-anthropic')
+    // Crucially, the m3-nova and m3-test rows must NOT be marked current.
+    expect(content.querySelector('[data-testid="model-row-m3-nova"]')
+      ?.getAttribute('data-current')).toBe('false')
+    expect(content.querySelector('[data-testid="model-row-m3-test"]')
+      ?.getAttribute('data-current')).toBe('false')
+  })
+
+  it('lands the keyboard highlight on the current (model, providerId) row, not flatList[0]', async () => {
+    // Session targets the anthropic-mix provider (set in beforeEach).
+    // Popover mount → selectedIndex jumps to m3-anthropic's position in
+    // flatList. After ArrowDown, the next Enter must target the next
+    // row (m3-test, open-platform-test), NOT silently re-confirm
+    // anthropic-mix by snapping selectedIndex back to 0.
+    render(<ModelStatusButton />)
+    await new Promise((r) => setTimeout(r, 0))
+    fireEvent.click(screen.getByText(/Anthropic-MIX/)) // open popover
+    await new Promise((r) => setTimeout(r, 0))
+    const content = screen.getByTestId('model-picker-content')
+    // On popover mount, the highlighted row (data-selected=true) must
+    // be the anthropic-mix row, which IS flatList[0] in this fixture —
+    // so this assertion alone does not distinguish fix vs. bug.
+    // The decisive check: Enter on the current row is a no-op.
+    const patchSpy = vi.spyOn(useAgentStore.getState(), 'patchSessionModel')
+      .mockResolvedValue(undefined)
+    fireEvent.keyDown(content, { key: 'Enter' })
+    expect(patchSpy).not.toHaveBeenCalled()
+    // One ArrowDown → next row, Enter must patch that row.
+    // The pre-fix bug had selectedIndex snap back to 0 on each re-render
+    // (the old useEffect-based initializer was order-dependent), so
+    // ArrowDown-then-Enter would silently re-patch anthropic-mix.
+    // Post-fix the next row in flatList order is m3-nova (Open Platform
+    // sorts before OPEN-PLATFORM-TEST in localeCompare due to lowercase
+    // 'O' coming before uppercase 'O').
+    fireEvent.keyDown(content, { key: 'ArrowDown' })
+    fireEvent.keyDown(content, { key: 'Enter' })
+    expect(patchSpy).toHaveBeenCalledWith('sess-1', {
+      model: 'MiniMax-M3',
+      providerId: 'open-platform',
+    })
   })
 })

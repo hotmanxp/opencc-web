@@ -65,6 +65,8 @@ import type { AgentDefinition } from './loadAgentsDir.js';
 import { filterAgentsByMcpRequirements, hasRequiredMcpServers, isBuiltInAgent } from './loadAgentsDir.js';
 import { getPrompt } from './prompt.js';
 import { runAgent } from './runAgent.js';
+import { runSubagentProvider } from './subagentProviderBridge.js';
+import { getSubagentRegistry } from '../../../compat/subagents/registry.js';
 import { renderGroupedAgentToolUse, renderToolResultMessage, renderToolUseErrorMessage, renderToolUseMessage, renderToolUseProgressMessage, renderToolUseRejectedMessage, renderToolUseTag, userFacingName, userFacingNameBackgroundColor } from './UI.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
@@ -332,7 +334,7 @@ export const AgentTool = buildTool({
   aliases: [LEGACY_AGENT_TOOL_NAME],
   maxResultSizeChars: 100_000,
   async description() {
-    return 'Launch a new agent';
+    return 'Launch a new agent. After the agent finishes, retrieve its final result by calling TaskOutput with the returned task_id. Do not read task output files directly.';
   },
   get inputSchema(): InputSchema {
     return inputSchema();
@@ -468,6 +470,39 @@ export const AgentTool = buildTool({
     // - subagent_type omitted, gate off: default general-purpose
     const effectiveType = subagent_type ?? (isForkSubagentEnabled() ? undefined : GENERAL_PURPOSE_AGENT.agentType);
     const isForkPath = effectiveType === undefined;
+
+    // Phase A3: subagent provider routing. When `subagent_type` matches a
+    // registered SubagentProvider (e.g. 'codex'), bypass the fork / built-in
+    // lookup entirely. The provider supplies its own process lifecycle,
+    // event stream, and result mapping — see `subagentProviderBridge.ts`
+    // for the contract (mirror* events, signal forwarding, cast through
+    // Output). Tree-only addition; existing branches below are untouched.
+    //
+    // Precedence note: a registered provider name shadows any
+    // AgentDefinition (built-in / custom / plugin) of the same name. Today
+    // there's no collision (`codex` / `claude-code` aren't shipped as
+    // AgentDefinitions), but if one is added later, this check wins.
+    // Provider descriptions are surfaced to the model via `prompt.ts`
+    // (`subagentProviderSection`) so the model can self-route.
+    if (effectiveType) {
+      const subagentProvider = getSubagentRegistry().getProvider(effectiveType)
+      if (subagentProvider) {
+        const providerOutput = await runSubagentProvider({
+          provider: subagentProvider,
+          description,
+          prompt,
+          ...(cwd ? { cwd } : {}),
+          ...(model !== undefined ? { model } : {}),
+          signal: toolUseContext.abortController.signal,
+        })
+        return {
+          data: providerOutput as unknown as Output,
+        } as unknown as {
+          data: Output;
+        }
+      }
+    }
+
     let selectedAgent: AgentDefinition;
     if (isForkPath) {
       // Recursive fork guard: fork children keep the Agent tool in their
@@ -1581,6 +1616,40 @@ The agent is now running and will receive instructions via mailbox.`
       };
     }
     if (data.status === 'completed') {
+      // zai patch (2026-08-21): SubagentProvider 输出(SubagentProviderOutput,
+      // subagentProviderBridge.ts)是独立于 fork/built-in Output 的 completed
+      // 结果:只携带 status/agentType/prompt/text/stopReason/errorMessage,没有
+      // content/agentId/totalTokens 等内置子代理字段。旧的 completed 分支硬编码
+      // 访问 data.content.length,provider 输出走到这直接抛
+      // "Cannot read properties of undefined (reading 'length')",整个
+      // tool_result 被上层吞成一行错误字符串,模型看不见真实结果。
+      // 这里按形状区分:built-in Output 一定有 content 数组(agentToolUtils.ts
+      // agentToolResultSchema),provider 输出没有 content 但有 string text。
+      const completedData = data as Record<string, unknown>;
+      if (!Array.isArray(completedData.content) && typeof completedData.text === 'string') {
+        const providerText = completedData.text as string;
+        const providerAgentType = typeof completedData.agentType === 'string' ? completedData.agentType : undefined;
+        const stopReason = completedData.stopReason;
+        const errorMessage = typeof completedData.errorMessage === 'string' ? completedData.errorMessage : undefined;
+        // 失败(非 completed stopReason)时不要拿空 text 冒充成功;让父代理看到
+        // stopReason + errorMessage,避免它基于空结果继续瞎猜。
+        const isProviderError = stopReason !== undefined && stopReason !== 'completed';
+        const body = isProviderError
+          ? '(Subagent provider finished without a result.)'
+          : (providerText || '(Subagent provider completed but returned no output.)');
+        const meta = [
+          providerAgentType ? `provider: ${providerAgentType}` : '',
+          stopReason !== undefined && stopReason !== 'completed' ? `stopReason: ${String(stopReason)}` : '',
+          errorMessage ? `errorMessage: ${errorMessage}` : '',
+        ].filter(Boolean).join('\n');
+        return {
+          tool_use_id: toolUseID,
+          type: 'tool_result',
+          content: meta
+            ? [{ type: 'text' as const, text: body }, { type: 'text' as const, text: meta }]
+            : [{ type: 'text' as const, text: body }],
+        };
+      }
       const worktreeData = data as Record<string, unknown>;
       const worktreeInfoText = worktreeData.worktreePath ? `\nworktreePath: ${worktreeData.worktreePath}\nworktreeBranch: ${worktreeData.worktreeBranch}` : '';
       const isolationFallbackText = worktreeData.worktreeIsolationFallback

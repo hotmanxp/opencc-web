@@ -143,4 +143,34 @@ describe('getAnthropicClient model routing', () => {
     })
     expect(client.baseURL).toBe(ENV_BASE_URL)
   })
+
+  describe('providerOverride format routing (zai patch)', () => {
+    it("format: 'anthropic' → Anthropic SDK with override baseURL/apiKey", async () => {
+      const client = await getAnthropicClient({
+        maxRetries: 0,
+        model: 'deepseek-v4-flash',
+        providerOverride: {
+          model: 'deepseek-v4-flash',
+          baseURL: 'https://api.deepseek.com/anthropic',
+          apiKey: 'ds-key',
+          format: 'anthropic',
+        } as never,
+      })
+      expect(client.baseURL).toBe('https://api.deepseek.com/anthropic')
+    })
+
+    it('format 缺省（openai 语义）→ 仍走 openai-shim（mock 抛错证明未走 Anthropic 路径）', async () => {
+      await expect(
+        getAnthropicClient({
+          maxRetries: 0,
+          model: 'deepseek-v4-flash',
+          providerOverride: {
+            model: 'deepseek-v4-flash',
+            baseURL: 'https://api.deepseek.com/chat/completions',
+            apiKey: 'ds-key',
+          } as never,
+        }),
+      ).rejects.toThrow('openaiShim should not be invoked on the anthropic-native path')
+    })
+  })
 })

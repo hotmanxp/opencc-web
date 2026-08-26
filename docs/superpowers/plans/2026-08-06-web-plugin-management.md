@@ -2,6 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态：已过期(2026-08-16)**
+> 本文档提到的 `package.json` exports subpath(`@zn-ai/zn-agent-core/<subpath>`)已全部废除,运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出。本文档保留作为历史记录,不再代表当前实现。
+
 **Goal:** 在 zai Web 工具栏增加插件管理按钮，弹出弹框管理已安装插件与浏览 marketplace 安装，复用 opencc 现有服务层（`installPluginOp` / `uninstallPluginOp` / `setPluginEnabledOp` / `updatePluginOp` / `loadAllPlugins` / `refreshActivePlugins`）。
 
 **Architecture:** 服务层挂在 `OpenccRuntime.plugins` 命名空间上而非新开 bundle。`loadAllPlugins` 是模块级 memoize，每个 `-impl` 独立 esbuild 打包产生独立 vendor 副本，独立 `pluginFacade-impl` bundle 会清错缓存使热重载静默失效。`createOpenccRuntime-impl.ts` 直接 import 兄弟 impl，zai 进程内只加载它一份。HTTP 层薄路由直调 `runtime.plugins.*`；DTO 通过 type-only 再导出共享。UI 沿用 antd Modal + Tabs + useAppStore 既有模式。

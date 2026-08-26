@@ -16,10 +16,10 @@ export { BRAND_NAME } from './constants/product.js'
 // ---------------------------------------------------------------------------
 
 /** Project-level config directory name (dot-prefixed) */
-export const CONFIG_DIRNAME = '.claude'
+export const CONFIG_DIRNAME = '.zai'
 
 /** User-level config directory name (dot-prefixed, inside home directory) */
-export const USER_CONFIG_DIRNAME = '.claude'
+export const USER_CONFIG_DIRNAME = '.zai'
 
 // ---------------------------------------------------------------------------
 // Settings files
@@ -31,32 +31,32 @@ export const SETTINGS_FILENAME = 'settings.json'
 /** Project-level local (gitignored) settings file */
 export const SETTINGS_LOCAL_FILENAME = 'settings.local.json'
 
-/** Full project settings path: .claude/settings.json */
+/** Full project settings path: .zai/settings.json */
 export const SETTINGS_PATH = `${CONFIG_DIRNAME}/${SETTINGS_FILENAME}`
 
-/** Full project local settings path: .claude/settings.local.json */
+/** Full project local settings path: .zai/settings.local.json */
 export const SETTINGS_LOCAL_PATH = `${CONFIG_DIRNAME}/${SETTINGS_LOCAL_FILENAME}`
 
-/** Full user-level settings path: ~/.claude/settings.json */
+/** Full user-level settings path: ~/.zai/settings.json */
 export const USER_SETTINGS_PATH = `~/${USER_CONFIG_DIRNAME}/${SETTINGS_FILENAME}`
 
 // ---------------------------------------------------------------------------
 // Sub-directories
 // ---------------------------------------------------------------------------
 
-/** Skills directory: .claude/skills/ */
+/** Skills directory: .zai/skills/ */
 export const SKILLS_DIRNAME = 'skills'
 export const SKILLS_PATH = `${CONFIG_DIRNAME}/${SKILLS_DIRNAME}`
 
-/** Loop markdown file: .claude/loop.md */
+/** Loop markdown file: .zai/loop.md */
 export const LOOP_FILENAME = 'loop.md'
 export const LOOP_PATH = `${CONFIG_DIRNAME}/${LOOP_FILENAME}`
 
-/** Agent definitions directory: .claude/agents/ */
+/** Agent definitions directory: .zai/agents/ */
 export const AGENTS_DIRNAME = 'agents'
 export const AGENTS_PATH = `${CONFIG_DIRNAME}/${AGENTS_DIRNAME}`
 
-/** Wiki directory: .claude/wiki/ */
+/** Wiki directory: .zai/wiki/ */
 export const WIKI_DIRNAME = 'wiki'
 export const WIKI_PATH = `${CONFIG_DIRNAME}/${WIKI_DIRNAME}`
 

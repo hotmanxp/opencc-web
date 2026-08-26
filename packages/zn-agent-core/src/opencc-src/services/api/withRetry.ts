@@ -61,6 +61,13 @@ const DEFAULT_MAX_RETRIES = 10
 const MAX_CONFIGURABLE_RETRIES = 100
 const FLOOR_OUTPUT_TOKENS = 3000
 const MAX_529_RETRIES = 3
+// rate_limit(429) 重试上限:限流风暴下每请求 ×N 次重试会把并发放大到
+// 上游网关无法恢复。收紧到 3 次(与 529 对齐),避免共享 key 的多实例
+// 一起把重试堆积成请求风暴。
+const MAX_429_RETRIES = 3
+// per-provider 429 冷却窗口默认值(ms)。收到 429 后该 provider 的所有
+// 请求先等窗口结束再发,让上游限流复位,而不是各自立刻重试。
+const DEFAULT_RATE_LIMIT_COOLDOWN_MS = 30_000
 export const DEFAULT_RETRY_DELAY_MS = 500
 export const BASE_DELAY_MS = DEFAULT_RETRY_DELAY_MS
 const MAX_RETRY_DELAY_BASE_MS = 60_000
@@ -113,6 +120,55 @@ const PERSISTENT_MAX_ATTEMPTS = 100
 // (tests must enable UNATTENDED_RETRY via `bun test --feature=UNATTENDED_RETRY`
 // and set CLAUDE_CODE_UNATTENDED_RETRY to exercise this path).
 export { PERSISTENT_MAX_ATTEMPTS as _PERSISTENT_MAX_ATTEMPTS_FOR_TEST, isPersistentRetryEnabled }
+
+// ---------------------------------------------------------------------------
+// Per-provider 429 rate-limit cooldown gate.
+//
+// 请求风暴的根因之一:多个 zai 实例共享同一 provider key,并发请求同时撞
+// 429 后各自指数退避重试,重试又立刻被限流 → 请求数随时间二次增长。这里
+// 加一个 per-provider 冷却门:任何一路收到 429 后,把该 provider 标记为
+// "冷却中",后续所有请求在窗口内先 sleep 再发,让上游限流复位而不是继续
+// 堆积。窗口默认 30s(可用 retry-after 覆盖)。
+// ---------------------------------------------------------------------------
+const rateLimitCooldowns = new Map<string, { until: number }>()
+
+function getRateLimitGate(): { remainingMs: number } | null {
+  const now = Date.now()
+  for (const [provider, entry] of rateLimitCooldowns) {
+    if (entry.until <= now) {
+      rateLimitCooldowns.delete(provider)
+      continue
+    }
+    if (provider === getAPIProvider()) {
+      return { remainingMs: entry.until - now }
+    }
+  }
+  return null
+}
+
+function setRateLimitCooldown(retryAfterMs?: number | null): void {
+  const windowMs =
+    retryAfterMs && retryAfterMs > 0
+      ? retryAfterMs
+      : DEFAULT_RATE_LIMIT_COOLDOWN_MS
+  rateLimitCooldowns.set(getAPIProvider(), { until: Date.now() + windowMs })
+}
+
+/**
+ * zai patch (2026-08-08): streaming-mode 的 429/529 错误发生在 withRetry
+ * 的 operation 之外(错误在流迭代时抛出),不会走本模块 catch →
+ * setRateLimitCooldown 的路径,导致限流后冷却门从不生效、请求在
+ * 429 后立刻重发(请求风暴)。export 通知入口,让 claude.ts 的流错误
+ * 处理处补触发同一个冷却门,使后续请求在 getRateLimitGate 等待窗口结束。
+ */
+export function notifyRateLimitCooldown(retryAfterMs?: number | null): void {
+  setRateLimitCooldown(retryAfterMs ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS)
+}
+
+/** 测试 seam:清空冷却门状态,避免单测间互相污染。 */
+export function __resetRateLimitStateForTests(): void {
+  rateLimitCooldowns.clear()
+}
 
 function isPersistentRetryEnabled(): boolean {
   return false
@@ -211,11 +267,22 @@ export async function* withRetry<T>(
   }
   let client: Anthropic | null = null
   let consecutive529Errors = options.initialConsecutive529Errors ?? 0
+  let consecutive429Errors = 0
   let lastError: unknown
   let persistentAttempt = 0
   for (let attempt = 1; attempt <= maxRetries + 1; attempt++) {
     if (options.signal?.aborted) {
       throw new APIUserAbortError()
+    }
+
+    // 429 冷却门:同一 provider 最近收到过 rate_limit 时,本请求先等
+    // 窗口结束再发(带少量抖动避免同时唤醒),让上游限流复位。abort
+    // 会立即中断等待。
+    const gate = getRateLimitGate()
+    if (gate) {
+      await sleep(gate.remainingMs + Math.random() * 2000, options.signal, {
+        abortError,
+      })
     }
 
     // Capture whether fast mode is active before this attempt
@@ -359,6 +426,42 @@ export async function* withRetry<T>(
         handleFastModeRejectedByAPI()
         retryContext.fastMode = false
         continue
+      }
+
+      // zai patch (2026-08-08): 强制冷却请求 + 注释重置逻辑
+      //
+      // 修复背景:z ai session sess-1786118761277-6ybrv2mm 30 分钟
+      // 累积 171 个 429 错误,但 30 秒 per-provider cooldown 完全没生效。
+      // 根因是 minimax proxy 在 streaming 模式下抛出的 429 error 对象
+      // `error.status` 不可靠(参考 is529Error 注释 "the SDK sometimes
+      // fails to properly pass the 529 status code during streaming" —
+      // 429 同样问题),导致:
+      //   1) `error.status === 429` 检查失败 → 走 else 分支
+      //   2) `consecutive429Errors = 0` 重置 → 永远到不了 MAX(3)
+      //   3) `setRateLimitCooldown` 不调用 → cooldown Map 永远空
+      //   4) 30s sleep 永远 sleep 0ms
+      //
+      // 临时修复:
+      //   1) 注释 else 重置分支 — 不再因"非 429 错误"重置计数
+      //   2) 把 setRateLimitCooldown 移到 if 外 — 任何 SDK error 都触发
+      //      冷却(不再依赖 error.status === 429 判断)
+      //   3) 留 MAX_429_RETRIES 限制 — 3 次连续失败后 throw CannotRetryError
+      //
+      // 这样无论 SDK 抛的错误 status 是什么,每次失败都会:
+      //   - consecutive429Errors++(永不重置)
+      //   - setRateLimitCooldown 30s(让 rateLimitCooldowns Map 始终有 entry)
+      //   - 下次 attempt 起点 getRateLimitGate() 返回 30s → sleep 30s
+      //   - 3 次连续失败后 throw CannotRetryError → queryLoop 终止
+      //
+      // 长期修复方向(vendor 应该做):
+      //   - error.status 不可靠时,fallback 到 error.message.includes('rate_limit')
+      //   - streaming mode SDK 错误的 status code 修复
+      consecutive429Errors++
+      setRateLimitCooldown(
+        getRetryAfterMs(error as APIError) ?? DEFAULT_RATE_LIMIT_COOLDOWN_MS,
+      )
+      if (consecutive429Errors >= MAX_429_RETRIES) {
+        throw new CannotRetryError(error, retryContext)
       }
 
       // Non-foreground sources bail immediately on 529 — no retry amplification

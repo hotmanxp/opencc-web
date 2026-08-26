@@ -47,20 +47,47 @@ export type RunRipgrepOptions = {
 const DEFAULT_TIMEOUT_MS = 10_000
 const SIGKILL_AFTER_MS = 5_000
 
-/** Resolve vendor ripgrep binary for the current platform/arch. */
-export function resolveRgVendor(): { rgPath: string; mode: 'vendor' } | null {
-  const platform = process.platform
-  const arch = process.arch
+/**
+ * Resolve vendor ripgrep binary relative to a module location `here`.
+ *
+ * The module is consumed in several runtime shapes, each placing `here` at
+ * a different depth below the package root (vendor/ripgrep/ lives at the
+ * package root):
+ *   - esbuild bundle (via package exports): dist/opencc-core.mjs
+ *     → here = <pkg>/dist            → 1 level up
+ *   - tsc-compiled subpath (legacy):  dist/compat/vendor/*.js
+ *     → here = <pkg>/dist/compat/vendor → 3 levels up
+ *   - tsx / vitest source:            src/compat/vendor/*.ts
+ *     → here = <pkg>/src/compat/vendor → 3 levels up
+ *
+ * Try several depths so we still resolve when `here` moves (e.g. inlining
+ * into dist/opencc-core.mjs — a single hardcoded depth overshoots to the
+ * monorepo root and the search reports "ripgrep 未安装").
+ */
+export function resolveVendorRgPath(
+  here: string,
+  platform: string,
+  arch: string,
+): string | null {
   if (!['darwin', 'win32'].includes(platform)) return null
   if (!['arm64', 'x64'].includes(arch)) return null
   const ext = platform === 'win32' ? '.exe' : ''
   const binName = `rg-${platform}-${arch}${ext}`
+
+  for (let up = 1; up <= 4; up++) {
+    const parts = Array(up).fill('..')
+    const vendorPath = join(here, ...parts, 'vendor', 'ripgrep', binName)
+    if (existsSync(vendorPath)) return vendorPath
+  }
+
+  return null
+}
+
+/** Resolve vendor ripgrep binary for the current platform/arch. */
+export function resolveRgVendor(): { rgPath: string; mode: 'vendor' } | null {
   const here = dirname(fileURLToPath(import.meta.url))
-  // compat/vendor/ → ../../../vendor/ripgrep/  (packages/zn-agent-core/vendor/ripgrep/)
-  const vendorPath = join(
-    here, '..', '..', '..', 'vendor', 'ripgrep', binName,
-  )
-  return existsSync(vendorPath) ? { rgPath: vendorPath, mode: 'vendor' } : null
+  const rgPath = resolveVendorRgPath(here, process.platform, process.arch)
+  return rgPath ? { rgPath, mode: 'vendor' } : null
 }
 
 /** Resolve ripgrep via PATH (`which rg` / `where rg`). */

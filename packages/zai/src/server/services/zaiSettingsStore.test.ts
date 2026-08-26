@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BUILTIN_DEFAULT_SETTINGS } from '../../shared/settings.js'
+import { DEFAULT_PERMISSIONS } from './zaiSettingsCache.js'
 
 /**
  * Tests for the zaiSettingsStore helper. We redirect `homedir()` into a
@@ -50,7 +51,8 @@ afterEach(() => {
 describe('zaiSettingsStore', () => {
   it('seeds and returns builtin defaults when settings.json is absent', async () => {
     const { readZaiSettings } = await import('./zaiSettingsStore.js')
-    expect(await readZaiSettings()).toEqual(BUILTIN_DEFAULT_SETTINGS)
+    // builtin defaults + the boot-time permissions backfill
+    expect(await readZaiSettings()).toEqual({ ...BUILTIN_DEFAULT_SETTINGS, permissions: DEFAULT_PERMISSIONS })
   })
 
   it('falls back to builtin defaults when settings.json contains invalid JSON', async () => {
@@ -62,7 +64,7 @@ describe('zaiSettingsStore', () => {
       'utf-8',
     )
     const { readZaiSettings } = await import('./zaiSettingsStore.js')
-    expect(await readZaiSettings()).toEqual(BUILTIN_DEFAULT_SETTINGS)
+    expect(await readZaiSettings()).toEqual({ ...BUILTIN_DEFAULT_SETTINGS, permissions: DEFAULT_PERMISSIONS })
   })
 
   it('round-trips outputStyle through writeZaiSettings', async () => {

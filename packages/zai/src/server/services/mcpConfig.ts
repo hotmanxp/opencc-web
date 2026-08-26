@@ -26,7 +26,7 @@ type McpJsonFile = {
   enabledMcpjsonServers?: unknown
   disabledMcpjsonServers?: unknown
   // Claude Code compat: global disable list, typically in user-scope
-  // (~/.claude.json / ~/.zai.json). Applied as final filter across all
+  // (~/.zai.json / ~/.zai.json). Applied as final filter across all
   // scopes' merged spec list.
   disabledMcpServers?: unknown
 }
@@ -64,10 +64,10 @@ type ScopeLoadResult = {
  *
  *   user (cross-project, override project):
  *     - $HOME/.zai.json
- *     - $HOME/.claude.json
+ *     - $HOME/.zai.json
  *
  *   local (project-scoped, override project, gitignored):
- *     - $cwd/.claude/settings.local.json
+ *     - $cwd/.zai/settings.local.json
  *
  *   project (committed to repo, walk up from cwd to root):
  *     - $cwd/.mcp.json, $parent/.mcp.json, ..., $root/.mcp.json
@@ -127,12 +127,12 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
     }
   }
 
-  // 2. local: $cwd/.claude/settings.local.json (zai's project-local).
-  //    Falls back to ~/.claude/settings.local.json only if cwd version missing
-  //    (rare — opencc keeps project-local inside .claude/).
+  // 2. local: $cwd/.zai/settings.local.json (zai's project-local).
+  //    Falls back to ~/.zai/settings.local.json only if cwd version missing
+  //    (rare — opencc keeps project-local inside .zai/).
   const localPaths = [
-    join(cwd, '.claude', 'settings.local.json'),
-    join(homedir(), '.claude', 'settings.local.json'),
+    join(cwd, '.zai', 'settings.local.json'),
+    join(homedir(), '.zai', 'settings.local.json'),
   ]
   const localLoads: ScopeLoadResult[] = []
   for (const p of localPaths) {
@@ -143,7 +143,7 @@ export function loadMcpServers(cwd: string): McpServerSpec[] {
   }
 
   // 3. user: $HOME/.zai.json (zai-specific) if present, else fall back to
-  //    $HOME/.claude.json (opencc compat). Mutually exclusive —
+  //    $HOME/.claude.json (legacy upstream claude-code). Mutually exclusive —
   //    zai.json fully shadows claude.json so users on a shared box can't leak
   //    MCP servers across tools.
   const home = homedir()
@@ -204,13 +204,13 @@ export function describeMcpSources(cwd: string): ScopeLoadResult[] {
     out.push({ scope: 'project', source: path, servers: parseFile(path)?.servers ?? [] })
   }
   // local
-  for (const p of [join(cwd, '.claude', 'settings.local.json'),
-                   join(homedir(), '.claude', 'settings.local.json')]) {
+  for (const p of [join(cwd, '.zai', 'settings.local.json'),
+                   join(homedir(), '.zai', 'settings.local.json')]) {
     out.push({ scope: 'local', source: p, servers: parseFile(p)?.servers ?? [] })
   }
   // user
   const zj = join(homedir(), '.zai.json')
-  const cj = join(homedir(), '.claude.json')
+  const cj = join(homedir(), '.zai.json')
   const userSource = existsSync(zj) ? zj : existsSync(cj) ? cj : zj
   out.push({
     scope: 'user',

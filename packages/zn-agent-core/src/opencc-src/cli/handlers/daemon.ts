@@ -180,9 +180,9 @@ function broadcastInbox(
   inbox.messages.push({...msg, id})
 }
 
-/** Path under `~/.claude/background/<shortId>.log` for a worker's captured output. */
+/** Path under `~/.zai/background/<shortId>.log` for a worker's captured output. */
 export function getJobLogPath(shortId: JobShortId): string {
-  return join(homedir(), '.claude', 'background', `${shortId}.log`)
+  return join(homedir(), '.zai', 'background', `${shortId}.log`)
 }
 
 /** Fire-and-forget save of the in-memory job map to the on-disk roster. */
@@ -206,7 +206,7 @@ export interface SupervisorOptions {
   sockPath?: string
   /**
    * Override the production roster path. Same reason as `sockPath`.
-   * Defaults to `~/.claude/roster.json`.
+   * Defaults to `~/.zai/roster.json`.
    */
   rosterPath?: string
   /**

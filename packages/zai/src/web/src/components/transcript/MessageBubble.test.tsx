@@ -1,8 +1,9 @@
 // @vitest-environment happy-dom
-import { describe, expect, test, vi } from "vitest"
+import { describe, expect, test, vi, beforeEach, afterEach } from "vitest"
 import "@testing-library/jest-dom"
-import { render, screen, fireEvent } from "@testing-library/react"
+import { render, screen, fireEvent, act } from "@testing-library/react"
 import { MessageBubble, MessageCopyButton } from "./MessageBubble.js"
+import { useAppStore } from "../../store/useAppStore.js"
 
 const msgMock = vi.hoisted(() => ({ success: vi.fn(), warning: vi.fn() }))
 vi.mock("antd", async (importOriginal) => {
@@ -280,5 +281,158 @@ describe("MessageBubble — Skill tool pill", () => {
     const matches = screen.getAllByText("plugin:superpowers:systematic-debugging")
     expect(matches.length).toBeGreaterThan(0)
     expect(screen.getByText("已完成")).toBeInTheDocument()
+  })
+})
+
+describe("MessageBubble — thinking_delta streaming 透传", () => {
+  test("content_block_delta + thinking_delta, 外层 streaming=true → 动画 className 挂上", () => {
+    // 透传外层 streaming (由 MessageListView 决定: thinking 是 messages
+    // 末尾时为 true). 这里验证 streaming=true 时 .zai-thinking-pill-active
+    // 挂上 + 三个点渲染.
+    const { container } = render(
+      <MessageBubble
+        streaming={true}
+        msg={{
+          eventId: "d-1",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "content_block_delta",
+          delta: { type: "thinking_delta", thinking: "trace..." },
+        }}
+      />,
+    )
+    expect(container.querySelector(".zai-thinking-pill-active")).not.toBeNull()
+    expect(container.querySelector(".zai-think-dot-1")).not.toBeNull()
+    expect(container.querySelector(".zai-think-dot-2")).not.toBeNull()
+    expect(container.querySelector(".zai-think-dot-3")).not.toBeNull()
+  })
+
+  test("content_block_delta + thinking_delta, 外层 streaming=false → 不挂动画 className", () => {
+    // text 已经切到, MessageListView 给外层 streaming=false → thinking_delta
+    // 路径也不应有动画.
+    const { container } = render(
+      <MessageBubble
+        streaming={false}
+        msg={{
+          eventId: "d-1",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "content_block_delta",
+          delta: { type: "thinking_delta", thinking: "trace..." },
+        }}
+      />,
+    )
+    expect(container.querySelector(".zai-thinking-pill-active")).toBeNull()
+    expect(container.querySelector(".zai-think-dot-1")).toBeNull()
+  })
+})
+
+describe("MessageBubble — user bubble maxWidth", () => {
+  const SPLIT_PANE_KEY = "zai.splitPane.open"
+
+  // 读 ant-card 节点上挂的 inline maxWidth. antd Card 把 style 透传到最外层
+  // .ant-card 节点 (不是 .ant-card-body). happy-dom 下 inline style 是 string,
+  // 这里直接断言百分比是否一致 — 不依赖 getComputedStyle.
+  const userBubbleMaxWidth = (container: HTMLElement): string | null => {
+    const wrap = container.querySelector('[data-testid="user-bubble-container"]')
+    if (!wrap) return null
+    const card = wrap.querySelector(".ant-card") as HTMLElement | null
+    return card ? (card.style.maxWidth || null) : null
+  }
+
+  beforeEach(() => {
+    // 隔离每个用例的 store + localStorage 状态, 避免跨用例泄漏.
+    useAppStore.setState({ isMobile: false })
+    window.localStorage.removeItem(SPLIT_PANE_KEY)
+  })
+
+  afterEach(() => {
+    useAppStore.setState({ isMobile: false })
+    window.localStorage.removeItem(SPLIT_PANE_KEY)
+  })
+
+  test("桌面端无分屏: user 气泡 maxWidth 保持 70%", () => {
+    const { container } = render(
+      <MessageBubble
+        msg={{
+          eventId: "u-desktop",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "user.text",
+          text: "hello",
+        }}
+      />,
+    )
+    expect(userBubbleMaxWidth(container)).toBe("70%")
+  })
+
+  test("isMobile=true (移动端): user 气泡 maxWidth 撑满 100%", () => {
+    act(() => {
+      useAppStore.getState().setIsMobile(true)
+    })
+    const { container } = render(
+      <MessageBubble
+        msg={{
+          eventId: "u-mobile",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "user.text",
+          text: "hello",
+        }}
+      />,
+    )
+    expect(userBubbleMaxWidth(container)).toBe("100%")
+  })
+
+  test("分屏开启 (splitPaneOpen=true): user 气泡 maxWidth 撑满 100%", () => {
+    // 在 mount 之前写入 localStorage, 让 MessageBubble 的 lazy initializer
+    // 读到 true, 避免依赖 storage 事件时序 (happy-dom 下不同浏览器行为差异).
+    window.localStorage.setItem(SPLIT_PANE_KEY, JSON.stringify(true))
+    const { container } = render(
+      <MessageBubble
+        msg={{
+          eventId: "u-split",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "user.text",
+          text: "hello",
+        }}
+      />,
+    )
+    expect(userBubbleMaxWidth(container)).toBe("100%")
+  })
+
+  test("分屏开启 → 关闭: 切回 70% (响应 zai-localstorage-sync)", () => {
+    window.localStorage.setItem(SPLIT_PANE_KEY, JSON.stringify(true))
+    const { container } = render(
+      <MessageBubble
+        msg={{
+          eventId: "u-split-toggle",
+          sessionId: "sess-1",
+          ts: 1,
+          turnIndex: 0,
+          type: "user.text",
+          text: "hello",
+        }}
+      />,
+    )
+    expect(userBubbleMaxWidth(container)).toBe("100%")
+    // 模拟 SplitPane / Agent.tsx 同 tab 内把 localStorage 翻成 false, 通过
+    // zai-localstorage-sync 通知同 tab siblings. MessageBubble 的 listener
+    // 应在收到事件后 setState, 下一帧 maxWidth 回落到 70%.
+    window.localStorage.setItem(SPLIT_PANE_KEY, JSON.stringify(false))
+    act(() => {
+      window.dispatchEvent(
+        new CustomEvent("zai-localstorage-sync", {
+          detail: { key: SPLIT_PANE_KEY, value: JSON.stringify(false) },
+        }),
+      )
+    })
+    expect(userBubbleMaxWidth(container)).toBe("70%")
   })
 })

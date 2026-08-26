@@ -44,6 +44,13 @@ export function useAutoScrollToBottom(
   // streaming 期间 "用户需要看新内容" 的关键信号 — 比 nextLength 更准:
   // streaming delta 时 length 不变但 scrollHeight 一直在涨。
   const prevScrollHeightRef = useRef<number>(0)
+  // 追踪上一次 effect 时的 scrollTop (post-scrollTo). 用于判定 "user 上一帧
+  // 在底部而本帧仍停在原 scrollTop" — 当两次 effect 之间 scrollHeight 涨超
+  // 80px 时, scrollTo({top:scrollHeight}) 被浏览器 clamp 限到 scrollHeight -
+  // clientHeight, 但 React 后续 render 让 scrollHeight 又涨, 此刻 scrollTop
+  // 仍停在旧 max 处, distanceToBottomPx 看起来 > 80 误判 userScrolledAway.
+  // 配合 contentGrew 用, 让 hook 知道 "user 没动过 + 内容在脚下, 跟".
+  const prevScrollTopRef = useRef<number | null>(null)
   // 追踪上一次 effect 时的 messages 引用, 折叠视图 fallback 路径用:
   // streaming delta / tool_result 都是 in-place 更新 (引用换但 length 不变),
   // 引用变化是 "store 真的写过" 的可靠信号.
@@ -73,6 +80,14 @@ export function useAutoScrollToBottom(
       // 用 delta 而非绝对值, 避免 resize 字体/窗口时的 false positive。
       const contentGrew = el.scrollHeight > prevScrollHeightRef.current
 
+      // wasAtBottom: 上一帧 scrollTop 与本帧几乎一致 (5px 容差, 过滤滚动条 jitter
+      // / iOS rubber-band). 配合 contentGrew 使用, 让 rule #5 在 scrollTop 被 clamp
+      // 落后于新 scrollHeight 时仍 follow. 首次 effect prevScrollTopRef === null,
+      // 显式排除 (跟 messagesRefChanged 一样的初始化路径处理).
+      const wasAtBottom =
+        prevScrollTopRef.current !== null &&
+        Math.abs(el.scrollTop - prevScrollTopRef.current) < 5
+
       // 折叠视图 fallback 信号: messages 数组引用换了 (即 store 真的写过),
       // 无论 length 是否增长、scrollHeight 是否增长, 都视为"有新数据要跟".
       // 折叠视图 (maxHeight:140 + overflow:hidden) clamp 让 contentGrew 在文字
@@ -85,7 +100,7 @@ export function useAutoScrollToBottom(
         opts?.messagesRef !== undefined &&
         opts.messagesRef !== prevMessagesRef.current
 
-      const decision = decideAutoScroll({
+      const { decision, reason } = decideAutoScroll({
         prevLength: prevLengthRef.current,
         nextLength,
         contentGrew,
@@ -93,18 +108,28 @@ export function useAutoScrollToBottom(
         distanceToBottomPx,
         folded: opts?.folded,
         messagesRefChanged,
+        wasAtBottom,
       })
 
-      // DEBUG: log scroll decision
-      console.debug('[autoScroll]', {
+      // DEBUG: 每条规则都带 reason, follow / stay 用不同 tag 方便 grep:
+      //   [autoScroll-follow]                       → 滚到底
+      //   [autoScroll-stay:noChange]                → rule #4: length 没增 + scrollHeight 没涨
+      //   [autoScroll-stay:userScrolledAway]        → rule #5: 用户真上滚
+      //   [autoScroll-stay:wasAtBottomContentGrew]  → rule #5a follow, 但 tag 也用 stay 一致即可
+      //   [autoScroll-stay:scrollFollowLocked]      → rule #1: 用户 5s 锁内
+      // 注意: console.debug 保留 .debug 级别, dev console 不需要过滤也能静音.
+      const tag = decision === 'follow' ? '[autoScroll-follow]' : `[autoScroll-stay:${reason}]`
+      console.debug(tag, {
         prevLength: prevLengthRef.current,
         nextLength,
         contentGrew,
+        wasAtBottom,
         scrollLocked,
         distanceToBottomPx,
         folded: opts?.folded,
         messagesRefChanged,
         decision,
+        reason,
         scrollHeight: el.scrollHeight,
         scrollTop: el.scrollTop,
         clientHeight: el.clientHeight,
@@ -123,9 +148,12 @@ export function useAutoScrollToBottom(
       // 不管 'follow' 还是 'stay' 都更新 prev, 让 delta 这条同样走 length===prev
       // 路径直接早退 (避免 init 之后 prev 永远 -1)。scrollHeight 也同步,
       // 否则下次 effect 会把"我们刚刚 scrollTo 完留下的新高度"误算成 contentGrew,
-      // 触发无谓重滚。messagesRef 同步让下次 effect 正确判断引用变化.
+      // 触发无谓重滚。scrollTop 同步让下次 effect 算 wasAtBottom (clamp 落后
+      // 补滚这条信号靠的就是 prevScrollTop 与本帧 scrollTop 是否一致)。
+      // messagesRef 同步让下次 effect 正确判断引用变化.
       prevLengthRef.current = nextLength
       prevScrollHeightRef.current = el.scrollHeight
+      prevScrollTopRef.current = el.scrollTop
       if (opts?.messagesRef !== undefined) {
         prevMessagesRef.current = opts.messagesRef
       }

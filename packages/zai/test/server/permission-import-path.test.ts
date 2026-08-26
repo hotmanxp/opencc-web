@@ -42,23 +42,19 @@ describe('permissions import path regression', () => {
     expect(m).toBeNull()
   })
 
-  it('services/permissionMode.ts imports EXTERNAL_PERMISSION_MODES from opencc-src subpath', () => {
+  // services/permissionMode.ts is now a re-export shim — getDefaultMode
+  // lives in compat/permissions.ts so legacyTranscriptStore (compat/runtime)
+  // can use the same fallback for legacy session meta. Verify the shim
+  // shape instead of the old "imports constants directly" assertions.
+  it('services/permissionMode.ts re-exports getDefaultMode from compat', () => {
     expect(PERMISSION_MODE_TS).toMatch(
-      /from\s+['"]@zn-ai\/zn-agent-core\/opencc-src\/permissions['"]/,
+      /export\s*\{[^}]*getDefaultMode[^}]*\}\s*from\s*['"]@zn-ai\/zn-agent-core\/compat\/permissions['"]/,
     )
   })
 
-  it('services/permissionMode.ts imports UserFacingPermissionMode from compat', () => {
+  it('services/permissionMode.ts re-exports UserFacingPermissionMode from compat', () => {
     expect(PERMISSION_MODE_TS).toMatch(
-      /import\s+type\s*\{[^}]*UserFacingPermissionMode[^}]*\}\s+from\s+['"]@zn-ai\/zn-agent-core\/compat\/permissions['"]/,
+      /export\s+type\s*\{[^}]*UserFacingPermissionMode[^}]*\}\s*from\s+['"]@zn-ai\/zn-agent-core\/compat\/permissions['"]/,
     )
-  })
-
-  it('services/permissionMode.ts does NOT import EXTERNAL_PERMISSION_MODES from package root', () => {
-    const stripped = stripOpenccSrcImport(PERMISSION_MODE_TS)
-    const m = stripped.match(
-      /import\s*\{[^}]*EXTERNAL_PERMISSION_MODES[^}]*\}\s*from\s*['"]@zn-ai\/zn-agent-core['"]/,
-    )
-    expect(m).toBeNull()
   })
 })

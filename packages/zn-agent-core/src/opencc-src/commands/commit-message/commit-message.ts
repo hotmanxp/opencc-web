@@ -20,7 +20,7 @@ export const USAGE = [
   '  /commit-message status',
   '  /commit-message off',
   '  /commit-message default',
-  '  /commit-message set "Generated with OpenCC using GPT-5.5"',
+  '  /commit-message set "Generated with Z.Ai using GPT-5.5"',
   '  /commit-message co-author "Name" name@example.com',
 ].join('\n')
 

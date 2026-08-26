@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import { readFileSync } from 'node:fs'
 
-// Mock fs so we control what ~/.zai/settings.json and ~/.claude.json return.
+// Mock fs so we control what ~/.zai/settings.json and ~/.zai.json return.
 vi.mock('node:fs', async () => {
   const actual = await vi.importActual<typeof import('node:fs')>('node:fs')
   return { ...actual, readFileSync: vi.fn() }
@@ -133,7 +133,7 @@ describe('resolveModel', () => {
 })
 
 describe('resolveCurrentProvider', () => {
-  it('returns anthropic when ~/.claude.json is missing', () => {
+  it('returns anthropic when ~/.zai.json is missing', () => {
     vi.mocked(readFileSync).mockImplementation(() => { throw new Error('ENOENT') })
     expect(resolveCurrentProvider()).toBe('anthropic')
   })
@@ -233,5 +233,34 @@ describe('applyModelMapping', () => {
     expect(applyModelMapping('haiku', { envMapping: 'haiku=', provider: 'anthropic' })).toEqual({
       model: 'haiku',
     })
+  })
+})
+
+// zai patch (2026-08-13): resolveModel now threads sessionProviderId
+// from transcript.meta into the result so the modelCaller matcher can
+// route the request to the exact provider the user picked when several
+// provider profiles host the same model name.
+describe('resolveModel — providerId plumbing', () => {
+  it('forwards sessionProviderId when source is session', () => {
+    setSettings({ env: {} })
+    const r = resolveModel({ sessionModel: 'MiniMax-M3', sessionProviderId: 'provider_a', cwd: '/tmp' })
+    expect(r.source).toBe('session')
+    expect(r.model).toBe('MiniMax-M3')
+    expect(r.providerId).toBe('provider_a')
+  })
+
+  it('omits providerId when sessionProviderId is empty / null', () => {
+    setSettings({ env: {} })
+    const empty = resolveModel({ sessionModel: 'MiniMax-M3', sessionProviderId: '', cwd: '/tmp' })
+    expect(empty.providerId).toBeUndefined()
+    const nullish = resolveModel({ sessionModel: 'MiniMax-M3', sessionProviderId: null, cwd: '/tmp' })
+    expect(nullish.providerId).toBeUndefined()
+  })
+
+  it('omits providerId when source is not session (env/settings/builtin)', () => {
+    setSettings({ env: { ANTHROPIC_DEFAULT_SONNET_MODEL: 'MiniMax-M3' } })
+    const r = resolveModel({ sessionModel: null, sessionProviderId: 'ignored', cwd: '/tmp' })
+    expect(r.source).toBe('env_default_sonnet')
+    expect(r.providerId).toBeUndefined()
   })
 })

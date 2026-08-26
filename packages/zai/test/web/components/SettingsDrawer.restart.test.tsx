@@ -12,25 +12,62 @@ afterEach(() => {
 })
 
 describe('SettingsDrawer service section', () => {
+  // isManagedChild=true 后,整个"服务"section 仅在 instance 子实例(带
+  // ZAI_INSTANCE_ID,instance manager 派生)时渲染。SettingsDrawer 的
+  // useAppStore 读 instanceContext.isManagedChild + instanceId,这里通过
+  // setState 把它打开,模拟 Layout hydrate 之后的状态。
+  const setManagedChild = (isManagedChild: boolean, instanceId: string | null = 'inst_abc') => {
+    useAppStore.setState({
+      settingsDrawerOpen: true,
+      serviceState: null,
+      instanceContext: {
+        cwd: '/tmp/x',
+        cwdName: 'x',
+        branch: null,
+        isManagedChild,
+        instanceId,
+      } as never,
+    })
+  }
+
   it('does not render when drawer closed', () => {
     useAppStore.setState({ settingsDrawerOpen: false })
     const { queryByTestId } = render(<SettingsDrawer />)
     expect(queryByTestId('settings-service-section')).toBeNull()
   })
 
-  it('renders section with restart button when drawer open', () => {
+  it('renders section with restart button when drawer open and isManagedChild with instanceId', () => {
     useAppStore.setState({ settingsDrawerOpen: true, serviceState: null })
+    setManagedChild(true)
     const { getByTestId, getByRole } = render(<SettingsDrawer />)
     expect(getByTestId('settings-service-section')).toBeTruthy()
     expect(getByRole('button', { name: /重启服务/ })).toBeTruthy()
   })
 
-  it('shows confirmation modal before calling API', async () => {
+  it('does not render section on managed child without instanceId (top-level entry)', () => {
     useAppStore.setState({ settingsDrawerOpen: true, serviceState: null })
+    setManagedChild(true, null)
+    const { queryByTestId } = render(<SettingsDrawer />)
+    expect(queryByTestId('settings-service-section')).toBeNull()
+  })
+
+  it('does not render section when isManagedChild=false', () => {
+    useAppStore.setState({ settingsDrawerOpen: true, serviceState: null })
+    setManagedChild(false)
+    const { queryByTestId } = render(<SettingsDrawer />)
+    expect(queryByTestId('settings-service-section')).toBeNull()
+  })
+
+  it('shows confirmation modal before calling API', async () => {
+    setManagedChild(true)
     const origFetch = globalThis.fetch
     let called = 0
-    globalThis.fetch = vi.fn(() => {
-      called++
+    // 只统计重启相关调用 —— SettingsDrawer mount 时会拉一次
+    // GET /api/agent/settings(主 Agent 列表),那不算是"取消重启"语义下
+    // 的 API 调用,不应计入。
+    globalThis.fetch = vi.fn((url: unknown) => {
+      const u = String(url)
+      if (u.includes('/api/instances') || u.includes('/api/system')) called++
       return Promise.resolve({ ok: true, status: 202, json: async () => ({}) } as Response)
     })
     try {

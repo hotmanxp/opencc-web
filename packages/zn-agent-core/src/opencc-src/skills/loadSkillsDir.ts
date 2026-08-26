@@ -1,6 +1,7 @@
 import { realpath } from 'fs/promises'
 import ignore from 'ignore'
 import memoize from 'lodash-es/memoize.js'
+import { homedir } from 'os'
 import {
   basename,
   dirname,
@@ -82,7 +83,7 @@ export function getSkillsPath(
     case 'policySettings':
       return join(getManagedFilePath(), CONFIG_DIRNAME, dir)
     case 'userSettings':
-      return join(getClaudeConfigHomeDir(), dir)
+      return join(homedir(), '.agents', dir)
     case 'projectSettings':
       return `${CONFIG_DIRNAME}/${dir}`
     case 'plugin':
@@ -967,7 +968,7 @@ export async function discoverSkillDirsForPaths(
         try {
           await fs.stat(skillDir)
           // Skills dir exists. Before loading, check if the containing dir
-          // is gitignored — blocks e.g. node_modules/pkg/.claude/skills from
+          // is gitignored — blocks e.g. node_modules/pkg/.zai/skills from
           // loading silently. `git check-ignore` handles nested .gitignore,
           // .git/info/exclude, and global gitignore. Fails open outside a
           // git repo (exit 128 → false); the invocation-time trust dialog

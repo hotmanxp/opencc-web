@@ -6,8 +6,10 @@ import type {
 import { getAPIProvider } from 'src/utils/model/providers.js'
 import { isEnvTruthy } from '../../utils/envUtils.js'
 import type { PermissionResult } from 'src/utils/permissions/PermissionResult.js'
+import { fetchWithProxyRetry } from '../../services/api/fetchWithProxyRetry.js'
+import { resolveProviderRequest } from '../../services/api/providerConfig.js'
 
-import { z } from 'zod/v4'
+import { tuple, z } from 'zod/v4'
 import { getFeatureValue_CACHED_MAY_BE_STALE } from '../../services/analytics/growthbook.js'
 import { queryModelWithStreaming } from '../../services/api/claude.js'
 import { buildTool, type ToolDef } from '../../Tool.js'
@@ -166,6 +168,19 @@ function isCodexResponsesWebSearchEnabled(): boolean {
   return request.transport === 'codex_responses'
 }
 
+function isChatCompletionsWebSearchEnabled(): boolean {
+  return true
+  // Support OpenAI-compatible providers (DashScope, zn-nova, etc.) that use
+  // chat_completions transport and support enable_search parameter.
+  // Don't restrict to getAPIProvider() === 'openai' — many OpenAI-compatible
+  // providers (e.g., zn-nova gateway with qwen models) use this transport.
+  const request = resolveProviderRequest({
+    model: getMainLoopModel(),
+    baseUrl: process.env.OPENAI_BASE_URL,
+  })
+  return request.transport === 'chat_completions'
+}
+
 function hasNativeSearchFallback(): boolean {
   if (isCodexResponsesWebSearchEnabled()) return true
   const provider = getAPIProvider()
@@ -223,7 +238,7 @@ function buildCodexWebSearchInput(input: Input): Array<Record<string, unknown>> 
 
 function buildCodexWebSearchInstructions(): string {
   return [
-    'You are the OpenCC web search tool.',
+    'You are the Z.Ai web search tool.',
     'Search the web for the user query and return a concise factual answer.',
     'Include source URLs in the response.',
   ].join(' ')
@@ -440,6 +455,97 @@ async function runCodexWebSearch(
   )
 }
 
+// ---------------------------------------------------------------------------
+// Chat Completions API search (DashScope / OpenAI-compatible)
+// ---------------------------------------------------------------------------
+
+async function runChatCompletionsWebSearch(
+  input: Input,
+  signal: AbortSignal,
+): Promise<Output> {
+  const startTime = performance.now()
+  const request = resolveProviderRequest({
+    model: 'qwen3.7-plus',
+    baseUrl: 'https://zn-nova.paic.com.cn/novai/v1',
+  })
+  const apiKey = process.env.ANTHROPIC_AUTH_TOKEN
+
+  // Some OpenAI-compatible providers (e.g., zn-nova internal gateway) don't
+  // require authentication. Only add Authorization header if API key is set.
+
+  const body: Record<string, unknown> = {
+    model: request.resolvedModel,
+    messages: [
+      {
+        role: 'user',
+        content: input.query,
+      },
+    ],
+    // Non-streaming: zn-nova returns the composed answer in a single JSON
+    // body. Streaming is unreliable here — the gateway emits SSE frames as
+    // `data:{...}` (no space, which the previous parser's `data: ` prefix
+    // check skipped entirely) and carries most content in
+    // `delta.reasoning_content`; the question-answering tool only needs the
+    // final result anyway.
+    stream: false,
+    enable_search: true,
+  }
+
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+  if (apiKey) {
+    headers.Authorization = `Bearer ${apiKey}`
+  }
+
+  const response = await fetchWithProxyRetry(
+    `${request.baseUrl}/chat/completions`,
+    {
+      method: 'POST',
+      headers,
+      body: JSON.stringify(body),
+      signal,
+    },
+  )
+
+  if (!response.ok) {
+    const errorBody = await response.text().catch(() => 'unknown error')
+    throw new Error(
+      `Chat Completions web search error ${response.status}: ${errorBody}`,
+    )
+  }
+
+  const payload = await response.json()
+  const fullText = payload?.choices?.[0]?.message?.content ?? ''
+
+  const endTime = performance.now()
+  const durationSeconds = (endTime - startTime) / 1000
+
+  // Extract URLs from the response text (markdown links)
+  const urlRegex = /\[([^\]]+)\]\((https?:\/\/[^\s)]+)\)/g
+  const hits: { title: string; url: string }[] = []
+  let match: RegExpExecArray | null
+  while ((match = urlRegex.exec(fullText)) !== null) {
+    hits.push({ title: match[1], url: match[2] })
+  }
+
+  const results: (SearchResult | string)[] = []
+  if (fullText.trim()) results.push(fullText.trim())
+  if (hits.length > 0) {
+    results.push({
+      tool_use_id: 'chat-completions-search',
+      content: hits,
+    })
+  }
+  if (results.length === 0) results.push('No results found.')
+
+  return {
+    query: input.query,
+    results,
+    durationSeconds,
+  }
+}
+
 function makeOutputFromSearchResponse(
   result: BetaContentBlock[],
   query: string,
@@ -565,7 +671,7 @@ export const WebSearchTool = buildTool({
   maxResultSizeChars: 100_000,
   shouldDefer: true,
   async description(input) {
-    return `OpenCC wants to search the web for: ${input.query}`
+    return `Z.Ai wants to search the web for: ${input.query}`
   },
   userFacingName() {
     return 'Web Search'
@@ -576,28 +682,7 @@ export const WebSearchTool = buildTool({
     return summary ? `Searching for ${summary}` : 'Searching the web'
   },
   isEnabled() {
-    // 检查环境变量控制
-    if (!isEnvTruthy(process.env.CLAUDE_CODE_WEBTOOL_ENABEL)) {
-      return false
-    }
-    const mode = getProviderMode()
-
-    // Specific provider mode: enabled if any adapter is configured
-    if (mode !== 'auto' && mode !== 'native') {
-      return getAvailableProviders().length > 0
-    }
-
-    // Auto/native mode: check all paths
-    if (getAvailableProviders().length > 0) return true
-
-    const provider = getAPIProvider()
-
-    // Enable for firstParty
-    if (provider === 'firstParty') {
-      return true
-    }
-
-    return false
+    return true
   },
   get inputSchema(): InputSchema {
     return inputSchema()
@@ -671,6 +756,14 @@ export const WebSearchTool = buildTool({
     // runSearch handles fallback semantics based on WEB_SEARCH_PROVIDER mode:
     //   - "auto": tries each provider, falls through on failure
     //   - specific mode: runs one provider, throws on failure
+    // --- Chat Completions API search path (DashScope / OpenAI-compatible) ---
+    if (isChatCompletionsWebSearchEnabled()) {
+      const chatData = await runChatCompletionsWebSearch(
+        input,
+        context.abortController.signal,
+      )
+      return { data: chatData }
+    }
     if (shouldUseAdapterProvider()) {
       const mode = getProviderMode()
       const isExplicitAdapter = mode !== 'auto'

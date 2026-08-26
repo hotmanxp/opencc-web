@@ -49,6 +49,7 @@ export function* translateSdkToRuntime(
 ): Generator<RuntimeEvent> {
   const m = openccMessage as {
     type?: string
+    subtype?: string
     message?: {
       id?: string
       model?: string
@@ -72,7 +73,12 @@ export function* translateSdkToRuntime(
   //     — already in zai's RuntimeEvent shape, just attach meta and pass through
   //
   // Detect which format and handle accordingly.
-  if (m.type === 'system') return
+  // 系统事件(system/init / system/compact_boundary)必须透传 —— init 事件
+  // 携带模型可见的 tools 列表(mcp__* / 内建),SDK 客户端与 zai
+  // server 都需要消费它;compact_boundary 标记 transcript 截断点,session
+  // 读取端需要识别。opencc vendor QueryEngine 把这两个 SDKMessage 直接
+  // yield 给消费者,adapter 不应吞掉。
+  if (m.type === 'system' && m.subtype !== 'init' && m.subtype !== 'compact_boundary') return
 
   // opencc's vendor query() emits a `{ type: 'stream_event', event: <raw
   // Anthropic SSE event> }` SDKMessage for every upstream token that arrives

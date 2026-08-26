@@ -1,5 +1,9 @@
 import { Dropdown, Menu, message, Modal } from 'antd';
 import React, { useMemo } from 'react';
+import {
+  AGENT_INPUT_INSERT_EVENT,
+  type AgentInputInsertDetail,
+} from '../../lib/agentInputEvents.js';
 
 export interface FsContextMenuProps {
   /** Path relative to cwd (sent to server verbatim). */
@@ -7,6 +11,8 @@ export interface FsContextMenuProps {
   /** Absolute path (sent to clipboard for "Copy Absolute Path"). */
   absPath: string;
   cwd: string;
+  /** Entry kind(目录/文件);「插入对话」据此把内容插入为对应类型的 @引用 chip。 */
+  kind?: 'file' | 'dir';
   /** Right-click screen coordinates. `null` keeps the menu closed. */
   position: { x: number; y: number } | null;
   onClose: () => void;
@@ -42,7 +48,7 @@ async function copyToClipboard(text: string, successMsg: string, onClose: () => 
 }
 
 export function FsContextMenu(props: FsContextMenuProps): JSX.Element | null {
-  const { path, absPath, position, onClose, onDeleted } = props;
+  const { path, absPath, kind, position, onClose, onDeleted } = props;
 
   const handleDelete = () => {
     Modal.confirm({
@@ -64,6 +70,19 @@ export function FsContextMenu(props: FsContextMenuProps): JSX.Element | null {
   };
 
   const menuItems = useMemo(() => [
+    {
+      key: 'insert',
+      'data-testid': 'fs-cm-insert',
+      label: '插入对话',
+      onClick: () => {
+        window.dispatchEvent(
+          new CustomEvent<AgentInputInsertDetail>(AGENT_INPUT_INSERT_EVENT, {
+            detail: { text: path, ...(kind !== undefined ? { kind } : {}) },
+          }),
+        );
+        onClose();
+      },
+    },
     {
       key: 'copy-rel',
       'data-testid': 'fs-cm-copy-rel',
@@ -98,7 +117,7 @@ export function FsContextMenu(props: FsContextMenuProps): JSX.Element | null {
       onClick: handleDelete,
     },
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  ], [path, absPath]);
+  ], [path, absPath, kind]);
 
   if (!position) return null;
   return (

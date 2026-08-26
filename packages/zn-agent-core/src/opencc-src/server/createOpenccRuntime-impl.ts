@@ -4,13 +4,22 @@ import { createHeadlessContextImpl } from './createHeadlessContext-impl.js'
 import { createSessionFacadeImpl } from './sessionFacade-impl.js'
 import { runWithSdkContext, getSessionId, getOriginalCwd } from '../bootstrap/state.js'
 import { wrapTaskAwareSetState } from '../../compat/runtime/agentTaskBridge.js'
+import { translateSdkToRuntime, type SdkEventMeta } from '../../compat/runtime/sdkEventAdapter.js'
 import { QueryEngine } from '../QueryEngine.js'
+// zai patch (sess-1787121363115-0zq3bo8a): engines miss 分支需要从磁盘
+// JSONL 反序列化历史 messages 灌回 QueryEngine.mutableMessages,让模型能看到
+// 历史对话 — vendor CLI 走 REPL.resume(),headless runtime 必须自己接。
+// 复用 vendor 现成的 deserializeMessages:自带 filterUnresolvedToolUses /
+// orphaned thinking 清理 / 末尾 assistant sentinel 注入。
+import { deserializeMessages } from '../utils/conversationRecovery.js'
+import type { Message } from '../types/message.js'
 import { createAbortController } from '../utils/abortController.js'
 import { FileStateCache } from '../utils/fileStateCache.js'
 import { transitionPermissionMode } from '../utils/permissions/permissionSetup.js'
 import { assembleToolPool } from '../tools.js'
 import { mergeAndFilterTools } from '../utils/toolPool.js'
 import { getMcpToolsCommandsAndResources } from '../services/mcp/client.js'
+import { getAllMcpConfigs } from '../services/mcp/config.js'
 import { assemblePluginList } from './pluginListAssembly.js'
 import {
   installPluginOp,
@@ -28,7 +37,7 @@ import { getMarketplaceSourceDisplay } from '../utils/plugins/marketplaceHelpers
 import { parseMarketplaceInput } from '../utils/plugins/parseMarketplaceInput.js'
 import { parsePluginIdentifier } from '../utils/plugins/pluginIdentifier.js'
 import { clearAllCaches } from '../utils/plugins/cacheUtils.js'
-import { getSettingsForSource } from '../utils/settings/settings.js'
+import { getUserConfigJson } from '../utils/userConfigJson.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
 import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto, OpenccMarketplaceDto, OpenccMarketplaceActionResult } from './serverTypes.js'
 
@@ -39,7 +48,7 @@ export async function createOpenccRuntimeImpl(options) {
     dataDir: options.dataDir,
     runtimeId: options.runtimeId ?? randomUUID(),
     // zai-server: skip MCP bootstrap so the headless runtime comes
-    // up even if the user's `~/.claude.json` lists MCP servers that
+    // up even if the user's `~/.zai.json` lists MCP servers that
     // block the connect call. The QueryEngine's per-query MCP
     // refresh + the `/mcp` slash command reconnect on demand.
     connectMcp: options.connectMcp ?? false,
@@ -89,6 +98,10 @@ export async function createOpenccRuntimeImpl(options) {
   // tools from live appState, then merge/filter by permission mode. Used
   // both for the initial tool list and as `refreshTools` for mid-query
   // updates once MCP servers finish connecting.
+  //
+  // zai patch (2026-08-20): 主 Agent tools 槽不再在此全局应用 —— 改为
+  // per-engine 应用(createEngine 按会话恢复的 agent 包一个闭包),否则
+  // 不同会话各自恢复的 agent 会互相污染工具池。
   const computeTools = () => {
     const state = ctx.appState.getState()
     const permissionContext = state.toolPermissionContext
@@ -101,42 +114,53 @@ export async function createOpenccRuntimeImpl(options) {
   // still become available for the first query's later turns (and are
   // picked up by computeTools via appState.mcp.tools). Dedup by name.
   if (!ctx.config.connectMcp) {
-    void getMcpToolsCommandsAndResources(
-      ({ client, tools: mcpTools, commands: mcpCommands }) => {
-        ctx.appState.setState(prev => {
-          const mcp =
-            prev.mcp ?? {
-              clients: [],
-              tools: [],
-              commands: [],
-              resources: {},
-              pluginReconnectKey: 0,
+    void (async () => {
+      // zai patch (2026-08-20): 主 Agent mcp 插槽 —— 连接前应用。origin
+      // 为 vendor 解析的全 scope server 配置表(name → config),槽函数
+      // 增删/改写后传入连接器。MCP 连接是启动时一次性,槽切换需重启生效。
+      let mcpConfigs = undefined
+      if (options.mainAgent?.mcp) {
+        const all = await getAllMcpConfigs()
+        mcpConfigs = await options.mainAgent.mcp(all.servers)
+      }
+      await getMcpToolsCommandsAndResources(
+        ({ client, tools: mcpTools, commands: mcpCommands }) => {
+          ctx.appState.setState(prev => {
+            const mcp =
+              prev.mcp ?? {
+                clients: [],
+                tools: [],
+                commands: [],
+                resources: {},
+                pluginReconnectKey: 0,
+              }
+            const mcpToolNames = new Set(mcpTools.map(t => t.name))
+            return {
+              ...prev,
+              mcp: {
+                ...mcp,
+                clients: [
+                  ...mcp.clients.filter(c => c.name !== client.name),
+                  client,
+                ],
+                tools: [
+                  ...mcp.tools.filter(t => !mcpToolNames.has(t.name)),
+                  ...mcpTools,
+                ],
+                commands: [
+                  ...mcp.commands.filter(
+                    c => !mcpCommands.some(nc => nc.name === c.name),
+                  ),
+                  ...mcpCommands,
+                ],
+                pluginReconnectKey: (mcp.pluginReconnectKey ?? 0) + 1,
+              },
             }
-          const mcpToolNames = new Set(mcpTools.map(t => t.name))
-          return {
-            ...prev,
-            mcp: {
-              ...mcp,
-              clients: [
-                ...mcp.clients.filter(c => c.name !== client.name),
-                client,
-              ],
-              tools: [
-                ...mcp.tools.filter(t => !mcpToolNames.has(t.name)),
-                ...mcpTools,
-              ],
-              commands: [
-                ...mcp.commands.filter(
-                  c => !mcpCommands.some(nc => nc.name === c.name),
-                ),
-                ...mcpCommands,
-              ],
-              pluginReconnectKey: (mcp.pluginReconnectKey ?? 0) + 1,
-            },
-          }
-        })
-      },
-    ).catch(err => {
+          })
+        },
+        mcpConfigs,
+      )
+    })().catch(err => {
       console.warn('[openccRuntime] async MCP connect failed:', err)
     })
   }
@@ -150,13 +174,49 @@ export async function createOpenccRuntimeImpl(options) {
   // 修复: 每 session 一个独立 QueryEngine。同 session 复用 engine 使
   // mutableMessages 跨 query 保留(续传历史不丢,与旧行为一致);不同 session
   // 互不共享 mutableMessages,并发隔离。
-  const createEngine = () =>
-    new QueryEngine({
+  // zai patch (2026-08-20): 按会话恢复主 Agent。`name` 来自该会话
+  // transcript meta(首次 query 由 zai-server 恢复后经 input.mainAgent 传入);
+  // 查不到(新会话/未知名)回退到全局 options.mainAgent。
+  const resolveSessionMainAgent = (name?: string) => {
+    if (name) {
+      const found = (options.mainAgents ?? []).find(a => a.name === name)
+      if (found) return found
+    }
+    return options.mainAgent
+  }
+
+  // 同时承担两个 patch 职责:
+  // 1) sess-1787121363115-0zq3bo8a hydration — server restart 后 model 看不到
+  //    历史,新建 engine 必须从磁盘 JSONL 反序列化历史 messages 灌回
+  //    mutableMessages(vendor QueryEngine.mutableMessages 默认 = [],zai server
+  //    没走 vendor CLI 的 --resume / REPL.resume(),必须手动做 vendor 风格的
+  //    hydration)。
+  // 2) 2026-08-20 主 Agent 插槽 — `mainAgentName` 决定该会话 engine 的
+  //    systemPrompt / 工具池槽,来自会话 transcript meta,未知名回退到全局
+  //    options.mainAgent。
+  const createEngine = (initialMessages?: Message[], mainAgentName?: string) => {
+    const agent = resolveSessionMainAgent(mainAgentName)
+    // per-engine 工具池:在 base(内置 + MCP + 权限过滤)上应用该会话
+    // agent 的 tools 槽。agent 无槽(如 default)→ 原样返回 base。
+    const engineComputeTools = () =>
+      agent?.tools ? agent.tools(computeTools()) : computeTools()
+    return new QueryEngine({
       cwd,
-      tools: computeTools(),
+      tools: engineComputeTools(),
       commands: ctx.mcp.commands,
       mcpClients: ctx.mcp.clients,
-      refreshTools: computeTools,
+      // zai patch (2026-08-09): includePartialMessages:true 让 vendor 把每条
+      // SDK 流事件包成 stream_event envelope 透传出来 —— 否则 query.ts:847
+      // 会吞掉所有 envelope,只 yield batched 的 assistant Message,导致
+      // zai-server 上层 translateRuntimeEvents 只能按 content_block 整块
+      // yield runtime.delta,失去 token-by-token 流式。sdkEventAdapter
+      // (compat/runtime/sdkEventAdapter.ts) 已实现 streamedBlockIndices
+      // dedup,避免 assistant Message 路径重发已 stream 过的 block。
+      includePartialMessages: true,
+      refreshTools: engineComputeTools,
+      // zai patch (2026-08-20): 主 Agent systemPrompt 插槽 —— engine 创建
+      // 时固定,按会话恢复(该会话当时选的 agent)。
+      systemPromptSlot: agent?.systemPrompt,
       // zai patch: read agents from AppState (populated by
       // createHeadlessContextImpl via getAgentDefinitionsWithOverrides).
       // QueryEngine constructs its own `options.agentDefinitions` from
@@ -180,24 +240,19 @@ export async function createOpenccRuntimeImpl(options) {
       readFileCache: new FileStateCache(100, 25 * 1024 * 1024),
       abortController: initialAbortController,
       query: customQuery,
+      // QueryEngine 接受 initialMessages 写入 mutableMessages
+      // (QueryEngine.ts:212: this.mutableMessages = config.initialMessages ?? [])。
+      // 上游 vendor CLI 走 REPL 的 useState(initialMessages) 同款路径。
+      ...(initialMessages && initialMessages.length > 0
+        ? { initialMessages }
+        : {}),
     })
+  }
   const engines = new Map<string, QueryEngine>()
   // sessionId → 该 session 当前 in-flight query 的 AbortController。
   // 旧实现只 track 单个 currentQueryAbortController,并发下 abort 无法精确
   // 命中目标 session;per-session 后按 sessionId 查表。
   const queryAbortControllers = new Map<string, AbortController>()
-
-  function eventFor(sessionId, value) {
-    const source = value && typeof value === 'object' ? value : { value }
-    return {
-      ...source,
-      type: source.type ?? source.message?.type ?? 'runtime.event',
-      sessionId: source.sessionId ?? sessionId,
-      eventId: source.eventId ?? source.uuid ?? randomUUID(),
-      ts: source.ts ?? Date.now(),
-      turnIndex: source.turnIndex ?? turnIndex,
-    }
-  }
 
   async function buildComponentCounts(): Promise<Map<string, OpenccPluginComponentCounts>> {
     const counts = new Map<string, OpenccPluginComponentCounts>()
@@ -253,7 +308,11 @@ export async function createOpenccRuntimeImpl(options) {
         pendingMap.set(u.id, true)
       }
     }
-    const enabled = getSettingsForSource('userSettings')?.enabledPlugins as Record<string, boolean> | undefined
+    // Plugin enable/disable state is stored in the unified user config JSON
+    // (~/.zai.json, fallback ~/.zai.json) — not the vendor settings
+    // cascade. See utils/userConfigJson.ts for the read/write contract.
+    const userConfig = getUserConfigJson()
+    const enabled = userConfig.enabledPlugins as Record<string, boolean> | undefined
     return assemblePluginList(loadResult, v2, enabled, counts, (id) => pendingMap.get(id) === true)
   }
 
@@ -348,7 +407,16 @@ export async function createOpenccRuntimeImpl(options) {
     },
 
     async setEnabled(id, enabled) {
-      const op = await setPluginEnabledOp(id, enabled, 'user')
+      // Auto-detect the scope where the plugin lives rather than forcing
+      // 'user'. The UI displays the merged state across scopes, but a
+      // hardcoded user-scope write produced false "already disabled"
+      // errors whenever the plugin was enabled at project/local scope but
+      // absent from user-scope settings — the merged state was enabled
+      // while user-scope saw undefined. Letting setPluginEnabledOp resolve
+      // the most specific scope (local > project > user) keeps the toggle
+      // aligned with the visible state and matches the CLI's /plugin
+      // command behavior (ManagePlugins.tsx:1180,1194).
+      const op = await setPluginEnabledOp(id, enabled)
       if (!op.success) return { success: false, message: op.message }
       const reload = await reloadActive()
       if (reload === undefined) {
@@ -497,9 +565,65 @@ export async function createOpenccRuntimeImpl(options) {
       }
       // zai patch (并发多会话): 每 session 独立 engine, mutableMessages 不
       // 跨 session 共享。同 session 复用 engine 保留续传历史。
+      //
+      // zai patch (sess-1787121363115-0zq3bo8a, server restart 后 model 看不到历史):
+      // engines miss (新进程首查 + 新会话) 必须从磁盘 JSONL 反序列化历史灌
+      // 回 mutableMessages。复用 vendor 的 deserializeMessages(自带 orphan
+      // tool_use / thinking 清理 + 末尾 assistant sentinel 注入)。
+      // sessionFacade.readTranscript 返回的 JSONL 字符串就是 vendor
+      // recordTranscript 写出的 TranscriptMessage 形态(看 compat/transcript/
+      // persistence.ts baseFields + appendUserMessageV2 msg 形态,字段对齐
+      // vendor types/logs.ts SerializedMessage),直接 JSON.parse 即可。
       let engine = engines.get(input.sessionId)
       if (!engine) {
-        engine = createEngine()
+let initialMessages: Message[] | undefined
+        try {
+          const jsonl = await sessions.readTranscript(input.sessionId)
+          if (jsonl.trim().length > 0) {
+            const entries: Message[] = []
+            for (const line of jsonl.split('\n')) {
+              const t = line.trim()
+              if (!t) continue
+              try {
+                const e = JSON.parse(t)
+                // 仅 transcript 形态参与 chain — 对齐 vendor 的
+                // isTranscriptMessage(entry) (sessionStorage.ts:149):
+                // user / assistant / attachment / system。其它条目
+                // (session-meta / custom-title / file-history-snapshot /
+                // attribution-snapshot / worktree-state 等) 是 metadata,
+                // 不能喂给 vendor Message[] — 否则 deserializeMessages
+                // 内部 filterUnresolvedToolUses 会因 type 不在 union 抛错。
+                if (
+                  e &&
+                  typeof e === 'object' &&
+                  'type' in e &&
+                  ((e as { type: unknown }).type === 'user' ||
+                    (e as { type: unknown }).type === 'assistant' ||
+                    (e as { type: unknown }).type === 'attachment' ||
+                    (e as { type: unknown }).type === 'system')
+                ) {
+                  entries.push(e as Message)
+                }
+              } catch {
+                // 跳过损坏行 — 旧 session 可能因各种原因有半行写入
+              }
+            }
+            if (entries.length > 0) {
+              initialMessages = deserializeMessages(entries)
+            }
+          }
+        } catch (err) {
+          // 新会话 / 文件不存在 / 读失败 → 当作全新对话
+          if (process.env.ZAI_DEBUG === '1') {
+            console.warn(
+              `[openccRuntime] resume hydration failed for ${input.sessionId}:`,
+              err,
+            )
+          }
+        }
+        // zai patch (2026-08-20): 会话首次 query 时按恢复的 mainAgent
+        // 构建 engine —— systemPrompt / tools 槽固定为该会话当时选的 agent。
+        engine = createEngine(initialMessages, input.mainAgent)
         engines.set(input.sessionId, engine)
       }
       engine.replaceAbortController(queryAbortController)
@@ -540,10 +664,32 @@ export async function createOpenccRuntimeImpl(options) {
         // ...}`) — that is the shape `defaultQuery`'s tool loop
         // (streamingToolExecutor) consumes.
         const stream = engine.submitMessage(input.prompt, {
-          uuid: input.sessionId,
+          // zai patch (2026-08-09): 不用 sessionId 当 user 消息 uuid。
+          // 该 uuid 会成为本条 prompt 的 user 文本消息 uuid;若固定为
+          // sessionId,同会话第 2 轮起 uuid 重复,recordTranscript 的
+          // messageSet dedup 会跳过写入 → 用户消息永不落盘,UI 刷新后
+          // 只剩 assistant 回复,表现为"会话错位"。每条 user 消息必须
+          // 唯一,用随机 UUID。
+          uuid: randomUUID(),
           // zai patch: 透传 isMeta — 后台任务完成触发的占位 query 用 meta
           // prompt(UI 隐藏),真正内容由 QueryEngine 首轮 drain 注入。
           ...(input.isMeta ? { isMeta: true } : {}),
+          // zai patch: per-query provider override. zai resolves the model
+          // → provider profile on the call site and threads the openai-
+          // compatible baseURL/apiKey/model through QueryEngine.submitMessage
+          // → processUserInputContext.options.providerOverride → vendor
+          // query.ts:1312 → queryModel → getAnthropicClient(providerOverride)
+          // → createOpenAIShimClient (openai-shim). Without this,
+          // zhiniao-* models would be POSTed to ANTHROPIC_BASE_URL and
+          // return `Model not found`.
+          ...(input.providerOverride ? { providerOverride: input.providerOverride } : {}),
+          // zai patch: per-query provider id (from transcript.meta.providerId).
+          // Mirrors the providerOverride plumbing above, but is read by the
+          // anthropic-side modelCaller (zai's createAnthropicModelCaller)
+          // instead of the openai-shim. Lets findProfileForModel route a
+          // model to the exact provider the user picked when several
+          // provider profiles share the same model name.
+          ...(input.providerId ? { providerId: input.providerId } : {}),
         })
         // zai patch: 绑定 vendor SDK context, 让 vendor 的 getSessionId()
         // 在本 query 的异步链上返回 input.sessionId, 从而 transcript 文件
@@ -563,12 +709,35 @@ export async function createOpenccRuntimeImpl(options) {
           typeof input.sessionId === 'string' && input.sessionId
             ? { sessionId: input.sessionId, sessionProjectDir: null, cwd, originalCwd: cwd }
             : null
+        // zai patch (2026-08-10): 接线 sdkEventAdapter。vendor
+        // submitMessage() 产出 SDK Message(assistant / user / stream_event /
+        // result),translateSdkToRuntime 把它们翻译成 Anthropic primitives
+        // (message_start / content_block_* / message_stop),供下游
+        // translateRuntimeEvents 消费。97ab9d1 删除了 translateRuntimeEvents
+        // 里对 assistant / user Message 的直接处理并依赖这里接线 ——
+        // 之前未接线导致 vendor 原始流全被 default 丢弃,只剩 result →
+        // runtime.done,模型回复文本丢失(Web 收不到消息)。adapter 同时处理
+        // stream_event 实时流与 assistant 终端消息,并用 streamedBlockIndices
+        // 去重避免同一 block 双发。
+        const adapterMeta = {
+          sessionId: input.sessionId,
+          turnIndex,
+          eventCounter: 0,
+          toolNameByUseId: new Map<string, string>(),
+          streamedBlockIndices: new Set<number>(),
+        }
         while (true) {
           const step = sdkCtx
             ? await runWithSdkContext(sdkCtx, () => stream.next())
             : await stream.next()
           if (step.done) break
-          yield eventFor(input.sessionId, step.value)
+          for (const ev of translateSdkToRuntime(step.value, adapterMeta)) {
+            yield ev as any
+          }
+          // adapter 用 meta.eventCounter 前缀生成 eventId(evt-N / evt-N.M),
+          // 每条 vendor 消息内部用 seq 区分,跨消息需递增(单次 makeEvent 不
+          // 自动递增 eventCounter)。
+          adapterMeta.eventCounter++
         }
       } finally {
         if (prevBridge === undefined) delete (globalThis as any).__zaiBridgeCtx

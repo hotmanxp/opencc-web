@@ -6,20 +6,16 @@ import request from 'supertest'
 // NOTE: factories return vi.fn() (not plain functions) so vi.mocked(...) has
 // spies to call .mockImplementation / .mockReturnValue on. This is the minimal
 // deviation from the brief required to make vi.mocked() work.
-vi.mock('@zn-ai/zn-agent-core/runtime', () => ({
+vi.mock('@zn-ai/zn-agent-core', () => ({
   CwdStore: {
     clear: vi.fn(),
     has: vi.fn(() => false),
     get: vi.fn(() => undefined as string | undefined),
     set: vi.fn(),
   },
-}))
-vi.mock('@zn-ai/zn-agent-core/taskListStore', () => ({
   getTaskListStore: vi.fn(() => ({
     list: vi.fn(async (_sid: string) => []),
   })),
-}))
-vi.mock('@zn-ai/zn-agent-core/bashTracker', () => ({
   bashBackgroundTracker: {
     list: vi.fn((_filter?: { sessionId?: string; limit?: number }) => []),
   },
@@ -31,8 +27,7 @@ vi.mock('../services/backgroundRuntime.js', () => ({
 }))
 
 import sessionStateRouter from './sessionState.js'
-import { CwdStore } from '@zn-ai/zn-agent-core/runtime'
-import { bashBackgroundTracker } from '@zn-ai/zn-agent-core/bashTracker'
+import { CwdStore, bashBackgroundTracker } from '@zn-ai/zn-agent-core'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
 
 describe('GET /api/agent/sessions/:id/state', () => {
@@ -89,7 +84,7 @@ describe('GET /api/agent/sessions/:id/state', () => {
   })
 
   it.skip('falls back to v2Tasks=[] when TaskListStore throws, others unaffected', async () => {
-    const { getTaskListStore } = await import('@zn-ai/zn-agent-core/taskListStore')
+    const { getTaskListStore } = await import('@zn-ai/zn-agent-core')
     vi.mocked(getTaskListStore).mockReturnValue({
       list: async () => {
         throw new Error('boom')

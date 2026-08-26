@@ -779,7 +779,7 @@ export const SendMessageTool: Tool<InputSchema, SendMessageToolOutput> =
             require('../../utils/udsClient.js') as typeof import('../../utils/udsClient.js')
           /* eslint-enable @typescript-eslint/no-require-imports */
           try {
-            await sendToUdsSocket(addr.target, input.message)
+            await sendToUdsSocket(addr.target, input.message as string)
             const preview = input.summary || truncate(String(input.message), 50)
             return {
               data: {

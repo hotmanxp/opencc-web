@@ -6,36 +6,22 @@ import { join } from 'path'
 export function resolveClaudeConfigHomeDir(options?: {
   configDirEnv?: string
   homeDir?: string
-  openClaudeExists?: boolean
-  legacyClaudeExists?: boolean
 }): string {
   if (options?.configDirEnv) {
     return options.configDirEnv.normalize('NFC')
   }
 
   const homeDir = options?.homeDir ?? homedir()
-  // zai patch: base 统一到 zai 的 dataDir。生产默认 ~/.zai; 显式设置
-  // ZAI_DATA_DIR (与 zai 侧 compat/data/dataDir.ts 的 resolveDataDir 优先
-  // 级一致) 时以它为准, 否则测试/自定义 dataDir 场景下 vendor 写
-  // ~/.zai/projects 而读取端读 ${ZAI_DATA_DIR}/projects, 目录又错位。
+  // zai patch: config home 统一到 zai 的 dataDir,不再回退 ~/.claude。
+  // 显式设置 ZAI_DATA_DIR (与 zai 侧 compat/data/dataDir.ts 的
+  // resolveDataDir 优先级一致) 时以它为准, 否则测试/自定义 dataDir
+  // 场景下 vendor 写 ~/.zai/projects 而读取端读 ${ZAI_DATA_DIR}/projects,
+  // 目录又错位。
   const zaiDataDir = process.env.ZAI_DATA_DIR
   if (zaiDataDir) {
     return zaiDataDir.normalize('NFC')
   }
-  const openClaudeDir = join(homeDir, '.zai')
-  const legacyClaudeDir = join(homeDir, '.zai')
-  const openClaudeExists =
-    options?.openClaudeExists ?? existsSync(openClaudeDir)
-  const legacyClaudeExists =
-    options?.legacyClaudeExists ?? existsSync(legacyClaudeDir)
-
-  // Preserve existing user config/install state until we ship an explicit
-  // migration. New installs (neither path exists) use ~/.claude.
-  if (!openClaudeExists && legacyClaudeExists) {
-    return legacyClaudeDir.normalize('NFC')
-  }
-
-  return openClaudeDir.normalize('NFC')
+  return join(homeDir, '.zai').normalize('NFC')
 }
 
 /**
@@ -106,7 +92,7 @@ export const getClaudeConfigHomeDir = memoize(
  * Resolve a directory under the user's home with zai→claude fallback.
  *
  * Returns `~/.zai/<dirName>` if it exists; otherwise falls back to
- * `~/.claude/<dirName>`. Mirrors the legacy migration strategy used by
+ * `~/.zai/<dirName>`. Mirrors the legacy migration strategy used by
  * `getClaudeConfigHomeDir` — newer installs land in `~/.zai`, but users
  * who migrated from upstream claude-code still have their data in
  * `~/.claude` and we should keep reading from there.
@@ -136,8 +122,13 @@ export function getProjectsDir(): string {
 }
 
 export function getUserAgentsDir(): string {
-  const homeDir = homedir()
-  return join(homeDir, '.agents')
+  // User skills (the only consumer of this helper, see
+  // skills/loadSkillsDir.ts: `join(getUserAgentsDir(), 'skills')`) live
+  // under `~/.agents/skills`. Returning `~/.agents` so that callers can
+  // join('skills') to reach the actual skills directory. Function name
+  // kept for blast-radius stability; the helper now points at the user's
+  // `~/.agents` home rather than a `~/.zai/agents` subdirectory.
+  return join(homedir(), '.agents')
 }
 
 /**
@@ -329,7 +320,7 @@ export function getVertexRegionForModel(
 // OpenCC Dynamic Workflows — env var helpers
 // ---------------------------------------------------------------------------
 // Runtime knobs for the WorkflowTool. Mirrored in settings.workflows.* so
-// users can pin them in .claude/settings.json instead of exporting env vars.
+// users can pin them in .zai/settings.json instead of exporting env vars.
 // Either source opts in (truthy env var OR settings.workflows.enabled === true).
 
 /**

@@ -7,6 +7,7 @@ import { MessageCopyButton, StreamingMarkdown, ThinkingBlock } from './MessageBu
 import { AttachmentStrip } from '../AttachmentStrip.js'
 import type { StripAttachment } from '../AttachmentStrip.js'
 import { linkifyText } from '../../lib/linkify.js'
+import { useExpandUserBubble } from './useExpandUserBubble.js'
 
 const { Paragraph, Text } = Typography
 
@@ -46,6 +47,11 @@ export function CollapsedMessageBubble({
 }) {
   const m = message as any
   const t = m.type as string
+  // 移动端 / 分屏开启时撑满对话区, 桌面端无分屏保留 70%. Hook 必须在任何
+  // 早返回之前调用 (Rules of Hooks), 实际只有 user 卡片消费此值, 但所有
+  // 分支都执行到这里, 顺序稳定 — assistant / thinking 早返回时 React
+  // 也仍然记录 hook 调用, 后续 user 分支切换视图时不会破坏 hook 顺序.
+  const expandUserBubble = useExpandUserBubble()
 
   // Thinking: 与 expanded 同款 ThinkingBlock. 兜底 'assistant' + thinking 字段的
   // legacy 路径 (transcript 回放可能产生), 一并覆盖.
@@ -104,13 +110,21 @@ export function CollapsedMessageBubble({
     const attachments = (m.attachments as StripAttachment[] | undefined) ?? []
     return (
       <div
+        data-testid="user-bubble-container"
         style={{
           display: 'flex',
           justifyContent: 'flex-end',
           marginBottom: 16,
         }}
       >
-        <Card size="small" style={{ maxWidth: '70%', borderRadius: 12, position: 'relative' }}>
+        <Card
+          size="small"
+          style={{
+            maxWidth: expandUserBubble ? '100%' : '70%',
+            borderRadius: 12,
+            position: 'relative',
+          }}
+        >
           {/* 横向 flex: [copy inline] [text+attachments flex:1] [UserOutlined]
               copy 与 expanded 视图一致用 inline 嵌最左, 避免短消息 + 右上绝对按钮盖住文字. */}
           <div
@@ -270,6 +284,7 @@ function AssistantTextBody({
         <Button
           type="link"
           size="small"
+          aria-label={expanded ? '收起内容' : '显示更多'}
           onClick={() => setExpanded((x) => !x)}
           style={{ padding: 0, marginTop: 4 }}
         >

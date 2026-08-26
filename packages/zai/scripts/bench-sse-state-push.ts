@@ -20,8 +20,12 @@
  * 非 CI 集成 — 一次性 perf 验证脚本,跑完即用。保留作为未来回归参考。
  */
 
-import { stateChangeBus, resetStateChangeBusForTests } from '@zn-ai/zn-agent-core/runtime'
-import { bashBackgroundTracker, type BashTaskInfo } from '@zn-ai/zn-agent-core/bashTracker'
+import {
+  stateChangeBus,
+  resetStateChangeBusForTests,
+  bashBackgroundTracker,
+  type BashTaskInfo,
+} from '@zn-ai/zn-agent-core'
 
 import { eventBus } from '../src/server/services/eventBus.js'
 import { initStateBridge } from '../src/server/services/stateBridge.js'

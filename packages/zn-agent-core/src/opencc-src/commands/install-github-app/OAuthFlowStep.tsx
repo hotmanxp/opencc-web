@@ -208,7 +208,7 @@ export function OAuthFlowStep({
             {!showPastePrompt && <Box>
                 <Spinner />
                 <Text>
-                  Opening browser to sign in with your OpenCC account…
+                  Opening browser to sign in with your Z.Ai account…
                 </Text>
               </Box>}
 

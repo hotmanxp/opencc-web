@@ -132,20 +132,61 @@ export function getRetryDelay(
   return base + jitter
 }
 
+// ---------------------------------------------------------------------------
+// 429 冷却门(zai patch 2026-08-08)
+// ---------------------------------------------------------------------------
+// MiniMax 的 TPM 限流通常持续 >30s,指数退避(500ms 起步)在限流恢复前
+// 反复打 API,多个后台任务并发时互相放大(会话 sess-1786201578807 现场:
+// 429 后 2 秒内并行重发相同命令)。收到 429 后进入冷却窗口,窗口内
+// 重试至少等到窗口结束。
+//
+// 注意:这是 compat 层(不感知 provider)的**全局**冷却门——任意后台任务
+// 收到 429 后,窗口内所有后台任务的重试都等到窗口结束(保守方向:宁可
+// 多等,不再限流期打 API)。zai 实际单 provider(MiniMax)时与主会话
+// withRetry 的 per-provider 冷却门行为等价;多 provider 时会暂时拖慢
+// 其他 provider 的后台重试至多 30s,属可接受的保守取舍。
+const RATE_LIMIT_COOLDOWN_MS = 30_000
+
+let rateLimitCooldownUntil = 0
+
+/** 进入 429 冷却窗口(默认 30s)。窗口内 runOne 的重试会等窗口结束再发。 */
+export function enterRateLimitCooldown(
+  ms: number = RATE_LIMIT_COOLDOWN_MS,
+): void {
+  rateLimitCooldownUntil = Date.now() + ms
+}
+
+/** 距冷却窗口结束的剩余毫秒;不在冷却窗口内时返回 0。 */
+export function getRateLimitCooldownRemainingMs(): number {
+  const remaining = rateLimitCooldownUntil - Date.now()
+  return remaining > 0 ? remaining : 0
+}
+
+/** 测试 seam:清空冷却状态,避免单测间互相污染。 */
+export function __resetRateLimitCooldownForTests(): void {
+  rateLimitCooldownUntil = 0
+}
+
 /**
  * 带 abort signal 的 sleep。signal 已 abort 时立即 resolve。
  */
 export function retrySleep(ms: number, signal?: AbortSignal): Promise<void> {
   if (signal?.aborted) return Promise.resolve()
   return new Promise<void>((resolve) => {
-    const t = setTimeout(resolve, ms)
+    let t: ReturnType<typeof setTimeout> | undefined
+    const onAbort = () => {
+      if (t) clearTimeout(t)
+      resolve()
+    }
     if (signal) {
-      const onAbort = () => {
-        clearTimeout(t)
-        resolve()
-      }
       signal.addEventListener('abort', onAbort, { once: true })
     }
+    t = setTimeout(() => {
+      // 正常到期:移除 abort listener,避免并发请求长时间挂在同一 signal
+      // 上触发 MaxListenersExceededWarning。
+      signal?.removeEventListener('abort', onAbort)
+      resolve()
+    }, ms)
   })
 }
 

@@ -32,24 +32,45 @@ import {
 //
 // The import is intentionally deferred (dynamic, inside
 // `initAgentRuntime`) so unrelated test paths that only touch the
-// session-abort helpers don't pay the cost of resolving
-// `@zn-ai/zn-agent-core/opencc-server` (the chain pulls in vendor
+// session-abort helpers don't pay the cost of resolving the package
+// main entry `@zn-ai/zn-agent-core` (the chain pulls in vendor
 // headless bootstrap code that takes ~5s to transform).
-import type { createOpenccRuntime as _factory } from '@zn-ai/zn-agent-core/opencc-server'
+import type { createOpenccRuntime as _factory } from '@zn-ai/zn-agent-core'
 type OpenccRuntime = Awaited<ReturnType<typeof _factory>>
 import { eventBus } from './eventBus.js'
 import {
   startMemoryWatcher,
   stopMemoryWatcher,
-} from '@zn-ai/zn-agent-core/agents/memoryWatcher'
-import { hasExternalIncludes } from '@zn-ai/zn-agent-core/agents/memoryLoader'
+  hasExternalIncludes,
+} from '@zn-ai/zn-agent-core'
 import type { LoadedSkill } from '@zn-ai/zn-agent-core'
 import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
 import { PermissionRegistry } from './permissionRegistry.js'
+import { sessionInbox, type InboxMessage } from './sessionInbox.js'
+import { resolveMainAgent } from './mainAgents.js'
+import { readZaiSettings } from './zaiSettingsStore.js'
+import type { SessionRegistry } from './sessionHost/SessionRegistry.js'
+import type { ZaiSettings } from '../../shared/settings.js'
+
+/**
+ * 双轨开关解析(env `ZAI_OPENCC_CLI` > settings.runtime.openccCli > 默认
+ * false)。在 `initAgentRuntime` 入口读一次,不在每个 query 重读 —— 避免
+ * 会话中途翻车。见
+ * docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md §5.6。
+ */
+function isEnvTruthy(value: string): boolean {
+  return value === '1' || value === 'true' || value === 'TRUE' || value === 'yes'
+}
+function resolveOpenccCliFlag(settings: ZaiSettings): boolean {
+  const env = process.env.ZAI_OPENCC_CLI
+  if (env !== undefined && env !== '') return isEnvTruthy(env)
+  return settings.runtime?.openccCli ?? false
+}
 
 let runtime: OpenccRuntime | null = null
 let currentSessionId: string | null = null
+let sessionRegistry: SessionRegistry | null = null
 /**
  * Legacy transcript accessor. Task 5 keeps a working `TranscriptStore`
  * around because route handlers (`routes/agent.ts`, `routes/transcript.ts`,
@@ -73,6 +94,21 @@ const permissionRegistry = new PermissionRegistry()
 // itself blocked on the tool's await. Setting this global on init
 // gives the bridge a synchronous side-channel to reach the SSE.
 ;(globalThis as any).__zaiEventBus = eventBus
+
+// zai patch (2026-08-17): bridge for zn-agent-core to enqueue session
+// inbox messages (sub-agent completion notices, bash task results, etc.).
+// The core side can't directly reach the zai-side `sessionInbox` singleton
+// (different module space) — it reads this global to call
+// `followup`/`inject` and rely on the zai scheduler's wake handler to
+// consume them via `runNextInQueue`. Aligns with `__zaiEventBus` /
+// `__zaiBridgeCtx` injection pattern (see compat/runtime/* for the
+// global-bridge convention).
+;(globalThis as any).__zaiSessionInbox = {
+  followup: (sid: string, msg: unknown) =>
+    sessionInbox.followup(sid, msg as InboxMessage),
+  inject: (sid: string, msg: unknown) =>
+    sessionInbox.inject(sid, msg as InboxMessage),
+}
 
 // zai patch: AskUserQuestion bridge context — static parts injected
 // once at init. The zai-native AskUserQuestion wrapper
@@ -211,6 +247,19 @@ export function releaseSessionController(sessionId: string): void {
   sessionControllers.delete(sessionId)
 }
 
+/**
+ * 某 session 当前是否有活跃 query 在跑。runQueryLoop 在开始时
+ * registerSessionController、结束(含 abort/异常)时 releaseSessionController,
+ * 所以这个 Map 的键集就是"正在跑 query 的 session"。
+ *
+ * 供 BashNotifier 做 running 守卫:主线活跃时不另起通知 query
+ * (通知已在 commandQueue,靠 QueryEngine mid-turn drain 注入),对齐
+ * opencc `if (running) return` 语义。
+ */
+export function hasActiveQuery(sessionId: string): boolean {
+  return sessionControllers.has(sessionId)
+}
+
 export function abortSessionController(
   sessionId: string,
   reason?: string,
@@ -218,6 +267,12 @@ export function abortSessionController(
   const c = sessionControllers.get(sessionId)
   if (!c || c.signal.aborted) return false
   c.abort(reason ?? 'user_abort')
+  // 同步取消该会话关联的后台任务。动态 import 避免与 backgroundRuntime.ts
+  // 顶部已 import getRuntime 的模块环;fire-and-forget 不阻塞 abort 返回。
+  void import('./backgroundRuntime.js').then(
+    ({ cancelBackgroundTasksByParentSession }) =>
+      cancelBackgroundTasksByParentSession(sessionId, reason ?? 'user_abort'),
+  )
   return true
 }
 
@@ -236,6 +291,10 @@ export function __resetAgentRuntimeForTests(): void {
   transcriptStore = null
   serverCwd = null
   sessionControllers.clear()
+  if (sessionRegistry) {
+    void sessionRegistry.killAll('test reset')
+    sessionRegistry = null
+  }
 }
 
 /**
@@ -246,6 +305,29 @@ export function __resetAgentRuntimeForTests(): void {
  */
 export function getActivePromptCount(): number {
   return sessionControllers.size
+}
+
+/**
+ * Best-effort read of the deployment's `subagents.<name>` config from
+ * `~/.zai/settings.json`. Returns `undefined` so the provider registers
+ * with the all-defaults config (which means `enabled: false` — explicit
+ * `subagent_type: '<name>'` still routes, but the model-visible tool is
+ * not mounted).
+ *
+ * Kept inline rather than exported to a separate file because it's the
+ * only place outside `applyXxxProvider` itself that needs the raw
+ * subagent config object.
+ */
+async function readSubagentConfigSafe(
+  _name: 'codex' | 'claude-code',
+): Promise<unknown | undefined> {
+  // Settings readers (`readZaiSettings`) may not be initialized at this
+  // module init point. The provider's own `safeParseXxxConfig` covers
+  // schema validation; this helper's job is only to forward the deployment
+  // block. Returning `undefined` here keeps the boot path tolerant when
+  // settings isn't ready yet — the provider registers with defaults
+  // instead of crashing the runtime.
+  return undefined
 }
 
 export function getAskRegistry(): AskRegistry {
@@ -274,25 +356,6 @@ function resolveSkillsDirs(): string[] {
 export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<void> {
   if (runtime) return
 
-  // zai patch: skip vendor PreToolUse plugin hooks under the HTTP-server
-  // runtime. Plugin hooks are shell scripts that expect an interactive
-  // TTY + CLAUDE_PLUGIN_ROOT env; under zai's headless server they throw
-  // (ENOUNT / spawn error), the vendor catch at
-  // src/opencc-src/services/tools/toolHooks.ts:715 yields {type:'stop'},
-  // and toolExecution.ts:1100 propagates that as
-  // `createToolResultStopMessage(toolUseID)` — so the LLM receives a
-  // synthetic "The user doesn't want to take this action right now. STOP…"
-  // tool_result and the real tool.call() never runs. The UI is stuck on
-  // "调用中" because the synthetic stop message closes the
-  // tool_use/tool_result pair without producing a real shell output.
-  //
-  // Setting this flag short-circuits runPreToolUseHooks in toolHooks.ts
-  // to return immediately (yielding nothing). checkPermissionsAndCallTool
-  // then falls through to the existing tool.checkPermissions path, which
-  // compat/tools/opencc/builtin.ts already overwrites with always-allow
-  // via forceAllowCheckPermissions — so every tool runs without prompt.
-  ;(globalThis as any).__zaiSkipPreToolUseHooks = true
-
   // The simple synchronous setup (serverCwd, transcriptStore) must
   // run BEFORE the first `await` — the test surface calls
   // `initAgentRuntime(cwd)` without awaiting and then synchronously
@@ -313,6 +376,59 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     console.error('[initAgentRuntime] enableOpenccConfigs failed:', err)
   })
 
+  // zai patch (2026-08-21): register the subagent providers we ship
+  // today. Both `codex` and `claude-code` are gated on `enabled: false`
+  // by default — explicit `subagent_type: 'codex'` / `'claude-code'`
+  // calls still route through the provider, but no model-visible tool
+  // is mounted unless the deployment flips the bit in settings.json.
+  // The `apply()` calls are intentionally synchronous and
+  // side-effectful on the runtime-global registry — see
+  // docs/superpowers/specs/2026-08-21-zai-subagent-codex-provider-design.md
+  // and the parallel spec for claude-code.
+  try {
+    const subagentMod = await import('@zn-ai/zn-agent-core')
+    const applyCodex = (subagentMod as unknown as {
+      applyCodexProvider?: (registry: unknown, config?: unknown) => void
+    }).applyCodexProvider
+    const applyClaude = (subagentMod as unknown as {
+      applyClaudeCodeProvider?: (registry: unknown, config?: unknown) => void
+    }).applyClaudeCodeProvider
+    const getSubagentRegistry = (subagentMod as unknown as {
+      getSubagentRegistry?: () => {
+        registerProvider: (provider: { name: string }) => void
+      }
+    }).getSubagentRegistry
+    if (typeof getSubagentRegistry !== 'function') {
+      console.warn(
+        '[initAgentRuntime] getSubagentRegistry missing from @zn-ai/zn-agent-core — ' +
+          'did you forget to rebuild core after adding utils/subagents?',
+      )
+    } else {
+      const registry = getSubagentRegistry()
+      if (typeof applyCodex === 'function') {
+        applyCodex(registry, await readSubagentConfigSafe('codex'))
+      } else {
+        console.warn(
+          '[initAgentRuntime] codex subagent symbols missing — did you forget to rebuild core?',
+        )
+      }
+      if (typeof applyClaude === 'function') {
+        applyClaude(
+          registry,
+          await readSubagentConfigSafe('claude-code'),
+        )
+      } else {
+        console.warn(
+          '[initAgentRuntime] claude-code subagent symbols missing — did you forget to rebuild core?',
+        )
+      }
+    }
+  } catch (err) {
+    // Non-fatal — without providers, `Agent(subagent_type: 'codex')`
+    // throws `provider not found`, which the user can fix by rebuilding.
+    console.warn('[initAgentRuntime] subagent provider registration failed:', err)
+  }
+
   // Build the new OpenccRuntime. The runtime is awaited so the
   // synchronous `initBackgroundRuntime()` call in `createApp` (the
   // very next line) sees a non-null `runtime` and can read it via
@@ -330,37 +446,84 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // calls now flow through vendor's `defaultQuery` →
   // `streamingToolExecutor` tool loop → vendor's
   // `queryModelWithStreaming` → upstream API.
-  try {
-    const { createOpenccRuntime: factory } = await import(
-      '@zn-ai/zn-agent-core/opencc-server'
-    )
-    runtime = await factory({
-      dataDir,
-      runtimeId: 'zai-server',
-      defaultCwd: cwd,
-      defaultModel:
-        process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
-        ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
-      // zai-server: skip MCP bootstrap so the headless runtime comes
-      // up even if the user's `~/.claude.json` lists MCP servers that
-      // block the connect call. The QueryEngine's per-query MCP
-      // refresh + the `/mcp` slash command reconnect on demand.
-      connectMcp: false,
-      // Default is interactive (STATE.isInteractive = true, vendor
-      // branches run as an interactive OpenCC CLI — verified against
-      // the real Web UI: permission asks and AskUserQuestion still
-      // bridge to the web). `zai dev --sdk` / `zai start --sdk` opts
-      // into SDK/headless mode instead.
-      interactive: !(isSdk ?? false),
-    })
-    const cleanup = () => {
-      if (runtime) void runtime.shutdown()
+  // ---------------------------------------------------------------------
+  // 双轨分支(ZAI_OPENCC_CLI,spec §5.6):
+  //   true  → spawn `opencc -p` 子进程(SessionHost B1,stdio NDJSON +
+  //           control_request 协议),zai 退化为 SDK 宿主;
+  //   false → 现状 in-process createOpenccRuntime。
+  // settings 在分支前读一次;上下文注释见文档 spec。双轨都保留上文
+  // enableOpenccConfigs(vendor config system)与 zai 内部子系统
+  // (PluginRuntime / eventBus / __zaiBridgeCtx / sessionInbox / sessionFacade)。
+  // isSdk 参数语义在阶段 5 收敛时删除;双轨期间保留 legacy 分支行为不变。
+  // ---------------------------------------------------------------------
+  const settings = await readZaiSettings()
+  const useOpenccCli = resolveOpenccCliFlag(settings)
+  // 启动日志显式标注运行时路径(双轨监控埋点,spec §5.6.5)。
+  console.log(
+    `[initAgentRuntime] runtime=${useOpenccCli ? 'opencc-cli' : 'in-process'} cwd=${cwd} (ZAI_OPENCC_CLI=${useOpenccCli ? '1' : '0'})`,
+  )
+  const { createSessionFacade } = await import('@zn-ai/zn-agent-core')
+  const { SessionRegistry } = await import('./sessionHost/SessionRegistry.js')
+  const { SessionHostRuntimeAdapter } = await import(
+    './agentRuntime/RuntimeAdapter.js'
+  )
+
+  if (useOpenccCli) {
+    try {
+      const reg = new SessionRegistry()
+      sessionRegistry = reg
+      const facade = await createSessionFacade({ cwd, dataDir })
+      runtime = new SessionHostRuntimeAdapter(reg, facade, cwd)
+      const cleanup = () => {
+        void reg.killAll('server shutdown')
+      }
+      process.once('SIGTERM', cleanup)
+      process.once('SIGINT', cleanup)
+      console.log(
+        `[initAgentRuntime] opencc-cli runtime 就绪(sessionRegistry hosts=0)`,
+      )
+    } catch (err) {
+      console.error('[initAgentRuntime] SessionHost runtime init failed:', err)
+      throw err
     }
-    process.once('SIGTERM', cleanup)
-    process.once('SIGINT', cleanup)
-  } catch (err) {
-    console.error('[initAgentRuntime] createOpenccRuntime failed:', err)
-    throw err
+  } else {
+    try {
+      const { agent: mainAgent, agents: mainAgents } = await resolveMainAgent(
+        settings.mainAgent,
+      )
+      const { createOpenccRuntime: factory } = await import(
+        '@zn-ai/zn-agent-core'
+      )
+      runtime = await factory({
+        dataDir,
+        mainAgent,
+        mainAgents,
+        runtimeId: 'zai-server',
+        defaultCwd: cwd,
+        defaultModel:
+          process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
+          ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
+        // zai-server: skip MCP bootstrap so the headless runtime comes
+        // up even if the user's `~/.zai.json` lists MCP servers that
+        // block the connect call. The QueryEngine's per-query MCP
+        // refresh + the `/mcp` slash command reconnect on demand.
+        connectMcp: false,
+        // Default is interactive (STATE.isInteractive = true, vendor
+        // branches run as an interactive OpenCC CLI — verified against
+        // the real Web UI: permission asks and AskUserQuestion still
+        // bridge to the web). `zai dev --sdk` / `zai start --sdk` opts
+        // into SDK/headless mode instead.
+        interactive: !(isSdk ?? false),
+      })
+      const cleanup = () => {
+        if (runtime) void runtime.shutdown()
+      }
+      process.once('SIGTERM', cleanup)
+      process.once('SIGINT', cleanup)
+    } catch (err) {
+      console.error('[initAgentRuntime] createOpenccRuntime failed:', err)
+      throw err
+    }
   }
 
   process.once('SIGTERM', () => stopMemoryWatcher())
@@ -372,7 +535,7 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     initCommands({ cwd, dataDir: process.env.ZAI_DATA_DIR ?? '', sessionId: undefined })
   ).catch((err) => console.error('[initCommands] failed:', err))
 
-  // AGENTS.md / .claude/rules hot-reload watcher
+  // AGENTS.md / .zai/rules hot-reload watcher
   startMemoryWatcher({ cwd })
 
   // External include warning (best-effort, never blocks init)
@@ -386,6 +549,17 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       })
     }
   })
+
+  // Weixin 微信机器人后台 task — best-effort 启动,失败只 warn 不 throw。
+  // 启动顺序:在 initAgentRuntime 完成(runtime + eventBus 就绪)之后,manager
+  // 内部根据 zaiSettings.weixinBot 决定 enabled/disabled,失败仅 setState('failed')
+  // 不中断其它子系统。详见 docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md B3。
+  try {
+    const { getWeixinBotManager } = await import('./weixinBot/WeixinBotManager.js')
+    await getWeixinBotManager().start()
+  } catch (err) {
+    console.warn('[initAgentRuntime] weixinBot start failed:', err)
+  }
 }
 
 export async function getOrCreateAgentSession(): Promise<string | null> {
@@ -414,6 +588,20 @@ export function getRuntime(): OpenccRuntime {
 }
 
 /**
+ * B1 路径的 SessionRegistry(spec §5.5.1)。仅在 `ZAI_OPENCC_CLI=1` 时被
+ * initAgentRuntime 挂载;legacy 路径调用会直接 throw(Phase B 的 registry
+ * resolve 落点需要它时,following 分支已守卫)。
+ */
+export function getSessionRegistry(): SessionRegistry {
+  if (!sessionRegistry) {
+    throw new Error(
+      'SessionRegistry not initialized (需要 ZAI_OPENCC_CLI=1 启动)',
+    )
+  }
+  return sessionRegistry
+}
+
+/**
  * Legacy transcript accessor. Kept for the existing reader call sites
  * in `routes/agent.ts`, `routes/transcript.ts`, `routes/approve.ts`, and
  * the builtin commands `clear` / `compact`. Task 6 deletes this accessor
@@ -437,6 +625,20 @@ export async function abortAgentSession(reason?: string): Promise<void> {
   permissionRegistry.abortAll(reason ?? 'session_aborted')
   if (currentSessionId) {
     abortSessionController(currentSessionId, reason)
+    // 覆盖"turn 已结束但后台任务还在跑"的场景:此时 sessionControllers 里
+    // 可能没有该 sid 的 controller(abortSessionController 会直接 return
+    // false),但后台任务仍应被终止,否则会继续向共享 API key 发请求。
+    try {
+      const { cancelBackgroundTasksByParentSession } = await import(
+        './backgroundRuntime.js'
+      )
+      await cancelBackgroundTasksByParentSession(
+        currentSessionId,
+        reason ?? 'session_aborted',
+      )
+    } catch (err) {
+      console.warn('[abortAgentSession] cancelBackgroundTasks failed:', err)
+    }
     // Forward to the new OpenccRuntime as well — its internal
     // abortController fans out to in-flight query streams, which
     // is the path the runtime's `query()` hook listens on.
@@ -477,7 +679,10 @@ function getPluginRuntime(): DefaultPluginRuntime {
   if (!pluginRuntime) {
     pluginRuntime = new DefaultPluginRuntime({
       opencc: {
-        configDir: resolveOpenccConfigDir() ?? join(homedir(), '.claude'),
+        // OPENCC_CONFIG_DIR / CLAUDE_CONFIG_DIR 未显式设置时,OpenCC 插件
+        // 根目录统一到 zai 的 dataDir(~/.zai),与 vendor 侧
+        // getClaudeConfigHomeDir 的默认值一致,不再回退 ~/.claude。
+        configDir: resolveOpenccConfigDir() ?? resolveDataDir().resolved,
       },
     })
   }

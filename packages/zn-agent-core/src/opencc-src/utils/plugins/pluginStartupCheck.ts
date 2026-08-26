@@ -8,6 +8,7 @@ import {
   getSettingsForSource,
   updateSettingsForSource,
 } from '../settings/settings.js'
+import { getUserConfigJson } from '../userConfigJson.js'
 import { getAddDirEnabledPlugins } from './addDirPluginSettings.js'
 import {
   getInMemoryInstalledPlugins,
@@ -48,7 +49,30 @@ export async function checkEnabledPlugins(): Promise<string[]> {
     }
   }
 
-  // Merged settings (policy > local > project > user) override --add-dir
+  // User-scope plugin state lives in the unified user config JSON
+  // (~/.zai.json, fallback ~/.zai.json), not the vendor settings
+  // cascade. We merge it on top of --add-dir/plugins so that toggling a
+  // plugin in the zai UI takes effect immediately.
+  const userEnabled = getUserConfigJson().enabledPlugins ?? {}
+  for (const [pluginId, value] of Object.entries(userEnabled)) {
+    if (!pluginId.includes('@')) {
+      continue
+    }
+    const idx = enabledPlugins.indexOf(pluginId)
+    if (value) {
+      if (idx === -1) {
+        enabledPlugins.push(pluginId)
+      }
+    } else {
+      // Explicitly disabled — remove even if --add-dir enabled it
+      if (idx !== -1) {
+        enabledPlugins.splice(idx, 1)
+      }
+    }
+  }
+
+  // Other sources (project/local/managed) still flow through the vendor
+  // settings cascade and can override the user-scope value.
   if (settings.enabledPlugins) {
     for (const [pluginId, value] of Object.entries(settings.enabledPlugins)) {
       if (!pluginId.includes('@')) {
@@ -122,12 +146,18 @@ export function getPluginEditableScopes(): Map<string, ExtendedPluginScope> {
   ]
 
   for (const { scope, source } of scopeSources) {
-    const settings = getSettingsForSource(source)
-    if (!settings?.enabledPlugins) {
+    // user-scope plugin state lives in the unified user config JSON, not the
+    // vendor settings cascade. Other sources (project/local/managed/flag) keep
+    // their existing read path.
+    const enabledPlugins =
+      source === 'userSettings'
+        ? getUserConfigJson().enabledPlugins
+        : getSettingsForSource(source)?.enabledPlugins
+    if (!enabledPlugins) {
       continue
     }
 
-    for (const [pluginId, value] of Object.entries(settings.enabledPlugins)) {
+    for (const [pluginId, value] of Object.entries(enabledPlugins)) {
       // Skip invalid format
       if (!pluginId.includes('@')) {
         continue

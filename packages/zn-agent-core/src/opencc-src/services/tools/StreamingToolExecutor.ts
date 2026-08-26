@@ -15,6 +15,7 @@ import {
   shouldCreateUserInterruptionMessage,
 } from '../../utils/abortReasons.js'
 import { runToolUse } from './toolExecution.js'
+import { findDuplicateTrackedTool } from './toolDedupe.js'
 
 type MessageUpdate = {
   message?: Message
@@ -141,6 +142,40 @@ export class StreamingToolExecutor {
           }
         })()
       : false
+
+    // zai patch (2026-08-08): 并行工具去重。模型在 429/超时重试、或
+    // 并行发散时会在同一轮响应里重复提交相同工具调用(相同 name + input,
+    // 会话 sess-1786201578807 现场:同一 `pnpm test` 命令被并行提交两次)。
+    // 同一 executor(同一轮模型响应)内的重复项只执行一次,后续重复项
+    // 直接标记 completed 并返回引用首个调用的 tool_result,避免同一
+    // 命令并行执行两次、每次执行又驱动一轮模型调用放大上游请求。
+    const duplicate = findDuplicateTrackedTool(this.tools, block)
+    if (duplicate) {
+      this.tools.push({
+        id: block.id,
+        block,
+        assistantMessage,
+        status: 'completed',
+        isConcurrencySafe,
+        pendingProgress: [],
+        results: [
+          createUserMessage({
+            content: [
+              {
+                type: 'tool_result',
+                content: `<tool_use_result>Duplicate of parallel tool call ${duplicate.name} (tool_use_id ${duplicate.id}): identical input already queued/executing, skipped to avoid duplicate execution.</tool_use_result>`,
+                is_error: false,
+                tool_use_id: block.id,
+              },
+            ],
+            toolUseResult: 'Duplicate tool call skipped',
+            sourceToolAssistantUUID: assistantMessage.uuid,
+          }),
+        ],
+      })
+      return
+    }
+
     this.tools.push({
       id: block.id,
       block,

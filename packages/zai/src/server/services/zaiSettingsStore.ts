@@ -1,7 +1,7 @@
 import { writeFile, rename, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
-import type { OutputStyle, Theme, ZaiSettings } from '../../shared/settings.js'
+import type { OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import { getCachedZaiSettings, refreshCache } from './zaiSettingsCache.js'
 
 // Re-export the cache API so existing `zaiSettingsStore` importers can reach
@@ -68,6 +68,26 @@ export function isValidOutputStyle(value: unknown): value is OutputStyle {
   return typeof value === 'string' && VALID_OUTPUT_STYLES.has(value as OutputStyle)
 }
 
+const VALID_WORK_MODES: ReadonlySet<WorkMode> = new Set<WorkMode>([
+  'code',
+  'office',
+  'general',
+])
+
+/** Resolve the persisted working mode, defaulting to code. */
+export function resolveWorkMode(settings: ZaiSettings): WorkMode {
+  const candidate = settings.workMode
+  if (typeof candidate === 'string' && VALID_WORK_MODES.has(candidate as WorkMode)) {
+    return candidate as WorkMode
+  }
+  return 'code'
+}
+
+/** Validate a candidate working mode before persisting. */
+export function isValidWorkMode(value: unknown): value is WorkMode {
+  return typeof value === 'string' && VALID_WORK_MODES.has(value as WorkMode)
+}
+
 const VALID_THEMES: ReadonlySet<Theme> = new Set<Theme>([
   'auto',
   'dark',
@@ -110,5 +130,43 @@ export function resolveDefaultSplitScreen(settings: ZaiSettings): boolean {
 
 /** Validate a candidate default-split-screen value before persisting. */
 export function isValidDefaultSplitScreen(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}
+
+/**
+ * Resolve the persisted "enable dynamic workflow" flag with validation.
+ * Unknown / missing values collapse to false — workflows stay opt-in.
+ *
+ * The setting is the zai-side mirror of vendor's `OPENCC_ENABLE_WORKFLOWS`
+ * env var: `enableDynamicWorkflow === true` maps to env=1 in the PUT route,
+ * and `enableOpenccConfigs()` does the same bridge on boot. The vendor
+ * `isWorkflowsDisabled()` check at `getAllBaseTools()` consults the env
+ * var first, so a runtime toggle takes effect on the next `query()` call
+ * without restarting the process.
+ */
+export function resolveEnableDynamicWorkflow(settings: ZaiSettings): boolean {
+  return settings.enableDynamicWorkflow === true
+}
+
+/** Validate a candidate enable-dynamic-workflow value before persisting. */
+export function isValidEnableDynamicWorkflow(value: unknown): value is boolean {
+  return typeof value === 'boolean'
+}
+
+/**
+ * Resolve the persisted "auto-update zai" flag with validation.
+ * Unknown / missing values collapse to true — we want new users to get
+ * silent auto-updates by default. SettingsDrawer is the explicit opt-out.
+ *
+ * The setting gates `maybeAutoUpdate()` in services/updater.ts: on every
+ * boot, fire-and-forget; if disabled, no `npm view`, no `npm install -g`,
+ * no SSE events — completely silent.
+ */
+export function resolveAutoUpdate(settings: ZaiSettings): boolean {
+  return settings.autoUpdate !== false
+}
+
+/** Validate a candidate auto-update value before persisting. */
+export function isValidAutoUpdate(value: unknown): value is boolean {
   return typeof value === 'boolean'
 }

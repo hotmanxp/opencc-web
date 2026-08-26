@@ -35,7 +35,7 @@ export function getDefaultPlansDirectory({
   if (configDirEnv) {
     return join(configDirEnv.normalize('NFC'), 'plans')
   }
-  return join(homeDir, '.claude', 'plans').normalize('NFC')
+  return join(homeDir, '.zai', 'plans').normalize('NFC')
 }
 
 /**

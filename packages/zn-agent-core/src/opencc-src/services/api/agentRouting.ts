@@ -10,10 +10,26 @@ import { isModelAlias } from '../../utils/model/aliases.js'
 export interface ProviderOverride {
   /** Model name to send to the API (e.g. "deepseek-chat", "gpt-4o") */
   model: string
-  /** OpenAI-compatible base URL */
+  /** Base URL for this provider (Anthropic Messages or OpenAI-compatible). */
   baseURL: string
   /** API key for this provider */
   apiKey: string
+  /**
+   * zai patch: 请求走哪条 API 通道。'openai'（缺省）→ vendor openai-shim
+   * POST `{baseURL}/chat/completions`；'anthropic' → Anthropic SDK +
+   * override 的 baseURL/apiKey（baseURL 指向 Anthropic Messages 兼容端点，
+   * 如 api.deepseek.com/anthropic）。zai 的 provider profile 命中
+   * `provider: 'anthropic'` 时注入 'anthropic'，让用户选择的 profile
+   * 配置（baseUrl/apiKey）真正参与调用，而不是回落到
+   * ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN 的 env 默认值。
+   */
+  format?: 'anthropic' | 'openai'
+  /**
+   * zai patch: free-form request-body fields merged into every
+   * POST `/chat/completions` (sourced from zai's
+   * `ProviderProfile.extraParams` in ~/.zai.json). Optional.
+   */
+  extraParams?: Record<string, unknown>
 }
 
 /** A model-only route: reuse the session's current provider, just change the model. */

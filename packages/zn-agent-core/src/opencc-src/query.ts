@@ -1310,6 +1310,14 @@ async function* queryLoop(
               agentId: toolUseContext.agentId,
               addNotification: toolUseContext.addNotification,
               providerOverride: toolUseContext.options.providerOverride,
+              // zai patch: thread the per-call providerId through to
+              // callModel options so zai's modelCaller can route the model
+              // to the exact provider the user picked (see plan §阶段 2
+              // vendor 透传 chain). Mirrors the providerOverride line
+              // above; both are read from ToolUseContext.options, which
+              // QueryEngine.submitMessage populates from createOpenccRuntime
+              // input. Optional — absent means legacy first-match-by-name.
+              providerId: toolUseContext.options.providerId,
               ...(toolsForModel !== toolUseContext.options.tools && {
                 messageNormalizationTools: toolUseContext.options.tools,
               }),

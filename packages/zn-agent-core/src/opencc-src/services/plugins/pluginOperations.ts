@@ -67,6 +67,10 @@ import {
   getSettingsForSource,
   updateSettingsForSource,
 } from '../../utils/settings/settings.js'
+import {
+  getUserConfigJson,
+  setUserConfigJsonValue,
+} from '../../utils/userConfigJson.js'
 import { plural } from '../../utils/stringUtils.js'
 
 /** Valid installable scopes (excludes 'managed' which can only be installed from managed-settings.json) */
@@ -117,7 +121,7 @@ export function getProjectPathForScope(scope: PluginScope): string | undefined {
 }
 
 /**
- * Is this plugin enabled (value === true) in .claude/settings.json?
+ * Is this plugin enabled (value === true) in .zai/settings.json?
  *
  * Distinct from V2 installed_plugins.json scope: that file tracks where a
  * plugin was *installed from*, but the same plugin can also be enabled at
@@ -483,12 +487,12 @@ export async function uninstallPluginOp(
     // Try to find where the plugin is actually installed to provide a helpful error
     const { scope: actualScope } = getPluginInstallationFromV2(pluginId)
     if (actualScope !== scope && installations && installations.length > 0) {
-      // Project scope is special: .claude/settings.json is shared with the team.
+      // Project scope is special: .zai/settings.json is shared with the team.
       // Point users at the local-override escape hatch instead of --scope project.
       if (actualScope === 'project') {
         return {
           success: false,
-          message: `Plugin "${plugin}" is enabled at project scope (.claude/settings.json, shared with your team). To disable just for you: claude plugin disable ${plugin} --scope local`,
+          message: `Plugin "${plugin}" is enabled at project scope (.zai/settings.json, shared with your team). To disable just for you: claude plugin disable ${plugin} --scope local`,
         }
       }
       return {
@@ -581,12 +585,12 @@ export async function setPluginEnabledOp(
 
   // Built-in plugins: always use user-scope settings, bypass the normal
   // scope-resolution + installed_plugins lookup (they're not installed).
+  // User-scope plugin state now lives in the unified user config JSON
+  // (~/.zai.json, fallback ~/.zai.json), not the vendor settings cascade.
   if (isBuiltinPluginId(plugin)) {
-    const { error } = updateSettingsForSource('userSettings', {
-      enabledPlugins: {
-        ...getSettingsForSource('userSettings')?.enabledPlugins,
-        [plugin]: enabled,
-      },
+    const { error } = setUserConfigJsonValue('enabledPlugins', {
+      ...getUserConfigJson().enabledPlugins,
+      [plugin]: enabled,
     })
     if (error) {
       return {
@@ -660,15 +664,20 @@ export async function setPluginEnabledOp(
   }
 
   const settingSource = scopeToSettingSource(resolvedScope)
+  // user-scope plugin state lives in the unified user config JSON
+  // (~/.zai.json, fallback ~/.zai.json) — read from there for the
+  // idempotency/cross-scope check below, mirroring the write target.
   const scopeSettingsValue =
-    getSettingsForSource(settingSource)?.enabledPlugins?.[pluginId]
+    settingSource === 'userSettings'
+      ? getUserConfigJson().enabledPlugins?.[pluginId]
+      : getSettingsForSource(settingSource)?.enabledPlugins?.[pluginId]
 
   // ── Cross-scope hint: explicit scope given but plugin is elsewhere ──
   // If the plugin is absent from the requested scope but present at a
   // different scope, guide the user to the right --scope — UNLESS they're
   // writing to a higher-precedence scope to override a lower one
   // (e.g. `disable --scope local` to override a project-enabled plugin
-  // without touching the shared .claude/settings.json).
+  // without touching the shared .zai/settings.json).
   const SCOPE_PRECEDENCE: Record<InstallableScope, number> = {
     user: 0,
     project: 1,
@@ -693,14 +702,20 @@ export async function setPluginEnabledOp(
   // When explicit scope given: check that scope's settings value directly
   // (merged state can be wrong if plugin is enabled elsewhere but disabled here).
   // When auto-detected: use merged effective state.
-  // When overriding a lower scope: check merged state — scopeSettingsValue is
-  // undefined (plugin not in this scope yet), which would read as "already
-  // disabled", but the whole point of the override is to write an explicit
-  // `false` that masks the lower scope's `true`.
-  const isCurrentlyEnabled =
+  // When overriding a lower scope: scopeSettingsValue is undefined (plugin not
+  // in this scope yet) — returning `undefined` here lets us write an explicit
+  // `false` to mask a higher scope's `true`. Same for plugins never declared
+  // in any scope but loaded as enabled by default — there's no existing entry
+  // to be idempotent against, so the operation should declare one.
+  const editableHas = getPluginEditableScopes().has(pluginId)
+  const isCurrentlyEnabled: boolean | undefined =
     scope && !isOverride
-      ? scopeSettingsValue === true
-      : getPluginEditableScopes().has(pluginId)
+      ? scopeSettingsValue === undefined
+        ? undefined
+        : scopeSettingsValue === true
+      : editableHas
+        ? true
+        : undefined
   if (enabled === isCurrentlyEnabled) {
     return {
       success: false,
@@ -721,12 +736,22 @@ export async function setPluginEnabledOp(
   }
 
   // ── ACTION: write settings ──
-  const { error } = updateSettingsForSource(settingSource, {
-    enabledPlugins: {
-      ...getSettingsForSource(settingSource)?.enabledPlugins,
-      [pluginId]: enabled,
-    },
-  })
+  // User-scope plugin state now lives in the unified user config JSON
+  // (~/.zai.json, fallback ~/.zai.json) instead of the vendor settings
+  // cascade. Project/local/managed scopes still flow through the vendor
+  // settings path.
+  const { error } =
+    settingSource === 'userSettings'
+      ? setUserConfigJsonValue('enabledPlugins', {
+          ...getUserConfigJson().enabledPlugins,
+          [pluginId]: enabled,
+        })
+      : updateSettingsForSource(settingSource, {
+          enabledPlugins: {
+            ...getSettingsForSource(settingSource)?.enabledPlugins,
+            [pluginId]: enabled,
+          },
+        })
   if (error) {
     return {
       success: false,

@@ -55,7 +55,7 @@ const inputSchema = lazySchema(() =>
       .optional()
       .describe(
         'Optional named agent type (e.g., "explore", "plan", or a custom ' +
-          'agent from .claude/agents/). Maps to the JobLaunchSpec.agent field.',
+          'agent from .zai/agents/). Maps to the JobLaunchSpec.agent field.',
       ),
     label: z
       .string()
@@ -180,7 +180,7 @@ export const BackgroundAgentTool = buildTool({
       'multiple times in a single turn to fan out parallel work — each ' +
       'call becomes an independent daemon-managed job. ' +
       'After spawning, the worker\'s output is captured to ' +
-      '`~/.claude/background/<shortId>.log`; pair with `BackgroundAgentResult` ' +
+      '`~/.zai/background/<shortId>.log`; pair with `BackgroundAgentResult` ' +
       'to fetch the result in a follow-up turn.'
     )
   },
@@ -199,7 +199,7 @@ export const BackgroundAgentTool = buildTool({
       'persistent, or `opencc daemon run` for foreground). If the daemon is ' +
       'not running, the tool returns a helpful error instead of failing silently.\n\n' +
       '**Output:** a 8-hex `shortId`. The worker\'s stdout+stderr is captured ' +
-      'to `~/.claude/background/<shortId>.log` (NOT returned inline). ' +
+      'to `~/.zai/background/<shortId>.log` (NOT returned inline). ' +
       '**To get the result back into your context, call `BackgroundAgentResult(' +
       'shortId)` in a follow-up turn.** Use the `tail` argument for long outputs.\n\n' +
       '**Input schema:**\n' +

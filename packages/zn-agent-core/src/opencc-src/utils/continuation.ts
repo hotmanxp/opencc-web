@@ -70,11 +70,15 @@ const VERB_ING = ACTION_VERBS.map(v => {
 
 // Build continuation-signal regexes from the shared verb list.
 // (Using function to keep construction readable.)
-function buildContinuationSignals(): RegExp[] {
+// `inclBareIng=false` 时排除裸 -ing 动词:裸动词(如文本任意位置的 "installing")
+// 只有出现在 last-120 最近窗口才算"马上要继续"的信号,全文扫会把总结里的任务
+// 主题词(如本次的 installing)误判成继续意图。
+function buildContinuationSignals(inclBareIng = true): RegExp[] {
   const v = VERB_ALT
   // "time to" needs "do" explicitly, but the rest of the verb list without "do"
   // (use filtered array instead of string.replace so reordering ACTION_VERBS doesn't break it)
   const vWithoutDo = ACTION_VERBS.filter(a => a !== 'do').join('|')
+  const ingPart = inclBareIng ? `|${VERB_ING}` : ''
   return [
     // English: Action-transition phrases (requires intent + action)
     new RegExp(`\\bso now (i|let me|we) (need to|have to|should|must|will) (${v})\\b`, 'i'),
@@ -82,7 +86,7 @@ function buildContinuationSignals(): RegExp[] {
     new RegExp(`\\bi (will|shall|now|need to|have to|must|should) (now )?(${v})\\b`, 'i'),
     new RegExp(`\\blet me (go ahead and |now )?(${v})\\b`, 'i'),
     new RegExp(`\\btime to (do|${vWithoutDo}|get started|begin|start)\\b`, 'i'),
-    new RegExp(`\\b(moving on to|next step is to|starting to|proceeding to|continuing with|applying (the|these) changes|${VERB_ING})\\b`, 'i'),
+    new RegExp(`\\b(moving on to|next step is to|starting to|proceeding to|continuing with|applying (the|these) changes${ingPart})\\b`, 'i'),
     // French: Support for common continuation phrasing (relaxed boundaries for accents and apostrophes)
     /(^|\s)(je passe (à|au)|ensuite|l'étape suivante est de|je continue avec|au suivant|passons à|je reviens vers vous|je suis en train d'|je vais maintenant)(\s|$|[a-zà-ÿ])/i,
     /(^|\s)(je (vais|dois|dois maintenant|vais maintenant) (faire|créer|écrire|modifier|ajouter|tester|vérifier|lancer|exécuter|procéder|démarrer|commencer|identifier|analyser|inspecter|revoir|chercher))(\s|$|[a-zà-ÿ])/i,
@@ -100,7 +104,16 @@ function buildContinuationSignals(): RegExp[] {
 
 export const CONTINUATION_SIGNALS = buildContinuationSignals()
 
-export const COMPLETION_MARKERS = /\b(done|finished|completed|complete|summary|that's all|that is all|all set|hope this helps|let me know if|no issues|lgtm)\b/i
+// 全文 fallback 专用的信号集(late-window 级 last-120 仍用上面的 CONTINUATION_SIGNALS)。
+// 裸 -ing 动词不做全文信号,避免任务主题词(如总结里反复出现的 "installing")误触发。
+export const FULL_TEXT_SIGNALS = buildContinuationSignals(false)
+
+export const COMPLETION_MARKERS =
+  /\b(done|finished|completed|complete|summary|that's all|that is all|all set|hope this helps|let me know if|no issues|lgtm)\b|(已完成|完成|完毕|已提交|已结束|收尾)/i
+
+// 行尾终止标点(英文 + 中文)。中文总结以「。」/「！」等收尾时同样视为已正常收尾,
+// 否则 full-text fallback 会把任何中文总结都当成"无终止标点"并误触发 nudge。
+export const TERMINAL_PUNCTUATION = /[.!?。！？…”’」』"'`)\]]\s*$/
 
 export type ContinuationResult = {
   shouldNudge: boolean
@@ -172,9 +185,9 @@ export function analyzeContinuationIntent(
   })
 
   if (hasLateContinuationSignal) {
-    // If the sentence is punctuated but has a transition word, only nudge if 
+    // If the sentence is punctuated but has a transition word, only nudge if
     // it's a strong 1st person intent or open tasks are present.
-    const hasTerminalPunctuation = /[.!??"'`)\]]\s*$/.test(lastText) || lastText.endsWith('`')
+    const hasTerminalPunctuation = TERMINAL_PUNCTUATION.test(lastText)
     if (hasTerminalPunctuation) {
       const strongIntent = /\b(i (will|shall|need to|must|should|now)|let (me|us)|je (vais|reviens)|passons à|moving on to|continuing with|proceeding to|next step is to)\b/i.test(lowerText) || 
                            /je suis en train d'/i.test(lowerText) || /◻/.test(lastText)
@@ -203,9 +216,9 @@ export function analyzeContinuationIntent(
   }
 
   // Global fallback for unpunctuated signals (must be a clear transition)
-  const hasTerminalPunctuation = /[.!??"'`)\]]\s*$/.test(lastText) || lastText.endsWith('`')
+  const hasTerminalPunctuation = TERMINAL_PUNCTUATION.test(lastText)
   if (
-    CONTINUATION_SIGNALS.some(re => re.test(lowerText)) && 
+    FULL_TEXT_SIGNALS.some(re => re.test(lowerText)) &&
     !hasTerminalPunctuation
   ) {
     return { shouldNudge: true, reason: 'continuation_signal' }

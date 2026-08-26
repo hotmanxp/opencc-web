@@ -134,7 +134,7 @@ export function Install({
 
         // Check specifically for lock failure
         if (result.lockFailed) {
-          throw new Error('Could not install - another process is currently installing OpenCC. Please try again in a moment.');
+          throw new Error('Could not install - another process is currently installing Z.Ai. Please try again in a moment.');
         }
 
         // If we couldn't get the version, there might be an issue
@@ -239,12 +239,12 @@ export function Install({
   useEffect(() => {
     if (state.type === 'success') {
       // Give success message time to render before exiting
-      setTimeout(onDone, 2000, 'OpenCC installation completed successfully', {
+      setTimeout(onDone, 2000, 'Z.Ai installation completed successfully', {
         display: 'system' as const
       });
     } else if (state.type === 'error') {
       // Give error message time to render before exiting
-      setTimeout(onDone, 3000, 'OpenCC installation failed', {
+      setTimeout(onDone, 3000, 'Z.Ai installation failed', {
         display: 'system' as const
       });
     }
@@ -255,7 +255,7 @@ export function Install({
       {state.type === 'cleaning-npm' && <Text color="warning">Cleaning up old npm installations...</Text>}
 
       {state.type === 'installing' && <Text color="claude">
-          Installing OpenCC native build {state.version}...
+          Installing Z.Ai native build {state.version}...
         </Text>}
 
       {state.type === 'setting-up' && <Text color="claude">Setting up launcher and shell integration...</Text>}
@@ -266,7 +266,7 @@ export function Install({
           <Box>
             <StatusIcon status="success" withSpace />
             <Text color="success" bold>
-              OpenCC successfully installed!
+              Z.Ai successfully installed!
             </Text>
           </Box>
           <Box marginLeft={2} flexDirection="column" gap={1}>
@@ -308,7 +308,7 @@ export function Install({
 export const install = {
   type: 'local-jsx' as const,
   name: 'install',
-  description: '安装 OpenCC 原生构建',
+  description: '安装 Z.Ai 原生构建',
   argumentHint: '[options]',
   async call(onDone: (result: string, options?: {
     display?: CommandResultDisplay;

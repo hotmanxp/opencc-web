@@ -14,6 +14,17 @@ export interface CommandContext {
   sessionId?: string
   model?: string
   dataDir: string
+  /**
+   * 会话当前 transcript 消息列表(RNA: 由路由层从 TranscriptStore.read 注入)。
+   * 仅命令执行需要时携带 — 命令可读 `m.type === 'assistant'` 统计 assistant
+   * 轮次,无需路由另传 `assistantMessageCount`。
+   *
+   * Vendor 同位置字段是 `messages: Message[]`(完整 opencc Message 形状);
+   * zai 端为避免把 vendor 内部类型拖入 compat 主入口,这里用最小子集
+   * `{ type: string }`,命令自己用 type guard 识别角色。TranscriptStore.read
+   * 返回的 `messages: unknown[]` 可直接喂进来,不需转换。
+   */
+  messages?: ReadonlyArray<{ type: string }>
 }
 
 export interface PromptCommand {

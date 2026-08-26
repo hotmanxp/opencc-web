@@ -3,7 +3,7 @@
  *
  * Asserts the structural migration from `DefaultAgentRuntime` (compat
  * shim over `runViaOpenccQuery`) to `OpenccRuntime` (`createOpenccRuntime`
- * from `@zn-ai/zn-agent-core/opencc-server`) — without invoking a real
+ * from `@zn-ai/zn-agent-core`) — without invoking a real
  * model call (the runtime's `modelCaller` injection is deferred to Task
  * 4.5; this test confirms the wiring contract, not the LLM round-trip).
  *
@@ -12,7 +12,7 @@
  * the new seam test for the Task 5 swap and asserts:
  *
  *   1. `initAgentRuntime(cwd)` constructs the OpenccRuntime via the
- *      public subpath factory (not via the compat bridge).
+ *      public main-entry factory (not via the compat bridge).
  *   2. `getRuntime()` returns an object with all 8 documented
  *      OpenccRuntime methods (`query`, `abort`, `getSession`,
  *      `listSessions`, `readTranscript`, `patchSession`,
@@ -26,7 +26,7 @@
  * The test does NOT spy on `__zaiBridgeCtx` or `openccQueryBridge` —
  * those shims are slated for deletion in Task 6 and asserting on them
  * would create a Task 6 follow-up. The migration contract lives in the
- * public surface (`@zn-ai/zn-agent-core/opencc-server`).
+ * public surface (`@zn-ai/zn-agent-core`).
  */
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'

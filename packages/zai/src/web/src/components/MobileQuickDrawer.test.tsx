@@ -7,7 +7,13 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 // so any cross-mock references must live inside a hoisted object.
 const mocks = vi.hoisted(() => {
   return {
-    execReplMock: vi.fn(async () => ({ ok: true as const, execId: 'e1' })),
+    execReplMock: vi.fn(async (_cmd: string, _opts?: { wait?: boolean }) => ({
+      ok: true as const,
+      execId: 'e1',
+      code: 0,
+      signal: null,
+      durationMs: 12,
+    })),
     refreshTopCommandsMock: vi.fn(),
     submitPromptMock: vi.fn(async () => undefined),
     pushUserMsgMock: vi.fn(),
@@ -87,6 +93,20 @@ vi.mock('antd', async (importOriginal) => {
   const modalConfirm = vi.fn((opts: { onOk?: () => void | Promise<void> }) => {
     ;(mocks as unknown as { lastConfirm: typeof opts }).lastConfirm = opts
   })
+  // 必须保留 Modal 的 React component 形态,否则组件树里的 <Modal> 渲染时
+  // React 会拿到对象并触发 "Element type is invalid"。同时把静态方法
+  // (confirm/info/error/useModal 等) 透传出来, 仅替换 confirm 让我们能
+  // 抓取 onOk — a02e4715 之后 Git tab 引入了 <Modal> 弹 DiffView,
+  // 因此不能简单 { ...antd.Modal, confirm }。
+  const StubModal = Object.assign(
+    (props: Parameters<typeof antd.Modal>[0]) =>
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (antd.Modal as any)(props),
+    {
+      ...antd.Modal,
+      confirm: modalConfirm,
+    },
+  )
   return {
     ...antd,
     message: {
@@ -95,12 +115,13 @@ vi.mock('antd', async (importOriginal) => {
       success: (...args: unknown[]) => mocks.messageSuccessMock(...args),
       error: (...args: unknown[]) => mocks.messageErrorMock(...args),
     },
-    Modal: { ...antd.Modal, confirm: modalConfirm },
+    Modal: StubModal,
   }
 })
 
 import MobileQuickDrawer from './MobileQuickDrawer.jsx'
 import { useAgentStore } from '../store/useAgentStore.js'
+import { useAppStore } from '../store/useAppStore.js'
 
 beforeEach(() => {
   mocks.execReplMock.mockClear()
@@ -123,6 +144,12 @@ beforeEach(() => {
     activeSessionId: 'sess-1',
     status: 'idle',
   })
+  // 默认注入 git 仓库上下文 (branch 非 null), Git segment 默认可见 —
+  // 让既有 Bash/Prompt/Git 布局用例保持 3 个 Segmented 项. "非 git 过滤"
+  // 用例在其 describe 内单独覆盖为 branch null.
+  useAppStore.setState({
+    instanceContext: { cwd: '/repo', cwdName: 'repo', branch: 'main' },
+  })
 })
 
 afterEach(() => {
@@ -131,6 +158,7 @@ afterEach(() => {
     activeSessionId: null,
     status: 'idle',
   })
+  useAppStore.setState({ instanceContext: null })
 })
 
 describe('MobileQuickDrawer — 打开/关闭', () => {
@@ -151,12 +179,81 @@ describe('MobileQuickDrawer — 打开/关闭', () => {
 })
 
 describe('MobileQuickDrawer — Bash tab', () => {
-  it('点击 row 调 execRepl + 触发 onClose', async () => {
+  it('点击 row 调 execRepl (wait=true) + 触发 onClose', async () => {
     const onClose = vi.fn()
     render(<MobileQuickDrawer open onClose={onClose} />)
     fireEvent.click(screen.getByText('ls -la'))
-    await waitFor(() => expect(mocks.execReplMock).toHaveBeenCalledWith('ls -la'))
+    // wait=true 用于同步拿到真实终态(code/signal),以决定 success/error toast。
+    await waitFor(() =>
+      expect(mocks.execReplMock).toHaveBeenCalledWith('ls -la', { wait: true }),
+    )
     expect(onClose).toHaveBeenCalledTimes(1)
+  })
+
+  it('点击 row 后 code=0 → message.success (已执行: ...)', async () => {
+    mocks.execReplMock.mockResolvedValueOnce({
+      ok: true as const,
+      execId: 'e-ok',
+      code: 0,
+      signal: null,
+      durationMs: 5,
+    })
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    fireEvent.click(screen.getByText('ls -la'))
+    await waitFor(() => expect(mocks.execReplMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(mocks.messageSuccessMock).toHaveBeenCalledWith('已执行: ls -la'),
+    )
+    expect(mocks.messageErrorMock).not.toHaveBeenCalled()
+  })
+
+  it('点击 row 后 code 非 0 → message.error (执行失败 (exit N): ...)', async () => {
+    mocks.execReplMock.mockResolvedValueOnce({
+      ok: true as const,
+      execId: 'e-fail',
+      code: 7,
+      signal: null,
+      durationMs: 5,
+    })
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    fireEvent.click(screen.getByText('ls -la'))
+    await waitFor(() => expect(mocks.execReplMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(mocks.messageErrorMock).toHaveBeenCalledWith('执行失败 (exit 7): ls -la'),
+    )
+    expect(mocks.messageSuccessMock).not.toHaveBeenCalled()
+  })
+
+  it('点击 row 后 signal 非空 → message.error (执行失败 (signal SIGxxx): ...)', async () => {
+    mocks.execReplMock.mockResolvedValueOnce({
+      ok: true as const,
+      execId: 'e-sig',
+      code: null,
+      signal: 'SIGTERM',
+      durationMs: 5,
+    })
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    fireEvent.click(screen.getByText('ls -la'))
+    await waitFor(() => expect(mocks.execReplMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(mocks.messageErrorMock).toHaveBeenCalledWith(
+        '执行失败 (signal SIGTERM): ls -la',
+      ),
+    )
+  })
+
+  it('busy 响应 → message.warning (已有命令在执行)', async () => {
+    mocks.execReplMock.mockResolvedValueOnce({
+      ok: false as const,
+      busy: true as const,
+      currentExecId: 'e-existing',
+    })
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    fireEvent.click(screen.getByText('ls -la'))
+    await waitFor(() => expect(mocks.execReplMock).toHaveBeenCalled())
+    await waitFor(() =>
+      expect(mocks.messageWarningMock).toHaveBeenCalledWith('已有命令在执行'),
+    )
   })
 
   it('sessionId 缺失时列表项渲染为禁用提示', () => {
@@ -228,10 +325,16 @@ describe('MobileQuickDrawer — Prompt tab', () => {
   })
 })
 
-describe('MobileQuickDrawer — Diff tab', () => {
-  function switchToDiffTab() {
+describe('MobileQuickDrawer — Git tab', () => {
+  // 顶层 beforeEach 已注入 git 仓库上下文 (branch='main'), 此处无需重复.
+  // a02e4715 把 Diff tab 整体重构为 Git tab:
+  //   - 行 testid: mobile-quick-drawer-git-row-{path}
+  //   - 撤销按钮没有 testid, 通过 aria-label 查询
+  //   - Empty 文案由 "无变更" 改为 "没有变更"
+  //   - 文件状态字符直接渲染 (M, ??), 不再用 STATUS_LABELS
+  function switchToGitTab() {
     // Segmented rendered via Portal, use document.body.
-    // After Task 2 the order is Bash(0) / 常用指令(1) / Diff(2).
+    // After a02e4715 the order is Bash(0) / 常用指令(1) / Git(2).
     const items = document.body.querySelectorAll('.ant-segmented-item')
     expect(items.length).toBe(3)
     fireEvent.click(items[2]!)
@@ -251,7 +354,7 @@ describe('MobileQuickDrawer — Diff tab', () => {
     })
   }
 
-  it('切到 Diff tab 渲染 useGitStatus 返回的文件列表', () => {
+  it('切到 Git tab 渲染 useGitStatus 返回的文件列表', () => {
     setGitStatusMock({
       data: {
         ok: true,
@@ -264,46 +367,35 @@ describe('MobileQuickDrawer — Diff tab', () => {
     })
     useAgentStore.setState({ cwdBySession: { 'sess-1': '/repo' } })
     render(<MobileQuickDrawer open onClose={() => {}} />)
-    switchToDiffTab()
-    expect(screen.getByTestId('mobile-quick-drawer-diff-row-src/a.ts')).toBeInTheDocument()
-    expect(screen.getByTestId('mobile-quick-drawer-diff-row-src/b.ts')).toBeInTheDocument()
-    expect(screen.getByText('已修改')).toBeInTheDocument()
-    expect(screen.getByText('未跟踪')).toBeInTheDocument()
+    switchToGitTab()
+    expect(screen.getByTestId('mobile-quick-drawer-git-row-src/a.ts')).toBeInTheDocument()
+    expect(screen.getByTestId('mobile-quick-drawer-git-row-src/b.ts')).toBeInTheDocument()
   })
 
-  it('files.length === 0 时渲染「无变更」Empty', () => {
+  it('files.length === 0 时渲染「没有变更」文案', () => {
     setGitStatusMock({ data: { ok: true, branch: 'main', files: [] } })
     useAgentStore.setState({ cwdBySession: { 'sess-1': '/repo' } })
     render(<MobileQuickDrawer open onClose={() => {}} />)
-    switchToDiffTab()
-    const empty = screen.getByTestId('mobile-quick-drawer-diff-empty')
-    expect(empty).toBeInTheDocument()
-    expect(empty).toHaveTextContent('无变更')
+    switchToGitTab()
+    expect(screen.getByText('没有变更')).toBeInTheDocument()
   })
 
-  it('非 git 仓(data.ok=false 且无 error 字段)渲染 fallback「当前目录不是 git 仓库」', () => {
-    // brief intent: data.ok=false triggers "当前目录不是 git 仓库" fallback.
-    // component code: `data.error ?? '当前目录不是 git 仓库'`,所以 data.error 为 null/undefined
-    // 时才走 fallback。data.error 不为空时 component 会透传 error 字符串(由下一个 case 覆盖)。
-    setGitStatusMock({
-      data: { ok: false },
-    })
+  it('非 git 仓(data.ok=false + 无 error)走「没有变更」分支(无 cwd 错误时不显示旧 fallback)', () => {
+    // a02e4715 简化: data.ok=false + 无 error 时跟 ok=true 空列表走相同分支,
+    // 显示「没有变更」。旧「当前目录不是 git 仓库」fallback 文案已移除。
+    setGitStatusMock({ data: { ok: false } })
     useAgentStore.setState({ cwdBySession: { 'sess-1': '/repo' } })
     render(<MobileQuickDrawer open onClose={() => {}} />)
-    switchToDiffTab()
-    const empty = screen.getByTestId('mobile-quick-drawer-diff-empty')
-    // antd <Empty> SVG <title> 默认 en_US locale 渲染 "No data",jest-dom
-    // toHaveTextContent 是 substring 匹配,容忍前缀 "No data"。
-    expect(empty).toHaveTextContent('当前目录不是 git 仓库')
+    switchToGitTab()
+    expect(screen.getByText('没有变更')).toBeInTheDocument()
   })
 
   it('useGitStatus 的 error 字段非空(网络错)时把错误文案透传', () => {
     setGitStatusMock({ error: 'network down' })
     useAgentStore.setState({ cwdBySession: { 'sess-1': '/repo' } })
     render(<MobileQuickDrawer open onClose={() => {}} />)
-    switchToDiffTab()
-    const empty = screen.getByTestId('mobile-quick-drawer-diff-empty')
-    expect(empty).toHaveTextContent('network down')
+    switchToGitTab()
+    expect(screen.getByText('network down')).toBeInTheDocument()
   })
 
   it('点 revert 按钮 → Modal.confirm → onOk → gitApi.revertFile 被调 + refetch 被调', async () => {
@@ -315,8 +407,8 @@ describe('MobileQuickDrawer — Diff tab', () => {
     useAgentStore.setState({ cwdBySession: { 'sess-1': '/repo' } })
     mocks.revertFileMock.mockResolvedValueOnce({ ok: true })
     render(<MobileQuickDrawer open onClose={() => {}} />)
-    switchToDiffTab()
-    fireEvent.click(screen.getByTestId('mobile-quick-drawer-diff-revert-src/a.ts'))
+    switchToGitTab()
+    fireEvent.click(screen.getByLabelText('撤销此文件的更改'))
     expect(mocks.lastConfirm).not.toBeNull()
     await act(async () => {
       await mocks.lastConfirm!.onOk?.()
@@ -326,14 +418,27 @@ describe('MobileQuickDrawer — Diff tab', () => {
     expect(mocks.messageSuccessMock).toHaveBeenCalledWith('已撤销')
   })
 
+  it('?? 状态文件的撤销按钮 aria-label 是「删除此新文件」', () => {
+    setGitStatusMock({
+      data: { ok: true, branch: 'main', files: [{ path: 'src/new.ts', status: '??', staged: false }] },
+    })
+    useAgentStore.setState({ cwdBySession: { 'sess-1': '/repo' } })
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    switchToGitTab()
+    fireEvent.click(screen.getByLabelText('删除此新文件'))
+    expect(mocks.lastConfirm).not.toBeNull()
+    // 用户取消 — 仅触发 confirm, 不调 gitApi.revertFile
+    expect(mocks.revertFileMock).not.toHaveBeenCalled()
+  })
+
   it('用户取消 Modal.confirm 时 gitApi.revertFile 不被调', () => {
     setGitStatusMock({
       data: { ok: true, branch: 'main', files: [{ path: 'src/a.ts', status: 'M', staged: false }] },
     })
     useAgentStore.setState({ cwdBySession: { 'sess-1': '/repo' } })
     render(<MobileQuickDrawer open onClose={() => {}} />)
-    switchToDiffTab()
-    fireEvent.click(screen.getByTestId('mobile-quick-drawer-diff-revert-src/a.ts'))
+    switchToGitTab()
+    fireEvent.click(screen.getByLabelText('撤销此文件的更改'))
     expect(mocks.lastConfirm).not.toBeNull()
     // User cancels — we simply do NOT invoke onOk.
     expect(mocks.revertFileMock).not.toHaveBeenCalled()
@@ -349,21 +454,16 @@ describe('MobileQuickDrawer — Diff tab', () => {
     })
     useAgentStore.setState({ cwdBySession: { 'sess-1': '/repo' } })
     render(<MobileQuickDrawer open onClose={() => {}} />)
-    switchToDiffTab()
-    fireEvent.click(screen.getByTestId('mobile-quick-drawer-diff-revert-src/a.ts'))
+    switchToGitTab()
+    fireEvent.click(screen.getByLabelText('撤销此文件的更改'))
     expect(mocks.lastConfirm).not.toBeNull()
-    // Trigger onOk WITHOUT awaiting its inner promise — gitApi.revertFile is
-    // deferred and would block act() forever. setLoadingPath(path) runs
-    // synchronously before the await, so we can observe loading state then
-    // resolve + advance to settle cleanly.
     await act(async () => {
       void mocks.lastConfirm!.onOk?.()
-      // flush microtasks so setLoadingPath settles
+      // flush microtasks so setReverting settles
       await Promise.resolve()
     })
-    // AntD Button 在 loading=true 时给底层 <button> 加 `ant-btn-loading` class
-    // 并把图标换成 loading spinner,但 native `disabled` 属性仍为 false。
-    const revertBtn = screen.getByTestId('mobile-quick-drawer-diff-revert-src/a.ts')
+    // AntD Button 在 loading=true 时给底层 <button> 加 `ant-btn-loading` class.
+    const revertBtn = screen.getByLabelText('撤销此文件的更改')
     expect(revertBtn.className).toMatch(/ant-btn-loading/)
     // Resolve so the async block exits cleanly and finally-set runs (loading clears).
     await act(async () => {
@@ -371,10 +471,39 @@ describe('MobileQuickDrawer — Diff tab', () => {
       await Promise.resolve()
     })
     await waitFor(() => expect(mocks.revertFileMock).toHaveBeenCalledTimes(1))
-    // After resolution, loading class is gone (finally setLoadingPath(null)).
     await waitFor(() => {
-      const after = screen.getByTestId('mobile-quick-drawer-diff-revert-src/a.ts')
+      const after = screen.getByLabelText('撤销此文件的更改')
       expect(after.className).not.toMatch(/ant-btn-loading/)
     })
+  })
+})
+
+describe('MobileQuickDrawer — 非 git 项目过滤 Git segment', () => {
+  afterEach(() => {
+    useAppStore.setState({ instanceContext: null })
+  })
+
+  function setNonGitContext() {
+    useAppStore.setState({
+      instanceContext: { cwd: '/repo', cwdName: 'repo', branch: null },
+    })
+  }
+
+  it('instanceContext.branch 为 null 时不渲染 Git segment (options 只剩两个)', () => {
+    setNonGitContext()
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    // Segmented rendered via Portal, use document.body.
+    const items = document.body.querySelectorAll('.ant-segmented-item')
+    expect(items.length).toBe(2)
+    expect(screen.queryByText('Git')).toBeNull()
+  })
+
+  it('旧 State 停在 git 时 fallback 到默认 bash 项, 不渲染 GitTab', () => {
+    setNonGitContext()
+    useAgentStore.setState({ cwdBySession: { 'sess-1': '/repo' } })
+    render(<MobileQuickDrawer open onClose={() => {}} />)
+    fireEvent.click(screen.getByText('快捷 Bash'))
+    // options 只有两个, 无 Git 内容渲染 (GitTab 未挂载)
+    expect(screen.queryByTestId('mobile-quick-drawer-git-row-')).toBeNull()
   })
 })

@@ -46,7 +46,7 @@ function PreviewText({ text }: { text: string }) {
       <pre style={{ fontSize: 11, margin: '4px 0 0 0', padding: '6px 8px', background: 'var(--bg-faint-04)', borderRadius: 4, whiteSpace: 'pre-wrap', fontFamily: 'ui-monospace, monospace' }}>
         {expanded ? text : text.slice(0, PREVIEW_LIMIT) + '…'}
       </pre>
-      <Button type="link" size="small" style={{ padding: 0, fontSize: 11 }} onClick={() => setExpanded((v) => !v)}>
+      <Button type="link" size="small" aria-label={expanded ? '收起详情' : '展开更多详情'} style={{ padding: 0, fontSize: 11 }} onClick={() => setExpanded((v) => !v)}>
         {expanded ? 'Show less' : 'Show more'}
       </Button>
     </div>
@@ -74,6 +74,7 @@ function QuestionPanel({
   onAnswer,
   onNotesChange,
   onOtherChange,
+  onAdvance,
 }: {
   q: any
   answers: Record<string, string>
@@ -81,6 +82,11 @@ function QuestionPanel({
   onAnswer: (questionText: string, label: string) => void
   onNotesChange: (questionText: string, notes: string) => void
   onOtherChange: (questionText: string, text: string) => void
+  // 单选 (Radio) 模式: 用户点完一个非 Other 选项后调用, 让父组件
+  // 把 Tabs activeKey 推进到下一题 / Review, 减少多问题卡片的手动切 tab
+  // 次数。Other 选项不调 (还要输入文本); 多选 (Checkbox) 也不调
+  // (用户可能还要勾别的或看 description)。未传时 (单问题卡片) 静默无效。
+  onAdvance?: () => void
 }) {
   const currentAnswer = answers[q.question]
   // 'Other' 选项的固定逻辑: answers 中始终保持 '__other__' 占位, 文本
@@ -109,6 +115,10 @@ function QuestionPanel({
       // 切走 Other: 清理 otherText (防止切回去时残留), 设真实答案。
       onOtherChange(q.question, '')
       onAnswer(q.question, e.target.value)
+      // Radio 选中即视为"答完此题", 多问题卡片自动推进到下一题 / Review
+      // tab, 避免每题都要手动点 tab。父组件按 idx 决定推到 questions
+      // [idx+1] 还是 'review'; 单问题模式父组件没传 onAdvance, 这里静默无效。
+      onAdvance?.()
     }
   }
 
@@ -124,6 +134,7 @@ function QuestionPanel({
         {q.multiSelect ? (
           <>
             <Checkbox.Group
+              aria-label={q.question}
               value={selectedList}
               onChange={(vals) => {
                 const list = vals as string[]
@@ -132,7 +143,7 @@ function QuestionPanel({
               style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
             >
               {q.options.map((opt: any) => (
-                <Checkbox key={opt.label} value={opt.label}>
+                <Checkbox key={opt.label} value={opt.label} aria-label={opt.label}>
                   <div>
                     <div style={{ fontWeight: 500 }}>{opt.label}</div>
                     {opt.description && (
@@ -144,7 +155,7 @@ function QuestionPanel({
                   </div>
                 </Checkbox>
               ))}
-              <Checkbox key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE}>
+              <Checkbox key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE} aria-label={OTHER_OPTION_LABEL}>
                 <div style={{ fontWeight: 500 }}>{OTHER_OPTION_LABEL}</div>
               </Checkbox>
             </Checkbox.Group>
@@ -162,12 +173,13 @@ function QuestionPanel({
         ) : (
           <>
             <Radio.Group
+              aria-label={q.question}
               value={currentAnswer}
               onChange={handleRadioChange}
               style={{ display: 'flex', flexDirection: 'column', gap: 6 }}
             >
               {q.options.map((opt: any) => (
-                <Radio key={opt.label} value={opt.label}>
+                <Radio key={opt.label} value={opt.label} aria-label={opt.label}>
                   <div>
                     <div style={{ fontWeight: 500 }}>{opt.label}</div>
                     {opt.description && (
@@ -179,7 +191,7 @@ function QuestionPanel({
                   </div>
                 </Radio>
               ))}
-              <Radio key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE}>
+              <Radio key={OTHER_OPTION_VALUE} value={OTHER_OPTION_VALUE} aria-label={OTHER_OPTION_LABEL}>
                 <div style={{ fontWeight: 500 }}>{OTHER_OPTION_LABEL}</div>
               </Radio>
             </Radio.Group>
@@ -381,7 +393,7 @@ export default function QuestionCard(props: QuestionCardProps) {
         activeKey={tabKey}
         onChange={setTabKey}
         items={[
-          ...questions.map((q) => ({
+          ...questions.map((q, idx) => ({
             key: q.question,
             label: (
               <span>
@@ -399,6 +411,16 @@ export default function QuestionCard(props: QuestionCardProps) {
                 onAnswer={onAnswer}
                 onNotesChange={onNotesChange}
                 onOtherChange={onOtherChange}
+                // 单选 Radio 选中后自动推进: 下一题 tab;最后一题则跳到
+                // Review tab (idx === questions.length - 1)。Other 选项在
+                // QuestionPanel 内部已被排除, 不会触发这个回调。
+                onAdvance={() => {
+                  if (idx < questions.length - 1) {
+                    setTabKey(questions[idx + 1].question)
+                  } else {
+                    setTabKey('review')
+                  }
+                }}
               />
             ),
           })),

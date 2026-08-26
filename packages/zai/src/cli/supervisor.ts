@@ -14,7 +14,7 @@ type ChildMsg = { type: 'ready'; pid: number; port: number } | { type: 'restarte
 type RestartReason = 'user_action' | 'auto_recovery' | 'update'
 
 export async function runSupervisor(
-  opts: { args: string[]; env: NodeJS.ProcessEnv; port: number },
+  opts: { args: string[]; env: NodeJS.ProcessEnv; port: number; label?: string },
   depsIn?: Partial<SupervisorDeps>,
 ): Promise<{ exitCode: number }> {
   const deps: SupervisorDeps = {
@@ -67,10 +67,17 @@ export async function runSupervisor(
         }).catch(() => {})
       }
     }
+    // 进程标题:`zai[label]:port`(有 label) 或 `zai:port`(无 label,CLI
+    // 直接 `zai start` 路径,start.ts 用 cwd basename 作为 label)。
+    // `argv0` 改 `argv[0]`(Linux/macOS `ps -o args` 列从 argv[0] 起始读);
+    // `ZAI_PROCESS_TITLE` env 让 child 启动早期把内部 `process.title` 也设
+    // 上,补 macOS Activity Monitor / Linux `top` 取 `comm` 字段的路径。
+    const title = opts.label ? `zai[${opts.label}]:${opts.port}` : `zai:${opts.port}`
     const child = deps.spawn(process.execPath, opts.args, {
       stdio: ['ipc', 'inherit', 'inherit'],
       detached: false,
-      env: { ...opts.env, ZAI_SUPERVISOR_PID: String(process.pid) },
+      argv0: title,
+      env: { ...opts.env, ZAI_SUPERVISOR_PID: String(process.pid), ZAI_PROCESS_TITLE: title },
     })
     currentChild = child
     lastChildStartTs = Date.now()

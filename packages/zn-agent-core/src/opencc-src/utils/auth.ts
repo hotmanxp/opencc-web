@@ -83,7 +83,7 @@ const DEFAULT_API_KEY_HELPER_TTL = 5 * 60 * 1000
 
 /**
  * CCR and OpenCC Desktop spawn the CLI with OAuth and should never fall back
- * to the user's ~/.claude/settings.json API-key config (apiKeyHelper,
+ * to the user's ~/.zai/settings.json API-key config (apiKeyHelper,
  * env.ANTHROPIC_API_KEY, env.ANTHROPIC_AUTH_TOKEN). Those settings exist for
  * the user's terminal CLI, not managed sessions. Without this guard, a user
  * who runs `claude` in their terminal with an API key sees every CCD session
@@ -360,7 +360,7 @@ export function getAnthropicApiKeyWithSource(
 /**
  * Get the configured apiKeyHelper from settings.
  * In bare mode, only the --settings flag source is consulted — apiKeyHelper
- * from ~/.claude/settings.json or project settings is ignored.
+ * from ~/.zai/settings.json or project settings is ignored.
  */
 export function getConfiguredApiKeyHelper(): string | undefined {
   if (isBareMode()) {
@@ -697,7 +697,7 @@ export function refreshAwsAuth(awsAuthRefresh: string): Promise<boolean> {
               'AWS auth refresh timed out after 3 minutes. Run your auth command manually in a separate terminal.',
             )
           : chalk.red(
-              'Error running awsAuthRefresh (in settings or ~/.claude.json):',
+              'Error running awsAuthRefresh (in settings or ~/.zai.json):',
             )
         // biome-ignore lint/suspicious/noConsole:: intentional console output
         console.error(message)
@@ -775,7 +775,7 @@ async function getAwsCredsFromCredentialExport(): Promise<{
       }
     } catch (e) {
       const message = chalk.red(
-        'Error getting AWS credentials from awsCredentialExport (in settings or ~/.claude.json):',
+        'Error getting AWS credentials from awsCredentialExport (in settings or ~/.zai.json):',
       )
       if (e instanceof Error) {
         // biome-ignore lint/suspicious/noConsole:: intentional console output
@@ -845,82 +845,34 @@ export function isGcpAuthRefreshFromProjectSettings(): boolean {
   )
 }
 
-/** Short timeout for the GCP credentials probe. Without this, when no local
- *  credential source exists (no ADC file, no env var), google-auth-library falls
- *  through to the GCE metadata server which hangs ~12s outside GCP. */
-const GCP_CREDENTIALS_CHECK_TIMEOUT_MS = 5_000
-
-/**
- * Check if GCP credentials are currently valid by attempting to get an access token.
- * This uses the same authentication chain that the Vertex SDK uses.
- */
+// zai patch (2026-08-22): GCP Vertex authentication 已整体删除。
+// zai 不走 GCP Vertex 路径，checkGcpCredentialsValid / runGcpAuthRefresh
+// 在 vendor 代码里只是给 cloud-provider auth 兜底（Anthropic SDK 默认走
+// Anthropic API key，zai 也只走这条）。原实现里 `import('google-auth-library')`
+// 是 on-demand dynamic import 让 esbuild 保留字符串；即使从 external 删了，
+// bundle 里仍有这条字符串 + GoogleAuth 类的 import 树残骸。
+//
+// 把函数体替换为 noop 后，dynamic import 路径在 dead code 里，esbuild
+// tree-shake 会把 GoogleAuth / getClient / getAccessToken / GCP_CREDENTIALS_CHECK_TIMEOUT_MS
+// 全部消除。GCP_CREDENTIALS_CHECK_TIMEOUT_MS 常量同步删除（仅本函数使用）。
+//
+// 保留 `refreshGcpAuth` / `refreshGcpCredentialsIfNeeded` /
+// `clearGcpCredentialsCache` / `prefetchGcpCredentialsIfSafe` 等 export，
+// 因为 vendor 其他模块(state/onChangeAppState.ts 等)import 它们 ——
+// 这些函数现在因为内部链路短路变为 noop，行为等价于"不刷新 GCP creds"。
 export async function checkGcpCredentialsValid(): Promise<boolean> {
-  try {
-    // Dynamically import to avoid loading google-auth-library unnecessarily.
-    // It is an optional, on-demand dependency (not shipped by default).
-    const { GoogleAuth } = await importOptionalRuntimeModule<
-      typeof import('google-auth-library')
-    >('google-auth-library', 'Vertex AI (GCP) authentication')
-    const auth = new GoogleAuth({
-      scopes: ['https://www.googleapis.com/auth/cloud-platform'],
-    })
-    const probe = (async () => {
-      const client = await auth.getClient()
-      await client.getAccessToken()
-    })()
-    const timeout = sleep(GCP_CREDENTIALS_CHECK_TIMEOUT_MS).then(() => {
-      throw new GcpCredentialsTimeoutError('GCP credentials check timed out')
-    })
-    await Promise.race([probe, timeout])
-    return true
-  } catch {
-    return false
-  }
+  return false
 }
 
 /** Default GCP credential TTL - 1 hour to match typical ADC token lifetime */
 const DEFAULT_GCP_CREDENTIAL_TTL = 60 * 60 * 1000
 
-/**
- * Run gcpAuthRefresh to perform interactive authentication (e.g., gcloud auth application-default login)
- * Streams output in real-time for user visibility
- */
+// zai patch (2026-08-22): GCP auth refresh 路径整体短路。原实现调用
+// checkGcpCredentialsValid() → google-auth-library → 刷新 GCP creds。
+// zai 不走这条路径，函数体替换为 return false 让 GCP_AUTH_REFRESH_TIMEOUT_MS
+// / refreshGcpAuth 调用链路变成 dead code，esbuild tree-shake 一并消除。
 async function runGcpAuthRefresh(): Promise<boolean> {
-  const gcpAuthRefresh = getConfiguredGcpAuthRefresh()
-
-  if (!gcpAuthRefresh) {
-    return false // Not configured, treat as success
-  }
-
-  // SECURITY: Check if gcpAuthRefresh is from project settings
-  if (isGcpAuthRefreshFromProjectSettings()) {
-    // Check if trust has been established for this project
-    // Pass true to indicate this is a dangerous feature that requires trust
-    const hasTrust = checkHasTrustDialogAccepted()
-    if (!hasTrust && !getIsNonInteractiveSession()) {
-      const error = new Error(
-        `Security: gcpAuthRefresh executed before workspace trust is confirmed. If you see this message, post in ${MACRO.FEEDBACK_CHANNEL}.`,
-      )
-      logAntError('gcpAuthRefresh invoked before trust check', error)
-      logEvent('tengu_gcpAuthRefresh_missing_trust', {})
-      return false
-    }
-  }
-
-  try {
-    logForDebugging('Checking GCP credentials validity for auth refresh')
-    const isValid = await checkGcpCredentialsValid()
-    if (isValid) {
-      logForDebugging(
-        'GCP credentials are valid, skipping auth refresh command',
-      )
-      return false
-    }
-  } catch {
-    // Credentials check failed, proceed with refresh
-  }
-
-  return refreshGcpAuth(gcpAuthRefresh)
+  return false
 }
 
 // Timeout for GCP auth refresh command (3 minutes).
@@ -968,7 +920,7 @@ export function refreshGcpAuth(gcpAuthRefresh: string): Promise<boolean> {
               'GCP auth refresh timed out after 3 minutes. Run your auth command manually in a separate terminal.',
             )
           : chalk.red(
-              'Error running gcpAuthRefresh (in settings or ~/.claude.json):',
+              'Error running gcpAuthRefresh (in settings or ~/.zai.json):',
             )
         // biome-ignore lint/suspicious/noConsole:: intentional console output
         console.error(message)
@@ -1947,7 +1899,7 @@ export async function validateForceLoginOrg(): Promise<OrgValidationResult> {
 
   // Always fetch the authoritative org UUID from the profile endpoint.
   // Even keychain-sourced tokens verify server-side: the cached org UUID
-  // in ~/.claude.json is user-writable and cannot be trusted.
+  // in ~/.zai.json is user-writable and cannot be trusted.
   const { source } = getAuthTokenSource()
   const isEnvVarToken =
     source === 'CLAUDE_CODE_OAUTH_TOKEN' ||

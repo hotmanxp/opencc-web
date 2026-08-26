@@ -277,7 +277,7 @@ outputStyle: settings?.outputStyle,
     abortControllerRef.current?.abort();
     const controller = new AbortController();
     abortControllerRef.current = controller;
-    const msgs = messagesRef.current;
+    const msgs = messagesRef.current ?? [];
     const logResult = logNextResultRef.current;
     try {
       let exceeds200kTokens = previousStateRef.current.exceeds200kTokens;

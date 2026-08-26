@@ -73,7 +73,7 @@ Based on what was detected in Phase 1, help the user set up appropriate verifica
    - Options to offer:
      - **Playwright** (Recommended) - Full browser automation library, works headless, great for CI
      - **Chrome DevTools MCP** - Uses Chrome DevTools Protocol via MCP
-     - **${BRAND_NAME} Chrome Extension** - Uses the OpenCC Chrome extension for browser interaction (requires the extension installed in Chrome)
+     - **${BRAND_NAME} Chrome Extension** - Uses the Z.Ai Chrome extension for browser interaction (requires the extension installed in Chrome)
      - **None** - Skip browser automation (will use basic HTTP checks only)
 
 3. **If user chooses to install Playwright**, run the appropriate command based on package manager:
@@ -163,9 +163,9 @@ Based on the areas detected in Phase 1, you may need to create multiple verifier
 
 ## Phase 4: Generate Verifier Skill
 
-**All verifier skills are created in the project root's \`.claude/skills/\` directory.** This ensures they are automatically loaded when ${BRAND_NAME} runs in the project.
+**All verifier skills are created in the project root's \`.zai/skills/\` directory.** This ensures they are automatically loaded when ${BRAND_NAME} runs in the project.
 
-Write the skill file to \`.claude/skills/<verifier-name>/SKILL.md\`.
+Write the skill file to \`.zai/skills/<verifier-name>/SKILL.md\`.
 
 ### Skill Template Structure
 
@@ -249,7 +249,7 @@ allowed-tools:
 ## Phase 5: Confirm Creation
 
 After writing the skill file(s), inform the user:
-1. Where each skill was created (always in \`.claude/skills/\`)
+1. Where each skill was created (always in \`.agents/skills/\`)
 2. How the Verify agent will discover them — the folder name must contain "verifier" (case-insensitive) for automatic discovery
 3. That they can edit the skills to customize them
 4. That they can run /init-verifiers again to add more verifiers for other areas

@@ -140,6 +140,7 @@ export default function Dashboard() {
           <Select
             style={{ width: 240 }}
             placeholder="选择 Registry"
+            aria-label="选择 npm Registry"
             value={
               KNOWN_REGISTRIES.find((o) => o.url === systemInfo?.npmRegistry)?.key
             }

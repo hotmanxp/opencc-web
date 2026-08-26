@@ -244,9 +244,9 @@ export type GlobalConfig = {
   lastOnboardingVersion?: string
   // Tracks the last version for which release notes were seen, used for managing release notes
   lastReleaseNotesSeen?: string
-  // Timestamp when changelog was last fetched (content stored in ~/.claude/cache/changelog.md)
+  // Timestamp when changelog was last fetched (content stored in ~/.zai/cache/changelog.md)
   changelogLastFetched?: number
-  // @deprecated - Migrated to ~/.claude/cache/changelog.md. Keep for migration support.
+  // @deprecated - Migrated to ~/.zai/cache/changelog.md. Keep for migration support.
   cachedChangelog?: string
   mcpServers?: Record<string, McpServerConfig>
   // claude.ai MCP connectors that have successfully connected at least once.
@@ -993,7 +993,7 @@ let configCacheHits = 0
 let configCacheMisses = 0
 // Session-total count of actual disk writes to the global config file.
 // Exposed for internal-only dev diagnostics (see inc-4552) so anomalous write
-// rates surface in the UI before they corrupt ~/.claude.json.
+// rates surface in the UI before they corrupt ~/.zai.json.
 let globalConfigWriteCount = 0
 
 export function getGlobalConfigWriteCount(): number {
@@ -1345,7 +1345,7 @@ function saveConfigWithLock<A extends object>(
     const currentConfig = getConfig(file, createDefault)
     if (file === getGlobalClaudeFile() && wouldLoseAuthState(currentConfig)) {
       logForDebugging(
-        'saveConfigWithLock: re-read config is missing auth that cache has; refusing to write to avoid wiping ~/.claude.json. See GH #3117.',
+        'saveConfigWithLock: re-read config is missing auth that cache has; refusing to write to avoid wiping ~/.zai.json. See GH #3117.',
         { level: 'error' },
       )
       logEvent('tengu_config_auth_loss_prevented', {})
@@ -1369,7 +1369,7 @@ function saveConfigWithLock<A extends object>(
 
     // Create timestamped backup of existing config before writing
     // We keep multiple backups to prevent data loss if a reset/corrupted config
-    // overwrites a good backup. Backups are stored in ~/.claude/backups/ to
+    // overwrites a good backup. Backups are stored in ~/.zai/backups/ to
     // keep the home directory clean.
     try {
       const fileBase = basename(file)
@@ -1508,11 +1508,11 @@ export function enableConfigs(): void {
 // its backups may still be filed under (#1807). Compared by basename so backup
 // recovery works against an injected virtual path in tests.
 const GLOBAL_CONFIG_BASENAME = '.openclaude.json'
-const LEGACY_GLOBAL_CONFIG_BASENAME = '.claude.json'
+const LEGACY_GLOBAL_CONFIG_BASENAME = '.zai.json'
 
 /**
  * Returns the directory where config backup files are stored.
- * Uses ~/.claude/backups/ to keep the home directory clean.
+ * Uses ~/.zai/backups/ to keep the home directory clean.
  */
 function getConfigBackupDir(): string {
   return join(getClaudeConfigHomeDir(), 'backups')
@@ -1520,7 +1520,7 @@ function getConfigBackupDir(): string {
 
 /**
  * Find the most recent backup file for a given config file.
- * Checks ~/.claude/backups/ first, then falls back to the legacy location
+ * Checks ~/.zai/backups/ first, then falls back to the legacy location
  * (next to the config file) for backwards compatibility.
  * Returns the full path to the most recent backup, or null if none exist.
  */
@@ -1533,10 +1533,10 @@ function getConfigBackupDir(): string {
  */
 function listBackupsNewestFirst(file: string): string[] {
   const fs = getFsImplementation()
-  // The global config was renamed `.claude.json` -> `.openclaude.json`. #1807's
+  // The global config was renamed `.zai.json` -> `.openclaude.json`. #1807's
   // reported scenario is that repeated corrupt writes poisoned every
   // `.openclaude.json.backup.*` snapshot and the only clean sources left were
-  // the pre-rename `.claude.json.backup.*` files sitting in the same backup
+  // the pre-rename `.zai.json.backup.*` files sitting in the same backup
   // dir. Recover the global config from that legacy basename too, otherwise the
   // recovery still fails for exactly the case the issue calls out.
   const fileBases = [basename(file)]
@@ -1547,7 +1547,7 @@ function listBackupsNewestFirst(file: string): string[] {
     fileBases.some(base => name.startsWith(`${base}.backup.`))
   // Order by the numeric timestamp after `.backup.` so the current and legacy
   // basenames interleave by recency instead of grouping by filename (a plain
-  // lexicographic sort would put every `.claude.json.*` before every
+  // lexicographic sort would put every `.zai.json.*` before every
   // `.openclaude.json.*` regardless of when each was written).
   const backupTimestamp = (name: string): number => {
     const suffix = name.split('.backup.').pop()
@@ -1596,7 +1596,7 @@ function findMostRecentBackup(file: string): string | null {
 /**
  * Attempt to recover a config whose live file is present but corrupt by
  * reading the most recent healthy backup and parsing it. Backups in
- * ~/.claude/backups are written from previously-valid configs, so this lets a
+ * ~/.zai/backups are written from previously-valid configs, so this lets a
  * one-off bad write be undone instead of silently discarding the user's
  * settings. Returns the merged config when a backup exists and parses, or
  * undefined when there is no usable backup (#1807).
@@ -1710,7 +1710,7 @@ function getConfig<A>(
 
     // A present-but-corrupt config previously reset to defaults (or crashed the
     // startup validation path), discarding the user's settings even though
-    // healthy backups exist in ~/.claude/backups. Recover the most recent
+    // healthy backups exist in ~/.zai/backups. Recover the most recent
     // backup that still parses before doing anything destructive, so a one-off
     // bad write no longer wipes config or crashes startup (#1807).
     if (error instanceof ConfigParseError) {
@@ -1867,7 +1867,7 @@ export const getProjectPathForConfig = memoize((): string => {
  * rest of the codebase can safely do `[...arr]` / `arr.includes(...)`.
  * Returns true if any field was repaired.
  *
- * Background: a .claude.json written by a third party may set
+ * Background: a .zai.json written by a third party may set
  * `disabledMcpServers` / `enabledMcpServers` to an object, string, or any
  * non-array value. v2.1.200 upstream fixed the resulting "xxx is not
  * iterable" / "includes is not a function" startup crash by coercing these
@@ -2097,7 +2097,7 @@ export function getMemoryPath(memoryType: MemoryType): string {
 }
 
 export function getManagedClaudeRulesDir(): string {
-  return join(getManagedFilePath(), '.claude', 'rules')
+  return join(getManagedFilePath(), '.zai', 'rules')
 }
 
 export function getUserClaudeRulesDir(): string {

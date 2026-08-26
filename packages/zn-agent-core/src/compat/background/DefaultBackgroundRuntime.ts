@@ -11,6 +11,8 @@ import type { BackgroundRuntime } from './BackgroundRuntime.js'
 import {
   RETRY_POLICY,
   classifyRetryableError,
+  enterRateLimitCooldown,
+  getRateLimitCooldownRemainingMs,
   getRetryDelay,
   retrySleep,
 } from './retryPolicy.js'
@@ -88,7 +90,7 @@ export interface DefaultBackgroundRuntimeOptions {
   onTaskStateChange?: (task: BackgroundTask) => void
 }
 
-const DEFAULT_MAX_CONCURRENT = 4
+const DEFAULT_MAX_CONCURRENT = 10
 const DEFAULT_SHUTDOWN_TIMEOUT_MS = 5000
 
 /**
@@ -102,6 +104,15 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
   private readonly queue: string[] = []
   private activeCount = 0
   private shuttingDown = false
+  /**
+   * 每条任务的 pending prompt 队列(父→子 control,send_message)。
+   * zai patch (HRMSV3-ZN-WEBSITE#668 / subagent_control):subagent_control
+   * 工具的 send_message 走这里排队;runOne 在 queryInput 构造处消费,
+   * 把 pending prompts 拼到原 prompt 前缀(用 `\n\n` 拼接),让子 agent
+   * 下一轮 turn 看到新的指令。任务终态或不存在时 sendMessageToTask
+   * 返回 {ok:false},调用方按 no-op 处理。
+   */
+  private readonly taskInbox = new Map<string, string[]>()
 
   private readonly agentRuntime: BackgroundAgentRuntime
   private readonly store: TaskStore
@@ -190,6 +201,50 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
   }
 
   /**
+   * 取消某父会话派生且尚未结束的全部任务。dispatch 与 attach 两条 record
+   * 路径都带 parentSessionId,这里统一匹配并 abort。任务终态由 runOne 的
+   * finally(dispatch 路径)或 finalizeTask(attach 路径)落盘 + emit done,
+   * 这里只负责触发 abort。
+   */
+  async cancelByParentSession(
+    sessionId: string,
+    reason?: string,
+  ): Promise<{ cancelled: number }> {
+    let cancelled = 0
+    for (const rec of this.records.values()) {
+      if (rec.task.parentSessionId !== sessionId) continue
+      const st = rec.task.status
+      if (st === 'completed' || st === 'failed' || st === 'cancelled') continue
+      rec.controller.abort(reason ?? 'user_abort')
+      cancelled++
+    }
+    return { cancelled }
+  }
+
+  /**
+   * zai patch (HRMSV3-ZN-WEBSITE#668 / subagent_control.send_message):
+   * 把父 agent 的指令投递到子 agent 的 pending prompt 队列,子 agent
+   * 下一轮 turn(`runOne` 的 queryInput 构造处)消费。多条 pending 用
+   * `\n\n` 拼到原 prompt 前缀,顺序保持入队顺序。
+   *
+   * 不存在 / 已终态的任务直接返回 {ok:false},调用方按 no-op 处理。
+   * 这是幂等的:已 enqueue 的 prompt 不会被丢;但重复调用的入队仍
+   * 追加(对齐 DSH followup queue 语义)。
+   */
+  async sendMessageToTask(
+    taskId: string,
+    prompt: string,
+  ): Promise<{ ok: boolean }> {
+    const rec = this.records.get(taskId)
+    if (!rec) return { ok: false }
+    if (isTerminal(rec.task.status)) return { ok: false }
+    const list = this.taskInbox.get(taskId) ?? []
+    list.push(prompt)
+    this.taskInbox.set(taskId, list)
+    return { ok: true }
+  }
+
+  /**
    * 登记一个 caller 外部管理的任务(AgentTool 子代理走这条路径)。与 dispatch 的区别:
    *   - id 由 caller 提供(AgentTool 已用 createAgentId() 生成),不重新分配
    *   - 不入 queue,不调 runOne —— 执行由 caller(AgentTool 调用 runAgent)
@@ -266,6 +321,15 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
       ts: Number((rawEv as { ts?: unknown }).ts ?? Date.now()),
       type: String(rawEv.type),
       data: stripMeta(rawEv),
+    }
+    // 兜底捕获 resultText:zai runtime.query 的 vendor 流在 minimax
+    // keep-alive 下永不发 runtime.done,runOne 只认 runtime.done 的提取
+    // 拿不到值。attach 路径(caller 用 appendTaskEvent 驱动)在每条
+    // assistant 消息时顺带记录最后一条 text,让 SubagentNotifier 的通知
+    // 能带上 <result>。只认 text block;thinking/tool_use 不算结果。
+    if (rawEv.type === 'assistant') {
+      const text = extractAssistantText(rawEv)
+      if (text) rec.task.resultText = text
     }
     rec.task.eventCount = seq
     await this.store.save(rec.task)
@@ -450,9 +514,24 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
     // background runtime 的 prompt 由用户在父 session 中发起,所以 tool
     // 黑名单不再由调用方传递。后续如果 vendor 暴露 per-query
     // disallowedTools,会在 Task 4.5 跟进。
+    //
+    // zai patch (HRMSV3-ZN-WEBSITE#668 / subagent_control):消费父 agent
+    // 经 sendMessageToTask 投递的 pending prompts。多条用 `\n\n` 拼到原
+    // prompt 前缀(顺序保持入队顺序),子 agent 下一轮 turn 把它们当成
+    // 新的用户指令。无 pending 时沿用原 prompt(行为不变)。
+    const pendingPrompts = this.taskInbox.get(id) ?? []
+    const composedPrompt =
+      pendingPrompts.length > 0
+        ? pendingPrompts.join('\n\n') + '\n\n' + rec.task.input.prompt
+        : rec.task.input.prompt
+    if (pendingPrompts.length > 0) {
+      // 一次性消费,queue 清空 — 下一轮 turn 起 pending 为空,直到父 agent
+      // 再次 sendMessageToTask。
+      this.taskInbox.delete(id)
+    }
     const queryInput = {
       sessionId: rec.task.parentSessionId ?? `bg-${id}`,
-      prompt: rec.task.input.prompt,
+      prompt: composedPrompt,
       cwd: rec.task.input.cwd ?? process.cwd(),
       model: rec.task.input.model,
       abortSignal: rec.controller.signal,
@@ -476,6 +555,12 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
         attempt++
         try {
           const stream = this.agentRuntime.query(queryInput)
+          // zai patch (2026-08-10): query 出口已接线 sdkEventAdapter,vendor
+          // 事件被翻译成 Anthropic primitives(content_block_delta / message_stop),
+          // 原 assistant 分支(直接读 vendor Message)不再命中。改为从 text_delta
+          // 累积当前 turn 文本,message_stop 时落为 resultText,保持
+          // SubagentNotifier 的 <result> 与 TaskOutput 的 resultText。
+          let turnText = ''
           for await (const ev of stream) {
             if (rec.controller.signal.aborted) break
             const seq = rec.task.eventCount + 1
@@ -501,6 +586,15 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
                   category: err.category ?? 'internal',
                 }
               }
+            } else if (ev.type === 'content_block_delta') {
+              // 只认 text_delta;thinking_delta / input_json_delta 不算结果。
+              const delta = (ev as { delta?: { type?: string; text?: string } }).delta
+              if (delta?.type === 'text_delta' && typeof delta.text === 'string') {
+                turnText += delta.text
+              }
+            } else if (ev.type === 'message_stop') {
+              if (turnText) rec.task.resultText = turnText
+              turnText = ''
             }
           }
           // 流正常结束 → 任务成功 (abort 由外层 while 顶部捕获)
@@ -553,8 +647,21 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
               break
             }
           }
+          // zai patch (2026-08-08): 429(rate_limit)进入冷却门。MiniMax
+          // 的 TPM 限流通常持续 >30s,指数退避在限流恢复前反复打 API,
+          // 多个后台任务并发时互相放大。收到 429 后重试至少等到冷却窗口
+          // 结束再发(与主会话 withRetry 的 per-provider 冷却门对齐)。
+          if (decision.category === 'llm_provider_rate_limit') {
+            enterRateLimitCooldown()
+          }
           // 计算 backoff, 等完再 retry
-          const delayMs = getRetryDelay(consecutive529 > 0 ? consecutive529 : attempt)
+          let delayMs = getRetryDelay(
+            consecutive529 > 0 ? consecutive529 : attempt,
+          )
+          const cooldownRemainingMs = getRateLimitCooldownRemainingMs()
+          if (cooldownRemainingMs > delayMs) {
+            delayMs = cooldownRemainingMs
+          }
           await retrySleep(delayMs, rec.controller.signal)
           // sleep 中被 abort → 退出
           if (rec.controller.signal.aborted) break
@@ -607,4 +714,27 @@ function stripMeta(ev: { eventId?: unknown; sessionId?: unknown; ts?: unknown; t
     data[k] = v
   }
   return data
+}
+
+/**
+ * 从 assistant Message 里提取最后一条 text block 的内容。
+ * 只认 `{type:'text', text}`;thinking / tool_use 不算结果。
+ * 返回空串时调用方跳过(不覆盖已有 resultText)。
+ */
+function extractAssistantText(rawEv: Record<string, unknown>): string | undefined {
+  const content = (rawEv as { message?: { content?: unknown } }).message?.content
+  if (!Array.isArray(content)) return undefined
+  let last: string | undefined
+  for (const block of content) {
+    if (
+      block &&
+      typeof block === 'object' &&
+      (block as { type?: unknown }).type === 'text' &&
+      typeof (block as { text?: unknown }).text === 'string'
+    ) {
+      const text = (block as { text: string }).text
+      if (text) last = text
+    }
+  }
+  return last
 }

@@ -1,16 +1,8 @@
 import { readFileSync, readdirSync, existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { createRequire } from 'node:module'
+import yaml from 'js-yaml'
 import type { PromptCommand, CommandContext, CommandSource } from '@zn-ai/zn-agent-core'
-// yaml 解析走 agent-core 的 js-yaml(其 package.json 已声明为依赖),
-// 通过 createRequire 跨包引用 node_modules,避免新增依赖。
-// 使用 require.resolve 通过 Node 标准模块解析找到 agent-core 的实际路径,
-// 兼容 pnpm workspace 和 npm 全局安装两种目录结构。
-const _require = createRequire(import.meta.url)
-const agentCorePkgPath = _require.resolve('@zn-ai/zn-agent-core/package.json')
-const requireFromAgentCore = createRequire(agentCorePkgPath)
-const yaml = requireFromAgentCore('js-yaml') as { load(s: string): unknown }
 
 const NAME_RE = /^[a-z0-9][a-z0-9-_]*$/
 
@@ -22,9 +14,9 @@ interface CommandsDirsOpts {
 
 /**
  * Resolve which command directories should be loaded. Merges:
- *   - project-level: `<cwd>/.claude/commands` and `<cwd>/.zai/commands` (if any)
+ *   - project-level: `<cwd>/.zai/commands` and `<cwd>/.zai/commands` (if any)
  *   - home-level: `~/.zai/commands` wins if it exists (single-source for zai
- *     users), otherwise fall back to `~/.claude/commands` for OpenCC workflows.
+ *     users), otherwise fall back to `~/.zai/commands` for OpenCC workflows.
  * Project-level dirs come first so a project command overrides a same-named
  * home-level command on name conflicts.
  */
@@ -33,12 +25,12 @@ export function defaultCommandsDirs(opts: CommandsDirsOpts = {}): string[] {
   const zaiDir = opts.dataDir
     ? join(opts.dataDir, '.zai', 'commands')
     : join(home, '.zai', 'commands')
-  const homeClaudeDir = join(home, '.claude', 'commands')
+  const homeClaudeDir = join(home, '.zai', 'commands')
 
   const dirs: string[] = []
   // project-level first (project overrides home on name conflicts)
   if (opts.cwd) {
-    const cwdClaude = join(opts.cwd, '.claude', 'commands')
+    const cwdClaude = join(opts.cwd, '.zai', 'commands')
     const cwdZai = join(opts.cwd, '.zai', 'commands')
     if (existsSync(cwdClaude)) dirs.push(cwdClaude)
     if (existsSync(cwdZai)) dirs.push(cwdZai)

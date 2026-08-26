@@ -2,6 +2,7 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Badge, Button, Drawer, Empty, Tag, Tooltip } from 'antd'
+import { useAppStore } from '../store/useAppStore'
 
 // React-syntax-highlighter lazy: SyntaxHighlighter + the prism style sheet
 // live in /components/markdown/syntaxHighlighter.ts (shared chunk with
@@ -531,9 +532,24 @@ export function buildTimeline(events: StreamedEvent[]): Array<
       case 'assistant': {
         // 原生 opencc assistant message (AgentTool.mirrorAppendBgEvent 推送)。
         // data = { content, message: { content: string | block[] }, … }。
-        const native = data as { content?: unknown; message?: { content?: unknown } }
-        const blocks = splitNativeContent(native.message?.content ?? native.content)
-        if (blocks.text) pendingText += blocks.text
+        // zai patch (2026-08-21): Subagent provider 路径
+        // (subagentProviderBridge.pumpSubagentEvents)推的事件 data 形状是
+        // { text, raw },其中 raw 是 claude stream-json / codex app-server 的
+        // 原始 frame。claude 的 assistant frame 是
+        // { message: { content: [{text|thinking|tool_use}] } } —— 与原生 opencc
+        // message.content 形状兼容。增加 raw.message.content fallback 让
+        // splitNativeContent 复用同一拆解逻辑。
+        const native = data as {
+          content?: unknown
+          message?: { content?: unknown }
+          text?: unknown
+          raw?: { message?: { content?: unknown } }
+        }
+        const contentSrc =
+          native.message?.content ?? native.raw?.message?.content ?? native.content
+        const blocks = splitNativeContent(contentSrc)
+        const extraText = typeof native.text === 'string' ? native.text : ''
+        if (blocks.text || extraText) pendingText += extraText + blocks.text
         // assistant message 到达时该回合的工具调用已由模型生成,视为完成,
         // 前端抽屉以绿色 Done 展示(无后续 tool_result 事件来更新状态)。
         for (const t of blocks.tools) {
@@ -551,14 +567,25 @@ export function buildTimeline(events: StreamedEvent[]): Array<
       }
       case 'user': {
         // 原生 opencc user message — 单独作为一条文本显示。
-        const native = data as { content?: unknown; message?: { content?: unknown } }
-        const blocks = splitNativeContent(native.message?.content ?? native.content)
-        if (blocks.text) {
+        // zai patch: 同 assistant case,增加 raw.message.content fallback 以
+        // 兼容 provider 路径的数据形状。
+        const native = data as {
+          content?: unknown
+          message?: { content?: unknown }
+          text?: unknown
+          raw?: { message?: { content?: unknown } }
+        }
+        const contentSrc =
+          native.message?.content ?? native.raw?.message?.content ?? native.content
+        const blocks = splitNativeContent(contentSrc)
+        const extraText = typeof native.text === 'string' ? native.text : ''
+        const displayText = extraText + blocks.text
+        if (displayText) {
           if (pendingText) {
             out.push({ kind: 'text', key: `text-${ev.seq}`, text: pendingText })
             pendingText = ''
           }
-          out.push({ kind: 'text', key: `user-${ev.seq}`, text: blocks.text })
+          out.push({ kind: 'text', key: `user-${ev.seq}`, text: displayText })
         }
         break
       }
@@ -632,6 +659,79 @@ export function buildTimeline(events: StreamedEvent[]): Array<
       case 'task.ended':
         out.push({ kind: 'system', key: `task-${ev.seq}`, label: `task.ended status=${(data as { status?: string }).status ?? '?'}`, tone: (data as { status?: string }).status === 'completed' ? 'ok' : 'neutral' })
         break
+      // zai patch (2026-08-21): Subagent provider (claude-code / codex)
+      // 路径走 mirrorAppendBgEvent 推送的事件 type 用的是
+      //   assistant_message / tool_use / tool_result / commentary /
+      //   subagent_turn_started / subagent_turn_completed
+      // 这套词汇(见 subagentProviderBridge.ts:mapSubagentEventType),switch
+      // 不识别 → provider 子代理的整条 timeline 不渲染、只显示"等待事件..."。
+      // 这里补齐 case 把 provider 事件投影成 text + tool + system 单元,
+      // 与原生 assistant/user 路径同款展示。raw 字段是 claude stream-json
+      // 或 codex app-server 的原始 frame(JSON);bridge pumpSubagentEvents
+      // 推送时已经把提取的文本放在 data.text。
+      case 'assistant_message': {
+        const d = data as { text?: unknown }
+        if (typeof d.text === 'string' && d.text) pendingText += d.text
+        break
+      }
+      case 'tool_use': {
+        const d = data as { raw?: { id?: unknown; name?: unknown; input?: unknown } }
+        const id = typeof d.raw?.id === 'string' ? d.raw.id : ''
+        if (!id) break
+        if (pendingText) {
+          out.push({ kind: 'text', key: `text-${ev.seq}`, text: pendingText })
+          pendingText = ''
+        }
+        const entry: ToolCallEntry = {
+          toolUseId: id,
+          name: typeof d.raw?.name === 'string' ? d.raw.name : 'tool',
+          input: d.raw?.input,
+          status: 'running',
+          ts: ev.ts,
+        }
+        toolById.set(id, entry)
+        out.push({ kind: 'tool', key: `tool-${id}-${ev.seq}`, entry })
+        break
+      }
+      case 'tool_result': {
+        const d = data as { raw?: { tool_use_id?: unknown } }
+        const id = typeof d.raw?.tool_use_id === 'string' ? d.raw.tool_use_id : ''
+        if (!id) break
+        const existing = toolById.get(id)
+        if (existing) {
+          existing.status = 'done'
+          const idx = out.findIndex(
+            (o) => o.kind === 'tool' && o.entry.toolUseId === id,
+          )
+          if (idx >= 0) {
+            out[idx] = {
+                kind: 'tool',
+                key: `tool-${id}-${ev.seq}`,
+                entry: { ...existing },
+              }
+          }
+        }
+        break
+      }
+      case 'subagent_turn_started':
+        if (pendingText) {
+          out.push({ kind: 'text', key: `text-${ev.seq}`, text: pendingText })
+          pendingText = ''
+        }
+        out.push({ kind: 'system', key: `sys-start-${ev.seq}`, label: '◇ turn started', tone: 'neutral' })
+        break
+      case 'subagent_turn_completed':
+        if (pendingText) {
+          out.push({ kind: 'text', key: `text-${ev.seq}`, text: pendingText })
+          pendingText = ''
+        }
+        out.push({ kind: 'system', key: `sys-end-${ev.seq}`, label: '✓ turn completed', tone: 'ok' })
+        break
+      case 'commentary': {
+        const d = data as { text?: unknown }
+        if (typeof d.text === 'string' && d.text) pendingText += d.text
+        break
+      }
     }
   }
   if (pendingText) out.push({ kind: 'text', key: 'text-tail', text: pendingText })
@@ -656,6 +756,8 @@ export function TaskDrawer({
   // 导致 bashTask 恒为 null、抽屉空白。改为按 taskId 在两个 store 中实际
   // 查找 — 找到了就归属对应类型。
   const allSessionIds = useAgentStore((s) => Object.keys(s.agentTasksBySession))
+  // 移动端走满屏宽度,避免 560px 在 <768px 视口溢出遮挡内容。
+  const isMobile = useAppStore((s) => s.isMobile)
   const detail = useAgentStore((s) => {
     if (!taskId) return null
     for (const sid of Object.keys(s.agentTasksBySession)) {
@@ -788,7 +890,7 @@ export function TaskDrawer({
         </div>
       }
       placement="right"
-      width={560}
+      width={isMobile ? '100%' : 560}
       open={!!taskId}
       onClose={onClose}
       destroyOnClose

@@ -25,7 +25,7 @@ export default function PermissionConfirmCard(): JSX.Element | null {
   const { toolName, description, message, input, status, errorMessage } = pending
   const submitting = status === 'submitting'
 
-  const inputPreview = formatInputPreview(input)
+  const commandLine = extractCommandLine(input)
 
   return (
     <div
@@ -69,28 +69,28 @@ export default function PermissionConfirmCard(): JSX.Element | null {
           {description}
         </Paragraph>
       )}
-      {inputPreview && (
-        <pre
+      {commandLine && (
+        <div
           style={{
             margin: '8px 0',
             padding: '8px 10px',
-            maxHeight: 180,
-            overflow: 'auto',
-            background: 'var(--bg-body)',
-            border: '1px solid var(--border-light)',
+            background: 'var(--bg-faint-04)',
+            border: '1px solid var(--border-mid)',
             borderRadius: 4,
-            color: 'var(--text-primary)',
+            color: '#1f1f1f',
             fontSize: 12,
+            fontFamily: 'ui-monospace, SFMono-Regular, Menlo, monospace',
             whiteSpace: 'pre-wrap',
             wordBreak: 'break-all',
           }}
         >
-          {inputPreview}
-        </pre>
+          {commandLine}
+        </div>
       )}
 
       <div style={{ marginTop: 4 }}>
         <textarea
+          aria-label="拒绝理由"
           value={localReason}
           onChange={(e) => setLocalReason(e.target.value.slice(0, 2000))}
           placeholder="拒绝理由（可选）"
@@ -98,10 +98,10 @@ export default function PermissionConfirmCard(): JSX.Element | null {
           style={{
             width: '100%',
             resize: 'vertical',
-            background: 'var(--bg-body)',
+            background: 'var(--bg-faint-04)',
             border: '1px solid var(--border-mid)',
             borderRadius: 4,
-            color: 'var(--text-primary)',
+            color: '#1f1f1f',
             padding: '6px 8px',
             fontSize: 12,
           }}
@@ -132,13 +132,20 @@ export default function PermissionConfirmCard(): JSX.Element | null {
   )
 }
 
-function formatInputPreview(input: unknown): string {
+/**
+ * 从 tool input 中提取 command 字符串。多数工具 (Bash / FileEdit /
+ * FileWrite 等) 的 input 是带 `command` 或 `file_path` 的对象, 直接展示
+ * command/file_path 文案比展示整段 JSON 元数据更直观; 既无 `command`
+ * 也无 `file_path` 时返回空串, 调用方据此跳过该 block.
+ */
+function extractCommandLine(input: unknown): string {
   if (input == null) return ''
   if (typeof input === 'string') return input
-  try {
-    const text = JSON.stringify(input, null, 2)
-    return text.length > 4000 ? `${text.slice(0, 4000)}…` : text
-  } catch {
-    return String(input)
+  if (typeof input !== 'object') return String(input)
+  const obj = input as Record<string, unknown>
+  for (const key of ['command', 'file_path']) {
+    const v = obj[key]
+    if (typeof v === 'string' && v.trim()) return v
   }
+  return ''
 }

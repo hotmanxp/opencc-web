@@ -91,7 +91,7 @@ export interface CreateHeadlessContextOptions {
   /**
    * Whether to connect MCP servers during bootstrap. Defaults to `true`
    * (current behaviour). zai-server sets this to `false` because the
-   * user's `~/.claude.json` MCP config can list servers that block the
+   * user's `~/.zai.json` MCP config can list servers that block the
    * headless bootstrap indefinitely; the server connects MCP
    * servers lazily via the QueryEngine's own per-query refresh path
    * (or `/mcp` slash command) so startup is fast and the HTTP listener

@@ -1,6 +1,7 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
 import type { SystemInfo, CliStatus } from '../../shared/types.js';
+import { resolveSpawnCommand } from './spawner.js';
 import {
   ensureManifestDir,
   readManifest,
@@ -36,7 +37,10 @@ ensureManifestDir()
   .catch(() => { /* noop — empty cache is fine */ });
 
 async function run(cmd: string, args: string[]): Promise<string> {
-  const { stdout } = await execFileAsync(cmd, args, { timeout: 5000 });
+  // npm 在 Windows 上是 .cmd shim,execFile 不能直接执行(ENOENT)——
+  // resolveSpawnCommand 在 win32 下改写为 cmd /c。
+  const { command, args: resolvedArgs } = resolveSpawnCommand(cmd, args);
+  const { stdout } = await execFileAsync(command, resolvedArgs, { timeout: 5000 });
   return stdout.trim();
 }
 
@@ -50,7 +54,13 @@ async function safeRun(cmd: string, args: string[]): Promise<string | null> {
 
 async function getNpmConfig(key: string): Promise<string> {
   try {
-    const { stdout } = await execFileAsync('npm', ['config', 'get', key, '--workspaces=false'], { timeout: 5000 });
+    const { command, args } = resolveSpawnCommand('npm', [
+      'config',
+      'get',
+      key,
+      '--workspaces=false',
+    ]);
+    const { stdout } = await execFileAsync(command, args, { timeout: 5000 });
     return stdout.trim();
   } catch {
     return '';

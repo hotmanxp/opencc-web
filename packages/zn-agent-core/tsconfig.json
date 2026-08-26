@@ -11,6 +11,12 @@
     "noEmit": false,
     "declaration": true,
     "declarationMap": true,
+    // zai patch (2026-08-18): 只发类型,不发 .js。运行时唯一入口是
+    // dist/opencc-core.mjs(bundle-opencc.ts esbuild 合成),tsc 编译出的
+    // dist/compat/**/*.js / index.js / stateChangeBus.js 无人 import
+    // (死重)。这里用 emitDeclarationOnly 只发射 bundle-entry.d.ts 类型
+    // 链需要的 .d.ts,从源头消灭死 js(tsconfig.server.json 早已如此)。
+    "emitDeclarationOnly": true,
     "sourceMap": true,
     "jsx": "preserve",
     "jsxImportSource": "react"
@@ -21,6 +27,10 @@
     "dist",
     "test",
     "**/*.test.ts",
-    "src/opencc-src"
+    "src/opencc-src",
+    // zai patch (2026-08-09): esbuild-only 聚合入口,横跨 vendor(opencc-src)
+    // 与 compat 两个 tsconfig 项目,由 scripts/bundle-opencc.ts 编译,不进
+    // tsc 主项目(否则 TS6307:引用被 exclude 的 opencc-src)。
+    "src/bundle-entry.ts"
   ]
 }

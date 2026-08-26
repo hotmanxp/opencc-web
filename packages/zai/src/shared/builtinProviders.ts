@@ -11,7 +11,7 @@
  *
  * Used by:
  *   - Config UI (ProviderForm "Add" modal presets) — packages/zai/src/web/src/pages/Config.tsx
- *   - First-run provisioning — if ~/.claude.json has no providerProfiles,
+ *   - First-run provisioning — if ~/.zai.json has no providerProfiles,
  *     zai can seed it from this catalog so the picker isn't empty.
  *
  * Edit this file to add/remove a system provider or refresh capability
@@ -43,11 +43,11 @@ const openplatformCaps: Record<string, ModelCapabilities> = {
   'MiniMax-M2.7-highspeed': allCaps({ contextWindow: 204_800, maxOutputTokens: 131_072, supportsVision: false }),
   'qwen3.6-plus':         allCaps({ contextWindow: 1_000_000, maxOutputTokens: 65_536, supportsVision: true }),
   'qwen3.7-plus':         allCaps({ contextWindow: 1_000_000, maxOutputTokens: 65_536, supportsVision: true }),
-  'qwen3.7-max':          allCaps({ contextWindow: 1_048_576, maxOutputTokens: 131_072, supportsVision: true }),
+  'qwen3.7-max':          allCaps({ contextWindow: 1_000_000, maxOutputTokens: 131_072, supportsVision: true }),
   'glm-5.1':              allCaps({ contextWindow: 202_745, maxOutputTokens: 65_536, supportsVision: false }),
-  'glm-5.2':              allCaps({ contextWindow: 1_048_576, maxOutputTokens: 131_072, supportsVision: false }),
-  'deepseek-v4-flash':    allCaps({ contextWindow: 1_048_576, maxOutputTokens: 262_144, supportsVision: false }),
-  'deepseek-v4-pro':      allCaps({ contextWindow: 1_048_576, maxOutputTokens: 262_144, supportsVision: false }),
+  'glm-5.2':              allCaps({ contextWindow: 1_000_000, maxOutputTokens: 131_072, supportsVision: false }),
+  'deepseek-v4-flash':    allCaps({ contextWindow: 1_000_000, maxOutputTokens: 262_144, supportsVision: false }),
+  'deepseek-v4-pro':      allCaps({ contextWindow: 1_000_000, maxOutputTokens: 262_144, supportsVision: false }),
 };
 
 /**
@@ -58,12 +58,20 @@ const openplatformCaps: Record<string, ModelCapabilities> = {
  *   2. zhiniao       — OpenAI-compatible protocol (Wizard AI gateway).
  *      4 models including M2.7, Qwen 3.6 Plus, GLM 5.1.
  *
- * `id` is intentionally absent; the user-assigned `id` is generated on
- * first save (see ProviderForm.handleModalOk) so we don't pin a stable
- * id into the catalog that would clash across installations.
+ * `id` is a hard-coded stable slug (see plan §阶段 1) — sessions can
+ * persist this id in transcript.meta.providerId to mean "this model
+ * came from the built-in openplatform / zhiniao profile", and the
+ * matcher will route back to the matching builtin even if the user
+ * has not saved the profile into their providerProfiles yet.
+ *
+ * The `id` does NOT collide with user-created profiles (which use
+ * the `provider_<timestamp>` scheme in ProviderForm.handleModalOk) —
+ * both namespaces live in the same provider list but are
+ * disambiguated by the slug prefix.
  */
 export const BUILTIN_PROVIDERS: ProviderProfile[] = [
   {
+    id: 'builtin-openplatform',
     name: 'Open Platform (Nova)',
     provider: 'anthropic',
     baseUrl: 'https://zn-nova.paic.com.cn/novai',
@@ -71,6 +79,7 @@ export const BUILTIN_PROVIDERS: ProviderProfile[] = [
     capabilities: openplatformCaps,
   },
   {
+    id: 'builtin-zhiniao',
     name: 'ZhiNiao (Wizard AI)',
     provider: 'openai',
     baseUrl: 'https://wizard-ai.paic.com.cn/code_pilot/api/v1',

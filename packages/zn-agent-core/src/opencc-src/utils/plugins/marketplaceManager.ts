@@ -8,7 +8,7 @@
  * - Track and update marketplace configurations
  *
  * File structure managed by this module:
- * ~/.claude/
+ * ~/.zai/
  *   └── plugins/
  *       ├── known_marketplaces.json    # Configuration of all known marketplaces
  *       └── marketplaces/              # Cache directory for marketplace data
@@ -42,6 +42,7 @@ import {
   getSettingsForSource,
   updateSettingsForSource,
 } from '../settings/settings.js'
+import { getUserConfigJson } from '../userConfigJson.js'
 import type { SettingsJson } from '../settings/types.js'
 import {
   jsonParse,
@@ -229,8 +230,12 @@ export function getDeclaredMarketplaces(): Record<string, DeclaredMarketplace> {
   // Only the official marketplace can be implicitly declared — it's the one
   // built-in source we know. Other marketplaces have no default source to inject.
   // Explicitly-disabled entries (value: false) don't count.
+  // User-scope plugin state lives in the unified user config JSON
+  // (~/.zai.json, fallback ~/.zai.json) — merge it into the implicit
+  // declaration set so the official marketplace stays surfaced.
   const enabledPlugins = {
     ...getAddDirEnabledPlugins(),
+    ...(getUserConfigJson().enabledPlugins ?? {}),
     ...(getInitialSettings().enabledPlugins ?? {}),
   }
   for (const [pluginId, value] of Object.entries(enabledPlugins)) {
@@ -325,7 +330,7 @@ function toNullProtoConfig(
 /**
  * Load known marketplaces configuration from disk
  *
- * Reads the configuration file at ~/.claude/plugins/known_marketplaces.json
+ * Reads the configuration file at ~/.zai/plugins/known_marketplaces.json
  * which contains a mapping of marketplace names to their sources and metadata.
  * The returned config is null-prototype (see {@link toNullProtoConfig}) so that
  * lookups by user-supplied marketplace name are own-property-exact.
@@ -335,12 +340,12 @@ function toNullProtoConfig(
  * {
  *   "official-marketplace": {
  *     "source": { "source": "url", "url": "https://example.com/marketplace.json" },
- *     "installLocation": "/Users/me/.claude/plugins/marketplaces/official-marketplace.json",
+ *     "installLocation": "/Users/me/.zai/plugins/marketplaces/official-marketplace.json",
  *     "lastUpdated": "2024-01-15T10:30:00.000Z"
  *   },
  *   "company-plugins": {
  *     "source": { "source": "github", "repo": "mycompany/plugins" },
- *     "installLocation": "/Users/me/.claude/plugins/marketplaces/company-plugins",
+ *     "installLocation": "/Users/me/.zai/plugins/marketplaces/company-plugins",
  *     "lastUpdated": "2024-01-14T15:45:00.000Z"
  *   }
  * }
@@ -406,7 +411,7 @@ export async function loadKnownMarketplacesConfigSafe(): Promise<KnownMarketplac
 /**
  * Save known marketplaces configuration to disk
  *
- * Writes the configuration to ~/.claude/plugins/known_marketplaces.json,
+ * Writes the configuration to ~/.zai/plugins/known_marketplaces.json,
  * creating the directory structure if it doesn't exist.
  *
  * @param config - The marketplace configuration to save
@@ -1505,7 +1510,7 @@ async function parseFileWithSchema<T>(
  * to match the marketplace's actual name from the manifest.
  *
  * Cache structure:
- * ~/.claude/plugins/marketplaces/
+ * ~/.zai/plugins/marketplaces/
  *   ├── official-marketplace.json     # From URL source
  *   ├── github-marketplace/          # From GitHub/Git source
  *   │   └── .claude-plugin/
@@ -1873,7 +1878,7 @@ async function loadAndCacheMarketplace(
  * Add a marketplace source to the known marketplaces
  *
  * The marketplace is fetched, validated, and cached locally.
- * The configuration is saved to ~/.claude/plugins/known_marketplaces.json.
+ * The configuration is saved to ~/.zai/plugins/known_marketplaces.json.
  *
  * @param source - MarketplaceSource object representing the marketplace source.
  *                 Callers should parse user input into MarketplaceSource format

@@ -115,7 +115,7 @@ export function SpinnerAnimationRow({
 
   // === Elapsed time (wall-clock, derived from refs each frame) ===
   const now = Date.now();
-  const elapsedTimeMs = pauseStartTimeRef.current !== null ? pauseStartTimeRef.current - loadingStartTimeRef.current - totalPausedMsRef.current : now - loadingStartTimeRef.current - totalPausedMsRef.current;
+  const elapsedTimeMs = pauseStartTimeRef.current !== null ? pauseStartTimeRef.current - loadingStartTimeRef.current! - totalPausedMsRef.current! : now - loadingStartTimeRef.current! - totalPausedMsRef.current!;
 
   // Track wall-clock turn start for teammates. While a swarm is running the
   // leader's elapsedTimeMs may jump around (new API calls reset
@@ -129,7 +129,7 @@ export function SpinnerAnimationRow({
   }
 
   // === Animation derivations from `time` ===
-  const currentResponseLength = responseLength ?? responseLengthRef.current;
+  const currentResponseLength = responseLength ?? responseLengthRef.current ?? 0;
 
   // Suppress stall detection when leader is idle — responseLengthRef and
   // hasActiveTools both track leader state. When viewing an active teammate

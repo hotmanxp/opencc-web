@@ -1523,7 +1523,7 @@ function isDefaultDisabledBuiltin(name: string): boolean {
  * Defensive array coercion for fields declared `?: T[]` in the project config.
  *
  * v2.1.200 upstream fixed a startup crash where `disabledMcpServers` /
- * `enabledMcpServers` in `.claude.json` could be written as a non-array
+ * `enabledMcpServers` in `.zai.json` could be written as a non-array
  * (object, string, etc.). The data-source layer (`getCurrentProjectConfig`)
  * repairs these to `[]` and writes them back to disk on first read, so by
  * the time we reach this read site the in-memory value should already be a

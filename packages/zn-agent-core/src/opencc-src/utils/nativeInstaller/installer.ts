@@ -1767,9 +1767,9 @@ export async function cleanupNpmInstallations(): Promise<{
     }
   }
 
-  // Preserve compatibility with pre-migration installs under ~/.claude/local.
+  // Preserve compatibility with pre-migration installs under ~/.zai/local.
   const localInstallDirs = Array.from(
-    new Set([join(getClaudeConfigHomeDir(), 'local'), join(homedir(), '.claude', 'local')]),
+    new Set([join(getClaudeConfigHomeDir(), 'local'), join(homedir(), '.zai', 'local')]),
   )
 
   for (const localInstallDir of localInstallDirs) {

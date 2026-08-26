@@ -272,16 +272,16 @@ function pickFileIconKind(kind: FileKind): (props: { 'data-file-ext'?: FileKind;
   }
 }
 
-export function FileIcon({ name }: { name: string }): JSX.Element {
+export function FileIcon({ name, size }: { name: string; size?: number }): JSX.Element {
   const kind = classifyFile(name);
   const Icon = pickFileIconKind(kind);
-  return <Icon data-file-ext={kind} />;
+  return <Icon data-file-ext={kind} size={size} />;
 }
 
-export function DirIcon({ name, open }: { name: string; open?: boolean }): JSX.Element {
+export function DirIcon({ name, open, size }: { name: string; open?: boolean; size?: number }): JSX.Element {
   // 不按子项细分(opencode 的文件夹图标种类繁多,VSCode 也是只有
   // src/ / test/ / node_modules/ 等才上专门图标,不值得为几个名字
   // 引入映射表).
   void name;
-  return <L.DirIconSvg open={open} data-dir="true" />;
+  return <L.DirIconSvg open={open} size={size} data-dir="true" />;
 }

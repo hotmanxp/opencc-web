@@ -27,6 +27,17 @@
   --success: #22c55e;
   --error: #ef4444;
   --warning: #f59e0b;
+  --success-bg: rgba(82,196,26,0.06);
+  --error-bg: rgba(255,77,79,0.06);
+  --warning-bg: rgba(250,173,20,0.06);
+  /* Thinking 块 / ToolGroupCard dark 主题: 紫色降饱和 (#722ed1 → #8b5cf6)
+     + 透明度 14% → 10%, 让 pill + 卡片在深色背景上不抢眼.
+     light 主题单独覆盖成主题橙, 见下方 :root[data-theme='light'] 块. */
+  --thinking-accent: #8b5cf6;
+  --thinking-bg: rgba(139, 92, 246, 0.10);
+  --tool-group-bg: rgba(139, 92, 246, 0.08);
+  --tool-group-border: rgba(139, 92, 246, 0.40);
+  --tool-group-header-bg: rgba(139, 92, 246, 0.18);
   --text-dim-90: rgba(255,255,255,0.9);
   --text-dim-85: rgba(255,255,255,0.85);
   --text-dim-72: rgba(255,255,255,0.72);
@@ -49,6 +60,11 @@
   --bg-theme-6: rgba(0,0,0,0.6);
   --bg-popup: rgba(0,0,0,0.6);
 
+  /* 命令/Skill 名称视觉 identity: 深色主题用紫色 (#a78bfa),
+     与下方 slash dropdown 的 `/name` 文字色对齐. 浅色主题在
+     :root[data-theme='light'] 里覆写为 var(--accent-start) (主题橙). */
+  --cmd-token-color: #a78bfa;
+
 }
 
 :root { color-scheme: light dark; }
@@ -58,7 +74,13 @@
   --bg-body: #ffffff;
   --bg-card: #f1f5f5;
   --bg-card-hover: #e2e8f0;
-  --bg-card-ansi: #64748b;
+  /* PermissionConfirmCard / QuestionCard 卡片底色: 与 dark 主题对称,
+     都用浅灰 #f1f5f5. 之前 light 是 #64748b (深灰) 在白底 + 黑字下看起来
+     像维护面板, 深灰卡片上叠 4% 黑又趋近全黑, 改回浅灰后:
+       - dark: #f1f5f5 + --bg-faint-04 (4% 白) = 稍亮浅灰
+       - light: #f1f5f5 + --bg-faint-04 (4% 黑) = 稍深浅灰
+     两个主题视觉对称. */
+  --bg-card-ansi: #f1f5f5;
   --ui-text-color: #1a1a2e;
   --ui-text-dim: #c6c6c6;
   --bg-tab: '#e4e4e4';
@@ -77,6 +99,19 @@
   --success: #16a34a;
   --error: #dc2626;
   --warning: #d97706;
+  /* Success/Error/Warn 浅色背景: 亮色主题下从 6% 提到 12%, 让 Bash 输出
+     success/error 块在白底上明显, 避免被误看成 warning 黄. */
+  --success-bg: rgba(22, 163, 74, 0.12);
+  --error-bg: rgba(220, 38, 38, 0.10);
+  --warning-bg: rgba(217, 119, 6, 0.12);
+  /* Thinking / ToolGroupCard 主题橙统一: 浅色主题下用主题橙主色 (#f97316) +
+     更低透明度 6%/5%/4%, 避免橙色在白底上过于鲜艳. 边框 0.30 alpha 保留
+     可见轮廓. */
+  --thinking-accent: #f97316;
+  --thinking-bg: rgba(249, 115, 22, 0.04);
+  --tool-group-bg: rgba(249, 115, 22, 0.04);
+  --tool-group-border: rgba(249, 115, 22, 0.30);
+  --tool-group-header-bg: rgba(249, 115, 22, 0.08);
   --text-dim-90: rgba(0,0,0,0.9);
   --text-dim-85: rgba(0,0,0,0.85);
   --text-dim-72: rgba(0,0,0,0.72);
@@ -98,6 +133,9 @@
   --bg-faint-08: rgba(0,0,0,0.08);
   --bg-theme-6: rgba(255,255,255,0.6);
   --bg-popup: #ffffff;
+  /* 浅色主题下命令/Skill 名称用主题橙,与全局 accent identity 一致 —
+     深色主题下仍是紫色 (见 :root --cmd-token-color 默认值). */
+  --cmd-token-color: var(--accent-start);
 }
 
 /* light 主题下, 半透明 header 需要更亮一些 */
@@ -147,6 +185,26 @@ body {
 ::-webkit-scrollbar-track { background: transparent; }
 ::-webkit-scrollbar-thumb { background: var(--text-tertiary); border-radius: 3px; }
 ::-webkit-scrollbar-thumb:hover { background: var(--text-secondary); }
+
+/* dark 主题: 显式锁定滚动条颜色, 防止 light 主题 selector 渗漏.
+   与 :root --text-tertiary = #94a3b8 (slate-400) / --text-secondary = #cbd5e1
+   (slate-300) 当前值一致, 后续 --text-* 变化不会影响滚动条. */
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb {
+  background: #94a3b8;
+}
+:root[data-theme='dark'] ::-webkit-scrollbar-thumb:hover {
+  background: #cbd5e1;
+}
+
+/* light 主题下滚动条颜色在浅色背景上太深 (slate-500 #64748b),
+   改成 slate-600 32% alpha — 静止可见但不抢眼, hover 加深到 55% 表示
+   激活. dark 主题走上面 :root[data-theme='dark'] 显式定义, 不会受影响. */
+:root[data-theme='light'] ::-webkit-scrollbar-thumb {
+  background: rgba(71, 85, 105, 0.32);
+}
+:root[data-theme='light'] ::-webkit-scrollbar-thumb:hover {
+  background: rgba(71, 85, 105, 0.55);
+}
 
 .ant-layout { background: var(--bg-body) !important; }
 .ant-layout-sider { background: var(--bg-sidebar) !important; border-right: 1px solid var(--border-subtle) !important; }
@@ -222,6 +280,15 @@ body {
 [data-testid="fs-tree"] .ant-tree-treenode {
   line-height: 22px !important;
   margin-bottom: 0 !important;
+  /* min-width:0 配合 .ant-tree-node-content-wrapper 的 min-width:0,
+     保证 treenode 行内的 title 被压缩触发省略号,而不是把整行撑出
+     fs-tree 边界导致相邻节点文字重叠. width:100% 覆盖 antd 默认的
+     align-items:flex-start (treenode 行宽度跟随内容变,fs-tree 因此出现
+     横向滚动条而不是 title 截断). */
+  min-width: 0 !important;
+  width: 100% !important;
+  max-width: 100% !important;
+  box-sizing: border-box !important;
 }
 
 [data-testid="fs-tree"] .ant-tree-treenode .ant-tree-node-content-wrapper {
@@ -231,6 +298,20 @@ body {
   line-height: 22px !important;
   padding: 0 4px !important;
   border-radius: 3px !important;
+  /* display:flex 让 .ant-tree-iconEle 与 .ant-tree-title 在同一行 flex 流里
+     并排 (默认 block 父容器里,block 子元素会纵向堆叠 → icon 一行, title 挤
+     到下一行,fs-tree 渲染时表现为"空行 + 文件名行"交替,实际是 title 被推出
+     wrapper 框). flex:1 让 wrapper 吃满 treenode 内 switcher 之后的剩余空间,
+     这是 .ant-tree-title 的 max-width:100% 能算出来的前提. 默认 flex:0 1 auto
+     会让 wrapper 缩到内容宽度,title 因此也跟着被压到 ~50px,长文件名
+     必然换行/溢出. overflow:hidden 兜底: 万一 nowrap 没生效,内容被裁而不是
+     溢出到下一行 treenode. min-width:0 让 flex 子元素可以缩到比内容更窄. */
+  display: flex !important;
+  align-items: center !important;
+  flex: 1 1 0 !important;
+  min-width: 0 !important;
+  max-width: 100%;
+  overflow: hidden !important;
 }
 
 [data-testid="fs-tree"] .ant-tree-node-content-wrapper .anticon {
@@ -280,6 +361,20 @@ body {
 
 [data-testid="fs-tree"] .ant-tree-title {
   font-size: 12px !important;
+  /* 长文件名(2026-08-17-dsh-kernel-batch-...-acceptance.md 这种)在 fs-tree
+     受限宽度下默认会换行,导致相邻节点文本相互重叠. title 设为 block 占据全宽
+     (FsTab renderTree 的内层 span 用 display:inline-block + maxWidth:100% 做
+     真正省略号触发点);line-height 22px 与 wrapper 高度对齐,避免因行高差导致
+     文字偏出. white-space:nowrap + overflow:hidden + text-overflow:ellipsis
+     是 antd 推荐的 .ant-tree-title 截断三件套. */
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  line-height: 22px;
+  /* flex 容器里的 flex 子项需要 min-width:0 才能缩到内容宽度以下,否则
+     内容宽度会把 flex 行撑出 fs-tree 边界. */
+  min-width: 0;
 }
 
 [data-testid="fs-tree"] .ant-tree-node-selected {
@@ -331,9 +426,6 @@ body {
 .question-card-scope,
 .question-card-scope *:not(.ant-tag):not(.ant-tag *) {
   color: #1f1f1f !important;
-}
-.question-card-scope.permission-confirm-card pre:not(.ant-tag):not(.ant-tag *) {
-  color: var(--text-primary) !important;
 }
 /* antd Tag 在 darkAlgorithm 下用紫色背景 + 白色文字, 通配符不能把它强制成深色
    (否则深色字 on 紫色背景完全看不清). 这里显式覆盖回白色, 让 pill 内部文字
@@ -399,4 +491,179 @@ body {
 .ant-popover .ant-popover-buttons .ant-btn-primary {
   background: #ff6600 !important;
   border-color: #ff6600 !important;
+}
+
+/* ─── Agent 输入框命令/Skill 高亮 (mirror-backdrop) ─────────────
+ * 模式: 一个绝对定位的 backdrop 浮在 antd TextArea 之下,渲染带 mark
+ * 的可见文本;textarea 自身 color/text-fill-color 变透明,只保留 caret
+ * 与 selection。两个图层共享 antd 默认 metrics (padding 4px/11px,
+ * fontSize 14, lineHeight 22) → 文本逐字对齐,mark 不会漂移。
+ *
+ * 触发条件: 仅当输入以 `/<已知命令名>` 起首时挂载 (见
+ * AgentInputBox.tsx `deriveCommandToken`),普通文本路径不渲染 backdrop,
+ * 性能开销为零。
+ *
+ * 与 deepseek-harness InputBar 的 hlToken / backdrop 思路一致,但只取
+ * "claim-token highlight" 这一支 (chips / textRefs / hint 不移植 —
+ * ZAI 当前没有 reference/codec/hint 这些概念)。
+ */
+.agent-input-decorator-wrap {
+  position: relative;
+  flex: 1;
+  min-width: 0;
+  display: flex;
+  flex-direction: column;
+}
+
+/* 透明 placeholder: backdrop 接管后,TextArea 文本变透明,但
+   placeholder 仍需可见 — 用 ::placeholder 显式恢复 fill-color。 */
+.agent-input-decorator-wrap textarea::placeholder {
+  color: var(--text-tertiary);
+  -webkit-text-fill-color: var(--text-tertiary);
+  opacity: 1;
+}
+
+/* antd TextArea 默认 `background: var(--bg-input)` 实色 + border,不透明化
+   会盖住 backdrop 的 mark + 普通文本。让 textarea 自身背景透明,
+   border 保留(否则输入框失去卡面轮廓):
+   装饰层 wrap 内,backdrop(z=0)画底色 + 高亮文本,
+   textarea(z=1)画透明 + caret — caret / selection 始终在最顶层
+   (不被 backdrop 盖住),选中态看得到浏览器 selection 蓝底框 + 高亮文本。*/
+.agent-input-textarea-field {
+  position: absolute;
+  inset: 0;
+  width: 100%;
+  height: 100%;
+  z-index: 1;
+  resize: none;
+  overflow: hidden;
+  border: none;
+  outline: none;
+  background: transparent;
+  color: transparent;
+  -webkit-text-fill-color: transparent;
+  caret-color: var(--text-primary);
+}
+
+/* ---- 三层输入区布局(追齐 deepseek-harness InputBar) ----
+   .scroll(唯一滚动容器,封顶滚动)> .grow(相对)> [backdrop / textarea /
+   mirror]。backdrop 渲染全部可见文本 + chip + token-mark;textarea 透明
+   只留 caret / selection;mirror 隐藏、决定 .grow 的高度 → auto-grow。
+   三层共享 metrics 与 DshChipCell 打头的 font-stack,占位符 U+FFFC 的
+   advance 三层一致 → chip 与文本零漂移。 */
+.agent-input-scroll {
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.agent-input-grow {
+  position: relative;
+}
+
+.agent-input-backdrop,
+.agent-input-textarea-field,
+.agent-input-mirror {
+  box-sizing: border-box;
+  padding: 4px 11px;
+  font-size: 14px;
+  line-height: 22px;
+  font-family: 'DshChipCell', -apple-system, BlinkMacSystemFont, 'Segoe UI',
+    Roboto, sans-serif;
+  white-space: pre-wrap;
+  word-break: break-word;
+  overflow-wrap: anywhere;
+}
+
+/* Backdrop 浮层: inset:0 填满 .grow,pointer-events 让开鼠标(点击落到
+   底层 textarea)。普通文本、chip、token-mark 全在这里画。 */
+.agent-input-backdrop {
+  position: absolute;
+  inset: 0;
+  z-index: 0;
+  pointer-events: none;
+  overflow: hidden;
+  color: var(--text-primary);
+}
+
+/* 隐藏镜像:高度权威,撑起 .grow(auto-grow);保留 3 行最小高度(≈ 原
+   rows=3 的视觉高度)。 */
+.agent-input-mirror {
+  visibility: hidden;
+  pointer-events: none;
+  min-height: 74px;
+}
+
+/* 命令 token mark: 与下方 slash dropdown 的 `/name` 文字色一致
+   (走 var(--cmd-token-color),深色主题 #a78bfa 紫,浅色主题
+   var(--accent-start) 橙)。不加背景色 (用户要求:文字色标记,
+   不要 block-style 的色块)。从 dropdown 选完 Tab/Enter 后输入框
+   里立刻出现同色文字,反馈链路视觉统一。
+   注意:不要在这里加 padding。backdrop 接管可见文本、textarea 自身
+   透明只保留 caret,两者宽度若不一致 (mark 多 4px 水平 padding 会让
+   mark 整体加宽) → 光标位置停留在 backdrop 文本"内部"而非末尾,
+   wrap 点也可能错位。视觉区分靠 color 已足够,如需 padding 视觉间距
+   仿 MentionChip 用 hidden placeholder + absolute stretch 占位。*/
+.agent-input-cmd-token {
+  color: var(--cmd-token-color);
+  border-radius: 4px;
+  box-decoration-break: clone;
+  -webkit-box-decoration-break: clone;
+}
+
+/* ---- 文件引用 chip 的单元字体 ----
+   一个 glyph 的字体:只把 U+FFFC 映射为 4em 空白单元(其余 codepoint 落
+   到后续 font-family)。textarea 里的占位符与 backdrop chip 的 ::before
+   都渲染同一个 U+FFFC、走同一个 stack → 两层宽度严格一致,chip 定位
+   零漂移。 */
+@font-face {
+  font-family: 'DshChipCell';
+  src: url('data:font/ttf;base64,AAEAAAAKAIAAAwAgT1MvMkT8SmIAAAEoAAAAYGNtYXAADQBPAAABkAAAADRnbHlmAAAAAAAAAcwAAAABaGVhZCwtPGoAAACsAAAANmhoZWEDIg7bAAAA5AAAACRobXR4EZQAAAAAAYgAAAAIbG9jYQAAAAAAAAHEAAAABm1heHAAAwACAAABCAAAACBuYW1lvljk2gAAAdAAAABscG9zdNNweNQAAAI8AAAALQABAAAAAQAAdia1tV8PPPUAAwPoAAAAAOaLfcUAAAAA5ot9xQAAAAAAAAAAAAAAAwACAAAAAAAAAAEAAAMg/zgAAA+gAAAAAAAAAAEAAAAAAAAAAAAAAAAAAAACAAEAAAACAAAAAAAAAAAAAgAAAAAAAAAAAAAAAAAAAAAAAwjKAZAABQAEAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAAAAAPz8/PwAA//z//AMg/zgAAAMgAMgAAAAAAAAAAAAAAAAAAAAgAAAB9AAAD6AAAAAAAAIAAAADAAAAFAADAAEAAAAUAAQAIAAAAAQABAABAAD//P//AAD//P//AAUAAQAAAAAAAAAAAAAAAAAAAAAAAAAEADYAAQAAAAAAAQALAAAAAQAAAAAAAgAHAAsAAwABBAkAAQAWABIAAwABBAkAAgAOAChEc2hDaGlwQ2VsbFJlZ3VsYXIARABzAGgAQwBoAGkAcABDAGUAbABsAFIAZQBnAHUAbABhAHIAAgAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAACAAABAgZvYmpyZXAAAAA=') format('truetype');
+}
+
+/* ---- 文件引用 chip ----
+   硬对齐约束:chip 的总宽度必须严格等于 textarea 里那个 U+FFFC 的
+   advance,否则其后每个字符漂移。::before 渲染同一 U+FFFC、走同一 font
+   stack(DshChipCell 4em 单元),两层天然一致;chip 本身不带 padding。
+   label 用 absolute + compensated-scale(先按 1/0.72 布局再缩回,裁边落到
+   视觉单元边沿),title 携带完整路径。 */
+.agent-input-ref-chip {
+  position: relative;
+  display: inline-block;
+  border-radius: 6px;
+  background: rgba(255, 102, 0, 0.18);
+  cursor: default;
+  vertical-align: baseline;
+}
+
+.agent-input-ref-chip::before {
+  content: '\FFFC';
+  color: transparent;
+}
+
+.agent-input-ref-chip-label {
+  position: absolute;
+  left: 50%;
+  top: 50%;
+  width: calc(100% / 0.72 - 10px);
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 3px;
+  overflow: hidden;
+  color: var(--text-primary);
+  white-space: nowrap;
+  transform: translate(-50%, -50%) scale(0.72);
+  font-size: 12px;
+  line-height: 16px;
+}
+
+.agent-input-ref-chip-icon {
+  font-size: 12px;
+  flex-shrink: 0;
+}
+
+.agent-input-ref-chip[data-invalid] {
+  background: rgba(216, 97, 97, 0.2);
+  text-decoration: line-through;
+  opacity: 0.7;
 }

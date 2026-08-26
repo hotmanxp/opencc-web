@@ -2,7 +2,7 @@ import { beforeAll, describe, expect, it } from 'vitest'
 import { mkdtemp, writeFile, mkdir } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { createOpenccRuntime } from '@zn-ai/zn-agent-core/opencc-server'
+import { createOpenccRuntime } from '@zn-ai/zn-agent-core'
 
 // Minimal stdio MCP server (newline-delimited JSON-RPC over stdin/stdout).
 // The runtime's MCP client (official @modelcontextprotocol/sdk
@@ -339,6 +339,35 @@ describe('createOpenccRuntime', { timeout: 30_000 }, () => {
     )
     expect(errorResults).toEqual([])
 
+    await r.shutdown()
+  })
+
+  it('applies the mainAgent.tools slot to the model-visible tool pool', async () => {
+    // zai patch (2026-08-20): 主 Agent tools 插槽 —— computeTools 在
+    // assembleToolPool + mergeAndFilterTools 之后同步应用槽函数,首个
+    // system init 事件的 tools 必须反映过滤结果。
+    const r = await runtime({
+      mainAgent: {
+        name: 'mini',
+        description: 'test',
+        tools: (origin) =>
+          origin.filter((t) => t.name === 'Bash'),
+      },
+    })
+    const tools = await initTools(r, 'tools-slot-1', process.cwd())
+    expect(tools).toEqual(['Bash'])
+    await r.shutdown()
+  })
+
+  it('mainAgent without a tools slot leaves the default tool pool intact', async () => {
+    const r = await runtime({
+      mainAgent: { name: 'passthrough', description: 'test' },
+    })
+    const tools = await initTools(r, 'tools-slot-2', process.cwd())
+    // 默认池应包含核心工具,且未被过滤成空。
+    expect(tools.length).toBeGreaterThan(10)
+    expect(tools).toContain('Bash')
+    expect(tools).toContain('Read')
     await r.shutdown()
   })
 })

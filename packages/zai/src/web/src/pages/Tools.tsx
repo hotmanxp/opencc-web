@@ -142,17 +142,19 @@ export default function Tools() {
   if (loading) return <Spin size="large" className="block mx-auto my-20" />;
 
   return (
-    <div className="space-y-4">
-      <div style={{ display: 'flex', justifyContent: 'flex-start' }}>
-        <Button
-          icon={<SyncOutlined spin={refreshing} />}
-          loading={refreshing}
-          onClick={handleRefreshAll}
-        >
-          刷新最新版本
-        </Button>
-      </div>
-
+    <div style={{ padding: 24 }}>
+      <Card
+        title={<Typography.Title level={4} style={{ margin: 0 }}>工具管理</Typography.Title>}
+        extra={
+          <Button
+            icon={<SyncOutlined spin={refreshing} />}
+            loading={refreshing}
+            onClick={handleRefreshAll}
+          >
+            刷新最新版本
+          </Button>
+        }
+      >
       <Row gutter={[16, 16]}>
         {TOOL_CARDS.map((card) => {
           const status = getStatus(card);
@@ -211,6 +213,7 @@ export default function Tools() {
                     icon={status.installed ? <ReloadOutlined /> : <DownloadOutlined />}
                     loading={installPkg === cli?.pkg}
                     disabled={status.upToDate}
+                    aria-label={status.upToDate ? '已是最新' : (status.installed ? '更新' : '安装')}
                     onClick={() => cli && handleInstall(cli.pkg, status.installed ? '更新' : '安装')}
                   >
                     {status.upToDate ? '已是最新' : (status.installed ? '更新' : '安装')}
@@ -229,7 +232,7 @@ export default function Tools() {
                       type="primary"
                       style={{ flex: 1, minWidth: 0 }}
                       icon={<SettingOutlined />}
-                      onClick={() => navigate(`/config?tool=${card.key}`)}
+                      onClick={() => navigate(`/manage?tab=config&tool=${card.key}`)}
                     >
                       配置
                     </Button>
@@ -240,9 +243,11 @@ export default function Tools() {
           );
         })}
       </Row>
+      </Card>
 
       <Modal
         title={`${installLabel}日志: ${installPkg}`}
+        aria-label={`${installLabel}日志: ${installPkg}`}
         open={!!installPkg}
         onCancel={() => setInstallPkg(null)}
         footer={null}

@@ -16,6 +16,11 @@ export async function cancelRestart(): Promise<{ status: number }> {
   return { status: res.status }
 }
 
+export async function requestStop(): Promise<{ status: number }> {
+  const res = await fetch('/api/system/stop', { method: 'POST' })
+  return { status: res.status }
+}
+
 export async function getStatus(): Promise<SystemStatus | null> {
   const res = await fetch('/api/system/status')
   if (!res.ok) return null

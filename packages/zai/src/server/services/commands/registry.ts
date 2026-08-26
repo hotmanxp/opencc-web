@@ -3,6 +3,7 @@ import type { CommandContext } from '@zn-ai/zn-agent-core'
 import { clearCommand } from './builtin/clear.js'
 import { compactCommand } from './builtin/compact.js'
 import { statusCommand } from './builtin/status.js'
+import { handoffCommand } from './builtin/handoffCommand.js'
 import { reloadUserCommands } from './userLoader.js'
 
 let initialized = false
@@ -16,6 +17,7 @@ export function registerBuiltinCommands(): void {
   reg.register(clearCommand)
   reg.register(compactCommand)
   reg.register(statusCommand)
+  reg.register(handoffCommand)
   initialized = true
 }
 

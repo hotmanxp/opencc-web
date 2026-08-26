@@ -14,6 +14,7 @@ import {
   RESPONSIVE_BREAKPOINT,
   clampWidth,
   useLocalStorageState,
+  useIsGitRepo,
 } from './shared.js';
 
 /**
@@ -58,6 +59,17 @@ export function SplitPane({ cwd }: SplitPaneProps) {
     true,
   );
   const activeSessionId = useAgentStore((s) => s.sessionId ?? null)
+  // 非 git 项目 (instanceContext.branch === null) 过滤 Git tab (见 shared.ts
+  // useIsGitRepo). 用户此前若把 tab 停在 git,fallback 到 fs 避免空面板.
+  const isGit = useIsGitRepo();
+  const tabItems = [
+    { key: 'fs', label: 'Files', children: <FsTab cwd={cwd} /> },
+    ...(isGit
+      ? [{ key: 'git', label: 'Git', children: <GitTab cwd={cwd} /> }]
+      : []),
+    { key: 'bash', label: 'Bash', children: <BashTab sessionId={activeSessionId} cwd={cwd} /> },
+  ];
+  const activeTab: TabKey = tab === 'git' && !isGit ? 'fs' : tab;
 
   // 实时同步 defaultSplitScreen → localStorage:用户在 /agent 页面打开设置,
   // 切换"默认启动分屏"时,立即把新值写入 localStorage 让面板按新设置显示,
@@ -150,7 +162,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
       {open && (
         <>
           <Tabs
-            activeKey={tab}
+            activeKey={activeTab}
             onChange={(k) => setTab(k as TabKey)}
             size="small"
             tabBarStyle={{
@@ -159,11 +171,7 @@ export function SplitPane({ cwd }: SplitPaneProps) {
               background: 'var(--bg-tab)',
               borderBottom: '1px solid var(--border-light)',
             }}
-            items={[
-              { key: 'fs', label: 'Files', children: <FsTab cwd={cwd} /> },
-              { key: 'git', label: 'Git', children: <GitTab cwd={cwd} /> },
-              { key: 'bash', label: 'Bash', children: <BashTab sessionId={activeSessionId} cwd={cwd} /> },
-            ]}
+            items={tabItems}
           />
           {/* Splitter drag surface — 锚定在 panel 左边缘 (borderLeft 视觉分割线
               位置, Agent ↔ 分屏区 的分界). 锁定时整条 12px 宽 surface

@@ -125,13 +125,19 @@ async function* openaiStreamToAnthropic(
         }
         const trimmed = line.trim()
         if (!trimmed || trimmed === 'data: [DONE]') continue
-        if (!trimmed.startsWith('data: ')) {
+        // zai patch: paic.com.cn gateways (e.g. wizard-ai) emit SSE lines as
+        // `data:{...}` without the space after `data:`. Accept both the
+        // OpenAI-spec `data: ` and the space-less `data:` prefix, mirroring
+        // the hand-rolled zai openaiClient.ts. Without this, every chunk is
+        // dropped and streaming degrades to a buffered non-streaming fallback.
+        if (!trimmed.startsWith('data:')) {
           continue
         }
+        const payload = trimmed.startsWith('data: ') ? trimmed.slice(6) : trimmed.slice(5)
 
         let chunk: OpenAIStreamChunk
         try {
-          chunk = JSON.parse(trimmed.slice(6))
+          chunk = JSON.parse(payload)
         } catch {
           continue
         }

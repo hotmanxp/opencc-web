@@ -99,7 +99,7 @@ export function renderToolResultMessage(content: Out, progressMessagesForMessage
   } = content;
   if (isImage) {
     return <MessageResponse height={1}>
-        <Text dimColor>[Image data detected and sent to OpenCC]</Text>
+        <Text dimColor>[Image data detected and sent to Z.Ai]</Text>
       </MessageResponse>;
   }
   return <Box flexDirection="column">

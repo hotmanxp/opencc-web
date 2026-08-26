@@ -255,9 +255,14 @@ import {
   recordPromptState,
 } from './promptCacheBreakDetection.js'
 import {
+  recordApiCall,
+  setLastContextUsage,
+} from '../../services/api/sessionApiCounter.js'
+import {
   CannotRetryError,
   FallbackTriggeredError,
   is529Error,
+  notifyRateLimitCooldown,
   type RetryContext,
   withRetry,
 } from './withRetry.js'
@@ -799,6 +804,25 @@ export function getClaudeStreamingAbortLogMessage(
   return getStreamingAbortMessage(signal.reason, errorMessage(streamingError))
 }
 
+/**
+ * zai patch (2026-08-08): duck-type 判断流中错误是否为 rate-limit /
+ * overloaded。MiniMax proxy 在 streaming 模式下抛出的 429 error 对象
+ * `error.status` 不可靠(与 is529Error 注释的 SDK status 丢失是同类问题),
+ * 所以除了 status 还匹配 message 里的 rate_limit / rate limit / tpm 标记。
+ */
+export function isStreamingRateLimitError(err: unknown): boolean {
+  if (is529Error(err)) return true
+  if (!err || typeof err !== 'object') return false
+  const e = err as { status?: unknown; message?: unknown }
+  if (e.status === 429) return true
+  const msg = typeof e.message === 'string' ? e.message.toLowerCase() : ''
+  return (
+    msg.includes('rate_limit') ||
+    msg.includes('rate limit') ||
+    msg.includes('tpm')
+  )
+}
+
 export function getClaudeExpectedSideTaskApiAbortLogMessage(
   signal: Pick<AbortSignal, 'aborted' | 'reason'>,
   errorFromRetry: unknown,
@@ -893,6 +917,9 @@ export async function* executeNonStreamingRequest(
    */
   originatingRequestId?: string | null,
 ): AsyncGenerator<SystemAPIErrorMessage, BetaMessage> {
+  // zai patch (2026-08-09): 每次外层非流式 fallback 入口记 1 次
+  // API 请求;内部 withRetry retry 不重复计(详见 sessionApiCounter.ts 注释)。
+  recordApiCall()
   const fallbackTimeoutMs = getNonstreamingFallbackTimeoutMs()
   const generator = withRetry(
     () =>
@@ -1845,6 +1872,9 @@ async function* queryModel(
   let isAdvisorInProgress = false
 
   try {
+    // zai patch (2026-08-09): 每次外层流式 query 入口记 1 次 API 请求;
+    // 内部 withRetry retry 不重复计(详见 sessionApiCounter.ts 注释)。
+    recordApiCall()
     queryCheckpoint('query_client_creation_start')
     const generator = withRetry(
       () =>
@@ -2146,6 +2176,17 @@ async function* queryModel(
             partialMessage = part.message
             ttftMs = Date.now() - start
             usage = updateUsage(usage, part.message?.usage)
+            // zai patch (2026-08-09): 把"截至当前 turn 的累计 usage"同步写到
+            // globalThis, zai-server emit runtime.done 时读 getLastContextTokens()
+            // 推给前端 store 显示"当前上下文大小"。globalThis 单 slot 设计:
+            // zai 服 runQueryLoop 串行,不会出现两个 session 并行覆盖;同一
+            // session 内 message_delta 后续覆盖 message_start 的值。
+            setLastContextUsage({
+              input: usage.input_tokens ?? 0,
+              cache_creation: usage.cache_creation_input_tokens ?? 0,
+              cache_read: usage.cache_read_input_tokens ?? 0,
+              output: usage.output_tokens ?? 0,
+            })
             // Capture research from message_start if available (internal only).
             // Always overwrite with the latest value.
             if (
@@ -2377,6 +2418,15 @@ async function* queryModel(
           }
           case 'message_delta': {
             usage = updateUsage(usage, part.usage)
+            // zai patch (2026-08-09): message_delta 带 usage 是 streaming 路径下
+            // 累计 input + cache 的权威来源(Anthropic streaming API 每条 message_delta
+            // 携带完整 usage,不是增量)。这里覆盖 message_start 的初始值。
+            setLastContextUsage({
+              input: usage.input_tokens ?? 0,
+              cache_creation: usage.cache_creation_input_tokens ?? 0,
+              cache_read: usage.cache_read_input_tokens ?? 0,
+              output: usage.output_tokens ?? 0,
+            })
             // Capture research from message_delta if available (internal only).
             // Always overwrite with the latest value. Also write back to
             // already-yielded messages since message_delta arrives after
@@ -2433,7 +2483,7 @@ async function* queryModel(
                 max_tokens: maxOutputTokens,
               })
               yield createAssistantAPIErrorMessage({
-                content: `${API_ERROR_MESSAGE_PREFIX}: OpenCC's response exceeded the ${
+                content: `${API_ERROR_MESSAGE_PREFIX}: Z.Ai's response exceeded the ${
                   maxOutputTokens
                 } output token maximum. To configure this behavior, set the CLAUDE_CODE_MAX_OUTPUT_TOKENS environment variable.`,
                 apiError: 'max_output_tokens',
@@ -2629,6 +2679,18 @@ async function* queryModel(
           getClaudeStreamingAbortLogMessage(signal, streamingError),
         )
         throw new APIUserAbortError()
+      }
+
+      // zai patch (2026-08-08): streaming-mode 的 429/529 错误发生在
+      // withRetry 的 operation 之外(错误在流迭代时抛出),不触发
+      // withRetry 内部的 rateLimitCooldowns 冷却门。这里补触发冷却,
+      // 让后续请求(agent 下一轮 / 并发会话 / non-streaming fallback)
+      // 在 withRetry 循环顶部的 gate 等待窗口结束,避免 429 后立刻
+      // 重发形成请求风暴(会话 sess-1786201578807 现场:429 后 2 秒内
+      // 并行重发相同命令)。MiniMax 的 TPM 限流通常持续 >30s,30s
+      // 冷却窗口能覆盖限流恢复期。
+      if (isStreamingRateLimitError(streamingError)) {
+        notifyRateLimitCooldown()
       }
 
       // When the flag is enabled, skip the non-streaming fallback and let the
@@ -3015,6 +3077,16 @@ async function* queryModel(
     if (fallbackMessage) {
       const fallbackUsage = fallbackMessage.message.usage
       usage = updateUsage(EMPTY_USAGE, fallbackUsage)
+      // zai patch (2026-08-09): non-streaming fallback 路径同样把 usage
+      // 写到 globalThis, 让 zai-server emit runtime.done 能读到正确的
+      // 当前上下文大小。streaming 主路径失败 / 触发 fallback 时,这是
+      // 唯一一次能捕获 usage 的机会(只有一条 message, 没有 message_delta)。
+      setLastContextUsage({
+        input: usage.input_tokens ?? 0,
+        cache_creation: usage.cache_creation_input_tokens ?? 0,
+        cache_read: usage.cache_read_input_tokens ?? 0,
+        output: usage.output_tokens ?? 0,
+      })
       stopReason = fallbackMessage.message.stop_reason
       const fallbackCost = calculateUSDCost(resolvedModel, fallbackUsage)
       costUSD += addToTotalSessionCost(

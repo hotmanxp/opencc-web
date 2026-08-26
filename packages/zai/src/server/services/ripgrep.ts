@@ -14,4 +14,4 @@ export {
   runRipgrep,
   type SpawnResult,
   type RunRipgrepOptions,
-} from '@zn-ai/zn-agent-core/compat/vendor/ripgrep'
+} from '@zn-ai/zn-agent-core'

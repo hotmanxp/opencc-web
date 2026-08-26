@@ -1,15 +1,16 @@
 /**
- * Package-consumer typecheck for `@zn-ai/zn-agent-core/opencc-server`.
+ * Package-consumer typecheck for `@zn-ai/zn-agent-core` (main entry).
  *
  * This file is the consumer-side mirror of the contract test in
  * `test/unit/server/openccRuntime-contract.test.ts`. The contract test
  * typechecks against the package source (`src/opencc-src/server/*`) via
  * the `tsconfig.contract-tests.json` build; THIS file typechecks against
- * the BUILT package (`dist/opencc-src/server/*`) via
- * `tsconfig.consumer.json`. The two must agree — if the source types
- * compile but the built d.ts does not (because the build dropped a
- * dependency, drifted a re-export, etc.), the consumer typecheck catches
- * it before the package is published.
+ * the BUILT package main entry (`dist/bundle-entry.d.ts`, which
+ * re-exports `dist/opencc-src/server/*`) via `tsconfig.consumer.json`.
+ * The two must agree — if the source types compile but the built d.ts
+ * does not (because the build dropped a dependency, drifted a
+ * re-export, etc.), the consumer typecheck catches it before the
+ * package is published.
  *
  * NOTE: the file is intentionally named `*.consumer-typecheck.ts` (NOT
  * `*.test.ts`) so the vitest `include` glob (`test/<dir>/<name>.test.ts`)
@@ -22,17 +23,16 @@
  * These are pure type-level assertions — no runtime expectations. As
  * long as `tsc --noEmit -p tsconfig.consumer.json` exits 0, the consumer
  * can:
- *   - import the seven public types and the factory
+ *   - import the seven public types and the factory from the main entry
  *   - construct a concrete-shape `OpenccServerEvent` literal
  *   - construct a concrete-shape `OpenccTranscriptMeta` literal
  *   - implement the eight-method `OpenccRuntime` interface
  *   - call `createOpenccRuntime` with the required `dataDir` option
  *   - subscribe to the `AsyncIterable<OpenccServerEvent>` returned by `query`
- * All without single-module imports from outside the `./opencc-server`
- * subpath. If the publisher ever silently re-introduces a `compat/*`
- * import in the published d.ts, the resolve path will fail because
- * `dist/compat/transcript/types.js` does not exist; the consumer
- * typecheck would fail-fast with TS2307.
+ * All from the single main entry. The `dist/opencc-src/server/*.d.ts`
+ * files must stay self-contained (no `compat/*` imports) — see
+ * `scripts/verify-server-types-self-contained.mjs`; a leaked cross-module
+ * import would fail the consumer typecheck with TS2307.
  *
  * This file is intentionally import-only — no `describe` / `it` blocks.
  * The runtime assertion is `tsc --noEmit` itself, which the npm script
@@ -49,7 +49,7 @@ import {
   type OpenccServerEvent,
   type OpenccTranscriptFile,
   type OpenccTranscriptMeta,
-} from '@zn-ai/zn-agent-core/opencc-server'
+} from '@zn-ai/zn-agent-core'
 
 // ── Value export: factory is a function ──────────────────────────────
 const _factoryIsFunction: typeof createOpenccRuntime = createOpenccRuntime
@@ -147,6 +147,8 @@ const _runtimeShape: OpenccRuntime = {
     install: async () => ({ success: true, message: 'ok' }),
     uninstall: async () => ({ success: true, message: 'ok' }),
     update: async () => ({ success: true, message: 'ok' }),
+    listMarketplaces: async () => [],
+    addMarketplace: async () => ({ success: true, message: 'ok' }),
     reload: async () => ({ success: true, message: 'ok' }),
   },
 }

@@ -35,9 +35,9 @@ import { wrapSkillToolAsOpencc } from './SkillTool.js'
 export type OpenccBuiltinTool = any
 
 // Same bundle as openccQueryBridge.ts. Imported via the package's
-// `./opencc-core` subpath export so we don't depend on the relative
-// layout of dist/ subdirs.
-const BUNDLE_URL = '@zn-ai/zn-agent-core/opencc-core'
+// main entry (whose runtime `default` IS the bundle) so we don't
+// depend on the relative layout of dist/ subdirs.
+const BUNDLE_URL = '@zn-ai/zn-agent-core'
 
 /**
  * zai patch: overwrite `tool.checkPermissions` on the live vendor Tool
@@ -156,7 +156,15 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
   forceAllowCheckPermissions(AgentTool)
   forceAllowCheckPermissions(BackgroundAgentResultTool)
   forceAllowCheckPermissions(TaskOutputTool)
-  forceAllowCheckPermissions(WebFetchTool)
+  // WebFetch 默认不加载:与 vendor 工具池一致(getAllBaseTools → isEnabled),
+  // 只有显式设置 OPENCC_WEBTOOL_ENABLE=1 时才进入内置列表。
+  const openccWebFetchEnabled =
+    typeof WebFetchTool.isEnabled === 'function'
+      ? WebFetchTool.isEnabled()
+      : false
+  if (openccWebFetchEnabled) {
+    forceAllowCheckPermissions(WebFetchTool)
+  }
   forceAllowCheckPermissions(WebSearchTool)
 
   // zai patch: treat empty-string pages as "not provided". Some models
@@ -199,7 +207,7 @@ export async function getOpenccBuiltinTools(): Promise<OpenccBuiltinTool[]> {
     AgentTool,
     BackgroundAgentResultTool,
     TaskOutputTool,
-    WebFetchTool,
+    ...(openccWebFetchEnabled ? [WebFetchTool] : []),
     WebSearchTool,
   ]
   return cachedTools

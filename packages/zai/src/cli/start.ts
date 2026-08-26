@@ -2,15 +2,18 @@ import { existsSync } from 'node:fs';
 import http from 'node:http';
 import { join, dirname, resolve, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { spawn } from 'node:child_process';
 import { createApp } from '../server/index.js';
-import { stopBranchChecker } from '../server/routes/system.js';
-import { shutdownBackgroundRuntime } from '../server/services/backgroundRuntime.js';
 import { createInstanceHeartbeat, getInstanceHeartbeatConfig } from '../server/services/instanceHeartbeat.js';
-import { shutdownInstanceSupervisor } from '../server/services/instanceSupervisor.js';
 import { sendReady } from '../server/services/readyHook.js';
 import { randomBytes } from 'node:crypto';
 import express from 'express';
+import { resolveServerPort } from './ports.js';
+import { openBrowser } from './openBrowser.js';
+import {
+  cleanupAndExit,
+  registerHttpServer,
+} from '../server/services/runtimeLifecycle.js';
+import { handleProxyUpgrade } from '../server/services/reverseProxy.js';
 
 interface StartOptions {
   port?: string;
@@ -34,6 +37,16 @@ interface StartOptions {
 }
 
 export async function runStart(options: StartOptions): Promise<void> {
+  // 受管子进程(`--managed-child`)早期设进程标题。supervisor spawn 时
+  // 已经传了 `argv0`,Linux/macOS `ps -o args` 列从 argv[0] 起始读会
+  // 显示新名;这里再补一刀 `process.title`,覆盖 macOS Activity Monitor
+  // 与 Linux `top` 取 `comm` 字段的路径。Env 为空时不动 title,自然降级
+  // 到默认 node 标题(对应未受管或测试 spawn 不传 title 的场景)。
+  if (options.managedChild) {
+    const titleFromEnv = process.env.ZAI_PROCESS_TITLE
+    if (titleFromEnv) process.title = titleFromEnv
+  }
+
   const managed =
     options.managed ??
     (options.managedChild === true
@@ -55,10 +68,15 @@ export async function runStart(options: StartOptions): Promise<void> {
     // browser — the user's `--open` request was already handled by the
     // supervisor's direct invocation, and we don't want a second tab.
     if (!options.open) childArgs.push('--no-open')
+    // CLI 路径无 instance name(只有 web UI 创建的多实例才有 name),fallback
+    // 到 cwd basename,让 supervisor 把子进程命名为 `zai[<project>]:<port>`。
+    const cliLabel = basename(resolve(process.cwd())) || resolve(process.cwd())
+    const cliPort = Number(options.port ?? 9201)
     const { exitCode } = await runSupervisor({
       args: childArgs,
       env: { ...process.env, ZAI_PORT: options.port ?? '9201' },
-      port: Number(options.port ?? 9201),
+      port: cliPort,
+      label: cliLabel,
     });
     process.exit(exitCode);
   }
@@ -90,65 +108,73 @@ async function runDirectServer(options: StartOptions): Promise<void> {
   console.log(`[zai] start token: ${token}`);
   console.log(`[zai] cwd: ${cwd}`);
 
-  // Port allocation: try to bind, if EADDRINUSE, close and retry next port
+  // Port allocation. 显式 --port 被占用 → 报错退出(不静默递增,多实例静默
+  // 换端口是请求风暴根因之一);未指定时自动扫描空闲端口。
   const basePort = options.port ? Number(options.port) : 9201;
-  const maxAttempts = 100;
-  let port = basePort;
-  let server: http.Server;
-
-  for (let attempt = 0; attempt < maxAttempts; attempt++) {
-    port = basePort + attempt;
-    server = http.createServer(app);
-
-    try {
-      await new Promise<void>((resolve, reject) => {
-        server!.on('error', (err: NodeJS.ErrnoException) => {
-          if (err.code === 'EADDRINUSE') {
-            reject(err);
-          } else {
-            reject(err);
-          }
-        });
-        server!.listen(port, host, () => {
-          process.env.ZAI_PORT = String(port);
-          // 在受管模式下(子进程由 supervisor 派生),port 一旦绑定立即
-          // 回送 ready,supervisor 才能从 starting 推进到 running 并解
-          // 锁其内部重启路径。无受管进程下 sendReady 是 no-op。
-          sendReady(port);
-          // 受管子进程 (ZAI_INSTANCE_ID + ZAI_SUPERVISOR_PID 已设) 定时回送
-          // heartbeat,中央 supervisor 据此判断存活;普通启动时 config 为
-          // null,整个块是 no-op。
-          const hb = getInstanceHeartbeatConfig();
-          if (hb) {
-            createInstanceHeartbeat({
-              intervalMs: hb.intervalMs,
-              instanceId: hb.instanceId,
-              getPort: () => Number(process.env.ZAI_PORT ?? 0) || null,
-            }).start();
-          }
-          resolve();
-        });
-      });
-      // Successfully bound
-      break;
-    } catch (err: any) {
-      if (err.code === 'EADDRINUSE' && attempt < maxAttempts - 1) {
-        server.close();
-        if (attempt === 0) {
-          console.log(`[zai] port ${port} occupied, trying ${port + 1}...`);
-        }
-        continue;
-      }
-      console.error(`[zai] port ${port} already in use (max attempts exhausted)`);
+  let port: number;
+  try {
+    port = await resolveServerPort({
+      explicit: options.port ? Number(options.port) : undefined,
+      base: basePort,
+      host,
+    });
+  } catch (err: any) {
+    if (err?.code === 'EADDRINUSE') {
+      console.error(
+        `[zai] error: port ${basePort} is already in use. ` +
+          `Use --port to pick a free port.`,
+      );
       process.exit(1);
     }
+    console.error(`[zai] port allocation error: ${err?.message ?? err}`);
+    process.exit(1);
   }
+  const server = http.createServer(app);
+  // WebSocket 反向代理:`--lan` 时启用,转发 `/proxy/<port>/ws` 到
+  // 127.0.0.1:<port>。Express 默认不处理 upgrade,handler 在 server 层面
+  // 接管 socket。手写 HTTP/1.1 upgrade 请求(`http.request` 不能用于
+  // upgrade),然后双向 pipe。
+  server.on('upgrade', handleProxyUpgrade({
+    isEnabled: () => options.lan === true,
+  }));
+  // 把 server 句柄交给 runtimeLifecycle 统一管理关闭流程。
+  // 强制 closeAllConnections:production 受管模式下,supervisor 重启 child 时
+  // 旧 child 必须立即释放端口,否则 supervisor 会因 EADDRINUSE 失败。SIGINT
+  // 路径同样走 closeAndExit(force=true),端口释放后再 process.exit。
+  registerHttpServer(server, { forceCloseAllConnections: true });
+  await new Promise<void>((resolve, reject) => {
+    server.on('error', reject);
+    server.listen(port, host, () => {
+      process.env.ZAI_PORT = String(port);
+      // 在受管模式下(子进程由 supervisor 派生),port 一旦绑定立即
+      // 回送 ready,supervisor 才能从 starting 推进到 running 并解
+      // 锁其内部重启路径。无受管进程下 sendReady 是 no-op。
+      sendReady(port);
+      // 受管子进程 (ZAI_INSTANCE_ID + ZAI_SUPERVISOR_PID 已设) 定时回送
+      // heartbeat,中央 supervisor 据此判断存活;普通启动时 config 为
+      // null,整个块是 no-op。
+      const hb = getInstanceHeartbeatConfig();
+      if (hb) {
+        createInstanceHeartbeat({
+          intervalMs: hb.intervalMs,
+          instanceId: hb.instanceId,
+          getPort: () => Number(process.env.ZAI_PORT ?? 0) || null,
+        }).start();
+      }
+      resolve();
+    });
+  });
 
   if (options.lan) {
     const { detectLanIps } = await import('../server/utils/lanIps.js');
     const ips = detectLanIps();
     console.log(`[zai] Production server on http://localhost:${port}`);
     console.log(`[zai] LAN mode — listening on 0.0.0.0:${port}`);
+    // 反向代理暴露面提示(同 dev.ts:任何同 LAN 访客可访问任意本机端口)
+    console.log(
+      `[zai] WARNING: --lan enables reverse proxy at /proxy/<port>/* → 127.0.0.1:<port>.` +
+        `\n[zai]          Anyone on your LAN can reach any local port you have running.`,
+    );
     for (const ip of ips) {
       console.log(`[zai]   → http://${ip}:${port}`);
     }
@@ -156,18 +182,12 @@ async function runDirectServer(options: StartOptions): Promise<void> {
     console.log(`[zai] Production server on http://localhost:${port}`);
   }
   if (options.open) {
-    spawn('open', [`http://localhost:${port}`], { stdio: 'ignore' });
+    openBrowser(`http://localhost:${port}`);
   }
 
-  const cleanup = () => {
-    void shutdownInstanceSupervisor().finally(() => {
-      void shutdownBackgroundRuntime().finally(() => {
-        server.close();
-        stopBranchChecker();
-        process.exit(0);
-      });
-    });
-  };
-  process.on('SIGINT', cleanup);
-  process.on('SIGTERM', cleanup);
+  // SIGINT/SIGTERM cleanup:统一走 cleanupAndExit,与 restart/stop route 共用
+  // 同一套 runtimeLifecycle,关闭顺序(关 server → 停 runtimes → 停 branch
+  // checker → process.exit)集中维护,不会三处分叉。
+  process.on('SIGINT', () => { void cleanupAndExit(0) });
+  process.on('SIGTERM', () => { void cleanupAndExit(0) });
 }

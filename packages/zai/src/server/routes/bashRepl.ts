@@ -33,14 +33,32 @@ router.post('/bash/repl/:sessionId/exec', async (req, res) => {
   }
   const { command, cwd } = parsed.data
   const sessionId = req.params.sessionId
+  // wait 模式: ?wait=1 / ?wait=true。fire-and-forget(默认)立即返回 execId;
+  // wait 模式 await child 完成后返回 code/signal/durationMs,MobileQuickDrawer 用。
+  // 注意:SSE events 推送不受 wait 影响 — 走的是独立 event bus。
+  const wait = req.body?.wait === true || req.query?.wait === '1' || req.query?.wait === 'true'
   const reg = getReplRegistry()
   const session = reg.get(sessionId, cwd ?? defaultCwd(req), {
     historyService: resolveHistoryService(req),
   })
 
   try {
-    const { execId, startedAt } = await session.exec(command, sessionId, cwd ? { cwd } : {})
-    return res.json({ ok: true, execId, startedAt })
+    const { execId, startedAt, completion } = await session.exec(command, sessionId, cwd ? { cwd } : {})
+    if (!wait) {
+      return res.json({ ok: true, execId, startedAt })
+    }
+    // wait 模式:等 child 真实终态,补充 code/signal/finishedAt/durationMs 字段。
+    // client 在这里长连接,直到 child 跑完(可能很慢,如 sleep 60)。
+    const { code, signal, finishedAt, durationMs } = await completion
+    return res.json({
+      ok: true,
+      execId,
+      startedAt,
+      finishedAt,
+      code,
+      signal,
+      durationMs,
+    })
   } catch (err: any) {
     if (err?.name === 'ReplBusyError') {
       return res.status(409).json({ ok: false, busy: true, currentExecId: err.currentExecId })

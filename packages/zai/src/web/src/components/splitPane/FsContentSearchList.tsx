@@ -12,6 +12,8 @@ export interface FsContentSearchListProps {
   truncated: boolean;
   query: string;
   onSelect: (path: string, line: number) => void;
+  /** 行右键回调(插入对话/复制/显示等)。path 为相对 cwd 的路径。 */
+  onItemContextMenu?: (path: string, x: number, y: number, kind?: 'file' | 'dir') => void;
 }
 
 const TRUNCATED_TAIL = '(结果已截断,继续输入以收窄范围)';
@@ -74,7 +76,7 @@ const previewStyle: React.CSSProperties = {
 };
 
 export function FsContentSearchList(props: FsContentSearchListProps): JSX.Element {
-  const { entries, loading, error, truncated, query, onSelect } = props;
+  const { entries, loading, error, truncated, query, onSelect, onItemContextMenu } = props;
 
   if (!query.trim()) {
     return <div data-testid="fs-content-empty-query" />;
@@ -129,6 +131,11 @@ export function FsContentSearchList(props: FsContentSearchListProps): JSX.Elemen
             role="button"
             tabIndex={0}
             onClick={() => onSelect(e.path, first.line)}
+            onContextMenu={(ev) => {
+              ev.preventDefault();
+              // 内容搜索只回文件,按 file 处理
+              onItemContextMenu?.(e.path, ev.clientX, ev.clientY, 'file');
+            }}
             onKeyDown={(ev) => {
               if (ev.key === 'Enter' || ev.key === ' ') {
                 ev.preventDefault();

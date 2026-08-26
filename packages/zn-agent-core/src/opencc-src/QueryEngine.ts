@@ -129,6 +129,12 @@ export type QueryEngineConfig = {
   readFileCache: FileStateCache
   customSystemPrompt?: string
   appendSystemPrompt?: string
+  /**
+   * zai patch (2026-08-20): 主 Agent systemPrompt 插槽。以最终默认
+   * prompt 数组(customSystemPrompt ?? defaultSystemPrompt)为 origin,
+   * 返回值作为组装后的首个 prompt 块。engine 创建时固定 → 新会话生效。
+   */
+  systemPromptSlot?: (origin: string[]) => string[]
   userSpecifiedModel?: string
   fallbackModel?: string
   thinkingConfig?: ThinkingConfig
@@ -175,7 +181,7 @@ export type QueryEngineConfig = {
    * user's actual provider profile (Anthropic / OpenAI-compat / etc.)
    * instead of the vendor default `queryModelWithStreaming` (which reads
    * `ANTHROPIC_API_KEY` from env at the zai-server process level and has no
-   * awareness of `~/.claude.json` provider profiles). All other deps fall
+   * awareness of `~/.zai.json` provider profiles). All other deps fall
    * back to `productionDeps()` so the env-only path is unchanged.
    */
   deps?: import('./query/deps.js').QueryDeps
@@ -218,7 +224,28 @@ export class QueryEngine {
 
   async *submitMessage(
     prompt: string | ContentBlockParam[],
-    options?: { uuid?: string; isMeta?: boolean },
+    options?: {
+      uuid?: string
+      isMeta?: boolean
+      /**
+       * zai patch: per-call provider override. Mirrors
+       * `ToolUseContext.options.providerOverride` (Tool.ts:199). When set,
+       * vendor query.ts:1312 forwards it to `getAnthropicClient` →
+       * `createOpenAIShimClient` so third-party OpenAI-compatible
+       * gateways (e.g. Wizard AI hosting zhiniao-* models) receive
+       * /chat/completions POSTs instead of Anthropic /v1/messages.
+       */
+      providerOverride?: { model: string; baseURL: string; apiKey: string }
+      /**
+       * zai patch: id of the provider profile the user picked for this
+       * query. Threaded into processUserInputContext.options.providerId
+       * (mirroring `providerOverride` above) so query.ts:1312 forwards
+       * it through to `callModel` options → zai's modelCaller → the
+       * `findProfileForModel` matcher. Optional — absence means the
+       * matcher uses legacy first-match-by-name.
+       */
+      providerId?: string
+    },
   ): AsyncGenerator<SDKMessage, void, unknown> {
     const {
       cwd,
@@ -244,6 +271,17 @@ export class QueryEngine {
       setSDKStatus,
       orphanedPermission,
     } = this.config
+
+    // zai patch: extract the per-call providerOverride from submitMessage
+    // options so it can be threaded into processUserInputContext.options
+    // (consumed by query.ts:1312 → getAnthropicClient → openai-shim).
+    const callProviderOverride = options?.providerOverride
+    // zai patch: same plumbing for per-call providerId (zai-specific).
+    // Read from submitMessage options (set by createOpenccRuntime-impl.ts
+    // when input.providerId is set from transcript.meta.providerId) and
+    // forwarded below into processUserInputContext.options so query.ts
+    // can pass it to callModel options → modelCaller.
+    const callProviderId = options?.providerId
 
     // zai patch: refresh the model-visible tool list before this turn
     // starts. `config.tools` is a construction-time snapshot (built-ins
@@ -339,8 +377,17 @@ export class QueryEngine {
         ? await loadMemoryPrompt()
         : null
 
+    // zai patch (2026-08-20): 主 Agent systemPrompt 插槽。origin 为
+    // customPrompt ?? defaultSystemPrompt(与旧逻辑完全一致的默认值),
+    // 槽函数返回值替换默认作为首个 prompt 块。
+    const basePrompt =
+      customPrompt !== undefined ? [customPrompt] : defaultSystemPrompt
+    const slottedPrompt = this.config.systemPromptSlot
+      ? await this.config.systemPromptSlot(basePrompt)
+      : basePrompt
+
     const systemPrompt = asSystemPrompt([
-      ...(customPrompt !== undefined ? [customPrompt] : defaultSystemPrompt),
+      ...slottedPrompt,
       ...(memoryMechanicsPrompt ? [memoryMechanicsPrompt] : []),
       ...(appendSystemPrompt ? [appendSystemPrompt] : []),
     ])
@@ -384,6 +431,15 @@ export class QueryEngine {
         theme: resolveThemeSetting(getGlobalConfig().theme),
         maxBudgetUsd,
         refreshTools: this.config.refreshTools,
+        // zai patch: thread per-call provider override into the tool-use
+        // context so vendor query.ts:1312 forwards it to getAnthropicClient
+        // (which routes to createOpenAIShimClient when present).
+        ...(callProviderOverride ? { providerOverride: callProviderOverride } : {}),
+        // zai patch: thread per-call provider id (zai-specific) into the
+        // tool-use context so query.ts:1312 forwards it to callModel
+        // options → zai's modelCaller. Optional — when absent, matcher
+        // uses legacy first-match-by-name behavior.
+        ...(callProviderId ? { providerId: callProviderId } : {}),
       },
       getAppState,
       setAppState,
@@ -540,6 +596,15 @@ export class QueryEngine {
         agentDefinitions: { activeAgents: agents, allAgents: agents },
         maxBudgetUsd,
         refreshTools: this.config.refreshTools,
+        // zai patch: re-attach per-call provider override after the
+        // processUserInputContext rebuild triggered by slash-command
+        // processing (mirrors the first construction above).
+        ...(callProviderOverride ? { providerOverride: callProviderOverride } : {}),
+        // zai patch: thread per-call provider id (zai-specific) into the
+        // tool-use context so query.ts:1312 forwards it to callModel
+        // options → zai's modelCaller. Optional — when absent, matcher
+        // uses legacy first-match-by-name behavior.
+        ...(callProviderId ? { providerId: callProviderId } : {}),
       },
       getAppState,
       setAppState,

@@ -41,6 +41,7 @@ export default function ConversationInfoButton() {
       <>
         <Button
           icon={<InfoCircleOutlined />}
+          aria-label="查看对话信息"
           title="查看对话信息"
           style={toolbarIconButtonStyle}
           data-testid="conversation-info-trigger"
@@ -55,6 +56,7 @@ export default function ConversationInfoButton() {
           maskClosable
           destroyOnHidden
           title="会话信息"
+          aria-label="会话信息"
           data-testid="mobile-conversation-info-modal"
         >
           {cardBody}
@@ -73,6 +75,7 @@ export default function ConversationInfoButton() {
     >
       <Button
         icon={<InfoCircleOutlined />}
+        aria-label="查看对话信息"
         title="查看对话信息"
         style={toolbarIconButtonStyle}
         data-testid="conversation-info-trigger"

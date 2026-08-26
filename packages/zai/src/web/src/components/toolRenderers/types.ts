@@ -5,6 +5,17 @@ export type ToolRenderer = {
   preview(input: Record<string, unknown>): string
   displayName?(input: Record<string, unknown>): string
   renderInput?(input: Record<string, unknown>): ReactNode
+  /**
+   * renderOutput 接受 (output, isError) 两个参数 — 与原有 11 个 renderer
+   * (bash / read / edit / write / glob / grep / agent / mcp / generic) 签名
+   * 完全一致. 不引入新参数, 不破坏 opencc 路径.
+   *
+   * 需要 AgentMessage 上下文的 renderer (例如 harness tool-fs-search 的
+   * structuredGrepRenderer / structuredGlobRenderer 读 presentationMeta) 应
+   * 实现 `renderFull(msg)`, 该方法接收完整 AgentMessage, 优先级高于
+   * renderOutput. MessageBubble 检测到 renderFull 时直接挂载其结果,
+   * 完全不走 renderOutput 路径. 这样不修改旧 API 即可接入新工具.
+   */
   renderOutput?(output: unknown, isError: boolean): ReactNode
   /**
    * 整块接管渲染: 当 ToolCallBlock 检测到 renderFull 存在, 它会跳过默认
@@ -15,4 +26,11 @@ export type ToolRenderer = {
    * preview 使用, 所以哪怕 renderFull 模式下, 也建议实现 preview.
    */
   renderFull?(msg: AgentMessage): ReactNode
+  /**
+   * 自包含展示类工具标记：collapsed 视图下不被 ToolGroupCard 包外壳，
+   * 由 MessageListView 直接路由到 MessageBubble 渲染，与 expanded
+   * 视觉对齐。pending / error / invalid / denied 状态会忽略此标记,
+   * 仍走 ToolGroupCard 保留状态提示。
+   */
+  skipOuterGroup?: boolean
 }

@@ -5,7 +5,7 @@ import {
   SUPPORTED_SETTINGS,
 } from './supportedSettings.js'
 
-export const DESCRIPTION = 'Get or set OpenCC configuration settings.'
+export const DESCRIPTION = 'Get or set Z.Ai configuration settings.'
 
 /**
  * Generate the prompt documentation from the registry
@@ -46,9 +46,9 @@ export function generatePrompt(): string {
 
   const modelSection = generateModelSection()
 
-  return `Get or set OpenCC configuration settings.
+  return `Get or set Z.Ai configuration settings.
 
-  View or change OpenCC settings. Use when the user requests configuration changes, asks about current settings, or when adjusting a setting would benefit them.
+  View or change Z.Ai settings. Use when the user requests configuration changes, asks about current settings, or when adjusting a setting would benefit them.
 
 
 ## Usage
@@ -58,7 +58,7 @@ export function generatePrompt(): string {
 ## Configurable settings list
 The following settings are available for you to change:
 
-### Global Settings (stored in ~/.claude.json)
+### Global Settings (stored in ~/.zai.json)
 ${globalSettings.join('\n')}
 
 ### Project Settings (stored in settings.json)

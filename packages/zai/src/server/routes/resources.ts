@@ -159,6 +159,13 @@ async function installResource(req: Request, res: Response) {
   }
   const { type, name } = parsed.data;
 
+  // "更新" flow passes force=1 → overwrite existing installed files with
+  // the latest cached resource. Normal install leaves existing files alone.
+  const force =
+    req.query.force === '1' ||
+    req.query.force === 'true' ||
+    req.body?.force === true;
+
   const stream = createSseStream(res);
   try {
     if (!USE_CACHE) {
@@ -190,6 +197,7 @@ async function installResource(req: Request, res: Response) {
       type,
       name,
       version: cached.version,
+      overwrite: force,
       emit: (ev) => stream.send(ev),
     });
   } catch (err) {

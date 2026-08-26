@@ -134,7 +134,7 @@ describe('SettingsDrawer — schema wires Display section', () => {
     })
     render(<SettingsDrawer />)
     // Display section header + 新加的 row 标签 / 数值都应出现
-    expect(screen.getByText('Display')).toBeInTheDocument()
+    expect(screen.getByText('显示')).toBeInTheDocument()
     expect(screen.getByText('消息最大显示条数')).toBeInTheDocument()
     expect(screen.getByText('30')).toBeInTheDocument()
   })

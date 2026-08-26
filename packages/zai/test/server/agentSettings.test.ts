@@ -46,4 +46,25 @@ describe('GET /api/agent/settings', () => {
     )
     expect(hasNova).toBe(true)
   })
+
+  // zai patch (2026-08-13): builtin providers ship with a stable id
+  // (builtin-openplatform / builtin-zhiniao). Each ModelEntry projected
+  // from a builtin must carry that id as providerId so ModelStatusButton
+  // can persist it on selection and the server-side matcher can route
+  // the model back to the exact provider the user picked.
+  it('builtin ModelEntry rows carry a stable providerId', async () => {
+    vi.mocked(readFileSync).mockReturnValue(JSON.stringify({ env: {} }))
+    const res = await request(app).get('/api/agent/settings')
+    const novaEntry = res.body.models.find(
+      (m: { baseUrl?: string }) => m.baseUrl === 'https://zn-nova.paic.com.cn/novai',
+    )
+    expect(novaEntry).toBeDefined()
+    expect(novaEntry.providerId).toBe('builtin-openplatform')
+    const zhiniaoEntry = res.body.models.find(
+      (m: { baseUrl?: string }) =>
+        m.baseUrl === 'https://wizard-ai.paic.com.cn/code_pilot/api/v1',
+    )
+    expect(zhiniaoEntry).toBeDefined()
+    expect(zhiniaoEntry.providerId).toBe('builtin-zhiniao')
+  })
 })

@@ -6,7 +6,7 @@
  * - Which plugins are installed globally
  * - Installation metadata (version, timestamps, paths)
  *
- * The enabled/disabled state remains in .claude/settings.json for per-repo control.
+ * The enabled/disabled state remains in .zai/settings.json for per-repo control.
  *
  * Rationale: Installation is global (a plugin is either on disk or not), while
  * enabled/disabled state is per-repository (different projects may want different
@@ -48,6 +48,7 @@ import {
   getSettings_DEPRECATED,
   getSettingsForSource,
 } from '../settings/settings.js'
+import { getUserConfigJson } from '../userConfigJson.js'
 import { getPluginById } from './marketplaceManager.js'
 import {
   parsePluginIdentifier,
@@ -184,8 +185,8 @@ export function migrateToSinglePluginFile(): void {
 /**
  * Clean up legacy non-versioned cache directories.
  *
- * Legacy cache structure: ~/.claude/plugins/cache/{plugin-name}/
- * Versioned cache structure: ~/.claude/plugins/cache/{marketplace}/{plugin}/{version}/
+ * Legacy cache structure: ~/.zai/plugins/cache/{plugin-name}/
+ * Versioned cache structure: ~/.zai/plugins/cache/{marketplace}/{plugin}/{version}/
  *
  * This function removes legacy directories that are not referenced by any installation.
  */
@@ -285,7 +286,7 @@ function migrateV1ToV2(v1Data: InstalledPluginsFileV1): InstalledPluginsFileV2 {
   const v2Plugins: InstalledPluginsMapV2 = {}
 
   for (const [pluginId, plugin] of Object.entries(v1Data.plugins)) {
-    // V2 format uses versioned cache path: ~/.claude/plugins/cache/{marketplace}/{plugin}/{version}
+    // V2 format uses versioned cache path: ~/.zai/plugins/cache/{marketplace}/{plugin}/{version}
     // Compute it from pluginId and version instead of using the V1 installPath
     const versionedCachePath = getVersionedCachePath(pluginId, plugin.version)
 
@@ -1048,7 +1049,12 @@ function getPluginVersionFromManifest(
 export async function migrateFromEnabledPlugins(): Promise<void> {
   // Use merged settings for shouldSkipSync check
   const settings = getSettings_DEPRECATED()
-  const enabledPlugins = settings.enabledPlugins || {}
+  // The user-scope plugin state now lives in the unified user config JSON
+  // (~/.zai.json, fallback ~/.zai.json). Merge it into the deprecation
+  // snapshot so this quick-exit / skip-migration check sees the same set
+  // of plugins the UI toggles.
+  const userEnabled = getUserConfigJson().enabledPlugins ?? {}
+  const enabledPlugins = { ...userEnabled, ...(settings.enabledPlugins || {}) }
 
   // No plugins in settings = nothing to sync
   if (Object.keys(enabledPlugins).length === 0) {
@@ -1111,8 +1117,13 @@ export async function migrateFromEnabledPlugins(): Promise<void> {
   ]
 
   for (const source of settingSources) {
-    const sourceSettings = getSettingsForSource(source)
-    const sourceEnabledPlugins = sourceSettings?.enabledPlugins || {}
+    // user-scope plugin state lives in the unified user config JSON
+    // (~/.zai.json, fallback ~/.zai.json), not the vendor settings
+    // cascade. project/local still flow through getSettingsForSource.
+    const sourceEnabledPlugins =
+      source === 'userSettings'
+        ? (getUserConfigJson().enabledPlugins ?? {})
+        : (getSettingsForSource(source)?.enabledPlugins ?? {})
 
     for (const pluginId of Object.keys(sourceEnabledPlugins)) {
       // Skip non-standard plugin IDs

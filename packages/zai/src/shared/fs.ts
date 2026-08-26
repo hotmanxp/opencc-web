@@ -50,10 +50,12 @@ export interface FsFile {
 export interface FsSearchEntry {
   /** Path relative to cwd, joined with forward slashes (POSIX style). */
   path: string;
-  /** Basename of the file — used for UI rendering and <mark> highlight alignment. */
+  /** Basename of the entry — used for UI rendering and <mark> highlight alignment. */
   name: string;
-  /** Search only ever returns files (not directories). */
-  type: 'file';
+  /** Entry kind. `file` is the historical default; `dir` is added for
+   *  the @-mention popup so users can pick a directory and continue
+   *  typing the next path segment (e.g. `@src/` then `utils/`). */
+  type: 'file' | 'dir';
   /** Fuzzy match score (>= 0). Higher = better. Useful for debugging + tests. */
   score: number;
 }
@@ -107,4 +109,52 @@ export interface FsContentSearchResult {
   truncated?: boolean;
   /** server 端耗时 ms。 */
   durationMs?: number;
+}
+
+/**
+ * Result of POST /api/fs/upload — drops a dragged file as a copy under
+ * `<cwd>/.zai/uploads/` and returns its absolute path (the "文件地址"
+ * that gets inserted into the chat input). The browser cannot expose the
+ * original system path of a dragged file, so the copy's path is the
+ * anchor the agent can Read from.
+ */
+export interface FsUploadResult {
+  ok: boolean;
+  error?: string;
+  /** Absolute path of the stored copy. */
+  absPath?: string;
+  /** Path relative to cwd (POSIX separators). */
+  relPath?: string;
+  /** Final on-disk basename (deduplicated: "a.txt" → "a-1.txt"). */
+  name?: string;
+  /** Stored size in bytes. */
+  size?: number;
+}
+
+import type { FilePreviewKind } from './fileKind.js'
+export type { FilePreviewKind } from './fileKind.js'
+
+/**
+ * /fs/preview 路由成功响应:按 kind 决定 content 字段语义。
+ * - 'text' / 'html' → `content` 为 utf8 原文
+ * - 'image' → `content` 为 base64(配合 mime 拼 data URL)
+ * - 'binary' → 仅返回元数据 + ext
+ */
+export interface FilePreviewPayload {
+  kind: FilePreviewKind
+  mime?: string
+  content?: string
+  size: number
+  mtime: number
+  ext?: string
+}
+
+/**
+ * /fs/preview 路由失败响应:HTTP status 携带语义,body 仅供前端展示。
+ * `code` 与工具层 `display_files` 的 error.code 对齐,便于 UI 复用同一套 Tag 文案。
+ */
+export interface FilePreviewError {
+  code: 'ENOENT' | 'EACCES' | 'EISDIR' | 'ETOOBIG' | 'EBADREQ' | 'EIO'
+  message: string
+  meta?: { size?: number }
 }

@@ -651,3 +651,267 @@ describe('useAgentStore.loadSessions', () => {
     expect(useAgentStore.getState().availableModels).toEqual([])
   })
 })
+
+describe('useAgentStore — 消息排队 (queuedPrompts + status 状态机)', () => {
+  const doneEvent = { eventId: 'd', ts: 1, sessionId: 's1', turnIndex: 0, type: 'runtime.done' } as any
+  const abortedEvent = {
+    eventId: 'ab', ts: 1, sessionId: 's1', turnIndex: 0,
+    type: 'runtime.aborted', reason: 'user_abort',
+  } as any
+
+  beforeEach(() => {
+    useAgentStore.setState({
+      sessionId: 's1',
+      status: 'idle',
+      queuedPrompts: [],
+      messages: [],
+      apiRequestCountBySession: {},
+      contextTokensBySession: {},
+    })
+  })
+
+  it('applyQueueChanged 快照覆盖 queuedPrompts (非 append)', () => {
+    useAgentStore.getState().applyQueueChanged({
+      pending: [
+        { id: 'q1', text: 'a' },
+        { id: 'q2', text: 'b' },
+      ],
+    })
+    expect(useAgentStore.getState().queuedPrompts).toEqual([
+      { id: 'q1', text: 'a' },
+      { id: 'q2', text: 'b' },
+    ])
+    useAgentStore.getState().applyQueueChanged({ pending: [{ id: 'q3', text: 'c' }] })
+    expect(useAgentStore.getState().queuedPrompts).toEqual([{ id: 'q3', text: 'c' }])
+  })
+
+  it('runtime.done 且队列非空 → 保持 streaming (等下一条排队任务)', () => {
+    useAgentStore.setState({
+      status: 'streaming',
+      queuedPrompts: [{ id: 'q1', text: 'a' }],
+    })
+    useAgentStore.getState().applyRuntimeEvent(doneEvent)
+    expect(useAgentStore.getState().status).toBe('streaming')
+  })
+
+  it('runtime.done 且队列空 → 回 idle', () => {
+    useAgentStore.setState({ status: 'streaming', queuedPrompts: [] })
+    useAgentStore.getState().applyRuntimeEvent(doneEvent)
+    expect(useAgentStore.getState().status).toBe('idle')
+  })
+
+  it('runtime.aborted 且队列非空 → 置回 streaming (下一条马上开始)', () => {
+    useAgentStore.setState({
+      status: 'streaming',
+      queuedPrompts: [{ id: 'q1', text: 'a' }],
+    })
+    useAgentStore.getState().applyRuntimeEvent(abortedEvent)
+    expect(useAgentStore.getState().status).toBe('streaming')
+  })
+
+  it('runtime.aborted 且队列空 → aborted', () => {
+    useAgentStore.setState({ status: 'streaming', queuedPrompts: [] })
+    useAgentStore.getState().applyRuntimeEvent(abortedEvent)
+    expect(useAgentStore.getState().status).toBe('aborted')
+  })
+
+  // zai patch (2026-08-09): runtime.done 即便 queuedPrompts 非空,
+  // 也必须把 apiRequestCount / contextTokens 推到 store。旧实现把
+  // 整个 case 早退,连发 A/B/C 三条 prompt 时 A/B 的 metrics 永远推不
+  // 到面板,直到 C 跑完才一次性更新。修复后 metric 拆出守卫,status
+  // 才受排队影响。
+  it('runtime.done 且队列非空 → 仍写入 apiRequestCount 与 contextTokens', () => {
+    useAgentStore.setState({
+      status: 'streaming',
+      queuedPrompts: [{ id: 'q1', text: 'a' }],
+    })
+    useAgentStore.getState().applyRuntimeEvent({
+      ...doneEvent,
+      apiRequestCount: 5,
+      contextTokens: 4321,
+    } as any)
+    // status 守卫保留:排队中 → 仍 streaming
+    expect(useAgentStore.getState().status).toBe('streaming')
+    // metric 不受守卫影响 → 立即累加
+    expect(useAgentStore.getState().apiRequestCountBySession['s1']).toBe(5)
+    expect(useAgentStore.getState().contextTokensBySession['s1']).toBe(4321)
+  })
+
+  it('runtime.done 且队列空 → 写入 metrics 并回到 idle', () => {
+    useAgentStore.setState({ status: 'streaming', queuedPrompts: [] })
+    useAgentStore.getState().applyRuntimeEvent({
+      ...doneEvent,
+      apiRequestCount: 3,
+      contextTokens: 2000,
+    } as any)
+    expect(useAgentStore.getState().status).toBe('idle')
+    expect(useAgentStore.getState().apiRequestCountBySession['s1']).toBe(3)
+    expect(useAgentStore.getState().contextTokensBySession['s1']).toBe(2000)
+  })
+
+  // zai patch (2026-08-09): runtime.started 也带 metrics,逐 turn 刷新
+  // (中间轮次的 message_stop 被 sdkEventAdapter 抑制,导致 runtime.done
+  // 只在整条 prompt 终结时推一次 — runtime.started 不被抑制,挂在它上面
+  // 就能逐 turn 推,面板在工具循环中段也能看到 +1)。
+  it('runtime.started 携带 metrics → 写入 store', () => {
+    useAgentStore.setState({ status: 'idle' })
+    useAgentStore.getState().applyRuntimeEvent({
+      eventId: 's',
+      ts: 1,
+      sessionId: 's1',
+      turnIndex: 0,
+      type: 'runtime.started',
+      apiRequestCount: 7,
+      contextTokens: 9999,
+    } as any)
+    // status 该走 streaming 还是 idle 由原 status 决定,这里只验 metrics
+    expect(useAgentStore.getState().apiRequestCountBySession['s1']).toBe(7)
+    expect(useAgentStore.getState().contextTokensBySession['s1']).toBe(9999)
+  })
+
+  // Math.max 防御:runtime.started 推 5,runtime.done 推 7(后续 LLM
+  // 调用再 +1 = 7),最终值取 max(5, 7) = 7 而非覆写回 5。
+  it('runtime.started 与 runtime.done 的 metrics 取 Math.max (SSE replay 防御)', () => {
+    useAgentStore.setState({ status: 'streaming' })
+    useAgentStore.getState().applyRuntimeEvent({
+      eventId: 's1', ts: 1, sessionId: 's1', turnIndex: 0,
+      type: 'runtime.started',
+      apiRequestCount: 5,
+    } as any)
+    expect(useAgentStore.getState().apiRequestCountBySession['s1']).toBe(5)
+    useAgentStore.setState({ status: 'streaming', queuedPrompts: [] })
+    useAgentStore.getState().applyRuntimeEvent({
+      ...doneEvent,
+      apiRequestCount: 3,
+    } as any)
+    // 旧值 5 > 新值 3 (snapshot replay 假设),保留 max
+    expect(useAgentStore.getState().apiRequestCountBySession['s1']).toBe(5)
+  })
+})
+
+// zai patch (2026-08-13): patchSessionModel now accepts
+// `{ model, providerId }` so the picker can persist the user's exact
+// provider choice. Backward compatibility: bare-string callers still
+// work and the body stays `{ model }` only (no providerId key).
+describe('useAgentStore.patchSessionModel — {model, providerId} payload', () => {
+  let originalFetch: typeof globalThis.fetch
+  let originalLocalStorage: Storage
+  beforeEach(() => {
+    originalFetch = globalThis.fetch
+    originalLocalStorage = globalThis.localStorage
+    const store: Record<string, string> = {}
+    globalThis.localStorage = {
+      getItem: (k: string) => store[k] ?? null,
+      setItem: (k: string, v: string) => { store[k] = v },
+      removeItem: (k: string) => { delete store[k] },
+      clear: () => { for (const k of Object.keys(store)) delete store[k] },
+      key: (i: number) => Object.keys(store)[i] ?? null,
+      get length() { return Object.keys(store).length },
+    } as Storage
+    useAgentStore.setState({ sessions: [], availableModels: [] })
+  })
+  afterEach(() => {
+    globalThis.fetch = originalFetch
+    globalThis.localStorage = originalLocalStorage
+  })
+
+  it('writes providerId alongside model in both local store and PATCH body', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    })
+    globalThis.fetch = fetchMock as any
+
+    useAgentStore.setState({
+      sessions: [{
+        sessionId: 'sess-1',
+        title: 'old',
+        updatedAt: 1,
+        cwd: '/x',
+      }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', {
+      model: 'MiniMax-M3',
+      providerId: 'provider_a',
+    })
+
+    const updated = useAgentStore.getState().sessions[0]
+    expect(updated!.model).toBe('MiniMax-M3')
+    expect(updated!.providerId).toBe('provider_a')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({
+      model: 'MiniMax-M3',
+      providerId: 'provider_a',
+    })
+  })
+
+  it('legacy bare-string callers keep sending only { model }', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    })
+    globalThis.fetch = fetchMock as any
+
+    useAgentStore.setState({
+      sessions: [{ sessionId: 'sess-1', title: 'old', updatedAt: 1 }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', 'MiniMax-M3')
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    const body = JSON.parse(init.body as string)
+    // providerId is omitted entirely — not set to undefined / null /
+    // empty — so the server-side PATCH handler treats the absence as
+    // "leave the persisted providerId alone" rather than "wipe it".
+    expect(body).toEqual({ model: 'MiniMax-M3' })
+    expect('providerId' in body).toBe(false)
+  })
+
+  it('object payload without providerId also sends only { model }', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      json: async () => ({}),
+    })
+    globalThis.fetch = fetchMock as any
+    useAgentStore.setState({
+      sessions: [{ sessionId: 'sess-1', title: 'old', updatedAt: 1 }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', {
+      model: 'MiniMax-M3',
+    })
+
+    const [, init] = fetchMock.mock.calls[0] as [string, RequestInit]
+    expect(JSON.parse(init.body as string)).toEqual({ model: 'MiniMax-M3' })
+  })
+
+  it('reverts providerId on PATCH failure', async () => {
+    const fetchMock = vi.fn().mockResolvedValue({
+      ok: false,
+      status: 500,
+      json: async () => ({ error: 'boom' }),
+    })
+    globalThis.fetch = fetchMock as any
+    useAgentStore.setState({
+      sessions: [{
+        sessionId: 'sess-1',
+        title: 'old',
+        updatedAt: 1,
+        providerId: 'provider_b',
+      }],
+    })
+
+    await useAgentStore.getState().patchSessionModel('sess-1', {
+      model: 'MiniMax-M3',
+      providerId: 'provider_a',
+    })
+
+    const after = useAgentStore.getState().sessions[0]
+    expect(after!.providerId).toBe('provider_b')
+  })
+})

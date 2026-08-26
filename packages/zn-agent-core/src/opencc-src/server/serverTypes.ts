@@ -17,11 +17,13 @@
  * Self-contained: the public surface is intentionally minimal and does
  * NOT re-export from `compat/runtime/events.js` or
  * `compat/transcript/types.js`. Those compat modules are zai-internal
- * implementation details and are not part of the published
- * `@zn-ai/zn-agent-core/opencc-server` subpath. The downstream-generated
- * `dist/opencc-src/server/serverTypes.d.ts` therefore has zero cross-module
- * type imports — a TypeScript consumer can resolve the package subpath
- * without chasing references into the compat tree.
+ * implementation details and are not part of the published type surface.
+ * The package main entry (`dist/bundle-entry.d.ts`) re-exports
+ * `dist/opencc-src/server/index.d.ts` (this file), so the downstream
+ * `dist/opencc-src/server/serverTypes.d.ts` must keep zero cross-module
+ * type imports — a TypeScript consumer resolves the main entry without
+ * chasing references into the compat tree (guarded by
+ * scripts/verify-server-types-self-contained.mjs).
  *
  * Compatibility note: the shapes below are the canonical public contracts.
  * The in-process compat `RuntimeEvent` / `TranscriptMeta` / `TranscriptFile`
@@ -110,6 +112,15 @@ export type OpenccTranscriptMeta = {
   subagentType?: string
   /** Permission mode the session was opened with. */
   permissionMode?: OpenccPermissionMode
+  /**
+   * zai patch: id of the provider profile the user picked when this
+   * session selected its model. Lets the server-side matcher route
+   * the model to the exact provider the user chose even when several
+   * provider profiles share the same model name. Optional — sessions
+   * persisted before this field existed keep working (the matcher
+   * falls back to the first matching profile by name, legacy behavior).
+   */
+  providerId?: string
 }
 
 /**
@@ -193,6 +204,33 @@ export type OpenccQueryInput = {
   model?: string
   /** Optional abort signal — `query` must subscribe and stop on abort. */
   abortSignal?: AbortSignal
+  /**
+   * zai patch: mark this query's prompt as a system-injected meta message
+   * (visible to the LLM, hidden from the transcript UI). Used for the
+   * placeholder query fired when a background task completes.
+   */
+  isMeta?: boolean
+  /**
+   * zai patch: optional per-query permission mode override. When absent the
+   * runtime keeps whatever mode the headless context was created with.
+   */
+  permissionMode?:
+    | 'default'
+    | 'acceptEdits'
+    | 'bypassPermissions'
+    | 'dontAsk'
+    | 'plan'
+  /**
+   * zai patch: per-query provider override — routes through an
+   * OpenAI-compatible shim client instead of the default Anthropic SDK path.
+   */
+  providerOverride?: { model: string; baseURL: string; apiKey: string }
+  /**
+   * zai patch: id of the provider profile the user picked for this query.
+   * Lets the server-side matcher route the model to the exact provider the
+   * user chose when several profiles share the same model name.
+   */
+  providerId?: string
 }
 
 /**

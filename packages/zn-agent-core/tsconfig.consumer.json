@@ -1,5 +1,5 @@
 {
-  "//": "Package-consumer typecheck for the `@zn-ai/zn-agent-core/opencc-server` subpath. Maps the package subpath to the BUILT `dist/` (not the source `src/`) so this typecheck proves the published d.ts resolves from a consumer's perspective. The `paths` mapping is the load-bearing part: it forces the consumer to resolve to the BUILT `dist/` (the consumer is the simulated downstream-package user; without it, tsc would happily load the source `src/opencc-src/server/serverTypes.ts` and the test would pass on the wrong artifact). Invoked by the `typecheck:consumer` npm script. NOTE: this tsc-based check does NOT catch unresolvable cross-module `import type` references in the published d.ts — TS's bundler resolution silently drops those. The companion script `scripts/verify-server-types-self-contained.mjs` (run as the next step of `typecheck:consumer`) does that check by scanning the d.ts for cross-module imports. Both must pass for the consumer typecheck to be GREEN.",
+  "//": "Package-consumer typecheck for the `@zn-ai/zn-agent-core` main entry. Maps the package entry to the BUILT `dist/` (not the source `src/`) so this typecheck proves the published d.ts resolves from a consumer's perspective. The `paths` mapping is the load-bearing part: it forces the consumer to resolve to the BUILT `dist/bundle-entry.d.ts` (the consumer is the simulated downstream-package user; without it, tsc would happily load the source `src/opencc-src/server/serverTypes.ts` and the test would pass on the wrong artifact). Invoked by the `typecheck:consumer` npm script. NOTE: this tsc-based check does NOT catch unresolvable cross-module `import type` references in the published d.ts — TS's bundler resolution silently drops those. The companion script `scripts/verify-server-types-self-contained.mjs` (run as the next step of `typecheck:consumer`) does that check by scanning the d.ts for cross-module imports. Both must pass for the consumer typecheck to be GREEN.",
 
   "compilerOptions": {
     "target": "ES2023",
@@ -14,7 +14,7 @@
 
     "baseUrl": ".",
     "paths": {
-      "@zn-ai/zn-agent-core/opencc-server": ["./dist/opencc-src/server/index.d.ts"]
+      "@zn-ai/zn-agent-core": ["./dist/bundle-entry.d.ts"]
     }
   },
 

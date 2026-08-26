@@ -3,31 +3,42 @@ import { basename, join } from 'node:path';
 import { copyFileSync, existsSync, mkdirSync, statSync } from 'node:fs';
 import { DirectoryMerger } from './merger.js';
 import { listCollectionResourcePaths, resolveResourcePath } from './extractor.js';
+import { ZAI_DIR } from './paths.js';
 import type { ResourceType, SseEvent } from '../../shared/types.js';
 
 const merger = new DirectoryMerger();
 
 export interface PlatformTarget {
   /** Platform key for logging */
-  platform: 'nova' | 'opencode' | 'opencc';
+  platform: 'nova' | 'opencode' | 'opencc' | 'zai';
   /** Absolute directory to receive the resource */
   target: string;
 }
 
 const NOVA_DIR = join(homedir(), '.nova');
 const OPENCODE_DIR = join(homedir(), '.config', 'opencode');
+// OPENCC_DIR is the upstream Claude Code home (legacy ~/.claude/). Distinct
+// from ZAI_DIR (zai's own ~/.zai/): each platform writes to its own tree so
+// resources installed for OPENCC stay under OPENCC_DIR instead of polluting
+// zai's user-dir.
 const OPENCC_DIR = join(homedir(), '.claude');
 const GLOBAL_SKILLS_DIR = join(homedir(), '.agents', 'skills');
 
 /**
  * Compute the platform target dirs that should receive a resource of
  * `type`. Mirrors publisher's PlatformAdapter matrix:
- *   - Nova: ~/.nova/{agents,commands,skills,extensions}
+ *   - Nova:    ~/.nova/{agents,commands,skills,extensions}
  *   - OpenCode: ~/.config/opencode/{agents,commands} + ~/.agents/skills
- *   - OpenCC: ~/.claude/{agents,commands} + ~/.agents/skills
+ *   - OpenCC:  ~/.claude/{agents,commands} + ~/.agents/skills
+ *   - Zai:     ~/.zai/{agents,commands} + ~/.agents/skills
  * Notably, Nova skills live in ~/.nova/skills/ (Nova-private), while
- * OpenCode/OpenCC skills share ~/.agents/skills/. So a skill installed
- * on a Nova+OpenCode box lands in BOTH locations.
+ * OpenCode / OpenCC / Zai all share ~/.agents/skills/. So a skill
+ * installed on a box with multiple of those platforms lands in BOTH
+ * Nova's private tree and the shared ~/.agents/skills.
+ *
+ * OPENCC and Zai split on purpose: OpenCC reads ~/.claude/ for its
+ * own resources, Zai reads ~/.zai/, so each platform's agents/commands
+ * stay under its own root instead of crossing over.
  *
  * Exported so the list/install route (resources.ts) can reuse the same
  * resolution. Keeping both call sites in sync prevents "installed but
@@ -48,7 +59,7 @@ export function targetDirsForType(type: ResourceType): PlatformTarget[] {
     if (existsSync(NOVA_DIR)) {
       targets.push({ platform: 'nova', target: join(NOVA_DIR, 'skills') });
     }
-    if (existsSync(OPENCODE_DIR) || existsSync(OPENCC_DIR)) {
+    if (existsSync(OPENCODE_DIR) || existsSync(OPENCC_DIR) || existsSync(ZAI_DIR)) {
       targets.push({ platform: 'opencode', target: GLOBAL_SKILLS_DIR });
     }
     if (targets.length === 0) {
@@ -66,6 +77,9 @@ export function targetDirsForType(type: ResourceType): PlatformTarget[] {
   if (existsSync(OPENCC_DIR)) {
     targets.push({ platform: 'opencc', target: join(OPENCC_DIR, type) });
   }
+  if (existsSync(ZAI_DIR)) {
+    targets.push({ platform: 'zai', target: join(ZAI_DIR, type) });
+  }
 
   return targets;
 }
@@ -76,9 +90,10 @@ export function targetDirsForType(type: ResourceType): PlatformTarget[] {
  * `agents/<platform>/<name>.md`, and command collections are stored as
  * `commands/<platform>/<name>.{toml,md}` (one platform per collection
  * because the file format is platform-specific — Nova uses .toml, the
- * other two use .md). Installing a Nova-format command on an OpenCode
- * target would silently drop a binary blob in a directory that only
- * reads .md, so this filter keeps only the matching platform.
+ * others use .md). Installing a Nova-format command on an OpenCode /
+ * OpenCC / Zai target would silently drop a binary blob in a
+ * directory that only reads .md, so this filter keeps only the
+ * matching platform.
  */
 function filterTargetsForResource(
   type: ResourceType,
@@ -106,6 +121,13 @@ export interface InstallFromCacheOpts {
    * and only the final targetPaths is returned.
    */
   emit?: (ev: SseEvent) => void;
+  /**
+   * When true, overwrite existing destination files (DirectoryMerger
+   * merge with overwrite). Used by the "更新" flow to force-push the
+   * latest cached resource over whatever is already installed. Defaults
+   * to false → keep existing files, matching the original install.
+   */
+  overwrite?: boolean;
   /**
    * Internal: when set, skip resolveResourcePath and use this absolute
    * path as the source. The `name` is still used to derive the target
@@ -137,7 +159,7 @@ export interface InstallFromCacheResult {
 export function installFromCache(
   opts: InstallFromCacheOpts,
 ): InstallFromCacheResult {
-  const { type, name, version, emit, _sourceOverride } = opts;
+  const { type, name, version, emit, overwrite, _sourceOverride } = opts;
 
   // Collection expand: a slash-free name that points at a collection dir
   // (one that contains sub-resources, each in their own sub-dir) should
@@ -162,6 +184,7 @@ export function installFromCache(
           name: basename(cp),  // FLATTEN: collection prefix dropped
           version,
           emit,
+          overwrite,
           _sourceOverride: cp,  // bypass resolver — use real source path
         });
         allTargets.push(...inner.targetPaths);
@@ -203,16 +226,22 @@ export function installFromCache(
     const target = isFile
       ? join(t.target, fileName!)
       : join(t.target, flatName);
-    // DirectoryMerger 不会自己创建目标根目录（只递归创建子项）；
-    // 当 t.target 整体不存在时直接调 merge 会让首个文件 copy 失败。
-    // 这里按 publisher 的 installResource 先 mkdirSync(target)，再 merge。
-    mkdirSync(target, { recursive: true });
     if (isFile) {
+      // File install: only the parent directory needs to exist. We do NOT
+      // mkdirSync(target) here — when t.target exists, that call would
+      // create a sibling directory with the same name as the destination
+      // file, and copyFileSync then fails with EISDIR. Ensure only the
+      // parent is present.
+      mkdirSync(t.target, { recursive: true });
       emit?.({ type: 'stdout', line: `copying ${sourcePath} → ${target}` });
       copyFileSync(sourcePath, target);
     } else {
+      // DirectoryMerger 不会自己创建目标根目录（只递归创建子项）；
+      // 当 t.target 整体不存在时直接调 merge 会让首个文件 copy 失败。
+      // 这里按 publisher 的 installResource 先 mkdirSync(target)，再 merge。
+      mkdirSync(target, { recursive: true });
       emit?.({ type: 'stdout', line: `merging ${sourcePath} → ${target}` });
-      merger.merge(sourcePath, target);
+      merger.merge(sourcePath, target, { overwrite });
     }
     targetPaths.push(target);
     platforms.push(t.platform);

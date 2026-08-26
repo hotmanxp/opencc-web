@@ -13,8 +13,8 @@ export default defineBrand({
     supportsPreciseTokenCount: false,
   },
   modelIds: [
-    'zhiniao-minimax-m2.7-highspeed',
-    'zhiniao-minimax-m2.7',
+    'zhiniao-MiniMax-M2.7-highspeed',
+    'zhiniao-MiniMax-M2.7',
     'zhiniao-qwen3.6-plus',
     'zhiniao-glm-5.1',
   ],

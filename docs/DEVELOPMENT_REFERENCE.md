@@ -13,7 +13,7 @@
 - `packages/zn-agent-core/src/compat/runtime/contract.ts` — `DefaultAgentRuntime` 兼容垫片,`run(opts)` 委托 `openccAdapter.runOpenccQuery()`。其他 compat shim(`cwdStore` / `commands` / `transcript` / `background/DefaultBackgroundRuntime` / `mcp/MCPClientPool` / `plugins/HookRunner` / `runtime/skills-*` / `runtime/compactService`)均按 zai 端原 API 形态提供。
 - `packages/zn-agent-core/src/compat/runtime/openccAdapter.ts` — surface bridge(BUNDLE_URL → vendor bundle + `tool.prompt({agents})` 动态渲染 + attachment 翻译),经 `bun-protocol.mjs` loader 在 Node 下运行。`dev`(tsx)为默认入口,`dev:bun` 为可选 Bun 快速运行;`start:node` 为发布态 Node 入口。
 - `packages/zn-agent-core/src/opencc-src/` — opencc 0.20.0 源码副本,UI 已剔除,`query.ts` 主循环入口 + `queryLoop.ts` / `services/tools/` / `services/api/` / `services/mcp/` 等。un-stripped 全量(commit `80a769b1`),`import 'bun:bundle'` 与 `Bun.sleep` 直接吃 Bun runtime;runtime path 走 compat bridge,只有 unit test 直接 import vendor 才撞 Bun-only 约束。
-- `packages/zn-agent-core/scripts/bundle-opencc.mjs` — esbuild `bundle: false` 单文件编 `src/opencc-src/types/<name>.ts` → `dist/opencc-src/types/<name>.js`;`package.json` 子路径 `"./opencc-src/<name>"` 暴露。
+- `packages/zn-agent-core/scripts/bundle-opencc.ts` — 把 `src/bundle-entry.ts` 打成单一 `dist/opencc-core.mjs`(esbuild bundle,运行时主入口),并机械生成 `dist/bundle-entry.d.ts`(主入口 types,从 `bundle-entry.ts` 的 export 语句原样提取,与 bundle 同步);额外用 `bundle: false` 单文件编 `src/opencc-src/{types,services/api,services/compressToolHistory,utils/model,server}/{permissions,sessionApiCounter,compressToolHistory,genericModelCapabilities,index,createOpenccRuntime,createHeadlessContext,sessionFacade}.ts` → 对应 `dist/` 产物(供主入口 d.ts 引用,不在 exports 暴露)。
 - `packages/zai/src/server/index.ts` — `createApp({cwd, cwdName, token, port?})` 顺序 `initAgentRuntime → initSubagentNotifierLifecycle → initBackgroundRuntime`,挂 14 个 router 到 `/api/*`;`express.json({limit:'20mb'})`(图片粘贴);`/api` 整段禁缓存。
 
 ## 3. 数据流
@@ -70,6 +70,27 @@ queryLoop 每轮 turn 进入
   → useAgentStore.applyCompactionEvent → 5s 自动消失的 toast
 ```
 
+### 3.5 SSE 事件序列化与投影状态推送（dsh 借鉴）
+
+设计稿: `docs/superpowers/specs/2026-08-15-dsh-event-seq-projection-design.md`；实施计划 `docs/superpowers/plans/2026-08-15-dsh-event-seq-projection.md`。三个核心机制:
+
+**1. `ServerEvent.seq` 单调递增**
+- `shared/events.ts` Base 加 `seq: z.number()`（必填）。`ServerEventBus.emit` 分配: `seq: event.seq ?? ++seqCounter`，全局单调、**单进程内**语义——跨重启由 `eventId` + history replay 兜底，**不得把 seq 当持久化 ID**。
+- SSE `id:` 行自动携带 seq（`sse.ts` `writeSse` 的 `event.seq ?? event.eventId`），`Last-Event-ID` 续读不受影响（eventBus history 仍按 `eventId` 比对）。
+- 前端 `useAgentStore.lastSeqBySession[sid]` 记录每 session 已应用的最大 seq（只升不降）;`upsertStreamBlock` / `upsertToolCall` 入口做 seq 守卫: `seq <= prev` 的重放/乱序/同 seq 重复投递直接丢弃,严格递增才合并。手工 key 拼接（`sendSeq/textSegmentRev`）仍负责 React 渲染分组,防御代码渐进式清理。
+
+**2. 连接状态机**
+- `eventSource.ts` 导出 `StreamState = 'connecting' | 'connected' | 'reconnecting' | 'error'`,`subscribeServerEvents(sid, onEvent, onState?)` 第三参由旧 `onError` 改为 `onState`。`onopen` → connected(重置计数);`onerror` → `attempt++`,`attempt <= 3` 报 reconnecting,否则 error(第 4 次失败)。
+- `useEventStream` 把 onState 写入 `useAppStore.streamState / streamAttempt`;`server.connected` 事件到达仍置 connected + 触发 `hydrateSessionState`(冷启动快照补全)。
+- `useEventStream.dispatch` 重构为批量 `applyBatch(batch)`(导出): 按 seq 全局排序 → 逐事件路由 → reducer。`enqueue` 用 `queueMicrotask` 把同 tick 的 N 个 SSE 事件合并成一次 flush(P4: 避免逐事件 setState)。
+- 新增 `stream/error` 帧(闭合 `RpcErrorCode` union): 路由到 `setStreamState('error')` + toast(`applySystemEvent` 的 stream/error 分支)。
+
+**3. `session/projection` 投影帧**
+- host 算完的派生值快照按 `{sessionId, key, value, seq}` 整体推送,前端 `useAgentStore.projectionsBySession` 做 higher-seq-wins 合并(低 seq 丢弃),重连后 host 重算整体重发。
+- 订阅面: `useProjection(sessionId, key, selector?, equal?)` hook(`store/useProjection.ts`)。
+- 试点 key: `title`(`session.renamed` emit 时同步投影,`routes/agent.ts`)+ `context.tokens`(`runtime.done` emit 时同步投影)。消费:`useConversationInfo` 的"当前上下文大小"行 + `MobileHeader` 标题(投影优先,fallback 到 sessions 列表)。
+- **新增事件必须同步**: `shared/events.ts` union + `eventSource.ts` `NAMED_EVENT_TYPES` + `eventBus.ts` `isGlobalEvent`(stream/error 是全局帧;session/projection 走 per-sid history)。漏一处即前端静默丢事件。
+
 ## 4. 关键文件
 
 | 路径 | 职责 |
@@ -110,6 +131,7 @@ queryLoop 每轮 turn 进入
 - **prompt.ask**:`sessionId + toolUseId + questions[{question, header, options}]`
 - **system.\***:server.connected / server.error / toast / branch.changed
 - **state.\***:cwd.changed / bash_task.changed / v2_task.changed / agent_task.changed
+- **command.\***:`command.run` + `command.done` 配对(`/api/agent/command` 路由发,`commandId` 配对,debugging / 慢命令分析埋点,见 §13)
 
 ## 6. RuntimeEvent 翻译表(`routes/agent.ts` 内 `translateRuntimeEvents`)
 
@@ -237,3 +259,138 @@ zai 端实现的能力,把 opencc 上游 `bashProvider.ts` 的"shell trailer 跟
 - AGENTS.md 自动注入:每个 turn 调 `loadAgentsMd(options.cwd)` 拼到 system prompt 顶部;`enableAgentsMd:false` 关闭
 - **bun: protocol loader**: zai dev 脚本走 `tsx --import ./bun-protocol.mjs` (从 `@zn-ai/zn-agent-core` 包内),把 opencc 86 处 `from 'bun:bundle'` 拦截到本地 `bun-shim.ts`。Node 22+ tsx 4.23+ 必需;漏掉这个 flag 会 `ERR_UNSUPPORTED_ESM_URL_SCHEME`。
 - 前端鉴权:**默认不带** `X-Zai-Token` —— `lib/api.ts:1-35` 不读 localStorage,只有 `v2TaskApi / slash` 等少数手写 fetch 显式加;server 也不强制校验
+
+## 13. 命令路由生命周期埋点 (`command.run` / `command.done`)
+
+`/api/agent/command` 路由自 2026-08-16 起在入口 + 5 处出口 emit `command.run` / `command.done` 配对 SSE 事件,用于会话日志、调试、慢命令分析。设计借鉴 dsh `command/run` + `command/done` 模式。
+
+**事件 schema**(`packages/zai/src/shared/events.ts` `CommandEvent`):
+
+- `command.run`: `{ sessionId, commandId, name, args, argsTruncated?, trigger: 'user' | 'skill', ts }`
+  - `commandId`: `crypto.randomUUID()`,单进程全局唯一,与 `command.done` 配对
+  - `args`: > 1024 字节时截断,带 `argsTruncated: true`
+  - `ts`: 触发瞬间, 手动填 `Date.now()`(非 eventBus 自动填充,这样 `run.ts` 与 `done.ts` 都能精确算 `durationMs`)
+- `command.done`: `{ sessionId, commandId, name, result, durationMs, error?, ts }`
+  - `result`: `'cleared' | 'compacted' | 'status' | 'message' | 'prompt' | 'error' | 'unknown'`(与 `routes/command.ts` 的 `res.json` type 严格对齐,新增 kind 必须同步这里)
+  - `error`: 仅 `result='error'` 时填
+  - `durationMs`: `done.ts - run.ts`
+
+**5 处出口**(`routes/command.ts` ):
+
+| 路径 | result | 触发位置 |
+|------|--------|----------|
+| skill fallthrough | `prompt` | `if (rendered !== null)` 分支 |
+| unknown command | `unknown` | `if (!cmd)` 兜底 |
+| local cmd cleared | `cleared` | `result.kind === 'cleared'` |
+| local cmd compacted | `compacted` | `result.kind === 'compacted'` |
+| local cmd status | `status` | `result.kind === 'status'` |
+| local cmd message | `message` | `result.kind === 'message'` |
+| local cmd error | `error` | `result.kind === 'error'` |
+| PromptCommand success | `prompt` | `cmd.getPromptForCommand` 路径 |
+| PromptCommand 抛错 | `error` | `cmd.getPromptForCommand` 内部 try/catch |
+| outer catch | `error` | 路由最外层 try/catch(`initCommands` 抛错等) |
+
+**全局事件**:`command.{run,done}` 已在 `eventBus.isGlobalEvent` 登记为 `true`,跨 sid 广播(所有 tab 都能看见,调试面板 / 活动指示器不依赖具体 sid)。
+
+**前端路由**:`packages/zai/src/web/src/lib/eventSource.ts` `NAMED_EVENT_TYPES` 已同步加 `command.run` / `command.done`,`EventSource` 不会静默丢。当前前端**不主动** toast(留给后续 UI 优化),但 store 仍可读取用于调试面板。
+
+**测试**:`test/server/routes/command.lifecycle.test.ts` — 14 个 case 覆盖 5 处出口 + 异常路径 + args 截断 + commandId 配对 + durationMs 边界。
+
+## 14. 类型化 RPC Client Stub (`apiRpc`)
+
+`packages/zai/src/shared/rpc.ts` 的 `RpcMethodMap` 是 **REST path + request/response** 的单一真相源,前后端共享类型。`scripts/generate-rpc-client.ts` AST 扫描它,生成 `packages/zai/src/web/src/lib/api.generated.ts`(generated stub,`as const` + `_Map[key]` 索引访问,无 drift 风险)。
+
+**调用方式**(优先用):
+
+```ts
+import { apiRpc } from '@/lib/api.js'
+const r = await apiRpc.agent.command.post({ name: 'clear', args: '', sessionId: 's1' })
+if (r.type === 'cleared') { ... }   // discriminated union 自动收窄
+```
+
+**当前覆盖**(高频 5 个 route,渐进迁移第一步):
+
+| Generated stub | Route |
+|----------------|-------|
+| `apiRpc.health.get()` | `GET /api/health` |
+| `apiRpc.cli.get()` | `GET /api/cli` |
+| `apiRpc.agent.command.post(body)` | `POST /api/agent/command` |
+| `apiRpc.agent.prompt.post(body)` | `POST /api/agent/prompt` |
+| `apiRpc.agent.sessions.get()` | `GET /api/agent/sessions` |
+| `apiRpc.agent.sessions.post(body)` | `POST /api/agent/sessions` |
+
+**加新 route**:
+1. 在 `shared/rpc.ts` 的 `RpcMethodMap` 加一行 `${METHOD} /api/...`: `{ request: T, response: U }`
+2. 跑 `pnpm run codegen:rpc` 重新生成 `api.generated.ts`
+3. commit generated stub + RpcMethodMap 一起
+4. 调用方用 `apiRpc.<path>.post(...)` 立即拿到类型
+
+**兼容老 `api.get/post/put`**: `web/src/lib/api.ts` 仍导出 `api`(走 `apiBase.request` 同样的 fetch 实现),迁移期间共存;新代码优先 `apiRpc`。
+
+**底层 fetch**:`web/src/lib/apiBase.ts` 抽 `request(method, path, body?)` — 路径含 `/api` 前缀的(generated stub)直接用,否则加前缀(老 `api.get/post/put`),自动跳过重复前缀。
+
+**测试**:
+- `test/web/lib/apiRpc.test.ts` — 12 个 case 验证 `apiBase.request` + `apiRpc` 各 method 调用 + 老 `api` 兼容
+- `test/scripts/generate-rpc-client.test.ts` — 2 个 case 验证 codegen 产物与 committed 文件 byte-for-byte 一致(snapshot),防止 RpcMethodMap 改了但忘了跑 codegen
+
+**限制**:
+- 当前 codegen 不支持 path 含动态参数(`:id` 等)的 route — 含 `:id` 的 entry 会被 skip 并 warn。迁移这些 route 时单独处理(e.g. 加 helper `withPathId` 拼接 `\`/sessions/${id}\``)。
+- 30 个 routes 渐进迁移的进度, 后续 plan 跟进 — 没有这条路线的统一 plan, 优先按"高频调用方"顺序迁(`agent.ts` → `cli.ts` → `plugin` → `git` → `fs`)。
+
+## 15. Weixin (微信) 个人号机器人适配器
+
+zai 通过长轮询适配 Tencent iLink Bot API 把个人微信接入 `eventBus` / SSE 通道,用户在手机微信里发消息即触发本地 zai agent,agent 回复自动推回微信。完整设计见 `docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md`,这里是关键的实现 trap。
+
+**架构**:
+- `packages/zai/src/server/services/weixinBot/WeixinAdapter.ts` — 核心适配器,实现 `connect / disconnect / _pollLoop` (long-poll) + 出站 `sendText / sendImage / sendDocument / sendVideo / sendVoice / sendTyping`,状态机 `disconnected → connecting → connected → reconnecting → failed`。
+- `packages/zai/src/server/services/weixinBot/WeixinBotManager.ts` — 单例 manager,init 读 `zaiSettings.weixinBot` 决定是否启 adapter,**启动失败仅 warn 不 throw**(不破坏 zai 主进程);双向桥:内部 emit `weixin.inbound` 到 eventBus,订阅 `runtime.delta` / `runtime.done` 把回复镜像给微信。
+- `packages/zai/src/server/services/weixinBot/iLinkClient.ts` — 7 个 iLink 端点(getUpdates / sendMessage / sendTyping / getConfig / getUploadUrl / getBotQrcode / getQrcodeStatus),所有 fetch 可注入,测试不依赖真实 iLink。
+- `packages/zai/src/shared/events.ts` — 新增 `weixin.inbound` 事件类型,sessionId 命名约定 `weixin:<accountId>:<chatType>:<chatId>`,sid-scoped(走 per-sid filter)。
+- `packages/zai/src/server/routes/weixin.ts` — REST API:`GET /api/weixin/status` / `POST /api/weixin/connect|disconnect|reload` / `POST /api/weixin/setup/start|confirm|cancel` / `GET /api/weixin/setup/poll?qrcodeId=`。
+- `packages/zai/src/web/src/components/WeixinBotPanel.tsx` — Vite + React Modal,4 section:状态 / QR 登录 / 设置 / 实时入站消息预览。在 SettingsDrawer header 按钮触发。
+
+**关键约束**:
+- iLink 协议层不依赖第三方 SDK,协议契约集中在 `services/weixinBot/iLinkTypes.ts` 和 `iLinkClient.ts`,后续升级只改这两处。
+- CDN URL 白名单硬编码(`services/weixinBot/mediaCrypto.ts` `WEIXIN_CDN_ALLOWLIST`),防 SSRF。
+- 账号锁用 `proper-lockfile` (`AccountLock.ts`),同一 token 只能单实例拉,锁文件 `~/.zai/weixin/locks/<sha256(token).hex>.lock`,**禁止**静默换端口。
+- 媒体加密 Node 内置 `crypto.createCipheriv` AES-128-ECB + PKCS#7,不引入 `crypto-js`。
+- QR 登录:B5 阶段 `Web UI` 走 `setup/start` + `setup/poll` 2s 轮询;**CLI 二维码** plan 提到的 `qrcode-terminal` 在 B7 阶段未部署,本期先 Web UI 路径。
+
+**WEIXIN_DIR 持久化 layout** (`services/paths.ts`):
+```
+~/.zai/weixin/
+├── accounts/         <accountId>.json (mode 0600, token 不进 settings.json)
+├── locks/            <sha256(token).hex>.lock
+├── sync/             <accountId>.buf (long-poll 续读游标)
+├── context-tokens/   <accountId>.json (per-peer context_token)
+└── media/            入站媒体缓存 + 出站媒体暂存
+```
+
+**iLink Bot 身份限制(已知,启动日志强制 WARN)**:
+QR 登录后拿到的是 iLink bot identity(`...@im.bot`),不是普通微信账号。最常见的落地形态是只 DM;group policy 默认 `disabled`,即使设置 `open` 也常常拿不到群事件 — 这是 iLink 端的限制,不是 Hermes/zai 的 bug。详细见 plan 文档 B7 与启动警告。
+
+**集成点**:
+- `services/agentRuntime.ts` `initAgentRuntime()` 末尾追加 `await getWeixinBotManager().start()`,best-effort 失败仅 warn。
+- `services/runtimeLifecycle.ts` `closeServer()` 末尾追加 `await getWeixinBotManager().stop()`:先 unsub eventBus,再 disconnect adapter(in-flight fetch abort + 锁释放)。
+
+**测试覆盖** (14 个 test file, 102 tests):
+- `services/weixinBot/iLinkClient.test.ts` — 7 端点 + 错误码 + AbortError
+- `MediaCrypto.test.ts` — AES round-trip + CDN 白名单 + parseKey
+- `stores/{ContextTokenStore,SyncBufStore,TypingTicketCache,MessageDeduplicator}.test.ts` — 持久化 + TTL
+- `accessPolicy.test.ts` — 4 DM + 3 group policy + chatType 推断
+- `debounce.test.ts` — 3s/5s 静默期 + 长 chunk 切长延迟
+- `WeixinAdapter.inbound.test.ts` — long-poll + dedup + access policy + session expired
+- `WeixinAdapter.outbound.test.ts` — 分块 / 重试 / 限流熔断 / 媒体上传
+- `outbound.test.ts` — splitText 文本分块
+- `WeixinBotManager.test.ts` — 启动 / 停止 / reload / 双向桥
+- `WeixinBotManager.setup.test.ts` — QR 登录状态机
+- `routes/weixin.test.ts` — supertest 全部 endpoint
+- `components/WeixinBotPanel.test.tsx` — happy-dom 组件测试
+
+**验收清单**:
+- [x] 102 tests pass, tsc 通过
+- [x] 同进程 long-poll,不破坏 zai 启动
+- [x] 启动失败 → 警告不 throw
+- [x] 事件总线双向桥(weixin.inbound in, runtime.delta/done out)
+- [x] SSR/SSRF 防护 (CDN 白名单 + token 锁 mode 0600)
+- [x] 真实浏览器验收:启动 dev 实例,打开 Settings → 微信机器人 → 显示状态 (unconfigured)

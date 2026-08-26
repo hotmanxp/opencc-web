@@ -29,6 +29,7 @@ import { copyToClipboard } from "../../lib/clipboard.js";
 import { linkifyText } from "../../lib/linkify.js";
 import { splitMarkdownOnIncomplete } from "../../lib/splitMarkdown.js";
 import { getRenderer } from "../toolRenderers/registry.js";
+import { useExpandUserBubble } from "./useExpandUserBubble.js";
 
 const { Text } = Typography;
 
@@ -95,8 +96,8 @@ export const StreamingMarkdown = React.memo(function StreamingMarkdown({ text }:
   );
 });
 
-const THINKING_ACCENT = "#722ed1"; // TODO: theme-constant (purple — no CSS var mapping yet)
-const THINKING_BG = "rgba(114, 45, 209, 0.14)"; // TODO: theme-constant (purple bg — no CSS var mapping yet)
+const THINKING_ACCENT = "var(--thinking-accent, #8b5cf6)"; // CSS var preferred, hardcoded fallback for tests/storybook
+const THINKING_BG = "var(--thinking-bg, rgba(139, 92, 246, 0.10))"; // CSS var preferred, hardcoded fallback for tests/storybook
 const THINKING_PREVIEW_MAX = 80;
 
 // 模块级计数器: 当前有几个 ThinkingBlock 处于 streaming 状态。
@@ -135,6 +136,11 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
   // <style> 元素会被吃掉、不到 DOM. 通过 useEffect 注入更稳.
   // 用模块级 refcount: 第一个 streaming=true 挂载, 最后一个 streaming 消失
   // (含组件卸载) 才卸载 — 避免历史回放中也跟着跑动画.
+  // 折叠态四重视觉信号 (让用户明显感知"正在思考"):
+  //   - 灯泡 fill 颜色循环 (zai-think-glow, 1.4s) — 浅黄 → 亮白 + 缩放 0.8 → 1.1
+  //   - pill 背景透明度呼吸 (zai-think-pill-pulse, 1.6s)
+  //   - "思考" 后面三个点循环闪烁 (zai-think-dot, 1.2s, 错开 0.15s)
+  // prefers-reduced-motion: reduce 全部降级为静态, 颜色不变.
   useEffect(() => {
     const id = "zai-think-glow-style";
     if (streaming) {
@@ -143,15 +149,50 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
         const style = document.createElement("style");
         style.id = id;
         style.textContent = `
+          /* 灯泡 fill 颜色循环 + 缩放呼吸:
+             fill 范围 #f7d774 暗黄 → #ffffff 亮白 (对比度最大, 紫色 pill 上一眼可见),
+             transform scale 0.8 → 1.1 配合 fill-box 让灯泡"呼吸".
+             transform-origin: center + transform-box: fill-box 是 SVG path
+             缩放必须有的一对, 不然缩放中心是 SVG 容器 origin.
+
+             缩放下限 0.8 是为了收缩时也形成明显节拍, 不止是"放大→恢复";
+             上限 1.1 之前实测 SVG 默认 overflow:hidden 会裁切, 因此 svg
+             加 overflow:visible 兜底 (即便继续调大 scale 也不会被裁). */
           @keyframes zai-think-glow {
-            0%, 100% { fill: #f7d774; }
-            50%      { fill: #ffe999; }
+            0%, 100% { fill: #f7d774; transform: scale(0.8); }
+            50%      { fill: #ffffff; transform: scale(1.1); }
+          }
+          .zai-thinking-bulb-active svg {
+            overflow: visible;
           }
           .zai-thinking-bulb-active svg path {
             animation: zai-think-glow 1.4s ease-in-out infinite;
+            transform-origin: center;
+            transform-box: fill-box;
           }
+          /* pill 背景呼吸: opacity 1.0 ↔ 0.78, 让"思考"标签在折叠态视觉跳动 */
+          @keyframes zai-think-pill-pulse {
+            0%, 100% { opacity: 1; }
+            50%      { opacity: 0.78; }
+          }
+          .zai-thinking-pill-active {
+            animation: zai-think-pill-pulse 1.6s ease-in-out infinite;
+          }
+          /* "思考"后面三个点循环: 每个 dot opacity 0.2 → 1.0, 错开 0.15s
+             形成打字机"思考中"视觉, 跟 StreamingMarkdown 末尾光标呼应 */
+          @keyframes zai-think-dot {
+            0%, 80%, 100% { opacity: 0.2; }
+            40%           { opacity: 1; }
+          }
+          .zai-think-dot-1 { animation: zai-think-dot 1.2s infinite; }
+          .zai-think-dot-2 { animation: zai-think-dot 1.2s 0.15s infinite; }
+          .zai-think-dot-3 { animation: zai-think-dot 1.2s 0.30s infinite; }
           @media (prefers-reduced-motion: reduce) {
-            @keyframes zai-think-glow { 0%, 100% { fill: #cacaca; } }
+            @keyframes zai-think-glow {
+              0%, 100% { fill: #cacaca; transform: scale(1); }
+            }
+            @keyframes zai-think-pill-pulse { 0%, 100% { opacity: 1; } }
+            @keyframes zai-think-dot { 0%, 100% { opacity: 1; } }
           }
         `;
         document.head.appendChild(style);
@@ -198,6 +239,7 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                 {/* 紫色 pill: 仿 opencc userFacingNameBackgroundColor,
                     把 "思考" 标签用主色背景包裹, 视觉权重高于纯文字标签. */}
                 <span
+                  className={streaming ? "zai-thinking-pill-active" : undefined}
                   style={{
                     display: "inline-flex",
                     alignItems: "center",
@@ -218,6 +260,23 @@ export const ThinkingBlock = React.memo(function ThinkingBlock({
                     style={{ fontSize: 11 }}
                   />
                   思考
+                  {/* 三个点循环: streaming 时让"思考"标签尾部有打字机视觉,
+                      折叠态用户一眼能看出模型还在思考. 历史回放/流式结束
+                      时点不渲染, 不会残留. */}
+                  {streaming && (
+                    <span
+                      aria-hidden="true"
+                      style={{
+                        display: "inline-flex",
+                        gap: 1,
+                        marginLeft: 1,
+                      }}
+                    >
+                      <span className="zai-think-dot-1">.</span>
+                      <span className="zai-think-dot-2">.</span>
+                      <span className="zai-think-dot-3">.</span>
+                    </span>
+                  )}
                 </span>
                 {/* 箭头: 折叠态 › (CaretRight), 展开态 ⌄ (CaretDown).
                     紧贴 pill 之后, 视觉顺序: pill → 箭头 → 预览文字.
@@ -652,6 +711,10 @@ export const MessageBubble = React.memo(function MessageBubble({
     | null
   >(null);
 
+  // 移动端 / 分屏开启时, user 气泡撑满对话区 (与 AI 气泡一致);
+  // 桌面端无分屏保留 70% 让短消息右对齐有视觉呼吸. 详见 useExpandUserBubble.ts.
+  const expandUserBubble = useExpandUserBubble()
+
   // 来自 transcript 历史回放: 思考块作为独立条目, 与 assistant.text 配对出现
   if (msg.type === "assistant.thinking") {
     return (
@@ -674,6 +737,7 @@ export const MessageBubble = React.memo(function MessageBubble({
     const visibleText = ((msg.text as string) || (msg.prompt as string) || "")
     return (
       <div
+        data-testid="user-bubble-container"
         style={{
           display: "flex",
           justifyContent: "flex-end",
@@ -683,7 +747,10 @@ export const MessageBubble = React.memo(function MessageBubble({
         <Card
           size="small"
           style={{
-            maxWidth: "70%",
+            // 移动端或分屏开启时, 对话区被压窄, 70% 显得局促; 撑满与 AI 气泡
+            // 行为一致 (见上方 expandUserBubble 计算). 桌面端无分屏仍维持
+            // 70% 以保留短消息右对齐的视觉呼吸.
+            maxWidth: expandUserBubble ? "100%" : "70%",
             background: "var(--bg-card)",
             borderRadius: 12,
             position: "relative",
@@ -959,9 +1026,12 @@ export const MessageBubble = React.memo(function MessageBubble({
     const delta = msg.delta as
       | { type?: string; text?: string; thinking?: string }
       | undefined;
-    // thinking_delta: 模型内部推理, 折叠成灰色面板
+    // thinking_delta: 模型内部推理, 折叠成灰色面板.
+    // 沿用外层 streaming (由 MessageListView 决定: thinking 是 messages
+    // 末尾时为 true). 这样 thinking 切到 text 后, 外层 streaming=false
+    // 会让动画也停掉.
     if (delta?.type === "thinking_delta") {
-      return <ThinkingBlock text={delta.thinking || ""} streaming={streaming} />;
+      return <ThinkingBlock text={delta.thinking || ""} streaming={streaming ?? false} />;
     }
     // text_delta: 可见回复正文
     const text = delta?.text || "";

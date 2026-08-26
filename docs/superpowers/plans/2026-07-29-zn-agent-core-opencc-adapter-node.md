@@ -2,6 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
+> **状态：已过期(2026-08-16)**
+> 本文档描述的早期 subpath API surface 已全部废除,运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出。本文档保留作为历史记录,不再代表当前实现。
+
 **Goal:** Wire `DefaultAgentRuntime.run()` to actually call `openccSrc.query()` under Node/tsx via a Node loader hook for `bun:bundle` + a bridge that translates zai `QueryOptions` ↔ opencc SDKMessages, with 5 wrapped core tools (Bash, Read, Edit, Write, AskUserQuestion) for end-to-end real tool execution. Replaces the Phase 1.b "bypass opencc-src" adapter with a real integration.
 
 **Architecture:** zai `DefaultAgentRuntime.run(opts)` delegates to `runViaOpenccQuery(opts, config)` (in `compat/runtime/openccQueryBridge.ts`). The bridge (1) imports `opencc-src/query.js` once and caches the module; (2) translates `QueryOptions` → opencc `QueryParams` via `toQueryParams()`; (3) attaches 5 wrapped core tools via `defaultCoreToolsAsOpencc()`; (4) calls `openccSrc.query(params)` and pipes the resulting `AsyncIterable<SDKMessage>` through `translateSdkToRuntime()` (in `sdkEventAdapter.ts`) to produce Anthropic-shaped `RuntimeEvent`s, which `wrapWithZaiMeta()` enriches with zai meta. The `bun:bundle` specifier is intercepted at the Node loader level by `bun-protocol.mjs` (loaded via `tsx --import`); 86 vendored files that import `bun:bundle` resolve to `compat/runtime/bun-shim.ts` which provides `feature()` and `require()` stubs.

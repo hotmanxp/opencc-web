@@ -21,6 +21,7 @@ import { SessionCwdBridge } from "../components/SessionCwdBridge";
 import { TaskDrawer } from "../components/TaskDrawer";
 import ApproveDrawer from "../components/ApproveDrawer.jsx";
 import SettingsDrawer from "../components/SettingsDrawer";
+import { FilePreviewDrawer } from "../components/conversation/FilePreviewDrawer.js";
 import TodoZone from "../components/TodoZone.jsx";
 import AgentInputBox from "../components/AgentInputBox";
 import { SplitPane } from "../components/splitPane/SplitPane.js";
@@ -54,11 +55,20 @@ export default function Agent() {
   const loadTranscript = useAgentStore((s) => s.loadTranscript);
   const createNewSession = useAgentStore((s) => s.createNewSession);
   const deleteSession = useAgentStore((s) => s.deleteSession);
+  // 对话进行中(streaming)禁用会话切换/新建/删除 — 避免打断当前流的
+  // transcript 上下文与排队归属。
+  const status = useAgentStore((s) => s.status);
+  const isBusy = status === "streaming";
   // v2TasksBySession 仍订阅在 store, 但渲染层 Agent.tsx 不再使用 —
   // 任务摘要现在由 AgentInputBox 内部从 store 直接取 (避免 props 透传).
   void v2TasksBySession;
   const cwdName = instanceContext?.cwdName || '~'
-  const branch = instanceContext?.branch || 'master'
+  // branch=null 表示当前 PWD 不是 Git 目录 (server /system 端点在
+  // git rev-parse --is-inside-work-tree 失败时返回 null). ConfigStatusBar
+  // 据此隐藏整个分支段 + 前后分隔符, 不显示误导性的 'master' 兜底, 也
+  // 不会触发 listBranches 失败弹错. 兜底之所以不能在父组件做: 旧 fallback
+  // 'master' 让用户以为 PWD 下有 git repo, 实际什么都没有, 误导更严重.
+  const branch = instanceContext?.branch ?? null
   // 会话列表 active 高亮色 — 用 ConfigProvider 默认 token.colorPrimary(#ff6600),
   // 硬编码而不是 theme.useToken() 让 Agent.tsx 不依赖 antd theme 上下文,
   // 避免某些测试 (无 ConfigProvider 包裹) 抛 "theme is not defined".
@@ -205,7 +215,13 @@ export default function Agent() {
                 size="small"
                 icon={<PlusOutlined />}
                 onClick={createNewSession}
-                title="创建新会话"
+                disabled={isBusy}
+                aria-label="创建新会话"
+                title={
+                  isBusy
+                    ? "对话进行中,请等待当前回复结束"
+                    : "创建新会话"
+                }
                 style={{
                   position: "absolute",
                   top: 0,
@@ -224,7 +240,12 @@ export default function Agent() {
                 type="text"
                 size="small"
                 onClick={openNewSessionInNewTab}
-                title="在新标签页打开新会话"
+                disabled={isBusy}
+                title={
+                  isBusy
+                    ? "对话进行中,请等待当前回复结束"
+                    : "在新标签页打开新会话"
+                }
                 data-testid="new-session-in-new-tab"
                 style={{
                   position: "absolute",
@@ -253,6 +274,7 @@ export default function Agent() {
                 size="small"
                 icon={<MenuUnfoldOutlined />}
                 onClick={sessionPanel.expand}
+                aria-label="展开会话历史"
                 title="展开会话历史"
                 style={{
                   position: "absolute",
@@ -280,14 +302,25 @@ export default function Agent() {
                   size="small"
                   icon={<PlusOutlined />}
                   onClick={createNewSession}
-                  title="创建新会话"
+                  disabled={isBusy}
+                  aria-label="创建新会话"
+                  title={
+                    isBusy
+                      ? "对话进行中,请等待当前回复结束"
+                      : "创建新会话"
+                  }
                 />
                 {/* N 按钮: 在新 tab 打开全新会话, 不影响当前 tab. */}
                 <Button
                   type="text"
                   size="small"
                   onClick={openNewSessionInNewTab}
-                  title="在新标签页打开新会话"
+                  disabled={isBusy}
+                  title={
+                    isBusy
+                      ? "对话进行中,请等待当前回复结束"
+                      : "在新标签页打开新会话"
+                  }
                   data-testid="new-session-in-new-tab"
                   style={{
                     color: "#722ed1",
@@ -304,6 +337,7 @@ export default function Agent() {
                   size="small"
                   icon={<MenuFoldOutlined />}
                   onClick={sessionPanel.collapse}
+                  aria-label="收起会话历史"
                   title="收起会话历史"
                 />
               </Space>
@@ -332,14 +366,20 @@ export default function Agent() {
                     return (
                       <div
                         key={s.sessionId}
+                        title={
+                          isBusy
+                            ? "对话进行中,请等待当前回复结束"
+                            : undefined
+                        }
                         style={{
                           position: "relative",
-                          cursor: "pointer",
+                          cursor: isBusy ? "not-allowed" : "pointer",
                           padding: "6px 8px",
                           borderRadius: 6,
                           background: active
                             ? 'rgba(255,102,0,0.10)'
                             : "transparent",
+                          opacity: isBusy ? 0.6 : 1,
                         }}
                         onMouseEnter={() => {
                           setHoveredSessionId(s.sessionId);
@@ -353,6 +393,9 @@ export default function Agent() {
                           )
                         }
                         onClick={() => {
+                          // 对话进行中禁用会话切换 — 防止切走当前流的
+                          // transcript 上下文 / 排队归属错乱。
+                          if (isBusy) return;
                           setCurrentSession(s.sessionId);
                           loadTranscript(s.sessionId);
                           // 切会话也重置 10s 倒计时.
@@ -380,6 +423,7 @@ export default function Agent() {
                           okText="删除"
                           cancelText="取消"
                           okButtonProps={{ danger: true }}
+                          aria-label="删除会话"
                           onConfirm={() => void deleteSession(s.sessionId)}
                         >
                           <Button
@@ -387,8 +431,14 @@ export default function Agent() {
                             size="small"
                             danger
                             icon={<DeleteOutlined />}
+                            disabled={isBusy}
                             onClick={(e) => e.stopPropagation()}
-                            title="删除会话"
+                            aria-label="删除会话"
+                            title={
+                              isBusy
+                                ? "对话进行中,请等待当前回复结束"
+                                : "删除会话"
+                            }
                             style={{
                               position: "absolute",
                               top: 4,
@@ -422,6 +472,7 @@ export default function Agent() {
                       color: '#ff6600',
                     }}
                     onClick={() => setShowAllSessions((v) => !v)}
+                    aria-label={showAllSessions ? "收起更多会话" : "展开更多会话"}
                   >
                     {showAllSessions
                       ? "收起"
@@ -458,6 +509,7 @@ export default function Agent() {
           <ConfigStatusBar
             cwdName={cwdName}
             branch={branch}
+            cwd={cwd}
             onTaskSelect={setSelectedTaskId}
             splitPaneOpen={splitPaneOpen}
           />
@@ -469,6 +521,7 @@ export default function Agent() {
       <TaskDrawer taskId={selectedTaskId} onClose={() => setSelectedTaskId(null)} />
       <ApproveDrawer />
       <SettingsDrawer />
+      <FilePreviewDrawer />
       <SessionCwdBridge />
     </div>
   );

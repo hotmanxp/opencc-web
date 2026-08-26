@@ -747,7 +747,9 @@ export async function initEnvLessBridgeCore(
   if (false && outboundOnly) {
     logEvent('tengu_ccr_mirror_started', {
       v2: true,
-      expires_in_s: credentials.expires_in,
+      // Guarded by the `if (!credentials)` check above; re-asserted for the
+      // dead-code branch where tsc drops the narrow.
+      expires_in_s: credentials!.expires_in,
     })
   } else {
     logEvent('tengu_bridge_repl_started', {

@@ -17,7 +17,7 @@
  * 2. Optionally set CLAUDE_CODE_PERFETTO_WRITE_INTERVAL_S=<positive integer> to write the
  *    trace file periodically (default: write only on exit).
  * 3. Run OpenCC normally
- * 4. Trace file is written to ~/.claude/traces/trace-<session-id>.json
+ * 4. Trace file is written to ~/.zai/traces/trace-<session-id>.json
  *    or to the specified path
  * 5. Open in ui.perfetto.dev to visualize
  */
@@ -273,7 +273,7 @@ export function initializePerfettoTracing(): void {
       tracePath = join(tracesDir, `trace-${getSessionId()}.json`)
     } else {
       // Use the provided path
-      tracePath = envValue
+      tracePath = envValue ?? null
     }
 
     logForDebugging(
@@ -290,7 +290,7 @@ export function initializePerfettoTracing(): void {
         void periodicWrite()
       }, intervalSec * 1000)
       // Don't let the interval keep the process alive on its own
-      if (writeIntervalId.unref) writeIntervalId.unref()
+      writeIntervalId?.unref?.()
       logForDebugging(
         `[Perfetto] Periodic write enabled, interval: ${intervalSec}s`,
       )
@@ -301,7 +301,7 @@ export function initializePerfettoTracing(): void {
       evictStaleSpans()
       evictOldestEvents()
     }, STALE_SPAN_CLEANUP_INTERVAL_MS)
-    if (staleSpanCleanupId.unref) staleSpanCleanupId.unref()
+    staleSpanCleanupId?.unref?.()
 
     // Register cleanup to write final trace on exit
     registerCleanup(async () => {

@@ -18,8 +18,12 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
   const loadTranscript = useAgentStore((s) => s.loadTranscript)
   const deleteSession = useAgentStore((s) => s.deleteSession)
   const createNewSession = useAgentStore((s) => s.createNewSession)
+  // 对话进行中(streaming)禁用会话切换/新建/删除 — 与桌面端侧栏一致。
+  const status = useAgentStore((s) => s.status)
+  const isBusy = status === "streaming"
 
   const handlePick = (sid: string) => {
+    if (isBusy) return
     setCurrentSession(sid)
     void loadTranscript(sid)
     onClose()
@@ -39,7 +43,9 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
           type="text"
           icon={<PlusOutlined />}
           onClick={() => void createNewSession()}
+          disabled={isBusy}
           aria-label="新建会话"
+          title={isBusy ? "对话进行中,请等待当前回复结束" : undefined}
         />
       }
     >
@@ -90,6 +96,7 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
               </div>
               <Popconfirm
                 title="删除该会话?"
+                aria-label="删除会话"
                 okText="删除"
                 cancelText="取消"
                 okButtonProps={{ danger: true }}
@@ -104,6 +111,7 @@ export default function MobileSessionDrawer({ open, onClose }: MobileSessionDraw
                   size="small"
                   danger
                   icon={<DeleteOutlined />}
+                  disabled={isBusy}
                   onClick={(e) => e.stopPropagation()}
                   aria-label="删除会话"
                 />

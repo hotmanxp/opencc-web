@@ -42,7 +42,7 @@ export const LAUNCH_AGENT_PATH = join(
 /** Where the launchd supervisor's stdout/stderr is captured. */
 export const LAUNCH_AGENT_LOG = join(
   homedir(),
-  '.claude',
+  '.zai',
   'logs',
   'daemon.log',
 )

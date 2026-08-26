@@ -1,4 +1,7 @@
-import type { OpenccContentBlockParam } from './serverTypes.js'
+import type {
+  OpenccContentBlockParam,
+  OpenccRuntime,
+} from './serverTypes.js'
 
 export type OpenccRuntimeOptions = {
   dataDir: string
@@ -6,9 +9,23 @@ export type OpenccRuntimeOptions = {
   defaultCwd?: string
   defaultModel?: string
   /**
+   * zai patch (2026-08-20): 主 Agent 插槽配置。三个插槽(systemPrompt /
+   * tools / mcp)替换系统默认,见 `mainAgents.ts` 与
+   * docs/superpowers/specs/2026-08-20-zai-main-agent-slots-design.md。
+   * systemPrompt / tools 槽按会话恢复(见 `mainAgents` 表 + OpenccQueryInput
+   * .mainAgent),mcp 槽在启动 MCP 连接前应用(全局,重启生效)。
+   */
+  mainAgent?: import('./mainAgents.js').MainAgentConfig
+  /**
+   * zai patch (2026-08-20): 合并后的完整主 Agent 表(内置 + 外置)。
+   * runtime 按会话恢复时按 name 从该表 resolve;新会话(无 meta 记录)
+   * 回退到 `mainAgent`。
+   */
+  mainAgents?: import('./mainAgents.js').MainAgentConfig[]
+  /**
    * Whether to attempt MCP server connections during headless
    * bootstrap. Defaults to `false` (zai-server's path) so the
-   * server's HTTP listener binds even if the user's `~/.claude.json`
+   * server's HTTP listener binds even if the user's `~/.zai.json`
    * lists MCP servers that block the connect call. Set `true` to
    * register MCP tools up-front; the QueryEngine's per-query MCP
    * refresh path is what actually wires them into the tool registry.
@@ -31,6 +48,13 @@ export type OpenccQueryInput = {
   model?: string
   abortSignal?: AbortSignal
   /**
+   * zai patch (2026-08-20): 该会话生效的主 Agent name。会话首次 query 时
+   * 由 zai-server 从 transcript meta 恢复(无记录时用全局设置)后传入;
+   * runtime 用它从 `mainAgents` 表 resolve 出该会话的插槽配置
+   * (systemPrompt / tools 槽),engine 创建时固定 → 会话级恢复。
+   */
+  mainAgent?: string
+  /**
    * 标记本 query 的 prompt 为 system-injected meta message(对 LLM 可见、
    * 不在 transcript UI 展示)。用于后台任务完成时触发的一轮占位 query——
    * 占位 prompt 本身不承载内容,真正的 <task-notification> 由 QueryEngine
@@ -46,6 +70,26 @@ export type OpenccQueryInput = {
    * ExitPlanMode's `ask` flows through the web confirm UI).
    */
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'dontAsk' | 'plan'
+  /**
+   * zai patch: per-query provider override. When set, vendor
+   * `getAnthropicClient({ providerOverride })` (`services/api/client.ts:151`)
+   * routes through `createOpenAIShimClient` instead of the default Anthropic
+   * SDK path — so third-party OpenAI-compatible gateways (e.g. Wizard AI
+   * hosting zhiniao-* models) get hit with /chat/completions POSTs rather
+   * than Anthropic-shaped /v1/messages. Mirrors the shape used by agent
+   * routing (`services/api/agentRouting.ts:10`).
+   */
+  providerOverride?: { model: string; baseURL: string; apiKey: string }
+  /**
+   * zai patch: id of the provider profile the user picked for this
+   * query. Threaded through `submitMessage → processUserInputContext →
+   * query.ts:1312 → callModel options → modelCaller req.providerId`
+   * so the anthropic-side matcher can route the model to the exact
+   * provider the user chose when several profiles share the same model
+   * name. Optional — when absent, the matcher falls back to legacy
+   * first-match-by-name behavior.
+   */
+  providerId?: string
 }
 
 export type OpenccServerEvent = {
@@ -108,20 +152,26 @@ export type CreateOpenccRuntimeOptions = OpenccRuntimeOptions & {
    * through the user's actual provider profile (Anthropic / OpenAI-compat
    * / etc.) instead of the vendor default `queryModelWithStreaming` (which
    * reads `ANTHROPIC_API_KEY` from the zai-server process env and has no
-   * awareness of `~/.claude.json` provider profiles). The factory
+   * awareness of `~/.zai.json` provider profiles). The factory
    * signature matches `vendor queryModelWithStreaming` so the vendor
    * `for await` loop yields the same event stream without translation.
    */
   callModel?: (
-    req: import('../services/api/claude.js').queryModelWithStreaming extends (
-      a: infer R,
-    ) => unknown
-      ? R
-      : never,
+    // Type-querying the vendor `queryModelWithStreaming` member from here
+    // fails the server tsconfig's declaration emit (TS2694 in emit mode —
+    // the import() namespace member lookup isn't portable) AND would drag a
+    // cross-module import into the published d.ts (blocked by
+    // verify-server-types-self-contained.mjs). `unknown` keeps the surface
+    // self-contained; zai passes a factory whose req shape matches vendor's
+    // `queryModelWithStreaming` first argument at runtime.
+    req: unknown,
   ) => AsyncIterable<unknown>
 }
 
 export const createOpenccRuntime = async (options: CreateOpenccRuntimeOptions): Promise<OpenccRuntime> => {
   const mod = await import('./createOpenccRuntime-impl.js')
-  return mod.createOpenccRuntimeImpl(options)
+  // impl carries `@ts-nocheck`; its inferred return shape is loose, so
+  // cast to the canonical runtime contract here (runtime shape is
+  // enforced by vitest, not by tsc).
+  return mod.createOpenccRuntimeImpl(options) as unknown as Promise<OpenccRuntime>
 }

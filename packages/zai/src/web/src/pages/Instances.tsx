@@ -61,27 +61,70 @@ function relativeAgo(iso: string | null): string {
   return `${hr} 小时前`
 }
 
-const INSTANCE_START_POLL_MS = 250
-const INSTANCE_START_TIMEOUT_MS = 30_000
+// 启动时间 / 运行时长 渲染:{inst.startedAt ? formatDuration(...) : '-'}。
+// 运行时长需要定期 re-render 才不会卡在同一数字,见页面顶部的
+// now-tick useState。
+function formatDuration(ms: number): string {
+  if (ms < 0) return '-'
+  const totalSec = Math.floor(ms / 1000)
+  const days = Math.floor(totalSec / 86400)
+  const hours = Math.floor((totalSec % 86400) / 3600)
+  const min = Math.floor((totalSec % 3600) / 60)
+  const sec = totalSec % 60
+  if (days > 0) return `${days}天${hours}小时`
+  if (hours > 0) return `${hours}小时${min}分`
+  if (min > 0) return `${min}分${sec}秒`
+  return `${sec}秒`
+}
 
-export async function waitForRunningInstance(
+// 死透了的实例在 UI 层视作 stopped:
+// 服务端 20s 心跳超时只把它打 'down',但 3 分钟还没复活就等同于
+// "没人管了",UI 上把 Tag 颜色切到 stopped 的 default,启动按钮可点。
+// 服务端 state 不变(保留历史),只改 UI 渲染。
+export const STALE_THRESHOLD_MS = 3 * 60 * 1000
+export function effectiveState(s: InstanceSnapshot): InstanceState {
+  if (s.state === 'down' && s.lastHeartbeatAt) {
+    const last = new Date(s.lastHeartbeatAt).getTime()
+    if (Date.now() - last > STALE_THRESHOLD_MS) return 'stopped'
+  }
+  return s.state
+}
+
+/**
+ * 轮询 GET /api/instances/:id,直到实例进入 running(且端口已知)才 resolve;
+ * 进入 down 立即 reject(带 lastError.message,供 message.error 展示);
+ * 超时兜底 reject。每轮把最新 snapshot 经 `apply` 写进 store,让卡片状态
+ * 跟着实时刷新。
+ *
+ * 这是"创建后打开新标签页"的前置:必须先确认实例真的跑起来(拿到端口),
+ * 再 window.open — 否则用户在 supervisor ready IPC 等待期间会看到
+ * about:blank 空白标签(用户报告的 bug)。
+ */
+async function waitForRunningInstance(
   id: string,
-  applySnapshot: (snapshot: InstanceSnapshot) => void,
+  apply: (s: InstanceSnapshot) => void,
 ): Promise<InstanceSnapshot> {
-  const deadline = Date.now() + INSTANCE_START_TIMEOUT_MS
-  while (true) {
+  const DEADLINE_MS = 20_000
+  const INTERVAL_MS = 500
+  const start = Date.now()
+  for (;;) {
     const res = await fetch(`/api/instances/${id}`)
-    if (!res.ok) throw new Error('无法读取实例状态')
-    const data = (await res.json()) as { instance: InstanceSnapshot }
-    applySnapshot(data.instance)
-    if (data.instance.state === 'running' && data.instance.port !== null) {
-      return data.instance
+    if (res.ok) {
+      const data = (await res.json().catch(() => ({}))) as { instance?: InstanceSnapshot }
+      if (data.instance) {
+        apply(data.instance)
+        if (data.instance.state === 'running' && data.instance.port != null) {
+          return data.instance
+        }
+        if (data.instance.state === 'down') {
+          throw new Error(data.instance.lastError?.message ?? '实例启动失败')
+        }
+      }
     }
-    if (data.instance.state === 'down') {
-      throw new Error(data.instance.lastError?.message ?? '实例启动失败')
+    if (Date.now() - start >= DEADLINE_MS) {
+      throw new Error('实例启动超时')
     }
-    if (Date.now() >= deadline) throw new Error('实例启动超时,请稍后手动打开')
-    await new Promise<void>((resolve) => setTimeout(resolve, INSTANCE_START_POLL_MS))
+    await new Promise((r) => setTimeout(r, INTERVAL_MS))
   }
 }
 
@@ -314,6 +357,19 @@ export default function Instances(): JSX.Element {
     void loadInstances()
   }, [loadInstances])
 
+  // 运行时长需要定期 re-render 才不会卡在同一数字。每 60s tick 一次,
+  // 60s 粒度对"X 分 Y 秒"足够细;粒度更细会让 setInterval 频繁触发
+  // re-render 但视觉上肉眼无差异。一个 1 小时的实例跑 60s 后才多 1 分钟,
+  // tick 频率足够。
+  const [now, setNow] = useState(() => Date.now())
+  useEffect(() => {
+    const id = setInterval(() => setNow(Date.now()), 60_000)
+    return () => clearInterval(id)
+  }, [])
+  // 让 lint 别报"unused":now 的用途在下面的 Descriptions 里取 Date.now()
+  // 替换为 now,触发依赖 `now` 的 re-render。
+  void now
+
   // Seed the per-row edit form whenever a row is opened (or re-opened
   // with a fresh snapshot). `destroyOnClose` on the modal handles the
   // teardown — we just have to land the right initial values before
@@ -406,7 +462,6 @@ export default function Instances(): JSX.Element {
   }
 
   async function onCreate(): Promise<void> {
-    const popup = window.open('about:blank', '_blank', 'noopener,noreferrer')
     try {
       const values = await form.validateFields()
       // Translate the Switch + InputNumber pair into the supervisor's
@@ -426,26 +481,34 @@ export default function Instances(): JSX.Element {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
         throw new Error(data.error ?? '创建失败')
       }
-      const data = (await res.json()) as { instance: InstanceSnapshot }
+      const data = (await res.json().catch(() => ({}))) as { instance?: InstanceSnapshot }
+      if (!data.instance) throw new Error('创建失败:响应缺少实例信息')
       setOpen(false)
       form.resetFields()
       void loadInstances()
       const started = await waitForRunningInstance(data.instance.id, applyInstanceSnapshot)
-      // LAN instances also listen on 127.0.0.1 (they bind 0.0.0.0 which
-      // covers both), so `localhost:<port>` is always reachable from
-      // the browser that just opened the popup.
-      const url = started.port != null ? `http://localhost:${started.port}` : 'about:blank'
-      if (popup && !popup.closed) popup.location.href = url
+      // waitForRunningInstance 只在 state==='running' && port!==null 时返回,
+      // 这里再做一次防御性检查以满足 TS 收窄 + 兜底(避免假设实现细节)。
+      if (started.port == null) throw new Error('实例已启动但端口未知')
+      // LAN 实例绑 0.0.0.0 同时含 127.0.0.1,浏览器端 localhost:<port>
+      // 总可达。仅在实例确认 running 且端口可用之后才打开新标签页,
+      // 避免用户在 supervisor ready IPC 等待期间看到一个 about:blank
+      // 空白标签 — 这就是用户报告的"创建后默认弹出 about:blank 空白页"
+      // bug 的真正来源。
+      window.open(`http://localhost:${started.port}`, '_blank', 'noopener,noreferrer')
     } catch (err) {
-      if (popup && !popup.closed) popup.close()
       message.error(err instanceof Error ? err.message : '创建失败')
     }
   }
 
   function renderActions(row: InstanceSnapshot): JSX.Element {
-    const canStart = !row.isCurrent && (row.state === 'stopped' || row.state === 'down')
-    const canStop = !row.isCurrent && (row.state === 'running' || row.state === 'starting')
-    const canRestart = !row.isCurrent && row.state === 'running'
+    // 按钮可用性按 effectiveState 走:down + 超过 3 分钟视为 stopped,
+    // "启动"按钮可点,让用户能重新拉起。"停止"/"重启"对死了 3 分钟的实例
+    // 都没意义(进程已经没了),disable。
+    const es = effectiveState(row)
+    const canStart = !row.isCurrent && (es === 'stopped' || es === 'down')
+    const canStop = !row.isCurrent && (es === 'running' || es === 'starting')
+    const canRestart = !row.isCurrent && es === 'running'
     const canDelete = !row.isCurrent
     return (
       <Space wrap>
@@ -523,15 +586,15 @@ export default function Instances(): JSX.Element {
   }
 
   return (
-    <Card
-      title={<Typography.Title level={4} style={{ margin: 0 }}>实例管理</Typography.Title>}
-      extra={
-        <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
-          新建实例
-        </Button>
-      }
-      style={{ margin: 24 }}
-    >
+    <div style={{ padding: 24 }}>
+      <Card
+        title={<Typography.Title level={4} style={{ margin: 0 }}>实例管理</Typography.Title>}
+        extra={
+          <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+            新建实例
+          </Button>
+        }
+      >
       <Row gutter={[16, 16]}>
         {loading && safeInstances.length === 0 ? (
           <Col xs={24} md={12} lg={8}><Card loading /></Col>
@@ -549,7 +612,7 @@ export default function Instances(): JSX.Element {
               extra={
                 <Space size={8} align="center">
                   {renderLanToggle(inst)}
-                  <Tag color={STATE_TAG_COLOR[inst.state]}>{stateLabel(inst.state)}</Tag>
+                  <Tag color={STATE_TAG_COLOR[effectiveState(inst)]}>{stateLabel(effectiveState(inst))}</Tag>
                 </Space>
               }
             >
@@ -577,6 +640,15 @@ export default function Instances(): JSX.Element {
                 <Descriptions.Item label="运行端口">{inst.port ?? '-'}</Descriptions.Item>
                 <Descriptions.Item label="cwd">{inst.cwd}</Descriptions.Item>
                 <Descriptions.Item label="pid">{inst.pid ?? '-'}</Descriptions.Item>
+                <Descriptions.Item label="启动时间">
+                  {inst.startedAt ? new Date(inst.startedAt).toLocaleString() : '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="运行时长">
+                  {inst.startedAt ? formatDuration(now - new Date(inst.startedAt).getTime()) : '-'}
+                </Descriptions.Item>
+                <Descriptions.Item label="创建时间">
+                  {inst.createdAt ? new Date(inst.createdAt).toLocaleString() : '-'}
+                </Descriptions.Item>
                 <Descriptions.Item label="最后心跳">{relativeAgo(inst.lastHeartbeatAt)}</Descriptions.Item>
                 {inst.lastError ? (
                   <Descriptions.Item label="错误">
@@ -762,6 +834,7 @@ export default function Instances(): JSX.Element {
           setPickerOpen(false)
         }}
       />
-    </Card>
+      </Card>
+    </div>
   )
 }

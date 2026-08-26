@@ -3,6 +3,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { BUILTIN_DEFAULT_SETTINGS } from '../../shared/settings.js'
+import { DEFAULT_PERMISSIONS } from './zaiSettingsCache.js'
 
 /**
  * Tests for the boot-time settings cache. `homedir()` is redirected into a
@@ -62,24 +63,32 @@ describe('zaiSettingsCache', () => {
     writeClaudeFile(JSON.stringify({ model: 'from-claude' }))
     const { initZaiSettingsCache, getCachedZaiSettingsSync } = await import('./zaiSettingsCache.js')
     await initZaiSettingsCache()
-    expect(getCachedZaiSettingsSync()).toEqual({ model: 'from-zai' })
+    expect(getCachedZaiSettingsSync()).toEqual({ model: 'from-zai', permissions: DEFAULT_PERMISSIONS })
     // tier-1 content was not overwritten by a tier-2/tier-3 seed
-    expect(readZaiFile()).toEqual({ model: 'from-zai' })
+    expect(readZaiFile()).toEqual({ model: 'from-zai', permissions: DEFAULT_PERMISSIONS })
   })
 
   it('tier 1 miss + tier 2 hit: seeds ~/.zai from ~/.claude', async () => {
     writeClaudeFile(JSON.stringify({ model: 'from-claude', env: { A: '1' } }))
     const { initZaiSettingsCache, getCachedZaiSettingsSync } = await import('./zaiSettingsCache.js')
     await initZaiSettingsCache()
-    expect(getCachedZaiSettingsSync()).toEqual({ model: 'from-claude', env: { A: '1' } })
-    expect(readZaiFile()).toEqual({ model: 'from-claude', env: { A: '1' } })
+    expect(getCachedZaiSettingsSync()).toEqual({
+      model: 'from-claude',
+      env: { A: '1' },
+      permissions: DEFAULT_PERMISSIONS,
+    })
+    expect(readZaiFile()).toEqual({
+      model: 'from-claude',
+      env: { A: '1' },
+      permissions: DEFAULT_PERMISSIONS,
+    })
   })
 
   it('tier 1 miss + tier 2 miss: seeds ~/.zai with builtin defaults', async () => {
     const { initZaiSettingsCache, getCachedZaiSettingsSync } = await import('./zaiSettingsCache.js')
     await initZaiSettingsCache()
-    expect(getCachedZaiSettingsSync()).toEqual(BUILTIN_DEFAULT_SETTINGS)
-    expect(readZaiFile()).toEqual(BUILTIN_DEFAULT_SETTINGS)
+    expect(getCachedZaiSettingsSync()).toEqual({ ...BUILTIN_DEFAULT_SETTINGS, permissions: DEFAULT_PERMISSIONS })
+    expect(readZaiFile()).toEqual({ ...BUILTIN_DEFAULT_SETTINGS, permissions: DEFAULT_PERMISSIONS })
   })
 
   it('tier 1 invalid JSON falls through to tier 2', async () => {
@@ -87,14 +96,14 @@ describe('zaiSettingsCache', () => {
     writeClaudeFile(JSON.stringify({ model: 'from-claude' }))
     const { initZaiSettingsCache, getCachedZaiSettingsSync } = await import('./zaiSettingsCache.js')
     await initZaiSettingsCache()
-    expect(getCachedZaiSettingsSync()).toEqual({ model: 'from-claude' })
+    expect(getCachedZaiSettingsSync()).toEqual({ model: 'from-claude', permissions: DEFAULT_PERMISSIONS })
   })
 
   it('tier 2 invalid JSON falls through to tier 3', async () => {
     writeClaudeFile('{not json')
     const { initZaiSettingsCache, getCachedZaiSettingsSync } = await import('./zaiSettingsCache.js')
     await initZaiSettingsCache()
-    expect(getCachedZaiSettingsSync()).toEqual(BUILTIN_DEFAULT_SETTINGS)
+    expect(getCachedZaiSettingsSync()).toEqual({ ...BUILTIN_DEFAULT_SETTINGS, permissions: DEFAULT_PERMISSIONS })
   })
 
   it('writeZaiSettings refreshes the cache (same-process read sees the new value)', async () => {
@@ -115,7 +124,7 @@ describe('zaiSettingsCache', () => {
     writeClaudeFile(JSON.stringify({ model: 'from-claude' }))
     const { getCachedZaiSettings } = await import('./zaiSettingsCache.js')
     // no explicit init; getCachedZaiSettings triggers and awaits it
-    expect(await getCachedZaiSettings()).toEqual({ model: 'from-claude' })
+    expect(await getCachedZaiSettings()).toEqual({ model: 'from-claude', permissions: DEFAULT_PERMISSIONS })
   })
 
   it('initZaiSettingsCache is idempotent (concurrent callers share one promise)', async () => {
@@ -124,5 +133,31 @@ describe('zaiSettingsCache', () => {
     const p2 = initZaiSettingsCache()
     expect(p1).toBe(p2)
     await p1
+  })
+
+  it('backfills DEFAULT_PERMISSIONS when ~/.zai has no permissions block', async () => {
+    writeZaiFile(JSON.stringify({ model: 'from-zai', defaultMode: 'default' }))
+    const { initZaiSettingsCache, getCachedZaiSettingsSync } = await import('./zaiSettingsCache.js')
+    await initZaiSettingsCache()
+    expect(getCachedZaiSettingsSync().permissions).toEqual(DEFAULT_PERMISSIONS)
+    expect(readZaiFile()).toEqual({ model: 'from-zai', defaultMode: 'default', permissions: DEFAULT_PERMISSIONS })
+  })
+
+  it('leaves an existing permissions block untouched (no backfill)', async () => {
+    const existing = { allow: ['Read'], defaultMode: 'acceptEdits' }
+    writeZaiFile(JSON.stringify({ model: 'from-zai', permissions: existing }))
+    const { initZaiSettingsCache, getCachedZaiSettingsSync } = await import('./zaiSettingsCache.js')
+    await initZaiSettingsCache()
+    expect(getCachedZaiSettingsSync()).toEqual({ model: 'from-zai', permissions: existing })
+    expect(readZaiFile()).toEqual({ model: 'from-zai', permissions: existing })
+  })
+
+  it('leaves a partial permissions block untouched (no backfill)', async () => {
+    const partial = { defaultMode: 'default' }
+    writeZaiFile(JSON.stringify({ model: 'from-zai', permissions: partial }))
+    const { initZaiSettingsCache, getCachedZaiSettingsSync } = await import('./zaiSettingsCache.js')
+    await initZaiSettingsCache()
+    expect(getCachedZaiSettingsSync()).toEqual({ model: 'from-zai', permissions: partial })
+    expect(readZaiFile()).toEqual({ model: 'from-zai', permissions: partial })
   })
 })

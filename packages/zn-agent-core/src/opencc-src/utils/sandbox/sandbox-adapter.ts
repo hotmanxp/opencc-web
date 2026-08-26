@@ -240,18 +240,18 @@ export function convertToSandboxRuntimeConfig(
   const cwd = getCwdState()
   const originalCwd = getOriginalCwd()
   if (cwd !== originalCwd) {
-    denyWrite.push(resolve(cwd, '.claude', 'settings.json'))
-    denyWrite.push(resolve(cwd, '.claude', 'settings.local.json'))
+    denyWrite.push(resolve(cwd, '.zai', 'settings.json'))
+    denyWrite.push(resolve(cwd, '.zai', 'settings.local.json'))
   }
 
-  // Block writes to .claude/skills in both original and current working directories.
-  // The sandbox-runtime's getDangerousDirectories() protects .claude/commands and
-  // .claude/agents but not .claude/skills. Skills have the same privilege level
+  // Block writes to .zai/skills in both original and current working directories.
+  // The sandbox-runtime's getDangerousDirectories() protects .zai/commands and
+  // .zai/agents but not .zai/skills. Skills have the same privilege level
   // (auto-discovered, auto-loaded, full OpenCC capabilities) so they need the
   // same OS-level sandbox protection.
-  denyWrite.push(resolve(originalCwd, '.claude', 'skills'))
+  denyWrite.push(resolve(originalCwd, '.zai', 'skills'))
   if (cwd !== originalCwd) {
-    denyWrite.push(resolve(cwd, '.claude', 'skills'))
+    denyWrite.push(resolve(cwd, '.zai', 'skills'))
   }
 
   // SECURITY: Git's is_git_directory() treats cwd as a bare repo if it has
@@ -459,7 +459,7 @@ const checkDependencies = memoize((): SandboxDependencyCheck => {
 /**
  * Read sandbox.enabled only from trusted settings sources.
  * projectSettings is intentionally excluded — a malicious repo could
- * otherwise disable the sandbox via .claude/settings.json.
+ * otherwise disable the sandbox via .zai/settings.json.
  */
 function getSandboxEnabledSetting(): boolean {
   try {

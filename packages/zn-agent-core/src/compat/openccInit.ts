@@ -34,10 +34,12 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
 
-// Imported via the package's `./opencc-core` subpath export (see
-// package.json `exports`). All opencc vendor code is bundled into
-// this single .mjs by scripts/bundle-opencc.ts.
-const BUNDLE_URL = '@zn-ai/zn-agent-core/opencc-core'
+// Imported via the package's main entry — the runtime `default` export
+// IS the single bundle (dist/opencc-core.mjs, see package.json
+// `exports`). All opencc vendor code is bundled into this one .mjs by
+// scripts/bundle-opencc.ts; resolving the main entry instead of the
+// old `./opencc-core` subpath keeps a single module instance.
+const BUNDLE_URL = '@zn-ai/zn-agent-core'
 
 /**
  * zai patch: pre-populate `globalThis.MACRO` before the opencc bundle
@@ -141,8 +143,8 @@ export function setZaiIsNonInteractive(): void {
  * `~/.zai/settings.json → env` to `process.env`.
  *
  * Vendor's `applySafeConfigEnvironmentVariables()` reads from
- * `getGlobalConfig()` (~/.claude.json) and `getSettingsForSource('userSettings')`
- * (~/.claude/settings.json). zai stores its own settings at
+ * `getGlobalConfig()` (~/.zai.json) and `getSettingsForSource('userSettings')`
+ * (~/.zai/settings.json). zai stores its own settings at
  * `~/.zai/settings.json` (see packages/zai/src/shared/settings.ts
  * `ZaiSettings`), so we can't directly call the vendor function even
  * if it were exported — the path layout differs.
@@ -252,6 +254,51 @@ export function applyZaiExtraCACertsFromConfig(): string | undefined {
   return undefined
 }
 
+/**
+ * Step 9b — bridge `settings.enableDynamicWorkflow` (zai's persisted
+ * flag) into `process.env.OPENCC_ENABLE_WORKFLOWS` (vendor's runtime
+ * gate). vendor's `isWorkflowsDisabled()` at opencc-src/utils/envUtils.ts:338
+ * reads the env var FIRST before consulting `settings.workflows.enabled`,
+ * so flipping the env var at boot is enough to make WorkflowTool show up
+ * or disappear from the next `getAllBaseTools()` call.
+ *
+ * Why the env var and not vendor's settings field directly:
+ *   1. zai-server's `~/.zai/settings.json` is its own schema (ZaiSettings),
+ *      not vendor's SettingsJson. Writing to vendor's settings would
+ *      leak zai concepts into vendor territory.
+ *   2. `process.env` is mutable at runtime, so the same function is
+ *      safe to call from the live PUT route too — toggling takes effect
+ *      on the next `query()` call without restarting the process.
+ *
+ * Idempotent. Safe to call multiple times: each call reflects the
+ * current settings.json on disk.
+ */
+export function applyZaiWorkflowEnableFromSettings(): boolean {
+  const settingsPath = join(
+    process.env.ZAI_DATA_DIR ?? join(homedir(), '.zai'),
+    'settings.json',
+  )
+  let enabled = false
+  if (existsSync(settingsPath)) {
+    try {
+      const raw = readFileSync(settingsPath, 'utf8')
+      const parsed = raw.trim() ? (JSON.parse(raw) as { enableDynamicWorkflow?: unknown }) : null
+      enabled = parsed?.enableDynamicWorkflow === true
+    } catch {
+      // Corrupt settings.json — default to disabled (the new opt-in
+      // default). Don't crash boot on a malformed file; the user can
+      // still flip the toggle once they fix settings.json.
+      enabled = false
+    }
+  }
+  if (enabled) {
+    process.env.OPENCC_ENABLE_WORKFLOWS = '1'
+  } else {
+    delete process.env.OPENCC_ENABLE_WORKFLOWS
+  }
+  return enabled
+}
+
 // ----- entry point -----
 
 let enabled = false
@@ -297,7 +344,10 @@ export async function enableOpenccConfigs(
   // code that references MACRO.X — without this stub the first
   // reference throws ReferenceError and aborts startup.
   installMacroStub()
-  setZaiIsNonInteractive()
+  // (REMOVED: `setZaiIsNonInteractive()` — zai is interactive, not SDK.
+  // The compat-side `globalThis.__zaiIsNonInteractive` flag is unused at
+  // runtime; vendor STATE.isInteractive is the source of truth and
+  // defaults to `true` from `bootstrap/state.ts:getInitialState()`.)
 
   const cwd = opts.cwd ?? process.cwd()
 
@@ -327,6 +377,16 @@ export async function enableOpenccConfigs(
   applySafeZaiSettingsEnv()
   applyZaiExtraCACertsFromConfig()
 
+  // Step 9b — bridge `settings.enableDynamicWorkflow` into
+  // `OPENCC_ENABLE_WORKFLOWS` so vendor's `isWorkflowsDisabled()` returns
+  // the right answer from the first `getAllBaseTools()` call. Done before
+  // the bundle import because some vendor code paths consult
+  // `isWorkflowsDisabled()` during their own module evaluation. The
+  // live PUT route also calls this function after writing settings,
+  // so a runtime toggle takes effect on the next `query()` call without
+  // requiring this boot sequence to re-run.
+  applyZaiWorkflowEnableFromSettings()
+
   const bundle = (await import(/* @vite-ignore */ BUNDLE_URL as any)) as any
 
   // Step 2: enableConfigs() — sets configReadingAllowed = true so
@@ -335,12 +395,21 @@ export async function enableOpenccConfigs(
     bundle.enableConfigs()
   }
 
-  // Step 3: setIsInteractive(false) — non-interactive (HTTP server,
-  // no TTY). Use the bundle's exported setter so vendor STATE stays
-  // in sync; falls back to the compat global if the setter is gone.
-  if (typeof bundle.setIsInteractive === 'function') {
-    bundle.setIsInteractive(false)
-  }
+  // Step 3 (REMOVED): zai previously called `bundle.setIsInteractive(false)`
+  // here to force non-interactive SDK mode. That override made vendor see
+  // `STATE.isInteractive = false` regardless of the source-of-truth default
+  // in `bootstrap/state.ts`, which caused `getCLISyspromptPrefix({isNonInteractive:true})`
+  // to return `AGENT_SDK_PREFIX` ("built on the OpenCC Agent SDK") for every
+  // zai session — wrong, since zai's Web UI is interactive (the
+  // headlessPermissionBridge + AskUserQuestion wrapper route permission asks
+  // through the web, which is exactly the `isInteractive = true` branch in
+  // vendor STATE). With this override removed, vendor defaults to
+  // `STATE.isInteractive = true`, system prompt resolves to
+  // `DEFAULT_PREFIX` ("You are OpenCC, an coding agent and CLI."), and the
+  // permission/AskUserQuestion web-bridge UX continues to work as
+  // `createHeadlessContext-impl.ts:146-152` documents. To re-enter SDK mode,
+  // use `zai --sdk` (which sets `interactive: false` on the headless context,
+  // distinct from the vendor STATE flag).
 
   // Step 4 + 5: originalCwd + cwdState — both same value initially;
   // cwdState diverges later when LLM self-tracks cwd via BashTool

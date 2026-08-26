@@ -151,6 +151,23 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(afterStop.port).toBeNull()
   })
 
+  it('clean exit (code 0) without userStopping → stopped, not down (close-service path)', async () => {
+    // instance child 设置面板「关闭服务」→ /api/system/stop → cleanupAndExit(0)
+    // → 进程 exit code 0。父进程 exit handler 没收到 userStopping,但 code 0
+    // 是主动退出,应标记 stopped 而非 down。
+    const { deps, fakeChildren } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    await getInstanceSupervisor().startInstance(snap.id)
+    const child = fakeChildren[0]!
+    child.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    child.emitExit(0)
+    const after = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
+    expect(after.state).toBe('stopped')
+    expect(after.lastError).toBeNull()
+    expect(after.port).toBeNull()
+  })
+
   it('restartInstance = stop + start', async () => {
     const { deps, fakeChildren } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)
@@ -217,6 +234,23 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(snap.lan).toBe(true)
     expect(fakeChildren).toHaveLength(1)
     expect(spawnArgs[0]).toContain('--lan')
+  })
+
+  // 进程命名:`argv0` 让 ps/top 显示 `zai[name]:port`,env.ZAI_PROCESS_TITLE
+  // 让 child 启动早期把内部 `process.title` 也设上。两条信息都在 spawn 那一
+  // 刻传到 child,跟随 supervisor 重启子进程链路自动续传。port 来自
+  // spawn 那一刻 supervisor 选定的(INSTANCE_BASE_PORT=9201 + probePort 自动
+  // 扫描;user-pin 走 entry.def.startPort / opts.port),不是 child ready
+  // 消息里上报的 port。
+  it('createInstance names the child with argv0 + ZAI_PROCESS_TITLE for `zai[name]:port`', async () => {
+    const { deps, fakeChildren, spawnOptions } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'myproj', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    expect(fakeChildren).toHaveLength(1)
+    const opts = spawnOptions[0] as SpawnOptions & { argv0?: string; env: NodeJS.ProcessEnv }
+    expect(opts.argv0).toBe('zai[myproj]:9201')
+    expect(opts.env.ZAI_PROCESS_TITLE).toBe('zai[myproj]:9201')
   })
 
   it('startInstance without lan arg uses persisted def.lan (no override → def wins)', async () => {
@@ -494,6 +528,27 @@ describe('instanceSupervisor (4c — fix round 1: race regressions)', () => {
     fakeChildren[0]!.emitExit(0)
     await restartP
     expect(fakeChildren).toHaveLength(2)
+  })
+
+  it('child IPC restart message → supervisor stop+start respawn (restart-only-closes bug fix)', async () => {
+    // instance child 的设置面板「重启服务」→ /api/system/restart → IPC
+    // {type:'restart'} 发到 instanceSupervisor 所在进程。supervisor 必须
+    // stop+start 重新拉起,否则 child 退出后只会被标记 down,永不 respawn。
+    const { deps, fakeChildren } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    expect(getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)?.state).toBe('running')
+
+    fakeChildren[0]!.emit('message', { type: 'restart', reason: 'user_action' })
+    // doStop 等旧 child exit / SIGKILL 超时(测试 sleep 立即 resolve),然后 doStart spawn 新 child。
+    await vi.waitFor(() => {
+      expect(fakeChildren).toHaveLength(2)
+    })
+    fakeChildren[1]!.emit('message', { type: 'ready', pid: 333, port: 9206 })
+    const updated = getInstanceSupervisor().getSnapshots().find((s) => s.id === snap.id)!
+    expect(updated.state).toBe('running')
+    expect(updated.port).toBe(9206)
   })
 
   it('doStop waits for actual exit after SIGINT timeout before returning', async () => {

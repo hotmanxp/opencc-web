@@ -40,7 +40,7 @@ const NON_FIRST_PARTY_ENV_KEYS = [
 ] as const
 
 export function getAPIProvider(): APIProvider {
-  // First check providerProfiles config from ~/.claude.json
+  // First check providerProfiles config from ~/.zai.json
   const globalConfig = getGlobalConfig()
   const activeProfile = getActiveProviderProfile(globalConfig)
   if (activeProfile) {

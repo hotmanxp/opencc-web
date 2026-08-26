@@ -24,9 +24,11 @@ vi.mock('./useFsFile.js', () => ({
 
 import { render, screen } from '@testing-library/react';
 import { SplitPane } from './SplitPane.js';
+import { useAppStore } from '../../store/useAppStore.js';
 
 beforeEach(() => {
   localStorage.clear();
+  useAppStore.setState({ instanceContext: null, defaultSplitScreen: false });
   Object.defineProperty(window, 'innerWidth', { configurable: true, value: 1440 });
 });
 
@@ -48,5 +50,28 @@ describe('SplitPane', () => {
     Object.defineProperty(window, 'innerWidth', { configurable: true, value: 800 });
     render(<SplitPane cwd="/repo" />);
     expect(screen.queryByText(/Git/)).toBeNull();
+  });
+
+  it('非 git 项目 (instanceContext.branch 为 null) 时过滤 Git tab', () => {
+    // defaultSplitScreen 需与 localStorage 'true' 一致, 否则 mount effect
+    // 会用 store 默认值 (false) 覆写 open 状态导致面板不展开.
+    useAppStore.setState({ defaultSplitScreen: true });
+    localStorage.setItem('zai.splitPane.open', 'true');
+    render(<SplitPane cwd="/repo" />);
+    expect(screen.queryByText(/Git/)).toBeNull();
+    // tab label + FsTab/BashTab 内容都会命中, 有渲染即可
+    expect(screen.getAllByText('Files').length).toBeGreaterThan(0);
+    expect(screen.getAllByText('Bash').length).toBeGreaterThan(0);
+  });
+
+  it('git 项目 (instanceContext.branch 非 null) 时展示 Git tab', () => {
+    useAppStore.setState({
+      defaultSplitScreen: true,
+      instanceContext: { cwd: '/repo', cwdName: 'repo', branch: 'main' },
+    });
+    localStorage.setItem('zai.splitPane.open', 'true');
+    render(<SplitPane cwd="/repo" />);
+    // Git tab label + GitTab 内容都会命中 "Git" — 有渲染即可
+    expect(screen.getAllByText(/Git/).length).toBeGreaterThan(0);
   });
 });

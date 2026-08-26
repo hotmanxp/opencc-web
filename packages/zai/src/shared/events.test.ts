@@ -7,6 +7,7 @@ describe('ServerEvent schema', () => {
       type: 'runtime.delta',
       eventId: 'evt_1',
       ts: 1000,
+      seq: 42,
       sessionId: 's_1',
       turnIndex: 0,
       delta: 'hello',
@@ -19,6 +20,7 @@ describe('ServerEvent schema', () => {
       type: 'session.created',
       eventId: 'evt_2',
       ts: 1000,
+      seq: 43,
       sessionId: 's_2',
       title: 'New chat',
       cwd: '/tmp',
@@ -31,6 +33,7 @@ describe('ServerEvent schema', () => {
       type: 'prompt.ask',
       eventId: 'evt_3',
       ts: 1000,
+      seq: 44,
       sessionId: 's_3',
       toolUseId: 'tu_1',
       questions: [
@@ -47,6 +50,7 @@ describe('ServerEvent schema', () => {
       type: 'prompt.approve',
       eventId: 'evt_3',
       ts: 1000,
+      seq: 45,
       sessionId: 's_3',
       toolUseId: 'tu_a',
       title: 'Review spec',
@@ -61,9 +65,61 @@ describe('ServerEvent schema', () => {
       type: 'server.connected',
       eventId: 'evt_4',
       ts: 1000,
+      seq: 46,
       sessionId: null,
     }
     expect(() => ServerEvent.parse(event)).not.toThrow()
+  })
+
+  test('rejects missing seq', () => {
+    const event = {
+      type: 'runtime.delta',
+      eventId: 'evt_1',
+      ts: 1000,
+      sessionId: 's_1',
+      turnIndex: 0,
+      delta: 'hello',
+    }
+    expect(() => ServerEvent.parse(event)).toThrow(/seq/)
+  })
+
+  test('accepts stream/error frame', () => {
+    const event = {
+      type: 'stream/error',
+      eventId: 'evt_err',
+      ts: 1000,
+      seq: 47,
+      error: { code: 'internal', message: 'boom', details: {} },
+    }
+    const parsed = ServerEvent.parse(event)
+    expect(parsed.type).toBe('stream/error')
+    expect(parsed).toMatchObject({ error: { code: 'internal', message: 'boom' } })
+  })
+
+  test('rejects unknown error code', () => {
+    const event = {
+      type: 'stream/error',
+      eventId: 'evt_err2',
+      ts: 1000,
+      seq: 48,
+      error: { code: 'nope', message: 'x' },
+    }
+    expect(() => ServerEvent.parse(event)).toThrow(/code/i)
+  })
+
+  test('accepts session/projection frame', () => {
+    const event = {
+      type: 'session/projection',
+      eventId: 'evt_proj',
+      ts: 1000,
+      seq: 49,
+      sessionId: 's_1',
+      key: 'title',
+      value: 'My Session',
+    }
+    const parsed = ServerEvent.parse(event)
+    expect(parsed.type).toBe('session/projection')
+    expect(parsed).toMatchObject({ sessionId: 's_1', key: 'title', value: 'My Session' })
   })
 
   test('rejects unknown type', () => {
@@ -79,6 +135,7 @@ describe('ServerEvent schema', () => {
     const event = {
       type: 'runtime.done',
       ts: 1000,
+      seq: 50,
       sessionId: 's_1',
       turnIndex: 0,
     }
@@ -90,6 +147,7 @@ describe('ServerEvent schema', () => {
       type: 'runtime.done',
       eventId: 'evt_6',
       ts: 1000,
+      seq: 51,
       sessionId: 's_1',
       turnIndex: 0,
       usage: { input: 10, output: 20 },

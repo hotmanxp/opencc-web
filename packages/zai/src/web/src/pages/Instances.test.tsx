@@ -3,7 +3,7 @@ import { describe, expect, it, beforeEach, vi, afterEach } from 'vitest'
 import '@testing-library/jest-dom'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
-import Instances from './Instances.js'
+import Instances, { effectiveState, STALE_THRESHOLD_MS } from './Instances.js'
 import { useInstanceStore } from '../store/useInstanceStore.js'
 import type { InstanceSnapshot } from '../../shared/instances.js'
 
@@ -39,19 +39,20 @@ const demo: InstanceSnapshot = {
   isCurrent: false,
 }
 
-const running: InstanceSnapshot = {
-  ...demo,
-  state: 'running',
-  port: 9202,
-  pid: 42,
-  startedAt: '2026-08-04T00:00:00.000Z',
-}
-
 const lan: InstanceSnapshot = {
   ...demo,
   id: 'inst_lan',
   name: 'lan-demo',
   lan: true,
+}
+
+const running: InstanceSnapshot = {
+  ...demo,
+  state: 'running',
+  port: 9202,
+  pid: 12345,
+  startedAt: new Date().toISOString(),
+  lastHeartbeatAt: new Date().toISOString(),
 }
 
 describe('Instances page', () => {
@@ -80,7 +81,11 @@ describe('Instances page', () => {
     seed([])
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/instances' && init?.method === 'POST') {
-        return new Response('{"instance":{...}}', { status: 201 })
+        const starting: InstanceSnapshot = { ...demo, state: 'starting' }
+        return new Response(JSON.stringify({ instance: starting }), {
+          status: 201,
+          headers: { 'Content-Type': 'application/json' },
+        })
       }
       return new Response('{"instances":[]}', { status: 200 })
     })
@@ -98,7 +103,7 @@ describe('Instances page', () => {
     })
   })
 
-  it('navigates the popup to the running instance port after create', async () => {
+  it('opens the new instance tab only after it is running, not as a blank about:blank', async () => {
     seed([])
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/instances' && init?.method === 'POST') {
@@ -117,12 +122,7 @@ describe('Instances page', () => {
       return new Response('{"instances":[]}', { status: 200 })
     })
     vi.stubGlobal('fetch', fetchMock)
-    const popup = {
-      closed: false,
-      location: { href: 'about:blank' },
-      close: vi.fn(),
-    }
-    const openSpy = vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
 
     render(<MemoryRouter><Instances /></MemoryRouter>)
     fireEvent.click(screen.getByText('新建实例'))
@@ -131,13 +131,20 @@ describe('Instances page', () => {
     fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }))
 
     await waitFor(() => {
-      expect(popup.location.href).toBe('http://localhost:9202')
+      expect(openSpy).toHaveBeenCalledWith(
+        'http://localhost:9202',
+        '_blank',
+        expect.stringContaining('noopener'),
+      )
     })
     expect(fetchMock).toHaveBeenCalledWith('/api/instances/inst_1')
-    expect(openSpy).toHaveBeenCalled()
+    // 关键断言: 不应在创建初期就预开 about:blank — 这就是用户报告的
+    // "新建实例后默认打开 about:blank 空白页" bug 的根因。
+    const preOpen = openSpy.mock.calls.find((c) => c[0] === 'about:blank')
+    expect(preOpen).toBeUndefined()
   })
 
-  it('closes the popup and surfaces the error when the instance goes down', async () => {
+  it('does not open a new tab and surfaces the error when the instance goes down', async () => {
     seed([])
     const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
       if (url === '/api/instances' && init?.method === 'POST') {
@@ -161,12 +168,7 @@ describe('Instances page', () => {
       return new Response('{"instances":[]}', { status: 200 })
     })
     vi.stubGlobal('fetch', fetchMock)
-    const popup = {
-      closed: false,
-      location: { href: 'about:blank' },
-      close: vi.fn(),
-    }
-    vi.spyOn(window, 'open').mockReturnValue(popup as unknown as Window)
+    const openSpy = vi.spyOn(window, 'open').mockReturnValue(null)
 
     render(<MemoryRouter><Instances /></MemoryRouter>)
     fireEvent.click(screen.getByText('新建实例'))
@@ -175,10 +177,11 @@ describe('Instances page', () => {
     fireEvent.click(screen.getByRole('button', { name: /创\s*建/ }))
 
     await waitFor(() => {
-      expect(popup.close).toHaveBeenCalled()
+      expect(screen.getByText('cwd failed')).toBeInTheDocument()
     })
+    // 错误路径不应打开任何新标签页。
+    expect(openSpy).not.toHaveBeenCalled()
   })
-
   it('renders a LAN switch on each non-current card with the persisted flag reflected', () => {
     seed([current, demo, lan])
     render(<MemoryRouter><Instances /></MemoryRouter>)
@@ -262,7 +265,6 @@ describe('Instances page', () => {
       return new Response('{"instances":[]}', { status: 200 })
     })
     vi.stubGlobal('fetch', fetchMock)
-    vi.spyOn(window, 'open').mockReturnValue({ closed: false, location: { href: '' }, close: vi.fn() } as unknown as Window)
 
     render(<MemoryRouter><Instances /></MemoryRouter>)
     fireEvent.click(screen.getByText('新建实例'))
@@ -283,5 +285,56 @@ describe('Instances page', () => {
         }),
       )
     })
+  })
+})
+
+describe('effectiveState (3 分钟 stale 阈值)', () => {
+  const base: InstanceSnapshot = {
+    id: 'inst_x',
+    name: 'x',
+    cwd: '/tmp/x',
+    createdAt: '',
+    state: 'down',
+    port: null,
+    pid: null,
+    startedAt: null,
+    lastHeartbeatAt: null,
+    lastError: null,
+    isCurrent: false,
+  }
+
+  it('down 但 lastHeartbeatAt 刚发生 → 仍按 down 渲染', () => {
+    const snap: InstanceSnapshot = { ...base, lastHeartbeatAt: new Date().toISOString() }
+    expect(effectiveState(snap)).toBe('down')
+  })
+
+  it('down + lastHeartbeatAt 在阈值内 → 仍按 down', () => {
+    const snap: InstanceSnapshot = {
+      ...base,
+      lastHeartbeatAt: new Date(Date.now() - (STALE_THRESHOLD_MS - 1000)).toISOString(),
+    }
+    expect(effectiveState(snap)).toBe('down')
+  })
+
+  it('down + lastHeartbeatAt 超过阈值 → 视作 stopped', () => {
+    const snap: InstanceSnapshot = {
+      ...base,
+      lastHeartbeatAt: new Date(Date.now() - (STALE_THRESHOLD_MS + 1000)).toISOString(),
+    }
+    expect(effectiveState(snap)).toBe('stopped')
+  })
+
+  it('down 但 lastHeartbeatAt 为 null → 仍按 down(没数据不假阳)', () => {
+    const snap: InstanceSnapshot = { ...base, lastHeartbeatAt: null }
+    expect(effectiveState(snap)).toBe('down')
+  })
+
+  it('非 down 状态不受阈值影响', () => {
+    const snap: InstanceSnapshot = {
+      ...base,
+      state: 'running',
+      lastHeartbeatAt: new Date(Date.now() - 10 * 60 * 1000).toISOString(),
+    }
+    expect(effectiveState(snap)).toBe('running')
   })
 })

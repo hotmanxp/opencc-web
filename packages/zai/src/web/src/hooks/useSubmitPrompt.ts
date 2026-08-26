@@ -61,21 +61,24 @@ export function useSubmitPrompt(): UseSubmitPromptResult {
 
   const submitPrompt = useCallback(
     async (text: string, opts?: { skipPushUserMsg?: boolean }) => {
-      if (!opts?.skipPushUserMsg) {
-        pushUserMsg(text)
-      }
       const s = useAgentStore.getState()
       const sid = s.sessionId || s.activeSessionId || undefined
-      const { sessionId: returnedSessionId } = await api.post<{ sessionId: string }>(
-        '/agent/prompt',
-        {
-          prompt: text || undefined,
-          sessionId: sid,
-        },
-        {
-          headers: sid ? { 'X-Session-Id': sid } : undefined,
-        },
-      )
+      const resp = await api.post<{
+        sessionId: string
+        queued?: boolean
+      }>('/agent/prompt', {
+        prompt: text || undefined,
+        sessionId: sid,
+      }, {
+        headers: sid ? { 'X-Session-Id': sid } : undefined,
+      })
+      // 排队(对话进行中提交): 消息不立即写 transcript, 由 queue.changed
+      // 事件在真正开始执行时由 AgentInputBox watcher pushUserMsg。
+      // 仅"立即执行"才乐观写入, 保持原有即时反馈。
+      if (!opts?.skipPushUserMsg && resp.queued !== true) {
+        pushUserMsg(text)
+      }
+      const returnedSessionId = resp.sessionId
       useAgentStore.setState({
         sessionId: returnedSessionId,
         activeSessionId: returnedSessionId,

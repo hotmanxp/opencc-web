@@ -146,4 +146,98 @@ describe('QuestionCard — 多问题保留 Tabs + Review 流程', () => {
     const submit = screen.getByText('Submit answers').closest('button')!
     expect(submit).toBeDisabled()
   })
+
+  test('Radio 选中后自动跳到下一题 tab (无需手动切 tab)', () => {
+    // 用 q1-A / q2-A / q3-A 这种带问题编号的 label, 避免单字母 'A' 在
+    // 三个 panel 间撞名. 选中触发用 click label 而不是 click input —
+    // happy-dom 下 fireEvent.click(input) 不会触发 antd Radio.Group 的
+    // onChange (Radio 监听内部 RcCheckbox 的 click 事件链), 但 click
+    // 整个 label 能链式触发内部 input click, 进而触发 onChange.
+    //
+    // antd Tabs 5.x 切 tab 不卸载 panel (用 CSS hidden + aria-hidden), 所以
+    // 不能用 queryByDisplayValue 断言 "q1 panel 已卸载" — 永远会命中. 改
+    // 用 getByRole('tab', { selected: true }) / aria-selected 断言 active tab.
+    const threeQs = [
+      q({ question: 'q1', header: 'H1', options: [{ label: 'q1-A' }, { label: 'q1-B' }] }),
+      q({ question: 'q2', header: 'H2', options: [{ label: 'q2-A' }, { label: 'q2-B' }] }),
+      q({ question: 'q3', header: 'H3', options: [{ label: 'q3-A' }, { label: 'q3-B' }] }),
+    ]
+    render(
+      <QuestionCard {...baseProps} questions={threeQs} />,
+    )
+    // 初始 active = q1
+    expect(screen.getByRole('tab', { name: /H1/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: /H2/ })).toHaveAttribute('aria-selected', 'false')
+
+    // 选 q1-A → handleRadioChange → onAdvance → setTabKey('q2')
+    fireEvent.click(screen.getByText('q1-A').closest('label')!)
+
+    expect(screen.getByRole('tab', { name: /H1/ })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: /H2/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: /H3/ })).toHaveAttribute('aria-selected', 'false')
+  })
+
+  test('最后一题 Radio 选中后自动跳到 Review tab', () => {
+    const twoQs = [
+      q({ question: 'q1', header: 'H1', options: [{ label: 'q1-A' }, { label: 'q1-B' }] }),
+      q({ question: 'q2', header: 'H2', options: [{ label: 'q2-A' }, { label: 'q2-B' }] }),
+    ]
+    render(
+      <QuestionCard {...baseProps} questions={twoQs} />,
+    )
+    // 初始 active = q1 (firstQuestion 默认)
+    expect(screen.getByRole('tab', { name: /H1/ })).toHaveAttribute('aria-selected', 'true')
+
+    // 手动切到 q2 tab — Review tab 的 accessible name 是 'Review', 其他
+    // tab 的 accessible name 由 header Tag + '单选'/'多选' 拼出, 用 regex
+    // /H1/ /H2/ 匹配.
+    fireEvent.click(screen.getByRole('tab', { name: /H2/ }))
+    expect(screen.getByRole('tab', { name: /H2/ })).toHaveAttribute('aria-selected', 'true')
+
+    // 选 q2-B (最后一题) → onAdvance → setTabKey('review')
+    fireEvent.click(screen.getByText('q2-B').closest('label')!)
+
+    expect(screen.getByRole('tab', { name: /H2/ })).toHaveAttribute('aria-selected', 'false')
+    expect(screen.getByRole('tab', { name: 'Review' })).toHaveAttribute('aria-selected', 'true')
+  })
+
+  test('Radio 选 Other 时不自动跳 (还要输入文本)', () => {
+    const onAnswer = vi.fn()
+    const twoQs = [
+      q({ question: 'q1', header: 'H1', options: [{ label: 'q1-A' }, { label: 'q1-B' }] }),
+      q({ question: 'q2', header: 'H2', options: [{ label: 'q2-A' }, { label: 'q2-B' }] }),
+    ]
+    render(
+      <QuestionCard {...baseProps} onAnswer={onAnswer} questions={twoQs} />,
+    )
+    // 初始 active = q1
+    expect(screen.getByRole('tab', { name: /H1/ })).toHaveAttribute('aria-selected', 'true')
+
+    // 选 Other — onAdvance 在 QuestionPanel 内部被故意排除 (用户还要在
+    // Other Input 里写自定义答案). tabKey 应保持 'q1'.
+    fireEvent.click(screen.getByText('Other').closest('label')!)
+
+    // handleRadioChange 走 Other 分支, onAnswer 被调但 onAdvance 不被调
+    expect(onAnswer).toHaveBeenCalledWith('q1', '__other__')
+    expect(screen.getByRole('tab', { name: /H1/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: /H2/ })).toHaveAttribute('aria-selected', 'false')
+  })
+
+  test('Checkbox (多选) 选中不自动跳 — 用户可能还要勾别的', () => {
+    const twoQs = [
+      q({ question: 'q1', header: 'H1', multiSelect: true, options: [{ label: 'q1-A' }, { label: 'q1-B' }, { label: 'q1-C' }] }),
+      q({ question: 'q2', header: 'H2', options: [{ label: 'q2-A' }, { label: 'q2-B' }] }),
+    ]
+    render(
+      <QuestionCard {...baseProps} questions={twoQs} />,
+    )
+    expect(screen.getByRole('tab', { name: /H1/ })).toHaveAttribute('aria-selected', 'true')
+
+    // 多选点 q1-A: Checkbox.Group 的 onChange 路径不走 handleRadioChange,
+    // onAdvance 不会被调用, 应停留在 q1. label click 链式触发 input click.
+    fireEvent.click(screen.getByText('q1-A').closest('label')!)
+
+    expect(screen.getByRole('tab', { name: /H1/ })).toHaveAttribute('aria-selected', 'true')
+    expect(screen.getByRole('tab', { name: /H2/ })).toHaveAttribute('aria-selected', 'false')
+  })
 })

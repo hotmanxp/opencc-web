@@ -6,6 +6,11 @@ import { getCachedZaiSettingsSync } from '../services/zaiSettingsStore.js'
 export interface ResolveModelInput {
   /** transcript.meta.model — 'unknown' / null / undefined all mean "not specified". */
   sessionModel: string | null | undefined
+  /** transcript.meta.providerId — the provider profile the user picked
+   *  for this session. Threads through to modelCaller.findProfileForModel
+   *  so a model name that exists on multiple provider profiles routes
+   *  to the one the user actually selected. Optional. */
+  sessionProviderId?: string | null
   /** Reserved for future cwd-scoped overrides; v1 ignores this. */
   cwd: string
 }
@@ -21,6 +26,15 @@ export interface ResolveModelResult {
     | 'builtin_fallback'
   /** Original alias if model mapping was applied. */
   mappedFrom?: string
+  /**
+   * Provider profile id forwarded from the session, when `source` is
+   * `'session'`. The modelCaller consults it as the preferred id when
+   * `findProfileForModel` has multiple candidates with the same model
+   * name. Undefined for env/settings/builtin_fallback layers — those
+   * paths have no associated provider id yet (see plan §阶段 3
+   * resolveModel note).
+   */
+  providerId?: string
 }
 
 /** Final fallback when nothing else resolves. Used by tests + non-/agent/prompt callers. */
@@ -46,12 +60,12 @@ const PROVIDER_MODEL_MAPPINGS: Record<ProviderType, Record<string, string>> = {
 }
 
 /**
- * Determine the current provider from ~/.claude.json providerProfiles.
+ * Determine the current provider from ~/.zai.json providerProfiles.
  * Takes the first profile's `provider` field. Defaults to 'anthropic'.
  */
 export function resolveCurrentProvider(): ProviderType {
   try {
-    const path = join(homedir(), '.claude.json')
+    const path = join(homedir(), '.zai.json')
     const raw = JSON.parse(readFileSync(path, 'utf-8'))
     const profiles = Array.isArray(raw?.providerProfiles) ? raw.providerProfiles : []
     if (profiles.length > 0 && profiles[0]?.provider) {
@@ -122,7 +136,7 @@ export function applyModelMapping(
  * Resolve the effective model for a single turn.
  *
  * Layer order (see spec):
- *   1. sessionModel (if not 'unknown' / empty)
+ *   1. sessionModel (if not 'unknown' / empty) — also carries sessionProviderId
  *   2. env.ANTHROPIC_DEFAULT_SONNET_MODEL
  *   3. env.ANTHROPIC_SMALL_FAST_MODEL
  *   4. settings.model
@@ -130,13 +144,24 @@ export function applyModelMapping(
  *   6. Model mapping (alias → concrete ID, per-provider)
  *
  * Always returns a non-empty `model`. The `source` field lets the caller
- * log which layer won.
+ * log which layer won. `providerId` is only populated when `source` is
+ * `'session'` — env/settings/builtin fallback layers don't track a
+ * provider id yet, so the matcher falls back to first-match-by-name.
  */
 export function resolveModel(input: ResolveModelInput): ResolveModelResult {
   let result: ResolveModelResult
 
   if (input.sessionModel && input.sessionModel !== 'unknown') {
-    result = { model: input.sessionModel, source: 'session' }
+    result = {
+      model: input.sessionModel,
+      source: 'session',
+      // Only forward providerId when it's a non-empty string — null /
+      // undefined / '' should not show up as a "preference" to the
+      // matcher (the matcher treats undefined as "no preference").
+      ...(typeof input.sessionProviderId === 'string' && input.sessionProviderId.length > 0
+        ? { providerId: input.sessionProviderId }
+        : {}),
+    }
   } else {
     const settings = getCachedZaiSettingsSync()
     const env = settings.env ?? {}
@@ -151,7 +176,13 @@ export function resolveModel(input: ResolveModelInput): ResolveModelResult {
     }
   }
 
-  // Apply model mapping as the final step (provider-aware)
+  // Apply model mapping as the final step (provider-aware). Note: alias
+  // mapping (haiku/sonnet/opus) resolves the alias against the CURRENT
+  // provider (read from ~/.zai.json's first profile), which can flip
+  // the model name to a different provider's model. The providerId
+  // forwarded above is the one the user explicitly picked — we keep it
+  // as-is even after alias mapping; the matcher will retry against
+  // profiles when the alias resolves to a different model id.
   const mapped = applyModelMapping(result.model)
   return { ...result, model: mapped.model, mappedFrom: mapped.mappedFrom }
 }

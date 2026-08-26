@@ -8,9 +8,13 @@ const nextId = () => `evt_${Date.now().toString(36)}_${(++counter).toString(36)}
 
 // Indexed-mapping input type: distributes ServerEvent variants by `type` discriminator
 // so inline object literals narrow correctly without excess property checks rejecting
-// variant-specific fields. eventId/ts remain optional (filled in by emit).
+// variant-specific fields. eventId/ts/seq remain optional (filled in by emit).
 export type ServerEventInput = {
-  [K in ServerEvent as K['type']]: Omit<K, 'eventId' | 'ts'> & { eventId?: string; ts?: number }
+  [K in ServerEvent as K['type']]: Omit<K, 'eventId' | 'ts' | 'seq'> & {
+    eventId?: string
+    ts?: number
+    seq?: number
+  }
 }[ServerEvent['type']]
 
 // 哪些事件不受 sid 限制 (与具体 session 解耦, 所有 tab 都应收)
@@ -42,8 +46,21 @@ function isGlobalEvent(event: ServerEvent): boolean {
     case 'job.done':
     case 'job.failed':
     case 'system.restarting':
+    case 'system.stopping':
     case 'system.restart.canceled':
     case 'instance.changed':
+    // app.update.* — zai 自身版本升级通道的事件,所有打开的 tab 都应收,
+    // 否则只有最初连 SSE 的那个 tab 会看到「升级完成」弹窗,后开的
+    // tab 永远不会被通知。
+    case 'app.update.checking':
+    case 'app.update.installing':
+    case 'app.update.complete':
+    case 'app.update.failed':
+    // command.* — 命令生命周期埋点(/api/agent/command 路由发,所有 tab
+    // 都该看见 — 调试 / 日志 / 慢命令分析不依赖具体 sid,跨 sid 广播)。命令
+    // 起停对调试面板与活动指示器是关键信号。
+    case 'command.run':
+    case 'command.done':
       return true
     default:
       return false
@@ -73,6 +90,9 @@ const STATE_EVENT_TYPES = new Set<string>([
 
 export class ServerEventBus {
   private subs = new Set<Subscriber>()
+  // 全局单调 seq 计数器 — emit 时分配, 单进程内单调递增, 进程重启后从 0
+  // 重新计数 (跨重启的排序由 history replay + eventId 兜底, 见 shared/events.ts Base.seq 注释).
+  private seqCounter = 0
   private history: ServerEvent[] = []
   // per-sid 历史切片, 给 SSE 路由按 sid replay 用. 仅缓存有 sessionId 的事件;
   // 全局事件 (session.* / system.*) 留在全局 history, 它们不归某个 sid.
@@ -84,15 +104,20 @@ export class ServerEventBus {
       ...event,
       eventId: event.eventId ?? nextId(),
       ts: event.ts ?? Date.now(),
+      seq: event.seq ?? ++this.seqCounter,
     } as ServerEvent
     this.history.push(full)
-    if (this.history.length > CAPACITY) this.history.shift()
+    if (this.history.length > CAPACITY) {
+      this.history.shift()
+    }
     // 写 per-sid 切片 (仅当 event 带明确的 string sessionId)
     const sid = eventSessionId(full)
     if (typeof sid === 'string') {
       const arr = this.historyBySid.get(sid) ?? []
       arr.push(full)
-      if (arr.length > CAPACITY) arr.shift()
+      if (arr.length > CAPACITY) {
+        arr.shift()
+      }
       this.historyBySid.set(sid, arr)
     }
     for (const sub of this.subs) {
@@ -149,6 +174,7 @@ export class ServerEventBus {
         type === 'toast' ||
         type === 'branch.changed' ||
         type === 'system.restarting' ||
+        type === 'system.stopping' ||
         type === 'system.restart.canceled'
       )) return true
     }

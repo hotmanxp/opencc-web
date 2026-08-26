@@ -15,7 +15,7 @@ describe('loadMcpServers roots injection', () => {
 
   beforeEach(() => {
     cwd = mkdtempSync(join(tmpdir(), 'zai-mcp-roots-'))
-    // isolate from real ~/.zai.json / ~/.claude.json
+    // isolate from real ~/.zai.json / ~/.zai.json
     homeBackup = process.env.HOME
     process.env.HOME = cwd
   })

@@ -1,16 +1,7 @@
 import { writeFileSync, readFileSync, readdirSync, mkdirSync, unlinkSync, existsSync, renameSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { createRequire } from 'node:module'
-
-// yaml 解析走 agent-core 的 js-yaml(其 package.json 已声明为依赖),
-// 通过 createRequire 跨包引用 node_modules,避免新增依赖。
-// 使用 require.resolve 通过 Node 标准模块解析找到 agent-core 的实际路径,
-// 兼容 pnpm workspace 和 npm 全局安装两种目录结构。
-const _require = createRequire(import.meta.url)
-const agentCorePkgPath = _require.resolve('@zn-ai/zn-agent-core/package.json')
-const requireFromAgentCore = createRequire(agentCorePkgPath)
-const yaml = requireFromAgentCore('js-yaml') as { load(s: string): unknown }
+import yaml from 'js-yaml'
 
 const NAME_RE = /^[a-z0-9][a-z0-9-_]*$/
 

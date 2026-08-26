@@ -1,6 +1,6 @@
-import { memo, useEffect, useMemo, useRef, useState } from 'react';
+import { memo, useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { Button, Empty, Input, Segmented, Spin, Switch, Tree, message } from 'antd';
-import { ReloadOutlined } from '@ant-design/icons';
+import { LockOutlined, ReloadOutlined, UnlockOutlined } from '@ant-design/icons';
 import { FileIcon, DirIcon } from './fileIcon.js';
 import type { DataNode } from 'antd/es/tree';
 import { useFsList } from './useFsList.js';
@@ -14,6 +14,14 @@ import { extToLanguage } from './extToLang.js';
 import { MarkdownText } from '../markdown/MarkdownText.js';
 import { FsContextMenu } from './FsContextMenu.js';
 import { useFsWrite } from './useFsWrite.js';
+import {
+  DEFAULT_FS_TREE_WIDTH,
+  FS_TREE_MAX_WIDTH,
+  FS_TREE_MIN_WIDTH,
+  STORAGE_KEYS,
+  clampFsTreeWidth,
+  useLocalStorageState,
+} from './shared.js';
 
 // TextEditor: dynamic-imported CodeMirror; we keep a module-scoped
 // cache rather than React.lazy + Suspense so FsTab tests don't need
@@ -494,7 +502,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const [expandedKeys, setExpandedKeys] = useState<React.Key[]>([]);
   const [loaded, setLoaded] = useState<LoadedMap>({});
   const file = useFsFile(cwd, selected);
-  const [contextMenu, setContextMenu] = useState<{ path: string; absPath: string; x: number; y: number } | null>(null);
+  const [contextMenu, setContextMenu] = useState<{ path: string; absPath: string; x: number; y: number; kind?: 'file' | 'dir' } | null>(null);
   // Search-mode toggle. When non-empty after trim, the left pane renders
   // <FsSearchList> instead of the directory tree. Right-side preview
   // (selected/file) is unchanged — search results reuse setSelected().
@@ -533,6 +541,77 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   const [editingPath, setEditingPath] = useState<string | null>(null);
   const [dirtyPaths, setDirtyPaths] = useState<Set<string>>(new Set());
 
+  // 文件树 ↔ 预览区 之间的宽度 (相对 FsTab 自身, 整数百分比).
+  // 持久化到 localStorage, 跨刷新保留; 范围 15-85% 由 clampFsTreeWidth 守卫.
+  // 拖动锁 (跟 SplitPane 一致): 默认锁定防误触, 点悬浮按钮解锁后才能拖动.
+  const [widthStored, setWidthStored] = useLocalStorageState<number>(
+    STORAGE_KEYS.fsTreeWidth,
+    DEFAULT_FS_TREE_WIDTH,
+  );
+  const fsTreeWidth = clampFsTreeWidth(widthStored);
+  const [lockedStored, setLockedStored] = useLocalStorageState<boolean>(
+    STORAGE_KEYS.fsTreeLocked,
+    true,
+  );
+
+  // Splitter drag state. widthStored 存的是百分比 (整数), 但 mouse 移动
+  // 给出 px; 拖拽过程中实时把 px delta 折算成 pct delta:
+  //   delta_pct = delta_px / startWPx * 100
+  // 然后加到 startW (pct) 上, clamp 进 [MIN, MAX].
+  //
+  // 关键: 分母必须是 *拖动开始时* fs-tree 的 px 宽度 (startWPx), 而不是
+  // 每次 move 时实时读 clientWidth. 因为 setWidthStored 会立即触发 React
+  // re-render, fs-tree 的 width 变 → clientWidth 跟着变. 如果分母用变化的
+  // clientWidth, delta_pct = delta_px / 变化的分母 → 鼠标移动距离和 fs-tree
+  // 实际变化非线性 (用户感觉鼠标"飘"或"加速")。用 startWPx 锁定分母, 整个
+  // 拖动过程 delta_pct 跟鼠标移动呈纯线性: 鼠标走 X px, fs-tree 增/减
+  // X / startWPx * 100 %.
+  const fsTreeContainerRef = useRef<HTMLDivElement | null>(null);
+  // 拖拽时用「父容器宽度」作为 px→pct 换算分母. fs-tree 的 width 是百分比,
+  // 相对的是父级 flex 容器 (FsTab.tsx 里 `display:flex` 那行), 不是 fs-tree
+  // 自身. 若分母用 fs-tree 自身的 clientWidth (它总是 < 容器宽), delta_pct =
+  // delta_px / fsTreePx * 100 会被放大成 delta_px / (W/100) — 文件树右边缘
+  // 移动 `100/W` 倍于鼠标距离 (W=40 时是 2.5x), 就是用户感觉"拖拽距离和鼠标
+  // 不一样、树飘过去"的根因. 分母锁在鼠标按下时的容器宽 (拖动期间不变),
+  // 让 delta_pct 跟鼠标移动严格 1:1 线性.
+  const dragRef = useRef<{ startX: number; startW: number; containerPx: number } | null>(null);
+  const onFsHandleMouseDown = useCallback(
+    (e: React.MouseEvent) => {
+      // 防御性 bail: 锁定时不应触发拖动 (UI 上 drag surface 的 pointer-events
+      // 已被设为 none, 但 hook 自身也短路避免任何 race 触发越权写入).
+      if (lockedStored) return;
+      const container = fsTreeContainerRef.current?.parentElement;
+      const containerPx = container?.clientWidth || 0;
+      // 拿不到父容器宽度 (如未挂载 / 隐藏) 就不启动拖动, 避免分母为 0 除零.
+      if (!containerPx) return;
+      dragRef.current = { startX: e.clientX, startW: fsTreeWidth, containerPx };
+      const onMove = (ev: MouseEvent) => {
+        if (!dragRef.current) return;
+        // Drag right → grow fs-tree (follow mouse direction); left → shrink.
+        // 直觉: handle 在 fs-tree 的 right 边缘 (position: absolute, right: -6),
+        // fs-tree 的 width 是 ${pct}%. 鼠标向右移动 X px:
+        //   - delta_pct = delta_px / containerPx * 100 → fs-tree 右边缘恰好
+        //     移动 delta_px px, handle (right: -6) 跟着 fs-tree 右边缘同步走
+        //   - handle 在视觉上跟着鼠标走, fs-tree 也跟着鼠标走 → 1:1 一致
+        // 分母锁在 mouseDown 时记录的 containerPx — 拖动期间不变 (delta_pct
+        // 跟鼠标移动纯线性); 若用实时变化的 clientWidth (setWidthStored 触发
+        // re-render 后 fs-tree / 容器宽度都会变), delta_pct 会非线性"飘".
+        const deltaPx = ev.clientX - dragRef.current.startX;
+        const deltaPct = (deltaPx / dragRef.current.containerPx) * 100;
+        const next = dragRef.current.startW + deltaPct;
+        setWidthStored(clampFsTreeWidth(next));
+      };
+      const onUp = () => {
+        dragRef.current = null;
+        window.removeEventListener('mousemove', onMove);
+        window.removeEventListener('mouseup', onUp);
+      };
+      window.addEventListener('mousemove', onMove);
+      window.addEventListener('mouseup', onUp);
+    },
+    [fsTreeWidth, setWidthStored, lockedStored],
+  );
+
   // Save handler — marks dirty by tree path key so renderTree lookup matches.
   const handleSave = async (path: string, content: string) => {
     const r = await saveFile(path, content);
@@ -550,6 +629,13 @@ export function FsTab({ cwd }: { cwd: string | null }) {
   };
   const handleCancel = () => {
     setEditingPath(null);
+  };
+
+  // 目录树 / 两个搜索列表共用的右键菜单打开器。path 为相对 cwd 的路径,
+  // 与「复制相对路径」同值;absPath 由 buildAbsPath 还原绝对路径;kind 供
+  // 「插入对话」生成对应类型的 @引用 chip。
+  const openContextMenu = (p: string, x: number, y: number, kind?: 'file' | 'dir') => {
+    setContextMenu({ path: p, absPath: buildAbsPath(cwd, p), x, y, kind });
   };
 
   // Reset on cwd change.
@@ -625,7 +711,25 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       return {
         key: e.path,
         title: (
-          <span style={{ fontFamily: MONO, fontSize: 12 }}>
+          // 长文件名(2026-08-17-dsh-kernel-batch-00-baseline-dual-track.md 这种
+          // 几十字符的 plan/spec 文件)在 fs-tree 受限宽度下默认换行,导致相邻
+          // 节点文本相互重叠. 这里把 title 内的 <span> 切成 block + 满宽 +
+          // nowrap + ellipsis;父级 .ant-tree-title 也已同步改 block + width:100%,
+          // 配合 .ant-tree-node-content-wrapper 改成 flex:1 让剩余空间撑出来,
+          // max-width:100% 在 inline-block 上的"父级由内容决定宽"循环依赖被破除.
+          // dirty dot 维持 inline-block 圆点,不影响后续文本省略计算.
+          <span
+            title={e.name}
+            style={{
+              fontFamily: MONO,
+              fontSize: 12,
+              display: 'block',
+              width: '100%',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap',
+            }}
+          >
             {isDirty && (
               <span
                 data-testid={`fs-tree-dirty-${e.name}`}
@@ -709,6 +813,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
         <Switch
           size="small"
           data-testid="fs-search-mode"
+          aria-label="切换文件名/内容搜索"
           checked={mode === 'content'}
           onChange={(v) => setMode(v ? 'content' : 'name')}
           checkedChildren="内容"
@@ -765,9 +870,16 @@ export function FsTab({ cwd }: { cwd: string | null }) {
       </div>
       <div style={{ display: 'flex', flex: 1, minHeight: 0 }}>
         <div
+          ref={fsTreeContainerRef}
           data-testid="fs-tree"
           style={{
-            flex: '0 0 40%',
+            // 宽度用百分比 (相对 FsTab 容器), 持久化到 localStorage, 用户
+            // 拖动调整; position:relative 让内部的 drag handle / lock 按钮
+            // 用 absolute 锚定到 fs-tree 右边缘 (borderRight 视觉分割线).
+            flex: '0 0 auto',
+            width: `${fsTreeWidth}%`,
+            minWidth: 0,
+            position: 'relative',
             // 显式高度 (calc(100vh - 140px)) 让 fs-tree 在 flex 行里
             // 有确定的高度, antd Tree 自然渲染的内容超出时被父容器
             // overflow:auto 截断并显示原生滚动条; minHeight:0 防止
@@ -788,6 +900,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                 truncated={contentSearch.data?.truncated ?? false}
                 query={submittedQuery}
                 onSelect={(p, l) => { setSelected(p); setPendingLine(l); }}
+                onItemContextMenu={openContextMenu}
               />
             ) : (
               <FsSearchList
@@ -797,6 +910,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                 truncated={search.data?.truncated ?? false}
                 query={submittedQuery}
                 onSelect={(p) => setSelected(p)}
+                onItemContextMenu={openContextMenu}
               />
             )
           ) : root.error && !root.data?.ok ? (
@@ -831,20 +945,93 @@ export function FsTab({ cwd }: { cwd: string | null }) {
                 }
               }}
               onRightClick={({ node, event }) => {
-                const relPath = String(node.key);
-                const abs = buildAbsPath(cwd, relPath);
-                setContextMenu({ path: relPath, absPath: abs, x: event.clientX, y: event.clientY });
                 event.preventDefault();
+                openContextMenu(String(node.key), event.clientX, event.clientY, node.isLeaf ? 'file' : 'dir');
               }}
             />
           )}
+          {/* Splitter drag surface — 锚定在 fs-tree 右边缘 (borderRight 视觉分割
+              线位置, 文件树 ↔ 预览区 的分界). 锁定时整条 12px 宽 surface
+              pointer-events: none, 误触不会拖动. 解锁后变 ew-resize cursor +
+              半透明高亮, 鼠标按下开始拖动. 实现跟 SplitPane 完全一致. */}
+          <div
+            data-testid="fs-tree-drag-handle"
+            onMouseDown={onFsHandleMouseDown}
+            style={{
+              position: 'absolute',
+              top: 0,
+              right: -6,
+              width: 12,
+              height: '100%',
+              cursor: lockedStored ? 'default' : 'ew-resize',
+              background: lockedStored
+                ? 'transparent'
+                : 'rgba(255,102,0,0.06)',
+              pointerEvents: lockedStored ? 'none' : 'auto',
+              zIndex: 5,
+            }}
+            onMouseEnter={(e) => {
+              if (lockedStored) return;
+              (e.currentTarget as HTMLDivElement).style.background =
+                'rgba(255,102,0,0.18)';
+            }}
+            onMouseLeave={(e) => {
+              if (lockedStored) return;
+              (e.currentTarget as HTMLDivElement).style.background =
+                'rgba(255,102,0,0.06)';
+            }}
+            title={
+              lockedStored
+                ? `文件树宽度已锁定 — 点击悬浮按钮解锁后拖动调整 (${FS_TREE_MIN_WIDTH}-${FS_TREE_MAX_WIDTH}%)`
+                : `拖动以调整文件树宽度 (${FS_TREE_MIN_WIDTH}-${FS_TREE_MAX_WIDTH}%) — 点击悬浮按钮可锁定`
+            }
+          />
+          {/* Splitter lock toggle — floating button 居中悬浮在分割线上.
+              永远可点击 (zIndex > handle); 锁定时显示锁图标, 解锁时显示开锁
+              图标 + ew-resize cursor (按钮自身也是拖动目标的一环).
+              位置 right: -14 让按钮左右对称跨在 borderRight 这条线上. */}
+          <button
+            type="button"
+            data-testid="fs-tree-lock-toggle"
+            aria-label={lockedStored ? '解锁文件树宽度拖动' : '锁定文件树宽度拖动'}
+            onClick={() => setLockedStored(!lockedStored)}
+            style={{
+              position: 'absolute',
+              top: '50%',
+              right: -14,
+              transform: 'translateY(-50%)',
+              width: 28,
+              height: 28,
+              padding: 0,
+              borderRadius: 14,
+              border: '1px solid var(--border-light)',
+              background: lockedStored ? 'var(--bg-card)' : 'var(--accent-start)',
+              color: lockedStored ? 'var(--text-secondary)' : '#fff',
+              cursor: lockedStored ? 'pointer' : 'ew-resize',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              zIndex: 6,
+              boxShadow: '0 1px 4px rgba(0,0,0,0.25)',
+              fontSize: 14,
+            }}
+            title={
+              lockedStored
+                ? '文件树宽度已锁定, 点击解锁后可拖动调整'
+                : '文件树宽度可拖动调整, 点击锁定'
+            }
+          >
+            {lockedStored ? <LockOutlined /> : <UnlockOutlined />}
+          </button>
         </div>
         <div
           data-testid="fs-preview"
           style={{
-            // 与 fs-tree 对齐的 calc 高度; minHeight:0 防止内层
-            // SyntaxHighlighter / <pre> 自然高度撑爆 flex 行.
-            flex: '0 0 60%',
+            // fs-tree 用固定百分比 width 占左侧, fs-preview 用 flex:1 填
+            // 剩余空间; minWidth:0 让预览区可以被 fs-tree 挤压 (而不是
+            // 因 SyntaxHighlighter / <pre> 自然宽度反向撑爆 flex 行).
+            flex: 1,
+            minWidth: 0,
             height: 'calc(100vh - 140px)',
             minHeight: 0,
             display: 'flex',
@@ -883,6 +1070,7 @@ export function FsTab({ cwd }: { cwd: string | null }) {
           path={contextMenu.path}
           absPath={contextMenu.absPath}
           cwd={cwd}
+          kind={contextMenu.kind}
           position={{ x: contextMenu.x, y: contextMenu.y }}
           onClose={() => setContextMenu(null)}
           onDeleted={() => { setContextMenu(null); refreshAll(); }}

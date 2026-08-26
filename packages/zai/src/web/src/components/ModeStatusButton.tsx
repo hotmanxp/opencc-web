@@ -9,7 +9,7 @@ import {
 } from '@ant-design/icons'
 import { useAgentStore } from '../store/useAgentStore.js'
 import { useAppStore } from '../store/useAppStore.js'
-import type { PermissionMode } from '@zn-ai/zn-agent-core/runtime'
+import type { PermissionMode } from '@zn-ai/zn-agent-core'
 
 // Canonical cycle order (matches OpenCC TUI shift+tab order).
 const MODE_CYCLE: PermissionMode[] = [
@@ -305,6 +305,7 @@ export default function ModeStatusButton({ compact = false }: { compact?: boolea
         type="text"
         size="small"
         data-testid="mode-status-button"
+        aria-label={isMobile ? `当前 mode: ${meta.label}` : `切换 mode,当前 ${meta.label}`}
         title={isMobile ? undefined : `当前 mode: ${meta.label}\n点击切换`}
         style={{
           color: meta.color,

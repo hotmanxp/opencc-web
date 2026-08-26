@@ -30,7 +30,9 @@ import { basename, extname } from 'path'
 // pushed later tests in the same shard into GC-pause territory and a
 // beforeEach/afterEach hook timeout (officialRegistry.test.ts, PR #24150).
 // Same lazy pattern the NAPI wrapper used for dlopen.
-type HLJSApi = typeof hljsNamespace
+// highlight.js types expose the API as the default export; the module
+// namespace object itself carries no `highlight`/`getLanguage` members.
+type HLJSApi = typeof hljsNamespace.default
 let cachedHljs: HLJSApi | null = null
 function hljs(): HLJSApi {
   if (cachedHljs) return cachedHljs

@@ -29,11 +29,12 @@ export default function ConfirmButton({
 
   return (
     <>
-      <Button type={type} danger={danger} loading={loading} onClick={() => setOpen(true)}>
+      <Button type={type} danger={danger} loading={loading} aria-label={title} onClick={() => setOpen(true)}>
         {children}
       </Button>
       <Modal
         title={title}
+        aria-label={title}
         open={open}
         onOk={handleConfirm}
         onCancel={() => setOpen(false)}

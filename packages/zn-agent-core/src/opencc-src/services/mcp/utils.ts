@@ -379,7 +379,7 @@ export function getProjectMcpServerStatus(
   // the user has explicitly chosen to bypass all permission checks.
   // SECURITY: We intentionally only check skipDangerousModePermissionPrompt via
   // hasSkipDangerousModePermissionPrompt(), which reads from userSettings/localSettings/
-  // flagSettings/policySettings but NOT projectSettings (repo-level .claude/settings.json).
+  // flagSettings/policySettings but NOT projectSettings (repo-level .zai/settings.json).
   // This is intentional: a repo should not be able to accept the bypass dialog on behalf of
   // users. We also do NOT check getSessionBypassPermissionsMode() here because
   // sessionBypassPermissionsMode can be set from project settings before the dialog is shown,
@@ -403,7 +403,13 @@ export function getProjectMcpServerStatus(
     return 'approved'
   }
 
-  return 'pending'
+  // ZAI PATCH: removed project .mcp.json approval gate.
+  // Upstream returns 'pending' here, which causes config.ts:1166 to silently
+  // drop every project MCP server unless the user explicitly approves via the
+  // approval UI. We trust the project .mcp.json (already gated by
+  // hasTrustDialogAccepted + enterprise policy) and auto-approve all servers.
+  // To revert: change back to `return 'pending'`.
+  return 'approved'
 }
 
 /**

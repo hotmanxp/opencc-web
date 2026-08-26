@@ -188,7 +188,7 @@ import effort from './commands/effort/index.js'
 const usageReport: Command = {
   type: 'prompt',
   name: 'insights',
-  description: '生成分析你的OpenCC会话的报告',
+  description: '生成分析你的Z.Ai会话的报告',
   contentLength: 0,
   progressMessage: 'analyzing your sessions',
   source: 'builtin',

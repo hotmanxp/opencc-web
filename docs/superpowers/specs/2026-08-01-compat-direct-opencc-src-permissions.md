@@ -4,6 +4,9 @@
 作者: brainstorming session with Ethan
 状态: 设计稿,待评审
 
+> **状态：已过期(2026-08-16)**
+> 本设计提到的 `package.json` exports subpath(`@zn-ai/zn-agent-core/<subpath>`)已全部废除,运行时与 types 都从主入口 `@zn-ai/zn-agent-core` 导出(参见 plan `~/.zai/plans/glowing-toasting-elephant.md`)。本文档保留作为历史记录,不再代表当前实现。
+
 ## 背景
 
 `packages/zn-agent-core/src/compat/permissions.ts` 是个 verbatim 移植,内容与 `packages/zn-agent-core/src/opencc-src/types/permissions.ts` 在 `EXTERNAL_PERMISSION_MODES` / `ExternalPermissionMode` 上逐字等价。`compat/permissionMode.ts` 仅一行 `export * from './permissions.js'`。

@@ -99,6 +99,24 @@ describe('FsContentSearchList', () => {
     expect(onSelect).toHaveBeenCalledWith('src/foo.ts', 42);
   });
 
+  test('right-clicking a row fires onItemContextMenu with path and coords', () => {
+    const onItemContextMenu = vi.fn();
+    render(
+      <FsContentSearchList
+        entries={sampleEntries}
+        loading={false}
+        error={null}
+        truncated={false}
+        query="TODO"
+        onSelect={() => {}}
+        onItemContextMenu={onItemContextMenu}
+      />,
+    );
+    const rows = screen.getAllByTestId('fs-content-row');
+    fireEvent.contextMenu(rows[1], { clientX: 80, clientY: 160 });
+    expect(onItemContextMenu).toHaveBeenCalledWith('src/bar.ts', 80, 160);
+  });
+
   test('shows loading spinner when loading and no entries', () => {
     render(
       <FsContentSearchList

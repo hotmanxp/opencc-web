@@ -197,6 +197,14 @@ export type ToolUseContext = {
     refreshTools?: () => Tools
     /** Per-agent provider override from agentRouting config */
     providerOverride?: { model: string; baseURL: string; apiKey: string }
+    /**
+     * zai patch: id of the provider profile the user picked for this
+     * query. The modelCaller consumes it via `findProfileForModel` to
+     * route the exact model to the exact provider when several
+     * provider profiles share the same model name. Optional — when
+     * absent, the matcher falls back to the legacy first-match behavior.
+     */
+    providerId?: string
   }
   abortController: AbortController
   readFileState: FileStateCache

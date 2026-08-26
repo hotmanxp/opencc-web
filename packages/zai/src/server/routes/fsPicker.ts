@@ -2,6 +2,7 @@ import { Router, type IRouter, type Request } from 'express';
 import { readdir, stat } from 'node:fs/promises';
 import { dirname, resolve, sep } from 'node:path';
 import { homedir } from 'node:os';
+import { expandTilde } from '../utils/expandTilde.js';
 import type { FsPickerEntry, FsPickerList } from '../../shared/fsPicker.js';
 
 /**
@@ -51,7 +52,8 @@ router.get('/fs/picker', async (req: Request, res) => {
 
   // 空字符串 = home (resolve('', homedir()) = homedir())。这样客户端
   // 想"回到 home"只要发 path= 即可,无需知道 home 的实际字符串。
-  const target = raw === '' ? homedir() : resolve(raw);
+  // 非空路径先 expandTilde 处理 ~/foo 简写,再 resolve 成 OS-native 绝对路径。
+  const target = raw === '' ? homedir() : resolve(expandTilde(raw));
   // 再 normalize 一次,处理 resolve 后仍可能存在的 ./ 或 //
   const normalized = resolve(target);
 

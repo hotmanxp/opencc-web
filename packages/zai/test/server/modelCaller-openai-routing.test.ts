@@ -63,7 +63,7 @@ function writeSettings(env: Record<string, string>) {
     JSON.stringify({ env }), 'utf-8')
 }
 function writeClaude(profiles: unknown[]) {
-  writeFileSync(join(currentHome, '.claude.json'),
+  writeFileSync(join(currentHome, '.zai.json'),
     JSON.stringify({ providerProfiles: profiles }), 'utf-8')
 }
 

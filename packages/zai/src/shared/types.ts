@@ -25,7 +25,22 @@ export interface DirectoryStatus {
   nova: DirInfo;
   opencode: DirInfo;
   opencc: DirInfo;
-  globalSkills: DirInfo;
+  zai: DirInfo;
+  globalSkills: GlobalSkillsInfo;
+}
+
+/**
+ * `~/.agents/skills` 是 OpenCC 全局 skills 的实际加载路径
+ * (`opencc-src/utils/envUtils.ts:getUserAgentsDir()` →
+ * `opencc-src/skills/loadSkillsDir.ts:getSkillsPath('userSettings', 'skills')`)。
+ * 它本身就是一个 skills 目录,不再嵌 agents/commands/skills/extensions
+ * 四个子目录,因此用独立类型,只暴露一级条目。
+ */
+export interface GlobalSkillsInfo {
+  path: string;
+  exists: boolean;
+  /** `~/.agents/skills` 下的直接条目(文件或子目录),与 readdir 一致 */
+  items: string[];
 }
 
 export interface DirInfo {
@@ -76,6 +91,21 @@ export interface ConfigFile {
   path: string;
   exists: boolean;
   content: Record<string, unknown>;
+  missing?: boolean;
+}
+
+/**
+ * AGENTS.md (Markdown 文本) 文件的读取结果 — 与 ConfigFile 同形但
+ * content 是 string 而非 Record<string, unknown>。用独立类型避免 string-or-record
+ * 二义性,前端可强类型拿到 content: string,不需要 ?? {} 兜底。
+ *
+ * missing=true 时 content 一定为空串;exists=true + content='' 表示文件存在但为空。
+ */
+export interface AgentsMdFile {
+  path: string;
+  exists: boolean;
+  /** Markdown 原文。缺失或空文件时为 '' */
+  content: string;
   missing?: boolean;
 }
 
@@ -130,6 +160,27 @@ export interface ProviderProfile {
    * round-trip. Unrecognised keys are ignored.
    */
   capabilities?: Record<string, ModelCapabilities>;
+  /**
+   * Name of the env var to read as the API key for this provider.
+   * Resolution order at request time:
+   *   1. `profile.apiKey` (inline, if set — not currently surfaced in UI)
+   *   2. `zaiEnv[profile.apiKeyEnv]` (e.g. `DEEPSEEK_API_KEY`)
+   *   3. `OPENAI_API_KEY` (openai providers) or `ANTHROPIC_AUTH_TOKEN`
+   *      (anthropic providers) — the global zai default.
+   *
+   * Lets users host multiple providers that each need their own key
+   * without changing the global env var.
+   */
+  apiKeyEnv?: string;
+  /**
+   * Free-form request-body fields merged into every LLM call routed
+   * through this profile (anthropic → `messages.create({...})`,
+   * openai → POST `/chat/completions` body). Lets users pin per-
+   * provider defaults like `temperature`, `top_p`, `reasoning_effort`,
+   * etc. without code changes. Keys here overwrite identical keys the
+   * caller already set.
+   */
+  extraParams?: Record<string, unknown>;
 }
 export type LoginType = 'pa' | 'pa-long' | 'op';
 

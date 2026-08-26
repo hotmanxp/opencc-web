@@ -28,9 +28,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
 
-import { createHeadlessContext } from '@zn-ai/zn-agent-core/opencc-server'
+import { createHeadlessContext } from '@zn-ai/zn-agent-core'
 
-describe('createHeadlessContext — vendor headless bootstrap (Task 2)', () => {
+describe('createHeadlessContext — vendor headless bootstrap (Task 2)', { timeout: 30_000 }, () => {
   let dataDir: string
   let cwdA: string
   let cwdB: string

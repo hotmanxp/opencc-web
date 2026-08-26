@@ -11,6 +11,8 @@ import { SEND_MESSAGE_TOOL_NAME } from '../SendMessageTool/constants.js'
 import { AGENT_TOOL_NAME } from './constants.js'
 import { isForkSubagentEnabled } from './forkSubagent.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
+import { getSubagentRegistry } from '../../../compat/subagents/registry.js'
+import { formatSubagentProviderSection } from '../../../compat/subagents/promptSection.js'
 
 function getToolsDescription(agent: AgentDefinition): string {
   const { tools, disallowedTools } = agent
@@ -158,20 +160,20 @@ ${AGENT_TOOL_NAME}({
   const currentExamples = `Example usage:
 
 <example_agent_descriptions>
-"claude-code-guide": use this agent when the user asks how OpenCC works or how to use its features
-"statusline-setup": use this agent to configure the user's OpenCC status line setting
+"claude-code-guide": use this agent when the user asks how Z.Ai works or how to use its features
+"statusline-setup": use this agent to configure the user's Z.Ai status line setting
 </example_agent_descriptions>
 
 <example>
-user: "How do I configure OpenCC hooks?"
+user: "How do I configure Z.Ai hooks?"
 <commentary>
-This is an OpenCC usage question, so use the claude-code-guide agent
+This is a Z.Ai usage question, so use the claude-code-guide agent
 </commentary>
 assistant: Uses the ${AGENT_TOOL_NAME} tool to launch the claude-code-guide agent
 </example>
 
 <example>
-user: "Set up my OpenCC status line"
+user: "Set up my Z.Ai status line"
 <commentary>
 This matches the statusline-setup agent, so use it to configure the setting
 </commentary>
@@ -190,13 +192,23 @@ assistant: "I'm going to use the ${AGENT_TOOL_NAME} tool to launch the statuslin
     : `Available agent types and the tools they have access to:
 ${effectiveAgents.map(agent => formatAgentLine(agent)).join('\n')}`
 
+  // Subagent providers live in a separate registry (`SubagentProvider`,
+  // not `AgentDefinition`) and are not covered by the agent-list
+  // attachment path above. Surface them here so the model can see what
+  // `subagent_type` values route to a provider — otherwise the schema's
+  // `subagent_type: z.string()` is opaque and the model falls back to
+  // guessing from prior conversation context. The formatting itself
+  // lives in `compat/subagents/promptSection.ts` so it can be unit-tested
+  // without importing AgentTool's full buildTool chain.
+  const subagentProviderSection = formatSubagentProviderSection(getSubagentRegistry())
+
   // Shared core prompt used by both coordinator and non-coordinator modes
   const shared = `Launch a new agent to handle complex, multi-step tasks autonomously.
 
 The ${AGENT_TOOL_NAME} tool launches specialized agents (subprocesses) that autonomously handle complex tasks. Each agent type has specific capabilities and tools available to it.
 
 ${agentListSection}
-
+${subagentProviderSection ? `\n${subagentProviderSection}\n` : ''}
 ${
   forkEnabled
     ? `When using the ${AGENT_TOOL_NAME} tool, specify a subagent_type to use a specialized agent, or omit it to fork yourself — a fork inherits your full conversation context.`

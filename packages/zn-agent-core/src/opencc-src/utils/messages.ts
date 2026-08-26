@@ -32,6 +32,7 @@ import {
 } from '../services/analytics/growthbook.js'
 import {
   getImageTooLargeErrorMessage,
+  getImageFormatInvalidErrorMessage,
   getPdfInvalidErrorMessage,
   getPdfPasswordProtectedErrorMessage,
   getPdfTooLargeErrorMessage,
@@ -1410,6 +1411,12 @@ export function normalizeMessagesForAPI(
     [getPdfInvalidErrorMessage()]: new Set(['document']),
     [getImageTooLargeErrorMessage()]: new Set(['image']),
     [getRequestTooLargeErrorMessage()]: new Set(['document', 'image']),
+    // zai patch (2026-08-09): tool_result 含坏图(image format unknown 2013)
+    // 时 strip 前导 user 消息的 image block。canonical 消息含
+    // IMAGE_FORMAT_INVALID_CANONICAL_ERROR,见 errors.ts。strip 搜索的扩展
+    // 见下方 — 必须能找到**非 isMeta** 的 user 消息(tool_result 路径
+    // 不带 isMeta),否则仍会死循环(sess-1786233030871-l455dror 复现)。
+    [getImageFormatInvalidErrorMessage()]: new Set(['image']),
     // Issue #1421: existing transcripts poisoned by a 400 "text is not set"
     // (Xiaomi Mimo + non-vision model) carry an image-only tool_result that
     // would re-trigger the same 400 on every retry. Match the canonical
@@ -1461,6 +1468,29 @@ export function normalizeMessagesForAPI(
       // Skip over other synthetic error messages or non-meta messages
       if (isSyntheticApiErrorMessage(candidate)) {
         continue
+      }
+      // zai patch (2026-08-09): 允许非 isMeta user 消息作为 strip 目标。
+      // 仅当 block 类型是 image(tool_result 路径的坏图 case)且该 user
+      // 消息确实含 image block 时才生效 — 不会误伤 PDF/其他类型,因为
+      // blockTypesToStrip.has('image') 守卫 + content 实际检查双重判定。
+      // 这是 sess-1786233030871-l455dror 4 次重试全 400 的修复点。
+      if (
+        candidate.type === 'user' &&
+        blockTypesToStrip.has('image') &&
+        Array.isArray(candidate.message?.content) &&
+        candidate.message.content.some(
+          (b: { type?: string }) => b?.type === 'image',
+        )
+      ) {
+        const existing = stripTargets.get(candidate.uuid)
+        if (existing) {
+          for (const t of blockTypesToStrip) {
+            existing.add(t)
+          }
+        } else {
+          stripTargets.set(candidate.uuid, new Set(blockTypesToStrip))
+        }
+        break
       }
       // Stop if we hit an assistant message or non-meta user message
       break
@@ -1545,7 +1575,7 @@ export function normalizeMessagesForAPI(
           // preceded a PDF/image/request-too-large error, to prevent re-sending
           // the problematic content on every subsequent API call.
           const typesToStrip = stripTargets.get(normalizedMessage.uuid)
-          if (typesToStrip && normalizedMessage.isMeta) {
+          if (typesToStrip && (normalizedMessage.isMeta || (normalizedMessage.type === 'user' && typesToStrip.has('image')))) {
             const content = normalizedMessage.message.content
             if (Array.isArray(content)) {
               const filtered = content.filter(

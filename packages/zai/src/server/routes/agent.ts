@@ -18,19 +18,94 @@ import {
   setCurrentSessionId,
   listSkills,
 } from "../services/agentRuntime.js";
-import { EXTERNAL_PERMISSION_MODES } from "@zn-ai/zn-agent-core/opencc-src/permissions";
-import type { UserFacingPermissionMode } from "@zn-ai/zn-agent-core/compat/permissions";
-import { CwdStore, runWithSessionId } from "@zn-ai/zn-agent-core/runtime";
 import {
+  EXTERNAL_PERMISSION_MODES,
+  getApiCallCount,
+  getLastContextTokens,
+  setCurrentApiCountSession,
+  clearApiCallCount,
+  CwdStore,
+  runWithSessionId,
   appendUserMessageV2,
   appendAssistantMessageV2,
   appendToolUse,
   appendToolResult,
-} from "@zn-ai/zn-agent-core/runtime";
+  takeDisplayFilesOutput,
+  type UserFacingPermissionMode,
+} from "@zn-ai/zn-agent-core";
 import { getDefaultMode } from "../services/permissionMode.js";
+import { getCachedZaiSettingsSync } from "../services/zaiSettingsStore.js";
+import { flushPendingBashNotifications } from "../services/bashNotifier.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
+import { sessionInbox, type InboxMessage } from "../services/sessionInbox.js";
+import { logHttp } from "../services/accessLog.js";
 import { resolveModel } from "../lib/resolveModel.js";
+import { resolveProviderForModel as resolveProviderForModelImpl } from "../services/modelCaller.js";
+
+/**
+ * zai patch: 把所选 model 解析到对应 provider profile，命中 profile 即返回
+ * providerOverride（model/baseURL/apiKey）。provider 类型决定请求走哪条 API
+ * 通道（vendor `getAnthropicClient({ providerOverride })` 消费）：
+ *
+ * - `provider: 'openai'` → 带 `format: 'openai'`（缺省语义），走 vendor
+ *   `createOpenAIShimClient`（openai-shim），POST 到 wizard-ai 等 OpenAI
+ *   兼容网关的 /chat/completions。
+ * - `provider: 'anthropic'`（如 deepseek）→ 带 `format: 'anthropic'`，vendor
+ *   改用 Anthropic SDK + override 的 baseURL/apiKey 打 Anthropic Messages
+ *   兼容端点。修复点：此前 anthropic profile 命中时返回空对象，请求落到
+ *   ANTHROPIC_BASE_URL/ANTHROPIC_AUTH_TOKEN 的 env 默认（MiniMax 端点），
+ *   用户选择的 deepseek profile 配置从未参与调用。
+ * - 未匹配到任何 profile → 空对象，走 env 默认路径，行为不变。
+ *
+ * `preferredProfileId` is forwarded to the matcher so when several
+ * provider profiles host the same model name (e.g. `MiniMax-M3` on
+ * both Open Platform and ZhiNiao), we route to the one the user
+ * actually picked in the picker instead of the first one in the array.
+ */
+async function resolveProviderOverrideForModel(
+  model: string | undefined,
+  preferredProfileId?: string | null,
+): Promise<
+  | {
+      providerOverride: {
+        model: string
+        baseURL: string
+        apiKey: string
+        /**
+         * 请求 API 通道：'anthropic' → Anthropic SDK + override
+         * baseURL/apiKey（Messages 兼容端点）；缺省/'openai' →
+         * openai-shim（chat/completions）。由 profile.provider 决定。
+         */
+        format?: 'anthropic' | 'openai'
+        /**
+         * zai patch: per-provider extraParams (e.g. enable_search) merged
+         * by the vendor openai-shim into every chat/completions body.
+         * Optional — absent for profiles without extraParams so the
+         * shim's built-in defaults keep winning.
+         */
+        extraParams?: Record<string, unknown>
+      }
+    }
+  | Record<string, never>
+> {
+  if (!model) return {}
+  const { baseURL, apiKey, profile } = resolveProviderForModelImpl(model, preferredProfileId)
+  if (!profile) return {}
+  if (!baseURL || !apiKey) return {}
+  const isAnthropicProfile = profile.provider !== 'openai'
+  return {
+    providerOverride: {
+      model,
+      baseURL,
+      apiKey,
+      // anthropic profile → Anthropic SDK + profile baseURL/apiKey；
+      // openai profile（缺省 format）→ vendor openai-shim。
+      ...(isAnthropicProfile ? { format: 'anthropic' as const } : {}),
+      ...(profile.extraParams ? { extraParams: profile.extraParams } : {}),
+    },
+  }
+}
 
 const router: IRouter = Router();
 router.use('/agent', commandRouter)
@@ -147,6 +222,46 @@ function newSessionId(): string {
 // 导出:subagentNotifier.ts 在 <task-notification> 触发的副 run 里也要把
 // runtime 事件翻译后 emit 到 eventBus,否则前端 SSE 渠道拿不到续写事件
 // (只写了 transcript,前端 status 永远卡在 idle)。
+
+// zai patch (2026-08-09): per-session 最近一次 API usage 缓存。
+//
+// 设计 — usage 实际上来自上游 vendor(claude.ts)在 message_start /
+// message_delta / non-streaming fallback 时通过 sessionApiCounter.ts 的
+// setLastContextUsage() 写到 globalThis.__zaiApiCountLastUsage 单 slot。
+// zai 服 emit runtime.done 时通过 getLastContextTokens() 读出。
+//
+// lastUsageBySession Map 是早期版本的占位(原计划在 translateRuntimeEvents
+// 的 case "message_delta" 里捕获,但 vendor 事件被 stream_event 包装,
+// 走 default 静默丢弃 — 永远不命中)。保留 Map 仅作 future-proof:
+// 若以后 unwrap stream_event 直接透传 SDK 原生事件,可同时填充 Map +
+// globalThis, getContextTokensForSession 优先用 Map(globalThis 在
+// 多 session 并行场景会被互相覆盖,Map 隔离更稳)。
+interface LastUsage {
+  input: number
+  cache_creation: number
+  cache_read: number
+  output: number
+  model: string | null
+}
+const lastUsageBySession = new Map<string, LastUsage>()
+
+/**
+ * 读某 session 最近一次 API 调用的 total context tokens(input +
+ * cache_creation + cache_read,不含 output)。
+ *
+ * 优先查 per-session Map(为未来 unwrap stream_event 留 hook);若没有
+ * 命中,回退到 globalThis 的单 slot 值(getLastContextTokens — claude.ts
+ * 的 message_start / message_delta / fallback 路径实时写入)。
+ *
+ * zai 服 emit runtime.done 时调用,把 total 推给前端 store。
+ */
+function getContextTokensForSession(sid: string): number | null {
+  const u = lastUsageBySession.get(sid)
+  if (u) return u.input + u.cache_creation + u.cache_read
+  // Fallback 到 globalThis 上游写入的最近一次 usage。zai-server 串行
+  // 处理 query,单 slot 不会出现 session 间串扰。
+  return getLastContextTokens()
+}
 export async function* translateRuntimeEvents(
   events: AsyncIterable<Record<string, unknown>>,
   sessionId: string,
@@ -183,7 +298,20 @@ export async function* translateRuntimeEvents(
     const t = ev.type as string | undefined;
     switch (t) {
       case "message_start":
-        yield { type: "runtime.started", sessionId, turnIndex };
+        // zai patch (2026-08-09): 把 metrics 提升到 runtime.started 推送。
+        // 中间轮次的 message_stop 被 sdkEventAdapter 抑制(避免冻结 vendor
+        // 工具循环),导致整条 prompt 期间 apiRequestCount / contextTokens
+        // 都不更新。这里在每次 LLM 调用起点(message_start 不被抑制)同步
+        // 推送:recordApiCall() 已在 claude.ts:1877 早于 message_start 触发,
+        // getContextTokensForSession 在 message_start 路径上拿到的是上一轮
+        // message_delta 的最终值,作为"本轮入站 context"显示稳定。
+        yield {
+          type: "runtime.started",
+          sessionId,
+          turnIndex,
+          apiRequestCount: getApiCallCount(sessionId),
+          contextTokens: getContextTokensForSession(sessionId) ?? undefined,
+        };
         break;
       case "content_block_start": {
         const block = ev.content_block as
@@ -334,6 +462,19 @@ export async function* translateRuntimeEvents(
         // 会因为 `{}` 是 truthy 而把已有 input 覆盖成空对象, ToolCallBlock
         // 折叠态预览丢失. 让 input 保持 undefined, 客户端走 prev.input 回退.
         const input = (ev.input !== undefined && ev.input !== null) ? (ev.input as unknown) : undefined;
+        // DisplayFiles 前端展示通道:LLM 消息历史里的 tool_result content 是
+        // 'done'(工具 mapToolResultToToolResultBlockParam 省上下文),但前端
+        // fileDisplayRenderer 渲染文件卡片靠 SSE output 里的 wrapper JSON ——
+        // 两者源自同一份 content,不能两全。zai-agent-core 把 wrapper 按
+        // toolUseId 暂存,takeDisplayFilesOutput 取出即删;命中就替换 output,
+        // 无暂存(异常路径)回退到 content 原值。
+        let toolOutput = (ev.output as unknown) ?? "";
+        if (toolName === "DisplayFiles") {
+          const wrapped = takeDisplayFilesOutput(id);
+          if (typeof wrapped === "string") {
+            toolOutput = wrapped;
+          }
+        }
         yield {
           type: "runtime.tool_result",
           sessionId,
@@ -341,7 +482,7 @@ export async function* translateRuntimeEvents(
           toolUseId: id,
           toolName,
           input,
-          output: (ev.output as unknown) ?? "",
+          output: toolOutput,
         };
         break;
       }
@@ -431,9 +572,40 @@ export async function* translateRuntimeEvents(
         };
         break;
       }
+      case "message_delta": {
+        // Anthropic SDK 在 streaming 模式唯一带 usage 的事件(输入 token
+        // 累计 + cache + 本次 output)。每个 message_delta 都累一次,
+        // 最后一个是完整数据;这里"最新即覆盖"足够(同 sessionId 串行
+        // 推,中间态会被最后一个覆盖)。
+        const usage = (ev as { usage?: unknown }).usage as
+          | { input_tokens?: number; cache_creation_input_tokens?: number;
+              cache_read_input_tokens?: number; output_tokens?: number }
+          | undefined
+        if (usage && typeof usage === "object") {
+          const prev = lastUsageBySession.get(sessionId)
+          lastUsageBySession.set(sessionId, {
+            input: typeof usage.input_tokens === "number" ? usage.input_tokens : (prev?.input ?? 0),
+            cache_creation: typeof usage.cache_creation_input_tokens === "number" ? usage.cache_creation_input_tokens : (prev?.cache_creation ?? 0),
+            cache_read: typeof usage.cache_read_input_tokens === "number" ? usage.cache_read_input_tokens : (prev?.cache_read ?? 0),
+            output: typeof usage.output_tokens === "number" ? usage.output_tokens : (prev?.output ?? 0),
+            model: prev?.model ?? null,
+          })
+        }
+        break
+      }
       case "message_stop":
         sawMessageStop = true;
-        yield { type: "runtime.done", sessionId, turnIndex };
+        yield {
+          type: "runtime.done",
+          sessionId,
+          turnIndex,
+          // zai patch (2026-08-09): 携带该 session 截至本次 runtime.done
+          // 为止的累计 API 请求数;前端 store 累加显示。
+          apiRequestCount: getApiCallCount(sessionId),
+          // 当前上下文大小(最近一次 API 调用的 input + cache tokens);
+          // 无记录时为 null,前端用 "—" 显示。
+          contextTokens: getContextTokensForSession(sessionId) ?? undefined,
+        };
         turnIndex++;
         // Reset tool accumulator between turns
         toolInputBuffers.clear();
@@ -473,71 +645,22 @@ export async function* translateRuntimeEvents(
         } as any
         break;
       }
-      // Vendor's `defaultQuery` yields these event types when
-      // `engine.submitMessage` (vendor's full tool loop) is the
-      // runtime path. The runtime used to bypass vendor's
-      // defaultQuery and yield raw SDK events (`message_start` /
-      // `content_block_*` / `message_stop`); now that vendor's
-      // built-in callModel is the default, the translator needs
-      // to also handle the Message shape the vendor emits.
-      case "assistant": {
-        const msg = (ev as { message?: { content?: unknown } }).message
-        const blocks = Array.isArray(msg?.content) ? (msg!.content as Array<Record<string, unknown>>) : []
-        // First assistant event in a turn = turn-start.
-        yield { type: 'runtime.started', sessionId, turnIndex }
-        for (const block of blocks) {
-          if (block?.type === 'text' && typeof block.text === 'string' && block.text) {
-            yield { type: 'runtime.delta', sessionId, turnIndex, delta: block.text }
-          } else if (block?.type === 'thinking' && typeof block.thinking === 'string' && block.thinking) {
-            yield { type: 'runtime.thinking', sessionId, turnIndex, thinking: block.thinking }
-          } else if (block?.type === 'tool_use' && typeof block.id === 'string') {
-            yield {
-              type: 'runtime.tool_call',
-              sessionId,
-              turnIndex,
-              toolUseId: block.id,
-              toolName: typeof block.name === 'string' ? block.name : 'unknown',
-              input: block.input,
-            }
-          }
-        }
-        // NOTE: do NOT emit `runtime.done` here. Vendor may yield
-        // multiple `assistant` events per turn (e.g. one for
-        // thinking, one for text, or one per tool_use block in a
-        // tool loop). `runtime.done` is reserved for the `result`
-        // case below; the route's `for await` breaks on
-        // `runtime.done`, so emitting it eagerly would tear the
-        // route down before the actual final response.
-        break
-      }
-      case "user": {
-        // Vendor's tool loop yields a `user` Message per tool_result
-        // after executing each tool.
-        const msg = (ev as { message?: { content?: unknown } }).message
-        const blocks = Array.isArray(msg?.content) ? (msg!.content as Array<Record<string, unknown>>) : []
-        for (const block of blocks) {
-          if (block?.type === 'tool_result' && typeof block.tool_use_id === 'string') {
-            const output =
-              typeof block.content === 'string'
-                ? block.content
-                : Array.isArray(block.content)
-                  ? (block.content as Array<Record<string, unknown>>)
-                      .map((c) => (typeof c?.text === 'string' ? c.text : JSON.stringify(c)))
-                      .join('')
-                  : ''
-            yield {
-              type: 'runtime.tool_result',
-              sessionId,
-              turnIndex,
-              toolUseId: block.tool_use_id,
-              toolName: '',
-              input: undefined,
-              output,
-            }
-          }
-        }
-        break
-      }
+      // zai patch (2026-08-09): 'assistant' / 'user' Message 在
+      // runtime.query 出口已被 compat/runtime/sdkEventAdapter
+      // (translateSdkToRuntime) 翻译为 Anthropic primitives:
+      //   - assistant → message_start + content_block_start/delta/stop
+      //     (+ message_delta); adapter 通过 streamedBlockIndices dedup
+      //     避免 stream_event envelope 路径与 assistant Message 路径
+      //     重发同一 block(见 sdkEventAdapter.ts:118-124, :218-221)。
+      //   - user with tool_result → tool_use:done(被上面的
+      //     case "tool_use:done" 转 runtime.tool_result)。
+      // vendor 的所有 'user' yield 路径(QueryEngine.ts:797-806,
+      // :940-950, query.ts:164-176, :245-254)的 message.content
+      // 只含 tool_result blocks,adapter 已全覆盖。
+      // 因此 translateRuntimeEvents 这里不再需要直接处理
+      // 'assistant' / 'user' Message shape —— 它们在上游已被 adapter
+      // 拆解成下面这些 primitives (message_start / content_block_* /
+      // message_stop / tool_use:done) 再走本 switch。
       case "result": {
         const r = ev as { is_error?: boolean }
         if (r.is_error) {
@@ -554,7 +677,13 @@ export async function* translateRuntimeEvents(
         }
         if (!sawMessageStop) {
           sawMessageStop = true
-          yield { type: 'runtime.done', sessionId, turnIndex }
+          yield {
+            type: 'runtime.done',
+            sessionId,
+            turnIndex,
+            apiRequestCount: getApiCallCount(sessionId),
+            contextTokens: getContextTokensForSession(sessionId) ?? undefined,
+          }
           turnIndex++
         }
         break
@@ -569,8 +698,794 @@ export async function* translateRuntimeEvents(
   // 不会被 forward 给我们 — for-await 上面没见到 message_stop, 兜底 yield
   // runtime.done 让前端 status:'idle' 能点亮.
   if (!sawMessageStop) {
-    yield { type: "runtime.done", sessionId, turnIndex };
+    yield {
+      type: "runtime.done",
+      sessionId,
+      turnIndex,
+      apiRequestCount: getApiCallCount(sessionId),
+      contextTokens: getContextTokensForSession(sessionId) ?? undefined,
+    };
   }
+}
+
+// ============================================================================
+// Per-session prompt queue — 对话进行中提交的消息排队串行执行
+//
+// 追齐 OPENCC(vendor) 的消息排队交互:生成过程中输入框不禁用,消息进入
+// 模块级命令队列,当前轮结束后自动执行下一条。zai 是前端/后端分离,队列放
+// server 端:同一 sessionId 的 /agent/prompt 串行执行(杜绝并发 queryLoop
+// 写坏同一 transcript),后续 prompt 排队等待,状态经 queue.changed SSE
+// 事件推给前端(排队预览)。
+//
+// - sessionQueues: 每个 sid 的等待队列(FIFO)
+// - sessionRunning: 每个 sid 当前是否在跑(单消费者标记)
+// 排队的命令不注册 sessionControllers — 该 Map 是单槽
+// (agentRuntime.ts),register 会覆盖正在跑的任务的 controller。Esc 中断
+// 只作用于当前轮,与 OPENCC 一致。
+// ============================================================================
+type PendingPrompt = {
+  id: string
+  sessionId: string
+  cwd: string
+  prompt: string
+  contentBlocks?: z.infer<typeof PromptRequest>['contentBlocks']
+}
+
+const sessionQueues = new Map<string, PendingPrompt[]>()
+const sessionRunning = new Set<string>()
+
+// ---------------------------------------------------------------------------
+// 会话级 429 冷却(zai patch 2026-08-08)
+// ---------------------------------------------------------------------------
+// 上一轮 query 因 rate_limit(429)终止后,本会话在冷却窗口(30s)内的新
+// query 直接拒绝,不再向 API 发请求。即使 vendor withRetry 的 gate 也会
+// 等窗口,这里在入口拦截更干净:不挂起请求、前端立即得到明确反馈、
+// 限流窗口内不会累积排队请求。窗口结束自动恢复。
+const SESSION_RATE_LIMIT_COOLDOWN_MS = 30_000
+const sessionRateLimitUntil = new Map<string, number>()
+
+export function markSessionRateLimited(
+  sessionId: string,
+  windowMs: number = SESSION_RATE_LIMIT_COOLDOWN_MS,
+): void {
+  sessionRateLimitUntil.set(sessionId, Date.now() + windowMs)
+}
+
+/** 本会话距 429 冷却窗口结束的剩余毫秒;不在冷却窗口内时返回 0。 */
+export function getSessionRateLimitRemainingMs(sessionId: string): number {
+  const until = sessionRateLimitUntil.get(sessionId)
+  if (until === undefined) return 0
+  const remaining = until - Date.now()
+  if (remaining <= 0) {
+    sessionRateLimitUntil.delete(sessionId)
+    return 0
+  }
+  return remaining
+}
+
+/** 测试 seam:清空会话级冷却状态。 */
+export function __resetSessionRateLimitsForTests(): void {
+  sessionRateLimitUntil.clear()
+}
+
+/** 测试 seam:撤销指定 session 的"运行中"标记(用于测试 steer 的空闲守卫)。 */
+export function __clearSessionRunningForTests(sessionId: string): void {
+  sessionRunning.delete(sessionId)
+}
+
+/** 判断错误消息是否命中 rate-limit(duck-type,兼容 MiniMax status 不可靠)。 */
+export function isRateLimitErrorMessage(message: unknown): boolean {
+  if (typeof message !== 'string') return false
+  const lower = message.toLowerCase()
+  return (
+    lower.includes('rate_limit') ||
+    lower.includes('rate limit') ||
+    // "rate limit exceeded(TPM) (1039)" 已命中上面的 "rate limit";这里只
+    // 匹配 429 + api error 组合,不裸匹配 "tpm"(模型正常输出讨论 TPM 芯片/
+    // tpm2-tools 会误触发会话级冷却)。
+    (lower.includes('429') && lower.includes('api error'))
+  )
+}
+
+function emitQueueChanged(sid: string): void {
+  const q = sessionQueues.get(sid) ?? []
+  eventBus.emit({
+    type: 'queue.changed',
+    sessionId: sid,
+    running: sessionRunning.has(sid),
+    queueLength: q.length,
+    pending: q.map((c) => ({ id: c.id, text: c.prompt })),
+  } as ServerEventInput)
+}
+
+async function runNextInQueue(sid: string): Promise<void> {
+  if (sessionRunning.has(sid)) return
+
+  const httpCmd = nextHttpPrompt(sid)
+  const inboxMsg = sessionInbox.consumeNextTurn(sid)
+
+  let cmd: PendingPrompt | null
+  if (httpCmd) {
+    // 用户人工输入 → 重置唤醒预算(对齐 SessionInbox.resetWakeBudget 语义)
+    sessionInbox.resetWakeBudget(sid)
+    cmd = httpCmd
+  } else if (inboxMsg) {
+    cmd = inboxToPendingPrompt(sid, inboxMsg)
+  } else {
+    sessionQueues.delete(sid)
+    emitQueueChanged(sid)
+    return
+  }
+
+  // ★ 同步段原子性: sessionRunning.add 与首个 await (runQueryLoop) 之间不得
+  // 插入任何 await — 「同一 tick 二次触发被 has(sid) 拦截」靠这段同步代码
+  // 保证。JS 单线程模型 + 入队/wake 触发都是同步段, 守卫不会被打断。
+  sessionRunning.add(sid)
+  sessionInbox.setBusy(sid)
+  emitQueueChanged(sid)
+  try {
+    await runQueryLoop(cmd)
+  } finally {
+    sessionRunning.delete(sid)
+    sessionInbox.clearRunning(sid)
+    // turn 结束 → 消费 next-step lane: 多条消息合并为单条 prompt 喂给下一轮
+    const nextStep = sessionInbox.consumeNextStep(sid)
+    if (nextStep.length > 0) {
+      enqueueInboxPrompt(sid, mergeInboxMessages(nextStep))
+    }
+    void runNextInQueue(sid)
+  }
+}
+
+/** HTTP 队列队首(shift + emitQueueChanged);空则 null。 */
+function nextHttpPrompt(sid: string): PendingPrompt | null {
+  const q = sessionQueues.get(sid)
+  if (!q || q.length === 0) return null
+  return q.shift()!
+}
+
+/** inbox 消息 → PendingPrompt(cwd 从 CwdStore 取;缺则 process.cwd 兜底)。 */
+function inboxToPendingPrompt(sid: string, msg: InboxMessage): PendingPrompt {
+  return {
+    id: `inbox-${msg.id}`,
+    sessionId: sid,
+    cwd: resolveInboxCwd(sid),
+    prompt: msg.content,
+  }
+}
+
+/** 多条 next-step 合并为单条 prompt(对齐 DSH steer 批处理语义)。 */
+function mergeInboxMessages(msgs: InboxMessage[]): string {
+  return msgs.map((m) => m.content).join('\n\n')
+}
+
+/**
+ * 把 inbox 合并的 prompt 排到 HTTP 队列顶 — HTTP 之后、未来输入之前。
+ * 直接 prepend 到 sessionQueues 头部(不再 wake: 已在本 tick 上下文中)。
+ */
+function enqueueInboxPrompt(sid: string, prompt: string): void {
+  const cwd = resolveInboxCwd(sid)
+  const cmd: PendingPrompt = {
+    id: `inbox-merged-${crypto.randomUUID()}`,
+    sessionId: sid,
+    cwd,
+    prompt,
+  }
+  const q = sessionQueues.get(sid) ?? []
+  q.unshift(cmd)
+  sessionQueues.set(sid, q)
+}
+
+/** 从 CwdStore 取 session 当前 cwd;缺则 process.cwd 兜底。 */
+function resolveInboxCwd(sid: string): string {
+  try {
+    const v = CwdStore.get(sid)
+    if (v) return v
+  } catch {
+    // CwdStore.get 不抛 (它走内部 Map), 兜底 catch 防 vendor 行为变更。
+  }
+  return process.cwd()
+}
+
+// ============================================================================
+// Inbox → zai scheduler wake bridge
+//
+// SessionInbox.followup / steer 在 idle 且 wakeBudget 预算内会调 wakeHandler
+// 唤醒父 session — 这里注册为 runNextInQueue, 把 next-turn lane 的消息
+// 作为一条 prompt 喂给 LLM。handler 抛错仅 console.warn, 不让后台回调把
+// server 弄崩(与 SubagentNotifier / BashNotifier 同款防御)。
+sessionInbox.setWakeHandler((sid) => {
+  void runNextInQueue(sid).catch((err) =>
+    console.warn('[agent] inbox wake runNextInQueue failed:', err),
+  )
+})
+
+/**
+ * 单条 prompt 的 queryLoop(原 /agent/prompt 的 runWithSessionId body)。
+ * 由 runNextInQueue 串行驱动;abortController / HARD_TIMEOUT / 注册与释放
+ * sessionController 都随"这条命令真正开始执行"进入生命周期。
+ */
+async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
+  // 整段包进 runWithSessionId 让 queryLoop 里的 getCwd() 通过 ALS
+  // 解析到本 session 的逻辑 cwd(与原 /agent/prompt 行为一致)。
+  return runWithSessionId(cmd.sessionId, async () => {
+  // zai patch (2026-08-09): 把当前 sessionId 注入 vendor globalThis,
+  // 让 claude.ts 内 recordApiCall 同步读到并累加 API 请求数。
+  // 必须在 runQueryLoop 入口(所有 vendor 调用之前)同步设。
+  setCurrentApiCountSession(cmd.sessionId)
+  const { sessionId, cwd } = cmd
+  // 入口落盘: 区分"prompt 根本没进 queryLoop" vs "queryLoop 内部失败"。
+  // 前端 fire-and-forget 立刻 200, 异步链任何一环无日志都表现为"发了没反应"。
+  logHttp(`[zai.agent.prompt] start sid=${sessionId} text=${JSON.stringify(cmd.prompt ?? '').slice(0, 100)}`, 'debug')
+  // zai patch (2026-08-08): 会话级 429 冷却拦截。上一轮 query 因
+  // rate_limit 终止后,冷却窗口内本会话的新 query 不再向 API 发请求,
+  // 直接 emit runtime.error(rate_limit)让前端明确感知"限流中,稍后重试",
+  // 避免用户/前端快速重试时每个请求都打一次 MiniMax 触发新一轮 429
+  // (请求风暴的最后一环:429 后 2 秒内自动重发)。
+  const rateLimitRemainingMs = getSessionRateLimitRemainingMs(sessionId)
+  if (rateLimitRemainingMs > 0) {
+    const waitSeconds = Math.ceil(rateLimitRemainingMs / 1000)
+    eventBus.emit({
+      type: "runtime.error",
+      eventId: "err-rate-limit",
+      sessionId,
+      ts: Date.now(),
+      turnIndex: 0,
+      error: {
+        category: "rate_limit",
+        message: `API 限流中,请 ${waitSeconds}s 后重试。`,
+        recoverable: true,
+      },
+    } as any);
+    return
+  }
+  // ★ 立即绑定 currentSessionId。queryLoop 启动后第一个 runtime.started
+  // 事件才会再 setCurrentSessionId 一次(兜底),但如果 AgentTool 是 query
+  // 第一批 tool_calls 之一(LLM 在 runtime.started 之前就调 sub-agent),
+  // compat/agentTaskBridge.mirrorAttachTaskToBg 的 parentSessionId
+  // fallback 链(globalThis.__zaiCurrentSessionId)需要这里先准备好,否则
+  // sub-agent 完成后 SubagentNotifier.handle() 拿不到父 session,主对话
+  // 收不到 <task-notification>。
+  setCurrentSessionId(sessionId)
+
+  const abortController = new AbortController()
+  // 只有正在执行的任务注册 controller — /agent/abort 通过
+  // abortSessionController(sid) 中断当前轮; 排队中的命令不注册。
+  registerSessionController(sessionId, abortController)
+  const timer = setTimeout(() => {
+    if (process.env.ZAI_DEBUG === "1") {
+      console.error("[zai.agent.prompt] HARD_TIMEOUT fired", {
+        sessionId,
+        ms: HARD_TIMEOUT_MS,
+      });
+    }
+    abortController.abort("timeout");
+  }, HARD_TIMEOUT_MS);
+
+  // ExitPlanMode 确认（用户 allow → vendor 退出 plan mode）检测标记。
+  // 声明在 try 外：finally 块（回写 meta）需要读到它。
+  let exitPlanConfirmed = false;
+  try {
+    // System-prompt 拼装由 queryLoop.assembleSystemPrompt 内部完成:
+    //   1. 7 段 DEFAULT_STATIC_INTRO (static intro)
+    //   2. SYSTEM_PROMPT_DYNAMIC_BOUNDARY marker
+    //   3. 11 个动态 section (env / language / scratchpad / memory / skills /
+    //      MCP / agents / FRC / summarize / token budget / numeric anchors)
+    // options.systemPrompt 走 buildEffectiveSystemPrompt 仲裁: 若此处非
+    // undefined 会替换 DEFAULT_STATIC_INTRO (customSystemPrompt 路径)。
+    // 这里不预拼,避免重复 IO + 缓存绕过。modelCaller 发送前过滤 boundary。
+    const systemPrompt: string | undefined = undefined;
+
+    const text = cmd.prompt?.trim() ?? "";
+    const blocks = cmd.contentBlocks;
+
+    // ★ image-paste v2: contentBlocks 拼成 user content-block array; 直接作为
+    // OpenccQueryInput.prompt 传给 runtime, 走 QueryEngine.submitMessage
+    // (prompt: string | ContentBlockParam[]) 的多模态路径 — image block 原样
+    // 转成 Anthropic protocol 发给模型. 当 contentBlocks 为空时退化为 string,
+    // 走纯文本路径.
+    const userContent =
+      blocks && blocks.length
+        ? [...blocks, ...(text ? [{ type: "text" as const, text }] : [])]
+        : text;
+
+    // zai patch (Aug 2026): persist the user prompt to the transcript
+    // BEFORE the runtime starts. Without this, every session in the
+    // new layout has `messages: []` and the UI shows a blank
+    // transcript on reload — the opencc vendor `query()` only emits
+    // stream events, it never writes to the transcript.
+    //
+    // Pass `userContent` (the actual content blocks / string), NOT a
+    // wrapper `[{role:'user', content:[...]}]` array. The transcript
+    // stores Anthropic-protocol content blocks directly. If we wrote
+    // the wrapper array, resume would re-send
+    // `[{role:"user", content:[image,text]}]` and the first "block"
+    // reaches Anthropic as `{role:"user", content:…}` with no `type`
+    // field → 400 "unsupported content type '' (2013)".
+    // Round-trip identity is preserved because the runtime reads from
+    // params.messages, not from the persisted transcript.
+    const transcriptCtx = { cwd, sessionId, userType: 'zai' }
+    try {
+      await appendUserMessageV2(
+        getTranscriptStore(),
+        sessionId,
+        userContent as unknown,
+        0,
+        null,
+        transcriptCtx,
+      )
+    } catch (e) {
+      if (process.env.ZAI_DEBUG === '1') {
+        console.error('[zai.agent.prompt] appendUserMessageV2 failed', e)
+      }
+    }
+
+    // 拉 transcript meta 给 resolveModel / permissionMode 用. 文件不存在
+    // (新会话) 是正常路径, 静默忽略 — sessionModel 保持 null,
+    // permissionMode 走 getDefaultMode() 兜底.
+    let sessionModel: string | null = null;
+    // zai patch: also pull the session's providerId (persisted when the
+    // user picked a model in ModelStatusButton). Forwarded to the
+    // modelCaller via resolveModel + OpenccQueryInput.providerId so the
+    // matcher routes the model to the exact provider the user chose.
+    let sessionProviderId: string | null = null;
+    // zai patch (2026-08-20): 会话当时选的主 Agent(per-session 落盘)。
+    // 有记录 → 本会话固定用该 agent;无记录(新会话/旧会话)→ 首次 query
+    // 用全局设置并落盘,之后固定。
+    let sessionMainAgent: string | null = null;
+    let transcript:
+      | Awaited<ReturnType<ReturnType<typeof getTranscriptStore>["read"]>>
+      | null = null;
+    try {
+      const existing = await getTranscriptStore().read(sessionId, { cwd });
+      transcript = existing;
+      if (existing.meta.model && existing.meta.model !== "unknown") {
+        sessionModel = existing.meta.model;
+      }
+      // Read providerId off transcript.meta — it's optional on the
+      // vendor type (see OpenccTranscriptMeta.providerId) and only set
+      // when the user explicitly picked a model via the picker. Old
+      // sessions without it keep working: the matcher falls back to
+      // legacy first-match-by-name behavior.
+      const metaProviderId = (existing.meta as { providerId?: string }).providerId;
+      if (typeof metaProviderId === 'string' && metaProviderId.length > 0) {
+        sessionProviderId = metaProviderId;
+      }
+      const metaMainAgent = (existing.meta as { mainAgent?: string }).mainAgent;
+      if (typeof metaMainAgent === 'string' && metaMainAgent.length > 0) {
+        sessionMainAgent = metaMainAgent;
+      }
+    } catch {
+      // 新会话 / 无 transcript — sessionModel 保持 null, transcript 保持 null
+    }
+
+    // 会话无 mainAgent 记录:用当前全局设置,并落盘固定该会话的 agent。
+    // 已有记录的会话保持当时选的 agent,不随全局切换变化(per-session 语义)。
+    // 用同步缓存读(不 await)—— prompt 热路径不该被 settings 初始化阻塞。
+    if (sessionMainAgent === null) {
+      try {
+        sessionMainAgent = getCachedZaiSettingsSync().mainAgent ?? 'default';
+        // 仅当 transcript 已存在(消息已落盘)才写 —— 新会话首条消息由
+        // 后续 append 流程创建文件,此时写会因文件不存在而失败(无害)。
+        if (transcript) {
+          void getTranscriptStore()
+            .patch(sessionId, { mainAgent: sessionMainAgent }, { cwd })
+            .catch(() => {
+              // 落盘失败不阻断 —— 下次 query 会再次尝试
+            });
+        }
+      } catch {
+        // settings 读不到 → 保持 null,运行时回退到默认 agent
+      }
+    }
+
+    // resolveModel 内部 readZaiSettings 读不到 ~/.zai/settings.json 时
+    // 会 re-throw 非 SyntaxError 的 IO 错误 (per resolveModel.ts 合约).
+    // /agent/prompt 是 fire-and-forget, 这种路径不能让整条回复丢掉,
+    // 兜底到 BUILTIN_FALLBACK_MODEL 让 LLM 仍然能跑起来.
+    let resolvedModel: string;
+    let modelSource: string;
+    let resolvedProviderId: string | undefined;
+    try {
+      const r = resolveModel({ sessionModel, sessionProviderId, cwd });
+      resolvedModel = r.model;
+      modelSource = r.source;
+      resolvedProviderId = r.providerId;
+    } catch {
+      resolvedModel = "MiniMax-M3";
+      modelSource = "builtin_fallback";
+    }
+
+    if (process.env.ZAI_DEBUG === "1") {
+      console.error("[zai.agent.prompt] resolved model", {
+        sessionId,
+        modelSource,
+        resolvedModel,
+      });
+    }
+    // 落盘 query 快照: model / providerId / providerOverride — 判定"走了
+    // 哪个 provider 分支"和"providerId 是否透传"的最直接证据。
+    logHttp(
+      `[zai.agent.prompt] query sid=${sessionId} model=${resolvedModel} source=${modelSource}` +
+        (resolvedProviderId ? ` providerId=${resolvedProviderId}` : " providerId=(none)"),
+      'debug',
+    );
+
+    const events = getRuntime().query({
+      // OpenccQueryInput.prompt accepts `string | OpenccContentBlockParam[]`.
+      // For multimodal input we pass the raw `userContent` block array —
+      // createOpenccRuntime-impl submits it directly to the vendor
+      // QueryEngine.submitMessage(string | ContentBlockParam[]), which
+      // converts image blocks to Anthropic protocol before hitting the
+      // API. JSON-encoding here would leak base64 as plain text and the
+      // model can't read the image.
+      prompt: userContent,
+      cwd,
+      // sessionId: 显式指定 ID. 不管新建还是续传, vendor runtime 都用这个
+      // ID 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
+      // 切换到 OpenccRuntime 后, 老 `transcriptId` 字段已合并到 `sessionId`.
+      // (旧 API resumeFromTranscriptId 在文件不存在时会抛 ENOENT, 不适用.)
+      sessionId,
+      // parentSessionId 由 vendor runtime 通过其 session facade 派生,
+      // 顶层 prompt 调用方不再显式透传该字段; sub-agent 路径由 AgentTool
+      // 在 BackgroundTask metadata 里携带, 通过 background runtime 进入
+      // 新 runtime 的 query (见 DefaultBackgroundRuntime.runOne 的 queryInput).
+      abortSignal: abortController.signal,
+      model: resolvedModel,
+      // 透传会话选定的 permission mode（如 plan）到 runtime AppState，让
+      // vendor 权限管线按该模式运行（plan mode 下模型可调用 ExitPlanMode，
+      // 其 `ask` 决策经 headless permission bridge 走 Web 确认 UI）。
+      // 未设置（或 auto）时缺省不传 → runtime 保持 bypassPermissions 语义。
+      ...(transcript?.meta.permissionMode &&
+      transcript.meta.permissionMode !== 'auto'
+        ? {
+            permissionMode: transcript.meta.permissionMode as
+              | 'default'
+              | 'acceptEdits'
+              | 'bypassPermissions'
+              | 'dontAsk'
+              | 'plan',
+          }
+        : {}),
+      // zai patch: 按所选 model 解析 provider profile,对 openai provider
+      // (e.g. zhiniao-* → wizard-ai OpenAI-Mix) 注入 providerOverride,
+      // 让 vendor `getAnthropicClient` 走 `createOpenAIShimClient`(openai-shim),
+      // 而不是默认的 Anthropic SDK + ANTHROPIC_BASE_URL(zn-nova)。
+      // 未命中 openai profile (anthropic 模型或无 profile) 不注入,行为不变。
+      // resolvedProviderId is forwarded so the matcher prefers the
+      // user-picked profile when several profiles host the same model
+      // name (e.g. MiniMax-M3 on both Open Platform and ZhiNiao).
+      ...(await resolveProviderOverrideForModel(resolvedModel, resolvedProviderId)),
+      // zai patch: per-query providerId (from transcript.meta.providerId).
+      // Threaded into the vendor runtime so the anthropic-side
+      // modelCaller can route the model to the exact provider the user
+      // picked. Mirrors the providerOverride plumbing but lands at
+      // zai's createAnthropicModelCaller instead of vendor's
+      // openai-shim. See plan §阶段 2 vendor 透传 chain.
+      ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
+      // zai patch (2026-08-20): 会话恢复的主 Agent。首次 query 用全局设置
+      // (并已落盘),后续从 transcript meta 恢复 → 会话级固定。
+      ...(sessionMainAgent ? { mainAgent: sessionMainAgent } : {}),
+    });
+
+    // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,
+    // 否则 ServerEvent.parse 会把上游所有事件当作非法 variant 直接丢弃.
+    const translated = translateRuntimeEvents(
+      events as AsyncIterable<Record<string, unknown>>,
+      sessionId,
+    );
+
+    // 用 transcript.meta.title 判断"是否需要写入标题":
+    // - 文件不存在 / meta.title 为空 → 首次消息, 应当写入
+    // - meta.title 已有值 → 续传, 不覆盖
+    // 不能用 existingSessionId 判断: commit 0f080e7 把"新建会话"挪到
+    // POST /api/agent/sessions, frontend 每次都带 sessionId, 这里
+    // existingSessionId 永远 truthy, 老逻辑会把所有"首次消息"误判成"续传".
+    let titlePatched = false;
+    try {
+      const existing = await getTranscriptStore().read(sessionId, { cwd });
+      if (existing.meta.title) titlePatched = true;
+    } catch {
+      // 文件不存在 (新会话尚无 transcript) — title 未设, 首次消息触发 patch
+    }
+
+    // zai patch (Aug 2026): per-event transcript persistence. The
+    // opencc vendor `query()` only emits stream events; it never
+    // writes to the transcript. We mirror each event to disk here
+    // so a page reload (or sharing `?sid=...` link) shows the
+    // full message history.
+    //
+    // Strategy:
+    // - runtime.tool_call → appendToolUse (one assistant message
+    //   carrying the tool_use block)
+    // - runtime.tool_result → appendToolResult (one user message
+    //   carrying the tool_result block)
+    // - runtime.thinking + runtime.delta → accumulate into
+    //   turnContentBlocks; flush via appendAssistantMessageV2 at
+    //   runtime.done / aborted
+    // Multiple assistant messages get folded on reload by
+    // serializeForAnthropic, so the tool_use-its-own-message
+    // and the flushed-thinking-text-message collapse correctly.
+    type ContentBlockShape = {
+      type: 'text' | 'thinking' | 'tool_use'
+      text?: string
+      thinking?: string
+      id?: string
+      name?: string
+      input?: unknown
+    }
+    let turnIndex = 0
+    let turnContentBlocks: ContentBlockShape[] = []
+    const flushAssistantMessage = async () => {
+      if (turnContentBlocks.length === 0) return
+      const blocksToFlush = turnContentBlocks
+      turnContentBlocks = []
+      try {
+        await appendAssistantMessageV2(
+          getTranscriptStore(),
+          sessionId,
+          blocksToFlush as unknown as Parameters<typeof appendAssistantMessageV2>[2],
+          turnIndex,
+          null,
+          transcriptCtx,
+        )
+      } catch (e) {
+        if (process.env.ZAI_DEBUG === '1') {
+          console.error('[zai.agent.prompt] appendAssistantMessageV2 failed', e)
+        }
+      }
+    }
+
+    for await (const event of translated) {
+      // zai patch: persist per-event transcript before forwarding.
+      if (event.type === 'runtime.tool_call') {
+        const ev = event as {
+          type: 'runtime.tool_call'
+          toolUseId?: string
+          toolName?: string
+          input?: unknown
+          turnIndex?: number
+        }
+        if (ev.toolUseId) {
+          // Push to the assistant buffer so the flush at
+          // runtime.started/runtime.done emits ONE assistant
+          // message containing [thinking..., text..., tool_use].
+          // Previously this handler ALSO called appendToolUse
+          // for mid-turn reload visibility, but that produced a
+          // standalone tool_use transcript entry that, after
+          // serializeForAnthropic folds it into the next assistant
+          // message, left a duplicate tool_use block in the
+          // resumed messages array. Now that the flush actually
+          // fires before the buffer is reset (see the
+          // runtime.started handler below), the buffered path is
+          // fast enough — a reload mid-turn loses at most a few
+          // buffered deltas, which the next SSE event re-emits.
+          turnContentBlocks.push({
+            type: 'tool_use',
+            id: ev.toolUseId,
+            name: ev.toolName ?? 'unknown',
+            input: ev.input ?? {},
+          })
+        }
+      } else if (event.type === 'runtime.tool_result') {
+        const ev = event as {
+          type: 'runtime.tool_result'
+          toolUseId?: string
+          output?: unknown
+          isError?: boolean
+          turnIndex?: number
+          toolName?: string
+        }
+        if (ev.toolName === 'ExitPlanMode') exitPlanConfirmed = true
+        if (ev.toolUseId) {
+          try {
+            await appendToolResult(
+              getTranscriptStore(),
+              sessionId,
+              {
+                tool_use_id: ev.toolUseId,
+                content: ev.output ?? '',
+                is_error: ev.isError === true,
+              },
+              ev.turnIndex ?? turnIndex,
+              null,
+              cwd,
+            )
+          } catch (e) {
+            if (process.env.ZAI_DEBUG === '1') {
+              console.error('[zai.agent.prompt] appendToolResult failed', e)
+            }
+          }
+        }
+      } else if (event.type === 'runtime.thinking') {
+        // translateRuntimeEvents emits {type:'runtime.thinking', thinking:string};
+        // older zod schema variants also accepted {delta/text} — keep both
+        // for backward compat with any in-flight event consumers.
+        const ev = event as { delta?: string; text?: string; thinking?: string }
+        const thinkingText = ev.thinking ?? ev.delta ?? ev.text ?? ''
+        if (thinkingText) {
+          const last = turnContentBlocks[turnContentBlocks.length - 1]
+          if (last && last.type === 'thinking') last.thinking = (last.thinking ?? '') + thinkingText
+          else turnContentBlocks.push({ type: 'thinking', thinking: thinkingText })
+        }
+      } else if (event.type === 'runtime.delta') {
+        const ev = event as { delta?: string; text?: string }
+        const deltaText = ev.delta ?? ev.text ?? ''
+        if (deltaText) {
+          const last = turnContentBlocks[turnContentBlocks.length - 1]
+          if (last && last.type === 'text') last.text = (last.text ?? '') + deltaText
+          else turnContentBlocks.push({ type: 'text', text: deltaText })
+        }
+      } else if (event.type === 'runtime.started') {
+        // New turn — advance turnIndex. CRITICAL: flush the previous
+        // turn's accumulated thinking/text FIRST. The old code reset
+        // turnContentBlocks = [] here on the assumption that
+        // runtime.done would fire before the next runtime.started,
+        // but in practice opencc vendor streams message_start of the
+        // next turn WITHOUT emitting an intervening message_stop when
+        // a tool_use / tool_result pair bridges turns. So the new
+        // turn's runtime.started arrives BEFORE the old turn's
+        // runtime.done, and resetting here would discard the
+        // accumulated thinking/text/tool_use blocks without ever
+        // flushing them. flushAssistantMessage() also resets the
+        // buffer (it steals `blocks` before clearing), so calling
+        // it here + resetting here is a no-op duplication.
+        const ev = event as { turnIndex?: number }
+        if (typeof ev.turnIndex === 'number') turnIndex = ev.turnIndex
+        await flushAssistantMessage()
+      } else if (event.type === 'runtime.done' || event.type === 'runtime.aborted') {
+        // End of current turn: flush accumulated thinking/text as
+        // one assistant message. The tool_use blocks were already
+        // appended by their own runtime.tool_call event.
+        //
+        // If the next turn's runtime.started already flushed this
+        // turn's buffer (see comment above), flushAssistantMessage()
+        // is a no-op because the buffer is empty.
+        await flushAssistantMessage()
+      }
+
+      // runtime.* 事件均带 sessionId, 在这里直接 narrow 到字符串即可.
+      // 用 event.type 同时锁定语义方向, 避免分布式联合中其它变体
+      // (job.* / prompt.ask / server.*) 没有 sessionId 字段导致 TS2339.
+      // translateRuntimeEvents 已经把所有事件绑定到入参 sessionId,
+      // event.sessionId === sessionId 恒成立, 老逻辑里的 `!== sessionId`
+      // 判断在新设计下永远 false, 是 dead code — 直接拿掉.
+      if (
+        (event.type === "runtime.started" ||
+          event.type === "runtime.delta" ||
+          event.type === "runtime.tool_call" ||
+          event.type === "runtime.tool_result" ||
+          event.type === "runtime.done" ||
+          event.type === "runtime.aborted" ||
+          event.type === "runtime.error") &&
+        typeof event.sessionId === "string"
+      ) {
+        setCurrentSessionId(event.sessionId);
+        if (!titlePatched) {
+          titlePatched = true;
+          try {
+            const title = deriveTitleFromPrompt(text);
+            await getTranscriptStore().patch(event.sessionId, { title }, { cwd });
+            // ★ 通知前端: sidebar 的 sessions 列表要立刻把这一条的 title
+            // 从"新会话"换成新标题. 前端 subscribeServerEvents 注册了
+            // session.renamed listener, 收到后通过 applySessionEvent
+            // 更新 sessions map.
+            eventBus.emit({
+              type: "session.renamed",
+              sessionId: event.sessionId,
+              title,
+            } as any);
+            // dsh 投影试点 (2026-08-15): 标题变化同步投影帧 — 前端
+            // useProjection(sid, 'title') 订阅 Sidebar 会话标题。重连后
+            // host 重算整体重发, 前端不用关心 diff 合并。
+            eventBus.emit({
+              type: "session/projection",
+              sessionId: event.sessionId,
+              key: "title",
+              value: title,
+            } as any);
+          } catch {
+            /* title 失败不阻断 */
+          }
+        }
+      }
+      // zai patch (2026-08-08): 检测 rate_limit 终止 → 进入会话级冷却。
+      // 覆盖两种形态: query 终止时 defaultQuery yield 的 assistant 错误
+      // 文本(经 translateRuntimeEvents 变 runtime.delta,如
+      // "API Error: 429 ... rate_limit_error"),以及 runtime.error 事件
+      // 的 message。命中后 30s 内本会话的新 query 在 runQueryLoop 入口
+      // 被拦截,不再向 API 发请求。
+      if (event.type === "runtime.delta" && typeof event.sessionId === "string") {
+        const ev = event as { delta?: string }
+        if (typeof ev.delta === "string" && isRateLimitErrorMessage(ev.delta)) {
+          markSessionRateLimited(event.sessionId)
+        }
+      } else if (
+        event.type === "runtime.error" &&
+        typeof event.sessionId === "string"
+      ) {
+        const ev = event as { error?: { message?: string } }
+        if (isRateLimitErrorMessage(ev.error?.message)) {
+          markSessionRateLimited(event.sessionId)
+        }
+      }
+      // ★ 替代原 stream.send：通过总线推送
+      eventBus.emit(event);
+      // dsh 投影试点 (2026-08-15): runtime.done 携带 contextTokens 时, 同步
+      // emit session/projection 帧 — 前端 useProjection(sid, 'context.tokens')
+      // 订阅会话信息面板的"当前上下文大小"行。seq 由 eventBus.emit 自动分配
+      // (省略即填全局单调 seq, 作为投影 watermark, higher-seq-wins 合并)。
+      if (event.type === "runtime.done" && typeof event.sessionId === "string") {
+        const ev = event as { contextTokens?: number }
+        if (typeof ev.contextTokens === "number") {
+          eventBus.emit({
+            type: "session/projection",
+            sessionId: event.sessionId,
+            key: "context.tokens",
+            value: ev.contextTokens,
+          } as any);
+        }
+      }
+      if (event.type === "runtime.done" || event.type === "runtime.aborted")
+        break;
+    }
+  } catch (err) {
+    // 无条件落盘(不依赖 ZAI_DEBUG): query 流异常是"发了没反应/页面上
+    // API Error"的最后一环, 只打 console 的话 console 没人盯就丢了。
+    logHttp(
+      `[zai.agent.prompt] for-await threw sid=${sessionId} ${(err as Error).message}\n${(err as Error).stack?.split("\n").slice(0, 8).join("\n") ?? ""}`,
+      'error',
+    );
+    if (process.env.ZAI_DEBUG === "1") {
+      console.error("[zai.agent.prompt] for-await threw", {
+        sessionId,
+        message: (err as Error).message,
+        stack: (err as Error).stack?.split("\n").slice(0, 5).join("\n"),
+      });
+    }
+    eventBus.emit({
+      type: "runtime.error",
+      eventId: "err",
+      sessionId,
+      ts: Date.now(),
+      turnIndex: 0,
+      error: {
+        category: "internal",
+        message: (err as Error).message,
+        recoverable: false,
+      },
+    } as any);
+  } finally {
+    clearTimeout(timer);
+    // ExitPlanMode 确认（用户 allow → vendor 已退出 plan mode）后，把
+    // transcript.meta.permissionMode 回写为进入 plan 前的 mode。否则
+    // 下一轮查询又从 meta 透传 'plan'，会话永远卡在 plan mode。
+    if (exitPlanConfirmed) {
+      const pre = planPreModeBySession.get(sessionId)
+      planPreModeBySession.delete(sessionId)
+      if (pre) {
+        try {
+          await getTranscriptStore().patch(
+            sessionId,
+            { permissionMode: pre },
+            { cwd },
+          )
+        } catch {
+          // 回写失败不影响本轮结果；下轮仍可能切回 plan，用户可手动切。
+        }
+      }
+    }
+    // 无论正常结束 / abort / 异常抛出 — 都必须从 sessionControllers map
+    // 释放掉, 否则这个 sid 会一直留在 map 里, 下一次同 sid 的 prompt
+    // registerSessionController 会覆盖. 留着不算 bug, 但内存会慢慢涨.
+    // release 只删 map 项, 不主动 .abort(). abort 已经发生过的 controller
+    // 自然 abort, 还没发生的就让它跑完.
+    releaseSessionController(sessionId)
+    // 同上:暂存的后台 Bash 完成通知(BashNotifier running 守卫暂存)在
+    // 主线结束后补发,避免通知 query 与主线并行 / 通知之间互相并行。
+    flushPendingBashNotifications(sessionId)
+  }
+  })
 }
 
 router.post("/agent/prompt", async (req: Request, res: Response) => {
@@ -629,38 +1544,18 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
     }
   }
 
-  const abortController = new AbortController()
-  // 把这个请求的 abortController 注册到 sessionControllers — /agent/abort
-  // 通过 abortSessionController(sid) 找到这条 controller 并 .abort()。
-  // 没这一步 abort route 永远 abort 不到正在跑的 queryLoop, 用户按 Esc
-  // 看到前端 status 卡在 'in_progress' 直到 HARD_TIMEOUT (2h) 兜底。
-  registerSessionController(sessionId, abortController)
-  const timer = setTimeout(() => {
-    if (process.env.ZAI_DEBUG === "1") {
-      console.error("[zai.agent.prompt] HARD_TIMEOUT fired", {
-        sessionId,
-        ms: HARD_TIMEOUT_MS,
-      });
-    }
-    abortController.abort("timeout");
-  }, HARD_TIMEOUT_MS);
-
   req.on("close", () => {
     if (process.env.ZAI_DEBUG === "1") {
       console.error(
         "[zai.agent.prompt] req.close (no abort — fire-and-forget)",
-        {
-          sessionId,
-          alreadyAborted: abortController.signal.aborted,
-        },
+        { sessionId },
       );
     }
-    // ★ 不要 abortController.abort: fire-and-forget 设计下, /agent/prompt
-    // 第 205 行 res.json({ sessionId }) 立即写完响应, HTTP/1.1 默认会 close
-    // res, client 关 body 是正常 lifecycle. abort 会让 queryEngine 144 行
-    // 立即 yield runtime.aborted 提前 return, 永远走不到
+    // ★ 不要 abort: fire-and-forget 设计下, /agent/prompt 立即写完响应,
+    // HTTP/1.1 默认会 close res, client 关 body 是正常 lifecycle. abort 会让
+    // queryEngine 立即 yield runtime.aborted 提前 return, 永远走不到
     // appendAssistantMessage — LLM 回复写不进 transcript, 刷新页面看不到.
-    // 真正兜底是上面的 HARD_TIMEOUT (现 2h, 见顶部常量).
+    // 真正兜底是 runQueryLoop 内的 HARD_TIMEOUT (现 2h, 见顶部常量).
     // 但 askRegistry 仍要 abort — client 关掉页面时正在 ask 的 tool 必须释放.
     getAskRegistry().abortAll("client_disconnect");
     // ApproveRegistry 同样要在 client 断开时释放: 阻止 /api/agent/approve
@@ -671,422 +1566,35 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
     getPermissionRegistry().abortAll("client_disconnect");
   });
 
-  // 立即响应，事件通过 eventBus → /api/event SSE
-  res.json({ sessionId });
-
-  // ★ 立即绑定 currentSessionId。queryLoop 启动后第一个 runtime.started
-  // 事件才会再 setCurrentSessionId 一次(兜底),但如果 AgentTool 是 query
-  // 第一批 tool_calls 之一(LLM 在 runtime.started 之前就调 sub-agent),
-  // compat/agentTaskBridge.mirrorAttachTaskToBg 的 parentSessionId
-  // fallback 链(globalThis.__zaiCurrentSessionId)需要这里先准备好,否则
-  // sub-agent 完成后 SubagentNotifier.handle() 拿不到父 session,主对话
-  // 收不到 <task-notification>。
-  setCurrentSessionId(sessionId);
-
-  // 异步 fire-and-forget 运行 runtime; 整段包进 runWithSessionId 让 queryLoop
-  // 里的 getCwd() 通过 ALS 解析到本 session 的逻辑 cwd。
-  void runWithSessionId(sessionId, async () => {
-    // ExitPlanMode 确认（用户 allow → vendor 退出 plan mode）检测标记。
-    // 声明在 try 外：finally 块（回写 meta）需要读到它。
-    let exitPlanConfirmed = false;
-    try {
-      // System-prompt 拼装由 queryLoop.assembleSystemPrompt 内部完成:
-      //   1. 7 段 DEFAULT_STATIC_INTRO (static intro)
-      //   2. SYSTEM_PROMPT_DYNAMIC_BOUNDARY marker
-      //   3. 11 个动态 section (env / language / scratchpad / memory / skills /
-      //      MCP / agents / FRC / summarize / token budget / numeric anchors)
-      // options.systemPrompt 走 buildEffectiveSystemPrompt 仲裁: 若此处非
-      // undefined 会替换 DEFAULT_STATIC_INTRO (customSystemPrompt 路径)。
-      // 这里不预拼,避免重复 IO + 缓存绕过。modelCaller 发送前过滤 boundary。
-      const systemPrompt: string | undefined = undefined;
-
-      const text = prompt?.trim() ?? "";
-      const blocks = contentBlocks;
-
-      // ★ image-paste v2: contentBlocks 拼成 user content-block array; 直接作为
-      // OpenccQueryInput.prompt 传给 runtime, 走 QueryEngine.submitMessage
-      // (prompt: string | ContentBlockParam[]) 的多模态路径 — image block 原样
-      // 转成 Anthropic protocol 发给模型. 当 contentBlocks 为空时退化为 string,
-      // 走纯文本路径.
-      const userContent =
-        blocks && blocks.length
-          ? [...blocks, ...(text ? [{ type: "text" as const, text }] : [])]
-          : text;
-
-      // zai patch (Aug 2026): persist the user prompt to the transcript
-      // BEFORE the runtime starts. Without this, every session in the
-      // new layout has `messages: []` and the UI shows a blank
-      // transcript on reload — the opencc vendor `query()` only emits
-      // stream events, it never writes to the transcript.
-      //
-      // Pass `userContent` (the actual content blocks / string), NOT a
-      // wrapper `[{role:'user', content:[...]}]` array. The transcript
-      // stores Anthropic-protocol content blocks directly. If we wrote
-      // the wrapper array, resume would re-send
-      // `[{role:"user", content:[image,text]}]` and the first "block"
-      // reaches Anthropic as `{role:"user", content:…}` with no `type`
-      // field → 400 "unsupported content type '' (2013)".
-      // Round-trip identity is preserved because the runtime reads from
-      // params.messages, not from the persisted transcript.
-      const transcriptCtx = { cwd, sessionId, userType: 'zai' }
-      try {
-        await appendUserMessageV2(
-          getTranscriptStore(),
-          sessionId,
-          userContent as unknown,
-          0,
-          null,
-          transcriptCtx,
-        )
-      } catch (e) {
-        if (process.env.ZAI_DEBUG === '1') {
-          console.error('[zai.agent.prompt] appendUserMessageV2 failed', e)
-        }
-      }
-
-      // 拉 transcript meta 给 resolveModel / permissionMode 用. 文件不存在
-      // (新会话) 是正常路径, 静默忽略 — sessionModel 保持 null,
-      // permissionMode 走 getDefaultMode() 兜底.
-      let sessionModel: string | null = null;
-      let transcript:
-        | Awaited<ReturnType<ReturnType<typeof getTranscriptStore>["read"]>>
-        | null = null;
-      try {
-        const existing = await getTranscriptStore().read(sessionId, { cwd });
-        transcript = existing;
-        if (existing.meta.model && existing.meta.model !== "unknown") {
-          sessionModel = existing.meta.model;
-        }
-      } catch {
-        // 新会话 / 无 transcript — sessionModel 保持 null, transcript 保持 null
-      }
-
-      // resolveModel 内部 readZaiSettings 读不到 ~/.zai/settings.json 时
-      // 会 re-throw 非 SyntaxError 的 IO 错误 (per resolveModel.ts 合约).
-      // /agent/prompt 是 fire-and-forget, 这种路径不能让整条回复丢掉,
-      // 兜底到 BUILTIN_FALLBACK_MODEL 让 LLM 仍然能跑起来.
-      let resolvedModel: string;
-      let modelSource: string;
-      try {
-        const r = resolveModel({ sessionModel, cwd });
-        resolvedModel = r.model;
-        modelSource = r.source;
-      } catch {
-        resolvedModel = "MiniMax-M3";
-        modelSource = "builtin_fallback";
-      }
-
-      if (process.env.ZAI_DEBUG === "1") {
-        console.error("[zai.agent.prompt] resolved model", {
-          sessionId,
-          modelSource,
-          resolvedModel,
-        });
-      }
-
-      const events = getRuntime().query({
-        // OpenccQueryInput.prompt accepts `string | OpenccContentBlockParam[]`.
-        // For multimodal input we pass the raw `userContent` block array —
-        // createOpenccRuntime-impl submits it directly to the vendor
-        // QueryEngine.submitMessage(string | ContentBlockParam[]), which
-        // converts image blocks to Anthropic protocol before hitting the
-        // API. JSON-encoding here would leak base64 as plain text and the
-        // model can't read the image.
-        prompt: userContent,
-        cwd,
-        // sessionId: 显式指定 ID. 不管新建还是续传, vendor runtime 都用这个
-        // ID 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
-        // 切换到 OpenccRuntime 后, 老 `transcriptId` 字段已合并到 `sessionId`.
-        // (旧 API resumeFromTranscriptId 在文件不存在时会抛 ENOENT, 不适用.)
-        sessionId,
-        // parentSessionId 由 vendor runtime 通过其 session facade 派生,
-        // 顶层 prompt 调用方不再显式透传该字段; sub-agent 路径由 AgentTool
-        // 在 BackgroundTask metadata 里携带, 通过 background runtime 进入
-        // 新 runtime 的 query (见 DefaultBackgroundRuntime.runOne 的 queryInput).
-        abortSignal: abortController.signal,
-        model: resolvedModel,
-        // 透传会话选定的 permission mode（如 plan）到 runtime AppState，让
-        // vendor 权限管线按该模式运行（plan mode 下模型可调用 ExitPlanMode，
-        // 其 `ask` 决策经 headless permission bridge 走 Web 确认 UI）。
-        // 未设置（或 auto）时缺省不传 → runtime 保持 bypassPermissions 语义。
-        ...(transcript?.meta.permissionMode &&
-        transcript.meta.permissionMode !== 'auto'
-          ? {
-              permissionMode: transcript.meta.permissionMode as
-                | 'default'
-                | 'acceptEdits'
-                | 'bypassPermissions'
-                | 'dontAsk'
-                | 'plan',
-            }
-          : {}),
-      });
-
-      // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,
-      // 否则 ServerEvent.parse 会把上游所有事件当作非法 variant 直接丢弃.
-      const translated = translateRuntimeEvents(
-        events as AsyncIterable<Record<string, unknown>>,
-        sessionId,
-      );
-
-      // 用 transcript.meta.title 判断"是否需要写入标题":
-      // - 文件不存在 / meta.title 为空 → 首次消息, 应当写入
-      // - meta.title 已有值 → 续传, 不覆盖
-      // 不能用 existingSessionId 判断: commit 0f080e7 把"新建会话"挪到
-      // POST /api/agent/sessions, frontend 每次都带 sessionId, 这里
-      // existingSessionId 永远 truthy, 老逻辑会把所有"首次消息"误判成"续传".
-      let titlePatched = false;
-      try {
-        const existing = await getTranscriptStore().read(sessionId, { cwd });
-        if (existing.meta.title) titlePatched = true;
-      } catch {
-        // 文件不存在 (新会话尚无 transcript) — title 未设, 首次消息触发 patch
-      }
-
-      // zai patch (Aug 2026): per-event transcript persistence. The
-      // opencc vendor `query()` only emits stream events; it never
-      // writes to the transcript. We mirror each event to disk here
-      // so a page reload (or sharing `?sid=...` link) shows the
-      // full message history.
-      //
-      // Strategy:
-      // - runtime.tool_call → appendToolUse (one assistant message
-      //   carrying the tool_use block)
-      // - runtime.tool_result → appendToolResult (one user message
-      //   carrying the tool_result block)
-      // - runtime.thinking + runtime.delta → accumulate into
-      //   turnContentBlocks; flush via appendAssistantMessageV2 at
-      //   runtime.done / aborted
-      // Multiple assistant messages get folded on reload by
-      // serializeForAnthropic, so the tool_use-its-own-message
-      // and the flushed-thinking-text-message collapse correctly.
-      type ContentBlockShape = {
-        type: 'text' | 'thinking' | 'tool_use'
-        text?: string
-        thinking?: string
-        id?: string
-        name?: string
-        input?: unknown
-      }
-      let turnIndex = 0
-      let turnContentBlocks: ContentBlockShape[] = []
-      const flushAssistantMessage = async () => {
-        if (turnContentBlocks.length === 0) return
-        const blocks = turnContentBlocks
-        turnContentBlocks = []
-        try {
-          await appendAssistantMessageV2(
-            getTranscriptStore(),
-            sessionId,
-            blocks as unknown as Parameters<typeof appendAssistantMessageV2>[2],
-            turnIndex,
-            null,
-            transcriptCtx,
-          )
-        } catch (e) {
-          if (process.env.ZAI_DEBUG === '1') {
-            console.error('[zai.agent.prompt] appendAssistantMessageV2 failed', e)
-          }
-        }
-      }
-
-      for await (const event of translated) {
-        // zai patch: persist per-event transcript before forwarding.
-        if (event.type === 'runtime.tool_call') {
-          const ev = event as {
-            type: 'runtime.tool_call'
-            toolUseId?: string
-            toolName?: string
-            input?: unknown
-            turnIndex?: number
-          }
-          if (ev.toolUseId) {
-            // Push to the assistant buffer so the flush at
-            // runtime.started/runtime.done emits ONE assistant
-            // message containing [thinking..., text..., tool_use].
-            // Previously this handler ALSO called appendToolUse
-            // for mid-turn reload visibility, but that produced a
-            // standalone tool_use transcript entry that, after
-            // serializeForAnthropic folds it into the next assistant
-            // message, left a duplicate tool_use block in the
-            // resumed messages array. Now that the flush actually
-            // fires before the buffer is reset (see the
-            // runtime.started handler below), the buffered path is
-            // fast enough — a reload mid-turn loses at most a few
-            // buffered deltas, which the next SSE event re-emits.
-            turnContentBlocks.push({
-              type: 'tool_use',
-              id: ev.toolUseId,
-              name: ev.toolName ?? 'unknown',
-              input: ev.input ?? {},
-            })
-          }
-        } else if (event.type === 'runtime.tool_result') {
-          const ev = event as {
-            type: 'runtime.tool_result'
-            toolUseId?: string
-            output?: unknown
-            isError?: boolean
-            turnIndex?: number
-            toolName?: string
-          }
-          if (ev.toolName === 'ExitPlanMode') exitPlanConfirmed = true
-          if (ev.toolUseId) {
-            try {
-              await appendToolResult(
-                getTranscriptStore(),
-                sessionId,
-                {
-                  tool_use_id: ev.toolUseId,
-                  content: ev.output ?? '',
-                  is_error: ev.isError === true,
-                },
-                ev.turnIndex ?? turnIndex,
-                null,
-                cwd,
-              )
-            } catch (e) {
-              if (process.env.ZAI_DEBUG === '1') {
-                console.error('[zai.agent.prompt] appendToolResult failed', e)
-              }
-            }
-          }
-        } else if (event.type === 'runtime.thinking') {
-          // translateRuntimeEvents emits {type:'runtime.thinking', thinking:string};
-          // older zod schema variants also accepted {delta/text} — keep both
-          // for backward compat with any in-flight event consumers.
-          const ev = event as { delta?: string; text?: string; thinking?: string }
-          const text = ev.thinking ?? ev.delta ?? ev.text ?? ''
-          if (text) {
-            const last = turnContentBlocks[turnContentBlocks.length - 1]
-            if (last && last.type === 'thinking') last.thinking = (last.thinking ?? '') + text
-            else turnContentBlocks.push({ type: 'thinking', thinking: text })
-          }
-        } else if (event.type === 'runtime.delta') {
-          const ev = event as { delta?: string; text?: string }
-          const text = ev.delta ?? ev.text ?? ''
-          if (text) {
-            const last = turnContentBlocks[turnContentBlocks.length - 1]
-            if (last && last.type === 'text') last.text = (last.text ?? '') + text
-            else turnContentBlocks.push({ type: 'text', text })
-          }
-        } else if (event.type === 'runtime.started') {
-          // New turn — advance turnIndex. CRITICAL: flush the previous
-          // turn's accumulated thinking/text FIRST. The old code reset
-          // turnContentBlocks = [] here on the assumption that
-          // runtime.done would fire before the next runtime.started,
-          // but in practice opencc vendor streams message_start of the
-          // next turn WITHOUT emitting an intervening message_stop when
-          // a tool_use / tool_result pair bridges turns. So the new
-          // turn's runtime.started arrives BEFORE the old turn's
-          // runtime.done, and resetting here would discard the
-          // accumulated thinking/text/tool_use blocks without ever
-          // flushing them. flushAssistantMessage() also resets the
-          // buffer (it steals `blocks` before clearing), so calling
-          // it here + resetting here is a no-op duplication.
-          const ev = event as { turnIndex?: number }
-          if (typeof ev.turnIndex === 'number') turnIndex = ev.turnIndex
-          await flushAssistantMessage()
-        } else if (event.type === 'runtime.done' || event.type === 'runtime.aborted') {
-          // End of current turn: flush accumulated thinking/text as
-          // one assistant message. The tool_use blocks were already
-          // appended by their own runtime.tool_call event.
-          //
-          // If the next turn's runtime.started already flushed this
-          // turn's buffer (see comment above), flushAssistantMessage()
-          // is a no-op because the buffer is empty.
-          await flushAssistantMessage()
-        }
-
-        // runtime.* 事件均带 sessionId, 在这里直接 narrow 到字符串即可.
-        // 用 event.type 同时锁定语义方向, 避免分布式联合中其它变体
-        // (job.* / prompt.ask / server.*) 没有 sessionId 字段导致 TS2339.
-        // translateRuntimeEvents 已经把所有事件绑定到入参 sessionId,
-        // event.sessionId === sessionId 恒成立, 老逻辑里的 `!== sessionId`
-        // 判断在新设计下永远 false, 是 dead code — 直接拿掉.
-        if (
-          (event.type === "runtime.started" ||
-            event.type === "runtime.delta" ||
-            event.type === "runtime.tool_call" ||
-            event.type === "runtime.tool_result" ||
-            event.type === "runtime.done" ||
-            event.type === "runtime.aborted" ||
-            event.type === "runtime.error") &&
-          typeof event.sessionId === "string"
-        ) {
-          setCurrentSessionId(event.sessionId);
-          if (!titlePatched) {
-            titlePatched = true;
-            try {
-              const title = deriveTitleFromPrompt(text);
-              await getTranscriptStore().patch(event.sessionId, { title }, { cwd });
-              // ★ 通知前端: sidebar 的 sessions 列表要立刻把这一条的 title
-              // 从"新会话"换成新标题. 前端 subscribeServerEvents 注册了
-              // session.renamed listener, 收到后通过 applySessionEvent
-              // 更新 sessions map.
-              eventBus.emit({
-                type: "session.renamed",
-                sessionId: event.sessionId,
-                title,
-              } as any);
-            } catch {
-              /* title 失败不阻断 */
-            }
-          }
-        }
-        // ★ 替代原 stream.send：通过总线推送
-        eventBus.emit(event);
-        if (event.type === "runtime.done" || event.type === "runtime.aborted")
-          break;
-      }
-    } catch (err) {
-      if (process.env.ZAI_DEBUG === "1") {
-        console.error("[zai.agent.prompt] for-await threw", {
-          sessionId,
-          message: (err as Error).message,
-          stack: (err as Error).stack?.split("\n").slice(0, 5).join("\n"),
-        });
-      }
-      eventBus.emit({
-        type: "runtime.error",
-        eventId: "err",
-        sessionId,
-        ts: Date.now(),
-        turnIndex: 0,
-        error: {
-          category: "internal",
-          message: (err as Error).message,
-          recoverable: false,
-        },
-      } as any);
-    } finally {
-      clearTimeout(timer);
-      // ExitPlanMode 确认（用户 allow → vendor 已退出 plan mode）后，把
-      // transcript.meta.permissionMode 回写为进入 plan 前的 mode。否则
-      // 下一轮查询又从 meta 透传 'plan'，会话永远卡在 plan mode。
-      if (exitPlanConfirmed) {
-        const pre = planPreModeBySession.get(sessionId)
-        planPreModeBySession.delete(sessionId)
-        if (pre) {
-          try {
-            await getTranscriptStore().patch(
-              sessionId,
-              { permissionMode: pre },
-              { cwd },
-            )
-          } catch {
-            // 回写失败不影响本轮结果；下轮仍可能切回 plan，用户可手动切。
-          }
-        }
-      }
-      // 无论正常结束 / abort / 异常抛出 — 都必须从 sessionControllers map
-      // 释放掉, 否则这个 sid 会一直留在 map 里, 下一次同 sid 的 prompt
-      // registerSessionController 会覆盖. 留着不算 bug, 但内存会慢慢涨.
-      // release 只删 map 项, 不主动 .abort(). abort 已经发生过的 controller
-      // 自然 abort, 还没发生的就让它跑完.
-      releaseSessionController(sessionId)
-    }
+  // ★ 立即响应，事件通过 eventBus → /api/event SSE。
+  // per-session 串行队列: 当前轮在跑或队列非空 → 本条 prompt 入队等待
+  // (追齐 OPENCC 的消息排队交互); 空闲 → 立即启动 queryLoop。入队与
+  // 启动判定在同一同步块内完成, JS 单线程保证原子性, 杜绝并发 queryLoop
+  // 写同一 transcript。排队状态经 queue.changed SSE 事件 + 响应快照推给前端。
+  // 用户人工输入 → 重置 inbox wakeBudget, 让后台通知在主线下次空闲时仍能唤醒。
+  sessionInbox.resetWakeBudget(sessionId)
+  const text = prompt?.trim() ?? "";
+  const blocks = contentBlocks;
+  const queue = sessionQueues.get(sessionId) ?? []
+  const wasIdle = !sessionRunning.has(sessionId) && queue.length === 0
+  queue.push({
+    id: `queue-${crypto.randomUUID()}`,
+    sessionId,
+    cwd,
+    prompt: text,
+    contentBlocks: blocks,
+  })
+  sessionQueues.set(sessionId, queue)
+  if (wasIdle) void runNextInQueue(sessionId)
+  const qNow = sessionQueues.get(sessionId) ?? []
+  const queued = !wasIdle
+  res.json({
+    sessionId,
+    queued,
+    queueLength: qNow.length,
+    pending: qNow.map((c) => ({ id: c.id, text: c.prompt })),
   });
+  emitQueueChanged(sessionId);
 });
 
 // GET /api/agent/sessions — 列出当前实例 cwd 对应的 session
@@ -1111,16 +1619,32 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     // 可选 model: 前端在 createNewSession 时会把"用户最近手动选过的模型"
     // 传过来, 让新建会话默认继承. 缺省/'unknown'/空串都视为不指定, 维持
     // 旧行为 (useConversationInfo 看到 'unknown' 就会回退到 runtime.defaultModel).
-    const requested = (req.body as { model?: unknown } | undefined)?.model
+    const body = req.body as { model?: unknown; providerId?: unknown } | undefined
+    const requested = body?.model
     const model =
       typeof requested === 'string' && requested.length > 0 && requested !== 'unknown'
         ? requested
         : 'unknown'
+    // zai patch: also accept the providerId the user picked for the
+    // most recent model. Same sanity rules as `model` — empty / unknown
+    // / non-string fall back to "not specified" so old clients without
+    // providerId keep working unchanged.
+    const requestedProviderId = body?.providerId
+    const providerId =
+      typeof requestedProviderId === 'string' && requestedProviderId.length > 0
+        ? requestedProviderId
+        : undefined
     const sessionId = await store.create({
       cwd: ctx.cwd,
       model,
+      // zai patch: pass providerId through to transcript.meta so the
+      // matcher can route the next prompt to the right provider. Cast
+      // through unknown to keep the public transcript meta type
+      // loose about this new optional field (OpenccTranscriptMeta is
+      // vendor-owned and only widened in serverTypes.ts).
+      ...(providerId ? { providerId } : {}),
       permissionMode: getDefaultMode(),
-    }, { cwd: ctx.cwd })
+    } as Parameters<typeof store.create>[0], { cwd: ctx.cwd })
     res.json({ sessionId })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
@@ -1176,12 +1700,16 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
 });
 
 // PATCH /agent/sessions/:id — partial-update a session's transcript meta.
-// Supports `model` and `permissionMode`. The model field must include a
-// non-empty string that's not the placeholder 'unknown' — silently
-// dropping the patch when 'unknown' is sent prevents accidentally
+// Supports `model`, `providerId`, and `permissionMode`. The model field
+// must include a non-empty string that's not the placeholder 'unknown' —
+// silently dropping the patch when 'unknown' is sent prevents accidentally
 // resetting the user's selection back to the env/settings fallback.
+// providerId follows the same "drop if empty/invalid" rule (we don't
+// reject the request — we just skip the patch — so old clients without
+// providerId can still PATCH model alone).
 const PatchSessionRequest = z.object({
   model: z.string().min(1).max(256).optional(),
+  providerId: z.string().min(1).max(256).optional(),
   permissionMode: z.enum(EXTERNAL_PERMISSION_MODES as readonly [UserFacingPermissionMode, ...UserFacingPermissionMode[]]).optional(),
 });
 
@@ -1196,6 +1724,18 @@ router.patch("/agent/sessions/:id", async (req: Request, res: Response) => {
     const store = getTranscriptStore();
     if (parsed.data.model && parsed.data.model !== "unknown") {
       await store.patch(sid, { model: parsed.data.model }, { cwd: ctx.cwd });
+    }
+    // zai patch: providerId persistence. Same "skip if absent" rule as
+    // model so the absence of the field (old clients) never wipes an
+    // existing providerId. Cast through unknown — the store.patch type
+    // accepts a partial meta shape, but the vendor OpenccTranscriptMeta
+    // type is widened in serverTypes.ts.
+    if (parsed.data.providerId) {
+      await store.patch(
+        sid,
+        { providerId: parsed.data.providerId } as { providerId: string },
+        { cwd: ctx.cwd },
+      );
     }
     if (parsed.data.permissionMode) {
       if (parsed.data.permissionMode === "plan") {
@@ -1236,6 +1776,107 @@ router.post("/agent/abort", async (req: Request, res: Response) => {
   // 走 currentSessionId 兜底时仍然能 abort.
   await abortAgentSession("user_abort")
   res.json({ ok: true, sessionId: sid, aborted })
+});
+
+// POST /api/agent/queue/cancel — 取消一条排队中的 prompt(排队预览区的 ×).
+// 只能取消"尚未开始执行"的命令; 正在跑的 queryLoop 走 /agent/abort。
+router.post("/agent/queue/cancel", async (req: Request, res: Response) => {
+  const { sessionId, promptId } = (req.body ?? {}) as {
+    sessionId?: string
+    promptId?: string
+  }
+  if (!sessionId || !promptId) {
+    return res.status(400).json({ error: "missing sessionId or promptId" })
+  }
+  const q = sessionQueues.get(sessionId)
+  if (!q) return res.json({ removed: false })
+  const idx = q.findIndex((c) => c.id === promptId)
+  if (idx === -1) return res.json({ removed: false })
+  q.splice(idx, 1)
+  // 队列清空后删除 Map 条目, 避免空数组残留(与 runNextInQueue 的空队列
+  // delete 行为一致, 防 Map 条目堆积)。
+  if (q.length === 0) sessionQueues.delete(sessionId)
+  emitQueueChanged(sessionId)
+  res.json({ removed: true })
+});
+
+// POST /api/agent/queue/edit — 编辑一条排队中的 prompt(排队预览区的铅笔按钮)。
+// 对齐 DSH `session.updateQueue` action 'edit'(Inbox.replace 原位替换):
+//   - 只能编辑"尚未开始执行"的命令;已开始执行(被 nextHttpPrompt shift 出队)
+//     或已不存在 → queue-item-not-found, 前端提示"可能已经开始发送"。
+//   - 编辑保留原 id 与队列位置, 文本替换后经 queue.changed 推送新快照;
+//     已编辑文本随该条真正执行时作为 prompt 发出。
+//   - 文本编辑仅纯文本(与 DSH 'queue edits accept text content only' 对齐;
+//     排队消息本就走纯文本路径, contentBlocks 置空)。
+router.post("/agent/queue/edit", async (req: Request, res: Response) => {
+  const { sessionId, promptId, text } = (req.body ?? {}) as {
+    sessionId?: string
+    promptId?: string
+    text?: unknown
+  }
+  if (
+    !sessionId ||
+    !promptId ||
+    typeof text !== "string" ||
+    text.trim() === ""
+  ) {
+    return res.status(400).json({ error: "missing sessionId, promptId or non-empty text" })
+  }
+  const q = sessionQueues.get(sessionId)
+  const item = q?.find((c) => c.id === promptId)
+  if (!q || !item) {
+    // 竞态优雅路径: 该条已被消费开始执行。200 + ok:false(对齐 cancel 的
+    // removed:false 风格), 不抛 ApiError 让前端 toast 走本地文案。
+    return res.json({ ok: false, error: "queue-item-not-found" })
+  }
+  item.prompt = text.trim()
+  item.contentBlocks = undefined
+  emitQueueChanged(sessionId)
+  res.json({ ok: true })
+});
+
+// POST /api/agent/queue/steer — 插话发送: 把一条排队中的 prompt 插进当前轮的
+// 后续执行(排队预览区的插话按钮)。
+// 对齐 DSH `session.updateQueue` action 'steer'(仅 running + next-turn 项):
+//   - 仅"当前轮在跑"时可用(前端按钮按 streaming 态启用; 空闲返回
+//     steer-unavailable, 与 DSH 'current turn no longer accepts steering')。
+//   - 实现: 该条移出 HTTP sessionQueues, 经 SessionInbox.steer 进入
+//     next-step lane —— 当前轮结束后 runNextInQueue 的 finally 消费
+//     next-step 合并为下一条 prompt(排到 HTTP 队列之前), 即"插队到下一轮
+//     最先执行", 而不再等它原来在队列里的位置。
+//   - 消息文本由前端 watcher 在离开排队预览时写入 transcript(用户消息
+//     "插入会话"即时可见), 与 DSH steer "interjection is logged, rendered"
+//     语义对齐。
+router.post("/agent/queue/steer", async (req: Request, res: Response) => {
+  const { sessionId, promptId } = (req.body ?? {}) as {
+    sessionId?: string
+    promptId?: string
+  }
+  if (!sessionId || !promptId) {
+    return res.status(400).json({ error: "missing sessionId or promptId" })
+  }
+  const q = sessionQueues.get(sessionId)
+  const idx = q?.findIndex((c) => c.id === promptId) ?? -1
+  if (!q || idx === -1) {
+    return res.json({ ok: false, error: "queue-item-not-found" })
+  }
+  if (!sessionRunning.has(sessionId)) {
+    return res.json({ ok: false, error: "steer-unavailable" })
+  }
+  const [item] = q.splice(idx, 1)
+  if (q.length === 0) sessionQueues.delete(sessionId)
+  // 进入 inbox next-step lane: 当前轮(是同一 queryLoop)在跑, SessionInbox
+  // busy → 不 wake, 仅排队; turn 结束 finally 消费合并为下一条 prompt。
+  if (item) {
+    sessionInbox.steer(sessionId, {
+      id: `steer-${promptId}`,
+      source: { kind: "user", form: "steer" },
+      content: item.prompt,
+      createdAt: Date.now(),
+    })
+  }
+  emitQueueChanged(sessionId)
+  res.json({ ok: true })
 });
 
 // GET /api/agent/skills — 返回可用 skills 列表，供前端 / 触发 autocomplete

@@ -8,6 +8,7 @@ import dirsRouter from './routes/dirs.js';
 import gitRouter from './routes/git.js';
 import fsRouter from './routes/fs.js';
 import fsPickerRouter from './routes/fsPicker.js';
+import desktopFsRouter from './routes/desktopFs.js';
 import loginRouter from './routes/login.js';
 import configRouter from './routes/config.js';
 import resourcesRouter from './routes/resources.js';
@@ -16,6 +17,7 @@ import execRouter from './routes/exec.js';
 import agentRouter from './routes/agent.js';
 import agentSettingsRouter from './routes/agentSettings.js';
 import { pluginsRouter } from './routes/plugins.js';
+import { weixinRouter } from './routes/weixin.js';
 import answerRouter from './routes/answer.js';
 import approveRouter from './routes/approve.js';
 import permissionRouter from './routes/permission.js';
@@ -38,9 +40,13 @@ import {
 import { initStateBridge } from './services/stateBridge.js';
 import { initBashNotifier } from './services/bashNotifier.js';
 import { initZaiSettingsCache } from './services/zaiSettingsStore.js';
+import { runClaudeToZaiMigration } from './services/zaiMigration.js';
+import { maybeAutoUpdate } from './services/updater.js';
 import { startBranchChecker } from './routes/system.js';
 import { noCacheForApi } from './middleware/noCache.js';
 import { redirectMobileUA } from './middleware/redirectMobileUA.js';
+import { createReverseProxyMiddleware } from './services/reverseProxy.js';
+import { logHttp } from './services/accessLog.js';
 
 // zai is a local dev tool — the server only listens on localhost and every
 // route is wide-open to anyone who can reach the port. The original
@@ -84,10 +90,55 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
     console.warn('[zai-settings-cache] boot init failed:', err),
   )
 
+  // One-shot boot-time migration: copy user data from ~/.claude/ to
+  // ~/.zai/ on first start so users upgrading from upstream claude-code
+  // keep their settings / agents / commands / plugins / skills / output
+  // styles. Guarded by sentinel + ZAI_DATA_DIR check inside; never throws.
+  // Runs alongside the settings cache init so the cache's tier-2 read of
+  // ~/.claude/settings.json still works even if the explicit copy below
+  // is a no-op (e.g. settings.json already exists in ~/.zai).
+  runClaudeToZaiMigration()
+    .then((r) => {
+      if (r.copied.length > 0) {
+        console.log(
+          `[zai-migration] copied ${r.copied.length} resource(s) from ~/.claude to ~/.zai` +
+            (r.errors.length > 0 ? ` (${r.errors.length} error(s))` : ''),
+        );
+      }
+    })
+    .catch((err) => console.warn('[zai-migration] boot migration failed:', err))
+
+  // zai 自身版本自动升级通道。fire-and-forget:createApp 必须立刻 return app,
+  // 不能等 npm view + 可能的 npm install -g 跑完。内部 dev-mode / settings
+  // autoUpdate=false / 无新版 都会提前 return,只有全局 install 且有更新时才
+  // 真正跑 npm;done 后 SSE 推 'app.update.complete' / '.failed',前端
+  // UpdateNotifier 弹窗提示。任何错误 swallow 进 console.warn,不冒泡。
+  maybeAutoUpdate().catch((err) =>
+    console.warn('[updater] boot trigger failed:', err),
+  )
+
   // Init central instance supervisor before any router that depends on it.
   // Reads ~/.zai/instances.json (async, fire-and-forget); snapshots start
   // with isCurrent row already visible via getInstanceSupervisor().
-  await initInstanceSupervisor({ cwd: opts.cwd })
+  //
+  // 子实例不能再 spawn 孙实例:只有被 instance manager(`InstanceSupervisor`)
+  // 派生的子进程带 `ZAI_INSTANCE_ID`(见 instanceSupervisor.ts:245),所以
+  // 这里看到这个 env 就直接跳过 init。env 未设说明是顶层独立 zai 或顶层
+  // managed child(后者虽无意义但仍允许 init,避免破坏其它路径)。
+  // routes/instances.ts 路由层还有第二道 404 兜底,防止有人手动注入 env
+  // 绕过 init 检查。
+  //
+  // `opts.forceInitInstanceSupervisor: true` 测试用:vitest 进程可能继承
+  // shell 的 ZAI_INSTANCE_ID(按 env 决定 init 跳过会让 tests fail)。此时
+  // 先 unset env 再 init,确保 routes/instances.ts 后续调用也按"非子实例"
+  // 路径走通 — 不 restore。生产路径不调用 forceInit,触不到这里。
+  if (opts.forceInitInstanceSupervisor) {
+    delete process.env.ZAI_INSTANCE_ID
+    delete process.env.ZAI_SUPERVISOR_PID
+  }
+  if (opts.forceInitInstanceSupervisor || !process.env.ZAI_INSTANCE_ID) {
+    await initInstanceSupervisor({ cwd: opts.cwd })
+  }
 
   // Ensure ~/.zai/ exists for persistent cache (manifest.json) and future
   // config data. This is fire-and-forget — if it fails the app still works,
@@ -107,10 +158,43 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   // Anthropic / 上游 base64 限额约束, 这里只是放行到 server.
   app.use(express.json({ limit: '20mb' }));
 
+  // 全量 HTTP 接口日志 — 定位 4xx/5xx 用。response finish 时记录一行:
+  // method + path + status + 耗时。>=500 打 console.error, >=400 打
+  // console.warn, 其余仅在 ZAI_DEBUG=1 时打,避免刷屏。SSE 长连接在
+  // 会话结束才 finish,该场景日志延迟属预期。console + /tmp/zai-http.log
+  // 双写(logHttp), 终端没盯着也能从文件排查。
+  app.use('/api', (req, res, next) => {
+    const startedAt = Date.now();
+    res.on('finish', () => {
+      const ms = Date.now() - startedAt;
+      const line = `[zai-http] :${req.socket.localPort} ${req.method} ${req.originalUrl} → ${res.statusCode} (${ms}ms)`;
+      if (res.statusCode >= 500) {
+        logHttp(line, 'error');
+      } else if (res.statusCode >= 400) {
+        logHttp(line, 'warn');
+      } else {
+        logHttp(line, 'debug');
+      }
+    });
+    next();
+  });
+
   // /api/* 必须禁浏览器缓存 (304 会让前端拿到启动时的旧响应)。
   // SSE 路由自带 Cache-Control, 中间件不覆盖。
   app.set('etag', false);
   app.use('/api', noCacheForApi);
+
+  // 反向代理(`/proxy/<localPort>/<path>` → 127.0.0.1:<localPort>)仅在
+  // --lan 时启用,默认 127.0.0.1 模式统一 403。闭包读 `opts.host` 与
+  // `instanceContext.host` 同源,所以 UI 看到的启用状态与服务端一致。
+  // 挂载顺序:必须在 /api noCache 之后,且不走 /agent 重定向;这里是 root
+  // mount,跟 /api /agent 路径不冲突。
+  // WebSocket upgrade 不在 Express 层面处理,由 dev/start.ts 在
+  // `http.createServer(app)` 之后单独挂 `server.on('upgrade')`。
+  const reverseProxyMw = createReverseProxyMiddleware({
+    isEnabled: () => (opts.host ?? '127.0.0.1') === '0.0.0.0',
+  });
+  app.use('/proxy', reverseProxyMw);
 
   app.use('/api', eventRouter);
   app.use('/api', healthRouter);
@@ -122,6 +206,7 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   // /fs/picker — 通用目录选择器,默认起点为用户 home;不受 instance cwd
   // 限制(zai 只监听 localhost,等同于本机 ls 暴露面,见 routes/fsPicker.ts 头注)。
   app.use('/api', fsPickerRouter);
+  app.use('/api', desktopFsRouter);
   app.use('/api', loginRouter);
   app.use('/api', configRouter);
   app.use('/api', resourcesRouter);
@@ -130,6 +215,9 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   app.use('/api', agentRouter);
   app.use('/api', agentSettingsRouter);
   app.use('/api/plugins', pluginsRouter);
+  // Weixin (微信) 机器人 — 状态 + QR 登录 + 启停控制。详见
+  // docs/superpowers/plans/2026-08-16-zai-weixin-bot-platform.md B4。
+  app.use('/api/weixin', weixinRouter);
   app.use('/api', tasksRouter);
   app.use('/api', bashTasksRouter);
   app.use('/api', bashReplRouter);
@@ -174,6 +262,21 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
 
   // 启动分支检查器（每 10 秒检测一次 git 分支变化）
   startBranchChecker(opts.cwd);
+
+  // 兜底 error handler: 路由 try/catch 漏网的异常统一打 stack — 否则 500
+  // 只在响应体里、控制台没有任何线索, 排障要开着路由源码一个个翻。
+  // headersSent(如 SSE 已开始流出) 时无法再发响应, 交给 Express 默认
+  // handler 关连接; 否则回 500 JSON 与其它路由风格一致。
+  app.use((err: unknown, req: express.Request, res: express.Response, next: express.NextFunction) => {
+    const e = err instanceof Error ? err : new Error(String(err));
+    const line = `[zai-http] uncaught :${req.socket.localPort} ${req.method} ${req.originalUrl} → 500: ${e.message}\n${e.stack ?? ''}`;
+    logHttp(line, 'error');
+    if (res.headersSent) {
+      next(err);
+      return;
+    }
+    res.status(500).json({ error: e.message });
+  });
 
   return app;
 }

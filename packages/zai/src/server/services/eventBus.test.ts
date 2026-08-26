@@ -1,9 +1,13 @@
-import { describe, expect, test } from 'vitest'
+import { describe, expect, test, vi, afterEach } from 'vitest'
 import { ServerEventBus } from './eventBus.js'
 
 const baseEvent = { type: 'server.error' as const, message: 'x' }
 
 describe('ServerEventBus', () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
   test('emit stores event with assigned eventId and ts', () => {
     const bus = new ServerEventBus()
     bus.emit(baseEvent)
@@ -23,6 +27,7 @@ describe('ServerEventBus', () => {
   })
 
   test('history capped at 256; oldest dropped', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const bus = new ServerEventBus()
     for (let i = 0; i < 300; i++) {
       bus.emit(baseEvent)
@@ -192,6 +197,7 @@ describe('ServerEventBus', () => {
   })
 
   test('per-sid history 各自独立裁剪 (CAPACITY=256)', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const bus = new ServerEventBus()
     // sid A 写 300 条
     for (let i = 0; i < 300; i++) {
@@ -204,5 +210,25 @@ describe('ServerEventBus', () => {
     const bTail = bus.getHistoryAfterForSid('evt_missing', 'B')
     expect(aTail.length).toBeLessThanOrEqual(256)
     expect(bTail.length).toBe(1)
+  })
+
+  // ========== seq 分配 (emit 分配全局单调 seq) ==========
+
+  test('emit assigns monotonically increasing seq', () => {
+    const bus = new ServerEventBus()
+    const seqs: number[] = []
+    bus.subscribe((e) => seqs.push(e.seq))
+    bus.emit(baseEvent)
+    bus.emit(baseEvent)
+    bus.emit(baseEvent)
+    expect(seqs).toEqual([1, 2, 3])
+  })
+
+  test('emit preserves caller-provided seq', () => {
+    const bus = new ServerEventBus()
+    let got: number | undefined
+    bus.subscribe((e) => { got = e.seq })
+    bus.emit({ type: 'server.error', message: 'x', seq: 99 })
+    expect(got).toBe(99)
   })
 })

@@ -14,7 +14,7 @@ export default function PluginButton() {
   const open = useAppStore((s) => s.openPluginModal)
   return (
     <>
-      <Tooltip title="插件管理" placement="top">
+      <Tooltip title="插件管理" aria-label="插件管理提示" placement="top">
         <Button
           icon={<BlockOutlined />}
           onClick={open}

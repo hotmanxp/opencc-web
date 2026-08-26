@@ -24,6 +24,25 @@ export interface BackgroundRuntime {
    */
   cancel(id: string, reason?: string): Promise<{ ok: boolean }>
   /**
+   * 按父会话取消该会话派生的全部未结束后台任务(dispatch 与 attach 两条
+   * 路径都覆盖)。返回实际取消的数量。ESC / /agent/abort 用它终止当前会话
+   * 关联的后台 agent,否则后台任务会继续跑、继续向共享 API key 发请求。
+   */
+  cancelByParentSession(
+    sessionId: string,
+    reason?: string,
+  ): Promise<{ cancelled: number }>
+  /**
+   * zai patch (HRMSV3-ZN-WEBSITE#668 / subagent_control.send_message):
+   * 把父 agent 的指令投递到子 agent 的 pending 队列,子 agent 下一轮
+   * turn 时拼到 query prompt 前缀消费。任务不存在 / 已终态返回
+   * {ok:false};否则返回 {ok:true}。调用方负责幂等性。
+   */
+  sendMessageToTask(
+    taskId: string,
+    prompt: string,
+  ): Promise<{ ok: boolean }>
+  /**
    * 流式读取任务事件。语义:
    *   1) 先回放 store 中 seq > fromSeq 的所有历史事件
    *   2) 若任务已结束,流完成后立即终止

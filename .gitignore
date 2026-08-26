@@ -25,7 +25,7 @@ yarn-error.log*
 .pnpm-debug.log*
 
 # TypeScript
-**/tsconfig.tsbuildinfo
+**/tsconfig*.tsbuildinfo
 
 # Coverage (vitest --coverage output)
 coverage/
@@ -46,10 +46,12 @@ Thumbs.db
 
 # Agent working directory (auto-generated)
 .agent_working_dir/
+.CONTEXT.md
 
 # Worktrees (git worktree isolation)
 .worktrees/
 .claude/worktrees/
+.zai/
 
 # Superpowers local task artifacts (briefs/reviews)
 .superpowers/briefs/
@@ -58,3 +60,9 @@ Thumbs.db
 # superpowers skill scratch
 .superpowers/
 .verify
+.zai-screenshots
+
+# Local runtime artifacts (ego browser task outputs etc.)
+var/
+docs/superpowers/plans/screenshots
+CONTEXT.md

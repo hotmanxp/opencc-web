@@ -2,7 +2,38 @@ import { useAgentStore, type AgentMessage } from '../../store/useAgentStore.js'
 import { MessageBubble } from './MessageBubble.js'
 import { CollapsedMessageBubble } from './CollapsedMessageBubble.js'
 import { ToolGroupCard } from './ToolGroupCard.js'
-import { deriveTranscriptNodes } from './deriveTranscriptNodes.js'
+import { deriveTranscriptNodes, type ToolGroupEntry, type ToolGroupStatus } from './deriveTranscriptNodes.js'
+import { lastAssistantTextIndex } from './deriveStreamLive.js'
+import { getRenderer } from '../toolRenderers/registry.js'
+
+// toolGroup 内的 status 是否需要保留 ToolGroupCard 外壳(展示状态提示)。
+// pending/error/invalid/denied 都保留外壳。
+const STATUS_KEEPS_SHELL: ReadonlySet<ToolGroupStatus> = new Set([
+  'pending',
+  'error',
+  'invalid',
+  'denied',
+])
+
+/**
+ * 判定 toolGroup 是否应跳过 ToolGroupCard 外壳直接展示
+ * MessageBubble 列表 —— 用于支持 renderer 标记的 skipOuterGroup 类
+ * 自包含展示工具(例如 DisplayFiles)。条件:
+ * 1) 每个 entry 的 message.name 非空
+ * 2) 每个 entry 的 renderer.skipOuterGroup === true
+ * 3) 每个 entry 的 status 都不是 pending/error/invalid/denied
+ *    (状态提示优先, 让 ToolGroupCard 显示「工具调用中…」/红色 Tag)
+ */
+function shouldSkipOuterGroup(toolCalls: ToolGroupEntry[]): boolean {
+  if (toolCalls.length === 0) return false
+  for (const e of toolCalls) {
+    if (STATUS_KEEPS_SHELL.has(e.status)) return false
+    const name = (e.message as { name?: unknown }).name
+    if (typeof name !== 'string' || name.length === 0) return false
+    if (getRenderer(name).skipOuterGroup !== true) return false
+  }
+  return true
+}
 
 interface Props {
   messages: AgentMessage[]
@@ -38,11 +69,20 @@ export function MessageListView({ messages, streaming }: Props) {
             : undefined
           const reactKey =
             (toolUseId ? `tool-${toolUseId}` : (msg as any).eventId) || String(idx)
+          // 判定: "最后一条消息是 thinking" 即视为流式 thinking 累积中,
+          // 给 ThinkingBlock 传 streaming={true} 启动动画. 旧实现这里
+          // 用 idx === lastIdx 也能覆盖大多数场景; text 一切到, lastIdx
+          // 立刻变成 text → thinking 自动失活 → 动画停. 简单可靠.
+          const lastIdx = visibleMessages.length - 1
+          const isLive =
+            t === 'assistant.thinking'
+              ? idx === lastIdx
+              : t === 'assistant.text' && Boolean(streaming) && idx === lastIdx
           return (
             <MessageBubble
               key={reactKey}
               msg={msg}
-              streaming={streaming && idx === visibleMessages.length - 1}
+              streaming={isLive}
             />
           )
         })}
@@ -71,17 +111,32 @@ export function MessageListView({ messages, streaming }: Props) {
   // (transcriptCollapsed=true) 用户期望看到 AI 的最近一条完整回答, 历史
   // 仍然 clamp — 这条规则与 splitPaneOpen 无关 (transcriptCollapsed 已经是
   // 单一真源, useSplitPaneCompactLock 把它锁到 true).
-  const lastAssistantIdx = (() => {
-    for (let i = visibleMessages.length - 1; i >= 0; i--) {
-      if ((visibleMessages[i] as { type?: string }).type === 'assistant.text') return i
-    }
-    return -1
-  })()
+  const lastAssistantIdx = lastAssistantTextIndex(visibleMessages)
 
   return (
     <>
       {nodes.map((node, i) => {
         if (node.kind === 'toolGroup') {
+          // 自包含展示类工具(标记了 skipOuterGroup)且所有 entry 都
+          // 已 done, 跳过 ToolGroupCard 外壳直接渲染 MessageBubble 列表,
+          // 与 expanded 视图视觉对齐. 与其他工具混合或 pending/error
+          // 状态会回退到 ToolGroupCard 保留状态提示.
+          if (shouldSkipOuterGroup(node.toolCalls)) {
+            return (
+              <span key={`grp-skip-${node.toolCalls[0]?.message.eventId ?? node.startIndex}`}>
+                {node.toolCalls.map((e) => {
+                  const evtId = ((e.message as any).eventId as string) ?? `tool-${e.index}`
+                  return (
+                    <MessageBubble
+                      key={evtId}
+                      msg={e.message}
+                      streaming={e.status === 'pending'}
+                    />
+                  )
+                })}
+              </span>
+            )
+          }
           // 用首条 tool entry 的 eventId 作稳定 key, 而非下标区间. 否则新消息
           // (或同一 turn 追加的新工具) 会改变 group 的 endIndex → key 变化 →
           // 整棵子树卸载重挂载, ToolGroupCard 内部折叠态被重置.
@@ -93,15 +148,16 @@ export function MessageListView({ messages, streaming }: Props) {
           )
         }
         if (node.kind === 'thinking') {
-          // Thinking in collapsed view: 与 expanded 走同一个 MessageBubble 渲染分支,
-          // 让 ThinkingBlock (含 pill + 折叠 + 预览) 在两种视图下完全一致.
-          // 原因: 早期 CollapsedMessageBubble 自渲染 thinking 文本, 用户反馈"思考模块不见了";
-          // 根因是旧分支只匹配 type==='assistant', 而真正的思考消息 type 是 'assistant.thinking'.
+          // 注意: collapsed 视图下, 流式 'assistant.thinking' 不会进这种
+          // 节点 (deriveTranscriptNodes 只把 legacy 'assistant' + thinking
+          // 字段提为 kind: 'thinking'). 流式 'assistant.thinking' 走
+          // text bucket, 见下面的 isThinkingMsg 分支.
+          // 这里是历史回放里的 legacy thinking 节点, 始终静态 (不闪烁).
           return (
             <MessageBubble
               key={`think-${node.index}-${i}`}
               msg={node.message}
-              streaming={streaming && node.index === visibleMessages.length - 1}
+              streaming={false}
             />
           )
         }
@@ -127,11 +183,21 @@ export function MessageListView({ messages, streaming }: Props) {
               // "最后一条 assistant.text" 完整展开 (绕开 clamp);
               // 历史 assistant.text 仍走默认 6 行 clamp + "显示更多" 按钮.
               const isLastAssistant = msgIdx === lastAssistantIdx
+              // 判定: 最后一条消息是 thinking → 走 streaming=true; 否则
+              // 走 status-based streaming (text 累积光标等).
+              // assistant.thinking 在 collapsed 视图走 text bucket;
+              // 简单规则: "thinking 是最后一条 messages" 即可.
+              const mt = (m as { type?: string }).type
+              const isThinkingMsg = mt === 'assistant.thinking'
+              const lastOverallIdx = visibleMessages.length - 1
+              const itemStreaming = isThinkingMsg
+                ? msgIdx === lastOverallIdx
+                : streaming && node.endIndex === lastOverallIdx
               return (
                 <CollapsedMessageBubble
                   key={evtId}
                   message={m}
-                  streaming={streaming && node.endIndex === visibleMessages.length - 1}
+                  streaming={itemStreaming}
                   forceExpanded={isLastAssistant}
                 />
               )

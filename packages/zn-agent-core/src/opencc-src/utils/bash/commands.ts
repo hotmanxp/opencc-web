@@ -252,7 +252,8 @@ export function filterControlOperators(
   commandsAndOperators: string[],
 ): string[] {
   return commandsAndOperators.filter(
-    part => !(ALL_SUPPORTED_CONTROL_OPERATORS as Set<string>).has(part),
+    part =>
+      !(ALL_SUPPORTED_CONTROL_OPERATORS as unknown as Set<string>).has(part),
   )
 }
 
@@ -526,14 +527,14 @@ const COMMAND_LIST_SEPARATORS = new Set<ControlOperator>([
   ';',
   ';;',
   '|',
-])
+] as unknown as ControlOperator[])
 
 const ALL_SUPPORTED_CONTROL_OPERATORS = new Set<ControlOperator>([
   ...COMMAND_LIST_SEPARATORS,
   '>&',
   '>',
   '>>',
-])
+] as ControlOperator[])
 
 // Checks if this is just a list of commands
 function isCommandList(command: string): boolean {
@@ -575,7 +576,7 @@ function isCommandList(command: string): boolean {
       if (part.op === 'glob') {
         // Globs are safe
         continue
-      } else if (COMMAND_LIST_SEPARATORS.has(part.op)) {
+      } else if (COMMAND_LIST_SEPARATORS.has(part.op as unknown as ControlOperator)) {
         // Command list separators are safe
         continue
       } else if (part.op === '>&') {

@@ -89,6 +89,89 @@ describe('bashRepl routes — exec / abort', () => {
     const abortRes = await request(app).post('/api/bash/repl/sess-1/abort').send({})
     expect(abortRes.status).toBe(409) // 无 child 在跑 → abort 409
   })
+
+  // ---------------------------------------------------------------------------
+  // wait=true 模式 — 同步拿到真实终态(code/signal/durationMs)
+  // ---------------------------------------------------------------------------
+
+  it('POST exec {wait:true} 返回 code=0 + durationMs (成功命令)', async () => {
+    const res = await request(app)
+      .post('/api/bash/repl/sess-1/exec')
+      .send({ command: 'true', wait: true })
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+    expect(res.body.execId).toMatch(/^e-/)
+    expect(res.body.code).toBe(0)
+    expect(res.body.signal).toBeNull()
+    expect(typeof res.body.finishedAt).toBe('number')
+    expect(typeof res.body.durationMs).toBe('number')
+    expect(res.body.durationMs).toBeGreaterThanOrEqual(0)
+  })
+
+  it('POST exec {wait:true} 返回 code 非 0 (失败命令)', async () => {
+    const res = await request(app)
+      .post('/api/bash/repl/sess-1/exec')
+      .send({ command: 'sh -c "exit 7"', wait: true })
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+    expect(res.body.code).toBe(7)
+    expect(res.body.signal).toBeNull()
+  })
+
+  it('POST exec ?wait=1 (query) 等价于 body.wait=true', async () => {
+    const res = await request(app)
+      .post('/api/bash/repl/sess-1/exec?wait=1')
+      .send({ command: 'echo hi' })
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+    expect(res.body.code).toBe(0)
+    expect(typeof res.body.durationMs).toBe('number')
+  })
+
+  it('POST exec 默认 (不传 wait) 不返回 code/durationMs 字段', async () => {
+    const res = await request(app)
+      .post('/api/bash/repl/sess-1/exec')
+      .send({ command: 'true' })
+    expect(res.status).toBe(200)
+    expect(res.body.ok).toBe(true)
+    expect(res.body.execId).toMatch(/^e-/)
+    expect(res.body.code).toBeUndefined()
+    expect(res.body.durationMs).toBeUndefined()
+    // fire-and-forget 也应让后续 abort 409(命令已结束)
+    await new Promise((r) => setTimeout(r, 200))
+    const abortRes = await request(app).post('/api/bash/repl/sess-1/abort').send({})
+    expect(abortRes.status).toBe(409)
+  })
+
+  it('POST exec {wait:true} 长跑命令 — server 真的 await 到结束才返回', async () => {
+    const start = Date.now()
+    const res = await request(app)
+      .post('/api/bash/repl/sess-1/exec')
+      .send({ command: 'sleep 0.2', wait: true })
+    const elapsed = Date.now() - start
+    expect(res.status).toBe(200)
+    expect(res.body.code).toBe(0)
+    // 至少 sleep 这么久 — 证明 server 真的等到命令完成,不是立即返回
+    expect(elapsed).toBeGreaterThanOrEqual(150)
+    // durationMs 与实测 elapsed 大致吻合(允许几 ms 误差)
+    expect(res.body.durationMs).toBeGreaterThanOrEqual(150)
+    expect(res.body.durationMs).toBeLessThanOrEqual(elapsed + 50)
+  })
+
+  it('POST exec {wait:true} 同一 session 内串行 (上条 wait=true 结束后才接受下一条)', async () => {
+    const a = await request(app)
+      .post('/api/bash/repl/sess-1/exec')
+      .send({ command: 'echo first', wait: true })
+    expect(a.status).toBe(200)
+    expect(a.body.code).toBe(0)
+    // 上条已完成 (code=0),busy=false,下一条立即可接收
+    const b = await request(app)
+      .post('/api/bash/repl/sess-1/exec')
+      .send({ command: 'echo second', wait: true })
+    expect(b.status).toBe(200)
+    expect(b.body.code).toBe(0)
+    expect(b.body.execId).not.toBe(a.body.execId)
+  })
 })
 
 // -----------------------------------------------------------------------------
