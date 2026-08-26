@@ -24,6 +24,8 @@ describe('routes/desktopFs', () => {
     mkdirSync(join(root, 'folder'));
     writeFileSync(join(root, 'a.md'), 'hi\n');
     writeFileSync(join(root, 'b.png'), Buffer.from([0x89, 0x50, 0x4e, 0x47])); // PNG magic 非完整,仅测路径存在性
+    writeFileSync(join(root, 'h.html'), '<!doctype html><title>x</title>');
+    writeFileSync(join(root, 'h.htm'), '<!doctype html><title>x</title>');
     writeFileSync(join(root, 'x.zip'), 'PK\x03\x04');
   });
   afterAll(() => rmSync(root, { recursive: true, force: true }));
@@ -44,13 +46,15 @@ describe('routes/desktopFs', () => {
     const entries = res.body.entries as Array<{ name: string; kind: string; size: number; mtime: number; path: string; preview?: boolean }>;
     expect(entries.map((e) => e.kind)).toEqual(expect.arrayContaining(['file', 'dir']));
     expect(entries[0]!.kind).toBe('dir');                 // 目录第一
-    expect(entries.map((e) => e.name)).toEqual(['folder', 'a.md', 'b.png', 'x.zip']); // dir 在后按字典序,文件按字典序
+    expect(entries.map((e) => e.name)).toEqual(['folder', 'a.md', 'b.png', 'h.htm', 'h.html', 'x.zip']); // dir 在后按字典序,文件按字典序
     expect(entries[1]!.mtime).toBeGreaterThan(0);
     expect(entries[0]!.path).toBe(join(root, 'folder'));  // path 由服务端 join,OS-native
     // preview 标记:服务端白名单命中 → true;非白名单 → false
     const byName = Object.fromEntries(entries.map((e) => [e.name, e]));
     expect(byName['a.md']!.preview).toBe(true);
     expect(byName['b.png']!.preview).toBe(true);
+    expect(byName['h.html']!.preview).toBe(true);   // HTML 白名单
+    expect(byName['h.htm']!.preview).toBe(true);    // htm 同 html
     expect(byName['x.zip']!.preview).toBe(false);
   });
 
@@ -84,6 +88,19 @@ describe('routes/desktopFs', () => {
   test('file: 非白名单类型 → 400', async () => {
     const res = await request(makeApp()).get('/api/desktop/fs/file').query({ path: join(root, 'x.zip') });
     expect(res.status).toBe(400);
+  });
+
+  test('file: HTML 文件返回 text/html mime,dataUrl 是 base64', async () => {
+    const res = await request(makeApp()).get('/api/desktop/fs/file').query({ path: join(root, 'h.html') });
+    expect(res.status).toBe(200);
+    expect(res.body.mime).toBe('text/html');
+    expect(res.body.dataUrl).toMatch(/^data:text\/html;base64,/);
+  });
+
+  test('file: .htm 与 .html 等价(mime=text/html)', async () => {
+    const res = await request(makeApp()).get('/api/desktop/fs/file').query({ path: join(root, 'h.htm') });
+    expect(res.status).toBe(200);
+    expect(res.body.mime).toBe('text/html');
   });
 
   test('file: 超 2MB → 413', async () => {

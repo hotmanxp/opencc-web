@@ -17,6 +17,11 @@ const IMAGE_EXTS: Record<string, string> = {
   '.gif': 'image/gif', '.webp': 'image/webp', '.bmp': 'image/bmp',
   '.svg': 'image/svg+xml', '.ico': 'image/x-icon', '.avif': 'image/avif',
 };
+// HTML 单独拆出来:toMime 返回 'text/html' 而不是 'text/plain',这样前端
+// FilePreviewBody 能识别为 html → 用 <iframe sandbox> 渲染;
+// 否则会走 text 分支当成纯文本(html 标签裸露显示)。
+// 与 shared/fileKind.ts 的 HTML_EXTS 同步。
+const HTML_EXTS = new Set(['.html', '.htm']);
 const TEXT_EXTS = new Set([
   '.md', '.markdown', '.txt', '.json', '.jsonc', '.json5', '.yaml', '.yml',
   '.toml', '.ini', '.cfg', '.conf', '.ts', '.tsx', '.js', '.jsx', '.mjs',
@@ -37,7 +42,7 @@ function normalizePath(raw: string): string {
 
 function toMime(name: string): string | undefined {
   const ext = extname(name).toLowerCase();
-  return IMAGE_EXTS[ext] ?? (TEXT_EXTS.has(ext) ? 'text/plain' : undefined);
+  return IMAGE_EXTS[ext] ?? (HTML_EXTS.has(ext) ? 'text/html' : TEXT_EXTS.has(ext) ? 'text/plain' : undefined);
 }
 
 router.get('/desktop/fs/list', async (req: Request, res) => {

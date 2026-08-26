@@ -60,4 +60,40 @@ describe('DesktopWindow', () => {
     fireEvent.pointerDown(screen.getByRole('region'));
     expect(onFocus).toHaveBeenCalledTimes(1);
   });
+
+  test('关闭按钮:提供 onClose 时点击触发,且不冒泡到标题栏拖动', () => {
+    const onClose = vi.fn();
+    const onFocus = vi.fn();
+    render(
+      <DesktopWindow win={baseWin()} active viewport={V} onFocus={onFocus} onMinimize={() => {}} onToggleMax={() => {}} onClose={onClose} onChange={() => {}}>
+        <div>正文</div>
+      </DesktopWindow>,
+    );
+    fireEvent.click(screen.getByLabelText('关闭'));
+    expect(onClose).toHaveBeenCalledTimes(1);
+  });
+
+  test('关闭按钮:不传 onClose 时仍可点(noop),避免无入口恢复的禁用陷阱', () => {
+    // 红点可点 → onClose?.() 是 optional chaining,无 handler 时不调用、不抛错。
+    // 核心窗口被关后由 Desktop 的 restoreWindow + Dock 恢复,不需要 disabled 防御。
+    render(
+      <DesktopWindow win={baseWin()} active viewport={V} onFocus={() => {}} onMinimize={() => {}} onToggleMax={() => {}} onChange={() => {}}>
+        <div>正文</div>
+      </DesktopWindow>,
+    );
+    const closeBtn = screen.getByLabelText('关闭');
+    expect(closeBtn).not.toBeDisabled();
+    expect(() => fireEvent.click(closeBtn)).not.toThrow();
+  });
+
+  test('最大化圆点触发 onToggleMax', () => {
+    const onToggleMax = vi.fn();
+    render(
+      <DesktopWindow win={baseWin()} active viewport={V} onFocus={() => {}} onMinimize={() => {}} onToggleMax={onToggleMax} onChange={() => {}}>
+        <div>正文</div>
+      </DesktopWindow>,
+    );
+    fireEvent.click(screen.getByLabelText('最大化'));
+    expect(onToggleMax).toHaveBeenCalledTimes(1);
+  });
 });

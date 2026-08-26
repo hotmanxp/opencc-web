@@ -3,7 +3,7 @@ import { TOPBAR_H, DOCK_GUARD } from './windowMath.js';
 
 export interface DesktopShortcut { id: string; name: string; path: string; kind: 'file' | 'dir' }
 
-export interface StickyNote { id: string; text: string; x: number; y: number; color: string }
+export interface StickyNote { id: string; text: string; x: number; y: number; color: string; w?: number; h?: number; z?: number }
 
 export interface TodoItem { id: string; text: string; done: boolean }
 

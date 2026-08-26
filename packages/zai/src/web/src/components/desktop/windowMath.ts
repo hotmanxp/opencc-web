@@ -17,7 +17,9 @@ export function clampBounds(b: WindowBounds, vp: { w: number; h: number }, id: '
   const w = Math.min(vp.w, Math.max(mn.w, Math.round(b.w)));
   const h = Math.min(vp.h, Math.max(mn.h, Math.round(b.h)));
   const x = Math.min(Math.max(0, Math.round(b.x)), Math.max(0, vp.w - 60)); // 标题栏至少留 60px 可抓
-  const y = Math.min(Math.max(0, Math.round(b.y)), Math.max(0, vp.h - 40));
+  // y 最小值 ≥ TOPBAR_H,避免窗口被状态栏(z=100)遮住标题栏无法操作;
+  // 最大化几何另走 maximizedBounds 已是 TOPBAR_H 开始,行为一致。
+  const y = Math.min(Math.max(TOPBAR_H, Math.round(b.y)), Math.max(0, vp.h - 40));
   return { x, y, w, h };
 }
 

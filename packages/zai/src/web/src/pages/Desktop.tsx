@@ -12,10 +12,11 @@ import {
   RobotFilled,
   FolderFilled,
   PictureFilled,
-  EditFilled,
   CheckSquareFilled,
   CloseCircleFilled,
+  EyeFilled,
 } from '@ant-design/icons';
+import NotesIcon from '../components/desktop/NotesIcon.js';
 import { useNavigate } from 'react-router-dom';
 import AgentConversation from './AgentConversation.js';
 import SettingsDrawer from '../components/SettingsDrawer.js';
@@ -173,10 +174,16 @@ const activeId = useMemo(
   );
   const focusWindow = useCallback((id: string) => {
     setWindows((ws) => {
-      const maxZ = Math.max(0, ...ws.map((w) => w.z)) + 1;
-      return ws.map((w) => (w.id === id ? { ...w, z: maxZ, minimized: false } : w));
+      // max 纳入便签 z;同时把其他窗口 z 降为 0(全局单焦点)。预览 z 也降为 0。
+      const noteMax = Math.max(0, ...notes.map((n) => n.z ?? 0));
+      const maxZ = Math.max(0, ...ws.map((w) => w.z), previewWindow?.z ?? 0, noteMax) + 1;
+      return ws.map((w) => (w.id === id ? { ...w, z: maxZ, minimized: false } : { ...w, z: 0 }));
     });
-  }, [setWindows]);
+    // 全局单焦点:便签 z 也要同步降为 0,否则便签 z 仍可能高于新窗口 z(虽然已 max+1 覆盖,
+    // 但降级更彻底,避免下次再点便签时 z 累加爆炸)。
+    setNotes((ns) => ns.map((n) => ({ ...n, z: 0 })));
+    setPreviewWindow((p) => (p ? { ...p, z: 0, minimized: false } : p));
+  }, [setWindows, setNotes, setPreviewWindow, previewWindow, notes]);
   const minimize = useCallback(
     (id: string) => {
       setWindows((ws) => {
@@ -191,6 +198,27 @@ const activeId = useMemo(
     (id: string) => setWindows((ws) => ws.map((w) => (w.id === id ? toggleMaximized(w, vp) : w))),
     [setWindows, vp],
   );
+  // 关闭核心窗口:从数组中过滤掉,Dock 点击对应图标时由 restoreWindow 重新创建。
+  // 持久化跟随 setWindows → 下次进入桌面 initWindows 重建默认布局。
+  const closeWindow = useCallback(
+    (id: string) => setWindows((ws) => ws.filter((w) => w.id !== id)),
+    [setWindows],
+  );
+  // 重建被关闭的核心窗口(agent/explorer)沿用 initWindows 默认几何,
+  // z 拉到当前最大之上确保置顶。preview 是临时窗口不走这条路径。
+  const restoreWindow = useCallback(
+    (id: 'agent' | 'explorer') => {
+      setWindows((ws) => {
+        if (ws.some((w) => w.id === id)) return ws;
+        const defaults = initWindows(vp);
+        const tpl = defaults.find((w) => w.id === id);
+        if (!tpl) return ws;
+        const maxZ = Math.max(0, ...ws.map((w) => w.z)) + 1;
+        return [...ws, { ...tpl, z: maxZ }];
+      });
+    },
+    [setWindows, vp],
+  );
 
   // ---------- 预览窗口操作(临时窗口,不进 windows 数组、不持久化) ----------
   /** onChange:DesktopWindow 拖动 title 移动 / 右下角改大小 → setPreviewWindow({...patch}) */
@@ -199,14 +227,21 @@ const activeId = useMemo(
       setPreviewWindow((w) => (w ? { ...w, ...patch } : w)),
     [],
   );
-  /** onFocus:把 previewWindow 提到所有窗口最上层 — 用户点击预览窗口内部时调用 */
+  /** onFocus:把 previewWindow 提到所有窗口最上层 — 用户点击预览窗口内部时调用。
+   *  同步把所有 windows 的 z 降为 0,确保 preview 的新 maxZ 严格高于 windows,
+   *  否则若 windows 此前 max 已经很高,新 preview z = max+1 仍可能被其他窗口追平,
+   *  导致 activeId 一直指向 windows 而不是 preview。 */
   const focusPreviewWindow = useCallback(() => {
     setPreviewWindow((w) => {
       if (!w) return w;
-      const maxZ = Math.max(0, ...windows.map((ww) => ww.z), w.z) + 1;
+      // 全局单焦点:max 纳入 windows + 便签;同时 windows 和 notes z 都降为 0。
+      const noteMax = Math.max(0, ...notes.map((n) => n.z ?? 0));
+      const maxZ = Math.max(0, ...windows.map((ww) => ww.z), w.z, noteMax) + 1;
       return { ...w, z: maxZ, minimized: false };
     });
-  }, [windows]);
+    setWindows((ws) => ws.map((w) => ({ ...w, z: 0 })));
+    setNotes((ns) => ns.map((n) => ({ ...n, z: 0 })));
+  }, [windows, notes, setWindows, setNotes]);
   const minimizePreviewWindow = useCallback(() => {
     setPreviewWindow((w) => (w ? { ...w, minimized: !w.minimized } : w));
   }, []);
@@ -366,8 +401,8 @@ const activeId = useMemo(
             ...meta,
           });
         } else if (kind === 'html') {
-          // desktopFs 不支持 .html 白名单(只有 text/image),这里只兜底:
-          // 若服务端真的返回了 html dataUrl,直接传给 iframe src=。
+          // desktopFs 的 TEXT_EXTS 抽 HTML_EXTS 出来后,服务端 toMime 返回
+          // 'text/html',dataUrl 是 base64(text/html;...) → 直接交给 iframe src=。
           setPreviewData({
             kind: 'html', path: preview.path,
             mime: r.mime ?? 'text/html', dataUrl: r.dataUrl,
@@ -494,9 +529,23 @@ const activeId = useMemo(
   const addNote = useCallback(() => {
     setNotes((ns) => [...ns, newStickyNote(vp, ns.length, windows)]);
   }, [setNotes, vp, windows]);
+  // 便签聚焦:全局单焦点语义 — 把目标便签 z 拉到当前 max + 1,
+  // 同时把其他窗口和预览窗口的 z 降为 0(失去焦点)。
+  // 这样保证桌面任何时刻只有一个元素是 active,聚焦切换不会"叠加"。
+  const focusStickyNote = useCallback((id: string) => {
+    const maxZ = Math.max(
+      0,
+      ...windows.map((w) => w.z),
+      ...notes.map((n) => n.z ?? 0),
+      previewWindow?.z ?? 0,
+    );
+    setNotes((ns) => ns.map((n) => (n.id === id ? { ...n, z: maxZ + 1 } : { ...n, z: 0 })));
+    setWindows((ws) => ws.map((w) => ({ ...w, z: 0 })));
+    setPreviewWindow((p) => (p ? { ...p, z: 0 } : p));
+  }, [setNotes, setWindows, setPreviewWindow, windows, notes, previewWindow]);
 
   const dockClick = useCallback(
-    (id: 'agent' | 'explorer' | 'wallpaper' | 'notes' | 'todo' | 'exit') => {
+    (id: 'agent' | 'explorer' | 'wallpaper' | 'notes' | 'todo' | 'preview' | 'exit') => {
       if (id === 'exit') {
         navigate('/agent');
         return;
@@ -509,13 +558,25 @@ const activeId = useMemo(
         addNote();
         return;
       }
+      if (id === 'preview') {
+        // 已聚焦 → 关闭(预览窗口是临时窗口,无最小化概念,再点 dock = 关闭);
+        // 否则 → 聚焦。
+        if (!previewWindow) return;
+        if (activeId === 'preview') closePreview();
+        else focusPreviewWindow();
+        return;
+      }
       if (id === 'todo') {
         setTodoOpen((v) => !v);
         return;
       }
       const target = id;
       const found = windows.find((w) => w.id === target);
-      if (!found) return;
+      if (!found) {
+        // 窗口被关闭 → 重建(Dock 提供恢复入口,保证"关了还能再开")
+        if (target === 'agent' || target === 'explorer') restoreWindow(target);
+        return;
+      }
       if (found.minimized) {
         focusWindow(target);
       } else if (activeId === target) {
@@ -524,7 +585,7 @@ const activeId = useMemo(
         focusWindow(target);
       }
     },
-    [activeId, addNote, focusWindow, minimize, navigate, windows],
+    [activeId, addNote, closePreview, focusPreviewWindow, focusWindow, minimize, navigate, previewWindow, restoreWindow, windows],
   );
 
   const isLight = effectiveTheme === 'light' || effectiveTheme === 'high-contrast';
@@ -625,6 +686,7 @@ const activeId = useMemo(
         notes={notes}
         onChange={(id, patch) => setNotes((ns) => ns.map((n) => (n.id === id ? { ...n, ...patch } : n)))}
         onDelete={(id) => setNotes((ns) => ns.filter((n) => n.id !== id))}
+        onFocus={focusStickyNote}
         viewport={vp}
       />
 
@@ -640,6 +702,7 @@ const activeId = useMemo(
             onFocus={() => focusWindow(w.id)}
             onMinimize={() => minimize(w.id)}
             onToggleMax={() => toggleMax(w.id)}
+            onClose={() => closeWindow(w.id)}
             onChange={(patch) => patchWindow(w.id, patch)}
           >
             {w.id === 'agent' ? (
@@ -761,6 +824,7 @@ const activeId = useMemo(
           onFocus={focusPreviewWindow}
           onMinimize={minimizePreviewWindow}
           onToggleMax={toggleMaxPreviewWindow}
+          onClose={closePreview}
           onChange={patchPreviewWindow}
         >
           <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
@@ -973,8 +1037,18 @@ const activeId = useMemo(
       >
         <DockButton label="Agent" active={activeId === 'agent'} onClick={() => dockClick('agent')} icon={<RobotFilled />} color="var(--accent-start, #ff6600)" />
         <DockButton label="资源管理器" active={activeId === 'explorer'} onClick={() => dockClick('explorer')} icon={<FolderFilled />} color="#faad14" />
+        {/* 预览按钮:仅在预览窗口存在时显示;点聚焦/再点关闭(预览是临时窗口无最小化) */}
+        {previewWindow && preview && (
+          <DockButton
+            label="预览"
+            active={activeId === 'preview'}
+            onClick={() => dockClick('preview')}
+            icon={<EyeFilled />}
+            color="#1677ff"
+          />
+        )}
         <DockButton label="壁纸设置" active={false} onClick={() => dockClick('wallpaper')} icon={<PictureFilled />} color="#13c2c2" />
-        <DockButton label="便签" active={false} onClick={() => dockClick('notes')} icon={<EditFilled />} color="#722ed1" />
+        <DockButton label="便签" active={false} onClick={() => dockClick('notes')} icon={<NotesIcon />} color="#faad14" />
         <DockButton label="待办" active={todoOpen} onClick={() => dockClick('todo')} icon={<CheckSquareFilled />} color="#52c41a" />
         <DockButton label="退出桌面" active={false} onClick={() => dockClick('exit')} icon={<CloseCircleFilled />} color="#ff4d4f" />
       </div>
