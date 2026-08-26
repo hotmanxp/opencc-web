@@ -229,6 +229,126 @@ function assertDtsTargetsResolve(bundleEntryDts: string): void {
   console.log(`[bundle-opencc]   → ${TOOL_DTS}`)
 }
 
+// ── Subagent registry barrel d.ts(zai patch 2026-08-26)──────────────
+// compat/subagents/index.ts is a thin barrel that re-exports
+// `registry.ts`. The barrel isn't referenced from src/index.ts
+// (only bundle-entry.ts re-exports it for the runtime bundle), so
+// `tsc -b` doesn't emit `dist/compat/subagents/index.d.ts` on a
+// normal build. But `assertDtsTargetsResolve` runs before `tsc -b`
+// in the build chain, so the build script can't rely on tsc to have
+// produced the d.ts yet.
+//
+// We hand-write it here (matching the pattern used for Tool.d.ts
+// above and sessionApiCounter.d.ts / genericModelCapabilities.d.ts
+// below). The surface mirrors src/compat/subagents/registry.ts
+// exactly — when registry.ts changes, sync the public surface here.
+// bundle-entry.ts's `export * from './compat/subagents/index.js'`
+// resolves to this file, keeping the main-entry d.ts self-contained.
+{
+  const SUBAGENT_INDEX_DTS = join(ROOT, 'dist', 'compat', 'subagents', 'index.d.ts')
+  mkdirSync(dirname(SUBAGENT_INDEX_DTS), { recursive: true })
+  const dts = [
+    `// Type declarations for the compat subagent provider registry barrel.`,
+    `// Mirror the public surface of src/compat/subagents/registry.ts.`,
+    `// Hand-written because compat/subagents/index.ts is a thin barrel`,
+    `// re-exported only by bundle-entry.ts (which main tsconfig.json`,
+    `// excludes), so tsc -b does not emit dist/compat/subagents/index.d.ts`,
+    `// in a normal build. Keep in sync with registry.ts.`,
+    `export declare class SubagentRegistry {`,
+    `  registerProvider(provider: SubagentProvider): () => void;`,
+    `  getProvider(name: string): SubagentProvider | undefined;`,
+    `  list(): string[];`,
+    `  startProvider(name: string, req: SubagentRequest, ctx?: SubagentContext): Promise<SubagentRun>;`,
+    `}`,
+    `export declare class SubagentError extends Error {`,
+    `  readonly code: string;`,
+    `  constructor(code: string, message: string);`,
+    `}`,
+    `export declare function getSubagentRegistry(): SubagentRegistry;`,
+    `export declare function _resetSubagentRegistryForTests(): void;`,
+    `export interface SubagentProvider {`,
+    `  readonly name: string;`,
+    `  readonly description: string;`,
+    `  readonly inheritsParentContext: boolean;`,
+    `  readonly capabilities: { readonly noStartCapabilities: boolean };`,
+    `  start(req: SubagentRequest, ctx: SubagentContext): Promise<SubagentRun>;`,
+    `}`,
+    `export interface SubagentRequest {`,
+    `  readonly description: string;`,
+    `  readonly prompt: string;`,
+    `  readonly cwd?: string;`,
+    `  readonly env?: Readonly<Record<string, string>>;`,
+    `  readonly model?: string;`,
+    `  readonly signal?: AbortSignal;`,
+    `}`,
+    `export interface SubagentContext {`,
+    `  readonly parentCwd?: string;`,
+    `  readonly parentEnv?: Readonly<Record<string, string>>;`,
+    `}`,
+    `export interface SubagentEvent {`,
+    `  readonly type: string;`,
+    `  readonly text?: string;`,
+    `  readonly phase?: string | null;`,
+    `  readonly raw?: unknown;`,
+    `}`,
+    `export type SubagentStopReason = 'completed' | 'error' | 'aborted' | 'max-tokens';`,
+    `export interface SubagentResult {`,
+    `  readonly text: string;`,
+    `  readonly stopReason: SubagentStopReason;`,
+    `  readonly errorMessage?: string;`,
+    `}`,
+    `export interface SubagentRun {`,
+    `  readonly id: string;`,
+    `  readonly events: AsyncIterable<SubagentEvent>;`,
+    `  readonly result: Promise<SubagentResult>;`,
+    `  cancel(): Promise<void>;`,
+    `}`,
+    ``,
+  ].join('\n')
+  writeFileSync(SUBAGENT_INDEX_DTS, dts)
+  console.log(`[bundle-opencc]   → ${SUBAGENT_INDEX_DTS}`)
+}
+
+// compat/subagents/codex/index.ts / claude-code/index.ts are
+// subagent provider registration modules. Like compat/subagents/index.ts
+// (the registry barrel above), they're only reached from bundle-entry.ts
+// for their apply function:
+//   export { apply as applyCodexProvider } from './compat/subagents/codex/index.js'
+//   export { apply as applyClaudeCodeProvider } from './compat/subagents/claude-code/index.js'
+// so tsc -b does not emit d.ts for them. Hand-write minimal d.ts
+// files covering only the apply surface the bundle-entry re-exports;
+// the SubagentRegistry type is imported from the barrel d.ts above.
+{
+  const SUBAGENT_PROVIDER_DTS_DIR = join(ROOT, 'dist', 'compat', 'subagents')
+  const codexDts = [
+    '// Type declarations for the codex subagent provider apply entry.',
+    '// Mirror src/compat/subagents/codex/index.ts (only apply is consumed',
+    '// by bundle-entry.ts). Hand-written because the file is only referenced',
+    '// from bundle-entry.ts (excluded from main tsconfig.json).',
+    "import { SubagentRegistry } from '../index.js';",
+    'export declare function apply(registry: SubagentRegistry, config?: unknown): void;',
+    '',
+  ].join('\n')
+  const claudeCodeDts = [
+    '// Type declarations for the claude-code subagent provider apply entry.',
+    '// Mirror src/compat/subagents/claude-code/index.ts (only apply is',
+    '// consumed by bundle-entry.ts). Hand-written because the file is only',
+    '// referenced from bundle-entry.ts (excluded from main tsconfig.json).',
+    "import { SubagentRegistry } from '../index.js';",
+    'export declare function apply(registry: SubagentRegistry, config?: unknown): void;',
+    '',
+  ].join('\n')
+  for (const [rel, dtsBody] of [
+    ['codex/index.d.ts', codexDts],
+    ['claude-code/index.d.ts', claudeCodeDts],
+  ] as const) {
+    const out = join(SUBAGENT_PROVIDER_DTS_DIR, rel)
+    mkdirSync(dirname(out), { recursive: true })
+    writeFileSync(out, dtsBody)
+    console.log(`[bundle-opencc]   → ${out}`)
+  }
+}
+
 function generateBundleEntryDts(): void {
   // Ensure OUT_DIR exists — this runs before any esbuild call, so we
   // can't rely on esbuild to create the dist/ directory for us.
