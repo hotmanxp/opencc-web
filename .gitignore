@@ -51,7 +51,7 @@ Thumbs.db
 # Worktrees (git worktree isolation)
 .worktrees/
 .claude/worktrees/
-.zai/
+.zai/worktrees/
 
 # Superpowers local task artifacts (briefs/reviews)
 .superpowers/briefs/
