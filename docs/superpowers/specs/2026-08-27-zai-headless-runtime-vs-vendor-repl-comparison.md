@@ -475,7 +475,609 @@ zai 当前的状态。每次 vendor 改 REPL,识别需要镜像的点,在 impl.t
 
 ---
 
-## 8. 附录:关键文件位置
+## 8. 附录 A:关键 vendor 代码片段
+
+### 8.1 `cronScheduler.ts` 核心 — 1 秒 setInterval 驱动所有 /loop 与 cron
+
+**位置**:`packages/zn-agent-core/src/opencc-src/utils/cronScheduler.ts:40-370`
+
+```typescript
+// cronScheduler.ts:40-44
+const CHECK_INTERVAL_MS = 1000
+const FILE_STABILITY_MS = 300
+const LOCK_PROBE_INTERVAL_MS = 5000
+
+// cronScheduler.ts:62-128 — CronSchedulerOptions 契约
+type CronSchedulerOptions = {
+  onFire: (prompt: string) => void              // 文件-backed 任务的入口
+  isLoading: () => boolean                     // turn 进行中则跳过
+  assistantMode?: boolean                       // true 时绕过 isLoading 守卫
+  onFireTask?: (task: CronTask) => void         // 拿到完整 task(含 agentId / cron / lastFiredAt)
+  onMissed?: (tasks: CronTask[]) => void        // 启动时 missed one-shot 任务
+  dir?: string                                  // Agent SDK daemon 用,绕开 bootstrap state
+  lockIdentity?: string                         // 锁 owner key;daemon 用稳定 per-process UUID
+  getJitterConfig?: () => CronJitterConfig      // REPL 用 GrowthBook 注入,可热调
+  isKilled?: () => boolean                      // killswitch,每 tick 轮询
+  filter?: (t: CronTask) => boolean             // daemon cron worker 用 `t.permanent` 过滤
+}
+
+// cronScheduler.ts:142-156
+export function createCronScheduler(options: CronSchedulerOptions): CronScheduler {
+  const lockOpts = dir || lockIdentity ? { dir, lockIdentity } : undefined
+  // File-backed tasks only. Session tasks (durable: false) NOT loaded here —
+  // 它们走 bootstrap state 的 getSessionCronTasks(),check() 每 tick 重读。
+  let tasks: CronTask[] = []
+  const nextFireAt = new Map<string, number>()
+  const missedAsked = new Set<string>()
+  const inFlight = new Set<string>()           // 防 async chokidar reload 期间重入
+
+  let enablePoll, checkTimer, lockProbeTimer: ...  // 三个 setInterval
+  let watcher: FSWatcher | null = null          // chokidar 监听 scheduled_tasks.json
+  let stopped = false, isOwner = false
+  // ...
+}
+
+// cronScheduler.ts:230-369 — check() 每 1s 执行
+function check() {
+  if (isKilled?.()) return                              // (1) GrowthBook 守卫
+  if (isLoading() && !assistantMode) return             // (2) turn 期间不发
+  const now = Date.now()
+  const seen = new Set<string>()
+  const firedFileRecurring: string[] = []               // 批量写盘累积
+  const jitterCfg = getJitterConfig?.() ?? DEFAULT_CRON_JITTER_CONFIG
+
+  function process(t: CronTask, isSession: boolean) {
+    if (filter && !filter(t)) return                    // daemon 过滤 non-permanent
+    seen.add(t.id)
+    if (inFlight.has(t.id)) return                      // inFlight 防重入
+
+    let next = nextFireAt.get(t.id)
+    if (next === undefined) {
+      // 首次见到 → 从 lastFiredAt ?? createdAt 锚定下一个 fire time
+      next = t.recurring
+        ? (jitteredNextCronRunMs(t.cron, t.lastFiredAt ?? t.createdAt, t.id, jitterCfg) ?? Infinity)
+        : (oneShotJitteredNextCronRunMs(t.cron, t.createdAt, t.id, jitterCfg) ?? Infinity)
+      nextFireAt.set(t.id, next)
+    }
+
+    if (now < next) return
+
+    if (onFireTask) onFireTask(t)                       // 走 task 路径(可路由 teammate)
+    else onFire(t.prompt)                                // 走 prompt 字符串路径
+
+    const aged = isRecurringTaskAged(t, now, jitterCfg.recurringMaxAgeMs)
+    if (aged) { /* log + 走一次性删除 */ }
+
+    if (t.recurring && !aged) {
+      // recurring: 从 now 重锚定下一个 fire(避免 catch-up),jitter 偏移 :00
+      const newNext = jitteredNextCronRunMs(t.cron, now, t.id, jitterCfg) ?? Infinity
+      nextFireAt.set(t.id, newNext)
+      if (!isSession) firedFileRecurring.push(t.id)    // 批量 markCronTasksFired
+    } else if (isSession) {
+      // 一次性 session task: 同步从内存删除
+      removeSessionCronTasks([t.id])
+      nextFireAt.delete(t.id)
+    } else {
+      // 一次性 file task: 异步删除, inFlight 守护
+      inFlight.add(t.id)
+      void removeCronTasks([t.id], dir).finally(() => inFlight.delete(t.id))
+      nextFireAt.delete(t.id)
+    }
+  }
+
+  if (isOwner) {                                        // 仅 owner 跑 file task
+    for (const t of tasks) process(t, false)
+    if (firedFileRecurring.length > 0) {
+      for (const id of firedFileRecurring) inFlight.add(id)
+      void markCronTasksFired(firedFileRecurring, now, dir)
+        .finally(() => { for (const id of firedFileRecurring) inFlight.delete(id) })
+    }
+  }
+  // session tasks 路径:每 tick 从 getSessionCronTasks() 重新读, 走 process(t, true)
+  // (与 isOwner 守卫无关)
+}
+```
+
+**关键常量与决策**:
+- `CHECK_INTERVAL_MS = 1000`:1 秒 tick — 任何"准实时"调度都有最多 1 秒延迟
+- `inFlight: Set<string>`:task 级防重入,覆盖 `removeCronTasks` 异步删除期间 chokidar reload
+- `tryAcquireSchedulerLock`(`cronTasksLock.ts`):cwd 级排他锁,防多个 OpenCC 实例同时跑同一份 scheduled_tasks.json
+- `getCronJitterConfig()`(`cronJitterConfig.ts`):GrowthBook 注入,运维可热调 jitter 窗口分散 `:00` 流量
+- `isKilled`:`() => !isKairosCronEnabled()`,每 tick 检查,翻转立即停止
+
+### 8.2 `useScheduledTasks.ts` + `useProactive` — REPL 侧的循环入口
+
+**位置**:`packages/zn-agent-core/src/opencc-src/hooks/useScheduledTasks.ts:42-130`
+
+```typescript
+// useScheduledTasks.ts:42-130
+export function useScheduledTasks({ isLoading, assistantMode = false, setMessages }: Props): void {
+  const isLoadingRef = useRef(isLoading)
+  isLoadingRef.current = isLoading
+
+  useEffect(() => {
+    if (!isKairosCronEnabled()) return              // GrowthBook 门控
+
+    const enqueueForLead = (prompt: string) =>
+      enqueuePendingNotification({                  // 入队到 commandQueue,priority='later'
+        value: prompt,
+        mode: 'prompt',
+        priority: 'later',                          // turn 结束后才 drain
+        isMeta: true,                               // 模型可见 / UI 隐藏
+        workload: WORKLOAD_CRON,                    // billing attribution
+      })
+
+    const scheduler = createCronScheduler({
+      onFire: enqueueForLead,
+      onFireTask: task => {
+        // teammate 路由:有 agentId → 投递给对应 teammate
+        if (task.agentId) {
+          const teammate = findTeammateTaskByAgentId(task.agentId, store.getState().tasks)
+          if (teammate && !isTerminalTaskStatus(teammate.status)) {
+            injectUserMessageToTeammate(teammate.id, task.prompt, setAppState)
+            return
+          }
+          // teammate 死了 → 清理孤儿 cron,否则 recurring 会一直 fire 到 nowhere
+          void removeCronTasks([task.id])
+          return
+        }
+        const msg = createScheduledTaskFireMessage(`Running scheduled task (${formatCronFireTime(new Date())})`)
+        setMessages(prev => [...prev, msg])
+        enqueueForLead(task.prompt)
+      },
+      isLoading: () => isLoadingRef.current,        // ref 取最新值,避免 stale closure
+      assistantMode,
+      getJitterConfig: getCronJitterConfig,         // GrowthBook 注入
+      isKilled: () => !isKairosCronEnabled(),
+    })
+    scheduler.start()
+    return () => scheduler.stop()
+  }, [assistantMode])                              // assistantMode session 寿命内稳定
+}
+```
+
+**Proactive tick**(REPL.tsx:4424-4440):
+
+```typescript
+useProactive?.({
+  isLoading: isLoading || initialMessage !== null,
+  queuedCommandsLength: queuedCommands.length,
+  hasActiveLocalJsxUI: isShowingLocalJSXCommand,
+  isInPlanMode: toolPermissionContext.mode === 'plan',
+  onSubmitTick: (prompt: string) =>
+    handleIncomingPrompt(prompt, { isMeta: true }),        // 立即插队提
+  onQueueTick: (prompt: string) =>
+    enqueue({ mode: 'prompt', value: prompt, isMeta: true }) // 入队等 turn 结束
+})
+```
+
+**架构差异**:
+- `/loop` → `useScheduledTasks` → `cronScheduler` → 1 秒 tick → `enqueuePendingNotification` → `commandQueue` → turn 结束 drain → `handleIncomingPrompt` → `onSubmit`
+- Proactive tick → `useProactive` → 立即/入队 → `handleIncomingPrompt` / `enqueue`
+- 两条路最终都汇入同一个 `handleIncomingPrompt` + `onSubmit`
+
+### 8.3 REPL 提问链 — onQuery / onQueryImpl
+
+**位置**:`packages/zn-agent-core/src/opencc-src/screens/REPL.tsx:3109-3314` (onQuery) + `2915-3108` (onQueryImpl)
+
+```typescript
+// REPL.tsx:3109-3140 — onQuery 入口
+const onQuery = useCallback(async (newMessages, abortController, shouldQuery, additionalAllowedTools, mainLoopModelParam, onBeforeQueryCallback?, input?, effort?) => {
+  // teammate mark active
+  if (isAgentSwarmsEnabled()) {
+    const teamName = getTeamName(), agentName = getAgentName()
+    if (teamName && agentName) void setMemberActive(teamName, agentName, true)
+  }
+
+  // queryGuard 状态机原子进入 running(generation token 防并发)
+  const thisGeneration = queryGuard.tryStart()
+  if (thisGeneration === null) {
+    // 并发兜底:把 user 文本入队,不让 query 抢占
+    newMessages.filter(m => m.type === 'user' && !m.isMeta).forEach(msg => {
+      enqueue({ value: getContentText(msg.message.content), mode: 'prompt' })
+    })
+    return false
+  }
+  try {
+    resetTimingRefs()
+    resetCurrentTurn()
+    setMessages(old => [...old, ...newMessages])    // 同步把新 message 写入 messagesRef
+    responseLengthRef.current = 0
+    snapshotOutputTokensForTurn(input ? parseTokenBudget(input) ?? getCurrentTurnTokenBudget() : getCurrentTurnTokenBudget())
+    setStreamingToolUses([]); setStreamingText(null)
+    const latestMessages = messagesRef.current      // 已含 newMessages
+    if (input) await mrOnBeforeQuery(input, latestMessages, newMessages.length)
+    if (onBeforeQueryCallback && input) {
+      const ok = await onBeforeQueryCallback(input, latestMessages)
+      if (!ok) return
+    }
+    await onQueryImpl(latestMessages, newMessages, abortController, shouldQuery, additionalAllowedTools, mainLoopModelParam, thisGeneration, effort)
+  } finally {
+    if (queryGuard.end(thisGeneration)) {           // generation match 才结束
+      clearQueryProfile()
+      setLastQueryCompletionTime(Date.now())
+      skipIdleCheckRef.current = false
+      resetLoadingState()
+      await mrOnTurnComplete(messagesRef.current, abortController.signal.aborted)  // zai 镜像成 runNextInQueue
+      sendBridgeResultRef.current()                  // mobile bridge 通知 turn 结束
+      // tungsten / budget / cache stats / auto-restore(用户 cancel 时回滚)
+    }
+    // 自动回滚:用户 cancel + 没新 query + 输入框空 + 队列空 + 没在 teammate view
+    if (abortController.signal.reason === 'user-cancel' && !queryGuard.isActive && inputValueRef.current === '' && getCommandQueueLength() === 0 && !store.getState().viewingAgentTaskId) {
+      const lastUserMsg = messagesRef.current.findLast(selectableUserMessagesFilter)
+      if (lastUserMsg && messagesAfterAreOnlySynthetic(messagesRef.current, lastIndex)) {
+        removeLastFromHistory()
+        restoreMessageSyncRef.current(lastUserMsg)
+      }
+    }
+  }
+}, [...deps])
+
+// REPL.tsx:2915-3108 — onQueryImpl 真正调 vendor query()
+const onQueryImpl = useCallback(async (messages, newMessages, abortController, shouldQuery, additionalAllowedTools, mainLoopModelParam, thisGeneration, effort) => {
+  if (shouldQuery) {
+    const freshClients = mergeClients(initialMcpClients, store.getState().mcp?.clients)
+    void diagnosticTracker.handleQueryStart(freshClients)
+    const ideClient = getConnectedIdeClient(freshClients)
+    if (ideClient) void closeOpenDiffs(ideClient)
+  }
+  void maybeMarkProjectOnboardingComplete()
+
+  // 第一条 user message 时,Haiku 抽标题(已 resumed session 跳过)
+  if (!titleDisabled && !sessionTitle && !agentTitle && !haikuTitleAttemptedRef.current) {
+    const text = newMessages.find(m => m.type === 'user' && !m.isMeta)?.message.content
+    if (text && /* 跳过 <local-command-stdout> / <command-message> / <command-name> / <bash-input> 合成 */) {
+      haikuTitleAttemptedRef.current = true
+      void generateSessionTitle(text, new AbortController().signal).then(t => t ? setHaikuTitle(t) : haikuTitleAttemptedRef.current = false)
+    }
+  }
+
+  // slash-command-scoped allowedTools 写 store
+  store.setState(prev => { /* alwaysAllowRules.command = additionalAllowedTools */ })
+
+  if (!shouldQuery) {                                // /compact 等不 query 的命令
+    if (newMessages.some(isCompactBoundaryMessage)) {
+      setConversationId(randomUUID())
+      // proactiveModule?.setContextBlocked(false)
+    }
+    resetLoadingState(); setAbortController(null)
+    return
+  }
+
+  const toolUseContext = getToolUseContext(messages, newMessages, abortController, mainLoopModelParam, thisGeneration)
+  if (effort !== undefined) {
+    // 临时把 effort 包成 per-turn AppState getter override,不污染全局
+    const prev = toolUseContext.getAppState
+    toolUseContext.getAppState = () => ({ ...prev(), effortValue: effort })
+  }
+
+  // 并发加载 system prompt / user context / system context
+  const [, , defaultSystemPrompt, baseUserContext, systemContext] = await Promise.all([
+    checkAndDisableBypassPermissionsIfNeeded(toolPermissionContext, setAppState),
+    checkAndDisableAutoModeIfNeeded(toolPermissionContext, setAppState, store.getState().fastMode),
+    getSystemPrompt(freshTools, mainLoopModelParam, Array.from(toolPermissionContext.additionalWorkingDirectories.keys()), freshMcpClients),
+    getUserContext(),
+    getSystemContext(),
+  ])
+  const userContext = {
+    ...baseUserContext,
+    ...getCoordinatorUserContext(freshMcpClients, isScratchpadEnabled() ? getScratchpadDir() : undefined),
+  }
+  const systemPrompt = buildEffectiveSystemPrompt({ mainThreadAgentDefinition, toolUseContext, customSystemPrompt, defaultSystemPrompt, appendSystemPrompt })
+  toolUseContext.renderedSystemPrompt = systemPrompt
+
+  // 真正调 vendor query() — 唯一的 for-await 循环
+  for await (const event of query({
+    messages,
+    systemPrompt,
+    userContext,
+    systemContext,
+    canUseTool,
+    toolUseContext,
+    querySource: getQuerySourceForREPL(),
+  })) {
+    onQueryEvent(event)
+  }
+
+  // 内部 API metrics 采集
+  if (isAntEmployee() && apiMetricsRef.current.length > 0) { /* OTPS / TTFT / hook 耗时 */ }
+
+  resetLoadingState()
+  logQueryProfileReport()
+  await onTurnComplete?.(messagesRef.current)
+}, [...deps])
+```
+
+### 8.4 `createOpenccRuntime-impl.query()` — zai 侧的镜像点
+
+**位置**:`packages/zn-agent-core/src/opencc-src/server/createOpenccRuntime-impl.ts:522-751`
+
+```typescript
+// createOpenccRuntime-impl.ts:522-549 — query 入口与 permissionMode
+async *query(input) {
+  if (closed) throw new Error('openccRuntime: shutdown')
+  turnIndex += 1
+  if (input.permissionMode) {
+    // per-query permission mode → AppState.setState (追齐 REPL.transitionPermissionMode)
+    ctx.appState.setState(prev => {
+      const current = prev.toolPermissionContext.mode
+      if (current === input.permissionMode) return prev
+      const next = transitionPermissionMode(current, input.permissionMode, prev.toolPermissionContext)
+      return { ...prev, toolPermissionContext: { ...next, mode: input.permissionMode } }
+    })
+  }
+
+// createOpenccRuntime-impl.ts:561-565 — per-query AbortController(Mirror vendor print.ts:2282)
+const queryAbortController = createAbortController()
+if (input.abortSignal) {
+  if (input.abortSignal.aborted) queryAbortController.abort(input.abortSignal.reason)
+  else input.abortSignal.addEventListener('abort', () => queryAbortController.abort(input.abortSignal.reason), { once: true })
+}
+
+// createOpenccRuntime-impl.ts:577-627 — resume hydration(镜像 REPL useState(initialMessages))
+let engine = engines.get(input.sessionId)
+if (!engine) {
+  let initialMessages: Message[] | undefined
+  try {
+    const jsonl = await sessions.readTranscript(input.sessionId)
+    if (jsonl.trim().length > 0) {
+      const entries: Message[] = []
+      for (const line of jsonl.split('\n')) {
+        const t = line.trim()
+        if (!t) continue
+        try {
+          const e = JSON.parse(t)
+          // 仅 transcript 形态(type=user/assistant/attachment/system)参与 chain,
+          // 其他(session-meta / file-history-snapshot 等)不能灌回 vendor mutableMessages
+          if (e?.type === 'user' || e?.type === 'assistant' || e?.type === 'attachment' || e?.type === 'system') {
+            entries.push(e as Message)
+          }
+        } catch { /* 跳过损坏行 */ }
+      }
+      if (entries.length > 0) initialMessages = deserializeMessages(entries)
+    }
+  } catch (err) { /* 新会话 / 文件不存在 / 读失败 → 当作全新对话 */ }
+  // zai patch (2026-08-20): 按会话恢复的 mainAgent 构建 engine
+  engine = createEngine(initialMessages, input.mainAgent)
+  engines.set(input.sessionId, engine)
+}
+engine.replaceAbortController(queryAbortController)
+queryAbortControllers.set(input.sessionId, queryAbortController)
+
+// createOpenccRuntime-impl.ts:638-642 — per-query bridge ctx(替代 REPL onQueryImpl 里的本地变量)
+const prevBridge = (globalThis as any).__zaiBridgeCtx
+;(globalThis as any).__zaiBridgeCtx = { ...(prevBridge ?? {}), sessionId: input.sessionId }
+
+// createOpenccRuntime-impl.ts:656-693 — model override + submitMessage
+if (input.model) {
+  engine.setModel(input.model)
+  ctx.appState.setState(prev => ({ ...prev, mainLoopModel: input.model }))   // zai patch
+}
+const stream = engine.submitMessage(input.prompt, {
+  uuid: randomUUID(),                                       // 不用 sessionId 当 uuid,避免 dedup 跳过
+  ...(input.isMeta ? { isMeta: true } : {}),
+  ...(input.providerOverride ? { providerOverride: input.providerOverride } : {}),
+  ...(input.providerId ? { providerId: input.providerId } : {}),
+})
+
+// createOpenccRuntime-impl.ts:708-741 — 套 runWithSdkContext + translateSdkToRuntime 包 SDK Message
+const sdkCtx = input.sessionId ? { sessionId: input.sessionId, sessionProjectDir: null, cwd, originalCwd: cwd } : null
+const adapterMeta = { sessionId: input.sessionId, turnIndex, eventCounter: 0, toolNameByUseId: new Map(), streamedBlockIndices: new Set() }
+while (true) {
+  const step = sdkCtx ? await runWithSdkContext(sdkCtx, () => stream.next()) : await stream.next()
+  if (step.done) break
+  for (const ev of translateSdkToRuntime(step.value, adapterMeta)) yield ev as any
+  adapterMeta.eventCounter++
+}
+
+// createOpenccRuntime-impl.ts:742-750 — finally 清理
+} finally {
+  if (prevBridge === undefined) delete (globalThis as any).__zaiBridgeCtx
+  else (globalThis as any).__zaiBridgeCtx = prevBridge
+  if (typeof input.sessionId === 'string') queryAbortControllers.delete(input.sessionId)
+}
+```
+
+**镜像对比表**:
+
+| REPL 写法 | zai 镜像写法 | 备注 |
+|---|---|---|
+| `useState(initialMessages)` (useState-based React state) | `mutableMessages = deserializeMessages(JSON.parse(jsonl))` | zai 走 disk hydration,无 React state |
+| `for await (const event of query({messages, systemPrompt, userContext, systemContext, canUseTool, toolUseContext, querySource}))` | `engine.submitMessage(prompt, opts)` + `for await (const step of stream.next())` 包 `translateSdkToRuntime` | zai 多一层 SDK event 翻译 |
+| `setAbortController(abortController)` per turn | `Map<sessionId, AbortController>` | zai 无 queryGuard generation token |
+| `transitionPermissionMode` 调用通过 `setAppState` | `ctx.appState.setState(prev => transitionPermissionMode(...))` | zai 显式调 |
+| `computeTools` 在 onQueryImpl 入口现算 | `refreshTools: engineComputeTools` 由 vendor QueryEngine 触发 | 时机滞后一轮 |
+
+### 8.5 hooks 系统入口 — zai 完全没接
+
+**位置**:`packages/zn-agent-core/src/opencc-src/utils/hooks.ts` + `sessionStart.ts`
+
+```typescript
+// sessionStart.ts — REPL 每次 prompt 都调
+const hookMessages = await processSessionStartHooks('resume' | 'fork', {
+  sessionId, agentType: mainThreadAgentDefinition?.agentType, model: mainLoopModel
+})
+// hook 返回的 messages push 进 messages,跟普通 user/assistant message 一样处理
+
+// hooks.ts — REPL session 切换时调
+await executeSessionEndHooks('resume', {
+  getAppState: () => store.getState(),
+  setAppState,
+  signal,                                  // createCombinedAbortSignal 包装的 timeout 信号
+  timeoutMs: getSessionEndHookTimeoutMs()  // 默认几秒
+})
+```
+
+**REPL 触发点**:
+- `REPL.tsx:1949-1957` — resume 时 fire SessionEnd for current session,再 processSessionStartHooks for target
+- vendor `toolExecution.ts` 内部 PreToolUse / PostToolUse 钩子(工具执行前后自动触发,无需 headless 镜像)
+- `UserPromptSubmit` 钩子在 `processUserInput.processTextPrompt` / `processImagePrompt` 路径触发
+
+**zai 现状**:
+- 完全不调 processSessionStartHooks / executeSessionEndHooks / UserPromptSubmit hooks
+- `__zaiBridgeCtx` 桥接了 AskUserQuestion 的 onYield,但不覆盖 hooks 系统
+- 用户的 `.claude/settings.json` `hooks` 配置 100% 失活
+
+### 8.6 computeTools / refreshTools 模式
+
+**位置**:`packages/zn-agent-core/src/opencc-src/server/createOpenccRuntime-impl.ts:105-110, 197-216`
+
+```typescript
+// createOpenccRuntime-impl.ts:105-110 — 镜像 REPL 的 computeTools
+const computeTools = () => {
+  const state = ctx.appState.getState()
+  const permissionContext = state.toolPermissionContext
+  const assembled = assembleToolPool(permissionContext, state.mcp?.tools ?? [])
+  return mergeAndFilterTools(ctx.tools, assembled, permissionContext.mode)
+}
+
+// createOpenccRuntime-impl.ts:197-216 — per-engine 工具池(主 Agent tools 槽)
+const createEngine = (initialMessages?: Message[], mainAgentName?: string) => {
+  const agent = resolveSessionMainAgent(mainAgentName)
+  const engineComputeTools = () =>
+    agent?.tools ? agent.tools(computeTools()) : computeTools()  // 主 agent 可白名单 / 注入
+  return new QueryEngine({
+    cwd,
+    tools: engineComputeTools(),
+    commands: ctx.mcp.commands,
+    mcpClients: ctx.mcp.clients,
+    includePartialMessages: true,                                  // SDK 流事件透明
+    refreshTools: engineComputeTools,                             // vendor QueryEngine 触发
+    systemPromptSlot: agent?.systemPrompt,                         // 主 agent systemPrompt 槽
+    agents: ctx.appState.getState().agentDefinitions.activeAgents,
+    canUseTool: ctx.permission,
+    getAppState: ctx.appState.getState,
+    setAppState: wrapTaskAwareSetState(...),                       // 桥接 AgentTool → agentTaskBridge
+    readFileCache: new FileStateCache(100, 25 * 1024 * 1024),
+    abortController: initialAbortController,
+    query: customQuery,                                            // options.query 包装
+    ...(initialMessages?.length ? { initialMessages } : {}),
+  })
+}
+```
+
+**REPL 的 computeTools 触发时机对比**:
+- REPL: `onQueryImpl` 入口重算 `tools` + `mcpClients`(每轮 prompt 提交前),`useManageMCPConnections` 异步 flush 新 MCP
+- headless: `refreshTools` callback 由 vendor QueryEngine 在 `defaultQuery` 内部触发(query.ts "Refresh tools between turns" 注释),**时机是 query 开始时,不是每轮 prompt 提交前** → 中途 enable plugin 当轮看不见
+
+### 8.7 sessionRestore 入口 — zai 完全没接
+
+**位置**:`packages/zn-agent-core/src/opencc-src/utils/sessionRestore.ts` + `sessionStorage.ts`
+
+```typescript
+// sessionRestore.ts — REPL resume() 调用
+const messages = deserializeMessages(log.messages)
+const { computeStandaloneAgentContext, restoreAgentFromSession,
+        restoreSessionStateFromLog, restoreWorktreeForResume,
+        exitRestoredWorktree } = require('../utils/sessionRestore.js')
+
+// restoreAgentFromSession:从 log.agentSetting 恢复 AgentDefinition
+const { agentDefinition: restoredAgent } = restoreAgentFromSession(
+  log.agentSetting, initialMainThreadAgentDefinition, agentDefinitions)
+setMainThreadAgentDefinition(restoredAgent)
+
+// restoreSessionStateFromLog:恢复 file history / attribution / bash tools
+restoreSessionStateFromLog(log, setAppState)
+
+// restoreWorktreeForResume:从 log.worktreeSession 切 worktree
+exitRestoredWorktree()       // 先退出当前 worktree
+restoreWorktreeForResume(log.worktreeSession)
+adoptResumedSessionFile()    // 把 transcript 文件指针切到 resumed session
+
+// sessionStorage.ts 提供:getCurrentWorktreeSession / saveWorktreeState
+```
+
+**zai 镜像**(createOpenccRuntime-impl.ts:577-625):
+- 仅 `deserializeMessages(JSON.parse(jsonl))` 反序列化 messages
+- worktree / file history / attribution / plan / cost / agent setting 全部不恢复
+- coordinator mode warning 不生成
+
+### 8.8 30+ REPL notification hooks 全清单
+
+**位置**:`packages/zn-agent-core/src/opencc-src/screens/REPL.tsx:835-867`
+
+```
+useModelMigrationNotifications()                  # API 迁移提醒
+useCanSwitchToExistingSubscription()              # 订阅切换提醒
+useIDEStatusIndicator({...})                       # IDE 状态
+useMcpConnectivityStatus({...})                   # MCP 连接状态
+useAutoModeUnavailableNotification()               # auto 模式不可用
+usePluginInstallationStatus()                      # plugin 安装状态
+usePluginAutoupdateNotification()                 # plugin 自动更新
+useSettingsErrors()                                # settings 错误
+useRateLimitWarningNotification(mainLoopModel)     # 429 限流警告
+useFastModeNotification()                          # fast mode 通知
+useDeprecationWarningNotification(mainLoopModel)  # 弃用 API 警告
+useInstallMessages()                               # 安装消息
+useChromeExtensionNotification()                   # Chrome 扩展通知
+useLspInitializationNotification()                 # LSP 初始化
+useTeammateLifecycleNotification()                 # teammate 生命周期
+useLspPluginRecommendation()                       # LSP 推荐
+useClaudeCodeHintRecommendation()                  # Claude Code 提示推荐
+usePromptsFromClaudeInChrome(...)                  # Chrome MCP 提示
+useSkillsChange(...)                               # skill 文件 hot-reload
+useManagePlugins(...)                              # plugin 装载
+useTasksV2WithCollapseEffect()                     # task list v2
+useSwarmInitialization(...)                        # swarm 团队初始化
+useBackgroundTaskNavigation()                      # 后台 task 导航
+useTeammateViewAutoExit()                          # teammate view 自动退出
+useSessionBackgrounding({...})                    # session 后台化
+useInboxPoller({...})                              # inbox 轮询
+useMailboxBridge({...})                            # mailbox bridge
+useScheduledTasks({...})                           # cron / /loop
+useProactive?.({...})                              # proactive tick
+useAssistantHistory(...)                           # 助手历史
+useApiKeyVerification()                            # API key 验证
+useCostSummary()                                   # cost 摘要
+useFpsMetrics()                                    # FPS metrics
+useAfterFirstRender()                              # first render hook
+useDeferredHookMessages({...})                     # 延迟 hook messages
+useIdeLogging({...})                               # IDE 日志
+useIdeSelection({...})                             # IDE 选择
+useFileHistorySnapshotInit(...)                    # file history init
+useKickOffCheckAndDisableBypassPermissionsIfNeeded() # bypassPermissions killswitch
+useKickOffCheckAndDisableAutoModeIfNeeded()        # auto mode killswitch
+usePromptsFromClaudeInChrome(...)                  # Chrome MCP 提示
+useAwaySummary()                                   # 离开摘要
+useMemorySurvey()                                  # 内存 survey
+usePostCompactSurvey()                             # post-compact survey
+useSkillImprovementSurvey()                        # skill 改进 survey
+useFeedbackSurvey()                                # 反馈 survey
+useTaskListWatcher({...})                          # task list watcher (内部)
+useIdleReturnDialog / CostThresholdDialog          # 对话框组件
+useChromeExtensionNotification()                   # Chrome 扩展
+useInstallMessages()                               # 安装消息
+useIssueFlagBanner()                               # issue flag banner
+useCustomShortcuts (keybindings)
+```
+
+**zai 镜像**:**全部 ❌** — 一个都没挂载。意味着:
+- rate limit 警告:zai server 自己 emit `runtime.error` 但没对应的通知 UI
+- plugin auto-update / MCP status:用户在 web UI 看不到
+- LSP / Chrome / IDE 集成状态:全无
+- survey 类(feedback / memory / post-compact):全无
+- keybinding 显示:无关(web 是鼠标)
+
+### 8.9 关键 vendor 常量与决策(便于对齐)
+
+| 常量 / 决策 | 来源 | 值 / 含义 |
+|---|---|---|
+| `CHECK_INTERVAL_MS` | cronScheduler.ts:40 | `1000` — /loop 最多 1 秒延迟 |
+| `FILE_STABILITY_MS` | cronScheduler.ts:41 | `300` — chokidar 文件稳定检测 |
+| `LOCK_PROBE_INTERVAL_MS` | cronScheduler.ts:44 | `5000` — 非 owning session 探锁间隔 |
+| `recurringMaxAgeMs` | cronJitterConfig.ts | recurring 任务自动过期时间 |
+| `HARD_TIMEOUT_MS` | routes/agent.ts:124 | `2 * 60 * 60 * 1000` — zai 兜底超时(原本 5min 太短) |
+| `SESSION_RATE_LIMIT_COOLDOWN_MS` | routes/agent.ts:744 | `30_000` — 429 后会话级冷却 |
+| `PROMPT_SUPPRESSION_MS` | REPL.tsx:1082 | `1500` — 用户输入期间不弹中断对话框 |
+| `RECENT_SCROLL_REPIN_WINDOW_MS` | REPL.tsx:319 | `3000` — 用户滚轮后不强制回到底部 |
+| `IDLE_THINKING_AUTO_HIDE_MS` | REPL.tsx:947 | `30_000` — thinking 流式结束后 30s 自动隐藏 |
+| `queryGuard` generation | REPL.tsx:994 | 每 turn 一个 generation token,stale finally 不误清状态 |
+| `recurring task anchor` | cronScheduler.ts:264 | 从 `lastFiredAt ?? createdAt` 锚定,防止 daemon child despawn 重锚过期 |
+| `assistantMode no --proactive` | useScheduledTasks.ts:25 | #20425 起 assistant mode 不再 force --proactive,isLoading 走 normal REPL 节奏 |
+
+---
+
+## 9. 附录 B:关键文件位置
 
 | 主题 | 路径 |
 |---|---|
