@@ -62,7 +62,27 @@ export function useSubmitPrompt(): UseSubmitPromptResult {
   const submitPrompt = useCallback(
     async (text: string, opts?: { skipPushUserMsg?: boolean }) => {
       const s = useAgentStore.getState()
-      const sid = s.sessionId || s.activeSessionId || undefined
+      // 关键: 等 sessionId 真有值才 POST。`s.sessionId || s.activeSessionId || undefined`
+      // 在 + click 后到 setSessionId(newSid) 之间的 ~50–200ms 空窗里会变成
+      // undefined。如果这时 POST,server `?? newServerSid()` 又造一个
+      // **phantom** session(空 sid),runtime 起来后所有 events 写到空 sid 的
+      // historyBySid,但 SSE 订阅的是 + click 的 sid → events 全部丢失,
+      // UI 一直 "就绪"。Send button 已经在 sessionId 为空时 disabled,
+      // 但 Enter 键 / 编程触发可能绕过,这里加最后一道兜底。
+      let sid = s.sessionId
+      if (!sid) {
+        // 不静默吞掉,打 console 让用户在 dev tools 能看到;
+        // 也不弹 toast(避免噪声)。retry 一次,50ms 后再读一次(常见场景是
+        // createNewSession 的 fetch 即将完成),若仍空就直接放弃。
+        await new Promise((r) => setTimeout(r, 50))
+        sid = useAgentStore.getState().sessionId
+        if (!sid) {
+          console.warn(
+            '[useSubmitPrompt] sessionId not ready after 50ms, abort POST to avoid phantom session',
+          )
+          return
+        }
+      }
       const resp = await api.post<{
         sessionId: string
         queued?: boolean
@@ -70,7 +90,7 @@ export function useSubmitPrompt(): UseSubmitPromptResult {
         prompt: text || undefined,
         sessionId: sid,
       }, {
-        headers: sid ? { 'X-Session-Id': sid } : undefined,
+        headers: { 'X-Session-Id': sid },
       })
       // 排队(对话进行中提交): 消息不立即写 transcript, 由 queue.changed
       // 事件在真正开始执行时由 AgentInputBox watcher pushUserMsg。

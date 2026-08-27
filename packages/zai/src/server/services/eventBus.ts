@@ -146,11 +146,15 @@ export class ServerEventBus {
   // SSE 渠道不需要重发 (server.connected 单独在 connect 时即时推送).
   getHistoryAfterForSid(lastEventId: string | undefined, sid: string): ServerEvent[] {
     const arr = this.historyBySid.get(sid) ?? []
-    console.error('[HISTORY-FIX] getHistoryAfterForSid sid=', sid, 'lastEid=', lastEventId, 'arr.len=', arr.length)
-    if (lastEventId === undefined) {
-      console.error('[HISTORY-FIX] returning full arr (race fix path)')
-      return [...arr]
-    }
+    // lastEventId===undefined 时也回放该 sid 保留的最近 history. 这是
+    // zai 修的一个 race:用户点 "创建新会话" → useEventStream 关旧
+    // EventSource + 开新 EventSource → 旧 ES 已关、新 ES 还没完全建立
+    // 时,用户已经发出消息,runtime 事件 emit 时两边都没人接。HTML 规范
+    // 规定 Last-Event-ID 只在同 EventSource 实例重连时携带;新 EventSource
+    // 实例(URL 变了)永远 undefined,所以无 lastEventId 路径必须能
+    // 自救 — 否则首次 turn 的 runtime.* 全丢,刷新才出现。
+    // 上限 CAPACITY=256,客户端 applyBatch 按 eventId/seq 去重。
+    if (lastEventId === undefined) return [...arr]
     const idx = arr.findIndex((e) => e.eventId === lastEventId)
     if (idx < 0) return [...arr]
     return arr.slice(idx + 1)

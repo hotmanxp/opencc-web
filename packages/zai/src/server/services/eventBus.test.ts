@@ -12,9 +12,11 @@ describe('ServerEventBus', () => {
     const bus = new ServerEventBus()
     bus.emit(baseEvent)
     const history = bus.getHistoryAfter()
-    expect(history.length).toBe(0) // 未传 lastEventId 返回空
+    // lastEventId===undefined 时也回放该进程保留的最近 history,
+    // 避免新 EventSource 实例创建时在建立前的 emit 事件永远丢失。
+    expect(history.length).toBe(1)
     const afterSomeId = bus.getHistoryAfter(undefined)
-    expect(afterSomeId.length).toBe(0)
+    expect(afterSomeId.length).toBe(1)
   })
 
   test('subscribe receives subsequent emits', () => {
@@ -171,8 +173,10 @@ describe('ServerEventBus', () => {
     bus.emit({ type: 'session.created', sessionId: 'A', title: 't', cwd: '/x' } as any)
     bus.emit({ type: 'runtime.delta', sessionId: 'A', turnIndex: 0, delta: 'a2' } as any)
     const aHistory = bus.getHistoryAfterForSid(undefined, 'A')
-    // 不含 lastEventId → 返回空 (要拿到切片首条需要先收一条再重连)
-    expect(aHistory.length).toBe(0)
+    // lastEventId===undefined 时也回放该 sid 的最近 history,
+    // 避免新 EventSource 实例创建时在建立前的 emit 事件永远丢失。
+    // session.created 是全局事件, 不在 per-sid 切片里, 故这里只含 3 条 runtime.delta。
+    expect(aHistory.length).toBe(3)
   })
 
   test('getHistoryAfterForSid 用 lastEventId 续读', () => {

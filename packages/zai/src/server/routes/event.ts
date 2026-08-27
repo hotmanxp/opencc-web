@@ -29,10 +29,8 @@ router.get('/event', (req: Request, res: Response) => {
   const wantedSid = readWantedSid(req)
   const wantedTopics = readWantedTopics(req)
 
-  console.error('[SSE-HANDLER] enter sid=', wantedSid, 'lastEid=', lastEventId, 'topics=', wantedTopics.length, 'writableEnded=', (res as any).writableEnded)
   for (const [k, v] of Object.entries(SSE_HEADERS)) res.setHeader(k, v)
   res.flushHeaders()
-  console.error('[SSE-HANDLER] after flushHeaders writableEnded=', (res as any).writableEnded, 'headersSent=', res.headersSent)
 
   // 1. 注册 subscriber (必须在 emit 前注册, 否则 emit 时没人接收).
   //    4 分支:
@@ -40,11 +38,8 @@ router.get('/event', (req: Request, res: Response) => {
   //    - 有 topics + 无 sid → subscribeTopics(null, topics, ...)
   //    - 无 topics + 有 sid → subscribeScoped (旧行为)
   //    - 无 topics + 无 sid → subscribe (旧行为, 兼容非 Agent 页面)
-  const writeEvent = (event: ServerEvent) => {
-    console.error('[SSE-WRITE]', event.type, 'seq=', (event as any).seq, 'writableEnded=', (res as any).writableEnded)
+  const writeEvent = (event: ServerEvent) =>
     writeSse(res, event as unknown as Parameters<typeof writeSse>[1])
-    console.error('[SSE-WRITE-AFTER]', event.type, 'writableEnded=', (res as any).writableEnded)
-  }
 
   let unsubscribe: () => void
   if (wantedTopics.length > 0) {
@@ -54,7 +49,6 @@ router.get('/event', (req: Request, res: Response) => {
   } else {
     unsubscribe = eventBus.subscribe(writeEvent)
   }
-  console.error('[SSE-HANDLER] subscriber registered')
 
   // 2. 重连补发 (必须在 emit 前执行, 避免 server.connected 被 replay 切片包含).
   //    topics 同样 apply 到 replay:
@@ -95,20 +89,10 @@ router.get('/event', (req: Request, res: Response) => {
     }
   }, HEARTBEAT_MS)
 
-  res.on('close', () => {
-    console.error('[SSE-CLOSE-RES] res closed writableEnded=', (res as any).writableEnded, 'finished=', res.writableFinished)
-  })
   req.on('close', () => {
-    console.error('[SSE-CLOSE-REQ] req close fired abort=', req.aborted, 'complete=', req.complete)
     clearInterval(heartbeat)
     unsubscribe()
     res.end()
-  })
-  req.on('aborted', () => {
-    console.error('[SSE-ABORTED] req aborted')
-  })
-  res.on('error', (err) => {
-    console.error('[SSE-RES-ERROR]', (err as NodeJS.ErrnoException).code, err.message)
   })
 })
 
