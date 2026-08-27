@@ -107,7 +107,9 @@ describe('useSubmitPrompt — submitPrompt', () => {
 
   it('返回的 sessionId 同步回 store', async () => {
     apiPost.mockResolvedValueOnce({ sessionId: 'sess-new' } as any)
-    useAgentStore.setState({ sessionId: null, activeSessionId: null })
+    // zai race fix (2026-08-28): submitPrompt 不再"无 sid 也照 POST",
+    // 必须以有效 sessionId 起步 → 测试设 'sess-start' 模拟有 sid 状态。
+    useAgentStore.setState({ sessionId: 'sess-start', activeSessionId: 'sess-start' })
     const { result } = renderHook(() => useSubmitPrompt())
     await act(async () => {
       await result.current.submitPrompt('first')
@@ -119,7 +121,7 @@ describe('useSubmitPrompt — submitPrompt', () => {
 
   it('第一行作为 title,通过 applySessionEvent 触发 session.renamed', async () => {
     apiPost.mockResolvedValueOnce({ sessionId: 'sess-new' } as any)
-    useAgentStore.setState({ sessionId: null, activeSessionId: null })
+    useAgentStore.setState({ sessionId: 'sess-start', activeSessionId: 'sess-start' })
     const applySpy = vi.spyOn(useAgentStore.getState(), 'applySessionEvent')
     const { result } = renderHook(() => useSubmitPrompt())
     await act(async () => {

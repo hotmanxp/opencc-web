@@ -196,6 +196,9 @@ function renderDraftDecorations(
 export default React.memo(function AgentInputBox() {
   const status = useAgentStore((s) => s.status);
   const sessionId = useAgentStore((s) => s.sessionId);
+  // zai race fix: createNewSession 异步窗口(~50–200ms)期间禁用 Send + 短路 Enter。
+  // 见 useAgentStore.createNewSession 注释。
+  const creatingSession = useAgentStore((s) => s.creatingSession);
   const activeSessionId = useAgentStore((s) => s.activeSessionId);
   const isMobile = useAppStore((s) => s.isMobile);
   // dsh 连接状态指示 (2026-08-15): SSE 断流时显示"重连中…/连接已断开",
@@ -1031,6 +1034,9 @@ export default React.memo(function AgentInputBox() {
     }
     // IME 组合输入中的 Enter 是选词候选,绝不能触发发送。
     if (composingRef.current && e.key === "Enter") return;
+    // zai race fix: createNewSession 异步窗口期,Send 按钮已 disabled,
+    // 但 Enter 键能绕过 disabled — 这里显式短路,避免 phantom POST。
+    if (creatingSession) return;
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
       handleSend();
@@ -1192,6 +1198,12 @@ export default React.memo(function AgentInputBox() {
   );
 
   const handleSend = async () => {
+    // zai race fix: createNewSession 异步窗口期(createNewSession 内 set
+    // sessionId:null → server POST 回来前)必须阻断 Send。Enter 键已短路
+    // (line ~1039),这里是 Enter / Send button / 编程触发三入口的统一拦截。
+    // 非 race 时(`creatingSession=false`):即便 sessionId 为空也走原 fallback
+    // 路径(sid = sessionId || activeSessionId || undefined),保持向后兼容。
+    if (creatingSession) return;
     // draft 里的 U+FFFC 占位符展开为剪贴板投影(@path 文本)再发送 —
     // 后端协议不变:收到的还是「文本里夹着 @相对路径」。
     const expanded = projectClipboard(machineRef.current!.state);
@@ -1373,10 +1385,11 @@ export default React.memo(function AgentInputBox() {
         </span>
         {!isMobile && (
           <span>
-            {status === "idle" && "就绪"}
-            {status === "streaming" && `对话中… (${elapsed}s)`}
-            {status === "aborted" && "已中止"}
-            {status === "error" && "错误"}
+            {creatingSession && "正在创建会话…"}
+            {!creatingSession && status === "idle" && "就绪"}
+            {!creatingSession && status === "streaming" && `对话中… (${elapsed}s)`}
+            {!creatingSession && status === "aborted" && "已中止"}
+            {!creatingSession && status === "error" && "错误"}
           </span>
         )}
         {streamState === "reconnecting" && (

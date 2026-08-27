@@ -366,6 +366,16 @@ interface AgentState {
    */
   hydrateSessionState: (sid: string) => Promise<void>
   createNewSession: () => void
+  /**
+   * createNewSession 异步进行中 — 清 sessionId 到 null 后,server POST
+   * /api/agent/sessions 回来前的窗口(~50–200ms)。此期间 UI 必须禁止任何
+   * POST /agent/prompt / /agent/command,否则消息落到 phantom session
+   * (server `existingSessionId ?? newSessionId()`),runtime events 全丢。
+   * AgentInputBox 据此禁用 Send 按钮 + 短路 Enter 键 + 在 useSubmitPrompt
+   * hook 里做 fail loud 兜底。同步 + 进入函数第一行 set true,finally
+   * 保证(成功 / !res.ok / 网络异常)都 reset 回 false。
+   */
+  creatingSession: boolean
   deleteSession: (sessionId: string) => Promise<void>
   /** Models list synced from /api/agent/settings → models[]. */
   availableModels: ModelEntry[]
@@ -531,6 +541,7 @@ export function loadTranscriptMessages(
 
 export const useAgentStore = create<AgentState>((set, get) => ({
   sessionId: null,
+  creatingSession: false,
   sessions: [],
   availableModels: [],
   cwd: '',
@@ -1063,6 +1074,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         sendSeq: 0,
         v2TasksBySession: nextV2,
         _taskClearTimers: nextTimers,
+        creatingSession: true,
       }
     })
     // 提取"用户最近手动选过的模型" — 按 sessions.updatedAt 倒序扫描, 第一个
@@ -1111,6 +1123,12 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       await get().loadSessions()
     } catch {
       // 静默失败: 用户还能继续在本地空态发消息, server 端会按旧路径新建
+    } finally {
+      // 必须在 finally 兜底: 不论 server 返回 / 抛错 / `!res.ok`,
+      // `creatingSession` 都要复位, 否则 Send 按钮永久卡死。
+      // sessionId 已在 catch / if (!res.ok) 路径下保持 null,
+      // useSubmitPrompt 的 hook 兜底会处理这种"真没 sid"的状态。
+      set({ creatingSession: false })
     }
   },
 

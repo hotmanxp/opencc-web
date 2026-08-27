@@ -476,6 +476,74 @@ describe('URL <-> sessionId sync (Agent ?sid=...)', () => {
     expect(new URLSearchParams(window.location.search).get('sid')).toBe('brand-new')
   })
 
+  test('createNewSession: 同步设 creatingSession=true, 异步窗口期可观察, finally 复位', async () => {
+    // zai race fix: sessionId 被清成 null → server POST 回来前的窗口里
+    // `creatingSession === true` 必须可见,UI 据此禁用 Send + 短路 Enter
+    // 阻止 phantom POST。finally 兜底保证 Send 不会永久卡死。
+    setLocationHref('http://localhost:3000/agent')
+
+    let resolvePost: ((value: Response) => void) | null = null
+    const postInFlight = new Promise<Response>((resolve) => {
+      resolvePost = resolve
+    })
+
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/sessions') && init?.method === 'POST') {
+        return postInFlight
+      }
+      if (url.endsWith('/sessions')) {
+        return new Response(JSON.stringify({ sessions: [] }), { status: 200 })
+      }
+      if (url.endsWith('/api/agent/settings')) {
+        return new Response(JSON.stringify({ models: [] }), { status: 200 })
+      }
+      return new Response('{}', { status: 200 })
+    }) as unknown as typeof fetch)
+
+    // 发起 createNewSession(不 await — 让它停在 POST 等待)
+    const promise = useAgentStore.getState().createNewSession()
+
+    // 同步阶段:sessionId 已 null,creatingSession 已 true(关键可观察量)
+    expect(useAgentStore.getState().sessionId).toBeNull()
+    expect(useAgentStore.getState().creatingSession).toBe(true)
+
+    // resolve POST → 走完 loadSessions → finally
+    resolvePost!(new Response(JSON.stringify({ sessionId: 'race-fixed' }), { status: 200 }))
+    await promise
+
+    expect(useAgentStore.getState().sessionId).toBe('race-fixed')
+    expect(useAgentStore.getState().creatingSession).toBe(false)
+  })
+
+  test('createNewSession: server POST 抛网络异常 → creatingSession 在 finally 复位', async () => {
+    // 防止 Send 按钮永久卡死的关键测试 — fetch 抛错路径必须复位。
+    setLocationHref('http://localhost:3000/agent')
+    vi.stubGlobal('fetch', vi.fn(async () => {
+      throw new Error('network down')
+    }) as unknown as typeof fetch)
+    await expect(useAgentStore.getState().createNewSession()).resolves.toBeUndefined()
+    expect(useAgentStore.getState().creatingSession).toBe(false)
+    // sessionId 留在 null(server 没回真 sid),后续若有 submit 调用会被 hook 兜底
+    expect(useAgentStore.getState().sessionId).toBeNull()
+  })
+
+  test('createNewSession: server POST 返回非 2xx → creatingSession 在 finally 复位', async () => {
+    setLocationHref('http://localhost:3000/agent')
+    vi.stubGlobal('fetch', vi.fn(async (url: string, init?: RequestInit) => {
+      if (url.endsWith('/sessions') && init?.method === 'POST') {
+        return new Response('{}', { status: 500 })
+      }
+      return new Response('{}', { status: 200 })
+    }) as unknown as typeof fetch)
+    await useAgentStore.getState().createNewSession()
+    expect(useAgentStore.getState().creatingSession).toBe(false)
+    expect(useAgentStore.getState().sessionId).toBeNull()
+  })
+
+  test('createNewSession: 默认初值 creatingSession === false', () => {
+    expect(useAgentStore.getState().creatingSession).toBe(false)
+  })
+
   test('loadSessions: URL ?sid=newID → 拦截并 createNewSession, URL 改成真实 sid', async () => {
     // ConfigStatusBar 上 N 按钮的新 tab 入口: URL 携带 newID 字面量,
     // 表示"全新会话"特殊标记, 不应回退到列表首条, 而是直接调
