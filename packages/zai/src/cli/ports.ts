@@ -1,5 +1,5 @@
 import type { Server } from 'node:net';
-import { createServer } from 'node:net';
+import { createConnection, createServer } from 'node:net';
 
 export function parsePort(value: string, field: string): number {
   const n = Number.parseInt(value, 10);
@@ -20,16 +20,69 @@ export function listen(port: number, host = '127.0.0.1'): Promise<Server> {
   });
 }
 
+/**
+ * Liveness probe: try to TCP-connect to the port on loopback. If anything
+ * on any local address is listening (`*:port`, `127.0.0.1:port`, `::1:port`),
+ * the kernel routes the SYN to it and `connect` resolves — bound or not,
+ * port is busy. ECONNREFUSED → port is free.
+ *
+ * This catches the SO_REUSEADDR split-bind case the bare-bind probe misses:
+ * on macOS/BSD a wildcard bind (`*:9201` from `--lan`) does NOT block a
+ * later specific bind (`127.0.0.1:9201`), so `listen(9201, '127.0.0.1')`
+ * succeeds even though 9201 is already serving traffic. The kernel still
+ * happily delivers connections to EITHER listener, so two zai instances end
+ * up sharing the port — kernel splits browser requests between them
+ * non-deterministically (split-brain), with one instance running turns and
+ * the other holding the SSE stream the UI is reading. Result: silent
+ * "model replied, UI saw nothing" — the bug 2026-08-27 print-runtime
+ * verification surfaced.
+ *
+ * Cheap, no socket held, race-free as long as it's done BEFORE any bind
+ * on the same port (otherwise we self-connect to our own probe).
+ */
+async function isPortBusy(port: number): Promise<boolean> {
+  const probe = (host: string) =>
+    new Promise<boolean>((resolve) => {
+      const sock = createConnection({ port, host });
+      let settled = false;
+      const finish = (busy: boolean) => {
+        if (settled) return;
+        settled = true;
+        sock.destroy();
+        resolve(busy);
+      };
+      sock.once('connect', () => finish(true));
+      sock.once('error', () => finish(false));
+      // Hard ceiling on the probe. socket.setTimeout() only configures
+      // SO_RCVTIMEO/SO_SNDTIMEO — it does NOT time out a stalled connect;
+      // on `::1` with IPv6 routing blackholed, ECONNREFUSED can take
+      // seconds (full TCP SYN retransmit window). A JS-side guard keeps
+      // the probe bounded so `findAvailablePort` never hangs.
+      const t = setTimeout(() => finish(false), 200);
+      t.unref?.();
+    });
+  // Either loopback family resolves if SOMETHING (specific or wildcard)
+  // is bound. Probing both covers `:::port` IPv6 wildcard on systems
+  // where IPV6_V6ONLY=1 is set, which would otherwise let `127.0.0.1:port`
+  // connect fail to reveal the conflict.
+  const [v4, v6] = await Promise.all([probe('127.0.0.1'), probe('::1')]);
+  return v4 || v6;
+}
+
 export async function findAvailablePort(
   start: number,
   maxAttempts = 100,
 ): Promise<{ port: number; server: Server }> {
   for (let offset = 0; offset < maxAttempts; offset++) {
     const candidate = start + offset;
+    // Liveness before bind — catches cross-bind conflicts bind alone misses.
+    if (await isPortBusy(candidate)) continue;
     try {
       const server = await listen(candidate);
       return { port: candidate, server };
     } catch {
+      // Raced: somebody bound between our connect probe and our bind.
+      // Skip and keep scanning.
       continue;
     }
   }
@@ -54,6 +107,17 @@ export async function assertPortAvailable(
   port: number,
   host = '127.0.0.1',
 ): Promise<void> {
+  // Liveness check first — the same SO_REUSEADDR split-bind that fools
+  // `findAvailablePort` would fool explicit-port callers too. Without
+  // this, `zai --port 9201` happily binds 127.0.0.1:9201 next to an
+  // existing `zai --lan` on *:9201 and produces the same split-brain.
+  if (await isPortBusy(port)) {
+    const err: NodeJS.ErrnoException = new Error(
+      `Port ${port} is already in use`,
+    );
+    err.code = 'EADDRINUSE';
+    throw err;
+  }
   const server = await listen(port, host);
   await new Promise<void>((resolve) => server.close(() => resolve()));
 }

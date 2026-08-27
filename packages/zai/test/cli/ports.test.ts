@@ -60,6 +60,24 @@ describe('findAvailablePort', () => {
     server.close();
   });
 
+  // 回归:2026-08-27 print-runtime 验证时撞到的 SO_REUSEADDR 分裂绑
+  // 定。`zai --lan` 持有 `*:9201`,新启的 `zai --runtime=print` 默认
+  // host=127.0.0.1,纯 bind 探测会让 `listen(49301, '127.0.0.1')` 成功
+  // —— 内核不阻止更具体的地址与通配并存。后果:两个 server 共享同一端
+  // 口,内核按 fd 把浏览器连接分给不同的实例,POST 落在一处、SSE 挂在另
+  // 一处 → 转录里有回复,UI 一片安静。connect 探活走内核 SYN 路由,
+  // 通配 bind 一定 catch loopback 连接,所以能拦住。
+  it('skips a port whose wildcard (*:port) bind is alive, even if loopback bind would succeed', async () => {
+    const lanLike = await listen(49310, '0.0.0.0');
+    try {
+      const { port, server } = await findAvailablePort(49310);
+      expect(port).toBeGreaterThan(49310);
+      server.close();
+    } finally {
+      lanLike.close();
+    }
+  });
+
   it('throws when all candidates are exhausted', async () => {
     const servers = [];
     const base = 49400;
@@ -91,6 +109,22 @@ describe('assertPortAvailable', () => {
       await expect(assertPortAvailable(occupied)).rejects.toThrow();
     } finally {
       blocker.close();
+    }
+  });
+
+  // 同 findAvailablePort 的分裂绑定场景:用户显式 `--port 49311`,
+  // 但 `:49311` 已被 `zai --lan` 类型的 `*:49311` 占住。修正前
+  // listen(49311, '127.0.0.1') 仍然成功,服务器以为端口可用;修正后
+  // connect 探活先拦下,抛 EADDRINUSE,调用方报错退出(对齐
+  // AGENTS.md「禁止静默递增换端口」)。
+  it('rejects when the port is held by a wildcard bind but loopback bind is free', async () => {
+    const lanLike = await listen(49311, '0.0.0.0');
+    try {
+      await expect(assertPortAvailable(49311)).rejects.toThrow(
+        /EADDRINUSE|Port 49311 is already in use/,
+      );
+    } finally {
+      lanLike.close();
     }
   });
 
