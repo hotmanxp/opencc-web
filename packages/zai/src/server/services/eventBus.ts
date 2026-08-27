@@ -130,7 +130,12 @@ export class ServerEventBus {
   }
 
   getHistoryAfter(lastEventId?: string): ServerEvent[] {
-    if (lastEventId === undefined) return []
+    // lastEventId===undefined 时也回放该进程保留的最近 history(否则
+    // 新 EventSource 实例 + sessionId 切换场景下,重连前 gap 内 emit 的
+    // 事件永远没人收 — 详细见 getHistoryAfterForSid 同款注释)。
+    // 上限 CAPACITY=256,客户端 applyBatch 按 eventId/seq 去重,
+    // 多回放对 UI 无副作用。
+    if (lastEventId === undefined) return [...this.history]
     const idx = this.history.findIndex((e) => e.eventId === lastEventId)
     if (idx < 0) return [...this.history]
     return this.history.slice(idx + 1)
@@ -141,7 +146,11 @@ export class ServerEventBus {
   // SSE 渠道不需要重发 (server.connected 单独在 connect 时即时推送).
   getHistoryAfterForSid(lastEventId: string | undefined, sid: string): ServerEvent[] {
     const arr = this.historyBySid.get(sid) ?? []
-    if (lastEventId === undefined) return []
+    console.error('[HISTORY-FIX] getHistoryAfterForSid sid=', sid, 'lastEid=', lastEventId, 'arr.len=', arr.length)
+    if (lastEventId === undefined) {
+      console.error('[HISTORY-FIX] returning full arr (race fix path)')
+      return [...arr]
+    }
     const idx = arr.findIndex((e) => e.eventId === lastEventId)
     if (idx < 0) return [...arr]
     return arr.slice(idx + 1)

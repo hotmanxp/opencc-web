@@ -49,7 +49,6 @@ describe('ServerEventBus topic filter', () => {
   })
 
   it('getHistoryAfterForSidWithTopics filters replay', () => {
-    // getHistoryAfterForSid semantics: lastEventId===undefined → [];
     // unknown lastEventId → full slice. Use an unknown id so the topic filter
     // actually has a non-empty slice to filter on.
     bus.emit({ type: 'cwd.changed', sessionId: 'sess-1', cwd: '/a', updatedAt: 1 })
@@ -58,5 +57,26 @@ describe('ServerEventBus topic filter', () => {
     const filtered = bus.getHistoryAfterForSidWithTopics('evt_unknown', 'sess-1', ['cwd'])
     expect(filtered).toHaveLength(2)
     expect(filtered.every((e) => e.type === 'cwd.changed')).toBe(true)
+  })
+
+  it('getHistoryAfterForSid: lastEventId===undefined returns full slice (EventSource reopen race fix)', () => {
+    // 回归:2026-08-27 用户报告 "点 + 新建会话后第一条消息收不到回复,刷新才行"。
+    // 旧实现 lastEventId===undefined → [];HTML 规范下新 EventSource 实例
+    // (URL 带新 sid) 永远不带 Last-Event-ID,导致重连 gap 内 emit 的 runtime.*
+    // 永远没人收。修法:无 lastEventId 时也回放该 sid 全部 history(<=256),
+    // 客户端 applyBatch 按 eventId/seq 去重,UI 无副作用。
+    bus.emit({ type: 'runtime.started', sessionId: 'sess-1', turnIndex: 0, apiRequestCount: 1, contextTokens: 0 })
+    bus.emit({ type: 'runtime.delta', sessionId: 'sess-1', turnIndex: 0, delta: 'hi' })
+    bus.emit({ type: 'cwd.changed', sessionId: 'sess-2', cwd: '/x', updatedAt: 1 })
+    const replayed = bus.getHistoryAfterForSid(undefined, 'sess-1')
+    expect(replayed).toHaveLength(2)
+    expect(replayed.every((e) => (e as { sessionId?: string }).sessionId === 'sess-1')).toBe(true)
+  })
+
+  it('getHistoryAfter: lastEventId===undefined returns full history (EventSource reopen race fix)', () => {
+    bus.emit({ type: 'queue.changed', sessionId: 'sess-1', running: true, queueLength: 0, pending: [] })
+    bus.emit({ type: 'queue.changed', sessionId: 'sess-2', running: false, queueLength: 0, pending: [] })
+    const replayed = bus.getHistoryAfter(undefined)
+    expect(replayed.length).toBeGreaterThanOrEqual(2)
   })
 })

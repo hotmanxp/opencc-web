@@ -5,6 +5,20 @@ import { useAppStore } from './useAppStore.js'
 import { useInstanceStore } from './useInstanceStore.js'
 import type { ServerEvent } from '../../../shared/events.js'
 
+// 在模块加载时一次性读 URL 决定是否开启 SSE 诊断模式,避免 useEffect 顺序
+// 竞态(打开页面时 useEventStream 已经跑了,后续置 flag 不会回填暴露的 ES)。
+// 生产 hot path 完全无开销(无 query 参数时不进 if)。
+if (typeof window !== 'undefined') {
+  try {
+    const url = new URL(window.location.href)
+    if (url.searchParams.get('__sseProbe') === '1') {
+      ;(window as { __zaiDebugSse?: boolean }).__zaiDebugSse = true
+    }
+  } catch {
+    // ignore
+  }
+}
+
 // 订阅 useAgentStore.sessionId 变化 — sessionId 改变时 React 会重跑 effect,
 // 关掉旧 EventSource + 拿新 sid 开新连接. 新连接走 ?sid=xxx 让后端按 sid
 // filter 事件流, 旧 sid 的 runtime.* / job.* / prompt.ask 不再穿透到当前 tab.
@@ -29,6 +43,14 @@ export function useEventStream(): void {
       // EventSource onopen 的时序差 — 见 applyBatch 顶部特殊处理)。
       useAppStore.getState().setStreamState(state, attempt)
     })
+    // 调试钩子:把 EventSource 实例暴露到 window,方便 ego-browser 等外部
+    // 观察真实 readyState / 触发诊断。生产 hot path 默认无开销:
+    // - __zaiDebugSse=true 时挂载(诊断模式)
+    // - URL 有 ?__sseProbe=1 时,模块顶层会把上面置为 true
+    if ((window as { __zaiDebugSse?: boolean }).__zaiDebugSse) {
+      const w = window as { __zaiSseDebug?: Array<{ handle: unknown; sid: string; ts: number }> }
+      w.__zaiSseDebug = (w.__zaiSseDebug ?? []).concat([{ handle, sid: sessionId, ts: Date.now() }])
+    }
     return () => {
       handle.close()
     }
