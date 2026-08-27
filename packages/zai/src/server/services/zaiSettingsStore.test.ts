@@ -89,6 +89,52 @@ describe('zaiSettingsStore', () => {
     })
   })
 
+  it('concurrent updateZaiSettings patches all land (no ENOENT, no lost update)', async () => {
+    const fs = await import('node:fs/promises')
+    const { readZaiSettings, updateZaiSettings } = await import('./zaiSettingsStore.js')
+    // Regression: two PUTs racing on the fixed `${path}.tmp` used to make the
+    // loser's rename throw ENOENT (500 on /api/agent/settings/main-agent).
+    // Each updateZaiSettings read-merge-writes inside the mutation queue, so
+    // every concurrent patch to a distinct key must survive.
+    await Promise.all([
+      updateZaiSettings({ theme: 'light' }),
+      updateZaiSettings({ workMode: 'office' }),
+      updateZaiSettings({ mainAgent: 'office' }),
+      updateZaiSettings({ outputStyle: 'compact' }),
+    ])
+    const loaded = await readZaiSettings()
+    expect(loaded).toMatchObject({
+      theme: 'light',
+      workMode: 'office',
+      mainAgent: 'office',
+      outputStyle: 'compact',
+    })
+    // the tmp file must be fully consumed (rename succeeded, nothing left)
+    await expect(
+      fs.stat(join(currentHome, '.zai', 'settings.json.tmp')),
+    ).rejects.toThrow()
+  })
+
+  it('concurrent writeZaiSettings + updateZaiSettings never fail mid-rename', async () => {
+    const { readZaiSettings, writeZaiSettings, updateZaiSettings } =
+      await import('./zaiSettingsStore.js')
+    // Mirror production boot order: createApp() awaits initZaiSettingsCache()
+    // before serving requests, so the tier-chain/permissions-backfill never
+    // races request writes. Warm the cache first, then fire the concurrent
+    // mutations.
+    await readZaiSettings()
+    // Whole-object write and patch write racing: both must resolve without
+    // ENOENT; whichever lands last wins the file contents.
+    await Promise.all([
+      writeZaiSettings({ model: 'MiniMax-M3', outputStyle: 'compact' }),
+      updateZaiSettings({ theme: 'dark' }),
+      writeZaiSettings({ model: 'MiniMax-M3', outputStyle: 'verbose' }),
+      updateZaiSettings({ workMode: 'code' }),
+    ])
+    const loaded = await readZaiSettings()
+    expect(loaded.model).toBe('MiniMax-M3')
+  })
+
   it('resolveOutputStyle falls back to default for unknown values', async () => {
     const { resolveOutputStyle } = await import('./zaiSettingsStore.js')
     expect(resolveOutputStyle({ outputStyle: 'compact' })).toBe('compact')

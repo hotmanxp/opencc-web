@@ -60,6 +60,8 @@ const PUBLIC_SURFACE_FILES = new Set([
   'createHeadlessContext.d.ts',
   'sessionFacade.d.ts',
   'createOpenccRuntime.d.ts',
+  // zai patch (2026-08-27, P1 inproc-print track)
+  'createPrintRuntime.d.ts',
 ])
 
 const IMPORT_RE = /^\s*import\s+(?:type\s+)?(?:[^'";]+?\s+from\s+)?['"]([^'"]+)['"]/gm

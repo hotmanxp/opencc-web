@@ -35,6 +35,8 @@ import type {
 } from 'src/utils/permissions/PermissionResult.js'
 import { hasPermissionsToUseTool } from 'src/utils/permissions/permissions.js'
 import { writeToStdout } from 'src/utils/process.js'
+// zai patch (2026-08-27): parse-error path needs the session context to avoid process.exit
+import { getPrintSessionContext } from 'src/utils/printSessionRuntime.js'
 import { jsonStringify } from 'src/utils/slowOperations.js'
 import { z } from 'zod/v4'
 import { notifyCommandLifecycle } from '../utils/commandLifecycle.js'
@@ -455,6 +457,17 @@ export class StructuredIO {
       }
       return message
     } catch (error) {
+      // zai patch (2026-08-27): inside an in-process headless session a
+      // malformed input line must not kill the server process. Log and treat
+      // the line as filtered (same "no message" result the type-filter path
+      // returns). CLI keeps the original console.error + exit behavior.
+      if (getPrintSessionContext()) {
+        logForDebugging(
+          `Error parsing streaming input line: ${line}: ${error}`,
+          { level: 'error' },
+        )
+        return undefined
+      }
       // biome-ignore lint/suspicious/noConsole:: intentional console output
       console.error(`Error parsing streaming input line: ${line}: ${error}`)
       // eslint-disable-next-line custom-rules/no-process-exit

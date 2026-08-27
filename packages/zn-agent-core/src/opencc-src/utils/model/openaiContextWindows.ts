@@ -257,6 +257,7 @@ const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
   // lands.
   'deepseek-v4-flash':      1_048_576,
   'deepseek-v4-pro':        1_048_576,
+  'deepseek-v4-pro-0813':   1_000_000,
   // Legacy DeepSeek API aliases documented in the public pricing/model pages.
   'deepseek-chat':            128_000,
   'deepseek-reasoner':        128_000,
@@ -381,6 +382,7 @@ const OPENAI_CONTEXT_WINDOWS: Record<string, number> = {
 
   // Qwen
   'qwen3.7-max':            1_048_576,
+  'qwen3.8-flash':          1_000_000,
   // Alibaba DashScope (Coding Plan)
   // Model context windows from DashScope API /models endpoint (April 2026).
   // Values sourced from: qwen3.5-plus/qwen3-coder-plus (1M), qwen3-coder-next/max (256K),
@@ -504,6 +506,7 @@ const OPENAI_MAX_OUTPUT_TOKENS: Record<string, number> = {
   // DeepSeek V4 coding-agent models. See context-window note above.
   'deepseek-v4-flash':        262_144,
   'deepseek-v4-pro':          262_144,
+  'deepseek-v4-pro-0813':     384_000,
   // Legacy DeepSeek API aliases documented in the public pricing/model pages.
   'deepseek-chat':              8_192,
   'deepseek-reasoner':         65_536,
@@ -597,6 +600,7 @@ const OPENAI_MAX_OUTPUT_TOKENS: Record<string, number> = {
 
   // Qwen
   'qwen3.7-max':              131_072,
+  'qwen3.8-flash':            131_072,
   // Alibaba DashScope (Coding Plan)
   'qwen3.6-plus':              65_536,
   'qwen3.5-plus':              65_536,

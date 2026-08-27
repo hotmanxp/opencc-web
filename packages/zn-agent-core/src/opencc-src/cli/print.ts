@@ -17,6 +17,12 @@ import {
 } from 'src/commands.js'
 import { createStreamlinedTransformer } from 'src/utils/streamlinedTransform.js'
 import { installStreamJsonStdoutGuard } from 'src/utils/streamJsonStdoutGuard.js'
+// zai patch (2026-08-27): in-process headless session runtime context
+import {
+  getPrintSessionContext,
+  getPrintSessionKey,
+  isPrintSessionMode,
+} from 'src/utils/printSessionRuntime.js'
 import type { ToolPermissionContext } from 'src/Tool.js'
 import type { ThinkingConfig } from 'src/utils/thinking.js'
 import { assembleToolPool, filterToolsByDenyRules } from 'src/tools.js'
@@ -396,26 +402,41 @@ Shut down your team and prepare your final response for the user.`
 
 // Track message UUIDs received during the current session runtime
 const MAX_RECEIVED_UUIDS = 10_000
-const receivedMessageUuids = new Set<UUID>()
-const receivedMessageUuidsOrder: UUID[] = []
+// zai patch (2026-08-27): bucketed per print-session (was process-wide Set/array,
+// which would cross-dedup messages between concurrent in-process sessions).
+// CLI mode uses the single shared `__cli_default__` bucket — identical semantics.
+type ReceivedUuidBucket = { set: Set<UUID>; order: UUID[] }
+const receivedUuidBuckets = new Map<string, ReceivedUuidBucket>()
 
 function trackReceivedMessageUuid(uuid: UUID): boolean {
-  if (receivedMessageUuids.has(uuid)) {
+  const key = getPrintSessionKey()
+  let bucket = receivedUuidBuckets.get(key)
+  if (!bucket) {
+    bucket = { set: new Set<UUID>(), order: [] }
+    receivedUuidBuckets.set(key, bucket)
+  }
+  if (bucket.set.has(uuid)) {
     return false // duplicate
   }
-  receivedMessageUuids.add(uuid)
-  receivedMessageUuidsOrder.push(uuid)
+  bucket.set.add(uuid)
+  bucket.order.push(uuid)
   // Evict oldest entries when at capacity
-  if (receivedMessageUuidsOrder.length > MAX_RECEIVED_UUIDS) {
-    const toEvict = receivedMessageUuidsOrder.splice(
+  if (bucket.order.length > MAX_RECEIVED_UUIDS) {
+    const toEvict = bucket.order.splice(
       0,
-      receivedMessageUuidsOrder.length - MAX_RECEIVED_UUIDS,
+      bucket.order.length - MAX_RECEIVED_UUIDS,
     )
     for (const old of toEvict) {
-      receivedMessageUuids.delete(old)
+      bucket.set.delete(old)
     }
   }
   return true // new UUID
+}
+
+/** zai patch (2026-08-27): drop a finished session's dedup bucket (called by
+ * the in-process session factory on dispose; no-op for CLI sessions). */
+export function clearReceivedMessageUuids(sessionKey: string): void {
+  receivedUuidBuckets.delete(sessionKey)
 }
 
 type PromptValue = string | ContentBlockParam[]
@@ -522,18 +543,26 @@ export async function runHeadless(
   // In headless mode there is no React tree, so the useSettingsChange hook
   // never runs. Subscribe directly so that settings changes (including
   // managed-settings / policy updates) are fully applied.
-  settingsChangeDetector.subscribe(source => {
-    applySettingsChange(source, setAppState)
+  // zai patch (2026-08-27): capture unsubscribe — in-process sessions drain it
+  // via registerCleanup (routed to the per-session dispose bag), so N sessions
+  // don't accumulate cross-firing listeners. CLI still relies on process exit.
+  const unsubscribeSettingsChange = settingsChangeDetector.subscribe(
+    source => {
+      applySettingsChange(source, setAppState)
 
-    // In headless mode, also sync the denormalized fastMode field from
-    // settings. The TUI manages fastMode via the UI so it skips this.
-    if (isFastModeEnabled()) {
-      setAppState(prev => {
-        const s = prev.settings as Record<string, unknown>
-        const fastMode = s.fastMode === true && !s.fastModePerSessionOptIn
-        return { ...prev, fastMode }
-      })
-    }
+      // In headless mode, also sync the denormalized fastMode field from
+      // settings. The TUI manages fastMode via the UI so it skips this.
+      if (isFastModeEnabled()) {
+        setAppState(prev => {
+          const s = prev.settings as Record<string, unknown>
+          const fastMode = s.fastMode === true && !s.fastModePerSessionOptIn
+          return { ...prev, fastMode }
+        })
+      }
+    },
+  )
+  registerCleanup(async () => {
+    unsubscribeSettingsChange()
   })
 
   // Proactive activation is now handled in main.tsx before getTools() so
@@ -596,7 +625,13 @@ export async function runHeadless(
   // line-by-line JSON parser. Install a guard that diverts non-JSON lines to
   // stderr so the stream stays clean. Must run before the first
   // structuredIO.write below.
-  if (options.outputFormat === 'stream-json') {
+  if (
+    options.outputFormat === 'stream-json' &&
+    // zai patch (2026-08-27): the guard monkey-patches process.stdout.write
+    // (a process-wide singleton) — meaningless and harmful when N in-process
+    // sessions each own a per-session sink. Skip it in print-session mode.
+    !isPrintSessionMode()
+  ) {
     installStreamJsonStdoutGuard()
   }
 
@@ -814,7 +849,9 @@ export async function runHeadless(
     }
 
     // Rewind complete - exit successfully
-    process.stdout.write(
+    // zai patch (2026-08-27): route through writeToStdout so in-process headless
+    // sessions capture this line via the per-session sink (identical in CLI mode).
+    writeToStdout(
       `Files rewound to state at message ${options.rewindFiles}\n`,
     )
     heartbeat?.stop()
@@ -887,7 +924,12 @@ export async function runHeadless(
   }
 
   // Install errors handlers to gracefully handle broken pipes (e.g., when parent process dies)
-  registerProcessOutputErrorHandlers()
+  // zai patch (2026-08-27): in-process sessions run inside the zai server —
+  // the server owns its stdio error handling; per-session calls would stack
+  // listeners on the real process.stdout/stderr.
+  if (!isPrintSessionMode()) {
+    registerProcessOutputErrorHandlers()
+  }
 
   headlessProfilerCheckpoint('after_loadInitialMessages')
 
@@ -1178,7 +1220,15 @@ function runHeadlessStreaming(
     }
     void gracefulShutdown(0)
   }
-  process.on('SIGINT', sigintHandler)
+  // zai patch (2026-08-27): in-process sessions must not stack process-wide
+  // SIGINT listeners (never removed — one per session would accumulate and
+  // all fire on a single Ctrl+C). In session mode interruption arrives via the
+  // SDK input queue's control_request{subtype:'interrupt'} (vendor handler at
+  // the interrupt branch aborts the same abortController); the server owns
+  // process signals.
+  if (!isPrintSessionMode()) {
+    process.on('SIGINT', sigintHandler)
+  }
 
   // Dump run()'s state at SIGTERM so a stuck session's healthsweep can name
   // the do/while(waitingForAgents) poll without reading the transcript.
@@ -2826,7 +2876,7 @@ function runHeadlessStreaming(
         }
         suggestionState.abortController?.abort()
         suggestionState.abortController = null
-        await finalizePendingAsyncHooks()
+        await finalizePendingAsyncHooks(getPrintSessionKey())
         unsubscribeSkillChanges()
         unsubscribeAuthStatus?.()
         statusListeners.delete(rateLimitListener)
@@ -4219,7 +4269,12 @@ clients: prev.mcp.clients.map((c: MCPServerConnection) =>
         )
 
         // Check both historical duplicates (from file) and runtime duplicates (this session)
-        if (existsInSession || receivedMessageUuids.has(message.uuid)) {
+        // zai patch (2026-08-27): per-session bucket lookup (was shared Set)
+        const uuidBucket = receivedUuidBuckets.get(getPrintSessionKey())
+        if (
+          existsInSession ||
+          (uuidBucket !== undefined && uuidBucket.set.has(message.uuid))
+        ) {
           logForDebugging(`Skipping duplicate user message: ${message.uuid}`)
           // Send acknowledgment for duplicate message if replay mode is enabled
           if (options.replayUserMessages) {
@@ -4282,7 +4337,7 @@ clients: prev.mcp.clients.map((c: MCPServerConnection) =>
       }
       suggestionState.abortController?.abort()
       suggestionState.abortController = null
-      await finalizePendingAsyncHooks()
+      await finalizePendingAsyncHooks(getPrintSessionKey())
       unsubscribeSkillChanges()
       unsubscribeAuthStatus?.()
       statusListeners.delete(rateLimitListener)
@@ -5010,7 +5065,9 @@ function emitLoadError(
       uuid: randomUUID(),
       errors: [message],
     }
-    process.stdout.write(jsonStringify(errorResult) + '\n')
+    // zai patch (2026-08-27): route through writeToStdout for per-session sink
+    // capture in in-process headless mode (identical in CLI mode).
+    writeToStdout(jsonStringify(errorResult) + '\n')
   } else {
     process.stderr.write(message + '\n')
   }

@@ -125,7 +125,8 @@ describe('profilesToModelEntries (integration)', () => {
     const dsFlash = entries.find(e => e.model === 'deepseek-v4-flash')
     expect(dsFlash).toBeDefined()
     expect(dsFlash!.capabilities!.supportsVision).toBe(false)
-    expect(dsFlash!.capabilities!.contextWindow).toBe(1_048_576)
+    // bee97d1 修正 builtin 各模型 contextWindow 为 1,000,000,builtin 值覆盖 generic 1,048,576
+    expect(dsFlash!.capabilities!.contextWindow).toBe(1_000_000)
   })
 
   it('comma-separated model list — each model becomes its own entry with own capabilities', () => {

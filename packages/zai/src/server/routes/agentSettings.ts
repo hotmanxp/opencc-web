@@ -23,7 +23,7 @@ import {
   resolveOutputStyle,
   resolveTheme,
   resolveWorkMode,
-  writeZaiSettings,
+  updateZaiSettings,
 } from '../services/zaiSettingsStore.js'
 
 /**
@@ -142,9 +142,7 @@ router.put('/agent/settings/work-mode', async (req: Request, res: Response) => {
       .json({ error: `invalid workMode: ${String(candidate)}` })
   }
   try {
-    const settings = await readZaiSettings()
-    const next: ZaiSettings = { ...settings, workMode: candidate as WorkMode }
-    await writeZaiSettings(next)
+    const next = await updateZaiSettings({ workMode: candidate as WorkMode })
     res.json({ workMode: next.workMode })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
@@ -170,9 +168,7 @@ router.put('/agent/settings/output-style', async (req: Request, res: Response) =
       .json({ error: `invalid outputStyle: ${String(candidate)}` })
   }
   try {
-    const settings = await readZaiSettings()
-    const next: ZaiSettings = { ...settings, outputStyle: candidate as OutputStyle }
-    await writeZaiSettings(next)
+    const next = await updateZaiSettings({ outputStyle: candidate as OutputStyle })
     res.json({ outputStyle: next.outputStyle })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
@@ -194,9 +190,7 @@ router.put('/agent/settings/theme', async (req: Request, res: Response) => {
     return res.status(400).json({ error: `invalid theme: ${String(candidate)}` })
   }
   try {
-    const settings = await readZaiSettings()
-    const next: ZaiSettings = { ...settings, theme: candidate as Theme }
-    await writeZaiSettings(next)
+    const next = await updateZaiSettings({ theme: candidate as Theme })
     res.json({ theme: next.theme })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
@@ -221,9 +215,7 @@ router.put(
     }
     const clamped = Math.max(1, Math.min(1000, Math.floor(n)))
     try {
-      const settings = await readZaiSettings()
-      const next: ZaiSettings = { ...settings, maxVisibleMessages: clamped }
-      await writeZaiSettings(next)
+      const next = await updateZaiSettings({ maxVisibleMessages: clamped })
       res.json({ value: next.maxVisibleMessages })
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
@@ -252,9 +244,7 @@ router.put(
         .json({ error: `invalid defaultSplitScreen: ${String(raw)}` })
     }
     try {
-      const settings = await readZaiSettings()
-      const next: ZaiSettings = { ...settings, defaultSplitScreen: raw }
-      await writeZaiSettings(next)
+      const next = await updateZaiSettings({ defaultSplitScreen: raw })
       res.json({ value: next.defaultSplitScreen })
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
@@ -291,9 +281,7 @@ router.put(
         .json({ error: `invalid enableDynamicWorkflow: ${String(raw)}` })
     }
     try {
-      const settings = await readZaiSettings()
-      const next: ZaiSettings = { ...settings, enableDynamicWorkflow: raw }
-      await writeZaiSettings(next)
+      const next = await updateZaiSettings({ enableDynamicWorkflow: raw })
       // Bridge to vendor's runtime gate. Mirror of the boot-time logic
       // in `enableOpenccConfigs() → applyZaiWorkflowEnableFromSettings()`:
       // mutate `process.env.OPENCC_ENABLE_WORKFLOWS` so the very next
@@ -331,9 +319,7 @@ router.put('/agent/settings/auto-update', async (req: Request, res: Response) =>
     return res.status(400).json({ error: `invalid autoUpdate: ${String(raw)}` })
   }
   try {
-    const settings = await readZaiSettings()
-    const next: ZaiSettings = { ...settings, autoUpdate: raw }
-    await writeZaiSettings(next)
+    const next = await updateZaiSettings({ autoUpdate: raw })
     res.json({ value: next.autoUpdate })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })
@@ -358,9 +344,7 @@ router.put('/agent/settings/main-agent', async (req: Request, res: Response) => 
     if (!agents.some((a) => a.name === candidate)) {
       return res.status(400).json({ error: `unknown mainAgent: ${candidate}` })
     }
-    const settings = await readZaiSettings()
-    const next: ZaiSettings = { ...settings, mainAgent: candidate }
-    await writeZaiSettings(next)
+    const next = await updateZaiSettings({ mainAgent: candidate })
     res.json({ mainAgent: next.mainAgent })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message })

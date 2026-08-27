@@ -2,6 +2,8 @@
 
 日期:2026-08-27
 状态:探索记录 / 设计输入(非定稿)
+> 2026-08-27 代码复核:逐条核验通过,已修正调用链行号(runQueryLoop 实际在 agent.ts:908)、tool refresh 过时论断(QueryEngine.ts:288-295 zai patch 已修复)、QueryEngine/worktree 文件路径、`/loop` 入口符号名、query.ts 行号等 7 处。
+> 2026-08-27 二次复核:① UserPromptSubmit / PreToolUse / PostToolUse hooks 实际已生效(QueryEngine.submitMessage → processUserInput 内部触发),失活范围缩小为 SessionStart / SessionEnd;② 新增 §5.8 vendor print.ts 覆盖度对比——print.ts 才是"完整 headless REPL 循环",需要完整循环应优先走双轨路径 A。
 
 > 起源:`/Users/ethan/code/opencc-web` 当前 `update-pa` 分支,讨论"server 调用 agent-core 是否缺 REPL 运行环节"演化而来。本文一次性记录三段探索:
 > 1. zai server → agent-core 调用链路 + REPL 是否被调用
@@ -16,7 +18,7 @@
 
 - **zai server 没有调用 vendor 的 `REPL.tsx` 交互组件**(由设计决定,非 bug)— 它通过 HTTP 接收 prompt,直接调 `runtime.query(input)`,由 `createOpenccRuntime` 的 headless runtime 包内 vendor 的 `QueryEngine.submitMessage`。
 - **手动镜像了 vendor REPL 的若干生命周期职责**:`computeTools` per-turn refresh、resume hydration 反序列化、per-query AbortController、permission mode transition、SDK event → runtime primitive 翻译等;每次 vendor 改 REPL,这些镜像点都有同步压力(代码里多处 `zai patch` 注释明写"Mirror REPL.tsx")。
-- **仍然缺失大量能力**:SessionStart/SessionEnd/UserPromptSubmit hooks 全层不调、resume 不恢复 file history/worktree/cost/plan/attribution、background session/swarm/mailbox/sandbox 整层无出口、30+ notification hook 不挂载、tool refresh 时机滞后一轮。
+- **仍然缺失大量能力**:SessionStart/SessionEnd hooks 不调、resume 不恢复 file history/worktree/cost/plan/attribution、background session/swarm/mailbox/sandbox 整层无出口、30+ notification hook 不挂载。(注1:tool refresh 时机滞后问题已由 `QueryEngine.ts:288-295` zai patch 在 `submitMessage` 入口修复。注2:UserPromptSubmit / PreToolUse / PostToolUse hooks 其实**已生效**——UserPromptSubmit 在 `QueryEngine.submitMessage` → `processUserInput`(processUserInput.ts:178-195)内部触发,Pre/PostToolUse 在 `toolExecution.ts` 触发,均无需外壳镜像。)
 - **vendor 的"循环"机制**全是定时器 / 事件驱动,不是 while 循环:`/loop` 走 `cronScheduler.ts` 的 `setInterval(check, 1000)`(session cron tasks 存内存 Map),proactive tick 走 `useProactive` 的内部 timer,REPL 主驱动是 React render 周期 + `for await query()` 事件消费。
 - **ZAI_OPENCC_CLI=1 双轨路径**(`SessionHostRuntimeAdapter` → spawn `opencc -p` 子进程)是拿 vendor 真 REPL 的官方逃生口,代价是 stdio NDJSON + control_request IPC 复杂度。
 
@@ -26,9 +28,9 @@
 
 ```
 HTTP POST /api/agent/prompt
-  → packages/zai/src/server/routes/agent.ts:1491 runQueryLoop(cmd)
-    → runNextInQueue(cmd.sessionId)            // per-session 串行队列
-      → runQueryLoop:
+  → packages/zai/src/server/routes/agent.ts:1491 router.post('/agent/prompt')
+    → agent.ts:801 runNextInQueue(sessionId)       // per-session 串行队列 + 串行守卫
+      → agent.ts:908 runQueryLoop(cmd):
           ↓
           runtime.query(input)                  // OpenccRuntime 契约
             → packages/zn-agent-core/src/opencc-src/server/createOpenccRuntime-impl.ts:522
@@ -69,7 +71,8 @@ HTTP POST /api/agent/prompt
 |---|---|---|
 | `processSessionStartHooks('resume'/'fork')` | REPL.tsx:1960, :1942 | **❌ 缺失** |
 | `executeSessionEndHooks(...)` | REPL.tsx:1949, hooks.ts | **❌ 缺失** |
-| SessionStart/SessionEnd/UserPromptSubmit hooks | hooks.ts | **❌ 缺失**(整层不调)|
+| SessionStart/SessionEnd hooks | hooks.ts | **❌ 缺失**(外壳层不调)|
+| UserPromptSubmit hooks | processUserInput.ts:178-195 | **✅ 已生效** — `QueryEngine.submitMessage`(:225)内部 :494 调 `processUserInput`,自动触发 |
 | `/clear` / `clearConversation` | REPL 通过 commands + conversation.ts | **❌** — zai server 是 builtin 命令 `clear`,逻辑分开 |
 | `/compact` / `partialCompactConversation` | REPL.tsx:182, :2985 | **⚠️ 间接** — 走 vendor QueryEngine → defaultQuery 自动路径 |
 | MicroCompact 状态管理 | `resetMicrocompactState`, `runPostCompactCleanup` | **⚠️ 间接** — 全在 vendor QueryEngine 内部 |
@@ -147,7 +150,7 @@ createOpenccRuntime-impl.ts:577-625 只把 JSONL 反序列化灌回 `mutableMess
 
 | REPL 能力 | 镜像状态 |
 |---|---|
-| 每轮 `computeTools` refresh(built-ins + MCP + 权限过滤) | **⚠️ 部分** — 镜像成 `computeTools` callback(createOpenccRuntime-impl.ts:105-110),但 vendor 触发点在 `defaultQuery` 开始时,**不是每轮 prompt 提交前**,plugin 中途 enable 当轮 query 看不到 |
+| 每轮 `computeTools` refresh(built-ins + MCP + 权限过滤) | **✅ 已镜像** — 镜像成 `computeTools` callback(createOpenccRuntime-impl.ts:105-110),且 `QueryEngine.ts:288-295` zai patch 在 `submitMessage` 入口(每轮 prompt 提交前)调 `refreshTools()`,注释明写 "mirroring the REPL's computeTools-per-query";query.ts:2741 的 "Refresh tools between turns" 是 vendor 原生第二触发点 |
 | `refreshActivePlugins` / `useManagePlugins` 自动 reload 监听 | **⚠️ 部分** — zai 提供 plugin API,但无自动 reload |
 | `useSkillsChange`(skill 文件 hot-reload) | **❌ 缺失** — zai 自己的 commands/registry 启动时一次性加载 |
 | `useMergedTools` / `useMergedCommands` / `useMergedClients` | **❌ 缺失** |
@@ -287,7 +290,7 @@ onQueryImpl — REPL.tsx:2915
    └─ sendBridgeResult (mobile bridge)
 ```
 
-**关键的"循环"是 vendor `query()`(query.ts:1312 起的 `for await (const event of ...)`)**,它内部驱动 LLM tool loop(streamingToolExecutor),一轮 turn 内可能有 N 轮 model → tool → model 的迭代。但 REPL **外层没有循环**,每个 turn 一次性 await 完。
+**关键的"循环"是 vendor `query()`(query.ts:501 生成器入口,model 流式 `for await` 在 :1271 起)**,它内部驱动 LLM tool loop(streamingToolExecutor),一轮 turn 内可能有 N 轮 model → tool → model 的迭代。但 REPL **外层没有循环**,每个 turn 一次性 await 完。
 
 ### 5.3 跨 turn 串行:`onTurnComplete` 钩子
 
@@ -303,7 +306,7 @@ finally {
 
 `onTurnComplete` 是 `mrOnTurnComplete`(mergeRemote / 兼容层包装),zai server **镜像**了这一点:
 
-- `packages/zai/src/server/routes/agent.ts:1491-1597` 的 `runNextInQueue` 在 `runQueryLoop` finally 里调 `void runNextInQueue(sessionId)`
+- `packages/zai/src/server/routes/agent.ts:836` 的 `runNextInQueue` 在 **`runNextInQueue` 自己的 finally**(`runQueryLoop` 在 :908,由其调用)里调 `void runNextInQueue(sessionId)`
 - 这是 zai server 把"REPL 的 onTurnComplete"翻译成"session 队列下一条 prompt"的桥
 
 但 vendor 自己的 `onTurnComplete` **不做**循环启动下一条 — 用户必须**自己手动输入**才会触发下一轮。zai 是显式把队列机制接上。
@@ -314,8 +317,8 @@ REPL.tsx:4399-4405 的注释明确:"Scheduled tasks from .claude/scheduled_tasks
 
 ```
 /loop 5m "check builds"          ← 用户输入
-   ↓ createLoopCommand           ← skills/bundled/loop.ts
-   ↓ addSessionCronTask({       ← bootstrap/state.ts session cron store (durable:false)
+   ↓ registerLoopSkill           ← skills/bundled/loop.ts:204
+   ↓ CronCreate → addSessionCronTask({  ← utils/cronTasks.ts:212;bootstrap/state.ts session cron store (durable:false)
        cron: '*/5 * * * *',
        prompt: 'check builds',
        recurring: true,
@@ -390,7 +393,7 @@ useProactive?.({
 | vendor 机制 | zai 镜像状态 |
 |---|---|
 | REPL 组件生命周期 | **不挂** — server 是 stateless over HTTP,前端持会话 |
-| `onSubmit → onQuery → onQueryImpl` | **✅ 镜像** — `runNextInQueue` + `runQueryLoop` (routes/agent.ts:801-1489) |
+| `onSubmit → onQuery → onQueryImpl` | **✅ 镜像** — `runNextInQueue` + `runQueryLoop` (routes/agent.ts:801 / :908) |
 | `queryGuard` 状态机 | **⚠️ 部分** — `sessionRunning` Set + `sessionControllers` Map,但无 generation token 防 stale finally |
 | `for await (const event of query())` | **✅ 镜像** — `for await (const step of stream.next())` (createOpenccRuntime-impl.ts:729-741) |
 | `onTurnComplete` | **✅ 镜像** — `runNextInQueue(sessionId)` 在 `runQueryLoop` finally |
@@ -402,15 +405,49 @@ useProactive?.({
 
 ---
 
+## 5.8 vendor print.ts(`-p` / SDK headless)覆盖度对比 — "完整 REPL session 循环"的答案
+
+**核心发现**:`cli/print.ts` 有 **5771 行**(比 REPL.tsx 的 5366 行还大),它不是简化 headless,而是把 REPL 外壳职责**全部命令式重实现**了一遍。`createOpenccRuntime`(804 行)相对 REPL 缺的外壳能力,print.ts 几乎全有;而 print.ts 与 `createOpenccRuntime` 用的是**同一个核心**(`QueryEngine` / `ask()`,print.ts:93/:2297)。
+
+| 能力 | print.ts 覆盖 | 证据(print.ts 行号) |
+|---|---|---|
+| SessionStart hooks | ✅ `processSessionStartHooks('startup')` | :5255, :5372 |
+| SessionEnd hooks | ✅ 经 `gracefulShutdown.ts:431/:504` 统一触发 | import :106 |
+| Resume 完整恢复 | ✅ `loadConversationForResume` + `restoreSessionStateFromLog` + `restoreAgentFromSession` + `restoreSessionMetadata`(含 worktreeSession)+ content replacements + `matchSessionMode` 警告 + `saveMode` | :5063/:5237, :5119/:5334, :756, :5121-5127, :5109-5114, :5070/:5286 |
+| file history rewind | ✅ `--rewind-files` + `fileHistoryRewind` | :784-818, :4677-4705 |
+| cron `/loop` | ✅ `createCronScheduler`,注释明写 "Mirrors REPL's useScheduledTasks hook"(enqueue + `void run()` kick) | :2850-2880 |
+| proactive tick | ✅ `proactiveModule` 空队列注入 + SDK 控制 `set_proactive` | :373/:2631/:4028-4040 |
+| inbox / teammate / swarm | ✅ 注释 "mirrors what useInboxPoller does" + teammateMailbox + UDS inbox 回调 kick run() + team shutdown | :2654-2838, :354-360 |
+| 命令队列主循环 | ✅ `while ((command = dequeue(...)))` + 批量合并 + run() mutex(替代 queryGuard) | :2084-2101 |
+| sandbox | ✅ `SandboxManager` + failIfUnavailable 守卫 | :631-644 |
+| elicitation | ✅ hook 先跑,未命中转发 SDK control_request | :1407-1458 |
+| Haiku 标题生成 | ✅ `generateSessionTitle` | :3949 |
+| hook 事件流外发 | ✅ hook_started / hook_progress / hook_response 推 SDK | :667-693 |
+| 双向流式输入 | ✅ `runHeadlessStreaming` + SdkControlClientTransport | :925 |
+
+**print.ts 也不覆盖的**(与 zai 同缺,REPL 独有):cost state 恢复(`getStoredSessionCosts` 0 命中)、`copyPlanForResume`(0 命中)、`applyPermissionUpdate` / `persistPermissionUpdate`(0 命中)、30+ React 通知 hooks(部分改经 `executeNotificationHooks` :244 + SDK 事件)、queryGuard generation(用 `running` 布尔 + mutex 替代)。
+
+**含义**:若要"完整 REPL session 循环",自建 createOpenccRuntime 外壳等价于重写 print.ts(约 2000-3000 行非 UI 逻辑)。三条路径:
+
+| 路径 | 做法 | 代价 | 评价 |
+|---|---|---|---|
+| **A. 启用双轨(短期推荐)** | `ZAI_OPENCC_CLI=1` → `SessionRegistry` spawn `opencc -p --input-format stream-json --output-format stream-json`(cliSpawn.ts:49-53 已就位),print.ts 全循环原样获得 | 需把 zai HTTP/SSE 协议对齐 SDK stream-json + control_request(权限 / elicitation / interrupt / set_proactive) | 最完整,零重复实现 |
+| B. 移植 print.ts 外壳进 createOpenccRuntime | 镜像队列循环 / resume / cron / inbox 等 | 双份实现,vendor 每次改 print.ts 都产生同步压力 | 不推荐 |
+| C. 抽共享 HeadlessSessionEngine | 把 print.ts 的 `run()` 循环重构为可 import 引擎,createOpenccRuntime 变薄壳 | vendor 重构成本高 | 治本,长期方向 |
+
+> §7 路径 C 的候选方法(`dispatchMailbox` / `registerProactiveTick` / `onSessionLifecycle` / cron 接入)本质都是 print.ts 已有逻辑——扩契约自建即"重写 print"。
+
+---
+
 ## 6. 风险摘要
 
 按严重性排序:
 
 ### 严重(用户能直接感知)
 
-1. **Hooks 系统整层空跑** — 用户在 `.claude/settings.json` / vendor settings 配的所有 PreToolUse / PostToolUse / SessionStart / UserPromptSubmit hooks **全部失活**。vendor 重要的扩展点,headless runtime 完全没调。**zai 用户的 hooks 配置 100% 无效**。
+1. **Session 级 hooks 不调** — 用户在 `.claude/settings.json` / vendor settings 配的 **SessionStart / SessionEnd** hooks 在 headless 外壳层没调。**注意(2026-08-27 二复核)**:UserPromptSubmit 在 `QueryEngine.submitMessage` → `processUserInput`(processUserInput.ts:178-195)内部触发,PreToolUse / PostToolUse 在 vendor `toolExecution.ts`(:995 附近)内部触发,headless 走 vendor QueryEngine 时**均已自动生效**,不在缺失范围(见 §8.5)。
 2. **Resume 只回 messages,不回"运行上下文"** — file history / worktree / cost / plan / attribution / read file state 全部不恢复。模型看得到历史文字,但文件快照回退 / worktree 切换 / cost 累计 / plan slug 全部丢失。
-3. **Tool refresh 时机不对** — REPL 在每轮 prompt submit **之前** 重新 assemble tools + commands + MCP(`useManageMCPConnections` 异步 flush)。createOpenccRuntime 把 `refreshTools` 传给 vendor QueryEngine,但 vendor 触发点是 `defaultQuery` 开始时(query.ts "Refresh tools between turns"),**不是每轮 prompt 提交前**。zai 用户中途 enable 一个 plugin,当轮 query 看不见,要等下一轮才会刷新。
+3. ~~**Tool refresh 时机不对**~~ — **已修复(2026-08-27 复核)**:`QueryEngine.ts:288-295` zai patch 已在 `submitMessage` 入口(每轮 prompt 提交前)调 `refreshTools()`,注释明写 "mirroring the REPL's computeTools-per-query";query.ts:2741 "Refresh tools between turns" 是 vendor 原生第二触发点。原"滞后一轮"论断不再成立。
 
 ### 中等(影响具体功能)
 
@@ -428,13 +465,13 @@ useProactive?.({
 
 ### 路径 A:补齐 hooks 接入(改动小,覆盖最大盲区)
 
-**目标**:让用户配的 SessionStart / SessionEnd / UserPromptSubmit / PreToolUse / PostToolUse hooks 在 headless runtime 上生效。
+**目标**:让用户配的 SessionStart / SessionEnd hooks 在 headless runtime 上生效(UserPromptSubmit / PreToolUse / PostToolUse 已经由 QueryEngine 内部链路自动生效,无需接入)。
 
 **改动点**:
 1. `createOpenccRuntime-impl.ts:522` query 入口(`engine.submitMessage` 之前)调 `await processSessionStartHooks('query', { sessionId, agentType, model })`,把返回的 hookMessages 注入 messages。
 2. query 出口(`finally` 块)调 `await executeSessionEndHooks('query', ...)`。
 3. `removeSession` 路径(impl.ts:783)调 `await executeSessionEndHooks('remove', ...)`。
-4. `readTranscript` 后的 user message 提交(由 zai server 的 `appendUserMessageV2` 路径)前调 UserPromptSubmit hooks。
+4. ~~UserPromptSubmit hooks 接入~~ — **不需要**:已在 `QueryEngine.submitMessage`(QueryEngine.ts:225 → :494 `processUserInput` → processUserInput.ts:178-195 `executeUserPromptSubmitHooks`)自动触发。
 5. vendor 的 tool 执行层(`toolExecution.ts`)已经在调 PreToolUse / PostToolUse hooks,无需 headless 镜像,但需要确认 `toolUseContext.canUseTool` 在 headless 路径传对(目前是 `ctx.permission`)。
 
 **风险**:SessionStart hook 可能阻塞 query 入口;兼容 vendor 的 hook 协议(参数 schema);ErrorModel vs block 行为差异。
@@ -886,7 +923,7 @@ while (true) {
 | `for await (const event of query({messages, systemPrompt, userContext, systemContext, canUseTool, toolUseContext, querySource}))` | `engine.submitMessage(prompt, opts)` + `for await (const step of stream.next())` 包 `translateSdkToRuntime` | zai 多一层 SDK event 翻译 |
 | `setAbortController(abortController)` per turn | `Map<sessionId, AbortController>` | zai 无 queryGuard generation token |
 | `transitionPermissionMode` 调用通过 `setAppState` | `ctx.appState.setState(prev => transitionPermissionMode(...))` | zai 显式调 |
-| `computeTools` 在 onQueryImpl 入口现算 | `refreshTools: engineComputeTools` 由 vendor QueryEngine 触发 | 时机滞后一轮 |
+| `computeTools` 在 onQueryImpl 入口现算 | `refreshTools: engineComputeTools` 由 QueryEngine `submitMessage` 入口触发(QueryEngine.ts:288-295 zai patch)+ query.ts:2741 turn 间第二触发点 | 已对齐每轮提交前刷新 |
 
 ### 8.5 hooks 系统入口 — zai 完全没接
 
@@ -911,12 +948,14 @@ await executeSessionEndHooks('resume', {
 **REPL 触发点**:
 - `REPL.tsx:1949-1957` — resume 时 fire SessionEnd for current session,再 processSessionStartHooks for target
 - vendor `toolExecution.ts` 内部 PreToolUse / PostToolUse 钩子(工具执行前后自动触发,无需 headless 镜像)
-- `UserPromptSubmit` 钩子在 `processUserInput.processTextPrompt` / `processImagePrompt` 路径触发
+- `UserPromptSubmit` 钩子在 `processUserInput`(processUserInput.ts:178-195 `executeUserPromptSubmitHooks`)触发
 
-**zai 现状**:
-- 完全不调 processSessionStartHooks / executeSessionEndHooks / UserPromptSubmit hooks
-- `__zaiBridgeCtx` 桥接了 AskUserQuestion 的 onYield,但不覆盖 hooks 系统
-- 用户的 `.claude/settings.json` `hooks` 配置 100% 失活
+**zai 现状**(2026-08-27 二复核修正):
+- **不调** 的只有 `processSessionStartHooks` / `executeSessionEndHooks`(外壳层职责)
+- **UserPromptSubmit 已生效**:`QueryEngine.submitMessage`(QueryEngine.ts:225)在 :494 调 `processUserInput`,内部即触发 UserPromptSubmit hooks——zai 经 `engine.submitMessage` 提交,该链路自动覆盖
+- PreToolUse / PostToolUse 走 `toolExecution.ts` 内部触发,同样已生效
+- `__zaiBridgeCtx` 桥接了 AskUserQuestion 的 onYield
+- 结论:用户 hooks 配置中仅 **SessionStart / SessionEnd 两类失活**,其余全部生效
 
 ### 8.6 computeTools / refreshTools 模式
 
@@ -956,9 +995,9 @@ const createEngine = (initialMessages?: Message[], mainAgentName?: string) => {
 }
 ```
 
-**REPL 的 computeTools 触发时机对比**:
+**REPL 的 computeTools 触发时机对比**(2026-08-27 复核更新):
 - REPL: `onQueryImpl` 入口重算 `tools` + `mcpClients`(每轮 prompt 提交前),`useManageMCPConnections` 异步 flush 新 MCP
-- headless: `refreshTools` callback 由 vendor QueryEngine 在 `defaultQuery` 内部触发(query.ts "Refresh tools between turns" 注释),**时机是 query 开始时,不是每轮 prompt 提交前** → 中途 enable plugin 当轮看不见
+- headless: `QueryEngine.ts:288-295` zai patch 在 `submitMessage` 入口调 `refreshTools()`(即每轮 prompt 提交前),另有 query.ts:2741 "Refresh tools between turns" turn 间触发 → 中途 enable plugin 当轮可见
 
 ### 8.7 sessionRestore 入口 — zai 完全没接
 
@@ -984,7 +1023,7 @@ exitRestoredWorktree()       // 先退出当前 worktree
 restoreWorktreeForResume(log.worktreeSession)
 adoptResumedSessionFile()    // 把 transcript 文件指针切到 resumed session
 
-// sessionStorage.ts 提供:getCurrentWorktreeSession / saveWorktreeState
+// getCurrentWorktreeSession 在 utils/worktree.ts:157;saveWorktreeState 在 utils/sessionStorage.ts:3244
 ```
 
 **zai 镜像**(createOpenccRuntime-impl.ts:577-625):
@@ -1081,27 +1120,28 @@ useCustomShortcuts (keybindings)
 
 | 主题 | 路径 |
 |---|---|
-| zai server agent 入口 | `packages/zai/src/server/routes/agent.ts:1491` (`runQueryLoop`) |
-| zai per-session queue | `packages/zai/src/server/routes/agent.ts:801-1597` (`runNextInQueue` + `sessionQueues`) |
+| zai server agent 入口 | `packages/zai/src/server/routes/agent.ts:1491` (`router.post('/agent/prompt')`) → `:908` (`runQueryLoop`) |
+| zai per-session queue | `packages/zai/src/server/routes/agent.ts:734` (`sessionQueues`) + `:801` (`runNextInQueue`) |
 | zai agentRuntime 模块 | `packages/zai/src/server/services/agentRuntime.ts` |
 | zai eventBus → SSE | `packages/zai/src/server/services/eventBus.ts` |
 | OpenccRuntime 类型契约 | `packages/zn-agent-core/src/opencc-src/server/serverTypes.ts:274-294` |
 | OpenccRuntime 实现 | `packages/zn-agent-core/src/opencc-src/server/createOpenccRuntime-impl.ts` |
 | vendor REPL 入口 | `packages/zn-agent-core/src/opencc-src/screens/REPL.tsx:615` |
-| vendor query 入口 | `packages/zn-agent-core/src/opencc-src/query.ts:1312`(for-await loop)|
-| vendor QueryEngine | `packages/zn-agent-core/src/opencc-src/server/QueryEngine.ts` |
+| vendor query 入口 | `packages/zn-agent-core/src/opencc-src/query.ts:501`(生成器入口;model 流式 for-await 在 :1271)|
+| vendor QueryEngine | `packages/zn-agent-core/src/opencc-src/QueryEngine.ts` |
 | vendor cronScheduler | `packages/zn-agent-core/src/opencc-src/utils/cronScheduler.ts` |
 | vendor sessionRestore | `packages/zn-agent-core/src/opencc-src/utils/sessionRestore.ts` |
 | vendor hooks 系统 | `packages/zn-agent-core/src/opencc-src/utils/hooks.ts` |
-| zai SessionHost 子进程路径 | `packages/zai/src/server/services/sessionHost/SessionRegistry.ts` |
-| zai 双轨开关 | `packages/zai/src/server/services/agentRuntime.ts:471-488` |
+| vendor print.ts(headless 全循环) | `packages/zn-agent-core/src/opencc-src/cli/print.ts`(5771 行,见 §5.8) |
+| zai SessionHost 子进程路径 | `packages/zai/src/server/services/sessionHost/SessionRegistry.ts` + `cliSpawn.ts:49-53`(`-p --input-format stream-json`) |
+| zai 双轨开关 | `packages/zai/src/server/services/agentRuntime.ts:460-493` |
 
-## 9. 后续 Spec 建议
+## 10. 后续 Spec 建议
 
 按优先级:
 
-1. **Hooks 接入 spec** — 路径 A 的具体改动方案 + 兼容性 + 测试矩阵
-2. **Resume 状态补齐 spec** — 路径 B 的字段清单 + 错误兜底 + race 处理
-3. **OpenccRuntime V2 契约扩展 spec** — 路径 C 的 API 草案 + 迁移策略
-4. **Loop / Cron 在 zai server 的镜像 spec** — `/loop` 接入 + cronScheduler 复用 + proactive tick 协议
-5. **Tool Refresh 时机修正** — 把 computeTools refresh 提到 query 入口之前(独立小改动)
+1. **Hooks 接入 spec** — 路径 A 的具体改动方案 + 兼容性 + 测试矩阵(范围缩小为 SessionStart / SessionEnd;UserPromptSubmit / PreToolUse / PostToolUse 已生效)
+2. **双轨路径 A 对齐 spec**(§5.8)— zai HTTP/SSE 协议 ↔ SDK stream-json + control_request(权限 / elicitation / interrupt / set_proactive)映射,替代自建外壳
+3. **Resume 状态补齐 spec** — 路径 B 的字段清单 + 错误兜底 + race 处理(可直接参考 print.ts:5063-5130 的恢复序列)
+4. **Loop / Cron 在 zai server 的镜像 spec** — `/loop` 接入 + cronScheduler 复用 + proactive tick 协议(print.ts:2850-2880 / :2631 有现成命令式范式)
+5. ~~**Tool Refresh 时机修正**~~ — 已落地(`QueryEngine.ts:288-295` zai patch 在 `submitMessage` 入口刷新),无需再立 spec

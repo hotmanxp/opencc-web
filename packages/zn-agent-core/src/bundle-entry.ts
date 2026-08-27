@@ -16,6 +16,19 @@
  */
 export * from './opencc-src/query.js'
 export { createOpenccRuntime } from './opencc-src/server/createOpenccRuntime.js'
+// zai patch (2026-08-27, P1 inproc-print track): createPrintRuntime value
+// export (types flow via `export type * from './opencc-src/server/index.js'`).
+export { createPrintRuntime } from './opencc-src/server/index.js'
+// zai patch (2026-08-27): print-session ALS helpers 值导出 —— P2/P3 的
+// 生命周期接线与本 bundle 消费者(含契约测试的 runHeadless stub)必须与
+// createPrintRuntime 用同一模块实例的 storage(手写 d.ts 由
+// scripts/bundle-opencc.ts 合成)。
+export {
+  getPrintSessionContext,
+  getPrintSessionKey,
+  isPrintSessionMode,
+  runWithPrintSession,
+} from './opencc-src/utils/printSessionRuntime.js'
 // zai patch (2026-08-20): 主 Agent 插槽配置 —— getBuiltinMainAgents 是
 // value,`export type *` 不会带出,需显式导出。路径指向 server/index.js
 // (dist 里已存在)而非 mainAgents.js —— bundle-opencc 的

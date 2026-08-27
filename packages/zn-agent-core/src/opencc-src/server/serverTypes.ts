@@ -293,6 +293,43 @@ export type OpenccRuntime = {
   plugins: OpenccPluginApi
 }
 
+/**
+ * zai patch (2026-08-27, P1 inproc-print track): steering priorities,
+ * mapped 1:1 onto the vendor command-queue semantics in cli/print.ts —
+ *   - 'now'   preempts (aborts) the in-flight turn and starts immediately
+ *   - 'next'  front of queue, drains at the next batch point
+ *   - 'later' back of queue, drains after current work (cron default)
+ */
+export type OpenccSteerPriority = 'now' | 'next' | 'later'
+
+/** zai patch (2026-08-27): enqueue input for mid-flight steering. */
+export type OpenccEnqueueInput = {
+  sessionId: string
+  prompt: string | OpenccContentBlockParam[]
+  priority?: OpenccSteerPriority
+  /** System-injected meta message (LLM-visible, UI-hidden). */
+  isMeta?: boolean
+}
+
+/**
+ * zai patch (2026-08-27): V2 runtime contract for the in-process print
+ * track (`ZAI_OPENCC_CLI=inproc`). Extends the frozen 8-method V1 shape
+ * with the three capabilities the vendor print loop natively supports but
+ * the lightweight runtime lacks: mid-flight steering (enqueue/interrupt)
+ * and per-session state introspection (getSessionState).
+ *
+ * The V1 8-method shape stays frozen (published dist behavior unchanged);
+ * consumers capability-probe (`'enqueue' in runtime`) before steering.
+ */
+export type OpenccRuntimeV2 = OpenccRuntime & {
+  /** Inject a prompt into the session's live command queue (steering). */
+  enqueue(input: OpenccEnqueueInput): Promise<void>
+  /** Abort the in-flight turn WITHOUT destroying the session instance. */
+  interrupt(sessionId: string): Promise<void>
+  /** Read-only AppState snapshot of the session instance (null if absent). */
+  getSessionState(sessionId: string): Promise<Record<string, unknown> | null>
+}
+
 export type OpenccPluginScope = 'user' | 'project' | 'local' | 'builtin'
 
 export type OpenccPluginComponentCounts = {

@@ -44,17 +44,19 @@ const openplatformCaps: Record<string, ModelCapabilities> = {
   'qwen3.6-plus':         allCaps({ contextWindow: 1_000_000, maxOutputTokens: 65_536, supportsVision: true }),
   'qwen3.7-plus':         allCaps({ contextWindow: 1_000_000, maxOutputTokens: 65_536, supportsVision: true }),
   'qwen3.7-max':          allCaps({ contextWindow: 1_000_000, maxOutputTokens: 131_072, supportsVision: true }),
+  'qwen3.8-flash':        allCaps({ contextWindow: 1_000_000, maxOutputTokens: 131_072, supportsVision: true }),
   'glm-5.1':              allCaps({ contextWindow: 202_745, maxOutputTokens: 65_536, supportsVision: false }),
   'glm-5.2':              allCaps({ contextWindow: 1_000_000, maxOutputTokens: 131_072, supportsVision: false }),
   'deepseek-v4-flash':    allCaps({ contextWindow: 1_000_000, maxOutputTokens: 262_144, supportsVision: false }),
   'deepseek-v4-pro':      allCaps({ contextWindow: 1_000_000, maxOutputTokens: 262_144, supportsVision: false }),
+  'deepseek-v4-pro-0813': allCaps({ contextWindow: 1_000_000, maxOutputTokens: 384_000, supportsVision: false }),
 };
 
 /**
  * The system default catalog — two Ping An gateways:
  *
  *   1. openplatform  — Anthropic protocol (Nova gateway).
- *      11 models including M3, Qwen 3.6/3.7, GLM 5/5.1/5.2, DeepSeek V4.
+ *      13 models including M3, Qwen 3.6/3.7/3.8, GLM 5/5.1/5.2, DeepSeek V4.
  *   2. zhiniao       — OpenAI-compatible protocol (Wizard AI gateway).
  *      4 models including M2.7, Qwen 3.6 Plus, GLM 5.1.
  *

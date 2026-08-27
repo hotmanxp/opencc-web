@@ -1,4 +1,10 @@
 import chalk from 'chalk'
+// zai patch (2026-08-27): route "shutdown" to per-session onComplete when
+// running inside an in-process headless session (see printSessionRuntime.ts).
+import {
+  getPrintSessionContext,
+  isPrintSessionMode,
+} from './printSessionRuntime.js'
 import { writeSync } from 'fs'
 import memoize from 'lodash-es/memoize.js'
 import { onExit } from 'signal-exit'
@@ -363,6 +369,15 @@ export function gracefulShutdownSync(
     setAppState?: (f: (prev: AppState) => AppState) => void
   },
 ): void {
+  // zai patch (2026-08-27): inside an in-process headless session, "shutdown"
+  // means *this session's loop finished*, not the process exiting. Never set
+  // process.exitCode or touch the global shutdown state; gracefulShutdown()
+  // routes to the session's onComplete handler instead.
+  if (isPrintSessionMode()) {
+    void gracefulShutdown(exitCode, reason, options).catch(() => {})
+    return
+  }
+
   // Set the exit code that will be used when process naturally exits. Note that we do it
   // here inside the sync version too so that it is possible to determine if
   // gracefulShutdownSync was called by checking process.exitCode.
@@ -420,6 +435,18 @@ export async function gracefulShutdown(
     finalMessage?: string
   },
 ): Promise<void> {
+  // zai patch (2026-08-27): in-process headless session completion — route to
+  // the session's own onComplete (drains its dispose bag, fires SessionEnd
+  // hooks, resolves the instance's done promise). Keeps shutdownInProgress /
+  // failsafe / terminal-cleanup / process.exit entirely process-scoped, so N
+  // concurrent sessions can each "shut down" without interfering, and one
+  // session ending never exits the zai server.
+  const printSession = getPrintSessionContext()
+  if (printSession) {
+    await printSession.onComplete(exitCode)
+    return
+  }
+
   if (shutdownInProgress) {
     return
   }

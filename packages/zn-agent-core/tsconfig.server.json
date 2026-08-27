@@ -37,6 +37,7 @@
     "src/opencc-src/server/createHeadlessContext.ts",
     "src/opencc-src/server/sessionFacade.ts",
     "src/opencc-src/server/createOpenccRuntime.ts",
+    "src/opencc-src/server/createPrintRuntime.ts",
     "src/opencc-src/server/mainAgents.ts",
     "src/opencc-src/server/mainAgents-office.ts",
     "src/opencc-src/server/mainAgents-agentCreator.ts"

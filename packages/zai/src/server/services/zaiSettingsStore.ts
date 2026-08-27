@@ -3,7 +3,6 @@ import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
 import type { OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import { getCachedZaiSettings, refreshCache } from './zaiSettingsCache.js'
-
 // Re-export the cache API so existing `zaiSettingsStore` importers can reach
 // it without a second import path.
 export {
@@ -30,18 +29,82 @@ export async function readZaiSettings(): Promise<ZaiSettings> {
 }
 
 /**
- * Atomically write the given object to ~/.zai/settings.json. Uses
- * tmp+rename so a crash mid-write never corrupts the user's settings,
- * then synchronously refreshes the in-memory cache so subsequent reads
- * (this process) see the new value immediately — no watcher, no restart.
+ * In-process serialisation chain for every settings.json mutation.
+ *
+ * Why: `writeZaiSettings` is tmp+rename, and the tmp path is a fixed
+ * `${path}.tmp`. Concurrent PUTs (e.g. SettingsDrawer's work-mode effect
+ * firing `work-mode` + `main-agent` back-to-back, or Desktop.tsx's office
+ * auto-switch racing a manual theme change) used to interleave
+ * writeFile/rename on the same tmp file — the first rename consumes it and
+ * the second rename fails with `ENOENT ... settings.json.tmp -> settings.json`
+ * (500 to the client, and the loser's update dropped).
+ *
+ * The chain makes each mutation atomic w.r.t. the others: only one task
+ * touches disk (and the cache) at a time. A rejected task must not break
+ * the chain, so both handlers continue.
  */
-export async function writeZaiSettings(settings: ZaiSettings): Promise<void> {
+let mutationChain: Promise<unknown> = Promise.resolve()
+
+function enqueueMutation<T>(task: () => Promise<T>): Promise<T> {
+  const run = mutationChain.then(task, task)
+  mutationChain = run.then(
+    () => undefined,
+    () => undefined,
+  )
+  return run
+}
+
+/**
+ * Atomically write the given object to ~/.zai/settings.json (unlocked —
+ * only call from inside an `enqueueMutation` task). Uses tmp+rename so a
+ * crash mid-write never corrupts the user's settings, then synchronously
+ * refreshes the in-memory cache so subsequent reads (this process) see
+ * the new value immediately — no watcher, no restart.
+ */
+async function writeZaiSettingsUnlocked(settings: ZaiSettings): Promise<void> {
   const path = zaiSettingsPath()
   await mkdir(dirname(path), { recursive: true })
   const tmpPath = `${path}.tmp`
   await writeFile(tmpPath, JSON.stringify(settings, null, 2), 'utf-8')
   await rename(tmpPath, path)
   refreshCache(settings)
+}
+
+/**
+ * Queue-based wrapper around `writeZaiSettingsUnlocked`. Whole-object
+ * writes are serialised against `updateZaiSettings` patches, so a full
+ * overwrite can never interleave with a read-merge-write.
+ */
+export function writeZaiSettings(settings: ZaiSettings): Promise<void> {
+  return enqueueMutation(() => writeZaiSettingsUnlocked(settings))
+}
+
+/**
+ * Read-merge-write a partial patch against the current settings, with the
+ * whole critical section (cached read → merge → tmp+rename write) running
+ * inside the mutation queue. This is the race-free path for routes that
+ * only change one field: the read always sees the result of every
+ * previously-queued write, so concurrent patches to different keys both
+ * land (no lost update, no fixed-tmp ENOENT).
+ *
+ * Returns the merged object that was persisted, so the caller can echo
+ * canonical values back to the client.
+ */
+export async function updateZaiSettings(
+  patch: Partial<ZaiSettings>,
+): Promise<ZaiSettings> {
+  // Warm the boot-time cache BEFORE taking the queue. First-touch cache
+  // init runs the tier chain, whose permissions backfill itself awaits
+  // `writeZaiSettings` — if that happened from inside a queued task the
+  // task would enqueue behind itself and deadlock.
+  await getCachedZaiSettings()
+  return enqueueMutation(async () => {
+    // Cache is initialised now, so this resolves without re-entering init.
+    const settings = await getCachedZaiSettings()
+    const next: ZaiSettings = { ...settings, ...patch }
+    await writeZaiSettingsUnlocked(next)
+    return next
+  })
 }
 
 const VALID_OUTPUT_STYLES: ReadonlySet<OutputStyle> = new Set<OutputStyle>([

@@ -1,7 +1,7 @@
 import { defineModel } from '../define.js'
 
-// All 10 model descriptors live under brandId 'openplatform'. The catalog
-// on the zn-nova gateway references all 10. Each defaultModel is the bare
+// All 13 model descriptors live under brandId 'openplatform'. The catalog
+// on the zn-nova gateway references all 13. Each defaultModel is the bare
 // apiName the 平安 Nova gateway expects (no zhiniao- prefix, unlike the
 // wizard-ai gateway).
 //
@@ -93,6 +93,17 @@ export default [
     maxOutputTokens: 131_072,
   }),
   defineModel({
+    id: 'openplatform-qwen3.8-flash',
+    label: 'Qwen 3.8 Flash (Open Platform)',
+    brandId: 'openplatform',
+    vendorId: 'anthropic',
+    classification: ['chat', 'reasoning', 'vision', 'coding'],
+    defaultModel: 'qwen3.8-flash',
+    capabilities: openplatformCapabilities,
+    contextWindow: 1_000_000,
+    maxOutputTokens: 131_072,
+  }),
+  defineModel({
     id: 'openplatform-glm-5.1',
     label: 'GLM 5.1 (Open Platform)',
     brandId: 'openplatform',
@@ -146,5 +157,16 @@ export default [
     capabilities: openplatformCapabilities,
     contextWindow: 1_048_576,
     maxOutputTokens: 262_144,
+  }),
+  defineModel({
+    id: 'openplatform-deepseek-v4-pro-0813',
+    label: 'DeepSeek V4 Pro 0813 (Open Platform)',
+    brandId: 'openplatform',
+    vendorId: 'anthropic',
+    classification: ['chat', 'reasoning', 'coding'],
+    defaultModel: 'deepseek-v4-pro-0813',
+    capabilities: openplatformCapabilities,
+    contextWindow: 1_000_000,
+    maxOutputTokens: 384_000,
   }),
 ]

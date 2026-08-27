@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import {
   DefaultPluginRuntime,
   enableOpenccConfigs,
+  getCurrentSessionId as getSessionIdFromChain,
   resolveDataDir,
   resolveOpenccConfigDir,
   TranscriptStore,
@@ -54,18 +55,29 @@ import type { SessionRegistry } from './sessionHost/SessionRegistry.js'
 import type { ZaiSettings } from '../../shared/settings.js'
 
 /**
- * 双轨开关解析(env `ZAI_OPENCC_CLI` > settings.runtime.openccCli > 默认
- * false)。在 `initAgentRuntime` 入口读一次,不在每个 query 重读 —— 避免
- * 会话中途翻车。见
- * docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md §5.6。
+ * 运行时轨道三态(zai patch 2026-08-27, P1 inproc-print):
+ *   off    → 轻量 in-process createOpenccRuntime(默认)
+ *   inproc → createPrintRuntime(每 sessionId 一个 vendor print.ts 实例)
+ *   spawn  → SessionHost 子进程(legacy 逃生口)
+ * 解析优先级:env `ZAI_OPENCC_CLI` > settings.runtime.openccCli > off。
+ * 旧布尔值 `1/true` 语义从 spawn 迁移到 inproc(需要子进程请显式 'spawn')。
+ * 在 `initAgentRuntime` 入口读一次,不在每个 query 重读。见
+ * docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md。
  */
+type RuntimeTrack = 'off' | 'inproc' | 'spawn'
 function isEnvTruthy(value: string): boolean {
   return value === '1' || value === 'true' || value === 'TRUE' || value === 'yes'
 }
-function resolveOpenccCliFlag(settings: ZaiSettings): boolean {
+function resolveOpenccCliFlag(settings: ZaiSettings): RuntimeTrack {
   const env = process.env.ZAI_OPENCC_CLI
-  if (env !== undefined && env !== '') return isEnvTruthy(env)
-  return settings.runtime?.openccCli ?? false
+  if (env !== undefined && env !== '') {
+    if (env === 'spawn') return 'spawn'
+    if (env === 'inproc') return 'inproc'
+    return isEnvTruthy(env) ? 'inproc' : 'off'
+  }
+  const s = settings.runtime?.openccCli
+  if (s === 'spawn' || s === 'inproc') return s
+  return s === true ? 'inproc' : 'off'
 }
 
 let runtime: OpenccRuntime | null = null
@@ -152,12 +164,17 @@ export function bridgeAskPendingToPromptAsk(
     | { emit: (e: unknown) => void }
     | undefined
   if (!bus) return
+  // zai patch (2026-08-27): prefer the async-chain sessionId (ALS) so an
+  // in-process headless session's question routes to its own card; fall back
+  // to the __zaiBridgeCtx global pointer for the classic runtime path.
   const bridge = ((globalThis as any).__zaiBridgeCtx ?? {}) as {
     sessionId?: string
   }
+  const sessionId =
+    getSessionIdFromChain() ?? bridge.sessionId ?? currentSessionId ?? ''
   bus.emit({
     type: 'prompt.ask',
-    sessionId: bridge.sessionId ?? '',
+    sessionId,
     toolUseId: event.id ?? event.toolUseId ?? '',
     questions: event.questions ?? [],
     ...(event.metadata ? { metadata: event.metadata } : {}),
@@ -191,12 +208,15 @@ export function bridgePermissionPendingToPromptPermission(
     | { emit: (e: unknown) => void }
     | undefined
   if (!bus) return
+  // zai patch (2026-08-27): ALS-preferred sessionId (see ask bridge above).
   const bridge = ((globalThis as any).__zaiBridgeCtx ?? {}) as {
     sessionId?: string
   }
+  const sessionId =
+    getSessionIdFromChain() ?? bridge.sessionId ?? currentSessionId ?? ''
   bus.emit({
     type: 'prompt.permission',
-    sessionId: bridge.sessionId ?? '',
+    sessionId,
     toolUseId: event.id ?? event.toolUseId ?? '',
     toolName: event.toolName ?? '',
     description: event.description ?? '',
@@ -457,18 +477,18 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // isSdk 参数语义在阶段 5 收敛时删除;双轨期间保留 legacy 分支行为不变。
   // ---------------------------------------------------------------------
   const settings = await readZaiSettings()
-  const useOpenccCli = resolveOpenccCliFlag(settings)
+  const track = resolveOpenccCliFlag(settings)
   // 启动日志显式标注运行时路径(双轨监控埋点,spec §5.6.5)。
   console.log(
-    `[initAgentRuntime] runtime=${useOpenccCli ? 'opencc-cli' : 'in-process'} cwd=${cwd} (ZAI_OPENCC_CLI=${useOpenccCli ? '1' : '0'})`,
-  )
-  const { createSessionFacade } = await import('@zn-ai/zn-agent-core')
-  const { SessionRegistry } = await import('./sessionHost/SessionRegistry.js')
-  const { SessionHostRuntimeAdapter } = await import(
-    './agentRuntime/RuntimeAdapter.js'
+    `[initAgentRuntime] runtime=${track === 'off' ? 'in-process' : track} cwd=${cwd} (ZAI_OPENCC_CLI=${process.env.ZAI_OPENCC_CLI ?? 'unset'})`,
   )
 
-  if (useOpenccCli) {
+  if (track === 'spawn') {
+    const { createSessionFacade } = await import('@zn-ai/zn-agent-core')
+    const { SessionRegistry } = await import('./sessionHost/SessionRegistry.js')
+    const { SessionHostRuntimeAdapter } = await import(
+      './agentRuntime/RuntimeAdapter.js'
+    )
     try {
       const reg = new SessionRegistry()
       sessionRegistry = reg
@@ -484,6 +504,38 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       )
     } catch (err) {
       console.error('[initAgentRuntime] SessionHost runtime init failed:', err)
+      throw err
+    }
+  } else if (track === 'inproc') {
+    // P1 inproc-print track: one vendor print.ts session instance per
+    // sessionId (plan §3). Implements OpenccRuntimeV2 (8-method contract +
+    // enqueue/interrupt/getSessionState); routes/agent.ts 消费 8 方法零改动,
+    // steering 接线按 `'enqueue' in runtime` 探测(P1-b)。
+    try {
+      const { createPrintRuntime } = await import('@zn-ai/zn-agent-core')
+      runtime = await createPrintRuntime({
+        dataDir,
+        runtimeId: 'zai-server',
+        defaultCwd: cwd,
+        defaultModel:
+          process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
+          ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
+        connectMcp: false,
+        interactive: !(isSdk ?? false),
+        maxSessions: Number(process.env.ZAI_PRINT_MAX_SESSIONS ?? '8') || 0,
+        // P2 idle-TTL eviction (minutes). Instances idle past this with no
+        // turn / no active background tasks are disposed; next query
+        // re-hydrates via vendor resume. Default 30; 0 disables.
+        idleTtlMin: Number(process.env.ZAI_PRINT_IDLE_TTL_MIN ?? '30'),
+      })
+      const cleanup = () => {
+        if (runtime) void runtime.shutdown()
+      }
+      process.once('SIGTERM', cleanup)
+      process.once('SIGINT', cleanup)
+      console.log(`[initAgentRuntime] inproc-print runtime 就绪(instances=0)`)
+    } catch (err) {
+      console.error('[initAgentRuntime] createPrintRuntime failed:', err)
       throw err
     }
   } else {

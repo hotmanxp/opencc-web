@@ -179,14 +179,18 @@ export interface ZaiSettings {
   }
   /**
    * 运行时开关。`runtime.openccCli`(env `ZAI_OPENCC_CLI` 优先)切换主会话
-   * 运行时:
-   * - false(默认)→ 现状 in-process `createOpenccRuntime`
-   * - true → spawn `opencc -p` 子进程(SessionHost B1 路径,stdio NDJSON +
-   *   control_request 协议)
-   * 详见 docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md。
+   * 运行时三态(zai patch 2026-08-27, P1):
+   * - false / undefined(默认)→ 轻量 in-process `createOpenccRuntime`
+   * - true / 'inproc' → in-process print 多 session 运行时
+   *   (`createPrintRuntime`:每 sessionId 一个 vendor print.ts REPL 等价实例,
+   *   hooks/resume 全恢复/rewind/steering 原生可用)。旧布尔值 true 保持
+   *   兼容,语义从 spawn 迁移到 inproc。
+   * - 'spawn' → spawn `opencc -p` 子进程(SessionHost B1 路径,legacy 逃生口)
+   * 详见 docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md
+   * 与 docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md。
    */
   runtime?: {
-    openccCli?: boolean
+    openccCli?: boolean | 'inproc' | 'spawn'
   }
 }
 

@@ -17,6 +17,9 @@ import type {
 export type {
   OpenccPermissionMode,
   OpenccRuntime,
+  OpenccRuntimeV2,
+  OpenccEnqueueInput,
+  OpenccSteerPriority,
   OpenccRuntimeOptions,
   OpenccQueryInput,
   OpenccServerEvent,
@@ -68,6 +71,14 @@ export type {
 } from './createOpenccRuntime.js'
 
 export { createOpenccRuntime } from './createOpenccRuntime.js'
+
+// zai patch (2026-08-27, P1 inproc-print track): createPrintRuntime —
+// one in-process vendor print.ts session instance per sessionId,
+// satisfying OpenccRuntimeV2 (steering + state introspection on top of
+// the frozen 8-method contract). Public types live in the thin module.
+export type { CreatePrintRuntimeOptions } from './createPrintRuntime.js'
+
+export { createPrintRuntime } from './createPrintRuntime.js'
 
 // zai patch (2026-08-20): 主 Agent 插槽配置。
 export { getBuiltinMainAgents } from './mainAgents.js'

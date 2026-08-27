@@ -1,4 +1,5 @@
 import { wrapAsOpenccTool } from '../../runtime/openccToolWrap.js'
+import { getCurrentSessionId } from '../../runWithSessionId.js'
 import { askUserQuestionTool } from '../../tools/index.js'
 import { z as z4 } from 'zod/v4'
 
@@ -6,6 +7,26 @@ export interface AskUserQuestionBridgeContext {
   sessionId?: string
   askRegistry?: any
   onYield?: (event: any) => void
+}
+
+/**
+ * zai patch (2026-08-27): resolve the bridging ctx for an AskUserQuestion
+ * call. sessionId prefers the per-async-chain ALS (runWithSessionId) over the
+ * process-global `__zaiBridgeCtx.sessionId` pointer:
+ *   - in-process print sessions (ZAI_OPENCC_CLI=inproc) wrap the whole
+ *     runHeadless chain in runWithSessionId, so concurrent sessions each see
+ *     their OWN sessionId here — the global pointer would cross-fire.
+ *   - outside any ALS (current lightweight track) the global pointer is used
+ *     unchanged (per-query merge in createOpenccRuntime-impl.query), so
+ *     existing behavior is preserved.
+ * Exported for unit testing without booting the full tool.
+ */
+export function resolveAskBridgeCtx(): AskUserQuestionBridgeContext & {
+  sessionId: string | undefined
+} {
+  const bridge = ((globalThis as any).__zaiBridgeCtx ??
+    {}) as AskUserQuestionBridgeContext
+  return { ...bridge, sessionId: getCurrentSessionId() ?? bridge.sessionId }
 }
 
 /**
@@ -69,7 +90,8 @@ const AskUserQuestionInputV4 = z4.object({
 export function wrapAskUserQuestionToolAsOpencc(): unknown {
   const wrapped = wrapAsOpenccTool(askUserQuestionTool as any, {
     transformCtx: (openccCtx: any) => {
-      const ctx = ((globalThis as any).__zaiBridgeCtx ?? {}) as AskUserQuestionBridgeContext
+      // zai patch (2026-08-27): ALS-preferred sessionId (see resolveAskBridgeCtx).
+      const ctx = resolveAskBridgeCtx()
       return {
         ...openccCtx,
         sessionId: ctx.sessionId,

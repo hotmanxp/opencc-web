@@ -1541,6 +1541,37 @@ console.log(`[bundle-opencc] compress-tool-history: ${COMPRESS_TOOL_HISTORY_OUT}
   console.log(`[bundle-opencc]   → ${GENERIC_MODEL_CAPABILITIES_DTS}`)
 }
 
+// ── printSessionRuntime 类型(zai patch 2026-08-27, P1 inproc-print)──
+// opencc-src/utils 被 tsc 全树排除(见 tsconfig.server.json exclude),
+// bundle-entry.ts 的值 re-export 需要手写 d.ts 落盘 —— 与上面
+// genericModelCapabilities 同款先例。公共表面窄(一个 type + 四个函数),
+// 字段/签名变更时同步下面这块。
+{
+  const { writeFileSync: wf2, mkdirSync: mk2 } = await import('node:fs')
+  const PRINT_SESSION_RUNTIME_DTS = join(
+    ROOT, 'dist', 'opencc-src', 'utils', 'printSessionRuntime.d.ts',
+  )
+  mk2(dirname(PRINT_SESSION_RUNTIME_DTS), { recursive: true })
+  const dts2 = [
+    `// Type declarations mirroring src/opencc-src/utils/printSessionRuntime.ts`,
+    `export type PrintSessionContext = {`,
+    `  sessionId: string;`,
+    `  writeOutput: (line: string) => void;`,
+    `  onComplete: (exitCode: number) => void;`,
+    `  cleanups: Set<() => Promise<void>>;`,
+    `  dispose: () => Promise<void>;`,
+    `}`,
+    `export declare function runWithPrintSession<T>(ctx: PrintSessionContext, fn: () => T): T;`,
+    `export declare function getPrintSessionContext(): PrintSessionContext | undefined;`,
+    `export declare function isPrintSessionMode(): boolean;`,
+    `export declare const CLI_SESSION_KEY: string;`,
+    `export declare function getPrintSessionKey(): string;`,
+    ``,
+  ].join('\n')
+  wf2(PRINT_SESSION_RUNTIME_DTS, dts2)
+  console.log(`[bundle-opencc]   → ${PRINT_SESSION_RUNTIME_DTS}`)
+}
+
 // Mechanically emit declaration files for the server module via tsc.
 // `noEmit` requires the tsc program to typecheck; we point outDir at
 // a tmp dir, run the emit, then copy only the server d.ts files into

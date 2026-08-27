@@ -34,6 +34,8 @@ const { Sider, Header, Content } = AntLayout;
 // 工具 进 /manage 当 tab(Tools 工具开关页与 /manage 内"配置"语义略近,
 // 但实际是工具检测面板;用户偏好放 tab 而不是顶菜单)。
 // 任何实例子进程仍隐藏"实例管理"(下方 Layout 里有说明)。
+// "桌面"只在设置的工作模式为 office(办公)时显示:menuItems 里按 workMode
+// 过滤(见 Layout 内 useMemo)。
 const ALL_MENU_ITEMS = [
   { key: '/agent', icon: <RobotOutlined />, label: 'Agent' },
   { key: '/desktop', icon: <DesktopOutlined />, label: '桌面' },
@@ -50,9 +52,15 @@ export default function Layout() {
   // instance 子实例(被 instance manager 派生的子进程)不显示 — 它不能 spawn
   // 孙实例,给它看到这个入口只会跳到 404 页面迷惑用户。
   const isInstanceChild = useAppStore((s) => s.instanceContext?.isManagedChild === true && (s.instanceContext?.instanceId ?? null) != null);
+  // "桌面"菜单仅在工作模式为 office(办公)时显示;workMode 由挂载时
+  // GET /agent/settings hydrate + SettingsDrawer 改动时同步 store,均可实时响应。
+  const workMode = useAppStore((s) => s.workMode);
   const menuItems = useMemo(
-    () => (isInstanceChild ? ALL_MENU_ITEMS.filter((m) => m.key !== '/instances') : [...ALL_MENU_ITEMS]),
-    [isInstanceChild],
+    () =>
+      ALL_MENU_ITEMS.filter(
+        (m) => (m.key !== '/instances' || !isInstanceChild) && (m.key !== '/desktop' || workMode === 'office'),
+      ),
+    [isInstanceChild, workMode],
   );
   // Menu 跟随 effective theme: 之前硬编码 theme="dark" 让 AntD 在 light 主题下
   // 仍按暗色算法把 menu-item 文字渲成 rgba(255,255,255,0.65), 但 sider 背景
