@@ -2904,34 +2904,48 @@ function runHeadlessStreaming(
   // that drains on enqueue while idle. The run() mutex makes this safe
   // during an active turn: the call no-ops and the post-run recheck at
   // the end of run() picks up the queued command.
+  //
+  // zai patch (2026-08-27, P3 cron routing per plan §4 / §6 P3): when this
+  // loop is running inside an in-process print-session context AND the
+  // context's `disableCron` flag is set, skip per-instance scheduling.
+  // The zai-side createPrintRuntime factory owns a single process-wide
+  // scheduler that fires once per `scheduled_tasks.json` task and routes
+  // the prompt to the right sessionId instance via ALS lookup. This
+  // avoids N timers per server + cross-fire risk on shared .zai/scheduled_tasks.json
+  // + 1s N timer cost. Outside any context (CLI / tests / lightweight track)
+  // the per-instance scheduler runs as before.
   let cronScheduler: import('../utils/cronScheduler.js').CronScheduler | null =
     null
   if (cronGate.isKairosCronEnabled()) {
-    cronScheduler = cronSchedulerModule.createCronScheduler({
-      onFire: prompt => {
-        if (inputClosed) return
-        enqueue({
-          mode: 'prompt',
-          value: prompt,
-          uuid: randomUUID(),
-          priority: 'later',
-          // System-generated — matches useScheduledTasks.ts REPL equivalent.
-          // Without this, messages.ts metaProp eval is {} → prompt leaks
-          // into visible transcript when cron fires mid-turn in -p mode.
-          isMeta: true,
-          // Threaded to cc_workload= in the billing-header attribution block
-          // so the API can serve cron requests at lower QoS. drainCommandQueue
-          // reads this per-iteration and hoists it into bootstrap state for
-          // the ask() call.
-          workload: WORKLOAD_CRON,
-        })
-        void run()
-      },
-      isLoading: () => running || inputClosed,
-      getJitterConfig: cronJitterConfigModule.getCronJitterConfig,
-      isKilled: () => !cronGate.isKairosCronEnabled(),
-    })
-    cronScheduler.start()
+    const ctx = getPrintSessionContext()
+    const skipForInproc = isPrintSessionMode() && ctx?.disableCron
+    if (!skipForInproc) {
+      cronScheduler = cronSchedulerModule.createCronScheduler({
+        onFire: prompt => {
+          if (inputClosed) return
+          enqueue({
+            mode: 'prompt',
+            value: prompt,
+            uuid: randomUUID(),
+            priority: 'later',
+            // System-generated — matches useScheduledTasks.ts REPL equivalent.
+            // Without this, messages.ts metaProp eval is {} → prompt leaks
+            // into visible transcript when cron fires mid-turn in -p mode.
+            isMeta: true,
+            // Threaded to cc_workload= in the billing-header attribution block
+            // so the API can serve cron requests at lower QoS. drainCommandQueue
+            // reads this per-iteration and hoists it into bootstrap state for
+            // the ask() call.
+            workload: WORKLOAD_CRON,
+          })
+          void run()
+        },
+        isLoading: () => running || inputClosed,
+        getJitterConfig: cronJitterConfigModule.getCronJitterConfig,
+        isKilled: () => !cronGate.isKairosCronEnabled(),
+      })
+      cronScheduler.start()
+    }
   }
 
   const sendControlResponseSuccess = function (
@@ -5250,9 +5264,34 @@ async function loadInitialMessages(
       logEvent('tengu_resume_print', {})
 
       // In print mode - we require a valid session ID, JSONL file or URL
-      const parsedSessionId = parseSessionIdentifier(
+      let parsedSessionId = parseSessionIdentifier(
         typeof options.resume === 'string' ? options.resume : '',
       )
+      // zai patch (2026-08-27, P1 inproc-print): zai session ids are
+      // `sess-<uuid>` (routes/agent.ts newSessionId), not bare UUIDs, so
+      // parseSessionIdentifier rejects them and the branch below would
+      // gracefulShutdownSync(1) — in an in-process session that resolves the
+      // instance's `done` promise immediately and the turn yields zero events
+      // (looks like "the agent never answered"). The id is only ever used as
+      // `${sessionId}.jsonl` (sessionStorage.ts:230/4217), so accepting it
+      // verbatim gives the full vendor restore chain (getLastSessionLog →
+      // fileHistory / attribution / mode / worktree), which the `.jsonl`-path
+      // alternative would not. Gated on isPrintSessionMode() so the CLI's
+      // strict UUID validation and its error message are untouched.
+      if (
+        !parsedSessionId &&
+        isPrintSessionMode() &&
+        typeof options.resume === 'string' &&
+        options.resume !== ''
+      ) {
+        parsedSessionId = {
+          sessionId: options.resume as UUID,
+          ingressUrl: null,
+          isUrl: false,
+          jsonlFile: null,
+          isJsonlFile: false,
+        }
+      }
       if (!parsedSessionId) {
         let errorMessage =
           'Error: --resume requires a valid session ID when used with --print. Usage: opencc -p --resume <session-id>'

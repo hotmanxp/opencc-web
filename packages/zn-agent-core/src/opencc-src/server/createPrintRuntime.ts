@@ -30,6 +30,77 @@ export type {
   OpenccSteerPriority,
 } from './serverTypes.js'
 
+/**
+ * P3 (plan §5): bridge hooks the zai server injects so the in-process headless
+ * loop's vendor-native `control_request` (can_use_tool / elicitation) can be
+ * routed to the right runtime without the runtime having to know about zai's
+ * registries. Each bridge receives the ALS-resolved sessionId so concurrent
+ * in-process sessions route to their own cards/decisions.
+ *
+ * The bridge is invoked when vendor sends a `control_request` mid-turn; the
+ * runtime awaits the bridge's resolution and writes the corresponding
+ * `control_response` back into the per-instance NDJSON input stream so the
+ * vendor loop unblocks.
+ *
+ * All three bridges are optional. When a bridge is absent the runtime writes
+ * a deny/cancel error response so vendor never hangs (P1 fallback preserved).
+ */
+export type AskBridgeInput = {
+  sessionId: string
+  toolUseId: string
+  requestId: string
+  /** Vendor control_request.request.input shape for AskUserQuestion: { questions, metadata? }. */
+  input: { questions?: unknown; metadata?: unknown }
+}
+/**
+ * Resolved AskUserQuestion answers — shape mirrors vendor's
+ * `permissionPromptToolResultToPermissionDecision` parse target and zai's
+ * `AskUserAnswers = Record<string, unknown>` (see compat/runtime/types.ts),
+ * which is what the frontend QuestionCard POSTs back as the body of
+ * `/api/agent/answer`. Vendor's canUseTool then maps `updatedInput.answers`
+ * into the model's tool_result block.
+ */
+export type AskBridgeResult = { answers: Record<string, unknown> }
+export type AskBridgeFn = (
+  input: AskBridgeInput,
+) => Promise<AskBridgeResult>
+
+export type PermissionBridgeInput = {
+  sessionId: string
+  toolUseId: string
+  requestId: string
+  toolName: string
+  input: unknown
+  /** Permission suggestions from the vendor pre-flight (mirrors control_request.permission_suggestions). */
+  permissionSuggestions?: unknown
+}
+export type PermissionBridgeResult = {
+  behavior: 'allow' | 'deny'
+  message?: string
+  updatedInput?: Record<string, unknown>
+}
+export type PermissionBridgeFn = (
+  input: PermissionBridgeInput,
+) => Promise<PermissionBridgeResult>
+
+export type ElicitationBridgeInput = {
+  sessionId: string
+  requestId: string
+  mcpServerName: string
+  message: string
+  mode: 'form' | 'url'
+  url?: string
+  elicitationId?: string
+  requestedSchema?: Record<string, unknown>
+}
+export type ElicitationBridgeResult = {
+  action: 'accept' | 'decline' | 'cancel'
+  content?: Record<string, unknown>
+}
+export type ElicitationBridgeFn = (
+  input: ElicitationBridgeInput,
+) => Promise<ElicitationBridgeResult>
+
 export type CreatePrintRuntimeOptions = {
   /** zai data dir (settings.json, plugins, sessions root). */
   dataDir: string
@@ -60,6 +131,29 @@ export type CreatePrintRuntimeOptions = {
    * §9.3). Default 30; 0 disables.
    */
   idleTtlMin?: number
+  /**
+   * P3: handle vendor-native AskUserQuestion `control_request{can_use_tool}`
+   * when no compat wrapper covers the call (or as a defense-in-depth path
+   * alongside the existing `__zaiBridgeCtx.onYield` route). The bridge
+   * receives the ALS-resolved sessionId so concurrent in-process sessions
+   * each see their own card. When omitted, the runtime writes an error
+   * response so vendor never hangs.
+   */
+  askBridge?: AskBridgeFn
+  /**
+   * P3: handle generic `control_request{can_use_tool}` for tools other than
+   * AskUserQuestion (Bash / Edit / etc.) when a per-query permission mode
+   * other than `bypassPermissions` forces the vendor canUseTool to defer to
+   * the SDK host. When omitted, the runtime writes an error response.
+   */
+  permissionBridge?: PermissionBridgeFn
+  /**
+   * P3: handle MCP `control_request{elicitation}` (see print.ts:1479 +
+   * structuredIO.handleElicitation). Same ALS-resolved sessionId routing
+   * as the ask/permission bridges. When omitted, the runtime writes a
+   * cancel response so MCP servers never block.
+   */
+  elicitationBridge?: ElicitationBridgeFn
 }
 
 // The impl is `@ts-nocheck` (vendor-typed); the public contract is the

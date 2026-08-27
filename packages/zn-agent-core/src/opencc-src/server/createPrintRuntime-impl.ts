@@ -34,6 +34,40 @@ import { createSessionFacadeImpl } from './sessionFacade-impl.js'
 import { startHeadlessPrintSession } from './headlessPrintSession.js'
 import { translateSdkToRuntime } from '../../compat/runtime/sdkEventAdapter.js'
 import { transitionPermissionMode } from '../utils/permissions/permissionSetup.js'
+import { getCurrentSessionId } from '../../compat/runWithSessionId.js'
+import {
+  createCronScheduler,
+  type CronScheduler,
+} from '../utils/cronScheduler.js'
+import { processSessionStartHooks } from '../utils/sessionStart.js'
+import { logForDebugging } from '../utils/debug.js'
+import { updateHooksConfigSnapshot } from '../utils/hooks/hooksConfigSnapshot.js'
+import type {
+  AskBridgeFn,
+  ElicitationBridgeFn,
+  PermissionBridgeFn,
+} from './createPrintRuntime.js'
+
+/** Vendor control_request shape — kept narrow here; the consumer only reads
+ *  the fields it actually routes on (subtype / tool_name / etc.). */
+type ControlRequestMsg = {
+  type: 'control_request'
+  request_id: string
+  request: {
+    subtype: string
+    tool_name?: string
+    input?: Record<string, unknown>
+    tool_use_id?: string
+    permission_suggestions?: unknown
+    // elicitation-only
+    mcp_server_name?: string
+    message?: string
+    mode?: 'form' | 'url'
+    url?: string
+    elicitation_id?: string
+    requested_schema?: Record<string, unknown>
+  }
+}
 
 export async function createPrintRuntimeImpl(options) {
   const cwd = options.defaultCwd ?? process.cwd()
@@ -43,6 +77,13 @@ export async function createPrintRuntimeImpl(options) {
   })
   const instances = new Map()
   let closed = false
+  // P3 (plan §7 path A, hook snapshot): zai-server path doesn't go through
+  // vendor's `setup.ts:166` captureHooksConfigSnapshot, so we lazy-init
+  // here. First `createInstance` triggers `updateHooksConfigSnapshot()`
+  // (which reads `~/.zai/settings.json` + cwd `.zai/settings.json` merged
+  // settings, captures the hooks tree, and resets the session cache).
+  // Subsequent processSessionStartHooks calls reuse the captured snapshot.
+  let hooksSnapshotCaptured = false
 
   // Serialize per-instance headless-context bootstraps (see header note).
   let bootstrapChain = Promise.resolve()
@@ -89,6 +130,146 @@ export async function createPrintRuntimeImpl(options) {
     }
   }
 
+  function controlResponseSuccess(requestId, payload) {
+    return {
+      type: 'control_response',
+      response: {
+        subtype: 'success',
+        request_id: requestId,
+        response: payload,
+      },
+    }
+  }
+
+  // P3 (plan §5): three-way control_request routing. All branches fall back
+  // to a deny/cancel error response when the matching bridge is absent so
+  // vendor never hangs waiting on the SDK host.
+  async function handleControlRequest(rec, msg) {
+    const subtype = msg?.request?.subtype
+    const requestId = msg?.request_id
+    if (typeof requestId !== 'string') return
+    const sessionId = getCurrentSessionId() ?? rec.sessionId
+    if (subtype === 'can_use_tool') {
+      const toolName = msg.request.tool_name
+      const toolInput = msg.request.input ?? {}
+      const toolUseId =
+        msg.request.tool_use_id ?? `${rec.sessionId}:${requestId}`
+      if (toolName === 'AskUserQuestion' && options.askBridge) {
+        try {
+          const result = await options.askBridge({
+            sessionId,
+            toolUseId,
+            requestId,
+            input: {
+              questions: toolInput.questions,
+              metadata: toolInput.metadata,
+            },
+          })
+          rec.session.writeLine(
+            controlResponseSuccess(requestId, {
+              behavior: 'allow',
+              updatedInput: { answers: result.answers },
+            }),
+          )
+        } catch (err) {
+          rec.session.writeLine(
+            controlResponseError(
+              requestId,
+              `askBridge threw: ${String(err)}`,
+            ),
+          )
+        }
+        return
+      }
+      if (options.permissionBridge) {
+        try {
+          const result = await options.permissionBridge({
+            sessionId,
+            toolUseId,
+            requestId,
+            toolName: toolName ?? '<unknown>',
+            input: toolInput,
+            permissionSuggestions: msg.request.permission_suggestions,
+          })
+          rec.session.writeLine(
+            controlResponseSuccess(requestId, {
+              behavior: result.behavior,
+              ...(result.message ? { message: result.message } : {}),
+              ...(result.updatedInput
+                ? { updatedInput: result.updatedInput }
+                : {}),
+            }),
+          )
+        } catch (err) {
+          rec.session.writeLine(
+            controlResponseError(
+              requestId,
+              `permissionBridge threw: ${String(err)}`,
+            ),
+          )
+        }
+        return
+      }
+      // No bridge — refuse so vendor doesn't hang. Use deny for AskUserQuestion
+      // (matches vendor semantics) and the synthetic SANDBOX_* / unknown tool
+      // names too.
+      rec.session.writeLine(
+        controlResponseError(
+          requestId,
+          `inproc print runtime: no permissionBridge for tool '${toolName ?? '<unknown>'}'`,
+        ),
+      )
+      return
+    }
+    if (subtype === 'elicitation') {
+      if (options.elicitationBridge) {
+        try {
+          const result = await options.elicitationBridge({
+            sessionId,
+            requestId,
+            mcpServerName: msg.request.mcp_server_name ?? '',
+            message: msg.request.message ?? '',
+            mode: msg.request.mode === 'url' ? 'url' : 'form',
+            ...(msg.request.url ? { url: msg.request.url } : {}),
+            ...(msg.request.elicitation_id
+              ? { elicitationId: msg.request.elicitation_id }
+              : {}),
+            ...(msg.request.requested_schema
+              ? { requestedSchema: msg.request.requested_schema }
+              : {}),
+          })
+          const payload = {
+            action: result.action,
+            ...(result.content ? { content: result.content } : {}),
+          }
+          rec.session.writeLine(controlResponseSuccess(requestId, payload))
+        } catch (err) {
+          rec.session.writeLine(
+            controlResponseError(
+              requestId,
+              `elicitationBridge threw: ${String(err)}`,
+            ),
+          )
+        }
+        return
+      }
+      // No bridge — cancel so MCP server doesn't block.
+      rec.session.writeLine(
+        controlResponseSuccess(requestId, { action: 'cancel' }),
+      )
+      return
+    }
+    // P4+ — set_permission_mode / interrupt / end_session handled directly by
+    // vendor structuredIO. Any other subtype is unknown to the runtime; send
+    // an error so the caller doesn't hang.
+    rec.session.writeLine(
+      controlResponseError(
+        requestId,
+        `Unsupported control request subtype: ${subtype}`,
+      ),
+    )
+  }
+
   async function createInstance(sessionId, input = {}) {
     // P2 observability: per-instance bootstrap is the dominant cold-query
     // latency (createHeadlessContext full build); log it so zai-side p95
@@ -127,8 +308,46 @@ export async function createPrintRuntimeImpl(options) {
     } catch {
       existing = null
     }
+    // Plan §6 P3 / §7 path A: zai server path didn't fire SessionStart
+    // hooks before — createPrintRuntime now bridges the vendor `print.ts:5309`
+    // semantics for the in-process headless loop. Fired exactly once per
+    // instance (`rec.sessionStartHooksPromise` is consumed by the first
+    // query's `print.ts:5429` join). User `~/.zai/settings.json`/`hooks.SessionStart`
+    // config is read directly by vendor hook machinery — zai does not
+    // shadow it. The fire is `await`ed so a hook that emits `initialUserMessage`
+    // (vendor pattern) can land in the first turn; failures are non-fatal.
+    //
+    // zai patch: zai-server doesn't go through `setup.ts:166` (which calls
+    // captureHooksConfigSnapshot during CLI bootstrap), so the hook snapshot
+    // would otherwise be empty. We refresh on first createInstance and
+    // rely on vendor's settings file watcher for subsequent updates; the
+    // SessionStart hook fires after refresh.
+    let sessionStartHooksPromise: ReturnType<typeof processSessionStartHooks> | null = null
+    try {
+      // One-time snapshot refresh (cost is read-and-cache). vendor's
+      // updateHooksConfigSnapshot already resets the session cache.
+      if (!hooksSnapshotCaptured) {
+        hooksSnapshotCaptured = true
+        updateHooksConfigSnapshot()
+      }
+      sessionStartHooksPromise = processSessionStartHooks('startup', {
+        sessionId,
+        agentType: input.mainAgent,
+        model: options.defaultModel,
+      })
+      // Eagerly await — vendor's runHeadless awaits the same promise in
+      // loadConversationForResume so that any initialUserMessage hook
+      // output lands in the first turn's messages.
+      await sessionStartHooksPromise
+    } catch (err) {
+      logForDebugging(
+        `[createPrintRuntime] SessionStart hook threw: ${String(err)}`,
+        { level: 'error' },
+      )
+    }
     const session = startHeadlessPrintSession({
       sessionId,
+      cwd,
       onOutputLine: line => rec.lines.push(line),
       getAppState: () => ctx.appState.getState(),
       setAppState: ctx.appState.setState,
@@ -163,6 +382,7 @@ export async function createPrintRuntimeImpl(options) {
         agent: input.mainAgent,
         workload: undefined,
         heartbeatIntervalMs: undefined,
+        sessionStartHooksPromise: sessionStartHooksPromise ?? undefined,
       },
       // Test seam (contract tests); undefined in production.
       runHeadlessImpl: options.runHeadlessImpl,
@@ -273,6 +493,53 @@ export async function createPrintRuntimeImpl(options) {
     })
   }
 
+  // P3 (plan §4 / §6 P3): process-wide single cronScheduler. Each instance's
+  // per-vendor scheduler is suppressed (ctx.disableCron = true; see
+  // headlessPrintSession.ts). This scheduler polls `.zai/scheduled_tasks.json`
+  // once per check-tick for the whole server, and routes fires to the right
+  // sessionId via the ALS-resolved sessionId in the receiving instance.
+  //
+  // CronTask has no `sessionId` field (the vendor file-backed scheduler is
+  // cwd-level, not session-level). Without an explicit route, we dispatch
+  // to the most-recently-active sessionId the runtime knows about — the
+  // closest match to "the user is here right now" the server can derive
+  // without per-task metadata. No live instance → drop + log (matches plan
+  // §4-c "实例不在则丢弃记日志" branch).
+  let cronScheduler: CronScheduler | null = null
+  cronScheduler = createCronScheduler({
+    onFire: prompt => {
+      // Find the most-recently-active live instance.
+      const live = Array.from(instances.values())
+        .filter(r => !r.session.isDone())
+        .sort((a, b) => b.lastActivity - a.lastActivity)[0]
+      if (!live) {
+        console.log(
+          `[createPrintRuntime] cron fire: no live instance — dropped: "${prompt.slice(0, 80)}"`,
+        )
+        return
+      }
+      live.lastActivity = Date.now()
+      live.session.sendUserMessage(prompt, {
+        uuid: randomUUID(),
+        priority: 'later',
+        isMeta: true,
+      })
+    },
+    isLoading: () => {
+      // Any active turn in any instance blocks cron fire (parity with
+      // vendor's run() mutex). Vendor cron would have enqueued + run()-kicked
+      // either way; we just hold off so the prompt doesn't fire mid-turn.
+      for (const r of instances.values()) {
+        if (r.turnActive) return true
+      }
+      return false
+    },
+    // Live jitter config lookup so ops can tune without restart; falls back
+    // to vendor DEFAULT_CRON_JITTER_CONFIG inside cronScheduler.
+    isKilled: () => false,
+  })
+  cronScheduler.start()
+
   return {
     async *query(input) {
       const rec = await getOrCreate(input.sessionId, input)
@@ -333,14 +600,12 @@ export async function createPrintRuntimeImpl(options) {
             continue
           }
           if (msg?.type === 'control_request') {
-            // P3 wires the permission/ask bridge (plan §5). Deny-with-error
-            // so the vendor loop never hangs on it in P1.
-            rec.session.writeLine(
-              controlResponseError(
-                msg.request_id,
-                'inproc print runtime (P1): control_request bridge not wired yet',
-              ),
-            )
+            // P3 (plan §5): three-way routing for vendor control_requests.
+            // All bridges are ALS-resolved by sessionId so concurrent
+            // in-process sessions never cross-fire (P0.5 contract).
+            // Without a matching bridge we still write a deny/cancel
+            // response so vendor never hangs waiting on the SDK host.
+            await handleControlRequest(rec, msg)
             continue
           }
           for (const ev of translateSdkToRuntime(msg, adapterMeta)) {
@@ -419,6 +684,10 @@ export async function createPrintRuntimeImpl(options) {
       if (sweepTimer) {
         clearInterval(sweepTimer)
         sweepTimer = null
+      }
+      if (cronScheduler) {
+        cronScheduler.stop()
+        cronScheduler = null
       }
       const disposes = Array.from(instances.values()).map(rec =>
         rec.session.dispose().catch(() => {}),

@@ -53,6 +53,11 @@ import { resolveMainAgent } from './mainAgents.js'
 import { readZaiSettings } from './zaiSettingsStore.js'
 import type { SessionRegistry } from './sessionHost/SessionRegistry.js'
 import type { ZaiSettings } from '../../shared/settings.js'
+import type {
+  AskBridgeFn,
+  PermissionBridgeFn,
+  ElicitationBridgeFn,
+} from '@zn-ai/zn-agent-core'
 
 /**
  * 运行时轨道三态(zai patch 2026-08-27, P1 inproc-print):
@@ -513,6 +518,102 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     // steering 接线按 `'enqueue' in runtime` 探测(P1-b)。
     try {
       const { createPrintRuntime } = await import('@zn-ai/zn-agent-core')
+      // P3 (plan §5): wire the three control_request bridges so vendor's
+      // can_use_tool / elicitation control_protocol hits the same ask /
+      // permission registries the lightweight track uses, with the same
+      // ALS-resolved sessionId routing (P0.5). The compat AskUserQuestion
+      // wrapper (paths/0.5) still fires first; these bridges are the
+      // defense-in-depth path for any tool that escapes the wrapper
+      // (vendor-native AskUserQuestion fallback, MCP elicitation, future
+      // sandbox-style tools).
+      const askBridge: AskBridgeFn = async ({
+        sessionId,
+        toolUseId,
+        requestId,
+        input,
+      }) => {
+        // askRegistry.register returns a Promise<AskUserAnswers> that
+        // resolves when the HTTP /api/agent/answer route calls answer().
+        // We register synchronously, emit prompt.ask so the frontend
+        // QuestionCard shows, and await the user's response.
+        const ctrl = new AbortController()
+        const answersPromise = askRegistry.register(
+          toolUseId,
+          sessionId,
+          ctrl.signal,
+        )
+        // Cast to ServerEventInput — vendor's MCP AskUserQuestion payload
+        // shape (vendor control_request.input.questions) is structurally
+        // compatible but TS narrows each option to `{}` since the input is
+        // `Record<string, unknown>`. The SSE consumer (web UI) parses
+        // through the same zod schema; if it fails the QuestionCard just
+        // shows an empty question list — but the ask still resolves.
+        eventBus.emit({
+          type: 'prompt.ask',
+          sessionId,
+          toolUseId,
+          requestId,
+          questions: input.questions ?? [],
+          ...(input.metadata ? { metadata: input.metadata } : {}),
+        } as unknown as Parameters<typeof eventBus.emit>[0])
+        const answers = await answersPromise
+        return { answers: answers as Record<string, unknown> }
+      }
+      const permissionBridge: PermissionBridgeFn = async ({
+        sessionId,
+        toolUseId,
+        requestId,
+        toolName,
+        input,
+      }) => {
+        const ctrl = new AbortController()
+        const decisionPromise = permissionRegistry.register(
+          toolUseId,
+          sessionId,
+          ctrl.signal,
+        )
+        eventBus.emit({
+          type: 'prompt.permission',
+          sessionId,
+          toolUseId,
+          requestId,
+          toolName,
+          description: typeof input === 'object' && input
+            ? JSON.stringify(input)
+            : String(input ?? ''),
+          // vendor's permission_pending event has no `message` field;
+          // zai's schema requires one — fall back to the description.
+          message: typeof input === 'object' && input
+            ? JSON.stringify(input)
+            : String(input ?? ''),
+        } as unknown as Parameters<typeof eventBus.emit>[0])
+        const decision = await decisionPromise
+        // Map registry's {decision, message?} shape to vendor's
+        // {behavior, message?, updatedInput?} shape. updatedInput is
+        // populated by the registry when the route supplies it.
+        return {
+          behavior: decision.decision,
+          ...(decision.message ? { message: decision.message } : {}),
+          ...(decision.updatedInput
+            ? { updatedInput: decision.updatedInput }
+            : {}),
+        }
+      }
+      // TODO (plan §5 MCP elicitation row): wire a proper ElicitRegistry
+      // / eventBus event so the web UI can render elicitation prompts.
+      // For now we cancel so MCP servers never block; users get a console
+      // warning instead of a UI dialog. Tracked as a follow-up alongside
+      // the elicitation.ask UI work.
+      const elicitationBridge: ElicitationBridgeFn = async ({
+        sessionId,
+        mcpServerName,
+        message,
+      }) => {
+        console.warn(
+          `[inproc] MCP elicitation not yet wired to UI — cancelling: server=${mcpServerName} message=${message.slice(0, 80)} session=${sessionId}`,
+        )
+        return { action: 'cancel' }
+      }
       runtime = await createPrintRuntime({
         dataDir,
         runtimeId: 'zai-server',
@@ -527,6 +628,9 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
         // turn / no active background tasks are disposed; next query
         // re-hydrates via vendor resume. Default 30; 0 disables.
         idleTtlMin: Number(process.env.ZAI_PRINT_IDLE_TTL_MIN ?? '30'),
+        askBridge,
+        permissionBridge,
+        elicitationBridge,
       })
       const cleanup = () => {
         if (runtime) void runtime.shutdown()

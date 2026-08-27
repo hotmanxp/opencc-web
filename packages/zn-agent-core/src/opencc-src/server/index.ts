@@ -76,7 +76,18 @@ export { createOpenccRuntime } from './createOpenccRuntime.js'
 // one in-process vendor print.ts session instance per sessionId,
 // satisfying OpenccRuntimeV2 (steering + state introspection on top of
 // the frozen 8-method contract). Public types live in the thin module.
-export type { CreatePrintRuntimeOptions } from './createPrintRuntime.js'
+export type {
+  AskBridgeFn,
+  AskBridgeInput,
+  AskBridgeResult,
+  CreatePrintRuntimeOptions,
+  ElicitationBridgeFn,
+  ElicitationBridgeInput,
+  ElicitationBridgeResult,
+  PermissionBridgeFn,
+  PermissionBridgeInput,
+  PermissionBridgeResult,
+} from './createPrintRuntime.js'
 
 export { createPrintRuntime } from './createPrintRuntime.js'
 

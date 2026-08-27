@@ -43,6 +43,8 @@ import {
 // pointer, so concurrent in-process sessions route questions/permissions to
 // their own cards. The whole runHeadless chain below inherits it.
 import { runWithSessionId } from '../../compat/runWithSessionId.js'
+import { runWithSdkContext } from '../bootstrap/state.js'
+import type { SessionId } from '../types/ids.js'
 import { logForDebugging } from '../utils/debug.js'
 
 type RunHeadlessParams = Parameters<typeof runHeadless>
@@ -137,6 +139,13 @@ export type HeadlessPrintSession = {
 
 export type StartHeadlessPrintSessionArgs = {
   sessionId: string
+  /**
+   * Project cwd bound into the vendor SDK context (plan §2.5). Vendor derives
+   * the transcript path from `getSessionId()` + cwd, so this must be the same
+   * cwd the sessionFacade / TranscriptStore read from. Defaults to
+   * `process.cwd()`.
+   */
+  cwd?: string
   /** Each NDJSON line the loop produces (SDK messages + control_requests). */
   onOutputLine: (line: string) => void
   getAppState: GetAppState
@@ -234,6 +243,11 @@ export function startHeadlessPrintSession(
 
   const ctx: PrintSessionContext = {
     sessionId,
+    // P3 (plan §4 / §6 P3): suppress the per-instance vendor cronScheduler
+    // so the factory-owned process-wide scheduler is the only one polling
+    // `.zai/scheduled_tasks.json`. Avoids N timers per session + the
+    // cross-fire risk when N instances share the same project dir.
+    disableCron: true,
     writeOutput: line => {
       // Output must not throw back into the loop; swallow listener errors.
       try {
@@ -252,23 +266,67 @@ export function startHeadlessPrintSession(
     dispose: () => disposeSession(),
   }
 
-  // Start the vendor loop inside the ALS contexts. runHeadless never returns
-  // until the input queue closes / drain completes; its final
-  // gracefulShutdownSync routes to onComplete above.
+  // Start the vendor loop inside the ALS contexts. The loop runs until the
+  // input queue closes / the drain completes; its final gracefulShutdownSync
+  // routes to onComplete above.
+  //
+  // runWithSdkContext (plan §2.5) is what makes `getSessionId()` return the
+  // zai sessionId for the whole loop, so vendor writes the transcript to
+  // `${dataDir}/projects/<cwd>/<sessionId>.jsonl` — the same path the
+  // sessionFacade / compat TranscriptStore read. Without it every in-process
+  // instance falls back to the ONE process-global `STATE.sessionId`, so all
+  // sessions append to a single foreign transcript and zai can neither list
+  // nor resume them. The whole loop lives inside `fn`, so unlike the
+  // lightweight track (which must re-enter per `.next()` because the async
+  // generator is pulled from outside) a single wrap is enough here.
+  const sdkCwd = args.cwd ?? process.cwd()
   void runWithPrintSession(ctx, () =>
     runWithSessionId(sessionId, () =>
-      runHeadlessWithCrashGuard(args, input.iterable),
+      runWithSdkContext(
+        {
+          sessionId: sessionId as SessionId,
+          sessionProjectDir: null,
+          cwd: sdkCwd,
+          originalCwd: sdkCwd,
+        },
+        () => runHeadlessWithCrashGuard(args, input.iterable),
+      ),
     ),
-  ).catch(err => {
-    logForDebugging(
-      `headlessPrintSession[${sessionId}]: runHeadless rejected: ${String(err)}`,
-      { level: 'error' },
-    )
-    void completeSession(1)
-  })
+  ).then(
+    () => {
+      // Normal return must complete the session too. `completeSession` is
+      // otherwise only reached via `ctx.onComplete` (gracefulShutdown*), but
+      // runHeadless has several paths that return without shutting down —
+      // e.g. the `initialMessages.length === 0 && process.exitCode !== undefined`
+      // bail (print.ts:813) where loadInitialMessages already shut down, and
+      // any injected loop driver in tests. Leaving `done` unresolved there
+      // makes every dispose() sit out the full SessionEnd-budget + 10s
+      // failsafe, which serialises into runtime.shutdown() (one wait per live
+      // instance). Idempotent: the gracefulShutdown path already flipped
+      // `completed` and captured the real exit code, so this is a no-op then.
+      void completeSession(typeof process.exitCode === 'number' ? process.exitCode : 0)
+    },
+    err => {
+      logForDebugging(
+        `headlessPrintSession[${sessionId}]: runHeadless rejected: ${String(err)}`,
+        { level: 'error' },
+      )
+      void completeSession(1)
+    },
+  )
 
   function writeLine(json: Record<string, unknown>): void {
-    input.push(JSON.stringify(json))
+    // The trailing '\n' is REQUIRED, not cosmetic: vendor `StructuredIO.read()`
+    // (cli/structuredIO.ts:213-251) accumulates every chunk into `content` and
+    // only emits a message once it finds a '\n' — a chunk without one sits in
+    // the buffer until the input stream *closes*. In the CLI that's invisible
+    // (`getStructuredIO` wraps the single prompt in `fromArray`, which closes
+    // immediately, so the tail-flush at :246 picks it up), but our queue stays
+    // open for the whole session lifetime, so a newline-less line means the
+    // turn never starts and the session produces zero output.
+    // Cross-check: `StructuredIO.prependUserMessage` (:202-211) appends '\n'
+    // for exactly this reason.
+    input.push(JSON.stringify(json) + '\n')
   }
 
   function disposeSession(): Promise<void> {
@@ -291,13 +349,12 @@ export function startHeadlessPrintSession(
   }
 
   function writeEndSession(): void {
-    input.push(
-      JSON.stringify({
-        type: 'control_request',
-        request_id: randomUUID(),
-        request: { subtype: 'end_session', reason: 'zai-session-destroy' },
-      }),
-    )
+    // Goes through writeLine so the newline framing stays in one place.
+    writeLine({
+      type: 'control_request',
+      request_id: randomUUID(),
+      request: { subtype: 'end_session', reason: 'zai-session-destroy' },
+    })
   }
 
   return {

@@ -60,7 +60,11 @@ async function fakeLoop(
 
 const HOUR = 3_600_000
 
-function emitLine(obj: Record<string, unknown>): void {
+// 60s suite timeout — same knob createPrintRuntime-contract.test.ts uses.
+// Every getOrCreate() runs a full createHeadlessContextImpl bootstrap, which
+// costs ~10s under vite-node (vs ~80ms in a warm process), so vitest's 5s
+// default trips on instance creation rather than on anything asserted here.
+describe('createPrintRuntime — P2 生命周期', { timeout: 60_000 }, () => {
   let dir: string
   let runtime: OpenccRuntimeV2 & { __sweepIdleForTests: (now?: number) => number }
 

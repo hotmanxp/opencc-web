@@ -41,6 +41,15 @@ export type PrintSessionContext = {
   cleanups: Set<() => Promise<void>>
   /** Drain the dispose bag (idempotent). Provided by the session factory. */
   dispose: () => Promise<void>
+  /**
+   * P3 cron routing flag (plan §4 / §6 P3). When true, the per-instance
+   * `createCronScheduler` inside vendor `cli/print.ts` is suppressed —
+   * the zai-side createPrintRuntime factory owns ONE process-wide
+   * scheduler that routes fires to whichever sessionId the task belongs
+   * to (or a configured fallback). Avoids N timers per session and the
+   * cross-fire risk when N instances load the same `.zai/scheduled_tasks.json`.
+   */
+  disableCron?: boolean
 }
 
 const storage = new AsyncLocalStorage<PrintSessionContext>()
