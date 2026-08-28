@@ -1357,13 +1357,16 @@ export default function SettingsDrawer() {
       destroyOnClose
       data-testid="settings-drawer"
       extra={
-        <Button
-          size="small"
-          onClick={() => setWeixinOpen(true)}
-          data-testid="open-weixin-bot"
-        >
-          微信机器人
-        </Button>
+        // TODO: 微信机器人暂时不开放,需要恢复时取消下面的 false 包裹
+        false ? (
+          <Button
+            size="small"
+            onClick={() => setWeixinOpen(true)}
+            data-testid="open-weixin-bot"
+          >
+            微信机器人
+          </Button>
+        ) : null
       }
       styles={{ body: { padding: '12px 16px' } }}
       footer={
