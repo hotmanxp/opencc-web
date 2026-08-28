@@ -45,10 +45,10 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 ## 强制开发规则
 
 - **真实浏览器验收**:任何问题修复或特性新增,完成前必须用 `/ego-browser` skill 启动真实 zai 实例并走完用户路径(页面加载、按钮点击、表单提交、截图等)。**禁止**用 Chrome DevTools MCP、Playwright、Puppeteer、`curl + WebFetch` 或单元测试替代。环境阻塞时必须显式报告。**注意**:`/ego-browser` 测试本地功能时,不要 kill 920x 端口所在的服务进程——920x 是 zai 正式服务端口, kill 后会导致真实实例不可用,应改为让 ego 使用另一个可用端口(如 8101 起)访问,或用 `pnpm --filter @zn-ai/zai dev` 启动独立开发服务。**ego-browser 在 zai dev 跑着时(SSE 长连接)实际可用**——通过 `browser-operator` skill 调真实浏览器(ego-browser)即可。早期 `feedback-ego-browser-sse-blocked` memory 已过时,不要因为旧经验跳过视觉验证。
-- **移动端路由访问路径**:zai 提供两条独立路径,验证 mobile-only 功能(`MobileQuickDrawer` / `MobileAgent.tsx` / `useBashRepl` 在 drawer 内的 toast 等)时务必切到 `/m`,不要在 `/agent` 上靠缩窗口判断:
-  - **`/agent`** → PC 端(`Layout.tsx` + `AgentConversation.tsx`,左侧 Sider + 右侧分屏 tab)。
-  - **`/m`** → 移动端(`pages/MobileAgent.tsx`,整页重写为顶部 hamburger + 底部输入 + Drawer)。
-  - 视口宽度 `< 768`(`useIsMobile.ts` `MOBILE_BREAKPOINT=768`)时 `Layout` 自身也会响应式收紧(隐藏 Sider、SplitPane 收起),但这跟 `/m` 路由是两条独立路径,**显式 mobile 路由不依赖视口宽度**。ego-browser 验证 mobile drawer 时直接访问 `/m`,无需 `Emulation.setDeviceMetricsOverride`。
+- **路由访问路径**:zai 提供三条独立顶层路径,验证时务必按目标切路由,不要靠缩窗口判断:
+  - **`/agent`** → PC 端(`Layout.tsx` + `AgentConversation.tsx`,左侧 Sider + 右侧分屏 tab)。默认入口。
+  - **`/m`** → 移动端(`pages/MobileAgent.tsx`,整页重写为顶部 hamburger + 底部输入 + Drawer)。验证 mobile-only 功能(`MobileQuickDrawer` / `useBashRepl` 在 drawer 内的 toast 等)时务必切到这里。视口宽度 `< 768`(`useIsMobile.ts` `MOBILE_BREAKPOINT=768`)时 `Layout` 自身也会响应式收紧(隐藏 Sider、SplitPane 收起),但这跟 `/m` 是两条独立路径,**显式 mobile 路由不依赖视口宽度**。ego-browser 验证 mobile drawer 时直接访问 `/m`,无需 `Emulation.setDeviceMetricsOverride`。
+  - **`/desktop`** → PC 端办公桌面(`pages/Desktop.tsx` + `components/desktop/`,2026-08-26 起 draft)。**脱离 Layout**(无 Sider)、全屏沉浸式:壁纸 + Dock + 可拖拽浮窗(资源管理器 + Agent 对话),资源拖入 `AttachmentZone` 即作为 `@` 文件引用上下文。验证时直接访问 `/desktop`,**不走 `/agent`**;`useIsMobile` 为 true 时访问 `/desktop` 会重定向到 `/agent`。资源 API 走 `/api/desktop/fs/*`(`routes/desktopFs.ts`)。
 - **core 改动必须先 build:core**:`packages/zn-agent-core/` 改完后的修复或特性,ego-browser 验证前**必须**先 `pnpm run build:core`。zai 进程通过 `node_modules/@zn-ai/zn-agent-core/` 加载的内容里,`dist/opencc-core.mjs` 单一 bundle、`dist/bundle-entry.d.ts`(主入口 types,机械生成)、以及 `dist/opencc-src/server/*.d.ts` 等被 bundle-entry 引用的小段 d.ts 都是构建产物,改源不会自动生效;不重建就用 ego 验证会复现到旧 core 行为,误导排错。仅改 `packages/zai/src/web/`(纯前端)或只改 zai 服务端源码(无 core 依赖)时**不需要** build:core。
 - **Node-direct runtime(默认)**:`zai dev` 默认走 Node,入口为 `tsx --loader .../bun-protocol.mjs`,通过 loader 拦截 `bun:bundle` / `bun:feature`(漏掉会 `ERR_UNSUPPORTED_ESM_URL_SCHEME`)。保留 `dev:bun`(`bun run src/cli/index.ts dev`)作为可选快速运行方式。opencc vendor 是 un-stripped 全量,Node 冷启动加载较慢,属预期。
 - **opencc-src vs compat**:`opencc-src/` 是 opencc 上游拷贝,但**允许修改**(类型修复、zai 补丁——改后需 `build:core` 生效)。compat 是 zai 专属别名载体。**zai 调用方统一从主入口 `@zn-ai/zn-agent-core` 取值**(2026-08-16 起全部 subpath 已废除);`src/bundle-entry.ts` 把 vendor 与 compat 符号聚合 re-export,主入口暴露 plugin DTO 等类型(`export type * from './opencc-src/server/index.js'`)与运行时。**禁止**用 tsc 整编 opencc-src(拖入 UI 传递依赖);`dist/opencc-src/server/*.d.ts` 由 `tsc -p tsconfig.server.json` 机械发射,由 `scripts/verify-server-types-self-contained.mjs` 守护 self-contained。
@@ -130,7 +130,16 @@ pnpm release:major
 | OpenCC Adapter(Node/tsx) | `docs/superpowers/specs/2026-07-29-zn-agent-core-opencc-adapter-node-design.md`(Bun 版已 deprecated) |
 | 类型化 RPC client stub | `docs/superpowers/specs/2026-08-16-rpc-type-safe-client-stubs.md` |
 | 命令生命周期事件埋点 | `docs/superpowers/specs/2026-08-16-command-lifecycle-events.md` |
+| Session inbox 机制 | `docs/superpowers/specs/2026-08-17-zai-session-inbox-mechanism-design.md` |
+| Display files 工具 | `docs/superpowers/specs/2026-08-20-display-files-tool-design.md` |
+| Main agent slots | `docs/superpowers/specs/2026-08-20-zai-main-agent-slots-design.md` |
+| Subagent claude-code provider | `docs/superpowers/specs/2026-08-21-zai-subagent-claude-code-provider-design.md` |
+| Subagent codex provider | `docs/superpowers/specs/2026-08-21-zai-subagent-codex-provider-design.md` |
+| Runtime printts SSE web bridge | `docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md` |
+| zai Desktop 办公桌面 | `docs/superpowers/specs/2026-08-26-zai-desktop-office-design.md` + `plans/2026-08-26-zai-desktop-office-plan.md` |
+| Headless runtime vs vendor REPL 对比 | `docs/superpowers/specs/2026-08-27-zai-headless-runtime-vs-vendor-repl-comparison.md` |
+| In-process print 多 session runtime | `docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md` |
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
 
-<!-- updated: 2026-08-18 -->
+<!-- updated: 2026-08-28 -->
