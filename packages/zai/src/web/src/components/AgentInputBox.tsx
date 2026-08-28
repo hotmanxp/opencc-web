@@ -1250,9 +1250,12 @@ export default React.memo(function AgentInputBox() {
             // 与 opencc 一致: 只显示用户输入的 `/<command-name> <args>`,
             // 不把 skill 展开后的完整 prompt(rendered)以「渲染后」行显示。
             // rendered 仍作为模型输入发送,不影响命令执行语义。
+            // commandText 同时随请求上送 —— 服务端把原始指令写成可见
+            // 消息、rendered 以 isMeta 落盘,刷新/恢复后展示形态与实时一致。
             pushUserMsg(text, false);
             await submitPrompt(result.payload?.rendered ?? text, {
               skipPushUserMsg: true,
+              commandText: text,
             });
             return;
           case "message":

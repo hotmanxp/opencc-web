@@ -462,6 +462,22 @@ export class TranscriptStore {
     return undefined
   }
 
+  /**
+   * zai patch (2026-08-28): 真实追加一条 vendor 不会写的 transcript 条目。
+   * `append()` 的 no-op 语义针对的是"消息行由 vendor 环写"这一主链路;
+   * 但 slash 指令的可见行(`/cmd args`)只存在于 zai 侧 —— zai 在进 runtime
+   * 前就把它展开了,vendor 环只见过展开后的 prompt——所以可见行必须由
+   * server 自己落盘,否则刷新后指令消息整体消失。走本方法复用与
+   * custom-title / session-meta 相同的 appendEntry 通道。
+   */
+  async appendMessageEntry(
+    sessionId: string,
+    entry: unknown,
+    opts: { cwd: string },
+  ): Promise<void> {
+    await this.appendEntry(sessionId, opts.cwd, entry)
+  }
+
   async appendUserMessage(_msg: unknown) {
     return undefined
   }

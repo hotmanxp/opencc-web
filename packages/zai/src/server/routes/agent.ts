@@ -27,6 +27,7 @@ import {
   CwdStore,
   runWithSessionId,
   appendUserMessageV2,
+  appendVisibleUserMessage,
   appendAssistantMessageV2,
   appendToolUse,
   appendToolResult,
@@ -163,6 +164,12 @@ const PromptRequest = z
       .array(z.discriminatedUnion("type", [ImageBlock, TextBlock]))
       .max(10)
       .optional(),
+    // slash 指令(/cmd 或 skill)展开后的 prompt 发送时,前端同时携带用户
+    // 原始输入文本(`/cmd args`)。落盘时 displayText 作为可见 user 消息、
+    // 展开 prompt 作为 isMeta user 消息(UI 隐藏、LLM 可见)——对齐
+    // opencc vendor processSlashCommand 的双消息形态,刷新/恢复后不再把
+    // 展开提示词直接显示成用户消息。
+    displayText: z.string().max(32_000).optional(),
     cwd: z.string().optional(),
     sessionId: z.string().optional(),
     permissionMode: z.enum(EXTERNAL_PERMISSION_MODES as readonly [UserFacingPermissionMode, ...UserFacingPermissionMode[]]).optional(),
@@ -729,6 +736,8 @@ type PendingPrompt = {
   cwd: string
   prompt: string
   contentBlocks?: z.infer<typeof PromptRequest>['contentBlocks']
+  /** slash 指令的原始用户输入(`/cmd args`);有值时展开 prompt 以 isMeta 落盘 */
+  displayText?: string
 }
 
 const sessionQueues = new Map<string, PendingPrompt[]>()
@@ -1004,8 +1013,25 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // field → 400 "unsupported content type '' (2013)".
     // Round-trip identity is preserved because the runtime reads from
     // params.messages, not from the persisted transcript.
+    //
+    // zai patch (2026-08-28): slash 指令消息对齐 vendor processSlashCommand
+    // 的双消息形态 —— 可见行(cmd.displayText,原始 `/cmd args`)由 server
+    // 经 appendVisibleUserMessage 真实落盘(此通道不依赖 store.append,
+    // inproc track 下 append 是 no-op、消息行归 vendor 环写);展开后的
+    // prompt 以 isMeta:true 提交 runtime(createPrintRuntime 透传到
+    // sendUserMessage → print.ts 入队 → recordTranscript 写 isMeta 行,
+    // 前端 loadTranscriptMessages 按 isMeta 跳过)。
+    // 无 displayText 的普通消息路径行为不变。
     const transcriptCtx = { cwd, sessionId, userType: 'zai' }
     try {
+      if (cmd.displayText) {
+        await appendVisibleUserMessage(
+          getTranscriptStore(),
+          sessionId,
+          cmd.displayText,
+          transcriptCtx,
+        )
+      }
       await appendUserMessageV2(
         getTranscriptStore(),
         sessionId,
@@ -1013,6 +1039,7 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         0,
         null,
         transcriptCtx,
+        cmd.displayText ? { isMeta: true } : undefined,
       )
     } catch (e) {
       if (process.env.ZAI_DEBUG === '1') {
@@ -1120,6 +1147,10 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       // API. JSON-encoding here would leak base64 as plain text and the
       // model can't read the image.
       prompt: userContent,
+      // zai patch (2026-08-28): slash 指令的展开 prompt 以 meta 消息提交给
+      // runtime —— vendor 语义下 isMeta 消息 LLM 可见、UI/恢复层隐藏,
+      // 保证 runtime 侧若写盘也不会泄漏展开提示词为可见用户消息。
+      ...(cmd.displayText ? { isMeta: true } : {}),
       cwd,
       // sessionId: 显式指定 ID. 不管新建还是续传, vendor runtime 都用这个
       // ID 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
@@ -1364,7 +1395,7 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         if (!titlePatched) {
           titlePatched = true;
           try {
-            const title = deriveTitleFromPrompt(text);
+            const title = deriveTitleFromPrompt(cmd.displayText ?? text);
             await getTranscriptStore().patch(event.sessionId, { title }, { cwd });
             // ★ 通知前端: sidebar 的 sessions 列表要立刻把这一条的 title
             // 从"新会话"换成新标题. 前端 subscribeServerEvents 注册了
@@ -1583,6 +1614,7 @@ router.post("/agent/prompt", async (req: Request, res: Response) => {
     cwd,
     prompt: text,
     contentBlocks: blocks,
+    displayText: parsed.data.displayText?.trim() || undefined,
   })
   sessionQueues.set(sessionId, queue)
   if (wasIdle) void runNextInQueue(sessionId)
@@ -1831,6 +1863,9 @@ router.post("/agent/queue/edit", async (req: Request, res: Response) => {
   }
   item.prompt = text.trim()
   item.contentBlocks = undefined
+  // 编辑后文本即用户可见的最终消息,不再是"指令展开"语义 —— 清掉
+  // displayText,避免旧指令名覆盖新文本的落盘形态。
+  item.displayText = undefined
   emitQueueChanged(sessionId)
   res.json({ ok: true })
 });

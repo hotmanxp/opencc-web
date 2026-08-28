@@ -14,7 +14,11 @@ export function deriveLocalTitle(prompt: string): string {
 export interface UseSubmitPromptResult {
   submitPrompt: (
     text: string,
-    opts?: { skipPushUserMsg?: boolean },
+    opts?: {
+      skipPushUserMsg?: boolean
+      /** slash 指令原始输入(`/cmd args`):随展开 prompt 一起上送,服务端按此落可见行 */
+      commandText?: string
+    },
   ) => Promise<void>
   pushUserMsg: (
     text: string,
@@ -60,7 +64,7 @@ export function useSubmitPrompt(): UseSubmitPromptResult {
   )
 
   const submitPrompt = useCallback(
-    async (text: string, opts?: { skipPushUserMsg?: boolean }) => {
+    async (text: string, opts?: { skipPushUserMsg?: boolean; commandText?: string }) => {
       const s = useAgentStore.getState()
       // zai race fix (2026-08-28): `creatingSession` 是 store 层标记
       // createNewSession 异步窗口(50–200ms)的字段 — 此期间 sid 必为
@@ -85,6 +89,7 @@ export function useSubmitPrompt(): UseSubmitPromptResult {
         queued?: boolean
       }>('/agent/prompt', {
         prompt: text || undefined,
+        ...(opts?.commandText ? { displayText: opts.commandText } : {}),
         sessionId: sid,
       }, {
         headers: { 'X-Session-Id': sid },
@@ -100,7 +105,8 @@ export function useSubmitPrompt(): UseSubmitPromptResult {
         sessionId: returnedSessionId,
         activeSessionId: returnedSessionId,
       })
-      const localTitle = deriveLocalTitle(text)
+      // 会话标题取用户原始输入(指令场景是 `/cmd args`,不是展开提示词)。
+      const localTitle = deriveLocalTitle(opts?.commandText ?? text)
       if (localTitle) {
         useAgentStore.getState().applySessionEvent({
           type: 'session.renamed',

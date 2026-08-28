@@ -8,6 +8,11 @@ vi.mock('../../src/server/services/sessionInbox.js', () => ({
     followup: (...args: unknown[]) => followupMock(...args),
   },
 }))
+// subagentNotifier 顶部 import getCoreRuntime(默认值)—— mock 掉避免
+// 测试拉起整个 agentRuntime / core bundle。默认 'default'(注入照常走)。
+vi.mock('../../src/server/services/agentRuntime.js', () => ({
+  getCoreRuntime: () => 'default',
+}))
 
 import {
   SubagentNotifier,
@@ -149,6 +154,18 @@ describe('SubagentNotifier.handle', () => {
     const n = new SubagentNotifier()
     await n.handle(makeTask({ status: 'running' }))
     expect(followupMock).not.toHaveBeenCalled()
+  })
+
+  test('inproc 运行时 → 不投递 followup(通知由 vendor print 环 drain 原生投递)', async () => {
+    const n = new SubagentNotifier({ getCore: () => 'inproc' })
+    await n.handle(makeTask({ status: 'completed', resultText: 'hi' }))
+    expect(followupMock).not.toHaveBeenCalled()
+  })
+
+  test('spawn 运行时 → 仍投递 followup(子进程环不共享 bundle 队列)', async () => {
+    const n = new SubagentNotifier({ getCore: () => 'spawn' })
+    await n.handle(makeTask())
+    expect(followupMock).toHaveBeenCalledTimes(1)
   })
 
   test('sessionInbox.followup 抛错 → handle 不抛,仅 console.warn', async () => {

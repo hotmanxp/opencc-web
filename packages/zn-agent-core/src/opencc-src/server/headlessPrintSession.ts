@@ -3,7 +3,7 @@
  *
  * Wraps the vendor headless loop (`cli/print.ts` `runHeadless`) as an
  * in-process, per-session, disposable instance — the "one REPL per zai
- * sessionId" unit for the `ZAI_OPENCC_CLI=inproc` track.
+ * sessionId" unit for the `ZAI_CORE_RUNTIME=inproc` core runtime.
  *
  * Mechanism (see utils/printSessionRuntime.ts for the ALS context and the
  * four patched chokepoints):

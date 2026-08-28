@@ -185,6 +185,36 @@ export async function appendUserMessageV2(
   }
 }
 
+export async function appendVisibleUserMessage(
+  store: TranscriptStore,
+  sessionId: string,
+  content: string,
+  ctx: CommonCtx,
+  pathOpts?: { cwd?: string },
+): Promise<string | undefined> {
+  try {
+    const base = baseFields(ctx, 0, null)
+    const msg: TranscriptMessage = {
+      ...base,
+      type: 'user',
+      message: { content, role: 'user' },
+    }
+    const cwd = pathOpts?.cwd ?? ctx.cwd
+    if (typeof store.appendMessageEntry === 'function') {
+      // inproc track: store.append 是 no-op(消息行归 vendor 环写),可见
+      // 指令行走 appendMessageEntry 真实落盘通道。
+      await store.appendMessageEntry(sessionId, msg, { cwd })
+    } else {
+      await store.append(sessionId, msg, { cwd })
+    }
+    return base.uuid
+  } catch (err) {
+    if (process.env.ZAI_DEBUG === '1')
+      console.error('[transcript] appendVisibleUserMessage failed', err)
+    return undefined
+  }
+}
+
 export async function appendToolUse(
   store: TranscriptStore,
   sessionId: string,

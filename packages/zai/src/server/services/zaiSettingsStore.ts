@@ -1,7 +1,7 @@
 import { writeFile, rename, mkdir } from 'node:fs/promises'
 import { homedir } from 'node:os'
 import { join, dirname } from 'node:path'
-import type { OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
+import type { CoreRuntime, OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import { getCachedZaiSettings, refreshCache } from './zaiSettingsCache.js'
 // Re-export the cache API so existing `zaiSettingsStore` importers can reach
 // it without a second import path.
@@ -232,4 +232,25 @@ export function resolveAutoUpdate(settings: ZaiSettings): boolean {
 /** Validate a candidate auto-update value before persisting. */
 export function isValidAutoUpdate(value: unknown): value is boolean {
   return typeof value === 'boolean'
+}
+
+/**
+ * zai patch (2026-08-28): 核心运行时三态设置开关。与 `agentRuntime.ts` 的
+ * `resolveCoreRuntime` 语义对齐(env `ZAI_CORE_RUNTIME` / `--coreRuntime`
+ * flag 优先级更高,不在此函数职责内):把持久化的 `settings.coreRuntime`
+ * 归一化为 'default' | 'inproc' | 'spawn' 供 UI 渲染(缺失 / 非法 → 'default')。
+ */
+export function resolveCoreRuntime(
+  settings: ZaiSettings,
+): CoreRuntime {
+  const s = settings.coreRuntime
+  if (s === 'inproc' || s === 'spawn' || s === 'default') return s
+  return 'default'
+}
+
+/** Validate a candidate coreRuntime value before persisting. */
+export function isValidCoreRuntime(
+  value: unknown,
+): value is CoreRuntime {
+  return value === 'default' || value === 'inproc' || value === 'spawn'
 }

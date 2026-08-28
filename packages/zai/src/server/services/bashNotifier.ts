@@ -1,10 +1,12 @@
 import type { BashTaskInfo } from '@zn-ai/zn-agent-core'
 import {
   getRuntime,
+  getCoreRuntime,
   getCurrentSessionId,
   setCurrentSessionId,
   hasActiveQuery,
 } from './agentRuntime.js'
+import type { CoreRuntime } from '../../shared/settings.js'
 import { resolveModel } from '../lib/resolveModel.js'
 import { eventBus } from './eventBus.js'
 import { translateRuntimeEvents } from '../routes/agent.js'
@@ -42,6 +44,8 @@ import { translateRuntimeEvents } from '../routes/agent.js'
 export interface BashNotifierOptions {
   /** 测试钩子:替换为 mock runtime。 */
   getRuntime?: typeof getRuntime
+  /** 测试钩子:替换运行时读取(默认 getCoreRuntime)。 */
+  getCore?: () => CoreRuntime
 }
 
 let notifier: BashNotifier | null = null
@@ -113,9 +117,11 @@ function escapeXml(s: string): string {
 
 export class BashNotifier {
   private readonly getRuntimeFn: typeof getRuntime
+  private readonly getCoreFn: () => CoreRuntime
 
   constructor(opts: BashNotifierOptions = {}) {
     this.getRuntimeFn = opts.getRuntime ?? getRuntime
+    this.getCoreFn = opts.getCore ?? getCoreRuntime
   }
 
   /**
@@ -124,6 +130,14 @@ export class BashNotifier {
    * 异常仅 console.warn,不让后台回调把 server 弄崩。
    */
   async handle(e: { sessionId: string; task: BashTaskInfo }): Promise<void> {
+    // zai patch (2026-08-28): inproc-print 运行时下**不注入**——后台 Bash 的
+    // <task-notification> 由 vendor print 环原生 drain 投递
+    // (LocalShellTask.enqueueShellNotification → bundle commandQueue →
+    // print.ts drainCommandQueue mode 'task-notification')。inproc 与
+    // default 不同:环与队列在同一 bundle 同一 module 实例,drain 可达,server 再
+    // query 一份就是重复注入(同一事件双份 user 消息进 transcript)。
+    // UI 侧 bash_task.changed SSE 不经这里,照常推送。
+    if (this.getCoreFn() === 'inproc') return
     const task = e.task
     if (task.status !== 'completed' && task.status !== 'failed' && task.status !== 'killed') {
       return

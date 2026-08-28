@@ -309,26 +309,19 @@ function assertDtsTargetsResolve(bundleEntryDts: string): void {
   console.log(`[bundle-opencc]   → ${SUBAGENT_INDEX_DTS}`)
 }
 
-// compat/subagents/codex/index.ts / claude-code/index.ts are
-// subagent provider registration modules. Like compat/subagents/index.ts
-// (the registry barrel above), they're only reached from bundle-entry.ts
-// for their apply function:
-//   export { apply as applyCodexProvider } from './compat/subagents/codex/index.js'
+// compat/subagents/claude-code/index.ts is a subagent provider
+// registration module. Like compat/subagents/index.ts
+// (the registry barrel above), it's only reached from bundle-entry.ts
+// for its apply function:
 //   export { apply as applyClaudeCodeProvider } from './compat/subagents/claude-code/index.js'
-// so tsc -b does not emit d.ts for them. Hand-write minimal d.ts
-// files covering only the apply surface the bundle-entry re-exports;
+// so tsc -b does not emit d.ts for it. Hand-write a minimal d.ts file
+// covering only the apply surface the bundle-entry re-exports;
 // the SubagentRegistry type is imported from the barrel d.ts above.
+// NOTE (2026-08-28): the codex provider d.ts mirror was removed along
+// with its bundle-entry export (app-server handshake fails unattended);
+// compat/subagents/codex/ module stays for a future fix.
 {
   const SUBAGENT_PROVIDER_DTS_DIR = join(ROOT, 'dist', 'compat', 'subagents')
-  const codexDts = [
-    '// Type declarations for the codex subagent provider apply entry.',
-    '// Mirror src/compat/subagents/codex/index.ts (only apply is consumed',
-    '// by bundle-entry.ts). Hand-written because the file is only referenced',
-    '// from bundle-entry.ts (excluded from main tsconfig.json).',
-    "import { SubagentRegistry } from '../index.js';",
-    'export declare function apply(registry: SubagentRegistry, config?: unknown): void;',
-    '',
-  ].join('\n')
   const claudeCodeDts = [
     '// Type declarations for the claude-code subagent provider apply entry.',
     '// Mirror src/compat/subagents/claude-code/index.ts (only apply is',
@@ -339,7 +332,6 @@ function assertDtsTargetsResolve(bundleEntryDts: string): void {
     '',
   ].join('\n')
   for (const [rel, dtsBody] of [
-    ['codex/index.d.ts', codexDts],
     ['claude-code/index.d.ts', claudeCodeDts],
   ] as const) {
     const out = join(SUBAGENT_PROVIDER_DTS_DIR, rel)

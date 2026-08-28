@@ -11,6 +11,7 @@ import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
 import { profilesToModelEntries } from '../../shared/profileProjection.js'
 import {
   isValidAutoUpdate,
+  isValidCoreRuntime,
   isValidDefaultSplitScreen,
   isValidEnableDynamicWorkflow,
   isValidOutputStyle,
@@ -18,6 +19,7 @@ import {
   isValidWorkMode,
   readZaiSettings,
   resolveAutoUpdate,
+  resolveCoreRuntime,
   resolveDefaultSplitScreen,
   resolveEnableDynamicWorkflow,
   resolveOutputStyle,
@@ -102,6 +104,12 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
     const defaultSplitScreen = resolveDefaultSplitScreen(settings)
     const enableDynamicWorkflow = resolveEnableDynamicWorkflow(settings)
     const autoUpdate = resolveAutoUpdate(settings)
+    // zai patch (2026-08-28): 核心运行时三态(持久化值)。
+    // 注意这只是 settings.coreRuntime 的归一化;实际生效运行时还受
+    // env ZAI_CORE_RUNTIME / --coreRuntime flag 覆盖(agentRuntime.
+    // resolveCoreRuntime 的优先级链),且只在 initAgentRuntime 解析一次,
+    // 改后需重启实例生效。
+    const coreRuntime = resolveCoreRuntime(settings)
     // zai patch (2026-08-20): 主 Agent —— 当前选择 + 可选列表(内置 + 外置
     // ~/.zai/main-agents/*.js 合并),供 SettingsDrawer 的 Agent 选择行渲染。
     const { agent: mainAgent, agents: mainAgents } = await resolveMainAgent(
@@ -119,6 +127,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       defaultSplitScreen,
       enableDynamicWorkflow,
       autoUpdate,
+      coreRuntime,
       mainAgent: mainAgent.name,
       mainAgents: mainAgents.map((a) => ({
         name: a.name,
@@ -350,5 +359,31 @@ router.put('/agent/settings/main-agent', async (req: Request, res: Response) => 
     res.status(500).json({ error: (err as Error).message })
   }
 })
+
+/**
+ * PUT /api/agent/settings/core-runtime — 持久化核心运行时开关
+ * (zai patch 2026-08-28 命名统一)。Body 是
+ * `{ coreRuntime: 'default' | 'inproc' | 'spawn' }`,写入 settings.coreRuntime。
+ *
+ * 生效时机:**重启实例后**——运行时在 `initAgentRuntime` 只解析一次;且
+ * env `ZAI_CORE_RUNTIME` / `--coreRuntime` flag 优先级更高,会盖过本设置。
+ */
+router.put(
+  '/agent/settings/core-runtime',
+  async (req: Request, res: Response) => {
+    const candidate = (req.body as { coreRuntime?: unknown } | undefined)?.coreRuntime
+    if (!isValidCoreRuntime(candidate)) {
+      return res
+        .status(400)
+        .json({ error: `invalid coreRuntime: ${String(candidate)}` })
+    }
+    try {
+      const next = await updateZaiSettings({ coreRuntime: candidate })
+      res.json({ coreRuntime: resolveCoreRuntime(next) })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  },
+)
 
 export default router

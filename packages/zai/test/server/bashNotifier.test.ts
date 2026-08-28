@@ -156,6 +156,16 @@ describe('BashNotifier.handle', () => {
     expect(queryCalls).toBe(3)
   })
 
+  test('inproc 运行时 → 不注入(通知由 vendor print 环 drain 原生投递)', async () => {
+    const n = new BashNotifier({
+      getRuntime: () => mockRuntime as any,
+      getCore: () => 'inproc',
+    })
+    await n.handle({ sessionId: 'sess-parent', task: makeTask() })
+    expect(lastRunOpts).toBeNull()
+    expect(queryCalls).toBe(0)
+  })
+
   test('runtime.query 抛错 → handle 不抛,仅 console.warn', async () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
     const broken = {

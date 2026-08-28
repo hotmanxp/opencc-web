@@ -82,6 +82,18 @@ export interface ZaiPermissions {
   defaultMode?: string
 }
 
+/**
+ * 核心运行时三态(zai patch 2026-08-28 命名统一):
+ * - 'default' → 轻量 in-process `createOpenccRuntime`(默认)
+ * - 'inproc'  → in-process print 多 session 运行时
+ *   (`createPrintRuntime`:每 sessionId 一个 vendor print.ts REPL 等价实例,
+ *   hooks/resume 全恢复/rewind/steering 原生可用)
+ * - 'spawn'   → spawn `opencc -p` 子进程(SessionHost 路径)
+ * 详见 docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md
+ * 与 docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md。
+ */
+export type CoreRuntime = 'default' | 'inproc' | 'spawn'
+
 /** Shape of ~/.zai/settings.json. */
 export interface ZaiSettings {
   env?: Record<string, string>
@@ -178,20 +190,12 @@ export interface ZaiSettings {
     rateLimitCircuitOpenSeconds?: number
   }
   /**
-   * 运行时开关。`runtime.openccCli`(env `ZAI_OPENCC_CLI` 优先)切换主会话
-   * 运行时三态(zai patch 2026-08-27, P1):
-   * - false / undefined(默认)→ 轻量 in-process `createOpenccRuntime`
-   * - true / 'inproc' → in-process print 多 session 运行时
-   *   (`createPrintRuntime`:每 sessionId 一个 vendor print.ts REPL 等价实例,
-   *   hooks/resume 全恢复/rewind/steering 原生可用)。旧布尔值 true 保持
-   *   兼容,语义从 spawn 迁移到 inproc。
-   * - 'spawn' → spawn `opencc -p` 子进程(SessionHost B1 路径,legacy 逃生口)
-   * 详见 docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md
-   * 与 docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md。
+   * 核心运行时三态(zai patch 2026-08-28 命名统一,原 `runtime.openccCli`
+   * 硬切,不留兼容)。见 CoreRuntime 的取值语义。生效优先级:
+   * `--coreRuntime` flag > env `ZAI_CORE_RUNTIME` > 本设置。
+   * 缺失 / 非法值 → 'default'。
    */
-  runtime?: {
-    openccCli?: boolean | 'inproc' | 'spawn'
-  }
+  coreRuntime?: CoreRuntime
 }
 
 /**

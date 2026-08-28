@@ -44,6 +44,7 @@ import {
   stopMemoryWatcher,
   hasExternalIncludes,
 } from '@zn-ai/zn-agent-core'
+import { reapplyCoreRuntimeFlag } from '../../cli/coreRuntimeFlag.js'
 import type { LoadedSkill } from '@zn-ai/zn-agent-core'
 import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
@@ -52,7 +53,7 @@ import { sessionInbox, type InboxMessage } from './sessionInbox.js'
 import { resolveMainAgent } from './mainAgents.js'
 import { readZaiSettings } from './zaiSettingsStore.js'
 import type { SessionRegistry } from './sessionHost/SessionRegistry.js'
-import type { ZaiSettings } from '../../shared/settings.js'
+import type { CoreRuntime, ZaiSettings } from '../../shared/settings.js'
 import type {
   AskBridgeFn,
   PermissionBridgeFn,
@@ -60,33 +61,36 @@ import type {
 } from '@zn-ai/zn-agent-core'
 
 /**
- * 运行时轨道三态(zai patch 2026-08-27, P1 inproc-print):
- *   off    → 轻量 in-process createOpenccRuntime(默认)
- *   inproc → createPrintRuntime(每 sessionId 一个 vendor print.ts 实例)
- *   spawn  → SessionHost 子进程(legacy 逃生口)
- * 解析优先级:env `ZAI_OPENCC_CLI` > settings.runtime.openccCli > off。
- * 旧布尔值 `1/true` 语义从 spawn 迁移到 inproc(需要子进程请显式 'spawn')。
+ * 核心运行时三态(zai patch 2026-08-28 命名统一,原 RuntimeTrack/openccCli):
+ *   default → 轻量 in-process createOpenccRuntime(默认)
+ *   inproc  → createPrintRuntime(每 sessionId 一个 vendor print.ts 实例)
+ *   spawn   → spawn `opencc -p` 子进程(SessionHost)
+ * 解析优先级:`--coreRuntime` flag(落到 env)> env `ZAI_CORE_RUNTIME`
+ * > settings.coreRuntime > 'default'。
  * 在 `initAgentRuntime` 入口读一次,不在每个 query 重读。见
  * docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md。
  */
-type RuntimeTrack = 'off' | 'inproc' | 'spawn'
-function isEnvTruthy(value: string): boolean {
-  return value === '1' || value === 'true' || value === 'TRUE' || value === 'yes'
-}
-function resolveOpenccCliFlag(settings: ZaiSettings): RuntimeTrack {
-  const env = process.env.ZAI_OPENCC_CLI
+function resolveCoreRuntime(settings: ZaiSettings): CoreRuntime {
+  const env = process.env.ZAI_CORE_RUNTIME
   if (env !== undefined && env !== '') {
-    if (env === 'spawn') return 'spawn'
-    if (env === 'inproc') return 'inproc'
-    return isEnvTruthy(env) ? 'inproc' : 'off'
+    if (env === 'inproc' || env === 'spawn' || env === 'default') return env
+    return 'default'
   }
-  const s = settings.runtime?.openccCli
-  if (s === 'spawn' || s === 'inproc') return s
-  return s === true ? 'inproc' : 'off'
+  const s = settings.coreRuntime
+  if (s === 'inproc' || s === 'spawn' || s === 'default') return s
+  return 'default'
 }
 
 let runtime: OpenccRuntime | null = null
 let currentSessionId: string | null = null
+// zai patch (2026-08-28): initAgentRuntime 解析出的核心运行时缓存,供下游按
+// 运行时分支(如 SubagentNotifier / BashNotifier 在 inproc 下跳过
+// server 注入——通知由 vendor print 环的 commandQueue drain 原生投递)。
+let activeCoreRuntime: CoreRuntime = 'default'
+/** 当前核心运行时;'default' 也是 initAgentRuntime 未跑完时的安全默认值。 */
+export function getCoreRuntime(): CoreRuntime {
+  return activeCoreRuntime
+}
 let sessionRegistry: SessionRegistry | null = null
 /**
  * Legacy transcript accessor. Task 5 keeps a working `TranscriptStore`
@@ -315,6 +319,7 @@ export function __resetAgentRuntimeForTests(): void {
   runtime = null
   transcriptStore = null
   serverCwd = null
+  activeCoreRuntime = 'default'
   sessionControllers.clear()
   if (sessionRegistry) {
     void sessionRegistry.killAll('test reset')
@@ -344,7 +349,7 @@ export function getActivePromptCount(): number {
  * subagent config object.
  */
 async function readSubagentConfigSafe(
-  _name: 'codex' | 'claude-code',
+  _name: 'claude-code',
 ): Promise<unknown | undefined> {
   // Settings readers (`readZaiSettings`) may not be initialized at this
   // module init point. The provider's own `safeParseXxxConfig` covers
@@ -402,19 +407,20 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   })
 
   // zai patch (2026-08-21): register the subagent providers we ship
-  // today. Both `codex` and `claude-code` are gated on `enabled: false`
-  // by default — explicit `subagent_type: 'codex'` / `'claude-code'`
-  // calls still route through the provider, but no model-visible tool
-  // is mounted unless the deployment flips the bit in settings.json.
+  // today. `claude-code` is gated on `enabled: false` by default —
+  // explicit `subagent_type: 'claude-code'` calls still route through
+  // the provider, but no model-visible tool is mounted unless the
+  // deployment flips the bit in settings.json.
   // The `apply()` calls are intentionally synchronous and
   // side-effectful on the runtime-global registry — see
-  // docs/superpowers/specs/2026-08-21-zai-subagent-codex-provider-design.md
-  // and the parallel spec for claude-code.
+  // docs/superpowers/specs/2026-08-21-zai-subagent-claude-code-provider-design.md.
+  // NOTE (2026-08-28): the `codex` provider registration was removed —
+  // its app-server protocol handshake fails unattended
+  // (`remoteControl/status/changed`). The provider module stays in
+  // `compat/subagents/codex/` for a future fix; re-register here once
+  // that works.
   try {
     const subagentMod = await import('@zn-ai/zn-agent-core')
-    const applyCodex = (subagentMod as unknown as {
-      applyCodexProvider?: (registry: unknown, config?: unknown) => void
-    }).applyCodexProvider
     const applyClaude = (subagentMod as unknown as {
       applyClaudeCodeProvider?: (registry: unknown, config?: unknown) => void
     }).applyClaudeCodeProvider
@@ -430,13 +436,6 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       )
     } else {
       const registry = getSubagentRegistry()
-      if (typeof applyCodex === 'function') {
-        applyCodex(registry, await readSubagentConfigSafe('codex'))
-      } else {
-        console.warn(
-          '[initAgentRuntime] codex subagent symbols missing — did you forget to rebuild core?',
-        )
-      }
       if (typeof applyClaude === 'function') {
         applyClaude(
           registry,
@@ -449,7 +448,7 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       }
     }
   } catch (err) {
-    // Non-fatal — without providers, `Agent(subagent_type: 'codex')`
+    // Non-fatal — without providers, `Agent(subagent_type: '<name>')`
     // throws `provider not found`, which the user can fix by rebuilding.
     console.warn('[initAgentRuntime] subagent provider registration failed:', err)
   }
@@ -472,23 +471,30 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // `streamingToolExecutor` tool loop → vendor's
   // `queryModelWithStreaming` → upstream API.
   // ---------------------------------------------------------------------
-  // 双轨分支(ZAI_OPENCC_CLI,spec §5.6):
-  //   true  → spawn `opencc -p` 子进程(SessionHost B1,stdio NDJSON +
-  //           control_request 协议),zai 退化为 SDK 宿主;
-  //   false → 现状 in-process createOpenccRuntime。
-  // settings 在分支前读一次;上下文注释见文档 spec。双轨都保留上文
+  // 三态分支(ZAI_CORE_RUNTIME,spec §5.6):
+  //   default → 现状 in-process createOpenccRuntime;
+  //   inproc  → createPrintRuntime(每 sessionId 一个 vendor print.ts 实例);
+  //   spawn   → spawn `opencc -p` 子进程(SessionHost,stdio NDJSON +
+  //           control_request 协议),zai 退化为 SDK 宿主。
+  // settings 在分支前读一次;上下文注释见文档 spec。三条链路都保留上文
   // enableOpenccConfigs(vendor config system)与 zai 内部子系统
   // (PluginRuntime / eventBus / __zaiBridgeCtx / sessionInbox / sessionFacade)。
   // isSdk 参数语义在阶段 5 收敛时删除;双轨期间保留 legacy 分支行为不变。
   // ---------------------------------------------------------------------
+  // zai patch (2026-08-28): `enableOpenccConfigs()`(上一段)会把 settings.env
+  // 无条件 `Object.assign` 回 process.env,覆盖 CLI 入口处
+  // `applyCoreRuntimeFlag()` 写入的 `ZAI_CORE_RUNTIME`。在解析运行时之前恢复
+  // `--coreRuntime` flag 的强制语义,保住 "flag > env > settings" 的设计承诺。
+  reapplyCoreRuntimeFlag()
   const settings = await readZaiSettings()
-  const track = resolveOpenccCliFlag(settings)
+  const coreRuntime = resolveCoreRuntime(settings)
+  activeCoreRuntime = coreRuntime
   // 启动日志显式标注运行时路径(双轨监控埋点,spec §5.6.5)。
   console.log(
-    `[initAgentRuntime] runtime=${track === 'off' ? 'in-process' : track} cwd=${cwd} (ZAI_OPENCC_CLI=${process.env.ZAI_OPENCC_CLI ?? 'unset'})`,
+    `[initAgentRuntime] coreRuntime=${coreRuntime} cwd=${cwd} (ZAI_CORE_RUNTIME=${process.env.ZAI_CORE_RUNTIME ?? 'unset'})`,
   )
 
-  if (track === 'spawn') {
+  if (coreRuntime === 'spawn') {
     const { createSessionFacade } = await import('@zn-ai/zn-agent-core')
     const { SessionRegistry } = await import('./sessionHost/SessionRegistry.js')
     const { SessionHostRuntimeAdapter } = await import(
@@ -511,7 +517,7 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       console.error('[initAgentRuntime] SessionHost runtime init failed:', err)
       throw err
     }
-  } else if (track === 'inproc') {
+  } else if (coreRuntime === 'inproc') {
     // P1 inproc-print track: one vendor print.ts session instance per
     // sessionId (plan §3). Implements OpenccRuntimeV2 (8-method contract +
     // enqueue/interrupt/getSessionState); routes/agent.ts 消费 8 方法零改动,
@@ -744,14 +750,14 @@ export function getRuntime(): OpenccRuntime {
 }
 
 /**
- * B1 路径的 SessionRegistry(spec §5.5.1)。仅在 `ZAI_OPENCC_CLI=1` 时被
+ * B1 路径的 SessionRegistry(spec §5.5.1)。仅在 `ZAI_CORE_RUNTIME=spawn` 时被
  * initAgentRuntime 挂载;legacy 路径调用会直接 throw(Phase B 的 registry
  * resolve 落点需要它时,following 分支已守卫)。
  */
 export function getSessionRegistry(): SessionRegistry {
   if (!sessionRegistry) {
     throw new Error(
-      'SessionRegistry not initialized (需要 ZAI_OPENCC_CLI=1 启动)',
+      'SessionRegistry not initialized (需要 ZAI_CORE_RUNTIME=spawn 启动)',
     )
   }
   return sessionRegistry

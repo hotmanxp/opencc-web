@@ -1,5 +1,7 @@
 import type { BackgroundTask } from '@zn-ai/zn-agent-core'
 import { sessionInbox } from './sessionInbox.js'
+import { getCoreRuntime } from './agentRuntime.js'
+import type { CoreRuntime } from '../../shared/settings.js'
 
 /**
  * SubagentNotifier:把 BackgroundRuntime 子 agent 的完成事件回流到父 session。
@@ -25,15 +27,19 @@ import { sessionInbox } from './sessionInbox.js'
 export interface SubagentNotifierOptions {
   /** 测试钩子:替换为 mock sessionInbox(默认走 module 单例)。 */
   inbox?: typeof sessionInbox
+  /** 测试钩子:替换运行时读取(默认 getCoreRuntime)。 */
+  getCore?: () => CoreRuntime
 }
 
 let notifier: SubagentNotifier | null = null
 
 export class SubagentNotifier {
   private readonly inbox: typeof sessionInbox
+  private readonly getCoreFn: () => CoreRuntime
 
   constructor(opts: SubagentNotifierOptions = {}) {
     this.inbox = opts.inbox ?? sessionInbox
+    this.getCoreFn = opts.getCore ?? getCoreRuntime
   }
 
   /**
@@ -42,6 +48,14 @@ export class SubagentNotifier {
    * 异常仅 console.warn,不让后台回调把 server 弄崩。
    */
   async handle(task: BackgroundTask): Promise<void> {
+    // zai patch (2026-08-28): inproc-print 运行时下**不注入**——子代理的
+    // <task-notification> 由 vendor print 环原生 drain 投递
+    // (AgentTool.enqueueAgentNotification → bundle commandQueue →
+    // print.ts drainCommandQueue mode 'task-notification' + waiting_for_agents
+    // do-while)。inproc 环与队列在同一 module 实例,drain 可达;server 经
+    // inbox 再注入一份 = 同一完成事件双份 user 消息(重复回合 + transcript
+    // 双写)。UI 侧 agent_task.changed / job.* SSE 事件不受影响。
+    if (this.getCoreFn() === 'inproc') return
     if (
       task.status !== 'completed' &&
       task.status !== 'failed' &&

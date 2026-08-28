@@ -8,7 +8,7 @@
  *
  * CLI 下这个缺陷不可见:`getStructuredIO` 把单条 prompt 包进 `fromArray`,流立刻关闭,
  * 收尾 flush 顶上了。但 in-process 轨道的输入队列在整个 session 生命周期里保持打开,
- * 于是 turn 永远不开始、session 零输出 —— 表现为「用 --runtime=print 启动后对话没有
+ * 于是 turn 永远不开始、session 零输出 —— 表现为「用 --coreRuntime inproc 启动后对话没有
  * 任何回复」。
  *
  * 已有的 contract / lifecycle / bridges 测试都用 `runHeadlessImpl` stub 逐行读队列

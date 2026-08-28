@@ -96,6 +96,7 @@ export {
   appendAssistantMessageV2,
   appendToolUse,
   appendToolResult,
+  appendVisibleUserMessage,
 } from './compat/transcript/persistence.js'
 export type { ModelCaller, Tool } from './compat/runtime/modelCaller.js'
 
@@ -143,10 +144,12 @@ export * from './opencc-src/utils/model/genericModelCapabilities.js'
 export type * from './opencc-src/server/index.js'
 
 // ./compat/subagents(zai agentRuntime 依赖 getSubagentRegistry 拿
-// SubagentRegistry 实例)。codex / claude-code provider 在各自子模块里
-// 各自导出 `apply`,同名会撞,这里显式 rename 为唯一名 `applyCodexProvider`
-// / `applyClaudeCodeProvider` 喂给 zai agentRuntime 直接取值(避免 `export *`
+// SubagentRegistry 实例)。claude-code provider 在子模块里导出 `apply`,
+// 与潜在同名符号会撞,这里显式 rename 为唯一名 `applyClaudeCodeProvider`
+// 喂给 zai agentRuntime 直接取值(避免 `export *`
 // 静默丢同名符号,也避免再加 sub-path)。
+// 注(2026-08-28):codex provider 的注册导出已移除(app-server 协议
+// 握手在无人值守下失败);`compat/subagents/codex/` 模块保留,修复后
+// 可在此重新导出 apply。
 export * from './compat/subagents/index.js'
-export { apply as applyCodexProvider } from './compat/subagents/codex/index.js'
 export { apply as applyClaudeCodeProvider } from './compat/subagents/claude-code/index.js'

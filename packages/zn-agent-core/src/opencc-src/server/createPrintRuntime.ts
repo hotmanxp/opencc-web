@@ -4,8 +4,8 @@
  *
  * Plan: docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md
  *
- * Where this sits in the dual-track design (`ZAI_OPENCC_CLI`):
- *   - off    → `createOpenccRuntime` (lightweight QueryEngine wrapper, frozen)
+ * Where this sits in the three-way core-runtime design (`ZAI_CORE_RUNTIME`):
+ *   - default → `createOpenccRuntime` (lightweight QueryEngine wrapper, frozen)
  *   - inproc → THIS factory: one "REPL-equivalent" instance per sessionId,
  *              driving the vendor `cli/print.ts` loop in-process via
  *              `startHeadlessPrintSession` (P0 surgery), with full hooks /

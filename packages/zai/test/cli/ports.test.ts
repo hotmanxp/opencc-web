@@ -61,7 +61,7 @@ describe('findAvailablePort', () => {
   });
 
   // 回归:2026-08-27 print-runtime 验证时撞到的 SO_REUSEADDR 分裂绑
-  // 定。`zai --lan` 持有 `*:9201`,新启的 `zai --runtime=print` 默认
+  // 定。`zai --lan` 持有 `*:9201`,新启的 `zai --coreRuntime inproc` 默认
   // host=127.0.0.1,纯 bind 探测会让 `listen(49301, '127.0.0.1')` 成功
   // —— 内核不阻止更具体的地址与通配并存。后果:两个 server 共享同一端
   // 口,内核按 fd 把浏览器连接分给不同的实例,POST 落在一处、SSE 挂在另

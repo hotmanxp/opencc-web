@@ -4326,6 +4326,14 @@ clients: prev.mcp.clients.map((c: MCPServerConnection) =>
         value: await resolveAndPrepend(message, message.message.content),
         uuid: message.uuid,
         priority: message.priority,
+        // zai patch (2026-08-28): forward isMeta from the inbound SDK user
+        // line (headlessPrintSession.sendUserMessage spreads it into the
+        // NDJSON). Without this, a slash-command-expanded prompt submitted
+        // with isMeta:true lands as a PLAIN user message in the transcript
+        // and zai's web UI replays it as if the user typed the whole skill
+        // prompt. ask() already threads cmd.isMeta → createUserMessage →
+        // recordTranscript, so the flag persists once it reaches the queue.
+        isMeta: (message as unknown as { isMeta?: boolean }).isMeta,
       })
       // Increment prompt count for attribution tracking and save snapshot
       // The snapshot persists promptCount so it survives compaction

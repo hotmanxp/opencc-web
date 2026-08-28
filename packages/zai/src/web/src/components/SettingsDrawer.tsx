@@ -646,6 +646,11 @@ function formatValue(row: SettingsRow): string {
 
 type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 
+// 核心运行时(zai patch 2026-08-28 命名统一):settings.coreRuntime 三态。
+// 实际生效优先级:--coreRuntime flag / env ZAI_CORE_RUNTIME > 本设置;且
+// 运行时只在服务启动 initAgentRuntime 时解析一次,改后需重启实例生效。
+type CoreRuntimeOption = 'default' | 'inproc' | 'spawn'
+
 // 阶段 1 schema:对齐 spec 表里的 Model / Permission / Theme / Env Vars 字段,
 // 但用 opencc /config 风格文本行代替 Tabs + Form。
 //
@@ -663,6 +668,7 @@ function buildStaticSchema(
   autoUpdate: boolean,
   mainAgent: string,
   agentOptions: EnumOption[],
+  coreRuntime: CoreRuntimeOption,
 ): SettingsSchema {
   return [
     {
@@ -859,6 +865,27 @@ function buildStaticSchema(
         },
       ],
     },
+    {
+      // Agent 核心运行时 — 写入 settings.coreRuntime。
+      // default:默认进程内 query 链路;inproc:in-process print 多 session
+      // 运行时;spawn:子进程 SessionRegistry。改后需重启实例生效
+      // (运行时在 initAgentRuntime 一次性解析);env ZAI_CORE_RUNTIME 或
+      // --coreRuntime flag 存在时会覆盖本设置。
+      section: '运行时',
+      rows: [
+        {
+          key: 'coreRuntime',
+          label: 'Agent 运行时',
+          kind: 'enum',
+          value: coreRuntime,
+          options: [
+            { value: 'default', label: 'default(默认)', description: '进程内 query 链路 · 重启后生效' },
+            { value: 'inproc', label: 'inproc', description: 'in-process print 多 session 运行时 · 重启后生效' },
+            { value: 'spawn', label: 'spawn', description: '子进程 SessionRegistry · 重启后生效' },
+          ],
+        },
+      ],
+    },
   ]
 }
 
@@ -916,9 +943,14 @@ export default function SettingsDrawer() {
   const [agentOptions, setAgentOptions] = useState<EnumOption[]>(() => [
     { value: 'default', label: 'default' },
   ])
+  // 核心运行时:当前持久化值来自 GET /api/agent/settings.coreRuntime,
+  // 修改走 PUT /api/agent/settings/core-runtime(同 mainAgent 模式,
+  // 本地 state + 重启后生效)。
+  const [coreRuntime, setCoreRuntime] =
+    useState<CoreRuntimeOption>('default')
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions),
+    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions, coreRuntime),
   )
   // mount 时拉一次 GET /api/agent/settings → 填充 agentOptions + 当前 mainAgent。
   // destroyOnClose 每次打开都会重新挂载,列表保持新鲜(新增外置 agent 文件后
@@ -942,6 +974,13 @@ export default function SettingsDrawer() {
           )
         }
         if (typeof data.mainAgent === 'string') setMainAgent(data.mainAgent)
+        if (
+          data.coreRuntime === 'default' ||
+          data.coreRuntime === 'inproc' ||
+          data.coreRuntime === 'spawn'
+        ) {
+          setCoreRuntime(data.coreRuntime)
+        }
       })
       .catch(() => {
         // swallow — 保持默认 'default' 选项
@@ -1073,6 +1112,20 @@ export default function SettingsDrawer() {
       })),
     )
   }, [mainAgent])
+  // 同步 coreRuntime → schema 行(本地 state,选择后 PUT 持久化)。
+  useEffect(() => {
+    setSchema((prev) =>
+      prev.map((s) => ({
+        ...s,
+        rows: s.rows.map((r) => {
+          if (r.key === 'coreRuntime' && r.kind === 'enum') {
+            return { ...r, value: coreRuntime }
+          }
+          return r
+        }),
+      })),
+    )
+  }, [coreRuntime])
   // 同步 agentOptions → schema 行(拉取 mainAgents 列表后更新 options)。
   useEffect(() => {
     setSchema((prev) =>
@@ -1225,6 +1278,27 @@ export default function SettingsDrawer() {
         }).catch(() => {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })
+      }
+      // 核心运行时 — PUT settings.coreRuntime。运行时在
+      // initAgentRuntime 一次性解析,改后需重启实例生效,提示用户。
+      if (key === 'coreRuntime' && typeof value === 'string') {
+        const next = value as CoreRuntimeOption
+        setCoreRuntime(next)
+        void fetch('/api/agent/settings/core-runtime', {
+          method: 'PUT',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ coreRuntime: next }),
+        })
+          .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
+          .then((data: { coreRuntime?: unknown }) => {
+            if (typeof data?.coreRuntime === 'string') {
+              setCoreRuntime(data.coreRuntime as CoreRuntimeOption)
+            }
+            message.info('运行时已保存,重启 zai 后生效')
+          })
+          .catch(() => {
+            message.warning('运行时保存失败,下次 GET 会重新对齐磁盘状态')
+          })
       }
       // 其它行目前只更新内部 schema state(阶段 2 接真实写盘)
       setSchema((prev) =>

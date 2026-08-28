@@ -21,12 +21,13 @@ interface DevOptions {
   lan?: boolean;
   sdk?: boolean;
   /**
-   * `--runtime <print|null>` — CLI flag 在 packages/zai/src/cli/index.ts 的
-   * action 包装里已经被 applyRuntimeFlag 翻译成 env 写/删,runDev 不再读。
+   * `--coreRuntime <default|inproc|spawn>` — CLI flag 在
+   * packages/zai/src/cli/index.ts 的 action 包装里已经被
+   * applyCoreRuntimeFlag 翻译成 env 写入,runDev 不再读。
    * 保留这个字段只为 commander .action 推断出来的 OptionValues 不会引入
    * 鸭子类型噪音,实际不需要在 runDev 内部消费。
    */
-  runtime?: string;
+  coreRuntime?: string;
 }
 
 export async function runDev(options: DevOptions) {

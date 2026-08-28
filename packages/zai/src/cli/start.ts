@@ -21,11 +21,11 @@ interface StartOptions {
   lan?: boolean;
   sdk?: boolean;
   /**
-   * `--runtime <print|null>` — 透传到 managed child,确保 child 再次跑
-   * `runStart` 时仍然按 CLI flag 强制覆盖 env;否则 child 只能从父进程
-   * env 间接继承。详见 packages/zai/src/cli/runtimeFlag.ts。
+   * `--coreRuntime <default|inproc|spawn>` — 透传到 managed child,确保
+   * child 再次跑 `runStart` 时仍然按 CLI flag 强制覆盖 env;否则 child 只能
+   * 从父进程 env 间接继承。详见 packages/zai/src/cli/coreRuntimeFlag.ts。
    */
-  runtime?: string;
+  coreRuntime?: string;
   /**
    * Force the managed/supervisor code path. When `undefined`, the decision
    * is taken from `process.env.ZAI_NO_MANAGED` (managed by default; set
@@ -70,10 +70,10 @@ export async function runStart(options: StartOptions): Promise<void> {
     if (options.port) childArgs.push('--port', options.port)
     if (options.lan) childArgs.push('--lan')
     if (options.sdk) childArgs.push('--sdk')
-    // 透传 --runtime 到 child,否则 child 重新跑 runStart 时 options.runtime
-    // === undefined,只能靠 env 继承,而 `--runtime=null` 必须由 child 自己
-    // 主动 delete 才能盖掉父进程 shell 残留的脏 env。
-    if (options.runtime) childArgs.push('--runtime', options.runtime)
+    // 透传 --coreRuntime 到 child,否则 child 重新跑 runStart 时
+    // options.coreRuntime === undefined,只能靠 env 继承;flag 显式指定的
+    // 强制值(含 default)必须由 child 自己重新落到 env 上。
+    if (options.coreRuntime) childArgs.push('--coreRuntime', options.coreRuntime)
     // Always pass --no-open to the child so it does not double-open the
     // browser — the user's `--open` request was already handled by the
     // supervisor's direct invocation, and we don't want a second tab.
