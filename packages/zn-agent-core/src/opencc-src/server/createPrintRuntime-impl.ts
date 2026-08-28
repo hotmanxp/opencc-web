@@ -77,6 +77,42 @@ export async function createPrintRuntimeImpl(options) {
   })
   const instances = new Map()
   let closed = false
+
+  /**
+   * zai patch (2026-08-28): cheap transcript probe used by `createInstance`
+   * to decide whether vendor resume is safe. Vendor's `getLastSessionLog`
+   * returns null whenever the file has zero `user`/`assistant` entries
+   * (it walks `loadSessionFile(...).messages.size`), and a null result
+   * triggers the vendor "No conversation found" emit + gracefulShutdown
+   * that dumps a stale `result: error_during_execution` line into our
+   * stdout pipe — which the query generator then breaks on. A freshly
+   * created zai session is exactly that state: `POST /api/agent/sessions`
+   * wrote only metadata + a single user message, no assistant reply yet.
+   * Cheap heuristic: scan the JSONL for any `assistant`-type line. Empty
+   * / unreadable file → treat as "no history" (safe default — vendor
+   * will start a new session instead of erroring out).
+   */
+  async function sessionHasAssistantMessage(
+    sid: string,
+    _sessionCwd: string,
+  ): Promise<boolean> {
+    try {
+      const raw = await sessions.readTranscript(sid)
+      for (const line of raw.split('\n')) {
+        const trimmed = line.trim()
+        if (!trimmed) continue
+        try {
+          const parsed = JSON.parse(trimmed) as { type?: unknown }
+          if (parsed.type === 'assistant') return true
+        } catch {
+          // ignore malformed lines
+        }
+      }
+      return false
+    } catch {
+      return false
+    }
+  }
   // P3 (plan §7 path A, hook snapshot): zai-server path doesn't go through
   // vendor's `setup.ts:166` captureHooksConfigSnapshot, so we lazy-init
   // here. First `createInstance` triggers `updateHooksConfigSnapshot()`
@@ -302,11 +338,36 @@ export async function createPrintRuntimeImpl(options) {
     const state = ctx.appState.getState()
     // Hydrate existing transcripts via the vendor resume chain (P0
     // advantage: file history / worktree / attribution / mode all restore).
+    //
+    // zai patch (2026-08-28): only pass `resume` when the session actually
+    // has assistant messages. The zai-side `POST /api/agent/sessions` writes
+    // a metadata-only transcript (session-meta + custom-title + mode +
+    // queue-operation); the user prompt is then persisted via
+    // `appendUserMessageV2` BEFORE runtime.query() starts. But vendor's
+    // `loadSessionFile` counts only `user`/`assistant` entries — pure
+    // metadata + a single orphan user message yields `messages.size === 0`,
+    // which makes `getLastSessionLog` return null and triggers the vendor
+    // "No conversation found" branch that emits an
+    // `error_during_execution` NDJSON line + `gracefulShutdownSync(1)`.
+    //
+    // That stray `result` line lands in the in-process stdout pipe BEFORE
+    // the new query's `system init`/`stream_event`/`assistant` lines and
+    // the query generator's `if (msg?.type === 'result') break` exits the
+    // loop on the very first read — every subsequent runtime.started /
+    // runtime.delta / runtime.tool_call is dropped, the UI sees only a
+    // premature runtime.done, status flips back to idle, and after refresh
+    // the reply shows up because vendor's own transcript writer already
+    // flushed the assistant turn. Resume-only-when-real-history keeps the
+    // initial empty-session path on the new-session code path where
+    // `runHeadless` issues a clean SessionStart instead of a load error.
     let existing = null
+    let hasConversationHistory = false
     try {
       existing = await sessions.get(sessionId, { cwd })
+      hasConversationHistory = await sessionHasAssistantMessage(sessionId, cwd)
     } catch {
       existing = null
+      hasConversationHistory = false
     }
     // Plan §6 P3 / §7 path A: zai server path didn't fire SessionStart
     // hooks before — createPrintRuntime now bridges the vendor `print.ts:5309`
@@ -357,7 +418,7 @@ export async function createPrintRuntimeImpl(options) {
       agents: state.agentDefinitions?.activeAgents ?? [],
       options: {
         continue: undefined,
-        resume: existing ? sessionId : undefined,
+        resume: hasConversationHistory ? sessionId : undefined,
         resumeSessionAt: undefined,
         verbose: true,
         outputFormat: 'stream-json',
