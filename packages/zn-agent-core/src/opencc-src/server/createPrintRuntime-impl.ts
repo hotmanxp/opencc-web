@@ -426,7 +426,10 @@ export async function createPrintRuntimeImpl(options) {
       cwd,
       onOutputLine: line => rec.lines.push(line),
       getAppState: () => ctx.appState.getState(),
-      setAppState: ctx.appState.setState,
+      setAppState: wrapTaskAwareSetState(
+        ctx.appState.setState as unknown as Parameters<typeof wrapTaskAwareSetState>[0],
+        () => readZaiCurrentSessionId() as string | null | undefined,
+      ),
       commands: ctx.mcp?.commands ?? [],
       tools: ctx.tools,
       sdkMcpConfigs: {},

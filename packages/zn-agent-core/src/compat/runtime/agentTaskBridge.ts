@@ -232,7 +232,7 @@ type AttachInput = Parameters<BackgroundRuntime['attach']>[0]
  * 内联,无法 import zai server 模块 — 通过 globalThis 读(与
  * __zaiEventBus 同款模式)。纯 zn-agent-core / 单测环境下值为 undefined。
  */
-function readZaiCurrentSessionId(): string | null | undefined {
+export function readZaiCurrentSessionId(): string | null | undefined {
   const v = (globalThis as { __zaiCurrentSessionId?: string | null }).__zaiCurrentSessionId
   return typeof v === 'string' ? v : v === null ? null : undefined
 }
