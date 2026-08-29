@@ -4,6 +4,10 @@ import { sendToSupervisor } from '../../cli/managedChild.js';
 import { shutdownInstanceSupervisor } from './instanceSupervisor.js';
 import { shutdownBackgroundRuntime } from './backgroundRuntime.js';
 import { stopBranchChecker } from '../routes/system.js';
+// zai patch (2026-08-29, plan §3.6): 关停时清 AgentRegistry.sessionBindings,
+// 释放 per-session agent 绑定;agents map(builtin + 外置配置)保留
+// 供下次冷启动复用(loadBuiltinAgents 是 idempotent)。
+import { getAgentRegistry } from '@zn-ai/zn-agent-core';
 
 /**
  * 重启原因与 web/src/lib/systemApi.ts 的 RestartReason 对齐,
@@ -72,6 +76,15 @@ export async function closeServer(): Promise<void> {
     await getWeixinBotManager().stop();
   } catch (err) {
     console.warn('[runtimeLifecycle] weixinBot stop failed:', err);
+  }
+
+  // zai patch (2026-08-29, plan §3.6): 清 AgentRegistry sessionBindings,
+  // 释放 per-session agent 绑定。agents map 保留,下次 init 时 builtin
+  // + loadUserAgents 是 idempotent 重入。
+  try {
+    getAgentRegistry().clear();
+  } catch (err) {
+    console.warn('[runtimeLifecycle] agentRegistry.clear failed:', err);
   }
 
   if (registeredServer) {
