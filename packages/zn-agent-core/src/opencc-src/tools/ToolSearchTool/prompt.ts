@@ -72,6 +72,8 @@ export function isDeferredTool(tool: Tool): boolean {
 
   // [FORK_SUBAGENT] was: feature('FORK_SUBAGENT') &&
   // Fork-first: Agent must be available turn 1, not behind ToolSearch.
+  // zai 始终启用 fork 子代理实验(isForkSubagentEnabled() 恒 true,除非
+  // coordinator / 非交互会话),所以普通交互下 Agent tool 永不被 defer。
   // Lazy require: static import of forkSubagent → coordinatorMode creates a cycle
   // through constants/tools.ts at module init.
   if (tool.name === AGENT_TOOL_NAME) {

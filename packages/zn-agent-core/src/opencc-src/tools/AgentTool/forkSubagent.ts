@@ -33,12 +33,15 @@ import type { BuiltInAgentDefinition } from './loadAgentsDir.js'
  * orchestration role and has its own delegation model.
  */
 // [FORK_SUBAGENT] was: feature('FORK_SUBAGENT') ? ... : false
-// 67e147e7 把所有 vendor feature() 内联成 false;这里同样应返回 false,
-// zai 不启用 fork 子代理实验,所有 Agent 调用按调用方传入的 run_in_background 决定。
+// 67e147e7 删除 bun:bundle feature() 调用后,这里固化返回 true —— zai
+// 始终启用 fork 子代理实验(forceAsync 恒为 true,所有 Agent 调用走
+// shouldRunAsync 路径派发到 background runtime,由 <task-notification>
+// 与主对话交互)。coordinator / 非交互会话各自走自己的 delegation
+// model,不参与 fork。
 export function isForkSubagentEnabled(): boolean {
   if (isCoordinatorMode()) return false
   if (getIsNonInteractiveSession()) return false
-  return false
+  return true
 }
 
 /** Synthetic agent type name used for analytics when the fork path fires. */
