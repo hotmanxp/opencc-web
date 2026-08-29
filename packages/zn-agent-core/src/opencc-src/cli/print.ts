@@ -57,6 +57,8 @@ import {
   subscribeToCommandQueue,
   getCommandsByMaxPriority,
 } from 'src/utils/messageQueueManager.js'
+// zai patch (2026-08-29): EventDrivenPrint — wake on queue change
+import { subscribeToHeadlessWake } from '../utils/headlessLoopWake.js'
 import { notifyCommandLifecycle } from 'src/utils/commandLifecycle.js'
 import {
   getSessionState,
@@ -2060,6 +2062,22 @@ function runHeadlessStreaming(
     }
   })
 
+  // zai patch (2026-08-29): EventDrivenPrint — wake run() on queue change.
+  // The do-while(waitingForAgents) loop above was replaced with a single
+  // drain; this subscription wakes run() again whenever a command is
+  // enqueued (e.g. enqueueAgentNotification firing <task-notification>).
+  // The `running` mutex inside run() collapses recursive wakes; the
+  // `inputClosed` predicate prevents wakes after shutdown.
+  subscribeToHeadlessWake({
+    shouldWake: () => !running && !inputClosed,
+    hasMainThreadQueued: () => peek(isMainThread) !== undefined,
+    getBgRunning: () =>
+      getRunningTasks(getAppState()).some(
+        t => isBackgroundTask(t) && t.type !== 'in_process_teammate',
+      ),
+    onWake: () => void run(),
+  })
+
   const run = async () => {
     if (running) {
       return
@@ -2565,47 +2583,28 @@ function runHeadlessStreaming(
         }
       }
 
-      // Use a do-while loop to drain commands and then wait for any
-      // background agents that are still running. When agents complete,
-      // their notifications are enqueued and the loop re-drains.
-      do {
-        // Drain SDK events (task_started, task_progress) before command queue
-        // so progress events precede task_notification on the stream.
-        for (const event of drainSdkEvents()) {
-          output.enqueue(event)
-        }
+      // Drain SDK events (task_started, task_progress) before command queue
+      // so progress events precede task_notification on the stream.
+      for (const event of drainSdkEvents()) {
+        output.enqueue(event)
+      }
 
-        runPhase = 'draining_commands'
-        options.heartbeat?.setPhase('draining_commands')
-        await drainCommandQueue()
+      runPhase = 'draining_commands'
+      options.heartbeat?.setPhase('draining_commands')
+      await drainCommandQueue()
 
-        // Check for running background tasks before exiting.
-        // Exclude in_process_teammate — teammates are long-lived by design
-        // (status: 'running' for their whole lifetime, cleaned up by the
-        // shutdown protocol, not by transitioning to 'completed'). Waiting
-        // on them here loops forever (gh-30008). Same exclusion already
-        // exists at useBackgroundTaskNavigation.ts:55 for the same reason;
-        // L1839 above is already narrower (type === 'local_agent') so it
-        // doesn't hit this.
-        waitingForAgents = false
-        {
-          const state = getAppState()
-          const hasRunningBg = getRunningTasks(state).some(
-            t => isBackgroundTask(t) && t.type !== 'in_process_teammate',
-          )
-          const hasMainThreadQueued = peek(isMainThread) !== undefined
-          if (hasRunningBg || hasMainThreadQueued) {
-            waitingForAgents = true
-            if (!hasMainThreadQueued) {
-              runPhase = 'waiting_for_agents'
-              options.heartbeat?.setPhase('waiting_for_agents')
-              // No commands ready yet, wait for tasks to complete
-              await sleep(100)
-            }
-            // Loop back to drain any newly queued commands
-          }
-        }
-      } while (waitingForAgents)
+      // zai patch (2026-08-29): EventDrivenPrint — replace the legacy
+      // do-while(waitingForAgents) loop above with a single drain. The
+      // loop polled getRunningTasks() and slept 100ms between iterations,
+      // which could exit before enqueueAgentNotification landed a
+      // <task-notification> for a completed background agent — leaving
+      // the notification stranded with no consumer. Now we subscribe to
+      // command-queue changes (subscribeToHeadlessWake, registered
+      // outside run() at startup) and re-invoke run() on every enqueue.
+      // The mutex `running` keeps recursive wakes collapsing to one run;
+      // drainCommandQueue's internal while(dequeue) already pulls every
+      // queued main-thread command at once, so a single iteration is
+      // sufficient per wake.
 
       if (heldBackResult) {
         output.enqueue(heldBackResult)
@@ -2899,11 +2898,11 @@ function runHeadlessStreaming(
   }
 
   // Cron scheduler: runs scheduled_tasks.json tasks in SDK/-p mode.
-  // Mirrors REPL's useScheduledTasks hook. Fired prompts enqueue + kick
-  // off run() directly — unlike REPL, there's no queue subscriber here
-  // that drains on enqueue while idle. The run() mutex makes this safe
-  // during an active turn: the call no-ops and the post-run recheck at
-  // the end of run() picks up the queued command.
+  // Mirrors REPL's useScheduledTasks hook. Fired prompts call enqueue()
+  // which synchronously notifies subscribeToCommandQueue subscribers —
+  // including subscribeToHeadlessWake (see L2058 above), which wakes
+  // run() if !running && !inputClosed. The run() mutex makes this safe
+  // during an active turn: the wake no-ops.
   //
   // zai patch (2026-08-27, P3 cron routing per plan §4 / §6 P3): when this
   // loop is running inside an in-process print-session context AND the
