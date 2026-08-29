@@ -2,6 +2,7 @@
 import { z } from 'zod/v4'
 import {
   mirrorAppendBgEvent,
+  mirrorAttachTaskToBg,
   mirrorFinalizeBgTask,
 } from '../../../compat/runtime/agentTaskBridge.js'
 import { clearInvokedSkillsForAgent } from '../../bootstrap/state.js'
@@ -60,6 +61,8 @@ import {
 import { emitTaskProgress as emitTaskProgressEvent } from '../../utils/task/sdkProgress.js'
 import { isInProcessTeammate } from '../../utils/teammateContext.js'
 import { getTokenCountFromUsage } from '../../utils/tokens.js'
+import { getCwd } from '../../utils/cwd.js'
+import { getParentSessionId } from '../../utils/teammate.js'
 import { EXIT_PLAN_MODE_V2_TOOL_NAME } from '../ExitPlanModeTool/constants.js'
 import { AGENT_TOOL_NAME, LEGACY_AGENT_TOOL_NAME } from './constants.js'
 import type { AgentDefinition } from './loadAgentsDir.js'
@@ -574,6 +577,30 @@ export async function runAsyncAgentLifecycle({
           stopSummarization = stop
         }
       : undefined
+    // zai patch: 必须在 for-await 之前 attach,否则第一条 mirrorAppendBgEvent
+    // 落到 DefaultBackgroundRuntime.appendTaskEvent 时找不到 record,被静默
+    // 丢弃(日志 "task X not found (never attached?)"),UI 后台抽屉显示
+    // 事件: 0;同时 attach 是落盘 task.parentSessionId 的唯一入口,缺失会让
+    // SubagentNotifier 拿不到父 sessionId,<task-notification> 静默吞掉,
+    // 主对话收不到完成事件,卡在停止按钮。
+    // parentSessionId 优先取 getParentSessionId()(in-process teammate /
+    // dynamicTeamContext 场景);普通 main REPL → sub-agent 时为 undefined,
+    // 由 mirrorAttachTaskToBg 内部 fallback 到 zai server 的 __zaiCurrentSessionId。
+    await mirrorAttachTaskToBg({
+      id: taskId,
+      input: {
+        prompt: metadata.prompt,
+        cwd: getCwd(),
+        agent: metadata.agentType,
+        model: metadata.resolvedAgentModel,
+      },
+      metadata: {
+        parentSessionId: getParentSessionId(),
+        agentType: metadata.agentType,
+        description,
+        invocationKind: 'spawn',
+      },
+    })
     for await (const message of makeStream(onCacheSafeParams)) {
       agentMessages.push(message)
       // Append immediately when UI holds the task (retain). Bootstrap reads
