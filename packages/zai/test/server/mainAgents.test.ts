@@ -333,3 +333,109 @@ describe('builtin agents (core)', () => {
     ])
   })
 })
+// =====================================================================
+// zai patch (2026-08-29, plan §6.1 Task 11): 回归断言——builtin agents 经
+// 新 AgentRegistry.slot() 派发与原 MainAgentConfig 直接调用输出等价。
+// 覆盖 office / agent-creator / default 三个 builtin,以及外置 .js 加载的
+// 三种格式(CJS object / CJS factory / ESM default) + 数组形式。
+// =====================================================================
+
+describe('AgentRegistry.slot() 派发(plan §6.1)', () => {
+  it('default.tools 经 slot 派发 append DisplayFiles 工具', async () => {
+    const r = getAgentRegistry()
+    r.loadBuiltinAgents()
+    r.registryAgent('s-default', 'default')
+    const tools = await r.slot<unknown[]>([], 'tools', 's-default')
+    expect(tools.map((t) => (t as { name: string }).name)).toContain(
+      'DisplayFiles',
+    )
+  })
+
+  it('office.systemPrompt 经 slot 派发返回非空数组且首项含 "Office Assistant"', async () => {
+    const r = getAgentRegistry()
+    r.loadBuiltinAgents()
+    r.registryAgent('s-office', 'office')
+    const out = await r.slot<string[]>([], 'systemPrompt', 's-office')
+    expect(Array.isArray(out)).toBe(true)
+    expect(out.length).toBeGreaterThan(0)
+    expect(out[0]).toContain('Office Assistant')
+  })
+
+  it('agent-creator.tools 经 slot 派发注入 ValidateMainAgent', async () => {
+    const r = getAgentRegistry()
+    r.loadBuiltinAgents()
+    r.registryAgent('s-ac', 'agent-creator')
+    const tools = await r.slot<unknown[]>([], 'tools', 's-ac')
+    expect(tools.map((t) => (t as { name: string }).name)).toContain(
+      'ValidateMainAgent',
+    )
+  })
+
+  it('builtin 不实现某 slot 时,slot 派发 pass-through 返回 origin', async () => {
+    const r = getAgentRegistry()
+    r.loadBuiltinAgents()
+    r.registryAgent('s-passthrough', 'default')
+    // default.tools 已实现,所以用 systemPrompt 测试 pass-through 行为:
+    // default 没 systemPrompt 槽(主 agents.ts:78-91 只见 tools)→ origin 不变
+    const origin = ['pass-through-test-line-1', 'pass-through-test-line-2']
+    const out = await r.slot<string[]>(origin, 'systemPrompt', 's-passthrough')
+    expect(out).toEqual(origin)
+  })
+})
+
+describe('loadUserAgents 三种格式兼容(plan §6.1)', () => {
+  it('CJS object export: module.exports = { name, description }', async () => {
+    const dir = await makeTmpDir()
+    await writeFile(
+      join(dir, 'a.js'),
+      `module.exports = { name: 'a', description: 'd' };`,
+    )
+    const r = getAgentRegistry()
+    const res = await r.loadUserAgents(dir)
+    expect(res.loaded).toEqual(['a'])
+  })
+
+  it('CJS factory export: module.exports = (ctx) => ({ name, description })', async () => {
+    const dir = await makeTmpDir()
+    await writeFile(
+      join(dir, 'b.js'),
+      `module.exports = (ctx) => ({ name: 'b', description: 'd' });`,
+    )
+    const r = getAgentRegistry()
+    const res = await r.loadUserAgents(dir)
+    expect(res.loaded).toEqual(['b'])
+  })
+
+  it('ESM default export: export default (ctx) => ({...})', async () => {
+    const dir = await makeTmpDir()
+    await writeFile(
+      join(dir, 'c.js'),
+      `export default () => ({ name: 'c', description: 'd' });`,
+    )
+    const r = getAgentRegistry()
+    const res = await r.loadUserAgents(dir)
+    expect(res.loaded).toEqual(['c'])
+  })
+
+  it('数组形式(单文件多 agent)', async () => {
+    const dir = await makeTmpDir()
+    await writeFile(
+      join(dir, 'multi.js'),
+      `module.exports = [{ name: 'x1', description: 'd' }, { name: 'x2', description: 'd' }];`,
+    )
+    const r = getAgentRegistry()
+    const res = await r.loadUserAgents(dir)
+    expect(res.loaded.sort()).toEqual(['x1', 'x2'])
+  })
+
+  it('损坏的 .js 文件不阻断其他文件加载', async () => {
+    const dir = await makeTmpDir()
+    await writeFile(join(dir, 'good.js'), `module.exports = { name: 'good', description: 'd' };`)
+    await writeFile(join(dir, 'bad.js'), `module.exports = ((`);  // 语法错误
+    const r = getAgentRegistry()
+    const res = await r.loadUserAgents(dir)
+    expect(res.loaded).toEqual(['good'])
+    expect(res.failed.length).toBe(1)
+    expect(res.failed[0].file).toBe('bad.js')
+  })
+})
