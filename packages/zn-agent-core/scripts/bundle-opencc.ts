@@ -43,6 +43,17 @@ const SRC_ENTRY = join(ROOT, 'src', 'bundle-entry.ts')
 const SRC_ROOT = join(ROOT, 'src', 'opencc-src')
 // react → preact/compat shim(bundle 内联 preact 而非 react,见 src/compat/preact-shim.ts)
 const PREACT_SHIM = join(ROOT, 'src', 'compat', 'preact-shim.ts')
+// bun:bundle → bun-shim(zai patch 2026-08-29, vendor 1be705bb 半截
+// cherry-pick 重引 `import { feature } from 'bun:bundle'`)。commit
+// 67e147e7 把 90 个 vendor 文件的 `feature()` 调用内联成 `false` 字面值
+// 并删除 `bun:bundle` import,所以以前 esbuild bundle 阶段不需要
+// 处理。这次 1be705bb 从上游 cherry-pick 又带回 3 处 `feature()`
+// 调用 + import(PR #2102 的部分代码),需要 esbuild 把 `bun:bundle`
+// 重定向到 src/compat/runtime/bun-shim.ts(运行时 stub,见
+// bun-shim.ts 头部注释)。运行时 tsx 路径上 bun-protocol.mjs loader
+// 已经在做同样的事(见 vitest.config.ts:34 同样 alias);此 plugin
+// 让 esbuild bundle 阶段也覆盖到,避免 "Could not resolve 'bun:bundle'"。
+const BUN_SHIM = join(ROOT, 'src', 'compat', 'runtime', 'bun-shim.ts')
 const OUT_DIR = join(ROOT, 'dist')
 const OUT_FILE = join(OUT_DIR, 'opencc-core.mjs')
 // Stamp file holding the input hash for the last successful bundle.
@@ -1255,6 +1266,15 @@ const preactAliasPlugin: esbuild.Plugin = {
   },
 }
 
+const bunBundleAliasPlugin: esbuild.Plugin = {
+  name: 'bun-bundle-alias',
+  setup(build) {
+    build.onResolve({ filter: /^bun:bundle$/ }, (args) => {
+      return { path: BUN_SHIM }
+    })
+  },
+}
+
 // ── ink 渲染入口 stub 插件(工作块 B)───────────────────────────────
 // zai 是 Node HTTP server,无 DOM/TTY。opencc 启动交互模式会调 ink 的
 // `render(node, options)` / `createRoot(options)` 在 terminal 渲染
@@ -1384,7 +1404,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin, bunBundleAliasPlugin],
   external: [
     // sharp: native .node binary binding(zai 前端直接用 sharp 处理图片),
     // esbuild 不能 inline native binding,必须 external 留给运行时 Node 解析。
@@ -1523,7 +1543,7 @@ await esbuild.build({
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
   },
-  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin],
+  plugins: [commandImplStubPlugin, vendorPatchesPlugin, optionalStubPlugin, uiComponentStubPlugin, inkRenderStubPlugin, preactAliasPlugin, bunBundleAliasPlugin],
   external: [
     'sharp', 'google-auth-library', '@vscode/ripgrep',
     '@orama/orama', '@orama/plugin-data-persistence',

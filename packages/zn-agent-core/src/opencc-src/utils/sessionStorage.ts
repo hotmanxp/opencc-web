@@ -2091,13 +2091,6 @@ export async function recordSpeculationAccept(
   await getProject().appendEntry(entry)
 }
 
-export async function recordGoalState(
-  goal: GoalStateEntry['goal'],
-  sessionId: UUID = getSessionId() as UUID,
-) {
-  await getProject().insertGoalState(goal, sessionId)
-}
-
 /**
  * Reset the session file pointer after switchSession/regenerateSessionId.
  * The new file is created lazily on the first user/assistant message.
