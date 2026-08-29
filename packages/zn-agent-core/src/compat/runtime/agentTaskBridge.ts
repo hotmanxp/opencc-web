@@ -132,6 +132,12 @@ function terminalStatusOnRemoval(status: string): string {
  * (同步路径完成时任务被 unregisterAgentForeground 直接删除)。sessionId 由
  * getSessionIdFn 提供 (AgentTool 在 query loop 内运行,getSessionId() 返回父
  * sessionId)。
+ *
+ * zai patch: getSessionIdFn() 为 null/空时,fallback 到
+ * `globalThis.__zaiCurrentSessionId`(zai server 在 setCurrentSessionId
+ * 时同步写入,与 __zaiEventBus 同款 bridge 模式)。AgentTool 派发子代理
+ * 调 setAppState 的路径可能不在 SDK context 内(query loop 之外 / teammate
+ * spawn),原实现静默吞掉事件 → dock 看不到任务。
  */
 export function wrapTaskAwareSetState(
   setAppState: TaskAwareSetState,
@@ -150,8 +156,16 @@ export function wrapTaskAwareSetState(
     setAppState(trackingUpdater)
     // 无变化 (同引用) 或没有 tasks 键 → 无需 emit。
     if (prevTasks === nextTasks || nextTasks === undefined) return
-    const sessionId = getSessionIdFn()
-    if (typeof sessionId !== 'string' || sessionId === '') return
+    let sessionId = getSessionIdFn()
+    if (typeof sessionId !== 'string' || sessionId === '') {
+      // zai fallback: SDK context 拿不到父 sessionId 时, 借 globalThis
+      // bridge 读 zai server 维护的当前 sessionId。仍为空就放弃 emit
+      // (避免 emit sessionId=null 事件, useAgentStore.applyAgentTaskChanged
+      // 会对 null 直接 no-op, 等于浪费一次广播).
+      const fromGlobal = readZaiCurrentSessionId()
+      if (typeof fromGlobal === 'string' && fromGlobal !== '') sessionId = fromGlobal
+      else return
+    }
 
     const presentIds = new Set<string>()
     for (const [id, task] of Object.entries(nextTasks)) {
