@@ -84,6 +84,7 @@ describe('agentRegistry types', () => {
       slot: async <T>(origin: T) => origin,
       listAgents: () => [],
       hasAgent: () => false,
+      resolveAgent: () => undefined,
       getBoundAgentId: () => undefined,
       clear: () => {},
     }
@@ -150,6 +151,7 @@ export interface AgentRegistry {
   slot<T>(origin: T, slotId: AgentSlotId, sessionId: string): Promise<T>
   listAgents(): AgentConfig[]
   hasAgent(name: string): boolean
+  resolveAgent(name: string): AgentConfig | undefined         // 替代 zai-server 的 resolveMainAgent
   getBoundAgentId(sessionId: string): string | undefined
   clear(): void
 }
@@ -203,6 +205,9 @@ export class AgentRegistryImpl implements AgentRegistry {
   }
   hasAgent(name: string): boolean {
     return this.agents.has(name)
+  }
+  resolveAgent(name: string): AgentConfig | undefined {
+    return this.agents.get(name)
   }
   getBoundAgentId(sessionId: string): string | undefined {
     return this.sessionBindings.get(sessionId)
@@ -840,34 +845,54 @@ Expected: 全部构建步骤完成,`dist/opencc-core.mjs` 包含新导出
 /**
  * 主 Agent 解析(zai patch 2026-08-29)。
  *
- * 历史职责(loadUserMainAgents / resolveMainAgent / mergeMainAgents)已下沉到
- * @zn-ai/zn-agent-core 的 AgentRegistry。本文件保留 zai-server 调用方的
- * import 兼容(re-export),后续 phase 删除。
+ * 核心 loader/registry 已下沉到 @zn-ai/zn-agent-core 的 AgentRegistry。
+ * 本文件保留 zai-server 调用方需要的 import 兼容:
+ *   - `resolveMainAgent(name)` 保留 {agent, agents} 形状,内部委托给
+ *     core 的 `resolveAgent(name)` + `listAgents()`,settings UI 列
+ *     agents 列表与 agentSettings.ts:117,354 调用保持原签名。
+ *   - `mainAgentsDir()` 保留,作为 `loadUserAgents` 的默认 dir。
+ *   - `isMainAgentConfig` / `buildLoadContext` 删除(已迁 core)。
+ *   - `loadUserMainAgents` / `mergeMainAgents` 删除(已迁 core)。
  *
  * 见 docs/superpowers/specs/2026-08-29-agent-plugin-system-refactor-design.md。
  */
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-
-export {
-  loadBuiltinAgents,
-  loadUserAgents,
-  registryAgent,
-  unregistryAgent,
-  slot,
+import {
   getAgentRegistry,
-  resetAgentRegistryForTests,
-  type AgentConfig as MainAgentConfig,
-  type AgentSlotFn as MainAgentSlot,
+  type AgentConfig,
+  type MainAgentConfig,
+  type MainAgentSlot,
 } from '@zn-ai/zn-agent-core'
 
 /** 外置 agent 目录:`~/.zai/main-agents/`(保留兼容)。 */
 export function mainAgentsDir(): string {
   return join(homedir(), '.zai', 'main-agents')
 }
+
+/**
+ * 解析当前生效的主 Agent(原 {agent, agents} 形状保留)。
+ * - `name` 未传 / 未知名 → 回退 `default`
+ * - `agents` 全部已注册的 agent(供 settings UI 列列表)
+ */
+export async function resolveMainAgent(
+  name: string | undefined,
+): Promise<{ agent: AgentConfig; agents: AgentConfig[] }> {
+  const registry = getAgentRegistry()
+  const agents = registry.listAgents()
+  const resolved = name ? registry.resolveAgent(name) : undefined
+  const agent = resolved ?? registry.resolveAgent('default')
+  if (!agent) {
+    throw new Error('builtin default agent missing — loadBuiltinAgents not called?')
+  }
+  return { agent, agents }
+}
+
+// 兼容旧 import 名字
+export type { AgentConfig as MainAgentConfig, MainAgentSlot }
 ```
 
-> **删除**:原文件内 `loadUserMainAgents` / `mergeMainAgents` / `resolveMainAgent` / `isMainAgentConfig` 实现全部删除(已迁 core)。`buildLoadContext` 同。
+> **删除**:原文件内 `loadUserMainAgents` / `mergeMainAgents` / `isMainAgentConfig` / `buildLoadContext` 实现全部删除。`resolveMainAgent` 保留为薄 wrapper。
 
 - [ ] **Step 7: 跑 zai-side 现有 mainAgents 测试,确保 re-export 不破坏**
 
@@ -1186,12 +1211,26 @@ if (userRes.failed.length > 0) {
 await restoreAllSessions(agentRegistry)
 ```
 
-- [ ] **Step 4: 修改 inproc 分支(:520-660)**
+- [ ] **Step 4: 修改 inproc 分支(:520-660) + `createPrintRuntime-impl.ts:399, :446`**
 
-把 `createPrintRuntime({...mainAgent, mainAgents})` 调用中的 `mainAgent` / `mainAgents` 字段删除(vendor 不认)。`createPrintRuntimeImpl` 内部通过 Task 7/8 的 slot 接入自动应用 registry。
+把 `createPrintRuntime({...mainAgent, mainAgents})` 调用中的 `mainAgent` / `mainAgents` 字段删除(vendor 不认)。**同时**修改 `createPrintRuntime-impl.ts` 内部两处残留:
 
 ```typescript
-// 原:
+// packages/zn-agent-core/src/opencc-src/server/createPrintRuntime-impl.ts:399
+// 原:agentType: input.mainAgent
+// 改为(从 registry 取,plugin runtime hook 'startup' 仍接受 agentType 但语义弱化):
+agentType: getAgentRegistry().getBoundAgentId(input.sessionId) ?? 'default',
+
+// :446
+// 原:agent: input.mainAgent
+// 改为(取消 vendor agent 查找,vendor 走默认 systemPrompt,由 Task 7/8 的 zai slot 提前注入):
+agent: undefined,
+```
+
+`createPrintRuntimeImpl` 内部通过 Task 7/8 的 slot 接入自动应用 registry;vendor `agent` 选项关闭,避免 vendor `print.ts:4616-4655` 试图查找 filesystem agent(`'default'` 命中 builtin AgentDefinition 不是 zai 的 MainAgentConfig)。
+
+```typescript
+// agentRuntime.ts:520-660 原:
 const runtime = await createPrintRuntime({
   dataDir,
   mainAgent,
@@ -1207,7 +1246,7 @@ const runtime = await createPrintRuntime({
 
 - [ ] **Step 5: 修改 lightweight 分支(:663)**
 
-`createOpenccRuntime({...mainAgent, mainAgents})` 同删 `mainAgent` / `mainAgents`。Task 6 接入已自动通过 registry。
+`createOpenccRuntime({...mainAgent, mainAgents})` 同删 `mainAgent` / `mainAgents`。Task 6 接入已自动通过 registry。**`agentRuntime.ts:663` 处调用 `resolveMainAgent(...)` 也删除**(已下沉 core);改为 `getAgentRegistry().hasAgent(...)` 或直接依赖 `registryAgent` 早先已在 prompt 路径绑定的事实。
 
 - [ ] **Step 6: 修改 routes/agent.ts:1081-1107**
 
