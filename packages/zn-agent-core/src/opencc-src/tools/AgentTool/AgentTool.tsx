@@ -1,13 +1,9 @@
 // @ts-nocheck
+import { feature } from 'bun:bundle';
 import { statSync } from 'fs';
 import { isAbsolute } from 'path';
 import * as React from 'react';
 import { buildTool, type ToolDef, toolMatchesName } from 'src/Tool.js';
-import {
-  mirrorAppendBgEvent,
-  mirrorAttachTaskToBg,
-  mirrorFinalizeBgTask,
-} from '../../../compat/runtime/agentTaskBridge.js';
 import type { Message as MessageType, NormalizedUserMessage } from 'src/types/message.js';
 import { getQuerySourceForAgent } from 'src/utils/promptCategory.js';
 import { z } from 'zod/v4';
@@ -22,6 +18,7 @@ import { resolveAgentRunModelRouting, resolveOutOfProcessTeammateProvider, resol
 import { completeAgentTask as completeAsyncAgent, createActivityDescriptionResolver, createProgressTracker, enqueueAgentNotification, failAgentTask as failAsyncAgent, getProgressUpdate, getTokenCountFromTracker, isLocalAgentTask, killAsyncAgent, registerAgentForeground, registerAsyncAgent, unregisterAgentForeground, updateAgentProgress as updateAsyncAgentProgress, updateProgressFromMessage } from '../../tasks/LocalAgentTask/LocalAgentTask.js';
 import { checkRemoteAgentEligibility, formatPreconditionError, getRemoteTaskSessionUrl, registerRemoteAgentTask } from '../../tasks/RemoteAgentTask/RemoteAgentTask.js';
 import { assembleToolPool } from '../../tools.js';
+import { isBuiltInAgentType } from './builtInAgents.js';
 import { asAgentId } from '../../types/ids.js';
 import { runWithAgentContext } from '../../utils/agentContext.js';
 import { isAgentSwarmsEnabled } from '../../utils/agentSwarmsEnabled.js';
@@ -31,6 +28,7 @@ import { isEnvTruthy } from '../../utils/envUtils.js';
 import { AbortError, errorMessage, toError } from '../../utils/errors.js';
 import type { CacheSafeParams } from '../../utils/forkedAgent.js';
 import { lazySchema } from '../../utils/lazySchema.js';
+import { logError } from '../../utils/log.js';
 import { createUserMessage, extractTextContent, isSyntheticMessage, normalizeMessages } from '../../utils/messages.js';
 import { getAgentModel } from '../../utils/model/agent.js';
 import { resolveOutOfProcessTeammateProvider } from '../../services/api/agentRouting.js';
@@ -65,12 +63,10 @@ import type { AgentDefinition } from './loadAgentsDir.js';
 import { filterAgentsByMcpRequirements, hasRequiredMcpServers, isBuiltInAgent } from './loadAgentsDir.js';
 import { getPrompt } from './prompt.js';
 import { runAgent } from './runAgent.js';
-import { runSubagentProvider } from './subagentProviderBridge.js';
-import { getSubagentRegistry } from '../../../compat/subagents/registry.js';
 import { renderGroupedAgentToolUse, renderToolResultMessage, renderToolUseErrorMessage, renderToolUseMessage, renderToolUseProgressMessage, renderToolUseRejectedMessage, renderToolUseTag, userFacingName, userFacingNameBackgroundColor } from './UI.js';
 
 /* eslint-disable @typescript-eslint/no-require-imports */
-const proactiveModule = false || false ? require('../../proactive/index.js') as typeof import('../../proactive/index.js') : null;
+const proactiveModule = feature('PROACTIVE') || feature('KAIROS') ? require('../../proactive/index.js') as typeof import('../../proactive/index.js') : null;
 /* eslint-enable @typescript-eslint/no-require-imports */
 
 // Progress display constants (for showing background hint)
@@ -334,7 +330,7 @@ export const AgentTool = buildTool({
   aliases: [LEGACY_AGENT_TOOL_NAME],
   maxResultSizeChars: 100_000,
   async description() {
-    return 'Launch a new agent. After the agent finishes, retrieve its final result by calling TaskOutput with the returned task_id. Do not read task output files directly.';
+    return 'Launch a new agent';
   },
   get inputSchema(): InputSchema {
     return inputSchema();
@@ -390,6 +386,17 @@ export const AgentTool = buildTool({
     if (teamName && name) {
       // Set agent definition color for grouped UI display before spawning
       const agentDef = subagent_type ? toolUseContext.options.agentDefinitions.activeAgents.find(a => a.agentType === subagent_type) : undefined;
+
+      if (subagent_type) {
+        if (agentDef) {
+          if (agentDef.source === 'built-in') {
+            throw new Error(`Built-in agent type '${subagent_type}' cannot be spawned as a teammate. Please omit name and team_name to use it as a standard subagent.`);
+          }
+        } else if (isBuiltInAgentType(subagent_type)) {
+          throw new Error(`Built-in agent type '${subagent_type}' cannot be spawned as a teammate. Please omit name and team_name to use it as a standard subagent.`);
+        }
+      }
+
       if (agentDef?.color) {
         setAgentColor(subagent_type!, agentDef.color);
       }
@@ -470,39 +477,6 @@ export const AgentTool = buildTool({
     // - subagent_type omitted, gate off: default general-purpose
     const effectiveType = subagent_type ?? (isForkSubagentEnabled() ? undefined : GENERAL_PURPOSE_AGENT.agentType);
     const isForkPath = effectiveType === undefined;
-
-    // Phase A3: subagent provider routing. When `subagent_type` matches a
-    // registered SubagentProvider (e.g. 'codex'), bypass the fork / built-in
-    // lookup entirely. The provider supplies its own process lifecycle,
-    // event stream, and result mapping — see `subagentProviderBridge.ts`
-    // for the contract (mirror* events, signal forwarding, cast through
-    // Output). Tree-only addition; existing branches below are untouched.
-    //
-    // Precedence note: a registered provider name shadows any
-    // AgentDefinition (built-in / custom / plugin) of the same name. Today
-    // there's no collision (`codex` / `claude-code` aren't shipped as
-    // AgentDefinitions), but if one is added later, this check wins.
-    // Provider descriptions are surfaced to the model via `prompt.ts`
-    // (`subagentProviderSection`) so the model can self-route.
-    if (effectiveType) {
-      const subagentProvider = getSubagentRegistry().getProvider(effectiveType)
-      if (subagentProvider) {
-        const providerOutput = await runSubagentProvider({
-          provider: subagentProvider,
-          description,
-          prompt,
-          ...(cwd ? { cwd } : {}),
-          ...(model !== undefined ? { model } : {}),
-          signal: toolUseContext.abortController.signal,
-        })
-        return {
-          data: providerOutput as unknown as Output,
-        } as unknown as {
-          data: Output;
-        }
-      }
-    }
-
     let selectedAgent: AgentDefinition;
     if (isForkPath) {
       // Recursive fork guard: fork children keep the Agent tool in their
@@ -764,7 +738,7 @@ export const AgentTool = buildTool({
     // executeForkedSlashCommand's fire-and-forget path; the
     // <task-notification> re-entry there is handled by the else branch
     // below (registerAsyncAgentTask + notifyOnCompletion).
-    const assistantForceAsync = false ? appState.kairosEnabled : false;
+    const assistantForceAsync = feature('KAIROS') ? appState.kairosEnabled : false;
     const shouldRunAsync = (run_in_background === true || selectedAgent.background === true || isCoordinator || forceAsync || assistantForceAsync || (proactiveModule?.isProactiveActive() ?? false)) && !isBackgroundTasksDisabled;
     // Assemble the worker's tool pool independently of the parent's.
     // Workers always get their tools from assembleToolPool with their own
@@ -907,6 +881,7 @@ export const AgentTool = buildTool({
           // present so resume can still land in the target repository.
           void writeAgentMetadata(asAgentId(earlyAgentId), {
             agentType: selectedAgent.agentType,
+            source: selectedAgent.source,
             ...(cwd && { cwd }),
             ...(description && { description }),
           }).catch(_err => logForDebugging(`Failed to clear worktree metadata: ${_err}`));
@@ -931,20 +906,6 @@ export const AgentTool = buildTool({
         // survive when the user presses ESC to cancel the main thread.
         // They are killed explicitly via chat:killAgents.
         toolUseId: toolUseContext.toolUseId
-      });
-      // zai patch: 把子代理登记到 DefaultBackgroundRuntime 让抽屉 SSE timeline
-      // 能拿到 per-task 事件流(zai Web `subscribeTaskEvents` → events(id))。
-      // attach 不调度执行 —— AgentTool 自己跑 runAgent 循环,后续通过
-      // mirrorAppendBgEvent 推送每个 yielded Message。
-      void mirrorAttachTaskToBg({
-        id: asyncAgentId,
-        input: { prompt, cwd: toolUseContext.options.isNonInteractiveSession ? process.cwd() : getCwd(), agent: selectedAgent.agentType, model: model ?? toolUseContext.options.mainLoopModel },
-        metadata: {
-          parentSessionId: getParentSessionId(),
-          agentType: selectedAgent.agentType,
-          description,
-          ...(name ? { agentName: name } : {}),
-        },
       });
 
       // Register name → agentId for SendMessage routing. Post-registerAsyncAgent
@@ -1078,18 +1039,6 @@ export const AgentTool = buildTool({
             type: 'background' as const
           }));
           cancelAutoBackground = registration.cancelAutoBackground;
-          // zai patch: 同步 (foreground) 子代理同样登记到 DefaultBackgroundRuntime,
-          // 让抽屉 SSE timeline 能跟着 sub-agent 的 tool_use 流走完。
-          void mirrorAttachTaskToBg({
-            id: syncAgentId,
-            input: { prompt, cwd: getCwd(), agent: selectedAgent.agentType, model: model ?? toolUseContext.options.mainLoopModel },
-            metadata: {
-              parentSessionId: getParentSessionId(),
-              agentType: selectedAgent.agentType,
-              description,
-              ...(name ? { agentName: name } : {}),
-            },
-          });
         }
 
         // Track if we've shown the background hint UI
@@ -1337,19 +1286,21 @@ export const AgentTool = buildTool({
                   updateAsyncAgentProgress(foregroundTaskId, getProgressUpdate(syncTracker), rootSetAppState);
                 }
               }
-              // zai patch: 推给 DefaultBackgroundRuntime 让抽屉 SSE timeline
-              // 看到每个 tool_use / assistant message。appendTaskEvent 在
-              // BackgroundRuntime 未初始化时内部 try/catch 静默回退。
-              void mirrorAppendBgEvent(foregroundTaskId, message as { type: string; [k: string]: unknown });
             }
 
-            // Forward bash_progress events from sub-agent to parent so the SDK
-            // receives tool_progress events just as it does for the main agent.
-            if (message.type === 'progress' && (message.data.type === 'bash_progress' || message.data.type === 'powershell_progress') && onProgress) {
-              onProgress({
-                toolUseID: message.toolUseID,
-                data: message.data
-              });
+            // Forward progress from long-running sub-agent tools so the parent
+            // query remains active while the child is doing bounded work.
+            if (message.type === 'progress' && (message.data.type === 'bash_progress' || message.data.type === 'powershell_progress' || message.data.type === 'mcp_progress' || message.data.type === 'waiting_for_task') && onProgress) {
+              try {
+                onProgress({
+                  toolUseID: message.toolUseID,
+                  data: message.data
+                });
+              } catch (error) {
+                // A throwing parent progress consumer must not become
+                // syncAgentError and change the subagent outcome.
+                logError(error);
+              }
             }
             if (message.type !== 'assistant' && message.type !== 'user') {
               continue;
@@ -1425,16 +1376,6 @@ export const AgentTool = buildTool({
           // Unregister foreground task if agent completed without being backgrounded
           if (foregroundTaskId) {
             unregisterAgentForeground(foregroundTaskId, rootSetAppState);
-            // zai patch: 同步镜像终态到 DefaultBackgroundRuntime。LocalAgentTask
-            // unregister 后从 appState.tasks 删掉,但 BG Runtime 的 record 留着
-            // — 抽屉 SSE 重连 / 关闭重开 仍能回放历史事件,然后读到终态完成流。
-            void mirrorFinalizeBgTask(
-              foregroundTaskId,
-              syncAgentError ? 'failed' : wasAborted ? 'cancelled' : 'completed',
-              syncAgentError
-                ? { message: syncAgentError.message, category: 'internal' }
-                : undefined,
-            );
             // Notify SDK consumers (e.g. VS Code subagent panel) that this
             // foreground agent is done. Goes through drainSdkEvents() — does
             // NOT trigger the print.ts XML task_notification parser or the LLM loop.
@@ -1616,40 +1557,6 @@ The agent is now running and will receive instructions via mailbox.`
       };
     }
     if (data.status === 'completed') {
-      // zai patch (2026-08-21): SubagentProvider 输出(SubagentProviderOutput,
-      // subagentProviderBridge.ts)是独立于 fork/built-in Output 的 completed
-      // 结果:只携带 status/agentType/prompt/text/stopReason/errorMessage,没有
-      // content/agentId/totalTokens 等内置子代理字段。旧的 completed 分支硬编码
-      // 访问 data.content.length,provider 输出走到这直接抛
-      // "Cannot read properties of undefined (reading 'length')",整个
-      // tool_result 被上层吞成一行错误字符串,模型看不见真实结果。
-      // 这里按形状区分:built-in Output 一定有 content 数组(agentToolUtils.ts
-      // agentToolResultSchema),provider 输出没有 content 但有 string text。
-      const completedData = data as Record<string, unknown>;
-      if (!Array.isArray(completedData.content) && typeof completedData.text === 'string') {
-        const providerText = completedData.text as string;
-        const providerAgentType = typeof completedData.agentType === 'string' ? completedData.agentType : undefined;
-        const stopReason = completedData.stopReason;
-        const errorMessage = typeof completedData.errorMessage === 'string' ? completedData.errorMessage : undefined;
-        // 失败(非 completed stopReason)时不要拿空 text 冒充成功;让父代理看到
-        // stopReason + errorMessage,避免它基于空结果继续瞎猜。
-        const isProviderError = stopReason !== undefined && stopReason !== 'completed';
-        const body = isProviderError
-          ? '(Subagent provider finished without a result.)'
-          : (providerText || '(Subagent provider completed but returned no output.)');
-        const meta = [
-          providerAgentType ? `provider: ${providerAgentType}` : '',
-          stopReason !== undefined && stopReason !== 'completed' ? `stopReason: ${String(stopReason)}` : '',
-          errorMessage ? `errorMessage: ${errorMessage}` : '',
-        ].filter(Boolean).join('\n');
-        return {
-          tool_use_id: toolUseID,
-          type: 'tool_result',
-          content: meta
-            ? [{ type: 'text' as const, text: body }, { type: 'text' as const, text: meta }]
-            : [{ type: 'text' as const, text: body }],
-        };
-      }
       const worktreeData = data as Record<string, unknown>;
       const worktreeInfoText = worktreeData.worktreePath ? `\nworktreePath: ${worktreeData.worktreePath}\nworktreeBranch: ${worktreeData.worktreeBranch}` : '';
       const isolationFallbackText = worktreeData.worktreeIsolationFallback

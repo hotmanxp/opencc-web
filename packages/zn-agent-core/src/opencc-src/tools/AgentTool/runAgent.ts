@@ -1,6 +1,6 @@
 // @ts-nocheck
-import { subagentReportOpenccTool } from '../../../compat/tools/opencc/subagentReport.js'
 import { AGENT_INSTRUCTIONS_FILE } from '../../constants/product.js'
+import { feature } from 'bun:bundle'
 import type { UUID } from 'crypto'
 import { randomUUID } from 'crypto'
 import uniqBy from 'lodash-es/uniqBy.js'
@@ -722,16 +722,10 @@ export async function* runAgent({
   // Merge agent MCP tools with resolved agent tools, deduplicating by name.
   // resolvedTools is already deduplicated (see resolveAgentTools), so skip
   // the spread + uniqBy overhead when there are no agent-specific MCP tools.
-  // zai patch: 子 agent 可主动向父 session 上报进度或结果(对齐 DSH tool-subagent-report)。
-  // 仅在子上下文中追加,避免主会话把异步 inbox 投递工具暴露给用户。
-  // 必须用 vendor 表面版本(subagentReportOpenccTool):裸 execute 形状缺
-  // vendor Tool 必需方法(prompt 等),首轮 API 请求 toolToAPISchema 会抛
-  // `tool.prompt is not a function`,子代理直接失败、任务永远 queued。
-  const allTools = [
-    ...resolvedTools,
-    subagentReportOpenccTool,
-    ...(agentMcpTools.length > 0 ? uniqBy(agentMcpTools, 'name') : []),
-  ]
+  const allTools =
+    agentMcpTools.length > 0
+      ? uniqBy([...resolvedTools, ...agentMcpTools], 'name')
+      : resolvedTools
 
   // Build agent-specific options
   const agentOptions: ToolUseContext['options'] = {
@@ -772,7 +766,6 @@ export async function* runAgent({
     options: agentOptions,
     agentId,
     agentType: agentDefinition.agentType,
-    parentSessionId: toolUseContext.parentSessionId ?? getSessionId(),
     messages: initialMessages,
     readFileState: agentReadFileState,
     abortController: agentAbortController,
@@ -804,21 +797,36 @@ export async function* runAgent({
     })
   }
 
-  // Record initial messages before the query loop starts, plus the agentType
-  // so resume can route correctly when subagent_type is omitted. Both writes
-  // are fire-and-forget — persistence failure shouldn't block the agent.
-  void recordSidechainTranscript(initialMessages, agentId).catch(_err =>
-    logForDebugging(`Failed to record sidechain transcript: ${_err}`),
-  )
-  void writeAgentMetadata(agentId, {
-    agentType: agentDefinition.agentType,
-    ...(worktreePath && { worktreePath }),
-    // Keep explicit cwd even when a worktree exists so resume can fall back
-    // to the child repo if the worktree is later removed.
-    ...(cwd && { cwd }),
-    ...(description && { description }),
-  }).catch(_err => logForDebugging(`Failed to write agent metadata: ${_err}`))
+  // Record agentType and identity metadata so resume can route correctly.
+  // This must be awaited before writing the initial transcript so that any
+  // resume attempt reading the transcript is guaranteed to find the metadata.
+  let metadataWritten = false
+  try {
+    await writeAgentMetadata(agentId, {
+      agentType: agentDefinition.agentType,
+      source: agentDefinition.source,
+      ...(worktreePath && { worktreePath }),
+      // Keep explicit cwd even when a worktree exists so resume can fall back
+      // to the child repo if the worktree is later removed.
+      ...(cwd && { cwd }),
+      ...(description && { description }),
+    })
+    metadataWritten = true
+  } catch (_err) {
+    logForDebugging(`Failed to write agent metadata: ${_err}`)
+  }
 
+  // Record initial messages before the query loop starts.
+  // Fire-and-forget — persistence failure shouldn't block the agent.
+  // Only write the transcript if identity metadata was successfully persisted,
+  // ensuring we never leave a transcript that would resume without its restricted identity.
+  if (metadataWritten) {
+    void recordSidechainTranscript(initialMessages, agentId).catch(_err =>
+      logForDebugging(`Failed to record sidechain transcript: ${_err}`),
+    )
+  } else {
+    logForDebugging('Skipping initial transcript write because identity metadata persistence failed')
+  }
   // Track the last recorded message UUID for parent chain continuity
   let lastRecordedUuid: UUID | null = initialMessages.at(-1)?.uuid ?? null
 
@@ -885,13 +893,16 @@ export async function* runAgent({
 
         if (isRecordableMessage(message)) {
           // Record only the new message with correct parent (O(1) per message)
-          await recordSidechainTranscript(
-            [message],
-            agentId,
-            lastRecordedUuid,
-          ).catch(err =>
-            logForDebugging(`Failed to record sidechain transcript: ${err}`),
-          )
+          // Only write if identity metadata was successfully persisted.
+          if (metadataWritten) {
+            await recordSidechainTranscript(
+              [message],
+              agentId,
+              lastRecordedUuid,
+            ).catch(err =>
+              logForDebugging(`Failed to record sidechain transcript: ${err}`),
+            )
+          }
           if (message.type !== 'progress') {
             lastRecordedUuid = message.uuid
           }
