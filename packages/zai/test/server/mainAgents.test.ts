@@ -1,19 +1,23 @@
 import { mkdtemp, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
-import { afterEach, describe, expect, it, vi } from 'vitest'
+import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { mainAgentsDir, resolveMainAgent } from '../../src/server/services/mainAgents.js'
 import {
-  loadUserMainAgents,
-  mainAgentsDir,
-  mergeMainAgents,
-  resolveMainAgent,
-} from '../../src/server/services/mainAgents.js'
-import { getBuiltinMainAgents, type MainAgentConfig } from '@zn-ai/zn-agent-core'
+  getAgentRegistry,
+  resetAgentRegistryForTests,
+  type MainAgentConfig,
+} from '@zn-ai/zn-agent-core'
 
 let cleanupDirs: string[] = []
 afterEach(() => {
   cleanupDirs = []
-  vi.restoreAllMocks()
+  resetAgentRegistryForTests()
+})
+
+beforeEach(() => {
+  // 每个 case 拿全新实例,避免 singleton 跨 case 串扰
+  resetAgentRegistryForTests()
 })
 
 async function makeTmpDir(): Promise<string> {
@@ -22,10 +26,18 @@ async function makeTmpDir(): Promise<string> {
   return dir
 }
 
-describe('loadUserMainAgents', () => {
-  it('returns [] when dir is missing', async () => {
-    const dir = join(tmpdir(), `main-agents-missing-${Date.now()}`)
-    expect(await loadUserMainAgents(dir)).toEqual([])
+describe('mainAgentsDir', () => {
+  it('returns ~/.zai/main-agents', () => {
+    expect(mainAgentsDir()).toMatch(/\.zai\/main-agents$/)
+  })
+})
+
+describe('AgentRegistry.loadUserAgents (core)', () => {
+  it('returns empty when dir is missing', async () => {
+    const r = getAgentRegistry()
+    const res = await r.loadUserAgents(join(tmpdir(), `main-agents-missing-${Date.now()}`))
+    expect(res.loaded).toEqual([])
+    expect(res.failed).toEqual([])
   })
 
   it('loads a single CJS agent file', async () => {
@@ -39,12 +51,14 @@ describe('loadUserMainAgents', () => {
       }`,
       'utf-8',
     )
-    const agents = await loadUserMainAgents(dir)
-    expect(agents).toHaveLength(1)
-    expect(agents[0].name).toBe('my-assistant')
-    expect(agents[0].systemPrompt).toBeTypeOf('function')
-    // 插槽函数真实可调用
-    expect(agents[0].systemPrompt!(['base'])).toEqual([
+    const r = getAgentRegistry()
+    const res = await r.loadUserAgents(dir)
+    expect(res.loaded).toEqual(['my-assistant'])
+    expect(res.failed).toEqual([])
+    const agent = r.resolveAgent('my-assistant')
+    expect(agent).toBeTruthy()
+    expect(agent!.slots.systemPrompt).toBeTypeOf('function')
+    expect(agent!.slots.systemPrompt!(['base'])).toEqual([
       '你是我的私人助手。',
       'base',
     ])
@@ -60,8 +74,9 @@ describe('loadUserMainAgents', () => {
       ]`,
       'utf-8',
     )
-    const agents = await loadUserMainAgents(dir)
-    expect(agents.map((a) => a.name).sort()).toEqual(['a', 'b'])
+    const r = getAgentRegistry()
+    const res = await r.loadUserAgents(dir)
+    expect(res.loaded.sort()).toEqual(['a', 'b'])
   })
 
   it('skips invalid exports and keeps valid ones', async () => {
@@ -76,8 +91,10 @@ describe('loadUserMainAgents', () => {
       `module.exports = { name: 'good', description: 'ok' }`,
       'utf-8',
     )
-    const agents = await loadUserMainAgents(dir)
-    expect(agents.map((a) => a.name)).toEqual(['good'])
+    const r = getAgentRegistry()
+    const res = await r.loadUserAgents(dir)
+    expect(res.loaded).toEqual(['good'])
+    expect(res.failed.map((f) => f.file)).toEqual(['bad.js'])
   })
 
   it('external agent can create its own tool via the (ctx) factory', async () => {
@@ -106,12 +123,13 @@ describe('loadUserMainAgents', () => {
        }`,
       'utf-8',
     )
-    const agents = await loadUserMainAgents(dir)
-    expect(agents).toHaveLength(1)
-    const greeter = agents[0]
-    expect(greeter.tools).toBeTypeOf('function')
-    // 应用 tools 槽:池尾部出现自定义 Greet 工具,且真实可调用
-    const pool = greeter.tools!([{ name: 'Read' }] as never)
+    const r = getAgentRegistry()
+    const res = await r.loadUserAgents(dir)
+    expect(res.loaded).toEqual(['greeter'])
+    const greeter = r.resolveAgent('greeter')
+    expect(greeter).toBeTruthy()
+    expect(greeter!.slots.tools).toBeTypeOf('function')
+    const pool = greeter!.slots.tools!([{ name: 'Read' }] as never)
     const greet = pool.find(
       (t) => t.name === 'Greet',
     ) as { call: (input: { name: string }) => Promise<{ greeting: string }> }
@@ -127,42 +145,41 @@ describe('loadUserMainAgents', () => {
       `module.exports = { name: 'legacy', description: '直接导出对象' }`,
       'utf-8',
     )
-    const agents = await loadUserMainAgents(dir)
-    expect(agents.map((a) => a.name)).toEqual(['legacy'])
+    const r = getAgentRegistry()
+    const res = await r.loadUserAgents(dir)
+    expect(res.loaded).toEqual(['legacy'])
   })
 })
 
-describe('mergeMainAgents', () => {
-  it('user agents override builtin on name collision', () => {
-    const builtin: MainAgentConfig[] = [
-      { name: 'default', description: 'builtin default' },
-      { name: 'office', description: 'builtin office' },
-    ]
-    const user: MainAgentConfig[] = [
-      { name: 'office', description: 'custom office override' },
-      { name: 'custom', description: 'user agent' },
-    ]
-    const merged = mergeMainAgents(builtin, user)
-    expect(merged.find((a) => a.name === 'office')?.description).toBe(
-      'custom office override',
+describe('user agents override builtin on name collision', () => {
+  it('loadUserAgents 后同名 builtin 被覆盖', async () => {
+    const r = getAgentRegistry()
+    r.loadBuiltinAgents()
+    const dir = await makeTmpDir()
+    await writeFile(
+      join(dir, 'override.js'),
+      `module.exports = { name: 'office', description: 'custom office override' };`,
+      'utf-8',
     )
-    expect(merged.find((a) => a.name === 'custom')).toBeTruthy()
-    // default 保留内置
-    expect(merged.find((a) => a.name === 'default')?.description).toBe(
-      'builtin default',
-    )
+    await r.loadUserAgents(dir)
+    expect(r.resolveAgent('office')!.description).toBe('custom office override')
+    // default 不被覆盖,仍为 builtin
+    expect(r.resolveAgent('default')!.description).not.toBe('custom office override')
   })
 })
 
-describe('resolveMainAgent', () => {
+describe('resolveMainAgent (zai-side thin wrapper)', () => {
   it('resolves a user agent by name', async () => {
+    const r = getAgentRegistry()
+    r.loadBuiltinAgents()
     const dir = await makeTmpDir()
     await writeFile(
       join(dir, 'custom.js'),
       `module.exports = { name: 'custom', description: 'user agent' }`,
       'utf-8',
     )
-    const { agent, agents } = await resolveMainAgent('custom', dir)
+    await r.loadUserAgents(dir)
+    const { agent, agents } = await resolveMainAgent('custom')
     expect(agent.name).toBe('custom')
     // 列表包含内置 + 外置
     expect(agents.some((a) => a.name === 'default')).toBe(true)
@@ -171,20 +188,35 @@ describe('resolveMainAgent', () => {
   })
 
   it('falls back to default for unknown name', async () => {
-    const dir = await makeTmpDir()
-    const { agent } = await resolveMainAgent('nope', dir)
+    const r = getAgentRegistry()
+    r.loadBuiltinAgents()
+    const { agent } = await resolveMainAgent('nope')
     expect(agent.name).toBe('default')
   })
 
   it('falls back to default when name is undefined', async () => {
+    const r = getAgentRegistry()
+    r.loadBuiltinAgents()
     const { agent } = await resolveMainAgent(undefined)
     expect(agent.name).toBe('default')
+  })
+
+  it('auto-loads builtin agents when registry is empty (idempotent fallback)', async () => {
+    // zai-side 兜底:不调 loadBuiltinAgents 也能拿到 default,避免设置类
+    // 路由(agentSettings)在没经过 initAgentRuntime 时 500。
+    const r = getAgentRegistry()
+    expect(r.listAgents()).toHaveLength(0)
+    const { agent } = await resolveMainAgent(undefined)
+    expect(agent.name).toBe('default')
+    expect(r.listAgents().length).toBeGreaterThan(0)
   })
 })
 
 describe('builtin agents (core)', () => {
   it('getBuiltinMainAgents exposes default + office + agent-creator', () => {
-    const builtin = getBuiltinMainAgents()
+    // 通过 internal import 复用 core 类型断言,不影响 thin wrapper 测试路径
+    const builtin = (require('@zn-ai/zn-agent-core') as { getBuiltinMainAgents(): MainAgentConfig[] })
+      .getBuiltinMainAgents()
     const names = builtin.map((a) => a.name)
     expect(names).toContain('default')
     expect(names).toContain('office')
@@ -218,9 +250,9 @@ describe('builtin agents (core)', () => {
   })
 
   it('office system prompt strips coding-oriented sections, keeps base mechanics', () => {
-    const office = getBuiltinMainAgents().find(
-      (a) => a.name === 'office',
-    )!
+    const builtin = (require('@zn-ai/zn-agent-core') as { getBuiltinMainAgents(): MainAgentConfig[] })
+      .getBuiltinMainAgents()
+    const office = builtin.find((a) => a.name === 'office')!
     const origin = [
       'You are an interactive agent that helps users with software engineering tasks. Use the instructions below and the tools available to you to assist the user. Only create URLs for programming help.',
       '# System\nTools are executed in a user-selected permission mode. If the user denies a tool you call, adjust your approach.',
@@ -243,9 +275,9 @@ describe('builtin agents (core)', () => {
   })
 
   it('agent-creator carries the full external-agent spec in its system prompt', () => {
-    const creator = getBuiltinMainAgents().find(
-      (a) => a.name === 'agent-creator',
-    )!
+    const builtin = (require('@zn-ai/zn-agent-core') as { getBuiltinMainAgents(): MainAgentConfig[] })
+      .getBuiltinMainAgents()
+    const creator = builtin.find((a) => a.name === 'agent-creator')!
     expect(creator.systemPrompt).toBeTypeOf('function')
     expect(creator.tools).toBeTypeOf('function')
     const prompt = creator.systemPrompt!(['base'])[0]

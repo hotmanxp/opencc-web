@@ -98,3 +98,26 @@ export type {
   MainAgentLoadContext,
   MainAgentSlot,
 } from './mainAgents.js'
+
+// zai patch (2026-08-29): Agent 插件系统 registry —— 单例由 core 持有,
+// zai-server 启动时 loadBuiltinAgents + loadUserAgents;session 生命周期
+// 经 registryAgent / unregistryAgent;socket 派发走 slot()。bundle-entry
+// 走本 barrel re-export 是为了绕开 bundle-opencc 的
+// assertDtsTargetsResolve 检查(它在 tsconfig.server.json 的 tsc emit
+// 之前运行,直接指 ./agentRegistry.js 会撞"目标无 d.ts"校验)。
+export {
+  getAgentRegistry,
+  resetAgentRegistryForTests,
+  AgentRegistryImpl,
+} from './agentRegistry.js'
+export type {
+  AgentConfig,
+  AgentSlotId,
+  AgentSlotFn,
+  AgentRegistry,
+  LoadUserAgentsResult,
+  AgentRegistryError,
+  UnknownAgentError,
+  AgentNotBoundError,
+  BuiltinAgentsLoadError,
+} from './agentRegistry.js'

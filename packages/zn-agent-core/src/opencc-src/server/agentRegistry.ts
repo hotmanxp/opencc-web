@@ -203,3 +203,19 @@ function buildLoadContext(): MainAgentLoadContext {
     z: core.z,
   } as MainAgentLoadContext
 }
+
+// ---------------------------------------------------------------------------
+// 单例工厂(zai patch 2026-08-29):agent 插件系统 registry 由 core 持有,
+// zai-server 启动时 loadBuiltinAgents + loadUserAgents;session 生命周期
+// 经 registryAgent / unregistryAgent;socket 派发走 slot()。reset 函数仅
+// 供测试使用 —— 服务进程内应始终拿到同一份实例,跨进程实例不共享。
+// 见 docs/superpowers/specs/2026-08-29-agent-plugin-system-refactor-design.md。
+// ---------------------------------------------------------------------------
+let singleton: AgentRegistryImpl | null = null
+export function getAgentRegistry(): AgentRegistryImpl {
+  if (!singleton) singleton = new AgentRegistryImpl()
+  return singleton
+}
+export function resetAgentRegistryForTests(): void {
+  singleton = null
+}

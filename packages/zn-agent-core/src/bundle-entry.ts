@@ -36,6 +36,29 @@ export {
 // 之前运行,直接指向 mainAgents.js 会撞"目标无 d.ts"校验;index.js 的
 // re-export 链由 server 项目 transitive emit 补齐。
 export { getBuiltinMainAgents } from './opencc-src/server/index.js'
+// zai patch (2026-08-29): Agent 插件系统 registry —— 单例由 core 持有,
+// zai-server 启动时 loadBuiltinAgents + loadUserAgents;session 生命周期
+// 经 registryAgent / unregistryAgent;socket 派发走 slot()。bundle-entry
+// 走 server/index.js barrel(避开 assertDtsTargetsResolve 在 tsc 之前的
+// "目标无 d.ts" 校验;dist/opencc-src/server/index.d.ts 在主 emit 后
+// 会包含 agentRegistry 的 re-export)。见
+// docs/superpowers/specs/2026-08-29-agent-plugin-system-refactor-design.md。
+export {
+  getAgentRegistry,
+  resetAgentRegistryForTests,
+  AgentRegistryImpl,
+} from './opencc-src/server/index.js'
+export type {
+  AgentConfig,
+  AgentSlotId,
+  AgentSlotFn,
+  AgentRegistry,
+  LoadUserAgentsResult,
+  AgentRegistryError,
+  UnknownAgentError,
+  AgentNotBoundError,
+  BuiltinAgentsLoadError,
+} from './opencc-src/server/index.js'
 // zai patch:DisplayFiles 前端展示通道 —— wrapper JSON 按 toolUseId 暂存,
 // zai server 转发 runtime.tool_result 时从主入口取出(见
 // routes/agent.ts translateRuntimeEvents 的 tool_use:done case)。
