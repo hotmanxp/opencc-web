@@ -118,11 +118,21 @@ export class AgentRegistryImpl implements AgentRegistry {
     }
     return { loaded, failed }
   }
-  registryAgent(_sessionId: string, _agentId: string): void {
-    throw new Error('not implemented')
+  registryAgent(sessionId: string, agentId: string): void {
+    if (!this.agents.has(agentId)) {
+      throw new UnknownAgentError(agentId)
+    }
+    const existing = this.sessionBindings.get(sessionId)
+    if (existing === agentId) {
+      return // 幂等
+    }
+    if (existing !== undefined) {
+      // 覆盖,可加 console.debug;默认静默
+    }
+    this.sessionBindings.set(sessionId, agentId)
   }
-  unregistryAgent(_sessionId: string): void {
-    throw new Error('not implemented')
+  unregistryAgent(sessionId: string): void {
+    this.sessionBindings.delete(sessionId)
   }
   slot<T>(_origin: T, _slotId: AgentSlotId, _sessionId: string): Promise<T> {
     throw new Error('not implemented')
