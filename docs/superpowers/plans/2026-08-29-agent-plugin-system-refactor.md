@@ -448,13 +448,22 @@ function toAgentConfig(c: MainAgentConfig): AgentConfig {
 }
 
 function buildLoadContext(): MainAgentLoadContext {
+  // 走包名 require '@zn-ai/zn-agent-core' 解析到 dist/opencc-core.mjs,
+  // 拿 buildTool / z 等运行时符号。理由:createRequire 不挂 tsx loader,
+  // ./mainAgents.js 在磁盘不存在(只有 .ts);mainAgents.ts 仅 type-only import
+  // Tool,未 runtime re-export buildTool/z,所以 self-require 拿不到。
+  // 与 zai-server packages/zai/src/server/services/mainAgents.ts:45
+  // 同名 helper 等价,语义一致。
   const requireFromCore = createRequire(import.meta.url)
-  const core = requireFromCore('./mainAgents.js') as { buildTool?: unknown; z?: unknown }
-  return core as MainAgentLoadContext
+  const core = requireFromCore('@zn-ai/zn-agent-core') as Partial<MainAgentLoadContext>
+  return {
+    buildTool: core.buildTool,
+    z: core.z,
+  } as MainAgentLoadContext
 }
 ```
 
-> **关于 ctx**:core 内 `createRequire(import.meta.url)` 解析 `./mainAgents.js` 与 `MainAgentLoadContext` 同包,无需跨包。`buildTool` / `z` 已在 `MainAgentLoadContext` 类型定义中,本任务不重新实现。
+> **关于 ctx**:core 内走包名 self-require,等价于 zai-server `packages/zai/src/server/services/mainAgents.ts:45` 现有实现(`@zn-ai/zn-agent-core` 包名解析到 `dist/opencc-core.mjs`)。如果未来想"core 不依赖自身 dist",需在 `mainAgents.ts` 真正 re-export `buildTool`/`z`,再把 `buildLoadContext` 改成 `await import('./mainAgents.js')` async 形式 —— 那是独立重构,不在本期范围。
 
 - [ ] **Step 4: Run test to verify it passes**
 
@@ -826,6 +835,8 @@ export type {
   BuiltinAgentsLoadError,
 } from './opencc-src/server/agentRegistry.js'
 ```
+
+**追加**:把 `packages/zn-agent-core/tsconfig.server.json` 的 `include` 列表加上 `"src/opencc-src/server/agentRegistry.ts"`,否则 `dist/opencc-src/server/agentRegistry.d.ts` 不会被机械发射,Task 5/9 zai-server 端无法 import 类型。位置:在 line 41 `"src/opencc-src/server/mainAgents.ts"` 之后追加。
 
 - [ ] **Step 4: Run core test to verify**
 
