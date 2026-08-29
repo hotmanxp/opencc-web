@@ -30,6 +30,13 @@
  */
 import { randomUUID } from 'node:crypto'
 import { createHeadlessContextImpl } from './createHeadlessContext-impl.js'
+// zai patch (2026-08-29, plan §3.7.2): inproc 链路 systemPrompt 槽走
+// AgentRegistry。base 用 vendor getSystemPrompt(tools, model) 拼,sync 查
+// 绑定 agent 的 systemPrompt 槽 fn,joined string 作为 options.systemPrompt
+// 传给 runHeadless(vendor print.ts:480)。
+// barrel re-export 同 Task 6 模式(避开 esbuild minify TDZ)。
+import { getAgentRegistry } from './index.js'
+import { getSystemPrompt } from '../constants/prompts.js'
 import { createSessionFacadeImpl } from './sessionFacade-impl.js'
 import { startHeadlessPrintSession } from './headlessPrintSession.js'
 import { translateSdkToRuntime } from '../../compat/runtime/sdkEventAdapter.js'
@@ -437,7 +444,35 @@ export async function createPrintRuntimeImpl(options) {
         maxTurns: undefined,
         maxBudgetUsd: undefined,
         taskBudget: undefined,
-        systemPrompt: undefined,
+        // zai patch (2026-08-29, plan §3.7.2): systemPrompt 槽走
+        // AgentRegistry。base 用 vendor getSystemPrompt 拼(tools +
+        // mainLoopModel + additionalWorkingDirectories + mcpClients),
+        // 按 sessionId 查绑定 agent 的 systemPrompt 槽 fn(origin, sid)
+        // sync 派发,joined string 喂给 runHeadless。无 agent 绑定或无
+        // 槽 → pass-through,行为与原"systemPrompt: undefined"(vendor
+        // 走 default getSystemPrompt 路径)等价。
+        systemPrompt: await (async () => {
+          try {
+            const basePrompt = await getSystemPrompt(
+              ctx.tools,
+              ctx.appState.getState().mainLoopModel as string,
+              [],
+              ctx.mcp.clients,
+            )
+            const reg = getAgentRegistry()
+            const agentName = reg.getBoundAgentId(sessionId)
+            if (!agentName) return undefined
+            const agent = reg.resolveAgent(agentName)
+            const fn = agent?.slots?.systemPrompt as
+              | ((o: string[], s: string) => string[] | Promise<string[]>)
+              | undefined
+            if (!fn) return undefined
+            const enriched = await fn(basePrompt, sessionId)
+            return enriched.join('\n')
+          } catch {
+            return undefined
+          }
+        })(),
         appendSystemPrompt: undefined,
         userSpecifiedModel: options.defaultModel,
         fallbackModel: undefined,
