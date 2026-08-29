@@ -329,6 +329,9 @@ export async function createPrintRuntimeImpl(options) {
         isInteractive: options.interactive ?? true,
         permissionMode:
           input.permissionMode ?? options.permissionMode ?? 'bypassPermissions',
+        // zai patch (2026-08-29, plan §A): forward per-instance option so
+        // the headless context can lock bypass availability. Default false.
+        dangerouslySkipPermissions: options.dangerouslySkipPermissions,
       }),
     )
     rec.ctx = ctx

@@ -67,6 +67,9 @@ import { getTools } from '../tools.js'
 import { onTaskChanged } from '../utils/tasks.js'
 import { applyPermissionRulesToPermissionContext } from '../utils/permissions/permissions.js'
 import { loadAllPermissionRulesFromDisk } from '../utils/permissions/permissionsLoader.js'
+// zai patch (2026-08-29, plan §A): read `permissions.disableBypassPermissionsMode`
+// during dangerouslySkipPermissions fail-loud guard.
+import { getSettings_DEPRECATED } from '../utils/settings/settings.js'
 
 /**
  * Build a fully-initialized headless OpenCC context keyed by the
@@ -191,10 +194,28 @@ export async function createHeadlessContextImpl(
   // even in 'default' mode. Mirrors vendor's initializeToolPermissionContext
   // (permissionSetup.ts:983-1028): loadAllPermissionRulesFromDisk then
   // applyPermissionRulesToPermissionContext.
+  // zai patch (2026-08-29, plan §A): when dangerouslySkipPermissions=true,
+  // lock `isBypassPermissionsModeAvailable` to true so turn-time mode
+  // switches (plan → bypassPermissions) bypass vendor
+  // `print.ts:4802-4823` guard. Otherwise let vendor's default rules
+  // (and `permissionSetup.ts:1424-1458` async gate) decide.
   let permissionContext = {
     ...getEmptyToolPermissionContext(),
     mode: permissionMode,
-    isBypassPermissionsModeAvailable: true,
+    isBypassPermissionsModeAvailable:
+      options.dangerouslySkipPermissions ?? false,
+  }
+  // zai patch (2026-08-29, plan §A): fail loud if user explicitly disabled
+  // bypass in settings while dangerouslySkipPermissions=true is requested.
+  // Prevents silent override of an explicit user opt-out.
+  if (options.dangerouslySkipPermissions) {
+    const settings = getSettings_DEPRECATED() || {}
+    if (settings.permissions?.disableBypassPermissionsMode === 'disable') {
+      throw new Error(
+        '[createHeadlessContext] dangerouslySkipPermissions=true rejected: ' +
+          'settings.permissions.disableBypassPermissionsMode is "disable"',
+      )
+    }
   }
   try {
     permissionContext = applyPermissionRulesToPermissionContext(

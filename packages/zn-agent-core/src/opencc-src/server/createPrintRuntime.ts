@@ -116,6 +116,17 @@ export type CreatePrintRuntimeOptions = {
    * per-query `permissionMode` overrides it on the instance's own store.
    */
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
+  /**
+   * zai patch (2026-08-29, plan §A): when true, mirror vendor CLI flag
+   * `--allow-dangerously-skip-permissions` for the in-process headless
+   * track. Forwarded to `createHeadlessContext`'s
+   * `dangerouslySkipPermissions` option, which in turn locks
+   * `toolPermissionContext.isBypassPermissionsModeAvailable`. Default
+   * false — inproc users opt in explicitly via env
+   * `ZAI_DANGEROUSLY_SKIP_PERMISSIONS=1` (or `settings.openccCliDangerouslySkip`).
+   * Fails loud at construction if `permissions.disableBypassPermissionsMode === 'disable'`.
+   */
+  dangerouslySkipPermissions?: boolean
   /** Skip MCP bootstrap during per-session context build. Default true. */
   connectMcp?: boolean
   /** Forwarded to createHeadlessContext (STATE.isInteractive). Default true. */

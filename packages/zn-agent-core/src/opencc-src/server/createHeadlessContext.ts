@@ -89,6 +89,23 @@ export interface CreateHeadlessContextOptions {
    */
   permissionMode?: 'default' | 'acceptEdits' | 'bypassPermissions' | 'plan'
   /**
+   * zai patch (2026-08-29, plan §A): When true, lock
+   * `toolPermissionContext.isBypassPermissionsModeAvailable` to true for
+   * this context's lifetime. Mirrors vendor CLI flag
+   * `--allow-dangerously-skip-permissions`. Default false.
+   *
+   * zai-server uses this for the inproc track so that turn-time mode
+   * switches (plan → bypassPermissions) are not blocked by
+   * `print.ts:4802-4823`. Does NOT bypass AskUserQuestion's
+   * `requiresUserInteraction()` step (`permissions.ts:1233`) or
+   * filesystem safetyCheck (`permissions.ts:1256`).
+   *
+   * Fails loud at construction time if
+   * `settings.permissions.disableBypassPermissionsMode === 'disable'`,
+   * to prevent silent override of an explicit user opt-out.
+   */
+  dangerouslySkipPermissions?: boolean
+  /**
    * Whether to connect MCP servers during bootstrap. Defaults to `true`
    * (current behaviour). zai-server sets this to `false` because the
    * user's `~/.zai.json` MCP config can list servers that block the

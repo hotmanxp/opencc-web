@@ -94,6 +94,14 @@ export function wrapAskUserQuestionToolAsOpencc(): unknown {
       const ctx = resolveAskBridgeCtx()
       return {
         ...openccCtx,
+        // zai patch (2026-08-29, plan §A): surface the vendor's `toolUseId`
+        // (camelCase) on the ctx we hand back to zai-native tools. The
+        // openccToolWrap fallback already tolerates both casings, but
+        // setting it here means the strict `!ctx.toolUseId` guard inside
+        // askUserQuestionCall never fires for the in-process headless
+        // path. Without this, the LLM sees a stub string and the Web
+        // UI never gets a QuestionCard.
+        toolUseId: openccCtx?.toolUseId ?? openccCtx?.toolUseID,
         sessionId: ctx.sessionId,
         askRegistry: ctx.askRegistry,
         onYield: ctx.onYield,

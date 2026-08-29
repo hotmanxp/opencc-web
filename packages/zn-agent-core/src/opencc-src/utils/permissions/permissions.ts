@@ -1253,9 +1253,18 @@ async function hasPermissionsToUseToolInner(
   // 1g. Safety checks (e.g. .git/, .zai/, .vscode/, shell configs) are
   // bypass-immune — they must prompt even in bypassPermissions mode.
   // checkPathSafetyForAutoEdit returns {type:'safetyCheck'} for these paths.
+  //
+  // zai patch (2026-08-29, plan §A): when `mode === 'bypassPermissions'`,
+  // downgrade safetyCheck to a passthrough so step 2a below can allow it.
+  // The zai in-process headless track defaults to bypassPermissions mode
+  // for every session, so without this fallback the LLM gets
+  // `is_error: true` for every sensitive-path write and the user has
+  // no opportunity to confirm. Other modes (`default`, `acceptEdits`,
+  // `plan`) still go through the safety check.
   if (
     toolPermissionResult?.behavior === 'ask' &&
-    toolPermissionResult.decisionReason?.type === 'safetyCheck'
+    toolPermissionResult.decisionReason?.type === 'safetyCheck' &&
+    appState.toolPermissionContext.mode !== 'bypassPermissions'
   ) {
     return toolPermissionResult
   }

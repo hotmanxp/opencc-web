@@ -196,7 +196,25 @@ export function wrapAsOpenccTool(
       // no output", conversation halts).
       if (!tool.call) throw new Error(`openccToolWrap: tool "${tool.name}" has no call method`)
       const finalCtx = opts.transformCtx ? opts.transformCtx(ctx) : ctx
-      const result = await tool.call(args, finalCtx as any)
+      // zai patch (2026-08-29, plan §A): the in-process headless wrap of
+      // AskUserQuestion takes a strict `!ctx.toolUseId` guard
+      // (compat/tools/index.ts:304) before yielding `tool_use:ask_pending`.
+      // Without this fallback the wrapped call drops into a stub branch
+      // that returns `[zai askRegistry not configured]` and the Web UI
+      // never receives `prompt.ask`. The vendor vocabulary exposes
+      // BOTH `toolUseId` (camelCase, ToolUseContext line 310) and
+      // `toolUseID` (PascalCase, Progress line 353); surface whichever
+      // the caller actually supplied.
+      const ctxAny = finalCtx as any
+      const toolUseIdFallback =
+        ctxAny?.toolUseId ??
+        ctxAny?.toolUseID ??
+        (ctx as any)?.toolUseId ??
+        (ctx as any)?.toolUseID
+      const enrichedCtx = toolUseIdFallback
+        ? { ...ctxAny, toolUseId: toolUseIdFallback }
+        : ctxAny
+      const result = await tool.call(args, enrichedCtx)
       // If the zai tool already returned a ToolResult-shaped value
       // (e.g. newMessages / contextModifier / mcpMeta passed through),
       // don't double-wrap. Detect by presence of `data` field — zai's
