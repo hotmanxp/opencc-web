@@ -6,6 +6,7 @@ import { mainAgentsDir, resolveMainAgent } from '../../src/server/services/mainA
 import {
   getAgentRegistry,
   resetAgentRegistryForTests,
+  type AgentConfig,
   type MainAgentConfig,
 } from '@zn-ai/zn-agent-core'
 
@@ -209,6 +210,36 @@ describe('resolveMainAgent (zai-side thin wrapper)', () => {
     const { agent } = await resolveMainAgent(undefined)
     expect(agent.name).toBe('default')
     expect(r.listAgents().length).toBeGreaterThan(0)
+  })
+
+  it('returned agent is AgentConfig shape (slots.*), not legacy MainAgentConfig top-level fields', async () => {
+    // fix round 1 for Task 5:阻止 `export type { AgentConfig as MainAgentConfig }`
+    // 误用回归。运行时字段断言 + 编译期类型断言:
+    //   - agent.slots 存在(systemPrompt / tools / mcp 都在 slots 下)
+    //   - 顶层没有 legacy systemPrompt / tools / mcp 字段
+    //   - 类型层:resolveMainAgent 返回的 agent 可赋给 AgentConfig
+    //     且不可赋给 vendor 的 MainAgentConfig(`slots` 在 MainAgentConfig
+    //     不存在,旧代码读 `agent.systemPrompt` 会拿到 undefined)。
+    const r = getAgentRegistry()
+    r.loadBuiltinAgents()
+    const { agent } = await resolveMainAgent(undefined)
+    expect(agent.slots).toBeDefined()
+    expect(typeof (agent as unknown as Record<string, unknown>).systemPrompt).toBe(
+      'undefined',
+    )
+    expect(typeof (agent as unknown as Record<string, unknown>).tools).toBe(
+      'undefined',
+    )
+    expect(typeof (agent as unknown as Record<string, unknown>).mcp).toBe(
+      'undefined',
+    )
+    // 编译期断言 —— `AgentConfig` 可赋,`MainAgentConfig` 因 slots 字段
+    // 不能赋,会触发 TS2322。
+    const _agentConfigOk: AgentConfig = agent
+    // @ts-expect-error MainAgentConfig 没有 slots 字段,不能赋 agentConfig
+    const _mainAgentConfigNotOk: MainAgentConfig = agent
+    void _agentConfigOk
+    void _mainAgentConfigNotOk
   })
 })
 

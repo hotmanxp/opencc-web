@@ -17,8 +17,6 @@ import { join } from 'node:path'
 import {
   getAgentRegistry,
   type AgentConfig,
-  type MainAgentConfig,
-  type MainAgentSlot,
 } from '@zn-ai/zn-agent-core'
 
 /** 外置 agent 目录:`~/.zai/main-agents/`(保留兼容)。 */
@@ -54,5 +52,12 @@ export async function resolveMainAgent(
   return { agent, agents }
 }
 
-// 兼容旧 import 名字
-export type { AgentConfig as MainAgentConfig, MainAgentSlot }
+// 注意:不再 export `type { AgentConfig as MainAgentConfig }`。
+// 旧的 vendor `MainAgentConfig` 形状(顶层 systemPrompt/tools/mcp 字段)与
+// 新的 `AgentConfig`(slots.{systemPrompt,tools,mcp})不是同一类型;
+// 之前的别名会让 zai 调用方拿到的 `MainAgentConfig` shape 实际是 slots.*,
+// 任何读 `agent.systemPrompt` / `agent.tools` / `agent.mcp` 的 caller
+// 会拿到 undefined。需要 vendor 旧 `MainAgentConfig` 的 caller 请直接从
+// `@zn-ai/zn-agent-core` import:这是 vendor opencc-src 的真实形状。
+// (fix round 1 for Task 5, see plan
+//  docs/superpowers/plans/2026-08-29-agent-plugin-system-refactor.md)
