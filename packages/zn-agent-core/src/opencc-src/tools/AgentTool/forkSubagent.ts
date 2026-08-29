@@ -33,10 +33,12 @@ import type { BuiltInAgentDefinition } from './loadAgentsDir.js'
  * orchestration role and has its own delegation model.
  */
 // [FORK_SUBAGENT] was: feature('FORK_SUBAGENT') ? ... : false
+// 67e147e7 把所有 vendor feature() 内联成 false;这里同样应返回 false,
+// zai 不启用 fork 子代理实验,所有 Agent 调用按调用方传入的 run_in_background 决定。
 export function isForkSubagentEnabled(): boolean {
   if (isCoordinatorMode()) return false
   if (getIsNonInteractiveSession()) return false
-  return true
+  return false
 }
 
 /** Synthetic agent type name used for analytics when the fork path fires. */
