@@ -254,3 +254,21 @@ export function isValidCoreRuntime(
 ): value is CoreRuntime {
   return value === 'default' || value === 'inproc' || value === 'spawn'
 }
+
+/**
+ * zai patch (2026-08-29, plan §A): 解析 settings.openccCliDangerouslySkip
+ * 持久化值。env `ZAI_DANGEROUSLY_SKIP_PERMISSIONS` 优先级更高（不在此函数职责内）：
+ * 把 settings 字段归一化为 boolean（缺失 / 非法 → false）。
+ */
+export function resolveOpenccCliDangerouslySkip(
+  settings: ZaiSettings,
+): boolean {
+  return settings.openccCliDangerouslySkip === true
+}
+
+/** Validate a candidate openccCliDangerouslySkip value before persisting. */
+export function isValidOpenccCliDangerouslySkip(
+  value: unknown,
+): value is boolean {
+  return typeof value === 'boolean'
+}

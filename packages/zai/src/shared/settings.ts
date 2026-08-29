@@ -196,6 +196,19 @@ export interface ZaiSettings {
    * 缺失 / 非法值 → 'default'。
    */
   coreRuntime?: CoreRuntime
+  /**
+   * zai patch (2026-08-29, plan §A): 显式 opt-in 让 inproc 轨道把
+   * `toolPermissionContext.isBypassPermissionsModeAvailable` 锁定为 true,
+   * 等价 vendor CLI flag `--allow-dangerously-skip-permissions`。生效优先级:
+   * env `ZAI_DANGEROUSLY_SKIP_PERMISSIONS === '1'` > 本设置 > 'false'。
+   *
+   * 若 `permissions.disableBypassPermissionsMode === 'disable'` 已显式禁用
+   * bypass,`initAgentRuntime` 启动时仍会 throw 拒绝 ——
+   * 不静默覆盖用户 opt-out。
+   *
+   * 缺失 / 非 boolean → false。
+   */
+  openccCliDangerouslySkip?: boolean
 }
 
 /**

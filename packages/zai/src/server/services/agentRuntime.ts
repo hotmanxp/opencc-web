@@ -634,6 +634,16 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
         // turn / no active background tasks are disposed; next query
         // re-hydrates via vendor resume. Default 30; 0 disables.
         idleTtlMin: Number(process.env.ZAI_PRINT_IDLE_TTL_MIN ?? '30'),
+        // zai patch (2026-08-29, plan §A): opt-in per-instance option that
+        // locks `isBypassPermissionsModeAvailable` to true so vendor's
+        // runtime mode-switch guard (print.ts:4802-4823) doesn't block
+        // plan→bypass transitions. Resolution: env > settings > false.
+        // Default false; production users opt in via
+        // ZAI_DANGEROUSLY_SKIP_PERMISSIONS=1 or
+        // settings.openccCliDangerouslySkip === true.
+        dangerouslySkipPermissions:
+          process.env.ZAI_DANGEROUSLY_SKIP_PERMISSIONS === '1'
+          || (settings.openccCliDangerouslySkip === true),
         askBridge,
         permissionBridge,
         elicitationBridge,

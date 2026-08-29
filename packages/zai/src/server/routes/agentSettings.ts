@@ -14,6 +14,7 @@ import {
   isValidCoreRuntime,
   isValidDefaultSplitScreen,
   isValidEnableDynamicWorkflow,
+  isValidOpenccCliDangerouslySkip,
   isValidOutputStyle,
   isValidTheme,
   isValidWorkMode,
@@ -22,6 +23,7 @@ import {
   resolveCoreRuntime,
   resolveDefaultSplitScreen,
   resolveEnableDynamicWorkflow,
+  resolveOpenccCliDangerouslySkip,
   resolveOutputStyle,
   resolveTheme,
   resolveWorkMode,
@@ -380,6 +382,44 @@ router.put(
     try {
       const next = await updateZaiSettings({ coreRuntime: candidate })
       res.json({ coreRuntime: resolveCoreRuntime(next) })
+    } catch (err) {
+      res.status(500).json({ error: (err as Error).message })
+    }
+  },
+)
+
+/**
+ * PUT /api/agent/settings/opencc-cli-dangerously-skip — 持久化 inproc 轨道
+ * 的 bypass 可用性开关 (zai patch 2026-08-29, plan §A)。Body 是
+ * `{ openccCliDangerouslySkip: boolean }`,写入 settings.openccCliDangerouslySkip。
+ *
+ * 生效时机:**重启实例后**——运行时在 `initAgentRuntime` 只解析一次;且
+ * env `ZAI_DANGEROUSLY_SKIP_PERMISSIONS=1` 优先级更高,会盖过本设置。
+ *
+ * 若 `settings.permissions.disableBypassPermissionsMode === 'disable'`,
+ * 即使 option 持久化成功,`initAgentRuntime` 启动时仍会 throw 拒绝 ——
+ * 不静默覆盖用户显式 opt-out。
+ */
+router.put(
+  '/agent/settings/opencc-cli-dangerously-skip',
+  async (req: Request, res: Response) => {
+    const candidate = (req.body as
+      | { openccCliDangerouslySkip?: unknown }
+      | undefined)?.openccCliDangerouslySkip
+    if (!isValidOpenccCliDangerouslySkip(candidate)) {
+      return res
+        .status(400)
+        .json({
+          error: `invalid openccCliDangerouslySkip: ${String(candidate)}`,
+        })
+    }
+    try {
+      const next = await updateZaiSettings({
+        openccCliDangerouslySkip: candidate,
+      })
+      res.json({
+        openccCliDangerouslySkip: resolveOpenccCliDangerouslySkip(next),
+      })
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
     }
