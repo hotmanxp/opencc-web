@@ -38,6 +38,12 @@ import { parseMarketplaceInput } from '../utils/plugins/parseMarketplaceInput.js
 import { parsePluginIdentifier } from '../utils/plugins/pluginIdentifier.js'
 import { clearAllCaches } from '../utils/plugins/cacheUtils.js'
 import { getUserConfigJson } from '../utils/userConfigJson.js'
+// zai patch (2026-08-29): 走 server/index.js barrel 拿 getAgentRegistry。
+// 直接 import './agentRegistry.js' 在 esbuild bundle 时把内部 call site
+// 留下未重命名的 `getAgentRegistry()` 引用,而函数被 minify 成 `lxr`,
+// 运行时报 "getAgentRegistry is not defined"。barrel re-export 触发
+// esbuild 同步生成 local binding,避开 TDZ。
+import { getAgentRegistry } from './index.js'
 import type { OpenccSessionMeta } from './createOpenccRuntime.js'
 import type { OpenccPluginApi, OpenccPluginComponentCounts, OpenccPluginListResult, OpenccPluginActionResult, OpenccMarketplacePluginDto, OpenccMarketplaceDto, OpenccMarketplaceActionResult } from './serverTypes.js'
 
@@ -115,13 +121,24 @@ export async function createOpenccRuntimeImpl(options) {
   // picked up by computeTools via appState.mcp.tools). Dedup by name.
   if (!ctx.config.connectMcp) {
     void (async () => {
-      // zai patch (2026-08-20): 主 Agent mcp 插槽 —— 连接前应用。origin
-      // 为 vendor 解析的全 scope server 配置表(name → config),槽函数
-      // 增删/改写后传入连接器。MCP 连接是启动时一次性,槽切换需重启生效。
-      let mcpConfigs = undefined
-      if (options.mainAgent?.mcp) {
-        const all = await getAllMcpConfigs()
-        mcpConfigs = await options.mainAgent.mcp(all.servers)
+      // zai patch (2026-08-29): 主 Agent mcp 插槽改为走 AgentRegistry。
+      // 启动期尚未有 session 绑定(zai-server initAgentRuntime 之后才
+      // registryAgent),此处按 options.mainAgent ?? 'default' 查 builtin
+      // agent 的 mcp 槽,直接 sync 调用(builtin agent 的 mcp 槽都是 sync;
+      // AgentSlotFn 允许 Promise,但启动期连接是 await pattern,此处走
+      // resolveAgent + 直接 fn 调 与原行为等价,绕开 async slot() 在
+      // 启动期不需要 sessionId 的边界场景)。
+      // MCP 连接是启动时一次性,槽切换需重启生效。
+      let mcpConfigs: Record<string, unknown> | undefined = undefined
+      {
+        const reg = getAgentRegistry()
+        const bootAgentName = options.mainAgent?.name ?? 'default'
+        const bootAgent = reg.resolveAgent(bootAgentName)
+        const mcpFn = bootAgent?.slots?.mcp
+        if (mcpFn) {
+          const all = await getAllMcpConfigs()
+          mcpConfigs = mcpFn(all.servers, '__startup__')
+        }
       }
       await getMcpToolsCommandsAndResources(
         ({ client, tools: mcpTools, commands: mcpCommands }) => {
@@ -174,32 +191,75 @@ export async function createOpenccRuntimeImpl(options) {
   // 修复: 每 session 一个独立 QueryEngine。同 session 复用 engine 使
   // mutableMessages 跨 query 保留(续传历史不丢,与旧行为一致);不同 session
   // 互不共享 mutableMessages,并发隔离。
-  // zai patch (2026-08-20): 按会话恢复主 Agent。`name` 来自该会话
-  // transcript meta(首次 query 由 zai-server 恢复后经 input.mainAgent 传入);
-  // 查不到(新会话/未知名)回退到全局 options.mainAgent。
-  const resolveSessionMainAgent = (name?: string) => {
-    if (name) {
-      const found = (options.mainAgents ?? []).find(a => a.name === name)
-      if (found) return found
-    }
-    return options.mainAgent
-  }
-
+  // zai patch (2026-08-29): 删 resolveSessionMainAgent 与 agent 局部。
+  // sessionId → agentId → agentConfig → slotFn 派发改由 AgentRegistry
+  // 承担(createEngine 第 3 参数 sessionId)。原 (mainAgentName, options.mainAgent)
+  // 兜底链废弃:zai-server initAgentRuntime 阶段已 registryAgent 每会话,
+  // 此处只走 registry.lookup(sid)。
+  //
   // 同时承担两个 patch 职责:
   // 1) sess-1787121363115-0zq3bo8a hydration — server restart 后 model 看不到
   //    历史,新建 engine 必须从磁盘 JSONL 反序列化历史 messages 灌回
   //    mutableMessages(vendor QueryEngine.mutableMessages 默认 = [],zai server
   //    没走 vendor CLI 的 --resume / REPL.resume(),必须手动做 vendor 风格的
   //    hydration)。
-  // 2) 2026-08-20 主 Agent 插槽 — `mainAgentName` 决定该会话 engine 的
-  //    systemPrompt / 工具池槽,来自会话 transcript meta,未知名回退到全局
-  //    options.mainAgent。
-  const createEngine = (initialMessages?: Message[], mainAgentName?: string) => {
-    const agent = resolveSessionMainAgent(mainAgentName)
-    // per-engine 工具池:在 base(内置 + MCP + 权限过滤)上应用该会话
-    // agent 的 tools 槽。agent 无槽(如 default)→ 原样返回 base。
+  // 2) 2026-08-29 主 Agent 插槽 — systemPrompt / tools 两槽统一走
+  //    `AgentRegistry.resolveBoundSlot(sid, slotId, origin)`,sync 派发;
+  //    sessionId 由 runtime.query() 调用处传入。
+  const createEngine = (initialMessages?: Message[], mainAgentName?: string, sessionId?: string) => {
+    const reg = getAgentRegistry()
+    const sid = sessionId ?? ''
+    // zai patch (2026-08-29): sync 派发 slot fn。
+    // QueryEngine.tools: Tools 字段要求 sync 数组(refreshTools 同),
+    // 而 AgentSlotFn<T> 类型允许 Promise<T>;此处假定 builtin / 已加载
+    // agent 的 tools / systemPrompt 槽都返回 sync T(现有 builtin 全部
+    // 满足),如果未来引入 async slot fn,需 QueryEngine 改造 + 此处
+    // 改 async + engineComputeTools 返回 Promise<T>(破坏当前 sync 契约)。
+    // 该限制在 spec §3.7.1 已隐含(tools 槽 per-turn 同步调用)。
+    //
+    // 回退链:registry 未绑定 session(sid 空字符串 / initAgentRuntime 还没
+    // registryAgent) → 用 options.mainAgent ?? 'default' 兜底,保留
+    // 2026-08-20 spec 阶段的"全局 mainAgent 立即生效"语义。Task 9 接通
+    // zai-server initAgentRuntime 后会 registryAgent 每会话,届时这条回退
+    // 路径仅在测试 / 离线构造 runtime 时触发。
+    const resolveBoundAgent = () => {
+      // 优先级:registry 绑定 > options.mainAgent(向后兼容 2026-08-20 spec
+      // 直传 agent 配置的测试场景)> registry 中的 default agent。
+      // 测试或离线构造 runtime 时 initAgentRuntime 还没 registryAgent,此时
+      // options.mainAgent 直接生效;线上 zai-server init 序列已
+      // registryAgent 每会话,这条回退只是名义兜底。
+      //
+      // options.mainAgent 是旧 MainAgentConfig 形状(顶层 systemPrompt/
+      // tools/mcp);转成新 AgentConfig(slots.{...})后再走 slot dispatch。
+      const bound = reg.getBoundAgentId(sid)
+      if (bound) return reg.resolveAgent(bound)
+      if (options.mainAgent) {
+        const m = options.mainAgent as unknown as {
+          name: string
+          description: string
+          systemPrompt?: (origin: string[]) => string[] | Promise<string[]>
+          tools?: (origin: unknown[]) => unknown[] | Promise<unknown[]>
+          mcp?: (origin: unknown) => unknown | Promise<unknown>
+        }
+        return {
+          name: m.name,
+          description: m.description,
+          slots: {
+            systemPrompt: m.systemPrompt as never,
+            tools: m.tools as never,
+            mcp: m.mcp as never,
+          },
+        } as ReturnType<typeof reg.resolveAgent>
+      }
+      return reg.resolveAgent('default')
+    }
+    const resolveBoundSlot = <T>(slotId: 'tools' | 'systemPrompt', origin: T): T => {
+      const agent = resolveBoundAgent()
+      const fn = agent?.slots?.[slotId] as ((o: T, s: string) => T) | undefined
+      return fn ? fn(origin, sid) : origin
+    }
     const engineComputeTools = () =>
-      agent?.tools ? agent.tools(computeTools()) : computeTools()
+      resolveBoundSlot('tools', computeTools())
     return new QueryEngine({
       cwd,
       tools: engineComputeTools(),
@@ -214,9 +274,10 @@ export async function createOpenccRuntimeImpl(options) {
       // dedup,避免 assistant Message 路径重发已 stream 过的 block。
       includePartialMessages: true,
       refreshTools: engineComputeTools,
-      // zai patch (2026-08-20): 主 Agent systemPrompt 插槽 —— engine 创建
-      // 时固定,按会话恢复(该会话当时选的 agent)。
-      systemPromptSlot: agent?.systemPrompt,
+      // zai patch (2026-08-29): 主 Agent systemPrompt 插槽 —— engine 创建
+      // 时固定,按会话恢复(该会话当时选的 agent)。closure 走 registry 派发。
+      systemPromptSlot: (origin: string[]) =>
+        resolveBoundSlot('systemPrompt', origin),
       // zai patch: read agents from AppState (populated by
       // createHeadlessContextImpl via getAgentDefinitionsWithOverrides).
       // QueryEngine constructs its own `options.agentDefinitions` from
@@ -623,7 +684,7 @@ let initialMessages: Message[] | undefined
         }
         // zai patch (2026-08-20): 会话首次 query 时按恢复的 mainAgent
         // 构建 engine —— systemPrompt / tools 槽固定为该会话当时选的 agent。
-        engine = createEngine(initialMessages, input.mainAgent)
+        engine = createEngine(initialMessages, input.mainAgent, input.sessionId)
         engines.set(input.sessionId, engine)
       }
       engine.replaceAbortController(queryAbortController)
