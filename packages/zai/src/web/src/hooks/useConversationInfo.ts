@@ -149,7 +149,24 @@ export function useConversationInfo(): ConversationInfo {
     const sess = effectiveSessionId
       ? sessions.find((s) => s.sessionId === effectiveSessionId) ?? null
       : null
-    const firstTs = messages[0]?.ts ?? sess?.createdAt ?? null
+    // 找首条 user.text: messages[0] 不一定是 user 消息(SSE 流水里
+    // 可能有 system / runtime.* / assistant.* 排在前面),所以不能直接
+    // 取 messages[0]。info 面板的"标题"和"首条消息时间"应该对齐
+    // 用户视角的第一条 user.text —— 它的 text 描述用户最初在问什么,
+    // ts 是用户实际发问的时刻。完全没有 user 消息时再 fallback 到
+    // manifest 字段(createdAt 是后端落盘的 session 创建时间,作为
+    // 兜底仍然比 messages[0]?.ts 稳定)。
+    const firstUserMsg = messages.find((m) => (m as { type?: unknown }).type === 'user.text') ?? null
+    const firstUserText =
+      firstUserMsg && typeof firstUserMsg.text === 'string' && firstUserMsg.text.length > 0
+        ? firstUserMsg.text
+        : null
+    const firstUserTs =
+      firstUserMsg && typeof firstUserMsg.ts === 'number' && firstUserMsg.ts > 0
+        ? firstUserMsg.ts
+        : null
+    const derivedTitle = firstUserText ?? sess?.title ?? null
+    const firstTs = firstUserTs ?? sess?.createdAt ?? null
     const turns = countCompletedTurns(messages)
     const model =
       sess?.model && sess.model !== 'unknown'
@@ -173,7 +190,7 @@ export function useConversationInfo(): ConversationInfo {
 
     return {
       sessionId: effectiveSessionId,
-      title: sess?.title ?? null,
+      title: derivedTitle,
       startTime: typeof firstTs === 'number' && firstTs > 0 ? firstTs : null,
       lastUpdate: sess?.updatedAt ?? null,
       turnCount: turns,

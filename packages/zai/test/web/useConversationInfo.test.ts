@@ -131,7 +131,10 @@ describe('useConversationInfo (integration)', () => {
     const { result } = renderHook(() => useConversationInfo())
     await act(async () => { await Promise.resolve() })
     expect(result.current.sessionId).toBe('sess-abc')
-    expect(result.current.title).toBe('Bug fix')
+    // 标题 = 首条 user.text 的 text('fix'),不是 manifest 的 'Bug fix'
+    // — info 面板的"标题"应该反映用户最初在问什么
+    expect(result.current.title).toBe('fix')
+    // startTime = 首条 user.text 的 ts(1000),而不是 sess.createdAt
     expect(result.current.startTime).toBe(1000)
     expect(result.current.lastUpdate).toBe(2000)
     expect(result.current.turnCount).toBe(1) // first pair complete, second unfinished
@@ -139,6 +142,59 @@ describe('useConversationInfo (integration)', () => {
     expect(result.current.status).toBe('streaming')
     expect(result.current.cwd).toBe('/repo')
     expect(result.current.model).toBe('claude-opus-4-6') // session.model takes precedence over runtime default
+  })
+
+  it('uses first user.text for title and startTime, ignoring non-user messages in front', async () => {
+    // 即使 messages[0] 是 assistant / runtime / tool_use 等非 user 消息,
+    // title 和 startTime 也要对齐首条 user.text(用户视角的"第一条消息")。
+    const sessionId = 'sess-mixed'
+    useAgentStore.setState({
+      sessionId,
+      sessions: [{
+        sessionId,
+        cwd: '/x',
+        model: 'MiniMax-M3',
+        createdAt: 100,
+        updatedAt: 500,
+        title: 'manifest title (should be overridden)',
+      }],
+      messages: [
+        // 排在 user 之前:runtime 启动事件 + assistant 早期回应 + tool_use
+        { eventId: 'r1', sessionId, ts: 200, turnIndex: 0, type: 'runtime.start', text: 'started' },
+        { eventId: 'a0', sessionId, ts: 300, turnIndex: 0, type: 'assistant.text', text: 'preamble' },
+        { eventId: 'u', sessionId, ts: 400, turnIndex: 0, type: 'user.text', text: 'first question' },
+        { eventId: 'a', sessionId, ts: 500, turnIndex: 0, type: 'assistant.text', text: 'reply' },
+      ],
+    })
+    const { result } = renderHook(() => useConversationInfo())
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.title).toBe('first question')
+    expect(result.current.startTime).toBe(400)
+  })
+
+  it('falls back to sess.title / createdAt when no user.text exists', async () => {
+    // 用户还没发任何消息(新 session 还在等首条 user.text,
+    // 或 transcript 重放还没把 user 事件塞回本地 store),title 和
+    // startTime 应该走 manifest fallback 而不是 null。
+    const sessionId = 'sess-no-user-msg'
+    useAgentStore.setState({
+      sessionId,
+      sessions: [{
+        sessionId,
+        cwd: '/x',
+        model: 'MiniMax-M3',
+        createdAt: 777,
+        updatedAt: 888,
+        title: 'manifest fallback',
+      }],
+      messages: [
+        { eventId: 'r', sessionId, ts: 800, turnIndex: 0, type: 'runtime.start', text: 'started' },
+      ],
+    })
+    const { result } = renderHook(() => useConversationInfo())
+    await act(async () => { await Promise.resolve() })
+    expect(result.current.title).toBe('manifest fallback')
+    expect(result.current.startTime).toBe(777)
   })
 
   it('falls back to runtime defaultModel when session.model is "unknown"', async () => {
