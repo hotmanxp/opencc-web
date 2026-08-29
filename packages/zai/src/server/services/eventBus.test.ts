@@ -172,11 +172,29 @@ describe('ServerEventBus', () => {
     bus.emit({ type: 'runtime.delta', sessionId: 'B', turnIndex: 0, delta: 'b1' } as any)
     bus.emit({ type: 'session.created', sessionId: 'A', title: 't', cwd: '/x' } as any)
     bus.emit({ type: 'runtime.delta', sessionId: 'A', turnIndex: 0, delta: 'a2' } as any)
+    // lastEventId===undefined 时回放该 sid 的 lifecycle 历史 (避免新 EventSource
+    // 实例创建时 gap 内的 emit 永远丢失 — race fix),同时过滤掉 streaming events
+    // (runtime.thinking/delta/tool_call/tool_result) — 它们已持久化在 transcript,
+    // replay 会让客户端 messages 数组与 transcript load 内容重复。
+    //
+    // 这里 3 条 runtime.delta 是 streaming 类型全被过滤。session.created 虽然是
+    // global event,但因为带了 sessionId='A' 也被存进 historyBySid['A'],这条
+    // 路径上 subscribeScoped 实时分发会按 isGlobalEvent 透传给所有 subscriber
+    // (包括 B,C,D 等);但 history replay 路径上没单独过滤 global — 这是 pre-existing
+    // 行为,与本次 streaming 过滤无关,故不在本测试断言范围。
     const aHistory = bus.getHistoryAfterForSid(undefined, 'A')
-    // lastEventId===undefined 时也回放该 sid 的最近 history,
-    // 避免新 EventSource 实例创建时在建立前的 emit 事件永远丢失。
-    // session.created 是全局事件, 不在 per-sid 切片里, 故这里只含 3 条 runtime.delta。
-    expect(aHistory.length).toBe(3)
+    expect(aHistory.map((e) => e.type)).toEqual(['session.created'])
+    // lifecycle events 走通:验证 runtime.started/runtime.done 不被 streaming 过滤吃掉
+    bus.emit({ type: 'runtime.started', sessionId: 'A', turnIndex: 0, apiRequestCount: 1, contextTokens: 0 } as any)
+    bus.emit({ type: 'runtime.thinking', sessionId: 'A', turnIndex: 0, thinking: 'think' } as any)
+    bus.emit({ type: 'runtime.delta', sessionId: 'A', turnIndex: 0, delta: 'text' } as any)
+    bus.emit({ type: 'runtime.done', sessionId: 'A', turnIndex: 0 } as any)
+    const aHistory2 = bus.getHistoryAfterForSid(undefined, 'A')
+    expect(aHistory2.map((e) => e.type)).toEqual([
+      'session.created',
+      'runtime.started',
+      'runtime.done',
+    ])
   })
 
   test('getHistoryAfterForSid 用 lastEventId 续读', () => {

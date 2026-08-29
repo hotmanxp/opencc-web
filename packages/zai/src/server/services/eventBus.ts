@@ -88,6 +88,23 @@ const STATE_EVENT_TYPES = new Set<string>([
   'agent_task.changed',
 ])
 
+// 流式事件 — 已经持久化在 transcript jsonl 的 [thinking + text + tool_use] blocks 里,
+// 由 loadTranscriptMessages 在 transcript load 时还原。SSE history replay 推这些事件
+// 会让客户端 upsertStreamBlock / upsertToolCall 写入额外 (thinking + text) 消息,
+// 与 transcript 内容重复 (sess-1787931317204-8d39z9ou 4 气泡 bug 根因)。
+// lastEventId===undefined (新 EventSource 实例 / reload) 时不 replay 它们;
+// lastEventId 有值 (同 EventSource 重连续读) 时仍需 replay 让 delta 继续 append 到
+// 既有 streaming message,不能丢 stream 内容。
+const STREAMING_REPLAY_EXCLUDE = new Set<string>([
+  'runtime.thinking',
+  'runtime.delta',
+  'runtime.tool_call',
+  'runtime.tool_result',
+])
+function isStreamingReplayEvent(type: string): boolean {
+  return STREAMING_REPLAY_EXCLUDE.has(type)
+}
+
 export class ServerEventBus {
   private subs = new Set<Subscriber>()
   // 全局单调 seq 计数器 — emit 时分配, 单进程内单调递增, 进程重启后从 0
@@ -144,16 +161,28 @@ export class ServerEventBus {
   // 仅返回属于该 sid 的事件历史 (Last-Event-ID 续读用). 不包含 session.* /
   // system.* 等全局事件 — 那些由 EventSource 在 client 端从 store 同步,
   // SSE 渠道不需要重发 (server.connected 单独在 connect 时即时推送).
+  //
+  // lastEventId===undefined 路径额外过滤 streaming events (runtime.thinking /
+  // delta / tool_call / tool_result): 这些事件已经持久化在 transcript jsonl,
+  // 由 loadTranscriptMessages 在 reload 时还原。replay 给客户端会让
+  // upsertStreamBlock / upsertToolCall 写入额外 (thinking + text) 消息,与
+  // transcript 内容重复 (sess-1787931317204-8d39z9ou 4 气泡 bug 根因)。
+  // lastEventId 有值时不过滤 — EventSource 自动重连的续读场景,delta
+  // 必须继续 append 到既有 streaming message,丢了会断流。
   getHistoryAfterForSid(lastEventId: string | undefined, sid: string): ServerEvent[] {
     const arr = this.historyBySid.get(sid) ?? []
-    // lastEventId===undefined 时也回放该 sid 保留的最近 history. 这是
-    // zai 修的一个 race:用户点 "创建新会话" → useEventStream 关旧
-    // EventSource + 开新 EventSource → 旧 ES 已关、新 ES 还没完全建立
-    // 时,用户已经发出消息,runtime 事件 emit 时两边都没人接。HTML 规范
-    // 规定 Last-Event-ID 只在同 EventSource 实例重连时携带;新 EventSource
-    // 实例(URL 变了)永远 undefined,所以无 lastEventId 路径必须能
-    // 自救 — 否则首次 turn 的 runtime.* 全丢,刷新才出现。
-    // 上限 CAPACITY=256,客户端 applyBatch 按 eventId/seq 去重。
+    const slice = this._sliceAfter(arr, lastEventId)
+    if (lastEventId === undefined) {
+      // 新 EventSource 实例 / reload: 过滤 streaming events,避免与 transcript load 重复
+      return slice.filter((e) => !isStreamingReplayEvent(e.type))
+    }
+    return slice
+  }
+
+  // EventSource 重连续读:从 lastEventId 之后开始切片,找不到 lastEventId 时
+  // 退到全量 (与 lastEventId===undefined 一致 — 续读如果断点丢失,只能假设
+  // 客户端靠 transcript load + 后续 live event 兜底)。
+  private _sliceAfter(arr: ServerEvent[], lastEventId: string | undefined): ServerEvent[] {
     if (lastEventId === undefined) return [...arr]
     const idx = arr.findIndex((e) => e.eventId === lastEventId)
     if (idx < 0) return [...arr]
