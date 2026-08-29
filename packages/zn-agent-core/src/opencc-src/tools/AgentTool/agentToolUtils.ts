@@ -577,16 +577,20 @@ export async function runAsyncAgentLifecycle({
           stopSummarization = stop
         }
       : undefined
-    // zai patch: 必须在 for-await 之前 attach,否则第一条 mirrorAppendBgEvent
-    // 落到 DefaultBackgroundRuntime.appendTaskEvent 时找不到 record,被静默
-    // 丢弃(日志 "task X not found (never attached?)"),UI 后台抽屉显示
-    // 事件: 0;同时 attach 是落盘 task.parentSessionId 的唯一入口,缺失会让
-    // SubagentNotifier 拿不到父 sessionId,<task-notification> 静默吞掉,
-    // 主对话收不到完成事件,卡在停止按钮。
-    // parentSessionId 优先取 getParentSessionId()(in-process teammate /
+    // zai patch: 必须在 for-await 之前 fire-and-forget 启动 attach,
+    // 与 subagentProviderBridge.ts:143 一致 —— 不阻塞 fire-and-forget
+    // 启动,避免主对话 turn 推迟一帧微任务导致后续消息不显示。
+    // attach 落盘 task.parentSessionId 是 SubagentNotifier 回流
+    // <task-notification> 的唯一入口,缺失会让主对话收不到完成事件。
+    // appendTaskEvent 找不到 record 时(DefaultBackgroundRuntime.ensureRecord
+    // 懒重建也找不到磁盘),会被 warn + silent drop —— 但只要 attach
+    // 在第一条 yield 之前完成 store.save + records.set,第一条事件就能命中。
+    // mirrorAttachTaskToBg 内部 try/catch 兜底,bg 不存在 / attach 抛错都
+    // 静默 return,不影响主流程。
+    // parentSessionId 优先 getParentSessionId()(in-process teammate /
     // dynamicTeamContext 场景);普通 main REPL → sub-agent 时为 undefined,
     // 由 mirrorAttachTaskToBg 内部 fallback 到 zai server 的 __zaiCurrentSessionId。
-    await mirrorAttachTaskToBg({
+    void mirrorAttachTaskToBg({
       id: taskId,
       input: {
         prompt: metadata.prompt,
