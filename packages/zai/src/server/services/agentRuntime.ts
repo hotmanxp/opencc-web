@@ -4,6 +4,7 @@ import { join } from 'node:path'
 import {
   DefaultPluginRuntime,
   enableOpenccConfigs,
+  getAgentRegistry,
   getCurrentSessionId as getSessionIdFromChain,
   resolveDataDir,
   resolveOpenccConfigDir,
@@ -146,6 +147,54 @@ const permissionRegistry = new PermissionRegistry()
   askRegistry,
   permissionRegistry,
   onYield: bridgeToolYieldToPrompt,
+}
+
+/**
+ * zai patch (2026-08-29, plan §3.2): 冷启动恢复所有已存在 session 的
+ * sessionId → agentId 绑定。遍历 TranscriptStore 拿到所有 session,
+ * 读 transcript.meta.mainAgent(per-session 冻结值),逐个调
+ * registryAgent。老会话无 mainAgent 字段 → fallback 'default'。
+ * bind 失败(如 builtin default 缺失)静默 skip,不阻断 init。
+ */
+async function restoreAllSessions(registry: ReturnType<typeof getAgentRegistry>): Promise<void> {
+  let store: TranscriptStore
+  try {
+    store = getTranscriptStore()
+  } catch {
+    return
+  }
+  const cwd = serverCwd ?? process.cwd()
+  let sessions: Array<{ sessionId: string }>
+  try {
+    const listResult = await (store as unknown as {
+      list?: (opts: { cwd: string }) => Promise<Array<{ sessionId: string }>>
+    }).list?.({ cwd })
+    if (!listResult) return
+    sessions = listResult
+  } catch (err) {
+    console.warn(`[restoreAllSessions] list failed:`, err)
+    return
+  }
+  for (const info of sessions) {
+    try {
+      const t = await store.read(info.sessionId, { cwd })
+      const agentId =
+        (t.meta as { mainAgent?: string } | undefined)?.mainAgent ?? 'default'
+      try {
+        registry.registryAgent(info.sessionId, agentId)
+      } catch (bindErr) {
+        console.warn(
+          `[restoreAllSessions] registryAgent(${info.sessionId}, ${agentId}) failed:`,
+          bindErr,
+        )
+      }
+    } catch (err) {
+      console.warn(
+        `[restoreAllSessions] read(${info.sessionId}) failed:`,
+        err,
+      )
+    }
+  }
 }
 
 /**
@@ -453,6 +502,31 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     console.warn('[initAgentRuntime] subagent provider registration failed:', err)
   }
 
+  // zai patch (2026-08-29, plan §3.1): Agent 插件系统 registry 启动序列。
+  // loadBuiltinAgents 先注册 default / office / agent-creator 三个
+  // builtin;再 loadUserAgents 扫描 ~/.zai/main-agents/*.js 合并;
+  // restoreAllSessions 扫所有已存在 transcript,把 sessionId → agentId
+  // 绑定回灌到 registry.sessionBindings。绑定失败静默 skip,不阻断 init。
+  try {
+    const agentRegistry = getAgentRegistry()
+    agentRegistry.loadBuiltinAgents()
+    const { mainAgentsDir } = await import('./mainAgents.js')
+    const userRes = await agentRegistry.loadUserAgents(mainAgentsDir())
+    if (userRes.failed.length > 0) {
+      console.warn(
+        `[initAgentRuntime] user main agents load partially failed: ${userRes.failed.length} file(s)`,
+        userRes.failed,
+      )
+    }
+    await restoreAllSessions(agentRegistry)
+    console.log(
+      `[initAgentRuntime] agent registry: ${agentRegistry.listAgents().length} agents, ${agentRegistry['sessionBindings']?.size ?? 0} sessions bound`,
+    )
+  } catch (err) {
+    // Non-fatal — registry 缺失不阻断 runtime 初始化,降级到 default agent。
+    console.warn('[initAgentRuntime] agent registry init failed:', err)
+  }
+
   // Build the new OpenccRuntime. The runtime is awaited so the
   // synchronous `initBackgroundRuntime()` call in `createApp` (the
   // very next line) sees a non-null `runtime` and can read it via
@@ -660,16 +734,17 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     }
   } else {
     try {
-      const { agent: mainAgent, agents: mainAgents } = await resolveMainAgent(
-        settings.mainAgent,
-      )
       const { createOpenccRuntime: factory } = await import(
         '@zn-ai/zn-agent-core'
       )
+      // zai patch (2026-08-29, plan §3.5): mainAgent / mainAgents 字段
+      // 已下沉 core 并由 AgentRegistry 接管;zai-server 端不再
+      // resolveMainAgent 调 createOpenccRuntime(它不再认这两个字段)。
+      // 当前会话的 mainAgent 走 routes/agent.ts prompt 路径的
+      // registryAgent(sessionId, agentId) 绑进 registry,createOpenccRuntime
+      // 内部直接 lookup registry slot。
       runtime = await factory({
         dataDir,
-        mainAgent,
-        mainAgents,
         runtimeId: 'zai-server',
         defaultCwd: cwd,
         defaultModel:

@@ -32,6 +32,7 @@ import {
   appendToolUse,
   appendToolResult,
   takeDisplayFilesOutput,
+  getAgentRegistry,
   type UserFacingPermissionMode,
 } from "@zn-ai/zn-agent-core";
 import { getDefaultMode } from "../services/permissionMode.js";
@@ -1097,12 +1098,24 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         if (transcript) {
           void getTranscriptStore()
             .patch(sessionId, { mainAgent: sessionMainAgent }, { cwd })
-            .catch(() => {
-              // 落盘失败不阻断 —— 下次 query 会再次尝试
-            });
         }
-      } catch {
-        // settings 读不到 → 保持 null,运行时回退到默认 agent
+      } catch (err) {
+        console.warn(`[prompt] failed to resolve mainAgent:`, err)
+      }
+    }
+    // zai patch (2026-08-29, plan §3.3): 把 sessionMainAgent 绑到
+    // AgentRegistry,让 per-session tools/systemPrompt 槽走
+    // registry.slot 派发(createOpenccRuntime/createPrintRuntime 内部
+    // 会 lookup getBoundAgentId(sessionId))。已有绑定由 restoreAllSessions
+    // 冷启动回灌,这里覆盖幂等。UnknownAgentError → 静默 skip(走 default pass-through)。
+    if (sessionMainAgent !== null) {
+      try {
+        getAgentRegistry().registryAgent(sessionId, sessionMainAgent)
+      } catch (err) {
+        console.warn(
+          `[prompt] registryAgent(${sessionId}, ${sessionMainAgent}) failed:`,
+          err,
+        )
       }
     }
 
@@ -1725,6 +1738,9 @@ router.delete('/agent/sessions/:id', async (req: Request, res: Response) => {
     await store.remove(req.params.id, { cwd: ctx.cwd })
     // 同时清掉 per-session cwd map(防内存泄漏 + 防止 stale data)
     CwdStore.delete(req.params.id)
+    // zai patch (2026-08-29, plan §3.5): unregistryAgent 释放
+    // AgentRegistry.sessionBindings 该 sid 条目,避免内存泄漏。
+    getAgentRegistry().unregistryAgent(req.params.id)
     res.json({ ok: true })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });
