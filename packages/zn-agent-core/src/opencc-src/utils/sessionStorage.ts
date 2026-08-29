@@ -3459,6 +3459,10 @@ function appendEntryToFile(
   const line = jsonStringify(entry) + '\n'
   if (project?._deferSynchronousAppend(fullPath, line)) return
   fs.mkdirSync(dirname(fullPath), { mode: 0o700 })
+  // withTranscriptFileLockSync does not consult asyncHeldLockCounts, so an
+  // in-flight async append on the same path will block until
+  // TRANSCRIPT_LOCK_WAIT_MS (30s) elapses and the sync caller fails open.
+  // Cross-mode contention is bounded by that deadline.
   withTranscriptFileLockSync(fullPath, () => {
     fs.appendFileSync(fullPath, line, { mode: 0o600 })
   })

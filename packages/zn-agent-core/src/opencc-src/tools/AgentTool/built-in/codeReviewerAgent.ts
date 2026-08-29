@@ -79,7 +79,7 @@ function getCodeReviewerTools(): string[] {
 export const CODE_REVIEWER_AGENT: BuiltInAgentDefinition = {
   agentType: 'code-reviewer',
   whenToUse:
-    'Independent code reviewer for changes, diffs, and pull requests. Provides balanced critique across correctness, security, performance, maintainability, and design. Use after completing a coding task or when asked to review specific changes. The caller must provide the diff or changed hunks inline in the prompt because this agent cannot run shell commands. Invoke with subagent_type: "code-reviewer".',
+    'Independent code reviewer for changes, diffs, and pull requests. Provides balanced critique across correctness, security, performance, maintainability, and design. Use after completing a coding task or when asked to review specific changes. The caller must provide the diff or changed hunks inline in the prompt because this agent cannot run shell commands. Invoke with subagent_type: "code-reviewer". Reviewer runs with no project CLAUDE.md context (clean slate) — it evaluates only what the inline diff and surrounding reads surface.',
   get tools() {
     return getCodeReviewerTools()
   },
