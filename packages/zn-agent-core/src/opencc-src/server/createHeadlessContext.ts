@@ -126,6 +126,15 @@ export interface CreateHeadlessContextOptions {
    * `zai dev --sdk` / `zai start --sdk`).
    */
   isInteractive?: boolean
+  /**
+   * zai patch (2026-08-29, plan §3.7.2): per-instance session id used
+   * to dispatch the main-agent tools / mcp slots. The inproc track
+   * (createPrintRuntime) calls `registryAgent(sessionId, agentId)` on
+   * the singleton registry before this factory runs, so the slot fns
+   * resolve against the bound agent. When undefined (legacy callers /
+   * tests), the slot dispatch pass-throughs with origin unchanged.
+   */
+  sessionId?: string
 }
 
 /**

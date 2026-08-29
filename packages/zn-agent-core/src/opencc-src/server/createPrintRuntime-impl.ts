@@ -332,6 +332,11 @@ export async function createPrintRuntimeImpl(options) {
         // zai patch (2026-08-29, plan §A): forward per-instance option so
         // the headless context can lock bypass availability. Default false.
         dangerouslySkipPermissions: options.dangerouslySkipPermissions,
+        // zai patch (2026-08-29, plan §3.7.2): forward per-instance sessionId
+        // so headless context can dispatch tools / mcp slot through
+        // AgentRegistry (Task 7). zai-server is expected to have
+        // registryAgent(sessionId, agentId) called before this point.
+        sessionId,
       }),
     )
     rec.ctx = ctx

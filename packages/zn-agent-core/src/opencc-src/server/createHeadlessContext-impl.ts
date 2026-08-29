@@ -40,6 +40,7 @@ import { installMacroStub } from '../../compat/openccInit.js'
 import { wrapAskUserQuestionToolAsOpencc } from '../../compat/tools/opencc/AskUserQuestionTool.js'
 import { getAgentDefinitionsWithOverrides } from '../tools/AgentTool/loadAgentsDir.js'
 import { getMcpToolsCommandsAndResources } from '../services/mcp/client.js'
+import { getAllMcpConfigs } from '../services/mcp/config.js'
 import { captureHooksConfigSnapshot } from '../utils/hooks/hooksConfigSnapshot.js'
 import { SandboxManager } from '../utils/sandbox/sandbox-adapter.js'
 import {
@@ -64,6 +65,10 @@ import { enableConfigs } from '../utils/config.js'
 import { getCanUseToolFn } from '../cli/print.js'
 import { wrapHeadlessPermissionFn } from './headlessPermissionBridge.js'
 import { getTools } from '../tools.js'
+// zai patch (2026-08-29, plan §3.7.2): inproc 链路 tools / mcp 槽接
+// AgentRegistry。走 ./index.js barrel 触发 esbuild 生成 local binding,
+// 避开 minify 后 call site TDZ(详见 Task 6 report §self-review 1)。
+import { getAgentRegistry } from './index.js'
 import { onTaskChanged } from '../utils/tasks.js'
 import { applyPermissionRulesToPermissionContext } from '../utils/permissions/permissions.js'
 import { loadAllPermissionRulesFromDisk } from '../utils/permissions/permissionsLoader.js'
@@ -232,7 +237,21 @@ export async function createHeadlessContextImpl(
   })
 
   // Step 8: built-in tool registry.
-  const tools: Tools = getTools(permissionContext as any)
+  // zai patch (2026-08-29, plan §3.7.2): tools 槽走 AgentRegistry 派发。
+  // 用 sync 直接 lookup(同 Task 6 模式):QueryEngine.tools: Tools 字段
+  // 要求 sync 数组,AgentSlotFn<T> 类型虽允许 Promise,builtin agent 的
+  // tools 槽都是 sync,这里假定 sync 满足;future async slot fn 需
+  // QueryEngine 改造 + 此处 await。
+  const sessionIdForSlot = options.sessionId ?? ''
+  const reg = getAgentRegistry()
+  const baseTools: Tools = getTools(permissionContext as any)
+  const tools: Tools = (() => {
+    const agentName = reg.getBoundAgentId(sessionIdForSlot)
+    if (!agentName) return baseTools
+    const agent = reg.resolveAgent(agentName)
+    const fn = agent?.slots?.tools as ((o: Tools, s: string) => Tools) | undefined
+    return fn ? fn(baseTools, sessionIdForSlot) : baseTools
+  })()
 
   // zai patch: load agent definitions BEFORE tools are wired into the
   // toolUseContext path. Vendor's CLI bootstrap populates
@@ -294,13 +313,25 @@ export async function createHeadlessContextImpl(
   }
   if (connectMcp) {
     try {
+      // zai patch (2026-08-29, plan §3.7.2): mcp 槽走 AgentRegistry 派发。
+      // 按 sessionId 查绑定 agent 的 mcp 槽,sync 调(builtin 不定义 mcp 槽,
+      // 实际是 pass-through);无 session 绑定或无 mcp 槽 → undefined(等同
+      // 现有行为,连全 scope servers)。
+      const agentName = reg.getBoundAgentId(sessionIdForSlot)
+      const mcpAgent = agentName ? reg.resolveAgent(agentName) : undefined
+      const mcpFn = mcpAgent?.slots?.mcp as
+        | ((o: Record<string, unknown>, s: string) => Record<string, unknown>)
+        | undefined
+      const mcpConfigs = mcpFn
+        ? mcpFn(await getAllMcpConfigs().then(c => c.servers), sessionIdForSlot)
+        : undefined
       await getMcpToolsCommandsAndResources(
         ({ client, tools: t, commands }) => {
           mcp.clients.push(client)
           mcp.tools.push(...t)
           mcp.commands.push(...commands)
         },
-        undefined,
+        mcpConfigs,
       )
       appState.setState((prev: any) => ({
         ...prev,
