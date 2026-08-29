@@ -134,8 +134,20 @@ export class AgentRegistryImpl implements AgentRegistry {
   unregistryAgent(sessionId: string): void {
     this.sessionBindings.delete(sessionId)
   }
-  slot<T>(_origin: T, _slotId: AgentSlotId, _sessionId: string): Promise<T> {
-    throw new Error('not implemented')
+  async slot<T>(origin: T, slotId: AgentSlotId, sessionId: string): Promise<T> {
+    const agentId = this.sessionBindings.get(sessionId)
+    if (agentId === undefined) {
+      throw new AgentNotBoundError(sessionId)
+    }
+    const agent = this.agents.get(agentId)
+    if (!agent) {
+      throw new AgentNotBoundError(sessionId) // 防御:已绑定但 agent 不存在
+    }
+    const fn = agent.slots[slotId]
+    if (!fn) {
+      return origin // pass-through
+    }
+    return (await fn(origin as never, sessionId)) as T
   }
   listAgents(): AgentConfig[] {
     return Array.from(this.agents.values())
