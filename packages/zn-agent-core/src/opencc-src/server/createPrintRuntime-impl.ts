@@ -30,6 +30,7 @@
  */
 import { randomUUID } from 'node:crypto'
 import { createHeadlessContextImpl } from './createHeadlessContext-impl.js'
+import { wrapTaskAwareSetState, readZaiCurrentSessionId } from '../../compat/runtime/agentTaskBridge.js'
 // zai patch (2026-08-29, plan §3.7.2): inproc 链路 systemPrompt 槽走
 // AgentRegistry。base 用 vendor getSystemPrompt(tools, model) 拼,sync 查
 // 绑定 agent 的 systemPrompt 槽 fn,joined string 作为 options.systemPrompt
