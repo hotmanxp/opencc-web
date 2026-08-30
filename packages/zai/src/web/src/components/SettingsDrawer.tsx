@@ -646,10 +646,10 @@ function formatValue(row: SettingsRow): string {
 
 type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 
-// 核心运行时(zai patch 2026-08-28 命名统一):settings.coreRuntime 三态。
+// 核心运行时(zai patch 2026-08-28 命名统一):settings.coreRuntime 四态。
 // 实际生效优先级:--coreRuntime flag / env ZAI_CORE_RUNTIME > 本设置;且
 // 运行时只在服务启动 initAgentRuntime 时解析一次,改后需重启实例生效。
-type CoreRuntimeOption = 'default' | 'inproc' | 'spawn'
+type CoreRuntimeOption = 'default' | 'inproc' | 'spawn' | 'repl'
 
 // 阶段 1 schema:对齐 spec 表里的 Model / Permission / Theme / Env Vars 字段,
 // 但用 opencc /config 风格文本行代替 Tabs + Form。
@@ -882,6 +882,7 @@ function buildStaticSchema(
             { value: 'default', label: 'default(默认)', description: '进程内 query 链路 · 重启后生效' },
             { value: 'inproc', label: 'inproc', description: 'in-process print 多 session 运行时 · 重启后生效' },
             { value: 'spawn', label: 'spawn', description: '子进程 SessionRegistry · 重启后生效' },
+            { value: 'repl', label: 'repl', description: 'ReplRuntime (P3.1 委托 shared OpenccRuntime) · 重启后生效' },
           ],
         },
       ],
@@ -977,7 +978,8 @@ export default function SettingsDrawer() {
         if (
           data.coreRuntime === 'default' ||
           data.coreRuntime === 'inproc' ||
-          data.coreRuntime === 'spawn'
+          data.coreRuntime === 'spawn' ||
+          data.coreRuntime === 'repl'
         ) {
           setCoreRuntime(data.coreRuntime)
         }

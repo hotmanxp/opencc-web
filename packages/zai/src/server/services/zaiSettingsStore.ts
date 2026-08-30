@@ -244,15 +244,20 @@ export function resolveCoreRuntime(
   settings: ZaiSettings,
 ): CoreRuntime {
   const s = settings.coreRuntime
-  if (s === 'inproc' || s === 'spawn' || s === 'default') return s
-  return 'default'
+  if (s === 'inproc' || s === 'spawn' || s === 'default' || s === 'repl') return s
+  return 'repl'
 }
 
 /** Validate a candidate coreRuntime value before persisting. */
 export function isValidCoreRuntime(
   value: unknown,
 ): value is CoreRuntime {
-  return value === 'default' || value === 'inproc' || value === 'spawn'
+  return (
+    value === 'default' ||
+    value === 'inproc' ||
+    value === 'spawn' ||
+    value === 'repl'
+  )
 }
 
 /**

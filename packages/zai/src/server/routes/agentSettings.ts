@@ -364,8 +364,8 @@ router.put('/agent/settings/main-agent', async (req: Request, res: Response) => 
 
 /**
  * PUT /api/agent/settings/core-runtime — 持久化核心运行时开关
- * (zai patch 2026-08-28 命名统一)。Body 是
- * `{ coreRuntime: 'default' | 'inproc' | 'spawn' }`,写入 settings.coreRuntime。
+ * (zai patch 2026-08-28 命名统一,P3.1 加 'repl')。Body 是
+ * `{ coreRuntime: 'default' | 'inproc' | 'spawn' | 'repl' }`,写入 settings.coreRuntime。
  *
  * 生效时机:**重启实例后**——运行时在 `initAgentRuntime` 只解析一次;且
  * env `ZAI_CORE_RUNTIME` / `--coreRuntime` flag 优先级更高,会盖过本设置。

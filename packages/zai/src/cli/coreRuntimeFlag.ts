@@ -14,6 +14,7 @@
  *   - 'default' → 强制轻量 in-process createOpenccRuntime
  *   - 'inproc'  → 强制 in-process print 多 session 运行时
  *   - 'spawn'   → 强制 spawn `opencc -p` 子进程(SessionHost)
+ *   - 'repl'    → 强制 ReplRuntime(P3 stub / P3.1 shared OpenccRuntime 委托,见 agentRuntime.ts:578)
  *   - undefined → 不动 env(把决定权交给 settings.json / 父进程 env)
  */
 import type { CoreRuntime } from '../shared/settings.js';
@@ -22,6 +23,7 @@ const VALID_VALUES: ReadonlySet<CoreRuntime> = new Set<CoreRuntime>([
   'default',
   'inproc',
   'spawn',
+  'repl',
 ])
 
 // zai patch (2026-08-28): `enableOpenccConfigs()` 在 `initAgentRuntime` 内会
@@ -50,7 +52,7 @@ export function applyCoreRuntimeFlag(raw: string | undefined): void {
   }
   if (!VALID_VALUES.has(raw as CoreRuntime)) {
     console.error(
-      `[zai] error: --coreRuntime expected one of [default, inproc, spawn], got '${raw}'`,
+      `[zai] error: --coreRuntime expected one of [default, inproc, spawn, repl], got '${raw}'`,
     )
     process.exit(2)
   }
