@@ -588,9 +588,31 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     },
 
     async interrupt(reason?: string): Promise<void> {
-      // P0: just record intent; P1 wires to vendor control_request{interrupt}.
+      // zai patch (2026-08-30, plan P3): graceful interrupt path. Sets
+      // isRunning=false so a follow-up submit() can re-enter the runTurn
+      // loop, signals any in-flight query via
+      // OnQueryStateMachine.signalInterrupt(), and emits a synthetic
+      // turnEnd so ReplRuntime's onEvent listener converts it to
+      // runtime.done (not runtime.error). Wraps everything in try/catch
+      // and never throws — idempotent so a duplicate ESC during
+      // already-aborting flow doesn't error the session. Spec §4.2.
       if (isDisposed) return
-      emitLifecycle('abort', { reason })
+      try {
+        isRunning = false
+        if (onQuery && typeof (onQuery as any).signalInterrupt === 'function') {
+          ;(onQuery as any).signalInterrupt(reason ?? 'interrupted')
+        }
+        emitReplEvent('turnEnd', {
+          turnIndex,
+          reason: 'interrupted',
+          interruptedReason: reason,
+        })
+      } catch (err) {
+        console.warn(
+          `[createReplSession ${sessionId}] interrupt threw (non-fatal):`,
+          err,
+        )
+      }
     },
 
     async endSession(reason?: string): Promise<void> {

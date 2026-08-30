@@ -44,14 +44,30 @@ type OnQueryOpts = {
   guard: { state: { tryStart(): number | null; end(gen: number): boolean; isActive(): boolean }; teardown(): void }
 }
 
+// zai patch (2026-08-30, plan P3): track an in-flight interruption flag
+// so session.interrupt() can break out of an active query loop without
+// throwing. start() resets the flag; signalInterrupt(reason) sets it
+// (idempotent — repeated signals are fine); isInterrupted() exposes
+// the current state. The flag is opt-in: callers that don't consult
+// it behave exactly as before. Spec §4.2.
 export class OnQueryStateMachine {
+  private interrupted = false
   constructor(private opts: OnQueryOpts) {}
 
   start(opts: any): number | null {
     const gen = this.opts.guard.state.tryStart()
     if (gen === null) return null
+    this.interrupted = false
     // Actual query loop runs in OnQueryImplStateMachine
     return gen
+  }
+
+  signalInterrupt(reason: string): void {
+    this.interrupted = true
+  }
+
+  isInterrupted(): boolean {
+    return this.interrupted
   }
 }
 
