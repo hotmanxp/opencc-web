@@ -26,6 +26,8 @@ import {
   isKnownSlashCommand,
 } from '@zn-ai/zn-agent-core'
 
+import type { OpenccRuntime } from '@zn-ai/zn-agent-core'
+
 // 客户端约定的事件形态(从 routes/agent.ts ServerEventInput 抽出最常用字段)。
 type RuntimeEvent = {
   type: string
@@ -43,23 +45,105 @@ type RuntimeEvent = {
   ts?: number
 }
 
+// zai patch (2026-08-30, plan P3.1-T1): OpenccRuntime.query 产出的事件由
+// vendor sdkEventAdapter (translateSdkToRuntime) 翻译为 Anthropic primitives
+// (message_start / content_block_* / message_stop / tool_use:* / result)。
+// routes/agent.ts 的 translateRuntimeEvents 知道这套词汇;ReplRuntime
+// 透传即可,不再自己生成 runtime.* 包装事件(那是 P3 stub 的折中,P3.1
+// 起交给 OpenccRuntime 真产出)。事件字段用 indexed map 表示,运行时由
+// translateRuntimeEvents 按 type 字段分支处理。
+
 export class ReplRuntime {
+  // zai patch (2026-08-30, plan P3.1-T1): shared OpenccRuntime 由
+  // services/agentRuntime.ts init 时构造,挂进本类。query() 优先委托给它;
+  // 未提供时(单元测试 / 渐进迁移场景)走原 createReplSession 路径。
+  constructor(private readonly openccRuntime?: OpenccRuntime) {}
+
   private sessions = new Map<string, ReturnType<typeof createReplSession>>()
   private eventQueues = new Map<string, RuntimeEvent[]>()
   private queueWaiters = new Map<string, Array<(ev: RuntimeEvent) => void>>()
 
   /**
-   * query() 是 zai 路由层的输入接口。它是 async generator,把 session
-   * 在 onEvent 钩子里 emit 的 ReplEvent 转成 runtime.* 事件后透传给消费者。
-   * 不调 vendor query() — P2 才接。
+   * query() 是 zai 路由层的输入接口。它是 async generator。
+   *
+   * zai patch (2026-08-30, plan P3.1-T1): 当构造时注入了 shared
+   * `openccRuntime`,非 slash 命令直接委托给它,由 vendor
+   * sdkEventAdapter (translateSdkToRuntime) 产出 Anthropic primitives
+   * (message_start / content_block_* / message_stop / tool_use:*) ——
+   * routes/agent.ts 的 translateRuntimeEvents 已经知道这套词汇。slash
+   * 命令继续走 P3 stub 路径(/loop /swarm /send /unknown)产
+   * runtime.notification + runtime.done,不动 OpenccRuntime。
+   *
+   * P3 旧路径(未注入 openccRuntime)保留兜底:把 input.prompt 推进
+   * createReplSession 的 stub,onEvent 队列里累积的 ReplEvent 被本层包装
+   * 成 runtime.* 透传给消费者。22 pre-existing test failures 不增不减。
    */
   async *query(input: any): AsyncGenerator<RuntimeEvent> {
+    // zai patch (2026-08-30, plan P3): slash command 路由先于所有其他
+    // 分支。识别 /-prefix prompt 后立即产出 notification + done,不走
+    // normal turn;不调真 handler,永不 yield runtime.error。openccRuntime
+    // 是否注入都不影响该路径。
+    const slash = parseSlashCommand(typeof input.prompt === 'string' ? input.prompt : '')
+    if (slash) {
+      const turnIndexForSlash =
+        typeof input.turnIndex === 'number' ? input.turnIndex : 0
+      if (isKnownSlashCommand(slash.command)) {
+        yield {
+          type: 'runtime.notification',
+          sessionId: input.sessionId,
+          turnIndex: turnIndexForSlash,
+          kind: `${slash.command}-scheduled`,
+          payload: { args: slash.args, raw: slash.raw },
+          ts: Date.now(),
+        } as RuntimeEvent
+      } else {
+        // Unknown slash command — emit unknown-event, NO runtime.error
+        yield {
+          type: 'runtime.notification',
+          sessionId: input.sessionId,
+          turnIndex: turnIndexForSlash,
+          kind: 'unknown-command',
+          payload: { command: slash.command, args: slash.args },
+          ts: Date.now(),
+        } as RuntimeEvent
+      }
+      yield {
+        type: 'runtime.done',
+        sessionId: input.sessionId,
+        turnIndex: turnIndexForSlash,
+        apiRequestCount: 0,
+        ts: Date.now(),
+      } as RuntimeEvent
+      return
+    }
+
+    // zai patch (2026-08-30, plan P3.1-T1): 委托 shared OpenccRuntime。
+    // vendor 内部跑 sdkEventAdapter,产出 Anthropic primitives;本层只透传。
+    // 不再 yield 包装的 runtime.* — 那会让 routes/agent.ts 看到两层事件,
+    // translateRuntimeEvents 会重复吃 message_start / content_block_* 错乱。
+    if (this.openccRuntime) {
+      try {
+        for await (const ev of this.openccRuntime.query(input)) {
+          yield ev as RuntimeEvent
+        }
+      } catch (err) {
+        // openccRuntime.query 抛错(例如网络失败 / model 401)— 转成
+        // runtime.error 让 translateRuntimeEvents 把它包装成 SSE error event。
+        const msg = err instanceof Error ? err.message : String(err)
+        yield {
+          type: 'runtime.error',
+          sessionId: input.sessionId,
+          turnIndex: typeof input.turnIndex === 'number' ? input.turnIndex : 0,
+          error: { message: msg },
+          ts: Date.now(),
+        } as RuntimeEvent
+      }
+      return
+    }
+
+    // P3 旧路径兜底:无 openccRuntime 注入时走 createReplSession stub。
+    // 单元测试(slashCommands / agentRuntime.repl.test)在此路径验证。
     const session = await this.getOrCreate(input.sessionId)
-    // 把 input.prompt 推进 session(同步,stub 实现);real submit 应在后台跑。
-    // 真 submit 是异步,这里 await 等 stub 完成 + emit turnStart/turnEnd。
-    // 为避免 await session.submit(input.prompt) 把整个 turn 卡死,我们
-    // 立刻 yield runtime.started,然后 async-poll event queue 直到
-    // 看到 turnEnd 或 runtime.done,最后 yield runtime.done。
     const turnIndex = (session.getState().turnIndex ?? 0) + 1
     yield {
       type: 'runtime.started',
@@ -83,42 +167,6 @@ export class ReplRuntime {
         ts: Date.now(),
       })
     })
-
-    // zai patch (2026-08-30, plan P3): slash command 路由。
-    // 识别 /-prefix prompt 后立即产出 notification + done,不走 normal turn。
-    // 不调真 handler(P3.1+ 接真实现),永不 yield runtime.error。
-    const slash = parseSlashCommand(typeof input.prompt === 'string' ? input.prompt : '')
-    if (slash) {
-      if (isKnownSlashCommand(slash.command)) {
-        yield {
-          type: 'runtime.notification',
-          sessionId: input.sessionId,
-          turnIndex,
-          kind: `${slash.command}-scheduled`,
-          payload: { args: slash.args, raw: slash.raw },
-          ts: Date.now(),
-        } as RuntimeEvent
-      } else {
-        // Unknown slash command — emit unknown-event, NO runtime.error
-        yield {
-          type: 'runtime.notification',
-          sessionId: input.sessionId,
-          turnIndex,
-          kind: 'unknown-command',
-          payload: { command: slash.command, args: slash.args },
-          ts: Date.now(),
-        } as RuntimeEvent
-      }
-      yield {
-        type: 'runtime.done',
-        sessionId: input.sessionId,
-        turnIndex,
-        apiRequestCount: 0,
-        ts: Date.now(),
-      } as RuntimeEvent
-      await submitPromise.catch(() => {})
-      return
-    }
 
     // 透传 onEvent 队列里的事件,直到 turnEnd 或 runtime.done
     while (true) {

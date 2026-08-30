@@ -40,6 +40,7 @@ import {
 import type { createOpenccRuntime as _factory } from '@zn-ai/zn-agent-core'
 type OpenccRuntime = Awaited<ReturnType<typeof _factory>>
 import { ReplRuntime } from './agentRuntime.repl.js'
+import { setOpenccRuntime } from './openccServer.js'
 import { eventBus } from './eventBus.js'
 import {
   startMemoryWatcher,
@@ -577,21 +578,47 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // Spec: docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1.
   if (coreRuntime === 'repl') {
     try {
-      // ReplRuntime implements a partial OpenccRuntime shape (query /
-      // abort / enqueue / interrupt / getSessionState / shutdown).
-      // The full V1 8-method contract (getSession, listSessions,
-      // readTranscript, patchSession, etc.) is NOT in scope for P1;
-      // route handlers capability-probe before calling it. The
-      // structural cast below keeps the `runtime` singleton's type
-      // narrow without forcing the adapter to backfill methods
-      // routes never call on the repl branch.
-      runtime = new ReplRuntime() as unknown as OpenccRuntime
+      // zai patch (2026-08-30, plan P3.1-T1): ReplRuntime 现在是 OpenccRuntime
+      // 的薄包装,而不是 createReplSession 的独立适配器。先构造 shared
+      // OpenccRuntime(供 routes/sessions.ts 的 5 个 RESTful 端点直接调用
+      // 8-method 契约),再注入到 ReplRuntime.query()。ReplRuntime 在
+      // openccRuntime.query() 不存在时(单元测试场景)回落到原 P3 stub 路径。
+      const { createOpenccRuntime: createOpenccRuntimeFactory } = await import(
+        '@zn-ai/zn-agent-core'
+      )
+      const sharedOpenccRuntime = await createOpenccRuntimeFactory({
+        dataDir,
+        runtimeId: 'zai-server',
+        defaultCwd: cwd,
+        defaultModel:
+          process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
+          ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
+        // zai-server: skip MCP bootstrap so the headless runtime comes up
+        // even if user's `~/.zai.json` blocks MCP connect. QueryEngine's
+        // per-query MCP refresh + /mcp slash command reconnect on demand.
+        connectMcp: false,
+        interactive: !(isSdk ?? false),
+      })
+      // Set on the singleton holder so routes/sessions.ts can call
+      // listSessions / getSession / readTranscript / patchSession /
+      // removeSession directly without going through the ReplRuntime
+      // adapter layer.
+      setOpenccRuntime(sharedOpenccRuntime)
+      // ReplRuntime implements a partial OpenccRuntimeV2 shape (query /
+      // abort / enqueue / interrupt / getSessionState / shutdown). With
+      // sharedOpenccRuntime injected, query() delegates to it; without it,
+      // query() falls back to the P3 stub (createReplSession). The full
+      // V1 8-method contract (getSession, listSessions, readTranscript,
+      // patchSession, removeSession) is now served via getOpenccRuntime()
+      // for routes/sessions.ts rather than through this adapter.
+      runtime = new ReplRuntime(sharedOpenccRuntime) as unknown as OpenccRuntime
       const cleanup = () => {
         if (runtime) void runtime.shutdown()
+        void sharedOpenccRuntime.shutdown().catch(() => {})
       }
       process.once('SIGTERM', cleanup)
       process.once('SIGINT', cleanup)
-      console.log(`[initAgentRuntime] repl runtime 就绪`)
+      console.log(`[initAgentRuntime] repl runtime 就绪(shared OpenccRuntime wired)`)
     } catch (err) {
       console.error('[initAgentRuntime] ReplRuntime init failed:', err)
       throw err
