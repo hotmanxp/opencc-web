@@ -93,7 +93,7 @@ describe('createReplSession smoke', () => {
     rmSync(tmpDir, { recursive: true, force: true })
   })
 
-  it('creates a session and reports correct initial state', () => {
+  it('creates a session and reports correct initial state', async () => {
     const session = createReplSession({
       sessionId: `s-${randomUUID()}`,
       cwd: tmpDir,
@@ -107,7 +107,7 @@ describe('createReplSession smoke', () => {
     expect(state.isDisposed).toBe(false)
     expect(state.turnIndex).toBe(0)
 
-    session.dispose()
+    await session.dispose()
   })
 
   it('submit increments turnIndex and emits turnStart+turnEnd events', async () => {
@@ -152,7 +152,7 @@ describe('createReplSession smoke', () => {
     await session.dispose()
   })
 
-  it('on returns an unsubscribe function and is idempotent', () => {
+  it('on returns an unsubscribe function and is idempotent', async () => {
     const session = createReplSession({
       sessionId: `s-${randomUUID()}`,
       cwd: tmpDir,
@@ -163,7 +163,7 @@ describe('createReplSession smoke', () => {
     expect(typeof unsub).toBe('function')
     expect(() => unsub()).not.toThrow()
     expect(() => unsub()).not.toThrow() // idempotent
-    session.dispose()
+    await session.dispose()
   })
 
   it('lifecycle subscriber receives turnEnd payload', async () => {
