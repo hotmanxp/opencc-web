@@ -193,3 +193,15 @@ export { apply as applyClaudeCodeProvider } from './compat/subagents/claude-code
 // zai patch (2026-08-30, plan P0): createReplSession value export from main
 // entry. Bundle consumers can import directly.
 export { createReplSession } from './compat/repl/index.js'
+// zai patch (2026-08-30, plan P3): slash command parser + whitelist —
+// ReplRuntime.query() imports parseSlashCommand + isKnownSlashCommand to
+// route /-prefixed prompts to stub handlers.
+export {
+  parseSlashCommand,
+  KNOWN_SLASH_COMMANDS,
+  isKnownSlashCommand,
+} from './compat/repl/setup/setupCommandQueue.js'
+export type {
+  ParsedSlashCommand,
+  KnownSlashCommand,
+} from './compat/repl/setup/setupCommandQueue.js'

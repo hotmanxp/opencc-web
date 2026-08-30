@@ -11,9 +11,20 @@
  * 只 emit turnStart/turnEnd + sessionStart/sessionEnd;我们在这层包
  * runtime.started/runtime.done,让 routes/agent.ts 的 for-await 链路
  * 不再 f.map 抛错。P2 替换为 vendor query() 真实集成。
+ *
+ * zai patch (2026-08-30, plan P3): slash command 路由。
+ * /-prefixed prompt 在 submit 后立即识别,已知命令(loop/swarm/send)
+ * yield `kind: '<cmd>-scheduled'` notification + runtime.done;未知
+ * slash yield `kind: 'unknown-command'` notification + runtime.done。
+ * 永不 yield runtime.error — Path 4/7/8 12-path 验证 fail 的根因。
+ * 非 slash prompt 走原路径不变。
  */
 
-import { createReplSession } from '@zn-ai/zn-agent-core'
+import {
+  createReplSession,
+  parseSlashCommand,
+  isKnownSlashCommand,
+} from '@zn-ai/zn-agent-core'
 
 // 客户端约定的事件形态(从 routes/agent.ts ServerEventInput 抽出最常用字段)。
 type RuntimeEvent = {
@@ -72,6 +83,42 @@ export class ReplRuntime {
         ts: Date.now(),
       })
     })
+
+    // zai patch (2026-08-30, plan P3): slash command 路由。
+    // 识别 /-prefix prompt 后立即产出 notification + done,不走 normal turn。
+    // 不调真 handler(P3.1+ 接真实现),永不 yield runtime.error。
+    const slash = parseSlashCommand(typeof input.prompt === 'string' ? input.prompt : '')
+    if (slash) {
+      if (isKnownSlashCommand(slash.command)) {
+        yield {
+          type: 'runtime.notification',
+          sessionId: input.sessionId,
+          turnIndex,
+          kind: `${slash.command}-scheduled`,
+          payload: { args: slash.args, raw: slash.raw },
+          ts: Date.now(),
+        } as RuntimeEvent
+      } else {
+        // Unknown slash command — emit unknown-event, NO runtime.error
+        yield {
+          type: 'runtime.notification',
+          sessionId: input.sessionId,
+          turnIndex,
+          kind: 'unknown-command',
+          payload: { command: slash.command, args: slash.args },
+          ts: Date.now(),
+        } as RuntimeEvent
+      }
+      yield {
+        type: 'runtime.done',
+        sessionId: input.sessionId,
+        turnIndex,
+        apiRequestCount: 0,
+        ts: Date.now(),
+      } as RuntimeEvent
+      await submitPromise.catch(() => {})
+      return
+    }
 
     // 透传 onEvent 队列里的事件,直到 turnEnd 或 runtime.done
     while (true) {
