@@ -190,15 +190,6 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     onNotification: n => emitReplEvent('notification', { kind: n.kind, payload: n.payload }),
   })
 
-  // zai patch (2026-08-30, plan P2, Task 4): kick the api-key check at
-  // construct time so the host sees a `notification` ReplEvent with
-  // `payload.type === 'apiKeyOk'` synchronously after createReplSession
-  // returns. Mirrors REPL.tsx's `useApiKeyVerification` running on
-  // mount. Subsequent re-checks (e.g. after a key rotation) call
-  // apiKeyHandle.verify() directly via the accessor. Failures are
-  // swallowed — verify() already short-circuits when disposed.
-  void apiKeyHandle.verify()
-
   // zai patch (2026-08-30, plan P2, Task 4): ElicitationRegistry — vendor
   // MCP code paths need a place to dispatch form/url requests and await
   // the user's answer. The host (zai web) supplies the concrete
