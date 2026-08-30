@@ -717,6 +717,14 @@ export async function createPrintRuntimeImpl(options) {
             continue
           }
           for (const ev of translateSdkToRuntime(msg, adapterMeta)) {
+            if (process.env.ZAI_DEBUG_SSE === '1') {
+              // zai patch (2026-08-30): trace every spec event yielded
+              // out of translateSdkToRuntime so we can see whether the
+              // new turn (task-notification triggered) is even reaching
+              // the generator — independent of agent.ts eventBus.emit.
+              // eslint-disable-next-line no-console
+              console.log('[core-yield]', ev.type, 'turnIndex=' + ((ev as { turnIndex?: number }).turnIndex ?? '-'))
+            }
             yield ev
           }
           adapterMeta.eventCounter++
