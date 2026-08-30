@@ -636,6 +636,46 @@ const ToolCallBlock = React.memo(function ToolCallBlock({ msg }: { msg: AgentMes
                 )}
                 {output !== undefined && output !== null && (
                   <div style={{ marginBottom: 8 }}>
+                    {/* zai patch (2026-08-30): 等待子代理返回中卡片。
+                        派发 async Agent 后,主 LLM 阻塞等 <task-notification>
+                        续写 — 期间不显示空 output 区域,而是显示"⏳ 等待
+                        子代理返回中...",让用户看到进度。新 turn 起点
+                        (useAgentStore runtime.started 分支) 清空
+                        awaitingSubagents map,这个卡片随之消失。 */}
+                    {status === 'done' &&
+                      (msg as { awaitingSubagent?: boolean }).awaitingSubagent && (
+                      <div
+                        data-testid="awaiting-subagent"
+                        style={{
+                          fontSize: 12,
+                          padding: '6px 10px',
+                          marginBottom: 6,
+                          background:
+                            'var(--info-bg, rgba(22,119,255,0.06))',
+                          borderLeft:
+                            '2px solid var(--accent-start, #1677ff)',
+                          borderRadius: 4,
+                          color: 'var(--text-secondary)',
+                          display: 'flex',
+                          alignItems: 'center',
+                          gap: 6,
+                        }}
+                      >
+                        <span style={{ fontSize: 14 }}>⏳</span>
+                        <span>等待子代理返回中…</span>
+                        {(msg as { awaitingAgentId?: string }).awaitingAgentId && (
+                          <Text
+                            type="secondary"
+                            style={{ fontSize: 11, marginLeft: 4 }}
+                          >
+                            (agent=
+                            {(msg as { awaitingAgentId?: string })
+                              .awaitingAgentId}
+                            )
+                          </Text>
+                        )}
+                      </div>
+                    )}
                     <Text
                       type="secondary"
                       style={{

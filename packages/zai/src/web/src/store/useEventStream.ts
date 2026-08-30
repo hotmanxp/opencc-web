@@ -42,6 +42,13 @@ let pending: ServerEvent[] = []
 let scheduled = false
 
 export function enqueue(event: ServerEvent): void {
+  if (process.env.NODE_ENV !== 'production' || typeof window !== 'undefined') {
+    // zai patch (2026-08-30): diagnostic log to trace which runtime events
+    // arrive from the inproc-print path. Used to root-cause "Agent 完成"
+    // follow-up not rendering until manual refresh.
+    // eslint-disable-next-line no-console
+    console.log('[sse]', event.type, 'turnIndex=' + ((event as { turnIndex?: number }).turnIndex ?? '-'), 'seq=' + (event as { seq?: number }).seq)
+  }
   pending.push(event)
   if (scheduled) return
   scheduled = true

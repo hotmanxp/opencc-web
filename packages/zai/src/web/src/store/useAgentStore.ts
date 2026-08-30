@@ -66,6 +66,46 @@ function dataURLtoBlob(dataUrl: string): Blob | null {
   return new Blob([arr], { type: mime })
 }
 
+// zai patch (2026-08-30): detect async-agent dispatch from AgentTool's
+// tool_result. Output can be:
+//  - a stringified JSON containing `status: "async_launched"` (vendor's
+//    inproc path stringifies tool_result content for display),
+//  - a plain object with the same shape (legacy / unwrapped path),
+//  - a string that includes "Async agent launched successfully" (text
+//    fallback when the content isn't structured).
+// Any of these signals means the agent is running in the background and
+// the main LLM is waiting for the <task-notification> follow-up — show
+// a placeholder card so the user isn't staring at a frozen transcript.
+function isAsyncLaunchedOutput(output: unknown): boolean {
+  if (output == null) return false
+  if (typeof output === 'string') {
+    return (
+      output.includes('"status":"async_launched"') ||
+      output.includes('"status": "async_launched"') ||
+      output.includes('Async agent launched successfully')
+    )
+  }
+  if (typeof output === 'object') {
+    const o = output as { status?: unknown; isAsync?: unknown }
+    return o.status === 'async_launched' || o.isAsync === true
+  }
+  return false
+}
+
+function extractAgentId(output: unknown): string | undefined {
+  if (output == null) return undefined
+  const tryStr = (s: string) => {
+    const m = s.match(/"agentId"\s*:\s*"([^"]+)"/)
+    return m?.[1]
+  }
+  if (typeof output === 'string') return tryStr(output)
+  if (typeof output === 'object') {
+    const id = (output as { agentId?: unknown }).agentId
+    if (typeof id === 'string' && id.length > 0) return id
+  }
+  return undefined
+}
+
 // RuntimeEvent: shape of events produced by the SSE pipeline.
 // Kept locally since sseAgent.ts is deleted; matches what loadTranscript
 // constructs for user.text / assistant.text / tool_use:* history events.
@@ -228,6 +268,11 @@ interface AgentState {
   // 执行(从 pending 消失)时移入 transcript。
   queuedPrompts: QueuedPrompt[]
   abortController: AbortController | null
+  // zai patch (2026-08-30): key = toolUseId. 派发 async Agent 后,
+  // 等待主 LLM 处理 <task-notification> 续写期间,UI 显示"等待子代理
+  // 返回中..."卡片。新 turn 起点(runtime.started, prevStatus='idle')
+  // 清空整个 map。
+  awaitingSubagents: Record<string, true>
   pendingAsk: AskState | null
   pendingApprove: ApproveState | null
   pendingPermission: PermissionState | null
@@ -547,6 +592,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   cwd: '',
   messages: [],
   status: 'idle',
+  awaitingSubagents: {},
   queuedPrompts: [],
   abortController: null,
   pendingAsk: null,
@@ -1450,6 +1496,10 @@ export const useAgentStore = create<AgentState>((set, get) => ({
             activeSessionId: sid,
             status: 'streaming',
             textSegmentRev: s.textSegmentRev + 1,
+            // zai patch (2026-08-30): SubagentNotifier 触发的 sub-agent 续写
+            // 也走新 turn — 把之前 tool_use:done 上挂的 awaitingSubagent
+            // 标记全部清掉,让等待卡片消失,新 turn 的 content 自然显示。
+            awaitingSubagents: {} as Record<string, true>,
           }))
         }
         // zai patch (2026-08-09): 把 metrics 更新挂在 runtime.started 上。
@@ -1547,6 +1597,14 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       case 'runtime.tool_result': {
         // runtime.tool_result schema 携带 toolUseId / toolName / input
         // (2026-07-18 加 toolName/input: 前端 upsertToolCall 守卫要靠这
+        //
+        // zai patch (2026-08-30): when the tool result is an async agent
+        // launch (AgentTool with run_in_background, fork-spawn, or
+        // backgrounded-mid-execution), mark the message so the transcript
+        // can render a "等待子代理返回中..." placeholder. Without this the
+        // user sees the tool_use card flip to "done" immediately and the
+        // transcript looks static for 5+s until the follow-up lands.
+        const isAsyncLaunched = isAsyncLaunchedOutput(event.output)
         const resultMsg: AgentMessage = {
           eventId: `tool-${event.toolUseId}`,
           sessionId: sid,
@@ -1558,6 +1616,9 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           name: event.toolName,
           input: event.input as Record<string, unknown>,
           output: event.output,
+          ...(isAsyncLaunched
+            ? { awaitingSubagent: true, awaitingAgentId: extractAgentId(event.output) }
+            : {}),
         }
         useAgentStore.getState().upsertToolCall(resultMsg)
         return
