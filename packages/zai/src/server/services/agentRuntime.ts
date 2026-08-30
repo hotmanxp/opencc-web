@@ -39,6 +39,7 @@ import {
 // headless bootstrap code that takes ~5s to transform).
 import type { createOpenccRuntime as _factory } from '@zn-ai/zn-agent-core'
 type OpenccRuntime = Awaited<ReturnType<typeof _factory>>
+import { ReplRuntime } from './agentRuntime.repl.js'
 import { eventBus } from './eventBus.js'
 import {
   startMemoryWatcher,
@@ -563,12 +564,43 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   const settings = await readZaiSettings()
   const coreRuntime = resolveCoreRuntime(settings)
   activeCoreRuntime = coreRuntime
+
+  // zai patch (2026-08-30, plan P1, Task 9): three-way kernel switch
+  // (off / inproc / repl) reads ZAI_RUNTIME_KERNEL env or
+  // settings.runtime.kernel. repl branch instantiates ReplRuntime which
+  // wraps createReplSession as OpenccRuntimeV2 adapter. Default 'off'
+  // preserves existing behavior. Precedence: env > settings > 'off'.
+  // Spec: docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1.
+  const kernel =
+    process.env.ZAI_RUNTIME_KERNEL
+    ?? (settings as { runtime?: { kernel?: string } }).runtime?.kernel
+    ?? 'off'
+  if (kernel === 'repl') {
+    try {
+      // ReplRuntime implements a partial OpenccRuntime shape (query /
+      // abort / enqueue / interrupt / getSessionState / shutdown).
+      // The full V1 8-method contract (getSession, listSessions,
+      // readTranscript, patchSession, etc.) is NOT in scope for P1;
+      // route handlers capability-probe before calling it. The
+      // structural cast below keeps the `runtime` singleton's type
+      // narrow without forcing the adapter to backfill methods
+      // routes never call on the repl branch.
+      runtime = new ReplRuntime() as unknown as OpenccRuntime
+      const cleanup = () => {
+        if (runtime) void runtime.shutdown()
+      }
+      process.once('SIGTERM', cleanup)
+      process.once('SIGINT', cleanup)
+      console.log(`[initAgentRuntime] repl runtime 就绪`)
+    } catch (err) {
+      console.error('[initAgentRuntime] ReplRuntime init failed:', err)
+      throw err
+    }
+  } else if (coreRuntime === 'spawn') {
   // 启动日志显式标注运行时路径(双轨监控埋点,spec §5.6.5)。
   console.log(
     `[initAgentRuntime] coreRuntime=${coreRuntime} cwd=${cwd} (ZAI_CORE_RUNTIME=${process.env.ZAI_CORE_RUNTIME ?? 'unset'})`,
   )
-
-  if (coreRuntime === 'spawn') {
     const { createSessionFacade } = await import('@zn-ai/zn-agent-core')
     const { SessionRegistry } = await import('./sessionHost/SessionRegistry.js')
     const { SessionHostRuntimeAdapter } = await import(
