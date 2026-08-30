@@ -1,6 +1,6 @@
 // @ts-nocheck
 /**
- * zai patch (2026-08-08-30, plan P0): L2 state machine — QueryGuardState.
+ * zai patch (2026-08-30, plan P0): L2 state machine — QueryGuardState.
  * Wraps vendor QueryGuard class as standalone (no React) for createReplSession.
  * Same generation-token semantics; usable from imperative code.
  *
@@ -17,6 +17,7 @@ import {
   QueryGuard,
   type QueryGuardOptions,
 } from '../../../opencc-src/utils/QueryGuard.js'
+import type { QueryActiveOperationSnapshot } from '../../../opencc-src/utils/queryLifecycle.js'
 
 export class QueryGuardState {
   private guard: QueryGuard
@@ -53,7 +54,7 @@ export class QueryGuardState {
   /**
    * Returns a snapshot of currently active operations.
    */
-  getActiveOperation(): ReturnType<QueryGuard['getActiveOperations']> {
+  getActiveOperation(): QueryActiveOperationSnapshot {
     return this.guard.getActiveOperations()
   }
 }
