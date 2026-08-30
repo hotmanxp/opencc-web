@@ -430,3 +430,14 @@ export type OpenccPluginApi = {
   /** `source` is raw user input — `owner/repo`, an https/git URL, or a local path. */
   addMarketplace(source: string): Promise<OpenccMarketplaceActionResult>
 }
+
+// zai patch (2026-08-30, plan P0): export ReplSession types from server barrel.
+export type {
+  ReplSession,
+  ReplSessionOptions,
+  ReplEvent,
+  ReplSessionInput,
+  HookTrace,
+  ContentBlock,
+  PermissionMode,
+} from '../../compat/repl/types.js'

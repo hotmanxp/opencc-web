@@ -110,6 +110,11 @@ export {
   resetAgentRegistryForTests,
   AgentRegistryImpl,
 } from './agentRegistry.js'
+
+// zai patch (2026-08-30, plan P0): createReplSession value export (parallel
+// to createPrintRuntime). zai call sites opt-in via runtime.kernel=repl
+// (full switch lands in P1).
+export { createReplSession } from '../../compat/repl/index.js'
 export type {
   AgentConfig,
   AgentSlotId,
