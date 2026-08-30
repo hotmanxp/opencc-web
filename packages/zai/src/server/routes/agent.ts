@@ -304,6 +304,16 @@ export async function* translateRuntimeEvents(
 
   for await (const ev of events) {
     const t = ev.type as string | undefined;
+    // zai patch (2026-08-30): compat/runtime/sdkEventAdapter places
+    // adapterMeta.turnIndex at the top level of every translated raw
+    // event (makeEvent → { type, eventId, sessionId, turnIndex, ts, ...extra }).
+    // Sync our local turnIndex from that signal so runtime.started/done
+    // published to the SSE bus use the same turnIndex the front-end
+    // will see in the spec event payload (consistent transcript layout).
+    const inboundTurn = (ev as { turnIndex?: number }).turnIndex
+    if (typeof inboundTurn === 'number' && inboundTurn >= 0) {
+      turnIndex = inboundTurn
+    }
     switch (t) {
       case "message_start":
         // zai patch (2026-08-09): 把 metrics 提升到 runtime.started 推送。
@@ -1462,6 +1472,14 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         }
       }
       // ★ 替代原 stream.send：通过总线推送
+      if (process.env.ZAI_DEBUG_SSE === '1') {
+        // zai patch (2026-08-30): trace every runtime.* event that hits
+        // the bus, including turnIndex and seq. Reveals whether new
+        // turns (turnIndex=1) actually reach the bus or are dropped
+        // earlier in the pipeline.
+        // eslint-disable-next-line no-console
+        console.log('[server-sse]', event.type, 'turnIndex=' + (event as { turnIndex?: number }).turnIndex, 'seq=' + (event as { seq?: number }).seq)
+      }
       eventBus.emit(event);
       // dsh 投影试点 (2026-08-15): runtime.done 携带 contextTokens 时, 同步
       // emit session/projection 帧 — 前端 useProjection(sid, 'context.tokens')
