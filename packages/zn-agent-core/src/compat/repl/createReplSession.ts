@@ -564,11 +564,22 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     : undefined
 
   return {
-    async submit(content: ContentBlock[]): Promise<void> {
+    async submit(content: string | ContentBlock[]): Promise<void> {
       if (isDisposed) {
         throw new Error(`createReplSession ${sessionId}: disposed`)
       }
-      await runTurn(content)
+      // zai patch (2026-08-30, plan P3 fix): normalize string → [text block]
+      // when callers (ReplRuntime.query + frontend plain-text prompts) pass
+      // a bare string. Without this, runTurn's `content.map(toVendorContentBlock)`
+      // throws `B.map is not a function` on strings. Browser-operator smoke
+      // test (post P3-T0) caught this — tool-call attempts never reached
+      // query() because the very first submit with a plain-text prompt
+      // died here.
+      const blocks: ContentBlock[] =
+        typeof content === 'string'
+          ? [{ type: 'text', text: content }]
+          : content
+      await runTurn(blocks)
     },
 
     async enqueue(
