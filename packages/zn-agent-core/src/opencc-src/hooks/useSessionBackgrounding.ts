@@ -156,3 +156,6 @@ export function useSessionBackgrounding({
     handleBackgroundSession,
   }
 }
+
+// zai patch (2026-08-30, plan P1): also export imperative setupSessionBackgrounding.
+export { setupSessionBackgrounding } from '../../compat/repl/setup/setupSessionBackgrounding.js'

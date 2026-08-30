@@ -10,3 +10,4 @@ export { setupCommandKeybindings, CommandKeybindingsState } from './setupCommand
 export { setupInboxPoller } from './setupInboxPoller.js'
 export { setupMailboxBridge } from './setupMailboxBridge.js'
 export { setupSwarmInitialization } from './setupSwarmInitialization.js'
+export { setupSessionBackgrounding } from './setupSessionBackgrounding.js'
