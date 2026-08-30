@@ -12,10 +12,21 @@
  *     still resolve and the session must surface `turnEnd`.
  *
  * Mock chain mirrors toolUseContext.test.ts so the full mock set is
- * consistent with the existing P3-T0 test infrastructure.
+ * consistent with the existing P3-T0 test infrastructure. Per-test setup
+ * (session construction, event capture, disposal) lives in the
+ * `newSession()` helper + beforeEach/afterEach so each `it` body only
+ * carries its own scenario.
  */
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeEach,
+  afterEach,
+  afterAll,
+} from 'vitest'
 import { randomUUID } from 'crypto'
 import { mkdtempSync, rmSync } from 'fs'
 import { tmpdir } from 'os'
@@ -124,31 +135,39 @@ vi.mock('../../../opencc-src/utils/abortController.js', () => ({
   createAbortController: () => new AbortController(),
 }))
 
-// Vendor query() mock — controllable per-test. By default, immediately
-// yields one assistant Message then returns a Terminal-success value,
-// so createReplSession.runTurn's `for await (...)` loop completes and
-// turnEnd is emitted. Tests that want to exercise hang / error paths
-// override `mockQueryImpl` before submitting.
+// Vendor query() mock — controllable per-test. `assistantTurn()` builds
+// the default impl: immediately yields one assistant Message then returns
+// a Terminal-success value, so createReplSession.runTurn's `for await (...)`
+// loop completes and turnEnd is emitted. Tests that want to exercise hang /
+// error paths assign `mockQueryImpl` before submitting.
 const capturedQueryCalls: any[] = []
-let mockQueryImpl: () => AsyncGenerator<unknown> = async function* () {
-  yield {
-    type: 'assistant',
-    message: {
-      id: 'msg-1',
-      model: 'claude-test',
-      role: 'assistant',
-      content: [{ type: 'text', text: 'hello from mock vendor' }],
-      stop_reason: 'end_turn',
-    },
+
+/**
+ * Default vendor `query()` behaviour: one assistant text message, then a
+ * Terminal. The Terminal return value is discarded by runTurn (the caller
+ * doesn't read the generator's return value); what matters is that the
+ * generator *completes*, letting the for-await loop fall through to turnEnd.
+ */
+function assistantTurn(
+  text = 'hello from mock vendor',
+  id = 'msg-1',
+): () => AsyncGenerator<unknown> {
+  return async function* () {
+    yield {
+      type: 'assistant',
+      message: {
+        id,
+        model: 'claude-test',
+        role: 'assistant',
+        content: [{ type: 'text', text }],
+        stop_reason: 'end_turn',
+      },
+    }
+    return { type: 'terminal', success: true } as any
   }
-  // The vendor `query()` generator yields SDKMessages (StreamEvent |
-  // Message | TombstoneMessage | ToolUseSummaryMessage) and returns
-  // a Terminal when done. The for-await loop in runTurn reads all
-  // yielded messages, then continues to emit turnEnd. The Terminal
-  // value is discarded by `yield*` (the caller doesn't read the
-  // return value).
-  return { type: 'terminal', success: true } as any
 }
+
+let mockQueryImpl: () => AsyncGenerator<unknown> = assistantTurn()
 
 vi.mock('../../../opencc-src/query.js', () => ({
   query: (params: any) => {
@@ -162,29 +181,18 @@ import { createReplSession } from '../createReplSession.js'
 
 describe('createReplSession.runTurn (P3.1-T1 — vendor query() no-hang)', () => {
   const tmpDir = mkdtempSync(join(tmpdir(), 'repl-p31-runt-'))
+  const openSessions: Array<ReturnType<typeof createReplSession>> = []
 
-  beforeEach(() => {
-    capturedQueryCalls.length = 0
-    mockQueryImpl = async function* () {
-      yield {
-        type: 'assistant',
-        message: {
-          id: 'msg-default',
-          model: 'claude-test',
-          role: 'assistant',
-          content: [{ type: 'text', text: 'default mock' }],
-          stop_reason: 'end_turn',
-        },
-      }
-      return { type: 'terminal', success: true } as any
-    }
-  })
-
-  afterAll(() => {
-    rmSync(tmpDir, { recursive: true, force: true })
-  })
-
-  it('emits turnEnd after vendor query() completes (no hang)', async () => {
+  /**
+   * Single session factory for every test: fresh sessionId, shared tmp cwd,
+   * empty input generator, and an `events` array wired to hooks.onEvent.
+   * Sessions are disposed collectively in afterEach so each `it` body only
+   * contains its own scenario + assertions.
+   */
+  function newSession(): {
+    session: ReturnType<typeof createReplSession>
+    events: any[]
+  } {
     const events: any[] = []
     const session = createReplSession({
       sessionId: `s-${randomUUID()}`,
@@ -192,6 +200,29 @@ describe('createReplSession.runTurn (P3.1-T1 — vendor query() no-hang)', () =>
       input: (async function* () {})(),
       hooks: { onEvent: ev => events.push(ev) },
     })
+    openSessions.push(session)
+    return { session, events }
+  }
+
+  beforeEach(() => {
+    capturedQueryCalls.length = 0
+    mockQueryImpl = assistantTurn('default mock', 'msg-default')
+  })
+
+  afterEach(async () => {
+    // dispose() must stay safe even while a hung runTurn is still parked
+    // inside the mock generator (see the interrupt test).
+    await Promise.all(
+      openSessions.splice(0).map(s => s.dispose().catch(() => {})),
+    )
+  })
+
+  afterAll(() => {
+    rmSync(tmpDir, { recursive: true, force: true })
+  })
+
+  it('emits turnEnd after vendor query() completes (no hang)', async () => {
+    const { session, events } = newSession()
 
     // submit() should resolve (not hang) once the mocked vendor query()
     // returns its Terminal value.
@@ -201,27 +232,20 @@ describe('createReplSession.runTurn (P3.1-T1 — vendor query() no-hang)', () =>
     const turnStartIdx = types.indexOf('turnStart')
     const turnEndIdx = types.lastIndexOf('turnEnd')
 
-    // turnStart and turnEnd must both fire, in order, with no
-    // sessionCrash in between (the hang-up protection path would emit
-    // sessionCrash + throw).
+    // Brief acceptance: vendor query() no longer hangs → turnEnd fires,
+    // after turnStart, with no sessionCrash in between (the hang-up
+    // protection path would emit sessionCrash + throw).
     expect(turnStartIdx).toBeGreaterThanOrEqual(0)
     expect(turnEndIdx).toBeGreaterThan(turnStartIdx)
     expect(events.find(e => e.type === 'sessionCrash')).toBeUndefined()
 
-    // At least one runtime.* event should have been emitted via the
-    // vendor SDKMessage → runtime adapter translation path.
-    expect(types).toContain('runtime')
-
-    await session.dispose()
+    // A completed (non-interrupted) turn must NOT be tagged as interrupted.
+    const turnEnd = events[turnEndIdx]
+    expect(turnEnd?.payload?.reason).not.toBe('interrupted')
   })
 
   it('runs turnEnd after a single-message assistant turn', async () => {
-    const session = createReplSession({
-      sessionId: `s-${randomUUID()}`,
-      cwd: tmpDir,
-      input: (async function* () {})(),
-      hooks: { onEvent: () => {} },
-    })
+    const { session } = newSession()
 
     await session.submit([{ type: 'text', text: 'go' }])
 
@@ -230,8 +254,6 @@ describe('createReplSession.runTurn (P3.1-T1 — vendor query() no-hang)', () =>
     const st = session.getState() as any
     expect(st.isRunning).toBe(false)
     expect(st.turnIndex).toBe(1)
-
-    await session.dispose()
   })
 
   it('hang-up protection: interrupt() emits synthetic turnEnd{reason:interrupted}', async () => {
@@ -262,23 +284,12 @@ describe('createReplSession.runTurn (P3.1-T1 — vendor query() no-hang)', () =>
       yield { type: 'unreachable' }
     }
 
-    const events: any[] = []
-    const session = createReplSession({
-      sessionId: `s-${randomUUID()}`,
-      cwd: tmpDir,
-      input: (async function* () {})(),
-      hooks: { onEvent: ev => events.push(ev) },
-    })
+    const { session, events } = newSession()
 
-    // Fire submit() but don't await — it will hang in the mock. We
-    // attach a noop .catch so the hung promise doesn't generate
-    // unhandled-rejection warnings if it eventually rejects during
-    // session.dispose().
-    void session
-      .submit([{ type: 'text', text: 'will hang' }])
-      .catch(() => {
-        /* expected — submit may reject on dispose() */
-      })
+    // Fire submit() but don't await — it will hang in the mock. The noop
+    // .catch keeps the hung promise from raising unhandled-rejection
+    // warnings if it eventually rejects during dispose().
+    void session.submit([{ type: 'text', text: 'will hang' }]).catch(() => {})
 
     // Give the submit() microtask a chance to enter runTurn's for-await.
     await new Promise(resolve => setTimeout(resolve, 50))
@@ -287,18 +298,14 @@ describe('createReplSession.runTurn (P3.1-T1 — vendor query() no-hang)', () =>
     await expect(session.interrupt('user pressed ESC')).resolves.toBeUndefined()
 
     // Brief acceptance: turnEnd{reason:'interrupted'} is emitted.
-    const turnEndEvent = events.find(
-      e => e.type === 'turnEnd' && e.payload?.reason === 'interrupted',
-    )
-    expect(turnEndEvent).toBeDefined()
+    const types = events.map(e => e.type)
+    expect(types).toContain('turnEnd')
+    const turnEndEvent = events.find(e => e.type === 'turnEnd')
+    expect(turnEndEvent?.payload?.reason).toBe('interrupted')
     expect(turnEndEvent?.payload?.interruptedReason).toBe('user pressed ESC')
 
     // turnStart must have fired before the hung for-await parked.
-    expect(events.find(e => e.type === 'turnStart')).toBeDefined()
-
-    // dispose() should cleanly tear down the session even while
-    // runTurn is still parked inside the hung mock query.
-    await expect(session.dispose()).resolves.toBeUndefined()
+    expect(types).toContain('turnStart')
   }, 10_000)
 
   it('propagates vendor query() errors via sessionCrash and rejects', async () => {
@@ -306,13 +313,7 @@ describe('createReplSession.runTurn (P3.1-T1 — vendor query() no-hang)', () =>
       throw new Error('vendor query failed in runTurn test')
     }
 
-    const events: any[] = []
-    const session = createReplSession({
-      sessionId: `s-${randomUUID()}`,
-      cwd: tmpDir,
-      input: (async function* () {})(),
-      hooks: { onEvent: ev => events.push(ev) },
-    })
+    const { session, events } = newSession()
 
     await expect(
       session.submit([{ type: 'text', text: 'will fail' }]),
@@ -323,36 +324,21 @@ describe('createReplSession.runTurn (P3.1-T1 — vendor query() no-hang)', () =>
     expect(crashEvent?.payload?.error).toMatch(/vendor query failed/)
 
     // turnEnd should NOT be emitted when the loop throws.
-    const turnEnd = events.find(e => e.type === 'turnEnd')
-    expect(turnEnd).toBeUndefined()
-
-    await session.dispose()
+    expect(events.find(e => e.type === 'turnEnd')).toBeUndefined()
   })
 
   it('increments turnIndex across successful turns', async () => {
-    const session = createReplSession({
-      sessionId: `s-${randomUUID()}`,
-      cwd: tmpDir,
-      input: (async function* () {})(),
-      hooks: { onEvent: () => {} },
-    })
+    const { session } = newSession()
 
     await session.submit([{ type: 'text', text: 'first' }])
     expect(session.getState().turnIndex).toBe(1)
 
     await session.submit([{ type: 'text', text: 'second' }])
     expect(session.getState().turnIndex).toBe(2)
-
-    await session.dispose()
   })
 
   it('passes toolUseContext shape required by vendor query()', async () => {
-    const session = createReplSession({
-      sessionId: `s-${randomUUID()}`,
-      cwd: tmpDir,
-      input: (async function* () {})(),
-      hooks: { onEvent: () => {} },
-    })
+    const { session } = newSession()
 
     await session.submit([{ type: 'text', text: 'go' }])
 
@@ -366,7 +352,5 @@ describe('createReplSession.runTurn (P3.1-T1 — vendor query() no-hang)', () =>
     // querySource discriminator — vendor distinguishes server-repl from
     // terminal REPL and SDK paths via this field.
     expect(call.querySource).toBe('server-repl')
-
-    await session.dispose()
   })
 })

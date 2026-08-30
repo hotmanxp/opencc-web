@@ -17,8 +17,7 @@
  * process (matching the previous `runtime = ...` field in
  * `services/agentRuntime.ts`). Multiple instances per process would multiply
  * vendor bootstrap cost (transcript loading, agent registry, MCP probes) and
- * fragment session continuity. Tests inject a fresh instance via
- * `__setOpenccRuntimeForTests`.
+ * fragment session continuity.
  *
  * Spec: docs/superpowers/specs/2026-08-30-p3.1-vendor-query-integration.md
  *      §2.3 V1 8-method + §4.1 P3.1-T1.
@@ -49,12 +48,4 @@ export function setOpenccRuntime(runtime: OpenccRuntime): void {
  */
 export function getOpenccRuntime(): OpenccRuntime | null {
   return openccRuntime
-}
-
-/**
- * Test seam. Clears the singleton so unit tests can swap in a mock
- * OpenccRuntime without leaking state across tests.
- */
-export function __resetOpenccRuntimeForTests(): void {
-  openccRuntime = null
 }

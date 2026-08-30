@@ -122,8 +122,19 @@ export class ReplRuntime {
     // 不再 yield 包装的 runtime.* — 那会让 routes/agent.ts 看到两层事件,
     // translateRuntimeEvents 会重复吃 message_start / content_block_* 错乱。
     if (this.openccRuntime) {
+      // Track the most recent turnIndex seen on the delegated stream so a
+      // mid-turn throw reports the turn it actually failed on. Falls back to
+      // `input.turnIndex` (the caller's turn hint) and finally to 0 when the
+      // failure happens before any event was yielded and the caller didn't
+      // supply one — documented limit: turnIndex is input/stream-driven here,
+      // the ReplRuntime layer has no independent turn counter for the
+      // delegated path (session state lives inside OpenccRuntime).
+      let lastTurnIndex =
+        typeof input.turnIndex === 'number' ? input.turnIndex : 0
       try {
         for await (const ev of this.openccRuntime.query(input)) {
+          const evTurnIndex = (ev as RuntimeEvent)?.turnIndex
+          if (typeof evTurnIndex === 'number') lastTurnIndex = evTurnIndex
           yield ev as RuntimeEvent
         }
       } catch (err) {
@@ -133,7 +144,7 @@ export class ReplRuntime {
         yield {
           type: 'runtime.error',
           sessionId: input.sessionId,
-          turnIndex: typeof input.turnIndex === 'number' ? input.turnIndex : 0,
+          turnIndex: lastTurnIndex,
           error: { message: msg },
           ts: Date.now(),
         } as RuntimeEvent
