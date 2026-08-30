@@ -19,6 +19,9 @@ vi.mock('../hooks/useConversationInfo.js', () => ({
     model: 'MiniMax-M3',
     settingsLoaded: true,
     displayLabel: 'MiniMax-M3',
+    // zai patch (2026-08-30): 新增字段(运行时展示行)。
+    coreRuntime: 'repl',
+    activeCoreRuntime: 'repl',
   }),
 }))
 

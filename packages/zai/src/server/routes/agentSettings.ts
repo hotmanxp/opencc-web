@@ -7,6 +7,7 @@ import { resolveMainAgent } from '../services/mainAgents.js'
 import type { ModelEntry, OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import type { ProviderProfile } from '../../shared/types.js'
 import { getDefaultMode } from '../services/permissionMode.js'
+import { getCoreRuntime } from '../services/agentRuntime.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
 import { profilesToModelEntries } from '../../shared/profileProjection.js'
 import {
@@ -112,6 +113,16 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
     // resolveCoreRuntime 的优先级链),且只在 initAgentRuntime 解析一次,
     // 改后需重启实例生效。
     const coreRuntime = resolveCoreRuntime(settings)
+    // zai patch (2026-08-30): `activeCoreRuntime` is the runtime-resolved
+    // value (--coreRuntime flag > env ZAI_CORE_RUNTIME > settings.coreRuntime
+    // > 'default'), read once at initAgentRuntime and cached in a module
+    // variable. Surfaces the same value the server actually uses to drive
+    // query() — distinct from `coreRuntime` which is only the persisted
+    // settings file. Conveys "what's actually running" vs "what's saved
+    // on disk", so users can spot flag/env overrides that haven't been
+    // reflected in settings.json yet. Restart-only; doesn't change at
+    // runtime even if settings are updated.
+    const activeCoreRuntime = getCoreRuntime()
     // zai patch (2026-08-20): 主 Agent —— 当前选择 + 可选列表(内置 + 外置
     // ~/.zai/main-agents/*.js 合并),供 SettingsDrawer 的 Agent 选择行渲染。
     const { agent: mainAgent, agents: mainAgents } = await resolveMainAgent(
@@ -130,6 +141,7 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       enableDynamicWorkflow,
       autoUpdate,
       coreRuntime,
+      activeCoreRuntime,
       mainAgent: mainAgent.name,
       mainAgents: mainAgents.map((a) => ({
         name: a.name,
@@ -381,7 +393,17 @@ router.put(
     }
     try {
       const next = await updateZaiSettings({ coreRuntime: candidate })
-      res.json({ coreRuntime: resolveCoreRuntime(next) })
+      // zai patch (2026-08-30): also return the runtime-resolved value so
+      // the client can show both "saved" (next.coreRuntime) and
+      // "currently effective" (activeCoreRuntime). The latter only
+      // updates on restart — that's the point: the user just wrote a
+      // new preference, but until they restart, `activeCoreRuntime`
+      // reflects whatever was resolved at init. Returning it makes the
+      // gap explicit in the UI rather than implicit.
+      res.json({
+        coreRuntime: resolveCoreRuntime(next),
+        activeCoreRuntime: getCoreRuntime(),
+      })
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })
     }

@@ -3,7 +3,7 @@ import { useAgentStore } from '../store/useAgentStore.js'
 import { useAppStore } from '../store/useAppStore.js'
 import { useProjection } from '../store/useProjection.js'
 import type { AgentMessage, AgentStatus } from '../store/useAgentStore.js'
-import type { ModelEntry } from '../../../shared/settings.js'
+import type { CoreRuntime, ModelEntry } from '../../../shared/settings.js'
 
 /**
  * Snapshot of conversation metadata shown in the info Popover.
@@ -40,12 +40,28 @@ export interface ConversationInfo {
   contextTokens: number | null
   /** zai patch (2026-08-09): 当前 sid 用的模型支持的上下文大小(从 settings.models 查 sid.model → capabilities.contextWindow)。null 表示无数据。 */
   contextWindow: number | null
+  /**
+   * zai patch (2026-08-30): 持久化的 coreRuntime(settings.json 里的值)。
+   * 与 `activeCoreRuntime` 可能不同:env `ZAI_CORE_RUNTIME` 或
+   * `--coreRuntime` flag 会覆盖它,且只在 initAgentRuntime 解析一次。
+   * null 表示 settings fetch 还没完成。
+   */
+  coreRuntime: CoreRuntime | null
+  /**
+   * zai patch (2026-08-30): 当前实际生效的 coreRuntime。改 settings /
+   * env / flag 后需重启 zai 实例才变化;运行时不会变。null 表示
+   * settings fetch 还没完成。
+   */
+  activeCoreRuntime: CoreRuntime | null
 }
 
 interface RuntimeSettings {
   defaultModel: string | null
   baseURL: string | null
   models: ModelEntry[]
+  // zai patch (2026-08-30): 见 ConversationInfo 注释。fetch 成功后回填。
+  coreRuntime: CoreRuntime | null
+  activeCoreRuntime: CoreRuntime | null
 }
 
 /**
@@ -111,6 +127,8 @@ export function useConversationInfo(): ConversationInfo {
     defaultModel: null,
     baseURL: null,
     models: [],
+    coreRuntime: null,
+    activeCoreRuntime: null,
   })
   const [settingsLoaded, setSettingsLoaded] = useState(false)
 
@@ -128,10 +146,16 @@ export function useConversationInfo(): ConversationInfo {
       .then((r) => (r.ok ? r.json() : Promise.reject(new Error(`HTTP ${r.status}`))))
       .then((data: Partial<RuntimeSettings>) => {
         if (cancelled) return
+        // zai patch (2026-08-30): 持久化值 / 实际生效值。两者都从
+        // /api/agent/settings 读,后端会做 zod 校验保证 coreRuntime
+        // 落在四态枚举内,这里窄化为 null fallback 防御 null 字段。
         setRuntime({
           defaultModel: data.defaultModel ?? null,
           baseURL: data.baseURL ?? null,
           models: Array.isArray(data.models) ? data.models : [],
+          coreRuntime: (data.coreRuntime as CoreRuntime | undefined) ?? null,
+          activeCoreRuntime:
+            (data.activeCoreRuntime as CoreRuntime | undefined) ?? null,
         })
       })
       .catch(() => {
@@ -207,6 +231,8 @@ export function useConversationInfo(): ConversationInfo {
         ? (projectedCtxTokens ?? contextTokensBySession[effectiveSessionId] ?? null)
         : null,
       contextWindow,
+      coreRuntime: runtime.coreRuntime,
+      activeCoreRuntime: runtime.activeCoreRuntime,
     }
   }, [effectiveSessionId, projectedCtxTokens, sessions, messages, status, cwd, runtime, settingsLoaded, apiRequestCountBySession, contextTokensBySession])
 }
