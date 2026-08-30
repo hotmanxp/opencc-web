@@ -35,6 +35,10 @@ import ts from 'typescript'
 
 const __dirname = dirname(fileURLToPath(import.meta.url))
 const ROOT = join(__dirname, '..')
+// zai patch (2026-08-30, dev mode): ZAI_BUNDLE_DEV=1 flips the bundle into
+// "development" mode — no minification, inline source maps, NODE_ENV
+// banner. Set by `build:core:dev`. Default is production minified.
+const isDev = process.env.ZAI_BUNDLE_DEV === '1'
 // zai patch (2026-08-09): 单一入口 —— 聚合 vendor(query) + server
 // (createOpenccRuntime) + compat(index.ts) 到同一份 bundle,让 zai 运行时
 // vendor/compat 只有一个 module 实例(STATE/commandQueue/bashTracker 共享,
@@ -1387,6 +1391,9 @@ const inkRenderStubPlugin: esbuild.Plugin = {
 // zai dev 用 tsx 直接跑 src（不走 bundle），生产发版前 `find ... -delete`
 // 已清掉 .map，线上 stack trace 必然是 minified 字符。关闭后省 ~30MB
 // dist 磁盘占用 + esbuild 不再生成 sourcemap 的 build 时间。
+// zai patch (2026-08-30, dev mode): ZAI_BUNDLE_DEV=1 时 sourcemap 开 + minify
+// 关，dist/opencc-core.mjs 体积变大但 stack trace 保留源码位置 + 变量名。
+// `build:core:dev` script 启用此模式。
 await esbuild.build({
   entryPoints: [SRC_ENTRY],
   outfile: OUT_FILE,
@@ -1394,8 +1401,8 @@ await esbuild.build({
   format: 'esm',
   platform: 'node',
   target: 'node20',
-  sourcemap: false,
-  minify: true,
+  sourcemap: isDev ? 'inline' : false,
+  minify: !isDev,
   logLevel: 'info',
   // Provide a Node `require` so the bundle's compiled
   // `__require("child_process")` calls resolve. esbuild leaves
@@ -1404,6 +1411,9 @@ await esbuild.build({
   // `createRequire(import.meta.url)`.
   banner: {
     js:
+      (isDev ? "globalThis.process = globalThis.process || {}; " +
+              "globalThis.process.env = globalThis.process.env || {}; " +
+              "globalThis.process.env.NODE_ENV = 'development';\n" : '') +
       "import { createRequire as __createRequire } from 'node:module';\n" +
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",
@@ -1538,11 +1548,15 @@ await esbuild.build({
   platform: 'node',
   target: 'node22',
   // zai patch (2026-08-22): sourcemap 关闭 + minify 开（与主 bundle 对齐）。
-  sourcemap: false,
-  minify: true,
+  // zai patch (2026-08-30, dev mode): ZAI_BUNDLE_DEV=1 时关 minify 开 inline sourcemap
+  sourcemap: isDev ? 'inline' : false,
+  minify: !isDev,
   logLevel: 'warning',
   banner: {
     js:
+      (isDev ? "globalThis.process = globalThis.process || {}; " +
+              "globalThis.process.env = globalThis.process.env || {}; " +
+              "globalThis.process.env.NODE_ENV = 'development';\n" : '') +
       "import { createRequire as __createRequire } from 'node:module';\n" +
       "import { fileURLToPath as __fileURLToPath } from 'node:url';\n" +
       "const require = __createRequire(import.meta.url);\n",

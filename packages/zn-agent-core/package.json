@@ -24,6 +24,7 @@
   },
   "scripts": {
     "build": "node scripts/ensure-fresh-tsc.mjs && node --experimental-strip-types scripts/bundle-opencc.ts && (tsc -b || true) && node scripts/tsc-with-cache.mjs tsconfig.contract-tests.json && node scripts/tsc-with-cache.mjs tsconfig.consumer.json && node scripts/copy-runtime-assets.mjs && node scripts/prune-dead-dist.mjs && node scripts/verify-server-types-self-contained.mjs",
+    "build:core:dev": "ZAI_BUNDLE_DEV=1 node --experimental-strip-types scripts/bundle-opencc.ts && (tsc -b || true) && node scripts/copy-runtime-assets.mjs",
     "dev": "tsc -b --watch",
     "typecheck": "tsc -b --noEmit && tsc --noEmit -p tsconfig.contract-tests.json && tsc --noEmit -p tsconfig.consumer.json && node scripts/verify-server-types-self-contained.mjs",
     "typecheck:contract-tests": "tsc --noEmit -p tsconfig.contract-tests.json",
