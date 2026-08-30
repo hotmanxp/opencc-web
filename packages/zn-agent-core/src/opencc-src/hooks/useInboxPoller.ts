@@ -967,3 +967,6 @@ export function useInboxPoller({
     // The ref guard is a safety measure to ensure initial poll only happens once
   }, [enabled, poll, store])
 }
+
+// zai patch (2026-08-30, plan P1): also export imperative setupInboxPoller.
+export { setupInboxPoller } from '../../compat/repl/setup/setupInboxPoller.js'
