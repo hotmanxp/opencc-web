@@ -1,6 +1,9 @@
 import { useCallback, useEffect, useMemo, useSyncExternalStore } from 'react'
 import { useMailbox } from '../context/mailbox.js'
 
+// zai patch (2026-08-30, plan P1): also export imperative setupMailboxBridge.
+export { setupMailboxBridge } from '../../compat/repl/setup/setupMailboxBridge.js'
+
 type Props = {
   isLoading: boolean
   onSubmitMessage: (content: string) => boolean
