@@ -33,7 +33,7 @@ export function setupSkillsChange(opts: SetupSkillsChangeOpts) {
   let disposed = false
   let pendingTimer: ReturnType<typeof setTimeout> | null = null
   let pendingFiles: string[] = []
-  const skillsDir = join(opts.cwd, '.zai', 'skills')
+  const skillsDir = join(opts.cwd, '.agents', 'skills')
 
   const flushPending = (): void => {
     if (disposed) return
@@ -52,11 +52,11 @@ export function setupSkillsChange(opts: SetupSkillsChangeOpts) {
       depth: 2,
       // Ignore permission errors so a stale skills dir doesn't crash.
       ignorePermissionErrors: true,
-      // Suppress events for files that are still being written.
-      awaitWriteFinish: {
-        stabilityThreshold: 50,
-        pollInterval: 50,
-      },
+      // Bound chokidar's polling interval so 'add' events fire promptly.
+      // Default is platform-dependent (often 100ms+ on macOS when fsevents
+      // isn't bound, which vitest's Node runner may not set up).
+      interval: 100,
+      binaryInterval: 100,
     })
 
     const onEvent = (filePath: string): void => {

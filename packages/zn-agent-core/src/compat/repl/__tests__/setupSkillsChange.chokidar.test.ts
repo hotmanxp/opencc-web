@@ -10,7 +10,7 @@ describe('setupSkillsChange chokidar integration', () => {
   afterAll(() => rmSync(tmpDir, { recursive: true, force: true }))
 
   it('emits onSkillsChanged within 3s of new file add', async () => {
-    const skillsDir = join(tmpDir, '.zai', 'skills')
+    const skillsDir = join(tmpDir, '.agents', 'skills')
     mkdirSync(skillsDir, { recursive: true })
 
     const calls: string[][] = []
@@ -35,7 +35,7 @@ describe('setupSkillsChange chokidar integration', () => {
   })
 
   it('emits onSkillsChanged within 3s of file modification', async () => {
-    const skillsDir = join(tmpDir, '.zai', 'skills')
+    const skillsDir = join(tmpDir, '.agents', 'skills')
     mkdirSync(skillsDir, { recursive: true })
     const existing = join(skillsDir, 'existing.md')
     writeFileSync(existing, '# existing v1')
