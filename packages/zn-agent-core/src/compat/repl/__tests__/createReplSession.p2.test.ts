@@ -132,6 +132,190 @@ describe('createReplSession P2 integration', () => {
     await session.dispose()
   })
 
+  // zai patch (2026-08-30, plan P2, Task 4): setupApiKeyVerification
+  // runs at construct time (mirrors REPL.tsx mount semantics). The
+  // resulting notification must propagate through hooks.onEvent with
+  // payload.type === 'apiKeyOk' and an `ok` boolean field. We yield
+  // to a microtask so the fire-and-forget verify() promise resolves
+  // before we read the captured events array.
+  it('setupApiKeyVerification runs on session create and emits notification', async () => {
+    const events: any[] = []
+    const session = createReplSession({
+      sessionId: `s-${randomUUID()}`,
+      cwd: tmpDir,
+      input: (async function* () {})(),
+      hooks: { onEvent: ev => events.push(ev) },
+    })
+
+    // verify() is fired-and-forgotten at createReplSession time;
+    // pump the microtask queue so the onResult callback lands before
+    // we read events.
+    await new Promise(resolve => setTimeout(resolve, 10))
+
+    const apiKeyEvents = events.filter(
+      ev => ev.type === 'notification'
+        && (ev.payload as any)?.kind === 'custom'
+        && (ev.payload as any)?.payload?.type === 'apiKeyOk',
+    )
+    expect(apiKeyEvents.length).toBeGreaterThanOrEqual(1)
+    const ok = (apiKeyEvents[0]!.payload as any).payload.ok
+    expect(typeof ok).toBe('boolean')
+
+    await session.dispose()
+  })
+
+  // zai patch (2026-08-30, plan P2, Task 4): setupTasksV2Collapse state
+  // is queryable via the getTasksV2Handle() accessor. toggle() must
+  // flip isCollapsed() and fire onCollapseChange, which routes through
+  // hooks.onEvent as a 'tasksV2Collapse' custom notification.
+  it('setupTasksV2Collapse state is queryable via getTasksV2Handle', async () => {
+    const events: any[] = []
+    const session = createReplSession({
+      sessionId: `s-${randomUUID()}`,
+      cwd: tmpDir,
+      input: (async function* () {})(),
+      hooks: { onEvent: ev => events.push(ev) },
+    })
+
+    const handle = session.getTasksV2Handle?.()
+    expect(handle).toBeDefined()
+    expect(typeof handle?.toggle).toBe('function')
+    expect(handle?.isCollapsed()).toBe(false)
+
+    // toggle to true → callback fires with true
+    handle?.toggle()
+    expect(handle?.isCollapsed()).toBe(true)
+
+    // toggle back to false
+    handle?.toggle()
+    expect(handle?.isCollapsed()).toBe(false)
+
+    // setCollapsed(true) is idempotent
+    handle?.setCollapsed(true)
+    handle?.setCollapsed(true)
+    expect(handle?.isCollapsed()).toBe(true)
+
+    // Verify collapse-change events were emitted
+    const collapseEvents = events.filter(
+      ev => ev.type === 'notification'
+        && (ev.payload as any)?.payload?.type === 'tasksV2Collapse',
+    )
+    // 3 transitions: false→true, true→false, false→true
+    expect(collapseEvents.length).toBe(3)
+
+    await session.dispose()
+  })
+
+  // zai patch (2026-08-30, plan P2, Task 4): setupNotifications bus
+  // propagates through hooks.onEvent as ReplEvent 'notification'.
+  // The bus is a public surface (drivers can emit from SSE handlers)
+  // so we exercise the round-trip: emit → ReplEvent with the same
+  // kind/payload.
+  it('setupNotifications bus is wired (emit propagates through onEvent)', async () => {
+    const events: any[] = []
+    const session = createReplSession({
+      sessionId: `s-${randomUUID()}`,
+      cwd: tmpDir,
+      input: (async function* () {})(),
+      hooks: { onEvent: ev => events.push(ev) },
+    })
+
+    const bus = session.getNotificationsHandle?.()
+    expect(bus).toBeDefined()
+
+    bus?.emit('rateLimit', { retryAfterMs: 30_000 })
+    bus?.emit('deprecation', { message: 'old-flag' })
+    bus?.emit('custom', { type: 'fromTest', value: 42 })
+
+    const notificationEvents = events.filter(ev => ev.type === 'notification')
+    const rateLimitEv = notificationEvents.find(
+      ev => (ev.payload as any)?.kind === 'rateLimit',
+    )
+    expect(rateLimitEv).toBeDefined()
+    expect((rateLimitEv!.payload as any).payload.retryAfterMs).toBe(30_000)
+
+    const customEv = notificationEvents.find(
+      ev => (ev.payload as any)?.kind === 'custom'
+        && (ev.payload as any)?.payload?.type === 'fromTest',
+    )
+    expect(customEv).toBeDefined()
+    expect((customEv!.payload as any).payload.value).toBe(42)
+
+    await session.dispose()
+  })
+
+  // zai patch (2026-08-30, plan P2, Task 4): ElicitationRegistry is
+  // accessible via getElicitationRegistry(). When the host doesn't
+  // supply one via opts, createReplSession fabricates a minimal
+  // in-process stub with the same request/resolve/cancel/hasPending
+  // surface so MCP code paths can always find a registry. When the
+  // host supplies one, the same accessor returns the host's
+  // instance (identity preserved).
+  it('ElicitationRegistry is exposed via getElicitationRegistry (default stub)', async () => {
+    const session = createReplSession({
+      sessionId: `s-${randomUUID()}`,
+      cwd: tmpDir,
+      input: (async function* () {})(),
+      hooks: { onEvent: () => {} },
+    })
+
+    const reg = session.getElicitationRegistry?.() as any
+    expect(reg).toBeDefined()
+    expect(typeof reg.request).toBe('function')
+    expect(typeof reg.resolve).toBe('function')
+    expect(typeof reg.cancel).toBe('function')
+    expect(typeof reg.hasPending).toBe('function')
+
+    // Stub behavior: request() returns a pending promise; resolve()
+    // completes it.
+    const id = randomUUID()
+    const promise = reg.request({ elicitationId: id, mcpServerName: 'm', message: 'fill', mode: 'form' })
+    expect(reg.hasPending()).toBe(true)
+    reg.resolve(id, { action: 'accept', content: { x: 1 } })
+    const result = await promise
+    expect(result.action).toBe('accept')
+    expect(result.content).toEqual({ x: 1 })
+    expect(reg.hasPending()).toBe(false)
+
+    // cancel() round-trip
+    const id2 = randomUUID()
+    const promise2 = reg.request({ elicitationId: id2, mcpServerName: 'm', message: 'fill', mode: 'form' })
+    reg.cancel(id2)
+    const r2 = await promise2
+    expect(r2.action).toBe('cancel')
+
+    await session.dispose()
+  })
+
+  // zai patch (2026-08-30, plan P2, Task 4): when the host supplies a
+  // registry via opts.elicitationRegistry, getElicitationRegistry()
+  // returns the SAME instance (identity check). This is the path T6
+  // uses — zai web constructs the real ElicitationRegistry and passes
+  // it into createReplSession.
+  it('ElicitationRegistry honors opts.elicitationRegistry (host-supplied)', async () => {
+    const hostRegistry = {
+      request: vi.fn(async () => ({ action: 'decline' as const })),
+      resolve: vi.fn(),
+      cancel: vi.fn(),
+      hasPending: vi.fn(() => false),
+      marker: 'host-supplied-registry',
+    }
+
+    const session = createReplSession({
+      sessionId: `s-${randomUUID()}`,
+      cwd: tmpDir,
+      input: (async function* () {})(),
+      hooks: { onEvent: () => {} },
+      elicitationRegistry: hostRegistry,
+    } as any)
+
+    const reg = session.getElicitationRegistry?.() as any
+    expect(reg).toBe(hostRegistry) // identity check — no in-core stub replacement
+    expect(reg.marker).toBe('host-supplied-registry')
+
+    await session.dispose()
+  })
+
   it('dispose() tears down all P2 handles and is idempotent', async () => {
     const session = createReplSession({
       sessionId: `s-${randomUUID()}`,

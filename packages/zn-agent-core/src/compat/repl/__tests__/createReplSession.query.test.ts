@@ -256,12 +256,20 @@ describe('createReplSession + vendor query() (Task 8)', () => {
     const turnStartIdx = types.indexOf('turnStart')
     const turnEndIdx = types.lastIndexOf('turnEnd')
 
-    expect(turnStartIdx).toBe(0)
+    // zai patch (2026-08-30, plan P2, Task 4): P2 mounts setupApiKeyVerification
+    // synchronously, which fires a `notification` event (kind: 'custom',
+    // payload.type: 'apiKeyOk') before the first turnStart. Similarly,
+    // sessionRestore may fire a 'hydrated' notification when prior JSONL
+    // exists. Pre-turn events must therefore be exclusively `notification`
+    // (no runtime / turnStart / turnEnd / sessionCrash).
+    expect(turnStartIdx).toBeGreaterThanOrEqual(0)
     expect(turnEndIdx).toBeGreaterThan(turnStartIdx)
     expect(turnEndIdx).toBe(types.length - 1)
 
-    // No runtime events before turnStart; runtime events between.
-    expect(types.slice(0, turnStartIdx)).toEqual([])
+    // Pre-turnStart slice: only notification events allowed (apiKeyOk /
+    // hydrated), no runtime events.
+    const preTurn = types.slice(0, turnStartIdx)
+    expect(preTurn.every(t => t === 'notification')).toBe(true)
     expect(types.slice(turnStartIdx + 1, turnEndIdx)).toContain('runtime')
     expect(types.slice(turnEndIdx + 1)).toEqual([])
 
