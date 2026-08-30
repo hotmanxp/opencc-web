@@ -44,6 +44,12 @@ export type ReplEventType =
   | 'sessionEnd'
   | 'sessionCrash'
   | 'notification'
+  // zai patch (2026-08-30, plan P0, Task 8): vendor query() now yields
+  // translated RuntimeEvents (message_start / content_block_* /
+  // tool_use:done / message_delta / message_stop). These are emitted
+  // through hooks.onEvent with type 'runtime' and the full
+  // RuntimeEvent payload.
+  | 'runtime'
 
 export type ReplEvent = {
   type: ReplEventType

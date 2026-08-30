@@ -8,8 +8,8 @@
  *   - Wire setupCommandQueue + setupScheduledTasks + setupProactive + setupQueryGuard
  *   - submit / enqueue / interrupt / endSession / on / dispose / getState
  *   - ALS-wrapped turn path via runWithSdkContext + runWithSessionId
- *   - Synthetic turnStart + turnEnd emit (vendor query() integration lands in Task 8)
- *   - No cron fire / proactive tick routing wired beyond what setupXxx already provides
+ *   - vendor `query()` for-await loop with `querySource: 'server-repl'`
+ *   - translateSdkToRuntime wires SDKMessage → ReplEvent stream
  *   - LIFO teardown order in dispose
  */
 
@@ -20,6 +20,14 @@ import { setupCommandQueue } from './setup/setupCommandQueue.js'
 import { setupScheduledTasks } from './setup/setupCronScheduler.js'
 import { setupProactive } from './setup/setupProactive.js'
 import { setupQueryGuard } from './setup/setupQueryGuard.js'
+// zai patch (2026-08-30, plan P0): vendor query() integration (Task 8).
+import { query } from '../../opencc-src/query.js'
+// zai patch (2026-08-30, plan P0): SDK message → runtime event adapter (Task 8).
+import { translateSdkToRuntime } from '../../compat/runtime/sdkEventAdapter.js'
+// zai patch (2026-08-30, plan P0): use vendor's user message factory so
+// the constructed UserMessage conforms to vendor's `Message` type
+// (top-level `content: string` + nested `message.content`).
+import { createUserMessage } from '../../opencc-src/utils/messages.js'
 import type {
   ReplSession,
   ReplSessionOptions,
@@ -133,9 +141,51 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
         },
         () =>
           runWithSessionId(sessionId, async () => {
-            // P0: vendor query() integration lands in Task 8. For now,
-            // emit synthetic turnEnd so the smoke tests verify the
-            // event lifecycle end-to-end.
+            // zai patch (2026-08-30, plan P0, Task 8): real vendor
+            // query() for-await loop. Each SDKMessage is unwrapped by
+            // translateSdkToRuntime into 0..N RuntimeEvents that we
+            // re-emit through hooks.onEvent as ReplEvent (preserving
+            // turnIndex so consumers can correlate). The
+            // `querySource: 'server-repl'` literal lets vendor distinguish
+            // an in-process server session from `repl_main_thread`
+            // (terminal REPL) and `sdk` (CLI child process).
+            //
+            // P0 minimal params — full ToolUseContext population lands in
+            // P1 once a real REPL-style AppState is plumbed through
+            // zai web. For now an empty object satisfies the type, and
+            // tests verify the call shape (querySource) via mock.
+            const adapterMeta = {
+              sessionId,
+              turnIndex: thisTurnIndex,
+              eventCounter: 0,
+              toolNameByUseId: new Map<string, string>(),
+              streamedBlockIndices: new Set<number>(),
+            }
+            // Build a single-user-message transcript: one user turn with
+            // the submitted content blocks. P0 doesn't manage the
+            // multi-turn transcript across submit() calls (that's
+            // vendor's job inside query()); each submit() here is a
+            // independent query() invocation in P0.
+            const messages = [
+              createUserMessage({
+                content: content.map(toVendorContentBlock) as any,
+                uuid: randomUUID(),
+              }),
+            ]
+            for await (const sdkMsg of query({
+              messages: messages as any,
+              systemPrompt: [] as any,
+              userContext: {},
+              systemContext: {},
+              canUseTool: opts.canUseTool ?? (async () => ({ behavior: 'allow' as const })),
+              toolUseContext: {} as any,
+              querySource: 'server-repl',
+            })) {
+              for (const runtimeEv of translateSdkToRuntime(sdkMsg, adapterMeta)) {
+                emitReplEvent('runtime', runtimeEv)
+              }
+              adapterMeta.eventCounter += 1
+            }
             emitLifecycle('turnEnd', { turnIndex: thisTurnIndex })
             emitReplEvent('turnEnd', { turnIndex: thisTurnIndex })
           }),
@@ -225,5 +275,41 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
         isDisposed,
       }
     },
+  }
+}
+
+/**
+ * zai patch (2026-08-30, plan P0, Task 8): convert our ContentBlock shape
+ * to vendor's opencc Message content block shape. P0 supports text only;
+ * image / tool_use / tool_result passthrough as-is so future callsites
+ * don't get silently dropped. Vendor will reject unknown shapes, but
+ * keeping the field names aligned keeps P1 migration trivial.
+ */
+function toVendorContentBlock(
+  block: ContentBlock,
+): unknown {
+  switch (block.type) {
+    case 'text':
+      return { type: 'text', text: block.text }
+    case 'image':
+      return { type: 'image', source: block.source }
+    case 'tool_use':
+      return {
+        type: 'tool_use',
+        id: block.id,
+        name: block.name,
+        input: block.input,
+      }
+    case 'tool_result':
+      return {
+        type: 'tool_result',
+        tool_use_id: block.tool_use_id,
+        content: block.content,
+        is_error: block.is_error,
+      }
+    default: {
+      const _exhaustive: never = block
+      return _exhaustive
+    }
   }
 }

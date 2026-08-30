@@ -2646,8 +2646,15 @@ if (
     // only; subagents never see the prompt stream.
     // eslint-disable-next-line custom-rules/require-tool-match-name -- ToolUseBlock.name has no aliases
     const sleepRan = toolUseBlocks.some(b => b.name === SLEEP_TOOL_NAME)
+    // zai patch (2026-08-30, plan P0, Task 8): 'server-repl' is the
+    // in-process server equivalent of repl_main_thread. The server REPL
+    // session is the main thread of its sessionId; subagents dispatched
+    // inside it (AgentTool with agentId) should drain their own
+    // agentId queue the same way as the terminal REPL.
     const isMainThread =
-      querySource.startsWith('repl_main_thread') || querySource === 'sdk'
+      querySource.startsWith('repl_main_thread') ||
+      querySource === 'server-repl' ||
+      querySource === 'sdk'
     const currentAgentId = toolUseContext.agentId
     const queuedCommandsSnapshot = getCommandsByMaxPriority(
       sleepRan ? 'later' : 'next',

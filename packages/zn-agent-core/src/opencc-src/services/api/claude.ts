@@ -1140,8 +1140,13 @@ async function* queryModel(
   const resolvedModel = options.model
 
   queryCheckpoint('query_tool_schema_build_start')
+  // zai patch (2026-08-30, plan P0, Task 8): 'server-repl' is the
+  // in-process server equivalent of repl_main_thread and gets full
+  // agentic treatment (tools, betas, prompt caching, etc.) just like
+  // the terminal REPL.
   const isAgenticQuery =
     options.querySource.startsWith('repl_main_thread') ||
+    options.querySource === 'server-repl' ||
     options.querySource.startsWith('agent:') ||
     options.querySource === 'sdk' ||
     options.querySource === 'hook_agent' ||

@@ -83,6 +83,42 @@ vi.mock('../../../opencc-src/services/analytics/growthbook.js', () => ({
   getFeatureValue_CACHED_MAY_BE_STALE: vi.fn(() => false),
 }))
 
+// mock vendor query() (Task 8): replace with a no-op async generator so
+// the smoke test doesn't pull in query.ts's heavy chain (claude.ts →
+// promptCache → utils/attachments → settingsCache → BashTool). The
+// dedicated query-integration test (createReplSession.query.test.ts)
+// verifies the call shape with controlled fixtures.
+vi.mock('../../../opencc-src/query.js', () => ({
+  query: async function* () {
+    // emit a single result SDKMessage so translateSdkToRuntime (also
+    // mocked below) has something to see; the smoke tests only assert
+    // on turnStart/turnEnd lifecycle, not on runtime payloads.
+    yield { type: 'result' }
+  },
+}))
+
+// mock translateSdkToRuntime (Task 8): identity-ish passthrough so the
+// smoke test asserts on lifecycle events without depending on the real
+// adapter's event-shape semantics. The dedicated query-integration test
+// covers real adapter behaviour.
+vi.mock('../../../compat/runtime/sdkEventAdapter.js', () => ({
+  translateSdkToRuntime: function* (_sdkMsg: unknown, _meta: unknown) {
+    yield { type: 'passthrough', message: 'mock' }
+  },
+}))
+
+// mock createUserMessage: trivial passthrough so the chain
+// query.js → utils/messages.js → ... doesn't evaluate the heavy
+// attachments / BashTool graph in the smoke test.
+vi.mock('../../../opencc-src/utils/messages.js', () => ({
+  createUserMessage: (opts: any) => ({
+    type: 'user',
+    content: '',
+    message: { role: 'user', content: opts.content ?? [] },
+    uuid: opts.uuid,
+  }),
+}))
+
 // Import after mocks are set up
 import { createReplSession } from '../createReplSession.js'
 
