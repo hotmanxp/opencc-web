@@ -106,3 +106,10 @@ export function CommandKeybindingHandlers(t0) {
   useKeybindings(handlers, t4);
   return null;
 }
+
+// zai patch (2026-08-30, plan P0): also export imperative CommandKeybindingsState.
+// Shares the same /-prefixed command-parse logic (REPL.tsx:3457-3458) as this hook.
+export {
+  setupCommandKeybindings,
+  CommandKeybindingsState,
+} from '../../compat/repl/setup/setupCommandKeybindings.js'
