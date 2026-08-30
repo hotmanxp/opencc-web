@@ -7,13 +7,29 @@
     "paths": {
       "src/*": ["./src/opencc-src/*"]
     },
-    "composite": true,
+    // zai patch (2026-08-30, plan P3 fix build errors — round 2): drop
+    // composite to eliminate TS6307 cascade. With composite: true, every
+    // transitively-referenced file must be in the project file list; src/
+    // opencc-src being excluded made every `import '../opencc-src/...'`
+    // resolve into an out-of-project file and trigger TS6307. The vendor
+    // tree additionally references the `MACRO` global (stripped upstream,
+    // substituted at bundle time by esbuild), producing TS2304 once
+    // tsc started following imports into excluded vendor files.
+    //
+    // Without composite, excluded-file imports are silently treated as
+    // `any` (the project's file list is just `include - exclude`, no
+    // transitive enforcement). Vendor files are still excluded — tsc
+    // does not compile them — so no d.ts is emitted for src/opencc-src/
+    // (dist stays minimal). `incremental` + `tsBuildInfoFile` retain
+    // incremental-build behavior (the part of composite we actually
+    // wanted); `noEmitOnError: false` is kept as a defensive guard for
+    // any future vendor import that slips through and surfaces a benign
+    // error during emit.
+    "incremental": true,
+    "tsBuildInfoFile": "./tsconfig.tsbuildinfo",
     "noEmit": false,
     "declaration": true,
-    "declarationMap": true,
-    // zai patch (2026-08-30, plan P3 fix build errors): emit despite TS6307
-    // cascade from opencc-src vendor imports. Bundle (esbuild) produces
-    // the real artifact; tsc -b's emit is best-effort for type surfaces.
+    "declarationMap": false,
     "noEmitOnError": false,
     // zai patch (2026-08-18): 只发类型,不发 .js。运行时唯一入口是
     // dist/opencc-core.mjs(bundle-opencc.ts esbuild 合成),tsc 编译出的
