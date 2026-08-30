@@ -504,7 +504,27 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
               },
               abortController: fallbackAbortController,
               readFileState: fallbackReadFileState,
-              getAppState: () => (opts.getAppState?.() ?? {}) as any,
+              // zai patch (2026-08-30, plan P3-T0 fix): vendor getTools() and
+              // most tool implementations dereference
+              // `appState.toolPermissionContext.{mode, additionalWorkingDirectories,
+              // prePlanMode}` synchronously during query(). The zai web
+              // host typically passes a minimal getAppState (just enough
+              // for the message store), so without defensive defaults the
+              // very first plain-text prompt crashes with "Cannot read
+              // properties of undefined (reading 'mode')". Mirror the
+              // shape queryContext.ts:107-160 builds, with safe sentinels.
+              getAppState: () => {
+                const host = (opts.getAppState?.() ?? {}) as Record<string, unknown>
+                if (host.toolPermissionContext) return host as any
+                return {
+                  ...host,
+                  toolPermissionContext: {
+                    mode: 'default',
+                    additionalWorkingDirectories: new Map<string, string>(),
+                    prePlanMode: 'default',
+                  },
+                } as any
+              },
               setAppState: (fn: (prev: unknown) => unknown) => {
                 opts.setAppState?.(fn)
               },
