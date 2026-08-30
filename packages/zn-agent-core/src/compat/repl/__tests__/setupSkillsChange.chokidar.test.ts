@@ -1,5 +1,11 @@
 // packages/zn-agent-core/src/compat/repl/__tests__/setupSkillsChange.chokidar.test.ts
 // @ts-nocheck
+/**
+ * zai patch (2026-08-30, plan P3, Task 4): chokidar integration test
+ * for setupSkillsChange. Path uses `${cwd}/.agents/skills/` per user
+ * clarification (vendored `.zai/skills/` is INTERNAL-only); chokidar
+ * reports add/change/unlink within 3s of file change.
+ */
 import { mkdtempSync, rmSync, writeFileSync, mkdirSync } from 'fs'
 import { tmpdir } from 'os'
 import { join } from 'path'
