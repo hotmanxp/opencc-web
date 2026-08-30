@@ -338,6 +338,78 @@ describe('instanceSupervisor (4a — state machine)', () => {
     await expect(getInstanceSupervisor().updateInstance(snap.id, {})).rejects.toMatchObject({ code: 'INVALID_STATE' })
   })
 
+  // ───────── runtimeCore 持久化 ─────────
+  // 创建时附带 runtimeCore,期望 snapshot 持久化该值 + spawn args 带 --coreRuntime <value>。
+  it('createInstance with runtimeCore=repl persists it on the def and forwards --coreRuntime repl', async () => {
+    const { deps, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', runtimeCore: 'repl' })
+    expect(snap.runtimeCore).toBe('repl')
+    const idx = spawnArgs[0]!.indexOf('--coreRuntime')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(spawnArgs[0]![idx + 1]).toBe('repl')
+  })
+
+  // 不传 runtimeCore → 不发 flag,child 继承全局 settings.coreRuntime(env)。
+  it('createInstance without runtimeCore does not forward --coreRuntime (inherits global)', async () => {
+    const { deps, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    expect(spawnArgs[0]).not.toContain('--coreRuntime')
+  })
+
+  // PATCH 设 runtimeCore 后,下一次 restart 用新值。
+  it('updateInstance({runtimeCore:inproc}) persists, restartInstance spawns --coreRuntime inproc', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    await getInstanceSupervisor().updateInstance(snap.id, { runtimeCore: 'inproc' })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(fakeChildren).toHaveLength(2)
+    expect(spawnArgs[0]).not.toContain('--coreRuntime')
+    const idx = spawnArgs[1]!.indexOf('--coreRuntime')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(spawnArgs[1]![idx + 1]).toBe('inproc')
+  })
+
+  // PATCH runtimeCore=null → 清回 inherit(undefined on snapshot),restart 不再带 flag。
+  it('updateInstance({runtimeCore:null}) clears the override, restartInstance drops --coreRuntime', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', runtimeCore: 'repl' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const cleared = await getInstanceSupervisor().updateInstance(snap.id, { runtimeCore: null })
+    // null clears the override → round-trips to undefined on the
+    // snapshot so the UI shows "inherit global" again.
+    expect(cleared.runtimeCore).toBeUndefined()
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(spawnArgs[1]).not.toContain('--coreRuntime')
+  })
+
+  // Per-call override 优先于持久化值。
+  it('startInstance({runtimeCore:spawn}) override beats def.runtimeCore=inproc on the new spawn', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', runtimeCore: 'inproc' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id, { runtimeCore: 'spawn' })
+    // First spawn was created with inproc → --coreRuntime inproc.
+    // Restart override swaps to spawn → --coreRuntime spawn.
+    expect(spawnArgs[0]).toContain('inproc')
+    const idx = spawnArgs[1]!.indexOf('--coreRuntime')
+    expect(spawnArgs[1]![idx + 1]).toBe('spawn')
+  })
+
   // ───────── port 配置相关 ─────────
   // 用户在创建时钉死一个端口 → supervisor 用该端口启动,probePort 不调用。
   it('createInstance with port pins the child to that exact port (probePort not used)', async () => {

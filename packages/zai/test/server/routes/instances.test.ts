@@ -312,4 +312,126 @@ describe('routes/instances', () => {
     expect(res.status).toBe(400)
     expect(res.body.error).toMatch(/port/)
   })
+
+  // ───────── runtimeCore 持久化 ─────────
+  // POST 接受合法值,落到 snapshot.runtimeCore;接受缺失字段(继承全局);
+  // 拒绝未知值 / null(POST 上 null 没有"清除"语义,跟 port 同理)。
+  it('POST /api/instances accepts runtimeCore=repl and persists it on the snapshot', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', runtimeCore: 'repl' })
+    expect(res.status).toBe(201)
+    expect(res.body.instance.runtimeCore).toBe('repl')
+  })
+
+  it.each(['default', 'inproc', 'spawn', 'repl'] as const)(
+    'POST /api/instances accepts runtimeCore=%s',
+    async (mode) => {
+      const { app } = await bootstrap()
+      const res = await request(app)
+        .post('/api/instances')
+        .send({ name: 'demo', cwd: '/tmp', runtimeCore: mode })
+      expect(res.status).toBe(201)
+      expect(res.body.instance.runtimeCore).toBe(mode)
+    },
+  )
+
+  it('POST /api/instances omits runtimeCore when absent (inherits global)', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp' })
+    expect(res.status).toBe(201)
+    expect(res.body.instance.runtimeCore).toBeUndefined()
+  })
+
+  it('POST /api/instances rejects runtimeCore=null with 400 (no override to clear on creation)', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', runtimeCore: null })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/runtimeCore/)
+  })
+
+  it('POST /api/instances rejects unknown runtimeCore value with 400', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', runtimeCore: 'repll' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/runtimeCore/)
+  })
+
+  it('POST /api/instances rejects non-string runtimeCore with 400', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', runtimeCore: 42 })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/runtimeCore/)
+  })
+
+  // PATCH 设置 runtimeCore,清回 inherit(null),absent 是 no-op。
+  it('PATCH /api/instances/:id sets runtimeCore', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z' }],
+        statuses: {},
+      }),
+    })
+    const res = await request(app)
+      .patch('/api/instances/inst_seed')
+      .send({ runtimeCore: 'inproc' })
+    expect(res.status).toBe(200)
+    expect(res.body.instance.runtimeCore).toBe('inproc')
+  })
+
+  it('PATCH /api/instances/:id with runtimeCore=null clears the override back to inherit', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z', runtimeCore: 'repl' }],
+        statuses: {},
+      }),
+    })
+    const res = await request(app)
+      .patch('/api/instances/inst_seed')
+      .send({ runtimeCore: null })
+    expect(res.status).toBe(200)
+    // Cleared: round-trips to absent → undefined on the snapshot so
+    // the UI shows "inherit global" again.
+    expect(res.body.instance.runtimeCore).toBeUndefined()
+  })
+
+  it('PATCH /api/instances/:id with absent runtimeCore is a no-op', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z', runtimeCore: 'spawn' }],
+        statuses: {},
+      }),
+    })
+    // No runtimeCore field in the body at all → should NOT clobber the
+    // persisted `spawn`. Use a sibling field so the route doesn't
+    // 400 with "no patchable fields supplied".
+    const res = await request(app)
+      .patch('/api/instances/inst_seed')
+      .send({ lan: true })
+    expect(res.status).toBe(200)
+    expect(res.body.instance.runtimeCore).toBe('spawn')
+  })
+
+  it('PATCH /api/instances/:id rejects unknown runtimeCore value with 400', async () => {
+    const { app } = await bootstrap({
+      readFile: async () => ({
+        definitions: [{ id: 'inst_seed', name: 'seed', cwd: '/tmp/x', createdAt: '2026-08-04T00:00:00.000Z' }],
+        statuses: {},
+      }),
+    })
+    const res = await request(app)
+      .patch('/api/instances/inst_seed')
+      .send({ runtimeCore: 'repll' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/runtimeCore/)
+  })
 })
