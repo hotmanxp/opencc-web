@@ -148,5 +148,13 @@ export type ReplSession = {
     setCollapsed: (v: boolean) => void
     teardown: () => void
   }
+  getApiKeyHandle?(): {
+    verify: () => Promise<boolean>
+    teardown: () => void
+  }
+  getCostSummaryHandle?(): {
+    refresh: () => Promise<void>
+    teardown: () => void
+  }
   getElicitationRegistry?(): unknown
 }

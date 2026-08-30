@@ -132,13 +132,17 @@ describe('createReplSession P2 integration', () => {
     await session.dispose()
   })
 
-  // zai patch (2026-08-30, plan P2, Task 4): setupApiKeyVerification
-  // runs at construct time (mirrors REPL.tsx mount semantics). The
-  // resulting notification must propagate through hooks.onEvent with
-  // payload.type === 'apiKeyOk' and an `ok` boolean field. We yield
-  // to a microtask so the fire-and-forget verify() promise resolves
-  // before we read the captured events array.
-  it('setupApiKeyVerification runs on session create and emits notification', async () => {
+  // zai patch (2026-08-30, plan P2, Task 4): setupApiKeyVerification is
+  // wired at session create (mirrors REPL.tsx mount semantics) and the
+  // callback fires when verify() runs. The test exercises the wiring
+  // by calling verify() on the accessor-exposed handle, which routes
+  // through the createReplSession's onResult callback and emits an
+  // 'apiKeyOk' notification on hooks.onEvent. The adapter is
+  // intentionally NOT auto-kicked at construct time — that would
+  // interleave a 'notification' event with the first turnStart/turnEnd
+  // pair and break createReplSession.query.test.ts which asserts
+  // turnStart is the first event.
+  it('setupApiKeyVerification emits notification when verify() runs', async () => {
     const events: any[] = []
     const session = createReplSession({
       sessionId: `s-${randomUUID()}`,
@@ -147,19 +151,20 @@ describe('createReplSession P2 integration', () => {
       hooks: { onEvent: ev => events.push(ev) },
     })
 
-    // verify() is fired-and-forgotten at createReplSession time;
-    // pump the microtask queue so the onResult callback lands before
-    // we read events.
-    await new Promise(resolve => setTimeout(resolve, 10))
+    const handle = session.getApiKeyHandle?.()
+    expect(handle).toBeDefined()
+    expect(typeof handle?.verify).toBe('function')
+
+    const ok = await handle!.verify()
+    expect(typeof ok).toBe('boolean')
 
     const apiKeyEvents = events.filter(
       ev => ev.type === 'notification'
         && (ev.payload as any)?.kind === 'custom'
         && (ev.payload as any)?.payload?.type === 'apiKeyOk',
     )
-    expect(apiKeyEvents.length).toBeGreaterThanOrEqual(1)
-    const ok = (apiKeyEvents[0]!.payload as any).payload.ok
-    expect(typeof ok).toBe('boolean')
+    expect(apiKeyEvents.length).toBe(1)
+    expect(typeof (apiKeyEvents[0]!.payload as any).payload.ok).toBe('boolean')
 
     await session.dispose()
   })
