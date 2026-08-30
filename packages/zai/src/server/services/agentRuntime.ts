@@ -40,8 +40,19 @@ import {
 import type { createOpenccRuntime as _factory } from '@zn-ai/zn-agent-core'
 type OpenccRuntime = Awaited<ReturnType<typeof _factory>>
 import { ReplRuntime } from './agentRuntime.repl.js'
-import { setOpenccRuntime } from './openccServer.js'
 import { eventBus } from './eventBus.js'
+
+// zai patch (2026-08-30, plan P3.1-T1, fix round 2 review I1): the
+// shared OpenccRuntime singleton lives here as a module-level binding
+// rather than in a dedicated `openccServer.ts` holder module. V1 8-method
+// RESTful route handlers (`routes/sessions.ts`) are explicitly T2+ scope
+// (spec §4.1), so there is no consumer for an exported getter yet — keeping
+// the holder inline avoids dead exported API surface. Resurrect as a
+// dedicated singleton module + `routes/sessions.ts` once V1 contract is
+// wired.
+// TODO: P3.1-T2 — extract to a dedicated singleton module + 8-method route
+// handlers (routes/sessions.ts) once V1 contract is wired.
+let sharedOpenccRuntimeSingleton: OpenccRuntime | null = null
 import {
   startMemoryWatcher,
   stopMemoryWatcher,
@@ -586,10 +597,11 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       const { createOpenccRuntime: createOpenccRuntimeFactory } = await import(
         '@zn-ai/zn-agent-core'
       )
-      const sharedOpenccRuntime = await createOpenccRuntimeFactory({
+      const sharedRuntime = await createOpenccRuntimeFactory({
         dataDir,
         runtimeId: 'zai-server',
         defaultCwd: cwd,
+        // Fallback chain: explicit Sonnet env → small/fast env → vendor default (anthropic SDK picks).
         defaultModel:
           process.env.ANTHROPIC_DEFAULT_SONNET_MODEL
           ?? process.env.ANTHROPIC_SMALL_FAST_MODEL,
@@ -599,22 +611,25 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
         connectMcp: false,
         interactive: !(isSdk ?? false),
       })
-      // Set on the singleton holder so routes/sessions.ts can call
-      // listSessions / getSession / readTranscript / patchSession /
+      // Set on the module-level singleton holder so routes/sessions.ts can
+      // call listSessions / getSession / readTranscript / patchSession /
       // removeSession directly without going through the ReplRuntime
-      // adapter layer.
-      setOpenccRuntime(sharedOpenccRuntime)
+      // adapter layer. Idempotent: a prior call (e.g. a hot-reloaded
+      // initAgentRuntime) keeps the original instance, matching the
+      // `if (runtime) return` guard at the top of initAgentRuntime.
+      if (!sharedOpenccRuntimeSingleton) sharedOpenccRuntimeSingleton = sharedRuntime
       // ReplRuntime implements a partial OpenccRuntimeV2 shape (query /
       // abort / enqueue / interrupt / getSessionState / shutdown). With
-      // sharedOpenccRuntime injected, query() delegates to it; without it,
+      // sharedRuntime injected, query() delegates to it; without it,
       // query() falls back to the P3 stub (createReplSession). The full
       // V1 8-method contract (getSession, listSessions, readTranscript,
-      // patchSession, removeSession) is now served via getOpenccRuntime()
-      // for routes/sessions.ts rather than through this adapter.
-      runtime = new ReplRuntime(sharedOpenccRuntime) as unknown as OpenccRuntime
+      // patchSession, removeSession) is served via the module-level
+      // `sharedOpenccRuntimeSingleton` for routes/sessions.ts rather than
+      // through this adapter.
+      runtime = new ReplRuntime(sharedRuntime) as unknown as OpenccRuntime
       const cleanup = () => {
         if (runtime) void runtime.shutdown()
-        void sharedOpenccRuntime.shutdown().catch(() => {})
+        void sharedRuntime.shutdown().catch(() => {})
       }
       process.once('SIGTERM', cleanup)
       process.once('SIGINT', cleanup)

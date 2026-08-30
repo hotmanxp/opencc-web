@@ -152,6 +152,7 @@ export class ReplRuntime {
       return
     }
 
+    // P3 stub fallback — test-only path; production always has openccRuntime injected by initAgentRuntime.
     // P3 旧路径兜底:无 openccRuntime 注入时走 createReplSession stub。
     // 单元测试(slashCommands / agentRuntime.repl.test)在此路径验证。
     const session = await this.getOrCreate(input.sessionId)
