@@ -646,10 +646,11 @@ function formatValue(row: SettingsRow): string {
 
 type Theme = 'auto' | 'dark' | 'light' | 'high-contrast'
 
-// 核心运行时(zai patch 2026-08-28 命名统一):settings.coreRuntime 四态。
-// 实际生效优先级:--coreRuntime flag / env ZAI_CORE_RUNTIME > 本设置;且
+// 核心运行时(zai patch 2026-08-28 命名统一,2026-08-30 全部统一为
+// `runtimeCore` 字段):settings.runtimeCore 四态。
+// 实际生效优先级:--runtimeCore flag / env ZAI_RUNTIME_CORE > 本设置;且
 // 运行时只在服务启动 initAgentRuntime 时解析一次,改后需重启实例生效。
-type CoreRuntimeOption = 'default' | 'inproc' | 'spawn' | 'repl'
+type RuntimeCoreOption = 'default' | 'inproc' | 'spawn' | 'repl'
 
 // 阶段 1 schema:对齐 spec 表里的 Model / Permission / Theme / Env Vars 字段,
 // 但用 opencc /config 风格文本行代替 Tabs + Form。
@@ -668,7 +669,7 @@ function buildStaticSchema(
   autoUpdate: boolean,
   mainAgent: string,
   agentOptions: EnumOption[],
-  coreRuntime: CoreRuntimeOption,
+  runtimeCore: RuntimeCoreOption,
 ): SettingsSchema {
   return [
     {
@@ -866,23 +867,23 @@ function buildStaticSchema(
       ],
     },
     {
-      // Agent 核心运行时 — 写入 settings.coreRuntime。
+      // Agent 核心运行时 — 写入 settings.runtimeCore。
       // default:默认进程内 query 链路;inproc:in-process print 多 session
-      // 运行时;spawn:子进程 SessionRegistry。改后需重启实例生效
-      // (运行时在 initAgentRuntime 一次性解析);env ZAI_CORE_RUNTIME 或
-      // --coreRuntime flag 存在时会覆盖本设置。
+      // 运行时;spawn:子进程 SessionRegistry;repl:ReplRuntime (P2 默认)。
+      // 改后需重启实例生效(运行时在 initAgentRuntime 一次性解析);
+      // env ZAI_RUNTIME_CORE 或 --runtimeCore flag 存在时会覆盖本设置。
       section: '运行时',
       rows: [
         {
-          key: 'coreRuntime',
+          key: 'runtimeCore',
           label: 'Agent 运行时',
           kind: 'enum',
-          value: coreRuntime,
+          value: runtimeCore,
           options: [
-            { value: 'default', label: 'default(默认)', description: '进程内 query 链路 · 重启后生效' },
+            { value: 'default', label: 'default', description: '进程内 query 链路 · 重启后生效' },
             { value: 'inproc', label: 'inproc', description: 'in-process print 多 session 运行时 · 重启后生效' },
             { value: 'spawn', label: 'spawn', description: '子进程 SessionRegistry · 重启后生效' },
-            { value: 'repl', label: 'repl', description: 'ReplRuntime (P3.1 委托 shared OpenccRuntime) · 重启后生效' },
+            { value: 'repl', label: 'repl(默认)', description: 'ReplRuntime (P3.1 委托 shared OpenccRuntime) · 重启后生效' },
           ],
         },
       ],
@@ -944,14 +945,14 @@ export default function SettingsDrawer() {
   const [agentOptions, setAgentOptions] = useState<EnumOption[]>(() => [
     { value: 'default', label: 'default' },
   ])
-  // 核心运行时:当前持久化值来自 GET /api/agent/settings.coreRuntime,
-  // 修改走 PUT /api/agent/settings/core-runtime(同 mainAgent 模式,
+  // 核心运行时:当前持久化值来自 GET /api/agent/settings.runtimeCore,
+  // 修改走 PUT /api/agent/settings/runtime-core(同 mainAgent 模式,
   // 本地 state + 重启后生效)。
-  const [coreRuntime, setCoreRuntime] =
-    useState<CoreRuntimeOption>('default')
+  const [runtimeCore, setRuntimeCore] =
+    useState<RuntimeCoreOption>('repl')
   // 把当前 store 主题映射进 schema(theme 行)
   const [schema, setSchema] = useState<SettingsSchema>(() =>
-    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions, coreRuntime),
+    buildStaticSchema(theme, outputStyle, workMode, maxVisibleMessages, defaultSplitScreen, enableDynamicWorkflow, autoUpdate, mainAgent, agentOptions, runtimeCore),
   )
   // mount 时拉一次 GET /api/agent/settings → 填充 agentOptions + 当前 mainAgent。
   // destroyOnClose 每次打开都会重新挂载,列表保持新鲜(新增外置 agent 文件后
@@ -976,16 +977,16 @@ export default function SettingsDrawer() {
         }
         if (typeof data.mainAgent === 'string') setMainAgent(data.mainAgent)
         if (
-          data.coreRuntime === 'default' ||
-          data.coreRuntime === 'inproc' ||
-          data.coreRuntime === 'spawn' ||
-          data.coreRuntime === 'repl'
+          data.runtimeCore === 'default' ||
+          data.runtimeCore === 'inproc' ||
+          data.runtimeCore === 'spawn' ||
+          data.runtimeCore === 'repl'
         ) {
-          setCoreRuntime(data.coreRuntime)
+          setRuntimeCore(data.runtimeCore)
         }
       })
       .catch(() => {
-        // swallow — 保持默认 'default' 选项
+        // swallow — 保持默认 'repl' 选项(spec 2026-08-30 §5.1 默认值翻为 'repl')
       })
     return () => {
       cancelled = true
@@ -1114,20 +1115,20 @@ export default function SettingsDrawer() {
       })),
     )
   }, [mainAgent])
-  // 同步 coreRuntime → schema 行(本地 state,选择后 PUT 持久化)。
+  // 同步 runtimeCore → schema 行(本地 state,选择后 PUT 持久化)。
   useEffect(() => {
     setSchema((prev) =>
       prev.map((s) => ({
         ...s,
         rows: s.rows.map((r) => {
-          if (r.key === 'coreRuntime' && r.kind === 'enum') {
-            return { ...r, value: coreRuntime }
+          if (r.key === 'runtimeCore' && r.kind === 'enum') {
+            return { ...r, value: runtimeCore }
           }
           return r
         }),
       })),
     )
-  }, [coreRuntime])
+  }, [runtimeCore])
   // 同步 agentOptions → schema 行(拉取 mainAgents 列表后更新 options)。
   useEffect(() => {
     setSchema((prev) =>
@@ -1281,20 +1282,20 @@ export default function SettingsDrawer() {
           // swallow — 下次 GET 会重新对齐磁盘状态
         })
       }
-      // 核心运行时 — PUT settings.coreRuntime。运行时在
+      // 核心运行时 — PUT settings.runtimeCore。运行时在
       // initAgentRuntime 一次性解析,改后需重启实例生效,提示用户。
-      if (key === 'coreRuntime' && typeof value === 'string') {
-        const next = value as CoreRuntimeOption
-        setCoreRuntime(next)
-        void fetch('/api/agent/settings/core-runtime', {
+      if (key === 'runtimeCore' && typeof value === 'string') {
+        const next = value as RuntimeCoreOption
+        setRuntimeCore(next)
+        void fetch('/api/agent/settings/runtime-core', {
           method: 'PUT',
           headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({ coreRuntime: next }),
+          body: JSON.stringify({ runtimeCore: next }),
         })
           .then((r) => (r.ok ? r.json() : Promise.reject(new Error(String(r.status)))))
-          .then((data: { coreRuntime?: unknown }) => {
-            if (typeof data?.coreRuntime === 'string') {
-              setCoreRuntime(data.coreRuntime as CoreRuntimeOption)
+          .then((data: { runtimeCore?: unknown }) => {
+            if (typeof data?.runtimeCore === 'string') {
+              setRuntimeCore(data.runtimeCore as RuntimeCoreOption)
             }
             message.info('运行时已保存,重启 zai 后生效')
           })

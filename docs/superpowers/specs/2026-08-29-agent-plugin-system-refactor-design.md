@@ -298,8 +298,8 @@ zai-server 路由层映射:400(unknown agent)/ 500(internal)/ 200(pass-through)�
 
 - desktop 启 dev 服务,访问 `/agent`,新建会话,选 `office` → 第一条 user message 后 assistant system prompt 含 office 注入(用调试 inspector 看 prompt)
 - 同样选 `default` → 不含 office 注入
-- 切换 `ZAI_CORE_RUNTIME=inproc`,重复上面 → 现在 inproc 也生效(原 bug 修复)
-- 切换 `ZAI_CORE_RUNTIME=lightweight`(`spawn` / `default`),行为不变
+- 切换 `ZAI_RUNTIME_CORE=inproc`,重复上面 → 现在 inproc 也生效(原 bug 修复)
+- 切换 `ZAI_RUNTIME_CORE=lightweight`(`spawn` / `default`),行为不变
 
 ### 6.5 不变量(单测断言)
 

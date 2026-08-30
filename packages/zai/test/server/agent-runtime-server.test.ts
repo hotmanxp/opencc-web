@@ -52,21 +52,21 @@ const RUNTIME_METHODS = [
 
 describe('zai agentRuntime ↔ OpenccRuntime seam (Task 5)', () => {
   let prevDataDir: string | undefined
-  let prevCoreRuntime: string | undefined
+  let prevRuntimeCore: string | undefined
   let tmpHome: string
 
   beforeEach(() => {
     // Reset module-level state so each test rebuilds the runtime.
     prevDataDir = process.env.ZAI_DATA_DIR
-    prevCoreRuntime = process.env.ZAI_CORE_RUNTIME
-    // Pin coreRuntime to legacy 'default' track — this seam test
+    prevRuntimeCore = process.env.ZAI_RUNTIME_CORE
+    // Pin runtimeCore to legacy 'default' track — this seam test
     // asserts the V1 8-method OpenccRuntime contract
     // (`createOpenccRuntime`), not the partial V2 ReplRuntime adapter.
     // Plan P2, Task 6 (2026-08-30) flipped the default to 'repl'; this
     // test preserves its original intent by explicitly selecting the
-    // V1 'default' path (now using ZAI_CORE_RUNTIME, not the legacy
+    // V1 'default' path (now using ZAI_RUNTIME_CORE, not the legacy
     // ZAI_RUNTIME_KERNEL env that the brief originally referenced).
-    process.env.ZAI_CORE_RUNTIME = 'default'
+    process.env.ZAI_RUNTIME_CORE = 'default'
     // `resolveDataDir()` reads `ZAI_DATA_DIR` first; pin to a tmp dir so
     // we don't touch the user's real ~/.zn-agent. Also clear HOME so
     // resolveDataDir() falls back to the env override.
@@ -77,8 +77,8 @@ describe('zai agentRuntime ↔ OpenccRuntime seam (Task 5)', () => {
 
   afterEach(async () => {
     process.env.ZAI_DATA_DIR = prevDataDir
-    if (prevCoreRuntime === undefined) delete process.env.ZAI_CORE_RUNTIME
-    else process.env.ZAI_CORE_RUNTIME = prevCoreRuntime
+    if (prevRuntimeCore === undefined) delete process.env.ZAI_RUNTIME_CORE
+    else process.env.ZAI_RUNTIME_CORE = prevRuntimeCore
     // Restore HOME to its original value (always set on macOS, but
     // be defensive).
     if (process.env.HOME === tmpHome) delete process.env.HOME

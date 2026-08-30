@@ -179,11 +179,11 @@ REPL.tsx 的 `onSubmit / onQuery / onQueryImpl` 状态机用 React `useState / u
 |---|---|---|---|
 | **P0 骨架** | `compat/repl/createReplSession.ts` + `setupXxx(opts)` 适配层(L0 全 + L1 cron/proactive)+ vendor `query()` 命令式调用(不绕 REPL.tsx React 树) | 一个 session 跑通 submit → for await events → turnEnd;两 sessionId 并发隔离;不退化 cron tick | ~1500-2000 行 |
 | **P1 主体能力** | L1 全套(`useInboxPoller`/`useMailboxBridge`/`useSwarmInitialization`/`useSessionBackgrounding`/`useSkillsChange` 等)+ 状态机类(`onSubmit→onQuery→onQueryImpl` 拆命令式)+ resume 完整状态恢复(file history / worktree / cost / plan / attribution) | L1 全套 setupXxx teardown 通过单测;两实例跑通 /loop + proactive tick;teammate 创建可被观察到 | ~3000-4000 行 |
-| **P2 收口** | L2 状态机 hook 拆分;`screens/*` UI 组件去除,web UI 出口(`askRegistry`/`permissionRegistry` 扩 `elicitationRegistry`);30+ notification hooks 接入(`runtime.notification` 事件) | `createPrintRuntime` 删除,所有路径走 `createReplSession`;`ZAI_CORE_RUNTIME` 从 `inproc` 翻成 `repl`(或直接干掉该开关);print.ts 17+ zai patch 撤回 | ~1500-2500 行 |
+| **P2 收口** | L2 状态机 hook 拆分;`screens/*` UI 组件去除,web UI 出口(`askRegistry`/`permissionRegistry` 扩 `elicitationRegistry`);30+ notification hooks 接入(`runtime.notification` 事件) | `createPrintRuntime` 删除,所有路径走 `createReplSession`;`ZAI_RUNTIME_CORE` 从 `inproc` 翻成 `repl`(或直接干掉该开关);print.ts 17+ zai patch 撤回 | ~1500-2500 行 |
 
 ### 5.1 替换时机
 
-- **P0 完成**:`ZAI_CORE_RUNTIME` 增加 `repl` 实验分支,`createPrintRuntime` 保留作 fallback
+- **P0 完成**:`ZAI_RUNTIME_CORE` 增加 `repl` 实验分支,`createPrintRuntime` 保留作 fallback
 - **P1 完成**:`repl` 默认;`createPrintRuntime` 留作 fallback(失败时降级)
 - **P2 完成**:`createPrintRuntime` 删除,print.ts 17+ zai patch 全部撤回(改回 vendor 原版,仅留 `// zai patch` 注释指引)
 

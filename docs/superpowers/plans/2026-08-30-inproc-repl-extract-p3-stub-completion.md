@@ -729,7 +729,7 @@ Expected: All pass; no regressions from P3 changes.
 
 - [ ] **Step 3: Re-run 12-path ego-browser verification**
 
-Dispatch browser-operator subagent with explicit `ZAI_CORE_RUNTIME=repl` and the 12-path plan. Verify:
+Dispatch browser-operator subagent with explicit `ZAI_RUNTIME_CORE=repl` and the 12-path plan. Verify:
 - Path 2: ESC interrupt → no `runtime.error`, clean abort
 - Path 3: interrupt + resume → no `runtime.error`, session continues
 - Path 4: `/loop 30s "ping"` → `kind: 'loop-scheduled'` notification fires, no error

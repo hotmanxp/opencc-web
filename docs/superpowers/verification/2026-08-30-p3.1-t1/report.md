@@ -1,7 +1,7 @@
 # P3.1-T1 E2E — `/agent` plain text chat 走通真 vendor query()
 
 **日期**: 2026-08-30 18:43
-**目的**: 在 `ZAI_CORE_RUNTIME=repl` 下,从 `/agent` 输入 plain text,
+**目的**: 在 `ZAI_RUNTIME_CORE=repl` 下,从 `/agent` 输入 plain text,
 确认 ReplRuntime.query() 真正调通 vendor `query()`,产出完整
 runtime.done,UI 不再卡"对话中"。
 
@@ -12,10 +12,10 @@ runtime.done,UI 不再卡"对话中"。
   - agentRuntime.repl.ts: ReplRuntime 改为接受 optional `openccRuntime` 参数,
     query() 在 openccRuntime 注入时直接委托给 shared OpenccRuntime.query()。
     P3 stub(createReplSession)路径保留为单元测试 / 渐进迁移兜底。
-  - agentRuntime.ts: `coreRuntime === 'repl'` 分支构造 shared OpenccRuntime
+  - agentRuntime.ts: `runtimeCore === 'repl'` 分支构造 shared OpenccRuntime
     并注入 ReplRuntime(openccRuntime 路径)。sharedOpenccRuntime 也通过
     setOpenccRuntime() 暴露给 routes/sessions.ts(8-method 契约)。
-- zai dev: 后台启动,显式 `ZAI_CORE_RUNTIME=repl ZAI_DEBUG=1 ZAI_DEBUG_SSE=1`,
+- zai dev: 后台启动,显式 `ZAI_RUNTIME_CORE=repl ZAI_DEBUG=1 ZAI_DEBUG_SSE=1`,
   `--port 8103 --api-port 7716`(8103/7716 空闲)
 - 输入: curl POST `/api/agent/prompt` {"prompt":"say hi in 3 words"}
   sessionId=sess-1788086634611-ta3o0x0b

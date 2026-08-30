@@ -1,7 +1,7 @@
 import type { BackgroundTask } from '@zn-ai/zn-agent-core'
 import { sessionInbox } from './sessionInbox.js'
-import { getCoreRuntime } from './agentRuntime.js'
-import type { CoreRuntime } from '../../shared/settings.js'
+import { getRuntimeCore } from './agentRuntime.js'
+import type { RuntimeCore } from '../../shared/settings.js'
 
 /**
  * SubagentNotifier:把 BackgroundRuntime 子 agent 的完成事件回流到父 session。
@@ -27,19 +27,19 @@ import type { CoreRuntime } from '../../shared/settings.js'
 export interface SubagentNotifierOptions {
   /** 测试钩子:替换为 mock sessionInbox(默认走 module 单例)。 */
   inbox?: typeof sessionInbox
-  /** 测试钩子:替换运行时读取(默认 getCoreRuntime)。 */
-  getCore?: () => CoreRuntime
+  /** 测试钩子:替换运行时读取(默认 getRuntimeCore)。 */
+  getCore?: () => RuntimeCore
 }
 
 let notifier: SubagentNotifier | null = null
 
 export class SubagentNotifier {
   private readonly inbox: typeof sessionInbox
-  private readonly getCoreFn: () => CoreRuntime
+  private readonly getCoreFn: () => RuntimeCore
 
   constructor(opts: SubagentNotifierOptions = {}) {
     this.inbox = opts.inbox ?? sessionInbox
-    this.getCoreFn = opts.getCore ?? getCoreRuntime
+    this.getCoreFn = opts.getCore ?? getRuntimeCore
   }
 
   /**

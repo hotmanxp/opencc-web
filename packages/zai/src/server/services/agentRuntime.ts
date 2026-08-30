@@ -58,7 +58,7 @@ import {
   stopMemoryWatcher,
   hasExternalIncludes,
 } from '@zn-ai/zn-agent-core'
-import { reapplyCoreRuntimeFlag } from '../../cli/coreRuntimeFlag.js'
+import { reapplyRuntimeCoreFlag } from '../../cli/runtimeCoreFlag.js'
 import type { LoadedSkill } from '@zn-ai/zn-agent-core'
 import { AskRegistry } from './askRegistry.js'
 import { ApproveRegistry } from './approveRegistry.js'
@@ -67,7 +67,7 @@ import { sessionInbox, type InboxMessage } from './sessionInbox.js'
 import { resolveMainAgent } from './mainAgents.js'
 import { readZaiSettings } from './zaiSettingsStore.js'
 import type { SessionRegistry } from './sessionHost/SessionRegistry.js'
-import type { CoreRuntime, ZaiSettings } from '../../shared/settings.js'
+import type { RuntimeCore, ZaiSettings } from '../../shared/settings.js'
 import type {
   AskBridgeFn,
   PermissionBridgeFn,
@@ -75,22 +75,26 @@ import type {
 } from '@zn-ai/zn-agent-core'
 
 /**
- * 核心运行时三态(zai patch 2026-08-28 命名统一,原 RuntimeTrack/openccCli):
- *   default → 轻量 in-process createOpenccRuntime(默认)
+ * 核心运行时三态(zai patch 2026-08-28 命名统一,2026-08-30 字段全部统一为
+ * `runtimeCore`,原 RuntimeTrack/openccCli):
+ *   default → 轻量 in-process createOpenccRuntime
  *   inproc  → createPrintRuntime(每 sessionId 一个 vendor print.ts 实例)
  *   spawn   → spawn `opencc -p` 子进程(SessionHost)
- * 解析优先级:`--coreRuntime` flag(落到 env)> env `ZAI_CORE_RUNTIME`
- * > settings.coreRuntime > 'default'。
+ *   repl    → ReplRuntime(createReplSession 抽壳路径,P2 默认;取代原
+ *            'default' 的默认位置;紧急回退用 'inproc' 或 'default')
+ * 解析优先级:`--runtimeCore` flag(落到 env)> env `ZAI_RUNTIME_CORE`
+ * > settings.runtimeCore > 'repl'(spec 2026-08-30 §5.1)。
  * 在 `initAgentRuntime` 入口读一次,不在每个 query 重读。见
- * docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md。
+ * docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md
+ * 与 docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md。
  */
-function resolveCoreRuntime(settings: ZaiSettings): CoreRuntime {
-  const env = process.env.ZAI_CORE_RUNTIME
+function resolveRuntimeCore(settings: ZaiSettings): RuntimeCore {
+  const env = process.env.ZAI_RUNTIME_CORE
   if (env !== undefined && env !== '') {
     if (env === 'inproc' || env === 'spawn' || env === 'default' || env === 'repl') return env
     return 'repl'
   }
-  const s = settings.coreRuntime
+  const s = settings.runtimeCore
   if (s === 'inproc' || s === 'spawn' || s === 'default' || s === 'repl') return s
   return 'repl'
 }
@@ -100,10 +104,10 @@ let currentSessionId: string | null = null
 // zai patch (2026-08-28): initAgentRuntime 解析出的核心运行时缓存,供下游按
 // 运行时分支(如 SubagentNotifier / BashNotifier 在 inproc 下跳过
 // server 注入——通知由 vendor print 环的 commandQueue drain 原生投递)。
-let activeCoreRuntime: CoreRuntime = 'default'
+let activeRuntimeCore: RuntimeCore = 'default'
 /** 当前核心运行时;'default' 也是 initAgentRuntime 未跑完时的安全默认值。 */
-export function getCoreRuntime(): CoreRuntime {
-  return activeCoreRuntime
+export function getRuntimeCore(): RuntimeCore {
+  return activeRuntimeCore
 }
 let sessionRegistry: SessionRegistry | null = null
 /**
@@ -381,7 +385,7 @@ export function __resetAgentRuntimeForTests(): void {
   runtime = null
   transcriptStore = null
   serverCwd = null
-  activeCoreRuntime = 'default'
+  activeRuntimeCore = 'default'
   sessionControllers.clear()
   if (sessionRegistry) {
     void sessionRegistry.killAll('test reset')
@@ -558,11 +562,12 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // `streamingToolExecutor` tool loop → vendor's
   // `queryModelWithStreaming` → upstream API.
   // ---------------------------------------------------------------------
-  // 三态分支(ZAI_CORE_RUNTIME,spec §5.6):
+  // 三态分支(ZAI_RUNTIME_CORE,spec §5.6):
   //   default → 现状 in-process createOpenccRuntime;
   //   inproc  → createPrintRuntime(每 sessionId 一个 vendor print.ts 实例);
   //   spawn   → spawn `opencc -p` 子进程(SessionHost,stdio NDJSON +
-  //           control_request 协议),zai 退化为 SDK 宿主。
+  //           control_request 协议),zai 退化为 SDK 宿主;
+  //   repl    → ReplRuntime(createReplSession 抽壳路径,默认)。
   // settings 在分支前读一次;上下文注释见文档 spec。三条链路都保留上文
   // enableOpenccConfigs(vendor config system)与 zai 内部子系统
   // (PluginRuntime / eventBus / __zaiBridgeCtx / sessionInbox / sessionFacade)。
@@ -570,24 +575,24 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   // ---------------------------------------------------------------------
   // zai patch (2026-08-28): `enableOpenccConfigs()`(上一段)会把 settings.env
   // 无条件 `Object.assign` 回 process.env,覆盖 CLI 入口处
-  // `applyCoreRuntimeFlag()` 写入的 `ZAI_CORE_RUNTIME`。在解析运行时之前恢复
-  // `--coreRuntime` flag 的强制语义,保住 "flag > env > settings" 的设计承诺。
-  reapplyCoreRuntimeFlag()
+  // `applyRuntimeCoreFlag()` 写入的 `ZAI_RUNTIME_CORE`。在解析运行时之前恢复
+  // `--runtimeCore` flag 的强制语义,保住 "flag > env > settings" 的设计承诺。
+  reapplyRuntimeCoreFlag()
   const settings = await readZaiSettings()
-  const coreRuntime = resolveCoreRuntime(settings)
-  activeCoreRuntime = coreRuntime
+  const runtimeCore = resolveRuntimeCore(settings)
+  activeRuntimeCore = runtimeCore
 
   // zai patch (2026-08-30, plan P2, Task 6): 'repl' is a top-level
-  // coreRuntime value (alongside 'default' / 'inproc' / 'spawn'), unified
-  // under the existing coreRuntime mechanism — not a sub-mode of 'inproc'
+  // runtimeCore value (alongside 'default' / 'inproc' / 'spawn'), unified
+  // under the existing runtimeCore mechanism — not a sub-mode of 'inproc'
   // and not a separate `runtime.kernel` field. repl branch instantiates
   // ReplRuntime which wraps createReplSession as OpenccRuntimeV2 adapter.
   // Default 'repl' makes the new path canonical (P2 complete). Legacy
   // 'inproc' (createPrintRuntime) stays as fallback (P2-T5 revert
   // deferred per user directive 2026-08-30). Emergency rollback:
-  // ZAI_CORE_RUNTIME=inproc or ZAI_CORE_RUNTIME=default.
+  // ZAI_RUNTIME_CORE=inproc or ZAI_RUNTIME_CORE=default.
   // Spec: docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1.
-  if (coreRuntime === 'repl') {
+  if (runtimeCore === 'repl') {
     try {
       // zai patch (2026-08-30, plan P3.1-T1): ReplRuntime 现在是 OpenccRuntime
       // 的薄包装,而不是 createReplSession 的独立适配器。先构造 shared
@@ -638,10 +643,10 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       console.error('[initAgentRuntime] ReplRuntime init failed:', err)
       throw err
     }
-  } else if (coreRuntime === 'spawn') {
+  } else if (runtimeCore === 'spawn') {
   // 启动日志显式标注运行时路径(双轨监控埋点,spec §5.6.5)。
   console.log(
-    `[initAgentRuntime] coreRuntime=${coreRuntime} cwd=${cwd} (ZAI_CORE_RUNTIME=${process.env.ZAI_CORE_RUNTIME ?? 'unset'})`,
+    `[initAgentRuntime] runtimeCore=${runtimeCore} cwd=${cwd} (ZAI_RUNTIME_CORE=${process.env.ZAI_RUNTIME_CORE ?? 'unset'})`,
   )
     const { createSessionFacade } = await import('@zn-ai/zn-agent-core')
     const { SessionRegistry } = await import('./sessionHost/SessionRegistry.js')
@@ -665,7 +670,7 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       console.error('[initAgentRuntime] SessionHost runtime init failed:', err)
       throw err
     }
-  } else if (coreRuntime === 'inproc') {
+  } else if (runtimeCore === 'inproc') {
     // P1 inproc-print track: one vendor print.ts session instance per
     // sessionId (plan §3). Implements OpenccRuntimeV2 (8-method contract +
     // enqueue/interrupt/getSessionState); routes/agent.ts 消费 8 方法零改动,
@@ -909,14 +914,14 @@ export function getRuntime(): OpenccRuntime {
 }
 
 /**
- * B1 路径的 SessionRegistry(spec §5.5.1)。仅在 `ZAI_CORE_RUNTIME=spawn` 时被
+ * B1 路径的 SessionRegistry(spec §5.5.1)。仅在 `ZAI_RUNTIME_CORE=spawn` 时被
  * initAgentRuntime 挂载;legacy 路径调用会直接 throw(Phase B 的 registry
  * resolve 落点需要它时,following 分支已守卫)。
  */
 export function getSessionRegistry(): SessionRegistry {
   if (!sessionRegistry) {
     throw new Error(
-      'SessionRegistry not initialized (需要 ZAI_CORE_RUNTIME=spawn 启动)',
+      'SessionRegistry not initialized (需要 ZAI_RUNTIME_CORE=spawn 启动)',
     )
   }
   return sessionRegistry

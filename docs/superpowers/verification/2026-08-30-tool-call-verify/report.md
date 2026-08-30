@@ -1,7 +1,7 @@
 # Repl 模式工具调用验证报告
 
 **日期**: 2026-08-30
-**环境**: zai dev on port 8102, ZAI_CORE_RUNTIME=repl (explicit)
+**环境**: zai dev on port 8102, ZAI_RUNTIME_CORE=repl (explicit)
 **API keys**: (无 API key 配置 — dev 模式本地运行)
 
 ## Summary

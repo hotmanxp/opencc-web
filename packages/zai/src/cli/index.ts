@@ -6,7 +6,7 @@ import { fileURLToPath } from 'node:url';
 import { registerProcessOutputErrorHandlers } from '@zn-ai/zn-agent-core';
 import { runDev } from './dev.js';
 import { runStart } from './start.js';
-import { applyCoreRuntimeFlag } from './coreRuntimeFlag.js';
+import { applyRuntimeCoreFlag } from './runtimeCoreFlag.js';
 
 // 防御 stdout/stderr EPIPE — 上游管道 (nohup + 重定向、容器关闭、
 // detached TTY) 被关闭后, console.log 会触发 EPIPE. 不处理会让 zai
@@ -49,12 +49,12 @@ program
   .option('--no-open', 'Do not auto-open browser')
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
   .option('--sdk', 'SDK/headless mode: treat the runtime as non-interactive (default is interactive OpenCC CLI)')
-  // --coreRuntime <default|inproc|spawn>: 强制覆盖 settings.coreRuntime,
-  // 落到 env ZAI_CORE_RUNTIME。不传 → 不动 env,沿用 settings.json / 父进程
-  // env(默认 default)。见 packages/zai/src/cli/coreRuntimeFlag.ts。
-  .option('--coreRuntime <mode>', 'Core runtime: default (in-process createOpenccRuntime) | inproc (in-process print multi-session) | spawn (opencc -p subprocess)')
+  // --runtimeCore <default|inproc|spawn>: 强制覆盖 settings.runtimeCore,
+  // 落到 env ZAI_RUNTIME_CORE。不传 → 不动 env,沿用 settings.json / 父进程
+  // env(默认 repl)。见 packages/zai/src/cli/runtimeCoreFlag.ts。
+  .option('--runtimeCore <mode>', 'Core runtime: default (in-process createOpenccRuntime) | inproc (in-process print multi-session) | spawn (opencc -p subprocess)')
   .action((options) => {
-    applyCoreRuntimeFlag(options.coreRuntime);
+    applyRuntimeCoreFlag(options.runtimeCore);
     return runDev(options);
   });
 
@@ -65,7 +65,7 @@ program
   .option('--no-open', 'Do not auto-open browser')
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
   .option('--sdk', 'SDK/headless mode: treat the runtime as non-interactive (default is interactive OpenCC CLI)')
-  .option('--coreRuntime <mode>', 'Core runtime: default (in-process createOpenccRuntime) | inproc (in-process print multi-session) | spawn (opencc -p subprocess)')
+  .option('--runtimeCore <mode>', 'Core runtime: default (in-process createOpenccRuntime) | inproc (in-process print multi-session) | spawn (opencc -p subprocess)')
   // Internal marker: when the supervisor spawns a managed child it
   // re-invokes `zai start --managed-child ...` so the child recognises
   // it is already inside a managed session and skips the supervisor
@@ -73,7 +73,7 @@ program
   .allowUnknownOption(false)
   .option('--managed-child', 'internal: spawned by supervisor')
   .action((options) => {
-    applyCoreRuntimeFlag(options.coreRuntime);
+    applyRuntimeCoreFlag(options.runtimeCore);
     return runStart(options);
   });
 

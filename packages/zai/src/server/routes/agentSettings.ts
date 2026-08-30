@@ -7,12 +7,12 @@ import { resolveMainAgent } from '../services/mainAgents.js'
 import type { ModelEntry, OutputStyle, Theme, WorkMode, ZaiSettings } from '../../shared/settings.js'
 import type { ProviderProfile } from '../../shared/types.js'
 import { getDefaultMode } from '../services/permissionMode.js'
-import { getCoreRuntime } from '../services/agentRuntime.js'
+import { getRuntimeCore } from '../services/agentRuntime.js'
 import { BUILTIN_PROVIDERS } from '../../shared/builtinProviders.js'
 import { profilesToModelEntries } from '../../shared/profileProjection.js'
 import {
   isValidAutoUpdate,
-  isValidCoreRuntime,
+  isValidRuntimeCore,
   isValidDefaultSplitScreen,
   isValidEnableDynamicWorkflow,
   isValidOpenccCliDangerouslySkip,
@@ -21,7 +21,7 @@ import {
   isValidWorkMode,
   readZaiSettings,
   resolveAutoUpdate,
-  resolveCoreRuntime,
+  resolveRuntimeCore,
   resolveDefaultSplitScreen,
   resolveEnableDynamicWorkflow,
   resolveOpenccCliDangerouslySkip,
@@ -108,21 +108,21 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
     const enableDynamicWorkflow = resolveEnableDynamicWorkflow(settings)
     const autoUpdate = resolveAutoUpdate(settings)
     // zai patch (2026-08-28): 核心运行时三态(持久化值)。
-    // 注意这只是 settings.coreRuntime 的归一化;实际生效运行时还受
-    // env ZAI_CORE_RUNTIME / --coreRuntime flag 覆盖(agentRuntime.
-    // resolveCoreRuntime 的优先级链),且只在 initAgentRuntime 解析一次,
+    // 注意这只是 settings.runtimeCore 的归一化;实际生效运行时还受
+    // env ZAI_RUNTIME_CORE / --runtimeCore flag 覆盖(agentRuntime.
+    // resolveRuntimeCore 的优先级链),且只在 initAgentRuntime 解析一次,
     // 改后需重启实例生效。
-    const coreRuntime = resolveCoreRuntime(settings)
-    // zai patch (2026-08-30): `activeCoreRuntime` is the runtime-resolved
-    // value (--coreRuntime flag > env ZAI_CORE_RUNTIME > settings.coreRuntime
-    // > 'default'), read once at initAgentRuntime and cached in a module
+    const runtimeCore = resolveRuntimeCore(settings)
+    // zai patch (2026-08-30): `activeRuntimeCore` is the runtime-resolved
+    // value (--runtimeCore flag > env ZAI_RUNTIME_CORE > settings.runtimeCore
+    // > 'repl'), read once at initAgentRuntime and cached in a module
     // variable. Surfaces the same value the server actually uses to drive
-    // query() — distinct from `coreRuntime` which is only the persisted
+    // query() — distinct from `runtimeCore` which is only the persisted
     // settings file. Conveys "what's actually running" vs "what's saved
     // on disk", so users can spot flag/env overrides that haven't been
     // reflected in settings.json yet. Restart-only; doesn't change at
     // runtime even if settings are updated.
-    const activeCoreRuntime = getCoreRuntime()
+    const activeRuntimeCore = getRuntimeCore()
     // zai patch (2026-08-20): 主 Agent —— 当前选择 + 可选列表(内置 + 外置
     // ~/.zai/main-agents/*.js 合并),供 SettingsDrawer 的 Agent 选择行渲染。
     const { agent: mainAgent, agents: mainAgents } = await resolveMainAgent(
@@ -140,8 +140,8 @@ router.get('/agent/settings', async (_req: Request, res: Response) => {
       defaultSplitScreen,
       enableDynamicWorkflow,
       autoUpdate,
-      coreRuntime,
-      activeCoreRuntime,
+      runtimeCore,
+      activeRuntimeCore,
       mainAgent: mainAgent.name,
       mainAgents: mainAgents.map((a) => ({
         name: a.name,
@@ -375,34 +375,35 @@ router.put('/agent/settings/main-agent', async (req: Request, res: Response) => 
 })
 
 /**
- * PUT /api/agent/settings/core-runtime — 持久化核心运行时开关
- * (zai patch 2026-08-28 命名统一,P3.1 加 'repl')。Body 是
- * `{ coreRuntime: 'default' | 'inproc' | 'spawn' | 'repl' }`,写入 settings.coreRuntime。
+ * PUT /api/agent/settings/runtime-core — 持久化核心运行时开关
+ * (zai patch 2026-08-28 命名统一,P3.1 加 'repl',2026-08-30 全部统一为
+ * `runtimeCore` 字段)。Body 是
+ * `{ runtimeCore: 'default' | 'inproc' | 'spawn' | 'repl' }`,写入 settings.runtimeCore。
  *
  * 生效时机:**重启实例后**——运行时在 `initAgentRuntime` 只解析一次;且
- * env `ZAI_CORE_RUNTIME` / `--coreRuntime` flag 优先级更高,会盖过本设置。
+ * env `ZAI_RUNTIME_CORE` / `--runtimeCore` flag 优先级更高,会盖过本设置。
  */
 router.put(
-  '/agent/settings/core-runtime',
+  '/agent/settings/runtime-core',
   async (req: Request, res: Response) => {
-    const candidate = (req.body as { coreRuntime?: unknown } | undefined)?.coreRuntime
-    if (!isValidCoreRuntime(candidate)) {
+    const candidate = (req.body as { runtimeCore?: unknown } | undefined)?.runtimeCore
+    if (!isValidRuntimeCore(candidate)) {
       return res
         .status(400)
-        .json({ error: `invalid coreRuntime: ${String(candidate)}` })
+        .json({ error: `invalid runtimeCore: ${String(candidate)}` })
     }
     try {
-      const next = await updateZaiSettings({ coreRuntime: candidate })
+      const next = await updateZaiSettings({ runtimeCore: candidate })
       // zai patch (2026-08-30): also return the runtime-resolved value so
-      // the client can show both "saved" (next.coreRuntime) and
-      // "currently effective" (activeCoreRuntime). The latter only
+      // the client can show both "saved" (next.runtimeCore) and
+      // "currently effective" (activeRuntimeCore). The latter only
       // updates on restart — that's the point: the user just wrote a
-      // new preference, but until they restart, `activeCoreRuntime`
+      // new preference, but until they restart, `activeRuntimeCore`
       // reflects whatever was resolved at init. Returning it makes the
       // gap explicit in the UI rather than implicit.
       res.json({
-        coreRuntime: resolveCoreRuntime(next),
-        activeCoreRuntime: getCoreRuntime(),
+        runtimeCore: resolveRuntimeCore(next),
+        activeRuntimeCore: getRuntimeCore(),
       })
     } catch (err) {
       res.status(500).json({ error: (err as Error).message })

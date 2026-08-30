@@ -1,7 +1,7 @@
 # P3.1 tool-use e2e — repl 链路 vendor 工具调用验证
 
 **日期**: 2026-08-30 19:23
-**目的**: 在 `ZAI_CORE_RUNTIME=repl` 下,从 `/agent` 真实浏览器操作,验证 LLM 能经 ReplRuntime → vendor `query()` → vendor 工具(Bash / Read)→ 真实 shell / fs 结果回灌 UI,完成工具调用 round-trip;同时验证 P3 路径两处修复(`/help` 不 crash、ESC 可中断)。
+**目的**: 在 `ZAI_RUNTIME_CORE=repl` 下,从 `/agent` 真实浏览器操作,验证 LLM 能经 ReplRuntime → vendor `query()` → vendor 工具(Bash / Read)→ 真实 shell / fs 结果回灌 UI,完成工具调用 round-trip;同时验证 P3 路径两处修复(`/help` 不 crash、ESC 可中断)。
 
 **环境**:
 
@@ -76,7 +76,7 @@
 - Passed: 4
 - Failed: 0
 - Skipped: 0
-- Conclusion: **`ZAI_CORE_RUNTIME=repl` 下,ReplRuntime → shared OpenccRuntime → vendor `query()` → vendor 工具(Bash / Read)→ 真实执行 → 结果回灌 UI 的完整链路在真实浏览器中可工作。LLM 能选工具、读 /etc/hostname 失败后自动 fallback Bash 调 hostname 命令,工具描述 / 命令 / 参数 / 结果四要素全部正确渲染在 `/agent` UI。P3 两处修复(`/help` 不 crash、ESC 可中断)在 `/agent` UI 上行为符合预期。**
+- Conclusion: **`ZAI_RUNTIME_CORE=repl` 下,ReplRuntime → shared OpenccRuntime → vendor `query()` → vendor 工具(Bash / Read)→ 真实执行 → 结果回灌 UI 的完整链路在真实浏览器中可工作。LLM 能选工具、读 /etc/hostname 失败后自动 fallback Bash 调 hostname 命令,工具描述 / 命令 / 参数 / 结果四要素全部正确渲染在 `/agent` UI。P3 两处修复(`/help` 不 crash、ESC 可中断)在 `/agent` UI 上行为符合预期。**
 
 ### 补充观察(非测试)
 

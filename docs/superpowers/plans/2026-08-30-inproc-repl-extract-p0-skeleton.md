@@ -2134,7 +2134,7 @@ Spec: docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.2, §1
 - §3 ReplSession 接口 ✅ Task 1 + Task 7
 - §4.1 hook 命令式适配原则 ✅ Task 2-6 (原 hook 增加 setupXxx 导出)
 - §4.5 vendor query() 调用 ✅ Task 8
-- §5.1 P0 完成 → ZAI_CORE_RUNTIME 增加 repl 实验分支 — **未在 P0 落地**(本 P0 plan 不改 packages/zai;P1 阶段接入)
+- §5.1 P0 完成 → ZAI_RUNTIME_CORE 增加 repl 实验分支 — **未在 P0 落地**(本 P0 plan 不改 packages/zai;P1 阶段接入)
 - §5.2 P0 验收(cpuUsage delta + getActiveHandlesInfo)✅ Task 11
 - §6 数据流(单 turn)✅ Task 7-8
 - §9 关键文件清单(P0 范围)✅ Task 1-10

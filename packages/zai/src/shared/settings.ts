@@ -96,7 +96,7 @@ export interface ZaiPermissions {
  * 与 docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md
  * 与 docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1。
  */
-export type CoreRuntime = 'default' | 'inproc' | 'spawn' | 'repl'
+export type RuntimeCore = 'default' | 'inproc' | 'spawn' | 'repl'
 
 /** Shape of ~/.zai/settings.json. */
 export interface ZaiSettings {
@@ -195,11 +195,11 @@ export interface ZaiSettings {
   }
   /**
    * 核心运行时三态(zai patch 2026-08-28 命名统一,原 `runtime.openccCli`
-   * 硬切,不留兼容)。见 CoreRuntime 的取值语义。生效优先级:
-   * `--coreRuntime` flag > env `ZAI_CORE_RUNTIME` > 本设置。
-   * 缺失 / 非法值 → 'default'。
+   * 硬切,不留兼容)。见 RuntimeCore 的取值语义。生效优先级:
+   * `--runtimeCore` flag > env `ZAI_RUNTIME_CORE` > 本设置。
+   * 缺失 / 非法值 → 'repl'(spec 2026-08-30 §5.1 把默认从 'default' 切到 'repl')。
    */
-  coreRuntime?: CoreRuntime
+  runtimeCore?: RuntimeCore
   /**
    * zai patch (2026-08-29, plan §A): 显式 opt-in 让 inproc 轨道把
    * `toolPermissionContext.isBypassPermissionsModeAvailable` 锁定为 true,

@@ -1505,7 +1505,7 @@ Expected: 断言通过
 
 - [ ] **Step 3: 浏览器验证 office agent 在 inproc 生效(关键修复)**
 
-切 `ZAI_CORE_RUNTIME=inproc`(重启服务,或改 `.zai/settings.json` → `{"agent":{"kernel":"inproc"}}`),重复 Step 2。
+切 `ZAI_RUNTIME_CORE=inproc`(重启服务,或改 `.zai/settings.json` → `{"agent":{"kernel":"inproc"}}`),重复 Step 2。
 
 Expected: 断言通过(原 inproc bug 已修复)
 

@@ -313,7 +313,7 @@ export type OpenccEnqueueInput = {
 
 /**
  * zai patch (2026-08-27): V2 runtime contract for the in-process print
- * core runtime (`ZAI_CORE_RUNTIME=inproc`). Extends the frozen 8-method V1 shape
+ * core runtime (`ZAI_RUNTIME_CORE=inproc`). Extends the frozen 8-method V1 shape
  * with the three capabilities the vendor print loop natively supports but
  * the lightweight runtime lacks: mid-flight steering (enqueue/interrupt)
  * and per-session state introspection (getSessionState).

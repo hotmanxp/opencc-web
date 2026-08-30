@@ -19,15 +19,15 @@ function statusLabel(status: ConversationInfo['status']): string {
   }
 }
 
-// zai patch (2026-08-30): 把 coreRuntime 4 态枚举翻译成更短的展示值,
+// zai patch (2026-08-30): 把 runtimeCore 4 态枚举翻译成更短的展示值,
 // 去掉下划线 / camelCase 噪声;与 SettingsDrawer 的 label 保持一致用
 // 中文,方便用户对照「Agent 运行时」设置项。
-function coreRuntimeLabel(r: ConversationInfo['coreRuntime']): string {
+function runtimeCoreLabel(r: ConversationInfo['runtimeCore']): string {
   switch (r) {
-    case 'default': return 'default(默认)'
+    case 'default': return 'default'
     case 'inproc': return 'inproc'
     case 'spawn': return 'spawn'
-    case 'repl': return 'repl'
+    case 'repl': return 'repl(默认)'
     case null: return '—'
   }
 }
@@ -110,25 +110,25 @@ export default function ConversationInfoCard({ info }: Props) {
         </span>
       </Descriptions.Item>
       <Descriptions.Item label="状态">{statusLabel(info.status)}</Descriptions.Item>
-      {/* zai patch (2026-08-30): 实际生效的 coreRuntime。`info.coreRuntime` 是
-          持久化值(settings.json),`info.activeCoreRuntime` 是 server 启动
-          时按 --coreRuntime flag > env ZAI_CORE_RUNTIME > settings > 'default'
-          解析后缓存的实际值。两者一致:简化显示 activeCoreRuntime。
-          不一致:高亮 activeCoreRuntime(实际跑的),并把 settings 值放在
+      {/* zai patch (2026-08-30): 实际生效的 runtimeCore。`info.runtimeCore` 是
+          持久化值(settings.json),`info.activeRuntimeCore` 是 server 启动
+          时按 --runtimeCore flag > env ZAI_RUNTIME_CORE > settings > 'repl'
+          解析后缓存的实际值。两者一致:简化显示 activeRuntimeCore。
+          不一致:高亮 activeRuntimeCore(实际跑的),并把 settings 值放在
           前面,显式告诉用户「env / flag 覆盖了 settings,需重启才一致」——
           与 SettingsDrawer 的「重启后生效」语义对齐。null 时显示 —,
           表示 settings fetch 还没回来。 */}
       <Descriptions.Item label="运行时">
-        {info.coreRuntime === null || info.activeCoreRuntime === null ? (
+        {info.runtimeCore === null || info.activeRuntimeCore === null ? (
           '—'
-        ) : info.coreRuntime === info.activeCoreRuntime ? (
-          coreRuntimeLabel(info.activeCoreRuntime)
+        ) : info.runtimeCore === info.activeRuntimeCore ? (
+          runtimeCoreLabel(info.activeRuntimeCore)
         ) : (
           <span style={{ fontVariantNumeric: 'tabular-nums' }}>
-            <Text type="secondary">{coreRuntimeLabel(info.coreRuntime)}</Text>
+            <Text type="secondary">{runtimeCoreLabel(info.runtimeCore)}</Text>
             <Text type="secondary"> → </Text>
             <Text strong style={{ color: 'var(--accent-warn, #d4880f)' }}>
-              {coreRuntimeLabel(info.activeCoreRuntime)}
+              {runtimeCoreLabel(info.activeRuntimeCore)}
             </Text>
             <Text type="secondary" style={{ fontSize: 12 }}>
               {' '}(需重启生效)

@@ -1,7 +1,7 @@
 # Repl Tool-Call Smoke Test (post P3-T0 + submit fix 7428b649)
 
 **日期**: 2026-08-30
-**环境**: zai dev on port 8102/7715, ZAI_CORE_RUNTIME=repl (explicit)
+**环境**: zai dev on port 8102/7715, ZAI_RUNTIME_CORE=repl (explicit)
 
 ## Summary
 - Tests: 0/4 attempted

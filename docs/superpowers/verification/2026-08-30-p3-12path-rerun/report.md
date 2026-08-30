@@ -1,9 +1,9 @@
 # P3 12-path 真机验收重跑报告
 
 **日期**: 2026-08-30
-**环境**: zai dev on port 8102/7715, ZAI_CORE_RUNTIME=repl (explicit)
+**环境**: zai dev on port 8102/7715, ZAI_RUNTIME_CORE=repl (explicit)
 **分支**: feat/regression-tests, HEAD `bad02d28`
-**核心**: coreRuntime='repl'
+**核心**: runtimeCore='repl'
 
 ## Summary
 - Paths tested: 1/12 (Path 1 only — blocker found immediately)

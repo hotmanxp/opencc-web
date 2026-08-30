@@ -1,12 +1,12 @@
 // @ts-nocheck
 import { initAgentRuntime, getRuntime } from '../agentRuntime.js'
 
-describe('agentRuntime coreRuntime=repl (P2 unified switch)', () => {
+describe('agentRuntime runtimeCore=repl (P2 unified switch)', () => {
   beforeEach(async () => {
     // zai patch (2026-08-30, plan P2, Task 6): 'repl' is a top-level
-    // coreRuntime value, unified under existing coreRuntime mechanism
-    // (ZAI_CORE_RUNTIME env). Legacy ZAI_RUNTIME_KERNEL env is removed.
-    process.env.ZAI_CORE_RUNTIME = 'repl'
+    // runtimeCore value, unified under existing runtimeCore mechanism
+    // (ZAI_RUNTIME_CORE env). Legacy ZAI_RUNTIME_KERNEL env is removed.
+    process.env.ZAI_RUNTIME_CORE = 'repl'
     // Note: brief wrote `initAgentRuntime({ cwd: process.cwd() })` but
     // the actual signature is `initAgentRuntime(cwd: string, isSdk?)`.
     // Passing the object crashes on the post-runtime `initCommands` call
@@ -16,10 +16,10 @@ describe('agentRuntime coreRuntime=repl (P2 unified switch)', () => {
   })
 
   afterEach(() => {
-    delete process.env.ZAI_CORE_RUNTIME
+    delete process.env.ZAI_RUNTIME_CORE
   })
 
-  it('coreRuntime=repl returns a ReplRuntime instance', () => {
+  it('runtimeCore=repl returns a ReplRuntime instance', () => {
     const runtime = getRuntime()
     expect(runtime).toBeDefined()
     expect(runtime.constructor.name).toBe('ReplRuntime')

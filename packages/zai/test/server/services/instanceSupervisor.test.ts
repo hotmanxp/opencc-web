@@ -339,27 +339,27 @@ describe('instanceSupervisor (4a — state machine)', () => {
   })
 
   // ───────── runtimeCore 持久化 ─────────
-  // 创建时附带 runtimeCore,期望 snapshot 持久化该值 + spawn args 带 --coreRuntime <value>。
-  it('createInstance with runtimeCore=repl persists it on the def and forwards --coreRuntime repl', async () => {
+  // 创建时附带 runtimeCore,期望 snapshot 持久化该值 + spawn args 带 --runtimeCore <value>。
+  it('createInstance with runtimeCore=repl persists it on the def and forwards --runtimeCore repl', async () => {
     const { deps, spawnArgs } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)
     const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', runtimeCore: 'repl' })
     expect(snap.runtimeCore).toBe('repl')
-    const idx = spawnArgs[0]!.indexOf('--coreRuntime')
+    const idx = spawnArgs[0]!.indexOf('--runtimeCore')
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(spawnArgs[0]![idx + 1]).toBe('repl')
   })
 
-  // 不传 runtimeCore → 不发 flag,child 继承全局 settings.coreRuntime(env)。
-  it('createInstance without runtimeCore does not forward --coreRuntime (inherits global)', async () => {
+  // 不传 runtimeCore → 不发 flag,child 继承全局 settings.runtimeCore(env)。
+  it('createInstance without runtimeCore does not forward --runtimeCore (inherits global)', async () => {
     const { deps, spawnArgs } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)
     await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
-    expect(spawnArgs[0]).not.toContain('--coreRuntime')
+    expect(spawnArgs[0]).not.toContain('--runtimeCore')
   })
 
   // PATCH 设 runtimeCore 后,下一次 restart 用新值。
-  it('updateInstance({runtimeCore:inproc}) persists, restartInstance spawns --coreRuntime inproc', async () => {
+  it('updateInstance({runtimeCore:inproc}) persists, restartInstance spawns --runtimeCore inproc', async () => {
     const { deps, fakeChildren, spawnArgs } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)
     const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x' })
@@ -370,14 +370,14 @@ describe('instanceSupervisor (4a — state machine)', () => {
     await stopP
     await getInstanceSupervisor().restartInstance(snap.id)
     expect(fakeChildren).toHaveLength(2)
-    expect(spawnArgs[0]).not.toContain('--coreRuntime')
-    const idx = spawnArgs[1]!.indexOf('--coreRuntime')
+    expect(spawnArgs[0]).not.toContain('--runtimeCore')
+    const idx = spawnArgs[1]!.indexOf('--runtimeCore')
     expect(idx).toBeGreaterThanOrEqual(0)
     expect(spawnArgs[1]![idx + 1]).toBe('inproc')
   })
 
   // PATCH runtimeCore=null → 清回 inherit(undefined on snapshot),restart 不再带 flag。
-  it('updateInstance({runtimeCore:null}) clears the override, restartInstance drops --coreRuntime', async () => {
+  it('updateInstance({runtimeCore:null}) clears the override, restartInstance drops --runtimeCore', async () => {
     const { deps, fakeChildren, spawnArgs } = makeSupervisor()
     const { getInstanceSupervisor } = await initSup(deps)
     const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', runtimeCore: 'repl' })
@@ -390,7 +390,7 @@ describe('instanceSupervisor (4a — state machine)', () => {
     fakeChildren[0]!.emitExit(0)
     await stopP
     await getInstanceSupervisor().restartInstance(snap.id)
-    expect(spawnArgs[1]).not.toContain('--coreRuntime')
+    expect(spawnArgs[1]).not.toContain('--runtimeCore')
   })
 
   // Per-call override 优先于持久化值。
@@ -403,10 +403,10 @@ describe('instanceSupervisor (4a — state machine)', () => {
     fakeChildren[0]!.emitExit(0)
     await stopP
     await getInstanceSupervisor().restartInstance(snap.id, { runtimeCore: 'spawn' })
-    // First spawn was created with inproc → --coreRuntime inproc.
-    // Restart override swaps to spawn → --coreRuntime spawn.
+    // First spawn was created with inproc → --runtimeCore inproc.
+    // Restart override swaps to spawn → --runtimeCore spawn.
     expect(spawnArgs[0]).toContain('inproc')
-    const idx = spawnArgs[1]!.indexOf('--coreRuntime')
+    const idx = spawnArgs[1]!.indexOf('--runtimeCore')
     expect(spawnArgs[1]![idx + 1]).toBe('spawn')
   })
 

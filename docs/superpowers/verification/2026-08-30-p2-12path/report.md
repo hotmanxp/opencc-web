@@ -1,7 +1,7 @@
 # P2 12-path Re-verification (post P3)
 
 **日期**: 2026-08-30 (re-run)
-**环境**: zai dev on port 8102/7715, ZAI_CORE_RUNTIME=repl (explicit)
+**环境**: zai dev on port 8102/7715, ZAI_RUNTIME_CORE=repl (explicit)
 **Token**: 1b722d3cb19b05860e0fd640cb519e7a
 **Browser**: ego-browser with IPv6 ([::1]) access
 

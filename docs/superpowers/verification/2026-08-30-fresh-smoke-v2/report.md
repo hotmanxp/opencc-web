@@ -1,7 +1,7 @@
 # Fresh smoke v2 — P3 Path 1 re-verification after agent restart
 
 **日期**: 2026-08-30 18:19–18:21
-**目的**: 重启 zai dev (port 8103/7716, `ZAI_CORE_RUNTIME=repl`) 后重跑 Path 1 basic chat,
+**目的**: 重启 zai dev (port 8103/7716, `ZAI_RUNTIME_CORE=repl`) 后重跑 Path 1 basic chat,
 确认 066fc22d defensive toolPermissionContext fix 实际生效。
 **上一个会话相关**: `2026-08-30-p3-12path-rerun/report.md` 报 Path 1 REGRESSION(回归),
 诊断根因为 P3-T0 populate ToolUseContext 后 zai host 最小 appState 必崩。
@@ -12,7 +12,7 @@
 - `feat/regression-tests` HEAD: `066fc22d`
 - core dist: `packages/zn-agent-core/dist/opencc-core.mjs` (57 MB unminified,
   `build:core:dev` 产物,18:04:54 rebuild 后)
-- zai dev: 后台 `b0en110m2`,显式 `ZAI_CORE_RUNTIME=repl`, `--port 8103 --api-port 7716`
+- zai dev: 后台 `b0en110m2`,显式 `ZAI_RUNTIME_CORE=repl`, `--port 8103 --api-port 7716`
 - ego-browser task space 24,`http://[::1]:8103/agent`(vite IPv6,express IPv4)
 - 输入: plain text "hello"
 - 等待: 3 / 6 / 9 / 12 / 15 秒 5 次 poll

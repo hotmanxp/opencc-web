@@ -12,7 +12,7 @@
 
 - ✅ P0 骨架(L0 + L1 cron/proactive + createReplSession 主入口 + bundle 导出)
 - ✅ P1 主体(L1 inbox/mailbox/swarm/background/skills + 状态机 + sessionRestore + zai 三态开关)
-- ✅ P2 主体(L2 apiKey/cost/tasksV2 + L3 notification bus + ElicitationRegistry + 集成到 createReplSession + 默认 coreRuntime='repl')
+- ✅ P2 主体(L2 apiKey/cost/tasksV2 + L3 notification bus + ElicitationRegistry + 集成到 createReplSession + 默认 runtimeCore='repl')
 - ⏸️ P2-T5 deferred: print.ts revert + 4 file deletions(用户授权 2026-08-30 暂缓,优先完成 repl 接入)
 
 ## 2. 关键文件变化
@@ -27,9 +27,9 @@
 - `packages/zn-agent-core/src/opencc-src/cli/print.ts`(保留 9e10ba59 headless wake fix,17+ 旧 zai patch 仍在 — T5 待办)
 - `packages/zn-agent-core/src/bundle-entry.ts`(暴露 vendor commandQueue API + ReplSession 类型)
 - `packages/zn-agent-core/src/compat/repl/createReplSession.ts`(P1 + P2 集成,5 个 accessor,p2Wired marker)
-- `packages/zai/src/shared/settings.ts`(`CoreRuntime` 类型扩展加 `'repl'` 四态,javadoc 标注)
-- `packages/zai/src/server/services/agentRuntime.ts`(`resolveCoreRuntime` 默认值翻成 `'repl'`,删除旧的 `runtime.kernel` 子分支,把 `kernel === 'repl'` 改写成顶层 `coreRuntime === 'repl'`,与 default/inproc/spawn 平级)
-- `packages/zai/test/server/agent-runtime-server.test.ts`(beforeEach 显式 `ZAI_CORE_RUNTIME=default` 锁住 V1 全 8 方法契约)
+- `packages/zai/src/shared/settings.ts`(`RuntimeCore` 类型扩展加 `'repl'` 四态,javadoc 标注)
+- `packages/zai/src/server/services/agentRuntime.ts`(`resolveRuntimeCore` 默认值翻成 `'repl'`,删除旧的 `runtime.kernel` 子分支,把 `kernel === 'repl'` 改写成顶层 `runtimeCore === 'repl'`,与 default/inproc/spawn 平级)
+- `packages/zai/test/server/agent-runtime-server.test.ts`(beforeEach 显式 `ZAI_RUNTIME_CORE=default` 锁住 V1 全 8 方法契约)
 
 ### 删除
 - (T5 deferred)— packages/zn-agent-core/src/opencc-src/server/createPrintRuntime-impl.ts
@@ -47,12 +47,12 @@
 
 ## 4. 默认行为变化(2026-08-30 P2 完成后)
 
-- `CoreRuntime` 类型新增 `'repl'` 成员,目前是 4 态:`'default' | 'inproc' | 'spawn' | 'repl'`
-- `resolveCoreRuntime()` 默认值从 `'default'` 改为 `'repl'`
+- `RuntimeCore` 类型新增 `'repl'` 成员,目前是 4 态:`'default' | 'inproc' | 'spawn' | 'repl'`
+- `resolveRuntimeCore()` 默认值从 `'default'` 改为 `'repl'`
 - 默认走 `createReplSession`(P0+P1+P2 全部能力,通过 `ReplRuntime` 适配 OpenccRuntime 形状)
 - `'default'` / `'inproc'` 保留为 legacy fallback(紧急回退用)
-- 紧急回退:`ZAI_CORE_RUNTIME=inproc` 或 `ZAI_CORE_RUNTIME=default`
-- 注意:老的 `ZAI_RUNTIME_KERNEL` env 与 `settings.runtime.kernel` 子字段已被 `'repl'` coreRuntime 替代;设置项路径变更属于设计取舍,因为 `coreRuntime` 早已是唯一的运行时维度,统一语义更干净
+- 紧急回退:`ZAI_RUNTIME_CORE=inproc` 或 `ZAI_RUNTIME_CORE=default`
+- 注意:老的 `ZAI_RUNTIME_KERNEL` env 与 `settings.runtime.kernel` 子字段已被 `'repl'` runtimeCore 替代;设置项路径变更属于设计取舍,因为 `runtimeCore` 早已是唯一的运行时维度,统一语义更干净
 
 ## 5. 待办(后续 session)
 
@@ -64,4 +64,4 @@
 ## 6. 已知 limitation
 
 - T1 commit `e20039e3` 单独 checkout 失败(T1 subagent 越界加了 T2 才建的目录 export),chain 工作但 commit 不独立。文档化即可,不改历史。
-- P2 任务分两阶段:本 T6 commit 完成 default kernel flip;`agent-runtime-server.test.ts` 的 `ZAI_CORE_RUNTIME=default` pin 是因为该测试本来就是 V1 8-method OpenccRuntime seam 契约测试,新默认 kernel 与其断言不兼容;最小修改是显式锁定 V1 路径而非改测试语义。
+- P2 任务分两阶段:本 T6 commit 完成 default kernel flip;`agent-runtime-server.test.ts` 的 `ZAI_RUNTIME_CORE=default` pin 是因为该测试本来就是 V1 8-method OpenccRuntime seam 契约测试,新默认 kernel 与其断言不兼容;最小修改是显式锁定 V1 路径而非改测试语义。

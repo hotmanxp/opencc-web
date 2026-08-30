@@ -1,12 +1,12 @@
 import type { BashTaskInfo } from '@zn-ai/zn-agent-core'
 import {
   getRuntime,
-  getCoreRuntime,
+  getRuntimeCore,
   getCurrentSessionId,
   setCurrentSessionId,
   hasActiveQuery,
 } from './agentRuntime.js'
-import type { CoreRuntime } from '../../shared/settings.js'
+import type { RuntimeCore } from '../../shared/settings.js'
 import { resolveModel } from '../lib/resolveModel.js'
 import { eventBus } from './eventBus.js'
 import { translateRuntimeEvents } from '../routes/agent.js'
@@ -44,8 +44,8 @@ import { translateRuntimeEvents } from '../routes/agent.js'
 export interface BashNotifierOptions {
   /** 测试钩子:替换为 mock runtime。 */
   getRuntime?: typeof getRuntime
-  /** 测试钩子:替换运行时读取(默认 getCoreRuntime)。 */
-  getCore?: () => CoreRuntime
+  /** 测试钩子:替换运行时读取(默认 getRuntimeCore)。 */
+  getCore?: () => RuntimeCore
 }
 
 let notifier: BashNotifier | null = null
@@ -117,11 +117,11 @@ function escapeXml(s: string): string {
 
 export class BashNotifier {
   private readonly getRuntimeFn: typeof getRuntime
-  private readonly getCoreFn: () => CoreRuntime
+  private readonly getCoreFn: () => RuntimeCore
 
   constructor(opts: BashNotifierOptions = {}) {
     this.getRuntimeFn = opts.getRuntime ?? getRuntime
-    this.getCoreFn = opts.getCore ?? getCoreRuntime
+    this.getCoreFn = opts.getCore ?? getRuntimeCore
   }
 
   /**
