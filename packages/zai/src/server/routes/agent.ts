@@ -1478,8 +1478,16 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
           } as any);
         }
       }
-      if (event.type === "runtime.done" || event.type === "runtime.aborted")
-        break;
+      // zai patch (2026-08-30): 不要在第一条 runtime.done 就 break —
+      // vendor 在主 turn 跑完(派 async Agent 后)就推 runtime.done,然后
+      // 阻塞等 <task-notification> → 续写新 turn → 推第二条 runtime.done。
+      // 旧逻辑在第一条 break,导致新 turn 的 events (runtime.started /
+      // .delta / .done turnIndex=1) 全部丢失,前端 transcript 看不到
+      // follow-up summary。删掉 break,让 for-await 自然消费完
+      // runtime.query 的 async generator(它在 vendor 端 result event
+      // 之后 done)。 HARD_TIMEOUT (runQueryLoop 顶部 2h) 兜底。
+      // 同样不处理 runtime.aborted — 沿用旧注释,aborted 通常
+      // 走 outer try/catch 的 runtime.error 路径。
     }
   } catch (err) {
     // 无条件落盘(不依赖 ZAI_DEBUG): query 流异常是"发了没反应/页面上
