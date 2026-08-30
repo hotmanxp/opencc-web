@@ -5,3 +5,4 @@
 export { setupCommandQueue } from './setupCommandQueue.js'
 export { setupScheduledTasks } from './setupCronScheduler.js'
 export { setupProactive } from './setupProactive.js'
+export { setupQueryGuard, QueryGuardState } from './setupQueryGuard.js'
