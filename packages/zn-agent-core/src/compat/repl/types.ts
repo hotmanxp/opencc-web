@@ -2,6 +2,12 @@
 /**
  * zai patch (2026-08-30, plan P0): createReplSession type surface.
  * See docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §3.
+ *
+ * P3-T0: extends ReplSessionOptions with `commands? / tools? /
+ * mcpClients? / readFileState?` so the host (zai web) can override the
+ * vendor fallbacks used to populate ToolUseContext. Without these,
+ * vendor query() sees an empty options.tools and the LLM never emits
+ * tool_use blocks.
  */
 
 export type ContentBlock =
@@ -85,6 +91,19 @@ export type ReplSessionOptions = {
   setAppState?: (fn: (prev: unknown) => unknown) => void
   mcpClients?: unknown[]
   bootstrap?: unknown
+  // zai patch (2026-08-30, plan P3, Task 0): ToolUseContext population
+  // inputs. Host (zai web) can override these to wire its own command
+  // registry / tool registry / MCP clients / FileStateCache; when
+  // omitted, createReplSession falls back to vendor getTools() /
+  // getCommands() / empty array / new FileStateCache() defaults so the
+  // query() call always sees a non-empty ToolUseContext.options.
+  commands?: unknown[]
+  tools?: unknown
+  readFileState?: unknown
+  // zai patch (2026-08-30, plan P3, Task 0): agents list fed into
+  // ToolUseContext.options.agentDefinitions.activeAgents. Falls back
+  // to [] when host doesn't supply one.
+  agents?: unknown[]
   // zai patch (2026-08-30, plan P2, Task 4): optional ElicitationRegistry
   // supplied by the host (zai web). Typed as `unknown` to avoid pulling
   // the zai workspace package into zn-agent-core — consumers in T6 cast
@@ -157,4 +176,11 @@ export type ReplSession = {
     teardown: () => void
   }
   getElicitationRegistry?(): unknown
+  // zai patch (2026-08-30, plan P3, Task 0): test seam for emitting
+  // synthetic ReplEvents. ONLY exposed when NODE_ENV === 'test' (see
+  // createReplSession.ts). Tests use this to inject runtime.tool_call /
+  // runtime.tool_result / runtime.delta / runtime.thinking events
+  // without depending on a real vendor query() chain. Production code
+  // paths must NOT call this.
+  __test_emitReplEvent?(typeOrEvent: string | ReplEvent, payload?: unknown): void
 }

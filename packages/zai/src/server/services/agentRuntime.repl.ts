@@ -250,6 +250,15 @@ export class ReplRuntime {
             // 我们把 turnStart 当 runtime.started 之前的隐含信号(已被
             // query() 外层 yield),turnEnd 对应 runtime.done 触发信号,
             // sessionCrash 对应 runtime.error。
+            //
+            // zai patch (2026-08-30, plan P3, Task 0): vendor
+            // translateSdkToRuntime 通过 hooks.onEvent emit
+            // ReplEvent { type: 'runtime', payload: { type: 'runtime.*' } }
+            // for tool_call / tool_result / delta / thinking events.
+            // 旧 handler 完全不识别 'runtime' 事件,这些 event 都被默默
+            // 丢掉,导致 LLM 调了 Bash/Read 但前端看不到 tool_call 也
+            // 看不到 tool_result。修复:增加一个分支直接转发 runtime.*
+            // payload 到 enqueueEvent(保持 sessionId/ts 元数据一致)。
             const sid = sessionId
             if (replEvent.type === 'turnEnd') {
               this.enqueueEvent(sid, {
@@ -271,6 +280,27 @@ export class ReplRuntime {
               this.enqueueEvent(sid, {
                 ...replEvent,
                 sessionId: sid,
+                ts: replEvent.timestamp ?? Date.now(),
+              } as RuntimeEvent)
+            } else if (
+              replEvent.type === 'runtime'
+              && replEvent.payload
+              && typeof replEvent.payload.type === 'string'
+              && replEvent.payload.type.startsWith('runtime.')
+            ) {
+              // zai patch (2026-08-30, plan P3, Task 0): forward
+              // runtime.* events directly. The vendor adapter wraps
+              // each RuntimeEvent in a ReplEvent { type: 'runtime',
+              // payload: <RuntimeEvent> } — we unwrap and surface the
+              // inner type so consumers see e.g. { type:
+              // 'runtime.tool_call', toolUseId, toolName, input } instead
+              // of the wrapper. sessionId + ts are normalized for
+              // consistency with turnEnd / sessionCrash / notification.
+              const inner = replEvent.payload
+              this.enqueueEvent(sid, {
+                ...inner,
+                sessionId: sid,
+                turnIndex: inner.turnIndex ?? replEvent.turnIndex,
                 ts: replEvent.timestamp ?? Date.now(),
               } as RuntimeEvent)
             }

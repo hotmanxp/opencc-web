@@ -11,6 +11,17 @@
  *   - vendor `query()` for-await loop with `querySource: 'server-repl'`
  *   - translateSdkToRuntime wires SDKMessage → ReplEvent stream
  *   - LIFO teardown order in dispose
+ *
+ * P3-T0: populate a full ToolUseContext (instead of `{} as any`) so
+ * vendor query() surfaces the LLM's full tool/command/MCP set. Without
+ * this, vendor's claude.ts / loop never sees any tools and the LLM
+ * never emits tool_use blocks — every repl turn was effectively pure
+ * text chat. Fallbacks: opts.commands / opts.tools / opts.mcpClients /
+ * opts.readFileState from the host, otherwise vendor getTools() /
+ * getCommands() / [] / new FileStateCache(). Also adds
+ * __test_emitReplEvent seam (NODE_ENV=test only) for tests to inject
+ * synthetic runtime.tool_call / runtime.tool_result events without
+ * the heavy vendor query() chain.
  */
 
 import { randomUUID } from 'crypto'
@@ -59,6 +70,31 @@ import { translateSdkToRuntime } from '../../compat/runtime/sdkEventAdapter.js'
 // the constructed UserMessage conforms to vendor's `Message` type
 // (top-level `content: string` + nested `message.content`).
 import { createUserMessage } from '../../opencc-src/utils/messages.js'
+// zai patch (2026-08-30, plan P3, Task 0): vendor tool/command registries
+// + FileStateCache + AbortController. Imported via dynamic import()
+// inside runTurn so vitest tests that mock query.js don't trigger the
+// full tools.ts → BashTool → prompt.ts evaluation chain at module
+// load. Dynamic import goes through vite/vitest's resolver so vi.mock
+// can still intercept these. The promise is memoized per session to
+// avoid re-importing on every turn.
+let _vendorToolContextPromise: Promise<any> | null = null
+function _loadVendorToolContext(): Promise<any> {
+  if (_vendorToolContextPromise) return _vendorToolContextPromise
+  _vendorToolContextPromise = (async () => {
+    const toolsMod: any = await import('../../opencc-src/tools.js')
+    const commandsMod: any = await import('../../opencc-src/commands.js')
+    const fileStateMod: any = await import('../../opencc-src/utils/fileStateCache.js')
+    const abortMod: any = await import('../../opencc-src/utils/abortController.js')
+    return {
+      getTools: toolsMod.getTools,
+      getCommands: commandsMod.getCommands,
+      createFileStateCacheWithSizeLimit:
+        fileStateMod.createFileStateCacheWithSizeLimit,
+      createAbortController: abortMod.createAbortController,
+    }
+  })()
+  return _vendorToolContextPromise
+}
 import type {
   ReplSession,
   ReplSessionOptions,
@@ -362,10 +398,12 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
             // an in-process server session from `repl_main_thread`
             // (terminal REPL) and `sdk` (CLI child process).
             //
-            // P0 minimal params — full ToolUseContext population lands in
-            // P1 once a real REPL-style AppState is plumbed through
-            // zai web. For now an empty object satisfies the type, and
-            // tests verify the call shape (querySource) via mock.
+            // P3-T0: populate a full ToolUseContext (was `{} as any`).
+            // Vendor query()/claude.ts reads options.tools / commands /
+            // mcpClients / mainLoopModel / abortController / readFileState
+            // / getAppState to render the API request and dispatch
+            // permission checks. Without this, the LLM never sees any
+            // tools and never emits tool_use blocks.
             const adapterMeta = {
               sessionId,
               turnIndex: thisTurnIndex,
@@ -384,13 +422,104 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
                 uuid: randomUUID(),
               }),
             ]
+            // zai patch (2026-08-30, plan P3, Task 0): ToolUseContext
+            // population. Vendor fallbacks loaded lazily so unit tests
+            // that mock query.js can skip the tools.ts → BashTool →
+            // prompt.ts evaluation chain entirely. When host (zai web)
+            // supplies overrides via opts, those win — they reflect the
+            // actual production app state. Defaults match the shape
+            // queryContext.ts:143-171 builds for the SDK/print path so
+            // the two paths behave equivalently.
+            const hostTools = (opts as any).tools
+            const hostCommands = (opts as any).commands
+            const hostMcpClients = (opts as any).mcpClients
+            const hostReadFileState = (opts as any).readFileState
+            const hostAgents = (opts as any).agents
+            // zai patch (2026-08-30, plan P3, Task 0): in test mode,
+            // skip the lazy vendor fallback entirely — unit tests mock
+            // query.js but don't mock tools.js / commands.js (those
+            // would otherwise pull in BashTool → prompt.ts and break
+            // `getMaxTimeoutMs is not a function`). Tests that care
+            // about specific ToolUseContext values mock them as
+            // opts.tools / opts.commands / opts.readFileState, OR set
+            // process.env.ZAI_P3_T0_FORCE_VENDOR_FALLBACK='1' to opt
+            // back into the lazy vendor graph (used by
+            // toolUseContext.test.ts which DOES mock the new modules).
+            const forceVendorFallback = process.env.ZAI_P3_T0_FORCE_VENDOR_FALLBACK === '1'
+            const useVendorFallbacks = (forceVendorFallback || process.env.NODE_ENV !== 'test')
+              && (!hostTools
+                || !hostCommands
+                || !hostReadFileState)
+            const vendorCtx = useVendorFallbacks
+              ? await _loadVendorToolContext()
+              : null
+            // Vendor getTools needs a ToolPermissionContext; we don't
+            // have a real one in server-repl mode, so use the empty
+            // default. assembleToolPool expects (permissionContext,
+            // mcpTools); passing getEmptyToolPermissionContext means
+            // permission-mode rules won't filter any tools (which is
+            // the right default — host-supplied tools already passed
+            // host-side filtering).
+            const fallbackTools = hostTools
+              ?? (vendorCtx
+                ? vendorCtx.getTools({
+                  mode: 'acceptEdits',
+                  additionalWorkingDirectories: new Map(),
+                  alwaysAllowRules: {},
+                  alwaysDenyRules: {},
+                  alwaysAskRules: {},
+                  isBypassPermissionsModeAvailable: false,
+                })
+                : {})
+            const fallbackCommands = hostCommands
+              ?? (vendorCtx ? await vendorCtx.getCommands(opts.cwd) : [])
+            const fallbackMcpClients = hostMcpClients ?? []
+            const fallbackReadFileState = hostReadFileState
+              ?? (vendorCtx
+                ? vendorCtx.createFileStateCacheWithSizeLimit(100)
+                : { get: () => undefined, set: () => undefined, has: () => false, delete: () => false })
+            const fallbackAgents = hostAgents ?? []
+            const fallbackAbortController = vendorCtx
+              ? vendorCtx.createAbortController()
+              : new AbortController()
+            const toolUseContext = {
+              options: {
+                commands: fallbackCommands,
+                debug: false,
+                mainLoopModel: (opts as any).model ?? 'claude-sonnet-4-5',
+                tools: fallbackTools,
+                verbose: false,
+                thinkingConfig: { type: 'adaptive' as const },
+                mcpClients: fallbackMcpClients,
+                mcpResources: {},
+                isNonInteractiveSession: true,
+                agentDefinitions: {
+                  activeAgents: fallbackAgents,
+                  allAgents: [] as unknown[],
+                },
+                customSystemPrompt: undefined,
+                appendSystemPrompt: undefined,
+                querySource: 'server-repl' as const,
+              },
+              abortController: fallbackAbortController,
+              readFileState: fallbackReadFileState,
+              getAppState: () => (opts.getAppState?.() ?? {}) as any,
+              setAppState: (fn: (prev: unknown) => unknown) => {
+                opts.setAppState?.(fn)
+              },
+              setInProgressToolUseIDs: () => {},
+              setResponseLength: () => {},
+              updateFileHistoryState: () => {},
+              updateAttributionState: () => {},
+              messages: [] as any[],
+            }
             for await (const sdkMsg of query({
               messages: messages as any,
               systemPrompt: [] as any,
               userContext: {},
               systemContext: {},
               canUseTool: opts.canUseTool ?? (async () => ({ behavior: 'allow' as const })),
-              toolUseContext: {} as any,
+              toolUseContext: toolUseContext as any,
               querySource: 'server-repl',
             })) {
               for (const runtimeEv of translateSdkToRuntime(sdkMsg, adapterMeta)) {
@@ -410,6 +539,29 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
       guard.state.end(gen)
     }
   }
+
+  // zai patch (2026-08-30, plan P3, Task 0): test seam. Exposed only
+  // when NODE_ENV === 'test' so production builds don't carry this
+  // surface. Tests use it to inject synthetic ReplEvents (runtime.*
+  // types) without depending on vendor query()'s real chain. Accepts
+  // either a fully-formed ReplEvent object or a (type, payload) pair
+  // — matches both ergonomics.
+  const __test_emitReplEvent = process.env.NODE_ENV === 'test'
+    ? (typeOrEvent: string | ReplEvent, payload?: unknown): void => {
+        if (typeof typeOrEvent === 'string') {
+          emitReplEvent(typeOrEvent as ReplEvent['type'], payload)
+        } else {
+          try {
+            opts.hooks.onEvent(typeOrEvent as ReplEvent)
+          } catch (err) {
+            console.warn(
+              `[createReplSession ${sessionId}] __test_emitReplEvent onEvent threw:`,
+              err,
+            )
+          }
+        }
+      }
+    : undefined
 
   return {
     async submit(content: ContentBlock[]): Promise<void> {
@@ -524,6 +676,12 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     getElicitationRegistry() {
       return elicitationRegistry
     },
+
+    // zai patch (2026-08-30, plan P3, Task 0): expose the test seam so
+    // vitest can reach it without going through hooks.onEvent. Production
+    // builds see `undefined` here (the seam is only attached when
+    // NODE_ENV === 'test' above).
+    ...(__test_emitReplEvent ? { __test_emitReplEvent } : {}),
   }
 }
 
