@@ -282,6 +282,18 @@ interface AgentState {
   // 气泡. sendSeq 提供跨轮唯一性, 根治该归并 bug.
   sendSeq: number
 
+  // zai patch (2026-08-30): 记录当前 session 最近一次 runtime.started
+  // 的 turnIndex(同 session 内,monotonic 不降)。用于在 runtime.started
+  // 入口判断"是否真正的新 turn":incomingTurn > lastSeen 才 bump
+  // textSegmentRev 开新 bubble。原先用 prevStatus==='streaming' 守卫,
+  // 但 inproc-print 的 async-agent follow-up turnIndex 跳升时 status
+  // 仍 'streaming'(子代理异步返回期间从未 idle),导致新 turn 的
+  // text_delta 全部被 upsertStreamBlock 复用上一轮的 key,UI 上 follow-up
+  // 文本"消失"。
+  //
+  // null = 还没收到过 runtime.started,首次遇到任何 turnIndex 都视为新 turn。
+  lastRuntimeTurnIndex: number | null
+
   // dsh 借鉴 (2026-08-15): seq 守卫 + 投影存储。
   // 每 session 已应用的最大事件 seq (只升不降) — 重放/乱序事件被丢弃,
   // 替代部分手工 key 拼接防御 (手工 key 仍负责 React 渲染分组, 渐进式)。
@@ -555,6 +567,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   textSegmentRev: 0,
   segmentedToolUseIds: {},
   sendSeq: 0,
+  lastRuntimeTurnIndex: null,
   v2TasksBySession: {},
   // SSE state.* event 缓存 (Task 10): 每个 sessionId 一份, 默认空,
   // 由 applyCwdChanged / applyBashTaskChanged / applyV2TaskChanged /
@@ -941,6 +954,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         textSegmentRev: 0,
         segmentedToolUseIds: {},
         sendSeq: 0,
+        lastRuntimeTurnIndex: null,
         v2TasksBySession: sid ? restV2 : s.v2TasksBySession,
       }
     }),
@@ -988,7 +1002,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   },
 
   setCurrentSession: (sessionId: string) => {
-    set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0 })
+    set({ sessionId, messages: [], textSegmentRev: 0, segmentedToolUseIds: {}, sendSeq: 0, lastRuntimeTurnIndex: null })
     // 同步 URL ?sid=..., 让刷新/分享链接落到同一会话.
     writeUrlSid(sessionId)
     // ★ Cold-start 快照补全: 切会话时 fire-and-forget 拉一次 4 字段快照,
@@ -1072,6 +1086,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         textSegmentRev: 0,
         segmentedToolUseIds: {},
         sendSeq: 0,
+        lastRuntimeTurnIndex: null,
         v2TasksBySession: nextV2,
         _taskClearTimers: nextTimers,
         creatingSession: true,
@@ -1245,6 +1260,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         textSegmentRev: 0,
         segmentedToolUseIds: {},
         sendSeq: 0,
+        lastRuntimeTurnIndex: null,
       })
     } catch {
       // ignore
@@ -1399,6 +1415,21 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   applyRuntimeEvent: (event) => {
     if (!('sessionId' in event) || typeof event.sessionId !== 'string') return
     const sid = event.sessionId
+    // ★ ZAI_DEBUG_SSE: 记录 reducer 入口,配合 server [server-sse] 日志
+    // 形成端到端追踪。注意 turnIndex 与 prevStatus 是 sub-agent follow-up
+    // 不显示的核心:服务端每条 runtime.started 都带 turnIndex,只有当
+    // incomingTurn > lastSeenTurn 时才识别为"新 turn" 并 bump textSegmentRev。
+    if (typeof window !== 'undefined' && ((window as any).__ZAI_DEBUG_SSE__ === true || (typeof localStorage !== 'undefined' && localStorage.getItem('zai-debug-sse') === '1'))) {
+      // eslint-disable-next-line no-console
+      console.log('[client-store] applyRuntimeEvent', JSON.stringify({
+        type: event.type,
+        sessionId: sid,
+        turnIndex: (event as any).turnIndex,
+        seq: (event as any).seq,
+        prevStatus: useAgentStore.getState().status,
+        textSegmentRev: useAgentStore.getState().textSegmentRev,
+      }))
+    }
     // Task 14 — runtime.compacted: 不经过 currentSid 过滤, 直接推顶部 toast.
     // 原因: 压缩 toast 是会话级"提示", 而非流式事件 — 切到 B 后即使迟到
     // 收到 A 的 compact 事件 (极少, 但 SSE 重连 / 后台压缩排队时可能发生),
@@ -1432,25 +1463,51 @@ export const useAgentStore = create<AgentState>((set, get) => ({
         // 标记当前活跃 session + 进入 streaming 态. status 已经是
         // 'idle' 时也会被覆盖成 'streaming'; UI 看到 streaming 后立即
         // 显示流式动画与 elapsed 计时.
-        const prevStatus = useAgentStore.getState().status
-        if (prevStatus === 'streaming') {
-          // SSE 重连: server 重新发 runtime.started, status 仍是 streaming,
-          // 属于同一 turn 的延续. 不能 bump textSegmentRev, 否则同一个
-          // turn 的 text 会被切到不同 bubble, 用户看到流式回答中段莫名
-          // 换气泡 / 重置 markdown.
-          useAgentStore.setState({ activeSessionId: sid, status: 'streaming' })
-        } else {
-          // 新 turn 起点. SubagentNotifier 触发的 sub-agent 续写也走这条:
-          // 上一轮已 runtime.done / aborted / error, status 不再 streaming,
-          // 续写 turn 的 text_delta 必须落到新 bubble, 不能 append 到上一轮
-          // 末尾的 text (否则"等待结果..."和"结果已收到"被拼成一段).
-          // 修法: 把 textSegmentRev +1, 让新一轮首个 stream block key 改变,
-          // upsertStreamBlock 自然开新 bubble.
-          useAgentStore.setState((s) => ({
+        //
+        // zai patch (2026-08-30): turnIndex strict-greater-than 守卫。
+        // 原先 `prevStatus === 'streaming'` 守卫在 inproc-print 异步代理
+        // 场景失败:async-agent 派发 → 等 <task-notification> → 续写新 turn
+        // 期间 status 始终是 'streaming',新 turn 的 runtime.started 到达
+        // 时 prevStatus==='streaming',不 bump textSegmentRev,新 turn 的
+        // text_delta 与上一轮共享同一个 stream block key,UI 上 follow-up
+        // 文本被吞掉。
+        //
+        // 新策略:跟踪 lastRuntimeTurnIndex(同 session monotonic 不降)。
+        // incomingTurn > lastRuntimeTurnIndex → 真正的新 turn → bump
+        // textSegmentRev 开新 bubble。同 turn 内的多次 started(stream_event
+        // + assistant wrapper / vendor reconnect / tool 桥接)因 turnIndex
+        // 不变走 else 分支,只更新 activeSessionId/status,不 bump。
+        const incomingTurn = (event as { turnIndex?: number }).turnIndex
+        const incomingTurnNum = typeof incomingTurn === 'number' ? incomingTurn : null
+        const lastTurn = useAgentStore.getState().lastRuntimeTurnIndex
+        const isNewTurn =
+          incomingTurnNum !== null &&
+          (lastTurn === null || incomingTurnNum > lastTurn)
+        if (typeof window !== 'undefined' && ((window as any).__ZAI_DEBUG_SSE__ === true || (typeof localStorage !== 'undefined' && localStorage.getItem('zai-debug-sse') === '1'))) {
+          // eslint-disable-next-line no-console
+          console.log('[client-store] runtime.started branch', JSON.stringify({
+            prevStatus: useAgentStore.getState().status,
+            incomingTurn: incomingTurnNum,
+            lastTurn,
+            willBumpSegment: isNewTurn,
+          }))
+        }
+        if (isNewTurn) {
+          // 记录新 turn 起点 + bump textSegmentRev。setState 两次合并:
+          // 1) activeSessionId/status/textSegmentRev/lastRuntimeTurnIndex;
+          // 2) 下面的 metrics 更新(apiRequestCount/contextTokens)。
+          useAgentStore.setState({
             activeSessionId: sid,
             status: 'streaming',
-            textSegmentRev: s.textSegmentRev + 1,
-          }))
+            textSegmentRev: useAgentStore.getState().textSegmentRev + 1,
+            lastRuntimeTurnIndex: incomingTurnNum,
+          })
+        } else {
+          // 同一 turn 的重复 runtime.started (stream_event + assistant wrapper
+          // / vendor reconnect): 仅更新 activeSessionId + status,不动
+          // textSegmentRev (保持 stream block key 稳定,后续 delta 拼到
+          // 同一 bubble)。
+          useAgentStore.setState({ activeSessionId: sid, status: 'streaming' })
         }
         // zai patch (2026-08-09): 把 metrics 更新挂在 runtime.started 上。
         // server 在每次 LLM 调用起点就推这两个字段(claude.ts:1877

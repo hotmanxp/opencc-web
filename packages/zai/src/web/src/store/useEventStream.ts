@@ -5,6 +5,23 @@ import { useAppStore } from './useAppStore.js'
 import { useInstanceStore } from './useInstanceStore.js'
 import type { ServerEvent } from '../../../shared/events.js'
 
+// 调试开关 — 与 eventSource.ts 同源(三选一): window.__ZAI_DEBUG_SSE__ /
+// localStorage 'zai-debug-sse'=1 / URL ?zai-debug-sse=1
+function isDebugSse(): boolean {
+  if (typeof window === 'undefined') return false
+  const w = window as any
+  if (w.__ZAI_DEBUG_SSE__ === true) return true
+  try {
+    if (window.localStorage?.getItem('zai-debug-sse') === '1') return true
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.get('zai-debug-sse') === '1') return true
+  } catch {
+    // ignore
+  }
+  return false
+}
+const DEBUG_SSE = isDebugSse()
+
 // 订阅 useAgentStore.sessionId 变化 — sessionId 改变时 React 会重跑 effect,
 // 关掉旧 EventSource + 拿新 sid 开新连接. 新连接走 ?sid=xxx 让后端按 sid
 // filter 事件流, 旧 sid 的 runtime.* / job.* / prompt.ask 不再穿透到当前 tab.
@@ -60,6 +77,18 @@ export function applyBatch(batch: ServerEvent[]): void {
   // 按 seq 全局排序: seq 是服务端全局单调顺序基准, 重连补发 / 乱序到达时
   // 保证同一 session 的事件按发布顺序应用 (T5 的 seq 守卫再兜底丢弃重放)。
   const ordered = [...batch].sort((a, b) => a.seq - b.seq)
+
+  if (DEBUG_SSE) {
+    for (const ev of ordered) {
+      // eslint-disable-next-line no-console
+      console.log('[client-sse] dispatch', JSON.stringify({
+        type: ev.type,
+        sessionId: (ev as any).sessionId,
+        turnIndex: (ev as any).turnIndex,
+        seq: (ev as any).seq,
+      }))
+    }
+  }
 
   // server.connected 特殊处理 (在逐事件路由前执行): 置 connected 并触发
   // 冷启动快照补全 — SSE per-sid slice 已注册, 此时拉 REST 不会漏事件。

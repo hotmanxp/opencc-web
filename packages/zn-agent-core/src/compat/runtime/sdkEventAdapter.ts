@@ -43,6 +43,16 @@ export interface SdkEventMeta {
   streamedBlockIndices?: Set<number>
 }
 
+// ★ 诊断日志 (ZAI_DEBUG_SSE=1): 把 sdkEventAdapter 产出的每一帧 runtime
+// event 打出来,含 meta.turnIndex。重点观察:
+//   - 每条 message_start 时 meta.turnIndex 是否随 LLM turn 递增
+//   - 同一 query 内多条 message_start 的 meta.turnIndex 是否相同 (== bug)
+const ADAPTER_DEBUG = process.env.ZAI_DEBUG_SSE === '1'
+function adapterLog(tag: string, payload: Record<string, unknown>): void {
+  if (!ADAPTER_DEBUG) return
+  console.log(`[core-yield] ${tag}`, JSON.stringify(payload))
+}
+
 export function* translateSdkToRuntime(
   openccMessage: unknown,
   meta: SdkEventMeta,
@@ -114,6 +124,24 @@ export function* translateSdkToRuntime(
     // message would falsely skip the next message's blocks.
     if (raw.type === 'message_start' && meta.streamedBlockIndices) {
       meta.streamedBlockIndices.clear()
+      // zai patch (2026-08-30): bump meta.turnIndex per assistant
+      // message_start. inproc-print runs a long-lived query() that
+      // bridges multiple LLM turns (main turn → agent dispatch → main
+      // turn close → wait for <task-notification> → sub-agent finishes
+      // → new turn). All those turns come through THIS one
+      // translateSdkToRuntime call (one query per session), so the
+      // query-entry ++rec.turnIndex in createPrintRuntime-impl.ts:659
+      // only fires once. We need each new assistant turn to bump
+      // turnIndex so the downstream runtime.started/runtime.delta
+      // events get a fresh id and the frontend can detect "new turn"
+      // via strict-greater-than (useAgentStore.runtime.started branch).
+      //
+      // bump here (stream_event path) — NOT in the assistant wrapper
+      // path below — because opencc emits the stream_event-wrapped
+      // message_start BEFORE the terminal `assistant` Message; bumping
+      // in both paths would double-bump and create empty bubbles
+      // between streamed and synthesized blocks.
+      meta.turnIndex += 1
     }
     // Track which block indices have been streamed via the stream_event
     // path so the terminal `assistant` message can skip re-emitting
@@ -186,6 +214,15 @@ export function* translateSdkToRuntime(
     // produces the *real* final message_stop that we let through.
     if (m.type === 'message_stop' && meta.toolNameByUseId && meta.toolNameByUseId.size > 0) {
       return
+    }
+    // zai patch (2026-08-30): 同样在 format-(b) 直通路径上 bump
+    // meta.turnIndex —— 若 vendor 偶尔不经 stream_event 包装直接
+    // yield message_start (非流式回放场景),也要识别"新 turn"。
+    // stream_event 路径已经先 bump 过,这里不需要重复(因为 vendor
+    // 一次 assistant turn 只走其中一条路径,不会 stream_event + 直通
+    // 同时触发)。
+    if (m.type === 'message_start') {
+      meta.turnIndex += 1
     }
     if (m.type === 'content_block_start' && meta.toolNameByUseId) {
       const cb = (m as any).content_block as
@@ -301,6 +338,16 @@ export function* translateSdkToRuntime(
       // the runtime.tool_call) and the frontend's upsertToolCall
       // will overwrite the stored "Bash" with "unknown".
       const toolName = meta.toolNameByUseId?.get(block.tool_use_id ?? '')
+      // zai patch (2026-08-30): tool_result 到达后从 toolNameByUseId
+      // 移除对应 entry,让后续 message_stop / result SDKMessage 的
+      // `toolNameByUseId.size > 0` 守卫放行(否则 size 永远 > 0,
+      // runtime.done 永远不 emit,前端 status 永远卡 streaming)。
+      //
+      // 修复前的症状:即使 LLM turn 实际完成了(包含 tool_use +
+      // tool_result),adapter 的 result 路径仍认为工具"pending"而
+      // suppress message_stop,导致 server for-await / 前端 reducer
+      // 都看不到 runtime.done,状态停在"对话中…"。
+      meta.toolNameByUseId?.delete(block.tool_use_id ?? '')
       yield emit('tool_use:done', {
         id: block.tool_use_id,
         toolUseId: block.tool_use_id,
@@ -320,7 +367,7 @@ function makeEvent(
   extra: Record<string, unknown> = {},
 ): RuntimeEvent {
   const eventId = seq === 0 ? `evt-${meta.eventCounter}` : `evt-${meta.eventCounter}.${seq}`
-  return {
+  const ev = {
     type,
     eventId,
     sessionId: meta.sessionId,
@@ -328,4 +375,13 @@ function makeEvent(
     ts: Date.now(),
     ...extra,
   } as RuntimeEvent
+  // 诊断: 每条 yield 出的 runtime 事件带 turnIndex。
+  // message_start 这条尤其关键 — meta.turnIndex 是否在 message_start 处
+  // 递增决定了 server / 前端能否识别"新 turn"。
+  adapterLog("yield", {
+    type,
+    turnIndex: meta.turnIndex,
+    eventId,
+  })
+  return ev
 }

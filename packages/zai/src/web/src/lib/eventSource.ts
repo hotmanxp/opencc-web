@@ -3,6 +3,26 @@ import { notifySseError } from './apiError.js'
 
 const API_BASE = '/api'
 
+// 客户端 SSE 调试开关 — 前端不能用 process.env。
+// 三种启用方式(任一为 true 即开启):
+//   1. 浏览器 console: window.__ZAI_DEBUG_SSE__ = true
+//   2. localStorage: localStorage.setItem('zai-debug-sse', '1')
+//   3. URL query: ?zai-debug-sse=1
+function isDebugSse(): boolean {
+  if (typeof window === 'undefined') return false
+  const w = window as any
+  if (w.__ZAI_DEBUG_SSE__ === true) return true
+  try {
+    if (window.localStorage?.getItem('zai-debug-sse') === '1') return true
+    const sp = new URLSearchParams(window.location.search)
+    if (sp.get('zai-debug-sse') === '1') return true
+  } catch {
+    // ignore
+  }
+  return false
+}
+const DEBUG_SSE = isDebugSse()
+
 export interface StreamHandle {
   close: () => void
 }
@@ -103,7 +123,20 @@ export function subscribeServerEvents(
   for (const name of NAMED_EVENT_TYPES) {
     es.addEventListener(name, (e: MessageEvent) => {
       try {
-        const parsed = ServerEvent.parse(JSON.parse(e.data))
+        const raw = JSON.parse(e.data)
+        // ★ ZAI_DEBUG_SSE: 浏览器收到 SSE 帧的原始数据,按 type + turnIndex
+        // + sid + seq 打印。和 server 端 [server-sse] 一一对应。
+        if (DEBUG_SSE) {
+          // eslint-disable-next-line no-console
+          console.log('[client-sse] recv', JSON.stringify({
+            type: name,
+            sessionId: raw?.sessionId,
+            turnIndex: raw?.turnIndex,
+            seq: raw?.seq,
+            eventId: raw?.eventId,
+          }))
+        }
+        const parsed = ServerEvent.parse(raw)
         onEvent(parsed)
       } catch (err) {
         console.error('[eventSource] parse failed', err, e.data)

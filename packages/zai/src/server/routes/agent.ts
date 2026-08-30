@@ -41,6 +41,7 @@ import { flushPendingBashNotifications } from "../services/bashNotifier.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
 import { sessionInbox, type InboxMessage } from "../services/sessionInbox.js";
+import { getBackgroundRuntime } from "../services/backgroundRuntime.js";
 import { logHttp } from "../services/accessLog.js";
 import { resolveModel } from "../lib/resolveModel.js";
 import { resolveProviderForModel as resolveProviderForModelImpl } from "../services/modelCaller.js";
@@ -270,11 +271,28 @@ function getContextTokensForSession(sid: string): number | null {
   // 处理 query,单 slot 不会出现 session 间串扰。
   return getLastContextTokens()
 }
+// ★ ZAI_DEBUG_SSE 统一开关: 打开后打印完整 SSE 链路事件流
+// (translateRuntimeEvents 入/出 / for-await 主循环 / runtime.done break)
+// 后端配合前端 useEventStream + useAgentStore 的 console.log,
+// 形成"请求 → SDK → server → SSE → reducer"完整链路追踪。
+const SSE_DEBUG = process.env.ZAI_DEBUG_SSE === '1'
+function sseLog(tag: string, payload: Record<string, unknown>): void {
+  if (!SSE_DEBUG) return
+  // 单行 JSON 便于和前端 console 交叉 grep, 不带换行符
+  console.log(`[server-sse] ${tag}`, JSON.stringify(payload))
+}
+
 export async function* translateRuntimeEvents(
   events: AsyncIterable<Record<string, unknown>>,
   sessionId: string,
 ): AsyncGenerator<ServerEventInput> {
+  // 关键 bug(2026-08-30 复盘): 这个 `turnIndex` 之前是从不递增的 let。
+  // 必须读 ev.turnIndex (由 sdkEventAdapter 在每个 message_start 写入),
+  // 才会在 sub-agent follow-up 的新一轮 message_start 时 turnIndex 跳升,
+  // 前端才能据此判断"这是一个新 turn"。同步本地计数器便于 fallback.
   let turnIndex = 0;
+  // seq: per-event 序号, 用于日志对齐 (server 主循环与 translator 对照)
+  let seq = 0;
   // 平行 tool_use block: Anthropic SDK 在一条 assistant message 里允许 N 个
   // tool_use blocks (各 block 自带 index 0..N-1). 老实现是单 string 缓冲,
   // 第二个 block 的 input_json_delta 拼到第一个后面, JSON.parse 失败 →
@@ -304,8 +322,23 @@ export async function* translateRuntimeEvents(
 
   for await (const ev of events) {
     const t = ev.type as string | undefined;
+    sseLog("translator.in", {
+      seq,
+      rawType: t,
+      rawTurnIndex: (ev as { turnIndex?: unknown }).turnIndex,
+      evKeys: Object.keys(ev).slice(0, 12),
+    });
     switch (t) {
       case "message_start":
+        // ★ 关键修复点: 把本地 turnIndex 与上游 sdkEventAdapter 写入的
+        // ev.turnIndex 同步. adapter 在每个 message_start 上应当 bump
+        // meta.turnIndex, 这个同步让 translateRuntimeEvents 输出的
+        // runtime.started/delta 等事件 turnIndex 与 LLM turn 同步,
+        // 前端 useAgentStore 才能据此识别"新 turn"并 bump textSegmentRev.
+        const incomingTurn = (ev as { turnIndex?: unknown }).turnIndex
+        if (typeof incomingTurn === "number" && incomingTurn > turnIndex) {
+          turnIndex = incomingTurn
+        }
         // zai patch (2026-08-09): 把 metrics 提升到 runtime.started 推送。
         // 中间轮次的 message_stop 被 sdkEventAdapter 抑制(避免冻结 vendor
         // 工具循环),导致整条 prompt 期间 apiRequestCount / contextTokens
@@ -320,6 +353,8 @@ export async function* translateRuntimeEvents(
           apiRequestCount: getApiCallCount(sessionId),
           contextTokens: getContextTokensForSession(sessionId) ?? undefined,
         };
+        sseLog("translator.out", { seq, type: "runtime.started", turnIndex });
+        seq++;
         break;
       case "content_block_start": {
         const block = ev.content_block as
@@ -361,6 +396,13 @@ export async function* translateRuntimeEvents(
             turnIndex,
             delta: delta.text,
           };
+          sseLog("translator.out", {
+            seq,
+            type: "runtime.delta",
+            turnIndex,
+            len: delta.text.length,
+          });
+          seq++;
         } else if (
           delta?.type === "input_json_delta" &&
           typeof delta.partial_json === "string"
@@ -391,6 +433,13 @@ export async function* translateRuntimeEvents(
             turnIndex,
             thinking: delta.thinking,
           };
+          sseLog("translator.out", {
+            seq,
+            type: "runtime.thinking",
+            turnIndex,
+            len: delta.thinking.length,
+          });
+          seq++;
         }
         break;
       }
@@ -421,6 +470,14 @@ export async function* translateRuntimeEvents(
               toolName: name,
               input: parsedInput,
             };
+            sseLog("translator.out", {
+              seq,
+              type: "runtime.tool_call",
+              turnIndex,
+              toolUseId: id,
+              toolName: name,
+            });
+            seq++;
           }
         }
         // 收尾: 删桶 + 清 pending (无论是否 emit 都清理, 避免下个 block
@@ -449,6 +506,15 @@ export async function* translateRuntimeEvents(
           toolName: name,
           input: startInput,
         };
+        sseLog("translator.out", {
+          seq,
+          type: "runtime.tool_call",
+          turnIndex,
+          toolUseId: id,
+          toolName: name,
+          source: "non-streamed",
+        });
+        seq++;
         // Remember id so the subsequent done/error uses the same identifier
         nonStreamedToolUseId = id;
         nonStreamedToolName = name;
@@ -492,6 +558,14 @@ export async function* translateRuntimeEvents(
           input,
           output: toolOutput,
         };
+        sseLog("translator.out", {
+          seq,
+          type: "runtime.tool_result",
+          turnIndex,
+          toolUseId: id,
+          toolName,
+        });
+        seq++;
         break;
       }
       case "tool_use:ask_pending": {
@@ -614,6 +688,13 @@ export async function* translateRuntimeEvents(
           // 无记录时为 null,前端用 "—" 显示。
           contextTokens: getContextTokensForSession(sessionId) ?? undefined,
         };
+        sseLog("translator.out", {
+          seq,
+          type: "runtime.done",
+          turnIndex,
+          apiRequestCount: getApiCallCount(sessionId),
+        });
+        seq++;
         turnIndex++;
         // Reset tool accumulator between turns
         toolInputBuffers.clear();
@@ -651,6 +732,13 @@ export async function* translateRuntimeEvents(
           } : undefined,
           toolUseId: errEv.toolUseId,
         } as any
+        sseLog("translator.out", {
+          seq,
+          type: errEv.type,
+          turnIndex,
+          reason,
+        });
+        seq++;
         break;
       }
       // zai patch (2026-08-09): 'assistant' / 'user' Message 在
@@ -861,6 +949,33 @@ function inboxToPendingPrompt(sid: string, msg: InboxMessage): PendingPrompt {
     sessionId: sid,
     cwd: resolveInboxCwd(sid),
     prompt: msg.content,
+  }
+}
+
+/**
+ * 列某 session 下仍未进入终态的后台任务数。用于 for-await 在
+ * runtime.done 时判断"LLM 是否还有 pending 续写":有就继续等
+ * (sub-agent 会通过 <task-notification> 触发下一轮 turn),没有就退出
+ * 让 sessionRunning.delete 释放,新 prompt 才能进入。
+ *
+ * BackgroundRuntime.list 接口 + TaskListFilter 当前只支持 status / limit,
+ * 不支持 parentSessionId 过滤。这里拉到全部再按 sessionId + status 双重
+ * 过滤,避免误判 — list 没有 server-side filter,跨 session 的旧任务会污染计数。
+ */
+async function listActiveBackgroundTasks(sid: string): Promise<number> {
+  try {
+    const bg = getBackgroundRuntime()
+    const tasks = await bg.list()
+    return tasks.filter(
+      (t) =>
+        (t.status === 'queued' || t.status === 'running') &&
+        (t as { parentSessionId?: string }).parentSessionId === sid,
+    ).length
+  } catch (err) {
+    // Background runtime 未初始化(罕见)或 list 失败 → 兜底 0,
+    // 让 for-await 安全 break,避免 sessionRunning 永远不释放。
+    console.warn('[agent.ts] listActiveBackgroundTasks failed:', err)
+    return 0
   }
 }
 
@@ -1289,6 +1404,10 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     }
 
     for await (const event of translated) {
+      sseLog("agent.in", {
+        type: event.type,
+        turnIndex: (event as { turnIndex?: unknown }).turnIndex,
+      });
       // zai patch: persist per-event transcript before forwarding.
       if (event.type === 'runtime.tool_call') {
         const ev = event as {
@@ -1478,8 +1597,41 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
           } as any);
         }
       }
-      if (event.type === "runtime.done" || event.type === "runtime.aborted")
-        break;
+      if (event.type === "runtime.done" || event.type === "runtime.aborted") {
+        // zai patch (2026-08-30): 智能退出 — runtime.done 出现时检查
+        // 是否还有"待处理"事件源,有就不 break 等更多事件,没有才 break。
+        //
+        // 待处理事件源(任一非空都不 break):
+        //   - BackgroundRuntime 还有非终态任务(子代理 in flight,后续会
+        //     通过 <task-notification> 触发 LLM 续写 turn)
+        //   - sessionInbox nextTurn lane 有 pending(后续会 wakeHandler →
+        //     runNextInQueue → 新一轮 query,但这条 query 的 for-await
+        //     已经在跑,这个 inbox 消息会在本 query 的下一轮被消费 — 等等,
+        //     inbox 是 next query 的入口,所以这里 break 不会丢)
+        //
+        // 注意:sessionRunning 标记在 runNextInQueue 入口被 set,这个 for-await
+        // 返回后 finally 才 delete。如果 for-await 永远不返回,sessionRunning
+        // 永远不 delete,新 prompt 全部被 runNextInQueue 的守卫拦截。
+        // 因此这里必须找到"真正没有后续"的时机 break。
+        const pendingTasks = await listActiveBackgroundTasks(sessionId)
+        const inboxPending =
+          sessionInbox.peekNextTurnCount(sessionId) > 0
+        if (pendingTasks === 0 && !inboxPending) {
+          sseLog("agent.break", {
+            type: event.type,
+            turnIndex: (event as { turnIndex?: unknown }).turnIndex,
+            reason: "no pending tasks or inbox; LLM truly done",
+          })
+          break
+        }
+        sseLog("agent.continue", {
+          type: event.type,
+          turnIndex: (event as { turnIndex?: unknown }).turnIndex,
+          pendingTasks,
+          inboxPending,
+          note: "for-await continues; awaiting next turn",
+        })
+      }
     }
   } catch (err) {
     // 无条件落盘(不依赖 ZAI_DEBUG): query 流异常是"发了没反应/页面上

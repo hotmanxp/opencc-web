@@ -665,6 +665,13 @@ export async function createPrintRuntimeImpl(options) {
         toolNameByUseId: new Map(),
         streamedBlockIndices: new Set(),
       }
+      if (process.env.ZAI_DEBUG_SSE === '1') {
+        console.log('[core-yield] query.entry', JSON.stringify({
+          sessionId: input.sessionId,
+          turnIndex,
+          promptLen: typeof input.prompt === 'string' ? input.prompt.length : 'blocks',
+        }))
+      }
       // Lightweight-track parity: per-query bridge ctx merge (compat
       // AskUserQuestion wrapper prefers ALS sessionId in this track; the
       // merge keeps the __zaiBridgeCtx fallback + zai consumers consistent).
@@ -720,7 +727,22 @@ export async function createPrintRuntimeImpl(options) {
             yield ev
           }
           adapterMeta.eventCounter++
-          if (msg?.type === 'result') break
+          // zai patch (2026-08-30): 不再 break on 'result'。vendor 的
+          // query.ts 在每个 LLM turn 结束(message_stop 后)都会 yield
+          // 一个 'result' SDKMessage 作为 per-turn envelope(带 duration_ms /
+          // total_cost_usd 等),不是 end-of-query 信号。在 inproc-print 的
+          // long-lived query 中(async-agent 派发 → 等 <task-notification>
+          // → 续写 follow-up),每个 turn 都会 emit result,原来的 break
+          // 直接把后续 turn 全部砍掉,UI 上 sub-agent follow-up 文本消失。
+          //
+          // 老注释提到的"stale result line from previous session"防护已
+          // 在外层 'Resume-only-when-real-history' 检查(getSessionFileOrNull)
+          // 里覆盖 —— 新的 query 启动前已经判断 session 是否真有 history,
+          // 不会再有 stale result 漏进新 session 的 stdout 管道。
+          //
+          // 自然终止靠外层 Promise.race 的 rec.session.done —— session
+          // dispose / abort / vendor 自然退出时 rec.session.done resolve,
+          // lineOrDone 变 null,内层 while 自然退出。
         }
       } finally {
         rec.turnActive = false
