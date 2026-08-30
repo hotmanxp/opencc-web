@@ -60,3 +60,6 @@ export function useSkillsChange(
     [handleGrowthBookRefresh],
   )
 }
+
+// zai patch (2026-08-30, plan P1): also export imperative setupSkillsChange.
+export { setupSkillsChange } from '../../compat/repl/setup/setupSkillsChange.js'
