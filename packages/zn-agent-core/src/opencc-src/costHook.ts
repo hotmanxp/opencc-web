@@ -20,3 +20,6 @@ export function useCostSummary(
     }
   }, [])
 }
+
+// zai patch (2026-08-30, plan P2): also export imperative setupCostSummary.
+export { setupCostSummary } from '../compat/repl/setup/setupCostSummary.js'

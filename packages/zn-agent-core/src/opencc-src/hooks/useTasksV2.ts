@@ -248,3 +248,6 @@ export function useTasksV2WithCollapseEffect(): Task[] | undefined {
 
   return tasks
 }
+
+// zai patch (2026-08-30, plan P2): also export imperative setupTasksV2Collapse.
+export { setupTasksV2Collapse } from '../../compat/repl/setup/setupTasksV2Collapse.js'

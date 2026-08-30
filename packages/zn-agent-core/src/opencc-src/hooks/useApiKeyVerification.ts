@@ -101,3 +101,6 @@ export function useApiKeyVerification(): ApiKeyVerificationResult {
     error,
   }
 }
+
+// zai patch (2026-08-30, plan P2): also export imperative setupApiKeyVerification.
+export { setupApiKeyVerification } from '../../compat/repl/setup/setupApiKeyVerification.js'
