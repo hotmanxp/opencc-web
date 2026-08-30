@@ -75,12 +75,12 @@ import type {
 function resolveCoreRuntime(settings: ZaiSettings): CoreRuntime {
   const env = process.env.ZAI_CORE_RUNTIME
   if (env !== undefined && env !== '') {
-    if (env === 'inproc' || env === 'spawn' || env === 'default') return env
-    return 'default'
+    if (env === 'inproc' || env === 'spawn' || env === 'default' || env === 'repl') return env
+    return 'repl'
   }
   const s = settings.coreRuntime
-  if (s === 'inproc' || s === 'spawn' || s === 'default') return s
-  return 'default'
+  if (s === 'inproc' || s === 'spawn' || s === 'default' || s === 'repl') return s
+  return 'repl'
 }
 
 let runtime: OpenccRuntime | null = null
@@ -565,17 +565,17 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   const coreRuntime = resolveCoreRuntime(settings)
   activeCoreRuntime = coreRuntime
 
-  // zai patch (2026-08-30, plan P1, Task 9): three-way kernel switch
-  // (off / inproc / repl) reads ZAI_RUNTIME_KERNEL env or
-  // settings.runtime.kernel. repl branch instantiates ReplRuntime which
-  // wraps createReplSession as OpenccRuntimeV2 adapter. Default 'off'
-  // preserves existing behavior. Precedence: env > settings > 'off'.
+  // zai patch (2026-08-30, plan P2, Task 6): 'repl' is a top-level
+  // coreRuntime value (alongside 'default' / 'inproc' / 'spawn'), unified
+  // under the existing coreRuntime mechanism — not a sub-mode of 'inproc'
+  // and not a separate `runtime.kernel` field. repl branch instantiates
+  // ReplRuntime which wraps createReplSession as OpenccRuntimeV2 adapter.
+  // Default 'repl' makes the new path canonical (P2 complete). Legacy
+  // 'inproc' (createPrintRuntime) stays as fallback (P2-T5 revert
+  // deferred per user directive 2026-08-30). Emergency rollback:
+  // ZAI_CORE_RUNTIME=inproc or ZAI_CORE_RUNTIME=default.
   // Spec: docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1.
-  const kernel =
-    process.env.ZAI_RUNTIME_KERNEL
-    ?? (settings as { runtime?: { kernel?: string } }).runtime?.kernel
-    ?? 'off'
-  if (kernel === 'repl') {
+  if (coreRuntime === 'repl') {
     try {
       // ReplRuntime implements a partial OpenccRuntime shape (query /
       // abort / enqueue / interrupt / getSessionState / shutdown).

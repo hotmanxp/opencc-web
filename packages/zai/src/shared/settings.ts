@@ -83,16 +83,20 @@ export interface ZaiPermissions {
 }
 
 /**
- * 核心运行时三态(zai patch 2026-08-28 命名统一):
- * - 'default' → 轻量 in-process `createOpenccRuntime`(默认)
+ * 核心运行时(zai patch 2026-08-28 三态;2026-08-30 加 'repl'):
+ * - 'default' → 轻量 in-process `createOpenccRuntime`(legacy 兜底)
  * - 'inproc'  → in-process print 多 session 运行时
  *   (`createPrintRuntime`:每 sessionId 一个 vendor print.ts REPL 等价实例,
  *   hooks/resume 全恢复/rewind/steering 原生可用)
  * - 'spawn'   → spawn `opencc -p` 子进程(SessionHost 路径)
+ * - 'repl'    → 新 REPL 命令式抽壳路径(`createReplSession`,plan P2 默认;
+ *   替代 'default' 的默认位置。P0/P1 实现 + P2 接入后默认走这条。
+ *   P2-T5 deferred,此路径与 'inproc' 共存,紧急回退用 'inproc' 或 'default')
  * 详见 docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md
- * 与 docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md。
+ * 与 docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md
+ * 与 docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md §5.1。
  */
-export type CoreRuntime = 'default' | 'inproc' | 'spawn'
+export type CoreRuntime = 'default' | 'inproc' | 'spawn' | 'repl'
 
 /** Shape of ~/.zai/settings.json. */
 export interface ZaiSettings {
