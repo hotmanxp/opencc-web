@@ -174,6 +174,17 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     getUserContext: async () => ({}),
     getSystemContext: async () => ({}),
   })
+  // Debug hook (Task 8 reviewer minor #3): prove state machines
+  // survive esbuild tree-shake — tests assert via globalThis when
+  // ZAI_DEBUG=1. Off by default; no production impact.
+  if (process.env.ZAI_DEBUG === '1') {
+    ;(globalThis as any).__zaiStateMachines = {
+      sessionId,
+      onSubmit,
+      onQuery,
+      onQueryImpl,
+    }
+  }
 
   // zai patch (2026-08-30, plan P1, Task 8): hydrate state from prior
   // JSONL on construct. restoreSession() is async (it may read disk),
@@ -190,10 +201,14 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     getAppState: () => opts.getAppState?.() ?? {},
     setAppState: fn => opts.setAppState?.(fn),
   }).then(restored => {
+    // zai patch (2026-08-30, plan P1, Task 8 fix): guard against stale
+    // hydrate notification if dispose() raced ahead of the disk read.
+    if (isDisposed) return
     if (restored.messages.length > 0) {
       emitReplEvent('notification', { kind: 'hydrated', payload: { count: restored.messages.length } })
     }
   }).catch(err => {
+    if (isDisposed) return
     console.warn(
       `[createReplSession ${sessionId}] restoreSession failed:`,
       err,
@@ -361,8 +376,9 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     async dispose(): Promise<void> {
       if (isDisposed) return
       isDisposed = true
-      // LIFO teardown: reverse construction order so any cross-handle
-      // dependencies unwind correctly.
+      // FIFO teardown: setup order (cmdQueue first, guard last).
+      // The brief specifies this exact sequence so cross-handle
+      // dependencies unwind in a known order.
       for (const teardown of teardownStack) {
         try {
           teardown()
