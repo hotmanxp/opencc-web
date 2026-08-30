@@ -1096,8 +1096,16 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         // 仅当 transcript 已存在(消息已落盘)才写 —— 新会话首条消息由
         // 后续 append 流程创建文件,此时写会因文件不存在而失败(无害)。
         if (transcript) {
-          void getTranscriptStore()
+          // zai patch: catch so the unhandled rejection doesn't crash the
+          // process under Node 22 (which defaults unhandledRejection to
+          // throw). legacyTranscriptStore.patch throws "session not found"
+          // when the session registry has been cleared (e.g. after a
+          // restart or session invalidation) — log and move on.
+          getTranscriptStore()
             .patch(sessionId, { mainAgent: sessionMainAgent }, { cwd })
+            .catch(err => {
+              console.warn(`[prompt] transcript patch mainAgent failed:`, err)
+            })
         }
       } catch (err) {
         console.warn(`[prompt] failed to resolve mainAgent:`, err)

@@ -2068,9 +2068,16 @@ function runHeadlessStreaming(
   // enqueued (e.g. enqueueAgentNotification firing <task-notification>).
   // The `running` mutex inside run() collapses recursive wakes; the
   // `inputClosed` predicate prevents wakes after shutdown.
+  //
+  // Note: inlined `cmd.agentId === undefined` here instead of referencing
+  // the `isMainThread` helper defined inside run() — the callback fires
+  // outside run()'s scope, so referencing the local would throw
+  // ReferenceError and crash the process under Node 22's strict
+  // unhandledRejection.
   subscribeToHeadlessWake({
     shouldWake: () => !running && !inputClosed,
-    hasMainThreadQueued: () => peek(isMainThread) !== undefined,
+    hasMainThreadQueued: () =>
+      peek((cmd: QueuedCommand) => cmd.agentId === undefined) !== undefined,
     getBgRunning: () =>
       getRunningTasks(getAppState()).some(
         t => isBackgroundTask(t) && t.type !== 'in_process_teammate',
