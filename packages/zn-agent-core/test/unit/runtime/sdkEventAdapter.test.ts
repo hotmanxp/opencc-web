@@ -91,7 +91,13 @@ describe('translateSdkToRuntime', () => {
       type: 'assistant',
       message: { id: 'm', model: 'm', content: [{ type: 'text', text: 'x' }], stop_reason: null },
     }
-    const events = [...translateSdkToRuntime(msg, { ...meta, eventCounter: 5 })]
+    // (zai patch 2026-08-30 review update): set lastStreamedMessageStartCounter
+    // to eventCounter to simulate "stream_event-wrapped message_start
+    // already bumped for this turn". This is the production case for
+    // streaming turns — wrapper path must NOT double-bump. Without
+    // this guard the wrapper would bump turnIndex from 0 to 1, which
+    // would mis-trigger "new turn" detection downstream.
+    const events = [...translateSdkToRuntime(msg, { ...meta, eventCounter: 5, lastStreamedMessageStartCounter: 5 })]
     for (const event of events) {
       expect(event.eventId).toMatch(/^evt-5(\.\d+)?$/)
       expect(event.sessionId).toBe('s1')

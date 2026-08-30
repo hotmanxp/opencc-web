@@ -282,6 +282,13 @@ function sseLog(tag: string, payload: Record<string, unknown>): void {
   console.log(`[server-sse] ${tag}`, JSON.stringify(payload))
 }
 
+// ★ runQueryLoop for-await drain 上限 (zai patch 2026-08-30 review update):
+// 兜底 "子代理卡死导致 sessionRunning 永不释放" 的死锁风险 — 5min 内
+// 即使 pendingTasks 一直 > 0, 或 sub-agent 已 completed 但新 turn 一直不
+// 来, 也强制 break 释放, 让用户能发新 prompt。正常场景(子代理秒回,
+// LLM 续写 turn 几十 ms 内到达)绝不会触达。
+const MAX_DRAIN_MS = 5 * 60 * 1000
+
 export async function* translateRuntimeEvents(
   events: AsyncIterable<Record<string, unknown>>,
   sessionId: string,
@@ -1403,6 +1410,9 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       }
     }
 
+    // zai patch (2026-08-30 review update): drain 计时起点 — 首个被
+    // 留住的 runtime.done 处设为 now()，超时强制 break。
+    let drainStartedAt: number | null = null
     for await (const event of translated) {
       sseLog("agent.in", {
         type: event.type,
@@ -1598,29 +1608,52 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         }
       }
       if (event.type === "runtime.done" || event.type === "runtime.aborted") {
-        // zai patch (2026-08-30): 智能退出 — runtime.done 出现时检查
-        // 是否还有"待处理"事件源,有就不 break 等更多事件,没有才 break。
+        // zai patch (2026-08-30 review update): 智能退出 — runtime.done
+        // 出现时检查 BackgroundRuntime 是否有非终态子代理,有就继续等
+        // <task-notification> 触发的续写 turn;没有就 break。
         //
-        // 待处理事件源(任一非空都不 break):
-        //   - BackgroundRuntime 还有非终态任务(子代理 in flight,后续会
-        //     通过 <task-notification> 触发 LLM 续写 turn)
-        //   - sessionInbox nextTurn lane 有 pending(后续会 wakeHandler →
-        //     runNextInQueue → 新一轮 query,但这条 query 的 for-await
-        //     已经在跑,这个 inbox 消息会在本 query 的下一轮被消费 — 等等,
-        //     inbox 是 next query 的入口,所以这里 break 不会丢)
+        // (原版本用 inboxPending 守卫, 与注释自相矛盾 — inbox nextTurn
+        // lane 的消息不在 for-await 通路里, 由 runNextInQueue 在 finally
+        // 消费, 这里等待 inbox 会死锁。已删除该守卫。)
         //
-        // 注意:sessionRunning 标记在 runNextInQueue 入口被 set,这个 for-await
-        // 返回后 finally 才 delete。如果 for-await 永远不返回,sessionRunning
-        // 永远不 delete,新 prompt 全部被 runNextInQueue 的守卫拦截。
-        // 因此这里必须找到"真正没有后续"的时机 break。
+        // race 防护: 子代理完成 → pendingTasks 短暂掉到 0 → 新 turn 的
+        // message_start 还没到达这个 for-await, 这时单看 pendingTasks=0
+        // 会误判"LLM 已 done" → break 丢事件。解法: 一旦我们留住过这个
+        // for-await(drainStartedAt !== null), 给一段吸收窗口;直到
+        // MAX_DRAIN_MS 后强制 break 兜底,避免 stuck 子代理造成
+        // sessionRunning 永不释放(用户无法发新 prompt)。
+        //
+        // sessionRunning 在 runNextInQueue 入口被 set, for-await 返回后
+        // finally 才 delete。如果 for-await 永远不返回, 新 prompt 全被
+        // 守卫拦截, 只有 server 重启恢复 — 所以这里必须有上限。
         const pendingTasks = await listActiveBackgroundTasks(sessionId)
-        const inboxPending =
-          sessionInbox.peekNextTurnCount(sessionId) > 0
-        if (pendingTasks === 0 && !inboxPending) {
+        const now = Date.now()
+        if (pendingTasks === 0 && drainStartedAt === null) {
           sseLog("agent.break", {
             type: event.type,
             turnIndex: (event as { turnIndex?: unknown }).turnIndex,
-            reason: "no pending tasks or inbox; LLM truly done",
+            reason: "no pending tasks; LLM truly done",
+          })
+          break
+        }
+        if (pendingTasks > 0) {
+          drainStartedAt = now
+          sseLog("agent.continue", {
+            type: event.type,
+            turnIndex: (event as { turnIndex?: unknown }).turnIndex,
+            pendingTasks,
+            note: "draining background tasks",
+          })
+          continue
+        }
+        // pendingTasks === 0 && drainStartedAt !== null → race 吸收窗口
+        const elapsed = now - (drainStartedAt as number)
+        if (elapsed > MAX_DRAIN_MS) {
+          sseLog("agent.break", {
+            type: event.type,
+            turnIndex: (event as { turnIndex?: unknown }).turnIndex,
+            reason: "drain watchdog; LLM should have produced next turn by now",
+            elapsedMs: elapsed,
           })
           break
         }
@@ -1628,9 +1661,10 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
           type: event.type,
           turnIndex: (event as { turnIndex?: unknown }).turnIndex,
           pendingTasks,
-          inboxPending,
-          note: "for-await continues; awaiting next turn",
+          elapsedMs: elapsed,
+          note: "drain window; awaiting next LLM turn",
         })
+        continue
       }
     }
   } catch (err) {

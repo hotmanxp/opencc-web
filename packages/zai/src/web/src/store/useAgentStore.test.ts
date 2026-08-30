@@ -169,13 +169,17 @@ describe('useAgentStore.applyRuntimeEvent', () => {
     })
 
     // 模拟 sub-agent 完成 → SubagentNotifier 注入同一 sessionId 的新一轮 turn
+    // 注意(zai patch 2026-08-30 review update): 第二轮 turnIndex 必须 > 上一轮,
+    // 触发 strict-greater-than 守卫。生产中 sdkEventAdapter 会在每个
+    // message_start bump meta.turnIndex, 续写 turn 自然 turnIndex=1+;
+    // 这里显式给 1 模拟该行为, 不依赖 prevStatus-based 检测(已被替换)。
     useAgentStore.getState().applyRuntimeEvent({
       type: 'runtime.started',
-      eventId: 'r6', ts: 6, sessionId: 's1', turnIndex: 0,
+      eventId: 'r6', ts: 6, sessionId: 's1', turnIndex: 1,
     })
     useAgentStore.getState().applyRuntimeEvent({
       type: 'runtime.delta',
-      eventId: 'r7', ts: 7, sessionId: 's1', turnIndex: 0, delta: 'sub-agent returned: result is 42',
+      eventId: 'r7', ts: 7, sessionId: 's1', turnIndex: 1, delta: 'sub-agent returned: result is 42',
     })
 
     const msgs = useAgentStore.getState().messages

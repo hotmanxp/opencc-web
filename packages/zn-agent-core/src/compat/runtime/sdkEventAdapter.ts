@@ -41,6 +41,24 @@ export interface SdkEventMeta {
    * per assistant message.
    */
   streamedBlockIndices?: Set<number>
+  /**
+   * Tracks the eventCounter of the most recent `stream_event`-wrapped
+   * message_start. Used by the format-(a) `assistant` wrapper path to
+   * decide whether to bump `meta.turnIndex` (and avoid double-bumping
+   * when stream_event already fired for this turn).
+   *
+   * opencc's normal streaming flow is:
+   *   stream_event(message_start) → ... → assistant(wrapper)
+   * In that case stream_event bumps first; the wrapper must NOT bump
+   * again or the second emitted message_start carries turnIndex=N+1
+   * which would mis-trigger the frontend's "new turn" detection.
+   *
+   * The latent gap (zai patch 2026-08-30 review update): if vendor
+   * ever yields ONLY the format-(a) wrapper (non-streaming playback /
+   * vendor future change), the wrapper must bump instead. Comparison
+   * is `lastStreamedMessageStartCounter !== meta.eventCounter`.
+   */
+  lastStreamedMessageStartCounter?: number
 }
 
 // ★ 诊断日志 (ZAI_DEBUG_SSE=1): 把 sdkEventAdapter 产出的每一帧 runtime
@@ -136,12 +154,11 @@ export function* translateSdkToRuntime(
       // events get a fresh id and the frontend can detect "new turn"
       // via strict-greater-than (useAgentStore.runtime.started branch).
       //
-      // bump here (stream_event path) — NOT in the assistant wrapper
-      // path below — because opencc emits the stream_event-wrapped
-      // message_start BEFORE the terminal `assistant` Message; bumping
-      // in both paths would double-bump and create empty bubbles
-      // between streamed and synthesized blocks.
+      // Record this eventCounter so the format-(a) `assistant` wrapper
+      // path can detect "stream_event already bumped for this turn"
+      // and avoid a double-bump. See SdkEventMeta.lastStreamedMessageStartCounter.
       meta.turnIndex += 1
+      meta.lastStreamedMessageStartCounter = meta.eventCounter
     }
     // Track which block indices have been streamed via the stream_event
     // path so the terminal `assistant` message can skip re-emitting
@@ -244,6 +261,16 @@ export function* translateSdkToRuntime(
     makeEvent(type, meta, seq++, extra)
 
   if (m.type === 'assistant' && m.message) {
+    // zai patch (2026-08-30 review update): bump meta.turnIndex here
+    // ONLY if stream_event-wrapped message_start didn't already bump
+    // for this turn. Normal flow has stream_event first then wrapper,
+    // so we skip; latent gap (vendor non-streaming playback) sees
+    // lastStreamedMessageStartCounter !== meta.eventCounter and bumps
+    // here. Without this guard, normal flow would double-bump and
+    // create empty bubbles between streamed and synthesized blocks.
+    if (meta.lastStreamedMessageStartCounter !== meta.eventCounter) {
+      meta.turnIndex += 1
+    }
     yield emit('message_start', {
       message: { id: m.message.id, model: m.message.model, role: 'assistant' },
     })
@@ -337,7 +364,9 @@ export function* translateSdkToRuntime(
       // pendingToolName is cleared after content_block_stop emits
       // the runtime.tool_call) and the frontend's upsertToolCall
       // will overwrite the stored "Bash" with "unknown".
-      const toolName = meta.toolNameByUseId?.get(block.tool_use_id ?? '')
+      const toolName = block.tool_use_id
+        ? meta.toolNameByUseId?.get(block.tool_use_id)
+        : undefined
       // zai patch (2026-08-30): tool_result 到达后从 toolNameByUseId
       // 移除对应 entry,让后续 message_stop / result SDKMessage 的
       // `toolNameByUseId.size > 0` 守卫放行(否则 size 永远 > 0,
@@ -347,7 +376,13 @@ export function* translateSdkToRuntime(
       // tool_result),adapter 的 result 路径仍认为工具"pending"而
       // suppress message_stop,导致 server for-await / 前端 reducer
       // 都看不到 runtime.done,状态停在"对话中…"。
-      meta.toolNameByUseId?.delete(block.tool_use_id ?? '')
+      //
+      // (zai patch 2026-08-30 review update): guard on undefined id —
+      // falling back to '' would have created a phantom empty-string
+      // entry in the map. Only delete when we have a real id.
+      if (block.tool_use_id) {
+        meta.toolNameByUseId?.delete(block.tool_use_id)
+      }
       yield emit('tool_use:done', {
         id: block.tool_use_id,
         toolUseId: block.tool_use_id,
