@@ -2060,6 +2060,24 @@ function runHeadlessStreaming(
     if (abortController && getCommandsByMaxPriority('now').length > 0) {
       abortController.abort('interrupt')
     }
+    // zai patch (2026-08-29): kick the headless loop awake on any non-'now'
+    // queue change. The 'now' branch above only handles in-flight abort;
+    // task-notifications / orphaned-permission / cron-prompt commands all
+    // arrive via the same `commandQueue` (see utils/messageQueueManager.ts)
+    // but were never wired to a wake in headless streaming mode. TUI/REPL
+    // gets this for free via hooks/useQueueProcessor.ts; -p / spawn / inproc
+    // don't, so a background agent completing while run()'s do-while is
+    // momentarily between iterations (completeAsyncAgent flipped task status
+    // to 'completed' but enqueueAgentNotification hasn't fired yet) sees
+    // waitingForAgents=false → do-while exits → run() returns → for-await
+    // on structuredInput suspends → the next enqueuePendingNotification
+    // lands with no consumer. Symptom in zai inproc: agent completes, main
+    // LLM never produces the follow-up summary. The mutex `running` makes
+    // this safe mid-turn; the post-finally peek at the bottom of run() picks
+    // up items that arrived during the run window.
+    if (!running && !inputClosed && hasCommandsInQueue()) {
+      void run()
+    }
   })
 
   // zai patch (2026-08-29): EventDrivenPrint — wake run() on queue change.

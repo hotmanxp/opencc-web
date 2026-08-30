@@ -142,6 +142,10 @@ const DTS_PATH_REWRITE: Readonly<Record<string, string>> = {
   './opencc-src/services/api/claude.js': './index.js',
   './opencc-src/utils/systemPromptType.js': './index.js',
   './opencc-src/types/message.js': './index.js',
+  // zai patch (2026-08-29): 暴露给回归测试的 commandQueue API —
+  // vendor 模块无独立 d.ts,镜像到 ./index.js;运行时值由 esbuild 打进
+  // opencc-core.mjs,类型只用于测试 import 类型推断。
+  './opencc-src/utils/messageQueueManager.js': './index.js',
 }
 
 /** 把 bundle-entry.ts 的 re-export 目标改写为 dist 里真实存在的类型面。 */

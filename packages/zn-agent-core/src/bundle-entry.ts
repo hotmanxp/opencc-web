@@ -113,6 +113,19 @@ export type { RuntimeEvent } from './compat/runtime/events.js'
 export { stateChangeBus, resetStateChangeBusForTests } from './stateChangeBus.js'
 export type { StateChangeEventMap } from './stateChangeBus.js'
 export { registerProcessOutputErrorHandlers } from './runtime/index.js'
+// zai patch (2026-08-29): 暴露 vendor 的统一 commandQueue API —
+// inproc + REPL + spawn 共享同一 module 单例(subagentNotifier.ts:51-58
+// 注释亦基于此 invariant)。zai-server 调试 / 测试可以拿到真实的
+// `enqueuePendingNotification` 入口(后台 Agent 完成时 vendor 内部
+// 用的就是这条),不暴露这条就只能从源码路径走 — 那条路会拉全
+// BashTool 等 vendor 重型模块,vitest 解析阶段就 `getMaxTimeoutMs is
+// not a function`。
+export {
+  enqueuePendingNotification,
+  hasCommandsInQueue,
+  resetCommandQueue,
+  subscribeToCommandQueue,
+} from './opencc-src/utils/messageQueueManager.js'
 export { repairAndPersistTranscript } from './compat/transcript/repair.js'
 export {
   appendUserMessageV2,
