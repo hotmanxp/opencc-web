@@ -129,6 +129,11 @@ export function useScheduledTasks({
   }, [assistantMode])
 }
 
+// zai patch (2026-08-30, plan P0): also export imperative setupScheduledTasks.
+// Shares GrowthBook kairos flag and 1s tick with useScheduledTasks. Same-module
+// cron scheduler so imperative and React callers don't double-fire.
+export { setupScheduledTasks } from '../../compat/repl/setup/setupCronScheduler.js'
+
 function formatCronFireTime(d: Date): string {
   return d
     .toLocaleString('en-US', {
