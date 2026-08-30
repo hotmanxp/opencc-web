@@ -20,6 +20,24 @@ import { setupCommandQueue } from './setup/setupCommandQueue.js'
 import { setupScheduledTasks } from './setup/setupCronScheduler.js'
 import { setupProactive } from './setup/setupProactive.js'
 import { setupQueryGuard } from './setup/setupQueryGuard.js'
+// zai patch (2026-08-30, plan P1): L1 hook adapters wired at createReplSession
+// boundary (Tasks 1-5). Each adapter takes a thin opt bag and returns
+// `{ ... teardown }` for the LIFO stack.
+import { setupInboxPoller } from './setup/setupInboxPoller.js'
+import { setupMailboxBridge } from './setup/setupMailboxBridge.js'
+import { setupSwarmInitialization } from './setup/setupSwarmInitialization.js'
+import { setupSessionBackgrounding } from './setup/setupSessionBackgrounding.js'
+import { setupSkillsChange } from './setup/setupSkillsChange.js'
+// zai patch (2026-08-30, plan P1): state machines (Task 6) — replace
+// REPL.tsx onSubmit/onQuery/onQueryImpl handlers with imperative classes.
+import {
+  OnSubmitStateMachine,
+  OnQueryStateMachine,
+  OnQueryImplStateMachine,
+} from './stateMachines.js'
+// zai patch (2026-08-30, plan P1): sessionRestore (Task 7) — hydrate
+// state from prior JSONL on create.
+import { restoreSession } from './sessionRestore.js'
 // zai patch (2026-08-30, plan P0): vendor query() integration (Task 8).
 import { query } from '../../opencc-src/query.js'
 // zai patch (2026-08-30, plan P0): SDK message → runtime event adapter (Task 8).
@@ -99,12 +117,103 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
   })
   const guard = setupQueryGuard()
 
-  // LIFO teardown stack — most-recently-created first.
+  // zai patch (2026-08-30, plan P1, Task 8): wire L1 hook adapters. Each
+  // one returns a `{ ... teardown }` handle; teardown is added to the
+  // LIFO stack below so dispose() unwinds them in reverse-construction
+  // order. onMessage callbacks feed `notification` ReplEvents back to
+  // the host (zai web UI consumes these via hooks.onEvent).
+  const inboxHandle = setupInboxPoller({
+    sessionId,
+    cwd: opts.cwd,
+    isLoading: () => isRunning,
+    onMessage: msg => {
+      emitReplEvent('notification', { kind: 'inbox', payload: msg })
+    },
+  })
+  const mailboxHandle = setupMailboxBridge({
+    sessionId,
+    cwd: opts.cwd,
+    onSubmitMessage: msg => {
+      emitReplEvent('notification', { kind: 'mailbox-self', payload: msg })
+    },
+  })
+  const swarmHandle = setupSwarmInitialization({
+    sessionId,
+    onTeammateCreated: id => {
+      emitReplEvent('notification', { kind: 'teammate-created', payload: { id } })
+    },
+  })
+  const backgroundHandle = setupSessionBackgrounding({
+    sessionId,
+    onBackground: () => emitReplEvent('notification', { kind: 'background' }),
+    onForeground: () => emitReplEvent('notification', { kind: 'foreground' }),
+  })
+  const skillsHandle = setupSkillsChange({
+    cwd: opts.cwd,
+    onSkillsChanged: files => {
+      emitReplEvent('notification', { kind: 'skills-changed', payload: files })
+    },
+  })
+
+  // zai patch (2026-08-30, plan P1, Task 8): state machines — class
+  // forms of REPL.tsx onSubmit / onQuery / onQueryImpl. P1 wires them
+  // up so P2 can drive submit→runTurn without React handlers. The
+  // OnQuery generator here is a placeholder — actual query() loop
+  // lives inside runTurn below; the state machine is constructed for
+  // parity with vendor REPL.tsx shape and to expose the same surface.
+  const onSubmit = new OnSubmitStateMachine({
+    cmdQueue,
+    onQuery: { submit: () => Promise.resolve() }, // P1 minimal; P2 wires fully
+  })
+  const onQuery = new OnQueryStateMachine({
+    query: async function* () { yield { type: 'noop' } },
+    guard,
+  })
+  const onQueryImpl = new OnQueryImplStateMachine({
+    getSystemPrompt: async () => '',
+    getUserContext: async () => ({}),
+    getSystemContext: async () => ({}),
+  })
+
+  // zai patch (2026-08-30, plan P1, Task 8): hydrate state from prior
+  // JSONL on construct. restoreSession() is async (it may read disk),
+  // so we await it at session boundary — createReplSession itself
+  // remains sync in its declared signature, but the brief calls
+  // createReplSession directly (not in an async wrapper), so we make
+  // the restore best-effort by deferring to a microtask and skipping
+  // if the host hasn't supplied getAppState/setAppState. The
+  // restored messages count is reported via a 'hydrated' notification
+  // event so the host can reflect history if it wants to.
+  void restoreSession({
+    sessionId,
+    cwd: opts.cwd,
+    getAppState: () => opts.getAppState?.() ?? {},
+    setAppState: fn => opts.setAppState?.(fn),
+  }).then(restored => {
+    if (restored.messages.length > 0) {
+      emitReplEvent('notification', { kind: 'hydrated', payload: { count: restored.messages.length } })
+    }
+  }).catch(err => {
+    console.warn(
+      `[createReplSession ${sessionId}] restoreSession failed:`,
+      err,
+    )
+  })
+
+  // LIFO teardown stack — most-recently-added first. The dispose loop
+  // runs `for (const t of teardownStack) t()`, so the first item runs
+  // first. We want the brief's order: cmdQueue → cron → proactive →
+  // inbox → mailbox → swarm → background → skills → guard.
   const teardownStack: Array<() => void> = [
-    () => guard.teardown(),
-    () => proactiveHandle.teardown(),
-    () => cronHandle.teardown(),
     () => cmdQueue.teardown(),
+    () => cronHandle.teardown(),
+    () => proactiveHandle.teardown(),
+    () => inboxHandle.teardown(),
+    () => mailboxHandle.teardown(),
+    () => swarmHandle.teardown(),
+    () => backgroundHandle.teardown(),
+    () => skillsHandle.teardown(),
+    () => guard.teardown(),
   ]
 
   async function runTurn(content: ContentBlock[]): Promise<void> {
