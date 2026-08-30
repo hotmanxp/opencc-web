@@ -1,13 +1,8 @@
 // @ts-nocheck
 import { ElicitationRegistry } from '../elicitationRegistry.js'
-import { mkdtempSync } from 'fs'
-import { tmpdir } from 'os'
-import { join } from 'path'
 import { randomUUID } from 'crypto'
 
 describe('ElicitationRegistry', () => {
-  const tmpDir = mkdtempSync(join(tmpdir(), 'repl-p2-elicit-'))
-
   it('request returns pending promise', async () => {
     const reg = new ElicitationRegistry()
     const id = randomUUID()
@@ -59,5 +54,21 @@ describe('ElicitationRegistry', () => {
   it('orphan resolve is no-op', () => {
     const reg = new ElicitationRegistry()
     expect(() => reg.resolve(randomUUID(), { action: 'accept' })).not.toThrow()
+  })
+
+  it('hasPending tracks request lifecycle', async () => {
+    const reg = new ElicitationRegistry()
+    expect(reg.hasPending()).toBe(false)
+    const id = randomUUID()
+    const promise = reg.request({
+      elicitationId: id,
+      mcpServerName: 'test-mcp',
+      message: 'form',
+      mode: 'form',
+    })
+    expect(reg.hasPending()).toBe(true)
+    setTimeout(() => reg.resolve(id, { action: 'accept' }), 10)
+    await promise
+    expect(reg.hasPending()).toBe(false)
   })
 })
