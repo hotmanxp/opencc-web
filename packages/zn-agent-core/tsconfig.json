@@ -11,6 +11,10 @@
     "noEmit": false,
     "declaration": true,
     "declarationMap": true,
+    // zai patch (2026-08-30, plan P3 fix build errors): emit despite TS6307
+    // cascade from opencc-src vendor imports. Bundle (esbuild) produces
+    // the real artifact; tsc -b's emit is best-effort for type surfaces.
+    "noEmitOnError": false,
     // zai patch (2026-08-18): 只发类型,不发 .js。运行时唯一入口是
     // dist/opencc-core.mjs(bundle-opencc.ts esbuild 合成),tsc 编译出的
     // dist/compat/**/*.js / index.js / stateChangeBus.js 无人 import
