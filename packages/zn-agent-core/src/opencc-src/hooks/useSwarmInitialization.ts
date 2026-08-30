@@ -79,3 +79,6 @@ export function useSwarmInitialization(
     }
   }, [setAppState, initialMessages, enabled])
 }
+
+// zai patch (2026-08-30, plan P1): also export imperative setupSwarmInitialization.
+export { setupSwarmInitialization } from '../../compat/repl/setup/setupSwarmInitialization.js'
