@@ -10,6 +10,7 @@ import {
 } from './instanceStore.js'
 import { assertPortAvailable, listen } from '../../cli/ports.js'
 import type { InstanceDefinition, InstanceSnapshot, InstanceStatus } from '../../shared/instances.js'
+import type { CoreRuntime } from '../../shared/settings.js'
 
 export const INSTANCE_BASE_PORT = 9201
 export const HEARTBEAT_TIMEOUT_MS = 20_000
@@ -63,20 +64,24 @@ type Entry = { def: InstanceDefinition; status: InstanceStatus; child: ChildProc
 
 export interface InstanceSupervisor {
   getSnapshots: () => InstanceSnapshot[]
-  createInstance: (input: { name: string; cwd: string; lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
-  startInstance: (id: string, opts?: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
+  createInstance: (input: { name: string; cwd: string; lan?: boolean; port?: number | null; runtimeCore?: CoreRuntime }) => Promise<InstanceSnapshot>
+  startInstance: (id: string, opts?: { lan?: boolean; port?: number | null; runtimeCore?: CoreRuntime | null }) => Promise<InstanceSnapshot>
   stopInstance: (id: string) => Promise<InstanceSnapshot>
-  restartInstance: (id: string, opts?: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
+  restartInstance: (id: string, opts?: { lan?: boolean; port?: number | null; runtimeCore?: CoreRuntime | null }) => Promise<InstanceSnapshot>
   removeInstance: (id: string) => Promise<void>
   /**
-   * Patch definition fields exposed in the UI. Today: `lan` and `port`.
-   * `lan` is a boolean toggle; `port` follows the same tri-state contract
-   * as the request body — `number` persists, `null` clears back to
-   * auto, `undefined` is a no-op. Other definition fields (cwd/name)
-   * are intentionally not patchable — they require a remove + recreate
-   * so we don't surprise the user with silent rewrites.
+   * Patch definition fields exposed in the UI. Today: `lan`, `port`,
+   * and `runtimeCore`. `lan` is a boolean toggle; `port` follows the
+   * same tri-state contract as the request body — `number` persists,
+   * `null` clears back to auto, `undefined` is a no-op;
+   * `runtimeCore` is the per-instance core-runtime override —
+   * `CoreRuntime` value persists, `null` clears back to inherit
+   * (undefined on disk), `undefined` is a no-op. Other definition
+   * fields (cwd/name) are intentionally not patchable — they require
+   * a remove + recreate so we don't surprise the user with silent
+   * rewrites.
    */
-  updateInstance: (id: string, patch: { lan?: boolean; port?: number | null }) => Promise<InstanceSnapshot>
+  updateInstance: (id: string, patch: { lan?: boolean; port?: number | null; runtimeCore?: CoreRuntime | null }) => Promise<InstanceSnapshot>
   shutdown: () => Promise<void>
 }
 
@@ -219,7 +224,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       })
     }
 
-    const doStart = async (id: string, opts?: { lan?: boolean; port?: number | null }) => {
+    const doStart = async (id: string, opts?: { lan?: boolean; port?: number | null; runtimeCore?: CoreRuntime | null }) => {
       const entry = getEntry(id)
       if (entry.status.state === 'starting' || entry.status.state === 'running') return snapshotOf(entry)
       setStatus(entry, { state: 'starting', lastError: null })
@@ -249,8 +254,26 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         // exposure must be deliberate so a dev's machine doesn't leak
         // workspaces they didn't intend to share.
         const useLan = opts?.lan ?? entry.def.lan ?? false
+        // runtimeCore resolution:
+        //   1. `opts.runtimeCore` per-call override (POST /start body)
+        //      — `null` is explicit "inherit global", but at the route
+        //      layer we already collapse `null` to `undefined` so
+        //      opting out per-start is treated identically to leaving
+        //      it off.
+        //   2. `entry.def.runtimeCore` persisted per-instance override
+        //   3. undefined → no flag forwarded → child inherits global
+        //      `settings.coreRuntime` via env (the legacy behaviour).
+        // We forward the flag as `--coreRuntime <value>` (matching
+        // `start.ts:76`'s childArgs.push shape) so the child's own
+        // runStart sees it in options.coreRuntime and re-applies the
+        // override env — without this, an explicit value wouldn't
+        // survive a multi-process boundary.
+        const effectiveRuntimeCore: CoreRuntime | undefined = opts?.runtimeCore !== undefined
+          ? opts.runtimeCore ?? undefined
+          : entry.def.runtimeCore
         const args: string[] = [cliEntry, 'start', '--managed-child', '--port', String(port), '--no-open']
         if (useLan) args.push('--lan')
+        if (effectiveRuntimeCore) args.push('--coreRuntime', effectiveRuntimeCore)
         // 进程标题:让 ps / top / macOS Activity Monitor 在 spawn 后立即
         // 显示 `zai[name]:port` 而不是 `node .../bin/zai.js`。`argv0` 改
         // `argv[0]`(Linux ps/macOS ps 列都从 argv[0] 起始读);`ZAI_PROCESS_TITLE`
@@ -351,7 +374,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       // assertions can observe the latest persisted snapshot deterministically.
       // Production callers should never invoke this.
       __flushPendingWrites: async () => { await writeChain },
-      async createInstance({ name, cwd, lan, port }: { name: string; cwd: string; lan?: boolean; port?: number | null }) {
+      async createInstance({ name, cwd, lan, port, runtimeCore }: { name: string; cwd: string; lan?: boolean; port?: number | null; runtimeCore?: CoreRuntime }) {
         const trimmed = name.trim(); for (const entry of entries.values()) if (entry.def.name === trimmed) throw new InstanceSupervisorError('DUPLICATE_NAME', `duplicate name: ${trimmed}`)
         const def: InstanceDefinition = {
           id: `inst_${randomUUID().slice(0, 8)}`,
@@ -363,6 +386,11 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
           // round-trip to `undefined` on disk so older readers continue
           // to treat it as "no pin set" — same shape as `lan`.
           startPort: typeof port === 'number' && Number.isInteger(port) ? port : undefined,
+          // Persist the per-instance core-runtime override. `undefined`
+          // round-trips to "absent" on disk → child inherits the global
+          // `settings.coreRuntime` at start time. Already validated by
+          // the route handler so no further narrowing needed here.
+          runtimeCore,
         }
         const entry: Entry = { def, status: { ...EMPTY_INSTANCE_STATUS }, child: null, childState: null }
         entries.set(def.id, entry)
@@ -370,11 +398,11 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         emit(def.id, entry.status)
         return doStart(def.id)
       },
-      startInstance: async (id: string, opts?: { lan?: boolean; port?: number | null }) => { ensureNotCurrent(id); return doStart(id, opts) },
+      startInstance: async (id: string, opts?: { lan?: boolean; port?: number | null; runtimeCore?: CoreRuntime | null }) => { ensureNotCurrent(id); return doStart(id, opts) },
       stopInstance: async (id: string) => { ensureNotCurrent(id); return doStop(id) },
-      restartInstance: async (id: string, opts?: { lan?: boolean; port?: number | null }) => { ensureNotCurrent(id); await doStop(id); return doStart(id, opts) },
+      restartInstance: async (id: string, opts?: { lan?: boolean; port?: number | null; runtimeCore?: CoreRuntime | null }) => { ensureNotCurrent(id); await doStop(id); return doStart(id, opts) },
       removeInstance: async (id: string) => doRemove(id),
-      async updateInstance(id: string, patch: { lan?: boolean; port?: number | null }) {
+      async updateInstance(id: string, patch: { lan?: boolean; port?: number | null; runtimeCore?: CoreRuntime | null }) {
         ensureNotCurrent(id)
         const entry = getEntry(id)
         // Refuse unknown / no-op patches explicitly so a typo in the
@@ -387,6 +415,12 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
           // `null` clears the pin back to auto (so the next start scans);
           // `number` sets a new pin (route already validated 1..65535).
           next.startPort = patch.port === null ? null : patch.port
+        }
+        if (patch.runtimeCore !== undefined) {
+          // `null` clears the per-instance override back to "inherit
+          // global settings.coreRuntime"; `CoreRuntime` value persists
+          // (route already validated it's a known enum member).
+          next.runtimeCore = patch.runtimeCore === null ? undefined : patch.runtimeCore
         }
         if (Object.keys(next).length === 0) throw new InstanceSupervisorError('INVALID_STATE', 'no patchable fields supplied')
         entry.def = { ...entry.def, ...next }

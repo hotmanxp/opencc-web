@@ -1,6 +1,8 @@
 // Shared instance-manager types — single source of truth for backend + frontend.
 // See docs/superpowers/specs/2026-08-03-zai-agent-instance-manager-design.md.
 
+import type { CoreRuntime } from './settings.js'
+
 export type InstanceState = 'stopped' | 'starting' | 'running' | 'stopping' | 'down'
 
 export const INSTANCE_STATES: readonly InstanceState[] = [
@@ -38,6 +40,20 @@ export interface InstanceDefinition {
    * fields cannot share a name without one of them losing precision.
    */
   startPort?: number | null
+  /**
+   * Per-instance override for the core runtime. When set, the supervisor
+   * spawns the child with `--coreRuntime <value>` so this instance picks
+   * up a different runtime than the global `settings.coreRuntime`
+   * default. When `undefined` (the default), the child inherits the
+   * global setting — the supervisor forwards no `--coreRuntime` flag and
+   * the resolved value comes from `ZAI_CORE_RUNTIME` env /
+   * `settings.coreRuntime`. `null` is NOT valid here; clearing back to
+   * inherit is done by omitting the field on PATCH (the route handler
+   * treats `null` as 400 to keep the contract unambiguous).
+   *
+   * Mirrors lan-agent's `InstanceRuntimeCore` enum (0.7.3 added `repl`).
+   */
+  runtimeCore?: CoreRuntime
 }
 
 export interface InstanceStatus {
