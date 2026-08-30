@@ -85,6 +85,13 @@ export type ReplSessionOptions = {
   setAppState?: (fn: (prev: unknown) => unknown) => void
   mcpClients?: unknown[]
   bootstrap?: unknown
+  // zai patch (2026-08-30, plan P2, Task 4): optional ElicitationRegistry
+  // supplied by the host (zai web). Typed as `unknown` to avoid pulling
+  // the zai workspace package into zn-agent-core — consumers in T6 cast
+  // it back to the concrete class. When omitted, createReplSession
+  // exposes its own via getElicitationRegistry() so MCP code paths can
+  // still find one. Spec §2.3.
+  elicitationRegistry?: unknown
 }
 
 export type ReplSessionLifecycleEvent =
@@ -122,4 +129,24 @@ export type ReplSession = {
   ): () => void
   dispose(): Promise<void>
   getState(): ReplSessionState
+  // zai patch (2026-08-30, plan P2, Task 4): P2 accessors — let the
+  // host (zai web) reach the wired L2/L3 handles without coupling to
+  // the internal closure. Each accessor returns the handle returned by
+  // the corresponding setupXxx() call so consumers can drive it
+  // (e.g. setupNotificationsHandle.emit('rateLimit', ...) from the
+  // SSE handler, or setupTasksV2Handle.toggle() from a UI click).
+  // Accessors are also used by tests to assert wiring without going
+  // through the hooks.onEvent channel.
+  getNotificationsHandle?(): {
+    emit: (kind: string, payload?: unknown) => void
+    subscribe: (cb: (n: unknown) => void) => () => void
+    teardown: () => void
+  }
+  getTasksV2Handle?(): {
+    toggle: () => void
+    isCollapsed: () => boolean
+    setCollapsed: (v: boolean) => void
+    teardown: () => void
+  }
+  getElicitationRegistry?(): unknown
 }

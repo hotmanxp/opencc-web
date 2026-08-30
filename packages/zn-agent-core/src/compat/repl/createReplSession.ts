@@ -190,6 +190,50 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     onNotification: n => emitReplEvent('notification', { kind: n.kind, payload: n.payload }),
   })
 
+  // zai patch (2026-08-30, plan P2, Task 4): ElicitationRegistry — vendor
+  // MCP code paths need a place to dispatch form/url requests and await
+  // the user's answer. The host (zai web) supplies the concrete
+  // `ElicitationRegistry` via opts.elicitationRegistry; when omitted
+  // we construct a minimal in-process stub here so MCP code paths
+  // always find one. The stub is created via a lazy require-style
+  // import to avoid pulling the zai workspace package into
+  // zn-agent-core's dep graph (the concrete class lives at
+  // packages/zai/src/server/services/elicitationRegistry.ts). T6 wires
+  // the real registry into MCP server lifecycle.
+  let elicitationRegistry: unknown = opts.elicitationRegistry
+  if (!elicitationRegistry) {
+    // zai patch (2026-08-30, plan P2, Task 4): minimal in-core stub.
+    // Mirrors the surface of ElicitationRegistry (request / resolve /
+    // cancel / hasPending) so MCP code paths can be exercised in
+    // zn-agent-core tests without crossing the workspace boundary. T6
+    // replaces usage with the zai-supplied real registry.
+    const pending = new Map<
+      string,
+      { resolve: (r: any) => void; reject: (e: Error) => void }
+    >()
+    elicitationRegistry = {
+      request: (input: any) => {
+        const id = input?.elicitationId ?? randomUUID()
+        return new Promise<any>((resolve, reject) => {
+          pending.set(id, { resolve, reject })
+        })
+      },
+      resolve: (id: string, result: any) => {
+        const p = pending.get(id)
+        if (!p) return
+        pending.delete(id)
+        p.resolve(result)
+      },
+      cancel: (id: string) => {
+        const p = pending.get(id)
+        if (!p) return
+        pending.delete(id)
+        p.resolve({ action: 'cancel' })
+      },
+      hasPending: () => pending.size > 0,
+    }
+  }
+
   // zai patch (2026-08-30, plan P1, Task 8): state machines — class
   // forms of REPL.tsx onSubmit / onQuery / onQueryImpl. P1 wires them
   // up so P2 can drive submit→runTurn without React handlers. The
@@ -452,6 +496,25 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
         isDisposed,
         p2Wired: true,
       } as any
+    },
+
+    // zai patch (2026-08-30, plan P2, Task 4): P2 accessors. These
+    // surface the wired L2/L3 handles without leaking closure refs
+    // through `getState()`. The handles themselves remain internal —
+    // only the accessors are exposed on the session object. Callers
+    // (zai web, tests) use these to drive the bus from external
+    // triggers (SSE messages, UI clicks) and to verify wiring.
+
+    getNotificationsHandle() {
+      return notificationsHandle
+    },
+
+    getTasksV2Handle() {
+      return tasksV2Handle
+    },
+
+    getElicitationRegistry() {
+      return elicitationRegistry
     },
   }
 }
