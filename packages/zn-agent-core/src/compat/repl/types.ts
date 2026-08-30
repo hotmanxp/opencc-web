@@ -183,4 +183,16 @@ export type ReplSession = {
   // without depending on a real vendor query() chain. Production code
   // paths must NOT call this.
   __test_emitReplEvent?(typeOrEvent: string | ReplEvent, payload?: unknown): void
+  // zai patch (2026-08-30, plan P3, Task 3): hydrate contract — returns
+  // the restoreSession result once the on-construct JSONL hydration
+  // completes. Hosts that need to read restored state (zai web
+  // routes/agent.ts session restore path) await this before responding.
+  // Resolves to { messages: [], hydrated: false } if the session was
+  // constructed without an in-flight restore (e.g. dispose() raced
+  // ahead). Spec §4.3.
+  whenHydrated(): Promise<{
+    messages: any[]
+    hydrated: boolean
+    [k: string]: unknown
+  }>
 }

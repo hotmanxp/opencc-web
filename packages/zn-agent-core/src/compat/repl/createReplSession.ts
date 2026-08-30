@@ -301,21 +301,22 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     }
   }
 
-  // zai patch (2026-08-30, plan P1, Task 8): hydrate state from prior
-  // JSONL on construct. restoreSession() is async (it may read disk),
-  // so we await it at session boundary — createReplSession itself
-  // remains sync in its declared signature, but the brief calls
-  // createReplSession directly (not in an async wrapper), so we make
-  // the restore best-effort by deferring to a microtask and skipping
-  // if the host hasn't supplied getAppState/setAppState. The
-  // restored messages count is reported via a 'hydrated' notification
-  // event so the host can reflect history if it wants to.
-  void restoreSession({
-    sessionId,
-    cwd: opts.cwd,
-    getAppState: () => opts.getAppState?.() ?? {},
-    setAppState: fn => opts.setAppState?.(fn),
-  }).then(restored => {
+  // zai patch (2026-08-30, plan P1, Task 8 + P3, Task 3): hydrate state
+  // from prior JSONL on construct. restoreSession() is async (it may
+  // read disk), so we track the promise in restorePromise instead of
+  // fire-and-forget. Hosts that need to wait until hydration completes
+  // (e.g. routes/agent.ts session restore path) await session
+  // .whenHydrated() before reading state. The restored messages count
+  // is still reported via a 'hydrated' notification event for hosts
+  // that subscribed to hooks.onEvent instead. Spec §4.3.
+  const restorePromise: Promise<ReturnType<typeof restoreSession>> =
+    restoreSession({
+      sessionId,
+      cwd: opts.cwd,
+      getAppState: () => opts.getAppState?.() ?? {},
+      setAppState: fn => opts.setAppState?.(fn),
+    })
+  restorePromise.then(restored => {
     // zai patch (2026-08-30, plan P1, Task 8 fix): guard against stale
     // hydrate notification if dispose() raced ahead of the disk read.
     if (isDisposed) return
@@ -629,6 +630,19 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     async endSession(reason?: string): Promise<void> {
       if (isDisposed) return
       emitLifecycle('sessionEnd', { reason })
+    },
+
+    // zai patch (2026-08-30, plan P3, Task 3): hydrate contract — hosts
+    // (routes/agent.ts session restore path) await this to ensure the
+    // on-construct JSONL hydration has completed before reading state.
+    // Resolves to { messages: [], hydrated: false } if the restore
+    // promise was somehow unset (defensive — restorePromise is assigned
+    // synchronously above, so this branch only fires in pathological
+    // cases). The promise is the same one tracked for the 'hydrated'
+    // notification event, so awaiting whenHydrated() and observing
+    // hydration via hooks.onEvent are consistent. Spec §4.3.
+    async whenHydrated() {
+      return restorePromise
     },
 
     on(

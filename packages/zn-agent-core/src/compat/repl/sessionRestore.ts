@@ -26,6 +26,10 @@ type RestoredSession = {
   planSlug: string | null
   attribution: any
   agentDefinition: any
+  // zai patch (2026-08-30, plan P3, Task 3): hydrated flag — true when
+  // on-disk JSONL was actually consumed, false when no session files
+  // were found. Spec §4.3.
+  hydrated: boolean
 }
 
 const EMPTY_RESULT: RestoredSession = {
@@ -36,6 +40,7 @@ const EMPTY_RESULT: RestoredSession = {
   planSlug: null,
   attribution: null,
   agentDefinition: null,
+  hydrated: false,
 }
 
 export async function restoreSession(opts: RestoreSessionOpts): Promise<RestoredSession> {
@@ -52,6 +57,17 @@ export async function restoreSession(opts: RestoreSessionOpts): Promise<Restored
   const vendorPath2 = join(opts.cwd, '.zai', 'projects', opts.sessionId, 'session.jsonl')
   if (existsSync(vendorPath2)) {
     return readSessionFile(vendorPath2)
+  }
+  // zai patch (2026-08-30, plan P3, Task 3): per-session subdir layout —
+  // `${cwd}/.zai/sessions/${sessionId}/messages.jsonl`. Spec §4.3.
+  // This is the conventional write path zai uses when persisting a
+  // session's transcript (one file per session inside its own folder),
+  // as opposed to the flat `${sessionId}.jsonl` sibling layouts above.
+  // Adding this case is additive — existing callers and EMPTY_RESULT
+  // semantics are unchanged.
+  const vendorPath3 = join(opts.cwd, '.zai', 'sessions', opts.sessionId, 'messages.jsonl')
+  if (existsSync(vendorPath3)) {
+    return readSessionFile(vendorPath3)
   }
   return EMPTY_RESULT
 }
@@ -80,6 +96,12 @@ function readSessionFile(jsonlPath: string): RestoredSession {
     planSlug: null,
     attribution: null,
     agentDefinition: null,
+    // zai patch (2026-08-30, plan P3, Task 3): reaching readSessionFile
+    // means a JSONL file existed (existsSync passed) and we attempted to
+    // parse it. Even if entries parse to empty, the session WAS hydrated
+    // from disk — flag true so callers can distinguish "no file" from
+    // "file existed but empty". Spec §4.3.
+    hydrated: true,
   }
 
   for (const entry of entries) {
