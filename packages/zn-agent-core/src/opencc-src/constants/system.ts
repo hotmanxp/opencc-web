@@ -1,10 +1,6 @@
 // Critical system constants extracted to break circular dependencies
 
-import { getFeatureValue_CACHED_MAY_BE_STALE } from '../services/analytics/growthbook.js'
-import { logForDebugging } from '../utils/debug.js'
-import { isEnvDefinedFalsy } from '../utils/envUtils.js'
 import { getAPIProvider } from '../utils/model/providers.js'
-import { getWorkload } from '../utils/workloadContext.js'
 
 const DEFAULT_PREFIX =
   `You are OpenCC, an coding agent and CLI.`
@@ -49,51 +45,24 @@ export function getCLISyspromptPrefix(options?: {
 }
 
 /**
- * Check if attribution header is enabled.
- * Enabled by default, can be disabled via env var or GrowthBook killswitch.
- */
-function isAttributionHeaderEnabled(): boolean {
-  return false
-  if (isEnvDefinedFalsy(process.env.CLAUDE_CODE_ATTRIBUTION_HEADER)) {
-    return false
-  }
-  return getFeatureValue_CACHED_MAY_BE_STALE('tengu_attribution_header', true)
-}
-
-/**
- * Get attribution header for API requests.
- * Returns a header string with cc_version (including fingerprint) and cc_entrypoint.
- * Enabled by default, can be disabled via env var or GrowthBook killswitch.
+ * Anthropic attribution header (`x-anthropic-billing-header`) for API requests.
  *
- * When NATIVE_CLIENT_ATTESTATION is enabled, includes a `cch=00000` placeholder.
- * Before the request is sent, Bun's native HTTP stack finds this placeholder
- * in the request body and overwrites the zeros with a computed hash. The
- * server verifies this token to confirm the request came from a real OpenCC
- * Code client. See bun-anthropic/src/http/Attestation.zig for implementation.
+ * **OpenCC never sends this header.** It was a 1P Anthropic internal billing
+ * identifier (`cc_version` + `cc_entrypoint` + optional `cc_workload` + native
+ * attestation placeholder) used by first-party Anthropic APIs to attribute CLI
+ * traffic. OpenCC only supports three providers (anthropic / ollama /
+ * openai-compatible per AGENTS.md "Provider Policy"); the openai-shim path
+ * strips the header on outbound conversion anyway, and the anthropic path is
+ * routed via the shim with no first-party billing hook.
  *
- * We use a placeholder (instead of injecting from Zig) because same-length
- * replacement avoids Content-Length changes and buffer reallocation.
+ * We removed the entire feature (and its `src/utils/fingerprint.ts`
+ * dependency) in this fork. The upstream PR #2147 routing-aware policy
+ * (`AnthropicAttributionPolicy`) is intentionally NOT ported — the fork's
+ * default route is `non_official` and the policy would always resolve to
+ * `{ generate: false }`, which is what the removed function returned anyway.
+ *
+ * Defensive `x-anthropic-billing-header` filters in the openai-shim layer
+ * (and `splitSysPromptPrefix` in `src/utils/api.ts`) are KEPT — they handle
+ * external system prompts (e.g. checkpoint resume, external memory) which
+ * may still contain this header from upstream-generated sessions.
  */
-export function getAttributionHeader(fingerprint: string): string {
-  if (!isAttributionHeaderEnabled()) {
-    return ''
-  }
-
-  const version = `${MACRO.VERSION}.${fingerprint}`
-  const entrypoint = process.env.CLAUDE_CODE_ENTRYPOINT ?? 'unknown'
-
-  // cch=00000 placeholder is overwritten by Bun's HTTP stack with attestation token
-  const cch = false ? ' cch=00000;' : ''
-  // cc_workload: turn-scoped hint so the API can route e.g. cron-initiated
-  // requests to a lower QoS pool. Absent = interactive default. Safe re:
-  // fingerprint (computed from msg chars + version only, line 78 above) and
-  // cch attestation (placeholder overwritten in serialized body bytes after
-  // this string is built). Server _parse_cc_header tolerates unknown extra
-  // fields so old API deploys silently ignore this.
-  const workload = getWorkload()
-  const workloadPair = workload ? ` cc_workload=${workload};` : ''
-  const header = `x-anthropic-billing-header: cc_version=${version}; cc_entrypoint=${entrypoint};${cch}${workloadPair}`
-
-  logForDebugging(`attribution header ${header}`)
-  return header
-}

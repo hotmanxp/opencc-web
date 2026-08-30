@@ -6,16 +6,12 @@ import {
 } from '../bootstrap/state.js'
 import { STRUCTURED_OUTPUTS_BETA_HEADER } from '../constants/betas.js'
 import type { QuerySource } from '../constants/querySource.js'
-import {
-  getAttributionHeader,
-  getCLISyspromptPrefix,
-} from '../constants/system.js'
+import { getCLISyspromptPrefix } from '../constants/system.js'
 import { logEvent } from '../services/analytics/index.js'
 import type { AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS } from '../services/analytics/metadata.js'
 import { getAPIMetadata } from '../services/api/claude.js'
 import { getAnthropicClient } from '../services/api/client.js'
 import { getModelBetas, modelSupportsStructuredOutputs } from './betas.js'
-import { computeFingerprint } from './fingerprint.js'
 import { normalizeModelStringForAPI } from './model/model.js'
 
 type MessageParam = Anthropic.MessageParam
@@ -30,11 +26,7 @@ export type SideQueryOptions = {
   /** Model to use for the query */
   model: string
   /**
-   * System prompt - string or array of text blocks (will be prefixed with CLI attribution).
-   *
-   * The attribution header is always placed in its own TextBlockParam block to ensure
-   * server-side parsing correctly extracts the cc_entrypoint value without including
-   * system prompt content.
+   * System prompt - string or array of text blocks.
    */
   system?: string | TextBlockParam[]
   /** Messages to send (supports cache_control on content blocks) */
@@ -51,7 +43,8 @@ export type SideQueryOptions = {
   maxRetries?: number
   /** Abort signal */
   signal?: AbortSignal
-  /** Skip CLI system prompt prefix (keeps attribution header for OAuth). Default true — side queries are internal classifiers with their own prompt. Set false only for queries that need the full "You are OpenCC…" prefix. */
+  /** Skip CLI system prompt prefix. Default true — side queries are internal classifiers
+   *  with their own prompt. Set false only for queries that need the full "You are OpenCC…" prefix. */
   skipSystemPromptPrefix?: boolean
   /** Temperature override */
   temperature?: number
@@ -64,29 +57,11 @@ export type SideQueryOptions = {
 }
 
 /**
- * Extract text from first user message for fingerprint computation.
- */
-function extractFirstUserMessageText(messages: MessageParam[]): string {
-  const firstUserMessage = messages.find(m => m.role === 'user')
-  if (!firstUserMessage) return ''
-
-  const content = firstUserMessage.content
-  if (typeof content === 'string') return content
-
-  // Array of content blocks - find first text block
-  const textBlock = content.find(block => block.type === 'text')
-  return textBlock?.type === 'text' ? textBlock.text : ''
-}
-
-/**
  * Lightweight API wrapper for "side queries" outside the main conversation loop.
  *
- * Use this instead of direct client.beta.messages.create() calls to ensure
- * proper OAuth token validation with fingerprint attribution headers.
+ * Use this instead of direct client.beta.messages.create() calls.
  *
  * This handles:
- * - Fingerprint computation for OAuth validation
- * - Attribution header injection
  * - CLI system prompt prefix
  * - Proper betas for the model
  * - API metadata
@@ -137,17 +112,10 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
     betas.push(STRUCTURED_OUTPUTS_BETA_HEADER)
   }
 
-  // Extract first user message text for fingerprint
-  const messageText = extractFirstUserMessageText(messages)
-
-  // Compute fingerprint for OAuth attribution
-  const fingerprint = computeFingerprint(messageText, MACRO.VERSION)
-  const attributionHeader = getAttributionHeader(fingerprint)
-
-  // Build system as array to keep attribution header in its own block
-  // (prevents server-side parsing from including system content in cc_entrypoint)
+  // OpenCC never sends x-anthropic-billing-header (see src/constants/system.ts),
+  // so systemBlocks does not include an attribution header. Build as array
+  // anyway for parity with upstream shape.
   const systemBlocks: TextBlockParam[] = [
-    attributionHeader ? { type: 'text', text: attributionHeader } : null,
     // Skip CLI system prompt prefix for internal classifiers that provide their own prompt
     ...(skipSystemPromptPrefix
       ? []
@@ -179,7 +147,6 @@ export async function sideQuery(opts: SideQueryOptions): Promise<BetaMessage> {
 
   const normalizedModel = normalizeModelStringForAPI(model)
   const start = Date.now()
-  // biome-ignore lint/plugin: this IS the wrapper that handles OAuth attribution
   const response = await client.beta.messages.create(
     {
       model: normalizedModel,

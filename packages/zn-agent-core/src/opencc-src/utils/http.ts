@@ -28,8 +28,9 @@ export function getUserAgent(): string {
   // Turn-/process-scoped workload tag for cron-initiated requests. 1P-only
   // observability — proxies strip HTTP headers; QoS routing uses cc_workload
   // in the billing-header attribution block instead (see constants/system.ts).
-  // getAnthropicClient (client.ts:98) calls this per-request inside withRetry,
-  // so the read picks up the same setWorkload() value as getAttributionHeader.
+  // OpenCC never sends the billing-header block (see constants/system.ts doc
+  // comment), so this workload tag only surfaces via the user-agent suffix.
+  // getAnthropicClient (client.ts:98) calls this per-request inside withRetry.
   const workload = getWorkload()
   const workloadSuffix = workload ? `, workload/${workload}` : ''
   return `opencc/${MACRO.VERSION} (${process.env.USER_TYPE}, ${process.env.CLAUDE_CODE_ENTRYPOINT ?? 'cli'}${agentSdkVersion}${clientApp}${workloadSuffix})`
