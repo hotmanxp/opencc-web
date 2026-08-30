@@ -28,6 +28,19 @@ import { setupMailboxBridge } from './setup/setupMailboxBridge.js'
 import { setupSwarmInitialization } from './setup/setupSwarmInitialization.js'
 import { setupSessionBackgrounding } from './setup/setupSessionBackgrounding.js'
 import { setupSkillsChange } from './setup/setupSkillsChange.js'
+// zai patch (2026-08-30, plan P2, Task 4): wire L2 hook adapters
+// (setupApiKeyVerification / setupCostSummary / setupTasksV2Collapse)
+// + L3 setupNotifications bus. Each adapter converts an internal
+// state change into a typed ReplEvent 'notification' routed through
+// hooks.onEvent; the notification bus additionally exposes `emit()` for
+// call-sites that don't fit the L2 adapter shape (e.g. rate-limit,
+// deprecation warnings, plugin auto-update). All four handles are
+// appended to the dispose() LIFO stack below so session teardown
+// unwinds them in reverse-construction order. Spec §5.1.
+import { setupApiKeyVerification } from './setup/setupApiKeyVerification.js'
+import { setupCostSummary } from './setup/setupCostSummary.js'
+import { setupTasksV2Collapse } from './setup/setupTasksV2Collapse.js'
+import { setupNotifications } from './notifications/setupNotifications.js'
 // zai patch (2026-08-30, plan P1): state machines (Task 6) — replace
 // REPL.tsx onSubmit/onQuery/onQueryImpl handlers with imperative classes.
 import {
@@ -155,6 +168,28 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     },
   })
 
+  // zai patch (2026-08-30, plan P2, Task 4): L2 hook adapters wired
+  // synchronously at createReplSession boundary. Each captures
+  // session-scoped state in its closure; onResult / onUpdate /
+  // onCollapseChange convert internal state changes into typed
+  // 'notification' ReplEvents (kind: 'custom' carrying a discriminator
+  // in payload.type for zai-web's notification reducer). The L3
+  // notification bus exposes emit() for future L3 call-sites and
+  // forwards each event through the same path.
+  const apiKeyHandle = setupApiKeyVerification({
+    onResult: ok => emitReplEvent('notification', { kind: 'custom', payload: { type: 'apiKeyOk', ok } }),
+  })
+  const costSummaryHandle = setupCostSummary({
+    onUpdate: summary => emitReplEvent('notification', { kind: 'custom', payload: { type: 'costSummary', summary } }),
+  })
+  const tasksV2Handle = setupTasksV2Collapse({
+    tasks: () => opts.getAppState?.() ? (opts.getAppState() as any).tasks : [],
+    onCollapseChange: collapsed => emitReplEvent('notification', { kind: 'custom', payload: { type: 'tasksV2Collapse', collapsed } }),
+  })
+  const notificationsHandle = setupNotifications({
+    onNotification: n => emitReplEvent('notification', { kind: n.kind, payload: n.payload }),
+  })
+
   // zai patch (2026-08-30, plan P1, Task 8): state machines — class
   // forms of REPL.tsx onSubmit / onQuery / onQueryImpl. P1 wires them
   // up so P2 can drive submit→runTurn without React handlers. The
@@ -218,7 +253,12 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
   // LIFO teardown stack — most-recently-added first. The dispose loop
   // runs `for (const t of teardownStack) t()`, so the first item runs
   // first. We want the brief's order: cmdQueue → cron → proactive →
-  // inbox → mailbox → swarm → background → skills → guard.
+  // inbox → mailbox → swarm → background → skills → guard → P2 layer
+  // (apiKey → costSummary → tasksV2 → notifications). P2 entries are
+  // appended after skillsHandle / before guard so guard still unwinds
+  // last (matching the existing convention). All four P2 teardowns
+  // are idempotent (each adapter's `teardown()` short-circuits on a
+  // `disposed` flag), so dispose() can be called twice safely.
   const teardownStack: Array<() => void> = [
     () => cmdQueue.teardown(),
     () => cronHandle.teardown(),
@@ -228,6 +268,10 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     () => swarmHandle.teardown(),
     () => backgroundHandle.teardown(),
     () => skillsHandle.teardown(),
+    () => apiKeyHandle.teardown(),
+    () => costSummaryHandle.teardown(),
+    () => tasksV2Handle.teardown(),
+    () => notificationsHandle.teardown(),
     () => guard.teardown(),
   ]
 
@@ -393,12 +437,21 @@ export function createReplSession(opts: ReplSessionOptions): ReplSession {
     },
 
     getState(): ReplSessionState {
+      // zai patch (2026-08-30, plan P2, Task 4): p2Wired marker
+      // advertises that L2 adapters + L3 notification bus are wired
+      // and their teardown handles live in the dispose() LIFO stack.
+      // zai web inspects this flag to decide whether to subscribe to
+      // 'custom' notification kinds via the bus (vs falling back to
+      // legacy per-hook subscription paths). Returning true on every
+      // getState() call makes the marker robust to hosts that capture
+      // getState() once at construct time.
       return {
         sessionId,
         turnIndex,
         isRunning,
         isDisposed,
-      }
+        p2Wired: true,
+      } as any
     },
   }
 }

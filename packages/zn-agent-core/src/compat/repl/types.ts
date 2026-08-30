@@ -99,6 +99,13 @@ export type ReplSessionState = {
   turnIndex: number
   isRunning: boolean
   isDisposed: boolean
+  // zai patch (2026-08-30, plan P2, Task 4): p2Wired marker. Always
+  // `true` on sessions constructed via createReplSession since P2 —
+  // signals to zai web that L2 hook adapters + L3 notification bus
+  // are wired and their teardown handles are registered on dispose().
+  // Hosts inspect this before subscribing to 'custom' notification
+  // kinds via the bus (vs legacy per-hook subscription paths).
+  p2Wired?: boolean
 }
 
 export type ReplSession = {
