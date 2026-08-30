@@ -168,7 +168,7 @@ router.post('/instances', async (req, res) => {
       cwd,
       lan: lan.value === true,
       port: port.value as number | undefined,
-      runtimeCore: runtimeCore.value,
+      runtimeCore: runtimeCore.value as CoreRuntime | undefined,
     })
     res.status(201).json({ instance })
   } catch (err) {
