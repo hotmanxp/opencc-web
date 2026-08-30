@@ -211,6 +211,36 @@ describe('createReplSession P2 integration', () => {
     await session.dispose()
   })
 
+  // zai patch (2026-08-30, plan P2, Task 4): setupCostSummary is wired
+  // at session create and emits a 'costSummary' notification when
+  // refresh() is called. The adapter is intentionally NOT auto-kicked
+  // for the same reason as setupApiKeyVerification — see above.
+  it('setupCostSummary emits notification when refresh() runs', async () => {
+    const events: any[] = []
+    const session = createReplSession({
+      sessionId: `s-${randomUUID()}`,
+      cwd: tmpDir,
+      input: (async function* () {})(),
+      hooks: { onEvent: ev => events.push(ev) },
+    })
+
+    const handle = session.getCostSummaryHandle?.()
+    expect(handle).toBeDefined()
+    expect(typeof handle?.refresh).toBe('function')
+
+    await handle!.refresh()
+
+    const costEvents = events.filter(
+      ev => ev.type === 'notification'
+        && (ev.payload as any)?.kind === 'custom'
+        && (ev.payload as any)?.payload?.type === 'costSummary',
+    )
+    expect(costEvents.length).toBe(1)
+    expect((costEvents[0]!.payload as any).payload.summary).toBeDefined()
+
+    await session.dispose()
+  })
+
   // zai patch (2026-08-30, plan P2, Task 4): setupNotifications bus
   // propagates through hooks.onEvent as ReplEvent 'notification'.
   // The bus is a public surface (drivers can emit from SSE handlers)
