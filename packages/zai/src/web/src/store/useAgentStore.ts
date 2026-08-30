@@ -66,46 +66,6 @@ function dataURLtoBlob(dataUrl: string): Blob | null {
   return new Blob([arr], { type: mime })
 }
 
-// zai patch (2026-08-30): detect async-agent dispatch from AgentTool's
-// tool_result. Output can be:
-//  - a stringified JSON containing `status: "async_launched"` (vendor's
-//    inproc path stringifies tool_result content for display),
-//  - a plain object with the same shape (legacy / unwrapped path),
-//  - a string that includes "Async agent launched successfully" (text
-//    fallback when the content isn't structured).
-// Any of these signals means the agent is running in the background and
-// the main LLM is waiting for the <task-notification> follow-up — show
-// a placeholder card so the user isn't staring at a frozen transcript.
-function isAsyncLaunchedOutput(output: unknown): boolean {
-  if (output == null) return false
-  if (typeof output === 'string') {
-    return (
-      output.includes('"status":"async_launched"') ||
-      output.includes('"status": "async_launched"') ||
-      output.includes('Async agent launched successfully')
-    )
-  }
-  if (typeof output === 'object') {
-    const o = output as { status?: unknown; isAsync?: unknown }
-    return o.status === 'async_launched' || o.isAsync === true
-  }
-  return false
-}
-
-function extractAgentId(output: unknown): string | undefined {
-  if (output == null) return undefined
-  const tryStr = (s: string) => {
-    const m = s.match(/"agentId"\s*:\s*"([^"]+)"/)
-    return m?.[1]
-  }
-  if (typeof output === 'string') return tryStr(output)
-  if (typeof output === 'object') {
-    const id = (output as { agentId?: unknown }).agentId
-    if (typeof id === 'string' && id.length > 0) return id
-  }
-  return undefined
-}
-
 // RuntimeEvent: shape of events produced by the SSE pipeline.
 // Kept locally since sseAgent.ts is deleted; matches what loadTranscript
 // constructs for user.text / assistant.text / tool_use:* history events.
@@ -268,20 +228,6 @@ interface AgentState {
   // 执行(从 pending 消失)时移入 transcript。
   queuedPrompts: QueuedPrompt[]
   abortController: AbortController | null
-  // zai patch (2026-08-30): last seen runtime.started turnIndex. Used
-  // to detect "new turn" (turnIndex strictly increased) vs "same turn
-  // continuation" (vendor internal message_start re-emit, SSE
-  // reconnect). The old check `prevStatus === 'streaming'` failed when
-  // async agent dispatched a sub-agent: the sub-agent's follow-up
-  // turnIndex=4 arrived while status was still 'streaming' from
-  // turnIndex=3, so textSegmentRev never bumped and the new turn's
-  // runtime.delta events were deduped against the old turn's key.
-  lastRuntimeTurnIndex: number | null
-  // zai patch (2026-08-30): key = toolUseId. 派发 async Agent 后,
-  // 等待主 LLM 处理 <task-notification> 续写期间,UI 显示"等待子代理
-  // 返回中..."卡片。新 turn 起点(runtime.started, prevStatus='idle')
-  // 清空整个 map。
-  awaitingSubagents: Record<string, true>
   pendingAsk: AskState | null
   pendingApprove: ApproveState | null
   pendingPermission: PermissionState | null
@@ -601,9 +547,7 @@ export const useAgentStore = create<AgentState>((set, get) => ({
   cwd: '',
   messages: [],
   status: 'idle',
-  awaitingSubagents: {},
   queuedPrompts: [],
-  lastRuntimeTurnIndex: null,
   abortController: null,
   pendingAsk: null,
   pendingApprove: null,
@@ -1485,29 +1429,61 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     // runtime.* 不在 ServerEvent union 之外的 type 才会进入这里.
     switch (event.type) {
       case 'runtime.started': {
-        // zai patch (2026-08-30): 用 turnIndex 严格递增判断"新 turn"而非
-        // status 状态机。vendor print loop 在 async agent 派发后会出现
-        // turnIndex=1 (主 turn 1) → turnIndex=2 (主 LLM thinking 重置)
-        // → turnIndex=3 (AgentTool dispatch) → turnIndex=3 (主 turn
-        // 续写) → turnIndex=4 (子代理续写 turn) 全程 status 都是
-        // streaming。用 prevStatus 没法识别 turnIndex=4 是新 turn。
-        // 改用 lastRuntimeTurnIndex:严格 +1 才算新 turn (bump
-        // textSegmentRev),同 turnIndex 重复 (vendor 重发) 不 bump。
-        const incomingTurn = (event as { turnIndex?: number }).turnIndex
-        const prevTurnIndex = useAgentStore.getState().lastRuntimeTurnIndex
-        const isNewTurn =
-          typeof incomingTurn === 'number' &&
-          (prevTurnIndex === null || incomingTurn > prevTurnIndex)
-        useAgentStore.setState((s) => ({
-          activeSessionId: sid,
-          status: 'streaming',
-          textSegmentRev: isNewTurn ? s.textSegmentRev + 1 : s.textSegmentRev,
-          lastRuntimeTurnIndex:
-            typeof incomingTurn === 'number' ? incomingTurn : s.lastRuntimeTurnIndex,
-          // SubagentNotifier 触发的 sub-agent 续写也走新 turn — 把之前
-          // tool_use:done 上挂的 awaitingSubagent 标记全部清掉。
-          awaitingSubagents: {} as Record<string, true>,
-        }))
+        // 标记当前活跃 session + 进入 streaming 态. status 已经是
+        // 'idle' 时也会被覆盖成 'streaming'; UI 看到 streaming 后立即
+        // 显示流式动画与 elapsed 计时.
+        const prevStatus = useAgentStore.getState().status
+        if (prevStatus === 'streaming') {
+          // SSE 重连: server 重新发 runtime.started, status 仍是 streaming,
+          // 属于同一 turn 的延续. 不能 bump textSegmentRev, 否则同一个
+          // turn 的 text 会被切到不同 bubble, 用户看到流式回答中段莫名
+          // 换气泡 / 重置 markdown.
+          useAgentStore.setState({ activeSessionId: sid, status: 'streaming' })
+        } else {
+          // 新 turn 起点. SubagentNotifier 触发的 sub-agent 续写也走这条:
+          // 上一轮已 runtime.done / aborted / error, status 不再 streaming,
+          // 续写 turn 的 text_delta 必须落到新 bubble, 不能 append 到上一轮
+          // 末尾的 text (否则"等待结果..."和"结果已收到"被拼成一段).
+          // 修法: 把 textSegmentRev +1, 让新一轮首个 stream block key 改变,
+          // upsertStreamBlock 自然开新 bubble.
+          useAgentStore.setState((s) => ({
+            activeSessionId: sid,
+            status: 'streaming',
+            textSegmentRev: s.textSegmentRev + 1,
+          }))
+        }
+        // zai patch (2026-08-09): 把 metrics 更新挂在 runtime.started 上。
+        // server 在每次 LLM 调用起点就推这两个字段(claude.ts:1877
+        // recordApiCall 已早于 message_start 触发,getContextTokensForSession
+        // 在 message_start 路径拿到上一轮 message_delta 的最终值) —
+        // 中间轮次的 message_stop 被 sdkEventAdapter 抑制导致 runtime.done
+        // 频率太低,挂在 started 上就能逐 turn 推送。与下方 runtime.done
+        // 用同一 Math.max 防御保证单调增。
+        const startedApi = (event as { apiRequestCount?: unknown }).apiRequestCount
+        const startedCtx = (event as { contextTokens?: unknown }).contextTokens
+        if (typeof startedApi === 'number' || typeof startedCtx === 'number') {
+          useAgentStore.setState((s) => {
+            const next: {
+              apiRequestCountBySession?: Record<string, number>
+              contextTokensBySession?: Record<string, number>
+            } = {}
+            if (typeof startedApi === 'number') {
+              const prev = s.apiRequestCountBySession[sid] ?? 0
+              next.apiRequestCountBySession = {
+                ...s.apiRequestCountBySession,
+                [sid]: Math.max(prev, startedApi),
+              }
+            }
+            if (typeof startedCtx === 'number') {
+              const prev = s.contextTokensBySession[sid] ?? 0
+              next.contextTokensBySession = {
+                ...s.contextTokensBySession,
+                [sid]: Math.max(prev, startedCtx),
+              }
+            }
+            return next
+          })
+        }
         return
       }
       case 'runtime.delta': {
@@ -1571,14 +1547,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
       case 'runtime.tool_result': {
         // runtime.tool_result schema 携带 toolUseId / toolName / input
         // (2026-07-18 加 toolName/input: 前端 upsertToolCall 守卫要靠这
-        //
-        // zai patch (2026-08-30): when the tool result is an async agent
-        // launch (AgentTool with run_in_background, fork-spawn, or
-        // backgrounded-mid-execution), mark the message so the transcript
-        // can render a "等待子代理返回中..." placeholder. Without this the
-        // user sees the tool_use card flip to "done" immediately and the
-        // transcript looks static for 5+s until the follow-up lands.
-        const isAsyncLaunched = isAsyncLaunchedOutput(event.output)
         const resultMsg: AgentMessage = {
           eventId: `tool-${event.toolUseId}`,
           sessionId: sid,
@@ -1590,9 +1558,6 @@ export const useAgentStore = create<AgentState>((set, get) => ({
           name: event.toolName,
           input: event.input as Record<string, unknown>,
           output: event.output,
-          ...(isAsyncLaunched
-            ? { awaitingSubagent: true, awaitingAgentId: extractAgentId(event.output) }
-            : {}),
         }
         useAgentStore.getState().upsertToolCall(resultMsg)
         return

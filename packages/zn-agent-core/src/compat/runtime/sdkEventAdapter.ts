@@ -206,17 +206,7 @@ export function* translateSdkToRuntime(
   const emit = (type: string, extra: Record<string, unknown> = {}): RuntimeEvent =>
     makeEvent(type, meta, seq++, extra)
 
-  // zai patch (2026-08-30): inproc-print runs a long-lived query that
-  // bridges multiple LLM turns (main turn dispatches an async agent →
-  // main turn closes → vendor loop blocks for <task-notification> →
-  // sub-agent finishes → new turn starts). All of those turns come
-  // through THIS one translateSdkToRuntime call (one query per
-  // session), so we cannot rely on the caller having pre-incremented
-  // meta.turnIndex. Bump it at the start of every new assistant
-  // message so each turn gets a fresh turnIndex and the SSE
-  // transcript groups events correctly.
   if (m.type === 'assistant' && m.message) {
-    meta.turnIndex += 1
     yield emit('message_start', {
       message: { id: m.message.id, model: m.message.model, role: 'assistant' },
     })

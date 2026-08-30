@@ -304,16 +304,6 @@ export async function* translateRuntimeEvents(
 
   for await (const ev of events) {
     const t = ev.type as string | undefined;
-    // zai patch (2026-08-30): compat/runtime/sdkEventAdapter places
-    // adapterMeta.turnIndex at the top level of every translated raw
-    // event (makeEvent → { type, eventId, sessionId, turnIndex, ts, ...extra }).
-    // Sync our local turnIndex from that signal so runtime.started/done
-    // published to the SSE bus use the same turnIndex the front-end
-    // will see in the spec event payload (consistent transcript layout).
-    const inboundTurn = (ev as { turnIndex?: number }).turnIndex
-    if (typeof inboundTurn === 'number' && inboundTurn >= 0) {
-      turnIndex = inboundTurn
-    }
     switch (t) {
       case "message_start":
         // zai patch (2026-08-09): 把 metrics 提升到 runtime.started 推送。
@@ -1106,16 +1096,8 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         // 仅当 transcript 已存在(消息已落盘)才写 —— 新会话首条消息由
         // 后续 append 流程创建文件,此时写会因文件不存在而失败(无害)。
         if (transcript) {
-          // zai patch: catch so the unhandled rejection doesn't crash the
-          // process under Node 22 (which defaults unhandledRejection to
-          // throw). legacyTranscriptStore.patch throws "session not found"
-          // when the session registry has been cleared (e.g. after a
-          // restart or session invalidation) — log and move on.
-          getTranscriptStore()
+          void getTranscriptStore()
             .patch(sessionId, { mainAgent: sessionMainAgent }, { cwd })
-            .catch(err => {
-              console.warn(`[prompt] transcript patch mainAgent failed:`, err)
-            })
         }
       } catch (err) {
         console.warn(`[prompt] failed to resolve mainAgent:`, err)
@@ -1472,14 +1454,6 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
         }
       }
       // ★ 替代原 stream.send：通过总线推送
-      if (process.env.ZAI_DEBUG_SSE === '1') {
-        // zai patch (2026-08-30): trace every runtime.* event that hits
-        // the bus, including turnIndex and seq. Reveals whether new
-        // turns (turnIndex=1) actually reach the bus or are dropped
-        // earlier in the pipeline.
-        // eslint-disable-next-line no-console
-        console.log('[server-sse]', event.type, 'turnIndex=' + (event as { turnIndex?: number }).turnIndex, 'seq=' + (event as { seq?: number }).seq)
-      }
       eventBus.emit(event);
       // dsh 投影试点 (2026-08-15): runtime.done 携带 contextTokens 时, 同步
       // emit session/projection 帧 — 前端 useProjection(sid, 'context.tokens')
@@ -1496,16 +1470,8 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
           } as any);
         }
       }
-      // zai patch (2026-08-30): 不要在第一条 runtime.done 就 break —
-      // vendor 在主 turn 跑完(派 async Agent 后)就推 runtime.done,然后
-      // 阻塞等 <task-notification> → 续写新 turn → 推第二条 runtime.done。
-      // 旧逻辑在第一条 break,导致新 turn 的 events (runtime.started /
-      // .delta / .done turnIndex=1) 全部丢失,前端 transcript 看不到
-      // follow-up summary。删掉 break,让 for-await 自然消费完
-      // runtime.query 的 async generator(它在 vendor 端 result event
-      // 之后 done)。 HARD_TIMEOUT (runQueryLoop 顶部 2h) 兜底。
-      // 同样不处理 runtime.aborted — 沿用旧注释,aborted 通常
-      // 走 outer try/catch 的 runtime.error 路径。
+      if (event.type === "runtime.done" || event.type === "runtime.aborted")
+        break;
     }
   } catch (err) {
     // 无条件落盘(不依赖 ZAI_DEBUG): query 流异常是"发了没反应/页面上

@@ -427,18 +427,12 @@ export class TranscriptStore {
   }
 
   async patch(id: string, patch: Record<string, unknown>, opts?: { cwd?: string }) {
-    // zai patch (2026-08-30): convert "session not found" from a throw into
-    // a warn + null return. The previous contract made this throw, but the
-    // call site in routes/agent.ts:1099 fires it via `void ... .patch(...)`
-    // (fire-and-forget), which on Node 22 default unhandledRejection crashes
-    // the entire server process. Title / mainAgent updates are non-critical
-    // metadata — failing them shouldn't take the process down.
+    // Throwing on unknown session id mirrors the OpenccRuntime.patchSession
+    // contract — routes return 5xx when the session doesn't exist, so the
+    // pre-existing PATCH 500 test passes.
     const found = await this.patchSession(id, patch, opts)
     if (!found) {
-      console.warn(
-        `[legacyTranscriptStore] patch: session not found: ${id} (silently no-op)`,
-      )
-      return null
+      throw new Error(`TranscriptStore.patch: session not found: ${id}`)
     }
     return found
   }
