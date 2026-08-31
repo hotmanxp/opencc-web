@@ -346,6 +346,7 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
     taskId: string,
     status: 'completed' | 'failed' | 'cancelled',
     error?: BackgroundTask['error'],
+    resultText?: string,
   ): Promise<void> {
     const rec = await this.ensureRecord(taskId)
     if (!rec) return
@@ -353,6 +354,17 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
     rec.task.status = status
     rec.task.finishedAt = Date.now()
     if (error) rec.task.error = error
+    // zai patch (2026-08-31, plan spawnagent-result-inline): attach-path
+    // callers (SpawnAgent / in-process CLI subagents) don't go through
+    // the dispatch streaming loop, so `task.resultText` is never set and
+    // the parent session's <task-notification> ships without a `<result>`
+    // block — forcing the parent agent to follow up with `TaskOutput` /
+    // `Read output_file`. Accepting resultText here lets the lifecycle
+    // plumb the final text through `mirrorFinalizeBgTask` so the
+    // notification renders the result inline.
+    if (status === 'completed' && typeof resultText === 'string' && resultText.length > 0) {
+      rec.task.resultText = resultText
+    }
     await this.store.save(rec.task)
     this.notifyChange(rec.task)
     rec.emitter.emit('done')

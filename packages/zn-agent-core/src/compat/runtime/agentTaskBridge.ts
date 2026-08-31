@@ -309,16 +309,22 @@ export async function mirrorAppendBgEvent(
 type FinalizeStatus = 'completed' | 'failed' | 'cancelled'
 
 /** AgentTool 用:在 LocalAgentTask 终态切换时同步标 BackgroundRuntime 终态,
- * SSE 抽屉订阅流立即结束。 */
+ * SSE 抽屉订阅流立即结束。
+ *
+ * `resultText` (可选,仅 status='completed' 时生效) 写入 BackgroundTask.resultText,
+ * 由 zai server 的 SubagentNotifier 拼进父 session 的 <task-notification> 的
+ * <result> 块;否则父 agent 只能从 TaskOutput / Read output_file 拉取结果。
+ * SpawnAgent 等走 attach 路径的 CLI subagent 通过此参数把 result.text 传进来。 */
 export async function mirrorFinalizeBgTask(
   taskId: string,
   status: FinalizeStatus,
   error?: BackgroundTask['error'],
+  resultText?: string,
 ): Promise<void> {
   const bg = tryGetBg()
   if (!bg) return
   try {
-    await bg.finalizeTask(taskId, status, error)
+    await bg.finalizeTask(taskId, status, error, resultText)
   } catch (err) {
     console.warn('[agentTaskBridge] mirrorFinalizeBgTask failed:', err)
   }
