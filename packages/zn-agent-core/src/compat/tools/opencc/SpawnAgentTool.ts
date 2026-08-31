@@ -129,7 +129,16 @@ async function executeSpawn(
     prompt,
     description,
     teamName: team_name,
-    cwd,
+    // zai patch (2026-08-31): cwd fallback to process.cwd() when LLM omits
+    // the parameter. All three providers (claude-code / dsh / codex) hard-throw
+    // failXxx('no cwd for child') when cwd is empty — without this fallback,
+    // a model that forgets the field gets a tool_result error and never
+    // reaches publishSpawnToBackground (drawer never sees the task). For
+    // zai-server: process.cwd() == the zai server boot cwd, which matches
+    // the session cwd when the user did not manually `cd` inside a tool
+    // run. Good enough default; can be tightened by plumbing session cwd
+    // through the wrap ctx later.
+    cwd: cwd ?? process.cwd(),
     model,
     signal: (ctx as { abortSignal?: AbortSignal }).abortSignal,
   })

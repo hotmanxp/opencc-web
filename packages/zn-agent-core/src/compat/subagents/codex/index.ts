@@ -66,9 +66,17 @@ const DEFAULT_CONFIG: CodexConfig = parseCodexConfig({})
  * Idempotent: the registry itself rejects duplicate-name registration. Pass
  * a partial config and let the schema's defaults fill in the rest; pass
  * `undefined` to use the all-defaults (feature-off) config.
+ *
+ * zai patch (2026-08-31, plan remove-codex): gated on `enabled` to match
+ * the dsh provider's behavior — codex's app-server protocol handshake
+ * fails unattended (`remoteControl/status/changed` stalls) and the CLI
+ * is not part of the zai-server hot path. Default `enabled: false` (see
+ * codexConfigSchema) means a missing/unconfigured settings entry no-ops
+ * instead of silently mounting a provider that will fail at first use.
  */
 export function apply(registry: SubagentRegistry, config?: unknown): void {
   const resolved: CodexConfig = config === undefined ? DEFAULT_CONFIG : parseCodexConfig(config)
+  if (!resolved.enabled) return
   registry.registerProvider(new CodexProvider(resolved))
 }
 

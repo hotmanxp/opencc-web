@@ -14,6 +14,12 @@ import { WebFetchTool } from './tools/WebFetchTool/WebFetchTool.js'
 import { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from './tools/BriefTool/BriefTool.js'
 import { SnipTool } from './tools/SnipTool/SnipTool.js'
+// zai patch (2026-08-31, plan spawnagent-register): SpawnAgent — external
+// CLI subagent carrier. Routes subagent_type='claude-code'|'dsh' through
+// compat/subagents registry. See compat/tools/opencc/SpawnAgentTool.ts.
+// Kept as a function import so the wrapper reads the registry at call-time
+// (initAgentRuntime registers providers after zai-server boots).
+import { wrapSpawnAgentToolAsOpencc } from '../compat/tools/opencc/SpawnAgentTool.js'
 // Dead code elimination: conditional import for internal-only tools
 /* eslint-disable @typescript-eslint/no-require-imports */
 const REPLTool = null
@@ -186,6 +192,13 @@ export function getAllBaseTools(): Tools {
     : []
   return [
     AgentTool,
+    // zai patch (2026-08-31, plan spawnagent-register): SpawnAgent — external
+    // CLI subagent carrier. Sits next to vendor AgentTool so the model sees
+    // both options (AgentTool for built-in agents, SpawnAgent for CLI
+    // engines via subagent_type='claude-code'|'dsh'). wrapAsOpenccTool is a
+    // plain object spread with no external side effects; lazy is unnecessary
+    // because getAllBaseTools is invoked per-query (re-reads registry state).
+    wrapSpawnAgentToolAsOpencc() as Tool,
     ...bgTools,
     TaskOutputTool,
     BashTool,
@@ -283,6 +296,10 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
         const sendMessageTool = getSendMessageTool()
         if (sendMessageTool) replSimple.push(TaskStopTool, sendMessageTool)
       }
+      // zai patch (2026-08-31, plan spawnagent-register): include SpawnAgent
+      // in the simple-mode REPL tool pool too so the model can route
+      // external CLI subagents via subagent_type='claude-code'|'dsh'.
+      replSimple.push(wrapSpawnAgentToolAsOpencc() as Tool)
       return filterToolsByDenyRules(replSimple, permissionContext)
     }
     const simpleTools: Tool[] = [BashTool, FileReadTool, FileEditTool]
@@ -294,6 +311,10 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
       const sendMessageTool = getSendMessageTool()
       if (sendMessageTool) simpleTools.push(sendMessageTool)
     }
+    // zai patch (2026-08-31, plan spawnagent-register): SpawnAgent stays
+    // available in simple-mode even outside coordinator mode so worker
+    // shells can spawn external CLI subagents when given a prompt.
+    simpleTools.push(wrapSpawnAgentToolAsOpencc() as Tool)
     return filterToolsByDenyRules(simpleTools, permissionContext)
   }
 
