@@ -46,9 +46,14 @@ export type ClaudeOutputFormat =
   (typeof CLAUDE_OUTPUT_FORMAT)[keyof typeof CLAUDE_OUTPUT_FORMAT]
 
 export const CLAUDE_PERMISSION_MODE = {
-  bypassPermissions: 'bypassPermissions',
+  // dsh 0.1.2-alpha.2 alignment (`subagent-claude-code/src/run.ts:44-53`):
+  // dontAsk / auto are the newer unattended-friendly modes; `default` is
+  // kept as a zai legacy value.
+  dontAsk: 'dontAsk',
   acceptEdits: 'acceptEdits',
+  auto: 'auto',
   plan: 'plan',
+  bypassPermissions: 'bypassPermissions',
   default: 'default',
 } as const
 

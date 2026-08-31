@@ -103,9 +103,9 @@ describe('routes/desktopFs', () => {
     expect(res.body.mime).toBe('text/html');
   });
 
-  test('file: 超 2MB → 413', async () => {
+  test('file: 超 5MB → 413', async () => {
     const big = join(root, 'big.md');
-    writeFileSync(big, 'x'.repeat(2 * 1024 * 1024 + 1));
+    writeFileSync(big, 'x'.repeat(5 * 1024 * 1024 + 1));
     const res = await request(makeApp()).get('/api/desktop/fs/file').query({ path: big });
     expect(res.status).toBe(413);
   });

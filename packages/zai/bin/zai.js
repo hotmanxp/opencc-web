@@ -6,12 +6,15 @@ import { dirname } from 'node:path';
 // zai 自升级通道 (services/updater.ts) 在全局 install 时跑,在 workspace
 // dev 模式跳过 — 区分依据:当前 bin 文件路径是否落在任意 node_modules 下。
 // 全局 install → <prefix>/lib/node_modules/@zn-ai/zai/bin/zai.js (含
-// /node_modules/) → 设 env,后续 maybeAutoUpdate 正常跑。
-// workspace dev → <workspace>/packages/zai/bin/zai.js (无 /node_modules/)
+// node_modules 段) → 设 env,后续 maybeAutoUpdate 正常跑。
+// workspace dev → <workspace>/packages/zai/bin/zai.js (无 node_modules 段)
 // → 不设 env,updater 直接 return。
+// 分隔符必须同时匹配 / 和 \ :Windows 全局 install 落在
+// <prefix>\node_modules\@zn-ai\zai\bin,只写 / 的正则永远不命中,
+// 会导致 Windows 上 zai 自升级静默关闭。
 const FROM_GLOBAL_INSTALL_ENV = 'ZAI_FROM_GLOBAL_INSTALL';
 const here = dirname(fileURLToPath(import.meta.url));
-const fromGlobalInstall = /\/node_modules\//.test(here);
+const fromGlobalInstall = /[\\/]node_modules[\\/]/.test(here);
 if (fromGlobalInstall) {
   process.env[FROM_GLOBAL_INSTALL_ENV] = '1';
 }

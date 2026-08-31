@@ -59,10 +59,10 @@ describe('DesktopExplorer', () => {
     await waitFor(() => expect(screen.getByText(/无权限访问/)).toBeInTheDocument());
   });
 
-  test('切到「线上」Tab 显示待接入空态', () => {
+  test('切到「线上知识」Tab 显示待接入空态', () => {
     vi.mocked(api.get).mockResolvedValueOnce(mkList('/Users/t', []));
     render(<DesktopExplorer cwd="/Users/t/sandbox" home="/Users/t" onOpenFile={() => {}} onDragFile={() => {}} />);
-    fireEvent.click(screen.getByRole('tab', { name: '线上' }));
+    fireEvent.click(screen.getByRole('tab', { name: '线上知识' }));
     expect(screen.getByText(/待接入/)).toBeInTheDocument();
   });
 

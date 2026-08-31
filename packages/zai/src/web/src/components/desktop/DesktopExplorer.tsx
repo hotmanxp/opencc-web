@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useState } from 'react';
-import { Input, Tabs, Alert, Empty, Spin } from 'antd';
+import { Input, Tabs, Alert, Empty, Spin, Segmented } from 'antd';
 import { ArrowUpOutlined } from '@ant-design/icons';
 import { api } from '../../lib/api.js';
 import type { DesktopFsList, DesktopFsEntry } from '../../../shared/desktopFs.js';
@@ -18,6 +18,20 @@ interface DesktopExplorerProps {
   defaultPath?: string;
 }
 
+// 起始目录切换键:工作目录 (process.cwd, 服务端 instanceContext.cwd)
+// vs 用户主目录 (~, 服务端 /desktop/fs/list 响应里的 res.home).
+// 持久化到 localStorage,关闭重开桌面仍记住上次选择.
+const START_ROOT_KEY = 'zai:desktop:explorer:startRoot';
+type StartRoot = 'cwd' | 'home';
+
+function readStartRoot(): StartRoot {
+  try {
+    return localStorage.getItem(START_ROOT_KEY) === 'home' ? 'home' : 'cwd';
+  } catch {
+    return 'cwd';
+  }
+}
+
 async function loadList(path: string | null): Promise<DesktopFsList> {
   const q = path == null ? '' : `?path=${encodeURIComponent(path)}`;
   try {
@@ -29,6 +43,10 @@ async function loadList(path: string | null): Promise<DesktopFsList> {
 
 export default function DesktopExplorer({ cwd, home, onOpenFile, onDragFile, defaultPath }: DesktopExplorerProps) {
   const [pathInput, setPathInput] = useState('');
+  // currentPath 只在 defaultPath (快捷方式双击定位) 时显式初始化;否则交给下面
+  // 的 effect 在 cwd hydrate 后再决定起点 — 避免首挂载时 cwd='' (instanceContext
+  // 还在等 /system 异步返回) 把 currentPath 锁死成 null → 服务端兜底解析 home,
+  // 之后 cwd 真值回来也无法再触发导航.
   const [currentPath, setCurrentPath] = useState<string | null>(defaultPath ?? null);
   const [homePath, setHomePath] = useState(home || '');
   const [entries, setEntries] = useState<ExplorerEntry[]>([]);
@@ -37,6 +55,8 @@ export default function DesktopExplorer({ cwd, home, onOpenFile, onDragFile, def
   const [loading, setLoading] = useState(false);
   const [tab, setTab] = useState<'local' | 'online'>('local');
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  // 起始目录:工作目录 (cwd) vs 用户主目录 (home),持久化到 localStorage
+  const [startRoot, setStartRoot] = useState<StartRoot>(readStartRoot);
 
   const go = useCallback(async (path: string | null) => {
     setLoading(true); setError(null);
@@ -58,7 +78,40 @@ export default function DesktopExplorer({ cwd, home, onOpenFile, onDragFile, def
     setSelectedPath(null);
   }, []);
 
-  useEffect(() => { void go(currentPath ?? null); }, []); // 首挂载一次
+  // 起始目录解析(单一 effect,state-driven):
+  //   - defaultPath (定位模式,快捷方式"在资源管理器定位") → 走 defaultPath
+  //   - startRoot='cwd' 且 cwd 已 hydrate → go(cwd)
+  //   - startRoot='home' → go(null) 让服务端兜底解析 ~ (自愈 homePath)
+  //   - 兜底 → go(null) (用户首次进入且 cwd 还没 hydrate 时,不要一直空白,
+  //     让服务端先把 home 列出来,等 cwd hydrate 进来 race effect 再覆盖)
+  // cwd race 由 effect 的 [cwd] deps 自然处理:instanceContext.cwd 从 '' 变
+  // 成真值时 effect 重跑,触发 go(cwd) 跳到工作目录.
+  // 不再用 `currentPath != null` 守卫 — 那个守卫会让"用户手动导航过 / 当前
+  // 在子目录、切回工作目录"被吞掉 (currentPath 已非 null 时不再覆盖).
+  useEffect(() => {
+    if (defaultPath) {
+      void go(defaultPath);
+      return;
+    }
+    if (startRoot === 'cwd' && cwd) {
+      void go(cwd);
+      return;
+    }
+    if (startRoot === 'home') {
+      void go(homePath || null);
+      return;
+    }
+    // cwd 还没 hydrate (startRoot='cwd' && cwd=''):兜底列 home,避免空白闪烁
+    void go(null);
+  }, [defaultPath, startRoot, cwd, homePath, go]);
+  // 起始目录切换持久化
+  useEffect(() => {
+    try {
+      localStorage.setItem(START_ROOT_KEY, startRoot);
+    } catch {
+      /* quota / privacy mode — swallow */
+    }
+  }, [startRoot]);
 
   const openEntry = (e: ExplorerEntry) =>
     e.kind === 'dir' ? void go(e.path) : onOpenFile(e);
@@ -71,12 +124,12 @@ export default function DesktopExplorer({ cwd, home, onOpenFile, onDragFile, def
 
   return (
     <div style={{ display: 'flex', flexDirection: 'column', height: '100%' }}>
-      <Tabs size="small" activeKey={tab} onChange={(k) => setTab(k as 'local' | 'online')} items={[
-        { key: 'local', label: '本地' },
-        { key: 'online', label: '线上' },
+      <Tabs size="small" activeKey={tab} onChange={(k) => setTab(k as 'local' | 'online')} style={{ paddingLeft: 20 }} items={[
+        { key: 'local', label: '本地文件' },
+        { key: 'online', label: '线上知识' },
       ]} />
       {tab === 'online' ? (
-        <Empty description="线上资源 · 待接入" style={{ marginTop: 64 }} />
+        <Empty description="线上知识 · 待接入" style={{ marginTop: 64 }} />
       ) : (
         <>
           <div style={{ display: 'flex', alignItems: 'center', gap: 6, padding: '0 8px 6px' }}>
@@ -88,9 +141,16 @@ export default function DesktopExplorer({ cwd, home, onOpenFile, onDragFile, def
               <ArrowUpOutlined />
             </button>
           </div>
-          <div style={{ display: 'flex', gap: 8, padding: '0 8px 6px', fontSize: 12 }}>
-            <button aria-label="书签-主目录" onClick={() => void go(homePath)} style={{ border: 0, background: 'transparent', cursor: 'pointer' }}>主目录</button>
-            {cwd && <button aria-label="书签-当前项目" onClick={() => void go(cwd)} style={{ border: 0, background: 'transparent', cursor: 'pointer' }}>当前项目</button>}
+          <div style={{ padding: '0 20px 6px' }}>
+            <Segmented
+              size="small"
+              value={startRoot}
+              onChange={(v) => setStartRoot(v as StartRoot)}
+              options={[
+                { label: '工作目录', value: 'cwd' },
+                { label: '用户目录', value: 'home' },
+              ]}
+            />
           </div>
           {error ? (
             <Alert type="error" message={error} showIcon style={{ margin: 8 }} />

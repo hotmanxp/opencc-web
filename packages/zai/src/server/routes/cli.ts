@@ -47,29 +47,28 @@ async function installCli(req: Request, res: Response) {
   const spec = parsed.data.pkg.endsWith('@latest') ? parsed.data.pkg : `${parsed.data.pkg}@latest`;
 
   const stream = createSseStream(res);
+  const npmArgs = [
+    'install',
+    '-g',
+    spec,
+    '--registry=http://maven.paic.com.cn/repository/npm/',
+    '--loglevel=verbose',
+    '--foreground-scripts',
+  ];
   try {
-    // npm writes --verbose output to stderr, which would render in red on
-    // the LogPanel and look like an error. Merge stderr into stdout via sh
-    // so all process output reads as normal text. Real failures still
-    // surface via the spawner's exit code (→ 'exit' event) and the
-    // spawn-level 'error' event.
-    await spawn(
-      'sh',
-      [
-        '-c',
-        [
-          'npm',
-          'install',
-          '-g',
-          spec,
-          '--registry=http://maven.paic.com.cn/repository/npm/',
-          '--loglevel=verbose',
-          '--foreground-scripts',
-          '2>&1',
-        ].join(' '),
-      ],
-      (ev) => stream.send(ev),
-    );
+    if (process.platform === 'win32') {
+      // Windows 没有 sh。spawner 的 resolveSpawnCommand 会把 npm 包成
+      // `cmd /c npm ...`,直接 spawn 即可;stderr 作为 'stderr' SSE 事件
+      // 推给前端,不再用 `2>&1` 合并。
+      await spawn('npm', npmArgs, (ev) => stream.send(ev));
+    } else {
+      // npm writes --verbose output to stderr, which would render in red on
+      // the LogPanel and look like an error. Merge stderr into stdout via sh
+      // so all process output reads as normal text. Real failures still
+      // surface via the spawner's exit code (→ 'exit' event) and the
+      // spawn-level 'error' event.
+      await spawn('sh', ['-c', [...npmArgs, '2>&1'].join(' ')], (ev) => stream.send(ev));
+    }
   } catch (err) {
     stream.send({ type: 'error', message: `spawn failed: ${(err as Error).message}` });
   } finally {

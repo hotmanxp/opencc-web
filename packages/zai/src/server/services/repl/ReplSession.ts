@@ -1,6 +1,8 @@
-import { spawn, type ChildProcess } from 'node:child_process'
+import { spawn, execFile, type ChildProcess } from 'node:child_process'
+import { promisify } from 'node:util'
 import { randomUUID } from 'node:crypto'
 import { EventEmitter } from 'node:events'
+import { killChildTree } from '../../utils/killTree.js'
 import type { ExitResult, ReplEvent } from '../../../shared/repl.js'
 import {
   getReplHistoryService,
@@ -30,19 +32,61 @@ export class ReplSpawnError extends Error {
 // env 白名单：仅暴露进程无关的安全 key；防止父进程环境里的
 // API key / token 等敏感信息泄漏到子 shell。
 const ENV_ALLOWLIST = new Set(['PATH', 'HOME', 'USER', 'LANG', 'TZ'])
+const IS_WIN32 = process.platform === 'win32'
+if (IS_WIN32) {
+  // Windows 子进程(cmd.exe / Git Bash)缺了这些系统变量会直接起不来或
+  // 找不到临时目录;全部用大写形态,配合 filterEnv 的大小写归一比较。
+  for (const k of [
+    'PATH', 'SYSTEMROOT', 'WINDIR', 'COMSPEC', 'PATHEXT',
+    'USERPROFILE', 'HOMEDRIVE', 'HOMEPATH', 'TEMP', 'TMP',
+    'APPDATA', 'LOCALAPPDATA',
+  ]) ENV_ALLOWLIST.add(k)
+}
 for (const k of Object.keys(process.env)) {
-  if (k.startsWith('LC_')) ENV_ALLOWLIST.add(k)
+  if (k.startsWith('LC_')) ENV_ALLOWLIST.add(k.toUpperCase())
 }
 
 function filterEnv(): NodeJS.ProcessEnv {
   const env: NodeJS.ProcessEnv = {}
   for (const [k, v] of Object.entries(process.env)) {
-    if (ENV_ALLOWLIST.has(k)) env[k] = v
+    // Windows 的 process.env 大小写不固定(常见 'Path'),按大写比较才能命中。
+    const key = IS_WIN32 ? k.toUpperCase() : k
+    if (ENV_ALLOWLIST.has(key) || key.startsWith('LC_')) env[k] = v
+  }
+  if (IS_WIN32) {
+    // Git Bash 需要 HOME;Windows 上只有 USERPROFILE,补一个等价变量。
+    const userProfile = env.USERPROFILE ?? env.UserProfile
+    if (userProfile && !('HOME' in env)) env.HOME = userProfile
   }
   // 子进程经 pipe 运行、没有 TTY, chalk / supports-color 默认会判定"无色"而抑制
   // ANSI 转义码。强制开启 16 色, 让前端 ANSI 解析器有内容可渲染 —— 与真实终端一致。
   env.FORCE_COLOR = '1'
   return env
+}
+
+/**
+ * win32 没有 sh。优先 Git Bash(UI 语义就是 bash 命令);`where bash` 可能
+ * 同时命中 WSL 的 bash.exe(那是 Linux 文件系统视角,cwd 会错乱),所以只认
+ * 安装路径含 \Git\ 的条目;找不到退 cmd.exe(原生语义,用户至少能跑原生命令)。
+ */
+let windowsShellCache: { cmd: string; prefixArgs: string[] } | null = null
+async function resolveWindowsShell(): Promise<{ cmd: string; prefixArgs: string[] }> {
+  if (windowsShellCache) return windowsShellCache
+  try {
+    const { stdout } = await promisify(execFile)('where', ['bash'], { timeout: 5000 })
+    const gitBash = stdout
+      .split(/\r?\n/)
+      .map((l) => l.trim())
+      .find((l) => /[\\/]git[\\/]/i.test(l) && /bash(?:\.exe)?$/i.test(l))
+    if (gitBash) {
+      windowsShellCache = { cmd: gitBash, prefixArgs: ['-c'] }
+      return windowsShellCache
+    }
+  } catch {
+    /* where 失败按无 bash 处理 */
+  }
+  windowsShellCache = { cmd: 'cmd.exe', prefixArgs: ['/d', '/s', '/c'] }
+  return windowsShellCache
 }
 
 export class ReplSession extends EventEmitter {
@@ -97,7 +141,11 @@ export class ReplSession extends EventEmitter {
 
     let child: ChildProcess
     try {
-      child = spawn('sh', ['-c', command], { cwd: targetCwd, env: filterEnv() })
+      // win32 没有 sh:见 resolveWindowsShell(Git Bash 优先,退 cmd.exe)
+      const shell = IS_WIN32
+        ? await resolveWindowsShell()
+        : { cmd: 'sh', prefixArgs: ['-c'] as string[] }
+      child = spawn(shell.cmd, [...shell.prefixArgs, command], { cwd: targetCwd, env: filterEnv() })
     } catch (err) {
       throw new ReplSpawnError(err)
     }
@@ -141,20 +189,18 @@ export class ReplSession extends EventEmitter {
   }
 
   /**
-   * SIGTERM 当前 child；5s 后升级 SIGKILL。无 child 时为 no-op。
+   * 终止当前 child；5s 后升级强杀。无 child 时为 no-op。
+   * win32 走 taskkill /T /F —— child 可能是 cmd/bash 包装层,只杀它会
+   * 留下真正在跑命令的孙进程。
    */
   abort(): void {
     const child = this.child
     if (!child) return
-    try {
-      child.kill('SIGTERM')
-    } catch {
-      /* 已退出 */
-    }
+    killChildTree(child)
     if (this.killTimer) clearTimeout(this.killTimer)
     this.killTimer = setTimeout(() => {
       if (this.child && this.child.exitCode === null && this.child.signalCode === null) {
-        try { this.child.kill('SIGKILL') } catch { /* */ }
+        killChildTree(this.child, { force: true })
       }
       this.killTimer = null
     }, 5_000)
@@ -165,7 +211,7 @@ export class ReplSession extends EventEmitter {
    */
   dispose(): void {
     if (this.child) {
-      try { this.child.kill('SIGKILL') } catch { /* */ }
+      killChildTree(this.child, { force: true })
       this.child = null
     }
     if (this.killTimer) {

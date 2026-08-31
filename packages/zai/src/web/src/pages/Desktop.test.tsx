@@ -165,4 +165,60 @@ describe('Desktop', () => {
     expect(img.tagName.toLowerCase()).toBe('img');
     expect(img.getAttribute('src') ?? '').toMatch(/^data:image\/png;base64,/);
   });
+
+  test('上传壁纸:PUT /desktop/wallpaper 存服务端文件,localStorage 只保存 URL', async () => {
+    fetchMock.mockImplementation(async (url: string, init?: RequestInit) => {
+      if (url.includes('/agent/settings')) return new Response(settings(), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      if (url.includes('/desktop/fs/list')) {
+        return new Response(JSON.stringify({ ok: true, path: '/Users/t', home: '/Users/t', parent: null, entries: [] }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      if (url.includes('/desktop/wallpaper') && (init?.method === 'PUT' || !init?.method)) {
+        const body = JSON.parse(String(init?.body)) as { dataUrl: string };
+        expect(body.dataUrl).toMatch(/^data:image\/png;base64,/);
+        return new Response(JSON.stringify({ ok: true, id: 'wabc', url: '/api/desktop/wallpaper/wabc' }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+      }
+      return new Response(JSON.stringify({ ok: true }), { status: 200, headers: { 'Content-Type': 'application/json' } });
+    });
+    renderDesktop();
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    // antd Popover 懒渲染:先打开壁纸面板,上传控件才在 DOM 里。
+    // 上传控件必须是原生 input(WallpaperUploadField 头注解释为何不能用 antd Input),
+    // 这里用它的 data-testid 精确选取,避开 AgentInputBox 的附件 file input。
+    fireEvent.click(screen.getByTestId('dock-壁纸设置'));
+    const input = await waitFor(() => {
+      const el = document.querySelector('[data-testid="wallpaper-file-input"]') as HTMLInputElement | null;
+      expect(el).not.toBeNull();
+      return el!;
+    });
+    expect(input.tagName.toLowerCase()).toBe('input');
+    // 防回归:不能包在 antd Input(rc-input)里 —— rc-input 会把
+    // `C:\fakepath\x.png` 作为 value 回写 DOM,React commitUpdate 抛
+    // InvalidStateError 并卸载整棵桌面树。
+    expect(input.classList.contains('ant-input')).toBe(false);
+    const png = new File([new Uint8Array([0x89, 0x50, 0x4e, 0x47])], 'wp.png', { type: 'image/png' });
+    // happy-dom 下 fireEvent.change({target:{files}}) 不会真正落到 input.files
+    // (FileList 是只读 getter),用 defineProperty 注入再派发 change。
+    Object.defineProperty(input, 'files', { value: [png], configurable: true });
+    await act(async () => {
+      fireEvent.change(input);
+      await new Promise((r) => setTimeout(r, 50));
+    });
+    // PUT 命中 + 壁纸以 URL(而非 dataURL)持久化
+    const puts = fetchMock.mock.calls.filter(([u, init]) => String(u).includes('/desktop/wallpaper') && (init as RequestInit | undefined)?.method === 'PUT');
+    expect(puts.length).toBe(1);
+    const stored = localStorage.getItem(LS_KEYS.wallpaper);
+    expect(stored).toBe('"/api/desktop/wallpaper/wabc"');
+    // 桌面树仍在(旧 bug:合成事件里给 file input 赋 value 抛 InvalidStateError → 整树卸载)
+    expect(screen.getByTestId('desktop-root')).not.toBeNull();
+    expect(screen.getByTestId('desktop-window-agent')).not.toBeNull();
+    // 根节点 background 引用服务端 URL
+    expect(screen.getByTestId('desktop-root').getAttribute('style')).toContain('/api/desktop/wallpaper/wabc');
+  });
+
+  test('历史 dataURL 壁纸迁移:挂载后重置为默认预设,不再存 base64', async () => {
+    localStorage.setItem(LS_KEYS.wallpaper, JSON.stringify('data:image/png;base64,AAAA'));
+    renderDesktop();
+    await act(async () => { await new Promise((r) => setTimeout(r, 0)); });
+    expect(JSON.parse(localStorage.getItem(LS_KEYS.wallpaper) ?? '""')).toBe('preset:aurora');
+  });
 });

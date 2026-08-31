@@ -18,6 +18,7 @@
 import { describe, expect, it } from 'vitest'
 import {
   SubagentRegistry,
+  NO_START_CAPABILITIES,
   type SubagentProvider,
   type SubagentRequest,
   type SubagentContext,
@@ -30,7 +31,7 @@ function makeFakeProvider(name: string, description: string): SubagentProvider {
     name,
     description,
     inheritsParentContext: false,
-    capabilities: { noStartCapabilities: true } as const,
+    capabilities: NO_START_CAPABILITIES,
     start: (_req: SubagentRequest, _ctx: SubagentContext): Promise<SubagentRun> => {
       throw new Error(`fake provider '${name}' start() not implemented in test`)
     },

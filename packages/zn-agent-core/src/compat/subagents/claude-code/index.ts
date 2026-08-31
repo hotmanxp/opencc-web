@@ -1,5 +1,7 @@
 import {
   SubagentRegistry,
+  NO_START_CAPABILITIES,
+  type SubagentCapabilities,
   type SubagentProvider,
   type SubagentRequest,
   type SubagentContext,
@@ -18,7 +20,9 @@ import { startClaudeCodeRun } from './run.js'
  * Every accepted run spawns a fresh `claude --print` process in the
  * delegating session's cwd. The provider inherits NO parent conversation
  * history (`inheritsParentContext = false`) and advertises no optional
- * start-time capabilities (`noStartCapabilities = true`).
+ * start-time capabilities (`NO_START_CAPABILITIES` — dsh 0.1.2-alpha.2
+ * alignment: the five flags stay false, matching dsh's own claude-code
+ * provider, `subagent-claude-code/src/index.ts:73-75`).
  *
  * Product selection and background execution are *not* model arguments;
  * routing to this provider happens by name in `AgentTool(subagent_type)`,
@@ -35,7 +39,7 @@ export class ClaudeCodeProvider implements SubagentProvider {
   readonly description =
     "Delegate a one-shot task to a fresh Claude CLI session (independent process; no parent context). Use when you want a separate Claude context with the CLI's native tools for a standalone task."
   readonly inheritsParentContext = false
-  readonly capabilities = { noStartCapabilities: true } as const
+  readonly capabilities: SubagentCapabilities = NO_START_CAPABILITIES
 
   constructor(private readonly config: ClaudeCodeConfig) {}
 
@@ -46,6 +50,9 @@ export class ClaudeCodeProvider implements SubagentProvider {
       args: this.config.args,
       outputFormat: this.config.outputFormat,
       permissionMode: this.config.permissionMode,
+      // dsh parity: config.model is the deployment default; request.model
+      // (per-call) wins.
+      model: req.model ?? this.config.model,
       env: this.config.env,
     })
   }
@@ -84,5 +91,9 @@ export {
 export {
   resolveFinalAnswer,
   stopReasonFromClaudeResult,
+  claudeResultFailureCategory,
+  claudeFailureDiagnostic,
+  type ClaudeResultFrame,
+  type ResolvedClaudeAnswer,
 } from './result.js'
 export { failClaudeCode } from './invariant.js'

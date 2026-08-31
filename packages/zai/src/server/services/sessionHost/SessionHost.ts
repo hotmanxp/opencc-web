@@ -24,6 +24,7 @@ import type {
 } from '@zn-ai/zn-agent-core'
 import { translateSdkToRuntime } from '@zn-ai/zn-agent-core'
 import { spawnSessionHost } from './cliSpawn.js'
+import { killChildTree } from '../../utils/killTree.js'
 import { ControlRequestRegistry } from './controlRequest.js'
 import { parseNdjson } from './ndjsonStream.js'
 import type {
@@ -250,7 +251,9 @@ export class SessionHost {
     const child = this.child
     this.state = 'killed'
     if (child && child.exitCode === null) {
-      child.kill('SIGKILL')
+      // win32 下 child 可能是 `cmd /c opencc...` 包装层,child.kill 只杀
+      // cmd.exe、opencc 孙进程会存活 —— 必须走进程树强杀。
+      killChildTree(child, { force: true })
     }
   }
 

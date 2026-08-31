@@ -26,3 +26,10 @@ export interface DesktopOpen {
   ok: boolean
   error?: string
 }
+/** PUT /desktop/wallpaper 响应:成功时返回可长期引用的 url(内容随 id 不可变) */
+export interface DesktopWallpaperPut {
+  ok: boolean
+  id?: string
+  url?: string
+  error?: string
+}

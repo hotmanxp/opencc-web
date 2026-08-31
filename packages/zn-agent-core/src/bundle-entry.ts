@@ -189,6 +189,10 @@ export type * from './opencc-src/server/index.js'
 // 可在此重新导出 apply。
 export * from './compat/subagents/index.js'
 export { apply as applyClaudeCodeProvider } from './compat/subagents/claude-code/index.js'
+// zai patch (2026-08-31): dsh (deepseek-harness) provider — apply registers
+// only when `settings.subagents.dsh.enabled === true` (returns the
+// unregister disposer, or undefined when disabled).
+export { apply as applyDshProvider } from './compat/subagents/dsh/index.js'
 
 // zai patch (2026-08-30, plan P0): createReplSession value export from main
 // entry. Bundle consumers can import directly.

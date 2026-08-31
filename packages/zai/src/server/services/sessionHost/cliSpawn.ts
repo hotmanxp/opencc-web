@@ -28,6 +28,7 @@
  */
 
 import { spawn, type ChildProcess } from 'node:child_process'
+import { resolveSpawnCommand } from '../spawner.js'
 import type { SpawnRequest } from './types.js'
 
 export interface SessionHostHandle {
@@ -76,7 +77,12 @@ export function buildCliArgs(opts: SpawnRequest): string[] {
  */
 export function spawnSessionHost(opts: SpawnRequest): SessionHostHandle {
   const args = buildCliArgs(opts)
-  const child = spawn('opencc', args, {
+  // win32 上 opencc 是 npm 装的 .cmd shim,原生 spawn 走 CreateProcess 会
+  // ENOENT —— resolveSpawnCommand 统一包成 `cmd /c ...`(与 spawner 同款)。
+  // 注意包装后 child 是 cmd.exe,杀进程须走 killChildTree 连树杀,见
+  // SessionHost.kill()。
+  const { command, args: spawnArgs } = resolveSpawnCommand('opencc', args)
+  const child = spawn(command, spawnArgs, {
     cwd: opts.cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
     env: {

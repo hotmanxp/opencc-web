@@ -2,6 +2,7 @@ import { describe, it, expect } from 'vitest'
 import {
   SubagentRegistry,
   SubagentError,
+  NO_START_CAPABILITIES,
   type SubagentEvent,
   type SubagentProvider,
   type SubagentRequest,
@@ -24,7 +25,7 @@ function makeRecordingProvider(name: string): SubagentProvider & {
   const proxy = {
     name,
     inheritsParentContext: false,
-    capabilities: { noStartCapabilities: true } as const,
+    capabilities: NO_START_CAPABILITIES,
     lastRequest: null as SubagentRequest | null,
     lastContext: null as SubagentContext | null,
     async start(req: SubagentRequest, ctx: SubagentContext): Promise<SubagentRun> {

@@ -5,11 +5,13 @@
 export {
   SubagentRegistry,
   SubagentError,
+  NO_START_CAPABILITIES,
   getSubagentRegistry,
   _resetSubagentRegistryForTests,
 } from './registry.js'
 export type {
   SubagentProvider,
+  SubagentCapabilities,
   SubagentRequest,
   SubagentContext,
   SubagentRun,

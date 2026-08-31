@@ -1,5 +1,6 @@
 import { execFile } from 'node:child_process';
 import { promisify } from 'node:util';
+import path from 'node:path';
 import type { SystemInfo, CliStatus } from '../../shared/types.js';
 import { resolveSpawnCommand } from './spawner.js';
 import {
@@ -20,7 +21,15 @@ const execFileAsync = promisify(execFile);
 // instant — the user only pays the cold-cache cost at most once per
 // TTL window, and the cache survives server restarts.
 const LATEST_TTL_MS = 24 * 60 * 60 * 1000;
+// null 结果（registry 查不到 / 命令失败）只短期缓存：Windows 上
+// `cmd /c npm view` 冷启动经常超过 5s，若把这种超时 null 按 24h 缓存，
+// 最新版本会整天空白。404 类真·查不到也会以 5 分钟节奏重试，代价可接受。
+const MISS_TTL_MS = 5 * 60 * 1000;
 const latestCache = new Map<string, { version: string | null; at: number }>();
+
+const IS_WIN32 = process.platform === 'win32';
+// Windows 下所有命令都经 cmd.exe 包装 + npm 冷启动，超时给宽裕一些。
+const CMD_TIMEOUT_MS = IS_WIN32 ? 15_000 : 5_000;
 
 // Load cache from disk on module init (fire-and-forget — errors are
 // swallowed because an empty cache is still a valid starting state).
@@ -40,7 +49,7 @@ async function run(cmd: string, args: string[]): Promise<string> {
   // npm 在 Windows 上是 .cmd shim,execFile 不能直接执行(ENOENT)——
   // resolveSpawnCommand 在 win32 下改写为 cmd /c。
   const { command, args: resolvedArgs } = resolveSpawnCommand(cmd, args);
-  const { stdout } = await execFileAsync(command, resolvedArgs, { timeout: 5000 });
+  const { stdout } = await execFileAsync(command, resolvedArgs, { timeout: CMD_TIMEOUT_MS });
   return stdout.trim();
 }
 
@@ -52,6 +61,24 @@ async function safeRun(cmd: string, args: string[]): Promise<string | null> {
   }
 }
 
+// Run a command merging stdout+stderr without a shell (Windows 没有 sh,
+// 不能再走 `sh -c '... 2>&1'`)。非零退出码时 execFile 会 throw,但 err 上
+// 仍带着已产生的 stdout/stderr,一并返回——很多 CLI 的 --version 写到
+// stderr 或以非零码退出,输出仍然可用。
+async function runMergeStreams(cmd: string, args: string[]): Promise<string | null> {
+  const collect = (o: { stdout?: string | Buffer; stderr?: string | Buffer }) =>
+    `${o.stdout ?? ''}\n${o.stderr ?? ''}`
+      .toString()
+      .trim();
+  try {
+    const { command, args: resolvedArgs } = resolveSpawnCommand(cmd, args);
+    const out = await execFileAsync(command, resolvedArgs, { timeout: CMD_TIMEOUT_MS });
+    return collect(out) || null;
+  } catch (err) {
+    return collect(err as { stdout?: string | Buffer; stderr?: string | Buffer }) || null;
+  }
+}
+
 async function getNpmConfig(key: string): Promise<string> {
   try {
     const { command, args } = resolveSpawnCommand('npm', [
@@ -60,14 +87,22 @@ async function getNpmConfig(key: string): Promise<string> {
       key,
       '--workspaces=false',
     ]);
-    const { stdout } = await execFileAsync(command, args, { timeout: 5000 });
+    const { stdout } = await execFileAsync(command, args, { timeout: CMD_TIMEOUT_MS });
     return stdout.trim();
   } catch {
     return '';
   }
 }
 
+// `which` 是 POSIX 命令,Windows 的 cmd 里没有(对应的是 `where`,且会按
+// PATHEXT 解析出 codegraph.cmd 这类 shim)。多行输出取第一行。
 async function which(cmd: string): Promise<string | null> {
+  if (IS_WIN32) {
+    const out = await safeRun('where', [cmd]);
+    if (!out) return null;
+    const first = out.split(/\r?\n/)[0]?.trim();
+    return first || null;
+  }
   return safeRun('which', [cmd]);
 }
 
@@ -78,8 +113,13 @@ export async function getSystemInfo(): Promise<SystemInfo> {
   const npmVersion = await safeRun('npm', ['--version']);
   const npmPrefix = await getNpmConfig('prefix');
   const npmRegistry = await getNpmConfig('registry');
-  const npmBin = npmPrefix ? `${npmPrefix}/bin` : '';
-  const npmBinInPath = npmBin ? process.env.PATH?.split(':').includes(npmBin) ?? false : false;
+  // Windows 上 npm 全局 bin 就是 prefix 本身(装的是 .cmd shim),
+  // POSIX 下才在 <prefix>/bin;PATH 分隔符也要用平台对应的
+  // (win32 是 ';',按 ':' 切会永远匹配不上)。
+  const npmBin = npmPrefix ? (IS_WIN32 ? npmPrefix : `${npmPrefix}/bin`) : '';
+  const npmBinInPath = npmBin
+    ? process.env.PATH?.split(path.delimiter).includes(npmBin) ?? false
+    : false;
 
   return {
     nodeVersion,
@@ -164,9 +204,10 @@ async function readVersionFromBin(bin: string): Promise<string | null> {
   // --version writes to either stdout or stderr depending on the CLI;
   // merge them so we don't miss whichever side the binary chose. Try
   // common flags in order; stop at the first one whose output contains
-  // an X.Y.Z-shaped token.
+  // an X.Y.Z-shaped token. 不用 `sh -c '... 2>&1'`——Windows 没有 sh,
+  // 改走 runMergeStreams 直接 spawn 并合并两路输出。
   for (const flag of ['--version', '-v', '-V']) {
-    const out = await safeRun('sh', ['-c', `${bin} ${flag} 2>&1`]);
+    const out = await runMergeStreams(bin, [flag]);
     if (!out) continue;
     const cleaned = out
       .replace(/\x1b\[[0-9;?]*[ -/]*[@-~]/g, '') // ANSI CSI
@@ -201,15 +242,19 @@ async function getLatestVersion(pkg: string, registry: string, forceRefresh = fa
   // `forceRefresh`（用户在 /tools 点 "刷新最新版本"）会跳过 TTL 直接
   // 重新查 npm view 并把新值写回内存 + 磁盘 manifest。
   const cached = latestCache.get(pkg);
-  if (!forceRefresh && cached && Date.now() - cached.at < LATEST_TTL_MS) {
+  // null 结果按 MISS_TTL_MS 过期(见常量注释),成功结果按 24h。
+  const ttl = cached && cached.version === null ? MISS_TTL_MS : LATEST_TTL_MS;
+  if (!forceRefresh && cached && Date.now() - cached.at < ttl) {
     return cached.version;
   }
-  const version = await safeRun('npm', ['view', pkg, 'version', '--registry', registry, '--workspaces=false', '--no-progress']);
+  // registry 取不到时不传 --registry(空串会让 npm 直接报错),退回它自己的默认配置。
+  const viewArgs = ['view', pkg, 'version', '--workspaces=false', '--no-progress'];
+  if (registry) viewArgs.splice(3, 0, '--registry', registry);
+  const version = await safeRun('npm', viewArgs);
   const at = Date.now();
   latestCache.set(pkg, { version, at });
-  // Persist to disk so the cache survives server restarts. Even null
-  // results (failed npm view, package not on registry) are cached to
-  // avoid re-running the expensive query on every page load.
+  // Persist to disk so the cache survives server restarts. null 结果也
+  // 持久化,但读取端按 MISS_TTL_MS 判断过期,不会把超时 null 锁死 24h。
   updateCachedVersion(pkg, version).catch(() => {});
   return version;
 }

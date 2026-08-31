@@ -1,17 +1,15 @@
 /**
  * Minimal naming subagent provider registry.
  *
- * This is *not* a full capability seam (no `SubagentCapabilities`, no
- * `descriptors`, no continuable children). It's just enough surface for
- * AgentTool to route `subagent_type='codex'` to the codex provider; a future
- * PR can migrate the existing fork / teammate / GENERAL_PURPOSE branches to
- * this registry without touching the consumer-side call sites.
+ * Capability flags now mirror the dsh `SubagentCapabilities` shape (5 flags,
+ * 2026-08-31 alignment), but this stays a naming registry: no `descriptors`,
+ * no continuable children. It is just enough surface for AgentTool to route
+ * `subagent_type='claude-code' | 'dsh'` to a registered provider.
  *
- * Why minimal now: zai today has hardcoded branches in AgentTool.tsx with
+ * Why minimal still: zai has hardcoded branches in AgentTool.tsx with
  * deep invariants (`useExactTools`, `buildForkedMessages`, `permissionMode:
- * 'bubble'`, etc.). A full DSH-style capability seam introduced in one PR
- * risks regressing those paths. Iterating in two steps keeps each PR scoped
- * to one new provider and one migration.
+ * 'bubble'`, etc.). A full DSH-style capability seam (prepareContinuable,
+ * scoped lifecycles) requires the dsh kernel track and is out of scope here.
  */
 
 export interface SubagentRequest {
@@ -58,12 +56,19 @@ export interface SubagentEvent {
   readonly raw?: unknown
 }
 
-export type SubagentStopReason = 'completed' | 'error' | 'aborted' | 'max-tokens'
+export type SubagentStopReason =
+  | 'completed'
+  | 'error'
+  | 'aborted'
+  | 'max-tokens'
+  | 'refusal'
 
 /**
  * Terminal result of a one-shot delegation. Mirrors deepseek's
- * `SubagentResult` minimally — the field list stays small so consumers
+ * `SubagentResult` — the field list stays small so consumers
  * don't bind to provider-specific stop-reason vocabularies.
+ * `refusal` + `diagnostic` align zai with dsh 0.1.2-alpha.2
+ * (`subagent/src/types.ts:208-253`).
  */
 export interface SubagentResult {
   /** Final assistant text content the child produced. Empty on `error`/`aborted`. */
@@ -72,6 +77,11 @@ export interface SubagentResult {
   readonly stopReason: SubagentStopReason
   /** Raw error message when `stopReason !== 'completed'`. */
   readonly errorMessage?: string
+  /**
+   * Provider-safe detail for non-completed results (dsh parity: fixed
+   * template facts only — never tool inputs, file contents, or credentials).
+   */
+  readonly diagnostic?: string
 }
 
 /**
@@ -107,10 +117,32 @@ export interface SubagentRun {
 }
 
 /**
- * Static descriptor for a subagent provider. The shape stays small on
- * purpose — `capabilities` is currently only `noStartCapabilities` (a
- * placeholder for the capability bits we may add later) so consumers
- * don't import deepseek-specific vocabulary until we have to.
+ * Start-time capability flags. Aligns with dsh 0.1.2-alpha.2
+ * `SubagentCapabilities` (`subagent/src/types.ts:86-92`): five required
+ * booleans. zai keeps `noStartCapabilities` on each provider instance for
+ * backward compat via {@link NO_START_CAPABILITIES}.
+ */
+export interface SubagentCapabilities {
+  readonly agentOptions: boolean
+  readonly outputSchema: boolean
+  readonly depthLimit: boolean
+  readonly toolFilter: boolean
+  readonly persona: boolean
+}
+
+/** All-false capabilities — the dsh `NO_START_CAPABILITIES` equivalent. */
+export const NO_START_CAPABILITIES: SubagentCapabilities = Object.freeze({
+  agentOptions: false,
+  outputSchema: false,
+  depthLimit: false,
+  toolFilter: false,
+  persona: false,
+})
+
+/**
+ * Static descriptor for a subagent provider. `capabilities` widened to the
+ * dsh 5-flag shape (2026-08-31); `agentRouteDefaults` mirrors dsh's optional
+ * provider-owned route (`types.ts:300-346`) and requires `agentOptions`.
  */
 export interface SubagentProvider {
   /** Unique registry name (e.g. `'codex'`); stable across releases. */
@@ -130,14 +162,14 @@ export interface SubagentProvider {
    * registry does not enforce.
    */
   readonly inheritsParentContext: boolean
+  /** Start-time capability flags (dsh shape). */
+  readonly capabilities: SubagentCapabilities
   /**
-   * Capability shape. Today only `{ noStartCapabilities: boolean }` —
-   * `true` for providers that don't accept `outputSchema` / `depthLimit` /
-   * `toolFilter` / `persona` overrides (codex is one). A future PR may
-   * widen this to deepseek's `SubagentCapabilities` once fork/teammate
-   * migrate to this registry.
+   * Optional static provider-owned provider/model route (dsh parity:
+   * requires `capabilities.agentOptions`). The dsh provider advertises it;
+   * claude-code / codex omit it.
    */
-  readonly capabilities: { readonly noStartCapabilities: boolean }
+  readonly agentRouteDefaults?: Readonly<{ provider: string; model: string }>
   /**
    * Establish a published one-shot child and return its handle after
    * publication. Setup is owned by the provider; a rejection implies

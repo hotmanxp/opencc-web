@@ -132,6 +132,21 @@ let _client: Anthropic | null = null
 let _clientKey: string | null = null
 
 /**
+ * Non-cryptographic fingerprint for credential material threaded into the
+ * client cache key. Keeps the plaintext apiKey/baseURL out of the key string
+ * (debug logging touches cache keys in several places) while still changing
+ * whenever the resolved credential changes — which is what the hot-reload
+ * path depends on.
+ */
+function credentialFingerprint(value: string): string {
+  let h = 0
+  for (let i = 0; i < value.length; i++) {
+    h = (h * 31 + value.charCodeAt(i)) | 0
+  }
+  return h.toString(36)
+}
+
+/**
  * Pick the right provider profile (if any) for the requested model.
  * Returns { baseURL, apiKey } from ~/.zai.json's providerProfiles when the
  * model is hosted by a non-Anthropic profile (e.g. zhiniao-* on the Wizard AI
@@ -191,16 +206,25 @@ async function getAnthropicClientForModel(
   model?: string,
   preferredProfileId?: string | null,
 ): Promise<{ client: Anthropic; profile?: ClaudeProviderProfile }> {
-  // Reuse cached client when the model resolves to the same provider.
-  // Cache key includes providerId so two profiles hosting the same
+  // Resolve BEFORE the cache check so the cache key can carry a credential
+  // fingerprint. The SDK client bakes authToken in at construction and is
+  // effectively immutable afterwards; a key of just providerId::model would
+  // return the stale client — with the OLD apiKey — after the user edits
+  // ~/.zai/settings.json (the settings fs.watch hot-reload refreshes the
+  // env, but the cached client never re-reads it). Including apiKey + baseURL
+  // in the key makes any config change rebuild the client on the next call,
+  // while keeping the reuse behavior for unchanged config.
+  //
+  // Cache key still includes providerId so two profiles hosting the same
   // model name (different baseURL / apiKey / extraParams) don't share
   // the cached client — calling getAnthropicClientForModel(M3, 'a')
   // then getAnthropicClientForModel(M3, 'b') correctly produces two
   // distinct clients, instead of reusing the first one.
-  const cacheKey = `${preferredProfileId ?? '_'}::${model ?? '__default__'}`
-  if (_client && _clientKey === cacheKey) return { client: _client }
-
   const { baseURL, apiKey, profile } = resolveProviderForModel(model, preferredProfileId)
+  const cacheKey =
+    `${preferredProfileId ?? '_'}::${model ?? '__default__'}` +
+    `::${credentialFingerprint(apiKey)}::${credentialFingerprint(baseURL)}`
+  if (_client && _clientKey === cacheKey) return { client: _client }
 
   if (!apiKey) throw new Error('API key not found for selected model')
   if (!baseURL) throw new Error('Base URL not found for selected model')

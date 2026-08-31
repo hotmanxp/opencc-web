@@ -1,5 +1,7 @@
 import {
   SubagentRegistry,
+  NO_START_CAPABILITIES,
+  type SubagentCapabilities,
   type SubagentProvider,
   type SubagentRequest,
   type SubagentContext,
@@ -16,8 +18,9 @@ import { CODEX_PROTOCOL_VERSION } from './invariant.js'
  * the delegating session's cwd and publishes only after an ephemeral
  * thread exists. The provider inherits NO parent conversation history
  * (`inheritsParentContext = false`) and advertises no optional start-time
- * capabilities (`noStartCapabilities = true`) — child tools, persona,
- * depth policy, and structured output are not configurable here.
+ * capabilities (`NO_START_CAPABILITIES` — the dsh 5-flag shape, all false)
+ * — child tools, persona, depth policy, and structured output are not
+ * configurable here.
  *
  * Product selection and background execution are *not* model arguments;
  * routing to this provider happens by name in `AgentTool(subagent_type)`,
@@ -34,7 +37,7 @@ export class CodexProvider implements SubagentProvider {
   readonly description =
     "Delegate a one-shot task to a fresh Codex CLI session (independent process; no parent context). Use when you want Codex as the engine for a standalone research or implementation task."
   readonly inheritsParentContext = false
-  readonly capabilities = { noStartCapabilities: true } as const
+  readonly capabilities: SubagentCapabilities = NO_START_CAPABILITIES
 
   constructor(private readonly config: CodexConfig) {}
 

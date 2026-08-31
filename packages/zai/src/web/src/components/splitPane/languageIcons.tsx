@@ -485,10 +485,10 @@ export function OtherIcon(p: IconProps = {}) {
   const { size = 14, ...rest } = p;
   return (
     <svg {...def(size)} {...rest}>
-      <rect width="16" height="16" rx="3" fill="rgba(255,255,255,0.18)" stroke="rgba(255,255,255,0.4)" />
-      <line x1="5" y1="6" x2="11" y2="6" stroke="rgba(255,255,255,0.7)" strokeWidth="0.7" />
-      <line x1="5" y1="8.5" x2="11" y2="8.5" stroke="rgba(255,255,255,0.7)" strokeWidth="0.7" />
-      <line x1="5" y1="11" x2="9" y2="11" stroke="rgba(255,255,255,0.7)" strokeWidth="0.7" />
+      <rect width="16" height="16" rx="3" style={{ fill: 'var(--file-icon-neutral-bg, rgba(255,255,255,0.18))', stroke: 'var(--file-icon-neutral-stroke, rgba(255,255,255,0.4))' }} />
+      <line x1="5" y1="6" x2="11" y2="6" style={{ stroke: 'var(--file-icon-neutral-line, rgba(255,255,255,0.7))' }} strokeWidth="0.7" />
+      <line x1="5" y1="8.5" x2="11" y2="8.5" style={{ stroke: 'var(--file-icon-neutral-line, rgba(255,255,255,0.7))' }} strokeWidth="0.7" />
+      <line x1="5" y1="11" x2="9" y2="11" style={{ stroke: 'var(--file-icon-neutral-line, rgba(255,255,255,0.7))' }} strokeWidth="0.7" />
     </svg>
   );
 }
@@ -498,12 +498,14 @@ export function OtherIcon(p: IconProps = {}) {
 export function DirIconSvg({ open, size = 14, ...rest }: { open?: boolean; size?: number } & SVGProps<SVGSVGElement>) {
   return (
     <svg {...def(size)} {...rest}>
+      {/* 路径占满 16x16 viewBox (原 11x9.5) — 跟其他文件图标 (色块全填) 视觉权重对齐,
+          不然 DesktopExplorer 大尺寸下文件夹明显比文件图标小一圈. */}
       <path
-        d="M2.5 4.5 Q2.5 3.5 3.5 3.5 H6.5 L8 5 H12.5 Q13.5 5 13.5 6 V12 Q13.5 13 12.5 13 H3.5 Q2.5 13 2.5 12 Z"
+        d="M0.5 4.5 Q0.5 3.5 1.5 3.5 H6 L8 5 H14.5 Q15.5 5 15.5 6 V14.5 Q15.5 15.5 14.5 15.5 H1.5 Q0.5 15.5 0.5 14.5 Z"
         fill={open ? '#fbbf24' : '#facc15'}
       />
-      <path d="M2.5 4.5 H12.5 Q13.5 5 13.5 6 V7 H2.5 Z" fill="rgba(0,0,0,0.18)" />
-      {open && <path d="M2.5 4.5 H13.5 V7 H2.5 Z" fill="rgba(255,255,255,0.15)" />}
+      <path d="M0.5 4.5 H14.5 Q15.5 5 15.5 6 V7 H0.5 Z" fill="rgba(0,0,0,0.18)" />
+      {open && <path d="M0.5 4.5 H15.5 V7 H0.5 Z" fill="rgba(255,255,255,0.15)" />}
     </svg>
   );
 }

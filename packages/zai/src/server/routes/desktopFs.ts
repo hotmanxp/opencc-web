@@ -28,7 +28,7 @@ const TEXT_EXTS = new Set([
   '.cjs', '.css', '.scss', '.less', '.xml', '.sh', '.bash', '.zsh', '.py',
   '.rs', '.go', '.java', '.kt', '.sql', '.graphql', '.log', '.env',
 ]);
-const MAX_FILE_BYTES = 2 * 1024 * 1024;
+const MAX_FILE_BYTES = 5 * 1024 * 1024;
 
 function errBody(message: string): DesktopFsList | DesktopFsFile | DesktopOpen {
   return { ok: false, error: message };

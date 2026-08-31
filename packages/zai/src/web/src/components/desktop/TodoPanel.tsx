@@ -30,7 +30,7 @@ export default function TodoPanel({ todos, onAdd, onToggle, onDelete, onClose }:
         right: 16,
         width: 260,
         zIndex: 80,
-        background: 'rgba(28,28,38,.92)',
+        background: 'var(--bg-elevated-92, rgba(28,28,38,.92))',
         backdropFilter: 'blur(10px)',
         border: '1px solid var(--border-subtle, rgba(128,128,128,.3))',
         borderRadius: 12,

@@ -167,4 +167,45 @@ describe('modelCaller → client routing', () => {
     expect(anthropicCalls[0].authToken).toBe('env-fallback-tok')
     expect(openaiClientCalls.length).toBe(0)
   })
+
+  it('same model + updated credential → rebuilds client instead of reusing stale one', async () => {
+    // 复现线上回归:用户编辑 ~/.zai/settings.json 换掉 ANTHROPIC_AUTH_TOKEN
+    // 后不重启服务, 下次对话应使用新 KEY。此前 client 缓存键只含
+    // providerId::model, 命中后返回固化旧 authToken 的 SDK client,
+    // 配置不生效。修复后缓存键含凭据指纹, key 变化即重建 client。
+    // 用独占 model 名避免与模块级 _client 缓存的前序用例冲突。
+    writeSettings({
+      ANTHROPIC_AUTH_TOKEN: 'tok-1',
+      ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic',
+    })
+    writeClaude([])
+    const mc = modelCallerModule.createAnthropicModelCaller()
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const call = () => mc({
+      model: 'MiniMax-HotReload',
+      systemPrompt: '',
+      messages: [{ role: 'user', content: 'hi' }],
+      tools: [],
+      signal: new AbortController().signal,
+    } as any)
+    // eslint-disable-next-line @typescript-eslint/no-unused-vars
+    const drain = async (gen: AsyncGenerator<unknown>) => { for await (const _ev of gen) { /* drain */ } }
+
+    await drain(call())
+    expect(anthropicCalls.length).toBe(1)
+    expect(anthropicCalls[0].authToken).toBe('tok-1')
+
+    // 模拟配置热重载(same model, 换 KEY)
+    writeSettings({
+      ANTHROPIC_AUTH_TOKEN: 'tok-2',
+      ANTHROPIC_BASE_URL: 'https://api.minimaxi.com/anthropic',
+    })
+    await drain(call())
+    expect(anthropicCalls.length).toBe(2)
+    expect(anthropicCalls[1].authToken).toBe('tok-2')
+
+    // 未改配置的重复调用仍复用缓存, 不重复构造
+    await drain(call())
+    expect(anthropicCalls.length).toBe(2)
+  })
 })

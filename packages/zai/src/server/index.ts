@@ -9,6 +9,7 @@ import gitRouter from './routes/git.js';
 import fsRouter from './routes/fs.js';
 import fsPickerRouter from './routes/fsPicker.js';
 import desktopFsRouter from './routes/desktopFs.js';
+import desktopWallpaperRouter from './routes/desktopWallpaper.js';
 import loginRouter from './routes/login.js';
 import configRouter from './routes/config.js';
 import resourcesRouter from './routes/resources.js';
@@ -207,6 +208,8 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   // 限制(zai 只监听 localhost,等同于本机 ls 暴露面,见 routes/fsPicker.ts 头注)。
   app.use('/api', fsPickerRouter);
   app.use('/api', desktopFsRouter);
+  // 桌面壁纸 — 图片落 ~/.zai/desktop/wallpapers/,前端只存 URL(见 routes/desktopWallpaper.ts 头注)
+  app.use('/api', desktopWallpaperRouter);
   app.use('/api', loginRouter);
   app.use('/api', configRouter);
   app.use('/api', resourcesRouter);

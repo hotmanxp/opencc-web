@@ -11,10 +11,12 @@ interface DesktopWindowProps {
   onClose?: () => void;
   onChange: (patch: Partial<DesktopWindowState>) => void;
   viewport: { w: number; h: number };
+  /** 标题栏右端插槽(如 Agent 窗口的快捷新建按钮);不传时右端留白。 */
+  titleExtra?: React.ReactNode;
   children: React.ReactNode;
 }
 
-export default function DesktopWindow({ win, active, onFocus, onMinimize, onToggleMax, onClose, onChange, viewport, children }: DesktopWindowProps) {
+export default function DesktopWindow({ win, active, onFocus, onMinimize, onToggleMax, onClose, onChange, viewport, titleExtra, children }: DesktopWindowProps) {
   const dragRef = useRef<{ kind: 'move' | 'resize'; startX: number; startY: number; base: { x: number; y: number; w: number; h: number } } | null>(null);
   // macOS 风格:三圆点 hover 时才显示内部符号(× / − / +)。容器级 hover 状态。
   const [dotsHover, setDotsHover] = useState(false);
@@ -110,6 +112,16 @@ export default function DesktopWindow({ win, active, onFocus, onMinimize, onTogg
           </button>
         </span>
         <span style={{ fontSize: 12, color: 'var(--text-secondary, #aaa)', flex: 1, textAlign: 'center', pointerEvents: 'none' }}>{win.title}</span>
+        {titleExtra && (
+          // stopPropagation 防触发标题栏拖拽/双击最大化;与三圆点按钮同等处理。
+          <span
+            style={{ display: 'inline-flex', alignItems: 'center' }}
+            onPointerDown={(e) => e.stopPropagation()}
+            onDoubleClick={(e) => e.stopPropagation()}
+          >
+            {titleExtra}
+          </span>
+        )}
       </div>
       <div style={{ flex: 1, minHeight: 0, overflow: 'auto' }}>{children}</div>
       {/* 右下角 resize handle:14x14 极小尺寸,单条 1px 斜线指示,hover 时才完全显示

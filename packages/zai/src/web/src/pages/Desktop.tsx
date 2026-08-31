@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { Input, Popover, Switch, message } from 'antd';
+import { Popover, Switch, message } from 'antd';
 import {
   ArrowLeftOutlined,
   SettingOutlined,
@@ -9,22 +9,27 @@ import {
   FileOutlined,
   PaperClipOutlined,
   MenuFoldOutlined,
+  MenuUnfoldOutlined,
   RobotFilled,
   FolderFilled,
   PictureFilled,
   CheckSquareFilled,
   CloseCircleFilled,
   EyeFilled,
+  MessageOutlined,
+  PlusOutlined,
 } from '@ant-design/icons';
 import NotesIcon from '../components/desktop/NotesIcon.js';
 import { useNavigate } from 'react-router-dom';
 import AgentConversation from './AgentConversation.js';
 import SettingsDrawer from '../components/SettingsDrawer.js';
 import { useAppStore } from '../store/useAppStore.js';
+import { useAgentStore } from '../store/useAgentStore.js';
 import { useLocalStorageState } from '../components/splitPane/shared.js';
 import { api } from '../lib/api.js';
 import { AGENT_INPUT_INSERT_EVENT } from '../lib/agentInputEvents.js';
 import { useEffectiveTheme } from '../hooks/useEffectiveTheme.js';
+import { useThemeToggle } from '../hooks/useThemeToggle.js';
 import { clampBounds, initWindows, initPreviewWindow, toggleMaximized, type DesktopWindowState } from '../components/desktop/windowMath.js';
 import DesktopWindow from '../components/desktop/DesktopWindow.js';
 import DesktopExplorer, { type ExplorerEntry } from '../components/desktop/DesktopExplorer.js';
@@ -35,6 +40,7 @@ import { gatherMentions } from '../components/desktop/gatherMentions.js';
 import { useDesktopAttachmentStore } from '../store/desktopAttachmentStore.js';
 import { LS_KEYS, newStickyNote, newTodoItem, type DesktopShortcut, type StickyNote, type TodoItem } from '../components/desktop/desktopStore.js';
 import type { DesktopFsFile, DesktopOpen } from '../../../shared/desktopFs.js';
+import WallpaperUploadField from '../components/desktop/WallpaperUploadField.js';
 import { classifyKind } from '../../../shared/fileKind.js';
 import { FilePreviewBody, decodeDataUrlUtf8 } from '../components/desktop/FilePreviewBody.js';
 
@@ -59,7 +65,6 @@ export default function Desktop() {
   const isMobile = useAppStore((s) => s.isMobile);
   const setWorkMode = useAppStore((s) => s.setWorkMode);
   const openSettingsDrawer = useAppStore((s) => s.openSettingsDrawer);
-  const setSettingsTheme = useAppStore((s) => s.setSettingsTheme);
   const effectiveTheme = useEffectiveTheme();
   const instanceContext = useAppStore((s) => s.instanceContext);
   const cwd = instanceContext?.cwd ?? '';
@@ -124,8 +129,31 @@ const activeId = useMemo(
   const onAddRef = useDesktopAttachmentStore((s) => s.addRef);
   const onRemoveRef = useDesktopAttachmentStore((s) => s.removeRef);
   const markAttachmentsMerged = useDesktopAttachmentStore((s) => s.markAllMerged);
-  // 附件面板开合(Agent 窗口内的左侧可收缩列)
-  const [attachmentsOpen, setAttachmentsOpen] = useState(true);
+  // 附件面板开合(Agent 窗口内的左侧可收缩列)— 默认收起
+  const [attachmentsOpen, setAttachmentsOpen] = useState(false);
+  // 会话面板开合(Agent 窗口内的右侧可收缩列)— 默认收起
+  const [sessionsOpen, setSessionsOpen] = useState(false);
+  // 会话状态与操作复用 useAgentStore(与 /agent 路由 Sider 同一份 store)
+  const sessions = useAgentStore((s) => s.sessions);
+  const currentSessionId = useAgentStore((s) => s.sessionId);
+  const agentStatus = useAgentStore((s) => s.status);
+  const loadSessions = useAgentStore((s) => s.loadSessions);
+  const setCurrentSession = useAgentStore((s) => s.setCurrentSession);
+  const loadTranscript = useAgentStore((s) => s.loadTranscript);
+  const createNewSession = useAgentStore((s) => s.createNewSession);
+  // 对话进行中(streaming)禁用切换/新建 — 与 /agent Sider 行为一致
+  const sessionBusy = agentStatus === 'streaming';
+
+  // 进入桌面时初始化会话列表(与 /agent 页一致:空列表兜底新建一条会话),
+  // 否则 agent 窗口会停在无会话空白态。
+  useEffect(() => {
+    (async () => {
+      await loadSessions();
+      if (useAgentStore.getState().sessions.length === 0) {
+        await useAgentStore.getState().createNewSession();
+      }
+    })();
+  }, [loadSessions]);
   // 快捷方式
   const [shortcuts, setShortcuts] = useLocalStorageState<DesktopShortcut[]>(LS_KEYS.shortcuts, []);
   const [wallpaper, setWallpaper] = useLocalStorageState<string>(LS_KEYS.wallpaper, 'preset:aurora');
@@ -468,6 +496,11 @@ const activeId = useMemo(
   }, []);
 
   // ---------- 壁纸层 ----------
+  // wallpaper 取值三态:
+  //   'preset:<name>'        → 内置渐变
+  //   '/api/desktop/...'     → 用户上传后服务端返回的 URL(图片落 ~/.zai/desktop/wallpapers/)
+  //   其它(历史 'data:...' )  → 旧版本把图片 base64 写进了 localStorage;体积可达数 MB,
+  //                             易撞 quota 且拖慢读图,启动时迁移为默认预设。
   const wallpaperBg = useMemo(() => {
     if (wallpaper.startsWith('preset:')) {
       return WALLPAPER_PRESET_BG[wallpaper] ?? WALLPAPER_PRESET_BG['preset:aurora']!;
@@ -475,20 +508,15 @@ const activeId = useMemo(
     return `center/cover url(${wallpaper})`;
   }, [wallpaper]);
 
-  // 上传壁纸
-  const onUploadWallpaper = (file: File): boolean => {
-    if (!file.type.startsWith('image/')) {
-      void message.error('请选择图片文件');
-      return false;
-    }
-    const reader = new FileReader();
-    reader.onload = () => {
-      const dataUrl = reader.result;
-      if (typeof dataUrl === 'string') setWallpaper(dataUrl);
-    };
-    reader.readAsDataURL(file);
-    return false; // 不让 antd 默认上传
-  };
+  // 历史 dataURL 壁纸一次性迁移(只在挂载时跑一次)
+  useEffect(() => {
+    if (wallpaper.startsWith('data:')) setWallpaper('preset:aurora');
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
+
+  // 上传成功后只持久化服务端返回的 URL(图片文件在 ~/.zai/desktop/wallpapers/)。
+  // 回调身份要稳定:setWallpaper 来自 useLocalStorageState 的 useCallback,本身稳定。
+  const onWallpaperUploaded = useCallback((url: string) => setWallpaper(url), [setWallpaper]);
 
   // ---------- 快捷方式 ----------
   const handleIconDrop = useCallback(
@@ -589,12 +617,11 @@ const activeId = useMemo(
   );
 
   const isLight = effectiveTheme === 'light' || effectiveTheme === 'high-contrast';
+  // 走与 SettingsDrawer / Layout 顶栏 Switch 完全一致的主题切换路径 ——
+  // 见 packages/zai/src/web/src/hooks/useThemeToggle.ts (store + PUT 写盘)
+  const toggleTheme = useThemeToggle();
   const handleToggleTheme = (checked: boolean) => {
-    const next: 'dark' | 'light' = checked ? 'light' : 'dark';
-    setSettingsTheme(next);
-    void api
-      .put('/agent/settings/theme', { theme: next })
-      .catch(() => undefined);
+    toggleTheme(checked ? 'light' : 'dark');
   };
 
   return (
@@ -663,13 +690,13 @@ const activeId = useMemo(
             {sc.kind === 'dir' ? (
               <FolderOutlined style={{ fontSize: 36, color: '#facc15' }} />
             ) : (
-              <FileOutlined style={{ fontSize: 32, color: 'var(--text-secondary, #aaa)' }} />
+              <FileOutlined style={{ fontSize: 32, color: 'var(--desktop-icon-color, rgba(255,255,255,.85))' }} />
             )}
             <span
               style={{
                 fontSize: 12,
-                color: 'var(--text-primary, #eaeaea)',
-                textShadow: '0 1px 2px rgba(0,0,0,.5)',
+                color: 'var(--desktop-label-color, rgba(255,255,255,.95))',
+                textShadow: 'var(--desktop-label-shadow, 0 1px 3px rgba(0,0,0,.7))',
                 textAlign: 'center',
                 wordBreak: 'break-all',
                 maxWidth: '100%',
@@ -704,6 +731,30 @@ const activeId = useMemo(
             onToggleMax={() => toggleMax(w.id)}
             onClose={() => closeWindow(w.id)}
             onChange={(patch) => patchWindow(w.id, patch)}
+            titleExtra={w.id === 'agent' ? (
+              // 标题栏快捷新建:不用先展开右侧会话栏即可开新会话
+              <button
+                type="button"
+                onClick={() => void createNewSession()}
+                disabled={sessionBusy}
+                aria-label="标题栏新建会话"
+                data-testid="desktop-title-new-session"
+                title={sessionBusy ? '对话进行中,请等待当前回复结束' : '新建会话'}
+                style={{
+                  border: 0,
+                  background: 'transparent',
+                  color: 'var(--text-secondary, #aaa)',
+                  cursor: sessionBusy ? 'not-allowed' : 'pointer',
+                  padding: '2px 6px',
+                  borderRadius: 4,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  opacity: sessionBusy ? 0.5 : 1,
+                }}
+              >
+                <PlusOutlined style={{ fontSize: 12 }} />
+              </button>
+            ) : undefined}
           >
             {w.id === 'agent' ? (
               <div
@@ -788,6 +839,141 @@ const activeId = useMemo(
                 <div style={{ flex: 1, minWidth: 0, display: 'flex', flexDirection: 'column' }}>
                   <AgentConversation />
                 </div>
+                {sessionsOpen ? (
+                  <div
+                    data-testid="agent-sessions-panel"
+                    style={{
+                      width: 220,
+                      flexShrink: 0,
+                      display: 'flex',
+                      flexDirection: 'column',
+                      borderLeft: '1px solid var(--border-subtle, rgba(128,128,128,.25))',
+                      background: 'rgba(128,128,128,.04)',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', padding: '6px 8px 2px 10px' }}>
+                      <span style={{ fontSize: 12, color: 'var(--text-secondary, #aaa)', display: 'inline-flex', alignItems: 'center', gap: 6 }}>
+                        <MessageOutlined style={{ fontSize: 12 }} /> 会话
+                      </span>
+                      <span style={{ display: 'inline-flex', alignItems: 'center', gap: 2 }}>
+                        <button
+                          type="button"
+                          onClick={() => void createNewSession()}
+                          disabled={sessionBusy}
+                          aria-label="新建会话"
+                          data-testid="desktop-new-session"
+                          title={sessionBusy ? '对话进行中,请等待当前回复结束' : '新建会话'}
+                          style={{
+                            border: 0,
+                            background: 'transparent',
+                            color: 'var(--text-secondary, #aaa)',
+                            cursor: sessionBusy ? 'not-allowed' : 'pointer',
+                            padding: 2,
+                            borderRadius: 4,
+                            opacity: sessionBusy ? 0.5 : 1,
+                          }}
+                        >
+                          <PlusOutlined style={{ fontSize: 11 }} />
+                        </button>
+                        <button
+                          type="button"
+                          onClick={() => setSessionsOpen(false)}
+                          aria-label="收起会话栏"
+                          style={{ border: 0, background: 'transparent', color: 'var(--text-secondary, #aaa)', cursor: 'pointer', padding: 2, borderRadius: 4 }}
+                        >
+                          <MenuUnfoldOutlined style={{ fontSize: 11 }} />
+                        </button>
+                      </span>
+                    </div>
+                    <div style={{ flex: 1, minHeight: 0, overflowY: 'auto', padding: '4px 6px' }}>
+                      {sessions.length === 0 ? (
+                        <div style={{ fontSize: 12, color: 'var(--text-secondary, #aaa)', padding: '8px 4px' }}>
+                          暂无历史会话
+                        </div>
+                      ) : (
+                        <div style={{ display: 'flex', flexDirection: 'column', gap: 2 }}>
+                          {sessions.map((s) => {
+                            const active = s.sessionId === currentSessionId;
+                            return (
+                              <div
+                                key={s.sessionId}
+                                data-testid={`desktop-session-${s.sessionId}`}
+                                title={sessionBusy ? '对话进行中,请等待当前回复结束' : undefined}
+                                onClick={() => {
+                                  if (sessionBusy || active) return;
+                                  setCurrentSession(s.sessionId);
+                                  void loadTranscript(s.sessionId);
+                                }}
+                                style={{
+                                  cursor: sessionBusy ? 'not-allowed' : 'pointer',
+                                  padding: '6px 8px',
+                                  borderRadius: 6,
+                                  background: active ? 'rgba(255,102,0,0.10)' : 'transparent',
+                                  opacity: sessionBusy ? 0.6 : 1,
+                                }}
+                              >
+                                <div
+                                  style={{
+                                    fontSize: 13,
+                                    whiteSpace: 'nowrap',
+                                    overflow: 'hidden',
+                                    textOverflow: 'ellipsis',
+                                    color: active ? '#ff6600' : 'var(--text-primary, #eaeaea)',
+                                  }}
+                                >
+                                  {s.title || '新会话'}
+                                </div>
+                                <div style={{ fontSize: 11, color: 'var(--text-secondary, #aaa)' }}>
+                                  {new Date(s.updatedAt).toLocaleString()}
+                                </div>
+                              </div>
+                            );
+                          })}
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setSessionsOpen(true)}
+                    aria-label="展开会话栏"
+                    data-testid="agent-sessions-collapsed"
+                    style={{
+                      width: 28,
+                      flexShrink: 0,
+                      border: 0,
+                      borderLeft: '1px solid var(--border-subtle, rgba(128,128,128,.25))',
+                      background: 'rgba(128,128,128,.04)',
+                      cursor: 'pointer',
+                      position: 'relative',
+                      display: 'flex',
+                      flexDirection: 'column',
+                      alignItems: 'center',
+                      justifyContent: 'center',
+                      gap: 4,
+                      color: 'var(--text-secondary, #aaa)',
+                    }}
+                  >
+                    <MessageOutlined style={{ fontSize: 13 }} />
+                    <span style={{ writingMode: 'vertical-rl', fontSize: 10 }}>会话</span>
+                    {currentSessionId && (
+                      <span
+                        aria-hidden
+                        title="当前会话"
+                        style={{
+                          position: 'absolute',
+                          top: 6,
+                          right: 5,
+                          width: 5,
+                          height: 5,
+                          borderRadius: '50%',
+                          background: 'var(--accent-start, #ff6600)',
+                        }}
+                      />
+                    )}
+                  </button>
+                )}
               </div>
             ) : (
               <DesktopExplorer
@@ -859,7 +1045,7 @@ const activeId = useMemo(
               ) : previewData == null ? (
                 <span style={{ color: 'var(--text-secondary, #aaa)', alignSelf: 'center' }}>无内容</span>
               ) : 'error' in previewData ? (
-                <span style={{ color: '#ff7875', alignSelf: 'center' }}>{previewData.error}</span>
+                <span style={{ color: 'var(--error, #ff7875)', alignSelf: 'center' }}>{previewData.error}</span>
               ) : (
                 <div style={{ width: '100%', height: '100%', display: 'flex', flexDirection: 'column' }}>
                   <FilePreviewBody payload={previewData} />
@@ -916,7 +1102,7 @@ const activeId = useMemo(
           alignItems: 'center',
           justifyContent: 'space-between',
           padding: '0 10px',
-          background: 'rgba(0,0,0,.35)',
+          background: 'var(--desktop-chrome-bg, rgba(0,0,0,.35))',
           backdropFilter: 'blur(8px)',
           zIndex: 100,
           color: 'var(--text-primary, #eaeaea)',
@@ -987,15 +1173,10 @@ const activeId = useMemo(
                   ))}
                 </div>
                 <div style={{ marginBottom: 6, fontSize: 12 }}>上传图片</div>
-                <Input
-                  type="file"
-                  accept="image/*"
-                  onChange={(e) => {
-                    const f = e.target.files?.[0];
-                    if (f) onUploadWallpaper(f);
-                    e.target.value = '';
-                  }}
-                />
+                {/* onUploaded 身份稳定 → 该子树在壁纸 state 更新时不会收到新 props,
+                    避免 React commitUpdate 回写 file input value 抛 InvalidStateError
+                    (见 WallpaperUploadField 头注) */}
+                <WallpaperUploadField onUploaded={onWallpaperUploaded} />
               </div>
             }
           >
@@ -1030,8 +1211,8 @@ const activeId = useMemo(
           gap: 10,
           padding: '8px 14px',
           borderRadius: 18,
-          background: 'rgba(0,0,0,.4)',
-          backdropFilter: 'blur(10px)',
+          background: 'var(--desktop-chrome-bg-strong, rgba(0,0,0,.22))',
+          backdropFilter: 'blur(18px) saturate(1.4)',
           zIndex: 100,
         }}
       >

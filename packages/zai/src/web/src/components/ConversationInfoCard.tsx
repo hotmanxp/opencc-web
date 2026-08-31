@@ -27,7 +27,7 @@ function runtimeCoreLabel(r: ConversationInfo['runtimeCore']): string {
     case 'default': return 'default'
     case 'inproc': return 'inproc'
     case 'spawn': return 'spawn'
-    case 'repl': return 'repl(默认)'
+    case 'repl': return 'repl'
     case null: return '—'
   }
 }

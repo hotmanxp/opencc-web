@@ -4,7 +4,7 @@
  * 抽取自 FilePreviewDrawer(conversation/) 的核心渲染管线:
  *   - text  → MarkdownText (.md/.markdown) 或 SyntaxHighlighter 代码高亮
  *   - image → <img src={dataUrl}>
- *   - html  → <iframe sandbox="" src={dataUrl}>
+ *   - html  → <iframe sandbox="allow-scripts" src={dataUrl}>
  *   - binary → Alert + 打开目录按钮
  *
  * Desktop 视图(/desktop 双击文件)和 code 模型右侧 Drawer 都用同一个组件,
@@ -177,7 +177,9 @@ function HtmlPreview({ dataUrl, content }: { dataUrl?: string; content?: string 
       data-testid="preview-html"
       src={src}
       srcDoc={srcDoc}
-      sandbox=""
+      // allow-scripts 让预览的 HTML 能执行自身 JS(data:/srcDoc 文档处于独立
+      // origin,不给 allow-same-origin,无法访问宿主页面)。与 FsTab 预览一致。
+      sandbox="allow-scripts"
       title="html-preview"
       style={{ width: '100%', height: '100%', minHeight: 320, border: 0 }}
     />

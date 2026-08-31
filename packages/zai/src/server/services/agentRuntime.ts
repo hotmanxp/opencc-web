@@ -92,11 +92,11 @@ function resolveRuntimeCore(settings: ZaiSettings): RuntimeCore {
   const env = process.env.ZAI_RUNTIME_CORE
   if (env !== undefined && env !== '') {
     if (env === 'inproc' || env === 'spawn' || env === 'default' || env === 'repl') return env
-    return 'repl'
+    return 'default'
   }
   const s = settings.runtimeCore
   if (s === 'inproc' || s === 'spawn' || s === 'default' || s === 'repl') return s
-  return 'repl'
+  return 'default'
 }
 
 let runtime: OpenccRuntime | null = null
@@ -331,6 +331,10 @@ export function bridgeToolYieldToPrompt(
 // (normal or error). Test seam at the bottom lets unit tests reset module state.
 const sessionControllers = new Map<string, AbortController>()
 
+// Disposers for config-gated subagent provider registrations (zai patch
+// 2026-08-31: `dsh`). Drained by __resetAgentRuntimeForTests.
+const subagentProviderDisposers: Array<() => void> = []
+
 export function registerSessionController(
   sessionId: string,
   controller: AbortController,
@@ -387,6 +391,16 @@ export function __resetAgentRuntimeForTests(): void {
   serverCwd = null
   activeRuntimeCore = 'default'
   sessionControllers.clear()
+  // Unregister config-gated subagent providers (dsh) so repeated test
+  // boots don't stack duplicate registrations.
+  while (subagentProviderDisposers.length > 0) {
+    const dispose = subagentProviderDisposers.pop()
+    try {
+      dispose?.()
+    } catch {
+      // best-effort
+    }
+  }
   if (sessionRegistry) {
     void sessionRegistry.killAll('test reset')
     sessionRegistry = null
@@ -405,25 +419,27 @@ export function getActivePromptCount(): number {
 
 /**
  * Best-effort read of the deployment's `subagents.<name>` config from
- * `~/.zai/settings.json`. Returns `undefined` so the provider registers
- * with the all-defaults config (which means `enabled: false` — explicit
- * `subagent_type: '<name>'` still routes, but the model-visible tool is
- * not mounted).
+ * `~/.zai/settings.json` (zai patch 2026-08-31:实装,此前是无条件返回
+ * `undefined` 的 stub)。Returns `undefined` when the block is absent so
+ * each provider registers with its all-defaults config. Schema validation
+ * belongs to the provider's own zod schema (`compat/subagents/<name>/config.ts`).
  *
  * Kept inline rather than exported to a separate file because it's the
  * only place outside `applyXxxProvider` itself that needs the raw
  * subagent config object.
  */
 async function readSubagentConfigSafe(
-  _name: 'claude-code',
+  name: 'claude-code' | 'dsh',
 ): Promise<unknown | undefined> {
-  // Settings readers (`readZaiSettings`) may not be initialized at this
-  // module init point. The provider's own `safeParseXxxConfig` covers
-  // schema validation; this helper's job is only to forward the deployment
-  // block. Returning `undefined` here keeps the boot path tolerant when
-  // settings isn't ready yet — the provider registers with defaults
-  // instead of crashing the runtime.
-  return undefined
+  try {
+    const settings = await readZaiSettings()
+    const block = settings.subagents?.[name]
+    return block ?? undefined
+  } catch {
+    // Settings cache not ready at this boot point — provider falls back
+    // to defaults instead of crashing the runtime.
+    return undefined
+  }
 }
 
 export function getAskRegistry(): AskRegistry {
@@ -473,10 +489,13 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   })
 
   // zai patch (2026-08-21): register the subagent providers we ship
-  // today. `claude-code` is gated on `enabled: false` by default —
-  // explicit `subagent_type: 'claude-code'` calls still route through
-  // the provider, but no model-visible tool is mounted unless the
-  // deployment flips the bit in settings.json.
+  // today. `claude-code` is registered unconditionally (defaults mean
+  // `enabled: false` — explicit `subagent_type: 'claude-code'` calls still
+  // route through the provider).
+  // zai patch (2026-08-31): `dsh` registers ONLY when
+  // `settings.subagents.dsh.enabled === true` — spawning `dsh --profile sdk`
+  // requires an operator-installed dsh CLI and child-env credentials.
+  // Config values land via `readSubagentConfigSafe` (settings.json `subagents.*`).
   // The `apply()` calls are intentionally synchronous and
   // side-effectful on the runtime-global registry — see
   // docs/superpowers/specs/2026-08-21-zai-subagent-claude-code-provider-design.md.
@@ -490,6 +509,9 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     const applyClaude = (subagentMod as unknown as {
       applyClaudeCodeProvider?: (registry: unknown, config?: unknown) => void
     }).applyClaudeCodeProvider
+    const applyDsh = (subagentMod as unknown as {
+      applyDshProvider?: (registry: unknown, config?: unknown) => (() => void) | undefined
+    }).applyDshProvider
     const getSubagentRegistry = (subagentMod as unknown as {
       getSubagentRegistry?: () => {
         registerProvider: (provider: { name: string }) => void
@@ -510,6 +532,18 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       } else {
         console.warn(
           '[initAgentRuntime] claude-code subagent symbols missing — did you forget to rebuild core?',
+        )
+      }
+      const dshConfig = await readSubagentConfigSafe('dsh')
+      if (typeof applyDsh === 'function') {
+        const dshDisposer = applyDsh(registry, dshConfig)
+        if (typeof dshDisposer === 'function') {
+          subagentProviderDisposers.push(dshDisposer)
+          console.log('[initAgentRuntime] dsh subagent provider registered (subagent_type: \'dsh\')')
+        }
+      } else if (dshConfig !== undefined) {
+        console.warn(
+          '[initAgentRuntime] dsh subagent symbols missing but settings.subagents.dsh is configured — did you forget to rebuild core?',
         )
       }
     }

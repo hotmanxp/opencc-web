@@ -59,6 +59,24 @@
   --bg-faint-08: rgba(255,255,255,0.08);
   --bg-theme-6: rgba(0,0,0,0.6);
   --bg-popup: rgba(0,0,0,0.6);
+  /* 桌面 (/desktop) 专用: 浮层窗口/菜单底色 + 顶栏/Dock 半透明 chrome.
+     旧实现直接写 var(--bg-elevated, #1c1c26) 但变量从未定义, light 主题下
+     窗口永远深色回退, 配 --text-primary 深色文字 → 黑底黑字不可见. */
+  --bg-elevated: #1c1c26;
+  --bg-elevated-92: rgba(28, 28, 38, 0.92);
+  --desktop-chrome-bg: rgba(0, 0, 0, 0.35);
+  --desktop-chrome-bg-strong: rgba(0, 0, 0, 0.22);
+  /* 壁纸之上的快捷方式标签/文件图标: 壁纸(图片或深色预设)不随主题变化,
+     固定浅色文字 + 深色描影, 不走 --text-primary. */
+  --desktop-label-color: rgba(255, 255, 255, 0.95);
+  --desktop-label-shadow: 0 1px 3px rgba(0, 0, 0, 0.7);
+  --desktop-icon-color: rgba(255, 255, 255, 0.85);
+  /* languageIcons OtherIcon (兜底文件图标): dark 主题走白色描线,
+     light 主题走深灰描线 — 浅色主题下硬编码白色会导致 .bash_history /
+     .DS_Store / .zshrc 等未分类扩展名文件图标在白底上完全不可见. */
+  --file-icon-neutral-bg: rgba(255, 255, 255, 0.18);
+  --file-icon-neutral-stroke: rgba(255, 255, 255, 0.4);
+  --file-icon-neutral-line: rgba(255, 255, 255, 0.7);
 
   /* 命令/Skill 名称视觉 identity: 深色主题用紫色 (#a78bfa),
      与下方 slash dropdown 的 `/name` 文字色对齐. 浅色主题在
@@ -133,6 +151,14 @@
   --bg-faint-08: rgba(0,0,0,0.08);
   --bg-theme-6: rgba(255,255,255,0.6);
   --bg-popup: #ffffff;
+  /* 桌面浮层/light 主题: 白色 elevate + 浅色半透明 chrome, 与深色文字对称. */
+  --bg-elevated: #ffffff;
+  --bg-elevated-92: rgba(255, 255, 255, 0.85);
+  --desktop-chrome-bg: rgba(255, 255, 255, 0.6);
+  --desktop-chrome-bg-strong: rgba(255, 255, 255, 0.28);
+  --file-icon-neutral-bg: rgba(15, 23, 42, 0.10);
+  --file-icon-neutral-stroke: rgba(15, 23, 42, 0.30);
+  --file-icon-neutral-line: rgba(15, 23, 42, 0.55);
   /* 浅色主题下命令/Skill 名称用主题橙,与全局 accent identity 一致 —
      深色主题下仍是紫色 (见 :root --cmd-token-color 默认值). */
   --cmd-token-color: var(--accent-start);

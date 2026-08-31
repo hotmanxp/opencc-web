@@ -1,6 +1,6 @@
 {
   "name": "@zn-ai/zai",
-  "version": "0.4.10",
+  "version": "0.5.4",
   "description": "知鸟AI 统一工具平台 — 本地 Web 管理界面",
   "type": "module",
   "main": "dist/server/index.js",

@@ -285,11 +285,20 @@ function assertDtsTargetsResolve(bundleEntryDts: string): void {
     `}`,
     `export declare function getSubagentRegistry(): SubagentRegistry;`,
     `export declare function _resetSubagentRegistryForTests(): void;`,
+    `export declare const NO_START_CAPABILITIES: SubagentCapabilities;`,
+    `export interface SubagentCapabilities {`,
+    `  readonly agentOptions: boolean;`,
+    `  readonly outputSchema: boolean;`,
+    `  readonly depthLimit: boolean;`,
+    `  readonly toolFilter: boolean;`,
+    `  readonly persona: boolean;`,
+    `}`,
     `export interface SubagentProvider {`,
     `  readonly name: string;`,
     `  readonly description: string;`,
     `  readonly inheritsParentContext: boolean;`,
-    `  readonly capabilities: { readonly noStartCapabilities: boolean };`,
+    `  readonly capabilities: SubagentCapabilities;`,
+    `  readonly agentRouteDefaults?: Readonly<{ provider: string; model: string }>;`,
     `  start(req: SubagentRequest, ctx: SubagentContext): Promise<SubagentRun>;`,
     `}`,
     `export interface SubagentRequest {`,
@@ -310,11 +319,12 @@ function assertDtsTargetsResolve(bundleEntryDts: string): void {
     `  readonly phase?: string | null;`,
     `  readonly raw?: unknown;`,
     `}`,
-    `export type SubagentStopReason = 'completed' | 'error' | 'aborted' | 'max-tokens';`,
+    `export type SubagentStopReason = 'completed' | 'error' | 'aborted' | 'max-tokens' | 'refusal';`,
     `export interface SubagentResult {`,
     `  readonly text: string;`,
     `  readonly stopReason: SubagentStopReason;`,
     `  readonly errorMessage?: string;`,
+    `  readonly diagnostic?: string;`,
     `}`,
     `export interface SubagentRun {`,
     `  readonly id: string;`,
@@ -350,6 +360,23 @@ function assertDtsTargetsResolve(bundleEntryDts: string): void {
     'export declare function apply(registry: SubagentRegistry, config?: unknown): void;',
     '',
   ].join('\n')
+  {
+    const dshDts = [
+      '// Type declarations for the dsh (deepseek-harness) subagent provider',
+      '// apply entry. Mirror src/compat/subagents/dsh/index.ts (only apply is',
+      '// consumed by bundle-entry.ts). Hand-written because the file is only',
+      "// referenced from bundle-entry.ts (excluded from main tsconfig.json).",
+      '// apply is config-gated: returns the unregister disposer only when',
+      "// `config.enabled === true`; undefined otherwise.",
+      "import { SubagentRegistry } from '../index.js';",
+      'export declare function apply(registry: SubagentRegistry, config?: unknown): (() => void) | undefined;',
+      '',
+    ].join('\n')
+    const out = join(SUBAGENT_PROVIDER_DTS_DIR, 'dsh', 'index.d.ts')
+    mkdirSync(dirname(out), { recursive: true })
+    writeFileSync(out, dshDts)
+    console.log(`[bundle-opencc]   → ${out}`)
+  }
   for (const [rel, dtsBody] of [
     ['claude-code/index.d.ts', claudeCodeDts],
   ] as const) {

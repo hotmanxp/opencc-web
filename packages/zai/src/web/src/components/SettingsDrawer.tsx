@@ -876,14 +876,14 @@ function buildStaticSchema(
       rows: [
         {
           key: 'runtimeCore',
-          label: 'Agent 运行时',
+          label: 'Agent 调度器 · 重启后生效',
           kind: 'enum',
           value: runtimeCore,
           options: [
-            { value: 'default', label: 'default', description: '进程内 query 链路 · 重启后生效' },
-            { value: 'inproc', label: 'inproc', description: 'in-process print 多 session 运行时 · 重启后生效' },
-            { value: 'spawn', label: 'spawn', description: '子进程 SessionRegistry · 重启后生效' },
-            { value: 'repl', label: 'repl(默认)', description: 'ReplRuntime (P3.1 委托 shared OpenccRuntime) · 重启后生效' },
+            { value: 'default', label: 'default', description: '进程内 query 链路' },
+            { value: 'inproc', label: 'inproc', description: 'in-process print 多 session 运行时' },
+            { value: 'spawn', label: 'spawn', description: '子进程 SessionRegistry' },
+            { value: 'repl', label: 'repl', description: 'in-process REPL' },
           ],
         },
       ],

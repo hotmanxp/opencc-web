@@ -246,7 +246,7 @@ export function resolveRuntimeCore(
 ): RuntimeCore {
   const s = settings.runtimeCore
   if (s === 'inproc' || s === 'spawn' || s === 'default' || s === 'repl') return s
-  return 'repl'
+  return 'default'
 }
 
 /** Validate a candidate runtimeCore value before persisting. */

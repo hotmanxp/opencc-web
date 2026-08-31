@@ -4,7 +4,6 @@ import {
   type SubprocessHandle,
 } from '../../subprocess/index.js'
 import type {
-  SubagentEvent,
   SubagentRequest,
   SubagentContext,
   SubagentResult,
@@ -12,11 +11,20 @@ import type {
 } from '../registry.js'
 import {
   CLAUDE_OUTPUT_FORMAT,
+  type ClaudePermissionMode,
   type ClaudeSpawnArgs,
   type ClaudeStreamEvent,
 } from './wire.js'
-import { failClaudeCode } from './invariant.js'
+import {
+  failClaudeCode,
+} from './invariant.js'
 import { resolveFinalAnswer, stopReasonFromClaudeResult } from './result.js'
+import {
+  createCliRunShell,
+  toMessage,
+  type CliRunShell,
+} from '../cliAgent/runShell.js'
+import { defaultCliRunId } from '../cliAgent/ids.js'
 
 /**
  * Compute the argv for spawning `claude --print` against a one-shot prompt.
@@ -88,7 +96,9 @@ export async function startClaudeCodeRun(
     cwd,
     outputFormat: spec.outputFormat,
     permissionMode: spec.permissionMode,
-    ...(request.model ? { model: request.model } : {}),
+    // dsh parity: per-call model already resolved by the provider
+    // (`req.model ?? config.model`); request.env-style last-write-wins here.
+    ...(spec.model ? { model: spec.model } : {}),
   }
 
   const { command, args } = claudeSpawnArgv(
@@ -105,11 +115,12 @@ export async function startClaudeCodeRun(
     signal: request.signal,
   })
 
-  // The same producer/consumer shape as codex/run.ts: declare cancellable
+  // The same producer/consumer shape as dsh/run.ts: declare cancellable
   // promise, then drive the pump on a microtask so startClaudeCodeRun
   // returns the handle to the caller immediately.
-  const { run, finalizeResult, finalizeError, internal } = createPendingRun(
+  const { run, finalizeResult, finalizeError, internal } = createCliRunShell(
     handle,
+    { id: defaultCliRunId('claude-code') },
   )
 
   void pumpClaudeStream({
@@ -131,101 +142,16 @@ export interface ClaudeRunSpec {
   command: string
   args: readonly string[]
   outputFormat: 'json' | 'stream-json' | 'text'
-  permissionMode: 'bypassPermissions' | 'acceptEdits' | 'plan' | 'default'
+  permissionMode: ClaudePermissionMode
+  /** Resolved child model (`request.model ?? config.model`); omit for CLI default. */
+  model?: string
   env?: Readonly<Record<string, string>>
-}
-
-interface PendingRun {
-  run: SubagentRun
-  finalizeResult: (r: SubagentResult) => void
-  finalizeError: (message: string) => void
-  internal: {
-    events: SubagentEvent[]
-    pushEvent: (e: SubagentEvent) => void
-  }
-}
-
-function createPendingRun(handle: SubprocessHandle): PendingRun {
-  const events: SubagentEvent[] = []
-  let resolveResult!: (value: SubagentResult) => void
-  let rejectResult!: (reason: Error) => void
-  const result = new Promise<SubagentResult>((resolve, reject) => {
-    resolveResult = resolve
-    rejectResult = reject
-  })
-
-  let finalized = false
-  const finalizeResult = (r: SubagentResult): void => {
-    if (finalized) return
-    finalized = true
-    resolveResult(r)
-  }
-  const finalizeError = (message: string): void => {
-    if (finalized) return
-    finalized = true
-    rejectResult(new Error(message))
-  }
-
-  const cancel = async (): Promise<void> => {
-    if (finalized) return
-    finalized = true
-    resolveResult({
-      text: '',
-      stopReason: 'aborted',
-      errorMessage: 'cancelled by caller',
-    })
-    try {
-      await handle.killTree()
-    } catch {
-      // best-effort
-    }
-  }
-
-  const run: SubagentRun = {
-    id: `claude-code-${Math.random().toString(36).slice(2, 10)}`,
-    events: (async function* () {
-      let i = 0
-      while (true) {
-        const next = await new Promise<SubagentEvent | 'DONE'>((res) => {
-          const tick = () => {
-            if (i < events.length) {
-              res(events[i++])
-              return
-            }
-            if (finalized) {
-              res('DONE')
-              return
-            }
-            setImmediate(tick)
-          }
-          tick()
-        })
-        if (next === 'DONE') return
-        yield next
-      }
-    })(),
-    result,
-    cancel,
-  }
-
-  void resolveResult
-  void rejectResult
-
-  return {
-    run,
-    finalizeResult,
-    finalizeError,
-    internal: {
-      events,
-      pushEvent: (e) => events.push(e),
-    },
-  }
 }
 
 interface PumpArgs {
   handle: SubprocessHandle
   outputFormat: 'json' | 'stream-json' | 'text'
-  internal: PendingRun['internal']
+  internal: CliRunShell['internal']
   finalizeResult: (r: SubagentResult) => void
   finalizeError: (message: string) => void
 }
@@ -252,15 +178,13 @@ async function pumpClaudeStream({
             text: typeof parsed.result === 'string' ? parsed.result : '',
             raw: parsed,
           })
-          const mapped = stopReasonFromClaudeResult({
-            is_error: parsed.is_error,
-            error: parsed.error,
-          })
+          const mapped = stopReasonFromClaudeResult(parsed)
           if (mapped.stopReason !== 'completed') {
             finalizeResult({
               text: '',
               stopReason: 'error',
               errorMessage: mapped.errorMessage,
+              ...(mapped.diagnostic !== undefined ? { diagnostic: mapped.diagnostic } : {}),
             })
             resolve()
             return
@@ -298,6 +222,7 @@ async function pumpClaudeStream({
           text: '',
           stopReason: 'error',
           errorMessage: resolved.errorMessage,
+          ...(resolved.diagnostic !== undefined ? { diagnostic: resolved.diagnostic } : {}),
         })
       }
       settle(resolve)
@@ -381,10 +306,6 @@ function extractAssistantText(frame: ClaudeStreamEvent): string {
       .join('')
   }
   return ''
-}
-
-function toMessage(err: unknown): string {
-  return err instanceof Error ? err.message : String(err)
 }
 
 // Avoid `process` being unused when nothing on this file references it.
