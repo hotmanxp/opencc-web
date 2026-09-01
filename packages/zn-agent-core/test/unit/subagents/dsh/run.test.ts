@@ -15,6 +15,7 @@ import {
   dshSpawnArgv,
   dshChildOutcome,
   AssistantTextFold,
+  projectDshSessionEvent,
   type DshRunSpec,
 } from '../../../../src/compat/subagents/dsh/run.js'
 import { dshFailureDiagnostic } from '../../../../src/compat/subagents/dsh/invariant.js'
@@ -171,6 +172,131 @@ describe('AssistantTextFold — dsh AssistantOutputFold parity', () => {
   })
 })
 
+describe('projectDshSessionEvent — dsh → zai bg vocabulary translation', () => {
+  it('translates assistant/message → agentMessage with full text', () => {
+    const projected = projectDshSessionEvent({
+      type: 'assistant/message',
+      data: { message: { content: [{ type: 'text', text: 'hello world' }] } },
+    })
+    expect(projected).toEqual({
+      type: 'agentMessage',
+      text: 'hello world',
+      raw: expect.objectContaining({ type: 'assistant/message' }),
+    })
+  })
+
+  it('translates assistant/chunk (text-delta) → agentMessage per delta', () => {
+    const projected = projectDshSessionEvent({
+      type: 'assistant/chunk',
+      data: { chunk: { type: 'text-delta', text: 'hel' } },
+    })
+    expect(projected).toEqual({
+      type: 'agentMessage',
+      text: 'hel',
+      raw: expect.objectContaining({ type: 'assistant/chunk' }),
+    })
+  })
+
+  it('drops assistant/chunk when chunk type is not text-delta', () => {
+    expect(
+      projectDshSessionEvent({
+        type: 'assistant/chunk',
+        data: { chunk: { type: 'reasoning-delta', text: 'thinking...' } },
+      }),
+    ).toBeUndefined()
+  })
+
+  it('drops assistant/message with empty text content', () => {
+    expect(
+      projectDshSessionEvent({
+        type: 'assistant/message',
+        data: { message: { content: [] } },
+      }),
+    ).toBeUndefined()
+  })
+
+  it('translates turn/start → turnStarted and turn/end → turnCompleted', () => {
+    expect(projectDshSessionEvent({ type: 'turn/start' })).toEqual({
+      type: 'turnStarted',
+      raw: expect.objectContaining({ type: 'turn/start' }),
+    })
+    expect(projectDshSessionEvent({ type: 'turn/end' })).toEqual({
+      type: 'turnCompleted',
+      raw: expect.objectContaining({ type: 'turn/end' }),
+    })
+  })
+
+  it('drops protocol-only noise frames (permission/preset, sandbox/mode, ...)', () => {
+    for (const type of [
+      'permission/preset',
+      'sandbox/mode',
+      'approval/policy',
+      'agent/inbox/spliced',
+      'user/message',
+      'step/start',
+    ]) {
+      expect(projectDshSessionEvent({ type })).toBeUndefined()
+    }
+  })
+
+  it('translates tool/call → toolCall with { id, name, input } raw shape', () => {
+    const projected = projectDshSessionEvent({
+      type: 'tool/call',
+      data: {
+        turn: 1,
+        step: 1,
+        callId: 'call-abc-123',
+        name: 'Bash',
+        arguments: '{"command":"ls /tmp"}',
+      },
+    })
+    expect(projected).toEqual({
+      type: 'toolCall',
+      raw: {
+        id: 'call-abc-123',
+        name: 'Bash',
+        input: '{"command":"ls /tmp"}',
+      },
+    })
+  })
+
+  it('drops tool/call when callId is missing', () => {
+    expect(
+      projectDshSessionEvent({
+        type: 'tool/call',
+        data: { name: 'Bash', arguments: '{}' },
+      }),
+    ).toBeUndefined()
+  })
+
+  it('translates tool/result → toolResult with raw.tool_use_id pairing callId', () => {
+    const projected = projectDshSessionEvent({
+      type: 'tool/result',
+      data: {
+        turn: 1,
+        step: 1,
+        message: {
+          role: 'user',
+          content: [{ type: 'tool-result', toolCallId: 'call-abc-123', content: [] }],
+        },
+      },
+    })
+    expect(projected).toEqual({
+      type: 'toolResult',
+      raw: { tool_use_id: 'call-abc-123' },
+    })
+  })
+
+  it('drops tool/result when message.content[0].toolCallId is missing', () => {
+    expect(
+      projectDshSessionEvent({
+        type: 'tool/result',
+        data: { message: { content: [] } },
+      }),
+    ).toBeUndefined()
+  })
+})
+
 describe('dsh run — loopback against dsh-mock', () => {
   it('happy path: initialize → prompt → message + turn/end → idle', async () => {
     process.env.MOCK_NONCE = 'nonce-happy'
@@ -178,18 +304,33 @@ describe('dsh run — loopback against dsh-mock', () => {
     process.env.MOCK_EMIT = 'message'
     const { events, result } = await runOnce(makeRequest())
     expect(result).toMatchObject({ text: 'nonce-happy', stopReason: 'completed' })
-    // Session events are forwarded with their native type.
-    expect(events.some((e) => e.type === 'assistant/message')).toBe(true)
-    expect(events.some((e) => e.type === 'turn/end')).toBe(true)
+    // Session events are projected to zai bg vocabulary so the SSE
+    // drawer can render them.
+    expect(events.some((e) => e.type === 'agentMessage')).toBe(true)
+    expect(events.some((e) => e.type === 'turnCompleted')).toBe(true)
+    // The raw dsh frame is preserved on `raw` for full fidelity.
+    expect(
+      events.some(
+        (e) =>
+          e.type === 'agentMessage' &&
+          (e.raw as { type?: string } | undefined)?.type === 'assistant/message',
+      ),
+    ).toBe(true)
   })
 
-  it('chunks-only fold: streamed text-delta becomes the answer', async () => {
+  it('chunks-only fold: streamed text-delta becomes per-event agentMessage', async () => {
     process.env.MOCK_NONCE = 'chunky'
     process.env.MOCK_EMIT = 'chunks'
     process.env.MOCK_TURN_KIND = 'completed'
-    const { result } = await runOnce(makeRequest())
+    const { events, result } = await runOnce(makeRequest())
     expect(result.text).toBe('hello chunky')
     expect(result.stopReason).toBe('completed')
+    // Each text-delta chunk projects to its own agentMessage so the SSE
+    // drawer can stream them as they arrive (TaskDrawer accumulates into
+    // pendingText and flushes on turnCompleted).
+    const agentMessages = events.filter((e) => e.type === 'agentMessage')
+    expect(agentMessages.length).toBe(2)
+    expect(agentMessages.map((e) => e.text)).toEqual(['hello ', 'chunky'])
   })
 
   it('max-tokens terminal maps to max-tokens stopReason', async () => {
@@ -248,7 +389,7 @@ describe('dsh run — loopback against dsh-mock', () => {
     const run = await startDshRun(makeRequest(), { parentCwd: HERE }, baseSpec())
     const iter = run.events[Symbol.asyncIterator]()
     const first = await iter.next()
-    expect(first.value?.type).toBe('assistant/message')
+    expect(first.value?.type).toBe('agentMessage')
     await iter.return?.()
     await run.cancel()
     const result = await run.result

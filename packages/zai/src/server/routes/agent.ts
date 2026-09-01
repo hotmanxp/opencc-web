@@ -37,7 +37,6 @@ import {
 } from "@zn-ai/zn-agent-core";
 import { getDefaultMode } from "../services/permissionMode.js";
 import { getCachedZaiSettingsSync } from "../services/zaiSettingsStore.js";
-import { flushPendingBashNotifications } from "../services/bashNotifier.js";
 import { eventBus } from "../services/eventBus.js";
 import type { ServerEventInput } from "../services/eventBus.js";
 import { sessionInbox, type InboxMessage } from "../services/sessionInbox.js";
@@ -125,6 +124,22 @@ router.use('/agent', commandsRouter)
 // 应该在 askRegistry.register 里接一个独立的 setTimeout,而不是复用这里的
 // abortController。
 const HARD_TIMEOUT_MS = 2 * 60 * 60 * 1000;
+
+/**
+ * 实例级 mainAgent 强制（任务工厂 profile）。
+ *
+ * 任务工厂实例（`--app task-factory`）由 `cli/index.ts` 把
+ * `process.env.ZAI_APP = 'task-factory'` 落到进程环境；
+ * `routes/system.ts` 据此在 /api/system 响应里回显 app。
+ * `routes/agent.ts` 的 /prompt handler 在会话没有自己的
+ * `meta.mainAgent`（per-session 冻结值）时，用此辅助决定
+ * fallback 值：任务工厂实例下强制 'task-factory'，不走全局
+ * `settings.mainAgent`。其它实例（无 profile 或未来加新 profile）
+ * 返回 `null`，保持原行为（fallback `settings.mainAgent ?? 'default'`）。
+ */
+function instanceForcedMainAgent(): string | null {
+  return process.env.ZAI_APP === 'task-factory' ? 'task-factory' : null
+}
 
 // ExitPlanMode 退出 plan 后的 mode 回写表。用户把会话切到 plan（PATCH
 // permissionMode='plan'）时记录"进入 plan 前的 mode"；当模型调用
@@ -1025,7 +1040,7 @@ function resolveInboxCwd(sid: string): string {
 // SessionInbox.followup / steer 在 idle 且 wakeBudget 预算内会调 wakeHandler
 // 唤醒父 session — 这里注册为 runNextInQueue, 把 next-turn lane 的消息
 // 作为一条 prompt 喂给 LLM。handler 抛错仅 console.warn, 不让后台回调把
-// server 弄崩(与 SubagentNotifier / BashNotifier 同款防御)。
+// server 弄崩(与 SubagentNotifier 同款防御)。
 sessionInbox.setWakeHandler((sid) => {
   void runNextInQueue(sid).catch((err) =>
     console.warn('[agent] inbox wake runNextInQueue failed:', err),
@@ -1214,7 +1229,11 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // 用同步缓存读(不 await)—— prompt 热路径不该被 settings 初始化阻塞。
     if (sessionMainAgent === null) {
       try {
-        sessionMainAgent = getCachedZaiSettingsSync().mainAgent ?? 'default';
+        // 任务工厂 profile:实例级强制 'task-factory',不走全局设置
+        // (用户改 settings.mainAgent 也不会改变任务工厂实例的 fallback)。
+        // 见 instanceForcedMainAgent() 注释。
+        sessionMainAgent = instanceForcedMainAgent()
+          ?? getCachedZaiSettingsSync().mainAgent ?? 'default';
         // 仅当 transcript 已存在(消息已落盘)才写 —— 新会话首条消息由
         // 后续 append 流程创建文件,此时写会因文件不存在而失败(无害)。
         if (transcript) {
@@ -1719,9 +1738,6 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
     // release 只删 map 项, 不主动 .abort(). abort 已经发生过的 controller
     // 自然 abort, 还没发生的就让它跑完.
     releaseSessionController(sessionId)
-    // 同上:暂存的后台 Bash 完成通知(BashNotifier running 守卫暂存)在
-    // 主线结束后补发,避免通知 query 与主线并行 / 通知之间互相并行。
-    flushPendingBashNotifications(sessionId)
   }
   })
 }

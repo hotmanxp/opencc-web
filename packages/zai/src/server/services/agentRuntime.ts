@@ -102,7 +102,7 @@ function resolveRuntimeCore(settings: ZaiSettings): RuntimeCore {
 let runtime: OpenccRuntime | null = null
 let currentSessionId: string | null = null
 // zai patch (2026-08-28): initAgentRuntime 解析出的核心运行时缓存,供下游按
-// 运行时分支(如 SubagentNotifier / BashNotifier 在 inproc 下跳过
+// 运行时分支(如 SubagentNotifier 在 inproc 下跳过
 // server 注入——通知由 vendor print 环的 commandQueue drain 原生投递)。
 let activeRuntimeCore: RuntimeCore = 'default'
 /** 当前核心运行时;'default' 也是 initAgentRuntime 未跑完时的安全默认值。 */
@@ -346,19 +346,6 @@ export function releaseSessionController(sessionId: string): void {
   sessionControllers.delete(sessionId)
 }
 
-/**
- * 某 session 当前是否有活跃 query 在跑。runQueryLoop 在开始时
- * registerSessionController、结束(含 abort/异常)时 releaseSessionController,
- * 所以这个 Map 的键集就是"正在跑 query 的 session"。
- *
- * 供 BashNotifier 做 running 守卫:主线活跃时不另起通知 query
- * (通知已在 commandQueue,靠 QueryEngine mid-turn drain 注入),对齐
- * opencc `if (running) return` 语义。
- */
-export function hasActiveQuery(sessionId: string): boolean {
-  return sessionControllers.has(sessionId)
-}
-
 export function abortSessionController(
   sessionId: string,
   reason?: string,
@@ -429,7 +416,7 @@ export function getActivePromptCount(): number {
  * subagent config object.
  */
 async function readSubagentConfigSafe(
-  name: 'claude-code' | 'dsh',
+  name: 'opencc' | 'dsh',
 ): Promise<unknown | undefined> {
   try {
     const settings = await readZaiSettings()
@@ -489,8 +476,9 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
   })
 
   // zai patch (2026-08-21): register the subagent providers we ship
-  // today. `claude-code` is registered unconditionally (defaults mean
-  // `enabled: false` — explicit `subagent_type: 'claude-code'` calls still
+  // today. `opencc` (claude-code provider) is registered unconditionally
+  // (defaults mean `enabled: false` — explicit `subagent_type: 'opencc'`
+  // calls still
   // route through the provider).
   // zai patch (2026-08-31): `dsh` registers ONLY when
   // `settings.subagents.dsh.enabled === true` — spawning `dsh --profile sdk`
@@ -527,11 +515,11 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       if (typeof applyClaude === 'function') {
         applyClaude(
           registry,
-          await readSubagentConfigSafe('claude-code'),
+          await readSubagentConfigSafe('opencc'),
         )
       } else {
         console.warn(
-          '[initAgentRuntime] claude-code subagent symbols missing — did you forget to rebuild core?',
+          '[initAgentRuntime] opencc (claude-code) subagent symbols missing — did you forget to rebuild core?',
         )
       }
       const dshConfig = await readSubagentConfigSafe('dsh')

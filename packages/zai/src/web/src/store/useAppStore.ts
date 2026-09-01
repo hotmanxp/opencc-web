@@ -62,6 +62,10 @@ interface AppState {
   // isManagedChild/supervisorPid/instanceId 由 Layout 从 GET /api/system
   // hydrate 进来,SettingsDrawer 用 isManagedChild 条件渲染重启/关闭按钮,
   // Layout 用它决定"实例管理"菜单是否显示。
+  // app 是任务工厂实例的 profile(后端 GET /api/system 回显的 process.env.ZAI_APP,
+  // 当前仅支持 'task-factory'):router.tsx 的 TaskFactoryRedirect 据此把
+  // / 与 /agent 重定向到 /super-tasks。`null` 表示未识别 / 未配置(profile
+  // 为空),undefined 表示字段未回传(向后兼容旧的 GET /api/system 响应)。
   instanceContext: {
     cwd: string;
     cwdName: string;
@@ -72,6 +76,7 @@ interface AppState {
     isManagedChild?: boolean;
     supervisorPid?: number | null;
     instanceId?: string | null;
+    app?: string | null;
   } | null;
   setConnected: (v: boolean) => void;
   setInstanceContext: (ctx: {
@@ -84,6 +89,7 @@ interface AppState {
     isManagedChild?: boolean;
     supervisorPid?: number | null;
     instanceId?: string | null;
+    app?: string | null;
   }) => void;
   applyJobEvent: (event: ServerEvent) => void;
   applySystemEvent: (event: ServerEvent) => void;

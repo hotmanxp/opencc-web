@@ -53,8 +53,14 @@ program
   // 落到 env ZAI_RUNTIME_CORE。不传 → 不动 env,沿用 settings.json / 父进程
   // env(默认 repl)。见 packages/zai/src/cli/runtimeCoreFlag.ts。
   .option('--runtimeCore <mode>', 'Core runtime: default (in-process createOpenccRuntime) | inproc (in-process print multi-session) | spawn (opencc -p subprocess)')
+  .option('--app <profile>', '应用 profile: task-factory 启动即打开 /super-tasks 并锁定主管 Agent')
   .action((options) => {
     applyRuntimeCoreFlag(options.runtimeCore);
+    // 应用 profile 透传到 env ZAI_APP：routes/agent.ts 据此把会话 mainAgent
+    // 锁为 'task-factory'，routes/system.ts 据此在 /api/system 响应里回
+    // 显当前 profile。`--app` 是 opt-in profile，未知值在 CLI 层不触发任何
+    // 行为、直接透传（由下游 agent.ts / system.ts 按 env 各查各表），无害。
+    if (options.app) process.env.ZAI_APP = options.app;
     return runDev(options);
   });
 
@@ -66,6 +72,7 @@ program
   .option('--lan', 'Bind to 0.0.0.0 to allow LAN clients to access')
   .option('--sdk', 'SDK/headless mode: treat the runtime as non-interactive (default is interactive OpenCC CLI)')
   .option('--runtimeCore <mode>', 'Core runtime: default (in-process createOpenccRuntime) | inproc (in-process print multi-session) | spawn (opencc -p subprocess)')
+  .option('--app <profile>', '应用 profile: task-factory 启动即打开 /super-tasks 并锁定主管 Agent')
   // Internal marker: when the supervisor spawns a managed child it
   // re-invokes `zai start --managed-child ...` so the child recognises
   // it is already inside a managed session and skips the supervisor
@@ -74,6 +81,8 @@ program
   .option('--managed-child', 'internal: spawned by supervisor')
   .action((options) => {
     applyRuntimeCoreFlag(options.runtimeCore);
+    // 见上方 dev command 的说明。start 也按同口径透传（未知 profile 无害）。
+    if (options.app) process.env.ZAI_APP = options.app;
     return runStart(options);
   });
 

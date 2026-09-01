@@ -54,7 +54,7 @@ describe('SpawnAgentTool — surface', () => {
   it('description includes the registered provider section (formatSubagentProviderSection)', () => {
     expect(spawnAgentTool.description()).toContain('no external subagent providers are registered')
     getSubagentRegistry().registerProvider({
-      name: 'claude-code',
+      name: 'opencc',
       inheritsParentContext: false,
       capabilities: NO_START_CAPABILITIES,
       // call() integration is out of scope for surface tests; spy just
@@ -65,7 +65,7 @@ describe('SpawnAgentTool — surface', () => {
     })
     const desc = spawnAgentTool.description()
     expect(desc).toContain('External subagent providers')
-    expect(desc).toContain('claude-code')
+    expect(desc).toContain('opencc')
   })
 
   it('inputSchema drops run_in_background (pure-async tool)', () => {

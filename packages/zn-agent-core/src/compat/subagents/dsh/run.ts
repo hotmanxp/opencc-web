@@ -5,6 +5,7 @@ import {
 } from '../../subprocess/index.js'
 import { JsonRpcClient } from '../../subprocess/jsonRpc.js'
 import type {
+  SubagentEvent,
   SubagentRequest,
   SubagentContext,
   SubagentResult,
@@ -125,6 +126,105 @@ function contentBlocksText(message: unknown): string {
 }
 
 /**
+ * Translate one dsh `session.event` frame into a zai-bg vocabulary
+ * `SubagentEvent` (or `undefined` to drop). zai's TaskDrawer.tsx SSE
+ * timeline only knows six keys: `agentMessage`, `toolCall`, `toolResult`,
+ * `commentary`, `turnStarted`, `turnCompleted`. dsh's native frame names
+ * differ (`assistant/message`, `assistant/chunk`, `turn/start`,
+ * `turn/end`, plus protocol noise like `permission/preset`,
+ * `sandbox/mode`, `approval/policy`, `agent/inbox/spliced`,
+ * `user/message`, `step/start`) — left untranslated they drop from the
+ * UI as if the provider emitted nothing.
+ *
+ * Mapping rules:
+ *   - `assistant/message`           → `agentMessage` (full text from
+ *                                     `data.message.content[]` text blocks)
+ *   - `assistant/chunk` (text-delta) → `agentMessage` (one per delta; the
+ *                                     drawer accumulates text via
+ *                                     `pendingText += d.text` until a turn
+ *                                     boundary flushes it)
+ *   - `turn/start`                  → `turnStarted`
+ *   - `turn/end`                    → `turnCompleted`
+ *   - `tool/call`                   → `toolCall` with `raw = { id, name,
+ *                                     input }` (dsh `data.callId` →
+ *                                     `id`; `data.arguments` (JSON
+ *                                     string) → `input`)
+ *   - `tool/result`                 → `toolResult` with `raw = { tool_use_id }`
+ *                                     (dsh `data.message.content[0].toolCallId`
+ *                                     → `tool_use_id` to pair with the
+ *                                     prior toolCall)
+ *   - `commentary`                  → `commentary` (passthrough)
+ *   - everything else               → dropped
+ *
+ * `raw` keeps the original dsh frame for callers that want full
+ * fidelity (TaskDrawer uses `raw` only on `tool_use` / `tool_result`).
+ */
+export function projectDshSessionEvent(
+  event: DshSessionEventFrame,
+): SubagentEvent | undefined {
+  switch (event.type) {
+    case 'assistant/message': {
+      const text = contentBlocksText(event.data?.message)
+      if (text.length === 0) return undefined
+      return { type: 'agentMessage', text, raw: event }
+    }
+    case 'assistant/chunk': {
+      const chunk = event.data?.chunk as { type?: unknown; text?: unknown } | undefined
+      if (chunk?.type !== 'text-delta') return undefined
+      const text = typeof chunk.text === 'string' ? chunk.text : ''
+      if (text.length === 0) return undefined
+      return { type: 'agentMessage', text, raw: event }
+    }
+    case 'turn/start':
+      return { type: 'turnStarted', raw: event }
+    case 'turn/end':
+      return { type: 'turnCompleted', raw: event }
+    // `tool/call` payload (`packages/core/session/src/types.ts:263`):
+    //   { turn, step, callId, name, arguments (raw JSON string) }
+    // zai bg wants raw = { id, name, input } — TaskDrawer.tsx:678 reads
+    // raw.id / raw.name / raw.input. The raw JSON string is kept on
+    // `input` verbatim; rendering as a string is acceptable for now.
+    case 'tool/call': {
+      const d = event.data as { callId?: unknown; name?: unknown; arguments?: unknown } | undefined
+      const callId = typeof d?.callId === 'string' ? d.callId : ''
+      if (!callId) return undefined
+      return {
+        type: 'toolCall',
+        raw: {
+          id: callId,
+          name: typeof d?.name === 'string' ? d.name : 'tool',
+          input: d?.arguments,
+        },
+      }
+    }
+    // `tool/result` payload (`packages/core/session/src/types.ts:275`):
+    //   { turn, step, message: ToolResultMessage, error?, meta? }
+    // The `callId` is on `message.content[0].toolCallId`. zai bg wants
+    // raw.tool_use_id (TaskDrawer.tsx:697) to pair with the prior toolCall.
+    case 'tool/result': {
+      const d = event.data as { message?: { content?: Array<{ toolCallId?: unknown }> } } | undefined
+      const block = d?.message?.content?.[0]
+      const callId = typeof block?.toolCallId === 'string' ? block.toolCallId : ''
+      if (!callId) return undefined
+      return { type: 'toolResult', raw: { tool_use_id: callId } }
+    }
+    case 'commentary':
+      return {
+        type: 'commentary',
+        ...(typeof (event.data as { text?: unknown } | undefined)?.text === 'string'
+          ? { text: (event.data as { text: string }).text }
+          : {}),
+        raw: event,
+      }
+    default:
+      // Drop protocol-only noise: permission/preset, sandbox/mode,
+      // approval/policy, agent/inbox/spliced, user/message, step/start,
+      // ... — none of these surface in the transcript timeline.
+      return undefined
+  }
+}
+
+/**
  * Drive one dsh SDK-runtime child end-to-end:
  *
  *   1. Spawn `dsh --profile sdk [--patch …]` through {@link spawnSubprocess}
@@ -228,13 +328,13 @@ async function bootstrap(
       if (event.type === 'turn/end') {
         lastReason = event.data?.reason as DshTurnEndReason | undefined
       }
-      internal.pushEvent({
-        type: event.type,
-        ...(event.type === 'assistant/message'
-          ? { text: contentBlocksText(event.data?.message) }
-          : {}),
-        raw: event,
-      })
+      // Translate dsh wire vocabulary to the zai-bg vocabulary the SSE
+      // drawer selects on (`agentMessage` / `turnStarted` / `turnCompleted` /
+      // ...). Without this translation TaskDrawer.tsx:665's switch has no
+      // case for dsh names (`assistant/message`, `assistant/chunk`, ...)
+      // and the entire provider timeline drops from the UI.
+      const projected = projectDshSessionEvent(event)
+      if (projected !== undefined) internal.pushEvent(projected)
       return
     }
     if (

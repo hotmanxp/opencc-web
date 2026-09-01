@@ -18,7 +18,7 @@ import {
   writeFile,
 } from 'fs/promises'
 import memoize from 'lodash-es/memoize.js'
-import { basename, dirname, join } from 'path'
+import { basename, dirname, isAbsolute, join } from 'path'
 import {
   type AnalyticsMetadata_I_VERIFIED_THIS_IS_NOT_CODE_OR_FILEPATHS,
   logEvent,
@@ -576,6 +576,12 @@ export function getAgentTranscriptPath(agentId: AgentId): string {
   const projectDir = getSessionProjectDir() ?? getProjectDir(getOriginalCwd())
   const sessionId = getSessionId()
   const subdir = agentTranscriptSubdirs.get(agentId)
+  // zai patch (2026-09-01, task-factory): 绝对路径 subdir 直接作为
+  // transcript 根目录 —— 任务工厂把执行器 transcript 归拢到
+  // ~/.zai/task-factory/processing-tasks/<id>/，原实现只支持相对拼接。
+  if (subdir && isAbsolute(subdir)) {
+    return join(subdir, `agent-${agentId}.jsonl`)
+  }
   const base = subdir
     ? join(projectDir, sessionId, 'subagents', subdir)
     : join(projectDir, sessionId, 'subagents')
@@ -816,7 +822,11 @@ export function resetProjectForTesting(): void {
 }
 
 export function setSessionFileForTesting(path: string): void {
-  getProject().sessionFile = path
+  const project = getProject()
+  project.sessionFile = path
+  // zai patch (2026-09-01): ownership stamp so the write-path guards treat
+  // this pointer as belonging to the current (test) session.
+  project.sessionFileSessionId = getSessionId() as string
 }
 
 type InternalEventWriter = (
@@ -881,6 +891,15 @@ class Project {
   currentSessionBranch: SessionBranchEntry | undefined
 
   sessionFile: string | null = null
+  // zai patch (2026-09-01, sess-1788251606074-owtqwsla 串会话修复): the
+  // sessionId `sessionFile` was derived for. In zai's shared OpenccRuntime
+  // (`repl` mode) all zai sessions drive vendor's transcript writer in the
+  // SAME process, switching the active session via `runWithSdkContext` ALS
+  // per query — `switchSession` / `resetSessionFilePointer` never run, so a
+  // pointer cached for session A silently received session B's entries.
+  // Write-path reads of `sessionFile` must check ownership; a mismatch means
+  // "not materialized for the current session yet".
+  sessionFileSessionId: string | null = null
   // Entries buffered while sessionFile is null. Flushed by materializeSessionFile
   // on the first user/assistant message — prevents metadata-only session files.
   private pendingEntries: Entry[] = []
@@ -1212,7 +1231,21 @@ class Project {
 
   resetSessionFile(): void {
     this.sessionFile = null
+    this.sessionFileSessionId = null
     this.pendingEntries = []
+  }
+
+  /**
+   * zai patch (2026-09-01): true when `sessionFile` is a usable pointer for
+   * the CURRENT active session (STATE or `runWithSdkContext` ALS). A pointer
+   * materialized for another session counts as stale — the in-process
+   * multi-session runtime never calls switchSession/resetSessionFilePointer.
+   */
+  private hasCurrentSessionFile(): boolean {
+    return (
+      this.sessionFile !== null &&
+      this.sessionFileSessionId === (getSessionId() as string)
+    )
   }
 
   /**
@@ -1244,7 +1277,10 @@ class Project {
    * external-writer concern — their caches are authoritative.
    */
   reAppendSessionMetadata(skipTitleRefresh = false): void {
-    if (!this.sessionFile) return
+    // zai patch (2026-09-01): only touch the file that belongs to the
+    // currently-active session (exit-cleanup can fire while the pointer /
+    // ALS session of another in-process session is cached).
+    if (!this.hasCurrentSessionFile()) return
     const sessionId = getSessionId() as UUID
     if (!sessionId) return
 
@@ -1416,7 +1452,9 @@ class Project {
    * the transcript so interruption never exposes a truncated live file.
    */
   async removeMessageByUuid(targetUuid: UUID): Promise<void> {
-    if (this.sessionFile === null) return
+    // zai patch (2026-09-01): stale (other-session) pointer → this session
+    // has no materialized file, nothing to tombstone.
+    if (!this.hasCurrentSessionFile()) return
     const sessionFile = this.sessionFile
 
     return this.trackWrite(async () => {
@@ -1558,7 +1596,17 @@ class Project {
     if (this.pendingEntries.length > 0) {
       const buffered = this.pendingEntries
       this.pendingEntries = []
+      // zai patch (2026-09-01): pendingEntries can mix sessions now that the
+      // pointer flips per ALS-active session — only flush entries belonging
+      // to the current session; re-buffer the rest for their own session's
+      // materialization.
+      const currentSessionId = getSessionId() as string
       for (const entry of buffered) {
+        const entrySessionId = (entry as { sessionId?: string }).sessionId
+        if (entrySessionId && entrySessionId !== currentSessionId) {
+          this.pendingEntries.push(entry)
+          continue
+        }
         await this.appendEntry(entry)
       }
     }
@@ -1576,8 +1624,10 @@ class Project {
 
       // First user/assistant message materializes the session file.
       // Hook progress/attachment messages alone stay buffered.
+      // zai patch (2026-09-01): a pointer owned by another session counts
+      // as un-materialized for the current session.
       if (
-        this.sessionFile === null &&
+        !this.hasCurrentSessionFile() &&
         messages.some(m => m.type === 'user' || m.type === 'assistant')
       ) {
         await this.materializeSessionFile()
@@ -1709,6 +1759,14 @@ class Project {
 
     let sessionFile: string
     if (isCurrentSession) {
+      // zai patch (2026-09-01): a pointer materialized for a different
+      // session is stale — drop it and buffer until this session
+      // materializes its own file (otherwise session B's entries append to
+      // session A's jsonl while carrying B's sessionId stamp).
+      if (this.sessionFile !== null && !this.hasCurrentSessionFile()) {
+        this.sessionFile = null
+        this.sessionFileSessionId = null
+      }
       // Buffer until materializeSessionFile runs (first user/assistant message).
       if (this.sessionFile === null) {
         this.pendingEntries.push(entry)
@@ -1857,8 +1915,11 @@ class Project {
    * Do not need to create session files until they are written to.
    */
   private ensureCurrentSessionFile(): string {
-    if (this.sessionFile === null) {
+    // zai patch (2026-09-01): re-derive when the cached pointer belongs to
+    // a different session (in-process multi-session runtime, ALS switch).
+    if (this.sessionFile === null || !this.hasCurrentSessionFile()) {
       this.sessionFile = getTranscriptPath()
+      this.sessionFileSessionId = getSessionId() as string
     }
 
     return this.sessionFile
@@ -2124,6 +2185,8 @@ export async function resetSessionFilePointer() {
 export function adoptResumedSessionFile(): void {
   const project = getProject()
   project.sessionFile = getTranscriptPath()
+  // zai patch (2026-09-01): record the owning session alongside the path.
+  project.sessionFileSessionId = getSessionId() as string
   project.reAppendSessionMetadata(true)
 }
 
@@ -3807,7 +3870,12 @@ export function saveWorktreeState(
   // Write eagerly when the file already exists (mid-session enter/exit).
   // For --worktree startup, sessionFile is null — materializeSessionFile
   // will write it on the first message via reAppendSessionMetadata.
-  if (project.sessionFile) {
+  // zai patch (2026-09-01): only when the pointer belongs to the CURRENT
+  // session — otherwise the cached file is another in-process session's and
+  // this entry (stamped getSessionId()) would land in the wrong transcript.
+  // The cache above still lets reAppendSessionMetadata persist it at the
+  // owning session's next materialization/exit.
+  if (project.sessionFile && project.sessionFileSessionId === (getSessionId() as string)) {
     appendEntryToFile(project.sessionFile, {
       type: 'worktree-state',
       worktreeSession: stripped,

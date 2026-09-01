@@ -54,6 +54,14 @@ export interface InstanceDefinition {
    * Mirrors lan-agent's `InstanceRuntimeCore` enum (0.7.3 added `repl`).
    */
   runtimeCore?: RuntimeCore
+  /**
+   * 启动 profile：'task-factory' = 任务工厂实例（打开 /super-tasks、锁定主管 Agent）。
+   * 该值经 supervisor spawn `--app` 传给子进程，并在 `/api/system` 回显。
+   * 子进程 `cli/index.ts` 把它落到 `process.env.ZAI_APP`；`routes/agent.ts`
+   * 看到该 env 后强制把所有新建会话的 `mainAgent` 锁定为 `task-factory`，
+   * 不走全局 `settings.mainAgent`。`undefined` 是默认（无 profile），行为与既有实例一致。
+   */
+  app?: 'task-factory'
 }
 
 export interface InstanceStatus {

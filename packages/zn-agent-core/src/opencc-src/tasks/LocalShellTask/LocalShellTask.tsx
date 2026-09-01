@@ -112,6 +112,9 @@ The command is likely blocked on an interactive prompt. Kill this task and re-ru
         enqueuePendingNotification({
           value: message,
           mode: 'task-notification',
+          // zai patch (2026-09-01): stall watchdog 只对 bash 类任务启动
+          // (monitor 提前返回),固定标 bash。
+          taskKind: 'bash',
           priority: 'next',
           agentId
         });
@@ -189,6 +192,9 @@ function enqueueShellNotification(taskId: string, description: string, status: '
   enqueuePendingNotification({
     value: message,
     mode: 'task-notification',
+    // zai patch (2026-09-01): 按 BashTaskKind 打标,供 wrapCommandText 分流
+    // 文案(bash 完成通知不再被称为 "background agent")。
+    taskKind: kind === 'monitor' ? 'monitor' : 'bash',
     priority: 'next',
     agentId
   });

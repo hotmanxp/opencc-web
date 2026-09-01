@@ -27,6 +27,14 @@ interface StartOptions {
    */
   runtimeCore?: string;
   /**
+   * `--app <profile>` — 应用 profile（当前仅 `task-factory`）。`cli/index.ts`
+   * 的两条 action 已经在进程早期把它落到 `process.env.ZAI_APP`；这里保留
+   * 字段仅为 commander 类型完整 + 与 supervisor 透传的 `--app` flag 对齐。
+   * 受管子进程拿不到 commander 的 options,但能拿到 env,所以本字段不直接
+   * 透传 child（env 已经传过去了）。
+   */
+  app?: string;
+  /**
    * Force the managed/supervisor code path. When `undefined`, the decision
    * is taken from `process.env.ZAI_NO_MANAGED` (managed by default; set
    * `ZAI_NO_MANAGED=1` to opt out for tests or single-shot runs).

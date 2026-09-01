@@ -259,7 +259,10 @@ export function enqueueAgentNotification({
 </${TASK_NOTIFICATION_TAG}>`;
   enqueuePendingNotification({
     value: message,
-    mode: 'task-notification'
+    mode: 'task-notification',
+    // zai patch (2026-09-01): 子代理完成通知显式标 agent(此前与 bash 共用
+    // "background agent" 措辞靠运气区分)。
+    taskKind: 'agent'
   });
 }
 

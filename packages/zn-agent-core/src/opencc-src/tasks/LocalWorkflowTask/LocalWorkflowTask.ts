@@ -502,6 +502,8 @@ export class LocalWorkflowTask implements Task {
     enqueuePendingNotification({
       value: content,
       mode: 'task-notification',
+      // zai patch (2026-09-01): workflow 终态通知标 workflow,分流文案。
+      taskKind: 'workflow',
     })
   }
 

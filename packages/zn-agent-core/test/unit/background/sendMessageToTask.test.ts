@@ -194,7 +194,7 @@ describe('sendMessageToTask', () => {
       input: { prompt: 'x' },
       metadata: { parentSessionId: 'sess-1' },
     })
-    // attach 路径 status=queued,sendMessageToTask 应该 ok:true
+    // attach 路径 status=running(非终态),sendMessageToTask 应该 ok:true
     const resBefore = await runtime.sendMessageToTask('agent-attach-1', 'go')
     expect(resBefore).toEqual({ ok: true })
 

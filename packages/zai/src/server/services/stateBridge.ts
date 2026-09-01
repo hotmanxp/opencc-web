@@ -10,9 +10,8 @@
  * 时调)。
  */
 
-import { stateChangeBus, type BashTaskInfo } from '@zn-ai/zn-agent-core'
+import { stateChangeBus } from '@zn-ai/zn-agent-core'
 import { eventBus } from './eventBus.js'
-import { getBashNotifier } from './bashNotifier.js'
 
 let _stateBridgeDispose: (() => void) | null = null
 
@@ -31,17 +30,13 @@ export function initStateBridge(): () => void {
   const onCwdChanged = (e: { sessionId: string; cwd: string; updatedAt: number }) => {
     eventBus.emit({ type: 'cwd.changed', ...e })
   }
+  // zai patch (2026-09-01): 不再调 BashNotifier —— repl/inproc 运行时下
+  // vendor LocalShellTask.enqueueShellNotification 的 commandQueue 与查询
+  // loop 同 module 实例,mid-turn drain 可达(会话 sess-1788225186061 现场:
+  // BashNotifier 与 vendor drain 双链路导致通知重复注入)。这里只保留
+  // UI 侧 SSE 透传。
   const onBashTaskChanged = (e: { sessionId: string; task: unknown }) => {
     eventBus.emit({ type: 'bash_task.changed', ...e })
-    // 后台 Bash 完成 → 通知 LLM(仿 SubagentNotifier)。terminal 时给父
-    // session 开新一轮 turn,让 LLM 感知后台命令已完成。fire-and-forget,
-    // 内部异常已 try/catch,不会影响 SSE 链路。
-    try {
-      getBashNotifier().handle(e as { sessionId: string; task: BashTaskInfo })
-    } catch {
-      // BashNotifier 未 init(测试/前缀启动)或 handle 抛错 — 静默,
-      // 这层只负责 UI 透传,LLM 通知失败不能拖垮状态桥。
-    }
   }
   const onV2TaskChanged = (e: { sessionId: string; task: unknown; action: 'upsert' | 'delete' }) => {
     eventBus.emit({ type: 'v2_task.changed', ...e })

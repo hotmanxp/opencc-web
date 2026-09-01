@@ -58,6 +58,7 @@ import type {
   AttachmentMessage,
   Message,
   MessageOrigin,
+  TaskNotificationKind,
 } from 'src/types/message.js'
 import {
   type QueuedCommand,
@@ -576,6 +577,10 @@ export type Attachment =
       origin?: MessageOrigin
       /** Carried from QueuedCommand.isMeta — distinguishes human-typed from system-injected */
       isMeta?: boolean
+      /** zai patch (2026-09-01): carried from QueuedCommand.taskKind — 后台任务来源类型 */
+      taskKind?: TaskNotificationKind
+      /** zai patch (2026-09-01): carried from QueuedCommand.enqueuedAt — ms epoch */
+      enqueuedAt?: number
     }
   | {
       type: 'output_style'
@@ -1162,6 +1167,10 @@ export async function getQueuedCommandAttachments(
         commandMode: _.mode,
         origin: _.origin,
         isMeta: _.isMeta,
+        // zai patch (2026-09-01): 透传任务类型与入队时刻,wrapCommandText 据此
+        // 分流文案并渲染可读时间。
+        taskKind: _.taskKind,
+        enqueuedAt: _.enqueuedAt,
       }
     }),
   )

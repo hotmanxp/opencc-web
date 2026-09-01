@@ -31,6 +31,7 @@ import bashReplRouter from './routes/bashRepl.js';
 import replHistoryRouter from './routes/replHistory.js';
 import transcriptRouter from './routes/transcript.js';
 import instancesRouter from './routes/instances.js';
+import superTasksRouter from './routes/superTasks.js';
 import { ensureManifestDir } from './services/manifest.js';
 import { initInstanceSupervisor } from './services/instanceSupervisor.js';
 import { initAgentRuntime, getAskRegistry, getApproveRegistry, getPermissionRegistry } from './services/agentRuntime.js';
@@ -39,10 +40,11 @@ import {
   initSubagentNotifierLifecycle,
 } from './services/backgroundRuntime.js';
 import { initStateBridge } from './services/stateBridge.js';
-import { initBashNotifier } from './services/bashNotifier.js';
 import { initZaiSettingsCache } from './services/zaiSettingsStore.js';
 import { runClaudeToZaiMigration } from './services/zaiMigration.js';
 import { maybeAutoUpdate } from './services/updater.js';
+import { initTaskFactoryBridge } from './services/taskFactoryBridge.js';
+import { startTaskFactoryManagedLoop } from './services/taskFactoryManagedLoop.js';
 import { startBranchChecker } from './routes/system.js';
 import { noCacheForApi } from './middleware/noCache.js';
 import { redirectMobileUA } from './middleware/redirectMobileUA.js';
@@ -74,9 +76,6 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   // 内部 tryGetNotifier 也兜底了反向顺序)。
   initSubagentNotifierLifecycle()
   initBackgroundRuntime()
-  // 后台 Bash 完成 → 通知 LLM 的 BashNotifier。stateBridge 订阅
-  // bash_task.changed 时经 getBashNotifier() 懒取,这里先注册保证可用。
-  initBashNotifier()
   // 桥接 agent-core StateChangeBus → eventBus. 必须在 initBackgroundRuntime
   // 之后调: agent-core 才会发 agent_task.changed, 先订阅才不会丢第一批;
   // 同时 stateBridge 必须存在, emit 才有下游订阅 (eventBus) 接收.
@@ -231,6 +230,15 @@ export async function createApp(opts: AppOptions): Promise<express.Express> {
   app.use('/api', v2TasksRouter);
   app.use('/api', sessionStateRouter);
   app.use('/api', instancesRouter);
+  // /api/super-tasks — 任务工厂 REST 端点(list / detail / delete / managed / inject)。
+  // 路由挂在 /api 前缀下,内部路径自带 super-tasks,与 /api/agent 不冲突。
+  app.use('/api', superTasksRouter);
+  // 注入 globalThis.__zaiTaskFactoryEmitter → eventBus 桥接,让 core 内
+  // emitTaskFactoryEvent 转 zai 的 SSE task_factory.* 事件。幂等。
+  initTaskFactoryBridge();
+  // AI 托管循环:顶层实例常驻(队列非空 → 派发;executor 终态 → 验收)。
+  // 受管子实例(带 ZAI_INSTANCE_ID)是执行器, 托管调度归父实例, 不启动。
+  if (!process.env.ZAI_INSTANCE_ID) startTaskFactoryManagedLoop();
   // /api/transcript/* 手动修复端点 — 给当前会话的 transcript 跑一次
   // repairAndPersistTranscript,补齐历史上漏写的 tool_result
   app.use('/api/transcript', transcriptRouter);

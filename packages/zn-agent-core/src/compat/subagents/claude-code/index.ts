@@ -35,9 +35,9 @@ import { startClaudeCodeRun } from './run.js'
  * and are NOT touched here.
  */
 export class ClaudeCodeProvider implements SubagentProvider {
-  readonly name = 'claude-code'
+  readonly name = 'opencc'
   readonly description =
-    "Delegate a one-shot task to a fresh Claude CLI session (independent process; no parent context). Use when you want a separate Claude context with the CLI's native tools for a standalone task."
+    "Delegate a one-shot task to a fresh OpenCC CLI session (independent process; no parent context). Use when you want a separate OpenCC context with the CLI's native tools for a standalone task."
   readonly inheritsParentContext = false
   readonly capabilities: SubagentCapabilities = NO_START_CAPABILITIES
 
@@ -64,7 +64,7 @@ export class ClaudeCodeProvider implements SubagentProvider {
 const DEFAULT_CONFIG: ClaudeCodeConfig = safeParseClaudeCodeConfig({})
 
 /**
- * Register the claude-code provider under the registry's `'claude-code'` name.
+ * Register the claude-code provider under the registry's `'opencc'` name.
  *
  * Idempotent: the registry itself rejects duplicate-name registration.
  */

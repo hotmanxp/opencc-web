@@ -104,7 +104,7 @@ describe('cancelByParentSession', () => {
 
     // attach 路径的终态由 caller 通过 finalizeTask 标记;cancelByParentSession
     // 只 abort controller,这里验证 controller 已被 abort 的信号会传给后续
-    // finalizeTask 的判定。attach 任务本身 status 仍 queued(外部管理),
+    // finalizeTask 的判定。attach 任务本身 status 仍 running(外部管理),
     // 但 cancel 后应能正常 finalize 为 cancelled。
     await runtime.finalizeTask('sub-1', 'cancelled', { message: 'cancelled', category: 'internal' })
     const t = await runtime.get('sub-1')

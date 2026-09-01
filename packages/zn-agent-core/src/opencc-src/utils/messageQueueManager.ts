@@ -125,7 +125,13 @@ export function recheckCommandQueue(): void {
  * Defaults priority to 'next' (processed before task notifications).
  */
 export function enqueue(command: QueuedCommand): void {
-  commandQueue.push({ ...command, priority: command.priority ?? 'next' })
+  // zai patch (2026-09-01): 统一盖章入队时刻 —— 通知类命令据此在模型文案里
+  // 渲染可读时间,乱序/滞后到达的通知能被识别为"过去的事件"。
+  commandQueue.push({
+    ...command,
+    enqueuedAt: command.enqueuedAt ?? Date.now(),
+    priority: command.priority ?? 'next',
+  })
   notifySubscribers()
   logOperation(
     'enqueue',
@@ -139,7 +145,12 @@ export function enqueue(command: QueuedCommand): void {
  * is never starved by system messages.
  */
 export function enqueuePendingNotification(command: QueuedCommand): void {
-  commandQueue.push({ ...command, priority: command.priority ?? 'later' })
+  // zai patch (2026-09-01): 同 enqueue,统一盖章 enqueuedAt。
+  commandQueue.push({
+    ...command,
+    enqueuedAt: command.enqueuedAt ?? Date.now(),
+    priority: command.priority ?? 'later',
+  })
   notifySubscribers()
   logOperation(
     'enqueue',

@@ -377,7 +377,11 @@ interface AgentState {
    * 详见 docs/superpowers/specs/2026-07-23-session-cold-state-design.md §3.2。
    */
   hydrateSessionState: (sid: string) => Promise<void>
-  createNewSession: () => void
+  // zai patch (Task 8 fix): 真实实现是 async (set state → POST /api/agent/sessions
+  // → loadSessions). 旧声明 `() => void` 是错的 — 调用方 `await s.createNewSession()`
+  // 只是因为 Promise 被忽略时不会报错而碰巧通过。改为 `Promise<void>`,既匹配实现,
+  // 也允许 `void s.createNewSession()` (忽略返回) 与 `await s.createNewSession()` 两种风格。
+  createNewSession: () => Promise<void>
   /**
    * createNewSession 异步进行中 — 清 sessionId 到 null 后,server POST
    * /api/agent/sessions 回来前的窗口(~50–200ms)。此期间 UI 必须禁止任何

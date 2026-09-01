@@ -15,7 +15,7 @@ import { TaskStopTool } from './tools/TaskStopTool/TaskStopTool.js'
 import { BriefTool } from './tools/BriefTool/BriefTool.js'
 import { SnipTool } from './tools/SnipTool/SnipTool.js'
 // zai patch (2026-08-31, plan spawnagent-register): SpawnAgent — external
-// CLI subagent carrier. Routes subagent_type='claude-code'|'dsh' through
+// CLI subagent carrier. Routes subagent_type='opencc'|'dsh' through
 // compat/subagents registry. See compat/tools/opencc/SpawnAgentTool.ts.
 // Kept as a function import so the wrapper reads the registry at call-time
 // (initAgentRuntime registers providers after zai-server boots).
@@ -195,7 +195,7 @@ export function getAllBaseTools(): Tools {
     // zai patch (2026-08-31, plan spawnagent-register): SpawnAgent — external
     // CLI subagent carrier. Sits next to vendor AgentTool so the model sees
     // both options (AgentTool for built-in agents, SpawnAgent for CLI
-    // engines via subagent_type='claude-code'|'dsh'). wrapAsOpenccTool is a
+    // engines via subagent_type='opencc'|'dsh'). wrapAsOpenccTool is a
     // plain object spread with no external side effects; lazy is unnecessary
     // because getAllBaseTools is invoked per-query (re-reads registry state).
     wrapSpawnAgentToolAsOpencc() as Tool,
@@ -298,7 +298,7 @@ export const getTools = (permissionContext: ToolPermissionContext): Tools => {
       }
       // zai patch (2026-08-31, plan spawnagent-register): include SpawnAgent
       // in the simple-mode REPL tool pool too so the model can route
-      // external CLI subagents via subagent_type='claude-code'|'dsh'.
+      // external CLI subagents via subagent_type='opencc'|'dsh'.
       replSimple.push(wrapSpawnAgentToolAsOpencc() as Tool)
       return filterToolsByDenyRules(replSimple, permissionContext)
     }

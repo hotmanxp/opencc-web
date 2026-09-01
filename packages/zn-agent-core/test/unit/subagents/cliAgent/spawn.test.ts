@@ -75,10 +75,10 @@ describe('subagents/cliAgent/spawn', () => {
   })
 
   it('name defaults to agentType when omitted', async () => {
-    getSubagentRegistry().registerProvider(makeStubProvider('claude-code'))
-    const spawn = await spawnCliAgent({ agentType: 'claude-code', prompt: 'hi' })
-    expect(spawn.name).toBe('claude-code')
-    expect(spawn.agent_id).toMatch(/^claude-code-[0-9a-z]{8}$/)
+    getSubagentRegistry().registerProvider(makeStubProvider('opencc'))
+    const spawn = await spawnCliAgent({ agentType: 'opencc', prompt: 'hi' })
+    expect(spawn.name).toBe('opencc')
+    expect(spawn.agent_id).toMatch(/^opencc-[0-9a-z]{8}$/)
   })
 
   it('teamName yields a vendor-shaped agent_id name@team', async () => {
@@ -125,8 +125,8 @@ describe('subagents/cliAgent/spawn', () => {
   })
 
   it('returns the provider run handle as spawn.run (for publish/cancel)', async () => {
-    getSubagentRegistry().registerProvider(makeStubProvider('claude-code'))
-    const spawn = await spawnCliAgent({ agentType: 'claude-code', prompt: 'hi' })
+    getSubagentRegistry().registerProvider(makeStubProvider('opencc'))
+    const spawn = await spawnCliAgent({ agentType: 'opencc', prompt: 'hi' })
     const result = await spawn.run.result
     expect(result.stopReason).toBe('completed')
     expect(result.text).toBe('ok')

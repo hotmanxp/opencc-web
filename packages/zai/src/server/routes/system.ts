@@ -107,6 +107,11 @@ router.get('/system', async (req, res) => {
         ? Number(process.env.ZAI_SUPERVISOR_PID)
         : null,
       instanceId: process.env.ZAI_INSTANCE_ID ?? null,
+      // 当前实例的应用 profile（仅 'task-factory'）。`cli/index.ts` 在
+      // 两条 command 的 action 顶部已经把它落到 `process.env.ZAI_APP`，
+      // 这里把同样的值回给前端（task-factory UI 用它决定要不要把 /super-tasks
+      // 设为默认页）。无 profile / 非受管实例返回 null。
+      app: process.env.ZAI_APP ?? null,
     });
   } catch (err) {
     res.status(500).json({ error: String(err) });

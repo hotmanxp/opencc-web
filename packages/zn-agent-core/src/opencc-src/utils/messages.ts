@@ -23,6 +23,8 @@ import {
 import { sanitizeToolNameForAnalytics } from 'src/services/analytics/metadata.js'
 import type { AgentId } from 'src/types/ids.js'
 import { companionIntroText } from '../buddy/prompt.js'
+// zai patch (2026-09-01): task-notification 文案分流 + 可读时间渲染。
+import { formatTaskNotification } from './taskNotificationText.js'
 import { NO_CONTENT_MESSAGE } from '../constants/messages.js'
 import { OUTPUT_STYLE_CONFIG } from '../constants/outputStyles.js'
 import { isAutoMemoryEnabled } from '../memdir/paths.js'
@@ -2625,11 +2627,22 @@ Read the team config to discover your teammates' names. Check the task list peri
     case 'queued_command': {
       // Prefer explicit origin carried from the queue; fall back to commandMode
       // for task notifications (which predate origin).
+      // zai patch (2026-09-01): 兜底 origin 合并 taskKind/enqueuedAt(可读时间
+      // 与按类型分流文案在 wrapCommandText 内渲染);显式 origin 若缺这两个字段
+      // 也补齐。
       const origin: MessageOrigin | undefined =
         attachment.origin ??
         (attachment.commandMode === 'task-notification'
           ? { kind: 'task-notification' }
           : undefined)
+      const enrichedOrigin: MessageOrigin | undefined =
+        origin?.kind === 'task-notification'
+          ? {
+              ...origin,
+              taskKind: origin.taskKind ?? attachment.taskKind,
+              enqueuedAt: origin.enqueuedAt ?? attachment.enqueuedAt,
+            }
+          : origin
 
       // Only hide from the transcript if the queued command was itself
       // system-generated. Human input drained mid-turn has no origin and no
@@ -2655,7 +2668,7 @@ Read the team config to discover your teammates' names. Check the task list peri
         const content: ContentBlockParam[] = [
           {
             type: 'text',
-            text: wrapCommandText(textContent, origin),
+            text: wrapCommandText(textContent, enrichedOrigin),
           },
           ...imageBlocks,
         ]
@@ -2664,7 +2677,7 @@ Read the team config to discover your teammates' names. Check the task list peri
           createUserMessage({
             content,
             ...metaProp,
-            origin,
+            origin: enrichedOrigin,
             uuid: attachment.source_uuid,
           }),
         ])
@@ -2673,9 +2686,9 @@ Read the team config to discover your teammates' names. Check the task list peri
       // String prompt
       return wrapMessagesInSystemReminder([
         createUserMessage({
-          content: wrapCommandText(String(attachment.prompt), origin),
+          content: wrapCommandText(String(attachment.prompt), enrichedOrigin),
           ...metaProp,
-          origin,
+          origin: enrichedOrigin,
           uuid: attachment.source_uuid,
         }),
       ])
@@ -4134,7 +4147,13 @@ export function wrapCommandText(
 ): string {
   switch (origin?.kind) {
     case 'task-notification':
-      return `A background agent completed a task:\n${raw}`
+      // zai patch (2026-09-01): 按 taskKind 分流(bash 完成通知不再叫
+      // "background agent"),并把 enqueuedAt 渲染成 LLM 可读时间 + 过期干扰
+      // 提示 —— 通知可能乱序/滞后到达,模型需要知道事件发生于过去某一刻。
+      return formatTaskNotification(raw, {
+        taskKind: origin.taskKind,
+        enqueuedAt: origin.enqueuedAt,
+      })
     case 'coordinator':
       return `The coordinator sent a message while you were working:\n${raw}\n\nAddress this before completing your current task.`
     case 'channel':

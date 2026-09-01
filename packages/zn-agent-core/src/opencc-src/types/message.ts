@@ -50,10 +50,31 @@ export type RedactedThinkingBlock = {
 
 export type ContentBlock = TextBlock | ToolUseBlock | ToolResultBlock | ImageBlock | ThinkingBlock | RedactedThinkingBlock
 
+/**
+ * zai patch (2026-09-01): 后台任务通知的来源类型。原先所有 task-notification
+ * (bash / subagent / workflow / monitor) 共用一条 "A background agent completed
+ * a task" 文案,模型会把后台 bash 完成通知误归因为用户指令。生产者入队时打上
+ * taskKind,wrapCommandText 按类型分流措辞。
+ */
+export type TaskNotificationKind = 'bash' | 'agent' | 'monitor' | 'workflow'
+
 // Message origin type
+// zai patch (2026-09-01): 原声明里的 'tool'/'assistant' 全库无使用(死值),实际
+// 在用的 kind 集合是 human/coordinator/channel/task-notification/server。
+// `(string & {})` 保留字面量补全,同时兼容旧 transcript 回放里的历史值。
 export type MessageOrigin = {
-  kind: 'human' | 'tool' | 'assistant' | 'server' | string
+  kind:
+    | 'human'
+    | 'coordinator'
+    | 'channel'
+    | 'task-notification'
+    | 'server'
+    | (string & {})
   server?: string
+  /** kind === 'task-notification' 时标注后台任务来源类型 */
+  taskKind?: TaskNotificationKind
+  /** 通知入队(≈事件发生)时刻, ms epoch —— 渲染为可读时间,提示可能的滞后 */
+  enqueuedAt?: number
 }
 
 // Message type used in conversation transcript handling

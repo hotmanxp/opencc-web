@@ -64,7 +64,10 @@ describe('attach()', () => {
     })
 
     expect(task.id).toBe('agent-xyz')
-    expect(task.status).toBe('queued')
+    // attach 语义 = caller 已在外部启动执行,登记即 running(2026-09-01 修复:
+    // 旧实现固定 queued 且 attach 路径无调度器,SpawnAgent 全程显示"排队中")
+    expect(task.status).toBe('running')
+    expect(task.startedAt).toBeTypeOf('number')
     expect(task.input.prompt).toBe('list files')
     expect(task.parentSessionId).toBe('sess-A')
     expect(task.agentType).toBe('general-purpose')
@@ -74,7 +77,7 @@ describe('attach()', () => {
     // store 也落盘 → 重启后 events() 仍能回放
     expect(await store.load('agent-xyz')).toMatchObject({
       id: 'agent-xyz',
-      status: 'queued',
+      status: 'running',
     })
 
     // get() 走 records 命中

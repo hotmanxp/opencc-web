@@ -10,7 +10,7 @@ describe('claude-code/config.parseClaudeCodeConfig', () => {
   it('returns all defaults on empty input', () => {
     const cfg = parseClaudeCodeConfig({})
     expect(cfg.enabled).toBe(false)
-    expect(cfg.command).toBe('claude')
+    expect(cfg.command).toBe('opencc')
     expect(cfg.args).toEqual(['--print', '--output-format', 'stream-json'])
     expect(cfg.outputFormat).toBe(CLAUDE_OUTPUT_FORMAT.streamJson)
     expect(cfg.permissionMode).toBe(CLAUDE_PERMISSION_MODE.bypassPermissions)

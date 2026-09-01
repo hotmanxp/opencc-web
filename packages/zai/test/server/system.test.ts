@@ -39,4 +39,27 @@ describe('GET /api/system', () => {
     expect(res.body.cwd).toBe('/');
     expect(res.body.cwdName).toBe('/');
   });
+
+  // 应用 profile 透传：cli/index.ts 的两条 action 顶部把 --app flag 落到
+  // process.env.ZAI_APP;routes/system.ts 据此在响应里写 process.env.
+  // ZAI_APP ?? null。无 profile / env 时为 null。
+  it('returns app=null when ZAI_APP is not set', async () => {
+    delete process.env.ZAI_APP;
+    const res = await request(makeApp('/tmp/project', 'project'))
+      .get('/api/system');
+    expect(res.status).toBe(200);
+    expect(res.body.app).toBeNull();
+  });
+
+  it('returns app=task-factory when ZAI_APP=task-factory', async () => {
+    process.env.ZAI_APP = 'task-factory';
+    try {
+      const res = await request(makeApp('/tmp/project', 'project'))
+        .get('/api/system');
+      expect(res.status).toBe(200);
+      expect(res.body.app).toBe('task-factory');
+    } finally {
+      delete process.env.ZAI_APP;
+    }
+  });
 });

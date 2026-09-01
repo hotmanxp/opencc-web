@@ -29,7 +29,7 @@ import type { SetAppState } from '../../../opencc-src/Task.js'
 
 /**
  * SpawnAgent — OPENCC native tool that delegates to a CLI subagent
- * (`claude-code` CLI or `dsh` DeepSeek Harness SDK runtime).
+ * (`opencc` CLI or `dsh` DeepSeek Harness SDK runtime).
  *
  * Modeled on vendor `AgentTool`'s async-from-start branch (AgentTool.tsx
  * lines 897-973): the tool call returns immediately with a task_id; the
@@ -39,7 +39,7 @@ import type { SetAppState } from '../../../opencc-src/Task.js'
  *
  * Lifecycle mapping:
  *   - register: `registerTask` with `type: 'local_agent'`, `agentType:
- *     spawn.agent_type` ('claude-code' | 'dsh'), independent abort
+ *     spawn.agent_type` ('opencc' | 'dsh'), independent abort
  *     controller (deliberately NOT linked to the parent query's controller,
  *     mirroring AgentTool.tsx:905-907 — ESC on the main thread must not
  *     kill detached children).
@@ -64,10 +64,10 @@ const SpawnAgentInputV4 = z4.object({
   prompt: z4.string(),
   /**
    * Which provider to spawn. Only registry-registered CLI agents
-   * (`claude-code` / `dsh`) route here; the description lists what's live.
+   * (`opencc` / `dsh`) route here; the description lists what's live.
    */
   subagent_type: z4.string().describe(
-    'Which CLI subagent provider to spawn. Use a registered external subagent provider (see the provider list in the tool description) — `claude-code` / `dsh`.',
+    'Which CLI subagent provider to spawn. Use a registered external subagent provider (see the provider list in the tool description) — `opencc` / `dsh`.',
   ),
   /** Optional model override; providers may ignore. */
   model: z4.string().optional(),
@@ -86,7 +86,7 @@ type SpawnAgentInput = z4.infer<typeof SpawnAgentInputV4>
 
 const SpawnAgentBaseDescription =
   'Spawn a CLI subagent to delegate a standalone task to an external agent engine ' +
-  '(claude-code CLI or dsh / DeepSeek Harness SDK runtime). Each runs as an ' +
+  '(opencc CLI or dsh / DeepSeek Harness SDK runtime). Each runs as an ' +
   'independent process in its own context and inherits no parent conversation. ' +
   'Choose the engine via `subagent_type`; give it a complete, self-contained prompt ' +
   'because it cannot see this conversation. The tool always returns a task_id ' +
@@ -152,7 +152,7 @@ async function executeSpawn(
     const message =
       `SpawnAgent: no subagent provider named '${subagent_type}'. ` +
       `Registered: ${registry.list().join(', ') || '∅'} — route via ` +
-      `subagent_type: 'claude-code' | 'dsh' (or whichever are registered).`
+      `subagent_type: 'opencc' | 'dsh' (or whichever are registered).`
     throw new Error(message)
   }
 
@@ -165,7 +165,7 @@ async function executeSpawn(
 
   const spawn = await spawnCliAgent({
     name,
-    agentType: subagent_type as 'claude-code' | 'dsh',
+    agentType: subagent_type as 'opencc' | 'dsh',
     prompt,
     description,
     teamName: team_name,

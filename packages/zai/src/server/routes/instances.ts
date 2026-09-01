@@ -162,6 +162,13 @@ router.post('/instances', async (req, res) => {
   // definition, and `null` only carries meaning on PATCH.
   const runtimeCore = parseRuntimeCoreField((req.body ?? {}).runtimeCore, 'runtimeCore', false)
   if (!runtimeCore.ok) return badRequest(res, runtimeCore.error)
+  // 应用 profile:仅允许 `undefined | 'task-factory'`。`null` 与未知字符串都 400,
+  // 对齐 POST 上其它字段(`port` / `runtimeCore`)无 null / 无 typo 的口径 —
+  // 创建路径没有"清除"语义,拒绝未知值避免给任务工厂实例错锁 mainAgent。
+  const rawApp = (req.body ?? {}).app
+  if (rawApp !== undefined && rawApp !== 'task-factory') {
+    return badRequest(res, 'app must be "task-factory" when present')
+  }
   try {
     const instance = await getInstanceSupervisor().createInstance({
       name: name.trim(),
@@ -169,6 +176,7 @@ router.post('/instances', async (req, res) => {
       lan: lan.value === true,
       port: port.value as number | undefined,
       runtimeCore: runtimeCore.value as RuntimeCore | undefined,
+      app: rawApp as 'task-factory' | undefined,
     })
     res.status(201).json({ instance })
   } catch (err) {

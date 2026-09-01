@@ -7,7 +7,7 @@ import type { PastedContent } from '../utils/config.js'
 import type { ImageDimensions } from '../utils/imageResizer.js'
 import type { TextHighlight } from '../utils/textHighlighting.js'
 import type { AgentId } from './ids.js'
-import type { AssistantMessage, MessageOrigin } from './message.js'
+import type { AssistantMessage, MessageOrigin, TaskNotificationKind } from './message.js'
 
 /**
  * Inline ghost text for mid-input command autocomplete
@@ -357,6 +357,18 @@ export type QueuedCommand = {
    * unified the queue but lost the isolation the dual-queue accidentally had).
    */
   agentId?: AgentId
+  /**
+   * zai patch (2026-09-01): task-notification 的来源类型(bash/agent/monitor/
+   * workflow)。生产者入队时打上,消费端(wrapCommandText)据此分流文案 ——
+   * 原先 bash 完成通知也被称为 "background agent",模型会误归因为用户指令。
+   */
+  taskKind?: TaskNotificationKind
+  /**
+   * zai patch (2026-09-01): 入队时刻(ms epoch),由 messageQueueManager 统一
+   * 盖章。渲染到模型文案时转成可读时间,让模型识别出这是"过去某一刻发生的
+   * 事件"、可能已过期的干扰通知。
+   */
+  enqueuedAt?: number
 }
 
 /**

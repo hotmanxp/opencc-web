@@ -90,7 +90,7 @@ opencc-web/
 | 目录 | 职责 |
 |------|------|
 | `packages/zai/src/cli/` | Commander 命令入口,`dev` / `start` / `supervisor` / `managedChild` / `restartLog` / `backoff` / `ports`;受管 supervisor/managed child 模式实现 |
-| `packages/zai/src/server/` | **Express 后端**。`routes/` 30+ 文件、`services/` 50+ 文件(`agentRuntime` / `bashNotifier` / `subagentNotifier` / `instanceSupervisor` / `restartCoordinator` / `weixinBot/...` 等);`middleware/` 仅 2 个(`noCache` + `redirectMobileUA`) |
+| `packages/zai/src/server/` | **Express 后端**。`routes/` 30+ 文件、`services/` 50+ 文件(`agentRuntime` / `subagentNotifier` / `instanceSupervisor` / `restartCoordinator` / `weixinBot/...` 等);`middleware/` 仅 2 个(`noCache` + `redirectMobileUA`) |
 | `packages/zai/src/web/` | **React 前端**。`pages/` 路由级页面、`components/` 60+ 组件(含 conversation/transcript/toolRenderers/splitPane 子目录)、`store/` Zustand store 群、`hooks/`、`lib/eventSource.js`(EventSource 封装) |
 | `packages/zai/src/shared/` | **跨端共享 schema**:`events.ts`(ServerEvent 联合类型)、`builtinProviders`、`settings`、`rpc`、`profileProjection`、zod schemas |
 | `packages/zn-agent-core/src/opencc-src/` | opencc 0.20.0 上游拷贝,大量 `react`/`ink`/`hookChains`/`MCP`/`LSP`/`hookEvents` 子模块。**vendor 允许本地补丁**(改完需 `build:core`) |
@@ -339,7 +339,7 @@ interface SseEvent { type: SseEventType; command?: string; line?: string; code?:
                     │   │   globalThis.{__zaiEventBus,    │
                     │   │     __zaiSessionInbox,          │
                     │   │     __zaiBridgeCtx}             │
-                    │   ├─ bashNotifier / subagentNotifier│
+                    │   ├─ subagentNotifier           │
                     │   ├─ restartCoordinator             │
                     │   ├─ instanceSupervisor             │
                     │   └─ weixinBot/...                  │

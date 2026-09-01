@@ -12,6 +12,7 @@ import {
   InputNumber,
   Modal,
   Popconfirm,
+  Radio,
   Row,
   Space,
   Spin,
@@ -32,6 +33,7 @@ import {
   HomeOutlined,
   ArrowUpOutlined,
   FolderOutlined,
+  RocketOutlined,
 } from '@ant-design/icons'
 import { useInstanceStore } from '../store/useInstanceStore.js'
 import type { InstanceSnapshot, InstanceState } from '../../../shared/instances.js'
@@ -329,6 +331,15 @@ export default function Instances(): JSX.Element {
     cwd: string
     lan?: boolean
     /**
+     * 实例类型:标准实例(`'standard'`,默认)或任务工厂实例(`'task-factory'`)。
+     * 任务工厂实例创建后由 supervisor spawn `--app task-factory` 传给子进程,
+     * 子进程的 `/api/system` 把 `app` 回显到前端,前端 router 的
+     * TaskFactoryRedirect 据此把入口重定向到 `/super-tasks`。前端只过
+     * `'task-factory'`,其它值落到后端 400;本地用 `'standard'` 占位以
+     * 区分 Radio.Group 选项(提交时映射为 `undefined`)。
+     */
+    app?: 'standard' | 'task-factory'
+    /**
      * When `true`, the user wants to pin a port on the new instance;
      * `portNumber` carries the actual number. Mirrors the supervisor's
      * `InstanceDefinition.port` field: `null` / `undefined` → auto,
@@ -472,10 +483,14 @@ export default function Instances(): JSX.Element {
       const port = values.portEnabled === true && typeof values.portNumber === 'number'
         ? values.portNumber
         : undefined
+      // 任务工厂实例:前端 Radio 选项 `'task-factory'` 直接映射到后端
+      // InstanceDefinition.app = 'task-factory';`undefined`(Radio 默认值
+      // `'standard'` 或表单未填)走标准实例,服务端不写 app 字段。
+      const app = values.app === 'task-factory' ? ('task-factory' as const) : undefined
       const res = await fetch('/api/instances', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ name: values.name, cwd: values.cwd, lan: values.lan === true, port }),
+        body: JSON.stringify({ name: values.name, cwd: values.cwd, lan: values.lan === true, port, app }),
       })
       if (!res.ok) {
         const data = (await res.json().catch(() => ({}))) as { error?: string }
@@ -590,9 +605,28 @@ export default function Instances(): JSX.Element {
       <Card
         title={<Typography.Title level={4} style={{ margin: 0 }}>实例管理</Typography.Title>}
         extra={
-          <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
-            新建实例
-          </Button>
+          <Space>
+            {/*
+              "新建任务工厂实例" 快捷入口:打开新建 Modal 时预选 `app='task-factory'`
+              并在 cwd 上默认填当前 cwd(任务工厂实例通常是当前仓库的子任务目录),
+              把路由跳转决策交给 router.TaskFactoryRedirect。用户后续仍能在
+              Modal 内手动改回标准实例。
+            */}
+            <Button
+              icon={<RocketOutlined />}
+              data-testid="new-task-factory-instance"
+              onClick={() => {
+                form.resetFields()
+                form.setFieldsValue({ app: 'task-factory', cwd: currentCwd })
+                setOpen(true)
+              }}
+            >
+              新建任务工厂实例
+            </Button>
+            <Button type="primary" icon={<PlusOutlined />} onClick={() => setOpen(true)}>
+              新建实例
+            </Button>
+          </Space>
         }
       >
       <Row gutter={[16, 16]}>
@@ -669,9 +703,32 @@ export default function Instances(): JSX.Element {
         okText="创建"
         cancelText="取消"
       >
-        <Form form={form} layout="vertical" initialValues={{ cwd: currentCwd, lan: false, portEnabled: false }}>
+        <Form
+          form={form}
+          layout="vertical"
+          initialValues={{ cwd: currentCwd, lan: false, portEnabled: false, app: 'standard' }}
+        >
           <Form.Item name="name" label="名称" rules={[{ required: true, message: '请输入名称' }]}>
             <Input placeholder="例如 demo" />
+          </Form.Item>
+          {/*
+            实例类型 — Radio.Group 替代 `<Select>`:
+            - 标准实例:`'standard'`,POST 时映射为 undefined(后端不写 app)。
+            - 任务工厂实例:`'task-factory'`,POST 时透传到 `InstanceDefinition.app`,
+              子进程启动后由 router.TaskFactoryRedirect 把入口重定向到 /super-tasks。
+            默认 `'standard'`,与历史行为对齐;快捷按钮"新建任务工厂实例"会
+            显式 setFieldsValue({ app: 'task-factory' })。
+          */}
+          <Form.Item
+            name="app"
+            label="实例类型"
+            data-testid="app-form-item"
+            tooltip="任务工厂实例启动后只展示 /super-tasks 任务面板,不会进入标准 Agent"
+          >
+            <Radio.Group data-testid="app-radio">
+              <Radio value="standard" data-testid="app-radio-standard">标准实例</Radio>
+              <Radio value="task-factory" data-testid="app-radio-task-factory">任务工厂实例</Radio>
+            </Radio.Group>
           </Form.Item>
           {/*
             cwd Form.Item 拆成 outer + 内嵌 noStyle 的写法,目的是在 Input 右侧

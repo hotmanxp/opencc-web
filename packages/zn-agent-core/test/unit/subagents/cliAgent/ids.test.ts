@@ -36,9 +36,9 @@ describe('subagents/cliAgent/ids', () => {
   })
 
   it('defaultCliRunId keeps the <prefix>-<rand8> shape', () => {
-    const id = defaultCliRunId('claude-code')
-    expect(id).toMatch(/^claude-code-[0-9a-z]{8}$/)
+    const id = defaultCliRunId('opencc')
+    expect(id).toMatch(/^opencc-[0-9a-z]{8}$/)
     // Distinct per call (rand8 suffix) — cheap collision sanity.
-    expect(defaultCliRunId('claude-code')).not.toBe(id)
+    expect(defaultCliRunId('opencc')).not.toBe(id)
   })
 })

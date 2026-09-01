@@ -11,6 +11,8 @@
  *      - default(本模块,不设任何插槽)
  *      - office(mainAgents-office.ts)
  *      - agent-creator(mainAgents-agentCreator.ts,含 ValidateMainAgent 工具)
+ *      - task-factory(mainAgents-taskFactory.ts,zai patch 2026-09-01,
+ *        主管任务工厂 —— 需求讨论、任务落库、分派执行与验收)
  *   2. 外置用户配置 —— `~/.zai/main-agents/*.js`(由 zai-server 扫描加载,
  *      重名时外置覆盖内置)
  *
@@ -25,6 +27,7 @@ import type { ScopedMcpServerConfig } from '../services/mcp/types.js'
 import type { buildTool } from '../Tool.js'
 import { officeMainAgent } from './mainAgents-office.js'
 import { agentCreatorMainAgent } from './mainAgents-agentCreator.js'
+import { taskFactoryMainAgent } from './mainAgents-taskFactory.js'
 import { displayFilesOpenccTool } from './displayFilesOpencc.js'
 
 // agent-creator 域的公共符号(ValidateMainAgent 工具 + 校验函数)定义在
@@ -92,6 +95,7 @@ export function getBuiltinMainAgents(): MainAgentConfig[] {
     },
     officeMainAgent,
     agentCreatorMainAgent,
+    taskFactoryMainAgent,
   ]
 }
 

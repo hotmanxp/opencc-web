@@ -252,6 +252,13 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
    *   - 落盘 + emit agent_task.changed,与 dispatch 的 notifyChange 保持同一通知链
    *
    * 幂等:已存在相同 id 时直接返回现有 task(用于 AgentTool 重试 / 重复注册场景)。
+   *
+   * zai patch (2026-09-01): 初始状态为 'running' 而非 'queued'。attach 的语义是
+   * "caller 已在外部启动执行,现在才登记"(SpawnAgent 先 spawnCliAgent 再 attach、
+   * AgentTool async 分支先 runAgent 再 attach),登记时刻任务必然在跑。
+   * 'queued' 只在 dispatch 路径有意义(入队等资源调度,runOne 起跑时再切
+   * running);attach 路径没有调度器,旧实现会让任务在抽屉里全程显示
+   * "排队中",直到 finalizeTask 直接跳终态。
    */
   async attach(input: AttachInput): Promise<BackgroundTask> {
     const existing = this.records.get(input.id)
@@ -265,7 +272,8 @@ export class DefaultBackgroundRuntime implements BackgroundRuntime {
     }
     const task: BackgroundTask = {
       id: input.id,
-      status: 'queued',
+      status: 'running',
+      startedAt: now,
       input: input.input,
       createdAt: now,
       eventCount: 0,

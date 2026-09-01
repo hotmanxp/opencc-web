@@ -1,0 +1,141 @@
+/**
+ * superTasks 路由 — zai 任务工厂的 REST 端点。
+ *
+ * - GET /api/super-tasks          三栏 bucket + 当前 state
+ * - GET /api/super-tasks/:id      单任务详情(index + spec + plan + process)
+ * - DELETE /api/super-tasks       删除任务(processing/paused → 409)
+ * - POST /api/super-tasks/managed 切换 managed 开关(持久化到 state.json)
+ * - POST /api/super-tasks/:id/start  手工启动 = 注入 dispatch
+ * - POST /api/super-tasks/:id/pause  kill 执行子任务 + 冻结(留 processing) + 注入通知
+ * - POST /api/super-tasks/:id/resume  = 注入 resume
+ * - POST /api/super-tasks/:id/accept  人工验收 = 注入 accept(主管调 SuperTasksMarkDone)
+ * - POST /api/super-tasks/inject  通用注入入口(白名单 action, 可附 id)
+ *
+ * 业务侧路由(start/pause/resume/accept)承担确定性副作用(kill executor /
+ * 状态落盘)后统一走 injectSupervisorCommand 送达主管会话;inject 端点保持
+ * 通用的「仅注入指令」语义供前端面板/测试使用。
+ */
+
+import { Router, type IRouter } from 'express'
+import {
+  taskFactoryListTasks as listTasks, getTaskSummary, getTaskDetails, deleteTasks,
+  moveTask, markTaskStatus,
+} from '@zn-ai/zn-agent-core'
+import {
+  getTaskFactoryState,
+  setTaskFactoryState,
+  injectSupervisorCommand,
+} from '../services/taskFactoryBridge.js'
+import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
+
+const router: IRouter = Router()
+const ALLOWED_ACTIONS = ['dispatch', 'resume', 'accept', 'pause'] as const
+type InjectAction = (typeof ALLOWED_ACTIONS)[number]
+
+router.get('/super-tasks', async (_req, res) => {
+  const [buckets, state] = await Promise.all([listTasks(), getTaskFactoryState()])
+  res.json({ buckets, managed: state.managedEnabled, supervisorSessionId: state.supervisorSessionId })
+})
+
+router.get('/super-tasks/:id', async (req, res) => {
+  const d = await getTaskDetails(req.params.id)
+  if (!d) return res.status(404).json({ error: `task ${req.params.id} not found` })
+  res.json({ task: d })
+})
+
+router.delete('/super-tasks', async (req, res) => {
+  const { ids } = (req.body ?? {}) as { ids?: unknown }
+  if (!Array.isArray(ids) || ids.length === 0 || ids.some((x) => typeof x !== 'string')) {
+    return res.status(400).json({ error: 'ids: 非空字符串数组必填' })
+  }
+  try {
+    await deleteTasks(ids as string[])
+    res.json({ ok: true })
+  } catch (err) {
+    const msg = (err as Error).message
+    res.status(msg.includes('processing') ? 409 : 404).json({ error: msg })
+  }
+})
+
+router.post('/super-tasks/managed', async (req, res) => {
+  const { enabled } = (req.body ?? {}) as { enabled?: unknown }
+  if (typeof enabled !== 'boolean') return res.status(400).json({ error: 'enabled: boolean 必填' })
+  await setTaskFactoryState({ managedEnabled: enabled })
+  res.json({ ok: true })
+})
+
+/**
+ * POST /api/super-tasks/inject — 向主管会话注入指令。
+ * action 白名单 dispatch/resume/accept/pause;可附 task id(存在性校验),
+ * 标题中的 `<` 替换为全角 `＜` 防止被解析为 XML 起始标签。
+ */
+router.post('/super-tasks/inject', async (req, res) => {
+  const { action, id } = (req.body ?? {}) as { action?: unknown; id?: unknown }
+  if (typeof action !== 'string' || !(ALLOWED_ACTIONS as readonly string[]).includes(action)) {
+    return res.status(400).json({ error: `action: ${ALLOWED_ACTIONS.join('/')} 之一必填` })
+  }
+  const typedAction = action as InjectAction
+  const task = id ? await getTaskSummary(id as string) : null
+  if (id && !task) return res.status(404).json({ error: `task ${id} not found` })
+  const body = id
+    ? `\n<task-command action="${typedAction}" id="${id}" title="${(task!.title ?? '').replace(/</g, '＜')}">请按指令处理任务 ${id}: ${typedAction}</task-command>`
+    : `\n<task-command action="${typedAction}">请按指令处理: ${typedAction}</task-command>`
+  injectSupervisorCommand(body)
+  res.json({ ok: true })
+})
+
+/**
+ * POST /api/super-tasks/:id/start — 手工启动：校验在队列后注入 dispatch 指令，
+ * 由主管按任务 cwd 委派执行子 Agent（优先 SpawnAgent）。
+ */
+router.post('/super-tasks/:id/start', async (req, res) => {
+  const t = await getTaskSummary(req.params.id)
+  if (!t || t.bucket !== 'queue-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在队列` })
+  injectSupervisorCommand(`\n<task-command action="dispatch" id="${t.id}" title="${(t.title ?? '').replace(/</g, '＜')}">请派发执行任务：${t.id}</task-command>`)
+  res.json({ ok: true })
+})
+
+/**
+ * POST /api/super-tasks/:id/pause — 暂停：kill 执行子任务（保留其会话），
+ * 任务冻结（index.md status=paused，目录仍留 processing-tasks），注入通知。
+ */
+router.post('/super-tasks/:id/pause', async (req, res) => {
+  const t = await getTaskSummary(req.params.id)
+  if (!t || t.bucket !== 'processing-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在执行中` })
+  const bg = getBackgroundRuntime()
+  if (t.executorTaskId) {
+    try { await bg.cancel(t.executorTaskId) } catch { /* 已终态/不存在则静默 */ }
+  }
+  try {
+    await markTaskStatus(t.id, 'processing-tasks', { status: 'paused', executorTaskId: null })
+  } catch (err) {
+    // executor 已 kill 但状态写入失败——显式 500，避免 UI 把「未暂停」误判为已暂停
+    return res.status(500).json({ error: (err as Error).message })
+  }
+  injectSupervisorCommand(`\n<task-command action="pause" id="${t.id}">任务已暂停（执行子 Agent 已结束），如需要恢复请回复继续。</task-command>`)
+  res.json({ ok: true })
+})
+
+/**
+ * POST /api/super-tasks/:id/resume — 继续：注入 resume 指令，
+ * 主管 resume 原执行会话或重新委派。
+ */
+router.post('/super-tasks/:id/resume', async (req, res) => {
+  const t = await getTaskSummary(req.params.id)
+  if (!t || t.bucket !== 'processing-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在执行中` })
+  injectSupervisorCommand(`\n<task-command action="resume" id="${t.id}" title="${(t.title ?? '').replace(/</g, '＜')}">继续执行任务（resume 原执行会话或重新委派）。</task-command>`)
+  res.json({ ok: true })
+})
+
+/**
+ * POST /api/super-tasks/:id/accept — 人工验收入口：注入 accept 指令，
+ * 主管验收任务成果并调 SuperTasksMarkDone 归档到 finished-tasks。
+ */
+router.post('/super-tasks/:id/accept', async (req, res) => {
+  const t = await getTaskSummary(req.params.id)
+  if (!t || t.bucket !== 'processing-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在执行中` })
+  injectSupervisorCommand(`\n<task-command action="accept" id="${t.id}">请验收任务成果并调用 SuperTasksMarkDone。</task-command>`)
+  res.json({ ok: true })
+})
+
+export default router

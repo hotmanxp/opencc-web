@@ -410,6 +410,38 @@ describe('instanceSupervisor (4a — state machine)', () => {
     expect(spawnArgs[1]![idx + 1]).toBe('spawn')
   })
 
+  // ───────── 应用 profile（app）─────────
+  // 创建时附带 app='task-factory'，期望 snapshot 持久化该值 + spawn args
+  // 带 --app <profile>（child 的 cli/index.ts 据此落到 process.env.ZAI_APP）。
+  it('createInstance with app=task-factory persists it on the def and spawns --app task-factory', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', app: 'task-factory' })
+    expect(snap.app).toBe('task-factory')
+    expect(fakeChildren).toHaveLength(1)
+    const idx = spawnArgs[0]!.indexOf('--app')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(spawnArgs[0]![idx + 1]).toBe('task-factory')
+  })
+
+  // PATCH 经 updateInstance 不支持改 app；同一定义 restart 后必须继续保持
+  // --app 透传（spawnArgs 最后一组 args 仍含 --app task-factory）。
+  it('restartInstance keeps forwarding --app task-factory from the persisted def', async () => {
+    const { deps, fakeChildren, spawnArgs } = makeSupervisor()
+    const { getInstanceSupervisor } = await initSup(deps)
+    const snap = await getInstanceSupervisor().createInstance({ name: 'demo', cwd: '/tmp/x', app: 'task-factory' })
+    fakeChildren[0]!.emit('message', { type: 'ready', pid: 222, port: 9205 })
+    const stopP = getInstanceSupervisor().stopInstance(snap.id)
+    fakeChildren[0]!.emitExit(0)
+    await stopP
+    await getInstanceSupervisor().restartInstance(snap.id)
+    expect(fakeChildren).toHaveLength(2)
+    const last = spawnArgs[spawnArgs.length - 1]!
+    const idx = last.indexOf('--app')
+    expect(idx).toBeGreaterThanOrEqual(0)
+    expect(last[idx + 1]).toBe('task-factory')
+  })
+
   // ───────── port 配置相关 ─────────
   // 用户在创建时钉死一个端口 → supervisor 用该端口启动,probePort 不调用。
   it('createInstance with port pins the child to that exact port (probePort not used)', async () => {

@@ -203,6 +203,7 @@ const BUILTIN_MAIN_AGENT_NAMES = new Set([
   'default',
   'office',
   'agent-creator',
+  'task-factory',
 ])
 
 /** 校验单个 agent 配置对象是否符合 MainAgentConfig 契约。 */

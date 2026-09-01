@@ -15,14 +15,14 @@ import {
  *
  * Mirrors the codex provider's config schema (zod-validated; documented
  * in `docs/superpowers/specs/2026-08-21-zai-subagent-codex-provider-design.md`).
- * `command` here is the explicit `claude` binary path — usually a plain
- * `claude` is fine, but staging may pin to a specific build.
+ * `command` here is the explicit CLI binary path — usually a plain
+ * `opencc` is fine, but staging may pin to a specific build.
  */
 export const claudeCodeConfigSchema = z.object({
   /** Master switch. */
   enabled: z.boolean().default(false),
-  /** Binary on PATH. Defaults to `claude` (the canonical CLI). */
-  command: z.string().min(1).default('claude'),
+  /** Binary on PATH. Defaults to `opencc` (the canonical CLI). */
+  command: z.string().min(1).default('opencc'),
   /** Args tail after `command`. Default = `['--print', '--output-format', 'stream-json']`. */
   args: z
     .array(z.string().min(1))

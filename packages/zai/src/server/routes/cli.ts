@@ -67,7 +67,7 @@ async function installCli(req: Request, res: Response) {
       // so all process output reads as normal text. Real failures still
       // surface via the spawner's exit code (→ 'exit' event) and the
       // spawn-level 'error' event.
-      await spawn('sh', ['-c', [...npmArgs, '2>&1'].join(' ')], (ev) => stream.send(ev));
+      await spawn('sh', ['-c', ['npm', ...npmArgs, '2>&1'].join(' ')], (ev) => stream.send(ev));
     }
   } catch (err) {
     stream.send({ type: 'error', message: `spawn failed: ${(err as Error).message}` });

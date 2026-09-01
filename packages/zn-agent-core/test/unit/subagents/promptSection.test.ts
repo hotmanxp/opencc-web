@@ -6,7 +6,7 @@
  * Why this is the surface we test: `subagent_type` in AgentTool's zod
  * schema is `z.string()` (no enum), so the only way the model learns
  * which values route to a provider is the description text. A
- * regression here = the model can't see `codex` / `claude-code` even
+ * regression here = the model can't see `codex` / `opencc` even
  * though `getSubagentRegistry()` has them.
  *
  * Why we don't test the full `getPrompt()` path: importing
@@ -54,8 +54,8 @@ describe('formatSubagentProviderSection', () => {
     )
     registry.registerProvider(
       makeFakeProvider(
-        'claude-code',
-        'Delegate a one-shot task to a fresh Claude CLI session (independent process).',
+        'opencc',
+        'Delegate a one-shot task to a fresh OpenCC CLI session (independent process).',
       ),
     )
 
@@ -66,12 +66,12 @@ describe('formatSubagentProviderSection', () => {
       '- codex: Delegate a one-shot task to a fresh Codex CLI session (independent process).',
     )
     expect(out).toContain(
-      '- claude-code: Delegate a one-shot task to a fresh Claude CLI session (independent process).',
+      '- opencc: Delegate a one-shot task to a fresh OpenCC CLI session (independent process).',
     )
     // Registration order is preserved (insertion-ordered Map; consumers
     // surface "available agents" in this order deterministically).
     const codexIdx = out.indexOf('- codex:')
-    const claudeIdx = out.indexOf('- claude-code:')
+    const claudeIdx = out.indexOf('- opencc:')
     expect(codexIdx).toBeGreaterThan(-1)
     expect(claudeIdx).toBeGreaterThan(codexIdx)
   })

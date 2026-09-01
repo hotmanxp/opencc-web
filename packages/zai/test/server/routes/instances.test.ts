@@ -325,6 +325,54 @@ describe('routes/instances', () => {
     expect(res.body.instance.runtimeCore).toBe('repl')
   })
 
+  // ───────── app profile 持久化 ─────────
+  // POST 接受 app='task-factory',落到 snapshot.app;缺失字段(继承无 profile);
+  // 拒绝未知值 / null(创建路径无"清除"语义)。
+  it('POST /api/instances accepts app=task-factory and persists it on the snapshot', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'tf', cwd: '/tmp', app: 'task-factory' })
+    expect(res.status).toBe(201)
+    expect(res.body.instance.app).toBe('task-factory')
+  })
+
+  it('POST /api/instances omits app when absent (no profile)', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp' })
+    expect(res.status).toBe(201)
+    expect(res.body.instance.app).toBeUndefined()
+  })
+
+  it('POST /api/instances rejects app=null with 400 (no override to clear on creation)', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', app: null })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/app/)
+  })
+
+  it('POST /api/instances rejects unknown app value with 400', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', app: 'office' })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/app/)
+  })
+
+  it('POST /api/instances rejects non-string app with 400', async () => {
+    const { app } = await bootstrap()
+    const res = await request(app)
+      .post('/api/instances')
+      .send({ name: 'demo', cwd: '/tmp', app: 42 })
+    expect(res.status).toBe(400)
+    expect(res.body.error).toMatch(/app/)
+  })
+
   it.each(['default', 'inproc', 'spawn', 'repl'] as const)(
     'POST /api/instances accepts runtimeCore=%s',
     async (mode) => {

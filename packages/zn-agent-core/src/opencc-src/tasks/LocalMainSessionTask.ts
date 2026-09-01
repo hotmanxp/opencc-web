@@ -259,7 +259,8 @@ function enqueueMainSessionNotification(
 <${SUMMARY_TAG}>${summary}</${SUMMARY_TAG}>
 </${TASK_NOTIFICATION_TAG}>`
 
-  enqueuePendingNotification({ value: message, mode: 'task-notification' })
+  // zai patch (2026-09-01): 主会话后台任务属 agent 类通知。
+  enqueuePendingNotification({ value: message, mode: 'task-notification', taskKind: 'agent' })
 }
 
 /**

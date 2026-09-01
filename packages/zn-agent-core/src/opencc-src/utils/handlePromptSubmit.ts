@@ -509,10 +509,16 @@ async function executeUserInput(params: ExecuteUserInputParams): Promise<void> {
         // derivation at messages.ts (case 'queued_command'); intentionally
         // does NOT mirror its isMeta:true so idle-dequeued notifications stay
         // visible in the transcript via UserAgentNotificationMessage.
+        // zai patch (2026-09-01): 兜底 origin 同步携带 taskKind/enqueuedAt,
+        // 与 messages.ts queued_command 分支保持一致(可读时间+分类型文案)。
         const origin =
           cmd.origin ??
           (cmd.mode === 'task-notification'
-            ? ({ kind: 'task-notification' } as const)
+            ? ({
+                kind: 'task-notification' as const,
+                taskKind: cmd.taskKind,
+                enqueuedAt: cmd.enqueuedAt,
+              } as const)
             : undefined)
         if (origin) {
           for (const m of result.messages) {

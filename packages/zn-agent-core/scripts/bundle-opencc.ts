@@ -181,6 +181,13 @@ function assertDtsTargetsResolve(bundleEntryDts: string): void {
   for (const m of bundleEntryDts.matchAll(fromRe)) {
     const target = m[1]
     if (target === './package.json' || !target.startsWith('.')) continue
+    // opencc-src/server/* targets are mechanically emitted later in THIS
+    // script by the `tsc -p tsconfig.server.json` step (their files are in
+    // tsconfig.server.json include), so a warm dist that predates a new
+    // server module must not hard-fail here before that step runs. Dangling
+    // refs are still caught by typecheck:consumer + verify-server-types-
+    // self-contained (the same net the cold-build guard relies on).
+    if (target.startsWith('./opencc-src/server/')) continue
     const expected = join(OUT_DIR, target.replace(/\.js$/, '.d.ts'))
     if (!existsSync(expected)) {
       console.error(

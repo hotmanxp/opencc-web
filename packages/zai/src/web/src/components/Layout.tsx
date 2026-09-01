@@ -103,6 +103,11 @@ export default function Layout() {
         isManagedChild?: boolean;
         supervisorPid?: number | null;
         instanceId?: string | null;
+        // 任务工厂实例 profile:服务端 GET /api/system 把 process.env.ZAI_APP
+        // 原样回显(见 routes/system.ts)。undefined / null 都视为"未配置
+        // 任务工厂 profile",TaskFactoryRedirect 据此判定是否把 / 与 /agent
+        // 重定向到 /super-tasks。
+        app?: string | null;
       }>('/system')
       .then((data) => {
         setVersion(data.version);
@@ -116,6 +121,10 @@ export default function Layout() {
           isManagedChild: data.isManagedChild === true,
           supervisorPid: typeof data.supervisorPid === 'number' ? data.supervisorPid : null,
           instanceId: typeof data.instanceId === 'string' ? data.instanceId : null,
+          // 显式归一为 null:服务端 /api/system 老版本不返回 app,前端
+          // 直接落 undefined 会让 TaskFactoryRedirect 的 `=== 'task-factory'`
+          // 判定拿不到真值信号,统一归一更稳。
+          app: typeof data.app === 'string' ? data.app : null,
         });
         document.title = `${data.cwdName}-Z.AI`;
       })

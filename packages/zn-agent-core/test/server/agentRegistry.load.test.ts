@@ -10,17 +10,23 @@ describe('AgentRegistry load', () => {
     registry = new AgentRegistryImpl()
   })
 
-  it('loadBuiltinAgents 注册 3 个 builtin', () => {
+  it('loadBuiltinAgents 注册 4 个 builtin', () => {
     registry.loadBuiltinAgents()
     const agents = registry.listAgents().map(a => a.name).sort()
-    expect(agents).toEqual(['agent-creator', 'default', 'office'])
+    expect(agents).toEqual([
+      'agent-creator',
+      'default',
+      'office',
+      'task-factory',
+    ])
   })
 
-  it('loadBuiltinAgents 后 hasAgent 对三个 name 返回 true', () => {
+  it('loadBuiltinAgents 后 hasAgent 对内置 name 返回 true', () => {
     registry.loadBuiltinAgents()
     expect(registry.hasAgent('default')).toBe(true)
     expect(registry.hasAgent('office')).toBe(true)
     expect(registry.hasAgent('agent-creator')).toBe(true)
+    expect(registry.hasAgent('task-factory')).toBe(true)
     expect(registry.hasAgent('nonexistent')).toBe(false)
   })
 

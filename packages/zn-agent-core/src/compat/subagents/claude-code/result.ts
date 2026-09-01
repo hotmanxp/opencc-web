@@ -94,7 +94,7 @@ export function resolveFinalAnswer(
           errorMessage:
             typeof parsed.error === 'string' && parsed.error
               ? parsed.error
-              : `claude-code result frame failed (${category})`,
+              : `opencc result frame failed (${category})`,
           diagnostic: claudeFailureDiagnostic(category, 'result-frame'),
         }
       }
@@ -103,7 +103,7 @@ export function resolveFinalAnswer(
     return {
       text: '',
       stopReason: 'error',
-      errorMessage: 'claude-code did not emit a result frame',
+      errorMessage: 'opencc did not emit a result frame',
       diagnostic: claudeFailureDiagnostic('missing-result', 'result-frame'),
     }
   }
@@ -137,7 +137,7 @@ export function resolveFinalAnswer(
         errorMessage:
           typeof latestResultFrame.error === 'string' && latestResultFrame.error
             ? latestResultFrame.error
-            : `claude-code result frame failed (${category})`,
+            : `opencc result frame failed (${category})`,
         diagnostic: claudeFailureDiagnostic(category, 'result-frame'),
       }
     }
@@ -155,14 +155,14 @@ export function resolveFinalAnswer(
     return {
       text: '',
       stopReason: 'error',
-      errorMessage: 'claude-code produced no assistant messages before settling',
+      errorMessage: 'opencc produced no assistant messages before settling',
       diagnostic: claudeFailureDiagnostic('invalid-result', 'result-frame'),
     }
   }
   return {
     text: '',
     stopReason: 'error',
-    errorMessage: 'claude-code produced only commentary/blank messages; cannot resolve an answer',
+    errorMessage: 'opencc produced only commentary/blank messages; cannot resolve an answer',
     diagnostic: claudeFailureDiagnostic('invalid-result', 'result-frame'),
   }
 }
@@ -183,7 +183,7 @@ export function stopReasonFromClaudeResult(result: ClaudeResultFrame & {
     errorMessage:
       typeof result.error === 'string' && result.error
         ? result.error
-        : `claude-code returned a failed result frame (${category})`,
+        : `opencc returned a failed result frame (${category})`,
     diagnostic: claudeFailureDiagnostic(category, 'result-frame'),
   }
 }

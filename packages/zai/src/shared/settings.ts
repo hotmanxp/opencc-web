@@ -215,13 +215,13 @@ export interface ZaiSettings {
   openccCliDangerouslySkip?: boolean
   /**
    * 外置 subagent provider 配置(zai patch 2026-08-31)。key = provider 注册名
-   * (`claude-code` / `dsh`),value = 该 provider 的部署配置对象,由
+   * (`opencc` / `dsh`),value = 该 provider 的部署配置对象,由
    * `@zn-ai/zn-agent-core` 侧的 zod schema 校验
    * (`compat/subagents/<name>/config.ts`)—— 这里保持 `unknown` 以避免
    * web/shared 层依赖 core 的具体 schema。
    *
    * 语义(与 dsh 0.1.2-alpha.2 provider Config 对齐):
-   * - `claude-code`:缺省即以默认配置注册(`claude --print`,unattended
+   * - `opencc`:缺省即以默认配置注册(`opencc --print`,unattended
    *   `bypassPermissions`);显式配置可覆盖 command/args/permissionMode/model/env 等。
    * - `dsh`:**必须 `enabled: true` 才注册**——spawn `dsh --profile sdk`
    *   需要操作员本机安装 dsh CLI 与 DeepSeek 凭据(child env)。

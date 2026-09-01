@@ -179,6 +179,50 @@ export * from './opencc-src/utils/model/genericModelCapabilities.js'
 // createSessionFacade 值冲突(TS 显式命名导出优先于 export *)。
 export type * from './opencc-src/server/index.js'
 
+// zai patch (2026-09-01, Task 4): superTasks 路由 + 任务工厂 bridge 依赖
+// taskFactoryFiles 的全部符号(createPoolTask/getTaskSummary/getTaskDetails/
+// deleteTasks/moveTask/markTaskStatus/emitTaskFactoryEvent/taskFactoryRoot 等)
+// —— zai 统一从主入口消费,这里补齐 export。
+//
+// 显式 named-export 关键符号:esbuild 的 re-export tree-shaking 会把 `export *`
+// 中"在主入口 graph 内未被引用"的符号砍掉;taskFactoryFiles.ts 内部只有
+// createPoolTask/getTaskSummary/deleteTasks/getTaskDetails 互相调用,
+// moveTask/markTaskStatus/emitTaskFactoryEvent/taskFactoryRoot/taskDir/
+// generateTaskId/bodyAfterFrontmatter 仅做出口,会被 tree-shake 掉。
+// 显式 export 把它们钉成活的。
+//
+// listTasks 与 vendor `utils/tasks.ts:listTasks(taskListId)` 同名重载冲突
+// (vendor 接受 taskListId,本文件无参;两者签名不可合并),这里 alias 为
+// `taskFactoryListTasks` 避免 TS 合并 namespace 时把签名混在一起导致
+// 已有调用点 (zai/src/server/routes/sessionState.ts:127) 类型推断失败。
+// vendor 的 listTasks 在 main bundle 里本来就活着(被 TaskCreate/TaskList tool
+// 等 vendor 内部模块引用),且没在主入口显式 re-export — zai 现有
+// `bundle.listTasks` dynamic import 类型上声明成 optional,运行期拿不到就会
+// fallback 跳过,sessionState.ts 走 vendor 路径属于 best-effort 兜底,
+// 加 alias 不影响其行为。
+export {
+  createPoolTask,
+  listTasks as taskFactoryListTasks,
+  getTaskSummary,
+  getTaskDetails,
+  deleteTasks,
+  moveTask,
+  markTaskStatus,
+  emitTaskFactoryEvent,
+  taskFactoryRoot,
+  taskDir,
+  generateTaskId,
+  bodyAfterFrontmatter,
+} from './opencc-src/server/taskFactoryFiles.js'
+export type {
+  TaskStatus,
+  TaskBucketName,
+  TaskSummary,
+  TaskBucket,
+  TaskDetails,
+  CreatePoolTaskInput,
+} from './opencc-src/server/taskFactoryFiles.js'
+
 // ./compat/subagents(zai agentRuntime 依赖 getSubagentRegistry 拿
 // SubagentRegistry 实例)。claude-code provider 在子模块里导出 `apply`,
 // 与潜在同名符号会撞,这里显式 rename 为唯一名 `applyClaudeCodeProvider`

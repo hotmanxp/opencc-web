@@ -64,7 +64,7 @@ type Entry = { def: InstanceDefinition; status: InstanceStatus; child: ChildProc
 
 export interface InstanceSupervisor {
   getSnapshots: () => InstanceSnapshot[]
-  createInstance: (input: { name: string; cwd: string; lan?: boolean; port?: number | null; runtimeCore?: RuntimeCore }) => Promise<InstanceSnapshot>
+  createInstance: (input: { name: string; cwd: string; lan?: boolean; port?: number | null; runtimeCore?: RuntimeCore; app?: 'task-factory' }) => Promise<InstanceSnapshot>
   startInstance: (id: string, opts?: { lan?: boolean; port?: number | null; runtimeCore?: RuntimeCore | null }) => Promise<InstanceSnapshot>
   stopInstance: (id: string) => Promise<InstanceSnapshot>
   restartInstance: (id: string, opts?: { lan?: boolean; port?: number | null; runtimeCore?: RuntimeCore | null }) => Promise<InstanceSnapshot>
@@ -274,6 +274,11 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
         const args: string[] = [cliEntry, 'start', '--managed-child', '--port', String(port), '--no-open']
         if (useLan) args.push('--lan')
         if (effectiveRuntimeCore) args.push('--runtimeCore', effectiveRuntimeCore)
+        // 应用 profile 透传：task-factory 实例把 `--app task-factory` 传给 child，
+        // 让 child 的 `cli/index.ts` action 落到 `process.env.ZAI_APP`，进而
+        // `routes/agent.ts` 据此锁定 `mainAgent = 'task-factory'`。其它值不传，
+        // child 走默认 profile（无 mainAgent 强制）。
+        if (entry.def.app === 'task-factory') args.push('--app', 'task-factory')
         // 进程标题:让 ps / top / macOS Activity Monitor 在 spawn 后立即
         // 显示 `zai[name]:port` 而不是 `node .../bin/zai.js`。`argv0` 改
         // `argv[0]`(Linux ps/macOS ps 列都从 argv[0] 起始读);`ZAI_PROCESS_TITLE`
@@ -374,7 +379,7 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
       // assertions can observe the latest persisted snapshot deterministically.
       // Production callers should never invoke this.
       __flushPendingWrites: async () => { await writeChain },
-      async createInstance({ name, cwd, lan, port, runtimeCore }: { name: string; cwd: string; lan?: boolean; port?: number | null; runtimeCore?: RuntimeCore }) {
+      async createInstance({ name, cwd, lan, port, runtimeCore, app }: { name: string; cwd: string; lan?: boolean; port?: number | null; runtimeCore?: RuntimeCore; app?: 'task-factory' }) {
         const trimmed = name.trim(); for (const entry of entries.values()) if (entry.def.name === trimmed) throw new InstanceSupervisorError('DUPLICATE_NAME', `duplicate name: ${trimmed}`)
         const def: InstanceDefinition = {
           id: `inst_${randomUUID().slice(0, 8)}`,
@@ -391,6 +396,9 @@ export async function initInstanceSupervisor(opts: InitOptions): Promise<Instanc
           // `settings.runtimeCore` at start time. Already validated by
           // the route handler so no further narrowing needed here.
           runtimeCore,
+          // 应用 profile；同样 undefined → "无 profile"，旧 reader 无感。
+          // 路由层已经收窄到 `undefined | 'task-factory'`，此处不再校验。
+          app,
         }
         const entry: Entry = { def, status: { ...EMPTY_INSTANCE_STATUS }, child: null, childState: null }
         entries.set(def.id, entry)

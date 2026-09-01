@@ -120,7 +120,7 @@ export async function startClaudeCodeRun(
   // returns the handle to the caller immediately.
   const { run, finalizeResult, finalizeError, internal } = createCliRunShell(
     handle,
-    { id: defaultCliRunId('claude-code') },
+    { id: defaultCliRunId('opencc') },
   )
 
   void pumpClaudeStream({
