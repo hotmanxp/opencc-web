@@ -2,6 +2,7 @@ import { create } from 'zustand'
 import {
   fetchSuperTasks, deleteSuperTasks, setSuperTasksManaged,
   startSuperTask, pauseSuperTask, resumeSuperTask, acceptSuperTask,
+  resetSupervisorSession as resetSupervisorSessionApi,
 } from '../lib/superTaskApi'
 import type { TaskBucket } from '../lib/superTaskApi'
 
@@ -32,6 +33,13 @@ export interface SuperTaskStore {
   pause: (id: string) => Promise<void>
   resume: (id: string) => Promise<void>
   accept: (id: string) => Promise<void>
+  /**
+   * 重置主管会话(2026-09-02)。调后端 reset 端点清 state.json +
+   * 关托管;reload 触发由调用层(window.location.reload())负责,
+   * store action 保持纯净 — 其它路径(脚本/测试)若需要不 reload
+   * 的版本也能直接复用。
+   */
+  resetSupervisorSession: () => Promise<void>
   /** SSE task_factory 事件入口(useEventStream dispatch)。 */
   applyTaskFactoryEvent: (event: TaskFactoryEventLike) => void
   clearLastCreated: () => void
@@ -68,6 +76,13 @@ export const useSuperTaskStore = create<SuperTaskStore>((set, get) => ({
     await setSuperTasksManaged(enabled)
     set({ managed: enabled })
   },
+  resetSupervisorSession: async () => {
+    await resetSupervisorSessionApi()
+    // 后端已 broadcast state.changed{payload:{supervisorSessionId:null,...}},
+    // SSE 触发 applyTaskFactoryEvent 会同步本地 store。这里不立即 set,
+    // 等 SSE 事件走完一遍,避免与 broadcast 抢写入时序。
+    // reload 由 UI 层负责(让看板 / 主管 transcript 干净同步)。
+  },
   start: async (id) => { await startSuperTask(id); await get().load() },
   pause: async (id) => { await pauseSuperTask(id); await get().load() },
   resume: async (id) => { await resumeSuperTask(id); await get().load() },
@@ -81,7 +96,12 @@ export const useSuperTaskStore = create<SuperTaskStore>((set, get) => ({
       const p = event.payload as { managedEnabled?: unknown; supervisorSessionId?: unknown }
       const patch: Partial<SuperTaskStore> = {}
       if (typeof p.managedEnabled === 'boolean') patch.managed = p.managedEnabled
-      if (typeof p.supervisorSessionId === 'string') patch.supervisorSessionId = p.supervisorSessionId
+      // 2026-09-02:reset 路由会把 supervisorSessionId 清成 null,
+      // 同步接受 string | null 才能反映「未绑定」状态(否则本地仍
+      // 显示旧 sid,误导 UI)。
+      if (typeof p.supervisorSessionId === 'string' || p.supervisorSessionId === null) {
+        patch.supervisorSessionId = p.supervisorSessionId
+      }
       if (Object.keys(patch).length > 0) set(patch)
     }
     void get().load()

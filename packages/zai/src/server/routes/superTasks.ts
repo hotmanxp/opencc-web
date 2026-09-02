@@ -81,6 +81,28 @@ router.post('/super-tasks/supervisor', async (req, res) => {
 })
 
 /**
+ * POST /api/super-tasks/supervisor/reset — 清空主管会话 id + 同步关托管(2026-09-02)。
+ *
+ * 语义:让前端 SuperTasks 重置按钮触发全新 mount 引导。前端调用成功后
+ * 应调 window.location.reload(),浏览器刷新后:
+ *   - /super-tasks mount 看到 server sid 为 null,走新建分支
+ *   - createAgentSession({ mainAgent: 'task-factory' }) 创建新空 session
+ *   - setSupervisorSession(newSid) 把新 sid 落回 state.json
+ *
+ * 旧 session transcript 保留在 ~/.zai/tasks/<oldSid>.json,与新主管不再关联;
+ * managed 同步关掉,避免新主管被 5s 托管循环立即注入 dispatch 指令。
+ * injectSupervisorCommand 在 sid 为空/null 时有 console.warn 护栏,
+ * 这里把 supervisorSessionId 置 null 是有意为之,不是 bug。
+ */
+router.post('/super-tasks/supervisor/reset', async (_req, res) => {
+  await setTaskFactoryState({
+    supervisorSessionId: null,
+    managedEnabled: false,
+  })
+  res.json({ ok: true })
+})
+
+/**
  * POST /api/super-tasks/inject — 向主管会话注入指令。
  * action 白名单 dispatch/resume/accept/pause;可附 task id(存在性校验),
  * 标题中的 `<` 替换为全角 `＜` 防止被解析为 XML 起始标签。

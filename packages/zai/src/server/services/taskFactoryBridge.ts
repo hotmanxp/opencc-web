@@ -20,7 +20,12 @@ import { taskFactoryRoot } from '@zn-ai/zn-agent-core'
 
 export type TaskFactoryState = {
   managedEnabled: boolean
-  supervisorSessionId: string
+  /**
+   * 主管会话 id。允许 null:reset 路由把 state 清空后到 mount 引导完成
+   * 前的窗口期内为 null;injectSupervisorCommand 在 sid 空/null 时
+   * 跳过注入并 warn,避免指令打到字面字符串 'null'。
+   */
+  supervisorSessionId: string | null
 }
 
 const DEFAULT_STATE: TaskFactoryState = {
@@ -90,9 +95,19 @@ export async function setTaskFactoryState(patch: Partial<TaskFactoryState>): Pro
 /**
  * 向主管会话注入一条指令(next-turn + wake;忙则自动降级排队)。
  * 同步接口 —— 内部读 cachedState,不阻塞 IO。
+ *
+ * 护栏(2026-09-02):sid 为空/null 时(典型场景 = reset 路由刚清完
+ * supervisorSessionId、mount 引导还没回来的窗口期),直接跳过并
+ * console.warn —— 不让指令打到字面字符串 'null' 误伤一个真实 session。
  */
 export function injectSupervisorCommand(content: string): void {
   const sid = cachedState.supervisorSessionId
+  if (typeof sid !== 'string' || sid.trim() === '') {
+    console.warn(
+      '[taskFactoryBridge] injectSupervisorCommand skipped: supervisorSessionId is empty/null (reset window?)',
+    )
+    return
+  }
   sessionInbox.followup(sid, {
     id: `tf-cmd-${++seq}-${Date.now()}`,
     source: { kind: 'task-factory', form: 'notice' },

@@ -7,6 +7,7 @@ import supertest from 'supertest'
 import superTasksRouter from '../../../src/server/routes/superTasks.js'
 import { __resetForTests, setTaskFactoryState, getTaskFactoryState } from '../../../src/server/services/taskFactoryBridge.js'
 import { __setBackgroundRuntime } from '../../../src/server/services/backgroundRuntime.js'
+import { eventBus } from '../../../src/server/services/eventBus.js'
 import { createPoolTask } from '@zn-ai/zn-agent-core'
 
 let dir: string
@@ -176,5 +177,30 @@ describe('POST /api/super-tasks/supervisor', () => {
     expect(r1.status).toBe(400)
     const r2 = await supertest(app).post('/api/super-tasks/supervisor').send({ sessionId: '   ' })
     expect(r2.status).toBe(400)
+  })
+})
+
+describe('POST /api/super-tasks/supervisor/reset (2026-09-02 重置主管)', () => {
+  it('清空 supervisorSessionId + 同步关托管 + 广播 state.changed', async () => {
+    // 先把 managed 打开 + sid 设成非空,验证 reset 把两者都重置
+    await setTaskFactoryState({ managedEnabled: true, supervisorSessionId: 'sess-pre-reset' })
+    const emitSpy = vi.spyOn(eventBus, 'emit')
+    const res = await supertest(app).post('/api/super-tasks/supervisor/reset')
+    expect(res.status).toBe(200)
+    expect(res.body).toEqual({ ok: true })
+    const s = await getTaskFactoryState()
+    expect(s.supervisorSessionId).toBeNull()
+    expect(s.managedEnabled).toBe(false)
+    // 验证广播事件(其它 tab / 前端 SSE 同步依赖它)
+    expect(emitSpy).toHaveBeenCalledWith(
+      expect.objectContaining({
+        type: 'task_factory',
+        action: 'state.changed',
+        payload: expect.objectContaining({ supervisorSessionId: null, managedEnabled: false }),
+      }),
+    )
+    emitSpy.mockRestore()
+    // 复位 beforeAll 状态,不影响后续用例
+    await setTaskFactoryState({ managedEnabled: false, supervisorSessionId: 'sess-sup' })
   })
 })

@@ -1,4 +1,5 @@
-import { Button, Space, Switch, Tooltip, message } from 'antd'
+import { Button, Popconfirm, Space, Switch, Tooltip, message } from 'antd'
+import { ReloadOutlined } from '@ant-design/icons'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 
 /** 看板筛选维度。'all' 不筛选；其余按任务 status 匹配。 */
@@ -48,6 +49,7 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask }: T
   const managed = useSuperTaskStore((s) => s.managed)
   const loading = useSuperTaskStore((s) => s.loading)
   const setManaged = useSuperTaskStore((s) => s.setManaged)
+  const resetSupervisorSession = useSuperTaskStore((s) => s.resetSupervisorSession)
 
   const allTasks = [...buckets.queue, ...buckets.processing, ...buckets.verifying, ...buckets.finished]
   const counts: Record<Exclude<SuperTaskFilter, 'all'>, number> = {
@@ -123,6 +125,43 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask }: T
             unCheckedChildren="AI 托管关"
           />
         </Tooltip>
+        {/*
+          重置主管会话(2026-09-02):清 state.json.supervisorSessionId +
+          同步关托管,然后 reload 触发 mount 引导重建一条新的空主管会话。
+          旧 transcript 保留在磁盘,与新主管不再关联 — 这是产品决策,
+          不是 bug。Popconfirm 二次确认防误点(参考 SuperTaskCard 删除
+          任务的同款 UI 惯例)。
+        */}
+        <Popconfirm
+          title="重置主管会话?"
+          description={
+            <span>
+              将创建一条新的空主管会话替换当前对话。
+              <br />
+              旧的 transcript 文件保留在 <code>~/.zai/tasks/</code> 与新主管不再关联。
+            </span>
+          }
+          okText="重置"
+          cancelText="取消"
+          okButtonProps={{ danger: true }}
+          onConfirm={async () => {
+            try {
+              await resetSupervisorSession()
+              // 全局 reload — 让 store / 看板 / 主管 transcript 干净同步
+              window.location.reload()
+            } catch (err) {
+              message.error(
+                `重置失败: ${err instanceof Error ? err.message : String(err)}`,
+              )
+            }
+          }}
+        >
+          <Tooltip title="清空当前主管会话,触发全新引导">
+            <Button icon={<ReloadOutlined />} data-testid="reset-supervisor-button">
+              重置会话
+            </Button>
+          </Tooltip>
+        </Popconfirm>
         <Button type="primary" onClick={onNewTask} data-testid="new-task-button">
           新建任务
         </Button>

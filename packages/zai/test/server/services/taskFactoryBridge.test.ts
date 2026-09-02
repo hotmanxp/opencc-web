@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
-  initTaskFactoryBridge, getTaskFactoryState, setTaskFactoryState, injectSupervisorCommand, __resetForTests,
+  initTaskFactoryBridge, getTaskFactoryState, getTaskFactoryStateSync, setTaskFactoryState, injectSupervisorCommand, __resetForTests,
 } from '../../../src/server/services/taskFactoryBridge.js'
 import { eventBus } from '../../../src/server/services/eventBus.js'
 import { sessionInbox } from '../../../src/server/services/sessionInbox.js'
@@ -50,5 +50,20 @@ describe('taskFactoryBridge', () => {
         content: expect.stringContaining('task-command'),
       }),
     )
+  })
+
+  it('injectSupervisorCommand 在 sid 为 null 时跳过(2026-09-02 reset 护栏)', async () => {
+    __resetForTests()
+    await setTaskFactoryState({ managedEnabled: false, supervisorSessionId: null })
+    // mockClear 处理前一个测试未 mockRestore 的 spy 累积
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    spy.mockClear()
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => {})
+    warn.mockClear()
+    injectSupervisorCommand('<task-command action="dispatch"></task-command>')
+    expect(spy).not.toHaveBeenCalled()
+    expect(warn).toHaveBeenCalledWith(expect.stringContaining('injectSupervisorCommand skipped'))
+    warn.mockRestore()
+    spy.mockRestore()
   })
 })
