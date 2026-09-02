@@ -32,6 +32,7 @@ export default function AgentConversation({
   toolbarLeftSlot,
   toolbarRightSlot,
   showTranscriptRepair,
+  hideShareAndPlugin,
 }: AgentInputBoxProps = {}) {
   const messages = useAgentStoreOrCtx((s) => s.messages)
   const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages)
@@ -201,6 +202,7 @@ export default function AgentConversation({
           toolbarLeftSlot={toolbarLeftSlot}
           toolbarRightSlot={toolbarRightSlot}
           showTranscriptRepair={showTranscriptRepair}
+          hideShareAndPlugin={hideShareAndPlugin}
         />
       </div>
     </div>

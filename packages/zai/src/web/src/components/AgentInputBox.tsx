@@ -206,12 +206,18 @@ export interface AgentInputBoxProps {
   /** 修复 transcript 按钮(扳手图标)。调试性质入口,默认不渲染;
    *  /agent 页面显式开启。 */
   showTranscriptRepair?: boolean;
+  /** 隐藏「分享到 LAN」与「插件管理」按钮。任务工厂的"需求讨论"模态框
+   *  (intake/supervisor 会话) 是与 AI 单独对齐意图的临时 session,没有跨
+   *  设备分享或换装插件的需求,挂上反而干扰 — 主管对话由调用方传 true 隐藏。
+   *  默认 false 保持 /agent、/m、/desktop 既有行为不变。 */
+  hideShareAndPlugin?: boolean;
 }
 
 export default React.memo(function AgentInputBox({
   toolbarLeftSlot,
   toolbarRightSlot,
   showTranscriptRepair = false,
+  hideShareAndPlugin = false,
 }: AgentInputBoxProps = {}) {
   const status = useAgentStoreOrCtx((s) => s.status);
   const sessionId = useAgentStoreOrCtx((s) => s.sessionId);
@@ -1529,7 +1535,9 @@ export default React.memo(function AgentInputBox({
             - disabled: 无 sessionId 时 disabled (分享空 session 无意义).
             - Popover: 受控 open={shareOpen}, 内部渲染 SharePopover.
             - 图标色与同行其他按钮一致 (var(--text-dim-45)).
+            - hideShareAndPlugin=true 时整块不渲染 — intake 主管对话不需要分享.
             详见 docs/superpowers/specs/2026-07-25-zai-agent-share-design.md §4.6 */}
+        {!hideShareAndPlugin && (
         <Tooltip
           title={
             sessionId
@@ -1562,8 +1570,9 @@ export default React.memo(function AgentInputBox({
             />
           </Popover>
         </Tooltip>
+        )}
         <SettingsButton />
-        <PluginButton />
+        {!hideShareAndPlugin && <PluginButton />}
         {/* 折叠/展开 transcript 按钮: 与 transcript repair 按钮相邻, 都是 transcript 相关.
             图标在 collapsed=false 时显示 ExpandOutlined (可折叠), true 时显示
             CompressOutlined (可展开), hover Tooltip 给完整文案, 与同行其他图标按钮

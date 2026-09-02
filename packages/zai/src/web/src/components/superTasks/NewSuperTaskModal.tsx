@@ -243,7 +243,9 @@ export default function NewSuperTaskModal({
         {intakeSid && sessionId === intakeSid ? (
           <AgentStoreContext.Provider value={intakeStore}>
             <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              <AgentConversation />
+              {/* intake/supervisor 临时对话不需要「分享到 LAN」与「插件管理」
+                  入口 — 主管讨论是单设备内对齐意图的过程,挂上反而干扰。 */}
+              <AgentConversation hideShareAndPlugin />
             </div>
           </AgentStoreContext.Provider>
         ) : (

@@ -179,7 +179,9 @@ export default function SuperTasks(): JSX.Element {
               flexDirection: 'column',
             }}
           >
-            <AgentConversation />
+            {/* 任务工厂主管会话不展示「分享到 LAN」与「插件管理」——
+                主管对话是单设备内对齐意图的过程,挂上反而干扰。 */}
+            <AgentConversation hideShareAndPlugin />
           </div>
         </div>
       )}
