@@ -1874,7 +1874,7 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     // 可选 model: 前端在 createNewSession 时会把"用户最近手动选过的模型"
     // 传过来, 让新建会话默认继承. 缺省/'unknown'/空串都视为不指定, 维持
     // 旧行为 (useConversationInfo 看到 'unknown' 就会回退到 runtime.defaultModel).
-    const body = req.body as { model?: unknown; providerId?: unknown } | undefined
+    const body = req.body as { model?: unknown; providerId?: unknown; mainAgent?: unknown } | undefined
     const requested = body?.model
     const model =
       typeof requested === 'string' && requested.length > 0 && requested !== 'unknown'
@@ -1889,6 +1889,22 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
       typeof requestedProviderId === 'string' && requestedProviderId.length > 0
         ? requestedProviderId
         : undefined
+    // zai patch (2026-09-02, task-intake): 可选 mainAgent —— 建会话时直接
+    // 冻结该会话的主 Agent(任务工厂主管引导用 'task-factory'、新建任务
+    // 弹窗用 'task-intake')。prompt 路径读 transcript.meta.mainAgent 即
+    // 命中此值,不再回落到全局 settings。未知名 → 400。
+    const requestedMainAgent = body?.mainAgent
+    const mainAgent =
+      typeof requestedMainAgent === 'string' && requestedMainAgent.length > 0
+        ? requestedMainAgent
+        : undefined
+    if (mainAgent) {
+      const reg = getAgentRegistry()
+      if (reg.listAgents().length === 0) reg.loadBuiltinAgents()
+      if (!reg.hasAgent(mainAgent)) {
+        return res.status(400).json({ error: `unknown mainAgent: ${mainAgent}` })
+      }
+    }
     const sessionId = await store.create({
       cwd: ctx.cwd,
       model,
@@ -1900,6 +1916,11 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
       ...(providerId ? { providerId } : {}),
       permissionMode: getDefaultMode(),
     } as Parameters<typeof store.create>[0], { cwd: ctx.cwd })
+    if (mainAgent) {
+      // create 已落盘 transcript,patch 写 meta.mainAgent(await —— 首条
+      // prompt 必须能看到冻结值)。
+      await store.patch(sessionId, { mainAgent }, { cwd: ctx.cwd })
+    }
     res.json({ sessionId })
   } catch (err) {
     res.status(500).json({ error: (err as Error).message });

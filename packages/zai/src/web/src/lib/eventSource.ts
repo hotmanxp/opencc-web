@@ -74,6 +74,10 @@ const NAMED_EVENT_TYPES = [
   'v2_task.changed',
   // instance.*
   'instance.changed',
+  // task_factory — 任务工厂生命周期 (created/finished/state.changed)。
+  // 2026-09-02: 接入 shared/events.ts union 后必须在此登记, 否则前端
+  // addEventListener 白名单静默丢事件 (弹窗完成条不出现的根因)。
+  'task_factory',
   // queue.* — 消息排队状态快照 (追齐 OPENCC 排队交互)
   'queue.changed',
   // app.update.* — zai 自身版本自动升级通道。UpdaterNotifier 监听,

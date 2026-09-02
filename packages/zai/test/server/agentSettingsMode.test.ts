@@ -116,3 +116,35 @@ describe('POST /api/agent/sessions uses defaultMode', () => {
     expect(transcript.meta.permissionMode).toBe('acceptEdits')
   })
 })
+
+// zai patch (2026-09-02, task-intake): sessions POST 支持可选 mainAgent,
+// 建会话即冻结 transcript.meta.mainAgent(主管引导 / 新建任务弹窗使用)。
+describe('POST /api/agent/sessions mainAgent', () => {
+  it('合法 mainAgent → 200 且 meta.mainAgent 落盘', async () => {
+    const router = await loadAgentRouter()
+    const app = buildApp(router)
+    const res = await request(app).post('/api/agent/sessions').send({ mainAgent: 'task-intake' })
+    expect(res.status).toBe(200)
+    const store = new TranscriptStore(dataDir)
+    const transcript = await store.read(res.body.sessionId, { cwd: tmpDir })
+    expect((transcript.meta as { mainAgent?: string }).mainAgent).toBe('task-intake')
+  })
+
+  it('未知 mainAgent → 400', async () => {
+    const router = await loadAgentRouter()
+    const app = buildApp(router)
+    const res = await request(app).post('/api/agent/sessions').send({ mainAgent: 'no-such-agent' })
+    expect(res.status).toBe(400)
+    expect(String(res.body.error)).toContain('no-such-agent')
+  })
+
+  it('缺省 mainAgent → 行为不变(meta 无 mainAgent)', async () => {
+    const router = await loadAgentRouter()
+    const app = buildApp(router)
+    const res = await request(app).post('/api/agent/sessions').send({})
+    expect(res.status).toBe(200)
+    const store = new TranscriptStore(dataDir)
+    const transcript = await store.read(res.body.sessionId, { cwd: tmpDir })
+    expect((transcript.meta as { mainAgent?: string }).mainAgent).toBeUndefined()
+  })
+})

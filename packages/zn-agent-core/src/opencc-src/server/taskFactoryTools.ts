@@ -5,11 +5,11 @@ import {
   createPoolTask, getTaskSummary, moveTask, emitTaskFactoryEvent, taskFactoryRoot,
 } from './taskFactoryFiles.js'
 
-const CREATE_DESC = '创建任务工厂任务：在 ~/.zai/task-factory/queue-tasks/<id>/ 初始化 index.md、docs/spec.md、docs/plan.md、process.md。' +
-  '需求与用户讨论清楚后调用；title 与 cwd 必填，agent 为执行子 Agent 用的 agent 名（默认 default），spec/plan 为已讨论出的内容（可选，落库后仍可用 Edit 补充）。'
+const CREATE_DESC = 'Create a Task Factory task: initializes index.md, docs/spec.md, docs/plan.md, process.md under ~/.zai/task-factory/queue-tasks/<id>/. ' +
+  'Call only after the requirements have been discussed with the user; title and cwd are required, agent is the executor subagent name (default "default"), spec/plan are the discussed content (optional; can still be filled in later via Edit).'
 
-const MARK_DESC = '验收任务完成：把 processing-tasks/<id> 移到 finished-tasks/<id> 并置 status: done。' +
-  '仅在确认 process.md 末尾有 ## [DONE] 且成果核对无误后调用。'
+const MARK_DESC = 'Accept a completed task: moves processing-tasks/<id> to finished-tasks/<id> and sets status: done. ' +
+  'Call only after confirming process.md ends with ## [DONE] and the deliverables check out.'
 
 export const superTasksCreateTool = buildTool({
   name: 'SuperTasksCreate',
@@ -20,18 +20,28 @@ export const superTasksCreateTool = buildTool({
   async prompt() { return CREATE_DESC },
   get inputSchema() {
     return z.object({
-      title: z.string().min(1).describe('任务标题（index.md 的 title）'),
-      cwd: z.string().min(1).describe('任务所在工程目录的绝对路径（执行子 Agent 的工作目录；不同任务可落在不同代码工程）'),
-      description: z.string().optional().describe('一句任务目标描述'),
-      agent: z.string().optional().describe('执行子 Agent 的 agent 名，默认 default'),
-      spec: z.string().optional().describe('已讨论的需求规格 markdown'),
-      plan: z.string().optional().describe('已讨论的执行计划 markdown'),
+      title: z.string().min(1).describe('Task title (the title field in index.md)'),
+      cwd: z.string().min(1).describe('Absolute path of the project directory the task belongs to (working directory of the executor subagent; different tasks may live in different code projects)'),
+      description: z.string().optional().describe('One-sentence task goal description'),
+      agent: z.string().optional().describe('Executor subagent name, defaults to "default"'),
+      spec: z.string().optional().describe('The discussed requirement spec (markdown)'),
+      plan: z.string().optional().describe('The discussed execution plan (markdown)'),
     })
   },
   async call(input: { title: string; cwd: string; description?: string; agent?: string; spec?: string; plan?: string }) {
     const s = await createPoolTask(input)
     emitTaskFactoryEvent('created', { id: s.id })
-    return { data: { output: `Task created: ${s.id}\n${s.title}\n工程目录: ${input.cwd}\n存放目录: ${join(taskFactoryRoot(), 'queue-tasks', s.id)}\n下一步：把 docs/spec.md、docs/plan.md 讨论结果落库；派发执行子 Agent 前先读 index.md 确认 agent 字段。` } }
+    return { data: { output: `Task created: ${s.id}\n${s.title}\nProject cwd: ${input.cwd}\nStorage dir: ${join(taskFactoryRoot(), 'queue-tasks', s.id)}\nNext step: persist the discussed results into docs/spec.md and docs/plan.md; before dispatching the executor subagent, read index.md to confirm the agent field.` } }
+  },
+  // Tool 接口要求实现结果序列化(缺了会在 runtime 落 tool_result 时抛
+  // "mapToolResultToToolResultBlockParam is not a function" —— 2026-09-02
+  // intake 弹窗实跑暴露;单测直调 call() 覆盖不到这条链路)。
+  mapToolResultToToolResultBlockParam(content: { output: string }, toolUseID: string) {
+    return {
+      type: 'tool_result' as const,
+      tool_use_id: toolUseID,
+      content: [{ type: 'text' as const, text: content.output }],
+    }
   },
   renderToolUseMessage() { return null },
   renderToolResultMessage() { return null },
@@ -50,7 +60,7 @@ export const superTasksMarkDoneTool = buildTool({
   async description() { return MARK_DESC },
   async prompt() { return MARK_DESC },
   get inputSchema() {
-    return z.object({ id: z.string().min(4).describe('任务 id，如 tf-a1b2c3d4') })
+    return z.object({ id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4') })
   },
   async call(input: { id: string }) {
     const inProcessing = await getTaskSummary(input.id, 'processing-tasks')
@@ -58,12 +68,20 @@ export const superTasksMarkDoneTool = buildTool({
       // 明确只接受 processing 状态（测试第二段断言此错误）
       const anywhere = await getTaskSummary(input.id)
       throw new Error(anywhere
-        ? `task ${input.id} 不在 processing-tasks（当前 ${anywhere.bucket}），拒绝验收`
+        ? `task ${input.id} is not in processing-tasks (current bucket: ${anywhere.bucket}), acceptance rejected`
         : `task ${input.id} not found`)
     }
     const done = await moveTask(input.id, 'processing-tasks', 'finished-tasks')
     emitTaskFactoryEvent('finished', { id: done.id })
-    return { data: { output: `Task done: ${done.id}（${done.title}）已移至 finished-tasks` } }
+    return { data: { output: `Task done: ${done.id} (${done.title}) moved to finished-tasks` } }
+  },
+  // 同 SuperTasksCreate:runtime 序列化 tool_result 必需(2026-09-02 补)。
+  mapToolResultToToolResultBlockParam(content: { output: string }, toolUseID: string) {
+    return {
+      type: 'tool_result' as const,
+      tool_use_id: toolUseID,
+      content: [{ type: 'text' as const, text: content.output }],
+    }
   },
   renderToolUseMessage() { return null },
   renderToolResultMessage() { return null },

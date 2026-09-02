@@ -5,6 +5,7 @@
  * - GET /api/super-tasks/:id      单任务详情(index + spec + plan + process)
  * - DELETE /api/super-tasks       删除任务(processing/paused → 409)
  * - POST /api/super-tasks/managed 切换 managed 开关(持久化到 state.json)
+ * - POST /api/super-tasks/supervisor 上报主管会话 id(持久化到 state.json)
  * - POST /api/super-tasks/:id/start  手工启动 = 注入 dispatch
  * - POST /api/super-tasks/:id/pause  kill 执行子任务 + 冻结(留 processing) + 注入通知
  * - POST /api/super-tasks/:id/resume  = 注入 resume
@@ -65,6 +66,21 @@ router.post('/super-tasks/managed', async (req, res) => {
 })
 
 /**
+ * POST /api/super-tasks/supervisor — 上报主管会话 id(2026-09-02)。
+ * 前端 /super-tasks 引导(沿用/新建主管会话)后调它把真实 sessionId 落到
+ * state.json,托管循环 injectSupervisorCommand 与手工 start/pause 等注入
+ * 才始终打在用户可见的主管会话上。
+ */
+router.post('/super-tasks/supervisor', async (req, res) => {
+  const { sessionId } = (req.body ?? {}) as { sessionId?: unknown }
+  if (typeof sessionId !== 'string' || sessionId.trim() === '') {
+    return res.status(400).json({ error: 'sessionId: 非空字符串必填' })
+  }
+  await setTaskFactoryState({ supervisorSessionId: sessionId.trim() })
+  res.json({ ok: true })
+})
+
+/**
  * POST /api/super-tasks/inject — 向主管会话注入指令。
  * action 白名单 dispatch/resume/accept/pause;可附 task id(存在性校验),
  * 标题中的 `<` 替换为全角 `＜` 防止被解析为 XML 起始标签。
@@ -78,8 +94,8 @@ router.post('/super-tasks/inject', async (req, res) => {
   const task = id ? await getTaskSummary(id as string) : null
   if (id && !task) return res.status(404).json({ error: `task ${id} not found` })
   const body = id
-    ? `\n<task-command action="${typedAction}" id="${id}" title="${(task!.title ?? '').replace(/</g, '＜')}">请按指令处理任务 ${id}: ${typedAction}</task-command>`
-    : `\n<task-command action="${typedAction}">请按指令处理: ${typedAction}</task-command>`
+    ? `\n<task-command action="${typedAction}" id="${id}" title="${(task!.title ?? '').replace(/</g, '＜')}">Handle task ${id} per the command: ${typedAction}</task-command>`
+    : `\n<task-command action="${typedAction}">Handle per the command: ${typedAction}</task-command>`
   injectSupervisorCommand(body)
   res.json({ ok: true })
 })
@@ -91,7 +107,7 @@ router.post('/super-tasks/inject', async (req, res) => {
 router.post('/super-tasks/:id/start', async (req, res) => {
   const t = await getTaskSummary(req.params.id)
   if (!t || t.bucket !== 'queue-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在队列` })
-  injectSupervisorCommand(`\n<task-command action="dispatch" id="${t.id}" title="${(t.title ?? '').replace(/</g, '＜')}">请派发执行任务：${t.id}</task-command>`)
+  injectSupervisorCommand(`\n<task-command action="dispatch" id="${t.id}" title="${(t.title ?? '').replace(/</g, '＜')}">Dispatch task ${t.id} for execution.</task-command>`)
   res.json({ ok: true })
 })
 
@@ -112,7 +128,7 @@ router.post('/super-tasks/:id/pause', async (req, res) => {
     // executor 已 kill 但状态写入失败——显式 500，避免 UI 把「未暂停」误判为已暂停
     return res.status(500).json({ error: (err as Error).message })
   }
-  injectSupervisorCommand(`\n<task-command action="pause" id="${t.id}">任务已暂停（执行子 Agent 已结束），如需要恢复请回复继续。</task-command>`)
+  injectSupervisorCommand(`\n<task-command action="pause" id="${t.id}">Task paused (executor subagent has been killed). Reply to resume when needed.</task-command>`)
   res.json({ ok: true })
 })
 
@@ -123,7 +139,7 @@ router.post('/super-tasks/:id/pause', async (req, res) => {
 router.post('/super-tasks/:id/resume', async (req, res) => {
   const t = await getTaskSummary(req.params.id)
   if (!t || t.bucket !== 'processing-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在执行中` })
-  injectSupervisorCommand(`\n<task-command action="resume" id="${t.id}" title="${(t.title ?? '').replace(/</g, '＜')}">继续执行任务（resume 原执行会话或重新委派）。</task-command>`)
+  injectSupervisorCommand(`\n<task-command action="resume" id="${t.id}" title="${(t.title ?? '').replace(/</g, '＜')}">Continue executing the task (resume the original executor session or re-delegate).</task-command>`)
   res.json({ ok: true })
 })
 
@@ -134,7 +150,7 @@ router.post('/super-tasks/:id/resume', async (req, res) => {
 router.post('/super-tasks/:id/accept', async (req, res) => {
   const t = await getTaskSummary(req.params.id)
   if (!t || t.bucket !== 'processing-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在执行中` })
-  injectSupervisorCommand(`\n<task-command action="accept" id="${t.id}">请验收任务成果并调用 SuperTasksMarkDone。</task-command>`)
+  injectSupervisorCommand(`\n<task-command action="accept" id="${t.id}">Accept the task deliverables and call SuperTasksMarkDone.</task-command>`)
   res.json({ ok: true })
 })
 

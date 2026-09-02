@@ -14,11 +14,11 @@
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
-import { eventBus, type ServerEventInput } from './eventBus.js'
+import { eventBus } from './eventBus.js'
 import { sessionInbox } from './sessionInbox.js'
 import { taskFactoryRoot } from '@zn-ai/zn-agent-core'
 
-export interface TaskFactoryState {
+export type TaskFactoryState = {
   managedEnabled: boolean
   supervisorSessionId: string
 }
@@ -46,7 +46,7 @@ export function initTaskFactoryBridge(): void {
       action: e.action,
       payload: e.payload,
       ts: Date.now(),
-    } as unknown as ServerEventInput)
+    })
   }
 }
 
@@ -84,7 +84,7 @@ export async function setTaskFactoryState(patch: Partial<TaskFactoryState>): Pro
     action: 'state.changed',
     payload: next,
     ts: Date.now(),
-  } as unknown as ServerEventInput)
+  })
 }
 
 /**

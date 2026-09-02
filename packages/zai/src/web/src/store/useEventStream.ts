@@ -3,6 +3,7 @@ import { subscribeServerEvents } from '../lib/eventSource.js'
 import { useAgentStore } from './useAgentStore.js'
 import { useAppStore } from './useAppStore.js'
 import { useInstanceStore } from './useInstanceStore.js'
+import { useSuperTaskStore } from './useSuperTaskStore.js'
 import type { ServerEvent } from '../../../shared/events.js'
 
 // 调试开关 — 与 eventSource.ts 同源(三选一): window.__ZAI_DEBUG_SSE__ /
@@ -170,6 +171,11 @@ export function applyBatch(batch: ServerEvent[]): void {
       useAgentStore.getState().applyAgentTaskChanged(event); break
     case 'instance.changed':
       useInstanceStore.getState().applyInstanceChanged(event)
+      break
+    // task_factory — 任务工厂事件(全局,不带 sid):刷新看板 + 记录
+    // created 的任务 id(新建任务弹窗据此显示「已创建」完成条)。
+    case 'task_factory':
+      useSuperTaskStore.getState().applyTaskFactoryEvent(event)
       break
     // app.update.* — zai 自身版本自动升级通道的事件,UpdateNotifier 监听
     // appUpdate 状态显示 Modal / notification。统一走 useAppStore,

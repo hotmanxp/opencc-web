@@ -13,6 +13,7 @@ const v2 = (id: string, subject: string, status: V2TaskItem["status"]): V2TaskIt
 });
 
 import AgentInputBox from "./AgentInputBox.js";
+import SplitPaneToggleButton from "./splitPane/SplitPaneToggleButton.js";
 
 // 避免 ConversationInfoButton / api 等副作用; 只关注状态行渲染.
 vi.mock("../components/ConversationInfoButton.js", () => ({
@@ -332,20 +333,28 @@ describe('AgentInputBox — 状态行合并 v2 任务摘要', () => {
   });
 })
 
-describe('AgentInputBox — 右侧分屏 toggle (split-pane)', () => {
+describe('AgentInputBox — 分屏 toggle 经 toolbarRightSlot 注入', () => {
   beforeEach(() => {
     localStorage.clear()
   })
 
-  test('默认渲染在状态行最右侧, 默认关闭', () => {
+  // 分屏按钮已从 AgentInputBox 内置移除(/desktop、/m 等场景没有 SplitPane),
+  // 由 /agent 页面通过右插槽注入 SplitPaneToggleButton。
+  test('默认不注入 → 状态行无分屏按钮;修复 transcript 按钮默认也不渲染', () => {
     render(<AgentInputBox />)
+    expect(screen.queryByTestId('split-pane-toggle-inputbox')).toBeNull()
+    expect(screen.queryByTestId('transcript-repair-button')).toBeNull()
+  })
+
+  test('注入 SplitPaneToggleButton 后渲染在状态行, 默认关闭', () => {
+    render(<AgentInputBox toolbarRightSlot={<SplitPaneToggleButton />} />)
     const btn = screen.getByTestId('split-pane-toggle-inputbox')
     expect(btn).toBeInTheDocument()
     expect(btn).toHaveAttribute('aria-pressed', 'false')
   })
 
   test('点击翻转并写入 STORAGE_KEYS.open, 再次点击翻回', () => {
-    render(<AgentInputBox />)
+    render(<AgentInputBox toolbarRightSlot={<SplitPaneToggleButton />} />)
     const btn = screen.getByTestId('split-pane-toggle-inputbox')
     fireEvent.click(btn)
     expect(btn).toHaveAttribute('aria-pressed', 'true')
@@ -357,9 +366,14 @@ describe('AgentInputBox — 右侧分屏 toggle (split-pane)', () => {
 
   test('已打开状态下刷新 (新挂载) 直接读取 localStorage 进入开启态', () => {
     localStorage.setItem('zai.splitPane.open', 'true')
-    render(<AgentInputBox />)
+    render(<AgentInputBox toolbarRightSlot={<SplitPaneToggleButton />} />)
     const btn = screen.getByTestId('split-pane-toggle-inputbox')
     expect(btn).toHaveAttribute('aria-pressed', 'true')
+  })
+
+  test('showTranscriptRepair=true → 修复 transcript 按钮渲染', () => {
+    render(<AgentInputBox showTranscriptRepair />)
+    expect(screen.getByTestId('transcript-repair-button')).toBeInTheDocument()
   })
 })
 

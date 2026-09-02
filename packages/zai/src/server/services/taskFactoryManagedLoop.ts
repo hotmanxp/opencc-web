@@ -65,9 +65,9 @@ async function tick(): Promise<void> {
   lastSignature = signature
   const first: string = actions[0]!
   if (first === 'dispatch') {
-    injectSupervisorCommand('\n<task-command action="dispatch">队列有任务，请按队列顺序派发执行（可一次派发多个，任务间并行）。</task-command>')
+    injectSupervisorCommand('\n<task-command action="dispatch">The queue has tasks; dispatch them for execution in queue order (multiple at once is fine — tasks run in parallel).</task-command>')
   } else if (first.startsWith('accept:')) {
     const id = first.slice('accept:'.length)
-    injectSupervisorCommand(`\n<task-command action="accept" id="${id}">执行子 Agent 已完成，请验收。</task-command>`)
+    injectSupervisorCommand(`\n<task-command action="accept" id="${id}">The executor subagent has finished; please accept the task.</task-command>`)
   }
 }

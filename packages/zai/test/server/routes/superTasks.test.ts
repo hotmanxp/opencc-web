@@ -88,3 +88,19 @@ describe('POST /api/super-tasks/managed', () => {
     expect((await getTaskFactoryState()).managedEnabled).toBe(false)
   })
 })
+
+describe('POST /api/super-tasks/supervisor', () => {
+  it('上报主管会话 id 并持久化到 state', async () => {
+    const res = await supertest(app).post('/api/super-tasks/supervisor').send({ sessionId: ' sess-new-sup ' })
+    expect(res.status).toBe(200)
+    expect((await getTaskFactoryState()).supervisorSessionId).toBe('sess-new-sup')
+    // 复位,避免影响后续用例(beforeAll 已跑,手动恢复)
+    await setTaskFactoryState({ supervisorSessionId: 'sess-sup' })
+  })
+  it('缺失/空串 sessionId → 400', async () => {
+    const r1 = await supertest(app).post('/api/super-tasks/supervisor').send({})
+    expect(r1.status).toBe(400)
+    const r2 = await supertest(app).post('/api/super-tasks/supervisor').send({ sessionId: '   ' })
+    expect(r2.status).toBe(400)
+  })
+})

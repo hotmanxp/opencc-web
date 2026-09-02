@@ -23,7 +23,7 @@ import ApproveDrawer from "../components/ApproveDrawer.jsx";
 import SettingsDrawer from "../components/SettingsDrawer";
 import { FilePreviewDrawer } from "../components/conversation/FilePreviewDrawer.js";
 import TodoZone from "../components/TodoZone.jsx";
-import AgentInputBox from "../components/AgentInputBox";
+import SplitPaneToggleButton from "../components/splitPane/SplitPaneToggleButton.js";
 import { SplitPane } from "../components/splitPane/SplitPane.js";
 import {
   STORAGE_KEYS,
@@ -495,7 +495,13 @@ export default function Agent() {
           overflowX: "hidden"
         }}
       >
-        <AgentConversation />
+        {/* 工具栏定制:分屏是本页面(SplitPane)专属能力,toggle 经右插槽注入;
+            transcript 修复按钮(调试入口)也仅在此页开启。Desktop/Mobile 等
+            复用 AgentConversation 的场景不传 → 两个按钮都不出现。 */}
+        <AgentConversation
+          showTranscriptRepair
+          toolbarRightSlot={<SplitPaneToggleButton />}
+        />
 
         {/*
           修复: BottomStatusBar 整行已移除. 任务摘要职责合并到

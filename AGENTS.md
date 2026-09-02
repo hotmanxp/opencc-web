@@ -44,6 +44,7 @@ zai 把用户级配置、plugin 元数据、任务持久化等放在 `~/.zai/`(�
 
 ## 强制开发规则
 
+- **系统提示词一律用英文**:所有写入代码的系统提示词(system prompt)——包括 Agent 定义描述(description/systemPrompt)、subagent 提示词、工具描述、LLM 指令模板——**必须用英文编写,禁止直接写中文**。用户可见的 UI 文案走 i18n,不受此限。**Why:** 提示词是发给模型的,英文指令遵循度与跨模型稳定性更好,且避免编码/ tokenizer 问题。**How to apply:** 新增/修改任何 prompt 字符串(Agent 描述、`prompt:` 字段、skill/agent frontmatter description、vendor 内的提示词补丁)时检查一遍。
 - **真实浏览器验收**:任何问题修复或特性新增,完成前必须用 `/ego-browser` skill 启动真实 zai 实例并走完用户路径(页面加载、按钮点击、表单提交、截图等)。**禁止**用 Chrome DevTools MCP、Playwright、Puppeteer、`curl + WebFetch` 或单元测试替代。环境阻塞时必须显式报告。**注意**:`/ego-browser` 测试本地功能时,不要 kill 920x 端口所在的服务进程——920x 是 zai 正式服务端口, kill 后会导致真实实例不可用,应改为让 ego 使用另一个可用端口(如 8101 起)访问,或用 `pnpm --filter @zn-ai/zai dev` 启动独立开发服务。**ego-browser 在 zai dev 跑着时(SSE 长连接)实际可用**——通过 `browser-operator` skill 调真实浏览器(ego-browser)即可。早期 `feedback-ego-browser-sse-blocked` memory 已过时,不要因为旧经验跳过视觉验证。
 - **路由访问路径**:zai 提供三条独立顶层路径,验证时务必按目标切路由,不要靠缩窗口判断:
   - **`/agent`** → PC 端(`Layout.tsx` + `AgentConversation.tsx`,左侧 Sider + 右侧分屏 tab)。默认入口。
@@ -142,4 +143,4 @@ pnpm release:major
 
 > 历史 spec / plan 完整列表见 `docs/superpowers/specs/` 与 `docs/superpowers/plans/`,命名 `YYYY-MM-DD-<topic>.md`。
 
-<!-- updated: 2026-08-28 -->
+<!-- updated: 2026-09-02 -->

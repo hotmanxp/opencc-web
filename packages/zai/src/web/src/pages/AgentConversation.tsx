@@ -6,22 +6,30 @@ import { useAppStore } from '../store/useAppStore'
 import QuestionCard from '../components/QuestionCard.jsx'
 import PermissionConfirmCard from '../components/PermissionConfirmCard.jsx'
 import TodoZone from '../components/TodoZone.jsx'
-import AgentInputBox from '../components/AgentInputBox'
+import AgentInputBox, { type AgentInputBoxProps } from '../components/AgentInputBox'
 import { MessageListView } from '../components/transcript/MessageListView.js'
 import { useAutoScrollToBottom } from '../hooks/useAutoScrollToBottom'
 
 const { Paragraph } = Typography
 
 /**
- * Agent.tsx 的对话核心 — 抽出来供 MobileAgent 复用。
+ * Agent.tsx 的对话核心 — 抽出来供 MobileAgent / Desktop 复用。
  * 只负责:消息裁剪 + 渲染 + QuestionCard + AgentInputBox + 自动滚动 + Esc 中断。
  * 不负责:左侧 sessions 栏、右侧 SplitPane、ConfigStatusBar、Drawer 容器。
- * 这些由调用方(Agent.tsx / MobileAgent.tsx)各自决定怎么挂。
+ * 这些由调用方(Agent.tsx / MobileAgent.tsx / Desktop.tsx)各自决定怎么挂。
+ *
+ * 工具栏定制(AgentInputBoxProps 透传):分屏等场景专属按钮不内置在
+ * AgentInputBox,由调用方经 toolbarLeftSlot / toolbarRightSlot 插槽注入;
+ * transcript 修复按钮默认隐藏,showTranscriptRepair 显式开启(/agent)。
  *
  * 移动端判断走 useAppStore.isMobile (由 useIsMobile() hook 在 Layout 顶部
  * 同步), 不再走 props, 让组件树更扁.
  */
-export default function AgentConversation() {
+export default function AgentConversation({
+  toolbarLeftSlot,
+  toolbarRightSlot,
+  showTranscriptRepair,
+}: AgentInputBoxProps = {}) {
   const messages = useAgentStore((s) => s.messages)
   const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages)
   const outputStyle = useAppStore((s) => s.outputStyle)
@@ -186,7 +194,11 @@ export default function AgentConversation() {
         <PermissionConfirmCard />
       </div>
       <div className="bottom-stack">
-        <AgentInputBox />
+        <AgentInputBox
+          toolbarLeftSlot={toolbarLeftSlot}
+          toolbarRightSlot={toolbarRightSlot}
+          showTranscriptRepair={showTranscriptRepair}
+        />
       </div>
     </div>
   )

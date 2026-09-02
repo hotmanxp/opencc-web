@@ -405,19 +405,6 @@ export function getActivePromptCount(): number {
 }
 
 /**
- * Per-session in-flight query check (zai patch 2026-08-09): 父 session
- * 主线活跃时 BashNotifier 暂存后台完成通知,主线结束由 agent.ts
- * `runQueryLoop` finally 调 `flushPendingBashNotifications` 补发,保证通知
- * query 不与主线并行、互相之间也不并行(并行 query 会各自加载完整父上下文
- * 续跑主任务 → 请求叠加,见 HRMSV3-ZN-WEBSITE#668 / 会话 sess-1786243017001
- * 现场 78 次/分钟)。Reuses the same sessionControllers map as
- * `getActivePromptCount`.
- */
-export function hasActiveQuery(sessionId: string): boolean {
-  return sessionControllers.has(sessionId)
-}
-
-/**
  * Best-effort read of the deployment's `subagents.<name>` config from
  * `~/.zai/settings.json` (zai patch 2026-08-31:实装,此前是无条件返回
  * `undefined` 的 stub)。Returns `undefined` when the block is absent so

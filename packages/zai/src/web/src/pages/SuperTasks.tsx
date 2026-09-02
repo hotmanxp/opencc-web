@@ -5,24 +5,18 @@ import AgentConversation from './AgentConversation'
 import SuperTaskPanel from '../components/superTasks/SuperTaskPanel'
 import { useAgentStore } from '../store/useAgentStore'
 import { useSuperTaskStore } from '../store/useSuperTaskStore'
-
-const SUPERVISOR_SESSION_KEY = 'zai-supervisor-session'
+import { setSupervisorSession } from '../lib/superTaskApi'
+import { createAgentSession, pickLastSelectedModel } from '../lib/agentSessionApi'
+import { LIGHT_PAGE_VARS } from '../components/superTasks/lightThemeVars'
 
 /**
- * 任务工厂页亮色化(2026-09-01 用户反馈):整页只在本页面范围内覆写 CSS 变量为
- * 亮色值,让主管对话区/看板/卡片全部按浅色渲染;再嵌套 antd ConfigProvider
- * defaultAlgorithm,让本页内的 Drawer/Modal/Popconfirm 等 portal 组件用亮色
- * token。不影响全局主题(其它页面照旧)。
+ * 任务工厂页亮色化(2026-09-01 用户反馈;09-02 抽到 superTasks/lightThemeVars):
+ * 整页在页面根 div 上覆写 CSS 变量为亮色值,让主管对话区/看板/卡片全部按浅色
+ * 渲染;再嵌套 antd ConfigProvider defaultAlgorithm,让本页内的 Drawer/Modal/
+ * Popconfirm 等 portal 组件用亮色 token。不影响全局主题(其它页面照旧)。
+ * 注意:portal 组件(弹窗)不继承页面 div 上的 CSS 变量,弹窗内容容器需各自
+ * 再注入 LIGHT_PAGE_VARS 一份(见 NewSuperTaskModal)。
  */
-const LIGHT_PAGE_VARS = {
-  '--bg-body': '#eef2f7',
-  '--bg-page': '#eef2f7',
-  '--bg-card': '#ffffff',
-  '--bg-card-hover': '#f7f9fc',
-  '--text-primary': '#1f2937',
-  '--text-secondary': '#6b7280',
-  '--border-subtle': '#e5e9f0',
-} as React.CSSProperties
 
 /**
  * SuperTasks 页面（任务工厂 · 主管）。
@@ -36,15 +30,16 @@ const LIGHT_PAGE_VARS = {
  *  - 左:主管对话边栏 280px,可折叠为 40px 图标条(点图标恢复)。
  *  - 右:flex:1 SuperTaskPanel(顶部总览统计卡组 + 三栏看板)。
  *
- * 主管会话引导(Task 8 修复):
- *  - mount 时调 loadSessions, 等 sessions 刷新到 store 后
- *  - 若 localStorage `zai-supervisor-session` 命中 sessions 中存在的 id
- *    → setCurrentSession(saved),保持主管身份稳定不漂移
- *  - 否则 (无论 sessions 是否为空) 都调 createNewSession() 拿到新 sid,
- *    写入 localStorage + setCurrentSession(sid)。
- *    关键:不能因为 sessions 非空就把主管会话"漂移"到 sessions[0] —
- *    那会让每次刷新都随机落到不同会话。store 内部 loadSessions 自动
- *    set({sessionId: sessions[0]}) 的兜底在引导流程跑完后会被覆盖。
+ * 主管会话引导(2026-09-02 改为「服务端为准」):
+ *  - mount 时 loadSessions + superTaskStore.load(拿 server 端
+ *    state.json 的 supervisorSessionId)
+ *  - server sid 存在于 sessions 列表 → setCurrentSession(serverSid),
+ *    主管 transcript 作为决策日志跨刷新/跨 tab 稳定延续
+ *  - 否则(首次进入 / 会话被删)→ POST /api/agent/sessions
+ *    {mainAgent:'task-factory'} 新建并冻结主管身份 →
+ *    POST /api/super-tasks/supervisor 上报 → setCurrentSession(新sid)。
+ *    托管循环/注入端点与用户可见会话由此始终指向同一个 session。
+ *  - 不再使用 localStorage `zai-supervisor-session`(旧键残留无害,不再读写)。
  *
  * 数据加载 + 3s 轮询由本页统一驱动(避免双轮询)。
  */
@@ -61,35 +56,31 @@ export default function SuperTasks(): JSX.Element {
     return () => window.clearInterval(id)
   }, [load])
 
-  // 主管会话引导 — 仅在 mount 跑一次。
-  // 用闭包里的 sessions 会有 stale 风险, 所以在 loadSessions() 返回后
-  // 从 store 里重新读最新的 sessions。
+  // 主管会话引导 — 仅在 mount 跑一次。真相源 = 后端 state.json 的
+  // supervisorSessionId(经 superTaskStore.load 带回)。
   useEffect(() => {
     if (booted.current) return
     booted.current = true
     void (async () => {
-      await loadSessions()
+      await Promise.all([loadSessions(), useSuperTaskStore.getState().load()])
       const s = useAgentStore.getState()
       const latest = s.sessions
-      const saved = (() => {
-        try { return localStorage.getItem(SUPERVISOR_SESSION_KEY) } catch { return null }
-      })()
-      const exists = saved ? latest.some((x) => x.sessionId === saved) : false
-      if (exists && saved) {
-        // 本地有持久化的主管会话,且仍在 sessions 列表里 → 锁定到它
-        s.setCurrentSession(saved)
+      const serverSid = useSuperTaskStore.getState().supervisorSessionId
+      if (serverSid && latest.some((x) => x.sessionId === serverSid)) {
+        s.setCurrentSession(serverSid)
         return
       }
-      // 命中失败(没有 saved / saved 已失效):统一创建新会话并接管主管身份。
-      // 注意:不论 sessions 列表是否非空,这里都强制创建 — 避免主管身份被
-      // store 兜底自动漂移到 sessions[0] 上,导致每次刷新主管会话都换。
+      // server sid 缺失或会话已被删:新建一条并冻结 task-factory,上报后端 —
+      // 不论 sessions 列表是否非空都强制创建,避免主管身份被 store 兜底漂移
+      // 到 sessions[0](且新会话必须带 mainAgent=task-factory)。
       try {
-        await s.createNewSession()
-        const after = useAgentStore.getState().sessionId
-        if (after) {
-          try { localStorage.setItem(SUPERVISOR_SESSION_KEY, after) } catch { /* quota / disabled */ }
-          s.setCurrentSession(after)
-        }
+        const sid = await createAgentSession({
+          mainAgent: 'task-factory',
+          ...pickLastSelectedModel(latest),
+        })
+        await setSupervisorSession(sid)
+        await loadSessions()
+        useAgentStore.getState().setCurrentSession(sid)
       } catch {
         // 创建失败静默, store 内部有兜底
       }

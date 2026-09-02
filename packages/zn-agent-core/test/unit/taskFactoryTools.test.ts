@@ -30,11 +30,31 @@ describe('superTasksCreateTool', () => {
     const res = await superTasksCreateTool.call({ title: '写周报脚本', cwd: dir, agent: 'default', spec: '# SPEC' })
     const out = res.data.output as string
     expect(out).toContain('Task created: tf-')
-    expect(out).toContain(`工程目录: ${dir}`)
+    expect(out).toContain(`Project cwd: ${dir}`)
     expect(events[0]?.action).toBe('created')
     const id = extractId(out)
     const spec = await readFile(join(taskDir('queue-tasks', id), 'docs', 'spec.md'), 'utf-8')
     expect(spec).toContain('# SPEC')
+  })
+})
+
+describe('tool_result serialization (2026-09-02 回归)', () => {
+  // runtime 在把 call() 结果落成 tool_result 块时强制调
+  // mapToolResultToToolResultBlockParam —— 缺实现会抛
+  // "is not a function"(intake 弹窗实跑暴露)。
+  it('SuperTasksCreate / SuperTasksMarkDone 均实现结果序列化', () => {
+    for (const tool of [superTasksCreateTool, superTasksMarkDoneTool] as const) {
+      expect(typeof tool.mapToolResultToToolResultBlockParam).toBe('function')
+      const block = tool.mapToolResultToToolResultBlockParam(
+        { output: 'hello-out' },
+        'tu-1',
+      )
+      expect(block).toEqual({
+        type: 'tool_result',
+        tool_use_id: 'tu-1',
+        content: [{ type: 'text', text: 'hello-out' }],
+      })
+    }
   })
 })
 
@@ -51,6 +71,6 @@ describe('superTasksMarkDoneTool', () => {
 
   it('对不在 processing 的任务抛错', async () => {
     const id = extractId((await superTasksCreateTool.call({ title: 't3', cwd: dir })).data.output as string) // 仍在 queue-tasks
-    await expect(superTasksMarkDoneTool.call({ id })).rejects.toThrow(/拒绝验收|not found/)
+    await expect(superTasksMarkDoneTool.call({ id })).rejects.toThrow(/acceptance rejected|not found/)
   })
 })

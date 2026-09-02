@@ -32,6 +32,7 @@ const LANE_COLOR: Record<BucketKey, string> = {
 export default function SuperTaskPanel(): JSX.Element {
   const buckets = useSuperTaskStore((s) => s.buckets)
   const loading = useSuperTaskStore((s) => s.loading)
+  const loadedOnce = useSuperTaskStore((s) => s.loadedOnce)
 
   const [selected, setSelected] = useState<Record<BucketKey, string[]>>({
     queue: [], processing: [], finished: [],
@@ -183,23 +184,25 @@ export default function SuperTaskPanel(): JSX.Element {
     )
   }
 
-  // 首载判定:仅当所有桶为空 + 仍在加载 → 空占位(父级 Spin 覆盖);轮询期间不闪。
-  if (loading && isEmpty) {
-    return (
-      <div style={{ padding: 24, textAlign: 'center' }}>
-        {/* loading 占位由父组件 Spin 覆盖 */}
-      </div>
-    )
-  }
-
+  // 首载判定:仅当「从未成功加载过 + 桶全空 + 正在加载」→ lanes 区占位(父级
+  // Spin 覆盖)。3s 轮询每轮都会置 loading,必须用 loadedOnce 过滤,否则空看板
+  // 每 3s 闪一次(2026-09-02 修)。
+  // 注意:顶栏 / 新建任务弹窗 / 详情抽屉**不能**随该条件一起挂载 ——
+  // NewSuperTaskModal 现在承载对话状态(intake sid、草稿选择),轮询导致的
+  // 卸载重挂会让 [open] effect 重跑,把对话窗口重置回草稿提示甚至瞬时消失。
+  const showLanes = !(loading && isEmpty && !loadedOnce)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', minHeight: 0 }}>
       <TaskOverviewBar filter={filter} onFilterChange={setFilter} onNewTask={() => setNewModalOpen(true)} />
-      <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0, alignItems: 'stretch' }}>
-        {renderLane('queue', buckets.queue, true)}
-        {renderLane('processing', buckets.processing, false)}
-        {renderLane('finished', buckets.finished, true)}
-      </div>
+      {showLanes ? (
+        <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0, alignItems: 'stretch' }}>
+          {renderLane('queue', buckets.queue, true)}
+          {renderLane('processing', buckets.processing, false)}
+          {renderLane('finished', buckets.finished, true)}
+        </div>
+      ) : (
+        <div style={{ padding: 24, textAlign: 'center' }} />
+      )}
       <NewSuperTaskModal open={newModalOpen} onClose={() => setNewModalOpen(false)} />
       <SuperTaskDetailDrawer taskId={detailId} onClose={() => setDetailId(null)} />
     </div>

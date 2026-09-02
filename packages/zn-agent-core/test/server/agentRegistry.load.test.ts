@@ -10,7 +10,7 @@ describe('AgentRegistry load', () => {
     registry = new AgentRegistryImpl()
   })
 
-  it('loadBuiltinAgents 注册 4 个 builtin', () => {
+  it('loadBuiltinAgents 注册 5 个 builtin', () => {
     registry.loadBuiltinAgents()
     const agents = registry.listAgents().map(a => a.name).sort()
     expect(agents).toEqual([
@@ -18,6 +18,7 @@ describe('AgentRegistry load', () => {
       'default',
       'office',
       'task-factory',
+      'task-intake',
     ])
   })
 
@@ -27,6 +28,7 @@ describe('AgentRegistry load', () => {
     expect(registry.hasAgent('office')).toBe(true)
     expect(registry.hasAgent('agent-creator')).toBe(true)
     expect(registry.hasAgent('task-factory')).toBe(true)
+    expect(registry.hasAgent('task-intake')).toBe(true)
     expect(registry.hasAgent('nonexistent')).toBe(false)
   })
 

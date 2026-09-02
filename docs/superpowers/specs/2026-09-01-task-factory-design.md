@@ -266,3 +266,29 @@ SSE：任务事件并入现有 SSE 流（`useEventStream` 已有全局连接）�
 > 更正（2026-09-01 用户确认）：**任务并行执行不排除**。每个任务同时只派发一个执行子
 > Agent，但不同任务可并行（主管收到 dispatch 指令时按队列顺序派发多个；托管循环不在
 > 「无 processing 才派发」上做单任务串行约束）。
+
+> **更正（2026-09-02 用户确认）：新建任务改为独立 intake 会话，废弃「弹窗输入发往
+> 主管 session」的原设计**（上文「页面布局 / 主管会话与唤醒机制 / 新建任务弹窗」相关
+> 描述以本条为准）：
+>
+> 1. **新建任务 = 独立 AI 对话窗口**：`NewSuperTaskModal` 不再是表单，打开即建一条
+>    独立的临时会话（`POST /api/agent/sessions` 带 `mainAgent: 'task-intake'`，
+>    transcript 与主管会话完全隔离），弹窗内嵌 `AgentConversation` 对话流；
+>    标题 / cwd / 执行 Agent 等要素全部由对话收集（废弃原「工程目录表单必填」）。
+> 2. **新内置 agent `task-intake`**（`mainAgents-taskIntake.ts`）：职责单一 ——
+>    brainstorming 聊需求 → `SuperTasksCreate` 落库 → 把讨论纪要写入任务目录
+>    `docs/brainstorm.md` → 报告任务 id。tools 槽只追加 SuperTasksCreate
+>    （不给 MarkDone/SpawnAgent，不派发不验收）。
+> 3. **纪要归档**：落库后纪要永久留在 `<任务目录>/docs/brainstorm.md`（主管派发时
+>    与 spec/plan 一并让执行子 Agent 阅读）；临时 intake 会话在用户「完成并关闭」后
+>    删除；讨论未完而关闭 → 保留草稿，下次打开弹窗提示「继续 / 新开」。
+> 4. **主管会话 id 以服务端 state.json 为唯一事实源**：修复前端 localStorage 随机
+>    会话与后端注入 id 不联动的 bug。`POST /api/agent/sessions` 支持 `mainAgent`
+>    （主管引导建会话即冻结 `task-factory`）；新增 `POST /api/super-tasks/supervisor`
+>    上报主管 sid；`/super-tasks` 页面引导改为读取 `GET /api/super-tasks` 返回的
+>    `supervisorSessionId`，命中则沿用，否则新建并上报。托管循环注入的
+>    dispatch/accept 指令由此始终落在用户可见的主管会话。
+> 5. **`task_factory` SSE 事件接入前端**：shared `ServerEvent` 联合类型新增
+>    `TaskFactoryEvent`（`action` + `payload`），`isGlobalEvent` 登记跨 sid 广播；
+>    前端 `useEventStream` 路由到 `useSuperTaskStore.applyTaskFactoryEvent`
+>    （刷新看板 + 记录 `lastCreatedTaskId` 供弹窗完成条）；3s 轮询保留作兜底。

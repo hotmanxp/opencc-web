@@ -34,6 +34,17 @@ export async function setSuperTasksManaged(enabled: boolean): Promise<void> {
     body: JSON.stringify({ enabled }),
   }).then((r) => json<{ ok: true }>(r))
 }
+/**
+ * 上报主管会话 id(2026-09-02)。/super-tasks 引导(沿用/新建主管会话)后调用,
+ * 让后端托管循环与注入端点始终打在用户可见的主管会话上。
+ */
+export async function setSupervisorSession(sessionId: string): Promise<void> {
+  await fetch('/api/super-tasks/supervisor', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ sessionId }),
+  }).then((r) => json<{ ok: true }>(r))
+}
 export async function injectSuperTaskCommand(
   action: 'dispatch' | 'resume' | 'accept' | 'pause',
   id?: string,

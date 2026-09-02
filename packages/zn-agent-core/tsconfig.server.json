@@ -41,15 +41,10 @@
     "src/opencc-src/server/mainAgents.ts",
     "src/opencc-src/server/mainAgents-office.ts",
     "src/opencc-src/server/mainAgents-agentCreator.ts",
-<<<<<<< HEAD
-    "src/opencc-src/server/agentRegistry.ts",
-    "src/opencc-src/server/taskFactoryFiles.ts"
-=======
     "src/opencc-src/server/mainAgents-taskFactory.ts",
     "src/opencc-src/server/taskFactoryFiles.ts",
     "src/opencc-src/server/taskFactoryTools.ts",
     "src/opencc-src/server/agentRegistry.ts"
->>>>>>> worktree-task-factory
   ],
 
   "exclude": [

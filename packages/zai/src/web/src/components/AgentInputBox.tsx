@@ -1,11 +1,11 @@
 import React, { useState, useRef, useEffect, useCallback, useMemo } from "react";
+import type { ReactNode } from "react";
 import { Input, Button, message, Popover, Tooltip } from "antd";
 import {
   PictureOutlined,
   ToolOutlined,
   CompressOutlined,
   ExpandOutlined,
-  MenuUnfoldOutlined,
   ShareAltOutlined,
   StopOutlined,
   AppstoreAddOutlined,
@@ -15,10 +15,6 @@ import {
   ArrowUpOutlined,
   CheckOutlined,
 } from "@ant-design/icons";
-import {
-  STORAGE_KEYS,
-  useLocalStorageState,
-} from "../components/splitPane/shared.js";
 import { useSplitPaneCompactLock } from "../hooks/useSplitPaneCompactLock.js";
 import { useSubmitPrompt } from "../hooks/useSubmitPrompt.js";
 import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
@@ -193,7 +189,26 @@ function renderDraftDecorations(
   return result;
 }
 
-export default React.memo(function AgentInputBox() {
+/**
+ * 工具栏定制项 — AgentConversation 被 /agent、/m、/desktop 等多场景复用,
+ * 场景专属按钮(如分屏 toggle)不再内置,改由调用方通过插槽注入。
+ * 详见 AgentConversation.tsx 顶部注释。
+ */
+export interface AgentInputBoxProps {
+  /** 状态行最左侧插槽(● 状态指示之前) */
+  toolbarLeftSlot?: ReactNode;
+  /** 状态行最右侧插槽(行尾最后一个元素) */
+  toolbarRightSlot?: ReactNode;
+  /** 修复 transcript 按钮(扳手图标)。调试性质入口,默认不渲染;
+   *  /agent 页面显式开启。 */
+  showTranscriptRepair?: boolean;
+}
+
+export default React.memo(function AgentInputBox({
+  toolbarLeftSlot,
+  toolbarRightSlot,
+  showTranscriptRepair = false,
+}: AgentInputBoxProps = {}) {
   const status = useAgentStore((s) => s.status);
   const sessionId = useAgentStore((s) => s.sessionId);
   // zai race fix: createNewSession 异步窗口(~50–200ms)期间禁用 Send + 短路 Enter。
@@ -522,14 +537,6 @@ export default React.memo(function AgentInputBox() {
   // 在对话进行中触发对当前文件的写操作;否则 concurrent append 会跟 repair 的
   // fileLock 撞车, 报 EAGAIN)。
   const [repairing, setRepairing] = useState(false);
-  // 右侧分屏开关: 复用 STORAGE_KEYS.open 与 SplitPane + 左侧栏 toggle 共享.
-  // useLocalStorageState 自带 same-tab 的 'zai-localstorage-sync' 事件, 写一次
-  // → 所有持有同 key 的组件(本按钮 / 左侧栏 SplitPaneToggle / SplitPane 内部
-  // 顶角 toggle)同步翻转, 无需在 Agent.tsx 多传一组 props.
-  const [splitPaneOpen, setSplitPaneOpen] = useLocalStorageState<boolean>(
-    STORAGE_KEYS.open,
-    false,
-  );
 
   // 模糊匹配: 检查 query 的字符是否按顺序出现在 target 中（可不连续）
   const fuzzyMatch = (query: string, target: string): number => {
@@ -1368,6 +1375,8 @@ export default React.memo(function AgentInputBox() {
           flexWrap: "wrap",
         }}
       >
+        {/* 最左侧插槽 — 场景专属按钮由此注入(● 状态指示之前)。 */}
+        {toolbarLeftSlot}
         <span
           style={{
             color:
@@ -1576,10 +1585,9 @@ export default React.memo(function AgentInputBox() {
         {/* 修复 transcript 按钮:
             对当前 session 触发 POST /api/transcript/:sessionId/repair,把历史上
             漏写的 tool_result 补成"tool execution did not complete" 占位,
-            解决 transcript 里 tool_use 没配对的 warning。按钮放在 spacer 后、
-            上传图片前 — 不抢主操作, 但用户能直接找到。点击后即时 toast 结果,
-            失败不打断会话。 */}
-        {!isMobile && (
+            解决 transcript 里 tool_use 没配对的 warning。调试性质入口,
+            2026-09-02 起默认不渲染,由 showTranscriptRepair prop 控制(/agent 开启)。 */}
+        {showTranscriptRepair && !isMobile && (
         <Tooltip
           title={
             sessionId
@@ -1661,29 +1669,9 @@ export default React.memo(function AgentInputBox() {
             />
           </Tooltip>
         )}
-        {/* 右侧分屏 toggle — 行尾最右侧.
-            图标用 MenuUnfoldOutlined (三线+右箭头, 侧边栏展开风格),
-            比 BorderOutlined 更直观表达"右侧面板滑出"的操作.
-            数据源 STORAGE_KEYS.open 与 SplitPane + 左侧栏 toggle 共享, 任意
-            一处写 → 全局同步 (useLocalStorageState 自带 same-tab storage event).
-            open 时用品牌色 #ff6600 高亮, 关闭时与同行其他按钮颜色一致. */}
-        {!isMobile && (
-        <Tooltip title="切换右侧分屏" placement="top">
-          <Button
-            icon={<MenuUnfoldOutlined />}
-            data-testid="split-pane-toggle-inputbox"
-            aria-pressed={splitPaneOpen}
-            onClick={() => setSplitPaneOpen(!splitPaneOpen)}
-            style={{
-              ...toolbarIconButtonStyle,
-              ...(splitPaneOpen && {
-                color: TOOLBAR_ACTIVE_COLOR,
-                borderColor: TOOLBAR_ACTIVE_COLOR,
-              }),
-            }}
-          />
-        </Tooltip>
-        )}
+        {/* 最右侧插槽 — 场景专属按钮由此注入。分屏 toggle 已抽为独立组件
+            SplitPaneToggleButton,只在 /agent 页面经此插槽挂载。 */}
+        {toolbarRightSlot}
 
       </div>
 

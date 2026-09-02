@@ -378,6 +378,18 @@ const ProjectionEvent = z.object({
   seq: z.number().int().nonnegative(), // 投影单元的 watermark，higher-seq-wins
 })
 
+// task_factory — 任务工厂生命周期事件(created / finished / state.changed 等)。
+// core `emitTaskFactoryEvent` 经 zai server 的 taskFactoryBridge 转发。事件与
+// 具体会话 sid 解耦(任务看板是全局视图),在 eventBus isGlobalEvent 登记跨 sid
+// 广播。action 语义:created payload={id};finished payload={id};state.changed
+// payload=TaskFactoryState(managedEnabled+supervisorSessionId)。
+const TaskFactoryEvent = z.object({
+  ...Base.shape,
+  type: z.literal('task_factory'),
+  action: z.string(),
+  payload: z.record(z.unknown()).default({}),
+})
+
 export const ServerEvent = z.discriminatedUnion('type', [
   ...RuntimeEvent.options,
   ...SessionEvent.options,
@@ -391,5 +403,6 @@ export const ServerEvent = z.discriminatedUnion('type', [
   WeixinInboundEvent,
   StreamErrorEvent,
   ProjectionEvent,
+  TaskFactoryEvent,
 ])
 export type ServerEvent = z.infer<typeof ServerEvent>

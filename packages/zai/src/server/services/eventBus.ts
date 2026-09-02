@@ -61,6 +61,8 @@ function isGlobalEvent(event: ServerEvent): boolean {
     // 起停对调试面板与活动指示器是关键信号。
     case 'command.run':
     case 'command.done':
+    // task_factory — 任务工厂事件不绑定会话 sid(看板全局视图),跨 sid 广播。
+    case 'task_factory':
       return true
     default:
       return false

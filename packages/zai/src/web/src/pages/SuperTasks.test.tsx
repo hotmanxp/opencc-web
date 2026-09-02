@@ -10,9 +10,47 @@ vi.mock('./AgentConversation', () => ({
   default: () => <div data-testid="agent-conv-mock" />,
 }))
 
+// superTaskApi 全量 mock:store.load 走 fetchSuperTasks,引导上报走
+// setSupervisorSession — 都不打真网络。默认带回 supervisorSessionId='sup-server'。
+vi.mock('../lib/superTaskApi', () => ({
+  fetchSuperTasks: vi.fn(async () => ({
+    buckets: { queue: [], processing: [], finished: [] },
+    managed: false,
+    supervisorSessionId: 'sup-server',
+  })),
+  fetchSuperTaskDetail: vi.fn(async () => null),
+  deleteSuperTasks: vi.fn(async () => {}),
+  setSuperTasksManaged: vi.fn(async () => {}),
+  setSupervisorSession: vi.fn(async () => {}),
+  injectSuperTaskCommand: vi.fn(async () => {}),
+  startSuperTask: vi.fn(async () => {}),
+  pauseSuperTask: vi.fn(async () => {}),
+  resumeSuperTask: vi.fn(async () => {}),
+  acceptSuperTask: vi.fn(async () => {}),
+}))
+
+vi.mock('../lib/agentSessionApi', () => ({
+  createAgentSession: vi.fn(async () => 'new-sup'),
+  pickLastSelectedModel: vi.fn(() => ({})),
+  deleteAgentSession: vi.fn(async () => {}),
+}))
+
 // Import 必须在 mock 之后 (vi.mock 是 hoist 的, 但 import SuperTasks 是
 // 被测对象, 放在顶部更清晰 — ESM import 提升不依赖文件位置)。
 import SuperTasks from './SuperTasks'
+import { setSupervisorSession } from '../lib/superTaskApi'
+import { createAgentSession } from '../lib/agentSessionApi'
+
+/** GET /api/agent/sessions 的返回按测试定制。 */
+function stubSessionsList(sessions: unknown[]) {
+  vi.stubGlobal('fetch', vi.fn(async (input: RequestInfo | URL) => {
+    const url = String(input)
+    if (url.includes('/api/agent/sessions')) {
+      return { ok: true, json: async () => ({ sessions }) } as Response
+    }
+    return { ok: true, json: async () => ({}) } as Response
+  }))
+}
 
 beforeEach(async () => {
   // Reset both stores to known initial state
@@ -21,6 +59,8 @@ beforeEach(async () => {
     managed: false,
     loading: false,
     error: null,
+    supervisorSessionId: null,
+    lastCreatedTaskId: null,
   })
   useAgentStore.setState({
     sessionId: null,
@@ -28,13 +68,8 @@ beforeEach(async () => {
     messages: [],
     status: 'idle',
   })
-  // Stub fetches that Agent store / boot sequence triggers so tests don't hit network
-  vi.stubGlobal('fetch', vi.fn(async () => ({
-    ok: true,
-    json: async () => ({ sessions: [], models: [] }),
-  })))
-  // Clear any saved supervisor session key from previous tests
-  try { localStorage.removeItem('zai-supervisor-session') } catch {}
+  stubSessionsList([])
+  vi.clearAllMocks()
 })
 
 describe('SuperTasks page', () => {
@@ -74,5 +109,33 @@ describe('SuperTasks page', () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+
+  // —— 主管会话引导(2026-09-02:真相源 = server state.json)——
+
+  it('server supervisorSessionId 命中会话列表 → 锁定它,不新建', async () => {
+    stubSessionsList([{ sessionId: 'sup-server', updatedAt: 2, title: 't' }])
+
+    render(<SuperTasks />)
+
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().sessionId).toBe('sup-server')
+    })
+    expect(createAgentSession).not.toHaveBeenCalled()
+    expect(setSupervisorSession).not.toHaveBeenCalled()
+  })
+
+  it('server supervisorSessionId 未命中 → 新建 task-factory 会话并上报', async () => {
+    stubSessionsList([])
+
+    render(<SuperTasks />)
+
+    await vi.waitFor(() => {
+      expect(useAgentStore.getState().sessionId).toBe('new-sup')
+    })
+    expect(createAgentSession).toHaveBeenCalledWith(
+      expect.objectContaining({ mainAgent: 'task-factory' }),
+    )
+    expect(setSupervisorSession).toHaveBeenCalledWith('new-sup')
   })
 })

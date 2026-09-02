@@ -14,6 +14,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import { applyBatch, enqueue } from './useEventStream.js'
 import { useAgentStore } from './useAgentStore.js'
 import { useAppStore } from './useAppStore.js'
+import { useSuperTaskStore } from './useSuperTaskStore.js'
 
 function delta(seq: number, text: string) {
   return {
@@ -100,5 +101,36 @@ describe('useEventStream batch dispatch', () => {
     ])
     expect(useAgentStore.getState().cwdBySession['s1']).toBe('/tmp')
     expect(useAgentStore.getState().queuedPrompts).toEqual([{ id: 'q1', text: 'x' }])
+  })
+
+  it('routes task_factory.created → lastCreatedTaskId + 面板刷新', () => {
+    const loadSpy = vi
+      .spyOn(useSuperTaskStore.getState(), 'load')
+      .mockResolvedValue(undefined as never)
+    applyBatch([
+      {
+        type: 'task_factory', eventId: 'etf1', ts: 1, seq: 1,
+        action: 'created', payload: { id: 'tf-abc' },
+      },
+    ])
+    expect(useSuperTaskStore.getState().lastCreatedTaskId).toBe('tf-abc')
+    expect(loadSpy).toHaveBeenCalled()
+    loadSpy.mockRestore()
+  })
+
+  it('routes task_factory.state.changed → 同步 managed/supervisorSessionId', () => {
+    const loadSpy = vi
+      .spyOn(useSuperTaskStore.getState(), 'load')
+      .mockResolvedValue(undefined as never)
+    applyBatch([
+      {
+        type: 'task_factory', eventId: 'etf2', ts: 1, seq: 1,
+        action: 'state.changed',
+        payload: { managedEnabled: true, supervisorSessionId: 'sup-x' },
+      },
+    ])
+    expect(useSuperTaskStore.getState().managed).toBe(true)
+    expect(useSuperTaskStore.getState().supervisorSessionId).toBe('sup-x')
+    loadSpy.mockRestore()
   })
 })
