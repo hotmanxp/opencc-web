@@ -7,6 +7,7 @@ import {
   createPoolTask, listTasks, moveTask, markTaskStatus,
   deleteTasks, getTaskDetails, getTaskSummary, taskFactoryRoot, emitTaskFactoryEvent,
   TASK_YAML_FILENAME, LEGACY_INDEX_MD_FILENAME,
+  sortTasksByPriority, normalizePriority, PR_ORDER, DEFAULT_TASK_PRIORITY, TASK_PRIORITIES,
 } from '../../src/opencc-src/server/taskFactoryFiles.js'
 
 let dir: string
@@ -208,6 +209,119 @@ describe('taskFactoryFiles (task.yaml 2026-09-02)', () => {
     await moveTask(s.id, 'queue-tasks', 'processing-tasks')
     await moveTask(s.id, 'processing-tasks', 'verifying-tasks')
     await expect(deleteTasks([s.id])).rejects.toThrow(/verifying/)
+  })
+})
+
+describe('taskFactoryFiles priority + dependsOn (2026-09-02 任务工厂升级)', () => {
+  it('TASK_PRIORITIES / DEFAULT_TASK_PRIORITY / PR_ORDER 暴露稳定契约', () => {
+    expect(TASK_PRIORITIES).toEqual(['P0', 'P1', 'P2', 'P3'])
+    expect(DEFAULT_TASK_PRIORITY).toBe('P2')
+    expect(PR_ORDER).toEqual({ P0: 0, P1: 1, P2: 2, P3: 3 })
+  })
+
+  it('normalizePriority: 合法值透传，非法值（含 null/undefined）回落到 P2', () => {
+    for (const p of ['P0', 'P1', 'P2', 'P3'] as const) {
+      expect(normalizePriority(p)).toBe(p)
+    }
+    expect(normalizePriority(undefined)).toBe('P2')
+    expect(normalizePriority(null)).toBe('P2')
+    expect(normalizePriority('P4')).toBe('P2')
+    expect(normalizePriority('p0')).toBe('P2') // 大小写敏感:不合法
+    expect(normalizePriority(0)).toBe('P2')
+  })
+
+  it('createPoolTask 缺省 priority=P2 / dependsOn=[]，写回 task.yaml 顶层', async () => {
+    const s = await createPoolTask({ title: 'defaults' })
+    expect(s.priority).toBe('P2')
+    expect(s.dependsOn).toEqual([])
+    const yaml = await readFile(join(dir, 'queue-tasks', s.id, TASK_YAML_FILENAME), 'utf-8')
+    expect(yaml).toContain('priority: P2')
+    // dependsOn 是空数组 —— yaml 序列化为 dependsOn: []
+    expect(yaml).toMatch(/dependsOn:\s*\[\]/)
+  })
+
+  it('createPoolTask 接受 priority=P0/P1/P2/P3 + dependsOn 数组，写回 yaml', async () => {
+    const s = await createPoolTask({ title: 'urgent', priority: 'P0', dependsOn: ['tf-aaaaaaaa', 'tf-bbbbbbbb'] })
+    expect(s.priority).toBe('P0')
+    expect(s.dependsOn).toEqual(['tf-aaaaaaaa', 'tf-bbbbbbbb'])
+    const yaml = await readFile(join(dir, 'queue-tasks', s.id, TASK_YAML_FILENAME), 'utf-8')
+    expect(yaml).toContain('priority: P0')
+    expect(yaml).toContain('- tf-aaaaaaaa')
+    expect(yaml).toContain('- tf-bbbbbbbb')
+  })
+
+  it('createPoolTask 拒绝非法 priority（fail loud,不让坏数据进 yaml）', async () => {
+    await expect(createPoolTask({ title: 'bad', priority: 'P9' as never })).rejects.toThrow(/invalid priority/)
+    await expect(createPoolTask({ title: 'bad', priority: 'p0' as never })).rejects.toThrow(/invalid priority/)
+    await expect(createPoolTask({ title: 'bad', priority: 0 as never })).rejects.toThrow(/invalid priority/)
+  })
+
+  it('createPoolTask 拒绝非法 dependsOn（非字符串/空字符串/自依赖）', async () => {
+    await expect(createPoolTask({ title: 'bad', dependsOn: [''] })).rejects.toThrow(/dependsOn/)
+    // 短字符串(<4 字符)也被拒
+    await expect(createPoolTask({ title: 'bad', dependsOn: ['abc'] })).rejects.toThrow(/dependsOn/)
+    // 自依赖 —— 必须先创建自身 id 才能测,所以走 process.cwd() 默认生成的 id 不可知;
+    // 这里用 id 显式注入的写法验证。
+    await expect(createPoolTask({ id: 'tf-selfdep', title: 'sd', dependsOn: ['tf-selfdep'] })).rejects.toThrow(/cannot depend on itself/)
+  })
+
+  it('getTaskSummary / listTasks 读回 priority + dependsOn(YAML 序列化 round-trip)', async () => {
+    const a = await createPoolTask({ title: 'rt-a', priority: 'P1', dependsOn: ['tf-11111111'] })
+    const b = await createPoolTask({ title: 'rt-b', priority: 'P3', dependsOn: ['tf-22222222', 'tf-33333333'] })
+    const sumA = await getTaskSummary(a.id, 'queue-tasks')
+    expect(sumA?.priority).toBe('P1')
+    expect(sumA?.dependsOn).toEqual(['tf-11111111'])
+    const sumB = await getTaskSummary(b.id, 'queue-tasks')
+    expect(sumB?.priority).toBe('P3')
+    expect(sumB?.dependsOn).toEqual(['tf-22222222', 'tf-33333333'])
+    const bucket = await listTasks()
+    const inQ = bucket.queue.filter((t) => t.id === a.id || t.id === b.id)
+    expect(inQ).toHaveLength(2)
+    for (const t of inQ) {
+      expect(t.priority).toMatch(/^P[0-3]$/)
+      expect(Array.isArray(t.dependsOn)).toBe(true)
+    }
+  })
+
+  it('sortTasksByPriority: priority ASC(P0 先)+ createdAt ASC,稳定排序', () => {
+    const out = sortTasksByPriority([
+      { id: '1', priority: 'P2', createdAt: '2026-09-02T10:00:00.000Z' },
+      { id: '0', priority: 'P0', createdAt: '2026-09-02T11:00:00.000Z' },
+      { id: '2', priority: 'P2', createdAt: '2026-09-02T09:00:00.000Z' },
+      { id: '3', priority: 'P1', createdAt: '2026-09-02T12:00:00.000Z' },
+      { id: '4', priority: undefined, createdAt: '2026-09-02T08:00:00.000Z' }, // 缺省视为 P2
+    ])
+    expect(out.map((t) => t.id)).toEqual(['0', '3', '4', '2', '1']) // P0 → P1 → P2(4=08:00 < 2=09:00 < 1=10:00,undefined 兜底 P2)
+  })
+
+  it('listTasks 桶内按 priority ASC + createdAt ASC 排序(P0 排首)', async () => {
+    // 按时间顺序创建不同 priority 的任务,验证 listTasks 自动按 priority + createdAt 排
+    const p0 = await createPoolTask({ title: 'first-p2', priority: 'P2' })
+    await new Promise((r) => setTimeout(r, 5))
+    const p1 = await createPoolTask({ title: 'urgent-p0', priority: 'P0' })
+    await new Promise((r) => setTimeout(r, 5))
+    const p2 = await createPoolTask({ title: 'low-p3', priority: 'P3' })
+    await new Promise((r) => setTimeout(r, 5))
+    const p3 = await createPoolTask({ title: 'high-p1', priority: 'P1' })
+    const bucket = await listTasks()
+    const ourIds = [p0.id, p1.id, p2.id, p3.id]
+    const ours = bucket.queue.filter((t) => ourIds.includes(t.id))
+    // 期望顺序:P0 → P1 → P2 → P3(按 createdAt 在同优先级内 tie-break)
+    expect(ours.map((t) => t.priority)).toEqual(['P0', 'P1', 'P2', 'P3'])
+  })
+
+  it('dependsOn 解析非法元素时容错:task.yaml 里非字符串元素被丢弃(只留字符串)', async () => {
+    // 手工写一个含混合类型的 task.yaml(模拟外部坏数据),验证读取时不抛
+    const id = 'mixed-deps-01'
+    await createPoolTask({ id, title: 'mixed' })
+    const yamlPath = join(dir, 'queue-tasks', id, TASK_YAML_FILENAME)
+    const txt = await readFile(yamlPath, 'utf-8')
+    // 在末尾追加一个混合数组;YAML 解析后会有字符串 + null + 对象
+    const patched = txt.replace(/dependsOn:.*\n/, '') + 'dependsOn:\n  - tf-good\n  - null\n  - 123\n  - tf-also-good\n'
+    await writeFile(yamlPath, patched, 'utf-8')
+    const sum = await getTaskSummary(id, 'queue-tasks')
+    // 只保留字符串(且非空)元素
+    expect(sum?.dependsOn).toEqual(['tf-good', 'tf-also-good'])
   })
 })
 

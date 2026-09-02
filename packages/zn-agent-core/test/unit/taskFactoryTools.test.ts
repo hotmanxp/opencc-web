@@ -38,6 +38,39 @@ describe('superTasksCreateTool', () => {
     const spec = await readFile(join(taskDir('queue-tasks', id), 'docs', 'spec.md'), 'utf-8')
     expect(spec).toContain('# SPEC')
   })
+
+  // zai patch (2026-09-02, priority + dependsOn 调度):
+  it('call 接受 priority=P0 + dependsOn 数组，回写 task.yaml', async () => {
+    const res = await superTasksCreateTool.call({
+      title: '紧急任务', cwd: dir, priority: 'P0', dependsOn: ['tf-aaaaaaaa', 'tf-bbbbbbbb'],
+    })
+    const out = res.data.output as string
+    expect(out).toContain('priority=P0')
+    expect(out).toContain('dependsOn=[tf-aaaaaaaa, tf-bbbbbbbb]')
+    const id = extractId(out)
+    const yaml = await readFile(join(taskDir('queue-tasks', id), 'task.yaml'), 'utf-8')
+    expect(yaml).toContain('priority: P0')
+    expect(yaml).toContain('- tf-aaaaaaaa')
+    expect(yaml).toContain('- tf-bbbbbbbb')
+  })
+
+  it('call 缺省 priority=P2 + dependsOn=[]', async () => {
+    const res = await superTasksCreateTool.call({ title: '普通任务', cwd: dir })
+    const out = res.data.output as string
+    expect(out).toContain('priority=P2')
+    // dependsOn=[] 时 result 文本不展示数组
+    expect(out).not.toContain('dependsOn=[')
+    const id = extractId(out)
+    const yaml = await readFile(join(taskDir('queue-tasks', id), 'task.yaml'), 'utf-8')
+    expect(yaml).toContain('priority: P2')
+    expect(yaml).toMatch(/dependsOn:\s*\[\]/)
+  })
+
+  it('call 拒绝非法 priority/P3 之外的值', async () => {
+    await expect(superTasksCreateTool.call({
+      title: '坏', cwd: dir, priority: 'P9' as never,
+    })).rejects.toThrow(/invalid priority/)
+  })
 })
 
 describe('tool_result serialization (2026-09-02 回归)', () => {
@@ -89,6 +122,18 @@ describe('superTasksGetTool (2026-09-02)', () => {
   it('isReadOnly = true（主管反复读取元数据不触发副作用）', () => {
     expect(superTasksGetTool.isReadOnly({ id: 'tf-x' } as never)).toBe(true)
   })
+
+  // zai patch (2026-09-02, priority + dependsOn 字段):
+  it('call 读回的 summary 包含 priority + dependsOn', async () => {
+    const res = await superTasksCreateTool.call({
+      title: '紧急', cwd: dir, priority: 'P1', dependsOn: ['tf-aaaaaaaa'],
+    })
+    const id = extractId(res.data.output as string)
+    const got = await superTasksGetTool.call({ id })
+    const structured = (got.data as { structured: { summary: { priority?: string; dependsOn?: string[] } } }).structured
+    expect(structured.summary.priority).toBe('P1')
+    expect(structured.summary.dependsOn).toEqual(['tf-aaaaaaaa'])
+  })
 })
 
 describe('superTasksListTool (2026-09-02)', () => {
@@ -127,5 +172,19 @@ describe('superTasksListTool (2026-09-02)', () => {
   it('isReadOnly + isConcurrencySafe = true（pipeline 总览可并发调）', () => {
     expect(superTasksListTool.isReadOnly({} as never)).toBe(true)
     expect(superTasksListTool.isConcurrencySafe({} as never)).toBe(true)
+  })
+
+  // zai patch (2026-09-02, priority 调度):
+  it('listTasks 输出 queue 按 priority ASC + createdAt ASC 排序(P0 先)', async () => {
+    await superTasksCreateTool.call({ title: 'normal', cwd: dir, priority: 'P2' })
+    await superTasksCreateTool.call({ title: 'urgent', cwd: dir, priority: 'P0' })
+    await superTasksCreateTool.call({ title: 'low', cwd: dir, priority: 'P3' })
+    const got = await superTasksListTool.call({})
+    const parsed = JSON.parse(got.data.output as string)
+    // 取出我们这 3 个任务的 priority 序列,断言顺序 P0 → P2 → P3
+    const priorities = (parsed.buckets.queue as Array<{ title: string; priority?: string }>)
+      .filter((t) => ['normal', 'urgent', 'low'].includes(t.title))
+      .map((t) => t.priority)
+    expect(priorities).toEqual(['P0', 'P2', 'P3'])
   })
 })
