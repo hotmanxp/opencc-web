@@ -45,6 +45,7 @@ import { LIGHT_PAGE_VARS } from '../components/superTasks/lightThemeVars'
  */
 export default function SuperTasks(): JSX.Element {
   const loadSessions = useAgentStore((s) => s.loadSessions)
+  const loadTranscript = useAgentStore((s) => s.loadTranscript)
   const load = useSuperTaskStore((s) => s.load)
   const booted = useRef(false)
   const [collapsed, setCollapsed] = useState(false)
@@ -58,6 +59,12 @@ export default function SuperTasks(): JSX.Element {
 
   // 主管会话引导 — 仅在 mount 跑一次。真相源 = 后端 state.json 的
   // supervisorSessionId(经 superTaskStore.load 带回)。
+  //
+  // 主管 mount 时把 server 端历史 transcript 拉到 store.messages,否则页面
+  // 一直停在「发送消息开始与 AI Agent 对话」空白态 — /agent 页点 sidebar
+  // 调 loadTranscript,session 切换才看得到历史;这里没有 sidebar 切换,只能
+  // mount 时主动拉。setCurrentSession 内置 hydrateSessionState(cwd/v2 tasks),
+  // 这里单独调 loadTranscript 补 messages,顺序无依赖。
   useEffect(() => {
     if (booted.current) return
     booted.current = true
@@ -68,6 +75,7 @@ export default function SuperTasks(): JSX.Element {
       const serverSid = useSuperTaskStore.getState().supervisorSessionId
       if (serverSid && latest.some((x) => x.sessionId === serverSid)) {
         s.setCurrentSession(serverSid)
+        await loadTranscript(serverSid)
         return
       }
       // server sid 缺失或会话已被删:新建一条并冻结 task-factory,上报后端 —
@@ -81,11 +89,12 @@ export default function SuperTasks(): JSX.Element {
         await setSupervisorSession(sid)
         await loadSessions()
         useAgentStore.getState().setCurrentSession(sid)
+        await loadTranscript(sid)
       } catch {
         // 创建失败静默, store 内部有兜底
       }
     })()
-  }, [loadSessions])
+  }, [loadSessions, loadTranscript])
 
   return (
     <div
