@@ -41,9 +41,6 @@ const SUM_PREFIX = 60
 const BASH_CMD_PREFIX = 80
 const JSON_FALLBACK_PREFIX = 80
 
-/** RuntimeEvent type 集合(spec 翻译规则表 → assistant/user/system + tool_use/tool_result blocks)。 */
-type RuntimeType = 'system' | 'user' | 'assistant'
-
 interface MessageWire {
   message?: { content?: unknown }
   [k: string]: unknown
@@ -55,6 +52,19 @@ function readWireMeta(obj: Record<string, unknown>): { seq: number; ts: number }
   const ts = obj.ts
   if (typeof seq !== 'number' || typeof ts !== 'number') return null
   return { seq, ts }
+}
+
+/**
+ * 解开外层 `.raw` 包裹(zai 真实 wire 把 raw event 整个嵌在 `.data.raw` 里),
+ * 无包裹时退回 rawObj 本身。返回的 raw 字段(layout)与 spec 翻译表对齐:
+ * raw.type/subtype/message.content/cwd/agent。
+ */
+function unwrapRaw(rawObj: Record<string, unknown>): Record<string, unknown> {
+  const inner = rawObj.raw
+  if (inner && typeof inner === 'object' && !Array.isArray(inner)) {
+    return inner as Record<string, unknown>
+  }
+  return rawObj
 }
 
 /** 从 raw 抽 message.content 数组,失败返回 null。 */
@@ -82,12 +92,54 @@ function renderAssistant(
   }
   if (t === 'thinking') {
     const text = typeof block.text === 'string' ? block.text : ''
+    if (text.length === 0) {
+      // streaming thinking delta:thinking 字段(Anthropic)
+      const thinking = typeof block.thinking === 'string' ? block.thinking : ''
+      return { kind: 'thinking', seq: meta.seq, ts: meta.ts, text: thinking }
+    }
     return { kind: 'thinking', seq: meta.seq, ts: meta.ts, text }
   }
   if (t === 'tool_use') {
     return renderToolUse(meta, block)
   }
   return null
+}
+
+/** content[0] 决定 user frame 的 kind;text → user,tool_result → tool-result。 */
+function renderUser(
+  meta: { seq: number; ts: number },
+  raw: Record<string, unknown>,
+): RenderedEvent | null {
+  const content = readContent(raw)
+  if (!content) return null
+  const block = content[0] as Record<string, unknown> | undefined
+  if (!block || typeof block !== 'object') return null
+  const t = block.type
+  if (t === 'text') {
+    const out: RenderedEvent = {
+      kind: 'user',
+      seq: meta.seq,
+      ts: meta.ts,
+      text: typeof block.text === 'string' ? block.text : '',
+    }
+    if (typeof raw.cwd === 'string') (out as { cwd?: string }).cwd = raw.cwd
+    if (typeof raw.agent === 'string') (out as { agent?: string }).agent = raw.agent
+    return out
+  }
+  if (t === 'tool_result') {
+    return renderToolResult(meta, block)
+  }
+  return null
+}
+
+/** system frame 只看 subtype 字段。 */
+function renderSystem(
+  meta: { seq: number; ts: number },
+  raw: Record<string, unknown>,
+): RenderedEvent | null {
+  const sub = raw.subtype
+  if (typeof sub !== 'string' || sub.length === 0) return null
+  return { kind: 'system', seq: meta.seq, ts: meta.ts, sub }
 }
 
 /** tool_use block → 一行 summary(8 个工具名特定规则)。 */
@@ -147,37 +199,6 @@ function renderToolUse(
   }
 }
 
-function fallback(input: Record<string, unknown>): string {
-  return JSON.stringify(input).slice(0, JSON_FALLBACK_PREFIX)
-}
-
-/** content[0] 决定 user frame 的 kind;text → user,tool_result → tool-result。 */
-function renderUser(
-  meta: { seq: number; ts: number },
-  raw: Record<string, unknown>,
-): RenderedEvent | null {
-  const content = readContent(raw)
-  if (!content) return null
-  const block = content[0] as Record<string, unknown> | undefined
-  if (!block || typeof block !== 'object') return null
-  const t = block.type
-  if (t === 'text') {
-    const out: RenderedEvent = {
-      kind: 'user',
-      seq: meta.seq,
-      ts: meta.ts,
-      text: typeof block.text === 'string' ? block.text : '',
-    }
-    if (typeof raw.cwd === 'string') (out as { cwd?: string }).cwd = raw.cwd
-    if (typeof raw.agent === 'string') (out as { agent?: string }).agent = raw.agent
-    return out
-  }
-  if (t === 'tool_result') {
-    return renderToolResult(meta, block)
-  }
-  return null
-}
-
 /** tool_result block → 摘要 (首行 + 长度),is_error 透传。 */
 function renderToolResult(
   meta: { seq: number; ts: number },
@@ -197,7 +218,6 @@ function renderToolResult(
       if (!p || typeof p !== 'object') continue
       const pp = p as Record<string, unknown>
       if (pp.type === 'text' && typeof pp.text === 'string') parts.push(pp.text)
-      // image / document 等非 text block 跳过
     }
     fullContent = parts.join('')
   } else {
@@ -220,14 +240,8 @@ function renderToolResult(
   }
 }
 
-/** system frame 只看 subtype 字段。 */
-function renderSystem(
-  meta: { seq: number; ts: number },
-  raw: Record<string, unknown>,
-): RenderedEvent | null {
-  const sub = raw.subtype
-  if (typeof sub !== 'string' || sub.length === 0) return null
-  return { kind: 'system', seq: meta.seq, ts: meta.ts, sub }
+function fallback(input: Record<string, unknown>): string {
+  return JSON.stringify(input).slice(0, JSON_FALLBACK_PREFIX)
 }
 
 /**
@@ -252,15 +266,17 @@ export function toRendered(frame: SseFrame): RenderedEvent | null {
     return out
   }
 
-  // attach 路径:frame.data.data 是 stripMeta 后的 raw(没有 type 字段)
+  // attach 路径:frame.data.data 是 stripMeta 后的 raw(没有顶层 type 字段,
+  // 真实 raw 包在 .raw 子层里)
   const meta = readWireMeta(obj)
   if (!meta) return null
   const raw = obj.data
   if (raw === null || raw === undefined || typeof raw !== 'object') return null
-  const rawObj = raw as Record<string, unknown>
+  const rawWrapped = raw as Record<string, unknown>
+  const rawObj = unwrapRaw(rawWrapped)
 
   // attach 帧的 RuntimeEvent type == frame.event(SSE event 字段;wire 内 type 同时存在但冗余)
-  const t = frame.event as RuntimeType
+  const t = frame.event
   // 已知 RuntimeEvent 集合外:message_start / content_block_delta / ping 等显式 reject → null
   if (t !== 'system' && t !== 'user' && t !== 'assistant') return null
 

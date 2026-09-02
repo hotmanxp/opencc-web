@@ -806,3 +806,166 @@ describe('toRendered · tool-result string / array / is_error', () => {
     ).toMatchObject({ kind: 'tool-result' })
   })
 })
+
+/* ── 真实 wire 形态 (`data.data.raw.<fields>`,zai DefaultBackgroundRuntime
+   走 appendTaskEvent + evToWire 后 payload 嵌套) ─────────────────── */
+
+describe('toRendered · 真实 wire 形态 (data.data.raw.*)', () => {
+  it('system frame with .raw wrapper → system{sub}', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'system',
+        data: {
+          seq: 1,
+          ts: 1000,
+          type: 'system',
+          data: {
+            text: '',
+            raw: { type: 'system', subtype: 'init', cwd: '/x', session_id: 's1' },
+          },
+        },
+      }),
+    ).toEqual({ kind: 'system', seq: 1, ts: 1000, sub: 'init' })
+  })
+
+  it('assistant with .raw wrapper, content[0].type=thinking → thinking', () => {
+    expect(
+      toRendered({
+        id: 2,
+        event: 'assistant',
+        data: {
+          seq: 2,
+          ts: 2000,
+          type: 'assistant',
+          data: {
+            text: '',
+            raw: {
+              type: 'assistant',
+              message: {
+                id: 'msg-1',
+                role: 'assistant',
+                content: [
+                  {
+                    type: 'thinking',
+                    thinking: 'reasoning across the wrapper',
+                    signature: 'sig-x',
+                  },
+                ],
+              },
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'thinking',
+      seq: 2,
+      ts: 2000,
+      text: 'reasoning across the wrapper',
+    })
+  })
+
+  it('assistant with .raw wrapper, content[0].type=tool_use → tool-use', () => {
+    expect(
+      toRendered({
+        id: 3,
+        event: 'assistant',
+        data: {
+          seq: 3,
+          ts: 3000,
+          type: 'assistant',
+          data: {
+            text: '',
+            raw: {
+              type: 'assistant',
+              message: {
+                content: [
+                  {
+                    type: 'tool_use',
+                    id: 'call_x',
+                    name: 'Read',
+                    input: { file_path: '/repo/file.ts' },
+                  },
+                ],
+              },
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'tool-use',
+      seq: 3,
+      ts: 3000,
+      name: 'Read',
+      toolUseId: 'call_x',
+      summary: '/repo/file.ts',
+      fullInput: { file_path: '/repo/file.ts' },
+    })
+  })
+
+  it('user with .raw wrapper, content[0].type=tool_result → tool-result', () => {
+    expect(
+      toRendered({
+        id: 4,
+        event: 'user',
+        data: {
+          seq: 4,
+          ts: 4000,
+          type: 'user',
+          data: {
+            text: '',
+            raw: {
+              type: 'user',
+              message: {
+                content: [
+                  {
+                    type: 'tool_result',
+                    tool_use_id: 'call_x',
+                    content: 'OK\nok',
+                    is_error: false,
+                  },
+                ],
+              },
+            },
+          },
+        },
+      }),
+    ).toMatchObject({
+      kind: 'tool-result',
+      toolUseId: 'call_x',
+      isError: false,
+      fullContent: 'OK\nok',
+      summary: 'OK (5 chars)',
+    })
+  })
+
+  it('user with .raw wrapper, content[0].type=text → user', () => {
+    expect(
+      toRendered({
+        id: 5,
+        event: 'user',
+        data: {
+          seq: 5,
+          ts: 5000,
+          type: 'user',
+          data: {
+            text: '',
+            raw: {
+              type: 'user',
+              message: { content: [{ type: 'text', text: 'hello' }] },
+              cwd: '/repo',
+              agent: 'claude-code',
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'user',
+      seq: 5,
+      ts: 5000,
+      text: 'hello',
+      cwd: '/repo',
+      agent: 'claude-code',
+    })
+  })
+})
