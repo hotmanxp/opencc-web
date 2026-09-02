@@ -46,6 +46,21 @@ const JSON_FALLBACK_PREFIX = 80
  * 会直接跳过(null 不进 timeline)。
  */
 export function toRendered(frame: SseFrame): RenderedEvent | null {
-  void frame
+  // task.ended 哨兵帧:status ∈ {completed, failed, cancelled}
+  if (frame.event === 'task.ended') {
+    const d = frame.data
+    if (d === null || typeof d !== 'object') return null
+    const obj = d as Record<string, unknown>
+    const status = obj.status
+    if (status !== 'completed' && status !== 'failed' && status !== 'cancelled') {
+      return null
+    }
+    const out: RenderedEvent = { kind: 'task-ended', status }
+    if (typeof obj.error === 'string') (out as { error?: string }).error = obj.error
+    if (typeof obj.resultText === 'string')
+      (out as { resultText?: string }).resultText = obj.resultText
+    return out
+  }
+  // 后续 cycle 加上 attach 分支
   return null
 }
