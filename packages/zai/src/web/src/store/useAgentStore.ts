@@ -1493,8 +1493,8 @@ export function createAgentStore() {
         sessionId: sid,
         turnIndex: (event as any).turnIndex,
         seq: (event as any).seq,
-        prevStatus: useAgentStore.getState().status,
-        textSegmentRev: useAgentStore.getState().textSegmentRev,
+        prevStatus: get().status,
+        textSegmentRev: get().textSegmentRev,
       }))
     }
     // Task 14 — runtime.compacted: 不经过 currentSid 过滤, 直接推顶部 toast.
@@ -1507,7 +1507,7 @@ export function createAgentStore() {
     // 因为 toast 形态与 system.toast 不同 (CompactionToast 带 expiresAt +
     // sessionId), 不能借用系统 toast 池.
     if (event.type === 'runtime.compacted') {
-      useAgentStore.getState().applyCompactionEvent(event)
+      get().applyCompactionEvent(event)
       return
     }
     // Defense-in-depth: 后端已经按 sid 过滤 (subscribeScoped), 但切换会话
@@ -1521,7 +1521,7 @@ export function createAgentStore() {
     //
     // 例外: activeSessionId (流式期间标记当前活跃 sid) 不同步更新, 因为
     // 切到 B 后 B 的 runtime.started 会自然覆盖.
-    const currentSid = useAgentStore.getState().sessionId
+    const currentSid = get().sessionId
     if (currentSid && sid !== currentSid) return
     // runtime.* 事件全部带 sessionId, 上面的 narrow 已保证它存在.
     // runtime.* 不在 ServerEvent union 之外的 type 才会进入这里.
@@ -1546,14 +1546,14 @@ export function createAgentStore() {
         // 不变走 else 分支,只更新 activeSessionId/status,不 bump。
         const incomingTurn = (event as { turnIndex?: number }).turnIndex
         const incomingTurnNum = typeof incomingTurn === 'number' ? incomingTurn : null
-        const lastTurn = useAgentStore.getState().lastRuntimeTurnIndex
+        const lastTurn = get().lastRuntimeTurnIndex
         const isNewTurn =
           incomingTurnNum !== null &&
           (lastTurn === null || incomingTurnNum > lastTurn)
         if (typeof window !== 'undefined' && ((window as any).__ZAI_DEBUG_SSE__ === true || (typeof localStorage !== 'undefined' && localStorage.getItem('zai-debug-sse') === '1'))) {
           // eslint-disable-next-line no-console
           console.log('[client-store] runtime.started branch', JSON.stringify({
-            prevStatus: useAgentStore.getState().status,
+            prevStatus: get().status,
             incomingTurn: incomingTurnNum,
             lastTurn,
             willBumpSegment: isNewTurn,
@@ -1563,10 +1563,10 @@ export function createAgentStore() {
           // 记录新 turn 起点 + bump textSegmentRev。setState 两次合并:
           // 1) activeSessionId/status/textSegmentRev/lastRuntimeTurnIndex;
           // 2) 下面的 metrics 更新(apiRequestCount/contextTokens)。
-          useAgentStore.setState({
+          set({
             activeSessionId: sid,
             status: 'streaming',
-            textSegmentRev: useAgentStore.getState().textSegmentRev + 1,
+            textSegmentRev: get().textSegmentRev + 1,
             lastRuntimeTurnIndex: incomingTurnNum,
           })
         } else {
@@ -1574,7 +1574,7 @@ export function createAgentStore() {
           // / vendor reconnect): 仅更新 activeSessionId + status,不动
           // textSegmentRev (保持 stream block key 稳定,后续 delta 拼到
           // 同一 bubble)。
-          useAgentStore.setState({ activeSessionId: sid, status: 'streaming' })
+          set({ activeSessionId: sid, status: 'streaming' })
         }
         // zai patch (2026-08-09): 把 metrics 更新挂在 runtime.started 上。
         // server 在每次 LLM 调用起点就推这两个字段(claude.ts:1877
@@ -1586,7 +1586,7 @@ export function createAgentStore() {
         const startedApi = (event as { apiRequestCount?: unknown }).apiRequestCount
         const startedCtx = (event as { contextTokens?: unknown }).contextTokens
         if (typeof startedApi === 'number' || typeof startedCtx === 'number') {
-          useAgentStore.setState((s) => {
+          set((s) => {
             const next: {
               apiRequestCountBySession?: Record<string, number>
               contextTokensBySession?: Record<string, number>
@@ -1614,7 +1614,7 @@ export function createAgentStore() {
         // 沿用 store 内已有的 upsertStreamBlock. blockIndex 即 sendSeq:
         // 每次 sendMessage 都会递增 sendSeq, 跨轮次文本块 key 永不碰撞;
         // 拼上 turnIndex 即使同一 sendSeq 内出现多轮也保持稳定.
-        const sendSeq = useAgentStore.getState().sendSeq
+        const sendSeq = get().sendSeq
         const base: AgentMessage = {
           eventId: '',
           sessionId: sid,
@@ -1624,13 +1624,13 @@ export function createAgentStore() {
           type: 'assistant.text',
           index: sendSeq,
         }
-        useAgentStore.getState().upsertStreamBlock('text', base, event.delta)
+        get().upsertStreamBlock('text', base, event.delta)
         return
       }
       case 'runtime.thinking': {
         // 思考块流式: 复用 upsertStreamBlock('thinking', ...) — 与 text 走
         // 独立 key, 不混淆. base type 留 'assistant.thinking' 标识.
-        const sendSeq = useAgentStore.getState().sendSeq
+        const sendSeq = get().sendSeq
         const base: AgentMessage = {
           eventId: '',
           sessionId: sid,
@@ -1640,7 +1640,7 @@ export function createAgentStore() {
           type: 'assistant.thinking',
           index: sendSeq,
         }
-        useAgentStore.getState().upsertStreamBlock('thinking', base, event.thinking)
+        get().upsertStreamBlock('thinking', base, event.thinking)
         return
       }
       case 'runtime.tool_call': {
@@ -1661,7 +1661,7 @@ export function createAgentStore() {
           name: event.toolName,
           input: event.input as Record<string, unknown>,
         }
-        useAgentStore.getState().upsertToolCall(startMsg)
+        get().upsertToolCall(startMsg)
         // V2 TaskList 增量刷新: 100% SSE 设计,不再 fetch /v2-tasks。
         // TaskCreate/TaskUpdate tool_call 触发 server 端 TaskListStore.write,
         // 后者 emit v2_task.changed (Task 4 + Task 8 + Task 11 wiring),前端
@@ -1683,11 +1683,11 @@ export function createAgentStore() {
           input: event.input as Record<string, unknown>,
           output: event.output,
         }
-        useAgentStore.getState().upsertToolCall(resultMsg)
+        get().upsertToolCall(resultMsg)
         return
       }
       case 'runtime.retrying':
-        useAgentStore.setState((s) => {
+        set((s) => {
           // Toast 去重: 同 session 已存在 runtime.retrying 消息时, 用新事件
           // 替换旧 toast, 而不是再追加一条. 避免每次 retry attempt 都往
           // messages 里 push 一行导致 transcript 被 toast 刷屏.
@@ -1734,7 +1734,7 @@ export function createAgentStore() {
         const incoming = (event as { apiRequestCount?: unknown }).apiRequestCount
         const incomingContext = (event as { contextTokens?: unknown }).contextTokens
         if (typeof incoming === 'number' || typeof incomingContext === 'number') {
-          useAgentStore.setState((s) => {
+          set((s) => {
             const next: {
               apiRequestCountBySession?: Record<string, number>
               contextTokensBySession?: Record<string, number>
@@ -1758,18 +1758,18 @@ export function createAgentStore() {
         }
         // 还有排队任务时保持 streaming, 等 queue.changed + 下一条
         // runtime.started 自然流转; 队列清空才回 idle。
-        if (useAgentStore.getState().queuedPrompts.length > 0) return
-        useAgentStore.getState().setStatus('idle')
+        if (get().queuedPrompts.length > 0) return
+        get().setStatus('idle')
         return
       }
       case 'runtime.aborted': {
         // Esc 中断当前轮: 若队列里还有排队任务, 后端 runNextInQueue 会立刻
         // 消费下一条, 前端置回 streaming 让它自然流转; 队列空则显示 aborted。
-        if (useAgentStore.getState().queuedPrompts.length > 0) {
-          useAgentStore.getState().setStatus('streaming')
+        if (get().queuedPrompts.length > 0) {
+          get().setStatus('streaming')
           return
         }
-        useAgentStore.getState().setStatus('aborted')
+        get().setStatus('aborted')
         return
       }
       case 'runtime.error': {
@@ -1784,7 +1784,7 @@ export function createAgentStore() {
         // error.message + error.category) 命中, 错误才能被用户看到.
         const toolUseId = (event as { toolUseId?: unknown }).toolUseId
         if (typeof toolUseId === 'string' && toolUseId) {
-          useAgentStore.getState().upsertToolCall({
+          get().upsertToolCall({
             eventId: `err-${toolUseId}`,
             sessionId: sid,
             ts: event.ts,
@@ -1795,7 +1795,7 @@ export function createAgentStore() {
             error: event.error.message,
           })
         } else {
-          useAgentStore.setState((s) => ({
+          set((s) => ({
             messages: [
               ...s.messages,
               {
@@ -1809,7 +1809,7 @@ export function createAgentStore() {
             ],
           }))
         }
-        useAgentStore.getState().setStatus('error')
+        get().setStatus('error')
         return
       }
       default:
