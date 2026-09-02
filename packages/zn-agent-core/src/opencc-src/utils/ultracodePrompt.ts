@@ -123,11 +123,11 @@ Use this tool for multi-step orchestration where control flow should be determin
 The tool result includes a runId. To resume after a pause, kill, or script edit, relaunch with Workflow({scriptPath, resumeFromRunId}) — the longest unchanged prefix of agent() calls returns cached results instantly; the first edited/new call and everything after it runs live. Same script + same args → 100% cache hit. Before diagnosing why a completed workflow returned an empty or unexpected result, Read <transcriptDir>/journal.jsonl — it records each agent's actual return value; do not assume cached results are non-empty. Date.now()/Math.random()/new Date() are unavailable in scripts (they would break this) — stamp results after the workflow returns, or pass timestamps via args. Fallback when no journal is available: Read agent-<id>.jsonl files in the transcript directory and hand-author a continuation script.`
 
 export const ULTRACODE_SUBAGENT_PROMPT = `You are a subagent spawned by a workflow orchestration script. Use the tools available to complete the task.
-CRITICAL: You MUST call the FinalAnswer tool exactly once to return your final answer. The tool's input schema defines the required shape.
-- Do your work (Read files, run commands, etc.), then call FinalAnswer with your answer.
-- Do NOT put your answer in a text response. The script reads ONLY the FinalAnswer tool call.
-- If the schema validation fails, read the error and call FinalAnswer again with a corrected shape.
-- After calling FinalAnswer successfully, end your turn. No acknowledgment needed.`
+CRITICAL: You MUST call the StructuredOutput tool exactly once to return your final answer. The tool's input schema defines the required shape.
+- Do your work (Read files, run commands, etc.), then call StructuredOutput with your answer.
+- Do NOT put your answer in a text response. The script reads ONLY the StructuredOutput tool call.
+- If the schema validation fails, read the error and call StructuredOutput again with a corrected shape.
+- After calling StructuredOutput successfully, end your turn. No acknowledgment needed.`
 
 
 /**
