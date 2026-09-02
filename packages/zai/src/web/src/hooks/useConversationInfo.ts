@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { useAgentStore } from '../store/useAgentStore.js'
+import { useAgentStoreOrCtx } from '../store/useAgentStore.js'
 import { useAppStore } from '../store/useAppStore.js'
 import { useProjection } from '../store/useProjection.js'
 import type { AgentMessage, AgentStatus } from '../store/useAgentStore.js'
@@ -119,7 +119,7 @@ function findAliasForModel(
  */
 export function useConversationInfo(): ConversationInfo {
   const { sessionId, activeSessionId, sessions, messages, status, apiRequestCountBySession, contextTokensBySession } =
-    useAgentStore()
+    useAgentStoreOrCtx()
   const { instanceContext } = useAppStore()
   const cwd = instanceContext?.cwd || null
 

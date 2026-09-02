@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { Button, Popconfirm, Tag, Typography } from 'antd'
-import { useAgentStore } from '../store/useAgentStore.js'
+import { useAgentStoreOrCtx } from '../store/useAgentStore.js'
 
 const { Text, Paragraph } = Typography
 
@@ -16,8 +16,8 @@ const { Text, Paragraph } = Typography
  * receives a rejection.
  */
 export default function PermissionConfirmCard(): JSX.Element | null {
-  const pending = useAgentStore((s) => s.pendingPermission)
-  const submit = useAgentStore((s) => s.submitPermissionResponse)
+  const pending = useAgentStoreOrCtx((s) => s.pendingPermission)
+  const submit = useAgentStoreOrCtx((s) => s.submitPermissionResponse)
   const [localReason, setLocalReason] = useState('')
 
   if (!pending) return null

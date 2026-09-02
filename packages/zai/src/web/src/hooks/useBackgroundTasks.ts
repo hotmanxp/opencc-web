@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react'
 import { useAppStore } from '../store/useAppStore.js'
-import { useAgentStore } from '../store/useAgentStore.js'
+import { useAgentStoreOrCtx, useAgentStoreOrCtxApi } from '../store/useAgentStore.js'
 import type { BackgroundTask, TaskStatus } from '../lib/taskApi.js'
 
 /**
@@ -45,10 +45,10 @@ export function useBackgroundTasks() {
   const jobs = useAppStore((s) => s.jobs)
   // 当前正在查看的 session; useAgentStore.sessionId 是 sidebar 选中项,
   // 没有选中 (新建会话占位) 时为 null —— 此时不显示 agent_task 任务。
-  const currentSessionId = useAgentStore((s) => s.sessionId)
+  const currentSessionId = useAgentStoreOrCtx((s) => s.sessionId)
   // SSE 推送的 agent_task.changed 落到 useAgentStore.agentTasksBySession[sid],
   // 作为本 hook 的 source of truth (按 session 隔离, store 写入与读取按 sid 走)。
-  const storeTasks = useAgentStore((s) =>
+  const storeTasks = useAgentStoreOrCtx((s) =>
     currentSessionId ? s.agentTasksBySession[currentSessionId] : undefined,
   )
   const [tasks, setTasks] = useState<Map<string, BackgroundTaskSummary>>(new Map())

@@ -1,4 +1,4 @@
-import { useAgentStore, type AgentMessage } from '../../store/useAgentStore.js'
+import { useAgentStoreOrCtx, type AgentMessage } from '../../store/useAgentStore.js'
 import { MessageBubble } from './MessageBubble.js'
 import { CollapsedMessageBubble } from './CollapsedMessageBubble.js'
 import { ToolGroupCard } from './ToolGroupCard.js'
@@ -55,7 +55,7 @@ export function MessageListView({ messages, streaming }: Props) {
   //   - 其余                     → transcriptCollapsed = false (默认展开)
   // 用户点工具栏按钮 → setTranscriptCollapsed(!transcriptCollapsed) 直接翻转;
   // 刷新回到 settings.outputStyle 决定的值.
-  const collapsed = useAgentStore((s) => s.transcriptCollapsed)
+  const collapsed = useAgentStoreOrCtx((s) => s.transcriptCollapsed)
   const visibleMessages = messages.filter((m) => !isAgentToolMessage(m))
 
   if (!collapsed) {

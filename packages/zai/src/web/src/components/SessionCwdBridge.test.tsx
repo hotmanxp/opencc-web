@@ -15,6 +15,8 @@ vi.mock('../hooks/useSessionCwd.js', () => ({
 vi.mock('../store/useAgentStore.js', () => ({
   useAgentStore: (selector: (s: { sessionId: string | null }) => unknown) =>
     selector({ sessionId: mockSessionId() }),
+  useAgentStoreOrCtx: (selector: (s: { sessionId: string | null }) => unknown) =>
+    selector({ sessionId: mockSessionId() }),
 }))
 
 // 真实 import useAppStore, 不 mock — 测试的是 SessionCwdBridge ↔ store 的

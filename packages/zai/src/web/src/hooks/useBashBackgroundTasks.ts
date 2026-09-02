@@ -1,4 +1,4 @@
-import { useAgentStore } from '../store/useAgentStore.js'
+import { useAgentStoreOrCtx, useAgentStoreOrCtxApi } from '../store/useAgentStore.js'
 import type { BashTaskInfo } from '../lib/taskApi.js'
 
 /**
@@ -11,8 +11,8 @@ import type { BashTaskInfo } from '../lib/taskApi.js'
  * 跑后台命令)。这是有意的 trade-off — 不再用一次性 REST 拉取。
  */
 export function useBashBackgroundTasks(): { tasks: BashTaskInfo[]; loading: boolean } {
-  const sessionId = useAgentStore((s) => s.sessionId)
-  const tasks = useAgentStore((s) =>
+  const sessionId = useAgentStoreOrCtx((s) => s.sessionId)
+  const tasks = useAgentStoreOrCtx((s) =>
     sessionId ? s.bashTasksBySession[sessionId] ?? [] : []
   )
   return { tasks, loading: false }

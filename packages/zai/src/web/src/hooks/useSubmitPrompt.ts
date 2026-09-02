@@ -1,6 +1,6 @@
 import { useCallback } from 'react'
 import { api } from '../lib/api.js'
-import { useAgentStore, type AgentMessage } from '../store/useAgentStore.js'
+import { useAgentStoreOrCtxApi, type AgentMessage } from '../store/useAgentStore.js'
 
 const TITLE_MAX_LEN = 50
 
@@ -40,9 +40,13 @@ interface PendingAttachmentLike {
 }
 
 export function useSubmitPrompt(): UseSubmitPromptResult {
+  // 2026-09-02:必须在 hook 顶层取 store api(Modal 内 AgentInputBox 通过
+  // Provider 注入 intake store,callback 内 `useAgentStoreOrCtxApi()` 会触发
+  // "Invalid hook call")。closure 引用 storeApi,运行时跟着 Context 切换。
+  const storeApi = useAgentStoreOrCtxApi()
   const pushUserMsg = useCallback(
     (text: string, isRenderedPrompt = false, attachments: PendingAttachmentLike[] = []) => {
-      useAgentStore.setState((s) => ({
+      storeApi.setState((s) => ({
         status: 'streaming' as const,
         messages: [
           ...s.messages,
@@ -60,12 +64,12 @@ export function useSubmitPrompt(): UseSubmitPromptResult {
         sendSeq: s.sendSeq + 1,
       }))
     },
-    [],
+    [storeApi],
   )
 
   const submitPrompt = useCallback(
     async (text: string, opts?: { skipPushUserMsg?: boolean; commandText?: string }) => {
-      const s = useAgentStore.getState()
+      const s = storeApi.getState()
       // zai race fix (2026-08-28): `creatingSession` 是 store 层标记
       // createNewSession 异步窗口(50–200ms)的字段 — 此期间 sid 必为
       // null,fallback 到 activeSessionId 反而会把消息发到旧 session,
@@ -101,14 +105,14 @@ export function useSubmitPrompt(): UseSubmitPromptResult {
         pushUserMsg(text)
       }
       const returnedSessionId = resp.sessionId
-      useAgentStore.setState({
+      storeApi.setState({
         sessionId: returnedSessionId,
         activeSessionId: returnedSessionId,
       })
       // 会话标题取用户原始输入(指令场景是 `/cmd args`,不是展开提示词)。
       const localTitle = deriveLocalTitle(opts?.commandText ?? text)
       if (localTitle) {
-        useAgentStore.getState().applySessionEvent({
+        storeApi.getState().applySessionEvent({
           type: 'session.renamed',
           sessionId: returnedSessionId,
           title: localTitle,
@@ -117,7 +121,7 @@ export function useSubmitPrompt(): UseSubmitPromptResult {
         })
       }
     },
-    [pushUserMsg],
+    [pushUserMsg, storeApi],
   )
 
   return { submitPrompt, pushUserMsg }

@@ -17,7 +17,11 @@ import {
 } from "@ant-design/icons";
 import { useSplitPaneCompactLock } from "../hooks/useSplitPaneCompactLock.js";
 import { useSubmitPrompt } from "../hooks/useSubmitPrompt.js";
-import { useAgentStore, type AgentMessage } from "../store/useAgentStore";
+import {
+  useAgentStoreOrCtx,
+  useAgentStoreOrCtxApi,
+  type AgentMessage,
+} from "../store/useAgentStore";
 import type { V2TaskItem, QueuedPrompt } from "../store/useAgentStore.js";
 import { MODE_CYCLE_ORDER } from "../components/ModeStatusButton";
 import { useAppStore } from "../store/useAppStore";
@@ -209,35 +213,35 @@ export default React.memo(function AgentInputBox({
   toolbarRightSlot,
   showTranscriptRepair = false,
 }: AgentInputBoxProps = {}) {
-  const status = useAgentStore((s) => s.status);
-  const sessionId = useAgentStore((s) => s.sessionId);
+  const status = useAgentStoreOrCtx((s) => s.status);
+  const sessionId = useAgentStoreOrCtx((s) => s.sessionId);
   // zai race fix: createNewSession 异步窗口(~50–200ms)期间禁用 Send + 短路 Enter。
   // 见 useAgentStore.createNewSession 注释。
-  const creatingSession = useAgentStore((s) => s.creatingSession);
-  const activeSessionId = useAgentStore((s) => s.activeSessionId);
+  const creatingSession = useAgentStoreOrCtx((s) => s.creatingSession);
+  const activeSessionId = useAgentStoreOrCtx((s) => s.activeSessionId);
   const isMobile = useAppStore((s) => s.isMobile);
   // dsh 连接状态指示 (2026-08-15): SSE 断流时显示"重连中…/连接已断开",
   // 恢复后自动消失。connected/connecting 不显示 — 连接正常时保持状态行整洁。
   const streamState = useAppStore((s) => s.streamState);
   const streamAttempt = useAppStore((s) => s.streamAttempt);
-  const pendingAsk = useAgentStore((s) => s.pendingAsk);
+  const pendingAsk = useAgentStoreOrCtx((s) => s.pendingAsk);
   // 排队中的 prompt(对话进行中提交, 后端串行队列等待执行) — 渲染在输入框
   // 上方排队预览区; 某条开始执行时由 watcher 移入 transcript。
-  const queuedPrompts = useAgentStore((s) => s.queuedPrompts);
+  const queuedPrompts = useAgentStoreOrCtx((s) => s.queuedPrompts);
   // 任务摘要: 从 store 取当前 session 的 v2 tasks 统计 N/M 任务.
   // 修复: 任务摘要从独立 BottomStatusBar 行合并到状态行, 让 UI 更紧凑.
   // 取 store 字段而非 props — AgentInputBox 是叶子组件, 让 store selector
   // 自动追踪 sid 变化, 避免父组件多传一组 props.
   // 2026-07-31: 老 TODO (todosBySession) 已被 refactor 删除, 全部走 v2 task tools.
-  const v2Tasks: V2TaskItem[] = useAgentStore((s) =>
+  const v2Tasks: V2TaskItem[] = useAgentStoreOrCtx((s) =>
     s.sessionId ? s.v2TasksBySession[s.sessionId] ?? [] : []
   );
   // 单一布尔 transcriptCollapsed:Layout hydrate 时根据 settings.outputStyle
   // 把初始值定为 (compact === true),用户点工具栏按钮 → 直接翻转.
   // 这里 *不* 重新计算 visuallyCollapsed — transcriptCollapsed 本身就是
   // 当前视觉折叠态,刷新时回到 Layout hydrate 后的值(由 settings 决定).
-  const transcriptCollapsed = useAgentStore((s) => s.transcriptCollapsed);
-  const setTranscriptCollapsed = useAgentStore((s) => s.setTranscriptCollapsed);
+  const transcriptCollapsed = useAgentStoreOrCtx((s) => s.transcriptCollapsed);
+  const setTranscriptCollapsed = useAgentStoreOrCtx((s) => s.setTranscriptCollapsed);
   // 分屏开启时锁住 transcript-collapsed 折叠按钮 — hook 内 effect 会立刻把
   // transcriptCollapsed 设为 true, 然后整个按钮 + Tooltip 不挂载, 让 "分屏
   // 模式下不可切换"的契约在 DOM 层一次性落实.
@@ -249,6 +253,14 @@ export default React.memo(function AgentInputBox({
   // 用户需要看分项时点摘要 → 弹出 TodoDropdown 详细列表.
   const totalTasks = v2Tasks.length;
   const doneTasks = v2Tasks.filter((t) => t.status === "completed").length;
+
+  // Context-aware store api(2026-09-02):AgentInputBox 可能在 NewSuperTaskModal
+  // 等 Provider 包裹下渲染,这里走 useAgentStoreOrCtxApi() 拿当前 store 实例,
+  // 让所有事件 handler(clearMessages / patchSessionMode / setState / stop 等)
+  // 走与组件 selector 一致的 store,而不是硬编码全局 useAgentStore 单例。
+  // 注意:必须在组件顶层调用一次,closure 到 handler 中复用 —— 不能在
+  // handler 内现取(useAgentStoreOrCtxApi 内部 useContext,违反 Rules of Hooks)。
+  const storeApi = useAgentStoreOrCtxApi();
 
   // 输入状态机(zai 版 deepseek-harness InputMachine):draft + occurrence
   // 表 + 事务 undo/redo 的权威源。React 只读镜像(render 时读 machine.state),
@@ -620,7 +632,7 @@ export default React.memo(function AgentInputBox({
         );
         switch (data.type) {
           case "cleared":
-            useAgentStore.getState().clearMessages();
+            storeApi.getState().clearMessages();
             message.success(`已清空对话: /${item.name}`);
             break;
           case "compacted":
@@ -1004,12 +1016,12 @@ export default React.memo(function AgentInputBox({
     if (e.key === "Tab" && e.shiftKey && status === "idle" && sessionId) {
       e.preventDefault();
       const currentMode =
-        useAgentStore.getState().sessions.find(
+        storeApi.getState().sessions.find(
           (s) => s.sessionId === sessionId,
         )?.permissionMode ?? "default";
       const idx = MODE_CYCLE_ORDER.indexOf(currentMode);
       const next = MODE_CYCLE_ORDER[(idx + 1) % MODE_CYCLE_ORDER.length]!;
-      void useAgentStore.getState().patchSessionMode(sessionId, next);
+      void storeApi.getState().patchSessionMode(sessionId, next);
       return;
     }
     // undo/redo:机器持有事务日志(chip 插入/删除也有事务语义),浏览器原生
@@ -1116,7 +1128,7 @@ export default React.memo(function AgentInputBox({
         return;
       }
       // 立即本地移除避免闪烁; 后端 queue.changed 事件也会刷新快照。
-      useAgentStore.setState((s) => ({
+      storeApi.setState((s) => ({
         queuedPrompts: s.queuedPrompts.filter((p) => p.id !== promptId),
       }));
     },
@@ -1159,7 +1171,7 @@ export default React.memo(function AgentInputBox({
           return;
         }
         pendingPushRef.current.set(editingQueuedId, text);
-        useAgentStore.setState((s) => ({
+        storeApi.setState((s) => ({
           queuedPrompts: s.queuedPrompts.map((p) =>
             p.id === editingQueuedId ? { ...p, text } : p,
           ),
@@ -1194,7 +1206,7 @@ export default React.memo(function AgentInputBox({
           return;
         }
         // 立即本地移除避免闪烁; 后端 queue.changed 事件也会刷新快照。
-        useAgentStore.setState((s) => ({
+        storeApi.setState((s) => ({
           queuedPrompts: s.queuedPrompts.filter((p) => p.id !== promptId),
         }));
       } catch {
@@ -1238,14 +1250,14 @@ export default React.memo(function AgentInputBox({
         );
         switch (result.type) {
           case "cleared":
-            useAgentStore.getState().clearMessages();
+            storeApi.getState().clearMessages();
             message.success("对话已清空");
             return;
           case "compacted":
             message.success(
               `压缩完成,移除 ${result.payload.removedMessages} 条`,
             );
-            await useAgentStore.getState().loadSessions();
+            await storeApi.getState().loadSessions();
             return;
           case "status":
             message.info(
@@ -1329,13 +1341,13 @@ export default React.memo(function AgentInputBox({
         { prompt: finalText || undefined, contentBlocks: blocks, sessionId: sid },
         { headers: sid ? { "X-Session-Id": sid } : undefined },
       );
-      useAgentStore.setState({
+      storeApi.setState({
         sessionId: returnedSessionId,
         activeSessionId: returnedSessionId,
       });
       const localTitle = deriveLocalTitle(finalText);
       if (localTitle) {
-        useAgentStore.getState().applySessionEvent({
+        storeApi.getState().applySessionEvent({
           type: "session.renamed",
           sessionId: returnedSessionId,
           title: localTitle,
@@ -2096,7 +2108,7 @@ export default React.memo(function AgentInputBox({
             物理键盘/软键盘都没有 Esc, 必须给移动用户提供一个等价入口.
             - 仅 isMobile 时挂载 (桌面端继续靠 Esc keydown, 避免按钮占位);
             - 仅 streaming 时显示, 非流式态 stop 无意义;
-            - 调用 useAgentStore.getState().stop() 与 AgentConversation 的
+            - 调用 storeApi.getState().stop() 与 AgentConversation 的
               全局 Esc 处理路径完全一致 (AgentConversation.tsx:91-99),
               走同一套后端 abort + status 流, 不会绕过任何清理逻辑. */}
           {isMobile && status === "streaming" && (
@@ -2104,7 +2116,7 @@ export default React.memo(function AgentInputBox({
               data-testid="mobile-stop-button"
               aria-label="停止生成"
               onClick={() => {
-                void useAgentStore.getState().stop()
+                void storeApi.getState().stop()
               }}
               style={{
                 flexShrink: 0,

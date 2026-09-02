@@ -1,6 +1,6 @@
 import { useEffect } from 'react'
 import { subscribeServerEvents } from '../lib/eventSource.js'
-import { useAgentStore } from './useAgentStore.js'
+import { useAgentStore, type AgentStoreApi } from './useAgentStore.js'
 import { useAppStore } from './useAppStore.js'
 import { useInstanceStore } from './useInstanceStore.js'
 import { useSuperTaskStore } from './useSuperTaskStore.js'
@@ -74,7 +74,12 @@ export function enqueue(event: ServerEvent): void {
 // 批量 dispatcher — 从 dispatch 的 switch 重构而来, 供 enqueue 的 microtask
 // flush 调用, 也导出供测试直接驱动 (test/web/eventStream-dispatch.test.ts 与
 // src/web/src/store/useEventStream.test.ts 直接调它, 不再复制 switch)。
-export function applyBatch(batch: ServerEvent[]): void {
+//
+// 2026-09-02 重构成 `applyBatchTo(store, batch)` 形式:让 NewSuperTaskModal
+// 内的独立 intake store 也能复用同一份 reducer 链(原 `applyBatch` 改为对
+// 默认 `useAgentStore` 单例的薄封装)。任何想把 SSE 帧刷到非默认 store 的
+// 调用方都直接 `applyBatchTo(store, batch)`。
+export function applyBatchTo(store: AgentStoreApi, batch: ServerEvent[]): void {
   // 按 seq 全局排序: seq 是服务端全局单调顺序基准, 重连补发 / 乱序到达时
   // 保证同一 session 的事件按发布顺序应用 (T5 的 seq 守卫再兜底丢弃重放)。
   const ordered = [...batch].sort((a, b) => a.seq - b.seq)
@@ -98,8 +103,8 @@ export function applyBatch(batch: ServerEvent[]): void {
   if (connected) {
     useAppStore.getState().setConnected(true)
     useAppStore.getState().setStreamState('connected', 0)
-    const _connectedSid = useAgentStore.getState().sessionId
-    if (_connectedSid) void useAgentStore.getState().hydrateSessionState(_connectedSid)
+    const _connectedSid = store.getState().sessionId
+    if (_connectedSid) void store.getState().hydrateSessionState(_connectedSid)
   }
 
   for (const event of ordered) {
@@ -113,12 +118,12 @@ export function applyBatch(batch: ServerEvent[]): void {
     case 'runtime.aborted':
     case 'runtime.error':
     case 'runtime.compacted':
-      useAgentStore.getState().applyRuntimeEvent(event)
+      store.getState().applyRuntimeEvent(event)
       break
     case 'session.created':
     case 'session.deleted':
     case 'session.renamed':
-      useAgentStore.getState().applySessionEvent(event)
+      store.getState().applySessionEvent(event)
       break
     case 'job.started':
     case 'job.progress':
@@ -127,19 +132,19 @@ export function applyBatch(batch: ServerEvent[]): void {
       useAppStore.getState().applyJobEvent(event)
       break
     case 'prompt.ask':
-      useAgentStore.getState().applyPromptAsk(event)
+      store.getState().applyPromptAsk(event)
       break
     case 'prompt.approve':
-      useAgentStore.getState().applyPromptApprove(event as any)
+      store.getState().applyPromptApprove(event as any)
       break
     case 'prompt.permission':
-      useAgentStore.getState().applyPromptPermission(event)
+      store.getState().applyPromptPermission(event)
       break
     case 'queue.changed':
-      useAgentStore.getState().applyQueueChanged(event)
+      store.getState().applyQueueChanged(event)
       break
     case 'session/projection':
-      useAgentStore.getState().applyProjection(event)
+      store.getState().applyProjection(event)
       break
     // server.connected 已在 applyBatch 顶部统一处理 (置 connected + hydrate)。
     case 'stream/error':
@@ -162,13 +167,13 @@ export function applyBatch(batch: ServerEvent[]): void {
     // (Task 10). 不能合并 case 因为 reducer 入参 shape 各不相同
     // (applyCwdChanged 不需要 task, applyV2TaskChanged 需要 action 字段).
     case 'cwd.changed':
-      useAgentStore.getState().applyCwdChanged(event); break
+      store.getState().applyCwdChanged(event); break
     case 'bash_task.changed':
-      useAgentStore.getState().applyBashTaskChanged(event); break
+      store.getState().applyBashTaskChanged(event); break
     case 'v2_task.changed':
-      useAgentStore.getState().applyV2TaskChanged(event); break
+      store.getState().applyV2TaskChanged(event); break
     case 'agent_task.changed':
-      useAgentStore.getState().applyAgentTaskChanged(event); break
+      store.getState().applyAgentTaskChanged(event); break
     case 'instance.changed':
       useInstanceStore.getState().applyInstanceChanged(event)
       break
@@ -188,4 +193,13 @@ export function applyBatch(batch: ServerEvent[]): void {
       break
   }
   }
+}
+/**
+ * applyBatch — 兼容旧调用方:对默认全局 useAgentStore 单例的事件 dispatch。
+ * 2026-09-02: 实际逻辑已抽到 `applyBatchTo(store, batch)`,本函数仅保留
+ * `applyBatch(batch) === applyBatchTo(useAgentStore, batch)` 的语义,供
+ * 测试 + 老代码继续引用。
+ */
+export function applyBatch(batch: ServerEvent[]): void {
+  applyBatchTo(useAgentStore, batch)
 }

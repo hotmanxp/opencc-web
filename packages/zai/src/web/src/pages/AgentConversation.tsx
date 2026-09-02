@@ -1,7 +1,10 @@
 import { useState, useRef, useEffect, useMemo } from 'react'
 import { Typography, Button } from 'antd'
 import { RobotFilled, UpOutlined } from '@ant-design/icons'
-import { useAgentStore } from '../store/useAgentStore'
+import {
+  useAgentStoreOrCtx,
+  useAgentStoreOrCtxApi,
+} from '../store/useAgentStore'
 import { useAppStore } from '../store/useAppStore'
 import QuestionCard from '../components/QuestionCard.jsx'
 import PermissionConfirmCard from '../components/PermissionConfirmCard.jsx'
@@ -30,7 +33,7 @@ export default function AgentConversation({
   toolbarRightSlot,
   showTranscriptRepair,
 }: AgentInputBoxProps = {}) {
-  const messages = useAgentStore((s) => s.messages)
+  const messages = useAgentStoreOrCtx((s) => s.messages)
   const maxVisibleMessages = useAppStore((s) => s.maxVisibleMessages)
   const outputStyle = useAppStore((s) => s.outputStyle)
   const isMobile = useAppStore((s) => s.isMobile)
@@ -68,21 +71,21 @@ export default function AgentConversation({
   }, [showAllMessages, hiddenCount])
   const showPill = hiddenCount > 0 && !showAllMessages
 
-  const status = useAgentStore((s) => s.status)
-  const sessionId = useAgentStore((s) => s.sessionId)
-  const transcriptCollapsed = useAgentStore((s) => s.transcriptCollapsed)
-  const pendingAsk = useAgentStore((s) => s.pendingAsk)
-  const setAskAnswer = useAgentStore((s) => s.setAskAnswer)
-  const setAskNotes = useAgentStore((s) => s.setAskNotes)
-  const setAskOtherText = useAgentStore((s) => s.setAskOtherText)
-  const submitAsk = useAgentStore((s) => s.submitAsk)
-  const rejectAsk = useAgentStore((s) => s.rejectAsk)
+  const status = useAgentStoreOrCtx((s) => s.status)
+  const sessionId = useAgentStoreOrCtx((s) => s.sessionId)
+  const transcriptCollapsed = useAgentStoreOrCtx((s) => s.transcriptCollapsed)
+  const pendingAsk = useAgentStoreOrCtx((s) => s.pendingAsk)
+  const setAskAnswer = useAgentStoreOrCtx((s) => s.setAskAnswer)
+  const setAskNotes = useAgentStoreOrCtx((s) => s.setAskNotes)
+  const setAskOtherText = useAgentStoreOrCtx((s) => s.setAskOtherText)
+  const submitAsk = useAgentStoreOrCtx((s) => s.submitAsk)
+  const rejectAsk = useAgentStoreOrCtx((s) => s.rejectAsk)
 
-  const v2TasksBySession = useAgentStore((s) => s.v2TasksBySession)
+  const v2TasksBySession = useAgentStoreOrCtx((s) => s.v2TasksBySession)
   const v2TasksForCurrentSession =
     sessionId != null ? (v2TasksBySession[sessionId] ?? []) : []
 
-  const stop = useAgentStore((s) => s.stop)
+  const stop = useAgentStoreOrCtx((s) => s.stop)
   const questionCardRef = useRef<HTMLDivElement>(null)
   const scrollContainerRef = useRef<HTMLDivElement>(null)
   const autoScroll = useAutoScrollToBottom(scrollContainerRef)

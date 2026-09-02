@@ -11,6 +11,8 @@ const collapsed = vi.hoisted(() => ({ value: false }))
 vi.mock("../../store/useAgentStore.js", () => ({
   useAgentStore: <T,>(selector: (s: { transcriptCollapsed: boolean }) => T): T =>
     selector({ transcriptCollapsed: collapsed.value }),
+  useAgentStoreOrCtx: <T,>(selector: (s: { transcriptCollapsed: boolean }) => T): T =>
+    selector({ transcriptCollapsed: collapsed.value }),
 }))
 
 function toolMsg(

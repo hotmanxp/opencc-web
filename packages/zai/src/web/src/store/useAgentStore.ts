@@ -1,5 +1,6 @@
 import { create } from 'zustand'
 import { flushSync } from 'react-dom'
+import { createContext, useContext } from 'react'
 import type { ServerEvent } from '../../../shared/events.js'
 import type { ModelEntry } from '../../../shared/settings.js'
 import type { PermissionMode } from '@zn-ai/zn-agent-core'
@@ -555,7 +556,69 @@ export function loadTranscriptMessages(
   return out
 }
 
-export const useAgentStore = create<AgentState>((set, get) => ({
+/** AgentStore — 单个 useAgentStore 实例的 store api 类型。 */
+export type AgentStoreApi = ReturnType<typeof createAgentStore>
+
+/**
+ * 默认 agentStore 单例 —— 全局共享,所有未在 `<AgentStoreContext.Provider>`
+ * 包裹下的消费者都用它。保持原 `import { useAgentStore } from '...'` 的
+ * 调用形式不变。
+ */
+export const useAgentStore: AgentStoreApi = createAgentStore()
+
+export function createAgentStore() {
+  // 自动清理 helper 闭包(2026-09-02 factory 改造):
+  // 之前是模块级函数,硬编码引用 useAgentStore 单例 — 一旦 store 走 factory
+  // 多实例(Modal 内的 intake store),就要让 helper 跟着 closure 走。把它挪到
+  // createAgentStore 内部,捕获本次 store 的 set (zustand 命令式更新 api),
+  // reducer 内调用 scheduleClear(sid) 即可,定时器字典在 store state 里
+  // 独立保留,Modal 卸载后随 store 一起 GC,不会跨实例污染。
+  const scheduleTaskListClearIfAllDone = (sessionId: string): void => {
+    const s = get()
+    const v2 = s.v2TasksBySession[sessionId] ?? []
+    if (v2.length === 0) {
+      if (s._taskClearTimers[sessionId]) {
+        clearTimeout(s._taskClearTimers[sessionId])
+        set((cur) => {
+          const { [sessionId]: _, ...rest } = cur._taskClearTimers
+          void _
+          return { _taskClearTimers: rest }
+        })
+      }
+      return
+    }
+    const hasUnfinished = v2.some(
+      (t) => t.status !== 'completed' && t.status !== 'deleted',
+    )
+    if (hasUnfinished) {
+      if (s._taskClearTimers[sessionId]) {
+        clearTimeout(s._taskClearTimers[sessionId])
+        set((cur) => {
+          const { [sessionId]: _, ...rest } = cur._taskClearTimers
+          void _
+          return { _taskClearTimers: rest }
+        })
+      }
+      return
+    }
+    if (s._taskClearTimers[sessionId]) clearTimeout(s._taskClearTimers[sessionId])
+    const timer = setTimeout(() => {
+      set((cur) => {
+        const { [sessionId]: _, ...restV2 } = cur.v2TasksBySession
+        const { [sessionId]: __, ...restTimers } = cur._taskClearTimers
+        void _; void __
+        return {
+          v2TasksBySession: restV2,
+          _taskClearTimers: restTimers,
+        }
+      })
+    }, 5_000)
+    set((cur) => ({
+      _taskClearTimers: { ...cur._taskClearTimers, [sessionId]: timer },
+    }))
+  }
+
+  return create<AgentState>((set, get) => ({
   sessionId: null,
   creatingSession: false,
   sessions: [],
@@ -2063,62 +2126,57 @@ export const useAgentStore = create<AgentState>((set, get) => ({
     })
   },
 }))
+}
 
 /**
- * 自动清理 helper: 当某个 sessionId 的 v2 tasks 全部 completed / deleted,
- * 5 秒后从 store 里清掉对应的 v2TasksBySession[sid]. 中途重新写入含未完成
- * 任务则取消定时器.
- *
- * 设计: 不依赖 React 组件挂载, 直接用模块级 setTimeout + 写入 store.
- * - 使用 getState() 拿到最新值, 不需要通过 set 闭包传递
- * - 重复调用时若 sid 的清除定时器已存在, 先 clear 再调度 (debounce)
- * - hasUnfinished 决定是否调度: 全部完成 → 调度; 任意未完成 → 取消
+ * 老的模块级 scheduleTaskListClearIfAllDone(2026-09-02 改造前)已下移到
+ * createAgentStore 闭包内,见 factory 顶部同名 const。当前文件已无该模块级
+ * helper 的存在空间 —— 直接保留空注释块做交叉引用占位,避免之后 grep
+ * 找不到入口。
  */
-const TASK_CLEAR_DELAY_MS = 5_000
-function scheduleTaskListClearIfAllDone(sessionId: string): void {
-  const s = useAgentStore.getState()
-  const v2 = s.v2TasksBySession[sessionId] ?? []
-  // 没任务 → 取消已有定时器
-  if (v2.length === 0) {
-    if (s._taskClearTimers[sessionId]) {
-      clearTimeout(s._taskClearTimers[sessionId])
-      useAgentStore.setState((cur) => {
-        const { [sessionId]: _, ...rest } = cur._taskClearTimers
-        void _
-        return { _taskClearTimers: rest }
-      })
-    }
-    return
-  }
-  // v2 的 completed + deleted 都是终态
-  const hasUnfinished = v2.some(
-    (t) => t.status !== 'completed' && t.status !== 'deleted',
-  )
-  if (hasUnfinished) {
-    if (s._taskClearTimers[sessionId]) {
-      clearTimeout(s._taskClearTimers[sessionId])
-      useAgentStore.setState((cur) => {
-        const { [sessionId]: _, ...rest } = cur._taskClearTimers
-        void _
-        return { _taskClearTimers: rest }
-      })
-    }
-    return
-  }
-  // 全部终态 → 调度 (或刷新) 5s 后清空
-  if (s._taskClearTimers[sessionId]) clearTimeout(s._taskClearTimers[sessionId])
-  const timer = setTimeout(() => {
-    useAgentStore.setState((cur) => {
-      const { [sessionId]: _, ...restV2 } = cur.v2TasksBySession
-      const { [sessionId]: __, ...restTimers } = cur._taskClearTimers
-      void _; void __
-      return {
-        v2TasksBySession: restV2,
-        _taskClearTimers: restTimers,
-      }
-    })
-  }, TASK_CLEAR_DELAY_MS)
-  useAgentStore.setState((cur) => ({
-    _taskClearTimers: { ...cur._taskClearTimers, [sessionId]: timer },
-  }))
+
+// (module-level helper removed; see createAgentStore() closure above)
+
+// ============== Context + hook:多实例注入(2026-09-02) ==============
+
+/**
+ * AgentStore React Context — 让 NewSuperTaskModal 等场景可以创建一份独立的
+ * intake store(走 createAgentStore() factory)并通过 Provider 注入子树。
+ *
+ * 调用形式:
+ *   const intake = useMemo(() => createAgentStore(), [])
+ *   <AgentStoreContext.Provider value={intake}>
+ *     <AgentConversation .../>
+ *   </AgentStoreContext.Provider>
+ *
+ * 消费者用 `useAgentStoreOrCtx(s => s.messages)` 自动从最近的 Provider
+ * 拿 store;Provider 之外(顶层 Layout)回退到模块级默认 `useAgentStore` 单例。
+ * SSE dispatch 走 `applyBatchTo(store, batch)`(useEventStream.ts),Modal 自己
+ * 挂 EventSource(`/api/event?sid={intakeSid}`)按 sid 路由事件到 intake store,
+ * 不会污染全局 store 的 messages / pendingAsk / status —— 主管 Layout 完全无感。
+ */
+export const AgentStoreContext = createContext<AgentStoreApi | null>(null)
+
+/**
+ * useAgentStoreOrCtx — 选 store 实例(优先 Context,fallback 默认)。
+ * 用法跟 zustand 的 hook 完全相同:`useAgentStoreOrCtx(s => s.messages)`。
+ */
+export function useAgentStoreOrCtx<T>(selector: (state: AgentState) => T): T {
+  const ctx = useContext(AgentStoreContext)
+  const store: AgentStoreApi = ctx ?? useAgentStore
+  return store(selector)
 }
+
+/**
+ * useAgentStoreOrCtxApi — 命令式调用 store(对应 zustand 的 `store.getState()`
+ * / `store.setState()`)。需要在 effect / SSE reducer / event handler 等
+ * 非 React 渲染路径访问 store 时用。
+ *
+ * 不通过 selector 触发的状态变更也不会让 React 重新渲染 —— 这是 zustand
+ * 的固有行为,在 useEventStream 的 microtask flush 里仍然成立。
+ */
+export function useAgentStoreOrCtxApi(): AgentStoreApi {
+  const ctx = useContext(AgentStoreContext)
+  return ctx ?? useAgentStore
+}
+

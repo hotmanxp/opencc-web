@@ -1,4 +1,4 @@
-import { useAgentStore } from '../store/useAgentStore.js'
+import { useAgentStoreOrCtx, useAgentStoreOrCtxApi } from '../store/useAgentStore.js'
 
 /**
  * 读取当前 session 的 cwd。
@@ -11,5 +11,5 @@ import { useAgentStore } from '../store/useAgentStore.js'
  * 不再用一次性 REST 拉取,避免任何 HTTP 调用。
  */
 export function useSessionCwd(sessionId: string | null): string | undefined {
-  return useAgentStore((s) => (sessionId ? s.cwdBySession[sessionId] : undefined))
+  return useAgentStoreOrCtx((s) => (sessionId ? s.cwdBySession[sessionId] : undefined))
 }
