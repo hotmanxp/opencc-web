@@ -1,16 +1,16 @@
 export function getEnterWorktreeToolPrompt(): string {
-  return `Use this tool ONLY when explicitly instructed to work in a worktree — either by the user directly, or by project instructions (CLAUDE.md / memory). This tool creates an isolated git worktree and switches the current session into it.
+  return `Use this tool ONLY when explicitly instructed to work in a worktree — either by the user directly, or by project instructions (AGENTS.md / memory). This tool creates an isolated git worktree and switches the current session into it.
 
 ## When to Use
 
 - The user explicitly says "worktree" (e.g., "start a worktree", "work in a worktree", "create a worktree", "use a worktree")
-- CLAUDE.md or memory instructions direct you to work in a worktree for the current task
+- AGENTS.md or memory instructions direct you to work in a worktree for the current task
 
 ## When NOT to Use
 
 - The user asks to create a branch, switch branches, or work on a different branch — use git commands instead
 - The user asks to fix a bug or work on a feature — use normal git workflow unless worktrees are explicitly requested by the user or project instructions
-- Never use this tool unless "worktree" is explicitly mentioned by the user or in CLAUDE.md / memory instructions
+- Never use this tool unless "worktree" is explicitly mentioned by the user or in AGENTS.md / memory instructions
 
 ## Requirements
 
