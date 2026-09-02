@@ -269,8 +269,7 @@ describe('toRendered · user 分支 (text only)', () => {
     })
   })
 
-  it('content[0].type=tool_result → 不归 user (走 tool-result 分支；本 cycle 返回 null 占位)', () => {
-    // 此 case 在 tool-result cycle 实现后改期望；先 null 表达"分支延迟"
+  it('content[0].type=tool_result → tool-result (优先 tool-result 分支)', () => {
     expect(
       toRendered({
         id: 3,
@@ -293,7 +292,7 @@ describe('toRendered · user 分支 (text only)', () => {
           },
         },
       }),
-    ).toBeNull()
+    ).toMatchObject({ kind: 'tool-result' })
   })
 
   it('block type 未知 → null (该 block skip,无其他 block 顶替)', () => {
@@ -546,5 +545,264 @@ describe('toRendered · tool-use 8 个工具名 summary', () => {
         },
       }),
     ).toBeNull()
+  })
+})
+
+describe('toRendered · tool-result string / array / is_error', () => {
+  it('string content → summary = 首行 + 长度', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'user',
+        data: {
+          seq: 1,
+          ts: 1000,
+          type: 'user',
+          data: {
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'tu-1',
+                  content: 'first line\nsecond line',
+                  is_error: false,
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'tool-result',
+      seq: 1,
+      ts: 1000,
+      toolUseId: 'tu-1',
+      isError: false,
+      summary: 'first line (22 chars)',
+      fullContent: 'first line\nsecond line',
+    })
+  })
+
+  it('string content 但 is_error=true 缺省 → 视作 false', () => {
+    expect(
+      toRendered({
+        id: 2,
+        event: 'user',
+        data: {
+          seq: 2,
+          ts: 2000,
+          type: 'user',
+          data: {
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'tu-2',
+                  content: 'OK',
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toMatchObject({ isError: false })
+  })
+
+  it('is_error=true → flag', () => {
+    expect(
+      toRendered({
+        id: 3,
+        event: 'user',
+        data: {
+          seq: 3,
+          ts: 3000,
+          type: 'user',
+          data: {
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'tu-3',
+                  content: 'permission denied',
+                  is_error: true,
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toMatchObject({ isError: true })
+  })
+
+  it('array content(text only) → 拼 text', () => {
+    expect(
+      toRendered({
+        id: 4,
+        event: 'user',
+        data: {
+          seq: 4,
+          ts: 4000,
+          type: 'user',
+          data: {
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'tu-4',
+                  content: [
+                    { type: 'text', text: 'alpha ' },
+                    { type: 'text', text: 'beta' },
+                  ],
+                  is_error: false,
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'tool-result',
+      seq: 4,
+      ts: 4000,
+      toolUseId: 'tu-4',
+      isError: false,
+      summary: 'alpha beta (10 chars)',
+      fullContent: 'alpha beta',
+    })
+  })
+
+  it('array content 混 image/document → 跳过 image/document,只留 text', () => {
+    expect(
+      toRendered({
+        id: 5,
+        event: 'user',
+        data: {
+          seq: 5,
+          ts: 5000,
+          type: 'user',
+          data: {
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'tu-5',
+                  content: [
+                    { type: 'text', text: 'kept' },
+                    { type: 'image', source: { type: 'base64', data: '...' } },
+                    { type: 'document', source: { type: 'base64', data: '...' } },
+                  ],
+                  is_error: false,
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toMatchObject({
+      kind: 'tool-result',
+      toolUseId: 'tu-5',
+      fullContent: 'kept',
+      summary: 'kept (4 chars)',
+    })
+  })
+
+  it('array 全 image/document → summary = 空 0 chars', () => {
+    expect(
+      toRendered({
+        id: 6,
+        event: 'user',
+        data: {
+          seq: 6,
+          ts: 6000,
+          type: 'user',
+          data: {
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'tu-6',
+                  content: [{ type: 'image', source: { type: 'base64', data: 'x' } }],
+                  is_error: false,
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toMatchObject({
+      kind: 'tool-result',
+      fullContent: '',
+      summary: '(0 chars)',
+    })
+  })
+
+  it('tool_result 缺 tool_use_id → null', () => {
+    expect(
+      toRendered({
+        id: 7,
+        event: 'user',
+        data: {
+          seq: 7,
+          ts: 7000,
+          type: 'user',
+          data: {
+            message: {
+              content: [{ type: 'tool_result', content: 'x', is_error: false }],
+            },
+          },
+        },
+      }),
+    ).toBeNull()
+  })
+
+  it('tool_result 但 content 缺 → null (无显示内容)', () => {
+    expect(
+      toRendered({
+        id: 8,
+        event: 'user',
+        data: {
+          seq: 8,
+          ts: 8000,
+          type: 'user',
+          data: {
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'tu-8',
+                  is_error: false,
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toBeNull()
+  })
+
+  it('user frame 但首 block 是 tool_result → tool-result (优先 tool-result 分支)', () => {
+    expect(
+      toRendered({
+        id: 9,
+        event: 'user',
+        data: {
+          seq: 9,
+          ts: 9000,
+          type: 'user',
+          data: {
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'tu-9',
+                  content: 'OK',
+                  is_error: false,
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toMatchObject({ kind: 'tool-result' })
   })
 })

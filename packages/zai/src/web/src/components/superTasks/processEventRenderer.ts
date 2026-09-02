@@ -151,7 +151,7 @@ function fallback(input: Record<string, unknown>): string {
   return JSON.stringify(input).slice(0, JSON_FALLBACK_PREFIX)
 }
 
-/** content[0] 决定 user frame 的 kind;text → user,tool_result → tool-result (后者在 cycle 6)。 */
+/** content[0] 决定 user frame 的 kind;text → user,tool_result → tool-result。 */
 function renderUser(
   meta: { seq: number; ts: number },
   raw: Record<string, unknown>,
@@ -172,8 +172,52 @@ function renderUser(
     if (typeof raw.agent === 'string') (out as { agent?: string }).agent = raw.agent
     return out
   }
-  // tool_result / unknown 分支留到 cycle 6 / 帧级守卫
+  if (t === 'tool_result') {
+    return renderToolResult(meta, block)
+  }
   return null
+}
+
+/** tool_result block → 摘要 (首行 + 长度),is_error 透传。 */
+function renderToolResult(
+  meta: { seq: number; ts: number },
+  block: Record<string, unknown>,
+): RenderedEvent | null {
+  const toolUseId = block.tool_use_id
+  if (typeof toolUseId !== 'string') return null
+  const rawContent = block.content
+  if (rawContent === null || rawContent === undefined) return null
+
+  let fullContent: string
+  if (typeof rawContent === 'string') {
+    fullContent = rawContent
+  } else if (Array.isArray(rawContent)) {
+    const parts: string[] = []
+    for (const p of rawContent) {
+      if (!p || typeof p !== 'object') continue
+      const pp = p as Record<string, unknown>
+      if (pp.type === 'text' && typeof pp.text === 'string') parts.push(pp.text)
+      // image / document 等非 text block 跳过
+    }
+    fullContent = parts.join('')
+  } else {
+    return null
+  }
+
+  const firstLine = fullContent.split('\n', 1)[0] ?? ''
+  const summary = firstLine.length > 0
+    ? `${firstLine} (${fullContent.length} chars)`
+    : `(${fullContent.length} chars)`
+  const isError = block.is_error === true
+  return {
+    kind: 'tool-result',
+    seq: meta.seq,
+    ts: meta.ts,
+    toolUseId,
+    isError,
+    summary,
+    fullContent,
+  }
 }
 
 /** system frame 只看 subtype 字段。 */
