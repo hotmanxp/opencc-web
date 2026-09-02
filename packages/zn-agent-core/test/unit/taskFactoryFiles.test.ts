@@ -5,7 +5,7 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
   createPoolTask, listTasks, moveTask, markTaskStatus,
-  deleteTasks, getTaskDetails, taskFactoryRoot, emitTaskFactoryEvent,
+  deleteTasks, getTaskDetails, getTaskSummary, taskFactoryRoot, emitTaskFactoryEvent,
 } from '../../src/opencc-src/server/taskFactoryFiles.js'
 
 let dir: string
@@ -143,5 +143,60 @@ describe('taskFactoryFiles', () => {
       if (prev === undefined) delete g.__zaiTaskFactoryEmitter
       else g.__zaiTaskFactoryEmitter = prev
     }
+  })
+
+  it('createPoolTask 接受 verifierAgent 写入 frontmatter（默认 null）', async () => {
+    // verifierAgent=空 → frontmatter 'verifierAgent: null'
+    const s1 = await createPoolTask({ title: 'v1' })
+    expect(s1.verifierAgent ?? null).toBeNull()
+    const idx1 = await readFile(join(dir, 'queue-tasks', s1.id, 'index.md'), 'utf-8')
+    expect(idx1).toContain('verifierAgent: null')
+    // verifierAgent=指定 → 写入
+    const s2 = await createPoolTask({ title: 'v2', verifierAgent: 'code-reviewer' })
+    expect(s2.verifierAgent).toBe('code-reviewer')
+    const idx2 = await readFile(join(dir, 'queue-tasks', s2.id, 'index.md'), 'utf-8')
+    expect(idx2).toContain('verifierAgent: code-reviewer')
+    // getTaskSummary 也能读出 verifierAgent
+    const sum = await getTaskSummary(s2.id, 'queue-tasks')
+    expect(sum?.verifierAgent).toBe('code-reviewer')
+  })
+
+  it('moveTask processing → verifying 时 status=verifying，verifying → finished 时 status=done', async () => {
+    const s = await createPoolTask({ title: 'v3', verifierAgent: 'code-reviewer' })
+    const p = await moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    expect(p.status).toBe('processing')
+    expect(p.bucket).toBe('processing-tasks')
+    const v = await moveTask(s.id, 'processing-tasks', 'verifying-tasks')
+    expect(v.status).toBe('verifying')
+    expect(v.bucket).toBe('verifying-tasks')
+    // verifierAgent 应保留
+    expect(v.verifierAgent).toBe('code-reviewer')
+    const idxV = await readFile(join(dir, 'verifying-tasks', s.id, 'index.md'), 'utf-8')
+    expect(idxV).toContain('status: verifying')
+    // 验证通过 → 归档
+    const f = await moveTask(s.id, 'verifying-tasks', 'finished-tasks')
+    expect(f.status).toBe('done')
+    expect(f.bucket).toBe('finished-tasks')
+  })
+
+  it('listTasks 返回四桶（含 verifying）', async () => {
+    const q = await createPoolTask({ title: 'qa' })
+    const p = await createPoolTask({ title: 'pb' })
+    const v = await createPoolTask({ title: 'vc' })
+    await moveTask(p.id, 'queue-tasks', 'processing-tasks')
+    await moveTask(v.id, 'queue-tasks', 'processing-tasks')
+    await moveTask(v.id, 'processing-tasks', 'verifying-tasks')
+    const bucket = await listTasks()
+    expect(bucket.queue.map((t) => t.id)).toContain(q.id)
+    expect(bucket.processing.map((t) => t.id)).toContain(p.id)
+    expect(bucket.verifying.map((t) => t.id)).toContain(v.id)
+    expect(bucket.verifying[0]?.status).toBe('verifying')
+  })
+
+  it('deleteTasks 拒绝 verifying 桶任务（验证闭环保护）', async () => {
+    const s = await createPoolTask({ title: 'dv' })
+    await moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    await moveTask(s.id, 'processing-tasks', 'verifying-tasks')
+    await expect(deleteTasks([s.id])).rejects.toThrow(/verifying/)
   })
 })

@@ -32,6 +32,17 @@ describe('GET /api/super-tasks', () => {
     expect(res.status).toBe(200)
     expect(res.body.buckets.queue.length).toBeGreaterThan(0)
   })
+
+  it('返回四栏 bucket 含 verifying(2026-09-02 新增)', async () => {
+    const s = await createPoolTask({ title: 'ver-bucket' })
+    const core = await import('@zn-ai/zn-agent-core')
+    await core.moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    await core.moveTask(s.id, 'processing-tasks', 'verifying-tasks')
+    const res = await supertest(app).get('/api/super-tasks')
+    expect(res.status).toBe(200)
+    expect(Array.isArray(res.body.buckets.verifying)).toBe(true)
+    expect(res.body.buckets.verifying.find((t: { id: string }) => t.id === s.id)).toBeTruthy()
+  })
 })
 
 describe('DELETE /api/super-tasks', () => {
@@ -77,6 +88,69 @@ describe('POST /api/super-tasks/:id/pause', () => {
     expect(t?.executorTaskId).toBeNull()
 
     __setBackgroundRuntime(null)
+  })
+
+  it('verifying 桶任务 pause 拒绝 400(2026-09-02 验证闭环保护)', async () => {
+    const s = await createPoolTask({ title: 'pause-ver' })
+    const core = await import('@zn-ai/zn-agent-core')
+    await core.moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    await core.moveTask(s.id, 'processing-tasks', 'verifying-tasks')
+    const cancelSpy = vi.fn().mockResolvedValue({ ok: true })
+    __setBackgroundRuntime({
+      get: async () => null,
+      cancel: cancelSpy,
+    } as unknown as Parameters<typeof __setBackgroundRuntime>[0])
+    try {
+      const res = await supertest(app).post(`/api/super-tasks/${s.id}/pause`)
+      expect(res.status).toBe(400)
+      expect(cancelSpy).not.toHaveBeenCalled()
+    } finally {
+      __setBackgroundRuntime(null)
+    }
+  })
+
+  it('processing+paused 状态 pause 拒 400(2026-09-02 收紧到 processing+processing)', async () => {
+    const s = await createPoolTask({ title: 'pause-paused' })
+    const core = await import('@zn-ai/zn-agent-core')
+    await core.moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    await core.markTaskStatus(s.id, 'processing-tasks', { status: 'paused' })
+    const cancelSpy = vi.fn().mockResolvedValue({ ok: true })
+    __setBackgroundRuntime({
+      get: async () => null,
+      cancel: cancelSpy,
+    } as unknown as Parameters<typeof __setBackgroundRuntime>[0])
+    try {
+      const res = await supertest(app).post(`/api/super-tasks/${s.id}/pause`)
+      expect(res.status).toBe(400)
+      expect(cancelSpy).not.toHaveBeenCalled()
+    } finally {
+      __setBackgroundRuntime(null)
+    }
+  })
+})
+
+describe('POST /api/super-tasks/:id/accept (2026-09-02 加 verifying 桶)', () => {
+  it('processing 桶任务可调用', async () => {
+    const s = await createPoolTask({ title: 'accept-p' })
+    const core = await import('@zn-ai/zn-agent-core')
+    await core.moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    const res = await supertest(app).post(`/api/super-tasks/${s.id}/accept`)
+    expect(res.status).toBe(200)
+  })
+
+  it('verifying 桶任务可调用(强制通过)', async () => {
+    const s = await createPoolTask({ title: 'accept-v' })
+    const core = await import('@zn-ai/zn-agent-core')
+    await core.moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    await core.moveTask(s.id, 'processing-tasks', 'verifying-tasks')
+    const res = await supertest(app).post(`/api/super-tasks/${s.id}/accept`)
+    expect(res.status).toBe(200)
+  })
+
+  it('queue 桶任务拒 400', async () => {
+    const s = await createPoolTask({ title: 'accept-q' })
+    const res = await supertest(app).post(`/api/super-tasks/${s.id}/accept`)
+    expect(res.status).toBe(400)
   })
 })
 

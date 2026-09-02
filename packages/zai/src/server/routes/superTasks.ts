@@ -1,15 +1,15 @@
 /**
  * superTasks 路由 — zai 任务工厂的 REST 端点。
  *
- * - GET /api/super-tasks          三栏 bucket + 当前 state
+ * - GET /api/super-tasks          四栏 bucket(queue/processing/verifying/finished) + 当前 state
  * - GET /api/super-tasks/:id      单任务详情(index + spec + plan + process)
- * - DELETE /api/super-tasks       删除任务(processing/paused → 409)
+ * - DELETE /api/super-tasks       删除任务(processing/paused/verifying → 409)
  * - POST /api/super-tasks/managed 切换 managed 开关(持久化到 state.json)
  * - POST /api/super-tasks/supervisor 上报主管会话 id(持久化到 state.json)
  * - POST /api/super-tasks/:id/start  手工启动 = 注入 dispatch
- * - POST /api/super-tasks/:id/pause  kill 执行子任务 + 冻结(留 processing) + 注入通知
+ * - POST /api/super-tasks/:id/pause  kill 执行子任务 + 冻结(留 processing) + 注入通知(仅 processing+processing)
  * - POST /api/super-tasks/:id/resume  = 注入 resume
- * - POST /api/super-tasks/:id/accept  人工验收 = 注入 accept(主管调 SuperTasksMarkDone)
+ * - POST /api/super-tasks/:id/accept  人工验收 = 注入 accept(processing)/forced-accept(verifying);主管调 SuperTasksMarkDone
  * - POST /api/super-tasks/inject  通用注入入口(白名单 action, 可附 id)
  *
  * 业务侧路由(start/pause/resume/accept)承担确定性副作用(kill executor /
@@ -114,10 +114,15 @@ router.post('/super-tasks/:id/start', async (req, res) => {
 /**
  * POST /api/super-tasks/:id/pause — 暂停：kill 执行子任务（保留其会话），
  * 任务冻结（index.md status=paused，目录仍留 processing-tasks），注入通知。
+ *
+ * 仅 processing 桶 + status=processing 允许暂停：verifying 桶中验证 subagent 正在跑,
+ * 暂停会破坏验证闭环, 直接 400 拒绝(用户应改用 verifying 桶的强制 accept 走归档)。
  */
 router.post('/super-tasks/:id/pause', async (req, res) => {
   const t = await getTaskSummary(req.params.id)
-  if (!t || t.bucket !== 'processing-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在执行中` })
+  if (!t || t.bucket !== 'processing-tasks' || t.status !== 'processing') {
+    return res.status(400).json({ error: `task ${req.params.id} 不在执行中(processing+processing)` })
+  }
   const bg = getBackgroundRuntime()
   if (t.executorTaskId) {
     try { await bg.cancel(t.executorTaskId) } catch { /* 已终态/不存在则静默 */ }
@@ -146,11 +151,20 @@ router.post('/super-tasks/:id/resume', async (req, res) => {
 /**
  * POST /api/super-tasks/:id/accept — 人工验收入口：注入 accept 指令，
  * 主管验收任务成果并调 SuperTasksMarkDone 归档到 finished-tasks。
+ *
+ * 接受 processing 与 verifying 两桶触发:
+ * - processing → 标准路径(主管可能刚收到 executor 完成通知, 准备调 Verify;
+ *   或者直接人工覆盖走归档)。
+ * - verifying → 「强制通过」语义,跳过 verifier 直接 MarkDone。
+ * queue/finished/不存在 → 400 拒绝。
  */
 router.post('/super-tasks/:id/accept', async (req, res) => {
   const t = await getTaskSummary(req.params.id)
-  if (!t || t.bucket !== 'processing-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在执行中` })
-  injectSupervisorCommand(`\n<task-command action="accept" id="${t.id}">Accept the task deliverables and call SuperTasksMarkDone.</task-command>`)
+  if (!t || (t.bucket !== 'processing-tasks' && t.bucket !== 'verifying-tasks')) {
+    return res.status(400).json({ error: `task ${req.params.id} 不在执行中或验证中(processing/verifying)` })
+  }
+  const action = t.bucket === 'verifying-tasks' ? 'forced-accept' : 'accept'
+  injectSupervisorCommand(`\n<task-command action="${action}" id="${t.id}">${t.bucket === 'verifying-tasks' ? 'Forced accept: skip verifier and call SuperTasksMarkDone.' : 'Accept the task deliverables and call SuperTasksMarkDone.'}</task-command>`)
   res.json({ ok: true })
 })
 

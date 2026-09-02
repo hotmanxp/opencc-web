@@ -7,15 +7,17 @@ const STATUS_TAG: Record<string, { color: string; label: string }> = {
   queued: { color: 'default', label: '排队' },
   processing: { color: 'purple', label: '执行中' },
   paused: { color: 'warning', label: '已暂停' },
+  verifying: { color: 'cyan', label: '验证中' },
   done: { color: 'success', label: '完成' },
   failed: { color: 'error', label: '失败' },
 }
 
-/** 卡片左侧状态色条(亮色化,用户 2026-09-01)。 */
+/** 卡片左侧状态色条(亮色化,用户 2026-09-01;verifying 加青色 2026-09-02)。 */
 const STATUS_ACCENT: Record<string, string> = {
   queued: '#3b82f6',
   processing: '#a855f7',
   paused: '#f59e0b',
+  verifying: '#06b6d4',
   done: '#22c55e',
   failed: '#ef4444',
 }
@@ -37,8 +39,12 @@ const stop = (e: React.MouseEvent | React.ChangeEvent): void => e.stopPropagatio
  * 看板单任务信息卡。
  *
  * 标题 + 状态Tag + agent Tag / 描述 2 行截断 / cwd / 创建时间 + 常显操作按钮。
- * 操作按 bucket+status:queue→▶启动;processing+processing→⏸暂停+验收;paused→▶继续。
- * 单卡 🗑 删除(Popconfirm;processing 桶禁用含 paused)。卡片点击开详情抽屉。
+ * 操作按 bucket+status(2026-09-02 加 verifying 桶):
+ * - queue→▶启动
+ * - processing+processing→⏸暂停+验收
+ * - processing+paused→▶继续
+ * - verifying→强制通过(跳过 verifier 直接 MarkDone)
+ * 单卡 🗑 删除(Popconfirm;processing/verifying 桶禁用含 paused)。卡片点击开详情抽屉。
  */
 export default function SuperTaskCard({
   task, selected, onToggleSelect, dimmed, onOpenDetail, onDeleted,
@@ -47,6 +53,9 @@ export default function SuperTaskCard({
   const tag = STATUS_TAG[task.status] ?? { color: 'default', label: task.status }
   const accent = STATUS_ACCENT[task.status] ?? '#9ca3af'
   const inProcessing = task.bucket === 'processing-tasks'
+  const inVerifying = task.bucket === 'verifying-tasks'
+  // verifying 桶显示强制通过按钮(替代普通验收);processing+processing 显示验收 + 暂停
+  const showAccept = inProcessing || inVerifying
   const showPause = inProcessing && task.status === 'processing'
   const showResume = inProcessing && task.status === 'paused'
 
@@ -177,8 +186,19 @@ export default function SuperTaskCard({
               />
             </Tooltip>
           )}
+          {inVerifying && (
+            <Tooltip title="跳过 verifier 直接归档(强制通过)">
+              <Button size="small" type="primary" onClick={(e) => { stop(e); void accept(task.id) }}>
+                强制通过
+              </Button>
+            </Tooltip>
+          )}
           {inProcessing ? (
             <Tooltip title="进行中任务需先暂停才能删除">
+              <Button size="small" danger icon={<DeleteOutlined />} disabled onClick={stop} />
+            </Tooltip>
+          ) : inVerifying ? (
+            <Tooltip title="验证中任务不可删除(等待 verifier 结论或强制通过)">
               <Button size="small" danger icon={<DeleteOutlined />} disabled onClick={stop} />
             </Tooltip>
           ) : (

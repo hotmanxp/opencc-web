@@ -11,21 +11,24 @@ import TaskOverviewBar, { matchFilter, type SuperTaskFilter } from './TaskOvervi
 /**
  * SuperTaskPanel — 看板式任务面板（kanban）。
  *
- * 顶部 TaskOverviewBar(总览统计卡组 + AI 托管 Switch + 新建任务),下方三栏看板:
- * 队列 / 执行中 / 已完成。每栏:栏头(计数 + 全选 + 删除选中 N,processing 桶删除禁用)
+ * 顶部 TaskOverviewBar(总览统计卡组 + AI 托管 Switch + 新建任务),下方四栏看板
+ * (2026-09-02 加 verifying 桶):
+ * 队列 / 执行中 / 验证中 / 已完成。每栏:栏头(计数 + 全选 + 删除选中 N,
+ * processing/verifying 桶删除禁用)
  * + 纵向卡片列表。卡片点击开详情抽屉;筛选态由 TaskOverviewBar 控制,非命中卡片降透明。
  *
  * 数据加载 + 3s 轮询由父组件 SuperTasks.tsx 统一驱动,本组件不重复触发。
  */
 
-export type BucketKey = 'queue' | 'processing' | 'finished'
+export type BucketKey = 'queue' | 'processing' | 'verifying' | 'finished'
 
-const LANE_TITLE: Record<BucketKey, string> = { queue: '队列', processing: '执行中', finished: '已完成' }
+const LANE_TITLE: Record<BucketKey, string> = { queue: '队列', processing: '执行中', verifying: '验证中', finished: '已完成' }
 
-/** 栏头配色(亮色化,用户 2026-09-01)。 */
+/** 栏头配色(亮色化,用户 2026-09-01;verifying 加青色 2026-09-02)。 */
 const LANE_COLOR: Record<BucketKey, string> = {
   queue: '#3b82f6',
   processing: '#a855f7',
+  verifying: '#06b6d4',
   finished: '#22c55e',
 }
 
@@ -35,14 +38,15 @@ export default function SuperTaskPanel(): JSX.Element {
   const loadedOnce = useSuperTaskStore((s) => s.loadedOnce)
 
   const [selected, setSelected] = useState<Record<BucketKey, string[]>>({
-    queue: [], processing: [], finished: [],
+    queue: [], processing: [], verifying: [], finished: [],
   })
   const [newModalOpen, setNewModalOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [filter, setFilter] = useState<SuperTaskFilter>('all')
 
   const isEmpty = useMemo(
-    () => buckets.queue.length === 0 && buckets.processing.length === 0 && buckets.finished.length === 0,
+    () => buckets.queue.length === 0 && buckets.processing.length === 0
+      && buckets.verifying.length === 0 && buckets.finished.length === 0,
     [buckets],
   )
 
@@ -73,6 +77,7 @@ export default function SuperTaskPanel(): JSX.Element {
     const allSelected = rows.length > 0 && sel.length === rows.length
     const someSelected = sel.length > 0 && !allSelected
     const laneColor = LANE_COLOR[key]
+    const isLocked = key === 'processing' || key === 'verifying'
     return (
       <div
         data-testid={`lane-${key}`}
@@ -144,8 +149,8 @@ export default function SuperTaskPanel(): JSX.Element {
               </Button>
             </Popconfirm>
           ) : (
-            <Tooltip title="进行中任务需先暂停才能删除">
-              <Button size="small" danger icon={<DeleteOutlined />} disabled>
+            <Tooltip title={isLocked ? '执行/验证中任务不可批量删除' : '不可删除'}>
+              <Button size="small" danger icon={<DeleteOutlined />} disabled data-testid={`delete-selected-${key}`}>
                 删除选中
               </Button>
             </Tooltip>
@@ -198,6 +203,7 @@ export default function SuperTaskPanel(): JSX.Element {
         <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0, alignItems: 'stretch' }}>
           {renderLane('queue', buckets.queue, true)}
           {renderLane('processing', buckets.processing, false)}
+          {renderLane('verifying', buckets.verifying, false)}
           {renderLane('finished', buckets.finished, true)}
         </div>
       ) : (

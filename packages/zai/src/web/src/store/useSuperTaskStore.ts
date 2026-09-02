@@ -5,7 +5,7 @@ import {
 } from '../lib/superTaskApi'
 import type { TaskBucket } from '../lib/superTaskApi'
 
-const EMPTY_BUCKET: TaskBucket = { queue: [], processing: [], finished: [] }
+const EMPTY_BUCKET: TaskBucket = { queue: [], processing: [], verifying: [], finished: [] }
 
 /** task_factory SSE 事件的局部形状(shared/events.ts TaskFactoryEvent 的子集)。 */
 export interface TaskFactoryEventLike {

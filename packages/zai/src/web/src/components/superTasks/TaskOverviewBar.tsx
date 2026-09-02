@@ -2,19 +2,21 @@ import { Button, Space, Switch, Tooltip, message } from 'antd'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 
 /** 看板筛选维度。'all' 不筛选；其余按任务 status 匹配。 */
-export type SuperTaskFilter = 'all' | 'queued' | 'processing' | 'done' | 'failed'
+export type SuperTaskFilter = 'all' | 'queued' | 'processing' | 'verifying' | 'done' | 'failed'
 
 const STAT_KEYS: Array<{ key: Exclude<SuperTaskFilter, 'all'>; label: string; danger?: boolean }> = [
   { key: 'queued', label: '排队' },
   { key: 'processing', label: '执行中' },
+  { key: 'verifying', label: '验证中' },
   { key: 'done', label: '已完成' },
   { key: 'failed', label: '失败', danger: true },
 ]
 
-/** 统计卡配色(亮色化,用户 2026-09-01)。 */
+/** 统计卡配色(亮色化,用户 2026-09-01;verifying 加青色 2026-09-02)。 */
 const STAT_COLORS: Record<Exclude<SuperTaskFilter, 'all'>, { bg: string; border: string; text: string }> = {
   queued: { bg: '#e8f1ff', border: '#93c5fd', text: '#1d4ed8' },
   processing: { bg: '#f3e8ff', border: '#d8b4fe', text: '#7e22ce' },
+  verifying: { bg: '#ecfeff', border: '#67e8f9', text: '#0e7490' },
   done: { bg: '#e6f7ed', border: '#86efac', text: '#15803d' },
   failed: { bg: '#fdecec', border: '#fca5a5', text: '#dc2626' },
 }
@@ -23,6 +25,7 @@ const STAT_COLORS: Record<Exclude<SuperTaskFilter, 'all'>, { bg: string; border:
 export function matchFilter(t: { status: string }, filter: SuperTaskFilter): boolean {
   if (filter === 'all') return true
   if (filter === 'processing') return t.status === 'processing' || t.status === 'paused'
+  if (filter === 'verifying') return t.status === 'verifying'
   return t.status === filter
 }
 
@@ -35,7 +38,7 @@ export interface TaskOverviewBarProps {
 /**
  * 总览统计卡组 + 操作条(看板顶部)。
  *
- * - 四张统计卡(排队/执行中/已完成/失败⚠)点击筛选:再点取消;筛选态显示「清除筛选」。
+ * - 五张统计卡(排队/执行中/验证中/已完成/失败⚠)点击筛选:再点取消;筛选态显示「清除筛选」。
  * - 右侧:AI 托管 Switch / 新建任务 / loading「刷新中…」。
  *
  * 数据源 = useSuperTaskStore.buckets(3s 轮询驱动,无新请求)。
@@ -46,10 +49,11 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask }: T
   const loading = useSuperTaskStore((s) => s.loading)
   const setManaged = useSuperTaskStore((s) => s.setManaged)
 
-  const allTasks = [...buckets.queue, ...buckets.processing, ...buckets.finished]
+  const allTasks = [...buckets.queue, ...buckets.processing, ...buckets.verifying, ...buckets.finished]
   const counts: Record<Exclude<SuperTaskFilter, 'all'>, number> = {
     queued: buckets.queue.length,
     processing: buckets.processing.length,
+    verifying: buckets.verifying.length,
     done: buckets.finished.filter((t) => t.status === 'done').length,
     failed: allTasks.filter((t) => t.status === 'failed').length,
   }

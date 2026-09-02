@@ -4,20 +4,28 @@ import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomInt } from 'node:crypto'
 
-export type TaskStatus = 'queued' | 'processing' | 'paused' | 'done' | 'failed'
-export type TaskBucketName = 'queue-tasks' | 'processing-tasks' | 'finished-tasks'
+export type TaskStatus = 'queued' | 'processing' | 'paused' | 'verifying' | 'done' | 'failed'
+export type TaskBucketName = 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'
 export interface TaskSummary {
   id: string; title: string; status: string
   cwd: string
   description?: string
-  agent?: string; createdAt?: string; startedAt?: string | null
+  agent?: string
+  /** 验证 subagent 名称(可选;默认沿用 `agent`)。SpawnAgent 调验证子任务时使用。 */
+  verifierAgent?: string | null
+  createdAt?: string; startedAt?: string | null
   completedAt?: string | null; executorTaskId?: string | null
   bucket: TaskBucketName
 }
-export interface TaskBucket { queue: TaskSummary[]; processing: TaskSummary[]; finished: TaskSummary[] }
+export interface TaskBucket {
+  queue: TaskSummary[]
+  processing: TaskSummary[]
+  verifying: TaskSummary[]
+  finished: TaskSummary[]
+}
 export interface TaskDetails { summary: TaskSummary; indexMd: string; specMd: string; planMd: string; processMd: string }
 
-const BUCKETS: TaskBucketName[] = ['queue-tasks', 'processing-tasks', 'finished-tasks']
+const BUCKETS: TaskBucketName[] = ['queue-tasks', 'processing-tasks', 'verifying-tasks', 'finished-tasks']
 const TASK_ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
 
 export function taskFactoryRoot(): string {
@@ -42,6 +50,8 @@ export function emitTaskFactoryEvent(action: string, payload: Record<string, unk
 export interface CreatePoolTaskInput {
   id?: string; title: string; description?: string; agent?: string; spec?: string; plan?: string
   cwd?: string
+  /** 验证 subagent 名称(可选);缺省回落到任务 `agent` 字段。SpawnAgent 验证时使用。 */
+  verifierAgent?: string
 }
 export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSummary> {
   const id = input.id ?? generateTaskId()
@@ -63,6 +73,7 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     `title: ${esc(input.title)}`,
     'status: queued',
     `agent: ${esc(input.agent ?? 'default')}`,
+    `verifierAgent: ${input.verifierAgent ? esc(input.verifierAgent) : 'null'}`,
     `cwd: ${escCwd(taskCwd)}`,
     `createdAt: ${createdAt}`,
     'startedAt: null',
@@ -79,7 +90,16 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
   await writeFile(join(dir, 'docs', 'spec.md'), input.spec ?? '# 需求规格\n\n（需求讨论后由主管补充）\n', 'utf-8')
   await writeFile(join(dir, 'docs', 'plan.md'), input.plan ?? '# 执行计划\n\n（执行前由主管补充）\n', 'utf-8')
   await writeFile(join(dir, 'process.md'), '# 执行记录\n\n', 'utf-8')
-  return { id, title: input.title, status: 'queued', agent: input.agent, createdAt, cwd: taskCwd, bucket: 'queue-tasks' }
+  return {
+    id,
+    title: input.title,
+    status: 'queued',
+    agent: input.agent,
+    verifierAgent: input.verifierAgent ?? null,
+    createdAt,
+    cwd: taskCwd,
+    bucket: 'queue-tasks',
+  }
 }
 
 function parseIndexFrontmatter(text: string): Record<string, string | null> {
@@ -146,6 +166,7 @@ function toSummary(id: string, bucket: TaskBucketName, meta: Record<string, stri
     cwd: meta.cwd ?? process.cwd(),
     description: text ? extractDescription(text) : undefined,
     agent: meta.agent ?? undefined,
+    verifierAgent: meta.verifierAgent ?? null,
     createdAt: meta.createdAt ?? undefined,
     startedAt: meta.startedAt ?? undefined,
     completedAt: meta.completedAt ?? undefined,
@@ -167,8 +188,8 @@ async function listIn(bucket: TaskBucketName): Promise<TaskSummary[]> {
 }
 
 export async function listTasks(): Promise<TaskBucket> {
-  const [queue, processing, finished] = await Promise.all(BUCKETS.map(listIn))
-  return { queue, processing, finished }
+  const [queue, processing, verifying, finished] = await Promise.all(BUCKETS.map(listIn))
+  return { queue, processing, verifying, finished }
 }
 
 export async function getTaskSummary(id: string, bucket?: TaskBucketName): Promise<TaskSummary | null> {
@@ -223,7 +244,10 @@ export async function moveTask(id: string, from: TaskBucketName, to: TaskBucketN
   if (!rec) throw new Error(`task ${id} not found in ${from}`)
   const dest = taskDir(to, id)
   if (existsSync(dest)) throw new Error(`task ${id} already exists in ${to}`)
-  const status = to === 'processing-tasks' ? 'processing' : to === 'finished-tasks' ? 'done' : 'queued'
+  const status = to === 'processing-tasks' ? 'processing'
+    : to === 'verifying-tasks' ? 'verifying'
+    : to === 'finished-tasks' ? 'done'
+    : 'queued'
   const nextText = rewriteIndex(rec.text, { status })
   // 先在原位置写好新 status，再 rename，避免 rename 成功后 writeFile 失败导致目录已移而 status 未更新
   await writeFile(join(taskDir(from, id), 'index.md'), nextText, 'utf-8')
@@ -233,10 +257,14 @@ export async function moveTask(id: string, from: TaskBucketName, to: TaskBucketN
 }
 
 export async function deleteTasks(ids: string[]): Promise<void> {
-  // 整批预校验：任一 id 非法（processing、不存在、两桶同存）则整体抛错，删除不开始，避免部分删除
+  // 整批预校验：任一 id 非法（processing/verifying、不存在、两桶同存）则整体抛错，删除不开始，避免部分删除
   const buckets: TaskBucketName[] = await Promise.all(ids.map(async (id): Promise<TaskBucketName> => {
-    const inProcessing = await getTaskSummary(id, 'processing-tasks')
+    const [inProcessing, inVerifying] = await Promise.all([
+      getTaskSummary(id, 'processing-tasks'),
+      getTaskSummary(id, 'verifying-tasks'),
+    ])
     if (inProcessing) throw new Error(`task ${id} is processing/paused — cannot delete`)
+    if (inVerifying) throw new Error(`task ${id} is verifying — cannot delete`)
     const [inQueue, inFinished] = await Promise.all([
       getTaskSummary(id, 'queue-tasks'),
       getTaskSummary(id, 'finished-tasks'),
