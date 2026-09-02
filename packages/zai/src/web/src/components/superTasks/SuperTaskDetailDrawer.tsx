@@ -3,6 +3,7 @@ import { Drawer, Tabs, Typography, Spin, Timeline, Collapse } from 'antd'
 import type { CSSProperties } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
+import { MarkdownText } from '../markdown/MarkdownText.js'
 import { fetchSuperTaskDetail } from '../../lib/superTaskApi'
 import { subscribeTaskEvents } from '../../lib/taskApi'
 import type { TaskDetails } from '../../lib/superTaskApi'
@@ -164,17 +165,17 @@ export default function SuperTaskDetailDrawer({
               {
                 key: 'spec',
                 label: 'spec.md',
-                children: <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.specMd ?? ''}</ReactMarkdown>,
+                children: <MarkdownText text={detail.specMd ?? ''} />,
               },
               {
                 key: 'plan',
                 label: 'plan.md',
-                children: <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.planMd ?? ''}</ReactMarkdown>,
+                children: <MarkdownText text={detail.planMd ?? ''} />,
               },
               {
                 key: 'processMd',
                 label: 'process.md',
-                children: <ReactMarkdown remarkPlugins={[remarkGfm]}>{detail.processMd ?? ''}</ReactMarkdown>,
+                children: <MarkdownText text={detail.processMd ?? ''} />,
               },
             ]}
           />
