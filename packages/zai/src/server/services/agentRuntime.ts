@@ -405,6 +405,20 @@ export function getActivePromptCount(): number {
 }
 
 /**
+ * 判断指定 session 是否正在跑 query。zai patch (2026-08-09):后台 Bash
+ * 完成通知注入前的 running 守卫 —— 主线活跃时通知暂存,主线结束由
+ * agent.ts finally 调 flushPendingBashNotifications 补发。详见
+ * services/bashNotifier.ts 文件头注释。
+ *
+ * 注:`sessionControllers` 在 registerSessionController 时登记(每条
+ * query 起始;见 query entrypoint),releaseSessionController 时清除。
+ * 因此 `has(sessionId)` 等价于"该 session 还有在飞 query"。
+ */
+export function hasActiveQuery(sessionId: string): boolean {
+  return sessionControllers.has(sessionId)
+}
+
+/**
  * Best-effort read of the deployment's `subagents.<name>` config from
  * `~/.zai/settings.json` (zai patch 2026-08-31:实装,此前是无条件返回
  * `undefined` 的 stub)。Returns `undefined` when the block is absent so
