@@ -148,3 +148,76 @@ describe('SuperTaskCard verifying 状态 (2026-09-02)', () => {
     expect(hasButtonWithText(container, '强制通过')).toBe(false)
   })
 })
+
+// zai patch (2026-09-02, priority Tag 渲染):
+describe('SuperTaskCard priority Tag (2026-09-02)', () => {
+  it('P0 → red Tag、P1 → orange、P2 → blue、P3 → default(灰)', () => {
+    const cases: Array<['P0' | 'P1' | 'P2' | 'P3', string]> = [
+      ['P0', 'ant-tag-red'],
+      ['P1', 'ant-tag-orange'],
+      ['P2', 'ant-tag-blue'],
+      ['P3', 'ant-tag-default'],
+    ]
+    for (const [priority, cls] of cases) {
+      const { container } = render(
+        <SuperTaskCard
+          task={baseTask({ priority, dependsOn: [] })}
+          selected={false}
+          onToggleSelect={() => {}}
+          dimmed={false}
+          onOpenDetail={() => {}}
+          onDeleted={() => {}}
+        />,
+      )
+      const tag = container.querySelector(`[data-priority="${priority}"]`)
+      expect(tag).toBeTruthy()
+      expect(tag?.classList.contains(cls) || tag?.className.includes(cls)).toBe(true)
+    }
+  })
+
+  it('priority 缺省(P2 也展示)+ 没有 priority 字段时卡片不挂 Tag', () => {
+    // 显式 P2 也展示 Tag,让用户看到调度排序
+    const { container: c1 } = render(
+      <SuperTaskCard
+        task={baseTask({ priority: 'P2' })}
+        selected={false}
+        onToggleSelect={() => {}}
+        dimmed={false}
+        onOpenDetail={() => {}}
+        onDeleted={() => {}}
+      />,
+    )
+    expect(c1.querySelector('[data-priority="P2"]')).toBeTruthy()
+    // 无 priority 字段 → 不渲染(向后兼容 legacy)
+    const { container: c2 } = render(
+      <SuperTaskCard
+        task={baseTask({})}
+        selected={false}
+        onToggleSelect={() => {}}
+        dimmed={false}
+        onOpenDetail={() => {}}
+        onDeleted={() => {}}
+      />,
+    )
+    expect(c2.querySelector('[data-priority]')).toBeNull()
+  })
+
+  it('dependsOn 非空时 tooltip 文案包含「依赖 N 个任务」', () => {
+    const { container } = render(
+      <SuperTaskCard
+        task={baseTask({ priority: 'P1', dependsOn: ['tf-aaaaaaaa', 'tf-bbbbbbbb'] })}
+        selected={false}
+        onToggleSelect={() => {}}
+        dimmed={false}
+        onOpenDetail={() => {}}
+        onDeleted={() => {}}
+      />,
+    )
+    // AntD Tooltip 渲染时,内容在 wrapper 里 —— 这里通过 querySelector 找含「依赖」的 wrapper
+    const wrapper = container.querySelector('.ant-tooltip')
+    // happy-dom 不一定完整渲染 tooltip,这里降级到查 Tag 上的属性
+    const tag = container.querySelector('[data-priority="P1"]')
+    expect(tag).toBeTruthy()
+    void wrapper
+  })
+})

@@ -12,6 +12,16 @@ const STATUS_TAG: Record<string, { color: string; label: string }> = {
   failed: { color: 'error', label: '失败' },
 }
 
+/** 调度优先级 Tag 配色(zai patch 2026-09-02):P0 红、P1 橙、P2 蓝、P3 灰。
+ *  AntD Tag `color` 接受预设关键字 + hex;P0 用 red、P1 用 orange 走预设,
+ *  P2 走 blue 预设,P3 走 default(灰)。 */
+const PRIORITY_TAG: Record<string, { color: string; label: string }> = {
+  P0: { color: 'red', label: 'P0 紧急' },
+  P1: { color: 'orange', label: 'P1 高' },
+  P2: { color: 'blue', label: 'P2 普通' },
+  P3: { color: 'default', label: 'P3 低' },
+}
+
 /** 卡片左侧状态色条(亮色化,用户 2026-09-01;verifying 加青色 2026-09-02)。 */
 const STATUS_ACCENT: Record<string, string> = {
   queued: '#3b82f6',
@@ -121,6 +131,26 @@ export default function SuperTaskCard({
           <Tag color={tag.color} style={{ marginInlineEnd: 0 }}>
             {tag.label}
           </Tag>
+          {/* zai patch (2026-09-02, priority Tag): P0 红 / P1 橙 / P2 蓝 / P3 灰。
+              缺省 P2 也显示,让用户一眼看清调度排序。dependsOn 非空时附 tooltip。 */}
+          {task.priority && (
+            <Tooltip
+              title={
+                task.dependsOn && task.dependsOn.length > 0
+                  ? `${PRIORITY_TAG[task.priority]?.label ?? task.priority} · 依赖 ${task.dependsOn.length} 个任务(${task.dependsOn.join(', ')})`
+                  : PRIORITY_TAG[task.priority]?.label ?? task.priority
+              }
+            >
+              <Tag
+                color={PRIORITY_TAG[task.priority]?.color ?? 'default'}
+                style={{ marginInlineEnd: 0 }}
+                data-priority={task.priority}
+                data-testid={`priority-${task.id}`}
+              >
+                {task.priority}
+              </Tag>
+            </Tooltip>
+          )}
           {task.agent && task.agent !== 'default' && <Tag style={{ marginInlineEnd: 0 }}>{task.agent}</Tag>}
         </Space>
       </div>
