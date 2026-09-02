@@ -1,26 +1,42 @@
 import { existsSync } from 'node:fs'
-import { appendFile, mkdir, readFile } from 'node:fs/promises'
 import { join } from 'node:path'
 import { z } from 'zod/v4'
 import { buildTool } from '../Tool.js'
 import {
-  createPoolTask, getTaskSummary, moveTask, emitTaskFactoryEvent, taskFactoryRoot, taskDir,
+  createPoolTask, getTaskSummary, moveTask, markTaskStatus, emitTaskFactoryEvent, taskFactoryRoot, taskDir,
 } from './taskFactoryFiles.js'
 
 const CREATE_DESC = 'Create a Task Factory task: initializes index.md, docs/spec.md, docs/plan.md, process.md under ~/.zai/task-factory/queue-tasks/<id>/. ' +
   'Call only after the requirements have been discussed with the user; title and cwd are required, agent is the executor subagent name (default "default"), spec/plan are the discussed content (optional; can still be filled in later via Edit). ' +
   'verifierAgent is the optional verification subagent name; when omitted, the task inherits the executor agent. The verifier subagent runs after the executor finishes and independently judges PASS/FAIL by reading docs/spec.md + docs/process.md.'
 
-const MARK_DESC = 'Accept a completed task: moves processing-tasks/<id> to finished-tasks/<id> and sets status: done. ' +
-  'Call only after the verifier subagent has reported PASS (or the user has explicitly forced acceptance via the verifying lane).'
+const MOVE_DESC = 'Move a Task Factory task between lifecycle buckets (queue-tasks / processing-tasks / verifying-tasks / finished-tasks) with optional executorTaskId backfill. ' +
+  'Use this as the SOLE write path for task state changes — do NOT edit index.md by hand. ' +
+  'Typical flows: ' +
+  '(a) SuperTasksMove(id, "queue-tasks", "processing-tasks", executorTaskId=<subagent>) on dispatch — atomically moves the folder, sets status=processing, and backfills executorTaskId; ' +
+  '(b) SuperTasksMove(id, "processing-tasks", "verifying-tasks") after the executor appends "## [DONE]" to process.md; ' +
+  '(c) SuperTasksMove(id, "verifying-tasks", "finished-tasks") on verifier PASS or forced accept; ' +
+  '(d) SuperTasksMove(id, "processing-tasks", "finished-tasks") on forced accept from the processing lane; ' +
+  '(e) SuperTasksMove(id, "processing-tasks", "queue-tasks") to roll back a failed SpawnAgent dispatch. ' +
+  'Errors: "task <id> not found in <from>" (id absent in the named source bucket — verify with getTaskSummary or ListTasks); ' +
+  '"task <id> already exists in <to>" (target bucket already has a folder with this id — concurrent collision). ' +
+  'When executorTaskId is provided non-empty, the index.md frontmatter is patched in place BEFORE the folder rename so the bucket move and the field write are committed atomically (no separate Edit race).'
 
-const VERIFY_DESC = 'Move a processing task into the verifying lane so a verification subagent can judge its deliverables. ' +
-  'The task must currently be in processing-tasks with status=processing (calling this from paused or verifying is illegal and will throw). ' +
-  'Behavior: (1) read verifierAgent (input override > index.md field > task agent), (2) compute the next verification round N = existing ## 轮次 N sections in docs/verification.md + 1 (no file → 1), ' +
-  '(3) write a new "## 轮次 N" header into docs/verification.md with timestamp and the round target, ' +
-  '(4) moveTask(id, processing-tasks → verifying-tasks) which sets status=verifying, ' +
-  '(5) return verifierAgent and cwd so the caller (the supervisor agent) can SpawnAgent the verifier subagent with subagent_type=verifierAgent, cwd=task.cwd, prompt asking it to append "结论: PASS|FAIL\n原因: ..." to docs/verification.md under the current round header. ' +
-  'After SpawnAgent returns, the supervisor reads verification.md, parses the conclusion, then either calls SuperTasksMarkDone (PASS) or resumes the task with the feedback path (FAIL, round < 3) or pauses the task (FAIL, round == 3).'
+const RESET_DESC = 'Reset a Task Factory task back to the runnable state for retry. ' +
+  'Auto-detects the current bucket (no `from` argument needed): ' +
+  '(a) task in verifying-tasks → folder moves back to processing-tasks AND status is forced to "processing" with executorTaskId cleared; ' +
+  '(b) task in processing-tasks with status="paused" → folder stays in processing-tasks, status forced back to "processing" with executorTaskId cleared (no bucket move); ' +
+  '(c) task in queue-tasks / finished-tasks / processing-tasks with status!="paused" / not found anywhere → throws "task <id> cannot be reset (current state: bucket=..., status=...)". ' +
+  'Use this after a verifier FAIL on round N < 3 to put the task back into the runnable lane so the supervisor can re-SpawnAgent the executor with the verifier feedback path included in the prompt. ' +
+  'After Reset, the supervisor must re-SpawnAgent the executor — Reset does NOT cancel or pause any existing subagent; if the previous executor subagent is still alive, the supervisor should BackgroundRuntime.cancel it first.'
+
+const PAUSE_DESC = 'Pause a Task Factory task in place without moving it between buckets. ' +
+  'Auto-detects the current bucket (no `from` argument needed): ' +
+  '(a) task in processing-tasks → status forced to "paused" and executorTaskId cleared (folder stays in processing-tasks); ' +
+  '(b) task in verifying-tasks → status forced to "paused" and executorTaskId cleared (folder stays in verifying-tasks so the user can still force-accept or reset later); ' +
+  '(c) task in queue-tasks / finished-tasks / not found → throws "task <id> cannot be paused (current state: bucket=..., status=...)". ' +
+  'Pause does NOT cancel the executor subagent — the supervisor is responsible for calling BackgroundRuntime.cancel(executorTaskId) BEFORE Pause so the in-flight subagent is killed first; ' +
+  'Pause only writes the paused status. Use this on FAIL round == 3 (after cancel) to freeze the task pending a human decision, or when the user explicitly requests a temporary freeze.'
 
 export const superTasksCreateTool = buildTool({
   name: 'SuperTasksCreate',
@@ -64,34 +80,87 @@ export const superTasksCreateTool = buildTool({
   userFacingName: () => 'SuperTasksCreate',
 })
 
-export const superTasksMarkDoneTool = buildTool({
-  name: 'SuperTasksMarkDone',
+const BUCKET_ENUM = z.enum(['queue-tasks', 'processing-tasks', 'verifying-tasks', 'finished-tasks'])
+
+export const superTasksMoveTool = buildTool({
+  name: 'SuperTasksMove',
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
-  isDestructive: () => true,
-  async description() { return MARK_DESC },
-  async prompt() { return MARK_DESC },
+  isDestructive: () => false,
+  async description() { return MOVE_DESC },
+  async prompt() { return MOVE_DESC },
+  get inputSchema() {
+    return z.object({
+      id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4'),
+      from: BUCKET_ENUM.describe('Source bucket the task is currently in (must match the actual folder location)'),
+      to: BUCKET_ENUM.describe('Destination bucket to move the task folder into (must be empty for this id)'),
+      executorTaskId: z.string().optional().describe('Optional subagent task id to backfill into index.md frontmatter (atomic with the bucket move; typically the id returned by SpawnAgent)'),
+    })
+  },
+  async call(input: { id: string; from: 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'; to: 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'; executorTaskId?: string }) {
+    const summary = await getTaskSummary(input.id, input.from)
+    if (!summary) {
+      throw new Error(`task ${input.id} not found in ${input.from}`)
+    }
+    if (existsSync(taskDir(input.to, input.id))) {
+      throw new Error(`task ${input.id} already exists in ${input.to}`)
+    }
+    if (input.executorTaskId && input.executorTaskId.length > 0) {
+      await markTaskStatus(input.id, input.from, { executorTaskId: input.executorTaskId })
+    }
+    const moved = await moveTask(input.id, input.from, input.to)
+    emitTaskFactoryEvent('moved', { id: moved.id, from: input.from, to: input.to })
+    const extra = input.executorTaskId ? ` (executorTaskId=${input.executorTaskId})` : ''
+    return { data: { output: `Task moved: ${moved.id} (${moved.title}) ${input.from} → ${input.to}${extra}` } }
+  },
+  mapToolResultToToolResultBlockParam(content: { output: string }, toolUseID: string) {
+    return {
+      type: 'tool_result' as const,
+      tool_use_id: toolUseID,
+      content: [{ type: 'text' as const, text: content.output }],
+    }
+  },
+  renderToolUseMessage() { return null },
+  renderToolResultMessage() { return null },
+  toAutoClassifierInput() { return '' },
+  checkPermissions(input) {
+    return Promise.resolve({ behavior: 'allow' as const, updatedInput: input, decisionReason: { type: 'mode' as const, mode: 'bypassPermissions' as const } })
+  },
+  userFacingName: () => 'SuperTasksMove',
+})
+
+export const superTasksResetTool = buildTool({
+  name: 'SuperTasksReset',
+  isReadOnly: () => false,
+  isConcurrencySafe: () => false,
+  isDestructive: () => false,
+  async description() { return RESET_DESC },
+  async prompt() { return RESET_DESC },
   get inputSchema() {
     return z.object({ id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4') })
   },
   async call(input: { id: string }) {
-    // 接受 processing-tasks(主动验收)/ verifying-tasks(强制通过,跳过 verifier 直接归档)。
-    // queue/finished/不存在 → 抛错。
-    const inProcessing = await getTaskSummary(input.id, 'processing-tasks')
-    const inVerifying = await getTaskSummary(input.id, 'verifying-tasks')
-    const summary = inProcessing ?? inVerifying
-    if (!summary) {
-      const anywhere = await getTaskSummary(input.id)
-      throw new Error(anywhere
-        ? `task ${input.id} is not in processing-tasks/verifying-tasks (current bucket: ${anywhere.bucket}), acceptance rejected`
-        : `task ${input.id} not found`)
+    const [inQueue, inProcessing, inVerifying, inFinished] = await Promise.all([
+      getTaskSummary(input.id, 'queue-tasks'),
+      getTaskSummary(input.id, 'processing-tasks'),
+      getTaskSummary(input.id, 'verifying-tasks'),
+      getTaskSummary(input.id, 'finished-tasks'),
+    ])
+    if (inVerifying) {
+      const moved = await moveTask(input.id, 'verifying-tasks', 'processing-tasks')
+      await markTaskStatus(input.id, 'processing-tasks', { status: 'processing', executorTaskId: null })
+      emitTaskFactoryEvent('reset', { id: input.id })
+      return { data: { output: `Task reset: ${input.id} (${moved.title}) → processing-tasks/status=processing (executorTaskId cleared)` } }
     }
-    const from = summary.bucket
-    const done = await moveTask(input.id, from, 'finished-tasks')
-    emitTaskFactoryEvent('finished', { id: done.id })
-    return { data: { output: `Task done: ${done.id} (${done.title}) moved to finished-tasks (forced from ${from})` } }
+    if (inProcessing && inProcessing.status === 'paused') {
+      await markTaskStatus(input.id, 'processing-tasks', { status: 'processing', executorTaskId: null })
+      emitTaskFactoryEvent('reset', { id: input.id })
+      return { data: { output: `Task reset: ${input.id} (${inProcessing.title}) → processing-tasks/status=processing (executorTaskId cleared)` } }
+    }
+    const bucket = inQueue ? 'queue-tasks' : inProcessing ? 'processing-tasks' : inFinished ? 'finished-tasks' : '(not found)'
+    const status = inProcessing?.status ?? (inQueue ? 'queued' : inVerifying ? 'verifying' : inFinished ? 'done' : 'unknown')
+    throw new Error(`task ${input.id} cannot be reset (current state: bucket=${bucket}, status=${status})`)
   },
-  // 同 SuperTasksCreate:runtime 序列化 tool_result 必需(2026-09-02 补)。
   mapToolResultToToolResultBlockParam(content: { output: string }, toolUseID: string) {
     return {
       type: 'tool_result' as const,
@@ -105,87 +174,40 @@ export const superTasksMarkDoneTool = buildTool({
   checkPermissions(input) {
     return Promise.resolve({ behavior: 'allow' as const, updatedInput: input, decisionReason: { type: 'mode' as const, mode: 'bypassPermissions' as const } })
   },
-  userFacingName: () => 'SuperTasksMarkDone',
+  userFacingName: () => 'SuperTasksReset',
 })
 
-/**
- * 读取 docs/verification.md 中已有的 `## 轮次 N` 段数,决定下一轮序号。
- * 文件不存在 / 没有段 → 1。
- */
-async function nextVerificationRound(dir: string): Promise<number> {
-  const file = join(dir, 'docs', 'verification.md')
-  if (!existsSync(file)) return 1
-  const text = await readFile(file, 'utf-8')
-  const matches = text.match(/^## 轮次 \d+/gm)
-  return (matches?.length ?? 0) + 1
-}
-
-export const superTasksVerifyTool = buildTool({
-  name: 'SuperTasksVerify',
+export const superTasksPauseTool = buildTool({
+  name: 'SuperTasksPause',
   isReadOnly: () => false,
   isConcurrencySafe: () => false,
   isDestructive: () => false,
-  async description() { return VERIFY_DESC },
-  async prompt() { return VERIFY_DESC },
+  async description() { return PAUSE_DESC },
+  async prompt() { return PAUSE_DESC },
   get inputSchema() {
-    return z.object({
-      id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4'),
-      verifierAgent: z.string().optional().describe('Optional verifier subagent name override (defaults to index.md verifierAgent field, then task agent)'),
-    })
+    return z.object({ id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4') })
   },
-  async call(input: { id: string; verifierAgent?: string }) {
-    // 严格状态:仅 processing + status=processing 接受。从 paused/verifying 起验证是非法状态。
-    const summary = await getTaskSummary(input.id, 'processing-tasks')
-    if (!summary) {
-      const anywhere = await getTaskSummary(input.id)
-      throw new Error(anywhere
-        ? `task ${input.id} is not in processing-tasks (current bucket: ${anywhere.bucket}, status: ${anywhere.status}), verification rejected`
-        : `task ${input.id} not found`)
+  async call(input: { id: string }) {
+    const [inQueue, inProcessing, inVerifying, inFinished] = await Promise.all([
+      getTaskSummary(input.id, 'queue-tasks'),
+      getTaskSummary(input.id, 'processing-tasks'),
+      getTaskSummary(input.id, 'verifying-tasks'),
+      getTaskSummary(input.id, 'finished-tasks'),
+    ])
+    if (inProcessing) {
+      await markTaskStatus(input.id, 'processing-tasks', { status: 'paused', executorTaskId: null })
+      emitTaskFactoryEvent('paused', { id: input.id })
+      return { data: { output: `Task paused: ${input.id} (${inProcessing.title}) in processing-tasks (executorTaskId cleared)` } }
     }
-    if (summary.status !== 'processing') {
-      throw new Error(`task ${input.id} status=${summary.status} (must be "processing" to enter verification), rejected`)
+    if (inVerifying) {
+      await markTaskStatus(input.id, 'verifying-tasks', { status: 'paused', executorTaskId: null })
+      emitTaskFactoryEvent('paused', { id: input.id })
+      return { data: { output: `Task paused: ${input.id} (${inVerifying.title}) in verifying-tasks (executorTaskId cleared)` } }
     }
-
-    const verifierAgent = input.verifierAgent ?? summary.verifierAgent ?? summary.agent ?? null
-    const dir = taskDir('processing-tasks', input.id)
-    await mkdir(join(dir, 'docs'), { recursive: true })
-    const round = await nextVerificationRound(dir)
-    const header = [
-      `## 轮次 ${round}`,
-      '',
-      `- 时间戳: ${new Date().toISOString()}`,
-      `- 验证目标: ${summary.title}`,
-      `- 验证 agent: ${verifierAgent ?? '(fallback to task agent)'}`,
-      '',
-    ].join('\n')
-    const file = join(dir, 'docs', 'verification.md')
-    if (!existsSync(file)) {
-      await appendFile(file, '# 验证记录\n\n', 'utf-8')
-    }
-    await appendFile(file, header, 'utf-8')
-
-    const moved = await moveTask(input.id, 'processing-tasks', 'verifying-tasks')
-    emitTaskFactoryEvent('verifying', { id: moved.id, round, verifierAgent })
-
-    return {
-      data: {
-        output:
-          `Task verifying: ${moved.id} (${moved.title}) moved to verifying-tasks\n` +
-          `Round: ${round}\n` +
-          `Verifier agent: ${verifierAgent ?? '(fallback to task agent)'}\n` +
-          `Cwd: ${moved.cwd}\n` +
-          `Storage dir: ${taskDir('verifying-tasks', moved.id)}\n` +
-          `Verification log: ${join(taskDir('verifying-tasks', moved.id), 'docs', 'verification.md')}\n` +
-          `Next step: the supervisor should SpawnAgent(subagent_type=verifierAgent, cwd=${moved.cwd}, ` +
-          `prompt="Read ${taskDir('verifying-tasks', moved.id)}/docs/spec.md (acceptance criteria) and process.md (executor record), ` +
-          `then append your conclusion to docs/verification.md under the current round header in the exact format: ` +
-          `'结论: PASS|FAIL\\n原因: ...'. After the verifier subagent completes, read verification.md and decide: ` +
-          `PASS → call SuperTasksMarkDone; FAIL with round < 3 → resume the task with feedback path; ` +
-          `FAIL with round == 3 → pause the task for human decision.`,
-      },
-    }
+    const bucket = inQueue ? 'queue-tasks' : inFinished ? 'finished-tasks' : '(not found)'
+    const status = inQueue ? 'queued' : inFinished ? 'done' : 'unknown'
+    throw new Error(`task ${input.id} cannot be paused (current state: bucket=${bucket}, status=${status})`)
   },
-  // 同 SuperTasksCreate:runtime 序列化 tool_result 必需。
   mapToolResultToToolResultBlockParam(content: { output: string }, toolUseID: string) {
     return {
       type: 'tool_result' as const,
@@ -199,5 +221,5 @@ export const superTasksVerifyTool = buildTool({
   checkPermissions(input) {
     return Promise.resolve({ behavior: 'allow' as const, updatedInput: input, decisionReason: { type: 'mode' as const, mode: 'bypassPermissions' as const } })
   },
-  userFacingName: () => 'SuperTasksVerify',
+  userFacingName: () => 'SuperTasksPause',
 })

@@ -1,8 +1,10 @@
 import { describe, expect, it } from 'vitest'
 import { TASK_FACTORY_MAIN_AGENT_NAME, taskFactoryMainAgent } from '../../src/opencc-src/server/mainAgents-taskFactory.js'
-import { superTasksCreateTool, superTasksMarkDoneTool, superTasksVerifyTool } from '../../src/opencc-src/server/taskFactoryTools.js'
+import {
+  superTasksCreateTool, superTasksMoveTool, superTasksResetTool, superTasksPauseTool,
+} from '../../src/opencc-src/server/taskFactoryTools.js'
 
-describe('taskFactory mainAgent (2026-09-02)', () => {
+describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)', () => {
   it('TASK_FACTORY_MAIN_AGENT_NAME === "task-factory"', () => {
     expect(TASK_FACTORY_MAIN_AGENT_NAME).toBe('task-factory')
   })
@@ -11,7 +13,7 @@ describe('taskFactory mainAgent (2026-09-02)', () => {
     expect(taskFactoryMainAgent.name).toBe(TASK_FACTORY_MAIN_AGENT_NAME)
   })
 
-  it('tools 槽追加 SuperTasksCreate / SuperTasksMarkDone / SuperTasksVerify', () => {
+  it('tools 槽追加 SuperTasksCreate / SuperTasksMove / SuperTasksReset / SuperTasksPause', () => {
     const baseTools = [
       { name: 'Bash' },
       { name: 'Read' },
@@ -23,23 +25,40 @@ describe('taskFactory mainAgent (2026-09-02)', () => {
     const result = (toolsFactory as (origin: typeof baseTools) => ReadonlyArray<{ name: unknown }>)(baseTools as never)
     const names = result.map((t) => String(t.name))
     expect(names).toContain('SuperTasksCreate')
-    expect(names).toContain('SuperTasksMarkDone')
-    expect(names).toContain('SuperTasksVerify')
+    expect(names).toContain('SuperTasksMove')
+    expect(names).toContain('SuperTasksReset')
+    expect(names).toContain('SuperTasksPause')
   })
 
-  it('同源已有同名工具时去重,不再叠加', () => {
+  it('不再包含已删除的 SuperTasksVerify / SuperTasksMarkDone', () => {
     const baseTools = [
-      { name: 'SuperTasksCreate' }, // 模拟 origin 已含同名
-      { name: 'SuperTasksVerify' },
+      { name: 'Bash' },
+      { name: 'Read' },
+      { name: 'Edit' },
+      { name: 'SpawnAgent' },
     ] as const
     const toolsFactory = taskFactoryMainAgent.tools
     if (typeof toolsFactory !== 'function') throw new Error('tools must be a function')
     const result = (toolsFactory as (origin: typeof baseTools) => ReadonlyArray<{ name: unknown }>)(baseTools as never)
     const names = result.map((t) => String(t.name))
-    const createCount = names.filter((n) => n === 'SuperTasksCreate').length
-    const verifyCount = names.filter((n) => n === 'SuperTasksVerify').length
-    expect(createCount).toBe(1)
-    expect(verifyCount).toBe(1)
+    expect(names).not.toContain('SuperTasksVerify')
+    expect(names).not.toContain('SuperTasksMarkDone')
+  })
+
+  it('同源已有同名工具时去重,不再叠加', () => {
+    const baseTools = [
+      { name: 'SuperTasksCreate' }, // 模拟 origin 已含同名
+      { name: 'SuperTasksMove' },
+      { name: 'SuperTasksReset' },
+      { name: 'SuperTasksPause' },
+    ] as const
+    const toolsFactory = taskFactoryMainAgent.tools
+    if (typeof toolsFactory !== 'function') throw new Error('tools must be a function')
+    const result = (toolsFactory as (origin: typeof baseTools) => ReadonlyArray<{ name: unknown }>)(baseTools as never)
+    const names = result.map((t) => String(t.name))
+    for (const n of ['SuperTasksCreate', 'SuperTasksMove', 'SuperTasksReset', 'SuperTasksPause']) {
+      expect(names.filter((x) => x === n)).toHaveLength(1)
+    }
   })
 
   it('description 与 systemPrompt 是英文', async () => {
@@ -48,14 +67,18 @@ describe('taskFactory mainAgent (2026-09-02)', () => {
     const resolved = typeof prompt === 'function' ? prompt(['origin-line']) : prompt
     const arr = Array.isArray(resolved) ? resolved : [String(resolved)]
     const text = arr.join('\n')
-    expect(text).toContain('SuperTasksVerify')
+    // 主管 prompt 必须出现新工具名 + 关键流程词
+    expect(text).toContain('SuperTasksMove')
+    expect(text).toContain('SuperTasksReset')
+    expect(text).toContain('SuperTasksPause')
     expect(text).toContain('SpawnAgent')
     expect(text).toContain('verification.md')
   })
 
-  it('三个工厂工具名字一致', () => {
+  it('四个工厂工具名字一致', () => {
     expect(superTasksCreateTool.name).toBe('SuperTasksCreate')
-    expect(superTasksMarkDoneTool.name).toBe('SuperTasksMarkDone')
-    expect(superTasksVerifyTool.name).toBe('SuperTasksVerify')
+    expect(superTasksMoveTool.name).toBe('SuperTasksMove')
+    expect(superTasksResetTool.name).toBe('SuperTasksReset')
+    expect(superTasksPauseTool.name).toBe('SuperTasksPause')
   })
 })
