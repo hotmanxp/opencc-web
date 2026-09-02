@@ -44,12 +44,83 @@ const JSON_FALLBACK_PREFIX = 80
 /** RuntimeEvent type 集合(spec 翻译规则表 → assistant/user/system + tool_use/tool_result blocks)。 */
 type RuntimeType = 'system' | 'user' | 'assistant'
 
+interface MessageWire {
+  message?: { content?: unknown }
+  [k: string]: unknown
+}
+
 /** 从外层 SSE data 抽出 {seq, ts},失败返回 null。 */
 function readWireMeta(obj: Record<string, unknown>): { seq: number; ts: number } | null {
   const seq = obj.seq
   const ts = obj.ts
   if (typeof seq !== 'number' || typeof ts !== 'number') return null
   return { seq, ts }
+}
+
+/** 从 raw 抽 message.content 数组,失败返回 null。 */
+function readContent(raw: Record<string, unknown>): unknown[] | null {
+  const m = raw.message as MessageWire['message']
+  if (!m || typeof m !== 'object') return null
+  const c = m.content
+  if (!Array.isArray(c)) return null
+  return c
+}
+
+/** content[0] 决定 assistant frame 的 kind;text / thinking / tool_use 三选一。 */
+function renderAssistant(
+  meta: { seq: number; ts: number },
+  raw: Record<string, unknown>,
+): RenderedEvent | null {
+  const content = readContent(raw)
+  if (!content) return null
+  const block = content[0] as Record<string, unknown> | undefined
+  if (!block || typeof block !== 'object') return null
+  const t = block.type
+  if (t === 'text') {
+    const text = typeof block.text === 'string' ? block.text : ''
+    return { kind: 'assistant-text', seq: meta.seq, ts: meta.ts, text }
+  }
+  if (t === 'thinking') {
+    const text = typeof block.text === 'string' ? block.text : ''
+    return { kind: 'thinking', seq: meta.seq, ts: meta.ts, text }
+  }
+  // tool_use 分支留到 cycle 5
+  return null
+}
+
+/** content[0] 决定 user frame 的 kind;text → user,tool_result → tool-result (后者在 cycle 6)。 */
+function renderUser(
+  meta: { seq: number; ts: number },
+  raw: Record<string, unknown>,
+): RenderedEvent | null {
+  const content = readContent(raw)
+  if (!content) return null
+  const block = content[0] as Record<string, unknown> | undefined
+  if (!block || typeof block !== 'object') return null
+  const t = block.type
+  if (t === 'text') {
+    const out: RenderedEvent = {
+      kind: 'user',
+      seq: meta.seq,
+      ts: meta.ts,
+      text: typeof block.text === 'string' ? block.text : '',
+    }
+    if (typeof raw.cwd === 'string') (out as { cwd?: string }).cwd = raw.cwd
+    if (typeof raw.agent === 'string') (out as { agent?: string }).agent = raw.agent
+    return out
+  }
+  // tool_result / unknown 分支留到 cycle 6 / 帧级守卫
+  return null
+}
+
+/** system frame 只看 subtype 字段。 */
+function renderSystem(
+  meta: { seq: number; ts: number },
+  raw: Record<string, unknown>,
+): RenderedEvent | null {
+  const sub = raw.subtype
+  if (typeof sub !== 'string' || sub.length === 0) return null
+  return { kind: 'system', seq: meta.seq, ts: meta.ts, sub }
 }
 
 /**
@@ -86,8 +157,12 @@ export function toRendered(frame: SseFrame): RenderedEvent | null {
   // 已知 RuntimeEvent 集合外:message_start / content_block_delta / ping 等显式 reject → null
   if (t !== 'system' && t !== 'user' && t !== 'assistant') return null
 
-  // 后续 cycle 接入 system / user / assistant-text/thinking/tool-use/tool-result 分支
-  void rawObj
-  void meta
-  return null
+  switch (t) {
+    case 'system':
+      return renderSystem(meta, rawObj)
+    case 'user':
+      return renderUser(meta, rawObj)
+    case 'assistant':
+      return renderAssistant(meta, rawObj)
+  }
 }

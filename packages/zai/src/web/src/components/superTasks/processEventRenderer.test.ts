@@ -175,3 +175,237 @@ describe('toRendered · 帧级守卫', () => {
     ).toBeNull()
   })
 })
+
+describe('toRendered · system 分支', () => {
+  it('init subtype → system{sub:init}', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'system',
+        data: {
+          seq: 1,
+          ts: 1000,
+          type: 'system',
+          data: { subtype: 'init' },
+        },
+      }),
+    ).toEqual({
+      kind: 'system',
+      seq: 1,
+      ts: 1000,
+      sub: 'init',
+    })
+  })
+
+  it('compact_boundary subtype → system{sub:compact_boundary}', () => {
+    expect(
+      toRendered({
+        id: 2,
+        event: 'system',
+        data: {
+          seq: 2,
+          ts: 2000,
+          type: 'system',
+          data: { subtype: 'compact_boundary' },
+        },
+      }),
+    ).toEqual({
+      kind: 'system',
+      seq: 2,
+      ts: 2000,
+      sub: 'compact_boundary',
+    })
+  })
+})
+
+describe('toRendered · user 分支 (text only)', () => {
+  it('content[0].type=text → user{text,cwd?,agent?}', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'user',
+        data: {
+          seq: 1,
+          ts: 1000,
+          type: 'user',
+          data: {
+            message: {
+              content: [{ type: 'text', text: 'hello agent' }],
+            },
+            cwd: '/Users/ethan',
+            agent: 'zai-default',
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'user',
+      seq: 1,
+      ts: 1000,
+      text: 'hello agent',
+      cwd: '/Users/ethan',
+      agent: 'zai-default',
+    })
+  })
+
+  it('content[0].type=text 无 cwd/agent → user{text} 缺 cwd/agent 字段', () => {
+    expect(
+      toRendered({
+        id: 2,
+        event: 'user',
+        data: {
+          seq: 2,
+          ts: 2000,
+          type: 'user',
+          data: {
+            message: { content: [{ type: 'text', text: 'no meta' }] },
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'user',
+      seq: 2,
+      ts: 2000,
+      text: 'no meta',
+    })
+  })
+
+  it('content[0].type=tool_result → 不归 user (走 tool-result 分支；本 cycle 返回 null 占位)', () => {
+    // 此 case 在 tool-result cycle 实现后改期望；先 null 表达"分支延迟"
+    expect(
+      toRendered({
+        id: 3,
+        event: 'user',
+        data: {
+          seq: 3,
+          ts: 3000,
+          type: 'user',
+          data: {
+            message: {
+              content: [
+                {
+                  type: 'tool_result',
+                  tool_use_id: 'tool-1',
+                  content: 'OK',
+                  is_error: false,
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toBeNull()
+  })
+
+  it('block type 未知 → null (该 block skip,无其他 block 顶替)', () => {
+    expect(
+      toRendered({
+        id: 4,
+        event: 'user',
+        data: {
+          seq: 4,
+          ts: 4000,
+          type: 'user',
+          data: {
+            message: { content: [{ type: 'unknown_kind', foo: 1 }] },
+          },
+        },
+      }),
+    ).toBeNull()
+  })
+})
+
+describe('toRendered · assistant 分支 (text/thinking 占位,tool_use 在 cycle 5)', () => {
+  it('content[0].type=text → assistant-text', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'assistant',
+        data: {
+          seq: 1,
+          ts: 1000,
+          type: 'assistant',
+          data: {
+            message: { content: [{ type: 'text', text: 'hi from model' }] },
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'assistant-text',
+      seq: 1,
+      ts: 1000,
+      text: 'hi from model',
+    })
+  })
+
+  it('content[0].type=thinking → thinking', () => {
+    expect(
+      toRendered({
+        id: 2,
+        event: 'assistant',
+        data: {
+          seq: 2,
+          ts: 2000,
+          type: 'assistant',
+          data: {
+            message: {
+              content: [{ type: 'thinking', text: 'reasoning...' }],
+            },
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'thinking',
+      seq: 2,
+      ts: 2000,
+      text: 'reasoning...',
+    })
+  })
+
+  it('content[0].type=tool_use → tool-use 分支占位 (cycle 5 补;本 cycle null)', () => {
+    expect(
+      toRendered({
+        id: 3,
+        event: 'assistant',
+        data: {
+          seq: 3,
+          ts: 3000,
+          type: 'assistant',
+          data: {
+            message: {
+              content: [
+                {
+                  type: 'tool_use',
+                  id: 'tu-1',
+                  name: 'Bash',
+                  input: { command: 'ls' },
+                },
+              ],
+            },
+          },
+        },
+      }),
+    ).toBeNull()
+  })
+
+  it('assistant 但 text 字段缺 → assistant-text 空串兜底', () => {
+    expect(
+      toRendered({
+        id: 4,
+        event: 'assistant',
+        data: {
+          seq: 4,
+          ts: 4000,
+          type: 'assistant',
+          data: {
+            message: { content: [{ type: 'text' }] },
+          },
+        },
+      }),
+    ).toEqual({
+      kind: 'assistant-text',
+      seq: 4,
+      ts: 4000,
+      text: '',
+    })
+  })
+})
