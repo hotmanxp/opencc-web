@@ -84,8 +84,71 @@ function renderAssistant(
     const text = typeof block.text === 'string' ? block.text : ''
     return { kind: 'thinking', seq: meta.seq, ts: meta.ts, text }
   }
-  // tool_use 分支留到 cycle 5
+  if (t === 'tool_use') {
+    return renderToolUse(meta, block)
+  }
   return null
+}
+
+/** tool_use block → 一行 summary(8 个工具名特定规则)。 */
+function renderToolUse(
+  meta: { seq: number; ts: number },
+  block: Record<string, unknown>,
+): RenderedEvent | null {
+  const id = block.id
+  const name = block.name
+  if (typeof id !== 'string' || typeof name !== 'string') return null
+  const input =
+    block.input && typeof block.input === 'object'
+      ? (block.input as Record<string, unknown>)
+      : {}
+
+  let summary: string
+  switch (name) {
+    case 'Read':
+    case 'Write':
+    case 'Edit':
+    case 'MultiEdit':
+      summary = typeof input.file_path === 'string' ? input.file_path : fallback(input)
+      break
+    case 'Bash':
+      summary =
+        typeof input.command === 'string'
+          ? input.command.slice(0, BASH_CMD_PREFIX)
+          : fallback(input)
+      break
+    case 'Grep':
+      summary = typeof input.pattern === 'string' ? input.pattern : fallback(input)
+      break
+    case 'Glob':
+      summary =
+        typeof input.pattern === 'string'
+          ? `${input.pattern} · ${typeof input.path === 'string' ? input.path : ''}`
+          : fallback(input)
+      break
+    case 'Agent':
+    case 'Task':
+      if (typeof input.description === 'string') summary = input.description
+      else if (typeof input.prompt === 'string') summary = input.prompt.slice(0, SUM_PREFIX)
+      else summary = fallback(input)
+      break
+    default:
+      summary = fallback(input)
+  }
+
+  return {
+    kind: 'tool-use',
+    seq: meta.seq,
+    ts: meta.ts,
+    name,
+    toolUseId: id,
+    summary,
+    fullInput: input,
+  }
+}
+
+function fallback(input: Record<string, unknown>): string {
+  return JSON.stringify(input).slice(0, JSON_FALLBACK_PREFIX)
 }
 
 /** content[0] 决定 user frame 的 kind;text → user,tool_result → tool-result (后者在 cycle 6)。 */

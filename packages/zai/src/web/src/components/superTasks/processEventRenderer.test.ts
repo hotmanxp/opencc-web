@@ -361,7 +361,7 @@ describe('toRendered · assistant 分支 (text/thinking 占位,tool_use 在 cycl
     })
   })
 
-  it('content[0].type=tool_use → tool-use 分支占位 (cycle 5 补;本 cycle null)', () => {
+  it('content[0].type=tool_use → tool-use (Bash → command 80)', () => {
     expect(
       toRendered({
         id: 3,
@@ -384,7 +384,15 @@ describe('toRendered · assistant 分支 (text/thinking 占位,tool_use 在 cycl
           },
         },
       }),
-    ).toBeNull()
+    ).toEqual({
+      kind: 'tool-use',
+      seq: 3,
+      ts: 3000,
+      name: 'Bash',
+      toolUseId: 'tu-1',
+      summary: 'ls',
+      fullInput: { command: 'ls' },
+    })
   })
 
   it('assistant 但 text 字段缺 → assistant-text 空串兜底', () => {
@@ -407,5 +415,136 @@ describe('toRendered · assistant 分支 (text/thinking 占位,tool_use 在 cycl
       ts: 4000,
       text: '',
     })
+  })
+})
+
+describe('toRendered · tool-use 8 个工具名 summary', () => {
+  const mk = (
+    name: string,
+    id: string,
+    input: Record<string, unknown>,
+    seq = 1,
+    ts = 1000,
+  ) => ({
+    id: seq,
+    event: 'assistant',
+    data: {
+      seq,
+      ts,
+      type: 'assistant',
+      data: {
+        message: {
+          content: [{ type: 'tool_use', id, name, input }],
+        },
+      },
+    },
+  })
+
+  it('Read → file_path', () => {
+    const r = toRendered(mk('Read', 'tu-r', { file_path: '/tmp/x.ts' }))
+    expect(r).toMatchObject({
+      kind: 'tool-use',
+      name: 'Read',
+      toolUseId: 'tu-r',
+      summary: '/tmp/x.ts',
+      fullInput: { file_path: '/tmp/x.ts' },
+    })
+  })
+
+  it('Write → file_path', () => {
+    const r = toRendered(mk('Write', 'tu-w', { file_path: '/tmp/y.ts', content: '...' }))
+    expect(r).toMatchObject({ summary: '/tmp/y.ts' })
+  })
+
+  it('Edit → file_path', () => {
+    const r = toRendered(mk('Edit', 'tu-e', { file_path: '/tmp/z.ts' }))
+    expect(r).toMatchObject({ summary: '/tmp/z.ts' })
+  })
+
+  it('MultiEdit → file_path', () => {
+    const r = toRendered(mk('MultiEdit', 'tu-me', { file_path: '/tmp/m.ts' }))
+    expect(r).toMatchObject({ summary: '/tmp/m.ts' })
+  })
+
+  it('Bash → command 前 80 字', () => {
+    const longCmd = 'echo ' + 'a'.repeat(200)
+    const r = toRendered(mk('Bash', 'tu-b', { command: longCmd }))
+    expect(r).toMatchObject({ summary: longCmd.slice(0, 80) })
+  })
+
+  it('Bash command 短 → 全量(不超过 80)', () => {
+    const r = toRendered(mk('Bash', 'tu-b2', { command: 'ls' }))
+    expect(r).toMatchObject({ summary: 'ls' })
+  })
+
+  it('Grep → pattern', () => {
+    const r = toRendered(mk('Grep', 'tu-g', { pattern: 'TODO', path: '/src' }))
+    expect(r).toMatchObject({ summary: 'TODO' })
+  })
+
+  it('Glob → pattern · path', () => {
+    const r = toRendered(mk('Glob', 'tu-gl', { pattern: '*.ts', path: '/src' }))
+    expect(r).toMatchObject({ summary: '*.ts · /src' })
+  })
+
+  it('Agent → description 优先', () => {
+    const r = toRendered(
+      mk('Agent', 'tu-a', {
+        description: 'fix bug',
+        prompt: 'long prompt...',
+      }),
+    )
+    expect(r).toMatchObject({ summary: 'fix bug' })
+  })
+
+  it('Agent 缺 description → prompt 前 60 字', () => {
+    const long = 'p'.repeat(100)
+    const r = toRendered(mk('Agent', 'tu-a2', { prompt: long }))
+    expect(r).toMatchObject({ summary: long.slice(0, 60) })
+  })
+
+  it('Task → description 优先 (跟 Agent 同 path)', () => {
+    const r = toRendered(
+      mk('Task', 'tu-t', {
+        description: 'kick off plan',
+        prompt: 'long prompt',
+      }),
+    )
+    expect(r).toMatchObject({ summary: 'kick off plan' })
+  })
+
+  it('其他工具名 → JSON.stringify(input).slice(0,80)', () => {
+    const input = { foo: 'bar', n: 42, big: 'x'.repeat(200) }
+    const r = toRendered(mk('CustomTool', 'tu-c', input))
+    expect(r).toMatchObject({
+      name: 'CustomTool',
+      toolUseId: 'tu-c',
+      summary: JSON.stringify(input).slice(0, 80),
+      fullInput: input,
+    })
+  })
+
+  it('tool_use 缺 input → JSON.stringify({}).slice(0,80) (空对象 fallback)', () => {
+    const r = toRendered(mk('Read', 'tu-ni', {} as unknown as Record<string, unknown>))
+    expect(r).toMatchObject({
+      kind: 'tool-use',
+      name: 'Read',
+      summary: JSON.stringify({}).slice(0, 80),
+    })
+  })
+
+  it('tool_use 缺 id/name → null (缺关键字段不渲染)', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'assistant',
+        data: {
+          seq: 1,
+          ts: 1,
+          type: 'assistant',
+          data: { message: { content: [{ type: 'tool_use', input: {} }] } },
+        },
+      }),
+    ).toBeNull()
   })
 })
