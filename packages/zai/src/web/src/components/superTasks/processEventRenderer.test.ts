@@ -89,3 +89,89 @@ describe('toRendered · task.ended 三态', () => {
     ).toBeNull()
   })
 })
+
+describe('toRendered · 帧级守卫', () => {
+  it('frame.data 非对象 → null', () => {
+    expect(toRendered({ id: 1, event: 'system', data: 'oops' })).toBeNull()
+    expect(toRendered({ id: 2, event: 'system', data: 42 })).toBeNull()
+    expect(toRendered({ id: 3, event: 'system', data: null })).toBeNull()
+    expect(toRendered({ id: 4, event: 'system', data: undefined })).toBeNull()
+  })
+
+  it('attach 帧但 frame.data.data(raw) 缺 → null', () => {
+    // raw 缺 (没 data.data 字段)
+    expect(
+      toRendered({
+        id: 1,
+        event: 'system',
+        data: { seq: 1, ts: 1, type: 'system' },
+      }),
+    ).toBeNull()
+    // raw 是非对象
+    expect(
+      toRendered({
+        id: 2,
+        event: 'system',
+        data: { seq: 2, ts: 1, type: 'system', data: 42 },
+      }),
+    ).toBeNull()
+    expect(
+      toRendered({
+        id: 3,
+        event: 'system',
+        data: { seq: 3, ts: 1, type: 'system', data: null },
+      }),
+    ).toBeNull()
+    expect(
+      toRendered({
+        id: 4,
+        event: 'system',
+        data: { seq: 4, ts: 1, type: 'system', data: 'x' },
+      }),
+    ).toBeNull()
+  })
+
+  it('unknown RuntimeEvent type → null (不静默丢,显式 null)', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'message_start',
+        data: { seq: 1, ts: 1, type: 'message_start', data: { foo: 1 } },
+      }),
+    ).toBeNull()
+  })
+
+  it('content 缺/非数组 → null', () => {
+    // assistant 类型但 content 缺
+    expect(
+      toRendered({
+        id: 1,
+        event: 'assistant',
+        data: { seq: 1, ts: 1, type: 'assistant', data: { message: {} } },
+      }),
+    ).toBeNull()
+    // assistant 类型但 content 非数组
+    expect(
+      toRendered({
+        id: 2,
+        event: 'assistant',
+        data: {
+          seq: 2,
+          ts: 1,
+          type: 'assistant',
+          data: { message: { content: 'oops' } },
+        },
+      }),
+    ).toBeNull()
+  })
+
+  it('user 类型但 content 缺 → null', () => {
+    expect(
+      toRendered({
+        id: 1,
+        event: 'user',
+        data: { seq: 1, ts: 1, type: 'user', data: { message: {} } },
+      }),
+    ).toBeNull()
+  })
+})
