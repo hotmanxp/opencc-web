@@ -8,7 +8,21 @@ import {
 
 const CREATE_DESC = 'Create a Task Factory task: initializes task.yaml, docs/spec.md, docs/plan.md, process.md under ~/.zai/task-factory/queue-tasks/<id>/. ' +
   'Call only after the requirements have been discussed with the user; title and cwd are required, agent is the executor subagent name (default "default"), spec/plan are the discussed content (optional; can still be filled in later via Edit). ' +
-  'verifierAgent is the optional verification subagent name; when omitted, the task inherits the executor agent. The verifier subagent runs after the executor finishes and independently judges PASS/FAIL by reading docs/spec.md + docs/process.md.'
+  'verifierAgent is the optional verification subagent name; when omitted, the task inherits the executor agent. The verifier subagent runs after the executor finishes and independently judges PASS/FAIL by reading docs/spec.md + docs/process.md. ' +
+  // zai patch (2026-09-02, 任务工厂升级 priority + dependsOn):
+  'priority is "P0"|"P1"|"P2"|"P3" (default "P2"; P0 most urgent); the supervisor dispatches queue-tasks in priority ASC + createdAt ASC order. ' +
+  'dependsOn is a string[] of task ids that must reach status=done before this task can be dispatched (default []).'
+
+const LIST_DESC = 'List all Task Factory tasks across the four lifecycle buckets. ' +
+  'Returns a TaskBucket object: { queue: TaskSummary[], processing: TaskSummary[], verifying: TaskSummary[], finished: TaskSummary[] }. ' +
+  'Each TaskSummary contains id / title / status / agent / verifierAgent / cwd / description / createdAt / ' +
+  'startedAt / completedAt / executorTaskId / priority / dependsOn / bucket. ' +
+  // zai patch (2026-09-02): 排序契约——priority ASC(P0 先)+ 同优先级 createdAt ASC。
+  'Tasks within each bucket are sorted by priority ASC (P0 → P3) then createdAt ASC. ' +
+  'Use this when you need an overview of the pipeline (queue length, processing in flight, recent failures) or ' +
+  'when picking the next task to dispatch. Prefer this over enumerating SuperTasksGet calls. ' +
+  'For a single task\'s full detail (spec.md / plan.md / process.md content), use SuperTasksGet(id) instead. ' +
+  'NOTE: never Read task.yaml files directly — SuperTasksList / SuperTasksGet are the SOLE read paths.'
 
 const MOVE_DESC = 'Move a Task Factory task between lifecycle buckets (queue-tasks / processing-tasks / verifying-tasks / finished-tasks) with optional executorTaskId backfill. ' +
   'Use this as the SOLE write path for task state changes — do NOT edit task.yaml by hand. ' +
@@ -54,12 +68,21 @@ export const superTasksCreateTool = buildTool({
       verifierAgent: z.string().optional().describe('Verification subagent name, defaults to the executor agent. The verifier independently judges PASS/FAIL by reading docs/spec.md + docs/process.md after the executor finishes.'),
       spec: z.string().optional().describe('The discussed requirement spec (markdown)'),
       plan: z.string().optional().describe('The discussed execution plan (markdown)'),
+      // zai patch (2026-09-02, 任务工厂升级 priority + dependsOn):
+      priority: z.enum(['P0', 'P1', 'P2', 'P3']).optional()
+        .describe('Dispatch priority (default "P2"; P0 most urgent, P3 least urgent). Supervisor dispatches queue-tasks in priority ASC + createdAt ASC.'),
+      dependsOn: z.array(z.string().min(4)).optional()
+        .describe('Task ids that must reach status=done before this task is dispatched (default []). Self-reference is rejected.'),
     })
   },
-  async call(input: { title: string; cwd: string; description?: string; agent?: string; verifierAgent?: string; spec?: string; plan?: string }) {
+  async call(input: {
+    title: string; cwd: string; description?: string; agent?: string; verifierAgent?: string; spec?: string; plan?: string
+    priority?: 'P0' | 'P1' | 'P2' | 'P3'; dependsOn?: string[]
+  }) {
     const s = await createPoolTask(input)
     emitTaskFactoryEvent('created', { id: s.id })
-    return { data: { output: `Task created: ${s.id}\n${s.title}\nProject cwd: ${input.cwd}\nStorage dir: ${join(taskFactoryRoot(), 'queue-tasks', s.id)}\nNext step: persist the discussed results into docs/spec.md and docs/plan.md; before dispatching the executor subagent, read task.yaml to confirm the agent field.` } }
+    const meta = `priority=${s.priority ?? 'P2'}${input.dependsOn?.length ? `, dependsOn=[${input.dependsOn.join(', ')}]` : ''}`
+    return { data: { output: `Task created: ${s.id}\n${s.title}\nProject cwd: ${input.cwd}\nStorage dir: ${join(taskFactoryRoot(), 'queue-tasks', s.id)}\n${meta}\nNext step: persist the discussed results into docs/spec.md and docs/plan.md; before dispatching the executor subagent, read task.yaml to confirm the agent field.` } }
   },
   // Tool 接口要求实现结果序列化(缺了会在 runtime 落 tool_result 时抛
   // "mapToolResultToToolResultBlockParam is not a function" —— 2026-09-02
@@ -226,11 +249,13 @@ export const superTasksPauseTool = buildTool({
 
 const GET_DESC = 'Read a Task Factory task\'s structured metadata + content files. ' +
   'Returns TaskSummary (id / title / status / agent / verifierAgent / cwd / description / createdAt / ' +
-  'startedAt / completedAt / executorTaskId / bucket) plus the full text of docs/spec.md, docs/plan.md, ' +
+  // zai patch (2026-09-02, priority + dependsOn 字段):
+  'startedAt / completedAt / executorTaskId / priority / dependsOn / bucket) plus the full text of docs/spec.md, docs/plan.md, ' +
   'process.md. ' +
   'Use this BEFORE dispatching the executor (so you can extract `agent` and `cwd` for SpawnAgent and `verifierAgent` for the verification round). ' +
   'Use this AFTER the executor completes to re-read `process.md` and confirm "## [DONE]" before moving to verifying. ' +
   'Use this in the verification round to read `docs/spec.md` (acceptance criteria) and the latest verification.md round. ' +
+  'Use this to check a task\'s `dependsOn` array before dispatching — every id must have status=done (otherwise the task stays queued). ' +
   'Errors: "task <id> not found" — verify with getTaskSummary or ListTasks. ' +
   'NOTE: do NOT Read <task_dir>/task.yaml directly — SuperTasksGet is the SOLE read path for task metadata; ' +
   'task.yaml is a YAML file and bypassing this tool risks inconsistent schema.'
@@ -274,15 +299,6 @@ export const superTasksGetTool = buildTool({
   },
   userFacingName: () => 'SuperTasksGet',
 })
-
-const LIST_DESC = 'List all Task Factory tasks across the four lifecycle buckets. ' +
-  'Returns a TaskBucket object: { queue: TaskSummary[], processing: TaskSummary[], verifying: TaskSummary[], finished: TaskSummary[] }. ' +
-  'Each TaskSummary contains id / title / status / agent / verifierAgent / cwd / description / createdAt / ' +
-  'startedAt / completedAt / executorTaskId / bucket. ' +
-  'Use this when you need an overview of the pipeline (queue length, processing in flight, recent failures) or ' +
-  'when picking the next task to dispatch. Prefer this over enumerating SuperTasksGet calls. ' +
-  'For a single task\'s full detail (spec.md / plan.md / process.md content), use SuperTasksGet(id) instead. ' +
-  'NOTE: never Read task.yaml files directly — SuperTasksList / SuperTasksGet are the SOLE read paths.'
 
 export const superTasksListTool = buildTool({
   name: 'SuperTasksList',

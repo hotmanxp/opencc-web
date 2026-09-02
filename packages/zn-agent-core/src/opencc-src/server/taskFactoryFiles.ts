@@ -16,6 +16,14 @@ export interface TaskSummary {
   verifierAgent?: string | null
   createdAt?: string; startedAt?: string | null
   completedAt?: string | null; executorTaskId?: string | null
+  /**
+   * 调度优先级(2026-09-02 任务工厂升级)。P0 最紧急、P3 最不紧急;缺省 P2。
+   * SuperTasksList 输出按 priority ASC(数值小 → 优先)→ createdAt ASC 排,
+   * 主管 dispatch 时挑 priority 最高(数值最小)且依赖完成的任务并行派发。
+   */
+  priority?: TaskPriority
+  /** 依赖的任务 id 列表;所有依赖任务 status=done 时本任务才可派发。 */
+  dependsOn?: string[]
   bucket: TaskBucketName
 }
 export interface TaskBucket {
@@ -44,6 +52,9 @@ export const LEGACY_INDEX_MD_FILENAME = 'index.md'
 const TASK_YAML_FIELDS = [
   'id', 'title', 'status', 'agent', 'verifierAgent', 'cwd',
   'description', 'createdAt', 'startedAt', 'completedAt', 'executorTaskId',
+  // zai patch (2026-09-02, priority + dependsOn 调度):
+  // priority 缺省 P2,dependsOn 缺省 [];写入校验都用白名单,避免无关字段。
+  'priority', 'dependsOn',
 ] as const
 
 /** 任务在 yaml 里允许的 status 字符串。 */
@@ -53,6 +64,22 @@ type TaskYamlScalar =
   | boolean
   | null
   | undefined
+  | TaskYamlScalar[]
+
+/**
+ * 调度优先级(2026-09-02 任务工厂升级):数值越小越优先派发。
+ * 缺省 P2(普通);P0/P1 紧急,P3 低。
+ */
+export type TaskPriority = 'P0' | 'P1' | 'P2' | 'P3'
+export const TASK_PRIORITIES: readonly TaskPriority[] = ['P0', 'P1', 'P2', 'P3'] as const
+export const DEFAULT_TASK_PRIORITY: TaskPriority = 'P2'
+/** 排序键映射:P0→0, P1→1, P2→2, P3→3;数值小 → 优先派发。 */
+export const PR_ORDER: Record<TaskPriority, number> = { P0: 0, P1: 1, P2: 2, P3: 3 }
+/** 把任意值规整成合法 priority;非法值回落到缺省 P2(创建阶段 fail loud;读取/列表兜底)。 */
+export function normalizePriority(v: unknown): TaskPriority {
+  return v === 'P0' || v === 'P1' || v === 'P2' || v === 'P3' ? v : DEFAULT_TASK_PRIORITY
+}
+
 /** task.yaml 的内存表示(扁平 key-value)。null 表示字段被显式置空。 */
 export type TaskYaml = Record<(typeof TASK_YAML_FIELDS)[number], TaskYamlScalar>
 
@@ -92,7 +119,9 @@ function serializeTaskYaml(meta: Partial<TaskYaml>): string {
   return YAML.stringify(out, { sortMapEntries: false, lineWidth: 0 })
 }
 
-/** 解析 task.yaml 文本为 TaskYaml。空文件/缺失字段都安全(默认 undefined)。 */
+/** 解析 task.yaml 文本为 TaskYaml。空文件/缺失字段都安全(默认 undefined)。
+ *  dependsOn 是 string[];YAML 解析后是数组,逐项校验类型并过滤非字符串。
+ */
 function parseTaskYaml(text: string): TaskYaml {
   const parsed = (YAML.parse(text) ?? {}) as Record<string, unknown>
   const out = {} as TaskYaml
@@ -102,6 +131,10 @@ function parseTaskYaml(text: string): TaskYaml {
     else if (v === undefined) continue
     else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
       out[k] = v
+    } else if (k === 'dependsOn' && Array.isArray(v)) {
+      // 只保留字符串元素;过滤掉 null/undefined/对象等异常值,容错坏数据。
+      const arr = v.filter((x): x is string => typeof x === 'string' && x.length > 0)
+      out[k] = arr
     }
   }
   return out
@@ -155,6 +188,16 @@ export interface CreatePoolTaskInput {
   cwd?: string
   /** 验证 subagent 名称(可选);缺省回落到任务 `agent` 字段。SpawnAgent 验证时使用。 */
   verifierAgent?: string
+  /**
+   * 调度优先级(2026-09-02)。缺省 P2;非法值 fail loud(intake 阶段已校验)。
+   * 主管 dispatch 按 priority ASC(P0 最先)→ createdAt ASC 派发。
+   */
+  priority?: TaskPriority
+  /**
+   * 依赖的任务 id 列表(2026-09-02)。所有依赖任务 status=done 时本任务才可派发;
+   * 缺省 []。
+   */
+  dependsOn?: string[]
 }
 export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSummary> {
   const id = input.id ?? generateTaskId()
@@ -168,6 +211,22 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     throw new Error(`cwd must not contain newline: ${JSON.stringify(input.cwd)}`)
   }
   const taskCwd = input.cwd && input.cwd.trim() ? input.cwd.trim() : process.cwd()
+  const priority: TaskPriority = input.priority ?? DEFAULT_TASK_PRIORITY
+  // 显式校验 priority;intake 应已把控,这里 fail loud 兜底(避免 P0/P1/P2/P3
+  // 之外的值穿透进 task.yaml,污染下游调度排序)。
+  if (!TASK_PRIORITIES.includes(priority)) {
+    throw new Error(`invalid priority ${JSON.stringify(input.priority)} (allowed: ${TASK_PRIORITIES.join(', ')})`)
+  }
+  const dependsOn = input.dependsOn ?? []
+  // 依赖必须是非空字符串数组,且不允许自依赖;每个 id 必须满足基础格式(tf-xxxx)。
+  for (const d of dependsOn) {
+    if (typeof d !== 'string' || d.length < 4) {
+      throw new Error(`invalid dependsOn entry ${JSON.stringify(d)} (expected non-empty task id string)`)
+    }
+    if (d === id) {
+      throw new Error(`task ${id} cannot depend on itself (dependsOn contains its own id)`)
+    }
+  }
   const meta: TaskYaml = {
     id,
     title: input.title,
@@ -180,6 +239,8 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     startedAt: null,
     completedAt: null,
     executorTaskId: null,
+    priority,
+    dependsOn,
   }
   await writeFile(join(dir, TASK_YAML_FILENAME), serializeTaskYaml(meta), 'utf-8')
   await writeFile(join(dir, 'docs', 'spec.md'), input.spec ?? '# 需求规格\n\n（需求讨论后由主管补充）\n', 'utf-8')
@@ -194,6 +255,8 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     createdAt,
     cwd: taskCwd,
     description: input.description,
+    priority,
+    dependsOn,
     bucket: 'queue-tasks',
   }
 }
@@ -227,19 +290,44 @@ async function readTaskMeta(id: string, bucket: TaskBucketName): Promise<TaskYam
 }
 
 function toSummary(id: string, bucket: TaskBucketName, meta: TaskYaml): TaskSummary {
+  // 标量字段(2026-09-02 + dependsOn 后 TaskYamlScalar 变宽泛):用 String() 兜底
+  // 把 number/boolean/null 统一规整成 string/null/undefined,避免 TaskSummary 字段类型不匹配。
+  const str = (v: TaskYamlScalar): string | null | undefined =>
+    v == null ? v : String(v)
   return {
     id, bucket,
-    title: meta.title ?? id,
-    status: meta.status ?? 'queued',
-    cwd: meta.cwd ?? process.cwd(),
-    description: meta.description == null ? undefined : String(meta.description),
-    agent: meta.agent == null ? undefined : String(meta.agent),
-    verifierAgent: meta.verifierAgent == null ? null : String(meta.verifierAgent),
-    createdAt: meta.createdAt == null ? undefined : String(meta.createdAt),
-    startedAt: meta.startedAt == null ? undefined : String(meta.startedAt),
-    completedAt: meta.completedAt == null ? undefined : String(meta.completedAt),
-    executorTaskId: meta.executorTaskId == null ? null : String(meta.executorTaskId),
+    title: str(meta.title) ?? id,
+    status: str(meta.status) ?? 'queued',
+    cwd: str(meta.cwd) ?? process.cwd(),
+    description: meta.description == null ? undefined : str(meta.description),
+    agent: meta.agent == null ? undefined : str(meta.agent),
+    verifierAgent: meta.verifierAgent == null ? null : str(meta.verifierAgent),
+    createdAt: meta.createdAt == null ? undefined : str(meta.createdAt),
+    startedAt: meta.startedAt == null ? undefined : str(meta.startedAt),
+    completedAt: meta.completedAt == null ? undefined : str(meta.completedAt),
+    executorTaskId: meta.executorTaskId == null ? null : str(meta.executorTaskId),
+    // priority 缺省 P2;非法值回落到 P2(读取容错,创建阶段已校验)。
+    priority: normalizePriority(meta.priority),
+    // dependsOn 在 task.yaml 是 string[];读取路径已过滤非字符串元素。
+    dependsOn: Array.isArray(meta.dependsOn)
+      ? (meta.dependsOn as unknown[]).filter((x): x is string => typeof x === 'string')
+      : [],
   }
+}
+
+/**
+ * 排序:priority ASC(数值小 → 优先,即 P0 → P1 → P2 → P3),
+ * 同优先级按 createdAt ASC(早创建的先派发,FIFO 兜底)。
+ * 暴露为命名导出,主管 prompt 与外部排序逻辑直接引用,
+ * 避免在多处重写排序规则造成不一致。
+ */
+export function sortTasksByPriority<T extends { priority?: TaskPriority; createdAt?: string }>(tasks: T[]): T[] {
+  return [...tasks].sort((a, b) => {
+    const ap = PR_ORDER[normalizePriority(a.priority)]
+    const bp = PR_ORDER[normalizePriority(b.priority)]
+    if (ap !== bp) return ap - bp
+    return (a.createdAt ?? '').localeCompare(b.createdAt ?? '')
+  })
 }
 
 async function listIn(bucket: TaskBucketName): Promise<TaskSummary[]> {
@@ -252,7 +340,9 @@ async function listIn(bucket: TaskBucketName): Promise<TaskSummary[]> {
     const meta = await readTaskMeta(id, bucket)
     if (meta) out.push(toSummary(id, bucket, meta))
   }
-  return out.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''))
+  // zai patch (2026-09-02, 任务工厂升级):queue/processing/verifying/finished
+  // 四个桶统一按 priority ASC + createdAt ASC 排,主管 UI/调度看到的顺序一致。
+  return sortTasksByPriority(out)
 }
 
 export async function listTasks(): Promise<TaskBucket> {
@@ -365,4 +455,8 @@ export async function getTaskDetails(id: string, bucket?: TaskBucketName): Promi
   return { summary, specMd, planMd, processMd }
 }
 
-export { serializeTaskYaml, parseTaskYaml, parseLegacyIndexMd, TASK_YAML_FIELDS }
+export {
+  serializeTaskYaml, parseTaskYaml, parseLegacyIndexMd, TASK_YAML_FIELDS,
+  // sortTasksByPriority / normalizePriority / TASK_PRIORITIES / DEFAULT_TASK_PRIORITY /
+  // PR_ORDER 已在文件顶部 export 声明,这里不再列(避免 TS2484 重复导出)。
+}
