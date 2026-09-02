@@ -7,7 +7,7 @@
  * - POST /api/super-tasks/managed 切换 managed 开关(持久化到 state.json)
  * - POST /api/super-tasks/supervisor 上报主管会话 id(持久化到 state.json)
  * - POST /api/super-tasks/:id/start  手工启动 = 注入 dispatch
- * - POST /api/super-tasks/:id/pause  kill 执行子任务 + 冻结(留 processing) + 注入通知(仅 processing+processing)
+ * - POST /api/super-tasks/:id/pause  kill 执行子任务 + 冻结(留 processing,status=paused) + 注入通知(仅 processing+processing)
  * - POST /api/super-tasks/:id/resume  = 注入 resume
  * - POST /api/super-tasks/:id/accept  人工验收 = 注入 accept(processing)/forced-accept(verifying);主管调 SuperTasksMarkDone
  * - POST /api/super-tasks/inject  通用注入入口(白名单 action, 可附 id)
@@ -113,7 +113,7 @@ router.post('/super-tasks/:id/start', async (req, res) => {
 
 /**
  * POST /api/super-tasks/:id/pause — 暂停：kill 执行子任务（保留其会话），
- * 任务冻结（index.md status=paused，目录仍留 processing-tasks），注入通知。
+ * 任务冻结（task.yaml status=paused，目录仍留 processing-tasks），注入通知。
  *
  * 仅 processing 桶 + status=processing 允许暂停：verifying 桶中验证 subagent 正在跑,
  * 暂停会破坏验证闭环, 直接 400 拒绝(用户应改用 verifying 桶的强制 accept 走归档)。

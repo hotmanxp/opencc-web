@@ -30,7 +30,7 @@ interface Expansion {
  * SuperTaskDetailDrawer — 任务详情抽屉（Task 10）。
  *
  * 抽屉打开后拉取任务详情（/api/super-tasks/:id），并在 open 期间每 3s 轮询
- * 刷新（process.md 增量追加）。任务已派生执行子 Agent（index.md 的
+ * 刷新（process.md 增量追加）。任务已派生执行子 Agent（task.yaml 的
  * executorTaskId）时，执行过程 Tab 通过 `/api/tasks/:id/events` 订阅执行器
  * 的工具调用与消息流，缓冲最近 200 帧。
  */

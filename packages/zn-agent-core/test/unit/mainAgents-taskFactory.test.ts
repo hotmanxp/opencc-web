@@ -1,7 +1,7 @@
 import { describe, expect, it } from 'vitest'
 import { TASK_FACTORY_MAIN_AGENT_NAME, taskFactoryMainAgent } from '../../src/opencc-src/server/mainAgents-taskFactory.js'
 import {
-  superTasksCreateTool, superTasksMoveTool, superTasksResetTool, superTasksPauseTool,
+  superTasksCreateTool, superTasksListTool, superTasksGetTool, superTasksMoveTool, superTasksResetTool, superTasksPauseTool,
 } from '../../src/opencc-src/server/taskFactoryTools.js'
 
 describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)', () => {
@@ -13,7 +13,7 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
     expect(taskFactoryMainAgent.name).toBe(TASK_FACTORY_MAIN_AGENT_NAME)
   })
 
-  it('tools 槽追加 SuperTasksCreate / SuperTasksMove / SuperTasksReset / SuperTasksPause', () => {
+  it('tools 槽追加 6 个 SuperTasks* 工具 (+List 2026-09-02)', () => {
     const baseTools = [
       { name: 'Bash' },
       { name: 'Read' },
@@ -25,6 +25,8 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
     const result = (toolsFactory as (origin: typeof baseTools) => ReadonlyArray<{ name: unknown }>)(baseTools as never)
     const names = result.map((t) => String(t.name))
     expect(names).toContain('SuperTasksCreate')
+    expect(names).toContain('SuperTasksList')
+    expect(names).toContain('SuperTasksGet')
     expect(names).toContain('SuperTasksMove')
     expect(names).toContain('SuperTasksReset')
     expect(names).toContain('SuperTasksPause')
@@ -48,6 +50,8 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
   it('同源已有同名工具时去重,不再叠加', () => {
     const baseTools = [
       { name: 'SuperTasksCreate' }, // 模拟 origin 已含同名
+      { name: 'SuperTasksList' },
+      { name: 'SuperTasksGet' },
       { name: 'SuperTasksMove' },
       { name: 'SuperTasksReset' },
       { name: 'SuperTasksPause' },
@@ -56,7 +60,7 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
     if (typeof toolsFactory !== 'function') throw new Error('tools must be a function')
     const result = (toolsFactory as (origin: typeof baseTools) => ReadonlyArray<{ name: unknown }>)(baseTools as never)
     const names = result.map((t) => String(t.name))
-    for (const n of ['SuperTasksCreate', 'SuperTasksMove', 'SuperTasksReset', 'SuperTasksPause']) {
+    for (const n of ['SuperTasksCreate', 'SuperTasksList', 'SuperTasksGet', 'SuperTasksMove', 'SuperTasksReset', 'SuperTasksPause']) {
       expect(names.filter((x) => x === n)).toHaveLength(1)
     }
   })
@@ -73,10 +77,17 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
     expect(text).toContain('SuperTasksPause')
     expect(text).toContain('SpawnAgent')
     expect(text).toContain('verification.md')
+    // 2026-09-02:SuperTasksGet 替代裸读 task.yaml
+    expect(text).toContain('SuperTasksGet')
+    expect(text).toContain('SuperTasksList')
+    expect(text).not.toContain('Read <task_dir>/task.yaml')
+    expect(text).not.toContain('Read task.yaml')
   })
 
-  it('四个工厂工具名字一致', () => {
+  it('六个工厂工具名字一致', () => {
     expect(superTasksCreateTool.name).toBe('SuperTasksCreate')
+    expect(superTasksListTool.name).toBe('SuperTasksList')
+    expect(superTasksGetTool.name).toBe('SuperTasksGet')
     expect(superTasksMoveTool.name).toBe('SuperTasksMove')
     expect(superTasksResetTool.name).toBe('SuperTasksReset')
     expect(superTasksPauseTool.name).toBe('SuperTasksPause')

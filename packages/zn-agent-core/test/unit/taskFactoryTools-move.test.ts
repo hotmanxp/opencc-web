@@ -3,7 +3,7 @@ import { mkdir, mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { superTasksCreateTool, superTasksMoveTool } from '../../src/opencc-src/server/taskFactoryTools.js'
-import { createPoolTask, getTaskSummary, taskDir } from '../../src/opencc-src/server/taskFactoryFiles.js'
+import { createPoolTask, getTaskSummary, taskDir, TASK_YAML_FILENAME } from '../../src/opencc-src/server/taskFactoryFiles.js'
 
 let dir: string
 let events: Array<{ action: string; payload: Record<string, unknown> }>
@@ -68,7 +68,7 @@ describe('superTasksMoveTool — 4×4 桶矩阵合法 12 对', () => {
       const sum = await getTaskSummary(id, to)
       expect(sum?.bucket).toBe(to)
       expect(sum?.status).toBe(expectedStatus)
-      const idx = await readFile(join(taskDir(to, id), 'index.md'), 'utf-8')
+      const idx = await readFile(join(taskDir(to, id), TASK_YAML_FILENAME), 'utf-8')
       expect(idx).toContain(`status: ${expectedStatus}`)
       // emit moved(id, from, to)
       const ev = events.find((e) => e.action === 'moved' && e.payload.id === id)
@@ -97,7 +97,7 @@ describe('superTasksMoveTool — executorTaskId backfill', () => {
     expect(r.data.output).toContain('executorTaskId=sub-abc-123')
     const sum = await getTaskSummary(id, 'processing-tasks')
     expect(sum?.executorTaskId).toBe('sub-abc-123')
-    const idx = await readFile(join(taskDir('processing-tasks', id), 'index.md'), 'utf-8')
+    const idx = await readFile(join(taskDir('processing-tasks', id), TASK_YAML_FILENAME), 'utf-8')
     expect(idx).toContain('executorTaskId: sub-abc-123')
   })
 
@@ -112,7 +112,7 @@ describe('superTasksMoveTool — executorTaskId backfill', () => {
   it('不带 executorTaskId 时 Move 不写 frontmatter executorTaskId', async () => {
     const id = extractId((await superTasksCreateTool.call({ title: 'plain-move', cwd: dir })).data.output as string)
     await superTasksMoveTool.call({ id, from: 'queue-tasks', to: 'processing-tasks' })
-    const idx = await readFile(join(taskDir('processing-tasks', id), 'index.md'), 'utf-8')
+    const idx = await readFile(join(taskDir('processing-tasks', id), TASK_YAML_FILENAME), 'utf-8')
     // 创建时 executorTaskId 是 null,Move 不带该参数 → 保持 null
     expect(idx).toContain('executorTaskId: null')
   })
@@ -160,14 +160,14 @@ describe('superTasksMoveTool — 移动后状态字段正确性', () => {
     const id = extractId((await superTasksCreateTool.call({ title: 'to-ver', cwd: dir })).data.output as string)
     await superTasksMoveTool.call({ id, from: 'queue-tasks', to: 'processing-tasks' })
     await superTasksMoveTool.call({ id, from: 'processing-tasks', to: 'verifying-tasks' })
-    const idx = await readFile(join(taskDir('verifying-tasks', id), 'index.md'), 'utf-8')
+    const idx = await readFile(join(taskDir('verifying-tasks', id), TASK_YAML_FILENAME), 'utf-8')
     expect(idx).toContain('status: verifying')
   })
 
   it('Move 到 finished 后 status=done', async () => {
     const id = extractId((await superTasksCreateTool.call({ title: 'to-fin', cwd: dir })).data.output as string)
     await superTasksMoveTool.call({ id, from: 'queue-tasks', to: 'finished-tasks' })
-    const idx = await readFile(join(taskDir('finished-tasks', id), 'index.md'), 'utf-8')
+    const idx = await readFile(join(taskDir('finished-tasks', id), TASK_YAML_FILENAME), 'utf-8')
     expect(idx).toContain('status: done')
   })
 })

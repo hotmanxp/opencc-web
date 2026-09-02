@@ -101,7 +101,13 @@ export default function SuperTaskCard({
         <div style={{ flex: 1, minWidth: 0 }}>
           <div
             style={{
+              // 2026-09-02 task.yaml 化后,title 改为 task.yaml 顶层字段,
+              // 卡片上让它更醒目一点:稍大字号 + 字色更深 + 收紧字间距。
+              fontSize: 14,
+              lineHeight: 1.4,
               fontWeight: 600,
+              color: '#0f172a',
+              letterSpacing: 0.1,
               overflow: 'hidden',
               textOverflow: 'ellipsis',
               whiteSpace: 'nowrap',

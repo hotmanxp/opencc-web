@@ -3,15 +3,15 @@ import { join } from 'node:path'
 import { z } from 'zod/v4'
 import { buildTool } from '../Tool.js'
 import {
-  createPoolTask, getTaskSummary, moveTask, markTaskStatus, emitTaskFactoryEvent, taskFactoryRoot, taskDir,
+  createPoolTask, getTaskSummary, getTaskDetails, listTasks, moveTask, markTaskStatus, emitTaskFactoryEvent, taskFactoryRoot, taskDir,
 } from './taskFactoryFiles.js'
 
-const CREATE_DESC = 'Create a Task Factory task: initializes index.md, docs/spec.md, docs/plan.md, process.md under ~/.zai/task-factory/queue-tasks/<id>/. ' +
+const CREATE_DESC = 'Create a Task Factory task: initializes task.yaml, docs/spec.md, docs/plan.md, process.md under ~/.zai/task-factory/queue-tasks/<id>/. ' +
   'Call only after the requirements have been discussed with the user; title and cwd are required, agent is the executor subagent name (default "default"), spec/plan are the discussed content (optional; can still be filled in later via Edit). ' +
   'verifierAgent is the optional verification subagent name; when omitted, the task inherits the executor agent. The verifier subagent runs after the executor finishes and independently judges PASS/FAIL by reading docs/spec.md + docs/process.md.'
 
 const MOVE_DESC = 'Move a Task Factory task between lifecycle buckets (queue-tasks / processing-tasks / verifying-tasks / finished-tasks) with optional executorTaskId backfill. ' +
-  'Use this as the SOLE write path for task state changes — do NOT edit index.md by hand. ' +
+  'Use this as the SOLE write path for task state changes — do NOT edit task.yaml by hand. ' +
   'Typical flows: ' +
   '(a) SuperTasksMove(id, "queue-tasks", "processing-tasks", executorTaskId=<subagent>) on dispatch — atomically moves the folder, sets status=processing, and backfills executorTaskId; ' +
   '(b) SuperTasksMove(id, "processing-tasks", "verifying-tasks") after the executor appends "## [DONE]" to process.md; ' +
@@ -20,7 +20,7 @@ const MOVE_DESC = 'Move a Task Factory task between lifecycle buckets (queue-tas
   '(e) SuperTasksMove(id, "processing-tasks", "queue-tasks") to roll back a failed SpawnAgent dispatch. ' +
   'Errors: "task <id> not found in <from>" (id absent in the named source bucket — verify with getTaskSummary or ListTasks); ' +
   '"task <id> already exists in <to>" (target bucket already has a folder with this id — concurrent collision). ' +
-  'When executorTaskId is provided non-empty, the index.md frontmatter is patched in place BEFORE the folder rename so the bucket move and the field write are committed atomically (no separate Edit race).'
+  'When executorTaskId is provided non-empty, the task.yaml is patched in place BEFORE the folder rename so the bucket move and the field write are committed atomically (no separate Edit race).'
 
 const RESET_DESC = 'Reset a Task Factory task back to the runnable state for retry. ' +
   'Auto-detects the current bucket (no `from` argument needed): ' +
@@ -47,7 +47,7 @@ export const superTasksCreateTool = buildTool({
   async prompt() { return CREATE_DESC },
   get inputSchema() {
     return z.object({
-      title: z.string().min(1).describe('Task title (the title field in index.md)'),
+      title: z.string().min(1).describe('Task title (the title field in task.yaml)'),
       cwd: z.string().min(1).describe('Absolute path of the project directory the task belongs to (working directory of the executor subagent; different tasks may live in different code projects)'),
       description: z.string().optional().describe('One-sentence task goal description'),
       agent: z.string().optional().describe('Executor subagent name, defaults to "default"'),
@@ -59,7 +59,7 @@ export const superTasksCreateTool = buildTool({
   async call(input: { title: string; cwd: string; description?: string; agent?: string; verifierAgent?: string; spec?: string; plan?: string }) {
     const s = await createPoolTask(input)
     emitTaskFactoryEvent('created', { id: s.id })
-    return { data: { output: `Task created: ${s.id}\n${s.title}\nProject cwd: ${input.cwd}\nStorage dir: ${join(taskFactoryRoot(), 'queue-tasks', s.id)}\nNext step: persist the discussed results into docs/spec.md and docs/plan.md; before dispatching the executor subagent, read index.md to confirm the agent field.` } }
+    return { data: { output: `Task created: ${s.id}\n${s.title}\nProject cwd: ${input.cwd}\nStorage dir: ${join(taskFactoryRoot(), 'queue-tasks', s.id)}\nNext step: persist the discussed results into docs/spec.md and docs/plan.md; before dispatching the executor subagent, read task.yaml to confirm the agent field.` } }
   },
   // Tool 接口要求实现结果序列化(缺了会在 runtime 落 tool_result 时抛
   // "mapToolResultToToolResultBlockParam is not a function" —— 2026-09-02
@@ -94,7 +94,7 @@ export const superTasksMoveTool = buildTool({
       id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4'),
       from: BUCKET_ENUM.describe('Source bucket the task is currently in (must match the actual folder location)'),
       to: BUCKET_ENUM.describe('Destination bucket to move the task folder into (must be empty for this id)'),
-      executorTaskId: z.string().optional().describe('Optional subagent task id to backfill into index.md frontmatter (atomic with the bucket move; typically the id returned by SpawnAgent)'),
+      executorTaskId: z.string().optional().describe('Optional subagent task id to backfill into task.yaml (atomic with the bucket move; typically the id returned by SpawnAgent)'),
     })
   },
   async call(input: { id: string; from: 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'; to: 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'; executorTaskId?: string }) {
@@ -222,4 +222,103 @@ export const superTasksPauseTool = buildTool({
     return Promise.resolve({ behavior: 'allow' as const, updatedInput: input, decisionReason: { type: 'mode' as const, mode: 'bypassPermissions' as const } })
   },
   userFacingName: () => 'SuperTasksPause',
+})
+
+const GET_DESC = 'Read a Task Factory task\'s structured metadata + content files. ' +
+  'Returns TaskSummary (id / title / status / agent / verifierAgent / cwd / description / createdAt / ' +
+  'startedAt / completedAt / executorTaskId / bucket) plus the full text of docs/spec.md, docs/plan.md, ' +
+  'process.md. ' +
+  'Use this BEFORE dispatching the executor (so you can extract `agent` and `cwd` for SpawnAgent and `verifierAgent` for the verification round). ' +
+  'Use this AFTER the executor completes to re-read `process.md` and confirm "## [DONE]" before moving to verifying. ' +
+  'Use this in the verification round to read `docs/spec.md` (acceptance criteria) and the latest verification.md round. ' +
+  'Errors: "task <id> not found" — verify with getTaskSummary or ListTasks. ' +
+  'NOTE: do NOT Read <task_dir>/task.yaml directly — SuperTasksGet is the SOLE read path for task metadata; ' +
+  'task.yaml is a YAML file and bypassing this tool risks inconsistent schema.'
+
+export const superTasksGetTool = buildTool({
+  name: 'SuperTasksGet',
+  isReadOnly: () => true,
+  isConcurrencySafe: () => true,
+  isDestructive: () => false,
+  async description() { return GET_DESC },
+  async prompt() { return GET_DESC },
+  get inputSchema() {
+    return z.object({
+      id: z.string().min(4).describe('Task id, e.g. tf-a1b2c3d4'),
+    })
+  },
+  async call(input: { id: string }) {
+    const details = await getTaskDetails(input.id)
+    if (!details) throw new Error(`task ${input.id} not found`)
+    // 结构化 JSON 输出(主管拿来按字段取值),同时给一段人读摘要方便回看。
+    const output = JSON.stringify({
+      summary: details.summary,
+      specMd: details.specMd,
+      planMd: details.planMd,
+      processMd: details.processMd,
+    }, null, 2)
+    return { data: { output, structured: { summary: details.summary, specMd: details.specMd, planMd: details.planMd, processMd: details.processMd } } }
+  },
+  mapToolResultToToolResultBlockParam(content: { output: string }, toolUseID: string) {
+    return {
+      type: 'tool_result' as const,
+      tool_use_id: toolUseID,
+      content: [{ type: 'text' as const, text: content.output }],
+    }
+  },
+  renderToolUseMessage() { return null },
+  renderToolResultMessage() { return null },
+  toAutoClassifierInput() { return '' },
+  checkPermissions(input) {
+    return Promise.resolve({ behavior: 'allow' as const, updatedInput: input, decisionReason: { type: 'mode' as const, mode: 'bypassPermissions' as const } })
+  },
+  userFacingName: () => 'SuperTasksGet',
+})
+
+const LIST_DESC = 'List all Task Factory tasks across the four lifecycle buckets. ' +
+  'Returns a TaskBucket object: { queue: TaskSummary[], processing: TaskSummary[], verifying: TaskSummary[], finished: TaskSummary[] }. ' +
+  'Each TaskSummary contains id / title / status / agent / verifierAgent / cwd / description / createdAt / ' +
+  'startedAt / completedAt / executorTaskId / bucket. ' +
+  'Use this when you need an overview of the pipeline (queue length, processing in flight, recent failures) or ' +
+  'when picking the next task to dispatch. Prefer this over enumerating SuperTasksGet calls. ' +
+  'For a single task\'s full detail (spec.md / plan.md / process.md content), use SuperTasksGet(id) instead. ' +
+  'NOTE: never Read task.yaml files directly — SuperTasksList / SuperTasksGet are the SOLE read paths.'
+
+export const superTasksListTool = buildTool({
+  name: 'SuperTasksList',
+  isReadOnly: () => true,
+  isConcurrencySafe: () => true,
+  isDestructive: () => false,
+  async description() { return LIST_DESC },
+  async prompt() { return LIST_DESC },
+  get inputSchema() {
+    // 故意设为空对象 —— list 任务没有任何入参(bucket 过滤由调用方读完四个数组自行筛选,避免实现泄漏)。
+    return z.object({})
+  },
+  async call() {
+    const buckets = await listTasks()
+    // 输出 JSON 字符串方便 model 解析;同时给一个简短的人读摘要(各桶计数)帮助回看。
+    const counts = {
+      queue: buckets.queue.length,
+      processing: buckets.processing.length,
+      verifying: buckets.verifying.length,
+      finished: buckets.finished.length,
+    }
+    const output = JSON.stringify({ buckets, counts }, null, 2)
+    return { data: { output, structured: { buckets, counts } } }
+  },
+  mapToolResultToToolResultBlockParam(content: { output: string }, toolUseID: string) {
+    return {
+      type: 'tool_result' as const,
+      tool_use_id: toolUseID,
+      content: [{ type: 'text' as const, text: content.output }],
+    }
+  },
+  renderToolUseMessage() { return null },
+  renderToolResultMessage() { return null },
+  toAutoClassifierInput() { return '' },
+  checkPermissions(input) {
+    return Promise.resolve({ behavior: 'allow' as const, updatedInput: input, decisionReason: { type: 'mode' as const, mode: 'bypassPermissions' as const } })
+  },
+  userFacingName: () => 'SuperTasksList',
 })

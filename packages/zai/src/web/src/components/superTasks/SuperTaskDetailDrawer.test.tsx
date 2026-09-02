@@ -51,8 +51,9 @@ describe('SuperTaskDetailDrawer', () => {
         ok: true,
         json: async () => ({
           task: {
+            // 2026-09-02:TaskDetails 不再含 indexMd 字段(元数据走 task.yaml)
             summary: { id: 'tf-x', title: 'T', status: 'processing', bucket: 'processing-tasks', executorTaskId: 'a1234567' },
-            indexMd: 'body', specMd: '# spec', planMd: '# plan', processMd: '# 执行记录\n## [DONE]',
+            specMd: '# spec', planMd: '# plan', processMd: '# 执行记录\n## [DONE]',
           },
         }),
       }

@@ -3,7 +3,7 @@ import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { superTasksCreateTool, superTasksPauseTool } from '../../src/opencc-src/server/taskFactoryTools.js'
-import { getTaskSummary, markTaskStatus, moveTask, taskDir } from '../../src/opencc-src/server/taskFactoryFiles.js'
+import { getTaskSummary, markTaskStatus, moveTask, taskDir, TASK_YAML_FILENAME } from '../../src/opencc-src/server/taskFactoryFiles.js'
 
 let dir: string
 let events: Array<{ action: string; payload: Record<string, unknown> }>
@@ -39,7 +39,7 @@ describe('superTasksPauseTool — 5 个分支', () => {
     expect(sum?.bucket).toBe('processing-tasks')
     expect(sum?.status).toBe('paused')
     expect(sum?.executorTaskId).toBeNull()
-    const idx = await readFile(join(taskDir('processing-tasks', id), 'index.md'), 'utf-8')
+    const idx = await readFile(join(taskDir('processing-tasks', id), TASK_YAML_FILENAME), 'utf-8')
     expect(idx).toContain('status: paused')
     expect(idx).toContain('executorTaskId: null')
     expect(events.some((e) => e.action === 'paused' && e.payload.id === id)).toBe(true)
@@ -59,7 +59,7 @@ describe('superTasksPauseTool — 5 个分支', () => {
     expect(sum?.bucket).toBe('verifying-tasks')
     expect(sum?.status).toBe('paused')
     expect(sum?.executorTaskId).toBeNull()
-    const idx = await readFile(join(taskDir('verifying-tasks', id), 'index.md'), 'utf-8')
+    const idx = await readFile(join(taskDir('verifying-tasks', id), TASK_YAML_FILENAME), 'utf-8')
     expect(idx).toContain('status: paused')
     expect(events.some((e) => e.action === 'paused' && e.payload.id === id)).toBe(true)
   })

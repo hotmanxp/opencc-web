@@ -3,6 +3,7 @@ import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { randomInt } from 'node:crypto'
+import YAML from 'yaml'
 
 export type TaskStatus = 'queued' | 'processing' | 'paused' | 'verifying' | 'done' | 'failed'
 export type TaskBucketName = 'queue-tasks' | 'processing-tasks' | 'verifying-tasks' | 'finished-tasks'
@@ -23,10 +24,37 @@ export interface TaskBucket {
   verifying: TaskSummary[]
   finished: TaskSummary[]
 }
-export interface TaskDetails { summary: TaskSummary; indexMd: string; specMd: string; planMd: string; processMd: string }
+/**
+ * 任务详情。task.yaml 是任务元数据的唯一权威源(id/title/status/agent/
+ * verifierAgent/cwd/createdAt/startedAt/completedAt/executorTaskId/description)。
+ * 历史版本的 `index.md`(YAML frontmatter + markdown 正文首段 description)
+ * 在读取时仍兼容解析,但所有新写都走 task.yaml。
+ */
+export interface TaskDetails { summary: TaskSummary; specMd: string; planMd: string; processMd: string }
 
 const BUCKETS: TaskBucketName[] = ['queue-tasks', 'processing-tasks', 'verifying-tasks', 'finished-tasks']
 const TASK_ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
+
+/** 新格式任务元数据文件名(2026-09-02 起替代 index.md)。 */
+export const TASK_YAML_FILENAME = 'task.yaml'
+/** 历史文件名,只读兼容;不再由本模块写入。 */
+export const LEGACY_INDEX_MD_FILENAME = 'index.md'
+
+/** task.yaml 顶层字段集合(写入/校验都用它做白名单,避免无关字段被序列化进去)。 */
+const TASK_YAML_FIELDS = [
+  'id', 'title', 'status', 'agent', 'verifierAgent', 'cwd',
+  'description', 'createdAt', 'startedAt', 'completedAt', 'executorTaskId',
+] as const
+
+/** 任务在 yaml 里允许的 status 字符串。 */
+type TaskYamlScalar =
+  | string
+  | number
+  | boolean
+  | null
+  | undefined
+/** task.yaml 的内存表示(扁平 key-value)。null 表示字段被显式置空。 */
+export type TaskYaml = Record<(typeof TASK_YAML_FIELDS)[number], TaskYamlScalar>
 
 export function taskFactoryRoot(): string {
   return process.env.ZAI_TASK_FACTORY_DIR ?? join(homedir(), '.zai', 'task-factory')
@@ -47,6 +75,81 @@ export function emitTaskFactoryEvent(action: string, payload: Record<string, unk
   emitter?.({ action, payload })
 }
 
+/**
+ * 把 TaskYaml 序列化成 YAML 文本(键序固定为 TASK_YAML_FIELDS,便于 diff/审计)。
+ * 使用 block scalar(`|`)承载长字符串(title/description/spec)—— 不做 escape
+ * 转义,也不需要 frontmatter 那种 `:` 全角化的 hack(YAML 是结构化语法,
+ * 字符串原生支持换行与冒号)。空字符串序列化成 `''`(保留 key,便于 patch)。
+ */
+function serializeTaskYaml(meta: Partial<TaskYaml>): string {
+  const out: Record<string, unknown> = {}
+  for (const k of TASK_YAML_FIELDS) {
+    if (!(k in meta)) continue
+    const v = meta[k]
+    if (v === undefined) continue
+    out[k] = v
+  }
+  return YAML.stringify(out, { sortMapEntries: false, lineWidth: 0 })
+}
+
+/** 解析 task.yaml 文本为 TaskYaml。空文件/缺失字段都安全(默认 undefined)。 */
+function parseTaskYaml(text: string): TaskYaml {
+  const parsed = (YAML.parse(text) ?? {}) as Record<string, unknown>
+  const out = {} as TaskYaml
+  for (const k of TASK_YAML_FIELDS) {
+    const v = parsed[k]
+    if (v === null) out[k] = null
+    else if (v === undefined) continue
+    else if (typeof v === 'string' || typeof v === 'number' || typeof v === 'boolean') {
+      out[k] = v
+    }
+  }
+  return out
+}
+
+/**
+ * 历史 index.md 解析(YAML frontmatter + markdown 正文首段)。
+ * 仅在读路径兼容,新写不再调用。frontmatter 不带 `:` 全角化,description
+ * 取首段(连续非空行)trim。空 description 返回 undefined。
+ */
+function parseLegacyIndexMd(text: string): TaskYaml {
+  const meta: TaskYaml = {} as TaskYaml
+  const fm = /^---\n([\s\S]*?)\n---/.exec(text)
+  if (fm) {
+    for (const line of fm[1]!.split('\n')) {
+      const i = line.indexOf(':')
+      if (i <= 0) continue
+      const key = line.slice(0, i).trim() as (typeof TASK_YAML_FIELDS)[number]
+      if (!(TASK_YAML_FIELDS as readonly string[]).includes(key)) continue
+      const raw = line.slice(i + 1).trim()
+      meta[key] = raw === 'null' || raw === '' ? null : raw
+    }
+  }
+  // 从正文首段提取 description(沿用旧 extractDescription 规则)
+  const bodyMatch = /^---\n[\s\S]*?\n---\n?([\s\S]*)$/.exec(text)
+  const body = bodyMatch ? bodyMatch[1]! : text
+  const lines = body.split('\n')
+  let idx = 0
+  while (idx < lines.length) {
+    const t = lines[idx]!.trim()
+    if (t.startsWith('# ')) { idx++; break }
+    if (t === '') { idx++; continue }
+    if (/^#{1,6} /.test(t)) { idx++; continue }
+    break
+  }
+  while (idx < lines.length && lines[idx]!.trim() === '') idx++
+  const buf: string[] = []
+  while (idx < lines.length) {
+    const t = lines[idx]!.trim()
+    if (t === '') break
+    buf.push(t)
+    idx++
+  }
+  const desc = buf.join('\n').trim()
+  if (desc.length > 0) meta.description = desc
+  return meta
+}
+
 export interface CreatePoolTaskInput {
   id?: string; title: string; description?: string; agent?: string; spec?: string; plan?: string
   cwd?: string
@@ -59,34 +162,26 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
   if (existsSync(dir)) throw new Error(`task ${id} already exists`)
   const createdAt = new Date().toISOString()
   await mkdir(join(dir, 'docs'), { recursive: true })
-  const esc = (s: string) => s.replace(/\n/g, ' ').replace(/:/g, '：') // frontmatter 防断行
-  // cwd 是绝对路径（含 `:`），不能走 esc（esc 把 `:` 转全角破坏「读回 spawn」语义）——
-  // 只防换行，不防冒号。约定 cwd 不允许内嵌换行（创建时若含则抛错）。
-  const escCwd = (s: string) => {
-    if (s.includes('\n')) throw new Error(`cwd must not contain newline: ${JSON.stringify(s)}`)
-    return s
+  // cwd 是绝对路径(含 `:`),绝对不能做 `:` → `：` 全角化(YAML 字符串不需要
+  // 转义,原样写即可);约定 cwd 不允许内嵌换行(避免破坏单行字符串语义)。
+  if (input.cwd && input.cwd.includes('\n')) {
+    throw new Error(`cwd must not contain newline: ${JSON.stringify(input.cwd)}`)
   }
   const taskCwd = input.cwd && input.cwd.trim() ? input.cwd.trim() : process.cwd()
-  const indexMd = [
-    '---',
-    `id: ${id}`,
-    `title: ${esc(input.title)}`,
-    'status: queued',
-    `agent: ${esc(input.agent ?? 'default')}`,
-    `verifierAgent: ${input.verifierAgent ? esc(input.verifierAgent) : 'null'}`,
-    `cwd: ${escCwd(taskCwd)}`,
-    `createdAt: ${createdAt}`,
-    'startedAt: null',
-    'completedAt: null',
-    'executorTaskId: null',
-    '---',
-    '',
-    `# ${input.title}`,
-    '',
-    input.description ?? '',
-    '',
-  ].join('\n')
-  await writeFile(join(dir, 'index.md'), indexMd, 'utf-8')
+  const meta: TaskYaml = {
+    id,
+    title: input.title,
+    status: 'queued',
+    agent: input.agent ?? 'default',
+    verifierAgent: input.verifierAgent ?? null,
+    cwd: taskCwd,
+    description: input.description ?? null,
+    createdAt,
+    startedAt: null,
+    completedAt: null,
+    executorTaskId: null,
+  }
+  await writeFile(join(dir, TASK_YAML_FILENAME), serializeTaskYaml(meta), 'utf-8')
   await writeFile(join(dir, 'docs', 'spec.md'), input.spec ?? '# 需求规格\n\n（需求讨论后由主管补充）\n', 'utf-8')
   await writeFile(join(dir, 'docs', 'plan.md'), input.plan ?? '# 执行计划\n\n（执行前由主管补充）\n', 'utf-8')
   await writeFile(join(dir, 'process.md'), '# 执行记录\n\n', 'utf-8')
@@ -98,79 +193,52 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     verifierAgent: input.verifierAgent ?? null,
     createdAt,
     cwd: taskCwd,
+    description: input.description,
     bucket: 'queue-tasks',
   }
 }
 
-function parseIndexFrontmatter(text: string): Record<string, string | null> {
-  const meta: Record<string, string | null> = {}
-  const m = /^---\n([\s\S]*?)\n---/.exec(text)
-  if (!m) return meta
-  for (const line of m[1]!.split('\n')) {
-    const i = line.indexOf(':')
-    if (i <= 0) continue
-    const key = line.slice(0, i).trim()
-    const raw = line.slice(i + 1).trim()
-    meta[key] = raw === 'null' || raw === '' ? null : raw
-  }
-  return meta
-}
-
-function bodyAfterFrontmatter(text: string): string {
-  const m = /^---\n[\s\S]*?\n---\n?([\s\S]*)$/.exec(text)
-  return m ? m[1]! : text
-}
-
-async function readIndex(id: string, bucket: TaskBucketName): Promise<{ text: string; meta: Record<string, string | null> } | null> {
-  const file = join(taskDir(bucket, id), 'index.md')
-  if (!existsSync(file)) return null
-  const text = await readFile(file, 'utf-8')
-  return { text, meta: parseIndexFrontmatter(text) }
-}
-
 /**
- * 从 index.md 正文提取任务描述摘要:frontmatter 之后、首个 `# <title>` 标题行
- * 下的第一个非空段(连续非空行),trim 后返回;无正文/仅标题 → undefined。
- * 不动 frontmatter schema — description 只读自正文首段。
+ * 读任务的 task.yaml(优先)或 legacy index.md(回退)。返回 meta + 文本来源。
+ * 触发 legacy 命中时,同步迁移:写入 task.yaml,删除旧 index.md(2026-09-02 起
+ * 双兼容策略)。迁移失败不抛(下次再迁),只回退 meta 内容。
  */
-function extractDescription(text: string): string | undefined {
-  const body = bodyAfterFrontmatter(text)
-  const lines = body.split('\n')
-  let idx = 0
-  // 跳过头部的空行与 `# <title>` 标题行
-  while (idx < lines.length) {
-    const t = lines[idx]!.trim()
-    if (t.startsWith('# ')) { idx++; break }
-    if (t === '') { idx++; continue }
-    if (/^#{1,6} /.test(t)) { idx++; continue }
-    break // 正文直接以描述开始(无标题行)
+async function readTaskMeta(id: string, bucket: TaskBucketName): Promise<TaskYaml | null> {
+  const dir = taskDir(bucket, id)
+  const yamlPath = join(dir, TASK_YAML_FILENAME)
+  const legacyPath = join(dir, LEGACY_INDEX_MD_FILENAME)
+  if (existsSync(yamlPath)) {
+    const text = await readFile(yamlPath, 'utf-8')
+    return parseTaskYaml(text)
   }
-  // 跳过标题与正文之间的空行
-  while (idx < lines.length && lines[idx]!.trim() === '') idx++
-  const buf: string[] = []
-  while (idx < lines.length) {
-    const t = lines[idx]!.trim()
-    if (t === '') break
-    buf.push(t)
-    idx++
+  if (existsSync(legacyPath)) {
+    const text = await readFile(legacyPath, 'utf-8')
+    const meta = parseLegacyIndexMd(text)
+    // 迁移:尽力而为;失败不抛(下次再迁)
+    try {
+      await writeFile(yamlPath, serializeTaskYaml(meta), 'utf-8')
+      await rm(legacyPath)
+    } catch {
+      // ignore — 读取路径仍然成功,下次再试
+    }
+    return meta
   }
-  const parsed = buf.join('\n').trim()
-  return parsed.length > 0 ? parsed : undefined
+  return null
 }
 
-function toSummary(id: string, bucket: TaskBucketName, meta: Record<string, string | null>, text?: string): TaskSummary {
+function toSummary(id: string, bucket: TaskBucketName, meta: TaskYaml): TaskSummary {
   return {
     id, bucket,
     title: meta.title ?? id,
     status: meta.status ?? 'queued',
     cwd: meta.cwd ?? process.cwd(),
-    description: text ? extractDescription(text) : undefined,
-    agent: meta.agent ?? undefined,
-    verifierAgent: meta.verifierAgent ?? null,
-    createdAt: meta.createdAt ?? undefined,
-    startedAt: meta.startedAt ?? undefined,
-    completedAt: meta.completedAt ?? undefined,
-    executorTaskId: meta.executorTaskId ?? null,
+    description: meta.description == null ? undefined : String(meta.description),
+    agent: meta.agent == null ? undefined : String(meta.agent),
+    verifierAgent: meta.verifierAgent == null ? null : String(meta.verifierAgent),
+    createdAt: meta.createdAt == null ? undefined : String(meta.createdAt),
+    startedAt: meta.startedAt == null ? undefined : String(meta.startedAt),
+    completedAt: meta.completedAt == null ? undefined : String(meta.completedAt),
+    executorTaskId: meta.executorTaskId == null ? null : String(meta.executorTaskId),
   }
 }
 
@@ -181,8 +249,8 @@ async function listIn(bucket: TaskBucketName): Promise<TaskSummary[]> {
   const ids = (await readdir(dir)).filter((n) => !n.startsWith('.'))
   const out: TaskSummary[] = []
   for (const id of ids) {
-    const rec = await readIndex(id, bucket)
-    if (rec) out.push(toSummary(id, bucket, rec.meta, rec.text))
+    const meta = await readTaskMeta(id, bucket)
+    if (meta) out.push(toSummary(id, bucket, meta))
   }
   return out.sort((a, b) => (a.createdAt ?? '').localeCompare(b.createdAt ?? ''))
 }
@@ -195,65 +263,68 @@ export async function listTasks(): Promise<TaskBucket> {
 export async function getTaskSummary(id: string, bucket?: TaskBucketName): Promise<TaskSummary | null> {
   const candidates: TaskBucketName[] = bucket ? [bucket] : BUCKETS
   for (const b of candidates) {
-    const rec = await readIndex(id, b)
-    if (rec) return toSummary(id, b, rec.meta, rec.text)
+    const meta = await readTaskMeta(id, b)
+    if (meta) return toSummary(id, b, meta)
   }
   return null
 }
 
-function rewriteIndex(text: string, patch: Record<string, string | null>): string {
-  // 逐行替换 frontmatter 内的 key；不在 frontmatter 内的 key 忽略
-  // cwd 是绝对路径（含 `:`），不走通用 esc：只防换行。约定 patch.cwd 不允许含换行。
-  const escRaw = (s: string) => {
-    if (s.includes('\n')) throw new Error(`cwd must not contain newline: ${JSON.stringify(s)}`)
-    return s
+/**
+ * 写一份新的 task.yaml:基于已有 meta + patch 合并,然后整体覆盖写回。
+ * patch 里 key → string 视为写入;key → null 视为显式置空;key 缺省视为不改。
+ * cwd patch 不允许含换行(单行字符串语义);description patch 多行原样写
+ * (YAML block scalar 原生支持)。
+ */
+async function writeTaskMeta(id: string, bucket: TaskBucketName, patch: Partial<TaskYaml>): Promise<TaskYaml> {
+  const dir = taskDir(bucket, id)
+  const yamlPath = join(dir, TASK_YAML_FILENAME)
+  const legacyPath = join(dir, LEGACY_INDEX_MD_FILENAME)
+  // 读旧 meta(task.yaml 优先;否则走 legacy 一次性迁移)
+  let base: TaskYaml
+  if (existsSync(yamlPath)) {
+    base = parseTaskYaml(await readFile(yamlPath, 'utf-8'))
+  } else if (existsSync(legacyPath)) {
+    base = parseLegacyIndexMd(await readFile(legacyPath, 'utf-8'))
+  } else {
+    throw new Error(`task ${id} not found in ${bucket}`)
   }
-  return text.replace(/^---\n([\s\S]*?)\n---/, (full, bodyStr: string) => {
-    const lines = bodyStr.split('\n').map((line: string) => {
-      const i = line.indexOf(':')
-      if (i <= 0) return line
-      const key = line.slice(0, i).trim()
-      if (!(key in patch)) return line
-      const v = patch[key]
-      const escaped = v === null
-        ? 'null'
-        : key === 'cwd'
-          ? escRaw(String(v))
-          : String(v).replace(/\n/g, ' ').replace(/:/g, '：')
-      return `${key}: ${escaped}`
-    })
-    return `---\n${lines.join('\n')}\n---`
-  })
+  const next: TaskYaml = { ...base }
+  for (const [k, v] of Object.entries(patch) as [(typeof TASK_YAML_FIELDS)[number], TaskYamlScalar][]) {
+    if (k === 'cwd' && typeof v === 'string' && v.includes('\n')) {
+      throw new Error(`cwd must not contain newline: ${JSON.stringify(v)}`)
+    }
+    next[k] = v
+  }
+  await writeFile(yamlPath, serializeTaskYaml(next), 'utf-8')
+  // 旧文件存在则一并清掉
+  if (existsSync(legacyPath)) {
+    await rm(legacyPath).catch(() => {})
+  }
+  return next
 }
 
 export async function markTaskStatus(
   id: string, bucket: TaskBucketName,
   patch: { status?: TaskStatus; startedAt?: string | null; completedAt?: string | null; executorTaskId?: string | null },
 ): Promise<TaskSummary> {
-  const file = join(taskDir(bucket, id), 'index.md')
-  const rec = await readIndex(id, bucket)
-  if (!rec) throw new Error(`task ${id} not found in ${bucket}`)
-  const next = rewriteIndex(rec.text, patch)
-  await writeFile(file, next, 'utf-8')
-  const meta = parseIndexFrontmatter(next)
-  return toSummary(id, bucket, meta, next)
+  const next = await writeTaskMeta(id, bucket, patch)
+  return toSummary(id, bucket, next)
 }
 
 export async function moveTask(id: string, from: TaskBucketName, to: TaskBucketName): Promise<TaskSummary> {
-  const rec = await readIndex(id, from)
-  if (!rec) throw new Error(`task ${id} not found in ${from}`)
-  const dest = taskDir(to, id)
-  if (existsSync(dest)) throw new Error(`task ${id} already exists in ${to}`)
+  const meta = await readTaskMeta(id, from)
+  if (!meta) throw new Error(`task ${id} not found in ${from}`)
   const status = to === 'processing-tasks' ? 'processing'
     : to === 'verifying-tasks' ? 'verifying'
     : to === 'finished-tasks' ? 'done'
     : 'queued'
-  const nextText = rewriteIndex(rec.text, { status })
+  const dest = taskDir(to, id)
+  if (existsSync(dest)) throw new Error(`task ${id} already exists in ${to}`)
   // 先在原位置写好新 status，再 rename，避免 rename 成功后 writeFile 失败导致目录已移而 status 未更新
-  await writeFile(join(taskDir(from, id), 'index.md'), nextText, 'utf-8')
+  await writeTaskMeta(id, from, { status })
   await mkdir(taskDir(to, ''), { recursive: true })
   await rename(taskDir(from, id), dest)
-  return toSummary(id, to, parseIndexFrontmatter(nextText), nextText)
+  return toSummary(id, to, { ...meta, status })
 }
 
 export async function deleteTasks(ids: string[]): Promise<void> {
@@ -288,10 +359,10 @@ export async function getTaskDetails(id: string, bucket?: TaskBucketName): Promi
     const f = join(dir, name)
     return existsSync(f) ? readFile(f, 'utf-8') : fallback
   }
-  const [indexMd, specMd, planMd, processMd] = await Promise.all([
-    read('index.md', ''), read('docs/spec.md', ''), read('docs/plan.md', ''), read('process.md', ''),
+  const [specMd, planMd, processMd] = await Promise.all([
+    read('docs/spec.md', ''), read('docs/plan.md', ''), read('process.md', ''),
   ])
-  return { summary, indexMd: bodyAfterFrontmatter(indexMd), specMd, planMd, processMd }
+  return { summary, specMd, planMd, processMd }
 }
 
-export { bodyAfterFrontmatter }
+export { serializeTaskYaml, parseTaskYaml, parseLegacyIndexMd, TASK_YAML_FIELDS }

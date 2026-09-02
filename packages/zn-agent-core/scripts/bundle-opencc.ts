@@ -1467,6 +1467,13 @@ await esbuild.build({
     // fflate: vendored via dynamic import in zip.ts / zipCache.ts. esbuild 不能
     // 静态解析 dynamic import 跨出 bundle 图的包,external 让 Node 运行时解析。
     'fflate',
+    // yaml: taskFactoryFiles 用 YAML.stringify/parse 写/读 task.yaml(2026-09-02
+    // 替代原 index.md frontmatter)。zai 包 deps 暂无 yaml,且 zai 通过
+    // node_modules hoisting 解析不可靠 —— esbuild 直接 inline 进 bundle
+    // (默认走 dist/index.js 即 CJS,import YAML from 'yaml' 是 default
+    // import,bundle 兼容)。
+    // (原注:曾列在 external 但 yaml 已在 zn-agent-core node_modules,inline
+    // 测试 bundle 字节增加 ~50KB(tree-shake 后),可接受。)
     // @orama/orama + plugin-data-persistence: zai 自己 deps 已有,external 让
     // zai 进程走 node_modules 解析,bundle 不内联(避免双份 module 实例)。
     '@orama/orama',

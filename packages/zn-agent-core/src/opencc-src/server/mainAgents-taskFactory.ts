@@ -4,8 +4,9 @@
  *
  * 主管对话中的"任务工厂"工作流:需求讨论 → 任务落库 → 派发执行 →
  * 验证 → 归档。tools 槽在 origin 默认工具池上**追加** SuperTasksCreate /
- * SuperTasksMove / SuperTasksReset / SuperTasksPause 四个专用工具,并去重防
- * 同名,以保证 SpawnAgent 等默认工具(SpawnAgent 用于派发外部 agent)仍可用。
+ * SuperTasksList / SuperTasksGet / SuperTasksMove / SuperTasksReset /
+ * SuperTasksPause 六个专用工具,并去重防同名,以保证 SpawnAgent 等默认工具
+ * (SpawnAgent 用于派发外部 agent)仍可用。
  *
  * 配置对象由 mainAgents.ts 的 getBuiltinMainAgents() 聚合进内置列表。
  */
@@ -13,6 +14,8 @@ import type { Tool } from '../Tool.js'
 import type { MainAgentConfig } from './mainAgents.js'
 import {
   superTasksCreateTool,
+  superTasksListTool,
+  superTasksGetTool,
   superTasksMoveTool,
   superTasksResetTool,
   superTasksPauseTool,
@@ -26,7 +29,7 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '1. Requirement discussion: by default, requirement discussion for new tasks happens in a separate task-intake agent session inside the creation modal (minutes are saved to docs/brainstorm.md in the task directory); if the user proposes a new task directly to you, first invoke SkillTool to run the brainstorming skill and clarify the requirements and acceptance criteria.',
   '2. Persist: once the discussion is clear, call SuperTasksCreate to create the task skeleton under ~/.zai/task-factory/queue-tasks/<id>/; write the discussion results into docs/spec.md (requirement spec) and docs/plan.md (execution plan) using Edit/Write. SuperTasksCreate accepts an optional verifierAgent field (defaults to the executor agent) so the task can use a different verifier subagent (e.g. code-reviewer).',
   '3. Dispatch execution:',
-  '   a. Read <task_dir>/index.md to extract `agent`, `cwd`, and `verifierAgent` (optional).',
+  '   a. Call SuperTasksGet(id) to read the structured task metadata — extract `agent`, `cwd`, and `verifierAgent` (optional) from the returned summary. Always go through SuperTasksGet for task metadata; the on-disk YAML file is an implementation detail.',
   '   b. SpawnAgent the executor (subagent_type=<agent>, cwd=<cwd>, prompt=full spec + plan + ...).',
   '      When delegating via AgentTool, set transcriptSubdir to the absolute path of the task directory.',
   '      The executor\'s SpawnAgent prompt MUST embed a code-commit instruction block so it commits its own changes per repo conventions:',
@@ -47,6 +50,7 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '          rule in AGENTS.md: only `pnpm --filter <pkg> test <path/to/file.test.ts>` for files YOU',
   '          changed; never `pnpm -r test`. Use this only as a typing/implementation feedback tool,',
   '          not as your acceptance gate.',
+  '        - To extract task metadata (agent/cwd/verifierAgent/...) call SuperTasksGet(id).',
   '        - If you are being re-spawned because a previous verification round FAILed, FIRST read',
   '          <task_dir>/docs/verification.md and address every FAIL point before touching code; also',
   '          skim <task_dir>/process.md for prior-round context. The verifier\'s feedback is the only',
@@ -58,16 +62,18 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '   c. After SpawnAgent returns the subagent task id, IMMEDIATELY call:',
   '        SuperTasksMove(id, from=\'queue-tasks\', to=\'processing-tasks\', executorTaskId=<subTaskId>)',
   '      to atomically (i) move the folder, (ii) set status=processing, (iii) backfill executorTaskId.',
-  '      Do NOT edit index.md by hand — Move is the only allowed write path for task state.',
+  '      Do NOT edit task.yaml by hand — Move is the only allowed write path for task state.',
   '      If Move fails, cancel the SpawnAgent subagent via BackgroundRuntime.cancel and report failure.',
   '4. Verify (after executor subagent <task-notification>):',
-  '   a. Read <task_dir>/process.md; confirm the "## [DONE]" marker is appended. If missing,',
-  '      the executor did not finish — wait, re-poll, or escalate to the user.',
+  '   a. Call SuperTasksGet(id) to re-read task state (status + process.md content) — confirm the',
+  '      "## [DONE]" marker is appended in processMd. If missing, the executor did not finish —',
+  '      wait, re-poll, or escalate to the user.',
   '   b. Call SuperTasksMove(id, from=\'processing-tasks\', to=\'verifying-tasks\') to enter the',
   '      verifying lane. No additional tools are needed — Move returns the task in the new bucket.',
   '   c. SpawnAgent an INDEPENDENT verifier subagent (subagent_type=<verifierAgent>, cwd=<cwd>,',
   '      transcriptSubdir=<task_dir>) with a prompt instructing it to:',
-  '        - Read <task_dir>/docs/spec.md (acceptance criteria) and process.md (executor record).',
+  '        - Call SuperTasksGet(id) to read summary + spec + process in one shot (do NOT Read',
+  '          task.yaml directly).',
   '        - Compute round N = (count of existing "## 轮次 N" sections in verification.md) + 1.',
   '        - Append to <task_dir>/docs/verification.md:',
   '            ## 轮次 N',
@@ -81,7 +87,8 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '      The verifier subagent owns writing the verification.md round header; do NOT pre-write',
   '      the header in the supervisor session.',
   '   d. After verifier <task-notification>:',
-  '      - Read <task_dir>/docs/verification.md; locate the most recent "## 轮次 N" section.',
+  '      - Call SuperTasksGet(id) to read the latest process.md / verification.md content (the',
+  '        verifier appended the new round); locate the most recent "## 轮次 N" section.',
   '      - Parse the "结论: " line into PASS or FAIL.',
   '      - PASS → SuperTasksMove(id, from=\'verifying-tasks\', to=\'finished-tasks\').',
   '      - FAIL, round < 3 → SuperTasksReset(id) (moves verifying→processing, status=processing,',
@@ -94,18 +101,24 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   '   On <task-command action="forced-accept"> for a task in verifying-tasks, immediately call',
   '   SuperTasksMove(id, from=\'verifying-tasks\', to=\'finished-tasks\') — the verifier is bypassed.',
   '   Do NOT re-SpawnAgent the verifier.',
-  '6. System commands (<task-command action="..."> injected by taskFactoryManagedLoop / manual UI):',
-  '   - dispatch: SpawnAgent executor + SuperTasksMove(queue-tasks → processing-tasks,',
+  '6. Pipeline overview: at any point you need a snapshot of all tasks across the four buckets,',
+  '   call SuperTasksList() — it returns { queue, processing, verifying, finished } arrays of TaskSummary,',
+  '   plus a counts summary. Use this for "what\'s queued / what\'s in flight / what just finished"',
+  '   questions, and for picking the next task to dispatch (filter by status="queued" + createdAt).',
+  '   For a single task\'s full detail (spec.md / plan.md / process.md content) call SuperTasksGet(id).',
+  '   Never enumerate SuperTasksGet calls when SuperTasksList can answer in one shot.',
+  '7. System commands (<task-command action="..."> injected by taskFactoryManagedLoop / manual UI):',
+  '   - dispatch: SuperTasksGet(id) → SpawnAgent executor + SuperTasksMove(queue-tasks → processing-tasks,',
   '     executorTaskId=<subTaskId>). Multiple queued tasks may be dispatched at once.',
-  '   - resume: SuperTasksReset(id) + re-SpawnAgent the executor (or continue the original session).',
+  '   - resume: SuperTasksReset(id) + SuperTasksGet(id) → re-SpawnAgent the executor (or continue the original session).',
   '   - accept: SuperTasksMove(id, from=\'processing-tasks\'|\'verifying-tasks\', to=\'finished-tasks\').',
   '   - pause: BackgroundRuntime.cancel(executorTaskId) if alive + SuperTasksPause(id).',
   'Dispatch at most one executor subagent per task at a time; different tasks may run in parallel — when receiving a dispatch command, dispatch in queue order (multiple tasks may run concurrently; do not force waiting for a previous task to finish before dispatching the next).',
 ]
 
-/** tools 槽:默认工具池追加四个专用工具(去重防同名)。 */
+/** tools 槽:默认工具池追加六个专用工具(去重防同名)。 */
 const taskFactoryTools = (origin: Tool[]): Tool[] => {
-  const extra = [superTasksCreateTool, superTasksMoveTool, superTasksResetTool, superTasksPauseTool]
+  const extra = [superTasksCreateTool, superTasksListTool, superTasksGetTool, superTasksMoveTool, superTasksResetTool, superTasksPauseTool]
   const names = new Set(origin.map((t) => String(t.name)))
   return [...origin, ...extra.filter((t) => !names.has(String(t.name)))]
 }
