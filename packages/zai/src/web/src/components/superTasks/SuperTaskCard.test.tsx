@@ -149,6 +149,86 @@ describe('SuperTaskCard verifying 状态 (2026-09-02)', () => {
   })
 })
 
+// 火柴人动画(2026-09-02,任务工厂动感增强):
+describe('SuperTaskCard stickman 动画 (2026-09-02)', () => {
+  it('processing 桶 + status=processing 时渲染 stickman-processing,含 hammer rect + SMIL animateTransform', () => {
+    const { container } = render(
+      <SuperTaskCard
+        task={baseTask({ status: 'processing', bucket: 'processing-tasks' })}
+        selected={false}
+        onToggleSelect={() => {}}
+        dimmed={false}
+        onOpenDetail={() => {}}
+        onDeleted={() => {}}
+      />,
+    )
+    const stickman = container.querySelector('[data-testid="stickman-processing"]')
+    expect(stickman).toBeTruthy()
+    // 应有 SVG 子节点 + 至少 4 个 animateTransform(头/右臂/左腿/右腿)
+    const svg = stickman?.querySelector('svg')
+    expect(svg).toBeTruthy()
+    const animTags = stickman?.querySelectorAll('animateTransform')
+    expect(animTags?.length).toBeGreaterThanOrEqual(4)
+    // 工作中应带锤子(实心 rect),不是放大镜(空心 circle)
+    expect(stickman?.querySelector('rect')).toBeTruthy()
+    expect(stickman?.querySelector('circle[fill="none"]')).toBeTruthy() // 头是空心 circle
+  })
+
+  it('verifying 桶时渲染 stickman-verifying,含 magnifier circle', () => {
+    const { container } = render(
+      <SuperTaskCard
+        task={baseTask({ status: 'verifying', bucket: 'verifying-tasks' })}
+        selected={false}
+        onToggleSelect={() => {}}
+        dimmed={false}
+        onOpenDetail={() => {}}
+        onDeleted={() => {}}
+      />,
+    )
+    const stickman = container.querySelector('[data-testid="stickman-verifying"]')
+    expect(stickman).toBeTruthy()
+    // 验证中应有两个空心 circle(头 + 放大镜);不应有 hammer rect
+    expect(stickman?.querySelector('rect')).toBeNull()
+    const circles = stickman?.querySelectorAll('circle')
+    expect(circles?.length).toBe(2) // 头 + 放大镜
+  })
+
+  it('processing 桶但 status=paused 时不渲染 stickman(已暂停不需要动感)', () => {
+    const { container } = render(
+      <SuperTaskCard
+        task={baseTask({ status: 'paused', bucket: 'processing-tasks' })}
+        selected={false}
+        onToggleSelect={() => {}}
+        dimmed={false}
+        onOpenDetail={() => {}}
+        onDeleted={() => {}}
+      />,
+    )
+    expect(container.querySelector('[data-testid="stickman-processing"]')).toBeNull()
+    expect(container.querySelector('[data-testid="stickman-verifying"]')).toBeNull()
+  })
+
+  it('finished / queue 桶都不渲染 stickman', () => {
+    const cases: Array<Partial<TaskSummary>> = [
+      { status: 'done', bucket: 'finished-tasks' },
+      { status: 'queued', bucket: 'queue-tasks' },
+    ]
+    for (const over of cases) {
+      const { container } = render(
+        <SuperTaskCard
+          task={baseTask(over)}
+          selected={false}
+          onToggleSelect={() => {}}
+          dimmed={false}
+          onOpenDetail={() => {}}
+          onDeleted={() => {}}
+        />,
+      )
+      expect(container.querySelector('[data-testid^="stickman-"]')).toBeNull()
+    }
+  })
+})
+
 // zai patch (2026-09-02, priority Tag 渲染):
 describe('SuperTaskCard priority Tag (2026-09-02)', () => {
   it('P0 → red Tag、P1 → orange、P2 → blue、P3 → default(灰)', () => {

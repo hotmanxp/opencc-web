@@ -1,7 +1,115 @@
+import { createElement, type JSX } from 'react'
 import { Button, Checkbox, Popconfirm, Space, Tag, Tooltip } from 'antd'
 import { DeleteOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons'
 import type { TaskSummary } from '../../lib/superTaskApi'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
+
+/** 火柴人动画(2026-09-02,任务工厂动感增强)。
+ *
+ * processing 卡片显示"工作中"小人:右臂大幅挥动持锤子、左腿/右腿交替抬步;
+ * verifying 卡片显示"检查中"小人:右臂举放大镜左右扫视、头微微点头。
+ * 用 SVG SMIL `<animateTransform>` 直接驱动关节旋转(无需 `transform-origin`,
+ * 跨 Chromium / Firefox / WebKit 表现一致)。JSX 不直接支持未知标签会报警告,
+ * 用 createElement 显式构造可消除 warning。
+ */
+function WorkingStickman({ status }: { status: 'processing' | 'verifying' }): JSX.Element {
+  const isWorking = status === 'processing'
+  const color = isWorking ? '#a855f7' : '#06b6d4'
+  const title = isWorking ? '任务执行中' : '任务验证中'
+  // 旋转中心统一为关节:右臂 (11,8) 肩;腿 (11,13) 胯。
+  const armRotation = isWorking
+    ? '0 11 8; -55 11 8; 0 11 8; 30 11 8; 0 11 8'   // 工作: 上下挥动
+    : '0 11 8; 10 11 8; 0 11 8; -10 11 8; 0 11 8'    // 检查: 左右扫视
+  const legL = isWorking ? '0 11 13; -22 11 13; 22 11 13; 0 11 13' : '0 11 13'
+  const legR = isWorking ? '0 11 13; 22 11 13; -22 11 13; 0 11 13' : '0 11 13'
+  const headNod = isWorking ? '0 0; 0 -0.6; 0 0' : '0 0; 0 0.6; 0 0'
+  const headDur = isWorking ? '0.6s' : '1s'
+  return (
+    <span
+      role="img"
+      aria-label={title}
+      title={title}
+      data-testid={`stickman-${status}`}
+      style={{
+        color,
+        display: 'inline-flex',
+        alignItems: 'center',
+        justifyContent: 'center',
+        flexShrink: 0,
+        width: 22,
+        height: 22,
+      }}
+    >
+      <svg width="22" height="22" viewBox="0 0 22 22" fill="none" aria-hidden="true">
+        {/* 头(执行中随身体弹,验证中微微点头) */}
+        {createElement('g', null,
+          createElement('animateTransform', {
+            attributeName: 'transform', type: 'translate',
+            values: headNod, dur: headDur, repeatCount: 'indefinite',
+          }),
+          createElement('circle', {
+            cx: 11, cy: 4, r: 1.8,
+            stroke: 'currentColor', strokeWidth: 1.4, fill: 'none',
+          }),
+        )}
+        {/* 身体 */}
+        <line
+          x1={11} y1={5.8} x2={11} y2={13}
+          stroke="currentColor" strokeWidth={1.4} strokeLinecap="round"
+        />
+        {/* 左臂(静止) */}
+        <line
+          x1={11} y1={8} x2={7.5} y2={11}
+          stroke="currentColor" strokeWidth={1.4} strokeLinecap="round"
+        />
+        {/* 右臂 + 工具(挥动/扫视) */}
+        {createElement('g', null,
+          createElement('animateTransform', {
+            attributeName: 'transform', type: 'rotate',
+            values: armRotation, dur: '0.6s', repeatCount: 'indefinite',
+          }),
+          // 手臂
+          createElement('line', {
+            x1: 11, y1: 8, x2: 14.5, y2: 11,
+            stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round',
+          }),
+          // 工具: 锤子(工作中)/ 放大镜(验证中)
+          isWorking
+            ? createElement('rect', {
+                x: 14, y: 9, width: 3.5, height: 2,
+                fill: 'currentColor', rx: 0.3,
+              })
+            : createElement('circle', {
+                cx: 17, cy: 10.5, r: 2.2,
+                stroke: 'currentColor', strokeWidth: 1.2, fill: 'none',
+              }),
+        )}
+        {/* 左腿 */}
+        {createElement('g', null,
+          createElement('animateTransform', {
+            attributeName: 'transform', type: 'rotate',
+            values: legL, dur: '0.5s', repeatCount: 'indefinite',
+          }),
+          createElement('line', {
+            x1: 11, y1: 13, x2: 8, y2: 18,
+            stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round',
+          }),
+        )}
+        {/* 右腿 */}
+        {createElement('g', null,
+          createElement('animateTransform', {
+            attributeName: 'transform', type: 'rotate',
+            values: legR, dur: '0.5s', repeatCount: 'indefinite',
+          }),
+          createElement('line', {
+            x1: 11, y1: 13, x2: 14, y2: 18,
+            stroke: 'currentColor', strokeWidth: 1.4, strokeLinecap: 'round',
+          }),
+        )}
+      </svg>
+    </span>
+  )
+}
 
 const STATUS_TAG: Record<string, { color: string; label: string }> = {
   queued: { color: 'default', label: '排队' },
@@ -152,6 +260,11 @@ export default function SuperTaskCard({
             </Tooltip>
           )}
           {task.agent && task.agent !== 'default' && <Tag style={{ marginInlineEnd: 0 }}>{task.agent}</Tag>}
+          {/* 火柴人动画(2026-09-02):仅 processing 桶(且 status=processing) 与 verifying 桶显示,
+              paused / done / failed / queued 都不动。放在 Space 末尾让"状态指示群"视觉对齐。 */}
+          {(inProcessing && task.status === 'processing') || inVerifying ? (
+            <WorkingStickman status={inVerifying ? 'verifying' : 'processing'} />
+          ) : null}
         </Space>
       </div>
 
