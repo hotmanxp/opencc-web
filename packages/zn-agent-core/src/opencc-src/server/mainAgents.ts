@@ -32,6 +32,7 @@ import { agentCreatorMainAgent } from './mainAgents-agentCreator.js'
 import { taskFactoryMainAgent } from './mainAgents-taskFactory.js'
 import { taskIntakeMainAgent } from './mainAgents-taskIntake.js'
 import { displayFilesOpenccTool } from './displayFilesOpencc.js'
+import { filterBannedTools } from './mainAgents-toolFilters.js'
 
 // agent-creator 域的公共符号(ValidateMainAgent 工具 + 校验函数)定义在
 // mainAgents-agentCreator.ts,此处 re-export 保持公共 API 稳定(core 单测
@@ -88,12 +89,13 @@ export function getBuiltinMainAgents(): MainAgentConfig[] {
       description: '系统默认 —— 代码编写、程序处理',
       tools: (origin: Tool[]) => {
         // origin 已是 vendor 内置 + MCP + 权限过滤后的最终池。
-        // append 避免重名冲突(若 origin 已有 DisplayFiles 同名工具,
-        // 跳过;理论上 vendor 不会自带,但防御一下);即时生效。
-        if (origin.some((t) => t.name === displayFilesOpenccTool.name)) {
-          return origin
+        // 先剔除内网不可用工具(WebFetch),再 append DisplayFiles;
+        // append 前查重(若 origin 已有同名,跳过;防御);即时生效。
+        const pool = filterBannedTools(origin)
+        if (pool.some((t) => t.name === displayFilesOpenccTool.name)) {
+          return pool
         }
-        return [...origin, displayFilesOpenccTool]
+        return [...pool, displayFilesOpenccTool]
       },
     },
     officeMainAgent,

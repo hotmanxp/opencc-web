@@ -1,8 +1,8 @@
-import { mkdir, readdir, readFile, rename, rm, writeFile } from 'node:fs/promises'
+import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises'
 import { existsSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
-import { randomInt } from 'node:crypto'
+import { createHash, randomInt } from 'node:crypto'
 import YAML from 'yaml'
 
 export type TaskStatus = 'queued' | 'processing' | 'paused' | 'verifying' | 'done' | 'failed'
@@ -15,7 +15,11 @@ export interface TaskSummary {
   /** 验证 subagent 名称(可选;默认沿用 `agent`)。SpawnAgent 调验证子任务时使用。 */
   verifierAgent?: string | null
   createdAt?: string; startedAt?: string | null
-  completedAt?: string | null; executorTaskId?: string | null
+  completedAt?: string | null
+  /** 执行器 background task id(SpawnAgent 返回值,Move 时回填)。 */
+  executorTaskId?: string | null
+  /** 验证器 background task id(verifier SpawnAgent 返回值,Move 就地回填)。 */
+  verifierTaskId?: string | null
   /**
    * 调度优先级(2026-09-02 任务工厂升级)。P0 最紧急、P3 最不紧急;缺省 P2。
    * SuperTasksList 输出按 priority ASC(数值小 → 优先)→ createdAt ASC 排,
@@ -38,7 +42,60 @@ export interface TaskBucket {
  * 历史版本的 `index.md`(YAML frontmatter + markdown 正文首段 description)
  * 在读取时仍兼容解析,但所有新写都走 task.yaml。
  */
-export interface TaskDetails { summary: TaskSummary; specMd: string; planMd: string; processMd: string }
+export interface TaskDetails { summary: TaskSummary; specMd: string; planMd: string; processMd: string; verificationMd: string; brainstormMd: string }
+
+/**
+ * intake 文档强校验契约(2026-09-03)。createPoolTask 写入的 spec/plan 骨架
+ * 占位文本 —— checkTaskIntakeDocs 用「去掉标题/占位行后是否仍有实质内容」
+ * 判定文档缺失,骨架原样视为未填。提示词侧(task-intake agent)声明同一契约:
+ * 用户关闭新建任务弹窗时前端会调 checkTaskIntakeDocs,缺失文档回流对话要求补齐。
+ */
+export const INTAKE_REQUIRED_DOCS = ['docs/spec.md', 'docs/plan.md', 'docs/brainstorm.md'] as const
+export type IntakeDocPath = (typeof INTAKE_REQUIRED_DOCS)[number]
+/** createPoolTask 缺省写入的骨架文本(抽常量供写入与校验共用)。 */
+export const DEFAULT_SPEC_SKELETON = '# 需求规格\n\n（需求讨论后由主管补充）\n'
+export const DEFAULT_PLAN_SKELETON = '# 执行计划\n\n（执行前由主管补充）\n'
+/** 骨架占位行标记:整行含以下文案视为未填。 */
+const INTAKE_PLACEHOLDER_MARKERS = ['（需求讨论后由主管补充）', '（执行前由主管补充）']
+
+/** 判定文档是否有实质内容:去掉 markdown 标题、空行、占位行后,非空白字符 ≥ 20。 */
+function intakeDocHasSubstance(text: string): boolean {
+  const kept = text
+    .split('\n')
+    .filter((line) => {
+      const t = line.trim()
+      if (t === '') return false
+      if (t.startsWith('#')) return false
+      if (INTAKE_PLACEHOLDER_MARKERS.some((m) => t.includes(m))) return false
+      return true
+    })
+    .join('')
+  return kept.replace(/\s/g, '').length >= 20
+}
+
+export interface IntakeDocCheck { ok: boolean; missing: IntakeDocPath[] }
+
+/**
+ * 校验任务目录下 intake 必需文档(docs/spec.md / docs/plan.md /
+ * docs/brainstorm.md)是否已填写实质内容。缺失判定:文件不存在、为空、
+ * 或仍是 createPoolTask 写入的骨架占位。任务不存在返回 null。
+ */
+export async function checkTaskIntakeDocs(id: string, bucket?: TaskBucketName): Promise<IntakeDocCheck | null> {
+  const summary = await getTaskSummary(id, bucket)
+  if (!summary) return null
+  const dir = taskDir(summary.bucket, id)
+  const missing: IntakeDocPath[] = []
+  for (const doc of INTAKE_REQUIRED_DOCS) {
+    const f = join(dir, doc)
+    if (!existsSync(f)) {
+      missing.push(doc)
+      continue
+    }
+    const text = await readFile(f, 'utf-8').catch(() => '')
+    if (!intakeDocHasSubstance(text)) missing.push(doc)
+  }
+  return { ok: missing.length === 0, missing }
+}
 
 const BUCKETS: TaskBucketName[] = ['queue-tasks', 'processing-tasks', 'verifying-tasks', 'finished-tasks']
 const TASK_ID_ALPHABET = '0123456789abcdefghijklmnopqrstuvwxyz'
@@ -51,7 +108,7 @@ export const LEGACY_INDEX_MD_FILENAME = 'index.md'
 /** task.yaml 顶层字段集合(写入/校验都用它做白名单,避免无关字段被序列化进去)。 */
 const TASK_YAML_FIELDS = [
   'id', 'title', 'status', 'agent', 'verifierAgent', 'cwd',
-  'description', 'createdAt', 'startedAt', 'completedAt', 'executorTaskId',
+  'description', 'createdAt', 'startedAt', 'completedAt', 'executorTaskId', 'verifierTaskId',
   // zai patch (2026-09-02, priority + dependsOn 调度):
   // priority 缺省 P2,dependsOn 缺省 [];写入校验都用白名单,避免无关字段。
   'priority', 'dependsOn',
@@ -239,12 +296,13 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     startedAt: null,
     completedAt: null,
     executorTaskId: null,
+    verifierTaskId: null,
     priority,
     dependsOn,
   }
   await writeFile(join(dir, TASK_YAML_FILENAME), serializeTaskYaml(meta), 'utf-8')
-  await writeFile(join(dir, 'docs', 'spec.md'), input.spec ?? '# 需求规格\n\n（需求讨论后由主管补充）\n', 'utf-8')
-  await writeFile(join(dir, 'docs', 'plan.md'), input.plan ?? '# 执行计划\n\n（执行前由主管补充）\n', 'utf-8')
+  await writeFile(join(dir, 'docs', 'spec.md'), input.spec ?? DEFAULT_SPEC_SKELETON, 'utf-8')
+  await writeFile(join(dir, 'docs', 'plan.md'), input.plan ?? DEFAULT_PLAN_SKELETON, 'utf-8')
   await writeFile(join(dir, 'process.md'), '# 执行记录\n\n', 'utf-8')
   return {
     id,
@@ -306,6 +364,7 @@ function toSummary(id: string, bucket: TaskBucketName, meta: TaskYaml): TaskSumm
     startedAt: meta.startedAt == null ? undefined : str(meta.startedAt),
     completedAt: meta.completedAt == null ? undefined : str(meta.completedAt),
     executorTaskId: meta.executorTaskId == null ? null : str(meta.executorTaskId),
+    verifierTaskId: meta.verifierTaskId == null ? null : str(meta.verifierTaskId),
     // priority 缺省 P2;非法值回落到 P2(读取容错,创建阶段已校验)。
     priority: normalizePriority(meta.priority),
     // dependsOn 在 task.yaml 是 string[];读取路径已过滤非字符串元素。
@@ -348,6 +407,89 @@ async function listIn(bucket: TaskBucketName): Promise<TaskSummary[]> {
 export async function listTasks(): Promise<TaskBucket> {
   const [queue, processing, verifying, finished] = await Promise.all(BUCKETS.map(listIn))
   return { queue, processing, verifying, finished }
+}
+
+// ---------------------------------------------------------------------------
+// 快照缓存 (2026-09-03, 列表接口性能优化):看板 3s 轮询绝大多数周期数据无变化,
+// 用「指纹」短路掉 yaml 解析 + toSummary + 排序的读盘组装成本。指纹只 stat 不读
+// 内容;缓存单槽、进程内,不做跨进程共享(已知取舍)。
+// ---------------------------------------------------------------------------
+
+/** 参与指纹的任务目录内文档文件(任务 meta 文件 task.yaml/index.md 另行处理)。 */
+const FINGERPRINT_DOC_FILES = ['docs/spec.md', 'docs/plan.md', 'process.md', 'docs/verification.md'] as const
+
+export interface TasksSnapshot {
+  fingerprint: string
+  buckets: TaskBucket
+}
+
+/**
+ * 计算四桶目录的内容指纹(sha1)。
+ * 条目 = 每个任务目录的 `<bucket>/<id>`(id 列表变化即指纹变化)+ 该目录下
+ * `task.yaml`(缺失回退 legacy `index.md`,与 readTaskMeta 判定一致)及
+ * {@link FINGERPRINT_DOC_FILES} 的 `<相对路径>|<mtimeMs>|<size>` 元组;
+ * 文件不存在则不参与。全部字典序排序 join 后 sha1。
+ * 目录不存在/为空 → 空集合,指纹稳定。只 stat 不读内容。
+ * 导出供单测直接验证指纹语义(快照缓存本身是内部实现细节)。
+ */
+export async function computeFingerprint(): Promise<string> {
+  const root = taskFactoryRoot()
+  const entries: string[] = []
+  for (const bucket of BUCKETS) {
+    let ids: string[]
+    try {
+      ids = (await readdir(join(root, bucket))).filter((n) => !n.startsWith('.'))
+    } catch {
+      ids = [] // bucket 目录不存在 → 视作空集合
+    }
+    for (const id of ids) {
+      const prefix = `${bucket}/${id}`
+      entries.push(prefix)
+      const statTuple = async (rel: string): Promise<boolean> => {
+        try {
+          const s = await stat(join(root, prefix, rel))
+          entries.push(`${prefix}/${rel}|${s.mtimeMs}|${s.size}`)
+          return true
+        } catch {
+          return false
+        }
+      }
+      // meta 文件:优先 task.yaml,不存在则 legacy index.md
+      if (!(await statTuple(TASK_YAML_FILENAME))) {
+        await statTuple(LEGACY_INDEX_MD_FILENAME)
+      }
+      for (const f of FINGERPRINT_DOC_FILES) {
+        await statTuple(f)
+      }
+    }
+  }
+  entries.sort()
+  return createHash('sha1').update(entries.join('\n')).digest('hex')
+}
+
+/** 单槽进程内缓存;只服务快照读路径,写路径不显式失效(靠指纹自然收敛)。 */
+let tasksSnapshotCache: TasksSnapshot | null = null
+
+/**
+ * 带缓存的列表快照:指纹与上次一致 → 直接复用缓存的 buckets 对象引用
+ * (跳过 readdir 之外的全部解析/排序);不一致 → 全量 listTasks 并回填缓存。
+ * 指纹先于 buckets 计算:listTasks 的读路径会迁移 legacy index.md(fs 副作用),
+ * 迁移后下一轮指纹必然不同 → 重算一次后重新稳定,可接受。
+ * 已知取舍:mtimeMs+size 在同毫秒同字节的改写会漏检,概率可忽略。
+ */
+export async function getTasksSnapshot(): Promise<TasksSnapshot> {
+  const fingerprint = await computeFingerprint()
+  if (tasksSnapshotCache && tasksSnapshotCache.fingerprint === fingerprint) {
+    return tasksSnapshotCache
+  }
+  const buckets = await listTasks()
+  tasksSnapshotCache = { fingerprint, buckets }
+  return tasksSnapshotCache
+}
+
+/** 手动失效快照缓存(预留钩子:写路径/测试可强制下一轮全量重算)。 */
+export function invalidateTasksSnapshot(): void {
+  tasksSnapshotCache = null
 }
 
 export async function getTaskSummary(id: string, bucket?: TaskBucketName): Promise<TaskSummary | null> {
@@ -395,7 +537,7 @@ async function writeTaskMeta(id: string, bucket: TaskBucketName, patch: Partial<
 
 export async function markTaskStatus(
   id: string, bucket: TaskBucketName,
-  patch: { status?: TaskStatus; startedAt?: string | null; completedAt?: string | null; executorTaskId?: string | null },
+  patch: { status?: TaskStatus; startedAt?: string | null; completedAt?: string | null; executorTaskId?: string | null; verifierTaskId?: string | null },
 ): Promise<TaskSummary> {
   const next = await writeTaskMeta(id, bucket, patch)
   return toSummary(id, bucket, next)
@@ -449,10 +591,11 @@ export async function getTaskDetails(id: string, bucket?: TaskBucketName): Promi
     const f = join(dir, name)
     return existsSync(f) ? readFile(f, 'utf-8') : fallback
   }
-  const [specMd, planMd, processMd] = await Promise.all([
+  const [specMd, planMd, processMd, verificationMd, brainstormMd] = await Promise.all([
     read('docs/spec.md', ''), read('docs/plan.md', ''), read('process.md', ''),
+    read('docs/verification.md', ''), read('docs/brainstorm.md', ''),
   ])
-  return { summary, specMd, planMd, processMd }
+  return { summary, specMd, planMd, processMd, verificationMd, brainstormMd }
 }
 
 export {

@@ -4,6 +4,7 @@ import { DeleteOutlined } from '@ant-design/icons'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import type { TaskSummary } from '../../lib/superTaskApi'
 import NewSuperTaskModal from './NewSuperTaskModal'
+import FactorySettingsDrawer from './FactorySettingsDrawer'
 import SuperTaskDetailDrawer from './SuperTaskDetailDrawer'
 import SuperTaskCard from './SuperTaskCard'
 import TaskOverviewBar, { matchFilter, type SuperTaskFilter } from './TaskOverviewBar'
@@ -11,7 +12,7 @@ import TaskOverviewBar, { matchFilter, type SuperTaskFilter } from './TaskOvervi
 /**
  * SuperTaskPanel — 看板式任务面板（kanban）。
  *
- * 顶部 TaskOverviewBar(总览统计卡组 + AI 托管 Switch + 新建任务),下方四栏看板
+ * 顶部 TaskOverviewBar(总览统计卡组 + AI 托管 Switch + 工厂设置齿轮 + 新建任务),下方四栏看板
  * (2026-09-02 加 verifying 桶):
  * 队列 / 执行中 / 验证中 / 已完成。每栏:栏头(计数 + 全选 + 删除选中 N,
  * processing/verifying 桶删除禁用)
@@ -41,6 +42,7 @@ export default function SuperTaskPanel(): JSX.Element {
     queue: [], processing: [], verifying: [], finished: [],
   })
   const [newModalOpen, setNewModalOpen] = useState(false)
+  const [settingsOpen, setSettingsOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [filter, setFilter] = useState<SuperTaskFilter>('all')
 
@@ -198,7 +200,12 @@ export default function SuperTaskPanel(): JSX.Element {
   const showLanes = !(loading && isEmpty && !loadedOnce)
   return (
     <div style={{ display: 'flex', flexDirection: 'column', gap: 12, height: '100%', minHeight: 0 }}>
-      <TaskOverviewBar filter={filter} onFilterChange={setFilter} onNewTask={() => setNewModalOpen(true)} />
+      <TaskOverviewBar
+        filter={filter}
+        onFilterChange={setFilter}
+        onNewTask={() => setNewModalOpen(true)}
+        onOpenSettings={() => setSettingsOpen(true)}
+      />
       {showLanes ? (
         <div style={{ display: 'flex', gap: 12, flex: 1, minHeight: 0, alignItems: 'stretch' }}>
           {renderLane('queue', buckets.queue, true)}
@@ -210,6 +217,7 @@ export default function SuperTaskPanel(): JSX.Element {
         <div style={{ padding: 24, textAlign: 'center' }} />
       )}
       <NewSuperTaskModal open={newModalOpen} onClose={() => setNewModalOpen(false)} />
+      <FactorySettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <SuperTaskDetailDrawer taskId={detailId} onClose={() => setDetailId(null)} />
     </div>
   )

@@ -1,5 +1,5 @@
 import { afterEach, beforeAll, beforeEach, describe, expect, it, vi } from 'vitest'
-import { mkdtemp, rm } from 'node:fs/promises'
+import { mkdtemp, rm, writeFile } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import {
@@ -11,24 +11,37 @@ import {
 import {
   __resetForTests, setTaskFactoryState,
 } from '../../../src/server/services/taskFactoryBridge.js'
+import {
+  __resetForTests as resetFactorySettings,
+} from '../../../src/server/services/factorySettings.js'
 import { sessionInbox } from '../../../src/server/services/sessionInbox.js'
 import {
   __setBackgroundRuntime, __resetBackgroundRuntimeForTests,
 } from '../../../src/server/services/backgroundRuntime.js'
 
 let dir: string
+let dataDir: string
 
 beforeAll(async () => {
-  dir = await mkdtemp(join(tmpdir(), 'tf-loop-'))
-  process.env.ZAI_TASK_FACTORY_DIR = dir
+  dataDir = await mkdtemp(join(tmpdir(), 'tf-loop-data-'))
+  process.env.ZAI_DATA_DIR = dataDir
 })
 
 afterAll(async () => {
   delete process.env.ZAI_TASK_FACTORY_DIR
-  await rm(dir, { recursive: true, force: true })
+  delete process.env.ZAI_DATA_DIR
+  if (dir) await rm(dir, { recursive: true, force: true })
+  await rm(dataDir, { recursive: true, force: true })
 })
 
 beforeEach(async () => {
+  // 每用例一个独立 task-factory 目录 —— createPoolTask 跨用例累积会污染
+  // processing 计数(并行上限用例依赖精确的桶数量,2026-09-03 tf-pnsl5m5e)。
+  if (dir) await rm(dir, { recursive: true, force: true })
+  dir = await mkdtemp(join(tmpdir(), 'tf-loop-'))
+  process.env.ZAI_TASK_FACTORY_DIR = dir
+  resetFactorySettings()
+  await rm(join(dataDir, 'factory-settings.json'), { force: true })
   __resetForTests()
   __resetBackgroundRuntimeForTests()
   await setTaskFactoryState({ managedEnabled: true, supervisorSessionId: 'sess-sup' })
@@ -72,10 +85,52 @@ describe('taskFactoryManagedLoop', () => {
     const spy = vi.spyOn(sessionInbox, 'followup')
     startTaskFactoryManagedLoop(20)
     await new Promise((r) => setTimeout(r, 60))
-    // executorTaskId 在后台运行时不可解析 → 不注入 accept（避免幽灵验收）；
+    // executorTaskId 在后台运行时不可解析 → 不注入 accept(避免幽灵验收);
     // 断言无 accept 注入即可
     const contents = injectedContents(spy)
     expect(contents.some((c) => c.includes('action="accept"'))).toBe(false)
     stopTaskFactoryManagedLoopForTests()
+  })
+})
+
+describe('taskFactoryManagedLoop — maxParallelTasks 并行上限(tf-pnsl5m5e)', () => {
+  it('processing 数达到上限 → 跳过 dispatch 注入;accept 不受限仍注入', async () => {
+    await writeFile(join(dataDir, 'factory-settings.json'), JSON.stringify({ maxParallelTasks: 2 }), 'utf-8')
+    resetFactorySettings() // 丢弃上一用例可能留下的缓存,让 tick 读到本用例设置
+    const p1 = await createPoolTask({ title: 'p1' })
+    const p2 = await createPoolTask({ title: 'p2' })
+    await markTaskStatus(p1.id, 'queue-tasks', { status: 'processing', executorTaskId: 'exec-done' })
+    await moveTask(p1.id, 'queue-tasks', 'processing-tasks')
+    await markTaskStatus(p2.id, 'queue-tasks', { status: 'processing', executorTaskId: 'exec-running' })
+    await moveTask(p2.id, 'queue-tasks', 'processing-tasks')
+    await createPoolTask({ title: 'q1' }) // 队列非空,但已满 → 不派发
+    // 覆盖 beforeEach 的 null stub:exec-done 终态,exec-running 在飞
+    __setBackgroundRuntime({
+      get: async (id: string) =>
+        id === 'exec-done' ? { status: 'completed' } : id === 'exec-running' ? { status: 'running' } : null,
+      cancel: async () => ({ ok: true }),
+    } as unknown as Parameters<typeof __setBackgroundRuntime>[0])
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    startTaskFactoryManagedLoop(20)
+    await new Promise((r) => setTimeout(r, 80))
+    stopTaskFactoryManagedLoopForTests()
+    const contents = injectedContents(spy)
+    expect(contents.some((c) => c.includes('action="dispatch"'))).toBe(false)
+    expect(contents.some((c) => c.includes(`action="accept" id="${p1.id}"`))).toBe(true)
+  })
+
+  it('processing 数未达上限 → dispatch 正常注入(含在飞任务)', async () => {
+    await writeFile(join(dataDir, 'factory-settings.json'), JSON.stringify({ maxParallelTasks: 2 }), 'utf-8')
+    resetFactorySettings()
+    const p1 = await createPoolTask({ title: 'under-p1' })
+    await markTaskStatus(p1.id, 'queue-tasks', { status: 'processing', executorTaskId: 'exec-running' })
+    await moveTask(p1.id, 'queue-tasks', 'processing-tasks')
+    await createPoolTask({ title: 'under-q1' })
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    startTaskFactoryManagedLoop(20)
+    await new Promise((r) => setTimeout(r, 80))
+    stopTaskFactoryManagedLoopForTests()
+    const contents = injectedContents(spy)
+    expect(contents.some((c) => c.includes('action="dispatch"'))).toBe(true)
   })
 })

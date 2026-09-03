@@ -90,6 +90,17 @@ describe('SpawnAgentTool — surface', () => {
     expect(desc).toMatch(/TaskOutput/)
   })
 
+  it('base description + subagent_type field mention the opencode provider', () => {
+    // The opencode provider is one of the selectable engines even before it is
+    // registered (registration only affects the dynamic provider list section).
+    const desc = spawnAgentTool.description()
+    expect(desc).toMatch(/opencode/i)
+    const schema = spawnAgentTool.inputSchema as {
+      shape?: Record<string, { description?: string }>
+    }
+    expect(schema.shape?.subagent_type?.description).toMatch(/opencode/)
+  })
+
   it('wraps as an opencc-compatible tool with name + schema', () => {
     const wrapped = wrapSpawnAgentToolAsOpencc() as {
       name: string

@@ -22,7 +22,19 @@ vi.mock('../../lib/eventSource', () => ({
   // 真实模块用 type,这里无需导出。
 }))
 
+// intake 文档 gate(2026-09-03):默认校验通过;单个用例内用 mockResolvedValueOnce
+// 覆盖为缺失场景。
+vi.mock('../../lib/superTaskApi', () => ({
+  checkSuperTaskIntakeDocs: vi.fn(async () => ({ ok: true, missing: [] })),
+}))
+// gate 反馈消息回流走 /agent/prompt(POST);默认成功且非 queued。
+vi.mock('../../lib/api', () => ({
+  api: { post: vi.fn(async () => ({ sessionId: 'intake-1', queued: false })) },
+}))
+
 import { createAgentSession, deleteAgentSession } from '../../lib/agentSessionApi'
+import { checkSuperTaskIntakeDocs } from '../../lib/superTaskApi'
+import { api } from '../../lib/api'
 
 beforeEach(() => {
   useSuperTaskStore.setState({
@@ -135,5 +147,64 @@ describe('NewSuperTaskModal (task-intake 对话窗口 · 2026-09-02 隔离)', ()
     expect(supMessages).toHaveLength(1)
     expect((supMessages[0] as { eventId?: string }).eventId).toBe('sup-msg')
     expect(useAgentStore.getState().sessionId).toBe('sup-1')
+  })
+
+  // ---- intake 文档 gate(2026-09-03)----
+
+  /** 打开弹窗并触发 created 信号,让「完成并关闭」可用。 */
+  async function openWithCreatedTask(): Promise<void> {
+    const onClose = vi.fn()
+    render(<NewSuperTaskModal open onClose={onClose} />)
+    await waitFor(() => expect(screen.getByTestId('intake-conv-mock')).toBeTruthy())
+    useSuperTaskStore.getState().applyTaskFactoryEvent({ action: 'created', payload: { id: 'tf-gate' } })
+    await waitFor(() => expect(screen.getByText(/任务 tf-gate 已创建/)).toBeTruthy())
+  }
+
+  it('文档校验未通过 → 拦截关闭,缺失清单作为消息回流 intake 会话', async () => {
+    vi.mocked(checkSuperTaskIntakeDocs).mockResolvedValueOnce({ ok: false, missing: ['docs/brainstorm.md'] })
+    await openWithCreatedTask()
+
+    fireEvent.click(screen.getByRole('button', { name: '完成并关闭' }))
+
+    await waitFor(() => {
+      expect(screen.getByTestId('intake-gate-warning')).toBeTruthy()
+    })
+    expect(screen.getByText(/缺少 docs\/brainstorm\.md/)).toBeTruthy()
+    // 未关闭、未删会话
+    expect(deleteAgentSession).not.toHaveBeenCalled()
+    // 反馈消息已 POST 到 intake 会话
+    expect(api.post).toHaveBeenCalledWith(
+      '/agent/prompt',
+      expect.objectContaining({
+        sessionId: 'intake-1',
+        prompt: expect.stringContaining('docs/brainstorm.md'),
+      }),
+      expect.anything(),
+    )
+  })
+
+  it('gate 拦截后可「强制关闭」绕过校验并正常清理会话', async () => {
+    vi.mocked(checkSuperTaskIntakeDocs).mockResolvedValueOnce({ ok: false, missing: ['docs/spec.md'] })
+    await openWithCreatedTask()
+
+    fireEvent.click(screen.getByRole('button', { name: '完成并关闭' }))
+    await waitFor(() => expect(screen.getByTestId('intake-gate-warning')).toBeTruthy())
+    expect(checkSuperTaskIntakeDocs).toHaveBeenCalledTimes(1)
+
+    fireEvent.click(screen.getByRole('button', { name: /强\s*制\s*关\s*闭/ }))
+    await waitFor(() => expect(deleteAgentSession).toHaveBeenCalledWith('intake-1'))
+    // 强制关闭不再触发校验
+    expect(checkSuperTaskIntakeDocs).toHaveBeenCalledTimes(1)
+    // 全局 sessionId 未被污染
+    expect(useAgentStore.getState().sessionId).toBe('sup-1')
+  })
+
+  it('校验接口异常 → fail open 放行关闭(不把用户困在弹窗)', async () => {
+    vi.mocked(checkSuperTaskIntakeDocs).mockRejectedValueOnce(new Error('boom'))
+    await openWithCreatedTask()
+
+    fireEvent.click(screen.getByRole('button', { name: '完成并关闭' }))
+    await waitFor(() => expect(deleteAgentSession).toHaveBeenCalledWith('intake-1'))
+    expect(api.post).not.toHaveBeenCalled()
   })
 })

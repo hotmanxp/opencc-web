@@ -88,15 +88,15 @@ import type {
  * docs/superpowers/plans/2026-08-27-inprocess-print-multi-session-runtime.md
  * 与 docs/superpowers/specs/2026-08-30-inproc-repl-extract-design.md。
  */
-function resolveRuntimeCore(settings: ZaiSettings): RuntimeCore {
+export function resolveRuntimeCore(settings: ZaiSettings): RuntimeCore {
   const env = process.env.ZAI_RUNTIME_CORE
   if (env !== undefined && env !== '') {
     if (env === 'inproc' || env === 'spawn' || env === 'default' || env === 'repl') return env
-    return 'default'
+    return 'repl'
   }
   const s = settings.runtimeCore
   if (s === 'inproc' || s === 'spawn' || s === 'default' || s === 'repl') return s
-  return 'default'
+  return 'repl'
 }
 
 let runtime: OpenccRuntime | null = null
@@ -104,8 +104,8 @@ let currentSessionId: string | null = null
 // zai patch (2026-08-28): initAgentRuntime 解析出的核心运行时缓存,供下游按
 // 运行时分支(如 SubagentNotifier 在 inproc 下跳过
 // server 注入——通知由 vendor print 环的 commandQueue drain 原生投递)。
-let activeRuntimeCore: RuntimeCore = 'default'
-/** 当前核心运行时;'default' 也是 initAgentRuntime 未跑完时的安全默认值。 */
+let activeRuntimeCore: RuntimeCore = 'repl'
+/** 当前核心运行时;'repl' 也是 initAgentRuntime 未跑完时的安全默认值(spec §5.1 未配置兜底)。 */
 export function getRuntimeCore(): RuntimeCore {
   return activeRuntimeCore
 }
@@ -376,7 +376,7 @@ export function __resetAgentRuntimeForTests(): void {
   runtime = null
   transcriptStore = null
   serverCwd = null
-  activeRuntimeCore = 'default'
+  activeRuntimeCore = 'repl'
   sessionControllers.clear()
   // Unregister config-gated subagent providers (dsh) so repeated test
   // boots don't stack duplicate registrations.
@@ -430,7 +430,7 @@ export function hasActiveQuery(sessionId: string): boolean {
  * subagent config object.
  */
 async function readSubagentConfigSafe(
-  name: 'opencc' | 'dsh',
+  name: 'opencc' | 'dsh' | 'opencode',
 ): Promise<unknown | undefined> {
   try {
     const settings = await readZaiSettings()
@@ -514,6 +514,9 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
     const applyDsh = (subagentMod as unknown as {
       applyDshProvider?: (registry: unknown, config?: unknown) => (() => void) | undefined
     }).applyDshProvider
+    const applyOpencode = (subagentMod as unknown as {
+      applyOpencodeProvider?: (registry: unknown, config?: unknown) => (() => void) | undefined
+    }).applyOpencodeProvider
     const getSubagentRegistry = (subagentMod as unknown as {
       getSubagentRegistry?: () => {
         registerProvider: (provider: { name: string }) => void
@@ -546,6 +549,22 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       } else if (dshConfig !== undefined) {
         console.warn(
           '[initAgentRuntime] dsh subagent symbols missing but settings.subagents.dsh is configured — did you forget to rebuild core?',
+        )
+      }
+      // zai patch (2026-09-03): `opencode` registers ONLY when
+      // `settings.subagents.opencode.enabled === true` — spawning a real
+      // `opencode run` child needs an operator-installed opencode CLI and its
+      // own credentials. Same config-gated shape as dsh.
+      const opencodeConfig = await readSubagentConfigSafe('opencode')
+      if (typeof applyOpencode === 'function') {
+        const opencodeDisposer = applyOpencode(registry, opencodeConfig)
+        if (typeof opencodeDisposer === 'function') {
+          subagentProviderDisposers.push(opencodeDisposer)
+          console.log('[initAgentRuntime] opencode subagent provider registered (subagent_type: \'opencode\')')
+        }
+      } else if (opencodeConfig !== undefined) {
+        console.warn(
+          '[initAgentRuntime] opencode subagent symbols missing but settings.subagents.opencode is configured — did you forget to rebuild core?',
         )
       }
     }

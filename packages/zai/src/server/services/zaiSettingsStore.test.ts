@@ -156,4 +156,17 @@ describe('zaiSettingsStore', () => {
     expect(isValidOutputStyle(undefined)).toBe(false)
     expect(isValidOutputStyle({})).toBe(false)
   })
+
+  it("resolveRuntimeCore normalizes missing / invalid to 'repl' (spec 2026-08-30 §5.1)", async () => {
+    const { resolveRuntimeCore } = await import('./zaiSettingsStore.js')
+    // 未配置 / 非法值 → 'repl'(不再回落 'default')
+    expect(resolveRuntimeCore({})).toBe('repl')
+    expect(resolveRuntimeCore({ runtimeCore: undefined })).toBe('repl')
+    expect(resolveRuntimeCore({ runtimeCore: 'bogus' as never })).toBe('repl')
+    // 显式合法值原样保留
+    expect(resolveRuntimeCore({ runtimeCore: 'default' })).toBe('default')
+    expect(resolveRuntimeCore({ runtimeCore: 'inproc' })).toBe('inproc')
+    expect(resolveRuntimeCore({ runtimeCore: 'spawn' })).toBe('spawn')
+    expect(resolveRuntimeCore({ runtimeCore: 'repl' })).toBe('repl')
+  })
 })

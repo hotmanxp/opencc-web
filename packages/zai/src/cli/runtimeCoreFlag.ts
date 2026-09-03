@@ -1,10 +1,10 @@
 /**
- * `applyRuntimeCoreFlag` — 把 CLI `--runtimeCore=default|inproc|spawn` 直接落到
+ * `applyRuntimeCoreFlag` — 把 CLI `--runtimeCore=default|inproc|spawn|repl` 直接落到
  * `process.env.ZAI_RUNTIME_CORE`,并打印结果。
  *
  * 为什么要在 CLI 入口处理而不是直接交给 `resolveRuntimeCore`:
- *   - `resolveRuntimeCore` 的优先级是 flag(env)> settings > default,只看 env
- *     不动 env;CLI flag 的语义是"强制覆盖",必须在 spawn 出 user process /
+ *   - `resolveRuntimeCore` 的优先级是 flag(env)> settings > 'repl'(spec
+ *     2026-08-30 §5.1),只看 env 不动 env;CLI flag 的语义是"强制覆盖",必须在 spawn 出 user process /
  *     解析 settings 之前落到 env 上,`initAgentRuntime` 才会读到正确值。
  *   - 启动日志(`[initAgentRuntime] runtimeCore=... (ZAI_RUNTIME_CORE=...)`)以
  *     env 实际值为锚;在 CLI 入口打可让用户立刻看到 flag 是否生效。

@@ -6,6 +6,7 @@ import { join } from 'node:path'
 import {
   createPoolTask, listTasks, moveTask, markTaskStatus,
   deleteTasks, getTaskDetails, getTaskSummary, taskFactoryRoot, emitTaskFactoryEvent,
+  checkTaskIntakeDocs,
   TASK_YAML_FILENAME, LEGACY_INDEX_MD_FILENAME,
   sortTasksByPriority, normalizePriority, PR_ORDER, DEFAULT_TASK_PRIORITY, TASK_PRIORITIES,
 } from '../../src/opencc-src/server/taskFactoryFiles.js'
@@ -56,10 +57,17 @@ describe('taskFactoryFiles (task.yaml 2026-09-02)', () => {
     await expect(deleteTasks([s.id])).rejects.toThrow(/processing/)
   })
 
-  it('getTaskDetails 读回 spec/plan/process + summary（不再含 indexMd）', async () => {
+  it('getTaskDetails 读回 spec/plan/process/verification + summary（不再含 indexMd）', async () => {
     const s = await createPoolTask({ title: 'd', spec: '# SPEC' })
+    // 2026-09-03:verification.md 进入 TaskDetails.verificationMd;缺文件时为空串
+    const d0 = await getTaskDetails(s.id)
+    expect(d0?.verificationMd).toBe('')
+    await writeFile(join(dir, 'queue-tasks', s.id, 'docs', 'verification.md'), '# 验证记录\n\n## 轮次 1\n\n结论: PASS\n')
+    await markTaskStatus(s.id, 'queue-tasks', { verifierTaskId: 'vrf-1' })
     const d = await getTaskDetails(s.id)
     expect(d?.specMd).toContain('# SPEC')
+    expect(d?.verificationMd).toContain('## 轮次 1')
+    expect(d?.summary.verifierTaskId).toBe('vrf-1')
     expect(d?.summary.title).toBe('d')
     // TaskDetails 不再含 indexMd 字段(2026-09-02)
     expect((d as unknown as { indexMd?: string } | null)?.indexMd).toBeUndefined()
@@ -396,5 +404,50 @@ describe('taskFactoryFiles legacy index.md 兼容 (2026-09-02)', () => {
     expect(sum?.description).toBe('仅供迁移测试。')
     expect(existsSync(join(dirQ, LEGACY_INDEX_MD_FILENAME))).toBe(false)
     expect(existsSync(join(dirQ, TASK_YAML_FILENAME))).toBe(true)
+  })
+})
+
+describe('checkTaskIntakeDocs intake 文档强校验 (2026-09-03)', () => {
+  it('刚创建的任务(骨架 spec/plan + 无 brainstorm)三份全缺失', async () => {
+    const s = await createPoolTask({ title: 'gate-empty' })
+    const check = await checkTaskIntakeDocs(s.id)
+    expect(check).not.toBeNull()
+    expect(check?.ok).toBe(false)
+    expect(check?.missing.sort()).toEqual(['docs/brainstorm.md', 'docs/plan.md', 'docs/spec.md'])
+  })
+
+  it('显式传入 spec/plan 内容 + 写 brainstorm 后 ok', async () => {
+    const s = await createPoolTask({
+      title: 'gate-ok',
+      spec: '# 需求规格\n\n任务目标:支持导出 CSV;验收标准:命令行产出 result.csv 且包含表头行。',
+      plan: '# 执行计划\n\n1. 实现 exportCsv 函数并补充单元测试覆盖空数据与大数据量场景。',
+    })
+    await writeFile(join(dir, 'queue-tasks', s.id, 'docs', 'brainstorm.md'), '# 讨论纪要\n\n用户确认导出格式为 CSV,编码 UTF-8,含 BOM 以兼容 Excel 打开。', 'utf-8')
+    const check = await checkTaskIntakeDocs(s.id)
+    expect(check?.ok).toBe(true)
+    expect(check?.missing).toEqual([])
+  })
+
+  it('空文件与纯标题/占位行视为缺失;内容过短(<20 非空白字符)也缺失', async () => {
+    const s = await createPoolTask({ title: 'gate-partial', spec: '# SPEC\n\n- abcdefghijklmnopqrst' })
+    // spec: "abcdefghijklmnopqrst" 恰好 20 字符 → 有实质内容
+    await writeFile(join(dir, 'queue-tasks', s.id, 'docs', 'plan.md'), '', 'utf-8')
+    await writeFile(join(dir, 'queue-tasks', s.id, 'docs', 'brainstorm.md'), '# 讨论纪要\n\n（占位）', 'utf-8')
+    const check = await checkTaskIntakeDocs(s.id)
+    expect(check?.ok).toBe(false)
+    expect(check?.missing.sort()).toEqual(['docs/brainstorm.md', 'docs/plan.md'])
+  })
+
+  it('任务不存在返回 null', async () => {
+    expect(await checkTaskIntakeDocs('tf-nonexist')).toBeNull()
+  })
+
+  it('getTaskDetails 返回 brainstormMd(缺失时为空串)', async () => {
+    const s = await createPoolTask({ title: 'gate-detail' })
+    const d1 = await getTaskDetails(s.id)
+    expect(d1?.brainstormMd).toBe('')
+    await writeFile(join(dir, 'queue-tasks', s.id, 'docs', 'brainstorm.md'), '# 纪要\n\n内容', 'utf-8')
+    const d2 = await getTaskDetails(s.id)
+    expect(d2?.brainstormMd).toContain('内容')
   })
 })

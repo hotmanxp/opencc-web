@@ -18,9 +18,27 @@ import { buildTool, type Tool, type ToolDef } from '../Tool.js'
 import { lazySchema } from '../utils/lazySchema.js'
 import type { ScopedMcpServerConfig } from '../services/mcp/types.js'
 import type { MainAgentConfig, MainAgentLoadContext } from './mainAgents.js'
+import { stripCodingSections } from './mainAgents-promptSections.js'
 
 /** AgentCreator 内置 agent 的固定 name(settings.mainAgent 持久化用)。 */
 export const AGENT_CREATOR_MAIN_AGENT_NAME = 'agent-creator'
+
+/**
+ * 内置 agent 名单 —— 外置文件与其重名会触发覆盖 warning。
+ * **单一事实源**:定义提至此处供提示词插值;新增内置 agent 时在此追加
+ * (单测 mainAgents-builtinNames.test.ts 断言与 getBuiltinMainAgents()
+ * 实际集合一致,防再漂移)。
+ */
+export const BUILTIN_MAIN_AGENT_NAMES: ReadonlySet<string> = new Set([
+  'default',
+  'office',
+  'agent-creator',
+  'task-factory',
+  'task-intake',
+])
+
+/** 供提示词/文档插值的展示形态,如 "default / office / ...". */
+const BUILTIN_NAMES_DISPLAY = [...BUILTIN_MAIN_AGENT_NAMES].join(' / ')
 
 /** AgentCreator 工具白名单 —— 创作外置 agent 需要读写文件 + 查询能力。 */
 const AGENT_CREATOR_TOOL_ALLOWLIST: ReadonlySet<string> = new Set([
@@ -30,7 +48,7 @@ const AGENT_CREATOR_TOOL_ALLOWLIST: ReadonlySet<string> = new Set([
   'Grep', // GrepTool
   'Glob', // GlobTool
   'Bash', // BashTool
-  'WebFetch', // WebFetchTool
+  'WebSearch', // WebSearchTool — 查同类 agent 设计参考;WebFetch 因内网受限不入白名单
   'Skill', // SkillTool
   'AskUserQuestion', // AskUserQuestionTool
 ])
@@ -85,7 +103,7 @@ module.exports = (ctx) => ({
     ...origin,
   ],
   tools: (origin) => origin.filter((t) =>
-    ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebFetch', 'AskUserQuestion'].includes(t.name),
+    ['Read', 'Edit', 'Write', 'Glob', 'Grep', 'WebSearch', 'AskUserQuestion'].includes(t.name),
   ),
   // mcp: (origin) => ({ ...origin, codegraph: { type: 'stdio', command: 'codegraph' } }),
 })
@@ -120,7 +138,7 @@ You have a dedicated tool \`ValidateMainAgent\` (input \`filePath\` = absolute p
 - the file exists and loads (CJS/ESM, single object or array);
 - every agent's \`name\` is a non-empty string and \`description\` is a string;
 - \`systemPrompt\` / \`tools\` / \`mcp\` are functions when present;
-- in-file duplicates and collisions with built-in agents (default / office / agent-creator) produce warnings.
+- in-file duplicates and collisions with built-in agents (${BUILTIN_NAMES_DISPLAY}) produce warnings.
 
 **After every create or update of an external agent file, you MUST validate it by calling the \`ValidateMainAgent\` tool (passing \`filePath\`)** and report the result truthfully; if validation fails, fix the file and re-validate until it passes. **Do NOT reimplement the validation logic manually** (reading the source with Grep/Read instead of calling the tool is wrong) — just call the \`ValidateMainAgent\` tool and use its authoritative result.
 
@@ -159,7 +177,7 @@ Checks performed:
 - \`systemPrompt\` / \`tools\` / \`mcp\` are functions if present (each is an
   (origin) => new slot).
 - Duplicate names inside the same file, or collision with built-in agents
-  (default / office / agent-creator), produce a warning.
+  (${BUILTIN_NAMES_DISPLAY}), produce a warning.
 
 Call this tool after writing/updating a main agent file to confirm it is valid.
 `
@@ -193,18 +211,6 @@ const validateOutputSchema = lazySchema(() =>
 type ValidateOutputSchema = ReturnType<typeof validateOutputSchema>
 
 export type ValidateMainAgentOutput = z.infer<ValidateOutputSchema>
-
-/**
- * 与内置 agent 重名会触发 warning(外置覆盖内置是有意为之,仅提示)。
- * 名单与 mainAgents.ts getBuiltinMainAgents() 的内置列表保持同步;
- * 新增内置 agent 时记得在此同步追加。
- */
-const BUILTIN_MAIN_AGENT_NAMES = new Set([
-  'default',
-  'office',
-  'agent-creator',
-  'task-factory',
-])
 
 /** 校验单个 agent 配置对象是否符合 MainAgentConfig 契约。 */
 export function validateMainAgentConfig(value: unknown): {
@@ -365,7 +371,7 @@ export const ValidateMainAgentTool = buildTool({
 export const agentCreatorMainAgent: MainAgentConfig = {
   name: AGENT_CREATOR_MAIN_AGENT_NAME,
   description: 'Agent创作助手 —— 针对特定场景,帮你创建、定制专属Agent',
-  systemPrompt: (origin) => [AGENT_CREATOR_PROMPT, ...origin],
+  systemPrompt: (origin) => [AGENT_CREATOR_PROMPT, ...stripCodingSections(origin)],
   tools: (origin) => [
     ...origin.filter((tool: Tool) =>
       AGENT_CREATOR_TOOL_ALLOWLIST.has(tool.name),

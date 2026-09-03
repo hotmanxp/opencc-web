@@ -6,8 +6,28 @@ import remarkGfm from 'remark-gfm'
 import { MarkdownText } from '../markdown/MarkdownText.js'
 import { fetchSuperTaskDetail } from '../../lib/superTaskApi'
 import { subscribeTaskEvents } from '../../lib/taskApi'
-import type { TaskDetails } from '../../lib/superTaskApi'
+import type { TaskDetails, TaskSummary } from '../../lib/superTaskApi'
 import { toRendered, type RenderedEvent } from './processEventRenderer'
+
+/**
+ * 按「当前干活的 Agent」挑要订阅的事件流:
+ * - verifying 桶 / finished 桶 → 优先 verifier 流(verifier 是验证阶段与收尾的
+ *   最后工作者);verifierTaskId 缺失(旧任务)回落 executor 流。
+ * - 其余(processing/queue/paused) → executor 流。
+ */
+function pickActiveStream(s: TaskSummary | undefined): {
+  id: string | null
+  role: 'executor' | 'verifier' | null
+} {
+  if (!s) return { id: null, role: null }
+  const executor = s.executorTaskId ?? null
+  const verifier = s.verifierTaskId ?? null
+  if (s.bucket === 'verifying-tasks' || s.bucket === 'finished-tasks') {
+    if (verifier) return { id: verifier, role: 'verifier' }
+    return { id: executor, role: executor ? 'executor' : null }
+  }
+  return { id: executor, role: executor ? 'executor' : null }
+}
 
 /** 执行过程事件帧（taskApi.subscribeTaskEvents 产出，字段对齐 taskApi.SseFrame）。 */
 interface EventFrame {
@@ -70,18 +90,19 @@ export default function SuperTaskDetailDrawer({
     }
   }, [taskId])
 
-  // executor 存在时订阅执行器事件流；executorTaskId 可能晚于首帧详情出现
-  // （任务先创建、后派发执行子 Agent），因此以 detail 变化驱动订阅。
-  const executorId = detail?.summary.executorTaskId ?? null
+  // 活跃子 Agent(executor 或 verifier)存在时订阅其事件流;task id 可能晚于
+  // 首帧详情出现(任务先创建、后派发子 Agent),因此以 detail 变化驱动订阅。
+  const active = pickActiveStream(detail?.summary)
+  const activeStreamId = active.id
   useEffect(() => {
-    if (!executorId) {
+    if (!activeStreamId) {
       setEvents([])
       return
     }
     const ctrl = new AbortController()
     const run = async (): Promise<void> => {
       try {
-        for await (const frame of subscribeTaskEvents(executorId, 0, ctrl.signal)) {
+        for await (const frame of subscribeTaskEvents(activeStreamId, 0, ctrl.signal)) {
           setEvents((p) => [...p, frame as EventFrame].slice(-200))
         }
       } catch {
@@ -90,7 +111,7 @@ export default function SuperTaskDetailDrawer({
     }
     void run()
     return () => ctrl.abort()
-  }, [executorId])
+  }, [activeStreamId])
 
   // 把 SSE 帧流翻译成结构化渲染事件 —— 翻译规则全在 processEventRenderer.ts
   const rendered = useMemo(
@@ -132,34 +153,61 @@ export default function SuperTaskDetailDrawer({
           <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
             状态:{detail.summary.status} · Agent:{detail.summary.agent ?? 'default'}
             {detail.summary.executorTaskId ? ` · 执行任务:${detail.summary.executorTaskId}` : ''}
+            {detail.summary.verifierTaskId ? ` · 验证任务:${detail.summary.verifierTaskId}` : ''}
           </Typography.Paragraph>
           <Tabs
             items={[
               {
                 key: 'process',
                 label: '执行过程',
-                children: detail.summary.executorTaskId ? (
-                  rendered.length > 0 ? (
-                    <div style={{ maxHeight: 'calc(100vh - 280px)', overflow: 'auto' }}>
-                      <Timeline
-                        items={rendered.map((r) => ({
-                          key: rowKey(r),
-                          color: dotColor(r),
-                          children: (
-                            <RenderedEventRow
-                              ev={r}
-                              expanded={expanded}
-                              toggle={toggleExpand}
-                            />
-                          ),
-                        }))}
-                      />
-                    </div>
-                  ) : (
-                    <Typography.Text type="secondary">等待执行事件...</Typography.Text>
-                  )
+                children: activeStreamId ? (
+                  <>
+                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                      当前事件流来源:{active.role === 'verifier' ? '验证 Agent(verifier)' : '执行 Agent(executor)'}
+                      {` · task ${activeStreamId}`}
+                    </Typography.Text>
+                    {rendered.length > 0 ? (
+                      <div style={{ maxHeight: 'calc(100vh - 310px)', overflow: 'auto', marginTop: 8 }}>
+                        <Timeline
+                          items={rendered.map((r) => ({
+                            key: rowKey(r),
+                            color: dotColor(r),
+                            children: (
+                              <RenderedEventRow
+                                ev={r}
+                                expanded={expanded}
+                                toggle={toggleExpand}
+                              />
+                            ),
+                          }))}
+                        />
+                      </div>
+                    ) : (
+                      <div style={{ marginTop: 8 }}>
+                        <Typography.Text type="secondary">等待执行事件...</Typography.Text>
+                      </div>
+                    )}
+                  </>
                 ) : (
-                  <Typography.Text type="secondary">尚未派生执行子 Agent</Typography.Text>
+                  <Typography.Text type="secondary">尚未派生执行/验证子 Agent</Typography.Text>
+                ),
+              },
+              {
+                key: 'verification',
+                label: '验证记录',
+                children: detail.verificationMd ? (
+                  <MarkdownText text={detail.verificationMd} />
+                ) : (
+                  <Typography.Text type="secondary">尚无验证记录</Typography.Text>
+                ),
+              },
+              {
+                key: 'brainstorm',
+                label: 'brainstorm.md',
+                children: detail.brainstormMd ? (
+                  <MarkdownText text={detail.brainstormMd} />
+                ) : (
+                  <Typography.Text type="secondary">尚无讨论纪要</Typography.Text>
                 ),
               },
               {

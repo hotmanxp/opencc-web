@@ -24,8 +24,15 @@ export interface SuperTaskStore {
   /** 最近一次 task_factory.created 的任务 id —— 新建任务弹窗据此显示完成条。 */
   lastCreatedTaskId: string | null
   /** 是否已成功加载过至少一次。面板的 loading 占位只应出现在首载;
-   *  3s 轮询每轮都会置 loading,若不过滤会让空看板反复闪(2026-09-02 修)。 */
+   *  2026-09-03 起带 lastHash 的轮询不再置 loading(短路轮询无抖动),
+   *  首载过滤语义保持不变。 */
   loadedOnce: boolean
+  /**
+   * 最近一次全量响应带回的 hash(2026-09-03 快照缓存优化)。每轮 load 以
+   * `?since=` 回传,服务端内容未变时短路,前端不 set 不重渲染。
+   * null = 下一轮强制全量(error/resetSupervisorSession 后)。
+   */
+  lastHash: string | null
   load: () => Promise<void>
   deleteTasks: (ids: string[]) => Promise<void>
   setManaged: (enabled: boolean) => Promise<void>
@@ -53,19 +60,29 @@ export const useSuperTaskStore = create<SuperTaskStore>((set, get) => ({
   supervisorSessionId: null,
   lastCreatedTaskId: null,
   loadedOnce: false,
+  lastHash: null,
   load: async () => {
-    set({ loading: true })
+    const { loadedOnce, lastHash } = get()
+    // 已首载且有缓存 hash → 不置 loading(3s 轮询大概率短路,置位反而每轮抖动);
+    // 首轮无 hash 走占位逻辑与旧语义一致。
+    if (!loadedOnce || !lastHash) set({ loading: true })
     try {
-      const dto = await fetchSuperTasks()
+      const dto = await fetchSuperTasks(lastHash)
+      if (dto.modified === false) {
+        // 服务端确认内容未变:不写 buckets/managed/sid,不触发任何 set → 无重渲染。
+        return
+      }
       set({
         buckets: dto.buckets,
         managed: dto.managed,
         supervisorSessionId: dto.supervisorSessionId ?? null,
+        lastHash: dto.hash ?? null,
         loading: false,
         loadedOnce: true,
       })
     } catch (err) {
-      set({ error: err instanceof Error ? err.message : String(err), loading: false })
+      // 报错后本地 hash 失效:下一轮强制全量,避免服务端短路导致持续看不到更新。
+      set({ error: err instanceof Error ? err.message : String(err), loading: false, lastHash: null })
     }
   },
   deleteTasks: async (ids) => {
@@ -79,9 +96,11 @@ export const useSuperTaskStore = create<SuperTaskStore>((set, get) => ({
   resetSupervisorSession: async () => {
     await resetSupervisorSessionApi()
     // 后端已 broadcast state.changed{payload:{supervisorSessionId:null,...}},
-    // SSE 触发 applyTaskFactoryEvent 会同步本地 store。这里不立即 set,
+    // SSE 触发 applyTaskFactoryEvent 会同步本地 store。这里不立即 set 其它字段,
     // 等 SSE 事件走完一遍,避免与 broadcast 抢写入时序。
+    // 但服务端 sid/managed 已变、本地 hash 必然过期 → 清空强制下一轮全量。
     // reload 由 UI 层负责(让看板 / 主管 transcript 干净同步)。
+    set({ lastHash: null })
   },
   start: async (id) => { await startSuperTask(id); await get().load() },
   pause: async (id) => { await pauseSuperTask(id); await get().load() },

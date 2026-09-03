@@ -18,9 +18,12 @@
  */
 
 import { Router, type IRouter } from 'express'
+import { execFile } from 'node:child_process'
+import { promisify } from 'node:util'
+import { existsSync, statSync } from 'node:fs'
 import {
-  taskFactoryListTasks as listTasks, getTaskSummary, getTaskDetails, deleteTasks,
-  moveTask, markTaskStatus,
+  getTasksSnapshot, getTaskSummary, getTaskDetails, deleteTasks,
+  moveTask, markTaskStatus, checkTaskIntakeDocs, getSubagentRegistry,
 } from '@zn-ai/zn-agent-core'
 import {
   getTaskFactoryState,
@@ -28,20 +31,197 @@ import {
   injectSupervisorCommand,
 } from '../services/taskFactoryBridge.js'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
+import {
+  FactorySettingsValidationError,
+  factorySettingsPatchSchema,
+  getFactorySettings,
+  setFactorySettings,
+} from '../services/factorySettings.js'
+import { sweepArchiveFinishedTasks } from '../services/historyArchive.js'
+import { readZaiSettings, updateZaiSettings } from '../services/zaiSettingsStore.js'
+
+const execFileAsync = promisify(execFile)
 
 const router: IRouter = Router()
 const ALLOWED_ACTIONS = ['dispatch', 'resume', 'accept', 'pause'] as const
 type InjectAction = (typeof ALLOWED_ACTIONS)[number]
 
-router.get('/super-tasks', async (_req, res) => {
-  const [buckets, state] = await Promise.all([listTasks(), getTaskFactoryState()])
-  res.json({ buckets, managed: state.managedEnabled, supervisorSessionId: state.supervisorSessionId })
+/** spawnAgent provider 白名单(注册/探测端点共用;向导架构可扩展)。 */
+const SPAWN_AGENT_NAMES = ['opencc', 'dsh', 'opencode'] as const
+
+/** `which <cmd>` 探测全局命令。失败/未找到 → found=false。 */
+async function whichProbe(cmd: string): Promise<{ found: boolean; path: string | null }> {
+  try {
+    const { stdout } = await execFileAsync('which', [cmd])
+    const p = (stdout.trim().split('\n')[0] ?? '').trim()
+    return { found: p.length > 0, path: p || null }
+  } catch {
+    return { found: false, path: null }
+  }
+}
+
+/** 目录存在性徽标(路径空/不存在/非目录 → false)。 */
+function isDirectory(p: string): boolean {
+  if (!p) return false
+  try {
+    return existsSync(p) && statSync(p).isDirectory()
+  } catch {
+    return false
+  }
+}
+
+/**
+ * GET /super-tasks — 列表 + since-hash 短路(2026-09-03 性能优化)。
+ * hash = fingerprint|managed|supervisorSessionId,覆盖整个 DTO:四桶变化(core
+ * 快照缓存指纹)或托管开关/主管会话 id 变化都会使 hash 变化。请求带
+ * `?since=<hash>` 且命中 → 返回 `{ modified:false, hash }` 极小响应(不含
+ * buckets/managed/supervisorSessionId),前端据此跳过重渲染。不带 since 的
+ * 旧调用方拿到 modified:true + 原有全部字段,向后兼容。
+ */
+router.get('/super-tasks', async (req, res) => {
+  // 返回列表前先扫一次过期终态归档(finished-tasks → history-tasks,tf-xrlcxuoi)。
+  // sweep 内部 try/catch + in-flight 去重,永不抛出;此处 catch 为双保险,
+  // 绝不阻塞/拖垮 3s 轮询。
+  await sweepArchiveFinishedTasks().catch(() => {})
+  const [{ fingerprint, buckets }, state] = await Promise.all([getTasksSnapshot(), getTaskFactoryState()])
+  const hash = `${fingerprint}|${String(state.managedEnabled)}|${String(state.supervisorSessionId)}`
+  const since = typeof req.query.since === 'string' ? req.query.since : undefined
+  if (since !== undefined && since === hash) {
+    return res.json({ modified: false, hash })
+  }
+  res.json({
+    modified: true,
+    hash,
+    buckets,
+    managed: state.managedEnabled,
+    supervisorSessionId: state.supervisorSessionId,
+  })
+})
+
+// ─── 工厂设置(~/.zai/factory-settings.json)────────────────────────────
+// 注意:这些静态段路由必须注册在 /super-tasks/:id 之前,否则 `settings` /
+// `spawn-agents` 会被 :id 吞掉。
+
+/**
+ * GET /api/super-tasks/settings — 当前工厂配置(含默认值合并)+ 目录存在性
+ * 徽标(docsDirExists / repoRootExists 为派生字段,不进 PUT schema)。
+ */
+router.get('/super-tasks/settings', async (_req, res) => {
+  const s = await getFactorySettings()
+  res.json({
+    ...s,
+    docsDirExists: isDirectory(s.docsDir),
+    repoRootExists: isDirectory(s.repoRoot),
+  })
+})
+
+/**
+ * PUT /api/super-tasks/settings — partial patch + zod 校验(含 maxParallelTasks
+ * 2–8),非法值 400。成功返回合并后的完整配置。
+ */
+router.put('/super-tasks/settings', async (req, res) => {
+  const parsed = factorySettingsPatchSchema.safeParse(req.body ?? {})
+  if (!parsed.success) {
+    return res.status(400).json({
+      error: 'invalid factory settings',
+      detail: parsed.error.issues.map((i) => `${i.path.join('.')}: ${i.message}`),
+    })
+  }
+  try {
+    const s = await setFactorySettings(parsed.data)
+    res.json({
+      ...s,
+      docsDirExists: isDirectory(s.docsDir),
+      repoRootExists: isDirectory(s.repoRoot),
+    })
+  } catch (err) {
+    if (err instanceof FactorySettingsValidationError) {
+      return res.status(400).json({ error: err.message, issues: err.issues })
+    }
+    return res.status(500).json({ error: (err as Error).message })
+  }
+})
+
+/**
+ * GET /api/super-tasks/spawn-agents — opencc / dsh / opencode 三个 spawnAgent
+ * provider 的可用性快照:
+ *  - commandFound/commandPath: `which <name>` 探测全局 CLI;
+ *  - registered: ~/.zai/settings.json 是否已有 subagents.<name> 配置块;
+ *  - active: 运行时 getSubagentRegistry().list() 是否包含(opencc/claude-code
+ *    provider 无条件注册 → 通常 active=true;dsh / opencode 在 initAgentRuntime
+ *    按配置注册 → 需 enabled 并重启后 active)。
+ */
+router.get('/super-tasks/spawn-agents', async (_req, res) => {
+  let settings: Awaited<ReturnType<typeof readZaiSettings>> | null = null
+  try {
+    settings = await readZaiSettings()
+  } catch {
+    // settings 缓存未就绪时 registered 一律 false,不阻断端点
+  }
+  let activeNames: string[] = []
+  try {
+    activeNames = getSubagentRegistry().list()
+  } catch {
+    activeNames = []
+  }
+  const agents = []
+  for (const name of SPAWN_AGENT_NAMES) {
+    const { found, path } = await whichProbe(name)
+    agents.push({
+      name,
+      commandFound: found,
+      commandPath: path,
+      registered: settings?.subagents?.[name] !== undefined,
+      active: activeNames.includes(name),
+    })
+  }
+  res.json({ agents })
+})
+
+/**
+ * POST /api/super-tasks/spawn-agents/:name/register — 一键注册:merge 写
+ * ~/.zai/settings.json 的 subagents.<name>(设置 enabled: true,保留该块
+ * 其它键与 settings.json 其它键不动)。dsh / opencode provider 在 initAgentRuntime
+ * 时才注册进 registry,故响应带 restartRequired: true 提示用户重启 zai 服务
+ * 生效(系统不自动重启)。:name 白名单 opencc/dsh/opencode,其余 404。
+ */
+router.post('/super-tasks/spawn-agents/:name/register', async (req, res) => {
+  const name = req.params.name
+  if (!(SPAWN_AGENT_NAMES as readonly string[]).includes(name)) {
+    return res.status(404).json({ error: `unknown spawn agent: ${name}` })
+  }
+  try {
+    const settings = await readZaiSettings()
+    const prev = settings.subagents ?? {}
+    const block =
+      typeof prev[name] === 'object' && prev[name] !== null
+        ? (prev[name] as Record<string, unknown>)
+        : {}
+    await updateZaiSettings({
+      subagents: { ...prev, [name]: { ...block, enabled: true } },
+    })
+    res.json({ ok: true, restartRequired: true })
+  } catch (err) {
+    res.status(500).json({ error: (err as Error).message })
+  }
 })
 
 router.get('/super-tasks/:id', async (req, res) => {
   const d = await getTaskDetails(req.params.id)
   if (!d) return res.status(404).json({ error: `task ${req.params.id} not found` })
   res.json({ task: d })
+})
+
+/**
+ * GET /super-tasks/:id/intake-check — intake 文档强校验(2026-09-03)。
+ * 新建任务弹窗关闭前由前端调用:检查 docs/spec.md / docs/plan.md /
+ * docs/brainstorm.md 是否已填实质内容,返回 { ok, missing }。
+ * 缺失时前端拦截关闭并把清单回流给 task-intake 会话补全。
+ */
+router.get('/super-tasks/:id/intake-check', async (req, res) => {
+  const check = await checkTaskIntakeDocs(req.params.id)
+  if (!check) return res.status(404).json({ error: `task ${req.params.id} not found` })
+  res.json(check)
 })
 
 router.delete('/super-tasks', async (req, res) => {

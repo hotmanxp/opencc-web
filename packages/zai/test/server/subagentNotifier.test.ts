@@ -9,9 +9,9 @@ vi.mock('../../src/server/services/sessionInbox.js', () => ({
   },
 }))
 // subagentNotifier 顶部 import getRuntimeCore(默认值)—— mock 掉避免
-// 测试拉起整个 agentRuntime / core bundle。默认 'default'(注入照常走)。
+// 测试拉起整个 agentRuntime / core bundle。'repl'(spec §5.1 未配置兜底,注入照常走)。
 vi.mock('../../src/server/services/agentRuntime.js', () => ({
-  getRuntimeCore: () => 'default',
+  getRuntimeCore: () => 'repl',
 }))
 
 import {

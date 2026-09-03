@@ -13,7 +13,7 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
     expect(taskFactoryMainAgent.name).toBe(TASK_FACTORY_MAIN_AGENT_NAME)
   })
 
-  it('tools 槽追加 6 个 SuperTasks* 工具 (+List 2026-09-02)', () => {
+  it('tools 槽追加 6 个 SuperTasks* 工具 + CreateWorktree', () => {
     const baseTools = [
       { name: 'Bash' },
       { name: 'Read' },
@@ -24,12 +24,9 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
     if (typeof toolsFactory !== 'function') throw new Error('tools must be a function')
     const result = (toolsFactory as (origin: typeof baseTools) => ReadonlyArray<{ name: unknown }>)(baseTools as never)
     const names = result.map((t) => String(t.name))
-    expect(names).toContain('SuperTasksCreate')
-    expect(names).toContain('SuperTasksList')
-    expect(names).toContain('SuperTasksGet')
-    expect(names).toContain('SuperTasksMove')
-    expect(names).toContain('SuperTasksReset')
-    expect(names).toContain('SuperTasksPause')
+    for (const n of ['SuperTasksCreate', 'SuperTasksList', 'SuperTasksGet', 'SuperTasksMove', 'SuperTasksReset', 'SuperTasksPause', 'CreateWorktree']) {
+      expect(names).toContain(n)
+    }
   })
 
   it('不再包含已删除的 SuperTasksVerify / SuperTasksMarkDone', () => {
@@ -55,18 +52,21 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
       { name: 'SuperTasksMove' },
       { name: 'SuperTasksReset' },
       { name: 'SuperTasksPause' },
+      { name: 'CreateWorktree' },
     ] as const
     const toolsFactory = taskFactoryMainAgent.tools
     if (typeof toolsFactory !== 'function') throw new Error('tools must be a function')
     const result = (toolsFactory as (origin: typeof baseTools) => ReadonlyArray<{ name: unknown }>)(baseTools as never)
     const names = result.map((t) => String(t.name))
-    for (const n of ['SuperTasksCreate', 'SuperTasksList', 'SuperTasksGet', 'SuperTasksMove', 'SuperTasksReset', 'SuperTasksPause']) {
+    for (const n of ['SuperTasksCreate', 'SuperTasksList', 'SuperTasksGet', 'SuperTasksMove', 'SuperTasksReset', 'SuperTasksPause', 'CreateWorktree']) {
       expect(names.filter((x) => x === n)).toHaveLength(1)
     }
   })
 
-  it('description 与 systemPrompt 是英文', async () => {
-    expect(taskFactoryMainAgent.description).toContain('Task Factory supervisor')
+  it('description 为中文 UI 文案,systemPrompt 是英文', async () => {
+    // description 只用于 settings 下拉展示(用户可见 UI 文案),按规范用中文;
+    // systemPrompt 发给模型,保持英文。
+    expect(taskFactoryMainAgent.description).toContain('任务工厂主管')
     const prompt = taskFactoryMainAgent.systemPrompt
     const resolved = typeof prompt === 'function' ? prompt(['origin-line']) : prompt
     const arr = Array.isArray(resolved) ? resolved : [String(resolved)]
@@ -82,6 +82,17 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
     expect(text).toContain('SuperTasksList')
     expect(text).not.toContain('Read <task_dir>/task.yaml')
     expect(text).not.toContain('Read task.yaml')
+    // 2026-09-03:工作目录冲突 + 独立 feature 分支 + commit-id 回写纪律
+    expect(text).toContain('Workspace-conflict discipline')
+    expect(text).toContain('CreateWorktree')
+    expect(text).toContain('Independent feature branch REQUIRED')
+    expect(text).toContain('commit: <full-sha>')
+    // 2026-09-03(合回主干改 PR + 集成验证):不 merge base,走 integration-main + PR
+    expect(text).toContain('Integration verification lane')
+    expect(text).toContain('integration-main')
+    expect(text).toContain('awaits their PR')
+    expect(text).toContain('reset --hard')
+    expect(text).not.toContain('git -C <repoPath> merge task-')
   })
 
   it('六个工厂工具名字一致', () => {

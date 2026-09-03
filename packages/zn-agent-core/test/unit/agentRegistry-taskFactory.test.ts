@@ -2,7 +2,7 @@
  * zai patch (2026-09-01, task-factory): 内置任务主管 agent `task-factory`
  * 注册验证。
  *   1. `loadBuiltinAgents()` 后 agent name='task-factory' 已注册且有 description
- *   2. tools 槽含 SuperTasksCreate / SuperTasksMarkDone 两个工具
+ *   2. tools 槽含 SuperTasksCreate / SuperTasksMove 等流水线工具
  *   3. tools 槽保留默认工具池(SpawnAgent 可用)
  */
 import { describe, expect, it } from 'vitest'
@@ -20,7 +20,8 @@ describe('task-factory builtin agent', () => {
     const tools = await reg.slot([], 'tools', 'sess-1')
     const names = tools.map((t) => t.name)
     expect(names).toContain('SuperTasksCreate')
-    expect(names).toContain('SuperTasksMarkDone')
+    expect(names).toContain('SuperTasksMove')
+    expect(names).toContain('SuperTasksGet')
     expect(reg.resolveAgent('task-factory')?.description).toBeTruthy()
   })
 

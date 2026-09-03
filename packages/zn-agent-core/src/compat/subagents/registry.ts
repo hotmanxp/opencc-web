@@ -4,7 +4,7 @@
  * Capability flags now mirror the dsh `SubagentCapabilities` shape (5 flags,
  * 2026-08-31 alignment), but this stays a naming registry: no `descriptors`,
  * no continuable children. It is just enough surface for AgentTool to route
- * `subagent_type='opencc' | 'dsh'` to a registered provider.
+ * `subagent_type='opencc' | 'dsh' | 'opencode'` to a registered provider.
  *
  * Why minimal still: zai has hardcoded branches in AgentTool.tsx with
  * deep invariants (`useExactTools`, `buildForkedMessages`, `permissionMode:

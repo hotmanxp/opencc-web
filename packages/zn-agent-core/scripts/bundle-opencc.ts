@@ -384,6 +384,23 @@ function assertDtsTargetsResolve(bundleEntryDts: string): void {
     writeFileSync(out, dshDts)
     console.log(`[bundle-opencc]   → ${out}`)
   }
+  {
+    const opencodeDts = [
+      '// Type declarations for the opencode subagent provider',
+      '// apply entry. Mirror src/compat/subagents/opencode/index.ts (only apply is',
+      '// consumed by bundle-entry.ts). Hand-written because the file is only',
+      '// referenced from bundle-entry.ts (excluded from main tsconfig.json).',
+      '// apply is config-gated (dsh shape): returns the unregister disposer only',
+      '// when `config.enabled === true`; undefined otherwise.',
+      "import { SubagentRegistry } from '../index.js';",
+      'export declare function apply(registry: SubagentRegistry, config?: unknown): (() => void) | undefined;',
+      '',
+    ].join('\n')
+    const ocOut = join(SUBAGENT_PROVIDER_DTS_DIR, 'opencode', 'index.d.ts')
+    mkdirSync(dirname(ocOut), { recursive: true })
+    writeFileSync(ocOut, opencodeDts)
+    console.log(`[bundle-opencc]   → ${ocOut}`)
+  }
   for (const [rel, dtsBody] of [
     ['claude-code/index.d.ts', claudeCodeDts],
   ] as const) {

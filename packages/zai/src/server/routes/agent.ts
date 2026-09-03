@@ -1874,7 +1874,7 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
     // 可选 model: 前端在 createNewSession 时会把"用户最近手动选过的模型"
     // 传过来, 让新建会话默认继承. 缺省/'unknown'/空串都视为不指定, 维持
     // 旧行为 (useConversationInfo 看到 'unknown' 就会回退到 runtime.defaultModel).
-    const body = req.body as { model?: unknown; providerId?: unknown; mainAgent?: unknown } | undefined
+    const body = req.body as { model?: unknown; providerId?: unknown; mainAgent?: unknown; cwd?: unknown } | undefined
     const requested = body?.model
     const model =
       typeof requested === 'string' && requested.length > 0 && requested !== 'unknown'
@@ -1905,6 +1905,14 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
         return res.status(400).json({ error: `unknown mainAgent: ${mainAgent}` })
       }
     }
+    // zai patch (2026-09-03, tf-pnsl5m5e 工厂设置): 可选 cwd —— 会话的「逻辑
+    // 工作目录」(任务工厂需求讨论用 factory-settings.docsDir)。transcript
+    // 仍按实例 ctx.cwd 落盘/校验(不改存储语义),这里只写 CwdStore,让
+    // inbox 注入指令(inboxToPendingPrompt → resolveInboxCwd)与
+    // GET /agent/sessions/:id/pwd 报告该目录。非绝对路径忽略。
+    const requestedCwd = typeof body?.cwd === 'string' && path.isAbsolute(body.cwd)
+      ? body.cwd
+      : undefined
     const sessionId = await store.create({
       cwd: ctx.cwd,
       model,
@@ -1920,6 +1928,9 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
       // create 已落盘 transcript,patch 写 meta.mainAgent(await —— 首条
       // prompt 必须能看到冻结值)。
       await store.patch(sessionId, { mainAgent }, { cwd: ctx.cwd })
+    }
+    if (requestedCwd) {
+      CwdStore.set(sessionId, requestedCwd)
     }
     res.json({ sessionId })
   } catch (err) {

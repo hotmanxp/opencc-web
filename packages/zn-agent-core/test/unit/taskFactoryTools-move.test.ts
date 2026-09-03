@@ -78,13 +78,36 @@ describe('superTasksMoveTool — 4×4 桶矩阵合法 12 对', () => {
     })
   }
 
-  it('4×4 中 from === to 的 4 对（self-loop）非法 → throws already exists', async () => {
-    // 自循环在 16 对中属于非法 4 对:目录仍在 from,目标判定为已存在 → 抛错。
+  it('from === to 且不带任何 backfill 参数 → throws "in-place move requires"', async () => {
+    // 自循环 + 无 patch 字段 = 无事可做,必须报错提示(2026-09-03 起自循环
+    // 从"非法"变为"就地回填"语义,只有空回填才拒绝)。
     for (const b of buckets) {
       const id = extractId((await superTasksCreateTool.call({ title: `self-${b}`, cwd: dir })).data.output as string)
       await seed(id, b)
-      await expect(superTasksMoveTool.call({ id, from: b, to: b })).rejects.toThrow(new RegExp(`already exists in ${b}`))
+      await expect(superTasksMoveTool.call({ id, from: b, to: b })).rejects.toThrow(/in-place move requires/)
     }
+  })
+
+  it('from === to == verifying-tasks + verifierTaskId → 就地回填,不移动目录', async () => {
+    const id = extractId((await superTasksCreateTool.call({ title: 'ver-backfill', cwd: dir })).data.output as string)
+    await seed(id, 'verifying-tasks')
+    const r = await superTasksMoveTool.call({ id, from: 'verifying-tasks', to: 'verifying-tasks', verifierTaskId: 'sub-vrf-1' })
+    expect(r.data.output).toContain('verifierTaskId=sub-vrf-1')
+    expect(r.data.output).toContain('patched in place')
+    // 仍在 verifying 桶,状态不变
+    const sum = await getTaskSummary(id, 'verifying-tasks')
+    expect(sum?.status).toBe('verifying')
+    expect(sum?.verifierTaskId).toBe('sub-vrf-1')
+    const ev = events.find((e) => e.action === 'moved' && e.payload.id === id)
+    expect(ev?.payload.inPlace).toBe(true)
+  })
+
+  it('from === to == processing-tasks + executorTaskId → FAIL 重试轮就地回填新 executor id', async () => {
+    const id = extractId((await superTasksCreateTool.call({ title: 'retry-backfill', cwd: dir })).data.output as string)
+    await seed(id, 'processing-tasks')
+    await superTasksMoveTool.call({ id, from: 'processing-tasks', to: 'processing-tasks', executorTaskId: 'sub-exec-2' })
+    const sum = await getTaskSummary(id, 'processing-tasks')
+    expect(sum?.executorTaskId).toBe('sub-exec-2')
   })
 })
 

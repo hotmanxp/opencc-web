@@ -10,6 +10,7 @@
  */
 import type { Tool } from '../Tool.js'
 import type { MainAgentConfig } from './mainAgents.js'
+import { stripCodingSections } from './mainAgents-promptSections.js'
 
 /** Office 内置 agent 的固定 name(settings.mainAgent 持久化用)。 */
 export const OFFICE_MAIN_AGENT_NAME = 'office'
@@ -82,30 +83,17 @@ These are the common corporate work systems on the intranet. Share the relevant 
 - 知鸟管理平台 (Zhi-niao Admin Platform): https://hrmsv3-mlearning-admin.pingan.com.cn/learn/antd/index.html#/login`
 
 /**
- * 默认系统提示词中面向 coding agent 的段落 —— office 场景不需要,
- * systemPrompt 槽把它们从 origin 中过滤掉(其余段落原样保留)。
- * 匹配基于段落自身稳定前缀(来自 constants/prompts.ts 的 section 拼接):
- *   - getSimpleIntroSection:含 "software engineering tasks"、URL 政策、
- *     CYBER_RISK_INSTRUCTION(安全授权工作)
- *   - getSimpleDoingTasksSection("# Doing tasks"):软件工程任务导向、
- *     "重复代码优于过早抽象"、反向兼容 hacks 等
+ * 办公场景不需要默认系统提示词里的编码专属段落(intro 的软件工程定位、
+ * # Doing tasks、# CodeGraph、git ticket 段),统一用 stripCodingSections
+ * 剔除,其余通用段落原样保留。见 mainAgents-promptSections.ts。
  */
-function isOfficeIrrelevantSection(section: string): boolean {
-  const s = section.trim()
-  if (s.startsWith('You are an interactive agent')) return true
-  if (s.startsWith('# Doing tasks')) return true
-  return false
-}
 
 /** Office 办公助手主 Agent 配置。 */
 export const officeMainAgent: MainAgentConfig = {
   name: OFFICE_MAIN_AGENT_NAME,
   description:
     'Office 办公助手 —— 文档、表格、邮件和日常办公任务,工具集精简',
-  systemPrompt: (origin) => [
-    OFFICE_SYSTEM_PROMPT,
-    ...origin.filter((section) => !isOfficeIrrelevantSection(section)),
-  ],
+  systemPrompt: (origin) => [OFFICE_SYSTEM_PROMPT, ...stripCodingSections(origin)],
   tools: (origin) =>
     origin.filter((tool: Tool) => OFFICE_TOOL_ALLOWLIST.has(tool.name)),
 }

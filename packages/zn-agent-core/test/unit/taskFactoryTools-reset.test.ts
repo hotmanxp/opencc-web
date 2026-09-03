@@ -28,19 +28,20 @@ describe('superTasksResetTool — 5 个分支', () => {
   it('verifying-tasks: 移到 processing-tasks + status=processing + executorTaskId cleared + emit reset', async () => {
     const id = extractId((await superTasksCreateTool.call({ title: 'rv', cwd: dir })).data.output as string)
     await moveTask(id, 'queue-tasks', 'processing-tasks')
-    await markTaskStatus(id, 'processing-tasks', { executorTaskId: 'old-sub' })
+    await markTaskStatus(id, 'processing-tasks', { executorTaskId: 'old-sub', verifierTaskId: 'old-vrf' })
     await moveTask(id, 'processing-tasks', 'verifying-tasks')
 
     const r = await superTasksResetTool.call({ id })
     expect(r.data.output).toContain(`Task reset: ${id}`)
     expect(r.data.output).toContain('processing-tasks/status=processing')
-    expect(r.data.output).toContain('executorTaskId cleared')
+    expect(r.data.output).toContain('executorTaskId/verifierTaskId cleared')
 
     // 桶已切到 processing,status=processing
     const sum = await getTaskSummary(id, 'processing-tasks')
     expect(sum?.bucket).toBe('processing-tasks')
     expect(sum?.status).toBe('processing')
     expect(sum?.executorTaskId).toBeNull()
+    expect(sum?.verifierTaskId).toBeNull()
     const idx = await readFile(join(taskDir('processing-tasks', id), TASK_YAML_FILENAME), 'utf-8')
     expect(idx).toContain('status: processing')
     expect(idx).toContain('executorTaskId: null')

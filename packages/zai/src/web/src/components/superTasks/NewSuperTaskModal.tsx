@@ -4,12 +4,15 @@ import AgentConversation from '../../pages/AgentConversation'
 import {
   AgentStoreContext,
   createAgentStore,
+  type AgentMessage,
   type AgentStoreApi,
 } from '../../store/useAgentStore'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import {
   createAgentSession, deleteAgentSession, pickLastSelectedModel,
 } from '../../lib/agentSessionApi'
+import { checkSuperTaskIntakeDocs, fetchFactorySettings } from '../../lib/superTaskApi'
+import { api } from '../../lib/api'
 import { subscribeServerEvents, type StreamHandle } from '../../lib/eventSource'
 import { applyBatchTo } from '../../store/useEventStream'
 import { useAgentStore } from '../../store/useAgentStore'
@@ -59,6 +62,9 @@ export default function NewSuperTaskModal({
   const [resumeDraft, setResumeDraft] = useState<string | null>(null)
   const [bootError, setBootError] = useState<string | null>(null)
   const [busy, setBusy] = useState(false)
+  // intake 文档 gate(2026-09-03):关闭校验失败时记录缺失文档清单,弹窗保持
+  // 打开并展示 warning + 「强制关闭」;补齐后再点「完成并关闭」重新过 gate。
+  const [docGateMissing, setDocGateMissing] = useState<string[] | null>(null)
   const createdBaselineRef = useRef<string | null>(null)
   const streamHandleRef = useRef<StreamHandle | null>(null)
   const lastCreatedTaskId = useSuperTaskStore((s) => s.lastCreatedTaskId)
@@ -109,8 +115,18 @@ export default function NewSuperTaskModal({
       // 不动全局 sessionId。intake store 自己的 sessions 字段此时为空,
       // 这里直接喂给它即可。
       const globalSessions = useAgentStore.getState().sessions
+      // 工厂设置 docsDir(tf-pnsl5m5e):非空时作为需求讨论会话的逻辑 cwd
+      // (后端写 CwdStore);读取失败 / 未配置 → 维持现状(实例 cwd)。
+      let intakeCwd: string | undefined
+      try {
+        const settings = await fetchFactorySettings()
+        if (settings.docsDir) intakeCwd = settings.docsDir
+      } catch {
+        // no-op — docsDir 未配置或服务暂不可达,按现状建会话
+      }
       const sid = await createAgentSession({
         mainAgent: INTAKE_MAIN_AGENT,
+        ...(intakeCwd ? { cwd: intakeCwd } : {}),
         ...pickLastSelectedModel(globalSessions),
       })
       try { window.localStorage.setItem(INTAKE_SESSION_KEY, sid) } catch { /* quota */ }
@@ -157,9 +173,31 @@ export default function NewSuperTaskModal({
   // 关闭:不再需要 setCurrentSession 恢复(全局 sid 本来就没动);只清理
   // intake 资源 —— intake store 本身随 Modal 卸载被 useMemo 回收;intake
   // 会话视 created 决定删/留。
-  async function handleClose(): Promise<void> {
+  //
+  // intake 文档 gate(2026-09-03):任务已创建且非强制关闭时,先校验
+  // docs/spec.md / docs/plan.md / docs/brainstorm.md 是否已填实质内容;
+  // 缺失 → 拦截关闭,把缺失清单作为消息回流 intake 会话引导 AI 补全。
+  // 校验接口异常时 fail open(放行关闭),避免服务端故障把用户困在弹窗里。
+  async function handleClose(force = false): Promise<void> {
     const sid = intakeSid
     const done = Boolean(createdId)
+    if (done && sid && !force) {
+      setBusy(true)
+      let check: Awaited<ReturnType<typeof checkSuperTaskIntakeDocs>> | null = null
+      try {
+        check = await checkSuperTaskIntakeDocs(createdId as string)
+      } catch (err) {
+        console.warn('[NewSuperTaskModal] intake-check failed; fail open:', err)
+      } finally {
+        setBusy(false)
+      }
+      if (check && !check.ok) {
+        setDocGateMissing(check.missing)
+        await notifyIntakeGateMissing(sid, createdId as string, check.missing)
+        return
+      }
+      setDocGateMissing(null)
+    }
     setBusy(true)
     try {
       if (sid) {
@@ -174,8 +212,51 @@ export default function NewSuperTaskModal({
       setIntakeSid(null)
       setResumeDraft(null)
       setBootError(null)
+      setDocGateMissing(null)
       setBusy(false)
       onClose()
+    }
+  }
+
+  // 把缺失文档清单回流到 intake 会话:走 /agent/prompt(服务端同 session
+  // 串行,streaming 中自动 queued),并像 useSubmitPrompt 一样做乐观本地
+  // 上屏(queued 分支交给 AgentInputBox 的 queue watcher,避免重复)。
+  async function notifyIntakeGateMissing(sid: string, taskId: string, missing: string[]): Promise<void> {
+    const text = [
+      `[intake-gate] Document check failed for task ${taskId}.`,
+      `The following required docs are missing or still contain only skeleton placeholders: ${missing.join(', ')}.`,
+      'Per the intake workflow, complete them NOW in the task storage directory with Write/Edit:',
+      'docs/spec.md / docs/plan.md with the discussed content (replace the skeleton placeholders),',
+      'and docs/brainstorm.md with the discussion minutes (goal, acceptance criteria, key decisions',
+      'with rationale, scope boundaries, confirmed priority + dependsOn). After filling them in,',
+      'briefly report what was added — the user will then close this modal again.',
+    ].join(' ')
+    try {
+      const resp = await api.post<{ sessionId: string; queued?: boolean }>('/agent/prompt', {
+        prompt: text,
+        sessionId: sid,
+      }, { headers: { 'X-Session-Id': sid } })
+      if (resp.queued !== true) {
+        intakeStore.setState((s) => ({
+          status: 'streaming' as const,
+          messages: [
+            ...s.messages,
+            {
+              eventId: `user-${Date.now()}-gate`,
+              sessionId: '',
+              ts: Date.now(),
+              turnIndex: 0,
+              type: 'user.text' as const,
+              text,
+              isRenderedPrompt: false,
+              attachments: [],
+            } as AgentMessage,
+          ],
+          sendSeq: s.sendSeq + 1,
+        }))
+      }
+    } catch (err) {
+      console.warn('[NewSuperTaskModal] failed to inject intake-gate feedback:', err)
     }
   }
 
@@ -211,6 +292,21 @@ export default function NewSuperTaskModal({
             action={(
               <Button type="primary" size="small" disabled={busy || status === 'streaming'} onClick={() => void handleClose()}>
                 完成并关闭
+              </Button>
+            )}
+          />
+        )}
+        {docGateMissing && (
+          <Alert
+            type="warning"
+            showIcon
+            data-testid="intake-gate-warning"
+            message={`文档校验未通过:缺少 ${docGateMissing.join('、')}`}
+            description="已向对话中的 AI 发送补全要求,请等它补齐后再点「完成并关闭」;确需跳过可用「强制关闭」。"
+            style={{ borderRadius: 0 }}
+            action={(
+              <Button size="small" danger disabled={busy} onClick={() => void handleClose(true)}>
+                强制关闭
               </Button>
             )}
           />

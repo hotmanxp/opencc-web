@@ -1,5 +1,5 @@
 import { Button, Popconfirm, Space, Switch, Tooltip, message } from 'antd'
-import { ReloadOutlined } from '@ant-design/icons'
+import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 
 /** 看板筛选维度。'all' 不筛选；其余按任务 status 匹配。 */
@@ -34,6 +34,8 @@ export interface TaskOverviewBarProps {
   filter: SuperTaskFilter
   onFilterChange: (f: SuperTaskFilter) => void
   onNewTask: () => void
+  /** 打开「工厂设置」抽屉(tf-pnsl5m5e)。 */
+  onOpenSettings: () => void
 }
 
 /**
@@ -44,7 +46,7 @@ export interface TaskOverviewBarProps {
  *
  * 数据源 = useSuperTaskStore.buckets(3s 轮询驱动,无新请求)。
  */
-export default function TaskOverviewBar({ filter, onFilterChange, onNewTask }: TaskOverviewBarProps): JSX.Element {
+export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onOpenSettings }: TaskOverviewBarProps): JSX.Element {
   const buckets = useSuperTaskStore((s) => s.buckets)
   const managed = useSuperTaskStore((s) => s.managed)
   const loading = useSuperTaskStore((s) => s.loading)
@@ -162,6 +164,16 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask }: T
             </Button>
           </Tooltip>
         </Popconfirm>
+        {/* 工厂设置(tf-pnsl5m5e):齿轮入口,打开 FactorySettingsDrawer。 */}
+        <Tooltip title="工厂设置(文档目录/代码库/并行上限/spawnAgent)">
+          <Button
+            icon={<SettingOutlined />}
+            data-testid="factory-settings-button"
+            onClick={onOpenSettings}
+          >
+            工厂设置
+          </Button>
+        </Tooltip>
         <Button type="primary" onClick={onNewTask} data-testid="new-task-button">
           新建任务
         </Button>

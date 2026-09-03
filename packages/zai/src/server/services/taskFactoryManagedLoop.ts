@@ -3,9 +3,11 @@
  *
  * 每 tick（默认 5s）:
  *  - managed 开关关 → 直接返回（全手工模式）。
- *  - 队列非空 → 注入一条 dispatch 指令（2026-09-01 用户更正:不做
+ *  - 队列非空 且 processing 桶数量 < factory-settings.maxParallelTasks →
+ *    注入一条 dispatch 指令（2026-09-01 用户更正:不做
  *    「无 processing 才派发」的单任务串行门闩 — 队列非空即派发,
- *    由主管按队列顺序一次派发多个任务，任务间并行）。
+ *    由主管按队列顺序一次派发多个任务，任务间并行。2026-09-03 tf-pnsl5m5e:
+ *    并行数受 factory-settings.json maxParallelTasks 服务端强约束）。
  *  - 某 processing 任务带 executorTaskId 且 executor 已是终态
  *    (completed/failed/cancelled/killed) → 注入 accept 验收指令。
  *    executor 不可解析（未知/尚不存在）一律视为未终态,避免幽灵验收。
@@ -19,6 +21,7 @@
  */
 import { taskFactoryListTasks as listTasks } from '@zn-ai/zn-agent-core'
 import { getBackgroundRuntime } from './backgroundRuntime.js'
+import { getFactorySettings } from './factorySettings.js'
 import { getTaskFactoryStateSync, injectSupervisorCommand } from './taskFactoryBridge.js'
 
 let timer: ReturnType<typeof setInterval> | null = null
@@ -48,12 +51,15 @@ function isTerminal(task: { status?: string } | null | undefined): boolean {
 
 async function tick(): Promise<void> {
   if (!getTaskFactoryStateSync().managedEnabled) return
+  const settings = await getFactorySettings()
   const { queue, processing } = await listTasks()
   const signature = `q:${queue.map((t) => t.id).join(',')}|p:${processing.map((t) => `${t.id}:${t.status}`).join(',')}`
   const actions: string[] = []
   // 并行派发（2026-09-01 用户更正）：不在「无 processing 才派发」上做单任务串行约束，
   // 队列非空即注入派发指令，由主管按队列顺序一次派发多个任务。
-  if (queue.length > 0) actions.push('dispatch')
+  // 工厂设置并行上限（tf-pnsl5m5e）：processing 桶数量达到 maxParallelTasks 时
+  // 跳过 dispatch 注入 —— 服务端强约束，防止主管超发；accept 指令不受限。
+  if (queue.length > 0 && processing.length < settings.maxParallelTasks) actions.push('dispatch')
   const bg = getBackgroundRuntime()
   for (const t of processing) {
     const done = t.status === 'processing' && t.executorTaskId

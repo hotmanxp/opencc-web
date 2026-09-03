@@ -136,6 +136,7 @@ pnpm release:major
 | Main agent slots | `docs/superpowers/specs/2026-08-20-zai-main-agent-slots-design.md` |
 | Subagent claude-code provider | `docs/superpowers/specs/2026-08-21-zai-subagent-claude-code-provider-design.md` |
 | Subagent codex provider | `docs/superpowers/specs/2026-08-21-zai-subagent-codex-provider-design.md` |
+| Subagent opencode provider(draft) | `docs/superpowers/specs/2026-09-03-zai-subagent-opencode-provider-design.md` |
 | Runtime printts SSE web bridge | `docs/superpowers/specs/2026-08-24-zai-runtime-printts-sse-web-bridge.md` |
 | zai Desktop 办公桌面 | `docs/superpowers/specs/2026-08-26-zai-desktop-office-design.md` + `plans/2026-08-26-zai-desktop-office-plan.md` |
 | Headless runtime vs vendor REPL 对比 | `docs/superpowers/specs/2026-08-27-zai-headless-runtime-vs-vendor-repl-comparison.md` |

@@ -1,6 +1,6 @@
 {
   "name": "@zn-ai/zn-agent-core",
-  "version": "0.5.7",
+  "version": "0.5.8",
   "description": "zai agent runtime core",
   "type": "module",
   "main": "dist/opencc-core.mjs",

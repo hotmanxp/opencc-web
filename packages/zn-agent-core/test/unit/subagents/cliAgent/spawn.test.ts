@@ -81,6 +81,24 @@ describe('subagents/cliAgent/spawn', () => {
     expect(spawn.agent_id).toMatch(/^opencc-[0-9a-z]{8}$/)
   })
 
+  it('routes an opencode spawn through the registry provider', async () => {
+    const provider = makeStubProvider('opencode')
+    getSubagentRegistry().registerProvider(provider)
+    const spawn = await spawnCliAgent({
+      agentType: 'opencode',
+      prompt: 'delegate to opencode',
+      description: 'oc task',
+      cwd: '/tmp/oc',
+      model: 'minimax-cn/MiniMax-M3',
+    })
+    expect(spawn.agent_type).toBe('opencode')
+    expect(provider.lastRequest?.prompt).toBe('delegate to opencode')
+    expect(provider.lastRequest?.model).toBe('minimax-cn/MiniMax-M3')
+    expect(provider.lastRequest?.cwd).toBe('/tmp/oc')
+    const result = await spawn.run.result
+    expect(result.stopReason).toBe('completed')
+  })
+
   it('teamName yields a vendor-shaped agent_id name@team', async () => {
     getSubagentRegistry().registerProvider(makeStubProvider('dsh'))
     const spawn = await spawnCliAgent({

@@ -14,7 +14,9 @@ vi.mock('./AgentConversation', () => ({
 // setSupervisorSession — 都不打真网络。默认带回 supervisorSessionId='sup-server'。
 vi.mock('../lib/superTaskApi', () => ({
   fetchSuperTasks: vi.fn(async () => ({
-    buckets: { queue: [], processing: [], finished: [] },
+    modified: true,
+    hash: 'H-page',
+    buckets: { queue: [], processing: [], verifying: [], finished: [] },
     managed: false,
     supervisorSessionId: 'sup-server',
   })),
@@ -55,12 +57,14 @@ function stubSessionsList(sessions: unknown[]) {
 beforeEach(async () => {
   // Reset both stores to known initial state
   useSuperTaskStore.setState({
-    buckets: { queue: [], processing: [], finished: [] },
+    buckets: { queue: [], processing: [], verifying: [], finished: [] },
     managed: false,
     loading: false,
     error: null,
     supervisorSessionId: null,
     lastCreatedTaskId: null,
+    lastHash: null,
+    loadedOnce: false,
   })
   useAgentStore.setState({
     sessionId: null,
@@ -73,7 +77,7 @@ beforeEach(async () => {
 })
 
 describe('SuperTasks page', () => {
-  it('挂载时触发 useSuperTaskStore.load 并展示「任务工厂」标题', async () => {
+  it('挂载时触发 useSuperTaskStore.load 并展示「任务主管」标题', async () => {
     const loadSpy = vi.spyOn(useSuperTaskStore.getState(), 'load').mockResolvedValue(undefined)
 
     render(<SuperTasks />)
@@ -83,7 +87,7 @@ describe('SuperTasks page', () => {
       expect(loadSpy).toHaveBeenCalled()
     })
 
-    expect(screen.getByText(/任务工厂/)).toBeTruthy()
+    expect(screen.getByText(/任务主管/)).toBeTruthy()
     loadSpy.mockRestore()
   })
 

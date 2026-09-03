@@ -1,6 +1,6 @@
 /**
  * SpawnAgent unified surface — a single entry to run one CLI agent
- * (`opencc` | `dsh`) end-to-end.
+ * (`opencc` | `dsh` | `opencode`) end-to-end.
  *
  * Rationale (handoff 2026-08-31, task #5): claude-code and dsh providers
  * each implement their own `start<X>Run(request, ctx, spec)` + private
@@ -27,7 +27,7 @@ import {
 } from './ids.js'
 
 /** CLI agents this carrier can spawn. */
-export type CliAgentKind = 'opencc' | 'dsh'
+export type CliAgentKind = 'opencc' | 'dsh' | 'opencode'
 
 export interface CliAgentSpawnArgs {
   /** Addressable name; defaults to `agentType` when omitted. */

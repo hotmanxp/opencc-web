@@ -203,6 +203,7 @@ export type * from './opencc-src/server/index.js'
 export {
   createPoolTask,
   listTasks as taskFactoryListTasks,
+  getTasksSnapshot,
   getTaskSummary,
   getTaskDetails,
   deleteTasks,
@@ -213,6 +214,8 @@ export {
   taskDir,
   generateTaskId,
   bodyAfterFrontmatter,
+  // zai patch (2026-09-03, intake 文档强校验):新建任务弹窗关闭前校验用。
+  checkTaskIntakeDocs,
 } from './opencc-src/server/taskFactoryFiles.js'
 export type {
   TaskStatus,
@@ -220,7 +223,10 @@ export type {
   TaskSummary,
   TaskBucket,
   TaskDetails,
+  TasksSnapshot,
   CreatePoolTaskInput,
+  IntakeDocCheck,
+  IntakeDocPath,
 } from './opencc-src/server/taskFactoryFiles.js'
 
 // ./compat/subagents(zai agentRuntime 依赖 getSubagentRegistry 拿
@@ -237,6 +243,10 @@ export { apply as applyClaudeCodeProvider } from './compat/subagents/claude-code
 // only when `settings.subagents.dsh.enabled === true` (returns the
 // unregister disposer, or undefined when disabled).
 export { apply as applyDshProvider } from './compat/subagents/dsh/index.js'
+// zai patch (2026-09-03): opencode provider — same config-gated shape as dsh
+// (apply registers only when `settings.subagents.opencode.enabled === true`,
+// returns the unregister disposer, or undefined when disabled).
+export { apply as applyOpencodeProvider } from './compat/subagents/opencode/index.js'
 
 // zai patch (2026-08-30, plan P0): createReplSession value export from main
 // entry. Bundle consumers can import directly.

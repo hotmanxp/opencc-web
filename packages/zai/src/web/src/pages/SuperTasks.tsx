@@ -172,7 +172,7 @@ export default function SuperTasks(): JSX.Element {
             }}
           >
             <Typography.Title level={5} style={{ margin: 0 }}>
-              任务工厂 · 主管
+              任务主管
             </Typography.Title>
             <Tooltip title="折叠主管对话">
               <Button type="text" size="small" icon={<DoubleLeftOutlined />} onClick={() => setCollapsed(true)} />
