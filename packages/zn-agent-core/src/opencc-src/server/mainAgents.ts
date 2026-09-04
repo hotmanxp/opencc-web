@@ -31,6 +31,7 @@ import { officeMainAgent } from './mainAgents-office.js'
 import { agentCreatorMainAgent } from './mainAgents-agentCreator.js'
 import { taskFactoryMainAgent } from './mainAgents-taskFactory.js'
 import { taskIntakeMainAgent } from './mainAgents-taskIntake.js'
+import { taskIntakeQuickMainAgent } from './mainAgents-taskIntakeQuick.js'
 import { displayFilesOpenccTool } from './displayFilesOpencc.js'
 import { filterBannedTools } from './mainAgents-toolFilters.js'
 
@@ -102,6 +103,9 @@ export function getBuiltinMainAgents(): MainAgentConfig[] {
     agentCreatorMainAgent,
     taskFactoryMainAgent,
     taskIntakeMainAgent,
+    // zai patch (2026-09-04, quick-intake):与 taskIntakeMainAgent 并列,
+    // 供「快速创建」弹窗(mainAgent: 'task-intake-quick')使用,跳过 brainstorming。
+    taskIntakeQuickMainAgent,
   ]
 }
 

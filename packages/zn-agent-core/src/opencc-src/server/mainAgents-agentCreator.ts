@@ -35,6 +35,8 @@ export const BUILTIN_MAIN_AGENT_NAMES: ReadonlySet<string> = new Set([
   'agent-creator',
   'task-factory',
   'task-intake',
+  // zai patch (2026-09-04, quick-intake):快速创建弹窗专用,与 task-intake 并列。
+  'task-intake-quick',
 ])
 
 /** 供提示词/文档插值的展示形态,如 "default / office / ...". */
