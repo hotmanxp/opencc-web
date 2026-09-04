@@ -2,9 +2,9 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 zai 内实现文件驱动的任务工厂：任务主管 Agent（需求讨论/落库/派生执行/验收）+ `/super-tasks` 调度面板（主管对话 + 三栏任务面板 + 详情抽屉）+ 任务工厂实例入口。
+**Goal:** 在 zai 内实现文件驱动的任务工厂：任务任务调度官 Agent（需求讨论/落库/派生执行/验收）+ `/super-tasks` 调度面板（任务调度官对话 + 三栏任务面板 + 详情抽屉）+ 任务工厂实例入口。
 
-**Architecture:** 文件系统（`~/.zai/task-factory/{queue,processing,finished}-tasks/<id>/`）是唯一事实源。主管 Agent 注册为内置 main agent，`SuperTasksCreate`/`SuperTasksMarkDone` 两个内置工具（core 侧 `buildTool`）操作任务文件并经 `globalThis.__zaiTaskFactoryEmitter` bridge 发 SSE 事件；委派执行**优先 SpawnAgent（claude-code|dsh 外部 CLI agent，默认工具池已有）**，回退 AgentTool，执行器 transcript 归拢到任务目录（core patch 支持绝对 transcript subdir）。zai server 提供 superTasks REST 路由，主管唤醒复用既有 `sessionInbox.followup` → `runNextInQueue` 通道。面板左栏复用 `AgentConversation`（用 `useAgentStore` 固定主管 session），右栏任务面板轮询 + 事件刷新。实例入口走 `--app task-factory` CLI flag + `ZAI_APP` env，强制 mainAgent 并把 `/` 重定向 `/super-tasks`。
+**Architecture:** 文件系统（`~/.zai/task-factory/{queue,processing,finished}-tasks/<id>/`）是唯一事实源。任务调度官 Agent 注册为内置 main agent，`SuperTasksCreate`/`SuperTasksMarkDone` 两个内置工具（core 侧 `buildTool`）操作任务文件并经 `globalThis.__zaiTaskFactoryEmitter` bridge 发 SSE 事件；委派执行**优先 SpawnAgent（claude-code|dsh 外部 CLI agent，默认工具池已有）**，回退 AgentTool，执行器 transcript 归拢到任务目录（core patch 支持绝对 transcript subdir）。zai server 提供 superTasks REST 路由，任务调度官唤醒复用既有 `sessionInbox.followup` → `runNextInQueue` 通道。面板左栏复用 `AgentConversation`（用 `useAgentStore` 固定任务调度官 session），右栏任务面板轮询 + 事件刷新。实例入口走 `--app task-factory` CLI flag + `ZAI_APP` env，强制 mainAgent 并把 `/` 重定向 `/super-tasks`。
 
 **Tech Stack:** TypeScript；Node `node:fs/promises`；zod v4（工具 inputSchema）；`buildTool`（vendor-shape 工具构造）；zustand（web store）；AntD（面板 UI）；React Router（顶层路由）；vitest。
 
@@ -194,8 +194,8 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     '',
   ].join('\n')
   await writeFile(join(dir, 'index.md'), indexMd, 'utf-8')
-  await writeFile(join(dir, 'docs', 'spec.md'), input.spec ?? '# 需求规格\n\n（需求讨论后由主管补充）\n', 'utf-8')
-  await writeFile(join(dir, 'docs', 'plan.md'), input.plan ?? '# 执行计划\n\n（执行前由主管补充）\n', 'utf-8')
+  await writeFile(join(dir, 'docs', 'spec.md'), input.spec ?? '# 需求规格\n\n（需求讨论后由任务调度官补充）\n', 'utf-8')
+  await writeFile(join(dir, 'docs', 'plan.md'), input.plan ?? '# 执行计划\n\n（执行前由任务调度官补充）\n', 'utf-8')
   await writeFile(join(dir, 'process.md'), '# 执行记录\n\n', 'utf-8')
   return { id, title: input.title, status: 'queued', agent: input.agent, createdAt, bucket: 'queue-tasks' }
 }
@@ -527,7 +527,7 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(core): SuperTasksCreate/SuperTasksMark
 
 ---
 
-### Task 3: core — 任务主管 Agent `task-factory` 注册 + transcript 归拢 patch
+### Task 3: core — 任务任务调度官 Agent `task-factory` 注册 + transcript 归拢 patch
 
 **Files:**
 - Create: `packages/zn-agent-core/src/opencc-src/server/mainAgents-taskFactory.ts`
@@ -640,7 +640,7 @@ import { superTasksCreateTool, superTasksMarkDoneTool } from './taskFactoryTools
 export const TASK_FACTORY_MAIN_AGENT_NAME = 'task-factory'
 
 const TASK_FACTORY_SYSTEM_PROMPT = [
-  '你是「任务工厂」主管 Agent。职责是接收、落库、分派、验收任务：',
+  '你是「任务工厂」任务调度官 Agent。职责是接收、落库、分派、验收任务：',
   '1. 需求讨论：用户提出任务时，先调用 SkillTool 运行 brainstorming skill 与用户把需求、验收标准讨论清楚（新建任务的对话默认就是这样）。',
   '2. 落库：讨论清楚后调用 SuperTasksCreate 在 ~/.zai/task-factory/queue-tasks/<id>/ 创建任务骨架；把讨论结果用 Edit/Write 写入 docs/spec.md（需求规格）、docs/plan.md（执行计划）。',
   '3. 派发执行：需要执行时，读取任务 index.md 的 agent 字段（claude-code 或 dsh 等外部 CLI agent 名）。**优先用 SpawnAgent 派发**（subagent_type 填该 agent 名），不可用（provider 未注册）时回退 AgentTool。执行子 Agent 的 cwd 指向任务目录（~/.zai/task-factory/processing-tasks/<id>/），prompt 要求其先读 docs/spec.md + docs/plan.md，再实现，边做边向 process.md 追加进度（一行时间戳 + 步骤 + 结论），完成后在 process.md 末尾追加 "## [DONE]"，并汇报结果摘要。若用 AgentTool 委派（内部 agent），把 transcriptSubdir 设为任务目录的绝对路径，让 transcript 归拢到任务目录。派发成功后把 index.md 的 executorTaskId 回填为子 Agent 任务的 task id（SpawnAgent 返回值里的 task_id / agentId）。',
@@ -658,7 +658,7 @@ const taskFactoryTools = (origin: Tool[]): Tool[] => {
 
 export const taskFactoryMainAgent: MainAgentConfig = {
   name: TASK_FACTORY_MAIN_AGENT_NAME,
-  description: '任务工厂主管 —— 需求讨论、任务落库、分派执行与验收',
+  description: '任务工厂任务调度官 —— 需求讨论、任务落库、分派执行与验收',
   systemPrompt: (origin) => [...TASK_FACTORY_SYSTEM_PROMPT, ...origin],
   tools: taskFactoryTools,
 }
@@ -689,7 +689,7 @@ Expected: PASS（5 it 全过：2 个 transcript + 3 个 agent）。
 
 ```bash
 git add packages/zn-agent-core/src/opencc-src/server/mainAgents-taskFactory.ts packages/zn-agent-core/src/opencc-src/server/mainAgents.ts packages/zn-agent-core/src/opencc-src/utils/sessionStorage.ts packages/zn-agent-core/test/unit/agentRegistry-taskFactory.test.ts packages/zn-agent-core/test/unit/sessionStorage-transcriptRoot.test.ts
-git commit -m "HRMSV3-ZN-WEBSITE#668 feat(core): 任务主管 agent task-factory + transcript 归拢 patch"
+git commit -m "HRMSV3-ZN-WEBSITE#668 feat(core): 任务任务调度官 agent task-factory + transcript 归拢 patch"
 ```
 
 ---
@@ -800,7 +800,7 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(core): 任务增加工程目录 cwd �
 
 ---
 
-### Task 4: zai server — superTasks 路由 + 事件 bridge + 状态持久化 + 主管注入
+### Task 4: zai server — superTasks 路由 + 事件 bridge + 状态持久化 + 任务调度官注入
 
 **Files:**
 - Create: `packages/zai/src/server/services/taskFactoryBridge.ts`
@@ -815,7 +815,7 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(core): 任务增加工程目录 cwd �
 export function initTaskFactoryBridge(): void            // 注入 globalThis.__zaiTaskFactoryEmitter → eventBus
 export function getTaskFactoryState(): Promise<{ managedEnabled: boolean; supervisorSessionId: string }>
 export function setTaskFactoryState(patch: Partial<{ managedEnabled: boolean; supervisorSessionId: string }>): Promise<void>
-export function injectSupervisorCommand(content: string): void   // sessionInbox.followup 主管会话
+export function injectSupervisorCommand(content: string): void   // sessionInbox.followup 任务调度官会话
 // routes/superTasks.ts 默认导出 router：GET /api/super-tasks、GET /api/super-tasks/:id、
 // POST /api/super-tasks/delete、POST /api/super-tasks/managed、POST /api/super-tasks/inject
 ```
@@ -924,7 +924,7 @@ export async function setTaskFactoryState(patch: Partial<TaskFactoryState>): Pro
   eventBus.emit({ type: 'task_factory', action: 'state.changed', payload: next, ts: Date.now() } as unknown as ServerEventInput)
 }
 
-/** 向主管会话注入一条指令（next-turn + wake；忙则自动降级排队）。 */
+/** 向任务调度官会话注入一条指令（next-turn + wake；忙则自动降级排队）。 */
 export function injectSupervisorCommand(content: string): void {
   const sid = // 异步读取融入同步调用：见下方 resolveSupervisorSessionIdSync
     getTaskFactoryStateSync().supervisorSessionId
@@ -1001,7 +1001,7 @@ describe('DELETE /api/super-tasks', () => {
 })
 
 describe('POST /api/super-tasks/managed', () => {
-  it('切换开关并注入主管指令', async () => {
+  it('切换开关并注入任务调度官指令', async () => {
     const spy = vi.spyOn({ injectSupervisorCommand }, 'injectSupervisorCommand')
     const res = await supertest(app).post('/api/super-tasks/managed').send({ enabled: false })
     expect(res.status).toBe(200)
@@ -1053,7 +1053,7 @@ router.post('/super-tasks/managed', async (req, res) => {
 })
 
 /**
- * POST /api/super-tasks/inject — 向主管会话注入指令（task-factory 内部 + 面板按钮统一入口）。
+ * POST /api/super-tasks/inject — 向任务调度官会话注入指令（task-factory 内部 + 面板按钮统一入口）。
  * 业务侧（start/pause/resume/托管循环）都调它，保证注入语义一致。
  */
 router.post('/super-tasks/inject', async (req, res) => {
@@ -1127,7 +1127,7 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(zai): superTasks 路由与任务工厂
 `index.ts`（两条 command 的 `.option` 链各加一条，参照 `--runtimeCore` 写法）：
 
 ```ts
-.option('--app <profile>', '应用 profile: task-factory 启动即打开 /super-tasks 并锁定主管 Agent')
+.option('--app <profile>', '应用 profile: task-factory 启动即打开 /super-tasks 并锁定任务调度官 Agent')
 ```
 
 并在两条 command 的 action 顶部（与 `applyRuntimeCoreFlag(options.runtimeCore)` 并排）：
@@ -1157,7 +1157,7 @@ it('POST /instances 接受 app=task-factory 并存持久化定义', async () => 
 `shared/instances.ts` `InstanceDefinition` 追加：
 
 ```ts
-/** 启动 profile：'task-factory' = 任务工厂实例（打开 /super-tasks、锁定主管 Agent）。 */
+/** 启动 profile：'task-factory' = 任务工厂实例（打开 /super-tasks、锁定任务调度官 Agent）。 */
 app?: 'task-factory'
 ```
 
@@ -1187,7 +1187,7 @@ if (entry.def.app === 'task-factory') args.push('--app', 'task-factory')
 
 ```ts
 if (sessionMainAgent === null) {
-  // 任务工厂实例锁定主管 Agent（实例级，用户 settings 不覆盖）
+  // 任务工厂实例锁定任务调度官 Agent（实例级，用户 settings 不覆盖）
   sessionMainAgent =
     process.env.ZAI_APP === 'task-factory'
       ? 'task-factory'
@@ -1477,7 +1477,7 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(web): /super-tasks 路由与任务工�
 
 ---
 
-### Task 8: web — SuperTasks 页面骨架 + 主管对话区
+### Task 8: web — SuperTasks 页面骨架 + 任务调度官对话区
 
 **Files:**
 - Create: `packages/zai/src/web/src/pages/SuperTasks.tsx`
@@ -1486,7 +1486,7 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(web): /super-tasks 路由与任务工�
 
 **Interfaces:**
 - Consumes: `AgentConversation`（`pages/AgentConversation.tsx`，default export，读 `useAgentStore`）；`useAgentStore`（loadSessions/setCurrentSession/createNewSession）；`useSuperTaskStore`（Task 6）。
-- Produces: `SuperTasks` 页面：左栏主管对话区（AgentConversation + 标题头），右栏 `SuperTaskPanel`（三栏面板，Task 9 完成）；页面挂载时确保主管会话存在。
+- Produces: `SuperTasks` 页面：左栏任务调度官对话区（AgentConversation + 标题头），右栏 `SuperTaskPanel`（三栏面板，Task 9 完成）；页面挂载时确保任务调度官会话存在。
 
 - [ ] **Step 1: 写失败测试（渲染 + store 调用）**
 
@@ -1569,7 +1569,7 @@ export default function SuperTasks(): JSX.Element {
     <div style={{ display: 'flex', height: '100vh', width: '100%' }}>
       <div style={{ width: '42%', minWidth: 400, display: 'flex', flexDirection: 'column', borderRight: '1px solid var(--border-subtle)' }}>
         <div style={{ padding: '10px 16px', borderBottom: '1px solid var(--border-subtle)' }}>
-          <Typography.Title level={5} style={{ margin: 0 }}>任务工厂 · 主管</Typography.Title>
+          <Typography.Title level={5} style={{ margin: 0 }}>任务工厂 · 任务调度官</Typography.Title>
         </div>
         <div style={{ flex: 1, minHeight: 0 }}>
           <AgentConversation />
@@ -1634,7 +1634,7 @@ else if (latest.length === 0) {
 
 ```bash
 git add packages/zai/src/web/src/pages/SuperTasks.tsx packages/zai/src/web/src/components/superTasks/SuperTaskPanel.tsx packages/zai/src/web/src/pages/SuperTasks.test.tsx
-git commit -m "HRMSV3-ZN-WEBSITE#668 feat(web): SuperTasks 页面骨架与主管对话区"
+git commit -m "HRMSV3-ZN-WEBSITE#668 feat(web): SuperTasks 页面骨架与任务调度官对话区"
 ```
 
 ---
@@ -1647,7 +1647,7 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(web): SuperTasks 页面骨架与主管
 - Test: `packages/zai/src/web/src/components/superTasks/SuperTaskPanel.test.tsx`
 
 **Interfaces:**
-- Consumes: Task 6 store + api；`useAgentStore`（新建任务弹窗发消息给主管 session）；`Modal`/`Table`/`Checkbox`/`Tag`/`Button`/`Switch`/`Popconfirm`/`message`（AntD）。
+- Consumes: Task 6 store + api；`useAgentStore`（新建任务弹窗发消息给任务调度官 session）；`Modal`/`Table`/`Checkbox`/`Tag`/`Button`/`Switch`/`Popconfirm`/`message`（AntD）。
 - Produces: 面板三栏（每栏 Card + 可多选 Row：标题/状态 Tag/创建时间/操作按钮）、操作条（AI 托管 Switch、批量删除 Popconfirm、新建任务按钮）。
 
 - [ ] **Step 1: 写失败测试（面板渲染 + 批量删除确认）**
@@ -1830,7 +1830,7 @@ export default function SuperTaskPanel(): JSX.Element {
 
 （`setDetailId` 在 Task 10 接入详情抽屉；本任务先声明 `const [detailId, setDetailId] = useState<string | null>(null)` 占位，抽屉在 Task 10 替换。）
 
-`NewSuperTaskModal.tsx` — 新建任务弹窗（复用主管会话对话流；含工程目录 cwd 选择）：
+`NewSuperTaskModal.tsx` — 新建任务弹窗（复用任务调度官会话对话流；含工程目录 cwd 选择）：
 
 ```tsx
 import { Modal, Input, Select, App } from 'antd'
@@ -1838,7 +1838,7 @@ import { useState } from 'react'
 import { useAgentStore } from '../../store/useAgentStore'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 
-/** 新建任务弹窗：输入标题+工程目录(cwd)+说明+目标 agent，发送给主管会话由主管走 brainstorming 讨论并落库。 */
+/** 新建任务弹窗：输入标题+工程目录(cwd)+说明+目标 agent，发送给任务调度官会话由任务调度官走 brainstorming 讨论并落库。 */
 export default function NewSuperTaskModal({ open, onClose }: { open: boolean; onClose: () => void }): JSX.Element {
   const [title, setTitle] = useState('')
   const [cwd, setCwd] = useState<string | undefined>(
@@ -1853,7 +1853,7 @@ export default function NewSuperTaskModal({ open, onClose }: { open: boolean; on
   async function onSubmit(): Promise<void> {
     if (!title.trim()) return
     if (!sessionId) {
-      App.useApp().message.warning('主管会话尚未就绪，请稍候')
+      App.useApp().message.warning('任务调度官会话尚未就绪，请稍候')
       return
     }
     setSending(true)
@@ -1876,7 +1876,7 @@ export default function NewSuperTaskModal({ open, onClose }: { open: boolean; on
   }
 
   return (
-    <Modal open={open} onCancel={onClose} onOk={() => void onSubmit()} okText="发给主管" confirmLoading={sending} width={560} title="新建任务（与任务主管讨论）">
+    <Modal open={open} onCancel={onClose} onOk={() => void onSubmit()} okText="发给任务调度官" confirmLoading={sending} width={560} title="新建任务（与任务任务调度官讨论）">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Input
           value={title}
@@ -1910,7 +1910,7 @@ export default function NewSuperTaskModal({ open, onClose }: { open: boolean; on
           ]}
         />
         <div style={{ fontSize: 12, color: 'var(--text-secondary)' }}>
-          发送后主管 Agent 会与你确认需求（brainstorming skill），讨论清楚后调用 SuperTasksCreate 落库到任务池。
+          发送后任务调度官 Agent 会与你确认需求（brainstorming skill），讨论清楚后调用 SuperTasksCreate 落库到任务池。
         </div>
       </div>
     </Modal>
@@ -2110,7 +2110,7 @@ afterEach(() => stopTaskFactoryManagedLoopForTests())
 describe('taskFactoryManagedLoop', () => {
   it('队列非空时注入 dispatch 指令（不依赖 processing 是否为空，允许多任务并行）', async () => {
     await createPoolTask({ title: 'a' })
-    await createPoolTask({ title: 'b' }) // 多个队列任务 → 指令可让主管并行派发
+    await createPoolTask({ title: 'b' }) // 多个队列任务 → 指令可让任务调度官并行派发
     const spy = vi.spyOn({ injectSupervisorCommand }, 'injectSupervisorCommand')
     startTaskFactoryManagedLoop(20) // 紧凑 interval 便于测试
     await new Promise((r) => setTimeout(r, 60))
@@ -2205,7 +2205,7 @@ async function tick(): Promise<void> {
   const signature = `q:${queue.map((t) => t.id).join(',')}|p:${processing.map((t) => `${t.id}:${t.status}`).join(',')}`
   const actions: string[] = []
   // 并行派发（2026-09-01 用户更正）：不在「无 processing 才派发」上做单任务串行约束，
-  // 队列非空即注入派发指令，由主管按队列顺序一次派发多个任务。
+  // 队列非空即注入派发指令，由任务调度官按队列顺序一次派发多个任务。
   if (queue.length > 0) actions.push('dispatch')
   const bg = getBackgroundRuntime()
   for (const t of processing) {
@@ -2270,10 +2270,10 @@ Run: `pnpm --filter @zn-ai/zai dev -- --port 8102 --api-port 7715`（先 `lsof -
 
 用 ego-browser / web-browser-operator 访问 `http://localhost:8102`，依次验证并截图留证：
 1. `/` 重定向到 `/agent`（标准实例）；切到任务工厂实例或直接访问 `/super-tasks`；
-2. `/super-tasks` 页面：左主管对话区 + 右三栏面板，无 Sider 菜单；
-3. 新建任务：点「新建任务」→ 弹窗输入标题 → 发给主管 → 主管会话（SSE 流）回复并出现 `SuperTasksCreate` 工具调用 → 队列栏出现该任务（index.md/process.md 在 `~/.zai/task-factory/queue-tasks/<id>/` 存在）；
-4. 手工启动：点 ▶ → 主管会话收到 `<task-command dispatch>` → 主管调用 `SpawnAgent`（subagent_type=claude-code|dsh）派生执行子 Agent → 任务移入「执行中」，详情抽屉显示执行过程（tools/消息流）；**验证执行器 transcript 出现在 `~/.zai/task-factory/processing-tasks/<id>/` 内（`agent-*.jsonl`）**；SpawnAgent provider 未注册时回退路径（AgentTool）同样验证 transcript 归拢；
-5. 暂停/继续：执行中任务点 ⏸（executor 被 kill，index.md status=paused），再点 ▶（主管 resume 派发）；
+2. `/super-tasks` 页面：左任务调度官对话区 + 右三栏面板，无 Sider 菜单；
+3. 新建任务：点「新建任务」→ 弹窗输入标题 → 发给任务调度官 → 任务调度官会话（SSE 流）回复并出现 `SuperTasksCreate` 工具调用 → 队列栏出现该任务（index.md/process.md 在 `~/.zai/task-factory/queue-tasks/<id>/` 存在）；
+4. 手工启动：点 ▶ → 任务调度官会话收到 `<task-command dispatch>` → 任务调度官调用 `SpawnAgent`（subagent_type=claude-code|dsh）派生执行子 Agent → 任务移入「执行中」，详情抽屉显示执行过程（tools/消息流）；**验证执行器 transcript 出现在 `~/.zai/task-factory/processing-tasks/<id>/` 内（`agent-*.jsonl`）**；SpawnAgent provider 未注册时回退路径（AgentTool）同样验证 transcript 归拢；
+5. 暂停/继续：执行中任务点 ⏸（executor 被 kill，index.md status=paused），再点 ▶（任务调度官 resume 派发）；
 6. AI 托管：开 Switch → 新建一个队列任务 → 观察托管循环自动派发/验收；
 7. 完成后任务移到「已完成」，点详情查看 process.md `[DONE]`；多选删除（队列/已完成）成功；processing 任务删除按钮禁用；
 8. 实例管理：「新建任务工厂实例」→ 创建 + 启动 → 新标签页打开即 `/super-tasks`，其 mainAgent 恒为 `task-factory`（新会话 meta 验证）。
@@ -2292,7 +2292,7 @@ Run: `pnpm --filter @zn-ai/zai dev -- --port 8102 --api-port 7715`（先 `lsof -
 
 ## Self-Review（自审结论）
 
-- **Spec 覆盖**：spec 的 10 节需求全部映射到任务——文件模型(T1)、工具(T2)、主管 Agent(T3)、后端路由/bridge(T4)、实例入口+mainAgent 锁定(T5, T7)、web api/store(T6)、页面+对话区(T8)、三栏+弹窗+托管开关(T9)、详情抽屉(T10)、生命周期 start/pause/resume/托管(T11)、真实验收(T12)。
+- **Spec 覆盖**：spec 的 10 节需求全部映射到任务——文件模型(T1)、工具(T2)、任务调度官 Agent(T3)、后端路由/bridge(T4)、实例入口+mainAgent 锁定(T5, T7)、web api/store(T6)、页面+对话区(T8)、三栏+弹窗+托管开关(T9)、详情抽屉(T10)、生命周期 start/pause/resume/托管(T11)、真实验收(T12)。
 - **用户补充要求**：① 委派优先 SpawnAgent（claude-code|dsh）——落在 Task 3 的 system prompt 与 spec「委派执行」小节、Task 12 验收步骤 4/6；② 执行器 transcript 归拢 `~/.zai/task-factory/`——落在 Task 3 Step 0（sessionStorage 绝对 subdir patch + 单测）、spec transcript 注记、Task 12 验收步骤 4；③ **任务并行不强制串行**（用户 2026-09-01 更正）——spec 范围外移除并行项 + AI 托管「队列非空即注入派发」，Task 3 prompt / Task 11 循环取消单任务门闩；④ **任务携带工程目录 cwd**（用户 2026-09-01 追加）——spec index.md 加 `cwd`、委派以任务 cwd 为执行环境，落在新增 Task 3.5（files 层 cwd + 工具 inputSchema cwd + prompt 委派 cwd）+ Task 9 弹窗 cwd 输入。
 - **占位符**：无 TBD/TODO；所有工具/服务接口均给出签名与实现要点。
 - **类型一致性**：`TaskStatus`/`TaskBucketName`/`TaskSummary`/`TaskBucket`/`TaskDetails` 在 Task 1 定义后贯穿 Task 2/4/6/9；`injectSupervisorCommand` 在 Task 4 定义、Task 9/11 使用；`executorTaskId` 在 Task 1 写入 index.md、Task 10 消费、Task 11 用于 pause/托管；`SpawnAgent` 子 agent 返回的 `task_id`/`agentId` 即回填的 `executorTaskId`（Task 3 system prompt）。
