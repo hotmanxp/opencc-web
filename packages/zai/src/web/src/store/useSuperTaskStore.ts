@@ -37,6 +37,12 @@ export interface SuperTaskStore {
   deleteTasks: (ids: string[]) => Promise<void>
   setManaged: (enabled: boolean) => Promise<void>
   start: (id: string) => Promise<void>
+  /**
+   * 批量启动(2026-09-05,tf-dkb8gj50)。chunked 并发调单接口,Promise.allSettled
+   * 统计成功/失败 → UI 反馈用。结尾统一 load 一次刷新,而不是每个 id 后都
+   * load(否则 100 个 task 排队触发 100 次 GET /api/super-tasks 请求风暴)。
+   */
+  startMany: (ids: string[]) => Promise<{ ok: number; failed: number; errors: Array<{ id: string; message: string }> }>
   pause: (id: string) => Promise<void>
   resume: (id: string) => Promise<void>
   accept: (id: string) => Promise<void>
@@ -103,6 +109,35 @@ export const useSuperTaskStore = create<SuperTaskStore>((set, get) => ({
     set({ lastHash: null })
   },
   start: async (id) => { await startSuperTask(id); await get().load() },
+  startMany: async (ids) => {
+    // chunked 并发:每批 5 个,避免队列大时(>20)100+ 同时飞行请求打爆
+    // SSE / Express。Promise.allSettled 永远 resolve → 单个 4xx/5xx 不会
+    // 让整批中断,UI 用 ok/failed 报告实际成功数。
+    const CONCURRENCY = 5
+    const errors: Array<{ id: string; message: string }> = []
+    let ok = 0
+    if (ids.length === 0) {
+      await get().load()
+      return { ok, failed: 0, errors }
+    }
+    for (let i = 0; i < ids.length; i += CONCURRENCY) {
+      const batch = ids.slice(i, i + CONCURRENCY)
+      const results = await Promise.allSettled(batch.map((id) => startSuperTask(id)))
+      for (let j = 0; j < results.length; j++) {
+        const r = results[j]
+        if (r.status === 'fulfilled') {
+          ok++
+        } else {
+          errors.push({
+            id: batch[j] as string,
+            message: r.reason instanceof Error ? r.reason.message : String(r.reason),
+          })
+        }
+      }
+    }
+    await get().load()
+    return { ok, failed: errors.length, errors }
+  },
   pause: async (id) => { await pauseSuperTask(id); await get().load() },
   resume: async (id) => { await resumeSuperTask(id); await get().load() },
   accept: async (id) => { await acceptSuperTask(id); await get().load() },

@@ -43,6 +43,86 @@ describe('useSuperTaskStore', () => {
   })
 })
 
+describe('useSuperTaskStore.startMany (2026-09-05, tf-dkb8gj50)', () => {
+  it('空 ids 数组 → 仍 load 一次,返回 { ok: 0, failed: 0, errors: [] }', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      calls.push(url)
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true }) })
+    }))
+    const result = await useSuperTaskStore.getState().startMany([])
+    expect(result).toEqual({ ok: 0, failed: 0, errors: [] })
+    // 没有 start 调用,但有 load 兜底
+    expect(calls.filter((u) => u.includes('/start'))).toEqual([])
+    expect(calls.at(-1)).toBe('/api/super-tasks')
+  })
+
+  it('3 个 id 全部成功 → ok=3, failed=0, errors=[]', async () => {
+    const calls: string[] = []
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      calls.push(url)
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true }) })
+    }))
+    const result = await useSuperTaskStore.getState().startMany(['a', 'b', 'c'])
+    expect(result.ok).toBe(3)
+    expect(result.failed).toBe(0)
+    expect(result.errors).toEqual([])
+    // 3 个 start 端点
+    expect(calls.filter((u) => u.includes('/start')).length).toBe(3)
+    // 末尾 1 次 load
+    expect(calls.at(-1)).toBe('/api/super-tasks')
+    // load 只调一次(不是 3 次!)
+    expect(calls.filter((u) => u === '/api/super-tasks').length).toBe(1)
+  })
+
+  it('部分失败 → ok/failed 正确计数,errors 含失败项的 id+message', async () => {
+    let n = 0
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.endsWith('/start')) {
+        n++
+        // 第 2 个失败(模拟某任务已被别人抢着启动了 → 后端 400)
+        if (n === 2) return Promise.resolve({ ok: false, status: 400, json: async () => ({ error: 'task b 不在队列' }) })
+        return Promise.resolve({ ok: true, json: async () => ({ ok: true }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ buckets: { queue: [], processing: [], verifying: [], finished: [] }, managed: false }) })
+    }))
+    const result = await useSuperTaskStore.getState().startMany(['a', 'b', 'c'])
+    expect(result.ok).toBe(2)
+    expect(result.failed).toBe(1)
+    expect(result.errors).toHaveLength(1)
+    expect(result.errors[0]?.id).toBe('b')
+    expect(result.errors[0]?.message).toContain('b 不在队列')
+  })
+
+  it('全部失败 → ok=0, failed=N, errors 全部回填', async () => {
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url.endsWith('/start')) {
+        return Promise.resolve({ ok: false, status: 500, json: async () => ({ error: 'boom' }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ buckets: { queue: [], processing: [], verifying: [], finished: [] }, managed: false }) })
+    }))
+    const result = await useSuperTaskStore.getState().startMany(['x', 'y'])
+    expect(result.ok).toBe(0)
+    expect(result.failed).toBe(2)
+    expect(result.errors.map((e) => e.id).sort()).toEqual(['x', 'y'])
+  })
+
+  it('全部成功 12 个 → load 仍只调 1 次(防止请求风暴)', async () => {
+    let loadCount = 0
+    vi.stubGlobal('fetch', vi.fn((url: string) => {
+      if (url === '/api/super-tasks') {
+        loadCount++
+        return Promise.resolve({ ok: true, json: async () => ({ buckets: { queue: [], processing: [], verifying: [], finished: [] }, managed: false }) })
+      }
+      return Promise.resolve({ ok: true, json: async () => ({ ok: true }) })
+    }))
+    const ids = Array.from({ length: 12 }, (_, i) => `tf-${i}`)
+    const result = await useSuperTaskStore.getState().startMany(ids)
+    expect(result.ok).toBe(12)
+    expect(loadCount).toBe(1)
+  })
+})
+
 describe('useSuperTaskStore since-hash 短路(2026-09-03 快照缓存)', () => {
   const fullDto = () => ({
     modified: true,

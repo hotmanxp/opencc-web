@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState } from 'react'
-import { Button, ConfigProvider, Empty, Segmented, Spin, Typography, theme as antdTheme } from 'antd'
-import { PlusOutlined, ThunderboltOutlined } from '@ant-design/icons'
+import { Badge, Button, ConfigProvider, Empty, Segmented, Spin, Tooltip, Typography, message, theme as antdTheme } from 'antd'
+import { PlayCircleOutlined, PlusOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import MobileSupervisorDrawer from '../components/superTasks/MobileSupervisorDrawer'
 import MobileSuperTaskCard from '../components/superTasks/MobileSuperTaskCard'
 import NewSuperTaskModal from '../components/superTasks/NewSuperTaskModal'
@@ -50,6 +50,7 @@ export default function MobileSuperTasks(): JSX.Element {
   const buckets = useSuperTaskStore((s) => s.buckets)
   const loading = useSuperTaskStore((s) => s.loading)
   const loadedOnce = useSuperTaskStore((s) => s.loadedOnce)
+  const startMany = useSuperTaskStore((s) => s.startMany)
   const cwdName = useAppStore((s) => s.instanceContext?.cwdName ?? null)
 
   const booted = useRef(false)
@@ -59,6 +60,8 @@ export default function MobileSuperTasks(): JSX.Element {
   const [quickOpen, setQuickOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [supOpen, setSupOpen] = useState(false)
+  // 批量启动 in-flight 防重:按钮 disabled + 显示 Spin。
+  const [startingAll, setStartingAll] = useState(false)
 
   // 3s 轮询 — 仅本页 mount 期间生效
   useEffect(() => {
@@ -120,6 +123,29 @@ export default function MobileSuperTasks(): JSX.Element {
 
   const rows = buckets[tab]
 
+  // 「开始所有任务」按钮(2026-09-05,tf-dkb8gj50):批量启动 queue 桶全部
+  // 任务。store.startMany 内 chunked 并发 + Promise.allSettled,UI 仅负责
+  // 触发 + 反馈。空队列 disabled + tooltip 解释,启动中 disabled 防重。
+  const queuedCount = buckets.queue.length
+  const startAllDisabled = queuedCount === 0 || startingAll
+  async function handleStartAll(): Promise<void> {
+    if (startAllDisabled) return
+    const ids = buckets.queue.map((t) => t.id)
+    setStartingAll(true)
+    try {
+      const result = await startMany(ids)
+      if (result.failed === 0) {
+        message.success(`已启动 ${result.ok} 个任务`)
+      } else {
+        message.warning(`已启动 ${result.ok} 个,失败 ${result.failed} 个`)
+      }
+    } catch (err) {
+      message.error(`批量启动失败: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setStartingAll(false)
+    }
+  }
+
   return (
     <div
       style={{
@@ -167,6 +193,32 @@ export default function MobileSuperTasks(): JSX.Element {
             )}
           </div>
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            {/* 「开始所有任务」按钮(2026-09-05,tf-dkb8gj50):批量启动 queue 桶
+                全部任务。带待启动 N 徽标;空队列 disabled + tooltip 解释;
+                启动中 disabled + Spin 防重。视觉权重与「快速创建」对齐(同 type=primary
+                + size=small),但用 Badge 标识待启动数。 */}
+            <Tooltip
+              title={queuedCount === 0 ? '暂无待启动任务' : `批量启动全部 ${queuedCount} 个排队任务`}
+            >
+              <Badge
+                count={queuedCount}
+                offset={[-4, 2]}
+                color="#f97316"
+                data-testid="mobile-start-all-badge"
+              >
+                <Button
+                  type="primary"
+                  size="small"
+                  icon={<PlayCircleOutlined />}
+                  loading={startingAll}
+                  disabled={startAllDisabled}
+                  onClick={() => void handleStartAll()}
+                  data-testid="mobile-start-all-button"
+                >
+                  开始所有任务
+                </Button>
+              </Badge>
+            </Tooltip>
             <Button
               type="primary"
               size="small"
