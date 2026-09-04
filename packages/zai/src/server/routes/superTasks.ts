@@ -29,6 +29,7 @@ import {
   getTaskFactoryState,
   setTaskFactoryState,
   injectSupervisorCommand,
+  buildTaskCommand,
 } from '../services/taskFactoryBridge.js'
 import { getBackgroundRuntime } from '../services/backgroundRuntime.js'
 import {
@@ -295,8 +296,10 @@ router.post('/super-tasks/inject', async (req, res) => {
   const typedAction = action as InjectAction
   const task = id ? await getTaskSummary(id as string) : null
   if (id && !task) return res.status(404).json({ error: `task ${id} not found` })
-  const body = id
-    ? `\n<task-command action="${typedAction}" id="${id}" title="${(task!.title ?? '').replace(/</g, '＜')}">Handle task ${id} per the command: ${typedAction}</task-command>`
+  // zai patch (2026-09-04, quick-intake): quick 任务在 dispatch/accept 上自动
+  // 附加 verifier light 提示段;full / 缺省保持原行为(零变化)。
+  const body = task
+    ? buildTaskCommand(typedAction, task, `Handle task ${id} per the command: ${typedAction}`)
     : `\n<task-command action="${typedAction}">Handle per the command: ${typedAction}</task-command>`
   injectSupervisorCommand(body)
   res.json({ ok: true })
@@ -309,7 +312,7 @@ router.post('/super-tasks/inject', async (req, res) => {
 router.post('/super-tasks/:id/start', async (req, res) => {
   const t = await getTaskSummary(req.params.id)
   if (!t || t.bucket !== 'queue-tasks') return res.status(400).json({ error: `task ${req.params.id} 不在队列` })
-  injectSupervisorCommand(`\n<task-command action="dispatch" id="${t.id}" title="${(t.title ?? '').replace(/</g, '＜')}">Dispatch task ${t.id} for execution.</task-command>`)
+  injectSupervisorCommand(buildTaskCommand('dispatch', t, `Dispatch task ${t.id} for execution.`))
   res.json({ ok: true })
 })
 
@@ -366,7 +369,10 @@ router.post('/super-tasks/:id/accept', async (req, res) => {
     return res.status(400).json({ error: `task ${req.params.id} 不在执行中或验证中(processing/verifying)` })
   }
   const action = t.bucket === 'verifying-tasks' ? 'forced-accept' : 'accept'
-  injectSupervisorCommand(`\n<task-command action="${action}" id="${t.id}">${t.bucket === 'verifying-tasks' ? 'Forced accept: skip verifier and call SuperTasksMarkDone.' : 'Accept the task deliverables and call SuperTasksMarkDone.'}</task-command>`)
+  const msg = t.bucket === 'verifying-tasks'
+    ? 'Forced accept: skip verifier and call SuperTasksMarkDone.'
+    : 'Accept the task deliverables and call SuperTasksMarkDone.'
+  injectSupervisorCommand(buildTaskCommand(action as 'forced-accept' | 'accept', t, msg))
   res.json({ ok: true })
 })
 

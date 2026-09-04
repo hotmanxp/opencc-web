@@ -1,7 +1,7 @@
 // @vitest-environment happy-dom
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom'
-import { render, screen, fireEvent, waitFor } from '@testing-library/react'
+import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
 import QuickCreateModal from './QuickCreateModal'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import { useAgentStore } from '../../store/useAgentStore'
@@ -62,10 +62,13 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
 
   it('priority 缺省 = P2', () => {
     render(<QuickCreateModal open onClose={vi.fn()} />)
-    const p2 = screen.getByText('P2').closest('[data-priority="P2"]')
-    expect(p2).toBeTruthy()
-    // antd Radio.Button 选中态有 aria-checked="true"
-    expect((p2 as HTMLElement).getAttribute('aria-checked')).toBe('true')
+    // data-priority 在 input 元素上;选中态给 input.checked = true + 父 label
+    // 加 ant-radio-button-wrapper-checked class。
+    const p2Input = screen.getByDisplayValue('P2') as HTMLInputElement
+    expect(p2Input.checked).toBe(true)
+    // 父 label 应带选中 class
+    const label = p2Input.closest('label.ant-radio-button-wrapper')
+    expect(label?.classList.contains('ant-radio-button-wrapper-checked')).toBe(true)
   })
 
   it('cwd 缺省 = useAgentStore.cwd(当前实例 cwd)', () => {
@@ -142,10 +145,12 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
 
   it('created 信号到达后弹窗切换到完成条 + 显示「完成」按钮', async () => {
     render(<QuickCreateModal open onClose={vi.fn()} />)
-    // 触发 created
-    useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-quick01' })
+    // 触发 created(act 包住 store 更新,避免 React 18 警告 + 触发重渲染)
+    act(() => { useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-quick01' }) })
     expect(await screen.findByText(/任务 tf-quick01 已创建/)).toBeTruthy()
-    expect(await screen.findByText('完成')).toBeTruthy()
+    // AntD Button 内容在 span 中间可能有空白(「完 成」),用 button role + 文字 trim 匹配
+    const doneBtn = await screen.findByRole('button', { name: (n) => n.replace(/\s+/g, '') === '完成' })
+    expect(doneBtn).toBeTruthy()
   })
 
   it('点击完成按钮调 deleteAgentSession + clearLastCreated + onClose', async () => {
@@ -158,9 +163,9 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
     await waitFor(() => {
       expect(createAgentSession).toHaveBeenCalled()
     })
-    // 触发 created
-    useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-q1' })
-    const doneBtn = await screen.findByText('完成')
+    // 触发 created(act 包住)
+    act(() => { useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-q1' }) })
+    const doneBtn = await screen.findByRole('button', { name: (n) => n.replace(/\s+/g, '') === '完成' })
     fireEvent.click(doneBtn)
     await waitFor(() => {
       expect(deleteAgentSession).toHaveBeenCalledWith('quick-sess-1')

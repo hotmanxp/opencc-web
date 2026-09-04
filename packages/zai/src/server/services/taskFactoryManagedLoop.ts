@@ -22,7 +22,11 @@
 import { taskFactoryListTasks as listTasks } from '@zn-ai/zn-agent-core'
 import { getBackgroundRuntime } from './backgroundRuntime.js'
 import { getFactorySettings } from './factorySettings.js'
-import { getTaskFactoryStateSync, injectSupervisorCommand } from './taskFactoryBridge.js'
+import {
+  getTaskFactoryStateSync,
+  injectSupervisorCommand,
+  QUICK_VERIFIER_HINT,
+} from './taskFactoryBridge.js'
 
 let timer: ReturnType<typeof setInterval> | null = null
 let lastSignature = ''
@@ -71,7 +75,12 @@ async function tick(): Promise<void> {
   lastSignature = signature
   const first: string = actions[0]!
   if (first === 'dispatch') {
-    injectSupervisorCommand('\n<task-command action="dispatch">The queue has tasks; dispatch them for execution in queue order (multiple at once is fine — tasks run in parallel).</task-command>')
+    // zai patch (2026-09-04, quick-intake):如果 queue 里含 quick 任务,在
+    // dispatch 注入里追加 verifier light 提示段 —— 主管后续 spawn verifier
+    // 时会读这段并走轻量验证(build + lint + 关键文件 diff 的 code review)。
+    const hasQuick = queue.some((t) => t.mode === 'quick')
+    const hint = hasQuick ? QUICK_VERIFIER_HINT : ''
+    injectSupervisorCommand(`\n<task-command action="dispatch">The queue has tasks; dispatch them for execution in queue order (multiple at once is fine — tasks run in parallel).${hint ? ' NOTE: queue contains quick-mode tasks — their verifier rounds should follow the light path below.' : ''}</task-command>${hint}`)
   } else if (first.startsWith('accept:')) {
     const id = first.slice('accept:'.length)
     injectSupervisorCommand(`\n<task-command action="accept" id="${id}">The executor subagent has finished; please accept the task.</task-command>`)
