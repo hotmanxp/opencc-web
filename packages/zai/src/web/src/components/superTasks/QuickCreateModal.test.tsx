@@ -213,4 +213,41 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
       expect(content?.style.borderRadius).not.toBe('0px')
     })
   })
+
+  // ---- mobileAsDrawer 模式(tf-cy9x9kjh,/m-super-tasks 抽屉式)----
+
+  it('mobileAsDrawer=true:渲染 .ant-drawer(非 .ant-modal),顶部拖把可见', () => {
+    render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
+    expect(document.querySelector('.ant-drawer')).toBeTruthy()
+    expect(document.querySelector('.ant-modal')).toBeNull()
+    expect(screen.getByTestId('quick-drawer-handle')).toBeTruthy()
+    expect(screen.getByTestId('quick-mobile-drawer')).toBeTruthy()
+  })
+
+  it('mobileAsDrawer=true:表单字段仍完整渲染(title/description/priority/cwd/agent/dependsOn/submit)', () => {
+    render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
+    expect(screen.getByTestId('quick-title-input')).toBeTruthy()
+    expect(screen.getByTestId('quick-description-input')).toBeTruthy()
+    expect(screen.getByTestId('quick-priority-radio')).toBeTruthy()
+    expect(screen.getByTestId('quick-cwd-input')).toBeTruthy()
+    expect(screen.getByTestId('quick-agent-select')).toBeTruthy()
+    expect(screen.getByTestId('quick-depends-on-select')).toBeTruthy()
+    expect(screen.getByTestId('quick-submit-button')).toBeTruthy()
+  })
+
+  it('mobileAsDrawer=true:created 信号 → 完成条在 Drawer 内渲染', async () => {
+    render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
+    act(() => { useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-quickmob' }) })
+    expect(await screen.findByText(/任务 tf-quickmob 已创建/)).toBeTruthy()
+    expect(document.querySelector('.ant-drawer')).toBeTruthy()
+  })
+
+  it('默认(桌面):回归 .ant-modal + width=640;无 drawer,无 drawer-handle', () => {
+    render(<QuickCreateModal open onClose={vi.fn()} />)
+    const modal = document.querySelector('.ant-modal') as HTMLElement | null
+    expect(modal).toBeTruthy()
+    expect(modal?.style.width).toBe('640px')
+    expect(document.querySelector('.ant-drawer')).toBeNull()
+    expect(screen.queryByTestId('quick-drawer-handle')).toBeNull()
+  })
 })

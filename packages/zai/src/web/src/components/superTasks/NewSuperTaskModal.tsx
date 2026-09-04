@@ -1,4 +1,4 @@
-import { Alert, Button, Modal, Space, Typography } from 'antd'
+import { Alert, Button, Drawer, Modal, Space, Typography } from 'antd'
 import { useEffect, useMemo, useRef, useState } from 'react'
 import AgentConversation from '../../pages/AgentConversation'
 import {
@@ -17,6 +17,7 @@ import { subscribeServerEvents, type StreamHandle } from '../../lib/eventSource'
 import { applyBatchTo } from '../../store/useEventStream'
 import { useAgentStore } from '../../store/useAgentStore'
 import { LIGHT_PAGE_VARS } from './lightThemeVars'
+import DrawerPullHandle from './DrawerPullHandle'
 
 const INTAKE_SESSION_KEY = 'zai-intake-session'
 const INTAKE_MAIN_AGENT = 'task-intake'
@@ -57,10 +58,19 @@ export default function NewSuperTaskModal({
    * 桌面调用点不传 → 行为 100% 兼容。
    */
   fullscreen = false,
+  /**
+   * 移动端抽屉式(2026-09-04,跟随 tf-cy9x9kjh):`true` 时把 `<Modal>` 容器
+   * 换成 `<Drawer placement="bottom" height="90%">`,顶部带 24px 拖把可下拉
+   * 关闭;内容 / 状态 / 事件链零改动。`fullscreen` 与 `mobileAsDrawer`
+   * 同时为 true 时 `mobileAsDrawer` 优先 —— drawer 自带 90% 容器尺寸,
+   * `fullscreen` 在 mobile 上不再被采用。桌面调用点不传 → 走 Modal。
+   */
+  mobileAsDrawer = false,
 }: {
   open: boolean
   onClose: () => void
   fullscreen?: boolean
+  mobileAsDrawer?: boolean
 }): JSX.Element {
   // intake-scoped 独立 store 实例。每个 Modal 打开周期一份,关闭后随 useMemo
   // 清理掉引用。createAgentStore 是从 useAgentStore.ts 导出的 factory —— 完全
@@ -268,6 +278,122 @@ export default function NewSuperTaskModal({
     }
   }
 
+  // mobileAsDrawer 优先于 fullscreen —— drawer 自带 90% 容器尺寸,
+  // fullscreen 仅用于桌面 fullscreen Modal(目前桌面不调,保留作未来扩展)。
+  const innerHeight = mobileAsDrawer
+    ? '100%'
+    : fullscreen
+      ? '100dvh'
+      : '68vh'
+
+  const bodyContent = (
+    <div
+      style={{
+        ...LIGHT_PAGE_VARS,
+        // Modal / Drawer 都走 portal 挂在 document.body 下,拿不到页面根 div 上的
+        // 亮色 CSS 变量;不在此重注入一份,AgentConversation 的 var(--bg-body)
+        // 会解析回全局暗色主题 → 黑底 + 暗色文字低对比(2026-09-02 用户反馈)。
+        background: '#eef2f7',
+        color: 'var(--text-primary, #1f2937)',
+        display: 'flex',
+        flexDirection: 'column',
+        height: innerHeight,
+      }}
+    >
+      {createdId && (
+        <Alert
+          type="success"
+          showIcon
+          message={`任务 ${createdId} 已创建,讨论纪要将归档到任务目录 docs/brainstorm.md`}
+          style={{ borderRadius: 0 }}
+          action={(
+            <Button type="primary" size="small" disabled={busy || status === 'streaming'} onClick={() => void handleClose()}>
+              完成并关闭
+            </Button>
+          )}
+        />
+      )}
+      {docGateMissing && (
+        <Alert
+          type="warning"
+          showIcon
+          data-testid="intake-gate-warning"
+          message={`文档校验未通过:缺少 ${docGateMissing.join('、')}`}
+          description="已向对话中的 AI 发送补全要求,请等它补齐后再点「完成并关闭」;确需跳过可用「强制关闭」。"
+          style={{ borderRadius: 0 }}
+          action={(
+            <Button size="small" danger disabled={busy} onClick={() => void handleClose(true)}>
+              强制关闭
+            </Button>
+          )}
+        />
+      )}
+      {resumeDraft && (
+        <Alert
+          type="info"
+          showIcon
+          message="检测到未完成的需求讨论"
+          style={{ borderRadius: 0 }}
+          action={(
+            <Space>
+              <Button size="small" onClick={() => resumeDraftSession(resumeDraft)}>继续</Button>
+              <Button size="small" disabled={busy} onClick={() => void startFresh(resumeDraft)}>新开</Button>
+            </Space>
+          )}
+        />
+      )}
+      {bootError && (
+        <Alert
+          type="error"
+          showIcon
+          message={bootError}
+          style={{ borderRadius: 0 }}
+          action={(
+            <Button size="small" disabled={busy} onClick={() => void startFresh()}>重试</Button>
+          )}
+        />
+      )}
+      {intakeSid && sessionId === intakeSid ? (
+        <AgentStoreContext.Provider value={intakeStore}>
+          <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
+            {/* intake/supervisor 临时对话不需要「分享到 LAN」与「插件管理」
+                入口 — 主管讨论是单设备内对齐意图的过程,挂上反而干扰。 */}
+            <AgentConversation hideShareAndPlugin />
+          </div>
+        </AgentStoreContext.Provider>
+      ) : (
+        <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+          <Typography.Text type="secondary">
+            {busy ? '正在准备需求讨论会话…' : resumeDraft ? '请选择继续未完成的讨论,或新开一轮。' : '准备中…'}
+          </Typography.Text>
+        </div>
+      )}
+    </div>
+  )
+
+  if (mobileAsDrawer) {
+    return (
+      <Drawer
+        open={open}
+        onClose={() => void handleClose()}
+        placement="bottom"
+        height="90%"
+        destroyOnHidden={false}
+        keyboard
+        title={(
+          <div>
+            <DrawerPullHandle testId="new-task-drawer-handle" onClose={() => void handleClose()} />
+            <span style={{ display: 'block', fontWeight: 500, paddingBottom: 8 }}>新建任务 · 需求讨论</span>
+          </div>
+        )}
+        styles={{ body: { padding: 0 } }}
+        data-testid="new-task-mobile-drawer"
+      >
+        {bodyContent}
+      </Drawer>
+    )
+  }
+
   return (
     <Modal
       open={open}
@@ -282,88 +408,7 @@ export default function NewSuperTaskModal({
         ...(fullscreen ? { content: { borderRadius: 0, padding: 0 } } : {}),
       }}
     >
-      <div
-        style={{
-          ...LIGHT_PAGE_VARS,
-          // Modal 走 portal 挂在 document.body 下,拿不到页面根 div 上的亮色
-          // CSS 变量;不在此重注入一份,AgentConversation 的 var(--bg-body) 会
-          // 解析回全局暗色主题 → 黑底 + 暗色文字低对比(2026-09-02 用户反馈)。
-          background: '#eef2f7',
-          color: 'var(--text-primary, #1f2937)',
-          display: 'flex',
-          flexDirection: 'column',
-          height: fullscreen ? '100dvh' : '68vh',
-        }}
-      >
-        {createdId && (
-          <Alert
-            type="success"
-            showIcon
-            message={`任务 ${createdId} 已创建,讨论纪要将归档到任务目录 docs/brainstorm.md`}
-            style={{ borderRadius: 0 }}
-            action={(
-              <Button type="primary" size="small" disabled={busy || status === 'streaming'} onClick={() => void handleClose()}>
-                完成并关闭
-              </Button>
-            )}
-          />
-        )}
-        {docGateMissing && (
-          <Alert
-            type="warning"
-            showIcon
-            data-testid="intake-gate-warning"
-            message={`文档校验未通过:缺少 ${docGateMissing.join('、')}`}
-            description="已向对话中的 AI 发送补全要求,请等它补齐后再点「完成并关闭」;确需跳过可用「强制关闭」。"
-            style={{ borderRadius: 0 }}
-            action={(
-              <Button size="small" danger disabled={busy} onClick={() => void handleClose(true)}>
-                强制关闭
-              </Button>
-            )}
-          />
-        )}
-        {resumeDraft && (
-          <Alert
-            type="info"
-            showIcon
-            message="检测到未完成的需求讨论"
-            style={{ borderRadius: 0 }}
-            action={(
-              <Space>
-                <Button size="small" onClick={() => resumeDraftSession(resumeDraft)}>继续</Button>
-                <Button size="small" disabled={busy} onClick={() => void startFresh(resumeDraft)}>新开</Button>
-              </Space>
-            )}
-          />
-        )}
-        {bootError && (
-          <Alert
-            type="error"
-            showIcon
-            message={bootError}
-            style={{ borderRadius: 0 }}
-            action={(
-              <Button size="small" disabled={busy} onClick={() => void startFresh()}>重试</Button>
-            )}
-          />
-        )}
-        {intakeSid && sessionId === intakeSid ? (
-          <AgentStoreContext.Provider value={intakeStore}>
-            <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
-              {/* intake/supervisor 临时对话不需要「分享到 LAN」与「插件管理」
-                  入口 — 主管讨论是单设备内对齐意图的过程,挂上反而干扰。 */}
-              <AgentConversation hideShareAndPlugin />
-            </div>
-          </AgentStoreContext.Provider>
-        ) : (
-          <div style={{ flex: 1, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
-            <Typography.Text type="secondary">
-              {busy ? '正在准备需求讨论会话…' : resumeDraft ? '请选择继续未完成的讨论,或新开一轮。' : '准备中…'}
-            </Typography.Text>
-          </div>
-        )}
-      </div>
+      {bodyContent}
     </Modal>
   )
 }
