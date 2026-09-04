@@ -1,9 +1,21 @@
 // @vitest-environment happy-dom
-import { describe, expect, it, vi } from 'vitest'
+import { describe, expect, it, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom'
-import { render, screen, fireEvent } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import MobileSuperTaskCard from './MobileSuperTaskCard'
 import type { TaskSummary } from '../../lib/superTaskApi'
+
+// zai patch (2026-09-04, tf-al38784c):用 vi.mock 替 deleteSuperTasks 防止真打 fetch。
+// 与 SuperTaskCard.test.tsx 对 agentSessionApi 的处理一致;mock factory
+// 外部引用 vi.fn 必须用 vi.hoisted(vitest 把 vi.mock 提到所有 import 前,
+// 工厂闭包要在 import 解析阶段执行,普通 const 还在 TDZ)。
+const { deleteSuperTasksMock } = vi.hoisted(() => ({
+  deleteSuperTasksMock: vi.fn(async () => undefined),
+}))
+vi.mock('../../lib/superTaskApi', async () => {
+  const actual = await vi.importActual<typeof import('../../lib/superTaskApi')>('../../lib/superTaskApi')
+  return { ...actual, deleteSuperTasks: deleteSuperTasksMock }
+})
 
 const baseTask = (over: Partial<TaskSummary> = {}): TaskSummary => ({
   id: 'tf-mob01',
@@ -14,6 +26,10 @@ const baseTask = (over: Partial<TaskSummary> = {}): TaskSummary => ({
   createdAt: '2026-09-02T00:00:00.000Z',
   priority: 'P1',
   ...over,
+})
+
+beforeEach(() => {
+  deleteSuperTasksMock.mockClear()
 })
 
 describe('MobileSuperTaskCard (2026-09-04)', () => {
@@ -112,5 +128,90 @@ describe('MobileSuperTaskCard — quick Tag (2026-09-04 round 2)', () => {
     )
     expect(container.querySelector('[data-testid="quick-tag-tf-legacy01"]')).toBeNull()
     expect(screen.queryByText('轻量')).toBeNull()
+  })
+})
+
+// zai patch (2026-09-04, tf-al38784c):移动端单卡右上角 × 删除按钮 + Popconfirm
+// 二次确认。spec R7 要求 4 个 case:渲染、queued 确认删除、processing/verifying
+// disabled、stopPropagation 不触发卡片 onOpen。
+describe('MobileSuperTaskCard — 删除按钮 (2026-09-04 tf-al38784c)', () => {
+  it('R7-1:默认渲染右上角 × 按钮(data-testid=mobile-card-delete-<id>)', () => {
+    render(<MobileSuperTaskCard task={baseTask({ id: 'tf-del01' })} onOpen={vi.fn()} />)
+    const btn = screen.getByTestId('mobile-card-delete-tf-del01')
+    expect(btn).toBeTruthy()
+    // 默认 processing 状态 → disabled
+    expect(btn.hasAttribute('disabled')).toBe(true)
+  })
+
+  it('R7-2:queued 任务 × 按钮 enabled → 点击触发 Popconfirm → 确认 → 调 deleteSuperTasks([id])', async () => {
+    const onOpen = vi.fn()
+    render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-del02', status: 'queued', bucket: 'queue-tasks' })}
+        onOpen={onOpen}
+      />,
+    )
+    const btn = screen.getByTestId('mobile-card-delete-tf-del02') as HTMLButtonElement
+    expect(btn.hasAttribute('disabled')).toBe(false)
+    // 点 × 触发 Popconfirm 显示 —— AntD 用 React portal 把 popconfirm 渲染到
+    // document.body(不在 render 返回的 container 内)。happy-dom 渲染时按钮
+    // 文案「删除」会因 <span> 包裹被插空格,用 class 直接锁定 dangerous 确认
+    // 按钮,绕开 title「删除该任务?」与按钮文案间的歧义。
+    fireEvent.click(btn)
+    const okBtn = await waitFor(() => {
+      const el = document.querySelector('.ant-popconfirm-buttons .ant-btn-dangerous') as HTMLButtonElement | null
+      if (!el) throw new Error('popconfirm dangerous button not yet in DOM')
+      return el
+    })
+    fireEvent.click(okBtn)
+    await waitFor(() => {
+      expect(deleteSuperTasksMock).toHaveBeenCalledWith(['tf-del02'])
+    })
+    // 卡片 onOpen **不**应被触发(spec R5:点 × 不能误开抽屉)
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('R7-3:processing 任务 × 按钮 disabled', () => {
+    render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-del03', status: 'processing', bucket: 'processing-tasks' })}
+        onOpen={vi.fn()}
+      />,
+    )
+    const btn = screen.getByTestId('mobile-card-delete-tf-del03') as HTMLButtonElement
+    expect(btn.hasAttribute('disabled')).toBe(true)
+    // Tooltip 通过 aria-describedby / title 体现:Button 实际挂在 Tooltip 内,
+    // happy-dom 下 AntD Tooltip 不直接渲染 popup,验证「disabled」属性即可
+    // (实际提示文案由 R8 端到端验收覆盖)。
+    // 尝试点 disabled 按钮不应触发 delete
+    fireEvent.click(btn)
+    expect(deleteSuperTasksMock).not.toHaveBeenCalled()
+  })
+
+  it('R7-3b:verifying 任务 × 按钮 disabled', () => {
+    render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-del03b', status: 'verifying', bucket: 'verifying-tasks' })}
+        onOpen={vi.fn()}
+      />,
+    )
+    const btn = screen.getByTestId('mobile-card-delete-tf-del03b') as HTMLButtonElement
+    expect(btn.hasAttribute('disabled')).toBe(true)
+    fireEvent.click(btn)
+    expect(deleteSuperTasksMock).not.toHaveBeenCalled()
+  })
+
+  it('R7-4:点 × 按钮 → 不触发卡片 onOpen(stopPropagation 隔离,queued 可点场景)', () => {
+    const onOpen = vi.fn()
+    render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-del04', status: 'queued', bucket: 'queue-tasks' })}
+        onOpen={onOpen}
+      />,
+    )
+    const btn = screen.getByTestId('mobile-card-delete-tf-del04') as HTMLButtonElement
+    fireEvent.click(btn)
+    // Popconfirm 弹出 ≠ 卡片 onOpen;若 stopPropagation 漏写则 onOpen 会被调
+    expect(onOpen).not.toHaveBeenCalled()
   })
 })
