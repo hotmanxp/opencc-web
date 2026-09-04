@@ -1,5 +1,7 @@
-import { Tag } from 'antd'
+import { Button, Popconfirm, Tag, Tooltip, message } from 'antd'
+import { CloseOutlined } from '@ant-design/icons'
 import type { TaskSummary } from '../../lib/superTaskApi'
+import { deleteSuperTasks } from '../../lib/superTaskApi'
 import { STATUS_TAG, PRIORITY_TAG, STATUS_ACCENT } from './SuperTaskCard'
 
 /**
@@ -13,6 +15,10 @@ import { STATUS_TAG, PRIORITY_TAG, STATUS_ACCENT } from './SuperTaskCard'
  *    单行 ellipsis 标题 + 右对齐相对时间。整卡可点 → 打开详情抽屉。
  *  - 三张配色/文案表(STATUS_TAG / PRIORITY_TAG / STATUS_ACCENT)从
  *    SuperTaskCard export 复用 —— 任何改色 / 改文案只改一处。
+ *
+ * 2026-09-04(tf-al38784c)补:右上角紧凑 × 删除按钮 + Popconfirm 二次确认。
+ * 仅 queued / done / failed / paused 状态可点;processing / verifying 状态
+ * 按钮 disabled + tooltip 解释。点 × 走 `e.stopPropagation()` 阻断卡片 onOpen。
  *
  * 触控目标 ≥44px(minHeight:56)。
  */
@@ -32,6 +38,33 @@ export default function MobileSuperTaskCard({
   // 也是桌面卡片 SuperTaskCard L300-302 用的字段);createdAt 缺失
   // 退到 startedAt / completedAt。完全没有 → 显示「-」。
   const ts = task.createdAt ?? task.startedAt ?? task.completedAt ?? null
+  // 状态守卫:processing / verifying 桶不可删(in-flight 任务避免打断),
+  // 后端对这两个状态也会返 409,前端 disabled 是双保险。
+  const deletable = task.status !== 'processing' && task.status !== 'verifying'
+
+  async function handleDelete(): Promise<void> {
+    try {
+      await deleteSuperTasks([task.id])
+      message.success(`任务 ${task.id} 已删除`)
+    } catch (err) {
+      message.error(`删除失败: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  const deleteBtn = (
+    <Tooltip title={deletable ? '删除该任务' : '处理中任务不可删(避免打断正在执行/验证的工作流)'}>
+      <Button
+        size="small"
+        shape="circle"
+        icon={<CloseOutlined />}
+        disabled={!deletable}
+        aria-label={`删除任务 ${task.title}`}
+        data-testid={`mobile-card-delete-${task.id}`}
+        onClick={(e) => e.stopPropagation()}
+        style={{ position: 'absolute', top: 6, right: 6, zIndex: 1 }}
+      />
+    </Tooltip>
+  )
 
   return (
     <div
@@ -46,6 +79,7 @@ export default function MobileSuperTaskCard({
         }
       }}
       style={{
+        position: 'relative',
         display: 'flex',
         flexDirection: 'column',
         gap: 6,
@@ -102,6 +136,7 @@ export default function MobileSuperTaskCard({
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
+          paddingRight: 28, // 给右上角 × 按钮留位,避免标题被遮
         }}
         title={task.title}
       >
@@ -117,6 +152,19 @@ export default function MobileSuperTaskCard({
       >
         {formatRelative(ts)}
       </div>
+      {/* 右上角 × 删除按钮(tf-al38784c):Popconfirm 二次确认,状态守卫见上,
+          onClick stopPropagation 不触发卡片 onOpen。 */}
+      <Popconfirm
+        title="删除该任务?"
+        description="删除后任务目录与执行记录会被清理。"
+        okText="删除"
+        cancelText="取消"
+        okButtonProps={{ danger: true }}
+        onConfirm={() => { void handleDelete() }}
+        onPopupClick={(e) => e.stopPropagation()}
+      >
+        {deleteBtn}
+      </Popconfirm>
     </div>
   )
 }
