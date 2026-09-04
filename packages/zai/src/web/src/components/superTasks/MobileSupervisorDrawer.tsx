@@ -5,10 +5,10 @@ import { useAgentStore } from '../../store/useAgentStore'
 import { LIGHT_PAGE_VARS } from './lightThemeVars'
 
 /**
- * 移动端主管对话入口(2026-09-04 新增,/m-super-tasks 路由使用)。
+ * 移动端任务调度官对话入口(2026-09-04 新增,/m-super-tasks 路由使用)。
  *
  * - 默认折叠:右下角固定圆形 FAB,点开 → bottom Drawer 高度 90%,
- *   内含 `<AgentConversation hideShareAndPlugin />`(主管 transcript
+ *   内含 `<AgentConversation hideShareAndPlugin />`(调度官 transcript
  *   跨开/关保留 —— 不开 destroyOnHidden)。
  * - FAB streaming 指示:`useAgentStore.status === 'streaming'` 时
  *   右上角叠小圆点。
@@ -33,7 +33,7 @@ export default function MobileSupervisorDrawer({
     <>
       <button
         type="button"
-        aria-label="打开主管对话"
+        aria-label="打开任务调度官对话"
         data-testid="mobile-supervisor-fab"
         onClick={onOpen}
         style={{
@@ -78,7 +78,7 @@ export default function MobileSupervisorDrawer({
         placement="bottom"
         height="90%"
         destroyOnHidden={false}
-        title="主管对话"
+        title="任务调度官对话"
         styles={{ body: { padding: 0 } }}
         data-testid="mobile-supervisor-drawer"
       >

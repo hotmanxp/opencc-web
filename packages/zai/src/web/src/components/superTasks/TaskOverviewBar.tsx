@@ -130,19 +130,19 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
           />
         </Tooltip>
         {/*
-          重置主管会话(2026-09-02):清 state.json.supervisorSessionId +
-          同步关托管,然后 reload 触发 mount 引导重建一条新的空主管会话。
-          旧 transcript 保留在磁盘,与新主管不再关联 — 这是产品决策,
+          重置任务调度官会话(2026-09-02):清 state.json.supervisorSessionId +
+          同步关托管,然后 reload 触发 mount 引导重建一条新的空调度官会话。
+          旧 transcript 保留在磁盘,与新调度官不再关联 — 这是产品决策,
           不是 bug。Popconfirm 二次确认防误点(参考 SuperTaskCard 删除
           任务的同款 UI 惯例)。
         */}
         <Popconfirm
-          title="重置主管会话?"
+          title="重置任务调度官会话?"
           description={
             <span>
-              将创建一条新的空主管会话替换当前对话。
+              将创建一条新的空调度官会话替换当前对话。
               <br />
-              旧的 transcript 文件保留在 <code>~/.zai/tasks/</code> 与新主管不再关联。
+              旧的 transcript 文件保留在 <code>~/.zai/tasks/</code> 与新调度官不再关联。
             </span>
           }
           okText="重置"
@@ -151,7 +151,7 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
           onConfirm={async () => {
             try {
               await resetSupervisorSession()
-              // 全局 reload — 让 store / 看板 / 主管 transcript 干净同步
+              // 全局 reload — 让 store / 看板 / 调度官 transcript 干净同步
               window.location.reload()
             } catch (err) {
               message.error(
@@ -160,7 +160,7 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
             }
           }}
         >
-          <Tooltip title="清空当前主管会话,触发全新引导">
+          <Tooltip title="清空当前任务调度官会话,触发全新引导">
             <Button icon={<ReloadOutlined />} data-testid="reset-supervisor-button">
               重置会话
             </Button>
