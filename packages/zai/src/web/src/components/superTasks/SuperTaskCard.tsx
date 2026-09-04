@@ -239,6 +239,18 @@ export default function SuperTaskCard({
           <Tag color={tag.color} style={{ marginInlineEnd: 0 }}>
             {tag.label}
           </Tag>
+          {/* zai patch (2026-09-04, quick-intake):quick 任务视觉标记 —— 状态 Tag 旁加
+              「轻量」Tag,跟 full 任务在卡片上明显区分(深色 default 灰)。 */}
+          {task.mode === 'quick' && (
+            <Tag
+              color="default"
+              style={{ marginInlineEnd: 0 }}
+              data-mode="quick"
+              data-testid={`mode-quick-${task.id}`}
+            >
+              轻量
+            </Tag>
+          )}
           {/* zai patch (2026-09-02, priority Tag): P0 红 / P1 橙 / P2 蓝 / P3 灰。
               缺省 P2 也显示,让用户一眼看清调度排序。dependsOn 非空时附 tooltip。 */}
           {task.priority && (

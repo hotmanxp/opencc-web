@@ -301,3 +301,43 @@ describe('SuperTaskCard priority Tag (2026-09-02)', () => {
     void wrapper
   })
 })
+
+// zai patch (2026-09-04, quick-intake):卡片渲染 quick 模式视觉标记。
+describe('SuperTaskCard mode Tag (2026-09-04 quick-intake)', () => {
+  it('mode="quick" 时渲染「轻量」Tag(data-mode="quick")', () => {
+    const { container } = render(
+      <SuperTaskCard
+        task={baseTask({ mode: 'quick' })}
+        selected={false}
+        onToggleSelect={() => {}}
+        dimmed={false}
+        onOpenDetail={() => {}}
+        onDeleted={() => {}}
+      />,
+    )
+    const quickTag = container.querySelector('[data-mode="quick"]')
+    expect(quickTag).toBeTruthy()
+    expect(quickTag?.textContent).toContain('轻量')
+    expect(quickTag?.classList.contains('ant-tag-default') || quickTag?.className.includes('ant-tag-default')).toBe(true)
+  })
+
+  it('mode="full" 或缺省时不渲染「轻量」Tag', () => {
+    const cases: Array<{ name: string; over: Partial<TaskSummary> }> = [
+      { name: 'full 显式', over: { mode: 'full' } },
+      { name: 'mode 缺省', over: {} },
+    ]
+    for (const c of cases) {
+      const { container } = render(
+        <SuperTaskCard
+          task={baseTask(c.over)}
+          selected={false}
+          onToggleSelect={() => {}}
+          dimmed={false}
+          onOpenDetail={() => {}}
+          onDeleted={() => {}}
+        />,
+      )
+      expect(container.querySelector(`[data-mode="quick"]`)).toBeNull()
+    }
+  })
+})
