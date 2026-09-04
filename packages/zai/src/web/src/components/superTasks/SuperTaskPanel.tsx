@@ -23,7 +23,8 @@ import TaskOverviewBar, { matchFilter, type SuperTaskFilter } from './TaskOvervi
 
 export type BucketKey = 'queue' | 'processing' | 'verifying' | 'finished'
 
-const LANE_TITLE: Record<BucketKey, string> = { queue: '队列', processing: '执行中', verifying: '验证中', finished: '已完成' }
+/** 栏头标题(2026-09-04 起 export 出来供移动端 MobileSuperTasks Segmented 复用)。 */
+export const LANE_TITLE: Record<BucketKey, string> = { queue: '队列', processing: '执行中', verifying: '验证中', finished: '已完成' }
 
 /** 栏头配色(亮色化,用户 2026-09-01;verifying 加青色 2026-09-02)。 */
 const LANE_COLOR: Record<BucketKey, string> = {

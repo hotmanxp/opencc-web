@@ -13,6 +13,10 @@ const Agent = lazy(() => import('./pages/Agent'));
 const Instances = lazy(() => import('./pages/Instances'));
 const MobileLayout = lazy(() => import('./components/MobileLayout'));
 const MobileAgent = lazy(() => import('./pages/MobileAgent'));
+// 移动端任务工厂页(2026-09-04):独立顶层路由,与 /m 是两条路径;
+// 不修改 /m 的 task-factory 分流 —— 移动端靠 lan-agent 卡片 / 直接
+// URL 进入本页。
+const MobileSuperTasks = lazy(() => import('./pages/MobileSuperTasks'));
 const Desktop = lazy(() => import('./pages/Desktop'));
 // 任务工厂面板 — Task 8 才落地完整 UI,本任务先把路由挂上 + redirect 通路打通,
 // 期间页面 404(暂未实现)可接受:路由表与跳转契约先固化,避免 Task 8 一次性改动
@@ -150,6 +154,10 @@ export default function AppRouter() {
         {/* 移动端 — 走 MobileLayout(无 Sider, 挂 visualViewport) */}
         <Route element={<MobileLayout />}>
           <Route path="/m" element={<MobileAgent />} />
+          {/* /m-super-tasks 与 /m 是两条独立顶层路径(2026-09-04):
+              不在 /m 下按 instanceContext.app 做任务工厂分流 —— 移动端
+              由 lan-agent 卡片或直接 URL 显式进入。 */}
+          <Route path="/m-super-tasks" element={<MobileSuperTasks />} />
         </Route>
 
         {/* /desktop 是脱离 Layout 的全屏办公桌面页 — 顶层路由 */}
