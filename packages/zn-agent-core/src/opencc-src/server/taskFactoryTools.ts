@@ -317,7 +317,7 @@ export const superTasksGetTool = buildTool({
   async call(input: { id: string }) {
     const details = await getTaskDetails(input.id)
     if (!details) throw new Error(`task ${input.id} not found`)
-    // 结构化 JSON 输出(主管拿来按字段取值),同时给一段人读摘要方便回看。
+    // 结构化 JSON 输出(调度官拿来按字段取值),同时给一段人读摘要方便回看。
     const output = JSON.stringify({
       summary: details.summary,
       specMd: details.specMd,
@@ -384,10 +384,10 @@ export const superTasksListTool = buildTool({
 
 // ---------------------------------------------------------------------------
 // CreateWorktree (zai patch 2026-09-03): 并行任务同仓库冲突隔离。
-// 主管检测到多个可派发任务共享同一 repo 时,为每个任务建独立 git worktree
+// 任务调度官检测到多个可派发任务共享同一 repo 时,为每个任务建独立 git worktree
 // (~/.zai/task-factory/worktrees/<taskId>/,分支 task-<taskId>),再以
-// cwd=<worktreePath> 派发 executor;验证 PASS 后主管在原始仓库合回分支并
-// 移除 worktree。路径按 taskId 确定性生成,主管会话重启后可重建。
+// cwd=<worktreePath> 派发 executor;验证 PASS 后任务调度官在原始仓库合回分支并
+// 移除 worktree。路径按 taskId 确定性生成,调度官会话重启后可重建。
 // ---------------------------------------------------------------------------
 
 const CREATE_WORKTREE_DESC =
