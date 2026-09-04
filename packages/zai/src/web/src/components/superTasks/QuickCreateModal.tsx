@@ -47,13 +47,20 @@ const QUICK_AGENT_OPTIONS = [
  *  - 无 AgentConversation 子树(无对话 UI) —— 用纯表单拿数据;
  *  - 不挂 EventSource(SSE 通过 useSuperTaskStore.lastCreatedTaskId 收);
  *  - 不复用 intake store(根本没有 intake 会话,直接 create → 一次性发 prompt → 关闭)。
+ *
+ * `fullscreen` prop(2026-09-04):参考 `NewSuperTaskModal.fullscreen` —— 仅影响
+ *  Modal 容器尺寸(width / top / 圆角 / 内层高度);表单 / 提交 / SSE /
+ * created 信号逻辑一律不变。桌面 SuperTaskPanel 调用点不传 → 行为 100%
+ * 兼容(仍 640px 居中,16px body padding)。
  */
 export default function QuickCreateModal({
   open,
   onClose,
+  fullscreen = false,
 }: {
   open: boolean
   onClose: () => void
+  fullscreen?: boolean
 }): JSX.Element {
   const lastCreatedTaskId = useSuperTaskStore((s) => s.lastCreatedTaskId)
   const clearLastCreated = useSuperTaskStore((s) => s.clearLastCreated)
@@ -154,7 +161,8 @@ export default function QuickCreateModal({
         if (!createdTaskId) onClose()
       }}
       footer={null}
-      width={640}
+      width={fullscreen ? '100vw' : 640}
+      style={fullscreen ? { top: 0, maxWidth: '100vw', margin: 0, paddingBottom: 0 } : undefined}
       destroyOnHidden
       title={(
         <Space>
@@ -162,8 +170,12 @@ export default function QuickCreateModal({
           <span>快速创建任务</span>
         </Space>
       )}
-      styles={{ body: { padding: 16 } }}
+      styles={{
+        body: { padding: 0 },
+        ...(fullscreen ? { content: { borderRadius: 0, padding: 0 } } : {}),
+      }}
     >
+      <div style={fullscreen ? { height: '100dvh', overflow: 'auto', padding: 16 } : { padding: 16 }}>
       {createdTaskId ? (
         <Alert
           type="success"
@@ -290,6 +302,7 @@ export default function QuickCreateModal({
           </div>
         </Form>
       )}
+      </div>
     </Modal>
   )
 }

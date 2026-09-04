@@ -23,6 +23,16 @@ vi.mock('../components/superTasks/NewSuperTaskModal', () => ({
   ),
 }))
 
+vi.mock('../components/superTasks/QuickCreateModal', () => ({
+  default: ({ open, fullscreen }: { open: boolean; fullscreen?: boolean }) => (
+    <div
+      data-testid="quick-create-modal-mock"
+      data-open={open ? 'true' : 'false'}
+      data-fullscreen={fullscreen ? 'true' : 'false'}
+    />
+  ),
+}))
+
 vi.mock('../components/superTasks/SuperTaskDetailDrawer', () => ({
   default: ({ taskId }: { taskId: string | null }) => (
     <div
@@ -177,6 +187,18 @@ describe('MobileSuperTasks page (2026-09-04)', () => {
     expect(modal.getAttribute('data-fullscreen')).toBe('true')
     fireEvent.click(screen.getByTestId('mobile-new-task-button'))
     expect(modal.getAttribute('data-open')).toBe('true')
+  })
+
+  it('点「快速创建」按钮 → QuickCreateModal 打开 + fullscreen=true(2026-09-04 quick-intake)', () => {
+    render(<MobileSuperTasks />)
+    const quickModal = screen.getByTestId('quick-create-modal-mock')
+    expect(quickModal.getAttribute('data-open')).toBe('false')
+    expect(quickModal.getAttribute('data-fullscreen')).toBe('true')
+    fireEvent.click(screen.getByTestId('mobile-quick-create-button'))
+    expect(quickModal.getAttribute('data-open')).toBe('true')
+    // 同时确认新建 modal 未被打开(两个独立 state)
+    const newModal = screen.getByTestId('new-task-modal-mock')
+    expect(newModal.getAttribute('data-open')).toBe('false')
   })
 
   it('首载 processing 空 + queue 非空 → 自动切到 queue(2026-09-04 行为)', () => {
