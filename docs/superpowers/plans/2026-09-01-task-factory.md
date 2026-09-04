@@ -2,7 +2,7 @@
 
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan task-by-task. Steps use checkbox (`- [ ]`) syntax for tracking.
 
-**Goal:** 在 zai 内实现文件驱动的任务工厂：任务任务调度官 Agent（需求讨论/落库/派生执行/验收）+ `/super-tasks` 调度面板（任务调度官对话 + 三栏任务面板 + 详情抽屉）+ 任务工厂实例入口。
+**Goal:** 在 zai 内实现文件驱动的任务工厂：任务调度官 Agent（需求讨论/落库/派生执行/验收）+ `/super-tasks` 调度面板（任务调度官对话 + 三栏任务面板 + 详情抽屉）+ 任务工厂实例入口。
 
 **Architecture:** 文件系统（`~/.zai/task-factory/{queue,processing,finished}-tasks/<id>/`）是唯一事实源。任务调度官 Agent 注册为内置 main agent，`SuperTasksCreate`/`SuperTasksMarkDone` 两个内置工具（core 侧 `buildTool`）操作任务文件并经 `globalThis.__zaiTaskFactoryEmitter` bridge 发 SSE 事件；委派执行**优先 SpawnAgent（claude-code|dsh 外部 CLI agent，默认工具池已有）**，回退 AgentTool，执行器 transcript 归拢到任务目录（core patch 支持绝对 transcript subdir）。zai server 提供 superTasks REST 路由，任务调度官唤醒复用既有 `sessionInbox.followup` → `runNextInQueue` 通道。面板左栏复用 `AgentConversation`（用 `useAgentStore` 固定任务调度官 session），右栏任务面板轮询 + 事件刷新。实例入口走 `--app task-factory` CLI flag + `ZAI_APP` env，强制 mainAgent 并把 `/` 重定向 `/super-tasks`。
 
@@ -527,7 +527,7 @@ git commit -m "HRMSV3-ZN-WEBSITE#668 feat(core): SuperTasksCreate/SuperTasksMark
 
 ---
 
-### Task 3: core — 任务任务调度官 Agent `task-factory` 注册 + transcript 归拢 patch
+### Task 3: core — 任务调度官 Agent `task-factory` 注册 + transcript 归拢 patch
 
 **Files:**
 - Create: `packages/zn-agent-core/src/opencc-src/server/mainAgents-taskFactory.ts`
@@ -689,7 +689,7 @@ Expected: PASS（5 it 全过：2 个 transcript + 3 个 agent）。
 
 ```bash
 git add packages/zn-agent-core/src/opencc-src/server/mainAgents-taskFactory.ts packages/zn-agent-core/src/opencc-src/server/mainAgents.ts packages/zn-agent-core/src/opencc-src/utils/sessionStorage.ts packages/zn-agent-core/test/unit/agentRegistry-taskFactory.test.ts packages/zn-agent-core/test/unit/sessionStorage-transcriptRoot.test.ts
-git commit -m "HRMSV3-ZN-WEBSITE#668 feat(core): 任务任务调度官 agent task-factory + transcript 归拢 patch"
+git commit -m "HRMSV3-ZN-WEBSITE#668 feat(core): 任务调度官 agent task-factory + transcript 归拢 patch"
 ```
 
 ---
@@ -1876,7 +1876,7 @@ export default function NewSuperTaskModal({ open, onClose }: { open: boolean; on
   }
 
   return (
-    <Modal open={open} onCancel={onClose} onOk={() => void onSubmit()} okText="发给任务调度官" confirmLoading={sending} width={560} title="新建任务（与任务任务调度官讨论）">
+    <Modal open={open} onCancel={onClose} onOk={() => void onSubmit()} okText="发给任务调度官" confirmLoading={sending} width={560} title="新建任务（与任务调度官讨论）">
       <div style={{ display: 'flex', flexDirection: 'column', gap: 12 }}>
         <Input
           value={title}
