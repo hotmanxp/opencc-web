@@ -221,13 +221,13 @@ describe('POST /api/super-tasks/managed', () => {
   it('切换开关并持久化到 state', async () => {
     const res = await supertest(app).post('/api/super-tasks/managed').send({ enabled: false })
     expect(res.status).toBe(200)
-    // managed 路由只持久化 state + 广播事件（不 inject 主管）——断言真实落盘结果
+    // managed 路由只持久化 state + 广播事件（不 inject 调度官）——断言真实落盘结果
     expect((await getTaskFactoryState()).managedEnabled).toBe(false)
   })
 })
 
 describe('POST /api/super-tasks/supervisor', () => {
-  it('上报主管会话 id 并持久化到 state', async () => {
+  it('上报任务调度官会话 id 并持久化到 state', async () => {
     const res = await supertest(app).post('/api/super-tasks/supervisor').send({ sessionId: ' sess-new-sup ' })
     expect(res.status).toBe(200)
     expect((await getTaskFactoryState()).supervisorSessionId).toBe('sess-new-sup')
@@ -242,7 +242,7 @@ describe('POST /api/super-tasks/supervisor', () => {
   })
 })
 
-describe('POST /api/super-tasks/supervisor/reset (2026-09-02 重置主管)', () => {
+describe('POST /api/super-tasks/supervisor/reset (2026-09-02 重置调度官)', () => {
   it('清空 supervisorSessionId + 同步关托管 + 广播 state.changed', async () => {
     // 先把 managed 打开 + sid 设成非空,验证 reset 把两者都重置
     await setTaskFactoryState({ managedEnabled: true, supervisorSessionId: 'sess-pre-reset' })
