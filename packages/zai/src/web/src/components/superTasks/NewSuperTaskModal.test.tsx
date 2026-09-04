@@ -207,4 +207,35 @@ describe('NewSuperTaskModal (task-intake 对话窗口 · 2026-09-02 隔离)', ()
     await waitFor(() => expect(deleteAgentSession).toHaveBeenCalledWith('intake-1'))
     expect(api.post).not.toHaveBeenCalled()
   })
+
+  // ---- mobileAsDrawer 模式(tf-cy9x9kjh,/m-super-tasks 抽屉式)----
+
+  it('mobileAsDrawer=true:渲染 .ant-drawer(非 .ant-modal),顶部拖把可见', async () => {
+    render(<NewSuperTaskModal open onClose={vi.fn()} mobileAsDrawer />)
+    await waitFor(() => expect(screen.getByTestId('intake-conv-mock')).toBeTruthy())
+    expect(document.querySelector('.ant-drawer')).toBeTruthy()
+    expect(document.querySelector('.ant-modal')).toBeNull()
+    expect(screen.getByTestId('new-task-drawer-handle')).toBeTruthy()
+    expect(screen.getByTestId('new-task-mobile-drawer')).toBeTruthy()
+  })
+
+  it('mobileAsDrawer=true:created 信号 → 完成条仍可在 Drawer 内渲染', async () => {
+    const onClose = vi.fn()
+    render(<NewSuperTaskModal open onClose={onClose} mobileAsDrawer />)
+    await waitFor(() => expect(screen.getByTestId('intake-conv-mock')).toBeTruthy())
+    useSuperTaskStore.getState().applyTaskFactoryEvent({ action: 'created', payload: { id: 'tf-mob' } })
+    await waitFor(() => expect(screen.getByText(/任务 tf-mob 已创建/)).toBeTruthy())
+    // Drawer 容器存在,完成条在 drawer body 内可见
+    expect(document.querySelector('.ant-drawer')).toBeTruthy()
+  })
+
+  it('默认(桌面):渲染 .ant-modal + width=720;无 drawer,无 drawer-handle', async () => {
+    render(<NewSuperTaskModal open onClose={vi.fn()} />)
+    await waitFor(() => expect(screen.getByTestId('intake-conv-mock')).toBeTruthy())
+    const modal = document.querySelector('.ant-modal') as HTMLElement | null
+    expect(modal).toBeTruthy()
+    expect(modal?.style.width).toBe('720px')
+    expect(document.querySelector('.ant-drawer')).toBeNull()
+    expect(screen.queryByTestId('new-task-drawer-handle')).toBeNull()
+  })
 })

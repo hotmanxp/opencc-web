@@ -172,4 +172,82 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
       expect(onClose).toHaveBeenCalled()
     })
   })
+
+  describe('fullscreen 模式(2026-09-04 /m-super-tasks 复用)', () => {
+    it('fullscreen=true:Modal 容器宽 = 100vw,无圆角,顶 0', () => {
+      render(<QuickCreateModal open onClose={vi.fn()} fullscreen />)
+      // AntD v5 Modal:width 落到 .ant-modal 内联 style;content.borderRadius
+      // 落到 .ant-modal-content 内联 style(来自 styles prop 的 content 字段)。
+      const modal = document.querySelector('.ant-modal') as HTMLElement | null
+      expect(modal).toBeTruthy()
+      expect(modal?.style.width).toBe('100vw')
+      expect(modal?.style.top).toBe('0px')
+      expect(modal?.style.maxWidth).toBe('100vw')
+      expect(modal?.style.margin).toBe('0px')
+      expect(modal?.style.paddingBottom).toBe('0px')
+      const content = document.querySelector('.ant-modal-content') as HTMLElement | null
+      expect(content).toBeTruthy()
+      // fullscreen 时 content borderRadius=0
+      expect(content?.style.borderRadius).toBe('0px')
+    })
+
+    it('fullscreen=true:表单仍渲染 title / description / submit 控件', () => {
+      render(<QuickCreateModal open onClose={vi.fn()} fullscreen />)
+      expect(screen.getByTestId('quick-title-input')).toBeTruthy()
+      expect(screen.getByTestId('quick-description-input')).toBeTruthy()
+      expect(screen.getByTestId('quick-priority-radio')).toBeTruthy()
+      expect(screen.getByTestId('quick-cwd-input')).toBeTruthy()
+      expect(screen.getByTestId('quick-submit-button')).toBeTruthy()
+    })
+
+    it('fullscreen=false(默认):桌面回归 width=640,content 无内联 borderRadius', () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      const modal = document.querySelector('.ant-modal') as HTMLElement | null
+      expect(modal).toBeTruthy()
+      // 桌面 width=640(top/maxWidth/margin/paddingBottom 都不应被覆盖)
+      expect(modal?.style.width).toBe('640px')
+      expect(modal?.style.top).toBe('')
+      const content = document.querySelector('.ant-modal-content') as HTMLElement | null
+      expect(content).toBeTruthy()
+      // 默认 content 不带内联 borderRadius(由 antd token / CSS class 给圆角)
+      expect(content?.style.borderRadius).not.toBe('0px')
+    })
+  })
+
+  // ---- mobileAsDrawer 模式(tf-cy9x9kjh,/m-super-tasks 抽屉式)----
+
+  it('mobileAsDrawer=true:渲染 .ant-drawer(非 .ant-modal),顶部拖把可见', () => {
+    render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
+    expect(document.querySelector('.ant-drawer')).toBeTruthy()
+    expect(document.querySelector('.ant-modal')).toBeNull()
+    expect(screen.getByTestId('quick-drawer-handle')).toBeTruthy()
+    expect(screen.getByTestId('quick-mobile-drawer')).toBeTruthy()
+  })
+
+  it('mobileAsDrawer=true:表单字段仍完整渲染(title/description/priority/cwd/agent/dependsOn/submit)', () => {
+    render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
+    expect(screen.getByTestId('quick-title-input')).toBeTruthy()
+    expect(screen.getByTestId('quick-description-input')).toBeTruthy()
+    expect(screen.getByTestId('quick-priority-radio')).toBeTruthy()
+    expect(screen.getByTestId('quick-cwd-input')).toBeTruthy()
+    expect(screen.getByTestId('quick-agent-select')).toBeTruthy()
+    expect(screen.getByTestId('quick-depends-on-select')).toBeTruthy()
+    expect(screen.getByTestId('quick-submit-button')).toBeTruthy()
+  })
+
+  it('mobileAsDrawer=true:created 信号 → 完成条在 Drawer 内渲染', async () => {
+    render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
+    act(() => { useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-quickmob' }) })
+    expect(await screen.findByText(/任务 tf-quickmob 已创建/)).toBeTruthy()
+    expect(document.querySelector('.ant-drawer')).toBeTruthy()
+  })
+
+  it('默认(桌面):回归 .ant-modal + width=640;无 drawer,无 drawer-handle', () => {
+    render(<QuickCreateModal open onClose={vi.fn()} />)
+    const modal = document.querySelector('.ant-modal') as HTMLElement | null
+    expect(modal).toBeTruthy()
+    expect(modal?.style.width).toBe('640px')
+    expect(document.querySelector('.ant-drawer')).toBeNull()
+    expect(screen.queryByTestId('quick-drawer-handle')).toBeNull()
+  })
 })
