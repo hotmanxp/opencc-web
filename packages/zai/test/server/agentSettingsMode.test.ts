@@ -118,7 +118,7 @@ describe('POST /api/agent/sessions uses defaultMode', () => {
 })
 
 // zai patch (2026-09-02, task-intake): sessions POST 支持可选 mainAgent,
-// 建会话即冻结 transcript.meta.mainAgent(主管引导 / 新建任务弹窗使用)。
+// 建会话即冻结 transcript.meta.mainAgent(调度官引导 / 新建任务弹窗使用)。
 describe('POST /api/agent/sessions mainAgent', () => {
   it('合法 mainAgent → 200 且 meta.mainAgent 落盘', async () => {
     const router = await loadAgentRouter()

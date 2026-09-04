@@ -1,7 +1,7 @@
 /**
  * agentSessionApi — 任务工厂前端建/删 agent 会话的公共 helper(2026-09-02)。
  *
- * 主管引导(SuperTasks.tsx)与新建任务弹窗(NewSuperTaskModal)都需要
+ * 任务调度官引导(SuperTasks.tsx)与新建任务弹窗(NewSuperTaskModal)都需要
  * 「带 mainAgent 冻结的建会话」:POST /api/agent/sessions 的 mainAgent 参数
  * 让 transcript.meta.mainAgent 建会话即锁定(task-factory / task-intake),
  * 首条 prompt 不再回落到全局 settings.mainAgent。

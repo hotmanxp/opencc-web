@@ -13,7 +13,7 @@ export interface SuperTaskFullDto {
   buckets: TaskBucket
   managed: boolean
   /**
-   * 后端 state.json 的主管会话 id(2026-09-02 起允许 null:
+   * 后端 state.json 的任务调度官会话 id(2026-09-02 起允许 null:
    * reset 路由清空后到 mount 引导完成前的窗口期为 null)。
    * 前端 SuperTasks.tsx 引导逻辑看到 null 视为"未绑定",
    * 走新建分支(createAgentSession + setSupervisorSession)。
@@ -68,8 +68,8 @@ export async function setSuperTasksManaged(enabled: boolean): Promise<void> {
   }).then((r) => json<{ ok: true }>(r))
 }
 /**
- * 上报主管会话 id(2026-09-02)。/super-tasks 引导(沿用/新建主管会话)后调用,
- * 让后端托管循环与注入端点始终打在用户可见的主管会话上。
+ * 上报任务调度官会话 id(2026-09-02)。/super-tasks 引导(沿用/新建调度官会话)后调用,
+ * 让后端托管循环与注入端点始终打在用户可见的调度官会话上。
  */
 export async function setSupervisorSession(sessionId: string): Promise<void> {
   await fetch('/api/super-tasks/supervisor', {
@@ -79,11 +79,11 @@ export async function setSupervisorSession(sessionId: string): Promise<void> {
   }).then((r) => json<{ ok: true }>(r))
 }
 /**
- * 重置主管会话(2026-09-02)。后端清 state.json.supervisorSessionId
+ * 重置任务调度官会话(2026-09-02)。后端清 state.json.supervisorSessionId
  * 并同步关托管;前端需在调用成功后 reload 触发 mount 引导。
  *
- * 旧 session transcript 保留在 ~/.zai/tasks/,与新主管不再关联;
- * 用户的"重置"心智 = 「换一个干净的主管对话」,不是「删除历史」。
+ * 旧 session transcript 保留在 ~/.zai/tasks/,与新调度官不再关联;
+ * 用户的"重置"心智 = 「换一个干净的调度官对话」,不是「删除历史」。
  */
 export async function resetSupervisorSession(): Promise<void> {
   await fetch('/api/super-tasks/supervisor/reset', { method: 'POST' })

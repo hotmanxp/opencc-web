@@ -25,21 +25,21 @@ const INTAKE_MAIN_AGENT = 'task-intake'
 /**
  * NewSuperTaskModal — 新建任务对话窗口(2026-09-02 隔离修复)。
  *
- * 之前实现是把全局 useAgentStore.sessionId 切到 intake 会话,导致主管
+ * 之前实现是把全局 useAgentStore.sessionId 切到 intake 会话,导致调度官
  * Layout 上的 `<AgentConversation>` 也跟着展示 intake 对话 —— 这是用户
- * 报告的"主管与创建 Modal 输出相同内容"的根因。
+ * 报告的"调度官与创建 Modal 输出相同内容"的根因。
  *
  * 当前实现改用 **独立的 intake agentStore**(走 createAgentStore() factory)
  * 通过 `<AgentStoreContext.Provider>` 注入 Modal 内的 AgentConversation
  * 子树,Modal 自己挂 `/api/event?sid={intakeSid}` 的 EventSource,intake
- * 会话的 SSE 帧按 sid 路由到 `applyBatchTo(intakeStore, ...)` —— 主管
+ * 会话的 SSE 帧按 sid 路由到 `applyBatchTo(intakeStore, ...)` —— 调度官
  * Layout 完全无感。
  *
  * 生命周期:
  *  - 打开:若 localStorage 记有未完成 draft sid(且仍在 sessions 列表)→
  *    先出「继续讨论 / 新开(删旧)」选择;否则直接新建 intake 会话。
  *  - 期间:intake store 切到 intake sid(SSE/输入/ask 卡全部作用于该会话),
- *    全局 useAgentStore.sessionId 保持不动(主管对话不被污染)。
+ *    全局 useAgentStore.sessionId 保持不动(调度官对话不被污染)。
  *  - created 信号:弹窗打开后出现新的 task_factory.created(SSE →
  *    superTaskStore.lastCreatedTaskId)→ 顶部完成条 + 「完成并关闭」。
  *  - 关闭:任务已创建 → 删除 intake 会话(纪要已归档任务目录);未创建 →
@@ -104,7 +104,7 @@ export default function NewSuperTaskModal({
   }
 
   // intake sid 改变时挂上自己的 EventSource;事件走 applyBatchTo(intakeStore, ...)
-  // 写入 intake store,不会触及全局 useAgentStore(主管 Layout 完全无感)。
+  // 写入 intake store,不会触及全局 useAgentStore(调度官 Layout 完全无感)。
   // 注意:onState 回调有意保持空 —— 链接状态指示器只服务于全局顶栏 / Modal
   // 内的 status 都是 intake store 内部状态,无需推 useAppStore。
   useEffect(() => {
@@ -166,7 +166,7 @@ export default function NewSuperTaskModal({
     setResumeDraft(null)
   }
 
-  // 打开:无需记录"原主管 sid" —— 全局 useAgentStore.sessionId 在 Modal 期间
+  // 打开:无需记录"原调度官 sid" —— 全局 useAgentStore.sessionId 在 Modal 期间
   // 完全不变,关闭也不需要恢复。created 信号仍用 baseline ref 防止重渲染
   // 时的重复触发。
   useEffect(() => {
@@ -357,7 +357,7 @@ export default function NewSuperTaskModal({
         <AgentStoreContext.Provider value={intakeStore}>
           <div style={{ flex: 1, minHeight: 0, display: 'flex', flexDirection: 'column' }}>
             {/* intake/supervisor 临时对话不需要「分享到 LAN」与「插件管理」
-                入口 — 主管讨论是单设备内对齐意图的过程,挂上反而干扰。 */}
+                入口 — 调度官讨论是单设备内对齐意图的过程,挂上反而干扰。 */}
             <AgentConversation hideShareAndPlugin />
           </div>
         </AgentStoreContext.Provider>

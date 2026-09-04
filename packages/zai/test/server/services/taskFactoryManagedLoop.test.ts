@@ -59,7 +59,7 @@ afterEach(() => {
   __setBackgroundRuntime(null)
 })
 
-/** 收集本轮注入的 followup 消息 content 列表（以主管会话 followup 的实效应答为准）。 */
+/** 收集本轮注入的 followup 消息 content 列表（以调度官会话 followup 的实效应答为准）。 */
 function injectedContents(
   spy: { mock: { calls: Array<[string, { content: string }]> } },
 ): string[] {
@@ -69,7 +69,7 @@ function injectedContents(
 describe('taskFactoryManagedLoop', () => {
   it('队列非空时注入 dispatch 指令（不依赖 processing 是否为空，允许多任务并行）', async () => {
     await createPoolTask({ title: 'a' })
-    await createPoolTask({ title: 'b' }) // 多个队列任务 → 指令可让主管并行派发
+    await createPoolTask({ title: 'b' }) // 多个队列任务 → 指令可让调度官并行派发
     const spy = vi.spyOn(sessionInbox, 'followup')
     startTaskFactoryManagedLoop(20) // 紧凑 interval 便于测试
     await new Promise((r) => setTimeout(r, 60))
@@ -141,7 +141,7 @@ describe('taskFactoryManagedLoop — maxParallelTasks 并行上限(tf-pnsl5m5e)'
 // (见 taskFactoryManagedLoop.ts:78-83) 此处覆盖。spec R8 要求。
 describe('taskFactoryManagedLoop — quick verifier 分流(2026-09-04 round 2)', () => {
   /** 与 taskFactoryBridge.QUICK_VERIFIER_HINT 字符串一致 —— 注入段里包含
-   *  这段语义标签即代表主管会引导 verifier 走轻量验证。 */
+   *  这段语义标签即代表任务调度官会引导 verifier 走轻量验证。 */
   const QUICK_HINT_MARKER = '<task-verifier-mode value="light">'
 
   it('queue 含 mode=quick 任务 → dispatch 注入段含 QUICK_VERIFIER_HINT', async () => {
@@ -156,7 +156,7 @@ describe('taskFactoryManagedLoop — quick verifier 分流(2026-09-04 round 2)',
     const dispatch = contents.find((c) => c.includes('action="dispatch"'))
     expect(dispatch).toBeDefined()
     expect(dispatch).toContain(QUICK_HINT_MARKER)
-    // 同时有 quick 队列提示,引导主管识别
+    // 同时有 quick 队列提示,引导调度官识别
     expect(dispatch).toContain('quick-mode tasks')
   })
 

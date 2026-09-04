@@ -32,7 +32,7 @@ describe('WebFetch banned on restricted intranet (2026-09-03)', () => {
       ]),
     ).map((t) => String(t.name))
     expect(names).not.toContain('WebFetch')
-    // 主管职责无关的会话级工具全部剔除
+    // 调度官职责无关的会话级工具全部剔除
     for (const gone of [
       'TaskCreate', 'TaskGet', 'TaskUpdate', 'TaskList',
       'EnterPlanMode', 'ExitPlanMode', 'EnterWorktree', 'ExitWorktree', 'LSP',

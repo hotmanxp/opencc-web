@@ -1890,7 +1890,7 @@ router.post("/agent/sessions", async (req: Request, res: Response) => {
         ? requestedProviderId
         : undefined
     // zai patch (2026-09-02, task-intake): 可选 mainAgent —— 建会话时直接
-    // 冻结该会话的主 Agent(任务工厂主管引导用 'task-factory'、新建任务
+    // 冻结该会话的主 Agent(任务工厂调度官引导用 'task-factory'、新建任务
     // 弹窗用 'task-intake')。prompt 路径读 transcript.meta.mainAgent 即
     // 命中此值,不再回落到全局 settings。未知名 → 400。
     const requestedMainAgent = body?.mainAgent

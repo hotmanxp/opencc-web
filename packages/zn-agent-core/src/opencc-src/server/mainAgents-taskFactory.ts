@@ -1,9 +1,9 @@
 /**
- * 任务主管 Agent `task-factory`(zai patch 2026-09-02, supervisor task state
+ * 任务调度官 Agent `task-factory`(zai patch 2026-09-02, supervisor task state
  * transition tools)。
  *
- * 主管对话中的"任务工厂"工作流:需求讨论 → 任务落库 → 派发执行 →
- * 验证 → 归档。tools 槽在 origin 默认工具池上剔除主管无关工具
+ * 调度官对话中的"任务工厂"工作流:需求讨论 → 任务落库 → 派发执行 →
+ * 验证 → 归档。tools 槽在 origin 默认工具池上剔除调度官无关工具
  * (Task v2 / plan-mode / Enter-ExitWorktree / LSP / WebFetch)后
  * **追加** SuperTasksCreate / SuperTasksList / SuperTasksGet /
  * SuperTasksMove / SuperTasksReset / SuperTasksPause / CreateWorktree
@@ -226,14 +226,14 @@ export function taskFactorySettingsSection(s: CoreFactorySettings): string[] {
 }
 
 /**
- * 主管会话内剔除的工具:
+ * 调度官会话内剔除的工具:
  *   - Task v2 四件套:流水线状态一律由 SuperTasks* 四桶管理,会话内 Task
- *     清单是平行双轨体系,留着只会诱导主管用 TaskCreate 复述流水线任务。
- *   - EnterPlanMode/ExitPlanMode:主管不产出实现计划(plan.md 来自 intake
+ *     清单是平行双轨体系,留着只会诱导调度官用 TaskCreate 复述流水线任务。
+ *   - EnterPlanMode/ExitPlanMode:调度官不产出实现计划(plan.md 来自 intake
  *     讨论),plan-mode 属于编码会话。
- *   - EnterWorktree/ExitWorktree:切换的是主管自己会话的 cwd,派发用不上;
- *     worktree 隔离走 CreateWorktree(为 executor 建,不动主管会话)。
- *   - LSP:主管不深入读代码符号,代码探索归 executor/verifier。
+ *   - EnterWorktree/ExitWorktree:切换的是调度官自己会话的 cwd,派发用不上;
+ *     worktree 隔离走 CreateWorktree(为 executor 建,不动调度官会话)。
+ *   - LSP:调度官不深入读代码符号,代码探索归 executor/verifier。
  */
 const SUPERVISOR_DROP_TOOLS: ReadonlySet<string> = new Set([
   'TaskCreate',
@@ -247,7 +247,7 @@ const SUPERVISOR_DROP_TOOLS: ReadonlySet<string> = new Set([
   'LSP',
 ])
 
-/** tools 槽:剔除内网不可用工具(WebFetch)与主管无关工具,再追加六个 SuperTasks + CreateWorktree(去重防同名)。 */
+/** tools 槽:剔除内网不可用工具(WebFetch)与调度官无关工具,再追加六个 SuperTasks + CreateWorktree(去重防同名)。 */
 const taskFactoryTools = (origin: Tool[]): Tool[] => {
   const filtered = filterBannedTools(origin).filter(
     (t) => !SUPERVISOR_DROP_TOOLS.has(String(t.name)),
@@ -260,7 +260,7 @@ const taskFactoryTools = (origin: Tool[]): Tool[] => {
 /** TaskFactory 主 Agent 配置。 */
 export const taskFactoryMainAgent: MainAgentConfig = {
   name: TASK_FACTORY_MAIN_AGENT_NAME,
-  description: '任务工厂主管 —— 需求讨论、任务落库、派发执行、验证与验收',
+  description: '任务工厂任务调度官 —— 需求讨论、任务落库、派发执行、验证与验收',
   // 需求讨论需先摸清项目代码,保留 # CodeGraph 段(见 mainAgents-promptSections.ts)。
   // 工厂设置段在 systemPrompt 构建时动态读取(每会话一次,新会话生效)。
   systemPrompt: (origin) => [

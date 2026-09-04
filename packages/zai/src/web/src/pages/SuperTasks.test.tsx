@@ -77,7 +77,7 @@ beforeEach(async () => {
 })
 
 describe('SuperTasks page', () => {
-  it('挂载时触发 useSuperTaskStore.load 并展示「任务主管」标题', async () => {
+  it('挂载时触发 useSuperTaskStore.load 并展示「任务调度官」标题', async () => {
     const loadSpy = vi.spyOn(useSuperTaskStore.getState(), 'load').mockResolvedValue(undefined)
 
     render(<SuperTasks />)
@@ -87,7 +87,7 @@ describe('SuperTasks page', () => {
       expect(loadSpy).toHaveBeenCalled()
     })
 
-    expect(screen.getByText(/任务主管/)).toBeTruthy()
+    expect(screen.getByText(/任务调度官/)).toBeTruthy()
     loadSpy.mockRestore()
   })
 
@@ -115,7 +115,7 @@ describe('SuperTasks page', () => {
     }
   })
 
-  // —— 主管会话引导(2026-09-02:真相源 = server state.json)——
+  // —— 调度官会话引导(2026-09-02:真相源 = server state.json)——
 
   it('server supervisorSessionId 命中会话列表 → 锁定它,不新建', async () => {
     stubSessionsList([{ sessionId: 'sup-server', updatedAt: 2, title: 't' }])

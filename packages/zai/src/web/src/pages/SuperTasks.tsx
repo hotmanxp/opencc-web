@@ -11,7 +11,7 @@ import { LIGHT_PAGE_VARS } from '../components/superTasks/lightThemeVars'
 
 /**
  * 任务工厂页亮色化(2026-09-01 用户反馈;09-02 抽到 superTasks/lightThemeVars):
- * 整页在页面根 div 上覆写 CSS 变量为亮色值,让主管对话区/看板/卡片全部按浅色
+ * 整页在页面根 div 上覆写 CSS 变量为亮色值,让任务调度官对话区/看板/卡片全部按浅色
  * 渲染;再嵌套 antd ConfigProvider defaultAlgorithm,让本页内的 Drawer/Modal/
  * Popconfirm 等 portal 组件用亮色 token。不影响全局主题(其它页面照旧)。
  * 注意:portal 组件(弹窗)不继承页面 div 上的 CSS 变量,弹窗内容容器需各自
@@ -19,7 +19,7 @@ import { LIGHT_PAGE_VARS } from '../components/superTasks/lightThemeVars'
  */
 
 /**
- * SuperTasks 页面（任务工厂 · 主管）。
+ * SuperTasks 页面（任务工厂 · 任务调度官）。
  *
  * 路由 `/super-tasks` 由 `router.tsx` 顶层挂出,
  * `TaskFactoryAgentEntry` 与 `TaskFactoryRedirect` 会按
@@ -27,16 +27,16 @@ import { LIGHT_PAGE_VARS } from '../components/superTasks/lightThemeVars'
  * (`/` `/agent` `*`) 重定向到本页。
  *
  * 布局(看板重设计):
- *  - 左:主管对话边栏 280px,可折叠为 40px 图标条(点图标恢复)。
+ *  - 左:任务调度官对话边栏 280px,可折叠为 40px 图标条(点图标恢复)。
  *  - 右:flex:1 SuperTaskPanel(顶部总览统计卡组 + 三栏看板)。
  *
- * 主管会话引导(2026-09-02 改为「服务端为准」):
+ * 调度官会话引导(2026-09-02 改为「服务端为准」):
  *  - mount 时 loadSessions + superTaskStore.load(拿 server 端
  *    state.json 的 supervisorSessionId)
  *  - server sid 存在于 sessions 列表 → setCurrentSession(serverSid),
- *    主管 transcript 作为决策日志跨刷新/跨 tab 稳定延续
+ *    调度官 transcript 作为决策日志跨刷新/跨 tab 稳定延续
  *  - 否则(首次进入 / 会话被删)→ POST /api/agent/sessions
- *    {mainAgent:'task-factory'} 新建并冻结主管身份 →
+ *    {mainAgent:'task-factory'} 新建并冻结调度官身份 →
  *    POST /api/super-tasks/supervisor 上报 → setCurrentSession(新sid)。
  *    托管循环/注入端点与用户可见会话由此始终指向同一个 session。
  *  - 不再使用 localStorage `zai-supervisor-session`(旧键残留无害,不再读写)。
@@ -57,10 +57,10 @@ export default function SuperTasks(): JSX.Element {
     return () => window.clearInterval(id)
   }, [load])
 
-  // 主管会话引导 — 仅在 mount 跑一次。真相源 = 后端 state.json 的
+  // 调度官会话引导 — 仅在 mount 跑一次。真相源 = 后端 state.json 的
   // supervisorSessionId(经 superTaskStore.load 带回)。
   //
-  // 主管 mount 时把 server 端历史 transcript 拉到 store.messages,否则页面
+  // 调度官 mount 时把 server 端历史 transcript 拉到 store.messages,否则页面
   // 一直停在「发送消息开始与 AI Agent 对话」空白态 — /agent 页点 sidebar
   // 调 loadTranscript,session 切换才看得到历史;这里没有 sidebar 切换,只能
   // mount 时主动拉。setCurrentSession 内置 hydrateSessionState(cwd/v2 tasks),
@@ -79,7 +79,7 @@ export default function SuperTasks(): JSX.Element {
         return
       }
       // server sid 缺失或会话已被删:新建一条并冻结 task-factory,上报后端 —
-      // 不论 sessions 列表是否非空都强制创建,避免主管身份被 store 兜底漂移
+      // 不论 sessions 列表是否非空都强制创建,避免调度官身份被 store 兜底漂移
       // 到 sessions[0](且新会话必须带 mainAgent=task-factory)。
       try {
         const sid = await createAgentSession({
@@ -134,7 +134,7 @@ export default function SuperTasks(): JSX.Element {
             background: '#ffffff',
           }}
         >
-          <Tooltip title="展开主管对话" placement="right">
+          <Tooltip title="展开调度官对话" placement="right">
             <Button type="text" icon={<CommentOutlined />} onClick={() => setCollapsed(false)} />
           </Tooltip>
           <span
@@ -146,7 +146,7 @@ export default function SuperTasks(): JSX.Element {
               letterSpacing: 4,
             }}
           >
-            主管
+            调度官
           </span>
         </div>
       ) : (
@@ -172,9 +172,9 @@ export default function SuperTasks(): JSX.Element {
             }}
           >
             <Typography.Title level={5} style={{ margin: 0 }}>
-              任务主管
+              任务调度官
             </Typography.Title>
-            <Tooltip title="折叠主管对话">
+            <Tooltip title="折叠调度官对话">
               <Button type="text" size="small" icon={<DoubleLeftOutlined />} onClick={() => setCollapsed(true)} />
             </Tooltip>
           </div>
@@ -188,8 +188,8 @@ export default function SuperTasks(): JSX.Element {
               flexDirection: 'column',
             }}
           >
-            {/* 任务工厂主管会话不展示「分享到 LAN」与「插件管理」——
-                主管对话是单设备内对齐意图的过程,挂上反而干扰。 */}
+            {/* 任务工厂调度官会话不展示「分享到 LAN」与「插件管理」——
+                调度官对话是单设备内对齐意图的过程,挂上反而干扰。 */}
             <AgentConversation hideShareAndPlugin />
           </div>
         </div>

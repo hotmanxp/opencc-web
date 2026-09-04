@@ -3,7 +3,7 @@
  *
  * 「新建任务」弹窗专用:与用户 brainstorming 讨论需求 → SuperTasksCreate
  * 落库 → 把讨论纪要写入任务目录 docs/brainstorm.md → 报告任务 id。
- * 职责单一,不承担派发/验收(那是主管 task-factory 的事),因此 tools 槽
+ * 职责单一,不承担派发/验收(那是任务调度官 task-factory 的事),因此 tools 槽
  * 收敛为需求承接最小集(白名单 + MCP 工具全保留),只兜底追加
  * SuperTasksCreate,不追加 SuperTasksMarkDone。
  *

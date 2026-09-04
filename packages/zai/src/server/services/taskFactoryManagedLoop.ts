@@ -6,15 +6,15 @@
  *  - 队列非空 且 processing 桶数量 < factory-settings.maxParallelTasks →
  *    注入一条 dispatch 指令（2026-09-01 用户更正:不做
  *    「无 processing 才派发」的单任务串行门闩 — 队列非空即派发,
- *    由主管按队列顺序一次派发多个任务，任务间并行。2026-09-03 tf-pnsl5m5e:
+ *    由任务调度官按队列顺序一次派发多个任务，任务间并行。2026-09-03 tf-pnsl5m5e:
  *    并行数受 factory-settings.json maxParallelTasks 服务端强约束）。
  *  - 某 processing 任务带 executorTaskId 且 executor 已是终态
  *    (completed/failed/cancelled/killed) → 注入 accept 验收指令。
  *    executor 不可解析（未知/尚不存在）一律视为未终态,避免幽灵验收。
  *
  * 用 signature 去重（queue/processing 的快照与上次相同则跳过注入），
- * 防止主管会话被重复指令刷屏。每次只注入 actions[0]（dispatch 优先），
- * 主管空闲唤醒后可自行按队列继续取任务。
+ * 防止任务调度官会话被重复指令刷屏。每次只注入 actions[0]（dispatch 优先），
+ * 任务调度官空闲唤醒后可自行按队列继续取任务。
  *
  * 只由顶层实例启动（server/index.ts 按 ZAI_INSTANCE_ID 判断）；
  * 受管子实例（执行器）不跑。测试用 intervalMs 参数 + stop* 清理。
@@ -60,9 +60,9 @@ async function tick(): Promise<void> {
   const signature = `q:${queue.map((t) => t.id).join(',')}|p:${processing.map((t) => `${t.id}:${t.status}`).join(',')}`
   const actions: string[] = []
   // 并行派发（2026-09-01 用户更正）：不在「无 processing 才派发」上做单任务串行约束，
-  // 队列非空即注入派发指令，由主管按队列顺序一次派发多个任务。
+  // 队列非空即注入派发指令，由任务调度官按队列顺序一次派发多个任务。
   // 工厂设置并行上限（tf-pnsl5m5e）：processing 桶数量达到 maxParallelTasks 时
-  // 跳过 dispatch 注入 —— 服务端强约束，防止主管超发；accept 指令不受限。
+  // 跳过 dispatch 注入 —— 服务端强约束，防止任务调度官超发；accept 指令不受限。
   if (queue.length > 0 && processing.length < settings.maxParallelTasks) actions.push('dispatch')
   const bg = getBackgroundRuntime()
   for (const t of processing) {
@@ -76,7 +76,7 @@ async function tick(): Promise<void> {
   const first: string = actions[0]!
   if (first === 'dispatch') {
     // zai patch (2026-09-04, quick-intake):如果 queue 里含 quick 任务,在
-    // dispatch 注入里追加 verifier light 提示段 —— 主管后续 spawn verifier
+    // dispatch 注入里追加 verifier light 提示段 —— 任务调度官后续 spawn verifier
     // 时会读这段并走轻量验证(build + lint + 关键文件 diff 的 code review)。
     const hasQuick = queue.some((t) => t.mode === 'quick')
     const hint = hasQuick ? QUICK_VERIFIER_HINT : ''
