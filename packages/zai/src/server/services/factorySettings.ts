@@ -11,7 +11,7 @@
  *  - `__resetForTests()` 清缓存。
  *
  * 消费端(混合模式):托管循环以 maxParallelTasks 为服务端强约束;
- * docsDir/repoRoot/preferSpawnAgent 为软引导(主管提示词 + 需求讨论 cwd)。
+ * docsDir/repoRoot/preferSpawnAgent 为软引导(任务调度官提示词 + 需求讨论 cwd)。
  * core 侧(mainAgents-taskFactory.ts)独立读同一文件,纯 core 环境文件缺失
  * 时全部默认值 no-op。
  */

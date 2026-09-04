@@ -5,15 +5,15 @@
  * - GET /api/super-tasks/:id      单任务详情(index + spec + plan + process)
  * - DELETE /api/super-tasks       删除任务(processing/paused/verifying → 409)
  * - POST /api/super-tasks/managed 切换 managed 开关(持久化到 state.json)
- * - POST /api/super-tasks/supervisor 上报主管会话 id(持久化到 state.json)
+ * - POST /api/super-tasks/supervisor 上报任务调度官会话 id(持久化到 state.json)
  * - POST /api/super-tasks/:id/start  手工启动 = 注入 dispatch
  * - POST /api/super-tasks/:id/pause  kill 执行子任务 + 冻结(留 processing,status=paused) + 注入通知(仅 processing+processing)
  * - POST /api/super-tasks/:id/resume  = 注入 resume
- * - POST /api/super-tasks/:id/accept  人工验收 = 注入 accept(processing)/forced-accept(verifying);主管调 SuperTasksMarkDone
+ * - POST /api/super-tasks/:id/accept  人工验收 = 注入 accept(processing)/forced-accept(verifying);任务调度官调 SuperTasksMarkDone
  * - POST /api/super-tasks/inject  通用注入入口(白名单 action, 可附 id)
  *
  * 业务侧路由(start/pause/resume/accept)承担确定性副作用(kill executor /
- * 状态落盘)后统一走 injectSupervisorCommand 送达主管会话;inject 端点保持
+ * 状态落盘)后统一走 injectSupervisorCommand 送达调度官会话;inject 端点保持
  * 通用的「仅注入指令」语义供前端面板/测试使用。
  */
 
@@ -74,7 +74,7 @@ function isDirectory(p: string): boolean {
 /**
  * GET /super-tasks — 列表 + since-hash 短路(2026-09-03 性能优化)。
  * hash = fingerprint|managed|supervisorSessionId,覆盖整个 DTO:四桶变化(core
- * 快照缓存指纹)或托管开关/主管会话 id 变化都会使 hash 变化。请求带
+ * 快照缓存指纹)或托管开关/任务调度官会话 id 变化都会使 hash 变化。请求带
  * `?since=<hash>` 且命中 → 返回 `{ modified:false, hash }` 极小响应(不含
  * buckets/managed/supervisorSessionId),前端据此跳过重渲染。不带 since 的
  * 旧调用方拿到 modified:true + 原有全部字段,向后兼容。
@@ -247,10 +247,10 @@ router.post('/super-tasks/managed', async (req, res) => {
 })
 
 /**
- * POST /api/super-tasks/supervisor — 上报主管会话 id(2026-09-02)。
- * 前端 /super-tasks 引导(沿用/新建主管会话)后调它把真实 sessionId 落到
+ * POST /api/super-tasks/supervisor — 上报任务调度官会话 id(2026-09-02)。
+ * 前端 /super-tasks 引导(沿用/新建调度官会话)后调它把真实 sessionId 落到
  * state.json,托管循环 injectSupervisorCommand 与手工 start/pause 等注入
- * 才始终打在用户可见的主管会话上。
+ * 才始终打在用户可见的调度官会话上。
  */
 router.post('/super-tasks/supervisor', async (req, res) => {
   const { sessionId } = (req.body ?? {}) as { sessionId?: unknown }
@@ -262,7 +262,7 @@ router.post('/super-tasks/supervisor', async (req, res) => {
 })
 
 /**
- * POST /api/super-tasks/supervisor/reset — 清空主管会话 id + 同步关托管(2026-09-02)。
+ * POST /api/super-tasks/supervisor/reset — 清空调度官会话 id + 同步关托管(2026-09-02)。
  *
  * 语义:让前端 SuperTasks 重置按钮触发全新 mount 引导。前端调用成功后
  * 应调 window.location.reload(),浏览器刷新后:
@@ -270,8 +270,8 @@ router.post('/super-tasks/supervisor', async (req, res) => {
  *   - createAgentSession({ mainAgent: 'task-factory' }) 创建新空 session
  *   - setSupervisorSession(newSid) 把新 sid 落回 state.json
  *
- * 旧 session transcript 保留在 ~/.zai/tasks/<oldSid>.json,与新主管不再关联;
- * managed 同步关掉,避免新主管被 5s 托管循环立即注入 dispatch 指令。
+ * 旧 session transcript 保留在 ~/.zai/tasks/<oldSid>.json,与新调度官不再关联;
+ * managed 同步关掉,避免新调度官被 5s 托管循环立即注入 dispatch 指令。
  * injectSupervisorCommand 在 sid 为空/null 时有 console.warn 护栏,
  * 这里把 supervisorSessionId 置 null 是有意为之,不是 bug。
  */
@@ -284,7 +284,7 @@ router.post('/super-tasks/supervisor/reset', async (_req, res) => {
 })
 
 /**
- * POST /api/super-tasks/inject — 向主管会话注入指令。
+ * POST /api/super-tasks/inject — 向任务调度官会话注入指令。
  * action 白名单 dispatch/resume/accept/pause;可附 task id(存在性校验),
  * 标题中的 `<` 替换为全角 `＜` 防止被解析为 XML 起始标签。
  */
@@ -307,7 +307,7 @@ router.post('/super-tasks/inject', async (req, res) => {
 
 /**
  * POST /api/super-tasks/:id/start — 手工启动：校验在队列后注入 dispatch 指令，
- * 由主管按任务 cwd 委派执行子 Agent（优先 SpawnAgent）。
+ * 由任务调度官按任务 cwd 委派执行子 Agent（优先 SpawnAgent）。
  */
 router.post('/super-tasks/:id/start', async (req, res) => {
   const t = await getTaskSummary(req.params.id)
@@ -344,7 +344,7 @@ router.post('/super-tasks/:id/pause', async (req, res) => {
 
 /**
  * POST /api/super-tasks/:id/resume — 继续：注入 resume 指令，
- * 主管 resume 原执行会话或重新委派。
+ * 任务调度官 resume 原执行会话或重新委派。
  */
 router.post('/super-tasks/:id/resume', async (req, res) => {
   const t = await getTaskSummary(req.params.id)
@@ -355,10 +355,10 @@ router.post('/super-tasks/:id/resume', async (req, res) => {
 
 /**
  * POST /api/super-tasks/:id/accept — 人工验收入口：注入 accept 指令，
- * 主管验收任务成果并调 SuperTasksMarkDone 归档到 finished-tasks。
+ * 任务调度官验收任务成果并调 SuperTasksMarkDone 归档到 finished-tasks。
  *
  * 接受 processing 与 verifying 两桶触发:
- * - processing → 标准路径(主管可能刚收到 executor 完成通知, 准备调 Verify;
+ * - processing → 标准路径(任务调度官可能刚收到 executor 完成通知, 准备调 Verify;
  *   或者直接人工覆盖走归档)。
  * - verifying → 「强制通过」语义,跳过 verifier 直接 MarkDone。
  * queue/finished/不存在 → 400 拒绝。

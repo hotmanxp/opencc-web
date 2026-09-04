@@ -11,7 +11,7 @@
  *    `cachedState`,get/set state 时同步更新缓存,保证后续 inject 命中。
  * 4. (zai patch 2026-09-04, quick-intake)`buildTaskCommand(action, task, body)`
  *    按 task.mode 拼 task-command,quick 任务自动追加 verifier light 提示段,
- *    让主管在 spawn verifier 时走 build + lint + code review 轻量路径。
+ *    让任务调度官在 spawn verifier 时走 build + lint + code review 轻量路径。
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -24,7 +24,7 @@ import { taskFactoryRoot } from '@zn-ai/zn-agent-core'
 export type TaskFactoryState = {
   managedEnabled: boolean
   /**
-   * 主管会话 id。允许 null:reset 路由把 state 清空后到 mount 引导完成
+   * 任务调度官会话 id。允许 null:reset 路由把 state 清空后到 mount 引导完成
    * 前的窗口期内为 null;injectSupervisorCommand 在 sid 空/null 时
    * 跳过注入并 warn,避免指令打到字面字符串 'null'。
    */
@@ -96,7 +96,7 @@ export async function setTaskFactoryState(patch: Partial<TaskFactoryState>): Pro
 }
 
 /**
- * 向主管会话注入一条指令(next-turn + wake;忙则自动降级排队)。
+ * 向任务调度官会话注入一条指令(next-turn + wake;忙则自动降级排队)。
  * 同步接口 —— 内部读 cachedState,不阻塞 IO。
  *
  * 护栏(2026-09-02):sid 为空/null 时(典型场景 = reset 路由刚清完
@@ -121,7 +121,7 @@ export function injectSupervisorCommand(content: string): void {
 
 /**
  * 注入到 dispatch / accept task-command 后的「轻量验证指令」段
- * (zai patch 2026-09-04, quick-intake)。主管读到 <task-verifier-mode value="light">
+ * (zai patch 2026-09-04, quick-intake)。任务调度官读到 <task-verifier-mode value="light">
  * 后,在 spawn verifier 时给 verifier 传「只跑 build + lint + 关键文件 diff 的
  * code review,跳过 spec/plan 完整对齐」指令 —— 因为 quick 任务目录里
  * 压根没有 plan.md / brainstorm.md。
@@ -139,7 +139,7 @@ export const QUICK_VERIFIER_HINT = [
   '</task-verifier-mode>',
 ].join('\n')
 
-/** 主管侧支持的 task-command action 白名单(用于 buildTaskCommand 类型守卫)。 */
+/** 任务调度官侧支持的 task-command action 白名单(用于 buildTaskCommand 类型守卫)。 */
 export type TaskCommandAction =
   | 'dispatch'
   | 'accept'
@@ -150,7 +150,7 @@ export type TaskCommandAction =
 /**
  * 给定任务 action + 任务摘要,拼出 `injectSupervisorCommand` 要送的字符串。
  *
- * - quick 任务:在 `<task-command>` 后追加 `QUICK_VERIFIER_HINT`,让主管在
+ * - quick 任务:在 `<task-command>` 后追加 `QUICK_VERIFIER_HINT`,让任务调度官在
  *   spawn verifier 时知道走轻量验证。
  * - full / mode 缺省:沿用现有指令(零变化,向后兼容历史 full 任务)。
  *
