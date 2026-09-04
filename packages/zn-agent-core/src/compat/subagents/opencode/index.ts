@@ -75,7 +75,12 @@ export {
   safeParseOpencodeConfig,
   type OpencodeConfig,
 } from './config.js'
-export { startOpencodeRun, opencodeSpawnArgv, type OpencodeRunSpec } from './run.js'
+export {
+  startOpencodeRun,
+  opencodeSpawnArgv,
+  normalizeOpencodeModelArg,
+  type OpencodeRunSpec,
+} from './run.js'
 export {
   OPENCODE_FORMAT,
   OPENCODE_FRAME,
@@ -86,8 +91,8 @@ export {
 } from './wire.js'
 export {
   resolveOpencodeAnswer,
-  opencodeFrameToEvent,
-  opencodeLineToEvent,
+  opencodeFrameToEvents,
+  opencodeLineToEvents,
   collectOpencodeAnswerParts,
   lastStepFinishPart,
   type OpencodeTerminal,

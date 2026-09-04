@@ -5,7 +5,9 @@
  *
  * Mimics `opencode run --format json`: newline-delimited JSON frames on
  * stdout, each carrying `sessionID` / `timestamp` / `part`. Frame vocabulary
- * follows the provider spec's smoke (`step_start` / `text` / `step_finish`).
+ * follows a real tool-using capture (2026-09-04): `step_start` / `tool_use`
+ * (call + settled output in one frame) / `text` / `step_finish` (intermediate
+ * steps finish with `reason: 'tool-calls'`, the terminal one with `'stop'`).
  *
  * argv (process.argv.slice(2)) as built by `opencodeSpawnArgv`:
  *   [THIS_FILE, 'run', '--format', 'json', (…'-m', model)?, prompt]
@@ -14,6 +16,8 @@
  *   - MOCK_NONCE       — the answer text (default 'mock-answer').
  *   - MOCK_MODE        — scenario selector (default 'normal'):
  *       normal    → step_start, text(NONCE), step_finish(reason:stop); exit 0
+ *       toolcall  → two steps: tool_use(bash, completed) + step_finish
+ *                   (tool-calls), then text(NONCE) + step_finish(stop)
  *       multtext  → two parts + a re-emitted same-id part (dedup test)
  *       garbage   → one non-JSON line then the normal frames
  *       noanswer  → step_finish(reason:stop) with NO text frame
@@ -22,6 +26,10 @@
  *       exiterr   → stderr only, exit 3, NO step_finish (auth-hang analog)
  *   - MOCK_DELAY_MS    — wait before emitting (used by the cancel test).
  *   - MOCK_ECHO_PROMPT — when '1', append the received prompt to the answer.
+ *   - MOCK_WAIT_STDIN_EOF — when '1', emit frames only after stdin reaches
+ *       EOF. Mirrors real `opencode run`, which consumes an open stdin pipe
+ *       as extra prompt input and blocks until it closes; regression guard
+ *       for the provider closing the child's stdin right after spawn.
  */
 
 import process from 'node:process'
@@ -46,9 +54,23 @@ const textFrame = (id, t) =>
   write({ type: 'text', sessionID: SESSION, timestamp: stamp(), part: { id, type: 'text', text: t, time: { start: stamp(), end: stamp() } } })
 const stepFinish = (reason) =>
   write({ type: 'step_finish', sessionID: SESSION, timestamp: stamp(), part: { id: 'prt_sf', type: 'step-finish', reason, tokens: { input: 1, output: 2 }, cost: 0 } })
+// Mirrors the real frame: call args + settled output arrive in ONE tool_use
+// frame, keyed by `callID` with a terminal `state.status`.
+const toolFrame = (id, callID, tool, input, output) =>
+  write({ type: 'tool_use', sessionID: SESSION, timestamp: stamp(), part: { id, type: 'tool', callID, tool, state: { status: 'completed', input, output, title: tool, time: { start: stamp(), end: stamp() } } } })
 
 function run() {
   switch (MODE) {
+    case 'toolcall':
+      // Real two-step sequence: step1 calls bash, step2 answers.
+      stepStart()
+      toolFrame('prt_t', 'call-mock-1', 'bash', { command: 'whoami', description: 'mock' }, 'mock-user\n')
+      stepFinish('tool-calls')
+      stepStart()
+      textFrame('prt_b', answer)
+      stepFinish('stop')
+      process.exit(0)
+      return
     case 'multtext':
       stepStart()
       // A trailing-whitespace blank part must be ignored; same-id re-emission
@@ -99,7 +121,12 @@ function run() {
   }
 }
 
-setTimeout(run, DELAY_MS)
+if (process.env.MOCK_WAIT_STDIN_EOF === '1') {
+  process.stdin.resume()
+  process.stdin.on('end', () => setTimeout(run, DELAY_MS))
+} else {
+  setTimeout(run, DELAY_MS)
+}
 
 process.on('SIGTERM', () => process.exit(143))
 process.stderr.on('data', () => {})

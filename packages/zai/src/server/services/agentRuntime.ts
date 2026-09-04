@@ -544,7 +544,6 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
         const dshDisposer = applyDsh(registry, dshConfig)
         if (typeof dshDisposer === 'function') {
           subagentProviderDisposers.push(dshDisposer)
-          console.log('[initAgentRuntime] dsh subagent provider registered (subagent_type: \'dsh\')')
         }
       } else if (dshConfig !== undefined) {
         console.warn(
@@ -560,7 +559,6 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
         const opencodeDisposer = applyOpencode(registry, opencodeConfig)
         if (typeof opencodeDisposer === 'function') {
           subagentProviderDisposers.push(opencodeDisposer)
-          console.log('[initAgentRuntime] opencode subagent provider registered (subagent_type: \'opencode\')')
         }
       } else if (opencodeConfig !== undefined) {
         console.warn(
@@ -591,9 +589,6 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       )
     }
     await restoreAllSessions(agentRegistry)
-    console.log(
-      `[initAgentRuntime] agent registry: ${agentRegistry.listAgents().length} agents, ${agentRegistry['sessionBindings']?.size ?? 0} sessions bound`,
-    )
   } catch (err) {
     // Non-fatal — registry 缺失不阻断 runtime 初始化,降级到 default agent。
     console.warn('[initAgentRuntime] agent registry init failed:', err)
@@ -693,7 +688,6 @@ export async function initAgentRuntime(cwd: string, isSdk?: boolean): Promise<vo
       }
       process.once('SIGTERM', cleanup)
       process.once('SIGINT', cleanup)
-      console.log(`[initAgentRuntime] repl runtime 就绪(shared OpenccRuntime wired)`)
     } catch (err) {
       console.error('[initAgentRuntime] ReplRuntime init failed:', err)
       throw err

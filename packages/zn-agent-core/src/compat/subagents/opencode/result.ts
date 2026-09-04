@@ -3,8 +3,10 @@ import {
   OPENCODE_FRAME,
   type OpencodeFinishReason,
   type OpencodeFrame,
+  type OpencodeReasoningPart,
   type OpencodeStepFinishPart,
   type OpencodeTextPart,
+  type OpencodeToolPart,
 } from './wire.js'
 import { opencodeFailureDiagnostic } from './invariant.js'
 
@@ -36,47 +38,90 @@ export interface ResolvedOpencodeAnswer {
 }
 
 /**
- * Project a single parsed frame onto the lossy {@link SubagentEvent} shape:
- *  - `text`        → `{ type: 'text', text: part.text, raw: frame }`
- *  - `step_start`  → `{ type: 'step_start', raw: frame }`
- *  - `step_finish` → `{ type: 'step_finish', raw: frame }`
- *  - anything else → `{ type: <frame.type | 'unknown'>, raw: frame }`
+ * Project a single parsed frame onto the lossy {@link SubagentEvent} shape,
+ * translated into the **zai-bg vocabulary** (same intermediate dialect the
+ * dsh provider emits): `mapSubagentEventType` in the pump bridges then maps
+ * these onto the SSE drawer keys (`assistant_message` / `tool_use` /
+ * `tool_result` / `subagent_turn_started` / `subagent_turn_completed` /
+ * `commentary`). Emitting opencode's native frame names instead would fall
+ * through the bridge's default branch and drop off the drawer whitelist —
+ * the whole timeline renders empty (2026-09-04 fix).
  *
- * Unknown types pass through with `raw` fidelity so the SSE timeline keeps
- * them; the final-answer rule only reads the three mapped kinds.
+ * Mapping (frame vocabulary from the real-run capture, see wire.ts):
+ *  - `text`        → `agentMessage`   (text = part.text, raw = frame)
+ *  - `step_start`  → `turnStarted`    (raw = frame)
+ *  - `step_finish` → `turnCompleted`  (raw = frame; the final-answer rule
+ *                    reads `part.reason` off the LAST one — intermediate
+ *                    steps carry `reason: 'tool-calls'`)
+ *  - `reasoning`   → `commentary`     (text = part.text)
+ *  - `tool_use`    → `toolCall` with `raw = { id, name, input }`
+ *                    (TaskDrawer keys the card off raw.id / raw.name /
+ *                    raw.input; opencode delivers call + settled output in
+ *                    ONE frame, so a completed/error state additionally
+ *                    emits a paired `toolResult` with
+ *                    `raw = { tool_use_id }` that flips the card to done)
+ *  - anything else → passthrough `{ type: <frame.type | 'unknown'>, raw }`
+ *
+ * Returns 1..2 events (tool frames with a terminal state return two).
  */
-export function opencodeFrameToEvent(frame: OpencodeFrame): SubagentEvent {
+export function opencodeFrameToEvents(frame: OpencodeFrame): SubagentEvent[] {
   const t = typeof frame.type === 'string' ? frame.type : 'unknown'
   if (t === OPENCODE_FRAME.text) {
     const part = frame.part as OpencodeTextPart | undefined
     const text = typeof part?.text === 'string' ? part.text : ''
-    return { type: t, text, raw: frame }
+    return [{ type: 'agentMessage', text, raw: frame }]
   }
-  return { type: t, raw: frame }
+  if (t === OPENCODE_FRAME.stepStart) {
+    return [{ type: 'turnStarted', raw: frame }]
+  }
+  if (t === OPENCODE_FRAME.stepFinish) {
+    return [{ type: 'turnCompleted', raw: frame }]
+  }
+  if (t === OPENCODE_FRAME.reasoning) {
+    const part = frame.part as OpencodeReasoningPart | undefined
+    const text = typeof part?.text === 'string' ? part.text : ''
+    if (!text) return []
+    return [{ type: 'commentary', text, raw: frame }]
+  }
+  if (t === OPENCODE_FRAME.toolUse) {
+    const part = frame.part as OpencodeToolPart | undefined
+    const id = typeof part?.callID === 'string' ? part.callID : ''
+    if (!id) return [{ type: 'toolCall', raw: frame }]
+    const name = typeof part?.tool === 'string' ? part.tool : 'tool'
+    const out: SubagentEvent[] = [
+      { type: 'toolCall', raw: { id, name, input: part?.state?.input } },
+    ]
+    const status = part?.state?.status
+    if (status === 'completed' || status === 'error') {
+      out.push({ type: 'toolResult', raw: { tool_use_id: id } })
+    }
+    return out
+  }
+  return [{ type: t, raw: frame }]
 }
 
 /**
- * Parse one stdout line. Non-JSON lines degrade to a `log` event (defensive —
- * they should not appear with `--format json`, but a stray banner must never
- * abort the run).
+ * Parse one stdout line into 1..2 events. Non-JSON lines degrade to a `log`
+ * event (defensive — they should not appear with `--format json`, but a
+ * stray banner must never abort the run).
  */
-export function opencodeLineToEvent(line: string): SubagentEvent {
+export function opencodeLineToEvents(line: string): SubagentEvent[] {
   try {
     const parsed = JSON.parse(line) as OpencodeFrame
-    return opencodeFrameToEvent(parsed)
+    return opencodeFrameToEvents(parsed)
   } catch {
-    return { type: 'log', text: line, raw: line }
+    return [{ type: 'log', text: line, raw: line }]
   }
 }
 
-/** Dedupe `text` events by `part.id` (last write wins), preserving order. */
+/** Dedupe `agentMessage` events by `part.id` (last write wins), preserving order. */
 export function collectOpencodeAnswerParts(
   events: readonly SubagentEvent[],
 ): string[] {
   const order: string[] = []
   const latest = new Map<string, string>()
   events.forEach((ev, idx) => {
-    if (ev.type !== OPENCODE_FRAME.text) return
+    if (ev.type !== 'agentMessage') return
     const text = typeof ev.text === 'string' ? ev.text : ''
     if (!text.trim()) return
     const frame = ev.raw as OpencodeFrame | undefined
@@ -91,13 +136,13 @@ export function collectOpencodeAnswerParts(
   return order.map((k) => latest.get(k) ?? '')
 }
 
-/** The `part` of the last `step_finish` event, if any. */
+/** The `part` of the last `turnCompleted` (step_finish) event, if any. */
 export function lastStepFinishPart(
   events: readonly SubagentEvent[],
 ): OpencodeStepFinishPart | null {
   let found: OpencodeStepFinishPart | null = null
   for (const ev of events) {
-    if (ev.type !== OPENCODE_FRAME.stepFinish) continue
+    if (ev.type !== 'turnCompleted') continue
     const frame = ev.raw as OpencodeFrame | undefined
     if (frame?.part) found = frame.part as OpencodeStepFinishPart
   }

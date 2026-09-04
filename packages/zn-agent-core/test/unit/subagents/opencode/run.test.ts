@@ -5,6 +5,7 @@ import { dirname, join } from 'node:path'
 import {
   OpencodeProvider,
   opencodeSpawnArgv,
+  normalizeOpencodeModelArg,
   parseOpencodeConfig,
 } from '../../../../src/compat/subagents/opencode/index.js'
 import type {
@@ -88,6 +89,50 @@ describe('opencode/wire.opencodeSpawnArgv', () => {
       'hi',
     ])
   })
+
+  it('routes bare model ids through the hardcoded providers', () => {
+    const { args } = opencodeSpawnArgv('opencode', ['run', '--format', 'json'], {
+      prompt: 'hi',
+      model: 'glm-5.2',
+    })
+    expect(args).toEqual([
+      'run',
+      '--format',
+      'json',
+      '-m',
+      'OpenPlatformOAuth2/glm-5.2',
+      'hi',
+    ])
+  })
+})
+
+describe('opencode/run.normalizeOpencodeModelArg', () => {
+  it('passes through ids that already carry a provider', () => {
+    expect(normalizeOpencodeModelArg('minimax-cn/MiniMax-M3')).toBe(
+      'minimax-cn/MiniMax-M3',
+    )
+  })
+
+  it('routes zhiniao-* models to the pa provider', () => {
+    expect(normalizeOpencodeModelArg('zhiniao-glm-5.1')).toBe('pa/zhiniao-glm-5.1')
+    expect(normalizeOpencodeModelArg('zhiniao-MiniMax-M2.7')).toBe(
+      'pa/zhiniao-MiniMax-M2.7',
+    )
+  })
+
+  it('routes all other bare ids to OpenPlatformOAuth2', () => {
+    expect(normalizeOpencodeModelArg('glm-5.2')).toBe('OpenPlatformOAuth2/glm-5.2')
+    expect(normalizeOpencodeModelArg('MiniMax-M3')).toBe(
+      'OpenPlatformOAuth2/MiniMax-M3',
+    )
+  })
+
+  it('trims whitespace and collapses blank input to empty string', () => {
+    expect(normalizeOpencodeModelArg('  glm-5.2  ')).toBe(
+      'OpenPlatformOAuth2/glm-5.2',
+    )
+    expect(normalizeOpencodeModelArg('   ')).toBe('')
+  })
 })
 
 describe('opencode/run.startOpencodeRun (keyless mock cli)', () => {
@@ -96,9 +141,47 @@ describe('opencode/run.startOpencodeRun (keyless mock cli)', () => {
     const out = await runOnce({ MOCK_NONCE: NONCE }, 'say the nonce')
     expect(out.stopReason).toBe('completed')
     expect(out.text).toBe(NONCE)
-    expect(out.events.some((e) => e.type === 'text')).toBe(true)
-    expect(out.events.some((e) => e.type === 'step_finish')).toBe(true)
+    // bg vocabulary (zai-bg dialect), NOT opencode-native frame names — the
+    // pump's mapSubagentEventType + the SSE drawer whitelist key off these.
+    expect(out.events.some((e) => e.type === 'agentMessage')).toBe(true)
+    expect(out.events.some((e) => e.type === 'turnCompleted')).toBe(true)
   })
+
+  it('projects a real two-step tool run into drawer-native events', async () => {
+    const out = await runOnce({ MOCK_MODE: 'toolcall', MOCK_NONCE: 'done' }, 'whoami')
+    expect(out.stopReason).toBe('completed')
+    expect(out.text).toBe('done')
+    const types = out.events.map((e) => e.type)
+    // step1: turnStarted, toolCall+toolResult pair, turnCompleted
+    // (reason 'tool-calls'); step2: turnStarted, agentMessage, turnCompleted.
+    expect(types).toEqual([
+      'turnStarted',
+      'toolCall',
+      'toolResult',
+      'turnCompleted',
+      'turnStarted',
+      'agentMessage',
+      'turnCompleted',
+    ])
+    const toolCall = out.events.find((e) => e.type === 'toolCall')!
+    expect(toolCall.raw).toEqual({
+      id: 'call-mock-1',
+      name: 'bash',
+      input: { command: 'whoami', description: 'mock' },
+    })
+    // The intermediate tool-calls finish must not leak into the answer.
+    expect(out.events.filter((e) => e.type === 'agentMessage')).toHaveLength(1)
+  })
+
+  it('closes the child stdin so an EOF-gated CLI does not hang', async () => {
+    // Regression (2026-09-03): real `opencode run` consumes an open stdin
+    // pipe as extra prompt input and blocks until EOF. The mock only emits
+    // frames after stdin closes; if the provider stops calling
+    // `handle.stdin.end()` after spawn, this run hangs until timeout.
+    const out = await runOnce({ MOCK_WAIT_STDIN_EOF: '1', MOCK_NONCE: 'after-eof' }, 'x')
+    expect(out.stopReason).toBe('completed')
+    expect(out.text).toBe('after-eof')
+  }, 15_000)
 
   it('dedupes repeated parts and joins distinct parts', async () => {
     const out = await runOnce({ MOCK_MODE: 'multtext' }, 'multi')
