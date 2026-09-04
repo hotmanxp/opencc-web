@@ -117,4 +117,21 @@ describe('SuperTaskPanel（看板）', () => {
     })
     del.mockRestore()
   })
+
+  // zai patch (2026-09-04, quick-intake):TaskOverviewBar 顶栏同时显示两个按钮。
+  it('顶栏同时渲染「新建任务(讨论)」与「快速创建」按钮(2026-09-04)', () => {
+    useSuperTaskStore.setState({
+      buckets: {
+        queue: [], processing: [], verifying: [], finished: [],
+      },
+      managed: false, loading: false, error: null,
+    })
+    render(<SuperTaskPanel />)
+    const discussBtn = screen.getByTestId('new-task-button')
+    expect(discussBtn).toBeTruthy()
+    expect(discussBtn.textContent).toContain('新建任务(讨论)')
+    const quickBtn = screen.getByTestId('quick-create-button')
+    expect(quickBtn).toBeTruthy()
+    expect(quickBtn.textContent).toContain('快速创建')
+  })
 })

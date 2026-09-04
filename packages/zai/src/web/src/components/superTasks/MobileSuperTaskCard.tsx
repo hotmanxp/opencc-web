@@ -9,6 +9,7 @@ import { STATUS_TAG, PRIORITY_TAG, STATUS_ACCENT } from './SuperTaskCard'
  *  - **不复用** SuperTaskCard(操作按钮 / 火柴人 / Checkbox / 多行描述
  *    在 375–430px 宽度下全部不可用或视觉过重)。
  *  - 只渲染:左侧状态色条(STATUS_ACCENT) + 优先级 Tag + 状态 Tag +
+ *    「轻量」Tag(quick 任务专属,2026-09-04 round 2 补) +
  *    单行 ellipsis 标题 + 右对齐相对时间。整卡可点 → 打开详情抽屉。
  *  - 三张配色/文案表(STATUS_TAG / PRIORITY_TAG / STATUS_ACCENT)从
  *    SuperTaskCard export 复用 —— 任何改色 / 改文案只改一处。
@@ -75,6 +76,20 @@ export default function MobileSuperTaskCard({
             data-testid={`mobile-priority-tag-${task.id}`}
           >
             {task.priority}
+          </Tag>
+        )}
+        {/* zai patch (2026-09-04, quick-intake round 2):quick 任务在状态/优先级 Tag 旁
+            渲染「轻量」Tag —— 跟桌面 SuperTaskCard L242-253 同款语义,移动端一眼可辨;
+            data-testid 用 `quick-tag-${task.id}` 与桌面 `mode-quick-${task.id}` 同源,
+            验收时两类 ID 都能用。 */}
+        {task.mode === 'quick' && (
+          <Tag
+            color="default"
+            style={{ marginInlineEnd: 0, fontSize: 12, lineHeight: '18px' }}
+            data-mode="quick"
+            data-testid={`quick-tag-${task.id}`}
+          >
+            轻量
           </Tag>
         )}
       </div>

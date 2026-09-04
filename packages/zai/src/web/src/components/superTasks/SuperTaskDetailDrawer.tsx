@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Drawer, Tabs, Typography, Spin, Timeline, Collapse } from 'antd'
+import { Alert, Drawer, Tabs, Typography, Spin, Timeline, Collapse } from 'antd'
 import type { CSSProperties } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -154,78 +154,102 @@ export default function SuperTaskDetailDrawer({
             状态:{detail.summary.status} · Agent:{detail.summary.agent ?? 'default'}
             {detail.summary.executorTaskId ? ` · 执行任务:${detail.summary.executorTaskId}` : ''}
             {detail.summary.verifierTaskId ? ` · 验证任务:${detail.summary.verifierTaskId}` : ''}
+            {detail.summary.mode === 'quick' ? ' · 模式:quick' : ''}
           </Typography.Paragraph>
+          {/* zai patch (2026-09-04, quick-intake):quick 任务顶部加横幅明示,
+              同时下文 Tabs 按 mode 过滤掉 plan.md / brainstorm.md Tab。 */}
+          {detail.summary.mode === 'quick' && (
+            <Alert
+              type="info"
+              showIcon
+              message="本任务为快速创建,无 plan.md / brainstorm.md"
+              description="任务目录只包含 task.yaml + process.md + 最小 docs/spec.md(title/description/priority/cwd 快照);验证走轻量路径(build + lint + 关键文件 diff 的 code review)。"
+              style={{ marginBottom: 12 }}
+              data-testid="quick-mode-banner"
+            />
+          )}
           <Tabs
-            items={[
-              {
-                key: 'process',
-                label: '执行过程',
-                children: activeStreamId ? (
-                  <>
-                    <Typography.Text type="secondary" style={{ fontSize: 12 }}>
-                      当前事件流来源:{active.role === 'verifier' ? '验证 Agent(verifier)' : '执行 Agent(executor)'}
-                      {` · task ${activeStreamId}`}
-                    </Typography.Text>
-                    {rendered.length > 0 ? (
-                      <div style={{ maxHeight: 'calc(100vh - 310px)', overflow: 'auto', marginTop: 8 }}>
-                        <Timeline
-                          items={rendered.map((r) => ({
-                            key: rowKey(r),
-                            color: dotColor(r),
-                            children: (
-                              <RenderedEventRow
-                                ev={r}
-                                expanded={expanded}
-                                toggle={toggleExpand}
-                              />
-                            ),
-                          }))}
-                        />
-                      </div>
-                    ) : (
-                      <div style={{ marginTop: 8 }}>
-                        <Typography.Text type="secondary">等待执行事件...</Typography.Text>
-                      </div>
-                    )}
-                  </>
-                ) : (
-                  <Typography.Text type="secondary">尚未派生执行/验证子 Agent</Typography.Text>
-                ),
-              },
-              {
-                key: 'verification',
-                label: '验证记录',
-                children: detail.verificationMd ? (
-                  <MarkdownText text={detail.verificationMd} />
-                ) : (
-                  <Typography.Text type="secondary">尚无验证记录</Typography.Text>
-                ),
-              },
-              {
-                key: 'brainstorm',
-                label: 'brainstorm.md',
-                children: detail.brainstormMd ? (
-                  <MarkdownText text={detail.brainstormMd} />
-                ) : (
-                  <Typography.Text type="secondary">尚无讨论纪要</Typography.Text>
-                ),
-              },
-              {
+            items={(() => {
+              const isQuick = detail.summary.mode === 'quick'
+              const items: Array<{
+                key: string; label: string; children: JSX.Element
+              }> = [
+                {
+                  key: 'process',
+                  label: '执行过程',
+                  children: activeStreamId ? (
+                    <>
+                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                        当前事件流来源:{active.role === 'verifier' ? '验证 Agent(verifier)' : '执行 Agent(executor)'}
+                        {` · task ${activeStreamId}`}
+                      </Typography.Text>
+                      {rendered.length > 0 ? (
+                        <div style={{ maxHeight: 'calc(100vh - 310px)', overflow: 'auto', marginTop: 8 }}>
+                          <Timeline
+                            items={rendered.map((r) => ({
+                              key: rowKey(r),
+                              color: dotColor(r),
+                              children: (
+                                <RenderedEventRow
+                                  ev={r}
+                                  expanded={expanded}
+                                  toggle={toggleExpand}
+                                />
+                              ),
+                            }))}
+                          />
+                        </div>
+                      ) : (
+                        <div style={{ marginTop: 8 }}>
+                          <Typography.Text type="secondary">等待执行事件...</Typography.Text>
+                        </div>
+                      )}
+                    </>
+                  ) : (
+                    <Typography.Text type="secondary">尚未派生执行/验证子 Agent</Typography.Text>
+                  ),
+                },
+                {
+                  key: 'verification',
+                  label: '验证记录',
+                  children: detail.verificationMd ? (
+                    <MarkdownText text={detail.verificationMd} />
+                  ) : (
+                    <Typography.Text type="secondary">尚无验证记录</Typography.Text>
+                  ),
+                },
+              ]
+              // quick 模式不显示 brainstorm.md / plan.md Tab —— 这些文件根本不会被创建。
+              if (!isQuick) {
+                items.push({
+                  key: 'brainstorm',
+                  label: 'brainstorm.md',
+                  children: detail.brainstormMd ? (
+                    <MarkdownText text={detail.brainstormMd} />
+                  ) : (
+                    <Typography.Text type="secondary">尚无讨论纪要</Typography.Text>
+                  ),
+                })
+              }
+              items.push({
                 key: 'spec',
                 label: 'spec.md',
                 children: <MarkdownText text={detail.specMd ?? ''} />,
-              },
-              {
-                key: 'plan',
-                label: 'plan.md',
-                children: <MarkdownText text={detail.planMd ?? ''} />,
-              },
-              {
+              })
+              if (!isQuick) {
+                items.push({
+                  key: 'plan',
+                  label: 'plan.md',
+                  children: <MarkdownText text={detail.planMd ?? ''} />,
+                })
+              }
+              items.push({
                 key: 'processMd',
                 label: 'process.md',
                 children: <MarkdownText text={detail.processMd ?? ''} />,
-              },
-            ]}
+              })
+              return items
+            })()}
           />
         </>
       )}

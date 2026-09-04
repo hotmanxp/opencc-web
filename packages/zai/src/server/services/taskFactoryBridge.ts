@@ -9,6 +9,9 @@
  * 3. 提供同步接口 `injectSupervisorCommand(content)` —— 因 sessionInbox.followup
  *    是同步调用,读取 state 也得同步;为它配套一个模块内缓存
  *    `cachedState`,get/set state 时同步更新缓存,保证后续 inject 命中。
+ * 4. (zai patch 2026-09-04, quick-intake)`buildTaskCommand(action, task, body)`
+ *    按 task.mode 拼 task-command,quick 任务自动追加 verifier light 提示段,
+ *    让主管在 spawn verifier 时走 build + lint + code review 轻量路径。
  */
 
 import { mkdir, readFile, writeFile } from 'node:fs/promises'
@@ -114,6 +117,62 @@ export function injectSupervisorCommand(content: string): void {
     content,
     createdAt: Date.now(),
   })
+}
+
+/**
+ * 注入到 dispatch / accept task-command 后的「轻量验证指令」段
+ * (zai patch 2026-09-04, quick-intake)。主管读到 <task-verifier-mode value="light">
+ * 后,在 spawn verifier 时给 verifier 传「只跑 build + lint + 关键文件 diff 的
+ * code review,跳过 spec/plan 完整对齐」指令 —— 因为 quick 任务目录里
+ * 压根没有 plan.md / brainstorm.md。
+ *
+ * 用 <task-verifier-mode value="light">...</task-verifier-mode> 这种与
+ * 既有 <task-command> 同级的语义标签,避免与现有 task-command XML 解析冲突。
+ */
+export const QUICK_VERIFIER_HINT = [
+  '',
+  '<task-verifier-mode value="light">',
+  'This task is quick-mode (no plan.md / brainstorm.md exists by design). When spawning the verifier (§4c), instruct it to:',
+  '  - Skip the full spec-alignment + plan-acceptance gate (plan.md is intentionally absent).',
+  '  - Only run: build, lint, and a focused code review of `git diff` against the task branch (task-<taskId>).',
+  '  - Report PASS/FAIL with a one-line reason; keep the verification round tight.',
+  '</task-verifier-mode>',
+].join('\n')
+
+/** 主管侧支持的 task-command action 白名单(用于 buildTaskCommand 类型守卫)。 */
+export type TaskCommandAction =
+  | 'dispatch'
+  | 'accept'
+  | 'forced-accept'
+  | 'pause'
+  | 'resume'
+
+/**
+ * 给定任务 action + 任务摘要,拼出 `injectSupervisorCommand` 要送的字符串。
+ *
+ * - quick 任务:在 `<task-command>` 后追加 `QUICK_VERIFIER_HINT`,让主管在
+ *   spawn verifier 时知道走轻量验证。
+ * - full / mode 缺省:沿用现有指令(零变化,向后兼容历史 full 任务)。
+ *
+ * title 中的 `<` 替换为全角 `＜`,防止被解析为 XML 起始标签(与既有
+ * superTasks 路由一致)。
+ */
+export function buildTaskCommand(
+  action: TaskCommandAction,
+  task: {
+    id: string
+    title?: string | null
+    mode?: 'quick' | 'full' | null
+  } | null,
+  body: string,
+): string {
+  const id = task?.id ?? ''
+  const title = (task?.title ?? '').replace(/</g, '＜')
+  const cmd = `\n<task-command action="${action}" id="${id}" title="${title}">${body}</task-command>`
+  if (task?.mode === 'quick') {
+    return `${cmd}${QUICK_VERIFIER_HINT}`
+  }
+  return cmd
 }
 
 /** 测试用 —— 重置注入标志、缓存、id 计数器。 */
