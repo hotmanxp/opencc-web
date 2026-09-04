@@ -28,6 +28,13 @@ export interface TaskSummary {
   priority?: TaskPriority
   /** 依赖的任务 id 列表;所有依赖任务 status=done 时本任务才可派发。 */
   dependsOn?: string[]
+  /**
+   * 任务创建模式(zai patch 2026-09-04, quick-intake):
+   *  - 'quick': 跳过 brainstorming + 不生成 plan.md / brainstorm.md + 轻量验证。
+   *  - 'full' : 完整 intake 流程(默认)。
+   * 历史任务与 full 模式读不到该字段,缺省回落 full(向后兼容)。
+   */
+  mode?: TaskMode
   bucket: TaskBucketName
 }
 export interface TaskBucket {
@@ -73,19 +80,37 @@ function intakeDocHasSubstance(text: string): boolean {
   return kept.replace(/\s/g, '').length >= 20
 }
 
-export interface IntakeDocCheck { ok: boolean; missing: IntakeDocPath[] }
+export interface IntakeDocCheck {
+  ok: boolean
+  missing: IntakeDocPath[]
+  /**
+   * 任务创建模式(zai patch 2026-09-04, quick-intake)。
+   *  - 'full' :沿用三份文档校验(spec.md / plan.md / brainstorm.md)。
+   *  - 'quick':只校验 spec.md 实质内容;plan.md / brainstorm.md 不会被创建。
+   * 缺省回落 full(向后兼容历史任务)。
+   */
+  mode: TaskMode
+}
+
+/** quick 模式只校验 docs/spec.md(plan.md / brainstorm.md 根本不会被创建)。 */
+const QUICK_INTAKE_DOCS = ['docs/spec.md'] as const
 
 /**
- * 校验任务目录下 intake 必需文档(docs/spec.md / docs/plan.md /
- * docs/brainstorm.md)是否已填写实质内容。缺失判定:文件不存在、为空、
- * 或仍是 createPoolTask 写入的骨架占位。任务不存在返回 null。
+ * 校验任务目录下 intake 必需文档是否已填写实质内容。缺失判定:文件不存在、
+ * 为空、或仍是 createPoolTask 写入的骨架占位。
+ *  - full 模式:校验 docs/spec.md / docs/plan.md / docs/brainstorm.md。
+ *  - quick 模式(zai patch 2026-09-04):只校验 docs/spec.md(plan.md /
+ *    brainstorm.md 不在 missing 清单,因为它们本来就不会被创建)。
+ * 任务不存在返回 null。
  */
 export async function checkTaskIntakeDocs(id: string, bucket?: TaskBucketName): Promise<IntakeDocCheck | null> {
   const summary = await getTaskSummary(id, bucket)
   if (!summary) return null
   const dir = taskDir(summary.bucket, id)
+  const mode: TaskMode = summary.mode ?? DEFAULT_TASK_MODE
+  const docs = mode === 'quick' ? QUICK_INTAKE_DOCS : INTAKE_REQUIRED_DOCS
   const missing: IntakeDocPath[] = []
-  for (const doc of INTAKE_REQUIRED_DOCS) {
+  for (const doc of docs) {
     const f = join(dir, doc)
     if (!existsSync(f)) {
       missing.push(doc)
@@ -94,7 +119,7 @@ export async function checkTaskIntakeDocs(id: string, bucket?: TaskBucketName): 
     const text = await readFile(f, 'utf-8').catch(() => '')
     if (!intakeDocHasSubstance(text)) missing.push(doc)
   }
-  return { ok: missing.length === 0, missing }
+  return { ok: missing.length === 0, missing, mode }
 }
 
 const BUCKETS: TaskBucketName[] = ['queue-tasks', 'processing-tasks', 'verifying-tasks', 'finished-tasks']
@@ -112,6 +137,11 @@ const TASK_YAML_FIELDS = [
   // zai patch (2026-09-02, priority + dependsOn 调度):
   // priority 缺省 P2,dependsOn 缺省 [];写入校验都用白名单,避免无关字段。
   'priority', 'dependsOn',
+  // zai patch (2026-09-04, 任务工厂 quick-intake):
+  // mode: 'quick' = 快速创建任务(只 task.yaml + process.md + 最小 docs/spec.md);
+  //       'full'   = 完整 intake 流程(三份文档齐全 + brainstorming)。
+  // full 模式省略(序列化时不写入);仅 quick 显式落盘,读路径容错 undefined→full。
+  'mode',
 ] as const
 
 /** 任务在 yaml 里允许的 status 字符串。 */
@@ -135,6 +165,22 @@ export const PR_ORDER: Record<TaskPriority, number> = { P0: 0, P1: 1, P2: 2, P3:
 /** 把任意值规整成合法 priority;非法值回落到缺省 P2(创建阶段 fail loud;读取/列表兜底)。 */
 export function normalizePriority(v: unknown): TaskPriority {
   return v === 'P0' || v === 'P1' || v === 'P2' || v === 'P3' ? v : DEFAULT_TASK_PRIORITY
+}
+
+/**
+ * 任务创建模式(zai patch 2026-09-04, quick-intake):
+ *  - 'quick': 快速创建,跳过 brainstorming;任务目录只生成 task.yaml + process.md + 最小
+ *    docs/spec.md(仅 title/description/priority/cwd 快照);intake gate 与 verifier 都按
+ *    mode 分流,只校验 / 只审查 spec.md。
+ *  - 'full' : 完整 intake 流程(头脑风暴 + 三份文档 + 完整 spec 对齐验收)。
+ *  兼容历史 full 任务 —— mode 字段缺省视为 full。
+ */
+export type TaskMode = 'quick' | 'full'
+export const TASK_MODES: readonly TaskMode[] = ['quick', 'full'] as const
+export const DEFAULT_TASK_MODE: TaskMode = 'full'
+/** 把任意值规整成合法 mode;非法值回落到缺省 full(读取容错)。 */
+export function normalizeMode(v: unknown): TaskMode {
+  return v === 'quick' || v === 'full' ? v : DEFAULT_TASK_MODE
 }
 
 /** task.yaml 的内存表示(扁平 key-value)。null 表示字段被显式置空。 */
@@ -255,6 +301,15 @@ export interface CreatePoolTaskInput {
    * 缺省 []。
    */
   dependsOn?: string[]
+  /**
+   * 任务创建模式(2026-09-04, quick-intake)。缺省 'full':
+   *  - 'full' :生成 task.yaml + process.md + docs/spec.md(完整) +
+   *             docs/plan.md(空骨架) + docs/brainstorm.md(空骨架)。
+   *  - 'quick':生成 task.yaml(写入 mode: quick)+ process.md + 最小 docs/spec.md
+   *             (title/description/priority/cwd 快照);不生成 plan.md / brainstorm.md。
+   * intake gate 与 verifier 按 mode 分流,只校验 / 只审查 spec.md。
+   */
+  mode?: TaskMode
 }
 export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSummary> {
   const id = input.id ?? generateTaskId()
@@ -284,6 +339,14 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
       throw new Error(`task ${id} cannot depend on itself (dependsOn contains its own id)`)
     }
   }
+  // zai patch (2026-09-04, quick-intake):mode 分流。缺省 full(向后兼容);
+  // 非法值 fail loud,避免脏数据穿透。full 模式 mode 字段在 yaml 里**不写入**
+  // (避免污染所有历史任务),只 quick 显式落盘。
+  const mode: TaskMode = input.mode ?? DEFAULT_TASK_MODE
+  if (!TASK_MODES.includes(mode)) {
+    throw new Error(`invalid mode ${JSON.stringify(input.mode)} (allowed: ${TASK_MODES.join(', ')})`)
+  }
+  // 仅 quick 模式写入 mode 字段 —— 避免 yaml 里出现 `mode: null` 污染历史 full 任务。
   const meta: TaskYaml = {
     id,
     title: input.title,
@@ -299,10 +362,31 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     verifierTaskId: null,
     priority,
     dependsOn,
+    ...(mode === 'quick' ? { mode: 'quick' as const } : {}),
   }
   await writeFile(join(dir, TASK_YAML_FILENAME), serializeTaskYaml(meta), 'utf-8')
-  await writeFile(join(dir, 'docs', 'spec.md'), input.spec ?? DEFAULT_SPEC_SKELETON, 'utf-8')
-  await writeFile(join(dir, 'docs', 'plan.md'), input.plan ?? DEFAULT_PLAN_SKELETON, 'utf-8')
+  if (mode === 'quick') {
+    // quick 模式:只生成最小 spec.md(title/description/priority/cwd 快照),
+    // 不生成 plan.md / brainstorm.md(intent:跳过 brainstorming,验收走轻量路径)。
+    const specLines = [
+      '# 需求规格(快速创建)',
+      '',
+      `- title: ${input.title}`,
+      ...(input.description ? [`- description: ${input.description.replace(/\n/g, ' ')}`] : []),
+      `- priority: ${priority}`,
+      `- cwd: ${taskCwd}`,
+      '',
+      '> 本任务为快速创建(quick mode),无 plan.md / brainstorm.md。',
+      '> 执行子 agent 直接读 task.yaml.description 作为需求上下文;',
+      '> 验证走轻量路径(只跑 build + lint + 关键文件 diff 的 code review)。',
+      '',
+    ]
+    await writeFile(join(dir, 'docs', 'spec.md'), specLines.join('\n'), 'utf-8')
+  } else {
+    // full 模式(默认,行为不变):生成完整三份文档骨架。
+    await writeFile(join(dir, 'docs', 'spec.md'), input.spec ?? DEFAULT_SPEC_SKELETON, 'utf-8')
+    await writeFile(join(dir, 'docs', 'plan.md'), input.plan ?? DEFAULT_PLAN_SKELETON, 'utf-8')
+  }
   await writeFile(join(dir, 'process.md'), '# 执行记录\n\n', 'utf-8')
   return {
     id,
@@ -315,6 +399,7 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     description: input.description,
     priority,
     dependsOn,
+    mode,
     bucket: 'queue-tasks',
   }
 }
@@ -371,6 +456,8 @@ function toSummary(id: string, bucket: TaskBucketName, meta: TaskYaml): TaskSumm
     dependsOn: Array.isArray(meta.dependsOn)
       ? (meta.dependsOn as unknown[]).filter((x): x is string => typeof x === 'string')
       : [],
+    // zai patch (2026-09-04, quick-intake):mode 缺省回落 full(向后兼容)。
+    mode: normalizeMode(meta.mode),
   }
 }
 

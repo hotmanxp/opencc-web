@@ -1,4 +1,5 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest'
+import { existsSync } from 'node:fs'
 import { mkdtemp, readFile, rm } from 'node:fs/promises'
 import { tmpdir } from 'node:os'
 import { join } from 'node:path'
@@ -71,6 +72,67 @@ describe('superTasksCreateTool', () => {
       title: '坏', cwd: dir, priority: 'P9' as never,
     })).rejects.toThrow(/invalid priority/)
   })
+
+  // zai patch (2026-09-04, quick-intake):mode 字段入参 + 落盘分流。
+  it('call mode=quick 仅落盘 task.yaml + process.md + docs/spec.md(无 plan.md/brainstorm.md)', async () => {
+    const res = await superTasksCreateTool.call({
+      title: '改文案', cwd: dir, mode: 'quick', description: '把按钮文案从「提交」改为「完成」',
+    })
+    const out = res.data.output as string
+    expect(out).toContain('mode=quick')
+    expect(out).toContain('Task created: tf-')
+    const id = extractId(out)
+    const dirQ = join(taskDir('queue-tasks', id))
+    // quick 模式应存在三个文件
+    const spec = await readFile(join(dirQ, 'docs', 'spec.md'), 'utf-8')
+    expect(spec).toContain('# 需求规格(快速创建)')
+    expect(spec).toContain('- title: 改文案')
+    expect(spec).toContain('- description: 把按钮文案从')
+    expect(spec).toContain('- priority: P2')
+    // quick 模式不应创建 plan.md / brainstorm.md(不存在)
+    expect(existsSync(join(dirQ, 'docs', 'plan.md'))).toBe(false)
+    expect(existsSync(join(dirQ, 'docs', 'brainstorm.md'))).toBe(false)
+    // task.yaml 应包含 mode: quick
+    const yaml = await readFile(join(dirQ, 'task.yaml'), 'utf-8')
+    expect(yaml).toContain('mode: quick')
+  })
+
+  it('call mode=full 落盘完整三份文档骨架(spec/plan),无 mode 字段', async () => {
+    const res = await superTasksCreateTool.call({
+      title: '完整任务', cwd: dir, mode: 'full', spec: '# SPEC', plan: '# PLAN',
+    })
+    const out = res.data.output as string
+    expect(out).toContain('mode=full')
+    const id = extractId(out)
+    const dirQ = join(taskDir('queue-tasks', id))
+    const spec = await readFile(join(dirQ, 'docs', 'spec.md'), 'utf-8')
+    expect(spec).toContain('# SPEC')
+    const plan = await readFile(join(dirQ, 'docs', 'plan.md'), 'utf-8')
+    expect(plan).toContain('# PLAN')
+    // full 模式不写入 mode 字段(避免污染所有历史 full 任务)
+    const yaml = await readFile(join(dirQ, 'task.yaml'), 'utf-8')
+    expect(yaml).not.toContain('mode:')
+  })
+
+  it('call mode 缺省 = full(向后兼容),行为与 mode=full 一致', async () => {
+    const res = await superTasksCreateTool.call({
+      title: '兼容任务', cwd: dir, spec: '# SPEC',
+    })
+    const out = res.data.output as string
+    expect(out).toContain('mode=full')
+    const id = extractId(out)
+    const dirQ = join(taskDir('queue-tasks', id))
+    const spec = await readFile(join(dirQ, 'docs', 'spec.md'), 'utf-8')
+    expect(spec).toContain('# SPEC')
+    const yaml = await readFile(join(dirQ, 'task.yaml'), 'utf-8')
+    expect(yaml).not.toContain('mode:')
+  })
+
+  it('call 拒绝非法 mode 值(非 quick/full)', async () => {
+    await expect(superTasksCreateTool.call({
+      title: '坏', cwd: dir, mode: 'fast' as never,
+    })).rejects.toThrow(/invalid mode/)
+  })
 })
 
 describe('tool_result serialization (2026-09-02 回归)', () => {
@@ -133,6 +195,21 @@ describe('superTasksGetTool (2026-09-02)', () => {
     const structured = (got.data as { structured: { summary: { priority?: string; dependsOn?: string[] } } }).structured
     expect(structured.summary.priority).toBe('P1')
     expect(structured.summary.dependsOn).toEqual(['tf-aaaaaaaa'])
+  })
+
+  // zai patch (2026-09-04, quick-intake):SuperTasksGet 读回 mode 字段。
+  it('call 读回的 summary 包含 mode(quick→「quick」,full/缺省→「full」)', async () => {
+    const resQuick = await superTasksCreateTool.call({ title: 'q', cwd: dir, mode: 'quick' })
+    const idQuick = extractId(resQuick.data.output as string)
+    const gotQuick = await superTasksGetTool.call({ id: idQuick })
+    const sumQuick = (gotQuick.data as { structured: { summary: { mode?: string } } }).structured.summary
+    expect(sumQuick.mode).toBe('quick')
+
+    const resFull = await superTasksCreateTool.call({ title: 'f', cwd: dir })
+    const idFull = extractId(resFull.data.output as string)
+    const gotFull = await superTasksGetTool.call({ id: idFull })
+    const sumFull = (gotFull.data as { structured: { summary: { mode?: string } } }).structured.summary
+    expect(sumFull.mode).toBe('full')
   })
 })
 

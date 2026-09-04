@@ -16,14 +16,21 @@ const CREATE_DESC = 'Create a Task Factory task: initializes task.yaml, docs/spe
   'verifierAgent is the optional verification subagent name; when omitted, the task inherits the executor agent. The verifier subagent runs after the executor finishes and independently judges PASS/FAIL by reading docs/spec.md + docs/process.md. ' +
   // zai patch (2026-09-02, 任务工厂升级 priority + dependsOn):
   'priority is "P0"|"P1"|"P2"|"P3" (default "P2"; P0 most urgent); the supervisor dispatches queue-tasks in priority ASC + createdAt ASC order. ' +
-  'dependsOn is a string[] of task ids that must reach status=done before this task can be dispatched (default []).'
+  'dependsOn is a string[] of task ids that must reach status=done before this task can be dispatched (default []). ' +
+  // zai patch (2026-09-04, quick-intake):
+  'mode is "quick"|"full" (default "full"): quick = lightweight task for small fixes / copy edits / styling tweaks — ' +
+  'skips brainstorming, generates ONLY task.yaml + process.md + a minimal docs/spec.md (title/description/priority/cwd snapshot), ' +
+  'does NOT generate docs/plan.md or docs/brainstorm.md; the intake gate and verifier then only check / audit docs/spec.md. ' +
+  'Use quick when the user opens the 「快速创建」 button (task-intake-quick main agent will set this for you).'
 
 const LIST_DESC = 'List all Task Factory tasks across the four lifecycle buckets. ' +
   'Returns a TaskBucket object: { queue: TaskSummary[], processing: TaskSummary[], verifying: TaskSummary[], finished: TaskSummary[] }. ' +
   'Each TaskSummary contains id / title / status / agent / verifierAgent / cwd / description / createdAt / ' +
-  'startedAt / completedAt / executorTaskId / verifierTaskId / priority / dependsOn / bucket. ' +
+  'startedAt / completedAt / executorTaskId / verifierTaskId / priority / dependsOn / mode / bucket. ' +
   // zai patch (2026-09-02): 排序契约——priority ASC(P0 先)+ 同优先级 createdAt ASC。
   'Tasks within each bucket are sorted by priority ASC (P0 → P3) then createdAt ASC. ' +
+  // zai patch (2026-09-04, quick-intake):
+  '`mode` is "quick"|"full" (defaults to "full" for legacy tasks). Quick tasks skip the brainstorming / plan.md / brainstorm.md workflow and use lightweight verification — keep them on the same dispatch lane as full tasks; they share priority / dependsOn semantics. ' +
   'Use this when you need an overview of the pipeline (queue length, processing in flight, recent failures) or ' +
   'when picking the next task to dispatch. Prefer this over enumerating SuperTasksGet calls. ' +
   'For a single task\'s full detail (spec.md / plan.md / process.md content), use SuperTasksGet(id) instead. ' +
@@ -81,16 +88,23 @@ export const superTasksCreateTool = buildTool({
         .describe('Dispatch priority (default "P2"; P0 most urgent, P3 least urgent). Supervisor dispatches queue-tasks in priority ASC + createdAt ASC.'),
       dependsOn: z.array(z.string().min(4)).optional()
         .describe('Task ids that must reach status=done before this task is dispatched (default []). Self-reference is rejected.'),
+      // zai patch (2026-09-04, quick-intake):
+      mode: z.enum(['quick', 'full']).optional()
+        .describe('Task creation mode (default "full"). "quick" = lightweight (no brainstorming, no plan.md / brainstorm.md, intake gate and verifier only check docs/spec.md); "full" = standard intake flow with three required docs.'),
     })
   },
   async call(input: {
     title: string; cwd: string; description?: string; agent?: string; verifierAgent?: string; spec?: string; plan?: string
-    priority?: 'P0' | 'P1' | 'P2' | 'P3'; dependsOn?: string[]
+    priority?: 'P0' | 'P1' | 'P2' | 'P3'; dependsOn?: string[]; mode?: 'quick' | 'full'
   }) {
     const s = await createPoolTask(input)
-    emitTaskFactoryEvent('created', { id: s.id })
-    const meta = `priority=${s.priority ?? 'P2'}${input.dependsOn?.length ? `, dependsOn=[${input.dependsOn.join(', ')}]` : ''}`
-    return { data: { output: `Task created: ${s.id}\n${s.title}\nProject cwd: ${input.cwd}\nStorage dir: ${join(taskFactoryRoot(), 'queue-tasks', s.id)}\n${meta}\nNext step: persist the discussed results into docs/spec.md and docs/plan.md (replace the skeleton placeholders), and write the discussion minutes to docs/brainstorm.md — a programmatic intake gate checks all three docs when the user closes the modal and feeds missing ones back to you. Before dispatching the executor subagent, read task.yaml to confirm the agent field.` } }
+    emitTaskFactoryEvent('created', { id: s.id, mode: s.mode })
+    const mode = s.mode ?? 'full'
+    const meta = `priority=${s.priority ?? 'P2'}, mode=${mode}${input.dependsOn?.length ? `, dependsOn=[${input.dependsOn.join(', ')}]` : ''}`
+    const nextStep = mode === 'quick'
+      ? 'Next step (quick mode): the task directory has only task.yaml + process.md + a minimal docs/spec.md snapshot. Skip brainstorming — the user already specified the requirements in the QuickCreate form. Report the task id to the user.'
+      : 'Next step: persist the discussed results into docs/spec.md and docs/plan.md (replace the skeleton placeholders), and write the discussion minutes to docs/brainstorm.md — a programmatic intake gate checks all three docs when the user closes the modal and feeds missing ones back to you. Before dispatching the executor subagent, read task.yaml to confirm the agent field.'
+    return { data: { output: `Task created: ${s.id}\n${s.title}\nProject cwd: ${input.cwd}\nStorage dir: ${join(taskFactoryRoot(), 'queue-tasks', s.id)}\n${meta}\n${nextStep}` } }
   },
   // Tool 接口要求实现结果序列化(缺了会在 runtime 落 tool_result 时抛
   // "mapToolResultToToolResultBlockParam is not a function" —— 2026-09-02
@@ -274,8 +288,12 @@ export const superTasksPauseTool = buildTool({
 const GET_DESC = 'Read a Task Factory task\'s structured metadata + content files. ' +
   'Returns TaskSummary (id / title / status / agent / verifierAgent / cwd / description / createdAt / ' +
   // zai patch (2026-09-02, priority + dependsOn 字段):
-  'startedAt / completedAt / executorTaskId / verifierTaskId / priority / dependsOn / bucket) plus the full text of docs/spec.md, docs/plan.md, ' +
+  'startedAt / completedAt / executorTaskId / verifierTaskId / priority / dependsOn / mode / bucket) plus the full text of docs/spec.md, docs/plan.md, ' +
   'process.md, docs/verification.md. ' +
+  // zai patch (2026-09-04, quick-intake):quick 任务不生成 plan.md / brainstorm.md,
+  // spec.md 只是 title/description/priority/cwd 快照;读取返回空字符串属正常,
+  // 调用方按 mode 分流决定是否读取 plan.md / brainstorm.md。
+  '`mode` is "quick"|"full" (defaults to "full"). For quick tasks, plan.md / brainstorm.md do NOT exist and will be returned as empty strings — that is expected, not an error. ' +
   'Use this BEFORE dispatching the executor (so you can extract `agent` and `cwd` for SpawnAgent and `verifierAgent` for the verification round). ' +
   'Use this AFTER the executor completes to re-read `process.md` and confirm "## [DONE]" before moving to verifying. ' +
   'Use this in the verification round to read `docs/spec.md` (acceptance criteria) and the latest verification.md round. ' +
