@@ -3,6 +3,7 @@ import { describe, expect, it, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
 import MobileSuperTaskCard from './MobileSuperTaskCard'
+import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import type { TaskSummary } from '../../lib/superTaskApi'
 
 // zai patch (2026-09-04, tf-al38784c):用 vi.mock 替 deleteSuperTasks 防止真打 fetch。
@@ -30,6 +31,25 @@ const baseTask = (over: Partial<TaskSummary> = {}): TaskSummary => ({
 
 beforeEach(() => {
   deleteSuperTasksMock.mockClear()
+  // 替 store actions 为 spy,避免真打 fetch —— 与 SuperTaskCard.test.tsx 同款套路
+  useSuperTaskStore.setState({
+    buckets: { queue: [], processing: [], verifying: [], finished: [] },
+    managed: false,
+    loading: false,
+    error: null,
+    supervisorSessionId: 'sup-1',
+    lastCreatedTaskId: null,
+    loadedOnce: true,
+    start: vi.fn(async () => {}),
+    pause: vi.fn(async () => {}),
+    resume: vi.fn(async () => {}),
+    accept: vi.fn(async () => {}),
+    deleteTasks: vi.fn(async () => {}),
+    setManaged: vi.fn(async () => {}),
+    load: vi.fn(async () => {}),
+    applyTaskFactoryEvent: vi.fn(),
+    clearLastCreated: vi.fn(),
+  })
 })
 
 describe('MobileSuperTaskCard (2026-09-04)', () => {
@@ -213,5 +233,91 @@ describe('MobileSuperTaskCard — 删除按钮 (2026-09-04 tf-al38784c)', () => 
     fireEvent.click(btn)
     // Popconfirm 弹出 ≠ 卡片 onOpen;若 stopPropagation 漏写则 onOpen 会被调
     expect(onOpen).not.toHaveBeenCalled()
+  })
+})
+
+// zai patch (2026-09-05, tf-oi7wu722):移动端卡片加「启动」按钮,仅 queued
+// 状态显示。spec 要求覆盖:渲染(queued vs 非 queued)、点击触发
+// store.start(id)、stopPropagation 不触发 onOpen。
+describe('MobileSuperTaskCard — 启动按钮 (2026-09-05 tf-oi7wu722)', () => {
+  it('S1:queued 任务渲染「启动」按钮(data-testid=mobile-card-start-<id>)', () => {
+    render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-start01', status: 'queued', bucket: 'queue-tasks' })}
+        onOpen={vi.fn()}
+      />,
+    )
+    const btn = screen.getByTestId('mobile-card-start-tf-start01') as HTMLButtonElement
+    expect(btn).toBeTruthy()
+    expect(btn.hasAttribute('disabled')).toBe(false)
+  })
+
+  it('S2:processing / verifying / done / failed / paused 任务均不渲染启动按钮', () => {
+    const cases: Array<{ id: string; status: TaskSummary['status']; bucket: TaskSummary['bucket'] }> = [
+      { id: 'tf-proc01', status: 'processing', bucket: 'processing-tasks' },
+      { id: 'tf-very01', status: 'verifying', bucket: 'verifying-tasks' },
+      { id: 'tf-done01', status: 'done', bucket: 'finished-tasks' },
+      { id: 'tf-fail01', status: 'failed', bucket: 'finished-tasks' },
+      { id: 'tf-paus01', status: 'paused', bucket: 'processing-tasks' },
+    ]
+    for (const c of cases) {
+      const { container } = render(
+        <MobileSuperTaskCard
+          task={baseTask({ id: c.id, status: c.status, bucket: c.bucket })}
+          onOpen={vi.fn()}
+        />,
+      )
+      expect(container.querySelector(`[data-testid="mobile-card-start-${c.id}"]`)).toBeNull()
+    }
+  })
+
+  it('S3:点击启动按钮 → 触发 store.start(task.id)', async () => {
+    const start = useSuperTaskStore.getState().start
+    render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-start03', status: 'queued', bucket: 'queue-tasks' })}
+        onOpen={vi.fn()}
+      />,
+    )
+    const btn = screen.getByTestId('mobile-card-start-tf-start03') as HTMLButtonElement
+    fireEvent.click(btn)
+    await waitFor(() => {
+      expect(start).toHaveBeenCalledWith('tf-start03')
+    })
+  })
+
+  it('S4:点启动按钮 → 不触发卡片 onOpen(stopPropagation 隔离)', () => {
+    const onOpen = vi.fn()
+    render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-start04', status: 'queued', bucket: 'queue-tasks' })}
+        onOpen={onOpen}
+      />,
+    )
+    const btn = screen.getByTestId('mobile-card-start-tf-start04') as HTMLButtonElement
+    fireEvent.click(btn)
+    // stopPropagation 阻断 → 卡片 onOpen 不应被调
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('S5:store.start 抛错时按钮不卡 loading 态(可继续点)', async () => {
+    // 让 start spy 抛错,验证 finally 中 setStarting(false) 复位
+    const startSpy = vi.fn(async () => { throw new Error('rpc 500') })
+    useSuperTaskStore.setState({ start: startSpy })
+    render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-start05', status: 'queued', bucket: 'queue-tasks' })}
+        onOpen={vi.fn()}
+      />,
+    )
+    const btn = screen.getByTestId('mobile-card-start-tf-start05') as HTMLButtonElement
+    fireEvent.click(btn)
+    await waitFor(() => {
+      expect(startSpy).toHaveBeenCalledWith('tf-start05')
+    })
+    // 等异步 finally 完成;按钮 disabled 应释放(loading 态归零)
+    await waitFor(() => {
+      expect(btn.hasAttribute('disabled')).toBe(false)
+    })
   })
 })

@@ -1,7 +1,9 @@
+import { useState } from 'react'
 import { Button, Popconfirm, Tag, Tooltip, message } from 'antd'
-import { CloseOutlined } from '@ant-design/icons'
+import { CloseOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import type { TaskSummary } from '../../lib/superTaskApi'
 import { deleteSuperTasks } from '../../lib/superTaskApi'
+import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import { STATUS_TAG, PRIORITY_TAG, STATUS_ACCENT } from './SuperTaskCard'
 
 /**
@@ -12,7 +14,7 @@ import { STATUS_TAG, PRIORITY_TAG, STATUS_ACCENT } from './SuperTaskCard'
  *    在 375–430px 宽度下全部不可用或视觉过重)。
  *  - 只渲染:左侧状态色条(STATUS_ACCENT) + 优先级 Tag + 状态 Tag +
  *    「轻量」Tag(quick 任务专属,2026-09-04 round 2 补) +
- *    单行 ellipsis 标题 + 右对齐相对时间。整卡可点 → 打开详情抽屉。
+ *    单行 ellipsis 标题 + 右对齐相对时间 + 操作按钮区。整卡可点 → 打开详情抽屉。
  *  - 三张配色/文案表(STATUS_TAG / PRIORITY_TAG / STATUS_ACCENT)从
  *    SuperTaskCard export 复用 —— 任何改色 / 改文案只改一处。
  *
@@ -20,7 +22,15 @@ import { STATUS_TAG, PRIORITY_TAG, STATUS_ACCENT } from './SuperTaskCard'
  * 仅 queued / done / failed / paused 状态可点;processing / verifying 状态
  * 按钮 disabled + tooltip 解释。点 × 走 `e.stopPropagation()` 阻断卡片 onOpen。
  *
- * 触控目标 ≥44px(minHeight:56)。
+ * 2026-09-05(tf-oi7wu722)补:卡片底部操作区在 `status === 'queued'` 时
+ * 显示「启动」按钮(▶ + 文字),调 `useSuperTaskStore.start(id)` →
+ * `POST /api/super-tasks/<id>/start`。loading 期间按钮显示 Spin +
+ * disabled,避免重复点击。其他状态不显示启动按钮。点击走 stopPropagation
+ * 阻断卡片 onOpen。触控目标 minHeight:32 + padding 4px,跟桌面
+ * SuperTaskCard L319-327 的 icon-only 启动按钮语义一致,但移动端
+ * 加文字便于一眼识别。
+ *
+ * 触控目标 ≥44px(整卡 minHeight:56;启动按钮独立区)。
  */
 export default function MobileSuperTaskCard({
   task,
@@ -41,6 +51,13 @@ export default function MobileSuperTaskCard({
   // 状态守卫:processing / verifying 桶不可删(in-flight 任务避免打断),
   // 后端对这两个状态也会返 409,前端 disabled 是双保险。
   const deletable = task.status !== 'processing' && task.status !== 'verifying'
+  // 仅 queued 任务可手动启动(tf-oi7wu722):与桌面 SuperTaskCard L319
+  // 同款 `bucket === 'queue-tasks'` 守卫,这里直接以 status 兜底(避免
+  // 历史无 bucket 字段的 legacy 数据漏显示)。
+  const canStart = task.status === 'queued'
+  // 启动按钮 loading 态:防止用户在 RPC 飞行中重复点击。store.start 内
+  // 部 await startSuperTask 再 await load() → 期间按钮 disabled。
+  const [starting, setStarting] = useState(false)
 
   async function handleDelete(): Promise<void> {
     try {
@@ -48,6 +65,19 @@ export default function MobileSuperTaskCard({
       message.success(`任务 ${task.id} 已删除`)
     } catch (err) {
       message.error(`删除失败: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  async function handleStart(): Promise<void> {
+    if (starting) return
+    setStarting(true)
+    try {
+      await useSuperTaskStore.getState().start(task.id)
+      message.success(`任务 ${task.id} 已启动`)
+    } catch (err) {
+      message.error(`启动失败: ${err instanceof Error ? err.message : String(err)}`)
+    } finally {
+      setStarting(false)
     }
   }
 
@@ -145,12 +175,34 @@ export default function MobileSuperTaskCard({
       <div
         style={{
           display: 'flex',
-          justifyContent: 'flex-end',
-          fontSize: 12,
-          color: '#94a3b8',
+          justifyContent: 'space-between',
+          alignItems: 'center',
+          gap: 8,
         }}
       >
-        {formatRelative(ts)}
+        <span style={{ fontSize: 12, color: '#94a3b8' }}>
+          {formatRelative(ts)}
+        </span>
+        {/* zai patch (2026-09-05, tf-oi7wu722):启动按钮 —— 仅 queued 状态显示。
+            与桌面 SuperTaskCard L319-327 同款语义(▶ + start(id)),移动端
+            加文字「启动」便于一眼识别,触控目标 ≥44px。loading 期间按钮
+            disabled,防重复点击。stopPropagation 不触发卡片 onOpen。 */}
+        {canStart && (
+          <Tooltip title="立即执行该任务">
+            <Button
+              size="small"
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              loading={starting}
+              disabled={starting}
+              aria-label={`启动任务 ${task.title}`}
+              data-testid={`mobile-card-start-${task.id}`}
+              onClick={(e) => { e.stopPropagation(); void handleStart() }}
+            >
+              启动
+            </Button>
+          </Tooltip>
+        )}
       </div>
       {/* 右上角 × 删除按钮(tf-al38784c):Popconfirm 二次确认,状态守卫见上,
           onClick stopPropagation 不触发卡片 onOpen。 */}
