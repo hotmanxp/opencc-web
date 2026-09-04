@@ -66,12 +66,12 @@ describe('taskFactory mainAgent (2026-09-02 supervisor state-transition tools)',
   it('description 为中文 UI 文案,systemPrompt 是英文', async () => {
     // description 只用于 settings 下拉展示(用户可见 UI 文案),按规范用中文;
     // systemPrompt 发给模型,保持英文。
-    expect(taskFactoryMainAgent.description).toContain('任务工厂主管')
+    expect(taskFactoryMainAgent.description).toContain('任务调度官')
     const prompt = taskFactoryMainAgent.systemPrompt
     const resolved = typeof prompt === 'function' ? prompt(['origin-line']) : prompt
     const arr = Array.isArray(resolved) ? resolved : [String(resolved)]
     const text = arr.join('\n')
-    // 主管 prompt 必须出现新工具名 + 关键流程词
+    // 调度官 prompt 必须出现新工具名 + 关键流程词
     expect(text).toContain('SuperTasksMove')
     expect(text).toContain('SuperTasksReset')
     expect(text).toContain('SuperTasksPause')

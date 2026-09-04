@@ -181,7 +181,7 @@ describe('superTasksGetTool (2026-09-02)', () => {
     await expect(superTasksGetTool.call({ id: 'tf-noexist0' })).rejects.toThrow(/not found/)
   })
 
-  it('isReadOnly = true（主管反复读取元数据不触发副作用）', () => {
+  it('isReadOnly = true（任务调度官反复读取元数据不触发副作用）', () => {
     expect(superTasksGetTool.isReadOnly({ id: 'tf-x' } as never)).toBe(true)
   })
 
