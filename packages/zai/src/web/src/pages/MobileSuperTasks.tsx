@@ -1,9 +1,10 @@
 import { useEffect, useRef, useState } from 'react'
 import { Button, ConfigProvider, Empty, Segmented, Spin, Typography, theme as antdTheme } from 'antd'
-import { PlusOutlined } from '@ant-design/icons'
+import { PlusOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import MobileSupervisorDrawer from '../components/superTasks/MobileSupervisorDrawer'
 import MobileSuperTaskCard from '../components/superTasks/MobileSuperTaskCard'
 import NewSuperTaskModal from '../components/superTasks/NewSuperTaskModal'
+import QuickCreateModal from '../components/superTasks/QuickCreateModal'
 import SuperTaskDetailDrawer from '../components/superTasks/SuperTaskDetailDrawer'
 import { LANE_TITLE, type BucketKey } from '../components/superTasks/SuperTaskPanel'
 import { useAgentStore } from '../store/useAgentStore'
@@ -55,6 +56,7 @@ export default function MobileSuperTasks(): JSX.Element {
   const defaultTabPicked = useRef(false)
   const [tab, setTab] = useState<BucketKey>('processing')
   const [newOpen, setNewOpen] = useState(false)
+  const [quickOpen, setQuickOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [supOpen, setSupOpen] = useState(false)
 
@@ -164,15 +166,29 @@ export default function MobileSuperTasks(): JSX.Element {
               </Typography.Text>
             )}
           </div>
-          <Button
-            type="primary"
-            size="small"
-            icon={<PlusOutlined />}
-            onClick={() => setNewOpen(true)}
-            data-testid="mobile-new-task-button"
-          >
-            新建
-          </Button>
+          <div style={{ display: 'flex', alignItems: 'center', gap: 8, flexShrink: 0 }}>
+            <Button
+              type="primary"
+              size="small"
+              icon={<PlusOutlined />}
+              onClick={() => setNewOpen(true)}
+              data-testid="mobile-new-task-button"
+            >
+              新建
+            </Button>
+            {/* 快速创建(2026-09-04 quick-intake):与「+ 新建」并列,复用桌面
+                QuickCreateModal 并显式传 fullscreen。复用的同款 modal 在桌面
+                SuperTaskPanel 不传 fullscreen → 仍 640px 居中,零回归。 */}
+            <Button
+              type="primary"
+              size="small"
+              icon={<ThunderboltOutlined />}
+              onClick={() => setQuickOpen(true)}
+              data-testid="mobile-quick-create-button"
+            >
+              快速创建
+            </Button>
+          </div>
         </div>
 
         {/* Segmented */}
@@ -244,6 +260,11 @@ export default function MobileSuperTasks(): JSX.Element {
         <NewSuperTaskModal
           open={newOpen}
           onClose={() => setNewOpen(false)}
+          fullscreen
+        />
+        <QuickCreateModal
+          open={quickOpen}
+          onClose={() => setQuickOpen(false)}
           fullscreen
         />
         <SuperTaskDetailDrawer
