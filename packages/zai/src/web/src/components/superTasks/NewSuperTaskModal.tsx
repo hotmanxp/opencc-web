@@ -50,9 +50,17 @@ const INTAKE_MAIN_AGENT = 'task-intake'
 export default function NewSuperTaskModal({
   open,
   onClose,
+  /**
+   * 移动端全屏模式(2026-09-04,/m-super-tasks 路由使用)。仅影响 Modal
+   * 容器尺寸(width / top / 圆角 / 内层高度);intake 会话逻辑(store /
+   * SSE / draft 恢复 / created 信号 / 文档 gate / 关闭清理)一律不变。
+   * 桌面调用点不传 → 行为 100% 兼容。
+   */
+  fullscreen = false,
 }: {
   open: boolean
   onClose: () => void
+  fullscreen?: boolean
 }): JSX.Element {
   // intake-scoped 独立 store 实例。每个 Modal 打开周期一份,关闭后随 useMemo
   // 清理掉引用。createAgentStore 是从 useAgentStore.ts 导出的 factory —— 完全
@@ -265,10 +273,14 @@ export default function NewSuperTaskModal({
       open={open}
       onCancel={() => void handleClose()}
       footer={null}
-      width={720}
+      width={fullscreen ? '100vw' : 720}
+      style={fullscreen ? { top: 0, maxWidth: '100vw', margin: 0, paddingBottom: 0 } : undefined}
       destroyOnHidden
       title="新建任务 · 需求讨论"
-      styles={{ body: { padding: 0 } }}
+      styles={{
+        body: { padding: 0 },
+        ...(fullscreen ? { content: { borderRadius: 0, padding: 0 } } : {}),
+      }}
     >
       <div
         style={{
@@ -280,7 +292,7 @@ export default function NewSuperTaskModal({
           color: 'var(--text-primary, #1f2937)',
           display: 'flex',
           flexDirection: 'column',
-          height: '68vh',
+          height: fullscreen ? '100dvh' : '68vh',
         }}
       >
         {createdId && (

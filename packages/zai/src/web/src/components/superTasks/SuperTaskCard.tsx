@@ -111,7 +111,8 @@ function WorkingStickman({ status }: { status: 'processing' | 'verifying' }): JS
   )
 }
 
-const STATUS_TAG: Record<string, { color: string; label: string }> = {
+/** 状态 Tag 配色 + 文案。2026-09-04 起 export 出来供移动端 MobileSuperTaskCard 复用。 */
+export const STATUS_TAG: Record<string, { color: string; label: string }> = {
   queued: { color: 'default', label: '排队' },
   processing: { color: 'purple', label: '执行中' },
   paused: { color: 'warning', label: '已暂停' },
@@ -122,16 +123,17 @@ const STATUS_TAG: Record<string, { color: string; label: string }> = {
 
 /** 调度优先级 Tag 配色(zai patch 2026-09-02):P0 红、P1 橙、P2 蓝、P3 灰。
  *  AntD Tag `color` 接受预设关键字 + hex;P0 用 red、P1 用 orange 走预设,
- *  P2 走 blue 预设,P3 走 default(灰)。 */
-const PRIORITY_TAG: Record<string, { color: string; label: string }> = {
+ *  P2 走 blue 预设,P3 走 default(灰)。2026-09-04 起 export 出来供移动端复用。 */
+export const PRIORITY_TAG: Record<string, { color: string; label: string }> = {
   P0: { color: 'red', label: 'P0 紧急' },
   P1: { color: 'orange', label: 'P1 高' },
   P2: { color: 'blue', label: 'P2 普通' },
   P3: { color: 'default', label: 'P3 低' },
 }
 
-/** 卡片左侧状态色条(亮色化,用户 2026-09-01;verifying 加青色 2026-09-02)。 */
-const STATUS_ACCENT: Record<string, string> = {
+/** 卡片左侧状态色条(亮色化,用户 2026-09-01;verifying 加青色 2026-09-02)。
+ *  2026-09-04 起 export 出来供移动端 MobileSuperTaskCard 复用。 */
+export const STATUS_ACCENT: Record<string, string> = {
   queued: '#3b82f6',
   processing: '#a855f7',
   paused: '#f59e0b',
