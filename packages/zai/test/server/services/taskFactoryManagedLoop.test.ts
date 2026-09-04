@@ -134,3 +134,70 @@ describe('taskFactoryManagedLoop — maxParallelTasks 并行上限(tf-pnsl5m5e)'
     expect(contents.some((c) => c.includes('action="dispatch"'))).toBe(true)
   })
 })
+
+// zai patch (2026-09-04, quick-intake round 2):补 managed loop 自动 dispatch
+// 注入对 queue.mode='quick' 的分流覆盖 —— taskFactoryBridge.test.ts 已覆盖
+// buildTaskCommand 路径,managed loop 直接 injectSupervisorCommand 的同款语义
+// (见 taskFactoryManagedLoop.ts:78-83) 此处覆盖。spec R8 要求。
+describe('taskFactoryManagedLoop — quick verifier 分流(2026-09-04 round 2)', () => {
+  /** 与 taskFactoryBridge.QUICK_VERIFIER_HINT 字符串一致 —— 注入段里包含
+   *  这段语义标签即代表主管会引导 verifier 走轻量验证。 */
+  const QUICK_HINT_MARKER = '<task-verifier-mode value="light">'
+
+  it('queue 含 mode=quick 任务 → dispatch 注入段含 QUICK_VERIFIER_HINT', async () => {
+    // 全 quick:单个 quick 任务就触发 hint,多个 quick 同样含 hint
+    await createPoolTask({ title: 'q-task-A', mode: 'quick' })
+    await createPoolTask({ title: 'q-task-B', mode: 'quick' })
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    startTaskFactoryManagedLoop(20)
+    await new Promise((r) => setTimeout(r, 60))
+    stopTaskFactoryManagedLoopForTests()
+    const contents = injectedContents(spy)
+    const dispatch = contents.find((c) => c.includes('action="dispatch"'))
+    expect(dispatch).toBeDefined()
+    expect(dispatch).toContain(QUICK_HINT_MARKER)
+    // 同时有 quick 队列提示,引导主管识别
+    expect(dispatch).toContain('quick-mode tasks')
+  })
+
+  it('queue 全是 mode=full(显式)→ dispatch 注入段不含 QUICK_VERIFIER_HINT', async () => {
+    await createPoolTask({ title: 'f-task-A', mode: 'full' })
+    await createPoolTask({ title: 'f-task-B', mode: 'full' })
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    startTaskFactoryManagedLoop(20)
+    await new Promise((r) => setTimeout(r, 60))
+    stopTaskFactoryManagedLoopForTests()
+    const contents = injectedContents(spy)
+    const dispatch = contents.find((c) => c.includes('action="dispatch"'))
+    expect(dispatch).toBeDefined()
+    expect(dispatch).not.toContain(QUICK_HINT_MARKER)
+  })
+
+  it('queue 任务 mode 缺省(历史 full 任务)→ dispatch 注入段不含 QUICK_VERIFIER_HINT', async () => {
+    // 不传 mode → CreatePoolTaskInput.mode? 缺省 → 走 full 默认路径
+    await createPoolTask({ title: 'legacy-A' })
+    await createPoolTask({ title: 'legacy-B' })
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    startTaskFactoryManagedLoop(20)
+    await new Promise((r) => setTimeout(r, 60))
+    stopTaskFactoryManagedLoopForTests()
+    const contents = injectedContents(spy)
+    const dispatch = contents.find((c) => c.includes('action="dispatch"'))
+    expect(dispatch).toBeDefined()
+    expect(dispatch).not.toContain(QUICK_HINT_MARKER)
+  })
+
+  it('queue 混合 quick + full → 含至少一个 quick 时仍注入 QUICK_VERIFIER_HINT', async () => {
+    await createPoolTask({ title: 'mix-full', mode: 'full' })
+    await createPoolTask({ title: 'mix-quick', mode: 'quick' })
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    startTaskFactoryManagedLoop(20)
+    await new Promise((r) => setTimeout(r, 60))
+    stopTaskFactoryManagedLoopForTests()
+    const contents = injectedContents(spy)
+    const dispatch = contents.find((c) => c.includes('action="dispatch"'))
+    expect(dispatch).toBeDefined()
+    expect(dispatch).toContain(QUICK_HINT_MARKER)
+  })
+})
+
