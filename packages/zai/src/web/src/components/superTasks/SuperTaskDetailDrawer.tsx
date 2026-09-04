@@ -8,6 +8,7 @@ import { fetchSuperTaskDetail } from '../../lib/superTaskApi'
 import { subscribeTaskEvents } from '../../lib/taskApi'
 import type { TaskDetails, TaskSummary } from '../../lib/superTaskApi'
 import { toRendered, type RenderedEvent } from './processEventRenderer'
+import { useAppStore } from '../../store/useAppStore'
 
 /**
  * 按「当前干活的 Agent」挑要订阅的事件流:
@@ -61,6 +62,13 @@ export default function SuperTaskDetailDrawer({
   taskId: string | null
   onClose: () => void
 }): JSX.Element {
+  // 移动端走 bottom Drawer + 90% 高度(对齐 MobileSupervisorDrawer 的同款
+  // 抽屉模式);桌面端保持 width=720 默认 right 抽屉。SuperTaskDetailDrawer
+  // 同时被 SuperTaskPanel(桌面)与 MobileSuperTasks(/m-super-tasks)引用,
+  // 通过 useAppStore.isMobile(由 useIsMobile 在 Layout / MobileLayout 顶层
+  // 通过 matchMedia 同步)做 props 分流 —— 桌面路由 isMobile=false → 抽屉
+  // 走 width=720;移动路由 isMobile=true → 抽屉走 placement="bottom"。
+  const isMobile = useAppStore((s) => s.isMobile)
   const [detail, setDetail] = useState<TaskDetails | null>(null)
   const [events, setEvents] = useState<EventFrame[]>([])
 
@@ -140,7 +148,10 @@ export default function SuperTaskDetailDrawer({
     <Drawer
       open={taskId != null}
       onClose={onClose}
-      width={720}
+      {...(isMobile
+        ? { placement: 'bottom' as const, height: '90%', destroyOnHidden: false }
+        : { width: 720 })}
+      data-testid={isMobile ? 'mobile-detail-drawer' : 'desktop-detail-drawer'}
       title={detail ? `任务 ${detail.summary.id}` : '任务详情'}
     >
       {!detail ? (
@@ -184,7 +195,7 @@ export default function SuperTaskDetailDrawer({
                         {` · task ${activeStreamId}`}
                       </Typography.Text>
                       {rendered.length > 0 ? (
-                        <div style={{ maxHeight: 'calc(100vh - 310px)', overflow: 'auto', marginTop: 8 }}>
+                        <div style={{ maxHeight: isMobile ? 'calc(100vh - 240px)' : 'calc(100vh - 310px)', overflow: 'auto', marginTop: 8 }}>
                           <Timeline
                             items={rendered.map((r) => ({
                               key: rowKey(r),
