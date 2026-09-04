@@ -4,6 +4,7 @@ import { DeleteOutlined } from '@ant-design/icons'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import type { TaskSummary } from '../../lib/superTaskApi'
 import NewSuperTaskModal from './NewSuperTaskModal'
+import QuickCreateModal from './QuickCreateModal'
 import FactorySettingsDrawer from './FactorySettingsDrawer'
 import SuperTaskDetailDrawer from './SuperTaskDetailDrawer'
 import SuperTaskCard from './SuperTaskCard'
@@ -43,6 +44,8 @@ export default function SuperTaskPanel(): JSX.Element {
     queue: [], processing: [], verifying: [], finished: [],
   })
   const [newModalOpen, setNewModalOpen] = useState(false)
+  // zai patch (2026-09-04, quick-intake):「快速创建」弹窗开关,与 NewSuperTaskModal 并列。
+  const [quickModalOpen, setQuickModalOpen] = useState(false)
   const [settingsOpen, setSettingsOpen] = useState(false)
   const [detailId, setDetailId] = useState<string | null>(null)
   const [filter, setFilter] = useState<SuperTaskFilter>('all')
@@ -205,6 +208,7 @@ export default function SuperTaskPanel(): JSX.Element {
         filter={filter}
         onFilterChange={setFilter}
         onNewTask={() => setNewModalOpen(true)}
+        onOpenQuickCreate={() => setQuickModalOpen(true)}
         onOpenSettings={() => setSettingsOpen(true)}
       />
       {showLanes ? (
@@ -218,6 +222,7 @@ export default function SuperTaskPanel(): JSX.Element {
         <div style={{ padding: 24, textAlign: 'center' }} />
       )}
       <NewSuperTaskModal open={newModalOpen} onClose={() => setNewModalOpen(false)} />
+      <QuickCreateModal open={quickModalOpen} onClose={() => setQuickModalOpen(false)} />
       <FactorySettingsDrawer open={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <SuperTaskDetailDrawer taskId={detailId} onClose={() => setDetailId(null)} />
     </div>

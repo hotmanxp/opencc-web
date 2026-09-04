@@ -1,5 +1,5 @@
 import { Button, Popconfirm, Space, Switch, Tooltip, message } from 'antd'
-import { ReloadOutlined, SettingOutlined } from '@ant-design/icons'
+import { ReloadOutlined, SettingOutlined, ThunderboltOutlined } from '@ant-design/icons'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 
 /** 看板筛选维度。'all' 不筛选；其余按任务 status 匹配。 */
@@ -34,6 +34,8 @@ export interface TaskOverviewBarProps {
   filter: SuperTaskFilter
   onFilterChange: (f: SuperTaskFilter) => void
   onNewTask: () => void
+  /** 打开「快速创建」弹窗(zai patch 2026-09-04, quick-intake)。 */
+  onOpenQuickCreate?: () => void
   /** 打开「工厂设置」抽屉(tf-pnsl5m5e)。 */
   onOpenSettings: () => void
 }
@@ -42,11 +44,11 @@ export interface TaskOverviewBarProps {
  * 总览统计卡组 + 操作条(看板顶部)。
  *
  * - 五张统计卡(排队/执行中/验证中/已完成/失败⚠)点击筛选:再点取消;筛选态显示「清除筛选」。
- * - 右侧:AI 托管 Switch / 新建任务 / loading「刷新中…」。
+ * - 右侧:AI 托管 Switch / 新建任务(讨论)/ 快速创建 / loading「刷新中…」。
  *
  * 数据源 = useSuperTaskStore.buckets(3s 轮询驱动,无新请求)。
  */
-export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onOpenSettings }: TaskOverviewBarProps): JSX.Element {
+export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onOpenQuickCreate, onOpenSettings }: TaskOverviewBarProps): JSX.Element {
   const buckets = useSuperTaskStore((s) => s.buckets)
   const managed = useSuperTaskStore((s) => s.managed)
   const loading = useSuperTaskStore((s) => s.loading)
@@ -174,9 +176,26 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
             工厂设置
           </Button>
         </Tooltip>
-        <Button type="primary" onClick={onNewTask} data-testid="new-task-button">
-          新建任务
+        {/* 新建任务(讨论):完整 intake 流程 —— task-intake 主 agent + 头脑风暴。
+            沿用原按钮 onNewTask(对应 NewSuperTaskModal),文案改为「(讨论)」与
+            快速创建区分(2026-09-04 quick-intake)。 */}
+        <Button onClick={onNewTask} data-testid="new-task-button">
+          新建任务(讨论)
         </Button>
+        {/* 快速创建(2026-09-04 quick-intake):task-intake-quick 主 agent + 跳过
+            brainstorming + 目录最小化 + 验证走轻量路径。图标用闪电,文案短。 */}
+        {onOpenQuickCreate && (
+          <Tooltip title="快速创建(跳过头脑风暴,适合文案/样式/小 bug 修复)">
+            <Button
+              type="primary"
+              icon={<ThunderboltOutlined />}
+              onClick={onOpenQuickCreate}
+              data-testid="quick-create-button"
+            >
+              快速创建
+            </Button>
+          </Tooltip>
+        )}
         {loading && <span style={{ color: 'var(--text-secondary, #666)' }}>刷新中…</span>}
       </Space>
     </div>

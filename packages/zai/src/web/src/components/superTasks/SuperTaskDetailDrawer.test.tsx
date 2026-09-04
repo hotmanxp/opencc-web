@@ -124,4 +124,48 @@ describe('SuperTaskDetailDrawer', () => {
     expect(await screen.findByText('尚无讨论纪要')).toBeTruthy()
     vi.unstubAllGlobals()
   })
+
+  // zai patch (2026-09-04, quick-intake):quick 模式顶部横幅 + Tab 过滤。
+  it('mode="quick" 时顶部显示「无 plan.md / brainstorm.md」横幅,且不显示 brainstorm.md / plan.md Tab', async () => {
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/events')) return eventsStreamMock()
+      return taskDetailsMock({ summary: { id: 'tf-quick', title: 'T', status: 'processing', bucket: 'processing-tasks', mode: 'quick', executorTaskId: 'a1', verifierTaskId: null } })
+    }))
+    render(<SuperTaskDetailDrawer taskId="tf-quick" onClose={() => {}} />)
+    // 横幅出现
+    expect(await screen.findByTestId('quick-mode-banner')).toBeTruthy()
+    expect(await screen.findByText(/本任务为快速创建,无 plan\.md \/ brainstorm\.md/)).toBeTruthy()
+    // brainstorm.md / plan.md Tab 不存在(只剩 process / verification / spec / processMd)
+    expect(screen.queryByText('brainstorm.md')).toBeNull()
+    expect(screen.queryByText('plan.md')).toBeNull()
+    // process.md / spec.md / 验证记录 仍在
+    expect(screen.getByText('process.md')).toBeTruthy()
+    expect(screen.getByText('spec.md')).toBeTruthy()
+    expect(screen.getByText('验证记录')).toBeTruthy()
+    vi.unstubAllGlobals()
+  })
+
+  it('mode="full" 或缺省时显示完整 Tab 列表(含 brainstorm.md / plan.md)', async () => {
+    const cases: Array<{ name: string; mode?: 'quick' | 'full' }> = [
+      { name: 'full 显式', mode: 'full' },
+      { name: 'mode 缺省', mode: undefined },
+    ]
+    for (const c of cases) {
+      vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+        if (String(url).endsWith('/events')) return eventsStreamMock()
+        const summary: Record<string, unknown> = {
+          id: 'tf-x', title: 'T', status: 'processing', bucket: 'processing-tasks',
+          executorTaskId: 'a1', verifierTaskId: null,
+        }
+        if (c.mode) summary.mode = c.mode
+        return taskDetailsMock({ summary })
+      }))
+      const { unmount } = render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
+      expect(await screen.findByText('brainstorm.md')).toBeTruthy()
+      expect(screen.getByText('plan.md')).toBeTruthy()
+      expect(screen.queryByTestId('quick-mode-banner')).toBeNull()
+      vi.unstubAllGlobals()
+      unmount()
+    }
+  })
 })

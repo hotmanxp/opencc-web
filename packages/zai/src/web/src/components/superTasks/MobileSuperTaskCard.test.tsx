@@ -71,3 +71,46 @@ describe('MobileSuperTaskCard (2026-09-04)', () => {
     }
   })
 })
+
+// zai patch (2026-09-04, quick-intake round 2):补 MobileSuperTaskCard
+// quick Tag 覆盖 —— 与桌面 SuperTaskCard.test.tsx quick 用例对齐。
+// spec R7 要求:task.mode === 'quick' 时移动端卡片渲染「轻量」Tag;
+// task.mode === 'full' 或缺省时不渲染。
+describe('MobileSuperTaskCard — quick Tag (2026-09-04 round 2)', () => {
+  it('task.mode === "quick" → 渲染「轻量」Tag(data-testid=quick-tag-<id>)', () => {
+    const { container } = render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-quick01', mode: 'quick' })}
+        onOpen={vi.fn()}
+      />,
+    )
+    const tag = container.querySelector('[data-testid="quick-tag-tf-quick01"]')
+    expect(tag).toBeTruthy()
+    expect(tag?.textContent).toBe('轻量')
+    // 视觉一致性:轻量 Tag 也带 data-mode="quick",便于按模式聚合检索
+    expect(tag?.getAttribute('data-mode')).toBe('quick')
+  })
+
+  it('task.mode === "full" → 不渲染「轻量」Tag', () => {
+    const { container } = render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-full01', mode: 'full' })}
+        onOpen={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('[data-testid="quick-tag-tf-full01"]')).toBeNull()
+    // full 模式 DOM 内不应出现任何「轻量」文本
+    expect(screen.queryByText('轻量')).toBeNull()
+  })
+
+  it('task.mode 缺省 → 不渲染「轻量」Tag(向后兼容历史 full 任务)', () => {
+    const { container } = render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-legacy01' })}
+        onOpen={vi.fn()}
+      />,
+    )
+    expect(container.querySelector('[data-testid="quick-tag-tf-legacy01"]')).toBeNull()
+    expect(screen.queryByText('轻量')).toBeNull()
+  })
+})
