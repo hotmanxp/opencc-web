@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react'
 import {
   Alert,
   Button,
+  Drawer,
   Form,
   Input,
   Modal,
@@ -17,6 +18,7 @@ import {
   createAgentSession, deleteAgentSession, pickLastSelectedModel,
 } from '../../lib/agentSessionApi'
 import { useAgentStore } from '../../store/useAgentStore'
+import DrawerPullHandle from './DrawerPullHandle'
 
 /** 优先级单选(zai patch 2026-09-02)。 */
 type QuickPriority = 'P0' | 'P1' | 'P2' | 'P3'
@@ -57,10 +59,20 @@ export default function QuickCreateModal({
   open,
   onClose,
   fullscreen = false,
+  /**
+   * 移动端抽屉式(2026-09-04,跟随 tf-cy9x9kjh):`true` 时把 `<Modal>` 容器
+   * 换成 `<Drawer placement="bottom" height="90%">`,顶部带 24px 拖把可下拉
+   * 关闭;表单 / 提交 / SSE / created 信号逻辑零改动。`fullscreen` 与
+   * `mobileAsDrawer` 同时为 true 时 `mobileAsDrawer` 优先(drawer 自带 90%
+   * 容器尺寸,`fullscreen` 在 mobile 上不再被采用)。桌面调用点不传 → 走
+   * 640px 居中 Modal。
+   */
+  mobileAsDrawer = false,
 }: {
   open: boolean
   onClose: () => void
   fullscreen?: boolean
+  mobileAsDrawer?: boolean
 }): JSX.Element {
   const lastCreatedTaskId = useSuperTaskStore((s) => s.lastCreatedTaskId)
   const clearLastCreated = useSuperTaskStore((s) => s.clearLastCreated)
@@ -154,28 +166,16 @@ export default function QuickCreateModal({
 
   const canSubmit = title.trim().length > 0 && description.trim().length > 0 && !submitting
 
-  return (
-    <Modal
-      open={open}
-      onCancel={() => {
-        if (!createdTaskId) onClose()
-      }}
-      footer={null}
-      width={fullscreen ? '100vw' : 640}
-      style={fullscreen ? { top: 0, maxWidth: '100vw', margin: 0, paddingBottom: 0 } : undefined}
-      destroyOnHidden
-      title={(
-        <Space>
-          <ThunderboltOutlined style={{ color: '#fa8c16' }} />
-          <span>快速创建任务</span>
-        </Space>
-      )}
-      styles={{
-        body: { padding: 0 },
-        ...(fullscreen ? { content: { borderRadius: 0, padding: 0 } } : {}),
-      }}
-    >
-      <div style={fullscreen ? { height: '100dvh', overflow: 'auto', padding: 16 } : { padding: 16 }}>
+  // mobileAsDrawer 优先于 fullscreen —— drawer body 自带 90% 容器尺寸,
+  // 内层用 100% 撑满 drawer body;fullscreen 仅用于桌面 fullscreen Modal。
+  const innerStyle = mobileAsDrawer
+    ? { height: '100%', overflow: 'auto' as const, padding: 16 }
+    : fullscreen
+      ? { height: '100dvh', overflow: 'auto' as const, padding: 16 }
+      : { padding: 16 }
+
+  const bodyContent = (
+    <div style={innerStyle}>
       {createdTaskId ? (
         <Alert
           type="success"
@@ -302,7 +302,61 @@ export default function QuickCreateModal({
           </div>
         </Form>
       )}
-      </div>
+    </div>
+  )
+
+  // Drawer 顶部 X 关闭按钮会触发 onClose;created 状态下走 handleDone,
+  // 其余直接 onClose(Modal / Drawer 行为对齐)。
+  const handleContainerClose = (): void => {
+    if (!createdTaskId) onClose()
+  }
+
+  if (mobileAsDrawer) {
+    return (
+      <Drawer
+        open={open}
+        onClose={handleContainerClose}
+        placement="bottom"
+        height="90%"
+        destroyOnHidden={false}
+        keyboard
+        title={(
+          <div>
+            <DrawerPullHandle testId="quick-drawer-handle" onClose={handleContainerClose} />
+            <Space style={{ display: 'flex', paddingBottom: 8 }}>
+              <ThunderboltOutlined style={{ color: '#fa8c16' }} />
+              <span>快速创建任务</span>
+            </Space>
+          </div>
+        )}
+        styles={{ body: { padding: 0 } }}
+        data-testid="quick-mobile-drawer"
+      >
+        {bodyContent}
+      </Drawer>
+    )
+  }
+
+  return (
+    <Modal
+      open={open}
+      onCancel={handleContainerClose}
+      footer={null}
+      width={fullscreen ? '100vw' : 640}
+      style={fullscreen ? { top: 0, maxWidth: '100vw', margin: 0, paddingBottom: 0 } : undefined}
+      destroyOnHidden
+      title={(
+        <Space>
+          <ThunderboltOutlined style={{ color: '#fa8c16' }} />
+          <span>快速创建任务</span>
+        </Space>
+      )}
+      styles={{
+        body: { padding: 0 },
+        ...(fullscreen ? { content: { borderRadius: 0, padding: 0 } } : {}),
+      }}
+    >
+      {bodyContent}
     </Modal>
   )
 }

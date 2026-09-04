@@ -177,8 +177,9 @@ export default function MobileSuperTasks(): JSX.Element {
               新建
             </Button>
             {/* 快速创建(2026-09-04 quick-intake):与「+ 新建」并列,复用桌面
-                QuickCreateModal 并显式传 fullscreen。复用的同款 modal 在桌面
-                SuperTaskPanel 不传 fullscreen → 仍 640px 居中,零回归。 */}
+                QuickCreateModal 并显式传 fullscreen + mobileAsDrawer(tf-cy9x9kjh,
+                抽屉式)。复用的同款 modal 在桌面 SuperTaskPanel 不传任何 prop →
+                仍 640px 居中 Modal,零回归。 */}
             <Button
               type="primary"
               size="small"
@@ -261,11 +262,13 @@ export default function MobileSuperTasks(): JSX.Element {
           open={newOpen}
           onClose={() => setNewOpen(false)}
           fullscreen
+          mobileAsDrawer
         />
         <QuickCreateModal
           open={quickOpen}
           onClose={() => setQuickOpen(false)}
           fullscreen
+          mobileAsDrawer
         />
         <SuperTaskDetailDrawer
           taskId={detailId}

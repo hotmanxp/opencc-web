@@ -14,21 +14,27 @@ vi.mock('./AgentConversation', () => ({
 }))
 
 vi.mock('../components/superTasks/NewSuperTaskModal', () => ({
-  default: ({ open, fullscreen }: { open: boolean; fullscreen?: boolean }) => (
+  default: ({ open, fullscreen, mobileAsDrawer }: {
+    open: boolean; fullscreen?: boolean; mobileAsDrawer?: boolean
+  }) => (
     <div
       data-testid="new-task-modal-mock"
       data-open={open ? 'true' : 'false'}
       data-fullscreen={fullscreen ? 'true' : 'false'}
+      data-mobile-as-drawer={mobileAsDrawer ? 'true' : 'false'}
     />
   ),
 }))
 
 vi.mock('../components/superTasks/QuickCreateModal', () => ({
-  default: ({ open, fullscreen }: { open: boolean; fullscreen?: boolean }) => (
+  default: ({ open, fullscreen, mobileAsDrawer }: {
+    open: boolean; fullscreen?: boolean; mobileAsDrawer?: boolean
+  }) => (
     <div
       data-testid="quick-create-modal-mock"
       data-open={open ? 'true' : 'false'}
       data-fullscreen={fullscreen ? 'true' : 'false'}
+      data-mobile-as-drawer={mobileAsDrawer ? 'true' : 'false'}
     />
   ),
 }))
@@ -180,20 +186,22 @@ describe('MobileSuperTasks page (2026-09-04)', () => {
     expect(screen.getByTestId('mobile-task-card-tf-d2')).toBeTruthy()
   })
 
-  it('点「新建」按钮 → Modal 打开 + fullscreen=true', () => {
+  it('点「新建」按钮 → Modal 打开 + fullscreen=true + mobileAsDrawer=true(tf-cy9x9kjh 抽屉式)', () => {
     render(<MobileSuperTasks />)
     const modal = screen.getByTestId('new-task-modal-mock')
     expect(modal.getAttribute('data-open')).toBe('false')
     expect(modal.getAttribute('data-fullscreen')).toBe('true')
+    expect(modal.getAttribute('data-mobile-as-drawer')).toBe('true')
     fireEvent.click(screen.getByTestId('mobile-new-task-button'))
     expect(modal.getAttribute('data-open')).toBe('true')
   })
 
-  it('点「快速创建」按钮 → QuickCreateModal 打开 + fullscreen=true(2026-09-04 quick-intake)', () => {
+  it('点「快速创建」按钮 → QuickCreateModal 打开 + fullscreen=true + mobileAsDrawer=true(tf-cy9x9kjh 抽屉式)', () => {
     render(<MobileSuperTasks />)
     const quickModal = screen.getByTestId('quick-create-modal-mock')
     expect(quickModal.getAttribute('data-open')).toBe('false')
     expect(quickModal.getAttribute('data-fullscreen')).toBe('true')
+    expect(quickModal.getAttribute('data-mobile-as-drawer')).toBe('true')
     fireEvent.click(screen.getByTestId('mobile-quick-create-button'))
     expect(quickModal.getAttribute('data-open')).toBe('true')
     // 同时确认新建 modal 未被打开(两个独立 state)
