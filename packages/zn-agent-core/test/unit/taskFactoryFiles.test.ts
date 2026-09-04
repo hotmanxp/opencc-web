@@ -414,6 +414,7 @@ describe('checkTaskIntakeDocs intake 文档强校验 (2026-09-03)', () => {
     expect(check).not.toBeNull()
     expect(check?.ok).toBe(false)
     expect(check?.missing.sort()).toEqual(['docs/brainstorm.md', 'docs/plan.md', 'docs/spec.md'])
+    expect(check?.mode).toBe('full')
   })
 
   it('显式传入 spec/plan 内容 + 写 brainstorm 后 ok', async () => {
@@ -426,6 +427,7 @@ describe('checkTaskIntakeDocs intake 文档强校验 (2026-09-03)', () => {
     const check = await checkTaskIntakeDocs(s.id)
     expect(check?.ok).toBe(true)
     expect(check?.missing).toEqual([])
+    expect(check?.mode).toBe('full')
   })
 
   it('空文件与纯标题/占位行视为缺失;内容过短(<20 非空白字符)也缺失', async () => {
@@ -436,6 +438,7 @@ describe('checkTaskIntakeDocs intake 文档强校验 (2026-09-03)', () => {
     const check = await checkTaskIntakeDocs(s.id)
     expect(check?.ok).toBe(false)
     expect(check?.missing.sort()).toEqual(['docs/brainstorm.md', 'docs/plan.md'])
+    expect(check?.mode).toBe('full')
   })
 
   it('任务不存在返回 null', async () => {
@@ -449,5 +452,50 @@ describe('checkTaskIntakeDocs intake 文档强校验 (2026-09-03)', () => {
     await writeFile(join(dir, 'queue-tasks', s.id, 'docs', 'brainstorm.md'), '# 纪要\n\n内容', 'utf-8')
     const d2 = await getTaskDetails(s.id)
     expect(d2?.brainstormMd).toContain('内容')
+  })
+})
+
+// zai patch (2026-09-04, quick-intake):intake gate 按 mode 分流。
+describe('checkTaskIntakeDocs mode 分流 (2026-09-04 quick-intake)', () => {
+  it('quick 任务只校验 docs/spec.md,plan.md / brainstorm.md 缺失不计入 missing', async () => {
+    // quick 模式 createPoolTask 已经写入最小 spec.md;无 plan.md / brainstorm.md
+    const s = await createPoolTask({ title: 'gate-quick', mode: 'quick', description: '改文案任务' })
+    const check = await checkTaskIntakeDocs(s.id)
+    expect(check).not.toBeNull()
+    expect(check?.mode).toBe('quick')
+    expect(check?.ok).toBe(true)
+    expect(check?.missing).toEqual([])
+    // 物理验证 plan.md / brainstorm.md 确实不存在
+    expect(existsSync(join(dir, 'queue-tasks', s.id, 'docs', 'plan.md'))).toBe(false)
+    expect(existsSync(join(dir, 'queue-tasks', s.id, 'docs', 'brainstorm.md'))).toBe(false)
+  })
+
+  it('quick 任务缺 spec.md(被外部删除)时算 missing;plan.md / brainstorm.md 仍不算', async () => {
+    const s = await createPoolTask({ title: 'gate-quick-nospc', mode: 'quick' })
+    // 外部删除 spec.md,模拟用户手贱
+    await rm(join(dir, 'queue-tasks', s.id, 'docs', 'spec.md'))
+    const check = await checkTaskIntakeDocs(s.id)
+    expect(check?.mode).toBe('quick')
+    expect(check?.ok).toBe(false)
+    expect(check?.missing).toEqual(['docs/spec.md'])
+  })
+
+  it('quick 任务 spec.md 是骨架占位(空内容) → 视为缺失', async () => {
+    const s = await createPoolTask({ title: 'gate-quick-skel', mode: 'quick' })
+    // 覆写为骨架占位文字
+    await writeFile(join(dir, 'queue-tasks', s.id, 'docs', 'spec.md'), '# 需求规格\n\n（需求讨论后由主管补充）\n', 'utf-8')
+    const check = await checkTaskIntakeDocs(s.id)
+    expect(check?.mode).toBe('quick')
+    expect(check?.ok).toBe(false)
+    expect(check?.missing).toContain('docs/spec.md')
+  })
+
+  it('full 任务缺 plan.md 或 brainstorm.md → missing 必含,行为不变', async () => {
+    const s = await createPoolTask({ title: 'gate-full-miss', spec: '# 需求规格\n\n这是一段足够长的实质内容描述,远超 20 字符阈值。' })
+    // spec 有实质内容,plan / brainstorm 都还是骨架占位
+    const check = await checkTaskIntakeDocs(s.id)
+    expect(check?.mode).toBe('full')
+    expect(check?.ok).toBe(false)
+    expect(check?.missing.sort()).toEqual(['docs/brainstorm.md', 'docs/plan.md'])
   })
 })
