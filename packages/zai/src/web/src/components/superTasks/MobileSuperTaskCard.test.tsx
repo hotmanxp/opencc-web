@@ -2,7 +2,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom'
 import { render, screen, fireEvent, waitFor } from '@testing-library/react'
-import MobileSuperTaskCard from './MobileSuperTaskCard'
+import MobileSuperTaskCard, { resolveCardTitle } from './MobileSuperTaskCard'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import type { TaskSummary } from '../../lib/superTaskApi'
 
@@ -121,6 +121,93 @@ describe('MobileSuperTaskCard (2026-09-04)', () => {
       const pTag = container.querySelector(`[data-priority="${c.priority}"]`)
       expect(pTag).toBeTruthy()
     }
+  })
+})
+
+// zai patch (2026-09-05, tf-eyzfrs3c):回归修正 —— 之前 tf-o9iu5pyf 修复
+// 只补了 data-testid 与字体加粗,但「task.title 为空」场景没覆盖;移动端卡片
+// 仍渲染出空白行。新行为契约:
+//  - task.title trim 后非空 → 照用(覆盖大多数 full / intake-driven 任务)
+//  - task.title 空 + task.description 有内容 → 取 description 第一行,截 30 字
+//    + …,与 QuickCreateModal deriveTitleFromDescription 视觉一致
+//  - task.title 空 + description 空/缺 → 退化到 task.id(损坏数据兜底)
+// resolveCardTitle 是组件私有 export 供单测直调;DOM 集成层额外验证 data-testid
+// 元素与 hover title 属性都被兜底逻辑覆盖。
+describe('MobileSuperTaskCard — 标题兜底 (2026-09-05 tf-eyzfrs3c)', () => {
+  it('resolveCardTitle:task.title 非空 → 原样返回(优先契约)', () => {
+    expect(resolveCardTitle(baseTask({ id: 'tf-t01', title: '直接给定的标题' }))).toBe('直接给定的标题')
+  })
+
+  it('resolveCardTitle:task.title 仅空白 → 退化到 description 第一行', () => {
+    const t = baseTask({
+      id: 'tf-t02',
+      title: '   ',
+      description: '把首页 CTA 改成「立即开始」',
+    })
+    expect(resolveCardTitle(t)).toBe('把首页 CTA 改成「立即开始」')
+  })
+
+  it('resolveCardTitle:task.title 空字符串 + description 多行 → 取首行(非后续行)', () => {
+    const t = baseTask({
+      id: 'tf-t03',
+      title: '',
+      description: '修复详情页空指针\n详细说明:当 user 为 null 时崩溃\n验收:不抛错',
+    })
+    expect(resolveCardTitle(t)).toBe('修复详情页空指针')
+  })
+
+  it('resolveCardTitle:description 首行超过 30 字 → 截断 + ellipsis', () => {
+    const longFirst = '把移动端任务卡片缺标题的回归 bug 修了,顺手再加点击反馈动画'
+    expect(longFirst.length).toBeGreaterThan(30)
+    const t = baseTask({
+      id: 'tf-t04',
+      title: '',
+      description: longFirst,
+    })
+    const got = resolveCardTitle(t)
+    expect(got.length).toBe(31) // 30 字 + 「…」
+    expect(got.endsWith('…')).toBe(true)
+    expect(got.startsWith('把移动端任务卡片缺标题的回归')).toBe(true)
+  })
+
+  it('resolveCardTitle:title 空 + description 缺省 → 退化到 task.id(损坏数据兜底)', () => {
+    const t = baseTask({ id: 'tf-t05', title: '' })
+    // baseTask 默认 description 缺省(undefined)→ 走 id 兜底
+    expect(resolveCardTitle(t)).toBe('tf-t05')
+  })
+
+  it('resolveCardTitle:title 空 + description 仅空白 → 退化到 task.id', () => {
+    const t = baseTask({ id: 'tf-t06', title: '', description: '   \n   ' })
+    expect(resolveCardTitle(t)).toBe('tf-t06')
+  })
+
+  // DOM 集成:兜底后 data-testid 元素、textContent、hover title 都应展示兜底串
+  it('DOM 集成:task.title 空 + description 存在 → data-testid 元素展示 description 首行', () => {
+    render(
+      <MobileSuperTaskCard
+        task={baseTask({
+          id: 'tf-dom10',
+          title: '',
+          description: '点击反馈文案改成「已完成」',
+        })}
+        onOpen={vi.fn()}
+      />,
+    )
+    const el = screen.getByTestId('mobile-card-title-tf-dom10')
+    expect(el.textContent).toBe('点击反馈文案改成「已完成」')
+    expect(el.getAttribute('title')).toBe('点击反馈文案改成「已完成」')
+  })
+
+  it('DOM 集成:title 空 + description 空 → 卡片展示 task.id(零空白行)', () => {
+    render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-dom11', title: '', description: '' })}
+        onOpen={vi.fn()}
+      />,
+    )
+    const el = screen.getByTestId('mobile-card-title-tf-dom11')
+    expect(el.textContent).toBe('tf-dom11')
+    expect(el.textContent?.length ?? 0).toBeGreaterThan(0)
   })
 })
 
