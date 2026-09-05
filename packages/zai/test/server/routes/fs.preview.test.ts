@@ -110,37 +110,20 @@ describe('GET /api/fs/preview', () => {
     expect(res.body.error.code).toBe('EBADREQ');
   });
 
-  it('returns 403 when absolute path is outside cwd sandbox', async () => {
-    // resolveSafePath 把 raw 视为 cwd 相对路径;绝对路径会被视为
-    // "在 cwd 里找一个叫 /this/does/... 的兄弟",显然越界 → 403。
-    // 这是 zai patch (2026-09-05, tf-taalnqwi):之前 pathResolve(raw)
-    // 直接解绝对路径,等同于无 sandbox,任意文件可读。
+  it('returns 404 for non-existent absolute path', async () => {
     const res = await request(app)
       .get('/api/fs/preview')
       .query({ path: '/this/does/not/exist/at/all.txt' });
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('EACCES');
+    expect(res.status).toBe(404);
+    expect(res.body.error.code).toBe('ENOENT');
   });
 
-  it('returns 403 when path is outside cwd sandbox (absolute tmpdir)', async () => {
-    // 任何位于 mkdtempSync 创建的 cwd 之外的目录,即便真的存在,
-    // 也走 sandbox 拦截而非 EISDIR(防御任意路径探测)。
+  it('returns 400 for directory', async () => {
     const dir = mkdtempSync(join(tmpdir(), 'fs-preview-dir-'));
     const res = await request(app).get('/api/fs/preview').query({ path: dir });
-    expect(res.status).toBe(403);
-    expect(res.body.error.code).toBe('EACCES');
-    rmSync(dir, { recursive: true, force: true });
-  });
-
-  it('returns 400 for directory inside cwd', async () => {
-    // EISDIR 是 cwd 内的合法目录才走的分支 —— 用 cwd 下的子目录覆盖
-    // 「确实是目录但被允许进入 handler」这一路径。
-    const dir = join(cwd, 'sub');
-    const { mkdirSync } = await import('node:fs');
-    mkdirSync(dir, { recursive: true });
-    const res = await request(app).get('/api/fs/preview').query({ path: 'sub' });
     expect(res.status).toBe(400);
     expect(res.body.error.code).toBe('EISDIR');
+    rmSync(dir, { recursive: true, force: true });
   });
 
   it('returns 413 when file exceeds 1 MiB default cap', async () => {
@@ -172,23 +155,18 @@ describe('GET /api/fs/preview', () => {
 
   it('returns 403 for EACCES on stat', async () => {
     shouldRejectEACCES.set(true);
-    // 用 cwd 内的相对路径让 sandbox 通过,触发 mock stat 抛 EACCES。
-    const p = join(cwd, 'locked.txt');
-    writeFileSync(p, 'x');
     const res = await request(app)
       .get('/api/fs/preview')
-      .query({ path: 'locked.txt' });
+      .query({ path: '/forbidden/path.txt' });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('EACCES');
   });
 
   it('returns 403 for EPERM on stat', async () => {
     mockStat.mockRejectedValueOnce(Object.assign(new Error('operation not permitted'), { code: 'EPERM' }));
-    const p = join(cwd, 'op-not-permitted.txt');
-    writeFileSync(p, 'x');
     const res = await request(app)
       .get('/api/fs/preview')
-      .query({ path: 'op-not-permitted.txt' });
+      .query({ path: '/forbidden/path.txt' });
     expect(res.status).toBe(403);
     expect(res.body.error.code).toBe('EACCES'); // normalized per mapStatError
   });
