@@ -11,20 +11,40 @@ import {
   Space,
   message,
 } from 'antd'
-import { ThunderboltOutlined, FolderOpenOutlined } from '@ant-design/icons'
+import { ThunderboltOutlined, FolderOpenOutlined, PictureOutlined } from '@ant-design/icons'
 import { api } from '../../lib/api'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import {
   createAgentSession, deleteAgentSession, pickLastSelectedModel,
 } from '../../lib/agentSessionApi'
 import { useAgentStore } from '../../store/useAgentStore'
+import { readImageAsBase64, ImageReadError } from '../../lib/imageReader'
 import DirectoryPicker from '../common/DirectoryPicker.js'
+import QuickAttachmentStrip, { type QuickAttachment } from './QuickAttachmentStrip.js'
 import DrawerPullHandle from './DrawerPullHandle'
 
 /** 优先级单选(zai patch 2026-09-02)。 */
 type QuickPriority = 'P0' | 'P1' | 'P2' | 'P3'
 const QUICK_PRIORITIES: QuickPriority[] = ['P0', 'P1', 'P2', 'P3']
 const DEFAULT_QUICK_PRIORITY: QuickPriority = 'P2'
+
+/** 单次快速创建最多附加 8 张图片(超过截断 + message.warning)。 */
+const MAX_IMAGES_PER_QUICK = 8
+
+// crypto.randomUUID() 在 insecure context 下抛异常 (HTTP 非 localhost).
+// happy-dom / LAN 模式下访问 zai 的场景 (192.168.x.x) 走 HTTP. 这里兜底到
+// 时间戳+随机数,仅用于本地 React key 用,不参与任何 cryptographic 用途。
+// 与 AgentInputBox.tsx:75-84 行为一致,不复用 — 那边没 export。
+function genLocalId(): string {
+  try {
+    if (typeof crypto !== 'undefined' && typeof crypto.randomUUID === 'function') {
+      return crypto.randomUUID()
+    }
+  } catch {
+    /* ignore */
+  }
+  return `att-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`
+}
 
 /** 子 agent 选择 —— 与 spawn-agent provider 名单对齐(2026-09-03)。 */
 const QUICK_AGENT_OPTIONS = [
@@ -110,6 +130,10 @@ export default function QuickCreateModal({
   // cwd picker 状态(tf-ch7u2cyt 2026-09-05):cw d 字段右侧「选择目录」按钮打开
   // 共享 DirectoryPicker Modal;选中 → onSelect 回填 cwd + 关闭 picker。
   const [cwdPickerOpen, setCwdPickerOpen] = useState(false)
+  // 图片附件状态(tf-ch7u2cyt 2026-09-05):用户选 / 黏贴图后进入 reading → ready,
+  // 提交流程用 ready 项调用 /api/fs/upload 拿 absPath。
+  const [attachments, setAttachments] = useState<QuickAttachment[]>([])
+  const fileInputRef = useRef<HTMLInputElement>(null)
   // 任务已创建 → 显示完成条;打开弹窗时通过 baseline ref 屏蔽历史 created 信号。
   const createdBaselineRef = useRef<string | null>(null)
   const createdTaskId =
@@ -130,7 +154,22 @@ export default function QuickCreateModal({
     setError(null)
     setActiveSessionId(null)
     setCwdPickerOpen(false)
+    setAttachments((prev) => {
+      // 重置前 revoke 旧缩略图,避免 blob URL 内存泄漏(用户重新打开弹窗时无残留)
+      prev.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl))
+      return []
+    })
   }, [open, defaultCwd])
+
+  // 组件卸载时清理所有 blob URL(走完整重置路径之外的兜底,
+  // 例如父级直接 unmount QuickCreateModal 而非切回 open=false 时)。
+  useEffect(() => {
+    return () => {
+      // eslint-disable-next-line react-hooks/exhaustive-deps
+      attachments.forEach((a) => URL.revokeObjectURL(a.thumbnailUrl))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
 
   async function handleSubmit(): Promise<void> {
     const d = description.trim()
@@ -184,9 +223,97 @@ export default function QuickCreateModal({
     }
   }
 
+  // 图片附件 helpers(tf-ch7u2cyt 2026-09-05):
+  // - addImages 接收 File[],slice(0, MAX) + 8 上限截断 + message.warning
+  //   + 并发 readImageAsBase64(10MB / jpeg+png+gif+webp 校验)
+  //   + status: 'reading' → 'ready' | 'error'
+  // - removeAttachment 删除单条并 revokeObjectURL 缩略图
+  // - handlePaste 拦截 image/* 黏贴,非图走默认
+  // - handleFilePick 监听隐藏 input[accept=image/*, multiple]
+  async function addImages(files: File[]): Promise<void> {
+    if (files.length > MAX_IMAGES_PER_QUICK) {
+      message.warning(`最多 ${MAX_IMAGES_PER_QUICK} 张图片,已截断`)
+    }
+    const accepted = files.slice(0, MAX_IMAGES_PER_QUICK)
+    const placeholders: QuickAttachment[] = accepted.map((f) => ({
+      localId: genLocalId(),
+      mime: f.type,
+      size: f.size,
+      filename: f.name || 'image.png',
+      dataUrl: '',
+      thumbnailUrl: URL.createObjectURL(f),
+      status: 'reading',
+    }))
+    setAttachments((prev) => [...prev, ...placeholders])
+    await Promise.all(
+      placeholders.map(async (p, i) => {
+        try {
+          const r = await readImageAsBase64(accepted[i]!)
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.localId === p.localId
+                ? { ...a, dataUrl: r.dataUrl, status: 'ready' }
+                : a,
+            ),
+          )
+        } catch (e) {
+          const msg =
+            e instanceof ImageReadError
+              ? e.message
+              : e instanceof Error
+                ? e.message
+                : String(e)
+          setAttachments((prev) =>
+            prev.map((a) =>
+              a.localId === p.localId
+                ? { ...a, status: 'error', error: msg }
+                : a,
+            ),
+          )
+        }
+      }),
+    )
+  }
+
+  function removeAttachment(localId: string): void {
+    setAttachments((prev) => {
+      const att = prev.find((a) => a.localId === localId)
+      if (att) URL.revokeObjectURL(att.thumbnailUrl)
+      return prev.filter((a) => a.localId !== localId)
+    })
+  }
+
+  function handlePaste(e: React.ClipboardEvent<HTMLTextAreaElement>): void {
+    const files: File[] = []
+    for (const item of e.clipboardData.items) {
+      if (item.kind === 'file') {
+        const f = item.getAsFile()
+        if (f && f.type.startsWith('image/')) files.push(f)
+      }
+    }
+    if (files.length === 0) return // 走 antd 默认文本粘贴
+    e.preventDefault()
+    void addImages(files)
+  }
+
+  function handleFilePick(e: React.ChangeEvent<HTMLInputElement>): void {
+    const files = Array.from(e.target.files ?? [])
+    if (files.length === 0) return
+    void addImages(files)
+    e.target.value = ''
+  }
+
   // tf-429i39sy 2026-09-05:canSubmit 只看 description,title 由 client 自动
   // 从 description 截取。
-  const canSubmit = description.trim().length > 0 && !submitting
+  // tf-ch7u2cyt 2026-09-05:加入图片附件状态校验 —— 还在 reading 阻断,
+  // 有附件但全部失败也阻断(canSubmit === false → 按钮 disabled).
+  const hasReading = attachments.some((a) => a.status === 'reading')
+  const readyCount = attachments.filter((a) => a.status === 'ready').length
+  const hasAnyAttachment = attachments.length > 0
+  const canSubmit = description.trim().length > 0
+    && !submitting
+    && !hasReading
+    && (!hasAnyAttachment || readyCount > 0)
 
   // mobileAsDrawer 优先于 fullscreen —— drawer body 自带 90% 容器尺寸,
   // 内层用 100% 撑满 drawer body;fullscreen 仅用于桌面 fullscreen Modal。
@@ -224,7 +351,37 @@ export default function QuickCreateModal({
               placeholder="例如:把 /m-super-tasks 顶栏「+ 新建」按钮文案「提交」改为「完成」。验收:PM 验收。"
               rows={4}
               autoFocus
+              onPaste={handlePaste}
             />
+          </Form.Item>
+          {/*
+            图片附件区(tf-ch7u2cyt 2026-09-05):
+            - 「添加图片」按钮触发隐藏 input[accept=image/*, multiple];
+            - 「也可用 Ctrl+V 黏贴截图」由 description TextArea 的 onPaste 处理;
+            - 缩略图条 QuickAttachmentStrip 渲染 reading/ready/error 三态。
+          */}
+          <Form.Item label="附件图片">
+            <Space wrap>
+                <Button
+                  icon={<PictureOutlined />}
+                  data-testid="quick-image-picker-trigger"
+                  onClick={() => fileInputRef.current?.click()}
+                >
+                  添加图片
+                </Button>
+                <span style={{ color: 'var(--text-dim-45)', fontSize: 12 }}>
+                  也可在描述框 Ctrl+V 黏贴截图
+                </span>
+              </Space>
+              <QuickAttachmentStrip items={attachments} onRemove={removeAttachment} disabled={submitting} />
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="image/*"
+                multiple
+                style={{ display: 'none' }}
+                onChange={handleFilePick}
+              />
           </Form.Item>
           <Form.Item label="优先级">
             <Radio.Group

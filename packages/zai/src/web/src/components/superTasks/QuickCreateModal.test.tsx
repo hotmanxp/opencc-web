@@ -329,4 +329,92 @@ describe('QuickCreateModal (2026-09-04 quick-intake; tf-429i39sy 2026-09-05 去 
       vi.unstubAllGlobals()
     })
   })
+
+  describe('image attachments', () => {
+    function makeImageFile(name: string, type: string, sizeBytes = 1024): File {
+      // happy-dom / jsdom 的 File 是支持的。直接构造。
+      const blob = new Blob([new Uint8Array(sizeBytes)], { type })
+      return new File([blob], name, { type })
+    }
+
+    it('renders quick-image-picker-trigger button below description', () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      expect(screen.getByTestId('quick-image-picker-trigger')).toBeTruthy()
+    })
+
+    it('clicking trigger calls hidden input.click()', () => {
+      // input 在组件里是 plain <input type="file"> (accept="image/*" multiple)。
+      // Modal 内容用 portal 渲染到 document.body,所以走 document.querySelector。
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      expect(input).toBeTruthy()
+      const clickSpy = vi.spyOn(input, 'click')
+      fireEvent.click(screen.getByTestId('quick-image-picker-trigger'))
+      expect(clickSpy).toHaveBeenCalled()
+    })
+
+    it('readImageAsBase64 success → quick-attachment-strip renders ready chip', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      const file = makeImageFile('shot.png', 'image/png')
+      // happy-dom 可能不触发完整的 change 链路 — 直接走 onChange
+      fireEvent.change(input, { target: { files: [file] } })
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy()
+      })
+    })
+
+    it('pasting an image file into the description triggers addImages (attachment chip appears)', async () => {
+      const file = makeImageFile('paste.png', 'image/png')
+      const dataTransfer = {
+        items: [{ kind: 'file', getAsFile: () => file, type: 'image/png' }],
+      }
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      const textarea = screen.getByTestId('quick-description-input') as HTMLTextAreaElement
+      const pasteEvent = {
+        clipboardData: dataTransfer,
+        preventDefault: vi.fn(),
+      } as unknown as React.ClipboardEvent<HTMLTextAreaElement>
+      fireEvent.paste(textarea, pasteEvent)
+      // addImages 被调用的副作用:quick-attachment-strip 出现 (即有附件 chip)
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy()
+      })
+    })
+
+    it('paste with no image file leaves text behavior alone (no attachment added)', async () => {
+      const dataTransfer = { items: [] }
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      const textarea = screen.getByTestId('quick-description-input') as HTMLTextAreaElement
+      fireEvent.paste(textarea, { clipboardData: dataTransfer, preventDefault: vi.fn() } as unknown as React.ClipboardEvent<HTMLTextAreaElement>)
+      // 等一拍确认没有附件出现
+      await new Promise((r) => setTimeout(r, 50))
+      expect(screen.queryByTestId('quick-attachment-strip')).toBeNull()
+    })
+
+    it('pasting a non-image file (e.g. PDF) does NOT add an attachment', async () => {
+      const pdfFile = makeImageFile('doc.pdf', 'application/pdf')
+      const dataTransfer = {
+        items: [{ kind: 'file', getAsFile: () => pdfFile, type: 'application/pdf' }],
+      }
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      const textarea = screen.getByTestId('quick-description-input') as HTMLTextAreaElement
+      fireEvent.paste(textarea, { clipboardData: dataTransfer, preventDefault: vi.fn() } as unknown as React.ClipboardEvent<HTMLTextAreaElement>)
+      await new Promise((r) => setTimeout(r, 50))
+      expect(screen.queryByTestId('quick-attachment-strip')).toBeNull()
+    })
+
+    it('× button calls removeAttachment (chip removed from strip)', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      const input = document.querySelector('input[type="file"]') as HTMLInputElement
+      fireEvent.change(input, { target: { files: [makeImageFile('shot.png', 'image/png')] } })
+      await waitFor(() => { expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy() })
+      const removeBtn = document.querySelector('[data-testid^="quick-attachment-chip-"][data-testid$="-remove"]') as HTMLElement
+      fireEvent.click(removeBtn)
+      // 移除后 strip 卸载(items 0 → null)
+      await waitFor(() => {
+        expect(screen.queryByTestId('quick-attachment-strip')).toBeNull()
+      })
+    })
+  })
 })
