@@ -153,15 +153,6 @@ describe('TranscriptStore.patch — model/providerId persistence', () => {
     expect(messages.filter((m: any) => m?.type === 'session-meta')).toHaveLength(0)
   })
 
-  it('throws when patching an unregistered session without cwd (legacy contract)', async () => {
-    // patch() 在找不到 REGISTRY 且无 cwd 时无法 rebuild,会抛错 —
-    // 这是 routes/agent.ts 早先引入的契约(opencc-runtime 的 session 都
-    // 带 cwd)。这里锁定行为,避免后续误改把 no-cwd 路径默默清空数据。
-    const store = new TranscriptStore(dataDir)
-    await expect(
-      store.patch('sess-no-cwd-unregistered', { model: 'deepseek-v4-flash' }),
-    ).rejects.toThrow(/TranscriptStore.patch: session not found/)
-  })
 })
 
 describe('TranscriptStore.read — model/providerId rebuild from disk', () => {

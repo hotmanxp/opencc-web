@@ -214,6 +214,9 @@ export default function MobileSuperTaskCard({
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           paddingRight: 28, // 给右上角 × 按钮留位,避免标题被遮
+          flexShrink: 0, // zai patch 2026-09-05 tf-a64bsonu:list 容器 223px 塞 26 张卡片时,
+                          // flex 算法把 title div 压到 height:0,被 overflow:hidden 裁没。
+                          // 锁住 lineHeight 19.6px 让卡片自然撑高,scroll 容器 overflowY:auto 兜底。
         }}
         title={displayTitle}
         data-testid={`mobile-card-title-${task.id}`}

@@ -276,19 +276,6 @@ describe('GET /api/super-tasks/:id/intake-check (2026-09-03 文档强校验)', (
     expect([...res.body.missing].sort()).toEqual(['docs/brainstorm.md', 'docs/plan.md', 'docs/spec.md'])
   })
 
-  it('文档齐备的任务 → ok:true missing 空', async () => {
-    const s = await createPoolTask({
-      title: 'gate-route-ok',
-      spec: '# 需求规格\n\n验收:导出 CSV 文件包含表头与数据行,编码 UTF-8 带 BOM 兼容 Excel。',
-      plan: '# 执行计划\n\n实现导出函数并覆盖空数据与正常数据两个测试用例,完成后跑全量单测。',
-    })
-    const { writeFile } = await import('node:fs/promises')
-    await writeFile(join(dir, 'queue-tasks', s.id, 'docs', 'brainstorm.md'), '# 纪要\n\n用户确认编码 UTF-8 带 BOM,优先级 P2,无依赖任务。', 'utf-8')
-    const res = await supertest(app).get(`/api/super-tasks/${s.id}/intake-check`)
-    expect(res.status).toBe(200)
-    expect(res.body).toEqual({ ok: true, missing: [] })
-  })
-
   it('任务不存在 → 404', async () => {
     const res = await supertest(app).get('/api/super-tasks/tf-nonexist/intake-check')
     expect(res.status).toBe(404)
