@@ -1,6 +1,6 @@
 import { createElement, type JSX } from 'react'
 import { Button, Checkbox, Popconfirm, Space, Tag, Tooltip } from 'antd'
-import { DeleteOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons'
+import { ClockCircleOutlined, DeleteOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons'
 import type { TaskSummary } from '../../lib/superTaskApi'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 
@@ -161,7 +161,7 @@ const stop = (e: React.MouseEvent | React.ChangeEvent): void => e.stopPropagatio
  *
  * 标题 + 状态Tag + agent Tag / 描述 2 行截断 / cwd / 创建时间 + 常显操作按钮。
  * 操作按 bucket+status(2026-09-02 加 verifying 桶):
- * - queue→▶启动
+ * - queue→「已排队」Tag(非交互,见 L319-337,tf-gqu253az)
  * - processing+processing→⏸暂停+验收
  * - processing+paused→▶继续
  * - verifying→强制通过(跳过 verifier 直接 MarkDone)
@@ -170,7 +170,7 @@ const stop = (e: React.MouseEvent | React.ChangeEvent): void => e.stopPropagatio
 export default function SuperTaskCard({
   task, selected, onToggleSelect, dimmed, onOpenDetail, onDeleted,
 }: SuperTaskCardProps): JSX.Element {
-  const { start, pause, resume, accept, deleteTasks } = useSuperTaskStore.getState()
+  const { pause, resume, accept, deleteTasks } = useSuperTaskStore.getState()
   const tag = STATUS_TAG[task.status] ?? { color: 'default', label: task.status }
   const accent = STATUS_ACCENT[task.status] ?? '#9ca3af'
   const inProcessing = task.bucket === 'processing-tasks'
@@ -316,13 +316,23 @@ export default function SuperTaskCard({
           {task.createdAt ? new Date(task.createdAt).toLocaleString() : '-'}
         </span>
         <Space size={4}>
+          {/* zai patch (2026-09-05, tf-gqu253az):queue→▶启动按钮改成「已排队」Tag。
+              原 start 按钮点击后,服务端 queued→processing 有一小段时间窗,
+              「按钮消失 / 状态文字切换」在快速操作后不够直观,用户回头
+              看卡片会觉得「刚才点的按钮到底有没有生效」。
+              现改为非交互 Tag:pointerEvents: none + cursor: default,
+              视觉上明确告诉用户「已排队,等待调度中」。其他状态
+              (processing/verifying/finished)的视觉标识不变。 */}
           {task.bucket === 'queue-tasks' && (
-            <Tooltip title="手工启动">
-              <Button
-                size="small"
-                icon={<PlayCircleOutlined />}
-                onClick={(e) => { stop(e); void start(task.id) }}
-              />
+            <Tooltip title="已排队,等待调度中">
+              <Tag
+                icon={<ClockCircleOutlined />}
+                color="processing"
+                data-testid={`queued-indicator-${task.id}`}
+                style={{ pointerEvents: 'none', cursor: 'default', marginInlineEnd: 0 }}
+              >
+                已排队
+              </Tag>
             </Tooltip>
           )}
           {showPause && (

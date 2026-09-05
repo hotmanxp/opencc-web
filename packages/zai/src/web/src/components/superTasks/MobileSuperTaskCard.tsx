@@ -1,6 +1,5 @@
-import { useState } from 'react'
 import { Button, Popconfirm, Tag, Tooltip, message } from 'antd'
-import { CloseOutlined, PlayCircleOutlined } from '@ant-design/icons'
+import { ClockCircleOutlined, CloseOutlined } from '@ant-design/icons'
 import type { TaskSummary } from '../../lib/superTaskApi'
 import { deleteSuperTasks } from '../../lib/superTaskApi'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
@@ -30,6 +29,15 @@ import { STATUS_TAG, PRIORITY_TAG, STATUS_ACCENT } from './SuperTaskCard'
  * SuperTaskCard L319-327 的 icon-only 启动按钮语义一致,但移动端
  * 加文字便于一眼识别。
  *
+ * 2026-09-05(tf-gqu253az)改:启动按钮改为「已排队」Tag 非交互指示。
+ * 原 start 按钮点击后,服务端 queued→processing 有一小段时间窗,
+ * 「按钮消失 / 状态文字切换」在快速操作后不够直观,用户回头看
+ * 卡片会觉得「刚才点的按钮到底有没有生效」。
+ * 现 Tag icon=ClockCircleOutlined + color=processing,data-testid 改
+ * 为 mobile-card-queued-<id>,挂 Tooltip title="已排队,等待调度中"。
+ * pointerEvents: none + cursor: default,从 DOM 层阻断交互意图。
+ * 跟桌面 SuperTaskCard L319-337 同步行为。
+ *
  * 触控目标 ≥44px(整卡 minHeight:56;启动按钮独立区)。
  */
 export default function MobileSuperTaskCard({
@@ -51,13 +59,11 @@ export default function MobileSuperTaskCard({
   // 状态守卫:processing / verifying 桶不可删(in-flight 任务避免打断),
   // 后端对这两个状态也会返 409,前端 disabled 是双保险。
   const deletable = task.status !== 'processing' && task.status !== 'verifying'
-  // 仅 queued 任务可手动启动(tf-oi7wu722):与桌面 SuperTaskCard L319
-  // 同款 `bucket === 'queue-tasks'` 守卫,这里直接以 status 兜底(避免
-  // 历史无 bucket 字段的 legacy 数据漏显示)。
-  const canStart = task.status === 'queued'
-  // 启动按钮 loading 态:防止用户在 RPC 飞行中重复点击。store.start 内
-  // 部 await startSuperTask 再 await load() → 期间按钮 disabled。
-  const [starting, setStarting] = useState(false)
+  // 仅 queued 任务在底部操作区显示「已排队」Tag(tf-oi7wu722 +
+  // tf-gqu253az):与桌面 SuperTaskCard L319-337 同款 `bucket === 'queue-tasks'`
+  // 守卫,这里直接以 status 兜底(避免历史无 bucket 字段的 legacy 数据
+  // 漏显示)。Tag 是非交互指示器,无 onClick / 无 loading 态。
+  const showQueuedTag = task.status === 'queued'
 
   async function handleDelete(): Promise<void> {
     try {
@@ -65,19 +71,6 @@ export default function MobileSuperTaskCard({
       message.success(`任务 ${task.id} 已删除`)
     } catch (err) {
       message.error(`删除失败: ${err instanceof Error ? err.message : String(err)}`)
-    }
-  }
-
-  async function handleStart(): Promise<void> {
-    if (starting) return
-    setStarting(true)
-    try {
-      await useSuperTaskStore.getState().start(task.id)
-      message.success(`任务 ${task.id} 已启动`)
-    } catch (err) {
-      message.error(`启动失败: ${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      setStarting(false)
     }
   }
 
@@ -183,24 +176,27 @@ export default function MobileSuperTaskCard({
         <span style={{ fontSize: 12, color: '#94a3b8' }}>
           {formatRelative(ts)}
         </span>
-        {/* zai patch (2026-09-05, tf-oi7wu722):启动按钮 —— 仅 queued 状态显示。
-            与桌面 SuperTaskCard L319-327 同款语义(▶ + start(id)),移动端
-            加文字「启动」便于一眼识别,触控目标 ≥44px。loading 期间按钮
-            disabled,防重复点击。stopPropagation 不触发卡片 onOpen。 */}
-        {canStart && (
-          <Tooltip title="立即执行该任务">
-            <Button
-              size="small"
-              type="primary"
-              icon={<PlayCircleOutlined />}
-              loading={starting}
-              disabled={starting}
-              aria-label={`启动任务 ${task.title}`}
-              data-testid={`mobile-card-start-${task.id}`}
-              onClick={(e) => { e.stopPropagation(); void handleStart() }}
+        {/* zai patch (2026-09-05, tf-gqu253az):queue→▶启动按钮改成「已排队」Tag,
+            跟桌面 SuperTaskCard L319-337 同款语义。Tag 是非交互指示器:
+            pointerEvents: none + cursor: default,从 DOM 层阻断 onClick +
+            stopPropagation 的潜在交互意图。挂 Tooltip title="已排队,
+            等待调度中" 提升可感知性。其他状态不渲染此 Tag。 */}
+        {showQueuedTag && (
+          <Tooltip title="已排队,等待调度中">
+            <Tag
+              icon={<ClockCircleOutlined />}
+              color="processing"
+              data-testid={`mobile-card-queued-${task.id}`}
+              style={{
+                pointerEvents: 'none',
+                cursor: 'default',
+                marginInlineEnd: 0,
+                fontSize: 12,
+                lineHeight: '18px',
+              }}
             >
-              启动
-            </Button>
+              已排队
+            </Tag>
           </Tooltip>
         )}
       </div>
