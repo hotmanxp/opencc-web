@@ -61,6 +61,22 @@ describe('MobileSuperTaskCard (2026-09-04)', () => {
     expect(screen.getByText('P1')).toBeTruthy()
   })
 
+  // zai patch (2026-09-05, tf-o9iu5pyf):移动端卡片必须展示 task.title。
+  // 之前没有任何 case 断言标题文本存在,导致排版/样式改坏(整段被删 /
+  // 加 display:none / 字号被覆盖)都不会被单测发现 —— 直到用户反馈
+  // 「移动端的任务卡片里面没有展示 title」才暴露。修复后:
+  // - 给标题 div 加 data-testid=`mobile-card-title-<id>`,提供稳定锚点
+  // - 显式断言标题文本出现在 DOM(textContent 含 task.title)
+  // - 顺带验证 title 属性(hover tooltip)也带相同文本,与桌面行为对齐
+  it('渲染任务标题 task.title(data-testid=mobile-card-title-<id>)', () => {
+    render(<MobileSuperTaskCard task={baseTask()} onOpen={vi.fn()} />)
+    const titleEl = screen.getByTestId('mobile-card-title-tf-mob01')
+    expect(titleEl).toBeTruthy()
+    expect(titleEl.textContent).toBe('移动端示例任务')
+    // hover tooltip(桌面 SuperTaskCard L245 同款契约)用 title 属性
+    expect(titleEl.getAttribute('title')).toBe('移动端示例任务')
+  })
+
   it('点击整卡 → 触发 onOpen(task.id)', () => {
     const onOpen = vi.fn()
     render(<MobileSuperTaskCard task={baseTask()} onOpen={onOpen} />)
