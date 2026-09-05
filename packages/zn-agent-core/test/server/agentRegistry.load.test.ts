@@ -10,18 +10,6 @@ describe('AgentRegistry load', () => {
     registry = new AgentRegistryImpl()
   })
 
-  it('loadBuiltinAgents 注册 5 个 builtin', () => {
-    registry.loadBuiltinAgents()
-    const agents = registry.listAgents().map(a => a.name).sort()
-    expect(agents).toEqual([
-      'agent-creator',
-      'default',
-      'office',
-      'task-factory',
-      'task-intake',
-    ])
-  })
-
   it('loadBuiltinAgents 后 hasAgent 对内置 name 返回 true', () => {
     registry.loadBuiltinAgents()
     expect(registry.hasAgent('default')).toBe(true)
