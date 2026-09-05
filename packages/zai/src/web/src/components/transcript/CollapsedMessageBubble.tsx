@@ -193,12 +193,17 @@ export function CollapsedMessageBubble({
       ? err
       : err?.message || '发生未知错误'
     const category = typeof err === 'object' && err !== null ? err.category : undefined
+    // 容器背景透明,只保留 border + text 表达「错误」语义;与 expanded 视图
+    // (MessageBubble.tsx:1003)共用 .runtime-error-card 类,CSS 统一覆盖
+    // AntD .ant-card 全局白底规则(.ant-card 在 index.css 用 !important
+    // 强制 background:var(--bg-card),普通 inline style 覆盖不掉,必须
+    // className 叠加选择器提优先级)。tf-k93br2hc,2026-09-05。
     return (
       <div style={{ marginBottom: 8 }}>
         <Card
           size="small"
+          className="runtime-error-card"
           style={{
-            background: 'var(--bg-card)',
             borderColor: 'var(--accent-end)',
             borderRadius: 12,
           }}
