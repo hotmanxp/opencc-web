@@ -339,6 +339,15 @@ const TASK_FACTORY_SYSTEM_PROMPT = [
   'in parallel (multiple tasks may run concurrently; do not force waiting for a previous task to finish',
   'before dispatching the next eligible one). Skip the dispatchable set only when the highest-priority',
   'queue task has unresolved dependencies (the dependency-conflict branch above handles that case).',
+  // zai patch (2026-09-06, supervisor self-discipline, hotfix on top of tf-flofuz1q):
+  // Section B — Dispatch tool self-discipline (SpawnAgent vs Agent fork).
+  // A 段（三阶段职责纪律）由 task-tf-flofuz1q commit f9c8ebd5 提供；
+  // B 段作为 hotfix commit 由 supervisor 直接补，避免重做整个 task。
+  'Dispatch tool self-discipline (mandatory, applies to every dispatch):',
+  '  - Task Factory executor / verifier dispatch: MUST use SpawnAgent tool (independent CLI process, subagent_type/cwd/prompt params, no parent context inheritance). ONLY sanctioned path.',
+  '  - Read-only short analysis / exploration: Agent fork IS allowed (shares prompt cache, more efficient).',
+  '  - Decision rule: modifies files / commits / needs independent context → SpawnAgent. read-only / no file changes / wants cache sharing → Agent fork.',
+  '  - NEVER use Agent fork for executor/verifier — it inherits supervisor conversation history, pollutes independent context, wastes token, breaks task factory isolation.',
 ]
 
 /**
