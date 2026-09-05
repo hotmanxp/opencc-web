@@ -44,7 +44,7 @@ export const INTAKE_SKILL_DISCIPLINE: string[]
 - 复制时间(YYYY-MM-DD),便于识别 SKILL 升级时是否 drift。
 - 与 `mainAgents-promptSections.ts` 的关系(后者只抽象通用编码段;本模块覆盖完整 SKILL)。
 
-### 3. task-intake prompt 改造 — `mainAgents-taskIntake.ts`
+### 2. task-intake prompt 改造 — `mainAgents-taskIntake.ts`
 
 **当前第 1 步**(摘):
 ```
@@ -78,7 +78,7 @@ systemPrompt: (origin) => [
 
 **tools 白名单**:`TASK_INTAKE_TOOL_ALLOWLIST` 保留 `'Skill'`(用户已确认);用法约束放在 `INTAKE_SKILL_DISCIPLINE` 段。
 
-### 4. task-factory prompt 改造 — `mainAgents-taskFactory.ts`
+### 3. task-factory prompt 改造 — `mainAgents-taskFactory.ts`
 
 **当前第 1 步兜底分支**(摘):
 ```
@@ -99,7 +99,7 @@ systemPrompt: (origin) => [
 
 **tools 白名单**:`SUPERVISOR_DROP_TOOLS` 不变;`Skill` 工具本来就在 origin 默认池里,白名单不动。
 
-### 5. 纪律段 — `INTAKE_SKILL_DISCIPLINE`
+### 4. 纪律段 — `INTAKE_SKILL_DISCIPLINE`
 
 新增常量,内容:
 ```
@@ -118,7 +118,7 @@ skills that are NOT pre-loaded here (e.g. user-invoked third-party skills).
 | 内联粒度 | 全量 / 只内联 brainstorming | **全量内联** | 用户原始诉求是"都内置到 agent 的提示词中",writing-plans 也属内联范围 |
 | Skill 工具 | 删除 / 保留 | **保留** | 用户明确"保留 Skill 工具但不触发" — 不删白名单,靠纪律段约束 |
 | 内容存储 | 单文件 / 独立模块 | **独立模块** | 跟 `mainAgents-promptSections.ts` 抽象一致;SKILL 升级时改一处两 agent 同步 |
-| 执行细节裁剪 | 去掉 / 保留 | **保留** | 用户原始反馈"去掉如何执行"被自己反转 — task-intake 落 plan.md 是给 executor 看的,执行步骤不能去掉 |
+| 执行细节裁剪 | 去掉 / 保留 | **保留** | 用户澄清阶段反转了原始口头诉求;task-intake 落 plan.md 是给 executor 看的,plan 内 TDD / commit / sub-skill 指令是 executor 的执行骨架,去掉会损害执行质量 |
 | 改造范围 | task-intake / task-factory / quick | **task-intake + task-factory** | 用户确认;task-intake-quick 本就剥离 brainstorming,不在 scope |
 
 ## 范围边界(明确不做)
