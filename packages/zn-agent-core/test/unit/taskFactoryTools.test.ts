@@ -133,6 +133,49 @@ describe('superTasksCreateTool', () => {
       title: '坏', cwd: dir, mode: 'fast' as never,
     })).rejects.toThrow(/invalid mode/)
   })
+
+  // zai patch (2026-09-05, tf-pqvxpay0):attachments 数组透传到 task.yaml。
+  it('call 接受 attachments 数组,落到 task.yaml.attachments(quick-intake 图片上传路径)', async () => {
+    const res = await superTasksCreateTool.call({
+      title: '带图任务', cwd: dir, mode: 'quick',
+      description: '改按钮文案',
+      attachments: [
+        '/Users/me/.zai/uploads/shot.png',
+        '/Users/me/.zai/uploads/截图.jpg',
+      ],
+    })
+    const out = res.data.output as string
+    expect(out).toContain('attachments=2')
+    const id = extractId(out)
+    const yaml = await readFile(join(taskDir('queue-tasks', id), 'task.yaml'), 'utf-8')
+    // YAML list 形式:
+    //   attachments:
+    //     - /Users/me/.zai/uploads/shot.png
+    //     - /Users/me/.zai/uploads/截图.jpg
+    expect(yaml).toContain('attachments:')
+    expect(yaml).toContain('- /Users/me/.zai/uploads/shot.png')
+    expect(yaml).toContain('- /Users/me/.zai/uploads/截图.jpg')
+  })
+
+  it('call 无 attachments 时:task.yaml 不出现 attachments 字段(避免污染历史任务)', async () => {
+    const res = await superTasksCreateTool.call({
+      title: '无图任务', cwd: dir, mode: 'quick',
+    })
+    const id = extractId((res.data.output as string))
+    const yaml = await readFile(join(taskDir('queue-tasks', id), 'task.yaml'), 'utf-8')
+    expect(yaml).not.toContain('attachments:')
+  })
+
+  it('call attachments 含非字符串 / 空串 → 过滤后只保留合法绝对路径', async () => {
+    const res = await superTasksCreateTool.call({
+      title: '脏数据', cwd: dir,
+      attachments: ['/abs/keep.png', '', 123 as never, null as never, '/abs/also-keep.jpg'],
+    })
+    const id = extractId(res.data.output as string)
+    const yaml = await readFile(join(taskDir('queue-tasks', id), 'task.yaml'), 'utf-8')
+    expect(yaml).toContain('- /abs/keep.png')
+    expect(yaml).toContain('- /abs/also-keep.jpg')
+  })
 })
 
 describe('tool_result serialization (2026-09-02 回归)', () => {

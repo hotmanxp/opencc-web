@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, describe, expect, test, vi 
 import express from 'express';
 import request from 'supertest';
 import { mkdtempSync, readFileSync, writeFileSync, mkdirSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { tmpdir, homedir } from 'node:os';
 import { join, sep } from 'node:path';
 import { execFile } from 'node:child_process';
 import fsRouter from './fs.js';
@@ -491,33 +491,55 @@ describe('GET /api/fs/search', () => {
   }, 10000);
 });
 
-describe('POST /api/fs/upload — 拖入文件作为副本落盘 .zai/uploads', () => {
+describe('POST /api/fs/upload — 拖入文件作为副本落盘 ~/.zai/uploads', () => {
   let root: string;
   const b64 = (s: string) => Buffer.from(s, 'utf8').toString('base64');
-  const uploads = (p: string) => join(root, '.zai', 'uploads', p);
+  // zai patch (2026-09-05, tf-pqvxpay0):上传目录已从 cwd-relative `.zai/uploads`
+  // 迁到用户级 `~/.zai/uploads/`。helper 直接拼绝对路径,断言 absPath 前缀。
+  const uploads = (p: string) => join(homedir(), '.zai', 'uploads', p);
+  // 测试创建的副产物 —— afterEach 统一清,避免污染用户真实 ~/.zai/uploads/。
+  const created: string[] = [];
 
   beforeEach(() => {
     root = mkdtempSync(join(tmpdir(), 'zai-fs-upload-'));
+    created.length = 0;
   });
 
   afterEach(() => {
+    // 只 rm 测试自己创建的文件,不 rm 整个 ~/.zai/uploads/(其它进程可能也在用)。
+    const { rmSync } = require('node:fs') as typeof import('node:fs')
+    for (const f of created) {
+      try { rmSync(f) } catch { /* ignore */ }
+    }
     rmSync(root, { recursive: true, force: true });
   });
 
-  test('把 base64 内容写为副本并返回绝对路径', async () => {
+  /** 记录本次测试期望创建的文件,afterEach 清。 */
+  function expectCreated(name: string): void {
+    created.push(uploads(name))
+  }
+
+  test('把 base64 内容写为副本并返回绝对路径(用户级 ~/.zai/uploads,非 cwd-relative)', async () => {
+    expectCreated('report.xlsx')
     const res = await request(makeApp(root))
       .post('/api/fs/upload')
       .send({ name: 'report.xlsx', data: b64('hello-xlsx') });
     expect(res.status).toBe(200);
     expect(res.body.ok).toBe(true);
     expect(res.body.absPath).toBe(uploads('report.xlsx'));
-    expect(res.body.relPath).toBe('.zai/uploads/report.xlsx');
+    // zai patch (2026-09-05, tf-pqvxpay0):absPath 必须落到 ~/.zai/uploads/ 下,
+    // 不能落回 cwd 内的 .zai/uploads/(违反 AGENTS.md「不要把根 .zai/ 路径写进代码」)。
+    expect(res.body.absPath.startsWith(join(homedir(), '.zai', 'uploads') + sep)).toBe(true);
+    expect(res.body.absPath.startsWith(join(root, '.zai'))).toBe(false);
+    // relPath 跟随目录迁移,现在也是绝对路径(文件不在 cwd 内,无法走 cwd 相对)
+    expect(res.body.relPath).toBe(uploads('report.xlsx'));
     expect(res.body.name).toBe('report.xlsx');
     expect(res.body.size).toBe(Buffer.byteLength('hello-xlsx'));
     expect(readFileSync(uploads('report.xlsx'), 'utf8')).toBe('hello-xlsx');
   });
 
   test('文件名中的目录段被剥离, 落盘不越界', async () => {
+    expectCreated('escape.txt')
     const res = await request(makeApp(root))
       .post('/api/fs/upload')
       .send({ name: '../../escape.txt', data: b64('x') });
@@ -527,6 +549,7 @@ describe('POST /api/fs/upload — 拖入文件作为副本落盘 .zai/uploads', 
   });
 
   test('中文文件名可正常落盘', async () => {
+    expectCreated('报告.docx')
     const res = await request(makeApp(root))
       .post('/api/fs/upload')
       .send({ name: '报告.docx', data: b64('doc') });
@@ -536,6 +559,9 @@ describe('POST /api/fs/upload — 拖入文件作为副本落盘 .zai/uploads', 
   });
 
   test('重名文件追加 -1/-2 后缀, 不覆盖', async () => {
+    expectCreated('dup.txt')
+    expectCreated('dup-1.txt')
+    expectCreated('dup-2.txt')
     await request(makeApp(root)).post('/api/fs/upload').send({ name: 'dup.txt', data: b64('one') });
     const res2 = await request(makeApp(root)).post('/api/fs/upload').send({ name: 'dup.txt', data: b64('two') });
     const res3 = await request(makeApp(root)).post('/api/fs/upload').send({ name: 'dup.txt', data: b64('three') });
