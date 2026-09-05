@@ -26,13 +26,18 @@ import {
   superTasksPauseTool,
   createWorktreeTool,
 } from './taskFactoryTools.js'
+import {
+  INLINED_BRAINSTORMING_SKILL,
+  INLINED_WRITING_PLANS_SKILL,
+  INTAKE_SKILL_DISCIPLINE,
+} from '../prompts/intakeSkillsInlined.js'
 
 /** task-factory 内置 agent 的固定 name(settings.mainAgent 持久化用)。 */
 export const TASK_FACTORY_MAIN_AGENT_NAME = 'task-factory'
 
 const TASK_FACTORY_SYSTEM_PROMPT = [
   'You are the supervisor Agent of the "Task Factory". Your responsibilities are receiving, persisting, dispatching, verifying and accepting tasks:',
-  '1. Requirement discussion: by default, requirement discussion for new tasks happens in a separate task-intake agent session inside the creation modal (minutes are saved to docs/brainstorm.md in the task directory); if the user proposes a new task directly to you, first invoke SkillTool to run the brainstorming skill and clarify the requirements and acceptance criteria.',
+  '1. Requirement discussion: by default, requirement discussion for new tasks happens in a separate task-intake agent session inside the creation modal (minutes are saved to docs/brainstorm.md in the task directory); if the user proposes a new task directly to you, follow the inlined brainstorming flow below (look for "# Brainstorming Ideas Into Designs" — already inlined into this system prompt; do NOT trigger it via SkillTool).',
   '2. Persist: once the discussion is clear, call SuperTasksCreate to create the task skeleton under ~/.zai/task-factory/queue-tasks/<id>/; write the discussion results into docs/spec.md (requirement spec) and docs/plan.md (execution plan) using Edit/Write. SuperTasksCreate accepts an optional verifierAgent field (defaults to the executor agent) so the task can use a different verifier subagent (e.g. code-reviewer). SuperTasksCreate also accepts optional `priority` ("P0"|"P1"|"P2"|"P3", default "P2"; P0 most urgent) and `dependsOn` (string[] of task ids that must reach status=done before this task is dispatched, default []) — intake collects these and forwards them verbatim; do not invent values yourself.',
   '3. Dispatch execution:',
   '   a. Call SuperTasksGet(id) to read the structured task metadata — extract `agent`, `cwd`, `verifierAgent` (optional), `priority`, and `dependsOn` from the returned summary. Always go through SuperTasksGet for task metadata; the on-disk YAML file is an implementation detail.',
@@ -326,6 +331,9 @@ export const taskFactoryMainAgent: MainAgentConfig = {
   // 工厂设置段在 systemPrompt 构建时动态读取(每会话一次,新会话生效)。
   systemPrompt: (origin) => [
     ...TASK_FACTORY_SYSTEM_PROMPT,
+    ...INLINED_BRAINSTORMING_SKILL,
+    ...INLINED_WRITING_PLANS_SKILL,
+    ...INTAKE_SKILL_DISCIPLINE,
     ...taskFactorySettingsSection(readCoreFactorySettings()),
     ...stripCodingSections(origin, ['codegraph']),
   ],
