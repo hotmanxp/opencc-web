@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
-import { Alert, Drawer, Tabs, Typography, Spin, Timeline, Collapse } from 'antd'
+import { Alert, Drawer, Empty, Tabs, Typography, Spin, Timeline, Collapse } from 'antd'
 import type { CSSProperties } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
@@ -149,7 +149,21 @@ export default function SuperTaskDetailDrawer({
       open={taskId != null}
       onClose={onClose}
       {...(isMobile
-        ? { placement: 'bottom' as const, height: '90%', destroyOnHidden: false }
+        ? {
+            placement: 'bottom' as const,
+            height: '90%',
+            destroyOnHidden: false,
+            // 让 Drawer body 在 mobile 走 flex 列向布局 —— 上方 title /
+            // status / quick banner 用 flexShrink:0 锁住高度,Tabs 拿
+            // flex:1 + minHeight:0 吃满剩余垂直空间,Timeline wrapper
+            // 再 flex:1 拿到 tab pane 内全部可用高度。tf-hq086lfy 修的
+            // 就是这里:旧版 maxHeight=calc(100vh-240px) 在窄屏把 Timeline
+            // 滚到可视区外、fallback 文本被压到 ~0px 看不见;改 flex 后
+            // 整条 Timeline 区始终挂在 drawer 内,首屏就能看见首个 frame。
+            styles: {
+              body: { display: 'flex', flexDirection: 'column' },
+            },
+          }
         : { width: 720 })}
       data-testid={isMobile ? 'mobile-detail-drawer' : 'desktop-detail-drawer'}
       title={detail ? `任务 ${detail.summary.id}` : '任务详情'}
@@ -157,11 +171,19 @@ export default function SuperTaskDetailDrawer({
       {!detail ? (
         <Spin />
       ) : (
-        <>
-          <Typography.Title level={5} style={{ marginTop: 0 }}>
+        // mobile 端把内容包成 flex 列向容器,让 Tabs 自适应吃满剩余高度;
+        // desktop 端不强制布局(保留原有 maxHeight 计算路径)。
+        <div
+          style={
+            isMobile
+              ? { display: 'flex', flexDirection: 'column', flex: 1, minHeight: 0 }
+              : undefined
+          }
+        >
+          <Typography.Title level={5} style={{ marginTop: 0, flexShrink: isMobile ? 0 : undefined }}>
             {detail.summary.title}
           </Typography.Title>
-          <Typography.Paragraph type="secondary" style={{ marginBottom: 8 }}>
+          <Typography.Paragraph type="secondary" style={{ marginBottom: 8, flexShrink: isMobile ? 0 : undefined }}>
             状态:{detail.summary.status} · Agent:{detail.summary.agent ?? 'default'}
             {detail.summary.executorTaskId ? ` · 执行任务:${detail.summary.executorTaskId}` : ''}
             {detail.summary.verifierTaskId ? ` · 验证任务:${detail.summary.verifierTaskId}` : ''}
@@ -175,27 +197,87 @@ export default function SuperTaskDetailDrawer({
               showIcon
               message="本任务为快速创建,无 plan.md / brainstorm.md"
               description="任务目录只包含 task.yaml + process.md + 最小 docs/spec.md(title/description/priority/cwd 快照);验证走轻量路径(build + lint + 关键文件 diff 的 code review)。"
-              style={{ marginBottom: 12 }}
+              style={{ marginBottom: 12, flexShrink: isMobile ? 0 : undefined }}
               data-testid="quick-mode-banner"
             />
           )}
           <Tabs
+            style={isMobile ? { flex: 1, minHeight: 0 } : undefined}
             items={(() => {
               const isQuick = detail.summary.mode === 'quick'
               const items: Array<{
-                key: string; label: string; children: JSX.Element
+                key: string; label: JSX.Element | string; children: JSX.Element
               }> = [
                 {
                   key: 'process',
-                  label: '执行过程',
+                  // tab 标签带事件计数 badge —— tf-hq086lfy:旧版空 fallback
+                  // 「等待执行事件...」在 mobile 窄屏被 maxHeight 截到 0 像素,
+                  // 用户看不出「事件流是开的,只是还没收到」;现在加 badge +
+                  // AntD Empty 图标让有无事件状态一目了然。
+                  label: (
+                    <span data-testid="process-tab-label">
+                      执行过程
+                      {rendered.length > 0 && (
+                        <span
+                          style={{
+                            marginLeft: 6,
+                            padding: '0 6px',
+                            background: '#f97316',
+                            color: '#fff',
+                            borderRadius: 8,
+                            fontSize: 11,
+                            lineHeight: '16px',
+                            display: 'inline-block',
+                          }}
+                          data-testid="process-event-count"
+                        >
+                          {rendered.length}
+                        </span>
+                      )}
+                    </span>
+                  ),
                   children: activeStreamId ? (
-                    <>
-                      <Typography.Text type="secondary" style={{ fontSize: 12 }}>
+                    <div
+                      style={
+                        isMobile
+                          ? {
+                              display: 'flex',
+                              flexDirection: 'column',
+                              height: '100%',
+                              minHeight: 0,
+                            }
+                          : undefined
+                      }
+                    >
+                      <Typography.Text
+                        type="secondary"
+                        style={{ fontSize: 12, flexShrink: isMobile ? 0 : undefined }}
+                      >
                         当前事件流来源:{active.role === 'verifier' ? '验证 Agent(verifier)' : '执行 Agent(executor)'}
                         {` · task ${activeStreamId}`}
                       </Typography.Text>
                       {rendered.length > 0 ? (
-                        <div style={{ maxHeight: isMobile ? 'calc(100vh - 240px)' : 'calc(100vh - 310px)', overflow: 'auto', marginTop: 8 }}>
+                        // mobile:flex:1 吃满 tab pane 剩余高度,scroll 在
+                        // 这里完成(避免 drawer body 双重 scroll);desktop:
+                        // 保留 maxHeight=calc(100vh-310px) 路径不变。
+                        <div
+                          style={
+                            isMobile
+                              ? {
+                                  flex: 1,
+                                  minHeight: 0,
+                                  overflowY: 'auto',
+                                  marginTop: 8,
+                                  WebkitOverflowScrolling: 'touch',
+                                }
+                              : {
+                                  maxHeight: 'calc(100vh - 310px)',
+                                  overflow: 'auto',
+                                  marginTop: 8,
+                                }
+                          }
+                          data-testid="process-timeline-scroll"
+                        >
                           <Timeline
                             items={rendered.map((r) => ({
                               key: rowKey(r),
@@ -211,11 +293,32 @@ export default function SuperTaskDetailDrawer({
                           />
                         </div>
                       ) : (
-                        <div style={{ marginTop: 8 }}>
-                          <Typography.Text type="secondary">等待执行事件...</Typography.Text>
+                        // 空状态用 AntD Empty(带图标 + 文案)而不是裸文本,
+                        // —— tf-hq086lfy:旧版「等待执行事件...」单行小灰字在
+                        // 移动端窄屏被压扁不可见;Empty 图标占用一整行,
+                        // 「事件流是开的」信号不会被 maxHeight 吃掉。
+                        <div
+                          style={
+                            isMobile
+                              ? {
+                                  flex: 1,
+                                  display: 'flex',
+                                  alignItems: 'center',
+                                  justifyContent: 'center',
+                                  marginTop: 8,
+                                  minHeight: 0,
+                                }
+                              : { marginTop: 8 }
+                          }
+                          data-testid="process-empty-state"
+                        >
+                          <Empty
+                            image={Empty.PRESENTED_IMAGE_SIMPLE}
+                            description="等待执行事件..."
+                          />
                         </div>
                       )}
-                    </>
+                    </div>
                   ) : (
                     <Typography.Text type="secondary">尚未派生执行/验证子 Agent</Typography.Text>
                   ),
@@ -262,7 +365,7 @@ export default function SuperTaskDetailDrawer({
               return items
             })()}
           />
-        </>
+        </div>
       )}
     </Drawer>
   )
