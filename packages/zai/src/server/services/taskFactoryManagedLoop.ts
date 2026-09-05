@@ -24,6 +24,8 @@
  * 只由顶层实例启动（server/index.ts 按 ZAI_INSTANCE_ID 判断）；
  * 受管子实例（执行器）不跑。测试用 intervalMs 参数 + stop* 清理。
  */
+import { existsSync } from 'node:fs'
+import { join } from 'node:path'
 import { taskFactoryListTasks as listTasks } from '@zn-ai/zn-agent-core'
 import { getBackgroundRuntime } from './backgroundRuntime.js'
 import { getFactorySettings } from './factorySettings.js'
@@ -32,6 +34,59 @@ import {
   injectSupervisorCommand,
   QUICK_VERIFIER_HINT,
 } from './taskFactoryBridge.js'
+
+/**
+ * 项目类型(zai patch 2026-09-05, tf-flofuz1q 三阶段职责固化)。detectProjectType
+ * 通过锁文件 / 清单文件识别仓库存量技术栈 — 用于 supervisor 派单时给出软
+ * 「install command 建议」(executor 仍需看 plan 字段决定是否跑)。
+ *  - 'node-pnpm':pnpm workspace(锁文件 pnpm-lock.yaml)
+ *  - 'node-npm' :npm / yarn(锁文件 package-lock.json 或 yarn.lock)
+ *  - 'python'   :pyproject.toml / requirements.txt / setup.py / Pipfile
+ *  - 'go'       :go.mod
+ *  - 'rust'     :Cargo.toml
+ *  - 'unknown'  :以上都不是(不强行推测;verifier 不会因 unknown 跳检查)
+ *
+ * 注:此识别是「软建议」依据 — 不硬编码到 supervisor prompt。supervisor 在
+ * 派单 plan 里可选填 project_specific_verify_cmd(参见 mainAgents-taskFactory
+ * §5 Stage 1)。
+ */
+export type ProjectType = 'node-pnpm' | 'node-npm' | 'python' | 'go' | 'rust' | 'unknown'
+
+const PYTHON_MARKERS = ['pyproject.toml', 'requirements.txt', 'setup.py', 'Pipfile'] as const
+
+/**
+ * 检测 cwd 目录的项目类型。检测顺序:pnpm > npm > python(任一标记文件) > go >
+ * rust > unknown。函数纯同步,只读锁文件 / 清单文件的存在性,不解析内容。
+ */
+export function detectProjectType(cwd: string): ProjectType {
+  if (!cwd) return 'unknown'
+  if (existsSync(join(cwd, 'pnpm-lock.yaml'))) return 'node-pnpm'
+  if (existsSync(join(cwd, 'package-lock.json'))) return 'node-npm'
+  if (PYTHON_MARKERS.some((m) => existsSync(join(cwd, m)))) return 'python'
+  if (existsSync(join(cwd, 'go.mod'))) return 'go'
+  if (existsSync(join(cwd, 'Cargo.toml'))) return 'rust'
+  return 'unknown'
+}
+
+/**
+ * 给定项目类型,返回「软建议」的 install 命令(不强制 executor 执行)。
+ *  - node-pnpm:`pnpm install --prefer-offline`(offline 优先,撞网失败再 online,
+ *    节省 CI 反复拉包时间)。
+ *  - node-npm :`npm ci`(锁定版本,比 install 严格)。
+ *  - python/go/rust:返回 null —— 这些语言不需要 supervisor 派单时拉依赖(
+ *    各自的标准工具链自带缓存,或 verifier 跑测试时才装)。
+ *  - unknown :null —— 没识别出来就不建议。
+ *
+ * 调用方(supervisor)把返回值作为软建议写入 executor prompt(若有需要);executor
+ * 仍按 plan 字段判定是否真跑,不在 supervisor prompt 里硬塞命令。
+ */
+export function suggestInstallCommand(_cwd: string, projectType: ProjectType): string | null {
+  switch (projectType) {
+    case 'node-pnpm': return 'pnpm install --prefer-offline'
+    case 'node-npm': return 'npm ci'
+    default: return null
+  }
+}
 
 let timer: ReturnType<typeof setInterval> | null = null
 let lastSignature = ''

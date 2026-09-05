@@ -176,6 +176,40 @@ describe('superTasksCreateTool', () => {
     expect(yaml).toContain('- /abs/keep.png')
     expect(yaml).toContain('- /abs/also-keep.jpg')
   })
+
+  // zai patch (2026-09-05, tf-flofuz1q):三阶段职责固化三字段入参测试。
+  it('call 接受 changeType + verificationScope + changedFiles,落到 task.yaml + result 文本', async () => {
+    const res = await superTasksCreateTool.call({
+      title: '三阶段任务',
+      cwd: dir,
+      changeType: 'logic',
+      verificationScope: 'ts_files',
+      changedFiles: ['packages/foo/src/a.ts', 'packages/foo/src/b.ts'],
+    })
+    const out = res.data.output as string
+    expect(out).toContain('changeType=logic')
+    expect(out).toContain('verificationScope=ts_files')
+    expect(out).toContain('changedFiles=[packages/foo/src/a.ts, packages/foo/src/b.ts]')
+    const id = extractId(out)
+    const yaml = await readFile(join(taskDir('queue-tasks', id), 'task.yaml'), 'utf-8')
+    expect(yaml).toContain('changeType: logic')
+    expect(yaml).toContain('verificationScope: ts_files')
+    expect(yaml).toContain('- packages/foo/src/a.ts')
+    expect(yaml).toContain('- packages/foo/src/b.ts')
+  })
+
+  it('call 缺省三字段:result 文本不展示, task.yaml 不写', async () => {
+    const res = await superTasksCreateTool.call({ title: '无三字段', cwd: dir })
+    const out = res.data.output as string
+    expect(out).not.toContain('changeType=')
+    expect(out).not.toContain('verificationScope=')
+    expect(out).not.toContain('changedFiles=')
+    const id = extractId(out)
+    const yaml = await readFile(join(taskDir('queue-tasks', id), 'task.yaml'), 'utf-8')
+    expect(yaml).not.toContain('changeType:')
+    expect(yaml).not.toContain('verificationScope:')
+    expect(yaml).not.toContain('changedFiles:')
+  })
 })
 
 describe('tool_result serialization (2026-09-02 回归)', () => {

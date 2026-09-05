@@ -8,6 +8,7 @@ import {
 import {
   startTaskFactoryManagedLoop, stopTaskFactoryManagedLoopForTests,
   __resetStagnantTrackersForTests,
+  detectProjectType, suggestInstallCommand,
 } from '../../../src/server/services/taskFactoryManagedLoop.js'
 import {
   __resetForTests, setTaskFactoryState,
@@ -382,6 +383,107 @@ describe('taskFactoryManagedLoop — stagnant 告警(tf-8rvychr0)', () => {
     expect(alert).toContain('"eventId":"ev-7"')
     expect(alert).toContain('Recent 5 TaskEvents')
     expect(alert).toContain('Last event count: 7')
+  })
+})
+
+// zai patch (2026-09-05, tf-flofuz1q):detectProjectType + suggestInstallCommand
+// 的项目无关检测矩阵 —— 用 mkdtemp 建独立目录,逐类放置标记文件后跑检测。
+// 不污染主测 dir,每个 case 自建子目录。
+describe('detectProjectType + suggestInstallCommand (2026-09-05 tf-flofuz1q)', () => {
+  it('detectProjectType: 空目录 → unknown', async () => {
+    const sub = await mkdtemp(join(tmpdir(), 'tf-detect-empty-'))
+    try {
+      expect(detectProjectType(sub)).toBe('unknown')
+    } finally {
+      await rm(sub, { recursive: true, force: true })
+    }
+  })
+
+  it('detectProjectType: 空 cwd → unknown(护栏)', () => {
+    expect(detectProjectType('')).toBe('unknown')
+  })
+
+  it('detectProjectType: pnpm-lock.yaml 命中 → node-pnpm', async () => {
+    const sub = await mkdtemp(join(tmpdir(), 'tf-detect-pnpm-'))
+    try {
+      await writeFile(join(sub, 'pnpm-lock.yaml'), '', 'utf-8')
+      expect(detectProjectType(sub)).toBe('node-pnpm')
+    } finally {
+      await rm(sub, { recursive: true, force: true })
+    }
+  })
+
+  it('detectProjectType: package-lock.json 命中 → node-npm', async () => {
+    const sub = await mkdtemp(join(tmpdir(), 'tf-detect-npm-'))
+    try {
+      await writeFile(join(sub, 'package-lock.json'), '', 'utf-8')
+      expect(detectProjectType(sub)).toBe('node-npm')
+    } finally {
+      await rm(sub, { recursive: true, force: true })
+    }
+  })
+
+  it('detectProjectType: pyproject.toml / requirements.txt / setup.py / Pipfile 任一命中 → python', async () => {
+    for (const marker of ['pyproject.toml', 'requirements.txt', 'setup.py', 'Pipfile']) {
+      const sub = await mkdtemp(join(tmpdir(), `tf-detect-${marker}-`))
+      try {
+        await writeFile(join(sub, marker), '', 'utf-8')
+        expect(detectProjectType(sub)).toBe('python')
+      } finally {
+        await rm(sub, { recursive: true, force: true })
+      }
+    }
+  })
+
+  it('detectProjectType: go.mod 命中 → go', async () => {
+    const sub = await mkdtemp(join(tmpdir(), 'tf-detect-go-'))
+    try {
+      await writeFile(join(sub, 'go.mod'), '', 'utf-8')
+      expect(detectProjectType(sub)).toBe('go')
+    } finally {
+      await rm(sub, { recursive: true, force: true })
+    }
+  })
+
+  it('detectProjectType: Cargo.toml 命中 → rust', async () => {
+    const sub = await mkdtemp(join(tmpdir(), 'tf-detect-rust-'))
+    try {
+      await writeFile(join(sub, 'Cargo.toml'), '', 'utf-8')
+      expect(detectProjectType(sub)).toBe('rust')
+    } finally {
+      await rm(sub, { recursive: true, force: true })
+    }
+  })
+
+  it('detectProjectType: 同时有 pnpm + npm lock → pnpm 优先(node-pnpm)', async () => {
+    const sub = await mkdtemp(join(tmpdir(), 'tf-detect-pnpm-prio-'))
+    try {
+      await writeFile(join(sub, 'pnpm-lock.yaml'), '', 'utf-8')
+      await writeFile(join(sub, 'package-lock.json'), '', 'utf-8')
+      expect(detectProjectType(sub)).toBe('node-pnpm')
+    } finally {
+      await rm(sub, { recursive: true, force: true })
+    }
+  })
+
+  it('detectProjectType: cwd 不存在的路径不抛错 → unknown', () => {
+    // 不存在路径:existsSync 全 false → 落到 unknown 而不是抛
+    expect(detectProjectType('/__no__such__path__tf_flofuz1q__/')).toBe('unknown')
+  })
+
+  it('suggestInstallCommand: node-pnpm → "pnpm install --prefer-offline"', () => {
+    expect(suggestInstallCommand('/anywhere', 'node-pnpm')).toBe('pnpm install --prefer-offline')
+  })
+
+  it('suggestInstallCommand: node-npm → "npm ci"', () => {
+    expect(suggestInstallCommand('/anywhere', 'node-npm')).toBe('npm ci')
+  })
+
+  it('suggestInstallCommand: python / go / rust / unknown → null(不硬塞命令)', () => {
+    expect(suggestInstallCommand('/anywhere', 'python')).toBeNull()
+    expect(suggestInstallCommand('/anywhere', 'go')).toBeNull()
+    expect(suggestInstallCommand('/anywhere', 'rust')).toBeNull()
+    expect(suggestInstallCommand('/anywhere', 'unknown')).toBeNull()
   })
 })
 

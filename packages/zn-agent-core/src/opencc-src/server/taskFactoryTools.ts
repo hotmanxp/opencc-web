@@ -104,18 +104,33 @@ export const superTasksCreateTool = buildTool({
       // bullet-list 提取并传入。
       attachments: z.array(z.string().min(1)).optional()
         .describe('Optional absolute file paths to attach to the task. Paths are persisted verbatim into task.yaml.attachments; executor and verifier subagents can Read them for context. Default []. QuickCreateModal passes image upload absolute paths (resolved via /api/fs/upload) here.'),
+      // zai patch (2026-09-05, tf-flofuz1q 三阶段职责固化):intake 阶段把
+      // supervisor 派单分析产物记到 task.yaml(executor / verifier 都从
+      // SuperTasksGet 拿到 TaskSummary 后直接读)。三字段全部 optional,向后兼容
+      // 历史任务(老任务 read 路径全部 undefined 兜底)。change_type /
+      // verification_scope 是枚举,非法值 fail loud;changed_files 是字符串数组,
+      // 不做单元素校验(filter 非字符串由 createPoolTask 兜底)。
+      changeType: z.enum(['docs', 'copy', 'style', 'logic', 'core', 'api', 'security']).optional()
+        .describe('Kind of change the executor will make (zhozh1 project-agnostic). One of docs|copy|style|logic|core|api|security. The supervisor writes this BEFORE SpawnAgent the executor; the executor reads it from TaskSummary and never re-decides. Optional — legacy tasks have no changeType.'),
+      verificationScope: z.enum(['ts_files', 'test_files', 'visual', 'none', 'build_artifact']).optional()
+        .describe('Which category of validation is appropriate for this change (project-agnostic). One of ts_files|test_files|visual|none|build_artifact. The verifier reads this and picks the right validation matrix entry. Optional.'),
+      changedFiles: z.array(z.string().min(1)).optional()
+        .describe('File paths (relative to executor cwd) the task is expected to touch. Optional — the verifier uses this for the targeted-test scope and the executor uses it for the change-set bound check. Strings only; non-string elements are filtered at write time.'),
     })
   },
   async call(input: {
     title: string; cwd: string; description?: string; agent?: string; verifierAgent?: string; spec?: string; plan?: string
     priority?: 'P0' | 'P1' | 'P2' | 'P3'; dependsOn?: string[]; mode?: 'quick' | 'full'
     attachments?: string[]
+    changeType?: 'docs' | 'copy' | 'style' | 'logic' | 'core' | 'api' | 'security'
+    verificationScope?: 'ts_files' | 'test_files' | 'visual' | 'none' | 'build_artifact'
+    changedFiles?: string[]
   }) {
     const s = await createPoolTask(input)
     emitTaskFactoryEvent('created', { id: s.id, mode: s.mode })
     const mode = s.mode ?? 'full'
     const attachmentsCount = s.attachments?.length ?? 0
-    const meta = `priority=${s.priority ?? 'P2'}, mode=${mode}${input.dependsOn?.length ? `, dependsOn=[${input.dependsOn.join(', ')}]` : ''}${attachmentsCount > 0 ? `, attachments=${attachmentsCount}` : ''}`
+    const meta = `priority=${s.priority ?? 'P2'}, mode=${mode}${input.dependsOn?.length ? `, dependsOn=[${input.dependsOn.join(', ')}]` : ''}${attachmentsCount > 0 ? `, attachments=${attachmentsCount}` : ''}${s.changeType ? `, changeType=${s.changeType}` : ''}${s.verificationScope ? `, verificationScope=${s.verificationScope}` : ''}${(s.changedFiles?.length ?? 0) > 0 ? `, changedFiles=[${(s.changedFiles ?? []).join(', ')}]` : ''}`
     const nextStep = mode === 'quick'
       ? 'Next step (quick mode): the task directory has only task.yaml + process.md + a minimal docs/spec.md snapshot. Skip brainstorming — the user already specified the requirements in the QuickCreate form. Report the task id to the user.'
       : 'Next step: persist the discussed results into docs/spec.md and docs/plan.md (replace the skeleton placeholders), and write the discussion minutes to docs/brainstorm.md — a programmatic intake gate checks all three docs when the user closes the modal and feeds missing ones back to you. Before dispatching the executor subagent, read task.yaml to confirm the agent field.'

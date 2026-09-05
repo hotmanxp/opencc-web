@@ -41,6 +41,24 @@ export interface TaskSummary {
    * 执行/验证子 agent 拿到 TaskSummary 后可直接 Read。读取路径容错坏数据。
    */
   attachments?: string[]
+  /**
+   * 改动类型(zai patch 2026-09-05, tf-flofuz1q 三阶段职责固化)。supervisor 在
+   * dispatch 前写入 task.yaml,executor / verifier 从 TaskSummary 读到该字段后
+   * 直接按对应规则跑(不再自己判定改动类型)。可选 — 历史任务无该字段,缺省
+   * undefined,executor / verifier 走「无类型兜底」分支(向后兼容)。
+   */
+  changeType?: ChangeType
+  /**
+   * 验证范畴(zai patch 2026-09-05, tf-flofuz1q)。verifier 按这个选验证矩阵条目
+   * (ts_files / test_files / visual / none / build_artifact)。可选。
+   */
+  verificationScope?: VerificationScope
+  /**
+   * 预计改动的文件路径列表(zai patch 2026-09-05, tf-flofuz1q)。相对 executor
+   * cwd。verifier 用来圈定定向测试范围;executor 用来 sanity check「改动范围是否
+   * 合理」。可选。
+   */
+  changedFiles?: string[]
   bucket: TaskBucketName
 }
 export interface TaskBucket {
@@ -153,6 +171,17 @@ const TASK_YAML_FIELDS = [
   // 执行/验证子 agent 拿到 task.yaml 后可直接 Read 这些文件(避免 prompt 文本
   // 拼接附件路径被模型忽略,或上传目录被 cwd-relative 误写进仓库根 .zai/)。
   'attachments',
+  // zai patch (2026-09-05, tf-flofuz1q 三阶段职责固化):supervisor 派单分析产物。
+  // 全部 optional,历史任务无字段 → 读取端兜底 undefined → 向后兼容。
+  //   changeType: 7 类改动枚举(docs/copy/style/logic/core/api/security),
+  //              supervisor 在 dispatch 前写入;executor 拿来用,不再自己判定。
+  //   verificationScope: 5 类验证范畴(ts_files/test_files/visual/none/build_artifact),
+  //              verifier 按 matrix 选择验证路径。
+  //   changedFiles: 文件路径列表(相对 executor cwd),用于 verifier 定向跑测试
+  //              + executor 自审「改动范围是否合理」。
+  'changeType',
+  'verificationScope',
+  'changedFiles',
 ] as const
 
 /** 任务在 yaml 里允许的 status 字符串。 */
@@ -192,6 +221,40 @@ export const DEFAULT_TASK_MODE: TaskMode = 'full'
 /** 把任意值规整成合法 mode;非法值回落到缺省 full(读取容错)。 */
 export function normalizeMode(v: unknown): TaskMode {
   return v === 'quick' || v === 'full' ? v : DEFAULT_TASK_MODE
+}
+
+/**
+ * 改动类型(zai patch 2026-09-05, tf-flofuz1q 三阶段职责固化)。项目无关 7 类
+ * —— 与项目栈无关,只描述「这次改动在做什么」。supervisor 派单前判定,executor
+ * 不再自行决定类型。
+ *  - 'docs':纯文档(改 markdown / 注释 / changelog)
+ *  - 'copy':文案 / 字面量字符串(commit message / UI 文案 / 错误信息)
+ *  - 'style':样式 / 视觉(CSS / Tailwind / 主题色 / 图标 / 布局)
+ *  - 'logic':业务逻辑(数据处理 / 状态机 / 算法 / 接口实现)
+ *  - 'core':核心构建产物改动(build 脚本 / vendor 拷贝 / opencc-src / codegen)
+ *  - 'api':对外 API 表面(路由 / RPC / CLI 子命令 / 协议 schema)
+ *  - 'security':安全相关(权限 / 鉴权 / 输入校验 / 反向检查)
+ */
+export type ChangeType = 'docs' | 'copy' | 'style' | 'logic' | 'core' | 'api' | 'security'
+export const CHANGE_TYPES: readonly ChangeType[] = ['docs', 'copy', 'style', 'logic', 'core', 'api', 'security'] as const
+/** 把任意值规整成合法 change_type;非法值回落到 undefined(读取容错,executor 走兜底分支)。 */
+export function normalizeChangeType(v: unknown): ChangeType | undefined {
+  return (CHANGE_TYPES as readonly string[]).includes(String(v)) ? (v as ChangeType) : undefined
+}
+
+/**
+ * 验证范畴(zai patch 2026-09-05, tf-flofuz1q)。verifier 按此选验证矩阵条目。
+ *  - 'ts_files': TS 类型检查 + 改动文件单测
+ *  - 'test_files': 仅跑测试(无类型检查)
+ *  - 'visual': 视觉验证(/ego-browser / 截图对比)
+ *  - 'none': 零命令验证(纯字符串 / 文档对比)
+ *  - 'build_artifact': 产物重新生成 + tsc
+ */
+export type VerificationScope = 'ts_files' | 'test_files' | 'visual' | 'none' | 'build_artifact'
+export const VERIFICATION_SCOPES: readonly VerificationScope[] = ['ts_files', 'test_files', 'visual', 'none', 'build_artifact'] as const
+/** 把任意值规整成合法 verification_scope;非法值回落到 undefined(读取容错)。 */
+export function normalizeVerificationScope(v: unknown): VerificationScope | undefined {
+  return (VERIFICATION_SCOPES as readonly string[]).includes(String(v)) ? (v as VerificationScope) : undefined
 }
 
 /** task.yaml 的内存表示(扁平 key-value)。null 表示字段被显式置空。 */
@@ -254,6 +317,18 @@ function parseTaskYaml(text: string): TaskYaml {
       // 非字符串元素过滤掉。读取容错坏数据(损坏 yaml / 客户端误塞对象)。
       const arr = v.filter((x): x is string => typeof x === 'string' && x.length > 0)
       out[k] = arr
+    } else if (k === 'changedFiles' && Array.isArray(v)) {
+      // zai patch (2026-09-05, tf-flofuz1q):与 dependsOn / attachments 同形态 ——
+      // 字符串路径数组(相对 executor cwd),非字符串元素过滤掉。
+      const arr = v.filter((x): x is string => typeof x === 'string' && x.length > 0)
+      out[k] = arr
+    } else if (k === 'changeType' && typeof v === 'string') {
+      // 枚举字符串:写入端已校验,读路径容错坏值(非 7 个之一 → undefined → 不写)。
+      const ct = normalizeChangeType(v)
+      if (ct) out[k] = ct
+    } else if (k === 'verificationScope' && typeof v === 'string') {
+      const vs = normalizeVerificationScope(v)
+      if (vs) out[k] = vs
     }
   }
   return out
@@ -334,6 +409,23 @@ export interface CreatePoolTaskInput {
    * 过滤 / 整体 undefined)。
    */
   attachments?: string[]
+  /**
+   * 改动类型(zai patch 2026-09-05, tf-flofuz1q 三阶段职责固化)。supervisor 派单前
+   * 判定 — executor 不再自己判定类型。非法值由 zod schema fail loud 拦截,这里
+   * 只负责 optional 透传。历史任务无该字段,缺省 undefined。
+   */
+  changeType?: ChangeType
+  /**
+   * 验证范畴(zai patch 2026-09-05, tf-flofuz1q)。verifier 按此选验证矩阵条目。
+   * 非法值 fail loud。可选。
+   */
+  verificationScope?: VerificationScope
+  /**
+   * 预计改动的文件路径列表(zai patch 2026-09-05, tf-flofuz1q)。相对 executor cwd。
+   * verifier 用来圈定定向测试范围;executor 用来 sanity check 改动范围。非字符串元素
+   * 在写入前过滤。可选。
+   */
+  changedFiles?: string[]
 }
 export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSummary> {
   const id = input.id ?? generateTaskId()
@@ -376,6 +468,21 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
   const attachments = (input.attachments ?? []).filter(
     (a): a is string => typeof a === 'string' && a.length > 0,
   )
+  // zai patch (2026-09-05, tf-flofuz1q):三阶段职责固化三字段。changeType /
+  // verificationScope 非法值 fail loud(zod 已在 schema 层校验过,这里再过一道
+  // 兜底,防止直接调 createPoolTask 而绕过 schema 的调用方穿透脏数据)。
+  // changedFiles 与 attachments 同形态 —— 过滤非字符串 / 空串;非法值容错。
+  const changeType: ChangeType | undefined = input.changeType
+  if (changeType !== undefined && !CHANGE_TYPES.includes(changeType)) {
+    throw new Error(`invalid changeType ${JSON.stringify(input.changeType)} (allowed: ${CHANGE_TYPES.join(', ')})`)
+  }
+  const verificationScope: VerificationScope | undefined = input.verificationScope
+  if (verificationScope !== undefined && !VERIFICATION_SCOPES.includes(verificationScope)) {
+    throw new Error(`invalid verificationScope ${JSON.stringify(input.verificationScope)} (allowed: ${VERIFICATION_SCOPES.join(', ')})`)
+  }
+  const changedFiles = (input.changedFiles ?? []).filter(
+    (p): p is string => typeof p === 'string' && p.length > 0,
+  )
   const meta: TaskYaml = {
     id,
     title: input.title,
@@ -393,6 +500,11 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     dependsOn,
     ...(mode === 'quick' ? { mode: 'quick' as const } : {}),
     ...(attachments.length > 0 ? { attachments } : {}),
+    // 三阶段职责固化字段:全部 optional,只在显式传入时写入 yaml,避免污染历史
+    // 任务(task.yaml 干净原则)。
+    ...(changeType ? { changeType } : {}),
+    ...(verificationScope ? { verificationScope } : {}),
+    ...(changedFiles.length > 0 ? { changedFiles } : {}),
   }
   await writeFile(join(dir, TASK_YAML_FILENAME), serializeTaskYaml(meta), 'utf-8')
   if (mode === 'quick') {
@@ -431,6 +543,10 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     dependsOn,
     mode,
     ...(attachments.length > 0 ? { attachments } : {}),
+    // zai patch (2026-09-05, tf-flofuz1q):三阶段职责固化字段透传。
+    ...(changeType ? { changeType } : {}),
+    ...(verificationScope ? { verificationScope } : {}),
+    ...(changedFiles.length > 0 ? { changedFiles } : {}),
     bucket: 'queue-tasks',
   }
 }
@@ -493,6 +609,13 @@ function toSummary(id: string, bucket: TaskBucketName, meta: TaskYaml): TaskSumm
     // 过滤非字符串;parseTaskYaml 里数组元素是非字符串时整字段被跳过 → undefined。
     attachments: Array.isArray(meta.attachments)
       ? (meta.attachments as unknown[]).filter((x): x is string => typeof x === 'string')
+      : undefined,
+    // zai patch (2026-09-05, tf-flofuz1q):三阶段职责固化字段。parseTaskYaml 已
+    // 过滤坏值(非 7 个枚举值之一 / 非字符串数组),读取端再过一遍兜底。
+    changeType: normalizeChangeType(meta.changeType),
+    verificationScope: normalizeVerificationScope(meta.verificationScope),
+    changedFiles: Array.isArray(meta.changedFiles)
+      ? (meta.changedFiles as unknown[]).filter((x): x is string => typeof x === 'string')
       : undefined,
   }
 }
