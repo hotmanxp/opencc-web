@@ -72,19 +72,25 @@ export default function MobileSuperTasks(): JSX.Element {
 
   // 调度器会话引导 — mount 跑一次。真相源 = 后端 state.json 的
   // supervisorSessionId(随 superTaskStore.load 带回)。
+  //
+  // **非破坏性语义**(2026-09-05, tf-hodj0u68):server sid 已设(非空)→ 永远
+  // 锁住它,不创建新会话,不覆盖 state.json。详见 SuperTasks.tsx 同段注释 —
+  // 切 cwd / 切 worktree 后老 transcript 不在当前 list,旧逻辑会创建新 sid
+  // 把用户持久化身份覆盖掉。修复:server sid 永远是真相源,sid 非空就照用;
+  // 只有 server sid 真的为空才走 create-new 分支。
   useEffect(() => {
     if (booted.current) return
     booted.current = true
     void (async () => {
       await Promise.all([loadSessions(), useSuperTaskStore.getState().load()])
       const s = useAgentStore.getState()
-      const latest = s.sessions
       const serverSid = useSuperTaskStore.getState().supervisorSessionId
-      if (serverSid && latest.some((x) => x.sessionId === serverSid)) {
+      if (serverSid) {
         s.setCurrentSession(serverSid)
         await loadTranscript(serverSid)
         return
       }
+      const latest = s.sessions
       try {
         const sid = await createAgentSession({
           mainAgent: 'task-factory',

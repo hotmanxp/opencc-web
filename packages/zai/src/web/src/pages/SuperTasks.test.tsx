@@ -11,14 +11,16 @@ vi.mock('./AgentConversation', () => ({
 }))
 
 // superTaskApi 全量 mock:store.load 走 fetchSuperTasks,引导上报走
-// setSupervisorSession — 都不打真网络。默认带回 supervisorSessionId='sup-server'。
+// setSupervisorSession — 都不打真网络。默认带回 supervisorSessionId='sup-server';
+// 单测可调 setMockSupervisorSessionId(null) 覆盖为「未绑定」走 create-new 分支。
+let mockSupervisorSessionId: string | null = 'sup-server'
 vi.mock('../lib/superTaskApi', () => ({
   fetchSuperTasks: vi.fn(async () => ({
     modified: true,
     hash: 'H-page',
     buckets: { queue: [], processing: [], verifying: [], finished: [] },
     managed: false,
-    supervisorSessionId: 'sup-server',
+    supervisorSessionId: mockSupervisorSessionId,
   })),
   fetchSuperTaskDetail: vi.fn(async () => null),
   deleteSuperTasks: vi.fn(async () => {}),
@@ -30,6 +32,11 @@ vi.mock('../lib/superTaskApi', () => ({
   resumeSuperTask: vi.fn(async () => {}),
   acceptSuperTask: vi.fn(async () => {}),
 }))
+
+/** 单测辅助:覆盖 mock fetchSuperTasks 带回的 supervisorSessionId。 */
+function setMockSupervisorSessionId(sid: string | null): void {
+  mockSupervisorSessionId = sid
+}
 
 vi.mock('../lib/agentSessionApi', () => ({
   createAgentSession: vi.fn(async () => 'new-sup'),
@@ -130,6 +137,10 @@ describe('SuperTasks page', () => {
   })
 
   it('server supervisorSessionId 未命中 → 新建 task-factory 会话并上报', async () => {
+    // 2026-09-05 (tf-hodj0u68):non-destructive 语义下,server sid 非空就锁住,
+    // 不创建新会话。要触发 create-new 分支需 mock server sid 为 null
+    // (reset 后的窗口期 / 首次进入)。
+    setMockSupervisorSessionId(null)
     stubSessionsList([])
 
     render(<SuperTasks />)
@@ -141,5 +152,7 @@ describe('SuperTasks page', () => {
       expect.objectContaining({ mainAgent: 'task-factory' }),
     )
     expect(setSupervisorSession).toHaveBeenCalledWith('new-sup')
+    // 恢复默认值给后续 it 用
+    setMockSupervisorSessionId('sup-server')
   })
 })

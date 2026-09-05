@@ -65,15 +65,27 @@ export default function SuperTasks(): JSX.Element {
   // 调 loadTranscript,session 切换才看得到历史;这里没有 sidebar 切换,只能
   // mount 时主动拉。setCurrentSession 内置 hydrateSessionState(cwd/v2 tasks),
   // 这里单独调 loadTranscript 补 messages,顺序无依赖。
+  //
+  // **非破坏性语义**(2026-09-05, tf-hodj0u68):server sid 已设(非空)→ 永远
+  // 锁住它,不创建新会话,不覆盖 state.json。原逻辑要求 sid 还必须在当前 cwd
+  // 的 sessions 列表里才使用,否则进入 create-new 分支 — 这导致用户在切换
+  // 实例 cwd(例如把 zai 从 opencc-web 根目录挪到 packages/zai,或在不同
+  // worktree 之间切换)后,旧的调度官会话文件留在原 cwd 的 project dir
+  // 不在新 cwd 的 list 中,boot 路径把 state.json 里的 sid 覆盖成新 sid,
+  // 老 transcript 与新调度官身份脱钩 — 刷新就丢历史。新逻辑:server sid 是
+  // 持久化身份的真相源,sid 设置了就用它(就算当前 list 没有它也照用,允许
+  // loadTranscript 返回空 messages,因为 cwd 切回来后 transcript 仍在;
+  // 用户主动「重置会话」才是清空语义)。只有 server sid 真的为空才走 create
+  // 新会话分支。
   useEffect(() => {
     if (booted.current) return
     booted.current = true
     void (async () => {
       await Promise.all([loadSessions(), useSuperTaskStore.getState().load()])
       const s = useAgentStore.getState()
-      const latest = s.sessions
       const serverSid = useSuperTaskStore.getState().supervisorSessionId
-      if (serverSid && latest.some((x) => x.sessionId === serverSid)) {
+      // server sid 已设 → 锁定,不创建新会话(避免覆盖用户的持久化身份)
+      if (serverSid) {
         s.setCurrentSession(serverSid)
         await loadTranscript(serverSid)
         return
@@ -81,6 +93,7 @@ export default function SuperTasks(): JSX.Element {
       // server sid 缺失或会话已被删:新建一条并冻结 task-factory,上报后端 —
       // 不论 sessions 列表是否非空都强制创建,避免调度器身份被 store 兜底漂移
       // 到 sessions[0](且新会话必须带 mainAgent=task-factory)。
+      const latest = s.sessions
       try {
         const sid = await createAgentSession({
           mainAgent: 'task-factory',
