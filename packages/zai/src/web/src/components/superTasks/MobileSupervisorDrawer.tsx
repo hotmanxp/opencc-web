@@ -7,10 +7,10 @@ import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import { LIGHT_PAGE_VARS } from './lightThemeVars'
 
 /**
- * 移动端任务调度官对话入口(2026-09-04 新增,/m-super-tasks 路由使用)。
+ * 移动端任务调度器对话入口(2026-09-04 新增,/m-super-tasks 路由使用)。
  *
  * - 默认折叠:右下角固定圆形 FAB,点开 → bottom Drawer 高度 90%,
- *   内含 `<AgentConversation hideShareAndPlugin />`(调度官 transcript
+ *   内含 `<AgentConversation hideShareAndPlugin />`(调度器 transcript
  *   跨开/关保留 —— 不开 destroyOnHidden)。
  * - FAB streaming 指示:`useAgentStore.status === 'streaming'` 时
  *   右上角叠小圆点。
@@ -40,7 +40,7 @@ export default function MobileSupervisorDrawer({
     <>
       <button
         type="button"
-        aria-label="打开任务调度官对话"
+        aria-label="打开任务调度器对话"
         data-testid="mobile-supervisor-fab"
         onClick={onOpen}
         style={{
@@ -85,25 +85,25 @@ export default function MobileSupervisorDrawer({
         placement="bottom"
         height="90%"
         destroyOnHidden={false}
-        title="任务调度官对话"
+        title="任务调度器对话"
         styles={{ body: { padding: 0 } }}
         data-testid="mobile-supervisor-drawer"
         extra={
           /*
-            重置任务调度官会话(tf-68obb3j3):抽屉头部右上角图标按钮。
+            重置任务调度器会话(tf-68obb3j3):抽屉头部右上角图标按钮。
             - 复用 useSuperTaskStore.resetSupervisorSession()(2026-09-02 桌面
               同款接口),不要重复造服务端轮子。
             - Popconfirm 二次确认防误点;成功后 window.location.reload()
-              触发 mount 引导,新建一条空调度官会话替换当前对话。
+              触发 mount 引导,新建一条空调度器会话替换当前对话。
             - 触摸区域 ≥44px(移动端规范),与抽屉关闭按钮风格一致。
           */
           <Popconfirm
-            title="重置任务调度官会话?"
+            title="重置任务调度器会话?"
             description={
               <span>
-                将创建一条新的空调度官会话替换当前对话。
+                将创建一条新的空调度器会话替换当前对话。
                 <br />
-                旧的 transcript 文件保留在 <code>~/.zai/tasks/</code> 与新调度官不再关联。
+                旧的 transcript 文件保留在 <code>~/.zai/tasks/</code> 与新调度器不再关联。
               </span>
             }
             okText="重置"
@@ -114,7 +114,7 @@ export default function MobileSupervisorDrawer({
               setResetting(true)
               try {
                 await resetSupervisorSession()
-                // 全局 reload —— 让 store / 看板 / 调度官 transcript 干净同步
+                // 全局 reload —— 让 store / 看板 / 调度器 transcript 干净同步
                 window.location.reload()
               } catch (err) {
                 setResetting(false)
@@ -124,13 +124,13 @@ export default function MobileSupervisorDrawer({
               }
             }}
           >
-            <Tooltip title="清空当前任务调度官会话,触发全新引导">
+            <Tooltip title="清空当前任务调度器会话,触发全新引导">
               <Button
                 type="text"
                 icon={<ReloadOutlined />}
                 loading={resetting}
                 disabled={resetting}
-                aria-label="重置任务调度官会话"
+                aria-label="重置任务调度器会话"
                 data-testid="mobile-supervisor-reset-button"
                 style={{ minWidth: 44, minHeight: 44 }}
               />
