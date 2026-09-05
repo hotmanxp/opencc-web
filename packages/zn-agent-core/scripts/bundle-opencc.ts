@@ -704,15 +704,12 @@ const vendorPatchesPlugin: esbuild.Plugin = {
       // (not full path) because esbuild may pass absolute or relative
       // `args.path` depending on entry resolution.
       if (args.path.endsWith('/QueryEngine.ts') || args.path.endsWith('QueryEngine.ts')) {
-        console.log('[zai-debug] QueryEngine.ts plugin hit, endsWith:', true)
         if (queryEngineImportPatchRe.test(contents)) {
           contents = contents.replace(
             queryEngineImportPatchRe,
             `import {\n  getIsNonInteractiveSession,\n  getSessionId,\n  isSessionPersistenceDisabled,\n} from 'src/bootstrap/state.js'`,
           )
           modified = true
-        } else {
-          console.log('[zai-debug] QueryEngine import regex DID NOT MATCH')
         }
         if (queryEngineNonInteractivePatchRe.test(contents)) {
           contents = contents.replace(
@@ -720,8 +717,6 @@ const vendorPatchesPlugin: esbuild.Plugin = {
             `isNonInteractiveSession: getIsNonInteractiveSession(),`,
           )
           modified = true
-        } else {
-          console.log('[zai-debug] QueryEngine noninteractive regex DID NOT MATCH')
         }
       }
 
