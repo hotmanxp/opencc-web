@@ -1004,11 +1004,14 @@ export const MessageBubble = React.memo(function MessageBubble({
     const error = msg.error as
       | { category?: string; message?: string }
       | undefined;
+    // 容器背景透明,只保留 border + text 表达「错误」语义;避免 Card 的白底
+    // 在浅色对话区(--bg-body=#eef2f7)上突兀跳出(tf-k93br2hc,2026-09-05)。
     return (
       <div style={{ marginBottom: 8 }}>
         <Card
           size="small"
-          style={{ background: "var(--bg-card)", borderColor: "var(--accent-end)" }}
+          className="runtime-error-card"
+          style={{ borderColor: "var(--accent-end)" }}
         >
           <Text type="danger">
             {error?.message || "发生未知错误"}
