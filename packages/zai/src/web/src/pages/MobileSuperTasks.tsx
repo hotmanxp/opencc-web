@@ -233,7 +233,6 @@ export default function MobileSuperTasks(): JSX.Element {
                 抽屉式)。复用的同款 modal 在桌面 SuperTaskPanel 不传任何 prop →
                 仍 640px 居中 Modal,零回归。 */}
             <Button
-              type="primary"
               size="small"
               icon={<ThunderboltOutlined />}
               onClick={() => setQuickOpen(true)}
