@@ -108,7 +108,10 @@ function isStreamingReplayEvent(type: string): boolean {
 }
 
 export class ServerEventBus {
-  private subs = new Set<Subscriber>()
+  // 用 Array 而非 Set 是为了支持 emit 期间根据索引 splice 移除抛错的 subscriber:
+  // 抛错的订阅者若留着,后续每次 emit 都会重复跑 + 累积 log, 形成死订阅堆积
+  // (eventBus 自身只 log, 不清理)。索引式 for + splice(i,1)+i-- 是经典做法。
+  private subs: Subscriber[] = []
   // 全局单调 seq 计数器 — emit 时分配, 单进程内单调递增, 进程重启后从 0
   // 重新计数 (跨重启的排序由 history replay + eventId 兜底, 见 shared/events.ts Base.seq 注释).
   private seqCounter = 0
@@ -139,11 +142,18 @@ export class ServerEventBus {
       }
       this.historyBySid.set(sid, arr)
     }
-    for (const sub of this.subs) {
+    // 用索引式 for 而非 for-of 是为了支持在 catch 中按当前索引 splice 移除
+    // 出错的 subscriber:抛错的订阅者会一直留在 subs 里,后续每次 emit 都白跑
+    // 一遍,还会污染日志 / 累计异常。splice(i,1) 后必须 i--,否则下次循环 i++
+    // 会跳过紧接其后的下一个订阅者(Set 迭代是安全的但 Array.splice 会左移)。
+    for (let i = 0; i < this.subs.length; i++) {
+      const sub = this.subs[i]
       try {
         sub(full)
       } catch (err) {
-        console.error('[eventBus] subscriber threw', err)
+        console.error('[eventBus] subscriber threw, removing', err)
+        this.subs.splice(i, 1)
+        i--
       }
     }
   }
@@ -254,16 +264,18 @@ export class ServerEventBus {
       if (!ServerEventBus.topicMatches(event.type, topics)) return
       sub(event)
     }
-    this.subs.add(wrapped)
+    this.subs.push(wrapped)
     return () => {
-      this.subs.delete(wrapped)
+      const idx = this.subs.indexOf(wrapped)
+      if (idx >= 0) this.subs.splice(idx, 1)
     }
   }
 
   subscribe(sub: Subscriber): () => void {
-    this.subs.add(sub)
+    this.subs.push(sub)
     return () => {
-      this.subs.delete(sub)
+      const idx = this.subs.indexOf(sub)
+      if (idx >= 0) this.subs.splice(idx, 1)
     }
   }
 
@@ -281,9 +293,10 @@ export class ServerEventBus {
       if (sid === wantedSid) return sub(event)
       // 不匹配: 静默丢弃. 不要 throw — 一个订阅者抛错不能影响其它订阅者.
     }
-    this.subs.add(wrapped)
+    this.subs.push(wrapped)
     return () => {
-      this.subs.delete(wrapped)
+      const idx = this.subs.indexOf(wrapped)
+      if (idx >= 0) this.subs.splice(idx, 1)
     }
   }
 }

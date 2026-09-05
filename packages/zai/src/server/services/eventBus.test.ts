@@ -74,6 +74,64 @@ describe('ServerEventBus', () => {
     expect(got).toEqual(['server.error'])
   })
 
+  // ========== 抛错的 subscriber 应被从 subs 移除,防死订阅堆积 ==========
+
+  test('throwing subscriber is removed after first throw (no repeated log / 死订阅堆积)', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const bus = new ServerEventBus()
+    const throwing = () => { throw new Error('boom') }
+    bus.subscribe(throwing)
+    // 第一次 emit 抛错 → 被 splice 移除
+    bus.emit(baseEvent)
+    bus.emit(baseEvent)
+    bus.emit(baseEvent)
+    // console.error 应只在第一次抛错时打,而不是每次 emit 都打
+    expect(errSpy).toHaveBeenCalledTimes(1)
+    expect(String(errSpy.mock.calls[0]?.[1]?.message ?? '')).toContain('boom')
+  })
+
+  test('throwing subscriber 移除后,正常 subscribers 继续收到后续事件', () => {
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const bus = new ServerEventBus()
+    const got: string[] = []
+    bus.subscribe(() => { throw new Error('boom') })
+    bus.subscribe((e) => got.push(e.type))
+    bus.emit(baseEvent)
+    bus.emit(baseEvent)
+    bus.emit(baseEvent)
+    // 三个 emit 都到正常 subscriber (throwing 被第一次抛错后就移除,不影响后续)
+    expect(got).toEqual(['server.error', 'server.error', 'server.error'])
+    // 抛错只触发一次 log
+    expect(errSpy).toHaveBeenCalledTimes(1)
+  })
+
+  test('emit 期间连续多个 subscriber 抛错,后续 subscriber 仍被正确派发 (i--/splice 索引安全)', () => {
+    // 压力测试 indexed for + i-- 的索引安全:
+    // subs 序列 = [throwerA, throwerB, survivor, throwerC]
+    // 一次 emit 期间:
+    //   - i=0 throwerA 抛错 → splice(0,1) → [throwerB, survivor, throwerC]; i-- → i=-1 → i++ → i=0
+    //   - i=0 throwerB 抛错 → splice(0,1) → [survivor, throwerC]; i-- → i=-1 → i++ → i=0
+    //   - i=0 survivor 收到事件 ✓
+    //   - i=1 throwerC 抛错 → splice(1,1) → [survivor]; i-- → i=0 → i++ → i=1 → 退出
+    // 老 for-of + splice(0,1) 的写法跳过 survivor; 这次跑通说明 i-- 正确补偿了 Array.splice 的左移。
+    // 同时验证: 即使 splice 把 subs 清空也不会越界 — `i < this.subs.length` 每轮重读 length,
+    // 老 for-of + 直接 splice 在迭代器上是 V8 未定义行为 (会抛 TypeError)。
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {})
+    const bus = new ServerEventBus()
+    const received: string[] = []
+    bus.subscribe(() => { throw new Error('boom-A') })
+    bus.subscribe(() => { throw new Error('boom-B') })
+    bus.subscribe((e) => received.push(e.type))
+    bus.subscribe(() => { throw new Error('boom-C') })
+    expect(() => bus.emit(baseEvent)).not.toThrow()
+    expect(received).toEqual(['server.error'])
+    // 3 个 thrower 各抛一次(被 splice 移除后,后续 emit 不会再触发)
+    bus.emit(baseEvent)
+    expect(received).toEqual(['server.error', 'server.error'])
+    // 总共仍只 3 次 error(throwing sub 第一次后都被踢,后续 emit 不再触发)
+    expect(errSpy).toHaveBeenCalledTimes(3)
+  })
+
   test('unsubscribe stops delivery', () => {
     const bus = new ServerEventBus()
     const got: string[] = []
