@@ -33,6 +33,7 @@ import { existsSync, readFileSync } from 'node:fs'
 import { homedir } from 'node:os'
 import { join } from 'node:path'
 import { fileURLToPath } from 'node:url'
+import { createRequire } from 'node:module'
 
 // Imported via the package's main entry — the runtime `default` export
 // IS the single bundle (dist/opencc-core.mjs, see package.json
@@ -76,10 +77,33 @@ export function installMacroStub(): void {
   if (g.MACRO && typeof g.MACRO === 'object' && typeof g.MACRO.VERSION === 'string') {
     return
   }
-  // zai's own pkg version is a reasonable proxy; build-time
-  // reflection isn't worth the bundle-size cost here.
-  const VERSION = '0.1.0'
-  const DISPLAY_VERSION = '0.1.0'
+  // Read this package's own version out of its package.json so the
+  // stub always matches what `pnpm release:patch` will publish. vendor
+  // treats MACRO.VERSION as a semver string (see
+  // src/opencc-src/services/analytics/metadata.ts:566 which runs
+  // `MACRO.VERSION.match(/^\d+\.\d+\.\d+(?:-[a-z]+)?/)`), so we must
+  // hand it a real semver — not the previous hardcoded `'0.1.0'`
+  // that drifted behind the actual package version (currently 0.6.1).
+  //
+  // createRequire(import.meta.url) works under both tsx (dev) and the
+  // bundled dist (prod). If the resolution fails for any reason
+  // (unusual loader, trimmed package.json), fall back to a sentinel
+  // rather than crashing boot — a missing VERSION is far less harmful
+  // than a ReferenceError on globalThis.MACRO.
+  let pkgVersion = '0.0.0-unknown'
+  try {
+    const requireFromHere = createRequire(import.meta.url)
+    const pkg = requireFromHere('@zn-ai/zn-agent-core/package.json') as {
+      version?: unknown
+    }
+    if (typeof pkg?.version === 'string' && pkg.version) {
+      pkgVersion = pkg.version
+    }
+  } catch {
+    // keep sentinel; vendor consumers degrade to 'unknown' / '0.0.0'.
+  }
+  const VERSION = pkgVersion
+  const DISPLAY_VERSION = pkgVersion
   const BUILD_TIME = new Date().toISOString()
   const IS_DEVELOPMENT_BUILD = true
   const PACKAGE_URL = 'https://www.npmjs.com/package/@zn-ai/zn-agent-core'
