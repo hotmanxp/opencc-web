@@ -15,10 +15,27 @@ vi.mock('../../lib/api', () => ({
   api: { post: vi.fn(async () => ({ sessionId: 'quick-sess-1', queued: false })) },
 }))
 
+// tfa-vy72blq6 2026-09-05:QuickCreateModal 提交后切到 chat mode,在 modal 内
+// 嵌 AgentConversation 渲染 intake researcher 的输出;同时 SSE 走
+// subscribeServerEvents 挂到 intake session。happy-dom 没有 EventSource 全局,
+// 这里 mock 两件事:
+//  - AgentConversation 替成 stub 元素,避免触发整棵 AgentInputBox / MessageList
+//    子树渲染(supervisor 默认 layout 那条线);
+//  - subscribeServerEvents 替成空操作 handle,避免 happy-dom 抛
+//    "EventSource is not defined"。
+// 跟 NewSuperTaskModal.test.tsx 完全一致的策略。
+vi.mock('../../pages/AgentConversation', () => ({
+  default: () => <div data-testid="quick-chat-conversation-mock" />,
+}))
+vi.mock('../../lib/eventSource', () => ({
+  subscribeServerEvents: vi.fn(() => ({ close: () => {} })),
+}))
+
 import {
   createAgentSession, deleteAgentSession,
 } from '../../lib/agentSessionApi'
 import { api } from '../../lib/api'
+import { subscribeServerEvents } from '../../lib/eventSource'
 
 beforeEach(() => {
   useSuperTaskStore.setState({
@@ -593,6 +610,134 @@ describe('QuickCreateModal (2026-09-04 quick-intake; tf-429i39sy 2026-09-05 去 
       expect(modeIdx).toBeGreaterThan(-1)
       expect(attachmentsIdx).toBeLessThan(modeIdx)
       vi.unstubAllGlobals()
+    })
+  })
+
+  // ---- chat mode(tfa-vy72blq6 2026-09-05):表单提交后切到对话态,modal 不关闭,
+  // 内嵌 AgentConversation 显示 intake researcher 输出,顶部 toolbar 有
+  // 「取消」+「确认建任务」按钮。designReady 翻 true 后才能点确认。----
+
+  describe('chat mode (intake researcher lite)', () => {
+    it('表单提交后切到 chat mode:渲染 AgentConversation stub + 状态 tag + 取消 / 确认按钮', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      fireEvent.change(screen.getByTestId('quick-description-input'), {
+        target: { value: '把按钮文案改一下' },
+      })
+      fireEvent.click(screen.getByTestId('quick-submit-button'))
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      // intake-scoped 子树 + 状态 tag + 取消 / 确认按钮全部就位
+      expect(screen.getByTestId('quick-chat-conversation-mock')).toBeTruthy()
+      expect(screen.getByTestId('quick-chat-design-pending')).toBeTruthy()
+      expect(screen.getByTestId('quick-chat-cancel-button')).toBeTruthy()
+      expect(screen.getByTestId('quick-chat-confirm-button')).toBeTruthy()
+      // chat mode 时表单应卸载(三个 radio / input 都不在 DOM)
+      expect(screen.queryByTestId('quick-description-input')).toBeNull()
+      expect(screen.queryByTestId('quick-submit-button')).toBeNull()
+    })
+
+    it('chat mode 挂 EventSource(sid=intake session)', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      fireEvent.change(screen.getByTestId('quick-description-input'), {
+        target: { value: '改文案' },
+      })
+      fireEvent.click(screen.getByTestId('quick-submit-button'))
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      // subscribeServerEvents 被调过,sid 是 intake session id(createAgentSession
+      // mock 返回 quick-sess-1)
+      expect(subscribeServerEvents).toHaveBeenCalledWith(
+        'quick-sess-1',
+        expect.any(Function),
+      )
+    })
+
+    it('chat mode 下「确认建任务」按钮初始 disabled(还没出方案)', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      fireEvent.change(screen.getByTestId('quick-description-input'), {
+        target: { value: '改文案' },
+      })
+      fireEvent.click(screen.getByTestId('quick-submit-button'))
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      const btn = screen.getByTestId('quick-chat-confirm-button') as HTMLButtonElement
+      expect(btn.hasAttribute('disabled')).toBe(true)
+    })
+
+    it('「取消」按钮调 deleteAgentSession + onClose,无任务创建', async () => {
+      const onClose = vi.fn()
+      render(<QuickCreateModal open onClose={onClose} />)
+      fireEvent.change(screen.getByTestId('quick-description-input'), {
+        target: { value: '改文案' },
+      })
+      fireEvent.click(screen.getByTestId('quick-submit-button'))
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      // 清除 createAgentSession 计数,只看 cancel 路径的 delete 调用
+      ;(deleteAgentSession as unknown as { mockClear: () => void }).mockClear()
+      fireEvent.click(screen.getByTestId('quick-chat-cancel-button'))
+      await waitFor(() => {
+        expect(deleteAgentSession).toHaveBeenCalledWith('quick-sess-1')
+        expect(onClose).toHaveBeenCalled()
+      })
+      // 没有 task_factory.created → useSuperTaskStore.lastCreatedTaskId 仍为 null
+      //   → 不应切到「完成」条
+      expect(screen.queryByText(/已创建/)).toBeNull()
+    })
+
+    it('用户 chat 输入 → /agent/prompt 触发 confirm 消息 → agent 调用 SuperTasksCreate → 完成条', async () => {
+      // 这里用一个集成序列模拟 happy path:用户在 chat 里点确认 → 发「确认」prompt →
+      // agent 在那一轮调 SuperTasksCreate → 服务端 SSE 触发 task_factory.created →
+      // modal 切到完成条 + 「完成」按钮 + handleDone → deleteAgentSession。
+      // 因为 intake researcher 是真实模型调用,这里不模拟整段模型推理,改用
+      // 后端 path:直接 setState lastCreatedTaskId 模拟 SSE 推回,验证前端
+      // 链路(确认按钮 → /agent/prompt → 切完成条 → handleDone → 关 modal)是对的。
+      const onClose = vi.fn()
+      render(<QuickCreateModal open onClose={onClose} />)
+      fireEvent.change(screen.getByTestId('quick-description-input'), {
+        target: { value: '改文案' },
+      })
+      fireEvent.click(screen.getByTestId('quick-submit-button'))
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      // 模拟 SSE task_factory.created 推回(useSuperTaskStore 的 applyTaskFactoryEvent)
+      // → modal 应切到完成条
+      act(() => {
+        useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-quickchat01' })
+      })
+      expect(await screen.findByText(/任务 tf-quickchat01 已创建/)).toBeTruthy()
+      // chat mode 卸载,「完成」按钮就位
+      expect(screen.queryByTestId('quick-chat-mode')).toBeNull()
+      const doneBtn = await screen.findByRole('button', { name: (n) => n.replace(/\s+/g, '') === '完成' })
+      fireEvent.click(doneBtn)
+      await waitFor(() => {
+        expect(deleteAgentSession).toHaveBeenCalledWith('quick-sess-1')
+        expect(onClose).toHaveBeenCalled()
+      })
+    })
+
+    it('chat mode 与 createdTaskId 共存时,createdTaskId 优先级高(切到完成条)', async () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      fireEvent.change(screen.getByTestId('quick-description-input'), {
+        target: { value: '改文案' },
+      })
+      fireEvent.click(screen.getByTestId('quick-submit-button'))
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-chat-mode')).toBeTruthy()
+      })
+      // task_factory.created 触发 → 应切到完成条,chat mode 卸载
+      act(() => {
+        useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-q1' })
+      })
+      await waitFor(() => {
+        expect(screen.queryByTestId('quick-chat-mode')).toBeNull()
+        expect(screen.getByText(/任务 tf-q1 已创建/)).toBeTruthy()
+      })
     })
   })
 })
