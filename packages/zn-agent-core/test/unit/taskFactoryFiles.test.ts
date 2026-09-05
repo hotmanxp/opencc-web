@@ -9,6 +9,7 @@ import {
   checkTaskIntakeDocs,
   TASK_YAML_FILENAME, LEGACY_INDEX_MD_FILENAME,
   sortTasksByPriority, normalizePriority, PR_ORDER, DEFAULT_TASK_PRIORITY, TASK_PRIORITIES,
+  sortFinishedByCompletedDesc, invalidateTasksSnapshot,
 } from '../../src/opencc-src/server/taskFactoryFiles.js'
 
 let dir: string
@@ -212,6 +213,25 @@ describe('taskFactoryFiles (task.yaml 2026-09-02)', () => {
     expect(bucket.verifying[0]?.status).toBe('verifying')
   })
 
+  it('listTasks finished 桶按 completedAt DESC 排(tf-w1mixibj,2026-09-05)', async () => {
+    // 三个任务:不同时间完成 → 最近完成应排首;无 completedAt 的回退 createdAt DESC。
+    // moveTask 不自动写 completedAt,这里手工 markTaskStatus 注入完成时间戳。
+    const a = await createPoolTask({ title: 'done-a' })
+    const b = await createPoolTask({ title: 'done-b' })
+    const c = await createPoolTask({ title: 'done-c' })
+    await moveTask(a.id, 'queue-tasks', 'finished-tasks')
+    await moveTask(b.id, 'queue-tasks', 'finished-tasks')
+    await moveTask(c.id, 'queue-tasks', 'finished-tasks')
+    await markTaskStatus(a.id, 'finished-tasks', { status: 'done', completedAt: '2026-09-01T10:00:00.000Z' })
+    await markTaskStatus(b.id, 'finished-tasks', { status: 'done', completedAt: '2026-09-05T10:00:00.000Z' })
+    await markTaskStatus(c.id, 'finished-tasks', { status: 'done', completedAt: '2026-09-03T10:00:00.000Z' })
+    // 失效快照缓存,确保读到刚 markTaskStatus 后的状态
+    invalidateTasksSnapshot()
+    const bucket = await listTasks()
+    const ours = bucket.finished.filter((t) => [a.id, b.id, c.id].includes(t.id))
+    expect(ours.map((t) => t.id)).toEqual([b.id, c.id, a.id]) // 09-05 → 09-03 → 09-01
+  })
+
   it('deleteTasks 拒绝 verifying 桶任务（验证闭环保护）', async () => {
     const s = await createPoolTask({ title: 'dv' })
     await moveTask(s.id, 'queue-tasks', 'processing-tasks')
@@ -300,6 +320,19 @@ describe('taskFactoryFiles priority + dependsOn (2026-09-02 任务工厂升级)'
       { id: '4', priority: undefined, createdAt: '2026-09-02T08:00:00.000Z' }, // 缺省视为 P2
     ])
     expect(out.map((t) => t.id)).toEqual(['0', '3', '4', '2', '1']) // P0 → P1 → P2(4=08:00 < 2=09:00 < 1=10:00,undefined 兜底 P2)
+  })
+
+  it('sortFinishedByCompletedDesc: completedAt DESC(最近完成在前);缺 completedAt 回退 createdAt', () => {
+    // tf-w1mixibj(2026-09-05):已完成列表按完成时间倒序;历史/异常路径无 completedAt 时
+    // 回退 createdAt DESC,避免退化成「任意顺序」。
+    const out = sortFinishedByCompletedDesc([
+      { id: 'A', completedAt: '2026-09-04T10:00:00.000Z', createdAt: '2026-09-01T10:00:00.000Z' },
+      { id: 'B', completedAt: '2026-09-05T08:00:00.000Z', createdAt: '2026-09-02T10:00:00.000Z' },
+      { id: 'C', completedAt: '2026-09-03T10:00:00.000Z', createdAt: '2026-09-03T10:00:00.000Z' },
+      { id: 'D', completedAt: null, createdAt: '2026-09-06T10:00:00.000Z' }, // 无完成时间 → 用 createdAt DESC
+      { id: 'E', completedAt: null, createdAt: '2026-09-07T10:00:00.000Z' }, // E createdAt 晚于 D → 应排前
+    ])
+    expect(out.map((t) => t.id)).toEqual(['E', 'D', 'B', 'A', 'C'])
   })
 
   it('listTasks 桶内按 priority ASC + createdAt ASC 排序(P0 排首)', async () => {
