@@ -476,6 +476,23 @@ export function sortTasksByPriority<T extends { priority?: TaskPriority; created
   })
 }
 
+/**
+ * 已完成桶排序(tf-w1mixibj):按完成时间倒序展示,最近完成的任务排最前,
+ * 符合用户对「已完成」列表的直观预期。fallback 链:completedAt DESC → createdAt DESC
+ * (历史任务 / 异常路径 completedAt 为 null/undefined 时仍能稳定排序,不会因缺字段
+ * 而退化成随机顺序)。其它桶(队列/执行中/验证中)的派发语义不变,继续走
+ * {@link sortTasksByPriority}(priority ASC + createdAt ASC,调度官按「该派谁」排)。
+ */
+export function sortFinishedByCompletedDesc<T extends { completedAt?: string | null; createdAt?: string }>(tasks: T[]): T[] {
+  return [...tasks].sort((a, b) => {
+    // 完成时间倒序:ISO 字符串字典序 = 时间倒序。两者都缺失时空串相等 → stable sort
+    // 保留原顺序(spread copy 已稳定),避免同 createdAt 的任务在每次 reload 时顺序抖动。
+    const aTs = a.completedAt ?? a.createdAt ?? ''
+    const bTs = b.completedAt ?? b.createdAt ?? ''
+    return bTs.localeCompare(aTs)
+  })
+}
+
 async function listIn(bucket: TaskBucketName): Promise<TaskSummary[]> {
   const root = taskFactoryRoot()
   const dir = join(root, bucket)
@@ -486,8 +503,12 @@ async function listIn(bucket: TaskBucketName): Promise<TaskSummary[]> {
     const meta = await readTaskMeta(id, bucket)
     if (meta) out.push(toSummary(id, bucket, meta))
   }
-  // zai patch (2026-09-02, 任务工厂升级):queue/processing/verifying/finished
-  // 四个桶统一按 priority ASC + createdAt ASC 排,调度官 UI/调度看到的顺序一致。
+  // zai patch (2026-09-02, 任务工厂升级):queue/processing/verifying 三个活动桶
+  // 统一按 priority ASC + createdAt ASC 排,调度官 UI/调度看到的顺序一致。
+  // zai patch (2026-09-05, tf-w1mixibj):finished 桶改成 completedAt DESC(最近完成在前),
+  // fallback createdAt DESC;移动端 /m-super-tasks 与桌面 /super-tasks 共享同一份数据,
+  // server 端单点修,前端零改动。
+  if (bucket === 'finished-tasks') return sortFinishedByCompletedDesc(out)
   return sortTasksByPriority(out)
 }
 
