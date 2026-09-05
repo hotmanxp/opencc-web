@@ -10,6 +10,8 @@ import {
   TASK_YAML_FILENAME, LEGACY_INDEX_MD_FILENAME,
   sortTasksByPriority, normalizePriority, PR_ORDER, DEFAULT_TASK_PRIORITY, TASK_PRIORITIES,
   sortFinishedByCompletedDesc, invalidateTasksSnapshot,
+  // zai patch (2026-09-05, tf-flofuz1q):三阶段职责固化字段测试导入。
+  CHANGE_TYPES, VERIFICATION_SCOPES, normalizeChangeType, normalizeVerificationScope,
 } from '../../src/opencc-src/server/taskFactoryFiles.js'
 
 let dir: string
@@ -530,5 +532,109 @@ describe('checkTaskIntakeDocs mode 分流 (2026-09-04 quick-intake)', () => {
     expect(check?.mode).toBe('full')
     expect(check?.ok).toBe(false)
     expect(check?.missing.sort()).toEqual(['docs/brainstorm.md', 'docs/plan.md'])
+  })
+})
+
+// zai patch (2026-09-05, tf-flofuz1q):三阶段职责固化字段 round-trip 测试。
+// 三字段全部 optional + 历史兼容;createPoolTask 写入 task.yaml,listTasks 读回
+// summary 字段,值完整。
+describe('taskFactoryFiles three-stage discipline fields (2026-09-05 tf-flofuz1q)', () => {
+  it('CHANGE_TYPES / VERIFICATION_SCOPES 暴露稳定契约', () => {
+    expect(CHANGE_TYPES).toEqual(['docs', 'copy', 'style', 'logic', 'core', 'api', 'security'])
+    expect(VERIFICATION_SCOPES).toEqual(['ts_files', 'test_files', 'visual', 'none', 'build_artifact'])
+  })
+
+  it('normalizeChangeType / normalizeVerificationScope: 合法值透传,非法值(含 null/undefined)回落到 undefined', () => {
+    for (const ct of CHANGE_TYPES) {
+      expect(normalizeChangeType(ct)).toBe(ct)
+    }
+    expect(normalizeChangeType(undefined)).toBeUndefined()
+    expect(normalizeChangeType(null)).toBeUndefined()
+    expect(normalizeChangeType('LOGIC')).toBeUndefined() // 大小写敏感
+    expect(normalizeChangeType(1)).toBeUndefined()
+    for (const vs of VERIFICATION_SCOPES) {
+      expect(normalizeVerificationScope(vs)).toBe(vs)
+    }
+    expect(normalizeVerificationScope(undefined)).toBeUndefined()
+    expect(normalizeVerificationScope(null)).toBeUndefined()
+    expect(normalizeVerificationScope('TS_FILES')).toBeUndefined()
+  })
+
+  it('createPoolTask 接受 changeType + verificationScope + changedFiles,落到 task.yaml', async () => {
+    const s = await createPoolTask({
+      title: '三阶段任务',
+      cwd: '/abs/proj',
+      changeType: 'logic',
+      verificationScope: 'ts_files',
+      changedFiles: ['packages/foo/src/a.ts', 'packages/foo/src/b.ts'],
+    })
+    expect(s.changeType).toBe('logic')
+    expect(s.verificationScope).toBe('ts_files')
+    expect(s.changedFiles).toEqual(['packages/foo/src/a.ts', 'packages/foo/src/b.ts'])
+    const yaml = await readFile(join(dir, 'queue-tasks', s.id, TASK_YAML_FILENAME), 'utf-8')
+    expect(yaml).toContain('changeType: logic')
+    expect(yaml).toContain('verificationScope: ts_files')
+    expect(yaml).toContain('- packages/foo/src/a.ts')
+    expect(yaml).toContain('- packages/foo/src/b.ts')
+  })
+
+  it('createPoolTask 缺省三字段:summary 字段全 undefined,task.yaml 不写入对应 key', async () => {
+    const s = await createPoolTask({ title: '无三字段任务' })
+    expect(s.changeType).toBeUndefined()
+    expect(s.verificationScope).toBeUndefined()
+    expect(s.changedFiles).toBeUndefined()
+    const yaml = await readFile(join(dir, 'queue-tasks', s.id, TASK_YAML_FILENAME), 'utf-8')
+    expect(yaml).not.toContain('changeType:')
+    expect(yaml).not.toContain('verificationScope:')
+    expect(yaml).not.toContain('changedFiles:')
+  })
+
+  it('createPoolTask 拒绝非法 changeType / verificationScope(fail loud)', async () => {
+    await expect(createPoolTask({ title: 'bad-ct', changeType: 'logic-typo' as never })).rejects.toThrow(/invalid changeType/)
+    await expect(createPoolTask({ title: 'bad-vs', verificationScope: 'ts_file_typo' as never })).rejects.toThrow(/invalid verificationScope/)
+  })
+
+  it('createPoolTask changedFiles 含非字符串 / 空串 → 过滤后只保留合法路径', async () => {
+    const s = await createPoolTask({
+      title: '脏 changedFiles',
+      changedFiles: ['packages/foo/a.ts', '', 123 as never, null as never, 'packages/foo/b.ts'],
+    })
+    expect(s.changedFiles).toEqual(['packages/foo/a.ts', 'packages/foo/b.ts'])
+    const yaml = await readFile(join(dir, 'queue-tasks', s.id, TASK_YAML_FILENAME), 'utf-8')
+    expect(yaml).toContain('- packages/foo/a.ts')
+    expect(yaml).toContain('- packages/foo/b.ts')
+  })
+
+  it('listTasks / getTaskSummary 读回三字段(YAML 序列化 round-trip)', async () => {
+    const a = await createPoolTask({
+      title: 'round-trip-a',
+      changeType: 'security',
+      verificationScope: 'none',
+      changedFiles: ['packages/foo/x.ts'],
+    })
+    const sum = await getTaskSummary(a.id, 'queue-tasks')
+    expect(sum?.changeType).toBe('security')
+    expect(sum?.verificationScope).toBe('none')
+    expect(sum?.changedFiles).toEqual(['packages/foo/x.ts'])
+    const bucket = await listTasks()
+    const found = bucket.queue.find((t) => t.id === a.id)
+    expect(found?.changeType).toBe('security')
+    expect(found?.verificationScope).toBe('none')
+    expect(found?.changedFiles).toEqual(['packages/foo/x.ts'])
+  })
+
+  it('读路径容错坏值:task.yaml 含非法 changeType / verificationScope / 混合 changedFiles', async () => {
+    const id = 'bad-three-stage-01'
+    await createPoolTask({ id, title: 'bad-three' })
+    const yamlPath = join(dir, 'queue-tasks', id, TASK_YAML_FILENAME)
+    const txt = await readFile(yamlPath, 'utf-8')
+    // 在末尾追加三个坏值
+    const patched = `${txt}changeType: GARBAGE\nverificationScope: ALSO_BAD\nchangedFiles:\n  - packages/good/x.ts\n  - 123\n  - null\n  - packages/good/y.ts\n`
+    await writeFile(yamlPath, patched, 'utf-8')
+    const sum = await getTaskSummary(id, 'queue-tasks')
+    // 非法枚举字符串 → undefined(不写);混合数组 → 只留字符串
+    expect(sum?.changeType).toBeUndefined()
+    expect(sum?.verificationScope).toBeUndefined()
+    expect(sum?.changedFiles).toEqual(['packages/good/x.ts', 'packages/good/y.ts'])
   })
 })

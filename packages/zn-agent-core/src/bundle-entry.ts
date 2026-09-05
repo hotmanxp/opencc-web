@@ -227,6 +227,17 @@ export type {
   CreatePoolTaskInput,
   IntakeDocCheck,
   IntakeDocPath,
+  // zai patch (2026-09-05, tf-flofuz1q):三阶段职责固化的类型导出。
+  ChangeType,
+  VerificationScope,
+} from './opencc-src/server/taskFactoryFiles.js'
+// 常量导出(zai patch 2026-09-05, tf-flofuz1q):enum 数组 + normalize 函数都
+// 导出,zai 端可消费(项目类型检测 / verifier 验证矩阵都依赖这些)。
+export {
+  CHANGE_TYPES,
+  VERIFICATION_SCOPES,
+  normalizeChangeType,
+  normalizeVerificationScope,
 } from './opencc-src/server/taskFactoryFiles.js'
 
 // ./compat/subagents(zai agentRuntime 依赖 getSubagentRegistry 拿
