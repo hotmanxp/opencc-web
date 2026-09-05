@@ -35,6 +35,12 @@ export interface TaskSummary {
    * 历史任务与 full 模式读不到该字段,缺省回落 full(向后兼容)。
    */
   mode?: TaskMode
+  /**
+   * 附件绝对路径列表(zai patch 2026-09-05, tf-pqvxpay0)。QuickCreateModal 上传
+   * 的图片副本落到 ~/.zai/uploads/,绝对路径传到 task.yaml 的 attachments 字段;
+   * 执行/验证子 agent 拿到 TaskSummary 后可直接 Read。读取路径容错坏数据。
+   */
+  attachments?: string[]
   bucket: TaskBucketName
 }
 export interface TaskBucket {
@@ -142,6 +148,11 @@ const TASK_YAML_FIELDS = [
   //       'full'   = 完整 intake 流程(三份文档齐全 + brainstorming)。
   // full 模式省略(序列化时不写入);仅 quick 显式落盘,读路径容错 undefined→full。
   'mode',
+  // zai patch (2026-09-05, tf-pqvxpay0 附件透传):QuickCreateModal 上传的图片副本
+  // 落到 ~/.zai/uploads/,绝对路径列表传给 SuperTasksCreate → 落到 task.yaml,
+  // 执行/验证子 agent 拿到 task.yaml 后可直接 Read 这些文件(避免 prompt 文本
+  // 拼接附件路径被模型忽略,或上传目录被 cwd-relative 误写进仓库根 .zai/)。
+  'attachments',
 ] as const
 
 /** 任务在 yaml 里允许的 status 字符串。 */
@@ -238,6 +249,11 @@ function parseTaskYaml(text: string): TaskYaml {
       // 只保留字符串元素;过滤掉 null/undefined/对象等异常值,容错坏数据。
       const arr = v.filter((x): x is string => typeof x === 'string' && x.length > 0)
       out[k] = arr
+    } else if (k === 'attachments' && Array.isArray(v)) {
+      // zai patch (2026-09-05, tf-pqvxpay0):与 dependsOn 同形态 —— 字符串绝对路径数组,
+      // 非字符串元素过滤掉。读取容错坏数据(损坏 yaml / 客户端误塞对象)。
+      const arr = v.filter((x): x is string => typeof x === 'string' && x.length > 0)
+      out[k] = arr
     }
   }
   return out
@@ -310,6 +326,14 @@ export interface CreatePoolTaskInput {
    * intake gate 与 verifier 按 mode 分流,只校验 / 只审查 spec.md。
    */
   mode?: TaskMode
+  /**
+   * 附件绝对路径列表(zai patch 2026-09-05, tf-pqvxpay0)。QuickCreateModal 上传的
+   * 图片副本落到 ~/.zai/uploads/,绝对路径传给 SuperTasksCreate → 落到 task.yaml
+   * 的 attachments 字段;执行/验证子 agent 拿到 task.yaml 后可直接 Read 这些文件。
+   * 历史任务无 attachments 字段,缺省 undefined;读取端容错坏数据(非字符串数组 →
+   * 过滤 / 整体 undefined)。
+   */
+  attachments?: string[]
 }
 export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSummary> {
   const id = input.id ?? generateTaskId()
@@ -347,6 +371,11 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     throw new Error(`invalid mode ${JSON.stringify(input.mode)} (allowed: ${TASK_MODES.join(', ')})`)
   }
   // 仅 quick 模式写入 mode 字段 —— 避免 yaml 里出现 `mode: null` 污染历史 full 任务。
+  // attachments(zai patch 2026-09-05, tf-pqvxpay0):过滤非字符串 / 空串;
+  // 非法值容错(模型塞对象/数字/空串)以避免污染 task.yaml 与下游读取。
+  const attachments = (input.attachments ?? []).filter(
+    (a): a is string => typeof a === 'string' && a.length > 0,
+  )
   const meta: TaskYaml = {
     id,
     title: input.title,
@@ -363,6 +392,7 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     priority,
     dependsOn,
     ...(mode === 'quick' ? { mode: 'quick' as const } : {}),
+    ...(attachments.length > 0 ? { attachments } : {}),
   }
   await writeFile(join(dir, TASK_YAML_FILENAME), serializeTaskYaml(meta), 'utf-8')
   if (mode === 'quick') {
@@ -400,6 +430,7 @@ export async function createPoolTask(input: CreatePoolTaskInput): Promise<TaskSu
     priority,
     dependsOn,
     mode,
+    ...(attachments.length > 0 ? { attachments } : {}),
     bucket: 'queue-tasks',
   }
 }
@@ -458,6 +489,11 @@ function toSummary(id: string, bucket: TaskBucketName, meta: TaskYaml): TaskSumm
       : [],
     // zai patch (2026-09-04, quick-intake):mode 缺省回落 full(向后兼容)。
     mode: normalizeMode(meta.mode),
+    // zai patch (2026-09-05, tf-pqvxpay0):attachments 是 string[],读取路径已
+    // 过滤非字符串;parseTaskYaml 里数组元素是非字符串时整字段被跳过 → undefined。
+    attachments: Array.isArray(meta.attachments)
+      ? (meta.attachments as unknown[]).filter((x): x is string => typeof x === 'string')
+      : undefined,
   }
 }
 
