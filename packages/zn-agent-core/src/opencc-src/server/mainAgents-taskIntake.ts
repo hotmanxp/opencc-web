@@ -14,6 +14,11 @@ import type { MainAgentConfig } from './mainAgents.js'
 import { stripCodingSections } from './mainAgents-promptSections.js'
 import { readCoreFactorySettings } from './factorySettingsCore.js'
 import { superTasksCreateTool } from './taskFactoryTools.js'
+import {
+  INLINED_BRAINSTORMING_SKILL,
+  INLINED_WRITING_PLANS_SKILL,
+  INTAKE_SKILL_DISCIPLINE,
+} from '../prompts/intakeSkillsInlined.js'
 
 /** task-intake 内置 agent 的固定 name(新建任务弹窗建会话时指定)。 */
 export const TASK_INTAKE_MAIN_AGENT_NAME = 'task-intake'
@@ -21,7 +26,7 @@ export const TASK_INTAKE_MAIN_AGENT_NAME = 'task-intake'
 const TASK_INTAKE_SYSTEM_PROMPT = [
   'You are the requirement-intake Agent of the "Task Factory". Your single responsibility: clarify the user\'s new task requirement through discussion and land it as one task in the Task Factory queue. Workflow:',
   // zai patch (2026-09-02, 任务工厂升级 priority + dependsOn):
-  '1. Requirement discussion: invoke SkillTool to run the brainstorming skill, and work out the task goal, acceptance criteria, and scope boundaries with the user step by step. During the discussion you must collect: task title, project cwd (the **absolute path** of the code project the task belongs to — the executor subagent will work there), executor agent (opencc / dsh / default, defaults to opencc), **priority** ("P0"|"P1"|"P2"|"P3", default "P2" — P0 means drop-everything urgent, P1 high, P2 normal, P3 low), and **dependsOn** (a list of task ids from `~/.zai/task-factory/finished-tasks/` that must finish before this task can dispatch; default [] — call `list_tasks` from a quick shell or read the directory to confirm the ids exist). Proactively ask for any element the user did not mention upfront — priority and dependsOn are mandatory before you can call SuperTasksCreate.',
+  '1. Requirement discussion: read the inlined brainstorming flow below (look for "# Brainstorming Ideas Into Designs" — already inlined into this system prompt at startup, no SkillTool invocation required). Walk the user through the brainstorming checklist (explore context → clarifying questions → propose approaches → present design → write spec doc → self-review → user review) step by step. During the discussion you must collect: task title, project cwd (the **absolute path** of the code project the task belongs to — the executor subagent will work there), executor agent (opencc / dsh / default, defaults to opencc), **priority** ("P0"|"P1"|"P2"|"P3", default "P2" — P0 means drop-everything urgent, P1 high, P2 normal, P3 low), and **dependsOn** (a list of task ids from `~/.zai/task-factory/finished-tasks/` that must finish before this task can dispatch; default [] — call `list_tasks` from a quick shell or read the directory to confirm the ids exist). Proactively ask for any element the user did not mention upfront — priority and dependsOn are mandatory before you can call SuperTasksCreate.',
   '2. Persist: once the requirements converge, **call `SuperTasksCreate` first** with title / cwd / agent / description / priority / dependsOn and **pass the discussed spec/plan content as `spec` / `plan` parameters** (the tool initializes `task.yaml` / `docs/spec.md` / `docs/plan.md` / `process.md` from your inputs). **Do NOT call Write/Edit on `docs/spec.md` or `docs/plan.md` BEFORE this tool call** — the skeleton already exists; pre-writing leaves stale files in the directory and can confuse the executor subagent when it later reads the spec. After creation, Edit/Write on `docs/spec.md` / `docs/plan.md` is allowed for follow-up corrections only.',
   '3. Archive minutes: after the task is created, use Write to save the discussion minutes to `<task storage directory>/docs/brainstorm.md` (the storage path returned by SuperTasksCreate), covering: task goal, acceptance criteria, key decisions with rationale, scope boundaries (what is explicitly NOT in scope), and the user-confirmed priority + dependsOn with rationale.',
   '4. Wrap up: report the task id, storage directory, priority, and dependsOn to the user, give a one-sentence summary, and end the discussion.',
@@ -84,7 +89,10 @@ export const taskIntakeMainAgent: MainAgentConfig = {
   // 需求讨论需先摸清项目代码,保留 # CodeGraph 段(见 mainAgents-promptSections.ts)。
   systemPrompt: (origin) => [
     ...TASK_INTAKE_SYSTEM_PROMPT,
+    ...INLINED_BRAINSTORMING_SKILL,
+    ...INLINED_WRITING_PLANS_SKILL,
     ...taskIntakeSettingsSection(),
+    ...INTAKE_SKILL_DISCIPLINE,
     ...stripCodingSections(origin, ['codegraph']),
   ],
   tools: taskIntakeTools,
