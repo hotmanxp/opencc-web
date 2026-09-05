@@ -1,4 +1,4 @@
-import { createElement, type JSX } from 'react'
+import { createElement, useEffect, useState, type JSX } from 'react'
 import { Button, Checkbox, Popconfirm, Space, Tag, Tooltip } from 'antd'
 import { ClockCircleOutlined, DeleteOutlined, PlayCircleOutlined, PauseCircleOutlined } from '@ant-design/icons'
 import type { TaskSummary } from '../../lib/superTaskApi'
@@ -161,7 +161,7 @@ const stop = (e: React.MouseEvent | React.ChangeEvent): void => e.stopPropagatio
  *
  * 标题 + 状态Tag + agent Tag / 描述 2 行截断 / cwd / 创建时间 + 常显操作按钮。
  * 操作按 bucket+status(2026-09-02 加 verifying 桶):
- * - queue→「已排队」Tag(非交互,见 L319-337,tf-gqu253az)
+ * - queue→▶启动 / 点击后乐观切到「已排队」Tag(tf-fjdn0n4v 修正 tf-gqu253az)
  * - processing+processing→⏸暂停+验收
  * - processing+paused→▶继续
  * - verifying→强制通过(跳过 verifier 直接 MarkDone)
@@ -170,7 +170,7 @@ const stop = (e: React.MouseEvent | React.ChangeEvent): void => e.stopPropagatio
 export default function SuperTaskCard({
   task, selected, onToggleSelect, dimmed, onOpenDetail, onDeleted,
 }: SuperTaskCardProps): JSX.Element {
-  const { pause, resume, accept, deleteTasks } = useSuperTaskStore.getState()
+  const { start, pause, resume, accept, deleteTasks } = useSuperTaskStore.getState()
   const tag = STATUS_TAG[task.status] ?? { color: 'default', label: task.status }
   const accent = STATUS_ACCENT[task.status] ?? '#9ca3af'
   const inProcessing = task.bucket === 'processing-tasks'
@@ -179,6 +179,15 @@ export default function SuperTaskCard({
   const showAccept = inProcessing || inVerifying
   const showPause = inProcessing && task.status === 'processing'
   const showResume = inProcessing && task.status === 'paused'
+  // zai patch (2026-09-05, tf-fjdn0n4v):queue 卡片的乐观启动态。
+  // 默认渲染「启动」按钮(可点),点击后立即置 isStarting 切到「已排队」
+  // Tag 解决 tf-gqu253az 回归(用户没按钮可点)。server 反馈后 bucket
+  // 通常会变 'processing-tasks' → 走其他渲染分支,这里 useEffect 兜底
+  // 清 isStarting,避免下次 bucket 切回 queue-tasks 时残留乐观态。
+  const [isStarting, setIsStarting] = useState(false)
+  useEffect(() => {
+    if (task.bucket !== 'queue-tasks' && isStarting) setIsStarting(false)
+  }, [task.bucket, isStarting])
 
   async function handleDelete(): Promise<void> {
     try {
@@ -316,14 +325,33 @@ export default function SuperTaskCard({
           {task.createdAt ? new Date(task.createdAt).toLocaleString() : '-'}
         </span>
         <Space size={4}>
-          {/* zai patch (2026-09-05, tf-gqu253az):queue→▶启动按钮改成「已排队」Tag。
-              原 start 按钮点击后,服务端 queued→processing 有一小段时间窗,
-              「按钮消失 / 状态文字切换」在快速操作后不够直观,用户回头
-              看卡片会觉得「刚才点的按钮到底有没有生效」。
-              现改为非交互 Tag:pointerEvents: none + cursor: default,
-              视觉上明确告诉用户「已排队,等待调度中」。其他状态
-              (processing/verifying/finished)的视觉标识不变。 */}
-          {task.bucket === 'queue-tasks' && (
+          {/* zai patch (2026-09-05, tf-fjdn0n4v):queue 卡片默认显示「启动」按钮,
+              点击后乐观切到「已排队」Tag。修复 tf-gqu253az 把按钮整体替换
+              导致的回归(新创建的 queued 任务无 Start 按钮)。
+              - !isStarting → 渲染 AntD Button ▶ + 文字「启动」,onClick 触发
+                start(task.id);stopPropagation 阻断卡片 onOpen。
+              - isStarting → 渲染「已排队」非交互 Tag(tf-gqu253az 引入,
+                pointerEvents: none + cursor: default + Tooltip 解释),
+                让用户在 server 飞行中有视觉反馈。
+              - server 反馈(task.bucket 离开 queue-tasks)由 useEffect 兜底
+                清 isStarting,渲染分支自然走其他状态。其他状态视觉零变化。 */}
+          {task.bucket === 'queue-tasks' && !isStarting && (
+            <Tooltip title="启动任务">
+              <Button
+                size="small"
+                icon={<PlayCircleOutlined />}
+                data-testid={`quick-start-task-${task.id}`}
+                onClick={(e) => {
+                  stop(e)
+                  setIsStarting(true)
+                  start(task.id).catch(() => setIsStarting(false))
+                }}
+              >
+                启动
+              </Button>
+            </Tooltip>
+          )}
+          {task.bucket === 'queue-tasks' && isStarting && (
             <Tooltip title="已排队,等待调度中">
               <Tag
                 icon={<ClockCircleOutlined />}

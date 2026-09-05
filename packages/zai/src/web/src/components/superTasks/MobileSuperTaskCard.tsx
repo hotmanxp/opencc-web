@@ -1,5 +1,6 @@
+import { useEffect, useState } from 'react'
 import { Button, Popconfirm, Tag, Tooltip, message } from 'antd'
-import { ClockCircleOutlined, CloseOutlined } from '@ant-design/icons'
+import { ClockCircleOutlined, CloseOutlined, PlayCircleOutlined } from '@ant-design/icons'
 import type { TaskSummary } from '../../lib/superTaskApi'
 import { deleteSuperTasks } from '../../lib/superTaskApi'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
@@ -38,6 +39,12 @@ import { STATUS_TAG, PRIORITY_TAG, STATUS_ACCENT } from './SuperTaskCard'
  * pointerEvents: none + cursor: default,从 DOM 层阻断交互意图。
  * 跟桌面 SuperTaskCard L319-337 同步行为。
  *
+ * 2026-09-05(tf-fjdn0n4v)再改:回归修正 —— tf-gqu253az 把按钮整体替换
+ * 导致新创建的 queued 任务没有 Start 按钮。现恢复默认渲染「启动」按钮
+ * (▶ + 文字),点击后乐观切到「已排队」Tag 解决反馈感缺失;server
+ * 反馈 task.status/bucket 变化后用 useEffect 兜底清 isStarting,渲染分支
+ * 自然走其他状态。行为契约与桌面 SuperTaskCard L319-367 完全一致。
+ *
  * 触控目标 ≥44px(整卡 minHeight:56;启动按钮独立区)。
  */
 export default function MobileSuperTaskCard({
@@ -59,11 +66,18 @@ export default function MobileSuperTaskCard({
   // 状态守卫:processing / verifying 桶不可删(in-flight 任务避免打断),
   // 后端对这两个状态也会返 409,前端 disabled 是双保险。
   const deletable = task.status !== 'processing' && task.status !== 'verifying'
-  // 仅 queued 任务在底部操作区显示「已排队」Tag(tf-oi7wu722 +
-  // tf-gqu253az):与桌面 SuperTaskCard L319-337 同款 `bucket === 'queue-tasks'`
-  // 守卫,这里直接以 status 兜底(避免历史无 bucket 字段的 legacy 数据
-  // 漏显示)。Tag 是非交互指示器,无 onClick / 无 loading 态。
-  const showQueuedTag = task.status === 'queued'
+  // 仅 queued 任务在底部操作区显示「启动」按钮(tf-oi7wu722)或点击后
+  // 切到「已排队」Tag(tf-fjdn0n4v):与桌面 SuperTaskCard L319-337 同款
+  // `bucket === 'queue-tasks'` 守卫,这里直接以 status 兜底(避免历史无
+  // bucket 字段的 legacy 数据漏显示)。
+  const showQueueAction = task.status === 'queued'
+  // 乐观启动态:点击启动后立刻置 true → 渲染「已排队」Tag;server
+  // 反馈 task.bucket 离开 queue-tasks 后由 useEffect 兜底清回 false,
+  // 避免下次 bucket 切回 queue-tasks 时残留乐观态。
+  const [isStarting, setIsStarting] = useState(false)
+  useEffect(() => {
+    if (task.bucket !== 'queue-tasks' && isStarting) setIsStarting(false)
+  }, [task.bucket, isStarting])
 
   async function handleDelete(): Promise<void> {
     try {
@@ -71,6 +85,18 @@ export default function MobileSuperTaskCard({
       message.success(`任务 ${task.id} 已删除`)
     } catch (err) {
       message.error(`删除失败: ${err instanceof Error ? err.message : String(err)}`)
+    }
+  }
+
+  async function handleStart(): Promise<void> {
+    if (isStarting) return
+    setIsStarting(true)
+    try {
+      await useSuperTaskStore.getState().start(task.id)
+      message.success(`任务 ${task.id} 已启动`)
+    } catch (err) {
+      message.error(`启动失败: ${err instanceof Error ? err.message : String(err)}`)
+      setIsStarting(false)
     }
   }
 
@@ -176,12 +202,31 @@ export default function MobileSuperTaskCard({
         <span style={{ fontSize: 12, color: '#94a3b8' }}>
           {formatRelative(ts)}
         </span>
-        {/* zai patch (2026-09-05, tf-gqu253az):queue→▶启动按钮改成「已排队」Tag,
-            跟桌面 SuperTaskCard L319-337 同款语义。Tag 是非交互指示器:
-            pointerEvents: none + cursor: default,从 DOM 层阻断 onClick +
-            stopPropagation 的潜在交互意图。挂 Tooltip title="已排队,
-            等待调度中" 提升可感知性。其他状态不渲染此 Tag。 */}
-        {showQueuedTag && (
+        {/* zai patch (2026-09-05, tf-fjdn0n4v):queue 卡片默认显示「启动」按钮,
+            点击后乐观切到「已排队」Tag。修复 tf-gqu253az 把按钮整体替换
+            导致的回归(新创建的 queued 任务无 Start 按钮)。
+            - !isStarting → 渲染 AntD Button ▶ + 文字「启动」,onClick 触发
+              start(task.id);stopPropagation 阻断卡片 onOpen。
+            - isStarting → 渲染「已排队」非交互 Tag(tf-gqu253az 引入,
+              pointerEvents: none + cursor: default + Tooltip 解释),
+              让用户在 server 飞行中有视觉反馈。
+            - server 反馈(task.bucket 离开 queue-tasks)由 useEffect 兜底
+              清 isStarting,渲染分支自然走其他状态。其他状态视觉零变化。 */}
+        {showQueueAction && !isStarting && (
+          <Tooltip title="立即执行该任务">
+            <Button
+              size="small"
+              type="primary"
+              icon={<PlayCircleOutlined />}
+              aria-label={`启动任务 ${task.title}`}
+              data-testid={`mobile-start-task-${task.id}`}
+              onClick={(e) => { e.stopPropagation(); void handleStart() }}
+            >
+              启动
+            </Button>
+          </Tooltip>
+        )}
+        {showQueueAction && isStarting && (
           <Tooltip title="已排队,等待调度中">
             <Tag
               icon={<ClockCircleOutlined />}
