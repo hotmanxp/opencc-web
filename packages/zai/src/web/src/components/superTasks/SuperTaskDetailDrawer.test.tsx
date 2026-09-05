@@ -216,4 +216,93 @@ describe('SuperTaskDetailDrawer', () => {
     expect(document.querySelector('.ant-drawer')).toBeTruthy()
     vi.unstubAllGlobals()
   })
+
+  // 2026-09-05 (tf-hq086lfy):移动端窄屏旧版 maxHeight=calc(100vh-240px) 把
+  // Timeline wrapper 高度压成 ~0px、fallback 「等待执行事件...」单行小灰字
+  // 看不见;且 Timeline 内的 [init] / 工具调用等事件帧被压到 drawer 滚出可视区。
+  // 修复:mobile drawer body 走 flex 列向布局 + Timeline wrapper flex:1 +
+  // Empty 组件占位 + Tab label 上挂事件计数 badge,让「事件流已开/已收到」
+  // 信号在窄屏也不会被布局吃掉。
+  it('isMobile=true + 有事件 → Tab label 出现事件计数 badge', async () => {
+    useAppStore.setState({ isMobile: true })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/events')) return eventsStreamMock()
+      return taskDetailsMock()
+    }))
+    try {
+      render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
+      // eventsStreamMock 推 2 帧,tab badge 应渲染 "2"
+      const badge = await screen.findByTestId('process-event-count')
+      expect(badge.textContent).toBe('2')
+    } finally {
+      useAppStore.setState({ isMobile: false })
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('isMobile=true + 无事件 → Empty 组件占位(data-testid=process-empty-state)', async () => {
+    useAppStore.setState({ isMobile: true })
+    // SSE 流只 close,不推任何帧 → rendered.length === 0
+    const emptyStreamMock = (): { ok: boolean; body: ReadableStream<Uint8Array> } => ({
+      ok: true,
+      body: new ReadableStream({ start(c) { c.close() } }),
+    })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/events')) return emptyStreamMock()
+      return taskDetailsMock()
+    }))
+    try {
+      render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
+      // Empty 节点存在 —— 这是用户感知「事件流是开的,只是还没收到」
+      // 的最小可信证据(旧版是裸 Typography.Text,窄屏会被压扁不可见)。
+      const empty = await screen.findByTestId('process-empty-state')
+      expect(empty).toBeTruthy()
+      expect(empty.textContent).toContain('等待执行事件')
+      // tab badge 此时不应出现
+      expect(screen.queryByTestId('process-event-count')).toBeNull()
+    } finally {
+      useAppStore.setState({ isMobile: false })
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('isMobile=true + 有事件 → Timeline wrapper 走 flex:1 + overflowY:auto(data-testid=process-timeline-scroll)', async () => {
+    useAppStore.setState({ isMobile: true })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/events')) return eventsStreamMock()
+      return taskDetailsMock()
+    }))
+    try {
+      render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
+      const wrap = await screen.findByTestId('process-timeline-scroll')
+      // mobile 分支显式声明 overflowY=auto + flex:1(不是桌面端 maxHeight=calc(...))
+      const cs = window.getComputedStyle(wrap)
+      expect(cs.overflowY).toBe('auto')
+    } finally {
+      useAppStore.setState({ isMobile: false })
+      vi.unstubAllGlobals()
+    }
+  })
+
+  // desktop 零回归:旧 maxHeight 路径保留
+  it('isMobile=false + 有事件 → Timeline wrapper 走 maxHeight=calc(100vh - 310px)(零回归)', async () => {
+    useAppStore.setState({ isMobile: false })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/events')) return eventsStreamMock()
+      return taskDetailsMock()
+    }))
+    try {
+      render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
+      const wrap = await screen.findByTestId('process-timeline-scroll')
+      const cs = window.getComputedStyle(wrap)
+      // desktop 端仍是 inline style maxHeight:calc(100vh - 310px) + overflow:auto,
+      // jsdom getComputedStyle 返回 inline style 直接值。
+      expect(wrap.getAttribute('style') ?? '').toMatch(/max-height:\s*calc\(100vh\s*-\s*310px\)/)
+      expect(cs.overflow).toMatch(/auto/)
+      // tab badge 仍渲染事件计数
+      expect((await screen.findByTestId('process-event-count')).textContent).toBe('2')
+    } finally {
+      vi.unstubAllGlobals()
+    }
+  })
 })
