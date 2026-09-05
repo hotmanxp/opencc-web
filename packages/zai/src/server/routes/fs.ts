@@ -1,7 +1,8 @@
 import { Router, type IRouter, type Request } from 'express';
 import { readdir, stat, readFile, rm, rmdir, mkdir, writeFile, access } from 'node:fs/promises';
 import type { Dirent } from 'node:fs';
-import { extname, basename, join, sep } from 'node:path';
+import { extname, basename, join, sep, resolve } from 'node:path';
+import { homedir } from 'node:os';
 import { execFile } from 'node:child_process';
 import { resolveSafePath } from '../utils/safePath.js';
 import { MAX_FILE_BYTES, writeTextFile } from '../utils/fsWrite.js';
@@ -19,11 +20,20 @@ const IGNORED = new Set([
   'node_modules', '.git', '.next', 'dist', 'build', '.cache', '.DS_Store',
 ]);
 
-// 拖入文件的存放目录(相对 cwd 的 POSIX 路径)。浏览器的 File.path /
-// file:// URI 已被现代浏览器移除,拖入文件的系统绝对路径拿不到 ——
-// 上传副本落到这里,用副本的绝对路径作为插入对话的「文件地址」,
-// agent 拿到后可直接读文件。
-const UPLOADS_REL = '.zai/uploads';
+// 拖入文件的存放目录(zai patch 2026-09-05, tf-pqvxpay0):改写到用户级
+// ~/.zai/uploads/,绝对路径。浏览器的 File.path / file:// URI 已被现代浏览器
+// 移除,拖入文件的系统绝对路径拿不到 —— 上传副本落到这里,用副本的绝对
+// 路径作为插入对话的「文件地址」,agent 拿到后可直接读文件。早期版本是
+// cwd-relative `.zai/uploads` —— 违反 AGENTS.md「不要把根 .zai/ 路径写进
+// 代码」约定(根 .zai/ 仅用于 IDE / dev 感知),改为 ~/.zai/uploads/ 后,所有
+// 实例共享同一上传池,任务工厂 quick-intake 也能用一份稳定的绝对路径(不会
+// 因不同 instance cwd 不同而错位)。
+const UPLOADS_DIR = resolveUploadsDir()
+
+/** 解析用户级上传目录的绝对路径 —— 暴露为命名导出供单测断言。 */
+export function resolveUploadsDir(): string {
+  return resolve(homedir(), '.zai', 'uploads')
+}
 // base64 请求体上限:express.json 全局是 20mb,留出 JSON envelope 余量。
 const MAX_UPLOAD_BASE64_LEN = 19 * 1024 * 1024;
 // 解码后的字节上限(base64 膨胀 ~1.33x 后仍落在 20mb JSON limit 内)。
@@ -547,7 +557,7 @@ fsRouter.put('/fs/file', async (req, res) => {
 /**
  * Sanitize a client-supplied filename for upload: strips directory
  * components (traversal guard — the stored copy always lives inside
- * `<cwd>/.zai/uploads/`), rejects hidden/control-char/oversized names.
+ * `~/.zai/uploads/`), rejects hidden/control-char/oversized names.
  */
 function sanitizeUploadName(name: unknown): string | null {
   if (typeof name !== 'string') return null;
@@ -586,7 +596,7 @@ async function uniqueUploadPath(dir: string, name: string): Promise<string> {
   }
 }
 
-// 拖入的非图片文件落到 `<cwd>/.zai/uploads/`,返回副本的绝对路径
+// 拖入的非图片文件落到 `~/.zai/uploads/`,返回副本的绝对路径
 // (FsUploadResult.absPath)作为「文件地址」插入对话输入框。
 fsRouter.post('/fs/upload', async (req, res) => {
   const { cwd } = ctx(req);
@@ -616,7 +626,7 @@ fsRouter.post('/fs/upload', async (req, res) => {
     res.status(413).json({ ok: false, error: `文件过大 (${mb} MB > 14 MB)` } satisfies FsUploadResult);
     return;
   }
-  const dir = join(cwd, ...UPLOADS_REL.split('/'));
+  const dir = UPLOADS_DIR;
   try {
     await mkdir(dir, { recursive: true });
   } catch (err) {
@@ -635,10 +645,12 @@ fsRouter.post('/fs/upload', async (req, res) => {
     res.status(500).json({ ok: false, error: `写入失败: ${err instanceof Error ? err.message : String(err)}` } satisfies FsUploadResult);
     return;
   }
+  // 上传目录已迁出 cwd(zai patch 2026-09-05, tf-pqvxpay0),relPath 也写绝对路径;
+  // QuickCreateModal 只用 absPath,relPath 仅作调试 / FsTab 显示用。
   res.json({
     ok: true,
     absPath,
-    relPath: `${UPLOADS_REL}/${basename(absPath)}`,
+    relPath: absPath,
     name: basename(absPath),
     size: buf.byteLength,
   } satisfies FsUploadResult);
