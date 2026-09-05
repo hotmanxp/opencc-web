@@ -45,7 +45,14 @@ import { STATUS_TAG, PRIORITY_TAG, STATUS_ACCENT } from './SuperTaskCard'
  * 反馈 task.status/bucket 变化后用 useEffect 兜底清 isStarting,渲染分支
  * 自然走其他状态。行为契约与桌面 SuperTaskCard L319-367 完全一致。
  *
- * 触控目标 ≥44px(整卡 minHeight:56;启动按钮独立区)。
+ * 2026-09-05(tf-7l9rsb47)改:整卡设固定 minHeight(基线 ≈ processing 卡
+ * 实测 ~108px),让 queue / processing / verifying / finished 四 tab 内卡片
+ * 高度一致,避免短内容卡视觉塌陷。根 div 加 `display:flex + flexDirection:
+ * column`,timestamp 行 `marginTop:'auto'` 让 timestamp 贴底,保证
+ * 齐顶齐底。根 div 加 `data-status` 属性(原 `data-testid=mobile-task-card-<id>`
+ * 保留),便于按 status 聚合回归断言。
+ *
+ * 触控目标 ≥44px(整卡 minHeight:108;启动按钮独立区)。
  */
 export default function MobileSuperTaskCard({
   task,
@@ -134,6 +141,7 @@ export default function MobileSuperTaskCard({
   return (
     <div
       data-testid={`mobile-task-card-${task.id}`}
+      data-status={task.status}
       onClick={() => onOpen(task.id)}
       role="button"
       tabIndex={0}
@@ -155,7 +163,13 @@ export default function MobileSuperTaskCard({
         borderLeft: `4px solid ${accent}`,
         boxShadow: '0 1px 3px rgba(15,23,42,.06)',
         cursor: 'pointer',
-        minHeight: 56,
+        // zai patch (2026-09-05, tf-7l9rsb47):根 div 抬到 processing 卡
+        // 实测基线 ≈108px(padding-top 10 + Tag 行 22 + gap 6 + title 行
+        // 20 + gap 6 + timestamp 行 24 + padding-bottom 10 ≈ 98,加 10px
+        // 安全余量 → 108,4 的倍数),让 queue / processing / verifying
+        // / finished 四 tab 内卡片高度齐顶齐底;display:flex + column
+        // (上方)+ timestamp 行 marginTop:'auto'(下方)双向锁定布局。
+        minHeight: 108,
         outline: 'none',
       }}
     >
@@ -229,6 +243,11 @@ export default function MobileSuperTaskCard({
           justifyContent: 'space-between',
           alignItems: 'center',
           gap: 8,
+          // zai patch (2026-09-05, tf-7l9rsb47):根 div flex column 布局下,
+          // timestamp 行 marginTop:'auto' 把它推到卡底,保证短内容卡
+          // (单行 tag、标题短)跟长内容卡齐底;与 minHeight:108 配合实现
+          // 「齐顶齐底」,视觉上四个 tab 内卡片高度一致。
+          marginTop: 'auto',
         }}
       >
         <span style={{ fontSize: 12, color: '#94a3b8' }}>
