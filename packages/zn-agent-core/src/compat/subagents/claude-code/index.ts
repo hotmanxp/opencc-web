@@ -37,7 +37,7 @@ import { startClaudeCodeRun } from './run.js'
 export class ClaudeCodeProvider implements SubagentProvider {
   readonly name = 'opencc'
   readonly description =
-    "Delegate a one-shot task to a fresh Claude Code CLI session (independent process; no parent context). Use when you want a separate Claude Code context with the CLI's native tools for a standalone task."
+    "Delegate a one-shot task to a fresh OpenCC CLI session (independent process; no parent context). Use when you want a separate OpenCC context with the CLI's native tools for a standalone task."
   readonly inheritsParentContext = false
   readonly capabilities: SubagentCapabilities = NO_START_CAPABILITIES
 
