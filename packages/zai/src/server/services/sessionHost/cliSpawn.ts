@@ -44,6 +44,79 @@ export function toVendorSessionId(sessionId: string): string {
   return sessionId.replace(/^sess-/, '')
 }
 
+/**
+ * 子进程 env 白名单 —— 最小权限透传。
+ *
+ * 之前 spawn 直接 `{...process.env}` 会把宿主(zai server)全部环境变量
+ * 注入子进程,含 ANTHROPIC_AUTH_TOKEN / OPENAI_API_KEY / GEMINI_API_KEY 等
+ * 全部 LLM provider 凭证 —— 任何宿主 shell 临时变量、CI 注入的密钥、
+ * 与 zai 业务无关的 user-level 配置都会一并透传,违反最小权限原则。
+ *
+ * 新策略:只透传以下三类,其它一律丢弃:
+ * - **runtime 必备**:PATH / HOME / USER / SHELL / LANG / LC_ALL / TZ /
+ *   TMPDIR / NODE_ENV / PWD / OLDPWD / TERM —— 这些是 Node 子进程、
+ *   vendor CLI、shell 调用链上的硬依赖,缺一就启动失败或行为异常。
+ * - **LLM 凭证白名单前缀**:ANTHROPIC_* / OPENAI_* / GEMINI_* / GOOGLE_*
+ *   / DEEPSEEK_* —— zai 业务上需要把当前选中的 provider 凭证交给
+ *   vendor 子进程;按前缀匹配允许覆盖 OPENAI_BASE_URL 等自定义项。
+ *   同时显式包含 `*_API_KEY` 与 `*_AUTH_TOKEN` 形式,以兼容第三方
+ *   proxy / 中转服务设置的 `CUSTOM_OPENAI_API_KEY` 等命名。
+ * - **业务锚点**:CLAUDE_CODE_SIMPLE = '0' 压平宿主泄漏,防 vendor 误
+ *   裁剪工具池(spec §5.4 baseline 已记录)。
+ *
+ * 其它一律丢(包括:`DATABASE_URL` / `SSH_AUTH_SOCK` / `GIT_*` / 用户
+ * shell 自定义变量 / 任何未列入白名单的 *_TOKEN / *_SECRET 等)。
+ *
+ * 函数纯函数化便于 vitest:无副作用,只读 `process.env`,返回新对象。
+ */
+const WHITELIST_EXACT = new Set<string>([
+  // runtime
+  'PATH',
+  'HOME',
+  'USER',
+  'SHELL',
+  'LANG',
+  'LC_ALL',
+  'TZ',
+  'TMPDIR',
+  'NODE_ENV',
+  'PWD',
+  'OLDPWD',
+  'TERM',
+  // business anchor
+  'CLAUDE_CODE_SIMPLE',
+])
+
+const WHITELIST_PREFIXES: readonly string[] = [
+  // LLM provider 凭证 + 配置(按前缀匹配,覆盖 *_API_KEY / *_AUTH_TOKEN
+  // / *_BASE_URL / *_DEFAULT_*_MODEL 等常见命名形态)
+  'ANTHROPIC_',
+  'OPENAI_',
+  'GEMINI_',
+  'GOOGLE_',
+  'DEEPSEEK_',
+]
+
+export function buildChildEnv(source: NodeJS.ProcessEnv = process.env): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {}
+  for (const key of Object.keys(source)) {
+    if (WHITELIST_EXACT.has(key)) {
+      const value = source[key]
+      if (value !== undefined) env[key] = value
+      continue
+    }
+    if (WHITELIST_PREFIXES.some((p) => key.startsWith(p))) {
+      const value = source[key]
+      if (value !== undefined) env[key] = value
+      continue
+    }
+  }
+  // 业务锚点 —— 强制压平,即使宿主未注入也写死 '0',防 vendor
+  // `--bare` 模式裁剪工具池(spec §5.4)。
+  env.CLAUDE_CODE_SIMPLE = '0'
+  return env
+}
+
 export function buildCliArgs(opts: SpawnRequest): string[] {
   const vendorSid = opts.sessionId
   const args = [
@@ -71,9 +144,8 @@ export function buildCliArgs(opts: SpawnRequest): string[] {
 
 /**
  * spawn 会话子进程,stdin/stdout/stderr 全 pipe。
- * env 直接继承 zai server 进程(dev 时已注入 ANTHROPIC_AUTH_TOKEN /
- * ANTHROPIC_BASE_URL / ANTHROPIC_DEFAULT_*_MODEL),不显式 scrub ——
- * zai 是 localhost 自用服务,spawn 出去的子进程本就该看到同一环境。
+ * env 走 buildChildEnv() 白名单透传,只保留 runtime 必备 + LLM provider
+ * 凭证 + 业务锚点,其它全部丢弃(最小权限)。
  */
 export function spawnSessionHost(opts: SpawnRequest): SessionHostHandle {
   const args = buildCliArgs(opts)
@@ -85,11 +157,7 @@ export function spawnSessionHost(opts: SpawnRequest): SessionHostHandle {
   const child = spawn(command, spawnArgs, {
     cwd: opts.cwd,
     stdio: ['pipe', 'pipe', 'pipe'],
-    env: {
-      ...process.env,
-      // 压平 SIMPLE:即使宿主 shell 泄漏了 CLAUDE_CODE_SIMPLE 也不裁剪工具池。
-      CLAUDE_CODE_SIMPLE: '0',
-    },
+    env: buildChildEnv(),
     windowsHide: true,
   })
   return { child }

@@ -300,6 +300,13 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
   const effectiveTab: TabKey = tab === 'git' && !isGit ? 'bash' : tab
   const [adding, setAdding] = useState(false)
   const [draft, setDraft] = useState('')
+  // 抽屉关闭延后到 effect 里执行,让 toast 先渲染出来 — finally 里直接
+  // onClose() 会立刻卸载 Drawer,把同帧的 message.error / message.warning
+  // 一起干掉,用户看不到错误提示。
+  const [shouldClose, setShouldClose] = useState(false)
+  useEffect(() => {
+    if (shouldClose) onClose()
+  }, [shouldClose])
 
   const effectiveSid = sessionId ?? activeSessionId
 
@@ -313,6 +320,7 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
       if (!result.ok) {
         if ('busy' in result && result.busy) {
           message.warning('已有命令在执行')
+          setShouldClose(true)
         }
         return
       }
@@ -322,14 +330,15 @@ export default function MobileQuickDrawer({ open, onClose }: MobileQuickDrawerPr
       const { code, signal } = result
       if (code === 0 && !signal) {
         message.success(`已执行: ${command}`)
+        setShouldClose(true)
       } else {
         const reason = signal ? `signal ${signal}` : `exit ${code ?? '?'}`
         message.error(`执行失败 (${reason}): ${command}`)
+        setTimeout(() => setShouldClose(true), 100)
       }
     } catch (err) {
       message.error(`执行失败: ${err instanceof Error ? err.message : String(err)}`)
-    } finally {
-      onClose()
+      setTimeout(() => setShouldClose(true), 100)
     }
   }
 

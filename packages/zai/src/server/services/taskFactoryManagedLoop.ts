@@ -11,6 +11,11 @@
  *  - 某 processing 任务带 executorTaskId 且 executor 已是终态
  *    (completed/failed/cancelled/killed) → 注入 accept 验收指令。
  *    executor 不可解析（未知/尚不存在）一律视为未终态,避免幽灵验收。
+ *  - (tf-8rvychr0) processing / verifying 任务的 executor / verifier 子任务
+ *    BackgroundTask.eventCount 在 stagnantThresholdMs 内未增长 → 注入一条
+ *    `<task-alert action="stagnant">`,内容是最近 5 条 TaskEvent 的 JSON
+ *    摘要。同任务 stagnantCooldownMs 冷却期内不重复告警。事件源是
+ *    BackgroundRuntime 的 TaskEvent 流,不是 process.md。
  *
  * 用 signature 去重（queue/processing 的快照与上次相同则跳过注入），
  * 防止任务调度器会话被重复指令刷屏。每次只注入 actions[0]（dispatch 优先），
@@ -43,6 +48,25 @@ export function stopTaskFactoryManagedLoopForTests(): void {
   lastSignature = ''
 }
 
+/**
+ * stagnant tracker:key = `${taskId}:${role}` (role ∈ executor | verifier),
+ * value 记录最近一次观察到的 BackgroundTask.eventCount、上次事件时间戳、上次
+ * 告警时间戳。每次 tick 拿 BackgroundTask.eventCount 比较,增长则重置
+ * lastEventAt;若 `Date.now() - lastEventAt > stagnantThresholdMs` 且冷却
+ * 期内未告警则注入一次 `<task-alert action="stagnant">` 摘要。
+ */
+type StagnantTracker = {
+  lastEventCount: number
+  lastEventAt: number
+  lastReportedAt: number
+}
+const stagnantTrackers = new Map<string, StagnantTracker>()
+
+/** 测试用 —— 启动前清空 trackers,让单测从零状态开始。 */
+export function __resetStagnantTrackersForTests(): void {
+  stagnantTrackers.clear()
+}
+
 function isTerminal(task: { status?: string } | null | undefined): boolean {
   if (!task) return false
   return (
@@ -56,7 +80,7 @@ function isTerminal(task: { status?: string } | null | undefined): boolean {
 async function tick(): Promise<void> {
   if (!getTaskFactoryStateSync().managedEnabled) return
   const settings = await getFactorySettings()
-  const { queue, processing } = await listTasks()
+  const { queue, processing, verifying } = await listTasks()
   const signature = `q:${queue.map((t) => t.id).join(',')}|p:${processing.map((t) => `${t.id}:${t.status}`).join(',')}`
   const actions: string[] = []
   // 并行派发（2026-09-01 用户更正）：不在「无 processing 才派发」上做单任务串行约束，
@@ -64,25 +88,142 @@ async function tick(): Promise<void> {
   // 工厂设置并行上限（tf-pnsl5m5e）：processing 桶数量达到 maxParallelTasks 时
   // 跳过 dispatch 注入 —— 服务端强约束，防止任务调度器超发；accept 指令不受限。
   if (queue.length > 0 && processing.length < settings.maxParallelTasks) actions.push('dispatch')
-  const bg = getBackgroundRuntime()
+  // 测试间清 stub 后,getBackgroundRuntime() 可能 throw —— 整个 tick 早退,
+  // 避免 fire-and-forget 的 checkStagnantTasks 在 stale 状态下 await bg.get 抛
+  // unhandled rejection。生产环境 stub 不会被清,无影响。
+  let bg: ReturnType<typeof getBackgroundRuntime>
+  try { bg = getBackgroundRuntime() } catch { return }
   for (const t of processing) {
     const done = t.status === 'processing' && t.executorTaskId
       ? isTerminal(await bg.get(t.executorTaskId).catch(() => null))
       : false
     if (done) actions.push(`accept:${t.id}`)
   }
-  if (actions.length === 0 || signature === lastSignature) return
-  lastSignature = signature
-  const first: string = actions[0]!
-  if (first === 'dispatch') {
-    // zai patch (2026-09-04, quick-intake):如果 queue 里含 quick 任务,在
-    // dispatch 注入里追加 verifier light 提示段 —— 任务调度器后续 spawn verifier
-    // 时会读这段并走轻量验证(build + lint + 关键文件 diff 的 code review)。
-    const hasQuick = queue.some((t) => t.mode === 'quick')
-    const hint = hasQuick ? QUICK_VERIFIER_HINT : ''
-    injectSupervisorCommand(`\n<task-command action="dispatch">The queue has tasks; dispatch them for execution in queue order (multiple at once is fine — tasks run in parallel).${hint ? ' NOTE: queue contains quick-mode tasks — their verifier rounds should follow the light path below.' : ''}</task-command>${hint}`)
-  } else if (first.startsWith('accept:')) {
-    const id = first.slice('accept:'.length)
-    injectSupervisorCommand(`\n<task-command action="accept" id="${id}">The executor subagent has finished; please accept the task.</task-command>`)
+  if (actions.length > 0 && signature !== lastSignature) {
+    lastSignature = signature
+    const first: string = actions[0]!
+    if (first === 'dispatch') {
+      // zai patch (2026-09-04, quick-intake):如果 queue 里含 quick 任务,在
+      // dispatch 注入里追加 verifier light 提示段 —— 任务调度器后续 spawn verifier
+      // 时会读这段并走轻量验证(build + lint + 关键文件 diff 的 code review)。
+      const hasQuick = queue.some((t) => t.mode === 'quick')
+      const hint = hasQuick ? QUICK_VERIFIER_HINT : ''
+      injectSupervisorCommand(`\n<task-command action="dispatch">The queue has tasks; dispatch them for execution in queue order (multiple at once is fine — tasks run in parallel).${hint ? ' NOTE: queue contains quick-mode tasks — their verifier rounds should follow the light path below.' : ''}</task-command>${hint}`)
+    } else if (first.startsWith('accept:')) {
+      const id = first.slice('accept:'.length)
+      injectSupervisorCommand(`\n<task-command action="accept" id="${id}">The executor subagent has finished; please accept the task.</task-command>`)
+    }
+  }
+
+  // ----- stagnant 监控 (tf-8rvychr0) -----
+  // 与上面 actions/signatures 完全独立 —— dispatch/accept 不收影响,且不依赖
+  // signature 变化:无论 queue/processing 是否有变化,只要 managed 开着就每 tick
+  // 巡检 processing + verifying 子任务的 eventCount。仅看 processing + verifying
+  // 桶,每任务取 executorTaskId/verifierTaskId,调 bg.get(taskId).eventCount
+  // 比较上次记录的 count;增长则重置 lastEventAt,停滞超过 stagnantThresholdMs
+  // 且 cooldown 已外 → 注入告警。bg.get 返回 null / 已终态 → 从 trackers
+  // 移除并跳过。
+  void checkStagnantTasks(bg, [...processing, ...verifying], settings.stagnantThresholdMs, settings.stagnantCooldownMs)
+}
+
+async function collectRecentEvents(
+  bg: ReturnType<typeof getBackgroundRuntime>,
+  taskId: string,
+  eventCount: number,
+): Promise<unknown[]> {
+  // 拉最近 5 条 TaskEvent 摘要:从 max(0, eventCount - 5) 开始订阅,事件流
+  // 会先回放历史(seq > fromSeq)再等待新增;任务已终态时流立即关闭,所以
+  // 拿到的事件最多 ~5 条(已达成完成);在线任务不会关闭流,这里仅取首个
+  // batch(用 break)就退出,避免长期挂着等新事件拖垮 tick。
+  const fromSeq = Math.max(0, eventCount - 5)
+  const collected: unknown[] = []
+  try {
+    for await (const ev of bg.events(taskId, fromSeq)) {
+      collected.push({
+        seq: ev.seq,
+        eventId: ev.eventId,
+        ts: ev.ts,
+        type: ev.type,
+        data: ev.data,
+      })
+      if (collected.length >= 5) break
+    }
+  } catch {
+    // bg.events 在 task 不存在 / store 抛错时可能抛 —— 静默吞掉,告警内容
+    // 退化为空数组,不影响 stagnant 触发本身。
+  }
+  return collected
+}
+
+async function checkStagnantTasks(
+  bg: ReturnType<typeof getBackgroundRuntime>,
+  candidates: Array<{
+    id: string
+    title?: string | null
+    executorTaskId?: string | null
+    verifierTaskId?: string | null
+  }>,
+  thresholdMs: number,
+  cooldownMs: number,
+): Promise<void> {
+  const now = Date.now()
+  // 收集本轮还在跟踪的 key,轮末剔除已消失/已终态的 —— 避免 trackers 长期
+  // 累积老任务。
+  const liveKeys = new Set<string>()
+  for (const t of candidates) {
+    const checks: Array<{ role: 'executor' | 'verifier'; taskId: string | null | undefined }> = [
+      { role: 'executor', taskId: t.executorTaskId },
+      { role: 'verifier', taskId: t.verifierTaskId },
+    ]
+    for (const c of checks) {
+      if (!c.taskId) continue
+      const key = `${t.id}:${c.role}`
+      liveKeys.add(key)
+      const bgTask = await bg.get(c.taskId).catch(() => null)
+      if (!bgTask) {
+        // 后台任务不存在(可能未派发 / 已清理) → 移除 tracker 避免误判
+        stagnantTrackers.delete(key)
+        continue
+      }
+      if (isTerminal(bgTask)) {
+        // 已终态 → 从 trackers 移除,下次自然不会触发告警
+        stagnantTrackers.delete(key)
+        continue
+      }
+      const evCount = bgTask.eventCount ?? 0
+      const tracker = stagnantTrackers.get(key)
+      if (!tracker) {
+        // 首次见到该子任务 → 初始化,lastEventAt = now 不立即告警(等待下一 tick
+        // 才有可比基线)。
+        stagnantTrackers.set(key, {
+          lastEventCount: evCount,
+          lastEventAt: now,
+          lastReportedAt: 0,
+        })
+        continue
+      }
+      if (evCount !== tracker.lastEventCount) {
+        tracker.lastEventCount = evCount
+        tracker.lastEventAt = now
+        continue
+      }
+      // eventCount 未变 → 检查停滞时长 + 冷却期
+      if (now - tracker.lastEventAt <= thresholdMs) continue
+      if (now - tracker.lastReportedAt <= cooldownMs) continue
+      const events = await collectRecentEvents(bg, c.taskId, evCount)
+      const stagnantMinutes = Math.round((now - tracker.lastEventAt) / 60_000)
+      const safeTitle = (t.title ?? '').replace(/</g, '＜')
+      const alertText =
+        `\n<task-alert action="stagnant" id="${t.id}" role="${c.role}" sub-task-id="${c.taskId}">` +
+        `Task ${t.id} (${safeTitle}) sub-task(${c.role}=${c.taskId}) stagnant for ${stagnantMinutes}m. ` +
+        `Last event count: ${evCount}. Recent ${events.length} TaskEvents: ` +
+        `${JSON.stringify(events)}</task-alert>`
+      injectSupervisorCommand(alertText)
+      tracker.lastReportedAt = now
+    }
+  }
+  // 清理已经不在候选集的 key(任务被移到 finished / 移除 executorTaskId)。
+  for (const k of [...stagnantTrackers.keys()]) {
+    if (!liveKeys.has(k)) stagnantTrackers.delete(k)
   }
 }

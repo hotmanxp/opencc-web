@@ -272,3 +272,85 @@ describe('useBashRepl — exec wait 模式', () => {
     expect(execResult.code).toBe(7)
   })
 })
+
+// -----------------------------------------------------------------------------
+// defaultCwd stale closure — exec 通过 ref 读最新 cwd,旧 exec 引用也不会跑老目录
+// -----------------------------------------------------------------------------
+
+describe('useBashRepl — defaultCwd stale closure', () => {
+  beforeEach(() => {
+    MockEventSource.instances.length = 0
+    fetchMock.mockReset()
+  })
+
+  /** 记录每次 /exec 请求 body 里的 cwd。 */
+  function mockExecFetch(seenCwd: (string | undefined)[]) {
+    fetchMock.mockImplementation(async (url: any, init?: any) => {
+      const u = typeof url === 'string' ? url : ''
+      if (u.includes('/exec')) {
+        const body = JSON.parse(init.body as string)
+        seenCwd.push(body.cwd)
+        return {
+          ok: true,
+          status: 200,
+          json: async () => ({ ok: true, execId: 'e-cwd' }),
+        } as unknown as Response
+      }
+      return {
+        ok: true,
+        status: 200,
+        json: async () => ({ entries: [] }),
+        text: async () => JSON.stringify({ entries: [] }),
+      } as unknown as Response
+    })
+  }
+
+  it('defaultCwd 变化后 exec 用最新 cwd(不是挂载时的旧值)', async () => {
+    const seenCwd: (string | undefined)[] = []
+    mockExecFetch(seenCwd)
+    const { result, rerender } = renderHook(
+      ({ cwd }: { cwd: string | null }) => useBashRepl('sess-1', cwd),
+      { initialProps: { cwd: '/a' as string | null } },
+    )
+    await act(async () => {
+      await result.current.exec('pwd')
+    })
+    expect(seenCwd).toEqual(['/a'])
+
+    rerender({ cwd: '/b' })
+    await act(async () => {
+      await result.current.exec('pwd')
+    })
+    expect(seenCwd).toEqual(['/a', '/b'])
+  })
+
+  it('cwd 变化后持有的旧 exec 引用仍然读到新 cwd(exec 身份稳定)', async () => {
+    const seenCwd: (string | undefined)[] = []
+    mockExecFetch(seenCwd)
+    const { result, rerender } = renderHook(
+      ({ cwd }: { cwd: string | null }) => useBashRepl('sess-1', cwd),
+      { initialProps: { cwd: '/a' as string | null } },
+    )
+    // 模拟调用方在 cwd 切换前就捕获了 exec(例如放进事件回调/子组件 prop)
+    const staleExec = result.current.exec
+
+    rerender({ cwd: '/b' })
+    // exec 不再因 defaultCwd 变化而重建
+    expect(result.current.exec).toBe(staleExec)
+
+    await act(async () => {
+      await staleExec('pwd')
+    })
+    expect(seenCwd).toEqual(['/b'])
+  })
+
+  it('defaultCwd 为 null 时不带 cwd 字段', async () => {
+    const seenCwd: (string | undefined)[] = []
+    mockExecFetch(seenCwd)
+    const { result } = renderHook(() => useBashRepl('sess-1', null))
+    await act(async () => {
+      await result.current.exec('pwd')
+    })
+    expect(seenCwd).toEqual([undefined])
+  })
+})

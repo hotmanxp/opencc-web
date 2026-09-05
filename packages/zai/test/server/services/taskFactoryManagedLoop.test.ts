@@ -7,6 +7,7 @@ import {
 } from '@zn-ai/zn-agent-core'
 import {
   startTaskFactoryManagedLoop, stopTaskFactoryManagedLoopForTests,
+  __resetStagnantTrackersForTests,
 } from '../../../src/server/services/taskFactoryManagedLoop.js'
 import {
   __resetForTests, setTaskFactoryState,
@@ -56,6 +57,7 @@ beforeEach(async () => {
 
 afterEach(() => {
   stopTaskFactoryManagedLoopForTests()
+  __resetStagnantTrackersForTests()
   __setBackgroundRuntime(null)
 })
 
@@ -198,6 +200,188 @@ describe('taskFactoryManagedLoop — quick verifier 分流(2026-09-04 round 2)',
     const dispatch = contents.find((c) => c.includes('action="dispatch"'))
     expect(dispatch).toBeDefined()
     expect(dispatch).toContain(QUICK_HINT_MARKER)
+  })
+})
+
+/**
+ * stagnant 告警 (tf-8rvychr0):processing / verifying 任务的 executor / verifier
+ * BackgroundTask.eventCount 在 stagnantThresholdMs 内未增长 → 通过
+ * injectSupervisorCommand 注入 `<task-alert action="stagnant">`,内容是最近
+ * 5 条 TaskEvent 的 JSON 摘要。同任务 stagnantCooldownMs 冷却期内不重复告警,
+ * 已终态的子任务从 trackers 移除。
+ *
+ * 实现策略:
+ *  - factory-settings.json 写 stagnantThresholdMs=10ms / stagnantCooldownMs=20s,
+ *    让第一次 tick init + 第二次 tick 跨过阈值触发告警;cooldown 大于测试时长
+ *    自然保证 cooldown 用例只触发一次。
+ *  - BackgroundRuntime stub 暴露可变 eventCount + 可配置 async events 流。
+ *  - 用 setInterval(5ms) 让 tick 多次跑,然后用真实 setTimeout 等到所有
+ *    microtask 排空。fake timers 在这里不能驱动 async iterator 推进
+ *    (vitest fake 推进 setInterval 回调里的 `void tick()` 时,async tick
+ *    的 await 链上后续微任务在真实微任务队列里,fake 不感知),所以放弃
+ *    fake timers,改用真实 timer + 极小阈值。
+ */
+describe('taskFactoryManagedLoop — stagnant 告警(tf-8rvychr0)', () => {
+  // 极小阈值 + 大 cooldown:threshold 5s(下限)让真实 timer 几次 tick
+  // (interval=50ms) 内跨过;cooldown 20s 测试时长内不会二次告警,
+  // 简化 case 3 断言。
+  const STAGNANT_SETTINGS = {
+    stagnantThresholdMs: 5_000,
+    stagnantCooldownMs: 20_000,
+    maxParallelTasks: 4,
+  }
+  // stagnant 测试用真实 timer 跨过 5s 阈值,等待时间 5.5–6.5s,
+  // 默认 vitest timeout=5s 不够 → 整个 describe 拉到 15s。
+  vi.setConfig({ testTimeout: 15_000 })
+
+  function makeEvent(seq: number, type = 'log') {
+    return {
+      seq,
+      eventId: `ev-${seq}`,
+      ts: 1_700_000_000_000 + seq,
+      type,
+      data: { msg: `event-${seq}` },
+    }
+  }
+
+  function makeBgStub(opts: {
+    records: Record<string, { status: string; eventCount: number }>
+    events?: Record<string, unknown[]>
+  }) {
+    const events = opts.events ?? {}
+    return {
+      get: async (id: string) => opts.records[id] ?? null,
+      events: (async function* (id: string, fromSeq = 0) {
+        const history = events[id] ?? []
+        for (const ev of history) {
+          if ((ev as { seq: number }).seq > fromSeq) yield ev
+        }
+      }),
+      cancel: async () => ({ ok: true }),
+    }
+  }
+
+  it('case 1: 任务 eventCount 3 分钟无增长 → 触发 stagnant 告警', async () => {
+    await writeFile(join(dataDir, 'factory-settings.json'), JSON.stringify(STAGNANT_SETTINGS), 'utf-8')
+    resetFactorySettings()
+    // 空 queue / 1 processing 任务 executor 子任务
+    const s = await createPoolTask({ title: 'stagnant-task' })
+    await markTaskStatus(s.id, 'queue-tasks', { status: 'processing', executorTaskId: 'exec-stuck' })
+    await moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    __setBackgroundRuntime(makeBgStub({
+      records: { 'exec-stuck': { status: 'running', eventCount: 0 } },
+      events: {
+        'exec-stuck': [makeEvent(1), makeEvent(2), makeEvent(3), makeEvent(4), makeEvent(5), makeEvent(6)],
+      },
+    }) as unknown as Parameters<typeof __setBackgroundRuntime>[0])
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    // 真实 timer:threshold=5s,interval=50ms — 5s 后跨过阈值触发告警。
+    startTaskFactoryManagedLoop(50)
+    await new Promise((r) => setTimeout(r, 5500))
+    stopTaskFactoryManagedLoopForTests()
+    const contents = injectedContents(spy)
+    const alert = contents.find((c) => c.includes('<task-alert action="stagnant"'))
+    expect(alert).toBeDefined()
+    expect(alert).toContain(`id="${s.id}"`)
+    expect(alert).toContain('stagnant for')
+    expect(alert).toContain('Last event count: 0')
+  })
+
+  it('case 2: eventCount 增长 → lastEventAt 重置,不触发告警', async () => {
+    await writeFile(join(dataDir, 'factory-settings.json'), JSON.stringify(STAGNANT_SETTINGS), 'utf-8')
+    resetFactorySettings()
+    const s = await createPoolTask({ title: 'growing-task' })
+    await markTaskStatus(s.id, 'queue-tasks', { status: 'processing', executorTaskId: 'exec-grow' })
+    await moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    // 每次 tick 都让 eventCount 单调增长 —— tracker.lastEventAt 永远被重置
+    let tickCount = 0
+    __setBackgroundRuntime({
+      get: async () => ({ status: 'running', eventCount: ++tickCount }),
+      events: (async function* () { /* 不会被调用 */ }) as never,
+      cancel: async () => ({ ok: true }),
+    } as unknown as Parameters<typeof __setBackgroundRuntime>[0])
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    startTaskFactoryManagedLoop(50)
+    await new Promise((r) => setTimeout(r, 5500))
+    stopTaskFactoryManagedLoopForTests()
+    const contents = injectedContents(spy)
+    // eventCount 持续增长,不应出现 stagnant 告警
+    expect(contents.some((c) => c.includes('<task-alert action="stagnant"'))).toBe(false)
+  })
+
+  it('case 3: 同一任务 cooldown 期内不重复告警', async () => {
+    // cooldown=20s 测试时长内不会跨过,threshold=5s — 等 6s 后应该恰好 1 次告警。
+    await writeFile(join(dataDir, 'factory-settings.json'), JSON.stringify(STAGNANT_SETTINGS), 'utf-8')
+    resetFactorySettings()
+    const s = await createPoolTask({ title: 'cooldown-task' })
+    await markTaskStatus(s.id, 'queue-tasks', { status: 'processing', executorTaskId: 'exec-cd' })
+    await moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    __setBackgroundRuntime(makeBgStub({
+      records: { 'exec-cd': { status: 'running', eventCount: 0 } },
+      events: {
+        'exec-cd': [makeEvent(1), makeEvent(2)],
+      },
+    }) as unknown as Parameters<typeof __setBackgroundRuntime>[0])
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    startTaskFactoryManagedLoop(50)
+    await new Promise((r) => setTimeout(r, 6500))
+    stopTaskFactoryManagedLoopForTests()
+    const contents = injectedContents(spy)
+    const alerts = contents.filter((c) => c.includes('<task-alert action="stagnant"'))
+    expect(alerts.length).toBe(1)
+  })
+
+  it('case 4: 已终态(Completed)子任务从 trackers 移除,不告警', async () => {
+    await writeFile(join(dataDir, 'factory-settings.json'), JSON.stringify(STAGNANT_SETTINGS), 'utf-8')
+    resetFactorySettings()
+    const s = await createPoolTask({ title: 'finished-task' })
+    await markTaskStatus(s.id, 'queue-tasks', { status: 'processing', executorTaskId: 'exec-fin' })
+    await moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    __setBackgroundRuntime(makeBgStub({
+      records: { 'exec-fin': { status: 'completed', eventCount: 5 } },
+      events: {},
+    }) as unknown as Parameters<typeof __setBackgroundRuntime>[0])
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    startTaskFactoryManagedLoop(50)
+    await new Promise((r) => setTimeout(r, 5500))
+    stopTaskFactoryManagedLoopForTests()
+    const contents = injectedContents(spy)
+    expect(contents.some((c) => c.includes('<task-alert action="stagnant"'))).toBe(false)
+  })
+
+  it('case 5: 告警内容包含最近 5 条 TaskEvent JSON 摘要', async () => {
+    await writeFile(join(dataDir, 'factory-settings.json'), JSON.stringify(STAGNANT_SETTINGS), 'utf-8')
+    resetFactorySettings()
+    const s = await createPoolTask({ title: 'payload-task' })
+    await markTaskStatus(s.id, 'queue-tasks', { status: 'processing', executorTaskId: 'exec-payload' })
+    await moveTask(s.id, 'queue-tasks', 'processing-tasks')
+    const history = [
+      makeEvent(1, 'start'),
+      makeEvent(2, 'log'),
+      makeEvent(3, 'log'),
+      makeEvent(4, 'progress'),
+      makeEvent(5, 'progress'),
+      makeEvent(6, 'progress'),
+      makeEvent(7, 'log'),
+    ]
+    __setBackgroundRuntime(makeBgStub({
+      records: { 'exec-payload': { status: 'running', eventCount: 7 } },
+      events: { 'exec-payload': history },
+    }) as unknown as Parameters<typeof __setBackgroundRuntime>[0])
+    const spy = vi.spyOn(sessionInbox, 'followup')
+    startTaskFactoryManagedLoop(50)
+    await new Promise((r) => setTimeout(r, 5500))
+    stopTaskFactoryManagedLoopForTests()
+    const contents = injectedContents(spy)
+    const alert = contents.find((c) => c.includes('<task-alert action="stagnant"'))
+    expect(alert).toBeDefined()
+    // 告警里应包含从 seq=3 开始的最近 5 条(seq 3,4,5,6,7)
+    expect(alert).toContain('"seq":3')
+    expect(alert).toContain('"seq":7')
+    expect(alert).toContain('"eventId":"ev-3"')
+    expect(alert).toContain('"eventId":"ev-7"')
+    expect(alert).toContain('Recent 5 TaskEvents')
+    expect(alert).toContain('Last event count: 7')
   })
 })
 

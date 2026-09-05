@@ -119,9 +119,24 @@ function inputHash(): string {
   h.update(
     `${scriptRel}\0${scriptSt.mtimeMs}\0${scriptSt.size}\n`,
   )
-  // Bump this string when the bundle recipe (configCheckPatchRe,
-  // plugins, externals) changes so old stamps are treated as stale.
-  h.update('recipe:v6\n')
+  // Hash the bundle recipe (patch regex sources, sentinel strings,
+  // plugin registrations). Any change to RECIPE entries — e.g. adding
+  // a new patch regex, tweaking a sentinel literal, registering a new
+  // plugin — flows through here and invalidates the stamp. The old
+  // `'recipe:v6'` literal bump is no longer needed; structure encodes
+  // version. JSON.stringify is deterministic for objects with string
+  // keys (RECIPE entries are constructed as object literals, so key
+  // order is preserved).
+  //
+  // RECIPE itself is declared further down (after the patch regex /
+  // plugin definitions it serializes), so this function is only safe
+  // to call AFTER those declarations have executed — true at the two
+  // call sites (cached-stamp check at line ~543 and stamp write at
+  // line ~1754). Lazy access via `getRecipe()` keeps this constraint
+  // explicit and lets us throw early if a future refactor calls
+  // inputHash() too early.
+  h.update(JSON.stringify(getRecipe()))
+  h.update('\n')
   return h.digest('hex').slice(0, 16)
 }
 
@@ -491,22 +506,9 @@ function generateBundleEntryDts(): void {
 }
 generateBundleEntryDts()
 
-if (existsSync(STAMP_FILE) && existsSync(OUT_FILE)) {
-  let cached = ''
-  try {
-    cached = readFileSync(STAMP_FILE, 'utf8').trim()
-  } catch {
-    cached = ''
-  }
-  if (cached === inputHash()) {
-    console.log(`[bundle-opencc] cached (input hash ${cached}) — skipping esbuild`)
-    // Skip directly to the end — the second esbuild call below is for
-    // the single-file type/const subpath exports, but those read the
-    // already-emitted bundle and don't depend on the bundle's content
-    // shape, so a content-hash match is sufficient to skip both.
-    process.exit(0)
-  }
-}
+// Cached-stamp check is performed later, AFTER the bundle-recipe
+// declaration below — inputHash() reads RECIPE, which depends on
+// vendorPatchesPlugin / the patch regex consts further down.
 
 // ── Vendor-patches plugin ─────────────────────────────────────────────
 // Apply targeted, file-specific patches to vendored opencc files.
@@ -611,6 +613,18 @@ const queryEngineImportPatchRe =
 const queryEngineNonInteractivePatchRe =
   /isNonInteractiveSession: true,/g
 
+// zai patch (sub-agent prompt injection): see vendor-patches header.
+// Hoisted to module scope so buildRecipe() can read its `.source` for
+// the bundle-recipe fingerprint (zai patch tf-jqy5q2bi) — was previously
+// a local const inside vendorPatchesPlugin.setup().
+const queryReExportSentinel = /\/\/ zai-bundle: agent-loader re-export\n$/
+// zai patch (messages-normalize re-export): see vendor-patches header.
+const normalizeReExportSentinel =
+  /\/\/ zai-bundle: messages-normalize re-export\n$/
+// zai patch (task-changed signal re-export): see vendor-patches header.
+const taskChangedReExportSentinel =
+  /\/\/ zai-bundle: task-changed re-export\n$/
+
 const vendorPatchesPlugin: esbuild.Plugin = {
   name: 'vendor-patches',
   setup(build) {
@@ -645,7 +659,6 @@ const vendorPatchesPlugin: esbuild.Plugin = {
       }
 
       // zai patch (sub-agent prompt injection): see vendor-patches header.
-      const queryReExportSentinel = /\/\/ zai-bundle: agent-loader re-export\n$/
       if (
         args.path.endsWith('opencc-src/query.ts') &&
         !queryReExportSentinel.test(contents)
@@ -658,8 +671,6 @@ const vendorPatchesPlugin: esbuild.Plugin = {
       }
 
       // zai patch (messages-normalize re-export): see vendor-patches header.
-      const normalizeReExportSentinel =
-        /\/\/ zai-bundle: messages-normalize re-export\n$/
       if (
         args.path.endsWith('opencc-src/query.ts') &&
         !normalizeReExportSentinel.test(contents)
@@ -676,8 +687,6 @@ const vendorPatchesPlugin: esbuild.Plugin = {
       // stateChangeBus for SSE delivery to the web frontend. Also export
       // listTasks + getTaskListId for cold-start hydration fallback (sessionState
       // route reads vendor task storage when the compat TaskListStore is empty).
-      const taskChangedReExportSentinel =
-        /\/\/ zai-bundle: task-changed re-export\n$/
       if (
         args.path.endsWith('opencc-src/query.ts') &&
         !taskChangedReExportSentinel.test(contents)
@@ -704,15 +713,12 @@ const vendorPatchesPlugin: esbuild.Plugin = {
       // (not full path) because esbuild may pass absolute or relative
       // `args.path` depending on entry resolution.
       if (args.path.endsWith('/QueryEngine.ts') || args.path.endsWith('QueryEngine.ts')) {
-        console.log('[zai-debug] QueryEngine.ts plugin hit, endsWith:', true)
         if (queryEngineImportPatchRe.test(contents)) {
           contents = contents.replace(
             queryEngineImportPatchRe,
             `import {\n  getIsNonInteractiveSession,\n  getSessionId,\n  isSessionPersistenceDisabled,\n} from 'src/bootstrap/state.js'`,
           )
           modified = true
-        } else {
-          console.log('[zai-debug] QueryEngine import regex DID NOT MATCH')
         }
         if (queryEngineNonInteractivePatchRe.test(contents)) {
           contents = contents.replace(
@@ -720,8 +726,6 @@ const vendorPatchesPlugin: esbuild.Plugin = {
             `isNonInteractiveSession: getIsNonInteractiveSession(),`,
           )
           modified = true
-        } else {
-          console.log('[zai-debug] QueryEngine noninteractive regex DID NOT MATCH')
         }
       }
 
@@ -1425,6 +1429,79 @@ const inkRenderStubPlugin: esbuild.Plugin = {
       }
     })
   },
+}
+
+// ── Bundle recipe(zai patch tf-jqy5q2bi)────────────────────────────
+// The set of patch regexes, sentinel markers, and plugin registrations
+// that affect the bundle output. Hashed into inputHash() so that any
+// change to a regex source / sentinel / plugin name invalidates the
+// stamp cache automatically — no more manual `recipe:vN` bumps.
+//
+// Shape: array of {kind, name, source} so the JSON serializer emits a
+// deterministic shape (object key order is preserved). `kind` is a
+// discriminator for human readability; `source` is the raw regex /
+// string literal at the time of declaration (frozen via `.source` for
+// RegExp, verbatim for strings).
+//
+// Declared here (after all the plugin / patch definitions it
+// references) so the consts it captures are initialized by the time
+// inputHash() reads them. The old `'recipe:v6'` literal bump is gone
+// — structure encodes version now.
+type RecipeEntry =
+  | { kind: 'regex'; name: string; source: string; flags: string }
+  | { kind: 'string'; name: string; value: string }
+
+function buildRecipe(): ReadonlyArray<RecipeEntry> {
+  return [
+    { kind: 'regex', name: 'configCheckPatchRe', source: configCheckPatchRe.source, flags: configCheckPatchRe.flags },
+    { kind: 'regex', name: 'vendorReturnPatchRe', source: vendorReturnPatchRe.source, flags: vendorReturnPatchRe.flags },
+    { kind: 'regex', name: 'vendorReturnElseRe', source: vendorReturnElseRe.source, flags: vendorReturnElseRe.flags },
+    { kind: 'regex', name: 'vendorNullishCoalesceRe', source: vendorNullishCoalesceRe.source, flags: vendorNullishCoalesceRe.flags },
+    { kind: 'regex', name: 'toolExecutionStopCaseRe', source: toolExecutionStopCaseRe.source, flags: toolExecutionStopCaseRe.flags },
+    { kind: 'regex', name: 'queryEngineImportPatchRe', source: queryEngineImportPatchRe.source, flags: queryEngineImportPatchRe.flags },
+    { kind: 'regex', name: 'queryEngineNonInteractivePatchRe', source: queryEngineNonInteractivePatchRe.source, flags: queryEngineNonInteractivePatchRe.flags },
+    { kind: 'string', name: 'queryReExportSentinel', value: queryReExportSentinel.source },
+    { kind: 'string', name: 'normalizeReExportSentinel', value: normalizeReExportSentinel.source },
+    { kind: 'string', name: 'taskChangedReExportSentinel', value: taskChangedReExportSentinel.source },
+    { kind: 'string', name: 'plugin:vendor-patches', value: vendorPatchesPlugin.name },
+    { kind: 'string', name: 'plugin:command-impl-stub', value: commandImplStubPlugin.name },
+    { kind: 'string', name: 'plugin:optional-stub', value: optionalStubPlugin.name },
+    { kind: 'string', name: 'plugin:ui-component-stub', value: uiComponentStubPlugin.name },
+    { kind: 'string', name: 'plugin:ink-render-stub', value: inkRenderStubPlugin.name },
+    { kind: 'string', name: 'plugin:preact-alias', value: preactAliasPlugin.name },
+    { kind: 'string', name: 'plugin:bun-bundle-alias', value: bunBundleAliasPlugin.name },
+  ]
+}
+
+const RECIPE: ReadonlyArray<RecipeEntry> = buildRecipe()
+
+function getRecipe(): ReadonlyArray<RecipeEntry> {
+  return RECIPE
+}
+
+// Cached-stamp short-circuit. Originally sat right after
+// generateBundleEntryDts() (zai patch 2026-08-09), but now must come
+// after the bundle-recipe declaration above — inputHash() reads
+// RECIPE, and RECIPE depends on the patch regex / plugin consts that
+// were declared between generateBundleEntryDts() and here. Moving
+// the check just delays it past a small fixed amount of declarations
+// (no I/O cost), and the optimization still works the same way: a
+// matching stamp skips both esbuild calls below.
+if (existsSync(STAMP_FILE) && existsSync(OUT_FILE)) {
+  let cached = ''
+  try {
+    cached = readFileSync(STAMP_FILE, 'utf8').trim()
+  } catch {
+    cached = ''
+  }
+  if (cached === inputHash()) {
+    console.log(`[bundle-opencc] cached (input hash ${cached}) — skipping esbuild`)
+    // Skip directly to the end — the second esbuild call below is for
+    // the single-file type/const subpath exports, but those read the
+    // already-emitted bundle and don't depend on the bundle's content
+    // shape, so a content-hash match is sufficient to skip both.
+    process.exit(0)
+  }
 }
 
 // ── Build ────────────────────────────────────────────────────────────
