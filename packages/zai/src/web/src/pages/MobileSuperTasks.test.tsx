@@ -248,3 +248,73 @@ describe('MobileSuperTasks page (2026-09-04)', () => {
     expect(setSupervisorSession).toHaveBeenCalledWith('new-sup-mob')
   })
 })
+
+describe('MobileSuperTasks 开始所有任务按钮 (2026-09-05, tf-dkb8gj50)', () => {
+  it('顶栏渲染「开始所有任务」按钮 + 徽标,徽标数字 = 排队任务数', () => {
+    render(<MobileSuperTasks />)
+    const btn = screen.getByTestId('mobile-start-all-button')
+    expect(btn).toBeTruthy()
+    expect(btn.textContent).toContain('开始所有任务')
+    // badge 数字节点(antd Badge count 渲染为 .ant-badge-count sup)
+    const badge = document.querySelector('[data-testid="mobile-start-all-badge"]')
+    expect(badge).toBeTruthy()
+    // queue 桶有 1 个 tf-q → 徽标 1
+    expect(badge?.textContent).toContain('1')
+  })
+
+  it('queue 空 → 按钮 disabled', () => {
+    useSuperTaskStore.setState({
+      buckets: { queue: [], processing: [{ id: 'tf-p', title: '执行 B', status: 'processing', cwd: '/t/b', bucket: 'processing-tasks' }], verifying: [], finished: [] },
+      loadedOnce: true,
+    })
+    render(<MobileSuperTasks />)
+    const btn = screen.getByTestId('mobile-start-all-button') as HTMLButtonElement
+    expect(btn.disabled).toBe(true)
+  })
+
+  it('点按钮 → 触发 store.startMany,传所有 queue ids;返回成功时 message.success', async () => {
+    // queue 加 3 个,确保一次 batch
+    useSuperTaskStore.setState({
+      buckets: {
+        queue: [
+          { id: 'tf-q1', title: '排队 1', status: 'queued', cwd: '/t/1', bucket: 'queue-tasks' },
+          { id: 'tf-q2', title: '排队 2', status: 'queued', cwd: '/t/2', bucket: 'queue-tasks' },
+          { id: 'tf-q3', title: '排队 3', status: 'queued', cwd: '/t/3', bucket: 'queue-tasks' },
+        ],
+        processing: [],
+        verifying: [],
+        finished: [],
+      },
+      loadedOnce: true,
+    })
+    const startManySpy = vi.spyOn(useSuperTaskStore.getState(), 'startMany').mockResolvedValue({
+      ok: 3,
+      failed: 0,
+      errors: [],
+    })
+    render(<MobileSuperTasks />)
+    fireEvent.click(screen.getByTestId('mobile-start-all-button'))
+    await waitFor(() => {
+      expect(startManySpy).toHaveBeenCalledWith(['tf-q1', 'tf-q2', 'tf-q3'])
+    })
+    startManySpy.mockRestore()
+  })
+
+  it('startMany 抛错 → message.error,不留下 startingAll 卡死', async () => {
+    useSuperTaskStore.setState({
+      buckets: {
+        queue: [{ id: 'tf-q', title: '排队 A', status: 'queued', cwd: '/t/a', bucket: 'queue-tasks' }],
+        processing: [], verifying: [], finished: [],
+      },
+      loadedOnce: true,
+    })
+    vi.spyOn(useSuperTaskStore.getState(), 'startMany').mockRejectedValue(new Error('网络挂了'))
+    render(<MobileSuperTasks />)
+    fireEvent.click(screen.getByTestId('mobile-start-all-button'))
+    // 等 finally 跑完 → 按钮恢复可点
+    await waitFor(() => {
+      const btn = screen.getByTestId('mobile-start-all-button') as HTMLButtonElement
+      expect(btn.disabled).toBe(false)
+    })
+  })
+})
