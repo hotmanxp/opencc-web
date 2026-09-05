@@ -13,7 +13,7 @@ import type {
   FilePreviewPayload, FilePreviewError,
 } from '../../shared/fs.js';
 import { classifyKind, mimeFromExt } from '../../shared/fileKind.js';
-import { dirname as pathDirname, relative as pathRelative, resolve as pathResolve } from 'node:path';
+import { dirname as pathDirname, relative as pathRelative } from 'node:path';
 const MAX_QUERY_LEN = 64;
 const WALK_TIMEOUT_MS = 200;
 const IGNORED = new Set([
@@ -1010,9 +1010,17 @@ fsRouter.get('/fs/preview', async (req, res) => {
     res.status(400).json({ error: { code: 'EBADREQ', message: 'path 必填' } } satisfies { error: FilePreviewError })
     return
   }
-  const abs = pathResolve(raw)
+  // 与 /fs/list /fs/read /fs/reveal 等一致:把 raw 视为 cwd 相对路径,
+  // 由 resolveSafePath 把越界(包括绝对路径 / ../../etc/passwd)挡掉,
+  // 防任意文件读取。其他 handler 已迁移,本 handler 之前用 pathResolve
+  // 直接解绝对路径,等同于无 sandbox。
+  const safe = resolveSafePath(cwd, raw)
+  if (!safe.ok) {
+    res.status(403).json({ error: { code: 'EACCES', message: safe.error } } satisfies { error: FilePreviewError })
+    return
+  }
+  const abs = safe.abs
   const maxBytes = clampInt(req.query.maxBytes, 1024, PREVIEW_DEFAULT_MAX, PREVIEW_DEFAULT_MAX)
-  void cwd // 不限 cwd,但 log 一次便于排查;实际 cwd 记录在 server 日志
 
   let info
   try {
