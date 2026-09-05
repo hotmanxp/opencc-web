@@ -2,7 +2,7 @@
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom'
 import { act, render, screen, fireEvent, waitFor } from '@testing-library/react'
-import QuickCreateModal from './QuickCreateModal'
+import QuickCreateModal, { deriveTitleFromDescription } from './QuickCreateModal'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import { useAgentStore } from '../../store/useAgentStore'
 
@@ -43,10 +43,10 @@ beforeEach(() => {
   vi.clearAllMocks()
 })
 
-describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
-  it('打开时渲染三必填字段(title/description/priority)+ cwd + agent + dependsOn', () => {
+describe('QuickCreateModal (2026-09-04 quick-intake; tf-429i39sy 2026-09-05 去 title)', () => {
+  it('打开时只渲染 description(必填)+ priority / cwd / agent / dependsOn,不再有 title 输入', () => {
     render(<QuickCreateModal open onClose={vi.fn()} />)
-    expect(screen.getByTestId('quick-title-input')).toBeTruthy()
+    expect(screen.queryByTestId('quick-title-input')).toBeNull()
     expect(screen.getByTestId('quick-description-input')).toBeTruthy()
     expect(screen.getByTestId('quick-priority-radio')).toBeTruthy()
     expect(screen.getByTestId('quick-cwd-input')).toBeTruthy()
@@ -54,7 +54,7 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
     expect(screen.getByTestId('quick-depends-on-select')).toBeTruthy()
   })
 
-  it('提交按钮初始 disabled(title + description 必填)', () => {
+  it('提交按钮初始 disabled(description 必填)', () => {
     render(<QuickCreateModal open onClose={vi.fn()} />)
     const btn = screen.getByTestId('quick-submit-button') as HTMLButtonElement
     expect(btn.hasAttribute('disabled')).toBe(true)
@@ -77,14 +77,20 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
     expect(input.value).toBe('/current/instance/cwd')
   })
 
-  it('填齐 title + description 后提交按钮 enable', () => {
+  it('填齐 description 后提交按钮 enable(没有 title 字段)', () => {
     render(<QuickCreateModal open onClose={vi.fn()} />)
-    const titleInput = screen.getByTestId('quick-title-input')
     const descInput = screen.getByTestId('quick-description-input')
-    fireEvent.change(titleInput, { target: { value: '改文案' } })
-    fireEvent.change(descInput, { target: { value: '把按钮文案从「提交」改为「完成」' } })
+    fireEvent.change(descInput, { target: { value: '把按钮文案改为完成' } })
     const btn = screen.getByTestId('quick-submit-button') as HTMLButtonElement
     expect(btn.hasAttribute('disabled')).toBe(false)
+  })
+
+  it('description 仅空白时提交按钮仍 disabled(防止 trim 后空)', () => {
+    render(<QuickCreateModal open onClose={vi.fn()} />)
+    const descInput = screen.getByTestId('quick-description-input')
+    fireEvent.change(descInput, { target: { value: '   \n   ' } })
+    const btn = screen.getByTestId('quick-submit-button') as HTMLButtonElement
+    expect(btn.hasAttribute('disabled')).toBe(true)
   })
 
   it('dependsOn 下拉只展示 finished 桶任务(不会含 queue / processing / verifying)', () => {
@@ -97,22 +103,14 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
       },
     })
     render(<QuickCreateModal open onClose={vi.fn()} />)
-    // 通过打开 select + 检查 options:finished 任务应在选项里,queue 任务不在
-    // AntD Select 不会立即渲染 options DOM,我们只能通过 select value 间接验:
-    // dependsOn 初始空数组,点击 add 一个 finished id 验证。
-    // 简化:把 finished id 传给 setState 重渲染
     fireEvent.click(screen.getByTestId('quick-depends-on-select'))
-    // 直接调用 onChange 模拟多选
     const select = screen.getByTestId('quick-depends-on-select') as HTMLElement
-    // find inner antd Select; onChange is on the underlying component
-    // 不强行模拟 click + click option(antd rc-select 在 happy-dom 行为复杂),
-    // 用单元断言 finished 来源:finishedTasks 参数已显式只有 finished 桶,UI 不会越界。
+    // finishedTasks 参数已显式只有 finished 桶,UI 不会越界。
     expect(select).toBeTruthy()
   })
 
   it('提交调 createAgentSession with mainAgent="task-intake-quick" + cwd', async () => {
     render(<QuickCreateModal open onClose={vi.fn()} />)
-    fireEvent.change(screen.getByTestId('quick-title-input'), { target: { value: '改文案' } })
     fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: '把按钮文案改为完成' } })
     fireEvent.click(screen.getByTestId('quick-submit-button'))
     await waitFor(() => {
@@ -122,18 +120,22 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
     })
   })
 
-  it('提交后向 /agent/prompt 发送结构化文本(包含 title/description/priority/cwd + mode: "quick" 提示)', async () => {
+  it('提交后向 /agent/prompt 发送结构化文本:title 从 description 第一行截取 + 含 description/priority/cwd + mode: "quick"', async () => {
     render(<QuickCreateModal open onClose={vi.fn()} />)
-    fireEvent.change(screen.getByTestId('quick-title-input'), { target: { value: '改文案' } })
-    fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: '描述' } })
+    fireEvent.change(screen.getByTestId('quick-description-input'), {
+      target: { value: '改 /m-super-tasks 顶栏文案\n\n第二行不进入 title' },
+    })
     fireEvent.click(screen.getByTestId('quick-submit-button'))
     await waitFor(() => {
       expect(api.post).toHaveBeenCalled()
     })
     const call = (api.post as unknown as { mock: { calls: Array<[string, { prompt: string }, { headers: Record<string, string> }]> } }).mock.calls[0]
     expect(call?.[0]).toBe('/agent/prompt')
-    expect(call?.[1].prompt).toContain('title: 改文案')
-    expect(call?.[1].prompt).toContain('description: 描述')
+    // title 由 client 从 description 第一行截取,不是来自独立输入;
+    // title 行是单独一行,后面紧跟换行 + 下一行('description: ')。
+    expect(call?.[1].prompt).toContain('- title: 改 /m-super-tasks 顶栏文案\n')
+    // description 字段保留完整多行输入(包含第二行);只验证 title 那行没把第二行塞进去。
+    expect(call?.[1].prompt).toContain('description: 改 /m-super-tasks 顶栏文案\n\n第二行不进入 title')
     expect(call?.[1].prompt).toContain('priority: P2')
     expect(call?.[1].prompt).toContain('cwd: /current/instance/cwd')
     expect(call?.[1].prompt).toContain('mode: "quick"')
@@ -143,12 +145,24 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
     expect(call?.[2].headers['X-Session-Id']).toBe('quick-sess-1')
   })
 
+  it('description 第一行超 50 字:title 被截断并加 ellipsis', async () => {
+    render(<QuickCreateModal open onClose={vi.fn()} />)
+    const long = 'a'.repeat(60)
+    fireEvent.change(screen.getByTestId('quick-description-input'), {
+      target: { value: long + '\n第二行' },
+    })
+    fireEvent.click(screen.getByTestId('quick-submit-button'))
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalled()
+    })
+    const call = (api.post as unknown as { mock: { calls: Array<[string, { prompt: string }, unknown]> } }).mock.calls[0]
+    expect(call?.[1].prompt).toContain(`title: ${'a'.repeat(50)}…`)
+  })
+
   it('created 信号到达后弹窗切换到完成条 + 显示「完成」按钮', async () => {
     render(<QuickCreateModal open onClose={vi.fn()} />)
-    // 触发 created(act 包住 store 更新,避免 React 18 警告 + 触发重渲染)
     act(() => { useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-quick01' }) })
     expect(await screen.findByText(/任务 tf-quick01 已创建/)).toBeTruthy()
-    // AntD Button 内容在 span 中间可能有空白(「完 成」),用 button role + 文字 trim 匹配
     const doneBtn = await screen.findByRole('button', { name: (n) => n.replace(/\s+/g, '') === '完成' })
     expect(doneBtn).toBeTruthy()
   })
@@ -156,14 +170,11 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
   it('点击完成按钮调 deleteAgentSession + clearLastCreated + onClose', async () => {
     const onClose = vi.fn()
     render(<QuickCreateModal open onClose={onClose} />)
-    // 先提交表单触发 activeSessionId 设置
-    fireEvent.change(screen.getByTestId('quick-title-input'), { target: { value: 't' } })
-    fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: 'd' } })
+    fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: '改文案' } })
     fireEvent.click(screen.getByTestId('quick-submit-button'))
     await waitFor(() => {
       expect(createAgentSession).toHaveBeenCalled()
     })
-    // 触发 created(act 包住)
     act(() => { useSuperTaskStore.setState({ lastCreatedTaskId: 'tf-q1' }) })
     const doneBtn = await screen.findByRole('button', { name: (n) => n.replace(/\s+/g, '') === '完成' })
     fireEvent.click(doneBtn)
@@ -173,11 +184,40 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
     })
   })
 
+  describe('deriveTitleFromDescription 工具函数', () => {
+    it('单行 description:整行作为 title', () => {
+      expect(deriveTitleFromDescription('改文案')).toBe('改文案')
+    })
+
+    it('多行 description:只取第一行,后续行不进 title', () => {
+      expect(deriveTitleFromDescription('第一行\n第二行')).toBe('第一行')
+      expect(deriveTitleFromDescription('第一行\r\n第二行')).toBe('第一行')
+    })
+
+    it('前后空白被 trim', () => {
+      expect(deriveTitleFromDescription('  hello world  ')).toBe('hello world')
+      expect(deriveTitleFromDescription('\n\nhello\n')).toBe('hello')
+    })
+
+    it('超过 50 字:截断到 50 字 + ellipsis', () => {
+      const long = 'a'.repeat(80)
+      expect(deriveTitleFromDescription(long)).toBe('a'.repeat(50) + '…')
+    })
+
+    it('正好 50 字:不截断,不加 ellipsis', () => {
+      const exactly = 'b'.repeat(50)
+      expect(deriveTitleFromDescription(exactly)).toBe(exactly)
+    })
+
+    it('空 / 仅空白:fallback "quick task"(后端 zod 校验过不去)', () => {
+      expect(deriveTitleFromDescription('')).toBe('quick task')
+      expect(deriveTitleFromDescription('   \n  ')).toBe('quick task')
+    })
+  })
+
   describe('fullscreen 模式(2026-09-04 /m-super-tasks 复用)', () => {
     it('fullscreen=true:Modal 容器宽 = 100vw,无圆角,顶 0', () => {
       render(<QuickCreateModal open onClose={vi.fn()} fullscreen />)
-      // AntD v5 Modal:width 落到 .ant-modal 内联 style;content.borderRadius
-      // 落到 .ant-modal-content 内联 style(来自 styles prop 的 content 字段)。
       const modal = document.querySelector('.ant-modal') as HTMLElement | null
       expect(modal).toBeTruthy()
       expect(modal?.style.width).toBe('100vw')
@@ -187,13 +227,12 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
       expect(modal?.style.paddingBottom).toBe('0px')
       const content = document.querySelector('.ant-modal-content') as HTMLElement | null
       expect(content).toBeTruthy()
-      // fullscreen 时 content borderRadius=0
       expect(content?.style.borderRadius).toBe('0px')
     })
 
-    it('fullscreen=true:表单仍渲染 title / description / submit 控件', () => {
+    it('fullscreen=true:表单仍渲染 description / priority / submit 控件;不再有 title 输入', () => {
       render(<QuickCreateModal open onClose={vi.fn()} fullscreen />)
-      expect(screen.getByTestId('quick-title-input')).toBeTruthy()
+      expect(screen.queryByTestId('quick-title-input')).toBeNull()
       expect(screen.getByTestId('quick-description-input')).toBeTruthy()
       expect(screen.getByTestId('quick-priority-radio')).toBeTruthy()
       expect(screen.getByTestId('quick-cwd-input')).toBeTruthy()
@@ -204,12 +243,10 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
       render(<QuickCreateModal open onClose={vi.fn()} />)
       const modal = document.querySelector('.ant-modal') as HTMLElement | null
       expect(modal).toBeTruthy()
-      // 桌面 width=640(top/maxWidth/margin/paddingBottom 都不应被覆盖)
       expect(modal?.style.width).toBe('640px')
       expect(modal?.style.top).toBe('')
       const content = document.querySelector('.ant-modal-content') as HTMLElement | null
       expect(content).toBeTruthy()
-      // 默认 content 不带内联 borderRadius(由 antd token / CSS class 给圆角)
       expect(content?.style.borderRadius).not.toBe('0px')
     })
   })
@@ -224,9 +261,9 @@ describe('QuickCreateModal (2026-09-04 quick-intake)', () => {
     expect(screen.getByTestId('quick-mobile-drawer')).toBeTruthy()
   })
 
-  it('mobileAsDrawer=true:表单字段仍完整渲染(title/description/priority/cwd/agent/dependsOn/submit)', () => {
+  it('mobileAsDrawer=true:表单字段仍完整渲染(description/priority/cwd/agent/dependsOn/submit);不再有 title 输入', () => {
     render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
-    expect(screen.getByTestId('quick-title-input')).toBeTruthy()
+    expect(screen.queryByTestId('quick-title-input')).toBeNull()
     expect(screen.getByTestId('quick-description-input')).toBeTruthy()
     expect(screen.getByTestId('quick-priority-radio')).toBeTruthy()
     expect(screen.getByTestId('quick-cwd-input')).toBeTruthy()

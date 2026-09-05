@@ -33,10 +33,14 @@ const QUICK_AGENT_OPTIONS = [
 ] as const
 
 /**
- * QuickCreateModal — 「快速创建」弹窗(zai patch 2026-09-04,quick-intake)。
+ * QuickCreateModal — 「快速创建」弹窗(zai patch 2026-09-04,quick-intake;
+ * tf-429i39sy 2026-09-05 去掉 title 输入,只保留 description)。
  *
  * 与 NewSuperTaskModal(完整 intake 讨论窗口)并列 —— 表单驱动,无 conversation:
- *   1. 用户填 title / description / priority / cwd / agent / dependsOn 必填/可选字段;
+ *   1. 用户填 description(必填)+ priority / cwd / agent / dependsOn 可选字段;
+ *      **没有 title 输入框**(2026-09-05 去掉) —— 后端 SuperTasksCreate 仍然要
+ *      求 title 字段必有值,因此提交时由 client 从 description 第一行截取
+ *      「标题」(`deriveTitleFromDescription`),作为 task.yaml 的 title 用;
  *   2. 提交时把表单内容打包成第一轮 prompt,创建 task-intake-quick 主 agent 会话
  *      (与 NewSuperTaskModal 走同样的 createAgentSession API,只是 mainAgent 不同);
  *   3. 监听 task_factory.created SSE → 显示完成条 + 「完成」按钮 → 关闭;
@@ -48,12 +52,20 @@ const QUICK_AGENT_OPTIONS = [
  * 与 NewSuperTaskModal 的根本差异:
  *  - 无 AgentConversation 子树(无对话 UI) —— 用纯表单拿数据;
  *  - 不挂 EventSource(SSE 通过 useSuperTaskStore.lastCreatedTaskId 收);
- *  - 不复用 intake store(根本没有 intake 会话,直接 create → 一次性发 prompt → 关闭)。
+ *  - 不复用 intake store(根本没有 intake 会话,直接 create → 一次性发 prompt → 关闭);
+ *  - 没有 title 输入项(quick 模式刻意去掉 —— 用户填描述就够了)。
  *
  * `fullscreen` prop(2026-09-04):参考 `NewSuperTaskModal.fullscreen` —— 仅影响
  *  Modal 容器尺寸(width / top / 圆角 / 内层高度);表单 / 提交 / SSE /
  * created 信号逻辑一律不变。桌面 SuperTaskPanel 调用点不传 → 行为 100%
  * 兼容(仍 640px 居中,16px body padding)。
+ *
+ * `mobileAsDrawer` prop(2026-09-04,跟随 tf-cy9x9kjh):`true` 时把 `<Modal>`
+ * 容器换成 `<Drawer placement="bottom" height="90%">`,顶部带 24px 拖把可下拉
+ * 关闭;表单 / 提交 / SSE / created 信号逻辑零改动。`fullscreen` 与
+ * `mobileAsDrawer` 同时为 true 时 `mobileAsDrawer` 优先(drawer 自带 90%
+ * 容器尺寸,`fullscreen` 在 mobile 上不再被采用)。桌面调用点不传 → 走
+ * 640px 居中 Modal。
  */
 export default function QuickCreateModal({
   open,
@@ -84,7 +96,9 @@ export default function QuickCreateModal({
     try { return useAgentStore.getState().cwd ?? '' } catch { return '' }
   }, [])
 
-  const [title, setTitle] = useState('')
+  // tf-429i39sy 2026-09-05:去掉 title 输入项 —— 后端 SuperTasksCreate 仍要求
+  // title 字段(task.yaml 的 title 顶层字段必须有内容),由 `deriveTitleFromDescription`
+  // 从 description 第一行截取最多 50 字作为 title,提交时塞给 task-intake-quick。
   const [description, setDescription] = useState('')
   const [priority, setPriority] = useState<QuickPriority>(DEFAULT_QUICK_PRIORITY)
   const [cwd, setCwd] = useState(defaultCwd)
@@ -104,7 +118,6 @@ export default function QuickCreateModal({
   useEffect(() => {
     if (!open) return
     createdBaselineRef.current = useSuperTaskStore.getState().lastCreatedTaskId
-    setTitle('')
     setDescription('')
     setPriority(DEFAULT_QUICK_PRIORITY)
     setCwd(defaultCwd)
@@ -115,9 +128,8 @@ export default function QuickCreateModal({
   }, [open, defaultCwd])
 
   async function handleSubmit(): Promise<void> {
-    const t = title.trim()
     const d = description.trim()
-    if (!t || !d) return // 必填校验(UI 上按钮已 disabled,这里双保险)
+    if (!d) return // 必填校验(UI 上按钮已 disabled,这里双保险)
     setSubmitting(true)
     setError(null)
     try {
@@ -130,8 +142,11 @@ export default function QuickCreateModal({
       })
       setActiveSessionId(sid)
       // 喂第一轮 prompt —— 把表单内容结构化交给 task-intake-quick。
+      // title 从 description 第一行截取(后端 SuperTasksCreate 仍要求 title
+      // 非空,task.yaml 的 title 顶层字段必须有内容)。
+      const title = deriveTitleFromDescription(d)
       const prompt = buildQuickPrompt({
-        title: t, description: d, priority,
+        title, description: d, priority,
         cwd: finalCwd ?? '', agent, dependsOn,
       })
       const resp = await api.post<{ sessionId: string; queued?: boolean }>('/agent/prompt', {
@@ -164,7 +179,9 @@ export default function QuickCreateModal({
     }
   }
 
-  const canSubmit = title.trim().length > 0 && description.trim().length > 0 && !submitting
+  // tf-429i39sy 2026-09-05:canSubmit 只看 description,title 由 client 自动
+  // 从 description 截取。
+  const canSubmit = description.trim().length > 0 && !submitting
 
   // mobileAsDrawer 优先于 fullscreen —— drawer body 自带 90% 容器尺寸,
   // 内层用 100% 撑满 drawer body;fullscreen 仅用于桌面 fullscreen Modal。
@@ -191,30 +208,17 @@ export default function QuickCreateModal({
       ) : (
         <Form layout="vertical">
           <Form.Item
-            label="标题(必填)"
-            required
-            help="一句话写清要改什么 / 修什么 / 调什么。"
-          >
-            <Input
-              data-testid="quick-title-input"
-              value={title}
-              onChange={(e) => setTitle(e.target.value)}
-              placeholder="例如:把按钮文案「提交」改为「完成」"
-              maxLength={120}
-              autoFocus
-            />
-          </Form.Item>
-          <Form.Item
             label="描述(必填)"
             required
-            help="详细说明需求 / 复现步骤 / 验收标准;quick 模式不写 plan.md / brainstorm.md。"
+            help="详细说明需求 / 复现步骤 / 验收标准;quick 模式不写 plan.md / brainstorm.md。第一行会被自动截为 task 标题。"
           >
             <Input.TextArea
               data-testid="quick-description-input"
               value={description}
               onChange={(e) => setDescription(e.target.value)}
-              placeholder="例如:打开 /m-super-tasks → 点「+ 新建」按钮 → 当前显示「提交」,改为「完成」。接受人:PM。"
+              placeholder="例如:把 /m-super-tasks 顶栏「+ 新建」按钮文案「提交」改为「完成」。验收:PM 验收。"
               rows={4}
+              autoFocus
             />
           </Form.Item>
           <Form.Item label="优先级">
@@ -384,4 +388,24 @@ function buildQuickPrompt(input: {
     'Pass mode: "quick" when calling SuperTasksCreate. Do NOT generate a planning doc or meeting minutes — quick mode keeps the directory lean by design.',
   ]
   return lines.join('\n')
+}
+
+/**
+ * 从 description 截出 task.yaml 的 title —— tf-429i39sy 2026-09-05:QuickCreateModal
+ * 去掉了 title 输入框,但 SuperTasksCreate 工具仍要求 title 字段(task.yaml 顶层
+ * title 必有值),所以 client 端在提交时把 description 的第一行截取(去掉首尾空白、
+ * 单行长度 50 字上限、超过 50 字用 ellipsis 收尾)直接当成 title 喂给后端。
+ *
+ * 实现要点:
+ *  - 先 trim(去掉首尾空白 + 换行),再取首个换行前的内容(只截一行,多行描述不会把第二行塞进 title);
+ *  - 限制在 50 字以内,超过则截断并加 '…';
+ *  - 极端空 / 仅空白 → fallback 'quick task'(title 不能为空,后端 zod 校验过不去)。
+ */
+const QUICK_TITLE_MAX_LEN = 50
+export function deriveTitleFromDescription(description: string): string {
+  const trimmed = description.trim()
+  if (!trimmed) return 'quick task'
+  const firstLine = trimmed.split(/\r?\n/, 1)[0] ?? trimmed
+  if (firstLine.length <= QUICK_TITLE_MAX_LEN) return firstLine
+  return `${firstLine.slice(0, QUICK_TITLE_MAX_LEN)}…`
 }
