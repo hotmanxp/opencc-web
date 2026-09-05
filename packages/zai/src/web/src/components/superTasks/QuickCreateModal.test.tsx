@@ -541,5 +541,58 @@ describe('QuickCreateModal (2026-09-04 quick-intake; tf-429i39sy 2026-09-05 去 
       expect(await screen.findByText(/所有图片上传失败/)).toBeTruthy()
       vi.unstubAllGlobals()
     })
+
+    // zai patch (2026-09-05, tf-pqvxpay0):QuickCreateModal 不直接写 task.yaml,
+    // 但发出的 prompt 里的 attachments 段必须与 task-intake-quick 的 extraction
+    // 契约对齐 —— headline 与每行 bullet 格式稳定,intake-quick 才能提取并
+    // 透传给 SuperTasksCreate 落到 task.yaml.attachments(taskFactoryTools 测试
+    // 守护实际 yaml 落盘)。本测试用更严格的"headline + 顺序约束"覆盖契约:
+    //   - 路径写到 ~/.zai/uploads/(非 cwd-relative,符合 fs.ts 改动后契约)
+    //   - bullet-list 在 Pass mode 之前
+    //   - 单条附件走通 —— 多附件由 buildQuickPrompt 的 for 循环保证(无需 e2e)
+    it('attachment prompt 段是 intake-quick 可解析的 bullet-list(契约回归)', async () => {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/api/fs/upload' && init?.method === 'POST') {
+          // 模拟 fs.ts 改写后返回 ~/.zai/uploads/<name> 绝对路径(不再是 cwd 相对)
+          return new Response(JSON.stringify({
+            ok: true,
+            absPath: '/Users/me/.zai/uploads/shot.png',
+          }), { status: 200 })
+        }
+        return new Response('{}', { status: 200 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      ;(api.post as unknown as { mock: { calls: unknown[] } }).mock.calls = []
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
+        target: { files: [makeImageFile('shot.png', 'image/png')] },
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy()
+      })
+      await waitForAttachmentReady('shot.png')
+      fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: '改按钮' } })
+      fireEvent.click(screen.getByTestId('quick-submit-button'))
+      await waitFor(() => { expect(api.post).toHaveBeenCalled() })
+      const promptCall = (api.post as unknown as { mock: { calls: Array<[string, { prompt: string }, unknown]> } }).mock.calls
+        .find((c) => c[0] === '/agent/prompt')
+      expect(promptCall).toBeTruthy()
+      const prompt = promptCall?.[1].prompt ?? ''
+      // 契约 1:headline 与 task-intake-quick systemPrompt 内的 extraction 锚点严格一致
+      //         —— intake-quick 会按这个 headline 起头切 bullet-list
+      expect(prompt).toContain('attachments (absolute paths, Read these if you need to see them):')
+      // 契约 2:每条附件以 `- <abs path>` 形式出现(整段前缀匹配)
+      expect(prompt).toMatch(/-\s+\/Users\/me\/\.zai\/uploads\/shot\.png/)
+      // 契约 3:absPath 已迁出 cwd-relative,使用 ~/.zai/uploads/(fs.ts 改动后契约)
+      //         —— 若 fs.ts 回退到 cwd 相对路径,这条断言会捕获回归
+      expect(prompt).not.toContain('proj/.zai/uploads')
+      // 契约 4:顺序 —— attachments 段必须在 Pass mode 之前(intake-quick 视觉对齐约束)
+      const attachmentsIdx = prompt.indexOf('attachments (absolute paths')
+      const modeIdx = prompt.indexOf('Pass mode: "quick"')
+      expect(attachmentsIdx).toBeGreaterThan(-1)
+      expect(modeIdx).toBeGreaterThan(-1)
+      expect(attachmentsIdx).toBeLessThan(modeIdx)
+      vi.unstubAllGlobals()
+    })
   })
 })
