@@ -177,6 +177,24 @@ export default function QuickCreateModal({
     setSubmitting(true)
     setError(null)
     try {
+      // 先并发上传所有 ready 图片(失败项用 allSettled 收集,继续后续步骤)
+      const readyAtts = attachments.filter((a) => a.status === 'ready')
+      const uploadResults = await Promise.allSettled(
+        readyAtts.map((att) => uploadImage(att)),
+      )
+      const readyPaths: string[] = []
+      let failedCount = 0
+      for (const r of uploadResults) {
+        if (r.status === 'fulfilled') {
+          readyPaths.push(r.value)
+        } else {
+          failedCount += 1
+        }
+      }
+      // 全部失败:阻断,不调 /agent/prompt
+      if (readyAtts.length > 0 && readyPaths.length === 0) {
+        throw new Error(`所有图片上传失败(共 ${readyAtts.length} 张),请重试或移除`)
+      }
       const globalSessions = useAgentStore.getState().sessions
       const finalCwd = cwd.trim() || defaultCwd || undefined
       const sid = await createAgentSession({
@@ -192,12 +210,19 @@ export default function QuickCreateModal({
       const prompt = buildQuickPrompt({
         title, description: d, priority,
         cwd: finalCwd ?? '', agent, dependsOn,
+        attachments: readyPaths,
       })
       const resp = await api.post<{ sessionId: string; queued?: boolean }>('/agent/prompt', {
         prompt, sessionId: sid,
       }, { headers: { 'X-Session-Id': sid } })
       if (!resp?.sessionId) {
         throw new Error('submit prompt failed: empty sessionId')
+      }
+      // 成功后清空附件(thumbnailUrl blob URL 随 strip 卸载 GC,无需主动 revoke)
+      setAttachments([])
+      if (failedCount > 0) {
+        // 部分失败:message.warning 告知,但不阻断后续流程
+        message.warning(`${failedCount} 张图片上传失败,未包含在附件清单中`)
       }
       // 成功提交 → 等 task_factory.created SSE → 显示完成条。
     } catch (err) {
@@ -301,6 +326,24 @@ export default function QuickCreateModal({
     if (files.length === 0) return
     void addImages(files)
     e.target.value = ''
+  }
+
+  // 单张图片上传到 <cwd>/.zai/uploads/<name>(后端 /api/fs/upload 决定路径)。
+  // 走磁盘 + 路径引用,不依赖模型视觉能力,跨模型稳定。
+  // absPath 由后端响应返回;失败抛错由 handleSubmit 的 allSettled 收集。
+  async function uploadImage(att: QuickAttachment): Promise<string> {
+    const data = att.dataUrl.replace(/^data:[^;]+;base64,/, '')
+    const res = await fetch('/api/fs/upload', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ name: att.filename, data }),
+    })
+    const body = (await res.json().catch(() => ({ ok: false, error: `HTTP ${res.status}` }))) as { ok: boolean; error?: string; absPath?: string }
+    if (!res.ok || !body.ok) {
+      throw new Error(body.error ?? `HTTP ${res.status}`)
+    }
+    if (!body.absPath) throw new Error('上传响应缺少 absPath')
+    return body.absPath
   }
 
   // tf-429i39sy 2026-09-05:canSubmit 只看 description,title 由 client 自动
@@ -567,10 +610,16 @@ export default function QuickCreateModal({
  * 把表单内容打包成 task-intake-quick 第一轮 prompt 的结构化文本。
  * 注意:不要嵌入 'brainstorming' / 'plan.md' / 'brainstorm.md' 字样
  * (task-intake-quick 的 systemPrompt 禁词;后端模型会拒绝)。
+ *
+ * 顺序约束(tf-ch7u2cyt 2026-09-05):`attachments:` 段必须在 `Pass mode: "quick"`
+ * 行之前插入,确保模型先看到附件清单再被告知 quick 模式约束(从磁盘读图由
+ * task-intake-quick 的 Read 工具负责,与 prompt 顺序无关,但视觉上让模型
+ * 一次看完所有上下文更稳)。
  */
 function buildQuickPrompt(input: {
   title: string; description: string; priority: QuickPriority
   cwd: string; agent: string; dependsOn: string[]
+  attachments?: string[]
 }): string {
   const lines: string[] = [
     `Create a quick task with the following fields:`,
@@ -582,9 +631,18 @@ function buildQuickPrompt(input: {
     ...(input.dependsOn.length > 0
       ? [`- dependsOn: [${input.dependsOn.join(', ')}]`]
       : []),
+  ]
+  // attachments 段在 Pass mode 行之前插入
+  if (input.attachments && input.attachments.length > 0) {
+    lines.push('', 'attachments (absolute paths, Read these if you need to see them):')
+    for (const p of input.attachments) {
+      lines.push(`- ${p}`)
+    }
+  }
+  lines.push(
     '',
     'Pass mode: "quick" when calling SuperTasksCreate. Do NOT generate a planning doc or meeting minutes — quick mode keeps the directory lean by design.',
-  ]
+  )
   return lines.join('\n')
 }
 

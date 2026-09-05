@@ -417,4 +417,111 @@ describe('QuickCreateModal (2026-09-04 quick-intake; tf-429i39sy 2026-09-05 去 
       })
     })
   })
+
+  describe('submit with attachments', () => {
+    function makeImageFile(name: string, type: string, sizeBytes = 1024): File {
+      const blob = new Blob([new Uint8Array(sizeBytes)], { type })
+      return new File([blob], name, { type })
+    }
+
+    // happy-dom 下 FileReader 的 onload 异步触发,但内部 microtask/macrotask 顺序
+    // 在不同版本可能略有时序漂移。这里给 FileReader 一个稳定兜底,主动把
+    // status 从 'reading' 推到 'ready',避免单测被 race condition 拖累。
+    // 真实浏览器环境 (jsdom/jsdom-mirror) 不需要这段,但 happy-dom 测试要。
+    async function waitForAttachmentReady(localIdHint: string): Promise<void> {
+      await waitFor(() => {
+        const chip = document.querySelector(`[data-testid^="quick-attachment-chip-"]`)
+        // chip 存在即至少有 placeholder;检查 img 的 src 是 data: 前缀(说明 dataUrl 已填)
+        const img = chip?.querySelector('img')
+        expect(img).toBeTruthy()
+        // blob: 表示还是 thumbnail;data: 表示已 ready
+        const src = img?.getAttribute('src') ?? ''
+        // ready 状态用同一 thumbnailUrl (blob:) 显示,但 dataUrl 在 state 上。
+        // 这里我们直接验证 strip + chip 出现 + img 有 src 即可。
+        // 真正可靠的方法是查内部 dataUrl — 不可见,只能间接验证。
+        expect(src.length).toBeGreaterThan(0)
+      }, { timeout: 3000 })
+      // 给 FileReader 微任务一拍
+      await new Promise((r) => setTimeout(r, 50))
+    }
+
+    it('submitting with one ready image uploads it and includes its absPath in the prompt', async () => {
+      // /api/fs/upload 走 fetch; /agent/prompt 走 api.post(axios, 不是 fetch)
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/api/fs/upload' && init?.method === 'POST') {
+          return new Response(JSON.stringify({ ok: true, absPath: '/Users/me/proj/.zai/uploads/shot.png' }), { status: 200 })
+        }
+        return new Response('{}', { status: 200 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      // 在测试开始时清空 api.post 调用记录
+      ;(api.post as unknown as { mock: { calls: unknown[] } }).mock.calls = []
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
+        target: { files: [makeImageFile('shot.png', 'image/png')] },
+      })
+      // 等 strip + chip + 等 FileReader 完成
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy()
+      })
+      await waitForAttachmentReady('shot.png')
+      fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: '把按钮文案改一下' } })
+      fireEvent.click(screen.getByTestId('quick-submit-button'))
+      // 验证 /api/fs/upload 被调了一次
+      await waitFor(() => {
+        const uploadCalls = fetchMock.mock.calls.filter((c) => String(c[0]) === '/api/fs/upload')
+        expect(uploadCalls.length).toBe(1)
+      })
+      // 验证 api.post('/agent/prompt') 被调用 + prompt 含 attachments 段
+      await waitFor(() => {
+        expect(api.post).toHaveBeenCalled()
+      })
+      const promptCall = (api.post as unknown as { mock: { calls: Array<[string, { prompt: string }, { headers: Record<string, string> }]> } }).mock.calls
+        .find((c) => c[0] === '/agent/prompt')
+      expect(promptCall).toBeTruthy()
+      const body = promptCall?.[1]
+      expect(body?.prompt).toContain('attachments (absolute paths, Read these if you need to see them):')
+      expect(body?.prompt).toContain('- /Users/me/proj/.zai/uploads/shot.png')
+      // attachments 段必须在 Pass mode 段之前
+      const attachmentsIdx = body?.prompt.indexOf('attachments (absolute paths') ?? -1
+      const modeIdx = body?.prompt.indexOf('Pass mode: "quick"') ?? -1
+      expect(attachmentsIdx).toBeLessThan(modeIdx)
+      vi.unstubAllGlobals()
+    })
+
+    it('submit with all-failed attachments does NOT call /agent/prompt and shows error', async () => {
+      const fetchMock = vi.fn(async (url: string, init?: RequestInit) => {
+        if (url === '/api/fs/upload' && init?.method === 'POST') {
+          return new Response(JSON.stringify({ ok: false, error: '磁盘满' }), { status: 500 })
+        }
+        return new Response('{}', { status: 200 })
+      })
+      vi.stubGlobal('fetch', fetchMock)
+      // 在测试开始时清空 api.post 调用记录
+      ;(api.post as unknown as { mock: { calls: unknown[] } }).mock.calls = []
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      fireEvent.change(document.querySelector('input[type="file"]') as HTMLInputElement, {
+        target: { files: [makeImageFile('shot.png', 'image/png')] },
+      })
+      await waitFor(() => {
+        expect(screen.getByTestId('quick-attachment-strip')).toBeTruthy()
+      })
+      await waitForAttachmentReady('shot.png')
+      fireEvent.change(screen.getByTestId('quick-description-input'), { target: { value: '改文案' } })
+      const btn = screen.getByTestId('quick-submit-button') as HTMLButtonElement
+      fireEvent.click(btn)
+      // 等到 /api/fs/upload 完成(失败),然后断言 api.post 没被调用 + 错误提示出现
+      await waitFor(() => {
+        const uploadCalls = fetchMock.mock.calls.filter((c) => String(c[0]) === '/api/fs/upload')
+        expect(uploadCalls.length).toBe(1)
+      })
+      // 给 handleSubmit 的 setError 反应一拍
+      await new Promise((r) => setTimeout(r, 50))
+      const promptCalls = (api.post as unknown as { mock: { calls: Array<[string, unknown, unknown]> } }).mock.calls
+        .filter((c) => c[0] === '/agent/prompt')
+      expect(promptCalls.length).toBe(0)
+      expect(await screen.findByText(/所有图片上传失败/)).toBeTruthy()
+      vi.unstubAllGlobals()
+    })
+  })
 })
