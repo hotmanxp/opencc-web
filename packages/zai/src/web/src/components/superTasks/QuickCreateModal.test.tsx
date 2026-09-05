@@ -287,4 +287,46 @@ describe('QuickCreateModal (2026-09-04 quick-intake; tf-429i39sy 2026-09-05 去 
     expect(document.querySelector('.ant-drawer')).toBeNull()
     expect(screen.queryByTestId('quick-drawer-handle')).toBeNull()
   })
+
+  describe('cwd picker', () => {
+    it('renders quick-cwd-picker-trigger button next to the cwd input', () => {
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      expect(screen.getByTestId('quick-cwd-picker-trigger')).toBeTruthy()
+    })
+
+    it('clicking picker trigger opens the DirectoryPicker modal', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, path: '/x', parent: '/', home: '/', entries: [] }), { status: 200 })))
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      fireEvent.click(screen.getByTestId('quick-cwd-picker-trigger'))
+      expect(await screen.findByTestId('quick-directory-picker')).toBeTruthy()
+      vi.unstubAllGlobals()
+    })
+
+    it('DirectoryPicker onSelect updates the cwd field', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(
+        JSON.stringify({ ok: true, path: '/Users/picked', parent: '/Users', home: '/Users', entries: [] }),
+        { status: 200 },
+      )))
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      fireEvent.click(screen.getByTestId('quick-cwd-picker-trigger'))
+      // 在 picker 内 fetch 完成后,点「选择当前目录」
+      await screen.findByTestId('picker-select')
+      fireEvent.click(screen.getByTestId('picker-select'))
+      const input = screen.getByTestId('quick-cwd-input') as HTMLInputElement
+      expect(input.value).toBe('/Users/picked')
+      vi.unstubAllGlobals()
+    })
+
+    it('DirectoryPicker cancel keeps cwd unchanged', async () => {
+      vi.stubGlobal('fetch', vi.fn(async () => new Response(JSON.stringify({ ok: true, path: '/x', parent: '/', home: '/', entries: [] }), { status: 200 })))
+      render(<QuickCreateModal open onClose={vi.fn()} />)
+      const before = (screen.getByTestId('quick-cwd-input') as HTMLInputElement).value
+      fireEvent.click(screen.getByTestId('quick-cwd-picker-trigger'))
+      await screen.findByTestId('picker-cancel')
+      fireEvent.click(screen.getByTestId('picker-cancel'))
+      const after = (screen.getByTestId('quick-cwd-input') as HTMLInputElement).value
+      expect(after).toBe(before)
+      vi.unstubAllGlobals()
+    })
+  })
 })

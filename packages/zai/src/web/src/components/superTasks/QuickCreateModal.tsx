@@ -11,13 +11,14 @@ import {
   Space,
   message,
 } from 'antd'
-import { ThunderboltOutlined } from '@ant-design/icons'
+import { ThunderboltOutlined, FolderOpenOutlined } from '@ant-design/icons'
 import { api } from '../../lib/api'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import {
   createAgentSession, deleteAgentSession, pickLastSelectedModel,
 } from '../../lib/agentSessionApi'
 import { useAgentStore } from '../../store/useAgentStore'
+import DirectoryPicker from '../common/DirectoryPicker.js'
 import DrawerPullHandle from './DrawerPullHandle'
 
 /** 优先级单选(zai patch 2026-09-02)。 */
@@ -106,6 +107,9 @@ export default function QuickCreateModal({
   const [dependsOn, setDependsOn] = useState<string[]>([])
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState<string | null>(null)
+  // cwd picker 状态(tf-ch7u2cyt 2026-09-05):cw d 字段右侧「选择目录」按钮打开
+  // 共享 DirectoryPicker Modal;选中 → onSelect 回填 cwd + 关闭 picker。
+  const [cwdPickerOpen, setCwdPickerOpen] = useState(false)
   // 任务已创建 → 显示完成条;打开弹窗时通过 baseline ref 屏蔽历史 created 信号。
   const createdBaselineRef = useRef<string | null>(null)
   const createdTaskId =
@@ -125,6 +129,7 @@ export default function QuickCreateModal({
     setDependsOn([])
     setError(null)
     setActiveSessionId(null)
+    setCwdPickerOpen(false)
   }, [open, defaultCwd])
 
   async function handleSubmit(): Promise<void> {
@@ -249,12 +254,22 @@ export default function QuickCreateModal({
               </Space>
             )}
           >
-            <Input
-              data-testid="quick-cwd-input"
-              value={cwd}
-              onChange={(e) => setCwd(e.target.value)}
-              placeholder={defaultCwd || '/absolute/path/to/repo'}
-            />
+            <Space.Compact style={{ width: '100%' }}>
+              <Input
+                data-testid="quick-cwd-input"
+                value={cwd}
+                onChange={(e) => setCwd(e.target.value)}
+                placeholder={defaultCwd || '/absolute/path/to/repo'}
+                style={{ flex: 1, minWidth: 0 }}
+              />
+              <Button
+                icon={<FolderOpenOutlined />}
+                data-testid="quick-cwd-picker-trigger"
+                onClick={() => setCwdPickerOpen(true)}
+              >
+                选择目录
+              </Button>
+            </Space.Compact>
           </Form.Item>
           <Form.Item label="执行子 agent">
             <Select
@@ -317,27 +332,44 @@ export default function QuickCreateModal({
 
   if (mobileAsDrawer) {
     return (
-      <Drawer
-        open={open}
-        onClose={handleContainerClose}
-        placement="bottom"
-        height="90%"
-        destroyOnHidden={false}
-        keyboard
-        title={(
-          <div>
-            <DrawerPullHandle testId="quick-drawer-handle" onClose={handleContainerClose} />
-            <Space style={{ display: 'flex', paddingBottom: 8 }}>
-              <ThunderboltOutlined style={{ color: '#fa8c16' }} />
-              <span>快速创建任务</span>
-            </Space>
-          </div>
-        )}
-        styles={{ body: { padding: 0 } }}
-        data-testid="quick-mobile-drawer"
-      >
-        {bodyContent}
-      </Drawer>
+      <>
+        <Drawer
+          open={open}
+          onClose={handleContainerClose}
+          placement="bottom"
+          height="90%"
+          destroyOnHidden={false}
+          keyboard
+          title={(
+            <div>
+              <DrawerPullHandle testId="quick-drawer-handle" onClose={handleContainerClose} />
+              <Space style={{ display: 'flex', paddingBottom: 8 }}>
+                <ThunderboltOutlined style={{ color: '#fa8c16' }} />
+                <span>快速创建任务</span>
+              </Space>
+            </div>
+          )}
+          styles={{ body: { padding: 0 } }}
+          data-testid="quick-mobile-drawer"
+        >
+          {bodyContent}
+        </Drawer>
+        {/*
+          cwd picker (tf-ch7u2cyt):Drawer 容器外另挂一个 Modal 形态的 picker。
+          antd Drawer 不允许再内嵌一个 Modal(嵌套 Modal 弹层有时出栈有问题),
+          放在 Drawer 外部作为 sibling 渲染即可。close 路径走父级 onSelect
+          内 setCwdPickerOpen(false) + 同步 setCwd 写入表单。
+        */}
+        <DirectoryPicker
+          open={cwdPickerOpen}
+          initialPath={cwd.trim() || defaultCwd}
+          onCancel={() => setCwdPickerOpen(false)}
+          onSelect={(p) => {
+            setCwd(p)
+            setCwdPickerOpen(false)
+          }}
+        />
+      </>
     )
   }
 
@@ -361,6 +393,15 @@ export default function QuickCreateModal({
       }}
     >
       {bodyContent}
+      <DirectoryPicker
+        open={cwdPickerOpen}
+        initialPath={cwd.trim() || defaultCwd}
+        onCancel={() => setCwdPickerOpen(false)}
+        onSelect={(p) => {
+          setCwd(p)
+          setCwdPickerOpen(false)
+        }}
+      />
     </Modal>
   )
 }
