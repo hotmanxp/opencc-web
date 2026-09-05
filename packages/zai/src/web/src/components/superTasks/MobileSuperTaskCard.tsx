@@ -79,6 +79,22 @@ export default function MobileSuperTaskCard({
     if (task.bucket !== 'queue-tasks' && isStarting) setIsStarting(false)
   }, [task.bucket, isStarting])
 
+  // zai patch (2026-09-05, tf-eyzfrs3c):任务标题兜底 —— task.title 为空
+  // (trim 后零长度)时,从 task.description 第一行截 ~30 字当标题,再退化到
+  // task.id,确保卡片 100% 有可见标题。背景:tf-o9iu5pyf 修复时只补了 data-testid
+  // 与 fontWeight:600,但「task.title 为空」场景没覆盖 —— 实测历史 quick 任务
+  // (description 写在 yaml 但 title 字段是空字符串)与 intake agent 偶发的
+  // 「只填 description 没填 title」调用,都会让卡片渲染出空白行。桌面对照
+  // SuperTaskCard.tsx 同样裸渲染 task.title,但桌面「title 为空 → id」兜底由
+  // core taskFactoryFiles.ts toSummary 完成;移动端只缺一个「显示侧」兜底。
+  // 兜底顺序:
+  //  1. task.title trim 后非空 → 直接用(常见路径)
+  //  2. task.description 第一行(去掉首尾空白 + 截 30 字 + …)→ 用于「title 空但
+  //     用户实际填了描述」的 quick-intake 任务,行为与 QuickCreateModal 的
+  //     deriveTitleFromDescription 一致(只是上限 30 字更紧凑,卡片单行截断)
+  //  3. task.id → 兜底兜底,确保测试 / 损坏数据下卡片仍有内容
+  const displayTitle = resolveCardTitle(task)
+
   async function handleDelete(): Promise<void> {
     try {
       await deleteSuperTasks([task.id])
@@ -176,12 +192,17 @@ export default function MobileSuperTaskCard({
           </Tag>
         )}
       </div>
-      {/* 任务标题(2026-09-05 tf-o9iu5pyf 回归修复):fontWeight:500 →
-          600 + letterSpacing:0.1 与桌面 SuperTaskCard L234-244 对齐,确保
-          移动端卡片一眼可辨;data-testid 提供回归测试锚点,防止以后
-          改样式时把整段误删或加 display:none(过去没有 testid 没人能
-          发现「title 没了」)。paddingRight:28 给右上角 × 按钮留位,
-          whiteSpace:nowrap + textOverflow:ellipsis 让超长标题单行截断。 */}
+      {/* 任务标题(2026-09-05 tf-o9iu5pyf 回归修复 + tf-eyzfrs3c 兜底):
+          fontWeight:500 → 600 + letterSpacing:0.1 与桌面 SuperTaskCard L234-244
+          对齐,确保移动端卡片一眼可辨;data-testid 提供回归测试锚点,
+          防止以后改样式时把整段误删或加 display:none(过去没有 testid
+          没人能发现「title 没了」)。paddingRight:28 给右上角 × 按钮
+          留位,whiteSpace:nowrap + textOverflow:ellipsis 让超长标题单行
+          截断。
+
+          tf-eyzfrs3c 兜底:`displayTitle` 由 resolveCardTitle 计算 —— task.title
+          空时退化到 description 首行(截 30 字),再退化到 task.id。卡片
+          100% 有可见标题,不再让 quick 任务 / 历史损坏数据的「空白行」溜过去。 */}
       <div
         style={{
           fontSize: 14,
@@ -194,10 +215,10 @@ export default function MobileSuperTaskCard({
           textOverflow: 'ellipsis',
           paddingRight: 28, // 给右上角 × 按钮留位,避免标题被遮
         }}
-        title={task.title}
+        title={displayTitle}
         data-testid={`mobile-card-title-${task.id}`}
       >
-        {task.title}
+        {displayTitle}
       </div>
       <div
         style={{
@@ -285,4 +306,28 @@ function formatRelative(ts: string | number | null | undefined): string {
   if (hr < 24) return `${hr}小时前`
   const day = Math.floor(hr / 24)
   return `${day}天前`
+}
+
+/** zai patch (2026-09-05, tf-eyzfrs3c):标题兜底解析 —— 见组件内 displayTitle
+ *  注释。截断上限 30 字 + ellipsis 是为了让「快速创建」derived 标题在移动端
+ *  卡片(单行 ellipsis,约 14ch)上不出现「又被截一遍」的二阶段截断感;视觉上
+ *  与 QuickCreateModal 的 deriveTitleFromDescription 上限 50 字保持分工:
+ *  QuickCreateModal 决定「存什么」,本函数决定「显示什么」(更紧凑)。
+ *  单测直接覆盖,确保行为契约稳定。 */
+const CARD_TITLE_FALLBACK_MAX = 30
+export function resolveCardTitle(task: TaskSummary): string {
+  const raw = typeof task.title === 'string' ? task.title.trim() : ''
+  if (raw.length > 0) return task.title
+  // task.title 缺失 / 空 / 仅空白 → 退化到 description 第一行。
+  // 快速创建任务里 description 是用户原始输入(必填),首行天然是「标题意图」。
+  const desc = typeof task.description === 'string' ? task.description : ''
+  const firstLine = desc.split(/\r?\n/, 1)[0]?.trim() ?? ''
+  if (firstLine.length > 0) {
+    if (firstLine.length <= CARD_TITLE_FALLBACK_MAX) return firstLine
+    return `${firstLine.slice(0, CARD_TITLE_FALLBACK_MAX)}…`
+  }
+  // 极端兜底:title 空 + description 空(legacy 损坏数据)→ 用 id,保证卡片
+  // 至少有个可识别串。与 taskFactoryFiles.toSummary 「title 缺失回退 id」
+  // 语义对齐,这里只是显示侧再补一道。
+  return task.id
 }
