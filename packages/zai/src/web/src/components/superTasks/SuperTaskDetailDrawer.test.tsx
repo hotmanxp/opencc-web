@@ -3,6 +3,7 @@ import { describe, expect, it, vi } from 'vitest'
 import '@testing-library/jest-dom'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import SuperTaskDetailDrawer from './SuperTaskDetailDrawer'
+import { useAppStore } from '../../store/useAppStore'
 
 /** 构造 /api/super-tasks/:id 的 TaskDetails mock。 */
 function taskDetailsMock(over: Record<string, unknown> = {}) {
@@ -167,5 +168,52 @@ describe('SuperTaskDetailDrawer', () => {
       vi.unstubAllGlobals()
       unmount()
     }
+  })
+
+  // 2026-09-05(tf-ocgwe3ej):移动端详情抽屉之前用 width=720 默认 right 抽屉,
+  // 在 375–430px 视口下整个抽屉溢出可视区,事件流 Timeline / Tabs 全部
+  // 渲染到屏幕外 → 用户感觉「看不到事件」。修复:useAppStore.isMobile=true
+  // 时切到 placement="bottom" + height="90%" 的底部抽屉(对齐
+  // MobileSupervisorDrawer 同款模式)。桌面 isMobile=false 仍走 width=720
+  // 默认 right 抽屉(原行为,零回归)。
+  it('isMobile=true → 抽屉走 placement="bottom" + height="90%"(data-testid=mobile-detail-drawer)', async () => {
+    useAppStore.setState({ isMobile: true })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/events')) return eventsStreamMock()
+      return taskDetailsMock()
+    }))
+    try {
+      const { container } = render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
+      // data-testid 标记走 mobile 分支
+      const drawer = await screen.findByTestId('mobile-detail-drawer')
+      expect(drawer).toBeTruthy()
+      // AntD Drawer 走 portal:wrapper 实际挂到 document.body,这里 container
+      // 找不到 drawer 根。改查全局 .ant-drawer-bottom —— 只有走 bottom
+      // placement 时 AntD 才挂这个 className。
+      const bottomDrawers = document.querySelectorAll('.ant-drawer-bottom')
+      expect(bottomDrawers.length).toBeGreaterThanOrEqual(1)
+      // 事件流仍然渲染 —— 这是用户感知「能看到事件」的最小可信证据
+      expect(await screen.findByText('[init]')).toBeTruthy()
+    } finally {
+      useAppStore.setState({ isMobile: false })
+      vi.unstubAllGlobals()
+    }
+  })
+
+  it('isMobile=false → 抽屉走 width=720 默认 right 抽屉(data-testid=desktop-detail-drawer)', async () => {
+    // 默认 isMobile=false,这里显式重置以防其它用例污染
+    useAppStore.setState({ isMobile: false })
+    vi.stubGlobal('fetch', vi.fn(async (url: string) => {
+      if (String(url).endsWith('/events')) return eventsStreamMock()
+      return taskDetailsMock()
+    }))
+    render(<SuperTaskDetailDrawer taskId="tf-x" onClose={() => {}} />)
+    const drawer = await screen.findByTestId('desktop-detail-drawer')
+    expect(drawer).toBeTruthy()
+    // 桌面不应出现 mobile 分支的 .ant-drawer-bottom
+    expect(document.querySelector('.ant-drawer-bottom')).toBeNull()
+    // 桌面应出现默认 right drawer
+    expect(document.querySelector('.ant-drawer')).toBeTruthy()
+    vi.unstubAllGlobals()
   })
 })
