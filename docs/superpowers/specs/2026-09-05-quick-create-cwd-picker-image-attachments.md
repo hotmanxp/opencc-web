@@ -232,9 +232,9 @@ const canSubmit = description.trim().length > 0
 
 ### 7.3 新 `QuickAttachmentStrip.test.tsx`
 
-- 空数组:`暂无附件`占位(或仅空状态)
-- 多张 ready:每张渲染缩略图 + 文件名 + × 按钮
-- `status='error'`:error 文字红字显示
+- 空数组(`items.length===0`):组件渲染为空(`null` 或 `[]`)—— QuickCreateModal 父级用 `attachments.length > 0 && <QuickAttachmentStrip .../>` 守卫,组件本身不需内置空状态文案
+- 多张 ready:每张渲染缩略图(`<img src={thumbnailUrl}>`)+ 文件名 + × 按钮
+- `status='error'`:error 文字以红色 className 渲染(具体 class 由 §8 实现确定)
 - 点 × → 调 `onRemove(localId)`
 
 ### 7.4 改 `QuickCreateModal.test.tsx`
@@ -285,7 +285,7 @@ const canSubmit = description.trim().length > 0
 - **MAX_IMAGES_PER_QUICK = 8**:常量放在 QuickCreateModal.tsx 顶部,与 `QUICK_TITLE_MAX_LEN = 50`、`DEFAULT_QUICK_PRIORITY = 'P2'` 等并列。
 - **`quick-cwd-picker-trigger` / `quick-directory-picker` / `quick-image-picker-trigger` / `quick-attachment-strip`** 是新增的 `data-testid`,便于测试。
 - **组件命名**:缩略图条叫 `QuickAttachmentStrip`(`superTasks/` 私有,不复用 AgentInputBox 的 AttachmentStrip);目录选择器复用 `DirectoryPicker`(`common/`,跨域共享)。
-- **`genLocalId`**:复用 AgentInputBox 的兜底实现(`crypto.randomUUID` + `att-` 时间戳随机数),不引入新工具函数。
+- **`genLocalId`**:在 `QuickCreateModal.tsx` 顶部**就地定义**(10 行,与 `MAX_IMAGES_PER_QUICK = 8` 等常量并列),**不**抽取到 `lib/`,**不**从 `AgentInputBox.tsx` import(那边没 export)。逻辑:`crypto.randomUUID` 优先,失败 fallback 到 `att-${Date.now().toString(36)}-${Math.random().toString(36).slice(2, 10)}`,与 AgentInputBox:75-84 完全一致。
 - **`buildQuickPrompt` 顺序**:保持现有 lines 顺序,只在 `Pass mode: 'quick'` 行**之前**插入 attachments 块,确保模型先看到附件清单,再被告知 quick 模式约束。
 - **`/agent/prompt` header**:`{ headers: { 'X-Session-Id': sid } }` 与现有契约一致,不引入新 header。
 
