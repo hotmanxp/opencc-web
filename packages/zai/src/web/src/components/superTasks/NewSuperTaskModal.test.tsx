@@ -57,7 +57,7 @@ beforeEach(() => {
 })
 
 describe('NewSuperTaskModal (task-intake 对话窗口 · 2026-09-02 隔离)', () => {
-  it('打开 → 建 task-intake 会话,主管全局 sessionId 保持不动(隔离)', async () => {
+  it('打开 → 建 task-intake 会话,调度官全局 sessionId 保持不动(隔离)', async () => {
     render(<NewSuperTaskModal open onClose={vi.fn()} />)
 
     await waitFor(() => {
@@ -69,13 +69,13 @@ describe('NewSuperTaskModal (task-intake 对话窗口 · 2026-09-02 隔离)', ()
       expect(screen.getByTestId('intake-conv-mock')).toBeTruthy()
     })
     // 关键断言:全局 useAgentStore.sessionId 没有被切到 intake 会话 —— 这是
-    // 修复 "主管与 Modal 显示相同对话" bug 的核心契约(2026-09-02)。
+    // 修复 "调度官与 Modal 显示相同对话" bug 的核心契约(2026-09-02)。
     expect(useAgentStore.getState().sessionId).toBe('sup-1')
     // intake 会话 id 仅作持久化使用,不写入全局 store。
     expect(window.localStorage.getItem('zai-intake-session')).toBe('intake-1')
   })
 
-  it('created 事件 → 显示完成条;完成并关闭 → 删 intake 会话,主管 sessionId 仍不变', async () => {
+  it('created 事件 → 显示完成条;完成并关闭 → 删 intake 会话,调度官 sessionId 仍不变', async () => {
     const onClose = vi.fn()
     render(<NewSuperTaskModal open onClose={onClose} />)
     await waitFor(() => expect(screen.getByTestId('intake-conv-mock')).toBeTruthy())
@@ -97,7 +97,7 @@ describe('NewSuperTaskModal (task-intake 对话窗口 · 2026-09-02 隔离)', ()
     expect(window.localStorage.getItem('zai-intake-session')).toBeNull()
   })
 
-  it('未创建任务时关闭 → 保留草稿会话,不删除,主管 sessionId 仍不变', async () => {
+  it('未创建任务时关闭 → 保留草稿会话,不删除,调度官 sessionId 仍不变', async () => {
     const onClose = vi.fn()
     render(<NewSuperTaskModal open onClose={onClose} />)
     await waitFor(() => expect(screen.getByTestId('intake-conv-mock')).toBeTruthy())
@@ -136,13 +136,13 @@ describe('NewSuperTaskModal (task-intake 对话窗口 · 2026-09-02 隔离)', ()
     expect(useAgentStore.getState().sessionId).toBe('sup-1')
   })
 
-  it('主管 Layout 全程 messages 数组不被 intake 写入污染', async () => {
+  it('调度官 Layout 全程 messages 数组不被 intake 写入污染', async () => {
     useAgentStore.setState({ messages: [{ eventId: 'sup-msg', type: 'user.text', text: 'hi', sessionId: 'sup-1', ts: 0, turnIndex: 0 }] as never })
 
     render(<NewSuperTaskModal open onClose={vi.fn()} />)
     await waitFor(() => expect(screen.getByTestId('intake-conv-mock')).toBeTruthy())
 
-    // 主管 store 的内容完整保留。
+    // 调度官 store 的内容完整保留。
     const supMessages = useAgentStore.getState().messages
     expect(supMessages).toHaveLength(1)
     expect((supMessages[0] as { eventId?: string }).eventId).toBe('sup-msg')

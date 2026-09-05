@@ -19,7 +19,7 @@ export interface SuperTaskStore {
   managed: boolean
   loading: boolean
   error: string | null
-  /** 后端 state.json 里的主管会话 id(GET /api/super-tasks 带回)。 */
+  /** 后端 state.json 里的任务调度官会话 id(GET /api/super-tasks 带回)。 */
   supervisorSessionId: string | null
   /** 最近一次 task_factory.created 的任务 id —— 新建任务弹窗据此显示完成条。 */
   lastCreatedTaskId: string | null
@@ -41,7 +41,7 @@ export interface SuperTaskStore {
   resume: (id: string) => Promise<void>
   accept: (id: string) => Promise<void>
   /**
-   * 重置主管会话(2026-09-02)。调后端 reset 端点清 state.json +
+   * 重置任务调度官会话(2026-09-02)。调后端 reset 端点清 state.json +
    * 关托管;reload 触发由调用层(window.location.reload())负责,
    * store action 保持纯净 — 其它路径(脚本/测试)若需要不 reload
    * 的版本也能直接复用。
@@ -99,7 +99,7 @@ export const useSuperTaskStore = create<SuperTaskStore>((set, get) => ({
     // SSE 触发 applyTaskFactoryEvent 会同步本地 store。这里不立即 set 其它字段,
     // 等 SSE 事件走完一遍,避免与 broadcast 抢写入时序。
     // 但服务端 sid/managed 已变、本地 hash 必然过期 → 清空强制下一轮全量。
-    // reload 由 UI 层负责(让看板 / 主管 transcript 干净同步)。
+    // reload 由 UI 层负责(让看板 / 调度官 transcript 干净同步)。
     set({ lastHash: null })
   },
   start: async (id) => { await startSuperTask(id); await get().load() },
@@ -111,7 +111,7 @@ export const useSuperTaskStore = create<SuperTaskStore>((set, get) => ({
       set({ lastCreatedTaskId: event.payload.id })
     }
     if (event.action === 'state.changed') {
-      // 其它 tab / 后端改了托管开关或主管 sid → 同步本地
+      // 其它 tab / 后端改了托管开关或调度官 sid → 同步本地
       const p = event.payload as { managedEnabled?: unknown; supervisorSessionId?: unknown }
       const patch: Partial<SuperTaskStore> = {}
       if (typeof p.managedEnabled === 'boolean') patch.managed = p.managedEnabled

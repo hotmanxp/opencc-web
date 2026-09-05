@@ -55,7 +55,7 @@ export interface InstanceDefinition {
    */
   runtimeCore?: RuntimeCore
   /**
-   * 启动 profile：'task-factory' = 任务工厂实例（打开 /super-tasks、锁定主管 Agent）。
+   * 启动 profile：'task-factory' = 任务工厂实例（打开 /super-tasks、锁定调度官 Agent）。
    * 该值经 supervisor spawn `--app` 传给子进程，并在 `/api/system` 回显。
    * 子进程 `cli/index.ts` 把它落到 `process.env.ZAI_APP`；`routes/agent.ts`
    * 看到该 env 后强制把所有新建会话的 `mainAgent` 锁定为 `task-factory`，

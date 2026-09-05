@@ -23,7 +23,7 @@ export interface TaskSummary {
   /**
    * 调度优先级(2026-09-02 任务工厂升级)。P0 最紧急、P3 最不紧急;缺省 P2。
    * SuperTasksList 输出按 priority ASC(数值小 → 优先)→ createdAt ASC 排,
-   * 主管 dispatch 时挑 priority 最高(数值最小)且依赖完成的任务并行派发。
+   * 任务调度官 dispatch 时挑 priority 最高(数值最小)且依赖完成的任务并行派发。
    */
   priority?: TaskPriority
   /** 依赖的任务 id 列表;所有依赖任务 status=done 时本任务才可派发。 */
@@ -60,10 +60,10 @@ export interface TaskDetails { summary: TaskSummary; specMd: string; planMd: str
 export const INTAKE_REQUIRED_DOCS = ['docs/spec.md', 'docs/plan.md', 'docs/brainstorm.md'] as const
 export type IntakeDocPath = (typeof INTAKE_REQUIRED_DOCS)[number]
 /** createPoolTask 缺省写入的骨架文本(抽常量供写入与校验共用)。 */
-export const DEFAULT_SPEC_SKELETON = '# 需求规格\n\n（需求讨论后由主管补充）\n'
-export const DEFAULT_PLAN_SKELETON = '# 执行计划\n\n（执行前由主管补充）\n'
+export const DEFAULT_SPEC_SKELETON = '# 需求规格\n\n（需求讨论后由任务调度官补充）\n'
+export const DEFAULT_PLAN_SKELETON = '# 执行计划\n\n（执行前由任务调度官补充）\n'
 /** 骨架占位行标记:整行含以下文案视为未填。 */
-const INTAKE_PLACEHOLDER_MARKERS = ['（需求讨论后由主管补充）', '（执行前由主管补充）']
+const INTAKE_PLACEHOLDER_MARKERS = ['（需求讨论后由任务调度官补充）', '（执行前由任务调度官补充）']
 
 /** 判定文档是否有实质内容:去掉 markdown 标题、空行、占位行后,非空白字符 ≥ 20。 */
 function intakeDocHasSubstance(text: string): boolean {
@@ -293,7 +293,7 @@ export interface CreatePoolTaskInput {
   verifierAgent?: string
   /**
    * 调度优先级(2026-09-02)。缺省 P2;非法值 fail loud(intake 阶段已校验)。
-   * 主管 dispatch 按 priority ASC(P0 最先)→ createdAt ASC 派发。
+   * 任务调度官 dispatch 按 priority ASC(P0 最先)→ createdAt ASC 派发。
    */
   priority?: TaskPriority
   /**
@@ -464,7 +464,7 @@ function toSummary(id: string, bucket: TaskBucketName, meta: TaskYaml): TaskSumm
 /**
  * 排序:priority ASC(数值小 → 优先,即 P0 → P1 → P2 → P3),
  * 同优先级按 createdAt ASC(早创建的先派发,FIFO 兜底)。
- * 暴露为命名导出,主管 prompt 与外部排序逻辑直接引用,
+ * 暴露为命名导出,调度官 prompt 与外部排序逻辑直接引用,
  * 避免在多处重写排序规则造成不一致。
  */
 export function sortTasksByPriority<T extends { priority?: TaskPriority; createdAt?: string }>(tasks: T[]): T[] {
@@ -487,7 +487,7 @@ async function listIn(bucket: TaskBucketName): Promise<TaskSummary[]> {
     if (meta) out.push(toSummary(id, bucket, meta))
   }
   // zai patch (2026-09-02, 任务工厂升级):queue/processing/verifying/finished
-  // 四个桶统一按 priority ASC + createdAt ASC 排,主管 UI/调度看到的顺序一致。
+  // 四个桶统一按 priority ASC + createdAt ASC 排,调度官 UI/调度看到的顺序一致。
   return sortTasksByPriority(out)
 }
 

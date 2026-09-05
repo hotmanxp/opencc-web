@@ -208,7 +208,7 @@ export interface AgentInputBoxProps {
   showTranscriptRepair?: boolean;
   /** 隐藏「分享到 LAN」与「插件管理」按钮。任务工厂的"需求讨论"模态框
    *  (intake/supervisor 会话) 是与 AI 单独对齐意图的临时 session,没有跨
-   *  设备分享或换装插件的需求,挂上反而干扰 — 主管对话由调用方传 true 隐藏。
+   *  设备分享或换装插件的需求,挂上反而干扰 — 任务调度官对话由调用方传 true 隐藏。
    *  默认 false 保持 /agent、/m、/desktop 既有行为不变。 */
   hideShareAndPlugin?: boolean;
 }
@@ -1535,7 +1535,7 @@ export default React.memo(function AgentInputBox({
             - disabled: 无 sessionId 时 disabled (分享空 session 无意义).
             - Popover: 受控 open={shareOpen}, 内部渲染 SharePopover.
             - 图标色与同行其他按钮一致 (var(--text-dim-45)).
-            - hideShareAndPlugin=true 时整块不渲染 — intake 主管对话不需要分享.
+            - hideShareAndPlugin=true 时整块不渲染 — intake 调度官对话不需要分享.
             详见 docs/superpowers/specs/2026-07-25-zai-agent-share-design.md §4.6 */}
         {!hideShareAndPlugin && (
         <Tooltip

@@ -267,7 +267,7 @@ export default function FactorySettingsDrawer({
               <div>
                 <Typography.Text strong>优先 spawnAgent</Typography.Text>
                 <div style={{ fontSize: 12, color: 'var(--text-secondary, #6b7280)', margin: '2px 0 6px' }}>
-                  主管委派执行(SpawnAgent / SuperTasksCreate 的 agent 字段)时优先使用。仅「活跃」的 provider 可选。
+                  任务调度官委派执行(SpawnAgent / SuperTasksCreate 的 agent 字段)时优先使用。仅「活跃」的 provider 可选。
                 </div>
                 {agents.length > 0 && !anyActive && (
                   <Alert

@@ -483,7 +483,7 @@ describe('checkTaskIntakeDocs mode 分流 (2026-09-04 quick-intake)', () => {
   it('quick 任务 spec.md 是骨架占位(空内容) → 视为缺失', async () => {
     const s = await createPoolTask({ title: 'gate-quick-skel', mode: 'quick' })
     // 覆写为骨架占位文字
-    await writeFile(join(dir, 'queue-tasks', s.id, 'docs', 'spec.md'), '# 需求规格\n\n（需求讨论后由主管补充）\n', 'utf-8')
+    await writeFile(join(dir, 'queue-tasks', s.id, 'docs', 'spec.md'), '# 需求规格\n\n（需求讨论后由任务调度官补充）\n', 'utf-8')
     const check = await checkTaskIntakeDocs(s.id)
     expect(check?.mode).toBe('quick')
     expect(check?.ok).toBe(false)

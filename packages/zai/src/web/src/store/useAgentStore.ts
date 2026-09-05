@@ -2153,7 +2153,7 @@ export function createAgentStore() {
  * 拿 store;Provider 之外(顶层 Layout)回退到模块级默认 `useAgentStore` 单例。
  * SSE dispatch 走 `applyBatchTo(store, batch)`(useEventStream.ts),Modal 自己
  * 挂 EventSource(`/api/event?sid={intakeSid}`)按 sid 路由事件到 intake store,
- * 不会污染全局 store 的 messages / pendingAsk / status —— 主管 Layout 完全无感。
+ * 不会污染全局 store 的 messages / pendingAsk / status —— 调度官 Layout 完全无感。
  */
 export const AgentStoreContext = createContext<AgentStoreApi | null>(null)
 

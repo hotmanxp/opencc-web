@@ -1,5 +1,5 @@
 /**
- * zai patch (2026-09-01, task-factory): 内置任务主管 agent `task-factory`
+ * zai patch (2026-09-01, task-factory): 内置任务调度官 agent `task-factory`
  * 注册验证。
  *   1. `loadBuiltinAgents()` 后 agent name='task-factory' 已注册且有 description
  *   2. tools 槽含 SuperTasksCreate / SuperTasksMove 等流水线工具

@@ -19,20 +19,20 @@ const BUCKET_ORDER: BucketKey[] = ['queue', 'processing', 'verifying', 'finished
 /**
  * 移动端任务工厂页(2026-09-04 新增,/m-super-tasks 路由)。
  *
- * 核心闭环:看任务状态 → 创建任务 → 与主管对话 → 查任务详情。
+ * 核心闭环:看任务状态 → 创建任务 → 与任务调度官对话 → 查任务详情。
  *
  * 路由:`/m-super-tasks` 走 MobileLayout,与 `/m` 是两条独立顶层
  * 路径 —— **不修改** `/m` 的任务工厂分流(任务工厂实例下 `/m` 仍
  * 渲染 MobileAgent),移动端靠 lan-agent 卡片 / 直接 URL 进入。
  *
  * 与桌面 `/super-tasks` 的差异:
- *  - 无左侧主管对话边栏 / 280px → 右下 FAB + 底部 Drawer(90%)
+ *  - 无左侧调度官对话边栏 / 280px → 右下 FAB + 底部 Drawer(90%)
  *  - 无 TaskOverviewBar 5 张统计卡 / 筛选 → 顶栏 Segmented 4 项 + 计数
  *  - 无批量多选 / 暂停继续删除按钮 / AI 托管 Switch / 工厂设置
  *  - 详情抽屉走底部 Drawer ≥ 90% 全屏呈现(SuperTaskDetailDrawer 现有
  *    props 已可达成,无需给它加新 prop)。
  *
- * 主管会话引导 + 3s 轮询:从桌面 SuperTasks.tsx L54-97 逐行平移
+ * 调度官会话引导 + 3s 轮询:从桌面 SuperTasks.tsx L54-97 逐行平移
  * (`booted` ref / `loadSessions` + `superTaskStore.load` 并行 /
  * server sid 命中或新建 mainAgent='task-factory')。
  *
@@ -67,7 +67,7 @@ export default function MobileSuperTasks(): JSX.Element {
     return () => window.clearInterval(id)
   }, [load])
 
-  // 主管会话引导 — mount 跑一次。真相源 = 后端 state.json 的
+  // 调度官会话引导 — mount 跑一次。真相源 = 后端 state.json 的
   // supervisorSessionId(随 superTaskStore.load 带回)。
   useEffect(() => {
     if (booted.current) return
