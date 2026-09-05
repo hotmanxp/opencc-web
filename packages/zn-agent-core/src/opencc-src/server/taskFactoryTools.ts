@@ -21,7 +21,14 @@ const CREATE_DESC = 'Create a Task Factory task: initializes task.yaml, docs/spe
   'mode is "quick"|"full" (default "full"): quick = lightweight task for small fixes / copy edits / styling tweaks — ' +
   'skips brainstorming, generates ONLY task.yaml + process.md + a minimal docs/spec.md (title/description/priority/cwd snapshot), ' +
   'does NOT generate docs/plan.md or docs/brainstorm.md; the intake gate and verifier then only check / audit docs/spec.md. ' +
-  'Use quick when the user opens the 「快速创建」 button (task-intake-quick main agent will set this for you).'
+  'Use quick when the user opens the 「快速创建」 button (task-intake-quick main agent will set this for you). ' +
+  // zai patch (2026-09-05, tf-pqvxpay0 附件透传):task-intake-quick 把 QuickCreateModal
+  // 上传图片后的绝对路径列表(落盘到 ~/.zai/uploads/<name>)作为 attachments 传入,
+  // 后端写进 task.yaml.attachments;执行 / 验证子 agent 拿到 TaskSummary 后可
+  // 直接 Read 这些文件(避免 prompt 文本里嵌的绝对路径被模型忽略 / 截断)。
+  'attachments is an optional string[] of absolute file paths that the executor/verifier subagents should Read for context (default []). ' +
+  'task-intake-quick extracts the attachment bullet-list from the user prompt (lines starting with `- /abs/path/...`) and forwards them here verbatim; full-intake may also pass attachments when the user provides files. ' +
+  'Paths are written verbatim into task.yaml.attachments without validation — call sites are responsible for ensuring they exist (QuickCreateModal uploads via /api/fs/upload before invoking this tool).'
 
 const LIST_DESC = 'List all Task Factory tasks across the four lifecycle buckets. ' +
   'Returns a TaskBucket object: { queue: TaskSummary[], processing: TaskSummary[], verifying: TaskSummary[], finished: TaskSummary[] }. ' +
@@ -91,16 +98,24 @@ export const superTasksCreateTool = buildTool({
       // zai patch (2026-09-04, quick-intake):
       mode: z.enum(['quick', 'full']).optional()
         .describe('Task creation mode (default "full"). "quick" = lightweight (no brainstorming, no plan.md / brainstorm.md, intake gate and verifier only check docs/spec.md); "full" = standard intake flow with three required docs.'),
+      // zai patch (2026-09-05, tf-pqvxpay0 附件透传):QuickCreateModal 上传的图
+      // 片副本绝对路径列表,落到 task.yaml.attachments。执行 / 验证子 agent 拿到
+      // TaskSummary 后可直接 Read。task-intake-quick 从 prompt 的 attachment
+      // bullet-list 提取并传入。
+      attachments: z.array(z.string().min(1)).optional()
+        .describe('Optional absolute file paths to attach to the task. Paths are persisted verbatim into task.yaml.attachments; executor and verifier subagents can Read them for context. Default []. QuickCreateModal passes image upload absolute paths (resolved via /api/fs/upload) here.'),
     })
   },
   async call(input: {
     title: string; cwd: string; description?: string; agent?: string; verifierAgent?: string; spec?: string; plan?: string
     priority?: 'P0' | 'P1' | 'P2' | 'P3'; dependsOn?: string[]; mode?: 'quick' | 'full'
+    attachments?: string[]
   }) {
     const s = await createPoolTask(input)
     emitTaskFactoryEvent('created', { id: s.id, mode: s.mode })
     const mode = s.mode ?? 'full'
-    const meta = `priority=${s.priority ?? 'P2'}, mode=${mode}${input.dependsOn?.length ? `, dependsOn=[${input.dependsOn.join(', ')}]` : ''}`
+    const attachmentsCount = s.attachments?.length ?? 0
+    const meta = `priority=${s.priority ?? 'P2'}, mode=${mode}${input.dependsOn?.length ? `, dependsOn=[${input.dependsOn.join(', ')}]` : ''}${attachmentsCount > 0 ? `, attachments=${attachmentsCount}` : ''}`
     const nextStep = mode === 'quick'
       ? 'Next step (quick mode): the task directory has only task.yaml + process.md + a minimal docs/spec.md snapshot. Skip brainstorming — the user already specified the requirements in the QuickCreate form. Report the task id to the user.'
       : 'Next step: persist the discussed results into docs/spec.md and docs/plan.md (replace the skeleton placeholders), and write the discussion minutes to docs/brainstorm.md — a programmatic intake gate checks all three docs when the user closes the modal and feeds missing ones back to you. Before dispatching the executor subagent, read task.yaml to confirm the agent field.'
