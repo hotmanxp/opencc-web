@@ -279,6 +279,24 @@ describe('QuickCreateModal (2026-09-04 quick-intake; tf-429i39sy 2026-09-05 去 
     expect(document.querySelector('.ant-drawer')).toBeTruthy()
   })
 
+  it('mobileAsDrawer=true: cwd picker trigger works and fills cwd', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => new Response(
+      JSON.stringify({ ok: true, path: '/Users/picked', parent: '/Users', home: '/Users', entries: [] }),
+      { status: 200 },
+    )))
+    render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
+    fireEvent.click(screen.getByTestId('quick-cwd-picker-trigger'))
+    await screen.findByTestId('picker-select')
+    fireEvent.click(screen.getByTestId('picker-select'))
+    expect((screen.getByTestId('quick-cwd-input') as HTMLInputElement).value).toBe('/Users/picked')
+    vi.unstubAllGlobals()
+  })
+
+  it('mobileAsDrawer=true: image picker trigger button present', () => {
+    render(<QuickCreateModal open onClose={vi.fn()} mobileAsDrawer />)
+    expect(screen.getByTestId('quick-image-picker-trigger')).toBeTruthy()
+  })
+
   it('默认(桌面):回归 .ant-modal + width=640;无 drawer,无 drawer-handle', () => {
     render(<QuickCreateModal open onClose={vi.fn()} />)
     const modal = document.querySelector('.ant-modal') as HTMLElement | null
