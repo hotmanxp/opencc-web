@@ -31,6 +31,19 @@ export interface FactorySettings {
   preferSpawnAgent: 'opencc' | 'dsh' | 'opencode' | null
   /** finished-tasks 终态任务过期自动归档进 history-tasks 的阈值(小时),整数 1–8760。 */
   historyArchiveHours: number
+  /**
+   * managed loop stagnant 告警触发阈值(毫秒):processing/verifying 任务的
+   * executor/verifier 后台子任务在 `stagnantThresholdMs` 内 BackgroundTask.eventCount
+   * 未增长 → 注入一次 `<task-alert action="stagnant">` 到任务调度器,内容是最近 5 条
+   * TaskEvent 的 JSON 摘要。整数 5 000–3 600 000。默认 180 000(3 分钟)。
+   */
+  stagnantThresholdMs: number
+  /**
+   * 同任务两次 stagnant 告警的最小间隔(毫秒),防止 supervisor 被刷屏。整数
+   * 5 000–3 600 000。默认 300 000(5 分钟)。与 `stagnantThresholdMs` 解耦,
+   * 让用户单独调告警频率。
+   */
+  stagnantCooldownMs: number
 }
 
 export const FACTORY_SETTINGS_DEFAULTS: FactorySettings = {
@@ -39,6 +52,8 @@ export const FACTORY_SETTINGS_DEFAULTS: FactorySettings = {
   maxParallelTasks: 4,
   preferSpawnAgent: null,
   historyArchiveHours: 48,
+  stagnantThresholdMs: 180_000,
+  stagnantCooldownMs: 300_000,
 }
 
 /** 写端 partial patch 校验 schema(GET/PUT 路由与服务层共用)。 */
@@ -48,6 +63,8 @@ export const factorySettingsPatchSchema = z.object({
   maxParallelTasks: z.number().int().min(2).max(8).optional(),
   preferSpawnAgent: z.enum(['opencc', 'dsh', 'opencode']).nullable().optional(),
   historyArchiveHours: z.number().int().min(1).max(8760).optional(),
+  stagnantThresholdMs: z.number().int().min(5_000).max(3_600_000).optional(),
+  stagnantCooldownMs: z.number().int().min(5_000).max(3_600_000).optional(),
 })
 export type FactorySettingsPatch = z.infer<typeof factorySettingsPatchSchema>
 
@@ -100,6 +117,25 @@ function sanitize(raw: unknown): FactorySettings {
     o.historyArchiveHours <= 8760
   ) {
     out.historyArchiveHours = o.historyArchiveHours
+  }
+  // stagnant 字段 sanitize:5s ≤ n ≤ 1h,整数,否则回落默认 —— 让手改坏
+  // JSON 时静默退化而不是把告警功能锁死。下限 5s 是为了允许测试用极小
+  // 阈值快速验证(测试覆盖 ≥ 5000ms 的实际场景由 180 000 默认值负责)。
+  if (
+    typeof o.stagnantThresholdMs === 'number' &&
+    Number.isInteger(o.stagnantThresholdMs) &&
+    o.stagnantThresholdMs >= 5_000 &&
+    o.stagnantThresholdMs <= 3_600_000
+  ) {
+    out.stagnantThresholdMs = o.stagnantThresholdMs
+  }
+  if (
+    typeof o.stagnantCooldownMs === 'number' &&
+    Number.isInteger(o.stagnantCooldownMs) &&
+    o.stagnantCooldownMs >= 5_000 &&
+    o.stagnantCooldownMs <= 3_600_000
+  ) {
+    out.stagnantCooldownMs = o.stagnantCooldownMs
   }
   return out
 }
