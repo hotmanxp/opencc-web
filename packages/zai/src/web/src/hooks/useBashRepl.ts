@@ -39,6 +39,13 @@ export function useBashRepl(
   const eventsRef = useRef<ReplEvent[]>([])
   const execIdRef = useRef<string | null>(null)
   const topCommandsRef = useRef<TopCommandEntry[]>([])
+  // defaultCwd 走 ref:exec 是 useCallback 记忆的,把 defaultCwd 当闭包变量捕获会让
+  // 已经拿到旧 exec 引用的调用方(BashTab / MobileQuickDrawer 等)在 cwd 切换后仍旧
+  // 用老目录跑命令(stale closure)。ref 保证 exec 身份稳定的同时永远读到最新值。
+  const defaultCwdRef = useRef<string | null>(defaultCwd)
+  useEffect(() => {
+    defaultCwdRef.current = defaultCwd
+  }, [defaultCwd])
 
   // SSE 连接管理 — sessionId 变化关闭旧连接、建新的；events 清空。
   useEffect(() => {
@@ -109,7 +116,7 @@ export function useBashRepl(
   const exec = useCallback(
     async (command: string, opts: { wait?: boolean } = {}): Promise<ExecResult> => {
       if (!sessionId) return { ok: false, busy: true, currentExecId: 'no-session' }
-      const body: ExecRequest = { command, cwd: defaultCwd ?? undefined }
+      const body: ExecRequest = { command, cwd: defaultCwdRef.current ?? undefined }
       const result = await execRepl(sessionId, body, opts)
       if (result.ok) {
         setBusy(true)
@@ -121,7 +128,7 @@ export function useBashRepl(
       }
       return result
     },
-    [sessionId, defaultCwd, refreshTopCommands],
+    [sessionId, refreshTopCommands],
   )
 
   const abort = useCallback(async () => {
