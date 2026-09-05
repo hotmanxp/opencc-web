@@ -2,7 +2,7 @@
 // @ts-nocheck — vitest 项目默认不开启 noImplicitAny,这里跳过检查加速
 import { describe, expect, it, vi, beforeEach } from 'vitest'
 import '@testing-library/jest-dom'
-import { render, screen, fireEvent, within } from '@testing-library/react'
+import { render, screen, fireEvent, waitFor, within } from '@testing-library/react'
 import SuperTaskCard from './SuperTaskCard'
 import { useSuperTaskStore } from '../../store/useSuperTaskStore'
 import type { TaskSummary } from '../../lib/superTaskApi'
@@ -339,5 +339,126 @@ describe('SuperTaskCard mode Tag (2026-09-04 quick-intake)', () => {
       )
       expect(container.querySelector(`[data-mode="quick"]`)).toBeNull()
     }
+  })
+})
+
+// zai patch (2026-09-05, tf-fjdn0n4v):回归修正 —— tf-gqu253az 把所有
+// queued 卡片的「启动」按钮整体替换成「已排队」Tag,导致新创建的任务
+// 无法启动。新行为契约:
+//  - 默认渲染「启动」按钮(▶ + 文字),data-testid=quick-start-task-<id>
+//  - 点击启动 → 乐观切到「已排队」Tag(data-testid=queued-indicator-<id>)
+//  - server 反馈(task.bucket 离开 queue-tasks)useEffect 兜底清 isStarting
+//  - start 抛错时回滚 isStarting,Start 按钮重新出现
+// 行为契约与移动端 MobileSuperTaskCard.tsx 完全一致。
+describe('SuperTaskCard — 启动按钮 + 已排队 Tag (2026-09-05 tf-fjdn0n4v)', () => {
+  it('S1:queued 任务默认渲染「启动」按钮(data-testid=quick-start-task-<id>),不渲染已排队 Tag', () => {
+    const { container } = render(
+      <SuperTaskCard
+        task={baseTask({ id: 'tf-dstart01', status: 'queued', bucket: 'queue-tasks' })}
+        selected={false}
+        onToggleSelect={() => {}}
+        dimmed={false}
+        onOpenDetail={() => {}}
+        onDeleted={() => {}}
+      />,
+    )
+    const btn = container.querySelector(`[data-testid="quick-start-task-tf-dstart01"]`) as HTMLButtonElement
+    expect(btn).toBeTruthy()
+    expect(btn.tagName.toLowerCase()).toBe('button')
+    expect(btn.hasAttribute('disabled')).toBe(false)
+    expect(btn.textContent).toContain('启动')
+    // 默认态不渲染已排队 Tag
+    expect(container.querySelector(`[data-testid="queued-indicator-tf-dstart01"]`)).toBeNull()
+  })
+
+  it('S2:processing / verifying / done / failed / paused 任务均不渲染启动按钮或已排队 Tag', () => {
+    const cases: Array<{ id: string; status: TaskSummary['status']; bucket: TaskSummary['bucket'] }> = [
+      { id: 'tf-dproc01', status: 'processing', bucket: 'processing-tasks' },
+      { id: 'tf-dvery01', status: 'verifying', bucket: 'verifying-tasks' },
+      { id: 'tf-ddone01', status: 'done', bucket: 'finished-tasks' },
+      { id: 'tf-dfail01', status: 'failed', bucket: 'finished-tasks' },
+      { id: 'tf-dpaus01', status: 'paused', bucket: 'processing-tasks' },
+    ]
+    for (const c of cases) {
+      const { container } = render(
+        <SuperTaskCard
+          task={baseTask({ id: c.id, status: c.status, bucket: c.bucket })}
+          selected={false}
+          onToggleSelect={() => {}}
+          dimmed={false}
+          onOpenDetail={() => {}}
+          onDeleted={() => {}}
+        />,
+      )
+      expect(container.querySelector(`[data-testid="quick-start-task-${c.id}"]`)).toBeNull()
+      expect(container.querySelector(`[data-testid="queued-indicator-${c.id}"]`)).toBeNull()
+    }
+  })
+
+  it('S3:点启动按钮 → 触发 store.start(task.id) + 乐观切到「已排队」Tag', async () => {
+    const start = useSuperTaskStore.getState().start
+    const { container } = render(
+      <SuperTaskCard
+        task={baseTask({ id: 'tf-dstart03', status: 'queued', bucket: 'queue-tasks' })}
+        selected={false}
+        onToggleSelect={() => {}}
+        dimmed={false}
+        onOpenDetail={() => {}}
+        onDeleted={() => {}}
+      />,
+    )
+    const btn = container.querySelector(`[data-testid="quick-start-task-tf-dstart03"]`) as HTMLButtonElement
+    fireEvent.click(btn)
+    expect(start).toHaveBeenCalledWith('tf-dstart03')
+    // 乐观态:Start 按钮消失,「已排队」Tag 出现(同步 setState 立即生效)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="quick-start-task-tf-dstart03"]')).toBeNull()
+      const tag = container.querySelector('[data-testid="queued-indicator-tf-dstart03"]')
+      expect(tag).toBeTruthy()
+      expect(tag?.textContent).toContain('已排队')
+    })
+  })
+
+  it('S4:点启动按钮 → 不触发卡片 onOpenDetail(stopPropagation 隔离)', () => {
+    const onOpenDetail = vi.fn()
+    render(
+      <SuperTaskCard
+        task={baseTask({ id: 'tf-dstart04', status: 'queued', bucket: 'queue-tasks' })}
+        selected={false}
+        onToggleSelect={() => {}}
+        dimmed={false}
+        onOpenDetail={onOpenDetail}
+        onDeleted={() => {}}
+      />,
+    )
+    const btn = screen.getByTestId('quick-start-task-tf-dstart04') as HTMLButtonElement
+    fireEvent.click(btn)
+    // stopPropagation 阻断 → 卡片 onOpenDetail 不应被调
+    expect(onOpenDetail).not.toHaveBeenCalled()
+  })
+
+  it('S5:store.start 抛错时 isStarting 回滚 → Start 按钮重新出现,可重试', async () => {
+    const startSpy = vi.fn(async () => { throw new Error('rpc 500') })
+    useSuperTaskStore.setState({ start: startSpy })
+    const { container } = render(
+      <SuperTaskCard
+        task={baseTask({ id: 'tf-dstart05', status: 'queued', bucket: 'queue-tasks' })}
+        selected={false}
+        onToggleSelect={() => {}}
+        dimmed={false}
+        onOpenDetail={() => {}}
+        onDeleted={() => {}}
+      />,
+    )
+    const btn = container.querySelector(`[data-testid="quick-start-task-tf-dstart05"]`) as HTMLButtonElement
+    fireEvent.click(btn)
+    await waitFor(() => {
+      expect(startSpy).toHaveBeenCalledWith('tf-dstart05')
+    })
+    // catch 块里 setIsStarting(false) → 按钮回来,可继续点
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="quick-start-task-tf-dstart05"]')).toBeTruthy()
+      expect(container.querySelector('[data-testid="queued-indicator-tf-dstart05"]')).toBeNull()
+    })
   })
 })

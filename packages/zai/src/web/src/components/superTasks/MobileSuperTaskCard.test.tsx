@@ -236,29 +236,32 @@ describe('MobileSuperTaskCard — 删除按钮 (2026-09-04 tf-al38784c)', () => 
   })
 })
 
-// zai patch (2026-09-05, tf-gqu253az):移动端「启动」按钮改成「已排队」
-// 非交互 Tag。spec 要求覆盖:渲染(queued → 显示 / 其他状态不显示),
-// 不可点击(DOM 层 pointerEvents: none + 不是 button + 不触发 store.start)。
-// 配套桌面 SuperTaskCard L319-337,两块 UI 共享同一份排队语义。
-describe('MobileSuperTaskCard — 已排队 Tag (2026-09-05 tf-gqu253az)', () => {
-  it('Q1:queued 任务渲染「已排队」Tag(data-testid=mobile-card-queued-<id>)且不可点击', () => {
+// zai patch (2026-09-05, tf-fjdn0n4v):回归修正 —— tf-gqu253az 把所有
+// queued 卡片的「启动」按钮整体替换成「已排队」Tag,导致新创建的任务
+// 无法启动。新行为契约:
+//  - 默认渲染「启动」按钮(▶ + 文字),data-testid=mobile-start-task-<id>
+//  - 点击启动 → 乐观切到「已排队」Tag(data-testid=mobile-card-queued-<id>)
+//  - server 反馈(task.bucket 离开 queue-tasks)useEffect 兜底清 isStarting
+//  - start 抛错时回滚 isStarting,Start 按钮重新出现
+//  行为契约与桌面 SuperTaskCard L319-367 完全一致。
+describe('MobileSuperTaskCard — 启动按钮 + 已排队 Tag (2026-09-05 tf-fjdn0n4v)', () => {
+  it('S1:queued 任务默认渲染「启动」按钮(data-testid=mobile-start-task-<id>),不渲染已排队 Tag', () => {
     const { container } = render(
       <MobileSuperTaskCard
-        task={baseTask({ id: 'tf-queue01', status: 'queued', bucket: 'queue-tasks' })}
+        task={baseTask({ id: 'tf-start01', status: 'queued', bucket: 'queue-tasks' })}
         onOpen={vi.fn()}
       />,
     )
-    const tag = container.querySelector('[data-testid="mobile-card-queued-tf-queue01"]')
-    expect(tag).toBeTruthy()
-    expect(tag?.textContent).toContain('已排队')
-    // Tag 不是 button → 无 button 角色,无 onClick 触点
-    expect(tag?.tagName.toLowerCase()).not.toBe('button')
-    // pointerEvents: none 阻断鼠标事件,从 DOM 层告诉用户「不可交互」
-    const style = (tag as HTMLElement | null)?.style
-    expect(style?.pointerEvents).toBe('none')
+    const btn = screen.getByTestId('mobile-start-task-tf-start01') as HTMLButtonElement
+    expect(btn).toBeTruthy()
+    expect(btn.hasAttribute('disabled')).toBe(false)
+    // 文字是「启动」(happy-dom 把按钮文字里的空格保留,直接比对)
+    expect(btn.textContent).toContain('启动')
+    // 默认态不渲染已排队 Tag
+    expect(container.querySelector('[data-testid="mobile-card-queued-tf-start01"]')).toBeNull()
   })
 
-  it('Q2:processing / verifying / done / failed / paused 任务均不渲染已排队 Tag', () => {
+  it('S2:processing / verifying / done / failed / paused 任务均不渲染启动按钮或已排队 Tag', () => {
     const cases: Array<{ id: string; status: TaskSummary['status']; bucket: TaskSummary['bucket'] }> = [
       { id: 'tf-proc01', status: 'processing', bucket: 'processing-tasks' },
       { id: 'tf-very01', status: 'verifying', bucket: 'verifying-tasks' },
@@ -273,34 +276,65 @@ describe('MobileSuperTaskCard — 已排队 Tag (2026-09-05 tf-gqu253az)', () =>
           onOpen={vi.fn()}
         />,
       )
+      expect(container.querySelector(`[data-testid="mobile-start-task-${c.id}"]`)).toBeNull()
       expect(container.querySelector(`[data-testid="mobile-card-queued-${c.id}"]`)).toBeNull()
     }
   })
 
-  it('Q3:已排队 Tag 是纯指示器 —— 元素无 onClick,store.start 不被任何点击路径触发', () => {
+  it('S3:点启动按钮 → 触发 store.start(task.id) + 乐观切到「已排队」Tag', async () => {
     const start = useSuperTaskStore.getState().start
-    const onOpen = vi.fn()
     const { container } = render(
       <MobileSuperTaskCard
-        task={baseTask({ id: 'tf-queue03', status: 'queued', bucket: 'queue-tasks' })}
+        task={baseTask({ id: 'tf-start03', status: 'queued', bucket: 'queue-tasks' })}
+        onOpen={vi.fn()}
+      />,
+    )
+    const btn = screen.getByTestId('mobile-start-task-tf-start03') as HTMLButtonElement
+    fireEvent.click(btn)
+    // store.start 已被调(start 是 async spy,这里不需要 await resolve)
+    expect(start).toHaveBeenCalledWith('tf-start03')
+    // 乐观态:Start 按钮消失,「已排队」Tag 出现(同步 setState 立即生效)
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="mobile-start-task-tf-start03"]')).toBeNull()
+      const tag = container.querySelector('[data-testid="mobile-card-queued-tf-start03"]')
+      expect(tag).toBeTruthy()
+      expect(tag?.textContent).toContain('已排队')
+    })
+  })
+
+  it('S4:点启动按钮 → 不触发卡片 onOpen(stopPropagation 隔离)', () => {
+    const onOpen = vi.fn()
+    render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-start04', status: 'queued', bucket: 'queue-tasks' })}
         onOpen={onOpen}
       />,
     )
-    const tag = container.querySelector('[data-testid="mobile-card-queued-tf-queue03"]') as HTMLElement
-    expect(tag).toBeTruthy()
-    // Tag DOM 节点不挂 React onClick 属性(spec 明确要求无 onClick)
-    // React 16+ 把所有事件用合成委托实现,onClick 不在 DOM 上,但 Tag
-    // 也没有 role=button,语义层即告诉用户「不可点」
-    expect(tag.getAttribute('role')).not.toBe('button')
-    // 真浏览器下 pointerEvents: none 让 click 根本不命中(命中测试失败),
-    // 这里用 happy-dom fireEvent 直接派发 click 来兜底断言 start 不被
-    // 任何 onClick handler 调用;若 Tag 漏挂 stopPropagation 或变成 button
-    // 这条断言会变成 flaky。先验证最关键的:start 从未被调。
-    fireEvent.click(tag)
-    expect(start).not.toHaveBeenCalled()
-    // 配套提示:onOpen 可能在 happy-dom 模拟下被 card onClick 透传
-    // (Tag 事件冒泡到卡片),真浏览器 pointerEvents: none 阻断,这里
-    // 不强断 onOpen;若需补这条断言应改用真实浏览器验证。
-    void onOpen
+    const btn = screen.getByTestId('mobile-start-task-tf-start04') as HTMLButtonElement
+    fireEvent.click(btn)
+    // stopPropagation 阻断 → 卡片 onOpen 不应被调
+    expect(onOpen).not.toHaveBeenCalled()
+  })
+
+  it('S5:store.start 抛错时 isStarting 回滚 → Start 按钮重新出现,可重试', async () => {
+    // 让 start spy 抛错,验证 catch 中 setIsStarting(false) 复位
+    const startSpy = vi.fn(async () => { throw new Error('rpc 500') })
+    useSuperTaskStore.setState({ start: startSpy })
+    const { container } = render(
+      <MobileSuperTaskCard
+        task={baseTask({ id: 'tf-start05', status: 'queued', bucket: 'queue-tasks' })}
+        onOpen={vi.fn()}
+      />,
+    )
+    const btn = screen.getByTestId('mobile-start-task-tf-start05') as HTMLButtonElement
+    fireEvent.click(btn)
+    await waitFor(() => {
+      expect(startSpy).toHaveBeenCalledWith('tf-start05')
+    })
+    // catch 块里 setIsStarting(false) → 按钮回来,可继续点
+    await waitFor(() => {
+      expect(container.querySelector('[data-testid="mobile-start-task-tf-start05"]')).toBeTruthy()
+      expect(container.querySelector('[data-testid="mobile-card-queued-tf-start05"]')).toBeNull()
+    })
   })
 })
