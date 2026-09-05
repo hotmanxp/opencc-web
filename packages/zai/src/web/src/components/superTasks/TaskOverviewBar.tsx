@@ -187,7 +187,6 @@ export default function TaskOverviewBar({ filter, onFilterChange, onNewTask, onO
         {onOpenQuickCreate && (
           <Tooltip title="快速创建(跳过头脑风暴,适合文案/样式/小 bug 修复)">
             <Button
-              type="primary"
               icon={<ThunderboltOutlined />}
               onClick={onOpenQuickCreate}
               data-testid="quick-create-button"
