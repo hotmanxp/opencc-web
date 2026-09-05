@@ -176,18 +176,26 @@ export default function MobileSuperTaskCard({
           </Tag>
         )}
       </div>
+      {/* 任务标题(2026-09-05 tf-o9iu5pyf 回归修复):fontWeight:500 →
+          600 + letterSpacing:0.1 与桌面 SuperTaskCard L234-244 对齐,确保
+          移动端卡片一眼可辨;data-testid 提供回归测试锚点,防止以后
+          改样式时把整段误删或加 display:none(过去没有 testid 没人能
+          发现「title 没了」)。paddingRight:28 给右上角 × 按钮留位,
+          whiteSpace:nowrap + textOverflow:ellipsis 让超长标题单行截断。 */}
       <div
         style={{
           fontSize: 14,
           lineHeight: 1.4,
-          fontWeight: 500,
+          fontWeight: 600,
           color: '#0f172a',
+          letterSpacing: 0.1,
           whiteSpace: 'nowrap',
           overflow: 'hidden',
           textOverflow: 'ellipsis',
           paddingRight: 28, // 给右上角 × 按钮留位,避免标题被遮
         }}
         title={task.title}
+        data-testid={`mobile-card-title-${task.id}`}
       >
         {task.title}
       </div>
