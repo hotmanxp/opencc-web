@@ -328,7 +328,8 @@ export default function QuickCreateModal({
     e.target.value = ''
   }
 
-  // 单张图片上传到 <cwd>/.zai/uploads/<name>(后端 /api/fs/upload 决定路径)。
+  // 单张图片上传到 ~/.zai/uploads/<name>(后端 /api/fs/upload 决定路径,
+  // 2026-09-05 迁出 cwd-relative 改为用户级固定目录,跨实例 cwd 稳定)。
   // 走磁盘 + 路径引用,不依赖模型视觉能力,跨模型稳定。
   // absPath 由后端响应返回;失败抛错由 handleSubmit 的 allSettled 收集。
   async function uploadImage(att: QuickAttachment): Promise<string> {
