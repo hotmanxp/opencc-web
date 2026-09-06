@@ -108,6 +108,15 @@ export { z } from 'zod/v4'
 export type { Message } from './opencc-src/types/message.js'
 export { CwdStore } from './compat/cwdStore.js'
 export { runWithSessionId, getCurrentSessionId } from './compat/runWithSessionId.js'
+// zai patch (2026-09-06): export vendor's per-query SDK context wrapper
+// so `runQueryLoop` can wrap `runtime.query(...)` with the vendor ALS.
+// Without this, `getSessionId()` inside vendor `query.ts:709` falls back
+// to the startup randomUUID `STATE.sessionId`, and the per-API-call
+// reminder provider looks up the wrong SessionInbox — busy-path
+// subagent notifications vanish. Distinct from the zai `runWithSessionId`
+// above (independent AsyncLocalStorage instance in compat/runWithSessionId.ts).
+export { runWithSdkContext } from './opencc-src/bootstrap/state.js'
+export type { SdkContext } from './opencc-src/bootstrap/state.js'
 export type { PermissionMode } from './compat/permissions.js'
 // zai patch (2026-08-24): SessionHost(B1 spawn CLI 路径)把子进程 stdout
 // NDJSON 行翻译成 zai RuntimeEvent(Anthropic primitives),复用 opencc SDK

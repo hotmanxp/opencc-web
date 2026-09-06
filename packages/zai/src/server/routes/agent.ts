@@ -26,6 +26,14 @@ import {
   clearApiCallCount,
   CwdStore,
   runWithSessionId,
+  // zai patch (2026-09-06, busy-path inbox reminder): vendor
+  // `runWithSdkContext` wraps `getRuntime().query(...)` so vendor
+  // `query.ts:709 runExtraReminderProviders(getSessionId())` sees the
+  // correct sessionId — without this wrap, vendor ALS is empty and
+  // `getSessionId()` falls back to `STATE.sessionId` (startup randomUUID).
+  // Distinct from zai's own `runWithSessionId` above (independent
+  // AsyncLocalStorage instance in compat/runWithSessionId.ts).
+  runWithSdkContext,
   appendUserMessageV2,
   appendVisibleUserMessage,
   appendAssistantMessageV2,
@@ -1299,82 +1307,113 @@ async function runQueryLoop(cmd: PendingPrompt): Promise<void> {
       'debug',
     );
 
-    const events = getRuntime().query({
-      // OpenccQueryInput.prompt accepts `string | OpenccContentBlockParam[]`.
-      // For multimodal input we pass the raw `userContent` block array —
-      // createOpenccRuntime-impl submits it directly to the vendor
-      // QueryEngine.submitMessage(string | ContentBlockParam[]), which
-      // converts image blocks to Anthropic protocol before hitting the
-      // API. JSON-encoding here would leak base64 as plain text and the
-      // model can't read the image.
-      //
-      // zai patch (2026-09-06): prompt passes through verbatim. The
-      // `<system-reminder>` prepend is now handled by vendor's
-      // `query.ts` loop via `runExtraReminderProviders(getSessionId())`,
-      // called once per API call. zai registers a provider at startup
-      // (agentRuntime.ts registerExtraReminderProvider) that drains
-      // the per-session SessionInbox on every iteration. Persistence
-      // above uses the unmodified `userContent`, so the reminder never
-      // reaches the transcript on disk.
-      prompt: userContent,
-      // zai patch (2026-08-28): slash 指令的展开 prompt 以 meta 消息提交给
-      // runtime —— vendor 语义下 isMeta 消息 LLM 可见、UI/恢复层隐藏,
-      // 保证 runtime 侧若写盘也不会泄漏展开提示词为可见用户消息。
-      ...(cmd.displayText ? { isMeta: true } : {}),
-      cwd,
-      // sessionId: 显式指定 ID. 不管新建还是续传, vendor runtime 都用这个
-      // ID 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
-      // 切换到 OpenccRuntime 后, 老 `transcriptId` 字段已合并到 `sessionId`.
-      // (旧 API resumeFromTranscriptId 在文件不存在时会抛 ENOENT, 不适用.)
-      sessionId,
-      // parentSessionId 由 vendor runtime 通过其 session facade 派生,
-      // 顶层 prompt 调用方不再显式透传该字段; sub-agent 路径由 AgentTool
-      // 在 BackgroundTask metadata 里携带, 通过 background runtime 进入
-      // 新 runtime 的 query (见 DefaultBackgroundRuntime.runOne 的 queryInput).
-      abortSignal: abortController.signal,
-      model: resolvedModel,
-      // 透传会话选定的 permission mode（如 plan）到 runtime AppState，让
-      // vendor 权限管线按该模式运行（plan mode 下模型可调用 ExitPlanMode，
-      // 其 `ask` 决策经 headless permission bridge 走 Web 确认 UI）。
-      // 未设置（或 auto）时缺省不传 → runtime 保持 bypassPermissions 语义。
-      ...(transcript?.meta.permissionMode &&
-      transcript.meta.permissionMode !== 'auto'
-        ? {
-            permissionMode: transcript.meta.permissionMode as
-              | 'default'
-              | 'acceptEdits'
-              | 'bypassPermissions'
-              | 'dontAsk'
-              | 'plan',
-          }
-        : {}),
-      // zai patch: 按所选 model 解析 provider profile,对 openai provider
-      // (e.g. zhiniao-* → wizard-ai OpenAI-Mix) 注入 providerOverride,
-      // 让 vendor `getAnthropicClient` 走 `createOpenAIShimClient`(openai-shim),
-      // 而不是默认的 Anthropic SDK + ANTHROPIC_BASE_URL(zn-nova)。
-      // 未命中 openai profile (anthropic 模型或无 profile) 不注入,行为不变。
-      // resolvedProviderId is forwarded so the matcher prefers the
-      // user-picked profile when several profiles host the same model
-      // name (e.g. MiniMax-M3 on both Open Platform and ZhiNiao).
-      ...(await resolveProviderOverrideForModel(resolvedModel, resolvedProviderId)),
-      // zai patch: per-query providerId (from transcript.meta.providerId).
-      // Threaded into the vendor runtime so the anthropic-side
-      // modelCaller can route the model to the exact provider the user
-      // picked. Mirrors the providerOverride plumbing but lands at
-      // zai's createAnthropicModelCaller instead of vendor's
-      // openai-shim. See plan §阶段 2 vendor 透传 chain.
-      ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
-      // zai patch (2026-08-20): 会话恢复的主 Agent。首次 query 用全局设置
-      // (并已落盘),后续从 transcript meta 恢复 → 会话级固定。
-      ...(sessionMainAgent ? { mainAgent: sessionMainAgent } : {}),
-    });
+    // zai patch (2026-09-06, busy-path inbox reminder): vendor
+    // `query.ts:709` calls `runExtraReminderProviders(getSessionId())`
+    // on every API call. `getSessionId()` goes through vendor's
+    // `sdkContextStorage` (bootstrap/state.ts:475) — an `AsyncLocalStorage`
+    // instance independent of zai's own `runWithSessionId` ALS in
+    // compat/runWithSessionId.ts. Without an explicit `runWithSdkContext`
+    // wrap here, vendor ALS is empty inside zai's runQueryLoop and
+    // `getSessionId()` falls back to `STATE.sessionId` (the vendor
+    // startup randomUUID). The reminder provider then drains the wrong
+    // SessionInbox → busy-path subagent notifications (in nextStep lane)
+    // silently disappear. Root cause of the
+    // `sess-1788688707077-6elqf2pl` tay4zcia1 miss.
+    //
+    // 必须包"调用本身 + 整段消费循环": async generator 的 body 跨 yield
+    // 是惰性的, vendor 的 `runExtraReminderProviders` 在 generator 内
+    // `await sdkMsg` 之后的 queryLoop 顶部被调; 若只包同步 `query()` 调用
+    // 拿到 generator 后 `for await` 在 ALS 边界外消费, `next()` 唤醒的
+    // 内部 await 链路会丢失 ALS context(虽然 OpenccRuntime 在 stream.next()
+    // 内部又 wrap 了一层,外层 wrap 仍是入口正确性的必要条件)。
+    const events = await runWithSdkContext(
+      { sessionId, sessionProjectDir: null, cwd, originalCwd: cwd },
+      async () => {
+        return getRuntime().query({
+          // OpenccQueryInput.prompt accepts `string | OpenccContentBlockParam[]`.
+          // For multimodal input we pass the raw `userContent` block array —
+          // createOpenccRuntime-impl submits it directly to the vendor
+          // QueryEngine.submitMessage(string | ContentBlockParam[]), which
+          // converts image blocks to Anthropic protocol before hitting the
+          // API. JSON-encoding here would leak base64 as plain text and the
+          // model can't read the image.
+          //
+          // zai patch (2026-09-06): prompt passes through verbatim. The
+          // `<system-reminder>` prepend is now handled by vendor's
+          // `query.ts` loop via `runExtraReminderProviders(getSessionId())`,
+          // called once per API call. zai registers a provider at startup
+          // (agentRuntime.ts registerExtraReminderProvider) that drains
+          // the per-session SessionInbox on every iteration. Persistence
+          // above uses the unmodified `userContent`, so the reminder never
+          // reaches the transcript on disk.
+          prompt: userContent,
+          // zai patch (2026-08-28): slash 指令的展开 prompt 以 meta 消息提交给
+          // runtime —— vendor 语义下 isMeta 消息 LLM 可见、UI/恢复层隐藏,
+          // 保证 runtime 侧若写盘也不会泄漏展开提示词为可见用户消息。
+          ...(cmd.displayText ? { isMeta: true } : {}),
+          cwd,
+          // sessionId: 显式指定 ID. 不管新建还是续传, vendor runtime 都用这个
+          // ID 写 transcript 文件, 与 server 返回给 client 的 sessionId 一致.
+          // 切换到 OpenccRuntime 后, 老 `transcriptId` 字段已合并到 `sessionId`.
+          // (旧 API resumeFromTranscriptId 在文件不存在时会抛 ENOENT, 不适用.)
+          sessionId,
+          // parentSessionId 由 vendor runtime 通过其 session facade 派生,
+          // 顶层 prompt 调用方不再显式透传该字段; sub-agent 路径由 AgentTool
+          // 在 BackgroundTask metadata 里携带, 通过 background runtime 进入
+          // 新 runtime 的 query (见 DefaultBackgroundRuntime.runOne 的 queryInput).
+          abortSignal: abortController.signal,
+          model: resolvedModel,
+          // 透传会话选定的 permission mode（如 plan）到 runtime AppState，让
+          // vendor 权限管线按该模式运行（plan mode 下模型可调用 ExitPlanMode，
+          // 其 `ask` 决策经 headless permission bridge 走 Web 确认 UI）。
+          // 未设置（或 auto）时缺省不传 → runtime 保持 bypassPermissions 语义。
+          ...(transcript?.meta.permissionMode &&
+          transcript.meta.permissionMode !== 'auto'
+            ? {
+                permissionMode: transcript.meta.permissionMode as
+                  | 'default'
+                  | 'acceptEdits'
+                  | 'bypassPermissions'
+                  | 'dontAsk'
+                  | 'plan',
+              }
+            : {}),
+          // zai patch: 按所选 model 解析 provider profile,对 openai provider
+          // (e.g. zhiniao-* → wizard-ai OpenAI-Mix) 注入 providerOverride,
+          // 让 vendor `getAnthropicClient` 走 `createOpenAIShimClient`(openai-shim),
+          // 而不是默认的 Anthropic SDK + ANTHROPIC_BASE_URL(zn-nova)。
+          // 未命中 openai profile (anthropic 模型或无 profile) 不注入,行为不变。
+          // resolvedProviderId is forwarded so the matcher prefers the
+          // user-picked profile when several profiles host the same model
+          // name (e.g. MiniMax-M3 on both Open Platform and ZhiNiao).
+          ...(await resolveProviderOverrideForModel(resolvedModel, resolvedProviderId)),
+          // zai patch: per-query providerId (from transcript.meta.providerId).
+          // Threaded into the vendor runtime so the anthropic-side
+          // modelCaller can route the model to the exact provider the user
+          // picked. Mirrors the providerOverride plumbing but lands at
+          // zai's createAnthropicModelCaller instead of vendor's
+          // openai-shim. See plan §阶段 2 vendor 透传 chain.
+          ...(resolvedProviderId ? { providerId: resolvedProviderId } : {}),
+          // zai patch (2026-08-20): 会话恢复的主 Agent。首次 query 用全局设置
+          // (并已落盘),后续从 transcript meta 恢复 → 会话级固定。
+          ...(sessionMainAgent ? { mainAgent: sessionMainAgent } : {}),
+        })
+      },
+    )
 
     // ★ 翻译层: 把 Anthropic-style runtime 事件转成 ServerEvent spec 形态,
     // 否则 ServerEvent.parse 会把上游所有事件当作非法 variant 直接丢弃.
-    const translated = translateRuntimeEvents(
-      events as AsyncIterable<Record<string, unknown>>,
-      sessionId,
-    );
+    // 同样包在 runWithSdkContext 内,虽然 translateRuntimeEvents 自己
+    // 不读 getSessionId(),但 vendor 事件可能在迭代中再触发 vendor ALS
+    // 调用(例如 future session-notification reminders);保险起见也包。
+    const translated = await runWithSdkContext(
+      { sessionId, sessionProjectDir: null, cwd, originalCwd: cwd },
+      async () =>
+        translateRuntimeEvents(
+          events as AsyncIterable<Record<string, unknown>>,
+          sessionId,
+        ),
+    )
 
     // 用 transcript.meta.title 判断"是否需要写入标题":
     // - 文件不存在 / meta.title 为空 → 首次消息, 应当写入

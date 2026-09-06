@@ -443,8 +443,15 @@ const STATE: State = getInitialState()
  * **Runtime Requirement:** Uses Node.js `async_hooks.AsyncLocalStorage`.
  * Not available in browsers or non-Node JavaScript environments.
  * SDK consumers must run in a Node.js runtime (Node.js 12.17.0+ or 14.0.0+).
+ *
+ * zai patch (2026-09-06): exported so external hosts (zai-server) can
+ * wrap vendor `query()` with `runWithSdkContext` and pass a typed
+ * context. Without this, vendor ALS stays empty inside zai's
+ * `runQueryLoop` → `runExtraReminderProviders(getSessionId())` looks
+ * up the wrong SessionInbox and busy-path subagent notifications
+ * (dropped into SessionInbox.nextStep) silently disappear.
  */
-type SdkContext = {
+export type SdkContext = {
   sessionId: SessionId
   sessionProjectDir: string | null
   cwd: string

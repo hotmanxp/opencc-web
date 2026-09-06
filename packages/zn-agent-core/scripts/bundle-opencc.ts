@@ -169,6 +169,14 @@ const DTS_PATH_REWRITE: Readonly<Record<string, string>> = {
   // 同上,vendor 模块无独立 d.ts,镜像到 ./index.js。运行时值由 esbuild
   // 打进 bundle。
   './opencc-src/utils/daemon/preApiCallReminders.js': './index.js',
+  // zai patch (2026-09-06): vendor `runWithSdkContext` + `SdkContext`
+  // ALS wrapper. zai-server wraps `getRuntime().query(...)` with this
+  // so the pre-API-call reminder provider sees the correct sessionId
+  // (otherwise vendor ALS is empty and `getSessionId()` falls back to
+  // `STATE.sessionId`, a startup randomUUID). Vendor module excluded
+  // from tsc — mirror to ./index.js for type re-export. Runtime value
+  // comes from esbuild bundle.
+  './opencc-src/bootstrap/state.js': './index.js',
 }
 
 /** 把 bundle-entry.ts 的 re-export 目标改写为 dist 里真实存在的类型面。 */
